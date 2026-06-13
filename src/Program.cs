@@ -10,6 +10,7 @@ public static class Program
         Raylib.SetConfigFlags(ConfigFlags.Msaa4xHint | ConfigFlags.VSyncHint);
         Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "BREACH — Tactical Squad Combat");
         Raylib.SetTargetFPS(60);
+        Audio.Init();
 
         var game = new Game();
 
@@ -47,6 +48,7 @@ public static class Program
             }
         }
 
+        Audio.Shutdown();
         Raylib.CloseWindow();
     }
 }

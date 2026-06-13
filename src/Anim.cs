@@ -90,6 +90,8 @@ public class ShotAnim : Anim
         Color muzzleCol = A.Team == Team.Player ? Pal.Friend : Pal.Foe;
         g.Fx.Muzzle(A.Pos, dir, Pal.Accent);
         g.Fx.AddShake(Res.Hit ? (Res.Crit ? 9f : 5f) : 2.5f);
+        Audio.Play("shoot");
+        Audio.Play(Res.Hit ? (Res.Crit ? "crit" : "hit") : "miss");
 
         if (Res.Hit)
         {

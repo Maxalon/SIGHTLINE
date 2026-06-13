@@ -4,8 +4,9 @@ A compact, XCOM-style tactics game built in **C# + [Raylib](https://www.raylib.c
 Command a four-soldier squad on a grid battlefield: spend action points, use cover,
 flank the enemy, set overwatch, and wipe the hostiles before they wipe you.
 
-No art assets — the whole game is drawn from geometry, particles and screen-shake,
-so it stays small, fast, and runs natively on Linux, macOS and Windows.
+No art or audio asset files — the whole game is drawn from geometry, particles
+and screen-shake, and every sound effect is **synthesised procedurally at
+runtime**. It stays small, fast, and runs natively on Linux, macOS and Windows.
 
 ![BREACH gameplay](docs/screenshot.png)
 
@@ -49,6 +50,7 @@ and reloads matter.
 | **Tab** | Cycle to next soldier |
 | **Enter** | End turn |
 | **Esc / Right-click** | Cancel targeting |
+| **M** | Mute / unmute |
 
 ## Build & run
 

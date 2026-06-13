@@ -150,18 +150,19 @@ seeds (mix of WIN/LOSE, no exceptions):
 - Enemy AI: seeks cover + line of fire, advances when blind, flanks, finishes.
 - Juice: move/shot anims, muzzle+tracer, particles, floating text, shake,
   selection ring, cover shields, turn banner.
+- **Procedural audio** (src/Audio.cs) for all actions; mute = M.
 - Full HUD + intro/win/lose; mission generator with scattered cover.
 
 ---
 
 ## ROADMAP — pick up here (ordered by impact)
 
-- [ ] **1. Procedural audio.** Biggest feel ROI. Synthesise WAVs at runtime
-      (PCM byte arrays → temp `.wav` → `Raylib.LoadSound`, or `LoadSoundFromWave`)
-      and wire to: select, move, shoot, hit, crit, miss, overwatch, death, turn,
-      win, lose. `InitAudioDevice()` in `Program`. Add a global mute toggle (M).
-      Mirror the old web prototype's `Sound` design (oscillator-ish blips + noise
-      bursts). Keep it gated so a missing audio device never crashes.
+- [x] **1. Procedural audio.** DONE. `src/Audio.cs` synthesises 16-bit PCM WAVs
+      in memory (`LoadWaveFromMemory(".wav", bytes)` → `LoadSoundFromWave`) for
+      select/move/shoot/hit/crit/miss/overwatch/death/hunker/reload/turn/win/lose.
+      `Audio.Init/Play/Shutdown`, gated on `IsAudioDeviceReady` (headless = no-op,
+      verified crash-safe). Mute toggle = **M**. Tuning lives in the `Add(...)`
+      recipes in `Audio.Init`.
 - [ ] **2. Combat juice pass.** Hit-stop (freeze ~60ms on a hit/kill), a tiny
       camera zoom-punch on kills, thicker tracer + recoil kick, damage-flash
       easing. Small, high-leverage.
@@ -194,4 +195,5 @@ Before stopping:
 4. Tell the human to open a fresh session (they'll send only `.`).
 
 ### WIP NOTES
-(none — slice complete; next up is ROADMAP item 1, audio.)
+(none — audio done & merged. Next up is ROADMAP item 2, the combat juice pass:
+hit-stop, kill zoom-punch, recoil kick, damage-flash easing.)

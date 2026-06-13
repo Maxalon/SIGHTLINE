@@ -70,6 +70,7 @@ public class Game
     {
         BannerText = text; BannerEnemy = enemy;
         BannerMax = BannerTimer = 1.2f;
+        Audio.Play("turn");
     }
 
     // ---------------- queries ----------------
@@ -129,6 +130,7 @@ public class Game
             w.Ammo--;
             var res = Combat.Resolve(Grid, w, mover, -10); // reaction penalty
             Fx.PopText(w.Pos + new Vector2(0, -30), "OVERWATCH", Pal.Accent, 18f);
+            Audio.Play("over");
             var shot = new ShotAnim(w, mover, res, reaction: true);
             shot.OnStart(this);
             _anims.Insert(Math.Min(insertAt, _anims.Count), shot);
@@ -146,6 +148,7 @@ public class Game
         Fx.Burst(d.Pos, Pal.RGBA(20, 25, 33), 16, 150f, 0.8f, 5f);
         Fx.PopText(d.Pos + new Vector2(0, -10), "DOWN", c, 22f);
         Fx.AddShake(7f);
+        Audio.Play("death");
         // purge any queued movement for the dead unit
         _anims.RemoveAll(a => a is MoveStepAnim m && m.Unit == d);
         if (Selected == d) Selected = null;
@@ -154,6 +157,8 @@ public class Game
     // ---------------- update ----------------
     public void Update(float dt)
     {
+        if (Raylib.IsKeyPressed(KeyboardKey.M)) Audio.ToggleMute();
+
         float t = MathF.Min(dt, 0.05f);
         Fx.Update(t);
         foreach (var u in Players) u.Flash = MathF.Max(0, u.Flash - t * 4f);
@@ -185,8 +190,8 @@ public class Game
     {
         if (Phase != Phase.PlayerTurn && Phase != Phase.EnemyTurn) return;
         if (_anims.Count > 0) return;
-        if (AliveEnemies().Count == 0) { Phase = Phase.Win; }
-        else if (AlivePlayers().Count == 0) { Phase = Phase.Lose; }
+        if (AliveEnemies().Count == 0) { Phase = Phase.Win; Audio.Play("win"); }
+        else if (AlivePlayers().Count == 0) { Phase = Phase.Lose; Audio.Play("lose"); }
     }
 
     // ---------------- player turn ----------------
@@ -343,7 +348,7 @@ public class Game
         }
     }
 
-    void SelectUnit(Unit u) { Selected = u; AimMode = false; }
+    void SelectUnit(Unit u) { Selected = u; AimMode = false; Audio.Play("select"); }
 
     void CycleSelection()
     {
@@ -352,6 +357,7 @@ public class Game
         int idx = Selected != null ? actable.IndexOf(Selected) : -1;
         Selected = actable[(idx + 1) % actable.Count];
         AimMode = false;
+        Audio.Play("select");
     }
 
     void ToggleAim()
@@ -376,6 +382,7 @@ public class Game
         foreach (var (px, py) in path) Enqueue(new MoveStepAnim(Selected, px, py), Team.Player);
         AimMode = false;
         PathPreview.Clear();
+        Audio.Play("move");
     }
 
     void IssueShoot(Unit target)
@@ -395,6 +402,7 @@ public class Game
         Selected.OnOverwatch = true;
         Selected.ActionsLeft = 0;
         Fx.PopText(Selected.Pos + new Vector2(0, -30), "OVERWATCH", Pal.Accent, 18f);
+        Audio.Play("over");
         AimMode = false;
     }
 
@@ -404,6 +412,7 @@ public class Game
         Selected.Hunkered = true;
         Selected.ActionsLeft = 0;
         Fx.PopText(Selected.Pos + new Vector2(0, -30), "HUNKERED", Pal.Good, 18f);
+        Audio.Play("hunker");
         AimMode = false;
     }
 
@@ -413,6 +422,7 @@ public class Game
         Selected.Ammo = Selected.Weapon.Clip;
         Selected.ActionsLeft -= 1;
         Fx.PopText(Selected.Pos + new Vector2(0, -30), "RELOAD", Pal.TxtDim, 18f);
+        Audio.Play("reload");
         AimMode = false;
     }
 
@@ -459,6 +469,7 @@ public class Game
             {
                 e.ActionsLeft -= _aiPlan.MoveActions;
                 foreach (var (px, py) in _aiPlan.Path) Enqueue(new MoveStepAnim(e, px, py), Team.Enemy);
+                Audio.Play("move");
             }
             _aiStage = AiStage.ActAfterMove;
             return;
@@ -482,6 +493,7 @@ public class Game
                 {
                     e.OnOverwatch = true; e.ActionsLeft = 0;
                     Fx.PopText(e.Pos + new Vector2(0, -30), "OVERWATCH", Pal.Accent, 16f);
+                    Audio.Play("over");
                 }
                 else if (_aiPlan.Hunker && e.ActionsLeft > 0)
                 {
