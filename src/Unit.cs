@@ -73,6 +73,11 @@ public class Unit
     public bool ReactedThisTurn; // overwatch fired this round
     public bool Alive = true;
 
+    // meta / campaign progression (persists across missions)
+    public int Kills;
+    public int Rank;            // index into Run.Ranks
+    public string RankName => Run.Ranks[Util.Clamp(Rank, 0, Run.Ranks.Length - 1)];
+
     // render state
     public Vector2 Pos;         // pixel-space centre (tweened)
     public Vector2 Recoil;      // transient recoil/knockback offset (decays)

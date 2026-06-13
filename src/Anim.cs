@@ -113,6 +113,7 @@ public class ShotAnim : Anim
             {
                 D.Hp = 0;
                 g.KillUnit(D);
+                if (A.Team == Team.Player && D.Team == Team.Enemy) A.Kills++;
             }
         }
         else

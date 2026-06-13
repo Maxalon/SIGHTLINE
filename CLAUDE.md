@@ -153,7 +153,10 @@ seeds (mix of WIN/LOSE, no exceptions):
 - **Procedural audio** (src/Audio.cs) for all actions; mute = M.
 - **Game-feel pass:** hit-stop on impacts/kills, camera zoom-punch on kills,
   weapon recoil + target knockback.
-- Full HUD + intro/win/lose; mission generator with scattered cover.
+- **Campaign meta-loop:** 6 escalating missions, one persistent squad, kills→
+  promotions (+Aim/+HP/+Mobility), between-mission barracks debrief + field-heal.
+- Full HUD + intro/barracks/win/lose; per-mission generator (scaled by mission #).
+- Text is ASCII-only (Raylib's default font lacks fancy glyphs → they render `?`).
 
 ---
 
@@ -170,11 +173,16 @@ seeds (mix of WIN/LOSE, no exceptions):
       (`Game._camPulse`, board-centred `Camera2D`), and weapon **recoil**
       (`Unit.Recoil`, set in `ShotAnim.Apply`, decays in `Game.Update`,
       applied in `Renderer.DrawUnit`). Shotgun kicks harder; crits freeze longer.
-- [ ] **3. Run-to-run loop (the meta).** Sequence of escalating missions; squad
-      persists between them with HP carry-over/heal, kills→XP→promotions granting
-      a perk or stat. Between-mission "barracks/briefing" screen. This is what
-      turns the slice into a *game*. Persist run state in memory (optionally a
-      save file under the user's data dir — but no asset files in repo).
+- [x] **3. Run-to-run loop (the meta).** DONE. `src/Run.cs` holds the persistent
+      squad across a **6-mission** campaign (`Run.MaxMissions`). Kills accrue on
+      `Unit.Kills` (attributed in `ShotAnim.Apply`, covers overwatch too) →
+      promotions via `Run.DebriefSurvivors` (rank up at `KillReq` thresholds,
+      buff cycles +Aim/+HP/+Mobility) + partial field-heal between missions.
+      `Phase.Barracks` shows the debrief (`Hud.DrawBarracks`); `Mission.Build`
+      now takes a missionNum and scales the hostile force. Flow:
+      Intro→Mission→(clear)→Barracks→NextMission… →Win after mission 6, or Lose
+      on squad wipe. Autoplay auto-advances the barracks so the smoke test still
+      plays whole runs. NOTE: run state is in-memory only (no save file yet).
 - [ ] **4. Tactical depth.** Grenades (AoE damage, arc preview, limited charges),
       enemy **activation pods** (groups that wake + scatter to cover on sighting),
       maybe elevation/high-ground aim bonus.
@@ -199,19 +207,17 @@ Before stopping:
 4. Tell the human to open a fresh session (they'll send only `.`).
 
 ### WIP NOTES
-Items 1 (audio) and 2 (juice) done & merged to `main`. The game is a polished,
-self-contained vertical slice.
+Items 1 (audio), 2 (juice) and 3 (campaign meta-loop) all done & merged to `main`.
+The game is now a full vertical slice with a real run-to-run loop.
 
-**Next up: ROADMAP item 3 — the run-to-run meta loop.** This is the big one and
-deserves a fresh session with full context. Suggested approach:
-- Introduce a `Campaign`/`Run` object holding the squad roster across missions.
-- After a win, go to a between-mission screen (reuse `Hud.DrawCenterCard` style):
-  show survivors, heal some HP, award XP for kills, promote at thresholds
-  (a perk or +stat: aim/HP/mobility). Dead soldiers stay dead (or are replaced).
-- Escalate difficulty each mission (more/tougher enemies; `Mission.Build` already
-  takes the grid+lists — add a difficulty/seed param).
-- Wire `Phase` to flow Mission → Result → NextMission instead of straight to a
-  single Win/Lose terminal. Keep autoplay working (it should just keep playing
-  missions; consider a mission cap in the harness).
-- Optional: persist the run to a save file under the OS user-data dir (NOT in the
-  repo — no asset/data files committed).
+**Next up: ROADMAP item 4 — tactical depth.** Good candidates, in rough order:
+- **Grenades**: a thrown AoE that ignores cover, limited charges per soldier, an
+  arc/blast-radius preview before confirming. New action button + targeting mode
+  (reuse the aim-mode plumbing in `Game`). Damages all units in radius.
+- **Enemy activation pods**: spawn enemies "dormant"; a pod wakes when a player
+  gets LoS, then scatters to cover (a free reposition). Add an `Active` flag on
+  `Unit`; dormant enemies are skipped in `UpdateEnemy` and drawn dimmer.
+- **Elevation / high ground**: optional, larger change (tiles need a height
+  level; +aim from high ground, blocks LoS differently). Consider last.
+Also still open from earlier: persist a run to a save file under the OS user-data
+dir (NOT in the repo). Keep autoplay (`BREACH_AUTOPLAY`) green after each change.

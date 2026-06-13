@@ -45,6 +45,8 @@ public static class Hud
         Raylib.DrawRectangleLinesEx(pill, 1.5f, Raylib.Fade(turnCol, 0.6f));
         CenterText(turnTxt, pill, 16, turnCol);
 
+        Raylib.DrawText($"MISSION {g.RunState.Mission}/{Run.MaxMissions}", 200, 19, 16, Pal.TxtDim);
+
         // counts
         int friends = g.AlivePlayers().Count;
         int foes = g.AliveEnemies().Count;
@@ -54,7 +56,7 @@ public static class Hud
         // end turn
         EndTurnRect = new Rectangle(Cfg.ScreenW - 170, 11, 150, 30);
         bool canEnd = g.IsPlayerInteractive();
-        DrawButtonRect(EndTurnRect, "END TURN", "⏎", canEnd, false, Pal.Accent);
+        DrawButtonRect(EndTurnRect, "END TURN", "ENT", canEnd, false, Pal.Accent);
     }
 
     static void DrawCounter(int x, int y, Color dot, string text)
@@ -92,6 +94,7 @@ public static class Hud
         Raylib.DrawText(u.Name, x + 14, y + 10, 20, Pal.Txt);
         int nw = Raylib.MeasureText(u.Name, 20);
         Raylib.DrawText(u.Cls, x + 20 + nw, y + 15, 12, Pal.Friend);
+        Raylib.DrawText(u.RankName, x + 250 - Raylib.MeasureText(u.RankName, 11) - 14, y + 13, 11, Pal.Accent);
 
         // hp bar
         var bar = new Rectangle(x + 14, y + 38, 222, 13);
@@ -177,7 +180,7 @@ public static class Hud
         Raylib.DrawText(dmg, x + w - Raylib.MeasureText(dmg, 16) - 12, y + 52, 16, Pal.Foe);
 
         if (o.Flanked)
-            Raylib.DrawText("⚠ FLANKED", x + 12, y + 76, 13, Pal.Accent);
+            Raylib.DrawText("! FLANKED", x + 12, y + 76, 13, Pal.Accent);
     }
 
     // ---------------- turn banner sweep ----------------
@@ -202,15 +205,95 @@ public static class Hud
         if (g.Phase == Phase.Intro)
             DrawCenterCard(g, "BREACH", "TURN-BASED SQUAD TACTICS", Pal.Friend,
                 new[]{
+                    $"Lead one squad through {Run.MaxMissions} escalating missions.",
                     "2 actions per soldier - move, then fire (firing ends the turn).",
                     "Stand beside cover to cut enemy aim. Get flanked and you're exposed.",
-                    "Overwatch fires on any enemy that moves in your sights.",
-                    "Wipe the hostiles. Don't lose the squad.",
+                    "Kills earn promotions: better aim, more HP, more mobility.",
+                    "Survivors carry their wounds and ranks to the next mission.",
                 }, "DEPLOY SQUAD");
+        else if (g.Phase == Phase.Barracks)
+            DrawBarracks(g);
         else if (g.Phase == Phase.Win)
-            DrawCenterCard(g, "MISSION COMPLETE", "Hostiles eliminated.", Pal.Good, null, "REDEPLOY");
+            DrawCenterCard(g, "CAMPAIGN COMPLETE", $"All {Run.MaxMissions} missions cleared. The squad stands victorious.",
+                Pal.Good, null, "NEW RUN");
         else if (g.Phase == Phase.Lose)
-            DrawCenterCard(g, "SQUAD LOST", "The team didn't make it out.", Pal.Foe, null, "REDEPLOY");
+            DrawCenterCard(g, "RUN OVER", $"The squad fell on mission {g.RunState.Mission}.", Pal.Foe, null, "NEW RUN");
+    }
+
+    static void DrawBarracks(Game g)
+    {
+        var run = g.RunState;
+        var squad = run.Squad;
+        Raylib.DrawRectangle(0, 0, Cfg.ScreenW, Cfg.ScreenH, Raylib.Fade(Pal.RGBA(5, 8, 11), 0.85f));
+
+        int w = 700;
+        int rows = squad.Count;
+        int h = 150 + rows * 46 + Math.Min(run.Report.Count, 5) * 22 + 90;
+        int x = Cfg.ScreenW / 2 - w / 2;
+        int y = Cfg.ScreenH / 2 - h / 2;
+        var card = new Rectangle(x, y, w, h);
+        Raylib.DrawRectangleRounded(card, 0.04f, 8, Pal.Panel);
+        Raylib.DrawRectangleLinesEx(card, 1.5f, Pal.PanelBd);
+
+        string title = $"MISSION {run.Mission} COMPLETE";
+        Raylib.DrawText(title, x + w / 2 - Raylib.MeasureText(title, 38) / 2, y + 26, 38, Pal.Good);
+        string sub = "BARRACKS - SQUAD DEBRIEF";
+        Raylib.DrawText(sub, x + w / 2 - Raylib.MeasureText(sub, 13) / 2, y + 70, 13, Pal.TxtDim);
+
+        int ry = y + 100;
+        foreach (var u in squad)
+        {
+            DrawSquadRow(g, u, x + 30, ry, w - 60);
+            ry += 46;
+        }
+
+        // promotions / heals report
+        ry += 8;
+        Raylib.DrawText("DEBRIEF", x + 30, ry, 12, Pal.Accent);
+        ry += 20;
+        int shown = 0;
+        foreach (var line in run.Report)
+        {
+            if (shown++ >= 5) break;
+            Raylib.DrawText("- " + line, x + 36, ry, 13, Pal.TxtDim);
+            ry += 22;
+        }
+        if (run.Fallen.Count > 0)
+        {
+            string kia = "KIA: " + string.Join(", ", run.Fallen);
+            Raylib.DrawText(kia, x + 36, ry, 13, Pal.Foe);
+        }
+
+        OverlayBtn = new Rectangle(x + w / 2 - 130, y + h - 64, 260, 46);
+        bool hover = Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), OverlayBtn);
+        Raylib.DrawRectangleRounded(OverlayBtn, 0.3f, 8, hover ? Pal.RGBA(92, 200, 251) : Pal.Friend);
+        CenterText($"DEPLOY  >  MISSION {run.Mission + 1}", OverlayBtn, 16, Pal.RGBA(3, 18, 26));
+    }
+
+    static void DrawSquadRow(Game g, Unit u, int x, int y, int w)
+    {
+        Raylib.DrawRectangleRounded(new Rectangle(x, y, w, 40), 0.2f, 6, Pal.RGBA(13, 19, 27));
+        Raylib.DrawRectangle(x, y, 3, 40, Pal.Friend);
+
+        Raylib.DrawText(u.Name, x + 14, y + 5, 18, Pal.Txt);
+        Raylib.DrawText($"{u.RankName}  -  {u.Cls}", x + 14, y + 24, 11, Pal.Accent);
+
+        // HP bar
+        var bar = new Rectangle(x + 220, y + 13, 150, 12);
+        Raylib.DrawRectangleRounded(bar, 0.5f, 6, Pal.RGBA(10, 15, 21));
+        float frac = u.MaxHp > 0 ? u.Hp / (float)u.MaxHp : 0;
+        if (frac > 0)
+        {
+            Color hc = frac > 0.5f ? Pal.Good : (frac > 0.25f ? Pal.Accent : Pal.Foe);
+            Raylib.DrawRectangleRounded(new Rectangle(bar.X, bar.Y, bar.Width * frac, bar.Height), 0.5f, 6, hc);
+        }
+        Raylib.DrawText($"{u.Hp}/{u.MaxHp} HP", x + 380, y + 13, 12, Pal.TxtDim);
+
+        // kills + progress
+        Raylib.DrawText($"{u.Kills} kills", x + w - 170, y + 6, 12, Pal.Txt);
+        int toNext = g.RunState.KillsToNext(u);
+        string prog = u.Rank >= Run.Ranks.Length - 1 ? "MAX RANK" : $"{toNext} to next rank";
+        Raylib.DrawText(prog, x + w - 170, y + 23, 11, Pal.TxtDim);
     }
 
     public static Rectangle OverlayBtn;
@@ -233,8 +316,8 @@ public static class Hud
             int ry = y + 130;
             foreach (var r in rules)
             {
-                Raylib.DrawText("▸", x + 40, ry, 16, Pal.Friend);
-                Raylib.DrawText(r, x + 62, ry, 15, Pal.TxtDim);
+                Raylib.DrawText(">", x + 40, ry, 16, Pal.Friend);
+                Raylib.DrawText(r, x + 58, ry, 15, Pal.TxtDim);
                 ry += 30;
             }
         }

@@ -3,49 +3,66 @@ using System.Collections.Generic;
 
 namespace Breach;
 
-/// Builds a battlefield + spawns both squads.
+/// Builds battlefields and squads. The player squad persists across a run
+/// (see Run); each mission regenerates the map + a scaled hostile force.
 public static class Mission
 {
-    public static void Build(Grid grid, List<Unit> players, List<Unit> enemies)
+    static readonly (int x, int y)[] PlayerSpawns = { (1, 2), (1, 4), (2, 7), (1, 9) };
+
+    /// The four starting soldiers for a fresh run.
+    public static List<Unit> NewRunSquad()
     {
-        players.Clear();
+        var squad = new List<Unit>();
+        squad.Add(MakeSoldier("VEGA",   "ASSAULT",      WeaponKind.Rifle,   8, 70, 7));
+        squad.Add(MakeSoldier("KRESS",  "RANGER",       WeaponKind.Shotgun, 7, 66, 8));
+        squad.Add(MakeSoldier("NOX",    "SHARPSHOOTER", WeaponKind.Sniper,  6, 76, 6));
+        squad.Add(MakeSoldier("BISHOP", "GUNNER",       WeaponKind.Lmg,    10, 62, 6));
+        return squad;
+    }
+
+    /// Lay out a mission: regenerate terrain, place the (persistent) players,
+    /// and spawn a hostile force scaled by missionNum.
+    public static void Build(Grid grid, List<Unit> players, List<Unit> enemies, int missionNum)
+    {
         enemies.Clear();
         for (int x = 0; x < grid.W; x++)
             for (int y = 0; y < grid.H; y++)
                 grid.Tiles[x, y] = TileType.Floor;
 
-        // ---- spawn squads first so we can salt cover around them ----
-        AddPlayer(players, "VEGA",   "ASSAULT",      WeaponKind.Rifle,   1, 2, 8, 70, 7);
-        AddPlayer(players, "KRESS",  "RANGER",       WeaponKind.Shotgun, 1, 4, 7, 66, 8);
-        AddPlayer(players, "NOX",    "SHARPSHOOTER", WeaponKind.Sniper,  2, 7, 6, 76, 6);
-        AddPlayer(players, "BISHOP", "GUNNER",       WeaponKind.Lmg,     1, 9, 10, 62, 6);
+        // place players at left spawns, refresh per-mission state (HP persists)
+        for (int i = 0; i < players.Count && i < PlayerSpawns.Length; i++)
+        {
+            var u = players[i];
+            u.X = PlayerSpawns[i].x;
+            u.Y = PlayerSpawns[i].y;
+            u.Ammo = u.Weapon.Clip;
+            u.OnOverwatch = false;
+            u.Hunkered = false;
+            u.Recoil = System.Numerics.Vector2.Zero;
+            u.Flash = 0;
+        }
 
-        AddEnemy(enemies, "RAIDER",  "GRUNT",   WeaponKind.Rifle,   16, 1, 5, 60, 6);
-        AddEnemy(enemies, "RAIDER",  "GRUNT",   WeaponKind.Rifle,   16, 4, 5, 60, 6);
-        AddEnemy(enemies, "STALKER", "SCOUT",   WeaponKind.Smg,     16, 6, 4, 60, 8);
-        AddEnemy(enemies, "RAIDER",  "GRUNT",   WeaponKind.Rifle,   16, 8, 5, 60, 6);
-        AddEnemy(enemies, "OGRE",    "BRUISER", WeaponKind.Lmg,     15, 10, 10, 56, 5);
+        SpawnEnemies(grid, enemies, missionNum);
 
         var occupied = new HashSet<(int, int)>();
         foreach (var u in players) occupied.Add((u.X, u.Y));
         foreach (var u in enemies) occupied.Add((u.X, u.Y));
 
-        // ---- scatter cover ----
-        // central structures for interesting sightlines
+        // central structures for sightlines
         PlaceBlock(grid, occupied, 8, 2, TileType.HighCover, 1, 3);
         PlaceBlock(grid, occupied, 9, 6, TileType.HighCover, 1, 3);
         PlaceBlock(grid, occupied, 5, 5, TileType.LowCover, 3, 1);
         PlaceBlock(grid, occupied, 12, 4, TileType.LowCover, 1, 3);
         PlaceBlock(grid, occupied, 13, 8, TileType.HighCover, 2, 1);
 
-        // protective cover near each soldier so opening turns aren't suicidal
-        foreach (var u in players) TryCoverNear(grid, occupied, u.X + 1, u.Y, TileType.LowCover);
-        foreach (var u in enemies) TryCoverNear(grid, occupied, u.X - 1, u.Y, TileType.HighCover);
+        // protective cover beside each soldier and hostile
+        foreach (var u in players) TryCover(grid, occupied, u.X + 1, u.Y, TileType.LowCover);
+        foreach (var u in enemies) TryCover(grid, occupied, u.X - 1, u.Y, TileType.HighCover);
 
-        // random sprinkle of crates
-        int sprinkles = 14;
+        // random crates (a touch more clutter on later missions)
+        int sprinkles = 14 + Math.Min(6, missionNum);
         int guard = 0;
-        while (sprinkles > 0 && guard++ < 400)
+        while (sprinkles > 0 && guard++ < 500)
         {
             int x = Util.RandInt(3, grid.W - 4);
             int y = Util.RandInt(0, grid.H - 1);
@@ -57,6 +74,52 @@ public static class Mission
 
         foreach (var u in players) u.SyncPos();
         foreach (var u in enemies) u.SyncPos();
+    }
+
+    static void SpawnEnemies(Grid grid, List<Unit> enemies, int n)
+    {
+        int count = Math.Min(4 + n, 9);
+        int bump = n - 1;                 // stat growth per mission
+        var rows = new List<int>();
+        for (int y = 0; y < grid.H; y++) rows.Add(y);
+        // shuffle rows
+        for (int i = rows.Count - 1; i > 0; i--) { int j = Util.RandInt(0, i); (rows[i], rows[j]) = (rows[j], rows[i]); }
+
+        var used = new HashSet<(int, int)>();
+        for (int i = 0; i < count; i++)
+        {
+            int y = rows[i % rows.Count];
+            int x = grid.W - 2 - (i / rows.Count);   // pack into right columns
+            if (x < grid.W - 4) x = grid.W - 2;
+            int guard = 0;
+            while (used.Contains((x, y)) && guard++ < 20) { y = Util.RandInt(0, grid.H - 1); }
+            used.Add((x, y));
+
+            float r = Util.RandF();
+            Unit e;
+            if (n >= 2 && r < 0.20f)
+                e = MakeHostile("OGRE", "BRUISER", WeaponKind.Lmg, 9 + bump * 2, 56 + bump, 5, x, y);
+            else if (r < 0.32f)
+                e = MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 58 + bump, 8, x, y);
+            else
+                e = MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 60 + bump, 6, x, y);
+            e.Aim = Math.Min(82, e.Aim);
+            enemies.Add(e);
+        }
+    }
+
+    static Unit MakeSoldier(string name, string cls, WeaponKind w, int hp, int aim, int mob)
+    {
+        var u = new Unit { Name = name, Cls = cls, Team = Team.Player, Hp = hp, MaxHp = hp, Aim = aim, Mobility = mob, Weapon = Weapon.Make(w) };
+        u.Ammo = u.Weapon.Clip;
+        return u;
+    }
+
+    static Unit MakeHostile(string name, string cls, WeaponKind w, int hp, int aim, int mob, int x, int y)
+    {
+        var u = new Unit { Name = name, Cls = cls, Team = Team.Enemy, X = x, Y = y, Hp = hp, MaxHp = hp, Aim = aim, Mobility = mob, Weapon = Weapon.Make(w) };
+        u.Ammo = u.Weapon.Clip;
+        return u;
     }
 
     static void PlaceBlock(Grid g, HashSet<(int, int)> occ, int x, int y, TileType t, int w, int h)
@@ -71,36 +134,10 @@ public static class Mission
             }
     }
 
-    static void TryCoverNear(Grid g, HashSet<(int, int)> occ, int x, int y, TileType t)
+    static void TryCover(Grid g, HashSet<(int, int)> occ, int x, int y, TileType t)
     {
         if (!g.InBounds(x, y) || occ.Contains((x, y)) || g.Tiles[x, y] != TileType.Floor) return;
         g.Tiles[x, y] = t;
         occ.Add((x, y));
-    }
-
-    static void AddPlayer(List<Unit> list, string name, string cls, WeaponKind w,
-                          int x, int y, int hp, int aim, int mob)
-    {
-        var u = new Unit
-        {
-            Name = name, Cls = cls, Team = Team.Player,
-            X = x, Y = y, Hp = hp, MaxHp = hp, Aim = aim, Mobility = mob,
-            Weapon = Weapon.Make(w),
-        };
-        u.Ammo = u.Weapon.Clip;
-        list.Add(u);
-    }
-
-    static void AddEnemy(List<Unit> list, string name, string cls, WeaponKind w,
-                         int x, int y, int hp, int aim, int mob)
-    {
-        var u = new Unit
-        {
-            Name = name, Cls = cls, Team = Team.Enemy,
-            X = x, Y = y, Hp = hp, MaxHp = hp, Aim = aim, Mobility = mob,
-            Weapon = Weapon.Make(w),
-        };
-        u.Ammo = u.Weapon.Clip;
-        list.Add(u);
     }
 }

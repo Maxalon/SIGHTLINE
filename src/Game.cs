@@ -6,7 +6,7 @@ using Raylib_cs;
 
 namespace Breach;
 
-public enum Phase { Intro, PlayerTurn, EnemyTurn, Win, Lose }
+public enum Phase { Intro, PlayerTurn, EnemyTurn, Barracks, Win, Lose }
 enum AiStage { PickNext, ActAfterMove }
 
 public class Game
@@ -50,6 +50,10 @@ public class Game
 
     int _turnCount;
 
+    // campaign run
+    Run _run = new();
+    public Run RunState => _run;
+
     // game-feel: hit-stop freeze + camera zoom-punch
     public float HitStop;
     float _camPulse;
@@ -57,19 +61,41 @@ public class Game
     public void AddZoomPunch(float p) { _camPulse = MathF.Max(_camPulse, p); }
 
     // ---------------- lifecycle ----------------
+    /// Start a brand-new campaign run (called from intro / after a run ends).
     public void StartMission()
     {
-        Mission.Build(Grid, Players, Enemies);
+        _run = new Run();
+        _run.Start();
+        Players = _run.Squad;
+        SetupMission(1);
+    }
+
+    void SetupMission(int n)
+    {
+        _run.Mission = n;
+        Players = _run.Squad;              // living roster only
+        Mission.Build(Grid, Players, Enemies, n);
         Fx.Particles.Clear();
         Fx.Texts.Clear();
         _anims.Clear();
+        HitStop = 0;
         _turnCount = 1;
         Phase = Phase.PlayerTurn;
         foreach (var u in Players) u.BeginTurn();
         foreach (var u in Enemies) { u.BeginTurn(); u.OnOverwatch = false; }
         Selected = Players.FirstOrDefault(p => p.CanAct);
         AimMode = false;
-        ShowBanner("PLAYER TURN", false);
+        ShowBanner($"MISSION {n}", false);
+    }
+
+    void NextMission() => SetupMission(_run.Mission + 1);
+
+    void EnterBarracks()
+    {
+        _run.Squad = AlivePlayers();
+        _run.DebriefSurvivors(_run.Squad);
+        if (_run.Mission >= Run.MaxMissions) { Phase = Phase.Win; Audio.Play("win"); }
+        else { Phase = Phase.Barracks; Audio.Play("win"); }
     }
 
     void ShowBanner(string text, bool enemy)
@@ -149,6 +175,7 @@ public class Game
     {
         d.Alive = false;
         d.Hp = 0;
+        if (d.Team == Team.Player) _run.Fallen.Add(d.Name);
         Color c = d.Team == Team.Player ? Pal.Friend : Pal.Foe;
         Fx.Burst(d.Pos, c, 30, 280f, 0.7f, 4f, true);
         Fx.Burst(d.Pos, Pal.RGBA(20, 25, 33), 16, 150f, 0.8f, 5f);
@@ -192,6 +219,9 @@ public class Game
             case Phase.Intro: HandleOverlayClick(); break;
             case Phase.PlayerTurn: UpdatePlayer(); break;
             case Phase.EnemyTurn: UpdateEnemy(); break;
+            case Phase.Barracks:
+                if (AutoPlay) NextMission(); else HandleOverlayClick();
+                break;
             case Phase.Win:
             case Phase.Lose: HandleOverlayClick(); break;
         }
@@ -203,7 +233,7 @@ public class Game
     {
         if (Phase != Phase.PlayerTurn && Phase != Phase.EnemyTurn) return;
         if (_anims.Count > 0) return;
-        if (AliveEnemies().Count == 0) { Phase = Phase.Win; Audio.Play("win"); }
+        if (AliveEnemies().Count == 0) EnterBarracks();
         else if (AlivePlayers().Count == 0) { Phase = Phase.Lose; Audio.Play("lose"); }
     }
 
@@ -521,16 +551,13 @@ public class Game
     // ---------------- overlay click ----------------
     void HandleOverlayClick()
     {
-        if (Raylib.IsMouseButtonPressed(MouseButton.Left))
-        {
-            var m = Raylib.GetMousePosition();
-            if (Raylib.CheckCollisionPointRec(m, Hud.OverlayBtn))
-            {
-                if (Phase == Phase.Intro) StartMission();
-                else StartMission(); // redeploy
-            }
-        }
-        if (Phase == Phase.Intro && Raylib.IsKeyPressed(KeyboardKey.Enter)) StartMission();
+        bool click = Raylib.IsMouseButtonPressed(MouseButton.Left) &&
+                     Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.OverlayBtn);
+        bool enter = Raylib.IsKeyPressed(KeyboardKey.Enter);
+        if (!click && !enter) return;
+
+        if (Phase == Phase.Barracks) NextMission();   // deploy to next mission
+        else StartMission();                           // intro / win / lose -> new run
     }
 
     // ---------------- draw ----------------

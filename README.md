@@ -22,7 +22,19 @@ runtime**. It stays small, fast, and runs natively on Linux, macOS and Windows.
 - **Overwatch** holds a reaction shot: any enemy that moves through your sights
   gets fired on automatically (and vice-versa).
 - **Hunker** trades your turn for extra defence and crit immunity.
-- Win by eliminating all hostiles; lose if the whole squad goes down.
+- Clear all hostiles to win the mission; lose a mission if the whole squad falls.
+
+### The campaign (run-to-run loop)
+
+A run is **six escalating missions** played with a single, persistent squad:
+
+- Survivors carry their **wounds and ranks** into the next mission (a partial
+  field-heal happens between missions — damage matters).
+- **Kills earn promotions.** Rookie → Squaddie → Corporal → … → Colonel, each
+  rank granting a stat bump (+Aim / +HP / +Mobility).
+- A **barracks debrief** between missions shows survivors, promotions, heals and
+  the fallen, then deploys you to a tougher fight.
+- Lose the whole squad and the run ends; clear all six and the campaign is won.
 
 ### Soldiers & weapons
 
@@ -95,7 +107,7 @@ src/
 
 ## Ideas for where to take it next
 
-- Sound (procedural synth, or sample-based via Raylib audio)
+- Grenades / abilities, ammo types, more enemy archetypes
 - Enemy "pods" that activate on sighting, height/elevation, destructible cover
-- Grenades / abilities, ammo types, a soldier XP + meta-progression layer
-- Multiple hand-authored or procedurally generated maps and mission types
+- Multiple hand-authored or procedurally generated maps and mission objectives
+- Saving runs to disk; a wider roster with recruits replacing the fallen
