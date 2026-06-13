@@ -151,6 +151,8 @@ seeds (mix of WIN/LOSE, no exceptions):
 - Juice: move/shot anims, muzzle+tracer, particles, floating text, shake,
   selection ring, cover shields, turn banner.
 - **Procedural audio** (src/Audio.cs) for all actions; mute = M.
+- **Game-feel pass:** hit-stop on impacts/kills, camera zoom-punch on kills,
+  weapon recoil + target knockback.
 - Full HUD + intro/win/lose; mission generator with scattered cover.
 
 ---
@@ -163,9 +165,11 @@ seeds (mix of WIN/LOSE, no exceptions):
       `Audio.Init/Play/Shutdown`, gated on `IsAudioDeviceReady` (headless = no-op,
       verified crash-safe). Mute toggle = **M**. Tuning lives in the `Add(...)`
       recipes in `Audio.Init`.
-- [ ] **2. Combat juice pass.** Hit-stop (freeze ~60ms on a hit/kill), a tiny
-      camera zoom-punch on kills, thicker tracer + recoil kick, damage-flash
-      easing. Small, high-leverage.
+- [x] **2. Combat juice pass.** DONE. Hit-stop on impact/kill (`Game.HitStop`
+      freezes the sim a few frames), camera **zoom-punch** on kills
+      (`Game._camPulse`, board-centred `Camera2D`), and weapon **recoil**
+      (`Unit.Recoil`, set in `ShotAnim.Apply`, decays in `Game.Update`,
+      applied in `Renderer.DrawUnit`). Shotgun kicks harder; crits freeze longer.
 - [ ] **3. Run-to-run loop (the meta).** Sequence of escalating missions; squad
       persists between them with HP carry-over/heal, kills→XP→promotions granting
       a perk or stat. Between-mission "barracks/briefing" screen. This is what
@@ -195,5 +199,19 @@ Before stopping:
 4. Tell the human to open a fresh session (they'll send only `.`).
 
 ### WIP NOTES
-(none — audio done & merged. Next up is ROADMAP item 2, the combat juice pass:
-hit-stop, kill zoom-punch, recoil kick, damage-flash easing.)
+Items 1 (audio) and 2 (juice) done & merged to `main`. The game is a polished,
+self-contained vertical slice.
+
+**Next up: ROADMAP item 3 — the run-to-run meta loop.** This is the big one and
+deserves a fresh session with full context. Suggested approach:
+- Introduce a `Campaign`/`Run` object holding the squad roster across missions.
+- After a win, go to a between-mission screen (reuse `Hud.DrawCenterCard` style):
+  show survivors, heal some HP, award XP for kills, promote at thresholds
+  (a perk or +stat: aim/HP/mobility). Dead soldiers stay dead (or are replaced).
+- Escalate difficulty each mission (more/tougher enemies; `Mission.Build` already
+  takes the grid+lists — add a difficulty/seed param).
+- Wire `Phase` to flow Mission → Result → NextMission instead of straight to a
+  single Win/Lose terminal. Keep autoplay working (it should just keep playing
+  missions; consider a mission cap in the harness).
+- Optional: persist the run to a save file under the OS user-data dir (NOT in the
+  repo — no asset/data files committed).

@@ -162,7 +162,7 @@ public static class Renderer
         Color dark = friend ? Pal.FriendDk : Pal.FoeDk;
 
         float bob = MathF.Sin((float)Raylib.GetTime() * 2.2f + u.Bob) * 1.6f;
-        Vector2 p = u.Pos + new Vector2(0, bob);
+        Vector2 p = u.Pos + new Vector2(0, bob) + u.Recoil;
 
         // shadow
         Raylib.DrawEllipse((int)u.Pos.X, (int)(u.Pos.Y + 17), 15, 6, Raylib.Fade(Pal.RGBA(0, 0, 0), 0.35f));

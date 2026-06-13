@@ -50,6 +50,12 @@ public class Game
 
     int _turnCount;
 
+    // game-feel: hit-stop freeze + camera zoom-punch
+    public float HitStop;
+    float _camPulse;
+    public void AddHitStop(float s) { HitStop = MathF.Max(HitStop, s); }
+    public void AddZoomPunch(float p) { _camPulse = MathF.Max(_camPulse, p); }
+
     // ---------------- lifecycle ----------------
     public void StartMission()
     {
@@ -148,6 +154,8 @@ public class Game
         Fx.Burst(d.Pos, Pal.RGBA(20, 25, 33), 16, 150f, 0.8f, 5f);
         Fx.PopText(d.Pos + new Vector2(0, -10), "DOWN", c, 22f);
         Fx.AddShake(7f);
+        AddHitStop(0.1f);
+        AddZoomPunch(0.05f);
         Audio.Play("death");
         // purge any queued movement for the dead unit
         _anims.RemoveAll(a => a is MoveStepAnim m && m.Unit == d);
@@ -159,10 +167,15 @@ public class Game
     {
         if (Raylib.IsKeyPressed(KeyboardKey.M)) Audio.ToggleMute();
 
+        // camera zoom-punch always relaxes; hit-stop freezes the rest of the sim
+        _camPulse *= MathF.Exp(-dt * 11f);
+        if (_camPulse < 0.001f) _camPulse = 0;
+        if (HitStop > 0) { HitStop -= dt; return; }
+
         float t = MathF.Min(dt, 0.05f);
         Fx.Update(t);
-        foreach (var u in Players) u.Flash = MathF.Max(0, u.Flash - t * 4f);
-        foreach (var u in Enemies) u.Flash = MathF.Max(0, u.Flash - t * 4f);
+        foreach (var u in Players) { u.Flash = MathF.Max(0, u.Flash - t * 4f); u.Recoil *= MathF.Exp(-t * 17f); }
+        foreach (var u in Enemies) { u.Flash = MathF.Max(0, u.Flash - t * 4f); u.Recoil *= MathF.Exp(-t * 17f); }
         if (BannerTimer > 0) BannerTimer -= t;
 
         // advance animation queue
@@ -525,12 +538,13 @@ public class Game
     {
         Raylib.ClearBackground(Pal.Bg);
 
+        var bc = new Vector2(Cfg.OriginX + Cfg.BoardW / 2f, Cfg.OriginY + Cfg.BoardH / 2f);
         var cam = new Camera2D
         {
-            Target = Vector2.Zero,
-            Offset = Fx.ShakeOffset,
+            Target = bc,
+            Offset = bc + Fx.ShakeOffset,
             Rotation = 0f,
-            Zoom = 1f,
+            Zoom = 1f + _camPulse,
         };
         Raylib.BeginMode2D(cam);
         Renderer.DrawBoard(this);

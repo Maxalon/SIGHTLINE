@@ -75,6 +75,7 @@ public class Unit
 
     // render state
     public Vector2 Pos;         // pixel-space centre (tweened)
+    public Vector2 Recoil;      // transient recoil/knockback offset (decays)
     public float Facing;        // radians, for the facing tick
     public float Flash;         // 0..1 damage flash
     public float Bob;           // idle bob phase

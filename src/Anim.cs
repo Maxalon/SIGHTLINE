@@ -92,12 +92,15 @@ public class ShotAnim : Anim
         g.Fx.AddShake(Res.Hit ? (Res.Crit ? 9f : 5f) : 2.5f);
         Audio.Play("shoot");
         Audio.Play(Res.Hit ? (Res.Crit ? "crit" : "hit") : "miss");
+        A.Recoil = -dir * (A.Weapon.Kind == WeaponKind.Shotgun ? 9f : 6f); // kick back
 
         if (Res.Hit)
         {
             _impact = D.Pos;
             D.Hp -= Res.Damage;
             D.Flash = 1f;
+            D.Recoil = dir * (Res.Crit ? 8f : 5f);           // knockback
+            g.AddHitStop(Res.Crit ? 0.09f : 0.05f);          // freeze on impact
             Color blood = D.Team == Team.Player ? Pal.Friend : Pal.Foe;
             g.Fx.Burst(D.Pos, blood, Res.Crit ? 22 : 13, Res.Crit ? 320f : 200f, 0.5f, 3.5f, true);
             g.Fx.Burst(D.Pos, Pal.RGBA(230, 230, 235), 6, 120f, 0.4f, 2.5f);
