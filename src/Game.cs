@@ -190,8 +190,41 @@ public class Game
     }
 
     // ---------------- player turn ----------------
+    // Test-only autopilot (enabled via BREACH_AUTOPLAY): drives real player actions
+    // so the whole loop can be exercised headlessly. Never enabled in normal play.
+    public bool AutoPlay;
+    void AutoStep()
+    {
+        if (_anims.Count > 0 || Phase != Phase.PlayerTurn) return;
+        var u = Players.FirstOrDefault(p => p.CanAct);
+        if (u == null) { EndPlayerTurn(); return; }
+        Selected = u;
+        RecomputeMoveCost();
+
+        var tgt = FirstTargetFor(u);
+        if (tgt != null && u.Ammo > 0) { IssueShoot(tgt); return; }
+        if (u.Ammo == 0) { DoReload(); return; }
+
+        var enemy = AliveEnemies().OrderBy(e => Util.TileDist(u.X, u.Y, e.X, e.Y)).FirstOrDefault();
+        if (enemy != null && MoveCost != null)
+        {
+            int bx = -1, by = -1; float best = Util.TileDist(u.X, u.Y, enemy.X, enemy.Y);
+            for (int x = 0; x < Grid.W; x++)
+                for (int y = 0; y < Grid.H; y++)
+                {
+                    int c = MoveCost[x, y];
+                    if (c <= 0 || c > u.MoveBudget) continue;
+                    float d = Util.TileDist(x, y, enemy.X, enemy.Y);
+                    if (d < best) { best = d; bx = x; by = y; }
+                }
+            if (bx >= 0) { IssueMove(bx, by); return; }
+        }
+        DoHunker(); // guarantees progress
+    }
+
     void UpdatePlayer()
     {
+        if (AutoPlay) { AutoStep(); return; }
         // keep selection valid
         if (Selected != null && !Selected.Alive) Selected = null;
         if (Selected == null || !Selected.CanAct)
