@@ -170,7 +170,8 @@ seeds (mix of WIN/LOSE, no exceptions):
 - **Campaign meta-loop:** 6 escalating missions, one persistent squad, kills→
   promotions (+Aim/+HP/+Mobility), between-mission barracks debrief + field-heal.
 - **Grenades:** AoE that ignores cover, hits both teams, destroys low cover
-  (key 4, 1 charge/mission) with range/blast/arc preview.
+  (key 4, 1 charge/mission) with range/blast/arc preview. The enemy AI also
+  frags clustered/covered soldiers (from mission 2; never hits its own).
 - **Activation pods:** enemies dormant (dimmed, "?") until a soldier sights them,
   then the pod wakes + scatters to cover ("CONTACT!"). Scouting carries risk.
 - **Mission objectives:** Eliminate, Hack (reach the TERMINAL and hack it down,
@@ -220,7 +221,10 @@ seeds (mix of WIN/LOSE, no exceptions):
             destroys low cover in the blast. 1 charge/soldier, refilled each
             mission (`Unit.Grenades`). Action key **4**; targeting mode in `Game`
             (`GrenadeMode`/`GrenValid`) with range ring + blast + arc preview
-            (`Renderer.DrawGrenade`). AI does NOT use grenades yet.
+            (`Renderer.DrawGrenade`). The enemy AI also throws frags (`Ai.BestGrenade`,
+            `EnemyPlan.Grenade`): from mission 2 some hostiles (bruisers always,
+            else ~22%) carry one and lob it at a 2+ soldier cluster, or to flush a
+            single well-covered target it can't shoot well — never catching allies.
       - [x] **Enemy activation pods.** DONE. Enemies spawn dormant (`Unit.Active`
             false, grouped by `Unit.PodId`). `Game.CheckPodActivation` (called each
             player frame + on player tile-entry) wakes a whole pod when any soldier
@@ -291,7 +295,8 @@ grenades + pods + elevation)**, and **5 is nearly complete**: objectives cover
 Eliminate / Hack / Evac, and **hand-authored map layouts** now mix in with the
 procedural generator (`src/Maps.cs` + `Mission.TryApplyLayout`, connectivity-
 guarded). Only **VIP escort** remains on item 5. Item 6 (polish) also gained a
-**threat preview** (red pips on exposed reachable tiles). The game is feature-rich
+**threat preview** (red pips on exposed reachable tiles), and the **enemy AI now
+throws grenades** (`Ai.BestGrenade`). The game is feature-rich
 and stable — autoplay across mission starts (`SIGHTLINE_MISSION`) resolves with no
 exceptions and no TIMEOUTs. NOTE: the headless autopilot is a weak smoke-test AI
 and LOSES most seeds (true on `main` too) — expected; the contract is "no
