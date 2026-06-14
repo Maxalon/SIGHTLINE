@@ -37,6 +37,12 @@ public class Game
     public bool ShowOdds;
     public ShotOdds HoverOdds;
 
+    // grenade targeting
+    public const int GrenadeRange = 7;
+    public bool GrenadeMode;
+    public int GrenTx, GrenTy;
+    public bool GrenValid;
+
     // banner
     public string BannerText = "";
     public float BannerTimer, BannerMax;
@@ -253,6 +259,14 @@ public class Game
         if (tgt != null && u.Ammo > 0) { IssueShoot(tgt); return; }
         if (u.Ammo == 0) { DoReload(); return; }
 
+        // lob a grenade at any hostile in range (exercises the AoE path)
+        if (u.Grenades > 0)
+        {
+            var near = AliveEnemies().Where(e => Util.TileDist(u.X, u.Y, e.X, e.Y) <= GrenadeRange)
+                                     .OrderBy(e => Util.TileDist(u.X, u.Y, e.X, e.Y)).FirstOrDefault();
+            if (near != null) { IssueGrenade(near.X, near.Y); return; }
+        }
+
         var enemy = AliveEnemies().OrderBy(e => Util.TileDist(u.X, u.Y, e.X, e.Y)).FirstOrDefault();
         if (enemy != null && MoveCost != null)
         {
@@ -305,6 +319,14 @@ public class Game
 
         Unit hovered = HoverValid ? UnitAt(HoverX, HoverY) : null;
 
+        if (GrenadeMode)
+        {
+            GrenTx = HoverX; GrenTy = HoverY;
+            GrenValid = HoverValid && Selected != null &&
+                        Util.TileDist(Selected.X, Selected.Y, HoverX, HoverY) <= GrenadeRange;
+            return;
+        }
+
         if (AimMode)
         {
             if (hovered != null && hovered.Team == Team.Enemy && CanTarget(Selected, hovered))
@@ -342,13 +364,14 @@ public class Game
         // keys
         if (Raylib.IsKeyPressed(KeyboardKey.Enter)) { EndPlayerTurn(); return; }
         if (Raylib.IsKeyPressed(KeyboardKey.Tab)) CycleSelection();
-        if (Raylib.IsKeyPressed(KeyboardKey.Escape)) { AimMode = false; }
+        if (Raylib.IsKeyPressed(KeyboardKey.Escape)) { AimMode = false; GrenadeMode = false; }
         if (Raylib.IsKeyPressed(KeyboardKey.One)) ToggleAim();
         if (Raylib.IsKeyPressed(KeyboardKey.Two)) DoOverwatch();
         if (Raylib.IsKeyPressed(KeyboardKey.Three)) DoHunker();
+        if (Raylib.IsKeyPressed(KeyboardKey.Four)) ToggleGrenade();
         if (Raylib.IsKeyPressed(KeyboardKey.R)) DoReload();
 
-        if (Raylib.IsMouseButtonPressed(MouseButton.Right)) { AimMode = false; return; }
+        if (Raylib.IsMouseButtonPressed(MouseButton.Right)) { AimMode = false; GrenadeMode = false; return; }
 
         if (Raylib.IsMouseButtonPressed(MouseButton.Left))
         {
@@ -361,6 +384,13 @@ public class Game
             // board click
             if (!HoverValid) return;
             var hovered = UnitAt(HoverX, HoverY);
+
+            if (GrenadeMode)
+            {
+                if (GrenValid) IssueGrenade(GrenTx, GrenTy);
+                else GrenadeMode = false;
+                return;
+            }
 
             if (AimMode)
             {
@@ -385,6 +415,7 @@ public class Game
         switch (id)
         {
             case "shoot": ToggleAim(); break;
+            case "grenade": ToggleGrenade(); break;
             case "overwatch": DoOverwatch(); break;
             case "hunker": DoHunker(); break;
             case "reload": DoReload(); break;
@@ -408,8 +439,26 @@ public class Game
         if (Selected == null || !Selected.CanAct || Selected.Ammo <= 0) return;
         if (AimMode) { AimMode = false; return; }
         if (!HasAnyTarget(Selected)) return;
+        GrenadeMode = false;
         AimMode = true;
         AimTarget = FirstTargetFor(Selected);
+    }
+
+    void ToggleGrenade()
+    {
+        if (Selected == null || !Selected.CanAct || Selected.Grenades <= 0) return;
+        GrenadeMode = !GrenadeMode;
+        if (GrenadeMode) AimMode = false;
+    }
+
+    void IssueGrenade(int tx, int ty)
+    {
+        if (Selected == null || !Selected.CanAct || Selected.Grenades <= 0) return;
+        if (Util.TileDist(Selected.X, Selected.Y, tx, ty) > GrenadeRange) return;
+        Selected.Grenades--;
+        Selected.ActionsLeft = 0;
+        Enqueue(new GrenadeAnim(Selected, tx, ty), Team.Player);
+        GrenadeMode = false;
     }
 
     void IssueMove(int tx, int ty)

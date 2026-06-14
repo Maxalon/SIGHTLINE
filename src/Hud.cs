@@ -115,6 +115,9 @@ public static class Hud
             bool on = i < u.ActionsLeft;
             Raylib.DrawRectangleRounded(pip, 0.5f, 4, on ? Pal.Accent : Pal.RGBA(28, 39, 51));
         }
+        // grenade count
+        string gren = $"GREN x{u.Grenades}";
+        Raylib.DrawText(gren, x + 72, y + 60, 11, u.Grenades > 0 ? Pal.Accent : Pal.TxtDim);
         // ammo
         string ammo = $"AMMO {u.Ammo}/{u.Weapon.Clip}";
         Raylib.DrawText(ammo, x + 250 - Raylib.MeasureText(ammo, 12) - 14, y + 60, 12,
@@ -128,7 +131,7 @@ public static class Hud
         bool hasTargets = interactive && g.HasAnyTarget(u);
 
         var btns = new System.Collections.Generic.List<UiButton>();
-        float bx = 300, bw = 138, bh = 40, gap = 8;
+        float bx = 300, bw = 118, bh = 40, gap = 8;
 
         void Add(string id, string label, string key, bool enabled, bool sel)
         {
@@ -142,6 +145,7 @@ public static class Hud
         }
 
         Add("shoot", "FIRE", "1", interactive && u != null && u.CanAct && u.Ammo > 0 && hasTargets, g.AimMode);
+        Add("grenade", "GRENADE", "4", interactive && u != null && u.CanAct && u.Grenades > 0, g.GrenadeMode);
         Add("overwatch", "OVERWATCH", "2", interactive && u != null && u.CanAct && u.Ammo > 0, false);
         Add("hunker", "HUNKER", "3", interactive && u != null && u.CanAct, u != null && u.Hunkered);
         Add("reload", "RELOAD", "R", interactive && u != null && u.CanAct && u.Ammo < u.Weapon.Clip, false);

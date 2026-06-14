@@ -66,6 +66,7 @@ public class Unit
     public int Mobility;        // tiles per single move action
     public Weapon Weapon;
     public int Ammo;
+    public int Grenades;        // thrown AoE charges (refilled each mission)
 
     public int ActionsLeft;
     public bool OnOverwatch;

@@ -155,6 +155,8 @@ seeds (mix of WIN/LOSE, no exceptions):
   weapon recoil + target knockback.
 - **Campaign meta-loop:** 6 escalating missions, one persistent squad, kills→
   promotions (+Aim/+HP/+Mobility), between-mission barracks debrief + field-heal.
+- **Grenades:** AoE that ignores cover, hits both teams, destroys low cover
+  (key 4, 1 charge/mission) with range/blast/arc preview.
 - Full HUD + intro/barracks/win/lose; per-mission generator (scaled by mission #).
 - Text is ASCII-only (Raylib's default font lacks fancy glyphs → they render `?`).
 
@@ -183,9 +185,17 @@ seeds (mix of WIN/LOSE, no exceptions):
       Intro→Mission→(clear)→Barracks→NextMission… →Win after mission 6, or Lose
       on squad wipe. Autoplay auto-advances the barracks so the smoke test still
       plays whole runs. NOTE: run state is in-memory only (no save file yet).
-- [ ] **4. Tactical depth.** Grenades (AoE damage, arc preview, limited charges),
-      enemy **activation pods** (groups that wake + scatter to cover on sighting),
-      maybe elevation/high-ground aim bonus.
+- [~] **4. Tactical depth.** IN PROGRESS.
+      - [x] **Grenades.** `GrenadeAnim` (src/Anim.cs): lobbed arc → AoE explosion,
+            Chebyshev radius 1, ignores cover, hits BOTH teams (friendly fire),
+            destroys low cover in the blast. 1 charge/soldier, refilled each
+            mission (`Unit.Grenades`). Action key **4**; targeting mode in `Game`
+            (`GrenadeMode`/`GrenValid`) with range ring + blast + arc preview
+            (`Renderer.DrawGrenade`). AI does NOT use grenades yet.
+      - [ ] **Enemy activation pods** (dormant groups that wake + scatter to cover
+            on first sighting; add `Unit.Active`, skip dormant in `UpdateEnemy`,
+            draw them dimmer).
+      - [ ] Elevation / high-ground aim bonus (bigger change; do last).
 - [ ] **5. Map variety.** A couple of hand-tuned layouts and/or better procedural
       generation with guaranteed connectivity + cover balance; objective types
       (e.g. reach-the-evac, VIP).
@@ -207,17 +217,20 @@ Before stopping:
 4. Tell the human to open a fresh session (they'll send only `.`).
 
 ### WIP NOTES
-Items 1 (audio), 2 (juice) and 3 (campaign meta-loop) all done & merged to `main`.
-The game is now a full vertical slice with a real run-to-run loop.
+Items 1 (audio), 2 (juice), 3 (campaign meta-loop) done & merged. Item 4 in
+progress: **grenades done & merged**; enemy activation pods + elevation remain.
 
-**Next up: ROADMAP item 4 — tactical depth.** Good candidates, in rough order:
-- **Grenades**: a thrown AoE that ignores cover, limited charges per soldier, an
-  arc/blast-radius preview before confirming. New action button + targeting mode
-  (reuse the aim-mode plumbing in `Game`). Damages all units in radius.
-- **Enemy activation pods**: spawn enemies "dormant"; a pod wakes when a player
-  gets LoS, then scatters to cover (a free reposition). Add an `Active` flag on
-  `Unit`; dormant enemies are skipped in `UpdateEnemy` and drawn dimmer.
-- **Elevation / high ground**: optional, larger change (tiles need a height
-  level; +aim from high ground, blocks LoS differently). Consider last.
-Also still open from earlier: persist a run to a save file under the OS user-data
-dir (NOT in the repo). Keep autoplay (`BREACH_AUTOPLAY`) green after each change.
+**Next concrete step: enemy activation pods.**
+- Add `bool Active` to `Unit` (enemies start dormant = false; players always
+  active). On the player turn, after any move/sight change, if a dormant enemy is
+  in LoS of any player, "wake" its pod: set Active, give a one-time free scatter
+  toward cover (enqueue MoveStepAnims), small SFX/banner ("CONTACT!").
+- `UpdateEnemy` should skip dormant enemies (they don't act). `Renderer.DrawUnit`
+  draws dormant enemies dimmer / with a "?" or sleep tick.
+- Pods = group dormant enemies by spawn cluster (e.g., tag a PodId in
+  `Mission.SpawnEnemies`); waking one wakes its whole pod.
+- Keep autoplay green (`BREACH_AUTOPLAY`). The autopilot rushes, so pods will
+  wake naturally.
+
+Reminder: run state is in-memory only — a save-file persist is still open.
+Keep all drawn strings ASCII. Always build Release + autoplay before merging.

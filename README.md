@@ -56,6 +56,7 @@ and reloads matter.
 | **Left-click** a tile | Move there (blue = 1 action, yellow = dash) |
 | **Left-click** a hostile | Fire |
 | **1** / FIRE | Enter targeting mode |
+| **4** / GRENADE | Throw a grenade (AoE, ignores cover, destroys low cover) |
 | **2** / OVERWATCH | Hold a reaction shot |
 | **3** / HUNKER | Defensive crouch |
 | **R** / RELOAD | Reload weapon |

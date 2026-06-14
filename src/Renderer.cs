@@ -30,6 +30,7 @@ public static class Renderer
         DrawHoverAndShields(g);
         DrawUnits(g);
         DrawAim(g);
+        DrawGrenade(g);
 
         g.ActiveAnim?.Draw(g);
         g.Fx.Draw();
@@ -50,7 +51,7 @@ public static class Renderer
 
     static void DrawMoveOverlay(Game g)
     {
-        if (g.Selected == null || !g.IsPlayerInteractive() || g.AimMode) return;
+        if (g.Selected == null || !g.IsPlayerInteractive() || g.AimMode || g.GrenadeMode) return;
         if (g.Selected.Team != Team.Player || !g.Selected.CanAct) return;
         var cost = g.MoveCost;
         if (cost == null) return;
@@ -230,6 +231,44 @@ public static class Renderer
                 : Pal.RGBA(40, 48, 60);
             Raylib.DrawRectangle((int)(sx + i * 6f), (int)y, 4, 4, c);
         }
+    }
+
+    static void DrawGrenade(Game g)
+    {
+        if (!g.GrenadeMode || g.Selected == null) return;
+        var origin = g.Selected.Pos;
+
+        // throw-range ring
+        Raylib.DrawCircleLines((int)origin.X, (int)origin.Y, Game.GrenadeRange * Cfg.Tile,
+                               Raylib.Fade(Pal.Accent, 0.35f));
+
+        if (!g.HoverValid) return;
+        Color col = g.GrenValid ? Pal.Accent : Pal.TxtDim;
+
+        // blast preview (Chebyshev radius 1)
+        for (int x = g.GrenTx - GrenadeAnim.Radius; x <= g.GrenTx + GrenadeAnim.Radius; x++)
+            for (int y = g.GrenTy - GrenadeAnim.Radius; y <= g.GrenTy + GrenadeAnim.Radius; y++)
+            {
+                if (!g.Grid.InBounds(x, y)) continue;
+                Raylib.DrawRectangleRec(Util.TileRect(x, y), Raylib.Fade(col, 0.22f));
+            }
+
+        var target = Util.TileCenter(g.GrenTx, g.GrenTy);
+        // arc preview
+        if (g.GrenValid)
+        {
+            Vector2 prev = origin;
+            for (int i = 1; i <= 12; i++)
+            {
+                float k = i / 12f;
+                var p = Vector2.Lerp(origin, target, k);
+                p.Y -= MathF.Sin(k * MathF.PI) * 60f;
+                Raylib.DrawLineEx(prev, p, 2f, Raylib.Fade(Pal.Accent, 0.5f));
+                prev = p;
+            }
+        }
+        Raylib.DrawCircleLines((int)target.X, (int)target.Y, 14, col);
+        Raylib.DrawCircleLines((int)target.X, (int)target.Y, 4, col);
     }
 
     static void DrawAim(Game g)

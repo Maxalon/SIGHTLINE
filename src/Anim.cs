@@ -143,6 +143,104 @@ public class ShotAnim : Anim
     }
 }
 
+/// A thrown grenade: arcs to a tile, then explodes — AoE damage that ignores
+/// cover, hits both teams, and clears low cover. Blast = Chebyshev radius 1.
+public class GrenadeAnim : Anim
+{
+    public Unit Thrower;
+    public int Tx, Ty;
+    public const int Radius = 1;
+    const float Flight = 0.5f;
+    const float Total = 0.78f;
+    float _t;
+    bool _boom;
+    Vector2 _from, _to;
+
+    public GrenadeAnim(Unit thrower, int tx, int ty) { Thrower = thrower; Tx = tx; Ty = ty; }
+
+    public override void OnStart(Game g)
+    {
+        _from = Thrower.Pos;
+        _to = Util.TileCenter(Tx, Ty);
+        var d = _to - _from;
+        if (d.LengthSquared() > 0.01f) Thrower.Facing = MathF.Atan2(d.Y, d.X);
+    }
+
+    public override bool Update(Game g, float dt)
+    {
+        _t += dt;
+        if (!_boom && _t >= Flight) { _boom = true; Explode(g); }
+        return _t >= Total;
+    }
+
+    void Explode(Game g)
+    {
+        Audio.Play("crit");
+        Audio.Play("death");
+        g.Fx.AddShake(12f);
+        g.AddHitStop(0.07f);
+        g.AddZoomPunch(0.06f);
+        g.Fx.Burst(_to, Pal.Accent, 36, 360f, 0.6f, 4.5f, true);
+        g.Fx.Burst(_to, Pal.RGBA(120, 90, 60), 22, 200f, 0.8f, 5f);
+
+        // clear low cover in the blast (debris)
+        for (int x = Tx - Radius; x <= Tx + Radius; x++)
+            for (int y = Ty - Radius; y <= Ty + Radius; y++)
+            {
+                if (!g.Grid.InBounds(x, y)) continue;
+                if (g.Grid.Tiles[x, y] == TileType.LowCover)
+                {
+                    g.Grid.Tiles[x, y] = TileType.Floor;
+                    g.Fx.Burst(Util.TileCenter(x, y), Pal.RGBA(90, 100, 116), 10, 150f, 0.6f, 4f);
+                }
+            }
+
+        // damage every unit in radius (friendly fire included)
+        var hit = new System.Collections.Generic.List<Unit>();
+        hit.AddRange(g.Players);
+        hit.AddRange(g.Enemies);
+        foreach (var u in hit)
+        {
+            if (!u.Alive) continue;
+            if (Util.ChebyDist(u.X, u.Y, Tx, Ty) > Radius) continue;
+            int dmg = Util.RandInt(3, 5);
+            u.Hp -= dmg;
+            u.Flash = 1f;
+            var kick = u.Pos - _to;
+            if (kick.LengthSquared() > 0.01f) u.Recoil = Vector2.Normalize(kick) * 7f;
+            Color c = u.Team == Team.Player ? Pal.Friend : Pal.Foe;
+            g.Fx.Burst(u.Pos, c, 12, 200f, 0.5f, 3.5f, true);
+            g.Fx.PopText(u.Pos + new Vector2(0, -26), dmg.ToString(), Pal.RGBA(255, 220, 180), 26f);
+            if (u.Hp <= 0)
+            {
+                u.Hp = 0;
+                g.KillUnit(u);
+                if (Thrower.Team == Team.Player && u.Team == Team.Enemy) Thrower.Kills++;
+            }
+        }
+    }
+
+    public override void Draw(Game g)
+    {
+        if (_t < Flight)
+        {
+            float k = _t / Flight;
+            Vector2 p = Vector2.Lerp(_from, _to, k);
+            p.Y -= MathF.Sin(k * MathF.PI) * 70f;          // parabolic arc
+            Raylib.DrawCircleV(p + new Vector2(2, 3), 5f, Raylib.Fade(Pal.RGBA(0, 0, 0), 0.4f));
+            Raylib.DrawCircleV(p, 5f, Pal.Accent);
+            Raylib.DrawCircleV(p, 2.5f, Pal.RGBA(255, 240, 200));
+        }
+        else
+        {
+            float k = (_t - Flight) / (Total - Flight);
+            float rad = Util.Lerp(8f, (Radius + 0.5f) * Cfg.Tile, Util.EaseOutQuad(k));
+            Raylib.DrawCircleV(_to, rad, Raylib.Fade(Pal.Accent, (1f - k) * 0.4f));
+            Raylib.DrawRing(_to, rad - 4, rad, 0, 360, 40, Raylib.Fade(Pal.RGBA(255, 230, 190), 1f - k));
+        }
+    }
+}
+
 /// A brief pause (used to space out AI actions so they read clearly).
 public class WaitAnim : Anim
 {
