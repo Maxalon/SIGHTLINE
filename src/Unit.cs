@@ -1,7 +1,7 @@
 using System;
 using System.Numerics;
 
-namespace Breach;
+namespace Sightline;
 
 public enum Team { Player, Enemy }
 

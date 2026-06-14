@@ -1,4 +1,4 @@
-# BREACH — Turn-Based Squad Tactics
+# SIGHTLINE — Turn-Based Squad Tactics
 
 A compact, XCOM-style tactics game built in **C# + [Raylib](https://www.raylib.com/)**.
 Command a four-soldier squad on a grid battlefield: spend action points, use cover,
@@ -8,7 +8,7 @@ No art or audio asset files — the whole game is drawn from geometry, particles
 and screen-shake, and every sound effect is **synthesised procedurally at
 runtime**. It stays small, fast, and runs natively on Linux, macOS and Windows.
 
-![BREACH gameplay](docs/screenshot.png)
+![SIGHTLINE gameplay](docs/screenshot.png)
 
 ## The game loop
 
@@ -88,14 +88,14 @@ To produce a standalone native binary (no SDK needed to run it):
 ```bash
 # Linux
 dotnet publish -c Release -r linux-x64 --self-contained
-# the executable lands in bin/Release/net8.0/linux-x64/publish/Breach
+# the executable lands in bin/Release/net8.0/linux-x64/publish/Sightline
 ```
 
 Use `osx-x64` / `osx-arm64` / `win-x64` for other targets.
 
 ### In Rider
 
-Open `Breach.csproj` (or the folder) and hit **Run**. The Raylib native libraries
+Open `Sightline.csproj` (or the folder) and hit **Run**. The Raylib native libraries
 are pulled in automatically via the `Raylib-cs` NuGet package.
 
 ## Project layout

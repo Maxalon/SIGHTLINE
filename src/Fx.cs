@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Numerics;
 using Raylib_cs;
 
-namespace Breach;
+namespace Sightline;
 
 public class Particle
 {

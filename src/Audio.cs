@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using Raylib_cs;
 
-namespace Breach;
+namespace Sightline;
 
 enum Wv { Sine, Square, Saw, Tri }
 

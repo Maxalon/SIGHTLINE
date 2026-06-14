@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace Breach;
+namespace Sightline;
 
 public class EnemyPlan
 {

@@ -2,7 +2,7 @@ using System;
 using System.Numerics;
 using Raylib_cs;
 
-namespace Breach;
+namespace Sightline;
 
 /// Base class for queued, sequential animations that can mutate game state.
 public abstract class Anim

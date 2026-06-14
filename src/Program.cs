@@ -1,23 +1,23 @@
 using System;
 using Raylib_cs;
 
-namespace Breach;
+namespace Sightline;
 
 public static class Program
 {
     public static void Main()
     {
         // ---- Headless verification harness (env-gated; no effect in normal play) ----
-        // BREACH_SHOT=<frame>  : skip intro, run to <frame>, write breach_shot.png, exit.
-        // BREACH_AUTOPLAY=1    : skip intro, let an autopilot play full matches to a result.
+        // SIGHTLINE_SHOT=<frame>  : skip intro, run to <frame>, write sightline_shot.png, exit.
+        // SIGHTLINE_AUTOPLAY=1    : skip intro, let an autopilot play full matches to a result.
         // Used to smoke-test the whole loop under Xvfb + software GL. See CLAUDE.md.
-        bool shot = int.TryParse(Environment.GetEnvironmentVariable("BREACH_SHOT"), out int shotFrame);
-        bool autoplay = Environment.GetEnvironmentVariable("BREACH_AUTOPLAY") == "1";
+        bool shot = int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_SHOT"), out int shotFrame);
+        bool autoplay = Environment.GetEnvironmentVariable("SIGHTLINE_AUTOPLAY") == "1";
 
         ConfigFlags flags = ConfigFlags.Msaa4xHint;
         if (!autoplay) flags |= ConfigFlags.VSyncHint;
         Raylib.SetConfigFlags(flags);
-        Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "BREACH — Tactical Squad Combat");
+        Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "SIGHTLINE — Tactical Squad Combat");
         Raylib.SetTargetFPS(autoplay ? 0 : 60);   // uncapped during the smoke test
         Audio.Init();
 
@@ -40,7 +40,7 @@ public static class Program
             if (shot || autoplay) frame++;
             if (shot)
             {
-                if (frame == shotFrame) Raylib.TakeScreenshot("breach_shot.png");
+                if (frame == shotFrame) Raylib.TakeScreenshot("sightline_shot.png");
                 if (!autoplay && frame >= shotFrame + 2) break;
             }
             if (autoplay)

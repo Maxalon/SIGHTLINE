@@ -2,7 +2,7 @@ using System;
 using System.Numerics;
 using Raylib_cs;
 
-namespace Breach;
+namespace Sightline;
 
 /// Global layout + tuning constants.
 public static class Cfg

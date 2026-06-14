@@ -1,6 +1,6 @@
 using System;
 
-namespace Breach;
+namespace Sightline;
 
 /// Precomputed odds for a shot from attacker -> defender.
 public struct ShotOdds

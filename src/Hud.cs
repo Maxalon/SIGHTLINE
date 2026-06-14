@@ -2,7 +2,7 @@ using System;
 using System.Numerics;
 using Raylib_cs;
 
-namespace Breach;
+namespace Sightline;
 
 public struct UiButton
 {
@@ -261,7 +261,7 @@ public static class Hud
     static void DrawOverlays(Game g)
     {
         if (g.Phase == Phase.Intro)
-            DrawCenterCard(g, "BREACH", "TURN-BASED SQUAD TACTICS", Pal.Friend,
+            DrawCenterCard(g, "SIGHTLINE", "TURN-BASED SQUAD TACTICS", Pal.Friend,
                 new[]{
                     $"Lead one squad through {Run.MaxMissions} escalating missions.",
                     "2 actions per soldier - move, then fire (firing ends the turn).",

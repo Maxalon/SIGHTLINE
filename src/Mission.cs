@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace Breach;
+namespace Sightline;
 
 /// Builds battlefields and squads. The player squad persists across a run
 /// (see Run); each mission regenerates the map + a scaled hostile force.

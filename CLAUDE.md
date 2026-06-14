@@ -15,7 +15,7 @@ are. **Keep it updated** — when you finish work, tick the roadmap and refresh
 
 ## What this is
 
-**BREACH** — a turn-based, XCOM-style squad tactics game.
+**SIGHTLINE** — a turn-based, XCOM-style squad tactics game.
 
 - **Stack:** C# / .NET 8 + [Raylib-cs](https://github.com/raylib-cs/raylib-cs) 8.0.0 (NuGet).
 - **Platform:** native; primary target **Linux** (also macOS/Windows). Compiles to a
@@ -45,7 +45,7 @@ are. **Keep it updated** — when you finish work, tick the roadmap and refresh
   automated). If you write a check that can't run in this sandbox, describe it so
   the human can run it on their machine — don't wire it to run automatically.
 - **Share screenshots in the chat.** The human follows progress visually. Every
-  time you take a screenshot (e.g. `breach_shot.png`), send it into the message
+  time you take a screenshot (e.g. `sightline_shot.png`), send it into the message
   thread with the `SendUserFile` tool so they can see the progression. Capture a
   frame for any notable visual change and surface it.
 - **Full autonomy:** build, commit, and **merge to `main`** freely. No PR/review
@@ -80,22 +80,22 @@ an env-gated harness baked into `Program.cs`:
 ```bash
 export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe
 
-# Screenshot a frame -> breach_shot.png  (then Read it to inspect visuals)
-BREACH_SHOT=90 xvfb-run -a -s "-screen 0 1280x800x24" dotnet run -c Debug
+# Screenshot a frame -> sightline_shot.png  (then Read it to inspect visuals)
+SIGHTLINE_SHOT=90 xvfb-run -a -s "-screen 0 1280x800x24" dotnet run -c Debug
 
 # Full-match autopilot smoke test -> prints "RESULT: WIN|LOSE|TIMEOUT"
-BREACH_AUTOPLAY=1 xvfb-run -a -s "-screen 0 1280x800x24" dotnet run -c Debug
+SIGHTLINE_AUTOPLAY=1 xvfb-run -a -s "-screen 0 1280x800x24" dotnet run -c Debug
 ```
 
 Run autoplay a few times (RNG varies) and confirm no exceptions and no TIMEOUT.
-`breach_shot.png` is gitignored; `docs/screenshot.png` (README image) is committed.
+`sightline_shot.png` is gitignored; `docs/screenshot.png` (README image) is committed.
 
 ---
 
 ## Architecture (file map)
 
 ```
-Breach.csproj     net8.0, Nullable disabled, Raylib-cs 8.0.0
+Sightline.csproj     net8.0, Nullable disabled, Raylib-cs 8.0.0
 src/
   Program.cs    entry + window loop + env-gated test harness
   Game.cs       state machine, input, turn flow, overwatch, AI staging, autopilot
@@ -260,5 +260,5 @@ manual autoplay reaches a clean result across many seeds, no exceptions/timeouts
 - Persist a run to a save file under the OS user-data dir (NOT in the repo).
 
 Conventions: drawn strings must be ASCII (default font). Build Release + run
-`BREACH_AUTOPLAY=1` a few times before merging. Share screenshots in chat via
+`SIGHTLINE_AUTOPLAY=1` a few times before merging. Share screenshots in chat via
 `SendUserFile` so the human can follow along.

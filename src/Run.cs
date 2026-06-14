@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace Breach;
+namespace Sightline;
 
 /// Holds the persistent squad across a campaign run, plus XP/rank progression.
 public class Run
@@ -21,7 +21,7 @@ public class Run
 
     public void Start()
     {
-        Squad = Breach.Mission.NewRunSquad();
+        Squad = Sightline.Mission.NewRunSquad();
         Mission = 0;
         Fallen.Clear();
         Report.Clear();
@@ -53,7 +53,7 @@ public class Run
         // backfill the squad up to 4 with rookie recruits
         while (Squad.Count < 4)
         {
-            var rec = Breach.Mission.MakeRecruit();
+            var rec = Sightline.Mission.MakeRecruit();
             Squad.Add(rec);
             Report.Add($"{rec.Name} joins the squad  (ROOKIE {rec.Cls})");
         }

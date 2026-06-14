@@ -4,7 +4,7 @@ using System.Linq;
 using System.Numerics;
 using Raylib_cs;
 
-namespace Breach;
+namespace Sightline;
 
 public enum Phase { Intro, PlayerTurn, EnemyTurn, Barracks, Win, Lose }
 public enum Objective { Eliminate, Evac }
@@ -273,7 +273,7 @@ public class Game
     }
 
     // ---------------- player turn ----------------
-    // Test-only autopilot (enabled via BREACH_AUTOPLAY): drives real player actions
+    // Test-only autopilot (enabled via SIGHTLINE_AUTOPLAY): drives real player actions
     // so the whole loop can be exercised headlessly. Never enabled in normal play.
     public bool AutoPlay;
     void AutoStep()

@@ -2,7 +2,7 @@ using System;
 using System.Numerics;
 using Raylib_cs;
 
-namespace Breach;
+namespace Sightline;
 
 /// Draws the battlefield, units and tactical overlays.
 public static class Renderer
