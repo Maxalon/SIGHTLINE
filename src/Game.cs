@@ -783,7 +783,16 @@ public class Game
             var e = _aiUnits[_aiIdx];
             if (e.Alive)
             {
-                if (_aiPlan.ShootTarget != null && _aiPlan.ShootTarget.Alive &&
+                if (_aiPlan.Grenade && e.Grenades > 0 && e.ActionsLeft > 0 &&
+                    Util.TileDist(e.X, e.Y, _aiPlan.GrenX, _aiPlan.GrenY) <= GrenadeRange)
+                {
+                    e.Grenades--;
+                    e.ActionsLeft = 0;
+                    Fx.PopText(e.Pos + new Vector2(0, -30), "FRAG OUT", Pal.Foe, 16f);
+                    Enqueue(new WaitAnim(0.2f), Team.Enemy);
+                    Enqueue(new GrenadeAnim(e, _aiPlan.GrenX, _aiPlan.GrenY), Team.Enemy);
+                }
+                else if (_aiPlan.ShootTarget != null && _aiPlan.ShootTarget.Alive &&
                     e.ActionsLeft > 0 && e.Ammo > 0 && CanTarget(e, _aiPlan.ShootTarget))
                 {
                     e.Ammo--;

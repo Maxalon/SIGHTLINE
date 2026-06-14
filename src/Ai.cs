@@ -10,6 +10,8 @@ public class EnemyPlan
     public Unit ShootTarget;      // null if no shot planned
     public bool Overwatch;
     public bool Hunker;
+    public bool Grenade;          // lob a grenade instead of shooting
+    public int GrenX, GrenY;      // grenade aim tile
 }
 
 /// Tactical decision-making for a single enemy. Greedy, but reads as competent:
@@ -94,8 +96,31 @@ public static class Ai
 
         plan.ShootTarget = bestShotTarget;
 
+        // grenade option: lob from the post-move tile at the best cluster. Prefer it
+        // over shooting when it catches 2+ soldiers, or flushes a single well-covered
+        // one we can't shoot well. Never throw if it would catch an ally.
+        if (e.Grenades > 0)
+        {
+            var (gx, gy, hits, allies) = BestGrenade(g, e, bestTile.x, bestTile.y);
+            if (hits >= 1 && allies == 0)
+            {
+                bool throwIt = hits >= 2;
+                if (!throwIt)   // single target: only if our shot would be weak
+                {
+                    int shotHit = plan.ShootTarget != null
+                        ? OddsFrom(g, e, bestTile.x, bestTile.y, plan.ShootTarget).HitChance : 0;
+                    throwIt = shotHit < 45;
+                }
+                if (throwIt)
+                {
+                    plan.Grenade = true; plan.GrenX = gx; plan.GrenY = gy;
+                    plan.ShootTarget = null;   // grenade takes the action instead
+                }
+            }
+        }
+
         // if no shot is possible and we still have an action after moving, hunker/overwatch
-        if (plan.ShootTarget == null)
+        if (plan.ShootTarget == null && !plan.Grenade)
         {
             int spent = plan.MoveActions;
             if (spent < 2)
@@ -109,6 +134,23 @@ public static class Ai
         }
 
         return plan;
+    }
+
+    // Best grenade aim tile thrown from (fx,fy): pick a soldier's tile in range that
+    // catches the most players (blast = Chebyshev radius 1); report ally splash too.
+    static (int x, int y, int hits, int allies) BestGrenade(Game g, Unit e, int fx, int fy)
+    {
+        int bx = -1, by = -1, bestHits = 0, bestAllies = 99;
+        foreach (var p in g.AlivePlayers())
+        {
+            if (Util.TileDist(fx, fy, p.X, p.Y) > Game.GrenadeRange) continue;
+            int hits = 0, allies = 0;
+            foreach (var q in g.AlivePlayers()) if (Util.ChebyDist(p.X, p.Y, q.X, q.Y) <= GrenadeAnim.Radius) hits++;
+            foreach (var a in g.AliveEnemies()) if (a != e && Util.ChebyDist(p.X, p.Y, a.X, a.Y) <= GrenadeAnim.Radius) allies++;
+            if (hits > bestHits || (hits == bestHits && allies < bestAllies))
+            { bestHits = hits; bestAllies = allies; bx = p.X; by = p.Y; }
+        }
+        return (bx, by, bestHits, bestAllies);
     }
 
     // odds as if attacker stood at (ax,ay)
