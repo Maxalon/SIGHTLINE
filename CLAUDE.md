@@ -157,6 +157,8 @@ seeds (mix of WIN/LOSE, no exceptions):
   promotions (+Aim/+HP/+Mobility), between-mission barracks debrief + field-heal.
 - **Grenades:** AoE that ignores cover, hits both teams, destroys low cover
   (key 4, 1 charge/mission) with range/blast/arc preview.
+- **Activation pods:** enemies dormant (dimmed, "?") until a soldier sights them,
+  then the pod wakes + scatters to cover ("CONTACT!"). Scouting carries risk.
 - Full HUD + intro/barracks/win/lose; per-mission generator (scaled by mission #).
 - Text is ASCII-only (Raylib's default font lacks fancy glyphs → they render `?`).
 
@@ -192,10 +194,15 @@ seeds (mix of WIN/LOSE, no exceptions):
             mission (`Unit.Grenades`). Action key **4**; targeting mode in `Game`
             (`GrenadeMode`/`GrenValid`) with range ring + blast + arc preview
             (`Renderer.DrawGrenade`). AI does NOT use grenades yet.
-      - [ ] **Enemy activation pods** (dormant groups that wake + scatter to cover
-            on first sighting; add `Unit.Active`, skip dormant in `UpdateEnemy`,
-            draw them dimmer).
-      - [ ] Elevation / high-ground aim bonus (bigger change; do last).
+      - [x] **Enemy activation pods.** DONE. Enemies spawn dormant (`Unit.Active`
+            false, grouped by `Unit.PodId`). `Game.CheckPodActivation` (called each
+            player frame + on player tile-entry) wakes a whole pod when any soldier
+            gets LoS within `SightRange` (12); `ActivatePod` gives a free scatter
+            (Ai.Plan move) + "CONTACT!" banner. Shooting/grenading a dormant enemy
+            also wakes its pod. Dormant enemies are skipped in `UpdateEnemy` and
+            drawn dimmed with a "?" (`Renderer.DrawUnit`).
+      - [ ] Elevation / high-ground aim bonus (bigger change; deferred — needs a
+            height layer on tiles + LoS/aim tweaks).
 - [ ] **5. Map variety.** A couple of hand-tuned layouts and/or better procedural
       generation with guaranteed connectivity + cover balance; objective types
       (e.g. reach-the-evac, VIP).
@@ -217,20 +224,22 @@ Before stopping:
 4. Tell the human to open a fresh session (they'll send only `.`).
 
 ### WIP NOTES
-Items 1 (audio), 2 (juice), 3 (campaign meta-loop) done & merged. Item 4 in
-progress: **grenades done & merged**; enemy activation pods + elevation remain.
+Items 1 (audio), 2 (juice), 3 (campaign meta-loop) done & merged. Item 4
+(tactical depth): **grenades + activation pods done & merged**; only elevation
+remains (deferred as a larger change). The game is feature-rich and stable —
+autoplay reaches a clean result across many seeds with no exceptions/timeouts.
 
-**Next concrete step: enemy activation pods.**
-- Add `bool Active` to `Unit` (enemies start dormant = false; players always
-  active). On the player turn, after any move/sight change, if a dormant enemy is
-  in LoS of any player, "wake" its pod: set Active, give a one-time free scatter
-  toward cover (enqueue MoveStepAnims), small SFX/banner ("CONTACT!").
-- `UpdateEnemy` should skip dormant enemies (they don't act). `Renderer.DrawUnit`
-  draws dormant enemies dimmer / with a "?" or sleep tick.
-- Pods = group dormant enemies by spawn cluster (e.g., tag a PodId in
-  `Mission.SpawnEnemies`); waking one wakes its whole pod.
-- Keep autoplay green (`BREACH_AUTOPLAY`). The autopilot rushes, so pods will
-  wake naturally.
+**Next up: ROADMAP item 5 — map variety & objectives.** Suggested:
+- Add mission **objectives** beyond "kill all": e.g. reach-the-evac (get any
+  soldier to a marked tile), or hold/hack a terminal for N turns. Add an enum to
+  `Mission`/`Run` and check it in `Game.CheckEnd`.
+- A couple of hand-authored map layouts mixed with the procedural generator;
+  ensure connectivity + balanced cover. `Mission.Build` is the single entry point.
+- Keep the per-mission scaling; maybe vary objective by mission number.
 
-Reminder: run state is in-memory only — a save-file persist is still open.
-Keep all drawn strings ASCII. Always build Release + autoplay before merging.
+Smaller open items / good warmups:
+- Persist a run to a save file under the OS user-data dir (NOT in the repo).
+- Elevation / high-ground aim bonus (item 4 leftover; needs a tile height layer).
+
+Conventions: drawn strings must be ASCII. Always build Release + run
+`BREACH_AUTOPLAY=1` (a few times — RNG varies) before merging to `main`.

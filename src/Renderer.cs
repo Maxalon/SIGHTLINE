@@ -159,8 +159,9 @@ public static class Renderer
     {
         if (!u.Alive) return;
         bool friend = u.Team == Team.Player;
-        Color main = friend ? Pal.Friend : Pal.Foe;
-        Color dark = friend ? Pal.FriendDk : Pal.FoeDk;
+        bool dormant = u.Team == Team.Enemy && !u.Active;
+        Color main = friend ? Pal.Friend : (dormant ? Pal.RGBA(120, 96, 96) : Pal.Foe);
+        Color dark = friend ? Pal.FriendDk : (dormant ? Pal.RGBA(46, 38, 42) : Pal.FoeDk);
 
         float bob = MathF.Sin((float)Raylib.GetTime() * 2.2f + u.Bob) * 1.6f;
         Vector2 p = u.Pos + new Vector2(0, bob) + u.Recoil;
@@ -190,6 +191,13 @@ public static class Renderer
         };
         float rot = u.Cls == "SHARPSHOOTER" ? 45f : (sides == 3 ? -90f : 0f);
         Raylib.DrawPoly(p, sides, 7.5f, rot, main);
+
+        // dormant enemies: show an "unaware" marker, no facing/pips/status
+        if (dormant)
+        {
+            Raylib.DrawText("?", (int)(p.X - 4), (int)(p.Y - 32), 18, Pal.TxtDim);
+            return;
+        }
 
         // facing tick
         var fdir = new Vector2(MathF.Cos(u.Facing), MathF.Sin(u.Facing));

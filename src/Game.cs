@@ -157,6 +157,7 @@ public class Game
     public void OnUnitEnteredTile(Unit mover)
     {
         if (!mover.Alive) return;
+        if (mover.Team == Team.Player) CheckPodActivation();  // reveal pods while advancing
         var watchers = mover.Team == Team.Player ? Enemies : Players;
         int insertAt = 1;
         foreach (var w in watchers)
@@ -270,23 +271,74 @@ public class Game
         var enemy = AliveEnemies().OrderBy(e => Util.TileDist(u.X, u.Y, e.X, e.Y)).FirstOrDefault();
         if (enemy != null && MoveCost != null)
         {
-            int bx = -1, by = -1; float best = Util.TileDist(u.X, u.Y, enemy.X, enemy.Y);
+            // true path-distance to the enemy (avoids getting stuck on walls)
+            var edist = Grid.CostMap(enemy.X, enemy.Y, (x, y) => IsOccupiedByOther(x, y, enemy), out _, 9999);
+            int myE = edist[u.X, u.Y];
+            int bx = -1, by = -1, bestE = int.MaxValue;
+            var reachable = new List<(int, int)>();
             for (int x = 0; x < Grid.W; x++)
                 for (int y = 0; y < Grid.H; y++)
                 {
                     int c = MoveCost[x, y];
-                    if (c <= 0 || c > u.MoveBudget) continue;
-                    float d = Util.TileDist(x, y, enemy.X, enemy.Y);
-                    if (d < best) { best = d; bx = x; by = y; }
+                    if (c <= 0) continue;
+                    int need = c <= u.MoveBudget ? 1 : 2;
+                    if (need > u.ActionsLeft) continue;
+                    reachable.Add((x, y));
+                    int e = edist[x, y];
+                    if (e >= 0 && e < bestE) { bestE = e; bx = x; by = y; }
                 }
-            if (bx >= 0) { IssueMove(bx, by); return; }
+            if (bx >= 0 && (myE < 0 || bestE < myE)) { IssueMove(bx, by); return; }
+            if (reachable.Count > 0) { var (rx, ry) = Util.Choice(reachable); IssueMove(rx, ry); return; } // break local minima
         }
         DoHunker(); // guarantees progress
+    }
+
+    // ---------------- activation pods ----------------
+    public const int SightRange = 12;
+
+    void CheckPodActivation()
+    {
+        foreach (var e in Enemies)
+        {
+            if (!e.Alive || e.Active) continue;
+            foreach (var p in Players)
+            {
+                if (!p.Alive) continue;
+                if (Util.TileDist(p.X, p.Y, e.X, e.Y) > SightRange) continue;
+                if (!Grid.HasLineOfSight(p.X, p.Y, e.X, e.Y)) continue;
+                ActivatePod(e.PodId);
+                break;
+            }
+        }
+    }
+
+    public void ActivatePod(int podId)
+    {
+        bool any = false;
+        foreach (var e in Enemies)
+        {
+            if (!e.Alive || e.Active || e.PodId != podId) continue;
+            e.Active = true;
+            any = true;
+            // free scatter toward cover/line of fire (move only, no shot)
+            var plan = Ai.Plan(this, e);
+            foreach (var (px, py) in plan.Path) Enqueue(new MoveStepAnim(e, px, py), Team.Enemy);
+        }
+        if (any)
+        {
+            BannerText = "CONTACT!"; BannerEnemy = true; BannerMax = BannerTimer = 1.0f;
+            Fx.AddShake(3f);
+            Audio.Play("over");
+        }
     }
 
     void UpdatePlayer()
     {
         if (AutoPlay) { AutoStep(); return; }
+
+        CheckPodActivation();
+        if (_anims.Count > 0) return;   // a pod just activated — let the scatter play
+
         // keep selection valid
         if (Selected != null && !Selected.Alive) Selected = null;
         if (Selected == null || !Selected.CanAct)
@@ -485,6 +537,7 @@ public class Game
         Selected.ActionsLeft = 0;
         var res = Combat.Resolve(Grid, Selected, target);
         Enqueue(new ShotAnim(Selected, target, res), Team.Player);
+        if (!target.Active) ActivatePod(target.PodId);   // gunfire reveals the pod
         AimMode = false;
     }
 
@@ -525,7 +578,7 @@ public class Game
         MoveCost = null;
         Phase = Phase.EnemyTurn;
         foreach (var e in Enemies) if (e.Alive) e.BeginTurn();
-        _aiUnits = AliveEnemies();
+        _aiUnits = AliveEnemies().Where(e => e.Active).ToList();  // dormant pods don't act
         _aiIdx = 0;
         _aiStage = AiStage.PickNext;
         _aiPlan = null;

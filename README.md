@@ -22,6 +22,11 @@ runtime**. It stays small, fast, and runs natively on Linux, macOS and Windows.
 - **Overwatch** holds a reaction shot: any enemy that moves through your sights
   gets fired on automatically (and vice-versa).
 - **Hunker** trades your turn for extra defence and crit immunity.
+- **Grenades** lob over cover for guaranteed AoE damage and blow apart low cover —
+  but they hit your own soldiers too, so mind the blast.
+- **Hostiles lurk in pods**: a group stays dormant (shown dimmed, marked `?`)
+  until a soldier spots it, then it wakes and scrambles to cover. Scouting ahead
+  is a real risk — push too far and you can wake two pods at once.
 - Clear all hostiles to win the mission; lose a mission if the whole squad falls.
 
 ### The campaign (run-to-run loop)
@@ -108,7 +113,7 @@ src/
 
 ## Ideas for where to take it next
 
-- Grenades / abilities, ammo types, more enemy archetypes
-- Enemy "pods" that activate on sighting, height/elevation, destructible cover
-- Multiple hand-authored or procedurally generated maps and mission objectives
+- More abilities + ammo types, additional enemy archetypes
+- Elevation / high ground and destructible high cover
+- Hand-authored maps and mission objectives (evac, VIP escort, hack-the-terminal)
 - Saving runs to disk; a wider roster with recruits replacing the fallen

@@ -199,10 +199,12 @@ public class GrenadeAnim : Anim
         var hit = new System.Collections.Generic.List<Unit>();
         hit.AddRange(g.Players);
         hit.AddRange(g.Enemies);
+        var wokePods = new System.Collections.Generic.HashSet<int>();
         foreach (var u in hit)
         {
             if (!u.Alive) continue;
             if (Util.ChebyDist(u.X, u.Y, Tx, Ty) > Radius) continue;
+            if (u.Team == Team.Enemy && !u.Active) wokePods.Add(u.PodId);
             int dmg = Util.RandInt(3, 5);
             u.Hp -= dmg;
             u.Flash = 1f;
@@ -218,6 +220,7 @@ public class GrenadeAnim : Anim
                 if (Thrower.Team == Team.Player && u.Team == Team.Enemy) Thrower.Kills++;
             }
         }
+        foreach (int pod in wokePods) g.ActivatePod(pod);   // the blast wakes survivors
     }
 
     public override void Draw(Game g)

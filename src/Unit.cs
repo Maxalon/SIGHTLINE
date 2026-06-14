@@ -74,6 +74,9 @@ public class Unit
     public bool ReactedThisTurn; // overwatch fired this round
     public bool Alive = true;
 
+    public bool Active = true;  // enemies start dormant until their pod is sighted
+    public int PodId = -1;      // activation-pod grouping (enemies only)
+
     // meta / campaign progression (persists across missions)
     public int Kills;
     public int Rank;            // index into Run.Ranks

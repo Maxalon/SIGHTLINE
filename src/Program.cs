@@ -33,7 +33,8 @@ public static class Program
             game.Update(dt);
 
             Raylib.BeginDrawing();
-            game.Draw();
+            if (autoplay) Raylib.ClearBackground(Pal.Bg);  // skip heavy draw during smoke test
+            else game.Draw();
             Raylib.EndDrawing();
 
             if (shot || autoplay) frame++;

@@ -105,6 +105,8 @@ public static class Mission
             else
                 e = MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 60 + bump, 6, x, y);
             e.Aim = Math.Min(82, e.Aim);
+            e.Active = false;          // dormant until sighted
+            e.PodId = i / 2;           // pods of ~2
             enemies.Add(e);
         }
     }
