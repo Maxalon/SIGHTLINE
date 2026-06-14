@@ -70,6 +70,7 @@ public static class Ai
             float score = 0;
             if (shoot != null) score += 100 + bestHit;          // having a shot is king
             score += cover.Level * 18;                           // value cover
+            score += g.Grid.HeightAt(tx, ty) * 14;               // seize the high ground
             if (cover.Flanked) score -= 25;
             score -= actionsToReach * 6;                         // prefer cheaper moves slightly
             score -= nd > 0 ? Util.ChebyDist(tx, ty, nearest.X, nearest.Y) * 1.4f : 0; // advance

@@ -11,6 +11,7 @@ public struct ShotOdds
     public int CoverLevel;  // 0/1/2
     public bool Flanked;
     public bool Hunkered;
+    public bool HighGround;  // attacker fires from raised terrain onto a lower foe
 }
 
 /// The resolved outcome of a shot.
@@ -24,18 +25,25 @@ public struct ShotResult
 
 public static class Combat
 {
+    // High-ground bonus: firing from raised terrain onto a lower target.
+    public const int HighGroundAim = 15;
+    public const int HighGroundCrit = 10;
+
     public static ShotOdds ComputeOdds(Grid grid, Unit a, Unit d)
     {
         float dist = Util.TileDist(a.X, a.Y, d.X, d.Y);
         var cover = grid.GetCover(d.X, d.Y, a.X, a.Y);
+        bool highGround = grid.HeightAt(a.X, a.Y) > grid.HeightAt(d.X, d.Y);
 
         int hit = a.Aim + a.Weapon.AimBonus + a.Weapon.RangeMod(dist) - cover.Defense;
         if (d.Hunkered) hit -= 25;
+        if (highGround) hit += HighGroundAim;
 
         hit = Util.Clamp(hit, 3, 95);
 
         int crit = a.Weapon.CritBase;
         if (cover.Level == 0) crit += 35;       // exposed / flanked target
+        if (highGround) crit += HighGroundCrit;  // shooting down rewards crits
         if (d.Hunkered) crit = 0;               // hunkered can't be crit
         crit = Util.Clamp(crit, 0, 100);
 
@@ -48,6 +56,7 @@ public static class Combat
             CoverLevel = cover.Level,
             Flanked = cover.Flanked,
             Hunkered = d.Hunkered,
+            HighGround = highGround,
         };
     }
 

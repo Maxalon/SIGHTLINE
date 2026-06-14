@@ -215,7 +215,8 @@ public static class Hud
         if (!g.ShowOdds) return;
         var o = g.HoverOdds;
         var m = Raylib.GetMousePosition();
-        int w = 150, h = o.Flanked ? 96 : 78;
+        int extras = (o.Flanked ? 1 : 0) + (o.HighGround ? 1 : 0);
+        int w = 150, h = 74 + extras * 18;
         int x = (int)m.X - w / 2;
         int y = (int)m.Y - h - 18;
         x = Util.Clamp(x, 8, Cfg.ScreenW - w - 8);
@@ -237,8 +238,9 @@ public static class Hud
         string dmg = $"{o.DmgMin}-{o.DmgMax}";
         Raylib.DrawText(dmg, x + w - Raylib.MeasureText(dmg, 16) - 12, y + 52, 16, Pal.Foe);
 
-        if (o.Flanked)
-            Raylib.DrawText("! FLANKED", x + 12, y + 76, 13, Pal.Accent);
+        int fy = y + 72;
+        if (o.Flanked) { Raylib.DrawText("! FLANKED", x + 12, fy, 13, Pal.Accent); fy += 18; }
+        if (o.HighGround) { Raylib.DrawText("+ HIGH GROUND", x + 12, fy, 13, Pal.Good); fy += 18; }
     }
 
     // ---------------- turn banner sweep ----------------
@@ -266,6 +268,7 @@ public static class Hud
                     $"Lead one squad through {Run.MaxMissions} escalating missions.",
                     "2 actions per soldier - move, then fire (firing ends the turn).",
                     "Stand beside cover to cut enemy aim. Get flanked and you're exposed.",
+                    "Seize the high ground (raised tiles) for an aim + crit edge.",
                     "Kills earn promotions: better aim, more HP, more mobility.",
                     "Survivors carry their wounds and ranks to the next mission.",
                 }, "DEPLOY SQUAD");
@@ -359,7 +362,7 @@ public static class Hud
     static void DrawCenterCard(Game g, string title, string sub, Color titleCol, string[] rules, string btn)
     {
         Raylib.DrawRectangle(0, 0, Cfg.ScreenW, Cfg.ScreenH, Raylib.Fade(Pal.RGBA(5, 8, 11), 0.84f));
-        int w = 540, h = rules != null ? 360 : 240;
+        int w = 540, h = rules != null ? 392 : 240;
         int x = Cfg.ScreenW / 2 - w / 2, y = Cfg.ScreenH / 2 - h / 2;
         var card = new Rectangle(x, y, w, h);
         Raylib.DrawRectangleRounded(card, 0.06f, 8, Pal.Panel);

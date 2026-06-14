@@ -11,16 +11,23 @@ public class Grid
     public readonly int W = Cfg.GridW;
     public readonly int H = Cfg.GridH;
     public TileType[,] Tiles;
+    public int[,] Height;       // elevation layer: 0 = ground, 1 = high ground
 
     public Grid()
     {
         Tiles = new TileType[W, H];
+        Height = new int[W, H];
     }
 
     public bool InBounds(int x, int y) => x >= 0 && y >= 0 && x < W && y < H;
     public TileType At(int x, int y) => Tiles[x, y];
     public bool IsCover(int x, int y) => InBounds(x, y) && Tiles[x, y] != TileType.Floor;
     public bool BlocksSight(int x, int y) => InBounds(x, y) && Tiles[x, y] == TileType.HighCover;
+
+    /// Terrain elevation at a tile (0 ground, 1 high ground). High ground grants
+    /// an aim/crit edge when firing down on a lower target.
+    public int HeightAt(int x, int y) => InBounds(x, y) ? Height[x, y] : 0;
+    public bool IsHigh(int x, int y) => HeightAt(x, y) > 0;
 
     /// A tile a unit can stand on (floor + in bounds). Occupancy handled by Game.
     public bool IsFloor(int x, int y) => InBounds(x, y) && Tiles[x, y] == TileType.Floor;
