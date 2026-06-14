@@ -137,7 +137,7 @@ public class Game
         }
 
         Mission.Build(Grid, Players, Enemies, n, EvacZone, HasTerminal ? Terminal : null);
-        if (Vip != null) Vip.Grenades = 0;  // the asset doesn't lob frags
+        if (Vip != null) { Vip.Grenades = 0; Vip.AbilityCharge = 0; }  // the asset has no kit
         Fx.Particles.Clear();
         Fx.Texts.Clear();
         _anims.Clear();
@@ -409,6 +409,15 @@ public class Game
         }
 
         // ELIMINATE objective
+        // (test) exercise the class signature ability to keep its path covered
+        if (CanAbility(u) && Util.Roll(45))
+        {
+            var kind = u.Ability;
+            DoAbility();
+            if (kind == AbilityKind.Steady || kind == AbilityKind.Suppress) return; // spent an action
+            // RunGun / Blitz are free stances — fall through and act with them
+        }
+
         var tgt = FirstTargetFor(u);
         if (tgt != null && u.Ammo > 0) { IssueShoot(tgt); return; }
         if (u.Ammo == 0) { DoReload(); return; }
@@ -604,6 +613,7 @@ public class Game
         if (Raylib.IsKeyPressed(KeyboardKey.Two)) DoOverwatch();
         if (Raylib.IsKeyPressed(KeyboardKey.Three)) DoHunker();
         if (Raylib.IsKeyPressed(KeyboardKey.Four)) ToggleGrenade();
+        if (Raylib.IsKeyPressed(KeyboardKey.Five)) DoAbility();
         if (Raylib.IsKeyPressed(KeyboardKey.H)) DoHack();
         if (Raylib.IsKeyPressed(KeyboardKey.R)) DoReload();
 
@@ -654,6 +664,7 @@ public class Game
         {
             case "shoot": ToggleAim(); break;
             case "grenade": ToggleGrenade(); break;
+            case "ability": DoAbility(); break;
             case "overwatch": DoOverwatch(); break;
             case "hunker": DoHunker(); break;
             case "hack": DoHack(); break;
@@ -706,10 +717,13 @@ public class Game
         int c = MoveCost[tx, ty];
         if (c <= 0) return;
         int need = c <= Selected.MoveBudget ? 1 : 2;
-        if (need > Selected.ActionsLeft) return;
+        bool blitz = Selected.Blitz;
+        int cost = blitz ? Math.Max(0, need - 1) : need;   // Blitz: one action cheaper
+        if (cost > Selected.ActionsLeft) return;
         var path = Grid.ReconstructPath(_cameFrom, Selected.X, Selected.Y, tx, ty);
         if (path.Count == 0) return;
-        Selected.ActionsLeft -= need;
+        Selected.ActionsLeft -= cost;
+        if (blitz) Selected.Blitz = false;
         foreach (var (px, py) in path) Enqueue(new MoveStepAnim(Selected, px, py), Team.Player);
         AimMode = false;
         PathPreview.Clear();
@@ -721,8 +735,11 @@ public class Game
         if (Selected == null || !Selected.CanAct || Selected.Ammo <= 0) return;
         if (!CanTarget(Selected, target)) return;
         Selected.Ammo--;
-        Selected.ActionsLeft = 0;
+        // Run & Gun: this shot costs one action instead of ending the turn.
+        if (Selected.RunGun) { Selected.ActionsLeft = Math.Max(0, Selected.ActionsLeft - 1); Selected.RunGun = false; }
+        else Selected.ActionsLeft = 0;
         var res = Combat.Resolve(Grid, Selected, target);
+        Selected.Steady = false;                         // braced shot consumed
         Enqueue(new ShotAnim(Selected, target, res), Team.Player);
         if (!target.Active) ActivatePod(target.PodId);   // gunfire reveals the pod
         AimMode = false;
@@ -770,6 +787,60 @@ public class Game
         AimMode = false;
     }
 
+    // Whether the selected unit could fire its signature ability right now.
+    public bool CanAbility(Unit u)
+    {
+        if (u == null || u.Team != Team.Player || !u.CanAct || u.AbilityCharge <= 0) return false;
+        return u.Ability switch
+        {
+            AbilityKind.RunGun  => !u.RunGun,
+            AbilityKind.Blitz   => !u.Blitz,
+            AbilityKind.Steady  => !u.Steady && u.ActionsLeft >= 1,
+            AbilityKind.Suppress=> u.Ammo > 0 && HasAnyTarget(u),
+            _ => false,
+        };
+    }
+
+    void DoAbility()
+    {
+        var u = Selected;
+        if (!CanAbility(u)) return;
+        var at = u.Pos + new Vector2(0, -34);
+        switch (u.Ability)
+        {
+            case AbilityKind.RunGun:
+                u.RunGun = true; u.AbilityCharge--;
+                Fx.PopText(at, "RUN & GUN", Pal.Accent, 18f);
+                Fx.Burst(u.Pos, Pal.Accent, 10, 120f, 0.4f, 3f);
+                Audio.Play("reload");
+                break;
+            case AbilityKind.Blitz:
+                u.Blitz = true; u.AbilityCharge--;
+                Fx.PopText(at, "BLITZ", Pal.Accent, 18f);
+                Fx.Burst(u.Pos, Pal.Accent, 10, 120f, 0.4f, 3f);
+                Audio.Play("reload");
+                break;
+            case AbilityKind.Steady:
+                u.Steady = true; u.AbilityCharge--; u.ActionsLeft -= 1;
+                Fx.PopText(at, "STEADY", Pal.Good, 18f);
+                Fx.Burst(u.Pos, Pal.Good, 10, 120f, 0.4f, 3f);
+                Audio.Play("reload");
+                break;
+            case AbilityKind.Suppress:
+                var t = FirstTargetFor(u);
+                if (t == null) return;
+                u.AbilityCharge--; u.Ammo--; u.ActionsLeft = 0; u.OnOverwatch = true;
+                t.Suppress = Combat.SuppressAim;
+                Fx.PopText(t.Pos + new Vector2(0, -34), "SUPPRESSED", Pal.Foe, 18f);
+                Fx.PopText(at, "SUPPRESS", Pal.Accent, 16f);
+                Audio.Play("over");
+                if (!t.Active) ActivatePod(t.PodId);   // pinning fire reveals the pod
+                break;
+        }
+        AimMode = false;
+        GrenadeMode = false;
+    }
+
     void RequestEndTurn()
     {
         if (!EndTurnArmed && AlivePlayers().Any(p => p.CanAct)) { EndTurnArmed = true; return; }
@@ -799,7 +870,7 @@ public class Game
         Phase = Phase.PlayerTurn;
         if (AutoPlay) AutoStallCheck();
         foreach (var p in Players) if (p.Alive) p.BeginTurn();
-        foreach (var e in Enemies) if (e.Alive) e.ReactedThisTurn = false; // enemy OW can react next turn
+        foreach (var e in Enemies) if (e.Alive) { e.ReactedThisTurn = false; e.Suppress = 0; } // OW resets; suppression expires
         Selected = Players.FirstOrDefault(p => p.CanAct);
         AimMode = false;
         ShowBanner("PLAYER TURN", false);

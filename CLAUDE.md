@@ -190,6 +190,13 @@ seeds (mix of WIN/LOSE, no exceptions):
   preview (red pips on exposed reachable tiles while positioning).
 - **Recruits:** the barracks backfills empty squad slots with fresh rookies
   (`Mission.MakeRecruit`, `Run.DebriefSurvivors`) so casualties don't death-spiral.
+- **Class signature abilities:** each class has one self-cast signature (key **5**,
+  1 charge/mission, refilled like grenades): Assault **RUN&GUN** (next shot costs 1
+  action instead of ending the turn), Ranger **BLITZ** (next move costs one action
+  less), Sharpshooter **STEADY** (next shot +25 aim/+20 crit), Gunner **SUPPRESS**
+  (pin the nearest foe: -30 aim + train overwatch on it). `Unit.AbilityKind`/
+  `Unit.Ability`/`Game.DoAbility`/`Game.CanAbility`; HUD ability button + on-unit
+  stance tags (R&G/BLZ/AIM, SUPP on pinned foes); tooltip shows "+ STEADY".
 - Full HUD + intro/barracks/win/lose; per-mission generator (scaled by mission #).
 - Text is ASCII-only (Raylib's default font lacks fancy glyphs → they render `?`).
 
@@ -291,6 +298,17 @@ seeds (mix of WIN/LOSE, no exceptions):
             (`Game.ComputeThreat` -> `Game.Threat`, drawn by `Renderer.DrawThreat`),
             so "move into cover" decisions are legible at a glance.
       - [ ] Keyboard tile cursor; camera pan/zoom for readability; settings.
+- [x] **7. Class signature abilities.** DONE. Per-class self-cast ability (key **5**,
+      1 charge/mission). `AbilityKind` (RunGun/Blitz/Steady/Suppress) derived from
+      `Unit.Cls` (`Unit.AbilityKindFor`); transient stances (`RunGun`/`Blitz`/
+      `Steady`) cleared each `BeginTurn`, the `Suppress` aim-debuff cleared at the
+      victim-owner's next `StartPlayerTurn` so it bites during the enemy turn.
+      `Game.DoAbility`/`CanAbility` drive it; Run&Gun edits `IssueShoot` (shot costs
+      1 action, doesn't end the turn), Blitz edits `IssueMove` (one action cheaper),
+      Steady + Suppress feed `Combat.ComputeOdds` (`SteadyAim/Crit`, `SuppressAim`).
+      HUD adds an ability button (reflowed to fit 7 buttons) + tooltip "+ STEADY";
+      renderer shows stance tags. The test autopilot fires abilities on Eliminate
+      missions to keep the paths covered. VIP has no ability.
 
 When you finish an item: verify (build + autoplay + a screenshot), commit, merge
 to `main`, tick the box, and update "Current state".
@@ -319,7 +337,12 @@ exceptions and no TIMEOUTs. NOTE: the headless autopilot is a weak smoke-test AI
 and LOSES most seeds (true on `main` too) — expected; the contract is "no
 exceptions, no TIMEOUT", not a WIN/LOSE mix.
 
-VIP escort (this session): the VIP is just a Player-team `Unit` with `IsVip` added
+Also DONE (bonus item 7): **class signature abilities** — Assault Run&Gun, Ranger
+Blitz, Sharpshooter Steady, Gunner Suppress (key 5, 1 charge/mission). Self-cast
+only (no new mouse-targeting mode), so low-risk and headless-verifiable; the test
+autopilot fires them on Eliminate missions. See item 7 for the wiring.
+
+VIP escort (earlier): the VIP is just a Player-team `Unit` with `IsVip` added
 to a per-mission COPY of the squad (`Game.SetupMission`), so all generic systems
 (occupancy/targeting/overwatch/render/roster) work unchanged — the only special
 cases are CheckEnd (win = VIP in evac, lose = VIP dead), `EnterBarracks` filtering

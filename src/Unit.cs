@@ -7,6 +7,9 @@ public enum Team { Player, Enemy }
 
 public enum WeaponKind { Rifle, Shotgun, Sniper, Lmg, Smg }
 
+/// Per-class signature ability (self-cast, one charge per mission).
+public enum AbilityKind { None, RunGun, Blitz, Steady, Suppress }
+
 public class Weapon
 {
     public string Name;
@@ -68,6 +71,31 @@ public class Unit
     public int Ammo;
     public int Grenades;        // thrown AoE charges (refilled each mission)
 
+    // class signature ability (see AbilityKind); charge refilled each mission
+    public int AbilityCharge;
+    public bool RunGun;         // assault: next shot costs 1 action, doesn't end the turn
+    public bool Blitz;          // ranger: next move costs one action less
+    public bool Steady;         // sharpshooter: next shot gets +aim/+crit
+    public int  Suppress;       // gunner debuff currently ON this unit (aim penalty)
+
+    public AbilityKind Ability => AbilityKindFor(Cls);
+    public string AbilityName => Ability switch
+    {
+        AbilityKind.RunGun  => "RUN&GUN",
+        AbilityKind.Blitz   => "BLITZ",
+        AbilityKind.Steady  => "STEADY",
+        AbilityKind.Suppress=> "SUPPRESS",
+        _ => "ABILITY",
+    };
+    public static AbilityKind AbilityKindFor(string cls) => cls switch
+    {
+        "ASSAULT"      => AbilityKind.RunGun,
+        "RANGER"       => AbilityKind.Blitz,
+        "SHARPSHOOTER" => AbilityKind.Steady,
+        "GUNNER"       => AbilityKind.Suppress,
+        _ => AbilityKind.None,
+    };
+
     public int ActionsLeft;
     public bool OnOverwatch;
     public bool Hunkered;
@@ -110,5 +138,10 @@ public class Unit
         OnOverwatch = false;
         Hunkered = false;
         ReactedThisTurn = false;
+        RunGun = false;            // ability stances don't carry between turns
+        Blitz = false;
+        Steady = false;
+        // note: Suppress (a debuff applied by an enemy gunner) is cleared on the
+        // victim's owner's next turn, NOT here, so it bites during the turn it's set.
     }
 }

@@ -349,6 +349,13 @@ public static class Renderer
         if (u.Hunkered)
             Raylib.DrawPoly(new Vector2(p.X, p.Y - 27), 4, 6f, 45f, Pal.Good);
 
+        // active ability stance tag (friendly) / suppression tag (enemy)
+        if (u.RunGun) Raylib.DrawText("R&G", (int)(p.X + 13), (int)(p.Y - 30), 11, Pal.Accent);
+        else if (u.Blitz) Raylib.DrawText("BLZ", (int)(p.X + 13), (int)(p.Y - 30), 11, Pal.Accent);
+        else if (u.Steady) Raylib.DrawText("AIM", (int)(p.X + 13), (int)(p.Y - 30), 11, Pal.Good);
+        if (u.Team == Team.Enemy && u.Suppress > 0)
+            Raylib.DrawText("SUPP", (int)(p.X + 12), (int)(p.Y - 30), 11, Pal.Foe);
+
         // VIP marker: gold diamond + tag above the asset
         if (vip)
         {
