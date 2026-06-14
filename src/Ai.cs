@@ -46,6 +46,7 @@ public static class Ai
             int d = Util.ChebyDist(e.X, e.Y, p.X, p.Y);
             if (d < nd) { nd = d; nearest = p; }
         }
+        Unit vip = players.Find(p => p.IsVip);   // escort: hunt the asset
 
         foreach (var (tx, ty, c) in reach)
         {
@@ -62,7 +63,8 @@ public static class Ai
                     if (!g.Grid.HasLineOfSight(tx, ty, p.X, p.Y)) continue;
                     var odds = OddsFrom(g, e, tx, ty, p);
                     float val = odds.HitChance + (odds.CoverLevel == 0 ? 25 : 0)
-                                + (p.Hp <= e.Weapon.DmgMax ? 30 : 0);   // can finish?
+                                + (p.Hp <= e.Weapon.DmgMax ? 30 : 0)    // can finish?
+                                + (p.IsVip ? 40 : 0);                    // prioritise the VIP
                     if (val > bestHit) { bestHit = val; shoot = p; }
                 }
             }
@@ -76,6 +78,7 @@ public static class Ai
             if (cover.Flanked) score -= 25;
             score -= actionsToReach * 6;                         // prefer cheaper moves slightly
             score -= nd > 0 ? Util.ChebyDist(tx, ty, nearest.X, nearest.Y) * 1.4f : 0; // advance
+            if (vip != null) score -= Util.ChebyDist(tx, ty, vip.X, vip.Y) * 1.0f;     // close on the asset
             score += Util.RandRange(0f, 3f);                     // tie-break jitter
 
             if (score > bestScore)

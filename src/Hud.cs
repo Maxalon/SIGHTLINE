@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Numerics;
 using Raylib_cs;
 
@@ -69,7 +70,8 @@ public static class Hud
                 bool on = i < u.ActionsLeft;
                 Raylib.DrawRectangleRounded(pip, 0.5f, 4, Raylib.Fade(on ? Pal.Accent : Pal.RGBA(28, 39, 51), a));
             }
-            Raylib.DrawText(u.RankName, (int)r.X + 58, (int)r.Y + 33, 9, Raylib.Fade(Pal.TxtDim, a));
+            Raylib.DrawText(u.IsVip ? "ASSET" : u.RankName, (int)r.X + 58, (int)r.Y + 33, 9,
+                            Raylib.Fade(u.IsVip ? Pal.VipGold : Pal.TxtDim, a));
 
             RosterChips.Add((r, u));
             y += 56;
@@ -96,12 +98,13 @@ public static class Hud
         {
             case Objective.Evac: objTxt = "EXTRACT"; objCol = Pal.Good; break;
             case Objective.Hack: objTxt = $"HACK {g.HackProgress}/{Game.HackRequired}"; objCol = Pal.Accent; break;
+            case Objective.Escort: objTxt = "ESCORT VIP"; objCol = Pal.VipGold; break;
             default: objTxt = "ELIMINATE"; objCol = Pal.TxtDim; break;
         }
         Raylib.DrawText(objTxt, 340, 19, 16, objCol);
 
-        // counts
-        int friends = g.AlivePlayers().Count;
+        // counts (the VIP isn't a combatant, so it's excluded from the squad tally)
+        int friends = g.AlivePlayers().Count(p => !p.IsVip);
         int foes = g.AliveEnemies().Count;
         DrawCounter(Cfg.ScreenW / 2 - 130, 20, Pal.Friend, $"{friends}  SQUAD");
         DrawCounter(Cfg.ScreenW / 2 + 20, 20, Pal.Foe, $"{foes}  HOSTILES");
@@ -153,8 +156,9 @@ public static class Hud
 
         Raylib.DrawText(u.Name, x + 14, y + 10, 20, Pal.Txt);
         int nw = Raylib.MeasureText(u.Name, 20);
-        Raylib.DrawText(u.Cls, x + 20 + nw, y + 15, 12, Pal.Friend);
-        Raylib.DrawText(u.RankName, x + 250 - Raylib.MeasureText(u.RankName, 11) - 14, y + 13, 11, Pal.Accent);
+        Raylib.DrawText(u.Cls, x + 20 + nw, y + 15, 12, u.IsVip ? Pal.VipGold : Pal.Friend);
+        string rank = u.IsVip ? "ASSET" : u.RankName;
+        Raylib.DrawText(rank, x + 250 - Raylib.MeasureText(rank, 11) - 14, y + 13, 11, u.IsVip ? Pal.VipGold : Pal.Accent);
 
         // hp bar
         var bar = new Rectangle(x + 14, y + 38, 222, 13);

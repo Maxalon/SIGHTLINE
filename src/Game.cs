@@ -7,7 +7,7 @@ using Raylib_cs;
 namespace Sightline;
 
 public enum Phase { Intro, PlayerTurn, EnemyTurn, Barracks, Win, Lose }
-public enum Objective { Eliminate, Evac, Hack }
+public enum Objective { Eliminate, Evac, Hack, Escort }
 enum AiStage { PickNext, ActAfterMove }
 
 public class Game
@@ -66,6 +66,10 @@ public class Game
     public Objective Objective;
     public List<(int x, int y)> EvacZone = new();
 
+    // escort objective: a fragile VIP that must reach the extraction zone alive.
+    // Mission-only — it rides in Players for the mission but never joins the squad.
+    public Unit Vip;
+
     // hack objective: reach the terminal and hack it over several actions
     public const int HackRequired = 3;
     public (int x, int y) Terminal;
@@ -96,25 +100,44 @@ public class Game
         SetupMission(Util.Clamp(startAt, 1, Run.MaxMissions));
     }
 
+    // Objective rotation across a run: Eliminate / Hack / Evac / Escort, repeating.
+    // (6-mission campaign -> Elim, Hack, Evac, Escort, Elim, Hack.)
+    static Objective ObjectiveFor(int n) => ((n - 1) % 4) switch
+    {
+        1 => Objective.Hack,
+        2 => Objective.Evac,
+        3 => Objective.Escort,
+        _ => Objective.Eliminate,
+    };
+
     void SetupMission(int n)
     {
         _run.Mission = n;
-        Players = _run.Squad;              // living roster only
+        // per-mission roster: a copy of the persistent squad (+ an optional VIP),
+        // so adding the escort asset never pollutes the campaign squad.
+        Players = new List<Unit>(_run.Squad);
 
-        // objective rotation: Evac every 3rd mission, Hack on the ones before,
-        // Eliminate otherwise (e.g. Elim / Hack / Evac / Elim / Hack / Evac).
-        Objective = (n % 3 == 0) ? Objective.Evac : (n % 3 == 2 ? Objective.Hack : Objective.Eliminate);
+        Objective = ObjectiveFor(n);
         EvacZone.Clear();
         HackProgress = 0;
-        if (Objective == Objective.Evac)
+        Vip = null;
+        // both Evac and Escort extract to the same top-right zone
+        if (Objective == Objective.Evac || Objective == Objective.Escort)
         {
             EvacZone.Add((Grid.W - 2, 0)); EvacZone.Add((Grid.W - 1, 0));
             EvacZone.Add((Grid.W - 2, 1)); EvacZone.Add((Grid.W - 1, 1));
         }
         if (Objective == Objective.Hack)
             Terminal = (Grid.W / 2 + 1, Grid.H / 2);
+        if (Objective == Objective.Escort)
+        {
+            Vip = Mission.MakeVip();
+            Vip.X = 2; Vip.Y = 5;          // valid pre-build tile (spawn table refines it)
+            Players.Add(Vip);
+        }
 
         Mission.Build(Grid, Players, Enemies, n, EvacZone, HasTerminal ? Terminal : null);
+        if (Vip != null) Vip.Grenades = 0;  // the asset doesn't lob frags
         Fx.Particles.Clear();
         Fx.Texts.Clear();
         _anims.Clear();
@@ -133,7 +156,7 @@ public class Game
 
     void EnterBarracks()
     {
-        _run.Squad = AlivePlayers();
+        _run.Squad = AlivePlayers().Where(u => !u.IsVip).ToList();  // the VIP never joins the squad
         _run.DebriefSurvivors();
         if (_run.Mission >= Run.MaxMissions) { Phase = Phase.Win; Audio.Play("win"); }
         else { Phase = Phase.Barracks; Audio.Play("win"); }
@@ -221,7 +244,8 @@ public class Game
         Color c = d.Team == Team.Player ? Pal.Friend : Pal.Foe;
         Fx.Burst(d.Pos, c, 30, 280f, 0.7f, 4f, true);
         Fx.Burst(d.Pos, Pal.RGBA(20, 25, 33), 16, 150f, 0.8f, 5f);
-        Fx.PopText(d.Pos + new Vector2(0, -10), "DOWN", c, 22f);
+        Fx.PopText(d.Pos + new Vector2(0, -10), d.IsVip ? "VIP DOWN" : "DOWN", c, 22f);
+        if (d.IsVip) { ShowBanner("VIP DOWN", true); Fx.AddShake(13f); }
         Fx.AddShake(7f);
         AddHitStop(0.1f);
         AddZoomPunch(0.05f);
@@ -285,6 +309,11 @@ public class Game
         else if (Objective == Objective.Hack) // hold the terminal until it's fully hacked
         {
             if (HackProgress >= HackRequired) EnterBarracks();
+        }
+        else if (Objective == Objective.Escort) // get the VIP to extraction; losing it is a wipe
+        {
+            if (Vip == null || !Vip.Alive) { Phase = Phase.Lose; Audio.Play("lose"); return; }
+            if (EvacZone.Contains((Vip.X, Vip.Y))) EnterBarracks();
         }
         else // Evac: every surviving soldier must stand in the extraction zone
         {
@@ -356,6 +385,27 @@ public class Game
             if (TryMoveTowardTile(u, Terminal.x, Terminal.y)) return;
             DoHunker();
             return;
+        }
+
+        // ESCORT objective: walk the VIP to extraction; soldiers screen for it
+        if (Objective == Objective.Escort)
+        {
+            if (u.IsVip)
+            {
+                if (!EvacZone.Contains((u.X, u.Y)))
+                {
+                    var cand = EvacZone.Where(t => !IsOccupiedByOther(t.x, t.y, u))
+                                       .OrderBy(t => Util.TileDist(u.X, u.Y, t.x, t.y)).ToList();
+                    if (cand.Count > 0 && TryMoveTowardTile(u, cand[0].x, cand[0].y)) return;
+                }
+                DoHunker(); return;        // arrived or no path this turn
+            }
+            var st = FirstTargetFor(u);
+            if (st != null && u.Ammo > 0) { IssueShoot(st); return; }
+            if (u.Ammo == 0) { DoReload(); return; }
+            var foe = AliveEnemies().OrderBy(e => Util.TileDist(u.X, u.Y, e.X, e.Y)).FirstOrDefault();
+            if (foe != null && TryMoveTowardTile(u, foe.X, foe.Y)) return;
+            DoHunker(); return;
         }
 
         // ELIMINATE objective
