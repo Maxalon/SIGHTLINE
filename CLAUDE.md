@@ -113,6 +113,7 @@ src/
   Hud.cs        top/bottom bars, action buttons (rects hit-tested by Game), tooltip,
                 banner, intro/win/lose cards
   Util.cs       Cfg (layout consts), Pal (palette), Util (math/rng/easing/tile<->px)
+  Maps.cs       hand-authored ASCII arena templates (Mission stamps them in)
 scripts/dev-setup.sh   sandbox setup
 docs/screenshot.png    README image
 ```
@@ -175,6 +176,9 @@ seeds (mix of WIN/LOSE, no exceptions):
 - **Mission objectives:** Eliminate, Hack (reach the TERMINAL and hack it down,
   HACK action / key H), and Evac (get the whole squad to the extraction zone).
   Rotation is Elim / Hack / Evac per 3-mission cycle; shown in the HUD.
+- **Map variety:** procedural scatter OR a hand-authored arena (`src/Maps.cs`,
+  ~55% of missions) chosen with a connectivity guard so spawns/evac/terminal are
+  always reachable.
 - **Elevation / high ground:** raised plateaus (`Grid.Height`) grant +15 aim /
   +10 crit firing down on lower targets; faux-3D platforms, height-aware overlays,
   AI seizes the high ground. Shown in the shot tooltip ("+ HIGH GROUND").
@@ -246,8 +250,13 @@ seeds (mix of WIN/LOSE, no exceptions):
             draws the console + a segmented progress ring; HUD top bar shows
             "HACK x/3" + a contextual HACK button. Objective rotation is now
             Elim / Hack / Evac (n%3: 2=Hack, 0=Evac, else Elim).
-      - [ ] Hand-authored map layouts mixed with the procedural generator
-            (connectivity + cover balance). `Mission.Build` is the single entry.
+      - [x] **Hand-authored map layouts.** DONE. `src/Maps.cs` holds ASCII arena
+            templates (legend: `.` floor / `o` low / `#` high / `^` plateau);
+            `Mission.Build` rolls ~55% to stamp a random template over the grid
+            (else procedural). Reserved tiles (spawns/evac/terminal+ring) stay open
+            floor; `Mission.TryApplyLayout` flood-fills from a soldier to verify all
+            spawns/evac/terminal stay reachable and reverts to procedural otherwise.
+            Two arenas so far: PLAZA (central plateau) + GAUNTLET (lane spine).
       - [ ] More objective types (VIP escort).
 - [~] **6. Polish/UX.** IN PROGRESS.
       - [x] Squad **roster strip** (left edge): all soldiers' HP/AP/rank/status,
@@ -273,12 +282,14 @@ Before stopping:
 
 ### WIP NOTES
 Done: items 1 (audio), 2 (juice), 3 (campaign meta-loop), **4 (tactical depth —
-grenades + pods + elevation)**, and **5 objectives now cover Eliminate / Hack /
-Evac** (hack-a-terminal added this session). The game is feature-rich and stable —
-autoplay across mission starts (`SIGHTLINE_MISSION`) resolves with no exceptions
-and no TIMEOUTs. NOTE: the headless autopilot is a weak smoke-test AI and LOSES
-most seeds (true on `main` too) — expected; the contract is "no exceptions, no
-TIMEOUT", not a WIN/LOSE mix.
+grenades + pods + elevation)**, and **5 is nearly complete**: objectives cover
+Eliminate / Hack / Evac, and **hand-authored map layouts** now mix in with the
+procedural generator (`src/Maps.cs` + `Mission.TryApplyLayout`, connectivity-
+guarded). Only **VIP escort** remains on item 5. The game is feature-rich and
+stable — autoplay across mission starts (`SIGHTLINE_MISSION`) resolves with no
+exceptions and no TIMEOUTs. NOTE: the headless autopilot is a weak smoke-test AI
+and LOSES most seeds (true on `main` too) — expected; the contract is "no
+exceptions, no TIMEOUT", not a WIN/LOSE mix.
 
 Autopilot hardening added this session (test-only, in `Game.cs`): the Evac branch
 now reloads/grenades a squatter instead of hunkering forever, and a turn-based
@@ -286,7 +297,10 @@ now reloads/grenades a squatter instead of hunkering forever, and a turn-based
 turns — together these eliminate the rare deep-campaign TIMEOUT.
 
 **Good next steps (any order):**
-- Item 5 leftovers: hand-authored map layouts; one more objective type (VIP escort).
+- Item 5 leftover: VIP escort objective (note: would likely need a neutral team or
+  an escort-flag on a unit — touches CanTarget/AI/render/occupancy, so plan it).
+- More authored arenas: just add ASCII templates to `Maps.Layouts` (11x18, legend
+  `. o # ^`); the connectivity guard auto-rejects anything that walls a spawn off.
 - Item 6 leftovers: keyboard tile cursor; camera pan/zoom; a settings screen.
 - Item 4 stretch: a 2nd elevation tier, or let high ground see over LOW cover.
 - Persist a run to a save file under the OS user-data dir (NOT in the repo).
@@ -294,6 +308,8 @@ turns — together these eliminate the rare deep-campaign TIMEOUT.
   (no climb cost); per-tile draws that sit on a plateau go through
   `Renderer.ElevRect/ElevCenter` (else they render 8px low). (b) Hack: the terminal
   is walkable floor; `Mission.Build` keeps it + its 8-neighbour ring clear of cover.
+  (c) Authored maps: walkable tiles are ONLY `.`/`^` (all cover blocks movement) —
+  keep lanes open or the connectivity guard will reject the layout.
 
 Conventions: drawn strings must be ASCII (default font). Build Release + run
 `SIGHTLINE_AUTOPLAY=1` a few times before merging. Share screenshots in chat via

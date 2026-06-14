@@ -59,37 +59,87 @@ public static class Mission
                 for (int dy = -1; dy <= 1; dy++)
                     occupied.Add((terminal.Value.x + dx, terminal.Value.y + dy));
 
-        // contested high ground: raised plateaus in the mid-field (more on later missions)
-        RaisePlateau(grid, evacSet, 7, 3, 2, 2);
-        RaisePlateau(grid, evacSet, 11, 7, 2, 2);
-        if (missionNum >= 3) RaisePlateau(grid, evacSet, Util.RandInt(6, 11), Util.RandInt(1, 8), 2, 2);
+        // Either lay down a hand-authored arena (with a connectivity guard) or fall
+        // back to the procedural generator. Both keep reserved tiles open.
+        bool authored = Util.Roll(55) &&
+            TryApplyLayout(grid, occupied, players, enemies, evacSet, terminal, Util.Choice(Maps.Layouts));
+        if (!authored)
+        {
+            // contested high ground: raised plateaus in the mid-field (more on later missions)
+            RaisePlateau(grid, evacSet, 7, 3, 2, 2);
+            RaisePlateau(grid, evacSet, 11, 7, 2, 2);
+            if (missionNum >= 3) RaisePlateau(grid, evacSet, Util.RandInt(6, 11), Util.RandInt(1, 8), 2, 2);
 
-        // central structures for sightlines
-        PlaceBlock(grid, occupied, 8, 2, TileType.HighCover, 1, 3);
-        PlaceBlock(grid, occupied, 9, 6, TileType.HighCover, 1, 3);
-        PlaceBlock(grid, occupied, 5, 5, TileType.LowCover, 3, 1);
-        PlaceBlock(grid, occupied, 12, 4, TileType.LowCover, 1, 3);
-        PlaceBlock(grid, occupied, 13, 8, TileType.HighCover, 2, 1);
+            // central structures for sightlines
+            PlaceBlock(grid, occupied, 8, 2, TileType.HighCover, 1, 3);
+            PlaceBlock(grid, occupied, 9, 6, TileType.HighCover, 1, 3);
+            PlaceBlock(grid, occupied, 5, 5, TileType.LowCover, 3, 1);
+            PlaceBlock(grid, occupied, 12, 4, TileType.LowCover, 1, 3);
+            PlaceBlock(grid, occupied, 13, 8, TileType.HighCover, 2, 1);
 
-        // protective cover beside each soldier and hostile
+            // random crates (a touch more clutter on later missions)
+            int sprinkles = 14 + Math.Min(6, missionNum);
+            int guard = 0;
+            while (sprinkles > 0 && guard++ < 500)
+            {
+                int x = Util.RandInt(3, grid.W - 4);
+                int y = Util.RandInt(0, grid.H - 1);
+                if (occupied.Contains((x, y)) || grid.Tiles[x, y] != TileType.Floor) continue;
+                grid.Tiles[x, y] = Util.Roll(55) ? TileType.LowCover : TileType.HighCover;
+                occupied.Add((x, y));
+                sprinkles--;
+            }
+        }
+
+        // protective cover beside each soldier and hostile (both layout paths)
         foreach (var u in players) TryCover(grid, occupied, u.X + 1, u.Y, TileType.LowCover);
         foreach (var u in enemies) TryCover(grid, occupied, u.X - 1, u.Y, TileType.HighCover);
 
-        // random crates (a touch more clutter on later missions)
-        int sprinkles = 14 + Math.Min(6, missionNum);
-        int guard = 0;
-        while (sprinkles > 0 && guard++ < 500)
-        {
-            int x = Util.RandInt(3, grid.W - 4);
-            int y = Util.RandInt(0, grid.H - 1);
-            if (occupied.Contains((x, y)) || grid.Tiles[x, y] != TileType.Floor) continue;
-            grid.Tiles[x, y] = Util.Roll(55) ? TileType.LowCover : TileType.HighCover;
-            occupied.Add((x, y));
-            sprinkles--;
-        }
-
         foreach (var u in players) u.SyncPos();
         foreach (var u in enemies) u.SyncPos();
+    }
+
+    /// Stamp a hand-authored template onto the grid, then verify every spawn, the
+    /// evac zone and the terminal stay mutually reachable over walkable terrain.
+    /// Reverts and returns false if the layout is malformed or would wall anyone off.
+    static bool TryApplyLayout(Grid g, HashSet<(int, int)> occupied, List<Unit> players,
+                               List<Unit> enemies, HashSet<(int, int)> evac,
+                               (int x, int y)? terminal, string[] tpl)
+    {
+        if (tpl.Length != g.H) return false;
+        for (int y = 0; y < g.H; y++) if (tpl[y].Length != g.W) return false;
+
+        for (int y = 0; y < g.H; y++)
+            for (int x = 0; x < g.W; x++)
+            {
+                if (occupied.Contains((x, y))) continue;   // reserved -> stays open floor
+                switch (tpl[y][x])
+                {
+                    case 'o': g.Tiles[x, y] = TileType.LowCover; break;
+                    case '#': g.Tiles[x, y] = TileType.HighCover; break;
+                    case '^': g.Height[x, y] = 1; break;   // walkable raised plateau
+                    default:  break;                        // '.' open floor
+                }
+            }
+
+        // connectivity: flood from the first soldier across walkable tiles (cover = wall)
+        var cost = g.CostMap(players[0].X, players[0].Y, (x, y) => false, out _, 9999);
+        bool Reachable(int x, int y) => g.InBounds(x, y) && cost[x, y] >= 0;
+
+        bool ok = true;
+        foreach (var u in players) if (!Reachable(u.X, u.Y)) ok = false;
+        foreach (var u in enemies) if (!Reachable(u.X, u.Y)) ok = false;
+        foreach (var t in evac) if (!Reachable(t.Item1, t.Item2)) ok = false;
+        if (terminal.HasValue && !Reachable(terminal.Value.x, terminal.Value.y)) ok = false;
+
+        if (!ok)   // revert to a clean slate so the procedural path can run
+        {
+            for (int y = 0; y < g.H; y++)
+                for (int x = 0; x < g.W; x++)
+                    if (!occupied.Contains((x, y))) { g.Tiles[x, y] = TileType.Floor; g.Height[x, y] = 0; }
+            return false;
+        }
+        return true;
     }
 
     static void SpawnEnemies(Grid grid, List<Unit> enemies, int n, HashSet<(int, int)> evac)
