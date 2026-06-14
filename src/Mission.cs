@@ -23,7 +23,7 @@ public static class Mission
     /// Lay out a mission: regenerate terrain, place the (persistent) players,
     /// and spawn a hostile force scaled by missionNum.
     public static void Build(Grid grid, List<Unit> players, List<Unit> enemies, int missionNum,
-                             List<(int x, int y)> evac = null)
+                             List<(int x, int y)> evac = null, (int x, int y)? terminal = null)
     {
         enemies.Clear();
         for (int x = 0; x < grid.W; x++)
@@ -54,6 +54,10 @@ public static class Mission
         foreach (var u in players) occupied.Add((u.X, u.Y));
         foreach (var u in enemies) occupied.Add((u.X, u.Y));
         foreach (var t in evacSet) occupied.Add(t);   // keep the extraction zone clear of cover
+        if (terminal.HasValue)                         // keep the terminal + its ring open
+            for (int dx = -1; dx <= 1; dx++)
+                for (int dy = -1; dy <= 1; dy++)
+                    occupied.Add((terminal.Value.x + dx, terminal.Value.y + dy));
 
         // contested high ground: raised plateaus in the mid-field (more on later missions)
         RaisePlateau(grid, evacSet, 7, 3, 2, 2);

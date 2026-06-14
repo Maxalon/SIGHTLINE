@@ -83,8 +83,12 @@ export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe
 # Screenshot a frame -> sightline_shot.png  (then Read it to inspect visuals)
 SIGHTLINE_SHOT=90 xvfb-run -a -s "-screen 0 1280x800x24" dotnet run -c Debug
 
-# Full-match autopilot smoke test -> prints "RESULT: WIN|LOSE|TIMEOUT"
+# Full-match autopilot smoke test -> prints "RESULT: WIN|LOSE|TIMEOUT mission=N"
 SIGHTLINE_AUTOPLAY=1 xvfb-run -a -s "-screen 0 1280x800x24" dotnet run -c Debug
+
+# Start the harness on a specific mission (verify Hack=2/5, Evac=3/6 maps).
+# Works with SHOT or AUTOPLAY, e.g. screenshot the Hack mission:
+SIGHTLINE_MISSION=2 SIGHTLINE_SHOT=80 xvfb-run -a -s "-screen 0 1280x800x24" dotnet run -c Debug
 ```
 
 Run autoplay a few times (RNG varies) and confirm no exceptions and no TIMEOUT.
@@ -168,8 +172,9 @@ seeds (mix of WIN/LOSE, no exceptions):
   (key 4, 1 charge/mission) with range/blast/arc preview.
 - **Activation pods:** enemies dormant (dimmed, "?") until a soldier sights them,
   then the pod wakes + scatters to cover ("CONTACT!"). Scouting carries risk.
-- **Mission objectives:** Eliminate (default) and Evac (missions 3 & 6 — get the
-  whole squad to a marked extraction zone). Shown in the HUD.
+- **Mission objectives:** Eliminate, Hack (reach the TERMINAL and hack it down,
+  HACK action / key H), and Evac (get the whole squad to the extraction zone).
+  Rotation is Elim / Hack / Evac per 3-mission cycle; shown in the HUD.
 - **Elevation / high ground:** raised plateaus (`Grid.Height`) grant +15 aim /
   +10 crit firing down on lower targets; faux-3D platforms, height-aware overlays,
   AI seizes the high ground. Shown in the shot tooltip ("+ HIGH GROUND").
@@ -234,9 +239,16 @@ seeds (mix of WIN/LOSE, no exceptions):
             `Renderer.DrawEvac`); win when all living soldiers stand in it. Others
             are Eliminate. `Game.CheckEnd` branches on objective; HUD shows the
             objective; `Mission.Build` keeps the evac zone clear; autopilot extracts.
+      - [x] **Hack-a-terminal objective.** DONE. `Objective.Hack` places a central
+            `Game.Terminal`; a soldier Chebyshev-adjacent hacks it (HACK action,
+            key **H**, costs 1 action, `Game.HackRequired`=3 charges; `Game.CanHack`/
+            `DoHack`). Win on `HackProgress >= HackRequired`. `Renderer.DrawTerminal`
+            draws the console + a segmented progress ring; HUD top bar shows
+            "HACK x/3" + a contextual HACK button. Objective rotation is now
+            Elim / Hack / Evac (n%3: 2=Hack, 0=Evac, else Elim).
       - [ ] Hand-authored map layouts mixed with the procedural generator
             (connectivity + cover balance). `Mission.Build` is the single entry.
-      - [ ] More objective types (VIP escort, hack-a-terminal for N turns).
+      - [ ] More objective types (VIP escort).
 - [~] **6. Polish/UX.** IN PROGRESS.
       - [x] Squad **roster strip** (left edge): all soldiers' HP/AP/rank/status,
             click to select, dims when spent (`Hud.DrawRoster` + `RosterChips`).
@@ -261,21 +273,27 @@ Before stopping:
 
 ### WIP NOTES
 Done: items 1 (audio), 2 (juice), 3 (campaign meta-loop), **4 (tactical depth —
-grenades + pods + elevation, now fully complete)**, and 5 **objectives**
-(Eliminate/Evac). The game is feature-rich and stable — autoplay reaches a clean
-result across seeds with no exceptions/timeouts. NOTE: the headless autopilot is
-a weak smoke-test AI and currently LOSES most seeds (true on `main` too) — that's
-expected; the contract is "no exceptions, no TIMEOUT", not a WIN/LOSE mix.
+grenades + pods + elevation)**, and **5 objectives now cover Eliminate / Hack /
+Evac** (hack-a-terminal added this session). The game is feature-rich and stable —
+autoplay across mission starts (`SIGHTLINE_MISSION`) resolves with no exceptions
+and no TIMEOUTs. NOTE: the headless autopilot is a weak smoke-test AI and LOSES
+most seeds (true on `main` too) — expected; the contract is "no exceptions, no
+TIMEOUT", not a WIN/LOSE mix.
+
+Autopilot hardening added this session (test-only, in `Game.cs`): the Evac branch
+now reloads/grenades a squatter instead of hunkering forever, and a turn-based
+`AutoStallCheck` force-wakes a dormant pod if no progress is made for 10 player
+turns — together these eliminate the rare deep-campaign TIMEOUT.
 
 **Good next steps (any order):**
-- Item 5 leftovers: hand-authored map layouts + more objective types (VIP, hack).
+- Item 5 leftovers: hand-authored map layouts; one more objective type (VIP escort).
 - Item 6 leftovers: keyboard tile cursor; camera pan/zoom; a settings screen.
 - Item 4 stretch: a 2nd elevation tier, or let high ground see over LOW cover.
 - Persist a run to a save file under the OS user-data dir (NOT in the repo).
-- Elevation gotcha: it's a pure positioning layer — plateaus are walkable floor
-  (no climb cost). All per-tile draws that should sit on a plateau go through
-  `Renderer.ElevRect/ElevCenter` (move/path/hover/shields/cover/units); add new
-  overlays the same way or they'll render 8px low on raised tiles.
+- Gotchas: (a) elevation is a pure positioning layer — plateaus are walkable floor
+  (no climb cost); per-tile draws that sit on a plateau go through
+  `Renderer.ElevRect/ElevCenter` (else they render 8px low). (b) Hack: the terminal
+  is walkable floor; `Mission.Build` keeps it + its 8-neighbour ring clear of cover.
 
 Conventions: drawn strings must be ASCII (default font). Build Release + run
 `SIGHTLINE_AUTOPLAY=1` a few times before merging. Share screenshots in chat via
