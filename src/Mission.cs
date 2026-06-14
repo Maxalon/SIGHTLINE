@@ -22,7 +22,8 @@ public static class Mission
 
     /// Lay out a mission: regenerate terrain, place the (persistent) players,
     /// and spawn a hostile force scaled by missionNum.
-    public static void Build(Grid grid, List<Unit> players, List<Unit> enemies, int missionNum)
+    public static void Build(Grid grid, List<Unit> players, List<Unit> enemies, int missionNum,
+                             List<(int x, int y)> evac = null)
     {
         enemies.Clear();
         for (int x = 0; x < grid.W; x++)
@@ -43,11 +44,13 @@ public static class Mission
             u.Flash = 0;
         }
 
-        SpawnEnemies(grid, enemies, missionNum);
+        var evacSet = new HashSet<(int, int)>(evac ?? new List<(int, int)>());
+        SpawnEnemies(grid, enemies, missionNum, evacSet);
 
         var occupied = new HashSet<(int, int)>();
         foreach (var u in players) occupied.Add((u.X, u.Y));
         foreach (var u in enemies) occupied.Add((u.X, u.Y));
+        foreach (var t in evacSet) occupied.Add(t);   // keep the extraction zone clear of cover
 
         // central structures for sightlines
         PlaceBlock(grid, occupied, 8, 2, TileType.HighCover, 1, 3);
@@ -77,7 +80,7 @@ public static class Mission
         foreach (var u in enemies) u.SyncPos();
     }
 
-    static void SpawnEnemies(Grid grid, List<Unit> enemies, int n)
+    static void SpawnEnemies(Grid grid, List<Unit> enemies, int n, HashSet<(int, int)> evac)
     {
         int count = Math.Min(4 + n, 9);
         int bump = n - 1;                 // stat growth per mission
@@ -93,7 +96,8 @@ public static class Mission
             int x = grid.W - 2 - (i / rows.Count);   // pack into right columns
             if (x < grid.W - 4) x = grid.W - 2;
             int guard = 0;
-            while (used.Contains((x, y)) && guard++ < 20) { y = Util.RandInt(0, grid.H - 1); }
+            while ((used.Contains((x, y)) || evac.Contains((x, y))) && guard++ < 30)
+            { y = Util.RandInt(0, grid.H - 1); x = grid.W - 2 - Util.RandInt(0, 2); }
             used.Add((x, y));
 
             float r = Util.RandF();

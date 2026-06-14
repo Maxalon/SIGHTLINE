@@ -24,6 +24,7 @@ public static class Renderer
             }
 
         DrawMoveOverlay(g);
+        DrawEvac(g);
         DrawGridLines(g);
         DrawPathPreview(g);
         DrawCover(g);
@@ -35,6 +36,23 @@ public static class Renderer
         g.ActiveAnim?.Draw(g);
         g.Fx.Draw();
         g.Fx.DrawText();
+    }
+
+    static void DrawEvac(Game g)
+    {
+        if (g.EvacZone.Count == 0) return;
+        float pulse = 0.5f + 0.5f * MathF.Sin((float)Raylib.GetTime() * 3f);
+        int minx = int.MaxValue, miny = int.MaxValue;
+        foreach (var (x, y) in g.EvacZone)
+        {
+            var r = Util.TileRect(x, y);
+            Raylib.DrawRectangleRec(r, Raylib.Fade(Pal.Good, 0.10f + 0.10f * pulse));
+            Raylib.DrawRectangleLinesEx(new Rectangle(r.X + 2, r.Y + 2, r.Width - 4, r.Height - 4),
+                                        2f, Raylib.Fade(Pal.Good, 0.5f + 0.4f * pulse));
+            minx = Math.Min(minx, x); miny = Math.Min(miny, y);
+        }
+        var at = Util.TileCenter(minx, miny);
+        Raylib.DrawText("EVAC", (int)at.X - 4, (int)(at.Y - Cfg.Tile / 2 + 4), 14, Pal.Good);
     }
 
     static void DrawGridLines(Game g)

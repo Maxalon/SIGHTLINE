@@ -7,6 +7,7 @@ using Raylib_cs;
 namespace Breach;
 
 public enum Phase { Intro, PlayerTurn, EnemyTurn, Barracks, Win, Lose }
+public enum Objective { Eliminate, Evac }
 enum AiStage { PickNext, ActAfterMove }
 
 public class Game
@@ -60,6 +61,10 @@ public class Game
     Run _run = new();
     public Run RunState => _run;
 
+    // mission objective
+    public Objective Objective;
+    public List<(int x, int y)> EvacZone = new();
+
     // game-feel: hit-stop freeze + camera zoom-punch
     public float HitStop;
     float _camPulse;
@@ -80,7 +85,17 @@ public class Game
     {
         _run.Mission = n;
         Players = _run.Squad;              // living roster only
-        Mission.Build(Grid, Players, Enemies, n);
+
+        // every 3rd mission is an extraction; the rest are eliminate
+        Objective = (n % 3 == 0) ? Objective.Evac : Objective.Eliminate;
+        EvacZone.Clear();
+        if (Objective == Objective.Evac)
+        {
+            EvacZone.Add((Grid.W - 2, 0)); EvacZone.Add((Grid.W - 1, 0));
+            EvacZone.Add((Grid.W - 2, 1)); EvacZone.Add((Grid.W - 1, 1));
+        }
+
+        Mission.Build(Grid, Players, Enemies, n, EvacZone);
         Fx.Particles.Clear();
         Fx.Texts.Clear();
         _anims.Clear();
@@ -240,8 +255,17 @@ public class Game
     {
         if (Phase != Phase.PlayerTurn && Phase != Phase.EnemyTurn) return;
         if (_anims.Count > 0) return;
-        if (AliveEnemies().Count == 0) EnterBarracks();
-        else if (AlivePlayers().Count == 0) { Phase = Phase.Lose; Audio.Play("lose"); }
+        var alivePlayers = AlivePlayers();
+        if (alivePlayers.Count == 0) { Phase = Phase.Lose; Audio.Play("lose"); return; }
+
+        if (Objective == Objective.Eliminate)
+        {
+            if (AliveEnemies().Count == 0) EnterBarracks();
+        }
+        else // Evac: every surviving soldier must stand in the extraction zone
+        {
+            if (alivePlayers.All(p => EvacZone.Contains((p.X, p.Y)))) EnterBarracks();
+        }
     }
 
     // ---------------- player turn ----------------
@@ -256,6 +280,22 @@ public class Game
         Selected = u;
         RecomputeMoveCost();
 
+        // EVAC objective: get everyone to the extraction zone
+        if (Objective == Objective.Evac)
+        {
+            if (!EvacZone.Contains((u.X, u.Y)))
+            {
+                var cand = EvacZone.Where(t => !IsOccupiedByOther(t.x, t.y, u))
+                                   .OrderBy(t => Util.TileDist(u.X, u.Y, t.x, t.y)).ToList();
+                if (cand.Count > 0 && TryMoveTowardTile(u, cand[0].x, cand[0].y)) return;
+            }
+            var et = FirstTargetFor(u);
+            if (et != null && u.Ammo > 0) { IssueShoot(et); return; }
+            DoHunker();
+            return;
+        }
+
+        // ELIMINATE objective
         var tgt = FirstTargetFor(u);
         if (tgt != null && u.Ammo > 0) { IssueShoot(tgt); return; }
         if (u.Ammo == 0) { DoReload(); return; }
@@ -269,28 +309,32 @@ public class Game
         }
 
         var enemy = AliveEnemies().OrderBy(e => Util.TileDist(u.X, u.Y, e.X, e.Y)).FirstOrDefault();
-        if (enemy != null && MoveCost != null)
-        {
-            // true path-distance to the enemy (avoids getting stuck on walls)
-            var edist = Grid.CostMap(enemy.X, enemy.Y, (x, y) => IsOccupiedByOther(x, y, enemy), out _, 9999);
-            int myE = edist[u.X, u.Y];
-            int bx = -1, by = -1, bestE = int.MaxValue;
-            var reachable = new List<(int, int)>();
-            for (int x = 0; x < Grid.W; x++)
-                for (int y = 0; y < Grid.H; y++)
-                {
-                    int c = MoveCost[x, y];
-                    if (c <= 0) continue;
-                    int need = c <= u.MoveBudget ? 1 : 2;
-                    if (need > u.ActionsLeft) continue;
-                    reachable.Add((x, y));
-                    int e = edist[x, y];
-                    if (e >= 0 && e < bestE) { bestE = e; bx = x; by = y; }
-                }
-            if (bx >= 0 && (myE < 0 || bestE < myE)) { IssueMove(bx, by); return; }
-            if (reachable.Count > 0) { var (rx, ry) = Util.Choice(reachable); IssueMove(rx, ry); return; } // break local minima
-        }
+        if (enemy != null && TryMoveTowardTile(u, enemy.X, enemy.Y)) return;
         DoHunker(); // guarantees progress
+    }
+
+    // autopilot helper: step toward (gx,gy) along true path distance; random hop if stuck
+    bool TryMoveTowardTile(Unit u, int gx, int gy)
+    {
+        if (MoveCost == null) return false;
+        var gd = Grid.CostMap(gx, gy, (x, y) => IsOccupiedByOther(x, y, u), out _, 9999);
+        int my = gd[u.X, u.Y];
+        int bx = -1, by = -1, best = int.MaxValue;
+        var reachable = new List<(int, int)>();
+        for (int x = 0; x < Grid.W; x++)
+            for (int y = 0; y < Grid.H; y++)
+            {
+                int c = MoveCost[x, y];
+                if (c <= 0) continue;
+                int need = c <= u.MoveBudget ? 1 : 2;
+                if (need > u.ActionsLeft) continue;
+                reachable.Add((x, y));
+                int d = gd[x, y];
+                if (d >= 0 && d < best) { best = d; bx = x; by = y; }
+            }
+        if (bx >= 0 && (my < 0 || best < my)) { IssueMove(bx, by); return true; }
+        if (reachable.Count > 0) { var (rx, ry) = Util.Choice(reachable); IssueMove(rx, ry); return true; }
+        return false;
     }
 
     // ---------------- activation pods ----------------

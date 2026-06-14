@@ -46,6 +46,8 @@ public static class Hud
         CenterText(turnTxt, pill, 16, turnCol);
 
         Raylib.DrawText($"MISSION {g.RunState.Mission}/{Run.MaxMissions}", 200, 19, 16, Pal.TxtDim);
+        bool evac = g.Objective == Objective.Evac;
+        Raylib.DrawText(evac ? "EXTRACT" : "ELIMINATE", 340, 19, 16, evac ? Pal.Good : Pal.TxtDim);
 
         // counts
         int friends = g.AlivePlayers().Count;

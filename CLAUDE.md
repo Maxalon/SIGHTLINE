@@ -38,12 +38,21 @@ are. **Keep it updated** — when you finish work, tick the roadmap and refresh
 
 ## Hard constraints / ground rules
 
-- **NO CI.** Do not add `.github/workflows/*` or any CI config. Keeping CI out
-  of the repo is an explicit, standing responsibility.
+- **NO CI. NO automated tests.** Do not add `.github/workflows/*`, any CI config,
+  or a test framework/test runner. This is a private repo and the human does not
+  want to spend Action minutes or run automated suites. Verify by **running the
+  game locally yourself** (the env-gated harness below is launched by hand, not
+  automated). If you write a check that can't run in this sandbox, describe it so
+  the human can run it on their machine — don't wire it to run automatically.
+- **Share screenshots in the chat.** The human follows progress visually. Every
+  time you take a screenshot (e.g. `breach_shot.png`), send it into the message
+  thread with the `SendUserFile` tool so they can see the progression. Capture a
+  frame for any notable visual change and surface it.
 - **Full autonomy:** build, commit, and **merge to `main`** freely. No PR/review
   ceremony is required (no reviewers exist). PRs are optional.
 - **Always ship compiling code to `main`.** Before merging, it must (a) build
-  clean in Release and (b) pass the headless autoplay smoke test (see below).
+  clean in Release and (b) pass the headless autoplay smoke test (see below),
+  which you run manually.
 - **Keep `CLAUDE.md` current** — it is the continuity contract.
 
 ---
@@ -159,6 +168,8 @@ seeds (mix of WIN/LOSE, no exceptions):
   (key 4, 1 charge/mission) with range/blast/arc preview.
 - **Activation pods:** enemies dormant (dimmed, "?") until a soldier sights them,
   then the pod wakes + scatters to cover ("CONTACT!"). Scouting carries risk.
+- **Mission objectives:** Eliminate (default) and Evac (missions 3 & 6 — get the
+  whole squad to a marked extraction zone). Shown in the HUD.
 - Full HUD + intro/barracks/win/lose; per-mission generator (scaled by mission #).
 - Text is ASCII-only (Raylib's default font lacks fancy glyphs → they render `?`).
 
@@ -203,9 +214,15 @@ seeds (mix of WIN/LOSE, no exceptions):
             drawn dimmed with a "?" (`Renderer.DrawUnit`).
       - [ ] Elevation / high-ground aim bonus (bigger change; deferred — needs a
             height layer on tiles + LoS/aim tweaks).
-- [ ] **5. Map variety.** A couple of hand-tuned layouts and/or better procedural
-      generation with guaranteed connectivity + cover balance; objective types
-      (e.g. reach-the-evac, VIP).
+- [~] **5. Map variety & objectives.** IN PROGRESS.
+      - [x] **Objectives.** `Objective` enum (Eliminate / Evac). Every 3rd mission
+            (3 & 6) is **Evac**: a 2x2 extraction zone (`Game.EvacZone`, drawn by
+            `Renderer.DrawEvac`); win when all living soldiers stand in it. Others
+            are Eliminate. `Game.CheckEnd` branches on objective; HUD shows the
+            objective; `Mission.Build` keeps the evac zone clear; autopilot extracts.
+      - [ ] Hand-authored map layouts mixed with the procedural generator
+            (connectivity + cover balance). `Mission.Build` is the single entry.
+      - [ ] More objective types (VIP escort, hack-a-terminal for N turns).
 - [ ] **6. Polish/UX.** Camera pan/zoom for larger maps, end-of-turn confirmation
       when actions remain, keyboard tile cursor, settings.
 
@@ -224,22 +241,18 @@ Before stopping:
 4. Tell the human to open a fresh session (they'll send only `.`).
 
 ### WIP NOTES
-Items 1 (audio), 2 (juice), 3 (campaign meta-loop) done & merged. Item 4
-(tactical depth): **grenades + activation pods done & merged**; only elevation
-remains (deferred as a larger change). The game is feature-rich and stable —
-autoplay reaches a clean result across many seeds with no exceptions/timeouts.
+Done & merged: items 1 (audio), 2 (juice), 3 (campaign meta-loop), 4 grenades +
+pods, and 5 **objectives** (Eliminate/Evac). The game is feature-rich and stable —
+manual autoplay reaches a clean result across many seeds, no exceptions/timeouts.
 
-**Next up: ROADMAP item 5 — map variety & objectives.** Suggested:
-- Add mission **objectives** beyond "kill all": e.g. reach-the-evac (get any
-  soldier to a marked tile), or hold/hack a terminal for N turns. Add an enum to
-  `Mission`/`Run` and check it in `Game.CheckEnd`.
-- A couple of hand-authored map layouts mixed with the procedural generator;
-  ensure connectivity + balanced cover. `Mission.Build` is the single entry point.
-- Keep the per-mission scaling; maybe vary objective by mission number.
-
-Smaller open items / good warmups:
+**Good next steps (any order):**
+- Item 5 leftovers: hand-authored map layouts + more objective types (VIP, hack).
+- Item 6 (polish/UX): end-of-turn confirm when actions remain, keyboard tile
+  cursor, a visible mute indicator, camera pan for readability.
+- Item 4 leftover: elevation / high-ground aim bonus (needs a tile height layer).
 - Persist a run to a save file under the OS user-data dir (NOT in the repo).
-- Elevation / high-ground aim bonus (item 4 leftover; needs a tile height layer).
+- Depth: a wider roster with recruits replacing the fallen between missions.
 
-Conventions: drawn strings must be ASCII. Always build Release + run
-`BREACH_AUTOPLAY=1` (a few times — RNG varies) before merging to `main`.
+Conventions: drawn strings must be ASCII (default font). Build Release + run
+`BREACH_AUTOPLAY=1` a few times before merging. Share screenshots in chat via
+`SendUserFile` so the human can follow along.
