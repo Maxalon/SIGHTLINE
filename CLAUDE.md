@@ -170,6 +170,7 @@ seeds (mix of WIN/LOSE, no exceptions):
   then the pod wakes + scatters to cover ("CONTACT!"). Scouting carries risk.
 - **Mission objectives:** Eliminate (default) and Evac (missions 3 & 6 — get the
   whole squad to a marked extraction zone). Shown in the HUD.
+- **UX:** squad roster strip, end-turn confirmation, mute indicator.
 - Full HUD + intro/barracks/win/lose; per-mission generator (scaled by mission #).
 - Text is ASCII-only (Raylib's default font lacks fancy glyphs → they render `?`).
 
@@ -223,8 +224,13 @@ seeds (mix of WIN/LOSE, no exceptions):
       - [ ] Hand-authored map layouts mixed with the procedural generator
             (connectivity + cover balance). `Mission.Build` is the single entry.
       - [ ] More objective types (VIP escort, hack-a-terminal for N turns).
-- [ ] **6. Polish/UX.** Camera pan/zoom for larger maps, end-of-turn confirmation
-      when actions remain, keyboard tile cursor, settings.
+- [~] **6. Polish/UX.** IN PROGRESS.
+      - [x] Squad **roster strip** (left edge): all soldiers' HP/AP/rank/status,
+            click to select, dims when spent (`Hud.DrawRoster` + `RosterChips`).
+      - [x] **End-turn confirmation** when a soldier still has actions
+            (`Game.RequestEndTurn`/`EndTurnArmed`; button shows "CONFIRM?").
+      - [x] **Mute indicator** in the top bar when audio is off.
+      - [ ] Keyboard tile cursor; camera pan/zoom for readability; settings.
 
 When you finish an item: verify (build + autoplay + a screenshot), commit, merge
 to `main`, tick the box, and update "Current state".
@@ -247,8 +253,7 @@ manual autoplay reaches a clean result across many seeds, no exceptions/timeouts
 
 **Good next steps (any order):**
 - Item 5 leftovers: hand-authored map layouts + more objective types (VIP, hack).
-- Item 6 (polish/UX): end-of-turn confirm when actions remain, keyboard tile
-  cursor, a visible mute indicator, camera pan for readability.
+- Item 6 leftovers: keyboard tile cursor; camera pan/zoom; a settings screen.
 - Item 4 leftover: elevation / high-ground aim bonus (needs a tile height layer).
 - Persist a run to a save file under the OS user-data dir (NOT in the repo).
 - Depth: a wider roster with recruits replacing the fallen between missions.

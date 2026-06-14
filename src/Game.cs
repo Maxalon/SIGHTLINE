@@ -65,6 +65,10 @@ public class Game
     public Objective Objective;
     public List<(int x, int y)> EvacZone = new();
 
+    // end-turn confirmation when soldiers still have actions
+    public bool EndTurnArmed;
+    int _lastSig = -1;
+
     // game-feel: hit-stop freeze + camera zoom-punch
     public float HitStop;
     float _camPulse;
@@ -383,6 +387,10 @@ public class Game
         CheckPodActivation();
         if (_anims.Count > 0) return;   // a pod just activated — let the scatter play
 
+        // clear the end-turn confirmation if anything changed (action taken / reselect)
+        int sig = AlivePlayers().Sum(p => p.ActionsLeft) * 8 + (Selected != null ? Players.IndexOf(Selected) : 0);
+        if (sig != _lastSig) { EndTurnArmed = false; _lastSig = sig; }
+
         // keep selection valid
         if (Selected != null && !Selected.Alive) Selected = null;
         if (Selected == null || !Selected.CanAct)
@@ -458,7 +466,7 @@ public class Game
     void HandlePlayerInput()
     {
         // keys
-        if (Raylib.IsKeyPressed(KeyboardKey.Enter)) { EndPlayerTurn(); return; }
+        if (Raylib.IsKeyPressed(KeyboardKey.Enter)) { RequestEndTurn(); return; }
         if (Raylib.IsKeyPressed(KeyboardKey.Tab)) CycleSelection();
         if (Raylib.IsKeyPressed(KeyboardKey.Escape)) { AimMode = false; GrenadeMode = false; }
         if (Raylib.IsKeyPressed(KeyboardKey.One)) ToggleAim();
@@ -473,9 +481,11 @@ public class Game
         {
             var m = Raylib.GetMousePosition();
             // HUD first
-            if (Raylib.CheckCollisionPointRec(m, Hud.EndTurnRect)) { EndPlayerTurn(); return; }
+            if (Raylib.CheckCollisionPointRec(m, Hud.EndTurnRect)) { RequestEndTurn(); return; }
             foreach (var b in Hud.ActionButtons)
                 if (b.Enabled && Raylib.CheckCollisionPointRec(m, b.Rect)) { DoAction(b.Id); return; }
+            foreach (var c in Hud.RosterChips)
+                if (Raylib.CheckCollisionPointRec(m, c.rect)) { SelectUnit(c.unit); return; }
 
             // board click
             if (!HoverValid) return;
@@ -615,8 +625,16 @@ public class Game
         AimMode = false;
     }
 
+    void RequestEndTurn()
+    {
+        if (!EndTurnArmed && AlivePlayers().Any(p => p.CanAct)) { EndTurnArmed = true; return; }
+        EndTurnArmed = false;
+        EndPlayerTurn();
+    }
+
     void EndPlayerTurn()
     {
+        EndTurnArmed = false;
         AimMode = false;
         Selected = null;
         MoveCost = null;

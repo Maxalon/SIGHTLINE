@@ -21,14 +21,59 @@ public static class Hud
 {
     public static Rectangle EndTurnRect;
     public static UiButton[] ActionButtons = Array.Empty<UiButton>();
+    public static System.Collections.Generic.List<(Rectangle rect, Unit unit)> RosterChips = new();
 
     public static void Draw(Game g)
     {
         DrawTopBar(g);
+        if (g.Phase == Phase.PlayerTurn || g.Phase == Phase.EnemyTurn) DrawRoster(g);
         DrawBottomBar(g);
         DrawTooltip(g);
         DrawBanner(g);
         DrawOverlays(g);
+    }
+
+    static void DrawRoster(Game g)
+    {
+        RosterChips.Clear();
+        int y = 70;
+        foreach (var u in g.AlivePlayers())
+        {
+            var r = new Rectangle(8, y, 120, 50);
+            bool sel = g.Selected == u;
+            bool spent = g.Phase == Phase.PlayerTurn && !u.CanAct;
+            float a = spent ? 0.5f : 1f;
+
+            Raylib.DrawRectangleRounded(r, 0.16f, 6, Raylib.Fade(sel ? Pal.RGBA(26, 36, 48) : Pal.Panel, a));
+            Raylib.DrawRectangleLinesEx(r, 1.5f, Raylib.Fade(sel ? Pal.Accent : Pal.PanelBd, a));
+            Raylib.DrawRectangle((int)r.X, (int)r.Y, 3, (int)r.Height, Raylib.Fade(sel ? Pal.Accent : Pal.Friend, a));
+
+            Raylib.DrawText(u.Name, (int)r.X + 9, (int)r.Y + 5, 13, Raylib.Fade(Pal.Txt, a));
+            // status marks (right)
+            if (u.OnOverwatch) Raylib.DrawText("OW", (int)r.X + 96, (int)r.Y + 5, 11, Raylib.Fade(Pal.Accent, a));
+            else if (u.Hunkered) Raylib.DrawText("HK", (int)r.X + 96, (int)r.Y + 5, 11, Raylib.Fade(Pal.Good, a));
+
+            // hp bar
+            var bar = new Rectangle(r.X + 9, r.Y + 23, 102, 6);
+            Raylib.DrawRectangleRounded(bar, 0.5f, 4, Raylib.Fade(Pal.RGBA(10, 15, 21), a));
+            float frac = u.MaxHp > 0 ? u.Hp / (float)u.MaxHp : 0;
+            if (frac > 0)
+            {
+                Color hc = frac > 0.5f ? Pal.Good : (frac > 0.25f ? Pal.Accent : Pal.Foe);
+                Raylib.DrawRectangleRounded(new Rectangle(bar.X, bar.Y, bar.Width * frac, bar.Height), 0.5f, 4, Raylib.Fade(hc, a));
+            }
+            // AP pips
+            for (int i = 0; i < 2; i++)
+            {
+                var pip = new Rectangle(r.X + 9 + i * 22, r.Y + 34, 18, 6);
+                bool on = i < u.ActionsLeft;
+                Raylib.DrawRectangleRounded(pip, 0.5f, 4, Raylib.Fade(on ? Pal.Accent : Pal.RGBA(28, 39, 51), a));
+            }
+            Raylib.DrawText(u.RankName, (int)r.X + 58, (int)r.Y + 33, 9, Raylib.Fade(Pal.TxtDim, a));
+
+            RosterChips.Add((r, u));
+            y += 56;
+        }
     }
 
     // ---------------- top bar ----------------
@@ -55,10 +100,17 @@ public static class Hud
         DrawCounter(Cfg.ScreenW / 2 - 130, 20, Pal.Friend, $"{friends}  SQUAD");
         DrawCounter(Cfg.ScreenW / 2 + 20, 20, Pal.Foe, $"{foes}  HOSTILES");
 
-        // end turn
+        // mute indicator
+        if (!Audio.Enabled)
+            Raylib.DrawText("MUTED (M)", Cfg.ScreenW - 290, 19, 15, Pal.TxtDim);
+
+        // end turn (turns into a confirm prompt if soldiers still have actions)
         EndTurnRect = new Rectangle(Cfg.ScreenW - 170, 11, 150, 30);
         bool canEnd = g.IsPlayerInteractive();
-        DrawButtonRect(EndTurnRect, "END TURN", "ENT", canEnd, false, Pal.Accent);
+        if (g.EndTurnArmed)
+            DrawButtonRect(EndTurnRect, "CONFIRM?", "ENT", canEnd, true, Pal.Accent);
+        else
+            DrawButtonRect(EndTurnRect, "END TURN", "ENT", canEnd, false, Pal.Accent);
     }
 
     static void DrawCounter(int x, int y, Color dot, string text)
