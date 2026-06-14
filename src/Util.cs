@@ -48,6 +48,10 @@ public static class Pal
     public static readonly Color Accent    = RGBA(251, 191, 36);
     public static readonly Color Good      = RGBA(74, 222, 128);
 
+    // the escort VIP (warm gold, distinct from friendly cyan and accent)
+    public static readonly Color VipGold   = RGBA(245, 200, 70);
+    public static readonly Color VipDk     = RGBA(110, 80, 14);
+
     public static readonly Color Txt       = RGBA(226, 232, 240);
     public static readonly Color TxtDim    = RGBA(124, 138, 160);
     public static readonly Color Panel     = RGBA(16, 22, 30, 235);

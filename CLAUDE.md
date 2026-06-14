@@ -86,7 +86,8 @@ SIGHTLINE_SHOT=90 xvfb-run -a -s "-screen 0 1280x800x24" dotnet run -c Debug
 # Full-match autopilot smoke test -> prints "RESULT: WIN|LOSE|TIMEOUT mission=N"
 SIGHTLINE_AUTOPLAY=1 xvfb-run -a -s "-screen 0 1280x800x24" dotnet run -c Debug
 
-# Start the harness on a specific mission (verify Hack=2/5, Evac=3/6 maps).
+# Start the harness on a specific mission. Objective rotation is now
+# Elim / Hack / Evac / Escort: Hack=2/6, Evac=3, Escort=4 (VIP).
 # Works with SHOT or AUTOPLAY, e.g. screenshot the Hack mission:
 SIGHTLINE_MISSION=2 SIGHTLINE_SHOT=80 xvfb-run -a -s "-screen 0 1280x800x24" dotnet run -c Debug
 ```
@@ -175,8 +176,10 @@ seeds (mix of WIN/LOSE, no exceptions):
 - **Activation pods:** enemies dormant (dimmed, "?") until a soldier sights them,
   then the pod wakes + scatters to cover ("CONTACT!"). Scouting carries risk.
 - **Mission objectives:** Eliminate, Hack (reach the TERMINAL and hack it down,
-  HACK action / key H), and Evac (get the whole squad to the extraction zone).
-  Rotation is Elim / Hack / Evac per 3-mission cycle; shown in the HUD.
+  HACK action / key H), Evac (get the whole squad to the extraction zone), and
+  **Escort** (walk a fragile gold VIP to the extraction zone alive — losing the
+  VIP is a loss; the enemy AI prioritises it). Rotation is Elim / Hack / Evac /
+  Escort per 4-mission cycle; shown in the HUD.
 - **Map variety:** procedural scatter OR a hand-authored arena (`src/Maps.cs`,
   ~55% of missions) chosen with a connectivity guard so spawns/evac/terminal are
   always reachable.
@@ -242,7 +245,7 @@ seeds (mix of WIN/LOSE, no exceptions):
             stand on them (`ElevLift`); move/path/hover overlays are height-aware.
             The enemy AI values seizing high ground (`Ai.Plan`). Movement cost is
             unchanged (plateaus are just walkable floor).
-- [~] **5. Map variety & objectives.** IN PROGRESS.
+- [x] **5. Map variety & objectives.** DONE.
       - [x] **Objectives.** `Objective` enum (Eliminate / Evac). Every 3rd mission
             (3 & 6) is **Evac**: a 2x2 extraction zone (`Game.EvacZone`, drawn by
             `Renderer.DrawEvac`); win when all living soldiers stand in it. Others
@@ -262,7 +265,21 @@ seeds (mix of WIN/LOSE, no exceptions):
             floor; `Mission.TryApplyLayout` flood-fills from a soldier to verify all
             spawns/evac/terminal stay reachable and reverts to procedural otherwise.
             Two arenas so far: PLAZA (central plateau) + GAUNTLET (lane spine).
-      - [ ] More objective types (VIP escort).
+      - [x] **VIP escort objective.** DONE. `Objective.Escort` (rotation is now
+            Elim / Hack / Evac / Escort, `Game.ObjectiveFor` = `(n-1)%4`). A fragile
+            gold **VIP** (`Mission.MakeVip`, `Unit.IsVip`: 6 HP, 45 aim, sidearm, no
+            frags) must reach the shared extraction zone alive. Implemented as a
+            Player-team unit added to a per-mission copy of the roster
+            (`Players = new List<Unit>(_run.Squad)` + `Players.Add(Vip)`), so
+            occupancy/targeting/overwatch/render all work generically; it's excluded
+            from the persistent squad at debrief (`EnterBarracks` filters `!IsVip`).
+            Win when the VIP stands in the evac zone; **losing the VIP is a loss**
+            (`Game.CheckEnd` Escort branch; "VIP DOWN" banner in `KillUnit`). The
+            enemy AI prioritises it (`Ai.Plan`: +40 shoot value + advance bias on
+            the VIP). 5th `PlayerSpawns` slot seats the VIP; renderer draws a gold
+            ring + diamond + "VIP" tag (`Renderer.DrawUnit`); HUD shows "ESCORT VIP"
+            and an "ASSET" roster/card label; squad counter excludes the VIP.
+            Autopilot walks the VIP to evac while soldiers screen.
 - [~] **6. Polish/UX.** IN PROGRESS.
       - [x] Squad **roster strip** (left edge): all soldiers' HP/AP/rank/status,
             click to select, dims when spent (`Hud.DrawRoster` + `RosterChips`).
@@ -291,10 +308,10 @@ Before stopping:
 
 ### WIP NOTES
 Done: items 1 (audio), 2 (juice), 3 (campaign meta-loop), **4 (tactical depth —
-grenades + pods + elevation)**, and **5 is nearly complete**: objectives cover
-Eliminate / Hack / Evac, and **hand-authored map layouts** now mix in with the
-procedural generator (`src/Maps.cs` + `Mission.TryApplyLayout`, connectivity-
-guarded). Only **VIP escort** remains on item 5. Item 6 (polish) also gained a
+grenades + pods + elevation)**, and **5 (map variety & objectives) is now COMPLETE**:
+objectives cover Eliminate / Hack / Evac / **Escort (VIP)**, plus hand-authored map
+layouts mixed in with the procedural generator (`src/Maps.cs` +
+`Mission.TryApplyLayout`, connectivity-guarded). Item 6 (polish) also gained a
 **threat preview** (red pips on exposed reachable tiles), and the **enemy AI now
 throws grenades** (`Ai.BestGrenade`). The game is feature-rich
 and stable — autoplay across mission starts (`SIGHTLINE_MISSION`) resolves with no
@@ -302,14 +319,24 @@ exceptions and no TIMEOUTs. NOTE: the headless autopilot is a weak smoke-test AI
 and LOSES most seeds (true on `main` too) — expected; the contract is "no
 exceptions, no TIMEOUT", not a WIN/LOSE mix.
 
+VIP escort (this session): the VIP is just a Player-team `Unit` with `IsVip` added
+to a per-mission COPY of the squad (`Game.SetupMission`), so all generic systems
+(occupancy/targeting/overwatch/render/roster) work unchanged — the only special
+cases are CheckEnd (win = VIP in evac, lose = VIP dead), `EnterBarracks` filtering
+it out of the persistent squad, the AI target/advance bias, and gold rendering.
+The 5th `PlayerSpawns` entry seats it. Escort reuses the Evac extraction zone.
+
 Autopilot hardening added this session (test-only, in `Game.cs`): the Evac branch
 now reloads/grenades a squatter instead of hunkering forever, and a turn-based
 `AutoStallCheck` force-wakes a dormant pod if no progress is made for 10 player
 turns — together these eliminate the rare deep-campaign TIMEOUT.
 
 **Good next steps (any order):**
-- Item 5 leftover: VIP escort objective (note: would likely need a neutral team or
-  an escort-flag on a unit — touches CanTarget/AI/render/occupancy, so plan it).
+- Item 6 leftovers (now the top frontier): keyboard tile cursor; camera pan/zoom;
+  a settings screen.
+- Escort polish stretch: a distinct "VIP EXTRACTED" / "VIP LOST" lose-card message
+  (currently the generic lose card), or let the VIP panic-flee toward evac on the
+  enemy turn if left alone. Also could add an Escort intro hint line.
 - More authored arenas: just add ASCII templates to `Maps.Layouts` (11x18, legend
   `. o # ^`); the connectivity guard auto-rejects anything that walls a spawn off.
 - Item 6 leftovers: keyboard tile cursor; camera pan/zoom; a settings screen.
@@ -321,6 +348,11 @@ turns — together these eliminate the rare deep-campaign TIMEOUT.
   is walkable floor; `Mission.Build` keeps it + its 8-neighbour ring clear of cover.
   (c) Authored maps: walkable tiles are ONLY `.`/`^` (all cover blocks movement) —
   keep lanes open or the connectivity guard will reject the layout.
+  (d) VIP escort: `Players` is a per-mission COPY of `_run.Squad` (NOT the same
+  list) so the VIP can ride along without joining the squad — don't revert that to
+  the old `Players = _run.Squad` alias or the VIP will persist/duplicate. The VIP
+  is a real Player unit, so it counts in `AlivePlayers()` (filter `!IsVip` where a
+  combatant-only view is needed, e.g. the squad counter / barracks roster).
 
 Conventions: drawn strings must be ASCII (default font). Build Release + run
 `SIGHTLINE_AUTOPLAY=1` a few times before merging. Share screenshots in chat via

@@ -7,7 +7,8 @@ namespace Sightline;
 /// (see Run); each mission regenerates the map + a scaled hostile force.
 public static class Mission
 {
-    static readonly (int x, int y)[] PlayerSpawns = { (1, 2), (1, 4), (2, 7), (1, 9) };
+    // up to 5 left-edge spawns: four soldiers + (on escort missions) the VIP
+    static readonly (int x, int y)[] PlayerSpawns = { (1, 2), (1, 4), (2, 7), (1, 9), (2, 5) };
 
     /// The four starting soldiers for a fresh run.
     public static List<Unit> NewRunSquad()
@@ -193,6 +194,21 @@ public static class Mission
             case 2: return MakeSoldier(name, "SHARPSHOOTER", WeaponKind.Sniper, 6, 72, 6);
             default: return MakeSoldier(name, "GUNNER", WeaponKind.Lmg, 10, 58, 6);
         }
+    }
+
+    /// The escort asset: fragile, poor aim, carries only a panicky sidearm.
+    /// Lives in the player roster for one mission and never joins the persistent squad.
+    public static Unit MakeVip()
+    {
+        var u = new Unit
+        {
+            Name = "VIP", Cls = "VIP", Team = Team.Player,
+            Hp = 6, MaxHp = 6, Aim = 45, Mobility = 6,
+            Weapon = Weapon.Make(WeaponKind.Smg), IsVip = true,
+        };
+        u.Ammo = u.Weapon.Clip;
+        u.Grenades = 0;
+        return u;
     }
 
     static Unit MakeSoldier(string name, string cls, WeaponKind w, int hp, int aim, int mob)

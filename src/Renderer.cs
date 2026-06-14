@@ -283,9 +283,10 @@ public static class Renderer
     {
         if (!u.Alive) return;
         bool friend = u.Team == Team.Player;
+        bool vip = friend && u.IsVip;
         bool dormant = u.Team == Team.Enemy && !u.Active;
-        Color main = friend ? Pal.Friend : (dormant ? Pal.RGBA(120, 96, 96) : Pal.Foe);
-        Color dark = friend ? Pal.FriendDk : (dormant ? Pal.RGBA(46, 38, 42) : Pal.FoeDk);
+        Color main = vip ? Pal.VipGold : (friend ? Pal.Friend : (dormant ? Pal.RGBA(120, 96, 96) : Pal.Foe));
+        Color dark = vip ? Pal.VipDk  : (friend ? Pal.FriendDk : (dormant ? Pal.RGBA(46, 38, 42) : Pal.FoeDk));
 
         // lift the figure when it stands on raised terrain
         float hlift = g.Grid.IsHigh(u.X, u.Y) ? ElevLift : 0f;
@@ -347,6 +348,14 @@ public static class Renderer
         }
         if (u.Hunkered)
             Raylib.DrawPoly(new Vector2(p.X, p.Y - 27), 4, 6f, 45f, Pal.Good);
+
+        // VIP marker: gold diamond + tag above the asset
+        if (vip)
+        {
+            Raylib.DrawPoly(new Vector2(p.X, p.Y - 39), 4, 5.5f, 45f, Pal.VipGold);
+            Raylib.DrawPolyLinesEx(new Vector2(p.X, p.Y - 39), 4, 5.5f, 45f, 1.5f, Pal.Txt);
+            Raylib.DrawText("VIP", (int)(p.X - 9), (int)(p.Y - 53), 12, Pal.VipGold);
+        }
     }
 
     static void DrawHpPips(Unit u, Vector2 p)

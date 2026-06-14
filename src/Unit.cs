@@ -77,6 +77,8 @@ public class Unit
     public bool Active = true;  // enemies start dormant until their pod is sighted
     public int PodId = -1;      // activation-pod grouping (enemies only)
 
+    public bool IsVip;          // escort objective: the asset to extract (mission-only, never persists)
+
     // meta / campaign progression (persists across missions)
     public int Kills;
     public int Rank;            // index into Run.Ranks
