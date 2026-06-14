@@ -182,7 +182,8 @@ seeds (mix of WIN/LOSE, no exceptions):
 - **Elevation / high ground:** raised plateaus (`Grid.Height`) grant +15 aim /
   +10 crit firing down on lower targets; faux-3D platforms, height-aware overlays,
   AI seizes the high ground. Shown in the shot tooltip ("+ HIGH GROUND").
-- **UX:** squad roster strip, end-turn confirmation, mute indicator.
+- **UX:** squad roster strip, end-turn confirmation, mute indicator, threat
+  preview (red pips on exposed reachable tiles while positioning).
 - **Recruits:** the barracks backfills empty squad slots with fresh rookies
   (`Mission.MakeRecruit`, `Run.DebriefSurvivors`) so casualties don't death-spiral.
 - Full HUD + intro/barracks/win/lose; per-mission generator (scaled by mission #).
@@ -264,6 +265,10 @@ seeds (mix of WIN/LOSE, no exceptions):
       - [x] **End-turn confirmation** when a soldier still has actions
             (`Game.RequestEndTurn`/`EndTurnArmed`; button shows "CONFIRM?").
       - [x] **Mute indicator** in the top bar when audio is off.
+      - [x] **Threat preview:** while positioning, reachable tiles a live, active
+            enemy could fire on with no cover get a red warning pip
+            (`Game.ComputeThreat` -> `Game.Threat`, drawn by `Renderer.DrawThreat`),
+            so "move into cover" decisions are legible at a glance.
       - [ ] Keyboard tile cursor; camera pan/zoom for readability; settings.
 
 When you finish an item: verify (build + autoplay + a screenshot), commit, merge
@@ -285,8 +290,9 @@ Done: items 1 (audio), 2 (juice), 3 (campaign meta-loop), **4 (tactical depth �
 grenades + pods + elevation)**, and **5 is nearly complete**: objectives cover
 Eliminate / Hack / Evac, and **hand-authored map layouts** now mix in with the
 procedural generator (`src/Maps.cs` + `Mission.TryApplyLayout`, connectivity-
-guarded). Only **VIP escort** remains on item 5. The game is feature-rich and
-stable — autoplay across mission starts (`SIGHTLINE_MISSION`) resolves with no
+guarded). Only **VIP escort** remains on item 5. Item 6 (polish) also gained a
+**threat preview** (red pips on exposed reachable tiles). The game is feature-rich
+and stable — autoplay across mission starts (`SIGHTLINE_MISSION`) resolves with no
 exceptions and no TIMEOUTs. NOTE: the headless autopilot is a weak smoke-test AI
 and LOSES most seeds (true on `main` too) — expected; the contract is "no
 exceptions, no TIMEOUT", not a WIN/LOSE mix.

@@ -42,6 +42,7 @@ public static class Renderer
 
         DrawElevation(g);
         DrawMoveOverlay(g);
+        DrawThreat(g);
         DrawEvac(g);
         DrawTerminal(g);
         DrawGridLines(g);
@@ -164,6 +165,29 @@ public static class Renderer
                 if (dash && g.Selected.ActionsLeft < 2) continue; // can't dash with 1 action
                 var r = ElevRect(g, x, y);
                 Raylib.DrawRectangleRec(r, dash ? Pal.MoveYellow : Pal.MoveBlue);
+            }
+    }
+
+    // Red warning pips on reachable tiles that a live enemy could fire on with no
+    // cover — a quick read on which destinations leave the soldier exposed.
+    static void DrawThreat(Game g)
+    {
+        if (g.Selected == null || !g.IsPlayerInteractive() || g.AimMode || g.GrenadeMode) return;
+        if (g.Selected.Team != Team.Player || !g.Selected.CanAct) return;
+        if (g.Threat == null || g.MoveCost == null) return;
+
+        float pulse = 0.6f + 0.4f * MathF.Sin((float)Raylib.GetTime() * 4f);
+        for (int x = 0; x < g.Grid.W; x++)
+            for (int y = 0; y < g.Grid.H; y++)
+            {
+                if (!g.Threat[x, y]) continue;
+                bool here = x == g.Selected.X && y == g.Selected.Y;
+                if (!here && g.MoveCost[x, y] <= 0) continue;
+                var r = ElevRect(g, x, y);
+                var pos = new Vector2(r.X + r.Width - 9, r.Y + 9);
+                Raylib.DrawPoly(pos, 3, 5.5f, -90f, Raylib.Fade(Pal.Foe, 0.85f * pulse));
+                Raylib.DrawPolyLinesEx(pos, 3, 5.5f, -90f, 1.5f, Raylib.Fade(Pal.RGBA(255, 220, 220), 0.8f));
+                Raylib.DrawRectangle((int)pos.X - 1, (int)pos.Y - 1, 2, 2, Pal.RGBA(30, 6, 6));
             }
     }
 

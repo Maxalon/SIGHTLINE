@@ -28,6 +28,7 @@ public class Game
     public int HoverX, HoverY;
     public bool HoverValid;
     public int[,] MoveCost;
+    public bool[,] Threat;          // reachable tiles exposed to active-enemy fire (no cover)
     (int, int)[,] _cameFrom;
     public List<(int x, int y)> PathPreview = new();
 
@@ -468,8 +469,30 @@ public class Game
         {
             Func<int, int, bool> blocked = (x, y) => IsOccupiedByOther(x, y, Selected);
             MoveCost = Grid.CostMap(Selected.X, Selected.Y, blocked, out _cameFrom, Selected.MoveBudget * 2);
+            ComputeThreat();
         }
-        else { MoveCost = null; _cameFrom = null; }
+        else { MoveCost = null; _cameFrom = null; Threat = null; }
+    }
+
+    // Mark each reachable tile (and the current one) that a live, active enemy could
+    // fire on with no cover for the mover — i.e. tiles you'd be exposed standing on.
+    void ComputeThreat()
+    {
+        Threat = new bool[Grid.W, Grid.H];
+        var foes = Enemies.Where(e => e.Alive && e.Active && e.Ammo > 0).ToList();
+        if (foes.Count == 0) return;
+        for (int x = 0; x < Grid.W; x++)
+            for (int y = 0; y < Grid.H; y++)
+            {
+                bool here = x == Selected.X && y == Selected.Y;
+                if (!here && MoveCost[x, y] <= 0) continue;
+                foreach (var e in foes)
+                {
+                    if (Util.TileDist(x, y, e.X, e.Y) > e.Weapon.MaxRange) continue;
+                    if (!Grid.HasLineOfSight(e.X, e.Y, x, y)) continue;
+                    if (Grid.GetCover(x, y, e.X, e.Y).Level == 0) { Threat[x, y] = true; break; }
+                }
+            }
     }
 
     void UpdateHoverAndAim()
