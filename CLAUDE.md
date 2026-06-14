@@ -171,6 +171,8 @@ seeds (mix of WIN/LOSE, no exceptions):
 - **Mission objectives:** Eliminate (default) and Evac (missions 3 & 6 — get the
   whole squad to a marked extraction zone). Shown in the HUD.
 - **UX:** squad roster strip, end-turn confirmation, mute indicator.
+- **Recruits:** the barracks backfills empty squad slots with fresh rookies
+  (`Mission.MakeRecruit`, `Run.DebriefSurvivors`) so casualties don't death-spiral.
 - Full HUD + intro/barracks/win/lose; per-mission generator (scaled by mission #).
 - Text is ASCII-only (Raylib's default font lacks fancy glyphs → they render `?`).
 
@@ -256,7 +258,6 @@ manual autoplay reaches a clean result across many seeds, no exceptions/timeouts
 - Item 6 leftovers: keyboard tile cursor; camera pan/zoom; a settings screen.
 - Item 4 leftover: elevation / high-ground aim bonus (needs a tile height layer).
 - Persist a run to a save file under the OS user-data dir (NOT in the repo).
-- Depth: a wider roster with recruits replacing the fallen between missions.
 
 Conventions: drawn strings must be ASCII (default font). Build Release + run
 `BREACH_AUTOPLAY=1` a few times before merging. Share screenshots in chat via

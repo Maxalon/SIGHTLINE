@@ -27,12 +27,13 @@ public class Run
         Report.Clear();
     }
 
-    /// Apply promotions (from accumulated kills) and field-heal to the survivors.
-    /// Builds the barracks Report. Returns nothing; mutates the squad in place.
-    public void DebriefSurvivors(IEnumerable<Unit> survivors)
+    /// Apply promotions (from accumulated kills) and field-heal to the survivors,
+    /// then backfill empty squad slots with fresh rookie recruits.
+    /// Builds the barracks Report; mutates Squad in place.
+    public void DebriefSurvivors()
     {
         Report.Clear();
-        foreach (var u in survivors)
+        foreach (var u in Squad.ToList())
         {
             // promotions: advance rank while kills clear the next threshold
             while (u.Rank < Ranks.Length - 1 && u.Kills >= KillReq[u.Rank + 1])
@@ -48,7 +49,16 @@ public class Run
             u.Hp = Math.Min(u.MaxHp, u.Hp + heal);
             if (u.Hp > before) Report.Add($"{u.Name} patched up  (+{u.Hp - before} HP)");
         }
-        if (Report.Count == 0) Report.Add("No promotions this mission.");
+
+        // backfill the squad up to 4 with rookie recruits
+        while (Squad.Count < 4)
+        {
+            var rec = Breach.Mission.MakeRecruit();
+            Squad.Add(rec);
+            Report.Add($"{rec.Name} joins the squad  (ROOKIE {rec.Cls})");
+        }
+
+        if (Report.Count == 0) Report.Add("No changes this mission.");
     }
 
     static string ApplyPromotion(Unit u, int rank)

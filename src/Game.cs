@@ -118,7 +118,7 @@ public class Game
     void EnterBarracks()
     {
         _run.Squad = AlivePlayers();
-        _run.DebriefSurvivors(_run.Squad);
+        _run.DebriefSurvivors();
         if (_run.Mission >= Run.MaxMissions) { Phase = Phase.Win; Audio.Play("win"); }
         else { Phase = Phase.Barracks; Audio.Play("win"); }
     }

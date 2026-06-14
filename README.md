@@ -38,7 +38,8 @@ A run is **six escalating missions** played with a single, persistent squad:
 - **Kills earn promotions.** Rookie → Squaddie → Corporal → … → Colonel, each
   rank granting a stat bump (+Aim / +HP / +Mobility).
 - A **barracks debrief** between missions shows survivors, promotions, heals and
-  the fallen, then deploys you to a tougher fight.
+  the fallen — and **fresh rookies backfill** any empty slots so a bad mission
+  doesn't doom the run — then deploys you to a tougher fight.
 - Missions vary by **objective**: most are *eliminate all hostiles*, but every
   third is an *extraction* — get the whole squad to the marked EVAC zone (fight
   through, or sneak past dormant pods).

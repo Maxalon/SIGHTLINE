@@ -115,6 +115,22 @@ public static class Mission
         }
     }
 
+    static readonly string[] Callsigns =
+        { "HAWK", "ECHO", "RAVEN", "SLATE", "ONYX", "FOX", "WREN", "ASH", "CIPHER", "JINX", "ROOK", "DELTA", "MOTH", "QUILL" };
+
+    /// A fresh rookie of a random class, for backfilling the squad between missions.
+    public static Unit MakeRecruit()
+    {
+        string name = Util.Choice(Callsigns);
+        switch (Util.RandInt(0, 3))
+        {
+            case 0: return MakeSoldier(name, "ASSAULT", WeaponKind.Rifle, 8, 66, 7);
+            case 1: return MakeSoldier(name, "RANGER", WeaponKind.Shotgun, 7, 62, 8);
+            case 2: return MakeSoldier(name, "SHARPSHOOTER", WeaponKind.Sniper, 6, 72, 6);
+            default: return MakeSoldier(name, "GUNNER", WeaponKind.Lmg, 10, 58, 6);
+        }
+    }
+
     static Unit MakeSoldier(string name, string cls, WeaponKind w, int hp, int aim, int mob)
     {
         var u = new Unit { Name = name, Cls = cls, Team = Team.Player, Hp = hp, MaxHp = hp, Aim = aim, Mobility = mob, Weapon = Weapon.Make(w) };
