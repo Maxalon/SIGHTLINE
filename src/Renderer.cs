@@ -43,6 +43,7 @@ public static class Renderer
         DrawElevation(g);
         DrawMoveOverlay(g);
         DrawEvac(g);
+        DrawTerminal(g);
         DrawGridLines(g);
         DrawPathPreview(g);
         DrawCover(g);
@@ -100,6 +101,39 @@ public static class Renderer
         }
         var at = Util.TileCenter(minx, miny);
         Raylib.DrawText("EVAC", (int)at.X - 4, (int)(at.Y - Cfg.Tile / 2 + 4), 14, Pal.Good);
+    }
+
+    // Hack objective: a console tile with a segmented progress ring.
+    static void DrawTerminal(Game g)
+    {
+        if (!g.HasTerminal) return;
+        var (tx, ty) = g.Terminal;
+        var r = ElevRect(g, tx, ty);
+        var c = ElevCenter(g, tx, ty);
+        bool done = g.HackProgress >= Game.HackRequired;
+        Color col = done ? Pal.Good : Pal.Accent;
+        float pulse = 0.5f + 0.5f * MathF.Sin((float)Raylib.GetTime() * 3f);
+
+        // pad
+        Raylib.DrawRectangleRec(r, Raylib.Fade(col, 0.08f + 0.06f * pulse));
+        Raylib.DrawRectangleLinesEx(new Rectangle(r.X + 3, r.Y + 3, r.Width - 6, r.Height - 6),
+                                    2f, Raylib.Fade(col, 0.45f + 0.4f * pulse));
+
+        // segmented hack-progress ring
+        float seg = 360f / Game.HackRequired;
+        for (int i = 0; i < Game.HackRequired; i++)
+        {
+            bool filled = i < g.HackProgress;
+            Raylib.DrawRing(c, 15, 19, -90 + i * seg + 5, -90 + (i + 1) * seg - 5, 14,
+                            Raylib.Fade(col, filled ? 0.95f : 0.18f));
+        }
+
+        // console box + screen blip
+        Raylib.DrawRectangleRec(new Rectangle(c.X - 9, c.Y - 11, 18, 22), Pal.RGBA(14, 20, 28));
+        Raylib.DrawRectangleLinesEx(new Rectangle(c.X - 9, c.Y - 11, 18, 22), 1.5f, col);
+        Raylib.DrawRectangleRec(new Rectangle(c.X - 5, c.Y - 7, 10, 6), Raylib.Fade(col, 0.6f + 0.4f * pulse));
+
+        Raylib.DrawText("TERMINAL", (int)c.X - 26, (int)r.Y - 13, 11, col);
     }
 
     static void DrawGridLines(Game g)

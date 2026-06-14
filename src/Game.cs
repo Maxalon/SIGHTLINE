@@ -7,7 +7,7 @@ using Raylib_cs;
 namespace Sightline;
 
 public enum Phase { Intro, PlayerTurn, EnemyTurn, Barracks, Win, Lose }
-public enum Objective { Eliminate, Evac }
+public enum Objective { Eliminate, Evac, Hack }
 enum AiStage { PickNext, ActAfterMove }
 
 public class Game
@@ -65,6 +65,15 @@ public class Game
     public Objective Objective;
     public List<(int x, int y)> EvacZone = new();
 
+    // hack objective: reach the terminal and hack it over several actions
+    public const int HackRequired = 3;
+    public (int x, int y) Terminal;
+    public int HackProgress;
+    public bool HasTerminal => Objective == Objective.Hack;
+    public bool CanHack(Unit u) =>
+        HasTerminal && u != null && u.Team == Team.Player && u.CanAct &&
+        HackProgress < HackRequired && Util.ChebyDist(u.X, u.Y, Terminal.x, Terminal.y) <= 1;
+
     // end-turn confirmation when soldiers still have actions
     public bool EndTurnArmed;
     int _lastSig = -1;
@@ -77,12 +86,13 @@ public class Game
 
     // ---------------- lifecycle ----------------
     /// Start a brand-new campaign run (called from intro / after a run ends).
-    public void StartMission()
+    /// startAt lets the headless harness jump straight to a given mission.
+    public void StartMission(int startAt = 1)
     {
         _run = new Run();
         _run.Start();
         Players = _run.Squad;
-        SetupMission(1);
+        SetupMission(Util.Clamp(startAt, 1, Run.MaxMissions));
     }
 
     void SetupMission(int n)
@@ -90,21 +100,26 @@ public class Game
         _run.Mission = n;
         Players = _run.Squad;              // living roster only
 
-        // every 3rd mission is an extraction; the rest are eliminate
-        Objective = (n % 3 == 0) ? Objective.Evac : Objective.Eliminate;
+        // objective rotation: Evac every 3rd mission, Hack on the ones before,
+        // Eliminate otherwise (e.g. Elim / Hack / Evac / Elim / Hack / Evac).
+        Objective = (n % 3 == 0) ? Objective.Evac : (n % 3 == 2 ? Objective.Hack : Objective.Eliminate);
         EvacZone.Clear();
+        HackProgress = 0;
         if (Objective == Objective.Evac)
         {
             EvacZone.Add((Grid.W - 2, 0)); EvacZone.Add((Grid.W - 1, 0));
             EvacZone.Add((Grid.W - 2, 1)); EvacZone.Add((Grid.W - 1, 1));
         }
+        if (Objective == Objective.Hack)
+            Terminal = (Grid.W / 2 + 1, Grid.H / 2);
 
-        Mission.Build(Grid, Players, Enemies, n, EvacZone);
+        Mission.Build(Grid, Players, Enemies, n, EvacZone, HasTerminal ? Terminal : null);
         Fx.Particles.Clear();
         Fx.Texts.Clear();
         _anims.Clear();
         HitStop = 0;
         _turnCount = 1;
+        _autoSig = -1; _autoStall = 0;
         Phase = Phase.PlayerTurn;
         foreach (var u in Players) u.BeginTurn();
         foreach (var u in Enemies) { u.BeginTurn(); u.OnOverwatch = false; }
@@ -266,6 +281,10 @@ public class Game
         {
             if (AliveEnemies().Count == 0) EnterBarracks();
         }
+        else if (Objective == Objective.Hack) // hold the terminal until it's fully hacked
+        {
+            if (HackProgress >= HackRequired) EnterBarracks();
+        }
         else // Evac: every surviving soldier must stand in the extraction zone
         {
             if (alivePlayers.All(p => EvacZone.Contains((p.X, p.Y)))) EnterBarracks();
@@ -276,6 +295,24 @@ public class Game
     // Test-only autopilot (enabled via SIGHTLINE_AUTOPLAY): drives real player actions
     // so the whole loop can be exercised headlessly. Never enabled in normal play.
     public bool AutoPlay;
+
+    // Stall guard for the headless autopilot: if no progress is made for several
+    // player turns (e.g. only unreachable dormant pods remain), force a pod awake
+    // so the match always resolves. Test-only; never runs in normal play.
+    int _autoSig = -1, _autoStall;
+    void AutoStallCheck()
+    {
+        int sig = AliveEnemies().Count * 1000
+                + AliveEnemies().Count(e => e.Active) * 10
+                + HackProgress
+                + AlivePlayers().Count(p => EvacZone.Contains((p.X, p.Y)));
+        if (sig != _autoSig) { _autoSig = sig; _autoStall = 0; return; }
+        if (++_autoStall < 10) return;
+        _autoStall = 0;
+        var dormant = Enemies.Where(e => e.Alive && !e.Active).ToList();
+        if (dormant.Count > 0) ActivatePod(dormant[0].PodId);
+    }
+
     void AutoStep()
     {
         if (_anims.Count > 0 || Phase != Phase.PlayerTurn) return;
@@ -293,8 +330,29 @@ public class Game
                                    .OrderBy(t => Util.TileDist(u.X, u.Y, t.x, t.y)).ToList();
                 if (cand.Count > 0 && TryMoveTowardTile(u, cand[0].x, cand[0].y)) return;
             }
+            // can't make extraction progress this turn — clear blockers / re-arm
             var et = FirstTargetFor(u);
             if (et != null && u.Ammo > 0) { IssueShoot(et); return; }
+            // an enemy squatting on the extraction zone: blast it loose
+            if (u.Grenades > 0)
+            {
+                var blocker = AliveEnemies()
+                    .Where(e => EvacZone.Contains((e.X, e.Y)) && Util.TileDist(u.X, u.Y, e.X, e.Y) <= GrenadeRange)
+                    .OrderBy(e => Util.TileDist(u.X, u.Y, e.X, e.Y)).FirstOrDefault();
+                if (blocker != null) { IssueGrenade(blocker.X, blocker.Y); return; }
+            }
+            if (u.Ammo == 0) { DoReload(); return; }   // re-arm instead of stalling forever
+            DoHunker();
+            return;
+        }
+
+        // HACK objective: get a soldier to the terminal and hack it down
+        if (Objective == Objective.Hack)
+        {
+            if (CanHack(u)) { DoHack(); return; }
+            var et = FirstTargetFor(u);
+            if (et != null && u.Ammo > 0) { IssueShoot(et); return; }
+            if (TryMoveTowardTile(u, Terminal.x, Terminal.y)) return;
             DoHunker();
             return;
         }
@@ -473,6 +531,7 @@ public class Game
         if (Raylib.IsKeyPressed(KeyboardKey.Two)) DoOverwatch();
         if (Raylib.IsKeyPressed(KeyboardKey.Three)) DoHunker();
         if (Raylib.IsKeyPressed(KeyboardKey.Four)) ToggleGrenade();
+        if (Raylib.IsKeyPressed(KeyboardKey.H)) DoHack();
         if (Raylib.IsKeyPressed(KeyboardKey.R)) DoReload();
 
         if (Raylib.IsMouseButtonPressed(MouseButton.Right)) { AimMode = false; GrenadeMode = false; return; }
@@ -524,6 +583,7 @@ public class Game
             case "grenade": ToggleGrenade(); break;
             case "overwatch": DoOverwatch(); break;
             case "hunker": DoHunker(); break;
+            case "hack": DoHack(); break;
             case "reload": DoReload(); break;
         }
     }
@@ -615,6 +675,18 @@ public class Game
         AimMode = false;
     }
 
+    void DoHack()
+    {
+        if (!CanHack(Selected)) return;
+        Selected.ActionsLeft -= 1;
+        HackProgress++;
+        var at = Util.TileCenter(Terminal.x, Terminal.y);
+        Fx.PopText(at + new Vector2(0, -30), HackProgress >= HackRequired ? "HACKED" : "HACK +1", Pal.Accent, 20f);
+        Fx.Burst(at, Pal.Accent, 14, 160f, 0.5f, 3f);
+        Audio.Play("reload");
+        AimMode = false;
+    }
+
     void DoReload()
     {
         if (Selected == null || !Selected.CanAct || Selected.Ammo >= Selected.Weapon.Clip) return;
@@ -652,6 +724,7 @@ public class Game
     {
         _turnCount++;
         Phase = Phase.PlayerTurn;
+        if (AutoPlay) AutoStallCheck();
         foreach (var p in Players) if (p.Alive) p.BeginTurn();
         foreach (var e in Enemies) if (e.Alive) e.ReactedThisTurn = false; // enemy OW can react next turn
         Selected = Players.FirstOrDefault(p => p.CanAct);

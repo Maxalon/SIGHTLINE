@@ -91,8 +91,14 @@ public static class Hud
         CenterText(turnTxt, pill, 16, turnCol);
 
         Raylib.DrawText($"MISSION {g.RunState.Mission}/{Run.MaxMissions}", 200, 19, 16, Pal.TxtDim);
-        bool evac = g.Objective == Objective.Evac;
-        Raylib.DrawText(evac ? "EXTRACT" : "ELIMINATE", 340, 19, 16, evac ? Pal.Good : Pal.TxtDim);
+        string objTxt; Color objCol;
+        switch (g.Objective)
+        {
+            case Objective.Evac: objTxt = "EXTRACT"; objCol = Pal.Good; break;
+            case Objective.Hack: objTxt = $"HACK {g.HackProgress}/{Game.HackRequired}"; objCol = Pal.Accent; break;
+            default: objTxt = "ELIMINATE"; objCol = Pal.TxtDim; break;
+        }
+        Raylib.DrawText(objTxt, 340, 19, 16, objCol);
 
         // counts
         int friends = g.AlivePlayers().Count;
@@ -202,6 +208,8 @@ public static class Hud
         Add("grenade", "GRENADE", "4", interactive && u != null && u.CanAct && u.Grenades > 0, g.GrenadeMode);
         Add("overwatch", "OVERWATCH", "2", interactive && u != null && u.CanAct && u.Ammo > 0, false);
         Add("hunker", "HUNKER", "3", interactive && u != null && u.CanAct, u != null && u.Hunkered);
+        if (g.HasTerminal)
+            Add("hack", "HACK", "H", interactive && g.CanHack(u), false);
         Add("reload", "RELOAD", "R", interactive && u != null && u.CanAct && u.Ammo < u.Weapon.Clip, false);
 
         ActionButtons = btns.ToArray();

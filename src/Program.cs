@@ -13,6 +13,8 @@ public static class Program
         // Used to smoke-test the whole loop under Xvfb + software GL. See CLAUDE.md.
         bool shot = int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_SHOT"), out int shotFrame);
         bool autoplay = Environment.GetEnvironmentVariable("SIGHTLINE_AUTOPLAY") == "1";
+        // SIGHTLINE_MISSION=<n> : start the harness on mission n (verify Hack/Evac maps).
+        int startMission = int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_MISSION"), out int sm) ? sm : 1;
 
         ConfigFlags flags = ConfigFlags.Msaa4xHint;
         if (!autoplay) flags |= ConfigFlags.VSyncHint;
@@ -22,7 +24,7 @@ public static class Program
         Audio.Init();
 
         var game = new Game();
-        if (shot || autoplay) game.StartMission();
+        if (shot || autoplay) game.StartMission(startMission);
         if (autoplay) game.AutoPlay = true;
         int frame = 0;
         const int autoCap = 20000;
@@ -45,9 +47,9 @@ public static class Program
             }
             if (autoplay)
             {
-                if (game.Phase == Phase.Win) { Console.WriteLine($"RESULT: WIN frame={frame}"); break; }
-                if (game.Phase == Phase.Lose) { Console.WriteLine($"RESULT: LOSE frame={frame}"); break; }
-                if (frame >= autoCap) { Console.WriteLine($"RESULT: TIMEOUT frame={frame}"); break; }
+                if (game.Phase == Phase.Win) { Console.WriteLine($"RESULT: WIN mission={game.RunState.Mission} frame={frame}"); break; }
+                if (game.Phase == Phase.Lose) { Console.WriteLine($"RESULT: LOSE mission={game.RunState.Mission} frame={frame}"); break; }
+                if (frame >= autoCap) { Console.WriteLine($"RESULT: TIMEOUT mission={game.RunState.Mission} frame={frame}"); break; }
             }
         }
 
