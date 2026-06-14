@@ -93,10 +93,19 @@ dotnet publish -c Release -r linux-x64 --self-contained
 
 Use `osx-x64` / `osx-arm64` / `win-x64` for other targets.
 
-### In Rider
+### In Rider (recommended IDE)
 
-Open `Sightline.csproj` (or the folder) and hit **Run**. The Raylib native libraries
-are pulled in automatically via the `Raylib-cs` NuGet package.
+Use **Rider** — this is a C#/.NET project. (Don't use CLion: that's for C/C++ via
+CMake and there's no `CMakeLists.txt` here.)
+
+1. **Open** the project folder (or `Sightline.csproj`) — not "New CMake project".
+2. A shared **Sightline** run configuration is committed under `.run/`, so the
+   green ▶ Run button is ready immediately on a fresh clone — just hit Run
+   (Shift+F10). It builds then launches the game.
+
+The Raylib native libraries are pulled in automatically via the `Raylib-cs`
+NuGet package (needs internet on first restore). Requires the .NET 8 SDK, which
+Rider can install/detect for you.
 
 ## Project layout
 
