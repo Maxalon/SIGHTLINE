@@ -142,7 +142,7 @@ public static class Hud
         DrawActionButtons(g, barY);
 
         // hint
-        string hint = "Click tile to MOVE  -  click hostile to FIRE  -  [Tab] next  -  [Space] center";
+        string hint = "Click tile to MOVE  -  click hostile to FIRE  -  [Tab] next  -  [5] ability";
         int hw = Raylib.MeasureText(hint, 13);
         Raylib.DrawText(hint, Cfg.ScreenW - hw - 24, Cfg.ScreenH - 30, 13, Pal.TxtDim);
     }
@@ -195,7 +195,7 @@ public static class Hud
         bool hasTargets = interactive && g.HasAnyTarget(u);
 
         var btns = new System.Collections.Generic.List<UiButton>();
-        float bx = 300, bw = 118, bh = 40, gap = 8;
+        float bx = 300, bw = 112, bh = 40, gap = 6;
 
         void Add(string id, string label, string key, bool enabled, bool sel)
         {
@@ -210,6 +210,8 @@ public static class Hud
 
         Add("shoot", "FIRE", "1", interactive && u != null && u.CanAct && u.Ammo > 0 && hasTargets, g.AimMode);
         Add("grenade", "GRENADE", "4", interactive && u != null && u.CanAct && u.Grenades > 0, g.GrenadeMode);
+        if (u != null && u.Ability != AbilityKind.None)
+            Add("ability", u.AbilityName, "5", interactive && g.CanAbility(u), u.RunGun || u.Blitz || u.Steady);
         Add("overwatch", "OVERWATCH", "2", interactive && u != null && u.CanAct && u.Ammo > 0, false);
         Add("hunker", "HUNKER", "3", interactive && u != null && u.CanAct, u != null && u.Hunkered);
         if (g.HasTerminal)
@@ -227,7 +229,7 @@ public static class Hud
         if (!g.ShowOdds) return;
         var o = g.HoverOdds;
         var m = Raylib.GetMousePosition();
-        int extras = (o.Flanked ? 1 : 0) + (o.HighGround ? 1 : 0);
+        int extras = (o.Flanked ? 1 : 0) + (o.HighGround ? 1 : 0) + (o.Steady ? 1 : 0);
         int w = 150, h = 74 + extras * 18;
         int x = (int)m.X - w / 2;
         int y = (int)m.Y - h - 18;
@@ -253,6 +255,7 @@ public static class Hud
         int fy = y + 72;
         if (o.Flanked) { Raylib.DrawText("! FLANKED", x + 12, fy, 13, Pal.Accent); fy += 18; }
         if (o.HighGround) { Raylib.DrawText("+ HIGH GROUND", x + 12, fy, 13, Pal.Good); fy += 18; }
+        if (o.Steady) { Raylib.DrawText("+ STEADY", x + 12, fy, 13, Pal.Good); fy += 18; }
     }
 
     // ---------------- turn banner sweep ----------------
@@ -281,6 +284,8 @@ public static class Hud
                     "2 actions per soldier - move, then fire (firing ends the turn).",
                     "Stand beside cover to cut enemy aim. Get flanked and you're exposed.",
                     "Seize the high ground (raised tiles) for an aim + crit edge.",
+                    "Each class has a signature ability (key 5): Run&Gun, Blitz,",
+                    "   Steady, Suppress - one charge per mission.",
                     "Kills earn promotions: better aim, more HP, more mobility.",
                     "Survivors carry their wounds and ranks to the next mission.",
                 }, "DEPLOY SQUAD");
@@ -374,7 +379,7 @@ public static class Hud
     static void DrawCenterCard(Game g, string title, string sub, Color titleCol, string[] rules, string btn)
     {
         Raylib.DrawRectangle(0, 0, Cfg.ScreenW, Cfg.ScreenH, Raylib.Fade(Pal.RGBA(5, 8, 11), 0.84f));
-        int w = 540, h = rules != null ? 392 : 240;
+        int w = 540, h = rules != null ? 152 + rules.Length * 30 + 70 : 240;
         int x = Cfg.ScreenW / 2 - w / 2, y = Cfg.ScreenH / 2 - h / 2;
         var card = new Rectangle(x, y, w, h);
         Raylib.DrawRectangleRounded(card, 0.06f, 8, Pal.Panel);

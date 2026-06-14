@@ -42,6 +42,8 @@ public static class Mission
             u.Y = PlayerSpawns[i].y;
             u.Ammo = u.Weapon.Clip;
             u.Grenades = 1;                  // refill grenade each mission
+            u.AbilityCharge = 1;             // refill signature ability each mission
+            u.Suppress = 0;
             u.OnOverwatch = false;
             u.Hunkered = false;
             u.Recoil = System.Numerics.Vector2.Zero;
@@ -216,6 +218,7 @@ public static class Mission
         var u = new Unit { Name = name, Cls = cls, Team = Team.Player, Hp = hp, MaxHp = hp, Aim = aim, Mobility = mob, Weapon = Weapon.Make(w) };
         u.Ammo = u.Weapon.Clip;
         u.Grenades = 1;
+        u.AbilityCharge = 1;
         return u;
     }
 

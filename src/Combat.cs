@@ -12,6 +12,7 @@ public struct ShotOdds
     public bool Flanked;
     public bool Hunkered;
     public bool HighGround;  // attacker fires from raised terrain onto a lower foe
+    public bool Steady;      // attacker braced (sharpshooter ability) this shot
 }
 
 /// The resolved outcome of a shot.
@@ -29,6 +30,12 @@ public static class Combat
     public const int HighGroundAim = 15;
     public const int HighGroundCrit = 10;
 
+    // Sharpshooter "Steady" ability: a braced shot.
+    public const int SteadyAim = 25;
+    public const int SteadyCrit = 20;
+    // Gunner "Suppress" ability: aim penalty inflicted on the pinned target.
+    public const int SuppressAim = 30;
+
     public static ShotOdds ComputeOdds(Grid grid, Unit a, Unit d)
     {
         float dist = Util.TileDist(a.X, a.Y, d.X, d.Y);
@@ -38,12 +45,15 @@ public static class Combat
         int hit = a.Aim + a.Weapon.AimBonus + a.Weapon.RangeMod(dist) - cover.Defense;
         if (d.Hunkered) hit -= 25;
         if (highGround) hit += HighGroundAim;
+        if (a.Steady) hit += SteadyAim;          // sharpshooter: braced shot
+        if (a.Suppress > 0) hit -= a.Suppress;   // gunner: suppressed shooter
 
         hit = Util.Clamp(hit, 3, 95);
 
         int crit = a.Weapon.CritBase;
         if (cover.Level == 0) crit += 35;       // exposed / flanked target
         if (highGround) crit += HighGroundCrit;  // shooting down rewards crits
+        if (a.Steady) crit += SteadyCrit;        // braced shot also crits harder
         if (d.Hunkered) crit = 0;               // hunkered can't be crit
         crit = Util.Clamp(crit, 0, 100);
 
@@ -57,6 +67,7 @@ public static class Combat
             Flanked = cover.Flanked,
             Hunkered = d.Hunkered,
             HighGround = highGround,
+            Steady = a.Steady,
         };
     }
 
