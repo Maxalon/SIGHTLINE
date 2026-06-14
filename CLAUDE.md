@@ -170,6 +170,9 @@ seeds (mix of WIN/LOSE, no exceptions):
   then the pod wakes + scatters to cover ("CONTACT!"). Scouting carries risk.
 - **Mission objectives:** Eliminate (default) and Evac (missions 3 & 6 — get the
   whole squad to a marked extraction zone). Shown in the HUD.
+- **Elevation / high ground:** raised plateaus (`Grid.Height`) grant +15 aim /
+  +10 crit firing down on lower targets; faux-3D platforms, height-aware overlays,
+  AI seizes the high ground. Shown in the shot tooltip ("+ HIGH GROUND").
 - **UX:** squad roster strip, end-turn confirmation, mute indicator.
 - **Recruits:** the barracks backfills empty squad slots with fresh rookies
   (`Mission.MakeRecruit`, `Run.DebriefSurvivors`) so casualties don't death-spiral.
@@ -201,7 +204,7 @@ seeds (mix of WIN/LOSE, no exceptions):
       Intro→Mission→(clear)→Barracks→NextMission… →Win after mission 6, or Lose
       on squad wipe. Autoplay auto-advances the barracks so the smoke test still
       plays whole runs. NOTE: run state is in-memory only (no save file yet).
-- [~] **4. Tactical depth.** IN PROGRESS.
+- [x] **4. Tactical depth.** DONE.
       - [x] **Grenades.** `GrenadeAnim` (src/Anim.cs): lobbed arc → AoE explosion,
             Chebyshev radius 1, ignores cover, hits BOTH teams (friendly fire),
             destroys low cover in the blast. 1 charge/soldier, refilled each
@@ -215,8 +218,16 @@ seeds (mix of WIN/LOSE, no exceptions):
             (Ai.Plan move) + "CONTACT!" banner. Shooting/grenading a dormant enemy
             also wakes its pod. Dormant enemies are skipped in `UpdateEnemy` and
             drawn dimmed with a "?" (`Renderer.DrawUnit`).
-      - [ ] Elevation / high-ground aim bonus (bigger change; deferred — needs a
-            height layer on tiles + LoS/aim tweaks).
+      - [x] **Elevation / high-ground.** DONE. `Grid.Height[,]` layer (0 ground,
+            1 high). Firing from a higher tile onto a lower one grants
+            `Combat.HighGroundAim` (+15 hit) + `HighGroundCrit` (+10), surfaced in
+            `Combat.ComputeOdds`/`ShotOdds.HighGround` and the shot tooltip
+            ("+ HIGH GROUND"). `Mission.RaisePlateau` carves 2-3 walkable plateaus
+            mid-field (skipping spawns/evac); `Renderer.DrawElevation` draws them
+            faux-3D (raised top + front wall + lit edge) and lifts cover/units that
+            stand on them (`ElevLift`); move/path/hover overlays are height-aware.
+            The enemy AI values seizing high ground (`Ai.Plan`). Movement cost is
+            unchanged (plateaus are just walkable floor).
 - [~] **5. Map variety & objectives.** IN PROGRESS.
       - [x] **Objectives.** `Objective` enum (Eliminate / Evac). Every 3rd mission
             (3 & 6) is **Evac**: a 2x2 extraction zone (`Game.EvacZone`, drawn by
@@ -249,15 +260,22 @@ Before stopping:
 4. Tell the human to open a fresh session (they'll send only `.`).
 
 ### WIP NOTES
-Done & merged: items 1 (audio), 2 (juice), 3 (campaign meta-loop), 4 grenades +
-pods, and 5 **objectives** (Eliminate/Evac). The game is feature-rich and stable —
-manual autoplay reaches a clean result across many seeds, no exceptions/timeouts.
+Done: items 1 (audio), 2 (juice), 3 (campaign meta-loop), **4 (tactical depth —
+grenades + pods + elevation, now fully complete)**, and 5 **objectives**
+(Eliminate/Evac). The game is feature-rich and stable — autoplay reaches a clean
+result across seeds with no exceptions/timeouts. NOTE: the headless autopilot is
+a weak smoke-test AI and currently LOSES most seeds (true on `main` too) — that's
+expected; the contract is "no exceptions, no TIMEOUT", not a WIN/LOSE mix.
 
 **Good next steps (any order):**
 - Item 5 leftovers: hand-authored map layouts + more objective types (VIP, hack).
 - Item 6 leftovers: keyboard tile cursor; camera pan/zoom; a settings screen.
-- Item 4 leftover: elevation / high-ground aim bonus (needs a tile height layer).
+- Item 4 stretch: a 2nd elevation tier, or let high ground see over LOW cover.
 - Persist a run to a save file under the OS user-data dir (NOT in the repo).
+- Elevation gotcha: it's a pure positioning layer — plateaus are walkable floor
+  (no climb cost). All per-tile draws that should sit on a plateau go through
+  `Renderer.ElevRect/ElevCenter` (move/path/hover/shields/cover/units); add new
+  overlays the same way or they'll render 8px low on raised tiles.
 
 Conventions: drawn strings must be ASCII (default font). Build Release + run
 `SIGHTLINE_AUTOPLAY=1` a few times before merging. Share screenshots in chat via

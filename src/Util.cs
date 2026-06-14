@@ -35,6 +35,12 @@ public static class Pal
     public static readonly Color CoverLo   = RGBA(40, 50, 64);
     public static readonly Color CoverLoTop= RGBA(58, 72, 90);
 
+    // high-ground plateaus (raised, walkable floor)
+    public static readonly Color HighA     = RGBA(46, 62, 80);
+    public static readonly Color HighB     = RGBA(52, 69, 88);
+    public static readonly Color HighSide  = RGBA(14, 19, 26);
+    public static readonly Color HighEdge  = RGBA(120, 165, 190);
+
     public static readonly Color Friend    = RGBA(56, 189, 248);
     public static readonly Color FriendDk   = RGBA(12, 74, 110);
     public static readonly Color Foe       = RGBA(248, 113, 113);

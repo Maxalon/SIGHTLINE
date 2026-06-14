@@ -7,6 +7,23 @@ namespace Sightline;
 /// Draws the battlefield, units and tactical overlays.
 public static class Renderer
 {
+    // how far raised terrain (and anything standing on it) lifts on screen
+    public const float ElevLift = 8f;
+
+    // tile draw rect/centre offset up onto the plateau top when elevated
+    static Rectangle ElevRect(Game g, int x, int y)
+    {
+        var r = Util.TileRect(x, y);
+        if (g.Grid.IsHigh(x, y)) r.Y -= ElevLift;
+        return r;
+    }
+    static Vector2 ElevCenter(Game g, int x, int y)
+    {
+        var c = Util.TileCenter(x, y);
+        if (g.Grid.IsHigh(x, y)) c.Y -= ElevLift;
+        return c;
+    }
+
     public static void DrawBoard(Game g)
     {
         // board backing
@@ -23,6 +40,7 @@ public static class Renderer
                 Raylib.DrawRectangleRec(r, ((x + y) & 1) == 0 ? Pal.FloorA : Pal.FloorB);
             }
 
+        DrawElevation(g);
         DrawMoveOverlay(g);
         DrawEvac(g);
         DrawGridLines(g);
@@ -36,6 +54,35 @@ public static class Renderer
         g.ActiveAnim?.Draw(g);
         g.Fx.Draw();
         g.Fx.DrawText();
+    }
+
+    // Raised plateaus: faux-3D platform with a front wall + lit top edge so the
+    // high ground reads clearly. Drawn back-to-front (top rows first).
+    static void DrawElevation(Game g)
+    {
+        for (int y = 0; y < g.Grid.H; y++)
+            for (int x = 0; x < g.Grid.W; x++)
+            {
+                if (!g.Grid.IsHigh(x, y)) continue;
+                var r = Util.TileRect(x, y);
+                // exposed front wall (only where the tile below isn't also raised)
+                if (!g.Grid.IsHigh(x, y + 1))
+                    Raylib.DrawRectangleRec(
+                        new Rectangle(r.X, r.Y + r.Height - ElevLift, r.Width, ElevLift + 3),
+                        Pal.HighSide);
+                // raised top face
+                var top = new Rectangle(r.X, r.Y - ElevLift, r.Width, r.Height);
+                Raylib.DrawRectangleRec(top, ((x + y) & 1) == 0 ? Pal.HighA : Pal.HighB);
+                // lit front edge of the top face
+                Raylib.DrawLineEx(new Vector2(top.X, top.Y + top.Height - 1),
+                                  new Vector2(top.X + top.Width, top.Y + top.Height - 1),
+                                  2f, Raylib.Fade(Pal.HighEdge, 0.5f));
+                // top-edge highlight where it meets open air above
+                if (!g.Grid.IsHigh(x, y - 1))
+                    Raylib.DrawLineEx(new Vector2(top.X, top.Y),
+                                      new Vector2(top.X + top.Width, top.Y),
+                                      1.5f, Raylib.Fade(Pal.HighEdge, 0.35f));
+            }
     }
 
     static void DrawEvac(Game g)
@@ -81,7 +128,7 @@ public static class Renderer
                 if (c <= 0) continue;
                 bool dash = c > budget;
                 if (dash && g.Selected.ActionsLeft < 2) continue; // can't dash with 1 action
-                var r = Util.TileRect(x, y);
+                var r = ElevRect(g, x, y);
                 Raylib.DrawRectangleRec(r, dash ? Pal.MoveYellow : Pal.MoveBlue);
             }
     }
@@ -89,16 +136,16 @@ public static class Renderer
     static void DrawPathPreview(Game g)
     {
         if (g.PathPreview == null || g.PathPreview.Count == 0 || g.Selected == null) return;
-        Vector2 prev = g.Selected.Pos;
+        Vector2 prev = ElevCenter(g, g.Selected.X, g.Selected.Y);
         foreach (var (x, y) in g.PathPreview)
         {
-            var c = Util.TileCenter(x, y);
+            var c = ElevCenter(g, x, y);
             Raylib.DrawLineEx(prev, c, 2.5f, Raylib.Fade(Pal.Accent, 0.55f));
             prev = c;
         }
         foreach (var (x, y) in g.PathPreview)
         {
-            var c = Util.TileCenter(x, y);
+            var c = ElevCenter(g, x, y);
             Raylib.DrawCircleV(c, 3.5f, Raylib.Fade(Pal.Accent, 0.8f));
         }
     }
@@ -111,6 +158,7 @@ public static class Renderer
                 var t = g.Grid.Tiles[x, y];
                 if (t == TileType.Floor) continue;
                 var r = Util.TileRect(x, y);
+                if (g.Grid.IsHigh(x, y)) r.Y -= ElevLift;   // sit cover on the plateau top
                 bool high = t == TileType.HighCover;
                 float inset = 5f;
                 float lift = high ? 16f : 8f;
@@ -140,7 +188,7 @@ public static class Renderer
         if (!g.IsPlayerInteractive()) return;
         if (g.HoverValid && g.Grid.IsFloor(g.HoverX, g.HoverY))
         {
-            var r = Util.TileRect(g.HoverX, g.HoverY);
+            var r = ElevRect(g, g.HoverX, g.HoverY);
             Raylib.DrawRectangleLinesEx(new Rectangle(r.X + 1, r.Y + 1, r.Width - 2, r.Height - 2),
                                         2f, Raylib.Fade(Pal.Txt, 0.5f));
             // preview cover the selected unit would gain here
@@ -152,7 +200,7 @@ public static class Renderer
     static void DrawShields(Game g, int tx, int ty, float alpha)
     {
         int[,] dirs = { { 0, -1 }, { 1, 0 }, { 0, 1 }, { -1, 0 } };
-        var center = Util.TileCenter(tx, ty);
+        var center = ElevCenter(g, tx, ty);
         for (int i = 0; i < 4; i++)
         {
             int nx = tx + dirs[i, 0], ny = ty + dirs[i, 1];
@@ -181,17 +229,21 @@ public static class Renderer
         Color main = friend ? Pal.Friend : (dormant ? Pal.RGBA(120, 96, 96) : Pal.Foe);
         Color dark = friend ? Pal.FriendDk : (dormant ? Pal.RGBA(46, 38, 42) : Pal.FoeDk);
 
-        float bob = MathF.Sin((float)Raylib.GetTime() * 2.2f + u.Bob) * 1.6f;
-        Vector2 p = u.Pos + new Vector2(0, bob) + u.Recoil;
+        // lift the figure when it stands on raised terrain
+        float hlift = g.Grid.IsHigh(u.X, u.Y) ? ElevLift : 0f;
+        var foot = u.Pos - new Vector2(0, hlift);
 
-        // shadow
-        Raylib.DrawEllipse((int)u.Pos.X, (int)(u.Pos.Y + 17), 15, 6, Raylib.Fade(Pal.RGBA(0, 0, 0), 0.35f));
+        float bob = MathF.Sin((float)Raylib.GetTime() * 2.2f + u.Bob) * 1.6f;
+        Vector2 p = foot + new Vector2(0, bob) + u.Recoil;
+
+        // shadow (sits on the platform top when elevated)
+        Raylib.DrawEllipse((int)foot.X, (int)(foot.Y + 17), 15, 6, Raylib.Fade(Pal.RGBA(0, 0, 0), 0.35f));
 
         // selection ring
         if (g.Selected == u)
         {
             float pulse = 0.5f + 0.5f * MathF.Sin((float)Raylib.GetTime() * 5f);
-            Raylib.DrawRing(u.Pos + new Vector2(0, 17), 17, 21, 0, 360, 48,
+            Raylib.DrawRing(foot + new Vector2(0, 17), 17, 21, 0, 360, 48,
                             Raylib.Fade(Pal.Accent, 0.4f + 0.4f * pulse));
         }
 

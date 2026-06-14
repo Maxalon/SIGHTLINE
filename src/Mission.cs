@@ -28,7 +28,10 @@ public static class Mission
         enemies.Clear();
         for (int x = 0; x < grid.W; x++)
             for (int y = 0; y < grid.H; y++)
+            {
                 grid.Tiles[x, y] = TileType.Floor;
+                grid.Height[x, y] = 0;
+            }
 
         // place players at left spawns, refresh per-mission state (HP persists)
         for (int i = 0; i < players.Count && i < PlayerSpawns.Length; i++)
@@ -51,6 +54,11 @@ public static class Mission
         foreach (var u in players) occupied.Add((u.X, u.Y));
         foreach (var u in enemies) occupied.Add((u.X, u.Y));
         foreach (var t in evacSet) occupied.Add(t);   // keep the extraction zone clear of cover
+
+        // contested high ground: raised plateaus in the mid-field (more on later missions)
+        RaisePlateau(grid, evacSet, 7, 3, 2, 2);
+        RaisePlateau(grid, evacSet, 11, 7, 2, 2);
+        if (missionNum >= 3) RaisePlateau(grid, evacSet, Util.RandInt(6, 11), Util.RandInt(1, 8), 2, 2);
 
         // central structures for sightlines
         PlaceBlock(grid, occupied, 8, 2, TileType.HighCover, 1, 3);
@@ -155,6 +163,20 @@ public static class Mission
                 if (!g.InBounds(nx, ny) || occ.Contains((nx, ny))) continue;
                 g.Tiles[nx, ny] = t;
                 occ.Add((nx, ny));
+            }
+    }
+
+    /// Raise a rectangular patch of ground to high ground (walkable plateau).
+    /// Skips the extraction zone and the left-edge spawn columns.
+    static void RaisePlateau(Grid g, HashSet<(int, int)> evac, int x, int y, int w, int h)
+    {
+        for (int dx = 0; dx < w; dx++)
+            for (int dy = 0; dy < h; dy++)
+            {
+                int nx = x + dx, ny = y + dy;
+                if (!g.InBounds(nx, ny) || nx < 3) continue;
+                if (evac.Contains((nx, ny))) continue;
+                g.Height[nx, ny] = 1;
             }
     }
 
