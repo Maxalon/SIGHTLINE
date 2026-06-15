@@ -40,6 +40,7 @@ public static class Program
         Raylib.SetConfigFlags(flags);
         Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "SIGHTLINE — Tactical Squad Combat");
         Raylib.SetExitKey(KeyboardKey.Null);       // ESC cancels aim/grenade & opens pause; never quits the app
+        Display.Init(!(shot || autoplay));         // window scaling/fullscreen (off for the headless harness)
         Raylib.SetTargetFPS(autoplay ? 0 : 60);   // uncapped during the smoke test
         Audio.Init();
 
@@ -68,13 +69,15 @@ public static class Program
         while (!Raylib.WindowShouldClose())
         {
             float dt = (shot || autoplay) ? 1f / 60f : Raylib.GetFrameTime();
+            Display.UpdateMouse();
             if (helpShot) Raylib.SetMousePosition(592, 740);   // park cursor on the ability button
             game.Update(dt);
 
-            Raylib.BeginDrawing();
-            if (autoplay) Raylib.ClearBackground(Pal.Bg);  // skip heavy draw during smoke test
-            else game.Draw();
-            Raylib.EndDrawing();
+            Display.RenderFrame(() =>
+            {
+                if (autoplay) Raylib.ClearBackground(Pal.Bg);  // skip heavy draw during smoke test
+                else game.Draw();
+            });
 
             if (shot || autoplay) frame++;
             if (shot)
@@ -90,6 +93,7 @@ public static class Program
             }
         }
 
+        Display.Shutdown();
         Audio.Shutdown();
         Raylib.CloseWindow();
     }

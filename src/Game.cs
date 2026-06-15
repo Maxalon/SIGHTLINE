@@ -379,6 +379,7 @@ public class Game
         if (EditingTag) { UpdateTagEditor(); return; }
 
         if (Raylib.IsKeyPressed(KeyboardKey.M)) Audio.ToggleMute();
+        if (!AutoPlay && Raylib.IsKeyPressed(KeyboardKey.F)) Display.ToggleFullscreen();
 
         // camera zoom-punch always relaxes; hit-stop freezes the rest of the sim
         _camPulse *= MathF.Exp(-dt * 11f);
@@ -857,10 +858,12 @@ public class Game
         if (!Raylib.IsMouseButtonPressed(MouseButton.Left)) return;
         var m = Raylib.GetMousePosition();
         if (Raylib.CheckCollisionPointRec(m, Hud.PauseResume)) Paused = false;
+        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseFullscreen)) Display.ToggleFullscreen();
+        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseWindow)) Display.CycleSize();
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseMute)) Audio.ToggleMute();
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseShake)) Fx.ShakeOn = !Fx.ShakeOn;
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseThreat)) ShowThreatPref = !ShowThreatPref;
-        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseAbandon)) { Paused = false; Phase = Phase.Lose; Audio.Play("lose"); }
+        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseAbandon)) { Paused = false; Phase = Phase.Lose; LoseTitle = "RUN ABANDONED"; LoseReason = "You called off the campaign."; Audio.Play("lose"); }
     }
 
     void DoAction(string id)
