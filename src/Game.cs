@@ -167,6 +167,9 @@ public class Game
 
     void NextMission() => SetupMission(_run.Mission + 1);
 
+    /// Harness hook (screenshot only): reveal all dormant enemies.
+    public void DebugWakeAll() { foreach (var e in Enemies) if (e.Alive) e.Active = true; }
+
     /// Harness hook (screenshot only): force a barracks rank-up perk choice.
     public void DebugBarracksPerk()
     {
@@ -989,6 +992,15 @@ public class Game
             if (_aiIdx >= _aiUnits.Count) { StartPlayerTurn(); return; }
 
             var e = _aiUnits[_aiIdx];
+            // elite boss: enrage once when first acting below half HP
+            if (e.Cls == "ELITE" && !e.Enraged && e.Hp <= e.MaxHp / 2)
+            {
+                e.Enraged = true;
+                e.Aim += 15; e.Mobility += 2;
+                Fx.PopText(e.Pos + new Vector2(0, -34), "ENRAGED", Pal.Foe, 20f);
+                Fx.AddShake(8f);
+                ShowBanner("WARLORD ENRAGED", true);
+            }
             _aiPlan = Ai.Plan(this, e);
 
             if (_aiPlan.Path.Count > 0)

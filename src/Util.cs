@@ -45,6 +45,8 @@ public static class Pal
     public static readonly Color FriendDk   = RGBA(12, 74, 110);
     public static readonly Color Foe       = RGBA(248, 113, 113);
     public static readonly Color FoeDk      = RGBA(120, 30, 30);
+    public static readonly Color Elite     = RGBA(255, 140, 90);   // capstone boss
+    public static readonly Color EliteDk    = RGBA(120, 50, 20);
     public static readonly Color Accent    = RGBA(251, 191, 36);
     public static readonly Color Good      = RGBA(74, 222, 128);
 

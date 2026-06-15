@@ -165,17 +165,27 @@ public static class Mission
             { y = Util.RandInt(0, grid.H - 1); x = grid.W - 2 - Util.RandInt(0, 2); }
             used.Add((x, y));
 
+            bool finalMission = n >= Run.MaxMissions;
             float r = Util.RandF();
             Unit e;
-            if (n >= 2 && r < 0.20f)
+            if (finalMission && i == 0)         // capstone elite (named boss)
+                e = MakeHostile("WARLORD", "ELITE", WeaponKind.Lmg, 20 + n * 2, 72, 6, x, y);
+            else if (n >= 3 && r < 0.12f)       // immobile overwatch nest
+                e = MakeHostile("SENTRY", "TURRET", WeaponKind.Lmg, 6 + bump, 66 + bump, 0, x, y);
+            else if (n >= 2 && r < 0.27f)       // long-range marksman
+                e = MakeHostile("VIPER", "SNIPER", WeaponKind.Sniper, 4 + bump, 62 + bump, 5, x, y);
+            else if (n >= 3 && r < 0.42f)       // charging melee bruiser
+                e = MakeHostile("REAVER", "BERSERKER", WeaponKind.Shotgun, 12 + bump * 2, 58 + bump, 8, x, y);
+            else if (n >= 2 && r < 0.57f)
                 e = MakeHostile("OGRE", "BRUISER", WeaponKind.Lmg, 9 + bump * 2, 56 + bump, 5, x, y);
-            else if (r < 0.32f)
+            else if (r < 0.74f)
                 e = MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 58 + bump, 8, x, y);
             else
                 e = MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 60 + bump, 6, x, y);
-            e.Aim = Math.Min(82, e.Aim);
-            // from mission 2 on, some hostiles carry a single frag (bruisers always)
-            if (n >= 2 && (e.Cls == "BRUISER" || Util.Roll(22))) e.Grenades = 1;
+            if (e.Cls != "ELITE") e.Aim = Math.Min(82, e.Aim);
+            // grenades: bruisers + the elite always; some others from mission 2 on
+            if (e.Cls == "ELITE") e.Grenades = 2;
+            else if (n >= 2 && (e.Cls == "BRUISER" || Util.Roll(22))) e.Grenades = 1;
             e.Active = false;          // dormant until sighted
             e.PodId = i / 2;           // pods of ~2
             enemies.Add(e);

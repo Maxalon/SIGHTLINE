@@ -304,9 +304,10 @@ public static class Renderer
         if (!u.Alive) return;
         bool friend = u.Team == Team.Player;
         bool vip = friend && u.IsVip;
+        bool elite = u.Team == Team.Enemy && u.Cls == "ELITE";
         bool dormant = u.Team == Team.Enemy && !u.Active;
-        Color main = vip ? Pal.VipGold : (friend ? Pal.Friend : (dormant ? Pal.RGBA(120, 96, 96) : Pal.Foe));
-        Color dark = vip ? Pal.VipDk  : (friend ? Pal.FriendDk : (dormant ? Pal.RGBA(46, 38, 42) : Pal.FoeDk));
+        Color main = vip ? Pal.VipGold : (friend ? Pal.Friend : (dormant ? Pal.RGBA(120, 96, 96) : (elite ? Pal.Elite : Pal.Foe)));
+        Color dark = vip ? Pal.VipDk  : (friend ? Pal.FriendDk : (dormant ? Pal.RGBA(46, 38, 42) : (elite ? Pal.EliteDk : Pal.FoeDk)));
 
         // lift the figure when it stands on raised terrain
         float hlift = g.Grid.IsHigh(u.X, u.Y) ? ElevLift : 0f;
@@ -336,10 +337,12 @@ public static class Renderer
         int sides = u.Cls switch
         {
             "ASSAULT" => 3, "RANGER" => 3, "SHARPSHOOTER" => 4,
-            "GUNNER" => 4, "BRUISER" => 6, "SCOUT" => 3, _ => 5,
+            "GUNNER" => 4, "BRUISER" => 6, "SCOUT" => 3,
+            "SNIPER" => 4, "TURRET" => 4, "BERSERKER" => 6, "ELITE" => 8, _ => 5,
         };
-        float rot = u.Cls == "SHARPSHOOTER" ? 45f : (sides == 3 ? -90f : 0f);
-        Raylib.DrawPoly(p, sides, 7.5f, rot, main);
+        float rot = (u.Cls == "SHARPSHOOTER" || u.Cls == "SNIPER") ? 45f : (sides == 3 ? -90f : 0f);
+        if (elite) Raylib.DrawRing(p, 18f, 20.5f, 0, 360, 40, Raylib.Fade(Pal.Elite, 0.55f));
+        Raylib.DrawPoly(p, sides, elite ? 9f : 7.5f, rot, main);
 
         // dormant enemies: show an "unaware" marker, no facing/pips/status
         if (dormant)
@@ -375,6 +378,13 @@ public static class Renderer
         else if (u.Steady) Raylib.DrawText("AIM", (int)(p.X + 13), (int)(p.Y - 30), 11, Pal.Good);
         if (u.Team == Team.Enemy && u.Suppress > 0)
             Raylib.DrawText("SUPP", (int)(p.X + 12), (int)(p.Y - 30), 11, Pal.Foe);
+
+        // elite boss name / rage tag
+        if (elite)
+        {
+            string tag = u.Enraged ? "ENRAGED" : "WARLORD";
+            Raylib.DrawText(tag, (int)(p.X - Raylib.MeasureText(tag, 11) / 2), (int)(p.Y - 42), 11, Pal.Elite);
+        }
 
         // VIP marker: gold diamond + tag above the asset
         if (vip)

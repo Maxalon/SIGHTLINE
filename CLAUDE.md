@@ -175,6 +175,10 @@ seeds (mix of WIN/LOSE, no exceptions):
   frags clustered/covered soldiers (from mission 2; never hits its own).
 - **Activation pods:** enemies dormant (dimmed, "?") until a soldier sights them,
   then the pod wakes + scatters to cover ("CONTACT!"). Scouting carries risk.
+- **Enemy variety:** Grunt / Scout / Bruiser plus **Sniper** (kites to range),
+  **Turret** (immobile overwatch nest), **Berserker** (tanky shotgun rusher), and a
+  capstone **Elite boss** (WARLORD) on the final mission with 2 grenades and a
+  one-time low-HP RAGE. Distinct AI temperaments in `Ai.Plan`; distinct glyphs.
 - **Mission objectives:** Eliminate, Hack (reach the TERMINAL and hack it down,
   HACK action / key H), Evac (get the whole squad to the extraction zone), and
   **Escort** (walk a fragile gold VIP to the extraction zone alive — losing the
@@ -354,12 +358,17 @@ the player meaningful long-game decisions. Ordered by impact:
       Sprinter (+1 mob), Adrenal (+1 ability charge). Stat perks apply on grant;
       passives read in `Combat.ComputeOdds`/`Mission.Build`. Maxed soldiers fall
       back to a stat bump. Barracks roster shows earned perk codes.
-- [ ] **B. Enemy variety + an elite/boss.** Only Grunt/Scout/Bruiser exist. Add
-      archetypes with distinct AI: a **Sniper** (holds max range, high crit), a
-      **Sentry/Turret** (immobile overwatch nest), a **Medic** (heals/revives
-      allies — changes target priority), a **Berserker** (charges + melee). Cap the
-      campaign with an **elite** on mission 6 (more HP, an ability, a name). Mostly
-      new `Mission.MakeHostile` recipes + small `Ai.cs` behavior branches.
+- [x] **B. Enemy variety + an elite/boss.** DONE. New `Mission.SpawnEnemies`
+      archetypes (gated by mission #): **SNIPER** (VIPER, sniper rifle, kites to
+      range + height — `Ai.Plan` distance bonus), **TURRET** (SENTRY, Mobility 0 so
+      it can't move — sits and overwatches for free), **BERSERKER** (REAVER, tanky
+      shotgun rusher — `Ai.Plan` 3.4x advance weight; ELITE charges too). Capstone
+      **ELITE** boss on the final mission (WARLORD: 20+2n HP, 2 grenades, high aim,
+      a one-time low-HP **RAGE** in `Game.UpdateEnemy` that buffs aim/mobility +
+      "WARLORD ENRAGED" banner). Renderer gives each a distinct glyph; the elite is
+      a larger orange figure with a ring + name/rage tag (`Pal.Elite`). A
+      **Medic** archetype is still open (would need an enemy heal action). Screenshot
+      hook `SIGHTLINE_WAKE` reveals dormant pods.
 - [ ] **C. Strategic between-mission layer.** Turn the barracks into a real meta
       node: **choose the next mission** from 2-3 cards (objective + risk/reward +
       modifier), and spend a light resource (intel/supplies earned from kills/secondary

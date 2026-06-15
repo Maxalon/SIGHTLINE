@@ -71,13 +71,25 @@ public static class Ai
 
             // cover quality at this tile vs the nearest player
             var cover = g.Grid.GetCover(tx, ty, nearest.X, nearest.Y);
+            int distNearest = Util.ChebyDist(tx, ty, nearest.X, nearest.Y);
             float score = 0;
             if (shoot != null) score += 100 + bestHit;          // having a shot is king
             score += cover.Level * 18;                           // value cover
             score += g.Grid.HeightAt(tx, ty) * 14;               // seize the high ground
             if (cover.Flanked) score -= 25;
             score -= actionsToReach * 6;                         // prefer cheaper moves slightly
-            score -= nd > 0 ? Util.ChebyDist(tx, ty, nearest.X, nearest.Y) * 1.4f : 0; // advance
+
+            // archetype movement temperament
+            if (e.Cls == "SNIPER")                               // kite: hold distance, love height
+            {
+                score += Math.Min(distNearest, e.Weapon.MaxRange) * 2.0f;
+                score += g.Grid.HeightAt(tx, ty) * 12;
+            }
+            else
+            {
+                float advW = (e.Cls == "BERSERKER" || e.Cls == "ELITE") ? 3.4f : 1.4f; // charge in
+                score -= nd > 0 ? distNearest * advW : 0;
+            }
             if (vip != null) score -= Util.ChebyDist(tx, ty, vip.X, vip.Y) * 1.0f;     // close on the asset
             score += Util.RandRange(0f, 3f);                     // tie-break jitter
 
