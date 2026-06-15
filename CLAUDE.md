@@ -430,9 +430,10 @@ the player meaningful long-game decisions. Ordered by impact:
       (blended toward `Biome.Tint` via `Pal.Mix` in `Renderer.DrawCover`/
       `DrawElevation`). Still open: *themed authored arenas* per biome (`Maps.cs`).
 
-Supporting polish (any time): distinct "VIP EXTRACTED/LOST" end cards; a 2nd
-elevation tier; secondary objectives; more authored arenas (and *themed-per-biome*
-arena selection); more requisition options (recruits/gear) for the shop.
+Supporting polish (any time): a distinct "VIP EXTRACTED" win flourish (the LOST/
+wipe lose cards are now distinct via `Game.LoseTitle/LoseReason`); a 2nd elevation
+tier; secondary objectives; more authored arenas (and *themed-per-biome* arena
+selection); more requisition options (recruits/gear) for the shop.
 
 ---
 
@@ -512,6 +513,10 @@ Harness screenshot hooks (all `shot`-only, in `Program.cs`):
 the CONTINUE button shows), **`SIGHTLINE_SHOP`** (barracks requisition screen). Plus
 non-shot **`SIGHTLINE_SAVETEST=1`** → prints `SAVETEST: PASS/FAIL` (save/load
 round-trip; no window).
+
+**Accurate run-over card (this session).** The lose screen now reads the real cause
+via `Game.LoseTitle`/`LoseReason` (set in `LoseRun`): "RUN OVER / squad fell" on a
+wipe vs "VIP LOST / asset was lost" on an escort failure (was always "squad fell").
 
 **High ground sees over low cover (this session).** `Combat.ComputeOdds` now
 negates a target's LOW cover when the attacker fires from high ground (high cover
