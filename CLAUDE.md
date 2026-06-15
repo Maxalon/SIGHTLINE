@@ -196,8 +196,10 @@ seeds (mix of WIN/LOSE, no exceptions):
   always reachable. Plus **per-mission biomes** (`Biome`: STEEL/ARID/TUNDRA/VERDANT/
   ASH/VOID) that retint the floor/grid so each mission reads as a distinct place.
 - **Elevation / high ground:** raised plateaus (`Grid.Height`) grant +15 aim /
-  +10 crit firing down on lower targets; faux-3D platforms, height-aware overlays,
-  AI seizes the high ground. Shown in the shot tooltip ("+ HIGH GROUND").
+  +10 crit firing down on lower targets AND **see over LOW cover** (negate the
+  target's low cover; high cover still blocks); faux-3D platforms, height-aware
+  overlays, AI seizes the high ground. Tooltip shows "+ HIGH GROUND" / "+ OVER LOW
+  COVER".
 - **UX:** squad roster strip, end-turn confirmation, mute indicator, threat
   preview (red pips on exposed reachable tiles while positioning), **camera
   zoom/pan** (wheel + middle-drag, C to reset), a **keyboard tile cursor**
@@ -265,7 +267,10 @@ seeds (mix of WIN/LOSE, no exceptions):
             1 high). Firing from a higher tile onto a lower one grants
             `Combat.HighGroundAim` (+15 hit) + `HighGroundCrit` (+10), surfaced in
             `Combat.ComputeOdds`/`ShotOdds.HighGround` and the shot tooltip
-            ("+ HIGH GROUND"). `Mission.RaisePlateau` carves 2-3 walkable plateaus
+            ("+ HIGH GROUND"). High ground also **sees over LOW cover**
+            (`ShotOdds.SeesOver`: negates a low-cover target's defense/flank, keeps
+            high cover; tooltip "+ OVER LOW COVER"; verified by `SIGHTLINE_COMBATTEST`).
+            `Mission.RaisePlateau` carves 2-3 walkable plateaus
             mid-field (skipping spawns/evac); `Renderer.DrawElevation` draws them
             faux-3D (raised top + front wall + lit edge) and lifts cover/units that
             stand on them (`ElevLift`); move/path/hover overlays are height-aware.
@@ -426,9 +431,8 @@ the player meaningful long-game decisions. Ordered by impact:
       `DrawElevation`). Still open: *themed authored arenas* per biome (`Maps.cs`).
 
 Supporting polish (any time): distinct "VIP EXTRACTED/LOST" end cards; a 2nd
-elevation tier; high ground seeing over LOW cover; secondary objectives; more
-authored arenas (and *themed-per-biome* arena selection); more requisition options
-(recruits/gear) for the shop.
+elevation tier; secondary objectives; more authored arenas (and *themed-per-biome*
+arena selection); more requisition options (recruits/gear) for the shop.
 
 ---
 
@@ -508,6 +512,12 @@ Harness screenshot hooks (all `shot`-only, in `Program.cs`):
 the CONTINUE button shows), **`SIGHTLINE_SHOP`** (barracks requisition screen). Plus
 non-shot **`SIGHTLINE_SAVETEST=1`** → prints `SAVETEST: PASS/FAIL` (save/load
 round-trip; no window).
+
+**High ground sees over low cover (this session).** `Combat.ComputeOdds` now
+negates a target's LOW cover when the attacker fires from high ground (high cover
+still blocks); `ShotOdds.SeesOver` + tooltip "+ OVER LOW COVER". The AI benefits
+automatically (it scores odds via `ComputeOdds`). Verified by
+`SIGHTLINE_COMBATTEST=1` -> `COMBATTEST: PASS`.
 
 **More arenas (this session).** `Maps.cs` grew from 2 to 5 hand-authored layouts
 (PILLARS / CHEVRON / CITADEL added). Verified each applies (connectivity guard
