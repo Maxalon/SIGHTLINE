@@ -10,6 +10,9 @@ public enum WeaponKind { Rifle, Shotgun, Sniper, Lmg, Smg }
 /// Per-class signature ability (self-cast, one charge per mission).
 public enum AbilityKind { None, RunGun, Blitz, Steady, Suppress }
 
+/// Promotion perks: a soldier picks one each rank-up (see Run / barracks).
+public enum Perk { LockOn, Hardened, Reflexes, Bandolier, CloseQuarters, Marksman, Deadeye, Tank, Sprinter, Adrenal }
+
 public class Weapon
 {
     public string Name;
@@ -78,6 +81,10 @@ public class Unit
     public bool Steady;         // sharpshooter: next shot gets +aim/+crit
     public int  Suppress;       // gunner debuff currently ON this unit (aim penalty)
 
+    // promotion perks (persist across the run); pick one per rank-up
+    public System.Collections.Generic.List<Perk> Perks = new();
+    public bool HasPerk(Perk p) => Perks.Contains(p);
+
     public AbilityKind Ability => AbilityKindFor(Cls);
     public string AbilityName => Ability switch
     {
@@ -132,6 +139,12 @@ public class Unit
         Pos = Util.TileCenter(X, Y);
     }
 
+    // perk magnitudes (kept here so Combat/Mission/Hud read one source)
+    public const int PerkAim = 15;       // LockOn / CloseQuarters / Marksman
+    public const int PerkCrit = 15;      // Deadeye
+    public const int CloseRange = 4;     // CloseQuarters threshold (tiles)
+    public const int LongRange = 7;      // Marksman threshold (tiles)
+
     public void BeginTurn()
     {
         ActionsLeft = 2;
@@ -144,4 +157,59 @@ public class Unit
         // note: Suppress (a debuff applied by an enemy gunner) is cleared on the
         // victim's owner's next turn, NOT here, so it bites during the turn it's set.
     }
+}
+
+/// Names + one-line descriptions for promotion perks, and the perk pool.
+public static class PerkDef
+{
+    public static readonly Perk[] All =
+    {
+        Perk.LockOn, Perk.Hardened, Perk.Reflexes, Perk.Bandolier, Perk.CloseQuarters,
+        Perk.Marksman, Perk.Deadeye, Perk.Tank, Perk.Sprinter, Perk.Adrenal,
+    };
+
+    public static string Name(Perk p) => p switch
+    {
+        Perk.LockOn => "LOCK-ON",
+        Perk.Hardened => "HARDENED",
+        Perk.Reflexes => "REFLEXES",
+        Perk.Bandolier => "BANDOLIER",
+        Perk.CloseQuarters => "CLOSE QUARTERS",
+        Perk.Marksman => "MARKSMAN",
+        Perk.Deadeye => "DEADEYE",
+        Perk.Tank => "TANK",
+        Perk.Sprinter => "SPRINTER",
+        Perk.Adrenal => "ADRENAL",
+        _ => "PERK",
+    };
+
+    public static string Code(Perk p) => p switch
+    {
+        Perk.LockOn => "LCK",
+        Perk.Hardened => "HRD",
+        Perk.Reflexes => "RFX",
+        Perk.Bandolier => "BND",
+        Perk.CloseQuarters => "CQB",
+        Perk.Marksman => "MRK",
+        Perk.Deadeye => "DDE",
+        Perk.Tank => "TNK",
+        Perk.Sprinter => "SPR",
+        Perk.Adrenal => "ADR",
+        _ => "?",
+    };
+
+    public static string Desc(Perk p) => p switch
+    {
+        Perk.LockOn => "+15 aim vs exposed targets",
+        Perk.Hardened => "-1 damage taken",
+        Perk.Reflexes => "overwatch shots rarely miss",
+        Perk.Bandolier => "+1 grenade each mission",
+        Perk.CloseQuarters => "+15 aim within 4 tiles",
+        Perk.Marksman => "+15 aim beyond 7 tiles",
+        Perk.Deadeye => "+15 crit chance",
+        Perk.Tank => "+3 max HP",
+        Perk.Sprinter => "+1 mobility",
+        Perk.Adrenal => "+1 ability charge each mission",
+        _ => "",
+    };
 }

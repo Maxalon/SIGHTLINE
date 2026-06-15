@@ -206,6 +206,7 @@ public class GrenadeAnim : Anim
             if (Util.ChebyDist(u.X, u.Y, Tx, Ty) > Radius) continue;
             if (u.Team == Team.Enemy && !u.Active) wokePods.Add(u.PodId);
             int dmg = Util.RandInt(3, 5);
+            if (u.HasPerk(Perk.Hardened)) dmg = Math.Max(1, dmg - 1);
             u.Hp -= dmg;
             u.Flash = 1f;
             var kick = u.Pos - _to;
