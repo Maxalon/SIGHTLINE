@@ -176,6 +176,9 @@ seeds (mix of WIN/LOSE, no exceptions):
   frags clustered/covered soldiers (from mission 2; never hits its own).
 - **Activation pods:** enemies dormant (dimmed, "?") until a soldier sights them,
   then the pod wakes + scatters to cover ("CONTACT!"). Scouting carries risk.
+- **Run save/load:** the campaign is checkpointed to the OS user-data dir at each
+  mission start (`src/SaveGame.cs`); the intro offers **CONTINUE RUN** (key C) to
+  resume. The save is cleared when a run ends.
 - **Enemy variety:** Grunt / Scout / Bruiser plus **Sniper** (kites to range),
   **Turret** (immobile overwatch nest), **Berserker** (tanky shotgun rusher), and a
   capstone **Elite boss** (WARLORD) on the final mission with 2 grenades and a
@@ -384,9 +387,19 @@ the player meaningful long-game decisions. Ordered by impact:
 - [ ] **D. Procedural music + ambience.** Audio is SFX-only. A synthesised, layered
       ambient/combat track (allowed: procedural only) would lift "feels good"
       enormously. Build on `src/Audio.cs` (it already synth's PCM in memory).
-- [ ] **E. Run persistence (save/load).** Serialize the `Run` to the OS user-data
-      dir (NOT the repo) so a campaign survives quitting. Lower urgency (a run is
-      ~one sitting) but expected of a roguelite; do after the loop has more depth.
+- [x] **E. Run persistence (save/load).** DONE. `src/SaveGame.cs` serialises the
+      `Run` (squad incl. perks/weapon/rank/HP + mission # + the active deployment
+      card) to the OS user-data dir (`ApplicationData/Sightline/save.json`, NOT the
+      repo) via `System.Text.Json` (compact DTOs; transient per-mission state is
+      rebuilt by `Mission.Build`). The run is **checkpointed at each mission start**
+      (`Game.SetupMission`) and the save is **deleted when a run ends** (win in
+      `EnterBarracks`, wipe via `Game.LoseRun`). The intro shows a **CONTINUE RUN**
+      button (key **C**) when `SaveGame.Exists` (`Game.ContinueRun` reloads + resumes
+      the current mission from its start; `Hud.OverlayBtn2`). All file I/O is gated
+      behind `Game.NoPersist` (set by the harness) so the smoke test never touches
+      disk. Verified: `SIGHTLINE_SAVETEST=1` round-trips squad/perks/weapon/card;
+      `SIGHTLINE_INTRO=1` screenshots the CONTINUE button. NOTE: CONTINUE resumes the
+      *last-started* mission from its start (mid-mission progress is not saved).
 - [x] **F. Biome/visual variety.** DONE (palette swaps). `Biome` (Util.cs) defines
       a per-mission floor checker + grid/edge tint; `Biome.For(n)` cycles STEEL /
       ARID / TUNDRA / VERDANT / ASH / VOID so each mission reads as a distinct place.
@@ -441,20 +454,31 @@ now reloads/grenades a squatter instead of hunkering forever, and a turn-based
 `AutoStallCheck` force-wakes a dormant pod if no progress is made for 10 player
 turns — together these eliminate the rare deep-campaign TIMEOUT.
 
-**Phase 2 progress (this session):** A (perk promotions), B (enemy variety +
-elite boss), C (deployment-choice cards), and F (biome palettes) are all DONE and
-merged to `main`. Remaining Phase 2: **D. Procedural music** (deferred here — it
-CANNOT be verified in this sandbox: no audio device, `InitAudioDevice` fails, so
-it'd be a blind ship; do it where you can actually hear it, building on the PCM
-synth in `src/Audio.cs`), and **E. Run save/load** (heavier plumbing: serialize
-`Run` — squad incl. perks/ability/weapon — to the OS user-data dir, add a CONTINUE
-on the intro; verify by save→reload). Smaller open follow-ups: a persistent
-intel currency + a barracks spend screen (the unfinished half of C), biome-tinted
-cover/plateaus + themed authored arenas (F), and a MEDIC enemy archetype (B).
+**Phase 2 progress:** A (perk promotions), B (enemy variety + elite boss),
+C (deployment-choice cards), **E (run save/load)**, and F (biome palettes) are all
+DONE and merged to `main`. **The ONLY remaining Phase 2 item is D. Procedural
+music** — deferred because it CANNOT be verified in this sandbox (no audio device,
+`InitAudioDevice` fails, so it'd be a blind ship); do it where you can actually
+hear it, building on the PCM synth in `src/Audio.cs`. Smaller open follow-ups: a
+persistent intel currency + a barracks spend screen (the unfinished half of C),
+biome-tinted cover/plateaus + themed authored arenas (F), and a MEDIC enemy
+archetype (B).
 
-Harness screenshot hooks added this session (all `shot`-only, in `Program.cs`):
+**E (run save/load) — this session.** `src/SaveGame.cs` (System.Text.Json, compact
+DTOs) persists the `Run` to `ApplicationData/Sightline/save.json` (NOT the repo).
+Checkpoint = each mission start (`Game.SetupMission`); cleared on win/loss
+(`EnterBarracks` / `Game.LoseRun`). Intro `CONTINUE RUN` button + key **C**
+(`Hud.OverlayBtn2`, `Game.ContinueRun`) resumes the last-started mission from its
+start (mid-mission progress is NOT saved — that's the intended granularity). All
+disk I/O is gated by `Game.NoPersist` (true in the harness) so the smoke test is
+unchanged. Gotcha: only persist *persistent* fields — ammo/grenades/ability/pos are
+re-derived by `Mission.Build`, so don't add them to the DTOs.
+
+Harness screenshot hooks (all `shot`-only, in `Program.cs`):
 `SIGHTLINE_ZOOM`, `SIGHTLINE_PAUSE`, `SIGHTLINE_PERKSHOT`, `SIGHTLINE_CARDS`,
-`SIGHTLINE_WAKE` (reveal dormant pods). Use them to screenshot the new screens.
+`SIGHTLINE_WAKE` (reveal dormant pods), **`SIGHTLINE_INTRO`** (intro with a save so
+the CONTINUE button shows). Plus non-shot **`SIGHTLINE_SAVETEST=1`** → prints
+`SAVETEST: PASS/FAIL` (save/load round-trip; no window).
 
 - Gotchas: (a) elevation is a pure positioning layer — plateaus are walkable floor
   (no climb cost); per-tile draws that sit on a plateau go through

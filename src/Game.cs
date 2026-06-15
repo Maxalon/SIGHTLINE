@@ -62,6 +62,11 @@ public class Game
     Run _run = new();
     public Run RunState => _run;
 
+    // run persistence: when false (normal play) the run is checkpointed to disk at
+    // each mission start and CONTINUE is offered on the intro. The headless harness
+    // sets this true so the smoke test never touches the save file.
+    public bool NoPersist;
+
     // mission objective
     public Objective Objective;
     public List<(int x, int y)> EvacZone = new();
@@ -161,9 +166,26 @@ public class Game
         AimMode = false;
         Biome = Biome.For(n);
         ShowBanner($"MISSION {n} - {Biome.Name}", false);
+
+        // checkpoint the run at the start of each mission (normal play only)
+        if (!NoPersist) SaveGame.Save(_run);
     }
 
     void NextMission() => SetupMission(_run.Mission + 1);
+
+    /// Resume a saved campaign from the intro. Reloads the run and restarts its
+    /// current mission from the start; returns false if there is no readable save.
+    public bool ContinueRun()
+    {
+        var run = SaveGame.Load();
+        if (run == null || run.Squad == null || run.Squad.Count == 0) return false;
+        _run = run;
+        Players = _run.Squad;
+        int n = Util.Clamp(_run.Mission < 1 ? 1 : _run.Mission, 1, Run.MaxMissions);
+        _run.CurrentCard ??= Run.StandardCard(n);
+        SetupMission(n);
+        return true;
+    }
 
     /// Harness hook (screenshot only): reveal all dormant enemies.
     public void DebugWakeAll() { foreach (var e in Enemies) if (e.Alive) e.Active = true; }
@@ -198,8 +220,16 @@ public class Game
         if (!finished && _run.CurrentCard != null && _run.CurrentCard.Reward == RewardKind.BonusPerk)
             _run.AddBonusPerk();
 
-        if (finished) { Phase = Phase.Win; Audio.Play("win"); }
+        if (finished) { Phase = Phase.Win; Audio.Play("win"); if (!NoPersist) SaveGame.Delete(); }
         else { _run.GenerateOffers(_run.Mission + 1); Phase = Phase.Barracks; Audio.Play("win"); }
+    }
+
+    /// End the run as a loss and clear the checkpoint so the intro stops offering CONTINUE.
+    void LoseRun()
+    {
+        Phase = Phase.Lose;
+        Audio.Play("lose");
+        if (!NoPersist) SaveGame.Delete();
     }
 
     void ShowBanner(string text, bool enemy)
@@ -358,7 +388,7 @@ public class Game
         if (Phase != Phase.PlayerTurn && Phase != Phase.EnemyTurn) return;
         if (_anims.Count > 0) return;
         var alivePlayers = AlivePlayers();
-        if (alivePlayers.Count == 0) { Phase = Phase.Lose; Audio.Play("lose"); return; }
+        if (alivePlayers.Count == 0) { LoseRun(); return; }
 
         if (Objective == Objective.Eliminate)
         {
@@ -370,7 +400,7 @@ public class Game
         }
         else if (Objective == Objective.Escort) // get the VIP to extraction; losing it is a wipe
         {
-            if (Vip == null || !Vip.Alive) { Phase = Phase.Lose; Audio.Play("lose"); return; }
+            if (Vip == null || !Vip.Alive) { LoseRun(); return; }
             if (EvacZone.Contains((Vip.X, Vip.Y))) EnterBarracks();
         }
         else // Evac: every surviving soldier must stand in the extraction zone
@@ -1107,6 +1137,15 @@ public class Game
     // ---------------- overlay click ----------------
     void HandleOverlayClick()
     {
+        // intro CONTINUE: resume a saved campaign (button or key C)
+        if (Phase == Phase.Intro && SaveGame.Exists)
+        {
+            bool cont = (Raylib.IsMouseButtonPressed(MouseButton.Left) &&
+                         Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.OverlayBtn2))
+                        || Raylib.IsKeyPressed(KeyboardKey.C);
+            if (cont && ContinueRun()) return;
+        }
+
         bool click = Raylib.IsMouseButtonPressed(MouseButton.Left) &&
                      Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.OverlayBtn);
         bool enter = Raylib.IsKeyPressed(KeyboardKey.Enter);
