@@ -67,6 +67,19 @@ public class Game
     // sets this true so the smoke test never touches the save file.
     public bool NoPersist;
 
+    // barracks requisition shop: spend Intel before choosing the next deployment.
+    // _shopDone gates the barracks flow (shop -> promotions -> deployment cards).
+    bool _shopDone = true;
+    public bool ShopDone => _shopDone;
+    public static readonly int[] ShopCost = { 6, 10, 16 };
+    public static readonly string[] ShopName = { "FIELD MEDKIT", "COMBAT STIMS", "ADV. TRAINING" };
+    public static readonly string[] ShopDesc =
+    {
+        "Heal your most-wounded soldier to full.",
+        "+2 max HP to your frailest soldier (permanent).",
+        "Grant a soldier a bonus perk choice.",
+    };
+
     // mission objective
     public Objective Objective;
     public List<(int x, int y)> EvacZone = new();
@@ -209,6 +222,7 @@ public class Game
     void EnterBarracks()
     {
         _run.Squad = AlivePlayers().Where(u => !u.IsVip).ToList();  // the VIP never joins the squad
+        int survivors = _run.Squad.Count;
         bool finished = _run.Mission >= Run.MaxMissions;
 
         // reward for clearing the chosen deployment
@@ -221,7 +235,18 @@ public class Game
             _run.AddBonusPerk();
 
         if (finished) { Phase = Phase.Win; Audio.Play("win"); if (!NoPersist) SaveGame.Delete(); }
-        else { _run.GenerateOffers(_run.Mission + 1); Phase = Phase.Barracks; Audio.Play("win"); }
+        else
+        {
+            // intel salvage scales with survivors + depth; ONSLAUGHT pays a risk premium
+            int gained = 8 + 3 * survivors + _run.Mission;
+            if (_run.CurrentCard != null && _run.CurrentCard.ModName == "ONSLAUGHT") gained += 6;
+            _run.Intel += gained;
+            _run.Report.Insert(0, $"Recovered {gained} intel  (total {_run.Intel})");
+            _shopDone = false;
+            _run.GenerateOffers(_run.Mission + 1);
+            Phase = Phase.Barracks;
+            Audio.Play("win");
+        }
     }
 
     /// End the run as a loss and clear the checkpoint so the intro stops offering CONTINUE.
@@ -369,11 +394,15 @@ public class Game
             case Phase.PlayerTurn: UpdatePlayer(); break;
             case Phase.EnemyTurn: UpdateEnemy(); break;
             case Phase.Barracks:
-                if (_run.PendingPerks.Count > 0)        // resolve rank-up perk picks first
+                if (!_shopDone)                          // spend intel first (requisition)
+                {
+                    if (AutoPlay) AutoShop(); else HandleShopClick();
+                }
+                else if (_run.PendingPerks.Count > 0)    // then resolve rank-up perk picks
                 {
                     if (AutoPlay) ChoosePerk(0); else HandlePerkClick();
                 }
-                else if (AutoPlay) ChooseCard(0);       // then choose the next deployment
+                else if (AutoPlay) ChooseCard(0);        // then choose the next deployment
                 else HandleCardClick();
                 break;
             case Phase.Win:
@@ -1116,6 +1145,78 @@ public class Game
         var m = Raylib.GetMousePosition();
         if (Raylib.CheckCollisionPointRec(m, Hud.PerkBtnA)) ChoosePerk(0);
         else if (Raylib.CheckCollisionPointRec(m, Hud.PerkBtnB)) ChoosePerk(1);
+    }
+
+    // ---------------- barracks requisition shop ----------------
+    /// True if item i can currently be bought (affordable + has an effect).
+    public bool CanBuy(int item)
+    {
+        if (item < 0 || item >= ShopCost.Length || _run.Intel < ShopCost[item]) return false;
+        return item switch
+        {
+            0 => _run.Squad.Any(u => u.Hp < u.MaxHp),     // medkit needs a wounded soldier
+            2 => _run.Squad.Any(u => CountPerksLeft(u) >= 2), // training needs an un-maxed soldier
+            _ => _run.Squad.Count > 0,
+        };
+    }
+
+    static int CountPerksLeft(Unit u)
+    {
+        int c = 0;
+        foreach (var p in PerkDef.All) if (!u.HasPerk(p)) c++;
+        return c;
+    }
+
+    void DoPurchase(int item)
+    {
+        if (!CanBuy(item)) { Audio.Play("miss"); return; }
+        switch (item)
+        {
+            case 0:
+                var hurt = _run.Squad.Where(u => u.Hp < u.MaxHp).OrderBy(u => u.Hp).First();
+                int amt = hurt.MaxHp - hurt.Hp; hurt.Hp = hurt.MaxHp;
+                _run.Report.Add($"{hurt.Name} field-treated  (+{amt} HP)");
+                break;
+            case 1:
+                var weak = _run.Squad.OrderBy(u => u.MaxHp).First();
+                weak.MaxHp += 2; weak.Hp += 2;
+                _run.Report.Add($"{weak.Name} stimmed  (+2 max HP)");
+                break;
+            case 2:
+                if (!_run.TryQueueBonusPerk("requisition")) { Audio.Play("miss"); return; }
+                break;
+        }
+        _run.Intel -= ShopCost[item];
+        Audio.Play("select");
+    }
+
+    void HandleShopClick()
+    {
+        if (Raylib.IsKeyPressed(KeyboardKey.Enter)) { _shopDone = true; Audio.Play("turn"); return; }
+        if (!Raylib.IsMouseButtonPressed(MouseButton.Left)) return;
+        var m = Raylib.GetMousePosition();
+        for (int i = 0; i < Hud.ShopBtns.Length; i++)
+            if (Raylib.CheckCollisionPointRec(m, Hud.ShopBtns[i])) { DoPurchase(i); return; }
+        if (Raylib.CheckCollisionPointRec(m, Hud.ShopProceed)) { _shopDone = true; Audio.Play("turn"); }
+    }
+
+    // autopilot: buy a medkit if it helps, then move on (keeps the shop path covered)
+    void AutoShop()
+    {
+        if (CanBuy(0)) DoPurchase(0);
+        _shopDone = true;
+    }
+
+    /// Harness hook (screenshot only): show the barracks requisition shop.
+    public void DebugShop()
+    {
+        if (_run.Squad.Count == 0) { _run = new Run(); _run.Start(); }
+        _run.Intel = 24;
+        _run.DebriefSurvivors();
+        if (_run.Squad.Count > 0) _run.Squad[0].Hp = Math.Max(1, _run.Squad[0].Hp - 4);  // wound for the medkit demo
+        _run.Report.Insert(0, $"Recovered 17 intel  (total {_run.Intel})");
+        _shopDone = false;
+        Phase = Phase.Barracks;
     }
 
     void ChooseCard(int i)

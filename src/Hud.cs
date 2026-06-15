@@ -26,6 +26,8 @@ public static class Hud
     public static Rectangle PauseResume, PauseMute, PauseShake, PauseThreat, PauseAbandon;
     public static Rectangle PerkBtnA, PerkBtnB;
     public static Rectangle[] MissionCards = new Rectangle[3];
+    public static Rectangle[] ShopBtns = new Rectangle[3];
+    public static Rectangle ShopProceed;
 
     public static void Draw(Game g)
     {
@@ -334,6 +336,7 @@ public static class Hud
     static void DrawBarracks(Game g)
     {
         var run = g.RunState;
+        if (!g.ShopDone) { DrawRequisition(g); return; }
         if (run.PendingPerks.Count > 0) { DrawPerkChooser(g, run.PendingPerks[0]); return; }
         var squad = run.Squad;
         Raylib.DrawRectangle(0, 0, Cfg.ScreenW, Cfg.ScreenH, Raylib.Fade(Pal.RGBA(5, 8, 11), 0.85f));
@@ -349,7 +352,7 @@ public static class Hud
 
         string title = $"MISSION {run.Mission} COMPLETE";
         Raylib.DrawText(title, x + w / 2 - Raylib.MeasureText(title, 38) / 2, y + 26, 38, Pal.Good);
-        string sub = "BARRACKS - SQUAD DEBRIEF";
+        string sub = $"BARRACKS - SQUAD DEBRIEF   |   INTEL {run.Intel}";
         Raylib.DrawText(sub, x + w / 2 - Raylib.MeasureText(sub, 13) / 2, y + 70, 13, Pal.TxtDim);
 
         int ry = y + 100;
@@ -385,6 +388,50 @@ public static class Hud
             MissionCards[i] = new Rectangle(x + 30 + i * (cw + gap), cy, cw, ch);
             DrawDeployCard(MissionCards[i], run.Offers[i]);
         }
+    }
+
+    static void DrawRequisition(Game g)
+    {
+        var run = g.RunState;
+        Raylib.DrawRectangle(0, 0, Cfg.ScreenW, Cfg.ScreenH, Raylib.Fade(Pal.RGBA(5, 8, 11), 0.85f));
+
+        int w = 560, h = 470;
+        int x = Cfg.ScreenW / 2 - w / 2, y = Cfg.ScreenH / 2 - h / 2;
+        var card = new Rectangle(x, y, w, h);
+        Raylib.DrawRectangleRounded(card, 0.04f, 8, Pal.Panel);
+        Raylib.DrawRectangleLinesEx(card, 1.5f, Pal.PanelBd);
+
+        string title = "REQUISITION";
+        Raylib.DrawText(title, x + w / 2 - Raylib.MeasureText(title, 36) / 2, y + 24, 36, Pal.Accent);
+        string intel = $"INTEL AVAILABLE: {run.Intel}";
+        Raylib.DrawText(intel, x + w / 2 - Raylib.MeasureText(intel, 16) / 2, y + 66, 16, Pal.Good);
+
+        int iy = y + 104, ih = 78, gap = 12;
+        for (int i = 0; i < 3; i++)
+        {
+            var r = new Rectangle(x + 30, iy, w - 60, ih);
+            ShopBtns[i] = r;
+            bool can = g.CanBuy(i);
+            bool hover = can && Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), r);
+            Raylib.DrawRectangleRounded(r, 0.1f, 6, hover ? Pal.RGBA(24, 34, 46) : Pal.RGBA(14, 20, 28));
+            Raylib.DrawRectangleLinesEx(r, 1.5f, can ? (hover ? Pal.Accent : Pal.PanelBd) : Pal.RGBA(40, 46, 54));
+            Color txt = can ? Pal.Txt : Pal.TxtDim;
+            Raylib.DrawText(Game.ShopName[i], (int)r.X + 14, (int)r.Y + 12, 18, txt);
+            Raylib.DrawText(Game.ShopDesc[i], (int)r.X + 14, (int)r.Y + 40, 12, Pal.TxtDim);
+            string cost = $"{Game.ShopCost[i]} INTEL";
+            Color cc = run.Intel >= Game.ShopCost[i] ? Pal.Good : Pal.Foe;
+            Raylib.DrawText(cost, (int)(r.X + r.Width - Raylib.MeasureText(cost, 16) - 14), (int)r.Y + 14, 16, cc);
+            if (!can)
+                Raylib.DrawText("- unavailable -", (int)(r.X + r.Width - Raylib.MeasureText("- unavailable -", 11) - 14), (int)r.Y + 44, 11, Pal.TxtDim);
+            else
+                Raylib.DrawText("[ BUY ]", (int)(r.X + r.Width - Raylib.MeasureText("[ BUY ]", 12) - 14), (int)r.Y + 46, 12, Pal.Accent);
+            iy += ih + gap;
+        }
+
+        ShopProceed = new Rectangle(x + w / 2 - 130, y + h - 60, 260, 44);
+        bool ph = Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), ShopProceed);
+        Raylib.DrawRectangleRounded(ShopProceed, 0.3f, 8, ph ? Pal.RGBA(92, 200, 251) : Pal.Friend);
+        CenterText("PROCEED TO DEPLOYMENT", ShopProceed, 15, Pal.RGBA(3, 18, 26));
     }
 
     static string ObjName(Objective o) => o switch

@@ -61,7 +61,7 @@ public static class SaveGame
     // ---- mapping ----
     static RunDto ToDto(Run r)
     {
-        var dto = new RunDto { Mission = r.Mission, Fallen = new List<string>(r.Fallen) };
+        var dto = new RunDto { Mission = r.Mission, Intel = r.Intel, Fallen = new List<string>(r.Fallen) };
         foreach (var u in r.Squad)
             dto.Squad.Add(new UnitDto
             {
@@ -83,7 +83,7 @@ public static class SaveGame
 
     static Run FromDto(RunDto dto)
     {
-        var r = new Run { Mission = dto.Mission, Squad = new List<Unit>() };
+        var r = new Run { Mission = dto.Mission, Intel = dto.Intel, Squad = new List<Unit>() };
         if (dto.Fallen != null) r.Fallen = new List<string>(dto.Fallen);
         foreach (var d in dto.Squad)
         {
@@ -114,6 +114,7 @@ public static class SaveGame
     class RunDto
     {
         public int Mission;
+        public int Intel;
         public List<UnitDto> Squad = new();
         public List<string> Fallen = new();
         public CardDto Card;
@@ -141,7 +142,7 @@ public static class SaveGame
         string saved = Exists ? File.ReadAllText(FilePath) : null;  // preserve any real save
         try
         {
-            var src = new Run { Mission = 4, Squad = new List<Unit>() };
+            var src = new Run { Mission = 4, Intel = 23, Squad = new List<Unit>() };
             src.Fallen.Add("DOWNED-GUY");
             var a = new Unit
             {
@@ -160,6 +161,7 @@ public static class SaveGame
 
             var fails = new List<string>();
             if (got.Mission != src.Mission) fails.Add("mission");
+            if (got.Intel != src.Intel) fails.Add("intel");
             if (got.Squad.Count != src.Squad.Count) fails.Add("squadCount");
             if (got.Fallen.Count != 1 || got.Fallen[0] != "DOWNED-GUY") fails.Add("fallen");
             var g0 = got.Squad[0];
