@@ -13,6 +13,13 @@ public static class Program
         // Used to smoke-test the whole loop under Xvfb + software GL. See CLAUDE.md.
         bool shot = int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_SHOT"), out int shotFrame);
         bool autoplay = Environment.GetEnvironmentVariable("SIGHTLINE_AUTOPLAY") == "1";
+
+        // SIGHTLINE_SAVETEST=1 : headless round-trip check for run persistence (item E). No window.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_SAVETEST") == "1")
+        {
+            Console.WriteLine(SaveGame.SelfTest());
+            return;
+        }
         // SIGHTLINE_MISSION=<n> : start the harness on mission n (verify Hack/Evac maps).
         int startMission = int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_MISSION"), out int sm) ? sm : 1;
 
@@ -24,7 +31,12 @@ public static class Program
         Audio.Init();
 
         var game = new Game();
-        if (shot || autoplay) game.StartMission(startMission);
+        game.NoPersist = shot || autoplay;   // the harness never reads/writes the save file
+        // SIGHTLINE_INTRO=1 (shot only): stay on the intro with a save present, to
+        // screenshot the CONTINUE-run button.
+        bool introShot = shot && Environment.GetEnvironmentVariable("SIGHTLINE_INTRO") == "1";
+        if (introShot) { var r = new Run(); r.Start(); r.Mission = 3; SaveGame.Save(r); }
+        if ((shot || autoplay) && !introShot) game.StartMission(startMission);
         if (autoplay) game.AutoPlay = true;
         // screenshot-only hooks for verifying the camera + pause overlay
         if (shot && float.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_ZOOM"), out float z)) game.CamZoom = z;

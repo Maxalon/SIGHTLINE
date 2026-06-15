@@ -321,7 +321,7 @@ public static class Hud
                     "   Steady, Suppress - one charge per mission.",
                     "Kills earn promotions: better aim, more HP, more mobility.",
                     "Survivors carry their wounds and ranks to the next mission.",
-                }, "DEPLOY SQUAD");
+                }, "DEPLOY SQUAD", SaveGame.Exists ? "CONTINUE RUN" : null);
         else if (g.Phase == Phase.Barracks)
             DrawBarracks(g);
         else if (g.Phase == Phase.Win)
@@ -488,8 +488,10 @@ public static class Hud
     }
 
     public static Rectangle OverlayBtn;
+    public static Rectangle OverlayBtn2;   // intro CONTINUE-run button (when a save exists)
 
-    static void DrawCenterCard(Game g, string title, string sub, Color titleCol, string[] rules, string btn)
+    static void DrawCenterCard(Game g, string title, string sub, Color titleCol, string[] rules, string btn,
+                               string secondBtn = null)
     {
         Raylib.DrawRectangle(0, 0, Cfg.ScreenW, Cfg.ScreenH, Raylib.Fade(Pal.RGBA(5, 8, 11), 0.84f));
         int w = 540, h = rules != null ? 152 + rules.Length * 30 + 70 : 240;
@@ -513,10 +515,31 @@ public static class Hud
             }
         }
 
-        OverlayBtn = new Rectangle(x + w / 2 - 110, y + h - 70, 220, 48);
-        bool hover = Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), OverlayBtn);
-        Raylib.DrawRectangleRounded(OverlayBtn, 0.3f, 8, hover ? Pal.RGBA(92, 200, 251) : Pal.Friend);
-        CenterText(btn, OverlayBtn, 18, Pal.RGBA(3, 18, 26));
+        int by = y + h - 70;
+        if (secondBtn != null)   // two side-by-side buttons: CONTINUE (left) + new run (right)
+        {
+            int bw = 210, gap = 20;
+            OverlayBtn2 = new Rectangle(x + w / 2 - bw - gap / 2, by, bw, 48);
+            OverlayBtn = new Rectangle(x + w / 2 + gap / 2, by, bw, 48);
+            DrawOverlayButton(OverlayBtn2, secondBtn, Pal.Good, "C");
+            DrawOverlayButton(OverlayBtn, btn, Pal.Friend, null);
+        }
+        else
+        {
+            OverlayBtn = new Rectangle(x + w / 2 - 110, by, 220, 48);
+            OverlayBtn2 = new Rectangle(0, 0, 0, 0);
+            DrawOverlayButton(OverlayBtn, btn, Pal.Friend, null);
+        }
+    }
+
+    static void DrawOverlayButton(Rectangle r, string label, Color baseCol, string keyHint)
+    {
+        bool hover = Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), r);
+        Color hi = Pal.RGBA(92, 200, 251);
+        Raylib.DrawRectangleRounded(r, 0.3f, 8, hover ? hi : baseCol);
+        CenterText(label, r, 18, Pal.RGBA(3, 18, 26));
+        if (keyHint != null)
+            Raylib.DrawText("[" + keyHint + "]", (int)(r.X + r.Width - 30), (int)(r.Y + r.Height - 16), 11, Pal.RGBA(3, 18, 26));
     }
 
     // ---------------- helpers ----------------
