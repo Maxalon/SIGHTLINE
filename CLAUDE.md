@@ -137,7 +137,11 @@ docs/screenshot.png    README image
 ### Combat model (tuning lives in code)
 - Hit% = aim + weapon.AimBonus + weapon.RangeMod(dist) − cover.Defense
   (− hunker), clamped 3..95. Cover: low −20 / high −40. Flanked = had adjacent
-  cover but not on the attacker's dominant-axis side → exposed (+35 crit).
+  cover but not protecting from this angle → exposed (+35 crit). `Grid.GetCover`:
+  for a dominant-axis attack the facing side covers; for a **pure diagonal** a shot
+  slips past a single corner, so the defender is only covered by a TRUE corner (cover
+  on BOTH facing sides, level = the weaker), else flanked. High ground also negates
+  the target's LOW cover (see elevation).
 - Each `WeaponKind` has its own `RangeMod` curve + `MaxRange` + clip + crit base.
 
 ---
@@ -456,6 +460,14 @@ Before stopping:
 4. Tell the human to open a fresh session (they'll send only `.`).
 
 ### WIP NOTES
+
+> **PLAYTEST FIXES (latest).** (1) **Diagonal flanking** — `Grid.GetCover` no longer
+> lets a single perpendicular cover block protect against a pure-diagonal shot (it slips
+> past the corner); only a true corner (cover on both facing sides) protects. Rewards
+> corner flanking; verified by `SIGHTLINE_COMBATTEST` diagonal cases. (2) **Action-button
+> hover help** — hovering FIRE/GRENADE/abilities/etc. shows a tooltip explaining the
+> action (`Hud.DrawActionHelp`/`ActionDesc`, `Unit.AbilityDesc`); `SIGHTLINE_HELP` hook
+> parks the cursor on the ability button for screenshots.
 
 > **DECISION-SCREEN INFO + DEATH VERIFICATION (latest).** Added soldier visibility
 > where choices are made: the **shop** shows a squad HP strip + each item's concrete

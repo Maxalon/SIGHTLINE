@@ -129,6 +129,18 @@ public static class Combat
         if (high.CoverLevel != 0) fails.Add("highNegatesLow");
         if (high.HitChance <= ground.HitChance) fails.Add("highHitNotBetter");
 
+        // diagonal flanking: a single perpendicular cover must NOT protect a diagonal shot,
+        // but a true corner (cover on both facing sides) still does.
+        var gd = new Grid();
+        gd.Tiles[4, 5] = TileType.LowCover;                       // west of the defender only
+        var ad = new Unit { Aim = 65, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 3, Y = 3 };  // NW diagonal
+        var dd = new Unit { Aim = 65, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 5, Y = 5, Hp = 6, MaxHp = 6 };
+        var diag1 = ComputeOdds(gd, ad, dd);
+        if (diag1.CoverLevel != 0 || !diag1.Flanked) fails.Add("diagFlankOpen");
+        gd.Tiles[5, 4] = TileType.LowCover;                       // add north -> a real corner
+        var diag2 = ComputeOdds(gd, ad, dd);
+        if (diag2.CoverLevel != 1 || diag2.Flanked) fails.Add("diagCornerCovered");
+
         // HIGH cover must still protect even from high ground
         var grid2 = new Grid();
         grid2.Tiles[6, 5] = TileType.HighCover;
