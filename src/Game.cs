@@ -110,18 +110,10 @@ public class Game
         _run = new Run();
         _run.Start();
         Players = _run.Squad;
-        SetupMission(Util.Clamp(startAt, 1, Run.MaxMissions));
+        int n = Util.Clamp(startAt, 1, Run.MaxMissions);
+        _run.CurrentCard = Run.StandardCard(n);
+        SetupMission(n);
     }
-
-    // Objective rotation across a run: Eliminate / Hack / Evac / Escort, repeating.
-    // (6-mission campaign -> Elim, Hack, Evac, Escort, Elim, Hack.)
-    static Objective ObjectiveFor(int n) => ((n - 1) % 4) switch
-    {
-        1 => Objective.Hack,
-        2 => Objective.Evac,
-        3 => Objective.Escort,
-        _ => Objective.Eliminate,
-    };
 
     void SetupMission(int n)
     {
@@ -130,7 +122,9 @@ public class Game
         // so adding the escort asset never pollutes the campaign squad.
         Players = new List<Unit>(_run.Squad);
 
-        Objective = ObjectiveFor(n);
+        // objective + difficulty come from the chosen deployment card (Run.ObjectiveFor baseline)
+        var card = _run.CurrentCard ?? Run.StandardCard(n);
+        Objective = card.Objective;
         EvacZone.Clear();
         HackProgress = 0;
         Vip = null;
@@ -149,7 +143,7 @@ public class Game
             Players.Add(Vip);
         }
 
-        Mission.Build(Grid, Players, Enemies, n, EvacZone, HasTerminal ? Terminal : null);
+        Mission.Build(Grid, Players, Enemies, n, EvacZone, HasTerminal ? Terminal : null, card.EnemyDelta, card.StatDelta);
         if (Vip != null) { Vip.Grenades = 0; Vip.AbilityCharge = 0; }  // the asset has no kit
         Fx.Particles.Clear();
         Fx.Texts.Clear();
@@ -178,12 +172,30 @@ public class Game
         Phase = Phase.Barracks;
     }
 
+    /// Harness hook (screenshot only): show the barracks deployment-card screen.
+    public void DebugDeployCards()
+    {
+        _run.DebriefSurvivors();
+        _run.GenerateOffers(_run.Mission + 1);
+        Phase = Phase.Barracks;
+    }
+
     void EnterBarracks()
     {
         _run.Squad = AlivePlayers().Where(u => !u.IsVip).ToList();  // the VIP never joins the squad
+        bool finished = _run.Mission >= Run.MaxMissions;
+
+        // reward for clearing the chosen deployment
+        if (!finished && _run.CurrentCard != null && _run.CurrentCard.Reward == RewardKind.Heal)
+            foreach (var u in _run.Squad) u.Hp = u.MaxHp;
+
         _run.DebriefSurvivors();
-        if (_run.Mission >= Run.MaxMissions) { Phase = Phase.Win; Audio.Play("win"); }
-        else { Phase = Phase.Barracks; Audio.Play("win"); }
+
+        if (!finished && _run.CurrentCard != null && _run.CurrentCard.Reward == RewardKind.BonusPerk)
+            _run.AddBonusPerk();
+
+        if (finished) { Phase = Phase.Win; Audio.Play("win"); }
+        else { _run.GenerateOffers(_run.Mission + 1); Phase = Phase.Barracks; Audio.Play("win"); }
     }
 
     void ShowBanner(string text, bool enemy)
@@ -327,8 +339,8 @@ public class Game
                 {
                     if (AutoPlay) ChoosePerk(0); else HandlePerkClick();
                 }
-                else if (AutoPlay) NextMission();
-                else HandleOverlayClick();
+                else if (AutoPlay) ChooseCard(0);       // then choose the next deployment
+                else HandleCardClick();
                 break;
             case Phase.Win:
             case Phase.Lose: HandleOverlayClick(); break;
@@ -1070,6 +1082,22 @@ public class Game
         var m = Raylib.GetMousePosition();
         if (Raylib.CheckCollisionPointRec(m, Hud.PerkBtnA)) ChoosePerk(0);
         else if (Raylib.CheckCollisionPointRec(m, Hud.PerkBtnB)) ChoosePerk(1);
+    }
+
+    void ChooseCard(int i)
+    {
+        if (i < 0 || i >= _run.Offers.Count) return;
+        _run.CurrentCard = _run.Offers[i];
+        Audio.Play("select");
+        NextMission();
+    }
+
+    void HandleCardClick()
+    {
+        if (!Raylib.IsMouseButtonPressed(MouseButton.Left)) return;
+        var m = Raylib.GetMousePosition();
+        for (int i = 0; i < Hud.MissionCards.Length; i++)
+            if (Raylib.CheckCollisionPointRec(m, Hud.MissionCards[i])) { ChooseCard(i); return; }
     }
 
     // ---------------- overlay click ----------------

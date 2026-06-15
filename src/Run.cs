@@ -10,6 +10,19 @@ public class PerkOffer
     public Perk A, B;
 }
 
+public enum RewardKind { None, Heal, BonusPerk }
+
+/// A pickable next-mission deployment: objective + a risk/reward modifier.
+public class MissionCard
+{
+    public Objective Objective;
+    public string ModName;       // RECON / STANDARD / ONSLAUGHT
+    public int EnemyDelta;       // +/- to the hostile count
+    public int StatDelta;        // +/- to the hostile stat bump
+    public RewardKind Reward;
+    public string RewardText;
+}
+
 /// Holds the persistent squad across a campaign run, plus XP/rank progression.
 public class Run
 {
@@ -26,6 +39,63 @@ public class Run
     public List<string> Fallen = new();       // names of KIA soldiers
     public List<string> Report = new();       // promotion/heal lines for the barracks
     public List<PerkOffer> PendingPerks = new(); // rank-up perk choices awaiting the player
+    public List<MissionCard> Offers = new();  // next-mission deployment choices
+    public MissionCard CurrentCard;           // the card the active mission was launched from
+
+    /// Objective rotation baseline: Eliminate / Hack / Evac / Escort, repeating.
+    public static Objective ObjectiveFor(int n) => ((n - 1) % 4) switch
+    {
+        1 => Objective.Hack,
+        2 => Objective.Evac,
+        3 => Objective.Escort,
+        _ => Objective.Eliminate,
+    };
+
+    public static MissionCard StandardCard(int n) => new MissionCard
+    {
+        Objective = ObjectiveFor(n), ModName = "STANDARD",
+        EnemyDelta = 0, StatDelta = 0, Reward = RewardKind.None, RewardText = "-",
+    };
+
+    /// Build three distinct next-mission deployments: a safer RECON, a STANDARD,
+    /// and a high-risk ONSLAUGHT, each with its own objective + reward.
+    public void GenerateOffers(int n)
+    {
+        Offers.Clear();
+        Objective def = ObjectiveFor(n);
+        var pool = new List<Objective> { Objective.Eliminate, Objective.Hack, Objective.Evac, Objective.Escort };
+        Objective Other(params Objective[] avoid)
+        {
+            var picks = pool.FindAll(o => System.Array.IndexOf(avoid, o) < 0);
+            return picks[Util.RandInt(0, picks.Count - 1)];
+        }
+        var recon = Other(def);
+        var onslaught = Other(def, recon);
+        Offers.Add(new MissionCard { Objective = recon, ModName = "RECON", EnemyDelta = -1, StatDelta = -1, Reward = RewardKind.Heal, RewardText = "Full squad heal" });
+        Offers.Add(StandardCard(n));
+        Offers.Add(new MissionCard { Objective = onslaught, ModName = "ONSLAUGHT", EnemyDelta = 2, StatDelta = 1, Reward = RewardKind.BonusPerk, RewardText = "Bonus perk" });
+    }
+
+    /// Reward: grant a bonus perk choice to a random survivor who has perks left.
+    public void AddBonusPerk()
+    {
+        var eligible = Squad.FindAll(u => CountAvail(u) >= 2);
+        if (eligible.Count == 0) return;
+        var u = eligible[Util.RandInt(0, eligible.Count - 1)];
+        var avail = new List<Perk>();
+        foreach (var p in PerkDef.All) if (!u.HasPerk(p)) avail.Add(p);
+        int i = Util.RandInt(0, avail.Count - 1);
+        int j = Util.RandInt(0, avail.Count - 2); if (j >= i) j++;
+        PendingPerks.Add(new PerkOffer { Unit = u, A = avail[i], B = avail[j] });
+        Report.Add($"{u.Name} earns a bonus perk (ONSLAUGHT)");
+    }
+
+    static int CountAvail(Unit u)
+    {
+        int c = 0;
+        foreach (var p in PerkDef.All) if (!u.HasPerk(p)) c++;
+        return c;
+    }
 
     public void Start()
     {
