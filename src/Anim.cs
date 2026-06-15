@@ -245,6 +245,50 @@ public class GrenadeAnim : Anim
     }
 }
 
+/// A medic mends an ally: a green link + particle burst, then restores HP.
+public class HealAnim : Anim
+{
+    public Unit Medic, Patient;
+    const float Apply = 0.18f;
+    const float Total = 0.5f;
+    float _t;
+    bool _done;
+
+    public HealAnim(Unit medic, Unit patient) { Medic = medic; Patient = patient; }
+
+    public override void OnStart(Game g)
+    {
+        var d = Patient.Pos - Medic.Pos;
+        if (d.LengthSquared() > 0.01f) Medic.Facing = MathF.Atan2(d.Y, d.X);
+    }
+
+    public override bool Update(Game g, float dt)
+    {
+        _t += dt;
+        if (!_done && _t >= Apply)
+        {
+            _done = true;
+            if (Patient.Alive && Patient.Hp < Patient.MaxHp)
+            {
+                int before = Patient.Hp;
+                Patient.Hp = Math.Min(Patient.MaxHp, Patient.Hp + Ai.HealAmount);
+                int gained = Patient.Hp - before;
+                g.Fx.Burst(Patient.Pos, Pal.Good, 14, 150f, 0.6f, 3.5f, true);
+                g.Fx.PopText(Patient.Pos + new Vector2(0, -26), "+" + gained, Pal.Good, 24f);
+                Audio.Play("reload");
+            }
+        }
+        return _t >= Total;
+    }
+
+    public override void Draw(Game g)
+    {
+        float k = 1f - Util.Clamp(_t / (Apply + 0.18f), 0f, 1f);
+        if (k > 0f)
+            Raylib.DrawLineEx(Medic.Pos, Patient.Pos, 2.5f, Raylib.Fade(Pal.Good, 0.2f + 0.6f * k));
+    }
+}
+
 /// A brief pause (used to space out AI actions so they read clearly).
 public class WaitAnim : Anim
 {

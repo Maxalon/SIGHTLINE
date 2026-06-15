@@ -12,12 +12,16 @@ public class EnemyPlan
     public bool Hunker;
     public bool Grenade;          // lob a grenade instead of shooting
     public int GrenX, GrenY;      // grenade aim tile
+    public Unit HealTarget;       // medic: mend this wounded ally instead of fighting
 }
 
 /// Tactical decision-making for a single enemy. Greedy, but reads as competent:
 /// seek cover + line of fire, prefer flanking/finishing, advance when blind.
 public static class Ai
 {
+    public const int HealRange = 4;    // tiles a medic can mend across
+    public const int HealAmount = 4;   // HP restored per heal
+
     public static EnemyPlan Plan(Game g, Unit e)
     {
         var plan = new EnemyPlan();
@@ -47,6 +51,42 @@ public static class Ai
             if (d < nd) { nd = d; nearest = p; }
         }
         Unit vip = players.Find(p => p.IsVip);   // escort: hunt the asset
+
+        // MEDIC: prefer patching up the most-wounded active ally (incl. itself) over
+        // fighting. Move to a covered tile within heal range + LoS of the patient. If
+        // no patient or no reachable heal spot, fall through to normal combat AI.
+        if (e.Cls == "MEDIC")
+        {
+            Unit patient = null; int worst = 0;
+            foreach (var a in g.AliveEnemies())
+                if (a.Active && a.Hp < a.MaxHp) { int miss = a.MaxHp - a.Hp; if (miss > worst) { worst = miss; patient = a; } }
+            if (patient != null)
+            {
+                (int x, int y) ht = (-1, -1); int htCost = 0; float htScore = float.NegativeInfinity;
+                foreach (var (tx, ty, c) in reach)
+                {
+                    int acts = c <= e.MoveBudget ? (c == 0 ? 0 : 1) : 2;
+                    if (acts >= 2) continue;                                       // keep an action to heal
+                    if (Util.TileDist(tx, ty, patient.X, patient.Y) > HealRange) continue;
+                    if (!g.Grid.HasLineOfSight(tx, ty, patient.X, patient.Y)) continue;
+                    var cov = g.Grid.GetCover(tx, ty, nearest.X, nearest.Y);
+                    float s = cov.Level * 18 + g.Grid.HeightAt(tx, ty) * 6 - acts * 6
+                              + Util.ChebyDist(tx, ty, nearest.X, nearest.Y) * 0.6f  // hang back from the front
+                              + Util.RandRange(0f, 3f);
+                    if (s > htScore) { htScore = s; ht = (tx, ty); htCost = c; }
+                }
+                if (ht.x >= 0)
+                {
+                    var hp = new EnemyPlan { HealTarget = patient };
+                    if (ht != (e.X, e.Y))
+                    {
+                        hp.Path = g.Grid.ReconstructPath(cameFrom, e.X, e.Y, ht.x, ht.y);
+                        hp.MoveActions = htCost <= e.MoveBudget ? 1 : 2;
+                    }
+                    return hp;
+                }
+            }
+        }
 
         foreach (var (tx, ty, c) in reach)
         {

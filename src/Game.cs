@@ -1093,7 +1093,17 @@ public class Game
             var e = _aiUnits[_aiIdx];
             if (e.Alive)
             {
-                if (_aiPlan.Grenade && e.Grenades > 0 && e.ActionsLeft > 0 &&
+                if (_aiPlan.HealTarget != null && _aiPlan.HealTarget.Alive && e.ActionsLeft > 0 &&
+                    _aiPlan.HealTarget.Hp < _aiPlan.HealTarget.MaxHp &&
+                    Util.TileDist(e.X, e.Y, _aiPlan.HealTarget.X, _aiPlan.HealTarget.Y) <= Ai.HealRange &&
+                    Grid.HasLineOfSight(e.X, e.Y, _aiPlan.HealTarget.X, _aiPlan.HealTarget.Y))
+                {
+                    e.ActionsLeft = 0;
+                    Fx.PopText(e.Pos + new Vector2(0, -30), "MEDIC", Pal.Good, 16f);
+                    Enqueue(new WaitAnim(0.2f), Team.Enemy);
+                    Enqueue(new HealAnim(e, _aiPlan.HealTarget), Team.Enemy);
+                }
+                else if (_aiPlan.Grenade && e.Grenades > 0 && e.ActionsLeft > 0 &&
                     Util.TileDist(e.X, e.Y, _aiPlan.GrenX, _aiPlan.GrenY) <= GrenadeRange)
                 {
                     e.Grenades--;

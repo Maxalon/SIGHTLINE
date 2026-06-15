@@ -348,7 +348,7 @@ public static class Renderer
         {
             "ASSAULT" => 3, "RANGER" => 3, "SHARPSHOOTER" => 4,
             "GUNNER" => 4, "BRUISER" => 6, "SCOUT" => 3,
-            "SNIPER" => 4, "TURRET" => 4, "BERSERKER" => 6, "ELITE" => 8, _ => 5,
+            "SNIPER" => 4, "TURRET" => 4, "BERSERKER" => 6, "ELITE" => 8, "MEDIC" => 4, _ => 5,
         };
         float rot = (u.Cls == "SHARPSHOOTER" || u.Cls == "SNIPER") ? 45f : (sides == 3 ? -90f : 0f);
         if (elite) Raylib.DrawRing(p, 18f, 20.5f, 0, 360, 40, Raylib.Fade(Pal.Elite, 0.55f));
@@ -364,6 +364,13 @@ public static class Renderer
         // facing tick
         var fdir = new Vector2(MathF.Cos(u.Facing), MathF.Sin(u.Facing));
         Raylib.DrawLineEx(p + fdir * 13f, p + fdir * 20f, 3f, main);
+
+        // medic: green cross marker so the support unit reads at a glance
+        if (u.Team == Team.Enemy && u.Cls == "MEDIC")
+        {
+            Raylib.DrawRectangle((int)p.X - 1, (int)p.Y - 5, 3, 11, Pal.Good);
+            Raylib.DrawRectangle((int)p.X - 5, (int)p.Y - 1, 11, 3, Pal.Good);
+        }
 
         // damage flash
         if (u.Flash > 0.01f)
