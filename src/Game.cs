@@ -207,7 +207,12 @@ public class Game
     /// Harness hook (screenshot only): force a barracks rank-up perk choice.
     public void DebugBarracksPerk()
     {
-        if (_run.Squad.Count > 0) _run.Squad[0].Kills = 3;
+        if (_run.Squad.Count > 0)
+        {
+            _run.Squad[0].Kills = 3;
+            _run.Squad[0].Perks.Add(Perk.Reflexes);   // show an existing perk in the dossier
+            _run.Squad[0].Hp = Math.Max(1, _run.Squad[0].Hp - 3);
+        }
         _run.DebriefSurvivors();
         Phase = Phase.Barracks;
     }
@@ -1189,6 +1194,29 @@ public class Game
         return c;
     }
 
+    /// The soldier a purchase would affect (for the shop preview). Matches DoPurchase.
+    public Unit ShopTarget(int item) => item switch
+    {
+        0 => _run.Squad.Where(u => u.Hp < u.MaxHp).OrderBy(u => u.Hp).FirstOrDefault(),
+        1 => _run.Squad.OrderBy(u => u.MaxHp).FirstOrDefault(),
+        3 => _run.Squad.Where(u => u.BonusGrenades < 2).OrderBy(u => u.BonusGrenades).FirstOrDefault(),
+        _ => null,
+    };
+
+    /// One-line concrete effect of a purchase, so the player can judge its value.
+    public string ShopEffect(int item)
+    {
+        var t = ShopTarget(item);
+        switch (item)
+        {
+            case 0: return t == null ? "no one is wounded" : $"{t.Name}: {t.Hp} -> {t.MaxHp} HP  (+{t.MaxHp - t.Hp})";
+            case 1: return t == null ? "-" : $"{t.Name}: max HP {t.MaxHp} -> {t.MaxHp + 2}";
+            case 2: return _run.Squad.Any(u => CountPerksLeft(u) >= 2) ? "a soldier gains a perk pick" : "every soldier is maxed";
+            case 3: return t == null ? "all soldiers at the cap" : $"{t.Name}: +1 grenade/mission";
+            default: return "";
+        }
+    }
+
     void DoPurchase(int item)
     {
         if (!CanBuy(item)) { Audio.Play("miss"); return; }
@@ -1244,6 +1272,29 @@ public class Game
         _run.Report.Insert(0, $"Recovered 17 intel  (total {_run.Intel})");
         _shopDone = false;
         Phase = Phase.Barracks;
+    }
+
+    /// Headless self-test (SIGHTLINE_DEATHTEST): kill the whole squad on an escort
+    /// mission (VIP solos to evac) and confirm the dead, leveled soldiers do NOT carry
+    /// into the next mission. Returns a one-line report.
+    public string DeathConsequenceTest()
+    {
+        NoPersist = true;
+        _run = new Run(); _run.Start();
+        // give one soldier a rank/perk so we'd notice if a "leveled" unit survived death
+        _run.Squad[0].Rank = 2; _run.Squad[0].Perks.Add(Perk.Deadeye);
+        var before = _run.Squad.Select(u => u.Name).ToList();
+        _run.CurrentCard = new MissionCard { Objective = Objective.Escort, ModName = "STANDARD", Reward = RewardKind.None };
+        SetupMission(1);
+        foreach (var u in Players.Where(p => !p.IsVip).ToList()) { u.Hp = 0; KillUnit(u); }
+        int stillAlive = AlivePlayers().Count(p => !p.IsVip);
+        Vip.X = EvacZone[0].x; Vip.Y = EvacZone[0].y;     // VIP reaches extraction -> escort win
+        CheckEnd();                                        // -> EnterBarracks
+        var after = _run.Squad.Select(u => u.Name).ToList();
+        int carried = after.Count(n => before.Contains(n));
+        string verdict = (stillAlive == 0 && carried == 0) ? "PASS" : "FAIL";
+        return $"DEATHTEST: {verdict} | soldiersAliveAfterKill={stillAlive} phase={Phase} " +
+               $"fallen={_run.Fallen.Count} before=[{string.Join(",", before)}] after=[{string.Join(",", after)}]";
     }
 
     void ChooseCard(int i)
