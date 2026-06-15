@@ -290,7 +290,10 @@ seeds (mix of WIN/LOSE, no exceptions):
             (else procedural). Reserved tiles (spawns/evac/terminal+ring) stay open
             floor; `Mission.TryApplyLayout` flood-fills from a soldier to verify all
             spawns/evac/terminal stay reachable and reverts to procedural otherwise.
-            Two arenas so far: PLAZA (central plateau) + GAUNTLET (lane spine).
+            **Five arenas:** PLAZA (central plateau), GAUNTLET (lane spine), PILLARS
+            (column field), CHEVRON (diagonal cover wall + redoubt), CITADEL (bunker
+            with interior plateau + doorway). Test hook `SIGHTLINE_MAP=<index>` forces
+            a specific layout (`Mission.ForcedLayout`).
       - [x] **VIP escort objective.** DONE. `Objective.Escort` (rotation is now
             Elim / Hack / Evac / Escort, `Game.ObjectiveFor` = `(n-1)%4`). A fragile
             gold **VIP** (`Mission.MakeVip`, `Unit.IsVip`: 6 HP, 45 aim, sidearm, no
@@ -423,9 +426,9 @@ the player meaningful long-game decisions. Ordered by impact:
       `DrawElevation`). Still open: *themed authored arenas* per biome (`Maps.cs`).
 
 Supporting polish (any time): distinct "VIP EXTRACTED/LOST" end cards; a 2nd
-elevation tier; high ground seeing over LOW cover; secondary objectives; themed
-authored arenas per biome; more requisition options (recruits/gear) for the shop;
-an enemy heal could also key an "interrupt the medic" focus-fire incentive.
+elevation tier; high ground seeing over LOW cover; secondary objectives; more
+authored arenas (and *themed-per-biome* arena selection); more requisition options
+(recruits/gear) for the shop.
 
 ---
 
@@ -505,6 +508,12 @@ Harness screenshot hooks (all `shot`-only, in `Program.cs`):
 the CONTINUE button shows), **`SIGHTLINE_SHOP`** (barracks requisition screen). Plus
 non-shot **`SIGHTLINE_SAVETEST=1`** → prints `SAVETEST: PASS/FAIL` (save/load
 round-trip; no window).
+
+**More arenas (this session).** `Maps.cs` grew from 2 to 5 hand-authored layouts
+(PILLARS / CHEVRON / CITADEL added). Verified each applies (connectivity guard
+passes) across Hack/Evac/Escort via a `SIGHTLINE_MAP=<index>` force hook
+(`Mission.ForcedLayout`, env-gated in `Program.cs`). Keep authored maps' walkable
+tiles to `.`/`^` only and leave the left/right spawn columns + center open.
 
 **MEDIC enemy (this session).** New support archetype (ORDERLY, mission 3+) that
 heals wounded allies. Wiring: `EnemyPlan.HealTarget`, `Ai.Plan` MEDIC branch +
