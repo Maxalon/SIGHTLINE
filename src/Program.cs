@@ -61,12 +61,14 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CARDS") == "1") game.DebugDeployCards();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_SHOP") == "1") game.DebugShop();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_TAGEDIT") == "1") game.DebugTagEditor();
+        bool helpShot = shot && Environment.GetEnvironmentVariable("SIGHTLINE_HELP") == "1";  // hover the ability button
         int frame = 0;
         const int autoCap = 20000;
 
         while (!Raylib.WindowShouldClose())
         {
             float dt = (shot || autoplay) ? 1f / 60f : Raylib.GetFrameTime();
+            if (helpShot) Raylib.SetMousePosition(592, 740);   // park cursor on the ability button
             game.Update(dt);
 
             Raylib.BeginDrawing();

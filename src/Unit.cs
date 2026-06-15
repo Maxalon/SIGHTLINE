@@ -99,6 +99,14 @@ public class Unit
         AbilityKind.Suppress=> "SUPPRESS",
         _ => "ABILITY",
     };
+    public string AbilityDesc => Ability switch
+    {
+        AbilityKind.RunGun   => "Next shot costs 1 action (won't end your turn)",
+        AbilityKind.Blitz    => "Next move costs one action less",
+        AbilityKind.Steady   => "Next shot: +25 aim, +20 crit",
+        AbilityKind.Suppress => "Pin the nearest foe: -30 aim + overwatch it",
+        _ => "",
+    };
     public static AbilityKind AbilityKindFor(string cls) => cls switch
     {
         "ASSAULT"      => AbilityKind.RunGun,

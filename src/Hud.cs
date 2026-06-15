@@ -299,6 +299,51 @@ public static class Hud
         ActionButtons = btns.ToArray();
         foreach (var b in ActionButtons)
             DrawButtonRect(b.Rect, b.Label, b.Key, b.Enabled, b.Selected, b.Accent);
+
+        DrawActionHelp(g);
+    }
+
+    // Hover help for the action buttons (explains FIRE/GRENADE/abilities/etc.).
+    static void DrawActionHelp(Game g)
+    {
+        if (ActionButtons == null) return;
+        var m = Raylib.GetMousePosition();
+        foreach (var b in ActionButtons)
+        {
+            if (!Raylib.CheckCollisionPointRec(m, b.Rect)) continue;
+            string desc = ActionDesc(g, b.Id);
+            if (string.IsNullOrEmpty(desc)) return;
+            string title = b.Label;
+            int w = Math.Max(Raylib.MeasureText(title, 14), Raylib.MeasureText(desc, 12)) + 20;
+            int h = 50;
+            int x = (int)(b.Rect.X + b.Rect.Width / 2 - w / 2);
+            int y = (int)b.Rect.Y - h - 8;
+            x = Util.Clamp(x, 8, Cfg.ScreenW - w - 8);
+            var box = new Rectangle(x, y, w, h);
+            Raylib.DrawRectangleRounded(box, 0.14f, 6, Pal.RGBA(10, 14, 19, 252));
+            Raylib.DrawRectangleLinesEx(box, 1.2f, Pal.Friend);
+            Raylib.DrawText(title, x + 10, y + 8, 14, Pal.Accent);
+            Raylib.DrawText(desc, x + 10, y + 28, 12, Pal.Txt);
+            return;
+        }
+    }
+
+    static string ActionDesc(Game g, string id)
+    {
+        switch (id)
+        {
+            case "shoot": return "Fire at a target in range + line of sight. Ends the turn.";
+            case "grenade": return "Lob a grenade: AoE that ignores cover, hits both teams, clears low cover.";
+            case "overwatch": return "Watch: fire a reaction shot at the first foe that moves in sight.";
+            case "hunker": return "Hunker down for extra cover defense; you can't be crit.";
+            case "hack": return $"Work the terminal ({g.HackProgress}/{Game.HackRequired} done). Costs 1 action.";
+            case "reload": return "Reload your weapon to full.";
+            case "ability":
+                return g.Selected != null && g.Selected.Ability != AbilityKind.None
+                    ? g.Selected.AbilityDesc + "  (1 charge/mission)"
+                    : "";
+            default: return "";
+        }
     }
 
     // ---------------- tooltip ----------------

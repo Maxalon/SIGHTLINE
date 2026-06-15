@@ -67,19 +67,34 @@ public class Grid
     public CoverInfo GetCover(int tx, int ty, int fx, int fy)
     {
         int dx = fx - tx, dy = fy - ty;
-        int best = 0;
 
-        // candidate protective sides, based on the dominant axis to the attacker
-        var sides = new List<(int sx, int sy)>();
-        if (Math.Abs(dx) >= Math.Abs(dy) && dx != 0) sides.Add((Util.Sign(dx), 0));
-        if (Math.Abs(dy) >= Math.Abs(dx) && dy != 0) sides.Add((0, Util.Sign(dy)));
-
-        foreach (var (sx, sy) in sides)
+        int LevelAt(int sx, int sy)
         {
             int nx = tx + sx, ny = ty + sy;
-            if (!InBounds(nx, ny)) continue;
-            if (Tiles[nx, ny] == TileType.HighCover) best = Math.Max(best, 2);
-            else if (Tiles[nx, ny] == TileType.LowCover) best = Math.Max(best, 1);
+            if (!InBounds(nx, ny)) return 0;
+            if (Tiles[nx, ny] == TileType.HighCover) return 2;
+            if (Tiles[nx, ny] == TileType.LowCover) return 1;
+            return 0;
+        }
+
+        bool horiz = Math.Abs(dx) > Math.Abs(dy) && dx != 0;
+        bool vert  = Math.Abs(dy) > Math.Abs(dx) && dy != 0;
+        bool diagonal = dx != 0 && dy != 0 && Math.Abs(dx) == Math.Abs(dy);
+
+        int best;
+        if (diagonal)
+        {
+            // A diagonal shot slips past the corner of a single cover block, so the
+            // defender is only protected by a true corner (cover on BOTH facing sides),
+            // and only as well as the weaker of the two. Otherwise it's a flank.
+            int h = LevelAt(Util.Sign(dx), 0);
+            int v = LevelAt(0, Util.Sign(dy));
+            best = (h > 0 && v > 0) ? Math.Min(h, v) : 0;
+        }
+        else
+        {
+            // attack is dominantly along one axis: the facing side on that axis covers
+            best = horiz ? LevelAt(Util.Sign(dx), 0) : (vert ? LevelAt(0, Util.Sign(dy)) : 0);
         }
 
         bool anyAdjacent = false;
