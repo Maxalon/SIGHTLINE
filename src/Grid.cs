@@ -60,7 +60,11 @@ public class Grid
     {
         public int Level;     // 0 none, 1 low, 2 high
         public bool Flanked;  // had adjacent cover, but not protecting from this angle
-        public int Defense => Level == 2 ? 40 : (Level == 1 ? 20 : 0);
+        public bool Partial;  // diagonal-at-range: defender only partly obscured -> half defense
+        public int Defense
+        {
+            get { int d = Level == 2 ? 40 : (Level == 1 ? 20 : 0); return Partial ? d / 2 : d; }
+        }
     }
 
     /// Cover that a unit standing on (tx,ty) gets against fire coming from (fx,fy).
@@ -82,14 +86,28 @@ public class Grid
         bool diagonal = dx != 0 && dy != 0 && Math.Abs(dx) == Math.Abs(dy);
 
         int best;
+        bool partial = false;
         if (diagonal)
         {
-            // A diagonal shot slips past the corner of a single cover block, so the
-            // defender is only protected by a true corner (cover on BOTH facing sides),
-            // and only as well as the weaker of the two. Otherwise it's a flank.
             int h = LevelAt(Util.Sign(dx), 0);
             int v = LevelAt(0, Util.Sign(dy));
-            best = (h > 0 && v > 0) ? Math.Min(h, v) : 0;
+            if (h > 0 && v > 0)
+            {
+                best = Math.Min(h, v);            // a true corner (both facing sides) -> full cover
+            }
+            else
+            {
+                int side = Math.Max(h, v);        // a single facing-side cover block
+                int dist = Math.Abs(dx);          // == |dy| on a diagonal
+                if (side > 0 && dist > 1)
+                {
+                    best = side; partial = true;  // at range the defender is partly obscured -> half cover
+                }
+                else
+                {
+                    best = 0;                     // point-blank diagonal slips past the corner -> flank
+                }
+            }
         }
         else
         {
@@ -102,7 +120,7 @@ public class Grid
         for (int i = 0; i < 4; i++)
             if (IsCover(tx + dirs[i, 0], ty + dirs[i, 1])) anyAdjacent = true;
 
-        return new CoverInfo { Level = best, Flanked = best == 0 && anyAdjacent };
+        return new CoverInfo { Level = best, Partial = partial, Flanked = best == 0 && anyAdjacent };
     }
 
     // ---------- Pathfinding (8-directional Dijkstra) ----------

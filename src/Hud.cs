@@ -352,7 +352,7 @@ public static class Hud
         if (!g.ShowOdds) return;
         var o = g.HoverOdds;
         var m = Raylib.GetMousePosition();
-        int extras = (o.Flanked ? 1 : 0) + (o.HighGround ? 1 : 0) + (o.SeesOver ? 1 : 0) + (o.Steady ? 1 : 0);
+        int extras = (o.Flanked ? 1 : 0) + (o.HighGround ? 1 : 0) + (o.SeesOver ? 1 : 0) + (o.Partial ? 1 : 0) + (o.Steady ? 1 : 0);
         int w = 150, h = 74 + extras * 18;
         int x = (int)m.X - w / 2;
         int y = (int)m.Y - h - 18;
@@ -379,6 +379,7 @@ public static class Hud
         if (o.Flanked) { Raylib.DrawText("! FLANKED", x + 12, fy, 13, Pal.Accent); fy += 18; }
         if (o.HighGround) { Raylib.DrawText("+ HIGH GROUND", x + 12, fy, 13, Pal.Good); fy += 18; }
         if (o.SeesOver) { Raylib.DrawText("+ OVER LOW COVER", x + 12, fy, 13, Pal.Good); fy += 18; }
+        if (o.Partial) { Raylib.DrawText("~ PARTIAL COVER", x + 12, fy, 13, Pal.TxtDim); fy += 18; }
         if (o.Steady) { Raylib.DrawText("+ STEADY", x + 12, fy, 13, Pal.Good); fy += 18; }
     }
 

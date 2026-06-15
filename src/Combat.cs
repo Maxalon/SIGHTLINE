@@ -13,6 +13,7 @@ public struct ShotOdds
     public bool Hunkered;
     public bool HighGround;  // attacker fires from raised terrain onto a lower foe
     public bool SeesOver;    // high ground negates the target's LOW cover
+    public bool Partial;     // diagonal-at-range: target only partly obscured (half cover)
     public bool Steady;      // attacker braced (sharpshooter ability) this shot
 }
 
@@ -47,8 +48,9 @@ public static class Combat
         // (high cover still blocks). The target reads as fully exposed for hit/crit/perks.
         bool seesOver = highGround && cover.Level == 1;
         int coverLevel = seesOver ? 0 : cover.Level;
-        int coverDef = seesOver ? 0 : cover.Defense;
+        int coverDef = seesOver ? 0 : cover.Defense;   // cover.Defense is already halved when partial
         bool flanked = cover.Flanked && !seesOver;
+        bool partial = cover.Partial && !seesOver;
 
         int hit = a.Aim + a.Weapon.AimBonus + a.Weapon.RangeMod(dist) - coverDef;
         if (d.Hunkered) hit -= 25;
@@ -81,6 +83,7 @@ public static class Combat
             Hunkered = d.Hunkered,
             HighGround = highGround,
             SeesOver = seesOver,
+            Partial = partial,
             Steady = a.Steady,
         };
     }
@@ -129,17 +132,40 @@ public static class Combat
         if (high.CoverLevel != 0) fails.Add("highNegatesLow");
         if (high.HitChance <= ground.HitChance) fails.Add("highHitNotBetter");
 
-        // diagonal flanking: a single perpendicular cover must NOT protect a diagonal shot,
-        // but a true corner (cover on both facing sides) still does.
-        var gd = new Grid();
-        gd.Tiles[4, 5] = TileType.LowCover;                       // west of the defender only
-        var ad = new Unit { Aim = 65, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 3, Y = 3 };  // NW diagonal
-        var dd = new Unit { Aim = 65, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 5, Y = 5, Hp = 6, MaxHp = 6 };
-        var diag1 = ComputeOdds(gd, ad, dd);
-        if (diag1.CoverLevel != 0 || !diag1.Flanked) fails.Add("diagFlankOpen");
-        gd.Tiles[5, 4] = TileType.LowCover;                       // add north -> a real corner
-        var diag2 = ComputeOdds(gd, ad, dd);
-        if (diag2.CoverLevel != 1 || diag2.Flanked) fails.Add("diagCornerCovered");
+        // --- the three cases from the cover sketch ---
+        var unitA = new Unit { Aim = 65, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy };
+        var unitD = new Unit { Aim = 65, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, Hp = 6, MaxHp = 6 };
+        ShotOdds Case(Grid grid, int ax, int ay, int dxp, int dyp)
+        { unitA.X = ax; unitA.Y = ay; unitD.X = dxp; unitD.Y = dyp; return ComputeOdds(grid, unitA, unitD); }
+
+        // (A) FULL COVER: shallow-angle shot, cover on the defender's facing (west) side
+        var gA = new Grid(); gA.Tiles[9, 5] = TileType.HighCover;
+        var cA = Case(gA, 2, 4, 10, 5);                 // attacker far west, one row off
+        if (cA.CoverLevel != 2 || cA.Flanked) fails.Add("sketchA_full");
+
+        // (B) FLANK: the defender's cover is on a side the shot doesn't come from (north)
+        var gB = new Grid(); gB.Tiles[10, 4] = TileType.HighCover;
+        var cB = Case(gB, 2, 5, 10, 5);                 // attacker due west
+        if (cB.CoverLevel != 0 || !cB.Flanked) fails.Add("sketchB_flank");
+
+        // (C) NO COVER: adjacent diagonal, cover only on one (perpendicular) side
+        var gC = new Grid(); gC.Tiles[9, 5] = TileType.HighCover;
+        var cC = Case(gC, 9, 6, 10, 5);                 // attacker SW, point-blank
+        if (cC.CoverLevel != 0 || !cC.Flanked) fails.Add("sketchC_nocover");
+
+        // (D) diagonal at RANGE with one facing-side cover -> PARTIAL (half) cover, not a flank
+        var gD2 = new Grid(); gD2.Tiles[9, 5] = TileType.HighCover;
+        var cD2 = Case(gD2, 7, 8, 10, 5);               // attacker 3 tiles SW
+        if (cD2.CoverLevel != 2 || cD2.Flanked || !cD2.Partial) fails.Add("diagRangePartial");
+        // half defense check: partial high cover should beat full high cover (more hit)
+        var gFull = new Grid(); gFull.Tiles[9, 5] = TileType.HighCover;
+        var cFull = Case(gFull, 2, 5, 10, 5);           // straight west -> full high cover
+        if (cD2.HitChance <= cFull.HitChance) fails.Add("partialNotHalf");
+
+        // (E) true corner (cover on BOTH facing sides) -> full cover, not partial
+        var gE = new Grid(); gE.Tiles[9, 5] = TileType.HighCover; gE.Tiles[10, 6] = TileType.LowCover;
+        var cE = Case(gE, 7, 8, 10, 5);
+        if (cE.CoverLevel != 1 || cE.Flanked || cE.Partial) fails.Add("diagCornerFull");
 
         // HIGH cover must still protect even from high ground
         var grid2 = new Grid();
@@ -150,7 +176,7 @@ public static class Combat
         if (highVsHigh.CoverLevel != 2) fails.Add("highCoverKept");
 
         return fails.Count == 0
-            ? "COMBATTEST: PASS (high ground negates low cover, keeps high cover)"
+            ? "COMBATTEST: PASS (cover sketch A-E + high-ground cases all hold)"
             : "COMBATTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 }
