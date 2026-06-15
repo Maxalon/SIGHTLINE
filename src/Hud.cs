@@ -671,7 +671,15 @@ public static class Hud
                                string secondBtn = null)
     {
         Raylib.DrawRectangle(0, 0, Cfg.ScreenW, Cfg.ScreenH, Raylib.Fade(Pal.RGBA(5, 8, 11), 0.84f));
-        int w = 540, h = rules != null ? 152 + rules.Length * 30 + 70 : 240;
+        // size the card to the widest rule so text never clips (rules sit at x+58 + right pad)
+        int w = 540;
+        if (rules != null)
+        {
+            int maxRule = 0;
+            foreach (var r in rules) maxRule = Math.Max(maxRule, Raylib.MeasureText(r, 15));
+            w = Math.Max(w, maxRule + 58 + 30);
+        }
+        int h = rules != null ? 152 + rules.Length * 30 + 70 : 240;
         int x = Cfg.ScreenW / 2 - w / 2, y = Cfg.ScreenH / 2 - h / 2;
         var card = new Rectangle(x, y, w, h);
         Raylib.DrawRectangleRounded(card, 0.06f, 8, Pal.Panel);
