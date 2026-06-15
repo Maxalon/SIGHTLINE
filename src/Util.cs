@@ -63,6 +63,26 @@ public static class Pal
     public static readonly Color MoveYellow= RGBA(251, 191, 36, 55);
 }
 
+/// A per-mission visual theme: floor checker + grid/edge tint, so each mission
+/// reads as a distinct place rather than one recoloured arena.
+public class Biome
+{
+    public string Name;
+    public Color FloorA, FloorB, Grid, Edge;
+
+    public static readonly Biome[] All =
+    {
+        new Biome { Name = "STEEL",   FloorA = Pal.RGBA(22, 29, 38), FloorB = Pal.RGBA(26, 34, 44), Grid = Pal.RGBA(33, 43, 56), Edge = Pal.RGBA(30, 39, 51) },
+        new Biome { Name = "ARID",    FloorA = Pal.RGBA(40, 33, 23), FloorB = Pal.RGBA(46, 38, 27), Grid = Pal.RGBA(62, 50, 33), Edge = Pal.RGBA(64, 52, 34) },
+        new Biome { Name = "TUNDRA",  FloorA = Pal.RGBA(23, 33, 42), FloorB = Pal.RGBA(28, 39, 49), Grid = Pal.RGBA(42, 56, 70), Edge = Pal.RGBA(44, 58, 74) },
+        new Biome { Name = "VERDANT", FloorA = Pal.RGBA(21, 35, 26), FloorB = Pal.RGBA(25, 41, 30), Grid = Pal.RGBA(38, 58, 42), Edge = Pal.RGBA(38, 60, 44) },
+        new Biome { Name = "ASH",     FloorA = Pal.RGBA(34, 27, 27), FloorB = Pal.RGBA(40, 31, 31), Grid = Pal.RGBA(56, 42, 42), Edge = Pal.RGBA(58, 40, 40) },
+        new Biome { Name = "VOID",    FloorA = Pal.RGBA(28, 24, 41), FloorB = Pal.RGBA(33, 28, 48), Grid = Pal.RGBA(50, 41, 68), Edge = Pal.RGBA(52, 42, 72) },
+    };
+
+    public static Biome For(int missionNum) => All[(missionNum - 1 + All.Length) % All.Length];
+}
+
 public static class Util
 {
     public static float Clamp(float v, float a, float b) => MathF.Max(a, MathF.Min(b, v));

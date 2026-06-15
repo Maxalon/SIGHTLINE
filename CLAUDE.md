@@ -187,7 +187,8 @@ seeds (mix of WIN/LOSE, no exceptions):
   Escort per 4-mission cycle; shown in the HUD.
 - **Map variety:** procedural scatter OR a hand-authored arena (`src/Maps.cs`,
   ~55% of missions) chosen with a connectivity guard so spawns/evac/terminal are
-  always reachable.
+  always reachable. Plus **per-mission biomes** (`Biome`: STEEL/ARID/TUNDRA/VERDANT/
+  ASH/VOID) that retint the floor/grid so each mission reads as a distinct place.
 - **Elevation / high ground:** raised plateaus (`Grid.Height`) grant +15 aim /
   +10 crit firing down on lower targets; faux-3D platforms, height-aware overlays,
   AI seizes the high ground. Shown in the shot tooltip ("+ HIGH GROUND").
@@ -386,11 +387,16 @@ the player meaningful long-game decisions. Ordered by impact:
 - [ ] **E. Run persistence (save/load).** Serialize the `Run` to the OS user-data
       dir (NOT the repo) so a campaign survives quitting. Lower urgency (a run is
       ~one sitting) but expected of a roguelite; do after the loop has more depth.
-- [ ] **F. Biome/visual variety.** Per-mission palette swaps + themed authored
-      arenas so missions read as distinct places, not one recoloured arena.
+- [x] **F. Biome/visual variety.** DONE (palette swaps). `Biome` (Util.cs) defines
+      a per-mission floor checker + grid/edge tint; `Biome.For(n)` cycles STEEL /
+      ARID / TUNDRA / VERDANT / ASH / VOID so each mission reads as a distinct place.
+      `Game.Biome` is set in `SetupMission` and shown in the mission banner; the
+      renderer tints floor, grid lines, and board edge. Still open: tinting cover/
+      plateaus too, and *themed authored arenas* per biome (`Maps.cs`).
 
 Supporting polish (any time): distinct "VIP EXTRACTED/LOST" end cards; a 2nd
-elevation tier; high ground seeing over LOW cover; secondary objectives.
+elevation tier; high ground seeing over LOW cover; secondary objectives; biome-
+tinted cover + plateaus; a persistent intel currency + barracks spend screen (C).
 
 ---
 
@@ -435,11 +441,20 @@ now reloads/grenades a squatter instead of hunkering forever, and a turn-based
 `AutoStallCheck` force-wakes a dormant pod if no progress is made for 10 player
 turns — together these eliminate the rare deep-campaign TIMEOUT.
 
-**Good next steps:** the original 7-item roadmap is fully cleared. Pick up from
-**ROADMAP — PHASE 2** above; the recommended next item is **A. Perk-based
-promotions** (highest replayability per unit of work, builds on the new ability
-system, headless-verifiable). B (enemy variety) and D (procedural music) are the
-next most impactful for "content" and "feel" respectively.
+**Phase 2 progress (this session):** A (perk promotions), B (enemy variety +
+elite boss), C (deployment-choice cards), and F (biome palettes) are all DONE and
+merged to `main`. Remaining Phase 2: **D. Procedural music** (deferred here — it
+CANNOT be verified in this sandbox: no audio device, `InitAudioDevice` fails, so
+it'd be a blind ship; do it where you can actually hear it, building on the PCM
+synth in `src/Audio.cs`), and **E. Run save/load** (heavier plumbing: serialize
+`Run` — squad incl. perks/ability/weapon — to the OS user-data dir, add a CONTINUE
+on the intro; verify by save→reload). Smaller open follow-ups: a persistent
+intel currency + a barracks spend screen (the unfinished half of C), biome-tinted
+cover/plateaus + themed authored arenas (F), and a MEDIC enemy archetype (B).
+
+Harness screenshot hooks added this session (all `shot`-only, in `Program.cs`):
+`SIGHTLINE_ZOOM`, `SIGHTLINE_PAUSE`, `SIGHTLINE_PERKSHOT`, `SIGHTLINE_CARDS`,
+`SIGHTLINE_WAKE` (reveal dormant pods). Use them to screenshot the new screens.
 
 - Gotchas: (a) elevation is a pure positioning layer — plateaus are walkable floor
   (no climb cost); per-tile draws that sit on a plateau go through
