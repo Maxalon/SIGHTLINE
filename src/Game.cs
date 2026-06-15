@@ -219,6 +219,7 @@ public class Game
             _run.Squad[0].Hp = Math.Max(1, _run.Squad[0].Hp - 3);
         }
         _run.DebriefSurvivors();
+        if (_run.Squad.Count > 0) _run.Squad[0].Wound = 2;   // show the WOUNDED dossier line
         Phase = Phase.Barracks;
     }
 
@@ -1226,7 +1227,7 @@ public class Game
         if (item < 0 || item >= ShopCost.Length || _run.Intel < ShopCost[item]) return false;
         return item switch
         {
-            0 => _run.Squad.Any(u => u.Hp < u.MaxHp),     // medkit needs a wounded soldier
+            0 => _run.Squad.Any(u => u.Hp < u.MaxHp || u.Wound > 0),  // medkit needs someone hurt or wounded
             2 => _run.Squad.Any(u => CountPerksLeft(u) >= 2), // training needs an un-maxed soldier
             3 => _run.Squad.Any(u => u.BonusGrenades < 2),    // cache caps at +2 per soldier
             _ => _run.Squad.Count > 0,
@@ -1243,7 +1244,7 @@ public class Game
     /// The soldier a purchase would affect (for the shop preview). Matches DoPurchase.
     public Unit ShopTarget(int item) => item switch
     {
-        0 => _run.Squad.Where(u => u.Hp < u.MaxHp).OrderBy(u => u.Hp).FirstOrDefault(),
+        0 => _run.Squad.Where(u => u.Hp < u.MaxHp || u.Wound > 0).OrderByDescending(u => u.Wound).ThenBy(u => u.Hp).FirstOrDefault(),
         1 => _run.Squad.OrderBy(u => u.MaxHp).FirstOrDefault(),
         3 => _run.Squad.Where(u => u.BonusGrenades < 2).OrderBy(u => u.BonusGrenades).FirstOrDefault(),
         _ => null,
@@ -1255,7 +1256,10 @@ public class Game
         var t = ShopTarget(item);
         switch (item)
         {
-            case 0: return t == null ? "no one is wounded" : $"{t.Name}: {t.Hp} -> {t.MaxHp} HP  (+{t.MaxHp - t.Hp})";
+            case 0:
+                if (t == null) return "no one is hurt or wounded";
+                string heal = t.Hp < t.MaxHp ? $"{t.Hp} -> {t.MaxHp} HP" : "full HP";
+                return t.Wound > 0 ? $"{t.Name}: {heal} + cure wound" : $"{t.Name}: {heal}  (+{t.MaxHp - t.Hp})";
             case 1: return t == null ? "-" : $"{t.Name}: max HP {t.MaxHp} -> {t.MaxHp + 2}";
             case 2: return _run.Squad.Any(u => CountPerksLeft(u) >= 2) ? "a soldier gains a perk pick" : "every soldier is maxed";
             case 3: return t == null ? "all soldiers at the cap" : $"{t.Name}: +1 grenade/mission";
@@ -1269,9 +1273,10 @@ public class Game
         switch (item)
         {
             case 0:
-                var hurt = _run.Squad.Where(u => u.Hp < u.MaxHp).OrderBy(u => u.Hp).First();
+                var hurt = ShopTarget(0);
                 int amt = hurt.MaxHp - hurt.Hp; hurt.Hp = hurt.MaxHp;
-                _run.Report.Add($"{hurt.Name} field-treated  (+{amt} HP)");
+                bool cured = hurt.Wound > 0; hurt.Wound = 0;
+                _run.Report.Add($"{hurt.Name} field-treated  (+{amt} HP{(cured ? ", wound cured" : "")})");
                 break;
             case 1:
                 var weak = _run.Squad.OrderBy(u => u.MaxHp).First();
@@ -1306,6 +1311,14 @@ public class Game
     {
         if (CanBuy(0)) DoPurchase(0);
         _shopDone = true;
+    }
+
+    /// Harness hook (screenshot only): mark a couple of soldiers wounded.
+    public void DebugWound()
+    {
+        var c = Players.Where(p => !p.IsVip).ToList();
+        if (c.Count > 0) c[0].Wound = 2;
+        if (c.Count > 1) c[1].Wound = 1;
     }
 
     /// Harness hook (screenshot only): open the custom-tag editor on a soldier.

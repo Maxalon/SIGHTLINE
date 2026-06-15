@@ -226,6 +226,9 @@ seeds (mix of WIN/LOSE, no exceptions):
   directly (keeps MSAA). Settings persist to `display.json` in the user-data dir.
   Disabled in the headless harness (`Display.Init(!(shot||autoplay))`) so screenshots
   stay byte-identical.
+- **Wounds & attrition:** survivors that end a mission badly hurt carry a temporary
+  `Unit.Wound` (−12 aim / −1 mobility) that decays over missions; a FIELD MEDKIT cures
+  it. Shown as red "WOUNDED (n)" in the roster + dossier. (Phase 3 item 3.1 core.)
 - **Recruits:** the barracks backfills empty squad slots with fresh rookies
   (`Mission.MakeRecruit`, `Run.DebriefSurvivors`) so casualties don't death-spiral.
 - **Perk-based promotions:** each rank-up is a pick-1-of-2 perk choice in the
@@ -473,19 +476,18 @@ code to `main`.
 
 ### Tier 1 — make the run loop bite (highest impact)
 
-- [ ] **3.1 Wounds & attrition.** Survivors that took real damage end a mission
-      **Wounded**: a temporary debuff (`Unit.Wound` = missions-remaining + a severity
-      → −Aim/−Mobility and/or a capped MaxHp) set in `Run.DebriefSurvivors` from HP
-      lost (heavier if downed to ~0). Decays one step per mission; `FIELD MEDKIT`
-      (shop) can also clear a wound. **Bench option:** leave a wounded soldier home to
-      recover fully → deploy short-handed (the backfill only tops up to the *deployed*
-      count, so a wipe genuinely costs strength). This is the concrete answer to the
-      "death has no consequence" note — gate harsher attrition behind a run/difficulty
-      flag if it feels punishing. Touch: `Unit` (+Wound, persisted in `SaveGame`),
-      `Run.DebriefSurvivors`/backfill, `Mission.Build` (apply stat penalty), `Hud`
-      roster/dossier "WOUNDED (n)" tag, `Game.DoPurchase` medkit. Verify: a
-      `SIGHTLINE_WOUNDTEST` (damage a survivor → carries a wound → decays/clears) +
-      autoplay.
+- [x] **3.1 Wounds & attrition (core).** DONE. Survivors that end a mission badly hurt
+      carry a **Wound** (`Unit.Wound` = missions remaining; 2 if downed to ≤¼ MaxHp, 1 if
+      ≤½). Assigned/decayed in `Run.DebriefSurvivors` (recover one step per mission, then
+      gauge fresh damage *before* the field-heal). While `Wound > 0`: **−12 Aim**
+      (`Combat.ComputeOdds`) and **−1 Mobility** (`Unit.MoveBudget`), via `Unit.WoundAim/
+      WoundMob`. `FIELD MEDKIT` heals to full **and cures the wound** (`Game.DoPurchase`/
+      `ShopTarget`/`ShopEffect`/`CanBuy` now consider wounds). UI: red "WOUNDED (n)" in the
+      roster strip + a "WOUNDED (n missions) −aim/−mob" dossier line. Persisted in
+      `SaveGame`. Verified by `SIGHTLINE_WOUNDTEST` (assign → penalise aim+mob → decay →
+      clear) + `SIGHTLINE_WOUND` screenshot + autoplay. **Still TODO:** the *bench /
+      deploy-short-handed* option (the squad still auto-backfills to 4, so a wipe doesn't
+      yet shrink strength) — that's the remaining half of "attrition bites".
 
 - [ ] **3.2 Soldier identity (nicknames, traits, bonds).** Make veterans matter so
       losing one hurts. `Unit.Nickname` + `Unit.Traits` (List) earned on feats
@@ -717,7 +719,8 @@ Harness screenshot hooks (all `shot`-only, in `Program.cs`):
 `SIGHTLINE_WAKE` (reveal dormant pods), **`SIGHTLINE_INTRO`** (intro with a save so
 the CONTINUE button shows), **`SIGHTLINE_SHOP`** (barracks requisition screen). Plus
 non-shot **`SIGHTLINE_SAVETEST=1`** → prints `SAVETEST: PASS/FAIL` (save/load
-round-trip; no window).
+round-trip; no window). Also non-shot **`SIGHTLINE_WOUNDTEST=1`** (wound assign/decay/
+clear + aim/mob penalty), and shot **`SIGHTLINE_WOUND=1`** (wounded roster/dossier).
 
 **Shop FRAG CACHE option (this session).** 4th requisition item: a permanent +1
 grenade/mission (`Unit.BonusGrenades`, read in `Mission.Build`, persisted in the
