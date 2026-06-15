@@ -249,9 +249,15 @@ public class Game
         }
     }
 
+    // run-over screen text (set by LoseRun so the cause reads accurately)
+    public string LoseTitle = "RUN OVER";
+    public string LoseReason = "";
+
     /// End the run as a loss and clear the checkpoint so the intro stops offering CONTINUE.
-    void LoseRun()
+    void LoseRun(string title, string reason)
     {
+        LoseTitle = title;
+        LoseReason = reason;
         Phase = Phase.Lose;
         Audio.Play("lose");
         if (!NoPersist) SaveGame.Delete();
@@ -417,7 +423,7 @@ public class Game
         if (Phase != Phase.PlayerTurn && Phase != Phase.EnemyTurn) return;
         if (_anims.Count > 0) return;
         var alivePlayers = AlivePlayers();
-        if (alivePlayers.Count == 0) { LoseRun(); return; }
+        if (alivePlayers.Count == 0) { LoseRun("RUN OVER", $"The squad fell on mission {_run.Mission}."); return; }
 
         if (Objective == Objective.Eliminate)
         {
@@ -429,7 +435,7 @@ public class Game
         }
         else if (Objective == Objective.Escort) // get the VIP to extraction; losing it is a wipe
         {
-            if (Vip == null || !Vip.Alive) { LoseRun(); return; }
+            if (Vip == null || !Vip.Alive) { LoseRun("VIP LOST", $"The asset was lost on mission {_run.Mission}."); return; }
             if (EvacZone.Contains((Vip.X, Vip.Y))) EnterBarracks();
         }
         else // Evac: every surviving soldier must stand in the extraction zone

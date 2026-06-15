@@ -331,7 +331,9 @@ public static class Hud
             DrawCenterCard(g, "CAMPAIGN COMPLETE", $"All {Run.MaxMissions} missions cleared. The squad stands victorious.",
                 Pal.Good, null, "NEW RUN");
         else if (g.Phase == Phase.Lose)
-            DrawCenterCard(g, "RUN OVER", $"The squad fell on mission {g.RunState.Mission}.", Pal.Foe, null, "NEW RUN");
+            DrawCenterCard(g, string.IsNullOrEmpty(g.LoseTitle) ? "RUN OVER" : g.LoseTitle,
+                string.IsNullOrEmpty(g.LoseReason) ? $"The squad fell on mission {g.RunState.Mission}." : g.LoseReason,
+                Pal.Foe, null, "NEW RUN");
     }
 
     static void DrawBarracks(Game g)
