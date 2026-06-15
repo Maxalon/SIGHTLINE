@@ -187,7 +187,10 @@ seeds (mix of WIN/LOSE, no exceptions):
   +10 crit firing down on lower targets; faux-3D platforms, height-aware overlays,
   AI seizes the high ground. Shown in the shot tooltip ("+ HIGH GROUND").
 - **UX:** squad roster strip, end-turn confirmation, mute indicator, threat
-  preview (red pips on exposed reachable tiles while positioning).
+  preview (red pips on exposed reachable tiles while positioning), **camera
+  zoom/pan** (wheel + middle-drag, C to reset), a **keyboard tile cursor**
+  (arrows/WASD + Space), and a **pause/settings menu** (Esc: audio, screen
+  shake, threat-preview toggles, abandon run).
 - **Recruits:** the barracks backfills empty squad slots with fresh rookies
   (`Mission.MakeRecruit`, `Run.DebriefSurvivors`) so casualties don't death-spiral.
 - **Class signature abilities:** each class has one self-cast signature (key **5**,
@@ -287,7 +290,7 @@ seeds (mix of WIN/LOSE, no exceptions):
             ring + diamond + "VIP" tag (`Renderer.DrawUnit`); HUD shows "ESCORT VIP"
             and an "ASSET" roster/card label; squad counter excludes the VIP.
             Autopilot walks the VIP to evac while soldiers screen.
-- [~] **6. Polish/UX.** IN PROGRESS.
+- [x] **6. Polish/UX.** DONE.
       - [x] Squad **roster strip** (left edge): all soldiers' HP/AP/rank/status,
             click to select, dims when spent (`Hud.DrawRoster` + `RosterChips`).
       - [x] **End-turn confirmation** when a soldier still has actions
@@ -297,7 +300,20 @@ seeds (mix of WIN/LOSE, no exceptions):
             enemy could fire on with no cover get a red warning pip
             (`Game.ComputeThreat` -> `Game.Threat`, drawn by `Renderer.DrawThreat`),
             so "move into cover" decisions are legible at a glance.
-      - [ ] Keyboard tile cursor; camera pan/zoom for readability; settings.
+      - [x] **Camera zoom/pan.** `Game.CamZoom`/`CamPan` feed `Game.ViewCamera(bool
+            withShake)` (render variant adds shake/zoom-punch, picking variant is
+            stable). Mouse wheel zooms toward the cursor, middle-drag pans, **C**
+            resets. Defaults to identity so default mouse picking + the headless
+            harness are byte-for-byte unchanged. Mouse->tile now routes through
+            `GetScreenToWorld2D` in `UpdateHoverAndAim`.
+      - [x] **Keyboard tile cursor.** Arrows/WASD move `Game.CurX/CurY` (`KbCursor`);
+            it overrides the mouse hover so path/odds/grenade previews all work, and
+            **Space** runs `Game.BoardAct` (the shared move/fire/select logic). Any
+            mouse movement hands control back to the mouse.
+      - [x] **Pause/settings menu.** **Esc** opens `Game.Paused` (cancels aim/grenade
+            first); `Hud.DrawPause` offers Resume, Audio, Screen-shake (`Fx.ShakeOn`),
+            Threat-preview (`Game.ShowThreatPref`) toggles, and Abandon Run.
+            Screenshot hooks: `SIGHTLINE_ZOOM`, `SIGHTLINE_PAUSE`.
 - [x] **7. Class signature abilities.** DONE. Per-class self-cast ability (key **5**,
       1 charge/mission). `AbilityKind` (RunGun/Blitz/Steady/Suppress) derived from
       `Unit.Cls` (`Unit.AbilityKindFor`); transient stances (`RunGun`/`Blitz`/
@@ -315,6 +331,50 @@ to `main`, tick the box, and update "Current state".
 
 ---
 
+## ROADMAP — PHASE 2 (next horizon)
+
+Items 1-7 are done: the tactical layer, the objectives, and the UX are feature-
+complete and polished. The game now plays well moment-to-moment and minute-to-
+minute. **The frontier is the run-to-run loop and content breadth** — right now
+every run feels mechanically identical because squad growth is fixed and the
+enemy roster is tiny. Phase 2 is about making runs feel *different* and giving
+the player meaningful long-game decisions. Ordered by impact:
+
+- [ ] **A. Perk-based promotions (build variety).** Replace the fixed +Aim/+HP/
+      +Mobility promotion cycle with a **pick-1-of-2 perk** choice at each rank-up
+      (in the barracks). Perks: stat boosts AND new tactical traits, e.g. *Lock-On*
+      (+aim vs flanked), *Hardened* (-1 dmg taken), *Lightning Reflexes* (first
+      overwatch shot can't miss), *Bandolier* (+1 grenade), *Close Quarters* (+aim
+      under 4 tiles), *Field Medic* (heal an adjacent ally), a 2nd ability charge.
+      This makes each soldier a build and leverages the new ability system. Wire a
+      `Perk` enum + `Unit.Perks`, surface in `Combat`/`Game`; barracks UI to choose;
+      autopilot auto-picks. **Recommended next — highest replayability per unit of
+      work, and self-contained/headless-verifiable.**
+- [ ] **B. Enemy variety + an elite/boss.** Only Grunt/Scout/Bruiser exist. Add
+      archetypes with distinct AI: a **Sniper** (holds max range, high crit), a
+      **Sentry/Turret** (immobile overwatch nest), a **Medic** (heals/revives
+      allies — changes target priority), a **Berserker** (charges + melee). Cap the
+      campaign with an **elite** on mission 6 (more HP, an ability, a name). Mostly
+      new `Mission.MakeHostile` recipes + small `Ai.cs` behavior branches.
+- [ ] **C. Strategic between-mission layer.** Turn the barracks into a real meta
+      node: **choose the next mission** from 2-3 cards (objective + risk/reward +
+      modifier), and spend a light resource (intel/supplies earned from kills/secondary
+      objectives) on squad upgrades or targeted recruits. This is the actual
+      "run-to-run" depth the design pillars call for.
+- [ ] **D. Procedural music + ambience.** Audio is SFX-only. A synthesised, layered
+      ambient/combat track (allowed: procedural only) would lift "feels good"
+      enormously. Build on `src/Audio.cs` (it already synth's PCM in memory).
+- [ ] **E. Run persistence (save/load).** Serialize the `Run` to the OS user-data
+      dir (NOT the repo) so a campaign survives quitting. Lower urgency (a run is
+      ~one sitting) but expected of a roguelite; do after the loop has more depth.
+- [ ] **F. Biome/visual variety.** Per-mission palette swaps + themed authored
+      arenas so missions read as distinct places, not one recoloured arena.
+
+Supporting polish (any time): distinct "VIP EXTRACTED/LOST" end cards; a 2nd
+elevation tier; high ground seeing over LOW cover; secondary objectives.
+
+---
+
 ## Handoff protocol (when context gets heavy)
 You judge when context rot risks quality (don't wait for the 1M hard limit).
 Before stopping:
@@ -329,9 +389,11 @@ Done: items 1 (audio), 2 (juice), 3 (campaign meta-loop), **4 (tactical depth �
 grenades + pods + elevation)**, and **5 (map variety & objectives) is now COMPLETE**:
 objectives cover Eliminate / Hack / Evac / **Escort (VIP)**, plus hand-authored map
 layouts mixed in with the procedural generator (`src/Maps.cs` +
-`Mission.TryApplyLayout`, connectivity-guarded). Item 6 (polish) also gained a
-**threat preview** (red pips on exposed reachable tiles), and the **enemy AI now
-throws grenades** (`Ai.BestGrenade`). The game is feature-rich
+`Mission.TryApplyLayout`, connectivity-guarded). **Item 6 (Polish/UX) is also
+COMPLETE** — threat preview, **camera zoom/pan**, a **keyboard tile cursor**, and a
+**pause/settings menu** — and the enemy AI throws grenades (`Ai.BestGrenade`).
+Items 1-7 are all done; **see "ROADMAP — PHASE 2" above for the next horizon.**
+The game is feature-rich
 and stable — autoplay across mission starts (`SIGHTLINE_MISSION`) resolves with no
 exceptions and no TIMEOUTs. NOTE: the headless autopilot is a weak smoke-test AI
 and LOSES most seeds (true on `main` too) — expected; the contract is "no
@@ -354,17 +416,12 @@ now reloads/grenades a squatter instead of hunkering forever, and a turn-based
 `AutoStallCheck` force-wakes a dormant pod if no progress is made for 10 player
 turns — together these eliminate the rare deep-campaign TIMEOUT.
 
-**Good next steps (any order):**
-- Item 6 leftovers (now the top frontier): keyboard tile cursor; camera pan/zoom;
-  a settings screen.
-- Escort polish stretch: a distinct "VIP EXTRACTED" / "VIP LOST" lose-card message
-  (currently the generic lose card), or let the VIP panic-flee toward evac on the
-  enemy turn if left alone. Also could add an Escort intro hint line.
-- More authored arenas: just add ASCII templates to `Maps.Layouts` (11x18, legend
-  `. o # ^`); the connectivity guard auto-rejects anything that walls a spawn off.
-- Item 6 leftovers: keyboard tile cursor; camera pan/zoom; a settings screen.
-- Item 4 stretch: a 2nd elevation tier, or let high ground see over LOW cover.
-- Persist a run to a save file under the OS user-data dir (NOT in the repo).
+**Good next steps:** the original 7-item roadmap is fully cleared. Pick up from
+**ROADMAP — PHASE 2** above; the recommended next item is **A. Perk-based
+promotions** (highest replayability per unit of work, builds on the new ability
+system, headless-verifiable). B (enemy variety) and D (procedural music) are the
+next most impactful for "content" and "feel" respectively.
+
 - Gotchas: (a) elevation is a pure positioning layer — plateaus are walkable floor
   (no climb cost); per-tile draws that sit on a plateau go through
   `Renderer.ElevRect/ElevCenter` (else they render 8px low). (b) Hack: the terminal
@@ -376,6 +433,10 @@ turns — together these eliminate the rare deep-campaign TIMEOUT.
   the old `Players = _run.Squad` alias or the VIP will persist/duplicate. The VIP
   is a real Player unit, so it counts in `AlivePlayers()` (filter `!IsVip` where a
   combatant-only view is needed, e.g. the squad counter / barracks roster).
+  (e) Camera: board picking MUST go through `GetScreenToWorld2D(mouse,
+  ViewCamera(false))` (done in `UpdateHoverAndAim`) so zoom/pan work; HUD hit-tests
+  stay in raw screen space. `ViewCamera` defaults to identity (zoom 1 / pan 0), so
+  the default mouse path and the headless harness are unchanged — keep it that way.
 
 Conventions: drawn strings must be ASCII (default font). Build Release + run
 `SIGHTLINE_AUTOPLAY=1` a few times before merging. Share screenshots in chat via
