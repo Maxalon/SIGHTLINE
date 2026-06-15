@@ -64,6 +64,10 @@ public static class Renderer
     // high ground reads clearly. Drawn back-to-front (top rows first).
     static void DrawElevation(Game g)
     {
+        // biome-tinted plateau faces (keeps each mission reading as a distinct place)
+        Color tint = g.Biome.Tint;
+        Color hiA = Pal.Mix(Pal.HighA, tint, 0.34f);
+        Color hiB = Pal.Mix(Pal.HighB, tint, 0.34f);
         for (int y = 0; y < g.Grid.H; y++)
             for (int x = 0; x < g.Grid.W; x++)
             {
@@ -76,7 +80,7 @@ public static class Renderer
                         Pal.HighSide);
                 // raised top face
                 var top = new Rectangle(r.X, r.Y - ElevLift, r.Width, r.Height);
-                Raylib.DrawRectangleRec(top, ((x + y) & 1) == 0 ? Pal.HighA : Pal.HighB);
+                Raylib.DrawRectangleRec(top, ((x + y) & 1) == 0 ? hiA : hiB);
                 // lit front edge of the top face
                 Raylib.DrawLineEx(new Vector2(top.X, top.Y + top.Height - 1),
                                   new Vector2(top.X + top.Width, top.Y + top.Height - 1),
@@ -213,6 +217,10 @@ public static class Renderer
 
     static void DrawCover(Game g)
     {
+        // blend the neutral cover palette toward the biome hue
+        Color tint = g.Biome.Tint;
+        Color cHi = Pal.Mix(Pal.CoverHi, tint, 0.28f), cHiTop = Pal.Mix(Pal.CoverHiTop, tint, 0.28f);
+        Color cLo = Pal.Mix(Pal.CoverLo, tint, 0.28f), cLoTop = Pal.Mix(Pal.CoverLoTop, tint, 0.28f);
         for (int x = 0; x < g.Grid.W; x++)
             for (int y = 0; y < g.Grid.H; y++)
             {
@@ -231,8 +239,8 @@ public static class Renderer
                 Raylib.DrawRectangleRounded(
                     new Rectangle(baseRect.X + 3, baseRect.Y + 4, baseRect.Width, baseRect.Height),
                     0.18f, 5, Raylib.Fade(Pal.RGBA(0, 0, 0), 0.35f));
-                Raylib.DrawRectangleRounded(baseRect, 0.18f, 5, high ? Pal.CoverHi : Pal.CoverLo);
-                Raylib.DrawRectangleRounded(topRect, 0.22f, 5, high ? Pal.CoverHiTop : Pal.CoverLoTop);
+                Raylib.DrawRectangleRounded(baseRect, 0.18f, 5, high ? cHi : cLo);
+                Raylib.DrawRectangleRounded(topRect, 0.22f, 5, high ? cHiTop : cLoTop);
                 // subtle top edge highlight
                 Raylib.DrawLineEx(new Vector2(topRect.X + 4, topRect.Y + 2),
                                   new Vector2(topRect.X + topRect.Width - 4, topRect.Y + 2),

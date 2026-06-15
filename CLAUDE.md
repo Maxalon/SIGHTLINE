@@ -414,12 +414,13 @@ the player meaningful long-game decisions. Ordered by impact:
       a per-mission floor checker + grid/edge tint; `Biome.For(n)` cycles STEEL /
       ARID / TUNDRA / VERDANT / ASH / VOID so each mission reads as a distinct place.
       `Game.Biome` is set in `SetupMission` and shown in the mission banner; the
-      renderer tints floor, grid lines, and board edge. Still open: tinting cover/
-      plateaus too, and *themed authored arenas* per biome (`Maps.cs`).
+      renderer tints floor, grid lines, board edge, and now **cover + plateaus**
+      (blended toward `Biome.Tint` via `Pal.Mix` in `Renderer.DrawCover`/
+      `DrawElevation`). Still open: *themed authored arenas* per biome (`Maps.cs`).
 
 Supporting polish (any time): distinct "VIP EXTRACTED/LOST" end cards; a 2nd
-elevation tier; high ground seeing over LOW cover; secondary objectives; biome-
-tinted cover + plateaus; more requisition options (recruits/gear) for the shop.
+elevation tier; high ground seeing over LOW cover; secondary objectives; themed
+authored arenas per biome; more requisition options (recruits/gear) for the shop.
 
 ---
 

@@ -25,6 +25,17 @@ public static class Pal
     public static Color RGBA(int r, int g, int b, int a = 255) =>
         new Color((byte)r, (byte)g, (byte)b, (byte)a);
 
+    /// Linear blend from a toward b by t (0..1); keeps a's alpha.
+    public static Color Mix(Color a, Color b, float t)
+    {
+        if (t < 0f) t = 0f; else if (t > 1f) t = 1f;
+        return RGBA(
+            (int)(a.R + (b.R - a.R) * t),
+            (int)(a.G + (b.G - a.G) * t),
+            (int)(a.B + (b.B - a.B) * t),
+            a.A);
+    }
+
     public static readonly Color Bg        = RGBA(10, 14, 19);
     public static readonly Color BoardEdge = RGBA(30, 39, 51);
     public static readonly Color FloorA    = RGBA(22, 29, 38);
@@ -69,15 +80,16 @@ public class Biome
 {
     public string Name;
     public Color FloorA, FloorB, Grid, Edge;
+    public Color Tint;   // representative hue cover + plateaus are blended toward
 
     public static readonly Biome[] All =
     {
-        new Biome { Name = "STEEL",   FloorA = Pal.RGBA(22, 29, 38), FloorB = Pal.RGBA(26, 34, 44), Grid = Pal.RGBA(33, 43, 56), Edge = Pal.RGBA(30, 39, 51) },
-        new Biome { Name = "ARID",    FloorA = Pal.RGBA(40, 33, 23), FloorB = Pal.RGBA(46, 38, 27), Grid = Pal.RGBA(62, 50, 33), Edge = Pal.RGBA(64, 52, 34) },
-        new Biome { Name = "TUNDRA",  FloorA = Pal.RGBA(23, 33, 42), FloorB = Pal.RGBA(28, 39, 49), Grid = Pal.RGBA(42, 56, 70), Edge = Pal.RGBA(44, 58, 74) },
-        new Biome { Name = "VERDANT", FloorA = Pal.RGBA(21, 35, 26), FloorB = Pal.RGBA(25, 41, 30), Grid = Pal.RGBA(38, 58, 42), Edge = Pal.RGBA(38, 60, 44) },
-        new Biome { Name = "ASH",     FloorA = Pal.RGBA(34, 27, 27), FloorB = Pal.RGBA(40, 31, 31), Grid = Pal.RGBA(56, 42, 42), Edge = Pal.RGBA(58, 40, 40) },
-        new Biome { Name = "VOID",    FloorA = Pal.RGBA(28, 24, 41), FloorB = Pal.RGBA(33, 28, 48), Grid = Pal.RGBA(50, 41, 68), Edge = Pal.RGBA(52, 42, 72) },
+        new Biome { Name = "STEEL",   FloorA = Pal.RGBA(22, 29, 38), FloorB = Pal.RGBA(26, 34, 44), Grid = Pal.RGBA(33, 43, 56), Edge = Pal.RGBA(30, 39, 51), Tint = Pal.RGBA(44, 58, 74) },
+        new Biome { Name = "ARID",    FloorA = Pal.RGBA(40, 33, 23), FloorB = Pal.RGBA(46, 38, 27), Grid = Pal.RGBA(62, 50, 33), Edge = Pal.RGBA(64, 52, 34), Tint = Pal.RGBA(92, 72, 38) },
+        new Biome { Name = "TUNDRA",  FloorA = Pal.RGBA(23, 33, 42), FloorB = Pal.RGBA(28, 39, 49), Grid = Pal.RGBA(42, 56, 70), Edge = Pal.RGBA(44, 58, 74), Tint = Pal.RGBA(58, 84, 108) },
+        new Biome { Name = "VERDANT", FloorA = Pal.RGBA(21, 35, 26), FloorB = Pal.RGBA(25, 41, 30), Grid = Pal.RGBA(38, 58, 42), Edge = Pal.RGBA(38, 60, 44), Tint = Pal.RGBA(50, 84, 56) },
+        new Biome { Name = "ASH",     FloorA = Pal.RGBA(34, 27, 27), FloorB = Pal.RGBA(40, 31, 31), Grid = Pal.RGBA(56, 42, 42), Edge = Pal.RGBA(58, 40, 40), Tint = Pal.RGBA(86, 56, 52) },
+        new Biome { Name = "VOID",    FloorA = Pal.RGBA(28, 24, 41), FloorB = Pal.RGBA(33, 28, 48), Grid = Pal.RGBA(50, 41, 68), Edge = Pal.RGBA(52, 42, 72), Tint = Pal.RGBA(72, 56, 102) },
     };
 
     public static Biome For(int missionNum) => All[(missionNum - 1 + All.Length) % All.Length];
