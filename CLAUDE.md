@@ -460,6 +460,131 @@ selection); more requisition options (recruits/gear) for the shop.
 
 ---
 
+## ROADMAP — PHASE 3 (specced; the next big push)
+
+Phase 1 + Phase 2 (A–F) are complete; the game is tactically rich and readable.
+**The frontier is still the run-to-run loop** — runs are mechanically same-y, and
+the human flagged that losing soldiers feels cheap. Phase 3 makes a run feel like a
+*campaign with stakes*, then broadens tactical + content variety, then presentation.
+Ordered by impact. Each item lists the concrete hooks to touch and how to verify it
+(headless unless noted). Keep the hard constraints: NO CI/tests-runner, ASCII-only
+drawn text, verify via `SIGHTLINE_*` harness + autoplay + screenshots, ship compiling
+code to `main`.
+
+### Tier 1 — make the run loop bite (highest impact)
+
+- [ ] **3.1 Wounds & attrition.** Survivors that took real damage end a mission
+      **Wounded**: a temporary debuff (`Unit.Wound` = missions-remaining + a severity
+      → −Aim/−Mobility and/or a capped MaxHp) set in `Run.DebriefSurvivors` from HP
+      lost (heavier if downed to ~0). Decays one step per mission; `FIELD MEDKIT`
+      (shop) can also clear a wound. **Bench option:** leave a wounded soldier home to
+      recover fully → deploy short-handed (the backfill only tops up to the *deployed*
+      count, so a wipe genuinely costs strength). This is the concrete answer to the
+      "death has no consequence" note — gate harsher attrition behind a run/difficulty
+      flag if it feels punishing. Touch: `Unit` (+Wound, persisted in `SaveGame`),
+      `Run.DebriefSurvivors`/backfill, `Mission.Build` (apply stat penalty), `Hud`
+      roster/dossier "WOUNDED (n)" tag, `Game.DoPurchase` medkit. Verify: a
+      `SIGHTLINE_WOUNDTEST` (damage a survivor → carries a wound → decays/clears) +
+      autoplay.
+
+- [ ] **3.2 Soldier identity (nicknames, traits, bonds).** Make veterans matter so
+      losing one hurts. `Unit.Nickname` + `Unit.Traits` (List) earned on feats
+      (clutch low-HP kill, multi-kill turn, surviving near-death) — hook the award in
+      `ShotAnim.Apply`/`KillUnit` and resolve in `DebriefSurvivors`; traits are small
+      passives read in `Combat.ComputeOdds` (e.g. "Cool Under Fire": +crit while
+      flanked; "Vengeful": +Aim after an ally dies this mission). **Bonds:** two
+      soldiers who survive N missions together buff each other when adjacent (read in
+      `Combat`). UI: dossier + roster show nickname/traits; a brief "FEAT" banner.
+      Persist all in `SaveGame`. Verify: deterministic feat-trigger test + dossier
+      screenshot.
+
+- [ ] **3.3 Branching campaign map.** Replace the 3-card barracks pick with a small
+      FTL/Slay-the-Spire node path. `Run.Map` = a generated DAG of `MissionNode`
+      (objective + biome + difficulty + reward + enemy modifiers + node kind:
+      COMBAT / ELITE / SUPPLY(shop+rest) / BOSS). Player picks the next reachable
+      node; persist position. Builds on the existing `MissionCard`/`Run.Offers` +
+      `EnterBarracks` flow (cards become node choices). New `Hud.DrawCampaignMap`
+      overlay + `Game.ChooseNode`. Autopilot walks a path to the boss. Verify:
+      autoplay to a BOSS node + map screenshot. (Largest item — can land after 3.1/3.2;
+      keep the current cards as a fallback if generation fails.)
+
+### Tier 2 — tactical depth (second-to-second)
+
+- [ ] **3.4 Utility items (smoke / flash / deployable cover).** A second throwable
+      slot beyond grenades. `ItemKind` enum; reuse the `GrenadeMode` targeting pattern
+      → `ItemMode` + an action button. **Smoke:** a transient LoS-blocking cloud — add
+      a `Grid.Smoke[,]` turn-counter layer that `HasLineOfSight` treats as blocking,
+      decremented each turn; blocks overwatch through it. **Flash:** AoE that
+      Disorients (see 3.5) + denies overwatch next turn. **Deployable cover:** drop a
+      LowCover tile. `SmokeAnim`/`FlashAnim` in `Anim.cs`. 1 charge/mission like
+      grenades (`Unit`), optional class/loadout choice. Verify: a COMBATTEST-style LoS
+      check (smoke blocks a clear sightline) + autoplay.
+
+- [ ] **3.5 Status effects.** `Unit.Statuses` (list of {kind, turnsLeft}); kinds
+      Burning (DoT at turn start), Bleed (DoT on move), Stun (lose one action),
+      Disoriented (−Aim, no overwatch). Tick in `BeginTurn`/`StartPlayerTurn` with FX +
+      floating text; `Combat.ComputeOdds` reads Disoriented. Sources: incendiary
+      grenade/weapon, flashbang (3.4), specific enemies (3.7). Persist nothing
+      (per-mission). Verify: deterministic DoT/stun test + autoplay.
+
+- [ ] **3.6 Destructible high cover + 2nd elevation tier.** (a) Give cover tiles HP
+      (`Grid.CoverHp[,]`); grenades + heavy fire (LMG/shotgun point-blank) chip it,
+      High→Low→gone, with a renderer damage state. (b) Extend `Grid.Height` to level 2:
+      `Renderer.DrawElevation` draws a taller platform, LoS sees over more low cover,
+      add ramps so reachability holds (extend `Maps.cs` legend, e.g. `=`). Verify:
+      COMBATTEST tiered high-ground case + autoplay on plateau/authored maps.
+
+### Tier 3 — content breadth (variety)
+
+- [ ] **3.7 New enemy archetypes + recurring mid-boss.** **DRONE/FLYER:** ignores
+      cover & elevation (always flanks ground targets), low HP, hovering glyph +
+      shadow; `Ai` beelines. **SHIELDED:** a frontal shield giving full cover from its
+      facing dir regardless of terrain (`Unit.ShieldDir`, special-cased in
+      `Grid.GetCover`/`Combat`) — must be flanked or grenaded. **SAPPER:** destroys the
+      player's cover (pairs with 3.6). **Mid-boss:** a named elite every ~3 missions via
+      a `Mission.SpawnEnemies` band (not only the final WARLORD). Verify: autoplay +
+      glyph screenshots (reuse `SIGHTLINE_WAKE`).
+
+- [ ] **3.8 New objectives.** Add to the `Objective` enum + `ObjectiveFor` rotation +
+      `CheckEnd` + HUD: **DEFEND** (hold a zone / survive N turns vs. spawned waves —
+      needs a wave spawner in the turn flow + a turn counter), **SABOTAGE** (destroy K
+      target props, like multi-`Terminal` Hack), **RESCUE** (free a captive that becomes
+      a fragile ally to extract — reuses the VIP/escort plumbing). Verify: autoplay each
+      via `SIGHTLINE_MISSION`.
+
+- [ ] **3.9 Secondary objectives.** An optional per-mission bonus goal (no soldier
+      wounded / hack the side cache / kill the elite) for extra `Run.Intel`. `Mission`
+      rolls one; `Game` tracks completion; HUD shows it; barracks reports the bonus.
+      Verify: autoplay + HUD screenshot. (Feeds the 3.1 economy.)
+
+### Tier 4 — feel, audio & accessibility
+
+- [ ] **3.10 Procedural music & ambience (roadmap item D).** Build on `src/Audio.cs`
+      (it already synthesises PCM in memory): a looping ambient bed + a combat layer
+      that ducks in on the enemy turn / when pods are active; crossfade; respect mute
+      (M). **MUST be built where audio is audible — `InitAudioDevice` fails in this
+      sandbox**, so it's a blind ship here. Verify: manual (human) — document what to
+      listen for; keep it crash-safe behind `IsAudioDeviceReady`.
+
+- [ ] **3.11 Game-feel + death feedback.** Final-blow slow-mo/kill-cam on the
+      mission-ending kill (extend `HitStop` + zoom-punch), and a prominent **KIA** stamp
+      with the soldier's name/nickname on death + in the debrief (reinforces 3.1/3.2).
+      Verify: screenshots.
+
+- [ ] **3.12 Onboarding tutorial.** A scripted first mission (gated by a "seen" flag in
+      `display.json`/settings) that prompts move → cover → flank → overwatch → fire with
+      contextual callouts. Verify: screenshots.
+
+- [ ] **3.13 Accessibility & display extras.** Now that everything renders through the
+      `Display` render-target, add a **brightness/contrast** post-pass on it; a
+      **colorblind palette** toggle (`Pal` variants); and an independent **UI text
+      scale**. Persist in `display.json`. Verify: screenshots.
+
+When picking up Phase 3: do **3.1** first (it's the highest-value and directly answers
+the death-consequence feedback), one verified PR per item, merge to `main` yourself.
+
+---
+
 ## Handoff protocol (when context gets heavy)
 You judge when context rot risks quality (don't wait for the 1M hard limit).
 Before stopping:
@@ -502,7 +627,17 @@ Before stopping:
 > replaced by fresh rookies (losing rank/perks) — it only *felt* consequence-free
 > because the squad always auto-refills to 4 (intentional anti-death-spiral) and the
 > roster was hard to read. If harsher attrition is wanted, that's a deliberate design
-> change to `Run.DebriefSurvivors` backfill — ask first.
+> change to `Run.DebriefSurvivors` backfill — **now specced as ROADMAP item 3.1
+> (Wounds & attrition)**.
+
+> **PHASE 3 ROADMAP SPECCED (latest).** Concepts for the next big push are written up
+> as **ROADMAP — PHASE 3** above (13 items, tiered): run-loop stakes (wounds, soldier
+> identity, branching campaign map), tactical depth (utility items, status effects,
+> destructible/2-tier terrain), content (new enemies, objectives, secondary goals), and
+> feel/audio/accessibility (procedural music = the old item D, kill-cam, tutorial,
+> brightness/colorblind). Each item names the hooks + a headless verification. Start
+> with **3.1** (highest value, answers the death-consequence feedback). Nothing built
+> yet — this was a planning pass.
 
 > **LATEST SESSION SUMMARY (read this first).** All of Phase 1 (1-7) and Phase 2
 > A/B/C/E/F are DONE and on `main` (builds 0/0, autoplay clean, `SIGHTLINE_SAVETEST`
