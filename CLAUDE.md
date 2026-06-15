@@ -403,9 +403,11 @@ the player meaningful long-game decisions. Ordered by impact:
       and persists in the save. The barracks opens with a **REQUISITION** screen
       (`Hud.DrawRequisition`, gated by `Game.ShopDone`) BEFORE the perk/card steps:
       spend intel on FIELD MEDKIT (heal most-wounded to full, 6), COMBAT STIMS (+2
-      max HP to the frailest, permanent, 10), or ADV. TRAINING (a bonus perk choice,
-      16). `Game.CanBuy/DoPurchase/HandleShopClick`; autopilot buys a medkit then
-      proceeds (`AutoShop`). Hook `SIGHTLINE_SHOP`.
+      max HP to the frailest, permanent, 10), ADV. TRAINING (a bonus perk choice,
+      16), or FRAG CACHE (+1 permanent grenade/mission, `Unit.BonusGrenades`, caps at
+      +2, persisted, 12). `Game.CanBuy/DoPurchase/HandleShopClick` + `Game.ShopName/
+      Desc/Cost` (the shop card auto-sizes to the item count); autopilot buys a medkit
+      then proceeds (`AutoShop`). Hook `SIGHTLINE_SHOP`.
 - [ ] **D. Procedural music + ambience.** Audio is SFX-only. A synthesised, layered
       ambient/combat track (allowed: procedural only) would lift "feels good"
       enormously. Build on `src/Audio.cs` (it already synth's PCM in memory).
@@ -513,6 +515,12 @@ Harness screenshot hooks (all `shot`-only, in `Program.cs`):
 the CONTINUE button shows), **`SIGHTLINE_SHOP`** (barracks requisition screen). Plus
 non-shot **`SIGHTLINE_SAVETEST=1`** → prints `SAVETEST: PASS/FAIL` (save/load
 round-trip; no window).
+
+**Shop FRAG CACHE option (this session).** 4th requisition item: a permanent +1
+grenade/mission (`Unit.BonusGrenades`, read in `Mission.Build`, persisted in the
+save, caps at +2). The requisition card now auto-sizes to `Game.ShopName.Length`, so
+adding more items is just extending the `ShopName/Desc/Cost` arrays + a `DoPurchase`
+case. Verified via `SIGHTLINE_SHOP` shot + `SIGHTLINE_SAVETEST` (round-trips it).
 
 **Accurate run-over card (this session).** The lose screen now reads the real cause
 via `Game.LoseTitle`/`LoseReason` (set in `LoseRun`): "RUN OVER / squad fell" on a

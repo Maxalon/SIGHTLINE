@@ -26,7 +26,7 @@ public static class Hud
     public static Rectangle PauseResume, PauseMute, PauseShake, PauseThreat, PauseAbandon;
     public static Rectangle PerkBtnA, PerkBtnB;
     public static Rectangle[] MissionCards = new Rectangle[3];
-    public static Rectangle[] ShopBtns = new Rectangle[3];
+    public static Rectangle[] ShopBtns = new Rectangle[Game.ShopName.Length];
     public static Rectangle ShopProceed;
 
     public static void Draw(Game g)
@@ -398,7 +398,9 @@ public static class Hud
         var run = g.RunState;
         Raylib.DrawRectangle(0, 0, Cfg.ScreenW, Cfg.ScreenH, Raylib.Fade(Pal.RGBA(5, 8, 11), 0.85f));
 
-        int w = 560, h = 470;
+        int items = Game.ShopName.Length;
+        int ih = 72, gap = 10;
+        int w = 560, h = 104 + items * (ih + gap) + 60;
         int x = Cfg.ScreenW / 2 - w / 2, y = Cfg.ScreenH / 2 - h / 2;
         var card = new Rectangle(x, y, w, h);
         Raylib.DrawRectangleRounded(card, 0.04f, 8, Pal.Panel);
@@ -409,8 +411,8 @@ public static class Hud
         string intel = $"INTEL AVAILABLE: {run.Intel}";
         Raylib.DrawText(intel, x + w / 2 - Raylib.MeasureText(intel, 16) / 2, y + 66, 16, Pal.Good);
 
-        int iy = y + 104, ih = 78, gap = 12;
-        for (int i = 0; i < 3; i++)
+        int iy = y + 104;
+        for (int i = 0; i < items; i++)
         {
             var r = new Rectangle(x + 30, iy, w - 60, ih);
             ShopBtns[i] = r;

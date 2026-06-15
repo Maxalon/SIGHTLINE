@@ -73,6 +73,7 @@ public class Unit
     public Weapon Weapon;
     public int Ammo;
     public int Grenades;        // thrown AoE charges (refilled each mission)
+    public int BonusGrenades;   // permanent extra grenade capacity (FRAG CACHE purchase)
 
     // class signature ability (see AbilityKind); charge refilled each mission
     public int AbilityCharge;
