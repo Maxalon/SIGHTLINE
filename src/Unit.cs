@@ -113,6 +113,7 @@ public class Unit
     public int PodId = -1;      // activation-pod grouping (enemies only)
 
     public bool IsVip;          // escort objective: the asset to extract (mission-only, never persists)
+    public bool Enraged;        // elite boss: one-time low-HP rage trigger
 
     // meta / campaign progression (persists across missions)
     public int Kills;
