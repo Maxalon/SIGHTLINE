@@ -71,13 +71,14 @@ public class Game
     // _shopDone gates the barracks flow (shop -> promotions -> deployment cards).
     bool _shopDone = true;
     public bool ShopDone => _shopDone;
-    public static readonly int[] ShopCost = { 6, 10, 16 };
-    public static readonly string[] ShopName = { "FIELD MEDKIT", "COMBAT STIMS", "ADV. TRAINING" };
+    public static readonly int[] ShopCost = { 6, 10, 16, 12 };
+    public static readonly string[] ShopName = { "FIELD MEDKIT", "COMBAT STIMS", "ADV. TRAINING", "FRAG CACHE" };
     public static readonly string[] ShopDesc =
     {
         "Heal your most-wounded soldier to full.",
         "+2 max HP to your frailest soldier (permanent).",
         "Grant a soldier a bonus perk choice.",
+        "+1 grenade every mission for a soldier (permanent).",
     };
 
     // mission objective
@@ -1172,6 +1173,7 @@ public class Game
         {
             0 => _run.Squad.Any(u => u.Hp < u.MaxHp),     // medkit needs a wounded soldier
             2 => _run.Squad.Any(u => CountPerksLeft(u) >= 2), // training needs an un-maxed soldier
+            3 => _run.Squad.Any(u => u.BonusGrenades < 2),    // cache caps at +2 per soldier
             _ => _run.Squad.Count > 0,
         };
     }
@@ -1200,6 +1202,11 @@ public class Game
                 break;
             case 2:
                 if (!_run.TryQueueBonusPerk("requisition")) { Audio.Play("miss"); return; }
+                break;
+            case 3:
+                var carrier = _run.Squad.Where(u => u.BonusGrenades < 2).OrderBy(u => u.BonusGrenades).First();
+                carrier.BonusGrenades += 1;
+                _run.Report.Add($"{carrier.Name} issued a frag cache  (+1 grenade/mission)");
                 break;
         }
         _run.Intel -= ShopCost[item];
