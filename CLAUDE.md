@@ -123,7 +123,10 @@ docs/screenshot.png    README image
 - `Phase`: Intro → PlayerTurn ⇄ EnemyTurn → Win/Lose.
 - An **animation queue** (`_anims` in Game) gates interactivity: while non-empty,
   input is locked and anims play one at a time. `IsPlayerInteractive()` = player
-  turn + empty queue.
+  turn + empty queue. **`Anim.OnStart` runs when an anim becomes ACTIVE (first frame
+  it's `_anims[0]`), NOT at enqueue** — otherwise every queued step of a multi-tile
+  path captures its `_from` at the original tile and the unit snaps back to the start
+  each step (the old movement-jitter bug). Don't call `OnStart` in `Enqueue`.
 - Player issues actions (move/shoot/overwatch/hunker/reload) → enqueues anims.
 - Movement is per-tile `MoveStepAnim`s; on each tile entry `Game.OnUnitEnteredTile`
   checks **overwatch** reactions and injects reaction `ShotAnim`s at the front.
@@ -140,6 +143,10 @@ docs/screenshot.png    README image
 ---
 
 ## Raylib-cs 8.0 gotchas (learned the hard way)
+- **Raylib's default exit key is ESC** — it sets `WindowShouldClose()` and quits the
+  app before any of our handling runs. We call `Raylib.SetExitKey(KeyboardKey.Null)`
+  after `InitWindow` so ESC instead cancels aim/grenade targeting and opens the pause
+  menu. Don't remove it or ESC will close the game mid-action.
 - Construct colours via `Pal.RGBA(r,g,b,a)` (casts to byte) — don't rely on int
   Color ctors.
 - `DrawRectangleRoundedLines` signature is version-volatile; **avoid it**. Use

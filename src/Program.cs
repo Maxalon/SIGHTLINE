@@ -32,6 +32,7 @@ public static class Program
         if (!autoplay) flags |= ConfigFlags.VSyncHint;
         Raylib.SetConfigFlags(flags);
         Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "SIGHTLINE — Tactical Squad Combat");
+        Raylib.SetExitKey(KeyboardKey.Null);       // ESC cancels aim/grenade & opens pause; never quits the app
         Raylib.SetTargetFPS(autoplay ? 0 : 60);   // uncapped during the smoke test
         Audio.Init();
 
