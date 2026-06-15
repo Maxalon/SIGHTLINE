@@ -34,6 +34,8 @@ public static class Program
         game.NoPersist = shot || autoplay;   // the harness never reads/writes the save file
         // SIGHTLINE_INTRO=1 (shot only): stay on the intro with a save present, to
         // screenshot the CONTINUE-run button.
+        if ((shot || autoplay) && int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_MAP"), out int forcedMap))
+            Mission.ForcedLayout = forcedMap;
         bool introShot = shot && Environment.GetEnvironmentVariable("SIGHTLINE_INTRO") == "1";
         if (introShot) { var r = new Run(); r.Start(); r.Mission = 3; SaveGame.Save(r); }
         if ((shot || autoplay) && !introShot) game.StartMission(startMission);

@@ -10,6 +10,9 @@ public static class Mission
     // up to 5 left-edge spawns: four soldiers + (on escort missions) the VIP
     static readonly (int x, int y)[] PlayerSpawns = { (1, 2), (1, 4), (2, 7), (1, 9), (2, 5) };
 
+    // test hook (SIGHTLINE_MAP): force a specific authored layout index; -1 = normal roll
+    public static int ForcedLayout = -1;
+
     /// The four starting soldiers for a fresh run.
     public static List<Unit> NewRunSquad()
     {
@@ -65,8 +68,12 @@ public static class Mission
 
         // Either lay down a hand-authored arena (with a connectivity guard) or fall
         // back to the procedural generator. Both keep reserved tiles open.
-        bool authored = Util.Roll(55) &&
-            TryApplyLayout(grid, occupied, players, enemies, evacSet, terminal, Util.Choice(Maps.Layouts));
+        bool authored;
+        if (ForcedLayout >= 0 && ForcedLayout < Maps.Layouts.Length)
+            authored = TryApplyLayout(grid, occupied, players, enemies, evacSet, terminal, Maps.Layouts[ForcedLayout]);
+        else
+            authored = Util.Roll(55) &&
+                TryApplyLayout(grid, occupied, players, enemies, evacSet, terminal, Util.Choice(Maps.Layouts));
         if (!authored)
         {
             // contested high ground: raised plateaus in the mid-field (more on later missions)
