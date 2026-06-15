@@ -463,7 +463,11 @@ Before stopping:
 > chooser** shows a full dossier (HP/AIM/MOB/weapon/grenades/ability + all current
 > perks + derived strengths, `Hud.DrawDossier`); the **in-round roster strip** shows
 > per-soldier strength tags (`Hud.Specialties`: OVERWATCH/SHARP/CLOSE/LONG/TOUGH/FAST
-> + a class-role fallback). Death mechanic was reported as "no consequence" but
+> + a class-role fallback), overridable by a player-authored **custom tag**
+> (`Unit.CustomTag`, persisted; edit with key **T** in-mission or the **EDIT TAG**
+> button in the perk chooser; modal `Game.EditingTag`/`UpdateTagEditor` +
+> `Hud.DrawTagEditor`; custom = cyan, auto = amber, blank reverts to auto). Death
+> mechanic was reported as "no consequence" but
 > `SIGHTLINE_DEATHTEST` PROVES it's not a bug: dead soldiers are permanently lost and
 > replaced by fresh rookies (losing rank/perks) — it only *felt* consequence-free
 > because the squad always auto-refills to 4 (intentional anti-death-spiral) and the

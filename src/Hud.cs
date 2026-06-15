@@ -24,7 +24,7 @@ public static class Hud
     public static UiButton[] ActionButtons = Array.Empty<UiButton>();
     public static System.Collections.Generic.List<(Rectangle rect, Unit unit)> RosterChips = new();
     public static Rectangle PauseResume, PauseMute, PauseShake, PauseThreat, PauseAbandon;
-    public static Rectangle PerkBtnA, PerkBtnB;
+    public static Rectangle PerkBtnA, PerkBtnB, PerkTagBtn;
     public static Rectangle[] MissionCards = new Rectangle[3];
     public static Rectangle[] ShopBtns = new Rectangle[Game.ShopName.Length];
     public static Rectangle ShopProceed;
@@ -38,6 +38,41 @@ public static class Hud
         DrawBanner(g);
         DrawOverlays(g);
         if (g.Paused) DrawPause(g);
+        if (g.EditingTag) DrawTagEditor(g);
+    }
+
+    // ---------------- custom tag editor ----------------
+    static void DrawTagEditor(Game g)
+    {
+        Raylib.DrawRectangle(0, 0, Cfg.ScreenW, Cfg.ScreenH, Raylib.Fade(Pal.RGBA(5, 8, 11), 0.7f));
+        int w = 460, h = 180;
+        int x = Cfg.ScreenW / 2 - w / 2, y = Cfg.ScreenH / 2 - h / 2;
+        var card = new Rectangle(x, y, w, h);
+        Raylib.DrawRectangleRounded(card, 0.06f, 8, Pal.Panel);
+        Raylib.DrawRectangleLinesEx(card, 1.5f, Pal.Accent);
+
+        string who = g.TagTarget != null ? g.TagTarget.Name : "";
+        Raylib.DrawText($"TAG  {who}", x + w / 2 - Raylib.MeasureText($"TAG  {who}", 22) / 2, y + 20, 22, Pal.Accent);
+
+        var box = new Rectangle(x + 30, y + 64, w - 60, 40);
+        Raylib.DrawRectangleRounded(box, 0.2f, 6, Pal.RGBA(10, 15, 21));
+        Raylib.DrawRectangleLinesEx(box, 1.5f, Pal.PanelBd);
+        string shown = g.TagBuffer + (((int)(Raylib.GetTime() * 2) % 2 == 0) ? "_" : " ");
+        Raylib.DrawText(shown, (int)box.X + 12, (int)box.Y + 11, 20, Pal.Txt);
+        if (g.TagBuffer.Length == 0)
+            Raylib.DrawText("(blank = auto tags)", (int)box.X + 12, (int)box.Y + 46, 11, Pal.TxtDim);
+
+        string hint = "Type a role  -  [Enter] save  -  [Esc] cancel  -  [Backspace] delete";
+        Raylib.DrawText(hint, x + w / 2 - Raylib.MeasureText(hint, 12) / 2, y + h - 26, 12, Pal.TxtDim);
+    }
+
+    /// The label to show for a soldier: a player-set custom tag if present, else the
+    /// top auto-derived strengths. Returns (text, isCustom).
+    static (string text, bool custom) DisplayTag(Unit u)
+    {
+        if (!string.IsNullOrEmpty(u.CustomTag)) return (u.CustomTag, true);
+        var sp = Specialties(u);
+        return sp.Count == 0 ? ("", false) : (string.Join(" ", sp.GetRange(0, Math.Min(2, sp.Count))), false);
     }
 
     // ---------------- pause / settings ----------------
@@ -108,15 +143,12 @@ public static class Hud
             Raylib.DrawText(u.IsVip ? "ASSET" : u.RankName, (int)r.X + 58, (int)r.Y + 33, 9,
                             Raylib.Fade(u.IsVip ? Pal.VipGold : Pal.TxtDim, a));
 
-            // strength tags (what this soldier is good at), so play-to-strength is legible
+            // role tag: a player-set custom tag (cyan) or auto strengths (amber)
             if (!u.IsVip)
             {
-                var sp = Specialties(u);
-                if (sp.Count > 0)
-                {
-                    string tags = string.Join(" ", sp.GetRange(0, Math.Min(2, sp.Count)));
-                    Raylib.DrawText(tags, (int)r.X + 9, (int)r.Y + 45, 9, Raylib.Fade(Pal.Accent, a));
-                }
+                var (tag, custom) = DisplayTag(u);
+                if (tag.Length > 0)
+                    Raylib.DrawText(tag, (int)r.X + 9, (int)r.Y + 45, 9, Raylib.Fade(custom ? Pal.Friend : Pal.Accent, a));
             }
 
             RosterChips.Add((r, u));
@@ -188,7 +220,7 @@ public static class Hud
         DrawActionButtons(g, barY);
 
         // hint
-        string hint = "MOVE / FIRE by click  -  [Tab] next  -  [5] ability  -  arrows+[Space]  -  [Esc] menu";
+        string hint = "MOVE / FIRE by click  -  [Tab] next  -  [5] ability  -  [T] tag  -  [Esc] menu";
         int hw = Raylib.MeasureText(hint, 13);
         Raylib.DrawText(hint, Cfg.ScreenW - hw - 24, Cfg.ScreenH - 30, 13, Pal.TxtDim);
     }
@@ -499,6 +531,13 @@ public static class Hud
         Raylib.DrawRectangleLinesEx(dossier, 1f, Pal.PanelBd);
         DrawDossier(off.Unit, x + 34, y + 98, w - 68);
 
+        // edit-tag affordance (also editable in-mission with key T)
+        PerkTagBtn = new Rectangle(x + w - 20 - 120, y + 94, 120, 24);
+        bool th = Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), PerkTagBtn);
+        Raylib.DrawRectangleRounded(PerkTagBtn, 0.3f, 6, th ? Pal.RGBA(24, 34, 46) : Pal.RGBA(14, 20, 28));
+        Raylib.DrawRectangleLinesEx(PerkTagBtn, 1.2f, th ? Pal.Accent : Pal.PanelBd);
+        CenterText("EDIT TAG", PerkTagBtn, 12, th ? Pal.Accent : Pal.TxtDim);
+
         int cw = (w - 60) / 2, ch = 170, cy = y + 172, gap = 20;
         PerkBtnA = new Rectangle(x + 20, cy, cw, ch);
         PerkBtnB = new Rectangle(x + 20 + cw + gap, cy, cw, ch);
@@ -518,9 +557,14 @@ public static class Hud
         string perks = u.Perks.Count == 0 ? "Perks: none yet"
             : "Perks: " + string.Join(", ", u.Perks.ConvertAll(PerkDef.Name));
         Raylib.DrawText(perks, x, y + 22, 13, Pal.Good);
-        var sp = Specialties(u);
-        if (sp.Count > 0)
-            Raylib.DrawText("Strengths: " + string.Join("  ", sp), x, y + 44, 12, Pal.Accent);
+        if (!string.IsNullOrEmpty(u.CustomTag))
+            Raylib.DrawText("Tag: " + u.CustomTag, x, y + 44, 12, Pal.Friend);
+        else
+        {
+            var sp = Specialties(u);
+            if (sp.Count > 0)
+                Raylib.DrawText("Strengths: " + string.Join("  ", sp), x, y + 44, 12, Pal.Accent);
+        }
     }
 
     /// Derived strength tags from class/weapon/stats/perks, so the player knows what
