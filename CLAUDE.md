@@ -449,6 +449,20 @@ Before stopping:
 4. Tell the human to open a fresh session (they'll send only `.`).
 
 ### WIP NOTES
+
+> **LATEST SESSION SUMMARY (read this first).** All of Phase 1 (1-7) and Phase 2
+> A/B/C/E/F are DONE and on `main` (builds 0/0, autoplay clean, `SIGHTLINE_SAVETEST`
+> + `SIGHTLINE_COMBATTEST` both PASS). This session shipped 8 PRs: **E** run save/load
+> (CONTINUE on intro), **C** intel currency + requisition shop (4 items incl. FRAG
+> CACHE), **B** MEDIC enemy, **F** biome-tinted cover/plateaus, 3 new authored arenas,
+> high-ground-sees-over-low-cover, accurate run-over card, and the FRAG CACHE upgrade.
+> **The ONLY remaining Phase-2 main item is D (procedural music)** — deliberately NOT
+> done here because it can't be verified in this sandbox (no audio device); do it on a
+> machine where you can hear it, building on `src/Audio.cs`. Other open polish:
+> save/load currently checkpoints at mission START only (mid-mission/barracks state is
+> not saved); a VIP-EXTRACTED win flourish; a 2nd elevation tier; secondary objectives;
+> themed-per-biome arena selection. The detailed per-feature notes below remain valid.
+
 Done: items 1 (audio), 2 (juice), 3 (campaign meta-loop), **4 (tactical depth —
 grenades + pods + elevation)**, and **5 (map variety & objectives) is now COMPLETE**:
 objectives cover Eliminate / Hack / Evac / **Escort (VIP)**, plus hand-authored map
