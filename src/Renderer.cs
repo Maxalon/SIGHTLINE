@@ -26,18 +26,19 @@ public static class Renderer
 
     public static void DrawBoard(Game g)
     {
+        var bm = g.Biome;
         // board backing
         var edge = new Rectangle(Cfg.OriginX - 6, Cfg.OriginY - 6, Cfg.BoardW + 12, Cfg.BoardH + 12);
         Raylib.DrawRectangleRounded(edge, 0.02f, 6, Pal.RGBA(7, 10, 14));
-        Raylib.DrawRectangleLinesEx(edge, 2f, Pal.BoardEdge);
+        Raylib.DrawRectangleLinesEx(edge, 2f, bm.Edge);
 
-        // floor
+        // floor (biome-tinted checker)
         for (int x = 0; x < g.Grid.W; x++)
             for (int y = 0; y < g.Grid.H; y++)
             {
                 if (g.Grid.Tiles[x, y] != TileType.Floor) continue;
                 var r = Util.TileRect(x, y);
-                Raylib.DrawRectangleRec(r, ((x + y) & 1) == 0 ? Pal.FloorA : Pal.FloorB);
+                Raylib.DrawRectangleRec(r, ((x + y) & 1) == 0 ? bm.FloorA : bm.FloorB);
             }
 
         DrawElevation(g);
@@ -140,14 +141,15 @@ public static class Renderer
 
     static void DrawGridLines(Game g)
     {
+        Color gl = g.Biome.Grid;
         for (int x = 0; x <= g.Grid.W; x++)
             Raylib.DrawLineEx(new Vector2(Cfg.OriginX + x * Cfg.Tile, Cfg.OriginY),
                               new Vector2(Cfg.OriginX + x * Cfg.Tile, Cfg.OriginY + Cfg.BoardH),
-                              1f, Pal.GridLine);
+                              1f, gl);
         for (int y = 0; y <= g.Grid.H; y++)
             Raylib.DrawLineEx(new Vector2(Cfg.OriginX, Cfg.OriginY + y * Cfg.Tile),
                               new Vector2(Cfg.OriginX + Cfg.BoardW, Cfg.OriginY + y * Cfg.Tile),
-                              1f, Pal.GridLine);
+                              1f, gl);
     }
 
     static void DrawMoveOverlay(Game g)

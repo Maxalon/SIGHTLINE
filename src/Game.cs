@@ -66,6 +66,9 @@ public class Game
     public Objective Objective;
     public List<(int x, int y)> EvacZone = new();
 
+    // per-mission visual theme
+    public Biome Biome = Biome.All[0];
+
     // escort objective: a fragile VIP that must reach the extraction zone alive.
     // Mission-only — it rides in Players for the mission but never joins the squad.
     public Unit Vip;
@@ -156,7 +159,8 @@ public class Game
         foreach (var u in Enemies) { u.BeginTurn(); u.OnOverwatch = false; }
         Selected = Players.FirstOrDefault(p => p.CanAct);
         AimMode = false;
-        ShowBanner($"MISSION {n}", false);
+        Biome = Biome.For(n);
+        ShowBanner($"MISSION {n} - {Biome.Name}", false);
     }
 
     void NextMission() => SetupMission(_run.Mission + 1);
