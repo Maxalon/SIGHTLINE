@@ -82,6 +82,10 @@ public class Unit
     public bool Steady;         // sharpshooter: next shot gets +aim/+crit
     public int  Suppress;       // gunner debuff currently ON this unit (aim penalty)
 
+    // optional player-authored role label (overrides the auto strength tags in the
+    // roster/dossier when set); persists across the run
+    public string CustomTag;
+
     // promotion perks (persist across the run); pick one per rank-up
     public System.Collections.Generic.List<Perk> Perks = new();
     public bool HasPerk(Perk p) => Perks.Contains(p);

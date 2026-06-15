@@ -118,6 +118,11 @@ public class Game
     public bool Paused;
     public bool ShowThreatPref = true;
 
+    // custom-tag text editor (modal): key T in a mission, or from the perk chooser
+    public bool EditingTag;
+    public string TagBuffer = "";
+    public Unit TagTarget;
+
     // game-feel: hit-stop freeze + camera zoom-punch
     public float HitStop;
     float _camPulse;
@@ -370,6 +375,9 @@ public class Game
     // ---------------- update ----------------
     public void Update(float dt)
     {
+        // custom-tag editor is modal: it swallows all other input while open
+        if (EditingTag) { UpdateTagEditor(); return; }
+
         if (Raylib.IsKeyPressed(KeyboardKey.M)) Audio.ToggleMute();
 
         // camera zoom-punch always relaxes; hit-stop freezes the rest of the sim
@@ -751,6 +759,7 @@ public class Game
         if (Raylib.IsKeyPressed(KeyboardKey.Five)) DoAbility();
         if (Raylib.IsKeyPressed(KeyboardKey.H)) DoHack();
         if (Raylib.IsKeyPressed(KeyboardKey.R)) DoReload();
+        if (Raylib.IsKeyPressed(KeyboardKey.T)) { OpenTagEditor(Selected); return; }
 
         // keyboard tile cursor: arrows / WASD move it, Space acts on it
         int cdx = 0, cdy = 0;
@@ -1169,8 +1178,42 @@ public class Game
     {
         if (!Raylib.IsMouseButtonPressed(MouseButton.Left)) return;
         var m = Raylib.GetMousePosition();
-        if (Raylib.CheckCollisionPointRec(m, Hud.PerkBtnA)) ChoosePerk(0);
+        if (Raylib.CheckCollisionPointRec(m, Hud.PerkTagBtn) && _run.PendingPerks.Count > 0)
+            OpenTagEditor(_run.PendingPerks[0].Unit);
+        else if (Raylib.CheckCollisionPointRec(m, Hud.PerkBtnA)) ChoosePerk(0);
         else if (Raylib.CheckCollisionPointRec(m, Hud.PerkBtnB)) ChoosePerk(1);
+    }
+
+    // ---------------- custom tag editor ----------------
+    void OpenTagEditor(Unit u)
+    {
+        if (u == null || u.Team != Team.Player || u.IsVip) return;
+        EditingTag = true;
+        TagTarget = u;
+        TagBuffer = u.CustomTag ?? "";
+    }
+
+    void UpdateTagEditor()
+    {
+        if (TagTarget == null) { EditingTag = false; return; }
+        if (Raylib.IsKeyPressed(KeyboardKey.Escape)) { EditingTag = false; return; }   // cancel
+        if (Raylib.IsKeyPressed(KeyboardKey.Enter))
+        {
+            TagTarget.CustomTag = TagBuffer.Trim();   // empty string clears -> auto tags return
+            EditingTag = false;
+            Audio.Play("select");
+            return;
+        }
+        if ((Raylib.IsKeyPressed(KeyboardKey.Backspace) || Raylib.IsKeyPressedRepeat(KeyboardKey.Backspace))
+            && TagBuffer.Length > 0)
+            TagBuffer = TagBuffer.Substring(0, TagBuffer.Length - 1);
+        int ch = Raylib.GetCharPressed();
+        while (ch > 0)
+        {
+            if (TagBuffer.Length < 14 && ch >= 32 && ch < 127)
+                TagBuffer += char.ToUpper((char)ch);   // ASCII-only, uppercase to match the UI font
+            ch = Raylib.GetCharPressed();
+        }
     }
 
     // ---------------- barracks requisition shop ----------------
@@ -1260,6 +1303,15 @@ public class Game
     {
         if (CanBuy(0)) DoPurchase(0);
         _shopDone = true;
+    }
+
+    /// Harness hook (screenshot only): open the custom-tag editor on a soldier.
+    public void DebugTagEditor()
+    {
+        TagTarget = Players.FirstOrDefault(p => !p.IsVip) ?? (_run.Squad.Count > 0 ? _run.Squad[0] : null);
+        if (TagTarget == null) return;
+        TagBuffer = "BREACHER";
+        EditingTag = true;
     }
 
     /// Harness hook (screenshot only): show the barracks requisition shop.

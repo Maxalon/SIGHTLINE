@@ -69,6 +69,7 @@ public static class SaveGame
                 Hp = u.Hp, MaxHp = u.MaxHp, Aim = u.Aim, Mobility = u.Mobility,
                 Weapon = (int)u.Weapon.Kind, Kills = u.Kills, Rank = u.Rank,
                 BonusGrenades = u.BonusGrenades,
+                CustomTag = u.CustomTag,
                 Perks = u.Perks.ConvertAll(p => (int)p),
             });
         var c = r.CurrentCard;
@@ -94,7 +95,7 @@ public static class SaveGame
                 Hp = d.Hp, MaxHp = d.MaxHp, Aim = d.Aim, Mobility = d.Mobility,
                 Weapon = Weapon.Make((WeaponKind)d.Weapon),
                 Kills = d.Kills, Rank = d.Rank, Alive = true,
-                BonusGrenades = d.BonusGrenades,
+                BonusGrenades = d.BonusGrenades, CustomTag = d.CustomTag,
             };
             u.Ammo = u.Weapon.Clip;
             if (d.Perks != null) foreach (var p in d.Perks) u.Perks.Add((Perk)p);
@@ -124,7 +125,7 @@ public static class SaveGame
 
     class UnitDto
     {
-        public string Name, Cls;
+        public string Name, Cls, CustomTag;
         public int Hp, MaxHp, Aim, Mobility, Weapon, Kills, Rank, BonusGrenades;
         public List<int> Perks = new();
     }
@@ -151,6 +152,7 @@ public static class SaveGame
                 Name = "VEGA", Cls = "ASSAULT", Team = Team.Player,
                 Hp = 4, MaxHp = 11, Aim = 78, Mobility = 8,
                 Weapon = Weapon.Make(WeaponKind.Rifle), Kills = 7, Rank = 3, BonusGrenades = 2,
+                CustomTag = "BREACHER",
             };
             a.Perks.Add(Perk.Deadeye); a.Perks.Add(Perk.Tank);
             src.Squad.Add(a);
@@ -172,6 +174,7 @@ public static class SaveGame
                 fails.Add("unit0Stats");
             if (g0.Weapon.Kind != WeaponKind.Rifle) fails.Add("weapon");
             if (g0.BonusGrenades != 2) fails.Add("bonusGrenades");
+            if (g0.CustomTag != "BREACHER") fails.Add("customTag");
             if (!g0.HasPerk(Perk.Deadeye) || !g0.HasPerk(Perk.Tank) || g0.Perks.Count != 2) fails.Add("perks");
             if (got.CurrentCard == null || got.CurrentCard.Objective != Objective.Hack ||
                 got.CurrentCard.EnemyDelta != 2 || got.CurrentCard.Reward != RewardKind.BonusPerk)
