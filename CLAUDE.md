@@ -179,6 +179,9 @@ seeds (mix of WIN/LOSE, no exceptions):
 - **Run save/load:** the campaign is checkpointed to the OS user-data dir at each
   mission start (`src/SaveGame.cs`); the intro offers **CONTINUE RUN** (key C) to
   resume. The save is cleared when a run ends.
+- **Intel currency + requisition shop:** each cleared mission grants `Intel`
+  (`Run.Intel`, persisted); the barracks opens with a REQUISITION screen to spend it
+  on a medkit, +2 max HP, or a bonus perk before choosing the next deployment.
 - **Enemy variety:** Grunt / Scout / Bruiser plus **Sniper** (kites to range),
   **Turret** (immobile overwatch nest), **Berserker** (tanky shotgun rusher), and a
   capstone **Elite boss** (WARLORD) on the final mission with 2 grenades and a
@@ -374,16 +377,23 @@ the player meaningful long-game decisions. Ordered by impact:
       a larger orange figure with a ring + name/rage tag (`Pal.Elite`). A
       **Medic** archetype is still open (would need an enemy heal action). Screenshot
       hook `SIGHTLINE_WAKE` reveals dormant pods.
-- [x] **C. Strategic between-mission layer.** DONE (choice + reward; currency/shop
-      still open). The barracks now ends with **3 deployment cards** (`Run.Offers` /
+- [x] **C. Strategic between-mission layer.** DONE (choice + reward + intel
+      currency/shop). The barracks now ends with **3 deployment cards** (`Run.Offers` /
       `MissionCard`, `Hud.DrawDeployCard`, `Game.ChooseCard`): RECON (other objective,
       lighter force, +full heal), STANDARD (rotation objective, normal), ONSLAUGHT
       (other objective, heavier force, +bonus perk). The pick sets the next mission's
       **objective + difficulty** (`MissionCard.EnemyDelta/StatDelta` thread into
       `Mission.Build`/`SpawnEnemies`); the cleared card's reward is applied in
       `EnterBarracks` (heal squad / `Run.AddBonusPerk`). `Run.ObjectiveFor` is the
-      STANDARD baseline. Autopilot picks card 0. Still TODO: a persistent
-      intel/supply currency + a spend screen (recruits/gear). Hook `SIGHTLINE_CARDS`.
+      STANDARD baseline. Autopilot picks card 0. Hook `SIGHTLINE_CARDS`.
+      **Intel currency + requisition shop (DONE):** `Run.Intel` accrues each mission
+      cleared in `EnterBarracks` (`8 + 3*survivors + missionNum`, +6 on ONSLAUGHT)
+      and persists in the save. The barracks opens with a **REQUISITION** screen
+      (`Hud.DrawRequisition`, gated by `Game.ShopDone`) BEFORE the perk/card steps:
+      spend intel on FIELD MEDKIT (heal most-wounded to full, 6), COMBAT STIMS (+2
+      max HP to the frailest, permanent, 10), or ADV. TRAINING (a bonus perk choice,
+      16). `Game.CanBuy/DoPurchase/HandleShopClick`; autopilot buys a medkit then
+      proceeds (`AutoShop`). Hook `SIGHTLINE_SHOP`.
 - [ ] **D. Procedural music + ambience.** Audio is SFX-only. A synthesised, layered
       ambient/combat track (allowed: procedural only) would lift "feels good"
       enormously. Build on `src/Audio.cs` (it already synth's PCM in memory).
@@ -409,7 +419,7 @@ the player meaningful long-game decisions. Ordered by impact:
 
 Supporting polish (any time): distinct "VIP EXTRACTED/LOST" end cards; a 2nd
 elevation tier; high ground seeing over LOW cover; secondary objectives; biome-
-tinted cover + plateaus; a persistent intel currency + barracks spend screen (C).
+tinted cover + plateaus; more requisition options (recruits/gear) for the shop.
 
 ---
 
@@ -459,10 +469,19 @@ C (deployment-choice cards), **E (run save/load)**, and F (biome palettes) are a
 DONE and merged to `main`. **The ONLY remaining Phase 2 item is D. Procedural
 music** — deferred because it CANNOT be verified in this sandbox (no audio device,
 `InitAudioDevice` fails, so it'd be a blind ship); do it where you can actually
-hear it, building on the PCM synth in `src/Audio.cs`. Smaller open follow-ups: a
-persistent intel currency + a barracks spend screen (the unfinished half of C),
+hear it, building on the PCM synth in `src/Audio.cs`. The previously-open
+**intel currency + barracks requisition shop** (the unfinished half of C) is now
+DONE (see item C). Smaller open follow-ups: more shop options (recruits/gear),
 biome-tinted cover/plateaus + themed authored arenas (F), and a MEDIC enemy
 archetype (B).
+
+**Intel shop (this session).** `Run.Intel` (persisted in the save) accrues per
+cleared mission in `Game.EnterBarracks`; the barracks now opens with a REQUISITION
+spend screen (`Hud.DrawRequisition`, gated by `Game.ShopDone`; flow is shop →
+promotions → deployment cards). `Game.CanBuy/DoPurchase/HandleShopClick/AutoShop`,
+items in `Game.ShopName/ShopDesc/ShopCost`. Gotcha: `_shopDone` defaults true so the
+first mission + the other barracks debug hooks skip the shop; it's set false only in
+`EnterBarracks`.
 
 **E (run save/load) — this session.** `src/SaveGame.cs` (System.Text.Json, compact
 DTOs) persists the `Run` to `ApplicationData/Sightline/save.json` (NOT the repo).
@@ -477,8 +496,9 @@ re-derived by `Mission.Build`, so don't add them to the DTOs.
 Harness screenshot hooks (all `shot`-only, in `Program.cs`):
 `SIGHTLINE_ZOOM`, `SIGHTLINE_PAUSE`, `SIGHTLINE_PERKSHOT`, `SIGHTLINE_CARDS`,
 `SIGHTLINE_WAKE` (reveal dormant pods), **`SIGHTLINE_INTRO`** (intro with a save so
-the CONTINUE button shows). Plus non-shot **`SIGHTLINE_SAVETEST=1`** → prints
-`SAVETEST: PASS/FAIL` (save/load round-trip; no window).
+the CONTINUE button shows), **`SIGHTLINE_SHOP`** (barracks requisition screen). Plus
+non-shot **`SIGHTLINE_SAVETEST=1`** → prints `SAVETEST: PASS/FAIL` (save/load
+round-trip; no window).
 
 - Gotchas: (a) elevation is a pure positioning layer — plateaus are walkable floor
   (no climb cost); per-tile draws that sit on a plateau go through
