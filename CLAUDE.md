@@ -374,9 +374,13 @@ the player meaningful long-game decisions. Ordered by impact:
       **ELITE** boss on the final mission (WARLORD: 20+2n HP, 2 grenades, high aim,
       a one-time low-HP **RAGE** in `Game.UpdateEnemy` that buffs aim/mobility +
       "WARLORD ENRAGED" banner). Renderer gives each a distinct glyph; the elite is
-      a larger orange figure with a ring + name/rage tag (`Pal.Elite`). A
-      **Medic** archetype is still open (would need an enemy heal action). Screenshot
-      hook `SIGHTLINE_WAKE` reveals dormant pods.
+      a larger orange figure with a ring + name/rage tag (`Pal.Elite`). **MEDIC**
+      (ORDERLY, from mission 3): a support hostile that mends wounded allies instead
+      of fighting — `Ai.Plan` MEDIC branch picks the most-wounded active ally, moves
+      to a covered tile within `Ai.HealRange` (4) + LoS and heals `Ai.HealAmount` (4)
+      via `HealAnim` (`Game.UpdateEnemy` heal branch). Distinct green-cross glyph
+      (`Renderer.DrawUnit`); falls back to normal combat AI when no one's hurt.
+      Screenshot hook `SIGHTLINE_WAKE` reveals dormant pods.
 - [x] **C. Strategic between-mission layer.** DONE (choice + reward + intel
       currency/shop). The barracks now ends with **3 deployment cards** (`Run.Offers` /
       `MissionCard`, `Hud.DrawDeployCard`, `Game.ChooseCard`): RECON (other objective,
@@ -420,7 +424,8 @@ the player meaningful long-game decisions. Ordered by impact:
 
 Supporting polish (any time): distinct "VIP EXTRACTED/LOST" end cards; a 2nd
 elevation tier; high ground seeing over LOW cover; secondary objectives; themed
-authored arenas per biome; more requisition options (recruits/gear) for the shop.
+authored arenas per biome; more requisition options (recruits/gear) for the shop;
+an enemy heal could also key an "interrupt the medic" focus-fire incentive.
 
 ---
 
@@ -500,6 +505,13 @@ Harness screenshot hooks (all `shot`-only, in `Program.cs`):
 the CONTINUE button shows), **`SIGHTLINE_SHOP`** (barracks requisition screen). Plus
 non-shot **`SIGHTLINE_SAVETEST=1`** → prints `SAVETEST: PASS/FAIL` (save/load
 round-trip; no window).
+
+**MEDIC enemy (this session).** New support archetype (ORDERLY, mission 3+) that
+heals wounded allies. Wiring: `EnemyPlan.HealTarget`, `Ai.Plan` MEDIC branch +
+`Ai.HealRange/HealAmount`, heal exec branch in `Game.UpdateEnemy`, `HealAnim`
+(`src/Anim.cs`), green-cross glyph in `Renderer.DrawUnit`, spawn band in
+`Mission.SpawnEnemies` (medics carry no grenades). Falls back to normal combat AI
+when no ally is hurt, so it's never a dead turn.
 
 - Gotchas: (a) elevation is a pure positioning layer — plateaus are walkable floor
   (no climb cost); per-tile draws that sit on a plateau go through

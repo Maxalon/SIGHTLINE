@@ -178,7 +178,9 @@ public static class Mission
                 e = MakeHostile("VIPER", "SNIPER", WeaponKind.Sniper, 4 + bump, 62 + bump, 5, x, y);
             else if (n >= 3 && r < 0.42f)       // charging melee bruiser
                 e = MakeHostile("REAVER", "BERSERKER", WeaponKind.Shotgun, 12 + bump * 2, 58 + bump, 8, x, y);
-            else if (n >= 2 && r < 0.57f)
+            else if (n >= 3 && r < 0.51f)       // field medic: heals wounded allies
+                e = MakeHostile("ORDERLY", "MEDIC", WeaponKind.Smg, 6 + bump, 52 + bump, 6, x, y);
+            else if (n >= 2 && r < 0.60f)
                 e = MakeHostile("OGRE", "BRUISER", WeaponKind.Lmg, 9 + bump * 2, 56 + bump, 5, x, y);
             else if (r < 0.74f)
                 e = MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 58 + bump, 8, x, y);
@@ -187,7 +189,7 @@ public static class Mission
             if (e.Cls != "ELITE") e.Aim = Math.Min(82, e.Aim);
             // grenades: bruisers + the elite always; some others from mission 2 on
             if (e.Cls == "ELITE") e.Grenades = 2;
-            else if (n >= 2 && (e.Cls == "BRUISER" || Util.Roll(22))) e.Grenades = 1;
+            else if (n >= 2 && e.Cls != "MEDIC" && (e.Cls == "BRUISER" || Util.Roll(22))) e.Grenades = 1;
             e.Active = false;          // dormant until sighted
             e.PodId = i / 2;           // pods of ~2
             enemies.Add(e);
