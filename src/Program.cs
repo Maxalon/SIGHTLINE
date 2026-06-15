@@ -20,6 +20,11 @@ public static class Program
             Console.WriteLine(SaveGame.SelfTest());
             return;
         }
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_COMBATTEST") == "1")
+        {
+            Console.WriteLine(Combat.SelfTest());
+            return;
+        }
         // SIGHTLINE_MISSION=<n> : start the harness on mission n (verify Hack/Evac maps).
         int startMission = int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_MISSION"), out int sm) ? sm : 1;
 
