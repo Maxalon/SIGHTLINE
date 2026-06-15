@@ -49,6 +49,7 @@ public static class Renderer
         DrawPathPreview(g);
         DrawCover(g);
         DrawHoverAndShields(g);
+        DrawKbCursor(g);
         DrawUnits(g);
         DrawAim(g);
         DrawGrenade(g);
@@ -253,6 +254,25 @@ public static class Renderer
             if (g.Selected != null && g.MoveCost != null && g.MoveCost[g.HoverX, g.HoverY] > 0)
                 DrawShields(g, g.HoverX, g.HoverY, 0.9f);
         }
+    }
+
+    // Keyboard tile cursor: animated corner-bracket reticle on the active tile.
+    static void DrawKbCursor(Game g)
+    {
+        if (!g.KbCursor || !g.Grid.InBounds(g.CurX, g.CurY)) return;
+        var r = ElevRect(g, g.CurX, g.CurY);
+        float p = 0.5f + 0.5f * MathF.Sin((float)Raylib.GetTime() * 6f);
+        Color c = Raylib.Fade(Pal.Accent, 0.55f + 0.45f * p);
+        float L = 11f, m = 2f;
+        float x0 = r.X + m, y0 = r.Y + m, x1 = r.X + r.Width - m, y1 = r.Y + r.Height - m;
+        Raylib.DrawLineEx(new Vector2(x0, y0), new Vector2(x0 + L, y0), 2.5f, c);
+        Raylib.DrawLineEx(new Vector2(x0, y0), new Vector2(x0, y0 + L), 2.5f, c);
+        Raylib.DrawLineEx(new Vector2(x1, y0), new Vector2(x1 - L, y0), 2.5f, c);
+        Raylib.DrawLineEx(new Vector2(x1, y0), new Vector2(x1, y0 + L), 2.5f, c);
+        Raylib.DrawLineEx(new Vector2(x0, y1), new Vector2(x0 + L, y1), 2.5f, c);
+        Raylib.DrawLineEx(new Vector2(x0, y1), new Vector2(x0, y1 - L), 2.5f, c);
+        Raylib.DrawLineEx(new Vector2(x1, y1), new Vector2(x1 - L, y1), 2.5f, c);
+        Raylib.DrawLineEx(new Vector2(x1, y1), new Vector2(x1, y1 - L), 2.5f, c);
     }
 
     static void DrawShields(Game g, int tx, int ty, float alpha)

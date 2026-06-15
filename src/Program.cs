@@ -26,6 +26,9 @@ public static class Program
         var game = new Game();
         if (shot || autoplay) game.StartMission(startMission);
         if (autoplay) game.AutoPlay = true;
+        // screenshot-only hooks for verifying the camera + pause overlay
+        if (shot && float.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_ZOOM"), out float z)) game.CamZoom = z;
+        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_PAUSE") == "1") game.Paused = true;
         int frame = 0;
         const int autoCap = 20000;
 

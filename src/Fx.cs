@@ -28,10 +28,11 @@ public class Fx
     public List<FloatText> Texts = new();
 
     public float Shake;
+    public bool ShakeOn = true;     // settings toggle
     Vector2 _shakeOff;
     public Vector2 ShakeOffset => _shakeOff;
 
-    public void AddShake(float amt) => Shake = MathF.Min(18f, Shake + amt);
+    public void AddShake(float amt) { if (ShakeOn) Shake = MathF.Min(18f, Shake + amt); }
 
     public void Update(float dt)
     {

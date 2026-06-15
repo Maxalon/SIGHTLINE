@@ -83,6 +83,19 @@ public class Game
     public bool EndTurnArmed;
     int _lastSig = -1;
 
+    // camera: player-controlled zoom/pan for readability (identity by default,
+    // so default mouse picking + the headless harness are unaffected)
+    public float CamZoom = 1f;
+    public Vector2 CamPan = Vector2.Zero;
+
+    // keyboard tile cursor (mouse-free play): arrows/WASD move it, Space acts
+    public bool KbCursor;
+    public int CurX, CurY;
+
+    // pause / settings overlay
+    public bool Paused;
+    public bool ShowThreatPref = true;
+
     // game-feel: hit-stop freeze + camera zoom-punch
     public float HitStop;
     float _camPulse;
@@ -264,6 +277,18 @@ public class Game
         _camPulse *= MathF.Exp(-dt * 11f);
         if (_camPulse < 0.001f) _camPulse = 0;
         if (HitStop > 0) { HitStop -= dt; return; }
+
+        // pause/settings overlay + camera controls (live play only, never in autoplay)
+        if (!AutoPlay && (Phase == Phase.PlayerTurn || Phase == Phase.EnemyTurn))
+        {
+            if (Raylib.IsKeyPressed(KeyboardKey.Escape))
+            {
+                if (AimMode || GrenadeMode) { AimMode = false; GrenadeMode = false; }
+                else Paused = !Paused;
+            }
+            if (Paused) { HandlePauseMenu(); return; }
+            HandleCamera();
+        }
 
         float t = MathF.Min(dt, 0.05f);
         Fx.Update(t);
@@ -537,6 +562,7 @@ public class Game
     // fire on with no cover for the mover — i.e. tiles you'd be exposed standing on.
     void ComputeThreat()
     {
+        if (!ShowThreatPref) { Threat = null; return; }   // disabled in settings
         Threat = new bool[Grid.W, Grid.H];
         var foes = Enemies.Where(e => e.Alive && e.Active && e.Ammo > 0).ToList();
         if (foes.Count == 0) return;
@@ -558,8 +584,10 @@ public class Game
     {
         ShowOdds = false;
         PathPreview.Clear();
-        var m = Raylib.GetMousePosition();
-        HoverValid = Util.ScreenToTile(m, out HoverX, out HoverY);
+        // mouse -> board tile, through the (stable) picking camera so zoom/pan work
+        var world = Raylib.GetScreenToWorld2D(Raylib.GetMousePosition(), ViewCamera(false));
+        HoverValid = Util.ScreenToTile(world, out HoverX, out HoverY);
+        if (KbCursor) { HoverX = CurX; HoverY = CurY; HoverValid = Grid.InBounds(CurX, CurY); }
 
         Unit hovered = HoverValid ? UnitAt(HoverX, HoverY) : null;
 
@@ -608,7 +636,6 @@ public class Game
         // keys
         if (Raylib.IsKeyPressed(KeyboardKey.Enter)) { RequestEndTurn(); return; }
         if (Raylib.IsKeyPressed(KeyboardKey.Tab)) CycleSelection();
-        if (Raylib.IsKeyPressed(KeyboardKey.Escape)) { AimMode = false; GrenadeMode = false; }
         if (Raylib.IsKeyPressed(KeyboardKey.One)) ToggleAim();
         if (Raylib.IsKeyPressed(KeyboardKey.Two)) DoOverwatch();
         if (Raylib.IsKeyPressed(KeyboardKey.Three)) DoHunker();
@@ -617,45 +644,106 @@ public class Game
         if (Raylib.IsKeyPressed(KeyboardKey.H)) DoHack();
         if (Raylib.IsKeyPressed(KeyboardKey.R)) DoReload();
 
+        // keyboard tile cursor: arrows / WASD move it, Space acts on it
+        int cdx = 0, cdy = 0;
+        if (Raylib.IsKeyPressed(KeyboardKey.Up) || Raylib.IsKeyPressed(KeyboardKey.W)) cdy = -1;
+        else if (Raylib.IsKeyPressed(KeyboardKey.Down) || Raylib.IsKeyPressed(KeyboardKey.S)) cdy = 1;
+        else if (Raylib.IsKeyPressed(KeyboardKey.Left) || Raylib.IsKeyPressed(KeyboardKey.A)) cdx = -1;
+        else if (Raylib.IsKeyPressed(KeyboardKey.Right) || Raylib.IsKeyPressed(KeyboardKey.D)) cdx = 1;
+        if (cdx != 0 || cdy != 0) MoveCursor(cdx, cdy);
+        if (Raylib.IsKeyPressed(KeyboardKey.Space) && HoverValid) { BoardAct(HoverX, HoverY); return; }
+        if (KbCursor && Raylib.GetMouseDelta() != Vector2.Zero) KbCursor = false;  // mouse takes back over
+
         if (Raylib.IsMouseButtonPressed(MouseButton.Right)) { AimMode = false; GrenadeMode = false; return; }
 
         if (Raylib.IsMouseButtonPressed(MouseButton.Left))
         {
+            KbCursor = false;
             var m = Raylib.GetMousePosition();
-            // HUD first
+            // HUD first (screen space — not affected by the board camera)
             if (Raylib.CheckCollisionPointRec(m, Hud.EndTurnRect)) { RequestEndTurn(); return; }
             foreach (var b in Hud.ActionButtons)
                 if (b.Enabled && Raylib.CheckCollisionPointRec(m, b.Rect)) { DoAction(b.Id); return; }
             foreach (var c in Hud.RosterChips)
                 if (Raylib.CheckCollisionPointRec(m, c.rect)) { SelectUnit(c.unit); return; }
 
-            // board click
             if (!HoverValid) return;
-            var hovered = UnitAt(HoverX, HoverY);
-
-            if (GrenadeMode)
-            {
-                if (GrenValid) IssueGrenade(GrenTx, GrenTy);
-                else GrenadeMode = false;
-                return;
-            }
-
-            if (AimMode)
-            {
-                if (hovered != null && hovered.Team == Team.Enemy && CanTarget(Selected, hovered))
-                    IssueShoot(hovered);
-                else
-                    AimMode = false;
-                return;
-            }
-
-            if (hovered != null && hovered.Team == Team.Player) { SelectUnit(hovered); return; }
-            if (hovered != null && hovered.Team == Team.Enemy && Selected != null &&
-                Selected.CanAct && CanTarget(Selected, hovered)) { IssueShoot(hovered); return; }
-            if (Selected != null && Selected.CanAct && MoveCost != null &&
-                Grid.IsFloor(HoverX, HoverY) && MoveCost[HoverX, HoverY] > 0)
-                IssueMove(HoverX, HoverY);
+            BoardAct(HoverX, HoverY);
         }
+    }
+
+    // Resolve a board action on tile (hx,hy): throw / aim / select / fire / move.
+    // Shared by mouse clicks and the keyboard cursor.
+    void BoardAct(int hx, int hy)
+    {
+        if (!Grid.InBounds(hx, hy)) return;
+        var hovered = UnitAt(hx, hy);
+
+        if (GrenadeMode)
+        {
+            if (GrenValid) IssueGrenade(hx, hy);
+            else GrenadeMode = false;
+            return;
+        }
+        if (AimMode)
+        {
+            if (hovered != null && hovered.Team == Team.Enemy && CanTarget(Selected, hovered)) IssueShoot(hovered);
+            else AimMode = false;
+            return;
+        }
+        if (hovered != null && hovered.Team == Team.Player) { SelectUnit(hovered); return; }
+        if (hovered != null && hovered.Team == Team.Enemy && Selected != null &&
+            Selected.CanAct && CanTarget(Selected, hovered)) { IssueShoot(hovered); return; }
+        if (Selected != null && Selected.CanAct && MoveCost != null &&
+            Grid.IsFloor(hx, hy) && MoveCost[hx, hy] > 0)
+            IssueMove(hx, hy);
+    }
+
+    void MoveCursor(int dx, int dy)
+    {
+        if (!KbCursor)
+        {
+            KbCursor = true;
+            CurX = Selected?.X ?? Grid.W / 2;
+            CurY = Selected?.Y ?? Grid.H / 2;
+        }
+        CurX = Util.Clamp(CurX + dx, 0, Grid.W - 1);
+        CurY = Util.Clamp(CurY + dy, 0, Grid.H - 1);
+    }
+
+    // ---------------- camera + pause ----------------
+    void HandleCamera()
+    {
+        float wheel = Raylib.GetMouseWheelMove();
+        if (wheel != 0)
+        {
+            var mouse = Raylib.GetMousePosition();
+            var before = Raylib.GetScreenToWorld2D(mouse, ViewCamera(false));
+            CamZoom = Util.Clamp(CamZoom + wheel * 0.12f, 1f, 2.4f);
+            var after = Raylib.GetScreenToWorld2D(mouse, ViewCamera(false));
+            CamPan += before - after;                 // keep the point under the cursor anchored
+        }
+        if (Raylib.IsMouseButtonDown(MouseButton.Middle))
+            CamPan -= Raylib.GetMouseDelta() / CamZoom;
+        if (Raylib.IsKeyPressed(KeyboardKey.C)) { CamZoom = 1f; CamPan = Vector2.Zero; }
+
+        if (CamZoom <= 1.001f) { CamZoom = 1f; CamPan = Vector2.Zero; }  // no pan when fully out
+        else
+        {
+            CamPan.X = Util.Clamp(CamPan.X, -Cfg.BoardW * 0.5f, Cfg.BoardW * 0.5f);
+            CamPan.Y = Util.Clamp(CamPan.Y, -Cfg.BoardH * 0.5f, Cfg.BoardH * 0.5f);
+        }
+    }
+
+    void HandlePauseMenu()
+    {
+        if (!Raylib.IsMouseButtonPressed(MouseButton.Left)) return;
+        var m = Raylib.GetMousePosition();
+        if (Raylib.CheckCollisionPointRec(m, Hud.PauseResume)) Paused = false;
+        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseMute)) Audio.ToggleMute();
+        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseShake)) Fx.ShakeOn = !Fx.ShakeOn;
+        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseThreat)) ShowThreatPref = !ShowThreatPref;
+        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseAbandon)) { Paused = false; Phase = Phase.Lose; Audio.Play("lose"); }
     }
 
     void DoAction(string id)
@@ -951,19 +1039,27 @@ public class Game
     }
 
     // ---------------- draw ----------------
+    Vector2 BoardCenter => new(Cfg.OriginX + Cfg.BoardW / 2f, Cfg.OriginY + Cfg.BoardH / 2f);
+
+    /// The board camera. withShake folds in the transient screen-shake + zoom-punch
+    /// (visual only); the picking variant omits them so mouse->tile stays stable.
+    public Camera2D ViewCamera(bool withShake)
+    {
+        var bc = BoardCenter;
+        return new Camera2D
+        {
+            Target = bc + CamPan,
+            Offset = bc + (withShake ? Fx.ShakeOffset : Vector2.Zero),
+            Rotation = 0f,
+            Zoom = CamZoom * (withShake ? (1f + _camPulse) : 1f),
+        };
+    }
+
     public void Draw()
     {
         Raylib.ClearBackground(Pal.Bg);
 
-        var bc = new Vector2(Cfg.OriginX + Cfg.BoardW / 2f, Cfg.OriginY + Cfg.BoardH / 2f);
-        var cam = new Camera2D
-        {
-            Target = bc,
-            Offset = bc + Fx.ShakeOffset,
-            Rotation = 0f,
-            Zoom = 1f + _camPulse,
-        };
-        Raylib.BeginMode2D(cam);
+        Raylib.BeginMode2D(ViewCamera(true));
         Renderer.DrawBoard(this);
         Raylib.EndMode2D();
 

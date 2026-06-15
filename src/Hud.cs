@@ -23,6 +23,7 @@ public static class Hud
     public static Rectangle EndTurnRect;
     public static UiButton[] ActionButtons = Array.Empty<UiButton>();
     public static System.Collections.Generic.List<(Rectangle rect, Unit unit)> RosterChips = new();
+    public static Rectangle PauseResume, PauseMute, PauseShake, PauseThreat, PauseAbandon;
 
     public static void Draw(Game g)
     {
@@ -32,6 +33,36 @@ public static class Hud
         DrawTooltip(g);
         DrawBanner(g);
         DrawOverlays(g);
+        if (g.Paused) DrawPause(g);
+    }
+
+    // ---------------- pause / settings ----------------
+    static void DrawPause(Game g)
+    {
+        Raylib.DrawRectangle(0, 0, Cfg.ScreenW, Cfg.ScreenH, Raylib.Fade(Pal.RGBA(5, 8, 11), 0.82f));
+        int w = 440, h = 396;
+        int x = Cfg.ScreenW / 2 - w / 2, y = Cfg.ScreenH / 2 - h / 2;
+        var card = new Rectangle(x, y, w, h);
+        Raylib.DrawRectangleRounded(card, 0.05f, 8, Pal.Panel);
+        Raylib.DrawRectangleLinesEx(card, 1.5f, Pal.PanelBd);
+
+        Raylib.DrawText("PAUSED", x + w / 2 - Raylib.MeasureText("PAUSED", 40) / 2, y + 26, 40, Pal.Friend);
+
+        int bw = 320, bh = 42, bx = x + w / 2 - bw / 2, by = y + 96, gap = 12;
+        PauseResume  = new Rectangle(bx, by, bw, bh); by += bh + gap;
+        PauseMute    = new Rectangle(bx, by, bw, bh); by += bh + gap;
+        PauseShake   = new Rectangle(bx, by, bw, bh); by += bh + gap;
+        PauseThreat  = new Rectangle(bx, by, bw, bh); by += bh + gap;
+        PauseAbandon = new Rectangle(bx, by, bw, bh);
+
+        DrawButtonRect(PauseResume, "RESUME", "ESC", true, false, Pal.Friend);
+        DrawButtonRect(PauseMute, Audio.Enabled ? "AUDIO: ON" : "AUDIO: OFF", "M", true, !Audio.Enabled, Pal.Accent);
+        DrawButtonRect(PauseShake, g.Fx.ShakeOn ? "SCREEN SHAKE: ON" : "SCREEN SHAKE: OFF", "", true, !g.Fx.ShakeOn, Pal.Accent);
+        DrawButtonRect(PauseThreat, g.ShowThreatPref ? "THREAT PREVIEW: ON" : "THREAT PREVIEW: OFF", "", true, !g.ShowThreatPref, Pal.Accent);
+        DrawButtonRect(PauseAbandon, "ABANDON RUN", "", true, false, Pal.Foe);
+
+        string ctl = "Wheel zoom  -  Middle-drag pan  -  [C] reset camera  -  Arrows/WASD + [Space]";
+        Raylib.DrawText(ctl, x + w / 2 - Raylib.MeasureText(ctl, 11) / 2, y + h - 24, 11, Pal.TxtDim);
     }
 
     static void DrawRoster(Game g)
@@ -142,7 +173,7 @@ public static class Hud
         DrawActionButtons(g, barY);
 
         // hint
-        string hint = "Click tile to MOVE  -  click hostile to FIRE  -  [Tab] next  -  [5] ability";
+        string hint = "MOVE / FIRE by click  -  [Tab] next  -  [5] ability  -  arrows+[Space]  -  [Esc] menu";
         int hw = Raylib.MeasureText(hint, 13);
         Raylib.DrawText(hint, Cfg.ScreenW - hw - 24, Cfg.ScreenH - 30, 13, Pal.TxtDim);
     }
