@@ -47,6 +47,10 @@ public static class Combat
         if (highGround) hit += HighGroundAim;
         if (a.Steady) hit += SteadyAim;          // sharpshooter: braced shot
         if (a.Suppress > 0) hit -= a.Suppress;   // gunner: suppressed shooter
+        // promotion perks (attacker)
+        if (a.HasPerk(Perk.LockOn) && cover.Level == 0) hit += Unit.PerkAim;
+        if (a.HasPerk(Perk.CloseQuarters) && dist <= Unit.CloseRange) hit += Unit.PerkAim;
+        if (a.HasPerk(Perk.Marksman) && dist >= Unit.LongRange) hit += Unit.PerkAim;
 
         hit = Util.Clamp(hit, 3, 95);
 
@@ -54,6 +58,7 @@ public static class Combat
         if (cover.Level == 0) crit += 35;       // exposed / flanked target
         if (highGround) crit += HighGroundCrit;  // shooting down rewards crits
         if (a.Steady) crit += SteadyCrit;        // braced shot also crits harder
+        if (a.HasPerk(Perk.Deadeye)) crit += Unit.PerkCrit;
         if (d.Hunkered) crit = 0;               // hunkered can't be crit
         crit = Util.Clamp(crit, 0, 100);
 
@@ -88,6 +93,7 @@ public static class Combat
             res.Crit = true;
             dmg = (int)MathF.Ceiling(dmg * 1.5f) + 1;
         }
+        if (d.HasPerk(Perk.Hardened)) dmg = Math.Max(1, dmg - 1);   // damage resistance
         res.Damage = dmg;
         return res;
     }

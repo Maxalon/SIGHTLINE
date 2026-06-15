@@ -41,8 +41,8 @@ public static class Mission
             u.X = PlayerSpawns[i].x;
             u.Y = PlayerSpawns[i].y;
             u.Ammo = u.Weapon.Clip;
-            u.Grenades = 1;                  // refill grenade each mission
-            u.AbilityCharge = 1;             // refill signature ability each mission
+            u.Grenades = 1 + (u.HasPerk(Perk.Bandolier) ? 1 : 0);   // refill (+Bandolier)
+            u.AbilityCharge = 1 + (u.HasPerk(Perk.Adrenal) ? 1 : 0);// refill (+Adrenal)
             u.Suppress = 0;
             u.OnOverwatch = false;
             u.Hunkered = false;

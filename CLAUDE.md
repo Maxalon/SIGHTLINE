@@ -193,6 +193,10 @@ seeds (mix of WIN/LOSE, no exceptions):
   shake, threat-preview toggles, abandon run).
 - **Recruits:** the barracks backfills empty squad slots with fresh rookies
   (`Mission.MakeRecruit`, `Run.DebriefSurvivors`) so casualties don't death-spiral.
+- **Perk-based promotions:** each rank-up is a pick-1-of-2 perk choice in the
+  barracks (`Perk`/`Unit.Perks`/`PerkDef`, `Run.PendingPerks`, `Hud.DrawPerkChooser`).
+  10 perks (LockOn/Hardened/Reflexes/Bandolier/CloseQuarters/Marksman/Deadeye/Tank/
+  Sprinter/Adrenal) make each soldier a build; autopilot auto-picks.
 - **Class signature abilities:** each class has one self-cast signature (key **5**,
   1 charge/mission, refilled like grenades): Assault **RUN&GUN** (next shot costs 1
   action instead of ending the turn), Ranger **BLITZ** (next move costs one action
@@ -340,16 +344,16 @@ every run feels mechanically identical because squad growth is fixed and the
 enemy roster is tiny. Phase 2 is about making runs feel *different* and giving
 the player meaningful long-game decisions. Ordered by impact:
 
-- [ ] **A. Perk-based promotions (build variety).** Replace the fixed +Aim/+HP/
-      +Mobility promotion cycle with a **pick-1-of-2 perk** choice at each rank-up
-      (in the barracks). Perks: stat boosts AND new tactical traits, e.g. *Lock-On*
-      (+aim vs flanked), *Hardened* (-1 dmg taken), *Lightning Reflexes* (first
-      overwatch shot can't miss), *Bandolier* (+1 grenade), *Close Quarters* (+aim
-      under 4 tiles), *Field Medic* (heal an adjacent ally), a 2nd ability charge.
-      This makes each soldier a build and leverages the new ability system. Wire a
-      `Perk` enum + `Unit.Perks`, surface in `Combat`/`Game`; barracks UI to choose;
-      autopilot auto-picks. **Recommended next — highest replayability per unit of
-      work, and self-contained/headless-verifiable.**
+- [x] **A. Perk-based promotions (build variety).** DONE. Each rank-up queues a
+      **pick-1-of-2 perk** choice (`Run.PendingPerks` / `PerkOffer`), resolved in
+      the barracks (`Hud.DrawPerkChooser`, `Game.ChoosePerk`; autopilot auto-picks).
+      `Perk` enum + `Unit.Perks` + `PerkDef` (Name/Code/Desc); 10 perks: LockOn
+      (+15 aim vs exposed), Hardened (-1 dmg taken, in `Combat.Resolve` + grenade),
+      Reflexes (overwatch +aim in `OnUnitEnteredTile`), Bandolier (+1 grenade),
+      CloseQuarters/Marksman (+15 aim by range), Deadeye (+15 crit), Tank (+3 HP),
+      Sprinter (+1 mob), Adrenal (+1 ability charge). Stat perks apply on grant;
+      passives read in `Combat.ComputeOdds`/`Mission.Build`. Maxed soldiers fall
+      back to a stat bump. Barracks roster shows earned perk codes.
 - [ ] **B. Enemy variety + an elite/boss.** Only Grunt/Scout/Bruiser exist. Add
       archetypes with distinct AI: a **Sniper** (holds max range, high crit), a
       **Sentry/Turret** (immobile overwatch nest), a **Medic** (heals/revives

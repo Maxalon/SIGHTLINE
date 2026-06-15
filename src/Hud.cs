@@ -24,6 +24,7 @@ public static class Hud
     public static UiButton[] ActionButtons = Array.Empty<UiButton>();
     public static System.Collections.Generic.List<(Rectangle rect, Unit unit)> RosterChips = new();
     public static Rectangle PauseResume, PauseMute, PauseShake, PauseThreat, PauseAbandon;
+    public static Rectangle PerkBtnA, PerkBtnB;
 
     public static void Draw(Game g)
     {
@@ -332,6 +333,7 @@ public static class Hud
     static void DrawBarracks(Game g)
     {
         var run = g.RunState;
+        if (run.PendingPerks.Count > 0) { DrawPerkChooser(g, run.PendingPerks[0]); return; }
         var squad = run.Squad;
         Raylib.DrawRectangle(0, 0, Cfg.ScreenW, Cfg.ScreenH, Raylib.Fade(Pal.RGBA(5, 8, 11), 0.85f));
 
@@ -379,6 +381,50 @@ public static class Hud
         CenterText($"DEPLOY  >  MISSION {run.Mission + 1}", OverlayBtn, 16, Pal.RGBA(3, 18, 26));
     }
 
+    // Rank-up perk choice: the soldier + two perk cards (pick one).
+    static void DrawPerkChooser(Game g, PerkOffer off)
+    {
+        Raylib.DrawRectangle(0, 0, Cfg.ScreenW, Cfg.ScreenH, Raylib.Fade(Pal.RGBA(5, 8, 11), 0.88f));
+        int w = 660, h = 360;
+        int x = Cfg.ScreenW / 2 - w / 2, y = Cfg.ScreenH / 2 - h / 2;
+        var card = new Rectangle(x, y, w, h);
+        Raylib.DrawRectangleRounded(card, 0.04f, 8, Pal.Panel);
+        Raylib.DrawRectangleLinesEx(card, 1.5f, Pal.PanelBd);
+
+        string title = "PROMOTION";
+        Raylib.DrawText(title, x + w / 2 - Raylib.MeasureText(title, 36) / 2, y + 24, 36, Pal.Accent);
+        string sub = $"{off.Unit.Name}  -  {off.Unit.RankName}  -  CHOOSE A PERK";
+        Raylib.DrawText(sub, x + w / 2 - Raylib.MeasureText(sub, 14) / 2, y + 68, 14, Pal.TxtDim);
+
+        int cw = (w - 60) / 2, ch = 170, cy = y + 100, gap = 20;
+        PerkBtnA = new Rectangle(x + 20, cy, cw, ch);
+        PerkBtnB = new Rectangle(x + 20 + cw + gap, cy, cw, ch);
+        DrawPerkCard(PerkBtnA, off.A);
+        DrawPerkCard(PerkBtnB, off.B);
+
+        int left = g.RunState.PendingPerks.Count - 1;
+        string foot = left > 0 ? $"{left} more promotion(s) to assign" : "Click a perk to continue";
+        Raylib.DrawText(foot, x + w / 2 - Raylib.MeasureText(foot, 12) / 2, y + h - 30, 12, Pal.TxtDim);
+    }
+
+    static void DrawPerkCard(Rectangle r, Perk p)
+    {
+        bool hover = Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), r);
+        Raylib.DrawRectangleRounded(r, 0.08f, 8, hover ? Pal.RGBA(24, 34, 46) : Pal.RGBA(14, 20, 28));
+        Raylib.DrawRectangleLinesEx(r, 1.5f, hover ? Pal.Accent : Pal.PanelBd);
+        Raylib.DrawRectangle((int)r.X, (int)r.Y, 4, (int)r.Height, hover ? Pal.Accent : Pal.Friend);
+
+        string name = PerkDef.Name(p);
+        Raylib.DrawText(name, (int)(r.X + r.Width / 2 - Raylib.MeasureText(name, 22) / 2), (int)r.Y + 28, 22,
+                        hover ? Pal.Accent : Pal.Txt);
+        // word-wrapped one-line description (kept short by design)
+        string desc = PerkDef.Desc(p);
+        Raylib.DrawText(desc, (int)(r.X + r.Width / 2 - Raylib.MeasureText(desc, 14) / 2), (int)r.Y + 78, 14, Pal.TxtDim);
+
+        Raylib.DrawText("SELECT", (int)(r.X + r.Width / 2 - Raylib.MeasureText("SELECT", 13) / 2),
+                        (int)(r.Y + r.Height - 32), 13, hover ? Pal.Accent : Pal.TxtDim);
+    }
+
     static void DrawSquadRow(Game g, Unit u, int x, int y, int w)
     {
         Raylib.DrawRectangleRounded(new Rectangle(x, y, w, 40), 0.2f, 6, Pal.RGBA(13, 19, 27));
@@ -386,6 +432,13 @@ public static class Hud
 
         Raylib.DrawText(u.Name, x + 14, y + 5, 18, Pal.Txt);
         Raylib.DrawText($"{u.RankName}  -  {u.Cls}", x + 14, y + 24, 11, Pal.Accent);
+
+        // earned perks (compact 3-letter codes)
+        if (u.Perks.Count > 0)
+        {
+            string codes = string.Join(" ", u.Perks.ConvertAll(PerkDef.Code));
+            Raylib.DrawText(codes, x + 220, y + 27, 9, Pal.Good);
+        }
 
         // HP bar
         var bar = new Rectangle(x + 220, y + 13, 150, 12);

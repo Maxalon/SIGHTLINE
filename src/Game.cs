@@ -167,6 +167,14 @@ public class Game
 
     void NextMission() => SetupMission(_run.Mission + 1);
 
+    /// Harness hook (screenshot only): force a barracks rank-up perk choice.
+    public void DebugBarracksPerk()
+    {
+        if (_run.Squad.Count > 0) _run.Squad[0].Kills = 3;
+        _run.DebriefSurvivors();
+        Phase = Phase.Barracks;
+    }
+
     void EnterBarracks()
     {
         _run.Squad = AlivePlayers().Where(u => !u.IsVip).ToList();  // the VIP never joins the squad
@@ -238,7 +246,8 @@ public class Game
             w.OnOverwatch = false;
             w.ReactedThisTurn = true;
             w.Ammo--;
-            var res = Combat.Resolve(Grid, w, mover, -10); // reaction penalty
+            int reactMod = w.HasPerk(Perk.Reflexes) ? 100 : -10; // Reflexes: overwatch rarely misses
+            var res = Combat.Resolve(Grid, w, mover, reactMod);
             Fx.PopText(w.Pos + new Vector2(0, -30), "OVERWATCH", Pal.Accent, 18f);
             Audio.Play("over");
             var shot = new ShotAnim(w, mover, res, reaction: true);
@@ -311,7 +320,12 @@ public class Game
             case Phase.PlayerTurn: UpdatePlayer(); break;
             case Phase.EnemyTurn: UpdateEnemy(); break;
             case Phase.Barracks:
-                if (AutoPlay) NextMission(); else HandleOverlayClick();
+                if (_run.PendingPerks.Count > 0)        // resolve rank-up perk picks first
+                {
+                    if (AutoPlay) ChoosePerk(0); else HandlePerkClick();
+                }
+                else if (AutoPlay) NextMission();
+                else HandleOverlayClick();
                 break;
             case Phase.Win:
             case Phase.Lose: HandleOverlayClick(); break;
@@ -1024,6 +1038,26 @@ public class Game
             _aiIdx++;
             _aiStage = AiStage.PickNext;
         }
+    }
+
+    // ---------------- barracks perk choice ----------------
+    void ChoosePerk(int which)
+    {
+        if (_run.PendingPerks.Count == 0) return;
+        var off = _run.PendingPerks[0];
+        Perk p = which == 0 ? off.A : off.B;
+        Run.ApplyPerk(off.Unit, p);
+        _run.Report.Add($"{off.Unit.Name} gains {PerkDef.Name(p)}");
+        _run.PendingPerks.RemoveAt(0);
+        Audio.Play("select");
+    }
+
+    void HandlePerkClick()
+    {
+        if (!Raylib.IsMouseButtonPressed(MouseButton.Left)) return;
+        var m = Raylib.GetMousePosition();
+        if (Raylib.CheckCollisionPointRec(m, Hud.PerkBtnA)) ChoosePerk(0);
+        else if (Raylib.CheckCollisionPointRec(m, Hud.PerkBtnB)) ChoosePerk(1);
     }
 
     // ---------------- overlay click ----------------
