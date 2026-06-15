@@ -311,7 +311,10 @@ public class Game
         return foes.OrderBy(f => Util.TileDist(u.X, u.Y, f.X, f.Y)).FirstOrDefault();
     }
 
-    void Enqueue(Anim a, Team owner) { AnimOwner = owner; a.OnStart(this); _anims.Add(a); }
+    // Note: OnStart runs when the anim becomes active (see the advance loop), NOT at
+    // enqueue time — otherwise every queued step of a multi-tile path captures its
+    // _from at the original tile and the unit snaps back to the start each step.
+    void Enqueue(Anim a, Team owner) { AnimOwner = owner; _anims.Add(a); }
 
     // ---------------- combat events ----------------
     public void OnUnitEnteredTile(Unit mover)
@@ -332,7 +335,8 @@ public class Game
             Fx.PopText(w.Pos + new Vector2(0, -30), "OVERWATCH", Pal.Accent, 18f);
             Audio.Play("over");
             var shot = new ShotAnim(w, mover, res, reaction: true);
-            shot.OnStart(this);
+            // OnStart runs when this reaction becomes the active anim (Started is false),
+            // by which point the mover has settled on the reacted-to tile.
             _anims.Insert(Math.Min(insertAt, _anims.Count), shot);
             insertAt++;
             if (res.Hit && mover.Hp - res.Damage <= 0) break; // will die; stop further reactions
@@ -390,7 +394,7 @@ public class Game
         if (_anims.Count > 0)
         {
             var a = _anims[0];
-            if (!a.Started) { a.Started = true; }
+            if (!a.Started) { a.Started = true; a.OnStart(this); }
             if (a.Update(this, t)) _anims.RemoveAt(0);
             return;
         }
