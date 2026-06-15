@@ -216,8 +216,16 @@ seeds (mix of WIN/LOSE, no exceptions):
 - **UX:** squad roster strip, end-turn confirmation, mute indicator, threat
   preview (red pips on exposed reachable tiles while positioning), **camera
   zoom/pan** (wheel + middle-drag, C to reset), a **keyboard tile cursor**
-  (arrows/WASD + Space), and a **pause/settings menu** (Esc: audio, screen
+  (arrows/WASD + Space), and a **pause/settings menu** (Esc: display, audio, screen
   shake, threat-preview toggles, abandon run).
+- **Display settings** (`src/Display.cs`): the fixed 1280x800 game is rendered to a
+  letterboxed render-target scaled to the window, so it stays readable on big/4K
+  screens. Pause menu offers **FULLSCREEN** (key **F**) + a **WINDOW** size cycle
+  (1280x800 → 3200x2000); the window is also free-resizable. Mouse is mapped back to
+  virtual space via `SetMouseOffset/Scale`. At native 1280x800 windowed it draws
+  directly (keeps MSAA). Settings persist to `display.json` in the user-data dir.
+  Disabled in the headless harness (`Display.Init(!(shot||autoplay))`) so screenshots
+  stay byte-identical.
 - **Recruits:** the barracks backfills empty squad slots with fresh rookies
   (`Mission.MakeRecruit`, `Run.DebriefSurvivors`) so casualties don't death-spiral.
 - **Perk-based promotions:** each rank-up is a pick-1-of-2 perk choice in the
@@ -462,6 +470,13 @@ Before stopping:
 4. Tell the human to open a fresh session (they'll send only `.`).
 
 ### WIP NOTES
+
+> **DISPLAY SETTINGS (latest).** `src/Display.cs` renders the fixed 1280x800 game to a
+> letterboxed render-target scaled to the window (essential on 4K). Pause menu adds
+> FULLSCREEN (key F) + a WINDOW size cycle; window is free-resizable; mouse mapped via
+> `SetMouseOffset/Scale`; native size draws directly (keeps MSAA); settings persist to
+> `display.json`. Off in the harness so screenshots are unchanged. Program wires it via
+> `Display.Init/UpdateMouse/RenderFrame/Shutdown`.
 
 > **PLAYTEST FIXES (latest).** (1) **Diagonal cover** — only the **point-blank
 > (adjacent) diagonal** flanks (slips past the corner → ~100% at that range); a diagonal

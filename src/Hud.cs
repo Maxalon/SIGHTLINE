@@ -23,7 +23,7 @@ public static class Hud
     public static Rectangle EndTurnRect;
     public static UiButton[] ActionButtons = Array.Empty<UiButton>();
     public static System.Collections.Generic.List<(Rectangle rect, Unit unit)> RosterChips = new();
-    public static Rectangle PauseResume, PauseMute, PauseShake, PauseThreat, PauseAbandon;
+    public static Rectangle PauseResume, PauseMute, PauseShake, PauseThreat, PauseFullscreen, PauseWindow, PauseAbandon;
     public static Rectangle PerkBtnA, PerkBtnB, PerkTagBtn;
     public static Rectangle[] MissionCards = new Rectangle[3];
     public static Rectangle[] ShopBtns = new Rectangle[Game.ShopName.Length];
@@ -79,22 +79,26 @@ public static class Hud
     static void DrawPause(Game g)
     {
         Raylib.DrawRectangle(0, 0, Cfg.ScreenW, Cfg.ScreenH, Raylib.Fade(Pal.RGBA(5, 8, 11), 0.82f));
-        int w = 440, h = 396;
+        int w = 440, h = 504;
         int x = Cfg.ScreenW / 2 - w / 2, y = Cfg.ScreenH / 2 - h / 2;
         var card = new Rectangle(x, y, w, h);
         Raylib.DrawRectangleRounded(card, 0.05f, 8, Pal.Panel);
         Raylib.DrawRectangleLinesEx(card, 1.5f, Pal.PanelBd);
 
-        Raylib.DrawText("PAUSED", x + w / 2 - Raylib.MeasureText("PAUSED", 40) / 2, y + 26, 40, Pal.Friend);
+        Raylib.DrawText("PAUSED", x + w / 2 - Raylib.MeasureText("PAUSED", 40) / 2, y + 22, 40, Pal.Friend);
 
-        int bw = 320, bh = 42, bx = x + w / 2 - bw / 2, by = y + 96, gap = 12;
-        PauseResume  = new Rectangle(bx, by, bw, bh); by += bh + gap;
-        PauseMute    = new Rectangle(bx, by, bw, bh); by += bh + gap;
-        PauseShake   = new Rectangle(bx, by, bw, bh); by += bh + gap;
-        PauseThreat  = new Rectangle(bx, by, bw, bh); by += bh + gap;
-        PauseAbandon = new Rectangle(bx, by, bw, bh);
+        int bw = 320, bh = 42, bx = x + w / 2 - bw / 2, by = y + 84, gap = 11;
+        PauseResume     = new Rectangle(bx, by, bw, bh); by += bh + gap;
+        PauseFullscreen = new Rectangle(bx, by, bw, bh); by += bh + gap;
+        PauseWindow     = new Rectangle(bx, by, bw, bh); by += bh + gap;
+        PauseMute       = new Rectangle(bx, by, bw, bh); by += bh + gap;
+        PauseShake      = new Rectangle(bx, by, bw, bh); by += bh + gap;
+        PauseThreat     = new Rectangle(bx, by, bw, bh); by += bh + gap;
+        PauseAbandon    = new Rectangle(bx, by, bw, bh);
 
         DrawButtonRect(PauseResume, "RESUME", "ESC", true, false, Pal.Friend);
+        DrawButtonRect(PauseFullscreen, Display.Fullscreen ? "FULLSCREEN: ON" : "FULLSCREEN: OFF", "F", true, !Display.Fullscreen, Pal.Accent);
+        DrawButtonRect(PauseWindow, "WINDOW: " + Display.SizeLabel, "", true, false, Pal.Accent);
         DrawButtonRect(PauseMute, Audio.Enabled ? "AUDIO: ON" : "AUDIO: OFF", "M", true, !Audio.Enabled, Pal.Accent);
         DrawButtonRect(PauseShake, g.Fx.ShakeOn ? "SCREEN SHAKE: ON" : "SCREEN SHAKE: OFF", "", true, !g.Fx.ShakeOn, Pal.Accent);
         DrawButtonRect(PauseThreat, g.ShowThreatPref ? "THREAT PREVIEW: ON" : "THREAT PREVIEW: OFF", "", true, !g.ShowThreatPref, Pal.Accent);
