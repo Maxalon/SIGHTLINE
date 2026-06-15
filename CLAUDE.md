@@ -138,10 +138,12 @@ docs/screenshot.png    README image
 - Hit% = aim + weapon.AimBonus + weapon.RangeMod(dist) − cover.Defense
   (− hunker), clamped 3..95. Cover: low −20 / high −40. Flanked = had adjacent
   cover but not protecting from this angle → exposed (+35 crit). `Grid.GetCover`:
-  for a dominant-axis attack the facing side covers; for a **pure diagonal** a shot
-  slips past a single corner, so the defender is only covered by a TRUE corner (cover
-  on BOTH facing sides, level = the weaker), else flanked. High ground also negates
-  the target's LOW cover (see elevation).
+  for a dominant-axis (cardinal) attack the facing side covers fully. For a **diagonal**
+  attack: a TRUE corner (cover on BOTH facing sides) = full cover (weaker level);
+  a single facing-side cover = **half cover at range** (`CoverInfo.Partial` → ½ Defense,
+  not flanked, `ShotOdds.Partial`/"~ PARTIAL COVER") but **no cover when adjacent**
+  (point-blank diagonal slips past the corner → flank). High ground also negates the
+  target's LOW cover (see elevation). Verified end-to-end by `SIGHTLINE_COMBATTEST`.
 - Each `WeaponKind` has its own `RangeMod` curve + `MaxRange` + clip + crit base.
 
 ---
@@ -461,10 +463,11 @@ Before stopping:
 
 ### WIP NOTES
 
-> **PLAYTEST FIXES (latest).** (1) **Diagonal flanking** — `Grid.GetCover` no longer
-> lets a single perpendicular cover block protect against a pure-diagonal shot (it slips
-> past the corner); only a true corner (cover on both facing sides) protects. Rewards
-> corner flanking; verified by `SIGHTLINE_COMBATTEST` diagonal cases. (2) **Action-button
+> **PLAYTEST FIXES (latest).** (1) **Diagonal cover** — only the **point-blank
+> (adjacent) diagonal** flanks (slips past the corner → ~100% at that range); a diagonal
+> at range keeps **half** the cover bonus (`CoverInfo.Partial`, still partly obscured);
+> a true corner (cover on both facing sides) keeps full cover. Verified by
+> `SIGHTLINE_COMBATTEST` cases A-E. (2) **Action-button
 > hover help** — hovering FIRE/GRENADE/abilities/etc. shows a tooltip explaining the
 > action (`Hud.DrawActionHelp`/`ActionDesc`, `Unit.AbilityDesc`); `SIGHTLINE_HELP` hook
 > parks the cursor on the ability button for screenshots.
