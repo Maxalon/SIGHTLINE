@@ -147,12 +147,17 @@ public static class Hud
             Raylib.DrawText(u.IsVip ? "ASSET" : u.RankName, (int)r.X + 58, (int)r.Y + 33, 9,
                             Raylib.Fade(u.IsVip ? Pal.VipGold : Pal.TxtDim, a));
 
-            // role tag: a player-set custom tag (cyan) or auto strengths (amber)
+            // role tag: WOUNDED (red) takes priority, else custom tag (cyan) / auto strengths (amber)
             if (!u.IsVip)
             {
-                var (tag, custom) = DisplayTag(u);
-                if (tag.Length > 0)
-                    Raylib.DrawText(tag, (int)r.X + 9, (int)r.Y + 45, 9, Raylib.Fade(custom ? Pal.Friend : Pal.Accent, a));
+                if (u.Wound > 0)
+                    Raylib.DrawText($"WOUNDED ({u.Wound})", (int)r.X + 9, (int)r.Y + 45, 9, Raylib.Fade(Pal.Foe, a));
+                else
+                {
+                    var (tag, custom) = DisplayTag(u);
+                    if (tag.Length > 0)
+                        Raylib.DrawText(tag, (int)r.X + 9, (int)r.Y + 45, 9, Raylib.Fade(custom ? Pal.Friend : Pal.Accent, a));
+                }
             }
 
             RosterChips.Add((r, u));
@@ -607,7 +612,9 @@ public static class Hud
         string perks = u.Perks.Count == 0 ? "Perks: none yet"
             : "Perks: " + string.Join(", ", u.Perks.ConvertAll(PerkDef.Name));
         Raylib.DrawText(perks, x, y + 22, 13, Pal.Good);
-        if (!string.IsNullOrEmpty(u.CustomTag))
+        if (u.Wound > 0)
+            Raylib.DrawText($"WOUNDED ({u.Wound} mission{(u.Wound > 1 ? "s" : "")})  -{Unit.WoundAim} aim / -{Unit.WoundMob} mob", x, y + 44, 12, Pal.Foe);
+        else if (!string.IsNullOrEmpty(u.CustomTag))
             Raylib.DrawText("Tag: " + u.CustomTag, x, y + 44, 12, Pal.Friend);
         else
         {

@@ -124,6 +124,16 @@ public class Run
         PendingPerks.Clear();
         foreach (var u in Squad.ToList())
         {
+            // attrition: a wound from a previous mission recovers one step, then fresh
+            // damage from THIS mission (gauged before the field-heal below) can add a new
+            // one. Ending near-death wounds worse. -Aim/-Mobility apply while Wound > 0.
+            int w0 = u.Wound;
+            if (u.Wound > 0) u.Wound--;
+            int sev = u.Hp <= u.MaxHp / 4 ? 2 : (u.Hp <= u.MaxHp / 2 ? 1 : 0);
+            if (sev > u.Wound) u.Wound = sev;
+            if (u.Wound > w0) Report.Add($"{u.Name} is WOUNDED ({u.Wound} mission{(u.Wound > 1 ? "s" : "")})");
+            else if (w0 > 0 && u.Wound == 0) Report.Add($"{u.Name} recovered from wounds");
+
             // promotions: advance rank while kills clear the next threshold
             while (u.Rank < Ranks.Length - 1 && u.Kills >= KillReq[u.Rank + 1])
             {

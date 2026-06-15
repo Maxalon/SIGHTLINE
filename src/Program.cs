@@ -32,6 +32,11 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_WOUNDTEST") == "1")
+        {
+            Console.WriteLine(WoundTest());
+            return;
+        }
         // SIGHTLINE_MISSION=<n> : start the harness on mission n (verify Hack/Evac maps).
         int startMission = int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_MISSION"), out int sm) ? sm : 1;
 
@@ -62,6 +67,7 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CARDS") == "1") game.DebugDeployCards();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_SHOP") == "1") game.DebugShop();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_TAGEDIT") == "1") game.DebugTagEditor();
+        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_WOUND") == "1") game.DebugWound();
         bool helpShot = shot && Environment.GetEnvironmentVariable("SIGHTLINE_HELP") == "1";  // hover the ability button
         int frame = 0;
         const int autoCap = 20000;
@@ -96,5 +102,42 @@ public static class Program
         Display.Shutdown();
         Audio.Shutdown();
         Raylib.CloseWindow();
+    }
+
+    // SIGHTLINE_WOUNDTEST: a survivor that ends a mission badly hurt carries a Wound
+    // (−Aim/−Mobility), which decays over missions and is cleared by a medkit. Pure
+    // Run logic — no window needed.
+    static string WoundTest()
+    {
+        var fails = new System.Collections.Generic.List<string>();
+        var r = new Run(); r.Start();
+        var u = r.Squad[0];
+        int baseBudget = u.MoveBudget;
+
+        // (1) end a mission nearly downed -> heavy wound
+        u.Hp = 1;
+        r.DebriefSurvivors();
+        if (u.Wound <= 0) fails.Add("noWoundAfterNearDeath");
+        if (u.MoveBudget >= baseBudget) fails.Add("noMobilityPenalty");
+        var g = new Grid();
+        var atk = new Unit { Aim = 65, Weapon = Weapon.Make(WeaponKind.Rifle) };
+        var def = new Unit { Aim = 65, Weapon = Weapon.Make(WeaponKind.Rifle), X = 3, Y = 0, Hp = 6, MaxHp = 6 };
+        atk.X = 0; atk.Y = 0; atk.Wound = 0; int healthyHit = Combat.ComputeOdds(g, atk, def).HitChance;
+        atk.Wound = 1; int woundedHit = Combat.ComputeOdds(g, atk, def).HitChance;
+        if (woundedHit >= healthyHit) fails.Add("noAimPenalty");
+
+        // (2) wound decays over healthy missions
+        int w1 = u.Wound;
+        u.Hp = u.MaxHp;            // a clean mission
+        r.DebriefSurvivors();
+        if (u.Wound >= w1) fails.Add("woundDidNotDecay");
+
+        // (3) heal it to full and run clean missions until it clears
+        for (int i = 0; i < 4 && u.Wound > 0; i++) { u.Hp = u.MaxHp; r.DebriefSurvivors(); }
+        if (u.Wound != 0) fails.Add("woundNeverCleared");
+
+        return fails.Count == 0
+            ? "WOUNDTEST: PASS (wound assigned, penalises aim+mobility, decays, clears)"
+            : "WOUNDTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 }

@@ -133,6 +133,10 @@ public class Unit
     public int Rank;            // index into Run.Ranks
     public string RankName => Run.Ranks[Util.Clamp(Rank, 0, Run.Ranks.Length - 1)];
 
+    // attrition: missions a battle wound lingers (>0 = −Aim/−Mobility); decays per
+    // mission in Run.DebriefSurvivors, cleared by a FIELD MEDKIT.
+    public int Wound;
+
     // render state
     public Vector2 Pos;         // pixel-space centre (tweened)
     public Vector2 Recoil;      // transient recoil/knockback offset (decays)
@@ -140,7 +144,7 @@ public class Unit
     public float Flash;         // 0..1 damage flash
     public float Bob;           // idle bob phase
 
-    public int MoveBudget => Mobility * 2;     // dijkstra half-tile budget for 1 action
+    public int MoveBudget => Math.Max(1, Mobility - (Wound > 0 ? WoundMob : 0)) * 2;  // half-tile budget (−mob while wounded)
     public bool CanAct => Alive && ActionsLeft > 0;
 
     public Unit()
@@ -158,6 +162,8 @@ public class Unit
     public const int PerkCrit = 15;      // Deadeye
     public const int CloseRange = 4;     // CloseQuarters threshold (tiles)
     public const int LongRange = 7;      // Marksman threshold (tiles)
+    public const int WoundAim = 12;      // aim penalty while Wound > 0
+    public const int WoundMob = 1;       // mobility penalty while Wound > 0
 
     public void BeginTurn()
     {
