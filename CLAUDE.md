@@ -169,7 +169,8 @@ seeds (mix of WIN/LOSE, no exceptions):
 - **Game-feel pass:** hit-stop on impacts/kills, camera zoom-punch on kills,
   weapon recoil + target knockback.
 - **Campaign meta-loop:** 6 escalating missions, one persistent squad, kills→
-  promotions (+Aim/+HP/+Mobility), between-mission barracks debrief + field-heal.
+  promotions, between-mission barracks debrief + field-heal, and a **deployment
+  choice** (RECON/STANDARD/ONSLAUGHT cards: objective + risk/reward) each mission.
 - **Grenades:** AoE that ignores cover, hits both teams, destroys low cover
   (key 4, 1 charge/mission) with range/blast/arc preview. The enemy AI also
   frags clustered/covered soldiers (from mission 2; never hits its own).
@@ -369,11 +370,16 @@ the player meaningful long-game decisions. Ordered by impact:
       a larger orange figure with a ring + name/rage tag (`Pal.Elite`). A
       **Medic** archetype is still open (would need an enemy heal action). Screenshot
       hook `SIGHTLINE_WAKE` reveals dormant pods.
-- [ ] **C. Strategic between-mission layer.** Turn the barracks into a real meta
-      node: **choose the next mission** from 2-3 cards (objective + risk/reward +
-      modifier), and spend a light resource (intel/supplies earned from kills/secondary
-      objectives) on squad upgrades or targeted recruits. This is the actual
-      "run-to-run" depth the design pillars call for.
+- [x] **C. Strategic between-mission layer.** DONE (choice + reward; currency/shop
+      still open). The barracks now ends with **3 deployment cards** (`Run.Offers` /
+      `MissionCard`, `Hud.DrawDeployCard`, `Game.ChooseCard`): RECON (other objective,
+      lighter force, +full heal), STANDARD (rotation objective, normal), ONSLAUGHT
+      (other objective, heavier force, +bonus perk). The pick sets the next mission's
+      **objective + difficulty** (`MissionCard.EnemyDelta/StatDelta` thread into
+      `Mission.Build`/`SpawnEnemies`); the cleared card's reward is applied in
+      `EnterBarracks` (heal squad / `Run.AddBonusPerk`). `Run.ObjectiveFor` is the
+      STANDARD baseline. Autopilot picks card 0. Still TODO: a persistent
+      intel/supply currency + a spend screen (recruits/gear). Hook `SIGHTLINE_CARDS`.
 - [ ] **D. Procedural music + ambience.** Audio is SFX-only. A synthesised, layered
       ambient/combat track (allowed: procedural only) would lift "feels good"
       enormously. Build on `src/Audio.cs` (it already synth's PCM in memory).

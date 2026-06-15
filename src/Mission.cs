@@ -24,7 +24,8 @@ public static class Mission
     /// Lay out a mission: regenerate terrain, place the (persistent) players,
     /// and spawn a hostile force scaled by missionNum.
     public static void Build(Grid grid, List<Unit> players, List<Unit> enemies, int missionNum,
-                             List<(int x, int y)> evac = null, (int x, int y)? terminal = null)
+                             List<(int x, int y)> evac = null, (int x, int y)? terminal = null,
+                             int enemyDelta = 0, int statDelta = 0)
     {
         enemies.Clear();
         for (int x = 0; x < grid.W; x++)
@@ -51,7 +52,7 @@ public static class Mission
         }
 
         var evacSet = new HashSet<(int, int)>(evac ?? new List<(int, int)>());
-        SpawnEnemies(grid, enemies, missionNum, evacSet);
+        SpawnEnemies(grid, enemies, missionNum, evacSet, enemyDelta, statDelta);
 
         var occupied = new HashSet<(int, int)>();
         foreach (var u in players) occupied.Add((u.X, u.Y));
@@ -145,10 +146,11 @@ public static class Mission
         return true;
     }
 
-    static void SpawnEnemies(Grid grid, List<Unit> enemies, int n, HashSet<(int, int)> evac)
+    static void SpawnEnemies(Grid grid, List<Unit> enemies, int n, HashSet<(int, int)> evac,
+                             int enemyDelta = 0, int statDelta = 0)
     {
-        int count = Math.Min(4 + n, 9);
-        int bump = n - 1;                 // stat growth per mission
+        int count = Math.Clamp(4 + n + enemyDelta, 3, 10);   // deployment-card modifier
+        int bump = Math.Max(0, n - 1 + statDelta);           // stat growth per mission +/- card
         var rows = new List<int>();
         for (int y = 0; y < grid.H; y++) rows.Add(y);
         // shuffle rows

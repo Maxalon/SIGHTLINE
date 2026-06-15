@@ -25,6 +25,7 @@ public static class Hud
     public static System.Collections.Generic.List<(Rectangle rect, Unit unit)> RosterChips = new();
     public static Rectangle PauseResume, PauseMute, PauseShake, PauseThreat, PauseAbandon;
     public static Rectangle PerkBtnA, PerkBtnB;
+    public static Rectangle[] MissionCards = new Rectangle[3];
 
     public static void Draw(Game g)
     {
@@ -339,7 +340,7 @@ public static class Hud
 
         int w = 700;
         int rows = squad.Count;
-        int h = 150 + rows * 46 + Math.Min(run.Report.Count, 5) * 22 + 90;
+        int h = 150 + rows * 46 + Math.Min(run.Report.Count, 5) * 22 + 220;
         int x = Cfg.ScreenW / 2 - w / 2;
         int y = Cfg.ScreenH / 2 - h / 2;
         var card = new Rectangle(x, y, w, h);
@@ -375,10 +376,38 @@ public static class Hud
             Raylib.DrawText(kia, x + 36, ry, 13, Pal.Foe);
         }
 
-        OverlayBtn = new Rectangle(x + w / 2 - 130, y + h - 64, 260, 46);
-        bool hover = Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), OverlayBtn);
-        Raylib.DrawRectangleRounded(OverlayBtn, 0.3f, 8, hover ? Pal.RGBA(92, 200, 251) : Pal.Friend);
-        CenterText($"DEPLOY  >  MISSION {run.Mission + 1}", OverlayBtn, 16, Pal.RGBA(3, 18, 26));
+        // next-mission deployment choice
+        string pick = $"SELECT DEPLOYMENT  >  MISSION {run.Mission + 1}";
+        Raylib.DrawText(pick, x + w / 2 - Raylib.MeasureText(pick, 15) / 2, y + h - 158, 15, Pal.Accent);
+        int cw = (w - 60 - 32) / 3, ch = 118, cy = y + h - 134, gap = 16;
+        for (int i = 0; i < run.Offers.Count && i < 3; i++)
+        {
+            MissionCards[i] = new Rectangle(x + 30 + i * (cw + gap), cy, cw, ch);
+            DrawDeployCard(MissionCards[i], run.Offers[i]);
+        }
+    }
+
+    static string ObjName(Objective o) => o switch
+    {
+        Objective.Hack => "HACK", Objective.Evac => "EXTRACT", Objective.Escort => "ESCORT VIP", _ => "ELIMINATE",
+    };
+
+    static void DrawDeployCard(Rectangle r, MissionCard c)
+    {
+        bool hover = Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), r);
+        Color tint = c.ModName == "RECON" ? Pal.Good : (c.ModName == "ONSLAUGHT" ? Pal.Foe : Pal.Friend);
+        Raylib.DrawRectangleRounded(r, 0.1f, 6, hover ? Pal.RGBA(24, 34, 46) : Pal.RGBA(14, 20, 28));
+        Raylib.DrawRectangleLinesEx(r, 1.5f, hover ? tint : Pal.PanelBd);
+        Raylib.DrawRectangle((int)r.X, (int)r.Y, 4, (int)r.Height, tint);
+
+        Raylib.DrawText(c.ModName, (int)r.X + 12, (int)r.Y + 10, 17, tint);
+        Raylib.DrawText(ObjName(c.Objective), (int)r.X + 12, (int)r.Y + 34, 13, Pal.Txt);
+        string force = c.EnemyDelta > 0 ? "Heavy resistance" : (c.EnemyDelta < 0 ? "Light resistance" : "Standard force");
+        Raylib.DrawText(force, (int)r.X + 12, (int)r.Y + 56, 11, Pal.TxtDim);
+        if (c.Reward != RewardKind.None)
+            Raylib.DrawText("+ " + c.RewardText, (int)r.X + 12, (int)r.Y + 74, 11, Pal.Accent);
+        Raylib.DrawText("DEPLOY", (int)(r.X + r.Width / 2 - Raylib.MeasureText("DEPLOY", 12) / 2),
+                        (int)(r.Y + r.Height - 22), 12, hover ? tint : Pal.TxtDim);
     }
 
     // Rank-up perk choice: the soldier + two perk cards (pick one).
