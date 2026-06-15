@@ -75,7 +75,7 @@ public static class Hud
         int y = 70;
         foreach (var u in g.AlivePlayers())
         {
-            var r = new Rectangle(8, y, 120, 50);
+            var r = new Rectangle(8, y, 132, 58);
             bool sel = g.Selected == u;
             bool spent = g.Phase == Phase.PlayerTurn && !u.CanAct;
             float a = spent ? 0.5f : 1f;
@@ -108,8 +108,19 @@ public static class Hud
             Raylib.DrawText(u.IsVip ? "ASSET" : u.RankName, (int)r.X + 58, (int)r.Y + 33, 9,
                             Raylib.Fade(u.IsVip ? Pal.VipGold : Pal.TxtDim, a));
 
+            // strength tags (what this soldier is good at), so play-to-strength is legible
+            if (!u.IsVip)
+            {
+                var sp = Specialties(u);
+                if (sp.Count > 0)
+                {
+                    string tags = string.Join(" ", sp.GetRange(0, Math.Min(2, sp.Count)));
+                    Raylib.DrawText(tags, (int)r.X + 9, (int)r.Y + 45, 9, Raylib.Fade(Pal.Accent, a));
+                }
+            }
+
             RosterChips.Add((r, u));
-            y += 56;
+            y += 64;
         }
     }
 
@@ -399,8 +410,9 @@ public static class Hud
         Raylib.DrawRectangle(0, 0, Cfg.ScreenW, Cfg.ScreenH, Raylib.Fade(Pal.RGBA(5, 8, 11), 0.85f));
 
         int items = Game.ShopName.Length;
-        int ih = 72, gap = 10;
-        int w = 560, h = 104 + items * (ih + gap) + 60;
+        int ih = 80, gap = 10;
+        int squadH = 40;
+        int w = 560, h = 104 + squadH + items * (ih + gap) + 60;
         int x = Cfg.ScreenW / 2 - w / 2, y = Cfg.ScreenH / 2 - h / 2;
         var card = new Rectangle(x, y, w, h);
         Raylib.DrawRectangleRounded(card, 0.04f, 8, Pal.Panel);
@@ -411,7 +423,10 @@ public static class Hud
         string intel = $"INTEL AVAILABLE: {run.Intel}";
         Raylib.DrawText(intel, x + w / 2 - Raylib.MeasureText(intel, 16) / 2, y + 66, 16, Pal.Good);
 
-        int iy = y + 104;
+        // squad HP strip so the player can judge whether a heal/stim is worth it
+        DrawSquadHpStrip(run.Squad, x + 30, y + 96, w - 60);
+
+        int iy = y + 104 + squadH;
         for (int i = 0; i < items; i++)
         {
             var r = new Rectangle(x + 30, iy, w - 60, ih);
@@ -421,15 +436,16 @@ public static class Hud
             Raylib.DrawRectangleRounded(r, 0.1f, 6, hover ? Pal.RGBA(24, 34, 46) : Pal.RGBA(14, 20, 28));
             Raylib.DrawRectangleLinesEx(r, 1.5f, can ? (hover ? Pal.Accent : Pal.PanelBd) : Pal.RGBA(40, 46, 54));
             Color txt = can ? Pal.Txt : Pal.TxtDim;
-            Raylib.DrawText(Game.ShopName[i], (int)r.X + 14, (int)r.Y + 12, 18, txt);
-            Raylib.DrawText(Game.ShopDesc[i], (int)r.X + 14, (int)r.Y + 40, 12, Pal.TxtDim);
+            Raylib.DrawText(Game.ShopName[i], (int)r.X + 14, (int)r.Y + 10, 18, txt);
+            Raylib.DrawText(Game.ShopDesc[i], (int)r.X + 14, (int)r.Y + 35, 12, Pal.TxtDim);
+            Raylib.DrawText(g.ShopEffect(i), (int)r.X + 14, (int)r.Y + 55, 12, can ? Pal.Accent : Pal.TxtDim);  // concrete effect
             string cost = $"{Game.ShopCost[i]} INTEL";
             Color cc = run.Intel >= Game.ShopCost[i] ? Pal.Good : Pal.Foe;
-            Raylib.DrawText(cost, (int)(r.X + r.Width - Raylib.MeasureText(cost, 16) - 14), (int)r.Y + 14, 16, cc);
+            Raylib.DrawText(cost, (int)(r.X + r.Width - Raylib.MeasureText(cost, 16) - 14), (int)r.Y + 12, 16, cc);
             if (!can)
-                Raylib.DrawText("- unavailable -", (int)(r.X + r.Width - Raylib.MeasureText("- unavailable -", 11) - 14), (int)r.Y + 44, 11, Pal.TxtDim);
+                Raylib.DrawText("- unavailable -", (int)(r.X + r.Width - Raylib.MeasureText("- unavailable -", 11) - 14), (int)r.Y + 52, 11, Pal.TxtDim);
             else
-                Raylib.DrawText("[ BUY ]", (int)(r.X + r.Width - Raylib.MeasureText("[ BUY ]", 12) - 14), (int)r.Y + 46, 12, Pal.Accent);
+                Raylib.DrawText("[ BUY ]", (int)(r.X + r.Width - Raylib.MeasureText("[ BUY ]", 12) - 14), (int)r.Y + 54, 12, Pal.Accent);
             iy += ih + gap;
         }
 
@@ -466,18 +482,24 @@ public static class Hud
     static void DrawPerkChooser(Game g, PerkOffer off)
     {
         Raylib.DrawRectangle(0, 0, Cfg.ScreenW, Cfg.ScreenH, Raylib.Fade(Pal.RGBA(5, 8, 11), 0.88f));
-        int w = 660, h = 360;
+        int w = 660, h = 440;
         int x = Cfg.ScreenW / 2 - w / 2, y = Cfg.ScreenH / 2 - h / 2;
         var card = new Rectangle(x, y, w, h);
         Raylib.DrawRectangleRounded(card, 0.04f, 8, Pal.Panel);
         Raylib.DrawRectangleLinesEx(card, 1.5f, Pal.PanelBd);
 
         string title = "PROMOTION";
-        Raylib.DrawText(title, x + w / 2 - Raylib.MeasureText(title, 36) / 2, y + 24, 36, Pal.Accent);
-        string sub = $"{off.Unit.Name}  -  {off.Unit.RankName}  -  CHOOSE A PERK";
-        Raylib.DrawText(sub, x + w / 2 - Raylib.MeasureText(sub, 14) / 2, y + 68, 14, Pal.TxtDim);
+        Raylib.DrawText(title, x + w / 2 - Raylib.MeasureText(title, 36) / 2, y + 22, 36, Pal.Accent);
+        string sub = $"{off.Unit.Name}  -  {off.Unit.RankName}  -  {off.Unit.Cls}  -  CHOOSE A PERK";
+        Raylib.DrawText(sub, x + w / 2 - Raylib.MeasureText(sub, 14) / 2, y + 64, 14, Pal.TxtDim);
 
-        int cw = (w - 60) / 2, ch = 170, cy = y + 100, gap = 20;
+        // full dossier so perks can be chosen for synergy
+        var dossier = new Rectangle(x + 20, y + 88, w - 40, 72);
+        Raylib.DrawRectangleRounded(dossier, 0.08f, 6, Pal.RGBA(13, 19, 27));
+        Raylib.DrawRectangleLinesEx(dossier, 1f, Pal.PanelBd);
+        DrawDossier(off.Unit, x + 34, y + 98, w - 68);
+
+        int cw = (w - 60) / 2, ch = 170, cy = y + 172, gap = 20;
         PerkBtnA = new Rectangle(x + 20, cy, cw, ch);
         PerkBtnB = new Rectangle(x + 20 + cw + gap, cy, cw, ch);
         DrawPerkCard(PerkBtnA, off.A);
@@ -485,7 +507,66 @@ public static class Hud
 
         int left = g.RunState.PendingPerks.Count - 1;
         string foot = left > 0 ? $"{left} more promotion(s) to assign" : "Click a perk to continue";
-        Raylib.DrawText(foot, x + w / 2 - Raylib.MeasureText(foot, 12) / 2, y + h - 30, 12, Pal.TxtDim);
+        Raylib.DrawText(foot, x + w / 2 - Raylib.MeasureText(foot, 12) / 2, y + h - 26, 12, Pal.TxtDim);
+    }
+
+    /// A soldier's stat line + current perks + derived strengths (for decision screens).
+    static void DrawDossier(Unit u, int x, int y, int w)
+    {
+        string stats = $"HP {u.Hp}/{u.MaxHp}    AIM {u.Aim}    MOB {u.Mobility}    {u.Weapon.Name}    GREN {1 + u.BonusGrenades}/mission    {u.AbilityName}";
+        Raylib.DrawText(stats, x, y, 13, Pal.Txt);
+        string perks = u.Perks.Count == 0 ? "Perks: none yet"
+            : "Perks: " + string.Join(", ", u.Perks.ConvertAll(PerkDef.Name));
+        Raylib.DrawText(perks, x, y + 22, 13, Pal.Good);
+        var sp = Specialties(u);
+        if (sp.Count > 0)
+            Raylib.DrawText("Strengths: " + string.Join("  ", sp), x, y + 44, 12, Pal.Accent);
+    }
+
+    /// Derived strength tags from class/weapon/stats/perks, so the player knows what
+    /// each soldier is good at (in-round play and build planning).
+    public static System.Collections.Generic.List<string> Specialties(Unit u)
+    {
+        var t = new System.Collections.Generic.List<string>();
+        if (u.HasPerk(Perk.Reflexes)) t.Add("OVERWATCH");
+        if (u.HasPerk(Perk.Deadeye) || u.Aim >= 72) t.Add("SHARP");
+        if (u.HasPerk(Perk.LockOn)) t.Add("FLANKER");
+        if ((u.Weapon != null && (u.Weapon.Kind == WeaponKind.Shotgun || u.Weapon.Kind == WeaponKind.Smg)) || u.HasPerk(Perk.CloseQuarters)) t.Add("CLOSE");
+        if ((u.Weapon != null && u.Weapon.Kind == WeaponKind.Sniper) || u.HasPerk(Perk.Marksman)) t.Add("LONG");
+        if (u.HasPerk(Perk.Tank) || u.HasPerk(Perk.Hardened) || u.MaxHp >= 11) t.Add("TOUGH");
+        if (u.HasPerk(Perk.Sprinter) || u.Mobility >= 8) t.Add("FAST");
+        if (t.Count == 0)   // class-role fallback so every soldier reads with a strength
+            t.Add(u.Cls switch
+            {
+                "GUNNER" => "SUPPRESS",
+                "ASSAULT" => "ASSAULT",
+                "RANGER" => "CLOSE",
+                "SHARPSHOOTER" => "SHARP",
+                _ => "SOLDIER",
+            });
+        return t;
+    }
+
+    /// Compact HP-per-soldier row used on the shop screen.
+    static void DrawSquadHpStrip(System.Collections.Generic.List<Unit> squad, int x, int y, int w)
+    {
+        if (squad.Count == 0) return;
+        int cw = w / squad.Count;
+        for (int i = 0; i < squad.Count; i++)
+        {
+            var u = squad[i];
+            int cx = x + i * cw;
+            Raylib.DrawText(u.Name, cx, y, 11, Pal.Txt);
+            var bar = new Rectangle(cx, y + 15, cw - 14, 7);
+            Raylib.DrawRectangleRounded(bar, 0.5f, 4, Pal.RGBA(10, 15, 21));
+            float frac = u.MaxHp > 0 ? u.Hp / (float)u.MaxHp : 0;
+            if (frac > 0)
+            {
+                Color hc = frac > 0.5f ? Pal.Good : (frac > 0.25f ? Pal.Accent : Pal.Foe);
+                Raylib.DrawRectangleRounded(new Rectangle(bar.X, bar.Y, bar.Width * frac, bar.Height), 0.5f, 4, hc);
+            }
+            Raylib.DrawText($"{u.Hp}/{u.MaxHp}", cx, y + 25, 10, Pal.TxtDim);
+        }
     }
 
     static void DrawPerkCard(Rectangle r, Perk p)

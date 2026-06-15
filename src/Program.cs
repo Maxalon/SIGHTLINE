@@ -25,6 +25,13 @@ public static class Program
             Console.WriteLine(Combat.SelfTest());
             return;
         }
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_DEATHTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "deathtest");   // a Game/Audio-free path still needs tile math; window is tiny
+            Console.WriteLine(new Game().DeathConsequenceTest());
+            Raylib.CloseWindow();
+            return;
+        }
         // SIGHTLINE_MISSION=<n> : start the harness on mission n (verify Hack/Evac maps).
         int startMission = int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_MISSION"), out int sm) ? sm : 1;
 

@@ -457,6 +457,19 @@ Before stopping:
 
 ### WIP NOTES
 
+> **DECISION-SCREEN INFO + DEATH VERIFICATION (latest).** Added soldier visibility
+> where choices are made: the **shop** shows a squad HP strip + each item's concrete
+> effect (`Game.ShopTarget/ShopEffect`, e.g. "VEGA: 4 -> 8 HP (+4)"); the **perk
+> chooser** shows a full dossier (HP/AIM/MOB/weapon/grenades/ability + all current
+> perks + derived strengths, `Hud.DrawDossier`); the **in-round roster strip** shows
+> per-soldier strength tags (`Hud.Specialties`: OVERWATCH/SHARP/CLOSE/LONG/TOUGH/FAST
+> + a class-role fallback). Death mechanic was reported as "no consequence" but
+> `SIGHTLINE_DEATHTEST` PROVES it's not a bug: dead soldiers are permanently lost and
+> replaced by fresh rookies (losing rank/perks) — it only *felt* consequence-free
+> because the squad always auto-refills to 4 (intentional anti-death-spiral) and the
+> roster was hard to read. If harsher attrition is wanted, that's a deliberate design
+> change to `Run.DebriefSurvivors` backfill — ask first.
+
 > **LATEST SESSION SUMMARY (read this first).** All of Phase 1 (1-7) and Phase 2
 > A/B/C/E/F are DONE and on `main` (builds 0/0, autoplay clean, `SIGHTLINE_SAVETEST`
 > + `SIGHTLINE_COMBATTEST` both PASS). This session shipped 8 PRs: **E** run save/load
