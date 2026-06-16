@@ -96,6 +96,7 @@ public class ShotAnim : Anim
 
         if (Res.Hit)
         {
+            g.TryChipCover(A, D);                              // heavy weapons chew the target's cover (3.6)
             _impact = D.Pos;
             D.Hp -= Res.Damage;
             D.Flash = 1f;
@@ -184,16 +185,13 @@ public class GrenadeAnim : Anim
         g.Fx.Burst(_to, Pal.Accent, 36, 360f, 0.6f, 4.5f, true);
         g.Fx.Burst(_to, Pal.RGBA(120, 90, 60), 22, 200f, 0.8f, 5f);
 
-        // clear low cover in the blast (debris)
+        // chew up cover in the blast: a frag cracks high->low and clears low cover (3.6)
         for (int x = Tx - Radius; x <= Tx + Radius; x++)
             for (int y = Ty - Radius; y <= Ty + Radius; y++)
             {
                 if (!g.Grid.InBounds(x, y)) continue;
-                if (g.Grid.Tiles[x, y] == TileType.LowCover)
-                {
-                    g.Grid.Tiles[x, y] = TileType.Floor;
-                    g.Fx.Burst(Util.TileCenter(x, y), Pal.RGBA(90, 100, 116), 10, 150f, 0.6f, 4f);
-                }
+                var ch = g.Grid.DamageCover(x, y, Grid.HighCoverHp);   // 2 dmg: high->low, low->gone
+                if (ch != Grid.CoverHit.None) g.CoverHitFx(x, y, ch);
             }
 
         // damage every unit in radius (friendly fire included)
