@@ -484,12 +484,19 @@ public static class Renderer
             Raylib.DrawText(tag, (int)(p.X - Raylib.MeasureText(tag, 11) / 2), (int)(p.Y - 42), 11, Pal.Elite);
         }
 
-        // VIP marker: gold diamond + tag above the asset
+        // VIP / captive marker: diamond + tag above the asset
         if (vip)
         {
-            Raylib.DrawPoly(new Vector2(p.X, p.Y - 39), 4, 5.5f, 45f, Pal.VipGold);
+            bool caged = g.CaptiveLocked && u == g.Vip;
+            Color vc = caged ? Pal.RGBA(180, 184, 194) : Pal.VipGold;
+            Raylib.DrawPoly(new Vector2(p.X, p.Y - 39), 4, 5.5f, 45f, vc);
             Raylib.DrawPolyLinesEx(new Vector2(p.X, p.Y - 39), 4, 5.5f, 45f, 1.5f, Pal.Txt);
-            Raylib.DrawText("VIP", (int)(p.X - 9), (int)(p.Y - 53), 12, Pal.VipGold);
+            string vtag = caged ? "CAPTIVE" : (u.Name == "CAPTIVE" ? "FREED" : "VIP");
+            Raylib.DrawText(vtag, (int)(p.X - Raylib.MeasureText(vtag, 12) / 2), (int)(p.Y - 53), 12, vc);
+            if (caged)   // cage bars over the figure
+                for (int i = -1; i <= 1; i++)
+                    Raylib.DrawLineEx(new Vector2(p.X + i * 6, p.Y - 12), new Vector2(p.X + i * 6, p.Y + 12),
+                                      1.5f, Raylib.Fade(Pal.Txt, 0.6f));
         }
     }
 

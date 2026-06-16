@@ -202,6 +202,7 @@ public class GrenadeAnim : Anim
         foreach (var u in hit)
         {
             if (!u.Alive) continue;
+            if (u == g.Vip && g.CaptiveLocked) continue;   // the caged captive is invulnerable
             if (Util.ChebyDist(u.X, u.Y, Tx, Ty) > Radius) continue;
             if (u.Team == Team.Enemy && !u.Active) wokePods.Add(u.PodId);
             int dmg = Util.RandInt(3, 5);

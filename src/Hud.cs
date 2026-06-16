@@ -192,6 +192,7 @@ public static class Hud
             case Objective.Hack: objTxt = $"HACK {g.HackProgress}/{Game.HackRequired}"; objCol = Pal.Accent; break;
             case Objective.Sabotage: objTxt = $"SABOTAGE {g.SabotageBlown.Count}/{g.SabotageSites.Count}"; objCol = Pal.Foe; break;
             case Objective.Escort: objTxt = "ESCORT VIP"; objCol = Pal.VipGold; break;
+            case Objective.Rescue: objTxt = g.CaptiveLocked ? "RESCUE CAPTIVE" : "EXTRACT CAPTIVE"; objCol = Pal.VipGold; break;
             default: objTxt = "ELIMINATE"; objCol = Pal.TxtDim; break;
         }
         Raylib.DrawText(objTxt, 340, 19, 16, objCol);
@@ -667,7 +668,7 @@ public static class Hud
     static string ObjName(Objective o) => o switch
     {
         Objective.Hack => "HACK", Objective.Evac => "EXTRACT", Objective.Escort => "ESCORT VIP",
-        Objective.Sabotage => "SABOTAGE", _ => "ELIMINATE",
+        Objective.Sabotage => "SABOTAGE", Objective.Rescue => "RESCUE", _ => "ELIMINATE",
     };
 
     static void DrawDeployCard(Rectangle r, MissionCard c)

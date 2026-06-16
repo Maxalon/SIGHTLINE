@@ -85,8 +85,12 @@ public static class Program
         if (introShot) { var r = new Run(); r.Start(); r.Mission = 3; SaveGame.Save(r); }
         if ((shot || autoplay) && !introShot) game.StartMission(startMission);
         if (autoplay) game.AutoPlay = true;
-        // force an objective for verification (e.g. SIGHTLINE_OBJ=sabotage), shot or autoplay
-        if (Environment.GetEnvironmentVariable("SIGHTLINE_OBJ") == "sabotage") game.DebugForceObjective(Objective.Sabotage);
+        // force an objective for verification (e.g. SIGHTLINE_OBJ=sabotage|rescue), shot or autoplay
+        switch (Environment.GetEnvironmentVariable("SIGHTLINE_OBJ"))
+        {
+            case "sabotage": game.DebugForceObjective(Objective.Sabotage); break;
+            case "rescue": game.DebugForceObjective(Objective.Rescue); break;
+        }
         // screenshot-only hooks for verifying the camera + pause overlay
         if (shot && float.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_ZOOM"), out float z)) game.CamZoom = z;
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_PAUSE") == "1") game.Paused = true;
