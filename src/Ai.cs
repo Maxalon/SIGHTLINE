@@ -13,6 +13,7 @@ public class EnemyPlan
     public bool Grenade;          // lob a grenade instead of shooting
     public int GrenX, GrenY;      // grenade aim tile
     public Unit HealTarget;       // medic: mend this wounded ally instead of fighting
+    public (int x, int y)? SapTile; // sapper: demolish this player cover tile instead of shooting
 }
 
 /// Tactical decision-making for a single enemy. Greedy, but reads as competent:
@@ -51,6 +52,10 @@ public static class Ai
             if (d < nd) { nd = d; nearest = p; }
         }
         Unit vip = players.Find(p => p.IsVip);   // escort: hunt the asset
+
+        // SAPPER: the nearest covered soldier's frontal cover tile — the demolition target
+        (int x, int y)? sapTarget = null;
+        if (e.Cls == "SAPPER" && nearest != null) sapTarget = g.Grid.CoverTile(nearest.X, nearest.Y, e.X, e.Y);
 
         // MEDIC: prefer patching up the most-wounded active ally (incl. itself) over
         // fighting. Move to a covered tile within heal range + LoS of the patient. If
@@ -134,6 +139,8 @@ public static class Ai
             }
             if (e.Cls == "DRONE") score -= cover.Level * 18;            // drone doesn't value cover (cancels the bonus above)
             if (vip != null) score -= Util.ChebyDist(tx, ty, vip.X, vip.Y) * 1.0f;     // close on the asset
+            if (sapTarget != null)                               // sapper: get adjacent to the cover
+                score -= Util.ChebyDist(tx, ty, sapTarget.Value.x, sapTarget.Value.y) * 3.0f;
             score += Util.RandRange(0f, 3f);                     // tie-break jitter
 
             if (score > bestScore)
@@ -154,10 +161,19 @@ public static class Ai
 
         plan.ShootTarget = bestShotTarget;
 
+        // sapper: if it can reach the cover tile, demolish it instead of shooting
+        if (e.Cls == "SAPPER" && sapTarget != null &&
+            g.Grid.IsCover(sapTarget.Value.x, sapTarget.Value.y) &&
+            Util.ChebyDist(bestTile.x, bestTile.y, sapTarget.Value.x, sapTarget.Value.y) <= 1)
+        {
+            plan.SapTile = sapTarget;
+            plan.ShootTarget = null;       // demolition takes the action
+        }
+
         // grenade option: lob from the post-move tile at the best cluster. Prefer it
         // over shooting when it catches 2+ soldiers, or flushes a single well-covered
         // one we can't shoot well. Never throw if it would catch an ally.
-        if (e.Grenades > 0)
+        if (e.Grenades > 0 && plan.SapTile == null)
         {
             var (gx, gy, hits, allies) = BestGrenade(g, e, bestTile.x, bestTile.y);
             if (hits >= 1 && allies == 0)
@@ -178,7 +194,7 @@ public static class Ai
         }
 
         // if no shot is possible and we still have an action after moving, hunker/overwatch
-        if (plan.ShootTarget == null && !plan.Grenade)
+        if (plan.ShootTarget == null && !plan.Grenade && plan.SapTile == null)
         {
             int spent = plan.MoveActions;
             if (spent < 2)
