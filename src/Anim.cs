@@ -113,8 +113,9 @@ public class ShotAnim : Anim
             {
                 D.Hp = 0;
                 g.KillUnit(D);
-                if (A.Team == Team.Player && D.Team == Team.Enemy) A.Kills++;
+                if (A.Team == Team.Player && D.Team == Team.Enemy) g.CreditKill(A);
             }
+            else g.MarkPlayerHurt(D);   // a survivor at death's door earns a feat if it lives
         }
         else
         {
@@ -218,8 +219,9 @@ public class GrenadeAnim : Anim
             {
                 u.Hp = 0;
                 g.KillUnit(u);
-                if (Thrower.Team == Team.Player && u.Team == Team.Enemy) Thrower.Kills++;
+                if (Thrower.Team == Team.Player && u.Team == Team.Enemy) g.CreditKill(Thrower);
             }
+            else g.MarkPlayerHurt(u);
         }
         foreach (int pod in wokePods) g.ActivatePod(pod);   // the blast wakes survivors
     }

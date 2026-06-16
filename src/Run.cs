@@ -34,10 +34,14 @@ public class Run
     // cumulative kills required to REACH each rank index
     public static readonly int[] KillReq = { 0, 1, 3, 6, 10, 15, 21, 28 };
 
+    public const int BondThreshold = 3;       // missions two soldiers must survive together to bond
+
     public List<Unit> Squad = new();
     public int Mission;                       // current mission number (1-based)
     public int Intel;                         // requisition currency spent in the barracks shop
     public List<string> Fallen = new();       // names of KIA soldiers
+    // co-survival tally per soldier pair ("A|B"); a bond forms at BondThreshold
+    public Dictionary<string, int> BondTally = new();
     public List<string> Report = new();       // promotion/heal lines for the barracks
     public List<PerkOffer> PendingPerks = new(); // rank-up perk choices awaiting the player
     public List<MissionCard> Offers = new();  // next-mission deployment choices
@@ -134,6 +138,14 @@ public class Run
             if (u.Wound > w0) Report.Add($"{u.Name} is WOUNDED ({u.Wound} mission{(u.Wound > 1 ? "s" : "")})");
             else if (w0 > 0 && u.Wound == 0) Report.Add($"{u.Name} recovered from wounds");
 
+            // FEATS -> earned traits (only survivors reach the barracks). Grant before
+            // the field-heal so IronWill's +max HP is included in the patch-up.
+            if (u.FeatMultiKill) GrantTrait(u, Trait.Killer);
+            if (u.FeatClutch)    GrantTrait(u, Trait.ColdBlood);
+            if (u.FeatVengeful)  GrantTrait(u, Trait.Vengeful);
+            if (u.WasNearDeath)  GrantTrait(u, Trait.IronWill);
+            u.FeatMultiKill = u.FeatClutch = u.FeatVengeful = u.WasNearDeath = u.AllyDown = false;
+
             // promotions: advance rank while kills clear the next threshold
             while (u.Rank < Ranks.Length - 1 && u.Kills >= KillReq[u.Rank + 1])
             {
@@ -158,6 +170,9 @@ public class Run
             if (u.Hp > before) Report.Add($"{u.Name} patched up  (+{u.Hp - before} HP)");
         }
 
+        // bonds: every pair of survivors that shared this mission grows closer
+        AdvanceBonds();
+
         // backfill the squad up to 4 with rookie recruits
         while (Squad.Count < 4)
         {
@@ -168,6 +183,54 @@ public class Run
 
         if (Report.Count == 0) Report.Add("No changes this mission.");
     }
+
+    /// Grant an earned trait, assign a nickname on the soldier's first feat, apply
+    /// any immediate stat effect (IronWill), and log it to the barracks report.
+    void GrantTrait(Unit u, Trait t)
+    {
+        if (u.HasTrait(t)) return;
+        u.Traits.Add(t);
+        if (t == Trait.IronWill) { u.MaxHp += Unit.IronWillHp; u.Hp += Unit.IronWillHp; }
+        AssignNickname(u);   // no-op if already nicknamed
+        Report.Add($"{u.Name} earned {TraitDef.Name(t)}  ({TraitDef.Feat(t)})");
+    }
+
+    /// Give an un-nicknamed soldier a callsign not already used in the squad.
+    void AssignNickname(Unit u)
+    {
+        if (!string.IsNullOrEmpty(u.Nickname)) return;
+        var used = new HashSet<string>();
+        foreach (var s in Squad) if (!string.IsNullOrEmpty(s.Nickname)) used.Add(s.Nickname);
+        var avail = new List<string>();
+        foreach (var n in Nicknames.Pool) if (!used.Contains(n)) avail.Add(n);
+        if (avail.Count == 0) return;
+        u.Nickname = avail[Util.RandInt(0, avail.Count - 1)];
+        Report.Add($"{u.Name} is now known as \"{u.Nickname}\"");
+    }
+
+    /// Increment co-survival for each pair of surviving soldiers; forge a bond when a
+    /// pair has fought through BondThreshold missions together. (Called pre-backfill,
+    /// so only true mission survivors tally.)
+    void AdvanceBonds()
+    {
+        var alive = Squad.FindAll(u => u.Alive && !u.IsVip);
+        for (int i = 0; i < alive.Count; i++)
+            for (int j = i + 1; j < alive.Count; j++)
+            {
+                var a = alive[i]; var b = alive[j];
+                string key = BondKey(a.Name, b.Name);
+                int c = (BondTally.TryGetValue(key, out var v) ? v : 0) + 1;
+                BondTally[key] = c;
+                if (c >= BondThreshold && !a.Bonds.Contains(b.Name))
+                {
+                    a.Bonds.Add(b.Name); b.Bonds.Add(a.Name);
+                    Report.Add($"{a.Name} & {b.Name} forged a BOND  (+{Unit.BondAim} aim when adjacent)");
+                }
+            }
+    }
+
+    public static string BondKey(string a, string b) =>
+        string.CompareOrdinal(a, b) <= 0 ? a + "|" + b : b + "|" + a;
 
     /// Offer two distinct perks the soldier doesn't already own (null if <2 left).
     static PerkOffer MakePerkOffer(Unit u)
@@ -209,5 +272,74 @@ public class Run
     {
         if (u.Rank >= Ranks.Length - 1) return 0;
         return Math.Max(0, KillReq[u.Rank + 1] - u.Kills);
+    }
+
+    static Unit TestSoldier(string name) => new Unit
+    {
+        Name = name, Cls = "ASSAULT", Team = Team.Player,
+        Hp = 8, MaxHp = 8, Aim = 65, Mobility = 7, Weapon = Weapon.Make(WeaponKind.Rifle),
+    };
+
+    /// Headless self-test (SIGHTLINE_TRAITTEST): feats resolve into traits + a
+    /// nickname at the barracks, the traits read correctly in combat, and bonds form
+    /// after enough shared missions. Returns a one-line report. No window required.
+    public static string TraitSelfTest()
+    {
+        var fails = new List<string>();
+
+        // (1) FEATS -> traits + nickname at debrief (survivors only reach the barracks)
+        var r = new Run();
+        var v = TestSoldier("ALPHA");
+        int hp0 = v.MaxHp;
+        v.FeatMultiKill = true; v.FeatClutch = true; v.WasNearDeath = true;
+        r.Squad = new List<Unit> { v };
+        r.DebriefSurvivors();
+        if (!v.HasTrait(Trait.Killer)) fails.Add("killerTrait");
+        if (!v.HasTrait(Trait.ColdBlood)) fails.Add("coldTrait");
+        if (!v.HasTrait(Trait.IronWill)) fails.Add("ironTrait");
+        if (v.MaxHp != hp0 + Unit.IronWillHp) fails.Add("ironHp");
+        if (string.IsNullOrEmpty(v.Nickname)) fails.Add("nickname");
+        if (v.FeatMultiKill || v.FeatClutch || v.WasNearDeath) fails.Add("featsNotCleared");
+
+        // (2) trait effects in ComputeOdds (open ground, no cover)
+        var grid = new Grid();
+        Unit Atk() => new Unit { Aim = 65, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 5, Y = 5, Hp = 8, MaxHp = 8 };
+        Unit Def() => new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 9, Y = 5, Hp = 8, MaxHp = 8 };
+
+        var a1 = Atk(); var d1 = Def(); d1.Hp = 3;                 // wounded target
+        int baseHit = Combat.ComputeOdds(grid, a1, d1).HitChance;
+        a1.Traits.Add(Trait.Killer);
+        if (Combat.ComputeOdds(grid, a1, d1).HitChance - baseHit != Unit.KillerAim) fails.Add("killerAim");
+
+        var a2 = Atk(); a2.Hp = 3; var d2 = Def();                // self bloodied
+        int baseCrit = Combat.ComputeOdds(grid, a2, d2).CritChance;
+        a2.Traits.Add(Trait.ColdBlood);
+        if (Combat.ComputeOdds(grid, a2, d2).CritChance - baseCrit != Unit.ColdBloodCrit) fails.Add("coldCrit");
+
+        var a3 = Atk(); a3.Traits.Add(Trait.Vengeful); var d3 = Def();
+        int noVeng = Combat.ComputeOdds(grid, a3, d3).HitChance;
+        a3.AllyDown = true;
+        if (Combat.ComputeOdds(grid, a3, d3).HitChance - noVeng != Unit.VengefulAim) fails.Add("vengefulAim");
+
+        var a4 = Atk(); var d4 = Def();
+        int noBond = Combat.ComputeOdds(grid, a4, d4).HitChance;
+        a4.BondAura = true;
+        if (Combat.ComputeOdds(grid, a4, d4).HitChance - noBond != Unit.BondAim) fails.Add("bondAim");
+
+        // (3) bonds form after BondThreshold shared missions
+        var r2 = new Run();
+        var pa = TestSoldier("PAXTON"); var pb = TestSoldier("QUINN");
+        for (int m = 0; m < BondThreshold; m++)
+        {
+            r2.Squad = new List<Unit> { pa, pb };                 // only the two truly survive
+            pa.Hp = pa.MaxHp; pb.Hp = pb.MaxHp;
+            r2.DebriefSurvivors();
+            if (m < BondThreshold - 1 && (pa.Bonds.Count > 0 || pb.Bonds.Count > 0)) fails.Add("bondEarly");
+        }
+        if (!pa.Bonds.Contains("QUINN") || !pb.Bonds.Contains("PAXTON")) fails.Add("bondForm");
+
+        return fails.Count == 0
+            ? "TRAITTEST: PASS (feats->traits+nickname, combat reads, bonds form)"
+            : "TRAITTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 }

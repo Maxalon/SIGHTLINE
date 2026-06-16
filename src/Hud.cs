@@ -124,9 +124,13 @@ public static class Hud
             Raylib.DrawRectangle((int)r.X, (int)r.Y, 3, (int)r.Height, Raylib.Fade(sel ? Pal.Accent : Pal.Friend, a));
 
             Raylib.DrawText(u.Name, (int)r.X + 9, (int)r.Y + 5, 13, Raylib.Fade(Pal.Txt, a));
-            // status marks (right)
+            int nameW = Raylib.MeasureText(u.Name, 13);
+            if (!string.IsNullOrEmpty(u.Nickname))   // earned callsign, in quotes
+                Raylib.DrawText($"\"{u.Nickname}\"", (int)r.X + 9 + nameW + 5, (int)r.Y + 6, 11, Raylib.Fade(Pal.VipGold, a));
+            // status marks (right): OW/HK, else a live BOND aura when a partner is adjacent
             if (u.OnOverwatch) Raylib.DrawText("OW", (int)r.X + 96, (int)r.Y + 5, 11, Raylib.Fade(Pal.Accent, a));
             else if (u.Hunkered) Raylib.DrawText("HK", (int)r.X + 96, (int)r.Y + 5, 11, Raylib.Fade(Pal.Good, a));
+            else if (u.BondAura) Raylib.DrawText("BOND", (int)r.X + 88, (int)r.Y + 5, 11, Raylib.Fade(Pal.VipGold, a));
 
             // hp bar
             var bar = new Rectangle(r.X + 9, r.Y + 23, 102, 6);
@@ -577,11 +581,11 @@ public static class Hud
 
         string title = "PROMOTION";
         Raylib.DrawText(title, x + w / 2 - Raylib.MeasureText(title, 36) / 2, y + 22, 36, Pal.Accent);
-        string sub = $"{off.Unit.Name}  -  {off.Unit.RankName}  -  {off.Unit.Cls}  -  CHOOSE A PERK";
+        string sub = $"{off.Unit.FullName}  -  {off.Unit.RankName}  -  {off.Unit.Cls}  -  CHOOSE A PERK";
         Raylib.DrawText(sub, x + w / 2 - Raylib.MeasureText(sub, 14) / 2, y + 64, 14, Pal.TxtDim);
 
         // full dossier so perks can be chosen for synergy
-        var dossier = new Rectangle(x + 20, y + 88, w - 40, 72);
+        var dossier = new Rectangle(x + 20, y + 88, w - 40, 96);
         Raylib.DrawRectangleRounded(dossier, 0.08f, 6, Pal.RGBA(13, 19, 27));
         Raylib.DrawRectangleLinesEx(dossier, 1f, Pal.PanelBd);
         DrawDossier(off.Unit, x + 34, y + 98, w - 68);
@@ -593,7 +597,7 @@ public static class Hud
         Raylib.DrawRectangleLinesEx(PerkTagBtn, 1.2f, th ? Pal.Accent : Pal.PanelBd);
         CenterText("EDIT TAG", PerkTagBtn, 12, th ? Pal.Accent : Pal.TxtDim);
 
-        int cw = (w - 60) / 2, ch = 170, cy = y + 172, gap = 20;
+        int cw = (w - 60) / 2, ch = 154, cy = y + 196, gap = 20;
         PerkBtnA = new Rectangle(x + 20, cy, cw, ch);
         PerkBtnB = new Rectangle(x + 20 + cw + gap, cy, cw, ch);
         DrawPerkCard(PerkBtnA, off.A);
@@ -612,15 +616,22 @@ public static class Hud
         string perks = u.Perks.Count == 0 ? "Perks: none yet"
             : "Perks: " + string.Join(", ", u.Perks.ConvertAll(PerkDef.Name));
         Raylib.DrawText(perks, x, y + 22, 13, Pal.Good);
+
+        // earned traits + bonds (3.2): what makes this veteran distinct
+        string traits = u.Traits.Count == 0 ? "Traits: none yet"
+            : "Traits: " + string.Join(", ", u.Traits.ConvertAll(TraitDef.Name));
+        if (u.Bonds.Count > 0) traits += "    Bonds: " + string.Join(", ", u.Bonds);
+        Raylib.DrawText(traits, x, y + 44, 12, u.Traits.Count == 0 && u.Bonds.Count == 0 ? Pal.TxtDim : Pal.VipGold);
+
         if (u.Wound > 0)
-            Raylib.DrawText($"WOUNDED ({u.Wound} mission{(u.Wound > 1 ? "s" : "")})  -{Unit.WoundAim} aim / -{Unit.WoundMob} mob", x, y + 44, 12, Pal.Foe);
+            Raylib.DrawText($"WOUNDED ({u.Wound} mission{(u.Wound > 1 ? "s" : "")})  -{Unit.WoundAim} aim / -{Unit.WoundMob} mob", x, y + 66, 12, Pal.Foe);
         else if (!string.IsNullOrEmpty(u.CustomTag))
-            Raylib.DrawText("Tag: " + u.CustomTag, x, y + 44, 12, Pal.Friend);
+            Raylib.DrawText("Tag: " + u.CustomTag, x, y + 66, 12, Pal.Friend);
         else
         {
             var sp = Specialties(u);
             if (sp.Count > 0)
-                Raylib.DrawText("Strengths: " + string.Join("  ", sp), x, y + 44, 12, Pal.Accent);
+                Raylib.DrawText("Strengths: " + string.Join("  ", sp), x, y + 66, 12, Pal.Accent);
         }
     }
 
