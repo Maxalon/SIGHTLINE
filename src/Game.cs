@@ -8,6 +8,7 @@ namespace Sightline;
 
 public enum Phase { Intro, PlayerTurn, EnemyTurn, Barracks, Win, Lose }
 public enum Objective { Eliminate, Evac, Hack, Escort }
+public enum SecondaryKind { None, NoLosses, Swift, CleanSweep }  // optional per-mission bonus goal (3.9)
 enum AiStage { PickNext, ActAfterMove }
 
 public class Game
@@ -90,6 +91,12 @@ public class Game
     // mission objective
     public Objective Objective;
     public List<(int x, int y)> EvacZone = new();
+
+    // optional secondary objective (3.9): a per-mission bonus goal worth extra intel
+    public const int SwiftTurns = 7;
+    public const int SecondaryIntel = 12;
+    public SecondaryKind Secondary;
+    public bool SecondaryFailed;     // a soldier was lost (fails NO LOSSES)
 
     // per-mission visual theme
     public Biome Biome = Biome.All[0];
@@ -193,6 +200,7 @@ public class Game
         { u.FeatMultiKill = u.FeatClutch = u.FeatVengeful = u.WasNearDeath = u.AllyDown = false; u.BondAura = false; u.Statuses.Clear(); }
         _missionKia.Clear();
         DeathFlash = 0;
+        RollSecondary(n);
         foreach (var u in Enemies) { u.BeginTurn(); u.OnOverwatch = false; }
         Selected = Players.FirstOrDefault(p => p.CanAct);
         AimMode = false;
@@ -260,6 +268,53 @@ public class Game
         Grid.AddSmoke(Util.Clamp(u.X + 5, 0, Grid.W - 1), Util.Clamp(u.Y + 3, 0, Grid.H - 1), SmokeAnim.Radius, SmokeAnim.Turns);
     }
 
+    // ---- secondary objective (3.9) ----
+    /// Roll an optional bonus goal for the mission (none on mission 1; CLEAN SWEEP is
+    /// skipped on Eliminate where it's automatic).
+    void RollSecondary(int n)
+    {
+        SecondaryFailed = false;
+        if (n <= 1) { Secondary = SecondaryKind.None; return; }
+        var pool = new List<SecondaryKind> { SecondaryKind.NoLosses, SecondaryKind.Swift };
+        if (Objective != Objective.Eliminate) pool.Add(SecondaryKind.CleanSweep);
+        Secondary = pool[Util.RandInt(0, pool.Count - 1)];
+    }
+
+    public string SecondaryName => Secondary switch
+    {
+        SecondaryKind.NoLosses  => "NO LOSSES",
+        SecondaryKind.Swift     => $"SWIFT (<={SwiftTurns} turns)",
+        SecondaryKind.CleanSweep => "CLEAN SWEEP",
+        _ => "",
+    };
+
+    /// Compact top-bar label (shows the live turn count for SWIFT).
+    public string SecondaryHud => Secondary switch
+    {
+        SecondaryKind.NoLosses  => "BONUS  NO LOSSES",
+        SecondaryKind.Swift     => $"BONUS  SWIFT {_turnCount}/{SwiftTurns}",
+        SecondaryKind.CleanSweep => "BONUS  CLEAN SWEEP",
+        _ => "",
+    };
+
+    /// Live status for the HUD: is the bonus still attainable right now?
+    public bool SecondaryOnTrack => Secondary switch
+    {
+        SecondaryKind.NoLosses  => !SecondaryFailed,
+        SecondaryKind.Swift     => _turnCount <= SwiftTurns,
+        SecondaryKind.CleanSweep => true,
+        _ => false,
+    };
+
+    /// Final evaluation at mission end.
+    bool SecondaryAchieved() => Secondary switch
+    {
+        SecondaryKind.NoLosses  => _missionKia.Count == 0,
+        SecondaryKind.Swift     => _turnCount <= SwiftTurns,
+        SecondaryKind.CleanSweep => AliveEnemies().Count == 0,
+        _ => false,
+    };
+
     /// Harness hook (screenshot only): force a barracks rank-up perk choice.
     public void DebugBarracksPerk()
     {
@@ -304,6 +359,17 @@ public class Game
             foreach (var u in _run.Squad) u.Hp = u.MaxHp;
 
         _run.DebriefSurvivors();
+
+        // secondary objective (3.9): award bonus intel if the optional goal was met
+        if (Secondary != SecondaryKind.None)
+        {
+            if (SecondaryAchieved())
+            {
+                _run.Intel += SecondaryIntel;
+                _run.Report.Insert(0, $"BONUS: {SecondaryName} cleared  (+{SecondaryIntel} intel)");
+            }
+            else _run.Report.Insert(0, $"Bonus missed: {SecondaryName}");
+        }
 
         // surface this mission's fallen at the top of the debrief (3.11)
         foreach (var name in _missionKia) _run.Report.Insert(0, $"KIA  {name}");
@@ -470,6 +536,7 @@ public class Game
         if (d.Team == Team.Player)
         {
             _run.Fallen.Add(d.Name);
+            if (!d.IsVip) SecondaryFailed = true;   // a lost soldier fails the NO LOSSES bonus
             // a fallen squadmate fires up the survivors (Vengeful feat / trait)
             if (!d.IsVip)
                 foreach (var p in Players) if (p.Alive && p != d && !p.IsVip) p.AllyDown = true;
