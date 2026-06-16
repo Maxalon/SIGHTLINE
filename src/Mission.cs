@@ -82,6 +82,8 @@ public static class Mission
             RaisePlateau(grid, evacSet, 7, 3, 2, 2);
             RaisePlateau(grid, evacSet, 11, 7, 2, 2);
             if (missionNum >= 3) RaisePlateau(grid, evacSet, Util.RandInt(6, 11), Util.RandInt(1, 8), 2, 2);
+            // a commanding tier-2 redoubt appears on later missions (sees over high cover)
+            if (missionNum >= 4) RaisePlateau(grid, evacSet, Util.RandInt(7, 10), Util.RandInt(3, 6), 2, 2, 2);
 
             // central structures for sightlines
             PlaceBlock(grid, occupied, 8, 2, TileType.HighCover, 1, 3);
@@ -132,7 +134,8 @@ public static class Mission
                 {
                     case 'o': g.Tiles[x, y] = TileType.LowCover; break;
                     case '#': g.Tiles[x, y] = TileType.HighCover; break;
-                    case '^': g.Height[x, y] = 1; break;   // walkable raised plateau
+                    case '^': g.Height[x, y] = 1; break;   // walkable raised plateau (tier 1)
+                    case '=': g.Height[x, y] = 2; break;   // walkable raised plateau (tier 2)
                     default:  break;                        // '.' open floor
                 }
             }
@@ -268,7 +271,7 @@ public static class Mission
 
     /// Raise a rectangular patch of ground to high ground (walkable plateau).
     /// Skips the extraction zone and the left-edge spawn columns.
-    static void RaisePlateau(Grid g, HashSet<(int, int)> evac, int x, int y, int w, int h)
+    static void RaisePlateau(Grid g, HashSet<(int, int)> evac, int x, int y, int w, int h, int level = 1)
     {
         for (int dx = 0; dx < w; dx++)
             for (int dy = 0; dy < h; dy++)
@@ -276,7 +279,7 @@ public static class Mission
                 int nx = x + dx, ny = y + dy;
                 if (!g.InBounds(nx, ny) || nx < 3) continue;
                 if (evac.Contains((nx, ny))) continue;
-                g.Height[nx, ny] = 1;
+                g.Height[nx, ny] = level;
             }
     }
 

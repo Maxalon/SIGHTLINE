@@ -252,6 +252,10 @@ seeds (mix of WIN/LOSE, no exceptions):
 - **Destructible cover:** cover tiles have HP (`Grid.CoverHp`); grenades crack
   High→Low→gone in the blast and LMG/shotgun fire chews a hit target's frontal cover
   (`Game.TryChipCover`), with a cracked renderer state. (Phase 3 item 3.6a.)
+- **2nd elevation tier:** `Grid.Height` goes to level 2; high ground is relative, and a
+  **commanding 2-tier advantage** sees over the target's HIGH cover (negates it + targets
+  through it via the `HasLineOfSight(...,overHighCover)` overload). Taller faux-3D render;
+  `=` map legend; a procedural tier-2 redoubt on missions 4+. (Phase 3 item 3.6b.)
 - **Utility items:** a second throwable slot beyond grenades (`Unit.Item`, 1 charge/
   mission, by class; key **6**): **SMOKE** (a 3x3 `Grid.Smoke` cloud that blocks LoS +
   overwatch for 3 turns, `SmokeAnim`/`Renderer.DrawSmoke`), **FLASH** (`FlashAnim` AoE
@@ -607,7 +611,7 @@ code to `main`.
       have no in-game source yet — those land with 3.4 (flash/incendiary utility items)
       and 3.7 (status-inflicting enemies).
 
-- [ ] **3.6 Destructible high cover + 2nd elevation tier.**
+- [x] **3.6 Destructible high cover + 2nd elevation tier.** DONE (both parts).
       - [x] **(a) Destructible cover. DONE.** `Grid.CoverHp[,]` (`HighCoverHp=2`/
             `LowCoverHp=1`) charged for every cover tile at the end of `Mission.Build`
             (`ResetCoverHp`; `SetCoverHp` for a deployed barricade). `Grid.DamageCover`
@@ -620,10 +624,20 @@ code to `main`.
             ("COVER CRACKED"/"COVER DOWN"); `Renderer.DrawCover` draws fissures on a
             chipped-but-not-degraded block. Verify: `SIGHTLINE_COVERTEST=1` →
             `COVERTEST: PASS` + `SIGHTLINE_COVER=1` screenshot + autoplay clean.
-      - [ ] **(b) 2nd elevation tier.** Extend `Grid.Height` to level 2:
-            `Renderer.DrawElevation` draws a taller platform, LoS sees over more low cover,
-            add ramps so reachability holds (extend `Maps.cs` legend, e.g. `=`). Verify:
-            COMBATTEST tiered high-ground case + autoplay on plateau/authored maps.
+      - [x] **(b) 2nd elevation tier. DONE.** `Grid.Height` now supports level 2.
+            High ground is fully **relative** (`heightAdv = HeightAt(a)-HeightAt(d)` in
+            `Combat.ComputeOdds`, so tier-2 beats tier-1 for free); a **commanding 2-tier
+            advantage** sees over the target's HIGH cover too (`seesOver` when
+            `heightAdv>=2`) AND can target through intermediate high cover via a new
+            `Grid.HasLineOfSight(..., overHighCover)` overload (smoke still blocks),
+            wired in `Game.CanTarget`. `Renderer` is height-aware: `ElevRect`/`ElevCenter`
+            lift by `HeightAt*ElevLift`, `DrawElevation` draws taller walls + a brighter
+            top for tier 2, `DrawCover` sits cover at the right tier. `Mission.RaisePlateau`
+            took a `level` param; procedural missions 4+ raise a tier-2 redoubt; `Maps.cs`
+            legend gains `=` (tier-2 plateau). No climb cost (plateaus are walkable floor),
+            so reachability holds without ramps. Verify: `SIGHTLINE_COMBATTEST` tier-2 case
+            (sees over high cover) + `SIGHTLINE_COVERTEST` LoS overload + `SIGHTLINE_ELEV=1`
+            screenshot + autoplay on missions 4-6.
 
 ### Tier 3 — content breadth (variety)
 
@@ -692,7 +706,26 @@ Before stopping:
 
 ### WIP NOTES
 
-> **3.6a DESTRUCTIBLE COVER (latest).** Cover tiles now degrade. `Grid`: `CoverHp[,]` +
+> **3.6b 2ND ELEVATION TIER (latest).** `Grid.Height` now supports level 2. Combat is
+> relative: `Combat.ComputeOdds` uses `heightAdv = HeightAt(a)-HeightAt(d)`; `seesOver`
+> negates LOW cover for any height edge and ALSO HIGH cover when `heightAdv>=2`. New
+> `Grid.HasLineOfSight(x0,y0,x1,y1, overHighCover)` overload (the old 4-arg signature
+> delegates to it with `false`); when `overHighCover`, intermediate HIGH cover doesn't
+> block but SMOKE still does. `Game.CanTarget` computes `commanding = heightAdv>=2` and
+> passes it, so a tier-2 shooter can target a lower foe through high cover. Renderer:
+> `ElevRect`/`ElevCenter`/`DrawCover` lift by `HeightAt*ElevLift` (was binary `IsHigh`);
+> `DrawElevation` draws a wall of `(h-belowH)*ElevLift` and a slightly brighter top for
+> tier 2. `Mission.RaisePlateau` gained a `level` param; procedural branch raises a tier-2
+> 2x2 redoubt on missionNum>=4; `Maps.cs` legend `=` → Height 2 (no authored map uses it
+> yet). No climb cost (Height is a pure positioning layer — plateaus are walkable floor),
+> so reachability holds without ramps. Tests: `SIGHTLINE_COMBATTEST` tier-2 case +
+> `SIGHTLINE_COVERTEST` `commandingSeesOverHigh` LoS-overload check; shot `SIGHTLINE_ELEV=1`
+> (`DebugElevation` stamps a tier-2 redoubt + tier-1 step + a high-cover block). Gotcha:
+> the AI's own LoS checks (Ai.cs / overwatch) still use the default blocking LoS, so the AI
+> doesn't yet exploit the commanding view — fine/safe, just not symmetric. TODO: AI use of
+> tier-2; a themed authored arena using `=`.
+
+> **3.6a DESTRUCTIBLE COVER.** Cover tiles now degrade. `Grid`: `CoverHp[,]` +
 > `HighCoverHp=2`/`LowCoverHp=1`, `CoverHit` enum, `MaxCoverHp`/`SetCoverHp`/`ResetCoverHp`/
 > `DamageCover` (High→Low→Floor, resets HP to the lower level on downgrade) + `CoverTile`
 > (frontal-block pick, mirrors `GetCover`'s side logic). `Mission.Build` calls
@@ -931,7 +964,8 @@ item smoke preview + a live cloud). Plus non-shot **`SIGHTLINE_SAVETEST=1`** →
 `SAVETEST: PASS/FAIL` (save/load round-trip; no window), **`SIGHTLINE_ITEMTEST=1`** →
 `ITEMTEST: PASS/FAIL` (smoke LoS / barricade / loadouts; no window),
 **`SIGHTLINE_COVERTEST=1`** → `COVERTEST: PASS/FAIL` (destructible-cover degrade; no
-window) + shot **`SIGHTLINE_COVER=1`** (cracked cover state). Also non-shot
+window) + shot **`SIGHTLINE_COVER=1`** (cracked cover state) + shot **`SIGHTLINE_ELEV=1`**
+(tier-2 plateau redoubt). Also non-shot
 **`SIGHTLINE_WOUNDTEST=1`** (wound assign/decay/clear + aim/mob penalty), and shot
 **`SIGHTLINE_WOUND=1`** (wounded roster/dossier).
 

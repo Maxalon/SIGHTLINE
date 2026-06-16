@@ -42,11 +42,12 @@ public static class Combat
     {
         float dist = Util.TileDist(a.X, a.Y, d.X, d.Y);
         var cover = grid.GetCover(d.X, d.Y, a.X, a.Y);
-        bool highGround = grid.HeightAt(a.X, a.Y) > grid.HeightAt(d.X, d.Y);
+        int heightAdv = grid.HeightAt(a.X, a.Y) - grid.HeightAt(d.X, d.Y);
+        bool highGround = heightAdv > 0;
 
-        // high ground sees over LOW cover: firing down negates the target's low cover
-        // (high cover still blocks). The target reads as fully exposed for hit/crit/perks.
-        bool seesOver = highGround && cover.Level == 1;
+        // high ground sees over LOW cover; a commanding 2-tier advantage sees over HIGH
+        // cover too (firing down negates the target's cover; it reads as fully exposed).
+        bool seesOver = highGround && (cover.Level == 1 || heightAdv >= 2);
         int coverLevel = seesOver ? 0 : cover.Level;
         int coverDef = seesOver ? 0 : cover.Defense;   // cover.Defense is already halved when partial
         bool flanked = cover.Flanked && !seesOver;
@@ -175,7 +176,7 @@ public static class Combat
         var cE = Case(gE, 7, 8, 10, 5);
         if (cE.CoverLevel != 1 || cE.Flanked || cE.Partial) fails.Add("diagCornerFull");
 
-        // HIGH cover must still protect even from high ground
+        // HIGH cover must still protect from a single-tier height edge...
         var grid2 = new Grid();
         grid2.Tiles[6, 5] = TileType.HighCover;
         grid2.Height[8, 5] = 1;
@@ -183,8 +184,15 @@ public static class Combat
         if (highVsHigh.SeesOver) fails.Add("highCoverSeesOver");
         if (highVsHigh.CoverLevel != 2) fails.Add("highCoverKept");
 
+        // ...but a commanding TIER-2 advantage sees over high cover (3.6b)
+        grid2.Height[8, 5] = 2;
+        var tier2 = ComputeOdds(grid2, a, d);
+        if (!tier2.SeesOver) fails.Add("tier2SeesOverHigh");
+        if (tier2.CoverLevel != 0) fails.Add("tier2NegatesHigh");
+        if (tier2.HitChance <= highVsHigh.HitChance) fails.Add("tier2HitBetter");
+
         return fails.Count == 0
-            ? "COMBATTEST: PASS (cover sketch A-E + high-ground cases all hold)"
+            ? "COMBATTEST: PASS (cover sketch A-E + high-ground + tier-2 cases all hold)"
             : "COMBATTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 }

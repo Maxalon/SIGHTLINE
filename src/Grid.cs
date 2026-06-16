@@ -115,8 +115,11 @@ public class Grid
     public bool IsFloor(int x, int y) => InBounds(x, y) && Tiles[x, y] == TileType.Floor;
 
     // ---------- Line of sight ----------
-    // Supercover line between tile centres; blocked by any intermediate HighCover tile.
-    public bool HasLineOfSight(int x0, int y0, int x1, int y1)
+    // Supercover line between tile centres; blocked by any intermediate HighCover tile
+    // (or smoke). `overHighCover` lets a commanding (tier-2) shooter see over high
+    // cover — smoke still blocks either way.
+    public bool HasLineOfSight(int x0, int y0, int x1, int y1) => HasLineOfSight(x0, y0, x1, y1, false);
+    public bool HasLineOfSight(int x0, int y0, int x1, int y1, bool overHighCover)
     {
         int dx = Math.Abs(x1 - x0), dy = Math.Abs(y1 - y0);
         int sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
@@ -132,7 +135,8 @@ public class Grid
             if (e2 < dx)  { err += dx; cy += sy; }
             // endpoint reached after step?
             if (cx == x1 && cy == y1) return true;
-            if (BlocksSight(cx, cy)) return false;
+            bool blocked = overHighCover ? IsSmoke(cx, cy) : BlocksSight(cx, cy);
+            if (blocked) return false;
         }
         return true;
     }
