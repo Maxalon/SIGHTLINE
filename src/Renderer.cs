@@ -340,8 +340,12 @@ public static class Renderer
         float hlift = g.Grid.IsHigh(u.X, u.Y) ? ElevLift : 0f;
         var foot = u.Pos - new Vector2(0, hlift);
 
+        // a DRONE hovers above its shadow (reads as airborne)
+        bool drone = u.Team == Team.Enemy && u.Cls == "DRONE";
+        float hover = drone ? 11f + MathF.Sin((float)Raylib.GetTime() * 3f + u.Bob) * 2f : 0f;
+
         float bob = MathF.Sin((float)Raylib.GetTime() * 2.2f + u.Bob) * 1.6f;
-        Vector2 p = foot + new Vector2(0, bob) + u.Recoil;
+        Vector2 p = foot + new Vector2(0, bob - hover) + u.Recoil;
 
         // shadow (sits on the platform top when elevated)
         Raylib.DrawEllipse((int)foot.X, (int)(foot.Y + 17), 15, 6, Raylib.Fade(Pal.RGBA(0, 0, 0), 0.35f));
@@ -365,9 +369,10 @@ public static class Renderer
         {
             "ASSAULT" => 3, "RANGER" => 3, "SHARPSHOOTER" => 4,
             "GUNNER" => 4, "BRUISER" => 6, "SCOUT" => 3,
-            "SNIPER" => 4, "TURRET" => 4, "BERSERKER" => 6, "ELITE" => 8, "MEDIC" => 4, _ => 5,
+            "SNIPER" => 4, "TURRET" => 4, "BERSERKER" => 6, "ELITE" => 8, "MEDIC" => 4,
+            "DRONE" => 4, "SHIELD" => 6, _ => 5,
         };
-        float rot = (u.Cls == "SHARPSHOOTER" || u.Cls == "SNIPER") ? 45f : (sides == 3 ? -90f : 0f);
+        float rot = (u.Cls == "SHARPSHOOTER" || u.Cls == "SNIPER" || u.Cls == "DRONE") ? 45f : (sides == 3 ? -90f : 0f);
         if (elite) Raylib.DrawRing(p, 18f, 20.5f, 0, 360, 40, Raylib.Fade(Pal.Elite, 0.55f));
         Raylib.DrawPoly(p, sides, elite ? 9f : 7.5f, rot, main);
 
@@ -387,6 +392,13 @@ public static class Renderer
         {
             Raylib.DrawRectangle((int)p.X - 1, (int)p.Y - 5, 3, 11, Pal.Good);
             Raylib.DrawRectangle((int)p.X - 5, (int)p.Y - 1, 11, 3, Pal.Good);
+        }
+
+        // shield: a thick barrier arc on the barred (facing) side
+        if (u.Team == Team.Enemy && u.Cls == "SHIELD" && (u.ShieldDx != 0 || u.ShieldDy != 0))
+        {
+            float ang = MathF.Atan2(u.ShieldDy, u.ShieldDx) * 180f / MathF.PI;
+            Raylib.DrawRing(p, 18f, 22f, ang - 55, ang + 55, 24, Pal.RGBA(150, 200, 240));
         }
 
         // damage flash
@@ -432,10 +444,10 @@ public static class Renderer
             }
         }
 
-        // elite boss name / rage tag
+        // elite boss name / rage tag (uses the unit's actual name so mid-bosses read right)
         if (elite)
         {
-            string tag = u.Enraged ? "ENRAGED" : "WARLORD";
+            string tag = u.Enraged ? u.Name + " ENRAGED" : u.Name;
             Raylib.DrawText(tag, (int)(p.X - Raylib.MeasureText(tag, 11) / 2), (int)(p.Y - 42), 11, Pal.Elite);
         }
 

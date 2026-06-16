@@ -127,9 +127,12 @@ public static class Ai
             }
             else
             {
-                float advW = (e.Cls == "BERSERKER" || e.Cls == "ELITE") ? 3.4f : 1.4f; // charge in
+                float advW = (e.Cls == "BERSERKER" || e.Cls == "ELITE") ? 3.4f
+                           : (e.Cls == "DRONE") ? 3.0f                  // drone beelines (ignores cover anyway)
+                           : (e.Cls == "SHIELD") ? 2.2f : 1.4f;         // shield pushes the line behind its barrier
                 score -= nd > 0 ? distNearest * advW : 0;
             }
+            if (e.Cls == "DRONE") score -= cover.Level * 18;            // drone doesn't value cover (cancels the bonus above)
             if (vip != null) score -= Util.ChebyDist(tx, ty, vip.X, vip.Y) * 1.0f;     // close on the asset
             score += Util.RandRange(0f, 3f);                     // tie-break jitter
 

@@ -45,13 +45,23 @@ public static class Combat
         int heightAdv = grid.HeightAt(a.X, a.Y) - grid.HeightAt(d.X, d.Y);
         bool highGround = heightAdv > 0;
 
+        // a DRONE attacks from above: it ignores the target's cover entirely (3.7)
+        bool ignoresCover = a.Cls == "DRONE";
+
         // high ground sees over LOW cover; a commanding 2-tier advantage sees over HIGH
         // cover too (firing down negates the target's cover; it reads as fully exposed).
-        bool seesOver = highGround && (cover.Level == 1 || heightAdv >= 2);
+        bool seesOver = ignoresCover || (highGround && (cover.Level == 1 || heightAdv >= 2));
         int coverLevel = seesOver ? 0 : cover.Level;
         int coverDef = seesOver ? 0 : cover.Defense;   // cover.Defense is already halved when partial
         bool flanked = cover.Flanked && !seesOver;
         bool partial = cover.Partial && !seesOver;
+
+        // a SHIELD's frontal barrier gives full cover from its facing side regardless of
+        // terrain — flank it (or hit it from above / commanding height) to bypass (3.7).
+        if (d.Cls == "SHIELD" && !seesOver && ShieldedFrom(d, a.X, a.Y) && coverLevel < 2)
+        {
+            coverLevel = 2; coverDef = 40; flanked = false; partial = false;
+        }
 
         int hit = a.Aim + a.Weapon.AimBonus + a.Weapon.RangeMod(dist) - coverDef;
         if (d.Hunkered) hit -= 25;
@@ -95,6 +105,15 @@ public static class Combat
             Partial = partial,
             Steady = a.Steady,
         };
+    }
+
+    /// True when an attack from (ax,ay) lands on a SHIELD unit's barred (front) side.
+    static bool ShieldedFrom(Unit d, int ax, int ay)
+    {
+        if (d.ShieldDx == 0 && d.ShieldDy == 0) return false;
+        int dx = ax - d.X, dy = ay - d.Y;
+        if (Math.Abs(dx) >= Math.Abs(dy)) return d.ShieldDx != 0 && Util.Sign(dx) == d.ShieldDx;
+        return d.ShieldDy != 0 && Util.Sign(dy) == d.ShieldDy;
     }
 
     /// Roll a shot. aimMod lets overwatch apply a reaction penalty.
@@ -191,8 +210,22 @@ public static class Combat
         if (tier2.CoverLevel != 0) fails.Add("tier2NegatesHigh");
         if (tier2.HitChance <= highVsHigh.HitChance) fails.Add("tier2HitBetter");
 
+        // DRONE ignores the target's cover entirely (attacks from above) (3.7)
+        var gDrone = new Grid(); gDrone.Tiles[6, 5] = TileType.HighCover;
+        var drone = new Unit { Aim = 65, Weapon = Weapon.Make(WeaponKind.Smg), Team = Team.Enemy, X = 8, Y = 5, Cls = "DRONE" };
+        var dTgt = new Unit { Aim = 65, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 5, Y = 5, Hp = 6, MaxHp = 6 };
+        if (ComputeOdds(gDrone, drone, dTgt).CoverLevel != 0) fails.Add("droneIgnoresCover");
+
+        // SHIELD: full cover from its barred (front) side, flankable from another (3.7)
+        var gShield = new Grid();   // no terrain cover at all
+        var sh = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 5, Y = 5, Hp = 10, MaxHp = 10, Cls = "SHIELD", ShieldDx = -1, ShieldDy = 0 };
+        var atkW = new Unit { Aim = 65, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 2, Y = 5 };  // from the front (west)
+        var atkE = new Unit { Aim = 65, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 8, Y = 5 };  // from behind the shield (east)
+        if (ComputeOdds(gShield, atkW, sh).CoverLevel != 2) fails.Add("shieldFront");
+        if (ComputeOdds(gShield, atkE, sh).CoverLevel != 0) fails.Add("shieldFlank");
+
         return fails.Count == 0
-            ? "COMBATTEST: PASS (cover sketch A-E + high-ground + tier-2 cases all hold)"
+            ? "COMBATTEST: PASS (cover A-E + high-ground + tier-2 + drone/shield all hold)"
             : "COMBATTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 }
