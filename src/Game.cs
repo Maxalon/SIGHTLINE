@@ -1417,7 +1417,7 @@ public class Game
                 e.Aim += 15; e.Mobility += 2;
                 Fx.PopText(e.Pos + new Vector2(0, -34), "ENRAGED", Pal.Foe, 20f);
                 Fx.AddShake(8f);
-                ShowBanner("WARLORD ENRAGED", true);
+                ShowBanner(e.Name + " ENRAGED", true);
             }
             _aiPlan = Ai.Plan(this, e);
 

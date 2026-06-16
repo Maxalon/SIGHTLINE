@@ -182,21 +182,31 @@ public static class Mission
             used.Add((x, y));
 
             bool finalMission = n >= Run.MaxMissions;
+            bool midBoss = !finalMission && i == 0 && (n == 3 || n == 5);   // recurring named elite
             float r = Util.RandF();
             Unit e;
             if (finalMission && i == 0)         // capstone elite (named boss)
                 e = MakeHostile("WARLORD", "ELITE", WeaponKind.Lmg, 20 + n * 2, 72, 6, x, y);
-            else if (n >= 3 && r < 0.12f)       // immobile overwatch nest
+            else if (midBoss)                   // mid-campaign elite (lighter than the WARLORD)
+                e = MakeHostile(n == 3 ? "BREAKER" : "WARDEN", "ELITE", WeaponKind.Lmg, 14 + n * 2, 68, 6, x, y);
+            else if (n >= 3 && r < 0.11f)       // immobile overwatch nest
                 e = MakeHostile("SENTRY", "TURRET", WeaponKind.Lmg, 6 + bump, 66 + bump, 0, x, y);
-            else if (n >= 2 && r < 0.27f)       // long-range marksman
+            else if (n >= 2 && r < 0.23f)       // long-range marksman
                 e = MakeHostile("VIPER", "SNIPER", WeaponKind.Sniper, 4 + bump, 62 + bump, 5, x, y);
-            else if (n >= 3 && r < 0.42f)       // charging melee bruiser
+            else if (n >= 3 && r < 0.33f)       // charging melee bruiser
                 e = MakeHostile("REAVER", "BERSERKER", WeaponKind.Shotgun, 12 + bump * 2, 58 + bump, 8, x, y);
-            else if (n >= 3 && r < 0.51f)       // field medic: heals wounded allies
+            else if (n >= 2 && r < 0.43f)       // hovering drone: ignores cover, beelines
+                e = MakeHostile("WASP", "DRONE", WeaponKind.Smg, 3 + bump, 60 + bump, 7, x, y);
+            else if (n >= 3 && r < 0.52f)       // shield-bearer: full frontal cover, must be flanked
+            {
+                e = MakeHostile("AEGIS", "SHIELD", WeaponKind.Rifle, 10 + bump * 2, 56 + bump, 4, x, y);
+                e.ShieldDx = -1; e.ShieldDy = 0;            // shield faces the squad (west)
+            }
+            else if (n >= 3 && r < 0.60f)       // field medic: heals wounded allies
                 e = MakeHostile("ORDERLY", "MEDIC", WeaponKind.Smg, 6 + bump, 52 + bump, 6, x, y);
-            else if (n >= 2 && r < 0.60f)
+            else if (n >= 2 && r < 0.70f)
                 e = MakeHostile("OGRE", "BRUISER", WeaponKind.Lmg, 9 + bump * 2, 56 + bump, 5, x, y);
-            else if (r < 0.74f)
+            else if (r < 0.82f)
                 e = MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 58 + bump, 8, x, y);
             else
                 e = MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 60 + bump, 6, x, y);

@@ -198,6 +198,7 @@ public class Unit
 
     public bool IsVip;          // escort objective: the asset to extract (mission-only, never persists)
     public bool Enraged;        // elite boss: one-time low-HP rage trigger
+    public int ShieldDx, ShieldDy;  // SHIELD archetype: facing dir its frontal shield blocks (3.7)
 
     // meta / campaign progression (persists across missions)
     public int Kills;

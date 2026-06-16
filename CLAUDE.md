@@ -207,10 +207,12 @@ seeds (mix of WIN/LOSE, no exceptions):
 - **Intel currency + requisition shop:** each cleared mission grants `Intel`
   (`Run.Intel`, persisted); the barracks opens with a REQUISITION screen to spend it
   on a medkit, +2 max HP, or a bonus perk before choosing the next deployment.
-- **Enemy variety:** Grunt / Scout / Bruiser plus **Sniper** (kites to range),
-  **Turret** (immobile overwatch nest), **Berserker** (tanky shotgun rusher), and a
-  capstone **Elite boss** (WARLORD) on the final mission with 2 grenades and a
-  one-time low-HP RAGE. Distinct AI temperaments in `Ai.Plan`; distinct glyphs.
+- **Enemy variety:** Grunt / Scout / Bruiser / Medic plus **Sniper** (kites to range),
+  **Turret** (immobile overwatch nest), **Berserker** (tanky shotgun rusher), **Drone**
+  (WASP — hovers, ignores cover/elevation, beelines), **Shield** (AEGIS — full frontal
+  cover, must be flanked or hit from above), a recurring **mid-boss** (BREAKER m3 /
+  WARDEN m5), and a capstone **Elite boss** (WARLORD) on the final mission with 2
+  grenades + a one-time low-HP RAGE. Distinct AI temperaments in `Ai.Plan`; distinct glyphs.
 - **Mission objectives:** Eliminate, Hack (reach the TERMINAL and hack it down,
   HACK action / key H), Evac (get the whole squad to the extraction zone), and
   **Escort** (walk a fragile gold VIP to the extraction zone alive — losing the
@@ -641,14 +643,23 @@ code to `main`.
 
 ### Tier 3 — content breadth (variety)
 
-- [ ] **3.7 New enemy archetypes + recurring mid-boss.** **DRONE/FLYER:** ignores
-      cover & elevation (always flanks ground targets), low HP, hovering glyph +
-      shadow; `Ai` beelines. **SHIELDED:** a frontal shield giving full cover from its
-      facing dir regardless of terrain (`Unit.ShieldDir`, special-cased in
-      `Grid.GetCover`/`Combat`) — must be flanked or grenaded. **SAPPER:** destroys the
-      player's cover (pairs with 3.6). **Mid-boss:** a named elite every ~3 missions via
-      a `Mission.SpawnEnemies` band (not only the final WARLORD). Verify: autoplay +
-      glyph screenshots (reuse `SIGHTLINE_WAKE`).
+- [ ] **3.7 New enemy archetypes + recurring mid-boss.** DRONE / SHIELD / mid-boss
+      DONE; SAPPER still open.
+      - [x] **DRONE (WASP).** Cls `DRONE`, low HP, fast, **ignores the target's cover**
+            (`Combat.ComputeOdds` `ignoresCover` folds into `seesOver`); AI beelines
+            (advW 3.0 + cancels its own cover value). Renderer hovers it above its
+            shadow (diamond glyph). Spawns mission 2+.
+      - [x] **SHIELD (AEGIS).** Cls `SHIELD`, `Unit.ShieldDx/Dy` (faces west toward the
+            squad); `Combat.ShieldedFrom` gives **full cover (lvl 2) from the barred
+            side regardless of terrain** — flank it, or bypass with a DRONE / commanding
+            tier-2 height. Renderer draws a frontal barrier arc. Spawns mission 3+.
+      - [x] **Mid-boss.** A named `ELITE` band on missions 3 (BREAKER) & 5 (WARDEN),
+            lighter than the final WARLORD but with the same rage; renderer + rage banner
+            now use `u.Name` (not a hardcoded "WARLORD"). Verify: `SIGHTLINE_COMBATTEST`
+            (drone-ignores-cover + shield front/flank cases) + `SIGHTLINE_MISSION=3`
+            screenshot + autoplay.
+      - [ ] **SAPPER.** Destroys the player's cover (pairs with 3.6 `DamageCover`) — an
+            AI action that moves adjacent to a soldier's cover and breaks it. Not done.
 
 - [ ] **3.8 New objectives.** Add to the `Objective` enum + `ObjectiveFor` rotation +
       `CheckEnd` + HUD: **DEFEND** (hold a zone / survive N turns vs. spawned waves —
@@ -706,7 +717,25 @@ Before stopping:
 
 ### WIP NOTES
 
-> **3.6b 2ND ELEVATION TIER (latest).** `Grid.Height` now supports level 2. Combat is
+> **3.7 NEW ENEMY ARCHETYPES (latest, partial — SAPPER still open).** Three new hostiles
+> in `Mission.SpawnEnemies` (probability chain re-banded). **WASP** (`Cls="DRONE"`, SMG,
+> low HP, mob 7, mission 2+): `Combat.ComputeOdds` sets `ignoresCover = a.Cls=="DRONE"`
+> which folds into `seesOver` (negates the target's cover entirely — attacks from above);
+> `Ai.Plan` advW 3.0 + subtracts its own cover value so it beelines; `Renderer.DrawUnit`
+> floats it above its shadow (`hover`, diamond glyph). **AEGIS** (`Cls="SHIELD"`, Rifle,
+> tanky, mob 4, mission 3+): new `Unit.ShieldDx/Dy` (set to -1,0 = faces west toward the
+> squad); `Combat.ShieldedFrom(d,ax,ay)` → if the shot comes in on the barred side,
+> override cover to full high (lvl2/40 def) regardless of terrain, unless `seesOver`
+> (drone/commanding tier-2) bypasses it; `Renderer` draws a frontal `DrawRing` arc.
+> **Mid-boss** (`Cls="ELITE"`): a named band on missions 3 (BREAKER) & 5 (WARDEN), HP
+> `14+2n` (vs WARLORD `20+2n`), `midBoss = !finalMission && i==0 && (n==3||n==5)`; the
+> renderer name tag + rage banner now read `u.Name` instead of a hardcoded "WARLORD".
+> Verify: `SIGHTLINE_COMBATTEST` (added drone-ignores-cover + shield front/flank cases) +
+> `SIGHTLINE_MISSION=3` shot. Gotcha: the elite rage in `Game.UpdateEnemy` keys on
+> `Cls=="ELITE"`, so mid-bosses rage too (intended). TODO: SAPPER (cover-destroyer AI);
+> AEGIS only ever faces west (no dynamic re-facing); enemy DRONE/commanding-view symmetry.
+
+> **3.6b 2ND ELEVATION TIER.** `Grid.Height` now supports level 2. Combat is
 > relative: `Combat.ComputeOdds` uses `heightAdv = HeightAt(a)-HeightAt(d)`; `seesOver`
 > negates LOW cover for any height edge and ALSO HIGH cover when `heightAdv>=2`. New
 > `Grid.HasLineOfSight(x0,y0,x1,y1, overHighCover)` overload (the old 4-arg signature
