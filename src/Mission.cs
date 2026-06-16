@@ -108,6 +108,8 @@ public static class Mission
         foreach (var u in players) TryCover(grid, occupied, u.X + 1, u.Y, TileType.LowCover);
         foreach (var u in enemies) TryCover(grid, occupied, u.X - 1, u.Y, TileType.HighCover);
 
+        grid.ResetCoverHp();   // charge every cover tile to full now the terrain is final (3.6)
+
         foreach (var u in players) u.SyncPos();
         foreach (var u in enemies) u.SyncPos();
     }

@@ -249,6 +249,9 @@ seeds (mix of WIN/LOSE, no exceptions):
   Two soldiers who survive 3 missions together forge a **bond** (`Unit.Bonds`,
   +10 aim while adjacent). Dossier + roster surface all of it; persisted in the save.
   (Phase 3 item 3.2.)
+- **Destructible cover:** cover tiles have HP (`Grid.CoverHp`); grenades crack
+  High→Low→gone in the blast and LMG/shotgun fire chews a hit target's frontal cover
+  (`Game.TryChipCover`), with a cracked renderer state. (Phase 3 item 3.6a.)
 - **Utility items:** a second throwable slot beyond grenades (`Unit.Item`, 1 charge/
   mission, by class; key **6**): **SMOKE** (a 3x3 `Grid.Smoke` cloud that blocks LoS +
   overwatch for 3 turns, `SmokeAnim`/`Renderer.DrawSmoke`), **FLASH** (`FlashAnim` AoE
@@ -604,12 +607,23 @@ code to `main`.
       have no in-game source yet — those land with 3.4 (flash/incendiary utility items)
       and 3.7 (status-inflicting enemies).
 
-- [ ] **3.6 Destructible high cover + 2nd elevation tier.** (a) Give cover tiles HP
-      (`Grid.CoverHp[,]`); grenades + heavy fire (LMG/shotgun point-blank) chip it,
-      High→Low→gone, with a renderer damage state. (b) Extend `Grid.Height` to level 2:
-      `Renderer.DrawElevation` draws a taller platform, LoS sees over more low cover,
-      add ramps so reachability holds (extend `Maps.cs` legend, e.g. `=`). Verify:
-      COMBATTEST tiered high-ground case + autoplay on plateau/authored maps.
+- [ ] **3.6 Destructible high cover + 2nd elevation tier.**
+      - [x] **(a) Destructible cover. DONE.** `Grid.CoverHp[,]` (`HighCoverHp=2`/
+            `LowCoverHp=1`) charged for every cover tile at the end of `Mission.Build`
+            (`ResetCoverHp`; `SetCoverHp` for a deployed barricade). `Grid.DamageCover`
+            degrades **High→Low→Floor** as HP runs out (`CoverHit` enum); `Grid.CoverTile`
+            finds the frontal block. Sources: **grenades** chew a full level in the blast
+            (`GrenadeAnim` now calls `DamageCover(HighCoverHp)` — high→low, low→gone,
+            replacing the old instant low-clear); **heavy fire** chips on hit
+            (`Game.TryChipCover` in `ShotAnim.Apply`: LMG any range / shotgun point-blank,
+            only when the target actually has cover). `Game.CoverHitFx` does the FX/sound
+            ("COVER CRACKED"/"COVER DOWN"); `Renderer.DrawCover` draws fissures on a
+            chipped-but-not-degraded block. Verify: `SIGHTLINE_COVERTEST=1` →
+            `COVERTEST: PASS` + `SIGHTLINE_COVER=1` screenshot + autoplay clean.
+      - [ ] **(b) 2nd elevation tier.** Extend `Grid.Height` to level 2:
+            `Renderer.DrawElevation` draws a taller platform, LoS sees over more low cover,
+            add ramps so reachability holds (extend `Maps.cs` legend, e.g. `=`). Verify:
+            COMBATTEST tiered high-ground case + autoplay on plateau/authored maps.
 
 ### Tier 3 — content breadth (variety)
 
@@ -678,7 +692,25 @@ Before stopping:
 
 ### WIP NOTES
 
-> **3.4 UTILITY ITEMS (latest).** Second throwable slot beyond grenades. `Unit`:
+> **3.6a DESTRUCTIBLE COVER (latest).** Cover tiles now degrade. `Grid`: `CoverHp[,]` +
+> `HighCoverHp=2`/`LowCoverHp=1`, `CoverHit` enum, `MaxCoverHp`/`SetCoverHp`/`ResetCoverHp`/
+> `DamageCover` (High→Low→Floor, resets HP to the lower level on downgrade) + `CoverTile`
+> (frontal-block pick, mirrors `GetCover`'s side logic). `Mission.Build` calls
+> `ResetCoverHp()` once terrain is final (after the per-unit cover pass). Sources:
+> `GrenadeAnim.Explode` now `DamageCover(x,y,HighCoverHp)` per blast tile (high→low,
+> low→gone — replaced the old instant low-clear); `ShotAnim.Apply` calls
+> `Game.TryChipCover(A,D)` on a hit (LMG any range / shotgun ≤2 tiles, gated on the target
+> actually having cover via `GetCover(...).Level>0`). `Game.CoverHitFx` = FX/sound per
+> `CoverHit`; barricade (`IssueItem`) calls `SetCoverHp`. `Renderer.DrawCover` draws dark
+> fissures when `CoverHp < MaxCoverHp` (only a chipped-but-not-degraded High block shows
+> them; a downgraded tile is fresh Low). Test: `SIGHTLINE_COVERTEST=1` (window-free,
+> `Game.CoverSelfTest`) + `SIGHTLINE_COVER=1` shot (`DebugCover` chips 8 high blocks).
+> Gotcha: HP lives in the reused `Grid`, so the per-mission `ResetCoverHp()` is essential —
+> don't remove it or cover starts a mission at 0 HP and dissolves on first contact.
+> **REMAINING for 3.6:** part (b) the 2nd elevation tier (taller plateaus + ramps) is NOT
+> done — see the roadmap checkbox.
+
+> **3.4 UTILITY ITEMS.** Second throwable slot beyond grenades. `Unit`:
 > `ItemKind` enum {None,Smoke,Flash,Barricade}, `Item` (derived from `Cls` via
 > `ItemKindFor` — Ranger/Sharp=Smoke, Assault=Flash, Gunner=Barricade), `ItemCharge`
 > (1/mission, refilled in `Mission.Build`; NOT persisted — derived like grenades).
@@ -893,7 +925,9 @@ the CONTINUE button shows), **`SIGHTLINE_SHOP`** (barracks requisition screen),
 **`SIGHTLINE_CAMPAIGN`** (branching campaign map mid-run), **`SIGHTLINE_ITEM`** (utility-
 item smoke preview + a live cloud). Plus non-shot **`SIGHTLINE_SAVETEST=1`** → prints
 `SAVETEST: PASS/FAIL` (save/load round-trip; no window), **`SIGHTLINE_ITEMTEST=1`** →
-`ITEMTEST: PASS/FAIL` (smoke LoS / barricade / loadouts; no window). Also non-shot
+`ITEMTEST: PASS/FAIL` (smoke LoS / barricade / loadouts; no window),
+**`SIGHTLINE_COVERTEST=1`** → `COVERTEST: PASS/FAIL` (destructible-cover degrade; no
+window) + shot **`SIGHTLINE_COVER=1`** (cracked cover state). Also non-shot
 **`SIGHTLINE_WOUNDTEST=1`** (wound assign/decay/clear + aim/mob penalty), and shot
 **`SIGHTLINE_WOUND=1`** (wounded roster/dossier).
 

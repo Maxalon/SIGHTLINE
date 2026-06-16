@@ -13,12 +13,70 @@ public class Grid
     public TileType[,] Tiles;
     public int[,] Height;       // elevation layer: 0 = ground, 1 = high ground
     public int[,] Smoke;        // utility-item smoke: turns remaining a tile blocks sight (3.4)
+    public int[,] CoverHp;      // hits a cover tile takes before degrading High->Low->gone (3.6)
+
+    public const int HighCoverHp = 2;   // chips to crack High -> Low
+    public const int LowCoverHp = 1;    // chips to clear Low -> Floor
 
     public Grid()
     {
         Tiles = new TileType[W, H];
         Height = new int[W, H];
         Smoke = new int[W, H];
+        CoverHp = new int[W, H];
+    }
+
+    public enum CoverHit { None, Chipped, Downgraded, Destroyed }
+
+    /// Full HP for a tile's CURRENT cover level (0 for floor).
+    public int MaxCoverHp(int x, int y) => !InBounds(x, y) ? 0 :
+        (Tiles[x, y] == TileType.HighCover ? HighCoverHp : (Tiles[x, y] == TileType.LowCover ? LowCoverHp : 0));
+
+    /// Charge a freshly-placed cover tile to full HP (e.g. a deployed barricade).
+    public void SetCoverHp(int x, int y) { if (InBounds(x, y)) CoverHp[x, y] = MaxCoverHp(x, y); }
+
+    /// (Re)initialise HP for every cover tile — call once a mission's terrain is final.
+    public void ResetCoverHp()
+    {
+        for (int x = 0; x < W; x++)
+            for (int y = 0; y < H; y++) CoverHp[x, y] = MaxCoverHp(x, y);
+    }
+
+    /// Apply `dmg` to a cover tile, degrading High->Low->Floor as its HP runs out.
+    public CoverHit DamageCover(int x, int y, int dmg)
+    {
+        if (!IsCover(x, y) || dmg <= 0) return CoverHit.None;
+        CoverHp[x, y] -= dmg;
+        if (CoverHp[x, y] > 0) return CoverHit.Chipped;
+        if (Tiles[x, y] == TileType.HighCover)
+        {
+            Tiles[x, y] = TileType.LowCover;
+            CoverHp[x, y] = LowCoverHp;            // the rubble still gives low cover
+            return CoverHit.Downgraded;
+        }
+        Tiles[x, y] = TileType.Floor;
+        CoverHp[x, y] = 0;
+        return CoverHit.Destroyed;
+    }
+
+    /// The cover tile shielding (tx,ty) from fire at (fx,fy), or null — mirrors GetCover's
+    /// dominant-side pick so heavy fire chips the right frontal block.
+    public (int x, int y)? CoverTile(int tx, int ty, int fx, int fy)
+    {
+        int dx = fx - tx, dy = fy - ty;
+        bool diagonal = dx != 0 && dy != 0 && Math.Abs(dx) == Math.Abs(dy);
+        (int, int)? pick = null; int best = 0;
+        void Consider(int sx, int sy)
+        {
+            int nx = tx + sx, ny = ty + sy;
+            if (!InBounds(nx, ny)) return;
+            int lv = Tiles[nx, ny] == TileType.HighCover ? 2 : (Tiles[nx, ny] == TileType.LowCover ? 1 : 0);
+            if (lv > best) { best = lv; pick = (nx, ny); }
+        }
+        if (diagonal) { Consider(Util.Sign(dx), 0); Consider(0, Util.Sign(dy)); }
+        else if (Math.Abs(dx) >= Math.Abs(dy) && dx != 0) Consider(Util.Sign(dx), 0);
+        else if (dy != 0) Consider(0, Util.Sign(dy));
+        return pick;
     }
 
     public bool InBounds(int x, int y) => x >= 0 && y >= 0 && x < W && y < H;

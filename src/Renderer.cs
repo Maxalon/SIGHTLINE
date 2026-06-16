@@ -247,6 +247,16 @@ public static class Renderer
                 Raylib.DrawLineEx(new Vector2(topRect.X + 4, topRect.Y + 2),
                                   new Vector2(topRect.X + topRect.Width - 4, topRect.Y + 2),
                                   1.5f, Raylib.Fade(Pal.RGBA(255, 255, 255), 0.12f));
+                // damage state (3.6): a chipped-but-not-yet-degraded block shows fissures
+                if (g.Grid.CoverHp[x, y] > 0 && g.Grid.CoverHp[x, y] < g.Grid.MaxCoverHp(x, y))
+                {
+                    Color crack = Pal.RGBA(14, 17, 23);
+                    float my = topRect.Y + topRect.Height * 0.55f;
+                    float mx = topRect.X + topRect.Width * 0.5f;
+                    Raylib.DrawLineEx(new Vector2(topRect.X + 5, topRect.Y + 6), new Vector2(mx, my), 1.6f, crack);
+                    Raylib.DrawLineEx(new Vector2(mx, my), new Vector2(topRect.X + topRect.Width - 6, topRect.Y + 9), 1.6f, crack);
+                    Raylib.DrawLineEx(new Vector2(mx, my), new Vector2(mx - 4, topRect.Y + topRect.Height - 4), 1.4f, crack);
+                }
             }
     }
 

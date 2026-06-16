@@ -222,6 +222,16 @@ public class Game
     /// Harness hook (screenshot only): reveal all dormant enemies.
     public void DebugWakeAll() { foreach (var e in Enemies) if (e.Alive) e.Active = true; }
 
+    /// Harness hook (screenshot only): chip several high-cover blocks so the cracked
+    /// damage state is visible, and fully degrade one to show the rubble (low) state.
+    public void DebugCover()
+    {
+        int chipped = 0;
+        for (int x = 0; x < Grid.W; x++)
+            for (int y = 0; y < Grid.H; y++)
+                if (Grid.Tiles[x, y] == TileType.HighCover && chipped < 8) { Grid.DamageCover(x, y, 1); chipped++; }
+    }
+
     /// Harness hook (screenshot only): arm a smoke-carrier's item targeting preview.
     public void DebugItem()
     {
@@ -399,6 +409,43 @@ public class Game
             _anims.Insert(Math.Min(insertAt, _anims.Count), shot);
             insertAt++;
             if (res.Hit && mover.Hp - res.Damage <= 0) break; // will die; stop further reactions
+        }
+    }
+
+    /// Heavy weapons (LMG anywhere, shotgun point-blank) chew through a hit target's
+    /// frontal cover, degrading High->Low->gone (3.6).
+    public void TryChipCover(Unit shooter, Unit target)
+    {
+        var w = shooter.Weapon.Kind;
+        bool heavy = w == WeaponKind.Lmg
+                     || (w == WeaponKind.Shotgun && Util.TileDist(shooter.X, shooter.Y, target.X, target.Y) <= 2);
+        if (!heavy) return;
+        if (Grid.GetCover(target.X, target.Y, shooter.X, shooter.Y).Level <= 0) return;
+        var tile = Grid.CoverTile(target.X, target.Y, shooter.X, shooter.Y);
+        if (tile == null) return;
+        var hit = Grid.DamageCover(tile.Value.x, tile.Value.y, 1);
+        if (hit != Grid.CoverHit.None) CoverHitFx(tile.Value.x, tile.Value.y, hit);
+    }
+
+    /// Feedback for a cover tile taking damage / degrading.
+    public void CoverHitFx(int x, int y, Grid.CoverHit hit)
+    {
+        var c = Util.TileCenter(x, y);
+        switch (hit)
+        {
+            case Grid.CoverHit.Chipped:
+                Fx.Burst(c, Pal.RGBA(150, 160, 175), 7, 130f, 0.4f, 3f);
+                break;
+            case Grid.CoverHit.Downgraded:
+                Fx.Burst(c, Pal.RGBA(150, 160, 175), 15, 190f, 0.5f, 4f);
+                Fx.PopText(c + new Vector2(0, -20), "COVER CRACKED", Pal.TxtDim, 16f);
+                Audio.Play("hit");
+                break;
+            case Grid.CoverHit.Destroyed:
+                Fx.Burst(c, Pal.RGBA(120, 130, 145), 18, 220f, 0.6f, 4.5f);
+                Fx.PopText(c + new Vector2(0, -20), "COVER DOWN", Pal.TxtDim, 16f);
+                Audio.Play("hit");
+                break;
         }
     }
 
@@ -1161,6 +1208,7 @@ public class Game
             case ItemKind.Flash: Enqueue(new FlashAnim(u, tx, ty), Team.Player); break;
             case ItemKind.Barricade:
                 Grid.Tiles[tx, ty] = TileType.LowCover;
+                Grid.SetCoverHp(tx, ty);
                 Fx.Burst(Util.TileCenter(tx, ty), Pal.RGBA(150, 200, 120), 16, 150f, 0.6f, 4.5f);
                 Fx.PopText(Util.TileCenter(tx, ty) + new Vector2(0, -22), "COVER UP", Pal.Good, 18f);
                 Audio.Play("hunker");
@@ -1743,6 +1791,41 @@ public class Game
         return fails.Count == 0
             ? "ITEMTEST: PASS (smoke blocks+decays LoS, barricade=cover, loadouts map)"
             : "ITEMTEST: FAIL (" + string.Join(",", fails) + ")";
+    }
+
+    /// Headless self-test (SIGHTLINE_COVERTEST): destructible cover — High chips to Low
+    /// to Floor, with LoS + cover level tracking the degrade, and a frag drops a level
+    /// in one blow. Window-free (grid only).
+    public static string CoverSelfTest()
+    {
+        var fails = new List<string>();
+        var grid = new Grid();
+        for (int x = 0; x < grid.W; x++)
+            for (int y = 0; y < grid.H; y++) grid.Tiles[x, y] = TileType.Floor;
+
+        // a high block: full HP, full cover from the facing side, blocks line of sight
+        grid.Tiles[5, 5] = TileType.HighCover; grid.ResetCoverHp();
+        if (grid.CoverHp[5, 5] != Grid.HighCoverHp) fails.Add("initHp");
+        if (grid.GetCover(5, 4, 5, 9).Level != 2) fails.Add("highCover");
+        if (grid.HasLineOfSight(5, 2, 5, 9)) fails.Add("highBlocksLoS");
+
+        // chip it down: HighCoverHp hits to degrade High -> Low
+        if (grid.DamageCover(5, 5, 1) != Grid.CoverHit.Chipped || grid.Tiles[5, 5] != TileType.HighCover) fails.Add("chip");
+        if (grid.DamageCover(5, 5, 1) != Grid.CoverHit.Downgraded || grid.Tiles[5, 5] != TileType.LowCover) fails.Add("downgrade");
+        if (grid.GetCover(5, 4, 5, 9).Level != 1) fails.Add("nowLow");
+        if (!grid.HasLineOfSight(5, 2, 5, 9)) fails.Add("lowSeesThrough");
+
+        // one more chip clears Low -> Floor
+        if (grid.DamageCover(5, 5, 1) != Grid.CoverHit.Destroyed || grid.Tiles[5, 5] != TileType.Floor) fails.Add("destroy");
+        if (grid.GetCover(5, 4, 5, 9).Level != 0) fails.Add("noCover");
+
+        // a grenade-strength blow drops High -> Low in one hit
+        grid.Tiles[7, 7] = TileType.HighCover; grid.SetCoverHp(7, 7);
+        if (grid.DamageCover(7, 7, Grid.HighCoverHp) != Grid.CoverHit.Downgraded || grid.Tiles[7, 7] != TileType.LowCover) fails.Add("frag");
+
+        return fails.Count == 0
+            ? "COVERTEST: PASS (high->low->gone, LoS + cover follow, frag drops a level)"
+            : "COVERTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
     void ChooseCard(int i)
