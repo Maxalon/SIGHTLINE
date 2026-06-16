@@ -43,6 +43,14 @@ public static class Program
             Console.WriteLine(Run.TraitSelfTest());
             return;
         }
+        // SIGHTLINE_STATUSTEST=1 : status-effect tick/decay/read check (item 3.5).
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_STATUSTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "statustest");   // Game uses tile math; window is tiny
+            Console.WriteLine(new Game().StatusSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         // SIGHTLINE_MISSION=<n> : start the harness on mission n (verify Hack/Evac maps).
         int startMission = int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_MISSION"), out int sm) ? sm : 1;
 
@@ -75,6 +83,7 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_TAGEDIT") == "1") game.DebugTagEditor();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_WOUND") == "1") game.DebugWound();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_TRAITS") == "1") game.DebugTraits();
+        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_STATUS") == "1") game.DebugStatus();
         bool helpShot = shot && Environment.GetEnvironmentVariable("SIGHTLINE_HELP") == "1";  // hover the ability button
         int frame = 0;
         const int autoCap = 20000;

@@ -396,6 +396,25 @@ public static class Renderer
         if (u.Team == Team.Enemy && u.Suppress > 0)
             Raylib.DrawText("SUPP", (int)(p.X + 12), (int)(p.Y - 30), 11, Pal.Foe);
 
+        // combat status effects (3.5): stacked codes below the figure
+        if (u.Statuses.Count > 0)
+        {
+            int sx = (int)p.X - 12, sy = (int)p.Y + 18;
+            foreach (var s in u.Statuses)
+            {
+                if (s.Turns <= 0) continue;
+                Color sc = s.Kind switch
+                {
+                    StatusKind.Burning => Pal.RGBA(255, 140, 40),
+                    StatusKind.Bleed => Pal.RGBA(210, 50, 50),
+                    StatusKind.Stun => Pal.RGBA(225, 205, 95),
+                    _ => Pal.RGBA(150, 120, 220),       // Disoriented
+                };
+                Raylib.DrawText(StatusDef.Code(s.Kind), sx, sy, 10, sc);
+                sx += 24;
+            }
+        }
+
         // elite boss name / rage tag
         if (elite)
         {
