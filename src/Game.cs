@@ -1503,7 +1503,19 @@ public class Game
             var e = _aiUnits[_aiIdx];
             if (e.Alive)
             {
-                if (_aiPlan.HealTarget != null && _aiPlan.HealTarget.Alive && e.ActionsLeft > 0 &&
+                if (_aiPlan.SapTile != null && e.ActionsLeft > 0 &&
+                    Grid.IsCover(_aiPlan.SapTile.Value.x, _aiPlan.SapTile.Value.y) &&
+                    Util.ChebyDist(e.X, e.Y, _aiPlan.SapTile.Value.x, _aiPlan.SapTile.Value.y) <= 1)
+                {
+                    e.ActionsLeft = 0;
+                    var (sx, sy) = _aiPlan.SapTile.Value;
+                    Fx.PopText(e.Pos + new Vector2(0, -30), "BREACH", Pal.Foe, 16f);
+                    var hit = Grid.DamageCover(sx, sy, Grid.HighCoverHp);  // demolish a full level
+                    if (hit != Grid.CoverHit.None) CoverHitFx(sx, sy, hit);
+                    Fx.AddShake(5f);
+                    Enqueue(new WaitAnim(0.25f), Team.Enemy);
+                }
+                else if (_aiPlan.HealTarget != null && _aiPlan.HealTarget.Alive && e.ActionsLeft > 0 &&
                     _aiPlan.HealTarget.Hp < _aiPlan.HealTarget.MaxHp &&
                     Util.TileDist(e.X, e.Y, _aiPlan.HealTarget.X, _aiPlan.HealTarget.Y) <= Ai.HealRange &&
                     Grid.HasLineOfSight(e.X, e.Y, _aiPlan.HealTarget.X, _aiPlan.HealTarget.Y))

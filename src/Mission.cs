@@ -202,18 +202,20 @@ public static class Mission
                 e = MakeHostile("AEGIS", "SHIELD", WeaponKind.Rifle, 10 + bump * 2, 56 + bump, 4, x, y);
                 e.ShieldDx = -1; e.ShieldDy = 0;            // shield faces the squad (west)
             }
-            else if (n >= 3 && r < 0.60f)       // field medic: heals wounded allies
+            else if (n >= 3 && r < 0.59f)       // demolition: tears down the squad's cover
+                e = MakeHostile("BREACH", "SAPPER", WeaponKind.Shotgun, 7 + bump, 56 + bump, 6, x, y);
+            else if (n >= 3 && r < 0.66f)       // field medic: heals wounded allies
                 e = MakeHostile("ORDERLY", "MEDIC", WeaponKind.Smg, 6 + bump, 52 + bump, 6, x, y);
-            else if (n >= 2 && r < 0.70f)
+            else if (n >= 2 && r < 0.74f)
                 e = MakeHostile("OGRE", "BRUISER", WeaponKind.Lmg, 9 + bump * 2, 56 + bump, 5, x, y);
-            else if (r < 0.82f)
+            else if (r < 0.84f)
                 e = MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 58 + bump, 8, x, y);
             else
                 e = MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 60 + bump, 6, x, y);
             if (e.Cls != "ELITE") e.Aim = Math.Min(82, e.Aim);
             // grenades: bruisers + the elite always; some others from mission 2 on
             if (e.Cls == "ELITE") e.Grenades = 2;
-            else if (n >= 2 && e.Cls != "MEDIC" && (e.Cls == "BRUISER" || Util.Roll(22))) e.Grenades = 1;
+            else if (n >= 2 && e.Cls != "MEDIC" && e.Cls != "SAPPER" && (e.Cls == "BRUISER" || Util.Roll(22))) e.Grenades = 1;
             e.Active = false;          // dormant until sighted
             e.PodId = i / 2;           // pods of ~2
             enemies.Add(e);

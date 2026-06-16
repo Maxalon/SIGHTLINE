@@ -370,7 +370,7 @@ public static class Renderer
             "ASSAULT" => 3, "RANGER" => 3, "SHARPSHOOTER" => 4,
             "GUNNER" => 4, "BRUISER" => 6, "SCOUT" => 3,
             "SNIPER" => 4, "TURRET" => 4, "BERSERKER" => 6, "ELITE" => 8, "MEDIC" => 4,
-            "DRONE" => 4, "SHIELD" => 6, _ => 5,
+            "DRONE" => 4, "SHIELD" => 6, "SAPPER" => 3, _ => 5,
         };
         float rot = (u.Cls == "SHARPSHOOTER" || u.Cls == "SNIPER" || u.Cls == "DRONE") ? 45f : (sides == 3 ? -90f : 0f);
         if (elite) Raylib.DrawRing(p, 18f, 20.5f, 0, 360, 40, Raylib.Fade(Pal.Elite, 0.55f));
@@ -392,6 +392,13 @@ public static class Renderer
         {
             Raylib.DrawRectangle((int)p.X - 1, (int)p.Y - 5, 3, 11, Pal.Good);
             Raylib.DrawRectangle((int)p.X - 5, (int)p.Y - 1, 11, 3, Pal.Good);
+        }
+
+        // sapper: a small demolition-charge marker so it reads as a cover-breaker
+        if (u.Team == Team.Enemy && u.Cls == "SAPPER")
+        {
+            Raylib.DrawRectangleLines((int)p.X - 4, (int)p.Y - 4, 8, 8, Pal.Accent);
+            Raylib.DrawCircleV(new Vector2(p.X + 4, p.Y - 4), 2f, Pal.Foe);
         }
 
         // shield: a thick barrier arc on the barred (facing) side

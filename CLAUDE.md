@@ -210,8 +210,9 @@ seeds (mix of WIN/LOSE, no exceptions):
 - **Enemy variety:** Grunt / Scout / Bruiser / Medic plus **Sniper** (kites to range),
   **Turret** (immobile overwatch nest), **Berserker** (tanky shotgun rusher), **Drone**
   (WASP — hovers, ignores cover/elevation, beelines), **Shield** (AEGIS — full frontal
-  cover, must be flanked or hit from above), a recurring **mid-boss** (BREAKER m3 /
-  WARDEN m5), and a capstone **Elite boss** (WARLORD) on the final mission with 2
+  cover, must be flanked or hit from above), **Sapper** (BREACH — demolishes the squad's
+  cover), a recurring **mid-boss** (BREAKER m3 / WARDEN m5), and a capstone **Elite boss**
+  (WARLORD) on the final mission with 2
   grenades + a one-time low-HP RAGE. Distinct AI temperaments in `Ai.Plan`; distinct glyphs.
 - **Secondary objectives:** an optional per-mission bonus goal (NO LOSSES / SWIFT ≤7
   turns / CLEAN SWEEP) worth +12 intel, shown live in the HUD and reported at the
@@ -646,8 +647,8 @@ code to `main`.
 
 ### Tier 3 — content breadth (variety)
 
-- [ ] **3.7 New enemy archetypes + recurring mid-boss.** DRONE / SHIELD / mid-boss
-      DONE; SAPPER still open.
+- [x] **3.7 New enemy archetypes + recurring mid-boss.** DONE (drone / shield / mid-boss
+      / sapper).
       - [x] **DRONE (WASP).** Cls `DRONE`, low HP, fast, **ignores the target's cover**
             (`Combat.ComputeOdds` `ignoresCover` folds into `seesOver`); AI beelines
             (advW 3.0 + cancels its own cover value). Renderer hovers it above its
@@ -661,8 +662,11 @@ code to `main`.
             now use `u.Name` (not a hardcoded "WARLORD"). Verify: `SIGHTLINE_COMBATTEST`
             (drone-ignores-cover + shield front/flank cases) + `SIGHTLINE_MISSION=3`
             screenshot + autoplay.
-      - [ ] **SAPPER.** Destroys the player's cover (pairs with 3.6 `DamageCover`) — an
-            AI action that moves adjacent to a soldier's cover and breaks it. Not done.
+      - [x] **SAPPER (BREACH). DONE.** Cls `SAPPER` (mission 3+, no grenades). `Ai.Plan`
+            computes `sapTarget = CoverTile(nearest, e)`, scores tiles toward it, and sets
+            `EnemyPlan.SapTile` when it ends adjacent (clearing ShootTarget); `Game.UpdateEnemy`
+            has a sap branch that `DamageCover(HighCoverHp)`s the tile ("BREACH" + `CoverHitFx`).
+            Renderer gives it a demo-charge marker. Pairs with 3.6 destructible cover.
 
 - [ ] **3.8 New objectives.** Add to the `Objective` enum + `ObjectiveFor` rotation +
       `CheckEnd` + HUD: **DEFEND** (hold a zone / survive N turns vs. spawned waves —
@@ -740,7 +744,18 @@ Before stopping:
 > still valid at `EnterBarracks` time. TODO: more goal types (hack a side cache / no damage);
 > autopilot doesn't optimise for the bonus (passive only).
 
-> **3.7 NEW ENEMY ARCHETYPES (partial — SAPPER still open).** Three new hostiles
+> **3.7 SAPPER (latest, completes 3.7).** Cls `SAPPER` ("BREACH", Shotgun, mission 3+,
+> no grenades). `EnemyPlan.SapTile` (nullable). `Ai.Plan`: `sapTarget =
+> Grid.CoverTile(nearest, e)`; a scoring term pulls the sapper adjacent to it; after the
+> tile loop, if it ended Chebyshev≤1 of a still-standing cover tile, set `plan.SapTile` and
+> null `ShootTarget` (grenade + hunker/overwatch fallbacks gated on `SapTile==null`).
+> `Game.UpdateEnemy` sap branch (first in the act chain) `DamageCover(HighCoverHp)`s the
+> tile + `CoverHitFx` + "BREACH" pop. Renderer: demo-charge marker (square + red dot).
+> Spawn re-banded (SAPPER r<0.59 on n≥3); excluded from the grenade-assignment roll.
+> Verify: autoplay missions 3-6 clean. Gotcha: `CoverTile` is computed from the sapper's
+> CURRENT position (approx); fine since it re-plans each turn.
+
+> **3.7 NEW ENEMY ARCHETYPES (drone / shield / mid-boss).** Three new hostiles
 > in `Mission.SpawnEnemies` (probability chain re-banded). **WASP** (`Cls="DRONE"`, SMG,
 > low HP, mob 7, mission 2+): `Combat.ComputeOdds` sets `ignoresCover = a.Cls=="DRONE"`
 > which folds into `seesOver` (negates the target's cover entirely — attacks from above);
