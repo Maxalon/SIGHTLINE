@@ -23,6 +23,25 @@ public class MissionCard
     public string RewardText;
 }
 
+/// A node on the branching campaign map (3.3). Each node is one mission: an
+/// objective + difficulty + reward (carried in Card) plus a node "kind" that
+/// flavours the encounter. Nodes are laid out in columns (one per mission) and
+/// connected to 1-2 nodes in the next column, FTL/Slay-the-Spire style.
+public enum NodeKind { Start, Combat, Elite, Supply, Boss }
+
+public class MissionNode
+{
+    public int Id;            // index into Run.Map
+    public int Col;           // 0-based column; mission number = Col + 1
+    public int Row;           // 0-based vertical slot within its column
+    public int RowCount;      // nodes in this column (for layout)
+    public NodeKind Kind;
+    public MissionCard Card;  // objective + deltas + reward derived from Kind
+    public List<int> Next = new();  // outgoing edges (node ids in the next column)
+    public bool Visited;
+    public int Mission => Col + 1;
+}
+
 /// Holds the persistent squad across a campaign run, plus XP/rank progression.
 public class Run
 {
@@ -44,8 +63,132 @@ public class Run
     public Dictionary<string, int> BondTally = new();
     public List<string> Report = new();       // promotion/heal lines for the barracks
     public List<PerkOffer> PendingPerks = new(); // rank-up perk choices awaiting the player
-    public List<MissionCard> Offers = new();  // next-mission deployment choices
+    public List<MissionCard> Offers = new();  // next-mission deployment choices (fallback)
     public MissionCard CurrentCard;           // the card the active mission was launched from
+
+    // ---- branching campaign map (3.3) ----
+    public List<MissionNode> Map = new();     // the generated DAG of mission nodes
+    public int MapSeed;                       // seed the map is regenerated from on load
+    public int MapPos = -1;                   // id of the current (last-cleared / start) node
+
+    public MissionNode CurrentNode =>
+        (MapPos >= 0 && MapPos < Map.Count) ? Map[MapPos] : null;
+
+    /// The reachable next-column nodes from the current position (the player's choices).
+    public List<MissionNode> NextNodes()
+    {
+        var list = new List<MissionNode>();
+        var n = CurrentNode;
+        if (n != null) foreach (var id in n.Next) if (id >= 0 && id < Map.Count) list.Add(Map[id]);
+        return list;
+    }
+
+    /// Build the campaign DAG deterministically from a seed: MaxMissions columns
+    /// (mission 1 = single START, last = single BOSS, middles 2-3 nodes), each
+    /// node wired to 1-2 nodes in the next column with a connectivity fix-up so
+    /// every node is reachable and every non-boss node leads onward.
+    public void GenerateMap(int seed)
+    {
+        Map.Clear();
+        var rng = new Random(seed);
+        int cols = MaxMissions;
+        var byCol = new List<List<MissionNode>>();
+        int id = 0;
+        for (int c = 0; c < cols; c++)
+        {
+            int count = (c == 0 || c == cols - 1) ? 1 : rng.Next(2, 4);  // 2 or 3 in the middle
+            var colNodes = new List<MissionNode>();
+            for (int r = 0; r < count; r++)
+            {
+                var node = new MissionNode { Id = id++, Col = c, Row = r, RowCount = count };
+                colNodes.Add(node);
+                Map.Add(node);
+            }
+            byCol.Add(colNodes);
+        }
+
+        // node kinds: START / BOSS fixed; sprinkle a few ELITE/SUPPLY through the middle
+        foreach (var node in Map) node.Kind = NodeKind.Combat;
+        Map[0].Kind = NodeKind.Start;
+        Map[Map.Count - 1].Kind = NodeKind.Boss;
+        var mids = Map.FindAll(n => n.Col > 0 && n.Col < cols - 1);
+        for (int i = mids.Count - 1; i > 0; i--) { int j = rng.Next(i + 1); (mids[i], mids[j]) = (mids[j], mids[i]); }
+        int elites = Math.Max(1, mids.Count / 5);
+        int supplies = Math.Max(1, mids.Count / 4);
+        int k = 0;
+        for (int e = 0; e < elites && k < mids.Count; e++, k++) mids[k].Kind = NodeKind.Elite;
+        for (int s = 0; s < supplies && k < mids.Count; s++, k++) mids[k].Kind = NodeKind.Supply;
+
+        foreach (var node in Map) node.Card = CardForNode(node);
+
+        // edges: wire each column to the next, then guarantee every next node has an entry
+        for (int c = 0; c < cols - 1; c++)
+        {
+            var cur = byCol[c]; var nxt = byCol[c + 1];
+            foreach (var a in cur)
+            {
+                int tgt = nxt.Count == 1 ? 0
+                    : (int)Math.Round((double)a.Row / Math.Max(1, cur.Count - 1) * (nxt.Count - 1));
+                tgt = Math.Clamp(tgt, 0, nxt.Count - 1);
+                AddEdge(a, nxt[tgt]);
+                if (nxt.Count > 1 && rng.NextDouble() < 0.45)           // sometimes branch
+                {
+                    int alt = tgt + (rng.Next(2) == 0 ? -1 : 1);
+                    if (alt >= 0 && alt < nxt.Count) AddEdge(a, nxt[alt]);
+                }
+            }
+            foreach (var b in nxt)
+                if (!cur.Exists(a => a.Next.Contains(b.Id)))            // fix-up: ensure reachable
+                {
+                    MissionNode best = cur[0]; int bestd = int.MaxValue;
+                    foreach (var a in cur) { int d = Math.Abs(a.Row - b.Row); if (d < bestd) { bestd = d; best = a; } }
+                    AddEdge(best, b);
+                }
+        }
+    }
+
+    static void AddEdge(MissionNode a, MissionNode b) { if (!a.Next.Contains(b.Id)) a.Next.Add(b.Id); }
+
+    /// Derive a deployment card from a node's kind: STANDARD combat, a tougher ELITE
+    /// (+force, bonus perk), a lighter SUPPLY (-force, full heal), or the capstone
+    /// BOSS (always Eliminate so the WARLORD must actually fall). Objective varies
+    /// per row so branching nodes in a column offer different ops.
+    MissionCard CardForNode(MissionNode node)
+    {
+        int n = node.Mission;
+        Objective obj = ObjectiveFor(n + node.Row);
+        switch (node.Kind)
+        {
+            case NodeKind.Start:
+                return new MissionCard { Objective = ObjectiveFor(n), ModName = "STANDARD", Reward = RewardKind.None, RewardText = "-" };
+            case NodeKind.Boss:
+                return new MissionCard { Objective = Objective.Eliminate, ModName = "BOSS", Reward = RewardKind.None, RewardText = "Warlord" };
+            case NodeKind.Elite:
+                return new MissionCard { Objective = obj, ModName = "ELITE", EnemyDelta = 2, StatDelta = 1, Reward = RewardKind.BonusPerk, RewardText = "Bonus perk" };
+            case NodeKind.Supply:
+                return new MissionCard { Objective = obj, ModName = "SUPPLY", EnemyDelta = -1, StatDelta = -1, Reward = RewardKind.Heal, RewardText = "Full squad heal" };
+            default:
+                return new MissionCard { Objective = obj, ModName = "STANDARD", Reward = RewardKind.None, RewardText = "-" };
+        }
+    }
+
+    /// Harness jump: walk the map greedily to a node in the target mission's column,
+    /// marking the path visited and adopting that node's card (so the post-mission
+    /// barracks shows the correct downstream choices).
+    public void JumpTo(int mission)
+    {
+        if (Map.Count == 0) return;
+        int targetCol = Math.Clamp(mission - 1, 0, MaxMissions - 1);
+        MapPos = 0; Map[0].Visited = true;
+        var node = Map[0];
+        while (node.Col < targetCol && node.Next.Count > 0)
+        {
+            node = Map[node.Next[0]];
+            node.Visited = true;
+            MapPos = node.Id;
+        }
+        CurrentCard = node.Card;
+    }
 
     /// Objective rotation baseline: Eliminate / Hack / Evac / Escort, repeating.
     public static Objective ObjectiveFor(int n) => ((n - 1) % 4) switch
@@ -115,6 +258,12 @@ public class Run
         Fallen.Clear();
         Report.Clear();
         PendingPerks.Clear();
+        // generate the branching campaign map and seat the squad at its START node
+        MapSeed = Util.RandInt(1, int.MaxValue - 1);
+        GenerateMap(MapSeed);
+        MapPos = 0;
+        Map[0].Visited = true;
+        CurrentCard = Map[0].Card;
     }
 
     /// Apply promotions (from accumulated kills) and field-heal to the survivors,

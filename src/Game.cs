@@ -137,10 +137,10 @@ public class Game
     public void StartMission(int startAt = 1)
     {
         _run = new Run();
-        _run.Start();
+        _run.Start();                       // builds the campaign map, seats at the START node
         Players = _run.Squad;
         int n = Util.Clamp(startAt, 1, Run.MaxMissions);
-        _run.CurrentCard = Run.StandardCard(n);
+        if (n > 1) _run.JumpTo(n);           // harness: advance along the map to the requested op
         SetupMission(n);
     }
 
@@ -235,6 +235,17 @@ public class Game
     {
         _run.DebriefSurvivors();
         _run.GenerateOffers(_run.Mission + 1);
+        Phase = Phase.Barracks;
+    }
+
+    /// Harness hook (screenshot only): show the branching campaign map mid-run with a
+    /// couple of columns already cleared, the shop/perks skipped.
+    public void DebugCampaignMap()
+    {
+        _run.JumpTo(3);                  // visit cols 0-2; current sits at mission 3
+        _run.DebriefSurvivors();
+        _run.PendingPerks.Clear();       // skip promotions for the screenshot
+        _shopDone = true;                // skip requisition for the screenshot
         Phase = Phase.Barracks;
     }
 
@@ -563,7 +574,11 @@ public class Game
                 {
                     if (AutoPlay) ChoosePerk(0); else HandlePerkClick();
                 }
-                else if (AutoPlay) ChooseCard(0);        // then choose the next deployment
+                else if (_run.NextNodes().Count > 0)     // then pick the next node on the campaign map
+                {
+                    if (AutoPlay) ChooseNode(_run.NextNodes()[0].Id); else HandleNodeClick();
+                }
+                else if (AutoPlay) ChooseCard(0);        // fallback: deployment cards
                 else HandleCardClick();
                 break;
             case Phase.Win:
@@ -1607,6 +1622,28 @@ public class Game
         var m = Raylib.GetMousePosition();
         for (int i = 0; i < Hud.MissionCards.Length; i++)
             if (Raylib.CheckCollisionPointRec(m, Hud.MissionCards[i])) { ChooseCard(i); return; }
+    }
+
+    /// Advance along the campaign map: a reachable node was chosen, so adopt its
+    /// deployment card and deploy to the next mission.
+    void ChooseNode(int nodeId)
+    {
+        var cur = _run.CurrentNode;
+        if (cur == null || !cur.Next.Contains(nodeId)) return;
+        var node = _run.Map[nodeId];
+        _run.MapPos = nodeId;
+        node.Visited = true;
+        _run.CurrentCard = node.Card;
+        Audio.Play("select");
+        NextMission();
+    }
+
+    void HandleNodeClick()
+    {
+        if (!Raylib.IsMouseButtonPressed(MouseButton.Left)) return;
+        var m = Raylib.GetMousePosition();
+        foreach (var (id, rect) in Hud.NodeBtns)
+            if (Raylib.CheckCollisionPointRec(m, rect)) { ChooseNode(id); return; }
     }
 
     // ---------------- overlay click ----------------
