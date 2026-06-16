@@ -845,18 +845,22 @@ Before stopping:
 > with **3.1** (highest value, answers the death-consequence feedback). Nothing built
 > yet — this was a planning pass.
 
-> **LATEST SESSION SUMMARY (read this first).** All of Phase 1 (1-7) and Phase 2
-> A/B/C/E/F are DONE and on `main` (builds 0/0, autoplay clean, `SIGHTLINE_SAVETEST`
-> + `SIGHTLINE_COMBATTEST` both PASS). This session shipped 8 PRs: **E** run save/load
-> (CONTINUE on intro), **C** intel currency + requisition shop (4 items incl. FRAG
-> CACHE), **B** MEDIC enemy, **F** biome-tinted cover/plateaus, 3 new authored arenas,
-> high-ground-sees-over-low-cover, accurate run-over card, and the FRAG CACHE upgrade.
-> **The ONLY remaining Phase-2 main item is D (procedural music)** — deliberately NOT
-> done here because it can't be verified in this sandbox (no audio device); do it on a
-> machine where you can hear it, building on `src/Audio.cs`. Other open polish:
-> save/load currently checkpoints at mission START only (mid-mission/barracks state is
-> not saved); a VIP-EXTRACTED win flourish; a 2nd elevation tier; secondary objectives;
-> themed-per-biome arena selection. The detailed per-feature notes below remain valid.
+> **LATEST SESSION SUMMARY (read this first).** Phase 1 (1-7), Phase 2 A/B/C/E/F, and
+> Phase 3 items **3.1, 3.2, 3.5, 3.11** were already DONE on `main`. **This session
+> shipped 3 more (PRs #29/#30/#31, all merged to `main`):** **3.3 branching campaign map**
+> (Slay-the-Spire node DAG replacing the deploy-card pick; `Run.Map`/`MapSeed`,
+> `Hud.DrawCampaignMap`, `Game.ChooseNode`), **3.4 utility items** (smoke/flash/barricade,
+> a 2nd throwable by class, key 6; `Grid.Smoke` LoS-blocking layer), and **3.6a
+> destructible cover** (`Grid.CoverHp`; grenades + LMG/shotgun degrade High→Low→gone).
+> Build is 0/0; `SIGHTLINE_SAVETEST`/`COMBATTEST`/`ITEMTEST`/`COVERTEST`/`STATUSTEST`/
+> `TRAITTEST` all PASS; autoplay clean across seeds + mission jumps incl. the BOSS node.
+> **Top remaining ROADMAP items (in priority order):** Phase 2 **D (procedural music)** —
+> still a blind ship here (no audio device; do it where you can hear it); **3.6b** the 2nd
+> elevation tier (taller plateaus + ramps); **3.7** new enemy archetypes (drone/shielded/
+> sapper + recurring mid-boss); **3.8** new objectives (Defend/Sabotage/Rescue); **3.9**
+> secondary objectives. Smaller open polish: enemy AI doesn't use utility items;
+> mid-mission save granularity; VIP-EXTRACTED win flourish; themed-per-biome arenas.
+> Detailed per-feature notes are in the WIP NOTES block above (newest first).
 
 Done: items 1 (audio), 2 (juice), 3 (campaign meta-loop), **4 (tactical depth —
 grenades + pods + elevation)**, and **5 (map variety & objectives) is now COMPLETE**:
