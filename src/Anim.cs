@@ -221,7 +221,7 @@ public class GrenadeAnim : Anim
                 g.KillUnit(u);
                 if (Thrower.Team == Team.Player && u.Team == Team.Enemy) g.CreditKill(Thrower);
             }
-            else g.MarkPlayerHurt(u);
+            else { g.MarkPlayerHurt(u); u.AddStatus(StatusKind.Burning, 2); }   // blast leaves them on fire
         }
         foreach (int pod in wokePods) g.ActivatePod(pod);   // the blast wakes survivors
     }

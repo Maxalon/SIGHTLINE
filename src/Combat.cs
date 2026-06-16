@@ -58,6 +58,7 @@ public static class Combat
         if (a.Steady) hit += SteadyAim;          // sharpshooter: braced shot
         if (a.Suppress > 0) hit -= a.Suppress;   // gunner: suppressed shooter
         if (a.Wound > 0) hit -= Unit.WoundAim;   // attrition: a wounded shooter is shakier
+        if (a.HasStatus(StatusKind.Disoriented)) hit -= Unit.DisorientAim;  // dazed: can't aim straight
         // promotion perks (attacker)
         if (a.HasPerk(Perk.LockOn) && coverLevel == 0) hit += Unit.PerkAim;
         if (a.HasPerk(Perk.CloseQuarters) && dist <= Unit.CloseRange) hit += Unit.PerkAim;

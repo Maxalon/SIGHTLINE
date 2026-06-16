@@ -17,6 +17,12 @@ public enum Perk { LockOn, Hardened, Reflexes, Bandolier, CloseQuarters, Marksma
 /// Each is a small passive read in Combat.ComputeOdds, so veterans matter.
 public enum Trait { Killer, ColdBlood, IronWill, Vengeful }
 
+/// Transient combat status effects (per-mission, never persisted). Burning/Bleed are
+/// damage-over-time, Stun costs an action, Disoriented dulls aim + denies overwatch.
+public enum StatusKind { Burning, Bleed, Stun, Disoriented }
+
+public class Status { public StatusKind Kind; public int Turns; }
+
 public class Weapon
 {
     public string Name;
@@ -102,6 +108,20 @@ public class Unit
 
     // a name with the earned nickname folded in, e.g. VEGA "REAPER"
     public string FullName => string.IsNullOrEmpty(Nickname) ? Name : $"{Name} \"{Nickname}\"";
+
+    // ---- combat status effects (3.5); per-mission, cleared in Game.SetupMission ----
+    public System.Collections.Generic.List<Status> Statuses = new();
+    public bool HasStatus(StatusKind k)
+    {
+        foreach (var s in Statuses) if (s.Kind == k && s.Turns > 0) return true;
+        return false;
+    }
+    /// Apply a status, or refresh it to the longer of the two durations.
+    public void AddStatus(StatusKind k, int turns)
+    {
+        foreach (var s in Statuses) if (s.Kind == k) { s.Turns = Math.Max(s.Turns, turns); return; }
+        Statuses.Add(new Status { Kind = k, Turns = turns });
+    }
 
     // transient per-mission feat tracking (reset in Game.SetupMission; never persisted)
     public bool FeatMultiKill;  // 2+ kills in a single turn this mission
@@ -193,6 +213,11 @@ public class Unit
     public const int VengefulAim = 12;   // Vengeful: +aim while a squadmate has fallen this mission
     public const int IronWillHp = 2;     // IronWill: permanent +max HP (granted at debrief)
     public const int BondAim = 10;       // Bond: +aim while a bonded squadmate is adjacent
+
+    // status-effect magnitudes (3.5)
+    public const int BurnDamage = 2;     // Burning: HP lost at the unit's turn start
+    public const int BleedDamage = 1;    // Bleed: HP lost per tile moved
+    public const int DisorientAim = 15;  // Disoriented: aim penalty (+ no overwatch)
 
     public void BeginTurn()
     {
@@ -301,6 +326,28 @@ public static class TraitDef
         Trait.ColdBlood => "a clutch kill while bloodied",
         Trait.IronWill  => "surviving near death",
         Trait.Vengeful  => "avenging a fallen squadmate",
+        _ => "",
+    };
+}
+
+/// Display metadata for combat status effects (short code + label).
+public static class StatusDef
+{
+    public static string Code(StatusKind k) => k switch
+    {
+        StatusKind.Burning => "BRN",
+        StatusKind.Bleed => "BLD",
+        StatusKind.Stun => "STN",
+        StatusKind.Disoriented => "DAZ",
+        _ => "?",
+    };
+
+    public static string Name(StatusKind k) => k switch
+    {
+        StatusKind.Burning => "BURNING",
+        StatusKind.Bleed => "BLEEDING",
+        StatusKind.Stun => "STUNNED",
+        StatusKind.Disoriented => "DISORIENTED",
         _ => "",
     };
 }

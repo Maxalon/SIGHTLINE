@@ -237,6 +237,11 @@ seeds (mix of WIN/LOSE, no exceptions):
   Two soldiers who survive 3 missions together forge a **bond** (`Unit.Bonds`,
   +10 aim while adjacent). Dossier + roster surface all of it; persisted in the save.
   (Phase 3 item 3.2.)
+- **Status effects:** transient per-mission `Unit.Statuses` — **Burning** (DoT at turn
+  start), **Bleed** (DoT per step), **Stun** (lose an action), **Disoriented** (−aim, no
+  overwatch). Ticked in `Game.TickStatuses` (DoT via `Game.EnvDamage`), read in
+  `Combat.ComputeOdds`/`DoOverwatch`; on-unit BRN/BLD/STN/DAZ codes. Grenade survivors
+  catch fire (live source); the rest get their sources in 3.4/3.7. (Phase 3 item 3.5.)
 - **Recruits:** the barracks backfills empty squad slots with fresh rookies
   (`Mission.MakeRecruit`, `Run.DebriefSurvivors`) so casualties don't death-spiral.
 - **Perk-based promotions:** each rank-up is a pick-1-of-2 perk choice in the
@@ -540,12 +545,23 @@ code to `main`.
       grenades (`Unit`), optional class/loadout choice. Verify: a COMBATTEST-style LoS
       check (smoke blocks a clear sightline) + autoplay.
 
-- [ ] **3.5 Status effects.** `Unit.Statuses` (list of {kind, turnsLeft}); kinds
-      Burning (DoT at turn start), Bleed (DoT on move), Stun (lose one action),
-      Disoriented (−Aim, no overwatch). Tick in `BeginTurn`/`StartPlayerTurn` with FX +
-      floating text; `Combat.ComputeOdds` reads Disoriented. Sources: incendiary
-      grenade/weapon, flashbang (3.4), specific enemies (3.7). Persist nothing
-      (per-mission). Verify: deterministic DoT/stun test + autoplay.
+- [x] **3.5 Status effects.** DONE. `Unit.Statuses` (`List<Status>` of {`StatusKind`,
+      `Turns`}) + `Unit.AddStatus`/`HasStatus`; per-mission, cleared in `Game.SetupMission`,
+      never persisted. Kinds: **Burning** (DoT at turn start), **Bleed** (DoT per tile
+      moved), **Stun** (lose one action), **Disoriented** (−15 aim + can't overwatch).
+      Ticked in `Game.TickStatuses` (called right after `BeginTurn` in `StartPlayerTurn`/
+      `EndPlayerTurn`/first-turn `SetupMission`); Bleed ticks in `OnUnitEnteredTile`; DoT
+      flows through `Game.EnvDamage` (source-less damage + FX + kill/near-death). Reads:
+      `Combat.ComputeOdds` (`StatusKind.Disoriented` → −`Unit.DisorientAim`), `DoOverwatch`
+      + the AI overwatch branch both refuse while disoriented. Magnitudes are consts on
+      `Unit` (`BurnDamage`/`BleedDamage`/`DisorientAim`). FX: floating "-n BURN/BLEED"
+      text + `Renderer` draws stacked status codes (BRN/BLD/STN/DAZ, `StatusDef.Code`)
+      under each figure. **Live source:** grenade survivors catch fire (`GrenadeAnim` →
+      `AddStatus(Burning, 2)`), so autoplay exercises it. Verify: `SIGHTLINE_STATUSTEST=1`
+      → `STATUSTEST: PASS` (burn/bleed/stun/disorient tick+read) + `SIGHTLINE_STATUS=1`
+      screenshot. **TODO:** the *system* is complete + tested, but Bleed/Stun/Disoriented
+      have no in-game source yet — those land with 3.4 (flash/incendiary utility items)
+      and 3.7 (status-inflicting enemies).
 
 - [ ] **3.6 Destructible high cover + 2nd elevation tier.** (a) Give cover tiles HP
       (`Grid.CoverHp[,]`); grenades + heavy fire (LMG/shotgun point-blank) chip it,
@@ -615,6 +631,23 @@ Before stopping:
 4. Tell the human to open a fresh session (they'll send only `.`).
 
 ### WIP NOTES
+
+> **3.5 STATUS EFFECTS (latest).** Transient combat statuses shipped. New on `Unit`:
+> `Statuses` (`List<Status>`), `HasStatus`/`AddStatus`, magnitude consts
+> (`BurnDamage=2`/`BleedDamage=1`/`DisorientAim=15`); `StatusKind`/`Status`/`StatusDef`
+> in `Unit.cs`. Tick path: `Game.TickStatuses(u)` runs right after each `BeginTurn`
+> (player: `StartPlayerTurn` + first-turn `SetupMission`; enemy: `EndPlayerTurn`) —
+> applies Burning DoT + Stun (−1 action), decays every timer; Bleed ticks per step in
+> `OnUnitEnteredTile`. All DoT routes through `Game.EnvDamage` (source-less damage + FX +
+> kill/`MarkPlayerHurt`). Reads: `Combat.ComputeOdds` (Disoriented −aim), `DoOverwatch` +
+> the AI overwatch branch both bail while Disoriented. Statuses cleared per mission in
+> `SetupMission` (added to the feat-reset loop); never persisted. Renderer draws stacked
+> BRN/BLD/STN/DAZ codes under each figure. **Live source so far = grenades** (survivors
+> `AddStatus(Burning,2)` in `GrenadeAnim.Explode`). Verify: `SIGHTLINE_STATUSTEST=1` →
+> `STATUSTEST: PASS`; `SIGHTLINE_STATUS=1` shot. **Next:** wire the remaining sources —
+> 3.4 (incendiary/flash utility items → Burning/Disoriented) and 3.7 (status-inflicting
+> enemies). The system + tooltips-on-unit are done; the shot tooltip does NOT yet flag
+> a target's status.
 
 > **3.2 SOLDIER IDENTITY (latest).** Nicknames + traits + bonds shipped. New data on
 > `Unit`: `Nickname`/`FullName`, `Traits`+`HasTrait`, `Bonds`, plus transient per-mission

@@ -180,9 +180,9 @@ public class Game
         _autoSig = -1; _autoStall = 0;
         Phase = Phase.PlayerTurn;
         foreach (var u in Players) u.BeginTurn();
-        // per-mission feat tracking starts clean each mission
+        // per-mission feat tracking + status effects start clean each mission
         foreach (var u in Players)
-        { u.FeatMultiKill = u.FeatClutch = u.FeatVengeful = u.WasNearDeath = u.AllyDown = false; u.BondAura = false; }
+        { u.FeatMultiKill = u.FeatClutch = u.FeatVengeful = u.WasNearDeath = u.AllyDown = false; u.BondAura = false; u.Statuses.Clear(); }
         foreach (var u in Enemies) { u.BeginTurn(); u.OnOverwatch = false; }
         Selected = Players.FirstOrDefault(p => p.CanAct);
         AimMode = false;
@@ -334,6 +334,11 @@ public class Game
     public void OnUnitEnteredTile(Unit mover)
     {
         if (!mover.Alive) return;
+        if (mover.HasStatus(StatusKind.Bleed))   // bleeding worsens with every step
+        {
+            EnvDamage(mover, Unit.BleedDamage, "BLEED", Pal.RGBA(205, 45, 45));
+            if (!mover.Alive) return;
+        }
         if (mover.Team == Team.Player) CheckPodActivation();  // reveal pods while advancing
         var watchers = mover.Team == Team.Player ? Enemies : Players;
         int insertAt = 1;
@@ -403,6 +408,43 @@ public class Game
     {
         if (d.Team == Team.Player && !d.IsVip && d.Alive && d.MaxHp > 0 && d.Hp * 4 <= d.MaxHp)
             d.WasNearDeath = true;
+    }
+
+    /// Apply per-turn status effects when a unit's turn begins (call right after its
+    /// BeginTurn): burning DoT, stun (lose one action), then decay every timer. Bleed
+    /// is ticked separately on movement (OnUnitEnteredTile). Per-mission, no persistence.
+    public void TickStatuses(Unit u)
+    {
+        if (!u.Alive || u.Statuses.Count == 0) return;
+        foreach (var s in u.Statuses)
+        {
+            if (s.Turns <= 0) continue;
+            switch (s.Kind)
+            {
+                case StatusKind.Burning:
+                    EnvDamage(u, Unit.BurnDamage, "BURN", Pal.RGBA(255, 140, 40));
+                    break;
+                case StatusKind.Stun:
+                    if (u.ActionsLeft > 0) u.ActionsLeft--;
+                    Fx.PopText(u.Pos + new Vector2(0, -30), "STUNNED", Pal.RGBA(225, 205, 95), 18f);
+                    break;
+            }
+            s.Turns--;
+            if (!u.Alive) break;          // a DoT can drop the unit mid-tick
+        }
+        u.Statuses.RemoveAll(s => s.Turns <= 0);
+    }
+
+    /// Source-less damage (status DoT / hazards): apply, splash FX, kill or note hurt.
+    public void EnvDamage(Unit u, int dmg, string label, Color col)
+    {
+        if (!u.Alive) return;
+        u.Hp -= dmg;
+        u.Flash = 1f;
+        Fx.Burst(u.Pos, col, 8, 130f, 0.4f, 3f, true);
+        Fx.PopText(u.Pos + new Vector2(0, -26), $"-{dmg} {label}", col, 20f);
+        if (u.Hp <= 0) { u.Hp = 0; KillUnit(u); }
+        else MarkPlayerHurt(u);
     }
 
     void FeatBanner(Unit u, string what)
@@ -1012,6 +1054,8 @@ public class Game
     void DoOverwatch()
     {
         if (Selected == null || !Selected.CanAct || Selected.Ammo <= 0) return;
+        if (Selected.HasStatus(StatusKind.Disoriented))
+        { Fx.PopText(Selected.Pos + new Vector2(0, -30), "DISORIENTED", Pal.Foe, 16f); return; }
         Selected.OnOverwatch = true;
         Selected.ActionsLeft = 0;
         Fx.PopText(Selected.Pos + new Vector2(0, -30), "OVERWATCH", Pal.Accent, 18f);
@@ -1119,7 +1163,7 @@ public class Game
         Selected = null;
         MoveCost = null;
         Phase = Phase.EnemyTurn;
-        foreach (var e in Enemies) if (e.Alive) e.BeginTurn();
+        foreach (var e in Enemies) if (e.Alive) { e.BeginTurn(); TickStatuses(e); }
         _aiUnits = AliveEnemies().Where(e => e.Active).ToList();  // dormant pods don't act
         _aiIdx = 0;
         _aiStage = AiStage.PickNext;
@@ -1133,7 +1177,7 @@ public class Game
         _turnCount++;
         Phase = Phase.PlayerTurn;
         if (AutoPlay) AutoStallCheck();
-        foreach (var p in Players) if (p.Alive) p.BeginTurn();
+        foreach (var p in Players) if (p.Alive) { p.BeginTurn(); TickStatuses(p); }
         foreach (var e in Enemies) if (e.Alive) { e.ReactedThisTurn = false; e.Suppress = 0; } // OW resets; suppression expires
         Selected = Players.FirstOrDefault(p => p.CanAct);
         AimMode = false;
@@ -1205,7 +1249,7 @@ public class Game
                     Enqueue(new WaitAnim(0.2f), Team.Enemy);
                     Enqueue(new ShotAnim(e, _aiPlan.ShootTarget, res), Team.Enemy);
                 }
-                else if (_aiPlan.Overwatch && e.ActionsLeft > 0 && e.Ammo > 0)
+                else if (_aiPlan.Overwatch && e.ActionsLeft > 0 && e.Ammo > 0 && !e.HasStatus(StatusKind.Disoriented))
                 {
                     e.OnOverwatch = true; e.ActionsLeft = 0;
                     Fx.PopText(e.Pos + new Vector2(0, -30), "OVERWATCH", Pal.Accent, 16f);
@@ -1376,6 +1420,18 @@ public class Game
         if (c.Count > 1) c[1].Wound = 1;
     }
 
+    /// Harness hook (screenshot only): paint sample status effects on soldiers/foes so
+    /// the on-unit status codes (BRN/BLD/STN/DAZ) can be verified (item 3.5).
+    public void DebugStatus()
+    {
+        var c = Players.Where(p => !p.IsVip).ToList();
+        if (c.Count > 0) c[0].AddStatus(StatusKind.Burning, 2);
+        if (c.Count > 1) c[1].AddStatus(StatusKind.Bleed, 2);
+        if (c.Count > 2) c[2].AddStatus(StatusKind.Stun, 1);
+        if (c.Count > 3) c[3].AddStatus(StatusKind.Disoriented, 2);
+        foreach (var e in Enemies) { e.Active = true; if (e.Alive) { e.AddStatus(StatusKind.Burning, 2); break; } }
+    }
+
     /// Harness hook (screenshot only): a decorated veteran (nickname/traits/bond) in
     /// the barracks promotion screen, to verify the dossier surfaces identity (3.2).
     public void DebugTraits()
@@ -1434,6 +1490,61 @@ public class Game
         string verdict = (stillAlive == 0 && carried == 0) ? "PASS" : "FAIL";
         return $"DEATHTEST: {verdict} | soldiersAliveAfterKill={stillAlive} phase={Phase} " +
                $"fallen={_run.Fallen.Count} before=[{string.Join(",", before)}] after=[{string.Join(",", after)}]";
+    }
+
+    /// Headless self-test (SIGHTLINE_STATUSTEST): status effects tick, decay, and read
+    /// correctly — burning/bleed DoT, stun (lose an action), disoriented (aim + no
+    /// overwatch). Needs a tiny window (Game uses tile math). Returns a one-line report.
+    public string StatusSelfTest()
+    {
+        NoPersist = true;
+        _run = new Run(); _run.Start();
+        _run.CurrentCard = new MissionCard { Objective = Objective.Eliminate, ModName = "STANDARD", Reward = RewardKind.None };
+        SetupMission(1);
+        var fails = new List<string>();
+        var u = Players.First(p => !p.IsVip);
+
+        // (1) Burning DoT applies at turn start, twice, then expires
+        u.Hp = u.MaxHp; int hp0 = u.Hp;
+        u.AddStatus(StatusKind.Burning, 2);
+        u.BeginTurn(); TickStatuses(u);
+        if (u.Hp != hp0 - Unit.BurnDamage) fails.Add("burnDmg");
+        if (!u.HasStatus(StatusKind.Burning)) fails.Add("burnPersist");
+        u.BeginTurn(); TickStatuses(u);
+        if (u.HasStatus(StatusKind.Burning)) fails.Add("burnExpire");
+        if (u.Hp != hp0 - 2 * Unit.BurnDamage) fails.Add("burnDmg2");
+
+        // (2) Stun costs one action, then expires
+        u.AddStatus(StatusKind.Stun, 1);
+        u.BeginTurn(); TickStatuses(u);
+        if (u.ActionsLeft != 1) fails.Add("stunAction");
+        u.BeginTurn(); TickStatuses(u);
+        if (u.ActionsLeft != 2) fails.Add("stunExpire");
+
+        // (3) Disoriented dulls aim and blocks overwatch (clear cover so the delta is clean)
+        var d = Enemies.First();
+        u.X = 5; u.Y = 5; d.X = 9; d.Y = 5;
+        for (int dx = -1; dx <= 1; dx++)
+            for (int dy = -1; dy <= 1; dy++)
+                if (Grid.InBounds(d.X + dx, d.Y + dy)) { Grid.Tiles[d.X + dx, d.Y + dy] = TileType.Floor; Grid.Height[d.X + dx, d.Y + dy] = 0; }
+        Grid.Height[u.X, u.Y] = 0;
+        int baseHit = Combat.ComputeOdds(Grid, u, d).HitChance;
+        u.AddStatus(StatusKind.Disoriented, 2);
+        int dazHit = Combat.ComputeOdds(Grid, u, d).HitChance;
+        if (baseHit - dazHit != Unit.DisorientAim) fails.Add("dazAim");
+        Selected = u; u.ActionsLeft = 2; u.OnOverwatch = false; u.SyncPos();
+        DoOverwatch();
+        if (u.OnOverwatch) fails.Add("dazOverwatch");
+
+        // (4) Bleed costs HP on each step
+        u.Hp = u.MaxHp; int bhp = u.Hp;
+        u.AddStatus(StatusKind.Bleed, 2);
+        OnUnitEnteredTile(u);
+        if (u.Hp != bhp - Unit.BleedDamage) fails.Add("bleedMove");
+
+        return fails.Count == 0
+            ? "STATUSTEST: PASS (burn/bleed DoT, stun, disorient aim+overwatch all hold)"
+            : "STATUSTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
     void ChooseCard(int i)
