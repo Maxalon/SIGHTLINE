@@ -1002,21 +1002,25 @@ Before stopping:
 > yet — this was a planning pass.
 
 > **LATEST SESSION SUMMARY (read this first).** Phase 1 (1-7), Phase 2 A/B/C/E/F, and
-> Phase 3 items **3.1, 3.2, 3.5, 3.11** were already DONE on `main`. **This session
-> shipped 3 more (PRs #29/#30/#31, all merged to `main`):** **3.3 branching campaign map**
-> (Slay-the-Spire node DAG replacing the deploy-card pick; `Run.Map`/`MapSeed`,
-> `Hud.DrawCampaignMap`, `Game.ChooseNode`), **3.4 utility items** (smoke/flash/barricade,
-> a 2nd throwable by class, key 6; `Grid.Smoke` LoS-blocking layer), and **3.6a
-> destructible cover** (`Grid.CoverHp`; grenades + LMG/shotgun degrade High→Low→gone).
-> Build is 0/0; `SIGHTLINE_SAVETEST`/`COMBATTEST`/`ITEMTEST`/`COVERTEST`/`STATUSTEST`/
-> `TRAITTEST` all PASS; autoplay clean across seeds + mission jumps incl. the BOSS node.
-> **Top remaining ROADMAP items (in priority order):** Phase 2 **D (procedural music)** —
-> still a blind ship here (no audio device; do it where you can hear it); **3.6b** the 2nd
-> elevation tier (taller plateaus + ramps); **3.7** new enemy archetypes (drone/shielded/
-> sapper + recurring mid-boss); **3.8** new objectives (Defend/Sabotage/Rescue); **3.9**
-> secondary objectives. Smaller open polish: enemy AI doesn't use utility items;
-> mid-mission save granularity; VIP-EXTRACTED win flourish; themed-per-biome arenas.
-> Detailed per-feature notes are in the WIP NOTES block above (newest first).
+> Phase 3 items **3.1, 3.2, 3.5, 3.11** were already DONE. **This session shipped NINE more
+> (PRs #29-#37, all merged to `main`):** **3.3** branching campaign map, **3.4** utility
+> items (smoke/flash/barricade), **3.6a** destructible cover, **3.6b** 2nd elevation tier
+> (+ commanding tier-2 high ground that sees over high cover), **3.7** new enemies (DRONE
+> WASP / SHIELD AEGIS / mid-boss BREAKER+WARDEN / SAPPER BREACH), **3.9** secondary
+> objectives (NO LOSSES / SWIFT / CLEAN SWEEP → +intel), **3.8 SABOTAGE** (plant K charges)
+> and **3.8 RESCUE** (free a caged captive → escort it out). Objective rotation is now a
+> 6-cycle (`Run.ObjectiveFor` %6). Build 0/0; SAVETEST/COMBATTEST/ITEMTEST/COVERTEST/
+> STATUSTEST/TRAITTEST all PASS; autoplay clean.
+> **Top remaining ROADMAP items (priority order):** **3.8 DEFEND** (the last objective —
+> hold a zone / survive N turns vs **mid-mission wave spawns**; needs a wave spawner in the
+> turn flow + a turn counter; most invasive of the objectives, deferred for a fresh
+> session); **3.10 / Phase 2 D procedural music** (BLIND SHIP here — no audio device; build
+> on `src/Audio.cs` where you can hear it); **3.12** onboarding tutorial; **3.13**
+> accessibility/display (brightness/contrast post-pass on the `Display` render-target,
+> colorblind `Pal` variants, UI text scale). Smaller polish: enemy AI doesn't use utility
+> items; AI doesn't exploit the commanding-view LoS; AEGIS only faces west; mid-mission save
+> granularity; themed-per-biome arenas. Harness objective-force hook
+> `SIGHTLINE_OBJ=sabotage|rescue`. Detailed per-feature notes in WIP NOTES (newest first).
 
 Done: items 1 (audio), 2 (juice), 3 (campaign meta-loop), **4 (tactical depth —
 grenades + pods + elevation)**, and **5 (map variety & objectives) is now COMPLETE**:
