@@ -180,6 +180,9 @@ public class Game
         _autoSig = -1; _autoStall = 0;
         Phase = Phase.PlayerTurn;
         foreach (var u in Players) u.BeginTurn();
+        // per-mission feat tracking starts clean each mission
+        foreach (var u in Players)
+        { u.FeatMultiKill = u.FeatClutch = u.FeatVengeful = u.WasNearDeath = u.AllyDown = false; u.BondAura = false; }
         foreach (var u in Enemies) { u.BeginTurn(); u.OnOverwatch = false; }
         Selected = Players.FirstOrDefault(p => p.CanAct);
         AimMode = false;
@@ -358,7 +361,13 @@ public class Game
     {
         d.Alive = false;
         d.Hp = 0;
-        if (d.Team == Team.Player) _run.Fallen.Add(d.Name);
+        if (d.Team == Team.Player)
+        {
+            _run.Fallen.Add(d.Name);
+            // a fallen squadmate fires up the survivors (Vengeful feat / trait)
+            if (!d.IsVip)
+                foreach (var p in Players) if (p.Alive && p != d && !p.IsVip) p.AllyDown = true;
+        }
         Color c = d.Team == Team.Player ? Pal.Friend : Pal.Foe;
         Fx.Burst(d.Pos, c, 30, 280f, 0.7f, 4f, true);
         Fx.Burst(d.Pos, Pal.RGBA(20, 25, 33), 16, 150f, 0.8f, 5f);
@@ -371,6 +380,51 @@ public class Game
         // purge any queued movement for the dead unit
         _anims.RemoveAll(a => a is MoveStepAnim m && m.Unit == d);
         if (Selected == d) Selected = null;
+    }
+
+    /// Credit a kill to a player and watch for FEATS (resolved into traits at the
+    /// barracks). Replaces the old inline `killer.Kills++` so both the rifle and the
+    /// grenade paths run the same feat checks. VIPs earn nothing.
+    public void CreditKill(Unit killer)
+    {
+        killer.Kills++;
+        if (killer.Team != Team.Player || killer.IsVip) return;
+        killer.KillsThisTurn++;
+        if (killer.KillsThisTurn >= 2 && !killer.FeatMultiKill)
+        { killer.FeatMultiKill = true; FeatBanner(killer, "MULTI-KILL"); }
+        if (killer.MaxHp > 0 && killer.Hp * 4 <= killer.MaxHp && !killer.FeatClutch)
+        { killer.FeatClutch = true; FeatBanner(killer, "CLUTCH KILL"); }
+        if (killer.AllyDown && !killer.FeatVengeful)
+        { killer.FeatVengeful = true; FeatBanner(killer, "AVENGED"); }
+    }
+
+    /// Note damage to a player so a near-death survival becomes a feat (IronWill).
+    public void MarkPlayerHurt(Unit d)
+    {
+        if (d.Team == Team.Player && !d.IsVip && d.Alive && d.MaxHp > 0 && d.Hp * 4 <= d.MaxHp)
+            d.WasNearDeath = true;
+    }
+
+    void FeatBanner(Unit u, string what)
+    {
+        ShowBanner($"FEAT: {u.Name} - {what}", false);
+        Fx.PopText(u.Pos + new Vector2(0, -40), "FEAT!", Pal.Accent, 22f);
+    }
+
+    /// Refresh each living soldier's bond aura: true when a bonded squadmate stands
+    /// adjacent (Chebyshev 1). Cheap (squad is tiny); drives the +aim bond bonus.
+    void UpdateBondAuras()
+    {
+        foreach (var u in Players)
+        {
+            u.BondAura = false;
+            if (!u.Alive || u.Bonds.Count == 0) continue;
+            foreach (var o in Players)
+            {
+                if (o == u || !o.Alive || !u.Bonds.Contains(o.Name)) continue;
+                if (Util.ChebyDist(u.X, u.Y, o.X, o.Y) <= 1) { u.BondAura = true; break; }
+            }
+        }
     }
 
     // ---------------- update ----------------
@@ -403,6 +457,7 @@ public class Game
         Fx.Update(t);
         foreach (var u in Players) { u.Flash = MathF.Max(0, u.Flash - t * 4f); u.Recoil *= MathF.Exp(-t * 17f); }
         foreach (var u in Enemies) { u.Flash = MathF.Max(0, u.Flash - t * 4f); u.Recoil *= MathF.Exp(-t * 17f); }
+        UpdateBondAuras();   // bonded squadmates buff each other while adjacent
         if (BannerTimer > 0) BannerTimer -= t;
 
         // advance animation queue
@@ -1319,6 +1374,22 @@ public class Game
         var c = Players.Where(p => !p.IsVip).ToList();
         if (c.Count > 0) c[0].Wound = 2;
         if (c.Count > 1) c[1].Wound = 1;
+    }
+
+    /// Harness hook (screenshot only): a decorated veteran (nickname/traits/bond) in
+    /// the barracks promotion screen, to verify the dossier surfaces identity (3.2).
+    public void DebugTraits()
+    {
+        if (_run.Squad.Count > 0)
+        {
+            var u = _run.Squad[0];
+            u.Nickname = "REAPER";
+            u.Traits.Add(Trait.Killer); u.Traits.Add(Trait.ColdBlood);
+            if (_run.Squad.Count > 1) { u.Bonds.Add(_run.Squad[1].Name); _run.Squad[1].Bonds.Add(u.Name); }
+            u.Kills = 3;                        // force a rank-up so the perk chooser opens
+        }
+        _run.DebriefSurvivors();
+        Phase = Phase.Barracks;
     }
 
     /// Harness hook (screenshot only): open the custom-tag editor on a soldier.

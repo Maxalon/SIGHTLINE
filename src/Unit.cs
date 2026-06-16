@@ -13,6 +13,10 @@ public enum AbilityKind { None, RunGun, Blitz, Steady, Suppress }
 /// Promotion perks: a soldier picks one each rank-up (see Run / barracks).
 public enum Perk { LockOn, Hardened, Reflexes, Bandolier, CloseQuarters, Marksman, Deadeye, Tank, Sprinter, Adrenal }
 
+/// Battlefield traits earned by FEATS (see Game feat hooks + Run.DebriefSurvivors).
+/// Each is a small passive read in Combat.ComputeOdds, so veterans matter.
+public enum Trait { Killer, ColdBlood, IronWill, Vengeful }
+
 public class Weapon
 {
     public string Name;
@@ -90,6 +94,24 @@ public class Unit
     public System.Collections.Generic.List<Perk> Perks = new();
     public bool HasPerk(Perk p) => Perks.Contains(p);
 
+    // ---- soldier identity (3.2): nickname + earned traits + bonds, all persist ----
+    public string Nickname;     // earned with the first feat; shown as NAME "NICK"
+    public System.Collections.Generic.List<Trait> Traits = new();
+    public bool HasTrait(Trait t) => Traits.Contains(t);
+    public System.Collections.Generic.List<string> Bonds = new();  // names of bonded squadmates
+
+    // a name with the earned nickname folded in, e.g. VEGA "REAPER"
+    public string FullName => string.IsNullOrEmpty(Nickname) ? Name : $"{Name} \"{Nickname}\"";
+
+    // transient per-mission feat tracking (reset in Game.SetupMission; never persisted)
+    public bool FeatMultiKill;  // 2+ kills in a single turn this mission
+    public bool FeatClutch;     // a kill while bloodied (<= 1/4 HP)
+    public bool FeatVengeful;   // a kill after a squadmate fell this mission
+    public bool WasNearDeath;   // dropped to <= 1/4 HP at some point this mission (survived = feat)
+    public bool AllyDown;       // a squadmate has been killed this mission
+    public int KillsThisTurn;   // reset each BeginTurn (multi-kill detection)
+    public bool BondAura;       // a bonded squadmate is adjacent (refreshed each frame by Game)
+
     public AbilityKind Ability => AbilityKindFor(Cls);
     public string AbilityName => Ability switch
     {
@@ -165,6 +187,13 @@ public class Unit
     public const int WoundAim = 12;      // aim penalty while Wound > 0
     public const int WoundMob = 1;       // mobility penalty while Wound > 0
 
+    // trait + bond magnitudes (read in Combat.ComputeOdds; one source of truth)
+    public const int KillerAim = 12;     // Killer: +aim vs targets already below half HP
+    public const int ColdBloodCrit = 15; // ColdBlood: +crit while bloodied (self <= half HP)
+    public const int VengefulAim = 12;   // Vengeful: +aim while a squadmate has fallen this mission
+    public const int IronWillHp = 2;     // IronWill: permanent +max HP (granted at debrief)
+    public const int BondAim = 10;       // Bond: +aim while a bonded squadmate is adjacent
+
     public void BeginTurn()
     {
         ActionsLeft = 2;
@@ -174,6 +203,7 @@ public class Unit
         RunGun = false;            // ability stances don't carry between turns
         Blitz = false;
         Steady = false;
+        KillsThisTurn = 0;         // multi-kill feat is per-turn
         // note: Suppress (a debuff applied by an enemy gunner) is cleared on the
         // victim's owner's next turn, NOT here, so it bites during the turn it's set.
     }
@@ -231,5 +261,56 @@ public static class PerkDef
         Perk.Sprinter => "+1 mobility",
         Perk.Adrenal => "+1 ability charge each mission",
         _ => "",
+    };
+}
+
+/// Names + descriptions for earned traits, and the feat that grants each.
+public static class TraitDef
+{
+    public static string Name(Trait t) => t switch
+    {
+        Trait.Killer    => "KILLER INSTINCT",
+        Trait.ColdBlood => "COLD BLOOD",
+        Trait.IronWill  => "IRON WILL",
+        Trait.Vengeful  => "VENGEFUL",
+        _ => "TRAIT",
+    };
+
+    public static string Code(Trait t) => t switch
+    {
+        Trait.Killer    => "KIL",
+        Trait.ColdBlood => "CLD",
+        Trait.IronWill  => "IRN",
+        Trait.Vengeful  => "VNG",
+        _ => "?",
+    };
+
+    public static string Desc(Trait t) => t switch
+    {
+        Trait.Killer    => "+12 aim vs wounded targets",
+        Trait.ColdBlood => "+15 crit while bloodied",
+        Trait.IronWill  => "+2 max HP (toughened)",
+        Trait.Vengeful  => "+12 aim after a squadmate falls",
+        _ => "",
+    };
+
+    // short note describing the feat that earns the trait (barracks report)
+    public static string Feat(Trait t) => t switch
+    {
+        Trait.Killer    => "a multi-kill turn",
+        Trait.ColdBlood => "a clutch kill while bloodied",
+        Trait.IronWill  => "surviving near death",
+        Trait.Vengeful  => "avenging a fallen squadmate",
+        _ => "",
+    };
+}
+
+/// A pool of earned nicknames, assigned with a soldier's first feat.
+public static class Nicknames
+{
+    public static readonly string[] Pool =
+    {
+        "REAPER", "GHOST", "MAVERICK", "DOC", "ACE", "VIPER", "BULLDOG", "HAWKEYE",
+        "SHADE", "IRON", "BLAZE", "NOMAD", "WIDOW", "TITAN", "SAINT", "FANG",
     };
 }

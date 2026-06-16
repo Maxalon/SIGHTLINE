@@ -61,7 +61,11 @@ public static class SaveGame
     // ---- mapping ----
     static RunDto ToDto(Run r)
     {
-        var dto = new RunDto { Mission = r.Mission, Intel = r.Intel, Fallen = new List<string>(r.Fallen) };
+        var dto = new RunDto
+        {
+            Mission = r.Mission, Intel = r.Intel, Fallen = new List<string>(r.Fallen),
+            BondTally = new Dictionary<string, int>(r.BondTally),
+        };
         foreach (var u in r.Squad)
             dto.Squad.Add(new UnitDto
             {
@@ -72,6 +76,9 @@ public static class SaveGame
                 CustomTag = u.CustomTag,
                 Wound = u.Wound,
                 Perks = u.Perks.ConvertAll(p => (int)p),
+                Nickname = u.Nickname,
+                Traits = u.Traits.ConvertAll(t => (int)t),
+                Bonds = new List<string>(u.Bonds),
             });
         var c = r.CurrentCard;
         if (c != null)
@@ -88,6 +95,7 @@ public static class SaveGame
     {
         var r = new Run { Mission = dto.Mission, Intel = dto.Intel, Squad = new List<Unit>() };
         if (dto.Fallen != null) r.Fallen = new List<string>(dto.Fallen);
+        if (dto.BondTally != null) r.BondTally = new Dictionary<string, int>(dto.BondTally);
         foreach (var d in dto.Squad)
         {
             var u = new Unit
@@ -97,9 +105,12 @@ public static class SaveGame
                 Weapon = Weapon.Make((WeaponKind)d.Weapon),
                 Kills = d.Kills, Rank = d.Rank, Alive = true,
                 BonusGrenades = d.BonusGrenades, CustomTag = d.CustomTag, Wound = d.Wound,
+                Nickname = d.Nickname,
             };
             u.Ammo = u.Weapon.Clip;
             if (d.Perks != null) foreach (var p in d.Perks) u.Perks.Add((Perk)p);
+            if (d.Traits != null) foreach (var t in d.Traits) u.Traits.Add((Trait)t);
+            if (d.Bonds != null) u.Bonds = new List<string>(d.Bonds);
             r.Squad.Add(u);
         }
         var cd = dto.Card;
@@ -121,14 +132,17 @@ public static class SaveGame
         public int Intel;
         public List<UnitDto> Squad = new();
         public List<string> Fallen = new();
+        public Dictionary<string, int> BondTally = new();
         public CardDto Card;
     }
 
     class UnitDto
     {
-        public string Name, Cls, CustomTag;
+        public string Name, Cls, CustomTag, Nickname;
         public int Hp, MaxHp, Aim, Mobility, Weapon, Kills, Rank, BonusGrenades, Wound;
         public List<int> Perks = new();
+        public List<int> Traits = new();
+        public List<string> Bonds = new();
     }
 
     class CardDto
@@ -156,8 +170,14 @@ public static class SaveGame
                 CustomTag = "BREACHER", Wound = 2,
             };
             a.Perks.Add(Perk.Deadeye); a.Perks.Add(Perk.Tank);
+            a.Nickname = "REAPER";
+            a.Traits.Add(Trait.Killer); a.Traits.Add(Trait.IronWill);
+            a.Bonds.Add("NOX");
             src.Squad.Add(a);
-            src.Squad.Add(new Unit { Name = "NOX", Cls = "SHARPSHOOTER", Team = Team.Player, Hp = 6, MaxHp = 6, Aim = 76, Mobility = 6, Weapon = Weapon.Make(WeaponKind.Sniper), Kills = 2, Rank = 1 });
+            var n = new Unit { Name = "NOX", Cls = "SHARPSHOOTER", Team = Team.Player, Hp = 6, MaxHp = 6, Aim = 76, Mobility = 6, Weapon = Weapon.Make(WeaponKind.Sniper), Kills = 2, Rank = 1 };
+            n.Bonds.Add("VEGA");
+            src.Squad.Add(n);
+            src.BondTally[Run.BondKey("VEGA", "NOX")] = 3;
             src.CurrentCard = new MissionCard { Objective = Objective.Hack, ModName = "ONSLAUGHT", EnemyDelta = 2, StatDelta = 1, Reward = RewardKind.BonusPerk, RewardText = "Bonus perk" };
 
             Save(src);
@@ -178,6 +198,10 @@ public static class SaveGame
             if (g0.CustomTag != "BREACHER") fails.Add("customTag");
             if (g0.Wound != 2) fails.Add("wound");
             if (!g0.HasPerk(Perk.Deadeye) || !g0.HasPerk(Perk.Tank) || g0.Perks.Count != 2) fails.Add("perks");
+            if (g0.Nickname != "REAPER") fails.Add("nickname");
+            if (!g0.HasTrait(Trait.Killer) || !g0.HasTrait(Trait.IronWill) || g0.Traits.Count != 2) fails.Add("traits");
+            if (g0.Bonds.Count != 1 || g0.Bonds[0] != "NOX") fails.Add("bonds");
+            if (!got.BondTally.TryGetValue(Run.BondKey("VEGA", "NOX"), out var bt) || bt != 3) fails.Add("bondTally");
             if (got.CurrentCard == null || got.CurrentCard.Objective != Objective.Hack ||
                 got.CurrentCard.EnemyDelta != 2 || got.CurrentCard.Reward != RewardKind.BonusPerk)
                 fails.Add("card");

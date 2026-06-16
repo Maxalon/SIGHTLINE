@@ -229,6 +229,14 @@ seeds (mix of WIN/LOSE, no exceptions):
 - **Wounds & attrition:** survivors that end a mission badly hurt carry a temporary
   `Unit.Wound` (−12 aim / −1 mobility) that decays over missions; a FIELD MEDKIT cures
   it. Shown as red "WOUNDED (n)" in the roster + dossier. (Phase 3 item 3.1 core.)
+- **Soldier identity (nicknames / traits / bonds):** veterans earn FEATS in combat —
+  a multi-kill turn, a clutch kill while bloodied, avenging a fallen squadmate, or
+  surviving near death — which resolve at the barracks into permanent **traits**
+  (KILLER INSTINCT / COLD BLOOD / VENGEFUL / IRON WILL; `Unit.Traits`, read in
+  `Combat.ComputeOdds`) plus a one-time **nickname** (`Unit.FullName` → `NAME "NICK"`).
+  Two soldiers who survive 3 missions together forge a **bond** (`Unit.Bonds`,
+  +10 aim while adjacent). Dossier + roster surface all of it; persisted in the save.
+  (Phase 3 item 3.2.)
 - **Recruits:** the barracks backfills empty squad slots with fresh rookies
   (`Mission.MakeRecruit`, `Run.DebriefSurvivors`) so casualties don't death-spiral.
 - **Perk-based promotions:** each rank-up is a pick-1-of-2 perk choice in the
@@ -489,16 +497,26 @@ code to `main`.
       deploy-short-handed* option (the squad still auto-backfills to 4, so a wipe doesn't
       yet shrink strength) — that's the remaining half of "attrition bites".
 
-- [ ] **3.2 Soldier identity (nicknames, traits, bonds).** Make veterans matter so
-      losing one hurts. `Unit.Nickname` + `Unit.Traits` (List) earned on feats
-      (clutch low-HP kill, multi-kill turn, surviving near-death) — hook the award in
-      `ShotAnim.Apply`/`KillUnit` and resolve in `DebriefSurvivors`; traits are small
-      passives read in `Combat.ComputeOdds` (e.g. "Cool Under Fire": +crit while
-      flanked; "Vengeful": +Aim after an ally dies this mission). **Bonds:** two
-      soldiers who survive N missions together buff each other when adjacent (read in
-      `Combat`). UI: dossier + roster show nickname/traits; a brief "FEAT" banner.
-      Persist all in `SaveGame`. Verify: deterministic feat-trigger test + dossier
-      screenshot.
+- [x] **3.2 Soldier identity (nicknames, traits, bonds).** DONE. `Unit.Nickname`
+      (shown as `NAME "NICK"` via `Unit.FullName`) + `Unit.Traits` (List) earned on
+      FEATS: **multi-kill turn** → KILLER INSTINCT (+12 aim vs wounded), **clutch kill
+      while bloodied** → COLD BLOOD (+15 crit while self ≤½ HP), **avenged a fallen
+      squadmate** → VENGEFUL (+12 aim while a squadmate is down), **survived near
+      death** → IRON WILL (+2 max HP). Feats are flagged during play in `Game.CreditKill`
+      (multi-kill/clutch/vengeful, with a "FEAT:" banner) + `Game.MarkPlayerHurt`
+      (near-death), and resolved into traits + a nickname in `Run.DebriefSurvivors`
+      (`GrantTrait`/`AssignNickname`). Traits read in `Combat.ComputeOdds`
+      (`Unit.HasTrait` + `KillerAim`/`ColdBloodCrit`/`VengefulAim`/`IronWillHp`).
+      **Bonds:** `Run.BondTally` (per-pair co-survival) forms a `Unit.Bonds` link after
+      `Run.BondThreshold` (3) shared missions (`Run.AdvanceBonds`); bonded squadmates
+      get **+10 aim while adjacent** (`Unit.BondAura`, refreshed each frame by
+      `Game.UpdateBondAuras`, read in `ComputeOdds`). UI: dossier shows nickname +
+      Traits + Bonds (gold); the roster strip shows the nickname + a live "BOND" tag.
+      Persisted in `SaveGame` (nickname/traits/bonds + BondTally). Verify:
+      `SIGHTLINE_TRAITTEST=1` → `TRAITTEST: PASS` + `SIGHTLINE_TRAITS=1` dossier
+      screenshot; `SIGHTLINE_SAVETEST` now round-trips identity too. **Still TODO (3.2
+      follow-ups):** trait/"FEAT" FX on the unit is minimal; tooltip doesn't yet flag
+      "+ BOND"/trait bonuses; bond progress shows no UI hint before it forms.
 
 - [ ] **3.3 Branching campaign map.** Replace the 3-card barracks pick with a small
       FTL/Slay-the-Spire node path. `Run.Map` = a generated DAG of `MissionNode`
@@ -597,6 +615,24 @@ Before stopping:
 4. Tell the human to open a fresh session (they'll send only `.`).
 
 ### WIP NOTES
+
+> **3.2 SOLDIER IDENTITY (latest).** Nicknames + traits + bonds shipped. New data on
+> `Unit`: `Nickname`/`FullName`, `Traits`+`HasTrait`, `Bonds`, plus transient per-mission
+> feat flags (`FeatMultiKill`/`FeatClutch`/`FeatVengeful`/`WasNearDeath`/`AllyDown`/
+> `KillsThisTurn`) and a per-frame `BondAura`. Feat detection lives in `Game.CreditKill`
+> (now the single kill-credit path — replaced the inline `A.Kills++`/`Thrower.Kills++`
+> in `ShotAnim`/`GrenadeAnim`) + `Game.MarkPlayerHurt`; `KillUnit` sets `AllyDown` on
+> survivors. Resolution (feat→trait→nickname) + bond progression are in
+> `Run.DebriefSurvivors` (`GrantTrait`/`AssignNickname`/`AdvanceBonds`, `Run.BondTally`+
+> `BondThreshold=3`). Combat reads in `Combat.ComputeOdds`; magnitudes are consts on
+> `Unit`. UI: `Hud.DrawDossier` (grown the perk-chooser dossier box 72→96 and pushed the
+> perk cards down) + roster strip. Persisted in `SaveGame` (UnitDto nickname/traits/bonds
+> + RunDto `BondTally`). Verify: `SIGHTLINE_TRAITTEST=1` (no window) and `SIGHTLINE_TRAITS=1`
+> shot. Gotchas: feat flags reset in `SetupMission` AND cleared in `DebriefSurvivors`
+> after resolving; `KillsThisTurn` resets in `Unit.BeginTurn`; bonds key pairs by name
+> (`Run.BondKey`, ordinal-sorted) so recruit name reuse is the only collision risk
+> (rare, benign). NOT done (follow-ups): trait/FEAT FX is minimal, no "+ BOND" tooltip
+> flag, no pre-bond progress hint.
 
 > **DISPLAY SETTINGS (latest).** `src/Display.cs` renders the fixed 1280x800 game to a
 > letterboxed render-target scaled to the window (essential on 4K). Pause menu adds

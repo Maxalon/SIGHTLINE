@@ -63,6 +63,11 @@ public static class Combat
         if (a.HasPerk(Perk.CloseQuarters) && dist <= Unit.CloseRange) hit += Unit.PerkAim;
         if (a.HasPerk(Perk.Marksman) && dist >= Unit.LongRange) hit += Unit.PerkAim;
 
+        // earned traits + bonds (attacker)
+        if (a.HasTrait(Trait.Killer) && d.MaxHp > 0 && d.Hp * 2 <= d.MaxHp) hit += Unit.KillerAim;
+        if (a.HasTrait(Trait.Vengeful) && a.AllyDown) hit += Unit.VengefulAim;
+        if (a.BondAura) hit += Unit.BondAim;     // a bonded squadmate stands adjacent
+
         hit = Util.Clamp(hit, 3, 95);
 
         int crit = a.Weapon.CritBase;
@@ -70,6 +75,7 @@ public static class Combat
         if (highGround) crit += HighGroundCrit;  // shooting down rewards crits
         if (a.Steady) crit += SteadyCrit;        // braced shot also crits harder
         if (a.HasPerk(Perk.Deadeye)) crit += Unit.PerkCrit;
+        if (a.HasTrait(Trait.ColdBlood) && a.MaxHp > 0 && a.Hp * 2 <= a.MaxHp) crit += Unit.ColdBloodCrit;
         if (d.Hunkered) crit = 0;               // hunkered can't be crit
         crit = Util.Clamp(crit, 0, 100);
 
