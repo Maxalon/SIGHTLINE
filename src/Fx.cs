@@ -116,6 +116,21 @@ public class Fx
         });
     }
 
+    /// A prominent, slow-fading, barely-rising stamp (e.g. a KIA marker on death).
+    public void Stamp(Vector2 at, string text, Color col, float size, float life)
+    {
+        Texts.Add(new FloatText
+        {
+            Pos = at,
+            Text = text,
+            Color = col,
+            Life = life,
+            MaxLife = life,
+            Size = size,
+            Rise = 7f,
+        });
+    }
+
     static Vector2 Rotate(Vector2 v, float a)
     {
         float c = MathF.Cos(a), s = MathF.Sin(a);

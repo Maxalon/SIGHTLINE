@@ -242,6 +242,11 @@ seeds (mix of WIN/LOSE, no exceptions):
   overwatch). Ticked in `Game.TickStatuses` (DoT via `Game.EnvDamage`), read in
   `Combat.ComputeOdds`/`DoOverwatch`; on-unit BRN/BLD/STN/DAZ codes. Grenade survivors
   catch fire (live source); the rest get their sources in 3.4/3.7. (Phase 3 item 3.5.)
+- **Death feedback:** a fallen soldier gets a prominent `KIA  NAME "NICK"` stamp
+  (`Fx.Stamp`) + a red screen death-flash (`Game.DeathFlash`) and is listed at the top
+  of the barracks debrief; the mission-deciding blow (last hostile / wipe / lost VIP,
+  `Game.IsMissionEndingKill`) lingers in a slow-mo kill-cam (extra HitStop + zoom-punch).
+  (Phase 3 item 3.11.)
 - **Recruits:** the barracks backfills empty squad slots with fresh rookies
   (`Mission.MakeRecruit`, `Run.DebriefSurvivors`) so casualties don't death-spiral.
 - **Perk-based promotions:** each rank-up is a pick-1-of-2 perk choice in the
@@ -602,10 +607,15 @@ code to `main`.
       sandbox**, so it's a blind ship here. Verify: manual (human) — document what to
       listen for; keep it crash-safe behind `IsAudioDeviceReady`.
 
-- [ ] **3.11 Game-feel + death feedback.** Final-blow slow-mo/kill-cam on the
-      mission-ending kill (extend `HitStop` + zoom-punch), and a prominent **KIA** stamp
-      with the soldier's name/nickname on death + in the debrief (reinforces 3.1/3.2).
-      Verify: screenshots.
+- [x] **3.11 Game-feel + death feedback.** DONE. **KIA stamp:** a fallen soldier
+      (`Game.KillUnit`, player non-VIP) gets a prominent `KIA  NAME "NICK"` stamp
+      (`Fx.Stamp`: slow-fade, barely-rising), a red full-screen **death-flash**
+      (`Game.DeathFlash`, decayed in `Update`, drawn under the HUD in `Game.Draw`), and
+      is logged to `_missionKia` → inserted at the top of the barracks debrief in
+      `EnterBarracks` (`KIA  NAME`). **Final-blow kill-cam:** `Game.IsMissionEndingKill`
+      (last hostile on Eliminate / squad wipe / lost VIP) punches up the deciding death
+      with extra `HitStop` (0.4s slow-mo) + `AddZoomPunch` + shake. Per-mission state
+      cleared in `SetupMission`. Verify: `SIGHTLINE_KIA=1` screenshot + autoplay clean.
 
 - [ ] **3.12 Onboarding tutorial.** A scripted first mission (gated by a "seen" flag in
       `display.json`/settings) that prompts move → cover → flank → overwatch → fire with
@@ -631,6 +641,18 @@ Before stopping:
 4. Tell the human to open a fresh session (they'll send only `.`).
 
 ### WIP NOTES
+
+> **3.11 DEATH FEEDBACK (latest).** KIA stamp + final-blow kill-cam shipped in
+> `Game.KillUnit`. On a player (non-VIP) death: `Fx.Stamp` (new slow/low-rise text)
+> draws `KIA  FullName`, `Game.DeathFlash` (new float, decayed in `Update` before the
+> HitStop early-return, drawn under the HUD in `Game.Draw`) flashes red, and the name is
+> pushed to `_missionKia` (new list, cleared in `SetupMission`) → inserted at the top of
+> `_run.Report` in `EnterBarracks`. The mission-deciding death (`Game.IsMissionEndingKill`:
+> last hostile on Eliminate / combatant wipe / lost VIP) adds 0.4s HitStop + a bigger
+> zoom-punch/shake for a slow-mo finish. Screenshot hook `SIGHTLINE_KIA=1`. Gotcha:
+> `IsMissionEndingKill` runs AFTER `d.Alive=false`, so the alive-counts already exclude
+> the dying unit. NOTE: the wipe path still routes through `CheckEnd`→`LoseRun` (lose
+> card), which does NOT list KIA names — only the survivable-mission debrief does.
 
 > **3.5 STATUS EFFECTS (latest).** Transient combat statuses shipped. New on `Unit`:
 > `Statuses` (`List<Status>`), `HasStatus`/`AddStatus`, magnitude consts
