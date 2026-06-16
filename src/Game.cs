@@ -45,6 +45,12 @@ public class Game
     public int GrenTx, GrenTy;
     public bool GrenValid;
 
+    // utility-item targeting (3.4): a second throwable slot (smoke / flash / barricade)
+    public const int ItemRange = 7;
+    public bool ItemMode;
+    public int ItemTx, ItemTy;
+    public bool ItemValid;
+
     // banner
     public string BannerText = "";
     public float BannerTimer, BannerMax;
@@ -215,6 +221,22 @@ public class Game
 
     /// Harness hook (screenshot only): reveal all dormant enemies.
     public void DebugWakeAll() { foreach (var e in Enemies) if (e.Alive) e.Active = true; }
+
+    /// Harness hook (screenshot only): arm a smoke-carrier's item targeting preview.
+    public void DebugItem()
+    {
+        var u = Players.FirstOrDefault(p => p.Alive && p.Item == ItemKind.Smoke)
+                ?? Players.FirstOrDefault(p => p.Alive && p.Item != ItemKind.None);
+        if (u == null) return;
+        Selected = u;
+        RecomputeMoveCost();
+        ItemMode = true;
+        KbCursor = true;
+        CurX = Util.Clamp(u.X + 4, 0, Grid.W - 1);
+        CurY = u.Y;
+        // also drop a live cloud elsewhere so the screenshot shows the deployed haze
+        Grid.AddSmoke(Util.Clamp(u.X + 5, 0, Grid.W - 1), Util.Clamp(u.Y + 3, 0, Grid.H - 1), SmokeAnim.Radius, SmokeAnim.Turns);
+    }
 
     /// Harness hook (screenshot only): force a barracks rank-up perk choice.
     public void DebugBarracksPerk()
@@ -537,7 +559,7 @@ public class Game
         {
             if (Raylib.IsKeyPressed(KeyboardKey.Escape))
             {
-                if (AimMode || GrenadeMode) { AimMode = false; GrenadeMode = false; }
+                if (AimMode || GrenadeMode || ItemMode) { AimMode = false; GrenadeMode = false; ItemMode = false; }
                 else Paused = !Paused;
             }
             if (Paused) { HandlePauseMenu(); return; }
@@ -715,6 +737,26 @@ public class Game
         if (tgt != null && u.Ammo > 0) { IssueShoot(tgt); return; }
         if (u.Ammo == 0) { DoReload(); return; }
 
+        // (test) deploy the class utility item to keep its path covered
+        if (u.ItemCharge > 0 && Util.Roll(30))
+        {
+            if (u.Item == ItemKind.Barricade)
+            {
+                for (int dx = -1; dx <= 1; dx++)
+                    for (int dy = -1; dy <= 1; dy++)
+                    {
+                        int nx = u.X + dx, ny = u.Y + dy;
+                        if ((dx != 0 || dy != 0) && ItemTargetOk(u, nx, ny)) { IssueItem(nx, ny); return; }
+                    }
+            }
+            else
+            {
+                var near = AliveEnemies().Where(e => Util.TileDist(u.X, u.Y, e.X, e.Y) <= ItemRange)
+                                         .OrderBy(e => Util.TileDist(u.X, u.Y, e.X, e.Y)).FirstOrDefault();
+                if (near != null) { IssueItem(near.X, near.Y); return; }
+            }
+        }
+
         // lob a grenade at any hostile in range (exercises the AoE path)
         if (u.Grenades > 0)
         {
@@ -867,6 +909,15 @@ public class Game
             return;
         }
 
+        if (ItemMode)
+        {
+            ItemTx = HoverX; ItemTy = HoverY;
+            ItemValid = HoverValid && Selected != null &&
+                        Util.TileDist(Selected.X, Selected.Y, HoverX, HoverY) <= ItemRange &&
+                        ItemTargetOk(Selected, HoverX, HoverY);
+            return;
+        }
+
         if (AimMode)
         {
             if (hovered != null && hovered.Team == Team.Enemy && CanTarget(Selected, hovered))
@@ -909,6 +960,7 @@ public class Game
         if (Raylib.IsKeyPressed(KeyboardKey.Three)) DoHunker();
         if (Raylib.IsKeyPressed(KeyboardKey.Four)) ToggleGrenade();
         if (Raylib.IsKeyPressed(KeyboardKey.Five)) DoAbility();
+        if (Raylib.IsKeyPressed(KeyboardKey.Six)) ToggleItem();
         if (Raylib.IsKeyPressed(KeyboardKey.H)) DoHack();
         if (Raylib.IsKeyPressed(KeyboardKey.R)) DoReload();
         if (Raylib.IsKeyPressed(KeyboardKey.T)) { OpenTagEditor(Selected); return; }
@@ -923,7 +975,7 @@ public class Game
         if (Raylib.IsKeyPressed(KeyboardKey.Space) && HoverValid) { BoardAct(HoverX, HoverY); return; }
         if (KbCursor && Raylib.GetMouseDelta() != Vector2.Zero) KbCursor = false;  // mouse takes back over
 
-        if (Raylib.IsMouseButtonPressed(MouseButton.Right)) { AimMode = false; GrenadeMode = false; return; }
+        if (Raylib.IsMouseButtonPressed(MouseButton.Right)) { AimMode = false; GrenadeMode = false; ItemMode = false; return; }
 
         if (Raylib.IsMouseButtonPressed(MouseButton.Left))
         {
@@ -952,6 +1004,12 @@ public class Game
         {
             if (GrenValid) IssueGrenade(hx, hy);
             else GrenadeMode = false;
+            return;
+        }
+        if (ItemMode)
+        {
+            if (ItemValid) IssueItem(hx, hy);
+            else ItemMode = false;
             return;
         }
         if (AimMode)
@@ -1023,6 +1081,7 @@ public class Game
         {
             case "shoot": ToggleAim(); break;
             case "grenade": ToggleGrenade(); break;
+            case "item": ToggleItem(); break;
             case "ability": DoAbility(); break;
             case "overwatch": DoOverwatch(); break;
             case "hunker": DoHunker(); break;
@@ -1049,6 +1108,7 @@ public class Game
         if (AimMode) { AimMode = false; return; }
         if (!HasAnyTarget(Selected)) return;
         GrenadeMode = false;
+        ItemMode = false;
         AimMode = true;
         AimTarget = FirstTargetFor(Selected);
     }
@@ -1068,6 +1128,44 @@ public class Game
         Selected.ActionsLeft = 0;
         Enqueue(new GrenadeAnim(Selected, tx, ty), Team.Player);
         GrenadeMode = false;
+    }
+
+    void ToggleItem()
+    {
+        if (Selected == null || !Selected.CanAct || Selected.ItemCharge <= 0 || Selected.Item == ItemKind.None) return;
+        ItemMode = !ItemMode;
+        if (ItemMode) { AimMode = false; GrenadeMode = false; }
+    }
+
+    /// Whether a utility item can legally land on (tx,ty): barricade needs an empty
+    /// floor tile; smoke/flash just need a tile in range.
+    bool ItemTargetOk(Unit u, int tx, int ty)
+    {
+        if (u.Item == ItemKind.Barricade)
+            return Grid.IsFloor(tx, ty) && !IsOccupiedByOther(tx, ty, u) && !EvacZone.Contains((tx, ty))
+                   && !(HasTerminal && Terminal.x == tx && Terminal.y == ty);
+        return true;
+    }
+
+    void IssueItem(int tx, int ty)
+    {
+        var u = Selected;
+        if (u == null || !u.CanAct || u.ItemCharge <= 0 || u.Item == ItemKind.None) return;
+        if (Util.TileDist(u.X, u.Y, tx, ty) > ItemRange || !ItemTargetOk(u, tx, ty)) return;
+        u.ItemCharge--;
+        u.ActionsLeft = 0;            // a thrown item ends the turn, like a grenade
+        ItemMode = false;
+        switch (u.Item)
+        {
+            case ItemKind.Smoke: Enqueue(new SmokeAnim(u, tx, ty), Team.Player); break;
+            case ItemKind.Flash: Enqueue(new FlashAnim(u, tx, ty), Team.Player); break;
+            case ItemKind.Barricade:
+                Grid.Tiles[tx, ty] = TileType.LowCover;
+                Fx.Burst(Util.TileCenter(tx, ty), Pal.RGBA(150, 200, 120), 16, 150f, 0.6f, 4.5f);
+                Fx.PopText(Util.TileCenter(tx, ty) + new Vector2(0, -22), "COVER UP", Pal.Good, 18f);
+                Audio.Play("hunker");
+                break;
+        }
     }
 
     void IssueMove(int tx, int ty)
@@ -1200,6 +1298,7 @@ public class Game
         }
         AimMode = false;
         GrenadeMode = false;
+        ItemMode = false;
     }
 
     void RequestEndTurn()
@@ -1229,6 +1328,7 @@ public class Game
     {
         _turnCount++;
         Phase = Phase.PlayerTurn;
+        Grid.TickSmoke();                 // smoke clouds decay one turn per round
         if (AutoPlay) AutoStallCheck();
         foreach (var p in Players) if (p.Alive) { p.BeginTurn(); TickStatuses(p); }
         foreach (var e in Enemies) if (e.Alive) { e.ReactedThisTurn = false; e.Suppress = 0; } // OW resets; suppression expires
@@ -1606,6 +1706,43 @@ public class Game
         return fails.Count == 0
             ? "STATUSTEST: PASS (burn/bleed DoT, stun, disorient aim+overwatch all hold)"
             : "STATUSTEST: FAIL (" + string.Join(",", fails) + ")";
+    }
+
+    /// Headless self-test (SIGHTLINE_ITEMTEST): the utility-item mechanics — smoke
+    /// blocks + decays line of sight, a barricade lays cover, loadouts map per class.
+    /// Window-free (grid + tile math only).
+    public static string ItemSelfTest()
+    {
+        var fails = new List<string>();
+        var grid = new Grid();
+        for (int x = 0; x < grid.W; x++)
+            for (int y = 0; y < grid.H; y++) grid.Tiles[x, y] = TileType.Floor;
+
+        // (1) clear LoS across an open lane
+        if (!grid.HasLineOfSight(2, 5, 9, 5)) fails.Add("clearLoS");
+
+        // (2) a smoke cloud blocks LoS through it, over a 3x3 footprint
+        grid.AddSmoke(5, 5, SmokeAnim.Radius, SmokeAnim.Turns);
+        if (grid.HasLineOfSight(2, 5, 9, 5)) fails.Add("smokeBlocks");
+        if (!grid.IsSmoke(5, 5) || !grid.IsSmoke(5, 4) || !grid.IsSmoke(6, 6)) fails.Add("smokeArea");
+
+        // (3) smoke decays one turn per tick; LoS returns once it clears
+        for (int i = 0; i < SmokeAnim.Turns; i++) grid.TickSmoke();
+        if (grid.IsSmoke(5, 5)) fails.Add("smokePersist");
+        if (!grid.HasLineOfSight(2, 5, 9, 5)) fails.Add("smokeCleared");
+
+        // (4) a barricade lays low cover on a floor tile
+        grid.Tiles[6, 5] = TileType.LowCover;
+        if (!grid.IsCover(6, 5)) fails.Add("barricadeCover");
+
+        // (5) class -> item loadouts exercise all three kinds
+        if (Unit.ItemKindFor("RANGER") != ItemKind.Smoke) fails.Add("mapSmoke");
+        if (Unit.ItemKindFor("ASSAULT") != ItemKind.Flash) fails.Add("mapFlash");
+        if (Unit.ItemKindFor("GUNNER") != ItemKind.Barricade) fails.Add("mapBarricade");
+
+        return fails.Count == 0
+            ? "ITEMTEST: PASS (smoke blocks+decays LoS, barricade=cover, loadouts map)"
+            : "ITEMTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
     void ChooseCard(int i)

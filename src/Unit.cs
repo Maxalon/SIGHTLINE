@@ -10,6 +10,9 @@ public enum WeaponKind { Rifle, Shotgun, Sniper, Lmg, Smg }
 /// Per-class signature ability (self-cast, one charge per mission).
 public enum AbilityKind { None, RunGun, Blitz, Steady, Suppress }
 
+/// Utility-item slot (3.4): a second throwable beyond grenades, assigned by class.
+public enum ItemKind { None, Smoke, Flash, Barricade }
+
 /// Promotion perks: a soldier picks one each rank-up (see Run / barracks).
 public enum Perk { LockOn, Hardened, Reflexes, Bandolier, CloseQuarters, Marksman, Deadeye, Tank, Sprinter, Adrenal }
 
@@ -156,6 +159,32 @@ public class Unit
         "SHARPSHOOTER" => AbilityKind.Steady,
         "GUNNER"       => AbilityKind.Suppress,
         _ => AbilityKind.None,
+    };
+
+    // ---- utility item (3.4): a second throwable slot, 1 charge/mission, by class ----
+    public int ItemCharge;                       // remaining uses this mission (refilled in Mission.Build)
+    public ItemKind Item => ItemKindFor(Cls);    // derived from class (never persisted)
+    public string ItemName => Item switch
+    {
+        ItemKind.Smoke     => "SMOKE",
+        ItemKind.Flash     => "FLASH",
+        ItemKind.Barricade => "BARRICADE",
+        _ => "ITEM",
+    };
+    public string ItemDesc => Item switch
+    {
+        ItemKind.Smoke     => "Lob a smoke cloud: blocks line of sight + overwatch through it for a few turns",
+        ItemKind.Flash     => "Lob a flashbang: disorients everyone in the blast (-aim, no overwatch next turn)",
+        ItemKind.Barricade => "Deploy a low-cover barricade on an empty tile",
+        _ => "",
+    };
+    public static ItemKind ItemKindFor(string cls) => cls switch
+    {
+        "ASSAULT"      => ItemKind.Flash,      // breacher: blind the room
+        "RANGER"       => ItemKind.Smoke,      // flanker: cover the approach
+        "SHARPSHOOTER" => ItemKind.Smoke,      // marksman: break enemy sightlines
+        "GUNNER"       => ItemKind.Barricade,  // nest-builder: drop cover
+        _ => ItemKind.None,
     };
 
     public int ActionsLeft;

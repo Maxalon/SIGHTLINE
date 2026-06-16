@@ -31,6 +31,7 @@ public static class Mission
                              int enemyDelta = 0, int statDelta = 0)
     {
         enemies.Clear();
+        grid.ClearSmoke();
         for (int x = 0; x < grid.W; x++)
             for (int y = 0; y < grid.H; y++)
             {
@@ -47,6 +48,7 @@ public static class Mission
             u.Ammo = u.Weapon.Clip;
             u.Grenades = 1 + u.BonusGrenades + (u.HasPerk(Perk.Bandolier) ? 1 : 0);  // refill (+cache +Bandolier)
             u.AbilityCharge = 1 + (u.HasPerk(Perk.Adrenal) ? 1 : 0);// refill (+Adrenal)
+            u.ItemCharge = u.Item != ItemKind.None ? 1 : 0;        // utility item: 1 charge/mission
             u.Suppress = 0;
             u.OnOverwatch = false;
             u.Hunkered = false;

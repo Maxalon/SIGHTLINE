@@ -287,7 +287,7 @@ public static class Hud
         bool hasTargets = interactive && g.HasAnyTarget(u);
 
         var btns = new System.Collections.Generic.List<UiButton>();
-        float bx = 300, bw = 112, bh = 40, gap = 6;
+        float bx = 300, bw = 104, bh = 40, gap = 6;
 
         void Add(string id, string label, string key, bool enabled, bool sel)
         {
@@ -304,6 +304,8 @@ public static class Hud
         Add("grenade", "GRENADE", "4", interactive && u != null && u.CanAct && u.Grenades > 0, g.GrenadeMode);
         if (u != null && u.Ability != AbilityKind.None)
             Add("ability", u.AbilityName, "5", interactive && g.CanAbility(u), u.RunGun || u.Blitz || u.Steady);
+        if (u != null && u.Item != ItemKind.None)
+            Add("item", u.ItemName, "6", interactive && u.CanAct && u.ItemCharge > 0, g.ItemMode);
         Add("overwatch", "OVERWATCH", "2", interactive && u != null && u.CanAct && u.Ammo > 0, false);
         Add("hunker", "HUNKER", "3", interactive && u != null && u.CanAct, u != null && u.Hunkered);
         if (g.HasTerminal)
@@ -355,6 +357,10 @@ public static class Hud
             case "ability":
                 return g.Selected != null && g.Selected.Ability != AbilityKind.None
                     ? g.Selected.AbilityDesc + "  (1 charge/mission)"
+                    : "";
+            case "item":
+                return g.Selected != null && g.Selected.Item != ItemKind.None
+                    ? g.Selected.ItemDesc + "  (1 charge/mission)"
                     : "";
             default: return "";
         }
