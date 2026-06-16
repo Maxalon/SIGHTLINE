@@ -123,9 +123,11 @@ public class Game
     public string TagBuffer = "";
     public Unit TagTarget;
 
-    // game-feel: hit-stop freeze + camera zoom-punch
+    // game-feel: hit-stop freeze + camera zoom-punch + red death-flash (3.11)
     public float HitStop;
     float _camPulse;
+    public float DeathFlash;                 // 0..1 red full-screen pulse on a soldier's death
+    readonly List<string> _missionKia = new(); // soldiers KIA this mission (for the debrief)
     public void AddHitStop(float s) { HitStop = MathF.Max(HitStop, s); }
     public void AddZoomPunch(float p) { _camPulse = MathF.Max(_camPulse, p); }
 
@@ -183,6 +185,8 @@ public class Game
         // per-mission feat tracking + status effects start clean each mission
         foreach (var u in Players)
         { u.FeatMultiKill = u.FeatClutch = u.FeatVengeful = u.WasNearDeath = u.AllyDown = false; u.BondAura = false; u.Statuses.Clear(); }
+        _missionKia.Clear();
+        DeathFlash = 0;
         foreach (var u in Enemies) { u.BeginTurn(); u.OnOverwatch = false; }
         Selected = Players.FirstOrDefault(p => p.CanAct);
         AimMode = false;
@@ -245,6 +249,9 @@ public class Game
             foreach (var u in _run.Squad) u.Hp = u.MaxHp;
 
         _run.DebriefSurvivors();
+
+        // surface this mission's fallen at the top of the debrief (3.11)
+        foreach (var name in _missionKia) _run.Report.Insert(0, $"KIA  {name}");
 
         if (!finished && _run.CurrentCard != null && _run.CurrentCard.Reward == RewardKind.BonusPerk)
             _run.AddBonusPerk();
@@ -382,9 +389,39 @@ public class Game
         AddHitStop(0.1f);
         AddZoomPunch(0.05f);
         Audio.Play("death");
+
+        // KIA feedback (3.11): a fallen soldier gets a prominent stamp with their
+        // name/nickname, a red screen-flash, and is logged for the debrief.
+        if (d.Team == Team.Player && !d.IsVip)
+        {
+            Fx.Stamp(d.Pos + new Vector2(0, -34), "KIA  " + d.FullName, Pal.Foe, 30f, 2.4f);
+            _missionKia.Add(d.FullName);
+            DeathFlash = 1f;
+            Fx.AddShake(9f);
+        }
+
+        // final-blow kill-cam (3.11): the mission-deciding death lingers in slow-mo
+        if (IsMissionEndingKill(d))
+        {
+            AddHitStop(0.4f);
+            AddZoomPunch(0.13f);
+            Fx.AddShake(11f);
+        }
+
         // purge any queued movement for the dead unit
         _anims.RemoveAll(a => a is MoveStepAnim m && m.Unit == d);
         if (Selected == d) Selected = null;
+    }
+
+    /// True when killing `d` decides the mission (last hostile on an Eliminate, a squad
+    /// wipe, or the lost VIP) — used to punch up the final blow into a brief kill-cam.
+    bool IsMissionEndingKill(Unit d)
+    {
+        if (d.IsVip) return true;                                   // escort failed
+        if (d.Team == Team.Enemy)
+            return Objective == Objective.Eliminate && AliveEnemies().Count == 0;
+        // player down: a wipe (no combatant soldiers left) ends the run
+        return !d.IsVip && AlivePlayers().Count(p => !p.IsVip) == 0;
     }
 
     /// Credit a kill to a player and watch for FEATS (resolved into traits at the
@@ -481,6 +518,7 @@ public class Game
         // camera zoom-punch always relaxes; hit-stop freezes the rest of the sim
         _camPulse *= MathF.Exp(-dt * 11f);
         if (_camPulse < 0.001f) _camPulse = 0;
+        if (DeathFlash > 0) DeathFlash = MathF.Max(0, DeathFlash - dt * 1.6f);
         if (HitStop > 0) { HitStop -= dt; return; }
 
         // pause/settings overlay + camera controls (live play only, never in autoplay)
@@ -1420,6 +1458,14 @@ public class Game
         if (c.Count > 1) c[1].Wound = 1;
     }
 
+    /// Harness hook (screenshot only): drop a soldier to show the KIA stamp + red
+    /// death-flash (item 3.11).
+    public void DebugKia()
+    {
+        var c = Players.Where(p => !p.IsVip).ToList();
+        if (c.Count > 1) { var v = c[1]; v.Nickname = "GHOST"; v.Hp = 0; KillUnit(v); }
+    }
+
     /// Harness hook (screenshot only): paint sample status effects on soldiers/foes so
     /// the on-unit status codes (BRN/BLD/STN/DAZ) can be verified (item 3.5).
     public void DebugStatus()
@@ -1608,6 +1654,10 @@ public class Game
         Raylib.BeginMode2D(ViewCamera(true));
         Renderer.DrawBoard(this);
         Raylib.EndMode2D();
+
+        // red death-flash over the board (under the HUD) when a soldier falls
+        if (DeathFlash > 0)
+            Raylib.DrawRectangle(0, 0, Cfg.ScreenW, Cfg.ScreenH, Raylib.Fade(Pal.Foe, DeathFlash * 0.35f));
 
         Hud.Draw(this);
     }
