@@ -182,8 +182,12 @@ seeds (mix of WIN/LOSE, no exceptions):
 - **Game-feel pass:** hit-stop on impacts/kills, camera zoom-punch on kills,
   weapon recoil + target knockback.
 - **Campaign meta-loop:** 6 escalating missions, one persistent squad, kills→
-  promotions, between-mission barracks debrief + field-heal, and a **deployment
-  choice** (RECON/STANDARD/ONSLAUGHT cards: objective + risk/reward) each mission.
+  promotions, between-mission barracks debrief + field-heal.
+- **Branching campaign map:** the barracks shows a Slay-the-Spire-style node path
+  (`Run.Map` of `MissionNode`, generated from `Run.MapSeed`); each node is a mission
+  (Combat / Elite / Supply / Boss) with its own objective + risk/reward, and the player
+  picks the next reachable node (`Hud.DrawCampaignMap`/`Game.ChooseNode`). Position
+  persists (seed+index). Legacy RECON/STANDARD/ONSLAUGHT deploy cards remain a fallback.
 - **Grenades:** AoE that ignores cover, hits both teams, destroys low cover
   (key 4, 1 charge/mission) with range/blast/arc preview. The enemy AI also
   frags clustered/covered soldiers (from mission 2; never hits its own).
@@ -528,15 +532,25 @@ code to `main`.
       follow-ups):** trait/"FEAT" FX on the unit is minimal; tooltip doesn't yet flag
       "+ BOND"/trait bonuses; bond progress shows no UI hint before it forms.
 
-- [ ] **3.3 Branching campaign map.** Replace the 3-card barracks pick with a small
-      FTL/Slay-the-Spire node path. `Run.Map` = a generated DAG of `MissionNode`
-      (objective + biome + difficulty + reward + enemy modifiers + node kind:
-      COMBAT / ELITE / SUPPLY(shop+rest) / BOSS). Player picks the next reachable
-      node; persist position. Builds on the existing `MissionCard`/`Run.Offers` +
-      `EnterBarracks` flow (cards become node choices). New `Hud.DrawCampaignMap`
-      overlay + `Game.ChooseNode`. Autopilot walks a path to the boss. Verify:
-      autoplay to a BOSS node + map screenshot. (Largest item — can land after 3.1/3.2;
-      keep the current cards as a fallback if generation fails.)
+- [x] **3.3 Branching campaign map.** DONE. The 3-card barracks pick is replaced by a
+      Slay-the-Spire-style node path. `Run.Map` = a DAG of `MissionNode`
+      (Col/Row/Kind/Card/Next edges/Visited), generated deterministically from
+      `Run.MapSeed` via `Run.GenerateMap(seed)`: `Run.MaxMissions` columns (mission 1 =
+      single START, last = single BOSS, middles 2-3 nodes), each wired to 1-2 next-column
+      nodes with a connectivity fix-up so every node is reachable and every non-boss node
+      leads onward. `NodeKind` (Start/Combat/Elite/Supply/Boss) → a `MissionCard` via
+      `Run.CardForNode` (ELITE = +force/bonus perk, SUPPLY = -force/full heal, BOSS =
+      forced Eliminate so the WARLORD must fall; objective varies per row for branch
+      variety). Flow: `Run.Start` builds the map + seats `MapPos=0` (START); the barracks
+      renders the DAG (`Hud.DrawCampaignMap`, replacing the deploy-card block) with the
+      current node ringed + reachable next nodes glowing/clickable (rects in
+      `Hud.NodeBtns`) + hover tooltips; `Game.ChooseNode` adopts the picked node's card +
+      `NextMission`. `Run.JumpTo(n)` walks the map for the `SIGHTLINE_MISSION` harness
+      jump; autopilot greedily takes `NextNodes()[0]` (always reaches the boss). Persisted
+      as just `MapSeed`+`MapPos` (regenerated on load in `SaveGame.FromDto`). Legacy
+      `Offers`/`ChooseCard`/`DrawDeployCard` kept as a fallback if the map is empty.
+      Verify: `SIGHTLINE_CAMPAIGN=1` screenshot, `SIGHTLINE_SAVETEST` (round-trips
+      seed/pos/node), autoplay clean across mission jumps incl. the BOSS node.
 
 ### Tier 2 — tactical depth (second-to-second)
 
@@ -642,7 +656,29 @@ Before stopping:
 
 ### WIP NOTES
 
-> **3.11 DEATH FEEDBACK (latest).** KIA stamp + final-blow kill-cam shipped in
+> **3.3 BRANCHING CAMPAIGN MAP (latest).** Slay-the-Spire node path replaces the
+> 3-card barracks pick. New in `Run.cs`: `NodeKind`, `MissionNode` (Col/Row/Kind/Card/
+> Next/Visited), `Run.Map`/`MapSeed`/`MapPos`/`CurrentNode`/`NextNodes()`,
+> `GenerateMap(seed)` (deterministic via `new Random(seed)`; START col0 / BOSS last /
+> 2-3 mids, proportional edges + ~45% branch + a fix-up pass so every node is reachable),
+> `CardForNode` (kind→MissionCard), `JumpTo(n)` (harness walk). `Run.Start` now generates
+> the map + seats `MapPos=0`. `Game`: `ChooseNode`/`HandleNodeClick` replace the
+> card-pick branch in the barracks `Update` (autopilot takes `NextNodes()[0]`);
+> `StartMission` uses `JumpTo` for `SIGHTLINE_MISSION>1`; `DebugCampaignMap` +
+> `SIGHTLINE_CAMPAIGN` screenshot hook. `Hud.DrawCampaignMap(run, region)` draws the DAG
+> inside the barracks card (edges, current node ringed "you are here", reachable nodes
+> glow + label their objective + cache rects in `Hud.NodeBtns`, hover tooltip). Persist:
+> `SaveGame` stores only `MapSeed`+`MapPos`; `FromDto` regenerates the map from the seed
+> (no big DTO). Legacy `Offers`/`ChooseCard`/`DrawDeployCard` kept as a fallback when the
+> map is empty (`EnterBarracks` still calls `GenerateOffers`, harmless). Gotchas: (a)
+> `EnterBarracks` finish/Win is gated on `_run.Mission >= MaxMissions` (independent of the
+> map), so the boss node always resolves to Win when cleared; (b) BOSS node forces
+> Eliminate so the WARLORD must actually fall; (c) `JumpTo` overwrites `CurrentCard` —
+> set any explicit card AFTER it (see `SaveGame.SelfTest`). TODO/follow-ups: per-node
+> biome (currently `Biome.For(mission)`); a visited-trail highlight after a CONTINUE
+> (only the current node is re-marked visited on load); node-kind FX in-mission.
+
+> **3.11 DEATH FEEDBACK.** KIA stamp + final-blow kill-cam shipped in
 > `Game.KillUnit`. On a player (non-VIP) death: `Fx.Stamp` (new slow/low-rise text)
 > draws `KIA  FullName`, `Game.DeathFlash` (new float, decayed in `Update` before the
 > HitStop early-return, drawn under the HUD in `Game.Draw`) flashes red, and the name is

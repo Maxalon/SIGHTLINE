@@ -26,6 +26,7 @@ public static class Hud
     public static Rectangle PauseResume, PauseMute, PauseShake, PauseThreat, PauseFullscreen, PauseWindow, PauseAbandon;
     public static Rectangle PerkBtnA, PerkBtnB, PerkTagBtn;
     public static Rectangle[] MissionCards = new Rectangle[3];
+    public static System.Collections.Generic.List<(int Id, Rectangle Rect)> NodeBtns = new();
     public static Rectangle[] ShopBtns = new Rectangle[Game.ShopName.Length];
     public static Rectangle ShopProceed;
 
@@ -484,14 +485,118 @@ public static class Hud
             Raylib.DrawText(kia, x + 36, ry, 13, Pal.Foe);
         }
 
-        // next-mission deployment choice
-        string pick = $"SELECT DEPLOYMENT  >  MISSION {run.Mission + 1}";
-        Raylib.DrawText(pick, x + w / 2 - Raylib.MeasureText(pick, 15) / 2, y + h - 158, 15, Pal.Accent);
-        int cw = (w - 60 - 32) / 3, ch = 118, cy = y + h - 134, gap = 16;
-        for (int i = 0; i < run.Offers.Count && i < 3; i++)
+        // next operation: pick a node on the branching campaign map (3.3).
+        if (run.Map.Count > 0 && run.NextNodes().Count > 0)
         {
-            MissionCards[i] = new Rectangle(x + 30 + i * (cw + gap), cy, cw, ch);
-            DrawDeployCard(MissionCards[i], run.Offers[i]);
+            string pick = "CAMPAIGN MAP  >  SELECT NEXT OPERATION";
+            Raylib.DrawText(pick, x + w / 2 - Raylib.MeasureText(pick, 15) / 2, y + h - 162, 15, Pal.Accent);
+            DrawCampaignMap(run, new Rectangle(x + 24, y + h - 140, w - 48, 124));
+        }
+        else  // fallback: legacy deployment cards (only if the map is unavailable)
+        {
+            string pick = $"SELECT DEPLOYMENT  >  MISSION {run.Mission + 1}";
+            Raylib.DrawText(pick, x + w / 2 - Raylib.MeasureText(pick, 15) / 2, y + h - 158, 15, Pal.Accent);
+            int cw = (w - 60 - 32) / 3, ch = 118, cy = y + h - 134, gap = 16;
+            for (int i = 0; i < run.Offers.Count && i < 3; i++)
+            {
+                MissionCards[i] = new Rectangle(x + 30 + i * (cw + gap), cy, cw, ch);
+                DrawDeployCard(MissionCards[i], run.Offers[i]);
+            }
+        }
+    }
+
+    static Color NodeColor(NodeKind k) => k switch
+    {
+        NodeKind.Start => Pal.TxtDim,
+        NodeKind.Elite => Pal.Elite,
+        NodeKind.Supply => Pal.Good,
+        NodeKind.Boss => Pal.Foe,
+        _ => Pal.Friend,
+    };
+
+    static string NodeGlyph(NodeKind k) => k switch
+    {
+        NodeKind.Start => "S", NodeKind.Elite => "!", NodeKind.Supply => "+", NodeKind.Boss => "X", _ => "*",
+    };
+
+    /// Draw the branching campaign DAG inside `region`: columns left-to-right (one per
+    /// mission), edges as lines, the current position ringed, the reachable next nodes
+    /// glowing + clickable (rects cached in NodeBtns), everything else dimmed.
+    static void DrawCampaignMap(Run run, Rectangle region)
+    {
+        NodeBtns.Clear();
+        int cols = Run.MaxMissions;
+        var cur = run.CurrentNode;
+        var reachable = new System.Collections.Generic.HashSet<int>();
+        if (cur != null) foreach (var idn in cur.Next) reachable.Add(idn);
+
+        Vector2 Center(MissionNode n)
+        {
+            float cx = region.X + (n.Col + 0.5f) * (region.Width / cols);
+            float cy = region.Y + (n.Row + 0.5f) * (region.Height / Math.Max(1, n.RowCount));
+            return new Vector2(cx, cy);
+        }
+
+        // edges first, so nodes sit on top
+        foreach (var a in run.Map)
+            foreach (var nid in a.Next)
+            {
+                var b = run.Map[nid];
+                bool live = cur != null && a.Id == cur.Id;        // outgoing from the current node
+                Color ec = live ? Pal.Accent : Pal.RGBA(48, 56, 66);
+                Raylib.DrawLineEx(Center(a), Center(b), live ? 2.2f : 1.3f, ec);
+            }
+
+        var mouse = Raylib.GetMousePosition();
+        MissionNode hovered = null;
+        foreach (var n in run.Map)
+        {
+            Vector2 p = Center(n);
+            bool isCur = cur != null && n.Id == cur.Id;
+            bool canPick = reachable.Contains(n.Id);
+            float rad = n.Kind == NodeKind.Boss ? 13f : 10f;
+            Color col = NodeColor(n.Kind);
+
+            // dim nodes that are neither visited, current, nor a current choice
+            Color fill = (n.Visited || isCur || canPick) ? col : Pal.Mix(col, Pal.Panel, 0.7f);
+            if (canPick)
+            {
+                bool hov = Raylib.CheckCollisionPointRec(mouse, new Rectangle(p.X - rad - 4, p.Y - rad - 4, rad * 2 + 8, rad * 2 + 8));
+                if (hov) hovered = n;
+                Raylib.DrawCircleV(p, rad + (hov ? 6f : 4f), Raylib.Fade(Pal.Accent, hov ? 0.45f : 0.25f));  // glow
+                NodeBtns.Add((n.Id, new Rectangle(p.X - rad - 4, p.Y - rad - 4, rad * 2 + 8, rad * 2 + 8)));
+            }
+            Raylib.DrawCircleV(p, rad, fill);
+            Raylib.DrawCircleLinesV(p, rad, isCur ? Pal.Txt : Pal.RGBA(10, 14, 20));
+            if (isCur) Raylib.DrawCircleLinesV(p, rad + 4, Pal.Accent);  // "you are here"
+
+            string gly = NodeGlyph(n.Kind);
+            Raylib.DrawText(gly, (int)(p.X - Raylib.MeasureText(gly, 14) / 2), (int)(p.Y - 7), 14, Pal.RGBA(8, 12, 18));
+
+            if (canPick)  // label the choices with their objective
+            {
+                string lbl = ObjName(n.Card.Objective);
+                Raylib.DrawText(lbl, (int)(p.X - Raylib.MeasureText(lbl, 10) / 2), (int)(p.Y + rad + 3), 10, Pal.Txt);
+            }
+        }
+
+        // hover tooltip: the chosen op's flavour (mod / objective / force / reward)
+        if (hovered != null)
+        {
+            var c = hovered.Card;
+            string l1 = $"{c.ModName}  -  {ObjName(c.Objective)}";
+            string l2 = c.EnemyDelta > 0 ? "Heavy resistance" : (c.EnemyDelta < 0 ? "Light resistance" : "Standard force");
+            string l3 = c.Reward != RewardKind.None ? "+ " + c.RewardText : null;
+            int tw = Math.Max(Raylib.MeasureText(l1, 13), Math.Max(Raylib.MeasureText(l2, 11), l3 != null ? Raylib.MeasureText(l3, 11) : 0)) + 20;
+            int th = l3 != null ? 60 : 44;
+            float tx = Math.Min(mouse.X + 14, region.X + region.Width - tw);
+            float ty = Math.Max(mouse.Y - th - 6, region.Y);
+            var tip = new Rectangle(tx, ty, tw, th);
+            Raylib.DrawRectangleRounded(tip, 0.12f, 6, Pal.RGBA(12, 18, 26));
+            Raylib.DrawRectangleLinesEx(tip, 1.2f, NodeColor(hovered.Kind));
+            Raylib.DrawText(l1, (int)tx + 10, (int)ty + 8, 13, NodeColor(hovered.Kind));
+            Raylib.DrawText(l2, (int)tx + 10, (int)ty + 26, 11, Pal.TxtDim);
+            if (l3 != null) Raylib.DrawText(l3, (int)tx + 10, (int)ty + 42, 11, Pal.Accent);
         }
     }
 

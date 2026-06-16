@@ -65,6 +65,7 @@ public static class SaveGame
         {
             Mission = r.Mission, Intel = r.Intel, Fallen = new List<string>(r.Fallen),
             BondTally = new Dictionary<string, int>(r.BondTally),
+            MapSeed = r.MapSeed, MapPos = r.MapPos,
         };
         foreach (var u in r.Squad)
             dto.Squad.Add(new UnitDto
@@ -96,6 +97,14 @@ public static class SaveGame
         var r = new Run { Mission = dto.Mission, Intel = dto.Intel, Squad = new List<Unit>() };
         if (dto.Fallen != null) r.Fallen = new List<string>(dto.Fallen);
         if (dto.BondTally != null) r.BondTally = new Dictionary<string, int>(dto.BondTally);
+        // regenerate the branching campaign map from its seed and restore the position
+        if (dto.MapSeed != 0)
+        {
+            r.MapSeed = dto.MapSeed;
+            r.GenerateMap(dto.MapSeed);
+            r.MapPos = (dto.MapPos >= 0 && dto.MapPos < r.Map.Count) ? dto.MapPos : 0;
+            if (r.CurrentNode != null) r.CurrentNode.Visited = true;
+        }
         foreach (var d in dto.Squad)
         {
             var u = new Unit
@@ -134,6 +143,8 @@ public static class SaveGame
         public List<string> Fallen = new();
         public Dictionary<string, int> BondTally = new();
         public CardDto Card;
+        public int MapSeed;
+        public int MapPos;
     }
 
     class UnitDto
@@ -178,6 +189,10 @@ public static class SaveGame
             n.Bonds.Add("VEGA");
             src.Squad.Add(n);
             src.BondTally[Run.BondKey("VEGA", "NOX")] = 3;
+            src.GenerateMap(424242);
+            src.MapSeed = 424242;
+            src.JumpTo(3);   // advance the map position a few columns
+            int srcPos = src.MapPos;
             src.CurrentCard = new MissionCard { Objective = Objective.Hack, ModName = "ONSLAUGHT", EnemyDelta = 2, StatDelta = 1, Reward = RewardKind.BonusPerk, RewardText = "Bonus perk" };
 
             Save(src);
@@ -205,6 +220,10 @@ public static class SaveGame
             if (got.CurrentCard == null || got.CurrentCard.Objective != Objective.Hack ||
                 got.CurrentCard.EnemyDelta != 2 || got.CurrentCard.Reward != RewardKind.BonusPerk)
                 fails.Add("card");
+            if (got.MapSeed != 424242) fails.Add("mapSeed");
+            if (got.Map.Count == 0) fails.Add("mapRegen");
+            if (got.MapPos != srcPos) fails.Add("mapPos");
+            if (got.CurrentNode == null || got.CurrentNode.Mission != 3) fails.Add("mapNode");
 
             return fails.Count == 0
                 ? "SAVETEST: PASS (run round-trips squad/perks/weapon/card)"
