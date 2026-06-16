@@ -213,6 +213,9 @@ seeds (mix of WIN/LOSE, no exceptions):
   cover, must be flanked or hit from above), a recurring **mid-boss** (BREAKER m3 /
   WARDEN m5), and a capstone **Elite boss** (WARLORD) on the final mission with 2
   grenades + a one-time low-HP RAGE. Distinct AI temperaments in `Ai.Plan`; distinct glyphs.
+- **Secondary objectives:** an optional per-mission bonus goal (NO LOSSES / SWIFT ≤7
+  turns / CLEAN SWEEP) worth +12 intel, shown live in the HUD and reported at the
+  barracks (`SecondaryKind`, `Game.RollSecondary`/`SecondaryAchieved`). (Phase 3 item 3.9.)
 - **Mission objectives:** Eliminate, Hack (reach the TERMINAL and hack it down,
   HACK action / key H), Evac (get the whole squad to the extraction zone), and
   **Escort** (walk a fragile gold VIP to the extraction zone alive — losing the
@@ -668,10 +671,15 @@ code to `main`.
       a fragile ally to extract — reuses the VIP/escort plumbing). Verify: autoplay each
       via `SIGHTLINE_MISSION`.
 
-- [ ] **3.9 Secondary objectives.** An optional per-mission bonus goal (no soldier
-      wounded / hack the side cache / kill the elite) for extra `Run.Intel`. `Mission`
-      rolls one; `Game` tracks completion; HUD shows it; barracks reports the bonus.
-      Verify: autoplay + HUD screenshot. (Feeds the 3.1 economy.)
+- [x] **3.9 Secondary objectives.** DONE. An optional per-mission bonus goal worth
+      `Game.SecondaryIntel` (12) extra `Run.Intel`. `SecondaryKind` {None, NoLosses,
+      Swift, CleanSweep}; `Game.RollSecondary(n)` picks one in `SetupMission` (none on
+      mission 1; CLEAN SWEEP skipped on Eliminate where it's automatic). Tracked live:
+      NO LOSSES fails in `KillUnit` on a soldier death (`SecondaryFailed`), SWIFT checks
+      `_turnCount <= SwiftTurns` (7), CLEAN SWEEP checks all hostiles dead. `EnterBarracks`
+      evaluates `SecondaryAchieved()`, awards intel + a debrief line. HUD top bar shows
+      `g.SecondaryHud` (green on track / red blown via `SecondaryOnTrack`). No persistence
+      (per-mission). Verify: `SIGHTLINE_MISSION=3` HUD screenshot + autoplay clean.
 
 ### Tier 4 — feel, audio & accessibility
 
@@ -717,7 +725,22 @@ Before stopping:
 
 ### WIP NOTES
 
-> **3.7 NEW ENEMY ARCHETYPES (latest, partial — SAPPER still open).** Three new hostiles
+> **3.9 SECONDARY OBJECTIVES (latest).** Optional per-mission bonus goal worth +12 intel.
+> `SecondaryKind` {None,NoLosses,Swift,CleanSweep} + `Game` fields `Secondary`/
+> `SecondaryFailed` + consts `SwiftTurns=7`/`SecondaryIntel=12`. `RollSecondary(n)` in
+> `SetupMission` (none on mission 1; CleanSweep only when Objective!=Eliminate, else it'd
+> be automatic). Tracking: `KillUnit` sets `SecondaryFailed` on a non-VIP soldier death
+> (NO LOSSES); SWIFT/CleanSweep evaluate at end. `SecondaryAchieved()` (NoLosses =
+> `_missionKia.Count==0`, Swift = `_turnCount<=SwiftTurns`, CleanSweep = `AliveEnemies==0`)
+> runs in `EnterBarracks` → +intel + a `Report` line ("BONUS: … cleared" / "Bonus missed").
+> HUD: `Game.SecondaryHud` (live label incl. SWIFT turn count) + `SecondaryOnTrack` (green/
+> red) drawn at x=812 in the top bar. Not persisted (per-mission, rebuilt each SetupMission).
+> Verify: `SIGHTLINE_MISSION=3` shot (HUD "BONUS …") + autoplay. Gotcha: `SecondaryAchieved`
+> reads `_missionKia` which is cleared in `SetupMission` (not DebriefSurvivors), so it's
+> still valid at `EnterBarracks` time. TODO: more goal types (hack a side cache / no damage);
+> autopilot doesn't optimise for the bonus (passive only).
+
+> **3.7 NEW ENEMY ARCHETYPES (partial — SAPPER still open).** Three new hostiles
 > in `Mission.SpawnEnemies` (probability chain re-banded). **WASP** (`Cls="DRONE"`, SMG,
 > low HP, mob 7, mission 2+): `Combat.ComputeOdds` sets `ignoresCover = a.Cls=="DRONE"`
 > which folds into `seesOver` (negates the target's cover entirely — attacks from above);

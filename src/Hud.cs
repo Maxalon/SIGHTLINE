@@ -201,6 +201,10 @@ public static class Hud
         DrawCounter(Cfg.ScreenW / 2 - 130, 20, Pal.Friend, $"{friends}  SQUAD");
         DrawCounter(Cfg.ScreenW / 2 + 20, 20, Pal.Foe, $"{foes}  HOSTILES");
 
+        // optional secondary objective (3.9): green while on track, red once blown
+        if (g.Secondary != SecondaryKind.None)
+            Raylib.DrawText(g.SecondaryHud, 812, 19, 14, g.SecondaryOnTrack ? Pal.Good : Pal.Foe);
+
         // mute indicator
         if (!Audio.Enabled)
             Raylib.DrawText("MUTED (M)", Cfg.ScreenW - 290, 19, 15, Pal.TxtDim);
