@@ -46,6 +46,7 @@ public static class Renderer
         DrawThreat(g);
         DrawEvac(g);
         DrawTerminal(g);
+        DrawSabotage(g);
         DrawGridLines(g);
         DrawPathPreview(g);
         DrawCover(g);
@@ -148,6 +149,31 @@ public static class Renderer
         Raylib.DrawRectangleRec(new Rectangle(c.X - 5, c.Y - 7, 10, 6), Raylib.Fade(col, 0.6f + 0.4f * pulse));
 
         Raylib.DrawText("TERMINAL", (int)c.X - 26, (int)r.Y - 13, 11, col);
+    }
+
+    // SABOTAGE charge sites: a blinking demolition console per site; armed once planted.
+    static void DrawSabotage(Game g)
+    {
+        if (!g.HasSabotage) return;
+        for (int i = 0; i < g.SabotageSites.Count; i++)
+        {
+            var (tx, ty) = g.SabotageSites[i];
+            bool blown = g.SabotageBlown.Contains(i);
+            var r = ElevRect(g, tx, ty);
+            var c = ElevCenter(g, tx, ty);
+            Color col = blown ? Pal.Good : Pal.Foe;
+            float pulse = 0.5f + 0.5f * MathF.Sin((float)Raylib.GetTime() * 3f + i);
+
+            Raylib.DrawRectangleRec(r, Raylib.Fade(col, 0.07f + (blown ? 0f : 0.06f * pulse)));
+            Raylib.DrawRectangleLinesEx(new Rectangle(r.X + 3, r.Y + 3, r.Width - 6, r.Height - 6),
+                                        2f, Raylib.Fade(col, blown ? 0.35f : 0.45f + 0.4f * pulse));
+            // charge box + light
+            Raylib.DrawRectangleRec(new Rectangle(c.X - 8, c.Y - 9, 16, 18), Pal.RGBA(14, 20, 28));
+            Raylib.DrawRectangleLinesEx(new Rectangle(c.X - 8, c.Y - 9, 16, 18), 1.5f, col);
+            Raylib.DrawCircleV(new Vector2(c.X, c.Y), 3.5f, Raylib.Fade(col, blown ? 0.9f : 0.5f + 0.5f * pulse));
+
+            Raylib.DrawText(blown ? "ARMED" : "CHARGE", (int)c.X - 18, (int)r.Y - 13, 10, col);
+        }
     }
 
     static void DrawGridLines(Game g)

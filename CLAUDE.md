@@ -94,9 +94,9 @@ SIGHTLINE_SHOT=90 xvfb-run -a -s "-screen 0 1280x800x24" dotnet run -c Debug
 # Full-match autopilot smoke test -> prints "RESULT: WIN|LOSE|TIMEOUT mission=N"
 SIGHTLINE_AUTOPLAY=1 xvfb-run -a -s "-screen 0 1280x800x24" dotnet run -c Debug
 
-# Start the harness on a specific mission. Objective rotation is now
-# Elim / Hack / Evac / Escort: Hack=2/6, Evac=3, Escort=4 (VIP).
-# Works with SHOT or AUTOPLAY, e.g. screenshot the Hack mission:
+# Start the harness on a specific mission. Objectives now come from the branching
+# campaign map (per-node), baseline rotation Elim/Hack/Evac/Escort/Sabotage (Run.ObjectiveFor,
+# (n-1)%5). Force one for testing with SIGHTLINE_OBJ=sabotage. SHOT or AUTOPLAY, e.g.:
 SIGHTLINE_MISSION=2 SIGHTLINE_SHOT=80 xvfb-run -a -s "-screen 0 1280x800x24" dotnet run -c Debug
 ```
 
@@ -217,6 +217,8 @@ seeds (mix of WIN/LOSE, no exceptions):
 - **Secondary objectives:** an optional per-mission bonus goal (NO LOSSES / SWIFT ≤7
   turns / CLEAN SWEEP) worth +12 intel, shown live in the HUD and reported at the
   barracks (`SecondaryKind`, `Game.RollSecondary`/`SecondaryAchieved`). (Phase 3 item 3.9.)
+- **Sabotage objective:** plant demolition charges on all 3 sites (`Game.SabotageSites`,
+  PLANT action) to win; part of the objective rotation. (Phase 3 item 3.8.)
 - **Mission objectives:** Eliminate, Hack (reach the TERMINAL and hack it down,
   HACK action / key H), Evac (get the whole squad to the extraction zone), and
   **Escort** (walk a fragile gold VIP to the extraction zone alive — losing the
@@ -668,12 +670,21 @@ code to `main`.
             has a sap branch that `DamageCover(HighCoverHp)`s the tile ("BREACH" + `CoverHitFx`).
             Renderer gives it a demo-charge marker. Pairs with 3.6 destructible cover.
 
-- [ ] **3.8 New objectives.** Add to the `Objective` enum + `ObjectiveFor` rotation +
-      `CheckEnd` + HUD: **DEFEND** (hold a zone / survive N turns vs. spawned waves —
-      needs a wave spawner in the turn flow + a turn counter), **SABOTAGE** (destroy K
-      target props, like multi-`Terminal` Hack), **RESCUE** (free a captive that becomes
-      a fragile ally to extract — reuses the VIP/escort plumbing). Verify: autoplay each
-      via `SIGHTLINE_MISSION`.
+- [ ] **3.8 New objectives.** SABOTAGE done; DEFEND + RESCUE still open.
+      - [x] **SABOTAGE. DONE.** `Objective.Sabotage` added to the enum + `Run.ObjectiveFor`
+            (now a 5-cycle: Elim/Hack/Evac/Escort/Sabotage). 3 charge sites
+            (`Game.SabotageSites`, spread mid-map; reserved in `Mission.Build` via a new
+            `sabotage` param) each demolished by one **PLANT** action — the HACK action/key
+            generalised (`HasHackAction`/`CanHack`/`DoHack` branch on `HasSabotage`,
+            `NearestSabotageSite`). Win in `CheckEnd` when `SabotageBlown.Count == sites`.
+            HUD "SABOTAGE x/3" + PLANT button + `Renderer.DrawSabotage` (blinking charge
+            consoles, ARMED once set). Autopilot plants each site. Verify:
+            `SIGHTLINE_OBJ=sabotage` (force hook, shot or autoplay) — autopilot WINs it +
+            screenshot.
+      - [ ] **DEFEND.** Hold a zone / survive N turns vs. spawned waves — needs a wave
+            spawner in the turn flow + a turn counter. Not done.
+      - [ ] **RESCUE.** Free a captive that becomes a fragile ally to extract — reuses the
+            VIP/escort plumbing. Not done.
 
 - [x] **3.9 Secondary objectives.** DONE. An optional per-mission bonus goal worth
       `Game.SecondaryIntel` (12) extra `Run.Intel`. `SecondaryKind` {None, NoLosses,
@@ -729,7 +740,22 @@ Before stopping:
 
 ### WIP NOTES
 
-> **3.9 SECONDARY OBJECTIVES (latest).** Optional per-mission bonus goal worth +12 intel.
+> **3.8 SABOTAGE OBJECTIVE (latest).** New `Objective.Sabotage` (enum + `Run.ObjectiveFor`
+> 5-cycle + the legacy `GenerateOffers` pool). `Game`: `SabotageSites` (List of 3 tiles
+> seeded in `SetupMission`: mid-map spread), `SabotageBlown` (HashSet of done indices),
+> `HasSabotage`/`HasHackAction`, `NearestSabotageSite`. The HACK action is generalised —
+> `CanHack`/`DoHack` branch on `HasSabotage` (one PLANT per adjacent un-blown site →
+> `SabotageBlown.Add`), HUD button label "PLANT", `ActionDesc` updated. `Mission.Build`
+> took a `sabotage` param that reserves each site + its 8-ring as open floor (like the
+> terminal). `CheckEnd` Sabotage branch wins when all sites blown. `Renderer.DrawSabotage`
+> draws blinking red charge consoles (green ARMED once set), wired after `DrawTerminal`.
+> Autopilot Sabotage branch walks to the nearest un-blown site + plants. Barricade
+> placement excludes sites. Harness: `SIGHTLINE_OBJ=sabotage` (`Game.DebugForceObjective`,
+> applies on shot OR autoplay) → autopilot WINs it. Gotcha: `DebugForceObjective` only
+> forces the FIRST mission's objective (re-runs SetupMission); later missions revert to the
+> map's card. TODO: 3.8 DEFEND (wave spawner + turn limit) + RESCUE (captive→escort).
+
+> **3.9 SECONDARY OBJECTIVES.** Optional per-mission bonus goal worth +12 intel.
 > `SecondaryKind` {None,NoLosses,Swift,CleanSweep} + `Game` fields `Secondary`/
 > `SecondaryFailed` + consts `SwiftTurns=7`/`SecondaryIntel=12`. `RollSecondary(n)` in
 > `SetupMission` (none on mission 1; CleanSweep only when Objective!=Eliminate, else it'd

@@ -190,6 +190,7 @@ public static class Hud
         {
             case Objective.Evac: objTxt = "EXTRACT"; objCol = Pal.Good; break;
             case Objective.Hack: objTxt = $"HACK {g.HackProgress}/{Game.HackRequired}"; objCol = Pal.Accent; break;
+            case Objective.Sabotage: objTxt = $"SABOTAGE {g.SabotageBlown.Count}/{g.SabotageSites.Count}"; objCol = Pal.Foe; break;
             case Objective.Escort: objTxt = "ESCORT VIP"; objCol = Pal.VipGold; break;
             default: objTxt = "ELIMINATE"; objCol = Pal.TxtDim; break;
         }
@@ -312,8 +313,8 @@ public static class Hud
             Add("item", u.ItemName, "6", interactive && u.CanAct && u.ItemCharge > 0, g.ItemMode);
         Add("overwatch", "OVERWATCH", "2", interactive && u != null && u.CanAct && u.Ammo > 0, false);
         Add("hunker", "HUNKER", "3", interactive && u != null && u.CanAct, u != null && u.Hunkered);
-        if (g.HasTerminal)
-            Add("hack", "HACK", "H", interactive && g.CanHack(u), false);
+        if (g.HasHackAction)
+            Add("hack", g.HasSabotage ? "PLANT" : "HACK", "H", interactive && g.CanHack(u), false);
         Add("reload", "RELOAD", "R", interactive && u != null && u.CanAct && u.Ammo < u.Weapon.Clip, false);
 
         ActionButtons = btns.ToArray();
@@ -356,7 +357,9 @@ public static class Hud
             case "grenade": return "Lob a grenade: AoE that ignores cover, hits both teams, clears low cover.";
             case "overwatch": return "Watch: fire a reaction shot at the first foe that moves in sight.";
             case "hunker": return "Hunker down for extra cover defense; you can't be crit.";
-            case "hack": return $"Work the terminal ({g.HackProgress}/{Game.HackRequired} done). Costs 1 action.";
+            case "hack": return g.HasSabotage
+                ? $"Plant a demolition charge on an adjacent site ({g.SabotageBlown.Count}/{g.SabotageSites.Count} set). Costs 1 action."
+                : $"Work the terminal ({g.HackProgress}/{Game.HackRequired} done). Costs 1 action.";
             case "reload": return "Reload your weapon to full.";
             case "ability":
                 return g.Selected != null && g.Selected.Ability != AbilityKind.None
@@ -663,7 +666,8 @@ public static class Hud
 
     static string ObjName(Objective o) => o switch
     {
-        Objective.Hack => "HACK", Objective.Evac => "EXTRACT", Objective.Escort => "ESCORT VIP", _ => "ELIMINATE",
+        Objective.Hack => "HACK", Objective.Evac => "EXTRACT", Objective.Escort => "ESCORT VIP",
+        Objective.Sabotage => "SABOTAGE", _ => "ELIMINATE",
     };
 
     static void DrawDeployCard(Rectangle r, MissionCard c)

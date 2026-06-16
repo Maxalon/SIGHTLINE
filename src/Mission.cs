@@ -28,7 +28,7 @@ public static class Mission
     /// and spawn a hostile force scaled by missionNum.
     public static void Build(Grid grid, List<Unit> players, List<Unit> enemies, int missionNum,
                              List<(int x, int y)> evac = null, (int x, int y)? terminal = null,
-                             int enemyDelta = 0, int statDelta = 0)
+                             int enemyDelta = 0, int statDelta = 0, List<(int x, int y)> sabotage = null)
     {
         enemies.Clear();
         grid.ClearSmoke();
@@ -67,6 +67,11 @@ public static class Mission
             for (int dx = -1; dx <= 1; dx++)
                 for (int dy = -1; dy <= 1; dy++)
                     occupied.Add((terminal.Value.x + dx, terminal.Value.y + dy));
+        if (sabotage != null)                          // keep each sabotage site + its ring open
+            foreach (var s in sabotage)
+                for (int dx = -1; dx <= 1; dx++)
+                    for (int dy = -1; dy <= 1; dy++)
+                        occupied.Add((s.x + dx, s.y + dy));
 
         // Either lay down a hand-authored arena (with a connectivity guard) or fall
         // back to the procedural generator. Both keep reserved tiles open.

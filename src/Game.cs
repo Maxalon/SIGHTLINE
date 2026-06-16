@@ -7,7 +7,7 @@ using Raylib_cs;
 namespace Sightline;
 
 public enum Phase { Intro, PlayerTurn, EnemyTurn, Barracks, Win, Lose }
-public enum Objective { Eliminate, Evac, Hack, Escort }
+public enum Objective { Eliminate, Evac, Hack, Escort, Sabotage }
 public enum SecondaryKind { None, NoLosses, Swift, CleanSweep }  // optional per-mission bonus goal (3.9)
 enum AiStage { PickNext, ActAfterMove }
 
@@ -110,9 +110,27 @@ public class Game
     public (int x, int y) Terminal;
     public int HackProgress;
     public bool HasTerminal => Objective == Objective.Hack;
-    public bool CanHack(Unit u) =>
-        HasTerminal && u != null && u.Team == Team.Player && u.CanAct &&
-        HackProgress < HackRequired && Util.ChebyDist(u.X, u.Y, Terminal.x, Terminal.y) <= 1;
+
+    // SABOTAGE: K charge sites, each demolished by one PLANT action (3.8)
+    public List<(int x, int y)> SabotageSites = new();
+    public HashSet<int> SabotageBlown = new();
+    public bool HasSabotage => Objective == Objective.Sabotage;
+    public bool HasHackAction => HasTerminal || HasSabotage;
+
+    public bool CanHack(Unit u)
+    {
+        if (u == null || u.Team != Team.Player || !u.CanAct) return false;
+        if (HasTerminal) return HackProgress < HackRequired && Util.ChebyDist(u.X, u.Y, Terminal.x, Terminal.y) <= 1;
+        if (HasSabotage) return NearestSabotageSite(u) >= 0;
+        return false;
+    }
+
+    int NearestSabotageSite(Unit u)
+    {
+        for (int i = 0; i < SabotageSites.Count; i++)
+            if (!SabotageBlown.Contains(i) && Util.ChebyDist(u.X, u.Y, SabotageSites[i].x, SabotageSites[i].y) <= 1) return i;
+        return -1;
+    }
 
     // end-turn confirmation when soldiers still have actions
     public bool EndTurnArmed;
@@ -169,6 +187,8 @@ public class Game
         Objective = card.Objective;
         EvacZone.Clear();
         HackProgress = 0;
+        SabotageSites.Clear();
+        SabotageBlown.Clear();
         Vip = null;
         // both Evac and Escort extract to the same top-right zone
         if (Objective == Objective.Evac || Objective == Objective.Escort)
@@ -178,6 +198,13 @@ public class Game
         }
         if (Objective == Objective.Hack)
             Terminal = (Grid.W / 2 + 1, Grid.H / 2);
+        if (Objective == Objective.Sabotage)
+        {
+            int my = Grid.H / 2;
+            SabotageSites.Add((Grid.W / 2 - 4, my - 2));
+            SabotageSites.Add((Grid.W / 2 + 1, my));
+            SabotageSites.Add((Grid.W / 2 + 4, my + 2));
+        }
         if (Objective == Objective.Escort)
         {
             Vip = Mission.MakeVip();
@@ -185,7 +212,8 @@ public class Game
             Players.Add(Vip);
         }
 
-        Mission.Build(Grid, Players, Enemies, n, EvacZone, HasTerminal ? Terminal : null, card.EnemyDelta, card.StatDelta);
+        Mission.Build(Grid, Players, Enemies, n, EvacZone, HasTerminal ? Terminal : null,
+                      card.EnemyDelta, card.StatDelta, HasSabotage ? SabotageSites : null);
         if (Vip != null) { Vip.Grenades = 0; Vip.AbilityCharge = 0; }  // the asset has no kit
         Fx.Particles.Clear();
         Fx.Texts.Clear();
@@ -225,6 +253,13 @@ public class Game
         _run.CurrentCard ??= Run.StandardCard(n);
         SetupMission(n);
         return true;
+    }
+
+    /// Harness hook: force the current mission's objective (verify new objective types).
+    public void DebugForceObjective(Objective o)
+    {
+        _run.CurrentCard = new MissionCard { Objective = o, ModName = "STANDARD", Reward = RewardKind.None };
+        SetupMission(_run.Mission < 1 ? 1 : _run.Mission);
     }
 
     /// Harness hook (screenshot only): reveal all dormant enemies.
@@ -753,6 +788,10 @@ public class Game
         {
             if (HackProgress >= HackRequired) EnterBarracks();
         }
+        else if (Objective == Objective.Sabotage) // plant charges on every site
+        {
+            if (SabotageBlown.Count >= SabotageSites.Count) EnterBarracks();
+        }
         else if (Objective == Objective.Escort) // get the VIP to extraction; losing it is a wipe
         {
             if (Vip == null || !Vip.Alive) { LoseRun("VIP LOST", $"The asset was lost on mission {_run.Mission}."); return; }
@@ -826,6 +865,20 @@ public class Game
             var et = FirstTargetFor(u);
             if (et != null && u.Ammo > 0) { IssueShoot(et); return; }
             if (TryMoveTowardTile(u, Terminal.x, Terminal.y)) return;
+            DoHunker();
+            return;
+        }
+
+        // SABOTAGE objective: plant charges on each site in turn
+        if (Objective == Objective.Sabotage)
+        {
+            if (CanHack(u)) { DoHack(); return; }
+            var et = FirstTargetFor(u);
+            if (et != null && u.Ammo > 0) { IssueShoot(et); return; }
+            var site = SabotageSites
+                .Where((s, i) => !SabotageBlown.Contains(i))
+                .OrderBy(s => Util.TileDist(u.X, u.Y, s.x, s.y)).FirstOrDefault();
+            if (site != default && TryMoveTowardTile(u, site.x, site.y)) return;
             DoHunker();
             return;
         }
@@ -1271,7 +1324,8 @@ public class Game
     {
         if (u.Item == ItemKind.Barricade)
             return Grid.IsFloor(tx, ty) && !IsOccupiedByOther(tx, ty, u) && !EvacZone.Contains((tx, ty))
-                   && !(HasTerminal && Terminal.x == tx && Terminal.y == ty);
+                   && !(HasTerminal && Terminal.x == tx && Terminal.y == ty)
+                   && !(HasSabotage && SabotageSites.Contains((tx, ty)));
         return true;
     }
 
@@ -1357,12 +1411,24 @@ public class Game
     {
         if (!CanHack(Selected)) return;
         Selected.ActionsLeft -= 1;
+        AimMode = false;
+        if (HasSabotage)
+        {
+            int i = NearestSabotageSite(Selected);
+            if (i < 0) return;
+            SabotageBlown.Add(i);
+            var sat = Util.TileCenter(SabotageSites[i].x, SabotageSites[i].y);
+            Fx.PopText(sat + new Vector2(0, -30), "CHARGE SET", Pal.Foe, 20f);
+            Fx.Burst(sat, Pal.Accent, 22, 240f, 0.6f, 4.5f, true);
+            Fx.AddShake(6f);
+            Audio.Play("reload");
+            return;
+        }
         HackProgress++;
         var at = Util.TileCenter(Terminal.x, Terminal.y);
         Fx.PopText(at + new Vector2(0, -30), HackProgress >= HackRequired ? "HACKED" : "HACK +1", Pal.Accent, 20f);
         Fx.Burst(at, Pal.Accent, 14, 160f, 0.5f, 3f);
         Audio.Play("reload");
-        AimMode = false;
     }
 
     void DoReload()
