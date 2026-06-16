@@ -77,10 +77,10 @@ public static class Mission
         // back to the procedural generator. Both keep reserved tiles open.
         bool authored;
         if (ForcedLayout >= 0 && ForcedLayout < Maps.Layouts.Length)
-            authored = TryApplyLayout(grid, occupied, players, enemies, evacSet, terminal, Maps.Layouts[ForcedLayout]);
+            authored = TryApplyLayout(grid, occupied, players, enemies, evacSet, terminal, Maps.Layouts[ForcedLayout], sabotage);
         else
             authored = Util.Roll(55) &&
-                TryApplyLayout(grid, occupied, players, enemies, evacSet, terminal, Util.Choice(Maps.Layouts));
+                TryApplyLayout(grid, occupied, players, enemies, evacSet, terminal, Util.Choice(Maps.Layouts), sabotage);
         if (!authored)
         {
             // contested high ground: raised plateaus in the mid-field (more on later missions)
@@ -126,7 +126,7 @@ public static class Mission
     /// Reverts and returns false if the layout is malformed or would wall anyone off.
     static bool TryApplyLayout(Grid g, HashSet<(int, int)> occupied, List<Unit> players,
                                List<Unit> enemies, HashSet<(int, int)> evac,
-                               (int x, int y)? terminal, string[] tpl)
+                               (int x, int y)? terminal, string[] tpl, List<(int x, int y)> sabotage)
     {
         if (tpl.Length != g.H) return false;
         for (int y = 0; y < g.H; y++) if (tpl[y].Length != g.W) return false;
@@ -154,6 +154,7 @@ public static class Mission
         foreach (var u in enemies) if (!Reachable(u.X, u.Y)) ok = false;
         foreach (var t in evac) if (!Reachable(t.Item1, t.Item2)) ok = false;
         if (terminal.HasValue && !Reachable(terminal.Value.x, terminal.Value.y)) ok = false;
+        if (sabotage != null) foreach (var s in sabotage) if (!Reachable(s.x, s.y)) ok = false;
 
         if (!ok)   // revert to a clean slate so the procedural path can run
         {

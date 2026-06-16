@@ -219,6 +219,9 @@ seeds (mix of WIN/LOSE, no exceptions):
   barracks (`SecondaryKind`, `Game.RollSecondary`/`SecondaryAchieved`). (Phase 3 item 3.9.)
 - **Sabotage objective:** plant demolition charges on all 3 sites (`Game.SabotageSites`,
   PLANT action) to win; part of the objective rotation. (Phase 3 item 3.8.)
+- **Rescue objective:** free a caged, invulnerable CAPTIVE mid-map (reach it with a
+  soldier), then escort the freed asset to extraction; losing it after freeing fails the
+  mission (`Game.CaptiveLocked`/`TryFreeCaptive`). (Phase 3 item 3.8.)
 - **Mission objectives:** Eliminate, Hack (reach the TERMINAL and hack it down,
   HACK action / key H), Evac (get the whole squad to the extraction zone), and
   **Escort** (walk a fragile gold VIP to the extraction zone alive — losing the
@@ -670,9 +673,9 @@ code to `main`.
             has a sap branch that `DamageCover(HighCoverHp)`s the tile ("BREACH" + `CoverHitFx`).
             Renderer gives it a demo-charge marker. Pairs with 3.6 destructible cover.
 
-- [ ] **3.8 New objectives.** SABOTAGE done; DEFEND + RESCUE still open.
+- [ ] **3.8 New objectives.** SABOTAGE + RESCUE done; DEFEND still open.
       - [x] **SABOTAGE. DONE.** `Objective.Sabotage` added to the enum + `Run.ObjectiveFor`
-            (now a 5-cycle: Elim/Hack/Evac/Escort/Sabotage). 3 charge sites
+            (rotation now %6: Elim/Hack/Evac/Escort/Sabotage/Rescue). 3 charge sites
             (`Game.SabotageSites`, spread mid-map; reserved in `Mission.Build` via a new
             `sabotage` param) each demolished by one **PLANT** action — the HACK action/key
             generalised (`HasHackAction`/`CanHack`/`DoHack` branch on `HasSabotage`,
@@ -681,10 +684,19 @@ code to `main`.
             consoles, ARMED once set). Autopilot plants each site. Verify:
             `SIGHTLINE_OBJ=sabotage` (force hook, shot or autoplay) — autopilot WINs it +
             screenshot.
+      - [x] **RESCUE. DONE.** `Objective.Rescue`. A caged captive (reuses the `Vip` unit,
+            `Cls="VIP"`, Name "CAPTIVE") seated mid-field, `CaptiveLocked` true: invulnerable
+            (guarded in `CanTarget` + `GrenadeAnim`), immobile (Mobility 0). `TryFreeCaptive`
+            (called from `CheckPodActivation` + `AutoStep`) unlocks it when a soldier is
+            Chebyshev≤1 → it becomes a fragile escort (Mobility 6) to walk to the shared
+            evac zone. `CheckEnd` Rescue branch: win = freed captive in evac; lose = captive
+            dies after freeing. Captive seat reserved + connectivity-verified via the
+            `terminal` Build arg (and `sabotage` sites now verified too). Renderer: caged =
+            gray figure + cage bars + "CAPTIVE" tag, gold "FREED" after. HUD "RESCUE/EXTRACT
+            CAPTIVE". Autopilot springs then extracts it. Verify: `SIGHTLINE_OBJ=rescue` +
+            screenshot.
       - [ ] **DEFEND.** Hold a zone / survive N turns vs. spawned waves — needs a wave
             spawner in the turn flow + a turn counter. Not done.
-      - [ ] **RESCUE.** Free a captive that becomes a fragile ally to extract — reuses the
-            VIP/escort plumbing. Not done.
 
 - [x] **3.9 Secondary objectives.** DONE. An optional per-mission bonus goal worth
       `Game.SecondaryIntel` (12) extra `Run.Intel`. `SecondaryKind` {None, NoLosses,
@@ -740,7 +752,25 @@ Before stopping:
 
 ### WIP NOTES
 
-> **3.8 SABOTAGE OBJECTIVE (latest).** New `Objective.Sabotage` (enum + `Run.ObjectiveFor`
+> **3.8 RESCUE OBJECTIVE (latest).** `Objective.Rescue` (rotation now %6, + `GenerateOffers`
+> pool). Reuses the `Vip` unit as the captive (`Cls="VIP"`, renamed "CAPTIVE"); new
+> `Game.CaptiveLocked`. Setup (`SetupMission`): make the Vip, add to `Players`, lock it,
+> then AFTER `Mission.Build` re-seat it at `(W/2,H/2)`, clear its ring, Mobility 0,
+> `SyncPos`. Invulnerable while locked: guarded in `CanTarget` (`d==Vip && CaptiveLocked`)
+> and `GrenadeAnim.Explode` (skip the caged Vip). `TryFreeCaptive` (called from
+> `CheckPodActivation` AND `AutoStep`) unlocks on a soldier Chebyshev≤1 → Mobility 6 +
+> `BeginTurn` + "CAPTIVE FREED" banner. `CheckEnd` Rescue: lose if freed-then-dead, win if
+> freed + in evac (shared top-right zone, same as Evac/Escort). Autopilot Rescue branch:
+> non-VIP soldiers path to the captive to spring it then fight; the freed captive walks to
+> evac (VIP path). Reserve+connectivity: the captive seat is passed as the `terminal` Build
+> arg (HasTerminal stays false so no terminal renders/draws) so authored maps keep it
+> reachable; `TryApplyLayout` now also verifies `sabotage` sites. Renderer: caged = gray +
+> cage bars + "CAPTIVE", else gold "FREED". HUD "RESCUE/EXTRACT CAPTIVE". Harness
+> `SIGHTLINE_OBJ=rescue`. Gotchas: (a) the captive rides in `Players` so `!IsVip` filters
+> (squad counter, barracks) already exclude it; (b) `DebugForceObjective` only forces the
+> FIRST mission. TODO: 3.8 DEFEND (wave spawner + survive-N-turns).
+
+> **3.8 SABOTAGE OBJECTIVE.** New `Objective.Sabotage` (enum + `Run.ObjectiveFor`
 > 5-cycle + the legacy `GenerateOffers` pool). `Game`: `SabotageSites` (List of 3 tiles
 > seeded in `SetupMission`: mid-map spread), `SabotageBlown` (HashSet of done indices),
 > `HasSabotage`/`HasHackAction`, `NearestSabotageSite`. The HACK action is generalised —

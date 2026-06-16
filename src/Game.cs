@@ -7,7 +7,7 @@ using Raylib_cs;
 namespace Sightline;
 
 public enum Phase { Intro, PlayerTurn, EnemyTurn, Barracks, Win, Lose }
-public enum Objective { Eliminate, Evac, Hack, Escort, Sabotage }
+public enum Objective { Eliminate, Evac, Hack, Escort, Sabotage, Rescue }
 public enum SecondaryKind { None, NoLosses, Swift, CleanSweep }  // optional per-mission bonus goal (3.9)
 enum AiStage { PickNext, ActAfterMove }
 
@@ -104,6 +104,7 @@ public class Game
     // escort objective: a fragile VIP that must reach the extraction zone alive.
     // Mission-only — it rides in Players for the mission but never joins the squad.
     public Unit Vip;
+    public bool CaptiveLocked;   // RESCUE: the asset starts caged + invulnerable until a soldier frees it (3.8)
 
     // hack objective: reach the terminal and hack it over several actions
     public const int HackRequired = 3;
@@ -190,8 +191,9 @@ public class Game
         SabotageSites.Clear();
         SabotageBlown.Clear();
         Vip = null;
-        // both Evac and Escort extract to the same top-right zone
-        if (Objective == Objective.Evac || Objective == Objective.Escort)
+        CaptiveLocked = false;
+        // Evac / Escort / Rescue all extract to the same top-right zone
+        if (Objective == Objective.Evac || Objective == Objective.Escort || Objective == Objective.Rescue)
         {
             EvacZone.Add((Grid.W - 2, 0)); EvacZone.Add((Grid.W - 1, 0));
             EvacZone.Add((Grid.W - 2, 1)); EvacZone.Add((Grid.W - 1, 1));
@@ -211,10 +213,35 @@ public class Game
             Vip.X = 2; Vip.Y = 5;          // valid pre-build tile (spawn table refines it)
             Players.Add(Vip);
         }
+        if (Objective == Objective.Rescue)
+        {
+            Vip = Mission.MakeVip();
+            Vip.Name = "CAPTIVE";
+            Vip.X = 2; Vip.Y = 5;          // pre-build placeholder; re-seated at centre below
+            Players.Add(Vip);
+            CaptiveLocked = true;
+        }
 
-        Mission.Build(Grid, Players, Enemies, n, EvacZone, HasTerminal ? Terminal : null,
+        // reserve + connectivity-verify a key tile: the Hack terminal, or the Rescue captive's seat
+        (int x, int y)? reserve = HasTerminal ? Terminal
+            : (Objective == Objective.Rescue ? (Grid.W / 2, Grid.H / 2) : ((int, int)?)null);
+        Mission.Build(Grid, Players, Enemies, n, EvacZone, reserve,
                       card.EnemyDelta, card.StatDelta, HasSabotage ? SabotageSites : null);
         if (Vip != null) { Vip.Grenades = 0; Vip.AbilityCharge = 0; }  // the asset has no kit
+        if (Objective == Objective.Rescue && Vip != null)
+        {
+            // seat the caged captive mid-field and clear its tile + ring so soldiers can reach it
+            Vip.X = Grid.W / 2; Vip.Y = Grid.H / 2;
+            for (int dx = -1; dx <= 1; dx++)
+                for (int dy = -1; dy <= 1; dy++)
+                {
+                    int nx = Vip.X + dx, ny = Vip.Y + dy;
+                    if (Grid.InBounds(nx, ny) && !IsOccupiedByOther(nx, ny, Vip)) Grid.Tiles[nx, ny] = TileType.Floor;
+                }
+            Grid.ResetCoverHp();
+            Vip.Mobility = 0;              // can't move while caged
+            Vip.SyncPos();
+        }
         Fx.Particles.Clear();
         Fx.Texts.Clear();
         _anims.Clear();
@@ -472,6 +499,7 @@ public class Game
     {
         if (a == null || d == null || !a.Alive || !d.Alive || a.Ammo <= 0) return false;
         if (a.Team == d.Team) return false;
+        if (d == Vip && CaptiveLocked) return false;   // the caged captive is invulnerable until freed
         if (Util.TileDist(a.X, a.Y, d.X, d.Y) > a.Weapon.MaxRange) return false;
         // a commanding 2-tier height advantage lets the shooter see over high cover
         bool commanding = Grid.HeightAt(a.X, a.Y) - Grid.HeightAt(d.X, d.Y) >= 2;
@@ -797,6 +825,12 @@ public class Game
             if (Vip == null || !Vip.Alive) { LoseRun("VIP LOST", $"The asset was lost on mission {_run.Mission}."); return; }
             if (EvacZone.Contains((Vip.X, Vip.Y))) EnterBarracks();
         }
+        else if (Objective == Objective.Rescue) // free the captive, then walk it to extraction
+        {
+            if (!CaptiveLocked && (Vip == null || !Vip.Alive))
+            { LoseRun("CAPTIVE LOST", $"The captive died on mission {_run.Mission}."); return; }
+            if (!CaptiveLocked && Vip != null && EvacZone.Contains((Vip.X, Vip.Y))) EnterBarracks();
+        }
         else // Evac: every surviving soldier must stand in the extraction zone
         {
             if (alivePlayers.All(p => EvacZone.Contains((p.X, p.Y)))) EnterBarracks();
@@ -828,6 +862,7 @@ public class Game
     void AutoStep()
     {
         if (_anims.Count > 0 || Phase != Phase.PlayerTurn) return;
+        TryFreeCaptive();                       // free a captive a soldier is already standing next to
         var u = Players.FirstOrDefault(p => p.CanAct);
         if (u == null) { EndPlayerTurn(); return; }
         Selected = u;
@@ -901,6 +936,30 @@ public class Game
             if (u.Ammo == 0) { DoReload(); return; }
             var foe = AliveEnemies().OrderBy(e => Util.TileDist(u.X, u.Y, e.X, e.Y)).FirstOrDefault();
             if (foe != null && TryMoveTowardTile(u, foe.X, foe.Y)) return;
+            DoHunker(); return;
+        }
+
+        // RESCUE objective: reach the caged captive to free it, then walk it to extraction
+        if (Objective == Objective.Rescue)
+        {
+            if (u.IsVip)
+            {
+                if (CaptiveLocked) { DoHunker(); return; }     // can't move while caged
+                if (!EvacZone.Contains((u.X, u.Y)))
+                {
+                    var cand = EvacZone.Where(t => !IsOccupiedByOther(t.x, t.y, u))
+                                       .OrderBy(t => Util.TileDist(u.X, u.Y, t.x, t.y)).ToList();
+                    if (cand.Count > 0 && TryMoveTowardTile(u, cand[0].x, cand[0].y)) return;
+                }
+                DoHunker(); return;
+            }
+            if (CaptiveLocked && Vip != null && Util.ChebyDist(u.X, u.Y, Vip.X, Vip.Y) > 1
+                && TryMoveTowardTile(u, Vip.X, Vip.Y)) return;   // go spring the captive
+            var rt = FirstTargetFor(u);
+            if (rt != null && u.Ammo > 0) { IssueShoot(rt); return; }
+            if (u.Ammo == 0) { DoReload(); return; }
+            var rfoe = AliveEnemies().OrderBy(e => Util.TileDist(u.X, u.Y, e.X, e.Y)).FirstOrDefault();
+            if (rfoe != null && TryMoveTowardTile(u, rfoe.X, rfoe.Y)) return;
             DoHunker(); return;
         }
 
@@ -992,6 +1051,25 @@ public class Game
                 break;
             }
         }
+        TryFreeCaptive();
+    }
+
+    /// RESCUE: free the caged captive once a soldier reaches it; it then becomes a
+    /// fragile escort that must be walked to extraction.
+    void TryFreeCaptive()
+    {
+        if (!CaptiveLocked || Vip == null || !Vip.Alive) return;
+        foreach (var p in Players)
+            if (p.Alive && !p.IsVip && Util.ChebyDist(p.X, p.Y, Vip.X, Vip.Y) <= 1)
+            {
+                CaptiveLocked = false;
+                Vip.Mobility = 6;                       // can move now
+                Vip.BeginTurn();                        // give it actions this turn
+                ShowBanner("CAPTIVE FREED", false);
+                Fx.PopText(Vip.Pos + new Vector2(0, -30), "FREED", Pal.VipGold, 22f);
+                Fx.Burst(Vip.Pos, Pal.VipGold, 20, 200f, 0.6f, 4f, true);
+                return;
+            }
     }
 
     public void ActivatePod(int podId)
