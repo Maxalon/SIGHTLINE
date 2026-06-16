@@ -10,17 +10,17 @@ public static class Renderer
     // how far raised terrain (and anything standing on it) lifts on screen
     public const float ElevLift = 8f;
 
-    // tile draw rect/centre offset up onto the plateau top when elevated
+    // tile draw rect/centre offset up onto the plateau top when elevated (per height tier)
     static Rectangle ElevRect(Game g, int x, int y)
     {
         var r = Util.TileRect(x, y);
-        if (g.Grid.IsHigh(x, y)) r.Y -= ElevLift;
+        r.Y -= g.Grid.HeightAt(x, y) * ElevLift;
         return r;
     }
     static Vector2 ElevCenter(Game g, int x, int y)
     {
         var c = Util.TileCenter(x, y);
-        if (g.Grid.IsHigh(x, y)) c.Y -= ElevLift;
+        c.Y -= g.Grid.HeightAt(x, y) * ElevLift;
         return c;
     }
 
@@ -73,22 +73,27 @@ public static class Renderer
         for (int y = 0; y < g.Grid.H; y++)
             for (int x = 0; x < g.Grid.W; x++)
             {
-                if (!g.Grid.IsHigh(x, y)) continue;
+                int h = g.Grid.HeightAt(x, y);
+                if (h <= 0) continue;
                 var r = Util.TileRect(x, y);
-                // exposed front wall (only where the tile below isn't also raised)
-                if (!g.Grid.IsHigh(x, y + 1))
+                float lift = h * ElevLift;
+                // exposed front wall down to whatever the tile below sits at (taller for tier 2)
+                int belowH = g.Grid.HeightAt(x, y + 1);
+                if (belowH < h)
                     Raylib.DrawRectangleRec(
-                        new Rectangle(r.X, r.Y + r.Height - ElevLift, r.Width, ElevLift + 3),
+                        new Rectangle(r.X, r.Y + r.Height - lift, r.Width, (h - belowH) * ElevLift + 3),
                         Pal.HighSide);
-                // raised top face
-                var top = new Rectangle(r.X, r.Y - ElevLift, r.Width, r.Height);
-                Raylib.DrawRectangleRec(top, ((x + y) & 1) == 0 ? hiA : hiB);
+                // raised top face — tier 2 reads a touch brighter so the height tier is legible
+                var top = new Rectangle(r.X, r.Y - lift, r.Width, r.Height);
+                Color ca = h >= 2 ? Pal.Mix(hiA, Pal.RGBA(255, 255, 255), 0.12f) : hiA;
+                Color cb = h >= 2 ? Pal.Mix(hiB, Pal.RGBA(255, 255, 255), 0.12f) : hiB;
+                Raylib.DrawRectangleRec(top, ((x + y) & 1) == 0 ? ca : cb);
                 // lit front edge of the top face
                 Raylib.DrawLineEx(new Vector2(top.X, top.Y + top.Height - 1),
                                   new Vector2(top.X + top.Width, top.Y + top.Height - 1),
                                   2f, Raylib.Fade(Pal.HighEdge, 0.5f));
-                // top-edge highlight where it meets open air above
-                if (!g.Grid.IsHigh(x, y - 1))
+                // top-edge highlight where it meets a lower tile above
+                if (g.Grid.HeightAt(x, y - 1) < h)
                     Raylib.DrawLineEx(new Vector2(top.X, top.Y),
                                       new Vector2(top.X + top.Width, top.Y),
                                       1.5f, Raylib.Fade(Pal.HighEdge, 0.35f));
@@ -229,7 +234,7 @@ public static class Renderer
                 var t = g.Grid.Tiles[x, y];
                 if (t == TileType.Floor) continue;
                 var r = Util.TileRect(x, y);
-                if (g.Grid.IsHigh(x, y)) r.Y -= ElevLift;   // sit cover on the plateau top
+                r.Y -= g.Grid.HeightAt(x, y) * ElevLift;   // sit cover on the plateau top (per tier)
                 bool high = t == TileType.HighCover;
                 float inset = 5f;
                 float lift = high ? 16f : 8f;

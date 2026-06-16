@@ -94,6 +94,7 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CAMPAIGN") == "1") game.DebugCampaignMap();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_ITEM") == "1") game.DebugItem();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_COVER") == "1") game.DebugCover();
+        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_ELEV") == "1") game.DebugElevation();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_SHOP") == "1") game.DebugShop();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_TAGEDIT") == "1") game.DebugTagEditor();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_WOUND") == "1") game.DebugWound();

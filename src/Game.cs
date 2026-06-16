@@ -222,6 +222,18 @@ public class Game
     /// Harness hook (screenshot only): reveal all dormant enemies.
     public void DebugWakeAll() { foreach (var e in Enemies) if (e.Alive) e.Active = true; }
 
+    /// Harness hook (screenshot only): stamp a tier-2 plateau (with a tier-1 step and a
+    /// high-cover block) mid-field so the 2nd elevation tier is visible.
+    public void DebugElevation()
+    {
+        for (int dx = 0; dx < 2; dx++)
+            for (int dy = 0; dy < 2; dy++)
+                if (Grid.InBounds(8 + dx, 4 + dy)) Grid.Height[8 + dx, 4 + dy] = 2;   // tier-2 redoubt
+        for (int dy = 0; dy < 2; dy++)
+            if (Grid.InBounds(7, 4 + dy)) Grid.Height[7, 4 + dy] = 1;                 // tier-1 step beside it
+        if (Grid.IsFloor(10, 5)) { Grid.Tiles[10, 5] = TileType.HighCover; Grid.SetCoverHp(10, 5); }  // a foe's high cover to see over
+    }
+
     /// Harness hook (screenshot only): chip several high-cover blocks so the cracked
     /// damage state is visible, and fully degrade one to show the rubble (low) state.
     public void DebugCover()
@@ -360,7 +372,9 @@ public class Game
         if (a == null || d == null || !a.Alive || !d.Alive || a.Ammo <= 0) return false;
         if (a.Team == d.Team) return false;
         if (Util.TileDist(a.X, a.Y, d.X, d.Y) > a.Weapon.MaxRange) return false;
-        return Grid.HasLineOfSight(a.X, a.Y, d.X, d.Y);
+        // a commanding 2-tier height advantage lets the shooter see over high cover
+        bool commanding = Grid.HeightAt(a.X, a.Y) - Grid.HeightAt(d.X, d.Y) >= 2;
+        return Grid.HasLineOfSight(a.X, a.Y, d.X, d.Y, commanding);
     }
 
     public bool HasAnyTarget(Unit u)
@@ -1808,6 +1822,7 @@ public class Game
         if (grid.CoverHp[5, 5] != Grid.HighCoverHp) fails.Add("initHp");
         if (grid.GetCover(5, 4, 5, 9).Level != 2) fails.Add("highCover");
         if (grid.HasLineOfSight(5, 2, 5, 9)) fails.Add("highBlocksLoS");
+        if (!grid.HasLineOfSight(5, 2, 5, 9, true)) fails.Add("commandingSeesOverHigh");  // 3.6b
 
         // chip it down: HighCoverHp hits to degrade High -> Low
         if (grid.DamageCover(5, 5, 1) != Grid.CoverHit.Chipped || grid.Tiles[5, 5] != TileType.HighCover) fails.Add("chip");
