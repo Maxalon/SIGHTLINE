@@ -12,17 +12,41 @@ public class Grid
     public readonly int H = Cfg.GridH;
     public TileType[,] Tiles;
     public int[,] Height;       // elevation layer: 0 = ground, 1 = high ground
+    public int[,] Smoke;        // utility-item smoke: turns remaining a tile blocks sight (3.4)
 
     public Grid()
     {
         Tiles = new TileType[W, H];
         Height = new int[W, H];
+        Smoke = new int[W, H];
     }
 
     public bool InBounds(int x, int y) => x >= 0 && y >= 0 && x < W && y < H;
     public TileType At(int x, int y) => Tiles[x, y];
     public bool IsCover(int x, int y) => InBounds(x, y) && Tiles[x, y] != TileType.Floor;
-    public bool BlocksSight(int x, int y) => InBounds(x, y) && Tiles[x, y] == TileType.HighCover;
+    // High cover OR an active smoke cloud blocks line of sight (and overwatch) through a tile.
+    public bool BlocksSight(int x, int y) =>
+        InBounds(x, y) && (Tiles[x, y] == TileType.HighCover || Smoke[x, y] > 0);
+    public bool IsSmoke(int x, int y) => InBounds(x, y) && Smoke[x, y] > 0;
+
+    /// Reset all smoke (called at mission build).
+    public void ClearSmoke() { Array.Clear(Smoke, 0, Smoke.Length); }
+
+    /// Decay every smoke cloud by one turn (called once per player turn).
+    public void TickSmoke()
+    {
+        for (int x = 0; x < W; x++)
+            for (int y = 0; y < H; y++)
+                if (Smoke[x, y] > 0) Smoke[x, y]--;
+    }
+
+    /// Lay a smoke cloud of `turns` over a Chebyshev `radius` around (cx,cy).
+    public void AddSmoke(int cx, int cy, int radius, int turns)
+    {
+        for (int x = cx - radius; x <= cx + radius; x++)
+            for (int y = cy - radius; y <= cy + radius; y++)
+                if (InBounds(x, y)) Smoke[x, y] = Math.Max(Smoke[x, y], turns);
+    }
 
     /// Terrain elevation at a tile (0 ground, 1 high ground). High ground grants
     /// an aim/crit edge when firing down on a lower target.

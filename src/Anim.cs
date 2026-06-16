@@ -247,6 +247,110 @@ public class GrenadeAnim : Anim
     }
 }
 
+/// Base for lobbed utility throwables (smoke / flash): parabolic arc, then a
+/// one-shot Effect on landing. Mirrors the grenade arc, tinted per item.
+public abstract class LobAnim : Anim
+{
+    protected readonly Unit Thrower;
+    protected readonly int Tx, Ty;
+    protected Color Tint = Pal.Accent;
+    const float Flight = 0.5f;
+    const float Total = 0.72f;
+    float _t;
+    bool _boom;
+    Vector2 _from, _to;
+
+    protected LobAnim(Unit thrower, int tx, int ty) { Thrower = thrower; Tx = tx; Ty = ty; }
+    protected virtual int BlastRadius => 1;
+
+    public override void OnStart(Game g)
+    {
+        _from = Thrower.Pos;
+        _to = Util.TileCenter(Tx, Ty);
+        var d = _to - _from;
+        if (d.LengthSquared() > 0.01f) Thrower.Facing = MathF.Atan2(d.Y, d.X);
+    }
+
+    public override bool Update(Game g, float dt)
+    {
+        _t += dt;
+        if (!_boom && _t >= Flight) { _boom = true; Effect(g); }
+        return _t >= Total;
+    }
+
+    protected abstract void Effect(Game g);
+
+    public override void Draw(Game g)
+    {
+        if (_t < Flight)
+        {
+            float k = _t / Flight;
+            Vector2 p = Vector2.Lerp(_from, _to, k);
+            p.Y -= MathF.Sin(k * MathF.PI) * 64f;          // parabolic arc
+            Raylib.DrawCircleV(p + new Vector2(2, 3), 5f, Raylib.Fade(Pal.RGBA(0, 0, 0), 0.4f));
+            Raylib.DrawCircleV(p, 5f, Tint);
+            Raylib.DrawCircleV(p, 2.5f, Pal.RGBA(245, 245, 245));
+        }
+        else
+        {
+            float k = (_t - Flight) / (Total - Flight);
+            float rad = Util.Lerp(8f, (BlastRadius + 0.5f) * Cfg.Tile, Util.EaseOutQuad(k));
+            Raylib.DrawCircleV(_to, rad, Raylib.Fade(Tint, (1f - k) * 0.4f));
+        }
+    }
+}
+
+/// Smoke grenade: lays a sight-blocking cloud over a 3x3 area for a few turns.
+public class SmokeAnim : LobAnim
+{
+    public const int Radius = 1;
+    public const int Turns = 3;        // player turns the cloud lingers
+    public SmokeAnim(Unit thrower, int tx, int ty) : base(thrower, tx, ty) { Tint = Pal.RGBA(150, 158, 168); }
+    protected override int BlastRadius => Radius;
+
+    protected override void Effect(Game g)
+    {
+        Audio.Play("hunker");
+        g.Grid.AddSmoke(Tx, Ty, Radius, Turns);
+        for (int x = Tx - Radius; x <= Tx + Radius; x++)
+            for (int y = Ty - Radius; y <= Ty + Radius; y++)
+                if (g.Grid.InBounds(x, y))
+                    g.Fx.Burst(Util.TileCenter(x, y), Pal.RGBA(160, 168, 178), 9, 70f, 1.1f, 6f);
+    }
+}
+
+/// Flashbang: AoE that disorients everyone caught in the blast (both teams) and
+/// denies their held overwatch. Reuses the status system (3.5).
+public class FlashAnim : LobAnim
+{
+    public const int Radius = 1;
+    public const int DisorientTurns = 2;
+    public FlashAnim(Unit thrower, int tx, int ty) : base(thrower, tx, ty) { Tint = Pal.RGBA(255, 250, 230); }
+    protected override int BlastRadius => Radius;
+
+    protected override void Effect(Game g)
+    {
+        Audio.Play("crit");
+        g.Fx.AddShake(7f);
+        g.AddHitStop(0.04f);
+        g.Fx.Burst(Util.TileCenter(Tx, Ty), Pal.RGBA(255, 250, 230), 34, 320f, 0.4f, 5f, true);
+
+        var all = new System.Collections.Generic.List<Unit>();
+        all.AddRange(g.Players); all.AddRange(g.Enemies);
+        var wokePods = new System.Collections.Generic.HashSet<int>();
+        foreach (var u in all)
+        {
+            if (!u.Alive || Util.ChebyDist(u.X, u.Y, Tx, Ty) > Radius) continue;
+            if (u.Team == Team.Enemy && !u.Active) wokePods.Add(u.PodId);
+            u.AddStatus(StatusKind.Disoriented, DisorientTurns);
+            u.OnOverwatch = false;             // the flash breaks any held overwatch
+            u.Flash = 1f;
+            g.Fx.PopText(u.Pos + new Vector2(0, -26), "DAZED", Pal.RGBA(255, 240, 200), 20f);
+        }
+        foreach (int pod in wokePods) g.ActivatePod(pod);
+    }
+}
+
 /// A medic mends an ally: a green link + particle burst, then restores HP.
 public class HealAnim : Anim
 {

@@ -54,6 +54,14 @@ are. **Keep it updated** — when you finish work, tick the roadmap and refresh
   clean in Release and (b) pass the headless autoplay smoke test (see below),
   which you run manually.
 - **Keep `CLAUDE.md` current** — it is the continuity contract.
+- **This is a fully autonomous, you-owned project. Do NOT ask the human "should I
+  continue?" or wait for approval to take the next step.** Keep picking up the top
+  unchecked ROADMAP item and building it, verify it, commit + merge to `main`, then move
+  to the next — looping until you hit a real stopping point (context rot risking quality,
+  a milestone worth a handoff, or something genuinely blocked that only the human can do,
+  e.g. audio that needs a real device). The human only chimes in with occasional feedback
+  / playtests; every other decision (what to build, scope, design, when to ship) is
+  yours. The one hard gate is below: **NO GitHub Actions / CI, ever.**
 
 ---
 
@@ -241,6 +249,11 @@ seeds (mix of WIN/LOSE, no exceptions):
   Two soldiers who survive 3 missions together forge a **bond** (`Unit.Bonds`,
   +10 aim while adjacent). Dossier + roster surface all of it; persisted in the save.
   (Phase 3 item 3.2.)
+- **Utility items:** a second throwable slot beyond grenades (`Unit.Item`, 1 charge/
+  mission, by class; key **6**): **SMOKE** (a 3x3 `Grid.Smoke` cloud that blocks LoS +
+  overwatch for 3 turns, `SmokeAnim`/`Renderer.DrawSmoke`), **FLASH** (`FlashAnim` AoE
+  that Disorients both teams + breaks overwatch), **BARRICADE** (drop a LowCover tile).
+  Ranger/Sharpshooter carry smoke, Assault a flash, Gunner a barricade.
 - **Status effects:** transient per-mission `Unit.Statuses` — **Burning** (DoT at turn
   start), **Bleed** (DoT per step), **Stun** (lose an action), **Disoriented** (−aim, no
   overwatch). Ticked in `Game.TickStatuses` (DoT via `Game.EnvDamage`), read in
@@ -554,15 +567,24 @@ code to `main`.
 
 ### Tier 2 — tactical depth (second-to-second)
 
-- [ ] **3.4 Utility items (smoke / flash / deployable cover).** A second throwable
-      slot beyond grenades. `ItemKind` enum; reuse the `GrenadeMode` targeting pattern
-      → `ItemMode` + an action button. **Smoke:** a transient LoS-blocking cloud — add
-      a `Grid.Smoke[,]` turn-counter layer that `HasLineOfSight` treats as blocking,
-      decremented each turn; blocks overwatch through it. **Flash:** AoE that
-      Disorients (see 3.5) + denies overwatch next turn. **Deployable cover:** drop a
-      LowCover tile. `SmokeAnim`/`FlashAnim` in `Anim.cs`. 1 charge/mission like
-      grenades (`Unit`), optional class/loadout choice. Verify: a COMBATTEST-style LoS
-      check (smoke blocks a clear sightline) + autoplay.
+- [x] **3.4 Utility items (smoke / flash / deployable cover).** DONE. A second
+      throwable slot beyond grenades, **1 charge/mission, assigned by class**
+      (`Unit.Item`/`ItemKindFor`: Ranger+Sharpshooter = SMOKE, Assault = FLASH, Gunner =
+      BARRICADE; refilled in `Mission.Build`). Targeting mirrors the grenade pattern
+      (`Game.ItemMode`/`ItemValid`/`ItemTargetOk`/`IssueItem`, action key **6**, HUD ITEM
+      button + tooltip; `Renderer.DrawItem` range ring + footprint). **Smoke:** a
+      `Grid.Smoke[,]` turn-counter layer that `BlocksSight` treats as blocking (so
+      `HasLineOfSight` + overwatch are cut through it), laid 3x3 by `SmokeAnim`, decays
+      one turn per round in `Game.StartPlayerTurn` (`Grid.TickSmoke`), cleared per mission
+      (`Grid.ClearSmoke`); drawn as a drifting haze (`Renderer.DrawSmoke`). **Flash:**
+      `FlashAnim` AoE that applies `StatusKind.Disoriented` (3.5: -aim + no overwatch) to
+      both teams in the blast and breaks held overwatch. **Barricade:** drops a LowCover
+      tile on an empty floor tile (instant, no projectile). `LobAnim` base in `Anim.cs`
+      backs Smoke/Flash. Autopilot uses items (~30%) to keep the paths covered. Verify:
+      `SIGHTLINE_ITEMTEST=1` → `ITEMTEST: PASS` (smoke blocks+decays LoS, barricade=cover,
+      loadouts map) + `SIGHTLINE_ITEM=1` screenshot + autoplay clean. **TODO:** AI doesn't
+      use utility items yet; no loadout-choice UI (fixed per class); shot tooltip doesn't
+      flag a smoked target.
 
 - [x] **3.5 Status effects.** DONE. `Unit.Statuses` (`List<Status>` of {`StatusKind`,
       `Turns`}) + `Unit.AddStatus`/`HasStatus`; per-mission, cleared in `Game.SetupMission`,
@@ -656,7 +678,30 @@ Before stopping:
 
 ### WIP NOTES
 
-> **3.3 BRANCHING CAMPAIGN MAP (latest).** Slay-the-Spire node path replaces the
+> **3.4 UTILITY ITEMS (latest).** Second throwable slot beyond grenades. `Unit`:
+> `ItemKind` enum {None,Smoke,Flash,Barricade}, `Item` (derived from `Cls` via
+> `ItemKindFor` — Ranger/Sharp=Smoke, Assault=Flash, Gunner=Barricade), `ItemCharge`
+> (1/mission, refilled in `Mission.Build`; NOT persisted — derived like grenades).
+> `Grid`: new `Smoke[,]` layer; `BlocksSight` now also blocks on `Smoke>0` (so LoS +
+> overwatch are cut), `IsSmoke`/`AddSmoke`/`TickSmoke`/`ClearSmoke`. `Game`: `ItemMode`/
+> `ItemValid`/`ItemTx,Ty`, `ToggleItem`/`ItemTargetOk`/`IssueItem` (mirrors the grenade
+> input/cancel sites — added `ItemMode` to every `AimMode/GrenadeMode` reset incl. Esc/
+> right-click/ToggleAim/DoAbility), key **6** + `DoAction("item")`; `Grid.TickSmoke()`
+> ticks once per round in `StartPlayerTurn`. `Anim.cs`: `LobAnim` base (arc + one-shot
+> `Effect`) → `SmokeAnim` (`Radius=1`,`Turns=3`) + `FlashAnim` (`Disoriented` 2 turns,
+> breaks OW, wakes pods). Barricade = instant `Tiles=LowCover` in `IssueItem` (no anim).
+> `Renderer`: `DrawSmoke` (drifting haze over units) + `DrawItem` (range ring + footprint);
+> wired into `DrawBoard`. `Hud`: ITEM button (key 6, bw shrunk 112→104 to fit 8 buttons)
+> + `ActionDesc`. Autopilot throws items ~30% in the Eliminate branch (covers all 3 anim
+> paths). Test: `SIGHTLINE_ITEMTEST=1` (window-free, `Game.ItemSelfTest`) + `SIGHTLINE_ITEM=1`
+> shot (`DebugItem` arms a smoke preview AND drops a live cloud). Gotchas: (a) smoke blinds
+> BOTH ways — a unit standing in its own cloud can't shoot out through the adjacent smoke
+> tile (intended); (b) flash/barricade reuse `ItemMode` targeting, so barricade validity
+> is gated by `ItemTargetOk` (empty floor, not evac/terminal); (c) `LobAnim.BlastRadius`
+> is virtual so the arc/footprint draw matches each kind. TODO: enemy AI item use; loadout
+> UI; "+ SMOKED" shot-tooltip flag.
+
+> **3.3 BRANCHING CAMPAIGN MAP.** Slay-the-Spire node path replaces the
 > 3-card barracks pick. New in `Run.cs`: `NodeKind`, `MissionNode` (Col/Row/Kind/Card/
 > Next/Visited), `Run.Map`/`MapSeed`/`MapPos`/`CurrentNode`/`NextNodes()`,
 > `GenerateMap(seed)` (deterministic via `new Random(seed)`; START col0 / BOSS last /
@@ -844,10 +889,13 @@ re-derived by `Mission.Build`, so don't add them to the DTOs.
 Harness screenshot hooks (all `shot`-only, in `Program.cs`):
 `SIGHTLINE_ZOOM`, `SIGHTLINE_PAUSE`, `SIGHTLINE_PERKSHOT`, `SIGHTLINE_CARDS`,
 `SIGHTLINE_WAKE` (reveal dormant pods), **`SIGHTLINE_INTRO`** (intro with a save so
-the CONTINUE button shows), **`SIGHTLINE_SHOP`** (barracks requisition screen). Plus
-non-shot **`SIGHTLINE_SAVETEST=1`** → prints `SAVETEST: PASS/FAIL` (save/load
-round-trip; no window). Also non-shot **`SIGHTLINE_WOUNDTEST=1`** (wound assign/decay/
-clear + aim/mob penalty), and shot **`SIGHTLINE_WOUND=1`** (wounded roster/dossier).
+the CONTINUE button shows), **`SIGHTLINE_SHOP`** (barracks requisition screen),
+**`SIGHTLINE_CAMPAIGN`** (branching campaign map mid-run), **`SIGHTLINE_ITEM`** (utility-
+item smoke preview + a live cloud). Plus non-shot **`SIGHTLINE_SAVETEST=1`** → prints
+`SAVETEST: PASS/FAIL` (save/load round-trip; no window), **`SIGHTLINE_ITEMTEST=1`** →
+`ITEMTEST: PASS/FAIL` (smoke LoS / barricade / loadouts; no window). Also non-shot
+**`SIGHTLINE_WOUNDTEST=1`** (wound assign/decay/clear + aim/mob penalty), and shot
+**`SIGHTLINE_WOUND=1`** (wounded roster/dossier).
 
 **Shop FRAG CACHE option (this session).** 4th requisition item: a permanent +1
 grenade/mission (`Unit.BonusGrenades`, read in `Mission.Build`, persisted in the

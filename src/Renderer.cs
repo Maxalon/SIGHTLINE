@@ -52,8 +52,10 @@ public static class Renderer
         DrawHoverAndShields(g);
         DrawKbCursor(g);
         DrawUnits(g);
+        DrawSmoke(g);
         DrawAim(g);
         DrawGrenade(g);
+        DrawItem(g);
 
         g.ActiveAnim?.Draw(g);
         g.Fx.Draw();
@@ -487,6 +489,51 @@ public static class Renderer
         }
         Raylib.DrawCircleLines((int)target.X, (int)target.Y, 14, col);
         Raylib.DrawCircleLines((int)target.X, (int)target.Y, 4, col);
+    }
+
+    // Smoke clouds: a drifting translucent haze drawn over the board (and units).
+    static void DrawSmoke(Game g)
+    {
+        float t = (float)Raylib.GetTime();
+        for (int x = 0; x < g.Grid.W; x++)
+            for (int y = 0; y < g.Grid.H; y++)
+            {
+                if (g.Grid.Smoke[x, y] <= 0) continue;
+                var c = Util.TileCenter(x, y);
+                // a couple of offset puffs per tile, gently drifting, fading as it expires
+                float life = Util.Clamp(g.Grid.Smoke[x, y] / (float)SmokeAnim.Turns, 0.35f, 1f);
+                float a = 0.55f * life;
+                float drift = MathF.Sin(t * 0.8f + (x * 3 + y)) * 3f;
+                Raylib.DrawCircleV(c + new Vector2(drift, -2), Cfg.Tile * 0.62f, Raylib.Fade(Pal.RGBA(176, 184, 194), a));
+                Raylib.DrawCircleV(c + new Vector2(-drift, 4), Cfg.Tile * 0.5f, Raylib.Fade(Pal.RGBA(150, 158, 168), a * 0.9f));
+            }
+    }
+
+    // Utility-item targeting preview: range ring + a per-kind footprint.
+    static void DrawItem(Game g)
+    {
+        if (!g.ItemMode || g.Selected == null) return;
+        var origin = g.Selected.Pos;
+        var kind = g.Selected.Item;
+        Raylib.DrawCircleLines((int)origin.X, (int)origin.Y, Game.ItemRange * Cfg.Tile, Raylib.Fade(Pal.Friend, 0.35f));
+        if (!g.HoverValid) return;
+        Color col = g.ItemValid ? Pal.Friend : Pal.TxtDim;
+
+        if (kind == ItemKind.Barricade)
+        {
+            Raylib.DrawRectangleRec(Util.TileRect(g.ItemTx, g.ItemTy), Raylib.Fade(col, 0.3f));
+            Raylib.DrawRectangleLinesEx(Util.TileRect(g.ItemTx, g.ItemTy), 2f, col);
+        }
+        else  // smoke / flash: 3x3 blast footprint
+        {
+            int rad = SmokeAnim.Radius;
+            for (int x = g.ItemTx - rad; x <= g.ItemTx + rad; x++)
+                for (int y = g.ItemTy - rad; y <= g.ItemTy + rad; y++)
+                    if (g.Grid.InBounds(x, y))
+                        Raylib.DrawRectangleRec(Util.TileRect(x, y), Raylib.Fade(col, 0.2f));
+            var tc = Util.TileCenter(g.ItemTx, g.ItemTy);
+            Raylib.DrawCircleLines((int)tc.X, (int)tc.Y, 14, col);
+        }
     }
 
     static void DrawAim(Game g)
