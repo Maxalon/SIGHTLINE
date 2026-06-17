@@ -21,7 +21,29 @@ public static class Display
     public static int SizeIdx;
     public static bool Fullscreen;
 
+    // accessibility (3.13): a screen brightness post-pass + a colorblind palette toggle
+    public static readonly float[] BrightLevels = { 0.70f, 0.85f, 1.00f, 1.15f, 1.30f };
+    public static int BrightIdx = 2;   // 1.00 = neutral (no overlay)
+    public static float Brightness => BrightLevels[Math.Clamp(BrightIdx, 0, BrightLevels.Length - 1)];
+    public static string BrightLabel => $"{(int)(Brightness * 100)}%";
+
     public static string SizeLabel => Fullscreen ? "FULLSCREEN" : $"{Sizes[SizeIdx].w} x {Sizes[SizeIdx].h}";
+
+    public static void CycleBrightness()
+    {
+        BrightIdx = (BrightIdx + 1) % BrightLevels.Length;
+        Save();
+    }
+
+    public static void ToggleColorblind()
+    {
+        Pal.SetColorblind(!Pal.Colorblind);
+        Save();
+    }
+
+    // onboarding tutorial (3.12): a one-time "seen" flag so it only shows on the first run
+    public static bool TutorialSeen;
+    public static void MarkTutorialSeen() { if (!TutorialSeen) { TutorialSeen = true; Save(); } }
 
     public static void Init(bool enabled)
     {
@@ -73,6 +95,7 @@ public static class Display
         {
             Raylib.BeginDrawing();
             draw();
+            DrawBrightness();
             Raylib.EndDrawing();
             return;
         }
@@ -87,7 +110,19 @@ public static class Display
         var src = new Rectangle(0, 0, Cfg.ScreenW, -Cfg.ScreenH);   // flip Y (render textures are upside-down)
         var dst = new Rectangle(o.X, o.Y, Cfg.ScreenW * s, Cfg.ScreenH * s);
         Raylib.DrawTexturePro(_target.Texture, src, dst, Vector2.Zero, 0f, Color.White);
+        DrawBrightness();
         Raylib.EndDrawing();
+    }
+
+    // Brightness post-pass: a translucent darken/lighten quad over the final frame.
+    // Neutral (100%) draws nothing, so the headless harness stays byte-identical.
+    static void DrawBrightness()
+    {
+        float b = Brightness;
+        if (b > 0.99f && b < 1.01f) return;
+        int w = Raylib.GetScreenWidth(), h = Raylib.GetScreenHeight();
+        if (b < 1f) Raylib.DrawRectangle(0, 0, w, h, Raylib.Fade(Pal.RGBA(0, 0, 0), 1f - b));
+        else        Raylib.DrawRectangle(0, 0, w, h, Raylib.Fade(Pal.RGBA(255, 255, 255), (b - 1f) * 0.55f));
     }
 
     public static void ToggleFullscreen()
@@ -128,14 +163,21 @@ public static class Display
     }
 
     // ---- persistence (alongside the save file, not in the repo) ----
-    class Dto { public bool Fullscreen { get; set; } public int SizeIdx { get; set; } }
+    class Dto
+    {
+        public bool Fullscreen { get; set; }
+        public int SizeIdx { get; set; }
+        public int BrightIdx { get; set; } = 2;
+        public bool Colorblind { get; set; }
+        public bool TutorialSeen { get; set; }
+    }
     static string Dir => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Sightline");
     static string FilePath => Path.Combine(Dir, "display.json");
 
     static void Save()
     {
-        try { Directory.CreateDirectory(Dir); File.WriteAllText(FilePath, JsonSerializer.Serialize(new Dto { Fullscreen = Fullscreen, SizeIdx = SizeIdx })); }
+        try { Directory.CreateDirectory(Dir); File.WriteAllText(FilePath, JsonSerializer.Serialize(new Dto { Fullscreen = Fullscreen, SizeIdx = SizeIdx, BrightIdx = BrightIdx, Colorblind = Pal.Colorblind, TutorialSeen = TutorialSeen })); }
         catch { }
     }
 
@@ -145,7 +187,14 @@ public static class Display
         {
             if (!File.Exists(FilePath)) return;
             var d = JsonSerializer.Deserialize<Dto>(File.ReadAllText(FilePath));
-            if (d != null) { Fullscreen = d.Fullscreen; SizeIdx = Math.Clamp(d.SizeIdx, 0, Sizes.Length - 1); }
+            if (d != null)
+            {
+                Fullscreen = d.Fullscreen;
+                SizeIdx = Math.Clamp(d.SizeIdx, 0, Sizes.Length - 1);
+                BrightIdx = Math.Clamp(d.BrightIdx, 0, BrightLevels.Length - 1);
+                Pal.SetColorblind(d.Colorblind);
+                TutorialSeen = d.TutorialSeen;
+            }
         }
         catch { }
     }

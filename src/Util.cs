@@ -54,12 +54,28 @@ public static class Pal
 
     public static readonly Color Friend    = RGBA(56, 189, 248);
     public static readonly Color FriendDk   = RGBA(12, 74, 110);
-    public static readonly Color Foe       = RGBA(248, 113, 113);
-    public static readonly Color FoeDk      = RGBA(120, 30, 30);
+    // Foe / Good are swapped to colorblind-safe hues by SetColorblind (3.13)
+    public static Color Foe       = RGBA(248, 113, 113);
+    public static Color FoeDk      = RGBA(120, 30, 30);
     public static readonly Color Elite     = RGBA(255, 140, 90);   // capstone boss
     public static readonly Color EliteDk    = RGBA(120, 50, 20);
     public static readonly Color Accent    = RGBA(251, 191, 36);
-    public static readonly Color Good      = RGBA(74, 222, 128);
+    public static Color Good      = RGBA(74, 222, 128);
+
+    // accessibility: a deuteranopia/protanopia-friendly remap of the threat/good hues
+    // (blue friend vs vermillion-orange foe vs blue-green good — distinguishable across
+    // common colour-blindness types). Toggled in the pause menu, persisted in display.json.
+    public static bool Colorblind;
+    static readonly Color FoeNorm = RGBA(248, 113, 113), FoeCb = RGBA(238, 138, 40);
+    static readonly Color FoeDkNorm = RGBA(120, 30, 30), FoeDkCb = RGBA(122, 66, 14);
+    static readonly Color GoodNorm = RGBA(74, 222, 128), GoodCb = RGBA(40, 200, 168);
+    public static void SetColorblind(bool on)
+    {
+        Colorblind = on;
+        Foe = on ? FoeCb : FoeNorm;
+        FoeDk = on ? FoeDkCb : FoeDkNorm;
+        Good = on ? GoodCb : GoodNorm;
+    }
 
     // the escort VIP (warm gold, distinct from friendly cyan and accent)
     public static readonly Color VipGold   = RGBA(245, 200, 70);

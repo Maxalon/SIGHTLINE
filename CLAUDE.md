@@ -200,7 +200,9 @@ seeds (mix of WIN/LOSE, no exceptions):
 - Enemy AI: seeks cover + line of fire, advances when blind, flanks, finishes.
 - Juice: move/shot anims, muzzle+tracer, particles, floating text, shake,
   selection ring, cover shields, turn banner.
-- **Procedural audio** (src/Audio.cs) for all actions; mute = M.
+- **Procedural audio** (src/Audio.cs) for all actions; mute = M. Plus a **procedural
+  music** layer — a looping ambient bed + a combat layer that crossfades by intensity
+  (enemy turn / live hostiles). Blind-shipped (no audio device in the sandbox).
 - **Game-feel pass:** hit-stop on impacts/kills, camera zoom-punch on kills,
   weapon recoil + target knockback.
 - **Campaign meta-loop:** 6 escalating missions, one persistent squad, kills→
@@ -224,7 +226,8 @@ seeds (mix of WIN/LOSE, no exceptions):
 - **Enemy variety:** Grunt / Scout / Bruiser / Medic plus **Sniper** (kites to range),
   **Turret** (immobile overwatch nest), **Berserker** (tanky shotgun rusher), **Drone**
   (WASP — hovers, ignores cover/elevation, beelines), **Shield** (AEGIS — full frontal
-  cover, must be flanked or hit from above), **Sapper** (BREACH — demolishes the squad's
+  cover that re-faces the nearest soldier each turn, must be flanked or hit from above),
+  **Sapper** (BREACH — demolishes the squad's
   cover), a recurring **mid-boss** (BREAKER m3 / WARDEN m5), and a capstone **Elite boss**
   (WARLORD) on the final mission with 2
   grenades + a one-time low-HP RAGE. Distinct AI temperaments in `Ai.Plan`; distinct glyphs.
@@ -257,6 +260,9 @@ seeds (mix of WIN/LOSE, no exceptions):
   zoom/pan** (wheel + middle-drag, C to reset), a **keyboard tile cursor**
   (arrows/WASD + Space), and a **pause/settings menu** (Esc: display, audio, screen
   shake, threat-preview toggles, abandon run).
+- **Accessibility** (`src/Display.cs` + `Pal`): a **brightness** post-pass (70–130%,
+  `Display.DrawBrightness`) + a **colorblind palette** toggle (`Pal.SetColorblind`, Foe→
+  orange / Good→teal), both in the pause menu + persisted. (Phase 3 item 3.13.)
 - **Display settings** (`src/Display.cs`): the fixed 1280x800 game is rendered to a
   letterboxed render-target scaled to the window, so it stays readable on big/4K
   screens. Pause menu offers **FULLSCREEN** (key **F**) + a **WINDOW** size cycle
@@ -389,10 +395,11 @@ seeds (mix of WIN/LOSE, no exceptions):
             (else procedural). Reserved tiles (spawns/evac/terminal+ring) stay open
             floor; `Mission.TryApplyLayout` flood-fills from a soldier to verify all
             spawns/evac/terminal stay reachable and reverts to procedural otherwise.
-            **Five arenas:** PLAZA (central plateau), GAUNTLET (lane spine), PILLARS
+            **Six arenas:** PLAZA (central plateau), GAUNTLET (lane spine), PILLARS
             (column field), CHEVRON (diagonal cover wall + redoubt), CITADEL (bunker
-            with interior plateau + doorway). Test hook `SIGHTLINE_MAP=<index>` forces
-            a specific layout (`Mission.ForcedLayout`).
+            with interior plateau + doorway), ZIGGURAT (stepped mound with a commanding
+            **tier-2** `=` core). Test hook `SIGHTLINE_MAP=<index>` forces a specific
+            layout (`Mission.ForcedLayout`).
       - [x] **VIP escort objective.** DONE. `Objective.Escort` (rotation is now
             Elim / Hack / Evac / Escort, `Game.ObjectiveFor` = `(n-1)%4`). A fragile
             gold **VIP** (`Mission.MakeVip`, `Unit.IsVip`: 6 HP, 45 aim, sidearm, no
@@ -502,9 +509,10 @@ the player meaningful long-game decisions. Ordered by impact:
       +2, persisted, 12). `Game.CanBuy/DoPurchase/HandleShopClick` + `Game.ShopName/
       Desc/Cost` (the shop card auto-sizes to the item count); autopilot buys a medkit
       then proceeds (`AutoShop`). Hook `SIGHTLINE_SHOP`.
-- [ ] **D. Procedural music + ambience.** Audio is SFX-only. A synthesised, layered
-      ambient/combat track (allowed: procedural only) would lift "feels good"
-      enormously. Build on `src/Audio.cs` (it already synth's PCM in memory).
+- [x] **D. Procedural music + ambience.** DONE (blind ship) — see Phase 3 item 3.10:
+      a synthesised looping ambient bed + a combat layer that crossfades by intensity
+      (`Audio.BuildAmbient`/`BuildCombat`/`UpdateMusic`, `Game.MusicIntensity`). Built but
+      not heard in this sandbox (no audio device); the human should verify + tune.
 - [x] **E. Run persistence (save/load).** DONE. `src/SaveGame.cs` serialises the
       `Run` (squad incl. perks/weapon/rank/HP + mission # + the active deployment
       card) to the OS user-data dir (`ApplicationData/Sightline/save.json`, NOT the
@@ -675,10 +683,12 @@ ASCII-only **until a font ships** (Phase 5.3; see the clarified Art policy), ver
             (`Combat.ComputeOdds` `ignoresCover` folds into `seesOver`); AI beelines
             (advW 3.0 + cancels its own cover value). Renderer hovers it above its
             shadow (diamond glyph). Spawns mission 2+.
-      - [x] **SHIELD (AEGIS).** Cls `SHIELD`, `Unit.ShieldDx/Dy` (faces west toward the
-            squad); `Combat.ShieldedFrom` gives **full cover (lvl 2) from the barred
-            side regardless of terrain** — flank it, or bypass with a DRONE / commanding
-            tier-2 height. Renderer draws a frontal barrier arc. Spawns mission 3+.
+      - [x] **SHIELD (AEGIS).** Cls `SHIELD`, `Unit.ShieldDx/Dy`; `Game.FaceShields`
+            (each enemy turn) re-faces the barrier toward the **nearest soldier**, so the
+            squad must keep moving to flank it. `Combat.ShieldedFrom` gives **full cover
+            (lvl 2) from the barred side regardless of terrain** — flank it, or bypass with
+            a DRONE / commanding tier-2 height. Renderer draws a frontal barrier arc.
+            Spawns mission 3+.
       - [x] **Mid-boss.** A named `ELITE` band on missions 3 (BREAKER) & 5 (WARDEN),
             lighter than the final WARLORD but with the same rage; renderer + rage banner
             now use `u.Name` (not a hardcoded "WARLORD"). Verify: `SIGHTLINE_COMBATTEST`
@@ -733,12 +743,19 @@ ASCII-only **until a font ships** (Phase 5.3; see the clarified Art policy), ver
 
 ### Tier 4 — feel, audio & accessibility
 
-- [ ] **3.10 Procedural music & ambience (roadmap item D).** Build on `src/Audio.cs`
-      (it already synthesises PCM in memory): a looping ambient bed + a combat layer
-      that ducks in on the enemy turn / when pods are active; crossfade; respect mute
-      (M). **MUST be built where audio is audible — `InitAudioDevice` fails in this
-      sandbox**, so it's a blind ship here. Verify: manual (human) — document what to
-      listen for; keep it crash-safe behind `IsAudioDeviceReady`.
+- [x] **3.10 Procedural music & ambience (roadmap item D). DONE (blind ship).** Two
+      synthesised looping beds in `src/Audio.cs`: `BuildAmbient` (an A-minor sine pad with
+      slow LFO tremolo) and `BuildCombat` (a tenser pad + a 2 Hz driving sub-bass pulse),
+      each an 8-second buffer of **integer-Hz tones over an integer-second loop so it loops
+      seamlessly**. Loaded via `LoadMusicStreamFromMemory(".wav", …)`, `Looping=true`, both
+      played at volume 0. `Audio.UpdateMusic(dt)` (called each frame in the `Program` loop)
+      pumps `UpdateMusicStream` and crossfades ambient↔combat toward `Audio.SetMusicIntensity`
+      — fed by `Game.MusicIntensity()` (1 on the enemy turn, 0.5 while live hostiles are
+      about, 0.15 when clear, 0 in menus). Mute (**M**) zeroes both via `Enabled`. All gated
+      behind `_music`/`IsAudioDeviceReady`, so it's a **no-op headless** (screenshots/autoplay
+      unchanged — verified crash-safe). **NOT heard in this sandbox** (no audio device) — the
+      human should verify audibly and tune the `Build*`/volume recipes. Tuning lives in
+      `BuildAmbient`/`BuildCombat` (freqs/vols) + the `ambT`/`combT` mix in `UpdateMusic`.
 
 - [x] **3.11 Game-feel + death feedback.** DONE. **KIA stamp:** a fallen soldier
       (`Game.KillUnit`, player non-VIP) gets a prominent `KIA  NAME "NICK"` stamp
@@ -750,17 +767,38 @@ ASCII-only **until a font ships** (Phase 5.3; see the clarified Art policy), ver
       with extra `HitStop` (0.4s slow-mo) + `AddZoomPunch` + shake. Per-mission state
       cleared in `SetupMission`. Verify: `SIGHTLINE_KIA=1` screenshot + autoplay clean.
 
-- [ ] **3.12 Onboarding tutorial.** A scripted first mission (gated by a "seen" flag in
-      `display.json`/settings) that prompts move → cover → flank → overwatch → fire with
-      contextual callouts. Verify: screenshots.
+- [x] **3.12 Onboarding tutorial.** DONE. A **non-blocking** 4-step callout on the
+      first-ever run (mission 1 only). `Game.TutStep`/`TutPrompts` + flags `_tutMoved`/
+      `_tutOver`/`_tutShot` (set in `IssueMove`/`DoOverwatch`/`IssueShoot`); `UpdateTutorial`
+      advances on the prompted action, `EndPlayerTurn` advances it too (so it never sticks),
+      and the final step auto-dismisses after 7s. `StartTutorialMaybe` (in `SetupMission`)
+      gates on `!NoPersist && Mission==1 && !Display.TutorialSeen` and calls
+      `Display.MarkTutorialSeen` (persisted in `display.json`) so it only ever shows once.
+      `Hud.DrawTutorial` renders a word-wrapped "TRAINING x/4" tip card (`WrapText` helper).
+      Off in the harness (NoPersist). Verify: `SIGHTLINE_TUTORIAL=1` screenshot. (ASCII-only.)
 
-- [ ] **3.13 Accessibility & display extras.** Now that everything renders through the
-      `Display` render-target, add a **brightness/contrast** post-pass on it; a
-      **colorblind palette** toggle (`Pal` variants); and an independent **UI text
-      scale**. Persist in `display.json`. Verify: screenshots.
+- [x] **3.13 Accessibility & display extras.** DONE (brightness + colorblind; contrast +
+      text-scale deferred). **Brightness:** `Display.BrightLevels` (70–130%) applied as a
+      translucent darken/lighten quad in `Display.DrawBrightness` (called at the end of both
+      `RenderFrame` paths; neutral 100% draws nothing → headless byte-identical).
+      **Colorblind palette:** `Pal.SetColorblind` swaps the threat/good hues to a
+      deuteranopia/protanopia-safe set (Foe red→vermillion-orange, Good green→blue-green;
+      blue Friend unchanged) — `Pal.Foe`/`FoeDk`/`Good` made mutable. Both live in the
+      **pause menu** (`Hud.PauseBright`/`PauseColorblind`, card grown to 9 buttons) and
+      persist in `display.json` (`Display` Dto `BrightIdx`+`Colorblind`, applied in `Load`).
+      Verify: `SIGHTLINE_CB=1` (orange foes) + `SIGHTLINE_PAUSE`+`SIGHTLINE_BRIGHT=1` (menu +
+      dim) screenshots. **TODO:** a true contrast/gamma post-pass (needs a shader) + an
+      independent UI text scale (invasive — all DrawText sizes are fixed).
 
-When picking up Phase 3: do **3.1** first (it's the highest-value and directly answers
-the death-consequence feedback), one verified PR per item, merge to `main` yourself.
+**PHASE 3 IS COMPLETE — every item 3.1 through 3.13 is DONE and on `main`.** The game is
+feature-complete against the whole spec. Remaining work is now *open-ended polish*, not a
+fixed roadmap. Highest-value next ideas (pick by feel): tune the procedural music once it's
+been heard; a true contrast/gamma post-pass (needs a shader) + UI text scale (3.13
+follow-ups); enemy AI using utility items + exploiting the commanding-view LoS; themed
+authored arenas per biome (`Maps.cs`); more authored maps using the `=` tier-2 legend; mid-
+mission save granularity; a VIP/captive-EXTRACTED win flourish. Keep the hard rules: NO
+CI/test-runner, ASCII-only drawn text, verify via the `SIGHTLINE_*` harness + autoplay +
+screenshots, ship compiling code to `main`.
 
 ---
 
@@ -914,6 +952,50 @@ Before stopping:
 > changed this session.** Next session: start **4.1** (full-bleed UI — safe, high value),
 > then 4.2/4.3, then 4.4. (This was a design/planning pass per the human's instruction;
 > nothing to build-verify — `main`/the harness are untouched.)
+
+> **3.12 ONBOARDING TUTORIAL (finishes Phase 3).** Non-blocking first-run
+> callout. `Game`: `TutStep` (-1 inactive) + `TutPrompts[4]` + `_tutMoved`/`_tutOver`/
+> `_tutShot` (set in `IssueMove`/`DoOverwatch`/`IssueShoot`) + `_tutDoneTimer`.
+> `StartTutorialMaybe()` (end of `SetupMission`) starts it only when `!NoPersist && Mission
+> ==1 && !Display.TutorialSeen`, then `Display.MarkTutorialSeen()` (new flag in the Display
+> Dto → display.json) so it shows once ever. `UpdateTutorial(dt)` (in `Game.Update`)
+> advances 0→1→2 when the matching flag sets; step 3 auto-clears after 7s. `EndPlayerTurn`
+> also calls `AdvanceTutorial` for steps 0-2 so it can't get stuck across turns.
+> `Hud.DrawTutorial` (called in `Hud.Draw` on the player/enemy turn when `TutorialText!=null`)
+> draws a word-wrapped "TRAINING x/4" card above the action bar (new `WrapText` greedy
+> wrapper). Harness hook `SIGHTLINE_TUTORIAL=1` (sets `TutStep=0`; harness is NoPersist so it
+> never auto-starts). Gotcha: ASCII-only — prompts use `-` not em dashes (the default font
+> renders `—` as `?`). With this, ALL of Phase 3 (3.1-3.13) is complete.
+
+> **3.13 ACCESSIBILITY (brightness + colorblind).** Two pause-menu options,
+> persisted in `display.json`. **Brightness:** `Display.BrightLevels` {0.70..1.30}, idx
+> default 2 (100% = neutral). `Display.DrawBrightness()` draws a fullscreen black (darken,
+> α=1-b) or white (lighten, α=(b-1)·0.55) quad at the end of BOTH `RenderFrame` paths;
+> neutral draws nothing so headless shots are byte-identical. `CycleBrightness`. **Colorblind:**
+> `Pal.Foe`/`FoeDk`/`Good` changed from `readonly` to mutable; `Pal.SetColorblind(on)` swaps
+> them to CB-safe hues (Foe→`(238,138,40)`, Good→`(40,200,168)`); `Display.ToggleColorblind`.
+> Pause menu (`Hud.DrawPause`) grew to 9 buttons (h 504→612) with `PauseBright`/`PauseColorblind`;
+> clicks in `Game.HandlePauseMenu`. `Display` Dto persists `BrightIdx`+`Colorblind`; `Load`
+> applies `Pal.SetColorblind` (only in non-headless, since `Display.Load` runs only when
+> Enabled). Screenshot hooks `SIGHTLINE_CB=1` + `SIGHTLINE_BRIGHT=<idx>` (both apply in the
+> direct RenderFrame path, which the harness uses since Display is disabled). TODO: true
+> contrast/gamma (shader); independent UI text scale (all DrawText sizes are hardcoded).
+
+> **3.10 PROCEDURAL MUSIC (blind ship — Phase 2 D too).** `src/Audio.cs` gained a
+> looping music layer alongside the SFX. `BuildAmbient` (A-minor sine pad + slow LFO
+> tremolo) + `BuildCombat` (tenser pad + 2 Hz sub-bass pulse), each an 8-second buffer
+> using **integer-Hz tones over an integer-second loop → seamless loop** (sin is 0 at both
+> ends; LFO/pulse periods divide the loop). `InitMusic` (end of `Audio.Init`, so it's
+> skipped when `!_ready`) loads both via `LoadMusicStreamFromMemory(".wav", …)`, sets
+> `Looping=true`, `PlayMusicStream` both at volume 0, sets `_music`. `Audio.UpdateMusic(dt)`
+> (new call in the `Program` window loop after `game.Update`) pumps `UpdateMusicStream` +
+> lerps ambient/combat volumes toward targets from `_intensity`. `Game.MusicIntensity()`
+> (called in `Game.Update` → `Audio.SetMusicIntensity`): 1 enemy turn / 0.5 live hostiles /
+> 0.15 clear / 0 menus. Mute (M) → `Enabled=false` → both volumes 0. Unloaded in `Shutdown`.
+> Gated behind `_music` so it's a **no-op with no audio device** (headless screenshots/
+> autoplay unchanged — verified). **BLIND SHIP: not heard here.** TODO for whoever has audio:
+> confirm it loops without clicks + isn't too loud (master is 0.6; music targets ~0.5/0.62),
+> tune `Build*` recipes. Could add per-phase stingers / a win/lose musical resolve.
 
 > **3.8 DEFEND OBJECTIVE (completes 3.8).** `Objective.Defend`: survive
 > `Game.DefendTurns` (8) player turns vs mid-mission waves. `CheckEnd` Defend branch wins
@@ -1179,26 +1261,23 @@ Before stopping:
 > with **3.1** (highest value, answers the death-consequence feedback). Nothing built
 > yet — this was a planning pass.
 
-> **LATEST SESSION SUMMARY (read this first).** Phase 1 (1-7), Phase 2 A/B/C/E/F, and
-> Phase 3 items **3.1, 3.2, 3.5, 3.11** were already DONE. **This session shipped NINE more
-> (PRs #29-#37, all merged to `main`):** **3.3** branching campaign map, **3.4** utility
-> items (smoke/flash/barricade), **3.6a** destructible cover, **3.6b** 2nd elevation tier
-> (+ commanding tier-2 high ground that sees over high cover), **3.7** new enemies (DRONE
-> WASP / SHIELD AEGIS / mid-boss BREAKER+WARDEN / SAPPER BREACH), **3.9** secondary
-> objectives (NO LOSSES / SWIFT / CLEAN SWEEP → +intel), **3.8 SABOTAGE** (plant K charges)
-> and **3.8 RESCUE** (free a caged captive → escort it out). Objective rotation is now a
-> 6-cycle (`Run.ObjectiveFor` %6). Build 0/0; SAVETEST/COMBATTEST/ITEMTEST/COVERTEST/
-> STATUSTEST/TRAITTEST all PASS; autoplay clean.
-> **Top remaining ROADMAP items (priority order):** **3.8 DEFEND** (the last objective —
-> hold a zone / survive N turns vs **mid-mission wave spawns**; needs a wave spawner in the
-> turn flow + a turn counter; most invasive of the objectives, deferred for a fresh
-> session); **3.10 / Phase 2 D procedural music** (BLIND SHIP here — no audio device; build
-> on `src/Audio.cs` where you can hear it); **3.12** onboarding tutorial; **3.13**
-> accessibility/display (brightness/contrast post-pass on the `Display` render-target,
-> colorblind `Pal` variants, UI text scale). Smaller polish: enemy AI doesn't use utility
-> items; AI doesn't exploit the commanding-view LoS; AEGIS only faces west; mid-mission save
-> granularity; themed-per-biome arenas. Harness objective-force hook
-> `SIGHTLINE_OBJ=sabotage|rescue`. Detailed per-feature notes in WIP NOTES (newest first).
+> **LATEST SESSION SUMMARY (read this first).** **PHASE 3 IS NOW 100% COMPLETE (3.1-3.13),
+> and Phase 2 is fully done too — the game is feature-complete against the entire spec.**
+> This marathon session shipped **TWELVE features (PRs #29-#40, all merged to `main`):**
+> **3.3** branching campaign map, **3.4** utility items (smoke/flash/barricade), **3.6a**
+> destructible cover, **3.6b** 2nd elevation tier (commanding tier-2 sees over high cover),
+> **3.7** new enemies (DRONE/SHIELD/mid-boss/SAPPER), **3.9** secondary objectives, **3.8**
+> all three new objectives (SABOTAGE / RESCUE / DEFEND — objective rotation is now a 7-cycle,
+> `Run.ObjectiveFor` %7), **3.10 / Phase 2 D** procedural music (BLIND SHIP — built + crash-
+> safe but unheard here; tune once audible), **3.13** accessibility (brightness post-pass +
+> colorblind palette), and **3.12** the onboarding tutorial. Build 0/0; SAVETEST/COMBATTEST/
+> ITEMTEST/COVERTEST/STATUSTEST/TRAITTEST all PASS; autoplay clean.
+> **No fixed roadmap remains — only open-ended polish** (see the "PHASE 3 IS COMPLETE" note
+> above the WIP block): verify/tune the music audibly; contrast-gamma shader + UI text scale;
+> enemy AI using utility items + the commanding-view LoS; themed-per-biome / `=`-tier-2
+> authored arenas; mid-mission save granularity; a captive/VIP-EXTRACTED win flourish.
+> Harness objective-force hook `SIGHTLINE_OBJ=sabotage|rescue|defend`; new shot hooks
+> `SIGHTLINE_CB`/`SIGHTLINE_BRIGHT`/`SIGHTLINE_TUTORIAL`. Per-feature notes in WIP NOTES below.
 
 Done: items 1 (audio), 2 (juice), 3 (campaign meta-loop), **4 (tactical depth —
 grenades + pods + elevation)**, and **5 (map variety & objectives) is now COMPLETE**:
