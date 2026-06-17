@@ -20,9 +20,17 @@ are. **Keep it updated** — when you finish work, tick the roadmap and refresh
 - **Stack:** C# / .NET 8 + [Raylib-cs](https://github.com/raylib-cs/raylib-cs) 8.0.0 (NuGet).
 - **Platform:** native; primary target **Linux** (also macOS/Windows). Compiles to a
   real ELF binary via `dotnet` — there is no `.exe` involved on Linux.
-- **Art policy:** **no external art/audio assets.** Everything is drawn from
-  geometry + particles + screen shake. Procedural audio is allowed (synthesised
-  at runtime). This keeps the repo tiny and fully self-contained.
+- **Art policy (clarified):** **no *hand-made / human-authored* art or audio** — the
+  human won't be making assets by hand. The aesthetic is built from geometry +
+  particles + shaders + screen shake, and audio is synthesised. **Generated assets ARE
+  allowed:** make them **procedurally / in-engine / via shaders first**, and reach for
+  an external **AI** generator only where procedural genuinely can't get the look;
+  **commit small, optimised generated files** (e.g. a font) but keep large binaries out
+  so the repo stays lean. Raylib can generate noise/gradient textures (`GenImage*`) and
+  bake TTF/OTF fonts (`LoadFontEx`) in-engine, so most upgrades need **no committed
+  binaries**. Rationale + visual style guide: [`docs/DESIGN.md`](docs/DESIGN.md) §3.H;
+  visual roadmap: **PHASE 5**. (Drawn text is ASCII-only **only until a font ships**,
+  Phase 5.3 — a current limitation, not a permanent rule.)
 - The human plays/compiles on their own Linux machine with the JetBrains suite
   (**Rider**). Don't assume a display is available *here* — see testing below.
 
@@ -33,6 +41,12 @@ are. **Keep it updated** — when you finish work, tick the roadmap and refresh
 3. **Well-designed loop:** second-to-second (move/aim/shoot), minute-to-minute
    (cover/flank/overwatch decisions), and — the current frontier — run-to-run
    (mission-to-mission squad progression). See ROADMAP.
+
+> **Design rationale lives in [`docs/DESIGN.md`](docs/DESIGN.md)** — the *why* behind
+> these pillars: researched game-design principles, a candid self-assessment, and the
+> reasoned encounter-design decision (incl. why fog of war is **deferred, not
+> rejected**). Read it before any change that touches the game's **feel** or
+> **information design**.
 
 ---
 
@@ -304,7 +318,8 @@ seeds (mix of WIN/LOSE, no exceptions):
   `Unit.Ability`/`Game.DoAbility`/`Game.CanAbility`; HUD ability button + on-unit
   stance tags (R&G/BLZ/AIM, SUPP on pinned foes); tooltip shows "+ STEADY".
 - Full HUD + intro/barracks/win/lose; per-mission generator (scaled by mission #).
-- Text is ASCII-only (Raylib's default font lacks fancy glyphs → they render `?`).
+- Text is **currently** ASCII-only (default Raylib font renders other glyphs as `?`); a
+  small committed/generated font (ROADMAP Phase 5.3) lifts this — not a permanent rule.
 
 ---
 
@@ -533,9 +548,9 @@ Phase 1 + Phase 2 (A–F) are complete; the game is tactically rich and readable
 the human flagged that losing soldiers feels cheap. Phase 3 makes a run feel like a
 *campaign with stakes*, then broadens tactical + content variety, then presentation.
 Ordered by impact. Each item lists the concrete hooks to touch and how to verify it
-(headless unless noted). Keep the hard constraints: NO CI/tests-runner, ASCII-only
-drawn text, verify via `SIGHTLINE_*` harness + autoplay + screenshots, ship compiling
-code to `main`.
+(headless unless noted). Keep the hard constraints: NO CI/tests-runner, drawn text
+ASCII-only **until a font ships** (Phase 5.3; see the clarified Art policy), verify via
+`SIGHTLINE_*` harness + autoplay + screenshots, ship compiling code to `main`.
 
 ### Tier 1 — make the run loop bite (highest impact)
 
@@ -787,6 +802,108 @@ screenshots, ship compiling code to `main`.
 
 ---
 
+## ROADMAP — PHASE 4 — encounter design & information feel (specced)
+
+> **Design rationale + the fog-of-war decision: see [`docs/DESIGN.md`](docs/DESIGN.md)
+> §5-6.** Phase 1-3 made the game wide and juicy; a research pass into design
+> fundamentals found the **weakest link is the encounter *opening*** — first contact is
+> an accident, not a choice. With an 18-wide map, ~8-tile moves, and a 12-tile pod sight
+> range, almost any advance trips a pod on turn 1 (a *flow*/anxiety + *telegraphing*/
+> gotcha violation). Phase 4 fixes that **while staying perfect-information** (keep
+> threat preview, %-to-hit, full-board readability). **Fog of war + a restrictive camera
+> is deliberately DEFERRED** — that's an identity pivot toward a recon-survival game, to
+> be prototyped behind a flag only if the items below prove insufficient (DESIGN.md §5).
+> Ordered by leverage and risk — do the safe, high-value UI win first.
+
+- [ ] **4.1 Full-bleed, translucent, non-cropping UI.** Today the 1008x616 board is a
+      cropped island in the 1280x800 window with opaque top/bottom bars (~40% of the
+      screen is chrome/margin). Make the board full-bleed and float **translucent,
+      contextual** HUD panels over it (scrim/drop-shadow so they stay legible over busy
+      terrain). Lowest risk, high "world presence" payoff; independent of the rest.
+      Touch `Cfg` layout consts, `Renderer` board rect, `Hud` panel draws. Verify:
+      `SIGHTLINE_SHOT` screenshots at several states; readability over each biome.
+- [ ] **4.2 Encounter geometry — spacing, density, standoff.** Goal = **standoff
+      distance + meaningful traversal, NOT raw map size** (empty maps = boredom turns).
+      Push enemy spawns further from player spawns; add more **sightline-blocking
+      terrain** so a 12-tile sight line no longer sees the whole board; tune the three
+      knobs (sight range, movement budget vs. map width, the free scatter). Touch
+      `Cfg.GridW/H`, `Mission.SpawnEnemies` placement, `Game.SightRange`, `Maps.cs`.
+      Verify: autoplay clean at the larger size; a soldier can take a full first move
+      without auto-tripping a pod; `SIGHTLINE_SHOT` of the opening.
+- [ ] **4.3 Alert / awareness tiers (green -> yellow -> red).** Replace binary
+      dormant -> instant-scatter with a **suspicious** middle state so being spotted is
+      gradual and telegraphed (never a pure gotcha); reconsider/soften the free scatter
+      on activation (the most-criticized part of pod design). Touch the pod/`Unit.Active`
+      state -> a small alert enum, `Game.CheckPodActivation`/`ActivatePod`, renderer
+      glyph states. Verify: `SIGHTLINE_WAKE`-style shot of each tier; autoplay clean.
+- [ ] **4.4 Concealment + ambush (the marquee mechanic).** Squad starts **concealed**;
+      while concealed it repositions/scouts freely and **the player chooses when to break
+      stealth and engage**; springing the ambush pays off (no overwatch aim penalty,
+      enemies caught out of cover, only a partial enemy scatter). Converts first contact
+      from accident to **rewarded choice** — the "find your footing" fantasy, board still
+      fully visible. Pairs with 4.3 (breaking concealment = going red). New per-unit/Run
+      concealment state; reuse the overwatch/ambush shot path. Verify: a self-test of the
+      conceal/break rules + `SIGHTLINE_*` shot + autoplay (autopilot breaks deliberately).
+- [ ] **4.5 (DEFERRED — flagged prototype only) Fog of war + soldier-focused auto-cam.**
+      Do NOT build unless 4.1-4.4 ship and playtests still want the recon-survival genre.
+      If attempted: a visibility mask behind a flag, on the larger maps, with strong
+      auto-framing (snap-to-selected, auto-pan-to-action). Judge on one question: is
+      partial-info SIGHTLINE *more fun* than full-info, knowing it costs threat-preview +
+      readability? See DESIGN.md §5.
+
+Supporting / any-time (now grounded by DESIGN.md §3-4): output-randomness mitigation
+(graze/partial hit, guaranteed-damage floor, many small rolls — DESIGN.md §3B); audit
+for a dominant overwatch-camp strategy + false-choice perks (§3A/§4); the bench /
+deploy-short-handed half of attrition so a wipe actually shrinks strength (§3F, ties to
+3.1). The Phase 3 Tier-4 items (3.10 music, 3.12 tutorial, 3.13 accessibility) still
+stand and are reinforced by DESIGN.md §3D/E/G.
+
+---
+
+## ROADMAP — PHASE 5 — visual identity & presentation (specced)
+
+> **Design rationale + style guide: [`docs/DESIGN.md`](docs/DESIGN.md) §3.H.** Orthogonal
+> to Phase 4 (encounter design) — can interleave. Enabled by the **clarified asset
+> policy** (see the pillars block): generated assets are allowed (procedural / in-engine /
+> shader first, AI only where it clearly wins; commit small generated files, no large
+> binaries). Engine note: Raylib generates noise/gradient textures (`GenImage*`) and bakes
+> TTF/OTF fonts (`LoadFontEx`) in-engine, so most of this needs **no committed binaries** —
+> a small font file is the main exception. Ordered by impact-per-effort.
+
+- [ ] **5.1 Visual style guide (docs).** In `DESIGN.md` §3.H: lock **semantic color
+      roles** (friendly / enemy / cover / objective / danger / neutral — one job per
+      accent), the **60-30-10** split, a **value-contrast** rule, line/shape language, and
+      a **squint-test** acceptance check (squint: can you still find the selected unit +
+      nearest threat + objective?). Pure docs; everything below conforms to it.
+- [ ] **5.2 Post-processing pass.** A shader stage on the existing `Display`
+      render-target: tasteful **bloom** (event-reactive — spike on hits/kills/crits),
+      **vignette**, per-**biome color grading**, subtle **chromatic aberration** on impact.
+      GLSL only, no assets. Biggest production-value lift; keep bloom subtle (the genre's
+      most-overused effect). Touch `src/Display.cs` (post pass), a small `.fs`/`.vs` shader
+      pair, `Fx` for event intensity. Verify: `SIGHTLINE_SHOT` before/after per biome; keep
+      it OFF in the headless harness so smoke shots stay byte-stable.
+- [ ] **5.3 Real font (kills the ASCII `?` limit).** Bake a committed small font via
+      `LoadFontEx` (procedural/generated, permissive) and route HUD/board text through it;
+      drop the ASCII-only constraint. Upgrades all typography. Touch `Hud`/`Renderer` text
+      draws + a font load in `Program`. Verify: `SIGHTLINE_SHOT` of HUD/cards rendering
+      non-ASCII glyphs correctly.
+- [ ] **5.4 Procedural texturing & particles.** Replace flat fills with subtle in-engine
+      **noise** on floor/cover/plateaus, **soft-glow** particle sprites (vs hard rects),
+      and generated **HUD icon glyphs**. `GenImage*` at load → cached textures; no committed
+      binaries. Touch `Renderer`/`Fx`. Verify: `SIGHTLINE_SHOT` per biome; confirm the
+      squint test still passes (texture must not fight signal).
+- [ ] **5.5 Semantic color + colorblind pass (folds in 3.13).** Enforce the 5.1 color
+      roles everywhere; add colorblind-safe `Pal` variants + shape/icon redundancy so coding
+      never relies on hue alone; persist the toggle in `display.json`. Touch `Pal`,
+      `Renderer`, `Hud`, `Display` settings. Verify: screenshots in each palette. (Supersedes
+      the colorblind half of Phase 3 item 3.13; 3.13's UI-text-scale piece still stands.)
+- [ ] **5.6 Focal-point & faux lighting.** Brighten/ring the active unit and gently
+      desaturate/vignette the rest toward the focal point; faux 2D lighting / emissive
+      cover+plateau edges to unify with elevation. Touch `Renderer` + the 5.2 post pass.
+      Verify: `SIGHTLINE_SHOT`; squint test still finds the focal unit fast.
+
+---
+
 ## Handoff protocol (when context gets heavy)
 You judge when context rot risks quality (don't wait for the 1M hard limit).
 Before stopping:
@@ -798,7 +915,45 @@ Before stopping:
 
 ### WIP NOTES
 
-> **3.12 ONBOARDING TUTORIAL (latest — finishes Phase 3).** Non-blocking first-run
+> **DESIGN SESSION pt.2 (latest) — asset policy + visual identity, DOCS ONLY.** The human
+> clarified the **art policy**: the old "no external art/audio assets" overstated it. Real
+> rule (now in the pillars block + DESIGN.md §3.H): **no *hand-made/human-authored*
+> assets**, but **generated assets ARE allowed** — **procedural/in-engine/shader first, AI
+> only where it clearly wins**, and **commit small generated files** (no large binaries;
+> keep the repo lean). This lifts the ASCII-only `?` limitation **once a font ships**
+> (Phase 5.3). Researched game **visual design** (squint test / visual hierarchy, limited
+> palette + value contrast + 60-30-10, semantic color coding, Into-the-Breach "communicate
+> not compel", post-processing/bloom, procedural texturing) → added a **§3.H Visual design**
+> section + style guide to `docs/DESIGN.md` and a new **ROADMAP — PHASE 5 (visual identity &
+> presentation)** above (5.1 style guide / 5.2 post-FX shaders / 5.3 font / 5.4 procedural
+> texturing / 5.5 semantic+colorblind / 5.6 focal+lighting). Engine note: Raylib generates
+> noise/gradient textures + bakes TTF fonts in-engine, so most visual upgrades need **no
+> committed binaries** — a small font file is the main thing worth committing. Still
+> DOCS-ONLY — no source changed. Build order: Phase **4.1** (full-bleed UI) is still the
+> natural first code step; Phase 5 is independent and can interleave (5.2 post-FX + 5.3 font
+> are the highest visual lift).
+
+> **DESIGN SESSION pt.1 — DOCS ONLY, no code.** The human asked for an educated,
+> deliberate look at the game's *principles & feel* (not more features). Ran a research
+> pass into game-design fundamentals (MDA; game feel/juice — Swink/Vlambeer; Sid Meier
+> "interesting decisions"; input vs output randomness; flow/difficulty; UX/readability +
+> affordances; enemy telegraphing; roguelike meta-loops; onboarding) and wrote it up as
+> **[`docs/DESIGN.md`](docs/DESIGN.md)** — a *rationale/decision* contract complementing
+> CLAUDE.md's *build/continuity* contract: sharpened pillars (added **Reads clearly** +
+> **Stakes that bite**), a principles library with **Do/Don't**, an **honest
+> self-scorecard**, and §5 the **information-design decision**. Key finding (validated by
+> the code's own numbers): the **encounter *opening* is the weakest link** — 18-wide map
+> + ~8-tile moves + 12-tile pod sight range => almost any advance trips a pod on turn 1
+> (anxiety + gotcha). Decision: fix it **while staying perfect-information** via full-bleed
+> UI + spacing/density + alert tiers + **XCOM2-style concealment** (DESIGN.md §5 Option 3);
+> **fog of war + restrictive camera DEFERRED** (identity pivot; flag-prototype only if
+> concealment proves insufficient). Specced as **ROADMAP — PHASE 4** above (4.1 UI -> 4.2
+> geometry -> 4.3 alert tiers -> 4.4 concealment -> 4.5 deferred fog). **No source files
+> changed this session.** Next session: start **4.1** (full-bleed UI — safe, high value),
+> then 4.2/4.3, then 4.4. (This was a design/planning pass per the human's instruction;
+> nothing to build-verify — `main`/the harness are untouched.)
+
+> **3.12 ONBOARDING TUTORIAL (finishes Phase 3).** Non-blocking first-run
 > callout. `Game`: `TutStep` (-1 inactive) + `TutPrompts[4]` + `_tutMoved`/`_tutOver`/
 > `_tutShot` (set in `IssueMove`/`DoOverwatch`/`IssueShoot`) + `_tutDoneTimer`.
 > `StartTutorialMaybe()` (end of `SetupMission`) starts it only when `!NoPersist && Mission
@@ -1243,6 +1398,6 @@ when no ally is hurt, so it's never a dead turn.
   stay in raw screen space. `ViewCamera` defaults to identity (zoom 1 / pan 0), so
   the default mouse path and the headless harness are unchanged — keep it that way.
 
-Conventions: drawn strings must be ASCII (default font). Build Release + run
+Conventions: drawn strings are ASCII for now (default font; a committed/generated font in Phase 5.3 lifts this). Build Release + run
 `SIGHTLINE_AUTOPLAY=1` a few times before merging. Share screenshots in chat via
 `SendUserFile` so the human can follow along.
