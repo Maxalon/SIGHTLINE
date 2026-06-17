@@ -90,6 +90,7 @@ public static class Program
         {
             case "sabotage": game.DebugForceObjective(Objective.Sabotage); break;
             case "rescue": game.DebugForceObjective(Objective.Rescue); break;
+            case "defend": game.DebugForceObjective(Objective.Defend); break;
         }
         // screenshot-only hooks for verifying the camera + pause overlay
         if (shot && float.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_ZOOM"), out float z)) game.CamZoom = z;

@@ -275,6 +275,17 @@ public static class Mission
         return u;
     }
 
+    /// A reinforcement for the DEFEND objective: a basic grunt/scout, scaled by mission.
+    public static Unit MakeWaveHostile(int n, int x, int y)
+    {
+        int bump = Math.Max(0, n - 1);
+        var e = Util.Roll(50)
+            ? MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 58 + bump, 6, x, y)
+            : MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 56 + bump, 8, x, y);
+        e.Aim = Math.Min(82, e.Aim);
+        return e;
+    }
+
     static void PlaceBlock(Grid g, HashSet<(int, int)> occ, int x, int y, TileType t, int w, int h)
     {
         for (int dx = 0; dx < w; dx++)

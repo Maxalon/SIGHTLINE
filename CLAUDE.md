@@ -222,6 +222,8 @@ seeds (mix of WIN/LOSE, no exceptions):
 - **Rescue objective:** free a caged, invulnerable CAPTIVE mid-map (reach it with a
   soldier), then escort the freed asset to extraction; losing it after freeing fails the
   mission (`Game.CaptiveLocked`/`TryFreeCaptive`). (Phase 3 item 3.8.)
+- **Defend objective:** hold out for 8 player turns while reinforcement waves spawn at
+  the right edge each enemy turn (`Game.DefendTurns`/`SpawnDefendWave`). (Phase 3 item 3.8.)
 - **Mission objectives:** Eliminate, Hack (reach the TERMINAL and hack it down,
   HACK action / key H), Evac (get the whole squad to the extraction zone), and
   **Escort** (walk a fragile gold VIP to the extraction zone alive — losing the
@@ -673,7 +675,7 @@ code to `main`.
             has a sap branch that `DamageCover(HighCoverHp)`s the tile ("BREACH" + `CoverHitFx`).
             Renderer gives it a demo-charge marker. Pairs with 3.6 destructible cover.
 
-- [ ] **3.8 New objectives.** SABOTAGE + RESCUE done; DEFEND still open.
+- [x] **3.8 New objectives.** DONE — SABOTAGE, RESCUE, and DEFEND all shipped.
       - [x] **SABOTAGE. DONE.** `Objective.Sabotage` added to the enum + `Run.ObjectiveFor`
             (rotation now %6: Elim/Hack/Evac/Escort/Sabotage/Rescue). 3 charge sites
             (`Game.SabotageSites`, spread mid-map; reserved in `Mission.Build` via a new
@@ -695,8 +697,14 @@ code to `main`.
             gray figure + cage bars + "CAPTIVE" tag, gold "FREED" after. HUD "RESCUE/EXTRACT
             CAPTIVE". Autopilot springs then extracts it. Verify: `SIGHTLINE_OBJ=rescue` +
             screenshot.
-      - [ ] **DEFEND.** Hold a zone / survive N turns vs. spawned waves — needs a wave
-            spawner in the turn flow + a turn counter. Not done.
+      - [x] **DEFEND. DONE.** `Objective.Defend`: survive `Game.DefendTurns` (8) player
+            turns. `CheckEnd` wins when `_turnCount > DefendTurns`. `Game.SpawnDefendWave`
+            (called at the top of `EndPlayerTurn` before the enemy turn) adds `2 + n/2`
+            active `Mission.MakeWaveHostile` grunts/scouts at the right edge on odd turns
+            (capped at 12 alive). HUD "DEFEND x/8" countdown (`Game.Turn`); autopilot holds
+            + overwatches; `RollSecondary` skips SWIFT on Defend (can't finish early).
+            Verify: `SIGHTLINE_OBJ=defend` (autopilot survives → advances, or wipes) +
+            screenshot.
 
 - [x] **3.9 Secondary objectives.** DONE. An optional per-mission bonus goal worth
       `Game.SecondaryIntel` (12) extra `Run.Intel`. `SecondaryKind` {None, NoLosses,
@@ -752,7 +760,22 @@ Before stopping:
 
 ### WIP NOTES
 
-> **3.8 RESCUE OBJECTIVE (latest).** `Objective.Rescue` (rotation now %6, + `GenerateOffers`
+> **3.8 DEFEND OBJECTIVE (latest, completes 3.8).** `Objective.Defend`: survive
+> `Game.DefendTurns` (8) player turns vs mid-mission waves. `CheckEnd` Defend branch wins
+> when `_turnCount > DefendTurns` (a squad wipe still loses via the alivePlayers==0 guard).
+> `Game.SpawnDefendWave()` is called at the TOP of `EndPlayerTurn` (before the per-enemy
+> `BeginTurn` loop + `_aiUnits` build, so the new wave acts that enemy turn): on odd turns
+> below the limit, spawns `2 + missionNum/2` `Mission.MakeWaveHostile` (public; basic
+> grunt/scout scaled by n) at the right edge (`W-2`/`W-1`), `Active=true PodId=-1`, capped
+> at 12 alive. `Run.ObjectiveFor` is now %7 (+Defend); `GenerateOffers` pool +Defend.
+> `RollSecondary` excludes SWIFT on Defend (impossible to finish before turn 8). HUD shows
+> "DEFEND x/8" via `Game.Turn` (new public getter for `_turnCount`). Autopilot Defend
+> branch: shoot/reload/overwatch/hunker to hold (no advance). Harness `SIGHTLINE_OBJ=defend`.
+> Verify: autoplay survives → advances past the forced mission (confirmed on mission 1),
+> else wipes; no exceptions/TIMEOUT. Gotcha: waves are real `Enemies` entries — they ride
+> all the generic systems (overwatch/FX/AI); they're active immediately (no pod scatter).
+
+> **3.8 RESCUE OBJECTIVE.** `Objective.Rescue` (rotation now %6, + `GenerateOffers`
 > pool). Reuses the `Vip` unit as the captive (`Cls="VIP"`, renamed "CAPTIVE"); new
 > `Game.CaptiveLocked`. Setup (`SetupMission`): make the Vip, add to `Players`, lock it,
 > then AFTER `Mission.Build` re-seat it at `(W/2,H/2)`, clear its ring, Mobility 0,
