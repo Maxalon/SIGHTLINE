@@ -41,6 +41,10 @@ public static class Display
         Save();
     }
 
+    // onboarding tutorial (3.12): a one-time "seen" flag so it only shows on the first run
+    public static bool TutorialSeen;
+    public static void MarkTutorialSeen() { if (!TutorialSeen) { TutorialSeen = true; Save(); } }
+
     public static void Init(bool enabled)
     {
         Enabled = enabled;
@@ -165,6 +169,7 @@ public static class Display
         public int SizeIdx { get; set; }
         public int BrightIdx { get; set; } = 2;
         public bool Colorblind { get; set; }
+        public bool TutorialSeen { get; set; }
     }
     static string Dir => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Sightline");
@@ -172,7 +177,7 @@ public static class Display
 
     static void Save()
     {
-        try { Directory.CreateDirectory(Dir); File.WriteAllText(FilePath, JsonSerializer.Serialize(new Dto { Fullscreen = Fullscreen, SizeIdx = SizeIdx, BrightIdx = BrightIdx, Colorblind = Pal.Colorblind })); }
+        try { Directory.CreateDirectory(Dir); File.WriteAllText(FilePath, JsonSerializer.Serialize(new Dto { Fullscreen = Fullscreen, SizeIdx = SizeIdx, BrightIdx = BrightIdx, Colorblind = Pal.Colorblind, TutorialSeen = TutorialSeen })); }
         catch { }
     }
 
@@ -188,6 +193,7 @@ public static class Display
                 SizeIdx = Math.Clamp(d.SizeIdx, 0, Sizes.Length - 1);
                 BrightIdx = Math.Clamp(d.BrightIdx, 0, BrightLevels.Length - 1);
                 Pal.SetColorblind(d.Colorblind);
+                TutorialSeen = d.TutorialSeen;
             }
         }
         catch { }
