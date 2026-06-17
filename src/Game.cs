@@ -736,6 +736,19 @@ public class Game
     }
 
     // ---------------- update ----------------
+    /// Drives the procedural music crossfade (0 calm .. 1 combat): tense on the enemy
+    /// turn, moderate while live hostiles are about, calm in menus / when clear.
+    float MusicIntensity()
+    {
+        switch (Phase)
+        {
+            case Phase.EnemyTurn: return 1f;
+            case Phase.PlayerTurn:
+                return Enemies.Any(e => e.Alive && e.Active) ? 0.5f : 0.15f;
+            default: return 0f;   // intro / barracks / win / lose
+        }
+    }
+
     public void Update(float dt)
     {
         // custom-tag editor is modal: it swallows all other input while open
@@ -743,6 +756,7 @@ public class Game
 
         if (Raylib.IsKeyPressed(KeyboardKey.M)) Audio.ToggleMute();
         if (!AutoPlay && Raylib.IsKeyPressed(KeyboardKey.F)) Display.ToggleFullscreen();
+        Audio.SetMusicIntensity(MusicIntensity());
 
         // camera zoom-punch always relaxes; hit-stop freezes the rest of the sim
         _camPulse *= MathF.Exp(-dt * 11f);
