@@ -245,6 +245,9 @@ seeds (mix of WIN/LOSE, no exceptions):
   zoom/pan** (wheel + middle-drag, C to reset), a **keyboard tile cursor**
   (arrows/WASD + Space), and a **pause/settings menu** (Esc: display, audio, screen
   shake, threat-preview toggles, abandon run).
+- **Accessibility** (`src/Display.cs` + `Pal`): a **brightness** post-pass (70–130%,
+  `Display.DrawBrightness`) + a **colorblind palette** toggle (`Pal.SetColorblind`, Foe→
+  orange / Good→teal), both in the pause menu + persisted. (Phase 3 item 3.13.)
 - **Display settings** (`src/Display.cs`): the fixed 1280x800 game is rendered to a
   letterboxed render-target scaled to the window, so it stays readable on big/4K
   screens. Pause menu offers **FULLSCREEN** (key **F**) + a **WINDOW** size cycle
@@ -749,10 +752,18 @@ code to `main`.
       `display.json`/settings) that prompts move → cover → flank → overwatch → fire with
       contextual callouts. Verify: screenshots.
 
-- [ ] **3.13 Accessibility & display extras.** Now that everything renders through the
-      `Display` render-target, add a **brightness/contrast** post-pass on it; a
-      **colorblind palette** toggle (`Pal` variants); and an independent **UI text
-      scale**. Persist in `display.json`. Verify: screenshots.
+- [x] **3.13 Accessibility & display extras.** DONE (brightness + colorblind; contrast +
+      text-scale deferred). **Brightness:** `Display.BrightLevels` (70–130%) applied as a
+      translucent darken/lighten quad in `Display.DrawBrightness` (called at the end of both
+      `RenderFrame` paths; neutral 100% draws nothing → headless byte-identical).
+      **Colorblind palette:** `Pal.SetColorblind` swaps the threat/good hues to a
+      deuteranopia/protanopia-safe set (Foe red→vermillion-orange, Good green→blue-green;
+      blue Friend unchanged) — `Pal.Foe`/`FoeDk`/`Good` made mutable. Both live in the
+      **pause menu** (`Hud.PauseBright`/`PauseColorblind`, card grown to 9 buttons) and
+      persist in `display.json` (`Display` Dto `BrightIdx`+`Colorblind`, applied in `Load`).
+      Verify: `SIGHTLINE_CB=1` (orange foes) + `SIGHTLINE_PAUSE`+`SIGHTLINE_BRIGHT=1` (menu +
+      dim) screenshots. **TODO:** a true contrast/gamma post-pass (needs a shader) + an
+      independent UI text scale (invasive — all DrawText sizes are fixed).
 
 When picking up Phase 3: do **3.1** first (it's the highest-value and directly answers
 the death-consequence feedback), one verified PR per item, merge to `main` yourself.
@@ -770,7 +781,21 @@ Before stopping:
 
 ### WIP NOTES
 
-> **3.10 PROCEDURAL MUSIC (latest, blind ship — Phase 2 D too).** `src/Audio.cs` gained a
+> **3.13 ACCESSIBILITY (latest — brightness + colorblind).** Two pause-menu options,
+> persisted in `display.json`. **Brightness:** `Display.BrightLevels` {0.70..1.30}, idx
+> default 2 (100% = neutral). `Display.DrawBrightness()` draws a fullscreen black (darken,
+> α=1-b) or white (lighten, α=(b-1)·0.55) quad at the end of BOTH `RenderFrame` paths;
+> neutral draws nothing so headless shots are byte-identical. `CycleBrightness`. **Colorblind:**
+> `Pal.Foe`/`FoeDk`/`Good` changed from `readonly` to mutable; `Pal.SetColorblind(on)` swaps
+> them to CB-safe hues (Foe→`(238,138,40)`, Good→`(40,200,168)`); `Display.ToggleColorblind`.
+> Pause menu (`Hud.DrawPause`) grew to 9 buttons (h 504→612) with `PauseBright`/`PauseColorblind`;
+> clicks in `Game.HandlePauseMenu`. `Display` Dto persists `BrightIdx`+`Colorblind`; `Load`
+> applies `Pal.SetColorblind` (only in non-headless, since `Display.Load` runs only when
+> Enabled). Screenshot hooks `SIGHTLINE_CB=1` + `SIGHTLINE_BRIGHT=<idx>` (both apply in the
+> direct RenderFrame path, which the harness uses since Display is disabled). TODO: true
+> contrast/gamma (shader); independent UI text scale (all DrawText sizes are hardcoded).
+
+> **3.10 PROCEDURAL MUSIC (blind ship — Phase 2 D too).** `src/Audio.cs` gained a
 > looping music layer alongside the SFX. `BuildAmbient` (A-minor sine pad + slow LFO
 > tremolo) + `BuildCombat` (tenser pad + 2 Hz sub-bass pulse), each an 8-second buffer
 > using **integer-Hz tones over an integer-second loop → seamless loop** (sin is 0 at both
