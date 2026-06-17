@@ -7,7 +7,7 @@ using Raylib_cs;
 namespace Sightline;
 
 public enum Phase { Intro, PlayerTurn, EnemyTurn, Barracks, Win, Lose }
-public enum Objective { Eliminate, Evac, Hack, Escort, Sabotage, Rescue }
+public enum Objective { Eliminate, Evac, Hack, Escort, Sabotage, Rescue, Defend }
 public enum SecondaryKind { None, NoLosses, Swift, CleanSweep }  // optional per-mission bonus goal (3.9)
 enum AiStage { PickNext, ActAfterMove }
 
@@ -91,6 +91,10 @@ public class Game
     // mission objective
     public Objective Objective;
     public List<(int x, int y)> EvacZone = new();
+
+    // DEFEND objective (3.8): survive this many player turns vs mid-mission waves
+    public const int DefendTurns = 8;
+    public int Turn => _turnCount;
 
     // optional secondary objective (3.9): a per-mission bonus goal worth extra intel
     public const int SwiftTurns = 7;
@@ -337,7 +341,8 @@ public class Game
     {
         SecondaryFailed = false;
         if (n <= 1) { Secondary = SecondaryKind.None; return; }
-        var pool = new List<SecondaryKind> { SecondaryKind.NoLosses, SecondaryKind.Swift };
+        var pool = new List<SecondaryKind> { SecondaryKind.NoLosses };
+        if (Objective != Objective.Defend) pool.Add(SecondaryKind.Swift);   // can't finish a hold-out early
         if (Objective != Objective.Eliminate) pool.Add(SecondaryKind.CleanSweep);
         Secondary = pool[Util.RandInt(0, pool.Count - 1)];
     }
@@ -831,6 +836,10 @@ public class Game
             { LoseRun("CAPTIVE LOST", $"The captive died on mission {_run.Mission}."); return; }
             if (!CaptiveLocked && Vip != null && EvacZone.Contains((Vip.X, Vip.Y))) EnterBarracks();
         }
+        else if (Objective == Objective.Defend) // hold out for DefendTurns player turns
+        {
+            if (_turnCount > DefendTurns) EnterBarracks();
+        }
         else // Evac: every surviving soldier must stand in the extraction zone
         {
             if (alivePlayers.All(p => EvacZone.Contains((p.X, p.Y)))) EnterBarracks();
@@ -960,6 +969,16 @@ public class Game
             if (u.Ammo == 0) { DoReload(); return; }
             var rfoe = AliveEnemies().OrderBy(e => Util.TileDist(u.X, u.Y, e.X, e.Y)).FirstOrDefault();
             if (rfoe != null && TryMoveTowardTile(u, rfoe.X, rfoe.Y)) return;
+            DoHunker(); return;
+        }
+
+        // DEFEND objective: hold position, shoot, overwatch, hunker until the timer runs out
+        if (Objective == Objective.Defend)
+        {
+            var dt = FirstTargetFor(u);
+            if (dt != null && u.Ammo > 0) { IssueShoot(dt); return; }
+            if (u.Ammo == 0) { DoReload(); return; }
+            if (u.ActionsLeft > 0 && u.Ammo > 0) { DoOverwatch(); return; }
             DoHunker(); return;
         }
 
@@ -1581,6 +1600,34 @@ public class Game
         EndPlayerTurn();
     }
 
+    /// DEFEND: spawn a wave of reinforcements at the right edge on early enemy turns.
+    void SpawnDefendWave()
+    {
+        if (_turnCount % 2 == 0 || _turnCount >= DefendTurns) return;  // waves on odd turns, not the last
+        if (AliveEnemies().Count >= 12) return;                        // clutter cap
+        int n = _run.Mission;
+        int want = 2 + n / 2;
+        var rows = Enumerable.Range(0, Grid.H).OrderBy(_ => Util.RandF()).ToList();
+        int added = 0;
+        foreach (int y in rows)
+        {
+            if (added >= want) break;
+            int x = Grid.W - 2;
+            if (!Grid.IsFloor(x, y) || IsOccupiedByOther(x, y, null))
+            {
+                x = Grid.W - 1;
+                if (!Grid.IsFloor(x, y) || IsOccupiedByOther(x, y, null)) continue;
+            }
+            var e = Mission.MakeWaveHostile(n, x, y);
+            e.Active = true; e.PodId = -1;
+            e.SyncPos();
+            Enemies.Add(e);
+            Fx.Burst(e.Pos, Pal.Foe, 14, 160f, 0.5f, 3f, true);
+            added++;
+        }
+        if (added > 0) { Fx.PopText(Util.TileCenter(Grid.W - 2, 0) + new Vector2(0, -10), "WAVE", Pal.Foe, 20f); Audio.Play("turn"); }
+    }
+
     void EndPlayerTurn()
     {
         EndTurnArmed = false;
@@ -1588,6 +1635,7 @@ public class Game
         Selected = null;
         MoveCost = null;
         Phase = Phase.EnemyTurn;
+        if (Objective == Objective.Defend) SpawnDefendWave();    // reinforcements assault the holdout
         foreach (var e in Enemies) if (e.Alive) { e.BeginTurn(); TickStatuses(e); }
         _aiUnits = AliveEnemies().Where(e => e.Active).ToList();  // dormant pods don't act
         _aiIdx = 0;

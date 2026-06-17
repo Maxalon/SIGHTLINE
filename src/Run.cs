@@ -191,13 +191,14 @@ public class Run
     }
 
     /// Objective rotation baseline: Eliminate / Hack / Evac / Escort, repeating.
-    public static Objective ObjectiveFor(int n) => ((n - 1) % 6) switch
+    public static Objective ObjectiveFor(int n) => ((n - 1) % 7) switch
     {
         1 => Objective.Hack,
         2 => Objective.Evac,
         3 => Objective.Escort,
         4 => Objective.Sabotage,
         5 => Objective.Rescue,
+        6 => Objective.Defend,
         _ => Objective.Eliminate,
     };
 
@@ -213,7 +214,7 @@ public class Run
     {
         Offers.Clear();
         Objective def = ObjectiveFor(n);
-        var pool = new List<Objective> { Objective.Eliminate, Objective.Hack, Objective.Evac, Objective.Escort, Objective.Sabotage, Objective.Rescue };
+        var pool = new List<Objective> { Objective.Eliminate, Objective.Hack, Objective.Evac, Objective.Escort, Objective.Sabotage, Objective.Rescue, Objective.Defend };
         Objective Other(params Objective[] avoid)
         {
             var picks = pool.FindAll(o => System.Array.IndexOf(avoid, o) < 0);
