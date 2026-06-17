@@ -212,6 +212,61 @@ a safe, contained problem; avoid walls of text.
 first mission that introduces move → cover → flank → overwatch → fire **in that order**,
 with contextual callouts, is the right shape — not a manual.
 
+### H. Visual design & readability (and the asset policy)
+
+**Readability is the master visual principle for tactics — pass the "squint test."**
+*[Squint test](https://medium.com/@sifatrabbani_UX/the-squint-test-0677a08de848);
+[NN/g](https://www.nngroup.com/videos/squint-test/).* Squint until detail blurs to
+silhouettes and color-blocks; the selected soldier, the nearest threat, and the cursor
+tile must **still** pop. This is *Into the Breach*'s ethos — [art that "communicates
+rather than compels,"](https://pressstartgaming.com/into-the-breach-a-tactical-masterpiece/)
+function before flourish.
+- **Do** carry critical info on **value (light/dark) contrast**, not hue alone; make the
+  focal element the brightest / largest / most-saturated.
+- **Don't** add texture or effects that compete with gameplay signal (visual noise).
+
+**Limited palette, semantic color, 60-30-10.** *[Limited palettes](https://www.wayline.io/blog/limited-color-palettes-game-art);
+[60-30-10](https://itch.io/blog/478705/a-short-recommendation-color-palettes-and-the-60-30-10-rule).*
+Color communicates faster than shape — so give each accent **one job**. Roughly 60%
+dominant/neutral, 30% secondary, 10% loud accent.
+- **Do** reserve the loudest accent (red) for **danger/enemy only**; keep palettes
+  consistent across biomes for cohesion; pair color codes with shape/icon redundancy.
+- **Don't** let hue alone carry meaning, or let a biome retint break the semantic roles.
+
+**Post-processing is the cheapest big lift — and it's code, not assets.**
+*[Bloom](https://pingpoli.medium.com/the-bloom-post-processing-effect-9352fa800caf).* A
+subtle, event-reactive bloom + vignette + per-biome grading + impact chromatic aberration
+on the existing `Display` render-target reads as "premium."
+- **Do** tie effect intensity to events (spike on hit/kill/crit); keep bloom subtle.
+- **Don't** over-bloom (the genre's most-abused effect) or wash out readability.
+
+**Generated > flat, and it stays lean.** Procedural in-engine noise/gradient textures and
+baked fonts add richness with [far less storage than bitmaps](https://docs.unity3d.com/550/Documentation/Manual/ProceduralMaterials.html)
+and no human-authored art.
+
+**Style guide — semantic color roles (lock in roadmap 5.1):**
+
+| Role | Job | Rule |
+|------|-----|------|
+| Friendly | the player's squad | cool/neutral family; **brightest when active/selected** |
+| Enemy / danger | hostiles, threat pips, lethal warnings | the **loud accent (red)** — reserved, never decorative |
+| Cover / terrain | low/high cover, plateaus | muted, low-saturation; never out-shouts units |
+| Objective | terminal / evac / sites / VIP | a single distinct **goal hue (gold)**, used only for goals |
+| Neutral / inactive | dormant pods, spent units | desaturated/dimmed toward the background |
+
+**Acceptance check for any visual change — the squint test:** squint; can you still
+instantly find (a) the selected unit, (b) the nearest threat, (c) the objective? If not,
+the change failed.
+
+**Asset policy (clarified — supersedes the old "no assets" wording):**
+- **No hand-made / human-authored assets** — the human won't make art/audio by hand.
+- **Generated assets are allowed:** **procedural / in-engine / shader first; AI only where
+  it clearly wins.** Audio stays synthesised.
+- **Commit small, optimised generated files** (a font is the headline win — it kills the
+  ASCII-`?` limit); **keep large binaries out** so the repo stays lean.
+- Most upgrades need **no committed binaries** (Raylib `GenImage*` textures + `LoadFontEx`
+  font baking are in-engine). Build checklist: `CLAUDE.md` → ROADMAP **PHASE 5**.
+
 ---
 
 ## 4. SIGHTLINE — honest scorecard
@@ -332,6 +387,10 @@ Design intent only — the build checklist lives in `CLAUDE.md` → **ROADMAP �
 - ✅ Juice proportional to event weight; reinforce information.
 - ❌ Don't let spectacle bury the signal.
 
+**Visual**
+- ✅ Pass the squint test; one job per accent color; value-contrast carries readability.
+- ❌ Don't over-bloom, rely on hue alone, or add texture that fights the signal.
+
 **UX**
 - ✅ Full-bleed play area; legible, translucent, progressively-disclosed HUD;
   high-contrast affordances; accessible by default.
@@ -378,6 +437,14 @@ Design intent only — the build checklist lives in `CLAUDE.md` → **ROADMAP �
   [Chen — *Flow in Games* (thesis)](https://www.jenovachen.com/flowingames/Flow_in_games_final.pdf)
 - [Game UX design](https://www.protopie.io/blog/game-ux-design) ·
   [Affordances in game systems](https://machinations.io/articles/affordances-in-game-systems-design)
+
+**Visual design**
+- [Limited color palettes in game art](https://www.wayline.io/blog/limited-color-palettes-game-art) ·
+  [60-30-10 rule](https://itch.io/blog/478705/a-short-recommendation-color-palettes-and-the-60-30-10-rule)
+- [The squint test](https://medium.com/@sifatrabbani_UX/the-squint-test-0677a08de848) ·
+  [Squint test (NN/g)](https://www.nngroup.com/videos/squint-test/)
+- [Into the Breach — functional art](https://pressstartgaming.com/into-the-breach-a-tactical-masterpiece/) ·
+  [Bloom post-processing (use sparingly)](https://pingpoli.medium.com/the-bloom-post-processing-effect-9352fa800caf)
 
 **Meta-loop & teaching**
 - [Building a roguelike — progression & run structure](https://www.strayspark.studio/blog/building-roguelike-ue5-procedural-progression) ·
