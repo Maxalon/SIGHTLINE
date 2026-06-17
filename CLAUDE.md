@@ -380,10 +380,11 @@ seeds (mix of WIN/LOSE, no exceptions):
             (else procedural). Reserved tiles (spawns/evac/terminal+ring) stay open
             floor; `Mission.TryApplyLayout` flood-fills from a soldier to verify all
             spawns/evac/terminal stay reachable and reverts to procedural otherwise.
-            **Five arenas:** PLAZA (central plateau), GAUNTLET (lane spine), PILLARS
+            **Six arenas:** PLAZA (central plateau), GAUNTLET (lane spine), PILLARS
             (column field), CHEVRON (diagonal cover wall + redoubt), CITADEL (bunker
-            with interior plateau + doorway). Test hook `SIGHTLINE_MAP=<index>` forces
-            a specific layout (`Mission.ForcedLayout`).
+            with interior plateau + doorway), ZIGGURAT (stepped mound with a commanding
+            **tier-2** `=` core). Test hook `SIGHTLINE_MAP=<index>` forces a specific
+            layout (`Mission.ForcedLayout`).
       - [x] **VIP escort objective.** DONE. `Objective.Escort` (rotation is now
             Elim / Hack / Evac / Escort, `Game.ObjectiveFor` = `(n-1)%4`). A fragile
             gold **VIP** (`Mission.MakeVip`, `Unit.IsVip`: 6 HP, 45 aim, sidearm, no
