@@ -96,6 +96,46 @@ public class Game
     public const int DefendTurns = 8;
     public int Turn => _turnCount;
 
+    // onboarding tutorial (3.12): non-blocking contextual callouts on the first-ever run
+    public int TutStep = -1;                 // -1 = inactive
+    bool _tutMoved, _tutOver, _tutShot;
+    float _tutDoneTimer;
+    public static readonly string[] TutPrompts =
+    {
+        "WELCOME, COMMANDER. Click a glowing tile to MOVE the selected soldier. Cover (the raised blocks) shields you from fire - end your move beside one.",
+        "Now set OVERWATCH: press [2] (or the button). That soldier will fire on the first enemy that moves into its line of sight.",
+        "Click a hostile to FIRE. A shot ends the soldier's turn. Attacking from a side a foe has no cover on FLANKS it - far deadlier.",
+        "That's the basics: move into cover, flank, overwatch, fire - then END TURN. Promotions, perks and a branching campaign await. Good hunting.",
+    };
+    public string TutorialText => (TutStep >= 0 && TutStep < TutPrompts.Length) ? TutPrompts[TutStep] : null;
+
+    void StartTutorialMaybe()
+    {
+        if (NoPersist || _run.Mission != 1 || Display.TutorialSeen) return;
+        TutStep = 0;
+        _tutMoved = _tutOver = _tutShot = false;
+        Display.MarkTutorialSeen();           // only ever shows once
+    }
+
+    void UpdateTutorial(float dt)
+    {
+        if (TutStep < 0) return;
+        switch (TutStep)
+        {
+            case 0: if (_tutMoved) AdvanceTutorial(); break;
+            case 1: if (_tutOver) AdvanceTutorial(); break;
+            case 2: if (_tutShot) AdvanceTutorial(); break;
+            case 3: _tutDoneTimer -= dt; if (_tutDoneTimer <= 0) TutStep = -1; break;
+        }
+    }
+
+    void AdvanceTutorial()
+    {
+        TutStep++;
+        if (TutStep == 3) _tutDoneTimer = 7f;
+        if (TutStep >= TutPrompts.Length) TutStep = -1;
+    }
+
     // optional secondary objective (3.9): a per-mission bonus goal worth extra intel
     public const int SwiftTurns = 7;
     public const int SecondaryIntel = 12;
@@ -265,6 +305,7 @@ public class Game
         AimMode = false;
         Biome = Biome.For(n);
         ShowBanner($"MISSION {n} - {Biome.Name}", false);
+        StartTutorialMaybe();
 
         // checkpoint the run at the start of each mission (normal play only)
         if (!NoPersist) SaveGame.Save(_run);
@@ -757,6 +798,7 @@ public class Game
         if (Raylib.IsKeyPressed(KeyboardKey.M)) Audio.ToggleMute();
         if (!AutoPlay && Raylib.IsKeyPressed(KeyboardKey.F)) Display.ToggleFullscreen();
         Audio.SetMusicIntensity(MusicIntensity());
+        UpdateTutorial(dt);
 
         // camera zoom-punch always relaxes; hit-stop freezes the rest of the sim
         _camPulse *= MathF.Exp(-dt * 11f);
@@ -1481,6 +1523,7 @@ public class Game
         AimMode = false;
         PathPreview.Clear();
         Audio.Play("move");
+        _tutMoved = true;
     }
 
     void IssueShoot(Unit target)
@@ -1496,6 +1539,7 @@ public class Game
         Enqueue(new ShotAnim(Selected, target, res), Team.Player);
         if (!target.Active) ActivatePod(target.PodId);   // gunfire reveals the pod
         AimMode = false;
+        _tutShot = true;
     }
 
     void DoOverwatch()
@@ -1508,6 +1552,7 @@ public class Game
         Fx.PopText(Selected.Pos + new Vector2(0, -30), "OVERWATCH", Pal.Accent, 18f);
         Audio.Play("over");
         AimMode = false;
+        _tutOver = true;
     }
 
     void DoHunker()
@@ -1646,6 +1691,8 @@ public class Game
 
     void EndPlayerTurn()
     {
+        // keep the tutorial progressing even if the player skipped a prompted action
+        if (TutStep >= 0 && TutStep < 3) AdvanceTutorial();
         EndTurnArmed = false;
         AimMode = false;
         Selected = null;

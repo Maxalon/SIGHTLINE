@@ -748,9 +748,15 @@ code to `main`.
       with extra `HitStop` (0.4s slow-mo) + `AddZoomPunch` + shake. Per-mission state
       cleared in `SetupMission`. Verify: `SIGHTLINE_KIA=1` screenshot + autoplay clean.
 
-- [ ] **3.12 Onboarding tutorial.** A scripted first mission (gated by a "seen" flag in
-      `display.json`/settings) that prompts move → cover → flank → overwatch → fire with
-      contextual callouts. Verify: screenshots.
+- [x] **3.12 Onboarding tutorial.** DONE. A **non-blocking** 4-step callout on the
+      first-ever run (mission 1 only). `Game.TutStep`/`TutPrompts` + flags `_tutMoved`/
+      `_tutOver`/`_tutShot` (set in `IssueMove`/`DoOverwatch`/`IssueShoot`); `UpdateTutorial`
+      advances on the prompted action, `EndPlayerTurn` advances it too (so it never sticks),
+      and the final step auto-dismisses after 7s. `StartTutorialMaybe` (in `SetupMission`)
+      gates on `!NoPersist && Mission==1 && !Display.TutorialSeen` and calls
+      `Display.MarkTutorialSeen` (persisted in `display.json`) so it only ever shows once.
+      `Hud.DrawTutorial` renders a word-wrapped "TRAINING x/4" tip card (`WrapText` helper).
+      Off in the harness (NoPersist). Verify: `SIGHTLINE_TUTORIAL=1` screenshot. (ASCII-only.)
 
 - [x] **3.13 Accessibility & display extras.** DONE (brightness + colorblind; contrast +
       text-scale deferred). **Brightness:** `Display.BrightLevels` (70–130%) applied as a
@@ -765,8 +771,15 @@ code to `main`.
       dim) screenshots. **TODO:** a true contrast/gamma post-pass (needs a shader) + an
       independent UI text scale (invasive — all DrawText sizes are fixed).
 
-When picking up Phase 3: do **3.1** first (it's the highest-value and directly answers
-the death-consequence feedback), one verified PR per item, merge to `main` yourself.
+**PHASE 3 IS COMPLETE — every item 3.1 through 3.13 is DONE and on `main`.** The game is
+feature-complete against the whole spec. Remaining work is now *open-ended polish*, not a
+fixed roadmap. Highest-value next ideas (pick by feel): tune the procedural music once it's
+been heard; a true contrast/gamma post-pass (needs a shader) + UI text scale (3.13
+follow-ups); enemy AI using utility items + exploiting the commanding-view LoS; themed
+authored arenas per biome (`Maps.cs`); more authored maps using the `=` tier-2 legend; mid-
+mission save granularity; a VIP/captive-EXTRACTED win flourish. Keep the hard rules: NO
+CI/test-runner, ASCII-only drawn text, verify via the `SIGHTLINE_*` harness + autoplay +
+screenshots, ship compiling code to `main`.
 
 ---
 
@@ -781,7 +794,21 @@ Before stopping:
 
 ### WIP NOTES
 
-> **3.13 ACCESSIBILITY (latest — brightness + colorblind).** Two pause-menu options,
+> **3.12 ONBOARDING TUTORIAL (latest — finishes Phase 3).** Non-blocking first-run
+> callout. `Game`: `TutStep` (-1 inactive) + `TutPrompts[4]` + `_tutMoved`/`_tutOver`/
+> `_tutShot` (set in `IssueMove`/`DoOverwatch`/`IssueShoot`) + `_tutDoneTimer`.
+> `StartTutorialMaybe()` (end of `SetupMission`) starts it only when `!NoPersist && Mission
+> ==1 && !Display.TutorialSeen`, then `Display.MarkTutorialSeen()` (new flag in the Display
+> Dto → display.json) so it shows once ever. `UpdateTutorial(dt)` (in `Game.Update`)
+> advances 0→1→2 when the matching flag sets; step 3 auto-clears after 7s. `EndPlayerTurn`
+> also calls `AdvanceTutorial` for steps 0-2 so it can't get stuck across turns.
+> `Hud.DrawTutorial` (called in `Hud.Draw` on the player/enemy turn when `TutorialText!=null`)
+> draws a word-wrapped "TRAINING x/4" card above the action bar (new `WrapText` greedy
+> wrapper). Harness hook `SIGHTLINE_TUTORIAL=1` (sets `TutStep=0`; harness is NoPersist so it
+> never auto-starts). Gotcha: ASCII-only — prompts use `-` not em dashes (the default font
+> renders `—` as `?`). With this, ALL of Phase 3 (3.1-3.13) is complete.
+
+> **3.13 ACCESSIBILITY (brightness + colorblind).** Two pause-menu options,
 > persisted in `display.json`. **Brightness:** `Display.BrightLevels` {0.70..1.30}, idx
 > default 2 (100% = neutral). `Display.DrawBrightness()` draws a fullscreen black (darken,
 > α=1-b) or white (lighten, α=(b-1)·0.55) quad at the end of BOTH `RenderFrame` paths;
@@ -1075,26 +1102,23 @@ Before stopping:
 > with **3.1** (highest value, answers the death-consequence feedback). Nothing built
 > yet — this was a planning pass.
 
-> **LATEST SESSION SUMMARY (read this first).** Phase 1 (1-7), Phase 2 A/B/C/E/F, and
-> Phase 3 items **3.1, 3.2, 3.5, 3.11** were already DONE. **This session shipped NINE more
-> (PRs #29-#37, all merged to `main`):** **3.3** branching campaign map, **3.4** utility
-> items (smoke/flash/barricade), **3.6a** destructible cover, **3.6b** 2nd elevation tier
-> (+ commanding tier-2 high ground that sees over high cover), **3.7** new enemies (DRONE
-> WASP / SHIELD AEGIS / mid-boss BREAKER+WARDEN / SAPPER BREACH), **3.9** secondary
-> objectives (NO LOSSES / SWIFT / CLEAN SWEEP → +intel), **3.8 SABOTAGE** (plant K charges)
-> and **3.8 RESCUE** (free a caged captive → escort it out). Objective rotation is now a
-> 6-cycle (`Run.ObjectiveFor` %6). Build 0/0; SAVETEST/COMBATTEST/ITEMTEST/COVERTEST/
-> STATUSTEST/TRAITTEST all PASS; autoplay clean.
-> **Top remaining ROADMAP items (priority order):** **3.8 DEFEND** (the last objective —
-> hold a zone / survive N turns vs **mid-mission wave spawns**; needs a wave spawner in the
-> turn flow + a turn counter; most invasive of the objectives, deferred for a fresh
-> session); **3.10 / Phase 2 D procedural music** (BLIND SHIP here — no audio device; build
-> on `src/Audio.cs` where you can hear it); **3.12** onboarding tutorial; **3.13**
-> accessibility/display (brightness/contrast post-pass on the `Display` render-target,
-> colorblind `Pal` variants, UI text scale). Smaller polish: enemy AI doesn't use utility
-> items; AI doesn't exploit the commanding-view LoS; AEGIS only faces west; mid-mission save
-> granularity; themed-per-biome arenas. Harness objective-force hook
-> `SIGHTLINE_OBJ=sabotage|rescue`. Detailed per-feature notes in WIP NOTES (newest first).
+> **LATEST SESSION SUMMARY (read this first).** **PHASE 3 IS NOW 100% COMPLETE (3.1-3.13),
+> and Phase 2 is fully done too — the game is feature-complete against the entire spec.**
+> This marathon session shipped **TWELVE features (PRs #29-#40, all merged to `main`):**
+> **3.3** branching campaign map, **3.4** utility items (smoke/flash/barricade), **3.6a**
+> destructible cover, **3.6b** 2nd elevation tier (commanding tier-2 sees over high cover),
+> **3.7** new enemies (DRONE/SHIELD/mid-boss/SAPPER), **3.9** secondary objectives, **3.8**
+> all three new objectives (SABOTAGE / RESCUE / DEFEND — objective rotation is now a 7-cycle,
+> `Run.ObjectiveFor` %7), **3.10 / Phase 2 D** procedural music (BLIND SHIP — built + crash-
+> safe but unheard here; tune once audible), **3.13** accessibility (brightness post-pass +
+> colorblind palette), and **3.12** the onboarding tutorial. Build 0/0; SAVETEST/COMBATTEST/
+> ITEMTEST/COVERTEST/STATUSTEST/TRAITTEST all PASS; autoplay clean.
+> **No fixed roadmap remains — only open-ended polish** (see the "PHASE 3 IS COMPLETE" note
+> above the WIP block): verify/tune the music audibly; contrast-gamma shader + UI text scale;
+> enemy AI using utility items + the commanding-view LoS; themed-per-biome / `=`-tier-2
+> authored arenas; mid-mission save granularity; a captive/VIP-EXTRACTED win flourish.
+> Harness objective-force hook `SIGHTLINE_OBJ=sabotage|rescue|defend`; new shot hooks
+> `SIGHTLINE_CB`/`SIGHTLINE_BRIGHT`/`SIGHTLINE_TUTORIAL`. Per-feature notes in WIP NOTES below.
 
 Done: items 1 (audio), 2 (juice), 3 (campaign meta-loop), **4 (tactical depth —
 grenades + pods + elevation)**, and **5 (map variety & objectives) is now COMPLETE**:

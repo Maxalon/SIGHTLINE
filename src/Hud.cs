@@ -37,10 +37,48 @@ public static class Hud
         if (g.Phase == Phase.PlayerTurn || g.Phase == Phase.EnemyTurn) DrawRoster(g);
         DrawBottomBar(g);
         DrawTooltip(g);
+        if ((g.Phase == Phase.PlayerTurn || g.Phase == Phase.EnemyTurn) && g.TutorialText != null)
+            DrawTutorial(g);
         DrawBanner(g);
         DrawOverlays(g);
         if (g.Paused) DrawPause(g);
         if (g.EditingTag) DrawTagEditor(g);
+    }
+
+    // Onboarding tutorial callout (3.12): a non-blocking tip card above the action bar.
+    static void DrawTutorial(Game g)
+    {
+        string body = g.TutorialText;
+        int step = g.TutStep + 1, total = Game.TutPrompts.Length;
+        int w = 760, x = Cfg.ScreenW / 2 - w / 2, y = 600, pad = 16;
+        // word-wrap the body at ~size 15
+        var lines = WrapText(body, 15, w - pad * 2);
+        int h = 40 + lines.Count * 20 + 10;
+        var card = new Rectangle(x, y, w, h);
+        Raylib.DrawRectangleRounded(card, 0.08f, 8, Raylib.Fade(Pal.RGBA(10, 16, 24), 0.96f));
+        Raylib.DrawRectangleLinesEx(card, 1.8f, Pal.Accent);
+        Raylib.DrawRectangle(x, y, 5, h, Pal.Accent);
+
+        string head = $"TRAINING  {step}/{total}";
+        Raylib.DrawText(head, x + pad, y + 10, 14, Pal.Accent);
+        int ty = y + 36;
+        foreach (var ln in lines) { Raylib.DrawText(ln, x + pad, ty, 15, Pal.Txt); ty += 20; }
+    }
+
+    // Greedy word-wrap to a pixel width.
+    static System.Collections.Generic.List<string> WrapText(string s, int size, int maxW)
+    {
+        var outl = new System.Collections.Generic.List<string>();
+        var words = s.Split(' ');
+        string cur = "";
+        foreach (var word in words)
+        {
+            string trial = cur.Length == 0 ? word : cur + " " + word;
+            if (Raylib.MeasureText(trial, size) > maxW && cur.Length > 0) { outl.Add(cur); cur = word; }
+            else cur = trial;
+        }
+        if (cur.Length > 0) outl.Add(cur);
+        return outl;
     }
 
     // ---------------- custom tag editor ----------------
