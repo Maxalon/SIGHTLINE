@@ -194,6 +194,10 @@ seeds (mix of WIN/LOSE, no exceptions):
 - **Full-bleed UI (Phase 4.1):** the board fills the frame (Tile 64, ~79% of the
   window, dead margins reclaimed) with the HUD floating over it — screen-anchored
   bottom bar, gradient scrims, and drop-shadowed roster/unit-card panels.
+- **Encounter geometry (Phase 4.2):** sight range 9 (was 12), a staggered mid-field
+  high-cover screen that breaks cross-board sightlines (procedural maps) with one open
+  "risky" lane, and the pod reveal-scatter capped to a single move — so first contact
+  is a deliberate approach, not a turn-1 ambush. Connectivity-guarded.
 - Grid battlefield w/ high+low cover, LoS, 8-dir pathfinding (corner-cut safe).
 - 2-action combat: move, dash (yellow), fire (ends turn), overwatch reaction
   fire (both sides), hunker, reload.
@@ -833,14 +837,25 @@ screenshots, ship compiling code to `main`.
       the HUD is still mostly always-on; *contextual / progressive disclosure* of panels
       is a future polish, as is scaling the unit-figure constants (they're ~12% smaller
       relative to the larger tiles now — still readable, intentionally left simple).
-- [ ] **4.2 Encounter geometry — spacing, density, standoff.** Goal = **standoff
-      distance + meaningful traversal, NOT raw map size** (empty maps = boredom turns).
-      Push enemy spawns further from player spawns; add more **sightline-blocking
-      terrain** so a 12-tile sight line no longer sees the whole board; tune the three
-      knobs (sight range, movement budget vs. map width, the free scatter). Touch
-      `Cfg.GridW/H`, `Mission.SpawnEnemies` placement, `Game.SightRange`, `Maps.cs`.
-      Verify: autoplay clean at the larger size; a soldier can take a full first move
-      without auto-tripping a pod; `SIGHTLINE_SHOT` of the opening.
+- [x] **4.2 Encounter geometry — spacing, density, standoff.** DONE (kept the map at
+      18x11 per "**NOT raw map size**" — the full-bleed 4.1 board already fills the
+      window; bigger = camera/scroll, out of scope). Three levers, all in
+      `Mission.Build` + `Game`: (1) **`Game.SightRange` 12->9** so the squad can creep
+      closer before a pod wakes (pods are always *drawn*, so perfect-info is preserved —
+      only *activation* is delayed). (2) A staggered **mid-field SCREEN of high cover**
+      (cols 7-11, in the procedural generator) that breaks the long cross-board
+      sightlines; no column is fully walled and **row 5 is left as an open "risky direct"
+      lane**, so a soldier can advance into the midfield under cover without auto-tripping
+      a pod (footing!), while the open lane is the deliberate high-risk route. Sprinkles
+      biased a touch toward high cover (LoS-blocking). (3) The free reveal-scatter in
+      `Game.ActivatePod` is **capped to a single move** (was a full `Ai.Plan` dash — the
+      most-criticized "free move on reveal"); an immobile turret now gets none. Plus a
+      `Mission.EnsureConnectivity` safety net (carves a lane if the denser cover ever
+      walls a hostile/objective off — runs for both layout paths). Verified: build 0/0,
+      autoplay x6 clean (no TIMEOUT — connectivity holds), `SIGHTLINE_SHOT` openings show
+      the screen + covered approaches, authored maps (`SIGHTLINE_MAP`) still apply.
+      **Follow-up:** PLAZA/ZIGGURAT authored arenas stay deliberately open (variety); the
+      enemy AI doesn't yet exploit the screen's LoS. Next: 4.3 alert tiers, 4.4 concealment.
 - [ ] **4.3 Alert / awareness tiers (green -> yellow -> red).** Replace binary
       dormant -> instant-scatter with a **suspicious** middle state so being spotted is
       gradual and telegraphed (never a pure gotcha); reconsider/soften the free scatter
@@ -926,7 +941,32 @@ Before stopping:
 
 ### WIP NOTES
 
-> **4.1 FULL-BLEED UI (latest) — first Phase 4 code step, SHIPPED.** Reclaimed the
+> **4.2 ENCOUNTER GEOMETRY (latest) — SHIPPED.** Fixes the turn-1 forced-ambush problem
+> (DESIGN.md §5) while keeping perfect information + the 18x11 full-bleed board (did NOT
+> grow the map — "not raw size"; bigger needs a camera). Three levers:
+> (1) **`Game.SightRange` 12->9** — pods wake on a closer sighting (they're always drawn,
+> so only *activation* is delayed; readability untouched).
+> (2) **Mid-field high-cover screen** in `Mission.Build`'s procedural branch — a staggered
+> band at cols 7-11 (replaced the old 5 `PlaceBlock` central structures) that breaks the
+> long cross-board sightlines. Designed connectivity-safe: no column fully walled, **row 5
+> left open** as the one risky direct lane. So a soldier can advance into the midfield
+> behind cover without auto-tripping a pod (the verify criterion), while the open lane is
+> the deliberate high-risk route. Sprinkle ratio nudged to ~55% high (LoS-blocking).
+> (3) **Capped reveal-scatter** in `Game.ActivatePod`: was the full `Ai.Plan` path (up to a
+> dash) — the criticized "free move on reveal"; now accumulates step cost (ortho 2/diag 3,
+> matching `CostMap`) and stops at one move (`Mobility*2`); an immobile turret (Mobility 0)
+> gets 0. Plus `Mission.EnsureConnectivity` (new): floods from squad[0], carves an L-lane
+> by clearing cover toward the squad for any unreachable hostile/evac/terminal/sabotage
+> tile; runs for BOTH layout paths (authored maps are verified pre-`TryCover`, so this
+> also catches the protective-cover edge case). Gotchas: (a) only HIGH cover + smoke block
+> LoS (low cover/plateaus don't) — the screen is HIGH cover on purpose; (b) all cover
+> blocks movement, hence the connectivity guard; (c) `MoveBudget` has a `Max(1,..)` floor
+> so I cap the scatter on raw `Mobility*2` to keep turrets immobile. Verified: Release 0/0,
+> autoplay x6 clean (no TIMEOUT => connectivity holds across random procedural maps), shot
+> openings show the screen, `SIGHTLINE_MAP=2` (PILLARS) still applies. **Next:** 4.3 alert
+> tiers (green/yellow/red, soften the binary dormant->scatter further), then 4.4 concealment.
+
+> **4.1 FULL-BLEED UI — first Phase 4 code step, SHIPPED.** Reclaimed the
 > ~40% chrome/margin so the board fills the frame. Two files only: **`Util.cs`** (`Cfg.Tile`
 > 56->64, `Cfg.OriginY` 64->40; `BoardW/H` + `OriginX` are derived so they followed) and
 > **`Hud.cs`** (bottom bar decoupled from the board: `barY = Cfg.ScreenH-106` instead of

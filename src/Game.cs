@@ -1110,7 +1110,7 @@ public class Game
     }
 
     // ---------------- activation pods ----------------
-    public const int SightRange = 12;
+    public const int SightRange = 9;   // pod-activation sight (4.2: down from 12 for a deliberate approach)
 
     void CheckPodActivation()
     {
@@ -1155,9 +1155,17 @@ public class Game
             if (!e.Alive || e.Active || e.PodId != podId) continue;
             e.Active = true;
             any = true;
-            // free scatter toward cover/line of fire (move only, no shot)
+            // free scatter toward cover/line of fire (move only, no shot), but 4.2 caps
+            // it to a SINGLE move — no free dash on reveal (an immobile turret gets none).
             var plan = Ai.Plan(this, e);
-            foreach (var (px, py) in plan.Path) Enqueue(new MoveStepAnim(e, px, py), Team.Enemy);
+            int cap = Math.Max(0, e.Mobility) * 2, spent = 0, lx = e.X, ly = e.Y;
+            foreach (var (px, py) in plan.Path)
+            {
+                int step = (px != lx && py != ly) ? 3 : 2;   // diag costs 3, ortho 2 (matches CostMap)
+                if (spent + step > cap) break;
+                spent += step; lx = px; ly = py;
+                Enqueue(new MoveStepAnim(e, px, py), Team.Enemy);
+            }
         }
         if (any)
         {
