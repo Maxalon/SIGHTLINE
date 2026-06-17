@@ -9,14 +9,14 @@ public static class Cfg
 {
     public const int ScreenW = 1280;
     public const int ScreenH = 800;
-    public const int Tile = 56;
+    public const int Tile = 64;                     // full-bleed board (Phase 4.1): bigger tiles reclaim the margin
     public const int GridW = 18;
     public const int GridH = 11;
 
-    public static int BoardW => GridW * Tile;       // 1008
-    public static int BoardH => GridH * Tile;       // 616
-    public static int OriginX => (ScreenW - BoardW) / 2; // 136
-    public const int OriginY = 64;                  // top HUD band
+    public static int BoardW => GridW * Tile;       // 1152
+    public static int BoardH => GridH * Tile;       // 704
+    public static int OriginX => (ScreenW - BoardW) / 2; // 64 (clears the left roster strip)
+    public const int OriginY = 40;                  // board floats near the top; translucent HUD overlays its edges
 }
 
 /// Colour palette + helpers.

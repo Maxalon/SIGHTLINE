@@ -283,7 +283,7 @@ Graded against the pillars/principles above. "Strong" = a genuine strength to pr
 | Decision quality per turn | **Watch** | Are both actions meaningful most turns, or is it often a rote "move then shoot"? Is **overwatch-camping** a quiet dominant strategy? Audit for false choices among perks/classes (different *numbers* vs different *decisions*). |
 | Output-randomness feel | **Watch** | %-to-hit is genre-true but is our biggest rage/save-scum surface. No graze/partial-hit or guaranteed-damage floor yet. Consider mitigation (§3B). |
 | Meta stakes vs. death-spiral | **Watch/Gap** | Wounds (3.1) add bite, but auto-backfill-to-4 keeps a wipe from shrinking strength — *stakes are softened*. The bench/short-handed half is unbuilt. |
-| Screen usage / UI framing | **Gap** | Board is a cropped island; opaque bars eat ~40% of the window. Full-bleed translucent UI is low-risk, high-value (§3E, §5). |
+| Screen usage / UI framing | **Addressed (4.1)** | Was a cropped island; opaque-ish bars ate ~40%. Phase 4.1 shipped a full-bleed board (~79% of the window) with translucent, drop-shadowed floating panels. Progressive disclosure of the HUD is the remaining polish. |
 | Onboarding | **Gap** | None yet (3.12). New players must infer cover/flank/overwatch. |
 | Accessibility | **Gap** | No colorblind palette / text scale / contrast pass yet (3.13). |
 
