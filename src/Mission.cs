@@ -90,14 +90,25 @@ public static class Mission
             // a commanding tier-2 redoubt appears on later missions (sees over high cover)
             if (missionNum >= 4) RaisePlateau(grid, evacSet, Util.RandInt(7, 10), Util.RandInt(3, 6), 2, 2, 2);
 
-            // central structures for sightlines
-            PlaceBlock(grid, occupied, 8, 2, TileType.HighCover, 1, 3);
-            PlaceBlock(grid, occupied, 9, 6, TileType.HighCover, 1, 3);
-            PlaceBlock(grid, occupied, 5, 5, TileType.LowCover, 3, 1);
-            PlaceBlock(grid, occupied, 12, 4, TileType.LowCover, 1, 3);
-            PlaceBlock(grid, occupied, 13, 8, TileType.HighCover, 2, 1);
+            // 4.2 ENCOUNTER GEOMETRY: a staggered mid-field SCREEN of high cover breaks
+            // the long cross-board sightlines, so the squad can advance into the midfield
+            // under cover before tripping a pod (a deliberate approach, not a turn-1
+            // ambush). No single column is ever fully walled and row 5 is left as an open
+            // lane, so the board stays traversable — that lane is the one risky direct route.
+            var screen = new (int x, int y)[]
+            {
+                (7, 1), (7, 2), (7, 3),   (8, 6), (8, 7), (8, 8),
+                (9, 0), (9, 1), (9, 9), (9, 10),   (10, 3), (10, 4), (10, 7), (10, 8),
+                (11, 1), (11, 2),
+            };
+            foreach (var (sx, sy) in screen)
+                if (grid.InBounds(sx, sy) && !occupied.Contains((sx, sy)))
+                { grid.Tiles[sx, sy] = TileType.HighCover; occupied.Add((sx, sy)); }
+            // low cover flanking the open central lane, for cover-fighting on the direct route
+            PlaceBlock(grid, occupied, 6, 5, TileType.LowCover, 1, 1);
+            PlaceBlock(grid, occupied, 12, 5, TileType.LowCover, 1, 1);
 
-            // random crates (a touch more clutter on later missions)
+            // random crates (a touch more clutter on later missions; biased toward LoS-blocking high cover)
             int sprinkles = 14 + Math.Min(6, missionNum);
             int guard = 0;
             while (sprinkles > 0 && guard++ < 500)
@@ -105,7 +116,7 @@ public static class Mission
                 int x = Util.RandInt(3, grid.W - 4);
                 int y = Util.RandInt(0, grid.H - 1);
                 if (occupied.Contains((x, y)) || grid.Tiles[x, y] != TileType.Floor) continue;
-                grid.Tiles[x, y] = Util.Roll(55) ? TileType.LowCover : TileType.HighCover;
+                grid.Tiles[x, y] = Util.Roll(45) ? TileType.LowCover : TileType.HighCover;
                 occupied.Add((x, y));
                 sprinkles--;
             }
@@ -114,6 +125,10 @@ public static class Mission
         // protective cover beside each soldier and hostile (both layout paths)
         foreach (var u in players) TryCover(grid, occupied, u.X + 1, u.Y, TileType.LowCover);
         foreach (var u in enemies) TryCover(grid, occupied, u.X - 1, u.Y, TileType.HighCover);
+
+        // 4.2 safety net: the denser mid-field cover (+ sprinkles + protective cover) must
+        // never wall a hostile or objective off from the squad — carve a lane if it did.
+        EnsureConnectivity(grid, players, enemies, evacSet, terminal, sabotage);
 
         grid.ResetCoverHp();   // charge every cover tile to full now the terrain is final (3.6)
 
@@ -284,6 +299,43 @@ public static class Mission
             : MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 56 + bump, 8, x, y);
         e.Aim = Math.Min(82, e.Aim);
         return e;
+    }
+
+    /// Procedural-path safety net: every hostile / objective tile must stay reachable
+    /// from the squad over walkable terrain. If a generated structure walled one off,
+    /// carve an L-shaped lane back toward the squad by clearing the blocking cover. Runs
+    /// universally (authored maps are pre-verified, but the protective cover is added
+    /// after that check, so this catches any edge case for both paths).
+    static void EnsureConnectivity(Grid g, List<Unit> players, List<Unit> enemies,
+                                   HashSet<(int, int)> evac, (int x, int y)? terminal, List<(int x, int y)> sabotage)
+    {
+        if (players.Count == 0) return;
+        var from = players[0];
+        for (int attempt = 0; attempt < 8; attempt++)
+        {
+            var cost = g.CostMap(from.X, from.Y, (x, y) => false, out _, 9999);
+            bool Stuck(int x, int y) => g.InBounds(x, y) && cost[x, y] < 0;
+
+            var stuck = new List<(int x, int y)>();
+            foreach (var e in enemies) if (Stuck(e.X, e.Y)) stuck.Add((e.X, e.Y));
+            foreach (var t in evac) if (Stuck(t.Item1, t.Item2)) stuck.Add(t);
+            if (terminal.HasValue && Stuck(terminal.Value.x, terminal.Value.y)) stuck.Add(terminal.Value);
+            if (sabotage != null) foreach (var s in sabotage) if (Stuck(s.x, s.y)) stuck.Add(s);
+            if (stuck.Count == 0) return;
+
+            // carve toward the squad until we meet ground that was already reachable
+            foreach (var (tx, ty) in stuck)
+            {
+                int cx = tx, cy = ty, guard = 0;
+                while (g.InBounds(cx, cy) && cost[cx, cy] < 0 && guard++ < g.W + g.H)
+                {
+                    if (g.Tiles[cx, cy] != TileType.Floor) g.Tiles[cx, cy] = TileType.Floor;
+                    if (cx != from.X) cx += Math.Sign(from.X - cx);
+                    else if (cy != from.Y) cy += Math.Sign(from.Y - cy);
+                    else break;
+                }
+            }
+        }
     }
 
     static void PlaceBlock(Grid g, HashSet<(int, int)> occ, int x, int y, TileType t, int w, int h)
