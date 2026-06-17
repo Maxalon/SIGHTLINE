@@ -212,7 +212,8 @@ seeds (mix of WIN/LOSE, no exceptions):
 - **Enemy variety:** Grunt / Scout / Bruiser / Medic plus **Sniper** (kites to range),
   **Turret** (immobile overwatch nest), **Berserker** (tanky shotgun rusher), **Drone**
   (WASP — hovers, ignores cover/elevation, beelines), **Shield** (AEGIS — full frontal
-  cover, must be flanked or hit from above), **Sapper** (BREACH — demolishes the squad's
+  cover that re-faces the nearest soldier each turn, must be flanked or hit from above),
+  **Sapper** (BREACH — demolishes the squad's
   cover), a recurring **mid-boss** (BREAKER m3 / WARDEN m5), and a capstone **Elite boss**
   (WARLORD) on the final mission with 2
   grenades + a one-time low-HP RAGE. Distinct AI temperaments in `Ai.Plan`; distinct glyphs.
@@ -666,10 +667,12 @@ code to `main`.
             (`Combat.ComputeOdds` `ignoresCover` folds into `seesOver`); AI beelines
             (advW 3.0 + cancels its own cover value). Renderer hovers it above its
             shadow (diamond glyph). Spawns mission 2+.
-      - [x] **SHIELD (AEGIS).** Cls `SHIELD`, `Unit.ShieldDx/Dy` (faces west toward the
-            squad); `Combat.ShieldedFrom` gives **full cover (lvl 2) from the barred
-            side regardless of terrain** — flank it, or bypass with a DRONE / commanding
-            tier-2 height. Renderer draws a frontal barrier arc. Spawns mission 3+.
+      - [x] **SHIELD (AEGIS).** Cls `SHIELD`, `Unit.ShieldDx/Dy`; `Game.FaceShields`
+            (each enemy turn) re-faces the barrier toward the **nearest soldier**, so the
+            squad must keep moving to flank it. `Combat.ShieldedFrom` gives **full cover
+            (lvl 2) from the barred side regardless of terrain** — flank it, or bypass with
+            a DRONE / commanding tier-2 height. Renderer draws a frontal barrier arc.
+            Spawns mission 3+.
       - [x] **Mid-boss.** A named `ELITE` band on missions 3 (BREAKER) & 5 (WARDEN),
             lighter than the final WARLORD but with the same rage; renderer + rage banner
             now use `u.Name` (not a hardcoded "WARLORD"). Verify: `SIGHTLINE_COMBATTEST`
