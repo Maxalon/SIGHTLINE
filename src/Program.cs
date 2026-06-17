@@ -118,6 +118,7 @@ public static class Program
             Display.UpdateMouse();
             if (helpShot) Raylib.SetMousePosition(592, 740);   // park cursor on the ability button
             game.Update(dt);
+            Audio.UpdateMusic(dt);
 
             Display.RenderFrame(() =>
             {

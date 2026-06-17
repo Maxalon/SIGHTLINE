@@ -186,7 +186,9 @@ seeds (mix of WIN/LOSE, no exceptions):
 - Enemy AI: seeks cover + line of fire, advances when blind, flanks, finishes.
 - Juice: move/shot anims, muzzle+tracer, particles, floating text, shake,
   selection ring, cover shields, turn banner.
-- **Procedural audio** (src/Audio.cs) for all actions; mute = M.
+- **Procedural audio** (src/Audio.cs) for all actions; mute = M. Plus a **procedural
+  music** layer — a looping ambient bed + a combat layer that crossfades by intensity
+  (enemy turn / live hostiles). Blind-shipped (no audio device in the sandbox).
 - **Game-feel pass:** hit-stop on impacts/kills, camera zoom-punch on kills,
   weapon recoil + target knockback.
 - **Campaign meta-loop:** 6 escalating missions, one persistent squad, kills→
@@ -487,9 +489,10 @@ the player meaningful long-game decisions. Ordered by impact:
       +2, persisted, 12). `Game.CanBuy/DoPurchase/HandleShopClick` + `Game.ShopName/
       Desc/Cost` (the shop card auto-sizes to the item count); autopilot buys a medkit
       then proceeds (`AutoShop`). Hook `SIGHTLINE_SHOP`.
-- [ ] **D. Procedural music + ambience.** Audio is SFX-only. A synthesised, layered
-      ambient/combat track (allowed: procedural only) would lift "feels good"
-      enormously. Build on `src/Audio.cs` (it already synth's PCM in memory).
+- [x] **D. Procedural music + ambience.** DONE (blind ship) — see Phase 3 item 3.10:
+      a synthesised looping ambient bed + a combat layer that crossfades by intensity
+      (`Audio.BuildAmbient`/`BuildCombat`/`UpdateMusic`, `Game.MusicIntensity`). Built but
+      not heard in this sandbox (no audio device); the human should verify + tune.
 - [x] **E. Run persistence (save/load).** DONE. `src/SaveGame.cs` serialises the
       `Run` (squad incl. perks/weapon/rank/HP + mission # + the active deployment
       card) to the OS user-data dir (`ApplicationData/Sightline/save.json`, NOT the
@@ -718,12 +721,19 @@ code to `main`.
 
 ### Tier 4 — feel, audio & accessibility
 
-- [ ] **3.10 Procedural music & ambience (roadmap item D).** Build on `src/Audio.cs`
-      (it already synthesises PCM in memory): a looping ambient bed + a combat layer
-      that ducks in on the enemy turn / when pods are active; crossfade; respect mute
-      (M). **MUST be built where audio is audible — `InitAudioDevice` fails in this
-      sandbox**, so it's a blind ship here. Verify: manual (human) — document what to
-      listen for; keep it crash-safe behind `IsAudioDeviceReady`.
+- [x] **3.10 Procedural music & ambience (roadmap item D). DONE (blind ship).** Two
+      synthesised looping beds in `src/Audio.cs`: `BuildAmbient` (an A-minor sine pad with
+      slow LFO tremolo) and `BuildCombat` (a tenser pad + a 2 Hz driving sub-bass pulse),
+      each an 8-second buffer of **integer-Hz tones over an integer-second loop so it loops
+      seamlessly**. Loaded via `LoadMusicStreamFromMemory(".wav", …)`, `Looping=true`, both
+      played at volume 0. `Audio.UpdateMusic(dt)` (called each frame in the `Program` loop)
+      pumps `UpdateMusicStream` and crossfades ambient↔combat toward `Audio.SetMusicIntensity`
+      — fed by `Game.MusicIntensity()` (1 on the enemy turn, 0.5 while live hostiles are
+      about, 0.15 when clear, 0 in menus). Mute (**M**) zeroes both via `Enabled`. All gated
+      behind `_music`/`IsAudioDeviceReady`, so it's a **no-op headless** (screenshots/autoplay
+      unchanged — verified crash-safe). **NOT heard in this sandbox** (no audio device) — the
+      human should verify audibly and tune the `Build*`/volume recipes. Tuning lives in
+      `BuildAmbient`/`BuildCombat` (freqs/vols) + the `ambT`/`combT` mix in `UpdateMusic`.
 
 - [x] **3.11 Game-feel + death feedback.** DONE. **KIA stamp:** a fallen soldier
       (`Game.KillUnit`, player non-VIP) gets a prominent `KIA  NAME "NICK"` stamp
@@ -760,7 +770,23 @@ Before stopping:
 
 ### WIP NOTES
 
-> **3.8 DEFEND OBJECTIVE (latest, completes 3.8).** `Objective.Defend`: survive
+> **3.10 PROCEDURAL MUSIC (latest, blind ship — Phase 2 D too).** `src/Audio.cs` gained a
+> looping music layer alongside the SFX. `BuildAmbient` (A-minor sine pad + slow LFO
+> tremolo) + `BuildCombat` (tenser pad + 2 Hz sub-bass pulse), each an 8-second buffer
+> using **integer-Hz tones over an integer-second loop → seamless loop** (sin is 0 at both
+> ends; LFO/pulse periods divide the loop). `InitMusic` (end of `Audio.Init`, so it's
+> skipped when `!_ready`) loads both via `LoadMusicStreamFromMemory(".wav", …)`, sets
+> `Looping=true`, `PlayMusicStream` both at volume 0, sets `_music`. `Audio.UpdateMusic(dt)`
+> (new call in the `Program` window loop after `game.Update`) pumps `UpdateMusicStream` +
+> lerps ambient/combat volumes toward targets from `_intensity`. `Game.MusicIntensity()`
+> (called in `Game.Update` → `Audio.SetMusicIntensity`): 1 enemy turn / 0.5 live hostiles /
+> 0.15 clear / 0 menus. Mute (M) → `Enabled=false` → both volumes 0. Unloaded in `Shutdown`.
+> Gated behind `_music` so it's a **no-op with no audio device** (headless screenshots/
+> autoplay unchanged — verified). **BLIND SHIP: not heard here.** TODO for whoever has audio:
+> confirm it loops without clicks + isn't too loud (master is 0.6; music targets ~0.5/0.62),
+> tune `Build*` recipes. Could add per-phase stingers / a win/lose musical resolve.
+
+> **3.8 DEFEND OBJECTIVE (completes 3.8).** `Objective.Defend`: survive
 > `Game.DefendTurns` (8) player turns vs mid-mission waves. `CheckEnd` Defend branch wins
 > when `_turnCount > DefendTurns` (a squad wipe still loses via the alivePlayers==0 guard).
 > `Game.SpawnDefendWave()` is called at the TOP of `EndPlayerTurn` (before the per-enemy
