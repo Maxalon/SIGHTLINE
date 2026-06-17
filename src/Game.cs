@@ -1689,6 +1689,22 @@ public class Game
         if (added > 0) { Fx.PopText(Util.TileCenter(Grid.W - 2, 0) + new Vector2(0, -10), "WAVE", Pal.Foe, 20f); Audio.Play("turn"); }
     }
 
+    /// AEGIS shields re-face toward the nearest soldier each enemy turn, so the squad
+    /// must keep moving to flank the barrier rather than parking on one open side.
+    void FaceShields()
+    {
+        foreach (var e in Enemies)
+        {
+            if (!e.Alive || e.Cls != "SHIELD") continue;
+            var p = AlivePlayers().OrderBy(q => Util.ChebyDist(e.X, e.Y, q.X, q.Y)).FirstOrDefault();
+            if (p == null) continue;
+            int dx = p.X - e.X, dy = p.Y - e.Y;
+            if (Math.Abs(dx) >= Math.Abs(dy)) { e.ShieldDx = Math.Sign(dx); e.ShieldDy = 0; }
+            else { e.ShieldDx = 0; e.ShieldDy = Math.Sign(dy); }
+            if (e.ShieldDx == 0 && e.ShieldDy == 0) e.ShieldDx = -1;   // degenerate (same tile): keep a facing
+        }
+    }
+
     void EndPlayerTurn()
     {
         // keep the tutorial progressing even if the player skipped a prompted action
@@ -1699,6 +1715,7 @@ public class Game
         MoveCost = null;
         Phase = Phase.EnemyTurn;
         if (Objective == Objective.Defend) SpawnDefendWave();    // reinforcements assault the holdout
+        FaceShields();                                           // AEGIS turns its barrier toward the squad
         foreach (var e in Enemies) if (e.Alive) { e.BeginTurn(); TickStatuses(e); }
         _aiUnits = AliveEnemies().Where(e => e.Active).ToList();  // dormant pods don't act
         _aiIdx = 0;
