@@ -163,6 +163,7 @@ public static class Hud
             bool spent = g.Phase == Phase.PlayerTurn && !u.CanAct;
             float a = spent ? 0.5f : 1f;
 
+            PanelShadow(r, a);
             Raylib.DrawRectangleRounded(r, 0.16f, 6, Raylib.Fade(sel ? Pal.RGBA(26, 36, 48) : Pal.Panel, a));
             Raylib.DrawRectangleLinesEx(r, 1.5f, Raylib.Fade(sel ? Pal.Accent : Pal.PanelBd, a));
             Raylib.DrawRectangle((int)r.X, (int)r.Y, 3, (int)r.Height, Raylib.Fade(sel ? Pal.Accent : Pal.Friend, a));
@@ -273,9 +274,10 @@ public static class Hud
     // ---------------- bottom bar ----------------
     static void DrawBottomBar(Game g)
     {
-        int barY = Cfg.OriginY + Cfg.BoardH + 14; // ~694
-        Raylib.DrawRectangleGradientV(0, Cfg.ScreenH - 120, Cfg.ScreenW, 120,
-                                      Pal.RGBA(8, 12, 17, 0), Pal.RGBA(8, 12, 17, 235));
+        int barY = Cfg.ScreenH - 106; // floating panel anchored to the screen bottom (decoupled from the board)
+        // a taller scrim so the board reading under the floating bar stays legible
+        Raylib.DrawRectangleGradientV(0, Cfg.ScreenH - 150, Cfg.ScreenW, 150,
+                                      Pal.RGBA(8, 12, 17, 0), Pal.RGBA(8, 12, 17, 238));
 
         var u = g.Selected;
         if (u != null && u.Team == Team.Player)
@@ -292,6 +294,7 @@ public static class Hud
     static void DrawUnitCard(Unit u, int x, int y)
     {
         var card = new Rectangle(x, y, 250, 92);
+        PanelShadow(card, 1f, 0.12f);
         Raylib.DrawRectangleRounded(card, 0.12f, 8, Pal.Panel);
         Raylib.DrawRectangleLinesEx(card, 1f, Pal.PanelBd);
         Raylib.DrawRectangle((int)card.X, (int)card.Y, 3, (int)card.Height, Pal.Friend);
@@ -960,6 +963,13 @@ public static class Hud
     }
 
     // ---------------- helpers ----------------
+    // Soft drop-shadow so a floating panel reads as hovering above the board terrain.
+    static void PanelShadow(Rectangle r, float alpha = 1f, float round = 0.16f)
+    {
+        Raylib.DrawRectangleRounded(new Rectangle(r.X + 3, r.Y + 6, r.Width, r.Height), round, 6,
+                                    Raylib.Fade(Pal.RGBA(0, 0, 0), 0.42f * alpha));
+    }
+
     public static void DrawButtonRect(Rectangle r, string label, string key, bool enabled, bool selected, Color accent)
     {
         bool hover = enabled && Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), r);

@@ -191,6 +191,9 @@ docs/screenshot.png    README image
 ## Current state — DONE ✅
 Playable vertical slice, builds clean (0 warn/0 err), autoplay-verified across
 seeds (mix of WIN/LOSE, no exceptions):
+- **Full-bleed UI (Phase 4.1):** the board fills the frame (Tile 64, ~79% of the
+  window, dead margins reclaimed) with the HUD floating over it — screen-anchored
+  bottom bar, gradient scrims, and drop-shadowed roster/unit-card panels.
 - Grid battlefield w/ high+low cover, LoS, 8-dir pathfinding (corner-cut safe).
 - 2-action combat: move, dash (yellow), fire (ends turn), overwatch reaction
   fire (both sides), hunker, reload.
@@ -815,13 +818,21 @@ screenshots, ship compiling code to `main`.
 > be prototyped behind a flag only if the items below prove insufficient (DESIGN.md §5).
 > Ordered by leverage and risk — do the safe, high-value UI win first.
 
-- [ ] **4.1 Full-bleed, translucent, non-cropping UI.** Today the 1008x616 board is a
-      cropped island in the 1280x800 window with opaque top/bottom bars (~40% of the
-      screen is chrome/margin). Make the board full-bleed and float **translucent,
-      contextual** HUD panels over it (scrim/drop-shadow so they stay legible over busy
-      terrain). Lowest risk, high "world presence" payoff; independent of the rest.
-      Touch `Cfg` layout consts, `Renderer` board rect, `Hud` panel draws. Verify:
-      `SIGHTLINE_SHOT` screenshots at several states; readability over each biome.
+- [x] **4.1 Full-bleed, translucent, non-cropping UI.** DONE. The board was a 1008x616
+      cropped island (~60% of the window) framed by opaque-ish bars. Bumped `Cfg.Tile`
+      56->64 (board now 1152x704, ~79% of the screen) + `Cfg.OriginY` 64->40, so the play
+      area fills the frame and the dead margins (esp. the empty right strip) are reclaimed.
+      Tile 64 is chosen so the left roster strip still just clears the leftmost player
+      column. The HUD now **floats over the board**: the bottom bar is screen-anchored
+      (`barY = ScreenH-106`, decoupled from the board) with a taller scrim, and the
+      floating panels (roster chips + unit card) get a soft drop-shadow (`Hud.PanelShadow`)
+      so they read as hovering over busy terrain. Everything board-side moved coherently
+      because all tile<->px math routes through `Cfg`/`Util` (no other code touched).
+      Verified: build 0/0, autoplay clean (no exceptions/TIMEOUT), screenshots across
+      Eliminate/Extract, biomes, and the pause/shop/campaign-map overlays. **Follow-up:**
+      the HUD is still mostly always-on; *contextual / progressive disclosure* of panels
+      is a future polish, as is scaling the unit-figure constants (they're ~12% smaller
+      relative to the larger tiles now — still readable, intentionally left simple).
 - [ ] **4.2 Encounter geometry — spacing, density, standoff.** Goal = **standoff
       distance + meaningful traversal, NOT raw map size** (empty maps = boredom turns).
       Push enemy spawns further from player spawns; add more **sightline-blocking
@@ -915,7 +926,30 @@ Before stopping:
 
 ### WIP NOTES
 
-> **DESIGN SESSION pt.2 (latest) — asset policy + visual identity, DOCS ONLY.** The human
+> **4.1 FULL-BLEED UI (latest) — first Phase 4 code step, SHIPPED.** Reclaimed the
+> ~40% chrome/margin so the board fills the frame. Two files only: **`Util.cs`** (`Cfg.Tile`
+> 56->64, `Cfg.OriginY` 64->40; `BoardW/H` + `OriginX` are derived so they followed) and
+> **`Hud.cs`** (bottom bar decoupled from the board: `barY = Cfg.ScreenH-106` instead of
+> `OriginY+BoardH+14`, taller bottom scrim `ScreenH-150..ScreenH`; new `Hud.PanelShadow`
+> drop-shadow behind the roster chips + unit card so they read as floating). NO Game/Renderer
+> code needed changing — every tile<->px conversion already routes through `Cfg`/`Util`
+> (TileCenter/TileRect/ScreenToTile), the camera uses `BoardCenter`, and HUD hit-testing
+> uses stored Hud rects (checked before the board, so floating panels keep click priority).
+> Tile 64 is deliberate: at OriginX=64 the left roster (x8..140) covers only board col0
+> (no spawns) and just grazes col1, so player units stay clear. Gotchas / things I checked:
+> (a) player spawns are rows 2/4/5/7/9 + cols 1-2 — all clear of the top (y40) & bottom
+> (y694) HUD bands; only board row 10 + the bottom-left corner sit under the (translucent)
+> bottom HUD, and nothing spawns there. (b) `Program.cs` `helpShot` parks the cursor at
+> (592,740) — still on the ability button (button row unchanged at y720..760), no edit
+> needed. (c) figure constants in `Renderer.DrawUnit` are still absolute px, so units are
+> ~12% smaller *relative* to the bigger tiles — looks fine/cleaner, left as-is on purpose.
+> Verified: Release 0/0, autoplay x3 clean (LOSE, no exceptions/TIMEOUT — expected), shots
+> of Eliminate/Extract/biomes/pause/shop/campaign-map all read well. **Next Phase 4 step:**
+> 4.2 (encounter geometry: spawn standoff + sightline-blocking terrain — that one DOES touch
+> gameplay/`Mission`/`Maps`), then 4.3 alert tiers, 4.4 concealment. Phase 5 (post-FX shader,
+> font) is independent and can interleave.
+
+> **DESIGN SESSION pt.2 — asset policy + visual identity, DOCS ONLY.** The human
 > clarified the **art policy**: the old "no external art/audio assets" overstated it. Real
 > rule (now in the pillars block + DESIGN.md §3.H): **no *hand-made/human-authored*
 > assets**, but **generated assets ARE allowed** — **procedural/in-engine/shader first, AI
