@@ -34,6 +34,12 @@ are. **Keep it updated** — when you finish work, tick the roadmap and refresh
    (cover/flank/overwatch decisions), and — the current frontier — run-to-run
    (mission-to-mission squad progression). See ROADMAP.
 
+> **Design rationale lives in [`docs/DESIGN.md`](docs/DESIGN.md)** — the *why* behind
+> these pillars: researched game-design principles, a candid self-assessment, and the
+> reasoned encounter-design decision (incl. why fog of war is **deferred, not
+> rejected**). Read it before any change that touches the game's **feel** or
+> **information design**.
+
 ---
 
 ## Hard constraints / ground rules
@@ -749,6 +755,64 @@ the death-consequence feedback), one verified PR per item, merge to `main` yours
 
 ---
 
+## ROADMAP — PHASE 4 — encounter design & information feel (specced)
+
+> **Design rationale + the fog-of-war decision: see [`docs/DESIGN.md`](docs/DESIGN.md)
+> §5-6.** Phase 1-3 made the game wide and juicy; a research pass into design
+> fundamentals found the **weakest link is the encounter *opening*** — first contact is
+> an accident, not a choice. With an 18-wide map, ~8-tile moves, and a 12-tile pod sight
+> range, almost any advance trips a pod on turn 1 (a *flow*/anxiety + *telegraphing*/
+> gotcha violation). Phase 4 fixes that **while staying perfect-information** (keep
+> threat preview, %-to-hit, full-board readability). **Fog of war + a restrictive camera
+> is deliberately DEFERRED** — that's an identity pivot toward a recon-survival game, to
+> be prototyped behind a flag only if the items below prove insufficient (DESIGN.md §5).
+> Ordered by leverage and risk — do the safe, high-value UI win first.
+
+- [ ] **4.1 Full-bleed, translucent, non-cropping UI.** Today the 1008x616 board is a
+      cropped island in the 1280x800 window with opaque top/bottom bars (~40% of the
+      screen is chrome/margin). Make the board full-bleed and float **translucent,
+      contextual** HUD panels over it (scrim/drop-shadow so they stay legible over busy
+      terrain). Lowest risk, high "world presence" payoff; independent of the rest.
+      Touch `Cfg` layout consts, `Renderer` board rect, `Hud` panel draws. Verify:
+      `SIGHTLINE_SHOT` screenshots at several states; readability over each biome.
+- [ ] **4.2 Encounter geometry — spacing, density, standoff.** Goal = **standoff
+      distance + meaningful traversal, NOT raw map size** (empty maps = boredom turns).
+      Push enemy spawns further from player spawns; add more **sightline-blocking
+      terrain** so a 12-tile sight line no longer sees the whole board; tune the three
+      knobs (sight range, movement budget vs. map width, the free scatter). Touch
+      `Cfg.GridW/H`, `Mission.SpawnEnemies` placement, `Game.SightRange`, `Maps.cs`.
+      Verify: autoplay clean at the larger size; a soldier can take a full first move
+      without auto-tripping a pod; `SIGHTLINE_SHOT` of the opening.
+- [ ] **4.3 Alert / awareness tiers (green -> yellow -> red).** Replace binary
+      dormant -> instant-scatter with a **suspicious** middle state so being spotted is
+      gradual and telegraphed (never a pure gotcha); reconsider/soften the free scatter
+      on activation (the most-criticized part of pod design). Touch the pod/`Unit.Active`
+      state -> a small alert enum, `Game.CheckPodActivation`/`ActivatePod`, renderer
+      glyph states. Verify: `SIGHTLINE_WAKE`-style shot of each tier; autoplay clean.
+- [ ] **4.4 Concealment + ambush (the marquee mechanic).** Squad starts **concealed**;
+      while concealed it repositions/scouts freely and **the player chooses when to break
+      stealth and engage**; springing the ambush pays off (no overwatch aim penalty,
+      enemies caught out of cover, only a partial enemy scatter). Converts first contact
+      from accident to **rewarded choice** — the "find your footing" fantasy, board still
+      fully visible. Pairs with 4.3 (breaking concealment = going red). New per-unit/Run
+      concealment state; reuse the overwatch/ambush shot path. Verify: a self-test of the
+      conceal/break rules + `SIGHTLINE_*` shot + autoplay (autopilot breaks deliberately).
+- [ ] **4.5 (DEFERRED — flagged prototype only) Fog of war + soldier-focused auto-cam.**
+      Do NOT build unless 4.1-4.4 ship and playtests still want the recon-survival genre.
+      If attempted: a visibility mask behind a flag, on the larger maps, with strong
+      auto-framing (snap-to-selected, auto-pan-to-action). Judge on one question: is
+      partial-info SIGHTLINE *more fun* than full-info, knowing it costs threat-preview +
+      readability? See DESIGN.md §5.
+
+Supporting / any-time (now grounded by DESIGN.md §3-4): output-randomness mitigation
+(graze/partial hit, guaranteed-damage floor, many small rolls — DESIGN.md §3B); audit
+for a dominant overwatch-camp strategy + false-choice perks (§3A/§4); the bench /
+deploy-short-handed half of attrition so a wipe actually shrinks strength (§3F, ties to
+3.1). The Phase 3 Tier-4 items (3.10 music, 3.12 tutorial, 3.13 accessibility) still
+stand and are reinforced by DESIGN.md §3D/E/G.
+
+---
+
 ## Handoff protocol (when context gets heavy)
 You judge when context rot risks quality (don't wait for the 1M hard limit).
 Before stopping:
@@ -760,7 +824,27 @@ Before stopping:
 
 ### WIP NOTES
 
-> **3.8 DEFEND OBJECTIVE (latest, completes 3.8).** `Objective.Defend`: survive
+> **DESIGN SESSION (latest) — DOCS ONLY, no code.** The human asked for an educated,
+> deliberate look at the game's *principles & feel* (not more features). Ran a research
+> pass into game-design fundamentals (MDA; game feel/juice — Swink/Vlambeer; Sid Meier
+> "interesting decisions"; input vs output randomness; flow/difficulty; UX/readability +
+> affordances; enemy telegraphing; roguelike meta-loops; onboarding) and wrote it up as
+> **[`docs/DESIGN.md`](docs/DESIGN.md)** — a *rationale/decision* contract complementing
+> CLAUDE.md's *build/continuity* contract: sharpened pillars (added **Reads clearly** +
+> **Stakes that bite**), a principles library with **Do/Don't**, an **honest
+> self-scorecard**, and §5 the **information-design decision**. Key finding (validated by
+> the code's own numbers): the **encounter *opening* is the weakest link** — 18-wide map
+> + ~8-tile moves + 12-tile pod sight range => almost any advance trips a pod on turn 1
+> (anxiety + gotcha). Decision: fix it **while staying perfect-information** via full-bleed
+> UI + spacing/density + alert tiers + **XCOM2-style concealment** (DESIGN.md §5 Option 3);
+> **fog of war + restrictive camera DEFERRED** (identity pivot; flag-prototype only if
+> concealment proves insufficient). Specced as **ROADMAP — PHASE 4** above (4.1 UI -> 4.2
+> geometry -> 4.3 alert tiers -> 4.4 concealment -> 4.5 deferred fog). **No source files
+> changed this session.** Next session: start **4.1** (full-bleed UI — safe, high value),
+> then 4.2/4.3, then 4.4. (This was a design/planning pass per the human's instruction;
+> nothing to build-verify — `main`/the harness are untouched.)
+
+> **3.8 DEFEND OBJECTIVE (completes 3.8).** `Objective.Defend`: survive
 > `Game.DefendTurns` (8) player turns vs mid-mission waves. `CheckEnd` Defend branch wins
 > when `_turnCount > DefendTurns` (a squad wipe still loses via the alivePlayers==0 guard).
 > `Game.SpawnDefendWave()` is called at the TOP of `EndPlayerTurn` (before the per-enemy
