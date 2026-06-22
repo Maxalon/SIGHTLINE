@@ -126,6 +126,29 @@ public static class Ai
             if (cover.Flanked) score -= 25;
             score -= actionsToReach * 6;                         // prefer cheaper moves slightly
 
+            // ELEVATION EXPLOITATION: when this tile gives a height advantage over the best
+            // target, reward it by how much the shot quality actually improves. This captures
+            // the HighGroundAim/Crit bonus AND the sees-over-low/high-cover payoff — so enemies
+            // specifically prefer height tiles that unlock a meaningfully better shot, not just
+            // any plateau. Gate on shoot != null so blind-advance (no target in sight) falls back
+            // to the flat HeightAt*14 bonus above. Cap the delta bonus so it never overrides the
+            // cover+advance fundamentals; scale by archetype so snipers love it, berserkers don't.
+            if (shoot != null && e.Cls != "DRONE")   // drone ignores cover/elevation; no benefit
+            {
+                var oddsHere = OddsFrom(g, e, tx, ty, shoot);
+                var oddsFrom = OddsFrom(g, e, e.X, e.Y, shoot);  // odds from the current standing spot
+                int hitDelta  = oddsHere.HitChance  - oddsFrom.HitChance;
+                int critDelta = oddsHere.CritChance - oddsFrom.CritChance;
+                // Combined shot-quality delta: hit improvement weighted more than crit.
+                float qdelta = hitDelta * 0.5f + critDelta * 0.25f;
+                // Per-archetype multiplier: snipers/elites care most, berserkers/sappers least.
+                float elevMult = (e.Cls == "SNIPER" || e.Cls == "ELITE") ? 1.4f
+                               : (e.Cls == "BERSERKER")                  ? 0.3f
+                               : (e.Cls == "SAPPER")                     ? 0.2f
+                               :                                            0.8f;   // grunt/scout/medic/shield
+                score += Util.Clamp(qdelta * elevMult, -10f, 30f);   // cap: bonus, not override
+            }
+
             // archetype movement temperament
             if (e.Cls == "SNIPER")                               // kite: hold distance, love height
             {

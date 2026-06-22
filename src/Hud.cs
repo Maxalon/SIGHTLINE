@@ -383,9 +383,209 @@ public static class Hud
 
         ActionButtons = btns.ToArray();
         foreach (var b in ActionButtons)
-            DrawButtonRect(b.Rect, b.Label, b.Key, b.Enabled, b.Selected, b.Accent);
+            DrawActionButton(b);
 
         DrawActionHelp(g);
+    }
+
+    /// Draw one action button: background + border via DrawButtonRect, then overlay a
+    /// small procedural icon in the left quarter of the button (14px zone) that uses the
+    /// same text color so enabled/disabled/selected states and colorblind mode all work.
+    static void DrawActionButton(UiButton b)
+    {
+        // First draw the standard background + border.  We still use DrawButtonRect for
+        // the chrome; the label text is re-drawn below shifted right by the icon width.
+        var r = b.Rect;
+        bool enabled = b.Enabled;
+        bool selected = b.Selected;
+        string label = b.Label;
+        string key   = b.Key;
+        Color accent = b.Accent;
+
+        bool hover = enabled && Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), r);
+        Color bg = selected ? Pal.RGBA(40, 34, 12) : (hover ? Pal.RGBA(22, 32, 44) : Pal.Panel);
+        Raylib.DrawRectangleRounded(r, 0.22f, 6, Raylib.Fade(bg, enabled ? 1f : 0.4f));
+        Color bd = selected ? Pal.Accent : (hover ? accent : Pal.PanelBd);
+        Raylib.DrawRectangleLinesEx(r, 1.5f, Raylib.Fade(bd, enabled ? 1f : 0.35f));
+
+        // Text color (same as DrawButtonRect).
+        Color tc = selected ? Pal.Accent : (enabled ? Pal.Txt : Pal.TxtDim);
+        float a = enabled ? 1f : 0.5f;
+        Color ic = Raylib.Fade(tc, a);   // icon color — tracks text so CB / disabled states work
+
+        // Icon zone: left 18px of the button interior, vertically centred.
+        float ix = r.X + 9f;
+        float iy = r.Y + r.Height / 2f;
+
+        DrawActionIcon(b.Id, ix, iy, ic);
+
+        // Label + key: shifted right to clear the icon zone (left 18px).
+        int fs = 16;
+        int lw = (int)Raylib.MeasureTextEx(Cfg.Font, label, fs, 1f).X;
+        int kw = string.IsNullOrEmpty(key) ? 0 : (int)Raylib.MeasureTextEx(Cfg.Font, key, 12, 1f).X + 8;
+        // Available width after removing the icon zone (left 18px) and right padding (6px).
+        int avail  = (int)r.Width - 18 - 6;
+        int startX = (int)(r.X + 18 + avail / 2 - (lw + kw) / 2);
+        int ty     = (int)(r.Y + r.Height / 2 - fs / 2);
+        Raylib.DrawTextEx(Cfg.Font, label, new Vector2(startX, ty), fs, 1f, Raylib.Fade(tc, a));
+        if (!string.IsNullOrEmpty(key))
+        {
+            int keyX = startX + lw + 8;
+            var kr = new Rectangle(keyX, r.Y + r.Height / 2 - 8, (int)Raylib.MeasureTextEx(Cfg.Font, key, 12, 1f).X + 6, 16);
+            Raylib.DrawRectangleLinesEx(kr, 1f, Raylib.Fade(tc, 0.4f));
+            Raylib.DrawTextEx(Cfg.Font, key, new Vector2(keyX + 3, (int)(r.Y + r.Height / 2 - 6)), 12, 1f, Raylib.Fade(tc, 0.7f));
+        }
+    }
+
+    /// Draw a small (~12-14px) procedural icon centred at (cx, cy) in color ic.
+    /// Each icon is made of 2D primitives (lines, polys, circles, rects) — no textures.
+    /// Designs:
+    ///   shoot    — a right-pointing chevron (bullet tip) with a short muzzle line
+    ///   grenade  — a small circle (body) + a short stub fuse at the top
+    ///   overwatch — two concentric arcs forming an eye/sector
+    ///   hunker   — a downward chevron inside a thin shield arc
+    ///   reload   — a three-quarter arc with an arrowhead tail
+    ///   hack     — two interlocked squares (circuitry)
+    ///   ability  — a four-point star (spark)
+    ///   item     — a small canister (rect + cap line)
+    static void DrawActionIcon(string id, float cx, float cy, Color c)
+    {
+        switch (id)
+        {
+            case "shoot":
+            {
+                // Right-pointing chevron (arrowhead): two lines meeting at a tip
+                float tip = cx + 7f, mid = cy;
+                float backY = 6f;
+                Raylib.DrawLineEx(new Vector2(cx - 1f, mid - backY), new Vector2(tip, mid), 1.8f, c);
+                Raylib.DrawLineEx(new Vector2(cx - 1f, mid + backY), new Vector2(tip, mid), 1.8f, c);
+                // Short barrel line behind the chevron
+                Raylib.DrawLineEx(new Vector2(cx - 7f, mid), new Vector2(cx - 1f, mid), 1.8f, c);
+                break;
+            }
+            case "grenade":
+            {
+                // Oval body + short fuse line at top
+                Raylib.DrawCircleLines((int)cx, (int)(cy + 2f), 5f, c);
+                Raylib.DrawLineEx(new Vector2(cx, cy - 3f), new Vector2(cx, cy - 8f), 1.8f, c);
+                // Small angled cap
+                Raylib.DrawLineEx(new Vector2(cx - 2f, cy - 8f), new Vector2(cx + 2f, cy - 8f), 1.5f, c);
+                break;
+            }
+            case "overwatch":
+            {
+                // Eye-shaped sector: two short arcs (approximated as poly lines)
+                // Draw an outward arc (upper) and inward arc (lower) to suggest an eye
+                int segs = 8;
+                float r1 = 7f, r2 = 3.5f;
+                float startA = -MathF.PI * 0.55f, endA = -MathF.PI * -0.55f; // roughly left-to-right
+                // outer arc
+                for (int i = 0; i < segs; i++)
+                {
+                    float t0 = startA + (endA - startA) * i / segs;
+                    float t1 = startA + (endA - startA) * (i + 1) / segs;
+                    Raylib.DrawLineEx(
+                        new Vector2(cx + MathF.Cos(t0) * r1, cy + MathF.Sin(t0) * r1),
+                        new Vector2(cx + MathF.Cos(t1) * r1, cy + MathF.Sin(t1) * r1),
+                        1.5f, c);
+                }
+                // inner arc (mirrored vertically for the lower lid)
+                float startB = MathF.PI * 0.55f, endB = MathF.PI * -0.55f;
+                for (int i = 0; i < segs; i++)
+                {
+                    float t0 = startB + (endB - startB) * i / segs;
+                    float t1 = startB + (endB - startB) * (i + 1) / segs;
+                    Raylib.DrawLineEx(
+                        new Vector2(cx + MathF.Cos(t0) * r1, cy + MathF.Sin(t0) * r1),
+                        new Vector2(cx + MathF.Cos(t1) * r1, cy + MathF.Sin(t1) * r1),
+                        1.5f, c);
+                }
+                // pupil dot
+                Raylib.DrawCircleV(new Vector2(cx, cy), r2, c);
+                break;
+            }
+            case "hunker":
+            {
+                // Downward-pointing chevron (duck-down arrow)
+                float tip = cy + 6f;
+                float hw = 6f, top = cy - 3f;
+                Raylib.DrawLineEx(new Vector2(cx - hw, top), new Vector2(cx, tip), 1.8f, c);
+                Raylib.DrawLineEx(new Vector2(cx + hw, top), new Vector2(cx, tip), 1.8f, c);
+                // Short shield-cap line across the top
+                Raylib.DrawLineEx(new Vector2(cx - hw, top), new Vector2(cx + hw, top), 1.5f, c);
+                break;
+            }
+            case "reload":
+            {
+                // Three-quarter circular arc with an arrowhead at one end
+                int segs = 9;
+                float rad = 6f;
+                float startA = MathF.PI * 0.3f; // start angle (slightly past bottom-right)
+                float sweep  = MathF.PI * 1.6f; // about 290 degrees
+                for (int i = 0; i < segs; i++)
+                {
+                    float t0 = startA + sweep * i / segs;
+                    float t1 = startA + sweep * (i + 1) / segs;
+                    Raylib.DrawLineEx(
+                        new Vector2(cx + MathF.Cos(t0) * rad, cy + MathF.Sin(t0) * rad),
+                        new Vector2(cx + MathF.Cos(t1) * rad, cy + MathF.Sin(t1) * rad),
+                        1.8f, c);
+                }
+                // arrowhead at the end of the arc
+                float eA = startA + sweep;
+                var ep = new Vector2(cx + MathF.Cos(eA) * rad, cy + MathF.Sin(eA) * rad);
+                // tangent direction: perpendicular to radius at eA
+                float tang = eA + MathF.PI / 2f;
+                var t1v = new Vector2(ep.X + MathF.Cos(tang) * 4f, ep.Y + MathF.Sin(tang) * 4f);
+                var t2v = new Vector2(ep.X - MathF.Cos(tang) * 4f, ep.Y - MathF.Sin(tang) * 4f);
+                // Move arrow tip slightly further along the arc direction
+                var tip2 = new Vector2(ep.X + MathF.Cos(eA) * 3.5f, ep.Y + MathF.Sin(eA) * 3.5f);
+                Raylib.DrawLineEx(t1v, tip2, 1.5f, c);
+                Raylib.DrawLineEx(t2v, tip2, 1.5f, c);
+                break;
+            }
+            case "hack":
+            {
+                // Two small interlocked squares (circuitry / terminal)
+                float s = 4.5f;
+                // left square
+                var r1 = new Rectangle(cx - 8f, cy - s, s * 2f, s * 2f);
+                Raylib.DrawRectangleLinesEx(r1, 1.2f, c);
+                // right square, partially overlapping
+                var r2 = new Rectangle(cx + 1f, cy - s, s * 2f, s * 2f);
+                Raylib.DrawRectangleLinesEx(r2, 1.2f, c);
+                // short connecting line at center
+                Raylib.DrawLineEx(new Vector2(cx - 1f, cy), new Vector2(cx + 1f, cy), 1.5f, c);
+                break;
+            }
+            case "ability":
+            {
+                // Four-point star / spark: two crossing lines at different angles
+                float len = 7f, lenD = 5f;
+                // cardinal arms
+                Raylib.DrawLineEx(new Vector2(cx, cy - len), new Vector2(cx, cy + len), 1.6f, c);
+                Raylib.DrawLineEx(new Vector2(cx - len, cy), new Vector2(cx + len, cy), 1.6f, c);
+                // diagonal arms (shorter)
+                Raylib.DrawLineEx(new Vector2(cx - lenD, cy - lenD), new Vector2(cx + lenD, cy + lenD), 1.2f, c);
+                Raylib.DrawLineEx(new Vector2(cx + lenD, cy - lenD), new Vector2(cx - lenD, cy + lenD), 1.2f, c);
+                // center dot
+                Raylib.DrawCircleV(new Vector2(cx, cy), 1.5f, c);
+                break;
+            }
+            case "item":
+            {
+                // Small canister: a thin rectangle body + a cap line on top
+                float w2 = 4f, h2 = 7f;
+                var body = new Rectangle(cx - w2, cy - h2 + 3f, w2 * 2f, h2 * 2f - 3f);
+                Raylib.DrawRectangleLinesEx(body, 1.2f, c);
+                // top cap
+                Raylib.DrawLineEx(new Vector2(cx - w2 + 1f, cy - h2 + 3f), new Vector2(cx + w2 - 1f, cy - h2 + 3f), 1.5f, c);
+                Raylib.DrawLineEx(new Vector2(cx - w2 + 1f, cy - h2 + 3f), new Vector2(cx - w2 + 1f, cy - h2), 1.5f, c);
+                Raylib.DrawLineEx(new Vector2(cx + w2 - 1f, cy - h2 + 3f), new Vector2(cx + w2 - 1f, cy - h2), 1.5f, c);
+                Raylib.DrawLineEx(new Vector2(cx - w2 + 1f, cy - h2), new Vector2(cx + w2 - 1f, cy - h2), 1.5f, c);
+                break;
+            }
+        }
     }
 
     // Hover help for the action buttons (explains FIRE/GRENADE/abilities/etc.).
@@ -652,22 +852,29 @@ public static class Hud
             string gly = NodeGlyph(n.Kind);
             Raylib.DrawTextEx(Cfg.Font, gly, new Vector2((int)(p.X - (int)Raylib.MeasureTextEx(Cfg.Font, gly, 14, 1f).X / 2), (int)(p.Y - 7)), 14, 1f, Pal.RGBA(8, 12, 18));
 
-            if (canPick)  // label the choices with their objective
+            if (canPick)  // label the choices with their objective + an intel hint
             {
                 string lbl = ObjName(n.Card.Objective);
                 Raylib.DrawTextEx(Cfg.Font, lbl, new Vector2((int)(p.X - (int)Raylib.MeasureTextEx(Cfg.Font, lbl, 10, 1f).X / 2), (int)(p.Y + rad + 3)), 10, 1f, Pal.Txt);
+                // enemy intel hint: a short flavour line so the pick is informed
+                string hint = Run.EnemyHint(n);
+                Raylib.DrawTextEx(Cfg.Font, hint, new Vector2((int)(p.X - (int)Raylib.MeasureTextEx(Cfg.Font, hint, 9, 1f).X / 2), (int)(p.Y + rad + 15)), 9, 1f, Pal.TxtDim);
             }
         }
 
-        // hover tooltip: the chosen op's flavour (mod / objective / force / reward)
+        // hover tooltip: the chosen op's flavour (mod / objective / force / reward / enemy hint)
         if (hovered != null)
         {
             var c = hovered.Card;
             string l1 = $"{c.ModName}  -  {ObjName(c.Objective)}";
             string l2 = c.EnemyDelta > 0 ? "Heavy resistance" : (c.EnemyDelta < 0 ? "Light resistance" : "Standard force");
             string l3 = c.Reward != RewardKind.None ? "+ " + c.RewardText : null;
-            int tw = Math.Max((int)Raylib.MeasureTextEx(Cfg.Font, l1, 13, 1f).X, Math.Max((int)Raylib.MeasureTextEx(Cfg.Font, l2, 11, 1f).X, l3 != null ? (int)Raylib.MeasureTextEx(Cfg.Font, l3, 11, 1f).X : 0)) + 20;
-            int th = l3 != null ? 60 : 44;
+            string l4 = Run.EnemyHint(hovered);   // enemy intel hint (S4-A)
+            int tw = Math.Max((int)Raylib.MeasureTextEx(Cfg.Font, l1, 13, 1f).X,
+                     Math.Max((int)Raylib.MeasureTextEx(Cfg.Font, l2, 11, 1f).X,
+                     Math.Max(l3 != null ? (int)Raylib.MeasureTextEx(Cfg.Font, l3, 11, 1f).X : 0,
+                              (int)Raylib.MeasureTextEx(Cfg.Font, l4, 11, 1f).X))) + 20;
+            int th = (l3 != null ? 76 : 60);   // extra row for the hint
             float tx = Math.Min(mouse.X + 14, region.X + region.Width - tw);
             float ty = Math.Max(mouse.Y - th - 6, region.Y);
             var tip = new Rectangle(tx, ty, tw, th);
@@ -676,6 +883,8 @@ public static class Hud
             Raylib.DrawTextEx(Cfg.Font, l1, new Vector2((int)tx + 10, (int)ty + 8), 13, 1f, NodeColor(hovered.Kind));
             Raylib.DrawTextEx(Cfg.Font, l2, new Vector2((int)tx + 10, (int)ty + 26), 11, 1f, Pal.TxtDim);
             if (l3 != null) Raylib.DrawTextEx(Cfg.Font, l3, new Vector2((int)tx + 10, (int)ty + 42), 11, 1f, Pal.Accent);
+            int hintY = l3 != null ? (int)ty + 58 : (int)ty + 42;
+            Raylib.DrawTextEx(Cfg.Font, l4, new Vector2((int)tx + 10, hintY), 11, 1f, Pal.Foe);
         }
     }
 

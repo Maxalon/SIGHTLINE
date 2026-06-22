@@ -10,6 +10,59 @@ public static class Renderer
     // how far raised terrain (and anything standing on it) lifts on screen
     public const float ElevLift = 8f;
 
+    // --- 5.4 Procedural noise overlay -----------------------------------------
+    // A 128x128 tiling Perlin-noise texture generated once after the GL context is
+    // ready (lazy-init on the first DrawBoard call).  Drawn at low alpha over floor
+    // tiles, cover tops and plateau top faces so each surface reads as a textured
+    // material without fighting unit/threat/objective legibility.  Falls back to a
+    // no-op if texture creation fails (never crashes).
+    static Texture2D _noise;
+    static bool _noiseReady;
+
+    /// Free the GPU texture — call once after the window is closed.
+    public static void UnloadNoise()
+    {
+        if (_noiseReady) { Raylib.UnloadTexture(_noise); _noiseReady = false; }
+    }
+
+    static void EnsureNoise()
+    {
+        if (_noiseReady) return;
+        try
+        {
+            // scale ~4.5 gives medium-grain features across 128 texels — not too
+            // fine (looks like static) and not too coarse (reads as splotchy).
+            var img = Raylib.GenImagePerlinNoise(128, 128, 17, 43, 4.5f);
+            _noise = Raylib.LoadTextureFromImage(img);
+            Raylib.UnloadImage(img);
+            Raylib.SetTextureWrap(_noise, TextureWrap.Repeat);
+            _noiseReady = _noise.Id > 0;
+        }
+        catch { _noiseReady = false; }
+    }
+
+    // Tile the noise texture over a screen-space rectangle, anchored to the board
+    // origin so adjacent tiles share the same underlying grain (no seams).
+    // 'tint' is blended with white at 0.45 toward the biome colour; 'alpha' keeps
+    // it subtle.  Using DrawTextureRec (CPU-side UV shift) rather than a sampler
+    // because software GL (llvmpipe) doesn't honour TextureWrap in the shader path.
+    static void DrawNoiseRect(Rectangle dst, Color tint, float alpha)
+    {
+        if (!_noiseReady) return;
+        const float ts = 128f;
+        // Offset relative to the BOARD ORIGIN (not absolute screen px): tile coords are
+        // multiples of Cfg.Tile, so a board-aligned offset keeps the source rect inside the
+        // texture (src + Tile <= 128) instead of overflowing on alternate rows -- which
+        // software GL (llvmpipe) renders as a seam because it ignores TextureWrap on a
+        // partial-rect sample. Still continuous across the board on real hardware. (Sprint 5 F3)
+        float sx = (((dst.X - Cfg.OriginX) % ts) + ts) % ts;
+        float sy = (((dst.Y - Cfg.OriginY) % ts) + ts) % ts;
+        var src = new Rectangle(sx, sy, dst.Width, dst.Height);
+        var col = Raylib.Fade(Pal.Mix(Color.White, tint, 0.45f), alpha);
+        Raylib.DrawTextureRec(_noise, src, new Vector2(dst.X, dst.Y), col);
+    }
+    // --------------------------------------------------------------------------
+
     // tile draw rect/centre offset up onto the plateau top when elevated (per height tier)
     static Rectangle ElevRect(Game g, int x, int y)
     {
@@ -26,6 +79,7 @@ public static class Renderer
 
     public static void DrawBoard(Game g)
     {
+        EnsureNoise();   // lazy-init the noise texture on first frame (no-op thereafter)
         var bm = g.Biome;
         // board backing
         var edge = new Rectangle(Cfg.OriginX - 6, Cfg.OriginY - 6, Cfg.BoardW + 12, Cfg.BoardH + 12);
@@ -40,6 +94,16 @@ public static class Renderer
                 var r = Util.TileRect(x, y);
                 Raylib.DrawRectangleRec(r, ((x + y) & 1) == 0 ? bm.FloorA : bm.FloorB);
             }
+
+        // 5.4: subtle noise grain over the floor so it reads as material, not flat colour.
+        // Alpha 0.09 keeps it well below signal level — squint test still passes.
+        if (_noiseReady)
+            for (int x = 0; x < g.Grid.W; x++)
+                for (int y = 0; y < g.Grid.H; y++)
+                {
+                    if (g.Grid.Tiles[x, y] != TileType.Floor) continue;
+                    DrawNoiseRect(Util.TileRect(x, y), bm.Tint, 0.09f);
+                }
 
         DrawElevation(g);
         DrawMoveOverlay(g);
@@ -94,6 +158,8 @@ public static class Renderer
                     Raylib.DrawRectangleRec(
                         new Rectangle(r.X + 2, r.Y + r.Height - lift + (h - belowH) * ElevLift + 2, r.Width - 4, 5),
                         Raylib.Fade(Pal.RGBA(0, 0, 0), 0.28f));
+                // 5.4: noise grain on the plateau top so it reads as raised stone/metal
+                DrawNoiseRect(top, tint, 0.11f);
                 // lit front edge of the top face (base glow at alpha 0.50)
                 Raylib.DrawLineEx(new Vector2(top.X, top.Y + top.Height - 1),
                                   new Vector2(top.X + top.Width, top.Y + top.Height - 1),
@@ -293,6 +359,8 @@ public static class Renderer
                     new Rectangle(baseRect.X + 4, baseRect.Y + baseRect.Height - 1, baseRect.Width - 8, 4),
                     Raylib.Fade(Pal.RGBA(0, 0, 0), 0.22f));
                 Raylib.DrawRectangleRounded(topRect, 0.22f, 5, high ? cHiTop : cLoTop);
+                // 5.4: noise grain on the top face so cover reads as a physical object
+                DrawNoiseRect(topRect, tint, 0.10f);
                 // subtle top edge highlight (existing soft white gleam)
                 Raylib.DrawLineEx(new Vector2(topRect.X + 4, topRect.Y + 2),
                                   new Vector2(topRect.X + topRect.Width - 4, topRect.Y + 2),

@@ -439,6 +439,39 @@ public class Run
         return Math.Max(0, KillReq[u.Rank + 1] - u.Kills);
     }
 
+    /// A short ASCII intel hint for a mission node — shown on the campaign map so the
+    /// player can make an informed pick. Derived purely from Kind + Mission column (i.e.
+    /// the real spawn gating in Mission.SpawnEnemies), so it's always deterministic and
+    /// roughly accurate. Kept <= ~22 chars so it fits beneath a node label.
+    public static string EnemyHint(MissionNode node)
+    {
+        int m = node.Mission;   // 1-based column == mission number
+        switch (node.Kind)
+        {
+            case NodeKind.Boss:
+                // GenerateMap only ever places ONE Boss node, at the final column, so the
+                // capstone WARLORD is the boss. (BREAKER m3 / WARDEN m5 appear as mid-bosses
+                // on Combat/Elite nodes, not as Boss-kind nodes — see Mission.midBoss.)
+                return "BOSS: WARLORD";
+            case NodeKind.Supply:
+                // Supply only thins the force (fewer enemies / lower stats); the archetype
+                // pool is unchanged, so don't overclaim composition (review Sprint 5 F1).
+                return "LIGHT FORCE";
+            case NodeKind.Elite:
+                // Same tier as Combat but heavier (+2 enemy delta)
+                if (m <= 2) return "BRUISER + SNIPER";
+                if (m <= 4) return "SHIELD + SAPPER";
+                return "BERSERKER + MEDIC";
+            default: // Combat / Start — normal force for this mission tier
+                if (m == 1)    return "GRUNTS + SCOUTS";
+                if (m == 2)    return "SNIPER + DRONE";
+                if (m == 3)    return "TURRET + SAPPER";
+                if (m == 4)    return "BERSERKER + DRONE";
+                if (m == 5)    return "SHIELD + MEDIC";
+                return                 "ELITE FORCE";
+        }
+    }
+
     static Unit TestSoldier(string name) => new Unit
     {
         Name = name, Cls = "ASSAULT", Team = Team.Player,

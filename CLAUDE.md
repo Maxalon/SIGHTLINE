@@ -246,6 +246,21 @@ seeds (mix of WIN/LOSE, no exceptions):
   deferred — see DEVLOG; the formation fix targets the actual "one line" cause.)
 - **Cover shape-cues (S4-B):** high cover draws a small △, low cover a — on its top face
   (subtle white, alpha ~0.19), so cover type reads by shape (colorblind-safe), not color/height.
+- **Campaign-map intel hints (S4-A):** each reachable node shows a short enemy-composition
+  hint (`Run.EnemyHint`: e.g. "SNIPER + DRONE", "BOSS: WARLORD", "LIGHT FORCE") + objective,
+  so the branch pick is an informed choice. Deterministic per node; autopilot unaffected.
+- **Procedural texturing (5.4):** biome-tinted Perlin-noise grain on floor/cover/plateaus
+  (`Renderer.DrawNoiseRect` over a 128x128 `GenImagePerlinNoise` tile, lazy-init, board-origin
+  anchored so there are no seams) + soft-glow particles (`Fx`). Subtle; squint test holds.
+- **11 authored arenas + biome affinity:** + RUINS / THICKET; `Mission.PickLayout` softly
+  prefers a biome-themed arena (50%) while keeping variety. `SIGHTLINE_MAP` still forces one.
+- **AI exploits high ground (Sprint 6):** `Ai.Plan` scores `Combat.ComputeOdds` from candidate
+  tiles vs the current standing spot (`OddsFrom`), so enemies seek elevation/commanding-view LoS
+  when it meaningfully improves the shot — capped as a bias, archetype-tuned (SNIPER/ELITE love
+  it, BERSERKER/SAPPER barely; DRONE ignores it).
+- **HUD action-bar icons (Sprint 6):** each action button has a small primitive-drawn glyph
+  (bullet/grenade/eye/shield/refresh/circuitry/star/canister) left of its label; icons inherit
+  the button text color so disabled/selected/colorblind states all work (`Hud.DrawActionIcon`).
 - Grid battlefield w/ high+low cover, LoS, 8-dir pathfinding (corner-cut safe).
 - 2-action combat: move, dash (yellow), fire (ends turn), overwatch reaction
   fire (both sides), hunker, reload.
@@ -363,8 +378,9 @@ seeds (mix of WIN/LOSE, no exceptions):
   (`Mission.MakeRecruit`, `Run.DebriefSurvivors`) so casualties don't death-spiral.
 - **Perk-based promotions:** each rank-up is a pick-1-of-2 perk choice in the
   barracks (`Perk`/`Unit.Perks`/`PerkDef`, `Run.PendingPerks`, `Hud.DrawPerkChooser`).
-  10 perks (LockOn/Hardened/Reflexes/Bandolier/CloseQuarters/Marksman/Deadeye/Tank/
-  Sprinter/Adrenal) make each soldier a build; autopilot auto-picks.
+  13 perks (LockOn/Hardened/Reflexes/Bandolier/CloseQuarters/Marksman/Deadeye/Tank/
+  Sprinter/Adrenal + S7 **Executioner** +crit vs ½-HP / **Guardian** +overwatch aim /
+  **CoolHeaded** divert incoming aim) make each soldier a build; autopilot auto-picks.
 - **Class signature abilities:** each class has one self-cast signature (key **5**,
   1 charge/mission, refilled like grenades): Assault **RUN&GUN** (next shot costs 1
   action instead of ending the turn), Ranger **BLITZ** (next move costs one action
@@ -974,11 +990,13 @@ stand and are reinforced by DESIGN.md §3D/E/G.
       `DrawText`/`MeasureText` sites migrated to `DrawTextEx`/`MeasureTextEx` (Hud/Renderer/Fx),
       sizes+positions unchanged. **The ASCII-only constraint is now lifted** — non-ASCII
       glyphs are available; new strings can use them (though most still ASCII for now).
-- [ ] **5.4 Procedural texturing & particles.** Replace flat fills with subtle in-engine
-      **noise** on floor/cover/plateaus, **soft-glow** particle sprites (vs hard rects),
-      and generated **HUD icon glyphs**. `GenImage*` at load → cached textures; no committed
-      binaries. Touch `Renderer`/`Fx`. Verify: `SIGHTLINE_SHOT` per biome; confirm the
-      squint test still passes (texture must not fight signal).
+- [x] **5.4 Procedural texturing & particles.** DONE (Sprint 5 + Sprint 6). A 128x128
+      `GenImagePerlinNoise` texture (lazy-init in `Renderer`, crash-safe fallback, unloaded on
+      shutdown, board-origin-anchored UV so software GL shows no seam) tiles over floor/cover-tops/
+      plateau faces at 9-11% alpha, biome-tinted via `Pal.Mix` (`Renderer.DrawNoiseRect`);
+      particles got a dim-halo + bright-core soft-glow (`Fx`). Generated **HUD action-bar icon
+      glyphs** landed too (`Hud.DrawActionIcon`, primitive-drawn, inherit button text color).
+      Subtle — squint test holds per biome.
 - [ ] **5.5 Semantic color + colorblind pass (folds in 3.13).** Enforce the 5.1 color
       roles everywhere; add colorblind-safe `Pal` variants + shape/icon redundancy so coding
       never relies on hue alone; persist the toggle in `display.json`. Touch `Pal`,
@@ -1003,6 +1021,43 @@ Before stopping:
 4. Tell the human to open a fresh session (they'll send only `.`).
 
 ### WIP NOTES
+
+> **AUTONOMOUS DEV-TEAM SESSION — 7 SPRINTS, 21 FEATURES + a 4-FEATURE CODE RECOVERY (read first).**
+> Ran the project as a multi-agent team (orchestrator/tech-lead + PM/research + architect +
+> parallel developer agents in isolated git worktrees + a peer-reviewer each sprint). 7 peer-review
+> rounds. **PR #47 (Sprints 1-6) and PR #48 (Sprint 7) were merged to `main`.** What shipped across 21
+> features:
+> - **S1:** 4.3 alert tiers · 4.4 concealment+ambush · 5.2 post-FX shader · 3 arenas.
+> - **S2:** graze/partial-hit · real font (NotoMono OFL — ASCII-only limit LIFTED) · enemy-AI smoke/flash.
+> - **S3:** bench/short-handed attrition · focal-point lighting · streak-breaker.
+> - **S4:** staggered deployment formation · opt-in auto-cam · cover shape-cues (owner "two firing lines"
+>   feedback; bigger maps deliberately DEFERRED — DEVLOG documents the NO-GO + flag-prototype path).
+> - **S5:** campaign-map intel hints · procedural texturing + soft-glow particles · 2 arenas (11 total) + biome affinity.
+> - **S6:** enemy AI seeks high ground/commanding-view LoS · procedural HUD action-bar icons.
+> - **S7:** 3 new perks (EXECUTIONER/GUARDIAN/COOL-HEADED) · emissive cover/plateau edges.
+> Reviews caught real issues autoplay can't — notably **bench silently destroying benched veterans**
+> (fixed + guarded by `SIGHTLINE_BENCHTEST`) and **graze deleting true misses at high hit%** (GrazeMinMiss
+> floor). New harness hooks: `SIGHTLINE_POSTFX/_CONCEAL/_CONCEALTEST/_BENCH/_BENCHTEST/_ALERT`. Full
+> process log + per-sprint results/learnings + the larger-maps NO-GO live in **`docs/DEVLOG.md`**.
+>
+> **⚠️ 4-FEATURE RECOVERY (this session) — the git hiccup was worse than first reported.** A stray
+> branch-rename + `reset --hard` mid-session truncated the integration merge and silently dropped FOUR
+> fully-built, peer-reviewed features from the merged trunk (the commits survived only as DANGLING
+> objects): **S5 procedural texturing** (`a610e3d`+seam-fix `d1521cd`), **S5 campaign-map intel hints**
+> (`d5ebbbb`), **the 2 new arenas RUINS/THICKET + biome affinity** (`15394e2`), **S6 HUD action-bar
+> icons** (`e5ce19b`), and the **S6 AI commanding-view tile-scoring** enhancement (`078a46b`). They were
+> recovered by cherry-picking the dangling commits back onto the branch (2 small complementary conflicts
+> in Renderer.cs = keep BOTH texturing + S7 emissive; a 3-region add/add in Hud.cs = take the icon
+> methods but keep S7's Guardian→OVERWATCH specialty). Re-verified: Release 0/0, all 6 self-tests PASS,
+> autoplay x5 clean (no TIMEOUT), screenshots confirm texturing grain + HUD icons render. **LESSON:**
+> after ANY `reset --hard`/branch-rename, diff the trunk's TREE against the feature commits
+> (`git log -S <marker> --all`, grep the src for each feature's marker) — do NOT trust the merge-commit
+> message's feature count. `git checkout <ref> -- <file>` also STAGES (bundles per-feature commits); use
+> one dev per hot file (Game/Hud/Renderer/Unit/Combat) per wave; review + autoplay together are the net.
+> **NEXT (open Phase-5 polish, any future `.` session):** 5.1 visual style-guide doc; 5.5 full
+> semantic-color enforcement; generated HUD objective/status icons; S2-C overwatch-camp soft-pressure;
+> tune the procedural music on a real audio device; the flagged bigger-maps prototype only if
+> formation+auto-cam playtests still want it. Multi-agent cadence proven.
 
 > **SPRINT 1 (autonomous dev-team) — SHIPPED: 4.4 concealment + 5.2 post-FX shader + 3 arenas.**
 > Ran as a multi-agent team (orchestrator + PM/research + architect + parallel devs in isolated

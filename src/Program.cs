@@ -220,6 +220,7 @@ public static class Program
 
         Display.Shutdown();
         Audio.Shutdown();
+        Renderer.UnloadNoise();   // 5.4: free the procedural noise texture
         if (Cfg.Font.Texture.Id != 0 && Cfg.Font.Texture.Id != Raylib.GetFontDefault().Texture.Id)
             Raylib.UnloadFont(Cfg.Font);
         Raylib.CloseWindow();

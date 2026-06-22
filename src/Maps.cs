@@ -142,5 +142,37 @@ public static class Maps
             "............o.....",
             "..................",
         },
+        new[] // RUINS — an exposed arena with shattered perimeter walls and an open
+              // centre; long sightlines reward ranged classes but the raised slabs give
+              // a height advantage to whoever seizes them first. Biome hint: VOID.
+        {
+            "..................",
+            "....##......##....",
+            "....#....o....#...",
+            "..................",
+            ".......^^.........",
+            ".......^^..o......",
+            "..................",
+            "....o..........o..",
+            "....#....o....#...",
+            "....##......##....",
+            "..................",
+        },
+        new[] // THICKET — dense organic low-cover clusters separated by winding
+              // corridors; two high-cover anchors give the squad fixed strongpoints;
+              // short engagements, lots of duck-and-move. Biome hint: VERDANT.
+        {
+            "..................",
+            "....oo......oo....",
+            "...o.o....oo......",
+            "....oo..#.........",
+            "..........oo.oo...",
+            "....o.....#.o.....",
+            "..........oo.oo...",
+            "....oo..#.........",
+            "...o.o....oo......",
+            "....oo......oo....",
+            "..................",
+        },
     };
 }
