@@ -365,6 +365,14 @@ public static class Renderer
         Color main = vip ? Pal.VipGold : (friend ? Pal.Friend : (unaware ? Pal.RGBA(120, 96, 96) : (suspicious ? Pal.Suspect : (elite ? Pal.Elite : Pal.Foe))));
         Color dark = vip ? Pal.VipDk  : (friend ? Pal.FriendDk : (unaware ? Pal.RGBA(46, 38, 42) : (suspicious ? Pal.SuspectDk : (elite ? Pal.EliteDk : Pal.FoeDk))));
 
+        // 5.3-B focal-point alpha: selected unit = full; spent players dimmed; enemies visible.
+        // HP bar, rings, status codes, alert markers, VIP markers stay full-alpha (they are signal).
+        float figAlpha;
+        if (g.Selected == u)              figAlpha = 1.0f;          // selected: full brightness
+        else if (friend && !u.CanAct)     figAlpha = 0.60f;          // spent player: visibly dimmed
+        else if (friend)                  figAlpha = 0.82f;          // other player: gently dimmed
+        else                              figAlpha = 0.85f;          // enemies: barely dimmed (must spot threats)
+
         // lift the figure when it stands on raised terrain
         float hlift = g.Grid.IsHigh(u.X, u.Y) ? ElevLift : 0f;
         var foot = u.Pos - new Vector2(0, hlift);
@@ -377,12 +385,15 @@ public static class Renderer
         Vector2 p = foot + new Vector2(0, bob - hover) + u.Recoil;
 
         // shadow (sits on the platform top when elevated)
-        Raylib.DrawEllipse((int)foot.X, (int)(foot.Y + 17), 15, 6, Raylib.Fade(Pal.RGBA(0, 0, 0), 0.35f));
+        Raylib.DrawEllipse((int)foot.X, (int)(foot.Y + 17), 15, 6, Raylib.Fade(Pal.RGBA(0, 0, 0), 0.35f * figAlpha));
 
-        // selection ring
+        // selection ring — full strength (signal), plus a faint extra glow on the selected unit
         if (g.Selected == u)
         {
             float pulse = 0.5f + 0.5f * MathF.Sin((float)Raylib.GetTime() * 5f);
+            // soft brightening halo so the selected unit pops further
+            Raylib.DrawRing(foot + new Vector2(0, 17), 22f, 27f, 0, 360, 48,
+                            Raylib.Fade(Pal.Accent, 0.12f + 0.10f * pulse));
             Raylib.DrawRing(foot + new Vector2(0, 17), 17, 21, 0, 360, 48,
                             Raylib.Fade(Pal.Accent, 0.4f + 0.4f * pulse));
         }
@@ -395,11 +406,11 @@ public static class Renderer
                             Raylib.Fade(Pal.Friend, pulse));
         }
 
-        // body
-        Raylib.DrawCircleV(p, 16f, dark);
+        // body — apply figAlpha to the figure shape
+        Raylib.DrawCircleV(p, 16f, Raylib.Fade(dark, figAlpha));
         Raylib.DrawCircleV(p, 16f, Raylib.Fade(Pal.RGBA(0, 0, 0), 0f)); // no-op keep
-        Raylib.DrawRing(p, 13.5f, 16.5f, 0, 360, 40, main);
-        Raylib.DrawCircleV(p, 13.5f, Raylib.Fade(main, 0.18f));
+        Raylib.DrawRing(p, 13.5f, 16.5f, 0, 360, 40, Raylib.Fade(main, figAlpha));
+        Raylib.DrawCircleV(p, 13.5f, Raylib.Fade(main, 0.18f * figAlpha));
 
         // class glyph
         int sides = u.Cls switch
@@ -410,8 +421,8 @@ public static class Renderer
             "DRONE" => 4, "SHIELD" => 6, "SAPPER" => 3, _ => 5,
         };
         float rot = (u.Cls == "SHARPSHOOTER" || u.Cls == "SNIPER" || u.Cls == "DRONE") ? 45f : (sides == 3 ? -90f : 0f);
-        if (elite) Raylib.DrawRing(p, 18f, 20.5f, 0, 360, 40, Raylib.Fade(Pal.Elite, 0.55f));
-        Raylib.DrawPoly(p, sides, elite ? 9f : 7.5f, rot, main);
+        if (elite) Raylib.DrawRing(p, 18f, 20.5f, 0, 360, 40, Raylib.Fade(Pal.Elite, 0.55f * figAlpha));
+        Raylib.DrawPoly(p, sides, elite ? 9f : 7.5f, rot, Raylib.Fade(main, figAlpha));
 
         // not-yet-engaged enemies: an awareness marker, no facing/pips/status
         if (inactive)
@@ -429,30 +440,30 @@ public static class Renderer
 
         // facing tick
         var fdir = new Vector2(MathF.Cos(u.Facing), MathF.Sin(u.Facing));
-        Raylib.DrawLineEx(p + fdir * 13f, p + fdir * 20f, 3f, main);
+        Raylib.DrawLineEx(p + fdir * 13f, p + fdir * 20f, 3f, Raylib.Fade(main, figAlpha));
 
         // medic: green cross marker so the support unit reads at a glance
         if (u.Team == Team.Enemy && u.Cls == "MEDIC")
         {
-            Raylib.DrawRectangle((int)p.X - 1, (int)p.Y - 5, 3, 11, Pal.Good);
-            Raylib.DrawRectangle((int)p.X - 5, (int)p.Y - 1, 11, 3, Pal.Good);
+            Raylib.DrawRectangle((int)p.X - 1, (int)p.Y - 5, 3, 11, Raylib.Fade(Pal.Good, figAlpha));
+            Raylib.DrawRectangle((int)p.X - 5, (int)p.Y - 1, 11, 3, Raylib.Fade(Pal.Good, figAlpha));
         }
 
         // sapper: a small demolition-charge marker so it reads as a cover-breaker
         if (u.Team == Team.Enemy && u.Cls == "SAPPER")
         {
-            Raylib.DrawRectangleLines((int)p.X - 4, (int)p.Y - 4, 8, 8, Pal.Accent);
-            Raylib.DrawCircleV(new Vector2(p.X + 4, p.Y - 4), 2f, Pal.Foe);
+            Raylib.DrawRectangleLines((int)p.X - 4, (int)p.Y - 4, 8, 8, Raylib.Fade(Pal.Accent, figAlpha));
+            Raylib.DrawCircleV(new Vector2(p.X + 4, p.Y - 4), 2f, Raylib.Fade(Pal.Foe, figAlpha));
         }
 
         // shield: a thick barrier arc on the barred (facing) side
         if (u.Team == Team.Enemy && u.Cls == "SHIELD" && (u.ShieldDx != 0 || u.ShieldDy != 0))
         {
             float ang = MathF.Atan2(u.ShieldDy, u.ShieldDx) * 180f / MathF.PI;
-            Raylib.DrawRing(p, 18f, 22f, ang - 55, ang + 55, 24, Pal.RGBA(150, 200, 240));
+            Raylib.DrawRing(p, 18f, 22f, ang - 55, ang + 55, 24, Raylib.Fade(Pal.RGBA(150, 200, 240), figAlpha));
         }
 
-        // damage flash
+        // damage flash — always at full strength (it's momentary feedback)
         if (u.Flash > 0.01f)
             Raylib.DrawCircleV(p, 17f, Raylib.Fade(Pal.RGBA(255, 255, 255), u.Flash * 0.8f));
 
