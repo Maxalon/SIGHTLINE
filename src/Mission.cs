@@ -237,6 +237,16 @@ public static class Mission
             // grenades: bruisers + the elite always; some others from mission 2 on
             if (e.Cls == "ELITE") e.Grenades = 2;
             else if (n >= 2 && e.Cls != "MEDIC" && e.Cls != "SAPPER" && (e.Cls == "BRUISER" || Util.Roll(22))) e.Grenades = 1;
+            // utility items (S2-B): snipers/scouts carry smoke to cover their movement;
+            // some grunts get smoke from mission 3+. Flash given to berserkers (mission 3+)
+            // to disorient the squad before charging. Never given to ELITE/MEDIC/TURRET/
+            // DRONE/SHIELD/SAPPER (they each have a dedicated role already).
+            if (e.Cls == "SNIPER" || e.Cls == "SCOUT")
+                { e.EnemyItem = ItemKind.Smoke; e.ItemCharge = 1; }
+            else if (n >= 3 && e.Cls == "BERSERKER")
+                { e.EnemyItem = ItemKind.Flash; e.ItemCharge = 1; }
+            else if (n >= 3 && e.Cls == "GRUNT" && Util.Roll(18))
+                { e.EnemyItem = ItemKind.Smoke; e.ItemCharge = 1; }
             e.Alert = AlertLevel.Unaware;  // dormant until sighted (escalates via 4.3 tiers)
             e.PodId = i / 2;               // pods of ~2
             enemies.Add(e);

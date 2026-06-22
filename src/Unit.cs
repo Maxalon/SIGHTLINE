@@ -174,6 +174,7 @@ public class Unit
     // ---- utility item (3.4): a second throwable slot, 1 charge/mission, by class ----
     public int ItemCharge;                       // remaining uses this mission (refilled in Mission.Build)
     public ItemKind Item => ItemKindFor(Cls);    // derived from class (never persisted)
+    public ItemKind EnemyItem;                   // explicit item for enemy units (set in SpawnEnemies, None for players)
     public string ItemName => Item switch
     {
         ItemKind.Smoke     => "SMOKE",

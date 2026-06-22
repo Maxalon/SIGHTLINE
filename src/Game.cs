@@ -385,8 +385,24 @@ public class Game
             if (!e.Active) fails.Add("sightedPodNotWokenOnBreak");
         }
 
+        // (Mi2) RevealRange proximity break: stepping within 3 of an ACTIVE foe auto-breaks
+        // concealment via OnUnitEnteredTile, and does NOT arm an ambush bonus (not a shot).
+        StartMission(1);
+        var p2 = Players.FirstOrDefault(u => u.Alive && !u.IsVip);
+        var e2 = Enemies.FirstOrDefault(x => x.Alive);
+        if (p2 != null && e2 != null)
+        {
+            if (!SquadConcealed) fails.Add("concealNotResetForProxTest");
+            e2.Alert = AlertLevel.Alert;                 // an already-active foe
+            e2.X = p2.X + RevealRange; e2.Y = p2.Y; e2.SyncPos();
+            p2.FiredFromConcealment = false;
+            OnUnitEnteredTile(p2);                        // simulate the soldier stepping here
+            if (SquadConcealed) fails.Add("revealRangeDidNotBreak");
+            if (p2.FiredFromConcealment) fails.Add("proximityArmedAmbush");
+        }
+
         return fails.Count == 0
-            ? "CONCEALTEST: PASS (starts concealed; pods gated while concealed; break arms actor + wakes sighted pods)"
+            ? "CONCEALTEST: PASS (start concealed; pods gated; break arms+wakes; RevealRange breaks w/o bonus)"
             : "CONCEALTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
@@ -633,10 +649,11 @@ public class Game
         }
         if (mover.Team == Team.Player)
         {
-            // 4.4: stepping within RevealRange of an already-active foe blows concealment
+            // 4.4: stepping within RevealRange of an already-active foe blows concealment.
+            // No actor - getting spotted is not your aimed shot, so no ambush bonus.
             if (SquadConcealed && Enemies.Any(e => e.Alive && e.Active
                     && Util.TileDist(mover.X, mover.Y, e.X, e.Y) <= RevealRange))
-                BreakConcealment(mover);
+                BreakConcealment();
             CheckPodActivation();  // reveal pods while advancing (no-op while still concealed)
         }
         var watchers = mover.Team == Team.Player ? Enemies : Players;
@@ -645,6 +662,9 @@ public class Game
         {
             if (!w.Alive || !w.OnOverwatch || w.ReactedThisTurn || w.Ammo <= 0) continue;
             if (!CanTarget(w, mover)) continue;
+            // 4.4 (review M1): a player's overwatch shot is still a shot — it reveals the
+            // squad. No actor -> no ambush bonus on a reaction (it already has its own mod).
+            if (w.Team == Team.Player && SquadConcealed) BreakConcealment();
             w.OnOverwatch = false;
             w.ReactedThisTurn = true;
             w.Ammo--;
@@ -1817,7 +1837,9 @@ public class Game
             case AbilityKind.Suppress:
                 var t = FirstTargetFor(u);
                 if (t == null) return;
-                if (SquadConcealed) BreakConcealment(u);   // 4.4: pinning fire breaks stealth
+                // 4.4 (review Mi1): pinning fire breaks stealth, but Suppress isn't a damage
+                // shot (no Combat.Resolve), so pass no actor - no dangling ambush flag.
+                if (SquadConcealed) BreakConcealment();
                 u.AbilityCharge--; u.Ammo--; u.ActionsLeft = 0; u.OnOverwatch = true;
                 t.Suppress = Combat.SuppressAim;
                 Fx.PopText(t.Pos + new Vector2(0, -34), "SUPPRESSED", Pal.Foe, 18f);
@@ -1983,6 +2005,24 @@ public class Game
                     Fx.PopText(e.Pos + new Vector2(0, -30), "FRAG OUT", Pal.Foe, 16f);
                     Enqueue(new WaitAnim(0.2f), Team.Enemy);
                     Enqueue(new GrenadeAnim(e, _aiPlan.GrenX, _aiPlan.GrenY), Team.Enemy);
+                }
+                else if (_aiPlan.UseItem && e.ItemCharge > 0 && e.ActionsLeft > 0 &&
+                    Grid.InBounds(_aiPlan.ItemTx, _aiPlan.ItemTy) &&
+                    Util.TileDist(e.X, e.Y, _aiPlan.ItemTx, _aiPlan.ItemTy) <= ItemRange)
+                {
+                    e.ItemCharge--;
+                    // item use takes one action but does NOT necessarily end the turn,
+                    // so the enemy can still shoot after laying smoke (if ShootTarget != null).
+                    // However we set ActionsLeft=0 here so it acts like a grenade (one big
+                    // action per turn), keeping the autopilot loop predictable + no TIMEOUT risk.
+                    e.ActionsLeft = 0;
+                    string label = e.EnemyItem == ItemKind.Smoke ? "SMOKE OUT" : "FLASH OUT";
+                    Fx.PopText(e.Pos + new Vector2(0, -30), label, Pal.RGBA(180, 190, 200), 16f);
+                    Enqueue(new WaitAnim(0.18f), Team.Enemy);
+                    if (e.EnemyItem == ItemKind.Smoke)
+                        Enqueue(new SmokeAnim(e, _aiPlan.ItemTx, _aiPlan.ItemTy), Team.Enemy);
+                    else
+                        Enqueue(new FlashAnim(e, _aiPlan.ItemTx, _aiPlan.ItemTy), Team.Enemy);
                 }
                 else if (_aiPlan.ShootTarget != null && _aiPlan.ShootTarget.Alive &&
                     e.ActionsLeft > 0 && e.Ammo > 0 && CanTarget(e, _aiPlan.ShootTarget))

@@ -64,28 +64,28 @@ uniform float uTime;         // accumulated time (for very slow drift; optional)
 
 // Cheap single-pass bloom via a 5-tap radial blur.
 // Sample offset scale in texel units.
-vec3 bloom(vec2 uv, float radius) {
+// radiusPx is in PIXELS; divide by uResolution per-axis so the kernel is square
+// regardless of aspect ratio (review Mi3).
+vec3 bloom(vec2 uv, float radiusPx) {
     vec3 col = texture(texture0, uv).rgb;
     float w = 1.0;
-    // 4 diagonal samples at radius and half-radius
-    float r2 = radius * 0.55;
-    vec2 d1 = vec2(radius, radius);
-    vec2 d2 = vec2(-radius, radius);
-    col += texture(texture0, uv + d1).rgb; w += 1.0;
-    col += texture(texture0, uv - d1).rgb; w += 1.0;
-    col += texture(texture0, uv + d2).rgb; w += 1.0;
-    col += texture(texture0, uv - d2).rgb; w += 1.0;
+    vec2 r1 = vec2(radiusPx) / uResolution;   // aspect-correct UV offset
+    vec2 r2 = r1 * 0.55;
+    // 4 diagonal samples
+    col += texture(texture0, uv + vec2( r1.x,  r1.y)).rgb; w += 1.0;
+    col += texture(texture0, uv - vec2( r1.x,  r1.y)).rgb; w += 1.0;
+    col += texture(texture0, uv + vec2(-r1.x,  r1.y)).rgb; w += 1.0;
+    col += texture(texture0, uv - vec2(-r1.x,  r1.y)).rgb; w += 1.0;
     // 4 axis samples at half-radius
-    col += texture(texture0, uv + vec2(r2, 0.0)).rgb; w += 1.0;
-    col += texture(texture0, uv - vec2(r2, 0.0)).rgb; w += 1.0;
-    col += texture(texture0, uv + vec2(0.0, r2)).rgb; w += 1.0;
-    col += texture(texture0, uv - vec2(0.0, r2)).rgb; w += 1.0;
+    col += texture(texture0, uv + vec2(r2.x, 0.0)).rgb; w += 1.0;
+    col += texture(texture0, uv - vec2(r2.x, 0.0)).rgb; w += 1.0;
+    col += texture(texture0, uv + vec2(0.0, r2.y)).rgb; w += 1.0;
+    col += texture(texture0, uv - vec2(0.0, r2.y)).rgb; w += 1.0;
     return col / w;
 }
 
 void main() {
     vec2 uv = fragTexCoord;
-    vec2 texel = 1.0 / uResolution;
 
     // --- chromatic aberration ---
     // Displace R and B channels by a small offset toward/away from centre.
@@ -99,8 +99,8 @@ void main() {
     vec3 base = vec3(r, g, b);
 
     // --- bloom ---
-    // Bloom radius in texel fractions: ~3 px at 1280 wide.
-    float bloomRadius = 3.0 / 1280.0;
+    // Bloom radius in pixels (converted to aspect-correct UV inside bloom()).
+    float bloomRadius = 3.0;
     // Bloom extracts only the bright part of the blurred sample (soft threshold > 0.55).
     vec3 blurred = bloom(uv, bloomRadius);
     vec3 bright  = max(blurred - 0.55, 0.0);   // soft threshold — only near-white areas glow
