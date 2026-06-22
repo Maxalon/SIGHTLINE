@@ -723,7 +723,8 @@ public class Game
             w.OnOverwatch = false;
             w.ReactedThisTurn = true;
             w.Ammo--;
-            int reactMod = w.HasPerk(Perk.Reflexes) ? 100 : -10; // Reflexes: overwatch rarely misses
+            // Reflexes: overwatch rarely misses (+100 aim mod). Guardian: +15 aim on overwatch shots.
+            int reactMod = w.HasPerk(Perk.Reflexes) ? 100 : (-10 + (w.HasPerk(Perk.Guardian) ? Unit.GuardianAim : 0));
             var res = Combat.Resolve(Grid, w, mover, reactMod);
             Fx.PopText(w.Pos + new Vector2(0, -30), "OVERWATCH", Pal.Accent, 18f);
             Audio.Play("over");

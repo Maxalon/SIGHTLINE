@@ -86,6 +86,8 @@ public static class Combat
         if (a.HasPerk(Perk.LockOn) && coverLevel == 0) hit += Unit.PerkAim;
         if (a.HasPerk(Perk.CloseQuarters) && dist <= Unit.CloseRange) hit += Unit.PerkAim;
         if (a.HasPerk(Perk.Marksman) && dist >= Unit.LongRange) hit += Unit.PerkAim;
+        // CoolHeaded: halves the Disoriented aim penalty (net = DisorientAim - CoolHeadedDivert)
+        if (a.HasPerk(Perk.CoolHeaded) && a.HasStatus(StatusKind.Disoriented)) hit += Unit.CoolHeadedDivert;
 
         // earned traits + bonds (attacker)
         if (a.HasTrait(Trait.Killer) && d.MaxHp > 0 && d.Hp * 2 <= d.MaxHp) hit += Unit.KillerAim;
@@ -101,6 +103,8 @@ public static class Combat
         if (highGround) crit += HighGroundCrit;  // shooting down rewards crits
         if (a.Steady) crit += SteadyCrit;        // braced shot also crits harder
         if (a.HasPerk(Perk.Deadeye)) crit += Unit.PerkCrit;
+        // Executioner: bonus crit vs targets already below half HP (finish-the-job perk)
+        if (a.HasPerk(Perk.Executioner) && d.MaxHp > 0 && d.Hp * 2 < d.MaxHp) crit += Unit.ExecutionerCrit;
         if (a.HasTrait(Trait.ColdBlood) && a.MaxHp > 0 && a.Hp * 2 <= a.MaxHp) crit += Unit.ColdBloodCrit;
         if (d.Hunkered) crit = 0;               // hunkered can't be crit
         crit = Util.Clamp(crit, 0, 100);
