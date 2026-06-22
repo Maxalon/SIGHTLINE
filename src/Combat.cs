@@ -128,11 +128,20 @@ public static class Combat
         return d.ShieldDy != 0 && Util.Sign(dy) == d.ShieldDy;
     }
 
+    // Streak-breaker constants (S4-C): per clean-miss aim bonus, capped at MaxStreakBonus.
+    // Applied INSIDE Resolve only (hidden from the ComputeOdds display — DESIGN.md 3B).
+    public const int StreakBonusPerMiss = 6;   // +6 effHit per consecutive miss
+    public const int MaxStreakBonus     = 12;  // capped at +12 (after 2+ misses)
+
     /// Roll a shot. aimMod lets overwatch apply a reaction penalty.
     public static ShotResult Resolve(Grid grid, Unit a, Unit d, int aimMod = 0)
     {
         var odds = ComputeOdds(grid, a, d);
-        int effHit = Util.Clamp(odds.HitChance + aimMod, 1, 99);
+        // Streak-breaker (S4-C): apply a small hidden bonus after consecutive clean misses.
+        // Keeps it subtle (max +12); resets on any connect (hit or graze). HIDDEN from
+        // the ComputeOdds tooltip so players don't know the dice are loaded (DESIGN.md 3B).
+        int streakBonus = Math.Min(StreakBonusPerMiss * a.ConsecutiveMisses, MaxStreakBonus);
+        int effHit = Util.Clamp(odds.HitChance + aimMod + streakBonus, 1, 99);
 
         var res = new ShotResult { Odds = odds };
 
@@ -143,9 +152,13 @@ public static class Combat
         bool graze = !hit && roll < effHit + GrazeBand;
 
         if (!hit && !graze)
-            return res; // clean miss
+        {
+            a.ConsecutiveMisses++;  // accumulate the streak
+            return res;             // clean miss
+        }
 
         res.Hit = true;
+        a.ConsecutiveMisses = 0;  // hit or graze: reset the streak
 
         if (graze)
         {
@@ -278,10 +291,12 @@ public static class Combat
             // Test graze band logic directly using the band constants: a shot at effHit=60
             // must graze when roll in [60,75) and miss when roll >= 75.
             // We'll call Resolve many times and verify statistical behaviour.
+            // Reset ConsecutiveMisses each shot so the streak-breaker doesn't skew the base-rate test.
             int totalShots = 10000;
             int hitCount = 0, grazeCount = 0, missCount = 0;
             for (int i = 0; i < totalShots; i++)
             {
+                gAtk.ConsecutiveMisses = 0;  // isolate: test raw effHit=60 only
                 var r = Resolve(gG, gAtk, gDef, 0);
                 if (!r.Hit) missCount++;
                 else if (r.Graze) grazeCount++;
@@ -299,6 +314,7 @@ public static class Combat
             bool foundGraze = false, grazeNoCrit = true, grazeDmgMin = true;
             for (int i = 0; i < 2000 && (!foundGraze || grazeNoCrit && grazeDmgMin); i++)
             {
+                gAtk.ConsecutiveMisses = 0;  // isolate: no streak bonus
                 gDef.Hp = 20;
                 var r = Resolve(gG, gAtk, gDef, 0);
                 if (r.Hit && r.Graze)
@@ -319,6 +335,7 @@ public static class Combat
             int normalHitsAtZero = 0;
             for (int i = 0; i < 500; i++)
             {
+                gAtk.ConsecutiveMisses = 0;  // isolate: no streak bonus (keep effHit near 1)
                 gDef.Hp = 20;
                 var r = Resolve(gG, gAtk, gDef, aimMod: -200);   // effHit clamped to 1
                 if (r.Hit && !r.Graze) normalHitsAtZero++;
@@ -339,8 +356,73 @@ public static class Combat
             }
         }
 
+        // STREAK-BREAKER (S4-C): ConsecutiveMisses raises the internal effHit (hidden).
+        {
+            var gS = new Grid();
+            var sAtk = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 3, Y = 5, ConsecutiveMisses = 0 };
+            var sDef = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy,  X = 7, Y = 5, Hp = 20, MaxHp = 20 };
+
+            // With 0 misses the streak bonus should be 0.
+            int bonusZero = Math.Min(StreakBonusPerMiss * sAtk.ConsecutiveMisses, MaxStreakBonus);
+            if (bonusZero != 0) fails.Add($"streakBonus0={bonusZero}");
+
+            // With 2 consecutive misses the streak bonus should be +12 (2*6 = 12 = cap).
+            sAtk.ConsecutiveMisses = 2;
+            int bonusTwo = Math.Min(StreakBonusPerMiss * sAtk.ConsecutiveMisses, MaxStreakBonus);
+            if (bonusTwo != 12) fails.Add($"streakBonus2={bonusTwo}");
+
+            // With 3+ misses it should be capped at MaxStreakBonus (12), not 18.
+            sAtk.ConsecutiveMisses = 5;
+            int bonusFive = Math.Min(StreakBonusPerMiss * sAtk.ConsecutiveMisses, MaxStreakBonus);
+            if (bonusFive != MaxStreakBonus) fails.Add($"streakBonusCap={bonusFive}");
+
+            // A HIT must reset ConsecutiveMisses to 0 (use a very high aimMod so we always hit).
+            sAtk.ConsecutiveMisses = 3;
+            sDef.Hp = 20;
+            // Force a hit by using a massive aimMod (+200 clamps to 99%, effectively certain).
+            // Keep retrying until we get a hit (should happen on virtually the first shot).
+            for (int i = 0; i < 1000 && sAtk.ConsecutiveMisses != 0; i++)
+            {
+                sDef.Hp = 20; sAtk.ConsecutiveMisses = 3;
+                var r = Resolve(gS, sAtk, sDef, aimMod: 200);
+                if (!r.Hit) sAtk.ConsecutiveMisses = 3;  // restore if somehow missed (pathological RNG)
+            }
+            if (sAtk.ConsecutiveMisses != 0) fails.Add($"streakHitReset={sAtk.ConsecutiveMisses}");
+
+            // A CLEAN MISS must increment ConsecutiveMisses (use a large negative aimMod so we mostly miss).
+            sAtk.ConsecutiveMisses = 0;
+            sDef.Hp = 20;
+            bool foundMiss = false;
+            for (int i = 0; i < 500; i++)
+            {
+                sDef.Hp = 20;
+                int prevMisses = sAtk.ConsecutiveMisses;
+                var r = Resolve(gS, sAtk, sDef, aimMod: -200);
+                if (!r.Hit)
+                {
+                    // A clean miss should have incremented by 1 from prevMisses.
+                    if (sAtk.ConsecutiveMisses != prevMisses + 1) fails.Add("streakMissIncrement");
+                    foundMiss = true;
+                    break;
+                }
+                else
+                {
+                    // A hit/graze resets to 0; that's also the behaviour we want.
+                    sAtk.ConsecutiveMisses = 0;
+                }
+            }
+            if (!foundMiss) fails.Add("streakNoMissFound");
+
+            // ComputeOdds must NOT reflect the streak bonus (hidden from the display).
+            sAtk.ConsecutiveMisses = 5;
+            var oddsNoStreak = ComputeOdds(gS, sAtk, sDef);
+            sAtk.ConsecutiveMisses = 0;
+            var oddsZeroMisses = ComputeOdds(gS, sAtk, sDef);
+            if (oddsNoStreak.HitChance != oddsZeroMisses.HitChance) fails.Add("streakVisibleInOdds");
+        }
+
         return fails.Count == 0
-            ? "COMBATTEST: PASS (cover A-E + high-ground + tier-2 + drone/shield + ambush + graze all hold)"
+            ? "COMBATTEST: PASS (cover A-E + high-ground + tier-2 + drone/shield + ambush + graze + streak all hold)"
             : "COMBATTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 }

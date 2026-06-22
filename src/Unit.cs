@@ -145,6 +145,12 @@ public class Unit
     public bool BondAura;       // a bonded squadmate is adjacent (refreshed each frame by Game)
     public bool FiredFromConcealment; // true for ONE shot after breaking concealment (4.4)
 
+    // Streak-breaker (S4-C): counts consecutive CLEAN misses by this unit. After each
+    // miss the next shot gets a small hidden aim bonus (see Combat.Resolve). Resets to
+    // 0 on any hit or graze. Intentionally NOT persisted — per-mission accumulation only;
+    // a fresh unit starts at 0, and a connect always clears it.
+    public int ConsecutiveMisses;
+
     public AbilityKind Ability => AbilityKindFor(Cls);
     public string AbilityName => Ability switch
     {
