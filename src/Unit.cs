@@ -26,6 +26,15 @@ public enum StatusKind { Burning, Bleed, Stun, Disoriented }
 
 public class Status { public StatusKind Kind; public int Turns; }
 
+/// Awareness tier for activation pods (4.3). Enemies escalate gradually rather than
+/// flipping awake instantly, so first contact is telegraphed (never a turn-1 gotcha):
+///   Unaware   - hasn't noticed the squad; dormant, doesn't act ("?")
+///   Suspicious- spotted at range this turn; alerted but not yet engaging ("!"); it
+///               confirms (-> Alert) if still in sight at the player's turn end, or
+///               loses interest (-> Unaware) if the squad breaks line of sight.
+///   Alert     - fully awake; acts, shoots, and is a live threat (the old "Active").
+public enum AlertLevel { Unaware, Suspicious, Alert }
+
 public class Weapon
 {
     public string Name;
@@ -193,7 +202,11 @@ public class Unit
     public bool ReactedThisTurn; // overwatch fired this round
     public bool Alive = true;
 
-    public bool Active = true;  // enemies start dormant until their pod is sighted
+    // Awareness tier (4.3): enemies escalate Unaware -> Suspicious -> Alert instead of
+    // waking instantly. Active (acts in combat / is a live threat) == fully Alert, so the
+    // many read sites that gate on "is this enemy awake" keep working unchanged.
+    public AlertLevel Alert = AlertLevel.Alert;
+    public bool Active => Alert == AlertLevel.Alert;
     public int PodId = -1;      // activation-pod grouping (enemies only)
 
     public bool IsVip;          // escort objective: the asset to extract (mission-only, never persists)

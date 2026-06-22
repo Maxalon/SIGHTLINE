@@ -358,9 +358,12 @@ public static class Renderer
         bool friend = u.Team == Team.Player;
         bool vip = friend && u.IsVip;
         bool elite = u.Team == Team.Enemy && u.Cls == "ELITE";
-        bool dormant = u.Team == Team.Enemy && !u.Active;
-        Color main = vip ? Pal.VipGold : (friend ? Pal.Friend : (dormant ? Pal.RGBA(120, 96, 96) : (elite ? Pal.Elite : Pal.Foe)));
-        Color dark = vip ? Pal.VipDk  : (friend ? Pal.FriendDk : (dormant ? Pal.RGBA(46, 38, 42) : (elite ? Pal.EliteDk : Pal.FoeDk)));
+        // 4.3 awareness tiers: Unaware (grey "?") / Suspicious (amber "!") / Alert (live foe)
+        bool unaware    = u.Team == Team.Enemy && u.Alert == AlertLevel.Unaware;
+        bool suspicious = u.Team == Team.Enemy && u.Alert == AlertLevel.Suspicious;
+        bool inactive   = unaware || suspicious;   // not yet a live combatant: no facing/pips
+        Color main = vip ? Pal.VipGold : (friend ? Pal.Friend : (unaware ? Pal.RGBA(120, 96, 96) : (suspicious ? Pal.Suspect : (elite ? Pal.Elite : Pal.Foe))));
+        Color dark = vip ? Pal.VipDk  : (friend ? Pal.FriendDk : (unaware ? Pal.RGBA(46, 38, 42) : (suspicious ? Pal.SuspectDk : (elite ? Pal.EliteDk : Pal.FoeDk))));
 
         // lift the figure when it stands on raised terrain
         float hlift = g.Grid.IsHigh(u.X, u.Y) ? ElevLift : 0f;
@@ -402,10 +405,17 @@ public static class Renderer
         if (elite) Raylib.DrawRing(p, 18f, 20.5f, 0, 360, 40, Raylib.Fade(Pal.Elite, 0.55f));
         Raylib.DrawPoly(p, sides, elite ? 9f : 7.5f, rot, main);
 
-        // dormant enemies: show an "unaware" marker, no facing/pips/status
-        if (dormant)
+        // not-yet-engaged enemies: an awareness marker, no facing/pips/status
+        if (inactive)
         {
-            Raylib.DrawText("?", (int)(p.X - 4), (int)(p.Y - 32), 18, Pal.TxtDim);
+            if (suspicious)
+            {
+                // pulsing amber ring + "!" so being spotted reads instantly as a warning
+                float pulse = 0.5f + 0.5f * MathF.Sin((float)Raylib.GetTime() * 6f);
+                Raylib.DrawRing(p, 18f, 21f, 0, 360, 40, Raylib.Fade(Pal.Suspect, 0.30f + 0.45f * pulse));
+                Raylib.DrawText("!", (int)(p.X - 2), (int)(p.Y - 33), 20, Pal.Suspect);
+            }
+            else Raylib.DrawText("?", (int)(p.X - 4), (int)(p.Y - 32), 18, Pal.TxtDim);
             return;
         }
 

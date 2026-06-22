@@ -237,8 +237,8 @@ public static class Mission
             // grenades: bruisers + the elite always; some others from mission 2 on
             if (e.Cls == "ELITE") e.Grenades = 2;
             else if (n >= 2 && e.Cls != "MEDIC" && e.Cls != "SAPPER" && (e.Cls == "BRUISER" || Util.Roll(22))) e.Grenades = 1;
-            e.Active = false;          // dormant until sighted
-            e.PodId = i / 2;           // pods of ~2
+            e.Alert = AlertLevel.Unaware;  // dormant until sighted (escalates via 4.3 tiers)
+            e.PodId = i / 2;               // pods of ~2
             enemies.Add(e);
         }
     }

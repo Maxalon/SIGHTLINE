@@ -334,8 +334,17 @@ public class Game
         SetupMission(_run.Mission < 1 ? 1 : _run.Mission);
     }
 
-    /// Harness hook (screenshot only): reveal all dormant enemies.
-    public void DebugWakeAll() { foreach (var e in Enemies) if (e.Alive) e.Active = true; }
+    /// Harness hook (screenshot only): reveal all dormant enemies (fully alert).
+    public void DebugWakeAll() { foreach (var e in Enemies) if (e.Alive) e.Alert = AlertLevel.Alert; }
+
+    /// Harness hook (screenshot only): spread the three awareness tiers (4.3) across the
+    /// enemies so one frame shows Unaware ("?") / Suspicious ("!") / Alert glyph states.
+    public void DebugAlertTiers()
+    {
+        var foes = Enemies.Where(e => e.Alive).ToList();
+        for (int i = 0; i < foes.Count; i++)
+            foes[i].Alert = (AlertLevel)(i % 3);   // 0 Unaware, 1 Suspicious, 2 Alert
+    }
 
     /// Harness hook (screenshot only): stamp a tier-2 plateau (with a tier-1 step and a
     /// high-cover block) mid-field so the 2nd elevation tier is visible.
@@ -1109,24 +1118,71 @@ public class Game
         return false;
     }
 
-    // ---------------- activation pods ----------------
-    public const int SightRange = 9;   // pod-activation sight (4.2: down from 12 for a deliberate approach)
+    // ---------------- activation pods (4.3 awareness tiers) ----------------
+    public const int SightRange = 9;   // spotted at range -> Suspicious (4.2: down from 12)
+    public const int AlertRange = 4;   // spotted up close -> straight to Alert (no grace turn)
+
+    // Closest distance at which any living soldier currently has line of sight on this
+    // enemy (within SightRange), or -1 if it is unseen.
+    float ClosestSightedDist(Unit e)
+    {
+        float best = -1f;
+        foreach (var p in Players)
+        {
+            if (!p.Alive) continue;
+            float d = Util.TileDist(p.X, p.Y, e.X, e.Y);
+            if (d > SightRange || (best >= 0 && d >= best)) continue;
+            if (!Grid.HasLineOfSight(p.X, p.Y, e.X, e.Y)) continue;
+            best = d;
+        }
+        return best;
+    }
 
     void CheckPodActivation()
     {
         foreach (var e in Enemies)
         {
-            if (!e.Alive || e.Active) continue;
-            foreach (var p in Players)
-            {
-                if (!p.Alive) continue;
-                if (Util.TileDist(p.X, p.Y, e.X, e.Y) > SightRange) continue;
-                if (!Grid.HasLineOfSight(p.X, p.Y, e.X, e.Y)) continue;
-                ActivatePod(e.PodId);
-                break;
-            }
+            if (!e.Alive || e.Active) continue;          // already fully alert
+            float d = ClosestSightedDist(e);
+            if (d < 0) continue;                         // not in sight
+            if (d <= AlertRange) ActivatePod(e.PodId);   // blundered in close -> snap awake (+scatter)
+            else SetPodSuspicious(e.PodId);              // spotted at range -> telegraphed warning
         }
         TryFreeCaptive();
+    }
+
+    /// 4.3: a whole pod goes Suspicious (alerted "!"), but does NOT act or scatter yet — it
+    /// confirms (-> Alert) at the player's turn end if still in sight (ResolveSuspicion),
+    /// else loses interest (-> Unaware). This is the telegraph that kills the turn-1 gotcha.
+    void SetPodSuspicious(int podId)
+    {
+        bool any = false;
+        foreach (var e in Enemies)
+        {
+            if (!e.Alive || e.PodId != podId || e.Alert != AlertLevel.Unaware) continue;
+            e.Alert = AlertLevel.Suspicious;
+            Fx.PopText(e.Pos + new Vector2(0, -30), "!", Pal.Suspect, 22f);
+            any = true;
+        }
+        if (any) { BannerText = "CONTACT?"; BannerEnemy = true; BannerMax = BannerTimer = 0.9f; Audio.Play("select"); }
+    }
+
+    /// At the player's turn end, resolve every Suspicious pod: it confirms the threat
+    /// (-> Alert, acts this enemy turn, but with NO free scatter since it had a turn's
+    /// warning) when a soldier is still in sight, or loses interest (-> Unaware) when
+    /// contact was broken. So lingering in view wakes them; retreating keeps them dormant.
+    void ResolveSuspicion()
+    {
+        foreach (var e in Enemies)
+        {
+            if (!e.Alive || e.Alert != AlertLevel.Suspicious) continue;
+            if (ClosestSightedDist(e) >= 0)
+            {
+                e.Alert = AlertLevel.Alert;
+                Fx.PopText(e.Pos + new Vector2(0, -32), "ALERT", Pal.Foe, 18f);
+            }
+            else e.Alert = AlertLevel.Unaware;   // squad broke contact in time
+        }
     }
 
     /// RESCUE: free the caged captive once a soldier reaches it; it then becomes a
@@ -1147,16 +1203,20 @@ public class Game
             }
     }
 
+    // Snap a whole pod to fully Alert with a reaction scatter. This is the SURPRISE path
+    // (blundered in close, or shot/pinned/grenaded). The telegraphed path — a pod that was
+    // merely Suspicious — wakes via ResolveSuspicion instead, with NO scatter (it had its
+    // warning), so the criticized "free move on reveal" only happens on a genuine surprise.
     public void ActivatePod(int podId)
     {
         bool any = false;
         foreach (var e in Enemies)
         {
             if (!e.Alive || e.Active || e.PodId != podId) continue;
-            e.Active = true;
+            e.Alert = AlertLevel.Alert;
             any = true;
-            // free scatter toward cover/line of fire (move only, no shot), but 4.2 caps
-            // it to a SINGLE move — no free dash on reveal (an immobile turret gets none).
+            // free scatter toward cover/line of fire (move only, no shot); 4.2 caps it to a
+            // SINGLE move — no free dash on reveal (an immobile turret gets none).
             var plan = Ai.Plan(this, e);
             int cap = Math.Max(0, e.Mobility) * 2, spent = 0, lx = e.X, ly = e.Y;
             foreach (var (px, py) in plan.Path)
@@ -1688,7 +1748,7 @@ public class Game
                 if (!Grid.IsFloor(x, y) || IsOccupiedByOther(x, y, null)) continue;
             }
             var e = Mission.MakeWaveHostile(n, x, y);
-            e.Active = true; e.PodId = -1;
+            e.Alert = AlertLevel.Alert; e.PodId = -1;   // reinforcements arrive already engaged
             e.SyncPos();
             Enemies.Add(e);
             Fx.Burst(e.Pos, Pal.Foe, 14, 160f, 0.5f, 3f, true);
@@ -1723,9 +1783,10 @@ public class Game
         MoveCost = null;
         Phase = Phase.EnemyTurn;
         if (Objective == Objective.Defend) SpawnDefendWave();    // reinforcements assault the holdout
+        ResolveSuspicion();                                      // 4.3: suspicious pods confirm or lose contact
         FaceShields();                                           // AEGIS turns its barrier toward the squad
         foreach (var e in Enemies) if (e.Alive) { e.BeginTurn(); TickStatuses(e); }
-        _aiUnits = AliveEnemies().Where(e => e.Active).ToList();  // dormant pods don't act
+        _aiUnits = AliveEnemies().Where(e => e.Active).ToList();  // dormant/suspicious pods don't act
         _aiIdx = 0;
         _aiStage = AiStage.PickNext;
         _aiPlan = null;
@@ -2011,7 +2072,7 @@ public class Game
         if (c.Count > 1) c[1].AddStatus(StatusKind.Bleed, 2);
         if (c.Count > 2) c[2].AddStatus(StatusKind.Stun, 1);
         if (c.Count > 3) c[3].AddStatus(StatusKind.Disoriented, 2);
-        foreach (var e in Enemies) { e.Active = true; if (e.Alive) { e.AddStatus(StatusKind.Burning, 2); break; } }
+        foreach (var e in Enemies) { e.Alert = AlertLevel.Alert; if (e.Alive) { e.AddStatus(StatusKind.Burning, 2); break; } }
     }
 
     /// Harness hook (screenshot only): a decorated veteran (nickname/traits/bond) in

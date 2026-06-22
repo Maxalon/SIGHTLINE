@@ -198,6 +198,13 @@ seeds (mix of WIN/LOSE, no exceptions):
   high-cover screen that breaks cross-board sightlines (procedural maps) with one open
   "risky" lane, and the pod reveal-scatter capped to a single move — so first contact
   is a deliberate approach, not a turn-1 ambush. Connectivity-guarded.
+- **Alert / awareness tiers (Phase 4.3):** pods escalate Unaware ("?") -> Suspicious
+  (amber "!" + pulsing ring, "CONTACT?") -> Alert (red, live foe) instead of waking
+  instantly. Being spotted at range only makes a pod *suspicious* (it doesn't act/scatter);
+  it confirms to Alert at the player's turn end if still in sight (no free scatter — it had
+  a warning) or loses interest if the squad broke contact. Blundering in close (≤4) or any
+  aggression snaps it straight to Alert with the capped reaction scatter. `Unit.AlertLevel`
+  (`Active => Alert==Alert`), `Game.CheckPodActivation`/`SetPodSuspicious`/`ResolveSuspicion`.
 - Grid battlefield w/ high+low cover, LoS, 8-dir pathfinding (corner-cut safe).
 - 2-action combat: move, dash (yellow), fire (ends turn), overwatch reaction
   fire (both sides), hunker, reload.
@@ -856,12 +863,19 @@ screenshots, ship compiling code to `main`.
       the screen + covered approaches, authored maps (`SIGHTLINE_MAP`) still apply.
       **Follow-up:** PLAZA/ZIGGURAT authored arenas stay deliberately open (variety); the
       enemy AI doesn't yet exploit the screen's LoS. Next: 4.3 alert tiers, 4.4 concealment.
-- [ ] **4.3 Alert / awareness tiers (green -> yellow -> red).** Replace binary
-      dormant -> instant-scatter with a **suspicious** middle state so being spotted is
-      gradual and telegraphed (never a pure gotcha); reconsider/soften the free scatter
-      on activation (the most-criticized part of pod design). Touch the pod/`Unit.Active`
-      state -> a small alert enum, `Game.CheckPodActivation`/`ActivatePod`, renderer
-      glyph states. Verify: `SIGHTLINE_WAKE`-style shot of each tier; autoplay clean.
+- [x] **4.3 Alert / awareness tiers (green -> yellow -> red).** DONE. Binary
+      dormant->instant-scatter is replaced by a 3-state `AlertLevel` (Unaware / Suspicious /
+      Alert) on `Unit`; `Active` is now derived `=> Alert == AlertLevel.Alert`, so every
+      read site is unchanged. Pods escalate gradually: a soldier sighting one within
+      `SightRange` (9) sets the pod **Suspicious** (amber "!" + pulsing ring, a "CONTACT?"
+      telegraph) WITHOUT acting or scattering; at the player's turn end `Game.ResolveSuspicion`
+      either confirms it (-> Alert, acts that enemy turn, **no free scatter** since it had a
+      turn's warning) if still in sight, or it loses interest (-> Unaware) if the squad broke
+      contact. Blundering within the new `AlertRange` (4) or any aggression (shoot/pin/grenade)
+      still snaps a pod straight to Alert **with** the (4.2-capped, single-move) reaction
+      scatter. So first contact is telegraphed and the free scatter is softened to surprise-only.
+      Renderer draws the three glyph states; `Game.DebugAlertTiers` + `SIGHTLINE_ALERT=1` shot
+      shows all three. Verify: build 0/0, autoplay x5 clean (no TIMEOUT), `SIGHTLINE_ALERT` shot.
 - [ ] **4.4 Concealment + ambush (the marquee mechanic).** Squad starts **concealed**;
       while concealed it repositions/scouts freely and **the player chooses when to break
       stealth and engage**; springing the ambush pays off (no overwatch aim penalty,
@@ -940,6 +954,38 @@ Before stopping:
 4. Tell the human to open a fresh session (they'll send only `.`).
 
 ### WIP NOTES
+
+> **4.3 ALERT / AWARENESS TIERS (latest) — SHIPPED.** Replaces the binary
+> dormant->instant-scatter pod model with a graded `AlertLevel` so first contact is
+> telegraphed (DESIGN.md §5/§6: never a pure gotcha) and the "free scatter on reveal" is
+> softened to surprise-only. Files touched: **Unit.cs** (new `enum AlertLevel { Unaware,
+> Suspicious, Alert }`; `Active` is now a get-only `=> Alert == AlertLevel.Alert`, so all
+> the read sites — music intensity, threat preview, `_aiUnits`, autoplay-stall — are
+> unchanged; only the ~5 WRITE sites flipped to `e.Alert = ...`). **Mission.cs** (pod spawn
+> `e.Alert = AlertLevel.Unaware`). **Util.cs** (`Pal.Suspect`/`SuspectDk` amber). **Game.cs**
+> (the activation block: new `AlertRange=4`, `ClosestSightedDist`, `SetPodSuspicious`,
+> `ResolveSuspicion`, `ActivatePod` = the surprise/scatter path; `ResolveSuspicion()` call in
+> `EndPlayerTurn` before `_aiUnits`; `DebugAlertTiers`). **Renderer.cs** (3-way glyph:
+> grey "?" / amber "!"+pulsing ring / live foe). **Program.cs** (`SIGHTLINE_ALERT=1` hook).
+> The model: CheckPodActivation (runs on player tile-entry + in UpdatePlayer) — sighted
+> within SightRange(9) but >AlertRange(4) => pod **Suspicious** (no act/scatter, "CONTACT?");
+> sighted ≤AlertRange OR shot/pinned/grenaded => straight to **Alert** WITH the (4.2-capped
+> single-move) scatter. At EndPlayerTurn, `ResolveSuspicion` turns every Suspicious pod into
+> Alert (still in sight; **no scatter** — it acts on the coming enemy turn) or back to Unaware
+> (contact broken). KEY INVARIANT: Suspicious only ever exists *within* a player turn (the
+> telegraph window) — it's always resolved at the turn boundary, so there's no stuck/oscillating
+> state and no new TIMEOUT risk (the existing `AutoStallCheck` still treats Suspicious as
+> `!Active` and force-wakes after 10 stalled turns). Gotchas: (a) `Util.TileDist` returns
+> **float** (Euclidean) — `ClosestSightedDist` is float, don't make it int. (b) shooting a
+> Suspicious enemy is allowed (it's targetable like the old dormant ones) and the existing
+> `if (!target.Active) ActivatePod(...)` correctly snaps it to Alert+scatter. (c) the amber
+> Suspect color is near VipGold, but the "!" marker + enemy-side body distinguish them.
+> Verified: Release 0/0, autoplay x5 clean (LOSE, no exceptions/TIMEOUT — expected for the
+> weak smoke AI), `SIGHTLINE_ALERT=1` shot shows all three tiers. **Next Phase 4 step:** 4.4
+> **concealment + ambush** (the marquee mechanic — squad starts concealed, player chooses
+> when to break stealth; pairs with these tiers: breaking concealment = going red). Then 4.5
+> is the DEFERRED fog-of-war prototype (only if 4.4 proves insufficient). Phase 5 (post-FX
+> shader, font) is independent and can interleave.
 
 > **4.2 ENCOUNTER GEOMETRY (latest) — SHIPPED.** Fixes the turn-1 forced-ambush problem
 > (DESIGN.md §5) while keeping perfect information + the 18x11 full-bleed board (did NOT

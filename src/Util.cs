@@ -59,6 +59,9 @@ public static class Pal
     public static Color FoeDk      = RGBA(120, 30, 30);
     public static readonly Color Elite     = RGBA(255, 140, 90);   // capstone boss
     public static readonly Color EliteDk    = RGBA(120, 50, 20);
+    // 4.3 awareness tiers: amber middle state between dormant grey and alert red ("!")
+    public static readonly Color Suspect   = RGBA(245, 184, 64);
+    public static readonly Color SuspectDk  = RGBA(110, 78, 22);
     public static readonly Color Accent    = RGBA(251, 191, 36);
     public static Color Good      = RGBA(74, 222, 128);
 
