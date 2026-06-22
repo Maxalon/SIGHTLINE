@@ -150,7 +150,12 @@ public class Fx
             }
             else
             {
-                Raylib.DrawCircleV(p.Pos, p.Size * k, c);
+                // 5.4 soft-glow particle: a dim translucent halo (2.2x radius) + bright core.
+                // Reads as a glowing ember rather than a hard opaque disc; cost is one extra
+                // DrawCircleV per non-spark particle — negligible given typical counts.
+                float coreR = p.Size * k;
+                Raylib.DrawCircleV(p.Pos, coreR * 2.2f, Raylib.Fade(p.Color, k * 0.22f));
+                Raylib.DrawCircleV(p.Pos, coreR, c);
             }
         }
     }
