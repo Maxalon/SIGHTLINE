@@ -66,12 +66,19 @@ public static class Program
         // SIGHTLINE_MISSION=<n> : start the harness on mission n (verify Hack/Evac maps).
         int startMission = int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_MISSION"), out int sm) ? sm : 1;
 
+        // SIGHTLINE_POSTFX=1 : force Display.Init(true) even in shot mode so the post-FX
+        // shader is active; sets a strong demo bloom so the effect is clearly visible in
+        // the screenshot. Plain SIGHTLINE_SHOT (without POSTFX) stays byte-identical.
+        bool postFxShot = shot && Environment.GetEnvironmentVariable("SIGHTLINE_POSTFX") == "1";
+
         ConfigFlags flags = ConfigFlags.Msaa4xHint;
         if (!autoplay) flags |= ConfigFlags.VSyncHint;
         Raylib.SetConfigFlags(flags);
         Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "SIGHTLINE — Tactical Squad Combat");
         Raylib.SetExitKey(KeyboardKey.Null);       // ESC cancels aim/grenade & opens pause; never quits the app
-        Display.Init(!(shot || autoplay));         // window scaling/fullscreen (off for the headless harness)
+        // Display is normally OFF in the headless harness (byte-identical screenshots).
+        // SIGHTLINE_POSTFX=1 forces it ON (+ the post-FX demo bloom) for verification.
+        Display.Init(!(shot || autoplay) || postFxShot);
         Raylib.SetTargetFPS(autoplay ? 0 : 60);   // uncapped during the smoke test
         Audio.Init();
 
@@ -112,6 +119,13 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_TUTORIAL") == "1") game.TutStep = 0;
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CB") == "1") Pal.SetColorblind(true);
         if (shot && int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_BRIGHT"), out int _bi)) Display.BrightIdx = _bi;
+        // SIGHTLINE_POSTFX=1: inject a strong demo bloom + chroma so the shader effect
+        // is clearly visible in the screenshot without needing a live combat event.
+        if (postFxShot)
+        {
+            Display.BloomIntensity = 0.85f;
+            Display.ChromaIntensity = 0.6f;
+        }
         bool helpShot = shot && Environment.GetEnvironmentVariable("SIGHTLINE_HELP") == "1";  // hover the ability button
         int frame = 0;
         const int autoCap = 20000;

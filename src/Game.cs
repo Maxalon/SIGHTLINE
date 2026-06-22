@@ -207,6 +207,11 @@ public class Game
     public void AddHitStop(float s) { HitStop = MathF.Max(HitStop, s); }
     public void AddZoomPunch(float p) { _camPulse = MathF.Max(_camPulse, p); }
 
+    // Phase 5.2 post-FX: bloom spikes on hits/kills/crits and decays smoothly.
+    float _postFxBloom;   // 0..1, decays ~1.5 s
+    // AddBloom is called alongside AddHitStop; magnitude maps s (0.1 normal, 0.4 kill-cam) -> bloom.
+    public void AddBloom(float s) { _postFxBloom = MathF.Min(1f, _postFxBloom + s * 2.2f); }
+
     // ---------------- lifecycle ----------------
     /// Start a brand-new campaign run (called from intro / after a run ends).
     /// startAt lets the headless harness jump straight to a given mission.
@@ -667,6 +672,7 @@ public class Game
         Fx.AddShake(7f);
         AddHitStop(0.1f);
         AddZoomPunch(0.05f);
+        AddBloom(0.1f);
         Audio.Play("death");
 
         // KIA feedback (3.11): a fallen soldier gets a prominent stamp with their
@@ -684,6 +690,7 @@ public class Game
         {
             AddHitStop(0.4f);
             AddZoomPunch(0.13f);
+            AddBloom(0.4f);
             Fx.AddShake(11f);
         }
 
@@ -813,6 +820,22 @@ public class Game
         _camPulse *= MathF.Exp(-dt * 11f);
         if (_camPulse < 0.001f) _camPulse = 0;
         if (DeathFlash > 0) DeathFlash = MathF.Max(0, DeathFlash - dt * 1.6f);
+
+        // Phase 5.2: bloom decays smoothly (half-life ~0.6 s) and drives Display post-FX.
+        _postFxBloom = MathF.Max(0, _postFxBloom - dt * 0.9f);
+        Display.AdvanceTime(dt);
+        // Biome colour-grade tint: a gentle push toward the biome hue (neutral at 1,1,1).
+        // Values are close to 1 to avoid washing out readability; the squint test must pass.
+        var biomeT = Biome.Tint;
+        // Normalise biome tint to produce a subtle multiplicative grade near 1.0.
+        // biomeT components are 22..108 raw; map to 0.97..1.03 range.
+        float invBase = 1f / 80f;
+        var grade = new Vector3(
+            1f + (biomeT.R - 60) * invBase * 0.04f,
+            1f + (biomeT.G - 60) * invBase * 0.04f,
+            1f + (biomeT.B - 60) * invBase * 0.04f);
+        Display.SetPostFxParams(_postFxBloom, _postFxBloom * 0.55f, grade);
+
         if (HitStop > 0) { HitStop -= dt; return; }
 
         // pause/settings overlay + camera controls (live play only, never in autoplay)

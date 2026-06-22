@@ -102,6 +102,7 @@ public class ShotAnim : Anim
             D.Flash = 1f;
             D.Recoil = dir * (Res.Crit ? 8f : 5f);           // knockback
             g.AddHitStop(Res.Crit ? 0.09f : 0.05f);          // freeze on impact
+            g.AddBloom(Res.Crit ? 0.09f : 0.045f);           // Phase 5.2: bloom spike on hit/crit
             Color blood = D.Team == Team.Player ? Pal.Friend : Pal.Foe;
             g.Fx.Burst(D.Pos, blood, Res.Crit ? 22 : 13, Res.Crit ? 320f : 200f, 0.5f, 3.5f, true);
             g.Fx.Burst(D.Pos, Pal.RGBA(230, 230, 235), 6, 120f, 0.4f, 2.5f);
