@@ -96,5 +96,51 @@ public static class Maps
             "..................",
             "..................",
         },
+        new[] // CROSSROADS — staggered pillar rows create sightline-channelling lanes;
+              // a central tier-1 plateau is contested high ground; three open horizontal
+              // routes (top / centre / bottom) let squads pick approach angle
+        {
+            "..................",
+            "....o.........o...",
+            "...#..#...#..#....",
+            "..................",
+            ".....o.....o......",
+            "....#...^^...#....",
+            ".....o.....o......",
+            "..................",
+            "...#..#...#..#....",
+            "....o.........o...",
+            "..................",
+        },
+        new[] // FOXHOLES — dense CQB low-cover warren with two high-cover strongpoints;
+              // short engagement ranges, lots of duck-and-move; flanks stay open
+        {
+            "..................",
+            "...oo.....oo......",
+            ".....oo.oo........",
+            "....#.....#.......",
+            "....oo..oo........",
+            "..................",
+            "....oo..oo........",
+            "....#.....#.......",
+            ".....oo.oo........",
+            "...oo.....oo......",
+            "..................",
+        },
+        new[] // RIDGE — a diagonal tier-1 ridge with a tier-2 commanding peak at centre;
+              // low-cover approaches bracket the slope; seizing height is decisive
+        {
+            "..................",
+            ".....o............",
+            "......^...o.......",
+            ".......^^.........",
+            "........^^^.......",
+            "......o.=^^.o.....",
+            ".......^^^........",
+            "..........^^......",
+            "...o.......^......",
+            "............o.....",
+            "..................",
+        },
     };
 }
