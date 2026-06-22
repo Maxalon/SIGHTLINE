@@ -50,8 +50,13 @@ public static class Mission
         for (int i = 0; i < players.Count && i < PlayerSpawns.Length; i++)
         {
             var u = players[i];
-            u.X = PlayerSpawns[i].x;
-            u.Y = PlayerSpawns[i].y;
+            // the VIP/captive always takes the dedicated 5th slot, even when the squad is
+            // short-handed (benched soldier) and the VIP would otherwise land on a soldier's
+            // lower index and spawn far from the squad/extraction (review Major). Rescue
+            // re-seats its captive at centre after Build, so this only matters for Escort.
+            var sp = u.IsVip ? PlayerSpawns[PlayerSpawns.Length - 1] : PlayerSpawns[i];
+            u.X = sp.x;
+            u.Y = sp.y;
             u.Ammo = u.Weapon.Clip;
             u.Grenades = 1 + u.BonusGrenades + (u.HasPerk(Perk.Bandolier) ? 1 : 0);  // refill (+cache +Bandolier)
             u.AbilityCharge = 1 + (u.HasPerk(Perk.Adrenal) ? 1 : 0);// refill (+Adrenal)

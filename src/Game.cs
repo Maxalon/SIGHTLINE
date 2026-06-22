@@ -233,10 +233,11 @@ public class Game
         CamZoom = 1f; CamPan = Vector2.Zero; _autoCamManual = false;
         // per-mission roster: a copy of the persistent squad (+ an optional VIP),
         // so adding the escort asset never pollutes the campaign squad.
-        // Benched soldiers sit this mission out (accelerated recovery in DebriefSurvivors);
-        // we clear the Benched flag here so they auto-reset for the following mission.
+        // Benched soldiers sit this mission out (deploy short-handed). They get accelerated
+        // recovery in DebriefSurvivors and the flag is cleared THERE (EnterBarracks, after the
+        // debrief consumes it) - so it must survive the whole mission. Do NOT clear it here,
+        // or the recovery path is dead code (review Blocker 2).
         Players = new List<Unit>(_run.Squad.Where(u => !u.Benched));
-        foreach (var u in _run.Squad) u.Benched = false;   // cleared at mission start
 
         // objective + difficulty come from the chosen deployment card (Run.ObjectiveFor baseline)
         var card = _run.CurrentCard ?? Run.StandardCard(n);
@@ -308,7 +309,7 @@ public class Game
         foreach (var u in Players) u.BeginTurn();
         // per-mission feat tracking + status effects start clean each mission
         foreach (var u in Players)
-        { u.FeatMultiKill = u.FeatClutch = u.FeatVengeful = u.WasNearDeath = u.AllyDown = false; u.BondAura = false; u.Statuses.Clear(); }
+        { u.FeatMultiKill = u.FeatClutch = u.FeatVengeful = u.WasNearDeath = u.AllyDown = false; u.BondAura = false; u.ConsecutiveMisses = 0; u.Statuses.Clear(); }
         _missionKia.Clear();
         DeathFlash = 0;
         RollSecondary(n);
@@ -410,6 +411,35 @@ public class Game
         return fails.Count == 0
             ? "CONCEALTEST: PASS (start concealed; pods gated; break arms+wakes; RevealRange breaks w/o bonus)"
             : "CONCEALTEST: FAIL (" + string.Join(",", fails) + ")";
+    }
+
+    /// Headless self-test for the bench/short-handed lifecycle (S3-A + review fixes).
+    /// Verifies a benched veteran is NOT deployed, NOT lost from the squad, recovers
+    /// (full HP + Wound-2), and is un-benched afterwards. Prints BENCHTEST: PASS/FAIL.
+    public string BenchSelfTest()
+    {
+        NoPersist = true;
+        var fails = new System.Collections.Generic.List<string>();
+        StartMission(1);                                  // fresh run + mission 1 deployed
+        var vet = _run.Squad.FirstOrDefault(u => !u.IsVip);
+        if (vet == null) return "BENCHTEST: FAIL (noSquad)";
+        vet.Wound = 2; vet.Hp = 1; vet.Benched = true;    // a wounded veteran, benched
+
+        SetupMission(1);                                  // redeploy with the bench set
+        if (Players.Contains(vet)) fails.Add("benchedStillDeployed");
+        if (!vet.Benched) fails.Add("flagClearedAtSetup");          // Blocker 2
+        if (!_run.Squad.Contains(vet)) fails.Add("droppedAtSetup");
+        if (AlivePlayers().Count(p => !p.IsVip) > 3) fails.Add("deployedNotShortHanded");
+
+        EnterBarracks();                                  // simulate mission-end debrief
+        if (!_run.Squad.Contains(vet)) fails.Add("benchedLostAtBarracks");   // Blocker 1
+        if (vet.Benched) fails.Add("flagNotClearedAfterDebrief");            // Blocker 2
+        if (vet.Hp != vet.MaxHp) fails.Add("notHealed");                     // accelerated recovery
+        if (vet.Wound != 0) fails.Add($"woundNotRecovered={vet.Wound}");     // 2 -> 0 (decay 2)
+
+        return fails.Count == 0
+            ? "BENCHTEST: PASS (benched veteran sits out, is preserved, recovers full HP + 2 wound steps, un-benches)"
+            : "BENCHTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
     /// Harness hook (screenshot only): stamp a tier-2 plateau (with a tier-1 step and a
@@ -546,7 +576,12 @@ public class Game
 
     void EnterBarracks()
     {
+        // a benched soldier sat this mission out: it's still in _run.Squad (flagged) but was
+        // never in Players, so it's absent from AlivePlayers(). Preserve it across the rebuild,
+        // or benching would silently destroy the veteran (review Blocker 1).
+        var benched = _run.Squad.Where(u => u.Benched && u.Alive).ToList();
         _run.Squad = AlivePlayers().Where(u => !u.IsVip).ToList();  // the VIP never joins the squad
+        foreach (var b in benched) if (!_run.Squad.Contains(b)) _run.Squad.Add(b);
         int survivors = _run.Squad.Count;
         bool finished = _run.Mission >= Run.MaxMissions;
 
@@ -555,6 +590,7 @@ public class Game
             foreach (var u in _run.Squad) u.Hp = u.MaxHp;
 
         _run.DebriefSurvivors();
+        foreach (var u in _run.Squad) u.Benched = false;   // consumed (Blocker 2): redeploy next mission
 
         // secondary objective (3.9): award bonus intel if the optional goal was met
         if (Secondary != SecondaryKind.None)

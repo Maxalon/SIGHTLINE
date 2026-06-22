@@ -143,7 +143,10 @@ public static class Combat
         // Streak-breaker (S4-C): apply a small hidden bonus after consecutive clean misses.
         // Keeps it subtle (max +12); resets on any connect (hit or graze). HIDDEN from
         // the ComputeOdds tooltip so players don't know the dice are loaded (DESIGN.md 3B).
-        int streakBonus = Math.Min(StreakBonusPerMiss * a.ConsecutiveMisses, MaxStreakBonus);
+        // player-only: the streak-breaker exists to curb the PLAYER's miss-streak frustration;
+        // enemies don't rage, and a hidden enemy aim nudge would only quietly raise difficulty
+        // (review Minor — matches the "a soldier's shot" intent).
+        int streakBonus = a.Team == Team.Player ? Math.Min(StreakBonusPerMiss * a.ConsecutiveMisses, MaxStreakBonus) : 0;
         int effHit = Util.Clamp(odds.HitChance + aimMod + streakBonus, 1, 99);
 
         var res = new ShotResult { Odds = odds };

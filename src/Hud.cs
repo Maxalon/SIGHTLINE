@@ -520,9 +520,9 @@ public static class Hud
     static void DrawBarracks(Game g)
     {
         var run = g.RunState;
+        BenchBtns.Clear();   // clear before the shop/perk early-returns so no stale rects linger
         if (!g.ShopDone) { DrawRequisition(g); return; }
         if (run.PendingPerks.Count > 0) { DrawPerkChooser(g, run.PendingPerks[0]); return; }
-        BenchBtns.Clear();
         var squad = run.Squad;
         Raylib.DrawRectangle(0, 0, Cfg.ScreenW, Cfg.ScreenH, Raylib.Fade(Pal.RGBA(5, 8, 11), 0.85f));
 

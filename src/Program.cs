@@ -65,6 +65,14 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        // SIGHTLINE_BENCHTEST=1 : bench/short-handed lifecycle (S3-A + review fixes).
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_BENCHTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "benchtest");
+            Console.WriteLine(new Game().BenchSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         // SIGHTLINE_COVERTEST=1 : destructible-cover degrade chain (item 3.6). No window.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_COVERTEST") == "1")
         {
