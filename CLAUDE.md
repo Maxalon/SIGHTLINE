@@ -218,6 +218,16 @@ seeds (mix of WIN/LOSE, no exceptions):
   keeps Display OFF (byte-stable shots); `SIGHTLINE_POSTFX=1` forces it on to verify.
 - **9 authored arenas** (`src/Maps.cs`): the original 6 + CROSSROADS / FOXHOLES / RIDGE
   (RIDGE is the first to use the tier-2 `=` legend). `SIGHTLINE_MAP=<index>` forces one.
+- **Real font (Phase 5.3):** `assets/NotoMono-Regular.ttf` (OFL-1.1) baked via `LoadFontEx`
+  (`Cfg.Font`, default-font fallback); all HUD/board text is `DrawTextEx` now. **ASCII-only is
+  lifted** — non-ASCII glyphs (em-dash, curly quotes, etc.) are baked and usable.
+- **Graze / partial-hit (S2-A):** a shot that misses by <=15 GRAZES (hit for min weapon
+  damage, no crit) instead of a clean miss; every hit deals >=1 (`Combat.GrazeBand`,
+  `ShotResult.Graze`, lighter "GRAZE" FX). Softens the output-randomness tail (DESIGN.md 3B).
+- **Enemy AI utility items (S2-B):** SNIPER/SCOUT throw SMOKE to blind a player overwatch
+  lane; BERSERKER throws FLASH to disorient a cluster; late GRUNTs get smoke. `EnemyPlan.UseItem`
+  + `Ai.BestSmoke/BestFlash` + a `Game.UpdateEnemy` item branch + `Unit.EnemyItem`. Never
+  splashes allies, always spends the action (no TIMEOUT).
 - Grid battlefield w/ high+low cover, LoS, 8-dir pathfinding (corner-cut safe).
 - 2-action combat: move, dash (yellow), fire (ends turn), overwatch reaction
   fire (both sides), hunker, reload.
@@ -933,18 +943,19 @@ stand and are reinforced by DESIGN.md §3D/E/G.
       accent), the **60-30-10** split, a **value-contrast** rule, line/shape language, and
       a **squint-test** acceptance check (squint: can you still find the selected unit +
       nearest threat + objective?). Pure docs; everything below conforms to it.
-- [ ] **5.2 Post-processing pass.** A shader stage on the existing `Display`
-      render-target: tasteful **bloom** (event-reactive — spike on hits/kills/crits),
-      **vignette**, per-**biome color grading**, subtle **chromatic aberration** on impact.
-      GLSL only, no assets. Biggest production-value lift; keep bloom subtle (the genre's
-      most-overused effect). Touch `src/Display.cs` (post pass), a small `.fs`/`.vs` shader
-      pair, `Fx` for event intensity. Verify: `SIGHTLINE_SHOT` before/after per biome; keep
-      it OFF in the headless harness so smoke shots stay byte-stable.
-- [ ] **5.3 Real font (kills the ASCII `?` limit).** Bake a committed small font via
-      `LoadFontEx` (procedural/generated, permissive) and route HUD/board text through it;
-      drop the ASCII-only constraint. Upgrades all typography. Touch `Hud`/`Renderer` text
-      draws + a font load in `Program`. Verify: `SIGHTLINE_SHOT` of HUD/cards rendering
-      non-ASCII glyphs correctly.
+- [x] **5.2 Post-processing pass.** DONE (Sprint 1). An embedded-GLSL post stage in
+      `src/Display.cs` over the render-target: soft **vignette**, event-reactive **bloom**
+      (`Game.AddBloom` spikes on hits/kills, decays), subtle per-**biome color grade**, and
+      impact **chromatic aberration**. Shader is a C# string (`LoadShaderFromMemory`, no asset
+      files), guarded by `IsShaderValid`. Headless harness keeps Display OFF (byte-stable
+      shots); `SIGHTLINE_POSTFX=1` forces it on to view. Bloom kept subtle in live play.
+- [x] **5.3 Real font (kills the ASCII `?` limit).** DONE (Sprint 2). Committed
+      `assets/NotoMono-Regular.ttf` (107KB, SIL OFL-1.1, free to redistribute) baked at 64px
+      via `LoadFontEx` in `Program.cs` (ASCII + em/en-dash, curly quotes, bullet, ellipsis,
+      x, middot), stored as `Cfg.Font` with a `GetFontDefault()` fallback. ~154
+      `DrawText`/`MeasureText` sites migrated to `DrawTextEx`/`MeasureTextEx` (Hud/Renderer/Fx),
+      sizes+positions unchanged. **The ASCII-only constraint is now lifted** — non-ASCII
+      glyphs are available; new strings can use them (though most still ASCII for now).
 - [ ] **5.4 Procedural texturing & particles.** Replace flat fills with subtle in-engine
       **noise** on floor/cover/plateaus, **soft-glow** particle sprites (vs hard rects),
       and generated **HUD icon glyphs**. `GenImage*` at load → cached textures; no committed

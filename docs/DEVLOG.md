@@ -89,3 +89,37 @@ sabotage/rescue/defend (no exceptions, no TIMEOUT); screenshots verified for eac
 
 Batching: S2-A (Combat/Anim) and S1-B (Program/Hud/Renderer/Fx) are file-disjoint -> parallel.
 S2-B touches Ai + Game(light); sequenced against other Game.cs work.
+
+### Sprint 1 peer review — findings (to apply as one batch AFTER Sprint 2 integrates)
+
+Reviewer verdict: **no blockers**; risky parts (shader compile guard, headless byte-stability,
+one-shot ambush discipline, captive decoupling, arena connectivity) all validated. To fix
+(all touch Game.cs/Display.cs, which Sprint 2 devs are editing — so batched, not applied mid-flight):
+- **M1 (major):** overwatch reactions fire while `SquadConcealed` without breaking stealth — a free
+  reaction round with no reveal (reachable with pre-active/Defend-wave enemies). Fix: in
+  `OnUnitEnteredTile`'s overwatch-fire loop, `if (w.Team==Player && SquadConcealed) BreakConcealment();`
+  (no actor -> no ambush bonus on a reaction) before the shot resolves.
+- **Mi1:** `DoAbility` Suppress passes the actor to `BreakConcealment` but has no shot to consume the
+  flag -> change to `BreakConcealment()` (no actor).
+- **Mi2:** add a RevealRange-proximity case to `ConcealSelfTest` (active foe at distance 3 -> auto-break).
+- **Mi3/N1 (shader):** bloom radius is aspect-agnostic + a dead `texel` var in the GLSL — make it
+  texel-relative. (N2 is a doc-comment nit; optional.)
+
+### Sprint 2 — RESULT (all shipped to PR #47)
+
+| Item | Owner | Outcome |
+|---|---|---|
+| S2-A graze / partial-hit + damage floor (`Combat`/`Anim`) | Dev D | Clean; integrated `e0feaa6`. Correct roll convention, preserved the post-FX bloom line. |
+| S1-B / 5.3 real font NotoMono (`Program/Hud/Renderer/Fx/Util/csproj/assets`) | Dev E | Clean; integrated `50caa57`. ~154 call sites migrated, OFL font committed, ASCII limit lifted. |
+| S2-B enemy AI utility items (`Ai/Game/Mission/Unit`) | Dev F | Clean; integrated `f1af741`. 11 autoplay runs clean; throttled, no ally-splash, no TIMEOUT. |
+| Sprint 1 review fixes (M1/Mi1/Mi2/Mi3/N1) | Orchestrator | Applied in `f1af741` (batched onto the integrated trunk after the Game.cs-touching dev landed, to avoid conflict). |
+
+All Sprint 2 devs ran in parallel on disjoint files (Combat/Anim | Program/Hud/Renderer/Fx/Util/csproj | Ai/Game/Mission/Unit) — zero merge conflicts. The Sprint 1 peer review ran in parallel (read-only). Integration was incremental, one commit per feature; the review fixes (Game.cs/Display.cs) were applied last so they didn't collide with Dev F's Game.cs work. QA on the integrated trunk: build 0/0, COMBATTEST + CONCEALTEST PASS, post-FX shader recompiles after the GLSL fix, autoplay clean x5 + sabotage/rescue/defend.
+
+## Sprint 3 — run-loop stakes + combat consistency + focal visuals (planned)
+
+Disjoint-file wave (parallel-safe): **S3-A** bench / deploy short-handed (attrition bites —
+`Run`/`Game`/`Hud`/`SaveGame`); **S4-C** streak-breaker + damage bell-curve (`Combat`/`Unit`);
+**S3-B** focal-point unit lighting (`Renderer`). Plus a peer review of the Sprint 2 gameplay
+logic (graze + AI items). Deferred to a later wave (share hot files with S3-A/S3-B):
+S4-A intel hints (Hud/Run), S4-B semantic color+shape (Renderer), S2-C overwatch-camp pressure (Game/Hud).
