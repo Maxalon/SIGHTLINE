@@ -152,7 +152,8 @@ public class ShotAnim : Anim
             float k = 1f - (_t - Fire) / (BeamEnd - Fire);
             var dir = Vector2.Normalize(D.Pos - A.Pos + new Vector2(0.001f, 0f));
             Vector2 start = A.Pos + dir * 16f;
-            Color beam = Res.Hit ? Pal.Accent : Pal.RGBA(170, 180, 195);
+            // graze fires a dimmer beam than a solid hit (reinforces the lighter "GRAZE" read)
+            Color beam = Res.Hit ? (Res.Graze ? Pal.RGBA(165, 175, 195) : Pal.Accent) : Pal.RGBA(170, 180, 195);
             Raylib.DrawLineEx(start, _impact, 3.5f * k + 0.6f, Raylib.Fade(beam, k));
             Raylib.DrawLineEx(start, _impact, 1.2f, Raylib.Fade(Pal.RGBA(255, 255, 255), k * 0.8f));
             // muzzle glow

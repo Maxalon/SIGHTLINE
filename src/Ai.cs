@@ -212,9 +212,10 @@ public static class Ai
                 if (smokeGood)
                 {
                     plan.UseItem = true; plan.ItemTx = sx; plan.ItemTy = sy;
-                    // smoke does NOT cancel a shot — the enemy moves into cover first,
-                    // then the smoke blinds the approach lane. Only cancel the shot if
-                    // we're lobbing smoke right on the target tile (would block our own shot).
+                    // Using an item ends the enemy's turn (UpdateEnemy zeroes ActionsLeft),
+                    // so a planned shot won't fire this turn regardless; still null ShootTarget
+                    // when the smoke lands on the target tile so the AI doesn't "plan" a shot
+                    // it would have blinded anyway.
                     if (plan.ShootTarget != null &&
                         Util.ChebyDist(sx, sy, plan.ShootTarget.X, plan.ShootTarget.Y) <= SmokeAnim.Radius)
                         plan.ShootTarget = null;
@@ -277,7 +278,7 @@ public static class Ai
         var eCover = g.Grid.GetCover(fx, fy,
             g.AlivePlayers().Count > 0 ? g.AlivePlayers()[0].X : 0,
             g.AlivePlayers().Count > 0 ? g.AlivePlayers()[0].Y : 0);
-        if (eCover.Flanked && Util.TileDist(fx, fy, fx, fy) <= Game.ItemRange)
+        if (eCover.Flanked)   // smoke lands on the unit's own tile, so range is trivially ok
             return (fx, fy, true);
         return (0, 0, false);
     }
@@ -292,7 +293,9 @@ public static class Ai
             if (Util.TileDist(fx, fy, p.X, p.Y) > Game.ItemRange) continue;
             int hits = 0, allies = 0;
             foreach (var q in g.AlivePlayers()) if (Util.ChebyDist(p.X, p.Y, q.X, q.Y) <= FlashAnim.Radius) hits++;
-            foreach (var a in g.AliveEnemies()) if (a != e && Util.ChebyDist(p.X, p.Y, a.X, a.Y) <= FlashAnim.Radius) allies++;
+            // count the THROWER too (review Mi4): a flash that lands adjacent to e would
+            // disorient e itself - that's self-harm, so it must veto the throw.
+            foreach (var a in g.AliveEnemies()) if (Util.ChebyDist(p.X, p.Y, a.X, a.Y) <= FlashAnim.Radius) allies++;
             if (hits > bestHits || (hits == bestHits && allies < bestAllies))
             { bestHits = hits; bestAllies = allies; bx = p.X; by = p.Y; }
         }

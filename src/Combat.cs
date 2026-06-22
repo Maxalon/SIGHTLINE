@@ -46,6 +46,9 @@ public static class Combat
     // Graze band: a shot that misses by <= GrazeBand hits for minimum damage (no crit).
     // Softens the "I whiffed three 80% shots" tail without removing true misses.
     public const int GrazeBand = 15;
+    // Always reserve at least this much clean-miss probability so the graze band can't
+    // swallow the whole roll space at high hit chance (review M1: keep true misses alive).
+    public const int GrazeMinMiss = 3;
 
     public static ShotOdds ComputeOdds(Grid grid, Unit a, Unit d)
     {
@@ -146,10 +149,13 @@ public static class Combat
         var res = new ShotResult { Odds = odds };
 
         // Inline the roll so we can inspect the raw value for the graze band.
-        // Roll is in [0,100): hit if roll < effHit. Graze if roll in [effHit, effHit+GrazeBand).
+        // Roll is in [0,100): hit if roll < effHit. Graze if roll in [effHit, grazeTop),
+        // where grazeTop reserves a minimum clean-miss window so even high-% shots can
+        // still truly miss (review M1: graze softens the tail, it doesn't delete misses).
         double roll = Util.Rng.NextDouble() * 100.0;
+        double grazeTop = Math.Min(effHit + GrazeBand, 100.0 - GrazeMinMiss);
         bool hit   = roll < effHit;
-        bool graze = !hit && roll < effHit + GrazeBand;
+        bool graze = !hit && roll < grazeTop;
 
         if (!hit && !graze)
         {
@@ -310,9 +316,10 @@ public static class Combat
             if (grazePct < 8f || grazePct > 22f) fails.Add($"grazeGrazeRate={grazePct:F1}");
             if (missPct < 18f || missPct > 32f) fails.Add($"grazeMissRate={missPct:F1}");
 
-            // A graze must deal exactly DmgMin and must not be a Crit.
-            bool foundGraze = false, grazeNoCrit = true, grazeDmgMin = true;
-            for (int i = 0; i < 2000 && (!foundGraze || grazeNoCrit && grazeDmgMin); i++)
+            // A graze must deal exactly DmgMin and must not be a Crit. Always run the full
+            // sample (no early exit) so the loop can't be misread as a premature-bail bug.
+            bool foundGraze = false, grazeCritBad = false, grazeDmgBad = false;
+            for (int i = 0; i < 2000; i++)
             {
                 gAtk.ConsecutiveMisses = 0;  // isolate: no streak bonus
                 gDef.Hp = 20;
@@ -320,13 +327,13 @@ public static class Combat
                 if (r.Hit && r.Graze)
                 {
                     foundGraze = true;
-                    if (r.Crit) grazeNoCrit = false;
-                    if (r.Damage != gAtk.Weapon.DmgMin) grazeDmgMin = false;
+                    if (r.Crit) grazeCritBad = true;
+                    if (r.Damage != gAtk.Weapon.DmgMin) grazeDmgBad = true;
                 }
             }
             if (!foundGraze) fails.Add("grazeNeverOccurred");
-            if (!grazeNoCrit) fails.Add("grazeCrit");
-            if (!grazeDmgMin) fails.Add("grazeDmgNotMin");
+            if (grazeCritBad) fails.Add("grazeCrit");
+            if (grazeDmgBad) fails.Add("grazeDmgNotMin");
 
             // A clean miss (roll >= effHit + GrazeBand) must have Hit==false.
             // Confirm: with effHit bumped very high a graze is ~15% window above 95 which is clamped,
