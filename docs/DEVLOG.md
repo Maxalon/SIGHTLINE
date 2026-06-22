@@ -184,9 +184,21 @@ The formation + shape-cue changes are both correct + present, just bundled under
 "formation" message. To get one-commit-per-feature with file-checkout integration: checkout +
 commit ONE feature's files, THEN checkout the next. (No force-push to fix a pushed commit message.)
 
-## Sprint 5 — candidates (next)
+### Sprint 3/4 peer review — RESOLVED (`b657838`)
 
-S4-A intel hints on the campaign map (`Hud`/`Run`); S2-C overwatch-camp soft pressure (`Game`/`Hud`)
-— these share `Hud`, so sequence them; 5.4 procedural floor/cover noise texturing (`Renderer`/`Fx`);
-possibly a new enemy archetype or objective variant for content breadth. Peer review of Sprint 3/4
-logic (bench/auto-cam/formation) is in flight.
+The review found TWO blockers in bench that autoplay couldn't (the autopilot never benches):
+(1) a benched soldier was dropped from `_run.Squad` (rebuilt from the deployed `Players`) and
+replaced by a rookie — benching destroyed the veteran; (2) the `Benched` flag was cleared in
+`SetupMission` before `DebriefSurvivors`, making the accelerated-recovery path dead code. Plus a
+Major (VIP spawned at a soldier's slot when short-handed) and minors (per-mission `ConsecutiveMisses`
+reset; streak-breaker gated player-only; `BenchBtns` cleared before early-returns). All fixed +
+a new `SIGHTLINE_BENCHTEST` self-test (bench -> deploy short -> barracks: veteran preserved, recovers
+full HP + 2 wound steps, un-benches). Auto-cam + formation were found logic-correct. Lesson reinforced:
+**review-in-parallel catches what autoplay structurally can't** (anything the weak autopilot never does).
+
+## Sprint 5 — visual richness + strategic info + variety (planned)
+
+Disjoint wave: **S4-A** intel hints on the campaign map (`Hud`/`Run`) — make the branch pick an
+informed choice; **5.4** procedural floor/cover noise texturing + soft-glow particles (`Renderer`/`Fx`);
+**themed-per-biome arena selection + 2 new arenas** (`Maps`/`Mission`). (S2-C overwatch-camp pressure
+deferred — shares `Hud` with S4-A.) Peer review of the Sprint 5 logic to follow.
