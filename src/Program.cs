@@ -84,6 +84,48 @@ public static class Program
         Raylib.SetConfigFlags(flags);
         Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "SIGHTLINE — Tactical Squad Combat");
         Raylib.SetExitKey(KeyboardKey.Null);       // ESC cancels aim/grenade & opens pause; never quits the app
+
+        // Phase 5.3 — real bitmap font (NotoMono-Regular, OFL-1.1).
+        // Bake ASCII 32-126 plus a selection of useful non-ASCII codepoints so the
+        // font supports them once we start using them.
+        {
+            int[] codepoints = new int[]
+            {
+                // ASCII printable range 32..126
+                32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,
+                48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,
+                65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,
+                81,82,83,84,85,86,87,88,89,90,
+                91,92,93,94,95,96,
+                97,98,99,100,101,102,103,104,105,106,107,108,109,110,
+                111,112,113,114,115,116,117,118,119,120,121,122,
+                123,124,125,126,
+                // useful non-ASCII
+                0x2013, // en-dash
+                0x2014, // em-dash
+                0x2018, // left single quote
+                0x2019, // right single quote
+                0x201C, // left double quote
+                0x201D, // right double quote
+                0x2022, // bullet
+                0x2026, // ellipsis
+                0x00D7, // multiply sign
+                0x00B7, // middle dot
+            };
+            Font loaded = Raylib.LoadFontEx("assets/NotoMono-Regular.ttf", 64, codepoints, codepoints.Length);
+            if (loaded.Texture.Id != 0)
+            {
+                Raylib.SetTextureFilter(loaded.Texture, TextureFilter.Bilinear);
+                Cfg.Font = loaded;
+                Console.WriteLine("FONT: NotoMono-Regular loaded (glyph atlas ok)");
+            }
+            else
+            {
+                Cfg.Font = Raylib.GetFontDefault();
+                Console.WriteLine("FONT: NotoMono-Regular not found, falling back to default");
+            }
+        }
+
         // Display is normally OFF in the headless harness (byte-identical screenshots).
         // SIGHTLINE_POSTFX=1 forces it ON (+ the post-FX demo bloom) for verification.
         Display.Init(!(shot || autoplay) || postFxShot);
@@ -169,6 +211,8 @@ public static class Program
 
         Display.Shutdown();
         Audio.Shutdown();
+        if (Cfg.Font.Texture.Id != 0 && Cfg.Font.Texture.Id != Raylib.GetFontDefault().Texture.Id)
+            Raylib.UnloadFont(Cfg.Font);
         Raylib.CloseWindow();
     }
 

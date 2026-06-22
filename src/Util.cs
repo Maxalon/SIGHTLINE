@@ -17,6 +17,10 @@ public static class Cfg
     public static int BoardH => GridH * Tile;       // 704
     public static int OriginX => (ScreenW - BoardW) / 2; // 64 (clears the left roster strip)
     public const int OriginY = 40;                  // board floats near the top; translucent HUD overlays its edges
+
+    // Real bitmap font (Phase 5.3) — loaded in Program.cs after InitWindow.
+    // Falls back to Raylib's default if the TTF is missing (graceful degradation).
+    public static Font Font;
 }
 
 /// Colour palette + helpers.

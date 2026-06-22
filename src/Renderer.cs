@@ -115,7 +115,7 @@ public static class Renderer
             minx = Math.Min(minx, x); miny = Math.Min(miny, y);
         }
         var at = Util.TileCenter(minx, miny);
-        Raylib.DrawText("EVAC", (int)at.X - 4, (int)(at.Y - Cfg.Tile / 2 + 4), 14, Pal.Good);
+        Raylib.DrawTextEx(Cfg.Font, "EVAC", new Vector2((int)at.X - 4, (int)(at.Y - Cfg.Tile / 2 + 4)), 14, 1f, Pal.Good);
     }
 
     // Hack objective: a console tile with a segmented progress ring.
@@ -148,7 +148,7 @@ public static class Renderer
         Raylib.DrawRectangleLinesEx(new Rectangle(c.X - 9, c.Y - 11, 18, 22), 1.5f, col);
         Raylib.DrawRectangleRec(new Rectangle(c.X - 5, c.Y - 7, 10, 6), Raylib.Fade(col, 0.6f + 0.4f * pulse));
 
-        Raylib.DrawText("TERMINAL", (int)c.X - 26, (int)r.Y - 13, 11, col);
+        Raylib.DrawTextEx(Cfg.Font, "TERMINAL", new Vector2((int)c.X - 26, (int)r.Y - 13), 11, 1f, col);
     }
 
     // SABOTAGE charge sites: a blinking demolition console per site; armed once planted.
@@ -172,7 +172,7 @@ public static class Renderer
             Raylib.DrawRectangleLinesEx(new Rectangle(c.X - 8, c.Y - 9, 16, 18), 1.5f, col);
             Raylib.DrawCircleV(new Vector2(c.X, c.Y), 3.5f, Raylib.Fade(col, blown ? 0.9f : 0.5f + 0.5f * pulse));
 
-            Raylib.DrawText(blown ? "ARMED" : "CHARGE", (int)c.X - 18, (int)r.Y - 13, 10, col);
+            Raylib.DrawTextEx(Cfg.Font, blown ? "ARMED" : "CHARGE", new Vector2((int)c.X - 18, (int)r.Y - 13), 10, 1f, col);
         }
     }
 
@@ -421,9 +421,9 @@ public static class Renderer
                 // pulsing amber ring + "!" so being spotted reads instantly as a warning
                 float pulse = 0.5f + 0.5f * MathF.Sin((float)Raylib.GetTime() * 6f);
                 Raylib.DrawRing(p, 18f, 21f, 0, 360, 40, Raylib.Fade(Pal.Suspect, 0.30f + 0.45f * pulse));
-                Raylib.DrawText("!", (int)(p.X - 2), (int)(p.Y - 33), 20, Pal.Suspect);
+                Raylib.DrawTextEx(Cfg.Font, "!", new Vector2((int)(p.X - 2), (int)(p.Y - 33)), 20, 1f, Pal.Suspect);
             }
-            else Raylib.DrawText("?", (int)(p.X - 4), (int)(p.Y - 32), 18, Pal.TxtDim);
+            else Raylib.DrawTextEx(Cfg.Font, "?", new Vector2((int)(p.X - 4), (int)(p.Y - 32)), 18, 1f, Pal.TxtDim);
             return;
         }
 
@@ -464,17 +464,17 @@ public static class Renderer
         if (u.OnOverwatch)
         {
             Raylib.DrawCircle((int)p.X, (int)(p.Y - 26), 6f, Raylib.Fade(Pal.Accent, 0.25f));
-            Raylib.DrawText("OW", (int)(p.X - 9), (int)(p.Y - 31), 10, Pal.Accent);
+            Raylib.DrawTextEx(Cfg.Font, "OW", new Vector2((int)(p.X - 9), (int)(p.Y - 31)), 10, 1f, Pal.Accent);
         }
         if (u.Hunkered)
             Raylib.DrawPoly(new Vector2(p.X, p.Y - 27), 4, 6f, 45f, Pal.Good);
 
         // active ability stance tag (friendly) / suppression tag (enemy)
-        if (u.RunGun) Raylib.DrawText("R&G", (int)(p.X + 13), (int)(p.Y - 30), 11, Pal.Accent);
-        else if (u.Blitz) Raylib.DrawText("BLZ", (int)(p.X + 13), (int)(p.Y - 30), 11, Pal.Accent);
-        else if (u.Steady) Raylib.DrawText("AIM", (int)(p.X + 13), (int)(p.Y - 30), 11, Pal.Good);
+        if (u.RunGun) Raylib.DrawTextEx(Cfg.Font, "R&G", new Vector2((int)(p.X + 13), (int)(p.Y - 30)), 11, 1f, Pal.Accent);
+        else if (u.Blitz) Raylib.DrawTextEx(Cfg.Font, "BLZ", new Vector2((int)(p.X + 13), (int)(p.Y - 30)), 11, 1f, Pal.Accent);
+        else if (u.Steady) Raylib.DrawTextEx(Cfg.Font, "AIM", new Vector2((int)(p.X + 13), (int)(p.Y - 30)), 11, 1f, Pal.Good);
         if (u.Team == Team.Enemy && u.Suppress > 0)
-            Raylib.DrawText("SUPP", (int)(p.X + 12), (int)(p.Y - 30), 11, Pal.Foe);
+            Raylib.DrawTextEx(Cfg.Font, "SUPP", new Vector2((int)(p.X + 12), (int)(p.Y - 30)), 11, 1f, Pal.Foe);
 
         // combat status effects (3.5): stacked codes below the figure
         if (u.Statuses.Count > 0)
@@ -490,7 +490,7 @@ public static class Renderer
                     StatusKind.Stun => Pal.RGBA(225, 205, 95),
                     _ => Pal.RGBA(150, 120, 220),       // Disoriented
                 };
-                Raylib.DrawText(StatusDef.Code(s.Kind), sx, sy, 10, sc);
+                Raylib.DrawTextEx(Cfg.Font, StatusDef.Code(s.Kind), new Vector2(sx, sy), 10, 1f, sc);
                 sx += 24;
             }
         }
@@ -499,7 +499,7 @@ public static class Renderer
         if (elite)
         {
             string tag = u.Enraged ? u.Name + " ENRAGED" : u.Name;
-            Raylib.DrawText(tag, (int)(p.X - Raylib.MeasureText(tag, 11) / 2), (int)(p.Y - 42), 11, Pal.Elite);
+            Raylib.DrawTextEx(Cfg.Font, tag, new Vector2((int)(p.X - (int)Raylib.MeasureTextEx(Cfg.Font, tag, 11, 1f).X / 2), (int)(p.Y - 42)), 11, 1f, Pal.Elite);
         }
 
         // VIP / captive marker: diamond + tag above the asset
@@ -510,7 +510,7 @@ public static class Renderer
             Raylib.DrawPoly(new Vector2(p.X, p.Y - 39), 4, 5.5f, 45f, vc);
             Raylib.DrawPolyLinesEx(new Vector2(p.X, p.Y - 39), 4, 5.5f, 45f, 1.5f, Pal.Txt);
             string vtag = caged ? "CAPTIVE" : (u.Name == "CAPTIVE" ? "FREED" : "VIP");
-            Raylib.DrawText(vtag, (int)(p.X - Raylib.MeasureText(vtag, 12) / 2), (int)(p.Y - 53), 12, vc);
+            Raylib.DrawTextEx(Cfg.Font, vtag, new Vector2((int)(p.X - (int)Raylib.MeasureTextEx(Cfg.Font, vtag, 12, 1f).X / 2), (int)(p.Y - 53)), 12, 1f, vc);
             if (caged)   // cage bars over the figure
                 for (int i = -1; i <= 1; i++)
                     Raylib.DrawLineEx(new Vector2(p.X + i * 6, p.Y - 12), new Vector2(p.X + i * 6, p.Y + 12),

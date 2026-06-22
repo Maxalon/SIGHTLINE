@@ -60,9 +60,9 @@ public static class Hud
         Raylib.DrawRectangle(x, y, 5, h, Pal.Accent);
 
         string head = $"TRAINING  {step}/{total}";
-        Raylib.DrawText(head, x + pad, y + 10, 14, Pal.Accent);
+        Raylib.DrawTextEx(Cfg.Font, head, new Vector2(x + pad, y + 10), 14, 1f, Pal.Accent);
         int ty = y + 36;
-        foreach (var ln in lines) { Raylib.DrawText(ln, x + pad, ty, 15, Pal.Txt); ty += 20; }
+        foreach (var ln in lines) { Raylib.DrawTextEx(Cfg.Font, ln, new Vector2(x + pad, ty), 15, 1f, Pal.Txt); ty += 20; }
     }
 
     // Greedy word-wrap to a pixel width.
@@ -74,7 +74,7 @@ public static class Hud
         foreach (var word in words)
         {
             string trial = cur.Length == 0 ? word : cur + " " + word;
-            if (Raylib.MeasureText(trial, size) > maxW && cur.Length > 0) { outl.Add(cur); cur = word; }
+            if ((int)Raylib.MeasureTextEx(Cfg.Font, trial, size, 1f).X > maxW && cur.Length > 0) { outl.Add(cur); cur = word; }
             else cur = trial;
         }
         if (cur.Length > 0) outl.Add(cur);
@@ -92,18 +92,18 @@ public static class Hud
         Raylib.DrawRectangleLinesEx(card, 1.5f, Pal.Accent);
 
         string who = g.TagTarget != null ? g.TagTarget.Name : "";
-        Raylib.DrawText($"TAG  {who}", x + w / 2 - Raylib.MeasureText($"TAG  {who}", 22) / 2, y + 20, 22, Pal.Accent);
+        Raylib.DrawTextEx(Cfg.Font, $"TAG  {who}", new Vector2(x + w / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, $"TAG  {who}", 22, 1f).X / 2, y + 20), 22, 1f, Pal.Accent);
 
         var box = new Rectangle(x + 30, y + 64, w - 60, 40);
         Raylib.DrawRectangleRounded(box, 0.2f, 6, Pal.RGBA(10, 15, 21));
         Raylib.DrawRectangleLinesEx(box, 1.5f, Pal.PanelBd);
         string shown = g.TagBuffer + (((int)(Raylib.GetTime() * 2) % 2 == 0) ? "_" : " ");
-        Raylib.DrawText(shown, (int)box.X + 12, (int)box.Y + 11, 20, Pal.Txt);
+        Raylib.DrawTextEx(Cfg.Font, shown, new Vector2((int)box.X + 12, (int)box.Y + 11), 20, 1f, Pal.Txt);
         if (g.TagBuffer.Length == 0)
-            Raylib.DrawText("(blank = auto tags)", (int)box.X + 12, (int)box.Y + 46, 11, Pal.TxtDim);
+            Raylib.DrawTextEx(Cfg.Font, "(blank = auto tags)", new Vector2((int)box.X + 12, (int)box.Y + 46), 11, 1f, Pal.TxtDim);
 
         string hint = "Type a role  -  [Enter] save  -  [Esc] cancel  -  [Backspace] delete";
-        Raylib.DrawText(hint, x + w / 2 - Raylib.MeasureText(hint, 12) / 2, y + h - 26, 12, Pal.TxtDim);
+        Raylib.DrawTextEx(Cfg.Font, hint, new Vector2(x + w / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, hint, 12, 1f).X / 2, y + h - 26), 12, 1f, Pal.TxtDim);
     }
 
     /// The label to show for a soldier: a player-set custom tag if present, else the
@@ -125,7 +125,7 @@ public static class Hud
         Raylib.DrawRectangleRounded(card, 0.05f, 8, Pal.Panel);
         Raylib.DrawRectangleLinesEx(card, 1.5f, Pal.PanelBd);
 
-        Raylib.DrawText("PAUSED", x + w / 2 - Raylib.MeasureText("PAUSED", 40) / 2, y + 22, 40, Pal.Friend);
+        Raylib.DrawTextEx(Cfg.Font, "PAUSED", new Vector2(x + w / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, "PAUSED", 40, 1f).X / 2, y + 22), 40, 1f, Pal.Friend);
 
         int bw = 320, bh = 42, bx = x + w / 2 - bw / 2, by = y + 84, gap = 11;
         PauseResume     = new Rectangle(bx, by, bw, bh); by += bh + gap;
@@ -149,7 +149,7 @@ public static class Hud
         DrawButtonRect(PauseAbandon, "ABANDON RUN", "", true, false, Pal.Foe);
 
         string ctl = "Wheel zoom  -  Middle-drag pan  -  [C] reset camera  -  Arrows/WASD + [Space]";
-        Raylib.DrawText(ctl, x + w / 2 - Raylib.MeasureText(ctl, 11) / 2, y + h - 24, 11, Pal.TxtDim);
+        Raylib.DrawTextEx(Cfg.Font, ctl, new Vector2(x + w / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, ctl, 11, 1f).X / 2, y + h - 24), 11, 1f, Pal.TxtDim);
     }
 
     static void DrawRoster(Game g)
@@ -168,14 +168,14 @@ public static class Hud
             Raylib.DrawRectangleLinesEx(r, 1.5f, Raylib.Fade(sel ? Pal.Accent : Pal.PanelBd, a));
             Raylib.DrawRectangle((int)r.X, (int)r.Y, 3, (int)r.Height, Raylib.Fade(sel ? Pal.Accent : Pal.Friend, a));
 
-            Raylib.DrawText(u.Name, (int)r.X + 9, (int)r.Y + 5, 13, Raylib.Fade(Pal.Txt, a));
-            int nameW = Raylib.MeasureText(u.Name, 13);
+            Raylib.DrawTextEx(Cfg.Font, u.Name, new Vector2((int)r.X + 9, (int)r.Y + 5), 13, 1f, Raylib.Fade(Pal.Txt, a));
+            int nameW = (int)Raylib.MeasureTextEx(Cfg.Font, u.Name, 13, 1f).X;
             if (!string.IsNullOrEmpty(u.Nickname))   // earned callsign, in quotes
-                Raylib.DrawText($"\"{u.Nickname}\"", (int)r.X + 9 + nameW + 5, (int)r.Y + 6, 11, Raylib.Fade(Pal.VipGold, a));
+                Raylib.DrawTextEx(Cfg.Font, $"\"{u.Nickname}\"", new Vector2((int)r.X + 9 + nameW + 5, (int)r.Y + 6), 11, 1f, Raylib.Fade(Pal.VipGold, a));
             // status marks (right): OW/HK, else a live BOND aura when a partner is adjacent
-            if (u.OnOverwatch) Raylib.DrawText("OW", (int)r.X + 96, (int)r.Y + 5, 11, Raylib.Fade(Pal.Accent, a));
-            else if (u.Hunkered) Raylib.DrawText("HK", (int)r.X + 96, (int)r.Y + 5, 11, Raylib.Fade(Pal.Good, a));
-            else if (u.BondAura) Raylib.DrawText("BOND", (int)r.X + 88, (int)r.Y + 5, 11, Raylib.Fade(Pal.VipGold, a));
+            if (u.OnOverwatch) Raylib.DrawTextEx(Cfg.Font, "OW", new Vector2((int)r.X + 96, (int)r.Y + 5), 11, 1f, Raylib.Fade(Pal.Accent, a));
+            else if (u.Hunkered) Raylib.DrawTextEx(Cfg.Font, "HK", new Vector2((int)r.X + 96, (int)r.Y + 5), 11, 1f, Raylib.Fade(Pal.Good, a));
+            else if (u.BondAura) Raylib.DrawTextEx(Cfg.Font, "BOND", new Vector2((int)r.X + 88, (int)r.Y + 5), 11, 1f, Raylib.Fade(Pal.VipGold, a));
 
             // hp bar
             var bar = new Rectangle(r.X + 9, r.Y + 23, 102, 6);
@@ -193,19 +193,18 @@ public static class Hud
                 bool on = i < u.ActionsLeft;
                 Raylib.DrawRectangleRounded(pip, 0.5f, 4, Raylib.Fade(on ? Pal.Accent : Pal.RGBA(28, 39, 51), a));
             }
-            Raylib.DrawText(u.IsVip ? "ASSET" : u.RankName, (int)r.X + 58, (int)r.Y + 33, 9,
-                            Raylib.Fade(u.IsVip ? Pal.VipGold : Pal.TxtDim, a));
+            Raylib.DrawTextEx(Cfg.Font, u.IsVip ? "ASSET" : u.RankName, new Vector2((int)r.X + 58, (int)r.Y + 33), 9, 1f, Raylib.Fade(u.IsVip ? Pal.VipGold : Pal.TxtDim, a));
 
             // role tag: WOUNDED (red) takes priority, else custom tag (cyan) / auto strengths (amber)
             if (!u.IsVip)
             {
                 if (u.Wound > 0)
-                    Raylib.DrawText($"WOUNDED ({u.Wound})", (int)r.X + 9, (int)r.Y + 45, 9, Raylib.Fade(Pal.Foe, a));
+                    Raylib.DrawTextEx(Cfg.Font, $"WOUNDED ({u.Wound})", new Vector2((int)r.X + 9, (int)r.Y + 45), 9, 1f, Raylib.Fade(Pal.Foe, a));
                 else
                 {
                     var (tag, custom) = DisplayTag(u);
                     if (tag.Length > 0)
-                        Raylib.DrawText(tag, (int)r.X + 9, (int)r.Y + 45, 9, Raylib.Fade(custom ? Pal.Friend : Pal.Accent, a));
+                        Raylib.DrawTextEx(Cfg.Font, tag, new Vector2((int)r.X + 9, (int)r.Y + 45), 9, 1f, Raylib.Fade(custom ? Pal.Friend : Pal.Accent, a));
                 }
             }
 
@@ -241,7 +240,7 @@ public static class Hud
         }
         else
         {
-            Raylib.DrawText($"MISSION {g.RunState.Mission}/{Run.MaxMissions}", 200, 19, 16, Pal.TxtDim);
+            Raylib.DrawTextEx(Cfg.Font, $"MISSION {g.RunState.Mission}/{Run.MaxMissions}", new Vector2(200, 19), 16, 1f, Pal.TxtDim);
         }
         string objTxt; Color objCol;
         switch (g.Objective)
@@ -254,7 +253,7 @@ public static class Hud
             case Objective.Defend: objTxt = $"DEFEND {Math.Min(g.Turn, Game.DefendTurns)}/{Game.DefendTurns}"; objCol = Pal.Foe; break;
             default: objTxt = "ELIMINATE"; objCol = Pal.TxtDim; break;
         }
-        Raylib.DrawText(objTxt, 340, 19, 16, objCol);
+        Raylib.DrawTextEx(Cfg.Font, objTxt, new Vector2(340, 19), 16, 1f, objCol);
 
         // counts (the VIP isn't a combatant, so it's excluded from the squad tally)
         int friends = g.AlivePlayers().Count(p => !p.IsVip);
@@ -264,11 +263,11 @@ public static class Hud
 
         // optional secondary objective (3.9): green while on track, red once blown
         if (g.Secondary != SecondaryKind.None)
-            Raylib.DrawText(g.SecondaryHud, 812, 19, 14, g.SecondaryOnTrack ? Pal.Good : Pal.Foe);
+            Raylib.DrawTextEx(Cfg.Font, g.SecondaryHud, new Vector2(812, 19), 14, 1f, g.SecondaryOnTrack ? Pal.Good : Pal.Foe);
 
         // mute indicator
         if (!Audio.Enabled)
-            Raylib.DrawText("MUTED (M)", Cfg.ScreenW - 290, 19, 15, Pal.TxtDim);
+            Raylib.DrawTextEx(Cfg.Font, "MUTED (M)", new Vector2(Cfg.ScreenW - 290, 19), 15, 1f, Pal.TxtDim);
 
         // end turn (turns into a confirm prompt if soldiers still have actions)
         EndTurnRect = new Rectangle(Cfg.ScreenW - 170, 11, 150, 30);
@@ -282,7 +281,7 @@ public static class Hud
     static void DrawCounter(int x, int y, Color dot, string text)
     {
         Raylib.DrawCircle(x, y + 7, 6, dot);
-        Raylib.DrawText(text, x + 14, y, 16, Pal.Txt);
+        Raylib.DrawTextEx(Cfg.Font, text, new Vector2(x + 14, y), 16, 1f, Pal.Txt);
     }
 
     // ---------------- bottom bar ----------------
@@ -301,8 +300,8 @@ public static class Hud
 
         // hint
         string hint = "MOVE / FIRE by click  -  [Tab] next  -  [5] ability  -  [T] tag  -  [Esc] menu";
-        int hw = Raylib.MeasureText(hint, 13);
-        Raylib.DrawText(hint, Cfg.ScreenW - hw - 24, Cfg.ScreenH - 30, 13, Pal.TxtDim);
+        int hw = (int)Raylib.MeasureTextEx(Cfg.Font, hint, 13, 1f).X;
+        Raylib.DrawTextEx(Cfg.Font, hint, new Vector2(Cfg.ScreenW - hw - 24, Cfg.ScreenH - 30), 13, 1f, Pal.TxtDim);
     }
 
     static void DrawUnitCard(Unit u, int x, int y)
@@ -313,11 +312,11 @@ public static class Hud
         Raylib.DrawRectangleLinesEx(card, 1f, Pal.PanelBd);
         Raylib.DrawRectangle((int)card.X, (int)card.Y, 3, (int)card.Height, Pal.Friend);
 
-        Raylib.DrawText(u.Name, x + 14, y + 10, 20, Pal.Txt);
-        int nw = Raylib.MeasureText(u.Name, 20);
-        Raylib.DrawText(u.Cls, x + 20 + nw, y + 15, 12, u.IsVip ? Pal.VipGold : Pal.Friend);
+        Raylib.DrawTextEx(Cfg.Font, u.Name, new Vector2(x + 14, y + 10), 20, 1f, Pal.Txt);
+        int nw = (int)Raylib.MeasureTextEx(Cfg.Font, u.Name, 20, 1f).X;
+        Raylib.DrawTextEx(Cfg.Font, u.Cls, new Vector2(x + 20 + nw, y + 15), 12, 1f, u.IsVip ? Pal.VipGold : Pal.Friend);
         string rank = u.IsVip ? "ASSET" : u.RankName;
-        Raylib.DrawText(rank, x + 250 - Raylib.MeasureText(rank, 11) - 14, y + 13, 11, u.IsVip ? Pal.VipGold : Pal.Accent);
+        Raylib.DrawTextEx(Cfg.Font, rank, new Vector2(x + 250 - (int)Raylib.MeasureTextEx(Cfg.Font, rank, 11, 1f).X - 14, y + 13), 11, 1f, u.IsVip ? Pal.VipGold : Pal.Accent);
 
         // hp bar
         var bar = new Rectangle(x + 14, y + 38, 222, 13);
@@ -340,11 +339,10 @@ public static class Hud
         }
         // grenade count
         string gren = $"GREN x{u.Grenades}";
-        Raylib.DrawText(gren, x + 72, y + 60, 11, u.Grenades > 0 ? Pal.Accent : Pal.TxtDim);
+        Raylib.DrawTextEx(Cfg.Font, gren, new Vector2(x + 72, y + 60), 11, 1f, u.Grenades > 0 ? Pal.Accent : Pal.TxtDim);
         // ammo
         string ammo = $"AMMO {u.Ammo}/{u.Weapon.Clip}";
-        Raylib.DrawText(ammo, x + 250 - Raylib.MeasureText(ammo, 12) - 14, y + 60, 12,
-                        u.Ammo == 0 ? Pal.Foe : Pal.TxtDim);
+        Raylib.DrawTextEx(Cfg.Font, ammo, new Vector2(x + 250 - (int)Raylib.MeasureTextEx(Cfg.Font, ammo, 12, 1f).X - 14, y + 60), 12, 1f, u.Ammo == 0 ? Pal.Foe : Pal.TxtDim);
     }
 
     static void DrawActionButtons(Game g, int y)
@@ -397,7 +395,7 @@ public static class Hud
             string desc = ActionDesc(g, b.Id);
             if (string.IsNullOrEmpty(desc)) return;
             string title = b.Label;
-            int w = Math.Max(Raylib.MeasureText(title, 14), Raylib.MeasureText(desc, 12)) + 20;
+            int w = Math.Max((int)Raylib.MeasureTextEx(Cfg.Font, title, 14, 1f).X, (int)Raylib.MeasureTextEx(Cfg.Font, desc, 12, 1f).X) + 20;
             int h = 50;
             int x = (int)(b.Rect.X + b.Rect.Width / 2 - w / 2);
             int y = (int)b.Rect.Y - h - 8;
@@ -405,8 +403,8 @@ public static class Hud
             var box = new Rectangle(x, y, w, h);
             Raylib.DrawRectangleRounded(box, 0.14f, 6, Pal.RGBA(10, 14, 19, 252));
             Raylib.DrawRectangleLinesEx(box, 1.2f, Pal.Friend);
-            Raylib.DrawText(title, x + 10, y + 8, 14, Pal.Accent);
-            Raylib.DrawText(desc, x + 10, y + 28, 12, Pal.Txt);
+            Raylib.DrawTextEx(Cfg.Font, title, new Vector2(x + 10, y + 8), 14, 1f, Pal.Accent);
+            Raylib.DrawTextEx(Cfg.Font, desc, new Vector2(x + 10, y + 28), 12, 1f, Pal.Txt);
             return;
         }
     }
@@ -452,25 +450,25 @@ public static class Hud
         Raylib.DrawRectangleRounded(box, 0.12f, 8, Pal.RGBA(10, 14, 19, 245));
         Raylib.DrawRectangleLinesEx(box, 1.5f, Pal.Foe);
 
-        Raylib.DrawText("HIT", x + 12, y + 10, 12, Pal.TxtDim);
+        Raylib.DrawTextEx(Cfg.Font, "HIT", new Vector2(x + 12, y + 10), 12, 1f, Pal.TxtDim);
         string hit = $"{o.HitChance}%";
-        Raylib.DrawText(hit, x + w - Raylib.MeasureText(hit, 22) - 12, y + 7, 22, Pal.Good);
+        Raylib.DrawTextEx(Cfg.Font, hit, new Vector2(x + w - (int)Raylib.MeasureTextEx(Cfg.Font, hit, 22, 1f).X - 12, y + 7), 22, 1f, Pal.Good);
 
-        Raylib.DrawText("CRIT", x + 12, y + 34, 12, Pal.TxtDim);
+        Raylib.DrawTextEx(Cfg.Font, "CRIT", new Vector2(x + 12, y + 34), 12, 1f, Pal.TxtDim);
         string crit = $"{o.CritChance}%";
-        Raylib.DrawText(crit, x + w - Raylib.MeasureText(crit, 16) - 12, y + 32, 16, Pal.Accent);
+        Raylib.DrawTextEx(Cfg.Font, crit, new Vector2(x + w - (int)Raylib.MeasureTextEx(Cfg.Font, crit, 16, 1f).X - 12, y + 32), 16, 1f, Pal.Accent);
 
-        Raylib.DrawText("DMG", x + 12, y + 54, 12, Pal.TxtDim);
+        Raylib.DrawTextEx(Cfg.Font, "DMG", new Vector2(x + 12, y + 54), 12, 1f, Pal.TxtDim);
         string dmg = $"{o.DmgMin}-{o.DmgMax}";
-        Raylib.DrawText(dmg, x + w - Raylib.MeasureText(dmg, 16) - 12, y + 52, 16, Pal.Foe);
+        Raylib.DrawTextEx(Cfg.Font, dmg, new Vector2(x + w - (int)Raylib.MeasureTextEx(Cfg.Font, dmg, 16, 1f).X - 12, y + 52), 16, 1f, Pal.Foe);
 
         int fy = y + 72;
-        if (o.Flanked) { Raylib.DrawText("! FLANKED", x + 12, fy, 13, Pal.Accent); fy += 18; }
-        if (o.HighGround) { Raylib.DrawText("+ HIGH GROUND", x + 12, fy, 13, Pal.Good); fy += 18; }
-        if (o.SeesOver) { Raylib.DrawText("+ OVER LOW COVER", x + 12, fy, 13, Pal.Good); fy += 18; }
-        if (o.Partial) { Raylib.DrawText("~ PARTIAL COVER", x + 12, fy, 13, Pal.TxtDim); fy += 18; }
-        if (o.Steady) { Raylib.DrawText("+ STEADY", x + 12, fy, 13, Pal.Good); fy += 18; }
-        if (o.Ambush) { Raylib.DrawText("+ AMBUSH", x + 12, fy, 13, Pal.Good); fy += 18; }
+        if (o.Flanked) { Raylib.DrawTextEx(Cfg.Font, "! FLANKED", new Vector2(x + 12, fy), 13, 1f, Pal.Accent); fy += 18; }
+        if (o.HighGround) { Raylib.DrawTextEx(Cfg.Font, "+ HIGH GROUND", new Vector2(x + 12, fy), 13, 1f, Pal.Good); fy += 18; }
+        if (o.SeesOver) { Raylib.DrawTextEx(Cfg.Font, "+ OVER LOW COVER", new Vector2(x + 12, fy), 13, 1f, Pal.Good); fy += 18; }
+        if (o.Partial) { Raylib.DrawTextEx(Cfg.Font, "~ PARTIAL COVER", new Vector2(x + 12, fy), 13, 1f, Pal.TxtDim); fy += 18; }
+        if (o.Steady) { Raylib.DrawTextEx(Cfg.Font, "+ STEADY", new Vector2(x + 12, fy), 13, 1f, Pal.Good); fy += 18; }
+        if (o.Ambush) { Raylib.DrawTextEx(Cfg.Font, "+ AMBUSH", new Vector2(x + 12, fy), 13, 1f, Pal.Good); fy += 18; }
     }
 
     // ---------------- turn banner sweep ----------------
@@ -485,8 +483,8 @@ public static class Hud
         Raylib.DrawRectangle(0, bandY, Cfg.ScreenW, 3, Raylib.Fade(c, a));
         Raylib.DrawRectangle(0, bandY + 89, Cfg.ScreenW, 3, Raylib.Fade(c, a));
         int fs = 44;
-        int tw = Raylib.MeasureText(g.BannerText, fs);
-        Raylib.DrawText(g.BannerText, Cfg.ScreenW / 2 - tw / 2, bandY + 24, fs, Raylib.Fade(c, a));
+        int tw = (int)Raylib.MeasureTextEx(Cfg.Font, g.BannerText, fs, 1f).X;
+        Raylib.DrawTextEx(Cfg.Font, g.BannerText, new Vector2(Cfg.ScreenW / 2 - tw / 2, bandY + 24), fs, 1f, Raylib.Fade(c, a));
     }
 
     // ---------------- overlays ----------------
@@ -533,9 +531,9 @@ public static class Hud
         Raylib.DrawRectangleLinesEx(card, 1.5f, Pal.PanelBd);
 
         string title = $"MISSION {run.Mission} COMPLETE";
-        Raylib.DrawText(title, x + w / 2 - Raylib.MeasureText(title, 38) / 2, y + 26, 38, Pal.Good);
+        Raylib.DrawTextEx(Cfg.Font, title, new Vector2(x + w / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, title, 38, 1f).X / 2, y + 26), 38, 1f, Pal.Good);
         string sub = $"BARRACKS - SQUAD DEBRIEF   |   INTEL {run.Intel}";
-        Raylib.DrawText(sub, x + w / 2 - Raylib.MeasureText(sub, 13) / 2, y + 70, 13, Pal.TxtDim);
+        Raylib.DrawTextEx(Cfg.Font, sub, new Vector2(x + w / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, sub, 13, 1f).X / 2, y + 70), 13, 1f, Pal.TxtDim);
 
         int ry = y + 100;
         foreach (var u in squad)
@@ -546,32 +544,32 @@ public static class Hud
 
         // promotions / heals report
         ry += 8;
-        Raylib.DrawText("DEBRIEF", x + 30, ry, 12, Pal.Accent);
+        Raylib.DrawTextEx(Cfg.Font, "DEBRIEF", new Vector2(x + 30, ry), 12, 1f, Pal.Accent);
         ry += 20;
         int shown = 0;
         foreach (var line in run.Report)
         {
             if (shown++ >= 5) break;
-            Raylib.DrawText("- " + line, x + 36, ry, 13, Pal.TxtDim);
+            Raylib.DrawTextEx(Cfg.Font, "- " + line, new Vector2(x + 36, ry), 13, 1f, Pal.TxtDim);
             ry += 22;
         }
         if (run.Fallen.Count > 0)
         {
             string kia = "KIA: " + string.Join(", ", run.Fallen);
-            Raylib.DrawText(kia, x + 36, ry, 13, Pal.Foe);
+            Raylib.DrawTextEx(Cfg.Font, kia, new Vector2(x + 36, ry), 13, 1f, Pal.Foe);
         }
 
         // next operation: pick a node on the branching campaign map (3.3).
         if (run.Map.Count > 0 && run.NextNodes().Count > 0)
         {
             string pick = "CAMPAIGN MAP  >  SELECT NEXT OPERATION";
-            Raylib.DrawText(pick, x + w / 2 - Raylib.MeasureText(pick, 15) / 2, y + h - 162, 15, Pal.Accent);
+            Raylib.DrawTextEx(Cfg.Font, pick, new Vector2(x + w / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, pick, 15, 1f).X / 2, y + h - 162), 15, 1f, Pal.Accent);
             DrawCampaignMap(run, new Rectangle(x + 24, y + h - 140, w - 48, 124));
         }
         else  // fallback: legacy deployment cards (only if the map is unavailable)
         {
             string pick = $"SELECT DEPLOYMENT  >  MISSION {run.Mission + 1}";
-            Raylib.DrawText(pick, x + w / 2 - Raylib.MeasureText(pick, 15) / 2, y + h - 158, 15, Pal.Accent);
+            Raylib.DrawTextEx(Cfg.Font, pick, new Vector2(x + w / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, pick, 15, 1f).X / 2, y + h - 158), 15, 1f, Pal.Accent);
             int cw = (w - 60 - 32) / 3, ch = 118, cy = y + h - 134, gap = 16;
             for (int i = 0; i < run.Offers.Count && i < 3; i++)
             {
@@ -647,12 +645,12 @@ public static class Hud
             if (isCur) Raylib.DrawCircleLinesV(p, rad + 4, Pal.Accent);  // "you are here"
 
             string gly = NodeGlyph(n.Kind);
-            Raylib.DrawText(gly, (int)(p.X - Raylib.MeasureText(gly, 14) / 2), (int)(p.Y - 7), 14, Pal.RGBA(8, 12, 18));
+            Raylib.DrawTextEx(Cfg.Font, gly, new Vector2((int)(p.X - (int)Raylib.MeasureTextEx(Cfg.Font, gly, 14, 1f).X / 2), (int)(p.Y - 7)), 14, 1f, Pal.RGBA(8, 12, 18));
 
             if (canPick)  // label the choices with their objective
             {
                 string lbl = ObjName(n.Card.Objective);
-                Raylib.DrawText(lbl, (int)(p.X - Raylib.MeasureText(lbl, 10) / 2), (int)(p.Y + rad + 3), 10, Pal.Txt);
+                Raylib.DrawTextEx(Cfg.Font, lbl, new Vector2((int)(p.X - (int)Raylib.MeasureTextEx(Cfg.Font, lbl, 10, 1f).X / 2), (int)(p.Y + rad + 3)), 10, 1f, Pal.Txt);
             }
         }
 
@@ -663,16 +661,16 @@ public static class Hud
             string l1 = $"{c.ModName}  -  {ObjName(c.Objective)}";
             string l2 = c.EnemyDelta > 0 ? "Heavy resistance" : (c.EnemyDelta < 0 ? "Light resistance" : "Standard force");
             string l3 = c.Reward != RewardKind.None ? "+ " + c.RewardText : null;
-            int tw = Math.Max(Raylib.MeasureText(l1, 13), Math.Max(Raylib.MeasureText(l2, 11), l3 != null ? Raylib.MeasureText(l3, 11) : 0)) + 20;
+            int tw = Math.Max((int)Raylib.MeasureTextEx(Cfg.Font, l1, 13, 1f).X, Math.Max((int)Raylib.MeasureTextEx(Cfg.Font, l2, 11, 1f).X, l3 != null ? (int)Raylib.MeasureTextEx(Cfg.Font, l3, 11, 1f).X : 0)) + 20;
             int th = l3 != null ? 60 : 44;
             float tx = Math.Min(mouse.X + 14, region.X + region.Width - tw);
             float ty = Math.Max(mouse.Y - th - 6, region.Y);
             var tip = new Rectangle(tx, ty, tw, th);
             Raylib.DrawRectangleRounded(tip, 0.12f, 6, Pal.RGBA(12, 18, 26));
             Raylib.DrawRectangleLinesEx(tip, 1.2f, NodeColor(hovered.Kind));
-            Raylib.DrawText(l1, (int)tx + 10, (int)ty + 8, 13, NodeColor(hovered.Kind));
-            Raylib.DrawText(l2, (int)tx + 10, (int)ty + 26, 11, Pal.TxtDim);
-            if (l3 != null) Raylib.DrawText(l3, (int)tx + 10, (int)ty + 42, 11, Pal.Accent);
+            Raylib.DrawTextEx(Cfg.Font, l1, new Vector2((int)tx + 10, (int)ty + 8), 13, 1f, NodeColor(hovered.Kind));
+            Raylib.DrawTextEx(Cfg.Font, l2, new Vector2((int)tx + 10, (int)ty + 26), 11, 1f, Pal.TxtDim);
+            if (l3 != null) Raylib.DrawTextEx(Cfg.Font, l3, new Vector2((int)tx + 10, (int)ty + 42), 11, 1f, Pal.Accent);
         }
     }
 
@@ -691,9 +689,9 @@ public static class Hud
         Raylib.DrawRectangleLinesEx(card, 1.5f, Pal.PanelBd);
 
         string title = "REQUISITION";
-        Raylib.DrawText(title, x + w / 2 - Raylib.MeasureText(title, 36) / 2, y + 24, 36, Pal.Accent);
+        Raylib.DrawTextEx(Cfg.Font, title, new Vector2(x + w / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, title, 36, 1f).X / 2, y + 24), 36, 1f, Pal.Accent);
         string intel = $"INTEL AVAILABLE: {run.Intel}";
-        Raylib.DrawText(intel, x + w / 2 - Raylib.MeasureText(intel, 16) / 2, y + 66, 16, Pal.Good);
+        Raylib.DrawTextEx(Cfg.Font, intel, new Vector2(x + w / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, intel, 16, 1f).X / 2, y + 66), 16, 1f, Pal.Good);
 
         // squad HP strip so the player can judge whether a heal/stim is worth it
         DrawSquadHpStrip(run.Squad, x + 30, y + 96, w - 60);
@@ -708,16 +706,16 @@ public static class Hud
             Raylib.DrawRectangleRounded(r, 0.1f, 6, hover ? Pal.RGBA(24, 34, 46) : Pal.RGBA(14, 20, 28));
             Raylib.DrawRectangleLinesEx(r, 1.5f, can ? (hover ? Pal.Accent : Pal.PanelBd) : Pal.RGBA(40, 46, 54));
             Color txt = can ? Pal.Txt : Pal.TxtDim;
-            Raylib.DrawText(Game.ShopName[i], (int)r.X + 14, (int)r.Y + 10, 18, txt);
-            Raylib.DrawText(Game.ShopDesc[i], (int)r.X + 14, (int)r.Y + 35, 12, Pal.TxtDim);
-            Raylib.DrawText(g.ShopEffect(i), (int)r.X + 14, (int)r.Y + 55, 12, can ? Pal.Accent : Pal.TxtDim);  // concrete effect
+            Raylib.DrawTextEx(Cfg.Font, Game.ShopName[i], new Vector2((int)r.X + 14, (int)r.Y + 10), 18, 1f, txt);
+            Raylib.DrawTextEx(Cfg.Font, Game.ShopDesc[i], new Vector2((int)r.X + 14, (int)r.Y + 35), 12, 1f, Pal.TxtDim);
+            Raylib.DrawTextEx(Cfg.Font, g.ShopEffect(i), new Vector2((int)r.X + 14, (int)r.Y + 55), 12, 1f, can ? Pal.Accent : Pal.TxtDim);  // concrete effect
             string cost = $"{Game.ShopCost[i]} INTEL";
             Color cc = run.Intel >= Game.ShopCost[i] ? Pal.Good : Pal.Foe;
-            Raylib.DrawText(cost, (int)(r.X + r.Width - Raylib.MeasureText(cost, 16) - 14), (int)r.Y + 12, 16, cc);
+            Raylib.DrawTextEx(Cfg.Font, cost, new Vector2((int)(r.X + r.Width - (int)Raylib.MeasureTextEx(Cfg.Font, cost, 16, 1f).X - 14), (int)r.Y + 12), 16, 1f, cc);
             if (!can)
-                Raylib.DrawText("- unavailable -", (int)(r.X + r.Width - Raylib.MeasureText("- unavailable -", 11) - 14), (int)r.Y + 52, 11, Pal.TxtDim);
+                Raylib.DrawTextEx(Cfg.Font, "- unavailable -", new Vector2((int)(r.X + r.Width - (int)Raylib.MeasureTextEx(Cfg.Font, "- unavailable -", 11, 1f).X - 14), (int)r.Y + 52), 11, 1f, Pal.TxtDim);
             else
-                Raylib.DrawText("[ BUY ]", (int)(r.X + r.Width - Raylib.MeasureText("[ BUY ]", 12) - 14), (int)r.Y + 54, 12, Pal.Accent);
+                Raylib.DrawTextEx(Cfg.Font, "[ BUY ]", new Vector2((int)(r.X + r.Width - (int)Raylib.MeasureTextEx(Cfg.Font, "[ BUY ]", 12, 1f).X - 14), (int)r.Y + 54), 12, 1f, Pal.Accent);
             iy += ih + gap;
         }
 
@@ -741,14 +739,13 @@ public static class Hud
         Raylib.DrawRectangleLinesEx(r, 1.5f, hover ? tint : Pal.PanelBd);
         Raylib.DrawRectangle((int)r.X, (int)r.Y, 4, (int)r.Height, tint);
 
-        Raylib.DrawText(c.ModName, (int)r.X + 12, (int)r.Y + 10, 17, tint);
-        Raylib.DrawText(ObjName(c.Objective), (int)r.X + 12, (int)r.Y + 34, 13, Pal.Txt);
+        Raylib.DrawTextEx(Cfg.Font, c.ModName, new Vector2((int)r.X + 12, (int)r.Y + 10), 17, 1f, tint);
+        Raylib.DrawTextEx(Cfg.Font, ObjName(c.Objective), new Vector2((int)r.X + 12, (int)r.Y + 34), 13, 1f, Pal.Txt);
         string force = c.EnemyDelta > 0 ? "Heavy resistance" : (c.EnemyDelta < 0 ? "Light resistance" : "Standard force");
-        Raylib.DrawText(force, (int)r.X + 12, (int)r.Y + 56, 11, Pal.TxtDim);
+        Raylib.DrawTextEx(Cfg.Font, force, new Vector2((int)r.X + 12, (int)r.Y + 56), 11, 1f, Pal.TxtDim);
         if (c.Reward != RewardKind.None)
-            Raylib.DrawText("+ " + c.RewardText, (int)r.X + 12, (int)r.Y + 74, 11, Pal.Accent);
-        Raylib.DrawText("DEPLOY", (int)(r.X + r.Width / 2 - Raylib.MeasureText("DEPLOY", 12) / 2),
-                        (int)(r.Y + r.Height - 22), 12, hover ? tint : Pal.TxtDim);
+            Raylib.DrawTextEx(Cfg.Font, "+ " + c.RewardText, new Vector2((int)r.X + 12, (int)r.Y + 74), 11, 1f, Pal.Accent);
+        Raylib.DrawTextEx(Cfg.Font, "DEPLOY", new Vector2((int)(r.X + r.Width / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, "DEPLOY", 12, 1f).X / 2), (int)(r.Y + r.Height - 22)), 12, 1f, hover ? tint : Pal.TxtDim);
     }
 
     // Rank-up perk choice: the soldier + two perk cards (pick one).
@@ -762,9 +759,9 @@ public static class Hud
         Raylib.DrawRectangleLinesEx(card, 1.5f, Pal.PanelBd);
 
         string title = "PROMOTION";
-        Raylib.DrawText(title, x + w / 2 - Raylib.MeasureText(title, 36) / 2, y + 22, 36, Pal.Accent);
+        Raylib.DrawTextEx(Cfg.Font, title, new Vector2(x + w / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, title, 36, 1f).X / 2, y + 22), 36, 1f, Pal.Accent);
         string sub = $"{off.Unit.FullName}  -  {off.Unit.RankName}  -  {off.Unit.Cls}  -  CHOOSE A PERK";
-        Raylib.DrawText(sub, x + w / 2 - Raylib.MeasureText(sub, 14) / 2, y + 64, 14, Pal.TxtDim);
+        Raylib.DrawTextEx(Cfg.Font, sub, new Vector2(x + w / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, sub, 14, 1f).X / 2, y + 64), 14, 1f, Pal.TxtDim);
 
         // full dossier so perks can be chosen for synergy
         var dossier = new Rectangle(x + 20, y + 88, w - 40, 96);
@@ -787,33 +784,33 @@ public static class Hud
 
         int left = g.RunState.PendingPerks.Count - 1;
         string foot = left > 0 ? $"{left} more promotion(s) to assign" : "Click a perk to continue";
-        Raylib.DrawText(foot, x + w / 2 - Raylib.MeasureText(foot, 12) / 2, y + h - 26, 12, Pal.TxtDim);
+        Raylib.DrawTextEx(Cfg.Font, foot, new Vector2(x + w / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, foot, 12, 1f).X / 2, y + h - 26), 12, 1f, Pal.TxtDim);
     }
 
     /// A soldier's stat line + current perks + derived strengths (for decision screens).
     static void DrawDossier(Unit u, int x, int y, int w)
     {
         string stats = $"HP {u.Hp}/{u.MaxHp}    AIM {u.Aim}    MOB {u.Mobility}    {u.Weapon.Name}    GREN {1 + u.BonusGrenades}/mission    {u.AbilityName}";
-        Raylib.DrawText(stats, x, y, 13, Pal.Txt);
+        Raylib.DrawTextEx(Cfg.Font, stats, new Vector2(x, y), 13, 1f, Pal.Txt);
         string perks = u.Perks.Count == 0 ? "Perks: none yet"
             : "Perks: " + string.Join(", ", u.Perks.ConvertAll(PerkDef.Name));
-        Raylib.DrawText(perks, x, y + 22, 13, Pal.Good);
+        Raylib.DrawTextEx(Cfg.Font, perks, new Vector2(x, y + 22), 13, 1f, Pal.Good);
 
         // earned traits + bonds (3.2): what makes this veteran distinct
         string traits = u.Traits.Count == 0 ? "Traits: none yet"
             : "Traits: " + string.Join(", ", u.Traits.ConvertAll(TraitDef.Name));
         if (u.Bonds.Count > 0) traits += "    Bonds: " + string.Join(", ", u.Bonds);
-        Raylib.DrawText(traits, x, y + 44, 12, u.Traits.Count == 0 && u.Bonds.Count == 0 ? Pal.TxtDim : Pal.VipGold);
+        Raylib.DrawTextEx(Cfg.Font, traits, new Vector2(x, y + 44), 12, 1f, u.Traits.Count == 0 && u.Bonds.Count == 0 ? Pal.TxtDim : Pal.VipGold);
 
         if (u.Wound > 0)
-            Raylib.DrawText($"WOUNDED ({u.Wound} mission{(u.Wound > 1 ? "s" : "")})  -{Unit.WoundAim} aim / -{Unit.WoundMob} mob", x, y + 66, 12, Pal.Foe);
+            Raylib.DrawTextEx(Cfg.Font, $"WOUNDED ({u.Wound} mission{(u.Wound > 1 ? "s" : "")})  -{Unit.WoundAim} aim / -{Unit.WoundMob} mob", new Vector2(x, y + 66), 12, 1f, Pal.Foe);
         else if (!string.IsNullOrEmpty(u.CustomTag))
-            Raylib.DrawText("Tag: " + u.CustomTag, x, y + 66, 12, Pal.Friend);
+            Raylib.DrawTextEx(Cfg.Font, "Tag: " + u.CustomTag, new Vector2(x, y + 66), 12, 1f, Pal.Friend);
         else
         {
             var sp = Specialties(u);
             if (sp.Count > 0)
-                Raylib.DrawText("Strengths: " + string.Join("  ", sp), x, y + 66, 12, Pal.Accent);
+                Raylib.DrawTextEx(Cfg.Font, "Strengths: " + string.Join("  ", sp), new Vector2(x, y + 66), 12, 1f, Pal.Accent);
         }
     }
 
@@ -850,7 +847,7 @@ public static class Hud
         {
             var u = squad[i];
             int cx = x + i * cw;
-            Raylib.DrawText(u.Name, cx, y, 11, Pal.Txt);
+            Raylib.DrawTextEx(Cfg.Font, u.Name, new Vector2(cx, y), 11, 1f, Pal.Txt);
             var bar = new Rectangle(cx, y + 15, cw - 14, 7);
             Raylib.DrawRectangleRounded(bar, 0.5f, 4, Pal.RGBA(10, 15, 21));
             float frac = u.MaxHp > 0 ? u.Hp / (float)u.MaxHp : 0;
@@ -859,7 +856,7 @@ public static class Hud
                 Color hc = frac > 0.5f ? Pal.Good : (frac > 0.25f ? Pal.Accent : Pal.Foe);
                 Raylib.DrawRectangleRounded(new Rectangle(bar.X, bar.Y, bar.Width * frac, bar.Height), 0.5f, 4, hc);
             }
-            Raylib.DrawText($"{u.Hp}/{u.MaxHp}", cx, y + 25, 10, Pal.TxtDim);
+            Raylib.DrawTextEx(Cfg.Font, $"{u.Hp}/{u.MaxHp}", new Vector2(cx, y + 25), 10, 1f, Pal.TxtDim);
         }
     }
 
@@ -871,14 +868,12 @@ public static class Hud
         Raylib.DrawRectangle((int)r.X, (int)r.Y, 4, (int)r.Height, hover ? Pal.Accent : Pal.Friend);
 
         string name = PerkDef.Name(p);
-        Raylib.DrawText(name, (int)(r.X + r.Width / 2 - Raylib.MeasureText(name, 22) / 2), (int)r.Y + 28, 22,
-                        hover ? Pal.Accent : Pal.Txt);
+        Raylib.DrawTextEx(Cfg.Font, name, new Vector2((int)(r.X + r.Width / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, name, 22, 1f).X / 2), (int)r.Y + 28), 22, 1f, hover ? Pal.Accent : Pal.Txt);
         // word-wrapped one-line description (kept short by design)
         string desc = PerkDef.Desc(p);
-        Raylib.DrawText(desc, (int)(r.X + r.Width / 2 - Raylib.MeasureText(desc, 14) / 2), (int)r.Y + 78, 14, Pal.TxtDim);
+        Raylib.DrawTextEx(Cfg.Font, desc, new Vector2((int)(r.X + r.Width / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, desc, 14, 1f).X / 2), (int)r.Y + 78), 14, 1f, Pal.TxtDim);
 
-        Raylib.DrawText("SELECT", (int)(r.X + r.Width / 2 - Raylib.MeasureText("SELECT", 13) / 2),
-                        (int)(r.Y + r.Height - 32), 13, hover ? Pal.Accent : Pal.TxtDim);
+        Raylib.DrawTextEx(Cfg.Font, "SELECT", new Vector2((int)(r.X + r.Width / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, "SELECT", 13, 1f).X / 2), (int)(r.Y + r.Height - 32)), 13, 1f, hover ? Pal.Accent : Pal.TxtDim);
     }
 
     static void DrawSquadRow(Game g, Unit u, int x, int y, int w)
@@ -886,14 +881,14 @@ public static class Hud
         Raylib.DrawRectangleRounded(new Rectangle(x, y, w, 40), 0.2f, 6, Pal.RGBA(13, 19, 27));
         Raylib.DrawRectangle(x, y, 3, 40, Pal.Friend);
 
-        Raylib.DrawText(u.Name, x + 14, y + 5, 18, Pal.Txt);
-        Raylib.DrawText($"{u.RankName}  -  {u.Cls}", x + 14, y + 24, 11, Pal.Accent);
+        Raylib.DrawTextEx(Cfg.Font, u.Name, new Vector2(x + 14, y + 5), 18, 1f, Pal.Txt);
+        Raylib.DrawTextEx(Cfg.Font, $"{u.RankName}  -  {u.Cls}", new Vector2(x + 14, y + 24), 11, 1f, Pal.Accent);
 
         // earned perks (compact 3-letter codes)
         if (u.Perks.Count > 0)
         {
             string codes = string.Join(" ", u.Perks.ConvertAll(PerkDef.Code));
-            Raylib.DrawText(codes, x + 220, y + 27, 9, Pal.Good);
+            Raylib.DrawTextEx(Cfg.Font, codes, new Vector2(x + 220, y + 27), 9, 1f, Pal.Good);
         }
 
         // HP bar
@@ -905,13 +900,13 @@ public static class Hud
             Color hc = frac > 0.5f ? Pal.Good : (frac > 0.25f ? Pal.Accent : Pal.Foe);
             Raylib.DrawRectangleRounded(new Rectangle(bar.X, bar.Y, bar.Width * frac, bar.Height), 0.5f, 6, hc);
         }
-        Raylib.DrawText($"{u.Hp}/{u.MaxHp} HP", x + 380, y + 13, 12, Pal.TxtDim);
+        Raylib.DrawTextEx(Cfg.Font, $"{u.Hp}/{u.MaxHp} HP", new Vector2(x + 380, y + 13), 12, 1f, Pal.TxtDim);
 
         // kills + progress
-        Raylib.DrawText($"{u.Kills} kills", x + w - 170, y + 6, 12, Pal.Txt);
+        Raylib.DrawTextEx(Cfg.Font, $"{u.Kills} kills", new Vector2(x + w - 170, y + 6), 12, 1f, Pal.Txt);
         int toNext = g.RunState.KillsToNext(u);
         string prog = u.Rank >= Run.Ranks.Length - 1 ? "MAX RANK" : $"{toNext} to next rank";
-        Raylib.DrawText(prog, x + w - 170, y + 23, 11, Pal.TxtDim);
+        Raylib.DrawTextEx(Cfg.Font, prog, new Vector2(x + w - 170, y + 23), 11, 1f, Pal.TxtDim);
     }
 
     public static Rectangle OverlayBtn;
@@ -926,7 +921,7 @@ public static class Hud
         if (rules != null)
         {
             int maxRule = 0;
-            foreach (var r in rules) maxRule = Math.Max(maxRule, Raylib.MeasureText(r, 15));
+            foreach (var r in rules) maxRule = Math.Max(maxRule, (int)Raylib.MeasureTextEx(Cfg.Font, r, 15, 1f).X);
             w = Math.Max(w, maxRule + 58 + 30);
         }
         int h = rules != null ? 152 + rules.Length * 30 + 70 : 240;
@@ -936,16 +931,16 @@ public static class Hud
         Raylib.DrawRectangleLinesEx(card, 1.5f, Pal.PanelBd);
 
         int tfs = 46;
-        Raylib.DrawText(title, x + w / 2 - Raylib.MeasureText(title, tfs) / 2, y + 34, tfs, titleCol);
-        Raylib.DrawText(sub, x + w / 2 - Raylib.MeasureText(sub, 14) / 2, y + 90, 14, Pal.TxtDim);
+        Raylib.DrawTextEx(Cfg.Font, title, new Vector2(x + w / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, title, tfs, 1f).X / 2, y + 34), tfs, 1f, titleCol);
+        Raylib.DrawTextEx(Cfg.Font, sub, new Vector2(x + w / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, sub, 14, 1f).X / 2, y + 90), 14, 1f, Pal.TxtDim);
 
         if (rules != null)
         {
             int ry = y + 130;
             foreach (var r in rules)
             {
-                Raylib.DrawText(">", x + 40, ry, 16, Pal.Friend);
-                Raylib.DrawText(r, x + 58, ry, 15, Pal.TxtDim);
+                Raylib.DrawTextEx(Cfg.Font, ">", new Vector2(x + 40, ry), 16, 1f, Pal.Friend);
+                Raylib.DrawTextEx(Cfg.Font, r, new Vector2(x + 58, ry), 15, 1f, Pal.TxtDim);
                 ry += 30;
             }
         }
@@ -974,7 +969,7 @@ public static class Hud
         Raylib.DrawRectangleRounded(r, 0.3f, 8, hover ? hi : baseCol);
         CenterText(label, r, 18, Pal.RGBA(3, 18, 26));
         if (keyHint != null)
-            Raylib.DrawText("[" + keyHint + "]", (int)(r.X + r.Width - 30), (int)(r.Y + r.Height - 16), 11, Pal.RGBA(3, 18, 26));
+            Raylib.DrawTextEx(Cfg.Font, "[" + keyHint + "]", new Vector2((int)(r.X + r.Width - 30), (int)(r.Y + r.Height - 16)), 11, 1f, Pal.RGBA(3, 18, 26));
     }
 
     // ---------------- helpers ----------------
@@ -995,23 +990,23 @@ public static class Hud
 
         Color tc = selected ? Pal.Accent : (enabled ? Pal.Txt : Pal.TxtDim);
         int fs = 16;
-        int lw = Raylib.MeasureText(label, fs);
-        int kw = string.IsNullOrEmpty(key) ? 0 : Raylib.MeasureText(key, 12) + 8;
+        int lw = (int)Raylib.MeasureTextEx(Cfg.Font, label, fs, 1f).X;
+        int kw = string.IsNullOrEmpty(key) ? 0 : (int)Raylib.MeasureTextEx(Cfg.Font, key, 12, 1f).X + 8;
         int startX = (int)(r.X + r.Width / 2 - (lw + kw) / 2);
         int ty = (int)(r.Y + r.Height / 2 - fs / 2);
-        Raylib.DrawText(label, startX, ty, fs, Raylib.Fade(tc, enabled ? 1f : 0.5f));
+        Raylib.DrawTextEx(Cfg.Font, label, new Vector2(startX, ty), fs, 1f, Raylib.Fade(tc, enabled ? 1f : 0.5f));
         if (!string.IsNullOrEmpty(key))
         {
             int keyX = startX + lw + 8;
-            var kr = new Rectangle(keyX, r.Y + r.Height / 2 - 8, Raylib.MeasureText(key, 12) + 6, 16);
+            var kr = new Rectangle(keyX, r.Y + r.Height / 2 - 8, (int)Raylib.MeasureTextEx(Cfg.Font, key, 12, 1f).X + 6, 16);
             Raylib.DrawRectangleLinesEx(kr, 1f, Raylib.Fade(tc, 0.4f));
-            Raylib.DrawText(key, keyX + 3, (int)(r.Y + r.Height / 2 - 6), 12, Raylib.Fade(tc, 0.7f));
+            Raylib.DrawTextEx(Cfg.Font, key, new Vector2(keyX + 3, (int)(r.Y + r.Height / 2 - 6)), 12, 1f, Raylib.Fade(tc, 0.7f));
         }
     }
 
     static void CenterText(string text, Rectangle r, int fs, Color c)
     {
-        int w = Raylib.MeasureText(text, fs);
-        Raylib.DrawText(text, (int)(r.X + r.Width / 2 - w / 2), (int)(r.Y + r.Height / 2 - fs / 2), fs, c);
+        int w = (int)Raylib.MeasureTextEx(Cfg.Font, text, fs, 1f).X;
+        Raylib.DrawTextEx(Cfg.Font, text, new Vector2((int)(r.X + r.Width / 2 - w / 2), (int)(r.Y + r.Height / 2 - fs / 2)), fs, 1f, c);
     }
 }
