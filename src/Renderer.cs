@@ -89,15 +89,30 @@ public static class Renderer
                 Color ca = h >= 2 ? Pal.Mix(hiA, Pal.RGBA(255, 255, 255), 0.12f) : hiA;
                 Color cb = h >= 2 ? Pal.Mix(hiB, Pal.RGBA(255, 255, 255), 0.12f) : hiB;
                 Raylib.DrawRectangleRec(top, ((x + y) & 1) == 0 ? ca : cb);
-                // lit front edge of the top face
+                // contact shadow at the base of the front wall — grounds the plateau
+                if (belowH < h)
+                    Raylib.DrawRectangleRec(
+                        new Rectangle(r.X + 2, r.Y + r.Height - lift + (h - belowH) * ElevLift + 2, r.Width - 4, 5),
+                        Raylib.Fade(Pal.RGBA(0, 0, 0), 0.28f));
+                // lit front edge of the top face (base glow at alpha 0.50)
                 Raylib.DrawLineEx(new Vector2(top.X, top.Y + top.Height - 1),
                                   new Vector2(top.X + top.Width, top.Y + top.Height - 1),
                                   2f, Raylib.Fade(Pal.HighEdge, 0.5f));
+                // emissive rim: a narrow bright inner accent — the 5.2 bloom will catch this on hardware
+                Raylib.DrawLineEx(new Vector2(top.X + 1, top.Y + top.Height - 2),
+                                  new Vector2(top.X + top.Width - 1, top.Y + top.Height - 2),
+                                  1f, Raylib.Fade(Pal.RGBA(200, 230, 255), h >= 2 ? 0.55f : 0.40f));
                 // top-edge highlight where it meets a lower tile above
                 if (g.Grid.HeightAt(x, y - 1) < h)
+                {
                     Raylib.DrawLineEx(new Vector2(top.X, top.Y),
                                       new Vector2(top.X + top.Width, top.Y),
                                       1.5f, Raylib.Fade(Pal.HighEdge, 0.35f));
+                    // emissive rim on the exposed top edge (slightly brighter, 1px inner)
+                    Raylib.DrawLineEx(new Vector2(top.X + 1, top.Y + 1),
+                                      new Vector2(top.X + top.Width - 1, top.Y + 1),
+                                      1f, Raylib.Fade(Pal.RGBA(200, 230, 255), h >= 2 ? 0.45f : 0.30f));
+                }
             }
     }
 
@@ -273,11 +288,22 @@ public static class Renderer
                     new Rectangle(baseRect.X + 3, baseRect.Y + 4, baseRect.Width, baseRect.Height),
                     0.18f, 5, Raylib.Fade(Pal.RGBA(0, 0, 0), 0.35f));
                 Raylib.DrawRectangleRounded(baseRect, 0.18f, 5, high ? cHi : cLo);
+                // contact shadow at the base of the cover block — grounds it against the floor
+                Raylib.DrawRectangleRec(
+                    new Rectangle(baseRect.X + 4, baseRect.Y + baseRect.Height - 1, baseRect.Width - 8, 4),
+                    Raylib.Fade(Pal.RGBA(0, 0, 0), 0.22f));
                 Raylib.DrawRectangleRounded(topRect, 0.22f, 5, high ? cHiTop : cLoTop);
-                // subtle top edge highlight
+                // subtle top edge highlight (existing soft white gleam)
                 Raylib.DrawLineEx(new Vector2(topRect.X + 4, topRect.Y + 2),
                                   new Vector2(topRect.X + topRect.Width - 4, topRect.Y + 2),
                                   1.5f, Raylib.Fade(Pal.RGBA(255, 255, 255), 0.12f));
+                // emissive rim — a warm bright accent on the upper edge so cover glows subtly;
+                // the 5.2 post-FX bloom will amplify this on hardware.  Keep alpha modest so
+                // the △/— shape cues still dominate.
+                Color rimCol = Pal.Mix(Pal.HighEdge, Pal.RGBA(255, 255, 255), 0.45f);
+                Raylib.DrawLineEx(new Vector2(topRect.X + 5, topRect.Y + 3),
+                                  new Vector2(topRect.X + topRect.Width - 5, topRect.Y + 3),
+                                  1f, Raylib.Fade(rimCol, high ? 0.30f : 0.20f));
                 // damage state (3.6): a chipped-but-not-yet-degraded block shows fissures
                 if (g.Grid.CoverHp[x, y] > 0 && g.Grid.CoverHp[x, y] < g.Grid.MaxCoverHp(x, y))
                 {

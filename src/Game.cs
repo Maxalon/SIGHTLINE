@@ -723,7 +723,10 @@ public class Game
             w.OnOverwatch = false;
             w.ReactedThisTurn = true;
             w.Ammo--;
-            int reactMod = w.HasPerk(Perk.Reflexes) ? 100 : -10; // Reflexes: overwatch rarely misses
+            // overwatch reaction aim: base -10; Reflexes makes it near-certain, Guardian adds a
+            // precision bump. ADDITIVE (not a ternary) so a soldier with BOTH gets both (review
+            // S7: the old ternary silently discarded Guardian whenever Reflexes was also held).
+            int reactMod = -10 + (w.HasPerk(Perk.Reflexes) ? 110 : 0) + (w.HasPerk(Perk.Guardian) ? Unit.GuardianAim : 0);
             var res = Combat.Resolve(Grid, w, mover, reactMod);
             Fx.PopText(w.Pos + new Vector2(0, -30), "OVERWATCH", Pal.Accent, 18f);
             Audio.Play("over");

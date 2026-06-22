@@ -14,7 +14,8 @@ public enum AbilityKind { None, RunGun, Blitz, Steady, Suppress }
 public enum ItemKind { None, Smoke, Flash, Barricade }
 
 /// Promotion perks: a soldier picks one each rank-up (see Run / barracks).
-public enum Perk { LockOn, Hardened, Reflexes, Bandolier, CloseQuarters, Marksman, Deadeye, Tank, Sprinter, Adrenal }
+public enum Perk { LockOn, Hardened, Reflexes, Bandolier, CloseQuarters, Marksman, Deadeye, Tank, Sprinter, Adrenal,
+    Executioner, Guardian, CoolHeaded }
 
 /// Battlefield traits earned by FEATS (see Game feat hooks + Run.DebriefSurvivors).
 /// Each is a small passive read in Combat.ComputeOdds, so veterans matter.
@@ -258,10 +259,16 @@ public class Unit
     }
 
     // perk magnitudes (kept here so Combat/Mission/Hud read one source)
-    public const int PerkAim = 15;       // LockOn / CloseQuarters / Marksman
-    public const int PerkCrit = 15;      // Deadeye
+    public const int PerkAim = 15;       // LockOn / CloseQuarters / Marksman / Guardian (overwatch)
+    public const int PerkCrit = 15;      // Deadeye / Executioner (vs wounded targets)
     public const int CloseRange = 4;     // CloseQuarters threshold (tiles)
     public const int LongRange = 7;      // Marksman threshold (tiles)
+    // Executioner: crit bonus vs targets below half HP (distinct from Deadeye's flat bonus)
+    public const int ExecutionerCrit = 15;
+    // Guardian: aim bonus on overwatch reaction shots (overwatch specialist, less absolute than Reflexes)
+    public const int GuardianAim = 15;
+    // CoolHeaded: Disoriented aim penalty is halved for this soldier
+    public const int CoolHeadedDivert = 8; // rounds down DisorientAim(15) by ~half => -7 instead of -15
     public const int WoundAim = 12;      // aim penalty while Wound > 0
     public const int WoundMob = 1;       // mobility penalty while Wound > 0
 
@@ -300,6 +307,7 @@ public static class PerkDef
     {
         Perk.LockOn, Perk.Hardened, Perk.Reflexes, Perk.Bandolier, Perk.CloseQuarters,
         Perk.Marksman, Perk.Deadeye, Perk.Tank, Perk.Sprinter, Perk.Adrenal,
+        Perk.Executioner, Perk.Guardian, Perk.CoolHeaded,
     };
 
     public static string Name(Perk p) => p switch
@@ -314,6 +322,9 @@ public static class PerkDef
         Perk.Tank => "TANK",
         Perk.Sprinter => "SPRINTER",
         Perk.Adrenal => "ADRENAL",
+        Perk.Executioner => "EXECUTIONER",
+        Perk.Guardian => "GUARDIAN",
+        Perk.CoolHeaded => "COOL-HEADED",
         _ => "PERK",
     };
 
@@ -329,6 +340,9 @@ public static class PerkDef
         Perk.Tank => "TNK",
         Perk.Sprinter => "SPR",
         Perk.Adrenal => "ADR",
+        Perk.Executioner => "EXC",
+        Perk.Guardian => "GRD",
+        Perk.CoolHeaded => "CLH",
         _ => "?",
     };
 
@@ -344,6 +358,9 @@ public static class PerkDef
         Perk.Tank => "+3 max HP",
         Perk.Sprinter => "+1 mobility",
         Perk.Adrenal => "+1 ability charge each mission",
+        Perk.Executioner => "+15 crit vs targets below half HP",
+        Perk.Guardian => "+15 aim on overwatch reaction shots",
+        Perk.CoolHeaded => "Disoriented aim penalty cut by 8 (-7 not -15)",
         _ => "",
     };
 }
