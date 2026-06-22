@@ -652,22 +652,29 @@ public static class Hud
             string gly = NodeGlyph(n.Kind);
             Raylib.DrawTextEx(Cfg.Font, gly, new Vector2((int)(p.X - (int)Raylib.MeasureTextEx(Cfg.Font, gly, 14, 1f).X / 2), (int)(p.Y - 7)), 14, 1f, Pal.RGBA(8, 12, 18));
 
-            if (canPick)  // label the choices with their objective
+            if (canPick)  // label the choices with their objective + an intel hint
             {
                 string lbl = ObjName(n.Card.Objective);
                 Raylib.DrawTextEx(Cfg.Font, lbl, new Vector2((int)(p.X - (int)Raylib.MeasureTextEx(Cfg.Font, lbl, 10, 1f).X / 2), (int)(p.Y + rad + 3)), 10, 1f, Pal.Txt);
+                // enemy intel hint: a short flavour line so the pick is informed
+                string hint = Run.EnemyHint(n);
+                Raylib.DrawTextEx(Cfg.Font, hint, new Vector2((int)(p.X - (int)Raylib.MeasureTextEx(Cfg.Font, hint, 9, 1f).X / 2), (int)(p.Y + rad + 15)), 9, 1f, Pal.TxtDim);
             }
         }
 
-        // hover tooltip: the chosen op's flavour (mod / objective / force / reward)
+        // hover tooltip: the chosen op's flavour (mod / objective / force / reward / enemy hint)
         if (hovered != null)
         {
             var c = hovered.Card;
             string l1 = $"{c.ModName}  -  {ObjName(c.Objective)}";
             string l2 = c.EnemyDelta > 0 ? "Heavy resistance" : (c.EnemyDelta < 0 ? "Light resistance" : "Standard force");
             string l3 = c.Reward != RewardKind.None ? "+ " + c.RewardText : null;
-            int tw = Math.Max((int)Raylib.MeasureTextEx(Cfg.Font, l1, 13, 1f).X, Math.Max((int)Raylib.MeasureTextEx(Cfg.Font, l2, 11, 1f).X, l3 != null ? (int)Raylib.MeasureTextEx(Cfg.Font, l3, 11, 1f).X : 0)) + 20;
-            int th = l3 != null ? 60 : 44;
+            string l4 = Run.EnemyHint(hovered);   // enemy intel hint (S4-A)
+            int tw = Math.Max((int)Raylib.MeasureTextEx(Cfg.Font, l1, 13, 1f).X,
+                     Math.Max((int)Raylib.MeasureTextEx(Cfg.Font, l2, 11, 1f).X,
+                     Math.Max(l3 != null ? (int)Raylib.MeasureTextEx(Cfg.Font, l3, 11, 1f).X : 0,
+                              (int)Raylib.MeasureTextEx(Cfg.Font, l4, 11, 1f).X))) + 20;
+            int th = (l3 != null ? 76 : 60);   // extra row for the hint
             float tx = Math.Min(mouse.X + 14, region.X + region.Width - tw);
             float ty = Math.Max(mouse.Y - th - 6, region.Y);
             var tip = new Rectangle(tx, ty, tw, th);
@@ -676,6 +683,8 @@ public static class Hud
             Raylib.DrawTextEx(Cfg.Font, l1, new Vector2((int)tx + 10, (int)ty + 8), 13, 1f, NodeColor(hovered.Kind));
             Raylib.DrawTextEx(Cfg.Font, l2, new Vector2((int)tx + 10, (int)ty + 26), 11, 1f, Pal.TxtDim);
             if (l3 != null) Raylib.DrawTextEx(Cfg.Font, l3, new Vector2((int)tx + 10, (int)ty + 42), 11, 1f, Pal.Accent);
+            int hintY = l3 != null ? (int)ty + 58 : (int)ty + 42;
+            Raylib.DrawTextEx(Cfg.Font, l4, new Vector2((int)tx + 10, hintY), 11, 1f, Pal.Foe);
         }
     }
 
