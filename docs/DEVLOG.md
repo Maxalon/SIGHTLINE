@@ -202,3 +202,16 @@ Disjoint wave: **S4-A** intel hints on the campaign map (`Hud`/`Run`) — make t
 informed choice; **5.4** procedural floor/cover noise texturing + soft-glow particles (`Renderer`/`Fx`);
 **themed-per-biome arena selection + 2 new arenas** (`Maps`/`Mission`). (S2-C overwatch-camp pressure
 deferred — shares `Hud` with S4-A.) Peer review of the Sprint 5 logic to follow.
+
+### Sprint 7 — RESULT (PR #48, on top of the merged main)
+
+| Item | Owner | Outcome |
+|---|---|---|
+| 3 new perks EXECUTIONER/GUARDIAN/COOL-HEADED (`Unit`/`Combat`/`Game`) | Dev | Integrated `45ea45e`. Build variety 10->13; distinct effects; persist; autopilot-safe. |
+| Emissive cover/plateau edges + contact shadows (`Renderer`) | Dev | Integrated `e84634c`. Subtle lit rims, bloom-amplified on hardware; squint test holds. |
+
+Disjoint (Unit/Combat/Game | Renderer). QA: build 0/0, COMBAT/SAVE/BENCH/CONCEAL PASS, autoplay
+clean. Peer review in flight. NOTE: a stray local branch-rename (`feat/5.4-procedural-texturing`)
+briefly left HEAD off the designated branch after the PR-#47 merge + reset; recovered cleanly
+(`git push origin HEAD:claude/...` + `checkout -B`), commit history verified intact (emissive+perks
+sit exactly on merged main). PR #47 (Sprints 1-6, 18 features) is MERGED to main (`d193b62`).
