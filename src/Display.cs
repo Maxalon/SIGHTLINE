@@ -156,6 +156,10 @@ void main() {
         Save();
     }
 
+    // auto-cam: optional character-focus camera that follows the selected/acting unit
+    public static bool AutoCam;
+    public static void ToggleAutoCam() { AutoCam = !AutoCam; Save(); }
+
     // onboarding tutorial (3.12): a one-time "seen" flag so it only shows on the first run
     public static bool TutorialSeen;
     public static void MarkTutorialSeen() { if (!TutorialSeen) { TutorialSeen = true; Save(); } }
@@ -354,6 +358,7 @@ void main() {
         public bool Colorblind { get; set; }
         public bool TutorialSeen { get; set; }
         public bool PostFX { get; set; } = true;
+        public bool AutoCam { get; set; }
     }
     static string Dir => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Sightline");
@@ -361,7 +366,7 @@ void main() {
 
     static void Save()
     {
-        try { Directory.CreateDirectory(Dir); File.WriteAllText(FilePath, JsonSerializer.Serialize(new Dto { Fullscreen = Fullscreen, SizeIdx = SizeIdx, BrightIdx = BrightIdx, Colorblind = Pal.Colorblind, TutorialSeen = TutorialSeen, PostFX = PostFX })); }
+        try { Directory.CreateDirectory(Dir); File.WriteAllText(FilePath, JsonSerializer.Serialize(new Dto { Fullscreen = Fullscreen, SizeIdx = SizeIdx, BrightIdx = BrightIdx, Colorblind = Pal.Colorblind, TutorialSeen = TutorialSeen, PostFX = PostFX, AutoCam = AutoCam })); }
         catch { }
     }
 
@@ -379,6 +384,7 @@ void main() {
                 Pal.SetColorblind(d.Colorblind);
                 TutorialSeen = d.TutorialSeen;
                 PostFX = d.PostFX;
+                AutoCam = d.AutoCam;
             }
         }
         catch { }

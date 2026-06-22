@@ -24,7 +24,7 @@ public static class Hud
     public static UiButton[] ActionButtons = Array.Empty<UiButton>();
     public static System.Collections.Generic.List<(Rectangle rect, Unit unit)> RosterChips = new();
     public static Rectangle PauseResume, PauseMute, PauseShake, PauseThreat, PauseFullscreen, PauseWindow, PauseAbandon;
-    public static Rectangle PauseBright, PauseColorblind;
+    public static Rectangle PauseBright, PauseColorblind, PauseAutoCam;
     public static Rectangle PerkBtnA, PerkBtnB, PerkTagBtn;
     public static Rectangle[] MissionCards = new Rectangle[3];
     public static System.Collections.Generic.List<(int Id, Rectangle Rect)> NodeBtns = new();
@@ -121,7 +121,7 @@ public static class Hud
     static void DrawPause(Game g)
     {
         Raylib.DrawRectangle(0, 0, Cfg.ScreenW, Cfg.ScreenH, Raylib.Fade(Pal.RGBA(5, 8, 11), 0.82f));
-        int w = 440, h = 612;
+        int w = 440, h = 665;
         int x = Cfg.ScreenW / 2 - w / 2, y = Cfg.ScreenH / 2 - h / 2;
         var card = new Rectangle(x, y, w, h);
         Raylib.DrawRectangleRounded(card, 0.05f, 8, Pal.Panel);
@@ -138,6 +138,7 @@ public static class Hud
         PauseThreat     = new Rectangle(bx, by, bw, bh); by += bh + gap;
         PauseBright     = new Rectangle(bx, by, bw, bh); by += bh + gap;
         PauseColorblind = new Rectangle(bx, by, bw, bh); by += bh + gap;
+        PauseAutoCam    = new Rectangle(bx, by, bw, bh); by += bh + gap;
         PauseAbandon    = new Rectangle(bx, by, bw, bh);
 
         DrawButtonRect(PauseResume, "RESUME", "ESC", true, false, Pal.Friend);
@@ -148,6 +149,7 @@ public static class Hud
         DrawButtonRect(PauseThreat, g.ShowThreatPref ? "THREAT PREVIEW: ON" : "THREAT PREVIEW: OFF", "", true, !g.ShowThreatPref, Pal.Accent);
         DrawButtonRect(PauseBright, "BRIGHTNESS: " + Display.BrightLabel, "", true, false, Pal.Accent);
         DrawButtonRect(PauseColorblind, Pal.Colorblind ? "COLORBLIND: ON" : "COLORBLIND: OFF", "", true, Pal.Colorblind, Pal.Accent);
+        DrawButtonRect(PauseAutoCam, Display.AutoCam ? "AUTO-CAM: ON" : "AUTO-CAM: OFF", "", true, Display.AutoCam, Pal.Accent);
         DrawButtonRect(PauseAbandon, "ABANDON RUN", "", true, false, Pal.Foe);
 
         string ctl = "Wheel zoom  -  Middle-drag pan  -  [C] reset camera  -  Arrows/WASD + [Space]";

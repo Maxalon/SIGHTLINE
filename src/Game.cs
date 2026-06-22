@@ -202,6 +202,7 @@ public class Game
     // game-feel: hit-stop freeze + camera zoom-punch + red death-flash (3.11)
     public float HitStop;
     float _camPulse;
+    bool  _autoCamManual;   // true = player manually moved camera; suppresses auto-follow until C-reset
     public float DeathFlash;                 // 0..1 red full-screen pulse on a soldier's death
     readonly List<string> _missionKia = new(); // soldiers KIA this mission (for the debrief)
     public void AddHitStop(float s) { HitStop = MathF.Max(HitStop, s); }
@@ -228,6 +229,8 @@ public class Game
     void SetupMission(int n)
     {
         _run.Mission = n;
+        // reset camera to identity each new mission (auto-cam will gently ease in if enabled)
+        CamZoom = 1f; CamPan = Vector2.Zero; _autoCamManual = false;
         // per-mission roster: a copy of the persistent squad (+ an optional VIP),
         // so adding the escort asset never pollutes the campaign squad.
         // Benched soldiers sit this mission out (accelerated recovery in DebriefSurvivors);
@@ -930,6 +933,7 @@ public class Game
             }
             if (Paused) { HandlePauseMenu(); return; }
             HandleCamera();
+            UpdateAutoCam(dt);
         }
 
         float t = MathF.Min(dt, 0.05f);
@@ -1590,6 +1594,7 @@ public class Game
         float wheel = Raylib.GetMouseWheelMove();
         if (wheel != 0)
         {
+            _autoCamManual = true;
             var mouse = Raylib.GetMousePosition();
             var before = Raylib.GetScreenToWorld2D(mouse, ViewCamera(false));
             CamZoom = Util.Clamp(CamZoom + wheel * 0.12f, 1f, 2.4f);
@@ -1597,8 +1602,11 @@ public class Game
             CamPan += before - after;                 // keep the point under the cursor anchored
         }
         if (Raylib.IsMouseButtonDown(MouseButton.Middle))
+        {
+            _autoCamManual = true;
             CamPan -= Raylib.GetMouseDelta() / CamZoom;
-        if (Raylib.IsKeyPressed(KeyboardKey.C)) { CamZoom = 1f; CamPan = Vector2.Zero; }
+        }
+        if (Raylib.IsKeyPressed(KeyboardKey.C)) { CamZoom = 1f; CamPan = Vector2.Zero; _autoCamManual = false; }
 
         if (CamZoom <= 1.001f) { CamZoom = 1f; CamPan = Vector2.Zero; }  // no pan when fully out
         else
@@ -1606,6 +1614,46 @@ public class Game
             CamPan.X = Util.Clamp(CamPan.X, -Cfg.BoardW * 0.5f, Cfg.BoardW * 0.5f);
             CamPan.Y = Util.Clamp(CamPan.Y, -Cfg.BoardH * 0.5f, Cfg.BoardH * 0.5f);
         }
+    }
+
+    // Auto-cam: gently lerps CamZoom/CamPan toward the focus unit each frame.
+    // Focus = Selected on player turn; the currently-acting enemy on enemy turn.
+    // Only runs when Display.AutoCam is on, we are NOT in autoplay, and the player
+    // hasn't manually overridden (wheel/middle-drag). C-reset re-enables it.
+    void UpdateAutoCam(float dt)
+    {
+        if (!Display.AutoCam || AutoPlay || _autoCamManual) return;
+        if (Phase != Phase.PlayerTurn && Phase != Phase.EnemyTurn) return;
+
+        // Determine the focus unit.
+        Unit focus = null;
+        if (Phase == Phase.PlayerTurn)
+            focus = Selected;
+        else if (Phase == Phase.EnemyTurn && _aiIdx < _aiUnits.Count)
+            focus = _aiUnits[_aiIdx];
+
+        if (focus == null || !focus.Alive) return;
+
+        // Target zoom: modest 1.35x so the board edge is still visible.
+        const float TargetZoom = 1.35f;
+        // Target pan: shift so the focus unit's world position is at BoardCenter.
+        // CamPan is added to BoardCenter as the camera Target, so to centre on
+        // TileCenter(focus) we want CamPan = TileCenter(focus) - BoardCenter.
+        var unitPos = Util.TileCenter(focus.X, focus.Y);
+        var boardCenter = BoardCenter;
+        var targetPan = unitPos - boardCenter;
+
+        // Clamp pan so we never show blank space beyond the board.
+        float halfW = Cfg.BoardW * 0.5f * (1f - 1f / TargetZoom);
+        float halfH = Cfg.BoardH * 0.5f * (1f - 1f / TargetZoom);
+        targetPan.X = Util.Clamp(targetPan.X, -halfW, halfW);
+        targetPan.Y = Util.Clamp(targetPan.Y, -halfH, halfH);
+
+        // Frame-rate-aware lerp (exp decay): ~6 units/s feel — smooth glide.
+        float alpha = 1f - MathF.Exp(-dt * 6f);
+        CamZoom = CamZoom + (TargetZoom - CamZoom) * alpha;
+        CamPan.X = CamPan.X + (targetPan.X - CamPan.X) * alpha;
+        CamPan.Y = CamPan.Y + (targetPan.Y - CamPan.Y) * alpha;
     }
 
     void HandlePauseMenu()
@@ -1620,6 +1668,7 @@ public class Game
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseThreat)) ShowThreatPref = !ShowThreatPref;
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseBright)) Display.CycleBrightness();
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseColorblind)) Display.ToggleColorblind();
+        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseAutoCam)) { Display.ToggleAutoCam(); if (!Display.AutoCam) { CamZoom = 1f; CamPan = Vector2.Zero; } }
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseAbandon)) { Paused = false; Phase = Phase.Lose; LoseTitle = "RUN ABANDONED"; LoseReason = "You called off the campaign."; Audio.Play("lose"); }
     }
 
