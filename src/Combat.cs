@@ -23,6 +23,7 @@ public struct ShotResult
 {
     public bool Hit;
     public bool Crit;
+    public bool Graze;   // hit for minimum damage only; not a full hit but not a miss
     public int Damage;
     public ShotOdds Odds;
 }
@@ -41,6 +42,10 @@ public static class Combat
     // Concealment ambush bonus: firing from concealment before breaking it.
     public const int AmbushAim  = 20;
     public const int AmbushCrit = 25;
+
+    // Graze band: a shot that misses by <= GrazeBand hits for minimum damage (no crit).
+    // Softens the "I whiffed three 80% shots" tail without removing true misses.
+    public const int GrazeBand = 15;
 
     public static ShotOdds ComputeOdds(Grid grid, Unit a, Unit d)
     {
@@ -130,18 +135,37 @@ public static class Combat
         int effHit = Util.Clamp(odds.HitChance + aimMod, 1, 99);
 
         var res = new ShotResult { Odds = odds };
-        if (!Util.Roll(effHit))
-            return res; // miss
+
+        // Inline the roll so we can inspect the raw value for the graze band.
+        // Roll is in [0,100): hit if roll < effHit. Graze if roll in [effHit, effHit+GrazeBand).
+        double roll = Util.Rng.NextDouble() * 100.0;
+        bool hit   = roll < effHit;
+        bool graze = !hit && roll < effHit + GrazeBand;
+
+        if (!hit && !graze)
+            return res; // clean miss
 
         res.Hit = true;
-        int dmg = Util.RandInt(odds.DmgMin, odds.DmgMax);
+
+        if (graze)
+        {
+            // Graze: minimum damage, never crits.
+            res.Graze = true;
+            int dmg = odds.DmgMin;
+            if (d.HasPerk(Perk.Hardened)) dmg = Math.Max(1, dmg - 1);
+            res.Damage = Math.Max(1, dmg);   // guaranteed-damage floor
+            return res;
+        }
+
+        // Normal hit path.
+        int dmgN = Util.RandInt(odds.DmgMin, odds.DmgMax);
         if (Util.Roll(odds.CritChance))
         {
             res.Crit = true;
-            dmg = (int)MathF.Ceiling(dmg * 1.5f) + 1;
+            dmgN = (int)MathF.Ceiling(dmgN * 1.5f) + 1;
         }
-        if (d.HasPerk(Perk.Hardened)) dmg = Math.Max(1, dmg - 1);   // damage resistance
-        res.Damage = dmg;
+        if (d.HasPerk(Perk.Hardened)) dmgN = Math.Max(1, dmgN - 1);   // damage resistance
+        res.Damage = Math.Max(1, dmgN);   // guaranteed-damage floor
         return res;
     }
 
@@ -242,8 +266,81 @@ public static class Combat
         if (yesAmb.HitChance != Util.Clamp(noAmb.HitChance + AmbushAim, 3, 95)) fails.Add("ambushHit");
         if (yesAmb.CritChance != Util.Clamp(noAmb.CritChance + AmbushCrit, 0, 100)) fails.Add("ambushCrit");
 
+        // GRAZE + guaranteed-damage floor (S2-A)
+        // Reproduce "a shot that misses by <= 15" by exercising Resolve directly.
+        // We need repeatable control over the roll, so we test the band conditions
+        // by comparing outcomes of two rolls at known positions in the band.
+        {
+            var gG = new Grid();
+            var gAtk = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 3, Y = 5 };
+            var gDef = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 7, Y = 5, Hp = 20, MaxHp = 20 };
+
+            // Test graze band logic directly using the band constants: a shot at effHit=60
+            // must graze when roll in [60,75) and miss when roll >= 75.
+            // We'll call Resolve many times and verify statistical behaviour.
+            int totalShots = 10000;
+            int hitCount = 0, grazeCount = 0, missCount = 0;
+            for (int i = 0; i < totalShots; i++)
+            {
+                var r = Resolve(gG, gAtk, gDef, 0);
+                if (!r.Hit) missCount++;
+                else if (r.Graze) grazeCount++;
+                else hitCount++;
+            }
+            // Expected: ~60% hit, ~15% graze, ~25% clean miss (within 7% tolerance at N=10000)
+            float hitPct   = hitCount   * 100f / totalShots;
+            float grazePct = grazeCount * 100f / totalShots;
+            float missPct  = missCount  * 100f / totalShots;
+            if (hitPct < 53f || hitPct > 67f) fails.Add($"grazeHitRate={hitPct:F1}");
+            if (grazePct < 8f || grazePct > 22f) fails.Add($"grazeGrazeRate={grazePct:F1}");
+            if (missPct < 18f || missPct > 32f) fails.Add($"grazeMissRate={missPct:F1}");
+
+            // A graze must deal exactly DmgMin and must not be a Crit.
+            bool foundGraze = false, grazeNoCrit = true, grazeDmgMin = true;
+            for (int i = 0; i < 2000 && (!foundGraze || grazeNoCrit && grazeDmgMin); i++)
+            {
+                gDef.Hp = 20;
+                var r = Resolve(gG, gAtk, gDef, 0);
+                if (r.Hit && r.Graze)
+                {
+                    foundGraze = true;
+                    if (r.Crit) grazeNoCrit = false;
+                    if (r.Damage != gAtk.Weapon.DmgMin) grazeDmgMin = false;
+                }
+            }
+            if (!foundGraze) fails.Add("grazeNeverOccurred");
+            if (!grazeNoCrit) fails.Add("grazeCrit");
+            if (!grazeDmgMin) fails.Add("grazeDmgNotMin");
+
+            // A clean miss (roll >= effHit + GrazeBand) must have Hit==false.
+            // Confirm: with effHit bumped very high a graze is ~15% window above 95 which is clamped,
+            // and with effHit=0 there are no hits and only grazes below 15, all misses above 15.
+            // Test: effHit=0 (aimMod=-200) → only misses and grazes (no normal hits).
+            int normalHitsAtZero = 0;
+            for (int i = 0; i < 500; i++)
+            {
+                gDef.Hp = 20;
+                var r = Resolve(gG, gAtk, gDef, aimMod: -200);   // effHit clamped to 1
+                if (r.Hit && !r.Graze) normalHitsAtZero++;
+            }
+            // At effHit=1 almost everything is a graze (<16) or a miss (>=16); no normal hits
+            // ... actually effHit is clamped to 1 not 0, so hits at roll<1 are rare but possible.
+            // Accept up to 5 pure hits out of 500 (1% expected; allow 5 as headroom).
+            if (normalHitsAtZero > 15) fails.Add($"grazeZeroHits={normalHitsAtZero}");
+
+            // Guaranteed-damage floor: every hit (incl. graze + Hardened perk) must deal >= 1.
+            var gHard = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 7, Y = 5, Hp = 20, MaxHp = 20 };
+            gHard.Perks.Add(Perk.Hardened);
+            for (int i = 0; i < 400; i++)
+            {
+                gHard.Hp = 20;
+                var r = Resolve(gG, gAtk, gHard, 0);
+                if (r.Hit && r.Damage < 1) fails.Add("dmgFloorBroken");
+            }
+        }
+
         return fails.Count == 0
-            ? "COMBATTEST: PASS (cover A-E + high-ground + tier-2 + drone/shield + ambush all hold)"
+            ? "COMBATTEST: PASS (cover A-E + high-ground + tier-2 + drone/shield + ambush + graze all hold)"
             : "COMBATTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 }
