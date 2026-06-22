@@ -449,13 +449,14 @@ public class Run
         switch (node.Kind)
         {
             case NodeKind.Boss:
-                // BREAKER m3, WARDEN m5, WARLORD m6 (final)
-                if (m >= Run.MaxMissions) return "BOSS: WARLORD";
-                if (m == 5)              return "BOSS: WARDEN";
-                return                          "BOSS: BREAKER";
+                // GenerateMap only ever places ONE Boss node, at the final column, so the
+                // capstone WARLORD is the boss. (BREAKER m3 / WARDEN m5 appear as mid-bosses
+                // on Combat/Elite nodes, not as Boss-kind nodes — see Mission.midBoss.)
+                return "BOSS: WARLORD";
             case NodeKind.Supply:
-                // Lighter force: mostly early-tier archetypes
-                return m <= 2 ? "GRUNTS + SCOUTS" : "LIGHT FORCE";
+                // Supply only thins the force (fewer enemies / lower stats); the archetype
+                // pool is unchanged, so don't overclaim composition (review Sprint 5 F1).
+                return "LIGHT FORCE";
             case NodeKind.Elite:
                 // Same tier as Combat but heavier (+2 enemy delta)
                 if (m <= 2) return "BRUISER + SNIPER";

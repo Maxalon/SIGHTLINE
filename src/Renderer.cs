@@ -50,8 +50,14 @@ public static class Renderer
     {
         if (!_noiseReady) return;
         const float ts = 128f;
-        // Shift UVs so the grain is continuous across the whole board
-        var src = new Rectangle(dst.X % ts, dst.Y % ts, dst.Width, dst.Height);
+        // Offset relative to the BOARD ORIGIN (not absolute screen px): tile coords are
+        // multiples of Cfg.Tile, so a board-aligned offset keeps the source rect inside the
+        // texture (src + Tile <= 128) instead of overflowing on alternate rows -- which
+        // software GL (llvmpipe) renders as a seam because it ignores TextureWrap on a
+        // partial-rect sample. Still continuous across the board on real hardware. (Sprint 5 F3)
+        float sx = (((dst.X - Cfg.OriginX) % ts) + ts) % ts;
+        float sy = (((dst.Y - Cfg.OriginY) % ts) + ts) % ts;
+        var src = new Rectangle(sx, sy, dst.Width, dst.Height);
         var col = Raylib.Fade(Pal.Mix(Color.White, tint, 0.45f), alpha);
         Raylib.DrawTextureRec(_noise, src, new Vector2(dst.X, dst.Y), col);
     }
