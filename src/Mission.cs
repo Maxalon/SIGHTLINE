@@ -20,6 +20,23 @@ public static class Mission
     // test hook (SIGHTLINE_MAP): force a specific authored layout index; -1 = normal roll
     public static int ForcedLayout = -1;
 
+    // Soft biome->layout affinity: each biome index (matching Biome.All order —
+    // STEEL=0 ARID=1 TUNDRA=2 VERDANT=3 ASH=4 VOID=5) hints at a preferred arena
+    // index. When an authored map is rolled, there is a 50% chance to pick the hinted
+    // layout and a 50% chance to pick randomly — keeping variety while nudging theme.
+    // -1 means no preference (always picks randomly). This is SOFT: ForcedLayout
+    // overrides it completely, and the connectivity guard can still fall back to
+    // procedural if a hinted layout fails (though the arenas are designed to pass).
+    static readonly int[] BiomeLayoutHint =
+    {
+        2,   // STEEL   → PILLARS (industrial columns)
+        8,   // ARID    → RIDGE (exposed slope, decisive high ground)
+        7,   // TUNDRA  → FOXHOLES (defensive low-cover warren)
+        10,  // VERDANT → THICKET (dense organic cover clusters)
+        6,   // ASH     → CROSSROADS (ruined sightline lanes)
+        9,   // VOID    → RUINS (open eerie arena, long sightlines)
+    };
+
     /// The four starting soldiers for a fresh run.
     public static List<Unit> NewRunSquad()
     {
@@ -92,7 +109,7 @@ public static class Mission
             authored = TryApplyLayout(grid, occupied, players, enemies, evacSet, terminal, Maps.Layouts[ForcedLayout], sabotage);
         else
             authored = Util.Roll(55) &&
-                TryApplyLayout(grid, occupied, players, enemies, evacSet, terminal, Util.Choice(Maps.Layouts), sabotage);
+                TryApplyLayout(grid, occupied, players, enemies, evacSet, terminal, PickLayout(missionNum), sabotage);
         if (!authored)
         {
             // contested high ground: raised plateaus in the mid-field (more on later missions)
@@ -385,6 +402,18 @@ public static class Mission
                 if (evac.Contains((nx, ny))) continue;
                 g.Height[nx, ny] = level;
             }
+    }
+
+    /// Pick an authored layout to try, applying a soft biome affinity: 50% of the time
+    /// choose the biome's hinted layout (if one is set), else pick uniformly at random.
+    /// The connectivity guard in TryApplyLayout still validates the result regardless.
+    static string[] PickLayout(int missionNum)
+    {
+        int biomeIdx = (missionNum - 1 + Biome.All.Length) % Biome.All.Length;
+        int hint = (biomeIdx < BiomeLayoutHint.Length) ? BiomeLayoutHint[biomeIdx] : -1;
+        if (hint >= 0 && hint < Maps.Layouts.Length && Util.Roll(50))
+            return Maps.Layouts[hint];
+        return Util.Choice(Maps.Layouts);
     }
 
     static void TryCover(Grid g, HashSet<(int, int)> occ, int x, int y, TileType t)
