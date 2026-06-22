@@ -230,6 +230,13 @@ public class Unit
     // mission in Run.DebriefSurvivors, cleared by a FIELD MEDKIT.
     public int Wound;
 
+    // bench (S3-A): a wounded soldier can sit out the next mission (deploy short-handed)
+    // in exchange for accelerated recovery — Wound decays 2 steps + full HP heal. Cleared
+    // at the start of the mission they sit out (SetupMission). Only wounded soldiers may be
+    // benched; the minimum deployable squad is 1 (guard in ToggleBench). Never set by the
+    // autopilot so smoke-test runs always deploy full-strength. Persists in SaveGame.
+    public bool Benched;
+
     // render state
     public Vector2 Pos;         // pixel-space centre (tweened)
     public Vector2 Recoil;      // transient recoil/knockback offset (decays)

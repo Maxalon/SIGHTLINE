@@ -76,6 +76,7 @@ public static class SaveGame
                 BonusGrenades = u.BonusGrenades,
                 CustomTag = u.CustomTag,
                 Wound = u.Wound,
+                Benched = u.Benched,
                 Perks = u.Perks.ConvertAll(p => (int)p),
                 Nickname = u.Nickname,
                 Traits = u.Traits.ConvertAll(t => (int)t),
@@ -114,7 +115,7 @@ public static class SaveGame
                 Weapon = Weapon.Make((WeaponKind)d.Weapon),
                 Kills = d.Kills, Rank = d.Rank, Alive = true,
                 BonusGrenades = d.BonusGrenades, CustomTag = d.CustomTag, Wound = d.Wound,
-                Nickname = d.Nickname,
+                Nickname = d.Nickname, Benched = d.Benched,
             };
             u.Ammo = u.Weapon.Clip;
             if (d.Perks != null) foreach (var p in d.Perks) u.Perks.Add((Perk)p);
@@ -151,6 +152,7 @@ public static class SaveGame
     {
         public string Name, Cls, CustomTag, Nickname;
         public int Hp, MaxHp, Aim, Mobility, Weapon, Kills, Rank, BonusGrenades, Wound;
+        public bool Benched;
         public List<int> Perks = new();
         public List<int> Traits = new();
         public List<string> Bonds = new();
@@ -180,6 +182,7 @@ public static class SaveGame
                 Weapon = Weapon.Make(WeaponKind.Rifle), Kills = 7, Rank = 3, BonusGrenades = 2,
                 CustomTag = "BREACHER", Wound = 2,
             };
+            a.Benched = true;
             a.Perks.Add(Perk.Deadeye); a.Perks.Add(Perk.Tank);
             a.Nickname = "REAPER";
             a.Traits.Add(Trait.Killer); a.Traits.Add(Trait.IronWill);
@@ -212,6 +215,7 @@ public static class SaveGame
             if (g0.BonusGrenades != 2) fails.Add("bonusGrenades");
             if (g0.CustomTag != "BREACHER") fails.Add("customTag");
             if (g0.Wound != 2) fails.Add("wound");
+            if (!g0.Benched) fails.Add("benched");
             if (!g0.HasPerk(Perk.Deadeye) || !g0.HasPerk(Perk.Tank) || g0.Perks.Count != 2) fails.Add("perks");
             if (g0.Nickname != "REAPER") fails.Add("nickname");
             if (!g0.HasTrait(Trait.Killer) || !g0.HasTrait(Trait.IronWill) || g0.Traits.Count != 2) fails.Add("traits");

@@ -230,7 +230,10 @@ public class Game
         _run.Mission = n;
         // per-mission roster: a copy of the persistent squad (+ an optional VIP),
         // so adding the escort asset never pollutes the campaign squad.
-        Players = new List<Unit>(_run.Squad);
+        // Benched soldiers sit this mission out (accelerated recovery in DebriefSurvivors);
+        // we clear the Benched flag here so they auto-reset for the following mission.
+        Players = new List<Unit>(_run.Squad.Where(u => !u.Benched));
+        foreach (var u in _run.Squad) u.Benched = false;   // cleared at mission start
 
         // objective + difficulty come from the chosen deployment card (Run.ObjectiveFor baseline)
         var card = _run.CurrentCard ?? Run.StandardCard(n);
@@ -511,6 +514,19 @@ public class Game
     {
         _run.DebriefSurvivors();
         _run.GenerateOffers(_run.Mission + 1);
+        Phase = Phase.Barracks;
+    }
+
+    /// Harness hook (screenshot only): show the barracks debrief with two wounded soldiers
+    /// so the BENCH toggle buttons are visible (S3-A).
+    public void DebugBench()
+    {
+        // wound two soldiers so the BENCH button appears in their rows
+        foreach (var u in _run.Squad.Take(2)) u.Wound = 2;
+        _run.JumpTo(2);
+        _run.DebriefSurvivors();
+        _run.PendingPerks.Clear();
+        _shopDone = true;
         Phase = Phase.Barracks;
     }
 
@@ -946,12 +962,17 @@ public class Game
                 {
                     if (AutoPlay) ChoosePerk(0); else HandlePerkClick();
                 }
-                else if (_run.NextNodes().Count > 0)     // then pick the next node on the campaign map
+                else
                 {
-                    if (AutoPlay) ChooseNode(_run.NextNodes()[0].Id); else HandleNodeClick();
+                    // debrief screen: bench toggles are available before choosing a node/card
+                    if (!AutoPlay) HandleBenchClick();
+                    if (_run.NextNodes().Count > 0)      // pick the next node on the campaign map
+                    {
+                        if (AutoPlay) ChooseNode(_run.NextNodes()[0].Id); else HandleNodeClick();
+                    }
+                    else if (AutoPlay) ChooseCard(0);    // fallback: deployment cards
+                    else HandleCardClick();
                 }
-                else if (AutoPlay) ChooseCard(0);        // fallback: deployment cards
-                else HandleCardClick();
                 break;
             case Phase.Win:
             case Phase.Lose: HandleOverlayClick(); break;
@@ -2448,6 +2469,32 @@ public class Game
         var m = Raylib.GetMousePosition();
         foreach (var (id, rect) in Hud.NodeBtns)
             if (Raylib.CheckCollisionPointRec(m, rect)) { ChooseNode(id); return; }
+    }
+
+    // ---------------- bench mechanic ----------------
+    /// Toggle a wounded soldier between benched / not benched.
+    /// Guards: only wounded soldiers may be benched; at least 1 deployable must remain.
+    /// Never called by the autopilot (headless runs always deploy full-strength).
+    public void ToggleBench(Unit u)
+    {
+        if (AutoPlay) return;
+        if (u == null || u.Wound == 0) return;   // only wounded soldiers may be benched
+        if (!u.Benched)
+        {
+            // count how many would remain deployable if we bench this soldier
+            int deployable = _run.Squad.Count(s => !s.Benched && s != u);
+            if (deployable < 1) return;           // must keep at least 1 soldier in the field
+        }
+        u.Benched = !u.Benched;
+        Audio.Play("select");
+    }
+
+    void HandleBenchClick()
+    {
+        if (!Raylib.IsMouseButtonPressed(MouseButton.Left)) return;
+        var m = Raylib.GetMousePosition();
+        foreach (var (unit, rect) in Hud.BenchBtns)
+            if (Raylib.CheckCollisionPointRec(m, rect)) { ToggleBench(unit); return; }
     }
 
     // ---------------- overlay click ----------------

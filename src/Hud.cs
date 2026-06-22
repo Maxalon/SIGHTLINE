@@ -30,6 +30,8 @@ public static class Hud
     public static System.Collections.Generic.List<(int Id, Rectangle Rect)> NodeBtns = new();
     public static Rectangle[] ShopBtns = new Rectangle[Game.ShopName.Length];
     public static Rectangle ShopProceed;
+    // bench mechanic (S3-A): toggled in the barracks debrief for wounded soldiers
+    public static System.Collections.Generic.List<(Unit unit, Rectangle rect)> BenchBtns = new();
 
     public static void Draw(Game g)
     {
@@ -518,6 +520,7 @@ public static class Hud
         var run = g.RunState;
         if (!g.ShopDone) { DrawRequisition(g); return; }
         if (run.PendingPerks.Count > 0) { DrawPerkChooser(g, run.PendingPerks[0]); return; }
+        BenchBtns.Clear();
         var squad = run.Squad;
         Raylib.DrawRectangle(0, 0, Cfg.ScreenW, Cfg.ScreenH, Raylib.Fade(Pal.RGBA(5, 8, 11), 0.85f));
 
@@ -881,8 +884,11 @@ public static class Hud
         Raylib.DrawRectangleRounded(new Rectangle(x, y, w, 40), 0.2f, 6, Pal.RGBA(13, 19, 27));
         Raylib.DrawRectangle(x, y, 3, 40, Pal.Friend);
 
-        Raylib.DrawTextEx(Cfg.Font, u.Name, new Vector2(x + 14, y + 5), 18, 1f, Pal.Txt);
-        Raylib.DrawTextEx(Cfg.Font, $"{u.RankName}  -  {u.Cls}", new Vector2(x + 14, y + 24), 11, 1f, Pal.Accent);
+        Raylib.DrawTextEx(Cfg.Font, u.Name, new Vector2(x + 14, y + 5), 18, 1f, u.Benched ? Pal.TxtDim : Pal.Txt);
+        string rankLine = $"{u.RankName}  -  {u.Cls}";
+        if (u.Wound > 0) rankLine += $"  WOUNDED({u.Wound})";
+        if (u.Benched)   rankLine += "  [SITTING OUT]";
+        Raylib.DrawTextEx(Cfg.Font, rankLine, new Vector2(x + 14, y + 24), 11, 1f, u.Wound > 0 ? Pal.Foe : Pal.Accent);
 
         // earned perks (compact 3-letter codes)
         if (u.Perks.Count > 0)
@@ -902,11 +908,28 @@ public static class Hud
         }
         Raylib.DrawTextEx(Cfg.Font, $"{u.Hp}/{u.MaxHp} HP", new Vector2(x + 380, y + 13), 12, 1f, Pal.TxtDim);
 
-        // kills + progress
-        Raylib.DrawTextEx(Cfg.Font, $"{u.Kills} kills", new Vector2(x + w - 170, y + 6), 12, 1f, Pal.Txt);
+        // kills + progress — shifted left to make room for BENCH button when wounded
+        int killsX = u.Wound > 0 ? x + w - 260 : x + w - 170;
+        Raylib.DrawTextEx(Cfg.Font, $"{u.Kills} kills", new Vector2(killsX, y + 6), 12, 1f, Pal.Txt);
         int toNext = g.RunState.KillsToNext(u);
         string prog = u.Rank >= Run.Ranks.Length - 1 ? "MAX RANK" : $"{toNext} to next rank";
-        Raylib.DrawTextEx(Cfg.Font, prog, new Vector2(x + w - 170, y + 23), 11, 1f, Pal.TxtDim);
+        Raylib.DrawTextEx(Cfg.Font, prog, new Vector2(killsX, y + 23), 11, 1f, Pal.TxtDim);
+
+        // BENCH toggle: shown only for wounded soldiers; benched = warm amber, unbenched = dim outline
+        if (u.Wound > 0)
+        {
+            string benchLabel = u.Benched ? "BENCHED" : " BENCH ";
+            Color benchBg   = u.Benched ? Pal.Accent : Pal.RGBA(20, 28, 40);
+            Color benchFg   = u.Benched ? Pal.Panel  : Pal.TxtDim;
+            Color benchBd   = u.Benched ? Pal.Accent : Pal.PanelBd;
+            var benchR = new Rectangle(x + w - 84, y + 9, 76, 22);
+            Raylib.DrawRectangleRounded(benchR, 0.3f, 6, benchBg);
+            Raylib.DrawRectangleLinesEx(benchR, 1f, benchBd);
+            Raylib.DrawTextEx(Cfg.Font, benchLabel,
+                new Vector2(benchR.X + benchR.Width / 2 - Raylib.MeasureTextEx(Cfg.Font, benchLabel, 11, 1f).X / 2,
+                            benchR.Y + 5), 11, 1f, benchFg);
+            BenchBtns.Add((u, benchR));
+        }
     }
 
     public static Rectangle OverlayBtn;
