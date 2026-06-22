@@ -7,8 +7,15 @@ namespace Sightline;
 /// (see Run); each mission regenerates the map + a scaled hostile force.
 public static class Mission
 {
-    // up to 5 left-edge spawns: four soldiers + (on escort missions) the VIP
-    static readonly (int x, int y)[] PlayerSpawns = { (1, 2), (1, 4), (2, 7), (1, 9), (2, 5) };
+    // Staggered deployment footprint: four soldiers across cols 0-3 in a loose wedge
+    // (upper-forward / back-left / lower-forward / back-right), plus a 5th slot for the
+    // VIP/captive near squad centre. Spread deliberately avoids a single-column firing-line
+    // while staying in the left third (cols 0-3) so standoff to the mid-field screen holds.
+    static readonly (int x, int y)[] PlayerSpawns = { (2, 2), (0, 5), (3, 8), (1, 9), (2, 5) };
+
+    // Per-pod column offsets for enemy spawns: vary across cols 14-17 so the right side
+    // doesn't mirror a parallel firing line. Indexed by pod id (i/2), cycling if more pods.
+    static readonly int[] EnemyPodColOffset = { 1, 3, 0, 2, 1, 3 };
 
     // test hook (SIGHTLINE_MAP): force a specific authored layout index; -1 = normal roll
     public static int ForcedLayout = -1;
@@ -195,8 +202,9 @@ public static class Mission
         for (int i = 0; i < count; i++)
         {
             int y = rows[i % rows.Count];
-            int x = grid.W - 2 - (i / rows.Count);   // pack into right columns
-            if (x < grid.W - 4) x = grid.W - 2;
+            int podId = i / 2;
+            int colOff = EnemyPodColOffset[podId % EnemyPodColOffset.Length];
+            int x = grid.W - 1 - colOff;              // stagger across cols 14-17
             int guard = 0;
             while ((used.Contains((x, y)) || evac.Contains((x, y))) && guard++ < 30)
             { y = Util.RandInt(0, grid.H - 1); x = grid.W - 2 - Util.RandInt(0, 2); }

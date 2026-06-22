@@ -288,6 +288,33 @@ public static class Renderer
                     Raylib.DrawLineEx(new Vector2(mx, my), new Vector2(topRect.X + topRect.Width - 6, topRect.Y + 9), 1.6f, crack);
                     Raylib.DrawLineEx(new Vector2(mx, my), new Vector2(mx - 4, topRect.Y + topRect.Height - 4), 1.4f, crack);
                 }
+
+                // S4-B shape-redundancy cue: HIGH cover gets a small upward chevron/triangle on
+                // its top face; LOW cover gets a short horizontal bar.  Both drawn at low alpha so
+                // they stay subtle and don't clutter the board — but they let the two cover tiers
+                // be distinguished by SHAPE alone (e.g. in colorblind mode or when squinting).
+                // Peak-up triangle = tall/full shield; flat bar = low/half cover.
+                {
+                    float cx = topRect.X + topRect.Width  * 0.5f;
+                    float cy = topRect.Y + topRect.Height * 0.72f;   // lower third of top face
+                    Color cue = Raylib.Fade(Pal.RGBA(255, 255, 255), 0.19f);
+                    if (high)
+                    {
+                        // Upward chevron: two lines from base corners meeting at a peak
+                        float halfW = 7f, ht = 9f;
+                        var peak   = new Vector2(cx,          cy - ht);
+                        var bLeft  = new Vector2(cx - halfW,  cy);
+                        var bRight = new Vector2(cx + halfW,  cy);
+                        Raylib.DrawLineEx(bLeft,  peak,   1.8f, cue);
+                        Raylib.DrawLineEx(peak,   bRight, 1.8f, cue);
+                        Raylib.DrawLineEx(bLeft,  bRight, 1.4f, cue);  // base closes the triangle
+                    }
+                    else
+                    {
+                        // Single flat bar — low / half-cover
+                        Raylib.DrawLineEx(new Vector2(cx - 9f, cy), new Vector2(cx + 9f, cy), 2.5f, cue);
+                    }
+                }
             }
     }
 
