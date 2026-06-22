@@ -60,4 +60,32 @@ Dispatched 3 developer agents into isolated worktrees, **disjoint files** for co
 4.4 concealment is being architected in parallel; it runs solo in a later wave (it touches the
 hot files Game/Hud/Renderer). Each feature is peer-reviewed + QA'd before integration.
 
-_Log entries appended below as work lands._
+### Sprint 1 — RESULT (all shipped to PR #47)
+
+| Item | Owner | Outcome |
+|---|---|---|
+| S3-C 3 arenas (`Maps.cs`) | Dev C | Clean; integrated `b92abfe`. RIDGE/CROSSROADS/FOXHOLES, all pass connectivity guard. |
+| S1-A post-FX shader (`Display.cs`) | Dev B | Clean; integrated `f3f4541`. Embedded GLSL, headless byte-stable, `SIGHTLINE_POSTFX=1` to view. |
+| 4.4 concealment | Dev A (+ child agent) + orchestrator | Dev A stalled mid-task; a child agent it spawned finished a full version (`011770f`). Orchestrator integrated: hand-merged Game/Program onto the post-FX trunk, adopted the child's verified Hud/Renderer + Combat/Unit, fixed a top-bar HUD collision. Integrated `005f1b5`. |
+
+**Process learnings:** (1) a dev agent can delegate to a sub-agent and report "still running" while
+coming to rest — always inspect the worktree branch before treating it as done. (2) `SendMessage`
+to resume a stalled agent was not available, so the orchestrator finished the marquee feature
+directly (reliable, full quality control). (3) Parallel devs MUST be on disjoint files; the one
+overlap (a dev based its branch on a pre-integration trunk) was resolved by hand-merging only the
+two shared files and file-level-checking-out the rest. (4) Integrated incrementally (one commit per
+feature) rather than a big-bang merge.
+
+QA (on the integrated trunk): Release 0/0; CONCEALTEST + COMBATTEST PASS; autoplay clean x5 +
+sabotage/rescue/defend (no exceptions, no TIMEOUT); screenshots verified for each feature.
+
+## Sprint 2 — combat feel + AI + typography (planned)
+
+- **S2-A** graze / partial-hit + guaranteed-damage floor (`Combat.cs`, `Anim.cs`) — output-randomness fix.
+- **S2-B** enemy AI uses utility items (smoke to reposition, flash to break overwatch) (`Ai.cs`, `Game.cs` light).
+- **S1-B** real font — NotoMono (OFL-1.1, already on the machine, no network) baked via `LoadFontEx`,
+  migrate `DrawText`->`DrawTextEx` (`Program.cs`, `Hud.cs`, `Renderer.cs`, `Fx.cs`); lifts the ASCII limit.
+- (S2-C overwatch-camp soft pressure queued behind these.)
+
+Batching: S2-A (Combat/Anim) and S1-B (Program/Hud/Renderer/Fx) are file-disjoint -> parallel.
+S2-B touches Ai + Game(light); sequenced against other Game.cs work.

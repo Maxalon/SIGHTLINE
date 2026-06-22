@@ -205,6 +205,19 @@ seeds (mix of WIN/LOSE, no exceptions):
   a warning) or loses interest if the squad broke contact. Blundering in close (≤4) or any
   aggression snaps it straight to Alert with the capped reaction scatter. `Unit.AlertLevel`
   (`Active => Alert==Alert`), `Game.CheckPodActivation`/`SetPodSuspicious`/`ResolveSuspicion`.
+- **Concealment + ambush (Phase 4.4):** the squad opens every mission **concealed**
+  (`Game.SquadConcealed`); it scouts/repositions freely and pods can't wake by sight. The
+  player picks when to break stealth (first shot/grenade/flash/pin, or stepping within
+  `RevealRange` 3 of an active foe) -> `Game.BreakConcealment` springs an **ambush** (the
+  breaking shot gets +20 aim/+25 crit via `Unit.FiredFromConcealment`/`Combat.AmbushAim/Crit`,
+  one shot only) and wakes sighted pods; then 4.3 tiers resume. CONCEALED HUD pill + friendly
+  ghost rings; "+ AMBUSH" tooltip. (`SIGHTLINE_CONCEAL`/`SIGHTLINE_CONCEALTEST`.)
+- **Post-processing shader (Phase 5.2):** an embedded-GLSL post pass over the final frame
+  (`Display`): soft vignette, event-reactive **bloom** (spikes on hits/kills via
+  `Game.AddBloom`, decays), subtle per-biome color grade, impact chroma. Headless harness
+  keeps Display OFF (byte-stable shots); `SIGHTLINE_POSTFX=1` forces it on to verify.
+- **9 authored arenas** (`src/Maps.cs`): the original 6 + CROSSROADS / FOXHOLES / RIDGE
+  (RIDGE is the first to use the tier-2 `=` legend). `SIGHTLINE_MAP=<index>` forces one.
 - Grid battlefield w/ high+low cover, LoS, 8-dir pathfinding (corner-cut safe).
 - 2-action combat: move, dash (yellow), fire (ends turn), overwatch reaction
   fire (both sides), hunker, reload.
@@ -876,14 +889,19 @@ screenshots, ship compiling code to `main`.
       scatter. So first contact is telegraphed and the free scatter is softened to surprise-only.
       Renderer draws the three glyph states; `Game.DebugAlertTiers` + `SIGHTLINE_ALERT=1` shot
       shows all three. Verify: build 0/0, autoplay x5 clean (no TIMEOUT), `SIGHTLINE_ALERT` shot.
-- [ ] **4.4 Concealment + ambush (the marquee mechanic).** Squad starts **concealed**;
-      while concealed it repositions/scouts freely and **the player chooses when to break
-      stealth and engage**; springing the ambush pays off (no overwatch aim penalty,
-      enemies caught out of cover, only a partial enemy scatter). Converts first contact
-      from accident to **rewarded choice** — the "find your footing" fantasy, board still
-      fully visible. Pairs with 4.3 (breaking concealment = going red). New per-unit/Run
-      concealment state; reuse the overwatch/ambush shot path. Verify: a self-test of the
-      conceal/break rules + `SIGHTLINE_*` shot + autoplay (autopilot breaks deliberately).
+- [x] **4.4 Concealment + ambush (the marquee mechanic).** DONE. Squad starts every mission
+      **concealed** (`Game.SquadConcealed`, set in `SetupMission`): it scouts/repositions freely
+      and `CheckPodActivation` is gated so pods can't escalate via sight. **The player chooses
+      when to break stealth** — first shot/grenade/flashbang/pinning fire, or stepping within
+      `RevealRange` (3) of an active foe (`Game.BreakConcealment`, called from IssueShoot/
+      IssueGrenade/IssueItem(Flash)/DoAbility(Suppress)/OnUnitEnteredTile/AutoStallCheck). The
+      breaking shot springs an **ambush**: `Unit.FiredFromConcealment` grants +20 aim/+25 crit
+      (`Combat.AmbushAim/Crit`, consumed by that one shot, `ShotOdds.Ambush` -> "+ AMBUSH"
+      tooltip); pods already in sight wake with the 4.2-capped scatter, then the normal 4.3
+      alert tiers resume. HUD shows a pulsing CONCEALED pill (in the MISSION slot); friendly
+      units get a ghost ring. Autopilot springs the ambush when it has a shot (no TIMEOUT).
+      Verify: build 0/0, `SIGHTLINE_CONCEALTEST`=PASS, `SIGHTLINE_COMBATTEST`=PASS, autoplay
+      clean x5 + sabotage/rescue/defend, `SIGHTLINE_CONCEAL=1` shot.
 - [ ] **4.5 (DEFERRED — flagged prototype only) Fog of war + soldier-focused auto-cam.**
       Do NOT build unless 4.1-4.4 ship and playtests still want the recon-survival genre.
       If attempted: a visibility mask behind a flag, on the larger maps, with strong
@@ -954,6 +972,25 @@ Before stopping:
 4. Tell the human to open a fresh session (they'll send only `.`).
 
 ### WIP NOTES
+
+> **SPRINT 1 (autonomous dev-team) — SHIPPED: 4.4 concealment + 5.2 post-FX shader + 3 arenas.**
+> Ran as a multi-agent team (orchestrator + PM/research + architect + parallel devs in isolated
+> worktrees + research). Three features landed on `claude/vigilant-faraday-4cjiff` (PR #47):
+> (1) **4.4 Concealment + ambush** (marquee) — see the 4.4 roadmap entry + Current state. Files:
+> Unit/Combat (FiredFromConcealment + AmbushAim/Crit + ShotOdds.Ambush), Game (SquadConcealed,
+> BreakConcealment + triggers, CheckPodActivation gate, AutoStep break, ConcealSelfTest), Hud
+> (CONCEALED pill + "+ AMBUSH"), Renderer (ghost ring), Program (SIGHTLINE_CONCEAL/CONCEALTEST).
+> (2) **5.2 post-FX shader** — embedded GLSL in `Display` (vignette/bloom/grade/chroma); bloom fed
+> by `Game.AddBloom` on hits/kills; headless OFF (byte-stable), `SIGHTLINE_POSTFX=1` to view.
+> (3) **3 arenas** in `Maps.cs` (CROSSROADS/FOXHOLES/RIDGE; RIDGE uses tier-2 `=`).
+> Process note / gotcha: a dev agent can spawn a sub-agent and "come to rest" with the child still
+> running — check the worktree branch state (`git -C .claude/worktrees/agent-<id> ...`) before
+> assuming done. Integration was file-level (`git checkout <branch> -- <files>`) to avoid
+> merge-base churn, since the concealment dev based its work on a pre-post-FX trunk; Game.cs/
+> Program.cs (touched by BOTH post-FX and concealment) were hand-merged. Verified end-to-end:
+> Release 0/0, CONCEALTEST/COMBATTEST PASS, autoplay clean x5 + sabotage/rescue/defend.
+> `docs/DEVLOG.md` tracks the team process. **Next:** Sprint 2 (graze/partial-hit S2-A, enemy AI
+> utility-items S2-B, overwatch-camp soft-pressure S2-C) + the font (NotoMono, OFL, on-machine).
 
 > **4.3 ALERT / AWARENESS TIERS (latest) — SHIPPED.** Replaces the binary
 > dormant->instant-scatter pod model with a graded `AlertLevel` so first contact is
