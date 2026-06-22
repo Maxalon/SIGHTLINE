@@ -15,6 +15,7 @@ public struct ShotOdds
     public bool SeesOver;    // high ground negates the target's LOW cover
     public bool Partial;     // diagonal-at-range: target only partly obscured (half cover)
     public bool Steady;      // attacker braced (sharpshooter ability) this shot
+    public bool Ambush;      // attacker fired from concealment (one-shot bonus)
 }
 
 /// The resolved outcome of a shot.
@@ -37,6 +38,9 @@ public static class Combat
     public const int SteadyCrit = 20;
     // Gunner "Suppress" ability: aim penalty inflicted on the pinned target.
     public const int SuppressAim = 30;
+    // Concealment ambush bonus: firing from concealment before breaking it.
+    public const int AmbushAim  = 20;
+    public const int AmbushCrit = 25;
 
     public static ShotOdds ComputeOdds(Grid grid, Unit a, Unit d)
     {
@@ -80,10 +84,12 @@ public static class Combat
         if (a.HasTrait(Trait.Vengeful) && a.AllyDown) hit += Unit.VengefulAim;
         if (a.BondAura) hit += Unit.BondAim;     // a bonded squadmate stands adjacent
 
+        if (a.FiredFromConcealment) hit += AmbushAim;
         hit = Util.Clamp(hit, 3, 95);
 
         int crit = a.Weapon.CritBase;
         if (coverLevel == 0) crit += 35;        // exposed / flanked target
+        if (a.FiredFromConcealment) crit += AmbushCrit;  // ambush bonus: caught off-guard
         if (highGround) crit += HighGroundCrit;  // shooting down rewards crits
         if (a.Steady) crit += SteadyCrit;        // braced shot also crits harder
         if (a.HasPerk(Perk.Deadeye)) crit += Unit.PerkCrit;
@@ -104,6 +110,7 @@ public static class Combat
             SeesOver = seesOver,
             Partial = partial,
             Steady = a.Steady,
+            Ambush = a.FiredFromConcealment,
         };
     }
 
@@ -224,8 +231,19 @@ public static class Combat
         if (ComputeOdds(gShield, atkW, sh).CoverLevel != 2) fails.Add("shieldFront");
         if (ComputeOdds(gShield, atkE, sh).CoverLevel != 0) fails.Add("shieldFlank");
 
+        // AMBUSH: FiredFromConcealment grants +AmbushAim hit and +AmbushCrit crit (4.4)
+        var gAmb = new Grid();
+        var ambA = new Unit { Aim = 65, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 3, Y = 5, FiredFromConcealment = false };
+        var ambD = new Unit { Aim = 65, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy,  X = 7, Y = 5, Hp = 6, MaxHp = 6 };
+        var noAmb = ComputeOdds(gAmb, ambA, ambD);
+        ambA.FiredFromConcealment = true;
+        var yesAmb = ComputeOdds(gAmb, ambA, ambD);
+        if (!yesAmb.Ambush) fails.Add("ambushFlag");
+        if (yesAmb.HitChance != Util.Clamp(noAmb.HitChance + AmbushAim, 3, 95)) fails.Add("ambushHit");
+        if (yesAmb.CritChance != Util.Clamp(noAmb.CritChance + AmbushCrit, 0, 100)) fails.Add("ambushCrit");
+
         return fails.Count == 0
-            ? "COMBATTEST: PASS (cover A-E + high-ground + tier-2 + drone/shield all hold)"
+            ? "COMBATTEST: PASS (cover A-E + high-ground + tier-2 + drone/shield + ambush all hold)"
             : "COMBATTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 }

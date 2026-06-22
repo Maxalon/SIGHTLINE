@@ -387,6 +387,14 @@ public static class Renderer
                             Raylib.Fade(Pal.Accent, 0.4f + 0.4f * pulse));
         }
 
+        // 4.4 ghost ring: soft pulsing ring on friendly units while the squad is concealed
+        if (friend && !vip && g.SquadConcealed)
+        {
+            float pulse = 0.3f + 0.3f * MathF.Sin((float)Raylib.GetTime() * 2.8f + u.Bob);
+            Raylib.DrawRing(foot + new Vector2(0, 17), 20f, 23f, 0, 360, 40,
+                            Raylib.Fade(Pal.Friend, pulse));
+        }
+
         // body
         Raylib.DrawCircleV(p, 16f, dark);
         Raylib.DrawCircleV(p, 16f, Raylib.Fade(Pal.RGBA(0, 0, 0), 0f)); // no-op keep

@@ -143,6 +143,7 @@ public class Unit
     public bool AllyDown;       // a squadmate has been killed this mission
     public int KillsThisTurn;   // reset each BeginTurn (multi-kill detection)
     public bool BondAura;       // a bonded squadmate is adjacent (refreshed each frame by Game)
+    public bool FiredFromConcealment; // true for ONE shot after breaking concealment (4.4)
 
     public AbilityKind Ability => AbilityKindFor(Cls);
     public string AbilityName => Ability switch
@@ -272,6 +273,7 @@ public class Unit
         Blitz = false;
         Steady = false;
         KillsThisTurn = 0;         // multi-kill feat is per-turn
+        FiredFromConcealment = false; // ambush bonus is for one shot only (4.4)
         // note: Suppress (a debuff applied by an enemy gunner) is cleared on the
         // victim's owner's next turn, NOT here, so it bites during the turn it's set.
     }

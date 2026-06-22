@@ -57,6 +57,14 @@ public static class Program
             Console.WriteLine(Game.ItemSelfTest());
             return;
         }
+        // SIGHTLINE_CONCEALTEST=1 : concealment gating + ambush break check (item 4.4).
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_CONCEALTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "concealtest");   // Game/Mission use tile math; tiny window
+            Console.WriteLine(new Game().ConcealSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         // SIGHTLINE_COVERTEST=1 : destructible-cover degrade chain (item 3.6). No window.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_COVERTEST") == "1")
         {
@@ -105,6 +113,7 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_PERKSHOT") == "1") game.DebugBarracksPerk();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_WAKE") == "1") game.DebugWakeAll();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_ALERT") == "1") game.DebugAlertTiers();
+        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CONCEAL") == "1") game.DebugConcealment();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CARDS") == "1") game.DebugDeployCards();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CAMPAIGN") == "1") game.DebugCampaignMap();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_ITEM") == "1") game.DebugItem();

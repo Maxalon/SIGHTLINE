@@ -228,7 +228,21 @@ public static class Hud
         Raylib.DrawRectangleLinesEx(pill, 1.5f, Raylib.Fade(turnCol, 0.6f));
         CenterText(turnTxt, pill, 16, turnCol);
 
-        Raylib.DrawText($"MISSION {g.RunState.Mission}/{Run.MaxMissions}", 200, 19, 16, Pal.TxtDim);
+        // 4.4 concealment pill: while the squad is hidden it takes the MISSION slot (a
+        // pulsing CONCEALED indicator); the mission counter returns the moment stealth breaks.
+        bool showConcealed = g.SquadConcealed && (g.Phase == Phase.PlayerTurn || g.Phase == Phase.EnemyTurn);
+        if (showConcealed)
+        {
+            float pulse = 0.55f + 0.45f * MathF.Sin((float)Raylib.GetTime() * 3.5f);
+            var cpill = new Rectangle(192, 11, 120, 30);
+            Raylib.DrawRectangleRounded(cpill, 0.4f, 8, Pal.Panel);
+            Raylib.DrawRectangleLinesEx(cpill, 1.5f, Raylib.Fade(Pal.Friend, 0.5f * pulse));
+            CenterText("CONCEALED", cpill, 14, Raylib.Fade(Pal.Friend, pulse));
+        }
+        else
+        {
+            Raylib.DrawText($"MISSION {g.RunState.Mission}/{Run.MaxMissions}", 200, 19, 16, Pal.TxtDim);
+        }
         string objTxt; Color objCol;
         switch (g.Objective)
         {
@@ -427,7 +441,7 @@ public static class Hud
         if (!g.ShowOdds) return;
         var o = g.HoverOdds;
         var m = Raylib.GetMousePosition();
-        int extras = (o.Flanked ? 1 : 0) + (o.HighGround ? 1 : 0) + (o.SeesOver ? 1 : 0) + (o.Partial ? 1 : 0) + (o.Steady ? 1 : 0);
+        int extras = (o.Flanked ? 1 : 0) + (o.HighGround ? 1 : 0) + (o.SeesOver ? 1 : 0) + (o.Partial ? 1 : 0) + (o.Steady ? 1 : 0) + (o.Ambush ? 1 : 0);
         int w = 150, h = 74 + extras * 18;
         int x = (int)m.X - w / 2;
         int y = (int)m.Y - h - 18;
@@ -456,6 +470,7 @@ public static class Hud
         if (o.SeesOver) { Raylib.DrawText("+ OVER LOW COVER", x + 12, fy, 13, Pal.Good); fy += 18; }
         if (o.Partial) { Raylib.DrawText("~ PARTIAL COVER", x + 12, fy, 13, Pal.TxtDim); fy += 18; }
         if (o.Steady) { Raylib.DrawText("+ STEADY", x + 12, fy, 13, Pal.Good); fy += 18; }
+        if (o.Ambush) { Raylib.DrawText("+ AMBUSH", x + 12, fy, 13, Pal.Good); fy += 18; }
     }
 
     // ---------------- turn banner sweep ----------------

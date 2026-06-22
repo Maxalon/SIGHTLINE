@@ -298,6 +298,7 @@ public class Game
         _turnCount = 1;
         _autoSig = -1; _autoStall = 0;
         Phase = Phase.PlayerTurn;
+        SquadConcealed = true;            // 4.4: every mission opens with the squad concealed
         foreach (var u in Players) u.BeginTurn();
         // per-mission feat tracking + status effects start clean each mission
         foreach (var u in Players)
@@ -349,6 +350,44 @@ public class Game
         var foes = Enemies.Where(e => e.Alive).ToList();
         for (int i = 0; i < foes.Count; i++)
             foes[i].Alert = (AlertLevel)(i % 3);   // 0 Unaware, 1 Suspicious, 2 Alert
+    }
+
+    /// Harness hook (screenshot only): the squad is concealed at mission start anyway;
+    /// this just adds a banner so the intent reads in the frame (the CONCEALED pill +
+    /// ghost rings are already drawn because SquadConcealed is true).
+    public void DebugConcealment() => ShowBanner("CONCEALED - PICK YOUR MOMENT", false);
+
+    /// Headless self-test for 4.4 concealment: starts concealed, pods are gated from
+    /// escalating while concealed, and breaking concealment ungates them + arms the
+    /// breaking actor's ambush bonus. Prints CONCEALTEST: PASS/FAIL.
+    public string ConcealSelfTest()
+    {
+        NoPersist = true;                       // never touch the save file in a test
+        var fails = new System.Collections.Generic.List<string>();
+        StartMission(1);
+        if (!SquadConcealed) fails.Add("notConcealedAtStart");
+
+        var p = Players.FirstOrDefault(u => u.Alive && !u.IsVip);
+        var e = Enemies.FirstOrDefault(x => x.Alive);
+        if (p == null || e == null) fails.Add("setupMissingUnits");
+        else
+        {
+            // a dormant foe stood right next to a soldier must NOT wake while concealed
+            e.Alert = AlertLevel.Unaware;
+            e.X = p.X + 1; e.Y = p.Y; e.SyncPos();
+            CheckPodActivation();
+            if (e.Active) fails.Add("wokeWhileConcealed");
+
+            // breaking concealment clears the flag, arms the actor, and wakes the sighted pod
+            BreakConcealment(p);
+            if (SquadConcealed) fails.Add("stillConcealedAfterBreak");
+            if (!p.FiredFromConcealment) fails.Add("actorNotArmed");
+            if (!e.Active) fails.Add("sightedPodNotWokenOnBreak");
+        }
+
+        return fails.Count == 0
+            ? "CONCEALTEST: PASS (starts concealed; pods gated while concealed; break arms actor + wakes sighted pods)"
+            : "CONCEALTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
     /// Harness hook (screenshot only): stamp a tier-2 plateau (with a tier-1 step and a
@@ -592,7 +631,14 @@ public class Game
             EnvDamage(mover, Unit.BleedDamage, "BLEED", Pal.RGBA(205, 45, 45));
             if (!mover.Alive) return;
         }
-        if (mover.Team == Team.Player) CheckPodActivation();  // reveal pods while advancing
+        if (mover.Team == Team.Player)
+        {
+            // 4.4: stepping within RevealRange of an already-active foe blows concealment
+            if (SquadConcealed && Enemies.Any(e => e.Alive && e.Active
+                    && Util.TileDist(mover.X, mover.Y, e.X, e.Y) <= RevealRange))
+                BreakConcealment(mover);
+            CheckPodActivation();  // reveal pods while advancing (no-op while still concealed)
+        }
         var watchers = mover.Team == Team.Player ? Enemies : Players;
         int insertAt = 1;
         foreach (var w in watchers)
@@ -952,6 +998,7 @@ public class Game
         if (sig != _autoSig) { _autoSig = sig; _autoStall = 0; return; }
         if (++_autoStall < 10) return;
         _autoStall = 0;
+        if (SquadConcealed) BreakConcealment();   // 4.4: a stalled autopilot reveals itself
         var dormant = Enemies.Where(e => e.Alive && !e.Active).ToList();
         if (dormant.Count > 0) ActivatePod(dormant[0].PodId);
     }
@@ -964,6 +1011,16 @@ public class Game
         if (u == null) { EndPlayerTurn(); return; }
         Selected = u;
         RecomputeMoveCost();
+
+        // 4.4: autopilot springs the ambush once it has a shot (u then fires it next step
+        // with the bonus), else when it has stalked within range; otherwise it keeps
+        // advancing concealed. Returns so any reveal-scatter plays before the shot.
+        if (SquadConcealed)
+        {
+            if (u.Ammo > 0 && FirstTargetFor(u) != null) { BreakConcealment(u); return; }
+            if (Players.Any(p => p.Alive && Enemies.Any(e => e.Alive
+                    && Util.TileDist(p.X, p.Y, e.X, e.Y) <= AlertRange + 1))) { BreakConcealment(); return; }
+        }
 
         // EVAC objective: get everyone to the extraction zone
         if (Objective == Objective.Evac)
@@ -1144,6 +1201,8 @@ public class Game
     // ---------------- activation pods (4.3 awareness tiers) ----------------
     public const int SightRange = 9;   // spotted at range -> Suspicious (4.2: down from 12)
     public const int AlertRange = 4;   // spotted up close -> straight to Alert (no grace turn)
+    public const int RevealRange = 3;  // 4.4: stepping this close to an ACTIVE foe auto-breaks concealment
+    public bool SquadConcealed;        // 4.4: squad starts each mission concealed (set in SetupMission)
 
     // Closest distance at which any living soldier currently has line of sight on this
     // enemy (within SightRange), or -1 if it is unseen.
@@ -1163,6 +1222,8 @@ public class Game
 
     void CheckPodActivation()
     {
+        TryFreeCaptive();                       // captive proximity isn't aggression - always checked
+        if (SquadConcealed) return;             // 4.4: concealment masks the squad; pods can't escalate via sight
         foreach (var e in Enemies)
         {
             if (!e.Alive || e.Active) continue;          // already fully alert
@@ -1171,7 +1232,6 @@ public class Game
             if (d <= AlertRange) ActivatePod(e.PodId);   // blundered in close -> snap awake (+scatter)
             else SetPodSuspicious(e.PodId);              // spotted at range -> telegraphed warning
         }
-        TryFreeCaptive();
     }
 
     /// 4.3: a whole pod goes Suspicious (alerted "!"), but does NOT act or scatter yet — it
@@ -1256,6 +1316,26 @@ public class Game
             Fx.AddShake(3f);
             Audio.Play("over");
         }
+    }
+
+    /// 4.4: break squad concealment. The first aggressive action (or stepping too close)
+    /// springs the ambush: the breaking shot gets the ambush bonus (FiredFromConcealment),
+    /// and any pod already in sight wakes with the usual capped scatter. After this, the
+    /// normal 4.3 alert-tier rules resume for the rest of the mission. Call BEFORE the
+    /// action mutates state so the bonus is in place when Combat.Resolve reads it.
+    public void BreakConcealment(Unit actor = null)
+    {
+        if (!SquadConcealed) return;
+        SquadConcealed = false;
+        if (actor != null) actor.FiredFromConcealment = true;   // only a deliberate first shot earns the bonus
+        ShowBanner("AMBUSH!", false);
+        Fx.AddShake(4f);
+        Audio.Play("turn");
+        // wake every pod a soldier can currently see (each pod activates once)
+        var seen = new HashSet<int>();
+        foreach (var e in Enemies)
+            if (e.Alive && !e.Active && e.PodId >= 0 && ClosestSightedDist(e) >= 0) seen.Add(e.PodId);
+        foreach (int pid in seen) ActivatePod(pid);
     }
 
     void UpdatePlayer()
@@ -1551,6 +1631,7 @@ public class Game
     {
         if (Selected == null || !Selected.CanAct || Selected.Grenades <= 0) return;
         if (Util.TileDist(Selected.X, Selected.Y, tx, ty) > GrenadeRange) return;
+        if (SquadConcealed) BreakConcealment(Selected);  // 4.4: a thrown grenade breaks stealth
         Selected.Grenades--;
         Selected.ActionsLeft = 0;
         Enqueue(new GrenadeAnim(Selected, tx, ty), Team.Player);
@@ -1586,7 +1667,9 @@ public class Game
         switch (u.Item)
         {
             case ItemKind.Smoke: Enqueue(new SmokeAnim(u, tx, ty), Team.Player); break;
-            case ItemKind.Flash: Enqueue(new FlashAnim(u, tx, ty), Team.Player); break;
+            case ItemKind.Flash:
+                if (SquadConcealed) BreakConcealment(u);   // 4.4: a flashbang is aggression
+                Enqueue(new FlashAnim(u, tx, ty), Team.Player); break;
             case ItemKind.Barricade:
                 Grid.Tiles[tx, ty] = TileType.LowCover;
                 Grid.SetCoverHp(tx, ty);
@@ -1621,12 +1704,14 @@ public class Game
     {
         if (Selected == null || !Selected.CanAct || Selected.Ammo <= 0) return;
         if (!CanTarget(Selected, target)) return;
+        if (SquadConcealed) BreakConcealment(Selected);  // 4.4: the ambush shot springs the trap
         Selected.Ammo--;
         // Run & Gun: this shot costs one action instead of ending the turn.
         if (Selected.RunGun) { Selected.ActionsLeft = Math.Max(0, Selected.ActionsLeft - 1); Selected.RunGun = false; }
         else Selected.ActionsLeft = 0;
         var res = Combat.Resolve(Grid, Selected, target);
         Selected.Steady = false;                         // braced shot consumed
+        Selected.FiredFromConcealment = false;           // ambush bonus is for this one shot only
         Enqueue(new ShotAnim(Selected, target, res), Team.Player);
         if (!target.Active) ActivatePod(target.PodId);   // gunfire reveals the pod
         AimMode = false;
@@ -1732,6 +1817,7 @@ public class Game
             case AbilityKind.Suppress:
                 var t = FirstTargetFor(u);
                 if (t == null) return;
+                if (SquadConcealed) BreakConcealment(u);   // 4.4: pinning fire breaks stealth
                 u.AbilityCharge--; u.Ammo--; u.ActionsLeft = 0; u.OnOverwatch = true;
                 t.Suppress = Combat.SuppressAim;
                 Fx.PopText(t.Pos + new Vector2(0, -34), "SUPPRESSED", Pal.Foe, 18f);
