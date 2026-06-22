@@ -360,7 +360,7 @@ public static class PerkDef
         Perk.Adrenal => "+1 ability charge each mission",
         Perk.Executioner => "+15 crit vs targets below half HP",
         Perk.Guardian => "+15 aim on overwatch reaction shots",
-        Perk.CoolHeaded => "Disoriented aim penalty is halved",
+        Perk.CoolHeaded => "Disoriented aim penalty cut by 8 (-7 not -15)",
         _ => "",
     };
 }

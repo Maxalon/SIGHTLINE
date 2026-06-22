@@ -824,7 +824,7 @@ public static class Hud
     public static System.Collections.Generic.List<string> Specialties(Unit u)
     {
         var t = new System.Collections.Generic.List<string>();
-        if (u.HasPerk(Perk.Reflexes)) t.Add("OVERWATCH");
+        if (u.HasPerk(Perk.Reflexes) || u.HasPerk(Perk.Guardian)) t.Add("OVERWATCH");
         if (u.HasPerk(Perk.Deadeye) || u.Aim >= 72) t.Add("SHARP");
         if (u.HasPerk(Perk.LockOn)) t.Add("FLANKER");
         if ((u.Weapon != null && (u.Weapon.Kind == WeaponKind.Shotgun || u.Weapon.Kind == WeaponKind.Smg)) || u.HasPerk(Perk.CloseQuarters)) t.Add("CLOSE");
