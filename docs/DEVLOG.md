@@ -215,3 +215,34 @@ clean. Peer review in flight. NOTE: a stray local branch-rename (`feat/5.4-proce
 briefly left HEAD off the designated branch after the PR-#47 merge + reset; recovered cleanly
 (`git push origin HEAD:claude/...` + `checkout -B`), commit history verified intact (emissive+perks
 sit exactly on merged main). PR #47 (Sprints 1-6, 18 features) is MERGED to main (`d193b62`).
+
+### POST-MERGE AUDIT + 4-FEATURE RECOVERY (correcting the "history intact" claim above)
+
+The Sprint-7 note above said "commit history verified intact" — **that was wrong, and it's an
+instructive failure.** A fresh-session continuity audit grepped the merged trunk for each shipped
+feature's code marker and found FOUR were absent: the `reset --hard` after the PR-#47 merge had
+truncated the integration merge (`d193b62`) so its first parent omitted the Sprint-5/6 feature lineage.
+The "18 features" merge-commit message was trusted; the merge's actual TREE was not re-audited. The
+commits survived only as dangling objects (`git log -S <marker> --all` found them):
+
+| Lost feature | Commit | Marker that was missing |
+|---|---|---|
+| 5.4 procedural texturing + soft-glow particles | `a610e3d` (+ seam-fix `d1521cd`) | `GenImagePerlinNoise` / `DrawNoiseRect` |
+| S4-A campaign-map intel hints | `d5ebbbb` | `Run.EnemyHint` |
+| 2 arenas RUINS/THICKET + biome affinity | `15394e2` | arena names in `Maps.cs` |
+| S6 HUD action-bar icons | `e5ce19b` | `Hud.DrawActionIcon` |
+| S6 AI commanding-view tile-scoring | `078a46b` | `qdelta`/`elevMult` in `Ai.Plan` |
+
+**Recovery:** cherry-picked the dangling commits back onto the branch in dependency order. Two small
+complementary conflicts in `Renderer.cs` (texturing's `DrawNoiseRect` calls vs Sprint-7's contact
+shadows/emissive rims — kept BOTH) and a 3-region add/add in `Hud.cs` (took the new `DrawActionButton`/
+`DrawActionIcon` methods; kept Sprint-7's `Guardian`→OVERWATCH specialty since `e5ce19b` predates that
+perk). QA after recovery: **Release 0/0; COMBAT/SAVE/CONCEAL/BENCH/ITEM/COVER self-tests all PASS;
+autoplay x5 clean (no TIMEOUT); RUINS+THICKET autoplay clean; gameplay screenshot confirms texturing
+grain + HUD icons render.**
+
+**LESSON (added to the team playbook):** a merge-commit message is a claim, not a guarantee. After any
+`reset --hard` / branch-rename near an integration merge, audit the resulting **tree** against the
+feature set — grep the source for each feature's distinctive marker and/or `git log -S` across all refs
+— before declaring "intact." Autoplay and self-tests pass on a *subset* of features too, so green QA
+does not by itself prove completeness.
