@@ -57,6 +57,22 @@ public static class Program
             Console.WriteLine(Game.ItemSelfTest());
             return;
         }
+        // SIGHTLINE_CONCEALTEST=1 : concealment gating + ambush break check (item 4.4).
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_CONCEALTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "concealtest");   // Game/Mission use tile math; tiny window
+            Console.WriteLine(new Game().ConcealSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
+        // SIGHTLINE_BENCHTEST=1 : bench/short-handed lifecycle (S3-A + review fixes).
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_BENCHTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "benchtest");
+            Console.WriteLine(new Game().BenchSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         // SIGHTLINE_COVERTEST=1 : destructible-cover degrade chain (item 3.6). No window.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_COVERTEST") == "1")
         {
@@ -66,12 +82,61 @@ public static class Program
         // SIGHTLINE_MISSION=<n> : start the harness on mission n (verify Hack/Evac maps).
         int startMission = int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_MISSION"), out int sm) ? sm : 1;
 
+        // SIGHTLINE_POSTFX=1 : force Display.Init(true) even in shot mode so the post-FX
+        // shader is active; sets a strong demo bloom so the effect is clearly visible in
+        // the screenshot. Plain SIGHTLINE_SHOT (without POSTFX) stays byte-identical.
+        bool postFxShot = shot && Environment.GetEnvironmentVariable("SIGHTLINE_POSTFX") == "1";
+
         ConfigFlags flags = ConfigFlags.Msaa4xHint;
         if (!autoplay) flags |= ConfigFlags.VSyncHint;
         Raylib.SetConfigFlags(flags);
         Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "SIGHTLINE — Tactical Squad Combat");
         Raylib.SetExitKey(KeyboardKey.Null);       // ESC cancels aim/grenade & opens pause; never quits the app
-        Display.Init(!(shot || autoplay));         // window scaling/fullscreen (off for the headless harness)
+
+        // Phase 5.3 — real bitmap font (NotoMono-Regular, OFL-1.1).
+        // Bake ASCII 32-126 plus a selection of useful non-ASCII codepoints so the
+        // font supports them once we start using them.
+        {
+            int[] codepoints = new int[]
+            {
+                // ASCII printable range 32..126
+                32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,
+                48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,
+                65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,
+                81,82,83,84,85,86,87,88,89,90,
+                91,92,93,94,95,96,
+                97,98,99,100,101,102,103,104,105,106,107,108,109,110,
+                111,112,113,114,115,116,117,118,119,120,121,122,
+                123,124,125,126,
+                // useful non-ASCII
+                0x2013, // en-dash
+                0x2014, // em-dash
+                0x2018, // left single quote
+                0x2019, // right single quote
+                0x201C, // left double quote
+                0x201D, // right double quote
+                0x2022, // bullet
+                0x2026, // ellipsis
+                0x00D7, // multiply sign
+                0x00B7, // middle dot
+            };
+            Font loaded = Raylib.LoadFontEx("assets/NotoMono-Regular.ttf", 64, codepoints, codepoints.Length);
+            if (loaded.Texture.Id != 0)
+            {
+                Raylib.SetTextureFilter(loaded.Texture, TextureFilter.Bilinear);
+                Cfg.Font = loaded;
+                Console.WriteLine("FONT: NotoMono-Regular loaded (glyph atlas ok)");
+            }
+            else
+            {
+                Cfg.Font = Raylib.GetFontDefault();
+                Console.WriteLine("FONT: NotoMono-Regular not found, falling back to default");
+            }
+        }
+
+        // Display is normally OFF in the headless harness (byte-identical screenshots).
+        // SIGHTLINE_POSTFX=1 forces it ON (+ the post-FX demo bloom) for verification.
+        Display.Init(!(shot || autoplay) || postFxShot);
         Raylib.SetTargetFPS(autoplay ? 0 : 60);   // uncapped during the smoke test
         Audio.Init();
 
@@ -97,6 +162,8 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_PAUSE") == "1") game.Paused = true;
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_PERKSHOT") == "1") game.DebugBarracksPerk();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_WAKE") == "1") game.DebugWakeAll();
+        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_ALERT") == "1") game.DebugAlertTiers();
+        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CONCEAL") == "1") game.DebugConcealment();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CARDS") == "1") game.DebugDeployCards();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CAMPAIGN") == "1") game.DebugCampaignMap();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_ITEM") == "1") game.DebugItem();
@@ -105,12 +172,20 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_SHOP") == "1") game.DebugShop();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_TAGEDIT") == "1") game.DebugTagEditor();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_WOUND") == "1") game.DebugWound();
+        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_BENCH") == "1") game.DebugBench();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_TRAITS") == "1") game.DebugTraits();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_STATUS") == "1") game.DebugStatus();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_KIA") == "1") game.DebugKia();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_TUTORIAL") == "1") game.TutStep = 0;
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CB") == "1") Pal.SetColorblind(true);
         if (shot && int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_BRIGHT"), out int _bi)) Display.BrightIdx = _bi;
+        // SIGHTLINE_POSTFX=1: inject a strong demo bloom + chroma so the shader effect
+        // is clearly visible in the screenshot without needing a live combat event.
+        if (postFxShot)
+        {
+            Display.BloomIntensity = 0.85f;
+            Display.ChromaIntensity = 0.6f;
+        }
         bool helpShot = shot && Environment.GetEnvironmentVariable("SIGHTLINE_HELP") == "1";  // hover the ability button
         int frame = 0;
         const int autoCap = 20000;
@@ -145,6 +220,8 @@ public static class Program
 
         Display.Shutdown();
         Audio.Shutdown();
+        if (Cfg.Font.Texture.Id != 0 && Cfg.Font.Texture.Id != Raylib.GetFontDefault().Texture.Id)
+            Raylib.UnloadFont(Cfg.Font);
         Raylib.CloseWindow();
     }
 

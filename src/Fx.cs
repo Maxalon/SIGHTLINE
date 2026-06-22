@@ -162,11 +162,11 @@ public class Fx
             float k = Util.Clamp(t.Life / t.MaxLife, 0f, 1f);
             float pop = t.Life > t.MaxLife - 0.12f ? Util.EaseOutBack((t.MaxLife - t.Life) / 0.12f) : 1f;
             int fs = (int)(t.Size * (0.6f + 0.4f * pop));
-            int w = Raylib.MeasureText(t.Text, fs);
+            int w = (int)Raylib.MeasureTextEx(Cfg.Font, t.Text, fs, 1f).X;
             int x = (int)(t.Pos.X - w / 2f);
             int y = (int)t.Pos.Y;
-            Raylib.DrawText(t.Text, x + 2, y + 2, fs, Raylib.Fade(Pal.RGBA(0, 0, 0), k * 0.6f));
-            Raylib.DrawText(t.Text, x, y, fs, Raylib.Fade(t.Color, k));
+            Raylib.DrawTextEx(Cfg.Font, t.Text, new Vector2(x + 2, y + 2), fs, 1f, Raylib.Fade(Pal.RGBA(0, 0, 0), k * 0.6f));
+            Raylib.DrawTextEx(Cfg.Font, t.Text, new Vector2(x, y), fs, 1f, Raylib.Fade(t.Color, k));
         }
     }
 }

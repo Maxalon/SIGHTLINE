@@ -89,26 +89,42 @@ public class ShotAnim : Anim
         var dir = Vector2.Normalize(D.Pos - A.Pos + new Vector2(0.001f, 0f));
         Color muzzleCol = A.Team == Team.Player ? Pal.Friend : Pal.Foe;
         g.Fx.Muzzle(A.Pos, dir, Pal.Accent);
-        g.Fx.AddShake(Res.Hit ? (Res.Crit ? 9f : 5f) : 2.5f);
+        // Graze shakes less than a solid hit.
+        g.Fx.AddShake(Res.Hit ? (Res.Graze ? 2f : (Res.Crit ? 9f : 5f)) : 2.5f);
         Audio.Play("shoot");
         Audio.Play(Res.Hit ? (Res.Crit ? "crit" : "hit") : "miss");
         A.Recoil = -dir * (A.Weapon.Kind == WeaponKind.Shotgun ? 9f : 6f); // kick back
 
         if (Res.Hit)
         {
-            g.TryChipCover(A, D);                              // heavy weapons chew the target's cover (3.6)
             _impact = D.Pos;
             D.Hp -= Res.Damage;
-            D.Flash = 1f;
-            D.Recoil = dir * (Res.Crit ? 8f : 5f);           // knockback
-            g.AddHitStop(Res.Crit ? 0.09f : 0.05f);          // freeze on impact
-            Color blood = D.Team == Team.Player ? Pal.Friend : Pal.Foe;
-            g.Fx.Burst(D.Pos, blood, Res.Crit ? 22 : 13, Res.Crit ? 320f : 200f, 0.5f, 3.5f, true);
-            g.Fx.Burst(D.Pos, Pal.RGBA(230, 230, 235), 6, 120f, 0.4f, 2.5f);
 
-            string txt = Res.Crit ? $"CRIT {Res.Damage}" : Res.Damage.ToString();
-            g.Fx.PopText(D.Pos + new Vector2(0, -26), txt, Res.Crit ? Pal.Accent : Pal.RGBA(255, 235, 235),
-                         Res.Crit ? 32f : 26f);
+            if (Res.Graze)
+            {
+                // Graze: wing-clip — lighter flash, less knockback, no cover chip, no hit-stop.
+                D.Flash = 0.5f;
+                D.Recoil = dir * 2.5f;
+                g.AddBloom(0.02f);
+                Color grazeTint = D.Team == Team.Player ? Pal.Friend : Pal.Foe;
+                g.Fx.Burst(D.Pos, grazeTint, 5, 110f, 0.35f, 2.5f, true);
+                g.Fx.PopText(D.Pos + new Vector2(0, -26), "GRAZE", Pal.RGBA(190, 200, 215), 20f);
+            }
+            else
+            {
+                g.TryChipCover(A, D);                              // heavy weapons chew the target's cover (3.6)
+                D.Flash = 1f;
+                D.Recoil = dir * (Res.Crit ? 8f : 5f);           // knockback
+                g.AddHitStop(Res.Crit ? 0.09f : 0.05f);          // freeze on impact
+                g.AddBloom(Res.Crit ? 0.09f : 0.045f);           // Phase 5.2: bloom spike on hit/crit
+                Color blood = D.Team == Team.Player ? Pal.Friend : Pal.Foe;
+                g.Fx.Burst(D.Pos, blood, Res.Crit ? 22 : 13, Res.Crit ? 320f : 200f, 0.5f, 3.5f, true);
+                g.Fx.Burst(D.Pos, Pal.RGBA(230, 230, 235), 6, 120f, 0.4f, 2.5f);
+
+                string txt = Res.Crit ? $"CRIT {Res.Damage}" : Res.Damage.ToString();
+                g.Fx.PopText(D.Pos + new Vector2(0, -26), txt, Res.Crit ? Pal.Accent : Pal.RGBA(255, 235, 235),
+                             Res.Crit ? 32f : 26f);
+            }
 
             if (D.Hp <= 0)
             {
@@ -136,7 +152,8 @@ public class ShotAnim : Anim
             float k = 1f - (_t - Fire) / (BeamEnd - Fire);
             var dir = Vector2.Normalize(D.Pos - A.Pos + new Vector2(0.001f, 0f));
             Vector2 start = A.Pos + dir * 16f;
-            Color beam = Res.Hit ? Pal.Accent : Pal.RGBA(170, 180, 195);
+            // graze fires a dimmer beam than a solid hit (reinforces the lighter "GRAZE" read)
+            Color beam = Res.Hit ? (Res.Graze ? Pal.RGBA(165, 175, 195) : Pal.Accent) : Pal.RGBA(170, 180, 195);
             Raylib.DrawLineEx(start, _impact, 3.5f * k + 0.6f, Raylib.Fade(beam, k));
             Raylib.DrawLineEx(start, _impact, 1.2f, Raylib.Fade(Pal.RGBA(255, 255, 255), k * 0.8f));
             // muzzle glow

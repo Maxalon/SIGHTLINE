@@ -26,6 +26,15 @@ public enum StatusKind { Burning, Bleed, Stun, Disoriented }
 
 public class Status { public StatusKind Kind; public int Turns; }
 
+/// Awareness tier for activation pods (4.3). Enemies escalate gradually rather than
+/// flipping awake instantly, so first contact is telegraphed (never a turn-1 gotcha):
+///   Unaware   - hasn't noticed the squad; dormant, doesn't act ("?")
+///   Suspicious- spotted at range this turn; alerted but not yet engaging ("!"); it
+///               confirms (-> Alert) if still in sight at the player's turn end, or
+///               loses interest (-> Unaware) if the squad breaks line of sight.
+///   Alert     - fully awake; acts, shoots, and is a live threat (the old "Active").
+public enum AlertLevel { Unaware, Suspicious, Alert }
+
 public class Weapon
 {
     public string Name;
@@ -134,6 +143,13 @@ public class Unit
     public bool AllyDown;       // a squadmate has been killed this mission
     public int KillsThisTurn;   // reset each BeginTurn (multi-kill detection)
     public bool BondAura;       // a bonded squadmate is adjacent (refreshed each frame by Game)
+    public bool FiredFromConcealment; // true for ONE shot after breaking concealment (4.4)
+
+    // Streak-breaker (S4-C): counts consecutive CLEAN misses by this unit. After each
+    // miss the next shot gets a small hidden aim bonus (see Combat.Resolve). Resets to
+    // 0 on any hit or graze. Intentionally NOT persisted — per-mission accumulation only;
+    // a fresh unit starts at 0, and a connect always clears it.
+    public int ConsecutiveMisses;
 
     public AbilityKind Ability => AbilityKindFor(Cls);
     public string AbilityName => Ability switch
@@ -164,6 +180,7 @@ public class Unit
     // ---- utility item (3.4): a second throwable slot, 1 charge/mission, by class ----
     public int ItemCharge;                       // remaining uses this mission (refilled in Mission.Build)
     public ItemKind Item => ItemKindFor(Cls);    // derived from class (never persisted)
+    public ItemKind EnemyItem;                   // explicit item for enemy units (set in SpawnEnemies, None for players)
     public string ItemName => Item switch
     {
         ItemKind.Smoke     => "SMOKE",
@@ -193,7 +210,11 @@ public class Unit
     public bool ReactedThisTurn; // overwatch fired this round
     public bool Alive = true;
 
-    public bool Active = true;  // enemies start dormant until their pod is sighted
+    // Awareness tier (4.3): enemies escalate Unaware -> Suspicious -> Alert instead of
+    // waking instantly. Active (acts in combat / is a live threat) == fully Alert, so the
+    // many read sites that gate on "is this enemy awake" keep working unchanged.
+    public AlertLevel Alert = AlertLevel.Alert;
+    public bool Active => Alert == AlertLevel.Alert;
     public int PodId = -1;      // activation-pod grouping (enemies only)
 
     public bool IsVip;          // escort objective: the asset to extract (mission-only, never persists)
@@ -208,6 +229,13 @@ public class Unit
     // attrition: missions a battle wound lingers (>0 = −Aim/−Mobility); decays per
     // mission in Run.DebriefSurvivors, cleared by a FIELD MEDKIT.
     public int Wound;
+
+    // bench (S3-A): a wounded soldier can sit out the next mission (deploy short-handed)
+    // in exchange for accelerated recovery — Wound decays 2 steps + full HP heal. Cleared
+    // at the start of the mission they sit out (SetupMission). Only wounded soldiers may be
+    // benched; the minimum deployable squad is 1 (guard in ToggleBench). Never set by the
+    // autopilot so smoke-test runs always deploy full-strength. Persists in SaveGame.
+    public bool Benched;
 
     // render state
     public Vector2 Pos;         // pixel-space centre (tweened)
@@ -259,6 +287,7 @@ public class Unit
         Blitz = false;
         Steady = false;
         KillsThisTurn = 0;         // multi-kill feat is per-turn
+        FiredFromConcealment = false; // ambush bonus is for one shot only (4.4)
         // note: Suppress (a debuff applied by an enemy gunner) is cleared on the
         // victim's owner's next turn, NOT here, so it bites during the turn it's set.
     }

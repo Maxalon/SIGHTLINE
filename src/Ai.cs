@@ -14,6 +14,8 @@ public class EnemyPlan
     public int GrenX, GrenY;      // grenade aim tile
     public Unit HealTarget;       // medic: mend this wounded ally instead of fighting
     public (int x, int y)? SapTile; // sapper: demolish this player cover tile instead of shooting
+    public bool UseItem;          // use a utility item (smoke/flash) this turn
+    public int ItemTx, ItemTy;    // item aim tile
 }
 
 /// Tactical decision-making for a single enemy. Greedy, but reads as competent:
@@ -193,8 +195,47 @@ public static class Ai
             }
         }
 
+        // utility item (smoke / flash): occasional tactical use, never hits allies.
+        // Gate: must have a charge, SapTile must be null, and ~25% base probability.
+        if (e.EnemyItem != ItemKind.None && e.ItemCharge > 0 && plan.SapTile == null
+            && !plan.Grenade && Util.Roll(25))
+        {
+            if (e.EnemyItem == ItemKind.Smoke)
+            {
+                // Smoke: use when an overwatching player has LoS to the enemy's post-move tile,
+                // or the enemy is badly exposed (flanked). Lay smoke on a tile between the
+                // enemy and the nearest overwatching player to blind the reaction lane.
+                // Smoke hurts BOTH sides equally, so only use it to cover a move, never when
+                // the enemy needs to shoot through it (it can still shoot after a smoke that
+                // landed away from the target).
+                var (sx, sy, smokeGood) = BestSmoke(g, e, bestTile.x, bestTile.y);
+                if (smokeGood)
+                {
+                    plan.UseItem = true; plan.ItemTx = sx; plan.ItemTy = sy;
+                    // Using an item ends the enemy's turn (UpdateEnemy zeroes ActionsLeft),
+                    // so a planned shot won't fire this turn regardless; still null ShootTarget
+                    // when the smoke lands on the target tile so the AI doesn't "plan" a shot
+                    // it would have blinded anyway.
+                    if (plan.ShootTarget != null &&
+                        Util.ChebyDist(sx, sy, plan.ShootTarget.X, plan.ShootTarget.Y) <= SmokeAnim.Radius)
+                        plan.ShootTarget = null;
+                }
+            }
+            else if (e.EnemyItem == ItemKind.Flash)
+            {
+                // Flash: disorient 2+ players OR break an overwatching cluster.
+                // Never catch allies in the blast radius.
+                var (fx, fy, flashHits, flashAllies) = BestFlash(g, e, bestTile.x, bestTile.y);
+                if (flashHits >= 2 && flashAllies == 0)
+                {
+                    plan.UseItem = true; plan.ItemTx = fx; plan.ItemTy = fy;
+                    plan.ShootTarget = null;   // flash takes the action (like grenade)
+                }
+            }
+        }
+
         // if no shot is possible and we still have an action after moving, hunker/overwatch
-        if (plan.ShootTarget == null && !plan.Grenade && plan.SapTile == null)
+        if (plan.ShootTarget == null && !plan.Grenade && plan.SapTile == null && !plan.UseItem)
         {
             int spent = plan.MoveActions;
             if (spent < 2)
@@ -208,6 +249,57 @@ public static class Ai
         }
 
         return plan;
+    }
+
+    // Best smoke tile thrown from (fx,fy): find an overwatching player with LoS to the
+    // enemy's post-move tile and place smoke halfway between them to blind the lane.
+    // Also considers lobbing at the enemy's own forward tile when badly exposed (flanked).
+    // Returns (tx, ty, worthDoing).
+    static (int x, int y, bool good) BestSmoke(Game g, Unit e, int fx, int fy)
+    {
+        // primary: find an overwatching player who can see the post-move tile
+        foreach (var p in g.AlivePlayers())
+        {
+            if (!p.OnOverwatch) continue;
+            if (!g.Grid.HasLineOfSight(p.X, p.Y, fx, fy)) continue;
+            // aim halfway between the enemy's post-move tile and the overwatcher
+            int tx = (fx + p.X) / 2;
+            int ty = (fy + p.Y) / 2;
+            if (!g.Grid.InBounds(tx, ty)) { tx = fx; ty = fy; }
+            if (Util.TileDist(fx, fy, tx, ty) > Game.ItemRange) { tx = fx; ty = fy; }
+            // don't land smoke in a tile occupied by a friendly
+            bool allyBlocked = false;
+            foreach (var a in g.AliveEnemies())
+                if (a != e && Util.ChebyDist(tx, ty, a.X, a.Y) <= SmokeAnim.Radius) { allyBlocked = true; break; }
+            if (!allyBlocked) return (tx, ty, true);
+        }
+        // secondary: the enemy is flanked/exposed — smoke its own forward tile to
+        // cover its current spot (useful when retreating or holding a thin position).
+        var eCover = g.Grid.GetCover(fx, fy,
+            g.AlivePlayers().Count > 0 ? g.AlivePlayers()[0].X : 0,
+            g.AlivePlayers().Count > 0 ? g.AlivePlayers()[0].Y : 0);
+        if (eCover.Flanked)   // smoke lands on the unit's own tile, so range is trivially ok
+            return (fx, fy, true);
+        return (0, 0, false);
+    }
+
+    // Best flash aim tile thrown from (fx,fy): pick a tile where 2+ players cluster
+    // within FlashAnim.Radius. Report ally splash count for safety gating.
+    static (int x, int y, int hits, int allies) BestFlash(Game g, Unit e, int fx, int fy)
+    {
+        int bx = -1, by = -1, bestHits = 0, bestAllies = 99;
+        foreach (var p in g.AlivePlayers())
+        {
+            if (Util.TileDist(fx, fy, p.X, p.Y) > Game.ItemRange) continue;
+            int hits = 0, allies = 0;
+            foreach (var q in g.AlivePlayers()) if (Util.ChebyDist(p.X, p.Y, q.X, q.Y) <= FlashAnim.Radius) hits++;
+            // count the THROWER too (review Mi4): a flash that lands adjacent to e would
+            // disorient e itself - that's self-harm, so it must veto the throw.
+            foreach (var a in g.AliveEnemies()) if (Util.ChebyDist(p.X, p.Y, a.X, a.Y) <= FlashAnim.Radius) allies++;
+            if (hits > bestHits || (hits == bestHits && allies < bestAllies))
+            { bestHits = hits; bestAllies = allies; bx = p.X; by = p.Y; }
+        }
+        return (bx, by, bestHits, bestAllies);
     }
 
     // Best grenade aim tile thrown from (fx,fy): pick a soldier's tile in range that

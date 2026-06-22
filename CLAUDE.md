@@ -198,6 +198,54 @@ seeds (mix of WIN/LOSE, no exceptions):
   high-cover screen that breaks cross-board sightlines (procedural maps) with one open
   "risky" lane, and the pod reveal-scatter capped to a single move — so first contact
   is a deliberate approach, not a turn-1 ambush. Connectivity-guarded.
+- **Alert / awareness tiers (Phase 4.3):** pods escalate Unaware ("?") -> Suspicious
+  (amber "!" + pulsing ring, "CONTACT?") -> Alert (red, live foe) instead of waking
+  instantly. Being spotted at range only makes a pod *suspicious* (it doesn't act/scatter);
+  it confirms to Alert at the player's turn end if still in sight (no free scatter — it had
+  a warning) or loses interest if the squad broke contact. Blundering in close (≤4) or any
+  aggression snaps it straight to Alert with the capped reaction scatter. `Unit.AlertLevel`
+  (`Active => Alert==Alert`), `Game.CheckPodActivation`/`SetPodSuspicious`/`ResolveSuspicion`.
+- **Concealment + ambush (Phase 4.4):** the squad opens every mission **concealed**
+  (`Game.SquadConcealed`); it scouts/repositions freely and pods can't wake by sight. The
+  player picks when to break stealth (first shot/grenade/flash/pin, or stepping within
+  `RevealRange` 3 of an active foe) -> `Game.BreakConcealment` springs an **ambush** (the
+  breaking shot gets +20 aim/+25 crit via `Unit.FiredFromConcealment`/`Combat.AmbushAim/Crit`,
+  one shot only) and wakes sighted pods; then 4.3 tiers resume. CONCEALED HUD pill + friendly
+  ghost rings; "+ AMBUSH" tooltip. (`SIGHTLINE_CONCEAL`/`SIGHTLINE_CONCEALTEST`.)
+- **Post-processing shader (Phase 5.2):** an embedded-GLSL post pass over the final frame
+  (`Display`): soft vignette, event-reactive **bloom** (spikes on hits/kills via
+  `Game.AddBloom`, decays), subtle per-biome color grade, impact chroma. Headless harness
+  keeps Display OFF (byte-stable shots); `SIGHTLINE_POSTFX=1` forces it on to verify.
+- **9 authored arenas** (`src/Maps.cs`): the original 6 + CROSSROADS / FOXHOLES / RIDGE
+  (RIDGE is the first to use the tier-2 `=` legend). `SIGHTLINE_MAP=<index>` forces one.
+- **Real font (Phase 5.3):** `assets/NotoMono-Regular.ttf` (OFL-1.1) baked via `LoadFontEx`
+  (`Cfg.Font`, default-font fallback); all HUD/board text is `DrawTextEx` now. **ASCII-only is
+  lifted** — non-ASCII glyphs (em-dash, curly quotes, etc.) are baked and usable.
+- **Graze / partial-hit (S2-A):** a shot that misses by <=15 GRAZES (hit for min weapon
+  damage, no crit) instead of a clean miss; every hit deals >=1 (`Combat.GrazeBand`,
+  `ShotResult.Graze`, lighter "GRAZE" FX). Softens the output-randomness tail (DESIGN.md 3B).
+- **Enemy AI utility items (S2-B):** SNIPER/SCOUT throw SMOKE to blind a player overwatch
+  lane; BERSERKER throws FLASH to disorient a cluster; late GRUNTs get smoke. `EnemyPlan.UseItem`
+  + `Ai.BestSmoke/BestFlash` + a `Game.UpdateEnemy` item branch + `Unit.EnemyItem`. Never
+  splashes allies (incl. the thrower for flash), always spends the action (no TIMEOUT).
+- **Streak-breaker (S4-C):** after consecutive clean misses a soldier's next shot gets a
+  hidden +6/miss aim bonus (cap +12), reset on any connect (hit/graze). Composes with graze,
+  hidden from the tooltip. (`Unit.ConsecutiveMisses`, in `Combat.Resolve`.)
+- **Focal-point lighting (Phase 5.6):** selected unit full-bright + glow, others gently dimmed,
+  signal kept full-alpha (`Renderer.DrawUnit` figure-alpha).
+- **Bench / deploy short-handed (S3-A):** at the barracks a WOUNDED soldier can be benched to
+  sit out the next mission (deploy 3-strong) for faster recovery (Wound -2 + full heal).
+  `Unit.Benched` (persisted), `Game.ToggleBench` (wounded-only, never <1 deployable, never by
+  autopilot), `SetupMission` excludes + auto-clears. Attrition now actually shrinks strength.
+- **Staggered deployment (owner feedback):** spawns are no longer two parallel firing lines —
+  soldiers deploy as a loose diagonal wedge (cols 0-3, `Mission.PlayerSpawns`), enemies scatter
+  3-4 columns deep (per-pod `EnemyPodColOffset`, cols 14-17). Standoff preserved.
+- **Auto-focus camera (owner feedback):** an opt-in pause-menu AUTO-CAM (`Display.AutoCam`,
+  default OFF) smoothly zooms+pans to follow the selected/acting unit (clamped to board);
+  manual pan/zoom hands control back; forced off in the harness. (Larger maps deliberately
+  deferred — see DEVLOG; the formation fix targets the actual "one line" cause.)
+- **Cover shape-cues (S4-B):** high cover draws a small △, low cover a — on its top face
+  (subtle white, alpha ~0.19), so cover type reads by shape (colorblind-safe), not color/height.
 - Grid battlefield w/ high+low cover, LoS, 8-dir pathfinding (corner-cut safe).
 - 2-action combat: move, dash (yellow), fire (ends turn), overwatch reaction
   fire (both sides), hunker, reload.
@@ -856,20 +904,32 @@ screenshots, ship compiling code to `main`.
       the screen + covered approaches, authored maps (`SIGHTLINE_MAP`) still apply.
       **Follow-up:** PLAZA/ZIGGURAT authored arenas stay deliberately open (variety); the
       enemy AI doesn't yet exploit the screen's LoS. Next: 4.3 alert tiers, 4.4 concealment.
-- [ ] **4.3 Alert / awareness tiers (green -> yellow -> red).** Replace binary
-      dormant -> instant-scatter with a **suspicious** middle state so being spotted is
-      gradual and telegraphed (never a pure gotcha); reconsider/soften the free scatter
-      on activation (the most-criticized part of pod design). Touch the pod/`Unit.Active`
-      state -> a small alert enum, `Game.CheckPodActivation`/`ActivatePod`, renderer
-      glyph states. Verify: `SIGHTLINE_WAKE`-style shot of each tier; autoplay clean.
-- [ ] **4.4 Concealment + ambush (the marquee mechanic).** Squad starts **concealed**;
-      while concealed it repositions/scouts freely and **the player chooses when to break
-      stealth and engage**; springing the ambush pays off (no overwatch aim penalty,
-      enemies caught out of cover, only a partial enemy scatter). Converts first contact
-      from accident to **rewarded choice** — the "find your footing" fantasy, board still
-      fully visible. Pairs with 4.3 (breaking concealment = going red). New per-unit/Run
-      concealment state; reuse the overwatch/ambush shot path. Verify: a self-test of the
-      conceal/break rules + `SIGHTLINE_*` shot + autoplay (autopilot breaks deliberately).
+- [x] **4.3 Alert / awareness tiers (green -> yellow -> red).** DONE. Binary
+      dormant->instant-scatter is replaced by a 3-state `AlertLevel` (Unaware / Suspicious /
+      Alert) on `Unit`; `Active` is now derived `=> Alert == AlertLevel.Alert`, so every
+      read site is unchanged. Pods escalate gradually: a soldier sighting one within
+      `SightRange` (9) sets the pod **Suspicious** (amber "!" + pulsing ring, a "CONTACT?"
+      telegraph) WITHOUT acting or scattering; at the player's turn end `Game.ResolveSuspicion`
+      either confirms it (-> Alert, acts that enemy turn, **no free scatter** since it had a
+      turn's warning) if still in sight, or it loses interest (-> Unaware) if the squad broke
+      contact. Blundering within the new `AlertRange` (4) or any aggression (shoot/pin/grenade)
+      still snaps a pod straight to Alert **with** the (4.2-capped, single-move) reaction
+      scatter. So first contact is telegraphed and the free scatter is softened to surprise-only.
+      Renderer draws the three glyph states; `Game.DebugAlertTiers` + `SIGHTLINE_ALERT=1` shot
+      shows all three. Verify: build 0/0, autoplay x5 clean (no TIMEOUT), `SIGHTLINE_ALERT` shot.
+- [x] **4.4 Concealment + ambush (the marquee mechanic).** DONE. Squad starts every mission
+      **concealed** (`Game.SquadConcealed`, set in `SetupMission`): it scouts/repositions freely
+      and `CheckPodActivation` is gated so pods can't escalate via sight. **The player chooses
+      when to break stealth** — first shot/grenade/flashbang/pinning fire, or stepping within
+      `RevealRange` (3) of an active foe (`Game.BreakConcealment`, called from IssueShoot/
+      IssueGrenade/IssueItem(Flash)/DoAbility(Suppress)/OnUnitEnteredTile/AutoStallCheck). The
+      breaking shot springs an **ambush**: `Unit.FiredFromConcealment` grants +20 aim/+25 crit
+      (`Combat.AmbushAim/Crit`, consumed by that one shot, `ShotOdds.Ambush` -> "+ AMBUSH"
+      tooltip); pods already in sight wake with the 4.2-capped scatter, then the normal 4.3
+      alert tiers resume. HUD shows a pulsing CONCEALED pill (in the MISSION slot); friendly
+      units get a ghost ring. Autopilot springs the ambush when it has a shot (no TIMEOUT).
+      Verify: build 0/0, `SIGHTLINE_CONCEALTEST`=PASS, `SIGHTLINE_COMBATTEST`=PASS, autoplay
+      clean x5 + sabotage/rescue/defend, `SIGHTLINE_CONCEAL=1` shot.
 - [ ] **4.5 (DEFERRED — flagged prototype only) Fog of war + soldier-focused auto-cam.**
       Do NOT build unless 4.1-4.4 ship and playtests still want the recon-survival genre.
       If attempted: a visibility mask behind a flag, on the larger maps, with strong
@@ -901,18 +961,19 @@ stand and are reinforced by DESIGN.md §3D/E/G.
       accent), the **60-30-10** split, a **value-contrast** rule, line/shape language, and
       a **squint-test** acceptance check (squint: can you still find the selected unit +
       nearest threat + objective?). Pure docs; everything below conforms to it.
-- [ ] **5.2 Post-processing pass.** A shader stage on the existing `Display`
-      render-target: tasteful **bloom** (event-reactive — spike on hits/kills/crits),
-      **vignette**, per-**biome color grading**, subtle **chromatic aberration** on impact.
-      GLSL only, no assets. Biggest production-value lift; keep bloom subtle (the genre's
-      most-overused effect). Touch `src/Display.cs` (post pass), a small `.fs`/`.vs` shader
-      pair, `Fx` for event intensity. Verify: `SIGHTLINE_SHOT` before/after per biome; keep
-      it OFF in the headless harness so smoke shots stay byte-stable.
-- [ ] **5.3 Real font (kills the ASCII `?` limit).** Bake a committed small font via
-      `LoadFontEx` (procedural/generated, permissive) and route HUD/board text through it;
-      drop the ASCII-only constraint. Upgrades all typography. Touch `Hud`/`Renderer` text
-      draws + a font load in `Program`. Verify: `SIGHTLINE_SHOT` of HUD/cards rendering
-      non-ASCII glyphs correctly.
+- [x] **5.2 Post-processing pass.** DONE (Sprint 1). An embedded-GLSL post stage in
+      `src/Display.cs` over the render-target: soft **vignette**, event-reactive **bloom**
+      (`Game.AddBloom` spikes on hits/kills, decays), subtle per-**biome color grade**, and
+      impact **chromatic aberration**. Shader is a C# string (`LoadShaderFromMemory`, no asset
+      files), guarded by `IsShaderValid`. Headless harness keeps Display OFF (byte-stable
+      shots); `SIGHTLINE_POSTFX=1` forces it on to view. Bloom kept subtle in live play.
+- [x] **5.3 Real font (kills the ASCII `?` limit).** DONE (Sprint 2). Committed
+      `assets/NotoMono-Regular.ttf` (107KB, SIL OFL-1.1, free to redistribute) baked at 64px
+      via `LoadFontEx` in `Program.cs` (ASCII + em/en-dash, curly quotes, bullet, ellipsis,
+      x, middot), stored as `Cfg.Font` with a `GetFontDefault()` fallback. ~154
+      `DrawText`/`MeasureText` sites migrated to `DrawTextEx`/`MeasureTextEx` (Hud/Renderer/Fx),
+      sizes+positions unchanged. **The ASCII-only constraint is now lifted** — non-ASCII
+      glyphs are available; new strings can use them (though most still ASCII for now).
 - [ ] **5.4 Procedural texturing & particles.** Replace flat fills with subtle in-engine
       **noise** on floor/cover/plateaus, **soft-glow** particle sprites (vs hard rects),
       and generated **HUD icon glyphs**. `GenImage*` at load → cached textures; no committed
@@ -923,10 +984,12 @@ stand and are reinforced by DESIGN.md §3D/E/G.
       never relies on hue alone; persist the toggle in `display.json`. Touch `Pal`,
       `Renderer`, `Hud`, `Display` settings. Verify: screenshots in each palette. (Supersedes
       the colorblind half of Phase 3 item 3.13; 3.13's UI-text-scale piece still stands.)
-- [ ] **5.6 Focal-point & faux lighting.** Brighten/ring the active unit and gently
-      desaturate/vignette the rest toward the focal point; faux 2D lighting / emissive
-      cover+plateau edges to unify with elevation. Touch `Renderer` + the 5.2 post pass.
-      Verify: `SIGHTLINE_SHOT`; squint test still finds the focal unit fast.
+- [x] **5.6 Focal-point lighting.** DONE (Sprint 3, focal half). `Renderer.DrawUnit` threads
+      a per-unit figure alpha: selected = 1.0 (+ a soft outer glow halo), spent player 0.60,
+      other friendlies 0.82, enemies 0.85 (threats stay visible). All SIGNAL stays full-alpha
+      (selection/ghost/VIP rings, HP pips, status codes, alert ?/! markers, labels, damage
+      flash). Squint test holds. (Still open: emissive cover/plateau edges + faux 2D lighting
+      via the 5.2 post pass.)
 
 ---
 
@@ -940,6 +1003,57 @@ Before stopping:
 4. Tell the human to open a fresh session (they'll send only `.`).
 
 ### WIP NOTES
+
+> **SPRINT 1 (autonomous dev-team) — SHIPPED: 4.4 concealment + 5.2 post-FX shader + 3 arenas.**
+> Ran as a multi-agent team (orchestrator + PM/research + architect + parallel devs in isolated
+> worktrees + research). Three features landed on `claude/vigilant-faraday-4cjiff` (PR #47):
+> (1) **4.4 Concealment + ambush** (marquee) — see the 4.4 roadmap entry + Current state. Files:
+> Unit/Combat (FiredFromConcealment + AmbushAim/Crit + ShotOdds.Ambush), Game (SquadConcealed,
+> BreakConcealment + triggers, CheckPodActivation gate, AutoStep break, ConcealSelfTest), Hud
+> (CONCEALED pill + "+ AMBUSH"), Renderer (ghost ring), Program (SIGHTLINE_CONCEAL/CONCEALTEST).
+> (2) **5.2 post-FX shader** — embedded GLSL in `Display` (vignette/bloom/grade/chroma); bloom fed
+> by `Game.AddBloom` on hits/kills; headless OFF (byte-stable), `SIGHTLINE_POSTFX=1` to view.
+> (3) **3 arenas** in `Maps.cs` (CROSSROADS/FOXHOLES/RIDGE; RIDGE uses tier-2 `=`).
+> Process note / gotcha: a dev agent can spawn a sub-agent and "come to rest" with the child still
+> running — check the worktree branch state (`git -C .claude/worktrees/agent-<id> ...`) before
+> assuming done. Integration was file-level (`git checkout <branch> -- <files>`) to avoid
+> merge-base churn, since the concealment dev based its work on a pre-post-FX trunk; Game.cs/
+> Program.cs (touched by BOTH post-FX and concealment) were hand-merged. Verified end-to-end:
+> Release 0/0, CONCEALTEST/COMBATTEST PASS, autoplay clean x5 + sabotage/rescue/defend.
+> `docs/DEVLOG.md` tracks the team process. **Next:** Sprint 2 (graze/partial-hit S2-A, enemy AI
+> utility-items S2-B, overwatch-camp soft-pressure S2-C) + the font (NotoMono, OFL, on-machine).
+
+> **4.3 ALERT / AWARENESS TIERS (latest) — SHIPPED.** Replaces the binary
+> dormant->instant-scatter pod model with a graded `AlertLevel` so first contact is
+> telegraphed (DESIGN.md §5/§6: never a pure gotcha) and the "free scatter on reveal" is
+> softened to surprise-only. Files touched: **Unit.cs** (new `enum AlertLevel { Unaware,
+> Suspicious, Alert }`; `Active` is now a get-only `=> Alert == AlertLevel.Alert`, so all
+> the read sites — music intensity, threat preview, `_aiUnits`, autoplay-stall — are
+> unchanged; only the ~5 WRITE sites flipped to `e.Alert = ...`). **Mission.cs** (pod spawn
+> `e.Alert = AlertLevel.Unaware`). **Util.cs** (`Pal.Suspect`/`SuspectDk` amber). **Game.cs**
+> (the activation block: new `AlertRange=4`, `ClosestSightedDist`, `SetPodSuspicious`,
+> `ResolveSuspicion`, `ActivatePod` = the surprise/scatter path; `ResolveSuspicion()` call in
+> `EndPlayerTurn` before `_aiUnits`; `DebugAlertTiers`). **Renderer.cs** (3-way glyph:
+> grey "?" / amber "!"+pulsing ring / live foe). **Program.cs** (`SIGHTLINE_ALERT=1` hook).
+> The model: CheckPodActivation (runs on player tile-entry + in UpdatePlayer) — sighted
+> within SightRange(9) but >AlertRange(4) => pod **Suspicious** (no act/scatter, "CONTACT?");
+> sighted ≤AlertRange OR shot/pinned/grenaded => straight to **Alert** WITH the (4.2-capped
+> single-move) scatter. At EndPlayerTurn, `ResolveSuspicion` turns every Suspicious pod into
+> Alert (still in sight; **no scatter** — it acts on the coming enemy turn) or back to Unaware
+> (contact broken). KEY INVARIANT: Suspicious only ever exists *within* a player turn (the
+> telegraph window) — it's always resolved at the turn boundary, so there's no stuck/oscillating
+> state and no new TIMEOUT risk (the existing `AutoStallCheck` still treats Suspicious as
+> `!Active` and force-wakes after 10 stalled turns). Gotchas: (a) `Util.TileDist` returns
+> **float** (Euclidean) — `ClosestSightedDist` is float, don't make it int. (b) shooting a
+> Suspicious enemy is allowed (it's targetable like the old dormant ones) and the existing
+> `if (!target.Active) ActivatePod(...)` correctly snaps it to Alert+scatter. (c) the amber
+> Suspect color is near VipGold, but the "!" marker + enemy-side body distinguish them.
+> Verified: Release 0/0, autoplay x5 clean (LOSE, no exceptions/TIMEOUT — expected for the
+> weak smoke AI), `SIGHTLINE_ALERT=1` shot shows all three tiers. **Next Phase 4 step:** 4.4
+> **concealment + ambush** (the marquee mechanic — squad starts concealed, player chooses
+> when to break stealth; pairs with these tiers: breaking concealment = going red). Then 4.5
+> is the DEFERRED fog-of-war prototype (only if 4.4 proves insufficient). Phase 5 (post-FX
+> shader, font) is independent and can interleave.
 
 > **4.2 ENCOUNTER GEOMETRY (latest) — SHIPPED.** Fixes the turn-1 forced-ambush problem
 > (DESIGN.md §5) while keeping perfect information + the 18x11 full-bleed board (did NOT

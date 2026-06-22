@@ -202,10 +202,16 @@ public class Game
     // game-feel: hit-stop freeze + camera zoom-punch + red death-flash (3.11)
     public float HitStop;
     float _camPulse;
+    bool  _autoCamManual;   // true = player manually moved camera; suppresses auto-follow until C-reset
     public float DeathFlash;                 // 0..1 red full-screen pulse on a soldier's death
     readonly List<string> _missionKia = new(); // soldiers KIA this mission (for the debrief)
     public void AddHitStop(float s) { HitStop = MathF.Max(HitStop, s); }
     public void AddZoomPunch(float p) { _camPulse = MathF.Max(_camPulse, p); }
+
+    // Phase 5.2 post-FX: bloom spikes on hits/kills/crits and decays smoothly.
+    float _postFxBloom;   // 0..1, decays ~1.5 s
+    // AddBloom is called alongside AddHitStop; magnitude maps s (0.1 normal, 0.4 kill-cam) -> bloom.
+    public void AddBloom(float s) { _postFxBloom = MathF.Min(1f, _postFxBloom + s * 2.2f); }
 
     // ---------------- lifecycle ----------------
     /// Start a brand-new campaign run (called from intro / after a run ends).
@@ -223,9 +229,15 @@ public class Game
     void SetupMission(int n)
     {
         _run.Mission = n;
+        // reset camera to identity each new mission (auto-cam will gently ease in if enabled)
+        CamZoom = 1f; CamPan = Vector2.Zero; _autoCamManual = false;
         // per-mission roster: a copy of the persistent squad (+ an optional VIP),
         // so adding the escort asset never pollutes the campaign squad.
-        Players = new List<Unit>(_run.Squad);
+        // Benched soldiers sit this mission out (deploy short-handed). They get accelerated
+        // recovery in DebriefSurvivors and the flag is cleared THERE (EnterBarracks, after the
+        // debrief consumes it) - so it must survive the whole mission. Do NOT clear it here,
+        // or the recovery path is dead code (review Blocker 2).
+        Players = new List<Unit>(_run.Squad.Where(u => !u.Benched));
 
         // objective + difficulty come from the chosen deployment card (Run.ObjectiveFor baseline)
         var card = _run.CurrentCard ?? Run.StandardCard(n);
@@ -293,10 +305,11 @@ public class Game
         _turnCount = 1;
         _autoSig = -1; _autoStall = 0;
         Phase = Phase.PlayerTurn;
+        SquadConcealed = true;            // 4.4: every mission opens with the squad concealed
         foreach (var u in Players) u.BeginTurn();
         // per-mission feat tracking + status effects start clean each mission
         foreach (var u in Players)
-        { u.FeatMultiKill = u.FeatClutch = u.FeatVengeful = u.WasNearDeath = u.AllyDown = false; u.BondAura = false; u.Statuses.Clear(); }
+        { u.FeatMultiKill = u.FeatClutch = u.FeatVengeful = u.WasNearDeath = u.AllyDown = false; u.BondAura = false; u.ConsecutiveMisses = 0; u.Statuses.Clear(); }
         _missionKia.Clear();
         DeathFlash = 0;
         RollSecondary(n);
@@ -334,8 +347,100 @@ public class Game
         SetupMission(_run.Mission < 1 ? 1 : _run.Mission);
     }
 
-    /// Harness hook (screenshot only): reveal all dormant enemies.
-    public void DebugWakeAll() { foreach (var e in Enemies) if (e.Alive) e.Active = true; }
+    /// Harness hook (screenshot only): reveal all dormant enemies (fully alert).
+    public void DebugWakeAll() { foreach (var e in Enemies) if (e.Alive) e.Alert = AlertLevel.Alert; }
+
+    /// Harness hook (screenshot only): spread the three awareness tiers (4.3) across the
+    /// enemies so one frame shows Unaware ("?") / Suspicious ("!") / Alert glyph states.
+    public void DebugAlertTiers()
+    {
+        var foes = Enemies.Where(e => e.Alive).ToList();
+        for (int i = 0; i < foes.Count; i++)
+            foes[i].Alert = (AlertLevel)(i % 3);   // 0 Unaware, 1 Suspicious, 2 Alert
+    }
+
+    /// Harness hook (screenshot only): the squad is concealed at mission start anyway;
+    /// this just adds a banner so the intent reads in the frame (the CONCEALED pill +
+    /// ghost rings are already drawn because SquadConcealed is true).
+    public void DebugConcealment() => ShowBanner("CONCEALED - PICK YOUR MOMENT", false);
+
+    /// Headless self-test for 4.4 concealment: starts concealed, pods are gated from
+    /// escalating while concealed, and breaking concealment ungates them + arms the
+    /// breaking actor's ambush bonus. Prints CONCEALTEST: PASS/FAIL.
+    public string ConcealSelfTest()
+    {
+        NoPersist = true;                       // never touch the save file in a test
+        var fails = new System.Collections.Generic.List<string>();
+        StartMission(1);
+        if (!SquadConcealed) fails.Add("notConcealedAtStart");
+
+        var p = Players.FirstOrDefault(u => u.Alive && !u.IsVip);
+        var e = Enemies.FirstOrDefault(x => x.Alive);
+        if (p == null || e == null) fails.Add("setupMissingUnits");
+        else
+        {
+            // a dormant foe stood right next to a soldier must NOT wake while concealed
+            e.Alert = AlertLevel.Unaware;
+            e.X = p.X + 1; e.Y = p.Y; e.SyncPos();
+            CheckPodActivation();
+            if (e.Active) fails.Add("wokeWhileConcealed");
+
+            // breaking concealment clears the flag, arms the actor, and wakes the sighted pod
+            BreakConcealment(p);
+            if (SquadConcealed) fails.Add("stillConcealedAfterBreak");
+            if (!p.FiredFromConcealment) fails.Add("actorNotArmed");
+            if (!e.Active) fails.Add("sightedPodNotWokenOnBreak");
+        }
+
+        // (Mi2) RevealRange proximity break: stepping within 3 of an ACTIVE foe auto-breaks
+        // concealment via OnUnitEnteredTile, and does NOT arm an ambush bonus (not a shot).
+        StartMission(1);
+        var p2 = Players.FirstOrDefault(u => u.Alive && !u.IsVip);
+        var e2 = Enemies.FirstOrDefault(x => x.Alive);
+        if (p2 != null && e2 != null)
+        {
+            if (!SquadConcealed) fails.Add("concealNotResetForProxTest");
+            e2.Alert = AlertLevel.Alert;                 // an already-active foe
+            e2.X = p2.X + RevealRange; e2.Y = p2.Y; e2.SyncPos();
+            p2.FiredFromConcealment = false;
+            OnUnitEnteredTile(p2);                        // simulate the soldier stepping here
+            if (SquadConcealed) fails.Add("revealRangeDidNotBreak");
+            if (p2.FiredFromConcealment) fails.Add("proximityArmedAmbush");
+        }
+
+        return fails.Count == 0
+            ? "CONCEALTEST: PASS (start concealed; pods gated; break arms+wakes; RevealRange breaks w/o bonus)"
+            : "CONCEALTEST: FAIL (" + string.Join(",", fails) + ")";
+    }
+
+    /// Headless self-test for the bench/short-handed lifecycle (S3-A + review fixes).
+    /// Verifies a benched veteran is NOT deployed, NOT lost from the squad, recovers
+    /// (full HP + Wound-2), and is un-benched afterwards. Prints BENCHTEST: PASS/FAIL.
+    public string BenchSelfTest()
+    {
+        NoPersist = true;
+        var fails = new System.Collections.Generic.List<string>();
+        StartMission(1);                                  // fresh run + mission 1 deployed
+        var vet = _run.Squad.FirstOrDefault(u => !u.IsVip);
+        if (vet == null) return "BENCHTEST: FAIL (noSquad)";
+        vet.Wound = 2; vet.Hp = 1; vet.Benched = true;    // a wounded veteran, benched
+
+        SetupMission(1);                                  // redeploy with the bench set
+        if (Players.Contains(vet)) fails.Add("benchedStillDeployed");
+        if (!vet.Benched) fails.Add("flagClearedAtSetup");          // Blocker 2
+        if (!_run.Squad.Contains(vet)) fails.Add("droppedAtSetup");
+        if (AlivePlayers().Count(p => !p.IsVip) > 3) fails.Add("deployedNotShortHanded");
+
+        EnterBarracks();                                  // simulate mission-end debrief
+        if (!_run.Squad.Contains(vet)) fails.Add("benchedLostAtBarracks");   // Blocker 1
+        if (vet.Benched) fails.Add("flagNotClearedAfterDebrief");            // Blocker 2
+        if (vet.Hp != vet.MaxHp) fails.Add("notHealed");                     // accelerated recovery
+        if (vet.Wound != 0) fails.Add($"woundNotRecovered={vet.Wound}");     // 2 -> 0 (decay 2)
+
+        return fails.Count == 0
+            ? "BENCHTEST: PASS (benched veteran sits out, is preserved, recovers full HP + 2 wound steps, un-benches)"
+            : "BENCHTEST: FAIL (" + string.Join(",", fails) + ")";
+    }
 
     /// Harness hook (screenshot only): stamp a tier-2 plateau (with a tier-1 step and a
     /// high-cover block) mid-field so the 2nd elevation tier is visible.
@@ -445,6 +550,19 @@ public class Game
         Phase = Phase.Barracks;
     }
 
+    /// Harness hook (screenshot only): show the barracks debrief with two wounded soldiers
+    /// so the BENCH toggle buttons are visible (S3-A).
+    public void DebugBench()
+    {
+        // wound two soldiers so the BENCH button appears in their rows
+        foreach (var u in _run.Squad.Take(2)) u.Wound = 2;
+        _run.JumpTo(2);
+        _run.DebriefSurvivors();
+        _run.PendingPerks.Clear();
+        _shopDone = true;
+        Phase = Phase.Barracks;
+    }
+
     /// Harness hook (screenshot only): show the branching campaign map mid-run with a
     /// couple of columns already cleared, the shop/perks skipped.
     public void DebugCampaignMap()
@@ -458,7 +576,12 @@ public class Game
 
     void EnterBarracks()
     {
+        // a benched soldier sat this mission out: it's still in _run.Squad (flagged) but was
+        // never in Players, so it's absent from AlivePlayers(). Preserve it across the rebuild,
+        // or benching would silently destroy the veteran (review Blocker 1).
+        var benched = _run.Squad.Where(u => u.Benched && u.Alive).ToList();
         _run.Squad = AlivePlayers().Where(u => !u.IsVip).ToList();  // the VIP never joins the squad
+        foreach (var b in benched) if (!_run.Squad.Contains(b)) _run.Squad.Add(b);
         int survivors = _run.Squad.Count;
         bool finished = _run.Mission >= Run.MaxMissions;
 
@@ -467,6 +590,7 @@ public class Game
             foreach (var u in _run.Squad) u.Hp = u.MaxHp;
 
         _run.DebriefSurvivors();
+        foreach (var u in _run.Squad) u.Benched = false;   // consumed (Blocker 2): redeploy next mission
 
         // secondary objective (3.9): award bonus intel if the optional goal was met
         if (Secondary != SecondaryKind.None)
@@ -578,13 +702,24 @@ public class Game
             EnvDamage(mover, Unit.BleedDamage, "BLEED", Pal.RGBA(205, 45, 45));
             if (!mover.Alive) return;
         }
-        if (mover.Team == Team.Player) CheckPodActivation();  // reveal pods while advancing
+        if (mover.Team == Team.Player)
+        {
+            // 4.4: stepping within RevealRange of an already-active foe blows concealment.
+            // No actor - getting spotted is not your aimed shot, so no ambush bonus.
+            if (SquadConcealed && Enemies.Any(e => e.Alive && e.Active
+                    && Util.TileDist(mover.X, mover.Y, e.X, e.Y) <= RevealRange))
+                BreakConcealment();
+            CheckPodActivation();  // reveal pods while advancing (no-op while still concealed)
+        }
         var watchers = mover.Team == Team.Player ? Enemies : Players;
         int insertAt = 1;
         foreach (var w in watchers)
         {
             if (!w.Alive || !w.OnOverwatch || w.ReactedThisTurn || w.Ammo <= 0) continue;
             if (!CanTarget(w, mover)) continue;
+            // 4.4 (review M1): a player's overwatch shot is still a shot — it reveals the
+            // squad. No actor -> no ambush bonus on a reaction (it already has its own mod).
+            if (w.Team == Team.Player && SquadConcealed) BreakConcealment();
             w.OnOverwatch = false;
             w.ReactedThisTurn = true;
             w.Ammo--;
@@ -658,6 +793,7 @@ public class Game
         Fx.AddShake(7f);
         AddHitStop(0.1f);
         AddZoomPunch(0.05f);
+        AddBloom(0.1f);
         Audio.Play("death");
 
         // KIA feedback (3.11): a fallen soldier gets a prominent stamp with their
@@ -675,6 +811,7 @@ public class Game
         {
             AddHitStop(0.4f);
             AddZoomPunch(0.13f);
+            AddBloom(0.4f);
             Fx.AddShake(11f);
         }
 
@@ -804,6 +941,22 @@ public class Game
         _camPulse *= MathF.Exp(-dt * 11f);
         if (_camPulse < 0.001f) _camPulse = 0;
         if (DeathFlash > 0) DeathFlash = MathF.Max(0, DeathFlash - dt * 1.6f);
+
+        // Phase 5.2: bloom decays smoothly (half-life ~0.6 s) and drives Display post-FX.
+        _postFxBloom = MathF.Max(0, _postFxBloom - dt * 0.9f);
+        Display.AdvanceTime(dt);
+        // Biome colour-grade tint: a gentle push toward the biome hue (neutral at 1,1,1).
+        // Values are close to 1 to avoid washing out readability; the squint test must pass.
+        var biomeT = Biome.Tint;
+        // Normalise biome tint to produce a subtle multiplicative grade near 1.0.
+        // biomeT components are 22..108 raw; map to 0.97..1.03 range.
+        float invBase = 1f / 80f;
+        var grade = new Vector3(
+            1f + (biomeT.R - 60) * invBase * 0.04f,
+            1f + (biomeT.G - 60) * invBase * 0.04f,
+            1f + (biomeT.B - 60) * invBase * 0.04f);
+        Display.SetPostFxParams(_postFxBloom, _postFxBloom * 0.55f, grade);
+
         if (HitStop > 0) { HitStop -= dt; return; }
 
         // pause/settings overlay + camera controls (live play only, never in autoplay)
@@ -816,6 +969,7 @@ public class Game
             }
             if (Paused) { HandlePauseMenu(); return; }
             HandleCamera();
+            UpdateAutoCam(dt);
         }
 
         float t = MathF.Min(dt, 0.05f);
@@ -848,12 +1002,17 @@ public class Game
                 {
                     if (AutoPlay) ChoosePerk(0); else HandlePerkClick();
                 }
-                else if (_run.NextNodes().Count > 0)     // then pick the next node on the campaign map
+                else
                 {
-                    if (AutoPlay) ChooseNode(_run.NextNodes()[0].Id); else HandleNodeClick();
+                    // debrief screen: bench toggles are available before choosing a node/card
+                    if (!AutoPlay) HandleBenchClick();
+                    if (_run.NextNodes().Count > 0)      // pick the next node on the campaign map
+                    {
+                        if (AutoPlay) ChooseNode(_run.NextNodes()[0].Id); else HandleNodeClick();
+                    }
+                    else if (AutoPlay) ChooseCard(0);    // fallback: deployment cards
+                    else HandleCardClick();
                 }
-                else if (AutoPlay) ChooseCard(0);        // fallback: deployment cards
-                else HandleCardClick();
                 break;
             case Phase.Win:
             case Phase.Lose: HandleOverlayClick(); break;
@@ -920,6 +1079,7 @@ public class Game
         if (sig != _autoSig) { _autoSig = sig; _autoStall = 0; return; }
         if (++_autoStall < 10) return;
         _autoStall = 0;
+        if (SquadConcealed) BreakConcealment();   // 4.4: a stalled autopilot reveals itself
         var dormant = Enemies.Where(e => e.Alive && !e.Active).ToList();
         if (dormant.Count > 0) ActivatePod(dormant[0].PodId);
     }
@@ -932,6 +1092,16 @@ public class Game
         if (u == null) { EndPlayerTurn(); return; }
         Selected = u;
         RecomputeMoveCost();
+
+        // 4.4: autopilot springs the ambush once it has a shot (u then fires it next step
+        // with the bonus), else when it has stalked within range; otherwise it keeps
+        // advancing concealed. Returns so any reveal-scatter plays before the shot.
+        if (SquadConcealed)
+        {
+            if (u.Ammo > 0 && FirstTargetFor(u) != null) { BreakConcealment(u); return; }
+            if (Players.Any(p => p.Alive && Enemies.Any(e => e.Alive
+                    && Util.TileDist(p.X, p.Y, e.X, e.Y) <= AlertRange + 1))) { BreakConcealment(); return; }
+        }
 
         // EVAC objective: get everyone to the extraction zone
         if (Objective == Objective.Evac)
@@ -1109,24 +1279,74 @@ public class Game
         return false;
     }
 
-    // ---------------- activation pods ----------------
-    public const int SightRange = 9;   // pod-activation sight (4.2: down from 12 for a deliberate approach)
+    // ---------------- activation pods (4.3 awareness tiers) ----------------
+    public const int SightRange = 9;   // spotted at range -> Suspicious (4.2: down from 12)
+    public const int AlertRange = 4;   // spotted up close -> straight to Alert (no grace turn)
+    public const int RevealRange = 3;  // 4.4: stepping this close to an ACTIVE foe auto-breaks concealment
+    public bool SquadConcealed;        // 4.4: squad starts each mission concealed (set in SetupMission)
+
+    // Closest distance at which any living soldier currently has line of sight on this
+    // enemy (within SightRange), or -1 if it is unseen.
+    float ClosestSightedDist(Unit e)
+    {
+        float best = -1f;
+        foreach (var p in Players)
+        {
+            if (!p.Alive) continue;
+            float d = Util.TileDist(p.X, p.Y, e.X, e.Y);
+            if (d > SightRange || (best >= 0 && d >= best)) continue;
+            if (!Grid.HasLineOfSight(p.X, p.Y, e.X, e.Y)) continue;
+            best = d;
+        }
+        return best;
+    }
 
     void CheckPodActivation()
     {
+        TryFreeCaptive();                       // captive proximity isn't aggression - always checked
+        if (SquadConcealed) return;             // 4.4: concealment masks the squad; pods can't escalate via sight
         foreach (var e in Enemies)
         {
-            if (!e.Alive || e.Active) continue;
-            foreach (var p in Players)
-            {
-                if (!p.Alive) continue;
-                if (Util.TileDist(p.X, p.Y, e.X, e.Y) > SightRange) continue;
-                if (!Grid.HasLineOfSight(p.X, p.Y, e.X, e.Y)) continue;
-                ActivatePod(e.PodId);
-                break;
-            }
+            if (!e.Alive || e.Active) continue;          // already fully alert
+            float d = ClosestSightedDist(e);
+            if (d < 0) continue;                         // not in sight
+            if (d <= AlertRange) ActivatePod(e.PodId);   // blundered in close -> snap awake (+scatter)
+            else SetPodSuspicious(e.PodId);              // spotted at range -> telegraphed warning
         }
-        TryFreeCaptive();
+    }
+
+    /// 4.3: a whole pod goes Suspicious (alerted "!"), but does NOT act or scatter yet — it
+    /// confirms (-> Alert) at the player's turn end if still in sight (ResolveSuspicion),
+    /// else loses interest (-> Unaware). This is the telegraph that kills the turn-1 gotcha.
+    void SetPodSuspicious(int podId)
+    {
+        bool any = false;
+        foreach (var e in Enemies)
+        {
+            if (!e.Alive || e.PodId != podId || e.Alert != AlertLevel.Unaware) continue;
+            e.Alert = AlertLevel.Suspicious;
+            Fx.PopText(e.Pos + new Vector2(0, -30), "!", Pal.Suspect, 22f);
+            any = true;
+        }
+        if (any) { BannerText = "CONTACT?"; BannerEnemy = true; BannerMax = BannerTimer = 0.9f; Audio.Play("select"); }
+    }
+
+    /// At the player's turn end, resolve every Suspicious pod: it confirms the threat
+    /// (-> Alert, acts this enemy turn, but with NO free scatter since it had a turn's
+    /// warning) when a soldier is still in sight, or loses interest (-> Unaware) when
+    /// contact was broken. So lingering in view wakes them; retreating keeps them dormant.
+    void ResolveSuspicion()
+    {
+        foreach (var e in Enemies)
+        {
+            if (!e.Alive || e.Alert != AlertLevel.Suspicious) continue;
+            if (ClosestSightedDist(e) >= 0)
+            {
+                e.Alert = AlertLevel.Alert;
+                Fx.PopText(e.Pos + new Vector2(0, -32), "ALERT", Pal.Foe, 18f);
+            }
+            else e.Alert = AlertLevel.Unaware;   // squad broke contact in time
+        }
     }
 
     /// RESCUE: free the caged captive once a soldier reaches it; it then becomes a
@@ -1147,16 +1367,20 @@ public class Game
             }
     }
 
+    // Snap a whole pod to fully Alert with a reaction scatter. This is the SURPRISE path
+    // (blundered in close, or shot/pinned/grenaded). The telegraphed path — a pod that was
+    // merely Suspicious — wakes via ResolveSuspicion instead, with NO scatter (it had its
+    // warning), so the criticized "free move on reveal" only happens on a genuine surprise.
     public void ActivatePod(int podId)
     {
         bool any = false;
         foreach (var e in Enemies)
         {
             if (!e.Alive || e.Active || e.PodId != podId) continue;
-            e.Active = true;
+            e.Alert = AlertLevel.Alert;
             any = true;
-            // free scatter toward cover/line of fire (move only, no shot), but 4.2 caps
-            // it to a SINGLE move — no free dash on reveal (an immobile turret gets none).
+            // free scatter toward cover/line of fire (move only, no shot); 4.2 caps it to a
+            // SINGLE move — no free dash on reveal (an immobile turret gets none).
             var plan = Ai.Plan(this, e);
             int cap = Math.Max(0, e.Mobility) * 2, spent = 0, lx = e.X, ly = e.Y;
             foreach (var (px, py) in plan.Path)
@@ -1173,6 +1397,26 @@ public class Game
             Fx.AddShake(3f);
             Audio.Play("over");
         }
+    }
+
+    /// 4.4: break squad concealment. The first aggressive action (or stepping too close)
+    /// springs the ambush: the breaking shot gets the ambush bonus (FiredFromConcealment),
+    /// and any pod already in sight wakes with the usual capped scatter. After this, the
+    /// normal 4.3 alert-tier rules resume for the rest of the mission. Call BEFORE the
+    /// action mutates state so the bonus is in place when Combat.Resolve reads it.
+    public void BreakConcealment(Unit actor = null)
+    {
+        if (!SquadConcealed) return;
+        SquadConcealed = false;
+        if (actor != null) actor.FiredFromConcealment = true;   // only a deliberate first shot earns the bonus
+        ShowBanner("AMBUSH!", false);
+        Fx.AddShake(4f);
+        Audio.Play("turn");
+        // wake every pod a soldier can currently see (each pod activates once)
+        var seen = new HashSet<int>();
+        foreach (var e in Enemies)
+            if (e.Alive && !e.Active && e.PodId >= 0 && ClosestSightedDist(e) >= 0) seen.Add(e.PodId);
+        foreach (int pid in seen) ActivatePod(pid);
     }
 
     void UpdatePlayer()
@@ -1386,6 +1630,7 @@ public class Game
         float wheel = Raylib.GetMouseWheelMove();
         if (wheel != 0)
         {
+            _autoCamManual = true;
             var mouse = Raylib.GetMousePosition();
             var before = Raylib.GetScreenToWorld2D(mouse, ViewCamera(false));
             CamZoom = Util.Clamp(CamZoom + wheel * 0.12f, 1f, 2.4f);
@@ -1393,8 +1638,11 @@ public class Game
             CamPan += before - after;                 // keep the point under the cursor anchored
         }
         if (Raylib.IsMouseButtonDown(MouseButton.Middle))
+        {
+            _autoCamManual = true;
             CamPan -= Raylib.GetMouseDelta() / CamZoom;
-        if (Raylib.IsKeyPressed(KeyboardKey.C)) { CamZoom = 1f; CamPan = Vector2.Zero; }
+        }
+        if (Raylib.IsKeyPressed(KeyboardKey.C)) { CamZoom = 1f; CamPan = Vector2.Zero; _autoCamManual = false; }
 
         if (CamZoom <= 1.001f) { CamZoom = 1f; CamPan = Vector2.Zero; }  // no pan when fully out
         else
@@ -1402,6 +1650,46 @@ public class Game
             CamPan.X = Util.Clamp(CamPan.X, -Cfg.BoardW * 0.5f, Cfg.BoardW * 0.5f);
             CamPan.Y = Util.Clamp(CamPan.Y, -Cfg.BoardH * 0.5f, Cfg.BoardH * 0.5f);
         }
+    }
+
+    // Auto-cam: gently lerps CamZoom/CamPan toward the focus unit each frame.
+    // Focus = Selected on player turn; the currently-acting enemy on enemy turn.
+    // Only runs when Display.AutoCam is on, we are NOT in autoplay, and the player
+    // hasn't manually overridden (wheel/middle-drag). C-reset re-enables it.
+    void UpdateAutoCam(float dt)
+    {
+        if (!Display.AutoCam || AutoPlay || _autoCamManual) return;
+        if (Phase != Phase.PlayerTurn && Phase != Phase.EnemyTurn) return;
+
+        // Determine the focus unit.
+        Unit focus = null;
+        if (Phase == Phase.PlayerTurn)
+            focus = Selected;
+        else if (Phase == Phase.EnemyTurn && _aiIdx < _aiUnits.Count)
+            focus = _aiUnits[_aiIdx];
+
+        if (focus == null || !focus.Alive) return;
+
+        // Target zoom: modest 1.35x so the board edge is still visible.
+        const float TargetZoom = 1.35f;
+        // Target pan: shift so the focus unit's world position is at BoardCenter.
+        // CamPan is added to BoardCenter as the camera Target, so to centre on
+        // TileCenter(focus) we want CamPan = TileCenter(focus) - BoardCenter.
+        var unitPos = Util.TileCenter(focus.X, focus.Y);
+        var boardCenter = BoardCenter;
+        var targetPan = unitPos - boardCenter;
+
+        // Clamp pan so we never show blank space beyond the board.
+        float halfW = Cfg.BoardW * 0.5f * (1f - 1f / TargetZoom);
+        float halfH = Cfg.BoardH * 0.5f * (1f - 1f / TargetZoom);
+        targetPan.X = Util.Clamp(targetPan.X, -halfW, halfW);
+        targetPan.Y = Util.Clamp(targetPan.Y, -halfH, halfH);
+
+        // Frame-rate-aware lerp (exp decay): ~6 units/s feel — smooth glide.
+        float alpha = 1f - MathF.Exp(-dt * 6f);
+        CamZoom = CamZoom + (TargetZoom - CamZoom) * alpha;
+        CamPan.X = CamPan.X + (targetPan.X - CamPan.X) * alpha;
+        CamPan.Y = CamPan.Y + (targetPan.Y - CamPan.Y) * alpha;
     }
 
     void HandlePauseMenu()
@@ -1416,6 +1704,7 @@ public class Game
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseThreat)) ShowThreatPref = !ShowThreatPref;
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseBright)) Display.CycleBrightness();
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseColorblind)) Display.ToggleColorblind();
+        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseAutoCam)) { Display.ToggleAutoCam(); if (!Display.AutoCam) { CamZoom = 1f; CamPan = Vector2.Zero; } }
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseAbandon)) { Paused = false; Phase = Phase.Lose; LoseTitle = "RUN ABANDONED"; LoseReason = "You called off the campaign."; Audio.Play("lose"); }
     }
 
@@ -1468,6 +1757,7 @@ public class Game
     {
         if (Selected == null || !Selected.CanAct || Selected.Grenades <= 0) return;
         if (Util.TileDist(Selected.X, Selected.Y, tx, ty) > GrenadeRange) return;
+        if (SquadConcealed) BreakConcealment(Selected);  // 4.4: a thrown grenade breaks stealth
         Selected.Grenades--;
         Selected.ActionsLeft = 0;
         Enqueue(new GrenadeAnim(Selected, tx, ty), Team.Player);
@@ -1503,7 +1793,9 @@ public class Game
         switch (u.Item)
         {
             case ItemKind.Smoke: Enqueue(new SmokeAnim(u, tx, ty), Team.Player); break;
-            case ItemKind.Flash: Enqueue(new FlashAnim(u, tx, ty), Team.Player); break;
+            case ItemKind.Flash:
+                if (SquadConcealed) BreakConcealment(u);   // 4.4: a flashbang is aggression
+                Enqueue(new FlashAnim(u, tx, ty), Team.Player); break;
             case ItemKind.Barricade:
                 Grid.Tiles[tx, ty] = TileType.LowCover;
                 Grid.SetCoverHp(tx, ty);
@@ -1538,12 +1830,14 @@ public class Game
     {
         if (Selected == null || !Selected.CanAct || Selected.Ammo <= 0) return;
         if (!CanTarget(Selected, target)) return;
+        if (SquadConcealed) BreakConcealment(Selected);  // 4.4: the ambush shot springs the trap
         Selected.Ammo--;
         // Run & Gun: this shot costs one action instead of ending the turn.
         if (Selected.RunGun) { Selected.ActionsLeft = Math.Max(0, Selected.ActionsLeft - 1); Selected.RunGun = false; }
         else Selected.ActionsLeft = 0;
         var res = Combat.Resolve(Grid, Selected, target);
         Selected.Steady = false;                         // braced shot consumed
+        Selected.FiredFromConcealment = false;           // ambush bonus is for this one shot only
         Enqueue(new ShotAnim(Selected, target, res), Team.Player);
         if (!target.Active) ActivatePod(target.PodId);   // gunfire reveals the pod
         AimMode = false;
@@ -1649,6 +1943,9 @@ public class Game
             case AbilityKind.Suppress:
                 var t = FirstTargetFor(u);
                 if (t == null) return;
+                // 4.4 (review Mi1): pinning fire breaks stealth, but Suppress isn't a damage
+                // shot (no Combat.Resolve), so pass no actor - no dangling ambush flag.
+                if (SquadConcealed) BreakConcealment();
                 u.AbilityCharge--; u.Ammo--; u.ActionsLeft = 0; u.OnOverwatch = true;
                 t.Suppress = Combat.SuppressAim;
                 Fx.PopText(t.Pos + new Vector2(0, -34), "SUPPRESSED", Pal.Foe, 18f);
@@ -1688,7 +1985,7 @@ public class Game
                 if (!Grid.IsFloor(x, y) || IsOccupiedByOther(x, y, null)) continue;
             }
             var e = Mission.MakeWaveHostile(n, x, y);
-            e.Active = true; e.PodId = -1;
+            e.Alert = AlertLevel.Alert; e.PodId = -1;   // reinforcements arrive already engaged
             e.SyncPos();
             Enemies.Add(e);
             Fx.Burst(e.Pos, Pal.Foe, 14, 160f, 0.5f, 3f, true);
@@ -1723,9 +2020,10 @@ public class Game
         MoveCost = null;
         Phase = Phase.EnemyTurn;
         if (Objective == Objective.Defend) SpawnDefendWave();    // reinforcements assault the holdout
+        ResolveSuspicion();                                      // 4.3: suspicious pods confirm or lose contact
         FaceShields();                                           // AEGIS turns its barrier toward the squad
         foreach (var e in Enemies) if (e.Alive) { e.BeginTurn(); TickStatuses(e); }
-        _aiUnits = AliveEnemies().Where(e => e.Active).ToList();  // dormant pods don't act
+        _aiUnits = AliveEnemies().Where(e => e.Active).ToList();  // dormant/suspicious pods don't act
         _aiIdx = 0;
         _aiStage = AiStage.PickNext;
         _aiPlan = null;
@@ -1813,6 +2111,24 @@ public class Game
                     Fx.PopText(e.Pos + new Vector2(0, -30), "FRAG OUT", Pal.Foe, 16f);
                     Enqueue(new WaitAnim(0.2f), Team.Enemy);
                     Enqueue(new GrenadeAnim(e, _aiPlan.GrenX, _aiPlan.GrenY), Team.Enemy);
+                }
+                else if (_aiPlan.UseItem && e.ItemCharge > 0 && e.ActionsLeft > 0 &&
+                    Grid.InBounds(_aiPlan.ItemTx, _aiPlan.ItemTy) &&
+                    Util.TileDist(e.X, e.Y, _aiPlan.ItemTx, _aiPlan.ItemTy) <= ItemRange)
+                {
+                    e.ItemCharge--;
+                    // item use takes one action but does NOT necessarily end the turn,
+                    // so the enemy can still shoot after laying smoke (if ShootTarget != null).
+                    // However we set ActionsLeft=0 here so it acts like a grenade (one big
+                    // action per turn), keeping the autopilot loop predictable + no TIMEOUT risk.
+                    e.ActionsLeft = 0;
+                    string label = e.EnemyItem == ItemKind.Smoke ? "SMOKE OUT" : "FLASH OUT";
+                    Fx.PopText(e.Pos + new Vector2(0, -30), label, Pal.RGBA(180, 190, 200), 16f);
+                    Enqueue(new WaitAnim(0.18f), Team.Enemy);
+                    if (e.EnemyItem == ItemKind.Smoke)
+                        Enqueue(new SmokeAnim(e, _aiPlan.ItemTx, _aiPlan.ItemTy), Team.Enemy);
+                    else
+                        Enqueue(new FlashAnim(e, _aiPlan.ItemTx, _aiPlan.ItemTy), Team.Enemy);
                 }
                 else if (_aiPlan.ShootTarget != null && _aiPlan.ShootTarget.Alive &&
                     e.ActionsLeft > 0 && e.Ammo > 0 && CanTarget(e, _aiPlan.ShootTarget))
@@ -2011,7 +2327,7 @@ public class Game
         if (c.Count > 1) c[1].AddStatus(StatusKind.Bleed, 2);
         if (c.Count > 2) c[2].AddStatus(StatusKind.Stun, 1);
         if (c.Count > 3) c[3].AddStatus(StatusKind.Disoriented, 2);
-        foreach (var e in Enemies) { e.Active = true; if (e.Alive) { e.AddStatus(StatusKind.Burning, 2); break; } }
+        foreach (var e in Enemies) { e.Alert = AlertLevel.Alert; if (e.Alive) { e.AddStatus(StatusKind.Burning, 2); break; } }
     }
 
     /// Harness hook (screenshot only): a decorated veteran (nickname/traits/bond) in
@@ -2238,6 +2554,32 @@ public class Game
         var m = Raylib.GetMousePosition();
         foreach (var (id, rect) in Hud.NodeBtns)
             if (Raylib.CheckCollisionPointRec(m, rect)) { ChooseNode(id); return; }
+    }
+
+    // ---------------- bench mechanic ----------------
+    /// Toggle a wounded soldier between benched / not benched.
+    /// Guards: only wounded soldiers may be benched; at least 1 deployable must remain.
+    /// Never called by the autopilot (headless runs always deploy full-strength).
+    public void ToggleBench(Unit u)
+    {
+        if (AutoPlay) return;
+        if (u == null || u.Wound == 0) return;   // only wounded soldiers may be benched
+        if (!u.Benched)
+        {
+            // count how many would remain deployable if we bench this soldier
+            int deployable = _run.Squad.Count(s => !s.Benched && s != u);
+            if (deployable < 1) return;           // must keep at least 1 soldier in the field
+        }
+        u.Benched = !u.Benched;
+        Audio.Play("select");
+    }
+
+    void HandleBenchClick()
+    {
+        if (!Raylib.IsMouseButtonPressed(MouseButton.Left)) return;
+        var m = Raylib.GetMousePosition();
+        foreach (var (unit, rect) in Hud.BenchBtns)
+            if (Raylib.CheckCollisionPointRec(m, rect)) { ToggleBench(unit); return; }
     }
 
     // ---------------- overlay click ----------------

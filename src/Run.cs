@@ -283,12 +283,25 @@ public class Run
             // attrition: a wound from a previous mission recovers one step, then fresh
             // damage from THIS mission (gauged before the field-heal below) can add a new
             // one. Ending near-death wounds worse. -Aim/-Mobility apply while Wound > 0.
+            // EXCEPTION: a benched soldier sat out the mission — they recover 2 steps and
+            // get a full heal (no fresh-wound gauge, since they weren't in the field).
             int w0 = u.Wound;
-            if (u.Wound > 0) u.Wound--;
-            int sev = u.Hp <= u.MaxHp / 4 ? 2 : (u.Hp <= u.MaxHp / 2 ? 1 : 0);
-            if (sev > u.Wound) u.Wound = sev;
-            if (u.Wound > w0) Report.Add($"{u.Name} is WOUNDED ({u.Wound} mission{(u.Wound > 1 ? "s" : "")})");
-            else if (w0 > 0 && u.Wound == 0) Report.Add($"{u.Name} recovered from wounds");
+            if (u.Benched)
+            {
+                // accelerated recovery: bench trades a mission's firepower for faster healing
+                if (u.Wound > 0) u.Wound = Math.Max(0, u.Wound - 2);
+                u.Hp = u.MaxHp;
+                Report.Add($"{u.Name} benched -- recovering (full heal)");
+                if (w0 > 0 && u.Wound == 0) Report.Add($"{u.Name} fully recovered from wounds");
+            }
+            else
+            {
+                if (u.Wound > 0) u.Wound--;
+                int sev = u.Hp <= u.MaxHp / 4 ? 2 : (u.Hp <= u.MaxHp / 2 ? 1 : 0);
+                if (sev > u.Wound) u.Wound = sev;
+                if (u.Wound > w0) Report.Add($"{u.Name} is WOUNDED ({u.Wound} mission{(u.Wound > 1 ? "s" : "")})");
+                else if (w0 > 0 && u.Wound == 0) Report.Add($"{u.Name} recovered from wounds");
+            }
 
             // FEATS -> earned traits (only survivors reach the barracks). Grant before
             // the field-heal so IronWill's +max HP is included in the patch-up.
