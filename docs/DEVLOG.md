@@ -123,3 +123,27 @@ Disjoint-file wave (parallel-safe): **S3-A** bench / deploy short-handed (attrit
 **S3-B** focal-point unit lighting (`Renderer`). Plus a peer review of the Sprint 2 gameplay
 logic (graze + AI items). Deferred to a later wave (share hot files with S3-A/S3-B):
 S4-A intel hints (Hud/Run), S4-B semantic color+shape (Renderer), S2-C overwatch-camp pressure (Game/Hud).
+
+### Sprint 3 — RESULT (all shipped to PR #47)
+
+| Item | Owner | Outcome |
+|---|---|---|
+| S4-C streak-breaker (`Combat`/`Unit`) | Dev I | Clean; integrated `2412432`. Hidden +6/miss cap +12, composes with graze. |
+| S3-B focal-point lighting (`Renderer`) | Dev H | Clean; integrated `159306c`. Selected pops, signal kept full-alpha, squint test holds. |
+| S3-A bench / short-handed (`Run/Game/Hud/SaveGame/Unit/Program`) | Dev G | Clean; integrated `04a5e78`. SAVETEST PASS, BENCH only on wounded, autopilot never benches. |
+| Sprint 2 review fixes (M1 graze miss-floor + Mi2/Mi3/Mi4/Mi5/N1) | Orchestrator | `62d4edd`, applied to the free files (Combat/Anim/Ai) while Dev G ran. |
+
+**Process learnings:** (1) A planning miss — Dev I (streak) and Dev G (bench) both added a field
+to `Unit.cs`. Resolved by integrating Dev I's `Unit.cs` first, then hand-adding Dev G's `Benched`
+field (non-overlapping additions). LESSON: assign each hot file (Unit.cs included) to ONE dev per
+wave. (2) The Sprint-2 peer review ran in parallel and found a real MAJOR (graze deleting true
+misses at >=85% hit) — fixed with a `GrazeMinMiss` floor. Review-in-parallel keeps catching things
+autoplay can't. (3) Review fixes were applied to files NOT under active development (Combat/Anim/Ai),
+so they never collided with the in-flight bench dev (Run/Game/Hud/SaveGame/Unit).
+
+## Sprint 4 — strategic info + readability + dominant-strategy guard (planned)
+
+Disjoint wave: **S2-C** overwatch-camp soft pressure (`Game`/`Hud`); **S4-B** semantic color +
+shape redundancy (`Renderer`); **themed-per-biome arena selection + 2 new arenas** (`Maps`/`Mission`).
+Plus a peer review of Sprint 3 (bench lifecycle is the most logic-heavy). S4-A intel-hints
+(Hud/Run) deferred behind S2-C (shares Hud).

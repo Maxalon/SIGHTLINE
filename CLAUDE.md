@@ -227,7 +227,16 @@ seeds (mix of WIN/LOSE, no exceptions):
 - **Enemy AI utility items (S2-B):** SNIPER/SCOUT throw SMOKE to blind a player overwatch
   lane; BERSERKER throws FLASH to disorient a cluster; late GRUNTs get smoke. `EnemyPlan.UseItem`
   + `Ai.BestSmoke/BestFlash` + a `Game.UpdateEnemy` item branch + `Unit.EnemyItem`. Never
-  splashes allies, always spends the action (no TIMEOUT).
+  splashes allies (incl. the thrower for flash), always spends the action (no TIMEOUT).
+- **Streak-breaker (S4-C):** after consecutive clean misses a soldier's next shot gets a
+  hidden +6/miss aim bonus (cap +12), reset on any connect (hit/graze). Composes with graze,
+  hidden from the tooltip. (`Unit.ConsecutiveMisses`, in `Combat.Resolve`.)
+- **Focal-point lighting (Phase 5.6):** selected unit full-bright + glow, others gently dimmed,
+  signal kept full-alpha (`Renderer.DrawUnit` figure-alpha).
+- **Bench / deploy short-handed (S3-A):** at the barracks a WOUNDED soldier can be benched to
+  sit out the next mission (deploy 3-strong) for faster recovery (Wound -2 + full heal).
+  `Unit.Benched` (persisted), `Game.ToggleBench` (wounded-only, never <1 deployable, never by
+  autopilot), `SetupMission` excludes + auto-clears. Attrition now actually shrinks strength.
 - Grid battlefield w/ high+low cover, LoS, 8-dir pathfinding (corner-cut safe).
 - 2-action combat: move, dash (yellow), fire (ends turn), overwatch reaction
   fire (both sides), hunker, reload.
@@ -966,10 +975,12 @@ stand and are reinforced by DESIGN.md §3D/E/G.
       never relies on hue alone; persist the toggle in `display.json`. Touch `Pal`,
       `Renderer`, `Hud`, `Display` settings. Verify: screenshots in each palette. (Supersedes
       the colorblind half of Phase 3 item 3.13; 3.13's UI-text-scale piece still stands.)
-- [ ] **5.6 Focal-point & faux lighting.** Brighten/ring the active unit and gently
-      desaturate/vignette the rest toward the focal point; faux 2D lighting / emissive
-      cover+plateau edges to unify with elevation. Touch `Renderer` + the 5.2 post pass.
-      Verify: `SIGHTLINE_SHOT`; squint test still finds the focal unit fast.
+- [x] **5.6 Focal-point lighting.** DONE (Sprint 3, focal half). `Renderer.DrawUnit` threads
+      a per-unit figure alpha: selected = 1.0 (+ a soft outer glow halo), spent player 0.60,
+      other friendlies 0.82, enemies 0.85 (threats stay visible). All SIGNAL stays full-alpha
+      (selection/ghost/VIP rings, HP pips, status codes, alert ?/! markers, labels, damage
+      flash). Squint test holds. (Still open: emissive cover/plateau edges + faux 2D lighting
+      via the 5.2 post pass.)
 
 ---
 
