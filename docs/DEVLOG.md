@@ -165,3 +165,28 @@ side of the field," and asked about larger maps + a camera with character focus.
   later:** a `SIGHTLINE_BIGMAP=1`/`Cfg.BigMap` flag that grows `Cfg.GridW/GridH`, shrinks `Cfg.Tile`,
   forces procedural-only maps (authored pool falls back gracefully), requires the (by-then-shipped)
   camera, and is never set in the harness. Only pursue if formation + auto-cam playtests still feel off.
+
+### Sprint 4 — RESULT (all shipped to PR #47)
+
+| Item | Owner | Outcome |
+|---|---|---|
+| Staggered formation (`Mission.cs`) | Dev | Wedge spawns + pod-staggered enemies; integrated in `d9ec213`. Screenshot confirms no more firing-line look. |
+| Cover shape-cues △/— (`Renderer.cs`) | Dev | Integrated in `d9ec213` (bundled — see lesson). Colorblind-safe cover read. |
+| Auto-focus camera (`Display/Game/Hud`) | Dev | Opt-in toggle, default OFF, harness-stable; integrated `e42481a`. |
+| Larger maps | Architect | NO-GO (documented above); flag-prototype path recorded. |
+
+QA on the integrated trunk: build 0/0, CONCEALTEST + COMBATTEST PASS, autoplay clean x5 +
+sabotage/rescue/defend + authored maps 0/4/8, formation/pause screenshots verified.
+
+**Process lesson:** `git checkout <ref> -- <file>` *stages* the file. So doing two file-checkouts
+then trying two separate commits bundles both into the FIRST commit (the index already held both).
+The formation + shape-cue changes are both correct + present, just bundled under `d9ec213`'s
+"formation" message. To get one-commit-per-feature with file-checkout integration: checkout +
+commit ONE feature's files, THEN checkout the next. (No force-push to fix a pushed commit message.)
+
+## Sprint 5 — candidates (next)
+
+S4-A intel hints on the campaign map (`Hud`/`Run`); S2-C overwatch-camp soft pressure (`Game`/`Hud`)
+— these share `Hud`, so sequence them; 5.4 procedural floor/cover noise texturing (`Renderer`/`Fx`);
+possibly a new enemy archetype or objective variant for content breadth. Peer review of Sprint 3/4
+logic (bench/auto-cam/formation) is in flight.

@@ -237,6 +237,15 @@ seeds (mix of WIN/LOSE, no exceptions):
   sit out the next mission (deploy 3-strong) for faster recovery (Wound -2 + full heal).
   `Unit.Benched` (persisted), `Game.ToggleBench` (wounded-only, never <1 deployable, never by
   autopilot), `SetupMission` excludes + auto-clears. Attrition now actually shrinks strength.
+- **Staggered deployment (owner feedback):** spawns are no longer two parallel firing lines —
+  soldiers deploy as a loose diagonal wedge (cols 0-3, `Mission.PlayerSpawns`), enemies scatter
+  3-4 columns deep (per-pod `EnemyPodColOffset`, cols 14-17). Standoff preserved.
+- **Auto-focus camera (owner feedback):** an opt-in pause-menu AUTO-CAM (`Display.AutoCam`,
+  default OFF) smoothly zooms+pans to follow the selected/acting unit (clamped to board);
+  manual pan/zoom hands control back; forced off in the harness. (Larger maps deliberately
+  deferred — see DEVLOG; the formation fix targets the actual "one line" cause.)
+- **Cover shape-cues (S4-B):** high cover draws a small △, low cover a — on its top face
+  (subtle white, alpha ~0.19), so cover type reads by shape (colorblind-safe), not color/height.
 - Grid battlefield w/ high+low cover, LoS, 8-dir pathfinding (corner-cut safe).
 - 2-action combat: move, dash (yellow), fire (ends turn), overwatch reaction
   fire (both sides), hunker, reload.
