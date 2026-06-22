@@ -147,3 +147,21 @@ Disjoint wave: **S2-C** overwatch-camp soft pressure (`Game`/`Hud`); **S4-B** se
 shape redundancy (`Renderer`); **themed-per-biome arena selection + 2 new arenas** (`Maps`/`Mission`).
 Plus a peer review of Sprint 3 (bench lifecycle is the most logic-heavy). S4-A intel-hints
 (Hud/Run) deferred behind S2-C (shares Hud).
+
+### Owner feedback (mid-Sprint-3) → re-prioritized Sprint 4
+
+The owner playtested and said it "feels weird with all characters on screen in one line on each
+side of the field," and asked about larger maps + a camera with character focus. Architect analysis:
+- **Root cause = spawn FORMATION, not map size (80-90%).** `PlayerSpawns` packs all 4 soldiers into
+  cols 1-2; `SpawnEnemies` packs enemies into cols 16-17 → two vertical firing lines. Fix is a ~6-line
+  `Mission.cs` change (stagger both sides across 3-4 columns), zero risk. → **Dev (this sprint).**
+- **Auto-focus camera: default OFF, togglable.** Full-board readability is the game's identity
+  (DESIGN.md §1/§5); auto-zoom trades it away, so make it opt-in via the existing CamZoom/CamPan rig,
+  forced off in the harness. → **Dev (this sprint).**
+- **Larger maps: NO-GO (for now).** Hard blockers: at 24x14/Tile64 the board (1536x896) overflows the
+  1280x800 window → requires mandatory camera scroll; all 9 authored 18x11 arenas fail
+  `TryApplyLayout`'s dimension check; Tile must drop to ~45-53px (hurts the readability 4.1 maximized);
+  +70-126% Dijkstra cost; and DESIGN.md §3D/§6 "empty traversal = boredom." **Minimal-viable IF revisited
+  later:** a `SIGHTLINE_BIGMAP=1`/`Cfg.BigMap` flag that grows `Cfg.GridW/GridH`, shrinks `Cfg.Tile`,
+  forces procedural-only maps (authored pool falls back gracefully), requires the (by-then-shipped)
+  camera, and is never set in the harness. Only pursue if formation + auto-cam playtests still feel off.
