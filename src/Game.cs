@@ -1594,7 +1594,7 @@ public class Game
         {
             var kind = u.Ability;
             DoAbility();
-            if (kind == AbilityKind.Steady || kind == AbilityKind.Suppress) return; // spent an action
+            if (kind == AbilityKind.Steady || kind == AbilityKind.Suppress || kind == AbilityKind.Heal) return; // spent an action
             // RunGun / Blitz are free stances — fall through and act with them
         }
 
@@ -2334,8 +2334,26 @@ public class Game
             AbilityKind.Blitz   => !u.Blitz,
             AbilityKind.Steady  => !u.Steady && u.ActionsLeft >= 1,
             AbilityKind.Suppress=> u.Ammo > 0 && HasAnyTarget(u),
+            AbilityKind.Heal    => u.ActionsLeft >= 1 && MostWoundedAdjacentAlly(u) != null,
             _ => false,
         };
+    }
+
+    /// CORPSMAN PATCH target: the most-wounded (lowest HP-fraction) alive, non-VIP squadmate
+    /// standing Chebyshev-adjacent to the corpsman. Returns null if no one nearby needs aid.
+    Unit MostWoundedAdjacentAlly(Unit medic)
+    {
+        if (medic == null) return null;
+        Unit best = null;
+        float worst = 1f;
+        foreach (var p in AlivePlayers())
+        {
+            if (p == medic || p.IsVip || p.Hp >= p.MaxHp || p.MaxHp <= 0) continue;
+            if (Util.ChebyDist(medic.X, medic.Y, p.X, p.Y) > 1) continue;
+            float frac = (float)p.Hp / p.MaxHp;
+            if (best == null || frac < worst) { best = p; worst = frac; }
+        }
+        return best;
     }
 
     void DoAbility()
@@ -2375,6 +2393,19 @@ public class Game
                 Fx.PopText(at, "SUPPRESS", Pal.Accent, 16f);
                 Audio.Play("over");
                 if (!t.Active) ActivatePod(t.PodId);   // pinning fire reveals the pod
+                break;
+            case AbilityKind.Heal:
+                var ally = MostWoundedAdjacentAlly(u);
+                if (ally == null) return;
+                int healed = Math.Min(Unit.PatchHeal, ally.MaxHp - ally.Hp);
+                if (healed <= 0) return;
+                ally.Hp += healed;
+                u.AbilityCharge--; u.ActionsLeft -= 1;     // patching costs one action (like STEADY)
+                Fx.PopText(ally.Pos + new Vector2(0, -34), $"+{healed}", Pal.Good, 20f);
+                Fx.Burst(ally.Pos, Pal.Good, 12, 120f, 0.45f, 3f);
+                Fx.PopText(at, "PATCH", Pal.Good, 16f);
+                ally.Flash = 0.6f;                          // a brief restorative flash on the patient
+                Audio.Play("reload");
                 break;
         }
         AimMode = false;

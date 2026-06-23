@@ -8,7 +8,9 @@ public enum Team { Player, Enemy }
 public enum WeaponKind { Rifle, Shotgun, Sniper, Lmg, Smg }
 
 /// Per-class signature ability (self-cast, one charge per mission).
-public enum AbilityKind { None, RunGun, Blitz, Steady, Suppress }
+/// APPEND-ONLY: AbilityKind is DERIVED from Cls (never serialised), so appending Heal
+/// is save-safe — a CORPSMAN persists as just its Cls string and re-derives its kit.
+public enum AbilityKind { None, RunGun, Blitz, Steady, Suppress, Heal }
 
 /// Utility-item slot (3.4): a second throwable beyond grenades, assigned by class.
 public enum ItemKind { None, Smoke, Flash, Barricade }
@@ -162,6 +164,7 @@ public class Unit
         AbilityKind.Blitz   => "BLITZ",
         AbilityKind.Steady  => "STEADY",
         AbilityKind.Suppress=> "SUPPRESS",
+        AbilityKind.Heal    => "PATCH",
         _ => "ABILITY",
     };
     public string AbilityDesc => Ability switch
@@ -170,6 +173,7 @@ public class Unit
         AbilityKind.Blitz    => "Next move costs one action less",
         AbilityKind.Steady   => "Next shot: +25 aim, +20 crit",
         AbilityKind.Suppress => "Pin the nearest foe: -30 aim + overwatch it",
+        AbilityKind.Heal     => "Heal the most-wounded adjacent squadmate (+4 HP)",
         _ => "",
     };
     public static AbilityKind AbilityKindFor(string cls) => cls switch
@@ -178,6 +182,7 @@ public class Unit
         "RANGER"       => AbilityKind.Blitz,
         "SHARPSHOOTER" => AbilityKind.Steady,
         "GUNNER"       => AbilityKind.Suppress,
+        "CORPSMAN"     => AbilityKind.Heal,
         _ => AbilityKind.None,
     };
 
@@ -205,6 +210,7 @@ public class Unit
         "RANGER"       => ItemKind.Smoke,      // flanker: cover the approach
         "SHARPSHOOTER" => ItemKind.Smoke,      // marksman: break enemy sightlines
         "GUNNER"       => ItemKind.Barricade,  // nest-builder: drop cover
+        "CORPSMAN"     => ItemKind.Smoke,      // medic: cover a casualty's extraction
         _ => ItemKind.None,
     };
 
@@ -310,6 +316,9 @@ public class Unit
     public const int VengefulAim = 12;   // Vengeful: +aim while a squadmate has fallen this mission
     public const int IronWillHp = 2;     // IronWill: permanent +max HP (granted at debrief)
     public const int BondAim = 10;       // Bond: +aim while a bonded squadmate is adjacent
+
+    // CORPSMAN PATCH ability: HP restored to the most-wounded adjacent squadmate (capped at MaxHp)
+    public const int PatchHeal = 4;
 
     // status-effect magnitudes (3.5)
     public const int BurnDamage = 2;     // Burning: HP lost at the unit's turn start

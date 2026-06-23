@@ -432,14 +432,16 @@ public static class Mission
         { "HAWK", "ECHO", "RAVEN", "SLATE", "ONYX", "FOX", "WREN", "ASH", "CIPHER", "JINX", "ROOK", "DELTA", "MOTH", "QUILL" };
 
     /// A fresh rookie of a random class, for backfilling the squad between missions.
+    /// Includes the CORPSMAN (5th class) so casualties can pull in in-combat sustain.
     public static Unit MakeRecruit()
     {
         string name = Util.Choice(Callsigns);
-        switch (Util.RandInt(0, 3))
+        switch (Util.RandInt(0, 4))
         {
             case 0: return MakeSoldier(name, "ASSAULT", WeaponKind.Rifle, 8, 66, 7);
             case 1: return MakeSoldier(name, "RANGER", WeaponKind.Shotgun, 7, 62, 8);
             case 2: return MakeSoldier(name, "SHARPSHOOTER", WeaponKind.Sniper, 6, 72, 6);
+            case 3: return MakeSoldier(name, "CORPSMAN", WeaponKind.Smg, 7, 62, 8);
             default: return MakeSoldier(name, "GUNNER", WeaponKind.Lmg, 10, 58, 6);
         }
     }
