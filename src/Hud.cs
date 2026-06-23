@@ -26,6 +26,7 @@ public static class Hud
     public static Rectangle PauseResume, PauseMute, PauseShake, PauseThreat, PauseFullscreen, PauseWindow, PauseAbandon;
     public static Rectangle PauseBright, PauseColorblind, PauseAutoCam;
     public static Rectangle PerkBtnA, PerkBtnB, PerkTagBtn;
+    public static Rectangle HeatMinus, HeatPlus;   // intro Heat/Ascension +/- selector
     public static Rectangle[] MissionCards = new Rectangle[3];
     public static System.Collections.Generic.List<(int Id, Rectangle Rect)> NodeBtns = new();
     public static Rectangle[] ShopBtns = new Rectangle[Game.ShopName.Length];
@@ -270,6 +271,15 @@ public static class Hud
         // optional secondary objective (3.9): green while on track, red once blown
         if (g.Secondary != SecondaryKind.None)
             Raylib.DrawTextEx(Cfg.Font, g.SecondaryHud, new Vector2(812, 19), 14, 1f, g.SecondaryOnTrack ? Pal.Good : Pal.Foe);
+
+        // Heat/Ascension indicator (only at heat > 0, so heat 0 stays byte-identical)
+        if (g.HeatLevel > 0)
+        {
+            var hp = new Rectangle(Cfg.ScreenW - 400, 11, 92, 30);
+            Raylib.DrawRectangleRounded(hp, 0.4f, 8, Pal.Panel);
+            Raylib.DrawRectangleLinesEx(hp, 1.5f, Raylib.Fade(Pal.Foe, 0.6f));
+            CenterText($"HEAT {g.HeatLevel}", hp, 15, Pal.Foe);
+        }
 
         // mute indicator
         if (!Audio.Enabled)
@@ -824,6 +834,7 @@ public static class Hud
     static void DrawOverlays(Game g)
     {
         if (g.Phase == Phase.Intro)
+        {
             DrawCenterCard(g, "SIGHTLINE", "TURN-BASED SQUAD TACTICS", Pal.Friend,
                 new[]{
                     $"Lead one squad through {Run.MaxMissions} escalating missions.",
@@ -835,6 +846,8 @@ public static class Hud
                     "Kills earn promotions: better aim, more HP, more mobility.",
                     "Survivors carry their wounds and ranks to the next mission.",
                 }, "DEPLOY SQUAD", SaveGame.Exists ? "CONTINUE RUN" : null);
+            DrawHeatSelector(g);
+        }
         else if (g.Phase == Phase.Barracks)
             DrawBarracks(g);
         else if (g.Phase == Phase.Win)
@@ -866,8 +879,17 @@ public static class Hud
 
         string title = $"MISSION {run.Mission} COMPLETE";
         Raylib.DrawTextEx(Cfg.Font, title, new Vector2(x + w / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, title, 38, 1f).X / 2, y + 26), 38, 1f, Pal.Good);
-        string sub = $"BARRACKS - SQUAD DEBRIEF   |   INTEL {run.Intel}";
-        Raylib.DrawTextEx(Cfg.Font, sub, new Vector2(x + w / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, sub, 13, 1f).X / 2, y + 70), 13, 1f, Pal.TxtDim);
+        string sub = run.HeatLevel > 0
+            ? $"BARRACKS - SQUAD DEBRIEF   |   INTEL {run.Intel}   |   HEAT {run.HeatLevel}"
+            : $"BARRACKS - SQUAD DEBRIEF   |   INTEL {run.Intel}";
+        Raylib.DrawTextEx(Cfg.Font, sub, new Vector2(x + w / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, sub, 13, 1f).X / 2, y + 70), 13, 1f, run.HeatLevel > 0 ? Pal.Foe : Pal.TxtDim);
+        if (run.HeatLevel > 0)
+        {
+            var names = new System.Collections.Generic.List<string>();
+            foreach (var mod in Sightline.Heat.Active(run.HeatLevel)) names.Add(mod.Name);
+            string modLine = string.Join("  -  ", names);
+            Raylib.DrawTextEx(Cfg.Font, modLine, new Vector2(x + w / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, modLine, 11, 1f).X / 2, y + 86), 11, 1f, Pal.TxtDim);
+        }
 
         int ry = y + 100;
         foreach (var u in squad)
@@ -1323,6 +1345,68 @@ public static class Hud
             OverlayBtn2 = new Rectangle(0, 0, 0, 0);
             DrawOverlayButton(OverlayBtn, btn, Pal.Friend, null);
         }
+    }
+
+    /// Intro Heat/Ascension selector: a side panel with a HEAT dial (+/- buttons, arrows/A-D),
+    /// the unlocked ceiling, and the live list of modifiers active at the dialled level. Heat
+    /// raises difficulty for a bigger intel payout; the cap rises when you WIN at it. Only
+    /// affects a fresh DEPLOY (CONTINUE keeps the saved run's heat).
+    static void DrawHeatSelector(Game g)
+    {
+        int level = Sightline.Heat.Clamp(g.PendingHeat);
+        int unlocked = Sightline.Heat.Clamp(g.UnlockedHeat);
+
+        int w = 320, x = Cfg.ScreenW - w - 40, y = 150;
+        // height grows with the active-modifier list (always tall enough for the ceiling's worth)
+        int rows = Math.Max(1, level);
+        int h = 132 + rows * 26 + 30;
+        var card = new Rectangle(x, y, w, h);
+        PanelShadow(card, 1f, 0.06f);
+        Raylib.DrawRectangleRounded(card, 0.06f, 8, Pal.Panel);
+        Raylib.DrawRectangleLinesEx(card, 1.5f, level > 0 ? Raylib.Fade(Pal.Foe, 0.7f) : Pal.PanelBd);
+
+        Color heatCol = level > 0 ? Pal.Foe : Pal.TxtDim;
+        Raylib.DrawTextEx(Cfg.Font, "HEAT / ASCENSION", new Vector2(x + 18, y + 14), 14, 1f, Pal.Accent);
+
+        // big level readout + the -/+ stepper
+        string val = level.ToString();
+        Raylib.DrawTextEx(Cfg.Font, "HEAT", new Vector2(x + 18, y + 48), 16, 1f, Pal.TxtDim);
+        Raylib.DrawTextEx(Cfg.Font, val, new Vector2(x + w / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, val, 40, 1f).X / 2, y + 40), 40, 1f, heatCol);
+
+        HeatMinus = new Rectangle(x + 18, y + 50, 34, 34);
+        HeatPlus = new Rectangle(x + w - 52, y + 50, 34, 34);
+        DrawStepper(HeatMinus, "-", level > 0);
+        DrawStepper(HeatPlus, "+", level < unlocked);
+
+        Raylib.DrawTextEx(Cfg.Font, $"MAX UNLOCKED: {unlocked}", new Vector2(x + 18, y + 92), 12, 1f, Pal.TxtDim);
+        string hint = level > 0 ? $"+{Sightline.Heat.IntelBonus(level)} intel / mission" : "standard difficulty";
+        Raylib.DrawTextEx(Cfg.Font, hint, new Vector2(x + 18, y + 110), 12, 1f, level > 0 ? Pal.Good : Pal.TxtDim);
+
+        // active modifiers (cumulative rungs 1..level)
+        int my = y + 132;
+        if (level == 0)
+            Raylib.DrawTextEx(Cfg.Font, "No modifiers active.", new Vector2(x + 18, my), 12, 1f, Pal.TxtDim);
+        else
+        {
+            int i = 1;
+            foreach (var mod in Sightline.Heat.Active(level))
+            {
+                Raylib.DrawTextEx(Cfg.Font, $"{i}.", new Vector2(x + 18, my), 12, 1f, Pal.Foe);
+                Raylib.DrawTextEx(Cfg.Font, mod.Name, new Vector2(x + 40, my), 12, 1f, Pal.Txt);
+                Raylib.DrawTextEx(Cfg.Font, mod.Desc, new Vector2(x + 40, my + 13), 11, 1f, Pal.TxtDim);
+                my += 26; i++;
+            }
+        }
+
+        Raylib.DrawTextEx(Cfg.Font, "[<] [>] to adjust", new Vector2(x + 18, y + h - 20), 11, 1f, Pal.TxtDim);
+    }
+
+    static void DrawStepper(Rectangle r, string sym, bool enabled)
+    {
+        bool hover = enabled && Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), r);
+        Raylib.DrawRectangleRounded(r, 0.3f, 6, Raylib.Fade(hover ? Pal.RGBA(40, 30, 20) : Pal.Panel, enabled ? 1f : 0.4f));
+        Raylib.DrawRectangleLinesEx(r, 1.5f, Raylib.Fade(enabled ? (hover ? Pal.Accent : Pal.PanelBd) : Pal.PanelBd, enabled ? 1f : 0.35f));
+        CenterText(sym, r, 22, Raylib.Fade(enabled ? Pal.Txt : Pal.TxtDim, enabled ? 1f : 0.5f));
     }
 
     static void DrawOverlayButton(Rectangle r, string label, Color baseCol, string keyHint)

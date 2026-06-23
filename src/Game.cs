@@ -80,6 +80,16 @@ public class Game
     // sets this true so the smoke test never touches the save file.
     public bool NoPersist;
 
+    // ---- Heat / Ascension difficulty ladder ----
+    // UnlockedHeat = the highest selectable level (META: persisted in meta.json, survives run
+    // end; rises by 1 when a run is WON at the current cap). PendingHeat = the level the player
+    // has dialled in on the intro for the NEXT new run (0..UnlockedHeat). The CURRENT run's heat
+    // lives on _run.HeatLevel (persisted in the run save). All default 0 -> heat 0 plays exactly
+    // like today, which keeps the harness/autoplay path byte-stable.
+    public int UnlockedHeat;
+    public int PendingHeat;
+    public int HeatLevel => _run?.HeatLevel ?? 0;   // the active run's heat (for HUD/barracks readouts)
+
     // barracks requisition shop: spend Intel before choosing the next deployment.
     // _shopDone gates the barracks flow (shop -> promotions -> deployment cards).
     bool _shopDone = true;
@@ -224,12 +234,42 @@ public class Game
     /// startAt lets the headless harness jump straight to a given mission.
     public void StartMission(int startAt = 1)
     {
+        EnsureMetaLoaded();
         _run = new Run();
         _run.Start();                       // builds the campaign map, seats at the START node
+        // adopt the dialled-in Heat for this run. The harness can't set PendingHeat (it doesn't
+        // touch the intro), so it reads SIGHTLINE_HEAT here instead — defaulting to 0 so plain
+        // autoplay/screenshots are byte-stable.
+        int heat = PendingHeat;
+        if (NoPersist && int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_HEAT"), out int hEnv)) heat = hEnv;
+        _run.HeatLevel = Sightline.Heat.Clamp(heat);
         Players = _run.Squad;
         int n = Util.Clamp(startAt, 1, Run.MaxMissions);
         if (n > 1) _run.JumpTo(n);           // harness: advance along the map to the requested op
         SetupMission(n);
+    }
+
+    // Lazily load the persisted unlocked-max Heat once (gated by NoPersist like all save I/O,
+    // so the headless harness never reads disk and stays at the default unlock of 0).
+    bool _metaLoaded;
+    void EnsureMetaLoaded()
+    {
+        if (_metaLoaded) return;
+        _metaLoaded = true;
+        if (NoPersist)
+        {
+            // Harness/screenshot affordance only: SIGHTLINE_HEAT lets the headless intro shot
+            // preview the dialled-in level + its unlocked ceiling. No disk I/O; default 0 keeps
+            // a plain shot byte-stable.
+            if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_HEAT"), out int hEnv) && hEnv > 0)
+            {
+                UnlockedHeat = Sightline.Heat.Clamp(hEnv);
+                PendingHeat = UnlockedHeat;
+            }
+            return;
+        }
+        UnlockedHeat = SaveGame.LoadMetaHeat();
+        PendingHeat = Math.Min(PendingHeat, UnlockedHeat);
     }
 
     void SetupMission(int n)
@@ -284,11 +324,17 @@ public class Game
             CaptiveLocked = true;
         }
 
+        // Heat folds into the SAME difficulty params the deployment cards use (no Mission.cs
+        // signature change): extra bodies + an extra stat bump as the ladder climbs.
+        int heat = _run.HeatLevel;
+        int enemyDelta = card.EnemyDelta + Sightline.Heat.EnemyDelta(heat);
+        int statDelta = card.StatDelta + Sightline.Heat.StatDelta(heat);
+
         // reserve + connectivity-verify a key tile: the Hack terminal, or the Rescue captive's seat
         (int x, int y)? reserve = HasTerminal ? Terminal
             : (Objective == Objective.Rescue ? (Grid.W / 2, Grid.H / 2) : ((int, int)?)null);
         Mission.Build(Grid, Players, Enemies, n, EvacZone, reserve,
-                      card.EnemyDelta, card.StatDelta, HasSabotage ? SabotageSites : null);
+                      enemyDelta, statDelta, HasSabotage ? SabotageSites : null);
         if (Vip != null) { Vip.Grenades = 0; Vip.AbilityCharge = 0; }  // the asset has no kit
         if (Objective == Objective.Rescue && Vip != null)
         {
@@ -311,7 +357,8 @@ public class Game
         _turnCount = 1;
         _autoSig = -1; _autoStall = 0;
         Phase = Phase.PlayerTurn;
-        SquadConcealed = true;            // 4.4: every mission opens with the squad concealed
+        // 4.4: every mission opens with the squad concealed -- UNLESS Heat "EXPOSED" strips it.
+        SquadConcealed = !Sightline.Heat.Exposed(_run.HeatLevel);
         foreach (var u in Players) u.BeginTurn();
         // per-mission feat tracking + status effects start clean each mission
         foreach (var u in Players)
@@ -338,6 +385,7 @@ public class Game
     {
         var run = SaveGame.Load();
         if (run == null || run.Squad == null || run.Squad.Count == 0) return false;
+        EnsureMetaLoaded();   // so a resumed run that gets WON can still unlock the next Heat
         _run = run;
         Players = _run.Squad;
         int n = Util.Clamp(_run.Mission < 1 ? 1 : _run.Mission, 1, Run.MaxMissions);
@@ -754,18 +802,41 @@ public class Game
         if (!finished && _run.CurrentCard != null && _run.CurrentCard.Reward == RewardKind.BonusPerk)
             _run.AddBonusPerk();
 
-        if (finished) { Phase = Phase.Win; Audio.Play("win"); if (!NoPersist) SaveGame.Delete(); }
+        if (finished)
+        {
+            // Heat/Ascension: winning a run at the current cap unlocks the next rung (META).
+            UnlockHeatOnWin();
+            Phase = Phase.Win; Audio.Play("win"); if (!NoPersist) SaveGame.Delete();
+        }
         else
         {
-            // intel salvage scales with survivors + depth; ONSLAUGHT pays a risk premium
+            // intel salvage scales with survivors + depth; ONSLAUGHT pays a risk premium;
+            // higher Heat pays a flat per-mission bonus (the reward for the ladder).
             int gained = 8 + 3 * survivors + _run.Mission;
             if (_run.CurrentCard != null && _run.CurrentCard.ModName == "ONSLAUGHT") gained += 6;
+            int heatBonus = Sightline.Heat.IntelBonus(_run.HeatLevel);
+            gained += heatBonus;
             _run.Intel += gained;
-            _run.Report.Insert(0, $"Recovered {gained} intel  (total {_run.Intel})");
+            string heatNote = heatBonus > 0 ? $"  (+{heatBonus} HEAT {_run.HeatLevel})" : "";
+            _run.Report.Insert(0, $"Recovered {gained} intel{heatNote}  (total {_run.Intel})");
             _shopDone = false;
             _run.GenerateOffers(_run.Mission + 1);
             Phase = Phase.Barracks;
             Audio.Play("win");
+        }
+    }
+
+    // Heat/Ascension unlock: a run cleared AT the current max raises the cap by one (capped at
+    // the ladder ceiling). The increment + persistence are gated by !NoPersist, so an autoplay
+    // win never mutates/writes the meta (the harness never loaded it). Safe to call always.
+    void UnlockHeatOnWin()
+    {
+        if (NoPersist) return;
+        if (_run.HeatLevel >= UnlockedHeat && UnlockedHeat < Sightline.Heat.Max)
+        {
+            UnlockedHeat++;
+            SaveGame.SaveMetaHeat(UnlockedHeat);
+            _run.Report.Insert(0, $"HEAT {UnlockedHeat} UNLOCKED");
         }
     }
 
@@ -1428,9 +1499,15 @@ public class Game
     }
 
     // ---------------- activation pods (4.3 awareness tiers) ----------------
-    public const int SightRange = 9;   // spotted at range -> Suspicious (4.2: down from 12)
-    public const int AlertRange = 4;   // spotted up close -> straight to Alert (no grace turn)
-    public const int RevealRange = 3;  // 4.4: stepping this close to an ACTIVE foe auto-breaks concealment
+    // Baselines; Heat "SHORT FUSE"/"RELENTLESS" shrink first-contact ranges by 1 (read off the
+    // active run's HeatLevel). Floored at 1 so a pod can always still be spotted.
+    public const int BaseSightRange = 9;   // spotted at range -> Suspicious (4.2: down from 12)
+    public const int BaseAlertRange = 4;   // spotted up close -> straight to Alert (no grace turn)
+    public const int BaseRevealRange = 3;  // 4.4: stepping this close to an ACTIVE foe auto-breaks concealment
+    int ContactTighten => Heat.TighterContact(_run?.HeatLevel ?? 0) ? 1 : 0;
+    public int SightRange  => Math.Max(1, BaseSightRange  - ContactTighten);
+    public int AlertRange  => Math.Max(1, BaseAlertRange  - ContactTighten);
+    public int RevealRange => Math.Max(1, BaseRevealRange - ContactTighten);
     public bool SquadConcealed;        // 4.4: squad starts each mission concealed (set in SetupMission)
 
     // Closest distance at which any living soldier currently has line of sight on this
@@ -2820,6 +2897,29 @@ public class Game
     // ---------------- overlay click ----------------
     void HandleOverlayClick()
     {
+        // intro HEAT/Ascension selector: dial the difficulty for the NEXT new run (0..unlocked).
+        // Arrows/A-D adjust; the +/- buttons (rects from Hud) are clickable. CONTINUE keeps the
+        // saved run's own heat, so this only affects a fresh DEPLOY.
+        if (Phase == Phase.Intro)
+        {
+            EnsureMetaLoaded();
+            PendingHeat = Sightline.Heat.Clamp(Math.Min(PendingHeat, UnlockedHeat));
+            int delta = 0;
+            if (Raylib.IsKeyPressed(KeyboardKey.Left) || Raylib.IsKeyPressed(KeyboardKey.A) || Raylib.IsKeyPressed(KeyboardKey.KpSubtract)) delta = -1;
+            else if (Raylib.IsKeyPressed(KeyboardKey.Right) || Raylib.IsKeyPressed(KeyboardKey.D) || Raylib.IsKeyPressed(KeyboardKey.KpAdd)) delta = 1;
+            if (Raylib.IsMouseButtonPressed(MouseButton.Left))
+            {
+                var m = Raylib.GetMousePosition();
+                if (Raylib.CheckCollisionPointRec(m, Hud.HeatMinus)) delta = -1;
+                else if (Raylib.CheckCollisionPointRec(m, Hud.HeatPlus)) delta = 1;
+            }
+            if (delta != 0)
+            {
+                PendingHeat = Sightline.Heat.Clamp(Math.Clamp(PendingHeat + delta, 0, UnlockedHeat));
+                Audio.Play("select");
+            }
+        }
+
         // intro CONTINUE: resume a saved campaign (button or key C)
         if (Phase == Phase.Intro && SaveGame.Exists)
         {

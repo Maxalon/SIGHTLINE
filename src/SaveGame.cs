@@ -17,6 +17,7 @@ public static class SaveGame
     static string Dir => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Sightline");
     static string FilePath => Path.Combine(Dir, "save.json");
+    static string MetaPath => Path.Combine(Dir, "meta.json");
 
     static readonly JsonSerializerOptions Opts = new()
     {
@@ -58,6 +59,33 @@ public static class SaveGame
         catch { Delete(); return null; }
     }
 
+    // ---- meta persistence (Heat/Ascension unlock) ----
+    // The max-unlocked Heat is META: it survives run end (unlike save.json, which is deleted
+    // when a run ends). Stored in its own tiny meta.json. Gated by Game.NoPersist at the call
+    // sites exactly like the run save, so the harness never touches disk.
+    public static int LoadMetaHeat()
+    {
+        try
+        {
+            if (!File.Exists(MetaPath)) return 0;
+            var dto = JsonSerializer.Deserialize<MetaDto>(File.ReadAllText(MetaPath), Opts);
+            return dto == null ? 0 : Heat.Clamp(dto.MaxHeat);
+        }
+        catch { return 0; }
+    }
+
+    public static void SaveMetaHeat(int maxHeat)
+    {
+        try
+        {
+            Directory.CreateDirectory(Dir);
+            File.WriteAllText(MetaPath, JsonSerializer.Serialize(new MetaDto { MaxHeat = Heat.Clamp(maxHeat) }, Opts));
+        }
+        catch { /* a failed meta save must never crash the game */ }
+    }
+
+    class MetaDto { public int MaxHeat; }
+
     // ---- mapping ----
     static RunDto ToDto(Run r)
     {
@@ -66,6 +94,7 @@ public static class SaveGame
             Mission = r.Mission, Intel = r.Intel, Fallen = new List<string>(r.Fallen),
             BondTally = new Dictionary<string, int>(r.BondTally),
             MapSeed = r.MapSeed, MapPos = r.MapPos,
+            HeatLevel = r.HeatLevel,
         };
         foreach (var u in r.Squad)
             dto.Squad.Add(new UnitDto
@@ -95,7 +124,7 @@ public static class SaveGame
 
     static Run FromDto(RunDto dto)
     {
-        var r = new Run { Mission = dto.Mission, Intel = dto.Intel, Squad = new List<Unit>() };
+        var r = new Run { Mission = dto.Mission, Intel = dto.Intel, Squad = new List<Unit>(), HeatLevel = Heat.Clamp(dto.HeatLevel) };
         if (dto.Fallen != null) r.Fallen = new List<string>(dto.Fallen);
         if (dto.BondTally != null) r.BondTally = new Dictionary<string, int>(dto.BondTally);
         // regenerate the branching campaign map from its seed and restore the position
@@ -146,6 +175,7 @@ public static class SaveGame
         public CardDto Card;
         public int MapSeed;
         public int MapPos;
+        public int HeatLevel;   // append-only: chosen Heat/Ascension level (old saves default 0)
     }
 
     class UnitDto
@@ -173,7 +203,7 @@ public static class SaveGame
         string saved = Exists ? File.ReadAllText(FilePath) : null;  // preserve any real save
         try
         {
-            var src = new Run { Mission = 4, Intel = 23, Squad = new List<Unit>() };
+            var src = new Run { Mission = 4, Intel = 23, Squad = new List<Unit>(), HeatLevel = 5 };
             src.Fallen.Add("DOWNED-GUY");
             var a = new Unit
             {
@@ -228,9 +258,25 @@ public static class SaveGame
             if (got.Map.Count == 0) fails.Add("mapRegen");
             if (got.MapPos != srcPos) fails.Add("mapPos");
             if (got.CurrentNode == null || got.CurrentNode.Mission != 3) fails.Add("mapNode");
+            if (got.HeatLevel != 5) fails.Add("heatLevel");
+
+            // meta (unlocked-max heat) round-trips through its own meta.json
+            string metaSaved = File.Exists(MetaPath) ? File.ReadAllText(MetaPath) : null;
+            try
+            {
+                SaveMetaHeat(4);
+                if (LoadMetaHeat() != 4) fails.Add("metaHeat");
+                SaveMetaHeat(99);                       // clamped to the ladder ceiling on read/write
+                if (LoadMetaHeat() != Heat.Max) fails.Add("metaHeatClamp");
+            }
+            finally
+            {
+                if (metaSaved != null) { try { File.WriteAllText(MetaPath, metaSaved); } catch { } }
+                else { try { if (File.Exists(MetaPath)) File.Delete(MetaPath); } catch { } }
+            }
 
             return fails.Count == 0
-                ? "SAVETEST: PASS (run round-trips squad/perks/weapon/card)"
+                ? "SAVETEST: PASS (run round-trips squad/perks/weapon/card/heat; meta heat round-trips)"
                 : "SAVETEST: FAIL (" + string.Join(",", fails) + ")";
         }
         catch (Exception e) { return "SAVETEST: FAIL (exception " + e.Message + ")"; }
