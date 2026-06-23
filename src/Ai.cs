@@ -132,6 +132,11 @@ public static class Ai
         // coordinator) — used by COORDINATION 3 below to route around the kill zone.
         var owTiles = g.PlayerOverwatchTiles;
 
+        // active allies, gathered ONCE for the per-tile anti-cluster term (review #4: avoid
+        // re-allocating g.AliveEnemies() inside the reachable-tile loop).
+        var activeAllies = new List<Unit>();
+        foreach (var a in g.AliveEnemies()) if (a != e && a.Active) activeAllies.Add(a);
+
         foreach (var (tx, ty, c) in reach)
         {
             int actionsToReach = c <= e.MoveBudget ? (c == 0 ? 0 : 1) : 2;
@@ -254,8 +259,8 @@ public static class Ai
             if (e.Cls != "SHIELD")
             {
                 int adjAllies = 0;
-                foreach (var a in g.AliveEnemies())
-                    if (a != e && a.Active && Util.ChebyDist(tx, ty, a.X, a.Y) <= 1) adjAllies++;
+                foreach (var a in activeAllies)
+                    if (Util.ChebyDist(tx, ty, a.X, a.Y) <= 1) adjAllies++;
                 if (adjAllies > 1) score -= (adjAllies - 1) * 6f;      // 1 neighbour is fine; 2+ clumps
             }
 

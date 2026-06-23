@@ -563,6 +563,24 @@ public class Game
         bool spendsAction = rplan.ShootTarget != null || rplan.Overwatch || rplan.Hunker
                           || rplan.Path.Count > 0 || rplan.Grenade || rplan.SapTile != null || rplan.UseItem;
         if (!spendsAction) fails.Add("retreatPlanNoAction");
+        // (The genuinely cornered case — best tile is the current one with no LoS for overwatch
+        // and no cover for hunker — can't TIMEOUT regardless, because UpdateEnemy advances
+        // _aiIdx unconditionally after ActAfterMove; that structural guarantee, not this scene,
+        // is what makes retreat stall-proof. Autoplay exercises the messy cases — review #2.)
+
+        // CONTRAST (#2): a FULL-HP loner in the SAME far scene is NOT in retreat mode, so its
+        // advance term pulls it TOWARD the soldier. This proves retreatMode is genuinely
+        // HP-GATED (the low-HP plan above is the exception, not the default behaviour). Non-flaky:
+        // the advance gradient (advW*distNearest) dwarfs the 0-3 tie-break jitter over this span.
+        float startDist = Util.TileDist(1, 5, faraway.X, faraway.Y);
+        var bold = MkE("BOLD", 1, 5); bold.Hp = 8; bold.MaxHp = 8;        // full HP -> advances
+        Enemies.Clear(); Enemies.Add(bold);
+        _aiUnits = AliveEnemies().Where(e => e.Active).ToList();
+        PlanEnemySquad();
+        var bplan = Ai.Plan(this, bold);
+        int bx = bplan.Path.Count > 0 ? bplan.Path[bplan.Path.Count - 1].x : bold.X;
+        int by = bplan.Path.Count > 0 ? bplan.Path[bplan.Path.Count - 1].y : bold.Y;
+        if (Util.TileDist(bx, by, faraway.X, faraway.Y) >= startDist) fails.Add("fullHpDidNotAdvance");
 
         return fails.Count == 0
             ? "AITEST: PASS (focus picks killable+exposed; Ai.Plan biases to focus + flips; overwatch map mirrors reaction; retreat plan still acts)"
@@ -2200,6 +2218,10 @@ public class Game
         float bestScore = float.NegativeInfinity;
         foreach (var p in soldiers)
         {
+            // a caged captive (Rescue) is invulnerable until freed — CanTarget blocks every
+            // shot on it, so it can never be collapsed; skip it so the focus lands on a
+            // shootable soldier instead of an inert target (review #6).
+            if (p.IsVip && CaptiveLocked) continue;
             // how many active enemies can hit p right now (mirrors CanTarget exactly)
             int shootersOnTarget = 0;
             float bestHitOnTarget = 0f;
@@ -2232,8 +2254,13 @@ public class Game
         // CanTarget = within w.Weapon.MaxRange AND HasLineOfSight(w -> T, commanding-if-2-tier).
         // We replicate that per tile so the AI's threat model is TRUTHFUL (no phantom denial).
         PlayerOverwatchTiles.Clear();
+        // Mirror CanTarget's reaction gate EXACTLY (Alive && OnOverwatch && !ReactedThisTurn
+        // && Ammo>0). We deliberately do NOT add a Disoriented filter the real reaction lacks
+        // (review #3): today disorient only comes from FLASH, which clears OnOverwatch, so the
+        // case is unreachable — but mirroring CanTarget keeps the model truthful if a future
+        // non-flash disorient source is ever added (so the AI never treats a watched tile as safe).
         var watchers = Players.Where(w => w.Alive && w.OnOverwatch && !w.ReactedThisTurn
-                                       && w.Ammo > 0 && !w.HasStatus(StatusKind.Disoriented)).ToList();
+                                       && w.Ammo > 0).ToList();
         if (watchers.Count > 0)
         {
             for (int x = 0; x < Grid.W; x++)
