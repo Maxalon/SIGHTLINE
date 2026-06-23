@@ -369,7 +369,7 @@ public class Game
         foreach (var u in Enemies) { u.BeginTurn(); u.OnOverwatch = false; }
         Selected = Players.FirstOrDefault(p => p.CanAct);
         AimMode = false;
-        Biome = Biome.For(n);
+        Biome = Biome.For(n, _run.MapSeed);   // per-run biome variety (surfaces NEON/MAGMA across seeds)
         ShowBanner($"MISSION {n} - {Biome.Name}", false);
         StartTutorialMaybe();
 

@@ -525,13 +525,13 @@ public class Run
                 return "LIGHT FORCE";
             case NodeKind.Elite:
                 // Same tier as Combat but heavier (+2 enemy delta)
-                if (m <= 2) return "BRUISER + SNIPER";
-                if (m <= 4) return "SHIELD + SAPPER";
+                if (m <= 2) return "BRUISER + HUNTER";
+                if (m <= 4) return "MORTAR + SHIELD";
                 return "BERSERKER + MEDIC";
             default: // Combat / Start — normal force for this mission tier
                 if (m == 1)    return "GRUNTS + SCOUTS";
-                if (m == 2)    return "SNIPER + DRONE";
-                if (m == 3)    return "TURRET + SAPPER";
+                if (m == 2)    return "HUNTER + DRONE";
+                if (m == 3)    return "MORTAR + TURRET";
                 if (m == 4)    return "BERSERKER + DRONE";
                 if (m == 5)    return "SHIELD + MEDIC";
                 return                 "ELITE FORCE";
