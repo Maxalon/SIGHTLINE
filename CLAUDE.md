@@ -62,8 +62,13 @@ are. **Keep it updated** — when you finish work, tick the roadmap and refresh
   time you take a screenshot (e.g. `sightline_shot.png`), send it into the message
   thread with the `SendUserFile` tool so they can see the progression. Capture a
   frame for any notable visual change and surface it.
-- **Full autonomy:** build, commit, and **merge to `main`** freely. No PR/review
-  ceremony is required (no reviewers exist). PRs are optional.
+- **Full autonomy — NO human intervention or review, ever.** This is a you-owned
+  project: build, commit, and **merge to `main`** yourself. **There are no human
+  reviewers and no approval step.** If you open a PR (optional — a convenient review
+  surface for yourself / the agent team) and it's green (builds clean in Release +
+  passes the headless self-tests + autoplay), **merge it yourself** — do not leave it
+  open waiting on anyone. Never block on "should the human look first?": the answer is
+  always no. The only hard gate is the constraints in this file (above all: NO CI).
 - **Always ship compiling code to `main`.** Before merging, it must (a) build
   clean in Release and (b) pass the headless autoplay smoke test (see below),
   which you run manually.
@@ -1031,6 +1036,63 @@ Before stopping:
 4. Tell the human to open a fresh session (they'll send only `.`).
 
 ### WIP NOTES
+
+> **PROGRAM "DEEP STRIKE" — NEW MULTI-WAVE PUSH (read first; full process log in `docs/DEVLOG.md`).**
+> Fresh fully-autonomous session running the project as a dev team (orchestrator + parallel dev agents in
+> isolated worktrees + independent reviewers + research/audit agents). Develops on
+> `claude/fervent-fermat-6lxlyv`, opens PR #51 as a review surface, and **self-merges it to `main` once
+> green** (no human review — this is a you-owned project; see the autonomy ground rule). A research+audit pass converged
+> on: coordinated enemy AI = biggest fun lever, plus output-randomness mitigation, content breadth, and a
+> replay ladder. **WAVE 1 SHIPPED (6 commits, all verified — build 0/0, 10/10 self-tests PASS, 14+ autoplay
+> runs clean, no TIMEOUT):**
+> - **Coordinated enemy AI** (`2e39592`): per-turn `Game.PlanEnemySquad` -> `EnemyFocus` (focus-fire) +
+>   `PlayerOverwatchTiles` (overwatch-aware routing, anti-turtle), read as advisory biases in `Ai.Plan`;
+>   plus low-HP fighting-retreat ("FALLING BACK"), anti-cluster, range-band kiting. New `SIGHTLINE_AITEST`.
+> - **4 new arenas** BASTION/CHASM/SPUR/HOOK + **richer procedural** (4 archetypes via `Mission.BuildProcedural`) (`d2291cf`).
+> - **Enemy-overwatch threat indicator** + unit-facing/impact FX polish (`2c92401`, `Renderer`/`Fx`).
+> - **Balance** (`a4be498`): Executioner/Guardian/CoolHeaded de-dominated; full-HP player can't be one-shot.
+> - **Combat-tooltip transparency** (`1cd4d61`): 14 modifier badges, each mirroring `ComputeOdds`.
+> - **Review follow-ups** (`83314f6`): truthful overwatch model, captive-focus skip, perf hoist, stronger AITEST.
+> Worktree gotcha: agent worktrees branch off near-empty `main` — every dev must `git reset --hard
+> claude/fervent-fermat-6lxlyv` first (all did; orchestrator verifies base+scope before integrating).
+> **WAVE 2 SHIPPED (5 commits, all verified — build 0/0, 10/10 self-tests PASS, autoplay clean across
+> heat 0/3/6/8 + objectives, no TIMEOUT):**
+> - **HEAT / ASCENSION ladder** (`8420ab3`): 8 cumulative rungs (more/tougher enemies, sooner contact,
+>   harsher attrition, top-tier EXPOSED=no concealment) + per-mission intel bonus; unlocked-max persists
+>   in `meta.json` (rises on a win at cap); run heat in the append-only Run DTO; intro selector + HUD pill;
+>   heat-0 = byte-stable no-op; `SIGHTLINE_HEAT=<n>` hook. (`Heat` table in `Run.cs`.)
+> - **HUNTER + MORTAR enemies** + **NEON/MAGMA biomes** + **per-run biome variety** (`94dd65e`): HUNTER
+>   flanks (AI seeks exposing tiles), MORTAR is a back-line grenadier (rides the existing grenade AI);
+>   both reuse the existing exec (no Game change). `Biome.For(missionNum, runSeed)`.
+> - **Combat-feel juice** (`932be49`, `Anim`/`Fx`): impact frames, directional sparks, grenade shockwave +
+>   debris, tracer polish, movement dust — new Fx Ring system + helpers, all fired from Anim, scale graze<hit<crit.
+> - **Integration wiring** (`d69faad`): biome call site -> `For(n, MapSeed)`; HUNTER/MORTAR in `Run.EnemyHint`.
+> - Independent review of the Heat ladder: APPROVE-WITH-NITS (save-format append-only + no-TIMEOUT confirmed).
+> **WAVE 3 SHIPPED (4 commits — build 0/0, SNAPTEST/COMBATTEST/AITEST/SAVETEST PASS, autoplay clean across
+> all 7 objectives + heat 6/8, no TIMEOUT):**
+> - **Aimed-vs-SNAP shot + flank-kill action refund** (`c6fb609`): SNAP (key 7) = 1 action, no end-turn,
+>   -15 aim; flank-kill on the player turn refunds +1 action (cap 1/soldier/turn) -- per-turn decision +
+>   anti-turtle tempo. Null-safe + bounded. New `SIGHTLINE_SNAPTEST`.
+> - **3 perks** OPPORTUNIST/POINT BLANK/GIANT SLAYER (`c1e4e16`, pure ComputeOdds, append-only enum).
+> - **3 arenas** GRID/FORGE(tier-2)/CONDUIT + NEON/MAGMA biome affinity (`2d6210f`).
+> - Glue: new-perk tooltip badges + `1211e95` SNAPTEST harness wiring.
+> **WAVE 4 SHIPPED (6 commits — build 0/0, all 11 self-tests PASS, autoplay clean across heat 0/4/8 + all
+> 7 objectives, no TIMEOUT):** a read-only **balance-audit agent** found the real problems, then:
+> - **Enemy-intent telegraph** (`fb59009`): before each hostile acts, a ~0.5s beat shows its plan (dashed
+>   move path + destination ring + target reticle + verb caption) from the same `_aiPlan` that executes --
+>   the Into-the-Breach fairness lever. SKIPPED under AutoPlay (frame counts A/B-verified). `SIGHTLINE_INTENT`.
+> - **Balance sweep** (audit-driven, 4 disjoint lanes + 2 orchestrator fixes): GIANT SLAYER (dead) ->
+>   FIRST STRIKE + OPPORTUNIST flank-gated (`52eccc0`); enemy grenades require LoS + MORTAR dialed back
+>   (`3e3685e`); Heat rung-8 NoReinforcements + cap 10->12 + intentional spawn tiers (`6cefead`); flank-kill
+>   refund requires a genuine flank (de-snowball) + grenade fragile-floor (`c2ce0ee`).
+> **WAVE 5 SHIPPED:** **DECAPITATE** objective (`fcaeb81`) -- kill the marked HVT (a buffed toughest-enemy
+> with a gold ring/crown marker); win on its death regardless of the other hostiles. 8 objectives now.
+> Append-only enum, `ObjectiveFor %7->%8`, autopilot branch (no TIMEOUT), `SIGHTLINE_OBJ=decapitate`.
+> **STATUS: 5 waves shipped (~20 features + a balance pass), all on PR #51.** Next open ideas (any future
+> wave): more objectives (hold-zones/extract-intel), a 5th player class, an anti-turtle pressure clock,
+> progressive-HUD/combat-log polish, audio tuning on a real device. Game/Hud are the per-wave bottleneck
+> (one owner each). The multi-agent cadence (disjoint files, parallel reviewers, read-only audit agents,
+> orchestrator wiring/fixes) is proven across 5 waves.
 
 > **AUTONOMOUS DEV-TEAM SESSION — 7 SPRINTS, 21 FEATURES + a 4-FEATURE CODE RECOVERY (read first).**
 > Ran the project as a multi-agent team (orchestrator/tech-lead + PM/research + architect +

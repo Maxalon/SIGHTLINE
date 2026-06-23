@@ -147,6 +147,7 @@ public static class Renderer
 
         DrawElevation(g);
         DrawMoveOverlay(g);
+        DrawOverwatchThreat(g);   // tiles each active overwatching enemy covers (reaction-fire danger)
         DrawThreat(g);
         DrawEvac(g);
         DrawTerminal(g);
@@ -156,6 +157,7 @@ public static class Renderer
         DrawCover(g);
         DrawHoverAndShields(g);
         DrawKbCursor(g);
+        DrawEnemyIntent(g);       // telegraph: the acting hostile's planned move + target + threat
         DrawUnits(g);
         DrawSmoke(g);
         DrawAim(g);
@@ -352,6 +354,68 @@ public static class Renderer
             }
     }
 
+    // Enemy-overwatch danger overlay (player turn only): every Active enemy that is on
+    // OVERWATCH will REACT-FIRE at the first soldier who moves into a tile it can see+hit.
+    // That reaction is otherwise invisible, so wash the watched tiles in a faint danger-red
+    // and mark each overwatcher with a reticle. A tile is "watched" iff it mirrors exactly
+    // what Game.OnUnitEnteredTile / CanTarget test for a reaction: the enemy has ammo, the
+    // tile is within its weapon MaxRange (Euclidean, matching Util.TileDist) and the enemy
+    // has line of sight to it (with the same commanding-height-over-high-cover rule). So the
+    // overlay never lies — a tile lit here is a tile that genuinely draws a reaction shot.
+    //
+    // Kept deliberately SUBTLE (low alpha) and visually DISTINCT from DrawThreat's corner
+    // pips: this is a soft full-tile wash + a watcher reticle, not a per-tile triangle, so a
+    // squint still reads the selected unit, the nearest foe and the objective first.
+    static void DrawOverwatchThreat(Game g)
+    {
+        if (g.Phase != Phase.PlayerTurn) return;
+
+        // collect the live overwatchers once (cheap; usually 0-2)
+        System.Collections.Generic.List<Unit> watchers = null;
+        foreach (var e in g.Enemies)
+        {
+            if (!e.Alive || !e.Active || !e.OnOverwatch || e.Ammo <= 0) continue;
+            (watchers ??= new System.Collections.Generic.List<Unit>()).Add(e);
+        }
+        if (watchers == null) return;
+
+        float pulse = 0.5f + 0.5f * MathF.Sin((float)Raylib.GetTime() * 3.2f);
+        // soft red wash — well below signal level so it informs without dominating the board
+        Color wash = Raylib.Fade(Pal.Foe, 0.055f + 0.045f * pulse);
+
+        // wash every watched tile (a tile may be watched by more than one enemy — the
+        // overlapping fills naturally read as a denser, more dangerous kill-zone)
+        for (int x = 0; x < g.Grid.W; x++)
+            for (int y = 0; y < g.Grid.H; y++)
+            {
+                if (!g.Grid.IsFloor(x, y)) continue;   // only walkable tiles can be moved into
+                foreach (var w in watchers)
+                {
+                    if (Util.TileDist(w.X, w.Y, x, y) > w.Weapon.MaxRange) continue;
+                    bool commanding = g.Grid.HeightAt(w.X, w.Y) - g.Grid.HeightAt(x, y) >= 2;
+                    if (!g.Grid.HasLineOfSight(w.X, w.Y, x, y, commanding)) continue;
+                    var r = ElevRect(g, x, y);
+                    Raylib.DrawRectangleRec(r, wash);
+                    break;   // one wash per tile is enough; overlap is conveyed by adjacency
+                }
+            }
+
+        // mark each overwatcher with a danger reticle so the SOURCE of the kill-zone reads
+        foreach (var w in watchers)
+        {
+            float hlift = g.Grid.IsHigh(w.X, w.Y) ? ElevLift : 0f;
+            var c = w.Pos - new Vector2(0, hlift + 30f);   // float the reticle just above the figure
+            Color rc = Raylib.Fade(Pal.Foe, 0.45f + 0.35f * pulse);
+            Raylib.DrawRing(c, 7.5f, 9f, 0, 360, 28, rc);
+            // crosshair ticks
+            Raylib.DrawLineEx(new Vector2(c.X - 11f, c.Y), new Vector2(c.X - 5f, c.Y), 1.6f, rc);
+            Raylib.DrawLineEx(new Vector2(c.X + 5f, c.Y), new Vector2(c.X + 11f, c.Y), 1.6f, rc);
+            Raylib.DrawLineEx(new Vector2(c.X, c.Y - 11f), new Vector2(c.X, c.Y - 5f), 1.6f, rc);
+            Raylib.DrawLineEx(new Vector2(c.X, c.Y + 5f), new Vector2(c.X, c.Y + 11f), 1.6f, rc);
+            Raylib.DrawCircleV(c, 1.6f, rc);
+        }
+    }
+
     static void DrawPathPreview(Game g)
     {
         if (g.PathPreview == null || g.PathPreview.Count == 0 || g.Selected == null) return;
@@ -366,6 +430,140 @@ public static class Renderer
         {
             var c = ElevCenter(g, x, y);
             Raylib.DrawCircleV(c, 3.5f, Raylib.Fade(Pal.Accent, 0.8f));
+        }
+    }
+
+    // Enemy-intent telegraph (the Into-the-Breach fairness lever). During the brief beat before
+    // a hostile acts, Game sets IntentUnit + IntentPlan (the SAME plan it then executes). We draw,
+    // in semantic enemy-red:
+    //   * the intended MOVE PATH as an animated dashed line from the unit through its plan Path;
+    //   * a soft wash on the tiles the unit will THREATEN from its post-move (IntentDest) tile;
+    //   * a bold reticle/X on its TARGET (the soldier it shoots, or the grenade/item tile).
+    // It's deliberately bold (this is the "it's about to hit you" warning) but on-theme, and it
+    // clears the instant the beat ends (Game.ClearIntent) so it never lingers into the action.
+    static void DrawEnemyIntent(Game g)
+    {
+        var e = g.IntentUnit;
+        var plan = g.IntentPlan;
+        if (e == null || plan == null || !e.Alive) return;
+
+        float t = (float)Raylib.GetTime();
+        float pulse = 0.6f + 0.4f * MathF.Sin(t * 5f);
+        Color danger = Pal.Foe;
+
+        var (dx, dy) = g.IntentDest;            // where the unit will stand after moving
+
+        // 1) THREATENED TILES — a faint red wash on every floor tile the unit could fire on from
+        // its destination (same LoS+range test the renderer uses elsewhere). Shows the kill-zone
+        // the move creates. Skipped for pure support plans (medic) where there's no shot threat.
+        bool support = plan.HealTarget != null && plan.ShootTarget == null && !plan.Grenade;
+        if (!support && e.Weapon != null)
+        {
+            Color wash = Raylib.Fade(danger, 0.05f + 0.04f * pulse);
+            int maxR = e.Weapon.MaxRange;
+            for (int x = 0; x < g.Grid.W; x++)
+                for (int y = 0; y < g.Grid.H; y++)
+                {
+                    if (!g.Grid.IsFloor(x, y)) continue;
+                    if (Util.TileDist(dx, dy, x, y) > maxR) continue;
+                    bool commanding = g.Grid.HeightAt(dx, dy) - g.Grid.HeightAt(x, y) >= 2;
+                    if (!g.Grid.HasLineOfSight(dx, dy, x, y, commanding)) continue;
+                    Raylib.DrawRectangleRec(ElevRect(g, x, y), wash);
+                }
+        }
+
+        // 2) MOVE PATH — an animated dashed red line from the unit through each planned tile,
+        // ending in a chevron stack at the destination. Dashes scroll along the path to read as
+        // motion/intent. Only drawn when the unit actually moves.
+        if (plan.Path.Count > 0)
+        {
+            Vector2 prev = ElevCenter(g, e.X, e.Y);
+            float phase = (t * 26f) % 16f;        // scrolling dash offset
+            foreach (var (px, py) in plan.Path)
+            {
+                Vector2 cur = ElevCenter(g, px, py);
+                DashedLine(prev, cur, 3f, Raylib.Fade(danger, 0.85f), phase, 9f, 7f);
+                prev = cur;
+            }
+            // destination marker: a pulsing ring footprint where the unit ends up
+            Vector2 dest = ElevCenter(g, dx, dy);
+            Raylib.DrawRing(dest, 9f, 11f, 0, 360, 28, Raylib.Fade(danger, 0.5f + 0.35f * pulse));
+            Raylib.DrawCircleV(dest, 3f, Raylib.Fade(danger, 0.85f));
+        }
+
+        // 3) TARGET MARKER — the most important read: WHO/WHERE the attack lands.
+        bool haveTarget = false; Vector2 tc = default; float reach = 0f;
+        if (plan.ShootTarget != null && plan.ShootTarget.Alive)
+        {
+            tc = ElevCenter(g, plan.ShootTarget.X, plan.ShootTarget.Y);
+            reach = 17f; haveTarget = true;
+        }
+        else if (plan.Grenade)
+        {
+            tc = ElevCenter(g, plan.GrenX, plan.GrenY);
+            reach = 19f; haveTarget = true;
+            // grenade blast footprint (Chebyshev radius 1) so the player sees the splash
+            for (int ox = -1; ox <= 1; ox++)
+                for (int oy = -1; oy <= 1; oy++)
+                {
+                    int bx = plan.GrenX + ox, by = plan.GrenY + oy;
+                    if (!g.Grid.InBounds(bx, by)) continue;
+                    Raylib.DrawRectangleRec(ElevRect(g, bx, by), Raylib.Fade(danger, 0.10f + 0.06f * pulse));
+                }
+        }
+        else if (plan.UseItem && g.Grid.InBounds(plan.ItemTx, plan.ItemTy))
+        {
+            tc = ElevCenter(g, plan.ItemTx, plan.ItemTy);
+            reach = 17f; haveTarget = true;
+        }
+
+        if (haveTarget)
+        {
+            // aim-line from the firer's post-move position to the mark, then a bold reticle + X
+            Vector2 from = ElevCenter(g, dx, dy);
+            Raylib.DrawLineEx(from, tc, 1.6f, Raylib.Fade(danger, 0.45f));
+            float rr = reach + 2.5f * pulse;
+            Raylib.DrawRing(tc, rr - 2f, rr, 0, 360, 32, Raylib.Fade(danger, 0.9f));
+            float k = rr * 0.7f;
+            Raylib.DrawLineEx(new Vector2(tc.X - k, tc.Y - k), new Vector2(tc.X + k, tc.Y + k), 2.4f, Raylib.Fade(danger, 0.95f));
+            Raylib.DrawLineEx(new Vector2(tc.X - k, tc.Y + k), new Vector2(tc.X + k, tc.Y - k), 2.4f, Raylib.Fade(danger, 0.95f));
+            Raylib.DrawCircleV(tc, 2.2f, Raylib.Fade(Pal.RGBA(255, 220, 220), 0.9f));
+        }
+
+        // 4) a small intent caption above the acting unit so the plan reads at a glance
+        string verb = plan.SapTile != null ? "BREACH"
+                    : plan.HealTarget != null ? "MEND"
+                    : plan.Grenade ? "FRAG"
+                    : plan.UseItem ? (e.EnemyItem == ItemKind.Smoke ? "SMOKE" : "FLASH")
+                    : plan.ShootTarget != null ? "FIRING"
+                    : plan.Overwatch ? "OVERWATCH"
+                    : plan.Path.Count > 0 ? "MOVING"
+                    : plan.Hunker ? "HUNKER" : "HOLD";
+        Vector2 cap = e.Pos - new Vector2(0, (g.Grid.IsHigh(e.X, e.Y) ? ElevLift : 0f) + 44f);
+        var sz = Raylib.MeasureTextEx(Cfg.Font, verb, 14f, 1f);
+        Raylib.DrawRectangleRec(new Rectangle(cap.X - sz.X / 2f - 4, cap.Y - 1, sz.X + 8, sz.Y + 2),
+                                Raylib.Fade(Pal.RGBA(20, 4, 4), 0.7f));
+        Raylib.DrawTextEx(Cfg.Font, verb, new Vector2(cap.X - sz.X / 2f, cap.Y), 14f, 1f,
+                          Raylib.Fade(Pal.RGBA(255, 210, 210), 0.95f));
+    }
+
+    // A scrolling dashed line between two points (used by the intent telegraph's move path).
+    // `phase` shifts the dash pattern along the segment for an animated "marching ants" feel.
+    static void DashedLine(Vector2 a, Vector2 b, float thick, Color col, float phase, float dash, float gap)
+    {
+        Vector2 d = b - a;
+        float len = d.Length();
+        if (len < 0.001f) return;
+        Vector2 dir = d / len;
+        float period = dash + gap;
+        float s = -((phase) % period);
+        while (s < len)
+        {
+            float s0 = MathF.Max(s, 0f);
+            float s1 = MathF.Min(s + dash, len);
+            if (s1 > s0)
+                Raylib.DrawLineEx(a + dir * s0, a + dir * s1, thick, col);
+            s += period;
         }
     }
 
@@ -513,12 +711,28 @@ public static class Renderer
         foreach (var u in g.Players) DrawUnit(g, u);
     }
 
+    // Nearest living enemy to a player unit (by tile distance) — used to point the selected
+    // soldier's aim-tick at who it's about to engage. Returns null if no foe is alive.
+    static Unit NearestLiveFoe(Game g, Unit u)
+    {
+        Unit best = null; float bestD = float.MaxValue;
+        var foes = u.Team == Team.Player ? g.Enemies : g.Players;
+        foreach (var f in foes)
+        {
+            if (!f.Alive) continue;
+            float d = Util.TileDist(u.X, u.Y, f.X, f.Y);
+            if (d < bestD) { bestD = d; best = f; }
+        }
+        return best;
+    }
+
     static void DrawUnit(Game g, Unit u)
     {
         if (!u.Alive) return;
         bool friend = u.Team == Team.Player;
         bool vip = friend && u.IsVip;
         bool elite = u.Team == Team.Enemy && u.Cls == "ELITE";
+        bool hvt = u.Team == Team.Enemy && g.HasHvt && u == g.Hvt;   // DECAPITATE target
         // 4.3 awareness tiers: Unaware (grey "?") / Suspicious (amber "!") / Alert (live foe)
         bool unaware    = u.Team == Team.Enemy && u.Alert == AlertLevel.Unaware;
         bool suspicious = u.Team == Team.Enemy && u.Alert == AlertLevel.Suspicious;
@@ -567,6 +781,16 @@ public static class Renderer
                             Raylib.Fade(Pal.Friend, pulse));
         }
 
+        // DECAPITATE marker: a bold gold double HVT ring on the ground so the target reads out of
+        // the pack at a glance (full-alpha signal, drawn regardless of alert state / dimming).
+        if (hvt)
+        {
+            float pulse = 0.55f + 0.45f * MathF.Sin((float)Raylib.GetTime() * 4.2f + u.Bob);
+            var hc = Pal.VipGold;
+            Raylib.DrawRing(foot + new Vector2(0, 17), 20f, 24f, 0, 360, 48, Raylib.Fade(hc, 0.85f));
+            Raylib.DrawRing(foot + new Vector2(0, 17), 26f, 28f, 0, 360, 48, Raylib.Fade(hc, 0.30f + 0.40f * pulse));
+        }
+
         // body — apply figAlpha to the figure shape
         Raylib.DrawCircleV(p, 16f, Raylib.Fade(dark, figAlpha));
         Raylib.DrawCircleV(p, 16f, Raylib.Fade(Pal.RGBA(0, 0, 0), 0f)); // no-op keep
@@ -579,11 +803,26 @@ public static class Renderer
             "ASSAULT" => 3, "RANGER" => 3, "SHARPSHOOTER" => 4,
             "GUNNER" => 4, "BRUISER" => 6, "SCOUT" => 3,
             "SNIPER" => 4, "TURRET" => 4, "BERSERKER" => 6, "ELITE" => 8, "MEDIC" => 4,
-            "DRONE" => 4, "SHIELD" => 6, "SAPPER" => 3, _ => 5,
+            "DRONE" => 4, "SHIELD" => 6, "SAPPER" => 3, "HUNTER" => 3, "MORTAR" => 5, _ => 5,
         };
         float rot = (u.Cls == "SHARPSHOOTER" || u.Cls == "SNIPER" || u.Cls == "DRONE") ? 45f : (sides == 3 ? -90f : 0f);
         if (elite) Raylib.DrawRing(p, 18f, 20.5f, 0, 360, 40, Raylib.Fade(Pal.Elite, 0.55f * figAlpha));
         Raylib.DrawPoly(p, sides, elite ? 9f : 7.5f, rot, Raylib.Fade(main, figAlpha));
+
+        // DECAPITATE: a gold crown chevron + "HVT" tag above the target (full-alpha signal, drawn
+        // in every alert state so the mark reads even on a dormant target). The body ring above
+        // already pulses; this names the priority. Placed before the inactive early-return.
+        if (hvt)
+        {
+            var hc = Pal.VipGold;
+            float cyT = p.Y - (elite ? 54f : 44f);          // sit above any elite name tag
+            Raylib.DrawLineEx(new Vector2(p.X - 7f, cyT + 4f), new Vector2(p.X - 3.5f, cyT - 3f), 2f, hc);
+            Raylib.DrawLineEx(new Vector2(p.X - 3.5f, cyT - 3f), new Vector2(p.X, cyT + 2f), 2f, hc);
+            Raylib.DrawLineEx(new Vector2(p.X, cyT + 2f), new Vector2(p.X + 3.5f, cyT - 3f), 2f, hc);
+            Raylib.DrawLineEx(new Vector2(p.X + 3.5f, cyT - 3f), new Vector2(p.X + 7f, cyT + 4f), 2f, hc);
+            float tw = Raylib.MeasureTextEx(Cfg.Font, "HVT", 11, 1f).X;
+            Raylib.DrawTextEx(Cfg.Font, "HVT", new Vector2((int)(p.X - tw / 2), (int)(cyT - 18f)), 11, 1f, hc);
+        }
 
         // not-yet-engaged enemies: an awareness marker, no facing/pips/status
         if (inactive)
@@ -599,9 +838,37 @@ public static class Renderer
             return;
         }
 
-        // facing tick
-        var fdir = new Vector2(MathF.Cos(u.Facing), MathF.Sin(u.Facing));
-        Raylib.DrawLineEx(p + fdir * 13f, p + fdir * 20f, 3f, Raylib.Fade(main, figAlpha));
+        // facing tick — a short "barrel" along the unit's facing. Active enemies get a small
+        // arrowhead so which way a foe is pointing (and thus where its overwatch/fire faces)
+        // reads at a glance; the selected soldier instead points its aim-tick at the nearest
+        // live foe (a clear "who am I about to shoot" cue) regardless of its idle facing.
+        float aimAng = u.Facing;
+        if (g.Selected == u && friend && !vip)
+        {
+            var foe = NearestLiveFoe(g, u);
+            if (foe != null)
+            {
+                var ad = foe.Pos - p;
+                if (ad.LengthSquared() > 0.01f) aimAng = MathF.Atan2(ad.Y, ad.X);
+            }
+        }
+        var fdir = new Vector2(MathF.Cos(aimAng), MathF.Sin(aimAng));
+        var perp = new Vector2(-fdir.Y, fdir.X);
+        Raylib.DrawLineEx(p + fdir * 13f, p + fdir * 21f, 3f, Raylib.Fade(main, figAlpha));
+        if (g.Selected == u && friend && !vip)
+        {
+            // a soft directional aim chevron a little further out, pointing at the target
+            var tip = p + fdir * 27f;
+            Raylib.DrawLineEx(tip, tip - fdir * 6f + perp * 5f, 2f, Raylib.Fade(main, 0.85f * figAlpha));
+            Raylib.DrawLineEx(tip, tip - fdir * 6f - perp * 5f, 2f, Raylib.Fade(main, 0.85f * figAlpha));
+        }
+        else if (u.Team == Team.Enemy)
+        {
+            // tiny arrowhead on the barrel so enemy facing is unmistakable
+            var tip = p + fdir * 21f;
+            Raylib.DrawLineEx(tip, tip - fdir * 4.5f + perp * 3.5f, 2f, Raylib.Fade(main, figAlpha));
+            Raylib.DrawLineEx(tip, tip - fdir * 4.5f - perp * 3.5f, 2f, Raylib.Fade(main, figAlpha));
+        }
 
         // medic: green cross marker so the support unit reads at a glance
         if (u.Team == Team.Enemy && u.Cls == "MEDIC")
@@ -615,6 +882,39 @@ public static class Renderer
         {
             Raylib.DrawRectangleLines((int)p.X - 4, (int)p.Y - 4, 8, 8, Raylib.Fade(Pal.Accent, figAlpha));
             Raylib.DrawCircleV(new Vector2(p.X + 4, p.Y - 4), 2f, Raylib.Fade(Pal.Foe, figAlpha));
+        }
+
+        // hunter: twin forward "speed" chevrons along its facing so it reads as a fast flanker
+        // (distinct from the plain scout/grunt triangle). They point the way it's curling.
+        if (u.Team == Team.Enemy && u.Cls == "HUNTER")
+        {
+            var hdir = new Vector2(MathF.Cos(u.Facing), MathF.Sin(u.Facing));
+            var hperp = new Vector2(-hdir.Y, hdir.X);
+            for (int k = 0; k < 2; k++)
+            {
+                var bse = p + hdir * (4f + k * 5f);     // two stacked chevrons
+                var nose = bse + hdir * 4.5f;
+                Raylib.DrawLineEx(nose, bse + hperp * 4.5f, 2f, Raylib.Fade(main, figAlpha));
+                Raylib.DrawLineEx(nose, bse - hperp * 4.5f, 2f, Raylib.Fade(main, figAlpha));
+            }
+        }
+
+        // mortar: a lob-arc + shell marker above the figure so it reads as a back-line grenadier
+        if (u.Team == Team.Enemy && u.Cls == "MORTAR")
+        {
+            // a small parabolic arc traced over the unit
+            Vector2 a0 = new Vector2(p.X - 8, p.Y - 4), a1 = new Vector2(p.X + 8, p.Y - 4);
+            Vector2 prev = a0;
+            for (int i = 1; i <= 8; i++)
+            {
+                float k = i / 8f;
+                var pt = Vector2.Lerp(a0, a1, k);
+                pt.Y -= MathF.Sin(k * MathF.PI) * 9f;
+                Raylib.DrawLineEx(prev, pt, 1.6f, Raylib.Fade(Pal.Accent, figAlpha));
+                prev = pt;
+            }
+            // the lobbed shell at the arc's apex
+            Raylib.DrawCircleV(new Vector2(p.X, p.Y - 12), 2.4f, Raylib.Fade(Pal.Foe, figAlpha));
         }
 
         // shield: a thick barrier arc on the barred (facing) side

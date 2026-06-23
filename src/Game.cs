@@ -7,9 +7,9 @@ using Raylib_cs;
 namespace Sightline;
 
 public enum Phase { Intro, PlayerTurn, EnemyTurn, Barracks, Win, Lose }
-public enum Objective { Eliminate, Evac, Hack, Escort, Sabotage, Rescue, Defend }
+public enum Objective { Eliminate, Evac, Hack, Escort, Sabotage, Rescue, Defend, Decapitate }
 public enum SecondaryKind { None, NoLosses, Swift, CleanSweep }  // optional per-mission bonus goal (3.9)
-enum AiStage { PickNext, ActAfterMove }
+enum AiStage { PickNext, Telegraph, ActAfterMove }
 
 public class Game
 {
@@ -40,6 +40,23 @@ public class Game
     public bool ShowOdds;
     public ShotOdds HoverOdds;
 
+    // Per-turn DEPTH (Wave 3): aimed-vs-snap shot.
+    // The normal "FIRE" is the AIMED shot (full aim, ends the turn). SNAP is a second fire
+    // option that costs only ONE action and does NOT end the turn, at an aim penalty — so
+    // "shoot" is a real choice every turn: the reliable aimed shot, or snap-fire and keep
+    // acting (reposition / second snap / overwatch). Both share the one aim-targeting mode
+    // (AimMode); SnapShot just records which variant the pending shot is. RUN&GUN is the
+    // free, no-penalty version and takes priority over the snap penalty when both are set.
+    public const int SnapAim = -15;   // snap-fire aim penalty (applied as the Resolve aimMod)
+    public bool SnapShot;             // the pending aim-mode shot is a snap (1 action, no end-turn)
+
+    // Flank-kill action refund ("press the advantage", Wave 3 anti-turtle). A player shot
+    // that KILLS a FLANKED/EXPOSED target refunds +1 action to the shooter, capped at one
+    // refund per soldier per turn (this set, cleared each StartPlayerTurn). Rewards aggressive
+    // flanking + chains (snap -> flank-kill -> refund -> act again), out-competing passive
+    // overwatch-camping. The 1/turn cap + finite enemies guarantee no infinite loop.
+    readonly HashSet<Unit> _refundedThisTurn = new();
+
     // grenade targeting
     public const int GrenadeRange = 7;
     public bool GrenadeMode;
@@ -63,6 +80,24 @@ public class Game
     int _aiIdx;
     EnemyPlan _aiPlan;
 
+    // ---- enemy-intent telegraph (Into-the-Breach fairness lever) ----
+    // Right before a hostile acts, we hold for a brief beat and show the player exactly what
+    // it intends to do: its planned move PATH, its TARGET, and the tiles it will threaten from
+    // its post-move tile. The renderer reads these; they are set in UpdateEnemy's PickNext (from
+    // the SAME _aiPlan that then executes, so the telegraph never lies) and cleared the moment
+    // the beat ends and at turn boundaries. The telegraph is SKIPPED entirely under AutoPlay so
+    // the headless smoke test's frame counts stay essentially unchanged (TIMEOUT-safe).
+    public Unit IntentUnit;                 // the hostile about to act (null = no telegraph showing)
+    public EnemyPlan IntentPlan;            // its plan (Path / ShootTarget / Grenade / Overwatch / ...)
+    public (int x, int y) IntentDest;       // the tile it will stand on after moving (threat origin)
+    public const float TelegraphBeat = 0.5f;  // how long the intent is held before the unit acts
+
+    // ---- squad coordination (computed once per enemy turn in PlanEnemySquad) ----
+    // Shared, ADVISORY hints read by Ai.Plan; they bias per-unit scoring but never override
+    // the fundamentals (having a shot, cover, advancing), so stall/timeout invariants hold.
+    public Unit EnemyFocus;                                  // priority target the squad converges on
+    public HashSet<(int, int)> PlayerOverwatchTiles = new(); // tiles under active player overwatch fire
+
     int _turnCount;
 
     // campaign run
@@ -73,6 +108,16 @@ public class Game
     // each mission start and CONTINUE is offered on the intro. The headless harness
     // sets this true so the smoke test never touches the save file.
     public bool NoPersist;
+
+    // ---- Heat / Ascension difficulty ladder ----
+    // UnlockedHeat = the highest selectable level (META: persisted in meta.json, survives run
+    // end; rises by 1 when a run is WON at the current cap). PendingHeat = the level the player
+    // has dialled in on the intro for the NEXT new run (0..UnlockedHeat). The CURRENT run's heat
+    // lives on _run.HeatLevel (persisted in the run save). All default 0 -> heat 0 plays exactly
+    // like today, which keeps the harness/autoplay path byte-stable.
+    public int UnlockedHeat;
+    public int PendingHeat;
+    public int HeatLevel => _run?.HeatLevel ?? 0;   // the active run's heat (for HUD/barracks readouts)
 
     // barracks requisition shop: spend Intel before choosing the next deployment.
     // _shopDone gates the barracks flow (shop -> promotions -> deployment cards).
@@ -162,6 +207,12 @@ public class Game
     public bool HasSabotage => Objective == Objective.Sabotage;
     public bool HasHackAction => HasTerminal || HasSabotage;
 
+    // DECAPITATE: one designated enemy is the High-Value Target; killing it WINS the
+    // mission outright (no need to clear the map). Designated from the Enemies list in
+    // SetupMission after Mission.Build; null on every other objective.
+    public Unit Hvt;
+    public bool HasHvt => Objective == Objective.Decapitate && Hvt != null;
+
     public bool CanHack(Unit u)
     {
         if (u == null || u.Team != Team.Player || !u.CanAct) return false;
@@ -218,12 +269,42 @@ public class Game
     /// startAt lets the headless harness jump straight to a given mission.
     public void StartMission(int startAt = 1)
     {
+        EnsureMetaLoaded();
         _run = new Run();
         _run.Start();                       // builds the campaign map, seats at the START node
+        // adopt the dialled-in Heat for this run. The harness can't set PendingHeat (it doesn't
+        // touch the intro), so it reads SIGHTLINE_HEAT here instead — defaulting to 0 so plain
+        // autoplay/screenshots are byte-stable.
+        int heat = PendingHeat;
+        if (NoPersist && int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_HEAT"), out int hEnv)) heat = hEnv;
+        _run.HeatLevel = Sightline.Heat.Clamp(heat);
         Players = _run.Squad;
         int n = Util.Clamp(startAt, 1, Run.MaxMissions);
         if (n > 1) _run.JumpTo(n);           // harness: advance along the map to the requested op
         SetupMission(n);
+    }
+
+    // Lazily load the persisted unlocked-max Heat once (gated by NoPersist like all save I/O,
+    // so the headless harness never reads disk and stays at the default unlock of 0).
+    bool _metaLoaded;
+    void EnsureMetaLoaded()
+    {
+        if (_metaLoaded) return;
+        _metaLoaded = true;
+        if (NoPersist)
+        {
+            // Harness/screenshot affordance only: SIGHTLINE_HEAT lets the headless intro shot
+            // preview the dialled-in level + its unlocked ceiling. No disk I/O; default 0 keeps
+            // a plain shot byte-stable.
+            if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_HEAT"), out int hEnv) && hEnv > 0)
+            {
+                UnlockedHeat = Sightline.Heat.Clamp(hEnv);
+                PendingHeat = UnlockedHeat;
+            }
+            return;
+        }
+        UnlockedHeat = SaveGame.LoadMetaHeat();
+        PendingHeat = Math.Min(PendingHeat, UnlockedHeat);
     }
 
     void SetupMission(int n)
@@ -247,6 +328,7 @@ public class Game
         SabotageSites.Clear();
         SabotageBlown.Clear();
         Vip = null;
+        Hvt = null;
         CaptiveLocked = false;
         // Evac / Escort / Rescue all extract to the same top-right zone
         if (Objective == Objective.Evac || Objective == Objective.Escort || Objective == Objective.Rescue)
@@ -278,11 +360,17 @@ public class Game
             CaptiveLocked = true;
         }
 
+        // Heat folds into the SAME difficulty params the deployment cards use (no Mission.cs
+        // signature change): extra bodies + an extra stat bump as the ladder climbs.
+        int heat = _run.HeatLevel;
+        int enemyDelta = card.EnemyDelta + Sightline.Heat.EnemyDelta(heat);
+        int statDelta = card.StatDelta + Sightline.Heat.StatDelta(heat);
+
         // reserve + connectivity-verify a key tile: the Hack terminal, or the Rescue captive's seat
         (int x, int y)? reserve = HasTerminal ? Terminal
             : (Objective == Objective.Rescue ? (Grid.W / 2, Grid.H / 2) : ((int, int)?)null);
         Mission.Build(Grid, Players, Enemies, n, EvacZone, reserve,
-                      card.EnemyDelta, card.StatDelta, HasSabotage ? SabotageSites : null);
+                      enemyDelta, statDelta, HasSabotage ? SabotageSites : null);
         if (Vip != null) { Vip.Grenades = 0; Vip.AbilityCharge = 0; }  // the asset has no kit
         if (Objective == Objective.Rescue && Vip != null)
         {
@@ -298,6 +386,7 @@ public class Game
             Vip.Mobility = 0;              // can't move while caged
             Vip.SyncPos();
         }
+        if (Objective == Objective.Decapitate) DesignateHvt();
         Fx.Particles.Clear();
         Fx.Texts.Clear();
         _anims.Clear();
@@ -305,18 +394,20 @@ public class Game
         _turnCount = 1;
         _autoSig = -1; _autoStall = 0;
         Phase = Phase.PlayerTurn;
-        SquadConcealed = true;            // 4.4: every mission opens with the squad concealed
+        // 4.4: every mission opens with the squad concealed -- UNLESS Heat "EXPOSED" strips it.
+        SquadConcealed = !Sightline.Heat.Exposed(_run.HeatLevel);
         foreach (var u in Players) u.BeginTurn();
         // per-mission feat tracking + status effects start clean each mission
         foreach (var u in Players)
         { u.FeatMultiKill = u.FeatClutch = u.FeatVengeful = u.WasNearDeath = u.AllyDown = false; u.BondAura = false; u.ConsecutiveMisses = 0; u.Statuses.Clear(); }
         _missionKia.Clear();
+        _refundedThisTurn.Clear();   // flank-kill refund is per-turn; clear it for the mission's first turn too (review #2)
         DeathFlash = 0;
         RollSecondary(n);
         foreach (var u in Enemies) { u.BeginTurn(); u.OnOverwatch = false; }
         Selected = Players.FirstOrDefault(p => p.CanAct);
         AimMode = false;
-        Biome = Biome.For(n);
+        Biome = Biome.For(n, _run.MapSeed);   // per-run biome variety (surfaces NEON/MAGMA across seeds)
         ShowBanner($"MISSION {n} - {Biome.Name}", false);
         StartTutorialMaybe();
 
@@ -326,12 +417,36 @@ public class Game
 
     void NextMission() => SetupMission(_run.Mission + 1);
 
+    // DECAPITATE: pick ONE spawned enemy to be the High-Value Target and buff it so it is a
+    // real, distinct objective. Preference: the toughest rank-and-file (highest MaxHp) that is
+    // NOT a dedicated special role (turret/medic/sapper/shield/drone make poor "punch-through"
+    // targets); otherwise the first pod leader. The HVT gets +HP so it survives a few hits and
+    // the player must commit to focusing it. Called only on Decapitate, after Mission.Build.
+    void DesignateHvt()
+    {
+        var pool = Enemies.Where(e => e.Alive).ToList();
+        if (pool.Count == 0) { Hvt = null; return; }
+        bool IsSpecial(Unit e) => e.Cls == "TURRET" || e.Cls == "MEDIC" || e.Cls == "SAPPER"
+                               || e.Cls == "SHIELD" || e.Cls == "DRONE" || e.Cls == "MORTAR";
+        // prefer a non-special, toughest body; fall back to any toughest; then pod leader.
+        Hvt = pool.Where(e => !IsSpecial(e)).OrderByDescending(e => e.MaxHp).ThenBy(e => e.PodId).FirstOrDefault()
+           ?? pool.OrderByDescending(e => e.MaxHp).ThenBy(e => e.PodId).FirstOrDefault();
+        if (Hvt == null) return;
+        // buff into a worthwhile target: a meaningful HP bump + a small aim edge. It is already
+        // an Enemy so every generic system (targeting/overwatch/FX/AI) treats it normally.
+        int bonus = 6 + _run.Mission;          // scales gently with mission depth
+        Hvt.MaxHp += bonus; Hvt.Hp += bonus;
+        Hvt.Aim = Math.Min(85, Hvt.Aim + 6);
+        Hvt.Name = Hvt.Cls == "ELITE" ? Hvt.Name : "HVT-" + Hvt.Name;
+    }
+
     /// Resume a saved campaign from the intro. Reloads the run and restarts its
     /// current mission from the start; returns false if there is no readable save.
     public bool ContinueRun()
     {
         var run = SaveGame.Load();
         if (run == null || run.Squad == null || run.Squad.Count == 0) return false;
+        EnsureMetaLoaded();   // so a resumed run that gets WON can still unlock the next Heat
         _run = run;
         Players = _run.Squad;
         int n = Util.Clamp(_run.Mission < 1 ? 1 : _run.Mission, 1, Run.MaxMissions);
@@ -363,6 +478,42 @@ public class Game
     /// this just adds a banner so the intent reads in the frame (the CONCEALED pill +
     /// ghost rings are already drawn because SquadConcealed is true).
     public void DebugConcealment() => ShowBanner("CONCEALED - PICK YOUR MOMENT", false);
+
+    /// Harness hook (screenshot only): stage an enemy-intent telegraph so a single SHOT frame
+    /// shows the planned move path + target reticle + threatened-tile wash + caption. Picks a
+    /// live foe, wakes it, runs the real Ai.Plan (so the drawn intent matches what would execute),
+    /// and forces a ShootTarget at the nearest soldier if the plan didn't already produce one.
+    public void DebugIntent()
+    {
+        DebugWakeAll();
+        // prefer a foe whose real plan includes a MOVE so the path reads in the demo frame;
+        // otherwise take any live active foe.
+        Unit foe = null; EnemyPlan plan = null;
+        foreach (var e in Enemies)
+        {
+            if (!e.Alive || !e.Active) continue;
+            var p = Ai.Plan(this, e);
+            if (foe == null) { foe = e; plan = p; }
+            if (p.Path.Count > 0) { foe = e; plan = p; break; }
+        }
+        if (foe == null) return;
+        var dest = plan.Path.Count > 0 ? plan.Path[^1] : (foe.X, foe.Y);
+        if (plan.ShootTarget == null && !plan.Grenade && !plan.UseItem && plan.HealTarget == null && plan.SapTile == null)
+        {
+            // ensure the marquee read (a target) is present in the demo frame
+            Unit nearest = null; int nd = int.MaxValue;
+            foreach (var p in AlivePlayers())
+            {
+                int d = Util.ChebyDist(dest.Item1, dest.Item2, p.X, p.Y);
+                if (d < nd) { nd = d; nearest = p; }
+            }
+            plan.ShootTarget = nearest;
+        }
+        IntentUnit = foe;
+        IntentPlan = plan;
+        IntentDest = dest;
+        ShowBanner("ENEMY INTENT", true);
+    }
 
     /// Headless self-test for 4.4 concealment: starts concealed, pods are gated from
     /// escalating while concealed, and breaking concealment ungates them + arms the
@@ -440,6 +591,145 @@ public class Game
         return fails.Count == 0
             ? "BENCHTEST: PASS (benched veteran sits out, is preserved, recovers full HP + 2 wound steps, un-benches)"
             : "BENCHTEST: FAIL (" + string.Join(",", fails) + ")";
+    }
+
+    /// Headless self-test for squad coordination (focus fire + overwatch-aware routing).
+    /// Builds a controlled open-field scenario (no random map / no run state) and asserts:
+    ///   * PlanEnemySquad picks the most-killable EXPOSED soldier as EnemyFocus, over a
+    ///     full-HP one and over a wounded-but-unreachable one.
+    ///   * Ai.Plan biases an enemy that can hit BOTH soldiers toward shooting the focus.
+    ///   * PlayerOverwatchTiles mirrors the real reaction test (in-range+LoS tile is marked;
+    ///     an out-of-range tile is not), and a retreat decision triggers for a cornered,
+    ///     low-HP, no-shot grunt. Prints AITEST: PASS/FAIL. No window needed.
+    public string AiSquadSelfTest()
+    {
+        NoPersist = true;
+        var fails = new System.Collections.Generic.List<string>();
+
+        // ---- controlled scene: empty 18x11 floor, no cover (LoS always clear) ----
+        Grid = new Grid();                       // all Floor, Height 0, no smoke/cover
+        Players = new System.Collections.Generic.List<Unit>();
+        Enemies = new System.Collections.Generic.List<Unit>();
+        Vip = null; CaptiveLocked = false;
+        Objective = Objective.Eliminate;
+        EvacZone.Clear();
+
+        Unit MkP(string name, int x, int y, int hp, int maxHp) {
+            var u = new Unit { Name = name, Cls = "ASSAULT", Team = Team.Player, X = x, Y = y,
+                               Hp = hp, MaxHp = maxHp, Aim = 65, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+            u.Ammo = u.Weapon.Clip; u.SyncPos(); u.BeginTurn(); return u;
+        }
+        Unit MkE(string name, int x, int y) {
+            var u = new Unit { Name = name, Cls = "GRUNT", Team = Team.Enemy, X = x, Y = y,
+                               Hp = 6, MaxHp = 6, Aim = 60, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+            u.Ammo = u.Weapon.Clip; u.Alert = AlertLevel.Alert; u.SyncPos(); u.BeginTurn(); return u;
+        }
+
+        // VICTIM: low HP (2/8), exposed, sat between two shooters -> should be the focus.
+        // HEALTHY: full HP, equally reachable -> a worse focus.
+        // HURT_FAR: also low HP but parked in the far corner, beyond BOTH enemies' rifle range
+        // (15) -> nobody can currently hit it, so it's a WEAK focus despite the low HP. (On this
+        // small board the shooters must sit in the opposite corner for a tile to be out of range.)
+        var victim  = MkP("VICTIM",  5, 4, 2, 8);
+        var healthy = MkP("HEALTHY", 5, 6, 8, 8);
+        var hurtFar = MkP("HURTFAR", 17, 10, 1, 8);   // > rifle range 15 from e1(2,4) & e2(2,5)
+        Players.Add(victim); Players.Add(healthy); Players.Add(hurtFar);
+
+        var e1 = MkE("E1", 2, 4);   // in range/LoS of VICTIM and HEALTHY, NOT of HURTFAR
+        var e2 = MkE("E2", 2, 5);
+        Enemies.Add(e1); Enemies.Add(e2);
+        _aiUnits = AliveEnemies().Where(e => e.Active).ToList();
+
+        // ---- 1. focus selection ----
+        PlanEnemySquad();
+        if (EnemyFocus != victim)
+            fails.Add("focusNotVictim=" + (EnemyFocus?.Name ?? "null"));
+
+        // ---- 2. Ai.Plan biases the shot toward the focus ----
+        // E1 sits in range/LoS of both VICTIM and HEALTHY. With the focus on VICTIM (a near-
+        // kill), its planned ShootTarget should be VICTIM. (We don't move it; it has the shot.)
+        var plan = Ai.Plan(this, e1);
+        if (plan.ShootTarget != victim)
+            fails.Add("e1ShotNotFocus=" + (plan.ShootTarget?.Name ?? "null"));
+
+        // load-bearing check on equal targets: two IDENTICAL exposed full-HP soldiers in range
+        // of one grunt — the ONLY thing that can tie-break them is the focus bonus, so forcing
+        // the focus to each in turn must pick that one. (Proves the bias actually drives choice,
+        // without fighting an intrinsic near-kill value as VICTIM would.)
+        var twinA = MkP("TWINA", 13, 4, 8, 8);
+        var twinB = MkP("TWINB", 13, 6, 8, 8);
+        var eg    = MkE("EG",    13, 5);            // equidistant (dist 1) to both twins
+        Players.Add(twinA); Players.Add(twinB); Enemies.Add(eg);
+        _aiUnits = AliveEnemies().Where(e => e.Active).ToList();
+        EnemyFocus = twinA;
+        if (Ai.Plan(this, eg).ShootTarget != twinA) fails.Add("biasFocusA");
+        EnemyFocus = twinB;
+        if (Ai.Plan(this, eg).ShootTarget != twinB) fails.Add("biasFocusB");
+
+        // ---- 3. overwatch kill-zone map (mirror the real reaction test) ----
+        // Fresh scene: a SHOTGUN watcher (range 8) in a corner so an out-of-range tile exists
+        // on this small board, plus a HIGH-COVER wall to prove a blocked-LoS tile is NOT marked.
+        Players = new System.Collections.Generic.List<Unit>();
+        Enemies = new System.Collections.Generic.List<Unit>();
+        var watcher = new Unit { Name = "WATCH", Cls = "GUNNER", Team = Team.Player, X = 1, Y = 1,
+                                 Hp = 8, MaxHp = 8, Aim = 65, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Shotgun) };
+        watcher.Ammo = watcher.Weapon.Clip; watcher.SyncPos(); watcher.BeginTurn();
+        watcher.OnOverwatch = true;
+        Players.Add(watcher);
+        Grid.Tiles[3, 1] = TileType.HighCover;   // a wall directly east of the watcher
+        Grid.SetCoverHp(3, 1);
+        _aiUnits = new System.Collections.Generic.List<Unit>();
+        PlanEnemySquad();
+        if (!PlayerOverwatchTiles.Contains((4, 4)))
+            fails.Add("owTileNotMarked");        // in range (dist 5 <= 8), clear LoS -> threatened
+        if (PlayerOverwatchTiles.Contains((1, 1)))
+            fails.Add("owMarkedWatcherTile");    // the watcher's own tile is never "entered"
+        if (PlayerOverwatchTiles.Contains((17, 10)))
+            fails.Add("owMarkedOutOfRange");     // dist ~18 > shotgun range 8 -> NOT threatened
+        if (PlayerOverwatchTiles.Contains((6, 1)))
+            fails.Add("owMarkedThroughWall");    // straight line crosses the HighCover at (3,1)
+
+        // ---- 4. self-preservation (retreat decision) ----
+        // A lone, low-HP (~12%) SHOTGUN grunt (range 8) whose only soldier sits ~17 tiles away
+        // can never line up a shot even after moving its full budget, so retreat mode engages:
+        // its plan must carry NO ShootTarget yet must STILL spend an action (move/overwatch/
+        // hunker) — the core progress invariant that keeps autoplay from ever stalling.
+        Enemies = new System.Collections.Generic.List<Unit>();
+        Players = new System.Collections.Generic.List<Unit>();
+        var loner = MkE("LONER", 1, 5);
+        loner.Hp = 1; loner.MaxHp = 8;                                   // ~12% HP
+        loner.Weapon = Weapon.Make(WeaponKind.Shotgun); loner.Ammo = loner.Weapon.Clip;  // range 8
+        var faraway = MkP("FARP", 17, 10, 8, 8);                         // ~17 tiles away
+        Enemies.Add(loner); Players.Add(faraway);
+        _aiUnits = AliveEnemies().Where(e => e.Active).ToList();
+        PlanEnemySquad();
+        var rplan = Ai.Plan(this, loner);
+        if (rplan.ShootTarget != null) fails.Add("retreatHadShot=" + rplan.ShootTarget.Name);
+        bool spendsAction = rplan.ShootTarget != null || rplan.Overwatch || rplan.Hunker
+                          || rplan.Path.Count > 0 || rplan.Grenade || rplan.SapTile != null || rplan.UseItem;
+        if (!spendsAction) fails.Add("retreatPlanNoAction");
+        // (The genuinely cornered case — best tile is the current one with no LoS for overwatch
+        // and no cover for hunker — can't TIMEOUT regardless, because UpdateEnemy advances
+        // _aiIdx unconditionally after ActAfterMove; that structural guarantee, not this scene,
+        // is what makes retreat stall-proof. Autoplay exercises the messy cases — review #2.)
+
+        // CONTRAST (#2): a FULL-HP loner in the SAME far scene is NOT in retreat mode, so its
+        // advance term pulls it TOWARD the soldier. This proves retreatMode is genuinely
+        // HP-GATED (the low-HP plan above is the exception, not the default behaviour). Non-flaky:
+        // the advance gradient (advW*distNearest) dwarfs the 0-3 tie-break jitter over this span.
+        float startDist = Util.TileDist(1, 5, faraway.X, faraway.Y);
+        var bold = MkE("BOLD", 1, 5); bold.Hp = 8; bold.MaxHp = 8;        // full HP -> advances
+        Enemies.Clear(); Enemies.Add(bold);
+        _aiUnits = AliveEnemies().Where(e => e.Active).ToList();
+        PlanEnemySquad();
+        var bplan = Ai.Plan(this, bold);
+        int bx = bplan.Path.Count > 0 ? bplan.Path[bplan.Path.Count - 1].x : bold.X;
+        int by = bplan.Path.Count > 0 ? bplan.Path[bplan.Path.Count - 1].y : bold.Y;
+        if (Util.TileDist(bx, by, faraway.X, faraway.Y) >= startDist) fails.Add("fullHpDidNotAdvance");
+
+        return fails.Count == 0
+            ? "AITEST: PASS (focus picks killable+exposed; Ai.Plan biases to focus + flips; overwatch map mirrors reaction; retreat plan still acts)"
+            : "AITEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
     /// Harness hook (screenshot only): stamp a tier-2 plateau (with a tier-1 step and a
@@ -609,18 +899,41 @@ public class Game
         if (!finished && _run.CurrentCard != null && _run.CurrentCard.Reward == RewardKind.BonusPerk)
             _run.AddBonusPerk();
 
-        if (finished) { Phase = Phase.Win; Audio.Play("win"); if (!NoPersist) SaveGame.Delete(); }
+        if (finished)
+        {
+            // Heat/Ascension: winning a run at the current cap unlocks the next rung (META).
+            UnlockHeatOnWin();
+            Phase = Phase.Win; Audio.Play("win"); if (!NoPersist) SaveGame.Delete();
+        }
         else
         {
-            // intel salvage scales with survivors + depth; ONSLAUGHT pays a risk premium
+            // intel salvage scales with survivors + depth; ONSLAUGHT pays a risk premium;
+            // higher Heat pays a flat per-mission bonus (the reward for the ladder).
             int gained = 8 + 3 * survivors + _run.Mission;
             if (_run.CurrentCard != null && _run.CurrentCard.ModName == "ONSLAUGHT") gained += 6;
+            int heatBonus = Sightline.Heat.IntelBonus(_run.HeatLevel);
+            gained += heatBonus;
             _run.Intel += gained;
-            _run.Report.Insert(0, $"Recovered {gained} intel  (total {_run.Intel})");
+            string heatNote = heatBonus > 0 ? $"  (+{heatBonus} HEAT {_run.HeatLevel})" : "";
+            _run.Report.Insert(0, $"Recovered {gained} intel{heatNote}  (total {_run.Intel})");
             _shopDone = false;
             _run.GenerateOffers(_run.Mission + 1);
             Phase = Phase.Barracks;
             Audio.Play("win");
+        }
+    }
+
+    // Heat/Ascension unlock: a run cleared AT the current max raises the cap by one (capped at
+    // the ladder ceiling). The increment + persistence are gated by !NoPersist, so an autoplay
+    // win never mutates/writes the meta (the harness never loaded it). Safe to call always.
+    void UnlockHeatOnWin()
+    {
+        if (NoPersist) return;
+        if (_run.HeatLevel >= UnlockedHeat && UnlockedHeat < Sightline.Heat.Max)
+        {
+            UnlockedHeat++;
+            SaveGame.SaveMetaHeat(UnlockedHeat);
+            _run.Report.Insert(0, $"HEAT {UnlockedHeat} UNLOCKED");
         }
     }
 
@@ -788,6 +1101,7 @@ public class Game
             if (!d.IsVip)
                 foreach (var p in Players) if (p.Alive && p != d && !p.IsVip) p.AllyDown = true;
         }
+        TryFlankKillRefund(d);   // "press the advantage": a player flank-kill refunds an action
         Color c = d.Team == Team.Player ? Pal.Friend : Pal.Foe;
         Fx.Burst(d.Pos, c, 30, 280f, 0.7f, 4f, true);
         Fx.Burst(d.Pos, Pal.RGBA(20, 25, 33), 16, 150f, 0.8f, 5f);
@@ -828,6 +1142,7 @@ public class Game
     bool IsMissionEndingKill(Unit d)
     {
         if (d.IsVip) return true;                                   // escort failed
+        if (d == Hvt) return true;                                  // decapitation: the HVT fell
         if (d.Team == Team.Enemy)
             return Objective == Objective.Eliminate && AliveEnemies().Count == 0;
         // player down: a wipe (no combatant soldiers left) ends the run
@@ -848,6 +1163,37 @@ public class Game
         { killer.FeatClutch = true; FeatBanner(killer, "CLUTCH KILL"); }
         if (killer.AllyDown && !killer.FeatVengeful)
         { killer.FeatVengeful = true; FeatBanner(killer, "AVENGED"); }
+    }
+
+    /// "Press the advantage" (Wave 3 anti-turtle): when a PLAYER shot KILLS a FLANKED /
+    /// EXPOSED enemy on the player's turn, refund +1 action to the shooter — capped at one
+    /// refund per soldier per turn. Rewards aggressive flanking and chains (snap -> flank-kill
+    /// -> refund -> act again), out-competing passive overwatch-camping.
+    ///
+    /// The kill is applied from inside ShotAnim.Apply while that shot is the ACTIVE anim, so
+    /// the active anim IS the shot that caused this death — we read its ShotResult to tell
+    /// whether the target was flanked/exposed (no Combat/Anim signature change needed).
+    /// Guards keep it bounded: PlayerTurn only (an enemy-turn overwatch kill grants nothing
+    /// the soldier could spend anyway), one /soldier /turn, and finite enemies — so the
+    /// autopilot's CanAct loop can never spin forever on refunds.
+    void TryFlankKillRefund(Unit d)
+    {
+        if (Phase != Phase.PlayerTurn || d.Team != Team.Enemy) return;
+        if (ActiveAnim is not ShotAnim sa) return;          // only a direct shot refunds (not a grenade/DoT)
+        var killer = sa.A;
+        if (sa.D != d || killer == null || killer.Team != Team.Player || killer.IsVip || !killer.Alive) return;
+        // Require a GENUINE FLANK (not merely any exposed target): the refund rewards
+        // *maneuvering to a flank*, not finishing an already-open foe. This de-snowballs the
+        // ambush+refund chain a balance audit flagged (an ambush-snap-kill on an exposed-but-
+        // -unflanked pod enemy no longer refunds, so one soldier can't clear a whole pod free).
+        bool flankKill = sa.Res.Odds.Flanked;
+        if (!flankKill || _refundedThisTurn.Contains(killer)) return;
+        _refundedThisTurn.Add(killer);
+        killer.ActionsLeft += 1;
+        Fx.PopText(killer.Pos + new Vector2(0, -46), "+1 ACTION", Pal.Accent, 22f);
+        Fx.PopText(killer.Pos + new Vector2(0, -28), "MOMENTUM", Pal.Good, 16f);
+        Fx.Burst(killer.Pos, Pal.Accent, 12, 150f, 0.45f, 3f, true);
+        Audio.Play("over");
     }
 
     /// Note damage to a player so a near-death survival becomes a feat (IronWill).
@@ -967,7 +1313,7 @@ public class Game
         {
             if (Raylib.IsKeyPressed(KeyboardKey.Escape))
             {
-                if (AimMode || GrenadeMode || ItemMode) { AimMode = false; GrenadeMode = false; ItemMode = false; }
+                if (AimMode || GrenadeMode || ItemMode) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; }
                 else Paused = !Paused;
             }
             if (Paused) { HandlePauseMenu(); return; }
@@ -1057,6 +1403,10 @@ public class Game
         else if (Objective == Objective.Defend) // hold out for DefendTurns player turns
         {
             if (_turnCount > DefendTurns) EnterBarracks();
+        }
+        else if (Objective == Objective.Decapitate) // kill the marked HVT; the rest don't matter
+        {
+            if (Hvt == null || !Hvt.Alive) EnterBarracks();
         }
         else // Evac: every surviving soldier must stand in the extraction zone
         {
@@ -1205,9 +1555,36 @@ public class Game
         if (Objective == Objective.Defend)
         {
             var dt = FirstTargetFor(u);
-            if (dt != null && u.Ammo > 0) { IssueShoot(dt); return; }
+            if (dt != null && u.Ammo > 0) { AutoShoot(u, dt); return; }
             if (u.Ammo == 0) { DoReload(); return; }
             if (u.ActionsLeft > 0 && u.Ammo > 0) { DoOverwatch(); return; }
+            DoHunker(); return;
+        }
+
+        // DECAPITATE objective: focus the marked HVT. Shoot it on sight, grenade it if it's the
+        // only reachable play, otherwise advance on it; fall through to the generic combat
+        // behaviour (clear blockers / reload / hunker) so progress is always guaranteed.
+        if (Objective == Objective.Decapitate)
+        {
+            if (Hvt != null && Hvt.Alive)
+            {
+                if (u.Ammo > 0 && CanTarget(u, Hvt)) { AutoShoot(u, Hvt); return; }     // kill the target
+                if (u.Ammo == 0) { DoReload(); return; }
+                if (u.Grenades > 0 && Util.TileDist(u.X, u.Y, Hvt.X, Hvt.Y) <= GrenadeRange
+                    && !Players.Any(f => f.Alive && Util.ChebyDist(f.X, f.Y, Hvt.X, Hvt.Y) <= 1))
+                { IssueGrenade(Hvt.X, Hvt.Y); return; }                                  // flush it out
+                // can't hit it yet: shoot anything blocking the path, else close on the HVT
+                var blk = FirstTargetFor(u);
+                if (blk != null && blk != Hvt && u.Ammo > 0
+                    && Util.TileDist(u.X, u.Y, blk.X, blk.Y) <= 3) { AutoShoot(u, blk); return; }
+                if (TryMoveTowardTile(u, Hvt.X, Hvt.Y)) return;
+            }
+            // HVT already dead (CheckEnd will end the mission) or unreachable: keep generic.
+            var dtgt = FirstTargetFor(u);
+            if (dtgt != null && u.Ammo > 0) { AutoShoot(u, dtgt); return; }
+            if (u.Ammo == 0) { DoReload(); return; }
+            var dfoe = AliveEnemies().OrderBy(e => Util.TileDist(u.X, u.Y, e.X, e.Y)).FirstOrDefault();
+            if (dfoe != null && TryMoveTowardTile(u, dfoe.X, dfoe.Y)) return;
             DoHunker(); return;
         }
 
@@ -1222,7 +1599,7 @@ public class Game
         }
 
         var tgt = FirstTargetFor(u);
-        if (tgt != null && u.Ammo > 0) { IssueShoot(tgt); return; }
+        if (tgt != null && u.Ammo > 0) { AutoShoot(u, tgt); return; }
         if (u.Ammo == 0) { DoReload(); return; }
 
         // (test) deploy the class utility item to keep its path covered
@@ -1258,6 +1635,17 @@ public class Game
         DoHunker(); // guarantees progress
     }
 
+    // autopilot helper: fire at `tgt`, exercising the SNAP path so it stays covered. When the
+    // soldier has both actions, ~40% take a snap (1 action, no end-turn, -aim) instead of the
+    // turn-ending aimed shot; the soldier then keeps acting next AutoStep (move/second snap/
+    // overwatch). Bounded: a snap always costs >=1 action, so at most two snaps end the turn —
+    // no infinite loop. (The flank-kill refund is capped 1/turn, so it can't unbound this.)
+    void AutoShoot(Unit u, Unit tgt)
+    {
+        if (u.ActionsLeft >= 2 && !u.RunGun && Util.Roll(40)) SnapShot = true;  // consumed by IssueShoot
+        IssueShoot(tgt);
+    }
+
     // autopilot helper: step toward (gx,gy) along true path distance; random hop if stuck
     bool TryMoveTowardTile(Unit u, int gx, int gy)
     {
@@ -1283,9 +1671,15 @@ public class Game
     }
 
     // ---------------- activation pods (4.3 awareness tiers) ----------------
-    public const int SightRange = 9;   // spotted at range -> Suspicious (4.2: down from 12)
-    public const int AlertRange = 4;   // spotted up close -> straight to Alert (no grace turn)
-    public const int RevealRange = 3;  // 4.4: stepping this close to an ACTIVE foe auto-breaks concealment
+    // Baselines; Heat "SHORT FUSE"/"RELENTLESS" shrink first-contact ranges by 1 (read off the
+    // active run's HeatLevel). Floored at 1 so a pod can always still be spotted.
+    public const int BaseSightRange = 9;   // spotted at range -> Suspicious (4.2: down from 12)
+    public const int BaseAlertRange = 4;   // spotted up close -> straight to Alert (no grace turn)
+    public const int BaseRevealRange = 3;  // 4.4: stepping this close to an ACTIVE foe auto-breaks concealment
+    int ContactTighten => Heat.TighterContact(_run?.HeatLevel ?? 0) ? 1 : 0;
+    public int SightRange  => Math.Max(1, BaseSightRange  - ContactTighten);
+    public int AlertRange  => Math.Max(1, BaseAlertRange  - ContactTighten);
+    public int RevealRange => Math.Max(1, BaseRevealRange - ContactTighten);
     public bool SquadConcealed;        // 4.4: squad starts each mission concealed (set in SetupMission)
 
     // Closest distance at which any living soldier currently has line of sight on this
@@ -1517,6 +1911,11 @@ public class Game
             {
                 ShowOdds = true;
                 HoverOdds = Combat.ComputeOdds(Grid, Selected, AimTarget);
+                // SNAP lowers the displayed hit% by the same penalty Resolve will apply, so
+                // the number the player sees is truthful (perfect-information contract). RUN&GUN
+                // is the free version, so no penalty when it's queued. Crit isn't aimMod-scaled.
+                if (SnapShot && !Selected.RunGun)
+                    HoverOdds.HitChance = Util.Clamp(HoverOdds.HitChance + SnapAim, 1, 99);
             }
             return;
         }
@@ -1545,6 +1944,7 @@ public class Game
         if (Raylib.IsKeyPressed(KeyboardKey.Enter)) { RequestEndTurn(); return; }
         if (Raylib.IsKeyPressed(KeyboardKey.Tab)) CycleSelection();
         if (Raylib.IsKeyPressed(KeyboardKey.One)) ToggleAim();
+        if (Raylib.IsKeyPressed(KeyboardKey.Seven)) ToggleSnap();
         if (Raylib.IsKeyPressed(KeyboardKey.Two)) DoOverwatch();
         if (Raylib.IsKeyPressed(KeyboardKey.Three)) DoHunker();
         if (Raylib.IsKeyPressed(KeyboardKey.Four)) ToggleGrenade();
@@ -1564,7 +1964,7 @@ public class Game
         if (Raylib.IsKeyPressed(KeyboardKey.Space) && HoverValid) { BoardAct(HoverX, HoverY); return; }
         if (KbCursor && Raylib.GetMouseDelta() != Vector2.Zero) KbCursor = false;  // mouse takes back over
 
-        if (Raylib.IsMouseButtonPressed(MouseButton.Right)) { AimMode = false; GrenadeMode = false; ItemMode = false; return; }
+        if (Raylib.IsMouseButtonPressed(MouseButton.Right)) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; return; }
 
         if (Raylib.IsMouseButtonPressed(MouseButton.Left))
         {
@@ -1604,7 +2004,7 @@ public class Game
         if (AimMode)
         {
             if (hovered != null && hovered.Team == Team.Enemy && CanTarget(Selected, hovered)) IssueShoot(hovered);
-            else AimMode = false;
+            else { AimMode = false; SnapShot = false; }
             return;
         }
         if (hovered != null && hovered.Team == Team.Player) { SelectUnit(hovered); return; }
@@ -1716,6 +2116,7 @@ public class Game
         switch (id)
         {
             case "shoot": ToggleAim(); break;
+            case "snap": ToggleSnap(); break;
             case "grenade": ToggleGrenade(); break;
             case "item": ToggleItem(); break;
             case "ability": DoAbility(); break;
@@ -1726,7 +2127,7 @@ public class Game
         }
     }
 
-    void SelectUnit(Unit u) { Selected = u; AimMode = false; Audio.Play("select"); }
+    void SelectUnit(Unit u) { Selected = u; AimMode = false; SnapShot = false; Audio.Play("select"); }
 
     void CycleSelection()
     {
@@ -1735,17 +2136,29 @@ public class Game
         int idx = Selected != null ? actable.IndexOf(Selected) : -1;
         Selected = actable[(idx + 1) % actable.Count];
         AimMode = false;
+        SnapShot = false;
         Audio.Play("select");
     }
 
-    void ToggleAim()
+    // FIRE: enter aim mode for the AIMED shot (full aim, ends the turn).
+    void ToggleAim() => EnterAim(false);
+    // SNAP: enter the SAME aim mode but flag the pending shot as a snap (1 action, no
+    // end-turn, -SnapAim). Generalises Assault's free RUN&GUN to every soldier as a paid,
+    // less-accurate option, so "shoot" is a real per-turn decision.
+    void ToggleSnap() => EnterAim(true);
+
+    void EnterAim(bool snap)
     {
         if (Selected == null || !Selected.CanAct || Selected.Ammo <= 0) return;
-        if (AimMode) { AimMode = false; return; }
+        // pressing the active variant again toggles aim OFF; switching variants (FIRE<->SNAP)
+        // just re-flags the pending shot and keeps the current target lock.
+        if (AimMode && SnapShot == snap) { AimMode = false; SnapShot = false; return; }
+        if (AimMode) { SnapShot = snap; return; }      // already aiming: flip the variant, keep AimTarget
         if (!HasAnyTarget(Selected)) return;
         GrenadeMode = false;
         ItemMode = false;
         AimMode = true;
+        SnapShot = snap;
         AimTarget = FirstTargetFor(Selected);
     }
 
@@ -1753,7 +2166,7 @@ public class Game
     {
         if (Selected == null || !Selected.CanAct || Selected.Grenades <= 0) return;
         GrenadeMode = !GrenadeMode;
-        if (GrenadeMode) AimMode = false;
+        if (GrenadeMode) { AimMode = false; SnapShot = false; }   // clear the snap variant too (review #3)
     }
 
     void IssueGrenade(int tx, int ty)
@@ -1771,7 +2184,7 @@ public class Game
     {
         if (Selected == null || !Selected.CanAct || Selected.ItemCharge <= 0 || Selected.Item == ItemKind.None) return;
         ItemMode = !ItemMode;
-        if (ItemMode) { AimMode = false; GrenadeMode = false; }
+        if (ItemMode) { AimMode = false; SnapShot = false; GrenadeMode = false; }   // clear the snap variant too (review #3)
     }
 
     /// Whether a utility item can legally land on (tx,ty): barricade needs an empty
@@ -1835,15 +2248,22 @@ public class Game
         if (!CanTarget(Selected, target)) return;
         if (SquadConcealed) BreakConcealment(Selected);  // 4.4: the ambush shot springs the trap
         Selected.Ammo--;
-        // Run & Gun: this shot costs one action instead of ending the turn.
+        // Action cost + accuracy by shot variant:
+        //  - RUN&GUN (Assault ability): free no-penalty shot — costs 1 action, no end-turn.
+        //  - SNAP: costs 1 action, no end-turn, at the SnapAim penalty (folded into aimMod).
+        //  - AIMED (default): full aim, ENDS the turn.
+        bool snap = SnapShot && !Selected.RunGun;        // RunGun's free shot takes priority over snap
+        int aimMod = 0;
         if (Selected.RunGun) { Selected.ActionsLeft = Math.Max(0, Selected.ActionsLeft - 1); Selected.RunGun = false; }
-        else Selected.ActionsLeft = 0;
-        var res = Combat.Resolve(Grid, Selected, target);
+        else if (snap)       { Selected.ActionsLeft = Math.Max(0, Selected.ActionsLeft - 1); aimMod = SnapAim; }
+        else                   Selected.ActionsLeft = 0;
+        var res = Combat.Resolve(Grid, Selected, target, aimMod);
         Selected.Steady = false;                         // braced shot consumed
         Selected.FiredFromConcealment = false;           // ambush bonus is for this one shot only
         Enqueue(new ShotAnim(Selected, target, res), Team.Player);
         if (!target.Active) ActivatePod(target.PodId);   // gunfire reveals the pod
         AimMode = false;
+        SnapShot = false;
         _tutShot = true;
     }
 
@@ -1958,6 +2378,7 @@ public class Game
                 break;
         }
         AimMode = false;
+        SnapShot = false;
         GrenadeMode = false;
         ItemMode = false;
     }
@@ -2027,9 +2448,11 @@ public class Game
         FaceShields();                                           // AEGIS turns its barrier toward the squad
         foreach (var e in Enemies) if (e.Alive) { e.BeginTurn(); TickStatuses(e); }
         _aiUnits = AliveEnemies().Where(e => e.Active).ToList();  // dormant/suspicious pods don't act
+        PlanEnemySquad();                                        // shared focus + overwatch map (advisory)
         _aiIdx = 0;
         _aiStage = AiStage.PickNext;
         _aiPlan = null;
+        ClearIntent();
         ShowBanner("ENEMY TURN", true);
         Enqueue(new WaitAnim(0.5f), Team.Enemy);
     }
@@ -2038,13 +2461,101 @@ public class Game
     {
         _turnCount++;
         Phase = Phase.PlayerTurn;
+        ClearIntent();                    // no enemy intent lingers into the player's turn
         Grid.TickSmoke();                 // smoke clouds decay one turn per round
+        _refundedThisTurn.Clear();        // flank-kill refund is one per soldier per turn
         if (AutoPlay) AutoStallCheck();
         foreach (var p in Players) if (p.Alive) { p.BeginTurn(); TickStatuses(p); }
         foreach (var e in Enemies) if (e.Alive) { e.ReactedThisTurn = false; e.Suppress = 0; } // OW resets; suppression expires
         Selected = Players.FirstOrDefault(p => p.CanAct);
         AimMode = false;
         ShowBanner("PLAYER TURN", false);
+    }
+
+    // ---------------- squad coordination ----------------
+    // Computed ONCE per enemy turn (right after _aiUnits is snapshotted in EndPlayerTurn).
+    // Produces two shared, ADVISORY hints that Ai.Plan reads to act as a coordinated squad
+    // rather than a pack of independent greedy units:
+    //   * EnemyFocus           — the soldier the squad should collapse on (focus fire).
+    //   * PlayerOverwatchTiles — tiles a live player overwatch currently threatens, so units
+    //                            can route around the kill zone (overwatch-aware movement).
+    // Both are biases only; per-unit scoring still lets the fundamentals dominate, so no enemy
+    // is ever forced into a no-progress choice (stall/timeout invariants are preserved).
+    void PlanEnemySquad()
+    {
+        // ---- 1. shared focus target ----------------------------------------------------
+        // Pick the soldier most worth concentrating fire on: low effective HP (closest to a
+        // kill), exposed (little/no cover from the squad's vantage), the VIP, and how many of
+        // our active shooters can currently bring fire on it (a target several enemies can hit
+        // is collapsible THIS turn). Perfect-information: we only read public live state.
+        EnemyFocus = null;
+        var soldiers = AlivePlayers();
+        // shooters that actually contribute to a focus-fire collapse (MEDIC heals, SAPPER
+        // demolishes — neither converges fire, so they don't define the priority target).
+        var shooters = _aiUnits.Where(e => e.Alive && e.Active && e.Ammo > 0
+                                        && e.Cls != "MEDIC" && e.Cls != "SAPPER").ToList();
+        float bestScore = float.NegativeInfinity;
+        foreach (var p in soldiers)
+        {
+            // a caged captive (Rescue) is invulnerable until freed — CanTarget blocks every
+            // shot on it, so it can never be collapsed; skip it so the focus lands on a
+            // shootable soldier instead of an inert target (review #6).
+            if (p.IsVip && CaptiveLocked) continue;
+            // how many active enemies can hit p right now (mirrors CanTarget exactly)
+            int shootersOnTarget = 0;
+            float bestHitOnTarget = 0f;
+            foreach (var e in shooters)
+            {
+                if (!CanTarget(e, p)) continue;
+                shootersOnTarget++;
+                int h = Combat.ComputeOdds(Grid, e, p).HitChance;
+                if (h > bestHitOnTarget) bestHitOnTarget = h;
+            }
+
+            // effective-HP term: the less HP, the juicier (a soldier near death is the kill).
+            float hpFrac = p.MaxHp > 0 ? (float)p.Hp / p.MaxHp : 1f;
+            float score = (1f - hpFrac) * 60f;                 // 0 (full) .. 60 (near-dead)
+            // exposure: no cover from the nearest shooter's angle => easier to drop
+            Unit anchor = shooters.Count > 0 ? shooters.OrderBy(e => Util.TileDist(e.X, e.Y, p.X, p.Y)).First() : null;
+            if (anchor != null && Grid.GetCover(p.X, p.Y, anchor.X, anchor.Y).Level == 0) score += 25f;
+            if (p.IsVip) score += 70f;                          // the asset is always the prize
+            score += shootersOnTarget * 22f;                    // collapsible THIS turn
+            score += bestHitOnTarget * 0.25f;                   // and we can actually land it
+            // a target nobody can currently hit is a weak focus; only pick it as a fallback
+            if (shootersOnTarget == 0) score -= 40f;
+
+            if (score > bestScore) { bestScore = score; EnemyFocus = p; }
+        }
+
+        // ---- 2. player overwatch kill-zone map -----------------------------------------
+        // Mirror the EXACT reaction test in OnUnitEnteredTile: a watcher w reacts to a unit
+        // entering tile T iff w is on overwatch, has ammo, hasn't reacted, and CanTarget(w, T).
+        // CanTarget = within w.Weapon.MaxRange AND HasLineOfSight(w -> T, commanding-if-2-tier).
+        // We replicate that per tile so the AI's threat model is TRUTHFUL (no phantom denial).
+        PlayerOverwatchTiles.Clear();
+        // Mirror CanTarget's reaction gate EXACTLY (Alive && OnOverwatch && !ReactedThisTurn
+        // && Ammo>0). We deliberately do NOT add a Disoriented filter the real reaction lacks
+        // (review #3): today disorient only comes from FLASH, which clears OnOverwatch, so the
+        // case is unreachable — but mirroring CanTarget keeps the model truthful if a future
+        // non-flash disorient source is ever added (so the AI never treats a watched tile as safe).
+        var watchers = Players.Where(w => w.Alive && w.OnOverwatch && !w.ReactedThisTurn
+                                       && w.Ammo > 0).ToList();
+        if (watchers.Count > 0)
+        {
+            for (int x = 0; x < Grid.W; x++)
+                for (int y = 0; y < Grid.H; y++)
+                {
+                    foreach (var w in watchers)
+                    {
+                        if (w.X == x && w.Y == y) continue;
+                        if (Util.TileDist(w.X, w.Y, x, y) > w.Weapon.MaxRange) continue;
+                        bool commanding = Grid.HeightAt(w.X, w.Y) - Grid.HeightAt(x, y) >= 2;
+                        if (!Grid.HasLineOfSight(w.X, w.Y, x, y, commanding)) continue;
+                        PlayerOverwatchTiles.Add((x, y));
+                        break;   // one watcher is enough to mark the tile threatened
+                    }
+                }
+        }
     }
 
     // ---------------- enemy turn ----------------
@@ -2069,12 +2580,32 @@ public class Game
             }
             _aiPlan = Ai.Plan(this, e);
 
-            if (_aiPlan.Path.Count > 0)
+            // TELEGRAPH (non-autoplay only): before the unit moves/acts, hold a brief beat and
+            // show its INTENT (move path + target + threatened tiles). The telegraph uses the SAME
+            // _aiPlan that executes next, so it never lies. AutoPlay skips this entirely — no extra
+            // WaitAnim, no intent state — so the smoke test's frame counts stay unchanged.
+            if (!AutoPlay)
             {
-                e.ActionsLeft -= _aiPlan.MoveActions;
-                foreach (var (px, py) in _aiPlan.Path) Enqueue(new MoveStepAnim(e, px, py), Team.Enemy);
-                Audio.Play("move");
+                IntentUnit = e;
+                IntentPlan = _aiPlan;
+                IntentDest = _aiPlan.Path.Count > 0 ? _aiPlan.Path[^1] : (e.X, e.Y);
+                Enqueue(new WaitAnim(TelegraphBeat), Team.Enemy);
+                _aiStage = AiStage.Telegraph;
+                return;
             }
+
+            EnqueuePlannedMove(e);
+            _aiStage = AiStage.ActAfterMove;
+            return;
+        }
+
+        if (_aiStage == AiStage.Telegraph)
+        {
+            // the telegraph beat has elapsed (queue drained) — clear the intent so it doesn't
+            // linger past the unit's action, then enqueue the planned move and proceed to act.
+            var e = _aiUnits[_aiIdx];
+            ClearIntent();
+            if (e.Alive) EnqueuePlannedMove(e);
             _aiStage = AiStage.ActAfterMove;
             return;
         }
@@ -2157,6 +2688,20 @@ public class Game
             _aiStage = AiStage.PickNext;
         }
     }
+
+    // Enqueue the move steps for the just-planned enemy (shared by the AutoPlay fast path and
+    // the post-telegraph path so the move timing/cost accounting is identical either way).
+    void EnqueuePlannedMove(Unit e)
+    {
+        if (_aiPlan == null || _aiPlan.Path.Count == 0) return;
+        e.ActionsLeft -= _aiPlan.MoveActions;
+        foreach (var (px, py) in _aiPlan.Path) Enqueue(new MoveStepAnim(e, px, py), Team.Enemy);
+        Audio.Play("move");
+    }
+
+    // Clear the enemy-intent telegraph (so it doesn't render past the unit's action or into the
+    // player's turn). Called when the telegraph beat ends and at every turn boundary.
+    void ClearIntent() { IntentUnit = null; IntentPlan = null; }
 
     // ---------------- barracks perk choice ----------------
     void ChoosePerk(int which)
@@ -2448,6 +2993,91 @@ public class Game
             : "STATUSTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
+    /// Headless self-test (SIGHTLINE_SNAPTEST): the per-turn DEPTH mechanics —
+    ///   (1) a SNAP shot costs exactly 1 action and does NOT end the turn (and the snap flag
+    ///       is consumed), while an AIMED shot still ends the turn (ActionsLeft -> 0);
+    ///   (2) a player flank-kill (exposed target) refunds +1 action ONCE per soldier per turn
+    ///       (a second flank-kill the same turn grants nothing), and a kill on a COVERED target
+    ///       refunds nothing.
+    /// Drives the real IssueShoot / TryFlankKillRefund paths on a controlled open field.
+    public string SnapRefundSelfTest()
+    {
+        NoPersist = true;
+        var fails = new System.Collections.Generic.List<string>();
+
+        // ---- controlled scene: empty open field, perfect LoS, no concealment ----
+        Grid = new Grid();
+        Players = new System.Collections.Generic.List<Unit>();
+        Enemies = new System.Collections.Generic.List<Unit>();
+        Vip = null; CaptiveLocked = false; SquadConcealed = false;
+        Objective = Objective.Eliminate; EvacZone.Clear();
+        Phase = Phase.PlayerTurn;
+        _refundedThisTurn.Clear();
+
+        Unit MkP(int x, int y) {
+            var u = new Unit { Name = "SOLDIER", Cls = "ASSAULT", Team = Team.Player, X = x, Y = y,
+                               Hp = 8, MaxHp = 8, Aim = 65, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+            u.Ammo = u.Weapon.Clip; u.SyncPos(); u.BeginTurn(); return u;
+        }
+        Unit MkE(int x, int y, int hp) {
+            var u = new Unit { Name = "FOE", Cls = "GRUNT", Team = Team.Enemy, X = x, Y = y,
+                               Hp = hp, MaxHp = 6, Aim = 60, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+            u.Ammo = u.Weapon.Clip; u.Alert = AlertLevel.Alert; u.SyncPos(); u.BeginTurn(); return u;
+        }
+
+        // ---- 1. SNAP shot: 1 action, no end-turn, flag consumed ----
+        var shooter = MkP(5, 5);
+        var dummy   = MkE(9, 5, 6);            // full HP so the shot can't kill (isolates the action cost)
+        Players.Add(shooter); Enemies.Add(dummy);
+        Selected = shooter; SnapShot = true;
+        IssueShoot(dummy);
+        if (shooter.ActionsLeft != 1) fails.Add($"snapCost={shooter.ActionsLeft}(want1)");
+        if (SnapShot) fails.Add("snapFlagNotConsumed");
+        if (AimMode) fails.Add("snapLeftAimModeOn");
+        _anims.Clear();                         // discard the queued ShotAnim; we don't pump frames here
+
+        // ---- 1b. AIMED shot still ends the turn ----
+        var shooter2 = MkP(5, 7);
+        Players.Add(shooter2);
+        Selected = shooter2; SnapShot = false;
+        IssueShoot(dummy);
+        if (shooter2.ActionsLeft != 0) fails.Add($"aimedCost={shooter2.ActionsLeft}(want0)");
+        _anims.Clear();
+
+        // ---- 2. flank-kill refund: once per soldier per turn, exposed only ----
+        // Build a flanked shot result and stage its ShotAnim as the ACTIVE anim, exactly as the
+        // live kill path does (KillUnit -> TryFlankKillRefund reads ActiveAnim's ShotResult).
+        var killer = MkP(5, 9);
+        var victim = MkE(7, 9, 1);
+        Players.Add(killer); Enemies.Add(victim);
+        killer.ActionsLeft = 0;                 // as if an aimed flank-shot just ended the turn
+        var flankRes = new ShotResult { Hit = true, Damage = 5, Odds = new ShotOdds { Flanked = true, CoverLevel = 0 } };
+        _anims.Clear(); _anims.Add(new ShotAnim(killer, victim, flankRes));   // active anim = this shot
+        _refundedThisTurn.Clear();
+        victim.Alive = false;                   // the victim has just been downed
+        TryFlankKillRefund(victim);
+        if (killer.ActionsLeft != 1) fails.Add($"refund1={killer.ActionsLeft}(want1)");
+        TryFlankKillRefund(victim);             // second flank-kill same turn -> capped, no extra
+        if (killer.ActionsLeft != 1) fails.Add($"refundCap={killer.ActionsLeft}(want1)");
+
+        // ---- 2b. a COVERED kill refunds nothing ----
+        var killer2 = MkP(3, 9);
+        var victim2 = MkE(1, 9, 1);
+        Players.Add(killer2); Enemies.Add(victim2);
+        killer2.ActionsLeft = 0;
+        var coverRes = new ShotResult { Hit = true, Damage = 5, Odds = new ShotOdds { Flanked = false, CoverLevel = 2 } };
+        _anims.Clear(); _anims.Add(new ShotAnim(killer2, victim2, coverRes));
+        _refundedThisTurn.Clear();
+        victim2.Alive = false;
+        TryFlankKillRefund(victim2);
+        if (killer2.ActionsLeft != 0) fails.Add($"coveredRefunded={killer2.ActionsLeft}(want0)");
+        _anims.Clear();
+
+        return fails.Count == 0
+            ? "SNAPTEST: PASS (snap=1 action/no-end-turn, aimed ends turn, flank-kill refunds once/turn, covered kill refunds nothing)"
+            : "SNAPTEST: FAIL (" + string.Join(",", fails) + ")";
+    }
+
     /// Headless self-test (SIGHTLINE_ITEMTEST): the utility-item mechanics — smoke
     /// blocks + decays line of sight, a barricade lays cover, loadouts map per class.
     /// Window-free (grid + tile math only).
@@ -2588,6 +3218,29 @@ public class Game
     // ---------------- overlay click ----------------
     void HandleOverlayClick()
     {
+        // intro HEAT/Ascension selector: dial the difficulty for the NEXT new run (0..unlocked).
+        // Arrows/A-D adjust; the +/- buttons (rects from Hud) are clickable. CONTINUE keeps the
+        // saved run's own heat, so this only affects a fresh DEPLOY.
+        if (Phase == Phase.Intro)
+        {
+            EnsureMetaLoaded();
+            PendingHeat = Sightline.Heat.Clamp(Math.Min(PendingHeat, UnlockedHeat));
+            int delta = 0;
+            if (Raylib.IsKeyPressed(KeyboardKey.Left) || Raylib.IsKeyPressed(KeyboardKey.A) || Raylib.IsKeyPressed(KeyboardKey.KpSubtract)) delta = -1;
+            else if (Raylib.IsKeyPressed(KeyboardKey.Right) || Raylib.IsKeyPressed(KeyboardKey.D) || Raylib.IsKeyPressed(KeyboardKey.KpAdd)) delta = 1;
+            if (Raylib.IsMouseButtonPressed(MouseButton.Left))
+            {
+                var m = Raylib.GetMousePosition();
+                if (Raylib.CheckCollisionPointRec(m, Hud.HeatMinus)) delta = -1;
+                else if (Raylib.CheckCollisionPointRec(m, Hud.HeatPlus)) delta = 1;
+            }
+            if (delta != 0)
+            {
+                PendingHeat = Sightline.Heat.Clamp(Math.Clamp(PendingHeat + delta, 0, UnlockedHeat));
+                Audio.Play("select");
+            }
+        }
+
         // intro CONTINUE: resume a saved campaign (button or key C)
         if (Phase == Phase.Intro && SaveGame.Exists)
         {

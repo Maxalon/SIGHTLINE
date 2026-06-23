@@ -21,20 +21,24 @@ public static class Mission
     public static int ForcedLayout = -1;
 
     // Soft biome->layout affinity: each biome index (matching Biome.All order —
-    // STEEL=0 ARID=1 TUNDRA=2 VERDANT=3 ASH=4 VOID=5) hints at a preferred arena
-    // index. When an authored map is rolled, there is a 50% chance to pick the hinted
+    // STEEL=0 ARID=1 TUNDRA=2 VERDANT=3 ASH=4 VOID=5 NEON=6 MAGMA=7) hints at a preferred
+    // arena index. When an authored map is rolled, there is a 50% chance to pick the hinted
     // layout and a 50% chance to pick randomly — keeping variety while nudging theme.
     // -1 means no preference (always picks randomly). This is SOFT: ForcedLayout
     // overrides it completely, and the connectivity guard can still fall back to
     // procedural if a hinted layout fails (though the arenas are designed to pass).
+    // Keep this array length-aligned with Biome.All (one entry per biome) so the two
+    // newest biomes also theme; PickLayout falls back to a random arena past the end.
     static readonly int[] BiomeLayoutHint =
     {
-        2,   // STEEL   → PILLARS (industrial columns)
-        8,   // ARID    → RIDGE (exposed slope, decisive high ground)
-        7,   // TUNDRA  → FOXHOLES (defensive low-cover warren)
+        11,  // STEEL   → BASTION (industrial fortress, tier-2 keep)
+        13,  // ARID    → SPUR (sun-baked diagonal high-ground spine)
+        12,  // TUNDRA  → CHASM (a frozen ravine split by a cover river)
         10,  // VERDANT → THICKET (dense organic cover clusters)
-        6,   // ASH     → CROSSROADS (ruined sightline lanes)
+        14,  // ASH     → HOOK (a ruined outpost with an asymmetric flank)
         9,   // VOID    → RUINS (open eerie arena, long sightlines)
+        15,  // NEON    → GRID (orthogonal server-room rack lattice)
+        16,  // MAGMA   → FORGE (commanding tier-2 foundry platform)
     };
 
     /// The four starting soldiers for a fresh run.
@@ -111,45 +115,7 @@ public static class Mission
             authored = Util.Roll(55) &&
                 TryApplyLayout(grid, occupied, players, enemies, evacSet, terminal, PickLayout(missionNum), sabotage);
         if (!authored)
-        {
-            // contested high ground: raised plateaus in the mid-field (more on later missions)
-            RaisePlateau(grid, evacSet, 7, 3, 2, 2);
-            RaisePlateau(grid, evacSet, 11, 7, 2, 2);
-            if (missionNum >= 3) RaisePlateau(grid, evacSet, Util.RandInt(6, 11), Util.RandInt(1, 8), 2, 2);
-            // a commanding tier-2 redoubt appears on later missions (sees over high cover)
-            if (missionNum >= 4) RaisePlateau(grid, evacSet, Util.RandInt(7, 10), Util.RandInt(3, 6), 2, 2, 2);
-
-            // 4.2 ENCOUNTER GEOMETRY: a staggered mid-field SCREEN of high cover breaks
-            // the long cross-board sightlines, so the squad can advance into the midfield
-            // under cover before tripping a pod (a deliberate approach, not a turn-1
-            // ambush). No single column is ever fully walled and row 5 is left as an open
-            // lane, so the board stays traversable — that lane is the one risky direct route.
-            var screen = new (int x, int y)[]
-            {
-                (7, 1), (7, 2), (7, 3),   (8, 6), (8, 7), (8, 8),
-                (9, 0), (9, 1), (9, 9), (9, 10),   (10, 3), (10, 4), (10, 7), (10, 8),
-                (11, 1), (11, 2),
-            };
-            foreach (var (sx, sy) in screen)
-                if (grid.InBounds(sx, sy) && !occupied.Contains((sx, sy)))
-                { grid.Tiles[sx, sy] = TileType.HighCover; occupied.Add((sx, sy)); }
-            // low cover flanking the open central lane, for cover-fighting on the direct route
-            PlaceBlock(grid, occupied, 6, 5, TileType.LowCover, 1, 1);
-            PlaceBlock(grid, occupied, 12, 5, TileType.LowCover, 1, 1);
-
-            // random crates (a touch more clutter on later missions; biased toward LoS-blocking high cover)
-            int sprinkles = 14 + Math.Min(6, missionNum);
-            int guard = 0;
-            while (sprinkles > 0 && guard++ < 500)
-            {
-                int x = Util.RandInt(3, grid.W - 4);
-                int y = Util.RandInt(0, grid.H - 1);
-                if (occupied.Contains((x, y)) || grid.Tiles[x, y] != TileType.Floor) continue;
-                grid.Tiles[x, y] = Util.Roll(45) ? TileType.LowCover : TileType.HighCover;
-                occupied.Add((x, y));
-                sprinkles--;
-            }
-        }
+            BuildProcedural(grid, occupied, evacSet, missionNum);
 
         // protective cover beside each soldier and hostile (both layout paths)
         foreach (var u in players) TryCover(grid, occupied, u.X + 1, u.Y, TileType.LowCover);
@@ -163,6 +129,144 @@ public static class Mission
 
         foreach (var u in players) u.SyncPos();
         foreach (var u in enemies) u.SyncPos();
+    }
+
+    // ---- Procedural map generation -----------------------------------------
+    // The procedural path picks one of several mid-field cover ARCHETYPES at random so
+    // generated missions don't all look the same. Every archetype preserves the 4.2
+    // encounter-geometry intent: sightline-blocking HIGH cover concentrated in the
+    // mid-field (cols ~6-12), at least one deliberately OPEN "risky direct" lane so the
+    // board stays traversable, and no fully-walled column. Plateaus (incl. a tier-2
+    // redoubt on later missions) are shared across archetypes, and `EnsureConnectivity`
+    // (run by Build afterwards) is the final net should sprinkles/protective cover ever
+    // pinch a path. Spawn columns (0-3) and enemy columns (14-17) are left clear.
+
+    static void BuildProcedural(Grid grid, HashSet<(int, int)> occupied,
+                                HashSet<(int, int)> evac, int missionNum)
+    {
+        // contested high ground: raised plateaus in the mid-field (more on later missions).
+        // Shared by all archetypes so elevation play is always present.
+        RaisePlateau(grid, evac, 7, 3, 2, 2);
+        RaisePlateau(grid, evac, 11, 7, 2, 2);
+        if (missionNum >= 3) RaisePlateau(grid, evac, Util.RandInt(6, 11), Util.RandInt(1, 8), 2, 2);
+        // a commanding tier-2 redoubt appears on later missions (sees over high cover)
+        if (missionNum >= 4) RaisePlateau(grid, evac, Util.RandInt(7, 10), Util.RandInt(3, 6), 2, 2, 2);
+
+        // pick a mid-field cover archetype (variety); each leaves an open lane + no walled column
+        switch (Util.RandInt(0, 3))
+        {
+            case 0:  ArchScreen(grid, occupied);        break;   // the 4.2 staggered screen
+            case 1:  ArchRedoubt(grid, occupied);       break;   // a central bunker, flank lanes
+            case 2:  ArchTwinCorridors(grid, occupied); break;   // two cover spines, a centre gap
+            default: ArchDiagonalWall(grid, occupied);  break;   // a slanted wall with a breach
+        }
+
+        // random crates (a touch more clutter on later missions; biased toward LoS-blocking high cover)
+        Sprinkle(grid, occupied, 14 + Math.Min(6, missionNum));
+    }
+
+    /// Archetype 0 — the original 4.2 staggered mid-field SCREEN of high cover: breaks the
+    /// long cross-board sightlines so the squad can advance into the midfield under cover
+    /// before tripping a pod. No column is fully walled; row 5 is the one open risky lane.
+    static void ArchScreen(Grid grid, HashSet<(int, int)> occupied)
+    {
+        var screen = new (int x, int y)[]
+        {
+            (7, 1), (7, 2), (7, 3),   (8, 6), (8, 7), (8, 8),
+            (9, 0), (9, 1), (9, 9), (9, 10),   (10, 3), (10, 4), (10, 7), (10, 8),
+            (11, 1), (11, 2),
+        };
+        foreach (var (sx, sy) in screen) PlaceCover(grid, occupied, sx, sy, TileType.HighCover);
+        // low cover flanking the open central lane, for cover-fighting on the direct route
+        PlaceCover(grid, occupied, 6, 5, TileType.LowCover);
+        PlaceCover(grid, occupied, 12, 5, TileType.LowCover);
+    }
+
+    /// Archetype 1 — a central REDOUBT: a compact high-cover bunker mid-board with a low-cover
+    /// apron, leaving wide flanking lanes top and bottom. Rewards a flank rather than a frontal
+    /// push; the bunker breaks the central sightline while the rims stay open.
+    static void ArchRedoubt(Grid grid, HashSet<(int, int)> occupied)
+    {
+        // high-cover ring of a hollow bunker around the mid-field (rows 3-7, cols 8-10).
+        // The WEST face at row 5 is left open as a doorway, so the interior (and a centre
+        // terminal/captive, if the objective seats one there) stays reachable without the
+        // connectivity net having to carve in.
+        var ring = new (int x, int y)[]
+        {
+            (8, 3), (9, 3), (10, 3),
+            (8, 4),                 (10, 4),
+                                    (10, 5),   // west doorway (8,5) open; east slit (10,5)
+            (8, 6),                 (10, 6),
+            (8, 7), (9, 7), (10, 7),
+        };
+        foreach (var (sx, sy) in ring) PlaceCover(grid, occupied, sx, sy, TileType.HighCover);
+        // low-cover apron on the approaches (covered fighting positions outside the bunker)
+        PlaceCover(grid, occupied, 6, 4, TileType.LowCover);
+        PlaceCover(grid, occupied, 6, 6, TileType.LowCover);
+        PlaceCover(grid, occupied, 12, 4, TileType.LowCover);
+        PlaceCover(grid, occupied, 12, 6, TileType.LowCover);
+        // top/bottom flanking lanes (rows 0-1 and 9-10) are deliberately left open.
+    }
+
+    /// Archetype 2 — TWIN CORRIDORS: two vertical high-cover spines (a forward and a rear
+    /// staggered wall), each gapped so a soldier can slip through, with an open central seam
+    /// between them. Creates layered cover and channels movement into the gaps.
+    static void ArchTwinCorridors(Grid grid, HashSet<(int, int)> occupied)
+    {
+        // forward spine at col 7, gap at rows 4-5 (the open seam)
+        for (int y = 0; y < grid.H; y++)
+            if (y < 4 || y > 5) PlaceCover(grid, occupied, 7, y, TileType.HighCover);
+        // rear spine at col 11, gap at rows 5-6 (offset from the forward gap -> staggered)
+        for (int y = 0; y < grid.H; y++)
+            if (y < 5 || y > 6) PlaceCover(grid, occupied, 11, y, TileType.HighCover);
+        // low cover bracketing the central seam (cover-fight in the gap between the spines)
+        PlaceCover(grid, occupied, 9, 4, TileType.LowCover);
+        PlaceCover(grid, occupied, 9, 6, TileType.LowCover);
+    }
+
+    /// Archetype 3 — a DIAGONAL WALL of high cover slashing across the mid-field with a single
+    /// breach gap, plus a low-cover counter-diagonal. Strong sightline break on a slant; the
+    /// breach is the contested crossing, and the wall's ends leave the rims open.
+    static void ArchDiagonalWall(Grid grid, HashSet<(int, int)> occupied)
+    {
+        // a slanted high-cover wall from upper-mid to lower-mid, with a one-tile breach
+        var wall = new (int x, int y)[]
+        {
+            (7, 1), (7, 2),
+            (8, 3), (8, 4),
+            (9, 5),                 // breach is the gap just below here (row 6 left open)
+            (10, 7), (10, 8),
+            (11, 9),
+        };
+        foreach (var (sx, sy) in wall) PlaceCover(grid, occupied, sx, sy, TileType.HighCover);
+        // a short low-cover counter-diagonal giving the attacker covered footing to the breach
+        PlaceCover(grid, occupied, 6, 6, TileType.LowCover);
+        PlaceCover(grid, occupied, 9, 6, TileType.LowCover);   // flanks the breach, doesn't seal it
+        PlaceCover(grid, occupied, 12, 6, TileType.LowCover);
+    }
+
+    /// Place a cover tile only on an unreserved, currently-empty floor tile (and mark it
+    /// occupied). The shared primitive for all procedural archetypes.
+    static void PlaceCover(Grid grid, HashSet<(int, int)> occupied, int x, int y, TileType t)
+    {
+        if (!grid.InBounds(x, y) || occupied.Contains((x, y)) || grid.Tiles[x, y] != TileType.Floor) return;
+        grid.Tiles[x, y] = t;
+        occupied.Add((x, y));
+    }
+
+    /// Scatter `count` random crates across the mid-board, biased toward LoS-blocking high cover.
+    static void Sprinkle(Grid grid, HashSet<(int, int)> occupied, int count)
+    {
+        int guard = 0;
+        while (count > 0 && guard++ < 500)
+        {
+            int x = Util.RandInt(3, grid.W - 4);
+            int y = Util.RandInt(0, grid.H - 1);
+            if (occupied.Contains((x, y)) || grid.Tiles[x, y] != TileType.Floor) continue;
+            grid.Tiles[x, y] = Util.Roll(45) ? TileType.LowCover : TileType.HighCover;
+            occupied.Add((x, y));
+            count--;
+        }
     }
 
     /// Stamp a hand-authored template onto the grid, then verify every spawn, the
@@ -213,7 +317,11 @@ public static class Mission
     static void SpawnEnemies(Grid grid, List<Unit> enemies, int n, HashSet<(int, int)> evac,
                              int enemyDelta = 0, int statDelta = 0)
     {
-        int count = Math.Clamp(4 + n + enemyDelta, 3, 10);   // deployment-card modifier
+        // Headcount cap raised 10 -> 12 so the top-Heat "+enemy" rungs aren't silently wasted
+        // (the +1/+1 from RELENTLESS/OVERWHELMING used to clip at 10 on later missions). 12 still
+        // fits easily: spawns occupy cols 14-17 over grid.H rows (44 slots) and the collision loop
+        // below relocates any overlap.
+        int count = Math.Clamp(4 + n + enemyDelta, 3, 12);   // deployment-card + Heat modifier
         int bump = Math.Max(0, n - 1 + statDelta);           // stat growth per mission +/- card
         var rows = new List<int>();
         for (int y = 0; y < grid.H; y++) rows.Add(y);
@@ -240,32 +348,13 @@ public static class Mission
                 e = MakeHostile("WARLORD", "ELITE", WeaponKind.Lmg, 20 + n * 2, 72, 6, x, y);
             else if (midBoss)                   // mid-campaign elite (lighter than the WARLORD)
                 e = MakeHostile(n == 3 ? "BREAKER" : "WARDEN", "ELITE", WeaponKind.Lmg, 14 + n * 2, 68, 6, x, y);
-            else if (n >= 3 && r < 0.11f)       // immobile overwatch nest
-                e = MakeHostile("SENTRY", "TURRET", WeaponKind.Lmg, 6 + bump, 66 + bump, 0, x, y);
-            else if (n >= 2 && r < 0.23f)       // long-range marksman
-                e = MakeHostile("VIPER", "SNIPER", WeaponKind.Sniper, 4 + bump, 62 + bump, 5, x, y);
-            else if (n >= 3 && r < 0.33f)       // charging melee bruiser
-                e = MakeHostile("REAVER", "BERSERKER", WeaponKind.Shotgun, 12 + bump * 2, 58 + bump, 8, x, y);
-            else if (n >= 2 && r < 0.43f)       // hovering drone: ignores cover, beelines
-                e = MakeHostile("WASP", "DRONE", WeaponKind.Smg, 3 + bump, 60 + bump, 7, x, y);
-            else if (n >= 3 && r < 0.52f)       // shield-bearer: full frontal cover, must be flanked
-            {
-                e = MakeHostile("AEGIS", "SHIELD", WeaponKind.Rifle, 10 + bump * 2, 56 + bump, 4, x, y);
-                e.ShieldDx = -1; e.ShieldDy = 0;            // shield faces the squad (west)
-            }
-            else if (n >= 3 && r < 0.59f)       // demolition: tears down the squad's cover
-                e = MakeHostile("BREACH", "SAPPER", WeaponKind.Shotgun, 7 + bump, 56 + bump, 6, x, y);
-            else if (n >= 3 && r < 0.66f)       // field medic: heals wounded allies
-                e = MakeHostile("ORDERLY", "MEDIC", WeaponKind.Smg, 6 + bump, 52 + bump, 6, x, y);
-            else if (n >= 2 && r < 0.74f)
-                e = MakeHostile("OGRE", "BRUISER", WeaponKind.Lmg, 9 + bump * 2, 56 + bump, 5, x, y);
-            else if (r < 0.84f)
-                e = MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 58 + bump, 8, x, y);
-            else
-                e = MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 60 + bump, 6, x, y);
+            else                                // a tier-appropriate rank-and-file archetype
+                e = SelectArchetype(n, r, bump, x, y);
             if (e.Cls != "ELITE") e.Aim = Math.Min(82, e.Aim);
-            // grenades: bruisers + the elite always; some others from mission 2 on
+            // grenades: bruisers + the elite always; some others from mission 2 on.
+            // MORTAR already carries a deep frag pouch (set in SelectArchetype) — never overwrite it.
             if (e.Cls == "ELITE") e.Grenades = 2;
+            else if (e.Cls == "MORTAR") { /* keep MORTAR's 2-3 grenades from SelectArchetype */ }
             else if (n >= 2 && e.Cls != "MEDIC" && e.Cls != "SAPPER" && (e.Cls == "BRUISER" || Util.Roll(22))) e.Grenades = 1;
             // utility items (S2-B): snipers/scouts carry smoke to cover their movement;
             // some grunts get smoke from mission 3+. Flash given to berserkers (mission 3+)
@@ -281,6 +370,62 @@ public static class Mission
             e.PodId = i / 2;               // pods of ~2
             enemies.Add(e);
         }
+    }
+
+    /// Pick a rank-and-file hostile archetype for mission tier `n` from a uniform roll `r` in
+    /// [0,1). Each mission TIER owns an explicit, non-overlapping set of probability windows so
+    /// the composition reads deliberately — no archetype dominates a tier as an accidental
+    /// fall-through (the old single cascade leaked the whole 0.49-0.85 band onto the BRUISER on
+    /// mission 2, because every n>=3 branch was skipped). Archetype STATS are unchanged; only the
+    /// gating/order moved. First-appearance tiers are preserved:
+    ///   - Mission 1  (basic force):   SCOUT / GRUNT only.
+    ///   - Mission 2  (light skirmish): SNIPER, DRONE, HUNTER, BRUISER, SCOUT, GRUNT — balanced,
+    ///                                  none over ~20% (fixes the m2 BRUISER-dominance leak).
+    ///   - Missions 3+ (full roster):  the complete pool incl. TURRET/BERSERKER/SHIELD/SAPPER/
+    ///                                  MORTAR/MEDIC, weighted toward variety.
+    /// Boss / mid-boss slots (i == 0 on the final / m3 / m5) are handled by the caller, not here.
+    static Unit SelectArchetype(int n, float r, int bump, int x, int y)
+    {
+        if (n <= 1)   // MISSION 1 — basic force: a scout screen + grunts, nothing special.
+            return r < 0.60f
+                ? MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 58 + bump, 8, x, y)
+                : MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 60 + bump, 6, x, y);
+
+        if (n == 2)   // MISSION 2 — light skirmishers (each ~15-20%; deliberately no dominant type).
+        {
+            if (r < 0.18f) return MakeHostile("VIPER", "SNIPER", WeaponKind.Sniper, 4 + bump, 62 + bump, 5, x, y); // 18% marksman
+            if (r < 0.35f) return MakeHostile("WASP", "DRONE", WeaponKind.Smg, 3 + bump, 60 + bump, 7, x, y);      // 17% drone
+            if (r < 0.50f) return MakeHostile("JACKAL", "HUNTER", WeaponKind.Smg, 5 + bump, 60 + bump, 9, x, y);   // 15% flanker
+            if (r < 0.65f) return MakeHostile("OGRE", "BRUISER", WeaponKind.Lmg, 9 + bump * 2, 56 + bump, 5, x, y);// 15% bruiser
+            if (r < 0.85f) return MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 58 + bump, 8, x, y);   // 20% scout
+            return MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 60 + bump, 6, x, y);                 // 15% grunt
+        }
+
+        // MISSIONS 3+ — the full roster is available. Windows tuned for variety: every archetype
+        // appears, with the specialists (TURRET/BERSERKER/SHIELD/SAPPER/MORTAR/MEDIC) collectively
+        // the bulk and the plain SCOUT/GRUNT now a small remainder (they carried too much before).
+        if (r < 0.09f) return MakeHostile("SENTRY", "TURRET", WeaponKind.Lmg, 6 + bump, 66 + bump, 0, x, y);       //  9% immobile nest
+        if (r < 0.19f) return MakeHostile("VIPER", "SNIPER", WeaponKind.Sniper, 4 + bump, 62 + bump, 5, x, y);     // 10% marksman
+        if (r < 0.28f) return MakeHostile("REAVER", "BERSERKER", WeaponKind.Shotgun, 12 + bump * 2, 58 + bump, 8, x, y); // 9% rusher
+        if (r < 0.37f) return MakeHostile("WASP", "DRONE", WeaponKind.Smg, 3 + bump, 60 + bump, 7, x, y);          //  9% drone
+        if (r < 0.46f) return MakeHostile("JACKAL", "HUNTER", WeaponKind.Smg, 5 + bump, 60 + bump, 9, x, y);       //  9% flanker
+        if (r < 0.54f)                                                                                              //  8% shield
+        {
+            var s = MakeHostile("AEGIS", "SHIELD", WeaponKind.Rifle, 10 + bump * 2, 56 + bump, 4, x, y);
+            s.ShieldDx = -1; s.ShieldDy = 0;            // shield faces the squad (west)
+            return s;
+        }
+        if (r < 0.61f) return MakeHostile("BREACH", "SAPPER", WeaponKind.Shotgun, 7 + bump, 56 + bump, 6, x, y);   //  7% demolition
+        if (r < 0.68f)                                                                                              //  7% grenadier
+        {
+            var m = MakeHostile("MORTAR", "MORTAR", WeaponKind.Smg, 6 + bump, 50 + bump, 5, x, y);
+            m.Grenades = n >= 5 ? 3 : 2;                // a deep frag pouch — the EXISTING grenade AI uses it
+            return m;
+        }
+        if (r < 0.74f) return MakeHostile("ORDERLY", "MEDIC", WeaponKind.Smg, 6 + bump, 52 + bump, 6, x, y);       //  6% medic
+        if (r < 0.83f) return MakeHostile("OGRE", "BRUISER", WeaponKind.Lmg, 9 + bump * 2, 56 + bump, 5, x, y);    //  9% bruiser
+        if (r < 0.92f) return MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 58 + bump, 8, x, y);       //  9% scout
+        return MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 60 + bump, 6, x, y);                     //  8% grunt
     }
 
     static readonly string[] Callsigns =

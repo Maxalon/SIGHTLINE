@@ -14,8 +14,11 @@ public enum AbilityKind { None, RunGun, Blitz, Steady, Suppress }
 public enum ItemKind { None, Smoke, Flash, Barricade }
 
 /// Promotion perks: a soldier picks one each rank-up (see Run / barracks).
+/// APPEND-ONLY: enum ordinals are the save keys (SaveGame stores perks by (int)Perk),
+/// so new members go at the END — never reorder or remove the existing ones.
 public enum Perk { LockOn, Hardened, Reflexes, Bandolier, CloseQuarters, Marksman, Deadeye, Tank, Sprinter, Adrenal,
-    Executioner, Guardian, CoolHeaded }
+    Executioner, Guardian, CoolHeaded,
+    Opportunist, PointBlank, GiantSlayer }
 
 /// Battlefield traits earned by FEATS (see Game feat hooks + Run.DebriefSurvivors).
 /// Each is a small passive read in Combat.ComputeOdds, so veterans matter.
@@ -259,16 +262,45 @@ public class Unit
     }
 
     // perk magnitudes (kept here so Combat/Mission/Hud read one source)
-    public const int PerkAim = 15;       // LockOn / CloseQuarters / Marksman / Guardian (overwatch)
-    public const int PerkCrit = 15;      // Deadeye / Executioner (vs wounded targets)
+    public const int PerkAim = 15;       // LockOn / CloseQuarters / Marksman
+    public const int PerkCrit = 15;      // Deadeye (unconditional crit)
     public const int CloseRange = 4;     // CloseQuarters threshold (tiles)
     public const int LongRange = 7;      // Marksman threshold (tiles)
-    // Executioner: crit bonus vs targets below half HP (distinct from Deadeye's flat bonus)
-    public const int ExecutionerCrit = 15;
-    // Guardian: aim bonus on overwatch reaction shots (overwatch specialist, less absolute than Reflexes)
-    public const int GuardianAim = 15;
-    // CoolHeaded: Disoriented aim penalty is halved for this soldier
-    public const int CoolHeadedDivert = 8; // rounds down DisorientAim(15) by ~half => -7 instead of -15
+    // Executioner: FINISHER crit vs targets already below half HP. Set higher than Deadeye's
+    // flat +15 so it's a real alternative, not a dominated subset: Executioner beats Deadeye
+    // against wounded prey, Deadeye wins against healthy targets (a genuine pick).
+    public const int ExecutionerCrit = 25;
+    // Guardian: an overwatch LETHALITY perk (vs Reflexes = overwatch RELIABILITY). On a reaction
+    // shot Guardian (a) negates the -10 reaction aim penalty (GuardianReactAim, applied in Resolve
+    // since the penalty lives in Game's aimMod) and (b) lands a big crit bonus (GuardianReactCrit,
+    // applied in ComputeOdds) — so Reflexes makes overwatch HIT, Guardian makes it HURT.
+    public const int GuardianReactAim  = 10;  // cancels the standard -10 overwatch reaction penalty
+    public const int GuardianReactCrit = 30;  // overwatch reactions crit hard (caught mid-move, exposed)
+    // GuardianAim is read by Game's overwatch path (reactMod). It's kept at 0 now: Guardian's whole
+    // effect lives in Combat (Resolve cancels the penalty, ComputeOdds adds the crit) so there's one
+    // source of truth and no double-counted aim. Don't drop it — Game.cs still references the symbol.
+    public const int GuardianAim = 0;
+    // CoolHeaded: composure. Cuts the Disoriented aim penalty AND grants a small always-on steady-aim
+    // bonus while the soldier carries NO negative status (so it's never a dead pick vs the rare daze).
+    public const int CoolHeadedDivert = 8;  // rounds down DisorientAim(15) by ~half => -7 instead of -15
+    public const int CoolHeadedSteady = 5;  // +aim while completely unhindered (no negative status)
+    // ---- build-variety perks: pure CRIT/AIM reads in Combat.ComputeOdds (no new state/hooks) ----
+    // Opportunist: a FLANKER'S FINISHER — +crit ONLY vs a genuinely FLANKED target (cover.Flanked: the
+    // foe HAD adjacent cover but you reached an angle it doesn't protect). Distinct from LockOn (+AIM vs
+    // ANY no-cover target — exposed OR flanked) and Deadeye (+crit unconditionally): Opportunist rewards
+    // the *maneuver that turns a covered foe's flank*, so it pays off exactly when you out-positioned cover.
+    public const int OpportunistCrit = 18;
+    // Point Blank: a CLOSE-RANGE CRIT build — +crit within 2 tiles. Distinct from CloseQuarters
+    // (+AIM within 4 tiles, a wider band that helps you hit): Point Blank is tighter and adds CRIT,
+    // so a shotgun/assault rusher hits HARDER in your face rather than just more reliably nearby.
+    public const int PointBlankCrit = 20;
+    public const int PointBlankRange = 2;   // crit applies at dist <= 2 tiles
+    // First Strike (enum member is still `GiantSlayer` for save-ordinal stability; reworked from the old
+    // dead "+aim vs MaxHp>=12" — ~70% of foes are sub-12 fodder, so it almost never fired). New effect: an
+    // ALPHA-STRIKE/OPENER — +crit vs a target at FULL HP. Fires on the FIRST connecting shot at any fresh
+    // enemy (fodder or boss), rewarding focus-firing a new target; it goes inert once the target is chipped
+    // (the opposite axis from Executioner's sub-half-HP finisher). Read in Combat.ComputeOdds via d.Hp>=MaxHp.
+    public const int FirstStrikeCrit = 15;
     public const int WoundAim = 12;      // aim penalty while Wound > 0
     public const int WoundMob = 1;       // mobility penalty while Wound > 0
 
@@ -308,6 +340,7 @@ public static class PerkDef
         Perk.LockOn, Perk.Hardened, Perk.Reflexes, Perk.Bandolier, Perk.CloseQuarters,
         Perk.Marksman, Perk.Deadeye, Perk.Tank, Perk.Sprinter, Perk.Adrenal,
         Perk.Executioner, Perk.Guardian, Perk.CoolHeaded,
+        Perk.Opportunist, Perk.PointBlank, Perk.GiantSlayer,
     };
 
     public static string Name(Perk p) => p switch
@@ -325,6 +358,9 @@ public static class PerkDef
         Perk.Executioner => "EXECUTIONER",
         Perk.Guardian => "GUARDIAN",
         Perk.CoolHeaded => "COOL-HEADED",
+        Perk.Opportunist => "OPPORTUNIST",
+        Perk.PointBlank => "POINT BLANK",
+        Perk.GiantSlayer => "FIRST STRIKE",
         _ => "PERK",
     };
 
@@ -343,6 +379,9 @@ public static class PerkDef
         Perk.Executioner => "EXC",
         Perk.Guardian => "GRD",
         Perk.CoolHeaded => "CLH",
+        Perk.Opportunist => "OPP",
+        Perk.PointBlank => "PBK",
+        Perk.GiantSlayer => "FST",
         _ => "?",
     };
 
@@ -358,9 +397,12 @@ public static class PerkDef
         Perk.Tank => "+3 max HP",
         Perk.Sprinter => "+1 mobility",
         Perk.Adrenal => "+1 ability charge each mission",
-        Perk.Executioner => "+15 crit vs targets below half HP",
-        Perk.Guardian => "+15 aim on overwatch reaction shots",
-        Perk.CoolHeaded => "Disoriented aim penalty cut by 8 (-7 not -15)",
+        Perk.Executioner => "+25 crit vs targets below half HP (finisher)",
+        Perk.Guardian => "overwatch reactions ignore the aim penalty + crit hard",
+        Perk.CoolHeaded => "Disoriented penalty cut to -7, +5 aim when unhindered",
+        Perk.Opportunist => "+18 crit vs flanked targets (out-positioned their cover)",
+        Perk.PointBlank => "+20 crit within 2 tiles",
+        Perk.GiantSlayer => "+15 crit vs full-HP targets (alpha strike on a fresh foe)",
         _ => "",
     };
 }

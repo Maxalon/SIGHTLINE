@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Numerics;
 
 namespace Sightline;
 
@@ -95,6 +96,47 @@ public static class Ai
             }
         }
 
+        // COORDINATION 2 — SELF-PRESERVATION / FIGHTING RETREAT (decision):
+        // a hurt, non-suicidal enemy that can't get a worthwhile shot this turn prefers to
+        // fall back into cover / out of line-of-sight rather than trade into death. BERSERKER
+        // and ELITE never break off (their whole identity is pressing the attack); DRONE/SAPPER
+        // are mission-committed too. We *decide* retreat here by scanning whether ANY reachable
+        // tile offers a decent shot; if none does and the unit is low, the tile loop below flips
+        // its advance term into a fall-back term. This stays progress-safe: it's a bias, the unit
+        // still spends its action (a safe tile that happens to have a shot still shoots, and the
+        // standard overwatch/hunker fallback still fires), so it re-engages the moment it can.
+        bool canRetreat = e.Cls != "BERSERKER" && e.Cls != "ELITE"
+                       && e.Cls != "DRONE" && e.Cls != "SAPPER" && e.Cls != "TURRET";
+        bool lowHp = e.Hp <= Math.Max(1, e.MaxHp * 3 / 10);   // <= ~30% MaxHp
+        bool retreatMode = false;
+        if (canRetreat && lowHp)
+        {
+            float bestReachHit = -1f;
+            foreach (var (tx, ty, c) in reach)
+            {
+                if (c > e.MoveBudget) continue;                 // must keep an action to fire
+                foreach (var p in players)
+                {
+                    if (Util.TileDist(tx, ty, p.X, p.Y) > e.Weapon.MaxRange) continue;
+                    if (!g.Grid.HasLineOfSight(tx, ty, p.X, p.Y)) continue;
+                    int h = OddsFrom(g, e, tx, ty, p).HitChance;
+                    if (h > bestReachHit) bestReachHit = h;
+                }
+            }
+            // only break off when no reachable tile yields a meaningful shot (<55% best);
+            // if it can still hit hard it stands and fights (a trade may be worth it).
+            retreatMode = bestReachHit < 55f;
+        }
+
+        // tiles a player overwatch currently covers (computed once per turn by the squad
+        // coordinator) — used by COORDINATION 3 below to route around the kill zone.
+        var owTiles = g.PlayerOverwatchTiles;
+
+        // active allies, gathered ONCE for the per-tile anti-cluster term (review #4: avoid
+        // re-allocating g.AliveEnemies() inside the reachable-tile loop).
+        var activeAllies = new List<Unit>();
+        foreach (var a in g.AliveEnemies()) if (a != e && a.Active) activeAllies.Add(a);
+
         foreach (var (tx, ty, c) in reach)
         {
             int actionsToReach = c <= e.MoveBudget ? (c == 0 ? 0 : 1) : 2;
@@ -109,9 +151,21 @@ public static class Ai
                     if (Util.TileDist(tx, ty, p.X, p.Y) > e.Weapon.MaxRange) continue;
                     if (!g.Grid.HasLineOfSight(tx, ty, p.X, p.Y)) continue;
                     var odds = OddsFrom(g, e, tx, ty, p);
+                    bool canFinish = p.Hp <= e.Weapon.DmgMax;
                     float val = odds.HitChance + (odds.CoverLevel == 0 ? 25 : 0)
-                                + (p.Hp <= e.Weapon.DmgMax ? 30 : 0)    // can finish?
+                                + (canFinish ? 30 : 0)                   // can finish?
                                 + (p.IsVip ? 40 : 0);                    // prioritise the VIP
+                    // COORDINATION 1 — FOCUS FIRE: the squad converges on a shared priority
+                    // target (chosen once per turn in Game.PlanEnemySquad). Reward shooting it
+                    // so enemies collapse one soldier rather than spreading chip damage; the
+                    // bonus is larger when this shot would be a likely killing blow (high hit %
+                    // AND lethal damage), so the squad actually closes the kill. Advisory: it
+                    // layers on top of hit/cover/finish, never replacing the "good shot" core.
+                    if (g.EnemyFocus != null && p == g.EnemyFocus)
+                    {
+                        val += 30;                                       // concentrate fire here
+                        if (canFinish && odds.HitChance >= 50) val += 35; // press a likely kill
+                    }
                     if (val > bestHit) { bestHit = val; shoot = p; }
                 }
             }
@@ -150,22 +204,100 @@ public static class Ai
             }
 
             // archetype movement temperament
-            if (e.Cls == "SNIPER")                               // kite: hold distance, love height
+            if (retreatMode)
+            {
+                // COORDINATION 2 (apply): fall back — reward distance from the nearest soldier,
+                // strongly reward breaking line-of-sight to ALL players (true safety), and lean
+                // on cover. Caps the distance term so it doesn't sprint blindly into a corner.
+                score += Math.Min(distNearest, 10) * 2.6f;
+                bool seenHere = false;
+                foreach (var p in players)
+                    if (g.Grid.HasLineOfSight(tx, ty, p.X, p.Y)) { seenHere = true; break; }
+                if (!seenHere) score += 45;                      // out of sight = out of the trade
+                score += cover.Level * 14;                       // hug cover while withdrawing
+            }
+            else if (e.Cls == "SNIPER")                          // kite: hold distance, love height
             {
                 score += Math.Min(distNearest, e.Weapon.MaxRange) * 2.0f;
                 score += g.Grid.HeightAt(tx, ty) * 12;
+            }
+            else if (e.Cls == "MORTAR")                          // back-line grenadier: hold off, lob frags
+            {
+                // hang back toward grenade range so it stays out of the brawl and keeps
+                // line-of-throw on clusters; mild height preference. The actual frag toss
+                // is handled by the shared grenade AI after the tile loop. Keep a soft pull
+                // toward staying reasonably near (so it doesn't flee off the board), capped.
+                int want = Math.Max(3, Game.GrenadeRange - 1);   // ideal standoff ~ grenade range
+                score -= Math.Abs(distNearest - want) * 1.6f;    // settle around the standoff band
+                score += g.Grid.HeightAt(tx, ty) * 8;
             }
             else
             {
                 float advW = (e.Cls == "BERSERKER" || e.Cls == "ELITE") ? 3.4f
                            : (e.Cls == "DRONE") ? 3.0f                  // drone beelines (ignores cover anyway)
+                           : (e.Cls == "HUNTER") ? 2.8f                 // fast flanker: presses hard to curl around cover
                            : (e.Cls == "SHIELD") ? 2.2f : 1.4f;         // shield pushes the line behind its barrier
                 score -= nd > 0 ? distNearest * advW : 0;
+            }
+
+            // HUNTER — FLANK SEEKER: actively reward ending on a tile from which the nearest
+            // soldier loses the protection of its cover (flanked) or never had cover from this
+            // angle (exposed). This makes the hunter curl AROUND a cover block to hit the soft
+            // side rather than trade frontally. A genuine flank (was covered, now isn't) is worth
+            // most; plain "no cover from here" still earns a smaller pull. Read straight off the
+            // same GetCover the shot resolver uses, so the bias is truthful.
+            if (e.Cls == "HUNTER" && nearest != null)
+            {
+                var tgtCov = g.Grid.GetCover(nearest.X, nearest.Y, tx, ty);
+                if (tgtCov.Flanked)      score += 34;            // soldier's cover doesn't protect from here
+                else if (tgtCov.Level == 0) score += 16;         // soldier simply has no cover from this angle
             }
             if (e.Cls == "DRONE") score -= cover.Level * 18;            // drone doesn't value cover (cancels the bonus above)
             if (vip != null) score -= Util.ChebyDist(tx, ty, vip.X, vip.Y) * 1.0f;     // close on the asset
             if (sapTarget != null)                               // sapper: get adjacent to the cover
                 score -= Util.ChebyDist(tx, ty, sapTarget.Value.x, sapTarget.Value.y) * 3.0f;
+
+            // COORDINATION 3 — OVERWATCH-AWARE ROUTING (anti-turtle): don't feed a player
+            // overwatch camp. Ending a move on a watched tile is heavily penalised; merely
+            // passing through one is penalised lightly (movement still happens, but a route
+            // that skirts the kill zone wins when it exists). Mirrors the real reaction test
+            // (see Game.PlanEnemySquad), so the AI's threat model is truthful. Berserkers/
+            // elites/drones discount it — they accept reaction fire to close. This makes player
+            // overwatch an area-denial tool instead of a free kill farm.
+            if (owTiles.Count > 0)
+            {
+                float owEnd = (e.Cls == "BERSERKER" || e.Cls == "ELITE" || e.Cls == "DRONE") ? 9f : 26f;
+                if (owTiles.Contains((tx, ty))) score -= owEnd;        // end here = eat the shot
+                if (c > 0)                                             // only an actual move has a route to skirt
+                {
+                    int passWatched = 0;
+                    foreach (var (rx, ry) in g.Grid.ReconstructPath(cameFrom, e.X, e.Y, tx, ty))
+                        if ((rx, ry) != (tx, ty) && owTiles.Contains((rx, ry))) passWatched++;
+                    if (passWatched > 0) score -= passWatched * 5f;    // light: skirt the lane
+                }
+            }
+
+            // COORDINATION 4 — ANTI-CLUSTER: don't gift-wrap a grenade. Small penalty for
+            // ending adjacent to many allies so the squad doesn't bunch into one AoE. Shields
+            // are exempt (they intentionally anchor a wall the line forms behind).
+            if (e.Cls != "SHIELD")
+            {
+                int adjAllies = 0;
+                foreach (var a in activeAllies)
+                    if (Util.ChebyDist(tx, ty, a.X, a.Y) <= 1) adjAllies++;
+                if (adjAllies > 1) score -= (adjAllies - 1) * 6f;      // 1 neighbour is fine; 2+ clumps
+            }
+
+            // COORDINATION 5 — KITE TO IDEAL RANGE BAND (light): each archetype plays to its
+            // gun. Reward a post-move tile whose shot distance sits near the weapon's peak
+            // effectiveness (read straight off Weapon.RangeMod), so SMGs/shotguns press in and
+            // snipers/LMGs hold off — without overriding cover/advance. Only when a shot exists.
+            if (shoot != null && !retreatMode)
+            {
+                float sd = Util.TileDist(tx, ty, shoot.X, shoot.Y);
+                int rm = e.Weapon.RangeMod(sd);                        // this weapon's range aim mod here
+                score += Util.Clamp(rm * 0.30f, -6f, 8f);              // modest pull toward the sweet spot
+            }
             score += Util.RandRange(0f, 3f);                     // tie-break jitter
 
             if (score > bestScore)
@@ -185,6 +317,13 @@ public static class Ai
         }
 
         plan.ShootTarget = bestShotTarget;
+
+        // COORDINATION 2 (feedback): telegraph a genuine fall-back — the unit was low, found
+        // no worthwhile shot, and chose to withdraw to a new tile. Pop it so the player reads
+        // the squad breaking off. (If a safe tile still happened to offer a shot, it isn't a
+        // retreat — the unit re-engaged — so no pop.)
+        if (retreatMode && bestShotTarget == null && bestTile != (e.X, e.Y))
+            g.Fx.PopText(e.Pos + new Vector2(0, -30), "FALLING BACK", Pal.Suspect, 14f);
 
         // sapper: if it can reach the cover tile, demolish it instead of shooting
         if (e.Cls == "SAPPER" && sapTarget != null &&
@@ -208,7 +347,11 @@ public static class Ai
                 {
                     int shotHit = plan.ShootTarget != null
                         ? OddsFrom(g, e, bestTile.x, bestTile.y, plan.ShootTarget).HitChance : 0;
-                    throwIt = shotHit < 45;
+                    // a MORTAR is a dedicated grenadier with a poor gun and a deep pouch — it
+                    // lobs more readily (its whole identity is raining frags), so its
+                    // single-target threshold is higher than a line trooper's opportunistic
+                    // toss — but dialed back from 70 so it's a threat, not a spammer.
+                    throwIt = shotHit < (e.Cls == "MORTAR" ? 55 : 45);
                 }
                 if (throwIt)
                 {
@@ -327,12 +470,20 @@ public static class Ai
 
     // Best grenade aim tile thrown from (fx,fy): pick a soldier's tile in range that
     // catches the most players (blast = Chebyshev radius 1); report ally splash too.
+    // FAIRNESS: the thrower must have LINE OF SIGHT from its post-move tile to the
+    // aim soldier — no lobbing blindly over a wall or through smoke. This makes enemy
+    // grenades counterable by breaking LoS (cover / smoke), consistent with the game's
+    // perfect-information contract. Applies to every enemy that throws (MORTAR, BRUISER,
+    // WARLORD, ...). Note we only require sight of the *aim* soldier; a clustered second
+    // soldier behind cover still gets caught by the AoE, which is fair (the throw was
+    // earned by a visible target and the blast spreads).
     static (int x, int y, int hits, int allies) BestGrenade(Game g, Unit e, int fx, int fy)
     {
         int bx = -1, by = -1, bestHits = 0, bestAllies = 99;
         foreach (var p in g.AlivePlayers())
         {
             if (Util.TileDist(fx, fy, p.X, p.Y) > Game.GrenadeRange) continue;
+            if (!g.Grid.HasLineOfSight(fx, fy, p.X, p.Y)) continue;   // can't blind-lob over walls / through smoke
             int hits = 0, allies = 0;
             foreach (var q in g.AlivePlayers()) if (Util.ChebyDist(p.X, p.Y, q.X, q.Y) <= GrenadeAnim.Radius) hits++;
             foreach (var a in g.AliveEnemies()) if (a != e && Util.ChebyDist(p.X, p.Y, a.X, a.Y) <= GrenadeAnim.Radius) allies++;

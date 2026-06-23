@@ -174,5 +174,129 @@ public static class Maps
             "....oo......oo....",
             "..................",
         },
+        new[] // BASTION — a central fortress: a commanding tier-2 ('=') keep walled by
+              // high cover, breached by gaps (north & south of the wall, plus a west
+              // doorway through the keep itself). The high ground is the prize, but you
+              // must fight to a breach to seize it — a set-piece assault. Biome hint: STEEL.
+        {
+            "..................",
+            "......##..##......",
+            "......#....#......",
+            "....###.==.###....",
+            ".......===........",
+            "......#.==.#......",
+            "....###.==.###....",
+            "......#....#......",
+            "......##..##......",
+            "..................",
+            "..................",
+        },
+        new[] // CHASM — a vertical "river" of high cover splits the board top-to-bottom,
+              // pierced by two clear crossing points (rows 3 & 7) bracketed by low cover.
+              // The fight funnels through the chokepoints; holding a crossing controls the
+              // flow between the two halves. Biome hint: TUNDRA (a frozen ravine).
+        {
+            "..................",
+            "........##........",
+            ".......o##o.......",
+            "..................",
+            "........##........",
+            "........##........",
+            "........##........",
+            "..................",
+            ".......o##o.......",
+            "........##........",
+            "..................",
+        },
+        new[] // SPUR — a diagonal tier-1 high-ground spine sweeps corner to corner: a
+              // commanding kill-lane that dominates the centre but is exposed at both
+              // ends. Low-cover nests bracket the slope as covered firing steps onto it.
+              // Biome hint: ARID (a sun-baked ridge).
+        {
+            "..................",
+            "...^..............",
+            "....^^...o........",
+            ".....^^...........",
+            "..o...^^..........",
+            ".......^^....o....",
+            "........^^........",
+            ".....o...^^.......",
+            "..........^^...o..",
+            "............^^....",
+            "..................",
+        },
+        new[] // HOOK — asymmetric: a fortified high-cover strongpoint (with a redoubt
+              // arm) anchors the top, forcing attackers to either grind through it or
+              // swing the wide-open bottom flank. A low-cover diagonal channels that
+              // bottom hook into a covered approach. Biome hint: ASH (a ruined outpost).
+        {
+            "..................",
+            ".....####.........",
+            ".....#..#....o....",
+            ".....#..####......",
+            ".....#.....#......",
+            ".......o...#......",
+            ".........o........",
+            "...........o......",
+            "..................",
+            "..................",
+            "..................",
+        },
+        new[] // GRID — a NEON server-room: a regular lattice of 2x2 high-cover "racks"
+              // separated by clean orthogonal aisles (vertical at cols 0-1/4-5/8-9/12-13/
+              // 16-17, horizontal at rows 0/3/6/9-10), with low-cover terminals dotting the
+              // mid aisles. Movement is corridor-bound and right-angled (no diagonals through
+              // a rack), so it plays as tight, blind-corner CQB unlike the open pillar field.
+              // Biome hint: NEON.
+        {
+            "..................",
+            "..##..##..##..##..",
+            "..##..##..##..##..",
+            "....o......o......",
+            "..##..##..##..##..",
+            "..##..##..##..##..",
+            "....o......o......",
+            "..##..##..##..##..",
+            "..##..##..##..##..",
+            "..................",
+            "..................",
+        },
+        new[] // FORGE — a MAGMA foundry: a commanding tier-2 ('=') casting platform at the
+              // centre, wrapped in a walkable tier-1 ('^') apron you can simply walk up onto
+              // (no walls — the height is openly contested, unlike BASTION's breach-only keep).
+              // Four corner high-cover smelters + low-cover ingot piles give covered firing
+              // steps onto the slope. Seizing the platform dominates the whole field.
+              // Biome hint: MAGMA.
+        {
+            "..................",
+            "...#..........#...",
+            "......^^^^^^......",
+            ".....^^====^^.....",
+            "..o..^^====^^..o..",
+            ".....^^====^^.....",
+            "..o..^^====^^..o..",
+            ".....^^^^^^^^.....",
+            "...#..........#...",
+            "..................",
+            "..................",
+        },
+        new[] // CONDUIT — a horizontally-split complex: fortified high-cover bunkers banking
+              // the NORTH and SOUTH, divided by a wide open central channel (row 5, the
+              // "conduit"). The fight runs ALONG and ACROSS the channel — the inverse axis of
+              // CHASM's vertical river. Low-cover nodes flank the channel as contested
+              // stepping points; the open lane is the fast-but-exposed flanking route.
+        {
+            "..................",
+            "...####..####.....",
+            "...#..o..o..#.....",
+            "...#........#.....",
+            "......o..o........",
+            "..................",
+            "......o..o........",
+            "...#........#.....",
+            "...#..o..o..#.....",
+            "...####..####.....",
+            "..................",
+        },
     };
 }

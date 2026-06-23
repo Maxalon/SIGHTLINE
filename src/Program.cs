@@ -79,6 +79,22 @@ public static class Program
             Console.WriteLine(Game.CoverSelfTest());
             return;
         }
+        // SIGHTLINE_AITEST=1 : squad-coordination check (focus fire / overwatch map / retreat).
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_AITEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "aitest");   // Unit.SyncPos uses tile->px math; tiny window
+            Console.WriteLine(new Game().AiSquadSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
+        // SIGHTLINE_SNAPTEST=1 : snap-shot cost/turn-end + flank-kill action-refund check.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_SNAPTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "snaptest");
+            Console.WriteLine(new Game().SnapRefundSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         // SIGHTLINE_MISSION=<n> : start the harness on mission n (verify Hack/Evac maps).
         int startMission = int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_MISSION"), out int sm) ? sm : 1;
 
@@ -156,6 +172,7 @@ public static class Program
             case "sabotage": game.DebugForceObjective(Objective.Sabotage); break;
             case "rescue": game.DebugForceObjective(Objective.Rescue); break;
             case "defend": game.DebugForceObjective(Objective.Defend); break;
+            case "decapitate": game.DebugForceObjective(Objective.Decapitate); break;
         }
         // screenshot-only hooks for verifying the camera + pause overlay
         if (shot && float.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_ZOOM"), out float z)) game.CamZoom = z;
@@ -164,6 +181,7 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_WAKE") == "1") game.DebugWakeAll();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_ALERT") == "1") game.DebugAlertTiers();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CONCEAL") == "1") game.DebugConcealment();
+        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_INTENT") == "1") game.DebugIntent();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CARDS") == "1") game.DebugDeployCards();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CAMPAIGN") == "1") game.DebugCampaignMap();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_ITEM") == "1") game.DebugItem();

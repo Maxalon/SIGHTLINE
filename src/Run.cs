@@ -42,6 +42,75 @@ public class MissionNode
     public int Mission => Col + 1;
 }
 
+/// One rung of the Heat / Ascension ladder (Hades' Pact of Punishment / StS Ascension).
+/// Heat level H applies modifiers 1..H cumulatively, escalating difficulty for a bigger
+/// requisition payout. The KNOBS reuse the existing difficulty plumbing wherever possible:
+/// EnemyDelta/StatDelta thread into the SAME Mission.Build/SpawnEnemies params the
+/// deployment cards already use; the Game-side flags (tighter first contact / no
+/// concealment / harsher attrition) are read where those systems live. Definitions are
+/// data, never persisted (only the chosen LEVEL is saved) — so re-tuning is safe.
+public class HeatModifier
+{
+    public string Name;       // short ALL-CAPS callsign shown in the UI
+    public string Desc;       // one-line "what it does"
+    public int EnemyDelta;    // extra hostiles this rung adds (folds into Mission.Build enemyDelta)
+    public int StatDelta;     // extra hostile stat bump this rung adds (folds into statDelta)
+    public bool TighterContact;  // shrink sight/alert/reveal ranges by 1 (first contact comes sooner)
+    public bool Exposed;         // squad deploys NOT concealed (no free ambush opener)
+    public bool HarshAttrition;  // wounds last +1 mission and field-heal is halved
+    public bool NoReinforcements; // the barracks stops backfilling fallen soldiers — losses shrink the squad
+}
+
+/// The Heat ladder: a static data table + cumulative-effect accessors. The MAX selectable
+/// level grows as the player wins runs at their current cap (persisted as meta, separate
+/// from the deletable run save).
+public static class Heat
+{
+    public const int Min = 0;
+    public const int Max = 8;                 // ladder ceiling
+    public const int IntelPerLevel = 3;       // extra requisition intel per cleared mission, per heat level
+
+    // Rung i (1-based) is Mods[i-1]. Heat H applies rungs 1..H. Tuned to escalate coherently:
+    // bodies first (most legible), then durability, then squeeze the opener + attrition, and
+    // finally strip concealment for the top-tier "no mercy" runs.
+    public static readonly HeatModifier[] Mods =
+    {
+        new HeatModifier { Name = "REINFORCED",   Desc = "+1 enemy per mission",                 EnemyDelta = 1 },
+        new HeatModifier { Name = "HARDENED",      Desc = "Enemies hit harder & tougher (+1 stat)", StatDelta = 1 },
+        new HeatModifier { Name = "SHORT FUSE",    Desc = "Enemies spot you sooner",              TighterContact = true },
+        new HeatModifier { Name = "OVERWHELMING",  Desc = "+1 more enemy per mission",            EnemyDelta = 1 },
+        new HeatModifier { Name = "LINGERING WOUNDS", Desc = "Wounds last longer; less field healing", HarshAttrition = true },
+        new HeatModifier { Name = "ELITE CADRE",   Desc = "Enemies even deadlier (+1 stat)",      StatDelta = 1 },
+        new HeatModifier { Name = "EXPOSED",       Desc = "Squad deploys without concealment",    Exposed = true },
+        // Rung 8 (the top of the ladder): +1 more enemy AND the harshest run-loop knob —
+        // the barracks no longer backfills fallen soldiers, so every casualty permanently
+        // shrinks the squad for the rest of the run (true attrition stakes). The old
+        // TighterContact here was a redundant no-op (already active from rung 3), so it's
+        // replaced with NoReinforcements — a NEW axis that reads as "no mercy, no replacements".
+        new HeatModifier { Name = "RELENTLESS",    Desc = "+1 enemy; no replacement recruits",    EnemyDelta = 1, NoReinforcements = true },
+    };
+
+    public static int Clamp(int level) => Math.Clamp(level, Min, Max);
+
+    /// The modifiers ACTIVE at this heat level (rungs 1..level), in ladder order.
+    public static IEnumerable<HeatModifier> Active(int level)
+    {
+        int n = Clamp(level);
+        for (int i = 0; i < n && i < Mods.Length; i++) yield return Mods[i];
+    }
+
+    // ---- cumulative effect accessors (sum/any over the active rungs) ----
+    public static int EnemyDelta(int level) { int s = 0; foreach (var m in Active(level)) s += m.EnemyDelta; return s; }
+    public static int StatDelta(int level)  { int s = 0; foreach (var m in Active(level)) s += m.StatDelta;  return s; }
+    public static bool TighterContact(int level) { foreach (var m in Active(level)) if (m.TighterContact) return true; return false; }
+    public static bool Exposed(int level)        { foreach (var m in Active(level)) if (m.Exposed) return true; return false; }
+    public static bool HarshAttrition(int level) { foreach (var m in Active(level)) if (m.HarshAttrition) return true; return false; }
+    public static bool NoReinforcements(int level) { foreach (var m in Active(level)) if (m.NoReinforcements) return true; return false; }
+
+    /// Bonus requisition intel per cleared mission at this heat level.
+    public static int IntelBonus(int level) => Clamp(level) * IntelPerLevel;
+}
+
 /// Holds the persistent squad across a campaign run, plus XP/rank progression.
 public class Run
 {
@@ -58,6 +127,7 @@ public class Run
     public List<Unit> Squad = new();
     public int Mission;                       // current mission number (1-based)
     public int Intel;                         // requisition currency spent in the barracks shop
+    public int HeatLevel;                     // chosen Heat/Ascension difficulty (0..Heat.Max); persisted in the run save
     public List<string> Fallen = new();       // names of KIA soldiers
     // co-survival tally per soldier pair ("A|B"); a bond forms at BondThreshold
     public Dictionary<string, int> BondTally = new();
@@ -191,7 +261,7 @@ public class Run
     }
 
     /// Objective rotation baseline: Eliminate / Hack / Evac / Escort, repeating.
-    public static Objective ObjectiveFor(int n) => ((n - 1) % 7) switch
+    public static Objective ObjectiveFor(int n) => ((n - 1) % 8) switch
     {
         1 => Objective.Hack,
         2 => Objective.Evac,
@@ -199,6 +269,7 @@ public class Run
         4 => Objective.Sabotage,
         5 => Objective.Rescue,
         6 => Objective.Defend,
+        7 => Objective.Decapitate,
         _ => Objective.Eliminate,
     };
 
@@ -214,7 +285,7 @@ public class Run
     {
         Offers.Clear();
         Objective def = ObjectiveFor(n);
-        var pool = new List<Objective> { Objective.Eliminate, Objective.Hack, Objective.Evac, Objective.Escort, Objective.Sabotage, Objective.Rescue, Objective.Defend };
+        var pool = new List<Objective> { Objective.Eliminate, Objective.Hack, Objective.Evac, Objective.Escort, Objective.Sabotage, Objective.Rescue, Objective.Defend, Objective.Decapitate };
         Objective Other(params Objective[] avoid)
         {
             var picks = pool.FindAll(o => System.Array.IndexOf(avoid, o) < 0);
@@ -239,11 +310,34 @@ public class Run
         var u = eligible[Util.RandInt(0, eligible.Count - 1)];
         var avail = new List<Perk>();
         foreach (var p in PerkDef.All) if (!u.HasPerk(p)) avail.Add(p);
-        int i = Util.RandInt(0, avail.Count - 1);
-        int j = Util.RandInt(0, avail.Count - 2); if (j >= i) j++;
-        PendingPerks.Add(new PerkOffer { Unit = u, A = avail[i], B = avail[j] });
+        PickPerkPair(avail, out Perk a, out Perk b);
+        PendingPerks.Add(new PerkOffer { Unit = u, A = a, B = b });
         Report.Add($"{u.Name} earns a bonus perk ({reason})");
         return true;
+    }
+
+    // A pure stat-bump perk applies once on grant and is otherwise a passive non-decision
+    // (Tank +HP / Sprinter +mob). Offering TWO of these together is the dullest possible pick,
+    // so PickPerkPair nudges away from it (below) when a more interesting alternative exists.
+    static bool IsStatBump(Perk p) => p == Perk.Tank || p == Perk.Sprinter;
+
+    /// Choose two distinct perks from `avail` for a pick-1-of-2 offer (caller guarantees
+    /// avail.Count >= 2). Light curation for variety: if the rolled pair is BOTH pure stat
+    /// bumps and a non-stat-bump perk is available, re-roll the second pick among the
+    /// interesting perks so every offer presents at least one real tactical decision. The
+    /// happy path consumes the same two RNG draws as before, so behaviour only changes for
+    /// the rare all-stat-bump pair (keeps things deterministic-friendly).
+    static void PickPerkPair(List<Perk> avail, out Perk a, out Perk b)
+    {
+        int i = Util.RandInt(0, avail.Count - 1);
+        int j = Util.RandInt(0, avail.Count - 2); if (j >= i) j++;
+        a = avail[i]; b = avail[j];
+        if (IsStatBump(a) && IsStatBump(b))
+        {
+            Perk first = a;   // local copy (an out-param can't be captured by the lambda below)
+            var interesting = avail.FindAll(p => !IsStatBump(p) && p != first);
+            if (interesting.Count > 0) b = interesting[Util.RandInt(0, interesting.Count - 1)];
+        }
     }
 
     static int CountAvail(Unit u)
@@ -278,6 +372,8 @@ public class Run
     {
         Report.Clear();
         PendingPerks.Clear();
+        // Heat "LINGERING WOUNDS": wounds bite a mission longer and field medicine is halved.
+        bool harsh = Heat.HarshAttrition(HeatLevel);
         foreach (var u in Squad.ToList())
         {
             // attrition: a wound from a previous mission recovers one step, then fresh
@@ -298,6 +394,7 @@ public class Run
             {
                 if (u.Wound > 0) u.Wound--;
                 int sev = u.Hp <= u.MaxHp / 4 ? 2 : (u.Hp <= u.MaxHp / 2 ? 1 : 0);
+                if (sev > 0 && harsh) sev++;          // Heat: wounds linger an extra mission
                 if (sev > u.Wound) u.Wound = sev;
                 if (u.Wound > w0) Report.Add($"{u.Name} is WOUNDED ({u.Wound} mission{(u.Wound > 1 ? "s" : "")})");
                 else if (w0 > 0 && u.Wound == 0) Report.Add($"{u.Name} recovered from wounds");
@@ -328,9 +425,9 @@ public class Run
                 }
             }
 
-            // field medicine: partial heal between missions
+            // field medicine: partial heal between missions (halved under Heat harsh attrition)
             int before = u.Hp;
-            int heal = (int)MathF.Ceiling(u.MaxHp * 0.4f);
+            int heal = (int)MathF.Ceiling(u.MaxHp * (harsh ? 0.2f : 0.4f));
             u.Hp = Math.Min(u.MaxHp, u.Hp + heal);
             if (u.Hp > before) Report.Add($"{u.Name} patched up  (+{u.Hp - before} HP)");
         }
@@ -338,8 +435,15 @@ public class Run
         // bonds: every pair of survivors that shared this mission grows closer
         AdvanceBonds();
 
-        // backfill the squad up to 4 with rookie recruits
-        while (Squad.Count < 4)
+        // backfill the squad up to 4 with rookie recruits — UNLESS Heat "RELENTLESS" (rung 8)
+        // turns off reinforcements, so casualties permanently shrink the squad for the run.
+        // (At least one soldier always survives to reach the barracks; a full wipe loses the run.)
+        if (Heat.NoReinforcements(HeatLevel))
+        {
+            if (Squad.Count < 4)
+                Report.Add($"No reinforcements (HEAT) -- deploying {Squad.Count} strong");
+        }
+        else while (Squad.Count < 4)
         {
             var rec = Sightline.Mission.MakeRecruit();
             Squad.Add(rec);
@@ -403,10 +507,8 @@ public class Run
         var avail = new List<Perk>();
         foreach (var p in PerkDef.All) if (!u.HasPerk(p)) avail.Add(p);
         if (avail.Count < 2) return null;
-        int i = Util.RandInt(0, avail.Count - 1);
-        int j = Util.RandInt(0, avail.Count - 2);
-        if (j >= i) j++;                         // distinct second pick
-        return new PerkOffer { Unit = u, A = avail[i], B = avail[j] };
+        PickPerkPair(avail, out Perk a, out Perk b);   // distinct + lightly curated for variety
+        return new PerkOffer { Unit = u, A = a, B = b };
     }
 
     /// Grant a chosen perk, applying any immediate stat effect.
@@ -459,13 +561,13 @@ public class Run
                 return "LIGHT FORCE";
             case NodeKind.Elite:
                 // Same tier as Combat but heavier (+2 enemy delta)
-                if (m <= 2) return "BRUISER + SNIPER";
-                if (m <= 4) return "SHIELD + SAPPER";
+                if (m <= 2) return "BRUISER + HUNTER";
+                if (m <= 4) return "MORTAR + SHIELD";
                 return "BERSERKER + MEDIC";
             default: // Combat / Start — normal force for this mission tier
                 if (m == 1)    return "GRUNTS + SCOUTS";
-                if (m == 2)    return "SNIPER + DRONE";
-                if (m == 3)    return "TURRET + SAPPER";
+                if (m == 2)    return "HUNTER + DRONE";
+                if (m == 3)    return "MORTAR + TURRET";
                 if (m == 4)    return "BERSERKER + DRONE";
                 if (m == 5)    return "SHIELD + MEDIC";
                 return                 "ELITE FORCE";

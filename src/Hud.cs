@@ -26,6 +26,7 @@ public static class Hud
     public static Rectangle PauseResume, PauseMute, PauseShake, PauseThreat, PauseFullscreen, PauseWindow, PauseAbandon;
     public static Rectangle PauseBright, PauseColorblind, PauseAutoCam;
     public static Rectangle PerkBtnA, PerkBtnB, PerkTagBtn;
+    public static Rectangle HeatMinus, HeatPlus;   // intro Heat/Ascension +/- selector
     public static Rectangle[] MissionCards = new Rectangle[3];
     public static System.Collections.Generic.List<(int Id, Rectangle Rect)> NodeBtns = new();
     public static Rectangle[] ShopBtns = new Rectangle[Game.ShopName.Length];
@@ -255,6 +256,7 @@ public static class Hud
             case Objective.Escort: objTxt = "ESCORT VIP"; objCol = Pal.VipGold; break;
             case Objective.Rescue: objTxt = g.CaptiveLocked ? "RESCUE CAPTIVE" : "EXTRACT CAPTIVE"; objCol = Pal.VipGold; break;
             case Objective.Defend: objTxt = $"DEFEND {Math.Min(g.Turn, Game.DefendTurns)}/{Game.DefendTurns}"; objCol = Pal.Foe; break;
+            case Objective.Decapitate: objTxt = "KILL HVT"; objCol = Pal.VipGold; break;
             default: objTxt = "ELIMINATE"; objCol = Pal.TxtDim; break;
         }
         Raylib.DrawTextEx(Cfg.Font, objTxt, new Vector2(360, 19), 16, 1f, objCol);
@@ -270,6 +272,15 @@ public static class Hud
         // optional secondary objective (3.9): green while on track, red once blown
         if (g.Secondary != SecondaryKind.None)
             Raylib.DrawTextEx(Cfg.Font, g.SecondaryHud, new Vector2(812, 19), 14, 1f, g.SecondaryOnTrack ? Pal.Good : Pal.Foe);
+
+        // Heat/Ascension indicator (only at heat > 0, so heat 0 stays byte-identical)
+        if (g.HeatLevel > 0)
+        {
+            var hp = new Rectangle(Cfg.ScreenW - 400, 11, 92, 30);
+            Raylib.DrawRectangleRounded(hp, 0.4f, 8, Pal.Panel);
+            Raylib.DrawRectangleLinesEx(hp, 1.5f, Raylib.Fade(Pal.Foe, 0.6f));
+            CenterText($"HEAT {g.HeatLevel}", hp, 15, Pal.Foe);
+        }
 
         // mute indicator
         if (!Audio.Enabled)
@@ -336,7 +347,8 @@ public static class Hud
         }
         CenterText($"{u.Hp}/{u.MaxHp}", bar, 11, Pal.RGBA(8, 14, 10));
 
-        // action pips
+        // action pips (a flank-kill refund tops a soldier back up to — never above — its
+        // 2-action budget, so two pips still cover every state)
         for (int i = 0; i < 2; i++)
         {
             var pip = new Rectangle(x + 14 + i * 26, y + 60, 22, 7);
@@ -357,21 +369,16 @@ public static class Hud
         bool interactive = g.IsPlayerInteractive() && u != null && u.Team == Team.Player;
         bool hasTargets = interactive && g.HasAnyTarget(u);
 
-        var btns = new System.Collections.Generic.List<UiButton>();
-        float bx = 300, bw = 104, bh = 40, gap = 6;
-
+        // Collect the button specs first, then size them to fit the bar (the count varies:
+        // base 6, +ability/+item per class, +hack on hack/sabotage objectives, +snap = up to 9).
+        var specs = new System.Collections.Generic.List<(string id, string label, string key, bool enabled, bool sel)>();
         void Add(string id, string label, string key, bool enabled, bool sel)
-        {
-            btns.Add(new UiButton
-            {
-                Rect = new Rectangle(bx, y + 26, bw, bh),
-                Id = id, Label = label, Key = key, Enabled = enabled, Selected = sel,
-                Accent = Pal.Friend,
-            });
-            bx += bw + gap;
-        }
+            => specs.Add((id, label, key, enabled, sel));
 
-        Add("shoot", "FIRE", "1", interactive && u != null && u.CanAct && u.Ammo > 0 && hasTargets, g.AimMode);
+        Add("shoot", "FIRE", "1", interactive && u != null && u.CanAct && u.Ammo > 0 && hasTargets, g.AimMode && !g.SnapShot);
+        // SNAP: a 1-action, no-end-turn shot at an aim penalty (per-turn DEPTH). Selected
+        // highlight only when the pending aim-mode shot is the snap variant.
+        Add("snap", "SNAP", "7", interactive && u != null && u.CanAct && u.Ammo > 0 && hasTargets, g.AimMode && g.SnapShot);
         Add("grenade", "GRENADE", "4", interactive && u != null && u.CanAct && u.Grenades > 0, g.GrenadeMode);
         if (u != null && u.Ability != AbilityKind.None)
             Add("ability", u.AbilityName, "5", interactive && g.CanAbility(u), u.RunGun || u.Blitz || u.Steady);
@@ -382,6 +389,25 @@ public static class Hud
         if (g.HasHackAction)
             Add("hack", g.HasSabotage ? "PLANT" : "HACK", "H", interactive && g.CanHack(u), false);
         Add("reload", "RELOAD", "R", interactive && u != null && u.CanAct && u.Ammo < u.Weapon.Clip, false);
+
+        // Responsive width: fit `count` buttons (+gaps) into the bar span [bx0 .. right edge].
+        float bx0 = 300, bh = 40, gap = 6;
+        float right = Cfg.ScreenW - 26;                      // leave a small right margin
+        int count = specs.Count;
+        float bw = MathF.Min(104, (right - bx0 - gap * (count - 1)) / count);
+
+        var btns = new System.Collections.Generic.List<UiButton>();
+        float bx = bx0;
+        foreach (var s in specs)
+        {
+            btns.Add(new UiButton
+            {
+                Rect = new Rectangle(bx, y + 26, bw, bh),
+                Id = s.id, Label = s.label, Key = s.key, Enabled = s.enabled, Selected = s.sel,
+                Accent = Pal.Friend,
+            });
+            bx += bw + gap;
+        }
 
         ActionButtons = btns.ToArray();
         foreach (var b in ActionButtons)
@@ -463,6 +489,17 @@ public static class Hud
                 Raylib.DrawLineEx(new Vector2(cx - 1f, mid + backY), new Vector2(tip, mid), 1.8f, c);
                 // Short barrel line behind the chevron
                 Raylib.DrawLineEx(new Vector2(cx - 7f, mid), new Vector2(cx - 1f, mid), 1.8f, c);
+                break;
+            }
+            case "snap":
+            {
+                // Double right chevron (>>) — conveys a fast, lighter "snap" shot vs FIRE's single chevron.
+                float mid = cy, backY = 5.5f;
+                foreach (float ox in new[] { -5f, 1f })
+                {
+                    Raylib.DrawLineEx(new Vector2(cx + ox, mid - backY), new Vector2(cx + ox + 5f, mid), 1.7f, c);
+                    Raylib.DrawLineEx(new Vector2(cx + ox, mid + backY), new Vector2(cx + ox + 5f, mid), 1.7f, c);
+                }
                 break;
             }
             case "grenade":
@@ -641,6 +678,16 @@ public static class Hud
                 Raylib.DrawLineEx(new Vector2(cx - 6f, cy + 1f), new Vector2(cx, cy + 7f), 1.6f, c);
                 Raylib.DrawLineEx(new Vector2(cx + 6f, cy + 1f), new Vector2(cx, cy + 7f), 1.6f, c);
                 break;
+            case Objective.Decapitate: // HVT: a reticle ring with crosshair ticks + two target "eyes"
+                Raylib.DrawCircleLines((int)cx, (int)cy, 7f, c);
+                Raylib.DrawCircleLines((int)cx, (int)cy, 7.5f, c);   // thicker ring (single-mark)
+                Raylib.DrawLineEx(new Vector2(cx - 9f, cy), new Vector2(cx - 5f, cy), 1.5f, c);
+                Raylib.DrawLineEx(new Vector2(cx + 5f, cy), new Vector2(cx + 9f, cy), 1.5f, c);
+                Raylib.DrawLineEx(new Vector2(cx, cy - 9f), new Vector2(cx, cy - 5f), 1.5f, c);
+                Raylib.DrawLineEx(new Vector2(cx, cy + 5f), new Vector2(cx, cy + 9f), 1.5f, c);
+                Raylib.DrawCircleV(new Vector2(cx - 2.5f, cy - 1f), 1.4f, c);   // marked "eyes"
+                Raylib.DrawCircleV(new Vector2(cx + 2.5f, cy - 1f), 1.4f, c);
+                break;
             default:               // Eliminate: crosshair (target reticle)
                 Raylib.DrawCircleLines((int)cx, (int)cy, 6f, c);
                 Raylib.DrawLineEx(new Vector2(cx - 8f, cy), new Vector2(cx - 3f, cy), 1.5f, c);
@@ -680,7 +727,8 @@ public static class Hud
     {
         switch (id)
         {
-            case "shoot": return "Fire at a target in range + line of sight. Ends the turn.";
+            case "shoot": return "Aimed shot at a target in range + line of sight. Full aim, ends the turn.";
+            case "snap": return $"Snap shot: costs 1 action and does NOT end the turn, but at {Game.SnapAim} aim. Fire and keep acting.";
             case "grenade": return "Lob a grenade: AoE that ignores cover, hits both teams, clears low cover.";
             case "overwatch": return "Watch: fire a reaction shot at the first foe that moves in sight.";
             case "hunker": return "Hunker down for extra cover defense; you can't be crit.";
@@ -701,13 +749,80 @@ public static class Hud
     }
 
     // ---------------- tooltip ----------------
+    // Perfect-information contract (DESIGN.md): the shot odds must explain WHY the number
+    // is what it is. We surface EVERY modifier Combat.ComputeOdds applies — the struct
+    // flags (cover/flank/high-ground/steady/ambush) PLUS the ones that ride on live
+    // attacker/target state (bonds, earned traits, range/exposure perks, suppression,
+    // wounds, daze, target hunker/smoke). Each badge's condition mirrors ComputeOdds
+    // EXACTLY so the explanation always matches the math. Display-only; no rule changes.
     static void DrawTooltip(Game g)
     {
         if (!g.ShowOdds) return;
         var o = g.HoverOdds;
+
+        // Recover the same attacker/target pair ComputeOdds was called with (see
+        // Game.UpdateHoverAndAim): attacker is always the selected soldier; the target is
+        // the locked aim target in aim mode, else the enemy under the cursor.
+        Unit a = g.Selected;
+        Unit d = g.AimMode ? g.AimTarget : g.UnitAt(g.HoverX, g.HoverY);
+
+        // Build the badge list. Order: target-cover/state, then attacker buffs, then
+        // attacker penalties — so advantages and warnings stay visually grouped.
+        var flags = new System.Collections.Generic.List<(string text, Color col)>();
+        // — already in the odds struct —
+        if (o.Flanked)   flags.Add(("! FLANKED", Pal.Accent));
+        if (o.Hunkered)  flags.Add(("- HUNKERED", Pal.Foe));          // target dug in: -25 aim, no crit
+        if (o.HighGround) flags.Add(("+ HIGH GROUND", Pal.Good));
+        if (o.SeesOver)  flags.Add(("+ OVER LOW COVER", Pal.Good));
+        if (o.Partial)   flags.Add(("~ PARTIAL COVER", Pal.TxtDim));
+        if (o.Steady)    flags.Add(("+ STEADY", Pal.Good));
+        if (o.Ambush)    flags.Add(("+ AMBUSH", Pal.Good));
+        // snap-fire penalty: this aim-mode shot is the cheap 1-action variant (the HitChance
+        // shown is already reduced by SnapAim). RUN&GUN is the free version, so no badge then.
+        if (g.AimMode && g.SnapShot && a != null && !a.RunGun) flags.Add(($"SNAP {Game.SnapAim}", Pal.Foe));
+
+        // — modifiers that read live attacker/target state (mirror Combat.ComputeOdds) —
+        if (a != null && d != null)
+        {
+            float dist = Util.TileDist(a.X, a.Y, d.X, d.Y);
+            bool tgtHurt    = d.MaxHp > 0 && d.Hp * 2 <= d.MaxHp;   // at/below half HP (Killer)
+            bool tgtSubHalf = d.MaxHp > 0 && d.Hp * 2 <  d.MaxHp;   // strictly below half (Executioner)
+            bool selfHurt   = a.MaxHp > 0 && a.Hp * 2 <= a.MaxHp;   // attacker bloodied (Cold Blood)
+
+            // attacker advantages (green) — each shown only when its condition holds THIS shot
+            if (a.BondAura)                                   flags.Add(("+ BOND", Pal.Good));
+            if (a.HasTrait(Trait.Killer) && tgtHurt)          flags.Add(("+ KILLER", Pal.Good));
+            if (a.HasTrait(Trait.Vengeful) && a.AllyDown)     flags.Add(("+ VENGEFUL", Pal.Good));
+            if (a.HasTrait(Trait.ColdBlood) && selfHurt)      flags.Add(("+ COLD BLOOD", Pal.Good));
+            if (a.HasPerk(Perk.LockOn) && o.CoverLevel == 0)  flags.Add(("+ LOCK-ON", Pal.Good));
+            if (a.HasPerk(Perk.CloseQuarters) && dist <= Unit.CloseRange) flags.Add(("+ CLOSE QTRS", Pal.Good));
+            if (a.HasPerk(Perk.Marksman) && dist >= Unit.LongRange)       flags.Add(("+ MARKSMAN", Pal.Good));
+            if (a.HasPerk(Perk.Deadeye))                      flags.Add(("+ DEADEYE", Pal.Good));
+            if (a.HasPerk(Perk.Executioner) && tgtSubHalf)    flags.Add(("+ EXECUTIONER", Pal.Good));
+            if (a.HasPerk(Perk.Opportunist) && o.Flanked)     flags.Add(("+ OPPORTUNIST", Pal.Good));
+            if (a.HasPerk(Perk.PointBlank) && dist <= Unit.PointBlankRange) flags.Add(("+ POINT BLANK", Pal.Good));
+            if (a.HasPerk(Perk.GiantSlayer) && d.MaxHp > 0 && d.Hp >= d.MaxHp) flags.Add(("+ FIRST STRIKE", Pal.Good));
+
+            // attacker penalties (red) — these quietly drag the hit% down
+            if (a.Suppress > 0)                               flags.Add(("- SUPPRESSED", Pal.Foe));
+            if (a.Wound > 0)                                  flags.Add(("- WOUNDED", Pal.Foe));
+            if (a.HasStatus(StatusKind.Disoriented))          flags.Add(("- DISORIENTED", Pal.Foe));
+
+            // target obscured in smoke (it's shootable — LoS clears the endpoint tile —
+            // but harder to make out). Neutral tag: smoke is not in the hit% math.
+            if (g.Grid.IsSmoke(d.X, d.Y))                     flags.Add(("~ SMOKED", Pal.TxtDim));
+        }
+
+        // Layout: one column when short, two when the badge list gets long, so a heavily
+        // perked veteran's tooltip stays compact instead of running tall.
+        const int hdr = 72, lineH = 17, fontFlag = 12, pad = 12;
+        bool twoCol = flags.Count > 5;
+        int rows = twoCol ? (flags.Count + 1) / 2 : flags.Count;
+        int colW = 132;                                    // width that fits "+ OVER LOW COVER" at 12px
+        int w = twoCol ? colW * 2 - 8 : 150;
+        int h = hdr + rows * lineH + (flags.Count > 0 ? 6 : 2);
+
         var m = Raylib.GetMousePosition();
-        int extras = (o.Flanked ? 1 : 0) + (o.HighGround ? 1 : 0) + (o.SeesOver ? 1 : 0) + (o.Partial ? 1 : 0) + (o.Steady ? 1 : 0) + (o.Ambush ? 1 : 0);
-        int w = 150, h = 74 + extras * 18;
         int x = (int)m.X - w / 2;
         int y = (int)m.Y - h - 18;
         x = Util.Clamp(x, 8, Cfg.ScreenW - w - 8);
@@ -717,25 +832,30 @@ public static class Hud
         Raylib.DrawRectangleRounded(box, 0.12f, 8, Pal.RGBA(10, 14, 19, 245));
         Raylib.DrawRectangleLinesEx(box, 1.5f, Pal.Foe);
 
-        Raylib.DrawTextEx(Cfg.Font, "HIT", new Vector2(x + 12, y + 10), 12, 1f, Pal.TxtDim);
+        Raylib.DrawTextEx(Cfg.Font, "HIT", new Vector2(x + pad, y + 10), 12, 1f, Pal.TxtDim);
         string hit = $"{o.HitChance}%";
-        Raylib.DrawTextEx(Cfg.Font, hit, new Vector2(x + w - (int)Raylib.MeasureTextEx(Cfg.Font, hit, 22, 1f).X - 12, y + 7), 22, 1f, Pal.Good);
+        Raylib.DrawTextEx(Cfg.Font, hit, new Vector2(x + w - (int)Raylib.MeasureTextEx(Cfg.Font, hit, 22, 1f).X - pad, y + 7), 22, 1f, Pal.Good);
 
-        Raylib.DrawTextEx(Cfg.Font, "CRIT", new Vector2(x + 12, y + 34), 12, 1f, Pal.TxtDim);
+        Raylib.DrawTextEx(Cfg.Font, "CRIT", new Vector2(x + pad, y + 34), 12, 1f, Pal.TxtDim);
         string crit = $"{o.CritChance}%";
-        Raylib.DrawTextEx(Cfg.Font, crit, new Vector2(x + w - (int)Raylib.MeasureTextEx(Cfg.Font, crit, 16, 1f).X - 12, y + 32), 16, 1f, Pal.Accent);
+        Raylib.DrawTextEx(Cfg.Font, crit, new Vector2(x + w - (int)Raylib.MeasureTextEx(Cfg.Font, crit, 16, 1f).X - pad, y + 32), 16, 1f, Pal.Accent);
 
-        Raylib.DrawTextEx(Cfg.Font, "DMG", new Vector2(x + 12, y + 54), 12, 1f, Pal.TxtDim);
+        Raylib.DrawTextEx(Cfg.Font, "DMG", new Vector2(x + pad, y + 54), 12, 1f, Pal.TxtDim);
         string dmg = $"{o.DmgMin}-{o.DmgMax}";
-        Raylib.DrawTextEx(Cfg.Font, dmg, new Vector2(x + w - (int)Raylib.MeasureTextEx(Cfg.Font, dmg, 16, 1f).X - 12, y + 52), 16, 1f, Pal.Foe);
+        Raylib.DrawTextEx(Cfg.Font, dmg, new Vector2(x + w - (int)Raylib.MeasureTextEx(Cfg.Font, dmg, 16, 1f).X - pad, y + 52), 16, 1f, Pal.Foe);
 
-        int fy = y + 72;
-        if (o.Flanked) { Raylib.DrawTextEx(Cfg.Font, "! FLANKED", new Vector2(x + 12, fy), 13, 1f, Pal.Accent); fy += 18; }
-        if (o.HighGround) { Raylib.DrawTextEx(Cfg.Font, "+ HIGH GROUND", new Vector2(x + 12, fy), 13, 1f, Pal.Good); fy += 18; }
-        if (o.SeesOver) { Raylib.DrawTextEx(Cfg.Font, "+ OVER LOW COVER", new Vector2(x + 12, fy), 13, 1f, Pal.Good); fy += 18; }
-        if (o.Partial) { Raylib.DrawTextEx(Cfg.Font, "~ PARTIAL COVER", new Vector2(x + 12, fy), 13, 1f, Pal.TxtDim); fy += 18; }
-        if (o.Steady) { Raylib.DrawTextEx(Cfg.Font, "+ STEADY", new Vector2(x + 12, fy), 13, 1f, Pal.Good); fy += 18; }
-        if (o.Ambush) { Raylib.DrawTextEx(Cfg.Font, "+ AMBUSH", new Vector2(x + 12, fy), 13, 1f, Pal.Good); fy += 18; }
+        // a hairline above the badges separates them from the headline numbers
+        if (flags.Count > 0)
+            Raylib.DrawRectangle(x + pad, y + hdr - 6, w - pad * 2, 1, Pal.RGBA(38, 49, 63, 200));
+
+        for (int i = 0; i < flags.Count; i++)
+        {
+            int col = twoCol ? i % 2 : 0;
+            int row = twoCol ? i / 2 : i;
+            int fx = x + pad + col * (colW - 4);
+            int fyy = y + hdr + row * lineH;
+            Raylib.DrawTextEx(Cfg.Font, flags[i].text, new Vector2(fx, fyy), fontFlag, 1f, flags[i].col);
+        }
     }
 
     // ---------------- turn banner sweep ----------------
@@ -758,6 +878,7 @@ public static class Hud
     static void DrawOverlays(Game g)
     {
         if (g.Phase == Phase.Intro)
+        {
             DrawCenterCard(g, "SIGHTLINE", "TURN-BASED SQUAD TACTICS", Pal.Friend,
                 new[]{
                     $"Lead one squad through {Run.MaxMissions} escalating missions.",
@@ -769,6 +890,8 @@ public static class Hud
                     "Kills earn promotions: better aim, more HP, more mobility.",
                     "Survivors carry their wounds and ranks to the next mission.",
                 }, "DEPLOY SQUAD", SaveGame.Exists ? "CONTINUE RUN" : null);
+            DrawHeatSelector(g);
+        }
         else if (g.Phase == Phase.Barracks)
             DrawBarracks(g);
         else if (g.Phase == Phase.Win)
@@ -800,8 +923,17 @@ public static class Hud
 
         string title = $"MISSION {run.Mission} COMPLETE";
         Raylib.DrawTextEx(Cfg.Font, title, new Vector2(x + w / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, title, 38, 1f).X / 2, y + 26), 38, 1f, Pal.Good);
-        string sub = $"BARRACKS - SQUAD DEBRIEF   |   INTEL {run.Intel}";
-        Raylib.DrawTextEx(Cfg.Font, sub, new Vector2(x + w / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, sub, 13, 1f).X / 2, y + 70), 13, 1f, Pal.TxtDim);
+        string sub = run.HeatLevel > 0
+            ? $"BARRACKS - SQUAD DEBRIEF   |   INTEL {run.Intel}   |   HEAT {run.HeatLevel}"
+            : $"BARRACKS - SQUAD DEBRIEF   |   INTEL {run.Intel}";
+        Raylib.DrawTextEx(Cfg.Font, sub, new Vector2(x + w / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, sub, 13, 1f).X / 2, y + 70), 13, 1f, run.HeatLevel > 0 ? Pal.Foe : Pal.TxtDim);
+        if (run.HeatLevel > 0)
+        {
+            var names = new System.Collections.Generic.List<string>();
+            foreach (var mod in Sightline.Heat.Active(run.HeatLevel)) names.Add(mod.Name);
+            string modLine = string.Join("  -  ", names);
+            Raylib.DrawTextEx(Cfg.Font, modLine, new Vector2(x + w / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, modLine, 11, 1f).X / 2, y + 86), 11, 1f, Pal.TxtDim);
+        }
 
         int ry = y + 100;
         foreach (var u in squad)
@@ -1005,7 +1137,8 @@ public static class Hud
     static string ObjName(Objective o) => o switch
     {
         Objective.Hack => "HACK", Objective.Evac => "EXTRACT", Objective.Escort => "ESCORT VIP",
-        Objective.Sabotage => "SABOTAGE", Objective.Rescue => "RESCUE", Objective.Defend => "DEFEND", _ => "ELIMINATE",
+        Objective.Sabotage => "SABOTAGE", Objective.Rescue => "RESCUE", Objective.Defend => "DEFEND",
+        Objective.Decapitate => "DECAPITATE", _ => "ELIMINATE",
     };
 
     static void DrawDeployCard(Rectangle r, MissionCard c)
@@ -1257,6 +1390,68 @@ public static class Hud
             OverlayBtn2 = new Rectangle(0, 0, 0, 0);
             DrawOverlayButton(OverlayBtn, btn, Pal.Friend, null);
         }
+    }
+
+    /// Intro Heat/Ascension selector: a side panel with a HEAT dial (+/- buttons, arrows/A-D),
+    /// the unlocked ceiling, and the live list of modifiers active at the dialled level. Heat
+    /// raises difficulty for a bigger intel payout; the cap rises when you WIN at it. Only
+    /// affects a fresh DEPLOY (CONTINUE keeps the saved run's heat).
+    static void DrawHeatSelector(Game g)
+    {
+        int level = Sightline.Heat.Clamp(g.PendingHeat);
+        int unlocked = Sightline.Heat.Clamp(g.UnlockedHeat);
+
+        int w = 320, x = Cfg.ScreenW - w - 40, y = 150;
+        // height grows with the active-modifier list (always tall enough for the ceiling's worth)
+        int rows = Math.Max(1, level);
+        int h = 132 + rows * 26 + 30;
+        var card = new Rectangle(x, y, w, h);
+        PanelShadow(card, 1f, 0.06f);
+        Raylib.DrawRectangleRounded(card, 0.06f, 8, Pal.Panel);
+        Raylib.DrawRectangleLinesEx(card, 1.5f, level > 0 ? Raylib.Fade(Pal.Foe, 0.7f) : Pal.PanelBd);
+
+        Color heatCol = level > 0 ? Pal.Foe : Pal.TxtDim;
+        Raylib.DrawTextEx(Cfg.Font, "HEAT / ASCENSION", new Vector2(x + 18, y + 14), 14, 1f, Pal.Accent);
+
+        // big level readout + the -/+ stepper
+        string val = level.ToString();
+        Raylib.DrawTextEx(Cfg.Font, "HEAT", new Vector2(x + 18, y + 48), 16, 1f, Pal.TxtDim);
+        Raylib.DrawTextEx(Cfg.Font, val, new Vector2(x + w / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, val, 40, 1f).X / 2, y + 40), 40, 1f, heatCol);
+
+        HeatMinus = new Rectangle(x + 18, y + 50, 34, 34);
+        HeatPlus = new Rectangle(x + w - 52, y + 50, 34, 34);
+        DrawStepper(HeatMinus, "-", level > 0);
+        DrawStepper(HeatPlus, "+", level < unlocked);
+
+        Raylib.DrawTextEx(Cfg.Font, $"MAX UNLOCKED: {unlocked}", new Vector2(x + 18, y + 92), 12, 1f, Pal.TxtDim);
+        string hint = level > 0 ? $"+{Sightline.Heat.IntelBonus(level)} intel / mission" : "standard difficulty";
+        Raylib.DrawTextEx(Cfg.Font, hint, new Vector2(x + 18, y + 110), 12, 1f, level > 0 ? Pal.Good : Pal.TxtDim);
+
+        // active modifiers (cumulative rungs 1..level)
+        int my = y + 132;
+        if (level == 0)
+            Raylib.DrawTextEx(Cfg.Font, "No modifiers active.", new Vector2(x + 18, my), 12, 1f, Pal.TxtDim);
+        else
+        {
+            int i = 1;
+            foreach (var mod in Sightline.Heat.Active(level))
+            {
+                Raylib.DrawTextEx(Cfg.Font, $"{i}.", new Vector2(x + 18, my), 12, 1f, Pal.Foe);
+                Raylib.DrawTextEx(Cfg.Font, mod.Name, new Vector2(x + 40, my), 12, 1f, Pal.Txt);
+                Raylib.DrawTextEx(Cfg.Font, mod.Desc, new Vector2(x + 40, my + 13), 11, 1f, Pal.TxtDim);
+                my += 26; i++;
+            }
+        }
+
+        Raylib.DrawTextEx(Cfg.Font, "[<] [>] to adjust", new Vector2(x + 18, y + h - 20), 11, 1f, Pal.TxtDim);
+    }
+
+    static void DrawStepper(Rectangle r, string sym, bool enabled)
+    {
+        bool hover = enabled && Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), r);
+        Raylib.DrawRectangleRounded(r, 0.3f, 6, Raylib.Fade(hover ? Pal.RGBA(40, 30, 20) : Pal.Panel, enabled ? 1f : 0.4f));
+        Raylib.DrawRectangleLinesEx(r, 1.5f, Raylib.Fade(enabled ? (hover ? Pal.Accent : Pal.PanelBd) : Pal.PanelBd, enabled ? 1f : 0.35f));
+        CenterText(sym, r, 22, Raylib.Fade(enabled ? Pal.Txt : Pal.TxtDim, enabled ? 1f : 0.5f));
     }
 
     static void DrawOverlayButton(Rectangle r, string label, Color baseCol, string keyHint)
