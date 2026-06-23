@@ -14,8 +14,11 @@ public enum AbilityKind { None, RunGun, Blitz, Steady, Suppress }
 public enum ItemKind { None, Smoke, Flash, Barricade }
 
 /// Promotion perks: a soldier picks one each rank-up (see Run / barracks).
+/// APPEND-ONLY: enum ordinals are the save keys (SaveGame stores perks by (int)Perk),
+/// so new members go at the END — never reorder or remove the existing ones.
 public enum Perk { LockOn, Hardened, Reflexes, Bandolier, CloseQuarters, Marksman, Deadeye, Tank, Sprinter, Adrenal,
-    Executioner, Guardian, CoolHeaded }
+    Executioner, Guardian, CoolHeaded,
+    Opportunist, PointBlank, GiantSlayer }
 
 /// Battlefield traits earned by FEATS (see Game feat hooks + Run.DebriefSurvivors).
 /// Each is a small passive read in Combat.ComputeOdds, so veterans matter.
@@ -281,6 +284,21 @@ public class Unit
     // bonus while the soldier carries NO negative status (so it's never a dead pick vs the rare daze).
     public const int CoolHeadedDivert = 8;  // rounds down DisorientAim(15) by ~half => -7 instead of -15
     public const int CoolHeadedSteady = 5;  // +aim while completely unhindered (no negative status)
+    // ---- build-variety perks: pure CRIT/AIM reads in Combat.ComputeOdds (no new state/hooks) ----
+    // Opportunist: a FLANKER'S FINISHER — +crit vs a target with NO cover (exposed/flanked). Distinct
+    // from LockOn (+AIM on the same condition: land the shot) and Deadeye (+crit unconditionally):
+    // Opportunist rewards *positioning the target out of cover* with extra lethality, not raw accuracy.
+    public const int OpportunistCrit = 18;
+    // Point Blank: a CLOSE-RANGE CRIT build — +crit within 2 tiles. Distinct from CloseQuarters
+    // (+AIM within 4 tiles, a wider band that helps you hit): Point Blank is tighter and adds CRIT,
+    // so a shotgun/assault rusher hits HARDER in your face rather than just more reliably nearby.
+    public const int PointBlankCrit = 20;
+    public const int PointBlankRange = 2;   // crit applies at dist <= 2 tiles
+    // Giant Slayer: an ANTI-TANK / BOSS specialist — +aim vs high-MaxHp targets (bruisers / shields /
+    // elites / bosses). No existing perk keys on the target's MaxHp, so this is a fully new axis: it's
+    // dead weight against fodder (MaxHp < 12) and shines exactly when a wall of HP needs chipping down.
+    public const int GiantSlayerAim = 14;
+    public const int GiantSlayerHp = 12;    // target MaxHp threshold to count as a "giant"
     public const int WoundAim = 12;      // aim penalty while Wound > 0
     public const int WoundMob = 1;       // mobility penalty while Wound > 0
 
@@ -320,6 +338,7 @@ public static class PerkDef
         Perk.LockOn, Perk.Hardened, Perk.Reflexes, Perk.Bandolier, Perk.CloseQuarters,
         Perk.Marksman, Perk.Deadeye, Perk.Tank, Perk.Sprinter, Perk.Adrenal,
         Perk.Executioner, Perk.Guardian, Perk.CoolHeaded,
+        Perk.Opportunist, Perk.PointBlank, Perk.GiantSlayer,
     };
 
     public static string Name(Perk p) => p switch
@@ -337,6 +356,9 @@ public static class PerkDef
         Perk.Executioner => "EXECUTIONER",
         Perk.Guardian => "GUARDIAN",
         Perk.CoolHeaded => "COOL-HEADED",
+        Perk.Opportunist => "OPPORTUNIST",
+        Perk.PointBlank => "POINT BLANK",
+        Perk.GiantSlayer => "GIANT SLAYER",
         _ => "PERK",
     };
 
@@ -355,6 +377,9 @@ public static class PerkDef
         Perk.Executioner => "EXC",
         Perk.Guardian => "GRD",
         Perk.CoolHeaded => "CLH",
+        Perk.Opportunist => "OPP",
+        Perk.PointBlank => "PBK",
+        Perk.GiantSlayer => "GSL",
         _ => "?",
     };
 
@@ -373,6 +398,9 @@ public static class PerkDef
         Perk.Executioner => "+25 crit vs targets below half HP (finisher)",
         Perk.Guardian => "overwatch reactions ignore the aim penalty + crit hard",
         Perk.CoolHeaded => "Disoriented penalty cut to -7, +5 aim when unhindered",
+        Perk.Opportunist => "+18 crit vs targets with no cover (flanker's finisher)",
+        Perk.PointBlank => "+20 crit within 2 tiles",
+        Perk.GiantSlayer => "+14 aim vs high-HP targets (bruisers, shields, bosses)",
         _ => "",
     };
 }

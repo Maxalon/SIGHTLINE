@@ -86,6 +86,10 @@ public static class Combat
         if (a.HasPerk(Perk.LockOn) && coverLevel == 0) hit += Unit.PerkAim;
         if (a.HasPerk(Perk.CloseQuarters) && dist <= Unit.CloseRange) hit += Unit.PerkAim;
         if (a.HasPerk(Perk.Marksman) && dist >= Unit.LongRange) hit += Unit.PerkAim;
+        // Giant Slayer: anti-tank/boss — +aim vs a high-MaxHp target (bruiser/shield/elite/boss).
+        // Keys on MaxHp (not current Hp), so it stays "on" all fight against a wall of HP, and is
+        // dead weight vs fodder — a distinct axis no other perk touches (see Unit.GiantSlayerHp).
+        if (a.HasPerk(Perk.GiantSlayer) && d.MaxHp >= Unit.GiantSlayerHp) hit += Unit.GiantSlayerAim;
         // CoolHeaded (composure). Two parts so it's never a dead pick:
         //  - cuts the Disoriented aim penalty (net = DisorientAim - CoolHeadedDivert), and
         //  - a small always-on steadiness bonus while the soldier carries NO negative status,
@@ -113,6 +117,12 @@ public static class Combat
         // Executioner: a FINISHER — bigger crit than Deadeye, but only vs sub-half-HP prey. So it
         // BEATS Deadeye against the wounded and LOSES against the healthy (a real choice, not a subset).
         if (a.HasPerk(Perk.Executioner) && d.MaxHp > 0 && d.Hp * 2 < d.MaxHp) crit += Unit.ExecutionerCrit;
+        // Opportunist: a FLANKER'S FINISHER — +crit vs a target with NO cover (exposed/flanked/seen-over,
+        // i.e. coverLevel collapsed to 0 above). Pairs with the move that strips the target's cover;
+        // distinct from LockOn (which gives +AIM, not crit, on the very same condition).
+        if (a.HasPerk(Perk.Opportunist) && coverLevel == 0) crit += Unit.OpportunistCrit;
+        // Point Blank: a CLOSE-RANGE CRIT build — +crit within 2 tiles (vs CloseQuarters' +aim within 4).
+        if (a.HasPerk(Perk.PointBlank) && dist <= Unit.PointBlankRange) crit += Unit.PointBlankCrit;
         // Guardian: overwatch LETHALITY. A reaction shot (ReactedThisTurn is set by Game right before
         // it Resolves this shot) crits hard — Reflexes makes overwatch reliable, Guardian makes it lethal.
         if (a.HasPerk(Perk.Guardian) && IsOverwatchReaction(a)) crit += Unit.GuardianReactCrit;
@@ -573,6 +583,52 @@ public static class Combat
             grd.ReactedThisTurn = false;
         }
 
+        // BUILD-VARIETY PERKS (Opportunist / Point Blank / Giant Slayer): each is a pure ComputeOdds
+        // read that fires ONLY under its condition and NOT otherwise, and is DISTINCT from the others.
+        {
+            var gV = new Grid();
+            Unit Perked(Perk p) { var u = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 3, Y = 5 }; u.Perks.Add(p); return u; }
+            Unit Plain() => new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 3, Y = 5 };
+
+            // ---- OPPORTUNIST: +crit vs a NO-COVER target; nothing vs a covered target ----
+            // Exposed target (no cover): Opportunist adds exactly OpportunistCrit over a plain shooter.
+            var exposed = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 7, Y = 5, Hp = 10, MaxHp = 10 };
+            int oppExposed   = ComputeOdds(gV, Perked(Perk.Opportunist), exposed).CritChance;
+            int plainExposed = ComputeOdds(gV, Plain(), exposed).CritChance;
+            if (oppExposed != Util.Clamp(plainExposed + Unit.OpportunistCrit, 0, 100)) fails.Add("opportunistExposed");
+            // Covered target (full high cover, coverLevel==2): Opportunist must NOT fire (no bonus).
+            // Attacker at x=3 (west), target at x=6, cover at x=5 on the target's facing (west) side.
+            var gCov = new Grid(); gCov.Tiles[5, 5] = TileType.HighCover;
+            var coveredFoe = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 6, Y = 5, Hp = 10, MaxHp = 10 };
+            var oppCovOdds = ComputeOdds(gCov, Perked(Perk.Opportunist), coveredFoe);
+            if (oppCovOdds.CoverLevel == 0) fails.Add("opportunistCoverSetup");   // guard: the foe really is covered
+            if (oppCovOdds.CritChance != ComputeOdds(gCov, Plain(), coveredFoe).CritChance) fails.Add("opportunistCoveredNoOp");
+
+            // ---- POINT BLANK: +crit within 2 tiles; nothing beyond (same NO-COVER state both times) ----
+            var pbClose = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 5, Y = 5, Hp = 10, MaxHp = 10 };  // dist 2 from x=3
+            var pbFar   = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 8, Y = 5, Hp = 10, MaxHp = 10 };  // dist 5 from x=3
+            int pbCloseOn  = ComputeOdds(gV, Perked(Perk.PointBlank), pbClose).CritChance;
+            int pbCloseOff = ComputeOdds(gV, Plain(),               pbClose).CritChance;
+            if (pbCloseOn != Util.Clamp(pbCloseOff + Unit.PointBlankCrit, 0, 100)) fails.Add("pointBlankClose");
+            if (ComputeOdds(gV, Perked(Perk.PointBlank), pbFar).CritChance != ComputeOdds(gV, Plain(), pbFar).CritChance) fails.Add("pointBlankFarNoOp");
+
+            // ---- GIANT SLAYER: +aim vs a high-MaxHp target; nothing vs fodder (same cover/range) ----
+            var giant  = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 7, Y = 5, Hp = Unit.GiantSlayerHp,     MaxHp = Unit.GiantSlayerHp };      // MaxHp == threshold (counts)
+            var fodder = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 7, Y = 5, Hp = Unit.GiantSlayerHp - 1, MaxHp = Unit.GiantSlayerHp - 1 };  // just below (does not)
+            int gsGiant  = ComputeOdds(gV, Perked(Perk.GiantSlayer), giant).HitChance;
+            int plainGi  = ComputeOdds(gV, Plain(),                  giant).HitChance;
+            if (gsGiant != Util.Clamp(plainGi + Unit.GiantSlayerAim, 3, 95)) fails.Add("giantSlayerGiant");
+            if (ComputeOdds(gV, Perked(Perk.GiantSlayer), fodder).HitChance != ComputeOdds(gV, Plain(), fodder).HitChance) fails.Add("giantSlayerFodderNoOp");
+
+            // ---- DISTINCTNESS: the three perks key off independent conditions ----
+            // Against an exposed, point-blank GIANT, all three would fire; against a covered, far,
+            // fodder target, none do. (A sanity check that they're not accidentally the same gate.)
+            var allYes = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 5, Y = 5, Hp = 14, MaxHp = 14 };  // exposed, dist 2, MaxHp>=12
+            if (ComputeOdds(gV, Perked(Perk.Opportunist), allYes).CritChance <= ComputeOdds(gV, Plain(), allYes).CritChance) fails.Add("distinctOppFires");
+            if (ComputeOdds(gV, Perked(Perk.PointBlank),  allYes).CritChance <= ComputeOdds(gV, Plain(), allYes).CritChance) fails.Add("distinctPbFires");
+            if (ComputeOdds(gV, Perked(Perk.GiantSlayer), allYes).HitChance  <= ComputeOdds(gV, Plain(), allYes).HitChance)  fails.Add("distinctGsFires");
+        }
+
         // FRAGILE-UNIT ONE-SHOT FLOOR: a full-HP PLAYER unit can't be dropped below 1 HP by a single
         // shot (capped at MaxHp-1); enemies are NOT protected. Use Sniper (DmgMin=5) vs a 4-HP unit so
         // EVERY hit (crit or not) would otherwise be lethal — the floor must always leave HP >= 1.
@@ -621,7 +677,7 @@ public static class Combat
         }
 
         return fails.Count == 0
-            ? "COMBATTEST: PASS (cover A-E + high-ground + tier-2 + drone/shield + ambush + graze + streak + perk-balance + fragile-floor all hold)"
+            ? "COMBATTEST: PASS (cover A-E + high-ground + tier-2 + drone/shield + ambush + graze + streak + perk-balance + build-perks + fragile-floor all hold)"
             : "COMBATTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 }
