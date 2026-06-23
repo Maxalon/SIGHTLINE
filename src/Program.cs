@@ -37,6 +37,12 @@ public static class Program
             Console.WriteLine(Combat.SelfTest());
             return;
         }
+        // SIGHTLINE_AMBIENTTEST=1 : per-biome ambient field stays bounded/finite/on-board (Phase 5). No window.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_AMBIENTTEST") == "1")
+        {
+            Console.WriteLine(Fx.AmbientSelfTest() ? "AMBIENTTEST: PASS" : "AMBIENTTEST: FAIL");
+            return;
+        }
         if (Environment.GetEnvironmentVariable("SIGHTLINE_DEATHTEST") == "1")
         {
             Raylib.InitWindow(64, 64, "deathtest");   // a Game/Audio-free path still needs tile math; window is tiny

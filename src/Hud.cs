@@ -34,6 +34,59 @@ public static class Hud
     // bench mechanic (S3-A): toggled in the barracks debrief for wounded soldiers
     public static System.Collections.Generic.List<(Unit unit, Rectangle rect)> BenchBtns = new();
 
+    // ---------------- UI motion (panel pop-in juice) ----------------
+    // Panels/cards animate in (slide + fade + scale) the first time they appear, instead
+    // of popping. We key each animated element by a stable string and record the wall-clock
+    // time it was first drawn (this frame); progress is (now - firstSeen)/duration eased.
+    // Keys that go untouched for a moment are pruned so re-appearing panels re-animate
+    // (e.g. re-entering the barracks). Deterministic w.r.t. when a phase becomes active:
+    // by a fixed screenshot frame the intro/HUD has been visible long enough to settle.
+    static readonly System.Collections.Generic.Dictionary<string, float> _animSeen = new();
+    static readonly System.Collections.Generic.HashSet<string> _animTouched = new();
+    static double _animLastPrune;
+
+    /// Eased 0..1 entrance progress for the element identified by `key`. `dur` is the
+    /// settle time (seconds). `delay` staggers the start (e.g. roster rows cascade).
+    static float PanelAnim(string key, float dur = 0.22f, float delay = 0f)
+    {
+        float now = (float)Raylib.GetTime();
+        _animTouched.Add(key);
+        if (!_animSeen.TryGetValue(key, out float t0)) { t0 = now; _animSeen[key] = now; }
+        float t = (now - t0 - delay) / MathF.Max(0.0001f, dur);
+        return Util.Clamp(t, 0f, 1f);
+    }
+
+    /// Call once per frame (from Draw) AFTER all PanelAnim() calls for the frame: forget
+    /// keys that weren't drawn this frame so they re-animate next time they appear.
+    static void PruneAnims()
+    {
+        double now = Raylib.GetTime();
+        // Prune a few times a second — cheap and avoids churn within a single frame.
+        if (now - _animLastPrune < 0.05) { _animTouched.Clear(); return; }
+        _animLastPrune = now;
+        if (_animSeen.Count != _animTouched.Count)
+        {
+            var stale = new System.Collections.Generic.List<string>();
+            foreach (var k in _animSeen.Keys) if (!_animTouched.Contains(k)) stale.Add(k);
+            foreach (var k in stale) _animSeen.Remove(k);
+        }
+        _animTouched.Clear();
+    }
+
+    /// Translate a panel rect upward-into-place by `slidePx` as t goes 0->1 (ease-out).
+    static Rectangle SlideIn(Rectangle r, float t, float slidePx = 18f)
+    {
+        float dy = (1f - Util.EaseOutQuad(t)) * slidePx;
+        return new Rectangle(r.X, r.Y + dy, r.Width, r.Height);
+    }
+
+    /// Scale a rect about its centre by `s` (1 = identity) — used for a subtle pop.
+    static Rectangle ScaleAbout(Rectangle r, float s)
+    {
+        float cx = r.X + r.Width / 2f, cy = r.Y + r.Height / 2f;
+        return new Rectangle(cx - r.Width * s / 2f, cy - r.Height * s / 2f, r.Width * s, r.Height * s);
+    }
+
     public static void Draw(Game g)
     {
         DrawTopBar(g);
@@ -46,6 +99,7 @@ public static class Hud
         DrawOverlays(g);
         if (g.Paused) DrawPause(g);
         if (g.EditingTag) DrawTagEditor(g);
+        PruneAnims();   // forget panel-entrance keys not drawn this frame (re-animate on re-show)
     }
 
     // Onboarding tutorial callout (3.12): a non-blocking tip card above the action bar.
@@ -121,9 +175,12 @@ public static class Hud
     // ---------------- pause / settings ----------------
     static void DrawPause(Game g)
     {
-        Raylib.DrawRectangle(0, 0, Cfg.ScreenW, Cfg.ScreenH, Raylib.Fade(Pal.RGBA(5, 8, 11), 0.82f));
+        // scrim fades in with the card so the pause lands rather than snaps
+        float in_ = PanelAnim("pause", 0.13f);
+        Raylib.DrawRectangle(0, 0, Cfg.ScreenW, Cfg.ScreenH, Raylib.Fade(Pal.RGBA(5, 8, 11), 0.82f * Util.EaseOutQuad(in_)));
         int w = 440, h = 665;
         int x = Cfg.ScreenW / 2 - w / 2, y = Cfg.ScreenH / 2 - h / 2;
+        y -= (int)((1f - Util.EaseOutQuad(in_)) * 14f);
         var card = new Rectangle(x, y, w, h);
         Raylib.DrawRectangleRounded(card, 0.05f, 8, Pal.Panel);
         Raylib.DrawRectangleLinesEx(card, 1.5f, Pal.PanelBd);
@@ -161,9 +218,15 @@ public static class Hud
     {
         RosterChips.Clear();
         int y = 70;
+        int idx = 0;
         foreach (var u in g.AlivePlayers())
         {
-            var r = new Rectangle(8, y, 132, 58);
+            // resting rect (used for click hit-testing) + a one-time staggered slide-in
+            // from the left edge so the strip assembles itself when combat opens.
+            var rest = new Rectangle(8, y, 132, 58);
+            float slideIn = PanelAnim("roster:" + u.Name, 0.28f, idx * 0.05f);
+            var r = new Rectangle(8 - (1f - Util.EaseOutQuad(slideIn)) * 26f, y, 132, 58);
+            idx++;
             bool sel = g.Selected == u;
             bool spent = g.Phase == Phase.PlayerTurn && !u.CanAct;
             float a = spent ? 0.5f : 1f;
@@ -213,7 +276,7 @@ public static class Hud
                 }
             }
 
-            RosterChips.Add((r, u));
+            RosterChips.Add((rest, u));   // hit-test the resting position, not the mid-slide rect
             y += 64;
         }
     }
@@ -323,6 +386,11 @@ public static class Hud
 
     static void DrawUnitCard(Unit u, int x, int y)
     {
+        // Pop the card in (slide up) when the selection changes — keyed per unit so
+        // switching soldiers re-triggers the entrance (old key prunes when it stops drawing).
+        float in_ = PanelAnim("unitcard:" + u.Name, 0.16f);
+        y += (int)((1f - Util.EaseOutBack(in_)) * 14f);
+
         var card = new Rectangle(x, y, 250, 92);
         PanelShadow(card, 1f, 0.12f);
         Raylib.DrawRectangleRounded(card, 0.12f, 8, Pal.Panel);
@@ -879,28 +947,317 @@ public static class Hud
     {
         if (g.Phase == Phase.Intro)
         {
-            DrawCenterCard(g, "SIGHTLINE", "TURN-BASED SQUAD TACTICS", Pal.Friend,
-                new[]{
-                    $"Lead one squad through {Run.MaxMissions} escalating missions.",
-                    "2 actions per soldier - move, then fire (firing ends the turn).",
-                    "Stand beside cover to cut enemy aim. Get flanked and you're exposed.",
-                    "Seize the high ground (raised tiles) for an aim + crit edge.",
-                    "Each class has a signature ability (key 5): Run&Gun, Blitz,",
-                    "   Steady, Suppress - one charge per mission.",
-                    "Kills earn promotions: better aim, more HP, more mobility.",
-                    "Survivors carry their wounds and ranks to the next mission.",
-                }, "DEPLOY SQUAD", SaveGame.Exists ? "CONTINUE RUN" : null);
+            DrawIntro(g);
             DrawHeatSelector(g);
         }
         else if (g.Phase == Phase.Barracks)
             DrawBarracks(g);
         else if (g.Phase == Phase.Win)
-            DrawCenterCard(g, "CAMPAIGN COMPLETE", $"All {Run.MaxMissions} missions cleared. The squad stands victorious.",
-                Pal.Good, null, "NEW RUN");
+            DrawEndScreen(g, true);
         else if (g.Phase == Phase.Lose)
-            DrawCenterCard(g, string.IsNullOrEmpty(g.LoseTitle) ? "RUN OVER" : g.LoseTitle,
-                string.IsNullOrEmpty(g.LoseReason) ? $"The squad fell on mission {g.RunState.Mission}." : g.LoseReason,
-                Pal.Foe, null, "NEW RUN");
+            DrawEndScreen(g, false);
+    }
+
+    // ============================================================================
+    //  TITLE / INTRO  — an animated geometric title screen (replaces the flat card).
+    //  A drifting tactical grid + a horizontal scanning "sightline" sweep + slow
+    //  parallax reticle motifs behind a stylized SIGHTLINE wordmark, with the rules
+    //  set as an elegant left-railed briefing. All motion is driven by GetTime() so
+    //  a fixed screenshot frame is reproducible (content may differ frame-to-frame,
+    //  which is fine + intended); no per-frame RNG.
+    // ============================================================================
+    static void DrawIntro(Game g)
+    {
+        float t = (float)Raylib.GetTime();
+        DrawTacticalBackdrop(t, Pal.Friend, 0.0f);
+
+        int W = Cfg.ScreenW, H = Cfg.ScreenH;
+
+        // ---- wordmark ----
+        // A large letter-spaced SIGHTLINE with a crosshair "I"-tick motif, a soft glow,
+        // and a scan line sweeping vertically through the glyphs.
+        float titleIn = PanelAnim("introTitle", 0.5f);
+        int tfs = 92;
+        string word = "SIGHTLINE";
+        float spacing = 6f;
+        Vector2 wm = Raylib.MeasureTextEx(Cfg.Font, word, tfs, spacing);
+        float wx = W / 2f - wm.X / 2f;
+        float wy = 150f - (1f - Util.EaseOutBack(titleIn)) * 26f;   // settle down + slight overshoot
+        // soft glow halo (a few offset dim copies)
+        Color glow = Raylib.Fade(Pal.Friend, 0.12f * titleIn);
+        for (int i = 1; i <= 3; i++)
+            Raylib.DrawTextEx(Cfg.Font, word, new Vector2(wx, wy - i), tfs, spacing, glow);
+        // a subtle vertical accent gradient over the wordmark via a clipped scan band
+        Raylib.DrawTextEx(Cfg.Font, word, new Vector2(wx, wy), tfs, spacing, Raylib.Fade(Pal.Txt, titleIn));
+        // scan line passing down through the wordmark (loops every ~3.5s)
+        float scanT = (t * 0.30f) % 1f;
+        float scanY = wy + scanT * tfs;
+        Raylib.DrawRectangleGradientH((int)wx - 10, (int)scanY, (int)wm.X + 20, 2,
+            Raylib.Fade(Pal.Friend, 0f), Raylib.Fade(Pal.Friend, 0.5f * titleIn));
+        Raylib.DrawRectangleGradientH((int)(wx + wm.X / 2), (int)scanY, (int)(wm.X / 2) + 10, 2,
+            Raylib.Fade(Pal.Friend, 0.5f * titleIn), Raylib.Fade(Pal.Friend, 0f));
+        // bracket ticks framing the wordmark (target-reticle motif)
+        float bo = 18f + 6f * MathF.Sin(t * 1.6f);   // breathing offset
+        DrawCornerBrackets(new Rectangle(wx - bo, wy + 6, wm.X + bo * 2, tfs - 4), Raylib.Fade(Pal.Friend, 0.55f * titleIn), 16f);
+
+        // subtitle
+        float subIn = PanelAnim("introSub", 0.4f, 0.18f);
+        string sub = "TURN-BASED SQUAD TACTICS";
+        int sfs = 18;
+        Vector2 sm = Raylib.MeasureTextEx(Cfg.Font, sub, sfs, 3f);
+        Raylib.DrawTextEx(Cfg.Font, sub, new Vector2(W / 2f - sm.X / 2f, wy + tfs + 8), sfs, 3f,
+            Raylib.Fade(Pal.TxtDim, subIn));
+        // thin divider under the subtitle that wipes outward
+        float divW = (sm.X + 80) * Util.EaseOutQuad(subIn);
+        Raylib.DrawRectangle((int)(W / 2f - divW / 2f), (int)(wy + tfs + 36), (int)divW, 1, Raylib.Fade(Pal.Friend, 0.4f * subIn));
+
+        // ---- briefing rules (elegant left-railed list, progressively revealed) ----
+        string[] rules =
+        {
+            $"Lead one squad through {Run.MaxMissions} escalating missions.",
+            "2 actions per soldier — move, then fire (firing ends the turn).",
+            "Hug cover to cut enemy aim; get flanked and you're exposed.",
+            "Seize the high ground for an aim and crit edge.",
+            "Each class wields a signature ability (key 5), once per mission.",
+            "Kills earn promotions; survivors carry wounds and rank onward.",
+        };
+        int ry0 = (int)(wy + tfs + 70);
+        int rx = W / 2 - 320;
+        int rowH = 30;
+        // a faint vertical rail the bullets hang off
+        float railIn = PanelAnim("introRail", 0.5f, 0.25f);
+        Raylib.DrawRectangle(rx - 16, ry0 + 2, 2, (int)(rules.Length * rowH * Util.EaseOutQuad(railIn)), Raylib.Fade(Pal.Friend, 0.45f));
+        for (int i = 0; i < rules.Length; i++)
+        {
+            float in_ = PanelAnim($"introRule{i}", 0.32f, 0.30f + i * 0.07f);
+            if (in_ <= 0f) continue;
+            float a = Util.EaseOutQuad(in_);
+            int yy = ry0 + i * rowH + (int)((1f - a) * 8f);
+            // a small diamond node on the rail
+            Raylib.DrawRectanglePro(new Rectangle(rx - 16, yy + 9, 6, 6), new Vector2(3, 3), 45f, Raylib.Fade(Pal.Friend, a));
+            Raylib.DrawTextEx(Cfg.Font, rules[i], new Vector2(rx, yy), 15, 1f, Raylib.Fade(Pal.Txt, 0.92f * a));
+        }
+
+        // ---- buttons (START / CONTINUE) ----
+        float btnIn = PanelAnim("introBtns", 0.3f, 0.55f);
+        int by = ry0 + rules.Length * rowH + 28;
+        by += (int)((1f - Util.EaseOutQuad(btnIn)) * 14f);
+        string btn = "DEPLOY SQUAD";
+        string secondBtn = SaveGame.Exists ? "CONTINUE RUN" : null;
+        if (secondBtn != null)
+        {
+            int bw = 220, gap = 22;
+            OverlayBtn2 = new Rectangle(W / 2 - bw - gap / 2, by, bw, 50);
+            OverlayBtn  = new Rectangle(W / 2 + gap / 2, by, bw, 50);
+            DrawOverlayButton(OverlayBtn2, secondBtn, Pal.Good, "C", btnIn);
+            DrawOverlayButton(OverlayBtn, btn, Pal.Friend, null, btnIn);
+        }
+        else
+        {
+            OverlayBtn = new Rectangle(W / 2 - 130, by, 260, 50);
+            OverlayBtn2 = new Rectangle(0, 0, 0, 0);
+            DrawOverlayButton(OverlayBtn, btn, Pal.Friend, null, btnIn);
+        }
+
+        // a faint version/footer stamp
+        Raylib.DrawTextEx(Cfg.Font, "GEOMETRY · PARTICLES · NO QUARTER", new Vector2(W / 2f - 150, H - 30), 11, 1f, Raylib.Fade(Pal.TxtDim, 0.6f));
+    }
+
+    /// A reusable animated geometric backdrop: an opaque graded fill, a slow-drifting
+    /// perspective-ish grid, a horizontal scanning sightline, drifting reticle rings,
+    /// and a few primitive "tracer" streaks. Used by the intro + the win/lose screens
+    /// (tinted by `accent`). `warp` (0..1) bends the grid toward the horizon for variety.
+    static void DrawTacticalBackdrop(float t, Color accent, float warp)
+    {
+        int W = Cfg.ScreenW, H = Cfg.ScreenH;
+
+        // 1) Opaque vertical graded base so the live board/HUD underneath is hidden.
+        Raylib.DrawRectangleGradientV(0, 0, W, H, Pal.RGBA(8, 11, 16), Pal.RGBA(5, 7, 11));
+        // a soft radial-ish vignette via two corner darkenings
+        Raylib.DrawRectangleGradientV(0, H - 220, W, 220, Pal.RGBA(5, 7, 11, 0), Pal.RGBA(2, 3, 5, 180));
+
+        // 2) Drifting grid. Vertical + horizontal lines scroll slowly; a subtle parallax
+        // brightness ripple sweeps across so it reads as alive, not static.
+        int cell = 56;
+        float driftX = (t * 9f) % cell;
+        float driftY = (t * 6f) % cell;
+        Color gl = Raylib.Fade(accent, 0.05f);
+        for (float x = -driftX; x < W; x += cell)
+        {
+            // brightness ripple based on horizontal position + time
+            float rip = 0.5f + 0.5f * MathF.Sin((x / W) * 6.28318f + t * 0.8f);
+            Raylib.DrawLine((int)x, 0, (int)x, H, Raylib.Fade(accent, 0.035f + 0.035f * rip));
+        }
+        for (float y = -driftY; y < H; y += cell)
+            Raylib.DrawLine(0, (int)y, W, (int)y, gl);
+
+        // 3) Scanning sightline: a bright horizontal beam sweeping top->bottom on a slow
+        // loop, with a soft falloff above/below and a moving reticle node riding it.
+        float sweep = (t * 0.07f) % 1f;
+        int sy = (int)(sweep * H);
+        Raylib.DrawRectangle(0, sy - 1, W, 2, Raylib.Fade(accent, 0.22f));
+        Raylib.DrawRectangleGradientV(0, sy - 60, W, 60, Raylib.Fade(accent, 0f), Raylib.Fade(accent, 0.06f));
+        Raylib.DrawRectangleGradientV(0, sy, W, 60, Raylib.Fade(accent, 0.06f), Raylib.Fade(accent, 0f));
+        // reticle node sweeping horizontally along the beam (independent phase)
+        float nodeX = (0.5f + 0.5f * MathF.Sin(t * 0.5f)) * W;
+        Raylib.DrawCircleLines((int)nodeX, sy, 9f, Raylib.Fade(accent, 0.5f));
+        Raylib.DrawLine((int)nodeX - 16, sy, (int)nodeX - 11, sy, Raylib.Fade(accent, 0.6f));
+        Raylib.DrawLine((int)nodeX + 11, sy, (int)nodeX + 16, sy, Raylib.Fade(accent, 0.6f));
+
+        // 4) Parallax reticle motifs: a few slowly-rotating concentric rings drifting in
+        // the background (deterministic from fixed seeds + time — no RNG).
+        DrawDriftRing(W * 0.16f, H * 0.30f, 70f, t * 0.20f, accent, 0.10f);
+        DrawDriftRing(W * 0.84f, H * 0.66f, 96f, -t * 0.14f, accent, 0.09f);
+        DrawDriftRing(W * 0.70f, H * 0.20f, 48f, t * 0.30f, accent, 0.08f);
+
+        // 5) Drifting particle dust (primitive points on deterministic sinusoidal paths).
+        for (int i = 0; i < 26; i++)
+        {
+            float px = (MathF.Sin(i * 12.9898f) * 0.5f + 0.5f) * W;
+            float baseY = (MathF.Sin(i * 78.233f) * 0.5f + 0.5f) * H;
+            float py = (baseY + t * (8f + (i % 5) * 4f)) % H;     // slow downward drift
+            float tw = 0.3f + 0.7f * (0.5f + 0.5f * MathF.Sin(t * 1.7f + i));   // twinkle
+            float r = 1f + (i % 3) * 0.6f;
+            Raylib.DrawCircleV(new Vector2(px, py), r, Raylib.Fade(accent, 0.10f * tw));
+        }
+
+        // 6) A couple of long diagonal "tracer" streaks crossing the field on a loop.
+        for (int s = 0; s < 2; s++)
+        {
+            float phase = (t * 0.13f + s * 0.5f) % 1f;
+            float sxp = phase * (W + 400) - 200;
+            float syp = H * (0.2f + 0.5f * s) + MathF.Sin(t * 0.6f + s) * 30f;
+            Raylib.DrawLineEx(new Vector2(sxp, syp), new Vector2(sxp + 120, syp + 26), 1.5f, Raylib.Fade(accent, 0.10f));
+            Raylib.DrawCircleV(new Vector2(sxp + 120, syp + 26), 2f, Raylib.Fade(accent, 0.18f));
+        }
+    }
+
+    /// A slowly-rotating concentric-ring reticle motif at (cx,cy), used as parallax decor.
+    static void DrawDriftRing(float cx, float cy, float rad, float rot, Color c, float alpha)
+    {
+        Raylib.DrawCircleLines((int)cx, (int)cy, rad, Raylib.Fade(c, alpha));
+        Raylib.DrawCircleLines((int)cx, (int)cy, rad * 0.6f, Raylib.Fade(c, alpha * 0.8f));
+        // 4 rotating tick marks
+        for (int i = 0; i < 4; i++)
+        {
+            float a = rot + i * MathF.PI / 2f;
+            float c0 = MathF.Cos(a), s0 = MathF.Sin(a);
+            Raylib.DrawLineEx(new Vector2(cx + c0 * rad, cy + s0 * rad),
+                              new Vector2(cx + c0 * (rad + 12), cy + s0 * (rad + 12)), 1.4f, Raylib.Fade(c, alpha * 1.4f));
+        }
+    }
+
+    /// Draw four L-shaped corner brackets just outside `r` (a target-frame motif).
+    static void DrawCornerBrackets(Rectangle r, Color c, float len)
+    {
+        float x0 = r.X, y0 = r.Y, x1 = r.X + r.Width, y1 = r.Y + r.Height;
+        // TL
+        Raylib.DrawLineEx(new Vector2(x0, y0), new Vector2(x0 + len, y0), 2f, c);
+        Raylib.DrawLineEx(new Vector2(x0, y0), new Vector2(x0, y0 + len), 2f, c);
+        // TR
+        Raylib.DrawLineEx(new Vector2(x1, y0), new Vector2(x1 - len, y0), 2f, c);
+        Raylib.DrawLineEx(new Vector2(x1, y0), new Vector2(x1, y0 + len), 2f, c);
+        // BL
+        Raylib.DrawLineEx(new Vector2(x0, y1), new Vector2(x0 + len, y1), 2f, c);
+        Raylib.DrawLineEx(new Vector2(x0, y1), new Vector2(x0, y1 - len), 2f, c);
+        // BR
+        Raylib.DrawLineEx(new Vector2(x1, y1), new Vector2(x1 - len, y1), 2f, c);
+        Raylib.DrawLineEx(new Vector2(x1, y1), new Vector2(x1, y1 - len), 2f, c);
+    }
+
+    // ============================================================================
+    //  VICTORY / DEFEAT  — a cinematic end screen with an animated reveal, a held
+    //  emphatic title, counting-up stats, and a colour-graded geometric backdrop.
+    // ============================================================================
+    static void DrawEndScreen(Game g, bool win)
+    {
+        float t = (float)Raylib.GetTime();
+        Color accent = win ? Pal.Good : Pal.Foe;
+        DrawTacticalBackdrop(t, accent, 0f);
+        // an extra colour wash to grade the whole frame toward win-green / lose-red
+        Raylib.DrawRectangle(0, 0, Cfg.ScreenW, Cfg.ScreenH, Raylib.Fade(accent, win ? 0.06f : 0.08f));
+
+        int W = Cfg.ScreenW;
+        var run = g.RunState;
+
+        // ---- big held title ----
+        float titleIn = PanelAnim("endTitle", 0.6f);
+        string title = win ? "VICTORY"
+                           : (string.IsNullOrEmpty(g.LoseTitle) ? "RUN OVER" : g.LoseTitle);
+        int tfs = 100;
+        Vector2 tm = Raylib.MeasureTextEx(Cfg.Font, title, tfs, 4f);
+        float tx = W / 2f - tm.X / 2f;
+        float ty = 150f - (1f - Util.EaseOutBack(Util.Clamp(titleIn, 0f, 1f))) * 30f;
+        // emphatic glow that pulses (a held, "earned" feel)
+        float pulse = 0.5f + 0.5f * MathF.Sin(t * 2.2f);
+        for (int i = 1; i <= 4; i++)
+            Raylib.DrawTextEx(Cfg.Font, title, new Vector2(tx, ty - i), tfs, 4f, Raylib.Fade(accent, (0.10f + 0.05f * pulse) * titleIn));
+        Raylib.DrawTextEx(Cfg.Font, title, new Vector2(tx, ty), tfs, 4f, Raylib.Fade(win ? Pal.Txt : Pal.Foe, titleIn));
+        DrawCornerBrackets(new Rectangle(tx - 24, ty + 8, tm.X + 48, tfs - 10), Raylib.Fade(accent, 0.5f * titleIn), 20f);
+
+        // ---- subtitle / reason ----
+        float subIn = PanelAnim("endSub", 0.4f, 0.2f);
+        int mission = run?.Mission ?? 1;
+        string sub = win
+            ? $"All {Run.MaxMissions} missions cleared. The squad stands victorious."
+            : (string.IsNullOrEmpty(g.LoseReason) ? $"The squad fell on mission {mission}." : g.LoseReason);
+        Vector2 sm = Raylib.MeasureTextEx(Cfg.Font, sub, 16, 1f);
+        Raylib.DrawTextEx(Cfg.Font, sub, new Vector2(W / 2f - sm.X / 2f, ty + tfs + 6), 16, 1f, Raylib.Fade(Pal.TxtDim, subIn));
+
+        // ---- counting-up stat slabs (missions / intel / kills / heat) ----
+        int totalKills = 0;
+        if (run != null && run.Squad != null) foreach (var u in run.Squad) totalKills += u.Kills;
+        int missionsShown = win ? Run.MaxMissions : Math.Max(0, mission - 1);
+
+        var stats = new System.Collections.Generic.List<(string label, int value, Color col)>
+        {
+            ("MISSIONS CLEARED", missionsShown, accent),
+            ("INTEL BANKED",     run?.Intel ?? 0, Pal.Accent),
+            ("CONFIRMED KILLS",  totalKills, Pal.Friend),
+        };
+        if ((run?.HeatLevel ?? 0) > 0) stats.Add(("HEAT / ASCENSION", run.HeatLevel, Pal.Foe));
+
+        float statsIn = PanelAnim("endStats", 0.3f, 0.45f);
+        int n = stats.Count;
+        int slabW = 210, gap = 18;
+        int totalW = n * slabW + (n - 1) * gap;
+        int sx0 = W / 2 - totalW / 2;
+        int sy = (int)(ty + tfs + 60);
+        // count-up factor: ramps 0->1 over ~0.9s after the slabs appear
+        float countF = Util.EaseOutQuad(PanelAnim("endCount", 0.9f, 0.5f));
+        for (int i = 0; i < n; i++)
+        {
+            float in_ = Util.Clamp((statsIn - i * 0.10f) / 0.6f, 0f, 1f);
+            if (in_ <= 0f) continue;
+            var slab = new Rectangle(sx0 + i * (slabW + gap), sy + (int)((1f - Util.EaseOutQuad(in_)) * 16f), slabW, 92);
+            float a = Util.EaseOutQuad(in_);
+            Raylib.DrawRectangleRounded(slab, 0.10f, 8, Raylib.Fade(Pal.Panel, 0.92f * a));
+            Raylib.DrawRectangleLinesEx(slab, 1.4f, Raylib.Fade(stats[i].col, 0.55f * a));
+            Raylib.DrawRectangle((int)slab.X, (int)slab.Y, 3, (int)slab.Height, Raylib.Fade(stats[i].col, a));
+            // big counted number
+            int shownVal = (int)MathF.Round(stats[i].value * countF);
+            string num = shownVal.ToString();
+            Vector2 nmz = Raylib.MeasureTextEx(Cfg.Font, num, 46, 1f);
+            Raylib.DrawTextEx(Cfg.Font, num, new Vector2(slab.X + slab.Width / 2 - nmz.X / 2, slab.Y + 16), 46, 1f, Raylib.Fade(stats[i].col, a));
+            Vector2 lz = Raylib.MeasureTextEx(Cfg.Font, stats[i].label, 11, 1f);
+            Raylib.DrawTextEx(Cfg.Font, stats[i].label, new Vector2(slab.X + slab.Width / 2 - lz.X / 2, slab.Y + 68), 11, 1f, Raylib.Fade(Pal.TxtDim, a));
+        }
+
+        // ---- fallen roll (lose only): a quiet honour list if the squad took losses ----
+        if (!win && run?.Fallen != null && run.Fallen.Count > 0)
+        {
+            float fIn = PanelAnim("endFallen", 0.4f, 0.7f);
+            string roll = "FALLEN:  " + string.Join("   ", run.Fallen);
+            Vector2 fz = Raylib.MeasureTextEx(Cfg.Font, roll, 13, 1f);
+            Raylib.DrawTextEx(Cfg.Font, roll, new Vector2(W / 2f - fz.X / 2f, sy + 110), 13, 1f, Raylib.Fade(Pal.Foe, 0.85f * fIn));
+        }
+
+        // ---- NEW RUN button (single, centred) ----
+        float btnIn = PanelAnim("endBtn", 0.3f, 0.8f);
+        int by = sy + 150;
+        OverlayBtn = new Rectangle(W / 2 - 130, by, 260, 50);
+        OverlayBtn2 = new Rectangle(0, 0, 0, 0);
+        DrawOverlayButton(OverlayBtn, "NEW RUN", win ? Pal.Good : Pal.Friend, null, btnIn);
     }
 
     static void DrawBarracks(Game g)
@@ -917,6 +1274,8 @@ public static class Hud
         int h = 150 + rows * 46 + Math.Min(run.Report.Count, 5) * 22 + 220;
         int x = Cfg.ScreenW / 2 - w / 2;
         int y = Cfg.ScreenH / 2 - h / 2;
+        // quick slide-down entrance (≈0.15s, settles well before any click on the map/bench)
+        y -= (int)((1f - Util.EaseOutQuad(PanelAnim("barracks", 0.15f))) * 16f);
         var card = new Rectangle(x, y, w, h);
         Raylib.DrawRectangleRounded(card, 0.04f, 8, Pal.Panel);
         Raylib.DrawRectangleLinesEx(card, 1.5f, Pal.PanelBd);
@@ -1093,6 +1452,7 @@ public static class Hud
         int squadH = 40;
         int w = 560, h = 104 + squadH + items * (ih + gap) + 60;
         int x = Cfg.ScreenW / 2 - w / 2, y = Cfg.ScreenH / 2 - h / 2;
+        y -= (int)((1f - Util.EaseOutQuad(PanelAnim("requisition", 0.15f))) * 16f);  // slide-down entrance
         var card = new Rectangle(x, y, w, h);
         Raylib.DrawRectangleRounded(card, 0.04f, 8, Pal.Panel);
         Raylib.DrawRectangleLinesEx(card, 1.5f, Pal.PanelBd);
@@ -1164,6 +1524,7 @@ public static class Hud
         Raylib.DrawRectangle(0, 0, Cfg.ScreenW, Cfg.ScreenH, Raylib.Fade(Pal.RGBA(5, 8, 11), 0.88f));
         int w = 660, h = 440;
         int x = Cfg.ScreenW / 2 - w / 2, y = Cfg.ScreenH / 2 - h / 2;
+        y -= (int)((1f - Util.EaseOutQuad(PanelAnim("perkchooser", 0.15f))) * 16f);  // slide-down entrance
         var card = new Rectangle(x, y, w, h);
         Raylib.DrawRectangleRounded(card, 0.04f, 8, Pal.Panel);
         Raylib.DrawRectangleLinesEx(card, 1.5f, Pal.PanelBd);
@@ -1344,56 +1705,6 @@ public static class Hud
     public static Rectangle OverlayBtn;
     public static Rectangle OverlayBtn2;   // intro CONTINUE-run button (when a save exists)
 
-    static void DrawCenterCard(Game g, string title, string sub, Color titleCol, string[] rules, string btn,
-                               string secondBtn = null)
-    {
-        Raylib.DrawRectangle(0, 0, Cfg.ScreenW, Cfg.ScreenH, Raylib.Fade(Pal.RGBA(5, 8, 11), 0.84f));
-        // size the card to the widest rule so text never clips (rules sit at x+58 + right pad)
-        int w = 540;
-        if (rules != null)
-        {
-            int maxRule = 0;
-            foreach (var r in rules) maxRule = Math.Max(maxRule, (int)Raylib.MeasureTextEx(Cfg.Font, r, 15, 1f).X);
-            w = Math.Max(w, maxRule + 58 + 30);
-        }
-        int h = rules != null ? 152 + rules.Length * 30 + 70 : 240;
-        int x = Cfg.ScreenW / 2 - w / 2, y = Cfg.ScreenH / 2 - h / 2;
-        var card = new Rectangle(x, y, w, h);
-        Raylib.DrawRectangleRounded(card, 0.06f, 8, Pal.Panel);
-        Raylib.DrawRectangleLinesEx(card, 1.5f, Pal.PanelBd);
-
-        int tfs = 46;
-        Raylib.DrawTextEx(Cfg.Font, title, new Vector2(x + w / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, title, tfs, 1f).X / 2, y + 34), tfs, 1f, titleCol);
-        Raylib.DrawTextEx(Cfg.Font, sub, new Vector2(x + w / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, sub, 14, 1f).X / 2, y + 90), 14, 1f, Pal.TxtDim);
-
-        if (rules != null)
-        {
-            int ry = y + 130;
-            foreach (var r in rules)
-            {
-                Raylib.DrawTextEx(Cfg.Font, ">", new Vector2(x + 40, ry), 16, 1f, Pal.Friend);
-                Raylib.DrawTextEx(Cfg.Font, r, new Vector2(x + 58, ry), 15, 1f, Pal.TxtDim);
-                ry += 30;
-            }
-        }
-
-        int by = y + h - 70;
-        if (secondBtn != null)   // two side-by-side buttons: CONTINUE (left) + new run (right)
-        {
-            int bw = 210, gap = 20;
-            OverlayBtn2 = new Rectangle(x + w / 2 - bw - gap / 2, by, bw, 48);
-            OverlayBtn = new Rectangle(x + w / 2 + gap / 2, by, bw, 48);
-            DrawOverlayButton(OverlayBtn2, secondBtn, Pal.Good, "C");
-            DrawOverlayButton(OverlayBtn, btn, Pal.Friend, null);
-        }
-        else
-        {
-            OverlayBtn = new Rectangle(x + w / 2 - 110, by, 220, 48);
-            OverlayBtn2 = new Rectangle(0, 0, 0, 0);
-            DrawOverlayButton(OverlayBtn, btn, Pal.Friend, null);
-        }
-    }
-
     /// Intro Heat/Ascension selector: a side panel with a HEAT dial (+/- buttons, arrows/A-D),
     /// the unlocked ceiling, and the live list of modifiers active at the dialled level. Heat
     /// raises difficulty for a bigger intel payout; the cap rises when you WIN at it. Only
@@ -1456,14 +1767,21 @@ public static class Hud
         CenterText(sym, r, 22, Raylib.Fade(enabled ? Pal.Txt : Pal.TxtDim, enabled ? 1f : 0.5f));
     }
 
-    static void DrawOverlayButton(Rectangle r, string label, Color baseCol, string keyHint)
+    static void DrawOverlayButton(Rectangle r, string label, Color baseCol, string keyHint, float anim = 1f)
     {
-        bool hover = Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), r);
+        float a = Util.EaseOutQuad(Util.Clamp(anim, 0f, 1f));
+        // entrance: fade + a few px of upward slide so it lands rather than pops
+        float dy = (1f - a) * 12f;
+        var rr = new Rectangle(r.X, r.Y + dy, r.Width, r.Height);
+        bool hover = a > 0.7f && Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), r);  // hit-test stays on the resting rect
         Color hi = Pal.RGBA(92, 200, 251);
-        Raylib.DrawRectangleRounded(r, 0.3f, 8, hover ? hi : baseCol);
-        CenterText(label, r, 18, Pal.RGBA(3, 18, 26));
+        // a soft halo when hovered (premium affordance)
+        if (hover) Raylib.DrawRectangleRounded(new Rectangle(rr.X - 3, rr.Y - 3, rr.Width + 6, rr.Height + 6), 0.3f, 8, Raylib.Fade(hi, 0.25f));
+        Raylib.DrawRectangleRounded(rr, 0.3f, 8, Raylib.Fade(hover ? hi : baseCol, a));
+        var lz = Raylib.MeasureTextEx(Cfg.Font, label, 18, 1f);
+        Raylib.DrawTextEx(Cfg.Font, label, new Vector2((int)(rr.X + rr.Width / 2 - lz.X / 2), (int)(rr.Y + rr.Height / 2 - 9)), 18, 1f, Raylib.Fade(Pal.RGBA(3, 18, 26), a));
         if (keyHint != null)
-            Raylib.DrawTextEx(Cfg.Font, "[" + keyHint + "]", new Vector2((int)(r.X + r.Width - 30), (int)(r.Y + r.Height - 16)), 11, 1f, Pal.RGBA(3, 18, 26));
+            Raylib.DrawTextEx(Cfg.Font, "[" + keyHint + "]", new Vector2((int)(rr.X + rr.Width - 30), (int)(rr.Y + rr.Height - 16)), 11, 1f, Raylib.Fade(Pal.RGBA(3, 18, 26), a));
     }
 
     // ---------------- helpers ----------------
