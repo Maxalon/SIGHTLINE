@@ -1062,9 +1062,18 @@ Before stopping:
 >   debris, tracer polish, movement dust — new Fx Ring system + helpers, all fired from Anim, scale graze<hit<crit.
 > - **Integration wiring** (`d69faad`): biome call site -> `For(n, MapSeed)`; HUNTER/MORTAR in `Run.EnemyHint`.
 > - Independent review of the Heat ladder: APPROVE-WITH-NITS (save-format append-only + no-TIMEOUT confirmed).
-> **NEXT: Wave 3** = per-turn DEPTH (aimed-vs-snap shot, crossfire/zone-of-control) + ANTI-TURTLE (visible
-> pressure clock / kills-refund-action) — both need `Game`/`Hud` (now free); then a new objective, more
-> perks/weapons, the enemy-intent telegraph (J1), and a balance/bug-hunt pass.
+> **WAVE 3 SHIPPED (4 commits — build 0/0, SNAPTEST/COMBATTEST/AITEST/SAVETEST PASS, autoplay clean across
+> all 7 objectives + heat 6/8, no TIMEOUT):**
+> - **Aimed-vs-SNAP shot + flank-kill action refund** (`c6fb609`): SNAP (key 7) = 1 action, no end-turn,
+>   -15 aim; flank-kill on the player turn refunds +1 action (cap 1/soldier/turn) -- per-turn decision +
+>   anti-turtle tempo. Null-safe + bounded. New `SIGHTLINE_SNAPTEST`.
+> - **3 perks** OPPORTUNIST/POINT BLANK/GIANT SLAYER (`c1e4e16`, pure ComputeOdds, append-only enum).
+> - **3 arenas** GRID/FORGE(tier-2)/CONDUIT + NEON/MAGMA biome affinity (`2d6210f`).
+> - Glue: new-perk tooltip badges + `1211e95` SNAPTEST harness wiring.
+> **NEXT: Wave 4** = enemy-intent telegraph (J1: show each hostile's planned move/threat before it acts --
+> `Game`/`Renderer`) + a NEW objective and/or anti-turtle pressure clock; plus a balance/bug-hunt pass over
+> the now-large content (16 perks, 14 enemy archetypes, 8 biomes, Heat ladder). Game/Hud are the bottleneck
+> (one owner per wave). Then: consolidation QA + closing summary.
 
 > **AUTONOMOUS DEV-TEAM SESSION — 7 SPRINTS, 21 FEATURES + a 4-FEATURE CODE RECOVERY (read first).**
 > Ran the project as a multi-agent team (orchestrator/tech-lead + PM/research + architect +
