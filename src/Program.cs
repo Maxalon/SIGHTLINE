@@ -87,6 +87,14 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        // SIGHTLINE_SNAPTEST=1 : snap-shot cost/turn-end + flank-kill action-refund check.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_SNAPTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "snaptest");
+            Console.WriteLine(new Game().SnapRefundSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         // SIGHTLINE_MISSION=<n> : start the harness on mission n (verify Hack/Evac maps).
         int startMission = int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_MISSION"), out int sm) ? sm : 1;
 
