@@ -58,6 +58,7 @@ public class HeatModifier
     public bool TighterContact;  // shrink sight/alert/reveal ranges by 1 (first contact comes sooner)
     public bool Exposed;         // squad deploys NOT concealed (no free ambush opener)
     public bool HarshAttrition;  // wounds last +1 mission and field-heal is halved
+    public bool NoReinforcements; // the barracks stops backfilling fallen soldiers — losses shrink the squad
 }
 
 /// The Heat ladder: a static data table + cumulative-effect accessors. The MAX selectable
@@ -81,7 +82,12 @@ public static class Heat
         new HeatModifier { Name = "LINGERING WOUNDS", Desc = "Wounds last longer; less field healing", HarshAttrition = true },
         new HeatModifier { Name = "ELITE CADRE",   Desc = "Enemies even deadlier (+1 stat)",      StatDelta = 1 },
         new HeatModifier { Name = "EXPOSED",       Desc = "Squad deploys without concealment",    Exposed = true },
-        new HeatModifier { Name = "RELENTLESS",    Desc = "+1 more enemy; first contact tighter", EnemyDelta = 1, TighterContact = true },
+        // Rung 8 (the top of the ladder): +1 more enemy AND the harshest run-loop knob —
+        // the barracks no longer backfills fallen soldiers, so every casualty permanently
+        // shrinks the squad for the rest of the run (true attrition stakes). The old
+        // TighterContact here was a redundant no-op (already active from rung 3), so it's
+        // replaced with NoReinforcements — a NEW axis that reads as "no mercy, no replacements".
+        new HeatModifier { Name = "RELENTLESS",    Desc = "+1 enemy; no replacement recruits",    EnemyDelta = 1, NoReinforcements = true },
     };
 
     public static int Clamp(int level) => Math.Clamp(level, Min, Max);
@@ -99,6 +105,7 @@ public static class Heat
     public static bool TighterContact(int level) { foreach (var m in Active(level)) if (m.TighterContact) return true; return false; }
     public static bool Exposed(int level)        { foreach (var m in Active(level)) if (m.Exposed) return true; return false; }
     public static bool HarshAttrition(int level) { foreach (var m in Active(level)) if (m.HarshAttrition) return true; return false; }
+    public static bool NoReinforcements(int level) { foreach (var m in Active(level)) if (m.NoReinforcements) return true; return false; }
 
     /// Bonus requisition intel per cleared mission at this heat level.
     public static int IntelBonus(int level) => Clamp(level) * IntelPerLevel;
@@ -302,11 +309,34 @@ public class Run
         var u = eligible[Util.RandInt(0, eligible.Count - 1)];
         var avail = new List<Perk>();
         foreach (var p in PerkDef.All) if (!u.HasPerk(p)) avail.Add(p);
-        int i = Util.RandInt(0, avail.Count - 1);
-        int j = Util.RandInt(0, avail.Count - 2); if (j >= i) j++;
-        PendingPerks.Add(new PerkOffer { Unit = u, A = avail[i], B = avail[j] });
+        PickPerkPair(avail, out Perk a, out Perk b);
+        PendingPerks.Add(new PerkOffer { Unit = u, A = a, B = b });
         Report.Add($"{u.Name} earns a bonus perk ({reason})");
         return true;
+    }
+
+    // A pure stat-bump perk applies once on grant and is otherwise a passive non-decision
+    // (Tank +HP / Sprinter +mob). Offering TWO of these together is the dullest possible pick,
+    // so PickPerkPair nudges away from it (below) when a more interesting alternative exists.
+    static bool IsStatBump(Perk p) => p == Perk.Tank || p == Perk.Sprinter;
+
+    /// Choose two distinct perks from `avail` for a pick-1-of-2 offer (caller guarantees
+    /// avail.Count >= 2). Light curation for variety: if the rolled pair is BOTH pure stat
+    /// bumps and a non-stat-bump perk is available, re-roll the second pick among the
+    /// interesting perks so every offer presents at least one real tactical decision. The
+    /// happy path consumes the same two RNG draws as before, so behaviour only changes for
+    /// the rare all-stat-bump pair (keeps things deterministic-friendly).
+    static void PickPerkPair(List<Perk> avail, out Perk a, out Perk b)
+    {
+        int i = Util.RandInt(0, avail.Count - 1);
+        int j = Util.RandInt(0, avail.Count - 2); if (j >= i) j++;
+        a = avail[i]; b = avail[j];
+        if (IsStatBump(a) && IsStatBump(b))
+        {
+            Perk first = a;   // local copy (an out-param can't be captured by the lambda below)
+            var interesting = avail.FindAll(p => !IsStatBump(p) && p != first);
+            if (interesting.Count > 0) b = interesting[Util.RandInt(0, interesting.Count - 1)];
+        }
     }
 
     static int CountAvail(Unit u)
@@ -404,8 +434,15 @@ public class Run
         // bonds: every pair of survivors that shared this mission grows closer
         AdvanceBonds();
 
-        // backfill the squad up to 4 with rookie recruits
-        while (Squad.Count < 4)
+        // backfill the squad up to 4 with rookie recruits — UNLESS Heat "RELENTLESS" (rung 8)
+        // turns off reinforcements, so casualties permanently shrink the squad for the run.
+        // (At least one soldier always survives to reach the barracks; a full wipe loses the run.)
+        if (Heat.NoReinforcements(HeatLevel))
+        {
+            if (Squad.Count < 4)
+                Report.Add($"No reinforcements (HEAT) -- deploying {Squad.Count} strong");
+        }
+        else while (Squad.Count < 4)
         {
             var rec = Sightline.Mission.MakeRecruit();
             Squad.Add(rec);
@@ -469,10 +506,8 @@ public class Run
         var avail = new List<Perk>();
         foreach (var p in PerkDef.All) if (!u.HasPerk(p)) avail.Add(p);
         if (avail.Count < 2) return null;
-        int i = Util.RandInt(0, avail.Count - 1);
-        int j = Util.RandInt(0, avail.Count - 2);
-        if (j >= i) j++;                         // distinct second pick
-        return new PerkOffer { Unit = u, A = avail[i], B = avail[j] };
+        PickPerkPair(avail, out Perk a, out Perk b);   // distinct + lightly curated for variety
+        return new PerkOffer { Unit = u, A = a, B = b };
     }
 
     /// Grant a chosen perk, applying any immediate stat effect.

@@ -317,7 +317,11 @@ public static class Mission
     static void SpawnEnemies(Grid grid, List<Unit> enemies, int n, HashSet<(int, int)> evac,
                              int enemyDelta = 0, int statDelta = 0)
     {
-        int count = Math.Clamp(4 + n + enemyDelta, 3, 10);   // deployment-card modifier
+        // Headcount cap raised 10 -> 12 so the top-Heat "+enemy" rungs aren't silently wasted
+        // (the +1/+1 from RELENTLESS/OVERWHELMING used to clip at 10 on later missions). 12 still
+        // fits easily: spawns occupy cols 14-17 over grid.H rows (44 slots) and the collision loop
+        // below relocates any overlap.
+        int count = Math.Clamp(4 + n + enemyDelta, 3, 12);   // deployment-card + Heat modifier
         int bump = Math.Max(0, n - 1 + statDelta);           // stat growth per mission +/- card
         var rows = new List<int>();
         for (int y = 0; y < grid.H; y++) rows.Add(y);
@@ -344,41 +348,13 @@ public static class Mission
                 e = MakeHostile("WARLORD", "ELITE", WeaponKind.Lmg, 20 + n * 2, 72, 6, x, y);
             else if (midBoss)                   // mid-campaign elite (lighter than the WARLORD)
                 e = MakeHostile(n == 3 ? "BREAKER" : "WARDEN", "ELITE", WeaponKind.Lmg, 14 + n * 2, 68, 6, x, y);
-            else if (n >= 3 && r < 0.10f)       // immobile overwatch nest
-                e = MakeHostile("SENTRY", "TURRET", WeaponKind.Lmg, 6 + bump, 66 + bump, 0, x, y);
-            else if (n >= 2 && r < 0.21f)       // long-range marksman
-                e = MakeHostile("VIPER", "SNIPER", WeaponKind.Sniper, 4 + bump, 62 + bump, 5, x, y);
-            else if (n >= 3 && r < 0.30f)       // charging melee bruiser
-                e = MakeHostile("REAVER", "BERSERKER", WeaponKind.Shotgun, 12 + bump * 2, 58 + bump, 8, x, y);
-            else if (n >= 2 && r < 0.39f)       // hovering drone: ignores cover, beelines
-                e = MakeHostile("WASP", "DRONE", WeaponKind.Smg, 3 + bump, 60 + bump, 7, x, y);
-            else if (n >= 2 && r < 0.49f)       // fast flanker: curls around cover to expose soldiers
-                e = MakeHostile("JACKAL", "HUNTER", WeaponKind.Smg, 5 + bump, 60 + bump, 9, x, y);
-            else if (n >= 3 && r < 0.57f)       // shield-bearer: full frontal cover, must be flanked
-            {
-                e = MakeHostile("AEGIS", "SHIELD", WeaponKind.Rifle, 10 + bump * 2, 56 + bump, 4, x, y);
-                e.ShieldDx = -1; e.ShieldDy = 0;            // shield faces the squad (west)
-            }
-            else if (n >= 3 && r < 0.64f)       // demolition: tears down the squad's cover
-                e = MakeHostile("BREACH", "SAPPER", WeaponKind.Shotgun, 7 + bump, 56 + bump, 6, x, y);
-            else if (n >= 3 && r < 0.71f)       // back-line grenadier: lobs frags at clusters (anti-turtle)
-            {
-                e = MakeHostile("MORTAR", "MORTAR", WeaponKind.Smg, 6 + bump, 50 + bump, 5, x, y);
-                e.Grenades = n >= 5 ? 3 : 2;                // a deep frag pouch — the EXISTING grenade AI uses it
-            }
-            else if (n >= 3 && r < 0.77f)       // field medic: heals wounded allies
-                e = MakeHostile("ORDERLY", "MEDIC", WeaponKind.Smg, 6 + bump, 52 + bump, 6, x, y);
-            else if (n >= 2 && r < 0.85f)
-                e = MakeHostile("OGRE", "BRUISER", WeaponKind.Lmg, 9 + bump * 2, 56 + bump, 5, x, y);
-            else if (r < 0.93f)
-                e = MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 58 + bump, 8, x, y);
-            else
-                e = MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 60 + bump, 6, x, y);
+            else                                // a tier-appropriate rank-and-file archetype
+                e = SelectArchetype(n, r, bump, x, y);
             if (e.Cls != "ELITE") e.Aim = Math.Min(82, e.Aim);
             // grenades: bruisers + the elite always; some others from mission 2 on.
-            // MORTAR already carries a deep frag pouch (set above) — never overwrite it.
+            // MORTAR already carries a deep frag pouch (set in SelectArchetype) — never overwrite it.
             if (e.Cls == "ELITE") e.Grenades = 2;
-            else if (e.Cls == "MORTAR") { /* keep MORTAR's 2-3 grenades from the cascade */ }
+            else if (e.Cls == "MORTAR") { /* keep MORTAR's 2-3 grenades from SelectArchetype */ }
             else if (n >= 2 && e.Cls != "MEDIC" && e.Cls != "SAPPER" && (e.Cls == "BRUISER" || Util.Roll(22))) e.Grenades = 1;
             // utility items (S2-B): snipers/scouts carry smoke to cover their movement;
             // some grunts get smoke from mission 3+. Flash given to berserkers (mission 3+)
@@ -394,6 +370,62 @@ public static class Mission
             e.PodId = i / 2;               // pods of ~2
             enemies.Add(e);
         }
+    }
+
+    /// Pick a rank-and-file hostile archetype for mission tier `n` from a uniform roll `r` in
+    /// [0,1). Each mission TIER owns an explicit, non-overlapping set of probability windows so
+    /// the composition reads deliberately — no archetype dominates a tier as an accidental
+    /// fall-through (the old single cascade leaked the whole 0.49-0.85 band onto the BRUISER on
+    /// mission 2, because every n>=3 branch was skipped). Archetype STATS are unchanged; only the
+    /// gating/order moved. First-appearance tiers are preserved:
+    ///   - Mission 1  (basic force):   SCOUT / GRUNT only.
+    ///   - Mission 2  (light skirmish): SNIPER, DRONE, HUNTER, BRUISER, SCOUT, GRUNT — balanced,
+    ///                                  none over ~20% (fixes the m2 BRUISER-dominance leak).
+    ///   - Missions 3+ (full roster):  the complete pool incl. TURRET/BERSERKER/SHIELD/SAPPER/
+    ///                                  MORTAR/MEDIC, weighted toward variety.
+    /// Boss / mid-boss slots (i == 0 on the final / m3 / m5) are handled by the caller, not here.
+    static Unit SelectArchetype(int n, float r, int bump, int x, int y)
+    {
+        if (n <= 1)   // MISSION 1 — basic force: a scout screen + grunts, nothing special.
+            return r < 0.60f
+                ? MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 58 + bump, 8, x, y)
+                : MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 60 + bump, 6, x, y);
+
+        if (n == 2)   // MISSION 2 — light skirmishers (each ~15-20%; deliberately no dominant type).
+        {
+            if (r < 0.18f) return MakeHostile("VIPER", "SNIPER", WeaponKind.Sniper, 4 + bump, 62 + bump, 5, x, y); // 18% marksman
+            if (r < 0.35f) return MakeHostile("WASP", "DRONE", WeaponKind.Smg, 3 + bump, 60 + bump, 7, x, y);      // 17% drone
+            if (r < 0.50f) return MakeHostile("JACKAL", "HUNTER", WeaponKind.Smg, 5 + bump, 60 + bump, 9, x, y);   // 15% flanker
+            if (r < 0.65f) return MakeHostile("OGRE", "BRUISER", WeaponKind.Lmg, 9 + bump * 2, 56 + bump, 5, x, y);// 15% bruiser
+            if (r < 0.85f) return MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 58 + bump, 8, x, y);   // 20% scout
+            return MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 60 + bump, 6, x, y);                 // 15% grunt
+        }
+
+        // MISSIONS 3+ — the full roster is available. Windows tuned for variety: every archetype
+        // appears, with the specialists (TURRET/BERSERKER/SHIELD/SAPPER/MORTAR/MEDIC) collectively
+        // the bulk and the plain SCOUT/GRUNT now a small remainder (they carried too much before).
+        if (r < 0.09f) return MakeHostile("SENTRY", "TURRET", WeaponKind.Lmg, 6 + bump, 66 + bump, 0, x, y);       //  9% immobile nest
+        if (r < 0.19f) return MakeHostile("VIPER", "SNIPER", WeaponKind.Sniper, 4 + bump, 62 + bump, 5, x, y);     // 10% marksman
+        if (r < 0.28f) return MakeHostile("REAVER", "BERSERKER", WeaponKind.Shotgun, 12 + bump * 2, 58 + bump, 8, x, y); // 9% rusher
+        if (r < 0.37f) return MakeHostile("WASP", "DRONE", WeaponKind.Smg, 3 + bump, 60 + bump, 7, x, y);          //  9% drone
+        if (r < 0.46f) return MakeHostile("JACKAL", "HUNTER", WeaponKind.Smg, 5 + bump, 60 + bump, 9, x, y);       //  9% flanker
+        if (r < 0.54f)                                                                                              //  8% shield
+        {
+            var s = MakeHostile("AEGIS", "SHIELD", WeaponKind.Rifle, 10 + bump * 2, 56 + bump, 4, x, y);
+            s.ShieldDx = -1; s.ShieldDy = 0;            // shield faces the squad (west)
+            return s;
+        }
+        if (r < 0.61f) return MakeHostile("BREACH", "SAPPER", WeaponKind.Shotgun, 7 + bump, 56 + bump, 6, x, y);   //  7% demolition
+        if (r < 0.68f)                                                                                              //  7% grenadier
+        {
+            var m = MakeHostile("MORTAR", "MORTAR", WeaponKind.Smg, 6 + bump, 50 + bump, 5, x, y);
+            m.Grenades = n >= 5 ? 3 : 2;                // a deep frag pouch — the EXISTING grenade AI uses it
+            return m;
+        }
+        if (r < 0.74f) return MakeHostile("ORDERLY", "MEDIC", WeaponKind.Smg, 6 + bump, 52 + bump, 6, x, y);       //  6% medic
+        if (r < 0.83f) return MakeHostile("OGRE", "BRUISER", WeaponKind.Lmg, 9 + bump * 2, 56 + bump, 5, x, y);    //  9% bruiser
+        if (r < 0.92f) return MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 58 + bump, 8, x, y);       //  9% scout
+        return MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 60 + bump, 6, x, y);                     //  8% grunt
     }
 
     static readonly string[] Callsigns =
