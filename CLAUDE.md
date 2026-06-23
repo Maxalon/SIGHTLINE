@@ -1079,11 +1079,14 @@ Before stopping:
 >   FIRST STRIKE + OPPORTUNIST flank-gated (`52eccc0`); enemy grenades require LoS + MORTAR dialed back
 >   (`3e3685e`); Heat rung-8 NoReinforcements + cap 10->12 + intentional spawn tiers (`6cefead`); flank-kill
 >   refund requires a genuine flank (de-snowball) + grenade fragile-floor (`c2ce0ee`).
-> **STATUS: 4 waves shipped (~19 features + a balance pass), all on PR #51.** Next open ideas (any future
-> wave): a NEW objective (assassinate/hold-zones/extract-intel), a 5th player class, anti-turtle pressure
-> clock, progressive-HUD/combat-log polish, audio tuning on a real device. Game/Hud are the per-wave
-> bottleneck (one owner each). The multi-agent cadence (disjoint files, parallel reviewers, audit agents,
-> orchestrator wiring/fixes) is proven across 4 waves.
+> **WAVE 5 SHIPPED:** **DECAPITATE** objective (`fcaeb81`) -- kill the marked HVT (a buffed toughest-enemy
+> with a gold ring/crown marker); win on its death regardless of the other hostiles. 8 objectives now.
+> Append-only enum, `ObjectiveFor %7->%8`, autopilot branch (no TIMEOUT), `SIGHTLINE_OBJ=decapitate`.
+> **STATUS: 5 waves shipped (~20 features + a balance pass), all on PR #51.** Next open ideas (any future
+> wave): more objectives (hold-zones/extract-intel), a 5th player class, an anti-turtle pressure clock,
+> progressive-HUD/combat-log polish, audio tuning on a real device. Game/Hud are the per-wave bottleneck
+> (one owner each). The multi-agent cadence (disjoint files, parallel reviewers, read-only audit agents,
+> orchestrator wiring/fixes) is proven across 5 waves.
 
 > **AUTONOMOUS DEV-TEAM SESSION — 7 SPRINTS, 21 FEATURES + a 4-FEATURE CODE RECOVERY (read first).**
 > Ran the project as a multi-agent team (orchestrator/tech-lead + PM/research + architect +
