@@ -1419,6 +1419,18 @@ public class Game
     // so the whole loop can be exercised headlessly. Never enabled in normal play.
     public bool AutoPlay;
 
+    // Competent-AI flag (enabled via SIGHTLINE_SMARTPLAY / the SIGHTLINE_BALANCE batch
+    // runner). When set, the autopilot routes through SmartStep() — a heuristic player
+    // that actually plays to win (cover/threat-aware positioning, best-target selection,
+    // deliberate ability/ambush use) — so headless games become a real balance gauge.
+    // The default AutoStep() remains the path-coverage smoke test.
+    public bool SmartPlay;
+
+    // CONTRACT STUB (filled in by the competent-AI work): a smarter per-step driver.
+    // Until implemented it delegates to the smoke-test autopilot so everything compiles
+    // and behaves. Keep this signature stable — the batch harness only toggles SmartPlay.
+    void SmartStep() => AutoStep();
+
     // Stall guard for the headless autopilot: if no progress is made for several
     // player turns (e.g. only unreachable dormant pods remain), force a pod awake
     // so the match always resolves. Test-only; never runs in normal play.
@@ -1818,7 +1830,7 @@ public class Game
 
     void UpdatePlayer()
     {
-        if (AutoPlay) { AutoStep(); return; }
+        if (AutoPlay) { if (SmartPlay) SmartStep(); else AutoStep(); return; }
 
         CheckPodActivation();
         if (_anims.Count > 0) return;   // a pod just activated — let the scatter play
