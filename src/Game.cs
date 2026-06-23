@@ -1150,9 +1150,12 @@ public class Game
         if (ActiveAnim is not ShotAnim sa) return;          // only a direct shot refunds (not a grenade/DoT)
         var killer = sa.A;
         if (sa.D != d || killer == null || killer.Team != Team.Player || killer.IsVip || !killer.Alive) return;
-        // exposed = the shot found no protecting cover from this angle (a clean flank or open target)
-        bool exposed = sa.Res.Odds.Flanked || sa.Res.Odds.CoverLevel == 0;
-        if (!exposed || _refundedThisTurn.Contains(killer)) return;
+        // Require a GENUINE FLANK (not merely any exposed target): the refund rewards
+        // *maneuvering to a flank*, not finishing an already-open foe. This de-snowballs the
+        // ambush+refund chain a balance audit flagged (an ambush-snap-kill on an exposed-but-
+        // -unflanked pod enemy no longer refunds, so one soldier can't clear a whole pod free).
+        bool flankKill = sa.Res.Odds.Flanked;
+        if (!flankKill || _refundedThisTurn.Contains(killer)) return;
         _refundedThisTurn.Add(killer);
         killer.ActionsLeft += 1;
         Fx.PopText(killer.Pos + new Vector2(0, -46), "+1 ACTION", Pal.Accent, 22f);
