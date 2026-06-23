@@ -63,6 +63,12 @@ public class Game
     int _aiIdx;
     EnemyPlan _aiPlan;
 
+    // ---- squad coordination (computed once per enemy turn in PlanEnemySquad) ----
+    // Shared, ADVISORY hints read by Ai.Plan; they bias per-unit scoring but never override
+    // the fundamentals (having a shot, cover, advancing), so stall/timeout invariants hold.
+    public Unit EnemyFocus;                                  // priority target the squad converges on
+    public HashSet<(int, int)> PlayerOverwatchTiles = new(); // tiles under active player overwatch fire
+
     int _turnCount;
 
     // campaign run
@@ -440,6 +446,127 @@ public class Game
         return fails.Count == 0
             ? "BENCHTEST: PASS (benched veteran sits out, is preserved, recovers full HP + 2 wound steps, un-benches)"
             : "BENCHTEST: FAIL (" + string.Join(",", fails) + ")";
+    }
+
+    /// Headless self-test for squad coordination (focus fire + overwatch-aware routing).
+    /// Builds a controlled open-field scenario (no random map / no run state) and asserts:
+    ///   * PlanEnemySquad picks the most-killable EXPOSED soldier as EnemyFocus, over a
+    ///     full-HP one and over a wounded-but-unreachable one.
+    ///   * Ai.Plan biases an enemy that can hit BOTH soldiers toward shooting the focus.
+    ///   * PlayerOverwatchTiles mirrors the real reaction test (in-range+LoS tile is marked;
+    ///     an out-of-range tile is not), and a retreat decision triggers for a cornered,
+    ///     low-HP, no-shot grunt. Prints AITEST: PASS/FAIL. No window needed.
+    public string AiSquadSelfTest()
+    {
+        NoPersist = true;
+        var fails = new System.Collections.Generic.List<string>();
+
+        // ---- controlled scene: empty 18x11 floor, no cover (LoS always clear) ----
+        Grid = new Grid();                       // all Floor, Height 0, no smoke/cover
+        Players = new System.Collections.Generic.List<Unit>();
+        Enemies = new System.Collections.Generic.List<Unit>();
+        Vip = null; CaptiveLocked = false;
+        Objective = Objective.Eliminate;
+        EvacZone.Clear();
+
+        Unit MkP(string name, int x, int y, int hp, int maxHp) {
+            var u = new Unit { Name = name, Cls = "ASSAULT", Team = Team.Player, X = x, Y = y,
+                               Hp = hp, MaxHp = maxHp, Aim = 65, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+            u.Ammo = u.Weapon.Clip; u.SyncPos(); u.BeginTurn(); return u;
+        }
+        Unit MkE(string name, int x, int y) {
+            var u = new Unit { Name = name, Cls = "GRUNT", Team = Team.Enemy, X = x, Y = y,
+                               Hp = 6, MaxHp = 6, Aim = 60, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+            u.Ammo = u.Weapon.Clip; u.Alert = AlertLevel.Alert; u.SyncPos(); u.BeginTurn(); return u;
+        }
+
+        // VICTIM: low HP (2/8), exposed, sat between two shooters -> should be the focus.
+        // HEALTHY: full HP, equally reachable -> a worse focus.
+        // HURT_FAR: also low HP but parked in the far corner, beyond BOTH enemies' rifle range
+        // (15) -> nobody can currently hit it, so it's a WEAK focus despite the low HP. (On this
+        // small board the shooters must sit in the opposite corner for a tile to be out of range.)
+        var victim  = MkP("VICTIM",  5, 4, 2, 8);
+        var healthy = MkP("HEALTHY", 5, 6, 8, 8);
+        var hurtFar = MkP("HURTFAR", 17, 10, 1, 8);   // > rifle range 15 from e1(2,4) & e2(2,5)
+        Players.Add(victim); Players.Add(healthy); Players.Add(hurtFar);
+
+        var e1 = MkE("E1", 2, 4);   // in range/LoS of VICTIM and HEALTHY, NOT of HURTFAR
+        var e2 = MkE("E2", 2, 5);
+        Enemies.Add(e1); Enemies.Add(e2);
+        _aiUnits = AliveEnemies().Where(e => e.Active).ToList();
+
+        // ---- 1. focus selection ----
+        PlanEnemySquad();
+        if (EnemyFocus != victim)
+            fails.Add("focusNotVictim=" + (EnemyFocus?.Name ?? "null"));
+
+        // ---- 2. Ai.Plan biases the shot toward the focus ----
+        // E1 sits in range/LoS of both VICTIM and HEALTHY. With the focus on VICTIM (a near-
+        // kill), its planned ShootTarget should be VICTIM. (We don't move it; it has the shot.)
+        var plan = Ai.Plan(this, e1);
+        if (plan.ShootTarget != victim)
+            fails.Add("e1ShotNotFocus=" + (plan.ShootTarget?.Name ?? "null"));
+
+        // load-bearing check on equal targets: two IDENTICAL exposed full-HP soldiers in range
+        // of one grunt — the ONLY thing that can tie-break them is the focus bonus, so forcing
+        // the focus to each in turn must pick that one. (Proves the bias actually drives choice,
+        // without fighting an intrinsic near-kill value as VICTIM would.)
+        var twinA = MkP("TWINA", 13, 4, 8, 8);
+        var twinB = MkP("TWINB", 13, 6, 8, 8);
+        var eg    = MkE("EG",    13, 5);            // equidistant (dist 1) to both twins
+        Players.Add(twinA); Players.Add(twinB); Enemies.Add(eg);
+        _aiUnits = AliveEnemies().Where(e => e.Active).ToList();
+        EnemyFocus = twinA;
+        if (Ai.Plan(this, eg).ShootTarget != twinA) fails.Add("biasFocusA");
+        EnemyFocus = twinB;
+        if (Ai.Plan(this, eg).ShootTarget != twinB) fails.Add("biasFocusB");
+
+        // ---- 3. overwatch kill-zone map (mirror the real reaction test) ----
+        // Fresh scene: a SHOTGUN watcher (range 8) in a corner so an out-of-range tile exists
+        // on this small board, plus a HIGH-COVER wall to prove a blocked-LoS tile is NOT marked.
+        Players = new System.Collections.Generic.List<Unit>();
+        Enemies = new System.Collections.Generic.List<Unit>();
+        var watcher = new Unit { Name = "WATCH", Cls = "GUNNER", Team = Team.Player, X = 1, Y = 1,
+                                 Hp = 8, MaxHp = 8, Aim = 65, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Shotgun) };
+        watcher.Ammo = watcher.Weapon.Clip; watcher.SyncPos(); watcher.BeginTurn();
+        watcher.OnOverwatch = true;
+        Players.Add(watcher);
+        Grid.Tiles[3, 1] = TileType.HighCover;   // a wall directly east of the watcher
+        Grid.SetCoverHp(3, 1);
+        _aiUnits = new System.Collections.Generic.List<Unit>();
+        PlanEnemySquad();
+        if (!PlayerOverwatchTiles.Contains((4, 4)))
+            fails.Add("owTileNotMarked");        // in range (dist 5 <= 8), clear LoS -> threatened
+        if (PlayerOverwatchTiles.Contains((1, 1)))
+            fails.Add("owMarkedWatcherTile");    // the watcher's own tile is never "entered"
+        if (PlayerOverwatchTiles.Contains((17, 10)))
+            fails.Add("owMarkedOutOfRange");     // dist ~18 > shotgun range 8 -> NOT threatened
+        if (PlayerOverwatchTiles.Contains((6, 1)))
+            fails.Add("owMarkedThroughWall");    // straight line crosses the HighCover at (3,1)
+
+        // ---- 4. self-preservation (retreat decision) ----
+        // A lone, low-HP (~12%) SHOTGUN grunt (range 8) whose only soldier sits ~17 tiles away
+        // can never line up a shot even after moving its full budget, so retreat mode engages:
+        // its plan must carry NO ShootTarget yet must STILL spend an action (move/overwatch/
+        // hunker) — the core progress invariant that keeps autoplay from ever stalling.
+        Enemies = new System.Collections.Generic.List<Unit>();
+        Players = new System.Collections.Generic.List<Unit>();
+        var loner = MkE("LONER", 1, 5);
+        loner.Hp = 1; loner.MaxHp = 8;                                   // ~12% HP
+        loner.Weapon = Weapon.Make(WeaponKind.Shotgun); loner.Ammo = loner.Weapon.Clip;  // range 8
+        var faraway = MkP("FARP", 17, 10, 8, 8);                         // ~17 tiles away
+        Enemies.Add(loner); Players.Add(faraway);
+        _aiUnits = AliveEnemies().Where(e => e.Active).ToList();
+        PlanEnemySquad();
+        var rplan = Ai.Plan(this, loner);
+        if (rplan.ShootTarget != null) fails.Add("retreatHadShot=" + rplan.ShootTarget.Name);
+        bool spendsAction = rplan.ShootTarget != null || rplan.Overwatch || rplan.Hunker
+                          || rplan.Path.Count > 0 || rplan.Grenade || rplan.SapTile != null || rplan.UseItem;
+        if (!spendsAction) fails.Add("retreatPlanNoAction");
+
+        return fails.Count == 0
+            ? "AITEST: PASS (focus picks killable+exposed; Ai.Plan biases to focus + flips; overwatch map mirrors reaction; retreat plan still acts)"
+            : "AITEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
     /// Harness hook (screenshot only): stamp a tier-2 plateau (with a tier-1 step and a
@@ -2027,6 +2154,7 @@ public class Game
         FaceShields();                                           // AEGIS turns its barrier toward the squad
         foreach (var e in Enemies) if (e.Alive) { e.BeginTurn(); TickStatuses(e); }
         _aiUnits = AliveEnemies().Where(e => e.Active).ToList();  // dormant/suspicious pods don't act
+        PlanEnemySquad();                                        // shared focus + overwatch map (advisory)
         _aiIdx = 0;
         _aiStage = AiStage.PickNext;
         _aiPlan = null;
@@ -2045,6 +2173,83 @@ public class Game
         Selected = Players.FirstOrDefault(p => p.CanAct);
         AimMode = false;
         ShowBanner("PLAYER TURN", false);
+    }
+
+    // ---------------- squad coordination ----------------
+    // Computed ONCE per enemy turn (right after _aiUnits is snapshotted in EndPlayerTurn).
+    // Produces two shared, ADVISORY hints that Ai.Plan reads to act as a coordinated squad
+    // rather than a pack of independent greedy units:
+    //   * EnemyFocus           — the soldier the squad should collapse on (focus fire).
+    //   * PlayerOverwatchTiles — tiles a live player overwatch currently threatens, so units
+    //                            can route around the kill zone (overwatch-aware movement).
+    // Both are biases only; per-unit scoring still lets the fundamentals dominate, so no enemy
+    // is ever forced into a no-progress choice (stall/timeout invariants are preserved).
+    void PlanEnemySquad()
+    {
+        // ---- 1. shared focus target ----------------------------------------------------
+        // Pick the soldier most worth concentrating fire on: low effective HP (closest to a
+        // kill), exposed (little/no cover from the squad's vantage), the VIP, and how many of
+        // our active shooters can currently bring fire on it (a target several enemies can hit
+        // is collapsible THIS turn). Perfect-information: we only read public live state.
+        EnemyFocus = null;
+        var soldiers = AlivePlayers();
+        // shooters that actually contribute to a focus-fire collapse (MEDIC heals, SAPPER
+        // demolishes — neither converges fire, so they don't define the priority target).
+        var shooters = _aiUnits.Where(e => e.Alive && e.Active && e.Ammo > 0
+                                        && e.Cls != "MEDIC" && e.Cls != "SAPPER").ToList();
+        float bestScore = float.NegativeInfinity;
+        foreach (var p in soldiers)
+        {
+            // how many active enemies can hit p right now (mirrors CanTarget exactly)
+            int shootersOnTarget = 0;
+            float bestHitOnTarget = 0f;
+            foreach (var e in shooters)
+            {
+                if (!CanTarget(e, p)) continue;
+                shootersOnTarget++;
+                int h = Combat.ComputeOdds(Grid, e, p).HitChance;
+                if (h > bestHitOnTarget) bestHitOnTarget = h;
+            }
+
+            // effective-HP term: the less HP, the juicier (a soldier near death is the kill).
+            float hpFrac = p.MaxHp > 0 ? (float)p.Hp / p.MaxHp : 1f;
+            float score = (1f - hpFrac) * 60f;                 // 0 (full) .. 60 (near-dead)
+            // exposure: no cover from the nearest shooter's angle => easier to drop
+            Unit anchor = shooters.Count > 0 ? shooters.OrderBy(e => Util.TileDist(e.X, e.Y, p.X, p.Y)).First() : null;
+            if (anchor != null && Grid.GetCover(p.X, p.Y, anchor.X, anchor.Y).Level == 0) score += 25f;
+            if (p.IsVip) score += 70f;                          // the asset is always the prize
+            score += shootersOnTarget * 22f;                    // collapsible THIS turn
+            score += bestHitOnTarget * 0.25f;                   // and we can actually land it
+            // a target nobody can currently hit is a weak focus; only pick it as a fallback
+            if (shootersOnTarget == 0) score -= 40f;
+
+            if (score > bestScore) { bestScore = score; EnemyFocus = p; }
+        }
+
+        // ---- 2. player overwatch kill-zone map -----------------------------------------
+        // Mirror the EXACT reaction test in OnUnitEnteredTile: a watcher w reacts to a unit
+        // entering tile T iff w is on overwatch, has ammo, hasn't reacted, and CanTarget(w, T).
+        // CanTarget = within w.Weapon.MaxRange AND HasLineOfSight(w -> T, commanding-if-2-tier).
+        // We replicate that per tile so the AI's threat model is TRUTHFUL (no phantom denial).
+        PlayerOverwatchTiles.Clear();
+        var watchers = Players.Where(w => w.Alive && w.OnOverwatch && !w.ReactedThisTurn
+                                       && w.Ammo > 0 && !w.HasStatus(StatusKind.Disoriented)).ToList();
+        if (watchers.Count > 0)
+        {
+            for (int x = 0; x < Grid.W; x++)
+                for (int y = 0; y < Grid.H; y++)
+                {
+                    foreach (var w in watchers)
+                    {
+                        if (w.X == x && w.Y == y) continue;
+                        if (Util.TileDist(w.X, w.Y, x, y) > w.Weapon.MaxRange) continue;
+                        bool commanding = Grid.HeightAt(w.X, w.Y) - Grid.HeightAt(x, y) >= 2;
+                        if (!Grid.HasLineOfSight(w.X, w.Y, x, y, commanding)) continue;
+                        PlayerOverwatchTiles.Add((x, y));
+                        break;   // one watcher is enough to mark the tile threatened
+                    }
+                }
+        }
     }
 
     // ---------------- enemy turn ----------------

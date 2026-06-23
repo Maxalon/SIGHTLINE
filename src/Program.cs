@@ -79,6 +79,14 @@ public static class Program
             Console.WriteLine(Game.CoverSelfTest());
             return;
         }
+        // SIGHTLINE_AITEST=1 : squad-coordination check (focus fire / overwatch map / retreat).
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_AITEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "aitest");   // Unit.SyncPos uses tile->px math; tiny window
+            Console.WriteLine(new Game().AiSquadSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         // SIGHTLINE_MISSION=<n> : start the harness on mission n (verify Hack/Evac maps).
         int startMission = int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_MISSION"), out int sm) ? sm : 1;
 
