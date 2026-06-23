@@ -154,7 +154,13 @@ public static class Ai
                     bool canFinish = p.Hp <= e.Weapon.DmgMax;
                     float val = odds.HitChance + (odds.CoverLevel == 0 ? 25 : 0)
                                 + (canFinish ? 30 : 0)                   // can finish?
-                                + (p.IsVip ? 40 : 0);                    // prioritise the VIP
+                                + (p.IsVip ? 10 : 0);                    // prioritise the VIP (was 40)
+                    // VIP bias dialed 40 -> 10: balance data (Escort 34% win, many "VIP LOST")
+                    // showed the +40 made the whole hostile force focus-fire the fragile asset and
+                    // delete it in 1-2 turns. 10 keeps it a mild tiebreaker priority (a hostile
+                    // already looking at the VIP shoots it over an equally-good soldier shot)
+                    // without the whole pod converging on it. Measured: Escort 34% -> 65% at heat 0
+                    // with this + the VIP HP buff in Mission.MakeVip + the halved closing-bias below.
                     // COORDINATION 1 — FOCUS FIRE: the squad converges on a shared priority
                     // target (chosen once per turn in Game.PlanEnemySquad). Reward shooting it
                     // so enemies collapse one soldier rather than spreading chip damage; the
@@ -221,12 +227,17 @@ public static class Ai
                 score += Math.Min(distNearest, e.Weapon.MaxRange) * 2.0f;
                 score += g.Grid.HeightAt(tx, ty) * 12;
             }
-            else if (e.Cls == "MORTAR")                          // back-line grenadier: hold off, lob frags
+            else if (e.Cls == "MORTAR" && e.Grenades > 0)       // back-line grenadier: hold off, lob frags
             {
                 // hang back toward grenade range so it stays out of the brawl and keeps
                 // line-of-throw on clusters; mild height preference. The actual frag toss
                 // is handled by the shared grenade AI after the tile loop. Keep a soft pull
                 // toward staying reasonably near (so it doesn't flee off the board), capped.
+                // ONLY while it still has frags (e.Grenades > 0). Once the pouch is empty a
+                // MORTAR has nothing to lob and a poor SMG, so holding the far standoff just
+                // wasted turns at the edge of the map -- it now falls through to the generic
+                // advance block below (default advW 1.4, i.e. closes to a normal SCOUT-ish
+                // fighting range and uses its gun).
                 int want = Math.Max(3, Game.GrenadeRange - 1);   // ideal standoff ~ grenade range
                 score -= Math.Abs(distNearest - want) * 1.6f;    // settle around the standoff band
                 score += g.Grid.HeightAt(tx, ty) * 8;
@@ -253,7 +264,7 @@ public static class Ai
                 else if (tgtCov.Level == 0) score += 16;         // soldier simply has no cover from this angle
             }
             if (e.Cls == "DRONE") score -= cover.Level * 18;            // drone doesn't value cover (cancels the bonus above)
-            if (vip != null) score -= Util.ChebyDist(tx, ty, vip.X, vip.Y) * 1.0f;     // close on the asset
+            if (vip != null) score -= Util.ChebyDist(tx, ty, vip.X, vip.Y) * 0.5f;     // lean toward the asset (was 1.0)
             if (sapTarget != null)                               // sapper: get adjacent to the cover
                 score -= Util.ChebyDist(tx, ty, sapTarget.Value.x, sapTarget.Value.y) * 3.0f;
 

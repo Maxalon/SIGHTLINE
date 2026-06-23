@@ -264,7 +264,7 @@ public class GrenadeAnim : Anim
             if (Util.ChebyDist(u.X, u.Y, Tx, Ty) > Radius) continue;
             if (u.Team == Team.Enemy && !u.Active) wokePods.Add(u.PodId);
             int dmg = Util.RandInt(3, 5);
-            if (u.HasPerk(Perk.Hardened)) dmg = Math.Max(1, dmg - 1);
+            dmg = Combat.HardenedReduce(u, dmg, crit: false);   // tank: -1 (a blast can't "crit")
             // fragile-unit floor (mirrors Combat.Resolve): a FULL-HP player/VIP can't be deleted
             // from full by a single blast -- it's left at 1 HP. Softens the worst grenade feel-bad
             // (losing a soldier/VIP from full to one frag); enemies are not protected.

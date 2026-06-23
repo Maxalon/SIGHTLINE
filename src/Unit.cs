@@ -71,8 +71,8 @@ public class Weapon
                 return (int)Util.Clamp((dist - 3) * 3, -15, 18);
             case WeaponKind.Smg:     // slight close-range edge
                 return (int)Util.Clamp((7 - dist) * 2, -12, 12);
-            case WeaponKind.Lmg:     // flat, mild long-range falloff
-                return (int)Util.Clamp(-(dist - 10) * 2, -16, 4);
+            case WeaponKind.Lmg:     // suppression gun: wide flat medium band, gentle long falloff
+                return (int)Util.Clamp(-(dist - 10) * 1.5f, -10, 6);
             default:                 // rifle: balanced, gentle falloff
                 return (int)Util.Clamp((8 - dist) * 1.5f, -18, 10);
         }
@@ -83,7 +83,7 @@ public class Weapon
         WeaponKind.Rifle   => new Weapon { Name = "Rifle",   Kind = k, DmgMin = 3, DmgMax = 5, AimBonus = 0,  CritBase = 10, Clip = 4 },
         WeaponKind.Shotgun => new Weapon { Name = "Shotgun", Kind = k, DmgMin = 4, DmgMax = 7, AimBonus = 0,  CritBase = 15, Clip = 2 },
         WeaponKind.Sniper  => new Weapon { Name = "Marksman",Kind = k, DmgMin = 5, DmgMax = 8, AimBonus = 5,  CritBase = 20, Clip = 3 },
-        WeaponKind.Lmg     => new Weapon { Name = "LMG",     Kind = k, DmgMin = 3, DmgMax = 6, AimBonus = -5, CritBase = 5,  Clip = 5 },
+        WeaponKind.Lmg     => new Weapon { Name = "LMG",     Kind = k, DmgMin = 3, DmgMax = 6, AimBonus = 3,  CritBase = 5,  Clip = 5 },
         WeaponKind.Smg     => new Weapon { Name = "SMG",     Kind = k, DmgMin = 2, DmgMax = 4, AimBonus = 0,  CritBase = 10, Clip = 4 },
         _ => new Weapon { Name = "Rifle", Kind = WeaponKind.Rifle, DmgMin = 3, DmgMax = 5, Clip = 4 },
     };
@@ -137,6 +137,8 @@ public class Unit
     /// Apply a status, or refresh it to the longer of the two durations.
     public void AddStatus(StatusKind k, int turns)
     {
+        // COOL-HEADED composure: this soldier is immune to Disoriented — the daze slides right off.
+        if (k == StatusKind.Disoriented && HasPerk(Perk.CoolHeaded)) return;
         foreach (var s in Statuses) if (s.Kind == k) { s.Turns = Math.Max(s.Turns, turns); return; }
         Statuses.Add(new Status { Kind = k, Turns = turns });
     }
@@ -286,10 +288,20 @@ public class Unit
     // effect lives in Combat (Resolve cancels the penalty, ComputeOdds adds the crit) so there's one
     // source of truth and no double-counted aim. Don't drop it — Game.cs still references the symbol.
     public const int GuardianAim = 0;
-    // CoolHeaded: composure. Cuts the Disoriented aim penalty AND grants a small always-on steady-aim
-    // bonus while the soldier carries NO negative status (so it's never a dead pick vs the rare daze).
-    public const int CoolHeadedDivert = 8;  // rounds down DisorientAim(15) by ~half => -7 instead of -15
-    public const int CoolHeadedSteady = 5;  // +aim while completely unhindered (no negative status)
+    // HARDENED (reworked): a real TANK durability perk. The old flat "-1 damage" was a dead pick (the
+    // graze floor already caps grazes at 1 and the fragile-floor already stops full-HP one-shots, so it
+    // saved ~1). New effect: -1 off every hit AND an extra cut vs CRITS — crits are the spiky shots that
+    // actually drop soldiers, so a tank that shrugs them off is exactly what a survivability build wants.
+    // It never touches your OFFENSE (pure damage-in reduction) so it's "sometimes worth it", not a must-pick.
+    // Read via Combat.HardenedReduce so all hit paths (Resolve hit/graze + the grenade in Anim) share one rule.
+    public const int HardenedFlat = 1;      // -1 off any incoming hit (the old behaviour, kept as the floor)
+    public const int HardenedCrit = 3;      // a critical hit deals an ADDITIONAL -3 (so a crit is -4 total)
+    // COOL-HEADED (reworked): composure under fire — a DEFENSIVE perk, distinct from the aim/crit offense line.
+    // The old "+5 aim when unhindered" was effectively a flat +5 aim, strictly worse than LockOn/Marksman. New
+    // effect, both halves always-on: (1) enemies shooting this soldier suffer -CoolHeadedEvade aim (hard to
+    // rattle — read defender-side in ComputeOdds), and (2) immunity to Disoriented (the daze just slides off —
+    // enforced in Unit.AddStatus). A survivability pick a frail flanker/point-soldier wants; not a damage perk.
+    public const int CoolHeadedEvade = 8;   // -aim to ANY attacker firing at a CoolHeaded soldier
     // ---- build-variety perks: pure CRIT/AIM reads in Combat.ComputeOdds (no new state/hooks) ----
     // Opportunist: a FLANKER'S FINISHER — +crit ONLY vs a genuinely FLANKED target (cover.Flanked: the
     // foe HAD adjacent cover but you reached an angle it doesn't protect). Distinct from LockOn (+AIM vs
@@ -397,7 +409,7 @@ public static class PerkDef
     public static string Desc(Perk p) => p switch
     {
         Perk.LockOn => "+15 aim vs exposed targets",
-        Perk.Hardened => "-1 damage taken",
+        Perk.Hardened => "-1 damage taken, and -3 more from crits (tank)",
         Perk.Reflexes => "overwatch shots rarely miss",
         Perk.Bandolier => "+1 grenade each mission",
         Perk.CloseQuarters => "+15 aim within 4 tiles",
@@ -408,7 +420,7 @@ public static class PerkDef
         Perk.Adrenal => "+1 ability charge each mission",
         Perk.Executioner => "+25 crit vs targets below half HP (finisher)",
         Perk.Guardian => "overwatch reactions ignore the aim penalty + crit hard",
-        Perk.CoolHeaded => "Disoriented penalty cut to -7, +5 aim when unhindered",
+        Perk.CoolHeaded => "enemies shooting you take -8 aim; immune to Disoriented",
         Perk.Opportunist => "+18 crit vs flanked targets (out-positioned their cover)",
         Perk.PointBlank => "+20 crit within 2 tiles",
         Perk.GiantSlayer => "+15 crit vs full-HP targets (alpha strike on a fresh foe)",

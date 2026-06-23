@@ -323,6 +323,20 @@ public static class Mission
         // below relocates any overlap.
         int count = Math.Clamp(4 + n + enemyDelta, 3, 12);   // deployment-card + Heat modifier
         int bump = Math.Max(0, n - 1 + statDelta);           // stat growth per mission +/- card
+        // Final mission (the WARLORD boss): de-stack the force. This was the core of the ~90% m6
+        // loss wall -- the squad cleared m1-5 (m5 often wins ~100%, partly because it isn't always
+        // forced Eliminate) then got alpha-struck on m6's forced full-clear. The compounding cause:
+        // the BOSS campaign node's card adds EnemyDelta +2 / StatDelta +1 (Run.CardForNode) ON TOP
+        // of the named boss itself, so the body count saturates the cap at 12 and every supporter
+        // also gets +1 stat -- a double-counted "elite" mission. The boss IS the elite, so here we
+        // (1) cut the supporting force HARD (boss is one slot, i==0) and (2) strip the rank-and-file
+        // stat bump back to the plain per-mission growth (the boss keeps its own explicit stats set
+        // below). Net at heat 0: 8 hostiles incl. the boss (was 12), supporters at +5 not +6.
+        if (n >= Run.MaxMissions)
+        {
+            count = Math.Max(5, count - 4);
+            bump = Math.Max(0, n - 1);                       // drop the boss-card/heat StatDelta for the screen
+        }
         var rows = new List<int>();
         for (int y = 0; y < grid.H; y++) rows.Add(y);
         // shuffle rows
@@ -345,7 +359,12 @@ public static class Mission
             float r = Util.RandF();
             Unit e;
             if (finalMission && i == 0)         // capstone elite (named boss)
-                e = MakeHostile("WARLORD", "ELITE", WeaponKind.Lmg, 20 + n * 2, 72, 6, x, y);
+                // HP 20+2n -> 14+n, aim 72 -> 68: mission-6 was a ~90%-loss wall for a competent
+                // squad (it cleared m1-5 then died on the boss). At n=6 this is 20 HP (was 32) and
+                // 68 aim -- still the toughest single unit in the game (a mid-boss is 24 HP) but no
+                // longer an unkillable, never-misses brick. Grenade count is also trimmed 2 -> 1
+                // below, and the supporting force is lighter (see the count adjustment above).
+                e = MakeHostile("WARLORD", "ELITE", WeaponKind.Lmg, 14 + n, 68, 6, x, y);
             else if (midBoss)                   // mid-campaign elite (lighter than the WARLORD)
                 e = MakeHostile(n == 3 ? "BREAKER" : "WARDEN", "ELITE", WeaponKind.Lmg, 14 + n * 2, 68, 6, x, y);
             else                                // a tier-appropriate rank-and-file archetype
@@ -353,7 +372,11 @@ public static class Mission
             if (e.Cls != "ELITE") e.Aim = Math.Min(82, e.Aim);
             // grenades: bruisers + the elite always; some others from mission 2 on.
             // MORTAR already carries a deep frag pouch (set in SelectArchetype) — never overwrite it.
-            if (e.Cls == "ELITE") e.Grenades = 2;
+            // ELITE grenades: mid-bosses (BREAKER/WARDEN on m3/m5, which already win at high
+            // rates) keep 2; the final WARLORD gets 1 -- two frags from the boss was a big part
+            // of the m6 wall (it could AoE the whole squad before they closed). midBoss==true
+            // only for the m3/m5 named elites; the final boss is finalMission && i==0.
+            if (e.Cls == "ELITE") e.Grenades = midBoss ? 2 : 1;
             else if (e.Cls == "MORTAR") { /* keep MORTAR's 2-3 grenades from SelectArchetype */ }
             else if (n >= 2 && e.Cls != "MEDIC" && e.Cls != "SAPPER" && (e.Cls == "BRUISER" || Util.Roll(22))) e.Grenades = 1;
             // utility items (S2-B): snipers/scouts carry smoke to cover their movement;
@@ -453,7 +476,14 @@ public static class Mission
         var u = new Unit
         {
             Name = "VIP", Cls = "VIP", Team = Team.Player,
-            Hp = 6, MaxHp = 6, Aim = 45, Mobility = 6,
+            // HP 6 -> 14: balance data (competent AI) showed Escort at 34% win-rate with many
+            // "VIP LOST" losses -- a 6-HP asset died in 1-2 turns once contact broke and the
+            // enemy focus-fired it. 14 makes it a sturdier asset (still no cover-perks, weak aim,
+            // no frags) that can eat a couple of hits while the squad screens for it. Paired with
+            // the dialed-down anti-VIP AI bias in Ai.Plan so the VIP stays a priority without being
+            // an instant focus-fire magnet. Measured: Escort 34% -> ~65% at heat 0, VIP-LOST losses
+            // roughly halved.
+            Hp = 14, MaxHp = 14, Aim = 45, Mobility = 6,
             Weapon = Weapon.Make(WeaponKind.Smg), IsVip = true,
         };
         u.Ammo = u.Weapon.Clip;
