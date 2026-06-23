@@ -9,7 +9,7 @@ namespace Sightline;
 public enum Phase { Intro, PlayerTurn, EnemyTurn, Barracks, Win, Lose }
 public enum Objective { Eliminate, Evac, Hack, Escort, Sabotage, Rescue, Defend }
 public enum SecondaryKind { None, NoLosses, Swift, CleanSweep }  // optional per-mission bonus goal (3.9)
-enum AiStage { PickNext, ActAfterMove }
+enum AiStage { PickNext, Telegraph, ActAfterMove }
 
 public class Game
 {
@@ -79,6 +79,18 @@ public class Game
     List<Unit> _aiUnits = new();
     int _aiIdx;
     EnemyPlan _aiPlan;
+
+    // ---- enemy-intent telegraph (Into-the-Breach fairness lever) ----
+    // Right before a hostile acts, we hold for a brief beat and show the player exactly what
+    // it intends to do: its planned move PATH, its TARGET, and the tiles it will threaten from
+    // its post-move tile. The renderer reads these; they are set in UpdateEnemy's PickNext (from
+    // the SAME _aiPlan that then executes, so the telegraph never lies) and cleared the moment
+    // the beat ends and at turn boundaries. The telegraph is SKIPPED entirely under AutoPlay so
+    // the headless smoke test's frame counts stay essentially unchanged (TIMEOUT-safe).
+    public Unit IntentUnit;                 // the hostile about to act (null = no telegraph showing)
+    public EnemyPlan IntentPlan;            // its plan (Path / ShootTarget / Grenade / Overwatch / ...)
+    public (int x, int y) IntentDest;       // the tile it will stand on after moving (threat origin)
+    public const float TelegraphBeat = 0.5f;  // how long the intent is held before the unit acts
 
     // ---- squad coordination (computed once per enemy turn in PlanEnemySquad) ----
     // Shared, ADVISORY hints read by Ai.Plan; they bias per-unit scoring but never override
@@ -435,6 +447,42 @@ public class Game
     /// this just adds a banner so the intent reads in the frame (the CONCEALED pill +
     /// ghost rings are already drawn because SquadConcealed is true).
     public void DebugConcealment() => ShowBanner("CONCEALED - PICK YOUR MOMENT", false);
+
+    /// Harness hook (screenshot only): stage an enemy-intent telegraph so a single SHOT frame
+    /// shows the planned move path + target reticle + threatened-tile wash + caption. Picks a
+    /// live foe, wakes it, runs the real Ai.Plan (so the drawn intent matches what would execute),
+    /// and forces a ShootTarget at the nearest soldier if the plan didn't already produce one.
+    public void DebugIntent()
+    {
+        DebugWakeAll();
+        // prefer a foe whose real plan includes a MOVE so the path reads in the demo frame;
+        // otherwise take any live active foe.
+        Unit foe = null; EnemyPlan plan = null;
+        foreach (var e in Enemies)
+        {
+            if (!e.Alive || !e.Active) continue;
+            var p = Ai.Plan(this, e);
+            if (foe == null) { foe = e; plan = p; }
+            if (p.Path.Count > 0) { foe = e; plan = p; break; }
+        }
+        if (foe == null) return;
+        var dest = plan.Path.Count > 0 ? plan.Path[^1] : (foe.X, foe.Y);
+        if (plan.ShootTarget == null && !plan.Grenade && !plan.UseItem && plan.HealTarget == null && plan.SapTile == null)
+        {
+            // ensure the marquee read (a target) is present in the demo frame
+            Unit nearest = null; int nd = int.MaxValue;
+            foreach (var p in AlivePlayers())
+            {
+                int d = Util.ChebyDist(dest.Item1, dest.Item2, p.X, p.Y);
+                if (d < nd) { nd = d; nearest = p; }
+            }
+            plan.ShootTarget = nearest;
+        }
+        IntentUnit = foe;
+        IntentPlan = plan;
+        IntentDest = dest;
+        ShowBanner("ENEMY INTENT", true);
+    }
 
     /// Headless self-test for 4.4 concealment: starts concealed, pods are gated from
     /// escalating while concealed, and breaking concealment ungates them + arms the
@@ -2338,6 +2386,7 @@ public class Game
         _aiIdx = 0;
         _aiStage = AiStage.PickNext;
         _aiPlan = null;
+        ClearIntent();
         ShowBanner("ENEMY TURN", true);
         Enqueue(new WaitAnim(0.5f), Team.Enemy);
     }
@@ -2346,6 +2395,7 @@ public class Game
     {
         _turnCount++;
         Phase = Phase.PlayerTurn;
+        ClearIntent();                    // no enemy intent lingers into the player's turn
         Grid.TickSmoke();                 // smoke clouds decay one turn per round
         _refundedThisTurn.Clear();        // flank-kill refund is one per soldier per turn
         if (AutoPlay) AutoStallCheck();
@@ -2464,12 +2514,32 @@ public class Game
             }
             _aiPlan = Ai.Plan(this, e);
 
-            if (_aiPlan.Path.Count > 0)
+            // TELEGRAPH (non-autoplay only): before the unit moves/acts, hold a brief beat and
+            // show its INTENT (move path + target + threatened tiles). The telegraph uses the SAME
+            // _aiPlan that executes next, so it never lies. AutoPlay skips this entirely — no extra
+            // WaitAnim, no intent state — so the smoke test's frame counts stay unchanged.
+            if (!AutoPlay)
             {
-                e.ActionsLeft -= _aiPlan.MoveActions;
-                foreach (var (px, py) in _aiPlan.Path) Enqueue(new MoveStepAnim(e, px, py), Team.Enemy);
-                Audio.Play("move");
+                IntentUnit = e;
+                IntentPlan = _aiPlan;
+                IntentDest = _aiPlan.Path.Count > 0 ? _aiPlan.Path[^1] : (e.X, e.Y);
+                Enqueue(new WaitAnim(TelegraphBeat), Team.Enemy);
+                _aiStage = AiStage.Telegraph;
+                return;
             }
+
+            EnqueuePlannedMove(e);
+            _aiStage = AiStage.ActAfterMove;
+            return;
+        }
+
+        if (_aiStage == AiStage.Telegraph)
+        {
+            // the telegraph beat has elapsed (queue drained) — clear the intent so it doesn't
+            // linger past the unit's action, then enqueue the planned move and proceed to act.
+            var e = _aiUnits[_aiIdx];
+            ClearIntent();
+            if (e.Alive) EnqueuePlannedMove(e);
             _aiStage = AiStage.ActAfterMove;
             return;
         }
@@ -2552,6 +2622,20 @@ public class Game
             _aiStage = AiStage.PickNext;
         }
     }
+
+    // Enqueue the move steps for the just-planned enemy (shared by the AutoPlay fast path and
+    // the post-telegraph path so the move timing/cost accounting is identical either way).
+    void EnqueuePlannedMove(Unit e)
+    {
+        if (_aiPlan == null || _aiPlan.Path.Count == 0) return;
+        e.ActionsLeft -= _aiPlan.MoveActions;
+        foreach (var (px, py) in _aiPlan.Path) Enqueue(new MoveStepAnim(e, px, py), Team.Enemy);
+        Audio.Play("move");
+    }
+
+    // Clear the enemy-intent telegraph (so it doesn't render past the unit's action or into the
+    // player's turn). Called when the telegraph beat ends and at every turn boundary.
+    void ClearIntent() { IntentUnit = null; IntentPlan = null; }
 
     // ---------------- barracks perk choice ----------------
     void ChoosePerk(int which)
