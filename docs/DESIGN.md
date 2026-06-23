@@ -258,6 +258,24 @@ and no human-authored art.
 instantly find (a) the selected unit, (b) the nearest threat, (c) the objective? If not,
 the change failed.
 
+**Shape / icon redundancy — meaning never rides on hue alone (5.5).** Every coded
+distinction carries a *second*, non-colour channel (shape, glyph, or position) so the
+game reads in the colorblind palette and at a glance. The in-engine icon vocabulary is
+all primitive-drawn (lines/circles/polys, no asset files) and **inherits the role colour
+of whatever it labels**, so a single glyph works in every palette + enabled/disabled state:
+- **Action bar** — each button carries its glyph (chevron=fire, oval+fuse=grenade, eye=overwatch,
+  shield=hunker, …); the glyph takes the button's text colour (`Hud.DrawActionIcon`).
+- **Objective readout** — a glyph left of the top-bar objective text: crosshair=ELIMINATE,
+  brackets+node=HACK, up-arrow=EVAC, diamond=ESCORT, spark=SABOTAGE, cage=RESCUE,
+  shield=DEFEND (`Hud.DrawObjectiveIcon`).
+- **Status effects** — a shape beside each on-unit code: flame=burning, droplet=bleed,
+  star-burst=stun, swirl=disoriented, so the effect reads without parsing the BRN/BLD/STN/DAZ
+  text or its hue (`Renderer.DrawStatusGlyph`).
+- **Cover** — type already reads by shape too: △ on high cover, — on low (5.4 / S4-B).
+
+Rule for any new coded state: ship its glyph in the same pass, and verify it in **both**
+palettes (`SIGHTLINE_CB=1`).
+
 **Asset policy (clarified — supersedes the old "no assets" wording):**
 - **No hand-made / human-authored assets** — the human won't make art/audio by hand.
 - **Generated assets are allowed:** **procedural / in-engine / shader first; AI only where

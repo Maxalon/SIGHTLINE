@@ -257,7 +257,9 @@ public static class Hud
             case Objective.Defend: objTxt = $"DEFEND {Math.Min(g.Turn, Game.DefendTurns)}/{Game.DefendTurns}"; objCol = Pal.Foe; break;
             default: objTxt = "ELIMINATE"; objCol = Pal.TxtDim; break;
         }
-        Raylib.DrawTextEx(Cfg.Font, objTxt, new Vector2(340, 19), 16, 1f, objCol);
+        Raylib.DrawTextEx(Cfg.Font, objTxt, new Vector2(360, 19), 16, 1f, objCol);
+        // 5.4/5.5: a semantic glyph left of the objective text (shape redundancy, not hue alone)
+        DrawObjectiveIcon(g.Objective, 344, 27, objCol);
 
         // counts (the VIP isn't a combatant, so it's excluded from the squad tally)
         int friends = g.AlivePlayers().Count(p => !p.IsVip);
@@ -585,6 +587,67 @@ public static class Hud
                 Raylib.DrawLineEx(new Vector2(cx - w2 + 1f, cy - h2), new Vector2(cx + w2 - 1f, cy - h2), 1.5f, c);
                 break;
             }
+        }
+    }
+
+    /// A small primitive-drawn glyph for the mission objective, drawn left of the
+    /// objective text in the top bar (5.4/5.5: shape redundancy so the objective reads
+    /// by icon as well as colour). Inherits the objective's accent colour.
+    static void DrawObjectiveIcon(Objective o, float cx, float cy, Color c)
+    {
+        switch (o)
+        {
+            case Objective.Hack:   // terminal brackets [ ] with a centre node
+                Raylib.DrawLineEx(new Vector2(cx - 6f, cy - 5f), new Vector2(cx - 6f, cy + 5f), 1.6f, c);
+                Raylib.DrawLineEx(new Vector2(cx - 6f, cy - 5f), new Vector2(cx - 3f, cy - 5f), 1.6f, c);
+                Raylib.DrawLineEx(new Vector2(cx - 6f, cy + 5f), new Vector2(cx - 3f, cy + 5f), 1.6f, c);
+                Raylib.DrawLineEx(new Vector2(cx + 6f, cy - 5f), new Vector2(cx + 6f, cy + 5f), 1.6f, c);
+                Raylib.DrawLineEx(new Vector2(cx + 6f, cy - 5f), new Vector2(cx + 3f, cy - 5f), 1.6f, c);
+                Raylib.DrawLineEx(new Vector2(cx + 6f, cy + 5f), new Vector2(cx + 3f, cy + 5f), 1.6f, c);
+                Raylib.DrawCircleV(new Vector2(cx, cy), 2f, c);
+                break;
+            case Objective.Evac:   // extraction: up-arrow rising out of a baseline
+                Raylib.DrawLineEx(new Vector2(cx - 6f, cy + 6f), new Vector2(cx + 6f, cy + 6f), 1.6f, c);
+                Raylib.DrawLineEx(new Vector2(cx, cy + 5f), new Vector2(cx, cy - 6f), 1.8f, c);
+                Raylib.DrawLineEx(new Vector2(cx - 4f, cy - 2f), new Vector2(cx, cy - 6f), 1.8f, c);
+                Raylib.DrawLineEx(new Vector2(cx + 4f, cy - 2f), new Vector2(cx, cy - 6f), 1.8f, c);
+                break;
+            case Objective.Escort: // VIP diamond (matches the on-board VIP marker)
+                Raylib.DrawLineEx(new Vector2(cx, cy - 7f), new Vector2(cx + 6f, cy), 1.6f, c);
+                Raylib.DrawLineEx(new Vector2(cx + 6f, cy), new Vector2(cx, cy + 7f), 1.6f, c);
+                Raylib.DrawLineEx(new Vector2(cx, cy + 7f), new Vector2(cx - 6f, cy), 1.6f, c);
+                Raylib.DrawLineEx(new Vector2(cx - 6f, cy), new Vector2(cx, cy - 7f), 1.6f, c);
+                break;
+            case Objective.Sabotage: // demolition charge: body + radiating spark
+            {
+                Raylib.DrawCircleLines((int)cx, (int)(cy + 1f), 4f, c);
+                for (int i = 0; i < 6; i++)
+                {
+                    float a = i * MathF.PI / 3f;
+                    Raylib.DrawLineEx(new Vector2(cx + MathF.Cos(a) * 5f, cy + 1f + MathF.Sin(a) * 5f),
+                                      new Vector2(cx + MathF.Cos(a) * 7.5f, cy + 1f + MathF.Sin(a) * 7.5f), 1.4f, c);
+                }
+                break;
+            }
+            case Objective.Rescue: // cage: a box with two vertical bars
+                Raylib.DrawRectangleLinesEx(new Rectangle(cx - 6f, cy - 6f, 12f, 12f), 1.4f, c);
+                Raylib.DrawLineEx(new Vector2(cx - 2f, cy - 6f), new Vector2(cx - 2f, cy + 6f), 1.3f, c);
+                Raylib.DrawLineEx(new Vector2(cx + 2f, cy - 6f), new Vector2(cx + 2f, cy + 6f), 1.3f, c);
+                break;
+            case Objective.Defend: // shield: flat top, sides taper to a bottom point
+                Raylib.DrawLineEx(new Vector2(cx - 6f, cy - 6f), new Vector2(cx + 6f, cy - 6f), 1.6f, c);
+                Raylib.DrawLineEx(new Vector2(cx - 6f, cy - 6f), new Vector2(cx - 6f, cy + 1f), 1.6f, c);
+                Raylib.DrawLineEx(new Vector2(cx + 6f, cy - 6f), new Vector2(cx + 6f, cy + 1f), 1.6f, c);
+                Raylib.DrawLineEx(new Vector2(cx - 6f, cy + 1f), new Vector2(cx, cy + 7f), 1.6f, c);
+                Raylib.DrawLineEx(new Vector2(cx + 6f, cy + 1f), new Vector2(cx, cy + 7f), 1.6f, c);
+                break;
+            default:               // Eliminate: crosshair (target reticle)
+                Raylib.DrawCircleLines((int)cx, (int)cy, 6f, c);
+                Raylib.DrawLineEx(new Vector2(cx - 8f, cy), new Vector2(cx - 3f, cy), 1.5f, c);
+                Raylib.DrawLineEx(new Vector2(cx + 3f, cy), new Vector2(cx + 8f, cy), 1.5f, c);
+                Raylib.DrawLineEx(new Vector2(cx, cy - 8f), new Vector2(cx, cy - 3f), 1.5f, c);
+                Raylib.DrawLineEx(new Vector2(cx, cy + 3f), new Vector2(cx, cy + 8f), 1.5f, c);
+                break;
         }
     }
 

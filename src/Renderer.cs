@@ -63,6 +63,46 @@ public static class Renderer
     }
     // --------------------------------------------------------------------------
 
+    // 5.5: a tiny shape glyph for a status effect (drawn beside its code under the
+    // figure) so the effect is distinguishable by SHAPE, not colour alone — flame /
+    // droplet / star-burst / swirl. Centred at (gx, gy), ~5px, inherits the status colour.
+    static void DrawStatusGlyph(StatusKind k, float gx, float gy, Color c)
+    {
+        switch (k)
+        {
+            case StatusKind.Burning:   // upward flame (triangle) with an inner flicker
+                Raylib.DrawLineEx(new Vector2(gx, gy - 5f), new Vector2(gx + 4f, gy + 4f), 1.4f, c);
+                Raylib.DrawLineEx(new Vector2(gx + 4f, gy + 4f), new Vector2(gx - 4f, gy + 4f), 1.4f, c);
+                Raylib.DrawLineEx(new Vector2(gx - 4f, gy + 4f), new Vector2(gx, gy - 5f), 1.4f, c);
+                Raylib.DrawLineEx(new Vector2(gx, gy), new Vector2(gx, gy + 4f), 1.2f, c);
+                break;
+            case StatusKind.Bleed:     // teardrop: rounded base + pointed top
+                Raylib.DrawCircleV(new Vector2(gx, gy + 2f), 3f, c);
+                Raylib.DrawLineEx(new Vector2(gx - 3f, gy + 1f), new Vector2(gx, gy - 5f), 1.3f, c);
+                Raylib.DrawLineEx(new Vector2(gx + 3f, gy + 1f), new Vector2(gx, gy - 5f), 1.3f, c);
+                break;
+            case StatusKind.Stun:      // star-burst: four crossing strokes
+                Raylib.DrawLineEx(new Vector2(gx, gy - 5f), new Vector2(gx, gy + 5f), 1.3f, c);
+                Raylib.DrawLineEx(new Vector2(gx - 5f, gy), new Vector2(gx + 5f, gy), 1.3f, c);
+                Raylib.DrawLineEx(new Vector2(gx - 3.5f, gy - 3.5f), new Vector2(gx + 3.5f, gy + 3.5f), 1.1f, c);
+                Raylib.DrawLineEx(new Vector2(gx - 3.5f, gy + 3.5f), new Vector2(gx + 3.5f, gy - 3.5f), 1.1f, c);
+                break;
+            default:                   // Disoriented: an inward swirl (shrinking arc)
+            {
+                Vector2 prev = new Vector2(gx + 5f, gy);
+                for (int i = 1; i <= 7; i++)
+                {
+                    float a = i * (MathF.PI * 1.6f / 7f);
+                    float rr = 5f - i * 0.6f;
+                    var pt = new Vector2(gx + MathF.Cos(a) * rr, gy + MathF.Sin(a) * rr);
+                    Raylib.DrawLineEx(prev, pt, 1.3f, c);
+                    prev = pt;
+                }
+                break;
+            }
+        }
+    }
+
     // tile draw rect/centre offset up onto the plateau top when elevated (per height tier)
     static Rectangle ElevRect(Game g, int x, int y)
     {
@@ -611,7 +651,7 @@ public static class Renderer
         // combat status effects (3.5): stacked codes below the figure
         if (u.Statuses.Count > 0)
         {
-            int sx = (int)p.X - 12, sy = (int)p.Y + 18;
+            int sx = (int)p.X - 14, sy = (int)p.Y + 18;
             foreach (var s in u.Statuses)
             {
                 if (s.Turns <= 0) continue;
@@ -622,8 +662,10 @@ public static class Renderer
                     StatusKind.Stun => Pal.RGBA(225, 205, 95),
                     _ => Pal.RGBA(150, 120, 220),       // Disoriented
                 };
-                Raylib.DrawTextEx(Cfg.Font, StatusDef.Code(s.Kind), new Vector2(sx, sy), 10, 1f, sc);
-                sx += 24;
+                // 5.5: a small shape glyph so the effect reads without relying on hue or the code text
+                DrawStatusGlyph(s.Kind, sx + 4f, sy + 5f, sc);
+                Raylib.DrawTextEx(Cfg.Font, StatusDef.Code(s.Kind), new Vector2(sx + 10, sy), 10, 1f, sc);
+                sx += 32;
             }
         }
 

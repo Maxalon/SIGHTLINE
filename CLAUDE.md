@@ -261,6 +261,12 @@ seeds (mix of WIN/LOSE, no exceptions):
 - **HUD action-bar icons (Sprint 6):** each action button has a small primitive-drawn glyph
   (bullet/grenade/eye/shield/refresh/circuitry/star/canister) left of its label; icons inherit
   the button text color so disabled/selected/colorblind states all work (`Hud.DrawActionIcon`).
+- **Objective + status glyphs (5.1/5.5 — shape redundancy):** a semantic icon left of the
+  top-bar objective text (`Hud.DrawObjectiveIcon`: crosshair=ELIM, brackets=HACK, up-arrow=EVAC,
+  diamond=ESCORT, spark=SABOTAGE, cage=RESCUE, shield=DEFEND) and a shape beside each on-unit
+  status code (`Renderer.DrawStatusGlyph`: flame=burn, droplet=bleed, star=stun, swirl=dazed),
+  so coded state reads by shape, not hue alone (verified in default + colorblind palettes). The
+  §3.H style-guide doc locks the rule. Both inherit the role colour; primitive-drawn (no assets).
 - Grid battlefield w/ high+low cover, LoS, 8-dir pathfinding (corner-cut safe).
 - 2-action combat: move, dash (yellow), fire (ends turn), overwatch reaction
   fire (both sides), hunker, reload.
@@ -972,11 +978,11 @@ stand and are reinforced by DESIGN.md §3D/E/G.
 > TTF/OTF fonts (`LoadFontEx`) in-engine, so most of this needs **no committed binaries** —
 > a small font file is the main exception. Ordered by impact-per-effort.
 
-- [ ] **5.1 Visual style guide (docs).** In `DESIGN.md` §3.H: lock **semantic color
-      roles** (friendly / enemy / cover / objective / danger / neutral — one job per
-      accent), the **60-30-10** split, a **value-contrast** rule, line/shape language, and
-      a **squint-test** acceptance check (squint: can you still find the selected unit +
-      nearest threat + objective?). Pure docs; everything below conforms to it.
+- [x] **5.1 Visual style guide (docs).** DONE. `DESIGN.md` §3.H locks the **semantic color
+      roles** table (friendly / enemy / cover / objective / neutral — one job per accent),
+      the **60-30-10** split, the **squint-test** acceptance check, AND a **shape/icon
+      redundancy** rule (meaning never rides on hue alone — every coded state ships a glyph;
+      verify in both palettes). Everything below conforms to it.
 - [x] **5.2 Post-processing pass.** DONE (Sprint 1). An embedded-GLSL post stage in
       `src/Display.cs` over the render-target: soft **vignette**, event-reactive **bloom**
       (`Game.AddBloom` spikes on hits/kills, decays), subtle per-**biome color grade**, and
@@ -997,11 +1003,15 @@ stand and are reinforced by DESIGN.md §3D/E/G.
       particles got a dim-halo + bright-core soft-glow (`Fx`). Generated **HUD action-bar icon
       glyphs** landed too (`Hud.DrawActionIcon`, primitive-drawn, inherit button text color).
       Subtle — squint test holds per biome.
-- [ ] **5.5 Semantic color + colorblind pass (folds in 3.13).** Enforce the 5.1 color
-      roles everywhere; add colorblind-safe `Pal` variants + shape/icon redundancy so coding
-      never relies on hue alone; persist the toggle in `display.json`. Touch `Pal`,
-      `Renderer`, `Hud`, `Display` settings. Verify: screenshots in each palette. (Supersedes
-      the colorblind half of Phase 3 item 3.13; 3.13's UI-text-scale piece still stands.)
+- [~] **5.5 Semantic color + colorblind pass (folds in 3.13).** PARTIAL. Colorblind-safe
+      `Pal` variants + the persisted toggle shipped in 3.13; **shape/icon redundancy** now
+      covers the action bar (`Hud.DrawActionIcon`), the **objective readout**
+      (`Hud.DrawObjectiveIcon` — crosshair/brackets/arrow/diamond/spark/cage/shield) and
+      **on-unit status effects** (`Renderer.DrawStatusGlyph` — flame/droplet/star/swirl beside
+      BRN/BLD/STN/DAZ), plus cover's △/— cues — all primitive-drawn, inheriting the role colour
+      so they work in every palette. **Still open:** a full audit enforcing the 5.1 colour roles
+      across *every* `Renderer`/`Hud` draw site (some biome tints/accents still ad-hoc); a UI
+      text-scale (3.13 follow-up). Verify: `SIGHTLINE_CB=1` + `SIGHTLINE_MISSION=2 SIGHTLINE_SHOT`.
 - [x] **5.6 Focal-point lighting.** DONE (Sprint 3, focal half). `Renderer.DrawUnit` threads
       a per-unit figure alpha: selected = 1.0 (+ a soft outer glow halo), spent player 0.60,
       other friendlies 0.82, enemies 0.85 (threats stay visible). All SIGNAL stays full-alpha
