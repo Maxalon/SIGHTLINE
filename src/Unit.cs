@@ -285,20 +285,22 @@ public class Unit
     public const int CoolHeadedDivert = 8;  // rounds down DisorientAim(15) by ~half => -7 instead of -15
     public const int CoolHeadedSteady = 5;  // +aim while completely unhindered (no negative status)
     // ---- build-variety perks: pure CRIT/AIM reads in Combat.ComputeOdds (no new state/hooks) ----
-    // Opportunist: a FLANKER'S FINISHER — +crit vs a target with NO cover (exposed/flanked). Distinct
-    // from LockOn (+AIM on the same condition: land the shot) and Deadeye (+crit unconditionally):
-    // Opportunist rewards *positioning the target out of cover* with extra lethality, not raw accuracy.
+    // Opportunist: a FLANKER'S FINISHER — +crit ONLY vs a genuinely FLANKED target (cover.Flanked: the
+    // foe HAD adjacent cover but you reached an angle it doesn't protect). Distinct from LockOn (+AIM vs
+    // ANY no-cover target — exposed OR flanked) and Deadeye (+crit unconditionally): Opportunist rewards
+    // the *maneuver that turns a covered foe's flank*, so it pays off exactly when you out-positioned cover.
     public const int OpportunistCrit = 18;
     // Point Blank: a CLOSE-RANGE CRIT build — +crit within 2 tiles. Distinct from CloseQuarters
     // (+AIM within 4 tiles, a wider band that helps you hit): Point Blank is tighter and adds CRIT,
     // so a shotgun/assault rusher hits HARDER in your face rather than just more reliably nearby.
     public const int PointBlankCrit = 20;
     public const int PointBlankRange = 2;   // crit applies at dist <= 2 tiles
-    // Giant Slayer: an ANTI-TANK / BOSS specialist — +aim vs high-MaxHp targets (bruisers / shields /
-    // elites / bosses). No existing perk keys on the target's MaxHp, so this is a fully new axis: it's
-    // dead weight against fodder (MaxHp < 12) and shines exactly when a wall of HP needs chipping down.
-    public const int GiantSlayerAim = 14;
-    public const int GiantSlayerHp = 12;    // target MaxHp threshold to count as a "giant"
+    // First Strike (enum member is still `GiantSlayer` for save-ordinal stability; reworked from the old
+    // dead "+aim vs MaxHp>=12" — ~70% of foes are sub-12 fodder, so it almost never fired). New effect: an
+    // ALPHA-STRIKE/OPENER — +crit vs a target at FULL HP. Fires on the FIRST connecting shot at any fresh
+    // enemy (fodder or boss), rewarding focus-firing a new target; it goes inert once the target is chipped
+    // (the opposite axis from Executioner's sub-half-HP finisher). Read in Combat.ComputeOdds via d.Hp>=MaxHp.
+    public const int FirstStrikeCrit = 15;
     public const int WoundAim = 12;      // aim penalty while Wound > 0
     public const int WoundMob = 1;       // mobility penalty while Wound > 0
 
@@ -358,7 +360,7 @@ public static class PerkDef
         Perk.CoolHeaded => "COOL-HEADED",
         Perk.Opportunist => "OPPORTUNIST",
         Perk.PointBlank => "POINT BLANK",
-        Perk.GiantSlayer => "GIANT SLAYER",
+        Perk.GiantSlayer => "FIRST STRIKE",
         _ => "PERK",
     };
 
@@ -379,7 +381,7 @@ public static class PerkDef
         Perk.CoolHeaded => "CLH",
         Perk.Opportunist => "OPP",
         Perk.PointBlank => "PBK",
-        Perk.GiantSlayer => "GSL",
+        Perk.GiantSlayer => "FST",
         _ => "?",
     };
 
@@ -398,9 +400,9 @@ public static class PerkDef
         Perk.Executioner => "+25 crit vs targets below half HP (finisher)",
         Perk.Guardian => "overwatch reactions ignore the aim penalty + crit hard",
         Perk.CoolHeaded => "Disoriented penalty cut to -7, +5 aim when unhindered",
-        Perk.Opportunist => "+18 crit vs targets with no cover (flanker's finisher)",
+        Perk.Opportunist => "+18 crit vs flanked targets (out-positioned their cover)",
         Perk.PointBlank => "+20 crit within 2 tiles",
-        Perk.GiantSlayer => "+14 aim vs high-HP targets (bruisers, shields, bosses)",
+        Perk.GiantSlayer => "+15 crit vs full-HP targets (alpha strike on a fresh foe)",
         _ => "",
     };
 }

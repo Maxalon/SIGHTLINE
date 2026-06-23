@@ -788,9 +788,9 @@ public static class Hud
             if (a.HasPerk(Perk.Marksman) && dist >= Unit.LongRange)       flags.Add(("+ MARKSMAN", Pal.Good));
             if (a.HasPerk(Perk.Deadeye))                      flags.Add(("+ DEADEYE", Pal.Good));
             if (a.HasPerk(Perk.Executioner) && tgtSubHalf)    flags.Add(("+ EXECUTIONER", Pal.Good));
-            if (a.HasPerk(Perk.Opportunist) && o.CoverLevel == 0)        flags.Add(("+ OPPORTUNIST", Pal.Good));
+            if (a.HasPerk(Perk.Opportunist) && o.Flanked)     flags.Add(("+ OPPORTUNIST", Pal.Good));
             if (a.HasPerk(Perk.PointBlank) && dist <= Unit.PointBlankRange) flags.Add(("+ POINT BLANK", Pal.Good));
-            if (a.HasPerk(Perk.GiantSlayer) && d.MaxHp >= Unit.GiantSlayerHp) flags.Add(("+ GIANT SLAYER", Pal.Good));
+            if (a.HasPerk(Perk.GiantSlayer) && d.MaxHp > 0 && d.Hp >= d.MaxHp) flags.Add(("+ FIRST STRIKE", Pal.Good));
 
             // attacker penalties (red) — these quietly drag the hit% down
             if (a.Suppress > 0)                               flags.Add(("- SUPPRESSED", Pal.Foe));
