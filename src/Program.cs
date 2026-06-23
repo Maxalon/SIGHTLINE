@@ -12,7 +12,10 @@ public static class Program
         // SIGHTLINE_AUTOPLAY=1    : skip intro, let an autopilot play full matches to a result.
         // Used to smoke-test the whole loop under Xvfb + software GL. See CLAUDE.md.
         bool shot = int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_SHOT"), out int shotFrame);
-        bool autoplay = Environment.GetEnvironmentVariable("SIGHTLINE_AUTOPLAY") == "1";
+        // SIGHTLINE_SMARTPLAY=1 : like AUTOPLAY, but routes the autopilot through the
+        // competent SmartStep() so a single headless game is played to win (balance gauge).
+        bool smartplay = Environment.GetEnvironmentVariable("SIGHTLINE_SMARTPLAY") == "1";
+        bool autoplay = Environment.GetEnvironmentVariable("SIGHTLINE_AUTOPLAY") == "1" || smartplay;
 
         // SIGHTLINE_SAVETEST=1 : headless round-trip check for run persistence (item E). No window.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_SAVETEST") == "1")
@@ -166,6 +169,7 @@ public static class Program
         if (introShot) { var r = new Run(); r.Start(); r.Mission = 3; SaveGame.Save(r); }
         if ((shot || autoplay) && !introShot) game.StartMission(startMission);
         if (autoplay) game.AutoPlay = true;
+        if (smartplay) game.SmartPlay = true;
         // force an objective for verification (e.g. SIGHTLINE_OBJ=sabotage|rescue), shot or autoplay
         switch (Environment.GetEnvironmentVariable("SIGHTLINE_OBJ"))
         {
