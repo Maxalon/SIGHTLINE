@@ -348,9 +348,10 @@ public static class Ai
                     int shotHit = plan.ShootTarget != null
                         ? OddsFrom(g, e, bestTile.x, bestTile.y, plan.ShootTarget).HitChance : 0;
                     // a MORTAR is a dedicated grenadier with a poor gun and a deep pouch — it
-                    // lobs far more readily (its whole identity is raining frags), so its
-                    // single-target threshold is higher than a line trooper's opportunistic toss.
-                    throwIt = shotHit < (e.Cls == "MORTAR" ? 70 : 45);
+                    // lobs more readily (its whole identity is raining frags), so its
+                    // single-target threshold is higher than a line trooper's opportunistic
+                    // toss — but dialed back from 70 so it's a threat, not a spammer.
+                    throwIt = shotHit < (e.Cls == "MORTAR" ? 55 : 45);
                 }
                 if (throwIt)
                 {
@@ -469,12 +470,20 @@ public static class Ai
 
     // Best grenade aim tile thrown from (fx,fy): pick a soldier's tile in range that
     // catches the most players (blast = Chebyshev radius 1); report ally splash too.
+    // FAIRNESS: the thrower must have LINE OF SIGHT from its post-move tile to the
+    // aim soldier — no lobbing blindly over a wall or through smoke. This makes enemy
+    // grenades counterable by breaking LoS (cover / smoke), consistent with the game's
+    // perfect-information contract. Applies to every enemy that throws (MORTAR, BRUISER,
+    // WARLORD, ...). Note we only require sight of the *aim* soldier; a clustered second
+    // soldier behind cover still gets caught by the AoE, which is fair (the throw was
+    // earned by a visible target and the blast spreads).
     static (int x, int y, int hits, int allies) BestGrenade(Game g, Unit e, int fx, int fy)
     {
         int bx = -1, by = -1, bestHits = 0, bestAllies = 99;
         foreach (var p in g.AlivePlayers())
         {
             if (Util.TileDist(fx, fy, p.X, p.Y) > Game.GrenadeRange) continue;
+            if (!g.Grid.HasLineOfSight(fx, fy, p.X, p.Y)) continue;   // can't blind-lob over walls / through smoke
             int hits = 0, allies = 0;
             foreach (var q in g.AlivePlayers()) if (Util.ChebyDist(p.X, p.Y, q.X, q.Y) <= GrenadeAnim.Radius) hits++;
             foreach (var a in g.AliveEnemies()) if (a != e && Util.ChebyDist(p.X, p.Y, a.X, a.Y) <= GrenadeAnim.Radius) allies++;
