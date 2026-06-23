@@ -1032,6 +1032,26 @@ Before stopping:
 
 ### WIP NOTES
 
+> **PROGRAM "DEEP STRIKE" — NEW MULTI-WAVE PUSH (read first; full process log in `docs/DEVLOG.md`).**
+> Fresh fully-autonomous session running the project as a dev team (orchestrator + parallel dev agents in
+> isolated worktrees + independent reviewers + research/audit agents). Develops on
+> `claude/fervent-fermat-6lxlyv` (PR open; NOT pushing main this session). A research+audit pass converged
+> on: coordinated enemy AI = biggest fun lever, plus output-randomness mitigation, content breadth, and a
+> replay ladder. **WAVE 1 SHIPPED (6 commits, all verified — build 0/0, 10/10 self-tests PASS, 14+ autoplay
+> runs clean, no TIMEOUT):**
+> - **Coordinated enemy AI** (`2e39592`): per-turn `Game.PlanEnemySquad` -> `EnemyFocus` (focus-fire) +
+>   `PlayerOverwatchTiles` (overwatch-aware routing, anti-turtle), read as advisory biases in `Ai.Plan`;
+>   plus low-HP fighting-retreat ("FALLING BACK"), anti-cluster, range-band kiting. New `SIGHTLINE_AITEST`.
+> - **4 new arenas** BASTION/CHASM/SPUR/HOOK + **richer procedural** (4 archetypes via `Mission.BuildProcedural`) (`d2291cf`).
+> - **Enemy-overwatch threat indicator** + unit-facing/impact FX polish (`2c92401`, `Renderer`/`Fx`).
+> - **Balance** (`a4be498`): Executioner/Guardian/CoolHeaded de-dominated; full-HP player can't be one-shot.
+> - **Combat-tooltip transparency** (`1cd4d61`): 14 modifier badges, each mirroring `ComputeOdds`.
+> - **Review follow-ups** (`83314f6`): truthful overwatch model, captive-focus skip, perf hoist, stronger AITEST.
+> Worktree gotcha: agent worktrees branch off near-empty `main` — every dev must `git reset --hard
+> claude/fervent-fermat-6lxlyv` first (all did; orchestrator verifies base+scope before integrating).
+> **NEXT: Wave 2** = Heat/Ascension difficulty ladder + run mutators (`Run`/`Game`/`Hud`/`SaveGame`) + a
+> Renderer/Fx feature; then per-turn depth, anti-turtle pressure clock, new enemies/objectives/biomes.
+
 > **AUTONOMOUS DEV-TEAM SESSION — 7 SPRINTS, 21 FEATURES + a 4-FEATURE CODE RECOVERY (read first).**
 > Ran the project as a multi-agent team (orchestrator/tech-lead + PM/research + architect +
 > parallel developer agents in isolated git worktrees + a peer-reviewer each sprint). 7 peer-review

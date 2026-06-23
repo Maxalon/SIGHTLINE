@@ -246,3 +246,54 @@ grain + HUD icons render.**
 feature set — grep the source for each feature's distinctive marker and/or `git log -S` across all refs
 — before declaring "intact." Autoplay and self-tests pass on a *subset* of features too, so green QA
 does not by itself prove completeness.
+
+---
+
+## PROGRAM "DEEP STRIKE" — a new multi-wave push (fresh session, full autonomy)
+
+Goal set by the owner: run the project like a real dev team and push the game as far as it goes —
+significant accomplishments, not a fine stopping point. Orchestrator + parallel developer agents in
+isolated git worktrees + independent reviewer agents + research/audit agents. Constraints unchanged
+(NO CI ever; nothing that costs money to build or distribute; perfect-information identity protected;
+free-to-redistribute assets allowed but none needed yet). A research+audit pass (two agents) converged
+with `docs/DESIGN.md` on the priorities: **smarter/coordinated enemy AI** is the single biggest fun
+lever; surface output-randomness mitigations; broaden content; a Heat/Ascension ladder for replay.
+
+### Worktree gotcha (applies to every wave)
+The Agent worktree isolation creates branches off the near-empty **`main`** (README only) — the real
+game lives on `claude/fervent-fermat-6lxlyv`. Every dev must `git reset --hard claude/fervent-fermat-6lxlyv`
+first. All five Wave-1 devs did; the orchestrator verifies each branch's base + diff scope before
+integrating (file-level `git checkout <branch> -- <files>`, one commit per feature).
+
+### Wave 1 — "Smarter & Richer" (5 features, all integrated + verified)
+
+| Item | Owner | Files | Outcome |
+|---|---|---|---|
+| Coordinated enemy AI (focus-fire / fighting-retreat / overwatch-aware routing / anti-cluster / kite) | Dev A | `Ai`,`Game`,`Program` | `2e39592`. Per-turn `Game.PlanEnemySquad` -> `EnemyFocus`+`PlayerOverwatchTiles`, read as advisory biases in `Ai.Plan`. +`SIGHTLINE_AITEST`. |
+| 4 new arenas (BASTION tier-2 keep / CHASM / SPUR / HOOK) + richer procedural variety (4 archetypes) | Dev B | `Maps`,`Mission` | `d2291cf`. `BuildProcedural` picks Screen/Redoubt/TwinCorridors/DiagonalWall. All 4 arenas verified APPLYING (instrumented `authored=True`). |
+| Enemy-overwatch threat indicator + unit-facing & impact FX polish | Dev C | `Renderer`,`Fx` | `2c92401`. Faint red wash on tiles a live overwatching enemy covers (mirrors the real reaction test) + watcher reticle; aim-tick at nearest foe; muzzle bloom + soft-glow spark heads. |
+| Balance: differentiate dominated perks + fragile-unit one-shot floor | Dev D | `Combat`,`Unit` | `a4be498`. Executioner +25 crit vs sub-half (beats Deadeye on wounded); Guardian = overwatch LETHALITY (ignore -10 + crit +30, via `ReactedThisTurn`, `GuardianAim`->0); CoolHeaded +5 unhindered; full-HP player can't be one-shot. COMBATTEST extended. |
+| Combat-tooltip transparency (surface every shot modifier) | Dev E | `Hud` | `1cd4d61`. 14 badges (BOND/KILLER/VENGEFUL/COLD BLOOD/LOCK-ON/CLOSE/MARKSMAN/DEADEYE/EXECUTIONER/SUPPRESSED/WOUNDED/DISORIENTED/HUNKERED/SMOKED), each mirroring `ComputeOdds`; two-column overflow. |
+| Independent review of Dev A + fixes | Reviewer + orch | `Ai`,`Game` | `83314f6`. APPROVE-WITH-NITS; applied #3 (truthful OW model: drop the `!Disoriented` filter), #6 (skip locked captive in focus), #4 (hoist `AliveEnemies()`), #2 (strengthen the retreat self-test with an HP-gated contrast). |
+
+**QA on the integrated trunk:** Release **0/0**; **all 10 self-tests PASS** (AITEST/COMBATTEST/TRAITTEST/
+SAVETEST/COVERTEST/ITEMTEST/STATUSTEST/BENCHTEST/CONCEALTEST/WOUNDTEST); **autoplay clean across 14+
+runs** (missions 1-6 + sabotage/rescue/defend) — no exceptions, no TIMEOUT, all decisive (<11k frames
+vs 20k cap). The smarter AI makes the weak smoke-test autopilot lose faster/decisively — intended.
+
+**Process learnings (Wave 1):** (1) 5 devs ran in parallel on fully-disjoint file sets
+({Ai,Game,Program} | {Maps,Mission} | {Renderer,Fx} | {Combat,Unit} | {Hud}) — zero merge conflicts;
+the Game/Hud hot-file bottleneck means only ONE dev owns each per wave. (2) A perk whose effect lives in
+a file you don't own (Guardian's reaction aim at `Game.cs:729`) can still be re-natured from the file you
+DO own by keying off existing state (`ReactedThisTurn`) and zeroing the cross-file const — no two-dev
+coordination needed. (3) Review-in-parallel again caught a latent-correctness item autoplay never would
+(the `!Disoriented` overwatch-model divergence). (4) Don't gold-plate a flaky test: the retreat
+"moves-away" assertion would have been flaky (the distance reward saturates at range), so the HP-gated
+*advance* contrast is the robust proof instead.
+
+### Next waves (planned)
+- **Wave 2 — Meta & depth:** Heat/Ascension difficulty ladder + run mutators (huge replay, `Run`/`Game`/
+  `Hud`/`SaveGame`); a Renderer/Fx feature (enemy-intent telegraph lines or environmental flourishes);
+  possibly aimed-vs-snap-shot depth.
+- **Wave 3+:** per-turn depth (crossfire/ZoC), anti-turtle pressure clock / kills-refund-action, new
+  enemy archetypes + a new objective, new biomes + per-run biome variety, then a balance/bug-hunt pass.
