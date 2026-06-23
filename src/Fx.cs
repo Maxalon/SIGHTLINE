@@ -84,13 +84,15 @@ public class Fx
 
     public void Muzzle(Vector2 at, Vector2 dir, Color col)
     {
+        var mouth = at + dir * 14f;
+        // directional spark cone
         for (int i = 0; i < 10; i++)
         {
             float spread = Util.RandRange(-0.4f, 0.4f);
             var d = Rotate(dir, spread);
             Particles.Add(new Particle
             {
-                Pos = at + dir * 14f,
+                Pos = mouth,
                 Vel = d * Util.RandRange(180f, 420f),
                 Life = Util.RandRange(0.08f, 0.22f),
                 MaxLife = 0.22f,
@@ -100,6 +102,20 @@ public class Fx
                 Spark = true,
             });
         }
+        // a brief soft muzzle bloom (a couple of fat, fast-fading glow dots) so the shot has a
+        // bright flash kick at the barrel — soft-glow style (handled in Draw), not a hard disc
+        for (int i = 0; i < 2; i++)
+            Particles.Add(new Particle
+            {
+                Pos = mouth + dir * Util.RandRange(0f, 4f),
+                Vel = dir * Util.RandRange(20f, 60f),
+                Life = Util.RandRange(0.05f, 0.10f),
+                MaxLife = 0.10f,
+                Size = Util.RandRange(5f, 7.5f),
+                Drag = 9f,
+                Color = Pal.RGBA(255, 244, 210),
+                Spark = false,
+            });
     }
 
     public void PopText(Vector2 at, string text, Color col, float size = 26f)
@@ -147,6 +163,12 @@ public class Fx
             {
                 Vector2 tail = p.Pos - Vector2.Normalize(p.Vel + new Vector2(0.001f, 0)) * p.Size * 2.5f;
                 Raylib.DrawLineEx(tail, p.Pos, MathF.Max(1f, p.Size * 0.6f), c);
+                // bright soft head: a faint halo + a hot white-ish core at the leading point so a
+                // dense burst (crit) glows noticeably hotter than a sparse one (graze) — the count
+                // does the weighting for free. Fades with the particle so it never lingers.
+                Raylib.DrawCircleV(p.Pos, MathF.Max(1f, p.Size * 0.5f) * 1.8f, Raylib.Fade(p.Color, k * 0.18f));
+                Raylib.DrawCircleV(p.Pos, MathF.Max(0.8f, p.Size * 0.4f),
+                                   Raylib.Fade(Pal.RGBA(255, 250, 240), k * 0.5f));
             }
             else
             {

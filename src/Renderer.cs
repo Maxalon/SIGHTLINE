@@ -147,6 +147,7 @@ public static class Renderer
 
         DrawElevation(g);
         DrawMoveOverlay(g);
+        DrawOverwatchThreat(g);   // tiles each active overwatching enemy covers (reaction-fire danger)
         DrawThreat(g);
         DrawEvac(g);
         DrawTerminal(g);
@@ -352,6 +353,68 @@ public static class Renderer
             }
     }
 
+    // Enemy-overwatch danger overlay (player turn only): every Active enemy that is on
+    // OVERWATCH will REACT-FIRE at the first soldier who moves into a tile it can see+hit.
+    // That reaction is otherwise invisible, so wash the watched tiles in a faint danger-red
+    // and mark each overwatcher with a reticle. A tile is "watched" iff it mirrors exactly
+    // what Game.OnUnitEnteredTile / CanTarget test for a reaction: the enemy has ammo, the
+    // tile is within its weapon MaxRange (Euclidean, matching Util.TileDist) and the enemy
+    // has line of sight to it (with the same commanding-height-over-high-cover rule). So the
+    // overlay never lies — a tile lit here is a tile that genuinely draws a reaction shot.
+    //
+    // Kept deliberately SUBTLE (low alpha) and visually DISTINCT from DrawThreat's corner
+    // pips: this is a soft full-tile wash + a watcher reticle, not a per-tile triangle, so a
+    // squint still reads the selected unit, the nearest foe and the objective first.
+    static void DrawOverwatchThreat(Game g)
+    {
+        if (g.Phase != Phase.PlayerTurn) return;
+
+        // collect the live overwatchers once (cheap; usually 0-2)
+        System.Collections.Generic.List<Unit> watchers = null;
+        foreach (var e in g.Enemies)
+        {
+            if (!e.Alive || !e.Active || !e.OnOverwatch || e.Ammo <= 0) continue;
+            (watchers ??= new System.Collections.Generic.List<Unit>()).Add(e);
+        }
+        if (watchers == null) return;
+
+        float pulse = 0.5f + 0.5f * MathF.Sin((float)Raylib.GetTime() * 3.2f);
+        // soft red wash — well below signal level so it informs without dominating the board
+        Color wash = Raylib.Fade(Pal.Foe, 0.055f + 0.045f * pulse);
+
+        // wash every watched tile (a tile may be watched by more than one enemy — the
+        // overlapping fills naturally read as a denser, more dangerous kill-zone)
+        for (int x = 0; x < g.Grid.W; x++)
+            for (int y = 0; y < g.Grid.H; y++)
+            {
+                if (!g.Grid.IsFloor(x, y)) continue;   // only walkable tiles can be moved into
+                foreach (var w in watchers)
+                {
+                    if (Util.TileDist(w.X, w.Y, x, y) > w.Weapon.MaxRange) continue;
+                    bool commanding = g.Grid.HeightAt(w.X, w.Y) - g.Grid.HeightAt(x, y) >= 2;
+                    if (!g.Grid.HasLineOfSight(w.X, w.Y, x, y, commanding)) continue;
+                    var r = ElevRect(g, x, y);
+                    Raylib.DrawRectangleRec(r, wash);
+                    break;   // one wash per tile is enough; overlap is conveyed by adjacency
+                }
+            }
+
+        // mark each overwatcher with a danger reticle so the SOURCE of the kill-zone reads
+        foreach (var w in watchers)
+        {
+            float hlift = g.Grid.IsHigh(w.X, w.Y) ? ElevLift : 0f;
+            var c = w.Pos - new Vector2(0, hlift + 30f);   // float the reticle just above the figure
+            Color rc = Raylib.Fade(Pal.Foe, 0.45f + 0.35f * pulse);
+            Raylib.DrawRing(c, 7.5f, 9f, 0, 360, 28, rc);
+            // crosshair ticks
+            Raylib.DrawLineEx(new Vector2(c.X - 11f, c.Y), new Vector2(c.X - 5f, c.Y), 1.6f, rc);
+            Raylib.DrawLineEx(new Vector2(c.X + 5f, c.Y), new Vector2(c.X + 11f, c.Y), 1.6f, rc);
+            Raylib.DrawLineEx(new Vector2(c.X, c.Y - 11f), new Vector2(c.X, c.Y - 5f), 1.6f, rc);
+            Raylib.DrawLineEx(new Vector2(c.X, c.Y + 5f), new Vector2(c.X, c.Y + 11f), 1.6f, rc);
+            Raylib.DrawCircleV(c, 1.6f, rc);
+        }
+    }
+
     static void DrawPathPreview(Game g)
     {
         if (g.PathPreview == null || g.PathPreview.Count == 0 || g.Selected == null) return;
@@ -513,6 +576,21 @@ public static class Renderer
         foreach (var u in g.Players) DrawUnit(g, u);
     }
 
+    // Nearest living enemy to a player unit (by tile distance) — used to point the selected
+    // soldier's aim-tick at who it's about to engage. Returns null if no foe is alive.
+    static Unit NearestLiveFoe(Game g, Unit u)
+    {
+        Unit best = null; float bestD = float.MaxValue;
+        var foes = u.Team == Team.Player ? g.Enemies : g.Players;
+        foreach (var f in foes)
+        {
+            if (!f.Alive) continue;
+            float d = Util.TileDist(u.X, u.Y, f.X, f.Y);
+            if (d < bestD) { bestD = d; best = f; }
+        }
+        return best;
+    }
+
     static void DrawUnit(Game g, Unit u)
     {
         if (!u.Alive) return;
@@ -599,9 +677,37 @@ public static class Renderer
             return;
         }
 
-        // facing tick
-        var fdir = new Vector2(MathF.Cos(u.Facing), MathF.Sin(u.Facing));
-        Raylib.DrawLineEx(p + fdir * 13f, p + fdir * 20f, 3f, Raylib.Fade(main, figAlpha));
+        // facing tick — a short "barrel" along the unit's facing. Active enemies get a small
+        // arrowhead so which way a foe is pointing (and thus where its overwatch/fire faces)
+        // reads at a glance; the selected soldier instead points its aim-tick at the nearest
+        // live foe (a clear "who am I about to shoot" cue) regardless of its idle facing.
+        float aimAng = u.Facing;
+        if (g.Selected == u && friend && !vip)
+        {
+            var foe = NearestLiveFoe(g, u);
+            if (foe != null)
+            {
+                var ad = foe.Pos - p;
+                if (ad.LengthSquared() > 0.01f) aimAng = MathF.Atan2(ad.Y, ad.X);
+            }
+        }
+        var fdir = new Vector2(MathF.Cos(aimAng), MathF.Sin(aimAng));
+        var perp = new Vector2(-fdir.Y, fdir.X);
+        Raylib.DrawLineEx(p + fdir * 13f, p + fdir * 21f, 3f, Raylib.Fade(main, figAlpha));
+        if (g.Selected == u && friend && !vip)
+        {
+            // a soft directional aim chevron a little further out, pointing at the target
+            var tip = p + fdir * 27f;
+            Raylib.DrawLineEx(tip, tip - fdir * 6f + perp * 5f, 2f, Raylib.Fade(main, 0.85f * figAlpha));
+            Raylib.DrawLineEx(tip, tip - fdir * 6f - perp * 5f, 2f, Raylib.Fade(main, 0.85f * figAlpha));
+        }
+        else if (u.Team == Team.Enemy)
+        {
+            // tiny arrowhead on the barrel so enemy facing is unmistakable
+            var tip = p + fdir * 21f;
+            Raylib.DrawLineEx(tip, tip - fdir * 4.5f + perp * 3.5f, 2f, Raylib.Fade(main, figAlpha));
+            Raylib.DrawLineEx(tip, tip - fdir * 4.5f - perp * 3.5f, 2f, Raylib.Fade(main, figAlpha));
+        }
 
         // medic: green cross marker so the support unit reads at a glance
         if (u.Team == Team.Enemy && u.Cls == "MEDIC")
