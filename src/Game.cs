@@ -268,6 +268,20 @@ public class Game
     bool  _autoCamManual;   // true = player manually moved camera; suppresses auto-follow until C-reset
     public float DeathFlash;                 // 0..1 red full-screen pulse on a soldier's death
     readonly List<string> _missionKia = new(); // soldiers KIA this mission (for the debrief)
+
+    // Death scorch decals: where a unit fell, a dark team-tinted burn mark lingers on the tile
+    // and fades over ~ScorchLife seconds (decayed in Update, drawn under units in Renderer, cleared
+    // per mission). So a kill reads as a burst + a lingering scorch, not an instant disappearance.
+    public struct Scorch { public Vector2 Pos; public Color Tint; public float Life, MaxLife; }
+    public readonly List<Scorch> Scorches = new();
+    public const float ScorchLife = 1.6f;    // seconds a scorch lingers before it's fully gone
+    /// Register a fading scorch decal at a fallen unit's position (team-tinted).
+    public void AddScorch(Vector2 at, Color tint)
+    {
+        // cap the list so a long mission can't accumulate unbounded decals (cheap; cosmetic)
+        if (Scorches.Count > 64) Scorches.RemoveAt(0);
+        Scorches.Add(new Scorch { Pos = at, Tint = tint, Life = ScorchLife, MaxLife = ScorchLife });
+    }
     public void AddHitStop(float s) { HitStop = MathF.Max(HitStop, s); }
     public void AddZoomPunch(float p) { _camPulse = MathF.Max(_camPulse, p); }
 
@@ -414,6 +428,7 @@ public class Game
         foreach (var u in Players)
         { u.FeatMultiKill = u.FeatClutch = u.FeatVengeful = u.WasNearDeath = u.AllyDown = false; u.BondAura = false; u.ConsecutiveMisses = 0; u.Statuses.Clear(); }
         _missionKia.Clear();
+        Scorches.Clear();            // death decals don't carry between missions
         _refundedThisTurn.Clear();   // flank-kill refund is per-turn; clear it for the mission's first turn too (review #2)
         _vipWaitTurns = 0;           // SmartStep Escort: VIP-hold patience (anti-TIMEOUT)
         _smartConcealTurns = 0;      // SmartStep: concealed-turn counter (hard anti-TIMEOUT cap)
@@ -789,6 +804,27 @@ public class Game
         Grid.AddSmoke(Util.Clamp(u.X + 5, 0, Grid.W - 1), Util.Clamp(u.Y + 3, 0, Grid.H - 1), SmokeAnim.Radius, SmokeAnim.Turns);
     }
 
+    /// Harness hook (screenshot only): freeze a sample of the procedural unit-animation poses
+    /// (fire-recoil / hit-flinch / walk-lean) on live units + drop a couple of death-scorch decals,
+    /// so a static SHOT frame demonstrates the new juice (which is otherwise transient in play).
+    public void DebugUnitFx()
+    {
+        var live = Players.Where(p => p.Alive).ToList();
+        if (live.Count > 0) { live[0].RecoilAnim = 1f; Selected = live[0]; }   // a soldier mid-fire-recoil
+        if (live.Count > 1) live[1].FlinchAnim = 1f;                            // a soldier mid-hit-flinch
+        if (live.Count > 2) live[2].WalkLean = 1f;                              // a soldier mid-stride
+        var foes = Enemies.Where(e => e.Alive).ToList();
+        if (foes.Count > 0) foes[0].FlinchAnim = 1f;
+        // a few lingering scorch decals on nearby empty tiles to show where units fell
+        if (live.Count > 0)
+            for (int i = 0; i < 3; i++)
+            {
+                int sx = Util.Clamp(live[0].X + 2 + i * 2, 0, Grid.W - 1);
+                int sy = Util.Clamp(live[0].Y + 1 + i, 0, Grid.H - 1);
+                AddScorch(Util.TileCenter(sx, sy), i % 2 == 0 ? Pal.Foe : Pal.Friend);
+            }
+    }
+
     // ---- secondary objective (3.9) ----
     /// Roll an optional bonus goal for the mission (none on mission 1; CLEAN SWEEP is
     /// skipped on Eliminate where it's automatic).
@@ -1146,8 +1182,14 @@ public class Game
         }
         TryFlankKillRefund(d);   // "press the advantage": a player flank-kill refunds an action
         Color c = d.Team == Team.Player ? Pal.Friend : Pal.Foe;
+        // team-colored SHATTER: an expanding ring + a radial spark spray + ember clouds, so a
+        // kill reads as a figure breaking apart (not a vanish). Tuned to the existing juice scale.
+        Fx.Shockwave(d.Pos, c, 8f, 38f, 4f, 0.85f, 0.34f);
+        Fx.DirSparks(d.Pos, new Vector2(0, -1f), c, 18, 300f, MathF.PI, 3.5f);   // full-circle spray (spread=PI)
         Fx.Burst(d.Pos, c, 30, 280f, 0.7f, 4f, true);
         Fx.Burst(d.Pos, Pal.RGBA(20, 25, 33), 16, 150f, 0.8f, 5f);
+        // lingering scorch decal on the tile (drawn under units, fades over ScorchLife)
+        AddScorch(d.Pos, c);
         Fx.PopText(d.Pos + new Vector2(0, -10), d.IsVip ? "VIP DOWN" : "DOWN", c, 22f);
         if (d.IsVip) { ShowBanner("VIP DOWN", true); Fx.AddShake(13f); }
         Fx.AddShake(7f);
@@ -1319,6 +1361,19 @@ public class Game
         }
     }
 
+    /// Relax a unit's transient render-only state each frame: damage flash, recoil/knockback
+    /// offset, and the procedural anim poses (fire-recoil / hit-flinch / walk-lean). All decay
+    /// deterministically toward 0 so a unit eases back to its idle breathing — kept out of the
+    /// sim (purely cosmetic), so the headless screenshot harness stays reproducible.
+    static void DecayUnitFx(Unit u, float t)
+    {
+        u.Flash = MathF.Max(0, u.Flash - t * 4f);
+        u.Recoil *= MathF.Exp(-t * 17f);
+        u.RecoilAnim = MathF.Max(0, u.RecoilAnim - t * 6.5f);   // snappy: a quick kick that settles fast
+        u.FlinchAnim = MathF.Max(0, u.FlinchAnim - t * 6.0f);   // a brief shudder
+        u.WalkLean   = MathF.Max(0, u.WalkLean   - t * 7.5f);   // leans through the step, settles when idle
+    }
+
     public void Update(float dt)
     {
         // custom-tag editor is modal: it swallows all other input while open
@@ -1328,6 +1383,7 @@ public class Game
         if (!AutoPlay && Raylib.IsKeyPressed(KeyboardKey.F)) Display.ToggleFullscreen();
         Audio.SetMusicIntensity(MusicIntensity());
         UpdateTutorial(dt);
+        Fx.UpdateAmbient(Biome, dt);   // per-biome ambient atmosphere (Wave B)
 
         // camera zoom-punch always relaxes; hit-stop freezes the rest of the sim
         _camPulse *= MathF.Exp(-dt * 11f);
@@ -1366,8 +1422,13 @@ public class Game
 
         float t = MathF.Min(dt, 0.05f);
         Fx.Update(t);
-        foreach (var u in Players) { u.Flash = MathF.Max(0, u.Flash - t * 4f); u.Recoil *= MathF.Exp(-t * 17f); }
-        foreach (var u in Enemies) { u.Flash = MathF.Max(0, u.Flash - t * 4f); u.Recoil *= MathF.Exp(-t * 17f); }
+        foreach (var u in Players) DecayUnitFx(u, t);
+        foreach (var u in Enemies) DecayUnitFx(u, t);
+        for (int i = Scorches.Count - 1; i >= 0; i--)   // death scorch decals fade out
+        {
+            var s = Scorches[i]; s.Life -= t;
+            if (s.Life <= 0) Scorches.RemoveAt(i); else Scorches[i] = s;
+        }
         UpdateBondAuras();   // bonded squadmates buff each other while adjacent
         if (BannerTimer > 0) BannerTimer -= t;
 

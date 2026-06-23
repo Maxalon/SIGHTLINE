@@ -256,6 +256,16 @@ public class Unit
     public float Flash;         // 0..1 damage flash
     public float Bob;           // idle bob phase
 
+    // ---- procedural unit animation (transient render-only state; decays in Game.Update) ----
+    // These drive small body+silhouette deformations in Renderer.DrawUnit so a unit reads as
+    // alive (idle breathing already rides Bob): a recoil KICK when it fires, a FLINCH when it
+    // takes a hit, and a forward LEAN while it walks. All are render-only (never affect the sim
+    // or determinism — they decay deterministically and are seeded only from animation events +
+    // the per-unit Bob phase), so the headless SIGHTLINE_SHOT harness stays reproducible.
+    public float RecoilAnim;    // 0..1 fire-recoil pose: body rocks back along -Facing, settles fast
+    public float FlinchAnim;    // 0..1 hit-flinch: a quick shudder/scale-pop when struck
+    public float WalkLean;      // 0..1 walk lean: leans into the direction of travel while stepping
+
     public int MoveBudget => Math.Max(1, Mobility - (Wound > 0 ? WoundMob : 0)) * 2;  // half-tile budget (−mob while wounded)
     public bool CanAct => Alive && ActionsLeft > 0;
 

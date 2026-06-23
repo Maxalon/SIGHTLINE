@@ -31,6 +31,7 @@ public class MoveStepAnim : Anim
         _dur = diag ? 0.155f : 0.12f;
         var d = _to - _from;
         if (d.LengthSquared() > 0.01f) Unit.Facing = MathF.Atan2(d.Y, d.X);
+        Unit.WalkLean = 1f;     // lean into the step (Renderer reads it as a forward body tilt); decays in Game.Update
         g.Fx.Dust(_from + new Vector2(0, 8f), 3);   // a small puff kicks up as the foot leaves
     }
 
@@ -98,6 +99,7 @@ public class ShotAnim : Anim
         // where the ShotResult is final. dmg counts only when the round connects.
         Stats.RecordShot(A.Cls, (int)A.Team, Res.Hit, Res.Crit, Res.Graze, Res.Hit ? Res.Damage : 0);
         A.Recoil = -dir * (A.Weapon.Kind == WeaponKind.Shotgun ? 9f : 6f); // kick back
+        A.RecoilAnim = A.Weapon.Kind == WeaponKind.Shotgun ? 1f : 0.8f;    // fire-recoil POSE: body rocks back along -Facing (Renderer); decays in Game.Update
 
         if (Res.Hit)
         {
@@ -109,6 +111,7 @@ public class ShotAnim : Anim
                 // Graze: wing-clip — lighter flash, less knockback, no cover chip, no hit-stop.
                 D.Flash = 0.5f;
                 D.Recoil = dir * 2.5f;
+                D.FlinchAnim = MathF.Max(D.FlinchAnim, 0.5f);   // a small shudder (Renderer); decays in Game.Update
                 g.AddBloom(0.02f);
                 Color grazeTint = D.Team == Team.Player ? Pal.Friend : Pal.Foe;
                 g.Fx.Burst(D.Pos, grazeTint, 5, 110f, 0.35f, 2.5f, true);
@@ -122,6 +125,7 @@ public class ShotAnim : Anim
                 g.TryChipCover(A, D);                              // heavy weapons chew the target's cover (3.6)
                 D.Flash = 1f;
                 D.Recoil = dir * (Res.Crit ? 8f : 5f);           // knockback
+                D.FlinchAnim = Res.Crit ? 1f : 0.85f;            // hit-flinch POSE: harder on a crit (Renderer); decays in Game.Update
                 g.AddHitStop(Res.Crit ? 0.09f : 0.05f);          // freeze on impact
                 g.AddBloom(Res.Crit ? 0.09f : 0.045f);           // Phase 5.2: bloom spike on hit/crit
                 Color blood = D.Team == Team.Player ? Pal.Friend : Pal.Foe;
@@ -271,6 +275,7 @@ public class GrenadeAnim : Anim
             if (u.Team == Team.Player && u.MaxHp >= 2 && u.Hp >= u.MaxHp) dmg = Math.Min(dmg, u.MaxHp - 1);
             u.Hp -= dmg;
             u.Flash = 1f;
+            u.FlinchAnim = 1f;       // the blast rocks them (Renderer hit-flinch); decays in Game.Update
             var kick = u.Pos - _to;
             if (kick.LengthSquared() > 0.01f) u.Recoil = Vector2.Normalize(kick) * 7f;
             Color c = u.Team == Team.Player ? Pal.Friend : Pal.Foe;
