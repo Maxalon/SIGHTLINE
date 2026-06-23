@@ -278,6 +278,7 @@ public class Game
         int heat = PendingHeat;
         if (NoPersist && int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_HEAT"), out int hEnv)) heat = hEnv;
         _run.HeatLevel = Sightline.Heat.Clamp(heat);
+        Stats.BeginRun(_run.HeatLevel);     // balance telemetry (no-op unless Stats.Enabled)
         Players = _run.Squad;
         int n = Util.Clamp(startAt, 1, Run.MaxMissions);
         if (n > 1) _run.JumpTo(n);           // harness: advance along the map to the requested op
@@ -413,6 +414,10 @@ public class Game
 
         // checkpoint the run at the start of each mission (normal play only)
         if (!NoPersist) SaveGame.Save(_run);
+
+        // balance telemetry (no-op unless Stats.Enabled): record the encounter we just built.
+        Stats.BeginMission(n, Objective.ToString(), _run.HeatLevel,
+                           Players.Count(p => p.Alive && !p.IsVip), Enemies.Count(e => e.Alive));
     }
 
     void NextMission() => SetupMission(_run.Mission + 1);
@@ -875,6 +880,10 @@ public class Game
         int survivors = _run.Squad.Count;
         bool finished = _run.Mission >= Run.MaxMissions;
 
+        // balance telemetry: this mission was just cleared (a win). A finished run also ends here.
+        Stats.EndMission(true, _turnCount, survivors, Enemies.Count(e => !e.Alive), "");
+        if (finished) Stats.EndRun(true, _run.Mission, "");
+
         // reward for clearing the chosen deployment
         if (!finished && _run.CurrentCard != null && _run.CurrentCard.Reward == RewardKind.Heal)
             foreach (var u in _run.Squad) u.Hp = u.MaxHp;
@@ -948,6 +957,10 @@ public class Game
         LoseReason = reason;
         Phase = Phase.Lose;
         Audio.Play("lose");
+        // balance telemetry: the active mission AND the run end here as a loss.
+        Stats.EndMission(false, _turnCount, AlivePlayers().Count(p => !p.IsVip),
+                         Enemies.Count(e => !e.Alive), title);
+        Stats.EndRun(false, _run.Mission - 1, title);
         if (!NoPersist) SaveGame.Delete();
     }
 
