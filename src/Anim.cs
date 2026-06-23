@@ -94,6 +94,9 @@ public class ShotAnim : Anim
         g.Fx.AddShake(Res.Hit ? (Res.Graze ? 2f : (Res.Crit ? 9f : 5f)) : 2.5f);
         Audio.Play("shoot");
         Audio.Play(Res.Hit ? (Res.Crit ? "crit" : "hit") : "miss");
+        // balance telemetry (no-op unless Stats.Enabled): one record per resolved shot, here
+        // where the ShotResult is final. dmg counts only when the round connects.
+        Stats.RecordShot(A.Cls, (int)A.Team, Res.Hit, Res.Crit, Res.Graze, Res.Hit ? Res.Damage : 0);
         A.Recoil = -dir * (A.Weapon.Kind == WeaponKind.Shotgun ? 9f : 6f); // kick back
 
         if (Res.Hit)

@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
 
 namespace Sightline;
 
@@ -220,5 +222,87 @@ public static class Stats
 
         sb.AppendLine("═══════════════════════════════════════════════════════════════════════");
         return sb.ToString();
+    }
+
+    // ── JSON export ───────────────────────────────────────────────────────────
+    // Writes the aggregate as a compact JSON document (same numbers as Report()) so a
+    // balance batch can be diffed/plotted by external tooling. Mirrors SaveGame's
+    // System.Text.Json pattern; failures are swallowed (telemetry must never crash a run).
+    static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = true };
+
+    public static void WriteJson(string path)
+    {
+        try
+        {
+            string dir = Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+            File.WriteAllText(path, JsonSerializer.Serialize(BuildSummary(), JsonOpts));
+        }
+        catch { /* telemetry is best-effort; never throw out of a balance batch */ }
+    }
+
+    // A plain-data view of the aggregate, for JSON. Built from the same Runs list as Report().
+    public static object BuildSummary()
+    {
+        var missions = Runs.SelectMany(r => r.Missions).ToList();
+
+        var dmgByClass = new Dictionary<string, int>();
+        var shotsByClass = new Dictionary<string, int>();
+        var hitsByClass = new Dictionary<string, int>();
+        var killsByClass = new Dictionary<string, int>();
+        foreach (var m in missions)
+        {
+            foreach (var kv in m.DamageByClass) Bump(dmgByClass, kv.Key, kv.Value);
+            foreach (var kv in m.ShotsByClass) Bump(shotsByClass, kv.Key, kv.Value);
+            foreach (var kv in m.HitsByClass) Bump(hitsByClass, kv.Key, kv.Value);
+            foreach (var kv in m.KillsByClass) Bump(killsByClass, kv.Key, kv.Value);
+        }
+        var deaths = new Dictionary<string, int>();
+        foreach (var m in missions)
+            foreach (var kv in m.DeathsByEnemyClass) Bump(deaths, kv.Key, kv.Value);
+        var perks = new Dictionary<string, int>();
+        foreach (var r in Runs) foreach (var p in r.PerksPicked) Bump(perks, p);
+
+        double WinRate(IEnumerable<MissionRec> ms)
+        {
+            var l = ms as IList<MissionRec> ?? ms.ToList();
+            return l.Count == 0 ? 0.0 : Math.Round(100.0 * l.Count(m => m.Win) / l.Count, 1);
+        }
+
+        return new
+        {
+            runs = Runs.Count,
+            missions = missions.Count,
+            runWinRate = Runs.Count == 0 ? 0.0 : Math.Round(100.0 * Runs.Count(r => r.Win) / Runs.Count, 1),
+            avgMissionsCleared = Runs.Count == 0 ? 0.0 : Math.Round(Runs.Average(r => (double)r.MissionsCleared), 2),
+            byHeat = missions.GroupBy(m => m.Heat).OrderBy(g => g.Key).Select(g => new
+            {
+                heat = g.Key, n = g.Count(), winRate = WinRate(g), avgTurns = Math.Round(g.Average(m => (double)m.Turns), 1)
+            }).ToList(),
+            byObjective = missions.GroupBy(m => m.Objective).OrderBy(g => g.Key).Select(g => new
+            {
+                objective = g.Key, n = g.Count(), winRate = WinRate(g), avgTurns = Math.Round(g.Average(m => (double)m.Turns), 1)
+            }).ToList(),
+            byMission = missions.GroupBy(m => m.Mission).OrderBy(g => g.Key).Select(g => new
+            {
+                mission = g.Key, n = g.Count(), winRate = WinRate(g)
+            }).ToList(),
+            lossCauses = missions.Where(m => !m.Win && !string.IsNullOrEmpty(m.LossCause))
+                                 .GroupBy(m => m.LossCause).OrderByDescending(g => g.Count())
+                                 .ToDictionary(g => g.Key, g => g.Count()),
+            playerClasses = dmgByClass.Keys.Concat(shotsByClass.Keys).Distinct()
+                                .OrderByDescending(c => dmgByClass.GetValueOrDefault(c)).Select(c => new
+            {
+                cls = c,
+                shots = shotsByClass.GetValueOrDefault(c),
+                hits = hitsByClass.GetValueOrDefault(c),
+                hitRate = shotsByClass.GetValueOrDefault(c) == 0 ? 0.0
+                          : Math.Round(100.0 * hitsByClass.GetValueOrDefault(c) / shotsByClass.GetValueOrDefault(c), 1),
+                dmg = dmgByClass.GetValueOrDefault(c),
+                kills = killsByClass.GetValueOrDefault(c)
+            }).ToList(),
+            soldierDeathsByEnemy = deaths.OrderByDescending(kv => kv.Value).ToDictionary(kv => kv.Key, kv => kv.Value),
+            perkPicks = perks.OrderByDescending(kv => kv.Value).ToDictionary(kv => kv.Key, kv => kv.Value),
+        };
     }
 }
