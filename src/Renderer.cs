@@ -800,7 +800,7 @@ public static class Renderer
         // class glyph
         int sides = u.Cls switch
         {
-            "ASSAULT" => 3, "RANGER" => 3, "SHARPSHOOTER" => 4,
+            "ASSAULT" => 3, "RANGER" => 3, "SHARPSHOOTER" => 4, "CORPSMAN" => 4,
             "GUNNER" => 4, "BRUISER" => 6, "SCOUT" => 3,
             "SNIPER" => 4, "TURRET" => 4, "BERSERKER" => 6, "ELITE" => 8, "MEDIC" => 4,
             "DRONE" => 4, "SHIELD" => 6, "SAPPER" => 3, "HUNTER" => 3, "MORTAR" => 5, _ => 5,
@@ -875,6 +875,16 @@ public static class Renderer
         {
             Raylib.DrawRectangle((int)p.X - 1, (int)p.Y - 5, 3, 11, Raylib.Fade(Pal.Good, figAlpha));
             Raylib.DrawRectangle((int)p.X - 5, (int)p.Y - 1, 11, 3, Raylib.Fade(Pal.Good, figAlpha));
+        }
+
+        // CORPSMAN: a bright WHITE medical cross on the cyan body so "the medic" reads at a glance.
+        // White (not green) keeps it distinct from the enemy MEDIC's green cross AND from the other
+        // friendly classes; the contrast is value-based, so it survives the colorblind palette too.
+        if (u.Team == Team.Player && u.Cls == "CORPSMAN")
+        {
+            var cw = Pal.RGBA(245, 252, 255);
+            Raylib.DrawRectangle((int)p.X - 6, (int)p.Y - 2, 13, 4, Raylib.Fade(cw, figAlpha));
+            Raylib.DrawRectangle((int)p.X - 2, (int)p.Y - 6, 4, 13, Raylib.Fade(cw, figAlpha));
         }
 
         // sapper: a small demolition-charge marker so it reads as a cover-breaker

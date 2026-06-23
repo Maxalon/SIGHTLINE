@@ -1236,6 +1236,7 @@ public static class Hud
         if ((u.Weapon != null && u.Weapon.Kind == WeaponKind.Sniper) || u.HasPerk(Perk.Marksman)) t.Add("LONG");
         if (u.HasPerk(Perk.Tank) || u.HasPerk(Perk.Hardened) || u.MaxHp >= 11) t.Add("TOUGH");
         if (u.HasPerk(Perk.Sprinter) || u.Mobility >= 8) t.Add("FAST");
+        if (u.Cls == "CORPSMAN") t.Insert(0, "MEDIC");   // the support role leads its tag list
         if (t.Count == 0)   // class-role fallback so every soldier reads with a strength
             t.Add(u.Cls switch
             {
@@ -1243,6 +1244,7 @@ public static class Hud
                 "ASSAULT" => "ASSAULT",
                 "RANGER" => "CLOSE",
                 "SHARPSHOOTER" => "SHARP",
+                "CORPSMAN" => "MEDIC",
                 _ => "SOLDIER",
             });
         return t;
