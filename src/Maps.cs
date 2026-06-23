@@ -242,5 +242,61 @@ public static class Maps
             "..................",
             "..................",
         },
+        new[] // GRID — a NEON server-room: a regular lattice of 2x2 high-cover "racks"
+              // separated by clean orthogonal aisles (vertical at cols 0-1/4-5/8-9/12-13/
+              // 16-17, horizontal at rows 0/3/6/9-10), with low-cover terminals dotting the
+              // mid aisles. Movement is corridor-bound and right-angled (no diagonals through
+              // a rack), so it plays as tight, blind-corner CQB unlike the open pillar field.
+              // Biome hint: NEON.
+        {
+            "..................",
+            "..##..##..##..##..",
+            "..##..##..##..##..",
+            "....o......o......",
+            "..##..##..##..##..",
+            "..##..##..##..##..",
+            "....o......o......",
+            "..##..##..##..##..",
+            "..##..##..##..##..",
+            "..................",
+            "..................",
+        },
+        new[] // FORGE — a MAGMA foundry: a commanding tier-2 ('=') casting platform at the
+              // centre, wrapped in a walkable tier-1 ('^') apron you can simply walk up onto
+              // (no walls — the height is openly contested, unlike BASTION's breach-only keep).
+              // Four corner high-cover smelters + low-cover ingot piles give covered firing
+              // steps onto the slope. Seizing the platform dominates the whole field.
+              // Biome hint: MAGMA.
+        {
+            "..................",
+            "...#..........#...",
+            "......^^^^^^......",
+            ".....^^====^^.....",
+            "..o..^^====^^..o..",
+            ".....^^====^^.....",
+            "..o..^^====^^..o..",
+            ".....^^^^^^^^.....",
+            "...#..........#...",
+            "..................",
+            "..................",
+        },
+        new[] // CONDUIT — a horizontally-split complex: fortified high-cover bunkers banking
+              // the NORTH and SOUTH, divided by a wide open central channel (row 5, the
+              // "conduit"). The fight runs ALONG and ACROSS the channel — the inverse axis of
+              // CHASM's vertical river. Low-cover nodes flank the channel as contested
+              // stepping points; the open lane is the fast-but-exposed flanking route.
+        {
+            "..................",
+            "...####..####.....",
+            "...#..o..o..#.....",
+            "...#........#.....",
+            "......o..o........",
+            "..................",
+            "......o..o........",
+            "...#........#.....",
+            "...#..o..o..#.....",
+            "...####..####.....",
+            "..................",
+        },
     };
 }

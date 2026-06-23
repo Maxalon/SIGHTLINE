@@ -21,12 +21,14 @@ public static class Mission
     public static int ForcedLayout = -1;
 
     // Soft biome->layout affinity: each biome index (matching Biome.All order —
-    // STEEL=0 ARID=1 TUNDRA=2 VERDANT=3 ASH=4 VOID=5) hints at a preferred arena
-    // index. When an authored map is rolled, there is a 50% chance to pick the hinted
+    // STEEL=0 ARID=1 TUNDRA=2 VERDANT=3 ASH=4 VOID=5 NEON=6 MAGMA=7) hints at a preferred
+    // arena index. When an authored map is rolled, there is a 50% chance to pick the hinted
     // layout and a 50% chance to pick randomly — keeping variety while nudging theme.
     // -1 means no preference (always picks randomly). This is SOFT: ForcedLayout
     // overrides it completely, and the connectivity guard can still fall back to
     // procedural if a hinted layout fails (though the arenas are designed to pass).
+    // Keep this array length-aligned with Biome.All (one entry per biome) so the two
+    // newest biomes also theme; PickLayout falls back to a random arena past the end.
     static readonly int[] BiomeLayoutHint =
     {
         11,  // STEEL   → BASTION (industrial fortress, tier-2 keep)
@@ -35,6 +37,8 @@ public static class Mission
         10,  // VERDANT → THICKET (dense organic cover clusters)
         14,  // ASH     → HOOK (a ruined outpost with an asymmetric flank)
         9,   // VOID    → RUINS (open eerie arena, long sightlines)
+        15,  // NEON    → GRID (orthogonal server-room rack lattice)
+        16,  // MAGMA   → FORGE (commanding tier-2 foundry platform)
     };
 
     /// The four starting soldiers for a fresh run.
