@@ -195,10 +195,19 @@ public class Game
     public Unit Vip;
     public bool CaptiveLocked;   // RESCUE: the asset starts caged + invulnerable until a soldier frees it (3.8)
 
-    // hack objective: reach the terminal and hack it over several actions
-    public const int HackRequired = 3;
+    // hack objective: reach the terminal and hack it over several actions. With the one-cycle-
+    // per-turn channel (HackedThisTurn) this is a 2-turn HOLD under fire — a 3-turn hold proved
+    // too lethal once the hack goes loud (competent-AI win-rate cratered); 2 keeps it a real
+    // fight the squad can win with good play.
+    public const int HackRequired = 2;
     public (int x, int y) Terminal;
     public int HackProgress;
+    // Balance fix: the terminal accepts only ONE breach cycle per player turn (a sustained
+    // channel), so the 3-charge hack is a genuine multi-turn HOLD — the squad can't stack 3
+    // soldiers to finish in one turn, it must defend the console across several turns while the
+    // hack-noise-roused pods converge. Reset each StartPlayerTurn. (Sabotage's spread-out charge
+    // sites already force a multi-turn traverse, so only the single-terminal hack needs this.)
+    public bool HackedThisTurn;
     public bool HasTerminal => Objective == Objective.Hack;
 
     // SABOTAGE: K charge sites, each demolished by one PLANT action (3.8)
@@ -216,7 +225,10 @@ public class Game
     public bool CanHack(Unit u)
     {
         if (u == null || u.Team != Team.Player || !u.CanAct) return false;
-        if (HasTerminal) return HackProgress < HackRequired && Util.ChebyDist(u.X, u.Y, Terminal.x, Terminal.y) <= 1;
+        // terminal: one breach cycle per turn (HackedThisTurn) so it's a multi-turn hold, not a
+        // stack-and-finish — the autopilot/HUD then route the other soldiers to defend instead.
+        if (HasTerminal) return !HackedThisTurn && HackProgress < HackRequired
+                              && Util.ChebyDist(u.X, u.Y, Terminal.x, Terminal.y) <= 1;
         if (HasSabotage) return NearestSabotageSite(u) >= 0;
         return false;
     }
@@ -786,7 +798,12 @@ public class Game
         if (n <= 1) { Secondary = SecondaryKind.None; return; }
         var pool = new List<SecondaryKind> { SecondaryKind.NoLosses };
         if (Objective != Objective.Defend) pool.Add(SecondaryKind.Swift);   // can't finish a hold-out early
-        if (Objective != Objective.Eliminate) pool.Add(SecondaryKind.CleanSweep);
+        // CLEAN SWEEP (kill every hostile) is a mismatched / near-impossible bonus on:
+        //  - Eliminate  (it's the primary objective — automatic, no challenge)
+        //  - Decapitate (you win the instant the HVT dies, so clearing the rest is harder)
+        //  - Defend     (waves spawn until the timer, so the board never fully clears)
+        if (Objective != Objective.Eliminate && Objective != Objective.Decapitate
+            && Objective != Objective.Defend) pool.Add(SecondaryKind.CleanSweep);
         Secondary = pool[Util.RandInt(0, pool.Count - 1)];
     }
 
@@ -1488,10 +1505,12 @@ public class Game
         // (fire it next step with +20 aim/+25 crit), or until proximity forces the reveal.
         if (SquadConcealed)
         {
-            // Stealth-race objectives: ones we can COMPLETE without firing (so pods stay
-            // dormant the whole time). Hack/Sabotage qualify because hacking/planting doesn't
-            // break concealment — a soldier can creep to the terminal/site and finish it
-            // covertly. Evac/Escort/Rescue qualify because they're pure "reach a tile" goals.
+            // Stealth-race objectives: ones we approach hidden without needing to fire first.
+            // Evac/Escort/Rescue qualify because they're pure "reach a tile" goals (no shot at
+            // all while hidden). Hack/Sabotage qualify for the covert APPROACH — but the first
+            // hack/plant now GOES LOUD (DoHack breaks concealment, balance fix), so after that
+            // the squad drops into the normal combat objective routing to hold & finish. We
+            // still creep in concealed (safe approach) rather than ambush-opening from afar.
             // (Eliminate/Decapitate/Defend inherently require killing, so they ambush instead.)
             bool stealthRace = Objective == Objective.Evac || Objective == Objective.Escort
                             || Objective == Objective.Rescue || Objective == Objective.Hack
@@ -1552,8 +1571,10 @@ public class Game
     /// move was issued. NEVER calls a shooting/ability path (that would break concealment).
     bool SmartConcealedRace(Unit u)
     {
-        // HACK / SABOTAGE: hacking & planting don't break stealth, so finish the objective
-        // covertly — hack/plant if adjacent, else creep to the terminal / nearest live site.
+        // HACK / SABOTAGE: creep to the objective concealed (safe approach), then hack/plant.
+        // NOTE: the first hack/plant now BREAKS stealth (DoHack → BreakConcealment, balance
+        // fix), so the very next SmartStep frame falls through to the engaged routing
+        // (SmartHack/SmartSabotage) which fights to hold the objective and finish it.
         if (Objective == Objective.Hack)
         {
             if (CanHack(u)) { DoHack(); return true; }
@@ -2477,6 +2498,14 @@ public class Game
     public int SightRange  => Math.Max(1, BaseSightRange  - ContactTighten);
     public int AlertRange  => Math.Max(1, BaseAlertRange  - ContactTighten);
     public int RevealRange => Math.Max(1, BaseRevealRange - ContactTighten);
+    // Balance fix: a hack/plant is LOUD — the noise rouses dormant pods within this radius of
+    // the objective site even without line of sight (a sound cue, not a sight cue). Kept SMALL
+    // so it wakes only the immediately-adjacent pods, NOT the whole force at once: a wide wake
+    // proved unwinnable (Sabotage's charge sites sit in the enemy half, so going loud there can
+    // rouse a dense late-mission force). The fight still escalates after the first loud act
+    // because concealment is broken, so the normal alert tiers (CheckPodActivation, via sight)
+    // take over. Heat's tighter-contact does NOT shrink it (noise carries regardless of stealth).
+    public const int HackNoiseRange = 2;
     public bool SquadConcealed;        // 4.4: squad starts each mission concealed (set in SetupMission)
 
     // Closest distance at which any living soldier currently has line of sight on this
@@ -2611,6 +2640,23 @@ public class Game
         foreach (var e in Enemies)
             if (e.Alive && !e.Active && e.PodId >= 0 && ClosestSightedDist(e) >= 0) seen.Add(e.PodId);
         foreach (int pid in seen) ActivatePod(pid);
+    }
+
+    /// Balance fix: a hack/plant GOES LOUD. First it breaks concealment — which springs the
+    /// ambush on any pod already in SIGHT (BreakConcealment). Then the bang additionally rouses
+    /// dormant pods physically near the objective site (sx,sy) even with NO line of sight (a
+    /// sound cue, within HackNoiseRange), each to full Alert with the usual 4.2-capped reveal-
+    /// scatter. Works whether or not still concealed, so a later charge of a Sabotage run also
+    /// rouses any pod that has since crept into earshot. (The main tempo lever that turns Hack
+    /// into a multi-turn hold is the one-cycle-per-turn channel; this is the "wake the area" half.)
+    void HackNoise(int sx, int sy)
+    {
+        if (SquadConcealed) BreakConcealment();   // first hack/plant springs the ambush + reveals
+        var roused = new HashSet<int>();
+        foreach (var e in Enemies)
+            if (e.Alive && !e.Active && e.PodId >= 0
+                && Util.TileDist(sx, sy, e.X, e.Y) <= HackNoiseRange) roused.Add(e.PodId);
+        foreach (int pid in roused) ActivatePod(pid);   // wake + the usual 4.2-capped reveal-scatter
     }
 
     void UpdatePlayer()
@@ -3097,6 +3143,9 @@ public class Game
             int i = NearestSabotageSite(Selected);
             if (i < 0) return;
             SabotageBlown.Add(i);
+            // balance fix: planting a charge GOES LOUD — break stealth + rouse pods near the
+            // site (no free, uncontested sabotage; the squad must hold while it plants all 3).
+            HackNoise(SabotageSites[i].x, SabotageSites[i].y);
             var sat = Util.TileCenter(SabotageSites[i].x, SabotageSites[i].y);
             Fx.PopText(sat + new Vector2(0, -30), "CHARGE SET", Pal.Foe, 20f);
             Fx.Burst(sat, Pal.Accent, 22, 240f, 0.6f, 4.5f, true);
@@ -3105,6 +3154,10 @@ public class Game
             return;
         }
         HackProgress++;
+        HackedThisTurn = true;          // one breach cycle per turn — finishing now takes a hold
+        // balance fix: hacking the terminal GOES LOUD — break stealth + rouse nearby pods so
+        // the squad must defend the console across all HackRequired charges, not sneak it.
+        HackNoise(Terminal.x, Terminal.y);
         var at = Util.TileCenter(Terminal.x, Terminal.y);
         Fx.PopText(at + new Vector2(0, -30), HackProgress >= HackRequired ? "HACKED" : "HACK +1", Pal.Accent, 20f);
         Fx.Burst(at, Pal.Accent, 14, 160f, 0.5f, 3f);
@@ -3295,6 +3348,7 @@ public class Game
         ClearIntent();                    // no enemy intent lingers into the player's turn
         Grid.TickSmoke();                 // smoke clouds decay one turn per round
         _refundedThisTurn.Clear();        // flank-kill refund is one per soldier per turn
+        HackedThisTurn = false;           // the terminal accepts one breach cycle per turn (hold)
         if (AutoPlay) AutoStallCheck();
         foreach (var p in Players) if (p.Alive) { p.BeginTurn(); TickStatuses(p); }
         foreach (var e in Enemies) if (e.Alive) { e.ReactedThisTurn = false; e.Suppress = 0; } // OW resets; suppression expires
