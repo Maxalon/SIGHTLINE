@@ -381,6 +381,7 @@ public class Game
         foreach (var u in Players)
         { u.FeatMultiKill = u.FeatClutch = u.FeatVengeful = u.WasNearDeath = u.AllyDown = false; u.BondAura = false; u.ConsecutiveMisses = 0; u.Statuses.Clear(); }
         _missionKia.Clear();
+        _refundedThisTurn.Clear();   // flank-kill refund is per-turn; clear it for the mission's first turn too (review #2)
         DeathFlash = 0;
         RollSecondary(n);
         foreach (var u in Enemies) { u.BeginTurn(); u.OnOverwatch = false; }
@@ -2051,7 +2052,7 @@ public class Game
     {
         if (Selected == null || !Selected.CanAct || Selected.Grenades <= 0) return;
         GrenadeMode = !GrenadeMode;
-        if (GrenadeMode) AimMode = false;
+        if (GrenadeMode) { AimMode = false; SnapShot = false; }   // clear the snap variant too (review #3)
     }
 
     void IssueGrenade(int tx, int ty)
@@ -2069,7 +2070,7 @@ public class Game
     {
         if (Selected == null || !Selected.CanAct || Selected.ItemCharge <= 0 || Selected.Item == ItemKind.None) return;
         ItemMode = !ItemMode;
-        if (ItemMode) { AimMode = false; GrenadeMode = false; }
+        if (ItemMode) { AimMode = false; SnapShot = false; GrenadeMode = false; }   // clear the snap variant too (review #3)
     }
 
     /// Whether a utility item can legally land on (tx,ty): barricade needs an empty
