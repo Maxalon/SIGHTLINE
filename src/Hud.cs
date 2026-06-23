@@ -346,7 +346,8 @@ public static class Hud
         }
         CenterText($"{u.Hp}/{u.MaxHp}", bar, 11, Pal.RGBA(8, 14, 10));
 
-        // action pips
+        // action pips (a flank-kill refund tops a soldier back up to — never above — its
+        // 2-action budget, so two pips still cover every state)
         for (int i = 0; i < 2; i++)
         {
             var pip = new Rectangle(x + 14 + i * 26, y + 60, 22, 7);
@@ -367,21 +368,16 @@ public static class Hud
         bool interactive = g.IsPlayerInteractive() && u != null && u.Team == Team.Player;
         bool hasTargets = interactive && g.HasAnyTarget(u);
 
-        var btns = new System.Collections.Generic.List<UiButton>();
-        float bx = 300, bw = 104, bh = 40, gap = 6;
-
+        // Collect the button specs first, then size them to fit the bar (the count varies:
+        // base 6, +ability/+item per class, +hack on hack/sabotage objectives, +snap = up to 9).
+        var specs = new System.Collections.Generic.List<(string id, string label, string key, bool enabled, bool sel)>();
         void Add(string id, string label, string key, bool enabled, bool sel)
-        {
-            btns.Add(new UiButton
-            {
-                Rect = new Rectangle(bx, y + 26, bw, bh),
-                Id = id, Label = label, Key = key, Enabled = enabled, Selected = sel,
-                Accent = Pal.Friend,
-            });
-            bx += bw + gap;
-        }
+            => specs.Add((id, label, key, enabled, sel));
 
-        Add("shoot", "FIRE", "1", interactive && u != null && u.CanAct && u.Ammo > 0 && hasTargets, g.AimMode);
+        Add("shoot", "FIRE", "1", interactive && u != null && u.CanAct && u.Ammo > 0 && hasTargets, g.AimMode && !g.SnapShot);
+        // SNAP: a 1-action, no-end-turn shot at an aim penalty (per-turn DEPTH). Selected
+        // highlight only when the pending aim-mode shot is the snap variant.
+        Add("snap", "SNAP", "7", interactive && u != null && u.CanAct && u.Ammo > 0 && hasTargets, g.AimMode && g.SnapShot);
         Add("grenade", "GRENADE", "4", interactive && u != null && u.CanAct && u.Grenades > 0, g.GrenadeMode);
         if (u != null && u.Ability != AbilityKind.None)
             Add("ability", u.AbilityName, "5", interactive && g.CanAbility(u), u.RunGun || u.Blitz || u.Steady);
@@ -392,6 +388,25 @@ public static class Hud
         if (g.HasHackAction)
             Add("hack", g.HasSabotage ? "PLANT" : "HACK", "H", interactive && g.CanHack(u), false);
         Add("reload", "RELOAD", "R", interactive && u != null && u.CanAct && u.Ammo < u.Weapon.Clip, false);
+
+        // Responsive width: fit `count` buttons (+gaps) into the bar span [bx0 .. right edge].
+        float bx0 = 300, bh = 40, gap = 6;
+        float right = Cfg.ScreenW - 26;                      // leave a small right margin
+        int count = specs.Count;
+        float bw = MathF.Min(104, (right - bx0 - gap * (count - 1)) / count);
+
+        var btns = new System.Collections.Generic.List<UiButton>();
+        float bx = bx0;
+        foreach (var s in specs)
+        {
+            btns.Add(new UiButton
+            {
+                Rect = new Rectangle(bx, y + 26, bw, bh),
+                Id = s.id, Label = s.label, Key = s.key, Enabled = s.enabled, Selected = s.sel,
+                Accent = Pal.Friend,
+            });
+            bx += bw + gap;
+        }
 
         ActionButtons = btns.ToArray();
         foreach (var b in ActionButtons)
@@ -473,6 +488,17 @@ public static class Hud
                 Raylib.DrawLineEx(new Vector2(cx - 1f, mid + backY), new Vector2(tip, mid), 1.8f, c);
                 // Short barrel line behind the chevron
                 Raylib.DrawLineEx(new Vector2(cx - 7f, mid), new Vector2(cx - 1f, mid), 1.8f, c);
+                break;
+            }
+            case "snap":
+            {
+                // Double right chevron (>>) — conveys a fast, lighter "snap" shot vs FIRE's single chevron.
+                float mid = cy, backY = 5.5f;
+                foreach (float ox in new[] { -5f, 1f })
+                {
+                    Raylib.DrawLineEx(new Vector2(cx + ox, mid - backY), new Vector2(cx + ox + 5f, mid), 1.7f, c);
+                    Raylib.DrawLineEx(new Vector2(cx + ox, mid + backY), new Vector2(cx + ox + 5f, mid), 1.7f, c);
+                }
                 break;
             }
             case "grenade":
@@ -690,7 +716,8 @@ public static class Hud
     {
         switch (id)
         {
-            case "shoot": return "Fire at a target in range + line of sight. Ends the turn.";
+            case "shoot": return "Aimed shot at a target in range + line of sight. Full aim, ends the turn.";
+            case "snap": return $"Snap shot: costs 1 action and does NOT end the turn, but at {Game.SnapAim} aim. Fire and keep acting.";
             case "grenade": return "Lob a grenade: AoE that ignores cover, hits both teams, clears low cover.";
             case "overwatch": return "Watch: fire a reaction shot at the first foe that moves in sight.";
             case "hunker": return "Hunker down for extra cover defense; you can't be crit.";
@@ -739,6 +766,9 @@ public static class Hud
         if (o.Partial)   flags.Add(("~ PARTIAL COVER", Pal.TxtDim));
         if (o.Steady)    flags.Add(("+ STEADY", Pal.Good));
         if (o.Ambush)    flags.Add(("+ AMBUSH", Pal.Good));
+        // snap-fire penalty: this aim-mode shot is the cheap 1-action variant (the HitChance
+        // shown is already reduced by SnapAim). RUN&GUN is the free version, so no badge then.
+        if (g.AimMode && g.SnapShot && a != null && !a.RunGun) flags.Add(($"SNAP {Game.SnapAim}", Pal.Foe));
 
         // — modifiers that read live attacker/target state (mirror Combat.ComputeOdds) —
         if (a != null && d != null)
@@ -758,6 +788,9 @@ public static class Hud
             if (a.HasPerk(Perk.Marksman) && dist >= Unit.LongRange)       flags.Add(("+ MARKSMAN", Pal.Good));
             if (a.HasPerk(Perk.Deadeye))                      flags.Add(("+ DEADEYE", Pal.Good));
             if (a.HasPerk(Perk.Executioner) && tgtSubHalf)    flags.Add(("+ EXECUTIONER", Pal.Good));
+            if (a.HasPerk(Perk.Opportunist) && o.CoverLevel == 0)        flags.Add(("+ OPPORTUNIST", Pal.Good));
+            if (a.HasPerk(Perk.PointBlank) && dist <= Unit.PointBlankRange) flags.Add(("+ POINT BLANK", Pal.Good));
+            if (a.HasPerk(Perk.GiantSlayer) && d.MaxHp >= Unit.GiantSlayerHp) flags.Add(("+ GIANT SLAYER", Pal.Good));
 
             // attacker penalties (red) — these quietly drag the hit% down
             if (a.Suppress > 0)                               flags.Add(("- SUPPRESSED", Pal.Foe));

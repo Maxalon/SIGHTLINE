@@ -40,6 +40,23 @@ public class Game
     public bool ShowOdds;
     public ShotOdds HoverOdds;
 
+    // Per-turn DEPTH (Wave 3): aimed-vs-snap shot.
+    // The normal "FIRE" is the AIMED shot (full aim, ends the turn). SNAP is a second fire
+    // option that costs only ONE action and does NOT end the turn, at an aim penalty — so
+    // "shoot" is a real choice every turn: the reliable aimed shot, or snap-fire and keep
+    // acting (reposition / second snap / overwatch). Both share the one aim-targeting mode
+    // (AimMode); SnapShot just records which variant the pending shot is. RUN&GUN is the
+    // free, no-penalty version and takes priority over the snap penalty when both are set.
+    public const int SnapAim = -15;   // snap-fire aim penalty (applied as the Resolve aimMod)
+    public bool SnapShot;             // the pending aim-mode shot is a snap (1 action, no end-turn)
+
+    // Flank-kill action refund ("press the advantage", Wave 3 anti-turtle). A player shot
+    // that KILLS a FLANKED/EXPOSED target refunds +1 action to the shooter, capped at one
+    // refund per soldier per turn (this set, cleared each StartPlayerTurn). Rewards aggressive
+    // flanking + chains (snap -> flank-kill -> refund -> act again), out-competing passive
+    // overwatch-camping. The 1/turn cap + finite enemies guarantee no infinite loop.
+    readonly HashSet<Unit> _refundedThisTurn = new();
+
     // grenade targeting
     public const int GrenadeRange = 7;
     public bool GrenadeMode;
@@ -1004,6 +1021,7 @@ public class Game
             if (!d.IsVip)
                 foreach (var p in Players) if (p.Alive && p != d && !p.IsVip) p.AllyDown = true;
         }
+        TryFlankKillRefund(d);   // "press the advantage": a player flank-kill refunds an action
         Color c = d.Team == Team.Player ? Pal.Friend : Pal.Foe;
         Fx.Burst(d.Pos, c, 30, 280f, 0.7f, 4f, true);
         Fx.Burst(d.Pos, Pal.RGBA(20, 25, 33), 16, 150f, 0.8f, 5f);
@@ -1064,6 +1082,34 @@ public class Game
         { killer.FeatClutch = true; FeatBanner(killer, "CLUTCH KILL"); }
         if (killer.AllyDown && !killer.FeatVengeful)
         { killer.FeatVengeful = true; FeatBanner(killer, "AVENGED"); }
+    }
+
+    /// "Press the advantage" (Wave 3 anti-turtle): when a PLAYER shot KILLS a FLANKED /
+    /// EXPOSED enemy on the player's turn, refund +1 action to the shooter — capped at one
+    /// refund per soldier per turn. Rewards aggressive flanking and chains (snap -> flank-kill
+    /// -> refund -> act again), out-competing passive overwatch-camping.
+    ///
+    /// The kill is applied from inside ShotAnim.Apply while that shot is the ACTIVE anim, so
+    /// the active anim IS the shot that caused this death — we read its ShotResult to tell
+    /// whether the target was flanked/exposed (no Combat/Anim signature change needed).
+    /// Guards keep it bounded: PlayerTurn only (an enemy-turn overwatch kill grants nothing
+    /// the soldier could spend anyway), one /soldier /turn, and finite enemies — so the
+    /// autopilot's CanAct loop can never spin forever on refunds.
+    void TryFlankKillRefund(Unit d)
+    {
+        if (Phase != Phase.PlayerTurn || d.Team != Team.Enemy) return;
+        if (ActiveAnim is not ShotAnim sa) return;          // only a direct shot refunds (not a grenade/DoT)
+        var killer = sa.A;
+        if (sa.D != d || killer == null || killer.Team != Team.Player || killer.IsVip || !killer.Alive) return;
+        // exposed = the shot found no protecting cover from this angle (a clean flank or open target)
+        bool exposed = sa.Res.Odds.Flanked || sa.Res.Odds.CoverLevel == 0;
+        if (!exposed || _refundedThisTurn.Contains(killer)) return;
+        _refundedThisTurn.Add(killer);
+        killer.ActionsLeft += 1;
+        Fx.PopText(killer.Pos + new Vector2(0, -46), "+1 ACTION", Pal.Accent, 22f);
+        Fx.PopText(killer.Pos + new Vector2(0, -28), "MOMENTUM", Pal.Good, 16f);
+        Fx.Burst(killer.Pos, Pal.Accent, 12, 150f, 0.45f, 3f, true);
+        Audio.Play("over");
     }
 
     /// Note damage to a player so a near-death survival becomes a feat (IronWill).
@@ -1183,7 +1229,7 @@ public class Game
         {
             if (Raylib.IsKeyPressed(KeyboardKey.Escape))
             {
-                if (AimMode || GrenadeMode || ItemMode) { AimMode = false; GrenadeMode = false; ItemMode = false; }
+                if (AimMode || GrenadeMode || ItemMode) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; }
                 else Paused = !Paused;
             }
             if (Paused) { HandlePauseMenu(); return; }
@@ -1421,7 +1467,7 @@ public class Game
         if (Objective == Objective.Defend)
         {
             var dt = FirstTargetFor(u);
-            if (dt != null && u.Ammo > 0) { IssueShoot(dt); return; }
+            if (dt != null && u.Ammo > 0) { AutoShoot(u, dt); return; }
             if (u.Ammo == 0) { DoReload(); return; }
             if (u.ActionsLeft > 0 && u.Ammo > 0) { DoOverwatch(); return; }
             DoHunker(); return;
@@ -1438,7 +1484,7 @@ public class Game
         }
 
         var tgt = FirstTargetFor(u);
-        if (tgt != null && u.Ammo > 0) { IssueShoot(tgt); return; }
+        if (tgt != null && u.Ammo > 0) { AutoShoot(u, tgt); return; }
         if (u.Ammo == 0) { DoReload(); return; }
 
         // (test) deploy the class utility item to keep its path covered
@@ -1472,6 +1518,17 @@ public class Game
         var enemy = AliveEnemies().OrderBy(e => Util.TileDist(u.X, u.Y, e.X, e.Y)).FirstOrDefault();
         if (enemy != null && TryMoveTowardTile(u, enemy.X, enemy.Y)) return;
         DoHunker(); // guarantees progress
+    }
+
+    // autopilot helper: fire at `tgt`, exercising the SNAP path so it stays covered. When the
+    // soldier has both actions, ~40% take a snap (1 action, no end-turn, -aim) instead of the
+    // turn-ending aimed shot; the soldier then keeps acting next AutoStep (move/second snap/
+    // overwatch). Bounded: a snap always costs >=1 action, so at most two snaps end the turn —
+    // no infinite loop. (The flank-kill refund is capped 1/turn, so it can't unbound this.)
+    void AutoShoot(Unit u, Unit tgt)
+    {
+        if (u.ActionsLeft >= 2 && !u.RunGun && Util.Roll(40)) SnapShot = true;  // consumed by IssueShoot
+        IssueShoot(tgt);
     }
 
     // autopilot helper: step toward (gx,gy) along true path distance; random hop if stuck
@@ -1739,6 +1796,11 @@ public class Game
             {
                 ShowOdds = true;
                 HoverOdds = Combat.ComputeOdds(Grid, Selected, AimTarget);
+                // SNAP lowers the displayed hit% by the same penalty Resolve will apply, so
+                // the number the player sees is truthful (perfect-information contract). RUN&GUN
+                // is the free version, so no penalty when it's queued. Crit isn't aimMod-scaled.
+                if (SnapShot && !Selected.RunGun)
+                    HoverOdds.HitChance = Util.Clamp(HoverOdds.HitChance + SnapAim, 1, 99);
             }
             return;
         }
@@ -1767,6 +1829,7 @@ public class Game
         if (Raylib.IsKeyPressed(KeyboardKey.Enter)) { RequestEndTurn(); return; }
         if (Raylib.IsKeyPressed(KeyboardKey.Tab)) CycleSelection();
         if (Raylib.IsKeyPressed(KeyboardKey.One)) ToggleAim();
+        if (Raylib.IsKeyPressed(KeyboardKey.Seven)) ToggleSnap();
         if (Raylib.IsKeyPressed(KeyboardKey.Two)) DoOverwatch();
         if (Raylib.IsKeyPressed(KeyboardKey.Three)) DoHunker();
         if (Raylib.IsKeyPressed(KeyboardKey.Four)) ToggleGrenade();
@@ -1786,7 +1849,7 @@ public class Game
         if (Raylib.IsKeyPressed(KeyboardKey.Space) && HoverValid) { BoardAct(HoverX, HoverY); return; }
         if (KbCursor && Raylib.GetMouseDelta() != Vector2.Zero) KbCursor = false;  // mouse takes back over
 
-        if (Raylib.IsMouseButtonPressed(MouseButton.Right)) { AimMode = false; GrenadeMode = false; ItemMode = false; return; }
+        if (Raylib.IsMouseButtonPressed(MouseButton.Right)) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; return; }
 
         if (Raylib.IsMouseButtonPressed(MouseButton.Left))
         {
@@ -1826,7 +1889,7 @@ public class Game
         if (AimMode)
         {
             if (hovered != null && hovered.Team == Team.Enemy && CanTarget(Selected, hovered)) IssueShoot(hovered);
-            else AimMode = false;
+            else { AimMode = false; SnapShot = false; }
             return;
         }
         if (hovered != null && hovered.Team == Team.Player) { SelectUnit(hovered); return; }
@@ -1938,6 +2001,7 @@ public class Game
         switch (id)
         {
             case "shoot": ToggleAim(); break;
+            case "snap": ToggleSnap(); break;
             case "grenade": ToggleGrenade(); break;
             case "item": ToggleItem(); break;
             case "ability": DoAbility(); break;
@@ -1948,7 +2012,7 @@ public class Game
         }
     }
 
-    void SelectUnit(Unit u) { Selected = u; AimMode = false; Audio.Play("select"); }
+    void SelectUnit(Unit u) { Selected = u; AimMode = false; SnapShot = false; Audio.Play("select"); }
 
     void CycleSelection()
     {
@@ -1957,17 +2021,29 @@ public class Game
         int idx = Selected != null ? actable.IndexOf(Selected) : -1;
         Selected = actable[(idx + 1) % actable.Count];
         AimMode = false;
+        SnapShot = false;
         Audio.Play("select");
     }
 
-    void ToggleAim()
+    // FIRE: enter aim mode for the AIMED shot (full aim, ends the turn).
+    void ToggleAim() => EnterAim(false);
+    // SNAP: enter the SAME aim mode but flag the pending shot as a snap (1 action, no
+    // end-turn, -SnapAim). Generalises Assault's free RUN&GUN to every soldier as a paid,
+    // less-accurate option, so "shoot" is a real per-turn decision.
+    void ToggleSnap() => EnterAim(true);
+
+    void EnterAim(bool snap)
     {
         if (Selected == null || !Selected.CanAct || Selected.Ammo <= 0) return;
-        if (AimMode) { AimMode = false; return; }
+        // pressing the active variant again toggles aim OFF; switching variants (FIRE<->SNAP)
+        // just re-flags the pending shot and keeps the current target lock.
+        if (AimMode && SnapShot == snap) { AimMode = false; SnapShot = false; return; }
+        if (AimMode) { SnapShot = snap; return; }      // already aiming: flip the variant, keep AimTarget
         if (!HasAnyTarget(Selected)) return;
         GrenadeMode = false;
         ItemMode = false;
         AimMode = true;
+        SnapShot = snap;
         AimTarget = FirstTargetFor(Selected);
     }
 
@@ -2057,15 +2133,22 @@ public class Game
         if (!CanTarget(Selected, target)) return;
         if (SquadConcealed) BreakConcealment(Selected);  // 4.4: the ambush shot springs the trap
         Selected.Ammo--;
-        // Run & Gun: this shot costs one action instead of ending the turn.
+        // Action cost + accuracy by shot variant:
+        //  - RUN&GUN (Assault ability): free no-penalty shot — costs 1 action, no end-turn.
+        //  - SNAP: costs 1 action, no end-turn, at the SnapAim penalty (folded into aimMod).
+        //  - AIMED (default): full aim, ENDS the turn.
+        bool snap = SnapShot && !Selected.RunGun;        // RunGun's free shot takes priority over snap
+        int aimMod = 0;
         if (Selected.RunGun) { Selected.ActionsLeft = Math.Max(0, Selected.ActionsLeft - 1); Selected.RunGun = false; }
-        else Selected.ActionsLeft = 0;
-        var res = Combat.Resolve(Grid, Selected, target);
+        else if (snap)       { Selected.ActionsLeft = Math.Max(0, Selected.ActionsLeft - 1); aimMod = SnapAim; }
+        else                   Selected.ActionsLeft = 0;
+        var res = Combat.Resolve(Grid, Selected, target, aimMod);
         Selected.Steady = false;                         // braced shot consumed
         Selected.FiredFromConcealment = false;           // ambush bonus is for this one shot only
         Enqueue(new ShotAnim(Selected, target, res), Team.Player);
         if (!target.Active) ActivatePod(target.PodId);   // gunfire reveals the pod
         AimMode = false;
+        SnapShot = false;
         _tutShot = true;
     }
 
@@ -2180,6 +2263,7 @@ public class Game
                 break;
         }
         AimMode = false;
+        SnapShot = false;
         GrenadeMode = false;
         ItemMode = false;
     }
@@ -2262,6 +2346,7 @@ public class Game
         _turnCount++;
         Phase = Phase.PlayerTurn;
         Grid.TickSmoke();                 // smoke clouds decay one turn per round
+        _refundedThisTurn.Clear();        // flank-kill refund is one per soldier per turn
         if (AutoPlay) AutoStallCheck();
         foreach (var p in Players) if (p.Alive) { p.BeginTurn(); TickStatuses(p); }
         foreach (var e in Enemies) if (e.Alive) { e.ReactedThisTurn = false; e.Suppress = 0; } // OW resets; suppression expires
@@ -2755,6 +2840,91 @@ public class Game
         return fails.Count == 0
             ? "STATUSTEST: PASS (burn/bleed DoT, stun, disorient aim+overwatch all hold)"
             : "STATUSTEST: FAIL (" + string.Join(",", fails) + ")";
+    }
+
+    /// Headless self-test (SIGHTLINE_SNAPTEST): the per-turn DEPTH mechanics —
+    ///   (1) a SNAP shot costs exactly 1 action and does NOT end the turn (and the snap flag
+    ///       is consumed), while an AIMED shot still ends the turn (ActionsLeft -> 0);
+    ///   (2) a player flank-kill (exposed target) refunds +1 action ONCE per soldier per turn
+    ///       (a second flank-kill the same turn grants nothing), and a kill on a COVERED target
+    ///       refunds nothing.
+    /// Drives the real IssueShoot / TryFlankKillRefund paths on a controlled open field.
+    public string SnapRefundSelfTest()
+    {
+        NoPersist = true;
+        var fails = new System.Collections.Generic.List<string>();
+
+        // ---- controlled scene: empty open field, perfect LoS, no concealment ----
+        Grid = new Grid();
+        Players = new System.Collections.Generic.List<Unit>();
+        Enemies = new System.Collections.Generic.List<Unit>();
+        Vip = null; CaptiveLocked = false; SquadConcealed = false;
+        Objective = Objective.Eliminate; EvacZone.Clear();
+        Phase = Phase.PlayerTurn;
+        _refundedThisTurn.Clear();
+
+        Unit MkP(int x, int y) {
+            var u = new Unit { Name = "SOLDIER", Cls = "ASSAULT", Team = Team.Player, X = x, Y = y,
+                               Hp = 8, MaxHp = 8, Aim = 65, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+            u.Ammo = u.Weapon.Clip; u.SyncPos(); u.BeginTurn(); return u;
+        }
+        Unit MkE(int x, int y, int hp) {
+            var u = new Unit { Name = "FOE", Cls = "GRUNT", Team = Team.Enemy, X = x, Y = y,
+                               Hp = hp, MaxHp = 6, Aim = 60, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+            u.Ammo = u.Weapon.Clip; u.Alert = AlertLevel.Alert; u.SyncPos(); u.BeginTurn(); return u;
+        }
+
+        // ---- 1. SNAP shot: 1 action, no end-turn, flag consumed ----
+        var shooter = MkP(5, 5);
+        var dummy   = MkE(9, 5, 6);            // full HP so the shot can't kill (isolates the action cost)
+        Players.Add(shooter); Enemies.Add(dummy);
+        Selected = shooter; SnapShot = true;
+        IssueShoot(dummy);
+        if (shooter.ActionsLeft != 1) fails.Add($"snapCost={shooter.ActionsLeft}(want1)");
+        if (SnapShot) fails.Add("snapFlagNotConsumed");
+        if (AimMode) fails.Add("snapLeftAimModeOn");
+        _anims.Clear();                         // discard the queued ShotAnim; we don't pump frames here
+
+        // ---- 1b. AIMED shot still ends the turn ----
+        var shooter2 = MkP(5, 7);
+        Players.Add(shooter2);
+        Selected = shooter2; SnapShot = false;
+        IssueShoot(dummy);
+        if (shooter2.ActionsLeft != 0) fails.Add($"aimedCost={shooter2.ActionsLeft}(want0)");
+        _anims.Clear();
+
+        // ---- 2. flank-kill refund: once per soldier per turn, exposed only ----
+        // Build a flanked shot result and stage its ShotAnim as the ACTIVE anim, exactly as the
+        // live kill path does (KillUnit -> TryFlankKillRefund reads ActiveAnim's ShotResult).
+        var killer = MkP(5, 9);
+        var victim = MkE(7, 9, 1);
+        Players.Add(killer); Enemies.Add(victim);
+        killer.ActionsLeft = 0;                 // as if an aimed flank-shot just ended the turn
+        var flankRes = new ShotResult { Hit = true, Damage = 5, Odds = new ShotOdds { Flanked = true, CoverLevel = 0 } };
+        _anims.Clear(); _anims.Add(new ShotAnim(killer, victim, flankRes));   // active anim = this shot
+        _refundedThisTurn.Clear();
+        victim.Alive = false;                   // the victim has just been downed
+        TryFlankKillRefund(victim);
+        if (killer.ActionsLeft != 1) fails.Add($"refund1={killer.ActionsLeft}(want1)");
+        TryFlankKillRefund(victim);             // second flank-kill same turn -> capped, no extra
+        if (killer.ActionsLeft != 1) fails.Add($"refundCap={killer.ActionsLeft}(want1)");
+
+        // ---- 2b. a COVERED kill refunds nothing ----
+        var killer2 = MkP(3, 9);
+        var victim2 = MkE(1, 9, 1);
+        Players.Add(killer2); Enemies.Add(victim2);
+        killer2.ActionsLeft = 0;
+        var coverRes = new ShotResult { Hit = true, Damage = 5, Odds = new ShotOdds { Flanked = false, CoverLevel = 2 } };
+        _anims.Clear(); _anims.Add(new ShotAnim(killer2, victim2, coverRes));
+        _refundedThisTurn.Clear();
+        victim2.Alive = false;
+        TryFlankKillRefund(victim2);
+        if (killer2.ActionsLeft != 0) fails.Add($"coveredRefunded={killer2.ActionsLeft}(want0)");
+        _anims.Clear();
+
+        return fails.Count == 0
+            ? "SNAPTEST: PASS (snap=1 action/no-end-turn, aimed ends turn, flank-kill refunds once/turn, covered kill refunds nothing)"
+            : "SNAPTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
     /// Headless self-test (SIGHTLINE_ITEMTEST): the utility-item mechanics — smoke
