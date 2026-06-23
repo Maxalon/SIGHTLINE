@@ -1070,10 +1070,20 @@ Before stopping:
 > - **3 perks** OPPORTUNIST/POINT BLANK/GIANT SLAYER (`c1e4e16`, pure ComputeOdds, append-only enum).
 > - **3 arenas** GRID/FORGE(tier-2)/CONDUIT + NEON/MAGMA biome affinity (`2d6210f`).
 > - Glue: new-perk tooltip badges + `1211e95` SNAPTEST harness wiring.
-> **NEXT: Wave 4** = enemy-intent telegraph (J1: show each hostile's planned move/threat before it acts --
-> `Game`/`Renderer`) + a NEW objective and/or anti-turtle pressure clock; plus a balance/bug-hunt pass over
-> the now-large content (16 perks, 14 enemy archetypes, 8 biomes, Heat ladder). Game/Hud are the bottleneck
-> (one owner per wave). Then: consolidation QA + closing summary.
+> **WAVE 4 SHIPPED (6 commits — build 0/0, all 11 self-tests PASS, autoplay clean across heat 0/4/8 + all
+> 7 objectives, no TIMEOUT):** a read-only **balance-audit agent** found the real problems, then:
+> - **Enemy-intent telegraph** (`fb59009`): before each hostile acts, a ~0.5s beat shows its plan (dashed
+>   move path + destination ring + target reticle + verb caption) from the same `_aiPlan` that executes --
+>   the Into-the-Breach fairness lever. SKIPPED under AutoPlay (frame counts A/B-verified). `SIGHTLINE_INTENT`.
+> - **Balance sweep** (audit-driven, 4 disjoint lanes + 2 orchestrator fixes): GIANT SLAYER (dead) ->
+>   FIRST STRIKE + OPPORTUNIST flank-gated (`52eccc0`); enemy grenades require LoS + MORTAR dialed back
+>   (`3e3685e`); Heat rung-8 NoReinforcements + cap 10->12 + intentional spawn tiers (`6cefead`); flank-kill
+>   refund requires a genuine flank (de-snowball) + grenade fragile-floor (`c2ce0ee`).
+> **STATUS: 4 waves shipped (~19 features + a balance pass), all on PR #51.** Next open ideas (any future
+> wave): a NEW objective (assassinate/hold-zones/extract-intel), a 5th player class, anti-turtle pressure
+> clock, progressive-HUD/combat-log polish, audio tuning on a real device. Game/Hud are the per-wave
+> bottleneck (one owner each). The multi-agent cadence (disjoint files, parallel reviewers, audit agents,
+> orchestrator wiring/fixes) is proven across 4 waves.
 
 > **AUTONOMOUS DEV-TEAM SESSION — 7 SPRINTS, 21 FEATURES + a 4-FEATURE CODE RECOVERY (read first).**
 > Ran the project as a multi-agent team (orchestrator/tech-lead + PM/research + architect +
