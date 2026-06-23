@@ -7,7 +7,7 @@ using Raylib_cs;
 namespace Sightline;
 
 public enum Phase { Intro, PlayerTurn, EnemyTurn, Barracks, Win, Lose }
-public enum Objective { Eliminate, Evac, Hack, Escort, Sabotage, Rescue, Defend }
+public enum Objective { Eliminate, Evac, Hack, Escort, Sabotage, Rescue, Defend, Decapitate }
 public enum SecondaryKind { None, NoLosses, Swift, CleanSweep }  // optional per-mission bonus goal (3.9)
 enum AiStage { PickNext, Telegraph, ActAfterMove }
 
@@ -207,6 +207,12 @@ public class Game
     public bool HasSabotage => Objective == Objective.Sabotage;
     public bool HasHackAction => HasTerminal || HasSabotage;
 
+    // DECAPITATE: one designated enemy is the High-Value Target; killing it WINS the
+    // mission outright (no need to clear the map). Designated from the Enemies list in
+    // SetupMission after Mission.Build; null on every other objective.
+    public Unit Hvt;
+    public bool HasHvt => Objective == Objective.Decapitate && Hvt != null;
+
     public bool CanHack(Unit u)
     {
         if (u == null || u.Team != Team.Player || !u.CanAct) return false;
@@ -322,6 +328,7 @@ public class Game
         SabotageSites.Clear();
         SabotageBlown.Clear();
         Vip = null;
+        Hvt = null;
         CaptiveLocked = false;
         // Evac / Escort / Rescue all extract to the same top-right zone
         if (Objective == Objective.Evac || Objective == Objective.Escort || Objective == Objective.Rescue)
@@ -379,6 +386,7 @@ public class Game
             Vip.Mobility = 0;              // can't move while caged
             Vip.SyncPos();
         }
+        if (Objective == Objective.Decapitate) DesignateHvt();
         Fx.Particles.Clear();
         Fx.Texts.Clear();
         _anims.Clear();
@@ -408,6 +416,29 @@ public class Game
     }
 
     void NextMission() => SetupMission(_run.Mission + 1);
+
+    // DECAPITATE: pick ONE spawned enemy to be the High-Value Target and buff it so it is a
+    // real, distinct objective. Preference: the toughest rank-and-file (highest MaxHp) that is
+    // NOT a dedicated special role (turret/medic/sapper/shield/drone make poor "punch-through"
+    // targets); otherwise the first pod leader. The HVT gets +HP so it survives a few hits and
+    // the player must commit to focusing it. Called only on Decapitate, after Mission.Build.
+    void DesignateHvt()
+    {
+        var pool = Enemies.Where(e => e.Alive).ToList();
+        if (pool.Count == 0) { Hvt = null; return; }
+        bool IsSpecial(Unit e) => e.Cls == "TURRET" || e.Cls == "MEDIC" || e.Cls == "SAPPER"
+                               || e.Cls == "SHIELD" || e.Cls == "DRONE" || e.Cls == "MORTAR";
+        // prefer a non-special, toughest body; fall back to any toughest; then pod leader.
+        Hvt = pool.Where(e => !IsSpecial(e)).OrderByDescending(e => e.MaxHp).ThenBy(e => e.PodId).FirstOrDefault()
+           ?? pool.OrderByDescending(e => e.MaxHp).ThenBy(e => e.PodId).FirstOrDefault();
+        if (Hvt == null) return;
+        // buff into a worthwhile target: a meaningful HP bump + a small aim edge. It is already
+        // an Enemy so every generic system (targeting/overwatch/FX/AI) treats it normally.
+        int bonus = 6 + _run.Mission;          // scales gently with mission depth
+        Hvt.MaxHp += bonus; Hvt.Hp += bonus;
+        Hvt.Aim = Math.Min(85, Hvt.Aim + 6);
+        Hvt.Name = Hvt.Cls == "ELITE" ? Hvt.Name : "HVT-" + Hvt.Name;
+    }
 
     /// Resume a saved campaign from the intro. Reloads the run and restarts its
     /// current mission from the start; returns false if there is no readable save.
@@ -1111,6 +1142,7 @@ public class Game
     bool IsMissionEndingKill(Unit d)
     {
         if (d.IsVip) return true;                                   // escort failed
+        if (d == Hvt) return true;                                  // decapitation: the HVT fell
         if (d.Team == Team.Enemy)
             return Objective == Objective.Eliminate && AliveEnemies().Count == 0;
         // player down: a wipe (no combatant soldiers left) ends the run
@@ -1372,6 +1404,10 @@ public class Game
         {
             if (_turnCount > DefendTurns) EnterBarracks();
         }
+        else if (Objective == Objective.Decapitate) // kill the marked HVT; the rest don't matter
+        {
+            if (Hvt == null || !Hvt.Alive) EnterBarracks();
+        }
         else // Evac: every surviving soldier must stand in the extraction zone
         {
             if (alivePlayers.All(p => EvacZone.Contains((p.X, p.Y)))) EnterBarracks();
@@ -1522,6 +1558,33 @@ public class Game
             if (dt != null && u.Ammo > 0) { AutoShoot(u, dt); return; }
             if (u.Ammo == 0) { DoReload(); return; }
             if (u.ActionsLeft > 0 && u.Ammo > 0) { DoOverwatch(); return; }
+            DoHunker(); return;
+        }
+
+        // DECAPITATE objective: focus the marked HVT. Shoot it on sight, grenade it if it's the
+        // only reachable play, otherwise advance on it; fall through to the generic combat
+        // behaviour (clear blockers / reload / hunker) so progress is always guaranteed.
+        if (Objective == Objective.Decapitate)
+        {
+            if (Hvt != null && Hvt.Alive)
+            {
+                if (u.Ammo > 0 && CanTarget(u, Hvt)) { AutoShoot(u, Hvt); return; }     // kill the target
+                if (u.Ammo == 0) { DoReload(); return; }
+                if (u.Grenades > 0 && Util.TileDist(u.X, u.Y, Hvt.X, Hvt.Y) <= GrenadeRange
+                    && !Players.Any(f => f.Alive && Util.ChebyDist(f.X, f.Y, Hvt.X, Hvt.Y) <= 1))
+                { IssueGrenade(Hvt.X, Hvt.Y); return; }                                  // flush it out
+                // can't hit it yet: shoot anything blocking the path, else close on the HVT
+                var blk = FirstTargetFor(u);
+                if (blk != null && blk != Hvt && u.Ammo > 0
+                    && Util.TileDist(u.X, u.Y, blk.X, blk.Y) <= 3) { AutoShoot(u, blk); return; }
+                if (TryMoveTowardTile(u, Hvt.X, Hvt.Y)) return;
+            }
+            // HVT already dead (CheckEnd will end the mission) or unreachable: keep generic.
+            var dtgt = FirstTargetFor(u);
+            if (dtgt != null && u.Ammo > 0) { AutoShoot(u, dtgt); return; }
+            if (u.Ammo == 0) { DoReload(); return; }
+            var dfoe = AliveEnemies().OrderBy(e => Util.TileDist(u.X, u.Y, e.X, e.Y)).FirstOrDefault();
+            if (dfoe != null && TryMoveTowardTile(u, dfoe.X, dfoe.Y)) return;
             DoHunker(); return;
         }
 

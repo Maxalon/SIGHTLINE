@@ -256,6 +256,7 @@ public static class Hud
             case Objective.Escort: objTxt = "ESCORT VIP"; objCol = Pal.VipGold; break;
             case Objective.Rescue: objTxt = g.CaptiveLocked ? "RESCUE CAPTIVE" : "EXTRACT CAPTIVE"; objCol = Pal.VipGold; break;
             case Objective.Defend: objTxt = $"DEFEND {Math.Min(g.Turn, Game.DefendTurns)}/{Game.DefendTurns}"; objCol = Pal.Foe; break;
+            case Objective.Decapitate: objTxt = "KILL HVT"; objCol = Pal.VipGold; break;
             default: objTxt = "ELIMINATE"; objCol = Pal.TxtDim; break;
         }
         Raylib.DrawTextEx(Cfg.Font, objTxt, new Vector2(360, 19), 16, 1f, objCol);
@@ -676,6 +677,16 @@ public static class Hud
                 Raylib.DrawLineEx(new Vector2(cx + 6f, cy - 6f), new Vector2(cx + 6f, cy + 1f), 1.6f, c);
                 Raylib.DrawLineEx(new Vector2(cx - 6f, cy + 1f), new Vector2(cx, cy + 7f), 1.6f, c);
                 Raylib.DrawLineEx(new Vector2(cx + 6f, cy + 1f), new Vector2(cx, cy + 7f), 1.6f, c);
+                break;
+            case Objective.Decapitate: // HVT: a reticle ring with crosshair ticks + two target "eyes"
+                Raylib.DrawCircleLines((int)cx, (int)cy, 7f, c);
+                Raylib.DrawCircleLines((int)cx, (int)cy, 7.5f, c);   // thicker ring (single-mark)
+                Raylib.DrawLineEx(new Vector2(cx - 9f, cy), new Vector2(cx - 5f, cy), 1.5f, c);
+                Raylib.DrawLineEx(new Vector2(cx + 5f, cy), new Vector2(cx + 9f, cy), 1.5f, c);
+                Raylib.DrawLineEx(new Vector2(cx, cy - 9f), new Vector2(cx, cy - 5f), 1.5f, c);
+                Raylib.DrawLineEx(new Vector2(cx, cy + 5f), new Vector2(cx, cy + 9f), 1.5f, c);
+                Raylib.DrawCircleV(new Vector2(cx - 2.5f, cy - 1f), 1.4f, c);   // marked "eyes"
+                Raylib.DrawCircleV(new Vector2(cx + 2.5f, cy - 1f), 1.4f, c);
                 break;
             default:               // Eliminate: crosshair (target reticle)
                 Raylib.DrawCircleLines((int)cx, (int)cy, 6f, c);
@@ -1126,7 +1137,8 @@ public static class Hud
     static string ObjName(Objective o) => o switch
     {
         Objective.Hack => "HACK", Objective.Evac => "EXTRACT", Objective.Escort => "ESCORT VIP",
-        Objective.Sabotage => "SABOTAGE", Objective.Rescue => "RESCUE", Objective.Defend => "DEFEND", _ => "ELIMINATE",
+        Objective.Sabotage => "SABOTAGE", Objective.Rescue => "RESCUE", Objective.Defend => "DEFEND",
+        Objective.Decapitate => "DECAPITATE", _ => "ELIMINATE",
     };
 
     static void DrawDeployCard(Rectangle r, MissionCard c)

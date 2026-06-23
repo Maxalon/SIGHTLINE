@@ -732,6 +732,7 @@ public static class Renderer
         bool friend = u.Team == Team.Player;
         bool vip = friend && u.IsVip;
         bool elite = u.Team == Team.Enemy && u.Cls == "ELITE";
+        bool hvt = u.Team == Team.Enemy && g.HasHvt && u == g.Hvt;   // DECAPITATE target
         // 4.3 awareness tiers: Unaware (grey "?") / Suspicious (amber "!") / Alert (live foe)
         bool unaware    = u.Team == Team.Enemy && u.Alert == AlertLevel.Unaware;
         bool suspicious = u.Team == Team.Enemy && u.Alert == AlertLevel.Suspicious;
@@ -780,6 +781,16 @@ public static class Renderer
                             Raylib.Fade(Pal.Friend, pulse));
         }
 
+        // DECAPITATE marker: a bold gold double HVT ring on the ground so the target reads out of
+        // the pack at a glance (full-alpha signal, drawn regardless of alert state / dimming).
+        if (hvt)
+        {
+            float pulse = 0.55f + 0.45f * MathF.Sin((float)Raylib.GetTime() * 4.2f + u.Bob);
+            var hc = Pal.VipGold;
+            Raylib.DrawRing(foot + new Vector2(0, 17), 20f, 24f, 0, 360, 48, Raylib.Fade(hc, 0.85f));
+            Raylib.DrawRing(foot + new Vector2(0, 17), 26f, 28f, 0, 360, 48, Raylib.Fade(hc, 0.30f + 0.40f * pulse));
+        }
+
         // body — apply figAlpha to the figure shape
         Raylib.DrawCircleV(p, 16f, Raylib.Fade(dark, figAlpha));
         Raylib.DrawCircleV(p, 16f, Raylib.Fade(Pal.RGBA(0, 0, 0), 0f)); // no-op keep
@@ -797,6 +808,21 @@ public static class Renderer
         float rot = (u.Cls == "SHARPSHOOTER" || u.Cls == "SNIPER" || u.Cls == "DRONE") ? 45f : (sides == 3 ? -90f : 0f);
         if (elite) Raylib.DrawRing(p, 18f, 20.5f, 0, 360, 40, Raylib.Fade(Pal.Elite, 0.55f * figAlpha));
         Raylib.DrawPoly(p, sides, elite ? 9f : 7.5f, rot, Raylib.Fade(main, figAlpha));
+
+        // DECAPITATE: a gold crown chevron + "HVT" tag above the target (full-alpha signal, drawn
+        // in every alert state so the mark reads even on a dormant target). The body ring above
+        // already pulses; this names the priority. Placed before the inactive early-return.
+        if (hvt)
+        {
+            var hc = Pal.VipGold;
+            float cyT = p.Y - (elite ? 54f : 44f);          // sit above any elite name tag
+            Raylib.DrawLineEx(new Vector2(p.X - 7f, cyT + 4f), new Vector2(p.X - 3.5f, cyT - 3f), 2f, hc);
+            Raylib.DrawLineEx(new Vector2(p.X - 3.5f, cyT - 3f), new Vector2(p.X, cyT + 2f), 2f, hc);
+            Raylib.DrawLineEx(new Vector2(p.X, cyT + 2f), new Vector2(p.X + 3.5f, cyT - 3f), 2f, hc);
+            Raylib.DrawLineEx(new Vector2(p.X + 3.5f, cyT - 3f), new Vector2(p.X + 7f, cyT + 4f), 2f, hc);
+            float tw = Raylib.MeasureTextEx(Cfg.Font, "HVT", 11, 1f).X;
+            Raylib.DrawTextEx(Cfg.Font, "HVT", new Vector2((int)(p.X - tw / 2), (int)(cyT - 18f)), 11, 1f, hc);
+        }
 
         // not-yet-engaged enemies: an awareness marker, no facing/pips/status
         if (inactive)
