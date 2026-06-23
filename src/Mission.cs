@@ -29,11 +29,11 @@ public static class Mission
     // procedural if a hinted layout fails (though the arenas are designed to pass).
     static readonly int[] BiomeLayoutHint =
     {
-        2,   // STEEL   → PILLARS (industrial columns)
-        8,   // ARID    → RIDGE (exposed slope, decisive high ground)
-        7,   // TUNDRA  → FOXHOLES (defensive low-cover warren)
+        11,  // STEEL   → BASTION (industrial fortress, tier-2 keep)
+        13,  // ARID    → SPUR (sun-baked diagonal high-ground spine)
+        12,  // TUNDRA  → CHASM (a frozen ravine split by a cover river)
         10,  // VERDANT → THICKET (dense organic cover clusters)
-        6,   // ASH     → CROSSROADS (ruined sightline lanes)
+        14,  // ASH     → HOOK (a ruined outpost with an asymmetric flank)
         9,   // VOID    → RUINS (open eerie arena, long sightlines)
     };
 
@@ -111,45 +111,7 @@ public static class Mission
             authored = Util.Roll(55) &&
                 TryApplyLayout(grid, occupied, players, enemies, evacSet, terminal, PickLayout(missionNum), sabotage);
         if (!authored)
-        {
-            // contested high ground: raised plateaus in the mid-field (more on later missions)
-            RaisePlateau(grid, evacSet, 7, 3, 2, 2);
-            RaisePlateau(grid, evacSet, 11, 7, 2, 2);
-            if (missionNum >= 3) RaisePlateau(grid, evacSet, Util.RandInt(6, 11), Util.RandInt(1, 8), 2, 2);
-            // a commanding tier-2 redoubt appears on later missions (sees over high cover)
-            if (missionNum >= 4) RaisePlateau(grid, evacSet, Util.RandInt(7, 10), Util.RandInt(3, 6), 2, 2, 2);
-
-            // 4.2 ENCOUNTER GEOMETRY: a staggered mid-field SCREEN of high cover breaks
-            // the long cross-board sightlines, so the squad can advance into the midfield
-            // under cover before tripping a pod (a deliberate approach, not a turn-1
-            // ambush). No single column is ever fully walled and row 5 is left as an open
-            // lane, so the board stays traversable — that lane is the one risky direct route.
-            var screen = new (int x, int y)[]
-            {
-                (7, 1), (7, 2), (7, 3),   (8, 6), (8, 7), (8, 8),
-                (9, 0), (9, 1), (9, 9), (9, 10),   (10, 3), (10, 4), (10, 7), (10, 8),
-                (11, 1), (11, 2),
-            };
-            foreach (var (sx, sy) in screen)
-                if (grid.InBounds(sx, sy) && !occupied.Contains((sx, sy)))
-                { grid.Tiles[sx, sy] = TileType.HighCover; occupied.Add((sx, sy)); }
-            // low cover flanking the open central lane, for cover-fighting on the direct route
-            PlaceBlock(grid, occupied, 6, 5, TileType.LowCover, 1, 1);
-            PlaceBlock(grid, occupied, 12, 5, TileType.LowCover, 1, 1);
-
-            // random crates (a touch more clutter on later missions; biased toward LoS-blocking high cover)
-            int sprinkles = 14 + Math.Min(6, missionNum);
-            int guard = 0;
-            while (sprinkles > 0 && guard++ < 500)
-            {
-                int x = Util.RandInt(3, grid.W - 4);
-                int y = Util.RandInt(0, grid.H - 1);
-                if (occupied.Contains((x, y)) || grid.Tiles[x, y] != TileType.Floor) continue;
-                grid.Tiles[x, y] = Util.Roll(45) ? TileType.LowCover : TileType.HighCover;
-                occupied.Add((x, y));
-                sprinkles--;
-            }
-        }
+            BuildProcedural(grid, occupied, evacSet, missionNum);
 
         // protective cover beside each soldier and hostile (both layout paths)
         foreach (var u in players) TryCover(grid, occupied, u.X + 1, u.Y, TileType.LowCover);
@@ -163,6 +125,144 @@ public static class Mission
 
         foreach (var u in players) u.SyncPos();
         foreach (var u in enemies) u.SyncPos();
+    }
+
+    // ---- Procedural map generation -----------------------------------------
+    // The procedural path picks one of several mid-field cover ARCHETYPES at random so
+    // generated missions don't all look the same. Every archetype preserves the 4.2
+    // encounter-geometry intent: sightline-blocking HIGH cover concentrated in the
+    // mid-field (cols ~6-12), at least one deliberately OPEN "risky direct" lane so the
+    // board stays traversable, and no fully-walled column. Plateaus (incl. a tier-2
+    // redoubt on later missions) are shared across archetypes, and `EnsureConnectivity`
+    // (run by Build afterwards) is the final net should sprinkles/protective cover ever
+    // pinch a path. Spawn columns (0-3) and enemy columns (14-17) are left clear.
+
+    static void BuildProcedural(Grid grid, HashSet<(int, int)> occupied,
+                                HashSet<(int, int)> evac, int missionNum)
+    {
+        // contested high ground: raised plateaus in the mid-field (more on later missions).
+        // Shared by all archetypes so elevation play is always present.
+        RaisePlateau(grid, evac, 7, 3, 2, 2);
+        RaisePlateau(grid, evac, 11, 7, 2, 2);
+        if (missionNum >= 3) RaisePlateau(grid, evac, Util.RandInt(6, 11), Util.RandInt(1, 8), 2, 2);
+        // a commanding tier-2 redoubt appears on later missions (sees over high cover)
+        if (missionNum >= 4) RaisePlateau(grid, evac, Util.RandInt(7, 10), Util.RandInt(3, 6), 2, 2, 2);
+
+        // pick a mid-field cover archetype (variety); each leaves an open lane + no walled column
+        switch (Util.RandInt(0, 3))
+        {
+            case 0:  ArchScreen(grid, occupied);        break;   // the 4.2 staggered screen
+            case 1:  ArchRedoubt(grid, occupied);       break;   // a central bunker, flank lanes
+            case 2:  ArchTwinCorridors(grid, occupied); break;   // two cover spines, a centre gap
+            default: ArchDiagonalWall(grid, occupied);  break;   // a slanted wall with a breach
+        }
+
+        // random crates (a touch more clutter on later missions; biased toward LoS-blocking high cover)
+        Sprinkle(grid, occupied, 14 + Math.Min(6, missionNum));
+    }
+
+    /// Archetype 0 — the original 4.2 staggered mid-field SCREEN of high cover: breaks the
+    /// long cross-board sightlines so the squad can advance into the midfield under cover
+    /// before tripping a pod. No column is fully walled; row 5 is the one open risky lane.
+    static void ArchScreen(Grid grid, HashSet<(int, int)> occupied)
+    {
+        var screen = new (int x, int y)[]
+        {
+            (7, 1), (7, 2), (7, 3),   (8, 6), (8, 7), (8, 8),
+            (9, 0), (9, 1), (9, 9), (9, 10),   (10, 3), (10, 4), (10, 7), (10, 8),
+            (11, 1), (11, 2),
+        };
+        foreach (var (sx, sy) in screen) PlaceCover(grid, occupied, sx, sy, TileType.HighCover);
+        // low cover flanking the open central lane, for cover-fighting on the direct route
+        PlaceCover(grid, occupied, 6, 5, TileType.LowCover);
+        PlaceCover(grid, occupied, 12, 5, TileType.LowCover);
+    }
+
+    /// Archetype 1 — a central REDOUBT: a compact high-cover bunker mid-board with a low-cover
+    /// apron, leaving wide flanking lanes top and bottom. Rewards a flank rather than a frontal
+    /// push; the bunker breaks the central sightline while the rims stay open.
+    static void ArchRedoubt(Grid grid, HashSet<(int, int)> occupied)
+    {
+        // high-cover ring of a hollow bunker around the mid-field (rows 3-7, cols 8-10).
+        // The WEST face at row 5 is left open as a doorway, so the interior (and a centre
+        // terminal/captive, if the objective seats one there) stays reachable without the
+        // connectivity net having to carve in.
+        var ring = new (int x, int y)[]
+        {
+            (8, 3), (9, 3), (10, 3),
+            (8, 4),                 (10, 4),
+                                    (10, 5),   // west doorway (8,5) open; east slit (10,5)
+            (8, 6),                 (10, 6),
+            (8, 7), (9, 7), (10, 7),
+        };
+        foreach (var (sx, sy) in ring) PlaceCover(grid, occupied, sx, sy, TileType.HighCover);
+        // low-cover apron on the approaches (covered fighting positions outside the bunker)
+        PlaceCover(grid, occupied, 6, 4, TileType.LowCover);
+        PlaceCover(grid, occupied, 6, 6, TileType.LowCover);
+        PlaceCover(grid, occupied, 12, 4, TileType.LowCover);
+        PlaceCover(grid, occupied, 12, 6, TileType.LowCover);
+        // top/bottom flanking lanes (rows 0-1 and 9-10) are deliberately left open.
+    }
+
+    /// Archetype 2 — TWIN CORRIDORS: two vertical high-cover spines (a forward and a rear
+    /// staggered wall), each gapped so a soldier can slip through, with an open central seam
+    /// between them. Creates layered cover and channels movement into the gaps.
+    static void ArchTwinCorridors(Grid grid, HashSet<(int, int)> occupied)
+    {
+        // forward spine at col 7, gap at rows 4-5 (the open seam)
+        for (int y = 0; y < grid.H; y++)
+            if (y < 4 || y > 5) PlaceCover(grid, occupied, 7, y, TileType.HighCover);
+        // rear spine at col 11, gap at rows 5-6 (offset from the forward gap -> staggered)
+        for (int y = 0; y < grid.H; y++)
+            if (y < 5 || y > 6) PlaceCover(grid, occupied, 11, y, TileType.HighCover);
+        // low cover bracketing the central seam (cover-fight in the gap between the spines)
+        PlaceCover(grid, occupied, 9, 4, TileType.LowCover);
+        PlaceCover(grid, occupied, 9, 6, TileType.LowCover);
+    }
+
+    /// Archetype 3 — a DIAGONAL WALL of high cover slashing across the mid-field with a single
+    /// breach gap, plus a low-cover counter-diagonal. Strong sightline break on a slant; the
+    /// breach is the contested crossing, and the wall's ends leave the rims open.
+    static void ArchDiagonalWall(Grid grid, HashSet<(int, int)> occupied)
+    {
+        // a slanted high-cover wall from upper-mid to lower-mid, with a one-tile breach
+        var wall = new (int x, int y)[]
+        {
+            (7, 1), (7, 2),
+            (8, 3), (8, 4),
+            (9, 5),                 // breach is the gap just below here (row 6 left open)
+            (10, 7), (10, 8),
+            (11, 9),
+        };
+        foreach (var (sx, sy) in wall) PlaceCover(grid, occupied, sx, sy, TileType.HighCover);
+        // a short low-cover counter-diagonal giving the attacker covered footing to the breach
+        PlaceCover(grid, occupied, 6, 6, TileType.LowCover);
+        PlaceCover(grid, occupied, 9, 6, TileType.LowCover);   // flanks the breach, doesn't seal it
+        PlaceCover(grid, occupied, 12, 6, TileType.LowCover);
+    }
+
+    /// Place a cover tile only on an unreserved, currently-empty floor tile (and mark it
+    /// occupied). The shared primitive for all procedural archetypes.
+    static void PlaceCover(Grid grid, HashSet<(int, int)> occupied, int x, int y, TileType t)
+    {
+        if (!grid.InBounds(x, y) || occupied.Contains((x, y)) || grid.Tiles[x, y] != TileType.Floor) return;
+        grid.Tiles[x, y] = t;
+        occupied.Add((x, y));
+    }
+
+    /// Scatter `count` random crates across the mid-board, biased toward LoS-blocking high cover.
+    static void Sprinkle(Grid grid, HashSet<(int, int)> occupied, int count)
+    {
+        int guard = 0;
+        while (count > 0 && guard++ < 500)
+        {
+            int x = Util.RandInt(3, grid.W - 4);
+            int y = Util.RandInt(0, grid.H - 1);
+            if (occupied.Contains((x, y)) || grid.Tiles[x, y] != TileType.Floor) continue;
+            grid.Tiles[x, y] = Util.Roll(45) ? TileType.LowCover : TileType.HighCover;
+            occupied.Add((x, y));
+            count--;
+        }
     }
 
     /// Stamp a hand-authored template onto the grid, then verify every spawn, the

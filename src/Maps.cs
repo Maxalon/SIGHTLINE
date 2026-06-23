@@ -174,5 +174,73 @@ public static class Maps
             "....oo......oo....",
             "..................",
         },
+        new[] // BASTION — a central fortress: a commanding tier-2 ('=') keep walled by
+              // high cover, breached by gaps (north & south of the wall, plus a west
+              // doorway through the keep itself). The high ground is the prize, but you
+              // must fight to a breach to seize it — a set-piece assault. Biome hint: STEEL.
+        {
+            "..................",
+            "......##..##......",
+            "......#....#......",
+            "....###.==.###....",
+            ".......===........",
+            "......#.==.#......",
+            "....###.==.###....",
+            "......#....#......",
+            "......##..##......",
+            "..................",
+            "..................",
+        },
+        new[] // CHASM — a vertical "river" of high cover splits the board top-to-bottom,
+              // pierced by two clear crossing points (rows 3 & 7) bracketed by low cover.
+              // The fight funnels through the chokepoints; holding a crossing controls the
+              // flow between the two halves. Biome hint: TUNDRA (a frozen ravine).
+        {
+            "..................",
+            "........##........",
+            ".......o##o.......",
+            "..................",
+            "........##........",
+            "........##........",
+            "........##........",
+            "..................",
+            ".......o##o.......",
+            "........##........",
+            "..................",
+        },
+        new[] // SPUR — a diagonal tier-1 high-ground spine sweeps corner to corner: a
+              // commanding kill-lane that dominates the centre but is exposed at both
+              // ends. Low-cover nests bracket the slope as covered firing steps onto it.
+              // Biome hint: ARID (a sun-baked ridge).
+        {
+            "..................",
+            "...^..............",
+            "....^^...o........",
+            ".....^^...........",
+            "..o...^^..........",
+            ".......^^....o....",
+            "........^^........",
+            ".....o...^^.......",
+            "..........^^...o..",
+            "............^^....",
+            "..................",
+        },
+        new[] // HOOK — asymmetric: a fortified high-cover strongpoint (with a redoubt
+              // arm) anchors the top, forcing attackers to either grind through it or
+              // swing the wide-open bottom flank. A low-cover diagonal channels that
+              // bottom hook into a covered approach. Biome hint: ASH (a ruined outpost).
+        {
+            "..................",
+            ".....####.........",
+            ".....#..#....o....",
+            ".....#..####......",
+            ".....#.....#......",
+            ".......o...#......",
+            ".........o........",
+            "...........o......",
+            "..................",
+            "..................",
+            "..................",
+        },
     };
 }
