@@ -86,8 +86,15 @@ public static class Combat
         if (a.HasPerk(Perk.LockOn) && coverLevel == 0) hit += Unit.PerkAim;
         if (a.HasPerk(Perk.CloseQuarters) && dist <= Unit.CloseRange) hit += Unit.PerkAim;
         if (a.HasPerk(Perk.Marksman) && dist >= Unit.LongRange) hit += Unit.PerkAim;
-        // CoolHeaded: halves the Disoriented aim penalty (net = DisorientAim - CoolHeadedDivert)
-        if (a.HasPerk(Perk.CoolHeaded) && a.HasStatus(StatusKind.Disoriented)) hit += Unit.CoolHeadedDivert;
+        // CoolHeaded (composure). Two parts so it's never a dead pick:
+        //  - cuts the Disoriented aim penalty (net = DisorientAim - CoolHeadedDivert), and
+        //  - a small always-on steadiness bonus while the soldier carries NO negative status,
+        //    so the perk earns its keep on the common case (not just the rare daze).
+        if (a.HasPerk(Perk.CoolHeaded))
+        {
+            if (a.HasStatus(StatusKind.Disoriented)) hit += Unit.CoolHeadedDivert;
+            else if (!HasAnyNegativeStatus(a)) hit += Unit.CoolHeadedSteady;
+        }
 
         // earned traits + bonds (attacker)
         if (a.HasTrait(Trait.Killer) && d.MaxHp > 0 && d.Hp * 2 <= d.MaxHp) hit += Unit.KillerAim;
@@ -102,9 +109,13 @@ public static class Combat
         if (a.FiredFromConcealment) crit += AmbushCrit;  // ambush bonus: caught off-guard
         if (highGround) crit += HighGroundCrit;  // shooting down rewards crits
         if (a.Steady) crit += SteadyCrit;        // braced shot also crits harder
-        if (a.HasPerk(Perk.Deadeye)) crit += Unit.PerkCrit;
-        // Executioner: bonus crit vs targets already below half HP (finish-the-job perk)
+        if (a.HasPerk(Perk.Deadeye)) crit += Unit.PerkCrit;   // Deadeye: flat crit, any target
+        // Executioner: a FINISHER — bigger crit than Deadeye, but only vs sub-half-HP prey. So it
+        // BEATS Deadeye against the wounded and LOSES against the healthy (a real choice, not a subset).
         if (a.HasPerk(Perk.Executioner) && d.MaxHp > 0 && d.Hp * 2 < d.MaxHp) crit += Unit.ExecutionerCrit;
+        // Guardian: overwatch LETHALITY. A reaction shot (ReactedThisTurn is set by Game right before
+        // it Resolves this shot) crits hard — Reflexes makes overwatch reliable, Guardian makes it lethal.
+        if (a.HasPerk(Perk.Guardian) && IsOverwatchReaction(a)) crit += Unit.GuardianReactCrit;
         if (a.HasTrait(Trait.ColdBlood) && a.MaxHp > 0 && a.Hp * 2 <= a.MaxHp) crit += Unit.ColdBloodCrit;
         if (d.Hunkered) crit = 0;               // hunkered can't be crit
         crit = Util.Clamp(crit, 0, 100);
@@ -135,6 +146,19 @@ public static class Combat
         return d.ShieldDy != 0 && Util.Sign(dy) == d.ShieldDy;
     }
 
+    /// True if this shot is an overwatch REACTION. Game's OnUnitEnteredTile sets
+    /// ReactedThisTurn=true on the watcher immediately before calling Combat.Resolve for the
+    /// reaction shot (and an overwatch unit has 0 actions left, so it can't also take a normal
+    /// aimed shot that turn). So ReactedThisTurn==true uniquely flags the reaction shot here —
+    /// it's never set for the hovered-aim preview of a selected, still-acting soldier. Guardian
+    /// keys its overwatch-only bonuses off this without needing a Game.cs edit.
+    static bool IsOverwatchReaction(Unit a) => a.ReactedThisTurn;
+
+    /// True if the unit carries any negative combat status (used by CoolHeaded's "unhindered" bonus).
+    static bool HasAnyNegativeStatus(Unit a) =>
+        a.HasStatus(StatusKind.Burning) || a.HasStatus(StatusKind.Bleed)
+        || a.HasStatus(StatusKind.Stun) || a.HasStatus(StatusKind.Disoriented);
+
     // Streak-breaker constants (S4-C): per clean-miss aim bonus, capped at MaxStreakBonus.
     // Applied INSIDE Resolve only (hidden from the ComputeOdds display — DESIGN.md 3B).
     public const int StreakBonusPerMiss = 6;   // +6 effHit per consecutive miss
@@ -151,7 +175,11 @@ public static class Combat
         // enemies don't rage, and a hidden enemy aim nudge would only quietly raise difficulty
         // (review Minor — matches the "a soldier's shot" intent).
         int streakBonus = a.Team == Team.Player ? Math.Min(StreakBonusPerMiss * a.ConsecutiveMisses, MaxStreakBonus) : 0;
-        int effHit = Util.Clamp(odds.HitChance + aimMod + streakBonus, 1, 99);
+        // Guardian: cancel the standard -10 overwatch reaction penalty (which Game folds into aimMod,
+        // invisible to ComputeOdds) so its reactions fire at full accuracy. Applied here, not in
+        // ComputeOdds, because the penalty it offsets isn't part of the displayed HitChance either.
+        int guardianBonus = (a.HasPerk(Perk.Guardian) && IsOverwatchReaction(a)) ? Unit.GuardianReactAim : 0;
+        int effHit = Util.Clamp(odds.HitChance + aimMod + streakBonus + guardianBonus, 1, 99);
 
         var res = new ShotResult { Odds = odds };
 
@@ -180,6 +208,7 @@ public static class Combat
             int dmg = odds.DmgMin;
             if (d.HasPerk(Perk.Hardened)) dmg = Math.Max(1, dmg - 1);
             res.Damage = Math.Max(1, dmg);   // guaranteed-damage floor
+            res.Damage = FragileFloor(d, res.Damage);   // a full-HP player survives any one shot
             return res;
         }
 
@@ -192,7 +221,20 @@ public static class Combat
         }
         if (d.HasPerk(Perk.Hardened)) dmgN = Math.Max(1, dmgN - 1);   // damage resistance
         res.Damage = Math.Max(1, dmgN);   // guaranteed-damage floor
+        res.Damage = FragileFloor(d, res.Damage);   // a full-HP player survives any one shot
         return res;
+    }
+
+    /// Fragile-unit anti-one-shot floor: a PLAYER unit (Team.Player, incl. the VIP) that is at
+    /// FULL HP cannot be dropped below 1 HP by a SINGLE shot — cap the damage at MaxHp-1 so a lucky
+    /// crit leaves them clinging at 1 HP instead of dead. Softens the worst output-randomness
+    /// feel-bad (losing a soldier/VIP from full to one crit) WITHOUT helping the player's offense:
+    /// enemies are never protected. Silent (no FX) — a pure damage cap kept inside Combat.
+    static int FragileFloor(Unit d, int dmg)
+    {
+        if (d.Team == Team.Player && d.MaxHp >= 2 && d.Hp >= d.MaxHp)
+            return Math.Min(dmg, d.MaxHp - 1);
+        return dmg;
     }
 
     /// Headless self-test (SIGHTLINE_COMBATTEST): verify high ground negates a
@@ -435,8 +477,151 @@ public static class Combat
             if (oddsNoStreak.HitChance != oddsZeroMisses.HitChance) fails.Add("streakVisibleInOdds");
         }
 
+        // PERK BALANCE: Executioner must now BEAT Deadeye vs a sub-half-HP target (finisher),
+        // and LOSE to Deadeye vs a healthy target (so it's a real choice, not a dominated subset).
+        {
+            var gP = new Grid();   // no cover -> identical baseline for both perks
+            var baseA = new Unit { Aim = 65, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 3, Y = 5 };
+            var ddeA  = new Unit { Aim = 65, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 3, Y = 5 };
+            var excA  = new Unit { Aim = 65, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 3, Y = 5 };
+            ddeA.Perks.Add(Perk.Deadeye);
+            excA.Perks.Add(Perk.Executioner);
+
+            // Wounded target (below half HP): Executioner's bonus applies and exceeds Deadeye's flat one.
+            var wounded = new Unit { Aim = 65, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 7, Y = 5, Hp = 2, MaxHp = 10 };
+            int baseCritW = ComputeOdds(gP, baseA, wounded).CritChance;
+            int ddeCritW  = ComputeOdds(gP, ddeA,  wounded).CritChance;
+            int excCritW  = ComputeOdds(gP, excA,  wounded).CritChance;
+            if (ddeCritW != baseCritW + Unit.PerkCrit) fails.Add("deadeyeFlat");
+            if (excCritW != baseCritW + Unit.ExecutionerCrit) fails.Add("execBonus");
+            if (excCritW <= ddeCritW) fails.Add("execNotBeatDeadeyeOnWounded");   // the un-domination check
+
+            // Healthy target (full HP): Executioner does nothing, so Deadeye wins (real trade-off).
+            var healthy = new Unit { Aim = 65, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 7, Y = 5, Hp = 10, MaxHp = 10 };
+            int ddeCritH = ComputeOdds(gP, ddeA, healthy).CritChance;
+            int excCritH = ComputeOdds(gP, excA, healthy).CritChance;
+            if (excCritH != ComputeOdds(gP, baseA, healthy).CritChance) fails.Add("execHealthyNoOp");
+            if (ddeCritH <= excCritH) fails.Add("deadeyeNotBeatExecOnHealthy");
+        }
+
+        // COOL-HEADED: the always-on steadiness bonus applies while UNHINDERED (no negative status),
+        // is suppressed while another negative status is present, and still cuts the daze penalty.
+        {
+            var gCH = new Grid();
+            var plain  = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 3, Y = 5 };
+            var chead  = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 3, Y = 5 };
+            chead.Perks.Add(Perk.CoolHeaded);
+            var tgt = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 7, Y = 5, Hp = 10, MaxHp = 10 };
+
+            // Unhindered: CoolHeaded shooter gets +CoolHeadedSteady over a plain shooter.
+            int plainHit = ComputeOdds(gCH, plain, tgt).HitChance;
+            int coolHit  = ComputeOdds(gCH, chead, tgt).HitChance;
+            if (coolHit != plainHit + Unit.CoolHeadedSteady) fails.Add("coolHeadedSteady");
+
+            // Burning (a negative status that isn't an aim mod itself): the steady bonus is suppressed,
+            // so the CoolHeaded shooter reads the SAME as a plain shooter (no bonus, no penalty here).
+            chead.AddStatus(StatusKind.Burning, 2);
+            if (ComputeOdds(gCH, chead, tgt).HitChance != plainHit) fails.Add("coolHeadedBurnNoSteady");
+            chead.Statuses.Clear();
+
+            // Disoriented: the penalty is cut (net -7), and the +5 steady does NOT also apply
+            // (else-branch). Net vs an un-perked disoriented shooter = +CoolHeadedDivert.
+            var dazPlain = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 3, Y = 5 };
+            dazPlain.AddStatus(StatusKind.Disoriented, 2);
+            chead.AddStatus(StatusKind.Disoriented, 2);
+            int dazPlainHit = ComputeOdds(gCH, dazPlain, tgt).HitChance;
+            int dazCoolHit  = ComputeOdds(gCH, chead,    tgt).HitChance;
+            if (dazCoolHit != dazPlainHit + Unit.CoolHeadedDivert) fails.Add("coolHeadedDaze");
+            chead.Statuses.Clear();
+        }
+
+        // GUARDIAN: an overwatch REACTION shot (flagged by ReactedThisTurn) ignores the -10 reaction
+        // penalty (Resolve) and crits hard (ComputeOdds); a normal (non-reaction) shot gets neither.
+        {
+            var gG2 = new Grid();
+            var grd = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 3, Y = 5 };
+            grd.Perks.Add(Perk.Guardian);
+            var foe = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 7, Y = 5, Hp = 10, MaxHp = 10 };
+
+            // Not reacting: Guardian is inert (it's an overwatch-only perk).
+            grd.ReactedThisTurn = false;
+            int restingCrit = ComputeOdds(gG2, grd, foe).CritChance;
+            if (restingCrit != ComputeOdds(gG2, new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 3, Y = 5 }, foe).CritChance)
+                fails.Add("guardianRestingInert");
+
+            // Reacting: the crit bonus shows in the odds...
+            grd.ReactedThisTurn = true;
+            int reactCrit = ComputeOdds(gG2, grd, foe).CritChance;
+            if (reactCrit != Util.Clamp(restingCrit + Unit.GuardianReactCrit, 0, 100)) fails.Add("guardianReactCrit");
+
+            // ...and the -10 reaction penalty is cancelled in Resolve. Compare effHit on a reaction
+            // shot with the standard -10 aimMod: a Guardian unit should hit as if there were no penalty.
+            // Probe via hit rate at the same aimMod=-10 (Guardian) vs aimMod=0 (no perk, no penalty).
+            int gHits = 0, refHits = 0; int N = 4000;
+            var refU = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 3, Y = 5 };
+            for (int i = 0; i < N; i++)
+            {
+                grd.ReactedThisTurn = true; grd.ConsecutiveMisses = 0; foe.Hp = 10;
+                if (Resolve(gG2, grd, foe, aimMod: -10).Hit) gHits++;        // Guardian reaction (penalty cancelled)
+                refU.ConsecutiveMisses = 0; foe.Hp = 10;
+                if (Resolve(gG2, refU, foe, aimMod: 0).Hit) refHits++;        // baseline with no penalty
+            }
+            // The two hit rates should be statistically equal (within tolerance) since Guardian
+            // negates the -10. Allow a 5-point band at N=4000.
+            float gPct = gHits * 100f / N, refPct = refHits * 100f / N;
+            if (Math.Abs(gPct - refPct) > 5f) fails.Add($"guardianPenaltyCancel(g={gPct:F1},ref={refPct:F1})");
+            grd.ReactedThisTurn = false;
+        }
+
+        // FRAGILE-UNIT ONE-SHOT FLOOR: a full-HP PLAYER unit can't be dropped below 1 HP by a single
+        // shot (capped at MaxHp-1); enemies are NOT protected. Use Sniper (DmgMin=5) vs a 4-HP unit so
+        // EVERY hit (crit or not) would otherwise be lethal — the floor must always leave HP >= 1.
+        {
+            var gF = new Grid();
+            var sniper = new Unit { Aim = 65, Weapon = Weapon.Make(WeaponKind.Sniper), Team = Team.Enemy, X = 8, Y = 5 };
+
+            // Player at full HP: never dies to one shot.
+            var pFull = new Unit { Aim = 50, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 5, Y = 5, Hp = 4, MaxHp = 4 };
+            bool floorHeld = true, sawHit = false, sawCrit = false;
+            for (int i = 0; i < 3000; i++)
+            {
+                pFull.Hp = 4;   // reset to full each shot
+                var r = Resolve(gF, sniper, pFull, aimMod: 200);   // guarantee a hit
+                if (!r.Hit) continue;
+                sawHit = true; if (r.Crit) sawCrit = true;
+                if (r.Damage > pFull.MaxHp - 1) floorHeld = false;          // capped at MaxHp-1...
+                if (pFull.Hp - r.Damage < 1) floorHeld = false;             // ...so survivor clings at >=1
+            }
+            if (!sawHit) fails.Add("floorNoHit");
+            if (!sawCrit) fails.Add("floorNoCritSampled");   // make sure the lethal-crit case was exercised
+            if (!floorHeld) fails.Add("fragileFloorBroken");
+
+            // Player NOT at full HP: the floor does not apply (a wounded soldier can still die).
+            var pHurt = new Unit { Aim = 50, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 5, Y = 5, Hp = 3, MaxHp = 4 };
+            bool sawLethalOnHurt = false;
+            for (int i = 0; i < 3000; i++)
+            {
+                pHurt.Hp = 3;
+                var r = Resolve(gF, sniper, pHurt, aimMod: 200);
+                if (r.Hit && pHurt.Hp - r.Damage < 1) { sawLethalOnHurt = true; break; }
+            }
+            if (!sawLethalOnHurt) fails.Add("floorWronglyProtectsHurt");
+
+            // Enemy at full HP: NOT protected (the player's offense isn't weakened).
+            var eFull = new Unit { Aim = 50, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 5, Y = 5, Hp = 4, MaxHp = 4 };
+            var shooter = new Unit { Aim = 65, Weapon = Weapon.Make(WeaponKind.Sniper), Team = Team.Player, X = 8, Y = 5 };
+            bool sawLethalOnEnemy = false;
+            for (int i = 0; i < 3000; i++)
+            {
+                eFull.Hp = 4;
+                var r = Resolve(gF, shooter, eFull, aimMod: 200);
+                if (r.Hit && eFull.Hp - r.Damage < 1) { sawLethalOnEnemy = true; break; }
+            }
+            if (!sawLethalOnEnemy) fails.Add("floorWronglyProtectsEnemy");
+        }
+
         return fails.Count == 0
-            ? "COMBATTEST: PASS (cover A-E + high-ground + tier-2 + drone/shield + ambush + graze + streak all hold)"
+            ? "COMBATTEST: PASS (cover A-E + high-ground + tier-2 + drone/shield + ambush + graze + streak + perk-balance + fragile-floor all hold)"
             : "COMBATTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 }
