@@ -1049,8 +1049,22 @@ Before stopping:
 > - **Review follow-ups** (`83314f6`): truthful overwatch model, captive-focus skip, perf hoist, stronger AITEST.
 > Worktree gotcha: agent worktrees branch off near-empty `main` — every dev must `git reset --hard
 > claude/fervent-fermat-6lxlyv` first (all did; orchestrator verifies base+scope before integrating).
-> **NEXT: Wave 2** = Heat/Ascension difficulty ladder + run mutators (`Run`/`Game`/`Hud`/`SaveGame`) + a
-> Renderer/Fx feature; then per-turn depth, anti-turtle pressure clock, new enemies/objectives/biomes.
+> **WAVE 2 SHIPPED (5 commits, all verified — build 0/0, 10/10 self-tests PASS, autoplay clean across
+> heat 0/3/6/8 + objectives, no TIMEOUT):**
+> - **HEAT / ASCENSION ladder** (`8420ab3`): 8 cumulative rungs (more/tougher enemies, sooner contact,
+>   harsher attrition, top-tier EXPOSED=no concealment) + per-mission intel bonus; unlocked-max persists
+>   in `meta.json` (rises on a win at cap); run heat in the append-only Run DTO; intro selector + HUD pill;
+>   heat-0 = byte-stable no-op; `SIGHTLINE_HEAT=<n>` hook. (`Heat` table in `Run.cs`.)
+> - **HUNTER + MORTAR enemies** + **NEON/MAGMA biomes** + **per-run biome variety** (`94dd65e`): HUNTER
+>   flanks (AI seeks exposing tiles), MORTAR is a back-line grenadier (rides the existing grenade AI);
+>   both reuse the existing exec (no Game change). `Biome.For(missionNum, runSeed)`.
+> - **Combat-feel juice** (`932be49`, `Anim`/`Fx`): impact frames, directional sparks, grenade shockwave +
+>   debris, tracer polish, movement dust — new Fx Ring system + helpers, all fired from Anim, scale graze<hit<crit.
+> - **Integration wiring** (`d69faad`): biome call site -> `For(n, MapSeed)`; HUNTER/MORTAR in `Run.EnemyHint`.
+> - Independent review of the Heat ladder: APPROVE-WITH-NITS (save-format append-only + no-TIMEOUT confirmed).
+> **NEXT: Wave 3** = per-turn DEPTH (aimed-vs-snap shot, crossfire/zone-of-control) + ANTI-TURTLE (visible
+> pressure clock / kills-refund-action) — both need `Game`/`Hud` (now free); then a new objective, more
+> perks/weapons, the enemy-intent telegraph (J1), and a balance/bug-hunt pass.
 
 > **AUTONOMOUS DEV-TEAM SESSION — 7 SPRINTS, 21 FEATURES + a 4-FEATURE CODE RECOVERY (read first).**
 > Ran the project as a multi-agent team (orchestrator/tech-lead + PM/research + architect +
