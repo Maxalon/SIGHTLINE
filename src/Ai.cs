@@ -221,12 +221,36 @@ public static class Ai
                 score += Math.Min(distNearest, e.Weapon.MaxRange) * 2.0f;
                 score += g.Grid.HeightAt(tx, ty) * 12;
             }
+            else if (e.Cls == "MORTAR")                          // back-line grenadier: hold off, lob frags
+            {
+                // hang back toward grenade range so it stays out of the brawl and keeps
+                // line-of-throw on clusters; mild height preference. The actual frag toss
+                // is handled by the shared grenade AI after the tile loop. Keep a soft pull
+                // toward staying reasonably near (so it doesn't flee off the board), capped.
+                int want = Math.Max(3, Game.GrenadeRange - 1);   // ideal standoff ~ grenade range
+                score -= Math.Abs(distNearest - want) * 1.6f;    // settle around the standoff band
+                score += g.Grid.HeightAt(tx, ty) * 8;
+            }
             else
             {
                 float advW = (e.Cls == "BERSERKER" || e.Cls == "ELITE") ? 3.4f
                            : (e.Cls == "DRONE") ? 3.0f                  // drone beelines (ignores cover anyway)
+                           : (e.Cls == "HUNTER") ? 2.8f                 // fast flanker: presses hard to curl around cover
                            : (e.Cls == "SHIELD") ? 2.2f : 1.4f;         // shield pushes the line behind its barrier
                 score -= nd > 0 ? distNearest * advW : 0;
+            }
+
+            // HUNTER — FLANK SEEKER: actively reward ending on a tile from which the nearest
+            // soldier loses the protection of its cover (flanked) or never had cover from this
+            // angle (exposed). This makes the hunter curl AROUND a cover block to hit the soft
+            // side rather than trade frontally. A genuine flank (was covered, now isn't) is worth
+            // most; plain "no cover from here" still earns a smaller pull. Read straight off the
+            // same GetCover the shot resolver uses, so the bias is truthful.
+            if (e.Cls == "HUNTER" && nearest != null)
+            {
+                var tgtCov = g.Grid.GetCover(nearest.X, nearest.Y, tx, ty);
+                if (tgtCov.Flanked)      score += 34;            // soldier's cover doesn't protect from here
+                else if (tgtCov.Level == 0) score += 16;         // soldier simply has no cover from this angle
             }
             if (e.Cls == "DRONE") score -= cover.Level * 18;            // drone doesn't value cover (cancels the bonus above)
             if (vip != null) score -= Util.ChebyDist(tx, ty, vip.X, vip.Y) * 1.0f;     // close on the asset
@@ -323,7 +347,10 @@ public static class Ai
                 {
                     int shotHit = plan.ShootTarget != null
                         ? OddsFrom(g, e, bestTile.x, bestTile.y, plan.ShootTarget).HitChance : 0;
-                    throwIt = shotHit < 45;
+                    // a MORTAR is a dedicated grenadier with a poor gun and a deep pouch — it
+                    // lobs far more readily (its whole identity is raining frags), so its
+                    // single-target threshold is higher than a line trooper's opportunistic toss.
+                    throwIt = shotHit < (e.Cls == "MORTAR" ? 70 : 45);
                 }
                 if (throwIt)
                 {

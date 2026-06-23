@@ -113,9 +113,23 @@ public class Biome
         new Biome { Name = "VERDANT", FloorA = Pal.RGBA(21, 35, 26), FloorB = Pal.RGBA(25, 41, 30), Grid = Pal.RGBA(38, 58, 42), Edge = Pal.RGBA(38, 60, 44), Tint = Pal.RGBA(50, 84, 56) },
         new Biome { Name = "ASH",     FloorA = Pal.RGBA(34, 27, 27), FloorB = Pal.RGBA(40, 31, 31), Grid = Pal.RGBA(56, 42, 42), Edge = Pal.RGBA(58, 40, 40), Tint = Pal.RGBA(86, 56, 52) },
         new Biome { Name = "VOID",    FloorA = Pal.RGBA(28, 24, 41), FloorB = Pal.RGBA(33, 28, 48), Grid = Pal.RGBA(50, 41, 68), Edge = Pal.RGBA(52, 42, 72), Tint = Pal.RGBA(72, 56, 102) },
+        // NEON: a dim cyber-grid arcology — cool slate floor lit by teal grid lines; cover reads cyan-tinted.
+        new Biome { Name = "NEON",    FloorA = Pal.RGBA(16, 28, 34), FloorB = Pal.RGBA(20, 34, 41), Grid = Pal.RGBA(34, 78, 92), Edge = Pal.RGBA(36, 90, 104), Tint = Pal.RGBA(46, 96, 110) },
+        // MAGMA: a volcanic foundry — dark basalt floor veined with a warm ember tint on cover/plateaus.
+        new Biome { Name = "MAGMA",   FloorA = Pal.RGBA(32, 22, 20), FloorB = Pal.RGBA(40, 26, 22), Grid = Pal.RGBA(74, 44, 32), Edge = Pal.RGBA(96, 50, 30), Tint = Pal.RGBA(132, 64, 34) },
     };
 
     public static Biome For(int missionNum) => All[(missionNum - 1 + All.Length) % All.Length];
+
+    /// Per-run biome variety: a run-seeded offset rotates which biome each mission shows,
+    /// so different runs surface different biomes (incl. the newer ones) across their
+    /// missions while staying deterministic within a run. The 1-arg For() is kept for any
+    /// caller that wants the fixed cycle; Game switches to this at integration.
+    public static Biome For(int missionNum, int runSeed)
+    {
+        int idx = (int)(((uint)runSeed + (uint)(missionNum - 1)) % (uint)All.Length);
+        return All[idx];
+    }
 }
 
 public static class Util

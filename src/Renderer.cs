@@ -657,7 +657,7 @@ public static class Renderer
             "ASSAULT" => 3, "RANGER" => 3, "SHARPSHOOTER" => 4,
             "GUNNER" => 4, "BRUISER" => 6, "SCOUT" => 3,
             "SNIPER" => 4, "TURRET" => 4, "BERSERKER" => 6, "ELITE" => 8, "MEDIC" => 4,
-            "DRONE" => 4, "SHIELD" => 6, "SAPPER" => 3, _ => 5,
+            "DRONE" => 4, "SHIELD" => 6, "SAPPER" => 3, "HUNTER" => 3, "MORTAR" => 5, _ => 5,
         };
         float rot = (u.Cls == "SHARPSHOOTER" || u.Cls == "SNIPER" || u.Cls == "DRONE") ? 45f : (sides == 3 ? -90f : 0f);
         if (elite) Raylib.DrawRing(p, 18f, 20.5f, 0, 360, 40, Raylib.Fade(Pal.Elite, 0.55f * figAlpha));
@@ -721,6 +721,39 @@ public static class Renderer
         {
             Raylib.DrawRectangleLines((int)p.X - 4, (int)p.Y - 4, 8, 8, Raylib.Fade(Pal.Accent, figAlpha));
             Raylib.DrawCircleV(new Vector2(p.X + 4, p.Y - 4), 2f, Raylib.Fade(Pal.Foe, figAlpha));
+        }
+
+        // hunter: twin forward "speed" chevrons along its facing so it reads as a fast flanker
+        // (distinct from the plain scout/grunt triangle). They point the way it's curling.
+        if (u.Team == Team.Enemy && u.Cls == "HUNTER")
+        {
+            var hdir = new Vector2(MathF.Cos(u.Facing), MathF.Sin(u.Facing));
+            var hperp = new Vector2(-hdir.Y, hdir.X);
+            for (int k = 0; k < 2; k++)
+            {
+                var bse = p + hdir * (4f + k * 5f);     // two stacked chevrons
+                var nose = bse + hdir * 4.5f;
+                Raylib.DrawLineEx(nose, bse + hperp * 4.5f, 2f, Raylib.Fade(main, figAlpha));
+                Raylib.DrawLineEx(nose, bse - hperp * 4.5f, 2f, Raylib.Fade(main, figAlpha));
+            }
+        }
+
+        // mortar: a lob-arc + shell marker above the figure so it reads as a back-line grenadier
+        if (u.Team == Team.Enemy && u.Cls == "MORTAR")
+        {
+            // a small parabolic arc traced over the unit
+            Vector2 a0 = new Vector2(p.X - 8, p.Y - 4), a1 = new Vector2(p.X + 8, p.Y - 4);
+            Vector2 prev = a0;
+            for (int i = 1; i <= 8; i++)
+            {
+                float k = i / 8f;
+                var pt = Vector2.Lerp(a0, a1, k);
+                pt.Y -= MathF.Sin(k * MathF.PI) * 9f;
+                Raylib.DrawLineEx(prev, pt, 1.6f, Raylib.Fade(Pal.Accent, figAlpha));
+                prev = pt;
+            }
+            // the lobbed shell at the arc's apex
+            Raylib.DrawCircleV(new Vector2(p.X, p.Y - 12), 2.4f, Raylib.Fade(Pal.Foe, figAlpha));
         }
 
         // shield: a thick barrier arc on the barred (facing) side
