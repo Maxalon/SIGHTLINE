@@ -62,8 +62,13 @@ are. **Keep it updated** — when you finish work, tick the roadmap and refresh
   time you take a screenshot (e.g. `sightline_shot.png`), send it into the message
   thread with the `SendUserFile` tool so they can see the progression. Capture a
   frame for any notable visual change and surface it.
-- **Full autonomy:** build, commit, and **merge to `main`** freely. No PR/review
-  ceremony is required (no reviewers exist). PRs are optional.
+- **Full autonomy — NO human intervention or review, ever.** This is a you-owned
+  project: build, commit, and **merge to `main`** yourself. **There are no human
+  reviewers and no approval step.** If you open a PR (optional — a convenient review
+  surface for yourself / the agent team) and it's green (builds clean in Release +
+  passes the headless self-tests + autoplay), **merge it yourself** — do not leave it
+  open waiting on anyone. Never block on "should the human look first?": the answer is
+  always no. The only hard gate is the constraints in this file (above all: NO CI).
 - **Always ship compiling code to `main`.** Before merging, it must (a) build
   clean in Release and (b) pass the headless autoplay smoke test (see below),
   which you run manually.
@@ -1035,7 +1040,8 @@ Before stopping:
 > **PROGRAM "DEEP STRIKE" — NEW MULTI-WAVE PUSH (read first; full process log in `docs/DEVLOG.md`).**
 > Fresh fully-autonomous session running the project as a dev team (orchestrator + parallel dev agents in
 > isolated worktrees + independent reviewers + research/audit agents). Develops on
-> `claude/fervent-fermat-6lxlyv` (PR open; NOT pushing main this session). A research+audit pass converged
+> `claude/fervent-fermat-6lxlyv`, opens PR #51 as a review surface, and **self-merges it to `main` once
+> green** (no human review — this is a you-owned project; see the autonomy ground rule). A research+audit pass converged
 > on: coordinated enemy AI = biggest fun lever, plus output-randomness mitigation, content breadth, and a
 > replay ladder. **WAVE 1 SHIPPED (6 commits, all verified — build 0/0, 10/10 self-tests PASS, 14+ autoplay
 > runs clean, no TIMEOUT):**
