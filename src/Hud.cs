@@ -701,13 +701,74 @@ public static class Hud
     }
 
     // ---------------- tooltip ----------------
+    // Perfect-information contract (DESIGN.md): the shot odds must explain WHY the number
+    // is what it is. We surface EVERY modifier Combat.ComputeOdds applies — the struct
+    // flags (cover/flank/high-ground/steady/ambush) PLUS the ones that ride on live
+    // attacker/target state (bonds, earned traits, range/exposure perks, suppression,
+    // wounds, daze, target hunker/smoke). Each badge's condition mirrors ComputeOdds
+    // EXACTLY so the explanation always matches the math. Display-only; no rule changes.
     static void DrawTooltip(Game g)
     {
         if (!g.ShowOdds) return;
         var o = g.HoverOdds;
+
+        // Recover the same attacker/target pair ComputeOdds was called with (see
+        // Game.UpdateHoverAndAim): attacker is always the selected soldier; the target is
+        // the locked aim target in aim mode, else the enemy under the cursor.
+        Unit a = g.Selected;
+        Unit d = g.AimMode ? g.AimTarget : g.UnitAt(g.HoverX, g.HoverY);
+
+        // Build the badge list. Order: target-cover/state, then attacker buffs, then
+        // attacker penalties — so advantages and warnings stay visually grouped.
+        var flags = new System.Collections.Generic.List<(string text, Color col)>();
+        // — already in the odds struct —
+        if (o.Flanked)   flags.Add(("! FLANKED", Pal.Accent));
+        if (o.Hunkered)  flags.Add(("- HUNKERED", Pal.Foe));          // target dug in: -25 aim, no crit
+        if (o.HighGround) flags.Add(("+ HIGH GROUND", Pal.Good));
+        if (o.SeesOver)  flags.Add(("+ OVER LOW COVER", Pal.Good));
+        if (o.Partial)   flags.Add(("~ PARTIAL COVER", Pal.TxtDim));
+        if (o.Steady)    flags.Add(("+ STEADY", Pal.Good));
+        if (o.Ambush)    flags.Add(("+ AMBUSH", Pal.Good));
+
+        // — modifiers that read live attacker/target state (mirror Combat.ComputeOdds) —
+        if (a != null && d != null)
+        {
+            float dist = Util.TileDist(a.X, a.Y, d.X, d.Y);
+            bool tgtHurt    = d.MaxHp > 0 && d.Hp * 2 <= d.MaxHp;   // at/below half HP (Killer)
+            bool tgtSubHalf = d.MaxHp > 0 && d.Hp * 2 <  d.MaxHp;   // strictly below half (Executioner)
+            bool selfHurt   = a.MaxHp > 0 && a.Hp * 2 <= a.MaxHp;   // attacker bloodied (Cold Blood)
+
+            // attacker advantages (green) — each shown only when its condition holds THIS shot
+            if (a.BondAura)                                   flags.Add(("+ BOND", Pal.Good));
+            if (a.HasTrait(Trait.Killer) && tgtHurt)          flags.Add(("+ KILLER", Pal.Good));
+            if (a.HasTrait(Trait.Vengeful) && a.AllyDown)     flags.Add(("+ VENGEFUL", Pal.Good));
+            if (a.HasTrait(Trait.ColdBlood) && selfHurt)      flags.Add(("+ COLD BLOOD", Pal.Good));
+            if (a.HasPerk(Perk.LockOn) && o.CoverLevel == 0)  flags.Add(("+ LOCK-ON", Pal.Good));
+            if (a.HasPerk(Perk.CloseQuarters) && dist <= Unit.CloseRange) flags.Add(("+ CLOSE QTRS", Pal.Good));
+            if (a.HasPerk(Perk.Marksman) && dist >= Unit.LongRange)       flags.Add(("+ MARKSMAN", Pal.Good));
+            if (a.HasPerk(Perk.Deadeye))                      flags.Add(("+ DEADEYE", Pal.Good));
+            if (a.HasPerk(Perk.Executioner) && tgtSubHalf)    flags.Add(("+ EXECUTIONER", Pal.Good));
+
+            // attacker penalties (red) — these quietly drag the hit% down
+            if (a.Suppress > 0)                               flags.Add(("- SUPPRESSED", Pal.Foe));
+            if (a.Wound > 0)                                  flags.Add(("- WOUNDED", Pal.Foe));
+            if (a.HasStatus(StatusKind.Disoriented))          flags.Add(("- DISORIENTED", Pal.Foe));
+
+            // target obscured in smoke (it's shootable — LoS clears the endpoint tile —
+            // but harder to make out). Neutral tag: smoke is not in the hit% math.
+            if (g.Grid.IsSmoke(d.X, d.Y))                     flags.Add(("~ SMOKED", Pal.TxtDim));
+        }
+
+        // Layout: one column when short, two when the badge list gets long, so a heavily
+        // perked veteran's tooltip stays compact instead of running tall.
+        const int hdr = 72, lineH = 17, fontFlag = 12, pad = 12;
+        bool twoCol = flags.Count > 5;
+        int rows = twoCol ? (flags.Count + 1) / 2 : flags.Count;
+        int colW = 132;                                    // width that fits "+ OVER LOW COVER" at 12px
+        int w = twoCol ? colW * 2 - 8 : 150;
+        int h = hdr + rows * lineH + (flags.Count > 0 ? 6 : 2);
+
         var m = Raylib.GetMousePosition();
-        int extras = (o.Flanked ? 1 : 0) + (o.HighGround ? 1 : 0) + (o.SeesOver ? 1 : 0) + (o.Partial ? 1 : 0) + (o.Steady ? 1 : 0) + (o.Ambush ? 1 : 0);
-        int w = 150, h = 74 + extras * 18;
         int x = (int)m.X - w / 2;
         int y = (int)m.Y - h - 18;
         x = Util.Clamp(x, 8, Cfg.ScreenW - w - 8);
@@ -717,25 +778,30 @@ public static class Hud
         Raylib.DrawRectangleRounded(box, 0.12f, 8, Pal.RGBA(10, 14, 19, 245));
         Raylib.DrawRectangleLinesEx(box, 1.5f, Pal.Foe);
 
-        Raylib.DrawTextEx(Cfg.Font, "HIT", new Vector2(x + 12, y + 10), 12, 1f, Pal.TxtDim);
+        Raylib.DrawTextEx(Cfg.Font, "HIT", new Vector2(x + pad, y + 10), 12, 1f, Pal.TxtDim);
         string hit = $"{o.HitChance}%";
-        Raylib.DrawTextEx(Cfg.Font, hit, new Vector2(x + w - (int)Raylib.MeasureTextEx(Cfg.Font, hit, 22, 1f).X - 12, y + 7), 22, 1f, Pal.Good);
+        Raylib.DrawTextEx(Cfg.Font, hit, new Vector2(x + w - (int)Raylib.MeasureTextEx(Cfg.Font, hit, 22, 1f).X - pad, y + 7), 22, 1f, Pal.Good);
 
-        Raylib.DrawTextEx(Cfg.Font, "CRIT", new Vector2(x + 12, y + 34), 12, 1f, Pal.TxtDim);
+        Raylib.DrawTextEx(Cfg.Font, "CRIT", new Vector2(x + pad, y + 34), 12, 1f, Pal.TxtDim);
         string crit = $"{o.CritChance}%";
-        Raylib.DrawTextEx(Cfg.Font, crit, new Vector2(x + w - (int)Raylib.MeasureTextEx(Cfg.Font, crit, 16, 1f).X - 12, y + 32), 16, 1f, Pal.Accent);
+        Raylib.DrawTextEx(Cfg.Font, crit, new Vector2(x + w - (int)Raylib.MeasureTextEx(Cfg.Font, crit, 16, 1f).X - pad, y + 32), 16, 1f, Pal.Accent);
 
-        Raylib.DrawTextEx(Cfg.Font, "DMG", new Vector2(x + 12, y + 54), 12, 1f, Pal.TxtDim);
+        Raylib.DrawTextEx(Cfg.Font, "DMG", new Vector2(x + pad, y + 54), 12, 1f, Pal.TxtDim);
         string dmg = $"{o.DmgMin}-{o.DmgMax}";
-        Raylib.DrawTextEx(Cfg.Font, dmg, new Vector2(x + w - (int)Raylib.MeasureTextEx(Cfg.Font, dmg, 16, 1f).X - 12, y + 52), 16, 1f, Pal.Foe);
+        Raylib.DrawTextEx(Cfg.Font, dmg, new Vector2(x + w - (int)Raylib.MeasureTextEx(Cfg.Font, dmg, 16, 1f).X - pad, y + 52), 16, 1f, Pal.Foe);
 
-        int fy = y + 72;
-        if (o.Flanked) { Raylib.DrawTextEx(Cfg.Font, "! FLANKED", new Vector2(x + 12, fy), 13, 1f, Pal.Accent); fy += 18; }
-        if (o.HighGround) { Raylib.DrawTextEx(Cfg.Font, "+ HIGH GROUND", new Vector2(x + 12, fy), 13, 1f, Pal.Good); fy += 18; }
-        if (o.SeesOver) { Raylib.DrawTextEx(Cfg.Font, "+ OVER LOW COVER", new Vector2(x + 12, fy), 13, 1f, Pal.Good); fy += 18; }
-        if (o.Partial) { Raylib.DrawTextEx(Cfg.Font, "~ PARTIAL COVER", new Vector2(x + 12, fy), 13, 1f, Pal.TxtDim); fy += 18; }
-        if (o.Steady) { Raylib.DrawTextEx(Cfg.Font, "+ STEADY", new Vector2(x + 12, fy), 13, 1f, Pal.Good); fy += 18; }
-        if (o.Ambush) { Raylib.DrawTextEx(Cfg.Font, "+ AMBUSH", new Vector2(x + 12, fy), 13, 1f, Pal.Good); fy += 18; }
+        // a hairline above the badges separates them from the headline numbers
+        if (flags.Count > 0)
+            Raylib.DrawRectangle(x + pad, y + hdr - 6, w - pad * 2, 1, Pal.RGBA(38, 49, 63, 200));
+
+        for (int i = 0; i < flags.Count; i++)
+        {
+            int col = twoCol ? i % 2 : 0;
+            int row = twoCol ? i / 2 : i;
+            int fx = x + pad + col * (colW - 4);
+            int fyy = y + hdr + row * lineH;
+            Raylib.DrawTextEx(Cfg.Font, flags[i].text, new Vector2(fx, fyy), fontFlag, 1f, flags[i].col);
+        }
     }
 
     // ---------------- turn banner sweep ----------------
