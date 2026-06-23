@@ -31,6 +31,7 @@ public class MoveStepAnim : Anim
         _dur = diag ? 0.155f : 0.12f;
         var d = _to - _from;
         if (d.LengthSquared() > 0.01f) Unit.Facing = MathF.Atan2(d.Y, d.X);
+        g.Fx.Dust(_from + new Vector2(0, 8f), 3);   // a small puff kicks up as the foot leaves
     }
 
     public override bool Update(Game g, float dt)
@@ -108,6 +109,9 @@ public class ShotAnim : Anim
                 g.AddBloom(0.02f);
                 Color grazeTint = D.Team == Team.Player ? Pal.Friend : Pal.Foe;
                 g.Fx.Burst(D.Pos, grazeTint, 5, 110f, 0.35f, 2.5f, true);
+                // small impact frame + a thin directional spray (the round just clips them)
+                g.Fx.Impact(_impact, Pal.RGBA(220, 226, 236), 9f, 0.55f, 0.10f);
+                g.Fx.DirSparks(_impact, dir, grazeTint, 5, 150f, 0.55f, 2.2f);
                 g.Fx.PopText(D.Pos + new Vector2(0, -26), "GRAZE", Pal.RGBA(190, 200, 215), 20f);
             }
             else
@@ -120,6 +124,20 @@ public class ShotAnim : Anim
                 Color blood = D.Team == Team.Player ? Pal.Friend : Pal.Foe;
                 g.Fx.Burst(D.Pos, blood, Res.Crit ? 22 : 13, Res.Crit ? 320f : 200f, 0.5f, 3.5f, true);
                 g.Fx.Burst(D.Pos, Pal.RGBA(230, 230, 235), 6, 120f, 0.4f, 2.5f);
+
+                // Impact frame + directional sparks, scaled by outcome: a crit throws a big
+                // hot burst + a dense, faster, tighter spray; a normal hit a medium one.
+                if (Res.Crit)
+                {
+                    g.Fx.Impact(_impact, Pal.Accent, 26f, 0.95f, 0.16f);
+                    g.Fx.DirSparks(_impact, dir, Pal.Accent, 16, 360f, 0.5f, 3.4f);
+                    g.Fx.DirSparks(_impact, dir, Pal.RGBA(255, 250, 240), 6, 280f, 0.35f, 2.6f);
+                }
+                else
+                {
+                    g.Fx.Impact(_impact, Pal.RGBA(255, 240, 235), 16f, 0.85f, 0.12f);
+                    g.Fx.DirSparks(_impact, dir, blood, 9, 230f, 0.65f, 3f);
+                }
 
                 string txt = Res.Crit ? $"CRIT {Res.Damage}" : Res.Damage.ToString();
                 g.Fx.PopText(D.Pos + new Vector2(0, -26), txt, Res.Crit ? Pal.Accent : Pal.RGBA(255, 235, 235),
@@ -140,6 +158,8 @@ public class ShotAnim : Anim
             var perp = new Vector2(-dir.Y, dir.X) * Util.RandRange(-22f, 22f);
             _impact = D.Pos + perp;
             g.Fx.Burst(_impact, Pal.RGBA(150, 160, 175), 5, 130f, 0.35f, 2f, true);
+            // a faint ricochet spit where the round strikes air/terrain (small — it whiffed)
+            g.Fx.DirSparks(_impact, dir, Pal.RGBA(170, 180, 195), 4, 150f, 0.9f, 2f);
             g.Fx.PopText(D.Pos + new Vector2(0, -26), "MISS", Pal.TxtDim, 24f);
         }
     }
@@ -152,12 +172,18 @@ public class ShotAnim : Anim
             float k = 1f - (_t - Fire) / (BeamEnd - Fire);
             var dir = Vector2.Normalize(D.Pos - A.Pos + new Vector2(0.001f, 0f));
             Vector2 start = A.Pos + dir * 16f;
-            // graze fires a dimmer beam than a solid hit (reinforces the lighter "GRAZE" read)
+            // graze fires a dimmer beam than a solid hit (reinforces the lighter "GRAZE" read);
+            // a crit's tracer runs a touch hotter/thicker.
             Color beam = Res.Hit ? (Res.Graze ? Pal.RGBA(165, 175, 195) : Pal.Accent) : Pal.RGBA(170, 180, 195);
-            Raylib.DrawLineEx(start, _impact, 3.5f * k + 0.6f, Raylib.Fade(beam, k));
-            Raylib.DrawLineEx(start, _impact, 1.2f, Raylib.Fade(Pal.RGBA(255, 255, 255), k * 0.8f));
-            // muzzle glow
-            Raylib.DrawCircleV(start, 7f * k, Raylib.Fade(Pal.Accent, k * 0.8f));
+            float wide = (Res.Hit && Res.Crit) ? 1.25f : 1f;
+            // outer glow trail (fades along the beam) -> bright core -> hot white center
+            Raylib.DrawLineEx(start, _impact, (5.5f * k + 0.8f) * wide, Raylib.Fade(beam, k * 0.30f));
+            Raylib.DrawLineEx(start, _impact, (3.2f * k + 0.6f) * wide, Raylib.Fade(beam, k));
+            Raylib.DrawLineEx(start, _impact, 1.3f * wide, Raylib.Fade(Pal.RGBA(255, 255, 255), k * 0.9f));
+            // muzzle snap: a quick bright flash-disc at the barrel, biggest at the instant of fire
+            float snap = k * k;       // front-loaded so it cracks then vanishes
+            Raylib.DrawCircleV(start, (9f * snap + 2f) * wide, Raylib.Fade(Pal.Accent, snap * 0.85f));
+            Raylib.DrawCircleV(start, (4.5f * snap + 1f) * wide, Raylib.Fade(Pal.RGBA(255, 250, 235), snap));
         }
     }
 }
@@ -202,13 +228,25 @@ public class GrenadeAnim : Anim
         g.Fx.Burst(_to, Pal.Accent, 36, 360f, 0.6f, 4.5f, true);
         g.Fx.Burst(_to, Pal.RGBA(120, 90, 60), 22, 200f, 0.8f, 5f);
 
+        // expanding shockwave sized to the blast radius + a bright impact flash at the core
+        float blastR = (Radius + 0.5f) * Cfg.Tile;
+        g.Fx.Shockwave(_to, Pal.RGBA(255, 226, 180), 10f, blastR, 5f, 0.95f, 0.30f);
+        g.Fx.Impact(_to, Pal.Accent, blastR * 0.42f, 0.9f, 0.14f);
+        // dirt/debris flung outward (a chunkier, slower-fading complement to the spark burst)
+        g.Fx.DirSparks(_to, new Vector2(1f, -0.3f), Pal.RGBA(150, 120, 84), 14, 240f, MathF.PI, 3.5f);
+
         // chew up cover in the blast: a frag cracks high->low and clears low cover (3.6)
         for (int x = Tx - Radius; x <= Tx + Radius; x++)
             for (int y = Ty - Radius; y <= Ty + Radius; y++)
             {
                 if (!g.Grid.InBounds(x, y)) continue;
                 var ch = g.Grid.DamageCover(x, y, Grid.HighCoverHp);   // 2 dmg: high->low, low->gone
-                if (ch != Grid.CoverHit.None) g.CoverHitFx(x, y, ch);
+                if (ch != Grid.CoverHit.None)
+                {
+                    g.CoverHitFx(x, y, ch);
+                    // shattered cover throws extra debris from its tile
+                    g.Fx.Burst(Util.TileCenter(x, y), Pal.RGBA(140, 116, 86), 10, 180f, 0.7f, 4f);
+                }
             }
 
         // damage every unit in radius (friendly fire included)
