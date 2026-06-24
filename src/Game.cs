@@ -123,15 +123,50 @@ public class Game
     // _shopDone gates the barracks flow (shop -> promotions -> deployment cards).
     bool _shopDone = true;
     public bool ShopDone => _shopDone;
-    public static readonly int[] ShopCost = { 6, 10, 16, 12 };
-    public static readonly string[] ShopName = { "FIELD MEDKIT", "COMBAT STIMS", "ADV. TRAINING", "FRAG CACHE" };
-    public static readonly string[] ShopDesc =
+
+    // The shop is two tiers: a fixed block of consumable/stat purchases (indices 0..ModBase-1)
+    // then the PERSISTENT WEAPON UPGRADES (indices ModBase..) appended from WeaponModDef — the
+    // run's real reward sink, so Intel buys permanent firepower that out-paces attrition. The
+    // parallel arrays + the switch handlers below auto-cover the appended items, and the shop
+    // card auto-sizes to ShopName.Length (Hud.DrawRequisition), so no UI rework is needed.
+    public const int ModBase = 4;                              // count of fixed (non-mod) shop items
+    static WeaponMod ModForItem(int item) => WeaponModDef.All[item - ModBase];
+    public static bool IsModItem(int item) => item >= ModBase && item < ModBase + WeaponModDef.All.Length;
+
+    public static readonly int[] ShopCost = BuildShopCost();
+    public static readonly string[] ShopName = BuildShopName();
+    public static readonly string[] ShopDesc = BuildShopDesc();
+
+    static int[] BuildShopCost()
     {
-        "Heal your most-wounded soldier to full.",
-        "+2 max HP to your frailest soldier (permanent).",
-        "Grant a soldier a bonus perk choice.",
-        "+1 grenade every mission for a soldier (permanent).",
-    };
+        var b = new[] { 6, 10, 16, 12 };
+        var all = new int[ModBase + WeaponModDef.All.Length];
+        b.CopyTo(all, 0);
+        for (int i = 0; i < WeaponModDef.All.Length; i++) all[ModBase + i] = WeaponModDef.Cost(WeaponModDef.All[i]);
+        return all;
+    }
+    static string[] BuildShopName()
+    {
+        var b = new[] { "FIELD MEDKIT", "COMBAT STIMS", "ADV. TRAINING", "FRAG CACHE" };
+        var all = new string[ModBase + WeaponModDef.All.Length];
+        b.CopyTo(all, 0);
+        for (int i = 0; i < WeaponModDef.All.Length; i++) all[ModBase + i] = "WPN: " + WeaponModDef.Name(WeaponModDef.All[i]);
+        return all;
+    }
+    static string[] BuildShopDesc()
+    {
+        var b = new[]
+        {
+            "Heal your most-wounded soldier to full.",
+            "+2 max HP to your frailest soldier (permanent).",
+            "Grant a soldier a bonus perk choice.",
+            "+1 grenade every mission for a soldier (permanent).",
+        };
+        var all = new string[ModBase + WeaponModDef.All.Length];
+        b.CopyTo(all, 0);
+        for (int i = 0; i < WeaponModDef.All.Length; i++) all[ModBase + i] = WeaponModDef.Desc(WeaponModDef.All[i]) + " (installed on a soldier)";
+        return all;
+    }
 
     // mission objective
     public Objective Objective;
@@ -195,10 +230,19 @@ public class Game
     public Unit Vip;
     public bool CaptiveLocked;   // RESCUE: the asset starts caged + invulnerable until a soldier frees it (3.8)
 
-    // hack objective: reach the terminal and hack it over several actions
-    public const int HackRequired = 3;
+    // hack objective: reach the terminal and hack it over several actions. With the one-cycle-
+    // per-turn channel (HackedThisTurn) this is a 2-turn HOLD under fire — a 3-turn hold proved
+    // too lethal once the hack goes loud (competent-AI win-rate cratered); 2 keeps it a real
+    // fight the squad can win with good play.
+    public const int HackRequired = 2;
     public (int x, int y) Terminal;
     public int HackProgress;
+    // Balance fix: the terminal accepts only ONE breach cycle per player turn (a sustained
+    // channel), so the 3-charge hack is a genuine multi-turn HOLD — the squad can't stack 3
+    // soldiers to finish in one turn, it must defend the console across several turns while the
+    // hack-noise-roused pods converge. Reset each StartPlayerTurn. (Sabotage's spread-out charge
+    // sites already force a multi-turn traverse, so only the single-terminal hack needs this.)
+    public bool HackedThisTurn;
     public bool HasTerminal => Objective == Objective.Hack;
 
     // SABOTAGE: K charge sites, each demolished by one PLANT action (3.8)
@@ -216,7 +260,10 @@ public class Game
     public bool CanHack(Unit u)
     {
         if (u == null || u.Team != Team.Player || !u.CanAct) return false;
-        if (HasTerminal) return HackProgress < HackRequired && Util.ChebyDist(u.X, u.Y, Terminal.x, Terminal.y) <= 1;
+        // terminal: one breach cycle per turn (HackedThisTurn) so it's a multi-turn hold, not a
+        // stack-and-finish — the autopilot/HUD then route the other soldiers to defend instead.
+        if (HasTerminal) return !HackedThisTurn && HackProgress < HackRequired
+                              && Util.ChebyDist(u.X, u.Y, Terminal.x, Terminal.y) <= 1;
         if (HasSabotage) return NearestSabotageSite(u) >= 0;
         return false;
     }
@@ -256,6 +303,20 @@ public class Game
     bool  _autoCamManual;   // true = player manually moved camera; suppresses auto-follow until C-reset
     public float DeathFlash;                 // 0..1 red full-screen pulse on a soldier's death
     readonly List<string> _missionKia = new(); // soldiers KIA this mission (for the debrief)
+
+    // Death scorch decals: where a unit fell, a dark team-tinted burn mark lingers on the tile
+    // and fades over ~ScorchLife seconds (decayed in Update, drawn under units in Renderer, cleared
+    // per mission). So a kill reads as a burst + a lingering scorch, not an instant disappearance.
+    public struct Scorch { public Vector2 Pos; public Color Tint; public float Life, MaxLife; }
+    public readonly List<Scorch> Scorches = new();
+    public const float ScorchLife = 1.6f;    // seconds a scorch lingers before it's fully gone
+    /// Register a fading scorch decal at a fallen unit's position (team-tinted).
+    public void AddScorch(Vector2 at, Color tint)
+    {
+        // cap the list so a long mission can't accumulate unbounded decals (cheap; cosmetic)
+        if (Scorches.Count > 64) Scorches.RemoveAt(0);
+        Scorches.Add(new Scorch { Pos = at, Tint = tint, Life = ScorchLife, MaxLife = ScorchLife });
+    }
     public void AddHitStop(float s) { HitStop = MathF.Max(HitStop, s); }
     public void AddZoomPunch(float p) { _camPulse = MathF.Max(_camPulse, p); }
 
@@ -278,6 +339,7 @@ public class Game
         int heat = PendingHeat;
         if (NoPersist && int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_HEAT"), out int hEnv)) heat = hEnv;
         _run.HeatLevel = Sightline.Heat.Clamp(heat);
+        Stats.BeginRun(_run.HeatLevel);     // balance telemetry (no-op unless Stats.Enabled)
         Players = _run.Squad;
         int n = Util.Clamp(startAt, 1, Run.MaxMissions);
         if (n > 1) _run.JumpTo(n);           // harness: advance along the map to the requested op
@@ -401,7 +463,10 @@ public class Game
         foreach (var u in Players)
         { u.FeatMultiKill = u.FeatClutch = u.FeatVengeful = u.WasNearDeath = u.AllyDown = false; u.BondAura = false; u.ConsecutiveMisses = 0; u.Statuses.Clear(); }
         _missionKia.Clear();
+        Scorches.Clear();            // death decals don't carry between missions
         _refundedThisTurn.Clear();   // flank-kill refund is per-turn; clear it for the mission's first turn too (review #2)
+        _vipWaitTurns = 0;           // SmartStep Escort: VIP-hold patience (anti-TIMEOUT)
+        _smartConcealTurns = 0;      // SmartStep: concealed-turn counter (hard anti-TIMEOUT cap)
         DeathFlash = 0;
         RollSecondary(n);
         foreach (var u in Enemies) { u.BeginTurn(); u.OnOverwatch = false; }
@@ -413,6 +478,10 @@ public class Game
 
         // checkpoint the run at the start of each mission (normal play only)
         if (!NoPersist) SaveGame.Save(_run);
+
+        // balance telemetry (no-op unless Stats.Enabled): record the encounter we just built.
+        Stats.BeginMission(n, Objective.ToString(), _run.HeatLevel,
+                           Players.Count(p => p.Alive && !p.IsVip), Enemies.Count(e => e.Alive));
     }
 
     void NextMission() => SetupMission(_run.Mission + 1);
@@ -770,6 +839,27 @@ public class Game
         Grid.AddSmoke(Util.Clamp(u.X + 5, 0, Grid.W - 1), Util.Clamp(u.Y + 3, 0, Grid.H - 1), SmokeAnim.Radius, SmokeAnim.Turns);
     }
 
+    /// Harness hook (screenshot only): freeze a sample of the procedural unit-animation poses
+    /// (fire-recoil / hit-flinch / walk-lean) on live units + drop a couple of death-scorch decals,
+    /// so a static SHOT frame demonstrates the new juice (which is otherwise transient in play).
+    public void DebugUnitFx()
+    {
+        var live = Players.Where(p => p.Alive).ToList();
+        if (live.Count > 0) { live[0].RecoilAnim = 1f; Selected = live[0]; }   // a soldier mid-fire-recoil
+        if (live.Count > 1) live[1].FlinchAnim = 1f;                            // a soldier mid-hit-flinch
+        if (live.Count > 2) live[2].WalkLean = 1f;                              // a soldier mid-stride
+        var foes = Enemies.Where(e => e.Alive).ToList();
+        if (foes.Count > 0) foes[0].FlinchAnim = 1f;
+        // a few lingering scorch decals on nearby empty tiles to show where units fell
+        if (live.Count > 0)
+            for (int i = 0; i < 3; i++)
+            {
+                int sx = Util.Clamp(live[0].X + 2 + i * 2, 0, Grid.W - 1);
+                int sy = Util.Clamp(live[0].Y + 1 + i, 0, Grid.H - 1);
+                AddScorch(Util.TileCenter(sx, sy), i % 2 == 0 ? Pal.Foe : Pal.Friend);
+            }
+    }
+
     // ---- secondary objective (3.9) ----
     /// Roll an optional bonus goal for the mission (none on mission 1; CLEAN SWEEP is
     /// skipped on Eliminate where it's automatic).
@@ -779,7 +869,12 @@ public class Game
         if (n <= 1) { Secondary = SecondaryKind.None; return; }
         var pool = new List<SecondaryKind> { SecondaryKind.NoLosses };
         if (Objective != Objective.Defend) pool.Add(SecondaryKind.Swift);   // can't finish a hold-out early
-        if (Objective != Objective.Eliminate) pool.Add(SecondaryKind.CleanSweep);
+        // CLEAN SWEEP (kill every hostile) is a mismatched / near-impossible bonus on:
+        //  - Eliminate  (it's the primary objective — automatic, no challenge)
+        //  - Decapitate (you win the instant the HVT dies, so clearing the rest is harder)
+        //  - Defend     (waves spawn until the timer, so the board never fully clears)
+        if (Objective != Objective.Eliminate && Objective != Objective.Decapitate
+            && Objective != Objective.Defend) pool.Add(SecondaryKind.CleanSweep);
         Secondary = pool[Util.RandInt(0, pool.Count - 1)];
     }
 
@@ -875,6 +970,10 @@ public class Game
         int survivors = _run.Squad.Count;
         bool finished = _run.Mission >= Run.MaxMissions;
 
+        // balance telemetry: this mission was just cleared (a win). A finished run also ends here.
+        Stats.EndMission(true, _turnCount, survivors, Enemies.Count(e => !e.Alive), "");
+        if (finished) Stats.EndRun(true, _run.Mission, "");
+
         // reward for clearing the chosen deployment
         if (!finished && _run.CurrentCard != null && _run.CurrentCard.Reward == RewardKind.Heal)
             foreach (var u in _run.Squad) u.Hp = u.MaxHp;
@@ -948,6 +1047,10 @@ public class Game
         LoseReason = reason;
         Phase = Phase.Lose;
         Audio.Play("lose");
+        // balance telemetry: the active mission AND the run end here as a loss.
+        Stats.EndMission(false, _turnCount, AlivePlayers().Count(p => !p.IsVip),
+                         Enemies.Count(e => !e.Alive), title);
+        Stats.EndRun(false, _run.Mission - 1, title);
         if (!NoPersist) SaveGame.Delete();
     }
 
@@ -1093,6 +1196,17 @@ public class Game
     {
         d.Alive = false;
         d.Hp = 0;
+        // balance telemetry (no-op unless Stats.Enabled): attribute this kill to the unit
+        // whose shot/grenade is the active anim (the blow that caused this death). Covers
+        // both directions (player kills enemies; an enemy's shot kills a soldier) so the
+        // report can rank player-class lethality AND which enemy class kills soldiers.
+        // A source-less death (DoT/environment, e.g. a burn tick on an idle queue) has no
+        // anim attacker → killer is null; we tag it killerTeam=1 so a soldier killed by DoT
+        // still buckets sensibly and an enemy killed by DoT is simply not credited to a
+        // player class (a minor per-class undercount; the EnemiesKilled total is reconciled
+        // by Stats.EndMission's dead-enemy count, so aggregate kill counts stay accurate).
+        Unit killer = ActiveAnim switch { ShotAnim sa => sa.A, GrenadeAnim ga => ga.Thrower, _ => null };
+        Stats.RecordKill(killer?.Cls ?? "?", killer != null ? (int)killer.Team : 1, d.Cls, (int)d.Team);
         if (d.Team == Team.Player)
         {
             _run.Fallen.Add(d.Name);
@@ -1103,8 +1217,14 @@ public class Game
         }
         TryFlankKillRefund(d);   // "press the advantage": a player flank-kill refunds an action
         Color c = d.Team == Team.Player ? Pal.Friend : Pal.Foe;
+        // team-colored SHATTER: an expanding ring + a radial spark spray + ember clouds, so a
+        // kill reads as a figure breaking apart (not a vanish). Tuned to the existing juice scale.
+        Fx.Shockwave(d.Pos, c, 8f, 38f, 4f, 0.85f, 0.34f);
+        Fx.DirSparks(d.Pos, new Vector2(0, -1f), c, 18, 300f, MathF.PI, 3.5f);   // full-circle spray (spread=PI)
         Fx.Burst(d.Pos, c, 30, 280f, 0.7f, 4f, true);
         Fx.Burst(d.Pos, Pal.RGBA(20, 25, 33), 16, 150f, 0.8f, 5f);
+        // lingering scorch decal on the tile (drawn under units, fades over ScorchLife)
+        AddScorch(d.Pos, c);
         Fx.PopText(d.Pos + new Vector2(0, -10), d.IsVip ? "VIP DOWN" : "DOWN", c, 22f);
         if (d.IsVip) { ShowBanner("VIP DOWN", true); Fx.AddShake(13f); }
         Fx.AddShake(7f);
@@ -1276,6 +1396,19 @@ public class Game
         }
     }
 
+    /// Relax a unit's transient render-only state each frame: damage flash, recoil/knockback
+    /// offset, and the procedural anim poses (fire-recoil / hit-flinch / walk-lean). All decay
+    /// deterministically toward 0 so a unit eases back to its idle breathing — kept out of the
+    /// sim (purely cosmetic), so the headless screenshot harness stays reproducible.
+    static void DecayUnitFx(Unit u, float t)
+    {
+        u.Flash = MathF.Max(0, u.Flash - t * 4f);
+        u.Recoil *= MathF.Exp(-t * 17f);
+        u.RecoilAnim = MathF.Max(0, u.RecoilAnim - t * 6.5f);   // snappy: a quick kick that settles fast
+        u.FlinchAnim = MathF.Max(0, u.FlinchAnim - t * 6.0f);   // a brief shudder
+        u.WalkLean   = MathF.Max(0, u.WalkLean   - t * 7.5f);   // leans through the step, settles when idle
+    }
+
     public void Update(float dt)
     {
         // custom-tag editor is modal: it swallows all other input while open
@@ -1285,6 +1418,7 @@ public class Game
         if (!AutoPlay && Raylib.IsKeyPressed(KeyboardKey.F)) Display.ToggleFullscreen();
         Audio.SetMusicIntensity(MusicIntensity());
         UpdateTutorial(dt);
+        Fx.UpdateAmbient(Biome, dt);   // per-biome ambient atmosphere (Wave B)
 
         // camera zoom-punch always relaxes; hit-stop freezes the rest of the sim
         _camPulse *= MathF.Exp(-dt * 11f);
@@ -1323,8 +1457,13 @@ public class Game
 
         float t = MathF.Min(dt, 0.05f);
         Fx.Update(t);
-        foreach (var u in Players) { u.Flash = MathF.Max(0, u.Flash - t * 4f); u.Recoil *= MathF.Exp(-t * 17f); }
-        foreach (var u in Enemies) { u.Flash = MathF.Max(0, u.Flash - t * 4f); u.Recoil *= MathF.Exp(-t * 17f); }
+        foreach (var u in Players) DecayUnitFx(u, t);
+        foreach (var u in Enemies) DecayUnitFx(u, t);
+        for (int i = Scorches.Count - 1; i >= 0; i--)   // death scorch decals fade out
+        {
+            var s = Scorches[i]; s.Life -= t;
+            if (s.Life <= 0) Scorches.RemoveAt(i); else Scorches[i] = s;
+        }
         UpdateBondAuras();   // bonded squadmates buff each other while adjacent
         if (BannerTimer > 0) BannerTimer -= t;
 
@@ -1419,10 +1558,785 @@ public class Game
     // so the whole loop can be exercised headlessly. Never enabled in normal play.
     public bool AutoPlay;
 
+    // Competent-AI flag (enabled via SIGHTLINE_SMARTPLAY / the SIGHTLINE_BALANCE batch
+    // runner). When set, the autopilot routes through SmartStep() — a heuristic player
+    // that actually plays to win (cover/threat-aware positioning, best-target selection,
+    // deliberate ability/ambush use) — so headless games become a real balance gauge.
+    // The default AutoStep() remains the path-coverage smoke test.
+    public bool SmartPlay;
+
+    // ════════════════════════════════════════════════════════════════════════════════
+    // SmartStep — the COMPETENT headless autopilot (SIGHTLINE_SMARTPLAY / the balance
+    // runner). Where AutoStep() is a deliberate smoke-test (nearest target, march straight
+    // in, random ability/grenade rolls — loses almost everything), SmartStep plays to WIN
+    // so headless games are a real balance gauge.
+    //
+    // Same per-step contract as AutoStep: called repeatedly while it's the player turn and
+    // the anim queue is idle; each call commits at most ONE action for the best soldier,
+    // then returns (the dispatcher calls us again until every soldier is spent and the turn
+    // ends). It REUSES every game primitive (Combat.ComputeOdds via SmartOdds, the same
+    // tile-scoring philosophy as Ai.Plan, ComputeThreat's exposure model, the real action
+    // issuers) so it never desyncs from the rules.
+    //
+    // PROGRESS INVARIANT (sacred — must never TIMEOUT): every code path either issues a
+    // real action (shoot/move/grenade/item/ability/hack/overwatch/reload) or falls through
+    // to a guaranteed-progress fallback (advance toward the objective/enemy, else hunker),
+    // exactly like AutoStep. The objective routing (Evac/Hack/Sabotage/Escort/Rescue/
+    // Defend/Decapitate) is preserved — combat is just layered on top of it.
+    // ════════════════════════════════════════════════════════════════════════════════
+    void SmartStep()
+    {
+        if (_anims.Count > 0 || Phase != Phase.PlayerTurn) return;
+        TryFreeCaptive();                       // free a captive a soldier already stands next to
+        var u = Players.FirstOrDefault(p => p.CanAct);
+        if (u == null) { EndPlayerTurn(); return; }
+        Selected = u;
+        RecomputeMoveCost();
+
+        // ── CONCEALMENT / AMBUSH (4.4): spend the opener deliberately ──────────────────
+        // While concealed the squad can reposition freely AND pods can't wake by sight, so
+        // concealment is a HUGE asset for the "race" objectives: keep stealth and walk the
+        // goal (the fragile VIP can cross the map untouched; an Evac squad can slip into the
+        // zone). For combat objectives, hold the break until a soldier has a GOOD ambush shot
+        // (fire it next step with +20 aim/+25 crit), or until proximity forces the reveal.
+        if (SquadConcealed)
+        {
+            // Stealth-race objectives: ones we approach hidden without needing to fire first.
+            // Evac/Escort/Rescue qualify because they're pure "reach a tile" goals (no shot at
+            // all while hidden). Hack/Sabotage qualify for the covert APPROACH — but the first
+            // hack/plant now GOES LOUD (DoHack breaks concealment, balance fix), so after that
+            // the squad drops into the normal combat objective routing to hold & finish. We
+            // still creep in concealed (safe approach) rather than ambush-opening from afar.
+            // (Eliminate/Decapitate/Defend inherently require killing, so they ambush instead.)
+            bool stealthRace = Objective == Objective.Evac || Objective == Objective.Escort
+                            || Objective == Objective.Rescue || Objective == Objective.Hack
+                            || Objective == Objective.Sabotage;
+
+            // auto-reveal is imminent (a soldier is about to step inside RevealRange of an
+            // active foe): break NOW so the ambush bonus isn't wasted on a forced reveal.
+            bool forced = Players.Any(p => p.Alive && Enemies.Any(e => e.Alive && e.Active
+                    && Util.TileDist(p.X, p.Y, e.X, e.Y) <= RevealRange + 1));
+
+            if (!stealthRace)
+            {
+                // COMBAT objective: a worthwhile ambush shot from where this soldier stands?
+                var (ambTgt, ambVal) = BestShotFrom(u, u.X, u.Y);
+                if (ambTgt != null && ambVal >= 8f) { BreakConcealment(u); return; }
+                if (forced) { BreakConcealment(); return; }
+                // creep into a better firing position before tipping our hand; hold if none.
+                if (SmartApproach(u)) return;
+                DoHunker(); return;
+            }
+
+            // STEALTH-RACE objective: stay hidden and make objective progress (NO shooting —
+            // a shot would break stealth and wake the pods we're sneaking past). Only break if
+            // a reveal is forced anyway (then spring it with the best-positioned soldier).
+            // HARD ANTI-TIMEOUT CAP: if the covert plan ever drags on (squad can't consolidate
+            // in the zone / path to the objective is blocked), abandon stealth so the normal
+            // combat objective logic — which has bulletproof guaranteed-progress fallbacks —
+            // resolves the match. This is the safety net that makes the stealth plan TIMEOUT-proof.
+            if (forced || _smartConcealTurns >= 30)
+            {
+                var breaker = BestSquadAmbushUnit() ?? u;
+                Selected = breaker; BreakConcealment(breaker); return;
+            }
+            if (SmartConcealedRace(u)) return;     // move the VIP/squad toward the goal, hidden
+            DoHunker(); return;
+        }
+
+        // ── OBJECTIVE ROUTING (preserved from AutoStep, with smart combat layered in) ──
+        switch (Objective)
+        {
+            case Objective.Evac:    if (SmartEvac(u))    return; break;
+            case Objective.Hack:    if (SmartHack(u))    return; break;
+            case Objective.Sabotage:if (SmartSabotage(u))return; break;
+            case Objective.Escort:  if (SmartEscort(u))  return; break;
+            case Objective.Rescue:  if (SmartRescue(u))  return; break;
+            case Objective.Defend:  if (SmartDefend(u))  return; break;
+            case Objective.Decapitate: if (SmartDecapitate(u)) return; break;
+        }
+
+        // ELIMINATE (and the combat-clearing fall-through for every other objective):
+        SmartCombatStep(u);
+    }
+
+    /// CONCEALED stealth-race movement: advance the acting soldier toward the goal WITHOUT
+    /// firing (pods stay dormant while we're hidden, so a covert dash to evac / the cage is
+    /// far safer than waking the board). The VIP/captive heads for extraction; escorts head
+    /// for the goal too (to be in position when stealth eventually breaks). Returns true if a
+    /// move was issued. NEVER calls a shooting/ability path (that would break concealment).
+    bool SmartConcealedRace(Unit u)
+    {
+        // HACK / SABOTAGE: creep to the objective concealed (safe approach), then hack/plant.
+        // NOTE: the first hack/plant now BREAKS stealth (DoHack → BreakConcealment, balance
+        // fix), so the very next SmartStep frame falls through to the engaged routing
+        // (SmartHack/SmartSabotage) which fights to hold the objective and finish it.
+        if (Objective == Objective.Hack)
+        {
+            if (CanHack(u)) { DoHack(); return true; }
+            return TryMoveTowardTile(u, Terminal.x, Terminal.y);
+        }
+        if (Objective == Objective.Sabotage)
+        {
+            if (CanHack(u)) { DoHack(); return true; }     // plants the nearest adjacent charge
+            var site = SabotageSites.Where((s, i) => !SabotageBlown.Contains(i))
+                .OrderBy(s => Util.TileDist(u.X, u.Y, s.x, s.y)).FirstOrDefault();
+            return site != default && TryMoveTowardTile(u, site.x, site.y);
+        }
+        // VIP / freed captive: walk to the extraction zone (concealed → no enemy fire, so just
+        // beeline; VipAdvance's exposure scoring is moot while hidden).
+        if (u.IsVip)
+        {
+            if (CaptiveLocked) return false;   // caged: can't move (hunker)
+            if (EvacZone.Contains((u.X, u.Y))) return false;
+            var g = EvacZone.Where(t => !IsOccupiedByOther(t.x, t.y, u))
+                            .OrderBy(t => Util.TileDist(u.X, u.Y, t.x, t.y)).FirstOrDefault();
+            return g != default && TryMoveTowardTile(u, g.x, g.y);
+        }
+        // RESCUE escort: rush to spring the still-caged captive (concealed → safe approach).
+        if (Objective == Objective.Rescue && CaptiveLocked && Vip != null
+            && Util.ChebyDist(u.X, u.Y, Vip.X, Vip.Y) > 1)
+            return TryMoveTowardTile(u, Vip.X, Vip.Y);
+        // Evac/Escort soldiers: move toward the extraction zone to get into position.
+        var ahead = EvacZone.OrderBy(t => Util.TileDist(u.X, u.Y, t.x, t.y)).FirstOrDefault();
+        if (ahead != default && !EvacZone.Contains((u.X, u.Y)))
+            return TryMoveTowardTile(u, ahead.x, ahead.y);
+        return false;   // already staged: hold concealed (caller hunkers)
+    }
+
+    /// The squad's best-positioned ambusher right now: the soldier whose current tile yields
+    /// the highest-value shot on a live foe. Used to pick WHO springs a forced concealment
+    /// break so the +ambush bonus lands the biggest hit. Null if no soldier has any shot.
+    Unit BestSquadAmbushUnit()
+    {
+        Unit best = null; float bestVal = 0f;
+        foreach (var p in Players)
+        {
+            if (!p.Alive || !p.CanAct || p.IsVip || p.Ammo <= 0) continue;
+            var (tgt, val) = BestShotFrom(p, p.X, p.Y);
+            if (tgt != null && val > bestVal) { bestVal = val; best = p; }
+        }
+        return best;
+    }
+
+    // ── objective sub-routines ────────────────────────────────────────────────────────
+    // Each returns true once it has committed this soldier's action. They prioritise the
+    // OBJECTIVE move but interleave smart combat (best shot / cover) so the squad fights
+    // its way to the goal instead of marching straight into fire. Returning false hands the
+    // soldier to SmartCombatStep (the shared combat brain + guaranteed-progress fallback).
+
+    bool SmartEvac(Unit u)
+    {
+        // EXTRACTION IS A RACE: the longer the squad lingers the more pods wake and grind it
+        // down (smart positioning that adds turns LOSES Evac). So beeline to the zone FIRST;
+        // only fight when genuinely blocked. Exception: take a kill ONLY when it doesn't cost
+        // tempo — a near-certain finisher of a foe that already threatens the lane.
+        if (EvacZone.Contains((u.X, u.Y)))
+        {
+            // arrived: hold it — finish nearby threats, else overwatch / hunker.
+            if (TakeBestShot(u)) return true;
+            if (u.Ammo == 0 && u.ActionsLeft > 0) { DoReload(); return true; }
+            if (HoldOverwatch(u)) return true;
+            DoHunker(); return true;
+        }
+        // push for the nearest free extraction tile — distance-greedy (speed over cover).
+        var cand = EvacZone.Where(t => !IsOccupiedByOther(t.x, t.y, u))
+                           .OrderBy(t => Util.TileDist(u.X, u.Y, t.x, t.y)).ToList();
+        if (cand.Count > 0 && TryMoveTowardTile(u, cand[0].x, cand[0].y)) return true;
+        // couldn't advance this turn (path blocked): clear a blocker, blast a squatter, re-arm.
+        if (TakeBestShot(u)) return true;
+        if (u.Grenades > 0)
+        {
+            // blast a squatter loose — but NEVER if a soldier is in the blast (friendly fire);
+            // the very "path jammed" state that got us here often means an ally is close by.
+            var blocker = AliveEnemies()
+                .Where(e => EvacZone.Contains((e.X, e.Y)) && CanGrenade(u, e.X, e.Y) && NoAllyInBlast(e.X, e.Y))
+                .OrderBy(e => Util.TileDist(u.X, u.Y, e.X, e.Y)).FirstOrDefault();
+            if (blocker != null) { IssueGrenade(blocker.X, blocker.Y); return true; }
+        }
+        if (u.Ammo == 0) { DoReload(); return true; }
+        DoHunker(); return true;
+    }
+
+    /// True if NO living soldier sits within a grenade's blast (Chebyshev GrenadeAnim.Radius)
+    /// of (tx,ty) — the friendly-fire safety check shared by every SmartStep grenade path.
+    bool NoAllyInBlast(int tx, int ty)
+        => !AlivePlayers().Any(f => Util.ChebyDist(tx, ty, f.X, f.Y) <= GrenadeAnim.Radius);
+
+    bool SmartHack(Unit u)
+    {
+        if (CanHack(u)) { DoHack(); return true; }          // adjacent: hack it down
+        // a strong shot is worth taking; otherwise RUSH the terminal (speed limits how many
+        // pods wake before we're done — distance-greedy, like the dumb baseline but smarter
+        // about when to pause). Once stuck, clear blockers / re-arm.
+        if (HasStrongShot(u) && TakeBestShot(u)) return true;
+        if (TryMoveTowardTile(u, Terminal.x, Terminal.y)) return true;
+        if (TakeBestShot(u)) return true;                   // pinned: clear blockers
+        if (u.Ammo == 0) { DoReload(); return true; }
+        return false;                                       // hand to combat brain (overwatch/hunker)
+    }
+
+    bool SmartSabotage(Unit u)
+    {
+        if (CanHack(u)) { DoHack(); return true; }          // plant the charge
+        if (HasStrongShot(u) && TakeBestShot(u)) return true;
+        var site = SabotageSites.Where((s, i) => !SabotageBlown.Contains(i))
+            .OrderBy(s => Util.TileDist(u.X, u.Y, s.x, s.y)).FirstOrDefault();
+        if (site != default && TryMoveTowardTile(u, site.x, site.y)) return true;
+        if (TakeBestShot(u)) return true;
+        if (u.Ammo == 0) { DoReload(); return true; }
+        return false;
+    }
+
+    bool SmartEscort(Unit u)
+    {
+        if (u.IsVip)
+        {
+            // the asset is fragile (6 HP) and the enemy AI hunts it, so SURVIVAL beats raw
+            // speed here (unlike Evac where the whole squad must arrive): advance toward evac
+            // along the SAFEST route — minimise exposure, hug cover — rather than sprinting
+            // through the open. VipAdvance falls back to a plain beeline if no path is safer.
+            if (!EvacZone.Contains((u.X, u.Y)))
+            {
+                var goal = EvacZone.Where(t => !IsOccupiedByOther(t.x, t.y, u))
+                                   .OrderBy(t => Util.TileDist(u.X, u.Y, t.x, t.y)).FirstOrDefault();
+                if (goal != default && VipAdvance(u, goal.x, goal.y)) return true;
+            }
+            DoHunker(); return true;     // arrived or blocked: tuck in (the VIP's gun is irrelevant)
+        }
+        // escorts: clear the path AHEAD of the VIP and kill threats to it. Take the best shot;
+        // if there's nothing to shoot, push toward the evac zone to screen the VIP's route
+        // (don't hang back letting the VIP walk into fire alone), then fall through to combat.
+        if (TakeBestShot(u)) return true;
+        if (u.Ammo == 0) { DoReload(); return true; }
+        var ahead = EvacZone.OrderBy(t => Util.TileDist(u.X, u.Y, t.x, t.y)).FirstOrDefault();
+        if (ahead != default && SmartMoveToward(u, ahead.x, ahead.y)) return true;
+        return false;
+    }
+
+    bool SmartRescue(Unit u)
+    {
+        if (u.IsVip)
+        {
+            if (CaptiveLocked) { DoHunker(); return true; }     // caged: can't move
+            // freed: race to extraction (beeline — speed beats cover for the fragile asset).
+            if (!EvacZone.Contains((u.X, u.Y)))
+            {
+                var cand = EvacZone.Where(t => !IsOccupiedByOther(t.x, t.y, u))
+                                   .OrderBy(t => Util.TileDist(u.X, u.Y, t.x, t.y)).ToList();
+                if (cand.Count > 0 && TryMoveTowardTile(u, cand[0].x, cand[0].y)) return true;
+            }
+            DoHunker(); return true;
+        }
+        // PHASE 1 — spring the captive ASAP: the WHOLE squad converges on the cage (the
+        // dumb baseline does this and it's right — the captive sits mid-board, so dawdling
+        // in cover just lets the enemies mass). Take a free finisher en route, else beeline.
+        if (CaptiveLocked && Vip != null)
+        {
+            if (Util.ChebyDist(u.X, u.Y, Vip.X, Vip.Y) > 1)
+            {
+                if (HasStrongShot(u) && TakeBestShot(u)) return true;     // a sure kill on the way is fine
+                if (TryMoveTowardTile(u, Vip.X, Vip.Y)) return true;     // otherwise rush the cage
+            }
+            // adjacent already (TryFreeCaptive will spring it next tick): fight from here.
+        }
+        // PHASE 2 (freed) — screen the captive's extraction: kill threats, else fall to combat.
+        if (TakeBestShot(u)) return true;
+        if (u.Ammo == 0) { DoReload(); return true; }
+        return false;
+    }
+
+    bool SmartDefend(Unit u)
+    {
+        // HOLD THE LINE: win = survive N turns, so DON'T wander (every step out of cover is
+        // risk and there's nowhere to "go"). Prep a steady shot, fire the best target, then
+        // overwatch the approach unconditionally (waves keep coming — a held lane is never
+        // wasted), and hunker as the floor. No repositioning: a defending squad stays put.
+        if (PrepAbility(u)) return true;
+        if (TakeBestShot(u)) return true;
+        if (u.Ammo == 0) { DoReload(); return true; }
+        if (u.Ammo > 0 && u.ActionsLeft > 0 && !u.HasStatus(StatusKind.Disoriented))
+        { DoOverwatch(); return true; }     // always worth watching on a defend
+        DoHunker(); return true;
+    }
+
+    bool SmartDecapitate(Unit u)
+    {
+        if (Hvt != null && Hvt.Alive)
+        {
+            // shoot the HVT on sight (prep a steady shot first if it sharpens the kill).
+            if (u.Ammo > 0 && CanTarget(u, Hvt))
+            {
+                if (PrepAbilityFor(u, Hvt)) return true;
+                AutoShootSmart(u, Hvt); return true;
+            }
+            if (u.Ammo == 0) { DoReload(); return true; }
+            if (u.Grenades > 0 && CanGrenade(u, Hvt.X, Hvt.Y)
+                && !Players.Any(f => f.Alive && Util.ChebyDist(f.X, f.Y, Hvt.X, Hvt.Y) <= 1))
+            { IssueGrenade(Hvt.X, Hvt.Y); return true; }       // flush it out of cover
+            // can't reach it: drop a close blocker, else maneuver onto the HVT.
+            var blk = FirstTargetFor(u);
+            if (blk != null && blk != Hvt && Util.TileDist(u.X, u.Y, blk.X, blk.Y) <= 3
+                && TakeBestShot(u)) return true;
+            if (SmartMoveToward(u, Hvt.X, Hvt.Y)) return true;
+        }
+        return false;   // HVT dead/unreachable → generic combat
+    }
+
+    // ── the shared combat brain (ELIMINATE + every objective's clear-and-advance) ──────
+    // The heart of the competent AI. Order of preference for a single soldier:
+    //   1. prep a value-adding ability (STEADY before a strong shot, SUPPRESS/SMOKE a
+    //      dangerous foe, PATCH a badly-hurt adjacent ally, RUN&GUN/BLITZ for tempo);
+    //   2. fire the best expected-value target (finishers + flanks + priority foes first);
+    //   3. grenade a 2+ cluster, or a well-covered target we can't shoot well;
+    //   4. reposition toward cover / a flanking angle (subtracting tile exposure);
+    //   5. reload if dry, overwatch if foes will push, else hunker (always progresses).
+    void SmartCombatStep(Unit u)
+    {
+        // 1 — deliberate ability prep that improves THIS turn's outcome.
+        if (PrepAbility(u)) return;
+
+        // 2 — best shot by expected value (only when it's actually worth firing).
+        if (TakeBestShot(u)) return;
+
+        // 3 — out of ammo: reload now so next step can fire.
+        if (u.Ammo == 0 && u.ActionsLeft > 0) { DoReload(); return; }
+
+        // 4 — grenade: catch a cluster, or flush a target our gun can't crack.
+        if (u.Grenades > 0 && SmartGrenade(u)) return;
+
+        // 5 — no shot available this turn: maneuver toward a covered firing position on the
+        //     nearest foe (cover + flank − exposure). If we're already well-placed and a foe
+        //     is in sight, hold overwatch; otherwise keep closing. Always ends in hunker.
+        if (SmartApproach(u)) return;
+        if (HoldOverwatch(u)) return;
+        if (SmartReposition(u)) return;     // shuffle into the best adjacent cover if any
+        DoHunker();                         // guarantees progress
+    }
+
+    // ════════════════════ smart combat helpers ════════════════════════════════════════
+
+    /// ComputeOdds as if `a` stood at (ax,ay) — the Ai.Plan trick (move, compute, restore).
+    /// Lets us score a prospective firing tile without actually moving the unit.
+    ShotOdds SmartOdds(Unit a, int ax, int ay, Unit d)
+    {
+        int ox = a.X, oy = a.Y;
+        a.X = ax; a.Y = ay;
+        var odds = Combat.ComputeOdds(Grid, a, d);
+        a.X = ox; a.Y = oy;
+        return odds;
+    }
+
+    /// How dangerous is this enemy → how much we want it dead first. VIP/HVT-style high-value
+    /// kills and the roles that punish us hardest (snipers, mortars, the medic that undoes our
+    /// damage, elites/bosses, cover-stripping sappers) get a priority premium.
+    float PriorityWeight(Unit e)
+    {
+        switch (e.Cls)
+        {
+            case "ELITE":     return 30f;   // boss / mid-boss: ends the mission, hits hard
+            case "WARLORD":   return 32f;
+            case "SNIPER":    return 22f;   // long-range chip from safety
+            case "MORTAR":    return 22f;   // back-line AoE we can't easily reach
+            case "MEDIC":     return 20f;   // undoes our damage — kill it to stop the heals
+            case "SAPPER":    return 14f;   // strips our cover
+            case "BERSERKER": return 14f;   // rushes us; better dead before it arrives
+            case "HUNTER":    return 13f;   // flanker
+            case "DRONE":     return 11f;   // ignores cover; usually fragile, finish it
+            case "TURRET":    return 8f;    // immobile but free overwatch
+            default:          return 4f;    // grunt / scout / shield
+        }
+    }
+
+    /// Expected value of a shot described by `odds` against `target`. Roughly
+    /// hitChance × expectedDamage, with big bonuses for a finishing blow and a crit-prone
+    /// flank/exposed shot, plus the target's threat priority. Used to rank both WHICH foe
+    /// to shoot and WHERE to stand to shoot it.
+    float ShotValue(ShotOdds odds, Unit target)
+    {
+        float hit = odds.HitChance / 100f;
+        // expected damage of a connecting shot: average dmg, lifted by the crit chance
+        // (a crit deals ~1.5×+1). Grazes (the miss-by-≤15 band) add a little guaranteed chip.
+        float avgDmg = (odds.DmgMin + odds.DmgMax) * 0.5f;
+        float critDmg = avgDmg * 1.5f + 1f;
+        float pc = odds.CritChance / 100f;
+        float expConnect = avgDmg * (1f - pc) + critDmg * pc;
+        // a rough "partial-hit tail" nudge: shots that miss by <= GrazeBand still chip for
+        // DmgMin. GrazeBand is a margin in aim-points, not a true probability, so this is a
+        // small heuristic bonus (ranking-only), NOT a precise EV term — fine for tie-breaking.
+        float grazeChip = Combat.GrazeBand / 100f * odds.DmgMin;
+        float ev = hit * expConnect + grazeChip;
+
+        // finisher: if a connecting hit very likely kills, that's worth far more than raw EV
+        // (removing a gun from the board). Scale by how reliably we'd land it.
+        if (target.Hp <= odds.DmgMin) ev += 14f * hit;               // even a min-roll kills
+        else if (target.Hp <= avgDmg) ev += 9f * hit;                // an average roll kills
+        else if (target.Hp <= odds.DmgMax) ev += 4f * hit;           // a good roll kills
+
+        if (odds.Flanked) ev += 5f;                                   // flank → reliable crit
+        else if (odds.CoverLevel == 0) ev += 2f;                     // exposed
+        ev += PriorityWeight(target) * hit * 0.30f;                  // kill the dangerous ones first
+        return ev;
+    }
+
+    /// Best targetable enemy from tile (ax,ay) and the value of that shot. Considers every
+    /// living foe in range+LoS from there. Returns (null, 0) if no shot exists from the tile.
+    (Unit tgt, float val) BestShotFrom(Unit u, int ax, int ay)
+    {
+        if (u.Ammo <= 0) return (null, 0f);
+        Unit best = null; float bestVal = 0f;
+        int ox = u.X, oy = u.Y; u.X = ax; u.Y = ay;
+        bool can(Unit e)                                  // CanTarget evaluated from (ax,ay)
+        {
+            if (e == null || !e.Alive || (e == Vip && CaptiveLocked)) return false;
+            if (Util.TileDist(ax, ay, e.X, e.Y) > u.Weapon.MaxRange) return false;
+            bool commanding = Grid.HeightAt(ax, ay) - Grid.HeightAt(e.X, e.Y) >= 2;
+            return Grid.HasLineOfSight(ax, ay, e.X, e.Y, commanding);
+        }
+        foreach (var e in Enemies)
+        {
+            if (!can(e)) continue;
+            var odds = Combat.ComputeOdds(Grid, u, e);
+            float v = ShotValue(odds, e);
+            if (v > bestVal) { bestVal = v; best = e; }
+        }
+        u.X = ox; u.Y = oy;
+        return (best, bestVal);
+    }
+
+    /// Fire the best expected-value shot the soldier can take from where it stands — but
+    /// only if that shot is worth taking (a desperate 3% poke that ends the turn is usually
+    /// worse than repositioning). Returns true if it shot.
+    bool TakeBestShot(Unit u)
+    {
+        if (u.Ammo <= 0) return false;
+        var (tgt, val) = BestShotFrom(u, u.X, u.Y);
+        if (tgt == null) return false;
+        var odds = Combat.ComputeOdds(Grid, u, tgt);
+        // worth firing? a hit chance floor OR a likely finisher (a near-certain kill of a
+        // low-HP foe is worth a poor-percentage shot). Otherwise prefer to reposition.
+        bool finisher = tgt.Hp <= odds.DmgMax && odds.HitChance >= 35;
+        bool decent   = odds.HitChance >= 45;
+        // if the soldier has BOTH actions, a weak shot is fine via SNAP (keeps acting); a
+        // turn-ending aimed shot should clear a higher bar. Either way, take a real chance.
+        bool twoActions = u.ActionsLeft >= 2 && !u.RunGun;
+        if (!finisher && !decent && !(twoActions && odds.HitChance >= 30)) return false;
+        AutoShootSmart(u, tgt);
+        return true;
+    }
+
+    /// True if the soldier has a high-confidence shot from where it stands (used by the
+    /// objective routines to decide "is a kill worth pausing the advance for?").
+    bool HasStrongShot(Unit u)
+    {
+        if (u.Ammo <= 0) return false;
+        var (tgt, _) = BestShotFrom(u, u.X, u.Y);
+        if (tgt == null) return false;
+        var odds = Combat.ComputeOdds(Grid, u, tgt);
+        return odds.HitChance >= 60 || (tgt.Hp <= odds.DmgMax && odds.HitChance >= 50);
+    }
+
+    /// Fire at `tgt`, choosing the AIMED vs SNAP variant intelligently. With both actions in
+    /// hand, prefer a SNAP (1 action, no end-turn, -15 aim) so the soldier keeps its tempo
+    /// (move + shoot, or two snaps), UNLESS this shot is a likely KILL — then commit the full
+    /// AIMED shot so the -15 doesn't cost the kill. (This is intentionally consistent with
+    /// TakeBestShot, which decides to fire a marginal shot precisely BECAUSE it can snap it and
+    /// keep acting — so we must actually snap it, not silently spend the whole turn aiming.)
+    /// Bounded exactly like AutoShoot (a snap always costs ≥1 action, so the turn still ends).
+    void AutoShootSmart(Unit u, Unit tgt)
+    {
+        if (u.ActionsLeft >= 2 && !u.RunGun)
+        {
+            var odds = Combat.ComputeOdds(Grid, u, tgt);
+            bool likelyKill = tgt.Hp <= odds.DmgMax && odds.HitChance >= 55;
+            if (!likelyKill) SnapShot = true;     // keep the second action; aim only to secure a kill
+        }
+        IssueShoot(tgt);
+    }
+
+    /// Prep a class ability when it improves THIS soldier's turn. Deliberate (never random):
+    ///   - PATCH (corpsman): heal the most-wounded adjacent ally if it's meaningfully hurt;
+    ///   - STEADY (sharpshooter): brace before a real shot to sharpen it;
+    ///   - SUPPRESS (gunner): pin a dangerous foe we can't cleanly kill;
+    ///   - RUN&GUN (assault) / BLITZ (ranger): free tempo stances — take them when they help.
+    /// Returns true if it spent the turn on the ability (Steady/Suppress/Heal cost an action;
+    /// RunGun/Blitz are free, so they DON'T return true — the soldier acts with them this step).
+    bool PrepAbility(Unit u) => PrepAbilityFor(u, null);
+
+    bool PrepAbilityFor(Unit u, Unit forcedTarget)
+    {
+        if (!CanAbility(u)) return false;
+        switch (u.Ability)
+        {
+            case AbilityKind.Heal:
+            {
+                // only patch when an adjacent ally is genuinely hurt (>=4 missing HP, so the
+                // +PatchHeal isn't wasted) — MostWoundedAdjacentAlly already gates on Hp<MaxHp.
+                var ally = MostWoundedAdjacentAlly(u);
+                if (ally != null && ally.MaxHp - ally.Hp >= 4) { DoAbility(); return true; }
+                return false;
+            }
+            case AbilityKind.Steady:
+            {
+                // brace only if there's a real shot to sharpen and we can still fire after
+                // (Steady costs one action; need >=2 so a shot remains). Worth it for a shot
+                // that isn't already near-certain.
+                if (u.ActionsLeft < 2 || u.Ammo <= 0) return false;
+                var tgt = forcedTarget != null && CanTarget(u, forcedTarget) ? forcedTarget : FirstTargetFor(u);
+                if (tgt == null) return false;
+                var odds = Combat.ComputeOdds(Grid, u, tgt);
+                if (odds.HitChance >= 40 && odds.HitChance <= 90) { DoAbility(); return true; }
+                return false;
+            }
+            case AbilityKind.Suppress:
+            {
+                // pin a foe we can see — best used on a dangerous attacker we can't reliably
+                // kill outright (it slashes its aim and trains overwatch on it). Skip if we
+                // already have a clean kill shot (just take the kill instead).
+                var tgt = FirstTargetFor(u);
+                if (tgt == null) return false;
+                var odds = Combat.ComputeOdds(Grid, u, tgt);
+                bool cleanKill = tgt.Hp <= odds.DmgMax && odds.HitChance >= 55;
+                if (cleanKill) return false;                       // prefer the kill
+                if (PriorityWeight(tgt) >= 14f || odds.HitChance < 45) { DoAbility(); return true; }
+                return false;
+            }
+            case AbilityKind.RunGun:
+            {
+                // free stance: only worth it if firing this turn (so the shot doesn't end the
+                // turn, letting the soldier move+shoot or shoot twice). Take it before a shot.
+                if (u.Ammo > 0 && FirstTargetFor(u) != null) { DoAbility(); return false; }  // free → act with it
+                return false;
+            }
+            case AbilityKind.Blitz:
+            {
+                // free stance: cheap movement. Take it when we have no shot and need to close
+                // distance toward a foe/objective this turn (so the move costs one less action).
+                if (FirstTargetFor(u) == null && AliveEnemies().Count > 0) { DoAbility(); return false; }
+                return false;
+            }
+        }
+        return false;
+    }
+
+    /// Grenade decision: lob at the cluster of enemies that catches the most foes (≥2),
+    /// or flush a single well-covered/high-priority target our gun can't crack.
+    /// Never catches an ally. Mirrors the enemy grenade AI's fairness (LoS-gated by CanGrenade
+    /// through IssueGrenade's range check + our own LoS test). Returns true if it threw.
+    bool SmartGrenade(Unit u)
+    {
+        if (u.Grenades <= 0) return false;
+        int bx = -1, by = -1, bestHits = 0; bool bestCovered = false; float bestPrio = 0f;
+        foreach (var e in AliveEnemies())
+        {
+            if (!CanGrenade(u, e.X, e.Y)) continue;                 // in range + LoS from here
+            if (!NoAllyInBlast(e.X, e.Y)) continue;                 // never frag our own
+            int hits = 0;
+            foreach (var q in AliveEnemies()) if (Util.ChebyDist(e.X, e.Y, q.X, q.Y) <= GrenadeAnim.Radius) hits++;
+            // is the aim foe well-covered from us (so our bullets are weak)?
+            var odds = SmartOdds(u, u.X, u.Y, e);
+            bool covered = odds.CoverLevel >= 1 || odds.HitChance < 45;
+            float prio = PriorityWeight(e);
+            if (hits > bestHits || (hits == bestHits && prio > bestPrio))
+            { bestHits = hits; bx = e.X; by = e.Y; bestCovered = covered; bestPrio = prio; }
+        }
+        if (bx < 0) return false;
+        // throw when it catches 2+, OR a single target that's well-covered or high-priority
+        // (a frag ignores cover) — i.e. when the grenade beats what our gun would do.
+        if (bestHits >= 2 || (bestHits == 1 && (bestCovered || bestPrio >= 20f)))
+        { IssueGrenade(bx, by); return true; }
+        return false;
+    }
+
+    /// True if (tx,ty) is in grenade range AND the soldier has line of sight to it (no
+    /// blind lobbing over high cover / through smoke — matches the perfect-info contract).
+    bool CanGrenade(Unit u, int tx, int ty)
+        => Util.TileDist(u.X, u.Y, tx, ty) <= GrenadeRange && Grid.HasLineOfSight(u.X, u.Y, tx, ty);
+
+    /// Per-tile exposure (mirrors ComputeThreat, but always available and not gated on the
+    /// player pref): how many live, active, armed enemies could fire on (x,y) with NO cover
+    /// for the mover. Weighted by the shooter's threat priority, so standing exposed to a
+    /// sniper hurts the score more than exposure to a grunt. This is the threat term the
+    /// brief asks us to SUBTRACT from destination tiles.
+    float TileExposure(Unit mover, int x, int y)
+    {
+        float threat = 0f;
+        foreach (var e in Enemies)
+        {
+            if (!e.Alive || !e.Active || e.Ammo <= 0) continue;
+            if (Util.TileDist(x, y, e.X, e.Y) > e.Weapon.MaxRange) continue;
+            if (!Grid.HasLineOfSight(e.X, e.Y, x, y)) continue;
+            // cover for the MOVER standing at (x,y) against this shooter
+            if (Grid.GetCover(x, y, e.X, e.Y).Level == 0)
+                threat += 6f + PriorityWeight(e) * 0.5f;            // exposed to this gun
+        }
+        return threat;
+    }
+
+    /// Score a prospective destination tile for `u`, Ai.Plan-style but from the PLAYER's
+    /// perspective: reward a good shot available from there, cover, high ground, a flank on
+    /// the nearest foe; subtract exposure (threat) and movement cost. `advanceTarget`, when
+    /// given, adds a mild pull toward it (objective/foe) so positioning still makes progress.
+    float ScoreDestTile(Unit u, int x, int y, int actionsToReach, Unit nearest, (int x, int y)? advanceTarget)
+    {
+        float score = 0f;
+
+        // a shot from here is the biggest prize (only if we'd keep an action to fire it).
+        if (actionsToReach <= 1)
+        {
+            var (tgt, val) = BestShotFrom(u, x, y);
+            if (tgt != null) score += 60f + val * 2.2f;
+        }
+
+        // terrain: cover + height vs the nearest foe (use it as the reference angle).
+        if (nearest != null)
+        {
+            var cov = Grid.GetCover(x, y, nearest.X, nearest.Y);
+            score += cov.Level * 16f;
+            if (cov.Flanked) score -= 18f;                         // our own cover useless from here
+        }
+        score += Grid.HeightAt(x, y) * 12f;                        // seize high ground
+
+        // exposure: avoid tiles a live enemy can shoot with no cover for us (the threat term).
+        score -= TileExposure(u, x, y);
+
+        score -= actionsToReach * 5f;                              // prefer cheaper moves
+
+        // mild pull toward the advance target so repositioning still closes the gap.
+        if (advanceTarget != null)
+            score -= Util.ChebyDist(x, y, advanceTarget.Value.x, advanceTarget.Value.y) * 1.4f;
+
+        score += Util.RandRange(0f, 2f);                           // tie-break jitter
+        return score;
+    }
+
+    /// Reposition toward the best firing tile on the nearest foe: an Ai.Plan-style sweep of
+    /// reachable tiles scored by ScoreDestTile (cover/height/flank/shot − exposure − cost,
+    /// pulled toward the foe). Moves there if it beats standing still. This is the core
+    /// "advance behind cover and set up flanks" behaviour. Returns true if it moved.
+    bool SmartApproach(Unit u)
+    {
+        var foe = AliveEnemies().OrderBy(e => Util.TileDist(u.X, u.Y, e.X, e.Y)).FirstOrDefault();
+        if (foe == null) return false;
+        return MoveToBestTile(u, foe, (foe.X, foe.Y));
+    }
+
+    /// Like SmartApproach but with no advance pull — purely shuffle into better cover/safety
+    /// near where we already are (used when holding a position, e.g. DEFEND / a held zone).
+    bool SmartReposition(Unit u)
+    {
+        var foe = AliveEnemies().OrderBy(e => Util.TileDist(u.X, u.Y, e.X, e.Y)).FirstOrDefault();
+        return MoveToBestTile(u, foe, null);
+    }
+
+    /// Move `u` to the best-scoring reachable tile (vs the value of staying put). `nearest`
+    /// is the reference foe for cover/flank scoring; `advance`, if set, pulls toward a goal.
+    /// Falls back to the distance-only TryMoveTowardTile if scoring finds nothing better, so
+    /// progress toward the goal is still guaranteed. Returns true if it issued a move.
+    bool MoveToBestTile(Unit u, Unit nearest, (int x, int y)? advance)
+    {
+        if (MoveCost == null) return false;
+        // score of staying at the current tile (it's always "reachable" at cost 0).
+        float stayScore = ScoreDestTile(u, u.X, u.Y, 0, nearest, advance);
+        int bx = -1, by = -1; float bestScore = stayScore;
+        for (int x = 0; x < Grid.W; x++)
+            for (int y = 0; y < Grid.H; y++)
+            {
+                int c = MoveCost[x, y];
+                if (c <= 0) continue;                              // unreachable / current tile
+                int need = c <= u.MoveBudget ? 1 : 2;
+                int cost = u.Blitz ? Math.Max(0, need - 1) : need;
+                if (cost > u.ActionsLeft) continue;                // can't afford it
+                float s = ScoreDestTile(u, x, y, need, nearest, advance);
+                if (s > bestScore) { bestScore = s; bx = x; by = y; }
+            }
+        if (bx >= 0) { IssueMove(bx, by); return true; }
+        // nothing scored better than standing still: if we have a goal, still close on it so
+        // the match never stalls (guaranteed progress). Otherwise stay put (caller hunkers).
+        if (advance != null) return TryMoveTowardTile(u, advance.Value.x, advance.Value.y);
+        return false;
+    }
+
+    /// Path toward (gx,gy) but prefer covered/safe stepping tiles when the move can reach
+    /// the goal area: try the cover-aware sweep first (pulled toward the goal), then fall
+    /// back to the plain distance-only step so progress is always guaranteed.
+    bool SmartMoveToward(Unit u, int gx, int gy)
+    {
+        var nearest = AliveEnemies().OrderBy(e => Util.TileDist(u.X, u.Y, e.X, e.Y)).FirstOrDefault();
+        // only bother with cover-aware routing when there's a live threat to avoid; with no
+        // active enemies, march straight (faster to the objective, and TileExposure is 0).
+        if (nearest != null && Enemies.Any(e => e.Alive && e.Active))
+        {
+            if (MoveToBestTile(u, nearest, (gx, gy))) return true;
+        }
+        return TryMoveTowardTile(u, gx, gy);
+    }
+
+    /// VIP/asset advance toward (gx,gy). The asset dies in one or two hits and the enemy AI
+    /// hunts it, so this is SURVIVAL-FIRST: only bound forward into a tile that's genuinely
+    /// SAFE (no live enemy can shoot it there — exposure 0 — or it ends in cover). Among safe
+    /// forward tiles, take the one that closes the most distance. If NO safe forward tile
+    /// exists, WAIT in place (let the escorts clear the lane) — UNLESS no active enemy can
+    /// even see the asset right now (the lane is already clear → just walk), which also doubles
+    /// as the anti-stall escape (a clear board → beeline → reach evac → win). Returns true if
+    /// it issued a move; false means "hold here" (the caller hunkers — turn still ends).
+    bool VipAdvance(Unit u, int gx, int gy)
+    {
+        if (MoveCost == null) return TryMoveTowardTile(u, gx, gy);
+        int hereDist = Util.ChebyDist(u.X, u.Y, gx, gy);
+        int bx = -1, by = -1; int bestProg = 0; float bestScore = float.NegativeInfinity;
+        for (int x = 0; x < Grid.W; x++)
+            for (int y = 0; y < Grid.H; y++)
+            {
+                int c = MoveCost[x, y];
+                if (c <= 0) continue;
+                int need = c <= u.MoveBudget ? 1 : 2;
+                int cost = u.Blitz ? Math.Max(0, need - 1) : need;
+                if (cost > u.ActionsLeft) continue;
+                int prog = hereDist - Util.ChebyDist(x, y, gx, gy);     // tiles closer to evac
+                if (prog <= 0) continue;                                // forward only
+                float expo = TileExposure(u, x, y);
+                var nearest = AliveEnemies().OrderBy(e => Util.ChebyDist(x, y, e.X, e.Y)).FirstOrDefault();
+                int cov = nearest != null ? Grid.GetCover(x, y, nearest.X, nearest.Y).Level : 2;
+                bool safe = expo <= 0f || cov >= 1;                     // no exposed-gun OR in cover
+                if (!safe) continue;
+                // among safe forward tiles, maximise progress, then cover, then least exposure.
+                float score = prog * 4f + cov * 3f - expo;
+                if (score > bestScore) { bestScore = score; bx = x; by = y; bestProg = prog; }
+            }
+        if (bx >= 0) { _vipWaitTurns = 0; IssueMove(bx, by); return true; }   // safe step: reset patience
+        // no SAFE forward tile. If the asset is currently unseen by any active foe, the lane
+        // is clear enough — just beeline (also doubles as an anti-stall valve: a cleared board
+        // ends in a win). Otherwise hold and let the escorts clear the lane.
+        bool unseen = !Enemies.Any(e => e.Alive && e.Active && Grid.HasLineOfSight(e.X, e.Y, u.X, u.Y));
+        if (unseen) { _vipWaitTurns = 0; return TryMoveTowardTile(u, gx, gy); }
+        // PATIENCE / ANTI-TIMEOUT: don't hold forever (the escorts may never clear that
+        // watcher). After several held turns, accept the risk and push toward evac so the
+        // mission always resolves. Bounded — the match can never stall on a waiting VIP.
+        if (++_vipWaitTurns >= 4) { _vipWaitTurns = 0; return TryMoveTowardTile(u, gx, gy); }
+        return false;   // wait this turn (hold in current cover); caller hunkers (turn still ends)
+    }
+
+    /// Hold overwatch when it's the right call: the soldier has ammo + an action, isn't
+    /// disoriented, and a live enemy is near enough to plausibly walk into the lane this
+    /// enemy turn (so we don't waste overwatch staring at an empty board). Returns true if set.
+    bool HoldOverwatch(Unit u)
+    {
+        if (u.Ammo <= 0 || u.ActionsLeft <= 0 || u.HasStatus(StatusKind.Disoriented)) return false;
+        // a foe that's active and within a turn's move + weapon reach is a credible pusher.
+        bool foesWillPush = Enemies.Any(e => e.Alive && e.Active
+            && Util.TileDist(u.X, u.Y, e.X, e.Y) <= e.Weapon.MaxRange + e.Mobility);
+        if (!foesWillPush) return false;
+        DoOverwatch();
+        return true;
+    }
+
     // Stall guard for the headless autopilot: if no progress is made for several
     // player turns (e.g. only unreachable dormant pods remain), force a pod awake
     // so the match always resolves. Test-only; never runs in normal play.
     int _autoSig = -1, _autoStall;
+    int _vipWaitTurns;       // SmartStep Escort: consecutive turns the VIP held for safety (anti-stall)
+    int _smartConcealTurns;  // SmartStep: player turns spent concealed (hard anti-TIMEOUT cap)
     void AutoStallCheck()
     {
         int sig = AliveEnemies().Count * 1000
@@ -1680,6 +2594,14 @@ public class Game
     public int SightRange  => Math.Max(1, BaseSightRange  - ContactTighten);
     public int AlertRange  => Math.Max(1, BaseAlertRange  - ContactTighten);
     public int RevealRange => Math.Max(1, BaseRevealRange - ContactTighten);
+    // Balance fix: a hack/plant is LOUD — the noise rouses dormant pods within this radius of
+    // the objective site even without line of sight (a sound cue, not a sight cue). Kept SMALL
+    // so it wakes only the immediately-adjacent pods, NOT the whole force at once: a wide wake
+    // proved unwinnable (Sabotage's charge sites sit in the enemy half, so going loud there can
+    // rouse a dense late-mission force). The fight still escalates after the first loud act
+    // because concealment is broken, so the normal alert tiers (CheckPodActivation, via sight)
+    // take over. Heat's tighter-contact does NOT shrink it (noise carries regardless of stealth).
+    public const int HackNoiseRange = 2;
     public bool SquadConcealed;        // 4.4: squad starts each mission concealed (set in SetupMission)
 
     // Closest distance at which any living soldier currently has line of sight on this
@@ -1816,9 +2738,26 @@ public class Game
         foreach (int pid in seen) ActivatePod(pid);
     }
 
+    /// Balance fix: a hack/plant GOES LOUD. First it breaks concealment — which springs the
+    /// ambush on any pod already in SIGHT (BreakConcealment). Then the bang additionally rouses
+    /// dormant pods physically near the objective site (sx,sy) even with NO line of sight (a
+    /// sound cue, within HackNoiseRange), each to full Alert with the usual 4.2-capped reveal-
+    /// scatter. Works whether or not still concealed, so a later charge of a Sabotage run also
+    /// rouses any pod that has since crept into earshot. (The main tempo lever that turns Hack
+    /// into a multi-turn hold is the one-cycle-per-turn channel; this is the "wake the area" half.)
+    void HackNoise(int sx, int sy)
+    {
+        if (SquadConcealed) BreakConcealment();   // first hack/plant springs the ambush + reveals
+        var roused = new HashSet<int>();
+        foreach (var e in Enemies)
+            if (e.Alive && !e.Active && e.PodId >= 0
+                && Util.TileDist(sx, sy, e.X, e.Y) <= HackNoiseRange) roused.Add(e.PodId);
+        foreach (int pid in roused) ActivatePod(pid);   // wake + the usual 4.2-capped reveal-scatter
+    }
+
     void UpdatePlayer()
     {
-        if (AutoPlay) { AutoStep(); return; }
+        if (AutoPlay) { if (SmartPlay) SmartStep(); else AutoStep(); return; }
 
         CheckPodActivation();
         if (_anims.Count > 0) return;   // a pod just activated — let the scatter play
@@ -2300,6 +3239,9 @@ public class Game
             int i = NearestSabotageSite(Selected);
             if (i < 0) return;
             SabotageBlown.Add(i);
+            // balance fix: planting a charge GOES LOUD — break stealth + rouse pods near the
+            // site (no free, uncontested sabotage; the squad must hold while it plants all 3).
+            HackNoise(SabotageSites[i].x, SabotageSites[i].y);
             var sat = Util.TileCenter(SabotageSites[i].x, SabotageSites[i].y);
             Fx.PopText(sat + new Vector2(0, -30), "CHARGE SET", Pal.Foe, 20f);
             Fx.Burst(sat, Pal.Accent, 22, 240f, 0.6f, 4.5f, true);
@@ -2308,6 +3250,10 @@ public class Game
             return;
         }
         HackProgress++;
+        HackedThisTurn = true;          // one breach cycle per turn — finishing now takes a hold
+        // balance fix: hacking the terminal GOES LOUD — break stealth + rouse nearby pods so
+        // the squad must defend the console across all HackRequired charges, not sneak it.
+        HackNoise(Terminal.x, Terminal.y);
         var at = Util.TileCenter(Terminal.x, Terminal.y);
         Fx.PopText(at + new Vector2(0, -30), HackProgress >= HackRequired ? "HACKED" : "HACK +1", Pal.Accent, 20f);
         Fx.Burst(at, Pal.Accent, 14, 160f, 0.5f, 3f);
@@ -2467,6 +3413,9 @@ public class Game
 
     void EndPlayerTurn()
     {
+        // SmartStep: count player turns spent concealed (a hard anti-TIMEOUT cap on the
+        // stealth-race plan — see the concealment block in SmartStep). Harmless otherwise.
+        if (SquadConcealed) _smartConcealTurns++;
         // keep the tutorial progressing even if the player skipped a prompted action
         if (TutStep >= 0 && TutStep < 3) AdvanceTutorial();
         EndTurnArmed = false;
@@ -2495,6 +3444,7 @@ public class Game
         ClearIntent();                    // no enemy intent lingers into the player's turn
         Grid.TickSmoke();                 // smoke clouds decay one turn per round
         _refundedThisTurn.Clear();        // flank-kill refund is one per soldier per turn
+        HackedThisTurn = false;           // the terminal accepts one breach cycle per turn (hold)
         if (AutoPlay) AutoStallCheck();
         foreach (var p in Players) if (p.Alive) { p.BeginTurn(); TickStatuses(p); }
         foreach (var e in Enemies) if (e.Alive) { e.ReactedThisTurn = false; e.Suppress = 0; } // OW resets; suppression expires
@@ -2741,6 +3691,7 @@ public class Game
         var off = _run.PendingPerks[0];
         Perk p = which == 0 ? off.A : off.B;
         Run.ApplyPerk(off.Unit, p);
+        Stats.RecordPerk(PerkDef.Code(p));   // balance telemetry (no-op unless Stats.Enabled)
         _run.Report.Add($"{off.Unit.Name} gains {PerkDef.Name(p)}");
         _run.PendingPerks.RemoveAt(0);
         Audio.Play("select");
@@ -2793,6 +3744,7 @@ public class Game
     public bool CanBuy(int item)
     {
         if (item < 0 || item >= ShopCost.Length || _run.Intel < ShopCost[item]) return false;
+        if (IsModItem(item)) return ModTarget(ModForItem(item)) != null;   // a soldier who lacks this mod
         return item switch
         {
             0 => _run.Squad.Any(u => u.Hp < u.MaxHp || u.Wound > 0),  // medkit needs someone hurt or wounded
@@ -2809,19 +3761,33 @@ public class Game
         return c;
     }
 
+    /// The soldier a weapon-mod purchase installs on: a combatant who doesn't already own it,
+    /// spreading upgrades across the squad (fewest mods first) so a single loss doesn't sink the
+    /// whole investment, tie-broken toward the veteran (most kills) who'll carry the run.
+    Unit ModTarget(WeaponMod m) => _run.Squad
+        .Where(u => !u.IsVip && u.Weapon != null && !u.HasMod(m))
+        .OrderBy(u => u.WeaponMods.Count).ThenByDescending(u => u.Kills).ThenBy(u => u.Name)
+        .FirstOrDefault();
+
     /// The soldier a purchase would affect (for the shop preview). Matches DoPurchase.
-    public Unit ShopTarget(int item) => item switch
+    public Unit ShopTarget(int item)
     {
-        0 => _run.Squad.Where(u => u.Hp < u.MaxHp || u.Wound > 0).OrderByDescending(u => u.Wound).ThenBy(u => u.Hp).FirstOrDefault(),
-        1 => _run.Squad.OrderBy(u => u.MaxHp).FirstOrDefault(),
-        3 => _run.Squad.Where(u => u.BonusGrenades < 2).OrderBy(u => u.BonusGrenades).FirstOrDefault(),
-        _ => null,
-    };
+        if (IsModItem(item)) return ModTarget(ModForItem(item));
+        return item switch
+        {
+            0 => _run.Squad.Where(u => u.Hp < u.MaxHp || u.Wound > 0).OrderByDescending(u => u.Wound).ThenBy(u => u.Hp).FirstOrDefault(),
+            1 => _run.Squad.OrderBy(u => u.MaxHp).FirstOrDefault(),
+            3 => _run.Squad.Where(u => u.BonusGrenades < 2).OrderBy(u => u.BonusGrenades).FirstOrDefault(),
+            _ => null,
+        };
+    }
 
     /// One-line concrete effect of a purchase, so the player can judge its value.
     public string ShopEffect(int item)
     {
         var t = ShopTarget(item);
+        if (IsModItem(item))
+            return t == null ? "every soldier has it" : $"{t.Name}: install {WeaponModDef.Name(ModForItem(item))}";
         switch (item)
         {
             case 0:
@@ -2838,6 +3804,17 @@ public class Game
     void DoPurchase(int item)
     {
         if (!CanBuy(item)) { Audio.Play("miss"); return; }
+        if (IsModItem(item))
+        {
+            var mod = ModForItem(item);
+            var t = ModTarget(mod);
+            if (t == null) { Audio.Play("miss"); return; }
+            t.InstallMod(mod);   // persistent: baked into the soldier's Weapon, carried across the run
+            _run.Report.Add($"{t.Name} fitted {WeaponModDef.Name(mod)}  ({WeaponModDef.Desc(mod)})");
+            _run.Intel -= ShopCost[item];
+            Audio.Play("select");
+            return;
+        }
         switch (item)
         {
             case 0:
@@ -2874,10 +3851,27 @@ public class Game
         if (Raylib.CheckCollisionPointRec(m, Hud.ShopProceed)) { _shopDone = true; Audio.Play("turn"); }
     }
 
-    // autopilot: buy a medkit if it helps, then move on (keeps the shop path covered)
+    // autopilot: spend Intel sensibly so the BALANCE analytics reflect the new power curve.
+    // Priority: (1) field-treat a wounded/hurt soldier (cheap survivability), then (2) sink the
+    // rest into PERSISTENT WEAPON UPGRADES — the reward sink that lets a leveled squad out-gun a
+    // fresh one and outpace attrition. Greedy by cheapest affordable so more upgrades land per
+    // barracks. ALWAYS terminates: every DoPurchase that fires reduces Intel by a positive cost,
+    // and the cap bounds the loop regardless (defensive against a future zero-cost item).
     void AutoShop()
     {
-        if (CanBuy(0)) DoPurchase(0);
+        if (CanBuy(0)) DoPurchase(0);   // one heal pass if someone's hurt/wounded
+
+        for (int guard = 0; guard < 40; guard++)
+        {
+            // cheapest affordable, still-useful weapon mod
+            int best = -1, bestCost = int.MaxValue;
+            for (int i = ModBase; i < ShopCost.Length; i++)
+                if (CanBuy(i) && ShopCost[i] < bestCost) { best = i; bestCost = ShopCost[i]; }
+            if (best < 0) break;        // nothing affordable/useful left
+            int before = _run.Intel;
+            DoPurchase(best);
+            if (_run.Intel >= before) break;   // safety: never spin on a no-op purchase
+        }
         _shopDone = true;
     }
 

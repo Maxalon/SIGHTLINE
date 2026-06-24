@@ -70,24 +70,42 @@ public static class Heat
     public const int Max = 8;                 // ladder ceiling
     public const int IntelPerLevel = 3;       // extra requisition intel per cleared mission, per heat level
 
-    // Rung i (1-based) is Mods[i-1]. Heat H applies rungs 1..H. Tuned to escalate coherently:
-    // bodies first (most legible), then durability, then squeeze the opener + attrition, and
-    // finally strip concealment for the top-tier "no mercy" runs.
+    // Rung i (1-based) is Mods[i-1]. Heat H applies rungs 1..H. Re-tuned against real
+    // competent-AI batch data: the prior table leaned on +bodies, but enemy headcount
+    // SATURATES at the spawn cap (12) on later missions, so the top rungs barely moved the
+    // win-rate (heat 8 was ~57%, nearly flat vs heat 0's ~76%). The fix leans on the lever
+    // that does NOT saturate -- StatDelta, a force-wide +1 HP & +1 Aim to EVERY hostile --
+    // and folds the already-wired qualitative knobs (tighter contact, harsh attrition,
+    // EXPOSED no-concealment opener, no reinforcements) in EARLIER so each rung adds real
+    // texture, not just a number. Cumulative at the milestones the balance pass targets:
+    //   heat 4 -> +2 enemy, +2 stat, tighter contact
+    //   heat 6 -> +3 enemy, +3 stat, +harsh attrition, +EXPOSED (no free ambush opener)
+    //   heat 8 -> +4 enemy, +5 stat, +no reinforcements (every prior flag too) = a real wall.
+    // A force-wide +5 HP/+5 Aim at the top is the bulk of the difficulty (it scales with the
+    // whole enemy count); the mutator flags supply the qualitative "no mercy" feel. Heat 0
+    // stays a true no-op. Re-tuning the deltas/flags is SAVE-SAFE -- only the chosen LEVEL is
+    // persisted, and "apply rungs 1..level cumulatively" (the meaning of a saved level) is
+    // unchanged; rung indices keep their escalating-difficulty concept (no reorder/removal).
     public static readonly HeatModifier[] Mods =
     {
         new HeatModifier { Name = "REINFORCED",   Desc = "+1 enemy per mission",                 EnemyDelta = 1 },
         new HeatModifier { Name = "HARDENED",      Desc = "Enemies hit harder & tougher (+1 stat)", StatDelta = 1 },
-        new HeatModifier { Name = "SHORT FUSE",    Desc = "Enemies spot you sooner",              TighterContact = true },
-        new HeatModifier { Name = "OVERWHELMING",  Desc = "+1 more enemy per mission",            EnemyDelta = 1 },
-        new HeatModifier { Name = "LINGERING WOUNDS", Desc = "Wounds last longer; less field healing", HarshAttrition = true },
+        // SHORT FUSE now also brings a body -- the qualitative "spotted sooner" twist plus volume.
+        new HeatModifier { Name = "SHORT FUSE",    Desc = "+1 enemy; enemies spot you sooner",    EnemyDelta = 1, TighterContact = true },
         new HeatModifier { Name = "ELITE CADRE",   Desc = "Enemies even deadlier (+1 stat)",      StatDelta = 1 },
-        new HeatModifier { Name = "EXPOSED",       Desc = "Squad deploys without concealment",    Exposed = true },
-        // Rung 8 (the top of the ladder): +1 more enemy AND the harshest run-loop knob —
-        // the barracks no longer backfills fallen soldiers, so every casualty permanently
-        // shrinks the squad for the rest of the run (true attrition stakes). The old
-        // TighterContact here was a redundant no-op (already active from rung 3), so it's
-        // replaced with NoReinforcements — a NEW axis that reads as "no mercy, no replacements".
-        new HeatModifier { Name = "RELENTLESS",    Desc = "+1 enemy; no replacement recruits",    EnemyDelta = 1, NoReinforcements = true },
+        // LINGERING WOUNDS arrives earlier (rung 5) and carries a body -- run-loop attrition
+        // pressure starts compounding in the mid-ladder instead of only near the top.
+        new HeatModifier { Name = "LINGERING WOUNDS", Desc = "+1 enemy; wounds linger, less field healing", EnemyDelta = 1, HarshAttrition = true },
+        // EXPOSED is the marquee mid-ladder MUTATOR: from heat 6 the squad loses its free
+        // concealment ambush opener AND every hostile gets another stat point.
+        new HeatModifier { Name = "EXPOSED",       Desc = "No concealment opener; +1 stat",       Exposed = true, StatDelta = 1 },
+        // RELENTLESS: the run-loop screw -- fallen soldiers are NOT replaced (the squad shrinks
+        // for the rest of the run) and the survivors face yet tougher enemies.
+        new HeatModifier { Name = "RELENTLESS",    Desc = "No replacement recruits; +1 stat",     NoReinforcements = true, StatDelta = 1 },
+        // NO QUARTER (rung 8, the ceiling): the final escalation -- one more body and the force
+        // hits its peak durability/accuracy (+5 stat cumulative). With every flag above also
+        // active, the top of the ladder is a genuine wall, beatable only by excellent play.
+        new HeatModifier { Name = "NO QUARTER",    Desc = "+1 enemy; the deadliest force (+1 stat)", EnemyDelta = 1, StatDelta = 1 },
     };
 
     public static int Clamp(int level) => Math.Clamp(level, Min, Max);
@@ -107,8 +125,16 @@ public static class Heat
     public static bool HarshAttrition(int level) { foreach (var m in Active(level)) if (m.HarshAttrition) return true; return false; }
     public static bool NoReinforcements(int level) { foreach (var m in Active(level)) if (m.NoReinforcements) return true; return false; }
 
-    /// Bonus requisition intel per cleared mission at this heat level.
-    public static int IntelBonus(int level) => Clamp(level) * IntelPerLevel;
+    /// Bonus requisition intel per cleared mission at this heat level. ACCELERATING (not
+    /// linear): a flat per-level base PLUS a quadratic kicker, so the now-genuinely-hard top
+    /// rungs pay disproportionately more -- the carrot keeps pace with the steeper difficulty.
+    /// heat 4 -> +20, heat 6 -> +36, heat 8 -> +56 (vs the old flat 3/level: 12/18/24).
+    /// Strictly increasing; heat 0 stays a true no-op (0).
+    public static int IntelBonus(int level)
+    {
+        int n = Clamp(level);
+        return n * IntelPerLevel + n * n / 2;
+    }
 }
 
 /// Holds the persistent squad across a campaign run, plus XP/rank progression.

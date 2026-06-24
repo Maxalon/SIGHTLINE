@@ -145,6 +145,8 @@ public static class Renderer
                     DrawNoiseRect(Util.TileRect(x, y), bm.Tint, 0.09f);
                 }
 
+        g.Fx.DrawAmbient();   // per-biome ambient atmosphere, under terrain/units (Wave B)
+
         DrawElevation(g);
         DrawMoveOverlay(g);
         DrawOverwatchThreat(g);   // tiles each active overwatching enemy covers (reaction-fire danger)
@@ -158,6 +160,7 @@ public static class Renderer
         DrawHoverAndShields(g);
         DrawKbCursor(g);
         DrawEnemyIntent(g);       // telegraph: the acting hostile's planned move + target + threat
+        DrawScorch(g);            // lingering burn decals where units fell (under the figures)
         DrawUnits(g);
         DrawSmoke(g);
         DrawAim(g);
@@ -705,6 +708,25 @@ public static class Renderer
         }
     }
 
+    // Death scorch decals: a dark burn blob + a faint team-tinted scorch ring at each spot a unit
+    // fell, fading out over its life. Drawn on the ground (under the figures) so a kill reads as a
+    // lingering mark on the battlefield rather than an instant disappearance. Cheap (a couple of
+    // ellipses/rings per decal) and bounded (Game caps the list).
+    static void DrawScorch(Game g)
+    {
+        foreach (var s in g.Scorches)
+        {
+            float k = Util.Clamp(s.Life / s.MaxLife, 0f, 1f);    // 1 at birth -> 0 at death
+            float spread = Util.Lerp(0.6f, 1f, 1f - k);          // the burn settles/spreads slightly as it ages
+            // dark charred core (flattened to read as on-the-ground)
+            float rx = 16f * spread, ry = 7f * spread;
+            Raylib.DrawEllipse((int)s.Pos.X, (int)(s.Pos.Y + 16f), rx, ry, Raylib.Fade(Pal.RGBA(12, 12, 14), 0.55f * k));
+            Raylib.DrawEllipse((int)s.Pos.X, (int)(s.Pos.Y + 16f), rx * 0.6f, ry * 0.6f, Raylib.Fade(Pal.RGBA(4, 4, 6), 0.6f * k));
+            // faint team-tinted ember ring around the edge of the scorch (the side of the team that fell)
+            Raylib.DrawRing(s.Pos + new Vector2(0, 16f), rx * 0.9f, rx, 0, 360, 28, Raylib.Fade(s.Tint, 0.30f * k));
+        }
+    }
+
     static void DrawUnits(Game g)
     {
         foreach (var u in g.Enemies) DrawUnit(g, u);
@@ -724,6 +746,146 @@ public static class Renderer
             if (d < bestD) { bestD = d; best = f; }
         }
         return best;
+    }
+
+    // ---- per-class silhouettes (the figure's primary identifying shape) ------------------------
+    // Each class gets a distinctive primitive-drawn cue inside its body radius so a SNIPER, GUNNER,
+    // TURRET, BERSERKER, DRONE, etc. read apart at a glance — NOT just an N-sided poly. Meaning rides
+    // on shape (colorblind-safe); everything inherits the team colour `c` + the focal `a` (figAlpha),
+    // and `s` is the flinch body-scale so the silhouette pops with the body. `ang` is the unit facing.
+    //
+    // Small oriented primitives are built from a forward vector (fdir) + its perpendicular (perp), so
+    // a wedge/barrel points where the unit faces. All offsets are in px, scaled by `s`.
+    static void DrawSilhouette(Unit u, Vector2 p, Color c, float a, float s, float ang)
+    {
+        Color col = Raylib.Fade(c, a);
+        var fdir = new Vector2(MathF.Cos(ang), MathF.Sin(ang));
+        var perp = new Vector2(-fdir.Y, fdir.X);
+        // local helpers (capture col/p/fdir/perp/s) -------------------------------------------------
+        Vector2 At(float fwd, float side) => p + fdir * (fwd * s) + perp * (side * s);
+        // a filled forward wedge (triangle): nose ahead, base behind — the "pointing somewhere" cue.
+        // DrawTriangle backface-culls by winding, so order the verts by signed area (robust at any facing).
+        void Wedge(float nose, float backFwd, float halfW, float alpha)
+            => FillTri(At(nose, 0), At(backFwd, -halfW), At(backFwd, halfW), Raylib.Fade(c, a * alpha));
+        void Bar(float fwd, float halfLen, float thick, float alpha)    // a line across the facing (perp bar)
+            => Raylib.DrawLineEx(At(fwd, -halfLen), At(fwd, halfLen), thick * s, Raylib.Fade(c, a * alpha));
+        void Barrel(float from, float to, float thick) // a line along the facing (a gun barrel)
+            => Raylib.DrawLineEx(At(from, 0), At(to, 0), thick * s, col);
+
+        switch (u.Cls)
+        {
+            // ---------------- players ----------------
+            case "ASSAULT":            // aggressive forward wedge (rifleman pushing up)
+                Wedge(9f, -5f, 7f, 1f);
+                Barrel(2f, 12f, 2.2f);                       // a short rifle barrel out the nose
+                break;
+            case "RANGER":             // a slim forward dart (fast flanker) + a blade tick
+                Wedge(9f, -3f, 4.5f, 1f);
+                Raylib.DrawLineEx(At(-1f, 4.5f), At(6f, 1.5f), 2f * s, col);   // angled blade
+                break;
+            case "SHARPSHOOTER":       // a compact body + a LONG barrel line (marksman)
+                Raylib.DrawCircleV(At(-2f, 0), 4f * s, col);
+                Barrel(-2f, 16f, 2.2f);
+                Raylib.DrawCircleV(At(16f, 0), 1.8f * s, col);   // muzzle bead
+                break;
+            case "GUNNER":             // a WIDE bipod stance: a heavy cross-bar + two splayed legs
+                Bar(3f, 9f, 3.2f, 1f);                       // the weapon, held broad
+                Raylib.DrawLineEx(At(3f, -7f), At(-4f, -10f), 2f * s, col);  // left leg
+                Raylib.DrawLineEx(At(3f,  7f), At(-4f,  10f), 2f * s, col);  // right leg
+                Barrel(3f, 12f, 2.4f);
+                break;
+            case "CORPSMAN":           // a rounded medic body (the white cross is drawn separately)
+                Raylib.DrawCircleV(p, 5.5f * s, col);
+                break;
+
+            // ---------------- enemies ----------------
+            case "GRUNT":              // basic forward triangle
+                Wedge(8f, -5f, 6.5f, 1f);
+                break;
+            case "SCOUT":              // small fast dart
+                Wedge(8f, -3f, 4.5f, 1f);
+                break;
+            case "BRUISER":            // a bulky wide hexagon (tanky LMG)
+                Raylib.DrawPoly(p, 6, 8.5f * s, MathF.Atan2(fdir.Y, fdir.X) * 180f / MathF.PI, col);
+                Barrel(2f, 12f, 3f);                         // a fat barrel
+                break;
+            case "SNIPER":             // compact body + long barrel (like the sharpshooter, foe-tinted)
+                Raylib.DrawCircleV(At(-2f, 0), 4f * s, col);
+                Barrel(-2f, 16f, 2.2f);
+                Raylib.DrawCircleV(At(16f, 0), 1.8f * s, col);
+                break;
+            case "TURRET":             // an EMPLACED block base + a stubby swivel barrel (immobile nest)
+                Raylib.DrawRectanglePro(new Rectangle(p.X, p.Y, 13f * s, 13f * s), new Vector2(6.5f * s, 6.5f * s), 0f, col);
+                Barrel(2f, 13f, 3.4f);
+                break;
+            case "BERSERKER":          // a SPIKY crown — short spikes radiating (a frenzied rusher)
+            {
+                Raylib.DrawCircleV(p, 4.5f * s, col);
+                for (int i = 0; i < 8; i++)
+                {
+                    float aa = i * (MathF.PI / 4f);
+                    var d = new Vector2(MathF.Cos(aa), MathF.Sin(aa));
+                    Raylib.DrawLineEx(p + d * (4.5f * s), p + d * (9.5f * s), 1.8f * s, col);
+                }
+                break;
+            }
+            case "ELITE":              // a bold 8-point star (the boss reads as a crown)
+                Raylib.DrawPoly(p, 8, 9f * s, 0f, col);
+                Raylib.DrawPolyLines(p, 4, 10f * s, 45f, col);
+                break;
+            case "MEDIC":              // a rounded body (the green cross is drawn separately)
+                Raylib.DrawCircleV(p, 5.5f * s, col);
+                break;
+            case "DRONE":              // a hovering ROTOR: a small core + two rotor blades (an X)
+                Raylib.DrawCircleV(p, 3.2f * s, col);
+                Raylib.DrawLineEx(p + new Vector2(-8f, -8f) * s, p + new Vector2(8f, 8f) * s, 1.8f * s, col);
+                Raylib.DrawLineEx(p + new Vector2(-8f,  8f) * s, p + new Vector2(8f, -8f) * s, 1.8f * s, col);
+                Raylib.DrawCircleV(p + new Vector2(-8f, -8f) * s, 1.6f * s, col);
+                Raylib.DrawCircleV(p + new Vector2( 8f, -8f) * s, 1.6f * s, col);
+                Raylib.DrawCircleV(p + new Vector2(-8f,  8f) * s, 1.6f * s, col);
+                Raylib.DrawCircleV(p + new Vector2( 8f,  8f) * s, 1.6f * s, col);
+                break;
+            case "SHIELD":             // a compact body biased BEHIND its arc (the arc is drawn separately)
+                Raylib.DrawCircleV(At(-3f, 0), 5.5f * s, col);
+                break;
+            case "SAPPER":             // a sturdy square breacher body (the demo charge is drawn separately)
+                Raylib.DrawRectanglePro(new Rectangle(p.X, p.Y, 11f * s, 11f * s), new Vector2(5.5f * s, 5.5f * s),
+                                        MathF.Atan2(fdir.Y, fdir.X) * 180f / MathF.PI, col);
+                break;
+            case "HUNTER":             // a lean forward dart (the twin speed chevrons are drawn separately)
+                Wedge(9f, -4f, 4f, 1f);
+                break;
+            case "MORTAR":             // a stout body + a back-tilted tube (the lob arc is drawn separately)
+                Raylib.DrawCircleV(At(-2f, 0), 5f * s, col);
+                Raylib.DrawLineEx(At(-3f, 0), At(-3f, 0) - fdir * (10f * s) + new Vector2(0, -9f * s), 3f * s, col);  // tube angled up-back
+                break;
+            case "SPOTTER":            // a SENSOR/DESIGNATOR: a small core + an antenna mast topped by a
+                                       // forward-facing dish bracket (the scan rings are drawn separately).
+                                       // Reads as "equipment, not a shooter" — distinct from the medic circle.
+            {
+                Raylib.DrawCircleV(At(-2f, 0), 4f * s, col);                       // compact core (sits back)
+                var mastTop = At(-2f, 0) + new Vector2(0, -11f * s);              // antenna mast straight up
+                Raylib.DrawLineEx(At(-2f, 0), mastTop, 1.8f * s, col);
+                // a small parabolic dish bracket at the mast top, opening along the facing
+                Raylib.DrawLineEx(mastTop, mastTop + fdir * (5f * s) + perp * (3.5f * s), 1.8f * s, col);
+                Raylib.DrawLineEx(mastTop, mastTop + fdir * (5f * s) - perp * (3.5f * s), 1.8f * s, col);
+                Raylib.DrawCircleV(mastTop, 1.6f * s, col);                       // dish hub
+                break;
+            }
+            default:                   // fallback: a neutral pentagon
+                Raylib.DrawPoly(p, 5, 7.5f * s, 0f, col);
+                break;
+        }
+    }
+
+    // A filled triangle that is robust to vertex winding: Raylib's DrawTriangle backface-culls by
+    // winding order, so we compute the signed area and swap two verts if needed. Lets the oriented
+    // silhouette wedges fill correctly no matter which way a unit is facing.
+    static void FillTri(Vector2 a, Vector2 b, Vector2 cc, Color col)
+    {
+        float area = (b.X - a.X) * (cc.Y - a.Y) - (cc.X - a.X) * (b.Y - a.Y);
+        if (area < 0f) Raylib.DrawTriangle(a, b, cc, col);
+        else           Raylib.DrawTriangle(a, cc, b, col);
     }
 
     static void DrawUnit(Game g, Unit u)
@@ -759,6 +921,22 @@ public static class Renderer
         float bob = MathF.Sin((float)Raylib.GetTime() * 2.2f + u.Bob) * 1.6f;
         Vector2 p = foot + new Vector2(0, bob - hover) + u.Recoil;
 
+        // ---- procedural unit animation pose (render-only; Unit fields decay in Game.Update) ----
+        // Translate the figure for a FIRE-RECOIL kick (rocks back along the barrel), a HIT-FLINCH
+        // (a quick shove back + a brief scale pop), and a WALK-LEAN (leans into the step). Facing
+        // already points along travel during a move, so the lean reads as striding forward. These
+        // fold into the body centre + a scale, so the silhouette + body deform together.
+        var fwd = new Vector2(MathF.Cos(u.Facing), MathF.Sin(u.Facing));
+        var fperp = new Vector2(-fwd.Y, fwd.X);
+        Vector2 pose = -fwd * (u.RecoilAnim * 4.2f)                                  // recoil: back along the barrel
+                     - fwd * (u.FlinchAnim * 2.4f)                                   // flinch: shoved back from the hit
+                     + fperp * (MathF.Sin(u.FlinchAnim * 22f) * u.FlinchAnim * 1.3f) // flinch: a small lateral shudder
+                     + fwd * (u.WalkLean * 3.2f)                                     // walk: lean into the step
+                     + new Vector2(0, -u.WalkLean * 1.5f);                           // walk: a slight stride lift
+        p += pose;
+        // a brief size pop on flinch (recoil compresses a touch) so a hit reads as a jolt
+        float bodyScale = Util.Clamp(1f + u.FlinchAnim * 0.12f - u.RecoilAnim * 0.05f, 0.85f, 1.18f);
+
         // shadow (sits on the platform top when elevated)
         Raylib.DrawEllipse((int)foot.X, (int)(foot.Y + 17), 15, 6, Raylib.Fade(Pal.RGBA(0, 0, 0), 0.35f * figAlpha));
 
@@ -791,23 +969,16 @@ public static class Renderer
             Raylib.DrawRing(foot + new Vector2(0, 17), 26f, 28f, 0, 360, 48, Raylib.Fade(hc, 0.30f + 0.40f * pulse));
         }
 
-        // body — apply figAlpha to the figure shape
-        Raylib.DrawCircleV(p, 16f, Raylib.Fade(dark, figAlpha));
-        Raylib.DrawCircleV(p, 16f, Raylib.Fade(Pal.RGBA(0, 0, 0), 0f)); // no-op keep
-        Raylib.DrawRing(p, 13.5f, 16.5f, 0, 360, 40, Raylib.Fade(main, figAlpha));
-        Raylib.DrawCircleV(p, 13.5f, Raylib.Fade(main, 0.18f * figAlpha));
+        // body — apply figAlpha to the figure shape (bodyScale gives a brief flinch pop)
+        float bodyR = 16f * bodyScale;
+        Raylib.DrawCircleV(p, bodyR, Raylib.Fade(dark, figAlpha));
+        Raylib.DrawRing(p, bodyR - 2.5f, bodyR + 0.5f, 0, 360, 40, Raylib.Fade(main, figAlpha));
+        Raylib.DrawCircleV(p, bodyR - 2.5f, Raylib.Fade(main, 0.18f * figAlpha));
 
-        // class glyph
-        int sides = u.Cls switch
-        {
-            "ASSAULT" => 3, "RANGER" => 3, "SHARPSHOOTER" => 4, "CORPSMAN" => 4,
-            "GUNNER" => 4, "BRUISER" => 6, "SCOUT" => 3,
-            "SNIPER" => 4, "TURRET" => 4, "BERSERKER" => 6, "ELITE" => 8, "MEDIC" => 4,
-            "DRONE" => 4, "SHIELD" => 6, "SAPPER" => 3, "HUNTER" => 3, "MORTAR" => 5, _ => 5,
-        };
-        float rot = (u.Cls == "SHARPSHOOTER" || u.Cls == "SNIPER" || u.Cls == "DRONE") ? 45f : (sides == 3 ? -90f : 0f);
-        if (elite) Raylib.DrawRing(p, 18f, 20.5f, 0, 360, 40, Raylib.Fade(Pal.Elite, 0.55f * figAlpha));
-        Raylib.DrawPoly(p, sides, elite ? 9f : 7.5f, rot, Raylib.Fade(main, figAlpha));
+        // class silhouette — a recognizable primitive cue per class (shape-redundant, colorblind-
+        // safe: meaning rides on the SHAPE, inheriting the team colour + focal figAlpha).
+        if (elite) Raylib.DrawRing(p, 18f * bodyScale, 20.5f * bodyScale, 0, 360, 40, Raylib.Fade(Pal.Elite, 0.55f * figAlpha));
+        DrawSilhouette(u, p, main, figAlpha, bodyScale, u.Facing);
 
         // DECAPITATE: a gold crown chevron + "HVT" tag above the target (full-alpha signal, drawn
         // in every alert state so the mark reads even on a dormant target). The body ring above
@@ -932,6 +1103,34 @@ public static class Renderer
         {
             float ang = MathF.Atan2(u.ShieldDy, u.ShieldDx) * 180f / MathF.PI;
             Raylib.DrawRing(p, 18f, 22f, ang - 55, ang + 55, 24, Raylib.Fade(Pal.RGBA(150, 200, 240), figAlpha));
+        }
+
+        // spotter: an outward radar "scan" pulse + a painted-target line so the force-multiplier
+        // reads — the player can SEE it designating the squad's priority target (kill it to break
+        // the crossfire). Signal-level, so drawn at a readable alpha regardless of focal dimming.
+        if (u.Team == Team.Enemy && u.Cls == "SPOTTER")
+        {
+            float t = (float)Raylib.GetTime();
+            // an expanding scan ring (radar sweep) that breathes outward from the unit
+            float scan = (t * 0.6f + u.Bob) % 1f;                     // 0..1 sweep phase
+            float rad = 14f + scan * 16f;
+            Raylib.DrawRing(p, rad, rad + 1.6f, 0, 360, 36, Raylib.Fade(Pal.Foe, (1f - scan) * 0.45f));
+            // a thin, dashed "painting" beam to the designated target while this beacon is live
+            if (u.Active && g.EnemyFocus != null && g.EnemyFocus.Alive)
+            {
+                var tgt = g.EnemyFocus.Pos - new Vector2(0, g.Grid.IsHigh(g.EnemyFocus.X, g.EnemyFocus.Y) ? ElevLift : 0f);
+                var dir = tgt - p;
+                float len = dir.Length();
+                if (len > 1f)
+                {
+                    dir /= len;
+                    float pulse = 0.18f + 0.16f * (0.5f + 0.5f * MathF.Sin(t * 5f + u.Bob));
+                    for (float d = 18f; d < len - 14f; d += 11f)      // dashed segments toward the target
+                        Raylib.DrawLineEx(p + dir * d, p + dir * Math.Min(d + 5f, len - 14f), 1.4f, Raylib.Fade(Pal.Foe, pulse));
+                    // a small reticle tick on the painted target
+                    Raylib.DrawRing(tgt, 13f, 14.6f, 0, 360, 24, Raylib.Fade(Pal.Foe, pulse + 0.12f));
+                }
+            }
         }
 
         // damage flash — always at full strength (it's momentary feedback)

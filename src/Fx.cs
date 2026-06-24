@@ -35,6 +35,19 @@ public class Ring
     public float RingAlpha;     // peak alpha of the ring outline
 }
 
+/// One ambient atmosphere particle. Its motion is a pure, deterministic function of its
+/// frozen per-index constants (set once when the pool is built) plus the ambient time
+/// accumulator — so a given frame always reproduces (essential for the SIGHTLINE_SHOT
+/// harness). Nothing here is spawned/removed at runtime: the field wraps in place, so
+/// there are zero per-frame allocations and no RNG drift.
+public struct AmbientP
+{
+    public float Sx, Sy;      // anchored base position in [0,1] board-space (frozen)
+    public float Phase;       // per-particle phase offset (frozen) — desyncs sway/twinkle
+    public float SizeK;       // size jitter 0.6..1.3 (frozen)
+    public float SpeedK;      // speed jitter 0.7..1.25 (frozen)
+}
+
 /// Particles, floating combat text, and screen shake.
 public class Fx
 {
@@ -322,5 +335,267 @@ public class Fx
             Raylib.DrawTextEx(Cfg.Font, t.Text, new Vector2(x + 2, y + 2), fs, 1f, Raylib.Fade(Pal.RGBA(0, 0, 0), k * 0.6f));
             Raylib.DrawTextEx(Cfg.Font, t.Text, new Vector2(x, y), fs, 1f, Raylib.Fade(t.Color, k));
         }
+    }
+
+    // ====================================================================================
+    // Ambient atmosphere layer (per-biome) — Phase 5 "give each biome a signature".
+    //
+    // Eight biomes used to differ only by a colour multiply (no embers in MAGMA, no snow
+    // in TUNDRA). This is a self-contained, low-contrast particle field that breathes each
+    // biome's signature motion (Biome.Ambient + its AmbCol/AmbCount/AmbSpeed/AmbSize/
+    // AmbAlpha tuning, all in Util.cs).
+    //
+    // DESIGN / determinism: there is NO runtime spawn/remove and NO RNG. A fixed pool of
+    // AmbientP is built once per biome with frozen per-index constants from a deterministic
+    // hash; every frame each particle's screen position + alpha is a *pure function* of
+    // those constants and `_ambT` (an internal time accumulator advanced by `dt`). In the
+    // SIGHTLINE_SHOT harness `dt` is a fixed 1/60 and the shot fires at a fixed frame, so
+    // `_ambT` — and therefore the whole field — reproduces byte-for-byte. The field wraps
+    // in place (modulo board height/width), so it's steady, seamless, and allocation-free
+    // in the hot path. It must stay SUBTLE: low alpha, desaturated, never read as a
+    // threat/objective (squint test). Drawn behind the units (see DrawAmbient note).
+    // ====================================================================================
+
+    AmbientP[] _amb = System.Array.Empty<AmbientP>();
+    int _ambKind = -1;          // Biome.Ambient currently baked into the pool (-1 = none)
+    int _ambCount;              // active count within _amb (<= _amb.Length)
+    Color _ambCol;
+    float _ambBaseSpeed, _ambBaseSize, _ambAlpha;
+    float _ambT;               // deterministic time accumulator (seconds), advanced by dt
+
+    const int AmbCap = 80;     // hard ceiling on the pool regardless of biome data (perf)
+
+    /// Advance the ambient field for `biome`. Rebuilds the (frozen) pool when the biome's
+    /// ambient kind changes; otherwise just steps the deterministic clock. Cheap + bounded
+    /// + allocation-free in steady state. Call once per frame from Game.Update with the
+    /// fixed `dt` (1/60 in the harness) so it reproduces.
+    public void UpdateAmbient(Biome biome, float dt)
+    {
+        if (biome == null) return;
+        int kind = (int)biome.Ambient;
+        if (kind != _ambKind || _ambCol.R != biome.AmbCol.R || _ambCol.G != biome.AmbCol.G
+            || _ambCol.B != biome.AmbCol.B || _ambCount != Util.Clamp(biome.AmbCount, 0, AmbCap))
+            BuildAmbient(biome);
+
+        // bound dt so a hitch/first-frame spike can't teleport the field (keeps it smooth +
+        // deterministic-enough; the harness dt is already a fixed 1/60 so this never bites it)
+        _ambT += Util.Clamp(dt, 0f, 0.05f);
+    }
+
+    /// (Re)bake the ambient pool for `biome`. Per-index constants come from a fixed-seed
+    /// deterministic hash (NOT Util.Rng) so the field is identical every run/frame. Called
+    /// only on a biome change — never in the hot loop.
+    void BuildAmbient(Biome biome)
+    {
+        _ambKind = (int)biome.Ambient;
+        _ambCol = biome.AmbCol;
+        _ambBaseSpeed = biome.AmbSpeed;
+        _ambBaseSize = biome.AmbSize;
+        _ambAlpha = biome.AmbAlpha;
+        _ambCount = Util.Clamp(biome.AmbCount, 0, AmbCap);
+        if (_amb.Length < _ambCount) _amb = new AmbientP[_ambCount];
+
+        // Seed the per-particle constants off the biome kind so different biomes scatter
+        // differently, but deterministically (same biome -> same layout every time).
+        uint seed = 0x9E3779B9u ^ (uint)(_ambKind * 0x85EBCA77);
+        for (int i = 0; i < _ambCount; i++)
+        {
+            uint h = seed + (uint)i * 0x27D4EB2Fu;
+            _amb[i].Sx = Hash01(h * 16777619u + 1u);
+            _amb[i].Sy = Hash01(h * 2246822519u + 7u);
+            _amb[i].Phase = Hash01(h * 3266489917u + 13u) * (MathF.PI * 2f);
+            _amb[i].SizeK = 0.6f + Hash01(h * 668265263u + 19u) * 0.7f;
+            _amb[i].SpeedK = 0.7f + Hash01(h * 374761393u + 23u) * 0.55f;
+        }
+    }
+
+    /// Draw the ambient field over the board rect. Pure-function positions from the frozen
+    /// constants + `_ambT`; low alpha, soft round/streak primitives in the biome's palette.
+    /// WIRING: call this in the board draw — recommended right after the floor + noise grain
+    /// (before cover/units/overlays) so it sits as background texture and never competes with
+    /// signal. It's a no-op when the pool is empty.
+    public void DrawAmbient()
+    {
+        if (_ambCount <= 0) return;
+
+        float ox = Cfg.OriginX, oy = Cfg.OriginY;
+        float bw = Cfg.BoardW, bh = Cfg.BoardH;
+        var kind = (AmbientKind)_ambKind;
+
+        for (int i = 0; i < _ambCount; i++)
+        {
+            var a = _amb[i];
+            float t = _ambT;
+            float px, py;          // 0..1 board-space position (pre-wrap)
+            float alpha = _ambAlpha;
+            float size = _ambBaseSize * a.SizeK;
+
+            switch (kind)
+            {
+                case AmbientKind.Ember:   // MAGMA: rise + accelerate upward, flicker, sway
+                {
+                    float climb = (_ambBaseSpeed * a.SpeedK / bh) * t;
+                    py = Frac(a.Sy - climb);                                   // travels up
+                    px = a.Sx + 0.012f * MathF.Sin(t * 1.3f + a.Phase);        // gentle sway
+                    float twk = 0.6f + 0.4f * MathF.Sin(t * 6f + a.Phase * 3f);// hot flicker
+                    alpha *= twk * (0.45f + 0.55f * py);                       // hotter low, fades as it rises
+                    break;
+                }
+                case AmbientKind.Mote:    // VOID: slow rise + twinkle
+                {
+                    float climb = (_ambBaseSpeed * a.SpeedK / bh) * t;
+                    py = Frac(a.Sy - climb);
+                    px = a.Sx + 0.01f * MathF.Sin(t * 0.7f + a.Phase);
+                    alpha *= 0.45f + 0.55f * (0.5f + 0.5f * MathF.Sin(t * 2.2f + a.Phase * 2f));
+                    break;
+                }
+                case AmbientKind.Spore:   // VERDANT: drift slowly upward, lazy bob
+                {
+                    float climb = (_ambBaseSpeed * a.SpeedK / bh) * t;
+                    py = Frac(a.Sy - climb);
+                    px = a.Sx + 0.02f * MathF.Sin(t * 0.9f + a.Phase);
+                    alpha *= 0.6f + 0.4f * MathF.Sin(t * 1.1f + a.Phase);
+                    break;
+                }
+                case AmbientKind.Snow:    // TUNDRA: fall + side sway
+                {
+                    float fall = (_ambBaseSpeed * a.SpeedK / bh) * t;
+                    py = Frac(a.Sy + fall);                                    // travels down
+                    px = a.Sx + 0.03f * MathF.Sin(t * 1.2f + a.Phase);
+                    break;
+                }
+                case AmbientKind.Ash:     // ASH: fall slower, tumble, dim
+                {
+                    float fall = (_ambBaseSpeed * a.SpeedK / bh) * t;
+                    py = Frac(a.Sy + fall);
+                    px = a.Sx + 0.045f * MathF.Sin(t * 0.8f + a.Phase) * MathF.Cos(t * 0.35f + a.Phase);
+                    alpha *= 0.7f + 0.3f * MathF.Sin(t * 1.5f + a.Phase);
+                    break;
+                }
+                case AmbientKind.Gust:    // ARID: blow fast left->right in a low band
+                {
+                    float blow = (_ambBaseSpeed * a.SpeedK / bw) * t;
+                    px = Frac(a.Sx + blow);                                    // streaks across
+                    py = a.Sy + 0.02f * MathF.Sin(t * 2.4f + a.Phase);
+                    alpha *= 0.5f + 0.5f * MathF.Sin(t * 3f + a.Phase);        // gusty in/out
+                    break;
+                }
+                case AmbientKind.Scan:    // NEON: drift sideways + a faint vertical scan pulse
+                {
+                    float drift = (_ambBaseSpeed * a.SpeedK / bw) * t;
+                    px = Frac(a.Sx + drift * 0.5f);
+                    py = a.Sy;
+                    // pulse brightest as a slow horizontal scanline sweeps past this row
+                    float scan = Frac(t * 0.12f);
+                    float d = MathF.Abs(py - scan); d = MathF.Min(d, 1f - d);
+                    alpha *= 0.32f + 0.68f * MathF.Max(0f, 1f - d * 7f);
+                    break;
+                }
+                default:                  // STEEL (Dust): slow lateral draft, faint shimmer
+                {
+                    float drift = (_ambBaseSpeed * a.SpeedK / bw) * t;
+                    px = Frac(a.Sx + drift);
+                    py = a.Sy + 0.015f * MathF.Sin(t * 0.6f + a.Phase);
+                    alpha *= 0.6f + 0.4f * MathF.Sin(t * 1.0f + a.Phase);
+                    break;
+                }
+            }
+
+            float x = ox + Frac(px) * bw;
+            float y = oy + Frac(py) * bh;
+            alpha = Util.Clamp(alpha, 0f, 1f);
+            if (alpha <= 0.01f) continue;
+            var col = Raylib.Fade(_ambCol, alpha);
+
+            // soft-glow primitive matching the house style: a dim halo + a brighter core.
+            // GUST streaks read as a short horizontal dash; everything else is a round mote.
+            if (kind == AmbientKind.Gust)
+            {
+                float len = size * 4.5f;
+                Raylib.DrawLineEx(new Vector2(x - len, y), new Vector2(x, y),
+                                  MathF.Max(1f, size * 0.9f), col);
+            }
+            else
+            {
+                Raylib.DrawCircleV(new Vector2(x, y), size * 2.0f, Raylib.Fade(_ambCol, alpha * 0.30f));
+                Raylib.DrawCircleV(new Vector2(x, y), MathF.Max(0.8f, size), col);
+            }
+        }
+    }
+
+    // fractional part in [0,1) — used to wrap the field so it loops seamlessly with no respawn.
+    static float Frac(float v) { v -= MathF.Floor(v); return v < 0f ? v + 1f : v; }
+
+    // deterministic uint->[0,1) hash (xorshift-mix). Used ONLY at pool-build time to freeze
+    // per-particle constants; never per frame. Replaces RNG so the field is reproducible.
+    static float Hash01(uint x)
+    {
+        x ^= x >> 16; x *= 0x7FEB352Du;
+        x ^= x >> 15; x *= 0x846CA68Bu;
+        x ^= x >> 16;
+        return (x & 0xFFFFFFu) / 16777216f;   // 24-bit mantissa -> [0,1)
+    }
+
+    /// Headless self-test (no window): build the ambient field for every biome, advance it
+    /// many fixed steps, and assert the pool stays bounded, finite (no NaN/Inf), and that
+    /// every drawn position stays inside the board rect. Returns true on PASS. Wired to
+    /// SIGHTLINE_AMBIENTTEST in Program.cs (orchestrator). Deterministic — does not touch
+    /// Raylib draw calls, so it's safe with no GL context.
+    public static bool AmbientSelfTest()
+    {
+        var fx = new Fx();
+        foreach (var bm in Biome.All)
+        {
+            // step the sim with the same fixed dt the harness uses
+            for (int step = 0; step < 600; step++)
+                fx.UpdateAmbient(bm, 1f / 60f);
+
+            if (fx._ambCount < 0 || fx._ambCount > AmbCap) return false;
+            if (fx._ambCount > fx._amb.Length) return false;
+            if (float.IsNaN(fx._ambT) || float.IsInfinity(fx._ambT)) return false;
+
+            // mirror DrawAmbient's position math for the active kind and verify bounds.
+            float ox = Cfg.OriginX, oy = Cfg.OriginY, bw = Cfg.BoardW, bh = Cfg.BoardH;
+            float t = fx._ambT;
+            var kind = (AmbientKind)fx._ambKind;
+            for (int i = 0; i < fx._ambCount; i++)
+            {
+                var a = fx._amb[i];
+                if (float.IsNaN(a.Sx) || float.IsNaN(a.Sy) || float.IsNaN(a.Phase)) return false;
+                float px, py;
+                float climb = (fx._ambBaseSpeed * a.SpeedK) * t;
+                switch (kind)
+                {
+                    case AmbientKind.Ember:
+                    case AmbientKind.Mote:
+                    case AmbientKind.Spore:
+                        py = Frac(a.Sy - climb / bh);
+                        px = a.Sx + 0.05f * MathF.Sin(t + a.Phase);
+                        break;
+                    case AmbientKind.Snow:
+                    case AmbientKind.Ash:
+                        py = Frac(a.Sy + climb / bh);
+                        px = a.Sx + 0.05f * MathF.Sin(t + a.Phase);
+                        break;
+                    case AmbientKind.Gust:
+                        px = Frac(a.Sx + climb / bw);
+                        py = a.Sy + 0.05f * MathF.Sin(t + a.Phase);
+                        break;
+                    default:
+                        px = Frac(a.Sx + climb / bw);
+                        py = a.Sy + 0.05f * MathF.Sin(t + a.Phase);
+                        break;
+                }
+                float x = ox + Frac(px) * bw;
+                float y = oy + Frac(py) * bh;
+                if (float.IsNaN(x) || float.IsNaN(y)) return false;
+                // wrapped positions must sit within the board rect (the field never leaks off-board)
+                if (x < ox - 1f || x > ox + bw + 1f || y < oy - 1f || y > oy + bh + 1f) return false;
+            }
+
+            // a fresh Fx for the next biome so the per-biome rebuild path is exercised cleanly
+            fx = new Fx();
+        }
+        return true;
     }
 }

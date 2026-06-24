@@ -86,15 +86,10 @@ public static class Combat
         if (a.HasPerk(Perk.LockOn) && coverLevel == 0) hit += Unit.PerkAim;
         if (a.HasPerk(Perk.CloseQuarters) && dist <= Unit.CloseRange) hit += Unit.PerkAim;
         if (a.HasPerk(Perk.Marksman) && dist >= Unit.LongRange) hit += Unit.PerkAim;
-        // CoolHeaded (composure). Two parts so it's never a dead pick:
-        //  - cuts the Disoriented aim penalty (net = DisorientAim - CoolHeadedDivert), and
-        //  - a small always-on steadiness bonus while the soldier carries NO negative status,
-        //    so the perk earns its keep on the common case (not just the rare daze).
-        if (a.HasPerk(Perk.CoolHeaded))
-        {
-            if (a.HasStatus(StatusKind.Disoriented)) hit += Unit.CoolHeadedDivert;
-            else if (!HasAnyNegativeStatus(a)) hit += Unit.CoolHeadedSteady;
-        }
+        // CoolHeaded (composure) is a DEFENDER perk now: a CoolHeaded TARGET is hard to rattle, so any
+        // attacker firing at it loses CoolHeadedEvade aim (its daze-immunity half lives in Unit.AddStatus).
+        // A survivability pick, distinct from the attacker-side aim line (LockOn/CloseQuarters/Marksman).
+        if (d.HasPerk(Perk.CoolHeaded)) hit -= Unit.CoolHeadedEvade;
 
         // earned traits + bonds (attacker)
         if (a.HasTrait(Trait.Killer) && d.MaxHp > 0 && d.Hp * 2 <= d.MaxHp) hit += Unit.KillerAim;
@@ -168,10 +163,16 @@ public static class Combat
     /// keys its overwatch-only bonuses off this without needing a Game.cs edit.
     static bool IsOverwatchReaction(Unit a) => a.ReactedThisTurn;
 
-    /// True if the unit carries any negative combat status (used by CoolHeaded's "unhindered" bonus).
-    static bool HasAnyNegativeStatus(Unit a) =>
-        a.HasStatus(StatusKind.Burning) || a.HasStatus(StatusKind.Bleed)
-        || a.HasStatus(StatusKind.Stun) || a.HasStatus(StatusKind.Disoriented);
+    /// HARDENED damage reduction (one source of truth for every incoming-hit path: Resolve's hit +
+    /// graze branches and the grenade blast in Anim). A Hardened defender takes HardenedFlat off any
+    /// hit, plus an extra HardenedCrit off a CRITICAL hit (crits are the spiky shots that drop
+    /// soldiers — a tank shrugs them off). Always floored at 1 (the guaranteed-damage floor still holds).
+    public static int HardenedReduce(Unit d, int dmg, bool crit)
+    {
+        if (!d.HasPerk(Perk.Hardened)) return dmg;
+        int reduced = dmg - Unit.HardenedFlat - (crit ? Unit.HardenedCrit : 0);
+        return Math.Max(1, reduced);
+    }
 
     // Streak-breaker constants (S4-C): per clean-miss aim bonus, capped at MaxStreakBonus.
     // Applied INSIDE Resolve only (hidden from the ComputeOdds display — DESIGN.md 3B).
@@ -219,8 +220,7 @@ public static class Combat
         {
             // Graze: minimum damage, never crits.
             res.Graze = true;
-            int dmg = odds.DmgMin;
-            if (d.HasPerk(Perk.Hardened)) dmg = Math.Max(1, dmg - 1);
+            int dmg = HardenedReduce(d, odds.DmgMin, crit: false);   // tank: damage resistance
             res.Damage = Math.Max(1, dmg);   // guaranteed-damage floor
             res.Damage = FragileFloor(d, res.Damage);   // a full-HP player survives any one shot
             return res;
@@ -233,7 +233,7 @@ public static class Combat
             res.Crit = true;
             dmgN = (int)MathF.Ceiling(dmgN * 1.5f) + 1;
         }
-        if (d.HasPerk(Perk.Hardened)) dmgN = Math.Max(1, dmgN - 1);   // damage resistance
+        dmgN = HardenedReduce(d, dmgN, res.Crit);   // tank: -1 always, -3 more from crits
         res.Damage = Math.Max(1, dmgN);   // guaranteed-damage floor
         res.Damage = FragileFloor(d, res.Damage);   // a full-HP player survives any one shot
         return res;
@@ -518,35 +518,56 @@ public static class Combat
             if (ddeCritH <= excCritH) fails.Add("deadeyeNotBeatExecOnHealthy");
         }
 
-        // COOL-HEADED: the always-on steadiness bonus applies while UNHINDERED (no negative status),
-        // is suppressed while another negative status is present, and still cuts the daze penalty.
+        // COOL-HEADED (reworked): a DEFENDER composure perk. (1) An attacker shooting a CoolHeaded
+        // target loses CoolHeadedEvade aim; a normal (non-perked) target gives no such discount.
+        // (2) A CoolHeaded soldier is immune to Disoriented (AddStatus is a no-op for that kind).
         {
             var gCH = new Grid();
-            var plain  = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 3, Y = 5 };
-            var chead  = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 3, Y = 5 };
-            chead.Perks.Add(Perk.CoolHeaded);
-            var tgt = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 7, Y = 5, Hp = 10, MaxHp = 10 };
+            var atk     = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy,  X = 3, Y = 5 };
+            var plainD  = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 7, Y = 5, Hp = 10, MaxHp = 10 };
+            var coolD   = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 7, Y = 5, Hp = 10, MaxHp = 10 };
+            coolD.Perks.Add(Perk.CoolHeaded);
 
-            // Unhindered: CoolHeaded shooter gets +CoolHeadedSteady over a plain shooter.
-            int plainHit = ComputeOdds(gCH, plain, tgt).HitChance;
-            int coolHit  = ComputeOdds(gCH, chead, tgt).HitChance;
-            if (coolHit != plainHit + Unit.CoolHeadedSteady) fails.Add("coolHeadedSteady");
+            // Shooting a CoolHeaded target: the attacker's hit drops by exactly CoolHeadedEvade.
+            int hitVsPlain = ComputeOdds(gCH, atk, plainD).HitChance;
+            int hitVsCool  = ComputeOdds(gCH, atk, coolD).HitChance;
+            if (hitVsCool != Util.Clamp(hitVsPlain - Unit.CoolHeadedEvade, 3, 95)) fails.Add("coolHeadedEvade");
 
-            // Burning (a negative status that isn't an aim mod itself): the steady bonus is suppressed,
-            // so the CoolHeaded shooter reads the SAME as a plain shooter (no bonus, no penalty here).
-            chead.AddStatus(StatusKind.Burning, 2);
-            if (ComputeOdds(gCH, chead, tgt).HitChance != plainHit) fails.Add("coolHeadedBurnNoSteady");
-            chead.Statuses.Clear();
+            // CoolHeaded does NOT help its own offense (it's a defender perk): a CoolHeaded SHOOTER reads
+            // the same as a plain shooter against the same target.
+            var coolAtk = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 3, Y = 5 };
+            coolAtk.Perks.Add(Perk.CoolHeaded);
+            var plainAtk = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 3, Y = 5 };
+            var foeT = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 7, Y = 5, Hp = 10, MaxHp = 10 };
+            if (ComputeOdds(gCH, coolAtk, foeT).HitChance != ComputeOdds(gCH, plainAtk, foeT).HitChance) fails.Add("coolHeadedNoSelfAim");
 
-            // Disoriented: the penalty is cut (net -7), and the +5 steady does NOT also apply
-            // (else-branch). Net vs an un-perked disoriented shooter = +CoolHeadedDivert.
+            // Disoriented immunity: AddStatus(Disoriented) is a no-op on a CoolHeaded unit (so its aim is
+            // never docked by the daze), but a plain unit catches it and reads -DisorientAim.
+            coolD.AddStatus(StatusKind.Disoriented, 3);
+            if (coolD.HasStatus(StatusKind.Disoriented)) fails.Add("coolHeadedDazeImmune");
             var dazPlain = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 3, Y = 5 };
-            dazPlain.AddStatus(StatusKind.Disoriented, 2);
-            chead.AddStatus(StatusKind.Disoriented, 2);
-            int dazPlainHit = ComputeOdds(gCH, dazPlain, tgt).HitChance;
-            int dazCoolHit  = ComputeOdds(gCH, chead,    tgt).HitChance;
-            if (dazCoolHit != dazPlainHit + Unit.CoolHeadedDivert) fails.Add("coolHeadedDaze");
-            chead.Statuses.Clear();
+            int plainShootClean = ComputeOdds(gCH, dazPlain, foeT).HitChance;
+            dazPlain.AddStatus(StatusKind.Disoriented, 3);
+            if (!dazPlain.HasStatus(StatusKind.Disoriented)) fails.Add("plainDazeApplies");
+            if (ComputeOdds(gCH, dazPlain, foeT).HitChance != Util.Clamp(plainShootClean - Unit.DisorientAim, 3, 95)) fails.Add("plainDazePenalty");
+        }
+
+        // HARDENED (reworked): -HardenedFlat off any hit, -HardenedCrit MORE off a crit. Verify the
+        // damage reduction via the helper directly (deterministic) so the random Resolve path can't flake.
+        {
+            var plainD = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, Hp = 20, MaxHp = 20 };
+            var hardD  = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, Hp = 20, MaxHp = 20 };
+            hardD.Perks.Add(Perk.Hardened);
+            // No perk: damage passes through untouched (both crit and non-crit).
+            if (HardenedReduce(plainD, 7, false) != 7 || HardenedReduce(plainD, 7, true) != 7) fails.Add("hardenedNoOpWithoutPerk");
+            // Non-crit hit: -HardenedFlat.
+            if (HardenedReduce(hardD, 7, false) != 7 - Unit.HardenedFlat) fails.Add("hardenedFlat");
+            // Crit hit: -HardenedFlat - HardenedCrit (the spiky-shot mitigation that makes it a tank perk).
+            if (HardenedReduce(hardD, 9, true) != 9 - Unit.HardenedFlat - Unit.HardenedCrit) fails.Add("hardenedCrit");
+            // Crit reduction must exceed the non-crit reduction (the whole point — shrugs off crits harder).
+            if ((9 - HardenedReduce(hardD, 9, true)) <= (9 - HardenedReduce(hardD, 9, false))) fails.Add("hardenedCritStronger");
+            // Floor: a tiny hit still deals >= 1 even with the full crit reduction.
+            if (HardenedReduce(hardD, 1, true) < 1) fails.Add("hardenedFloor");
         }
 
         // GUARDIAN: an overwatch REACTION shot (flagged by ReactedThisTurn) ignores the -10 reaction

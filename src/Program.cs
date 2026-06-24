@@ -12,7 +12,19 @@ public static class Program
         // SIGHTLINE_AUTOPLAY=1    : skip intro, let an autopilot play full matches to a result.
         // Used to smoke-test the whole loop under Xvfb + software GL. See CLAUDE.md.
         bool shot = int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_SHOT"), out int shotFrame);
-        bool autoplay = Environment.GetEnvironmentVariable("SIGHTLINE_AUTOPLAY") == "1";
+        // SIGHTLINE_SMARTPLAY=1 : like AUTOPLAY, but routes the autopilot through the
+        // competent SmartStep() so a single headless game is played to win (balance gauge).
+        bool smartplay = Environment.GetEnvironmentVariable("SIGHTLINE_SMARTPLAY") == "1";
+        bool autoplay = Environment.GetEnvironmentVariable("SIGHTLINE_AUTOPLAY") == "1" || smartplay;
+
+        // SIGHTLINE_BALANCE=<N> : run N full headless campaigns with the competent AI, aggregate
+        // balance telemetry (Stats), and print Stats.Report(). A measurement harness — takes over
+        // completely when set; leaves AUTOPLAY/SHOT/the *TEST modes untouched when unset.
+        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_BALANCE"), out int balanceN) && balanceN > 0)
+        {
+            BalanceBatch(balanceN);
+            return;
+        }
 
         // SIGHTLINE_SAVETEST=1 : headless round-trip check for run persistence (item E). No window.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_SAVETEST") == "1")
@@ -23,6 +35,12 @@ public static class Program
         if (Environment.GetEnvironmentVariable("SIGHTLINE_COMBATTEST") == "1")
         {
             Console.WriteLine(Combat.SelfTest());
+            return;
+        }
+        // SIGHTLINE_AMBIENTTEST=1 : per-biome ambient field stays bounded/finite/on-board (Phase 5). No window.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_AMBIENTTEST") == "1")
+        {
+            Console.WriteLine(Fx.AmbientSelfTest() ? "AMBIENTTEST: PASS" : "AMBIENTTEST: FAIL");
             return;
         }
         if (Environment.GetEnvironmentVariable("SIGHTLINE_DEATHTEST") == "1")
@@ -166,6 +184,7 @@ public static class Program
         if (introShot) { var r = new Run(); r.Start(); r.Mission = 3; SaveGame.Save(r); }
         if ((shot || autoplay) && !introShot) game.StartMission(startMission);
         if (autoplay) game.AutoPlay = true;
+        if (smartplay) game.SmartPlay = true;
         // force an objective for verification (e.g. SIGHTLINE_OBJ=sabotage|rescue), shot or autoplay
         switch (Environment.GetEnvironmentVariable("SIGHTLINE_OBJ"))
         {
@@ -186,6 +205,7 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CAMPAIGN") == "1") game.DebugCampaignMap();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_ITEM") == "1") game.DebugItem();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_COVER") == "1") game.DebugCover();
+        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_UNITFX") == "1") game.DebugUnitFx();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_ELEV") == "1") game.DebugElevation();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_SHOP") == "1") game.DebugShop();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_TAGEDIT") == "1") game.DebugTagEditor();
@@ -241,6 +261,92 @@ public static class Program
         Renderer.UnloadNoise();   // 5.4: free the procedural noise texture
         if (Cfg.Font.Texture.Id != 0 && Cfg.Font.Texture.Id != Raylib.GetFontDefault().Texture.Id)
             Raylib.UnloadFont(Cfg.Font);
+        Raylib.CloseWindow();
+    }
+
+    // SIGHTLINE_BALANCE=<N>: run N full headless campaigns through the competent autopilot
+    // (SmartPlay), accumulate Stats telemetry across all of them, and print the aggregate
+    // balance report. Heat is cycled 0..4 across the batch (or pinned via SIGHTLINE_BALANCE_HEAT)
+    // so the report shows a difficulty curve. Fast + headless: one window, minimal per-frame
+    // draw (the autoplay path), uncapped FPS, hard per-match frame cap so it can never hang.
+    static void BalanceBatch(int runs)
+    {
+        // Cumulative telemetry across the whole batch (NOT reset per match).
+        Stats.Reset();
+        Stats.Enabled = true;
+
+        // Keep batch-wide static state deterministic across matches.
+        Mission.ForcedLayout = -1;       // no forced arena
+        Pal.SetColorblind(false);        // default palette (irrelevant headless, set defensively)
+
+        // Optional pinned heat; otherwise cycle 0..4 so the curve shows.
+        bool pinHeat = int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_BALANCE_HEAT"), out int fixedHeat);
+        // SIGHTLINE_BALANCE_DUMB=1 runs the smoke-test autopilot instead of the competent AI,
+        // so the same batch can produce a baseline to compare the smart AI (and balance changes) against.
+        bool dumb = Environment.GetEnvironmentVariable("SIGHTLINE_BALANCE_DUMB") == "1";
+
+        // One window for the whole batch (the autoplay smoke path uses Display.RenderFrame).
+        Raylib.SetConfigFlags(ConfigFlags.Msaa4xHint);
+        Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "SIGHTLINE — balance batch");
+        Raylib.SetExitKey(KeyboardKey.Null);
+        Cfg.Font = Raylib.GetFontDefault();   // no draw of game content in autoplay; default font is enough
+        Display.Init(false);                  // headless render-frame path (no post-FX / no save)
+        Raylib.SetTargetFPS(0);               // uncapped — run as fast as the sim allows
+
+        const int frameCap = 20000;           // per-match safety cap; a hit cap counts as a loss
+        int wins = 0, losses = 0, capped = 0;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+
+        for (int i = 0; i < runs && !Raylib.WindowShouldClose(); i++)
+        {
+            int heat = pinHeat ? Sightline.Heat.Clamp(fixedHeat) : (i % 5);
+            // StartMission reads SIGHTLINE_HEAT when NoPersist is set — dial it in before starting.
+            Environment.SetEnvironmentVariable("SIGHTLINE_HEAT", heat.ToString());
+
+            var game = new Game { NoPersist = true, AutoPlay = true, SmartPlay = !dumb };
+            game.StartMission(1);   // fires Stats.BeginRun internally
+
+            int frame = 0;
+            bool decided = false;
+            while (!Raylib.WindowShouldClose())
+            {
+                game.Update(1f / 60f);
+                Display.RenderFrame(() => Raylib.ClearBackground(Pal.Bg));   // minimal draw
+                frame++;
+                if (game.Phase == Phase.Win) { wins++; decided = true; break; }
+                if (game.Phase == Phase.Lose) { losses++; decided = true; break; }
+                if (frame >= frameCap)
+                {
+                    // Treat a frame-cap as a loss so the batch never hangs. EndRun is no-op if
+                    // the run already finalised; defensively close the run record for the report.
+                    capped++; losses++;
+                    Stats.EndRun(false, game.RunState != null ? game.RunState.Mission - 1 : 0, "frame-cap");
+                    break;
+                }
+            }
+            if (!decided && frame < frameCap)
+            {
+                // window closed mid-match (Xvfb teardown / Ctrl-C): close the run record and stop.
+                Stats.EndRun(false, game.RunState != null ? game.RunState.Mission - 1 : 0, "aborted");
+                break;
+            }
+
+            if ((i + 1) % 5 == 0 || i + 1 == runs)
+                Console.WriteLine($"run {i + 1}/{runs}  (W:{wins} L:{losses} cap:{capped})  {sw.Elapsed.TotalSeconds:0.0}s");
+        }
+
+        sw.Stop();
+        Console.WriteLine();
+        Console.WriteLine(Stats.Report());
+        Console.WriteLine($"batch wall-time: {sw.Elapsed.TotalSeconds:0.0}s  ({runs} runs, frame-cap hits: {capped})");
+
+        // Optional machine-readable aggregate alongside the printed report.
+        string jsonPath = "/tmp/claude-0/-home-user-temporary-name/809199e3-983c-51d2-b8f8-28bff90d918a/scratchpad/balance.json";
+        Stats.WriteJson(jsonPath);
+        Console.WriteLine($"aggregate JSON -> {jsonPath}");
+
+        Display.Shutdown();
+        Renderer.UnloadNoise();
         Raylib.CloseWindow();
     }
 

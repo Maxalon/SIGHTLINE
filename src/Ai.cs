@@ -56,6 +56,11 @@ public static class Ai
         }
         Unit vip = players.Find(p => p.IsVip);   // escort: hunt the asset
 
+        // SPOTTER force-multiplier (3.x): a live BEACON on the field "paints" the squad's
+        // priority target, so every ally's focus-fire convergence is amplified below. Computed
+        // once per plan; kill the SPOTTER to break the crossfire (it doesn't fight much itself).
+        bool spotterActive = SpotterActive(g, e);
+
         // SAPPER: the nearest covered soldier's frontal cover tile — the demolition target
         (int x, int y)? sapTarget = null;
         if (e.Cls == "SAPPER" && nearest != null) sapTarget = g.Grid.CoverTile(nearest.X, nearest.Y, e.X, e.Y);
@@ -154,7 +159,13 @@ public static class Ai
                     bool canFinish = p.Hp <= e.Weapon.DmgMax;
                     float val = odds.HitChance + (odds.CoverLevel == 0 ? 25 : 0)
                                 + (canFinish ? 30 : 0)                   // can finish?
-                                + (p.IsVip ? 40 : 0);                    // prioritise the VIP
+                                + (p.IsVip ? 10 : 0);                    // prioritise the VIP (was 40)
+                    // VIP bias dialed 40 -> 10: balance data (Escort 34% win, many "VIP LOST")
+                    // showed the +40 made the whole hostile force focus-fire the fragile asset and
+                    // delete it in 1-2 turns. 10 keeps it a mild tiebreaker priority (a hostile
+                    // already looking at the VIP shoots it over an equally-good soldier shot)
+                    // without the whole pod converging on it. Measured: Escort 34% -> 65% at heat 0
+                    // with this + the VIP HP buff in Mission.MakeVip + the halved closing-bias below.
                     // COORDINATION 1 — FOCUS FIRE: the squad converges on a shared priority
                     // target (chosen once per turn in Game.PlanEnemySquad). Reward shooting it
                     // so enemies collapse one soldier rather than spreading chip damage; the
@@ -163,8 +174,18 @@ public static class Ai
                     // layers on top of hit/cover/finish, never replacing the "good shot" core.
                     if (g.EnemyFocus != null && p == g.EnemyFocus)
                     {
-                        val += 30;                                       // concentrate fire here
+                        // SPOTTER amplifies the convergence: a painted target is worth collapsing
+                        // on even harder, so the squad genuinely focuses while the BEACON lives.
+                        val += spotterActive ? 45 : 30;                  // concentrate fire here
                         if (canFinish && odds.HitChance >= 50) val += 35; // press a likely kill
+                        // COORDINATION 6 — CROSSFIRE (AI improvement): prefer hitting the focus
+                        // from an angle its cover DOESN'T protect (a genuine flank) or where it's
+                        // simply exposed, so the squad attacks the priority target from converging,
+                        // unprotected lines rather than all battering its frontal cover. Read off the
+                        // SAME GetCover the resolver uses (truthful), and only when this shot already
+                        // exists, so it's a pure tie-break among focus shots — never a no-progress move.
+                        if (odds.Flanked) val += spotterActive ? 22 : 14; // out-positioned its cover
+                        else if (odds.CoverLevel == 0) val += 4;          // already exposed: minor nudge
                     }
                     if (val > bestHit) { bestHit = val; shoot = p; }
                 }
@@ -221,15 +242,34 @@ public static class Ai
                 score += Math.Min(distNearest, e.Weapon.MaxRange) * 2.0f;
                 score += g.Grid.HeightAt(tx, ty) * 12;
             }
-            else if (e.Cls == "MORTAR")                          // back-line grenadier: hold off, lob frags
+            else if (e.Cls == "MORTAR" && e.Grenades > 0)       // back-line grenadier: hold off, lob frags
             {
                 // hang back toward grenade range so it stays out of the brawl and keeps
                 // line-of-throw on clusters; mild height preference. The actual frag toss
                 // is handled by the shared grenade AI after the tile loop. Keep a soft pull
                 // toward staying reasonably near (so it doesn't flee off the board), capped.
+                // ONLY while it still has frags (e.Grenades > 0). Once the pouch is empty a
+                // MORTAR has nothing to lob and a poor SMG, so holding the far standoff just
+                // wasted turns at the edge of the map -- it now falls through to the generic
+                // advance block below (default advW 1.4, i.e. closes to a normal SCOUT-ish
+                // fighting range and uses its gun).
                 int want = Math.Max(3, Game.GrenadeRange - 1);   // ideal standoff ~ grenade range
                 score -= Math.Abs(distNearest - want) * 1.6f;    // settle around the standoff band
                 score += g.Grid.HeightAt(tx, ty) * 8;
+            }
+            else if (e.Cls == "SPOTTER")                        // designator: hang back in cover, stay in contact
+            {
+                // The BEACON is a fragile force-multiplier — its value is staying ALIVE on the field
+                // (it amplifies the squad's focus fire), not trading shots. So it holds a mid
+                // standoff well out of the brawl, prizes cover/height hard, and keeps line of sight to
+                // the nearest soldier (it must "see" the squad to paint it) without ever charging in.
+                int want = 6;                                    // a comfortable observation standoff
+                score -= Math.Abs(distNearest - want) * 1.4f;    // settle around the standoff band
+                score += cover.Level * 16;                       // value cover heavily (it's frail)
+                score += g.Grid.HeightAt(tx, ty) * 10;           // a vantage point reads the field
+                if (nearest != null && g.Grid.HasLineOfSight(tx, ty, nearest.X, nearest.Y))
+                    score += 10;                                 // stay in contact to keep painting
+                if (distNearest <= 2) score -= 24;               // never let the squad close on it
             }
             else
             {
@@ -253,7 +293,7 @@ public static class Ai
                 else if (tgtCov.Level == 0) score += 16;         // soldier simply has no cover from this angle
             }
             if (e.Cls == "DRONE") score -= cover.Level * 18;            // drone doesn't value cover (cancels the bonus above)
-            if (vip != null) score -= Util.ChebyDist(tx, ty, vip.X, vip.Y) * 1.0f;     // close on the asset
+            if (vip != null) score -= Util.ChebyDist(tx, ty, vip.X, vip.Y) * 0.5f;     // lean toward the asset (was 1.0)
             if (sapTarget != null)                               // sapper: get adjacent to the cover
                 score -= Util.ChebyDist(tx, ty, sapTarget.Value.x, sapTarget.Value.y) * 3.0f;
 
@@ -501,5 +541,17 @@ public static class Ai
         var odds = Combat.ComputeOdds(g.Grid, a, d);
         a.X = ox; a.Y = oy;
         return odds;
+    }
+
+    // True when a live, ALERT SPOTTER (BEACON) is on the field other than `self` — the
+    // force-multiplier condition. While one survives it "paints" the squad's priority target,
+    // so every planning ally amplifies its focus-fire + crossfire bias (see Ai.Plan). A SPOTTER
+    // never amplifies for itself (it's a fragile designator, not a shooter), and a Suspicious/
+    // Unaware (not-yet-engaged) one doesn't count — only an active beacon is coordinating.
+    static bool SpotterActive(Game g, Unit self)
+    {
+        foreach (var a in g.AliveEnemies())
+            if (a != self && a.Active && a.Cls == "SPOTTER") return true;
+        return false;
     }
 }

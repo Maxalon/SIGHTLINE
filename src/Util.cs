@@ -97,6 +97,22 @@ public static class Pal
     public static readonly Color MoveYellow= RGBA(251, 191, 36, 55);
 }
 
+/// The kind of ambient atmosphere a biome breathes — a small library of motions the
+/// Fx ambient layer (Fx.UpdateAmbient/DrawAmbient) renders so each biome reads as a
+/// distinct *place* (embers in MAGMA, snow in TUNDRA) rather than a flat colour multiply.
+/// Each is a deterministic, bounded particle field; the visual recipe lives in Fx.cs.
+public enum AmbientKind
+{
+    Dust,    // STEEL  — sparse industrial dust motes drifting on a slow lateral draft
+    Gust,    // ARID   — blowing dust gusts streaking fast across the board
+    Snow,    // TUNDRA — drifting snow falling with a gentle side-sway
+    Spore,   // VERDANT— floating spores/pollen bobbing slowly upward
+    Ash,     // ASH    — grey ash flakes fluttering down (tumbling, slower than snow)
+    Mote,    // VOID   — slow rising star/void motes that twinkle
+    Scan,    // NEON   — drifting cyber motes that pulse on a faint horizontal scan
+    Ember,   // MAGMA  — rising embers that flicker and accelerate upward
+}
+
 /// A per-mission visual theme: floor checker + grid/edge tint, so each mission
 /// reads as a distinct place rather than one recoloured arena.
 public class Biome
@@ -105,18 +121,37 @@ public class Biome
     public Color FloorA, FloorB, Grid, Edge;
     public Color Tint;   // representative hue cover + plateaus are blended toward
 
+    // --- Ambient atmosphere signature (Fx ambient layer; subtle background texture) ---
+    // Data-driven so each biome reads as a distinct *place*. Kept low-contrast + bounded
+    // (see Fx.UpdateAmbient/DrawAmbient): ambient must pass the squint test and never be
+    // mistaken for a threat/objective. AmbCount caps the per-biome pool for perf.
+    public AmbientKind Ambient;   // which motion this biome breathes
+    public Color AmbCol;          // ambient particle base colour (low-contrast, never threat-like)
+    public int   AmbCount;        // bounded pool size for this biome (0 = none)
+    public float AmbSpeed;        // base drift speed scalar (px/s; meaning per kind)
+    public float AmbSize;         // base particle radius (px)
+    public float AmbAlpha;        // peak alpha (kept low so it passes the squint test)
+
     public static readonly Biome[] All =
     {
-        new Biome { Name = "STEEL",   FloorA = Pal.RGBA(22, 29, 38), FloorB = Pal.RGBA(26, 34, 44), Grid = Pal.RGBA(33, 43, 56), Edge = Pal.RGBA(30, 39, 51), Tint = Pal.RGBA(44, 58, 74) },
-        new Biome { Name = "ARID",    FloorA = Pal.RGBA(40, 33, 23), FloorB = Pal.RGBA(46, 38, 27), Grid = Pal.RGBA(62, 50, 33), Edge = Pal.RGBA(64, 52, 34), Tint = Pal.RGBA(92, 72, 38) },
-        new Biome { Name = "TUNDRA",  FloorA = Pal.RGBA(23, 33, 42), FloorB = Pal.RGBA(28, 39, 49), Grid = Pal.RGBA(42, 56, 70), Edge = Pal.RGBA(44, 58, 74), Tint = Pal.RGBA(58, 84, 108) },
-        new Biome { Name = "VERDANT", FloorA = Pal.RGBA(21, 35, 26), FloorB = Pal.RGBA(25, 41, 30), Grid = Pal.RGBA(38, 58, 42), Edge = Pal.RGBA(38, 60, 44), Tint = Pal.RGBA(50, 84, 56) },
-        new Biome { Name = "ASH",     FloorA = Pal.RGBA(34, 27, 27), FloorB = Pal.RGBA(40, 31, 31), Grid = Pal.RGBA(56, 42, 42), Edge = Pal.RGBA(58, 40, 40), Tint = Pal.RGBA(86, 56, 52) },
-        new Biome { Name = "VOID",    FloorA = Pal.RGBA(28, 24, 41), FloorB = Pal.RGBA(33, 28, 48), Grid = Pal.RGBA(50, 41, 68), Edge = Pal.RGBA(52, 42, 72), Tint = Pal.RGBA(72, 56, 102) },
+        new Biome { Name = "STEEL",   FloorA = Pal.RGBA(22, 29, 38), FloorB = Pal.RGBA(26, 34, 44), Grid = Pal.RGBA(33, 43, 56), Edge = Pal.RGBA(30, 39, 51), Tint = Pal.RGBA(44, 58, 74),
+                    Ambient = AmbientKind.Dust,  AmbCol = Pal.RGBA(120, 140, 165), AmbCount = 44, AmbSpeed = 10f, AmbSize = 1.6f, AmbAlpha = 0.15f },
+        new Biome { Name = "ARID",    FloorA = Pal.RGBA(40, 33, 23), FloorB = Pal.RGBA(46, 38, 27), Grid = Pal.RGBA(62, 50, 33), Edge = Pal.RGBA(64, 52, 34), Tint = Pal.RGBA(92, 72, 38),
+                    Ambient = AmbientKind.Gust,  AmbCol = Pal.RGBA(176, 150, 104), AmbCount = 54, AmbSpeed = 92f, AmbSize = 1.7f, AmbAlpha = 0.14f },
+        new Biome { Name = "TUNDRA",  FloorA = Pal.RGBA(23, 33, 42), FloorB = Pal.RGBA(28, 39, 49), Grid = Pal.RGBA(42, 56, 70), Edge = Pal.RGBA(44, 58, 74), Tint = Pal.RGBA(58, 84, 108),
+                    Ambient = AmbientKind.Snow,  AmbCol = Pal.RGBA(206, 222, 238), AmbCount = 64, AmbSpeed = 30f, AmbSize = 2.0f, AmbAlpha = 0.20f },
+        new Biome { Name = "VERDANT", FloorA = Pal.RGBA(21, 35, 26), FloorB = Pal.RGBA(25, 41, 30), Grid = Pal.RGBA(38, 58, 42), Edge = Pal.RGBA(38, 60, 44), Tint = Pal.RGBA(50, 84, 56),
+                    Ambient = AmbientKind.Spore, AmbCol = Pal.RGBA(150, 200, 140), AmbCount = 40, AmbSpeed = 13f, AmbSize = 1.8f, AmbAlpha = 0.16f },
+        new Biome { Name = "ASH",     FloorA = Pal.RGBA(34, 27, 27), FloorB = Pal.RGBA(40, 31, 31), Grid = Pal.RGBA(56, 42, 42), Edge = Pal.RGBA(58, 40, 40), Tint = Pal.RGBA(86, 56, 52),
+                    Ambient = AmbientKind.Ash,   AmbCol = Pal.RGBA(150, 138, 132), AmbCount = 58, AmbSpeed = 22f, AmbSize = 2.0f, AmbAlpha = 0.18f },
+        new Biome { Name = "VOID",    FloorA = Pal.RGBA(28, 24, 41), FloorB = Pal.RGBA(33, 28, 48), Grid = Pal.RGBA(50, 41, 68), Edge = Pal.RGBA(52, 42, 72), Tint = Pal.RGBA(72, 56, 102),
+                    Ambient = AmbientKind.Mote,  AmbCol = Pal.RGBA(170, 150, 210), AmbCount = 42, AmbSpeed = 8f,  AmbSize = 1.7f, AmbAlpha = 0.18f },
         // NEON: a dim cyber-grid arcology — cool slate floor lit by teal grid lines; cover reads cyan-tinted.
-        new Biome { Name = "NEON",    FloorA = Pal.RGBA(16, 28, 34), FloorB = Pal.RGBA(20, 34, 41), Grid = Pal.RGBA(34, 78, 92), Edge = Pal.RGBA(36, 90, 104), Tint = Pal.RGBA(46, 96, 110) },
+        new Biome { Name = "NEON",    FloorA = Pal.RGBA(16, 28, 34), FloorB = Pal.RGBA(20, 34, 41), Grid = Pal.RGBA(34, 78, 92), Edge = Pal.RGBA(36, 90, 104), Tint = Pal.RGBA(46, 96, 110),
+                    Ambient = AmbientKind.Scan,  AmbCol = Pal.RGBA(90, 200, 210), AmbCount = 50, AmbSpeed = 40f, AmbSize = 1.7f, AmbAlpha = 0.15f },
         // MAGMA: a volcanic foundry — dark basalt floor veined with a warm ember tint on cover/plateaus.
-        new Biome { Name = "MAGMA",   FloorA = Pal.RGBA(32, 22, 20), FloorB = Pal.RGBA(40, 26, 22), Grid = Pal.RGBA(74, 44, 32), Edge = Pal.RGBA(96, 50, 30), Tint = Pal.RGBA(132, 64, 34) },
+        new Biome { Name = "MAGMA",   FloorA = Pal.RGBA(32, 22, 20), FloorB = Pal.RGBA(40, 26, 22), Grid = Pal.RGBA(74, 44, 32), Edge = Pal.RGBA(96, 50, 30), Tint = Pal.RGBA(132, 64, 34),
+                    Ambient = AmbientKind.Ember, AmbCol = Pal.RGBA(255, 150, 70),  AmbCount = 52, AmbSpeed = 34f, AmbSize = 1.9f, AmbAlpha = 0.22f },
     };
 
     public static Biome For(int missionNum) => All[(missionNum - 1 + All.Length) % All.Length];

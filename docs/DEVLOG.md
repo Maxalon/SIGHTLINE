@@ -360,3 +360,74 @@ Kicked off with a read-only **balance/bug audit** agent (alongside the architect
 | CORPSMAN — 5th player class (medic/support) | Dev Q | `Unit`,`Game`,`Hud`,`Mission`,`Renderer` | `bc2427d`. SMG support soldier (7/62/8, SMOKE) whose PATCH ability heals the most-wounded Chebyshev-adjacent squadmate +4 for one action -- the squad's first in-combat sustain. New `AbilityKind.Heal` (append-only, Cls-derived -> save-safe); modeled on SUPPRESS (auto-target, no new aim mode); enters via the recruit pool; friendly white-cross glyph (distinct from the enemy MEDIC). Build 0/0, SAVE/COMBAT/AI/SNAP tests PASS, autoplay clean (gated heal -> no TIMEOUT). Self-merged.
 
 **6 waves, ~21 features + a full balance pass, ~28 commits, merged to `main`** — every feature peer-reviewed (3 independent review rounds on the riskiest: squad AI, Heat ladder, snap/refund), headless-tested (12 self-tests incl. 3 new: AITEST/SNAPTEST + the build-perk/heat cases), and verified by autoplay (clean across all 8 heat tiers + all 8 objectives, no TIMEOUT). Highlights: coordinated enemy AI, the Heat/Ascension ladder, per-turn aimed-vs-snap + flank-kill tempo, the enemy-intent telegraph, 5 player classes, 3 new enemy archetypes, 8 objectives, 8 biomes + per-run variety, ~18 arenas, 16 perks, plus an audit-driven balance sweep — all preserving the perfect-information identity (no fog of war), no CI, no paid deps. The multi-agent cadence (orchestrator + isolated-worktree devs on disjoint files + parallel reviewers + read-only audit agents + orchestrator wiring/fixes) is proven and repeatable. PR #51 (Waves 1-5) merged to `main` (`5bcc6bf`); Wave 6 self-merged on top.
+
+---
+
+## PROGRAM "ASCENDANT" — analytics-driven balance + visual identity (autonomous, full team)
+
+Fresh fully-autonomous session run as orchestrator + parallel dev agents (isolated worktrees) +
+read-only research/audit agents + reviewers. No human input. Develops on `claude/gifted-faraday-ftl23r`,
+PR #53 (self-merge when green; no human review per the project's autonomy rule). A 3-agent research pass
+(architecture cartographer + opportunity/design analyst + balance/bug auditor) converged on one verdict:
+*"an exceptionally well-engineered tactics skeleton with a thin skin and an invisible soul"* — the master
+gaps being (1) balance was **unmeasurable** (the headless autopilot was a deliberately-dumb path-coverage
+smoke test, so the game "always lost" and no balance claim was falsifiable), (2) units are abstract tokens
+that **vanish** on death, and (3) the meta has **no reward sink** (kills feed only a number).
+
+### Wave A — make balance measurable (the flywheel)
+- **Competent autopilot** (`Game.SmartStep`): a real heuristic player — best-target EV scoring, cover/threat-
+  aware positioning (mirrors `Ai.Plan`, subtracts the threat map), deliberate ability/grenade/item use, all
+  8 objectives, guaranteed-progress (no TIMEOUT). The dumb `AutoStep` stays the default smoke test.
+- **Telemetry + analytics** (`src/Stats.cs` + `SIGHTLINE_BALANCE=N`): N headless campaigns with the competent
+  AI -> aggregate win-rate by heat/objective/mission, turn counts, loss causes, per-class lethality, threat
+  ranking, JSON. Balance is FALSIFIABLE for the first time. (Orchestrator pre-wrote Stats.cs + the lifecycle
+  hooks as a stable contract so the AI dev + harness dev compiled in parallel.)
+- Lift: mission win-rate heat-0 66->76%, heat-3 44->74%; missions-cleared/run ~doubled.
+
+### Wave A.5 — data-driven balance pass (4 parallel devs, disjoint files)
+The analytics **redirected** the pass away from the code-audit's speculative crit/perk worries toward what
+actually gates the game:
+- Objective tension (Game.cs): Hack/Sabotage were free 100%/2-turn stealth-wins -> the hack/plant now "goes
+  loud" (breaks concealment + rouses pods), terminal is a multi-turn hold. Hack 100->86%.
+- Escort+boss (Mission/Ai): VIP HP 6->14 + reduced anti-VIP AI bias (Escort isolated 34->65%); de-stacked the
+  double-buffed WARLORD node (m6 boss 0->38%); MORTAR no-op fix.
+- Heat ladder (Run.cs): data proved it was too SHALLOW not steep -> now descends h0 69 / h4 67 / h8 32% with
+  qualitative mutators pulled earlier + scaled intel rewards.
+- Classes/perks (Unit/Combat): GUNNER 65->84% hit (tight 81-90% band); dead perks HARDENED + COOLHEADED reworked.
+- Confirm batch surfaced the NEXT problem: a steep campaign attrition curve (m1 98 -> m5 0) — a meta-progression
+  issue, not encounter tuning (=> Wave C).
+
+### Wave B — visual identity leap (3 parallel devs)
+- Unit visuals (Renderer/Anim/Unit/Game): 13 distinct per-class silhouettes (replacing the overloaded side-count
+  glyph) + procedural recoil/flinch/walk animation + a death dissolve (team-colored shatter + lingering scorch
+  decal) replacing the instant vanish.
+- Title/UI (Hud): animated SIGHTLINE title screen (tactical backdrop, scan sweep, parallax reticles) + panel
+  entrance motion + cinematic counting-up win/lose with a FALLEN honor roll.
+- Per-biome atmosphere (Fx/Util): ambient signatures (MAGMA embers, TUNDRA snow, ASH flakes, NEON motes, ARID
+  dust, VERDANT spores, VOID motes, STEEL dust), deterministic + bounded; orchestrator wired the 2 call-sites.
+
+### Wave C — meta reward sink (the attrition fix) [in progress]
+Persistent weapon upgrades bought with intel (so kills compound into power vs attrition) + a new enemy archetype
++ arenas + an AI improvement.
+
+### Process notes / gotchas (this session)
+- `isolation:worktree` agents sometimes branch off the near-empty default `main` (faf6b664); EVERY worktree
+  dev's STEP 0 is `git reset --hard claude/gifted-faraday-ftl23r`.
+- Worktree-agent commits RESET the shared `.git/config` local `user.email` to the human's address; re-assert
+  `git config --local user.email noreply@anthropic.com` before every integration commit.
+- Env signing key is an empty 0-byte placeholder (no ssh-agent) -> `-S` attaches a signature but it can't be
+  GitHub-verified from here; committer email is correct (the substantive part).
+- Integration is file-copy (`git checkout <devbranch> -- <files>`) + an orchestrator `-S` commit, on strictly
+  disjoint files per wave (one owner per hot file: Game.cs / Renderer.cs / Hud.cs).
+- Verification cadence per wave: Release 0/0 + the `SIGHTLINE_*TEST` self-tests + a `SIGHTLINE_BALANCE` analytics
+  batch (the new measurement instrument) + screenshots. The competent-AI+analytics flywheel makes every
+  subsequent balance change provable.
+
+### Wave C — RESULT (recovered from interrupted agents, verified + shipped)
+Gear reward sink (WeaponMod Scope/ExtendedMag/HollowPoint/Stabilizer, persisted, shop-bought) + SPOTTER enemy +
+3 arenas + AI focus-fire amplification. Both dev agents finished their code (build 0/0) but HUNG on a post-build
+verification bash command; orchestrator recovered the uncommitted worktree files + verified (SAVETEST round-trips
+weapon-mods, AITEST/COMBATTEST PASS, no TIMEOUT). Measured: the reward sink works — **Evac 43->77%** (squad power
+compounds). Full-run completion still gated by Escort (m4 ~37%, gear buffs soldiers not the fragile VIP) + the m6
+boss — flagged for a future tuning pass (the analytics harness is the tool). **4 waves shipped (~12 features + a
+measurement system + 2 balance passes), all on the branch / PR #53.**
