@@ -422,3 +422,12 @@ Persistent weapon upgrades bought with intel (so kills compound into power vs at
 - Verification cadence per wave: Release 0/0 + the `SIGHTLINE_*TEST` self-tests + a `SIGHTLINE_BALANCE` analytics
   batch (the new measurement instrument) + screenshots. The competent-AI+analytics flywheel makes every
   subsequent balance change provable.
+
+### Wave C — RESULT (recovered from interrupted agents, verified + shipped)
+Gear reward sink (WeaponMod Scope/ExtendedMag/HollowPoint/Stabilizer, persisted, shop-bought) + SPOTTER enemy +
+3 arenas + AI focus-fire amplification. Both dev agents finished their code (build 0/0) but HUNG on a post-build
+verification bash command; orchestrator recovered the uncommitted worktree files + verified (SAVETEST round-trips
+weapon-mods, AITEST/COMBATTEST PASS, no TIMEOUT). Measured: the reward sink works — **Evac 43->77%** (squad power
+compounds). Full-run completion still gated by Escort (m4 ~37%, gear buffs soldiers not the fragile VIP) + the m6
+boss — flagged for a future tuning pass (the analytics harness is the tool). **4 waves shipped (~12 features + a
+measurement system + 2 balance passes), all on the branch / PR #53.**

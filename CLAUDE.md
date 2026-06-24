@@ -1720,3 +1720,62 @@ when no ally is hurt, so it's never a dead turn.
 Conventions: drawn strings are ASCII for now (default font; a committed/generated font in Phase 5.3 lifts this). Build Release + run
 `SIGHTLINE_AUTOPLAY=1` a few times before merging. Share screenshots in chat via
 `SendUserFile` so the human can follow along.
+
+### WIP NOTES — PROGRAM "ASCENDANT" (analytics-driven balance + visual identity + reward sink)
+
+> **Fresh fully-autonomous session, run as orchestrator + parallel dev agents (isolated worktrees) +
+> read-only research/audit agents. Develops on `claude/gifted-faraday-ftl23r` (PR #53). Full process log
+> in `docs/DEVLOG.md`.** A 3-agent research pass converged on: *"an exceptionally well-engineered tactics
+> skeleton with a thin skin and an invisible soul"* — master gaps: (1) balance UNMEASURABLE (the autopilot
+> was a deliberately-dumb smoke test), (2) units are tokens that VANISH on death, (3) the meta has NO reward
+> sink. Attacked in 4 waves, each verified headlessly (Release 0/0 + `SIGHTLINE_*TEST` + `SIGHTLINE_BALANCE`
+> analytics + screenshots). All shipped to the branch.**
+>
+> **THE FLYWHEEL (Wave A) — the keystone:** `src/Stats.cs` + a competent autopilot (`Game.SmartStep`, gated
+> by `Game.SmartPlay`) + a batch analytics harness **`SIGHTLINE_BALANCE=<N>`** (N headless campaigns ->
+> win-rate by heat/objective/mission, turns, loss-causes, per-class lethality, threat ranking, JSON to the
+> scratchpad). `SIGHTLINE_BALANCE_HEAT=<h>` pins a rung; `SIGHTLINE_BALANCE_DUMB=1` runs the smoke-test
+> baseline. **Balance is now MEASURABLE — re-run a batch before/after any balance change to PROVE it.** The
+> dumb `AutoStep` (`SIGHTLINE_AUTOPLAY`) stays the default path-coverage smoke test. New self-test
+> `SIGHTLINE_AMBIENTTEST`; new screenshot hook `SIGHTLINE_UNITFX`.
+>
+> **Wave A.5 — data-driven balance pass** (the analytics redirected priorities away from the code-audit's
+> speculative crit/perk worries): Hack/Sabotage no longer free stealth-wins (hack/plant "goes loud" — breaks
+> concealment + rouses pods; terminal is a multi-turn hold, `HackRequired` 3->2); Escort VIP HP 6->14 +
+> reduced anti-VIP AI bias; de-stacked the double-buffed WARLORD boss node; Heat ladder was too SHALLOW (not
+> steep) -> now descends h0 69 / h4 67 / h8 32% with mutators pulled earlier; GUNNER 65->84% hit; dead perks
+> HARDENED + COOLHEADED reworked. CleanSweep excluded on Decapitate+Defend. MORTAR no-op fix.
+>
+> **Wave B — visual identity leap:** 13 distinct per-class **silhouettes** (`Renderer.DrawSilhouette`,
+> replacing the side-count glyph) + procedural **animation** (`Unit.RecoilAnim/FlinchAnim/WalkLean`) + a
+> **death dissolve** (team-colored shatter + a lingering scorch decal `Game.Scorches`, replacing the instant
+> vanish); an animated **title screen** + UI panel motion + cinematic counting-up **win/lose** cards
+> (`Hud`); per-biome **ambient atmosphere** (`Fx.UpdateAmbient`/`DrawAmbient`: MAGMA embers / TUNDRA snow /
+> ASH / NEON / ARID dust / VERDANT / VOID / STEEL), deterministic + bounded.
+>
+> **Wave C — meta reward sink (the attrition fix):** persistent per-soldier **weapon upgrades** bought with
+> Intel, extending the requisition shop (`WeaponMod` {Scope/ExtendedMag/HollowPoint/Stabilizer}, APPEND-ONLY;
+> `Unit.WeaponMods` persisted; shop auto-targets the soldier lacking the mod). + new enemy **SPOTTER (BEACON)**
+> — a fragile back-line designator that paints the squad's priority target, amplifying focus-fire for all
+> allies (kill it first) + 3 new arenas (Maps 18->21) + `Ai.Plan` focus-fire amplification. **Both Wave C dev
+> agents finished their code (builds 0/0) but HUNG on a post-build verification bash command; the orchestrator
+> recovered their work from the worktrees and verified it** (SAVETEST round-trips weapon-mods; AITEST/COMBATTEST
+> PASS; no TIMEOUT). **Measured: the reward sink works — Evac 43->77% (squad power compounds on the survivability
+> slog).**
+>
+> **REMAINING / NEXT (measured, for a future session):** full-run completion is still ~0% (a 6-mission ironman
+> with a 4-soldier squad is inherently punishing) gated by **(a) Escort (m4, ~37%)** — gear upgrades soldiers'
+> weapons, NOT the fragile VIP, so Escort needs a VIP-survivability or AI-bias tune; **(b) the m6 boss**; and
+> the new SPOTTER + "loud" objectives added difficulty that offset some gear buff. The analytics harness is now
+> the tool to tune these (force an objective via the rotation / `SIGHTLINE_OBJ`, measure, iterate). Other open
+> ideas: verb-changing perks (toys, not just %), deliberate squad/loadout selection, the Wave-D strategy/
+> readability items (combat log, campaign routing economy, anti-turtle clock), audio tuning on a real device.
+>
+> **PROCESS GOTCHAS (this session):** worktree agents sometimes branch off the near-empty default `main`
+> (faf6b664) — every worktree dev's STEP 0 is `git reset --hard claude/gifted-faraday-ftl23r`. Worktree-agent
+> commits RESET the shared `.git/config` `user.email` to the human's address — re-assert
+> `git config --local user.email noreply@anthropic.com` before each integration commit. The env's signing key
+> is an empty placeholder, so commits are correctly authored but not GitHub-verifiable. Integrate via FILE-COPY
+> of the dev's (possibly UNCOMMITTED) worktree files + an orchestrator commit; strictly disjoint files per wave
+> (one owner per hot file: Game.cs / Renderer.cs / Hud.cs). If an agent hangs on a verify command, its CODE is
+> usually already on disk in its worktree — recover + verify it yourself rather than waiting.
