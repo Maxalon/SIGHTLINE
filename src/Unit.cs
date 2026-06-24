@@ -15,6 +15,16 @@ public enum AbilityKind { None, RunGun, Blitz, Steady, Suppress, Heal }
 /// Utility-item slot (3.4): a second throwable beyond grenades, assigned by class.
 public enum ItemKind { None, Smoke, Flash, Barricade }
 
+/// Persistent weapon upgrades bought with Intel at the barracks requisition shop — the
+/// run's real reward sink, so kills compound into permanent firepower and a leveled squad
+/// genuinely out-guns a fresh one (fixes the campaign attrition death-spiral). A mod is
+/// INSTALLED on a Unit (Unit.WeaponMods, persisted) and its effect is baked into that
+/// soldier's Weapon's effective stats via Weapon.ApplyMods, so it flows through every
+/// combat read (incl. the HUD %-to-hit / crit tooltip) with no special-casing.
+/// APPEND-ONLY: SaveGame persists installed mods by (int)WeaponMod, so new members go at
+/// the END — never reorder or remove the existing ones.
+public enum WeaponMod { Scope, ExtendedMag, HollowPoint, Stabilizer }
+
 /// Promotion perks: a soldier picks one each rank-up (see Run / barracks).
 /// APPEND-ONLY: enum ordinals are the save keys (SaveGame stores perks by (int)Perk),
 /// so new members go at the END — never reorder or remove the existing ones.
@@ -45,13 +55,23 @@ public class Weapon
 {
     public string Name;
     public WeaponKind Kind;
+    // EFFECTIVE stats (base + installed weapon-mod bonuses). Read throughout Combat/Hud/Mission.
+    // ApplyMods recomputes these from the captured base values (below) so it's idempotent.
     public int DmgMin, DmgMax;
     public int AimBonus;
     public int CritBase;
     public int Clip;
 
-    /// Maximum effective firing range in tiles.
-    public int MaxRange => Kind switch
+    // ---- weapon-mod plumbing (persistent upgrades, src/WeaponMod) ----
+    // The pristine base stats captured at Make() time, so ApplyMods can re-derive the
+    // effective fields above from scratch (idempotent — re-applying the same mods is safe).
+    int _baseDmgMin, _baseDmgMax, _baseAimBonus, _baseCritBase, _baseClip;
+    public int RangeBonus;   // +tiles of effective range from mods (Stabilizer); 0 by default
+    public bool Scoped;      // SCOPE: flattens long-range aim falloff
+
+    /// Maximum effective firing range in tiles (+ any mod range bonus).
+    public int MaxRange => BaseMaxRange + RangeBonus;
+    int BaseMaxRange => Kind switch
     {
         WeaponKind.Shotgun => 8,
         WeaponKind.Smg => 10,
@@ -60,32 +80,71 @@ public class Weapon
         _ => 15,
     };
 
-    /// Aim modifier from range (in tiles). Each weapon has its own profile.
+    /// Aim modifier from range (in tiles). Each weapon has its own profile. A SCOPE softens
+    /// the long-range penalty (the falloff term is halved past the weapon's sweet spot), so a
+    /// scoped weapon stays accurate further out without changing its close-range behaviour.
     public int RangeMod(float dist)
     {
         switch (Kind)
         {
             case WeaponKind.Shotgun: // brutal up close, useless at range
-                return (int)Util.Clamp((5 - dist) * 8, -45, 30);
+                return (int)Util.Clamp(Soften((5 - dist) * 8), -45, 30);
             case WeaponKind.Sniper:  // rewards distance, punished point-blank
-                return (int)Util.Clamp((dist - 3) * 3, -15, 18);
+                return (int)Util.Clamp((dist - 3) * 3, -15, 18);   // already long-ranged; scope adds none here
             case WeaponKind.Smg:     // slight close-range edge
-                return (int)Util.Clamp((7 - dist) * 2, -12, 12);
+                return (int)Util.Clamp(Soften((7 - dist) * 2), -12, 12);
             case WeaponKind.Lmg:     // suppression gun: wide flat medium band, gentle long falloff
-                return (int)Util.Clamp(-(dist - 10) * 1.5f, -10, 6);
+                return (int)Util.Clamp(Soften(-(dist - 10) * 1.5f), -10, 6);
             default:                 // rifle: balanced, gentle falloff
-                return (int)Util.Clamp((8 - dist) * 1.5f, -18, 10);
+                return (int)Util.Clamp(Soften((8 - dist) * 1.5f), -18, 10);
         }
+    }
+
+    // SCOPE: halve a NEGATIVE range term (long-range penalty); leave the close-range bonus alone.
+    float Soften(float v) => (Scoped && v < 0) ? v * 0.5f : v;
+
+    /// Re-derive the effective stats from base + the installed mods. Idempotent: it always
+    /// starts from the captured base values, so calling it repeatedly (or after adding a mod)
+    /// is safe. Magnitudes live in WeaponModDef (one source of truth, shared with the shop UI).
+    public void ApplyMods(System.Collections.Generic.IEnumerable<WeaponMod> mods)
+    {
+        DmgMin = _baseDmgMin; DmgMax = _baseDmgMax;
+        AimBonus = _baseAimBonus; CritBase = _baseCritBase; Clip = _baseClip;
+        RangeBonus = 0; Scoped = false;
+        if (mods == null) return;
+        foreach (var m in mods)
+            switch (m)
+            {
+                case WeaponMod.Scope:
+                    AimBonus += WeaponModDef.ScopeAim; Scoped = true; break;
+                case WeaponMod.ExtendedMag:
+                    Clip += WeaponModDef.MagClip; break;
+                case WeaponMod.HollowPoint:
+                    CritBase += WeaponModDef.HollowCrit; DmgMin += WeaponModDef.HollowDmg; DmgMax += WeaponModDef.HollowDmg; break;
+                case WeaponMod.Stabilizer:
+                    AimBonus += WeaponModDef.StabilizerAim; RangeBonus += WeaponModDef.StabilizerRange; break;
+            }
+    }
+
+    static Weapon New(string name, WeaponKind k, int dmgMin, int dmgMax, int aimBonus, int critBase, int clip)
+    {
+        var w = new Weapon
+        {
+            Name = name, Kind = k,
+            DmgMin = dmgMin, DmgMax = dmgMax, AimBonus = aimBonus, CritBase = critBase, Clip = clip,
+            _baseDmgMin = dmgMin, _baseDmgMax = dmgMax, _baseAimBonus = aimBonus, _baseCritBase = critBase, _baseClip = clip,
+        };
+        return w;
     }
 
     public static Weapon Make(WeaponKind k) => k switch
     {
-        WeaponKind.Rifle   => new Weapon { Name = "Rifle",   Kind = k, DmgMin = 3, DmgMax = 5, AimBonus = 0,  CritBase = 10, Clip = 4 },
-        WeaponKind.Shotgun => new Weapon { Name = "Shotgun", Kind = k, DmgMin = 4, DmgMax = 7, AimBonus = 0,  CritBase = 15, Clip = 2 },
-        WeaponKind.Sniper  => new Weapon { Name = "Marksman",Kind = k, DmgMin = 5, DmgMax = 8, AimBonus = 5,  CritBase = 20, Clip = 3 },
-        WeaponKind.Lmg     => new Weapon { Name = "LMG",     Kind = k, DmgMin = 3, DmgMax = 6, AimBonus = 3,  CritBase = 5,  Clip = 5 },
-        WeaponKind.Smg     => new Weapon { Name = "SMG",     Kind = k, DmgMin = 2, DmgMax = 4, AimBonus = 0,  CritBase = 10, Clip = 4 },
-        _ => new Weapon { Name = "Rifle", Kind = WeaponKind.Rifle, DmgMin = 3, DmgMax = 5, Clip = 4 },
+        WeaponKind.Rifle   => New("Rifle",   k, 3, 5, 0, 10, 4),
+        WeaponKind.Shotgun => New("Shotgun", k, 4, 7, 0, 15, 2),
+        WeaponKind.Sniper  => New("Marksman",k, 5, 8, 5, 20, 3),
+        WeaponKind.Lmg     => New("LMG",     k, 3, 6, 3,  5, 5),
+        WeaponKind.Smg     => New("SMG",     k, 2, 4, 0, 10, 4),
+        _ => New("Rifle", WeaponKind.Rifle, 3, 5, 0, 10, 4),
     };
 }
 
@@ -117,6 +176,23 @@ public class Unit
     // promotion perks (persist across the run); pick one per rank-up
     public System.Collections.Generic.List<Perk> Perks = new();
     public bool HasPerk(Perk p) => Perks.Contains(p);
+
+    // ---- persistent weapon upgrades (the Intel reward sink): installed weapon mods ----
+    // Bought at the barracks shop; baked into Weapon.ApplyMods so the effect flows through
+    // every combat read. Persisted by SaveGame (as a list of ints). Each mod is one-per-soldier
+    // (a soldier can own each upgrade once); HasMod gates re-purchase + the shop affordability.
+    public System.Collections.Generic.List<WeaponMod> WeaponMods = new();
+    public bool HasMod(WeaponMod m) => WeaponMods.Contains(m);
+    /// Install a weapon mod (no-op if already owned) and re-bake the weapon's effective stats.
+    public void InstallMod(WeaponMod m)
+    {
+        if (WeaponMods.Contains(m)) return;
+        WeaponMods.Add(m);
+        Weapon?.ApplyMods(WeaponMods);
+    }
+    /// Re-apply all installed mods onto the current Weapon (call after rebuilding the weapon,
+    /// e.g. on save-load, so the persisted upgrades take effect).
+    public void RefreshWeaponMods() => Weapon?.ApplyMods(WeaponMods);
 
     // ---- soldier identity (3.2): nickname + earned traits + bonds, all persist ----
     public string Nickname;     // earned with the first feat; shown as NAME "NICK"
@@ -434,6 +510,66 @@ public static class PerkDef
         Perk.Opportunist => "+18 crit vs flanked targets (out-positioned their cover)",
         Perk.PointBlank => "+20 crit within 2 tiles",
         Perk.GiantSlayer => "+15 crit vs full-HP targets (alpha strike on a fresh foe)",
+        _ => "",
+    };
+}
+
+/// Names + descriptions + tuning + cost for persistent weapon upgrades (the Intel reward
+/// sink). One source of truth for the magnitudes (read in Weapon.ApplyMods) AND the shop
+/// UI / autopilot. Costs are tuned so a run can buy a few upgrades across the squad but not
+/// everything (Intel stays scarce) — a leveled squad out-guns a fresh one, outpacing attrition.
+public static class WeaponModDef
+{
+    public static readonly WeaponMod[] All =
+        { WeaponMod.Scope, WeaponMod.ExtendedMag, WeaponMod.HollowPoint, WeaponMod.Stabilizer };
+
+    // effect magnitudes (kept here so Weapon.ApplyMods + the shop description read one source)
+    public const int ScopeAim = 12;         // SCOPE: +aim, and flattens long-range falloff (Weapon.Scoped)
+    public const int MagClip = 2;           // EXTENDED MAG: +clip (fewer reloads = more shots/turn)
+    public const int HollowCrit = 15;       // HOLLOW POINT: +crit chance...
+    public const int HollowDmg = 1;         // ...and +1 to min & max damage
+    public const int StabilizerAim = 6;     // STABILIZER: +aim...
+    public const int StabilizerRange = 2;   // ...and +2 tiles of effective range
+
+    public const int ScopeCost = 14;
+    public const int MagCost = 10;
+    public const int HollowCost = 14;
+    public const int StabilizerCost = 12;
+
+    public static int Cost(WeaponMod m) => m switch
+    {
+        WeaponMod.Scope => ScopeCost,
+        WeaponMod.ExtendedMag => MagCost,
+        WeaponMod.HollowPoint => HollowCost,
+        WeaponMod.Stabilizer => StabilizerCost,
+        _ => 99,
+    };
+
+    public static string Name(WeaponMod m) => m switch
+    {
+        WeaponMod.Scope => "SCOPE",
+        WeaponMod.ExtendedMag => "EXTENDED MAG",
+        WeaponMod.HollowPoint => "HOLLOW POINT",
+        WeaponMod.Stabilizer => "STABILIZER",
+        _ => "MOD",
+    };
+
+    // short tag for the dossier / roster
+    public static string Code(WeaponMod m) => m switch
+    {
+        WeaponMod.Scope => "SCP",
+        WeaponMod.ExtendedMag => "MAG",
+        WeaponMod.HollowPoint => "HP",
+        WeaponMod.Stabilizer => "STB",
+        _ => "?",
+    };
+
+    public static string Desc(WeaponMod m) => m switch
+    {
+        WeaponMod.Scope => $"+{ScopeAim} aim; holds accuracy at long range",
+        WeaponMod.ExtendedMag => $"+{MagClip} clip (fewer reloads)",
+        WeaponMod.HollowPoint => $"+{HollowCrit} crit, +{HollowDmg} damage",
+        WeaponMod.Stabilizer => $"+{StabilizerAim} aim, +{StabilizerRange} range",
         _ => "",
     };
 }

@@ -859,6 +859,19 @@ public static class Renderer
                 Raylib.DrawCircleV(At(-2f, 0), 5f * s, col);
                 Raylib.DrawLineEx(At(-3f, 0), At(-3f, 0) - fdir * (10f * s) + new Vector2(0, -9f * s), 3f * s, col);  // tube angled up-back
                 break;
+            case "SPOTTER":            // a SENSOR/DESIGNATOR: a small core + an antenna mast topped by a
+                                       // forward-facing dish bracket (the scan rings are drawn separately).
+                                       // Reads as "equipment, not a shooter" — distinct from the medic circle.
+            {
+                Raylib.DrawCircleV(At(-2f, 0), 4f * s, col);                       // compact core (sits back)
+                var mastTop = At(-2f, 0) + new Vector2(0, -11f * s);              // antenna mast straight up
+                Raylib.DrawLineEx(At(-2f, 0), mastTop, 1.8f * s, col);
+                // a small parabolic dish bracket at the mast top, opening along the facing
+                Raylib.DrawLineEx(mastTop, mastTop + fdir * (5f * s) + perp * (3.5f * s), 1.8f * s, col);
+                Raylib.DrawLineEx(mastTop, mastTop + fdir * (5f * s) - perp * (3.5f * s), 1.8f * s, col);
+                Raylib.DrawCircleV(mastTop, 1.6f * s, col);                       // dish hub
+                break;
+            }
             default:                   // fallback: a neutral pentagon
                 Raylib.DrawPoly(p, 5, 7.5f * s, 0f, col);
                 break;
@@ -1090,6 +1103,34 @@ public static class Renderer
         {
             float ang = MathF.Atan2(u.ShieldDy, u.ShieldDx) * 180f / MathF.PI;
             Raylib.DrawRing(p, 18f, 22f, ang - 55, ang + 55, 24, Raylib.Fade(Pal.RGBA(150, 200, 240), figAlpha));
+        }
+
+        // spotter: an outward radar "scan" pulse + a painted-target line so the force-multiplier
+        // reads — the player can SEE it designating the squad's priority target (kill it to break
+        // the crossfire). Signal-level, so drawn at a readable alpha regardless of focal dimming.
+        if (u.Team == Team.Enemy && u.Cls == "SPOTTER")
+        {
+            float t = (float)Raylib.GetTime();
+            // an expanding scan ring (radar sweep) that breathes outward from the unit
+            float scan = (t * 0.6f + u.Bob) % 1f;                     // 0..1 sweep phase
+            float rad = 14f + scan * 16f;
+            Raylib.DrawRing(p, rad, rad + 1.6f, 0, 360, 36, Raylib.Fade(Pal.Foe, (1f - scan) * 0.45f));
+            // a thin, dashed "painting" beam to the designated target while this beacon is live
+            if (u.Active && g.EnemyFocus != null && g.EnemyFocus.Alive)
+            {
+                var tgt = g.EnemyFocus.Pos - new Vector2(0, g.Grid.IsHigh(g.EnemyFocus.X, g.EnemyFocus.Y) ? ElevLift : 0f);
+                var dir = tgt - p;
+                float len = dir.Length();
+                if (len > 1f)
+                {
+                    dir /= len;
+                    float pulse = 0.18f + 0.16f * (0.5f + 0.5f * MathF.Sin(t * 5f + u.Bob));
+                    for (float d = 18f; d < len - 14f; d += 11f)      // dashed segments toward the target
+                        Raylib.DrawLineEx(p + dir * d, p + dir * Math.Min(d + 5f, len - 14f), 1.4f, Raylib.Fade(Pal.Foe, pulse));
+                    // a small reticle tick on the painted target
+                    Raylib.DrawRing(tgt, 13f, 14.6f, 0, 360, 24, Raylib.Fade(Pal.Foe, pulse + 0.12f));
+                }
+            }
         }
 
         // damage flash — always at full strength (it's momentary feedback)

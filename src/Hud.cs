@@ -1561,7 +1561,10 @@ public static class Hud
     /// A soldier's stat line + current perks + derived strengths (for decision screens).
     static void DrawDossier(Unit u, int x, int y, int w)
     {
-        string stats = $"HP {u.Hp}/{u.MaxHp}    AIM {u.Aim}    MOB {u.Mobility}    {u.Weapon.Name}    GREN {1 + u.BonusGrenades}/mission    {u.AbilityName}";
+        // installed weapon upgrades read right next to the weapon name (e.g. "Rifle [SCP MAG]")
+        string wpn = u.Weapon.Name + (u.WeaponMods.Count > 0
+            ? " [" + string.Join(" ", u.WeaponMods.ConvertAll(WeaponModDef.Code)) + "]" : "");
+        string stats = $"HP {u.Hp}/{u.MaxHp}    AIM {u.Aim}    MOB {u.Mobility}    {wpn}    GREN {1 + u.BonusGrenades}/mission    {u.AbilityName}";
         Raylib.DrawTextEx(Cfg.Font, stats, new Vector2(x, y), 13, 1f, Pal.Txt);
         string perks = u.Perks.Count == 0 ? "Perks: none yet"
             : "Perks: " + string.Join(", ", u.Perks.ConvertAll(PerkDef.Name));

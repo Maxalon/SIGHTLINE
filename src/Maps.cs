@@ -298,5 +298,58 @@ public static class Maps
             "...####..####.....",
             "..................",
         },
+        new[] // PALISADE — a staggered mid-field SCREEN of high cover (cols 7-11) that breaks the
+              // long cross-board sightlines, in the Phase-4.2 encounter-geometry spirit: no column is
+              // fully walled, ROW 5 is the one open "risky direct" lane straight up the middle, and
+              // low-cover firing steps bracket the screen so the squad can advance under cover and
+              // pick its breach rather than being seen across the whole board. A deliberate approach.
+        {
+            "..................",
+            ".......#.#........",
+            ".....o.#...#.o....",
+            ".......#.#.#......",
+            ".....#...#...#....",
+            "..................",   // row 5: the open risky lane
+            ".....#...#...#....",
+            ".......#.#.#......",
+            ".....o.#...#.o....",
+            ".......#.#........",
+            "..................",
+        },
+        new[] // TERRACE — a split-level set-piece: a commanding tier-2 ('=') firing terrace banks the
+              // NORTH, openly walkable up a tier-1 ('^') ramp (no walls — the height is contested, not
+              // gated), while a high-cover screen breaks the centre and the SOUTH stays an open flank.
+              // Seizing the terrace dominates the field; taking the open south lane trades height for
+              // speed. The first arena to put the tier-2 legend on a reachable, fought-over vantage.
+        {
+            "....===.==........",
+            "....^^^.^^........",
+            "..................",
+            ".....#..#..#......",
+            "......#..#..#.....",
+            ".....#..#..#......",
+            "..................",
+            "......o....o......",
+            ".....#......#.....",
+            "..................",
+            "..................",
+        },
+        new[] // WISHBONE — two diagonal high-cover walls fan out from a central spine into a wide V,
+              // funnelling the approach through a single mid-field BREACH (the contested crossing) while
+              // leaving both rims open to a wide flank. Low-cover nests give covered footing to the
+              // breach. A strong slanted sightline break that rewards committing to a lane or swinging wide.
+        {
+            "..................",
+            ".......#..#.......",
+            "......#....#......",
+            ".....#......#.....",
+            "....#...oo...#....",
+            ".......o..o.......",   // the breach is the gap between the walls' inner mouths
+            "....#...oo...#....",
+            ".....#......#.....",
+            "......#....#......",
+            ".......#..#.......",
+            "..................",
+        },
     };
 }

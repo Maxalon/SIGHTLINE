@@ -56,6 +56,11 @@ public static class Ai
         }
         Unit vip = players.Find(p => p.IsVip);   // escort: hunt the asset
 
+        // SPOTTER force-multiplier (3.x): a live BEACON on the field "paints" the squad's
+        // priority target, so every ally's focus-fire convergence is amplified below. Computed
+        // once per plan; kill the SPOTTER to break the crossfire (it doesn't fight much itself).
+        bool spotterActive = SpotterActive(g, e);
+
         // SAPPER: the nearest covered soldier's frontal cover tile — the demolition target
         (int x, int y)? sapTarget = null;
         if (e.Cls == "SAPPER" && nearest != null) sapTarget = g.Grid.CoverTile(nearest.X, nearest.Y, e.X, e.Y);
@@ -169,8 +174,18 @@ public static class Ai
                     // layers on top of hit/cover/finish, never replacing the "good shot" core.
                     if (g.EnemyFocus != null && p == g.EnemyFocus)
                     {
-                        val += 30;                                       // concentrate fire here
+                        // SPOTTER amplifies the convergence: a painted target is worth collapsing
+                        // on even harder, so the squad genuinely focuses while the BEACON lives.
+                        val += spotterActive ? 45 : 30;                  // concentrate fire here
                         if (canFinish && odds.HitChance >= 50) val += 35; // press a likely kill
+                        // COORDINATION 6 — CROSSFIRE (AI improvement): prefer hitting the focus
+                        // from an angle its cover DOESN'T protect (a genuine flank) or where it's
+                        // simply exposed, so the squad attacks the priority target from converging,
+                        // unprotected lines rather than all battering its frontal cover. Read off the
+                        // SAME GetCover the resolver uses (truthful), and only when this shot already
+                        // exists, so it's a pure tie-break among focus shots — never a no-progress move.
+                        if (odds.Flanked) val += spotterActive ? 22 : 14; // out-positioned its cover
+                        else if (odds.CoverLevel == 0) val += 4;          // already exposed: minor nudge
                     }
                     if (val > bestHit) { bestHit = val; shoot = p; }
                 }
@@ -241,6 +256,20 @@ public static class Ai
                 int want = Math.Max(3, Game.GrenadeRange - 1);   // ideal standoff ~ grenade range
                 score -= Math.Abs(distNearest - want) * 1.6f;    // settle around the standoff band
                 score += g.Grid.HeightAt(tx, ty) * 8;
+            }
+            else if (e.Cls == "SPOTTER")                        // designator: hang back in cover, stay in contact
+            {
+                // The BEACON is a fragile force-multiplier — its value is staying ALIVE on the field
+                // (it amplifies the squad's focus fire), not trading shots. So it holds a mid
+                // standoff well out of the brawl, prizes cover/height hard, and keeps line of sight to
+                // the nearest soldier (it must "see" the squad to paint it) without ever charging in.
+                int want = 6;                                    // a comfortable observation standoff
+                score -= Math.Abs(distNearest - want) * 1.4f;    // settle around the standoff band
+                score += cover.Level * 16;                       // value cover heavily (it's frail)
+                score += g.Grid.HeightAt(tx, ty) * 10;           // a vantage point reads the field
+                if (nearest != null && g.Grid.HasLineOfSight(tx, ty, nearest.X, nearest.Y))
+                    score += 10;                                 // stay in contact to keep painting
+                if (distNearest <= 2) score -= 24;               // never let the squad close on it
             }
             else
             {
@@ -512,5 +541,17 @@ public static class Ai
         var odds = Combat.ComputeOdds(g.Grid, a, d);
         a.X = ox; a.Y = oy;
         return odds;
+    }
+
+    // True when a live, ALERT SPOTTER (BEACON) is on the field other than `self` — the
+    // force-multiplier condition. While one survives it "paints" the squad's priority target,
+    // so every planning ally amplifies its focus-fire + crossfire bias (see Ai.Plan). A SPOTTER
+    // never amplifies for itself (it's a fragile designator, not a shooter), and a Suspicious/
+    // Unaware (not-yet-engaged) one doesn't count — only an active beacon is coordinating.
+    static bool SpotterActive(Game g, Unit self)
+    {
+        foreach (var a in g.AliveEnemies())
+            if (a != self && a.Active && a.Cls == "SPOTTER") return true;
+        return false;
     }
 }

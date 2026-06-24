@@ -123,15 +123,50 @@ public class Game
     // _shopDone gates the barracks flow (shop -> promotions -> deployment cards).
     bool _shopDone = true;
     public bool ShopDone => _shopDone;
-    public static readonly int[] ShopCost = { 6, 10, 16, 12 };
-    public static readonly string[] ShopName = { "FIELD MEDKIT", "COMBAT STIMS", "ADV. TRAINING", "FRAG CACHE" };
-    public static readonly string[] ShopDesc =
+
+    // The shop is two tiers: a fixed block of consumable/stat purchases (indices 0..ModBase-1)
+    // then the PERSISTENT WEAPON UPGRADES (indices ModBase..) appended from WeaponModDef — the
+    // run's real reward sink, so Intel buys permanent firepower that out-paces attrition. The
+    // parallel arrays + the switch handlers below auto-cover the appended items, and the shop
+    // card auto-sizes to ShopName.Length (Hud.DrawRequisition), so no UI rework is needed.
+    public const int ModBase = 4;                              // count of fixed (non-mod) shop items
+    static WeaponMod ModForItem(int item) => WeaponModDef.All[item - ModBase];
+    public static bool IsModItem(int item) => item >= ModBase && item < ModBase + WeaponModDef.All.Length;
+
+    public static readonly int[] ShopCost = BuildShopCost();
+    public static readonly string[] ShopName = BuildShopName();
+    public static readonly string[] ShopDesc = BuildShopDesc();
+
+    static int[] BuildShopCost()
     {
-        "Heal your most-wounded soldier to full.",
-        "+2 max HP to your frailest soldier (permanent).",
-        "Grant a soldier a bonus perk choice.",
-        "+1 grenade every mission for a soldier (permanent).",
-    };
+        var b = new[] { 6, 10, 16, 12 };
+        var all = new int[ModBase + WeaponModDef.All.Length];
+        b.CopyTo(all, 0);
+        for (int i = 0; i < WeaponModDef.All.Length; i++) all[ModBase + i] = WeaponModDef.Cost(WeaponModDef.All[i]);
+        return all;
+    }
+    static string[] BuildShopName()
+    {
+        var b = new[] { "FIELD MEDKIT", "COMBAT STIMS", "ADV. TRAINING", "FRAG CACHE" };
+        var all = new string[ModBase + WeaponModDef.All.Length];
+        b.CopyTo(all, 0);
+        for (int i = 0; i < WeaponModDef.All.Length; i++) all[ModBase + i] = "WPN: " + WeaponModDef.Name(WeaponModDef.All[i]);
+        return all;
+    }
+    static string[] BuildShopDesc()
+    {
+        var b = new[]
+        {
+            "Heal your most-wounded soldier to full.",
+            "+2 max HP to your frailest soldier (permanent).",
+            "Grant a soldier a bonus perk choice.",
+            "+1 grenade every mission for a soldier (permanent).",
+        };
+        var all = new string[ModBase + WeaponModDef.All.Length];
+        b.CopyTo(all, 0);
+        for (int i = 0; i < WeaponModDef.All.Length; i++) all[ModBase + i] = WeaponModDef.Desc(WeaponModDef.All[i]) + " (installed on a soldier)";
+        return all;
+    }
 
     // mission objective
     public Objective Objective;
@@ -3709,6 +3744,7 @@ public class Game
     public bool CanBuy(int item)
     {
         if (item < 0 || item >= ShopCost.Length || _run.Intel < ShopCost[item]) return false;
+        if (IsModItem(item)) return ModTarget(ModForItem(item)) != null;   // a soldier who lacks this mod
         return item switch
         {
             0 => _run.Squad.Any(u => u.Hp < u.MaxHp || u.Wound > 0),  // medkit needs someone hurt or wounded
@@ -3725,19 +3761,33 @@ public class Game
         return c;
     }
 
+    /// The soldier a weapon-mod purchase installs on: a combatant who doesn't already own it,
+    /// spreading upgrades across the squad (fewest mods first) so a single loss doesn't sink the
+    /// whole investment, tie-broken toward the veteran (most kills) who'll carry the run.
+    Unit ModTarget(WeaponMod m) => _run.Squad
+        .Where(u => !u.IsVip && u.Weapon != null && !u.HasMod(m))
+        .OrderBy(u => u.WeaponMods.Count).ThenByDescending(u => u.Kills).ThenBy(u => u.Name)
+        .FirstOrDefault();
+
     /// The soldier a purchase would affect (for the shop preview). Matches DoPurchase.
-    public Unit ShopTarget(int item) => item switch
+    public Unit ShopTarget(int item)
     {
-        0 => _run.Squad.Where(u => u.Hp < u.MaxHp || u.Wound > 0).OrderByDescending(u => u.Wound).ThenBy(u => u.Hp).FirstOrDefault(),
-        1 => _run.Squad.OrderBy(u => u.MaxHp).FirstOrDefault(),
-        3 => _run.Squad.Where(u => u.BonusGrenades < 2).OrderBy(u => u.BonusGrenades).FirstOrDefault(),
-        _ => null,
-    };
+        if (IsModItem(item)) return ModTarget(ModForItem(item));
+        return item switch
+        {
+            0 => _run.Squad.Where(u => u.Hp < u.MaxHp || u.Wound > 0).OrderByDescending(u => u.Wound).ThenBy(u => u.Hp).FirstOrDefault(),
+            1 => _run.Squad.OrderBy(u => u.MaxHp).FirstOrDefault(),
+            3 => _run.Squad.Where(u => u.BonusGrenades < 2).OrderBy(u => u.BonusGrenades).FirstOrDefault(),
+            _ => null,
+        };
+    }
 
     /// One-line concrete effect of a purchase, so the player can judge its value.
     public string ShopEffect(int item)
     {
         var t = ShopTarget(item);
+        if (IsModItem(item))
+            return t == null ? "every soldier has it" : $"{t.Name}: install {WeaponModDef.Name(ModForItem(item))}";
         switch (item)
         {
             case 0:
@@ -3754,6 +3804,17 @@ public class Game
     void DoPurchase(int item)
     {
         if (!CanBuy(item)) { Audio.Play("miss"); return; }
+        if (IsModItem(item))
+        {
+            var mod = ModForItem(item);
+            var t = ModTarget(mod);
+            if (t == null) { Audio.Play("miss"); return; }
+            t.InstallMod(mod);   // persistent: baked into the soldier's Weapon, carried across the run
+            _run.Report.Add($"{t.Name} fitted {WeaponModDef.Name(mod)}  ({WeaponModDef.Desc(mod)})");
+            _run.Intel -= ShopCost[item];
+            Audio.Play("select");
+            return;
+        }
         switch (item)
         {
             case 0:
@@ -3790,10 +3851,27 @@ public class Game
         if (Raylib.CheckCollisionPointRec(m, Hud.ShopProceed)) { _shopDone = true; Audio.Play("turn"); }
     }
 
-    // autopilot: buy a medkit if it helps, then move on (keeps the shop path covered)
+    // autopilot: spend Intel sensibly so the BALANCE analytics reflect the new power curve.
+    // Priority: (1) field-treat a wounded/hurt soldier (cheap survivability), then (2) sink the
+    // rest into PERSISTENT WEAPON UPGRADES — the reward sink that lets a leveled squad out-gun a
+    // fresh one and outpace attrition. Greedy by cheapest affordable so more upgrades land per
+    // barracks. ALWAYS terminates: every DoPurchase that fires reduces Intel by a positive cost,
+    // and the cap bounds the loop regardless (defensive against a future zero-cost item).
     void AutoShop()
     {
-        if (CanBuy(0)) DoPurchase(0);
+        if (CanBuy(0)) DoPurchase(0);   // one heal pass if someone's hurt/wounded
+
+        for (int guard = 0; guard < 40; guard++)
+        {
+            // cheapest affordable, still-useful weapon mod
+            int best = -1, bestCost = int.MaxValue;
+            for (int i = ModBase; i < ShopCost.Length; i++)
+                if (CanBuy(i) && ShopCost[i] < bestCost) { best = i; bestCost = ShopCost[i]; }
+            if (best < 0) break;        // nothing affordable/useful left
+            int before = _run.Intel;
+            DoPurchase(best);
+            if (_run.Intel >= before) break;   // safety: never spin on a no-op purchase
+        }
         _shopDone = true;
     }
 

@@ -425,8 +425,10 @@ public static class Mission
         }
 
         // MISSIONS 3+ — the full roster is available. Windows tuned for variety: every archetype
-        // appears, with the specialists (TURRET/BERSERKER/SHIELD/SAPPER/MORTAR/MEDIC) collectively
-        // the bulk and the plain SCOUT/GRUNT now a small remainder (they carried too much before).
+        // appears, with the specialists (TURRET/BERSERKER/SHIELD/SAPPER/MORTAR/MEDIC/SPOTTER)
+        // collectively the bulk and the plain SCOUT/GRUNT now a small remainder (they carried too
+        // much before). SPOTTER is a force-multiplier (see Ai.Plan): low priority body count but
+        // high priority to KILL, so it's deliberately a single ~7% slot, not a swarm.
         if (r < 0.09f) return MakeHostile("SENTRY", "TURRET", WeaponKind.Lmg, 6 + bump, 66 + bump, 0, x, y);       //  9% immobile nest
         if (r < 0.19f) return MakeHostile("VIPER", "SNIPER", WeaponKind.Sniper, 4 + bump, 62 + bump, 5, x, y);     // 10% marksman
         if (r < 0.28f) return MakeHostile("REAVER", "BERSERKER", WeaponKind.Shotgun, 12 + bump * 2, 58 + bump, 8, x, y); // 9% rusher
@@ -446,9 +448,13 @@ public static class Mission
             return m;
         }
         if (r < 0.74f) return MakeHostile("ORDERLY", "MEDIC", WeaponKind.Smg, 6 + bump, 52 + bump, 6, x, y);       //  6% medic
-        if (r < 0.83f) return MakeHostile("OGRE", "BRUISER", WeaponKind.Lmg, 9 + bump * 2, 56 + bump, 5, x, y);    //  9% bruiser
-        if (r < 0.92f) return MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 58 + bump, 8, x, y);       //  9% scout
-        return MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 60 + bump, 6, x, y);                     //  8% grunt
+        // SPOTTER (BEACON): a fragile back-line designator. It barely fights (poor SMG, low HP) but
+        // while it lives it "paints" the squad's priority target — Ai.Plan amplifies focus-fire
+        // convergence for ALL allies (see Ai.SpotterActive). Kill it first to break the crossfire.
+        if (r < 0.81f) return MakeHostile("BEACON", "SPOTTER", WeaponKind.Smg, 5 + bump, 48 + bump, 6, x, y);      //  7% designator
+        if (r < 0.89f) return MakeHostile("OGRE", "BRUISER", WeaponKind.Lmg, 9 + bump * 2, 56 + bump, 5, x, y);    //  8% bruiser
+        if (r < 0.95f) return MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 58 + bump, 8, x, y);       //  6% scout
+        return MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 60 + bump, 6, x, y);                     //  5% grunt
     }
 
     static readonly string[] Callsigns =

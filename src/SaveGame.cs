@@ -107,6 +107,7 @@ public static class SaveGame
                 Wound = u.Wound,
                 Benched = u.Benched,
                 Perks = u.Perks.ConvertAll(p => (int)p),
+                WeaponMods = u.WeaponMods.ConvertAll(m => (int)m),
                 Nickname = u.Nickname,
                 Traits = u.Traits.ConvertAll(t => (int)t),
                 Bonds = new List<string>(u.Bonds),
@@ -146,8 +147,12 @@ public static class SaveGame
                 BonusGrenades = d.BonusGrenades, CustomTag = d.CustomTag, Wound = d.Wound,
                 Nickname = d.Nickname, Benched = d.Benched,
             };
-            u.Ammo = u.Weapon.Clip;
             if (d.Perks != null) foreach (var p in d.Perks) u.Perks.Add((Perk)p);
+            // installed weapon mods: add them, then re-bake the freshly-built weapon's stats
+            // BEFORE seeding ammo so an EXTENDED MAG is reflected in the starting clip.
+            if (d.WeaponMods != null) foreach (var m in d.WeaponMods) u.WeaponMods.Add((WeaponMod)m);
+            u.RefreshWeaponMods();
+            u.Ammo = u.Weapon.Clip;
             if (d.Traits != null) foreach (var t in d.Traits) u.Traits.Add((Trait)t);
             if (d.Bonds != null) u.Bonds = new List<string>(d.Bonds);
             r.Squad.Add(u);
@@ -184,6 +189,7 @@ public static class SaveGame
         public int Hp, MaxHp, Aim, Mobility, Weapon, Kills, Rank, BonusGrenades, Wound;
         public bool Benched;
         public List<int> Perks = new();
+        public List<int> WeaponMods = new();   // append-only: persisted weapon upgrades (old saves default empty)
         public List<int> Traits = new();
         public List<string> Bonds = new();
     }
@@ -214,6 +220,7 @@ public static class SaveGame
             };
             a.Benched = true;
             a.Perks.Add(Perk.Deadeye); a.Perks.Add(Perk.Tank);
+            a.InstallMod(WeaponMod.Scope); a.InstallMod(WeaponMod.ExtendedMag);   // persistent weapon upgrades
             a.Nickname = "REAPER";
             a.Traits.Add(Trait.Killer); a.Traits.Add(Trait.IronWill);
             a.Bonds.Add("NOX");
@@ -247,6 +254,10 @@ public static class SaveGame
             if (g0.Wound != 2) fails.Add("wound");
             if (!g0.Benched) fails.Add("benched");
             if (!g0.HasPerk(Perk.Deadeye) || !g0.HasPerk(Perk.Tank) || g0.Perks.Count != 2) fails.Add("perks");
+            // weapon mods round-trip AND re-bake onto the rebuilt weapon's effective stats
+            if (!g0.HasMod(WeaponMod.Scope) || !g0.HasMod(WeaponMod.ExtendedMag) || g0.WeaponMods.Count != 2) fails.Add("weaponMods");
+            if (g0.Weapon.AimBonus != WeaponModDef.ScopeAim) fails.Add("weaponModScopeApplied");      // Rifle base aimBonus 0 + scope
+            if (g0.Weapon.Clip != 4 + WeaponModDef.MagClip) fails.Add("weaponModMagApplied");         // Rifle base clip 4 + extended mag
             if (g0.Nickname != "REAPER") fails.Add("nickname");
             if (!g0.HasTrait(Trait.Killer) || !g0.HasTrait(Trait.IronWill) || g0.Traits.Count != 2) fails.Add("traits");
             if (g0.Bonds.Count != 1 || g0.Bonds[0] != "NOX") fails.Add("bonds");
@@ -276,7 +287,7 @@ public static class SaveGame
             }
 
             return fails.Count == 0
-                ? "SAVETEST: PASS (run round-trips squad/perks/weapon/card/heat; meta heat round-trips)"
+                ? "SAVETEST: PASS (run round-trips squad/perks/weapon-mods/card/heat; meta heat round-trips)"
                 : "SAVETEST: FAIL (" + string.Join(",", fails) + ")";
         }
         catch (Exception e) { return "SAVETEST: FAIL (exception " + e.Message + ")"; }
