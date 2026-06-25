@@ -166,6 +166,7 @@ public static class Renderer
         DrawAim(g);
         DrawGrenade(g);
         DrawItem(g);
+        DrawShove(g);
 
         g.ActiveAnim?.Draw(g);
         g.Fx.Draw();
@@ -1357,6 +1358,57 @@ public static class Renderer
                         Raylib.DrawRectangleRec(Util.TileRect(x, y), Raylib.Fade(col, 0.2f));
             var tc = Util.TileCenter(g.ItemTx, g.ItemTy);
             Raylib.DrawCircleLines((int)tc.X, (int)tc.Y, 14, col);
+        }
+    }
+
+    // SHOVE targeting preview: ring every shovable adjacent enemy, and for the hovered valid
+    // target draw the push direction + destination (or a collision indicator if it's blocked).
+    static void DrawShove(Game g)
+    {
+        if (!g.ShoveMode || g.Selected == null) return;
+        var u = g.Selected;
+        float t = (float)Raylib.GetTime();
+
+        // ring all valid (adjacent, alive) enemy targets so the player sees what's shovable.
+        foreach (var e in g.Enemies)
+        {
+            if (!e.Alive || Util.ChebyDist(u.X, u.Y, e.X, e.Y) > 1) continue;
+            float pulse = 20f + MathF.Sin(t * 6f) * 2.5f;
+            Raylib.DrawCircleLines((int)e.Pos.X, (int)e.Pos.Y, pulse, Raylib.Fade(Pal.Friend, 0.7f));
+        }
+
+        var tgt = g.ShoveTarget;
+        if (tgt == null || !g.ShoveValid) return;
+
+        int dx = Util.Sign(tgt.X - u.X), dy = Util.Sign(tgt.Y - u.Y);
+        int destX = tgt.X + dx, destY = tgt.Y + dy;
+        bool clear = g.Grid.IsFloor(destX, destY) && !g.IsOccupiedByOther(destX, destY, tgt);
+
+        var from = tgt.Pos;
+        var arrowEnd = from + new Vector2(dx, dy) * (Cfg.Tile * (clear ? 0.95f : 0.55f));
+        Color col = clear ? Pal.Friend : Pal.Foe;
+
+        // push arrow from the target toward the destination
+        Raylib.DrawLineEx(from, arrowEnd, 2.4f, Raylib.Fade(col, 0.9f));
+        var perp = new Vector2(-dy, dx);
+        Raylib.DrawLineEx(arrowEnd, arrowEnd - new Vector2(dx, dy) * 8f + perp * 6f, 2.2f, Raylib.Fade(col, 0.9f));
+        Raylib.DrawLineEx(arrowEnd, arrowEnd - new Vector2(dx, dy) * 8f - perp * 6f, 2.2f, Raylib.Fade(col, 0.9f));
+
+        if (clear)
+        {
+            // destination tile highlight
+            Raylib.DrawRectangleRec(Util.TileRect(destX, destY), Raylib.Fade(Pal.Friend, 0.25f));
+            Raylib.DrawRectangleLinesEx(Util.TileRect(destX, destY), 2f, Pal.Friend);
+        }
+        else
+        {
+            // collision indicator: a red burst marker where it would slam (off the target edge)
+            var slam = from + new Vector2(dx, dy) * (Cfg.Tile * 0.55f);
+            float r = 9f + MathF.Sin(t * 9f) * 2f;
+            Raylib.DrawCircleLines((int)slam.X, (int)slam.Y, r, Pal.Foe);
+            // a small "X" to read as "blocked / impact"
+            Raylib.DrawLineEx(slam + new Vector2(-5, -5), slam + new Vector2(5, 5), 2f, Pal.Foe);
+            Raylib.DrawLineEx(slam + new Vector2(-5, 5), slam + new Vector2(5, -5), 2f, Pal.Foe);
         }
     }
 

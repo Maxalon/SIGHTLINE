@@ -43,6 +43,15 @@ public static class Combat
     public const int AmbushAim  = 20;
     public const int AmbushCrit = 25;
 
+    // SHOVE (forced-movement verb): when a shoved enemy can't move (destination blocked by a
+    // wall, cover, another unit, or the board edge) it slams the obstacle and takes this much
+    // collision damage instead of repositioning; the unit it was rammed INTO takes the lesser
+    // amount. Both run through Game.EnvDamage so the guaranteed-damage floor + kill handling
+    // apply (final damage is always >= 1). Small on purpose: shove is a setup/expose verb, the
+    // collision is a consolation, not a primary damage source.
+    public const int ShoveCollisionDamage = 2;   // dealt to the shoved enemy on a blocked shove
+    public const int ShoveRammedDamage    = 1;   // dealt to a unit the shoved enemy was rammed into
+
     // ---- run-scoped BOONS (Wave 3) ----
     // The active run's boons, set once per mission by Game.SetupMission (like Stats.Enabled), so the
     // static combat reads can see them without threading run state through every ComputeOdds call.

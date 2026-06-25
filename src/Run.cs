@@ -692,13 +692,60 @@ public class Run
     public static string BondKey(string a, string b) =>
         string.CompareOrdinal(a, b) <= 0 ? a + "|" + b : b + "|" + a;
 
-    /// Offer two distinct perks the soldier doesn't already own (null if <2 left).
+    // Class-flavoured perk build-trees: each class has a thematic perk LINE so a soldier grows
+    // into its archetype over a run (sharpshooter -> precision/crit, gunner -> tanky/overwatch,
+    // ranger -> mobile/flanker, assault -> close-range bruiser, corpsman -> durable support).
+    // Every perk appears in >=1 line; many appear in several (build flavour overlaps, not silos).
+    // Used only to BIAS the offer (see MakePerkOffer) -- it never restricts what can be granted.
+    static Perk[] ClassLine(string cls) => (cls ?? "").ToUpperInvariant() switch
+    {
+        // Precision marksmen: long-range aim + crit + a defensive overwatch lean.
+        "SHARPSHOOTER" => new[] { Perk.Marksman, Perk.Deadeye, Perk.LockOn, Perk.Executioner,
+                                  Perk.Guardian, Perk.Reflexes },
+        // Close-range bruisers: point-blank crit + alpha-strike finishers + mobility to close.
+        "ASSAULT"      => new[] { Perk.CloseQuarters, Perk.PointBlank, Perk.Vanguard, Perk.Opportunist,
+                                  Perk.GiantSlayer, Perk.Bandolier },
+        // Heavy weapons: durability + reaction-fire control to anchor the line.
+        "GUNNER"       => new[] { Perk.Tank, Perk.Bulwark, Perk.Hardened, Perk.Reflexes,
+                                  Perk.Guardian, Perk.LockOn, Perk.CoolHeaded },
+        // Skirmishers: speed + flanking crit + first-contact alpha.
+        "RANGER"       => new[] { Perk.Sprinter, Perk.Opportunist, Perk.PointBlank, Perk.Vanguard,
+                                  Perk.GiantSlayer, Perk.CloseQuarters },
+        // Field medics: stay alive + keep the kit topped up to support the squad.
+        "CORPSMAN"     => new[] { Perk.Hardened, Perk.Tank, Perk.CoolHeaded, Perk.Bandolier,
+                                  Perk.Adrenal },
+        _              => System.Array.Empty<Perk>(),
+    };
+
+    /// Offer two distinct perks the soldier doesn't already own (null if <2 left). The pick-1-of-2
+    /// is BIASED toward the soldier's class line so it develops a coherent archetype over a run:
+    /// option A is a random unowned perk from the class line (if any remain), option B is a random
+    /// unowned perk from the WHOLE pool (so there's always an off-archetype option -- a real choice).
+    /// Falls back to the flat any-2 PickPerkPair when the class line is exhausted (or class unknown).
     static PerkOffer MakePerkOffer(Unit u)
     {
         var avail = new List<Perk>();
         foreach (var p in PerkDef.All) if (!u.HasPerk(p)) avail.Add(p);
         if (avail.Count < 2) return null;
-        PickPerkPair(avail, out Perk a, out Perk b);   // distinct + lightly curated for variety
+
+        // A = a still-available perk from this soldier's class line (the on-archetype option).
+        var line = new List<Perk>();
+        foreach (var p in ClassLine(u.Cls)) if (!u.HasPerk(p)) line.Add(p);
+        if (line.Count == 0)
+        {
+            // class line exhausted / unknown -> keep the original flat, lightly-curated behaviour.
+            PickPerkPair(avail, out Perk fa, out Perk fb);
+            return new PerkOffer { Unit = u, A = fa, B = fb };
+        }
+        Perk a = line[Util.RandInt(0, line.Count - 1)];
+
+        // B = a random unowned perk from the whole pool, distinct from A (the off-archetype option,
+        // so the choice stays real). Nudge away from a dull two-pure-stat-bump pair when we can.
+        var other = avail.FindAll(p => p != a);
+        var spicy = other.FindAll(p => !(IsStatBump(a) && IsStatBump(p)));
+        var bPool = spicy.Count > 0 ? spicy : other;   // other is non-empty (avail.Count >= 2)
+        Perk b = bPool[Util.RandInt(0, bPool.Count - 1)];
+
         return new PerkOffer { Unit = u, A = a, B = b };
     }
 

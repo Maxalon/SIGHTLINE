@@ -297,6 +297,10 @@ public class Unit
     public bool OnOverwatch;
     public bool Hunkered;
     public bool ReactedThisTurn; // overwatch fired this round
+    // SHOVE (forced-movement verb): a soldier may shove at most ONCE per turn. Combined with
+    // "shove always costs 1 action" this double-bounds it (no infinite reposition loop). Reset
+    // every BeginTurn; never persisted (per-turn combat state only).
+    public bool ShovedThisTurn;
     public bool Alive = true;
 
     // Awareness tier (4.3): enemies escalate Unaware -> Suspicious -> Alert instead of
@@ -457,6 +461,7 @@ public class Unit
         OnOverwatch = false;
         Hunkered = false;
         ReactedThisTurn = false;
+        ShovedThisTurn = false;    // SHOVE: one per soldier per turn
         RunGun = false;            // ability stances don't carry between turns
         Blitz = false;
         Steady = false;

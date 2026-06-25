@@ -541,6 +541,9 @@ public static class Hud
             Add("ability", u.AbilityName, "5", interactive && g.CanAbility(u), u.RunGun || u.Blitz || u.Steady);
         if (u != null && u.Item != ItemKind.None)
             Add("item", u.ItemName, "6", interactive && u.CanAct && u.ItemCharge > 0, g.ItemMode);
+        // SHOVE: forced-movement verb (1 action, no end-turn, 1/turn). Enabled only when an
+        // enemy is adjacent (CanShove), so it surfaces exactly when it's usable.
+        Add("shove", "SHOVE", "8", interactive && g.CanShove(u), g.ShoveMode);
         Add("overwatch", "OVERWATCH", "2", interactive && u != null && u.CanAct && u.Ammo > 0, false);
         Add("hunker", "HUNKER", "3", interactive && u != null && u.CanAct, u != null && u.Hunkered);
         if (g.HasHackAction)
@@ -781,6 +784,18 @@ public static class Hud
                 Raylib.DrawLineEx(new Vector2(cx - w2 + 1f, cy - h2), new Vector2(cx + w2 - 1f, cy - h2), 1.5f, c);
                 break;
             }
+            case "shove":
+            {
+                // A vertical "hand/plate" bar shoving a box to the right (forced movement).
+                Raylib.DrawLineEx(new Vector2(cx - 6f, cy - 6f), new Vector2(cx - 6f, cy + 6f), 2f, c);   // the pushing plate
+                var box = new Rectangle(cx - 3f, cy - 4f, 5f, 8f);                                        // the shoved block
+                Raylib.DrawRectangleLinesEx(box, 1.3f, c);
+                // motion arrow off the box's right edge
+                Raylib.DrawLineEx(new Vector2(cx + 3f, cy), new Vector2(cx + 8f, cy), 1.7f, c);
+                Raylib.DrawLineEx(new Vector2(cx + 5f, cy - 3f), new Vector2(cx + 8f, cy), 1.7f, c);
+                Raylib.DrawLineEx(new Vector2(cx + 5f, cy + 3f), new Vector2(cx + 8f, cy), 1.7f, c);
+                break;
+            }
         }
     }
 
@@ -887,6 +902,7 @@ public static class Hud
             case "shoot": return "Aimed shot at a target in range + line of sight. Full aim, ends the turn.";
             case "snap": return $"Snap shot: costs 1 action and does NOT end the turn, but at {Game.SnapAim} aim. Fire and keep acting.";
             case "grenade": return "Lob a grenade: AoE that ignores cover, hits both teams, clears low cover.";
+            case "shove": return "Shove an adjacent enemy 1 tile back (breaks its overwatch + exposes it). Blocked = collision damage. 1 action, won't end your turn, once/turn.";
             case "overwatch": return "Watch: fire a reaction shot at the first foe that moves in sight.";
             case "hunker": return "Hunker down for extra cover defense; you can't be crit.";
             case "hack": return g.HasSabotage
