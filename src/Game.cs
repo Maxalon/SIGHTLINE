@@ -6,7 +6,7 @@ using Raylib_cs;
 
 namespace Sightline;
 
-public enum Phase { Intro, PlayerTurn, EnemyTurn, Barracks, Win, Lose }
+public enum Phase { Intro, PlayerTurn, EnemyTurn, Barracks, Win, Lose, Draft }
 public enum Objective { Eliminate, Evac, Hack, Escort, Sabotage, Rescue, Defend, Decapitate }
 public enum SecondaryKind { None, NoLosses, Swift, CleanSweep }  // optional per-mission bonus goal (3.9)
 enum AiStage { PickNext, Telegraph, ActAfterMove }
@@ -346,6 +346,75 @@ public class Game
     // AddBloom is called alongside AddHitStop; magnitude maps s (0.1 normal, 0.4 kill-cam) -> bloom.
     public void AddBloom(float s) { _postFxBloom = MathF.Min(1f, _postFxBloom + s * 2.2f); }
 
+    // ---------------- run-opening squad draft (Wave 3) ----------------
+    // The interactive new-run path (intro / post-run) routes through a DRAFT screen where the
+    // player picks a founding squad + a starting boon. These hold the in-progress / confirmed
+    // picks; both default null so the harness path (StartMission called DIRECTLY, bypassing the
+    // intro) uses the fixed default squad and no starting boon — byte-stable + no TIMEOUT.
+    public List<Unit> DraftPool = new();        // the 6 candidate recruits on offer
+    public List<Boon> DraftBoonOffer = new();   // the 3 starting boons on offer
+    public HashSet<Unit> DraftPicked = new();   // candidates currently selected
+    public Boon? DraftSelectedBoon;             // the selected starting boon (null until chosen)
+    public const int DraftCap = 4;              // founding core size (roster still backfills to 6 over the run)
+    // Threaded into StartMission's new Run on CONFIRM (then cleared back to null/empty):
+    public List<Unit> DraftedSquad;             // the confirmed 4 picked Units (null = default squad)
+    public Boon? DraftBoon;                     // the confirmed starting boon (null = none)
+
+    /// Set up + enter the run-opening DRAFT (interactive new-run path only). Builds the candidate
+    /// pool + the starting-boon offer and switches to Phase.Draft. NEVER called by the harness
+    /// (the autoplay/balance/screenshot paths call StartMission directly).
+    public void BeginDraft()
+    {
+        DraftPool = Run.GenerateDraftPool();
+        DraftBoonOffer = Run.GenerateDraftBoonOffer();
+        DraftPicked = new HashSet<Unit>();
+        DraftSelectedBoon = null;
+        Phase = Phase.Draft;
+        Audio.Play("select");
+    }
+
+    /// Draft input: toggle a candidate (cap DraftCap), single-select a boon, CONFIRM when valid.
+    void HandleDraftClick()
+    {
+        var m = Raylib.GetMousePosition();
+        if (Raylib.IsMouseButtonPressed(MouseButton.Left))
+        {
+            // candidate cards
+            foreach (var (unit, rect) in Hud.DraftCardBtns)
+            {
+                if (!Raylib.CheckCollisionPointRec(m, rect)) continue;
+                if (DraftPicked.Contains(unit)) DraftPicked.Remove(unit);
+                else if (DraftPicked.Count < DraftCap) DraftPicked.Add(unit);
+                Audio.Play("select");
+                return;
+            }
+            // boon cards (single-select)
+            foreach (var (boon, rect) in Hud.DraftBoonBtns)
+            {
+                if (!Raylib.CheckCollisionPointRec(m, rect)) continue;
+                DraftSelectedBoon = boon;
+                Audio.Play("select");
+                return;
+            }
+            // confirm
+            if (DraftReady && Raylib.CheckCollisionPointRec(m, Hud.DraftConfirm)) { ConfirmDraft(); return; }
+        }
+        // keyboard: Enter deploys when the draft is complete
+        if (DraftReady && Raylib.IsKeyPressed(KeyboardKey.Enter)) ConfirmDraft();
+    }
+
+    /// True when exactly DraftCap soldiers and one boon are chosen (CONFIRM/Enter enabled).
+    public bool DraftReady => DraftPicked.Count == DraftCap && DraftSelectedBoon.HasValue;
+
+    /// Finalize the draft: stage the picks, then run the SAME new-run start the intro would have.
+    void ConfirmDraft()
+    {
+        DraftedSquad = new List<Unit>(DraftPicked);
+        DraftBoon = DraftSelectedBoon;
+        Audio.Play("turn");
+        StartMission();   // threads DraftedSquad/DraftBoon into the new Run, then clears them
+    }
+
     // ---------------- lifecycle ----------------
     /// Start a brand-new campaign run (called from intro / after a run ends).
     /// startAt lets the headless harness jump straight to a given mission.
@@ -353,7 +422,9 @@ public class Game
     {
         EnsureMetaLoaded();
         _run = new Run();
-        _run.Start();                       // builds the campaign map, seats at the START node
+        _run.Start(DraftedSquad);           // builds the campaign map, seats at the START node (drafted squad if any)
+        if (DraftBoon.HasValue) _run.ActiveBoons.Add(DraftBoon.Value);   // adopt the chosen starting boon
+        DraftedSquad = null; DraftBoon = null;   // consumed: the harness path leaves these null (default squad)
         // adopt the dialled-in Heat for this run. The harness can't set PendingHeat (it doesn't
         // touch the intro), so it reads SIGHTLINE_HEAT here instead — defaulting to 0 so plain
         // autoplay/screenshots are byte-stable.
@@ -1743,6 +1814,7 @@ public class Game
                 break;
             case Phase.Win:
             case Phase.Lose: HandleOverlayClick(); break;
+            case Phase.Draft: HandleDraftClick(); break;
         }
 
         CheckEnd();
@@ -4524,6 +4596,48 @@ public class Game
             : "COVERTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
+    /// Headless self-test (SIGHTLINE_DRAFTTEST): the run-opening squad-draft plumbing.
+    /// (a) GenerateDraftPool returns DraftPoolSize recruits with class variety (<=2/class);
+    /// (b) a drafted founding squad + a starting boon seats EXACTLY those Units + the boon
+    /// active via Run.Start(picked)+ActiveBoons; (c) Run.Start(null) keeps the fixed default
+    /// NewRunSquad (the harness path is unchanged). Window-free (no Raylib, no disk).
+    public static string DraftSelfTest()
+    {
+        var fails = new List<string>();
+
+        // (a) pool size + class variety
+        var pool = Run.GenerateDraftPool();
+        if (pool.Count != Run.DraftPoolSize) fails.Add($"poolSize={pool.Count}(want{Run.DraftPoolSize})");
+        var byCls = new Dictionary<string, int>();
+        foreach (var u in pool) { byCls.TryGetValue(u.Cls, out int c); byCls[u.Cls] = c + 1; }
+        foreach (var kv in byCls) if (kv.Value > 2) fails.Add($"class {kv.Key}x{kv.Value}(>2)");
+        if (byCls.Count < 2) fails.Add($"variety={byCls.Count}(want>=2)");
+
+        // (b) a drafted core of DraftCap + a chosen starting boon seats exactly those + the boon
+        var picked = new List<Unit>();
+        for (int i = 0; i < DraftCap && i < pool.Count; i++) picked.Add(pool[i]);
+        var run = new Run();
+        run.Start(picked);
+        run.ActiveBoons.Add(Boon.Marksmen);
+        if (run.Squad.Count != picked.Count) fails.Add($"draftCount={run.Squad.Count}(want{picked.Count})");
+        for (int i = 0; i < picked.Count; i++)
+            if (i >= run.Squad.Count || !ReferenceEquals(run.Squad[i], picked[i])) fails.Add($"draftSeat[{i}]");
+        if (!run.HasBoon(Boon.Marksmen)) fails.Add("boonNotActive");
+
+        // (c) the default (harness) path still yields the fixed NewRunSquad
+        var run2 = new Run();
+        run2.Start();
+        var def = Sightline.Mission.NewRunSquad();
+        if (run2.Squad.Count != def.Count) fails.Add($"defaultCount={run2.Squad.Count}(want{def.Count})");
+        else for (int i = 0; i < def.Count; i++)
+            if (run2.Squad[i].Name != def[i].Name || run2.Squad[i].Cls != def[i].Cls) fails.Add($"defaultSquad[{i}]");
+        if (run2.ActiveBoons.Count != 0) fails.Add($"defaultBoons={run2.ActiveBoons.Count}(want0)");
+
+        return fails.Count == 0
+            ? $"DRAFTTEST: PASS (pool={pool.Count} variety={byCls.Count}cls, drafted {picked.Count}+boon seated, default squad intact)"
+            : "DRAFTTEST: FAIL (" + string.Join(",", fails) + ")";
+    }
+
     void ChooseCard(int i)
     {
         if (i < 0 || i >= _run.Offers.Count) return;
@@ -4641,7 +4755,12 @@ public class Game
         if (!click && !enter) return;
 
         if (Phase == Phase.Barracks) NextMission();   // deploy to next mission
-        else StartMission();                           // intro / win / lose -> new run
+        // intro / win / lose -> new run. INTERACTIVELY this opens the run-opening DRAFT (pick a
+        // founding squad + starting boon). The harness NEVER reaches here (it calls StartMission
+        // DIRECTLY, bypassing the intro), but gate on !NoPersist defensively so the smoke test /
+        // balance batch can never enter Phase.Draft (which would have no autopilot path -> hang).
+        else if (!NoPersist) BeginDraft();
+        else StartMission();
     }
 
     // ---------------- draw ----------------

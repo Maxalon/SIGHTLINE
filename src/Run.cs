@@ -467,9 +467,12 @@ public class Run
         return c;
     }
 
-    public void Start()
+    /// Begin a fresh campaign. `drafted` (when non-null) seats a player-chosen founding squad
+    /// from the run-opening DRAFT; otherwise the fixed default core is used. Every existing
+    /// caller (the harness path StartMission -> Start()) compiles unchanged via the default.
+    public void Start(List<Unit> drafted = null)
     {
-        Squad = Sightline.Mission.NewRunSquad();
+        Squad = drafted ?? Sightline.Mission.NewRunSquad();
         Mission = 0;
         Intel = 0;
         Fallen.Clear();
@@ -545,6 +548,44 @@ public class Run
         ActiveBoons.Add(b);
         BoonOffer.Clear();
         Report.Insert(0, $"BOON: {BoonDef.Name(b)}  ({BoonDef.Desc(b)})");
+    }
+
+    // ---- run-opening squad draft (Wave 3) ----
+    /// The number of recruits offered in the run-opening draft (pick DraftCap of these).
+    public const int DraftPoolSize = 6;
+
+    /// Build the run-opening DRAFT candidate pool: DraftPoolSize fresh recruits with class
+    /// VARIETY (no more than 2 of any single class) so the pick is a real "what squad thesis"
+    /// decision, not a random dump. Deterministic-friendly (Mission.MakeRecruit -> Util.RandInt).
+    /// Pure construction — does NOT touch run state, so it's safe to call from the self-test.
+    public static List<Unit> GenerateDraftPool()
+    {
+        var pool = new List<Unit>();
+        var classCount = new Dictionary<string, int>();
+        int guard = 0;   // bound the re-roll loop (5 classes, cap 2 each => max 10 distinct slots)
+        while (pool.Count < DraftPoolSize && guard++ < 400)
+        {
+            var u = Sightline.Mission.MakeRecruit();
+            classCount.TryGetValue(u.Cls, out int c);
+            if (c >= 2) continue;                 // cap any one class at 2 to force a spread
+            classCount[u.Cls] = c + 1;
+            pool.Add(u);
+        }
+        // Safety: if the (bounded) re-roll somehow under-filled, top up without the class cap
+        // so the pool is always exactly DraftPoolSize (never blocks the draft).
+        while (pool.Count < DraftPoolSize) pool.Add(Sightline.Mission.MakeRecruit());
+        return pool;
+    }
+
+    /// Build a fresh pick-1-of-3 STARTING boon offer for the draft (distinct boons from the
+    /// full pool — a fresh run owns none yet). Returned as a list; the draft single-selects one.
+    public static List<Boon> GenerateDraftBoonOffer()
+    {
+        var pool = new List<Boon>(BoonDef.All);
+        for (int i = pool.Count - 1; i > 0; i--) { int j = Util.RandInt(0, i); (pool[i], pool[j]) = (pool[j], pool[i]); }
+        var offer = new List<Boon>();
+        for (int i = 0; i < pool.Count && i < 3; i++) offer.Add(pool[i]);
+        return offer;
     }
 
     /// Apply promotions (from accumulated kills) and field-heal to the survivors,

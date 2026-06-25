@@ -35,6 +35,10 @@ public static class Hud
     public static System.Collections.Generic.List<(Unit unit, Rectangle rect)> BenchBtns = new();
     // run-scoped boon offer (Wave 3): the pick-1-of-3 boon cards in the barracks
     public static System.Collections.Generic.List<(Boon boon, Rectangle rect)> BoonBtns = new();
+    // run-opening squad DRAFT (Wave 3): candidate cards + starting-boon cards + the DEPLOY button
+    public static System.Collections.Generic.List<(Unit unit, Rectangle rect)> DraftCardBtns = new();
+    public static System.Collections.Generic.List<(Boon boon, Rectangle rect)> DraftBoonBtns = new();
+    public static Rectangle DraftConfirm;
 
     // ---------------- UI motion (panel pop-in juice) ----------------
     // Panels/cards animate in (slide + fade + scale) the first time they appear, instead
@@ -1062,6 +1066,8 @@ public static class Hud
             DrawEndScreen(g, true);
         else if (g.Phase == Phase.Lose)
             DrawEndScreen(g, false);
+        else if (g.Phase == Phase.Draft)
+            DrawDraft(g);
     }
 
     // ============================================================================
@@ -1430,6 +1436,157 @@ public static class Hud
         if (cur.Length > 0) lines.Add((cur, dy));
         return lines;
     }
+
+    // ============================================================================
+    //  RUN-OPENING SQUAD DRAFT (Wave 3) — "ASSEMBLE STRIKE TEAM".
+    //  Pick DraftCap recruits of 6 (each card shows name/class/weapon/HP-AIM-MOB + a
+    //  role one-liner + its signature ability) AND one of 3 starting boons, then DEPLOY.
+    //  Perfect-information: every stat + the mission-1 objective + chosen Heat are shown.
+    //  All clickable rects cached in DraftCardBtns / DraftBoonBtns / DraftConfirm.
+    // ============================================================================
+    static void DrawDraft(Game g)
+    {
+        DraftCardBtns.Clear();
+        DraftBoonBtns.Clear();
+
+        float t = (float)Raylib.GetTime();
+        DrawTacticalBackdrop(t, Pal.Friend, 0f);
+        Raylib.DrawRectangle(0, 0, Cfg.ScreenW, Cfg.ScreenH, Raylib.Fade(Pal.RGBA(6, 9, 13), 0.82f));
+
+        int W = Cfg.ScreenW;
+        var mouse = Raylib.GetMousePosition();
+
+        // ---- title ----
+        string title = "ASSEMBLE STRIKE TEAM";
+        var tm = Raylib.MeasureTextEx(Cfg.Font, title, 40, 2f);
+        Raylib.DrawTextEx(Cfg.Font, title, new Vector2(W / 2f - tm.X / 2f, 26), 40, 2f, Pal.Txt);
+        string sub = $"Pick {Game.DraftCap} operators + a starting doctrine — this is your run's thesis.";
+        var sm = Raylib.MeasureTextEx(Cfg.Font, sub, 15, 1f);
+        Raylib.DrawTextEx(Cfg.Font, sub, new Vector2(W / 2f - sm.X / 2f, 74), 15, 1f, Pal.TxtDim);
+
+        // selection counter
+        int picked = g.DraftPicked.Count;
+        string cnt = $"{picked} / {Game.DraftCap} SELECTED";
+        Color cntCol = picked == Game.DraftCap ? Pal.Good : Pal.Accent;
+        var cm = Raylib.MeasureTextEx(Cfg.Font, cnt, 18, 1f);
+        Raylib.DrawTextEx(Cfg.Font, cnt, new Vector2(W / 2f - cm.X / 2f, 98), 18, 1f, cntCol);
+
+        // ---- candidate cards: 6 in two rows of 3 ----
+        int cols = 3, cw = 300, chH = 150, gx = 24, gy = 18;
+        int gridW = cols * cw + (cols - 1) * gx;
+        int x0 = W / 2 - gridW / 2;
+        int y0 = 134;
+        for (int i = 0; i < g.DraftPool.Count; i++)
+        {
+            var u = g.DraftPool[i];
+            int col = i % cols, row = i / cols;
+            var r = new Rectangle(x0 + col * (cw + gx), y0 + row * (chH + gy), cw, chH);
+            bool sel = g.DraftPicked.Contains(u);
+            bool hover = Raylib.CheckCollisionPointRec(mouse, r);
+            // a card is "blocked" (can't add more) only matters visually when not already picked
+            bool full = !sel && picked >= Game.DraftCap;
+
+            PanelShadow(r, 1f);
+            Color body = sel ? Pal.RGBA(20, 38, 30) : (hover && !full ? Pal.RGBA(24, 34, 46) : Pal.Panel);
+            Raylib.DrawRectangleRounded(r, 0.07f, 8, full ? Raylib.Fade(body, 0.55f) : body);
+            Color bd = sel ? Pal.Good : (hover && !full ? Pal.Friend : Pal.PanelBd);
+            Raylib.DrawRectangleLinesEx(r, sel ? 3f : 1.5f, full ? Raylib.Fade(bd, 0.5f) : bd);
+
+            float a = full ? 0.55f : 1f;
+            int px = (int)r.X + 16, py = (int)r.Y + 12;
+            // name + class
+            Raylib.DrawTextEx(Cfg.Font, u.Name, new Vector2(px, py), 22, 1f, Raylib.Fade(Pal.Txt, a));
+            int nw = (int)Raylib.MeasureTextEx(Cfg.Font, u.Name, 22, 1f).X;
+            Raylib.DrawTextEx(Cfg.Font, u.Cls, new Vector2(px + nw + 8, py + 5), 13, 1f, Raylib.Fade(Pal.Friend, a));
+            // weapon
+            string wpn = u.Weapon != null ? u.Weapon.Name : "-";
+            Raylib.DrawTextEx(Cfg.Font, wpn, new Vector2(px, py + 30), 13, 1f, Raylib.Fade(Pal.TxtDim, a));
+            // stat line
+            string stats = $"HP {u.MaxHp}    AIM {u.Aim}    MOB {u.Mobility}";
+            Raylib.DrawTextEx(Cfg.Font, stats, new Vector2(px, py + 52), 15, 1f, Raylib.Fade(Pal.Txt, a));
+            // role one-liner
+            Raylib.DrawTextEx(Cfg.Font, ClassBlurb(u.Cls), new Vector2(px, py + 76), 12, 1f, Raylib.Fade(Pal.TxtDim, a));
+            // signature ability
+            Raylib.DrawTextEx(Cfg.Font, "ABILITY: " + u.AbilityName, new Vector2(px, py + 96), 12, 1f, Raylib.Fade(Pal.Accent, a));
+            // pick state line
+            string tag = sel ? "[ SELECTED ]" : (full ? "TEAM FULL" : "[ SELECT ]");
+            Color tagCol = sel ? Pal.Good : (full ? Pal.TxtDim : (hover ? Pal.Friend : Pal.Accent));
+            Raylib.DrawTextEx(Cfg.Font, tag, new Vector2(px, (int)r.Y + chH - 22), 13, 1f, Raylib.Fade(tagCol, a));
+
+            DraftCardBtns.Add((u, r));
+        }
+
+        // ---- starting boon (pick 1 of 3) ----
+        int boonY = y0 + 2 * (chH + gy) + 16;
+        string bh = "STARTING DOCTRINE";
+        var bhm = Raylib.MeasureTextEx(Cfg.Font, bh, 18, 1f);
+        Raylib.DrawTextEx(Cfg.Font, bh, new Vector2(W / 2f - bhm.X / 2f, boonY - 4), 18, 1f, Pal.VipGold);
+
+        int bn = g.DraftBoonOffer.Count, bcw = 296, bgap = 22, bch = 86;
+        int btotal = bn * bcw + (bn - 1) * bgap;
+        int bx0 = W / 2 - btotal / 2;
+        int by = boonY + 24;
+        for (int i = 0; i < bn; i++)
+        {
+            var boon = g.DraftBoonOffer[i];
+            var r = new Rectangle(bx0 + i * (bcw + bgap), by, bcw, bch);
+            bool sel = g.DraftSelectedBoon.HasValue && g.DraftSelectedBoon.Value == boon;
+            bool hover = Raylib.CheckCollisionPointRec(mouse, r);
+            PanelShadow(r, 1f);
+            Raylib.DrawRectangleRounded(r, 0.08f, 8, sel ? Pal.RGBA(40, 34, 12) : (hover ? Pal.RGBA(26, 36, 48) : Pal.Panel));
+            Raylib.DrawRectangleLinesEx(r, sel ? 3f : 1.5f, sel ? Pal.VipGold : (hover ? Pal.VipGold : Pal.PanelBd));
+            Raylib.DrawTextEx(Cfg.Font, BoonDef.Name(boon), new Vector2((int)r.X + 14, (int)r.Y + 10), 18, 1f, sel ? Pal.VipGold : Pal.Txt);
+            foreach (var (line, dy) in WrapLines(BoonDef.Desc(boon), bcw - 28, 13, 0))
+                Raylib.DrawTextEx(Cfg.Font, line, new Vector2((int)r.X + 14, (int)r.Y + 38 + dy), 13, 1f, Pal.TxtDim);
+            DraftBoonBtns.Add((boon, r));
+        }
+
+        // ---- mission-1 + heat preview ----
+        string m1 = $"FIRST OP: {ObjectiveLabel(Run.ObjectiveFor(1))}   ·   HEAT {g.PendingHeat}";
+        var m1m = Raylib.MeasureTextEx(Cfg.Font, m1, 14, 1f);
+        int infoY = by + bch + 14;
+        Raylib.DrawTextEx(Cfg.Font, m1, new Vector2(W / 2f - m1m.X / 2f, infoY), 14, 1f, Pal.TxtDim);
+
+        // ---- DEPLOY button (greyed until exactly DraftCap soldiers + a boon are chosen) ----
+        bool ready = g.DraftReady;
+        int dbw = 280, dbh = 50;
+        DraftConfirm = new Rectangle(W / 2 - dbw / 2, infoY + 26, dbw, dbh);
+        bool dhover = ready && Raylib.CheckCollisionPointRec(mouse, DraftConfirm);
+        Color deployCol = ready ? (dhover ? Pal.RGBA(92, 200, 251) : Pal.Good) : Pal.RGBA(40, 50, 63);
+        if (dhover) Raylib.DrawRectangleRounded(new Rectangle(DraftConfirm.X - 3, DraftConfirm.Y - 3, dbw + 6, dbh + 6), 0.3f, 8, Raylib.Fade(deployCol, 0.25f));
+        Raylib.DrawRectangleRounded(DraftConfirm, 0.3f, 8, Raylib.Fade(deployCol, ready ? 1f : 0.5f));
+        string dl = ready ? "DEPLOY" : $"SELECT {Game.DraftCap - picked} MORE";
+        if (ready) dl = "DEPLOY";
+        else if (picked == Game.DraftCap && !g.DraftSelectedBoon.HasValue) dl = "PICK A DOCTRINE";
+        var dlm = Raylib.MeasureTextEx(Cfg.Font, dl, 18, 1f);
+        Raylib.DrawTextEx(Cfg.Font, dl, new Vector2((int)(DraftConfirm.X + dbw / 2 - dlm.X / 2), (int)(DraftConfirm.Y + dbh / 2 - 9)), 18, 1f, ready ? Pal.RGBA(3, 18, 26) : Pal.TxtDim);
+        if (ready)
+            Raylib.DrawTextEx(Cfg.Font, "[ENTER]", new Vector2((int)(DraftConfirm.X + dbw - 56), (int)(DraftConfirm.Y + dbh - 16)), 11, 1f, Pal.RGBA(3, 18, 26));
+    }
+
+    /// A short prose role one-liner per class, for the draft candidate cards.
+    static string ClassBlurb(string cls) => cls switch
+    {
+        "ASSAULT" => "Aggressive rifleman; closes and clears.",
+        "RANGER" => "Shotgun flanker; brutal up close.",
+        "SHARPSHOOTER" => "Long-range sniper; picks off threats.",
+        "GUNNER" => "Heavy LMG; suppresses and pins.",
+        "CORPSMAN" => "Field medic; in-combat sustain.",
+        _ => "Versatile operator.",
+    };
+
+    /// Objective enum -> a short readout label (mirrors the top bar), for the draft preview.
+    static string ObjectiveLabel(Objective o) => o switch
+    {
+        Objective.Evac => "EXTRACT",
+        Objective.Hack => "HACK TERMINAL",
+        Objective.Sabotage => "SABOTAGE",
+        Objective.Escort => "ESCORT VIP",
+        Objective.Rescue => "RESCUE",
+        Objective.Defend => "DEFEND",
+        Objective.Decapitate => "KILL HVT",
+        _ => "ELIMINATE",
+    };
 
     static void DrawBarracks(Game g)
     {
