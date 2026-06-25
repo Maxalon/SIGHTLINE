@@ -1037,6 +1037,31 @@ Before stopping:
 
 ### WIP NOTES
 
+> **PROGRAM "CRUCIBLE" — completability + variety + readability (LATEST; read first; full log in
+> `docs/DEVLOG.md`).** Fully-autonomous orchestrator + 4 parallel research/audit agents + parallel dev agents
+> (isolated worktrees, disjoint files) + the `SIGHTLINE_BALANCE` flywheel. Branch `claude/awesome-bardeen-jd6u5q`,
+> PR #54. The MEASURED master problem: full-run completion was **~2%** — a 6-mission geometric-product collapse
+> with no compounding survivability term + hard gates. Research converged: "long run + terminal wipe + power-only
+> meta = the FTL↔XCOM/Hades dead zone; add recovery valves + lateral variety." Shipped, measured at every step:
+> - **Wave 1:** deep ROSTER (carry 6) + DEPLOY-GROWTH (deploy 4→5→6 by mission, the action-economy master lever)
+>   + adaptive ASSIST (Hades God-Mode loss-streak meta, `Run.LossStreak`/`AssistStatRelief`, base-heat only,
+>   persisted in meta.json) + boss node → DECAPITATE (`Run.CardForNode`) + 4 arenas + game-feel juice.
+> - **Wave 2:** ARMOR reward-sink (`Unit.Armor`, folded into `Combat.HardenedReduce`; sold as BALLISTIC PLATING)
+>   + BULWARK/VANGUARD perks + barracks DEPLOY-PICKER (`Game.ToggleBench` cap-aware + `Hud` deploy UI) + Escort
+>   fix (VIP Armor in `Mission.MakeVip` + cut the anti-VIP AI "finish frenzy" in `Ai.Plan`) + Renderer readability.
+> - **Wave 3:** 10 run-scoped BOONS (`enum Boon`/`BoonDef`, `Run.ActiveBoons`/`BoonOffer`, FIELD DOCTRINE pick
+>   each barracks, read via static `Combat.RunBoons` + on-kill in `CreditKill`; the anti-same-y keystone) +
+>   always-on combat-log (`Stats.CombatLog`, recorded in `ShotAnim.Apply`) + combat-log/active-boons HUD.
+> - **Fixes:** robust anim-queue pop (`Game.Update`: only pop index 0 if `a` is still front — an anim's Update
+>   can mutate `_anims` via KillUnit/overwatch → intermittent IndexOutOfRange); EVAC zone 2×2→2×4 (a 5+-soldier
+>   squad couldn't fit the 4-tile zone → unwinnable → TIMEOUT); difficulty RECALIBRATION (stacked squad power
+>   overshot to 54% → restored `Mission.SpawnEnemies` count `4+n`/bump `n-1`).
+> MEASURED ARC (competent AI, heat 0-4): **2% → 28% → 32%** run-completion (avg ~3.6 missions; no mission gate
+> below 70%/mission; heat ladder declines to 76% @ heat 4; AutoStep clean, no TIMEOUT). A **16x lift** — base
+> winnable, the 8-rung Heat ladder carries mastery. New hook `SIGHTLINE_BOON`; COMBATTEST extended (armor/
+> bulwark/vanguard). **NEXT (documented future):** PUSH/forced-movement verb (ITB — the top depth add);
+> perk build-trees; deliberate squad draft at run start; animation-speed toggle; tune the Heat-8 ceiling.
+
 > **PROGRAM "DEEP STRIKE" — NEW MULTI-WAVE PUSH (read first; full process log in `docs/DEVLOG.md`).**
 > Fresh fully-autonomous session running the project as a dev team (orchestrator + parallel dev agents in
 > isolated worktrees + independent reviewers + research/audit agents). Develops on
