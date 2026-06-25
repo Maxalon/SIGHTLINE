@@ -508,7 +508,10 @@ public static class Combat
         {
             var gG = new Grid();
             var gAtk = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 3, Y = 5 };
-            var gDef = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 7, Y = 5, Hp = 20, MaxHp = 20 };
+            // dist 8 so the rifle's RangeMod is exactly 0 (Soften((8-8)*1.5)) -> effHit == 60, matching the
+            // bands below. (At the old dist 4 the +6 range bonus pushed effHit to ~66, sitting on the [53,67]
+            // upper edge -> the statistical hit-rate band flaked ~1/150 runs. Recentered, not widened.)
+            var gDef = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 11, Y = 5, Hp = 20, MaxHp = 20 };
 
             // Test graze band logic directly using the band constants: a shot at effHit=60
             // must graze when roll in [60,75) and miss when roll >= 75.
