@@ -448,9 +448,20 @@ public class Game
         // Heat folds into the SAME difficulty params the deployment cards use (no Mission.cs
         // signature change): extra bodies + an extra stat bump as the ladder climbs.
         int heat = _run.HeatLevel;
-        int enemyDelta = card.EnemyDelta + Sightline.Heat.EnemyDelta(heat);
+        int heatEnemy = Sightline.Heat.EnemyDelta(heat);
+        int heatStat  = Sightline.Heat.StatDelta(heat);
+        // EARLY-MISSION HEAT GRACE. The measured ~20% mission-1 loss (which hard-caps run
+        // completion, a geometric product) was almost entirely a heat-3/4 alpha-strike on the
+        // COLD OPENER: Heat adds +2 bodies / +2 stat to a force a green 4-rookie squad meets
+        // before it has earned a single promotion, perk, or boon. Ramp Heat's contribution in
+        // over the first missions so the ladder bites once the squad can answer it (m1 x0, m2
+        // x1/2, m3+ full). Card deltas and the per-mission growth curve (Mission.cs) are
+        // untouched — only Heat's extra bodies/stats ramp. Heat 0 stays a true no-op.
+        if (n <= 1)      { heatEnemy = 0; heatStat = 0; }
+        else if (n == 2) { heatEnemy /= 2; heatStat /= 2; }
+        int enemyDelta = card.EnemyDelta + heatEnemy;
         // adaptive assist eases the force-wide enemy stat bump (base Heat only; 0 otherwise).
-        int statDelta = card.StatDelta + Sightline.Heat.StatDelta(heat) - _run.AssistStatRelief;
+        int statDelta = card.StatDelta + heatStat - _run.AssistStatRelief;
 
         // reserve + connectivity-verify a key tile: the Hack terminal, or the Rescue captive's seat
         (int x, int y)? reserve = HasTerminal ? Terminal

@@ -170,6 +170,13 @@ public static class Stats
         double avgCleared = Runs.Average(r => (double)r.MissionsCleared);
         sb.AppendLine($"\nRUN OUTCOMES:  win-rate {Pct(runWins, Runs.Count)}   avg missions cleared {avgCleared:0.0}");
 
+        // Run-completion by heat — the metric the Heat ladder is supposed to bend. The
+        // per-MISSION win-rate below conflates "harder rung" with "how far the run got"
+        // (survivorship bias), so it can't show the ladder's shape; this one can.
+        sb.AppendLine("\nRUN COMPLETION BY HEAT (full-campaign clears):");
+        foreach (var g in Runs.GroupBy(r => r.Heat).OrderBy(g => g.Key))
+            sb.AppendLine($"  heat {g.Key}: {Pct(g.Count(r => r.Win), g.Count())}  (n={g.Count()} runs, avg {g.Average(r => (double)r.MissionsCleared):0.0} missions)");
+
         // Win-rate by heat
         sb.AppendLine("\nMISSION WIN-RATE BY HEAT:");
         foreach (var g in missions.GroupBy(m => m.Heat).OrderBy(g => g.Key))
@@ -290,6 +297,14 @@ public static class Stats
             missions = missions.Count,
             runWinRate = Runs.Count == 0 ? 0.0 : Math.Round(100.0 * Runs.Count(r => r.Win) / Runs.Count, 1),
             avgMissionsCleared = Runs.Count == 0 ? 0.0 : Math.Round(Runs.Average(r => (double)r.MissionsCleared), 2),
+            // Run-completion grouped by heat (the ladder's true shape — distinct from the
+            // survivorship-skewed per-mission byHeat below).
+            byHeatRun = Runs.GroupBy(r => r.Heat).OrderBy(g => g.Key).Select(g => new
+            {
+                heat = g.Key, runs = g.Count(),
+                runWinRate = Math.Round(100.0 * g.Count(r => r.Win) / g.Count(), 1),
+                avgMissionsCleared = Math.Round(g.Average(r => (double)r.MissionsCleared), 2)
+            }).ToList(),
             byHeat = missions.GroupBy(m => m.Heat).OrderBy(g => g.Key).Select(g => new
             {
                 heat = g.Key, n = g.Count(), winRate = WinRate(g), avgTurns = Math.Round(g.Average(m => (double)m.Turns), 1)
