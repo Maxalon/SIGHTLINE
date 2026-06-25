@@ -164,6 +164,7 @@ public static class Renderer
         DrawUnits(g);
         DrawSmoke(g);
         DrawAim(g);
+        DrawCrossfire(g);         // pincer telegraph: converging-fire prongs when the aimed/hovered shot is a crossfire
         DrawGrenade(g);
         DrawItem(g);
         DrawShove(g);
@@ -1426,5 +1427,114 @@ public static class Renderer
         Raylib.DrawRing(d, 18, 21, ang + 120, ang + 180, 16, col);
         Raylib.DrawRing(d, 18, 21, ang + 240, ang + 300, 16, col);
         Raylib.DrawCircleLines((int)d.X, (int)d.Y, 24, Raylib.Fade(col, 0.6f));
+    }
+
+    // CROSSFIRE telegraph (Wave 2 mechanic made visible). The crossfire bonus (+aim/+crit when a
+    // target is converged on from two diverging angles) is surfaced in the shot tooltip but is
+    // INVISIBLE on the board, so the player can't SEE the pincer while positioning. When the player
+    // is actively AIMING at an enemy, OR hovering an enemy the selected soldier could shoot, AND that
+    // shot is a genuine crossfire, draw a faint converging-fire prong from EACH threatening squadmate
+    // to the target so the pincer geometry reads at a glance.
+    //
+    // GATING (harness byte-stability): only the INTERACTIVE aim/hover path. The headless SIGHTLINE_SHOT
+    // autopilot never sets AimMode and isn't hovering a shootable enemy on a normal frame, so this is
+    // naturally inert there; we also require g.AimMode OR g.ShowOdds (set only by UpdateHoverAndAim's
+    // hover-to-shoot branch) on the player turn with a live selected soldier, which the shot harness
+    // doesn't satisfy. Never draws on the enemy turn or with no selection.
+    //
+    // COLOUR: the friendly/good accent (Pal.Good), NOT the enemy red of the aim line — crossfire is a
+    // PLAYER advantage, and the red aim line already points at the foe, so the green prongs read
+    // distinctly as "your other guns are also on this target". Thin + low-alpha (squint test).
+    static void DrawCrossfire(Game g)
+    {
+        var aimer = g.Selected;
+        if (aimer == null || g.Phase != Phase.PlayerTurn || !g.IsPlayerInteractive()) return;
+        if (aimer.Team != Team.Player) return;
+
+        // Resolve the single target under consideration on the interactive path:
+        //  - aim mode: the locked-in aim target (mirrors DrawAim's gate),
+        //  - otherwise: the hovered enemy the selected soldier could shoot (mirrors the
+        //    UpdateHoverAndAim hover-to-shoot branch, which is the only other thing that sets ShowOdds).
+        Unit target = null;
+        if (g.AimMode)
+        {
+            if (g.AimTarget != null && g.AimTarget.Alive && g.AimValid) target = g.AimTarget;
+        }
+        else if (g.ShowOdds && g.HoverValid)
+        {
+            var hov = g.UnitAt(g.HoverX, g.HoverY);
+            if (hov != null && hov.Alive && hov.Team == Team.Enemy && g.CanTarget(aimer, hov)) target = hov;
+        }
+        if (target == null) return;
+
+        // The mechanic itself decides whether this is a crossfire (so the indicator can never lie /
+        // drift from Combat's thresholds). Only light up when it's genuinely a pincer.
+        if (!Combat.InCrossfire(g.Grid, aimer, target)) return;
+
+        var d = target.Pos;
+        float t = (float)Raylib.GetTime();
+        // gentle travelling dash so the converging fire reads as live/active without flashing.
+        float phase = t * 2.2f;
+
+        int prongs = 0;
+        var all = Combat.AllUnits;
+        if (all != null)
+        {
+            for (int i = 0; i < all.Count; i++)
+            {
+                var ally = all[i];
+                if (ally == null || ally == aimer) continue;       // the aimer's own line is the red aim line
+                if (!ally.Alive) continue;
+                if (ally.Team != aimer.Team) continue;             // same squad only
+                if (ally.Cls == "VIP") continue;                   // non-combatant asset (VIP / caged captive)
+                if (ally.X == target.X && ally.Y == target.Y) continue;
+                // credible converging threat = an actual line of sight to the target (the dominant gate in
+                // Combat.InCrossfire). Drawing only LoS allies keeps every prong an honest second gun.
+                if (!g.Grid.HasLineOfSight(ally.X, ally.Y, target.X, target.Y)) continue;
+
+                DrawCrossfireProng(ally.Pos, d, phase);
+                prongs++;
+            }
+        }
+        if (prongs == 0) return;   // nothing to show (defensive; InCrossfire implies >=1)
+
+        // converging-arrows glyph + label at the target so the pincer is named, not just inferred.
+        float pulse = 0.55f + 0.45f * MathF.Sin(t * 4f);
+        Color lab = Raylib.Fade(Pal.Good, 0.85f * pulse + 0.15f);
+        // two small chevrons pointing inward toward the target centre (a >< convergence cue)
+        Raylib.DrawLineEx(new Vector2(d.X - 16, d.Y - 6), new Vector2(d.X - 9, d.Y), 1.8f, lab);
+        Raylib.DrawLineEx(new Vector2(d.X - 16, d.Y + 6), new Vector2(d.X - 9, d.Y), 1.8f, lab);
+        Raylib.DrawLineEx(new Vector2(d.X + 16, d.Y - 6), new Vector2(d.X + 9, d.Y), 1.8f, lab);
+        Raylib.DrawLineEx(new Vector2(d.X + 16, d.Y + 6), new Vector2(d.X + 9, d.Y), 1.8f, lab);
+        var lp = new Vector2((int)d.X - 30, (int)(d.Y + 22));
+        Raylib.DrawTextEx(Cfg.Font, "CROSSFIRE", lp, 11, 1f, lab);
+    }
+
+    // One converging-fire prong: a thin low-alpha line from a squadmate to the target, with a short
+    // brighter travelling dash sliding toward the target (reads as live, directional fire) and a small
+    // arrowhead at the target end. All Pal.Good, all faint — reinforces the pincer without clutter.
+    static void DrawCrossfireProng(Vector2 from, Vector2 to, float phase)
+    {
+        var seg = to - from;
+        float len = seg.Length();
+        if (len < 1f) return;
+        var dir = seg / len;
+
+        // base line: very faint full-length connector.
+        Raylib.DrawLineEx(from, to, 1.4f, Raylib.Fade(Pal.Good, 0.32f));
+
+        // travelling highlight: a short bright dash that slides from the ally toward the target.
+        float dashLen = 18f;
+        float headRoom = 22f;                                   // stop short so it doesn't fight the target reticle
+        float travel = ((phase % 1f) + 1f) % 1f * MathF.Max(1f, len - headRoom);
+        var ds = from + dir * travel;
+        var de = from + dir * MathF.Min(len - headRoom, travel + dashLen);
+        Raylib.DrawLineEx(ds, de, 2.2f, Raylib.Fade(Pal.Good, 0.5f));
+
+        // arrowhead near the target end (pointing inward) — the "fire arrives here" cue.
+        var tip = to - dir * (headRoom - 4f);
+        var perp = new Vector2(-dir.Y, dir.X);
+        Raylib.DrawLineEx(tip, tip - dir * 7f + perp * 4f, 1.8f, Raylib.Fade(Pal.Good, 0.55f));
+        Raylib.DrawLineEx(tip, tip - dir * 7f - perp * 4f, 1.8f, Raylib.Fade(Pal.Good, 0.55f));
     }
 }

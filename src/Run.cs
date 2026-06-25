@@ -95,6 +95,7 @@ public class MissionNode
     public int Row;           // 0-based vertical slot within its column
     public int RowCount;      // nodes in this column (for layout)
     public NodeKind Kind;
+    public Faction Faction = Faction.None;   // enemy faction for this fight (Wave 4); None = mixed force
     public MissionCard Card;  // objective + deltas + reward derived from Kind
     public List<int> Next = new();  // outgoing edges (node ids in the next column)
     public bool Visited;
@@ -306,6 +307,16 @@ public class Run
 
         foreach (var node in Map) node.Card = CardForNode(node);
 
+        // Enemy FACTIONS (Wave 4): give the main fights (Combat/Elite nodes) a faction identity so each
+        // reads as a distinct opponent the player pre-plans against (the EnemyHint + banner show it; the
+        // faction-gated roster + combat rule warp the encounter). START / SUPPLY / BOSS stay a mixed force
+        // (None) so the opener, rest stops, and the WARLORD finale aren't themed. Deterministic from the
+        // seeded rng, so it round-trips on load (the map is regenerated from MapSeed).
+        var facPool = new[] { Faction.Syndicate, Faction.Legion, Faction.Wardens };
+        foreach (var node in Map)
+            if (node.Kind == NodeKind.Combat || node.Kind == NodeKind.Elite)
+                node.Faction = facPool[rng.Next(facPool.Length)];
+
         // edges: wire each column to the next, then guarantee every next node has an entry
         for (int c = 0; c < cols - 1; c++)
         {
@@ -467,9 +478,12 @@ public class Run
         return c;
     }
 
-    public void Start()
+    /// Begin a fresh campaign. `drafted` (when non-null) seats a player-chosen founding squad
+    /// from the run-opening DRAFT; otherwise the fixed default core is used. Every existing
+    /// caller (the harness path StartMission -> Start()) compiles unchanged via the default.
+    public void Start(List<Unit> drafted = null)
     {
-        Squad = Sightline.Mission.NewRunSquad();
+        Squad = drafted ?? Sightline.Mission.NewRunSquad();
         Mission = 0;
         Intel = 0;
         Fallen.Clear();
@@ -545,6 +559,58 @@ public class Run
         ActiveBoons.Add(b);
         BoonOffer.Clear();
         Report.Insert(0, $"BOON: {BoonDef.Name(b)}  ({BoonDef.Desc(b)})");
+    }
+
+    // ---- run-opening squad draft (Wave 3) ----
+    /// The number of recruits offered in the run-opening draft (pick DraftCap of these).
+    public const int DraftPoolSize = 6;
+
+    /// Build the run-opening DRAFT candidate pool: DraftPoolSize fresh recruits with class
+    /// VARIETY (no more than 2 of any single class) so the pick is a real "what squad thesis"
+    /// decision, not a random dump. Deterministic-friendly (Mission.MakeRecruit -> Util.RandInt).
+    /// Pure construction — does NOT touch run state, so it's safe to call from the self-test.
+    public static List<Unit> GenerateDraftPool()
+    {
+        var pool = new List<Unit>();
+        var classCount = new Dictionary<string, int>();
+        // Phase 1 — seed DISTINCT classes first (cap 1 each), so the draft always offers a broad spread
+        // (with 5 classes and a 6-card pool, every class appears at least once: the choice is which to
+        // DOUBLE up + who to leave behind, not "which 3 classes did the dice give me"). Bounded re-roll.
+        int guard = 0;
+        while (pool.Count < DraftPoolSize && guard++ < 400)
+        {
+            var u = Sightline.Mission.MakeRecruit();
+            classCount.TryGetValue(u.Cls, out int c);
+            if (c >= 1) continue;                 // phase 1: at most one of each class
+            classCount[u.Cls] = c + 1;
+            pool.Add(u);
+            if (classCount.Count >= 5) break;     // covered every class -> move to the fill phase
+        }
+        // Phase 2 — fill the remaining slots allowing a SECOND of any class (cap 2) for some duplication.
+        guard = 0;
+        while (pool.Count < DraftPoolSize && guard++ < 400)
+        {
+            var u = Sightline.Mission.MakeRecruit();
+            classCount.TryGetValue(u.Cls, out int c);
+            if (c >= 2) continue;
+            classCount[u.Cls] = c + 1;
+            pool.Add(u);
+        }
+        // Safety: if the (bounded) re-rolls somehow under-filled, top up so the pool is always exactly
+        // DraftPoolSize (never blocks the draft).
+        while (pool.Count < DraftPoolSize) pool.Add(Sightline.Mission.MakeRecruit());
+        return pool;
+    }
+
+    /// Build a fresh pick-1-of-3 STARTING boon offer for the draft (distinct boons from the
+    /// full pool — a fresh run owns none yet). Returned as a list; the draft single-selects one.
+    public static List<Boon> GenerateDraftBoonOffer()
+    {
+        var pool = new List<Boon>(BoonDef.All);
+        for (int i = pool.Count - 1; i > 0; i--) { int j = Util.RandInt(0, i); (pool[i], pool[j]) = (pool[j], pool[i]); }
+        var offer = new List<Boon>();
+        for (int i = 0; i < pool.Count && i < 3; i++) offer.Add(pool[i]);
+        return offer;
     }
 
     /// Apply promotions (from accumulated kills) and field-heal to the survivors,
@@ -783,8 +849,27 @@ public class Run
     /// player can make an informed pick. Derived purely from Kind + Mission column (i.e.
     /// the real spawn gating in Mission.SpawnEnemies), so it's always deterministic and
     /// roughly accurate. Kept <= ~22 chars so it fits beneath a node label.
+    /// Display name of an enemy faction (Wave 4), used by the campaign-map hint + the mission banner.
+    public static string FactionName(Faction f) => f switch
+    {
+        Faction.Syndicate => "SYNDICATE",
+        Faction.Legion    => "LEGION",
+        Faction.Wardens   => "WARDENS",
+        _ => "",
+    };
+
     public static string EnemyHint(MissionNode node)
     {
+        // Faction nodes read by their faction + signature units (the roster is faction-gated), so the
+        // branch pick telegraphs the encounter's personality (counter-build before you commit).
+        if (node.Faction != Faction.None)
+            return node.Faction switch
+            {
+                Faction.Syndicate => "SYNDICATE: drones + shields",
+                Faction.Legion    => "LEGION: berserkers rush",
+                Faction.Wardens   => "WARDENS: snipers + mortars",
+                _ => FactionName(node.Faction),
+            };
         int m = node.Mission;   // 1-based column == mission number
         switch (node.Kind)
         {

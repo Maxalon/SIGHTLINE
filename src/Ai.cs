@@ -16,6 +16,7 @@ public class EnemyPlan
     public Unit HealTarget;       // medic: mend this wounded ally instead of fighting
     public (int x, int y)? SapTile; // sapper: demolish this player cover tile instead of shooting
     public bool UseItem;          // use a utility item (smoke/flash) this turn
+    public Unit ShoveTarget;      // rusher/Legion: shove this soldier OUT of cover to expose it (Wave 5)
     public int ItemTx, ItemTy;    // item aim tile
 }
 
@@ -193,6 +194,49 @@ public static class Ai
                         if (odds.Flanked) val += spotterActive ? 22 : 14; // out-positioned its cover
                         else if (odds.CoverLevel == 0) val += 4;          // already exposed: minor nudge
                     }
+
+                    bool isFocus = g.EnemyFocus != null && p == g.EnemyFocus;
+
+                    // CROSSFIRE SEEKING (AI improvement 1): reward ending on a tile that puts THIS
+                    // soldier in a pincer with another living enemy that already has line-of-sight
+                    // to it from a meaningfully DIFFERENT angle. The new CROSSFIRE combat mechanic is
+                    // symmetric (a target shot by 2+ same-team attackers from diverging vectors —
+                    // > ~72deg — takes +aim/+crit), so the squad benefits from collapsing on a
+                    // soldier from converging lines instead of stacking one approach. Computed
+                    // locally (CrossfireWith), so Ai.cs compiles standalone — no Combat dependency.
+                    // Advisory: it layers onto the existing hit/cover/finish/focus core, only when a
+                    // shot already exists, so it biases POSITIONING and never forces a worse shot.
+                    if (CrossfireWith(g, e, tx, ty, p))
+                    {
+                        // moderate, in the band of a cover/flank term (cover.Level*18, flank 14/-25),
+                        // amplified for the painted FOCUS so the squad genuinely pincers the BEACON's
+                        // mark; a NON-focus crossfire is a smaller nudge so it never out-votes the
+                        // squad's deliberate focus choice. Never large enough to override "can I
+                        // shoot at all / am I safe".
+                        val += isFocus ? (spotterActive ? 22f : 16f) : 8f;
+                    }
+
+                    // TARGET SHARPENING (AI improvement 3): among shootable soldiers prefer, in order,
+                    // (a) a likely KILL this turn (lethal EV: in the finish band AND a real chance to
+                    // connect), then (b) the squad's focus (the big +val above), then (c) the lowest
+                    // effective HP / most exposed. These are small tie-breakers folded onto the
+                    // hit-based core. CRUCIALLY they DEFER to focus: the squad's focus is its
+                    // coordinated decision, so a non-focus target's sharpeners stay modest and never
+                    // out-vote an in-range focus (autoplay + AITEST both rely on focus driving choice
+                    // when a focus exists). When NO focus is set, they cleanly sharpen the pick.
+                    if (isFocus || g.EnemyFocus == null)
+                    {
+                        if (p.Hp <= e.Weapon.DmgMax && odds.HitChance >= 50) val += 18;   // (a) close the kill
+                        val += Util.Clamp((12 - p.Hp) * 0.6f, 0f, 7f);                    // (c) softer target first
+                        if (odds.CoverLevel == 0 && !isFocus) val += 3;                   // (c) exposed nudge
+                    }
+                    else
+                    {
+                        // a focus exists but this isn't it: only a tiny softer-target tie-break,
+                        // capped well under the focus margin, so focus discipline holds.
+                        val += Util.Clamp((12 - p.Hp) * 0.25f, 0f, 3f);
+                    }
+
                     if (val > bestHit) { bestHit = val; shoot = p; }
                 }
             }
@@ -407,38 +451,64 @@ public static class Ai
             }
         }
 
-        // utility item (smoke / flash): occasional tactical use, never hits allies.
-        // Gate: must have a charge, SapTile must be null, and ~25% base probability.
-        if (e.EnemyItem != ItemKind.None && e.ItemCharge > 0 && plan.SapTile == null
-            && !plan.Grenade && Util.Roll(25))
+        // utility item (smoke / flash): PROACTIVE, reason-driven tactical use (AI improvement 2),
+        // never hits allies. Gate: must have a charge + no sap/grenade planned. Rather than a flat
+        // random roll, each item fires when there's a CONCRETE reason (see below), with only a
+        // small random damper so it isn't perfectly predictable/exploitable. A used item ends the
+        // turn (UpdateEnemy zeroes ActionsLeft), so this still always spends the action -> no
+        // dead turn / no TIMEOUT, and it doesn't disturb the focus-fire/retreat logic above (it
+        // only supersedes a planned SHOT, which wouldn't get to fire this turn anyway).
+        if (e.EnemyItem != ItemKind.None && e.ItemCharge > 0 && plan.SapTile == null && !plan.Grenade)
         {
             if (e.EnemyItem == ItemKind.Smoke)
             {
-                // Smoke: use when an overwatching player has LoS to the enemy's post-move tile,
-                // or the enemy is badly exposed (flanked). Lay smoke on a tile between the
-                // enemy and the nearest overwatching player to blind the reaction lane.
-                // Smoke hurts BOTH sides equally, so only use it to cover a move, never when
-                // the enemy needs to shoot through it (it can still shoot after a smoke that
-                // landed away from the target).
-                var (sx, sy, smokeGood) = BestSmoke(g, e, bestTile.x, bestTile.y);
-                if (smokeGood)
+                // SMOKE — blind a player OVERWATCH lane the enemy would otherwise cross/feed, or
+                // screen an advance across open ground toward the squad. Concrete reasons:
+                //  (1) the post-move tile sits IN a player overwatch kill-zone (it would eat
+                //      reaction fire ending there), OR the move's ROUTE threads an overwatch tile;
+                //  (2) the enemy is closing on the squad with NO shot from cover this turn and is
+                //      exposed in the open (a screened advance), which BestSmoke's flanked-tile
+                //      branch covers;
+                //  (3) BestSmoke otherwise finds an overwatcher-vs-post-move-tile lane to cut.
+                // SNIPER/SCOUT/GRUNT are the smoke carriers (Mission.cs); any of them benefit.
+                bool endsWatched = owTiles.Count > 0 && owTiles.Contains((bestTile.x, bestTile.y));
+                bool routeWatched = false;
+                if (!endsWatched && owTiles.Count > 0 && bestTile != (e.X, e.Y))
+                    foreach (var (rx, ry) in g.Grid.ReconstructPath(cameFrom, e.X, e.Y, bestTile.x, bestTile.y))
+                        if (owTiles.Contains((rx, ry))) { routeWatched = true; break; }
+                // crossing open ground: it moved toward the squad, has no shot, and ends exposed.
+                bool exposedAdvance = plan.ShootTarget == null && bestTile != (e.X, e.Y)
+                    && nearest != null
+                    && Util.ChebyDist(bestTile.x, bestTile.y, nearest.X, nearest.Y)
+                       < Util.ChebyDist(e.X, e.Y, nearest.X, nearest.Y)
+                    && g.Grid.GetCover(bestTile.x, bestTile.y, nearest.X, nearest.Y).Level == 0;
+
+                bool wantSmoke = endsWatched || routeWatched || exposedAdvance;
+                if (wantSmoke)
                 {
-                    plan.UseItem = true; plan.ItemTx = sx; plan.ItemTy = sy;
-                    // Using an item ends the enemy's turn (UpdateEnemy zeroes ActionsLeft),
-                    // so a planned shot won't fire this turn regardless; still null ShootTarget
-                    // when the smoke lands on the target tile so the AI doesn't "plan" a shot
-                    // it would have blinded anyway.
-                    if (plan.ShootTarget != null &&
-                        Util.ChebyDist(sx, sy, plan.ShootTarget.X, plan.ShootTarget.Y) <= SmokeAnim.Radius)
-                        plan.ShootTarget = null;
+                    var (sx, sy, smokeGood) = BestSmoke(g, e, bestTile.x, bestTile.y);
+                    // strong reasons (about to eat overwatch) fire almost always; a softer
+                    // open-ground screen fires often-but-not-always, so it stays a threat not a tic.
+                    bool fire = endsWatched ? Util.Roll(90) : routeWatched ? Util.Roll(70) : Util.Roll(55);
+                    if (smokeGood && fire)
+                    {
+                        plan.UseItem = true; plan.ItemTx = sx; plan.ItemTy = sy;
+                        // if the smoke would also blind our own planned shot, drop that shot.
+                        if (plan.ShootTarget != null &&
+                            Util.ChebyDist(sx, sy, plan.ShootTarget.X, plan.ShootTarget.Y) <= SmokeAnim.Radius)
+                            plan.ShootTarget = null;
+                    }
                 }
             }
             else if (e.EnemyItem == ItemKind.Flash)
             {
-                // Flash: disorient 2+ players OR break an overwatching cluster.
-                // Never catch allies in the blast radius.
+                // FLASH — a BERSERKER (or any flash-carrier) blinds a CLUSTER of 2+ soldiers to
+                // strip their overwatch/aim right before charging in. Only when it genuinely hits
+                // 2+ and catches NO ally (BestFlash counts the thrower among allies, so a blast
+                // adjacent to e itself is vetoed). It fires reliably when the cluster exists — a
+                // pre-charge tool, not a coin flip — with a small damper so it isn't fully scripted.
                 var (fx, fy, flashHits, flashAllies) = BestFlash(g, e, bestTile.x, bestTile.y);
-                if (flashHits >= 2 && flashAllies == 0)
+                if (flashHits >= 2 && flashAllies == 0 && Util.Roll(80))
                 {
                     plan.UseItem = true; plan.ItemTx = fx; plan.ItemTy = fy;
                     plan.ShootTarget = null;   // flash takes the action (like grenade)
@@ -446,8 +516,44 @@ public static class Ai
             }
         }
 
+        // AI uses SHOVE (Wave 5): a rusher (BERSERKER/BRUISER/HUNTER) or any LEGION-faction enemy that
+        // ends adjacent to a soldier in COVER can shove it OUT of cover -- exposing it for the pod to
+        // finish, or slamming it for collision damage if it's pinned. Turns the player's own forced-
+        // movement verb against them; thematically the Legion rush. A setup play: it REPLACES a (weak,
+        // cover-reduced) shot at that target only when the shove meaningfully exposes it (slides it to a
+        // less-covered tile) or is blocked (collision). Bounded -- the exec spends the action (no loop /
+        // no TIMEOUT); never the VIP/captive. Considered only with a spare action after moving.
+        if (plan.ShoveTarget == null && plan.SapTile == null && !plan.Grenade && !plan.UseItem
+            && plan.MoveActions < 2)
+        {
+            bool rusher = e.Cls == "BERSERKER" || e.Cls == "BRUISER" || e.Cls == "HUNTER"
+                          || Combat.MissionFaction == Faction.Legion;
+            if (rusher)
+            {
+                foreach (var p in g.AlivePlayers())
+                {
+                    if (p.Cls == "VIP") continue;                                  // never shove the asset
+                    if (Util.ChebyDist(bestTile.x, bestTile.y, p.X, p.Y) != 1) continue;   // adjacent only
+                    var cur = g.Grid.GetCover(p.X, p.Y, bestTile.x, bestTile.y);
+                    if (cur.Level == 0) continue;                                  // already exposed -> just shoot it
+                    int sdx = Math.Sign(p.X - bestTile.x), sdy = Math.Sign(p.Y - bestTile.y);
+                    int nx = p.X + sdx, ny = p.Y + sdy;
+                    bool inb = g.Grid.InBounds(nx, ny);
+                    bool slides = inb && g.Grid.IsFloor(nx, ny)
+                                  && g.Grid.GetCover(nx, ny, bestTile.x, bestTile.y).Level < cur.Level;  // shove exposes it
+                    bool pinned = !inb || !g.Grid.IsFloor(nx, ny);                                        // pinned -> collision
+                    if (slides || pinned)
+                    {
+                        plan.ShoveTarget = p;
+                        plan.ShootTarget = null;   // the shove takes the action
+                        break;
+                    }
+                }
+            }
+        }
+
         // if no shot is possible and we still have an action after moving, hunker/overwatch
-        if (plan.ShootTarget == null && !plan.Grenade && plan.SapTile == null && !plan.UseItem)
+        if (plan.ShootTarget == null && !plan.Grenade && plan.SapTile == null && !plan.UseItem && plan.ShoveTarget == null)
         {
             int spent = plan.MoveActions;
             if (spent < 2)
@@ -537,6 +643,34 @@ public static class Ai
             { bestHits = hits; bestAllies = allies; bx = p.X; by = p.Y; }
         }
         return (bx, by, bestHits, bestAllies);
+    }
+
+    // CROSSFIRE test (AI improvement 1): true when firing on target `tgt` from candidate tile
+    // (cx,cy) forms a crossfire with at least one OTHER living enemy that already has line-of-
+    // sight to `tgt` from a meaningfully DIFFERENT angle. "Different angle" mirrors the new
+    // (symmetric) CROSSFIRE combat bonus: the two firing vectors (tgt - candidate) and
+    // (tgt - e2) diverge by more than ~72deg, i.e. their normalised dot < 0.30. Computed locally
+    // (no Combat reference) so Ai.cs compiles standalone. Self is excluded; e2 must be active and
+    // in its own weapon range (a vector from an ally that can't actually shoot isn't a real pincer).
+    // Degenerate zero-length vectors (an ally or the candidate sharing the target's tile) are
+    // skipped — they have no defined angle.
+    static bool CrossfireWith(Game g, Unit self, int cx, int cy, Unit tgt)
+    {
+        float v1x = tgt.X - cx, v1y = tgt.Y - cy;
+        float m1 = MathF.Sqrt(v1x * v1x + v1y * v1y);
+        if (m1 < 0.001f) return false;                       // candidate on the target: no angle
+        foreach (var e2 in g.AliveEnemies())
+        {
+            if (e2 == self || !e2.Active) continue;
+            if (Util.TileDist(e2.X, e2.Y, tgt.X, tgt.Y) > e2.Weapon.MaxRange) continue;
+            if (!g.Grid.HasLineOfSight(e2.X, e2.Y, tgt.X, tgt.Y)) continue;
+            float v2x = tgt.X - e2.X, v2y = tgt.Y - e2.Y;
+            float m2 = MathF.Sqrt(v2x * v2x + v2y * v2y);
+            if (m2 < 0.001f) continue;                       // ally on the target: no angle
+            float cos = (v1x * v2x + v1y * v2y) / (m1 * m2);
+            if (cos < 0.30f) return true;                    // vectors diverge > ~72deg -> crossfire
+        }
+        return false;
     }
 
     // odds as if attacker stood at (ax,ay)

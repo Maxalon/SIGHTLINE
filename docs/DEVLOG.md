@@ -490,3 +490,105 @@ PROCESS: the SHOVE worktree dev was interrupted by a worker restart mid-verify; 
 (7 files, ~375 lines) was recovered from the worktree and verified by the orchestrator (SHOVETEST/COMBATTEST PASS,
 12/12 autoplay clean) — the same recover-from-worktree fallback used in prior sessions. PUSH + perk-trees are now
 DONE; remaining future work: squad draft at run start, animation-speed toggle, AI use of SHOVE.
+
+---
+
+## PROGRAM "KEYSTONE" — decisions that matter, from run-open to each turn (fresh autonomous session)
+
+Run as orchestrator + parallel dev agents (isolated worktrees, strictly disjoint files) + read-only
+research/audit + reviewer agents + the `SIGHTLINE_BALANCE` flywheel. Branch `claude/adoring-lovelace-2f6q3c`.
+A 3-agent research fan-out (decision-quality auditor / opportunity scout / balance analyst) converged on:
+(1) the **per-turn decision space is thin** (~2 real options — "shoot best target / reposition"; anti-turtle
+is offloaded onto the enemy AI, the player has no positive advance reward); (2) the **run opening, the
+between-mission economy, and enemy identity are decision-thin**; (3) **measured gates**: mission-1 lost 20% of
+the time (a heat-3/4 alpha-strike on the green opener — a hard cap on a geometric-product run-completion), and
+the harness couldn't show the Heat ladder's *shape* (per-mission byHeat is survivorship-skewed).
+
+### Wave 1 — balance + measurement foundations (tech-lead-driven, measured)
+- **Run-completion-by-heat metric** (`Stats.cs` text + JSON `byHeatRun`) — the ladder's true shape, distinct
+  from the survivorship-skewed per-mission byHeat.
+- **Early-mission heat grace** (`Game.SetupMission`): ramp Heat's extra bodies/stats in over missions 1-3
+  (m1 ×0, m2 ×½, m3+ full) so a green 4-rookie squad doesn't eat a heat-3/4 alpha-strike on the cold opener.
+  **MEASURED: mission-1 win-rate 80% → 100%** via the flywheel. Card deltas + the per-mission growth curve are
+  untouched; heat 0 stays a true no-op.
+- *Considered + REVERTED:* a Sniper crit trim (20→15) to flatten SHARPSHOOTER dominance — the data showed it
+  only narrowed the kill gap 2×→1.4× (the real edge is 94% hit + a positive range curve, not crit) while
+  possibly costing squad DPS, so it was reverted; class balance is better solved by crossfire + the draft +
+  role value than a blunt crit nerf.
+
+### Wave 2 — per-turn tactical depth (3 parallel disjoint-file devs + orchestrator wiring + reviewer)
+| Item | Owner | Files | Outcome |
+|---|---|---|---|
+| CROSSFIRE / converging-fire bonus | Dev A | `Combat` | A target threatened by 2+ same-team attackers from angles diverging >~72° takes +10 aim/+10 crit (it can't use cover against both). Symmetric, via a static `Combat.AllUnits` roster read in `ComputeOdds` (the `RunBoons` pattern; set by `Game.RefreshCombatRoster`). `ShotOdds.Crossfire` + `+ CROSSFIRE` tooltip badge. Rewards pincering over stacking one firing line — the thinnest pillar. |
+| Smarter enemy AI | Dev C | `Ai` | Enemies seek crossfire/exposing angles, use SMOKE to cover advances / cross overwatch lanes + FLASH on 2+ clusters proactively (reason-driven, not a tic), sharper lethal-EV targeting that defers to squad focus. |
+| Anim-speed toggle (F2, 1x/2x/3x) + SHOVE reach-2 | Dev B | `Game` | Long-requested QoL (byte-stable at default 1x) + the forced-movement verb now targets within Chebyshev 2. |
+| Wiring + tooltip badge | orch | `Game`,`Hud` | `RefreshCombatRoster` (per-mission + Defend waves); `+ CROSSFIRE` badge. |
+
+Disjoint files {Combat}|{Ai}|{Game} → clean file-copy integration; Game.cs took Dev B's diff via `git apply`
+onto the Wave-1 grace commit (different regions). **QA: build 0/0; all 13 self-tests PASS** (COMBATTEST now
+covers crossfire, SHOVETEST reach-2, AITEST the AI changes); **independent reviewer APPROVE-WITH-NITS** (no
+blockers; crossfire math/lifecycle, AI no-TIMEOUT, anim-speed inertness, shove reach all verified). **Balance
+flywheel (N=30, heat 0-4): run completion 47% (vs ~50% baseline), heat-0 83%, declining ladder, all
+per-mission 81-97% / per-objective 81-100%** — depth + a smarter opponent added WITHOUT cratering
+completability; the reviewer's "symmetric crossfire favors the numerically-superior enemy" worry was checked
+against the data (enemies don't get the player-only +25 ambush, and heat-0 stayed at 83%), so crossfire kept
+symmetric.
+
+### Wave 3 — run-opening squad DRAFT (+ crossfire visual) [SHIPPED]
+Before mission 1, the player drafts a strike team: pick 4 of 6 generated operators (class/weapon/stats/ability
+shown) + a STARTING DOCTRINE (boon), with the first mission's objective/heat previewed — the run gets a thesis
+from turn 0 (pillars 4 + 5). One feature-owner dev (Run/Game/Hud); gated OUT of the harness via `!NoPersist`
+(autoplay/balance/shot call StartMission directly, never `Phase.Draft`). Integrated via a 3-way cherry-pick (the
+draft worktree branched off the pre-KEYSTONE base; Game/Hud auto-merged). Plus a parallel disjoint dev: an
+on-board CROSSFIRE visual indicator (Renderer.cs) — converging-fire prongs while aiming a pincered enemy.
+`SIGHTLINE_DRAFTTEST`. Verified: build 0/0, DRAFTTEST/SAVETEST/COMBATTEST PASS, autoplay clean, draft screen
+screenshot.
+
+### Wave 4 — enemy FACTIONS [SHIPPED, 2-phase]
+The ~14 archetypes become 3 readable opponents, each warping POSITIONING (not flat stats): SYNDICATE (tech) —
+enemy attackers see over LOW cover (counter: high cover/elevation); LEGION (assault) — enemies +12 aim/+12 crit
+within close range (counter: kite/kill on approach); WARDENS (precision) — enemies +12 aim at long range
+(counter: close/break LoS). Phase 1 (a dev, Mission+Combat): faction enum + rosters + the 3 ComputeOdds rules
+(all gated `a.Team==Enemy`) + faction-gated `SelectArchetype`, a SAFE NO-OP until wired (`MissionFaction==None`
+== today). Phase 2 (tech-lead, Run/Game/Hud): `MissionNode.Faction` assigned per Combat/Elite node from the
+seeded rng (round-trips on load), `Combat.MissionFaction` set in `SetupMission`, the banner + a faction-named
+HOSTILES counter + the campaign-map hint telegraph it. **Integration was the riskiest of the program:** the
+faction-foundation worktree branched off the PRE-crossfire base, so its Combat.cs was cherry-picked onto the
+crossfire trunk with 4 manual conflict resolutions keeping BOTH crossfire + factions (verified by COMBATTEST's
+combined PASS string + an independent review). Also de-flaked the COMBATTEST graze band (a dist-4 +6-RangeMod
+centering bug). `SIGHTLINE_MISSION` shows e.g. "STEEL - WARDENS".
+
+### Wave 5 — the enemy AI uses SHOVE [SHIPPED]
+Completes the smarter-opponent theme + gives LEGION a signature move: a rusher (BERSERKER/BRUISER/HUNTER) or
+any Legion enemy adjacent to a soldier in COVER shoves it out of cover to expose it for the pod (or collides it
+if pinned) — the player's own Wave-2 forced-movement verb turned against them. `Ai.Plan` sets
+`EnemyPlan.ShoveTarget` (only when the shove meaningfully exposes / is blocked, replacing a weak cover-reduced
+shot); `Game.UpdateEnemy` execs it via the player's `ShoveAnim` (action spent -> bounded, no TIMEOUT).
+Tech-lead-driven directly (Game.cs was heavily edited this program -> a worktree merge was the bigger risk).
+Build 0/0, SHOVETEST/AITEST/COMBATTEST PASS, autoplay x8 clean.
+
+### Independent reviews (3 rounds) + measured balance
+Crossfire (Wave 2): APPROVE-WITH-NITS (math/lifecycle/no-TIMEOUT/byte-stability all verified). Draft+factions
+(Wave 3+4): APPROVE-WITH-NITS — the 3-way merge correctness + the draft harness-gate (the two highest-risk
+spots) both confirmed sound; nits (stale-faction reset, draft variety, a dead-line that was actually live)
+applied as a polish commit. The `SIGHTLINE_BALANCE` flywheel measured every step: m1 80%->100% (heat grace);
+Wave 2 run-completion 47% (heat-0 83%) — depth + smarter AI without cratering; Wave 4 factions 43% (per-mission
+86-97%, all objectives 71-100%) — modest, well-tuned added difficulty, still winnable.
+
+### Process learnings (KEYSTONE)
+1. **The worktree base is unpredictable** — agents launched BEFORE the first push branched off the pre-KEYSTONE
+   base (4de6fc9); those launched after branched off the pushed HEAD. ALWAYS check `git merge-base <devcommit>
+   HEAD` + grep the dev's file for the expected recent symbols before integrating; a file-copy is only safe when
+   the dev's base == current trunk, else 3-way cherry-pick and resolve.
+2. **A cherry-pick onto a heavily-edited hot file (Game.cs) is riskier than doing the coupled work directly** —
+   so the draft (Run/Game/Hud, off a clean-ish base) went via dev+cherry-pick, but AI-shove (Game.cs, after many
+   tech-lead edits) was done directly to avoid a fragile merge.
+3. **Build-verify on a FRESH binary** — `dotnet run --no-build` silently uses the stale assembly; a green test on
+   a stale binary masked a real Hud.cs build break (a "dead line" the reviewer flagged was actually an if/else-if
+   head). Always rebuild before trusting a self-test after an edit.
+4. **Reviewer nits are hypotheses, not facts** — the "dead line" nit would have shipped a build break if applied
+   blindly; the compiler is the arbiter.
+
+**KEYSTONE TOTAL: 5 waves, ~12 commits, ~10 agents (3 research + 5 dev + 2 review) — heat grace + run-completion
+metric, crossfire + smarter AI + anim-speed + shove-reach + crossfire visual, squad draft, enemy factions, and
+AI-uses-shove — all measured by the flywheel, 3 review rounds, 14 self-tests green, on PR #56.**

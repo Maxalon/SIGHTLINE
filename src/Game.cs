@@ -6,7 +6,7 @@ using Raylib_cs;
 
 namespace Sightline;
 
-public enum Phase { Intro, PlayerTurn, EnemyTurn, Barracks, Win, Lose }
+public enum Phase { Intro, PlayerTurn, EnemyTurn, Barracks, Win, Lose, Draft }
 public enum Objective { Eliminate, Evac, Hack, Escort, Sabotage, Rescue, Defend, Decapitate }
 public enum SecondaryKind { None, NoLosses, Swift, CleanSweep }  // optional per-mission bonus goal (3.9)
 enum AiStage { PickNext, Telegraph, ActAfterMove }
@@ -23,6 +23,14 @@ public class Game
 
     readonly List<Anim> _anims = new();
     public Anim ActiveAnim => _anims.Count > 0 ? _anims[0] : null;
+
+    // Animation-speed toggle (QoL fast-forward). A player-cyclable multiplier (1x/2x/3x) that
+    // scales ONLY the animation-queue stepping (move steps / shots / grenades / shove) and the
+    // hit-stop decay — NOT the whole game tick, so the autopilot/timers/sim are unaffected.
+    // Default 1f, and nothing reads it unless the key is pressed, so the headless screenshot
+    // path stays byte-stable and the autoplay smoke test is unchanged.
+    public float AnimSpeed = 1f;
+    public void CycleAnimSpeed() { AnimSpeed = AnimSpeed >= 3f ? 1f : AnimSpeed + 1f; }
 
     // selection / hover
     public Unit Selected;
@@ -74,6 +82,9 @@ public class Game
     // key + every mode-reset site). ShoveTarget is the hovered adjacent enemy (null = no valid
     // target under the cursor); ShoveValid gates the click. Costs 1 action, never ends the turn,
     // 1 use per soldier per turn (Unit.ShovedThisTurn) — bounded, no infinite reposition loop.
+    // Reach is Chebyshev <= ShoveReach (2) so it's usable at typical engagement range, not just
+    // point-blank; the PUSH is still a single tile directly away from the shover.
+    public const int ShoveReach = 2;
     public bool ShoveMode;
     public Unit ShoveTarget;
     public bool ShoveValid;
@@ -335,6 +346,75 @@ public class Game
     // AddBloom is called alongside AddHitStop; magnitude maps s (0.1 normal, 0.4 kill-cam) -> bloom.
     public void AddBloom(float s) { _postFxBloom = MathF.Min(1f, _postFxBloom + s * 2.2f); }
 
+    // ---------------- run-opening squad draft (Wave 3) ----------------
+    // The interactive new-run path (intro / post-run) routes through a DRAFT screen where the
+    // player picks a founding squad + a starting boon. These hold the in-progress / confirmed
+    // picks; both default null so the harness path (StartMission called DIRECTLY, bypassing the
+    // intro) uses the fixed default squad and no starting boon — byte-stable + no TIMEOUT.
+    public List<Unit> DraftPool = new();        // the 6 candidate recruits on offer
+    public List<Boon> DraftBoonOffer = new();   // the 3 starting boons on offer
+    public HashSet<Unit> DraftPicked = new();   // candidates currently selected
+    public Boon? DraftSelectedBoon;             // the selected starting boon (null until chosen)
+    public const int DraftCap = 4;              // founding core size (roster still backfills to 6 over the run)
+    // Threaded into StartMission's new Run on CONFIRM (then cleared back to null/empty):
+    public List<Unit> DraftedSquad;             // the confirmed 4 picked Units (null = default squad)
+    public Boon? DraftBoon;                     // the confirmed starting boon (null = none)
+
+    /// Set up + enter the run-opening DRAFT (interactive new-run path only). Builds the candidate
+    /// pool + the starting-boon offer and switches to Phase.Draft. NEVER called by the harness
+    /// (the autoplay/balance/screenshot paths call StartMission directly).
+    public void BeginDraft()
+    {
+        DraftPool = Run.GenerateDraftPool();
+        DraftBoonOffer = Run.GenerateDraftBoonOffer();
+        DraftPicked = new HashSet<Unit>();
+        DraftSelectedBoon = null;
+        Phase = Phase.Draft;
+        Audio.Play("select");
+    }
+
+    /// Draft input: toggle a candidate (cap DraftCap), single-select a boon, CONFIRM when valid.
+    void HandleDraftClick()
+    {
+        var m = Raylib.GetMousePosition();
+        if (Raylib.IsMouseButtonPressed(MouseButton.Left))
+        {
+            // candidate cards
+            foreach (var (unit, rect) in Hud.DraftCardBtns)
+            {
+                if (!Raylib.CheckCollisionPointRec(m, rect)) continue;
+                if (DraftPicked.Contains(unit)) DraftPicked.Remove(unit);
+                else if (DraftPicked.Count < DraftCap) DraftPicked.Add(unit);
+                Audio.Play("select");
+                return;
+            }
+            // boon cards (single-select)
+            foreach (var (boon, rect) in Hud.DraftBoonBtns)
+            {
+                if (!Raylib.CheckCollisionPointRec(m, rect)) continue;
+                DraftSelectedBoon = boon;
+                Audio.Play("select");
+                return;
+            }
+            // confirm
+            if (DraftReady && Raylib.CheckCollisionPointRec(m, Hud.DraftConfirm)) { ConfirmDraft(); return; }
+        }
+        // keyboard: Enter deploys when the draft is complete
+        if (DraftReady && Raylib.IsKeyPressed(KeyboardKey.Enter)) ConfirmDraft();
+    }
+
+    /// True when exactly DraftCap soldiers and one boon are chosen (CONFIRM/Enter enabled).
+    public bool DraftReady => DraftPicked.Count == DraftCap && DraftSelectedBoon.HasValue;
+
+    /// Finalize the draft: stage the picks, then run the SAME new-run start the intro would have.
+    void ConfirmDraft()
+    {
+        DraftedSquad = new List<Unit>(DraftPicked);
+        DraftBoon = DraftSelectedBoon;
+        Audio.Play("turn");
+        StartMission();   // threads DraftedSquad/DraftBoon into the new Run, then clears them
+    }
+
     // ---------------- lifecycle ----------------
     /// Start a brand-new campaign run (called from intro / after a run ends).
     /// startAt lets the headless harness jump straight to a given mission.
@@ -342,7 +422,9 @@ public class Game
     {
         EnsureMetaLoaded();
         _run = new Run();
-        _run.Start();                       // builds the campaign map, seats at the START node
+        _run.Start(DraftedSquad);           // builds the campaign map, seats at the START node (drafted squad if any)
+        if (DraftBoon.HasValue) _run.ActiveBoons.Add(DraftBoon.Value);   // adopt the chosen starting boon
+        DraftedSquad = null; DraftBoon = null;   // consumed: the harness path leaves these null (default squad)
         // adopt the dialled-in Heat for this run. The harness can't set PendingHeat (it doesn't
         // touch the intro), so it reads SIGHTLINE_HEAT here instead — defaulting to 0 so plain
         // autoplay/screenshots are byte-stable.
@@ -448,9 +530,26 @@ public class Game
         // Heat folds into the SAME difficulty params the deployment cards use (no Mission.cs
         // signature change): extra bodies + an extra stat bump as the ladder climbs.
         int heat = _run.HeatLevel;
-        int enemyDelta = card.EnemyDelta + Sightline.Heat.EnemyDelta(heat);
+        int heatEnemy = Sightline.Heat.EnemyDelta(heat);
+        int heatStat  = Sightline.Heat.StatDelta(heat);
+        // EARLY-MISSION HEAT GRACE. The measured ~20% mission-1 loss (which hard-caps run
+        // completion, a geometric product) was almost entirely a heat-3/4 alpha-strike on the
+        // COLD OPENER: Heat adds +2 bodies / +2 stat to a force a green 4-rookie squad meets
+        // before it has earned a single promotion, perk, or boon. Ramp Heat's contribution in
+        // over the first missions so the ladder bites once the squad can answer it (m1 x0, m2
+        // x1/2, m3+ full). Card deltas and the per-mission growth curve (Mission.cs) are
+        // untouched — only Heat's extra bodies/stats ramp. Heat 0 stays a true no-op.
+        if (n <= 1)      { heatEnemy = 0; heatStat = 0; }
+        else if (n == 2) { heatEnemy /= 2; heatStat /= 2; }
+        int enemyDelta = card.EnemyDelta + heatEnemy;
         // adaptive assist eases the force-wide enemy stat bump (base Heat only; 0 otherwise).
-        int statDelta = card.StatDelta + Sightline.Heat.StatDelta(heat) - _run.AssistStatRelief;
+        int statDelta = card.StatDelta + heatStat - _run.AssistStatRelief;
+
+        // Enemy FACTIONS (Wave 4): set the active mission's faction so BOTH the faction-gated spawn
+        // roster (Mission.SelectArchetype) AND the faction combat rule (Combat.ComputeOdds) take effect
+        // this mission. Read from the campaign node; None on START/SUPPLY/BOSS (mixed force) and any
+        // non-campaign path. MUST be set BEFORE Mission.Build — SelectArchetype reads it at spawn time.
+        Combat.MissionFaction = _run.CurrentNode?.Faction ?? Faction.None;
 
         // reserve + connectivity-verify a key tile: the Hack terminal, or the Rescue captive's seat
         (int x, int y)? reserve = HasTerminal ? Terminal
@@ -473,6 +572,12 @@ public class Game
             Vip.SyncPos();
         }
         if (Objective == Objective.Decapitate) DesignateHvt();
+        // CROSSFIRE (Wave 2): expose the full live roster to Combat.ComputeOdds so it can see an
+        // attacker's squadmates (the converging-fire bonus) without threading the list through every
+        // call — the same static-state pattern as Combat.RunBoons. Rebuilt per mission here; InCrossfire
+        // guards on Alive, so dead units left in the list are harmless. RefreshCombatRoster() re-snaps it
+        // when the roster grows mid-mission (Defend reinforcement waves).
+        RefreshCombatRoster();
         Fx.Particles.Clear();
         Fx.Texts.Clear();
         _anims.Clear();
@@ -501,7 +606,8 @@ public class Game
         ItemMode = false;
         ShoveMode = false;
         Biome = Biome.For(n, _run.MapSeed);   // per-run biome variety (surfaces NEON/MAGMA across seeds)
-        ShowBanner($"MISSION {n} - {Biome.Name}", false);
+        string facTag = Combat.MissionFaction != Faction.None ? $" - {Run.FactionName(Combat.MissionFaction)}" : "";
+        ShowBanner($"MISSION {n} - {Biome.Name}{facTag}", false);
         StartTutorialMaybe();
 
         // checkpoint the run at the start of each mission (normal play only)
@@ -732,24 +838,26 @@ public class Game
         if (e2.Hp >= hp0) fails.Add($"blockedShoveNoDamage(hp={e2.Hp})");
         if (!e2.Alive && e2.Hp > 0) fails.Add("blockedShoveDeathInconsistent");
 
-        // ---- (3) CanShove gating ----
+        // ---- (3) CanShove gating (reach 2) ----
         Players = new System.Collections.Generic.List<Unit>();
         Enemies = new System.Collections.Generic.List<Unit>();
         var p3 = MkP(5, 5);
         Players.Add(p3);
         if (CanShove(p3)) fails.Add("canShoveWithNoEnemy");      // no enemy anywhere
-        var eFar = MkE(15, 9); Enemies.Add(eFar);
-        if (CanShove(p3)) fails.Add("canShoveWithFarEnemy");     // enemy not adjacent
-        var eAdj = MkE(6, 5); Enemies.Add(eAdj);
+        var eFar = MkE(8, 5); Enemies.Add(eFar);                // Chebyshev 3 east -> beyond reach 2
+        if (CanShove(p3)) fails.Add("canShoveWithFarEnemy");     // enemy out of shove reach
+        if (ShoveTargetOk(p3, eFar)) fails.Add("farEnemyValidTarget");
+        var eAdj = MkE(6, 5); Enemies.Add(eAdj);                // Chebyshev 1 east -> adjacent
         if (!CanShove(p3)) fails.Add("cannotShoveWithAdjacentEnemy");
         if (!ShoveTargetOk(p3, eAdj)) fails.Add("adjacentEnemyNotValidTarget");
-        if (ShoveTargetOk(p3, eFar)) fails.Add("farEnemyValidTarget");
+        var eReach2 = MkE(7, 7); Enemies.Add(eReach2);          // Chebyshev 2 (diagonal) -> within reach
+        if (!ShoveTargetOk(p3, eReach2)) fails.Add("reach2EnemyNotValidTarget");
         // once shoved this turn, CanShove must be false (anti-loop / 1-per-turn cap)
         p3.ShovedThisTurn = true;
         if (CanShove(p3)) fails.Add("canShoveTwiceInOneTurn");
 
         return fails.Count == 0
-            ? "SHOVETEST: PASS (clear shove moves + breaks overwatch/hunker; blocked shove damages + holds; CanShove gates adjacency + 1/turn)"
+            ? "SHOVETEST: PASS (reach 2: clear shove moves + breaks overwatch/hunker; blocked shove damages + holds; CanShove gates Chebyshev<=2 + 1/turn)"
             : "SHOVETEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
@@ -1125,6 +1233,7 @@ public class Game
 
     void EnterBarracks()
     {
+        Combat.MissionFaction = Faction.None;   // defensive: clear the mission faction between missions (re-set in SetupMission) so no stale value can warp a barracks-phase odds read
         // a benched soldier sat this mission out: it's still in _run.Squad (flagged) but was
         // never in Players, so it's absent from AlivePlayers(). Preserve it across the rebuild,
         // or benching would silently destroy the veteran (review Blocker 1).
@@ -1214,6 +1323,7 @@ public class Game
     /// End the run as a loss and clear the checkpoint so the intro stops offering CONTINUE.
     void LoseRun(string title, string reason)
     {
+        Combat.MissionFaction = Faction.None;   // defensive: clear the mission faction on run end (re-set next SetupMission)
         LoseTitle = title;
         LoseReason = reason;
         Phase = Phase.Lose;
@@ -1613,6 +1723,7 @@ public class Game
 
         if (Raylib.IsKeyPressed(KeyboardKey.M)) Audio.ToggleMute();
         if (!AutoPlay && Raylib.IsKeyPressed(KeyboardKey.F)) Display.ToggleFullscreen();
+        if (!AutoPlay && Raylib.IsKeyPressed(KeyboardKey.F2)) CycleAnimSpeed();   // fast-forward anim pacing (1x/2x/3x)
         Audio.SetMusicIntensity(MusicIntensity());
         UpdateTutorial(dt);
         Fx.UpdateAmbient(Biome, dt);   // per-biome ambient atmosphere (Wave B)
@@ -1637,7 +1748,7 @@ public class Game
             1f + (biomeT.B - 60) * invBase * 0.04f);
         Display.SetPostFxParams(_postFxBloom, _postFxBloom * 0.55f, grade);
 
-        if (HitStop > 0) { HitStop -= dt; return; }
+        if (HitStop > 0) { HitStop -= dt * AnimSpeed; return; }   // fast-forward shortens the hit-stop freeze too
 
         // pause/settings overlay + camera controls (live play only, never in autoplay)
         if (!AutoPlay && (Phase == Phase.PlayerTurn || Phase == Phase.EnemyTurn))
@@ -1673,7 +1784,9 @@ public class Game
             // overwatch reaction can kill the moving unit (removing `a` itself) or empty the queue.
             // So only pop index 0 when `a` is genuinely still at the front — never RemoveAt(0) on an
             // emptied/reordered queue (that was an intermittent IndexOutOfRange crash deep in a batch).
-            bool done = a.Update(this, t);
+            // Scale ONLY the anim-stepping dt by AnimSpeed (default 1f = unchanged) — this fast-forwards
+            // the visual playback without touching the autopilot/sim timers elsewhere in Update.
+            bool done = a.Update(this, t * AnimSpeed);
             if (done && _anims.Count > 0 && _anims[0] == a) _anims.RemoveAt(0);
             return;
         }
@@ -1710,6 +1823,7 @@ public class Game
                 break;
             case Phase.Win:
             case Phase.Lose: HandleOverlayClick(); break;
+            case Phase.Draft: HandleDraftClick(); break;
         }
 
         CheckEnd();
@@ -3397,24 +3511,24 @@ public class Game
 
     // ---- SHOVE (forced-movement verb) ----
     /// Can the selected soldier shove right now? Needs an action, no shove spent this turn,
-    /// and at least one alive enemy standing Chebyshev-adjacent.
+    /// and at least one alive enemy standing within ShoveReach (Chebyshev <= 2).
     public bool CanShove(Unit u)
     {
         if (u == null || u.Team != Team.Player || !u.CanAct || u.ShovedThisTurn) return false;
         foreach (var e in Enemies)
-            if (e.Alive && Util.ChebyDist(u.X, u.Y, e.X, e.Y) <= 1) return true;
+            if (e.Alive && Util.ChebyDist(u.X, u.Y, e.X, e.Y) <= ShoveReach) return true;
         return false;
     }
 
-    /// Is `target` a legal shove target for `u`? An alive enemy exactly one tile away
-    /// (Chebyshev 1, never the same tile), with the shover able + not having shoved yet.
+    /// Is `target` a legal shove target for `u`? An alive enemy within ShoveReach tiles
+    /// (Chebyshev <= 2, never the same tile), with the shover able + not having shoved yet.
     bool ShoveTargetOk(Unit u, Unit target)
     {
         if (u == null || target == null || !u.CanAct || u.ShovedThisTurn) return false;
         if (!target.Alive || target.Team != Team.Enemy) return false;
         int dx = target.X - u.X, dy = target.Y - u.Y;
         if (dx == 0 && dy == 0) return false;
-        return Math.Abs(dx) <= 1 && Math.Abs(dy) <= 1;   // Chebyshev-adjacent
+        return Math.Abs(dx) <= ShoveReach && Math.Abs(dy) <= ShoveReach;   // within shove reach
     }
 
     void ToggleShove()
@@ -3672,8 +3786,14 @@ public class Game
             Fx.Burst(e.Pos, Pal.Foe, 14, 160f, 0.5f, 3f, true);
             added++;
         }
-        if (added > 0) { Fx.PopText(Util.TileCenter(Grid.W - 2, 0) + new Vector2(0, -10), "WAVE", Pal.Foe, 20f); Audio.Play("turn"); }
+        if (added > 0) { Fx.PopText(Util.TileCenter(Grid.W - 2, 0) + new Vector2(0, -10), "WAVE", Pal.Foe, 20f); Audio.Play("turn"); RefreshCombatRoster(); }
     }
+
+    /// CROSSFIRE wiring: re-snapshot the full live roster into Combat.AllUnits so ComputeOdds'
+    /// converging-fire check sees every unit (both teams). Called per mission and whenever the
+    /// roster grows mid-mission (Defend waves). Cheap; the list is tiny.
+    void RefreshCombatRoster() =>
+        Combat.AllUnits = new List<Unit>(Players.Where(u => u != null).Concat(Enemies.Where(u => u != null)));
 
     /// AEGIS shields re-face toward the nearest soldier each enemy turn, so the squad
     /// must keep moving to flank the barrier rather than parking on one open side.
@@ -3932,6 +4052,20 @@ public class Game
                         Enqueue(new SmokeAnim(e, _aiPlan.ItemTx, _aiPlan.ItemTy), Team.Enemy);
                     else
                         Enqueue(new FlashAnim(e, _aiPlan.ItemTx, _aiPlan.ItemTy), Team.Enemy);
+                }
+                else if (_aiPlan.ShoveTarget != null && _aiPlan.ShoveTarget.Alive && e.ActionsLeft > 0 &&
+                    !_aiPlan.ShoveTarget.IsVip &&
+                    Util.ChebyDist(e.X, e.Y, _aiPlan.ShoveTarget.X, _aiPlan.ShoveTarget.Y) == 1)
+                {
+                    // AI SHOVE (Wave 5): slam an adjacent covered soldier 1 tile to expose it (or deal
+                    // collision damage if it's pinned). Reuses the player's ShoveAnim verbatim; the action
+                    // is spent here (no TIMEOUT). The exposed soldier is then a soft target for the pod.
+                    e.ActionsLeft = 0;
+                    var t = _aiPlan.ShoveTarget;
+                    int sdx = Math.Sign(t.X - e.X), sdy = Math.Sign(t.Y - e.Y);
+                    Fx.PopText(e.Pos + new Vector2(0, -30), "SHOVE", Pal.Foe, 16f);
+                    Enqueue(new WaitAnim(0.15f), Team.Enemy);
+                    Enqueue(new ShoveAnim(e, t, sdx, sdy), Team.Enemy);
                 }
                 else if (_aiPlan.ShootTarget != null && _aiPlan.ShootTarget.Alive &&
                     e.ActionsLeft > 0 && e.Ammo > 0 && CanTarget(e, _aiPlan.ShootTarget))
@@ -4485,6 +4619,48 @@ public class Game
             : "COVERTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
+    /// Headless self-test (SIGHTLINE_DRAFTTEST): the run-opening squad-draft plumbing.
+    /// (a) GenerateDraftPool returns DraftPoolSize recruits with class variety (<=2/class);
+    /// (b) a drafted founding squad + a starting boon seats EXACTLY those Units + the boon
+    /// active via Run.Start(picked)+ActiveBoons; (c) Run.Start(null) keeps the fixed default
+    /// NewRunSquad (the harness path is unchanged). Window-free (no Raylib, no disk).
+    public static string DraftSelfTest()
+    {
+        var fails = new List<string>();
+
+        // (a) pool size + class variety
+        var pool = Run.GenerateDraftPool();
+        if (pool.Count != Run.DraftPoolSize) fails.Add($"poolSize={pool.Count}(want{Run.DraftPoolSize})");
+        var byCls = new Dictionary<string, int>();
+        foreach (var u in pool) { byCls.TryGetValue(u.Cls, out int c); byCls[u.Cls] = c + 1; }
+        foreach (var kv in byCls) if (kv.Value > 2) fails.Add($"class {kv.Key}x{kv.Value}(>2)");
+        if (byCls.Count < 2) fails.Add($"variety={byCls.Count}(want>=2)");
+
+        // (b) a drafted core of DraftCap + a chosen starting boon seats exactly those + the boon
+        var picked = new List<Unit>();
+        for (int i = 0; i < DraftCap && i < pool.Count; i++) picked.Add(pool[i]);
+        var run = new Run();
+        run.Start(picked);
+        run.ActiveBoons.Add(Boon.Marksmen);
+        if (run.Squad.Count != picked.Count) fails.Add($"draftCount={run.Squad.Count}(want{picked.Count})");
+        for (int i = 0; i < picked.Count; i++)
+            if (i >= run.Squad.Count || !ReferenceEquals(run.Squad[i], picked[i])) fails.Add($"draftSeat[{i}]");
+        if (!run.HasBoon(Boon.Marksmen)) fails.Add("boonNotActive");
+
+        // (c) the default (harness) path still yields the fixed NewRunSquad
+        var run2 = new Run();
+        run2.Start();
+        var def = Sightline.Mission.NewRunSquad();
+        if (run2.Squad.Count != def.Count) fails.Add($"defaultCount={run2.Squad.Count}(want{def.Count})");
+        else for (int i = 0; i < def.Count; i++)
+            if (run2.Squad[i].Name != def[i].Name || run2.Squad[i].Cls != def[i].Cls) fails.Add($"defaultSquad[{i}]");
+        if (run2.ActiveBoons.Count != 0) fails.Add($"defaultBoons={run2.ActiveBoons.Count}(want0)");
+
+        return fails.Count == 0
+            ? $"DRAFTTEST: PASS (pool={pool.Count} variety={byCls.Count}cls, drafted {picked.Count}+boon seated, default squad intact)"
+            : "DRAFTTEST: FAIL (" + string.Join(",", fails) + ")";
+    }
+
     void ChooseCard(int i)
     {
         if (i < 0 || i >= _run.Offers.Count) return;
@@ -4602,7 +4778,12 @@ public class Game
         if (!click && !enter) return;
 
         if (Phase == Phase.Barracks) NextMission();   // deploy to next mission
-        else StartMission();                           // intro / win / lose -> new run
+        // intro / win / lose -> new run. INTERACTIVELY this opens the run-opening DRAFT (pick a
+        // founding squad + starting boon). The harness NEVER reaches here (it calls StartMission
+        // DIRECTLY, bypassing the intro), but gate on !NoPersist defensively so the smoke test /
+        // balance batch can never enter Phase.Draft (which would have no autopilot path -> hang).
+        else if (!NoPersist) BeginDraft();
+        else StartMission();
     }
 
     // ---------------- draw ----------------
