@@ -2,6 +2,19 @@ using System;
 
 namespace Sightline;
 
+/// Enemy FACTIONS (Phase 4 foundation). A mission's hostiles all belong to ONE faction, which
+/// (a) restricts the spawn pool (Mission.FactionRoster) and (b) warps the combat math via a
+/// faction RULE that bends POSITIONING (not flat stats). The rule is an ENEMY-only trait — a
+/// player attacker is NEVER affected. `None` is the default and means EXACTLY today's behavior
+/// (the safety invariant: until Game.SetupMission sets Combat.MissionFaction, nothing changes).
+///   - Syndicate (tech/mechanized): an enemy attacker SEES OVER the target's LOW cover (negate it,
+///     like high ground) — counter with HIGH cover / elevation / staying mobile.
+///   - Legion (shock assault): an enemy attacker within close range (dist <= 4) gets +aim AND +crit
+///     (a closing-rush reward) — counter by kiting / killing them before they reach you.
+///   - Wardens (precision/control): an enemy attacker at long range (dist >= Unit.LongRange) gets
+///     +aim (precision back-line) — counter by closing / breaking line of sight.
+public enum Faction { None, Syndicate, Legion, Wardens }
+
 /// Precomputed odds for a shot from attacker -> defender.
 public struct ShotOdds
 {
@@ -63,7 +76,7 @@ public static class Combat
     public const int BoonFervorCrit = 30;  // FERVOR: +crit on overwatch reactions
     public const int BoonExecCrit  = 20;   // EXECUTIONERS: +crit vs sub-half-HP targets
 
-    // ---- CROSSFIRE: the live unit roster (both teams), set once per mission by Game.SetupMission
+    // ---- CROSSFIRE (Wave 2): the live unit roster (both teams), set once per mission by Game.SetupMission
     // (like RunBoons) so ComputeOdds can see an attacker's squadmates without a signature change.
     // Defaults empty -> crossfire is simply inert until Game populates it (existing callers/tests unaffected).
     public static System.Collections.Generic.IReadOnlyList<Unit> AllUnits = System.Array.Empty<Unit>();
@@ -77,6 +90,19 @@ public static class Combat
     const float CrossfireCosMax = 0.30f;
     // ...and the converging ally is a credible threat (has LoS and is within this range of the target).
     const float CrossfireAllyRange = 10f;
+
+    // ---- enemy FACTIONS (Wave 4 foundation) ----
+    // The active mission's enemy faction, set once per mission by Game.SetupMission (mirrors the
+    // RunBoons/AllUnits static pattern) so the static combat reads see it without threading state
+    // through every ComputeOdds call. DEFAULT None == today's behavior exactly (safety invariant).
+    // Each faction read below gates on `a.Team == Team.Enemy` so a PLAYER attacker is never warped.
+    public static Faction MissionFaction = Faction.None;
+    // Legion (shock assault): a closing enemy within close range hits harder. Modest — these stack
+    // with the whole existing model, so kept small to avoid a swingy point-blank one-shot.
+    public const int LegionCloseAim  = 12;   // +aim   for a Legion enemy attacker at dist <= 4
+    public const int LegionCloseCrit = 12;   // +crit  for a Legion enemy attacker at dist <= 4
+    // Wardens (precision/control): a back-line enemy at long range aims truer.
+    public const int WardenLongAim   = 12;   // +aim   for a Wardens enemy attacker at dist >= Unit.LongRange
 
     // Graze band: a shot that misses by <= GrazeBand hits for minimum damage (no crit).
     // Softens the "I whiffed three 80% shots" tail without removing true misses.
@@ -95,9 +121,15 @@ public static class Combat
         // a DRONE attacks from above: it ignores the target's cover entirely (3.7)
         bool ignoresCover = a.Cls == "DRONE";
 
+        // SYNDICATE faction (enemy attacker only): "cover won't save you" — a Syndicate enemy
+        // attacker sees over the target's LOW cover exactly as high ground does (negate it; HIGH
+        // cover still blocks). Folds into seesOver below. Enemy-only (a.Team) so the player's own
+        // shots are never warped. None (the default) leaves this false => today's behavior.
+        bool syndicateLowSee = a.Team == Team.Enemy && MissionFaction == Faction.Syndicate && cover.Level == 1;
+
         // high ground sees over LOW cover; a commanding 2-tier advantage sees over HIGH
         // cover too (firing down negates the target's cover; it reads as fully exposed).
-        bool seesOver = ignoresCover || (highGround && (cover.Level == 1 || heightAdv >= 2));
+        bool seesOver = ignoresCover || syndicateLowSee || (highGround && (cover.Level == 1 || heightAdv >= 2));
         int coverLevel = seesOver ? 0 : cover.Level;
         int coverDef = seesOver ? 0 : cover.Defense;   // cover.Defense is already halved when partial
         bool flanked = cover.Flanked && !seesOver;
@@ -138,6 +170,13 @@ public static class Combat
         // cover/position against both and is pinned/distracted -> the attacker's shot lands easier.
         bool crossfire = InCrossfire(grid, a, d);
         if (crossfire) hit += CrossfireAim;
+        // enemy FACTION aim rules (enemy attacker only; None = no-op): LEGION rewards closing in,
+        // WARDENS rewards holding the back line. Applied before the hit clamp.
+        if (a.Team == Team.Enemy)
+        {
+            if (MissionFaction == Faction.Legion  && dist <= Unit.CloseRange) hit += LegionCloseAim;
+            if (MissionFaction == Faction.Wardens && dist >= Unit.LongRange)  hit += WardenLongAim;
+        }
         hit = Util.Clamp(hit, 3, 95);
 
         int crit = a.Weapon.CritBase;
@@ -180,6 +219,9 @@ public static class Combat
             if (HasRunBoon(Sightline.Boon.Executioners) && d.MaxHp > 0 && d.Hp * 2 < d.MaxHp) crit += BoonExecCrit;
         }
         if (crossfire) crit += CrossfireCrit;   // converging fire also crits harder (target distracted/exposed)
+        // enemy FACTION crit rule (enemy attacker only; None = no-op): LEGION's closing rush also
+        // crits harder within close range. Applied before the crit clamp (and before the hunker zero).
+        if (a.Team == Team.Enemy && MissionFaction == Faction.Legion && dist <= Unit.CloseRange) crit += LegionCloseCrit;
         if (d.Hunkered) crit = 0;               // hunkered can't be crit
         crit = Util.Clamp(crit, 0, 100);
 
@@ -966,8 +1008,92 @@ public static class Combat
             AllUnits = savedAll;                          // restore (back to empty) for every later/other test
         }
 
+        // ENEMY FACTIONS (Phase 4 foundation): each faction RULE warps an ENEMY attacker's odds and
+        // NEVER a player attacker's; with MissionFaction==None nothing changes (the safety invariant).
+        // We flip MissionFaction case-by-case and ALWAYS restore it to None at the end so the global
+        // static can't leak into any later test or into runtime.
+        {
+            var gFac = new Grid();
+            // baselines captured with MissionFaction==None (today's math) so the deltas are exact.
+
+            // ---- LEGION: an enemy attacker within close range (dist<=4) gets +aim AND +crit; a
+            // player attacker at the same range gets NEITHER (factions are an enemy-only trait). ----
+            var legEnemy  = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy,  X = 3, Y = 5 };
+            var legTarget = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 5, Y = 5, Hp = 10, MaxHp = 10 }; // dist 2 (close)
+            var legPlayer = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 3, Y = 5 };
+            var legFoe    = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy,  X = 5, Y = 5, Hp = 10, MaxHp = 10 };
+            MissionFaction = Faction.None;
+            int legEnemyBaseHit  = ComputeOdds(gFac, legEnemy,  legTarget).HitChance;
+            int legEnemyBaseCrit = ComputeOdds(gFac, legEnemy,  legTarget).CritChance;
+            int legPlayerBaseHit = ComputeOdds(gFac, legPlayer, legFoe).HitChance;
+            MissionFaction = Faction.Legion;
+            var legEnemyOdds  = ComputeOdds(gFac, legEnemy,  legTarget);
+            var legPlayerOdds = ComputeOdds(gFac, legPlayer, legFoe);
+            if (legEnemyOdds.HitChance  != Util.Clamp(legEnemyBaseHit  + LegionCloseAim,  3, 95)) fails.Add("legionEnemyAim");
+            if (legEnemyOdds.CritChance != Util.Clamp(legEnemyBaseCrit + LegionCloseCrit, 0, 100)) fails.Add("legionEnemyCrit");
+            if (legPlayerOdds.HitChance != legPlayerBaseHit) fails.Add("legionPlayerUnaffected");
+            // Legion must NOT fire at long range (dist >= LongRange): an enemy far from the target.
+            var legFarEnemy = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 0, Y = 5 }; // dist 10 from (10,5)
+            var legFarTgt   = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 10, Y = 5, Hp = 10, MaxHp = 10 };
+            MissionFaction = Faction.None;   int legFarBase = ComputeOdds(gFac, legFarEnemy, legFarTgt).HitChance;
+            MissionFaction = Faction.Legion; int legFarOn   = ComputeOdds(gFac, legFarEnemy, legFarTgt).HitChance;
+            if (legFarOn != legFarBase) fails.Add("legionFarNoOp");
+
+            // ---- SYNDICATE: an enemy attacker negates a LOW-cover target (CoverLevel 1 -> 0); a
+            // player attacker against the same low-cover target keeps the cover. Geometry: attacker
+            // EAST (X=8) of the target (5,5) with low cover on the target's EAST (facing) side (6,5),
+            // mirroring the high-ground baseline at the top of this test, so the cover really faces
+            // the shot (CoverLevel==1) rather than reading as a flank. ----
+            var gSyn = new Grid(); gSyn.Tiles[6, 5] = TileType.LowCover;   // low cover on the target's facing (east) side
+            var synEnemy  = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy,  X = 8, Y = 5 };
+            var synTarget = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 5, Y = 5, Hp = 10, MaxHp = 10 };
+            MissionFaction = Faction.None;
+            if (ComputeOdds(gSyn, synEnemy, synTarget).CoverLevel != 1) fails.Add("syndicateBaselineLow");  // guard: it really is low cover
+            int synBaseHit = ComputeOdds(gSyn, synEnemy, synTarget).HitChance;                              // hit WITH the low cover
+            MissionFaction = Faction.Syndicate;
+            var synOdds = ComputeOdds(gSyn, synEnemy, synTarget);
+            if (synOdds.CoverLevel != 0) fails.Add("syndicateNegatesLow");
+            if (!synOdds.SeesOver)       fails.Add("syndicateSeesOver");
+            if (synOdds.HitChance <= synBaseHit) fails.Add("syndicateHitBetter");   // negating low cover must raise the hit
+            // HIGH cover must STILL block a Syndicate enemy attacker (the rule only negates LOW cover).
+            var gSynHigh = new Grid(); gSynHigh.Tiles[6, 5] = TileType.HighCover;
+            if (ComputeOdds(gSynHigh, synEnemy, synTarget).CoverLevel != 2) fails.Add("syndicateKeepsHigh");
+            // A PLAYER attacker is unaffected by Syndicate: low cover still protects the (enemy) target.
+            var gSynP = new Grid(); gSynP.Tiles[6, 5] = TileType.LowCover;
+            var synPlayer = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 8, Y = 5 };
+            var synFoe    = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy,  X = 5, Y = 5, Hp = 10, MaxHp = 10 };
+            if (ComputeOdds(gSynP, synPlayer, synFoe).CoverLevel != 1) fails.Add("syndicatePlayerUnaffected");
+
+            // ---- WARDENS: an enemy attacker at long range (dist >= LongRange) gets +aim; a player
+            // attacker at the same range gets nothing; a CLOSE enemy gets nothing. ----
+            var gWar = new Grid();
+            var warEnemy  = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy,  X = 1, Y = 5 };
+            var warTarget = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 12, Y = 5, Hp = 10, MaxHp = 10 }; // dist 11 (long)
+            var warPlayer = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 1, Y = 5 };
+            var warFoe    = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy,  X = 12, Y = 5, Hp = 10, MaxHp = 10 };
+            MissionFaction = Faction.None;
+            int warEnemyBase  = ComputeOdds(gWar, warEnemy,  warTarget).HitChance;
+            int warPlayerBase = ComputeOdds(gWar, warPlayer, warFoe).HitChance;
+            MissionFaction = Faction.Wardens;
+            if (ComputeOdds(gWar, warEnemy,  warTarget).HitChance != Util.Clamp(warEnemyBase + WardenLongAim, 3, 95)) fails.Add("wardensEnemyLongAim");
+            if (ComputeOdds(gWar, warPlayer, warFoe).HitChance    != warPlayerBase) fails.Add("wardensPlayerUnaffected");
+            // A CLOSE Wardens enemy (dist <= 4) gets no bonus (the rule is long-range only).
+            var warCloseEnemy = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy,  X = 3, Y = 5 };
+            var warCloseTgt   = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 5, Y = 5, Hp = 10, MaxHp = 10 }; // dist 2
+            MissionFaction = Faction.None;    int warCloseBase = ComputeOdds(gWar, warCloseEnemy, warCloseTgt).HitChance;
+            MissionFaction = Faction.Wardens; int warCloseOn   = ComputeOdds(gWar, warCloseEnemy, warCloseTgt).HitChance;
+            if (warCloseOn != warCloseBase) fails.Add("wardensCloseNoOp");
+
+            // ---- SAFETY INVARIANT: with None restored, an enemy attacker reads identically to the
+            // pre-faction baseline (no static leak). ----
+            MissionFaction = Faction.None;
+            if (ComputeOdds(gFac, legEnemy, legTarget).HitChance  != legEnemyBaseHit)  fails.Add("factionNoneRestoredHit");
+            if (ComputeOdds(gFac, legEnemy, legTarget).CritChance != legEnemyBaseCrit) fails.Add("factionNoneRestoredCrit");
+        }
+        MissionFaction = Faction.None;   // belt-and-braces: never leave the global static set for later tests/runtime
+
         return fails.Count == 0
-            ? "COMBATTEST: PASS (cover A-E + high-ground + tier-2 + drone/shield + ambush + graze + streak + perk-balance + build-perks + fragile-floor + armor + bulwark + vanguard + crossfire all hold)"
+            ? "COMBATTEST: PASS (cover A-E + high-ground + tier-2 + drone/shield + ambush + graze + streak + perk-balance + build-perks + fragile-floor + armor + bulwark + vanguard + crossfire + factions all hold)"
             : "COMBATTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 }

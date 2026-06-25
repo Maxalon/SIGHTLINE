@@ -417,6 +417,15 @@ public static class Mission
     /// Boss / mid-boss slots (i == 0 on the final / m3 / m5) are handled by the caller, not here.
     static Unit SelectArchetype(int n, float r, int bump, int x, int y)
     {
+        // ENEMY FACTIONS (Phase 4 foundation): when a faction is active, a mission's rank-and-file
+        // is drawn from THAT faction's roster instead of the default tier cascade, so the force reads
+        // as one named opponent. Boss / mid-boss slots are handled by the caller (SpawnEnemies), not
+        // here, so the campaign's named elites are untouched. With None (the default, since Game isn't
+        // wired to set Combat.MissionFaction yet) this falls through to the unchanged cascade below —
+        // the SAFETY INVARIANT: byte-identical spawns to today until a faction is actually set.
+        if (Combat.MissionFaction != Faction.None)
+            return FactionRoster(Combat.MissionFaction, n, r, bump, x, y);
+
         if (n <= 1)   // MISSION 1 — basic force: a scout screen + grunts, nothing special.
             return r < 0.60f
                 ? MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 58 + bump, 8, x, y)
@@ -463,6 +472,54 @@ public static class Mission
         if (r < 0.89f) return MakeHostile("OGRE", "BRUISER", WeaponKind.Lmg, 9 + bump * 2, 56 + bump, 5, x, y);    //  8% bruiser
         if (r < 0.95f) return MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 58 + bump, 8, x, y);       //  6% scout
         return MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 60 + bump, 6, x, y);                     //  5% grunt
+    }
+
+    /// FACTION-GATED rank-and-file pick (Phase 4 foundation). Returns one archetype drawn from the
+    /// given faction's roster by the uniform roll `r` in [0,1). STATS are copied VERBATIM from the
+    /// default cascade in SelectArchetype (same name/cls/weapon/hp/aim/mob lines, incl. SHIELD facing
+    /// and MORTAR's frag pouch) — only the gating moved, so a faction force is the SAME units, just
+    /// grouped. Each roster ends with a GRUNT (Wardens: SCOUT) filler so any roll resolves. Only ever
+    /// called when Combat.MissionFaction != None (the None default uses the unchanged cascade).
+    static Unit FactionRoster(Faction f, int n, float r, int bump, int x, int y)
+    {
+        switch (f)
+        {
+            // SYNDICATE (tech/mechanized) — DRONE, SHIELD, TURRET, SAPPER, SPOTTER (+ GRUNT filler).
+            case Faction.Syndicate:
+                if (r < 0.24f) return MakeHostile("WASP", "DRONE", WeaponKind.Smg, 3 + bump, 60 + bump, 7, x, y);
+                if (r < 0.44f)
+                {
+                    var s = MakeHostile("AEGIS", "SHIELD", WeaponKind.Rifle, 10 + bump * 2, 56 + bump, 4, x, y);
+                    s.ShieldDx = -1; s.ShieldDy = 0;            // shield faces the squad (west)
+                    return s;
+                }
+                if (r < 0.62f) return MakeHostile("SENTRY", "TURRET", WeaponKind.Lmg, 6 + bump, 66 + bump, 0, x, y);
+                if (r < 0.80f) return MakeHostile("BREACH", "SAPPER", WeaponKind.Shotgun, 7 + bump, 56 + bump, 6, x, y);
+                if (r < 0.92f) return MakeHostile("BEACON", "SPOTTER", WeaponKind.Smg, 5 + bump, 48 + bump, 6, x, y);
+                return MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 60 + bump, 6, x, y);              // filler
+
+            // LEGION (shock assault) — BERSERKER, BRUISER, HUNTER, SCOUT (+ GRUNT filler).
+            case Faction.Legion:
+                if (r < 0.26f) return MakeHostile("REAVER", "BERSERKER", WeaponKind.Shotgun, 12 + bump * 2, 58 + bump, 8, x, y);
+                if (r < 0.50f) return MakeHostile("OGRE", "BRUISER", WeaponKind.Lmg, 9 + bump * 2, 56 + bump, 5, x, y);
+                if (r < 0.74f) return MakeHostile("JACKAL", "HUNTER", WeaponKind.Smg, 5 + bump, 60 + bump, 9, x, y);
+                if (r < 0.90f) return MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 58 + bump, 8, x, y);
+                return MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 60 + bump, 6, x, y);              // filler
+
+            // WARDENS (precision/control) — SNIPER, MORTAR, MEDIC, GRUNT (+ SCOUT filler).
+            case Faction.Wardens:
+            default:
+                if (r < 0.28f) return MakeHostile("VIPER", "SNIPER", WeaponKind.Sniper, 4 + bump, 62 + bump, 5, x, y);
+                if (r < 0.50f)
+                {
+                    var m = MakeHostile("MORTAR", "MORTAR", WeaponKind.Smg, 6 + bump, 50 + bump, 5, x, y);
+                    m.Grenades = n >= 5 ? 3 : 2;                // a deep frag pouch — the EXISTING grenade AI uses it
+                    return m;
+                }
+                if (r < 0.70f) return MakeHostile("ORDERLY", "MEDIC", WeaponKind.Smg, 6 + bump, 52 + bump, 6, x, y);
+                if (r < 0.90f) return MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 60 + bump, 6, x, y);
+                return MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 58 + bump, 8, x, y);              // filler
+        }
     }
 
     static readonly string[] Callsigns =
