@@ -402,8 +402,15 @@ public class Game
         // Evac / Escort / Rescue all extract to the same top-right zone
         if (Objective == Objective.Evac || Objective == Objective.Escort || Objective == Objective.Rescue)
         {
-            EvacZone.Add((Grid.W - 2, 0)); EvacZone.Add((Grid.W - 1, 0));
-            EvacZone.Add((Grid.W - 2, 1)); EvacZone.Add((Grid.W - 1, 1));
+            // A 2x4 extraction block (8 tiles) in the top-right. CRITICAL: with deploy-growth the
+            // squad can field up to DeployCapMax soldiers, and EVAC requires ALL of them to stand
+            // in the zone — a 2x2 (4 tiles) was unwinnable (and TIMEOUT-looping the autopilot) once
+            // 5+ soldiers survived. 8 tiles fits the largest squad (+ the escort VIP) with margin.
+            for (int ey = 0; ey < 4; ey++)
+            {
+                EvacZone.Add((Grid.W - 2, ey));
+                EvacZone.Add((Grid.W - 1, ey));
+            }
         }
         if (Objective == Objective.Hack)
             Terminal = (Grid.W / 2 + 1, Grid.H / 2);
