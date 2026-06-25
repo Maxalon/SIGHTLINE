@@ -1271,7 +1271,8 @@ public static class Hud
 
         int w = 700;
         int rows = squad.Count;
-        int h = 150 + rows * 46 + Math.Min(run.Report.Count, 5) * 22 + 220;
+        const int rowPitch = 44;   // tightened so a full 6-soldier roster + debrief + map fits 800px tall
+        int h = 150 + 22 /*deploy header*/ + rows * rowPitch + Math.Min(run.Report.Count, 5) * 22 + 220;
         int x = Cfg.ScreenW / 2 - w / 2;
         int y = Cfg.ScreenH / 2 - h / 2;
         // quick slide-down entrance (≈0.15s, settles well before any click on the map/bench)
@@ -1294,11 +1295,21 @@ public static class Hud
             Raylib.DrawTextEx(Cfg.Font, modLine, new Vector2(x + w / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, modLine, 11, 1f).X / 2, y + 86), 11, 1f, Pal.TxtDim);
         }
 
+        // DEPLOY-PICKER header: how many soldiers field next mission vs the cap (which GROWS
+        // as the campaign deepens: 4 -> 5 (m3) -> 6 (m5)). Click a row's pill to deploy/bench.
         int ry = y + 100;
+        int deployed = run.Deployed.Count, cap = run.NextDeployCap;
+        bool atCap = deployed >= cap;
+        string deployHdr = $"DEPLOY  {deployed}/{cap}";
+        Color hdrCol = atCap ? Pal.Accent : Pal.Suspect;
+        Raylib.DrawTextEx(Cfg.Font, deployHdr, new Vector2(x + 30, ry), 15, 1f, hdrCol);
+        string capNote = atCap ? "(squad at capacity - bench a soldier to swap)" : "(cap grows over the campaign - field up to it)";
+        Raylib.DrawTextEx(Cfg.Font, capNote, new Vector2(x + 30 + (int)Raylib.MeasureTextEx(Cfg.Font, deployHdr, 15, 1f).X + 12, ry + 2), 11, 1f, Pal.TxtDim);
+        ry += 22;
         foreach (var u in squad)
         {
             DrawSquadRow(g, u, x + 30, ry, w - 60);
-            ry += 46;
+            ry += rowPitch;
         }
 
         // promotions / heals report
@@ -1654,20 +1665,22 @@ public static class Hud
 
     static void DrawSquadRow(Game g, Unit u, int x, int y, int w)
     {
-        Raylib.DrawRectangleRounded(new Rectangle(x, y, w, 40), 0.2f, 6, Pal.RGBA(13, 19, 27));
-        Raylib.DrawRectangle(x, y, 3, 40, Pal.Friend);
+        // benched soldiers read as "on the bench": dimmer plate + a grey accent stripe.
+        bool benched = u.Benched;
+        Raylib.DrawRectangleRounded(new Rectangle(x, y, w, 40), 0.2f, 6, benched ? Pal.RGBA(11, 15, 20) : Pal.RGBA(13, 19, 27));
+        Raylib.DrawRectangle(x, y, 3, 40, benched ? Pal.TxtDim : Pal.Friend);
 
-        Raylib.DrawTextEx(Cfg.Font, u.Name, new Vector2(x + 14, y + 5), 18, 1f, u.Benched ? Pal.TxtDim : Pal.Txt);
+        Raylib.DrawTextEx(Cfg.Font, u.Name, new Vector2(x + 14, y + 5), 18, 1f, benched ? Pal.TxtDim : Pal.Txt);
+        // class is always on the row so benching is an informed choice; WOUND is flagged in red.
         string rankLine = $"{u.RankName}  -  {u.Cls}";
         if (u.Wound > 0) rankLine += $"  WOUNDED({u.Wound})";
-        if (u.Benched)   rankLine += "  [SITTING OUT]";
-        Raylib.DrawTextEx(Cfg.Font, rankLine, new Vector2(x + 14, y + 24), 11, 1f, u.Wound > 0 ? Pal.Foe : Pal.Accent);
+        Raylib.DrawTextEx(Cfg.Font, rankLine, new Vector2(x + 14, y + 24), 11, 1f, u.Wound > 0 ? Pal.Foe : (benched ? Pal.TxtDim : Pal.Accent));
 
         // earned perks (compact 3-letter codes)
         if (u.Perks.Count > 0)
         {
             string codes = string.Join(" ", u.Perks.ConvertAll(PerkDef.Code));
-            Raylib.DrawTextEx(Cfg.Font, codes, new Vector2(x + 220, y + 27), 9, 1f, Pal.Good);
+            Raylib.DrawTextEx(Cfg.Font, codes, new Vector2(x + 220, y + 27), 9, 1f, benched ? Pal.RGBA(60, 92, 70) : Pal.Good);
         }
 
         // HP bar
@@ -1677,32 +1690,37 @@ public static class Hud
         if (frac > 0)
         {
             Color hc = frac > 0.5f ? Pal.Good : (frac > 0.25f ? Pal.Accent : Pal.Foe);
+            if (benched) hc = Raylib.Fade(hc, 0.45f);
             Raylib.DrawRectangleRounded(new Rectangle(bar.X, bar.Y, bar.Width * frac, bar.Height), 0.5f, 6, hc);
         }
         Raylib.DrawTextEx(Cfg.Font, $"{u.Hp}/{u.MaxHp} HP", new Vector2(x + 380, y + 13), 12, 1f, Pal.TxtDim);
 
-        // kills + progress — shifted left to make room for BENCH button when wounded
-        int killsX = u.Wound > 0 ? x + w - 260 : x + w - 170;
-        Raylib.DrawTextEx(Cfg.Font, $"{u.Kills} kills", new Vector2(killsX, y + 6), 12, 1f, Pal.Txt);
+        // kills + progress — shifted left to clear the always-on deploy/bench pill
+        int killsX = x + w - 264;
+        Raylib.DrawTextEx(Cfg.Font, $"{u.Kills} kills", new Vector2(killsX, y + 6), 12, 1f, benched ? Pal.TxtDim : Pal.Txt);
         int toNext = g.RunState.KillsToNext(u);
         string prog = u.Rank >= Run.Ranks.Length - 1 ? "MAX RANK" : $"{toNext} to next rank";
         Raylib.DrawTextEx(Cfg.Font, prog, new Vector2(killsX, y + 23), 11, 1f, Pal.TxtDim);
 
-        // BENCH toggle: shown only for wounded soldiers; benched = warm amber, unbenched = dim outline
-        if (u.Wound > 0)
-        {
-            string benchLabel = u.Benched ? "BENCHED" : " BENCH ";
-            Color benchBg   = u.Benched ? Pal.Accent : Pal.RGBA(20, 28, 40);
-            Color benchFg   = u.Benched ? Pal.Panel  : Pal.TxtDim;
-            Color benchBd   = u.Benched ? Pal.Accent : Pal.PanelBd;
-            var benchR = new Rectangle(x + w - 84, y + 9, 76, 22);
-            Raylib.DrawRectangleRounded(benchR, 0.3f, 6, benchBg);
-            Raylib.DrawRectangleLinesEx(benchR, 1f, benchBd);
-            Raylib.DrawTextEx(Cfg.Font, benchLabel,
-                new Vector2(benchR.X + benchR.Width / 2 - Raylib.MeasureTextEx(Cfg.Font, benchLabel, 11, 1f).X / 2,
-                            benchR.Y + 5), 11, 1f, benchFg);
-            BenchBtns.Add((u, benchR));
-        }
+        // status chip (DEPLOYED green / BENCHED grey) between the progress text and the pill.
+        string stTag = benched ? "BENCHED" : "DEPLOYED";
+        Color stCol  = benched ? Pal.TxtDim : Pal.Good;
+        Raylib.DrawTextEx(Cfg.Font, stTag, new Vector2(x + w - 168, y + 14), 11, 1f, stCol);
+
+        // DEPLOY/BENCH toggle — now on EVERY soldier (Game.ToggleBench enforces >=1 deployed and
+        // the deploy cap). The verb is the ACTION the click performs: a deployed soldier shows
+        // "BENCH", a benched one shows "DEPLOY". Registered in BenchBtns for hit-testing.
+        string pillLabel = benched ? "DEPLOY" : "BENCH";
+        Color pillBg = benched ? Raylib.Fade(Pal.Good, 0.22f) : Pal.RGBA(20, 28, 40);
+        Color pillFg = benched ? Pal.Good : Pal.Suspect;
+        Color pillBd = benched ? Pal.Good : Pal.Suspect;
+        var benchR = new Rectangle(x + w - 84, y + 9, 76, 22);
+        Raylib.DrawRectangleRounded(benchR, 0.3f, 6, pillBg);
+        Raylib.DrawRectangleLinesEx(benchR, 1f, pillBd);
+        Raylib.DrawTextEx(Cfg.Font, pillLabel,
+            new Vector2(benchR.X + benchR.Width / 2 - Raylib.MeasureTextEx(Cfg.Font, pillLabel, 11, 1f).X / 2,
+                        benchR.Y + 5), 11, 1f, pillFg);
+        BenchBtns.Add((u, benchR));
     }
 
     public static Rectangle OverlayBtn;

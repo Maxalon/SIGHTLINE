@@ -115,6 +115,7 @@ public static class SaveGame
                 BonusGrenades = u.BonusGrenades,
                 CustomTag = u.CustomTag,
                 Wound = u.Wound,
+                Armor = u.Armor,
                 Benched = u.Benched,
                 Perks = u.Perks.ConvertAll(p => (int)p),
                 WeaponMods = u.WeaponMods.ConvertAll(m => (int)m),
@@ -155,6 +156,7 @@ public static class SaveGame
                 Weapon = Weapon.Make((WeaponKind)d.Weapon),
                 Kills = d.Kills, Rank = d.Rank, Alive = true,
                 BonusGrenades = d.BonusGrenades, CustomTag = d.CustomTag, Wound = d.Wound,
+                Armor = d.Armor,
                 Nickname = d.Nickname, Benched = d.Benched,
             };
             if (d.Perks != null) foreach (var p in d.Perks) u.Perks.Add((Perk)p);
@@ -196,7 +198,7 @@ public static class SaveGame
     class UnitDto
     {
         public string Name, Cls, CustomTag, Nickname;
-        public int Hp, MaxHp, Aim, Mobility, Weapon, Kills, Rank, BonusGrenades, Wound;
+        public int Hp, MaxHp, Aim, Mobility, Weapon, Kills, Rank, BonusGrenades, Wound, Armor;
         public bool Benched;
         public List<int> Perks = new();
         public List<int> WeaponMods = new();   // append-only: persisted weapon upgrades (old saves default empty)

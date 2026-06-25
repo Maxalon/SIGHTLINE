@@ -129,7 +129,7 @@ public class Game
     // run's real reward sink, so Intel buys permanent firepower that out-paces attrition. The
     // parallel arrays + the switch handlers below auto-cover the appended items, and the shop
     // card auto-sizes to ShopName.Length (Hud.DrawRequisition), so no UI rework is needed.
-    public const int ModBase = 4;                              // count of fixed (non-mod) shop items
+    public const int ModBase = 5;                              // count of fixed (non-mod) shop items
     static WeaponMod ModForItem(int item) => WeaponModDef.All[item - ModBase];
     public static bool IsModItem(int item) => item >= ModBase && item < ModBase + WeaponModDef.All.Length;
 
@@ -139,7 +139,7 @@ public class Game
 
     static int[] BuildShopCost()
     {
-        var b = new[] { 6, 10, 16, 12 };
+        var b = new[] { 6, 10, 16, 12, 14 };   // +BALLISTIC PLATING (survivability sink)
         var all = new int[ModBase + WeaponModDef.All.Length];
         b.CopyTo(all, 0);
         for (int i = 0; i < WeaponModDef.All.Length; i++) all[ModBase + i] = WeaponModDef.Cost(WeaponModDef.All[i]);
@@ -147,7 +147,7 @@ public class Game
     }
     static string[] BuildShopName()
     {
-        var b = new[] { "FIELD MEDKIT", "COMBAT STIMS", "ADV. TRAINING", "FRAG CACHE" };
+        var b = new[] { "FIELD MEDKIT", "COMBAT STIMS", "ADV. TRAINING", "FRAG CACHE", "BALLISTIC PLATING" };
         var all = new string[ModBase + WeaponModDef.All.Length];
         b.CopyTo(all, 0);
         for (int i = 0; i < WeaponModDef.All.Length; i++) all[ModBase + i] = "WPN: " + WeaponModDef.Name(WeaponModDef.All[i]);
@@ -161,6 +161,7 @@ public class Game
             "+2 max HP to your frailest soldier (permanent).",
             "Grant a soldier a bonus perk choice.",
             "+1 grenade every mission for a soldier (permanent).",
+            "+1 armor to your least-armored soldier (permanent: -1 damage per hit).",
         };
         var all = new string[ModBase + WeaponModDef.All.Length];
         b.CopyTo(all, 0);
@@ -3779,9 +3780,17 @@ public class Game
             0 => _run.Squad.Any(u => u.Hp < u.MaxHp || u.Wound > 0),  // medkit needs someone hurt or wounded
             2 => _run.Squad.Any(u => CountPerksLeft(u) >= 2), // training needs an un-maxed soldier
             3 => _run.Squad.Any(u => u.BonusGrenades < 2),    // cache caps at +2 per soldier
+            4 => ArmorTarget() != null,                       // plating: a soldier under the armor cap
             _ => _run.Squad.Count > 0,
         };
     }
+
+    /// The soldier a PLATING purchase armors: the least-armored combatant under the cap, tie-broken
+    /// toward the veteran who'll carry the run. Spreads survivability before stacking it on one body.
+    Unit ArmorTarget() => _run.Squad
+        .Where(u => !u.IsVip && u.Armor < Unit.ArmorMax)
+        .OrderBy(u => u.Armor).ThenByDescending(u => u.Kills).ThenBy(u => u.Name)
+        .FirstOrDefault();
 
     static int CountPerksLeft(Unit u)
     {
@@ -3807,6 +3816,7 @@ public class Game
             0 => _run.Squad.Where(u => u.Hp < u.MaxHp || u.Wound > 0).OrderByDescending(u => u.Wound).ThenBy(u => u.Hp).FirstOrDefault(),
             1 => _run.Squad.OrderBy(u => u.MaxHp).FirstOrDefault(),
             3 => _run.Squad.Where(u => u.BonusGrenades < 2).OrderBy(u => u.BonusGrenades).FirstOrDefault(),
+            4 => ArmorTarget(),
             _ => null,
         };
     }
@@ -3826,6 +3836,7 @@ public class Game
             case 1: return t == null ? "-" : $"{t.Name}: max HP {t.MaxHp} -> {t.MaxHp + 2}";
             case 2: return _run.Squad.Any(u => CountPerksLeft(u) >= 2) ? "a soldier gains a perk pick" : "every soldier is maxed";
             case 3: return t == null ? "all soldiers at the cap" : $"{t.Name}: +1 grenade/mission";
+            case 4: return t == null ? "all soldiers fully plated" : $"{t.Name}: armor {t.Armor} -> {t.Armor + 1}";
             default: return "";
         }
     }
@@ -3865,6 +3876,12 @@ public class Game
                 carrier.BonusGrenades += 1;
                 _run.Report.Add($"{carrier.Name} issued a frag cache  (+1 grenade/mission)");
                 break;
+            case 4:
+                var plated = ArmorTarget();
+                if (plated == null) { Audio.Play("miss"); return; }
+                plated.Armor += 1;
+                _run.Report.Add($"{plated.Name} fitted ballistic plating  (armor {plated.Armor}, -1 dmg/hit)");
+                break;
         }
         _run.Intel -= ShopCost[item];
         Audio.Play("select");
@@ -3892,10 +3909,15 @@ public class Game
 
         for (int guard = 0; guard < 40; guard++)
         {
-            // cheapest affordable, still-useful weapon mod
+            // cheapest affordable PERMANENT upgrade: weapon mods + plating (4) + frag (3) + stims
+            // (1). Skip the heal (0, done) and the perk pick (2, needs the chooser flow). Greedy by
+            // cost so a leveled squad sinks intel into firepower AND survivability (the reward sink).
             int best = -1, bestCost = int.MaxValue;
-            for (int i = ModBase; i < ShopCost.Length; i++)
+            for (int i = 1; i < ShopCost.Length; i++)
+            {
+                if (i == 2) continue;   // perk pick is a player choice, not an auto-buy
                 if (CanBuy(i) && ShopCost[i] < bestCost) { best = i; bestCost = ShopCost[i]; }
+            }
             if (best < 0) break;        // nothing affordable/useful left
             int before = _run.Intel;
             DoPurchase(best);

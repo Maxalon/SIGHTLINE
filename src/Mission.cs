@@ -504,6 +504,11 @@ public static class Mission
         };
         u.Ammo = u.Weapon.Clip;
         u.Grenades = 0;
+        // The escort asset also gets light ARMOR that scales with mission depth (the squad's
+        // bought plating doesn't help the VIP, so it carries its own): every incoming hit -armor,
+        // floored at 1. Paired with the HP scaling + the reduced anti-VIP AI finish-frenzy, this
+        // stops the fragile asset getting deleted in one focus-fire volley over a long escort.
+        u.Armor = Math.Max(1, missionNum) / 2;   // m2~1, m4~2, m6~3
         return u;
     }
 

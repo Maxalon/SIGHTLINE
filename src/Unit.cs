@@ -30,7 +30,8 @@ public enum WeaponMod { Scope, ExtendedMag, HollowPoint, Stabilizer }
 /// so new members go at the END — never reorder or remove the existing ones.
 public enum Perk { LockOn, Hardened, Reflexes, Bandolier, CloseQuarters, Marksman, Deadeye, Tank, Sprinter, Adrenal,
     Executioner, Guardian, CoolHeaded,
-    Opportunist, PointBlank, GiantSlayer }
+    Opportunist, PointBlank, GiantSlayer,
+    Bulwark, Vanguard }
 
 /// Battlefield traits earned by FEATS (see Game feat hooks + Run.DebriefSurvivors).
 /// Each is a small passive read in Combat.ComputeOdds, so veterans matter.
@@ -318,6 +319,17 @@ public class Unit
     // mission in Run.DebriefSurvivors, cleared by a FIELD MEDKIT.
     public int Wound;
 
+    // ---- ARMOR: a persistent flat damage-reduction stat (the Intel survivability sink) ----
+    // Bought in the barracks shop (the orchestrator wires that + SaveGame persistence). Every
+    // incoming hit on this unit is reduced by Armor, on TOP of the Hardened perk, floored at 1
+    // (the guaranteed-damage floor still holds — see Combat.HardenedReduce, the single chokepoint
+    // for ALL incoming-damage paths: a normal hit, a graze, and a grenade blast). 0 by default so
+    // old saves load unchanged; capped via the shop (ArmorMax) rather than here.
+    public int Armor;
+    // Shop cap for the Armor stat (the shop should refuse to sell past this). Kept here so the
+    // shop UI / autopilot read one source. Modest so armor mitigates, never trivialises damage.
+    public const int ArmorMax = 3;
+
     // bench (S3-A): a wounded soldier can sit out the next mission (deploy short-handed)
     // in exchange for accelerated recovery — Wound decays 2 steps + full HP heal. Cleared
     // at the start of the mission they sit out (SetupMission). Only wounded soldiers may be
@@ -405,6 +417,22 @@ public class Unit
     // enemy (fodder or boss), rewarding focus-firing a new target; it goes inert once the target is chipped
     // (the opposite axis from Executioner's sub-half-HP finisher). Read in Combat.ComputeOdds via d.Hp>=MaxHp.
     public const int FirstStrikeCrit = 15;
+    // BULWARK: a DEFENSIVE/turtle survivability perk. While this soldier is HUNKERED (spent the
+    // turn to brace), every incoming hit is reduced by an EXTRA BulwarkFlat — on top of cover, the
+    // hunker -25-aim, Hardened, and Armor (all stack in HardenedReduce, the single chokepoint).
+    // Distinct from Hardened (unconditional -1/-4-crit, any time) and Tank (+3 max HP): Bulwark is
+    // CONDITIONAL on the hunker stance, so it rewards a deliberate hold-the-line playstyle and is
+    // worthless on a soldier that never digs in (a real trade, not a flat must-pick). Read in
+    // Combat.HardenedReduce off d.Hunkered (already a field on the defending Unit — no new hook).
+    public const int BulwarkFlat = 2;    // extra -damage on every incoming hit WHILE hunkered
+    // VANGUARD: an AGGRESSION/breach perk for a flanker who closes the distance. +crit ONLY when the
+    // target is BOTH genuinely FLANKED (cover.Flanked — you out-positioned its cover) AND ADJACENT
+    // (dist <= 1, point-blank). Distinct from Opportunist (+crit on a flank at ANY range) and Point
+    // Blank (+crit within 2 tiles vs ANY target, no flank needed): Vanguard demands you both flank
+    // AND get in its face, the tightest gate of the three, so it pays the biggest crit. A pure
+    // ComputeOdds read (flank flag + range), no new state.
+    public const int VanguardCrit = 28;
+    public const int VanguardRange = 1;  // crit applies at dist <= 1 tile (adjacent) AND flanked
     public const int WoundAim = 12;      // aim penalty while Wound > 0
     public const int WoundMob = 1;       // mobility penalty while Wound > 0
 
@@ -448,6 +476,7 @@ public static class PerkDef
         Perk.Marksman, Perk.Deadeye, Perk.Tank, Perk.Sprinter, Perk.Adrenal,
         Perk.Executioner, Perk.Guardian, Perk.CoolHeaded,
         Perk.Opportunist, Perk.PointBlank, Perk.GiantSlayer,
+        Perk.Bulwark, Perk.Vanguard,
     };
 
     public static string Name(Perk p) => p switch
@@ -468,6 +497,8 @@ public static class PerkDef
         Perk.Opportunist => "OPPORTUNIST",
         Perk.PointBlank => "POINT BLANK",
         Perk.GiantSlayer => "FIRST STRIKE",
+        Perk.Bulwark => "BULWARK",
+        Perk.Vanguard => "VANGUARD",
         _ => "PERK",
     };
 
@@ -489,6 +520,8 @@ public static class PerkDef
         Perk.Opportunist => "OPP",
         Perk.PointBlank => "PBK",
         Perk.GiantSlayer => "FST",
+        Perk.Bulwark => "BLW",
+        Perk.Vanguard => "VAN",
         _ => "?",
     };
 
@@ -510,6 +543,8 @@ public static class PerkDef
         Perk.Opportunist => "+18 crit vs flanked targets (out-positioned their cover)",
         Perk.PointBlank => "+20 crit within 2 tiles",
         Perk.GiantSlayer => "+15 crit vs full-HP targets (alpha strike on a fresh foe)",
+        Perk.Bulwark => "-2 more damage taken while hunkered (dig in to hold the line)",
+        Perk.Vanguard => "+28 crit vs adjacent flanked targets (breach and finish)",
         _ => "",
     };
 }
