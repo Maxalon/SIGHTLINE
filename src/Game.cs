@@ -24,6 +24,14 @@ public class Game
     readonly List<Anim> _anims = new();
     public Anim ActiveAnim => _anims.Count > 0 ? _anims[0] : null;
 
+    // Animation-speed toggle (QoL fast-forward). A player-cyclable multiplier (1x/2x/3x) that
+    // scales ONLY the animation-queue stepping (move steps / shots / grenades / shove) and the
+    // hit-stop decay — NOT the whole game tick, so the autopilot/timers/sim are unaffected.
+    // Default 1f, and nothing reads it unless the key is pressed, so the headless screenshot
+    // path stays byte-stable and the autoplay smoke test is unchanged.
+    public float AnimSpeed = 1f;
+    public void CycleAnimSpeed() { AnimSpeed = AnimSpeed >= 3f ? 1f : AnimSpeed + 1f; }
+
     // selection / hover
     public Unit Selected;
     public int HoverX, HoverY;
@@ -74,6 +82,9 @@ public class Game
     // key + every mode-reset site). ShoveTarget is the hovered adjacent enemy (null = no valid
     // target under the cursor); ShoveValid gates the click. Costs 1 action, never ends the turn,
     // 1 use per soldier per turn (Unit.ShovedThisTurn) — bounded, no infinite reposition loop.
+    // Reach is Chebyshev <= ShoveReach (2) so it's usable at typical engagement range, not just
+    // point-blank; the PUSH is still a single tile directly away from the shover.
+    public const int ShoveReach = 2;
     public bool ShoveMode;
     public Unit ShoveTarget;
     public bool ShoveValid;
@@ -484,6 +495,12 @@ public class Game
             Vip.SyncPos();
         }
         if (Objective == Objective.Decapitate) DesignateHvt();
+        // CROSSFIRE (Wave 2): expose the full live roster to Combat.ComputeOdds so it can see an
+        // attacker's squadmates (the converging-fire bonus) without threading the list through every
+        // call — the same static-state pattern as Combat.RunBoons. Rebuilt per mission here; InCrossfire
+        // guards on Alive, so dead units left in the list are harmless. RefreshCombatRoster() re-snaps it
+        // when the roster grows mid-mission (Defend reinforcement waves).
+        RefreshCombatRoster();
         Fx.Particles.Clear();
         Fx.Texts.Clear();
         _anims.Clear();
@@ -743,24 +760,26 @@ public class Game
         if (e2.Hp >= hp0) fails.Add($"blockedShoveNoDamage(hp={e2.Hp})");
         if (!e2.Alive && e2.Hp > 0) fails.Add("blockedShoveDeathInconsistent");
 
-        // ---- (3) CanShove gating ----
+        // ---- (3) CanShove gating (reach 2) ----
         Players = new System.Collections.Generic.List<Unit>();
         Enemies = new System.Collections.Generic.List<Unit>();
         var p3 = MkP(5, 5);
         Players.Add(p3);
         if (CanShove(p3)) fails.Add("canShoveWithNoEnemy");      // no enemy anywhere
-        var eFar = MkE(15, 9); Enemies.Add(eFar);
-        if (CanShove(p3)) fails.Add("canShoveWithFarEnemy");     // enemy not adjacent
-        var eAdj = MkE(6, 5); Enemies.Add(eAdj);
+        var eFar = MkE(8, 5); Enemies.Add(eFar);                // Chebyshev 3 east -> beyond reach 2
+        if (CanShove(p3)) fails.Add("canShoveWithFarEnemy");     // enemy out of shove reach
+        if (ShoveTargetOk(p3, eFar)) fails.Add("farEnemyValidTarget");
+        var eAdj = MkE(6, 5); Enemies.Add(eAdj);                // Chebyshev 1 east -> adjacent
         if (!CanShove(p3)) fails.Add("cannotShoveWithAdjacentEnemy");
         if (!ShoveTargetOk(p3, eAdj)) fails.Add("adjacentEnemyNotValidTarget");
-        if (ShoveTargetOk(p3, eFar)) fails.Add("farEnemyValidTarget");
+        var eReach2 = MkE(7, 7); Enemies.Add(eReach2);          // Chebyshev 2 (diagonal) -> within reach
+        if (!ShoveTargetOk(p3, eReach2)) fails.Add("reach2EnemyNotValidTarget");
         // once shoved this turn, CanShove must be false (anti-loop / 1-per-turn cap)
         p3.ShovedThisTurn = true;
         if (CanShove(p3)) fails.Add("canShoveTwiceInOneTurn");
 
         return fails.Count == 0
-            ? "SHOVETEST: PASS (clear shove moves + breaks overwatch/hunker; blocked shove damages + holds; CanShove gates adjacency + 1/turn)"
+            ? "SHOVETEST: PASS (reach 2: clear shove moves + breaks overwatch/hunker; blocked shove damages + holds; CanShove gates Chebyshev<=2 + 1/turn)"
             : "SHOVETEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
@@ -1624,6 +1643,7 @@ public class Game
 
         if (Raylib.IsKeyPressed(KeyboardKey.M)) Audio.ToggleMute();
         if (!AutoPlay && Raylib.IsKeyPressed(KeyboardKey.F)) Display.ToggleFullscreen();
+        if (!AutoPlay && Raylib.IsKeyPressed(KeyboardKey.F2)) CycleAnimSpeed();   // fast-forward anim pacing (1x/2x/3x)
         Audio.SetMusicIntensity(MusicIntensity());
         UpdateTutorial(dt);
         Fx.UpdateAmbient(Biome, dt);   // per-biome ambient atmosphere (Wave B)
@@ -1648,7 +1668,7 @@ public class Game
             1f + (biomeT.B - 60) * invBase * 0.04f);
         Display.SetPostFxParams(_postFxBloom, _postFxBloom * 0.55f, grade);
 
-        if (HitStop > 0) { HitStop -= dt; return; }
+        if (HitStop > 0) { HitStop -= dt * AnimSpeed; return; }   // fast-forward shortens the hit-stop freeze too
 
         // pause/settings overlay + camera controls (live play only, never in autoplay)
         if (!AutoPlay && (Phase == Phase.PlayerTurn || Phase == Phase.EnemyTurn))
@@ -1684,7 +1704,9 @@ public class Game
             // overwatch reaction can kill the moving unit (removing `a` itself) or empty the queue.
             // So only pop index 0 when `a` is genuinely still at the front — never RemoveAt(0) on an
             // emptied/reordered queue (that was an intermittent IndexOutOfRange crash deep in a batch).
-            bool done = a.Update(this, t);
+            // Scale ONLY the anim-stepping dt by AnimSpeed (default 1f = unchanged) — this fast-forwards
+            // the visual playback without touching the autopilot/sim timers elsewhere in Update.
+            bool done = a.Update(this, t * AnimSpeed);
             if (done && _anims.Count > 0 && _anims[0] == a) _anims.RemoveAt(0);
             return;
         }
@@ -3408,24 +3430,24 @@ public class Game
 
     // ---- SHOVE (forced-movement verb) ----
     /// Can the selected soldier shove right now? Needs an action, no shove spent this turn,
-    /// and at least one alive enemy standing Chebyshev-adjacent.
+    /// and at least one alive enemy standing within ShoveReach (Chebyshev <= 2).
     public bool CanShove(Unit u)
     {
         if (u == null || u.Team != Team.Player || !u.CanAct || u.ShovedThisTurn) return false;
         foreach (var e in Enemies)
-            if (e.Alive && Util.ChebyDist(u.X, u.Y, e.X, e.Y) <= 1) return true;
+            if (e.Alive && Util.ChebyDist(u.X, u.Y, e.X, e.Y) <= ShoveReach) return true;
         return false;
     }
 
-    /// Is `target` a legal shove target for `u`? An alive enemy exactly one tile away
-    /// (Chebyshev 1, never the same tile), with the shover able + not having shoved yet.
+    /// Is `target` a legal shove target for `u`? An alive enemy within ShoveReach tiles
+    /// (Chebyshev <= 2, never the same tile), with the shover able + not having shoved yet.
     bool ShoveTargetOk(Unit u, Unit target)
     {
         if (u == null || target == null || !u.CanAct || u.ShovedThisTurn) return false;
         if (!target.Alive || target.Team != Team.Enemy) return false;
         int dx = target.X - u.X, dy = target.Y - u.Y;
         if (dx == 0 && dy == 0) return false;
-        return Math.Abs(dx) <= 1 && Math.Abs(dy) <= 1;   // Chebyshev-adjacent
+        return Math.Abs(dx) <= ShoveReach && Math.Abs(dy) <= ShoveReach;   // within shove reach
     }
 
     void ToggleShove()
@@ -3683,8 +3705,14 @@ public class Game
             Fx.Burst(e.Pos, Pal.Foe, 14, 160f, 0.5f, 3f, true);
             added++;
         }
-        if (added > 0) { Fx.PopText(Util.TileCenter(Grid.W - 2, 0) + new Vector2(0, -10), "WAVE", Pal.Foe, 20f); Audio.Play("turn"); }
+        if (added > 0) { Fx.PopText(Util.TileCenter(Grid.W - 2, 0) + new Vector2(0, -10), "WAVE", Pal.Foe, 20f); Audio.Play("turn"); RefreshCombatRoster(); }
     }
+
+    /// CROSSFIRE wiring: re-snapshot the full live roster into Combat.AllUnits so ComputeOdds'
+    /// converging-fire check sees every unit (both teams). Called per mission and whenever the
+    /// roster grows mid-mission (Defend waves). Cheap; the list is tiny.
+    void RefreshCombatRoster() =>
+        Combat.AllUnits = new List<Unit>(Players.Where(u => u != null).Concat(Enemies.Where(u => u != null)));
 
     /// AEGIS shields re-face toward the nearest soldier each enemy turn, so the squad
     /// must keep moving to flank the barrier rather than parking on one open side.

@@ -975,6 +975,7 @@ public static class Hud
             if (a.HasPerk(Perk.Opportunist) && o.Flanked)     flags.Add(("+ OPPORTUNIST", Pal.Good));
             if (a.HasPerk(Perk.PointBlank) && dist <= Unit.PointBlankRange) flags.Add(("+ POINT BLANK", Pal.Good));
             if (a.HasPerk(Perk.GiantSlayer) && d.MaxHp > 0 && d.Hp >= d.MaxHp) flags.Add(("+ FIRST STRIKE", Pal.Good));
+            if (o.Crossfire)                                  flags.Add(("+ CROSSFIRE", Pal.Good));   // a squadmate threatens this target from a converging angle
 
             // attacker penalties (red) — these quietly drag the hit% down
             if (a.Suppress > 0)                               flags.Add(("- SUPPRESSED", Pal.Foe));

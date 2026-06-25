@@ -16,6 +16,7 @@ public struct ShotOdds
     public bool Partial;     // diagonal-at-range: target only partly obscured (half cover)
     public bool Steady;      // attacker braced (sharpshooter ability) this shot
     public bool Ambush;      // attacker fired from concealment (one-shot bonus)
+    public bool Crossfire;   // target caught in converging fire from two diverging angles
 }
 
 /// The resolved outcome of a shot.
@@ -61,6 +62,21 @@ public static class Combat
     public const int BoonMarksAim  = 12;   // MARKSMEN: +aim at long range
     public const int BoonFervorCrit = 30;  // FERVOR: +crit on overwatch reactions
     public const int BoonExecCrit  = 20;   // EXECUTIONERS: +crit vs sub-half-HP targets
+
+    // ---- CROSSFIRE: the live unit roster (both teams), set once per mission by Game.SetupMission
+    // (like RunBoons) so ComputeOdds can see an attacker's squadmates without a signature change.
+    // Defaults empty -> crossfire is simply inert until Game populates it (existing callers/tests unaffected).
+    public static System.Collections.Generic.IReadOnlyList<Unit> AllUnits = System.Array.Empty<Unit>();
+    // Two attackers firing on one target from sufficiently DIFFERENT angles catch it in a crossfire:
+    // it can't use cover/position against both at once, and it's pinned/distracted. Rewards pincering
+    // (spreading the squad to flanking angles) over stacking a single firing line. Symmetric — BOTH
+    // teams earn it when they converge, so it also gives counterplay to the enemy AI's flank-positioning.
+    public const int CrossfireAim  = 10;   // converging fire: harder for the target to use cover/position
+    public const int CrossfireCrit = 10;
+    // Crossfire fires when the two firing vectors diverge by > ~72.5 degrees (cosine < this threshold)...
+    const float CrossfireCosMax = 0.30f;
+    // ...and the converging ally is a credible threat (has LoS and is within this range of the target).
+    const float CrossfireAllyRange = 10f;
 
     // Graze band: a shot that misses by <= GrazeBand hits for minimum damage (no crit).
     // Softens the "I whiffed three 80% shots" tail without removing true misses.
@@ -118,6 +134,10 @@ public static class Combat
         if (a.FiredFromConcealment) hit += AmbushAim;
         // run boon (player attacker): MARKSMEN sharpens the squad's long shots
         if (a.Team == Team.Player && RunBoons.Count > 0 && HasRunBoon(Sightline.Boon.Marksmen) && dist >= Unit.LongRange) hit += BoonMarksAim;
+        // CROSSFIRE (symmetric, both teams): a target converged on from two diverging angles can't use
+        // cover/position against both and is pinned/distracted -> the attacker's shot lands easier.
+        bool crossfire = InCrossfire(grid, a, d);
+        if (crossfire) hit += CrossfireAim;
         hit = Util.Clamp(hit, 3, 95);
 
         int crit = a.Weapon.CritBase;
@@ -159,6 +179,7 @@ public static class Combat
             if (HasRunBoon(Sightline.Boon.Fervor) && IsOverwatchReaction(a)) crit += BoonFervorCrit;
             if (HasRunBoon(Sightline.Boon.Executioners) && d.MaxHp > 0 && d.Hp * 2 < d.MaxHp) crit += BoonExecCrit;
         }
+        if (crossfire) crit += CrossfireCrit;   // converging fire also crits harder (target distracted/exposed)
         if (d.Hunkered) crit = 0;               // hunkered can't be crit
         crit = Util.Clamp(crit, 0, 100);
 
@@ -176,7 +197,51 @@ public static class Combat
             Partial = partial,
             Steady = a.Steady,
             Ambush = a.FiredFromConcealment,
+            Crossfire = crossfire,
         };
+    }
+
+    /// True when attacker `a` shooting defender `d` is a CROSSFIRE: at least one OTHER living
+    /// same-team COMBATANT has line of sight to `d` AND threatens it from a sufficiently
+    /// different angle (the two firing vectors diverge by > ~72.5 degrees). Excludes the attacker
+    /// itself, the dead, and non-combatant assets (Cls=="VIP"). Reads Combat.AllUnits.
+    /// Side-effect-free + public so the HUD/Renderer can reuse it for an indicator. O(allies): a
+    /// single early-return loop over AllUnits, no allocations (squads are <=6, AllUnits <= ~18).
+    public static bool InCrossfire(Grid grid, Unit a, Unit d)
+    {
+        if (a == null || d == null || grid == null) return false;
+        var all = AllUnits;
+        if (all == null || all.Count == 0) return false;
+
+        // v1 = the attacker's firing vector toward the target (target - attacker).
+        float v1x = d.X - a.X, v1y = d.Y - a.Y;
+        float len1Sq = v1x * v1x + v1y * v1y;
+        if (len1Sq <= 0f) return false;                    // attacker is on the target's tile
+        float len1 = MathF.Sqrt(len1Sq);
+
+        for (int i = 0; i < all.Count; i++)
+        {
+            var ally = all[i];
+            if (ally == null || ally == a) continue;       // not the attacker itself
+            if (!ally.Alive) continue;                      // dead don't converge fire
+            if (ally.Team != a.Team) continue;              // same team only
+            if (ally.Cls == "VIP") continue;                // non-combatant asset (VIP / caged captive)
+
+            // v2 = the ally's firing vector toward the same target.
+            float v2x = d.X - ally.X, v2y = d.Y - ally.Y;
+            float len2Sq = v2x * v2x + v2y * v2y;
+            if (len2Sq <= 0f) continue;                     // ally is on the target's tile
+
+            // Credible threat: within range and with an actual line of sight to the target.
+            if (Util.TileDist(ally.X, ally.Y, d.X, d.Y) > CrossfireAllyRange) continue;
+            if (!grid.HasLineOfSight(ally.X, ally.Y, d.X, d.Y)) continue;
+
+            // Angle test: cosine of the angle between the two firing vectors. A small cosine means a
+            // wide angle (the shots come from very different bearings) -> a genuine crossfire.
+            float cos = (v1x * v2x + v1y * v2y) / (len1 * MathF.Sqrt(len2Sq));
+            if (cos < CrossfireCosMax) return true;
+        }
+        return false;
     }
 
     /// True when an attack from (ax,ay) lands on a SHIELD unit's barred (front) side.
@@ -834,8 +899,75 @@ public static class Combat
             if (vanExp.CritChance != ComputeOdds(gVan, PlainU(9), adjExposed).CritChance) fails.Add("vanguardExposedNoOp");
         }
 
+        // CROSSFIRE: a target converged on from two diverging angles (a flanking ally with LoS) reads
+        // as InCrossfire -> +CrossfireAim hit / +CrossfireCrit crit; a same-angle ally (no divergence)
+        // or no ally at all does NOT. Symmetric (both teams). Sets Combat.AllUnits for the case, then
+        // restores it to empty so every other test (which assumes no roster) is unaffected.
+        {
+            var savedAll = AllUnits;                 // restore at the end no matter what
+            var gX = new Grid();                     // empty -> clear LoS for everyone
+            // target at (10,5); attacker due WEST at (5,5) -> firing vector points +x.
+            var xATk = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 5, Y = 5 };
+            var xTgt = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy,  X = 10, Y = 5, Hp = 10, MaxHp = 10 };
+            // a SAME-team ally due SOUTH at (10,10) -> firing vector points -y (90 deg off the attacker): crossfire.
+            var xAllyCross = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 10, Y = 10 };
+            // a SAME-team ally further WEST at (3,5) -> firing vector also +x (same bearing): NOT a crossfire.
+            var xAllySame  = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 3,  Y = 5 };
+            // an ENEMY at the crossfire position -> different team, must be ignored for the player attacker.
+            var xFoeCross  = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy,  X = 10, Y = 10 };
+
+            // (1) No roster at all -> inert: no crossfire, odds equal a plain (empty-roster) shot.
+            AllUnits = System.Array.Empty<Unit>();
+            var baseOdds = ComputeOdds(gX, xATk, xTgt);
+            if (InCrossfire(gX, xATk, xTgt)) fails.Add("crossfireEmptyRoster");
+            if (baseOdds.Crossfire) fails.Add("crossfireEmptyOddsFlag");
+
+            // (2) Attacker + a diverging ally with LoS -> crossfire fires: flag set, +CrossfireAim hit.
+            AllUnits = new System.Collections.Generic.List<Unit> { xATk, xTgt, xAllyCross };
+            if (!InCrossfire(gX, xATk, xTgt)) fails.Add("crossfirePredicateTrue");
+            var crossOdds = ComputeOdds(gX, xATk, xTgt);
+            if (!crossOdds.Crossfire) fails.Add("crossfireOddsFlag");
+            if (crossOdds.HitChance != Util.Clamp(baseOdds.HitChance + CrossfireAim, 3, 95)) fails.Add("crossfireHit");
+            if (crossOdds.CritChance != Util.Clamp(baseOdds.CritChance + CrossfireCrit, 0, 100)) fails.Add("crossfireCrit");
+
+            // (3) Same-angle ally (no angular divergence) -> NOT a crossfire (odds back to the base shot).
+            AllUnits = new System.Collections.Generic.List<Unit> { xATk, xTgt, xAllySame };
+            if (InCrossfire(gX, xATk, xTgt)) fails.Add("crossfireSameAngle");
+            if (ComputeOdds(gX, xATk, xTgt).HitChance != baseOdds.HitChance) fails.Add("crossfireSameAngleNoBonus");
+
+            // (4) The ONLY converging unit is an ENEMY -> ignored for a player attacker (same-team only).
+            AllUnits = new System.Collections.Generic.List<Unit> { xATk, xTgt, xFoeCross };
+            if (InCrossfire(gX, xATk, xTgt)) fails.Add("crossfireWrongTeam");
+
+            // (5) Symmetric: the ENEMY gets a crossfire too when ITS allies converge. Attacker = the foe,
+            // target = a player unit, with a second enemy at a diverging angle.
+            var eAtk = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy,  X = 5, Y = 5 };
+            var pTgt = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 10, Y = 5, Hp = 10, MaxHp = 10 };
+            var eAlly = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy,  X = 10, Y = 10 };
+            AllUnits = new System.Collections.Generic.List<Unit> { eAtk, pTgt, eAlly };
+            if (!InCrossfire(gX, eAtk, pTgt)) fails.Add("crossfireEnemySymmetric");
+
+            // (6) The diverging ally is a VIP (non-combatant asset) -> does NOT count as a converging gun.
+            var vipAlly = new Unit { Aim = 45, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 10, Y = 10, Cls = "VIP" };
+            AllUnits = new System.Collections.Generic.List<Unit> { xATk, xTgt, vipAlly };
+            if (InCrossfire(gX, xATk, xTgt)) fails.Add("crossfireVipExcluded");
+
+            // (7) The diverging ally is too FAR (beyond CrossfireAllyRange) -> not a credible threat.
+            var farAlly = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 10, Y = 24 };  // dist 19 south of target
+            AllUnits = new System.Collections.Generic.List<Unit> { xATk, xTgt, farAlly };
+            if (InCrossfire(gX, xATk, xTgt)) fails.Add("crossfireOutOfRange");
+
+            // (8) The diverging ally's LoS is BLOCKED (high cover between it and the target) -> no crossfire.
+            var gBlock = new Grid();
+            gBlock.Tiles[10, 8] = TileType.HighCover;     // wall between (10,10) ally and (10,5) target
+            AllUnits = new System.Collections.Generic.List<Unit> { xATk, xTgt, xAllyCross };
+            if (InCrossfire(gBlock, xATk, xTgt)) fails.Add("crossfireBlockedLoS");
+
+            AllUnits = savedAll;                          // restore (back to empty) for every later/other test
+        }
+
         return fails.Count == 0
-            ? "COMBATTEST: PASS (cover A-E + high-ground + tier-2 + drone/shield + ambush + graze + streak + perk-balance + build-perks + fragile-floor + armor + bulwark + vanguard all hold)"
+            ? "COMBATTEST: PASS (cover A-E + high-ground + tier-2 + drone/shield + ambush + graze + streak + perk-balance + build-perks + fragile-floor + armor + bulwark + vanguard + crossfire all hold)"
             : "COMBATTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 }
