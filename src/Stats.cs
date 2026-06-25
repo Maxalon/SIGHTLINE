@@ -22,6 +22,21 @@ public static class Stats
 {
     public static bool Enabled = false;
 
+    // ──── COMBAT LOG (Wave 4 readability) ────────────────────────────────────────
+    // A rolling ledger of the last MaxLog consequential events (shots/kills/status/objective),
+    // shown by Hud's combat-log panel. ALWAYS-ON (independent of Enabled / the balance harness) so
+    // a player can audit "did the dice cheat me?" — the antidote to output-randomness rage. Cheap:
+    // a bounded list of small structs. The Hud reads CombatLog read-only; nothing else depends on it.
+    public struct LogEntry { public int Turn; public int Team; public string Text; public string Outcome; }
+    public const int MaxLog = 40;
+    public static readonly List<LogEntry> CombatLog = new();
+    public static void ClearLog() => CombatLog.Clear();
+    public static void Log(int turn, int team, string text, string outcome = "")
+    {
+        CombatLog.Add(new LogEntry { Turn = turn, Team = team, Text = text, Outcome = outcome });
+        if (CombatLog.Count > MaxLog) CombatLog.RemoveAt(0);
+    }
+
     public class MissionRec
     {
         public int Mission, Heat, Turns;

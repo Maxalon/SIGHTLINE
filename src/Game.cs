@@ -378,6 +378,7 @@ public class Game
         _run.Mission = n;
         // publish this run's boons to the static combat reads (Marksmen/Fervor/Executioners/Fortified)
         Combat.RunBoons = new System.Collections.Generic.HashSet<Boon>(_run.ActiveBoons);
+        Stats.ClearLog();   // fresh combat-log ledger each mission
         // reset camera to identity each new mission (auto-cam will gently ease in if enabled)
         CamZoom = 1f; CamPan = Vector2.Zero; _autoCamManual = false;
         // per-mission roster: a copy of the persistent squad (+ an optional VIP),
@@ -1539,7 +1540,12 @@ public class Game
         {
             var a = _anims[0];
             if (!a.Started) { a.Started = true; a.OnStart(this); }
-            if (a.Update(this, t)) _anims.RemoveAt(0);
+            // a.Update can MUTATE the queue: KillUnit purges the dead unit's queued moves, and an
+            // overwatch reaction can kill the moving unit (removing `a` itself) or empty the queue.
+            // So only pop index 0 when `a` is genuinely still at the front — never RemoveAt(0) on an
+            // emptied/reordered queue (that was an intermittent IndexOutOfRange crash deep in a batch).
+            bool done = a.Update(this, t);
+            if (done && _anims.Count > 0 && _anims[0] == a) _anims.RemoveAt(0);
             return;
         }
 

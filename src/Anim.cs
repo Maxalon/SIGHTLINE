@@ -220,6 +220,13 @@ public class ShotAnim : Anim
             g.Fx.DirSparks(_impact, dir, Pal.RGBA(170, 180, 195), 4, 150f, 0.9f, 2f);
             g.Fx.PopText(D.Pos + new Vector2(0, -26), "MISS", Pal.TxtDim, 24f);
         }
+
+        // combat-log ledger (always-on readability): one terse line per shot with the rolled odds
+        // and outcome, so a player can audit a bad miss instead of feeling cheated.
+        bool killed = Res.Hit && D.Hp <= 0;
+        string oc = killed ? "KILL" : Res.Crit ? "CRIT" : Res.Graze ? "GRAZE" : Res.Hit ? "HIT" : "MISS";
+        string ln = $"{A.Name} > {D.Name}  {oc}" + (Res.Hit ? $" {Res.Damage}" : "") + $"  ({Res.Odds.HitChance}%)";
+        Stats.Log(g.Turn, (int)A.Team, ln, oc);
     }
 
     public override void Draw(Game g)
