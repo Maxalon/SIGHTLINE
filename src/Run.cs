@@ -573,17 +573,31 @@ public class Run
     {
         var pool = new List<Unit>();
         var classCount = new Dictionary<string, int>();
-        int guard = 0;   // bound the re-roll loop (5 classes, cap 2 each => max 10 distinct slots)
+        // Phase 1 — seed DISTINCT classes first (cap 1 each), so the draft always offers a broad spread
+        // (with 5 classes and a 6-card pool, every class appears at least once: the choice is which to
+        // DOUBLE up + who to leave behind, not "which 3 classes did the dice give me"). Bounded re-roll.
+        int guard = 0;
         while (pool.Count < DraftPoolSize && guard++ < 400)
         {
             var u = Sightline.Mission.MakeRecruit();
             classCount.TryGetValue(u.Cls, out int c);
-            if (c >= 2) continue;                 // cap any one class at 2 to force a spread
+            if (c >= 1) continue;                 // phase 1: at most one of each class
+            classCount[u.Cls] = c + 1;
+            pool.Add(u);
+            if (classCount.Count >= 5) break;     // covered every class -> move to the fill phase
+        }
+        // Phase 2 — fill the remaining slots allowing a SECOND of any class (cap 2) for some duplication.
+        guard = 0;
+        while (pool.Count < DraftPoolSize && guard++ < 400)
+        {
+            var u = Sightline.Mission.MakeRecruit();
+            classCount.TryGetValue(u.Cls, out int c);
+            if (c >= 2) continue;
             classCount[u.Cls] = c + 1;
             pool.Add(u);
         }
-        // Safety: if the (bounded) re-roll somehow under-filled, top up without the class cap
-        // so the pool is always exactly DraftPoolSize (never blocks the draft).
+        // Safety: if the (bounded) re-rolls somehow under-filled, top up so the pool is always exactly
+        // DraftPoolSize (never blocks the draft).
         while (pool.Count < DraftPoolSize) pool.Add(Sightline.Mission.MakeRecruit());
         return pool;
     }
