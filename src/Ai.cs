@@ -16,6 +16,7 @@ public class EnemyPlan
     public Unit HealTarget;       // medic: mend this wounded ally instead of fighting
     public (int x, int y)? SapTile; // sapper: demolish this player cover tile instead of shooting
     public bool UseItem;          // use a utility item (smoke/flash) this turn
+    public Unit ShoveTarget;      // rusher/Legion: shove this soldier OUT of cover to expose it (Wave 5)
     public int ItemTx, ItemTy;    // item aim tile
 }
 
@@ -515,8 +516,44 @@ public static class Ai
             }
         }
 
+        // AI uses SHOVE (Wave 5): a rusher (BERSERKER/BRUISER/HUNTER) or any LEGION-faction enemy that
+        // ends adjacent to a soldier in COVER can shove it OUT of cover -- exposing it for the pod to
+        // finish, or slamming it for collision damage if it's pinned. Turns the player's own forced-
+        // movement verb against them; thematically the Legion rush. A setup play: it REPLACES a (weak,
+        // cover-reduced) shot at that target only when the shove meaningfully exposes it (slides it to a
+        // less-covered tile) or is blocked (collision). Bounded -- the exec spends the action (no loop /
+        // no TIMEOUT); never the VIP/captive. Considered only with a spare action after moving.
+        if (plan.ShoveTarget == null && plan.SapTile == null && !plan.Grenade && !plan.UseItem
+            && plan.MoveActions < 2)
+        {
+            bool rusher = e.Cls == "BERSERKER" || e.Cls == "BRUISER" || e.Cls == "HUNTER"
+                          || Combat.MissionFaction == Faction.Legion;
+            if (rusher)
+            {
+                foreach (var p in g.AlivePlayers())
+                {
+                    if (p.Cls == "VIP") continue;                                  // never shove the asset
+                    if (Util.ChebyDist(bestTile.x, bestTile.y, p.X, p.Y) != 1) continue;   // adjacent only
+                    var cur = g.Grid.GetCover(p.X, p.Y, bestTile.x, bestTile.y);
+                    if (cur.Level == 0) continue;                                  // already exposed -> just shoot it
+                    int sdx = Math.Sign(p.X - bestTile.x), sdy = Math.Sign(p.Y - bestTile.y);
+                    int nx = p.X + sdx, ny = p.Y + sdy;
+                    bool inb = g.Grid.InBounds(nx, ny);
+                    bool slides = inb && g.Grid.IsFloor(nx, ny)
+                                  && g.Grid.GetCover(nx, ny, bestTile.x, bestTile.y).Level < cur.Level;  // shove exposes it
+                    bool pinned = !inb || !g.Grid.IsFloor(nx, ny);                                        // pinned -> collision
+                    if (slides || pinned)
+                    {
+                        plan.ShoveTarget = p;
+                        plan.ShootTarget = null;   // the shove takes the action
+                        break;
+                    }
+                }
+            }
+        }
+
         // if no shot is possible and we still have an action after moving, hunker/overwatch
-        if (plan.ShootTarget == null && !plan.Grenade && plan.SapTile == null && !plan.UseItem)
+        if (plan.ShootTarget == null && !plan.Grenade && plan.SapTile == null && !plan.UseItem && plan.ShoveTarget == null)
         {
             int spent = plan.MoveActions;
             if (spent < 2)

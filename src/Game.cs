@@ -4053,6 +4053,20 @@ public class Game
                     else
                         Enqueue(new FlashAnim(e, _aiPlan.ItemTx, _aiPlan.ItemTy), Team.Enemy);
                 }
+                else if (_aiPlan.ShoveTarget != null && _aiPlan.ShoveTarget.Alive && e.ActionsLeft > 0 &&
+                    !_aiPlan.ShoveTarget.IsVip &&
+                    Util.ChebyDist(e.X, e.Y, _aiPlan.ShoveTarget.X, _aiPlan.ShoveTarget.Y) == 1)
+                {
+                    // AI SHOVE (Wave 5): slam an adjacent covered soldier 1 tile to expose it (or deal
+                    // collision damage if it's pinned). Reuses the player's ShoveAnim verbatim; the action
+                    // is spent here (no TIMEOUT). The exposed soldier is then a soft target for the pod.
+                    e.ActionsLeft = 0;
+                    var t = _aiPlan.ShoveTarget;
+                    int sdx = Math.Sign(t.X - e.X), sdy = Math.Sign(t.Y - e.Y);
+                    Fx.PopText(e.Pos + new Vector2(0, -30), "SHOVE", Pal.Foe, 16f);
+                    Enqueue(new WaitAnim(0.15f), Team.Enemy);
+                    Enqueue(new ShoveAnim(e, t, sdx, sdy), Team.Enemy);
+                }
                 else if (_aiPlan.ShootTarget != null && _aiPlan.ShootTarget.Alive &&
                     e.ActionsLeft > 0 && e.Ammo > 0 && CanTarget(e, _aiPlan.ShootTarget))
                 {
