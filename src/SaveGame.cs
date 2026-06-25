@@ -105,6 +105,7 @@ public static class SaveGame
             BondTally = new Dictionary<string, int>(r.BondTally),
             MapSeed = r.MapSeed, MapPos = r.MapPos,
             HeatLevel = r.HeatLevel,
+            ActiveBoons = r.ActiveBoons.ConvertAll(b => (int)b),
         };
         foreach (var u in r.Squad)
             dto.Squad.Add(new UnitDto
@@ -139,6 +140,7 @@ public static class SaveGame
         var r = new Run { Mission = dto.Mission, Intel = dto.Intel, Squad = new List<Unit>(), HeatLevel = Heat.Clamp(dto.HeatLevel) };
         if (dto.Fallen != null) r.Fallen = new List<string>(dto.Fallen);
         if (dto.BondTally != null) r.BondTally = new Dictionary<string, int>(dto.BondTally);
+        if (dto.ActiveBoons != null) foreach (var b in dto.ActiveBoons) r.ActiveBoons.Add((Boon)b);
         // regenerate the branching campaign map from its seed and restore the position
         if (dto.MapSeed != 0)
         {
@@ -193,6 +195,7 @@ public static class SaveGame
         public int MapSeed;
         public int MapPos;
         public int HeatLevel;   // append-only: chosen Heat/Ascension level (old saves default 0)
+        public List<int> ActiveBoons = new();   // append-only: run-scoped boons (old saves default empty)
     }
 
     class UnitDto

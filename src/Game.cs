@@ -376,6 +376,8 @@ public class Game
     void SetupMission(int n)
     {
         _run.Mission = n;
+        // publish this run's boons to the static combat reads (Marksmen/Fervor/Executioners/Fortified)
+        Combat.RunBoons = new System.Collections.Generic.HashSet<Boon>(_run.ActiveBoons);
         // reset camera to identity each new mission (auto-cam will gently ease in if enabled)
         CamZoom = 1f; CamPan = Vector2.Zero; _autoCamManual = false;
         // per-mission roster: a copy of the persistent squad (+ an optional VIP),
@@ -980,6 +982,17 @@ public class Game
         Phase = Phase.Barracks;
     }
 
+    /// Harness (screenshot): show the run-scoped BOON pick screen.
+    public void DebugBoon()
+    {
+        _run.JumpTo(2);
+        _run.DebriefSurvivors();
+        _run.PendingPerks.Clear();
+        _shopDone = true;
+        _run.GenerateBoonOffer();        // populate the pick-1-of-3 doctrine card
+        Phase = Phase.Barracks;
+    }
+
     void EnterBarracks()
     {
         // a benched soldier sat this mission out: it's still in _run.Squad (flagged) but was
@@ -1044,6 +1057,7 @@ public class Game
             _run.Report.Insert(0, $"Recovered {gained} intel{heatNote}  (total {_run.Intel})");
             _shopDone = false;
             _run.GenerateOffers(_run.Mission + 1);
+            _run.GenerateBoonOffer();                // offer a run-scoped boon pick this barracks
             Phase = Phase.Barracks;
             Audio.Play("win");
         }
@@ -1096,6 +1110,9 @@ public class Game
     public List<Unit> AliveEnemies() => Enemies.Where(u => u.Alive).ToList();
 
     public bool IsPlayerInteractive() => Phase == Phase.PlayerTurn && _anims.Count == 0;
+
+    /// Is a run-scoped boon active? (Public so Anim.cs's shot path can read VENOM etc.)
+    public bool HasBoon(Boon b) => _run != null && _run.HasBoon(b);
 
     public bool IsOccupiedByOther(int x, int y, Unit except)
     {
@@ -1152,7 +1169,10 @@ public class Game
         {
             // 4.4: stepping within RevealRange of an already-active foe blows concealment.
             // No actor - getting spotted is not your aimed shot, so no ambush bonus.
-            if (SquadConcealed && Enemies.Any(e => e.Alive && e.Active
+            // GHOST boon: the squad moves unseen — proximity never breaks stealth (only an aggressive
+            // action does), so a GHOST run can reposition right up to a foe before springing the ambush.
+            if (SquadConcealed && !(_run != null && _run.HasBoon(Boon.Ghost))
+                    && Enemies.Any(e => e.Alive && e.Active
                     && Util.TileDist(mover.X, mover.Y, e.X, e.Y) <= RevealRange))
                 BreakConcealment();
             CheckPodActivation();  // reveal pods while advancing (no-op while still concealed)
@@ -1313,6 +1333,23 @@ public class Game
         { killer.FeatClutch = true; FeatBanner(killer, "CLUTCH KILL"); }
         if (killer.AllyDown && !killer.FeatVengeful)
         { killer.FeatVengeful = true; FeatBanner(killer, "AVENGED"); }
+
+        // run boons (on a player kill): reward aggression / sustain.
+        if (_run != null && _run.ActiveBoons.Count > 0)
+        {
+            if (_run.HasBoon(Boon.Grenadier) && killer.Grenades < 1 + killer.BonusGrenades + (killer.HasPerk(Perk.Bandolier) ? 1 : 0))
+                killer.Grenades++;                                   // a kill tops the grenade back up
+            if (_run.HasBoon(Boon.Scavenger))
+                killer.Ammo = Math.Min(killer.Weapon.Clip, killer.Ammo + 2);   // scavenge ammo
+            // ADRENALINE: a kill on the player's turn refunds +1 action, capped once/turn per soldier
+            // (shares the flank-kill refund guard so the two never compound into an endless chain).
+            if (_run.HasBoon(Boon.Adrenaline) && Phase == Phase.PlayerTurn && !_refundedThisTurn.Contains(killer))
+            {
+                killer.ActionsLeft++;
+                _refundedThisTurn.Add(killer);
+                Fx.PopText(killer.Pos + new Vector2(0, -16), "ADRENALINE", Pal.Accent, 18f);
+            }
+        }
     }
 
     /// "Press the advantage" (Wave 3 anti-turtle): when a PLAYER shot KILLS a FLANKED /
@@ -1519,6 +1556,10 @@ public class Game
                 else if (_run.PendingPerks.Count > 0)    // then resolve rank-up perk picks
                 {
                     if (AutoPlay) ChoosePerk(0); else HandlePerkClick();
+                }
+                else if (_run.BoonOffer.Count > 0)       // then pick a run-scoped boon
+                {
+                    if (AutoPlay) _run.ChooseBoon(_run.BoonOffer[0]); else HandleBoonClick();
                 }
                 else
                 {
@@ -4292,6 +4333,15 @@ public class Game
         var m = Raylib.GetMousePosition();
         foreach (var (unit, rect) in Hud.BenchBtns)
             if (Raylib.CheckCollisionPointRec(m, rect)) { ToggleBench(unit); return; }
+    }
+
+    /// Barracks: click one of the offered run-scoped boons to adopt it for the rest of the run.
+    void HandleBoonClick()
+    {
+        if (!Raylib.IsMouseButtonPressed(MouseButton.Left)) return;
+        var m = Raylib.GetMousePosition();
+        foreach (var (boon, rect) in Hud.BoonBtns)
+            if (Raylib.CheckCollisionPointRec(m, rect)) { _run.ChooseBoon(boon); Audio.Play("select"); return; }
     }
 
     // ---------------- overlay click ----------------

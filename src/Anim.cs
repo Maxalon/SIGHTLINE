@@ -123,6 +123,10 @@ public class ShotAnim : Anim
             _impact = D.Pos;
             D.Hp -= Res.Damage;
 
+            // VENOM boon: a player's hit leaves the (surviving) enemy bleeding (DoT per step).
+            if (A.Team == Team.Player && D.Team == Team.Enemy && D.Hp > 0 && g.HasBoon(Sightline.Boon.Venom))
+                D.AddStatus(StatusKind.Bleed, 2);
+
             if (Res.Graze)
             {
                 // Graze: wing-clip — lighter flash, less knockback, no cover chip; a tiny

@@ -33,6 +33,8 @@ public static class Hud
     public static Rectangle ShopProceed;
     // bench mechanic (S3-A): toggled in the barracks debrief for wounded soldiers
     public static System.Collections.Generic.List<(Unit unit, Rectangle rect)> BenchBtns = new();
+    // run-scoped boon offer (Wave 3): the pick-1-of-3 boon cards in the barracks
+    public static System.Collections.Generic.List<(Boon boon, Rectangle rect)> BoonBtns = new();
 
     // ---------------- UI motion (panel pop-in juice) ----------------
     // Panels/cards animate in (slide + fade + scale) the first time they appear, instead
@@ -1260,12 +1262,79 @@ public static class Hud
         DrawOverlayButton(OverlayBtn, "NEW RUN", win ? Pal.Good : Pal.Friend, null, btnIn);
     }
 
+    /// The run-scoped BOON pick (Wave 3): a pick-1-of-3 doctrine card shown in the barracks before
+    /// the campaign-map node choice. Boons last the whole run (discarded at run end) and stack, so
+    /// every run develops a different character. Cards are clickable (rects cached in BoonBtns).
+    static void DrawBoonOffer(Game g, Run run)
+    {
+        Raylib.DrawRectangle(0, 0, Cfg.ScreenW, Cfg.ScreenH, Raylib.Fade(Pal.RGBA(5, 8, 11), 0.9f));
+        int n = run.BoonOffer.Count;
+        int cw = 300, gap = 22, ch = 188;
+        int totalW = n * cw + (n - 1) * gap;
+        int x0 = Cfg.ScreenW / 2 - totalW / 2;
+        int y0 = Cfg.ScreenH / 2 - ch / 2 - 10;
+
+        string title = "FIELD DOCTRINE";
+        Raylib.DrawTextEx(Cfg.Font, title, new Vector2(Cfg.ScreenW / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, title, 34, 1f).X / 2, y0 - 92), 34, 1f, Pal.VipGold);
+        string sub = "CHOOSE A BOON  -  it lasts the whole run";
+        Raylib.DrawTextEx(Cfg.Font, sub, new Vector2(Cfg.ScreenW / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, sub, 14, 1f).X / 2, y0 - 54), 14, 1f, Pal.TxtDim);
+
+        var mouse = Raylib.GetMousePosition();
+        for (int i = 0; i < n; i++)
+        {
+            var boon = run.BoonOffer[i];
+            var r = new Rectangle(x0 + i * (cw + gap), y0, cw, ch);
+            bool hover = Raylib.CheckCollisionPointRec(mouse, r);
+            PanelShadow(r, 1f);
+            Raylib.DrawRectangleRounded(r, 0.06f, 8, hover ? Pal.RGBA(26, 36, 48) : Pal.Panel);
+            Raylib.DrawRectangleLinesEx(r, hover ? 2.5f : 1.5f, hover ? Pal.VipGold : Pal.PanelBd);
+            // code chip
+            Raylib.DrawTextEx(Cfg.Font, BoonDef.Code(boon), new Vector2((int)r.X + 18, (int)r.Y + 16), 16, 1f, Pal.VipGold);
+            // name
+            Raylib.DrawTextEx(Cfg.Font, BoonDef.Name(boon), new Vector2((int)r.X + 18, (int)r.Y + 46), 22, 1f, Pal.Txt);
+            // description (word-wrapped)
+            foreach (var (line, dy) in WrapLines(BoonDef.Desc(boon), cw - 36, 14, 0))
+                Raylib.DrawTextEx(Cfg.Font, line, new Vector2((int)r.X + 18, (int)r.Y + 86 + dy), 14, 1f, Pal.TxtDim);
+            Raylib.DrawTextEx(Cfg.Font, "[ CHOOSE ]", new Vector2((int)r.X + 18, (int)r.Y + ch - 30), 14, 1f, hover ? Pal.Good : Pal.Accent);
+            BoonBtns.Add((boon, r));
+        }
+
+        // active boons so far (a small strip beneath)
+        if (run.ActiveBoons.Count > 0)
+        {
+            var codes = new System.Collections.Generic.List<string>();
+            foreach (var b in run.ActiveBoons) codes.Add(BoonDef.Code(b));
+            string active = "ACTIVE: " + string.Join("  ", codes);
+            Raylib.DrawTextEx(Cfg.Font, active, new Vector2(Cfg.ScreenW / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, active, 13, 1f).X / 2, y0 + ch + 24), 13, 1f, Pal.Accent);
+        }
+    }
+
+    /// Greedy word-wrap helper: returns (line, yOffset) pairs for `text` within `width` px at `size`.
+    static System.Collections.Generic.List<(string, int)> WrapLines(string text, int width, int size, int _)
+    {
+        var lines = new System.Collections.Generic.List<(string, int)>();
+        var words = text.Split(' ');
+        string cur = "";
+        int dy = 0, lh = size + 6;
+        foreach (var w in words)
+        {
+            string test = cur.Length == 0 ? w : cur + " " + w;
+            if (Raylib.MeasureTextEx(Cfg.Font, test, size, 1f).X > width && cur.Length > 0)
+            { lines.Add((cur, dy)); dy += lh; cur = w; }
+            else cur = test;
+        }
+        if (cur.Length > 0) lines.Add((cur, dy));
+        return lines;
+    }
+
     static void DrawBarracks(Game g)
     {
         var run = g.RunState;
         BenchBtns.Clear();   // clear before the shop/perk early-returns so no stale rects linger
+        BoonBtns.Clear();
         if (!g.ShopDone) { DrawRequisition(g); return; }
         if (run.PendingPerks.Count > 0) { DrawPerkChooser(g, run.PendingPerks[0]); return; }
+        if (run.BoonOffer.Count > 0) { DrawBoonOffer(g, run); return; }
         var squad = run.Squad;
         Raylib.DrawRectangle(0, 0, Cfg.ScreenW, Cfg.ScreenH, Raylib.Fade(Pal.RGBA(5, 8, 11), 0.85f));
 

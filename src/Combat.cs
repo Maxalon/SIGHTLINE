@@ -43,6 +43,16 @@ public static class Combat
     public const int AmbushAim  = 20;
     public const int AmbushCrit = 25;
 
+    // ---- run-scoped BOONS (Wave 3) ----
+    // The active run's boons, set once per mission by Game.SetupMission (like Stats.Enabled), so the
+    // static combat reads can see them without threading run state through every ComputeOdds call.
+    // Player-only: each read gates on the relevant unit's Team so an enemy never gets a player boon.
+    public static System.Collections.Generic.HashSet<Boon> RunBoons = new();
+    static bool HasRunBoon(Boon b) => RunBoons.Contains(b);
+    public const int BoonMarksAim  = 12;   // MARKSMEN: +aim at long range
+    public const int BoonFervorCrit = 30;  // FERVOR: +crit on overwatch reactions
+    public const int BoonExecCrit  = 20;   // EXECUTIONERS: +crit vs sub-half-HP targets
+
     // Graze band: a shot that misses by <= GrazeBand hits for minimum damage (no crit).
     // Softens the "I whiffed three 80% shots" tail without removing true misses.
     public const int GrazeBand = 15;
@@ -97,6 +107,8 @@ public static class Combat
         if (a.BondAura) hit += Unit.BondAim;     // a bonded squadmate stands adjacent
 
         if (a.FiredFromConcealment) hit += AmbushAim;
+        // run boon (player attacker): MARKSMEN sharpens the squad's long shots
+        if (a.Team == Team.Player && RunBoons.Count > 0 && HasRunBoon(Sightline.Boon.Marksmen) && dist >= Unit.LongRange) hit += BoonMarksAim;
         hit = Util.Clamp(hit, 3, 95);
 
         int crit = a.Weapon.CritBase;
@@ -132,6 +144,12 @@ public static class Combat
         // it Resolves this shot) crits hard — Reflexes makes overwatch reliable, Guardian makes it lethal.
         if (a.HasPerk(Perk.Guardian) && IsOverwatchReaction(a)) crit += Unit.GuardianReactCrit;
         if (a.HasTrait(Trait.ColdBlood) && a.MaxHp > 0 && a.Hp * 2 <= a.MaxHp) crit += Unit.ColdBloodCrit;
+        // run boons (player attacker): FERVOR makes overwatch lethal; EXECUTIONERS finishes the wounded
+        if (a.Team == Team.Player && RunBoons.Count > 0)
+        {
+            if (HasRunBoon(Sightline.Boon.Fervor) && IsOverwatchReaction(a)) crit += BoonFervorCrit;
+            if (HasRunBoon(Sightline.Boon.Executioners) && d.MaxHp > 0 && d.Hp * 2 < d.MaxHp) crit += BoonExecCrit;
+        }
         if (d.Hunkered) crit = 0;               // hunkered can't be crit
         crit = Util.Clamp(crit, 0, 100);
 
@@ -187,6 +205,8 @@ public static class Combat
             reduce += Unit.HardenedFlat + (crit ? Unit.HardenedCrit : 0);  // tank perk: flat + extra vs crit
         if (d.HasPerk(Perk.Bulwark) && d.Hunkered)
             reduce += Unit.BulwarkFlat;                         // turtle perk: extra while braced
+        if (d.Team == Team.Player && RunBoons.Count > 0 && HasRunBoon(Sightline.Boon.Fortified))
+            reduce += 1;                                        // FORTIFIED boon: squad-wide +1 armor
         if (reduce <= 0) return dmg;                            // nothing to subtract: pass through
         return Math.Max(1, dmg - reduce);                       // guaranteed-damage floor (>= 1)
     }

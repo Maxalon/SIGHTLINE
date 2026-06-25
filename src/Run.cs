@@ -12,6 +12,65 @@ public class PerkOffer
 
 public enum RewardKind { None, Heal, BonusPerk }
 
+/// Run-scoped BOONS (Hades boons / StS relics): a pick-1-of-3 modifier offered each barracks
+/// that warps THIS run only (discarded at run end — the inverse of persistent perks). They are
+/// combinatorial and lateral (not a power ladder), so every run plays differently. APPEND-ONLY
+/// (the ordinal is the save key). Read in Combat.ComputeOdds (the aim/crit/armor ones, via a
+/// static Combat.RunBoons set each mission) and in Game (the on-kill / concealment / deploy ones).
+public enum Boon
+{
+    Marksmen,      // +aim at long range, squad-wide
+    Fervor,        // overwatch reactions crit
+    Executioners,  // +crit vs sub-half-HP targets, squad-wide
+    Fortified,     // +1 effective armor, squad-wide
+    Grenadier,     // a kill refreshes the killer's grenade
+    Scavenger,     // a kill refills +2 ammo to the killer
+    Adrenaline,    // a kill grants the killer +1 action this turn (cap 1/turn)
+    Venom,         // a player hit applies Bleed to the target
+    Ghost,         // moving near a foe does not break concealment
+    RapidDeploy,   // +1 deploy slot this run
+}
+
+public static class BoonDef
+{
+    public static readonly Boon[] All =
+    {
+        Boon.Marksmen, Boon.Fervor, Boon.Executioners, Boon.Fortified, Boon.Grenadier,
+        Boon.Scavenger, Boon.Adrenaline, Boon.Venom, Boon.Ghost, Boon.RapidDeploy,
+    };
+
+    public static string Name(Boon b) => b switch
+    {
+        Boon.Marksmen => "MARKSMEN", Boon.Fervor => "FERVOR", Boon.Executioners => "EXECUTIONERS",
+        Boon.Fortified => "FORTIFIED", Boon.Grenadier => "GRENADIER", Boon.Scavenger => "SCAVENGER",
+        Boon.Adrenaline => "ADRENALINE", Boon.Venom => "VENOM", Boon.Ghost => "GHOST",
+        Boon.RapidDeploy => "RAPID DEPLOY", _ => "BOON",
+    };
+
+    public static string Desc(Boon b) => b switch
+    {
+        Boon.Marksmen => "Squad +12 aim at long range",
+        Boon.Fervor => "Overwatch reaction shots crit",
+        Boon.Executioners => "Squad +20 crit vs targets below half HP",
+        Boon.Fortified => "Whole squad gains +1 armor (-1 damage/hit)",
+        Boon.Grenadier => "A kill refreshes the killer's grenade",
+        Boon.Scavenger => "A kill refills +2 ammo to the killer",
+        Boon.Adrenaline => "A kill grants the killer +1 action (once/turn)",
+        Boon.Venom => "Your hits make the target bleed",
+        Boon.Ghost => "Moving near foes never breaks concealment",
+        Boon.RapidDeploy => "Deploy one extra soldier all run",
+        _ => "",
+    };
+
+    // short tag for the active-boons strip
+    public static string Code(Boon b) => b switch
+    {
+        Boon.Marksmen => "MRK", Boon.Fervor => "FVR", Boon.Executioners => "EXE", Boon.Fortified => "FRT",
+        Boon.Grenadier => "GRN", Boon.Scavenger => "SCV", Boon.Adrenaline => "ADR", Boon.Venom => "VNM",
+        Boon.Ghost => "GHO", Boon.RapidDeploy => "RPD", _ => "?",
+    };
+}
+
 /// A pickable next-mission deployment: objective + a risk/reward modifier.
 public class MissionCard
 {
@@ -186,6 +245,11 @@ public class Run
     public List<PerkOffer> PendingPerks = new(); // rank-up perk choices awaiting the player
     public List<MissionCard> Offers = new();  // next-mission deployment choices (fallback)
     public MissionCard CurrentCard;           // the card the active mission was launched from
+
+    // ---- run-scoped boons (Wave 3 variance) ----
+    public List<Boon> ActiveBoons = new();    // boons chosen this run (persisted within the run)
+    public List<Boon> BoonOffer = new();      // the current pick-1-of-3 awaiting the player
+    public bool HasBoon(Boon b) => ActiveBoons.Contains(b);
 
     // ---- branching campaign map (3.3) ----
     public List<MissionNode> Map = new();     // the generated DAG of mission nodes
@@ -411,6 +475,8 @@ public class Run
         Fallen.Clear();
         Report.Clear();
         PendingPerks.Clear();
+        ActiveBoons.Clear();      // boons are run-scoped: a fresh run starts with none
+        BoonOffer.Clear();
         // generate the branching campaign map and seat the squad at its START node
         MapSeed = Util.RandInt(1, int.MaxValue - 1);
         GenerateMap(MapSeed);
@@ -432,8 +498,10 @@ public class Run
     public void RecordRunResult(bool win) { LossStreak = win ? 0 : Math.Min(99, LossStreak + 1); }
 
     // ---- deployment selection ----
-    /// The deploy cap for the NEXT mission (the one the barracks is preparing for).
-    public int NextDeployCap => DeployCapFor(Mission + 1);
+    /// The deploy cap for the NEXT mission (the one the barracks is preparing for). The RapidDeploy
+    /// boon adds a body, capped at DeployCapMax (= the battlefield spawn capacity), so it boosts the
+    /// early/mid game without ever overflowing PlayerSpawns.
+    public int NextDeployCap => Math.Min(DeployCapMax, DeployCapFor(Mission + 1) + (HasBoon(Boon.RapidDeploy) ? 1 : 0));
 
     /// Choose the DEFAULT deployment for the next mission: field the best NextDeployCap soldiers
     /// (healthy + senior first; the wounded sink to the bench when there are healthy alternatives),
@@ -457,6 +525,27 @@ public class Run
 
     /// Soldiers that will deploy next mission (Benched == false), for UI/queries.
     public List<Unit> Deployed => Squad.FindAll(u => !u.Benched);
+
+    // ---- boon offers ----
+    /// Build a fresh pick-1-of-3 boon offer from the boons not yet taken this run (fewer if the
+    /// pool is nearly exhausted; empty if all are owned). Deterministic-friendly (Util.RandInt).
+    public void GenerateBoonOffer()
+    {
+        BoonOffer.Clear();
+        var pool = new List<Boon>();
+        foreach (var b in BoonDef.All) if (!HasBoon(b)) pool.Add(b);
+        for (int i = pool.Count - 1; i > 0; i--) { int j = Util.RandInt(0, i); (pool[i], pool[j]) = (pool[j], pool[i]); }
+        for (int i = 0; i < pool.Count && i < 3; i++) BoonOffer.Add(pool[i]);
+    }
+
+    /// Adopt a boon from the current offer (no-op if not on offer or already owned).
+    public void ChooseBoon(Boon b)
+    {
+        if (!BoonOffer.Contains(b) || HasBoon(b)) return;
+        ActiveBoons.Add(b);
+        BoonOffer.Clear();
+        Report.Insert(0, $"BOON: {BoonDef.Name(b)}  ({BoonDef.Desc(b)})");
+    }
 
     /// Apply promotions (from accumulated kills) and field-heal to the survivors,
     /// then backfill empty squad slots with fresh rookie recruits.
