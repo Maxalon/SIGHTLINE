@@ -95,6 +95,7 @@ public class MissionNode
     public int Row;           // 0-based vertical slot within its column
     public int RowCount;      // nodes in this column (for layout)
     public NodeKind Kind;
+    public Faction Faction = Faction.None;   // enemy faction for this fight (Wave 4); None = mixed force
     public MissionCard Card;  // objective + deltas + reward derived from Kind
     public List<int> Next = new();  // outgoing edges (node ids in the next column)
     public bool Visited;
@@ -305,6 +306,16 @@ public class Run
         for (int s = 0; s < supplies && k < mids.Count; s++, k++) mids[k].Kind = NodeKind.Supply;
 
         foreach (var node in Map) node.Card = CardForNode(node);
+
+        // Enemy FACTIONS (Wave 4): give the main fights (Combat/Elite nodes) a faction identity so each
+        // reads as a distinct opponent the player pre-plans against (the EnemyHint + banner show it; the
+        // faction-gated roster + combat rule warp the encounter). START / SUPPLY / BOSS stay a mixed force
+        // (None) so the opener, rest stops, and the WARLORD finale aren't themed. Deterministic from the
+        // seeded rng, so it round-trips on load (the map is regenerated from MapSeed).
+        var facPool = new[] { Faction.Syndicate, Faction.Legion, Faction.Wardens };
+        foreach (var node in Map)
+            if (node.Kind == NodeKind.Combat || node.Kind == NodeKind.Elite)
+                node.Faction = facPool[rng.Next(facPool.Length)];
 
         // edges: wire each column to the next, then guarantee every next node has an entry
         for (int c = 0; c < cols - 1; c++)
@@ -824,8 +835,27 @@ public class Run
     /// player can make an informed pick. Derived purely from Kind + Mission column (i.e.
     /// the real spawn gating in Mission.SpawnEnemies), so it's always deterministic and
     /// roughly accurate. Kept <= ~22 chars so it fits beneath a node label.
+    /// Display name of an enemy faction (Wave 4), used by the campaign-map hint + the mission banner.
+    public static string FactionName(Faction f) => f switch
+    {
+        Faction.Syndicate => "SYNDICATE",
+        Faction.Legion    => "LEGION",
+        Faction.Wardens   => "WARDENS",
+        _ => "",
+    };
+
     public static string EnemyHint(MissionNode node)
     {
+        // Faction nodes read by their faction + signature units (the roster is faction-gated), so the
+        // branch pick telegraphs the encounter's personality (counter-build before you commit).
+        if (node.Faction != Faction.None)
+            return node.Faction switch
+            {
+                Faction.Syndicate => "SYNDICATE: drones + shields",
+                Faction.Legion    => "LEGION: berserkers rush",
+                Faction.Wardens   => "WARDENS: snipers + mortars",
+                _ => FactionName(node.Faction),
+            };
         int m = node.Mission;   // 1-based column == mission number
         switch (node.Kind)
         {

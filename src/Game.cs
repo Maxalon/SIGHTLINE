@@ -545,6 +545,12 @@ public class Game
         // adaptive assist eases the force-wide enemy stat bump (base Heat only; 0 otherwise).
         int statDelta = card.StatDelta + heatStat - _run.AssistStatRelief;
 
+        // Enemy FACTIONS (Wave 4): set the active mission's faction so BOTH the faction-gated spawn
+        // roster (Mission.SelectArchetype) AND the faction combat rule (Combat.ComputeOdds) take effect
+        // this mission. Read from the campaign node; None on START/SUPPLY/BOSS (mixed force) and any
+        // non-campaign path. MUST be set BEFORE Mission.Build — SelectArchetype reads it at spawn time.
+        Combat.MissionFaction = _run.CurrentNode?.Faction ?? Faction.None;
+
         // reserve + connectivity-verify a key tile: the Hack terminal, or the Rescue captive's seat
         (int x, int y)? reserve = HasTerminal ? Terminal
             : (Objective == Objective.Rescue ? (Grid.W / 2, Grid.H / 2) : ((int, int)?)null);
@@ -600,7 +606,8 @@ public class Game
         ItemMode = false;
         ShoveMode = false;
         Biome = Biome.For(n, _run.MapSeed);   // per-run biome variety (surfaces NEON/MAGMA across seeds)
-        ShowBanner($"MISSION {n} - {Biome.Name}", false);
+        string facTag = Combat.MissionFaction != Faction.None ? $" - {Run.FactionName(Combat.MissionFaction)}" : "";
+        ShowBanner($"MISSION {n} - {Biome.Name}{facTag}", false);
         StartTutorialMaybe();
 
         // checkpoint the run at the start of each mission (normal play only)

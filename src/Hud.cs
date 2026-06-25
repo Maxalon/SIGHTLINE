@@ -341,7 +341,10 @@ public static class Hud
         int friends = g.AlivePlayers().Count(p => !p.IsVip);
         int foes = g.AliveEnemies().Count;
         DrawCounter(Cfg.ScreenW / 2 - 130, 20, Pal.Friend, $"{friends}  SQUAD");
-        DrawCounter(Cfg.ScreenW / 2 + 20, 20, Pal.Foe, $"{foes}  HOSTILES");
+        // Wave 4: a faction mission names its enemy by FACTION (a persistent reminder of who you're
+        // fighting + which positional rule is in effect); otherwise the generic HOSTILES tally.
+        string foeLabel = Combat.MissionFaction != Faction.None ? Run.FactionName(Combat.MissionFaction) : "HOSTILES";
+        DrawCounter(Cfg.ScreenW / 2 + 20, 20, Pal.Foe, $"{foes}  {foeLabel}");
 
         // optional secondary objective (3.9): green while on track, red once blown
         if (g.Secondary != SecondaryKind.None)
