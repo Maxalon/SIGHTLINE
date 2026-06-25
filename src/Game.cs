@@ -129,7 +129,7 @@ public class Game
     // run's real reward sink, so Intel buys permanent firepower that out-paces attrition. The
     // parallel arrays + the switch handlers below auto-cover the appended items, and the shop
     // card auto-sizes to ShopName.Length (Hud.DrawRequisition), so no UI rework is needed.
-    public const int ModBase = 4;                              // count of fixed (non-mod) shop items
+    public const int ModBase = 5;                              // count of fixed (non-mod) shop items
     static WeaponMod ModForItem(int item) => WeaponModDef.All[item - ModBase];
     public static bool IsModItem(int item) => item >= ModBase && item < ModBase + WeaponModDef.All.Length;
 
@@ -139,7 +139,7 @@ public class Game
 
     static int[] BuildShopCost()
     {
-        var b = new[] { 6, 10, 16, 12 };
+        var b = new[] { 6, 10, 16, 12, 14 };   // +BALLISTIC PLATING (survivability sink)
         var all = new int[ModBase + WeaponModDef.All.Length];
         b.CopyTo(all, 0);
         for (int i = 0; i < WeaponModDef.All.Length; i++) all[ModBase + i] = WeaponModDef.Cost(WeaponModDef.All[i]);
@@ -147,7 +147,7 @@ public class Game
     }
     static string[] BuildShopName()
     {
-        var b = new[] { "FIELD MEDKIT", "COMBAT STIMS", "ADV. TRAINING", "FRAG CACHE" };
+        var b = new[] { "FIELD MEDKIT", "COMBAT STIMS", "ADV. TRAINING", "FRAG CACHE", "BALLISTIC PLATING" };
         var all = new string[ModBase + WeaponModDef.All.Length];
         b.CopyTo(all, 0);
         for (int i = 0; i < WeaponModDef.All.Length; i++) all[ModBase + i] = "WPN: " + WeaponModDef.Name(WeaponModDef.All[i]);
@@ -161,6 +161,7 @@ public class Game
             "+2 max HP to your frailest soldier (permanent).",
             "Grant a soldier a bonus perk choice.",
             "+1 grenade every mission for a soldier (permanent).",
+            "+1 armor to your least-armored soldier (permanent: -1 damage per hit).",
         };
         var all = new string[ModBase + WeaponModDef.All.Length];
         b.CopyTo(all, 0);
@@ -339,6 +340,7 @@ public class Game
         int heat = PendingHeat;
         if (NoPersist && int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_HEAT"), out int hEnv)) heat = hEnv;
         _run.HeatLevel = Sightline.Heat.Clamp(heat);
+        _run.LossStreak = _metaLossStreak;  // adaptive assist: carry the loss history into this run
         Stats.BeginRun(_run.HeatLevel);     // balance telemetry (no-op unless Stats.Enabled)
         Players = _run.Squad;
         int n = Util.Clamp(startAt, 1, Run.MaxMissions);
@@ -349,6 +351,7 @@ public class Game
     // Lazily load the persisted unlocked-max Heat once (gated by NoPersist like all save I/O,
     // so the headless harness never reads disk and stays at the default unlock of 0).
     bool _metaLoaded;
+    int _metaLossStreak;          // adaptive-assist loss streak loaded from meta.json (0 headless)
     void EnsureMetaLoaded()
     {
         if (_metaLoaded) return;
@@ -367,11 +370,15 @@ public class Game
         }
         UnlockedHeat = SaveGame.LoadMetaHeat();
         PendingHeat = Math.Min(PendingHeat, UnlockedHeat);
+        _metaLossStreak = SaveGame.LoadMetaLossStreak();
     }
 
     void SetupMission(int n)
     {
         _run.Mission = n;
+        // publish this run's boons to the static combat reads (Marksmen/Fervor/Executioners/Fortified)
+        Combat.RunBoons = new System.Collections.Generic.HashSet<Boon>(_run.ActiveBoons);
+        Stats.ClearLog();   // fresh combat-log ledger each mission
         // reset camera to identity each new mission (auto-cam will gently ease in if enabled)
         CamZoom = 1f; CamPan = Vector2.Zero; _autoCamManual = false;
         // per-mission roster: a copy of the persistent squad (+ an optional VIP),
@@ -395,8 +402,15 @@ public class Game
         // Evac / Escort / Rescue all extract to the same top-right zone
         if (Objective == Objective.Evac || Objective == Objective.Escort || Objective == Objective.Rescue)
         {
-            EvacZone.Add((Grid.W - 2, 0)); EvacZone.Add((Grid.W - 1, 0));
-            EvacZone.Add((Grid.W - 2, 1)); EvacZone.Add((Grid.W - 1, 1));
+            // A 2x4 extraction block (8 tiles) in the top-right. CRITICAL: with deploy-growth the
+            // squad can field up to DeployCapMax soldiers, and EVAC requires ALL of them to stand
+            // in the zone — a 2x2 (4 tiles) was unwinnable (and TIMEOUT-looping the autopilot) once
+            // 5+ soldiers survived. 8 tiles fits the largest squad (+ the escort VIP) with margin.
+            for (int ey = 0; ey < 4; ey++)
+            {
+                EvacZone.Add((Grid.W - 2, ey));
+                EvacZone.Add((Grid.W - 1, ey));
+            }
         }
         if (Objective == Objective.Hack)
             Terminal = (Grid.W / 2 + 1, Grid.H / 2);
@@ -409,13 +423,13 @@ public class Game
         }
         if (Objective == Objective.Escort)
         {
-            Vip = Mission.MakeVip();
+            Vip = Mission.MakeVip(n);      // VIP durability scales with mission depth
             Vip.X = 2; Vip.Y = 5;          // valid pre-build tile (spawn table refines it)
             Players.Add(Vip);
         }
         if (Objective == Objective.Rescue)
         {
-            Vip = Mission.MakeVip();
+            Vip = Mission.MakeVip(n);
             Vip.Name = "CAPTIVE";
             Vip.X = 2; Vip.Y = 5;          // pre-build placeholder; re-seated at centre below
             Players.Add(Vip);
@@ -426,7 +440,8 @@ public class Game
         // signature change): extra bodies + an extra stat bump as the ladder climbs.
         int heat = _run.HeatLevel;
         int enemyDelta = card.EnemyDelta + Sightline.Heat.EnemyDelta(heat);
-        int statDelta = card.StatDelta + Sightline.Heat.StatDelta(heat);
+        // adaptive assist eases the force-wide enemy stat bump (base Heat only; 0 otherwise).
+        int statDelta = card.StatDelta + Sightline.Heat.StatDelta(heat) - _run.AssistStatRelief;
 
         // reserve + connectivity-verify a key tile: the Hack terminal, or the Rescue captive's seat
         (int x, int y)? reserve = HasTerminal ? Terminal
@@ -501,12 +516,18 @@ public class Game
         Hvt = pool.Where(e => !IsSpecial(e)).OrderByDescending(e => e.MaxHp).ThenBy(e => e.PodId).FirstOrDefault()
            ?? pool.OrderByDescending(e => e.MaxHp).ThenBy(e => e.PodId).FirstOrDefault();
         if (Hvt == null) return;
-        // buff into a worthwhile target: a meaningful HP bump + a small aim edge. It is already
-        // an Enemy so every generic system (targeting/overwatch/FX/AI) treats it normally.
-        int bonus = 6 + _run.Mission;          // scales gently with mission depth
-        Hvt.MaxHp += bonus; Hvt.Hp += bonus;
-        Hvt.Aim = Math.Min(85, Hvt.Aim + 6);
-        Hvt.Name = Hvt.Cls == "ELITE" ? Hvt.Name : "HVT-" + Hvt.Name;
+        // buff a rank-and-file body into a worthwhile target: a meaningful HP bump + a small aim
+        // edge. It is already an Enemy so every generic system (targeting/overwatch/FX/AI) treats
+        // it normally. EXCEPTION: an ELITE (the WARLORD on the boss node, now a Decapitate) is
+        // ALREADY a tuned boss — double-buffing it would re-create the stat-check wall we're
+        // removing, so the ELITE keeps its own stats and only takes the HVT marker/name.
+        if (Hvt.Cls != "ELITE")
+        {
+            int bonus = 6 + _run.Mission;      // scales gently with mission depth
+            Hvt.MaxHp += bonus; Hvt.Hp += bonus;
+            Hvt.Aim = Math.Min(85, Hvt.Aim + 6);
+            Hvt.Name = "HVT-" + Hvt.Name;
+        }
     }
 
     /// Resume a saved campaign from the intro. Reloads the run and restarts its
@@ -517,6 +538,7 @@ public class Game
         if (run == null || run.Squad == null || run.Squad.Count == 0) return false;
         EnsureMetaLoaded();   // so a resumed run that gets WON can still unlock the next Heat
         _run = run;
+        _run.LossStreak = _metaLossStreak;   // adaptive assist carries across a resumed run
         Players = _run.Squad;
         int n = Util.Clamp(_run.Mission < 1 ? 1 : _run.Mission, 1, Run.MaxMissions);
         _run.CurrentCard ??= Run.StandardCard(n);
@@ -633,32 +655,41 @@ public class Game
             : "CONCEALTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
-    /// Headless self-test for the bench/short-handed lifecycle (S3-A + review fixes).
-    /// Verifies a benched veteran is NOT deployed, NOT lost from the squad, recovers
-    /// (full HP + Wound-2), and is un-benched afterwards. Prints BENCHTEST: PASS/FAIL.
+    /// Headless self-test for the WAVE 1 deep-roster + deployment lifecycle.
+    /// Verifies: AutoDeploy benches the wounded when healthy bodies exist, deploy never exceeds
+    /// DeployCap, the roster backfills toward RosterMax, and a benched (wounded) soldier is
+    /// preserved + recovers faster across a debrief. Prints BENCHTEST: PASS/FAIL.
     public string BenchSelfTest()
     {
         NoPersist = true;
         var fails = new System.Collections.Generic.List<string>();
         StartMission(1);                                  // fresh run + mission 1 deployed
-        var vet = _run.Squad.FirstOrDefault(u => !u.IsVip);
-        if (vet == null) return "BENCHTEST: FAIL (noSquad)";
-        vet.Wound = 2; vet.Hp = 1; vet.Benched = true;    // a wounded veteran, benched
+        if (_run.Squad.Count(u => !u.IsVip) < 1) return "BENCHTEST: FAIL (noSquad)";
+        int cap = _run.NextDeployCap;
+        if (_run.Deployed.Count > cap) fails.Add("startDeployedOverCap");
 
-        SetupMission(1);                                  // redeploy with the bench set
-        if (Players.Contains(vet)) fails.Add("benchedStillDeployed");
-        if (!vet.Benched) fails.Add("flagClearedAtSetup");          // Blocker 2
-        if (!_run.Squad.Contains(vet)) fails.Add("droppedAtSetup");
-        if (AlivePlayers().Count(p => !p.IsVip) > 3) fails.Add("deployedNotShortHanded");
+        // (1) AutoDeploy benches the wounded when healthy alternatives exist + caps the deploy.
+        while (_run.Squad.Count < Run.RosterMax) _run.Squad.Add(Mission.MakeRecruit());
+        var wounded = _run.Squad[0]; wounded.Wound = 2; wounded.Hp = 1;
+        foreach (var u in _run.Squad.Skip(1)) { u.Wound = 0; u.Hp = u.MaxHp; }   // the rest healthy
+        _run.AutoDeploy();
+        if (!wounded.Benched) fails.Add("woundedNotBenched");
+        if (_run.Deployed.Count != cap) fails.Add($"deployedNot{cap}");
+        if (_run.Deployed.Any(u => u.Wound > 0)) fails.Add("deployedWoundedDespiteHealthy");
 
-        EnterBarracks();                                  // simulate mission-end debrief
-        if (!_run.Squad.Contains(vet)) fails.Add("benchedLostAtBarracks");   // Blocker 1
-        if (vet.Benched) fails.Add("flagNotClearedAfterDebrief");            // Blocker 2
-        if (vet.Hp != vet.MaxHp) fails.Add("notHealed");                     // accelerated recovery
-        if (vet.Wound != 0) fails.Add($"woundNotRecovered={vet.Wound}");     // 2 -> 0 (decay 2)
+        // (2) a benched wounded soldier is preserved + recovers faster across a debrief.
+        int hp0 = wounded.Hp;
+        _run.DebriefSurvivors();                          // benched-recovery path + re-AutoDeploy
+        if (!_run.Squad.Contains(wounded)) fails.Add("benchedLostAtDebrief");
+        if (wounded.Hp <= hp0) fails.Add("benchedNotHealed");
+        if (wounded.Wound > 1) fails.Add($"benchedWoundNotRecovered={wounded.Wound}");
+
+        // (3) caps hold after a debrief.
+        if (_run.Squad.Count > Run.RosterMax) fails.Add("rosterOverMax");
+        if (_run.Deployed.Count > _run.NextDeployCap) fails.Add("deployedOverCapAfterDebrief");
 
         return fails.Count == 0
-            ? "BENCHTEST: PASS (benched veteran sits out, is preserved, recovers full HP + 2 wound steps, un-benches)"
+            ? "BENCHTEST: PASS (auto-bench wounded, deploy<=cap, roster<=max, benched recover+preserved)"
             : "BENCHTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
@@ -959,6 +990,17 @@ public class Game
         Phase = Phase.Barracks;
     }
 
+    /// Harness (screenshot): show the run-scoped BOON pick screen.
+    public void DebugBoon()
+    {
+        _run.JumpTo(2);
+        _run.DebriefSurvivors();
+        _run.PendingPerks.Clear();
+        _shopDone = true;
+        _run.GenerateBoonOffer();        // populate the pick-1-of-3 doctrine card
+        Phase = Phase.Barracks;
+    }
+
     void EnterBarracks()
     {
         // a benched soldier sat this mission out: it's still in _run.Squad (flagged) but was
@@ -978,8 +1020,11 @@ public class Game
         if (!finished && _run.CurrentCard != null && _run.CurrentCard.Reward == RewardKind.Heal)
             foreach (var u in _run.Squad) u.Hp = u.MaxHp;
 
+        // DebriefSurvivors reads the just-played bench state (benched soldiers recover faster),
+        // backfills the roster, then calls AutoDeploy() to set the DEFAULT deployment for next
+        // mission (best healthy DeployCap; wounded benched). So Benched is now meaningful coming
+        // out of the debrief — the player tunes it in the barracks; we must NOT clear it here.
         _run.DebriefSurvivors();
-        foreach (var u in _run.Squad) u.Benched = false;   // consumed (Blocker 2): redeploy next mission
 
         // secondary objective (3.9): award bonus intel if the optional goal was met
         if (Secondary != SecondaryKind.None)
@@ -1002,6 +1047,9 @@ public class Game
         {
             // Heat/Ascension: winning a run at the current cap unlocks the next rung (META).
             UnlockHeatOnWin();
+            // adaptive assist: a win clears the loss streak (the next run starts un-assisted).
+            _run.RecordRunResult(true);
+            if (!NoPersist) SaveGame.SaveMetaLossStreak(_run.LossStreak);
             Phase = Phase.Win; Audio.Play("win"); if (!NoPersist) SaveGame.Delete();
         }
         else
@@ -1017,6 +1065,7 @@ public class Game
             _run.Report.Insert(0, $"Recovered {gained} intel{heatNote}  (total {_run.Intel})");
             _shopDone = false;
             _run.GenerateOffers(_run.Mission + 1);
+            _run.GenerateBoonOffer();                // offer a run-scoped boon pick this barracks
             Phase = Phase.Barracks;
             Audio.Play("win");
         }
@@ -1051,7 +1100,10 @@ public class Game
         Stats.EndMission(false, _turnCount, AlivePlayers().Count(p => !p.IsVip),
                          Enemies.Count(e => !e.Alive), title);
         Stats.EndRun(false, _run.Mission - 1, title);
-        if (!NoPersist) SaveGame.Delete();
+        // adaptive assist: a lost run grows the streak, so a persistently-stuck player gets a
+        // small, capped, reversible easing on their NEXT base-Heat run (Hades God-Mode).
+        _run.RecordRunResult(false);
+        if (!NoPersist) { SaveGame.SaveMetaLossStreak(_run.LossStreak); SaveGame.Delete(); }
     }
 
     void ShowBanner(string text, bool enemy)
@@ -1066,6 +1118,9 @@ public class Game
     public List<Unit> AliveEnemies() => Enemies.Where(u => u.Alive).ToList();
 
     public bool IsPlayerInteractive() => Phase == Phase.PlayerTurn && _anims.Count == 0;
+
+    /// Is a run-scoped boon active? (Public so Anim.cs's shot path can read VENOM etc.)
+    public bool HasBoon(Boon b) => _run != null && _run.HasBoon(b);
 
     public bool IsOccupiedByOther(int x, int y, Unit except)
     {
@@ -1122,7 +1177,10 @@ public class Game
         {
             // 4.4: stepping within RevealRange of an already-active foe blows concealment.
             // No actor - getting spotted is not your aimed shot, so no ambush bonus.
-            if (SquadConcealed && Enemies.Any(e => e.Alive && e.Active
+            // GHOST boon: the squad moves unseen — proximity never breaks stealth (only an aggressive
+            // action does), so a GHOST run can reposition right up to a foe before springing the ambush.
+            if (SquadConcealed && !(_run != null && _run.HasBoon(Boon.Ghost))
+                    && Enemies.Any(e => e.Alive && e.Active
                     && Util.TileDist(mover.X, mover.Y, e.X, e.Y) <= RevealRange))
                 BreakConcealment();
             CheckPodActivation();  // reveal pods while advancing (no-op while still concealed)
@@ -1283,6 +1341,23 @@ public class Game
         { killer.FeatClutch = true; FeatBanner(killer, "CLUTCH KILL"); }
         if (killer.AllyDown && !killer.FeatVengeful)
         { killer.FeatVengeful = true; FeatBanner(killer, "AVENGED"); }
+
+        // run boons (on a player kill): reward aggression / sustain.
+        if (_run != null && _run.ActiveBoons.Count > 0)
+        {
+            if (_run.HasBoon(Boon.Grenadier) && killer.Grenades < 1 + killer.BonusGrenades + (killer.HasPerk(Perk.Bandolier) ? 1 : 0))
+                killer.Grenades++;                                   // a kill tops the grenade back up
+            if (_run.HasBoon(Boon.Scavenger))
+                killer.Ammo = Math.Min(killer.Weapon.Clip, killer.Ammo + 2);   // scavenge ammo
+            // ADRENALINE: a kill on the player's turn refunds +1 action, capped once/turn per soldier
+            // (shares the flank-kill refund guard so the two never compound into an endless chain).
+            if (_run.HasBoon(Boon.Adrenaline) && Phase == Phase.PlayerTurn && !_refundedThisTurn.Contains(killer))
+            {
+                killer.ActionsLeft++;
+                _refundedThisTurn.Add(killer);
+                Fx.PopText(killer.Pos + new Vector2(0, -16), "ADRENALINE", Pal.Accent, 18f);
+            }
+        }
     }
 
     /// "Press the advantage" (Wave 3 anti-turtle): when a PLAYER shot KILLS a FLANKED /
@@ -1472,7 +1547,12 @@ public class Game
         {
             var a = _anims[0];
             if (!a.Started) { a.Started = true; a.OnStart(this); }
-            if (a.Update(this, t)) _anims.RemoveAt(0);
+            // a.Update can MUTATE the queue: KillUnit purges the dead unit's queued moves, and an
+            // overwatch reaction can kill the moving unit (removing `a` itself) or empty the queue.
+            // So only pop index 0 when `a` is genuinely still at the front — never RemoveAt(0) on an
+            // emptied/reordered queue (that was an intermittent IndexOutOfRange crash deep in a batch).
+            bool done = a.Update(this, t);
+            if (done && _anims.Count > 0 && _anims[0] == a) _anims.RemoveAt(0);
             return;
         }
 
@@ -1489,6 +1569,10 @@ public class Game
                 else if (_run.PendingPerks.Count > 0)    // then resolve rank-up perk picks
                 {
                     if (AutoPlay) ChoosePerk(0); else HandlePerkClick();
+                }
+                else if (_run.BoonOffer.Count > 0)       // then pick a run-scoped boon
+                {
+                    if (AutoPlay) _run.ChooseBoon(_run.BoonOffer[0]); else HandleBoonClick();
                 }
                 else
                 {
@@ -3750,9 +3834,17 @@ public class Game
             0 => _run.Squad.Any(u => u.Hp < u.MaxHp || u.Wound > 0),  // medkit needs someone hurt or wounded
             2 => _run.Squad.Any(u => CountPerksLeft(u) >= 2), // training needs an un-maxed soldier
             3 => _run.Squad.Any(u => u.BonusGrenades < 2),    // cache caps at +2 per soldier
+            4 => ArmorTarget() != null,                       // plating: a soldier under the armor cap
             _ => _run.Squad.Count > 0,
         };
     }
+
+    /// The soldier a PLATING purchase armors: the least-armored combatant under the cap, tie-broken
+    /// toward the veteran who'll carry the run. Spreads survivability before stacking it on one body.
+    Unit ArmorTarget() => _run.Squad
+        .Where(u => !u.IsVip && u.Armor < Unit.ArmorMax)
+        .OrderBy(u => u.Armor).ThenByDescending(u => u.Kills).ThenBy(u => u.Name)
+        .FirstOrDefault();
 
     static int CountPerksLeft(Unit u)
     {
@@ -3778,6 +3870,7 @@ public class Game
             0 => _run.Squad.Where(u => u.Hp < u.MaxHp || u.Wound > 0).OrderByDescending(u => u.Wound).ThenBy(u => u.Hp).FirstOrDefault(),
             1 => _run.Squad.OrderBy(u => u.MaxHp).FirstOrDefault(),
             3 => _run.Squad.Where(u => u.BonusGrenades < 2).OrderBy(u => u.BonusGrenades).FirstOrDefault(),
+            4 => ArmorTarget(),
             _ => null,
         };
     }
@@ -3797,6 +3890,7 @@ public class Game
             case 1: return t == null ? "-" : $"{t.Name}: max HP {t.MaxHp} -> {t.MaxHp + 2}";
             case 2: return _run.Squad.Any(u => CountPerksLeft(u) >= 2) ? "a soldier gains a perk pick" : "every soldier is maxed";
             case 3: return t == null ? "all soldiers at the cap" : $"{t.Name}: +1 grenade/mission";
+            case 4: return t == null ? "all soldiers fully plated" : $"{t.Name}: armor {t.Armor} -> {t.Armor + 1}";
             default: return "";
         }
     }
@@ -3836,6 +3930,12 @@ public class Game
                 carrier.BonusGrenades += 1;
                 _run.Report.Add($"{carrier.Name} issued a frag cache  (+1 grenade/mission)");
                 break;
+            case 4:
+                var plated = ArmorTarget();
+                if (plated == null) { Audio.Play("miss"); return; }
+                plated.Armor += 1;
+                _run.Report.Add($"{plated.Name} fitted ballistic plating  (armor {plated.Armor}, -1 dmg/hit)");
+                break;
         }
         _run.Intel -= ShopCost[item];
         Audio.Play("select");
@@ -3863,10 +3963,15 @@ public class Game
 
         for (int guard = 0; guard < 40; guard++)
         {
-            // cheapest affordable, still-useful weapon mod
+            // cheapest affordable PERMANENT upgrade: weapon mods + plating (4) + frag (3) + stims
+            // (1). Skip the heal (0, done) and the perk pick (2, needs the chooser flow). Greedy by
+            // cost so a leveled squad sinks intel into firepower AND survivability (the reward sink).
             int best = -1, bestCost = int.MaxValue;
-            for (int i = ModBase; i < ShopCost.Length; i++)
+            for (int i = 1; i < ShopCost.Length; i++)
+            {
+                if (i == 2) continue;   // perk pick is a player choice, not an auto-buy
                 if (CanBuy(i) && ShopCost[i] < bestCost) { best = i; bestCost = ShopCost[i]; }
+            }
             if (best < 0) break;        // nothing affordable/useful left
             int before = _run.Intel;
             DoPurchase(best);
@@ -4214,19 +4319,22 @@ public class Game
             if (Raylib.CheckCollisionPointRec(m, rect)) { ChooseNode(id); return; }
     }
 
-    // ---------------- bench mechanic ----------------
-    /// Toggle a wounded soldier between benched / not benched.
-    /// Guards: only wounded soldiers may be benched; at least 1 deployable must remain.
-    /// Never called by the autopilot (headless runs always deploy full-strength).
+    // ---------------- deployment / bench mechanic ----------------
+    /// Toggle a roster soldier between DEPLOYED and BENCHED (the deploy-picker). With the deep
+    /// roster (up to RosterMax, deploy up to DeployCap) ANY soldier may be benched — you field
+    /// your best DeployCap and the rest recover off the line. Guards: keep at least 1 deployed,
+    /// and never deploy more than DeployCap. Never called by the autopilot (it takes AutoDeploy's
+    /// default). AutoDeploy already benches the wounded by default; this lets the player override.
     public void ToggleBench(Unit u)
     {
-        if (AutoPlay) return;
-        if (u == null || u.Wound == 0) return;   // only wounded soldiers may be benched
+        if (AutoPlay || u == null) return;
         if (!u.Benched)
         {
-            // count how many would remain deployable if we bench this soldier
-            int deployable = _run.Squad.Count(s => !s.Benched && s != u);
-            if (deployable < 1) return;           // must keep at least 1 soldier in the field
+            if (_run.Squad.Count(s => !s.Benched && s != u) < 1) return;   // keep >=1 deployed
+        }
+        else
+        {
+            if (_run.Deployed.Count >= _run.NextDeployCap) return;         // don't exceed the cap
         }
         u.Benched = !u.Benched;
         Audio.Play("select");
@@ -4238,6 +4346,15 @@ public class Game
         var m = Raylib.GetMousePosition();
         foreach (var (unit, rect) in Hud.BenchBtns)
             if (Raylib.CheckCollisionPointRec(m, rect)) { ToggleBench(unit); return; }
+    }
+
+    /// Barracks: click one of the offered run-scoped boons to adopt it for the rest of the run.
+    void HandleBoonClick()
+    {
+        if (!Raylib.IsMouseButtonPressed(MouseButton.Left)) return;
+        var m = Raylib.GetMousePosition();
+        foreach (var (boon, rect) in Hud.BoonBtns)
+            if (Raylib.CheckCollisionPointRec(m, rect)) { _run.ChooseBoon(boon); Audio.Play("select"); return; }
     }
 
     // ---------------- overlay click ----------------

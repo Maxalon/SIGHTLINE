@@ -33,6 +33,8 @@ public static class Hud
     public static Rectangle ShopProceed;
     // bench mechanic (S3-A): toggled in the barracks debrief for wounded soldiers
     public static System.Collections.Generic.List<(Unit unit, Rectangle rect)> BenchBtns = new();
+    // run-scoped boon offer (Wave 3): the pick-1-of-3 boon cards in the barracks
+    public static System.Collections.Generic.List<(Boon boon, Rectangle rect)> BoonBtns = new();
 
     // ---------------- UI motion (panel pop-in juice) ----------------
     // Panels/cards animate in (slide + fade + scale) the first time they appear, instead
@@ -90,7 +92,12 @@ public static class Hud
     public static void Draw(Game g)
     {
         DrawTopBar(g);
-        if (g.Phase == Phase.PlayerTurn || g.Phase == Phase.EnemyTurn) DrawRoster(g);
+        if (g.Phase == Phase.PlayerTurn || g.Phase == Phase.EnemyTurn)
+        {
+            DrawRoster(g);
+            DrawBoonStrip(g);   // active run boons, just under the top bar
+            DrawCombatLog(g);   // rolling combat ledger, lower-right above the action bar
+        }
         DrawBottomBar(g);
         DrawTooltip(g);
         if ((g.Phase == Phase.PlayerTurn || g.Phase == Phase.EnemyTurn) && g.TutorialText != null)
@@ -362,6 +369,88 @@ public static class Hud
     {
         Raylib.DrawCircle(x, y + 7, 6, dot);
         Raylib.DrawTextEx(Cfg.Font, text, new Vector2(x + 14, y), 16, 1f, Pal.Txt);
+    }
+
+    // ---------------- active-boons strip ----------------
+    // Small gold chips of each run-scoped boon's short code, right-anchored just under the
+    // top bar so the player always sees which run modifiers are live. Draws nothing when the
+    // run has no boons (so heat-0 / boon-less runs stay byte-identical). Render-only.
+    static void DrawBoonStrip(Game g)
+    {
+        var boons = g.RunState?.ActiveBoons;
+        if (boons == null || boons.Count == 0) return;
+
+        const float size = 12f, padX = 7f, h = 18f, gap = 5f, y = 46f;
+        // measure right-to-left so the strip hugs the screen's right edge (clear of the
+        // left roster strip, the heat pill and the end-turn button above it)
+        float x = Cfg.ScreenW - 20f;
+        for (int i = boons.Count - 1; i >= 0; i--)
+        {
+            string code = BoonDef.Code(boons[i]);
+            float tw = Raylib.MeasureTextEx(Cfg.Font, code, size, 1f).X;
+            float w = tw + padX * 2f;
+            x -= w;
+            var chip = new Rectangle(x, y, w, h);
+            Raylib.DrawRectangleRounded(chip, 0.4f, 6, Raylib.Fade(Pal.Panel, 0.85f));
+            Raylib.DrawRectangleLinesEx(chip, 1f, Raylib.Fade(Pal.VipGold, 0.55f));
+            Raylib.DrawTextEx(Cfg.Font, code, new Vector2(x + padX, y + 3f), size, 1f, Pal.VipGold);
+            x -= gap;
+        }
+    }
+
+    // ---------------- in-mission combat log ----------------
+    // A compact, always-visible ledger of the last few consequential events (Stats.CombatLog,
+    // always-on backend) anchored lower-right above the action bar. Team-colored + outcome-tinted,
+    // very low-alpha background so it never fights the board (readability is sacred: it sits over
+    // the lower-right board corner but never occludes units/threat pips meaningfully). Render-only.
+    static void DrawCombatLog(Game g)
+    {
+        var log = Stats.CombatLog;
+        const int shown = 6;
+        const float w = 296f, lh = 14f, padX = 9f, headH = 18f, padY = 6f;
+        float bodyH = shown * lh;
+        float h = headH + bodyH + padY;
+        // bottom edge sits just above the action-button row (y 720) and the unit card (x 20..270)
+        float x = Cfg.ScreenW - w - 14f;
+        float y = 712f - h;
+        var panel = new Rectangle(x, y, w, h);
+
+        // low-alpha frame so the board reads through it
+        Raylib.DrawRectangleRounded(panel, 0.10f, 6, Raylib.Fade(Pal.RGBA(8, 12, 17), 0.62f));
+        Raylib.DrawRectangleLinesEx(panel, 1f, Raylib.Fade(Pal.PanelBd, 0.6f));
+        // tiny header
+        Raylib.DrawTextEx(Cfg.Font, "LOG", new Vector2(x + padX, y + 4f), 11, 1f, Pal.TxtDim);
+
+        float ty = y + headH;
+        int start = Math.Max(0, log.Count - shown);
+        for (int i = start; i < log.Count; i++)
+        {
+            var e = log[i];
+            // base color by team (Player=0 -> Friend, else Foe), then tint by outcome
+            Color c = e.Team == 0 ? Pal.Friend : Pal.Foe;
+            switch (e.Outcome)
+            {
+                case "KILL":  c = Pal.VipGold; break;            // bright: a death
+                case "CRIT":  c = Pal.Accent;  break;            // crit pop
+                case "GRAZE":
+                case "MISS":  c = Pal.TxtDim;  break;            // dim: low-consequence
+            }
+            string line = e.Text ?? "";
+            // clip to the panel width so long lines never spill
+            line = Clip(line, 11, (int)(w - padX * 2f));
+            Raylib.DrawTextEx(Cfg.Font, line, new Vector2(x + padX, ty), 11, 1f, c);
+            ty += lh;
+        }
+    }
+
+    /// Truncate `text` (with an ellipsis) so it fits within `maxW` px at `size`.
+    static string Clip(string text, int size, int maxW)
+    {
+        if (string.IsNullOrEmpty(text)) return text;
+        if (Raylib.MeasureTextEx(Cfg.Font, text, size, 1f).X <= maxW) return text;
+        while (text.Length > 1 && Raylib.MeasureTextEx(Cfg.Font, text + "…", size, 1f).X > maxW)
+            text = text.Substring(0, text.Length - 1);
+        return text + "…";
     }
 
     // ---------------- bottom bar ----------------
@@ -1260,18 +1349,86 @@ public static class Hud
         DrawOverlayButton(OverlayBtn, "NEW RUN", win ? Pal.Good : Pal.Friend, null, btnIn);
     }
 
+    /// The run-scoped BOON pick (Wave 3): a pick-1-of-3 doctrine card shown in the barracks before
+    /// the campaign-map node choice. Boons last the whole run (discarded at run end) and stack, so
+    /// every run develops a different character. Cards are clickable (rects cached in BoonBtns).
+    static void DrawBoonOffer(Game g, Run run)
+    {
+        Raylib.DrawRectangle(0, 0, Cfg.ScreenW, Cfg.ScreenH, Raylib.Fade(Pal.RGBA(5, 8, 11), 0.9f));
+        int n = run.BoonOffer.Count;
+        int cw = 300, gap = 22, ch = 188;
+        int totalW = n * cw + (n - 1) * gap;
+        int x0 = Cfg.ScreenW / 2 - totalW / 2;
+        int y0 = Cfg.ScreenH / 2 - ch / 2 - 10;
+
+        string title = "FIELD DOCTRINE";
+        Raylib.DrawTextEx(Cfg.Font, title, new Vector2(Cfg.ScreenW / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, title, 34, 1f).X / 2, y0 - 92), 34, 1f, Pal.VipGold);
+        string sub = "CHOOSE A BOON  -  it lasts the whole run";
+        Raylib.DrawTextEx(Cfg.Font, sub, new Vector2(Cfg.ScreenW / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, sub, 14, 1f).X / 2, y0 - 54), 14, 1f, Pal.TxtDim);
+
+        var mouse = Raylib.GetMousePosition();
+        for (int i = 0; i < n; i++)
+        {
+            var boon = run.BoonOffer[i];
+            var r = new Rectangle(x0 + i * (cw + gap), y0, cw, ch);
+            bool hover = Raylib.CheckCollisionPointRec(mouse, r);
+            PanelShadow(r, 1f);
+            Raylib.DrawRectangleRounded(r, 0.06f, 8, hover ? Pal.RGBA(26, 36, 48) : Pal.Panel);
+            Raylib.DrawRectangleLinesEx(r, hover ? 2.5f : 1.5f, hover ? Pal.VipGold : Pal.PanelBd);
+            // code chip
+            Raylib.DrawTextEx(Cfg.Font, BoonDef.Code(boon), new Vector2((int)r.X + 18, (int)r.Y + 16), 16, 1f, Pal.VipGold);
+            // name
+            Raylib.DrawTextEx(Cfg.Font, BoonDef.Name(boon), new Vector2((int)r.X + 18, (int)r.Y + 46), 22, 1f, Pal.Txt);
+            // description (word-wrapped)
+            foreach (var (line, dy) in WrapLines(BoonDef.Desc(boon), cw - 36, 14, 0))
+                Raylib.DrawTextEx(Cfg.Font, line, new Vector2((int)r.X + 18, (int)r.Y + 86 + dy), 14, 1f, Pal.TxtDim);
+            Raylib.DrawTextEx(Cfg.Font, "[ CHOOSE ]", new Vector2((int)r.X + 18, (int)r.Y + ch - 30), 14, 1f, hover ? Pal.Good : Pal.Accent);
+            BoonBtns.Add((boon, r));
+        }
+
+        // active boons so far (a small strip beneath)
+        if (run.ActiveBoons.Count > 0)
+        {
+            var codes = new System.Collections.Generic.List<string>();
+            foreach (var b in run.ActiveBoons) codes.Add(BoonDef.Code(b));
+            string active = "ACTIVE: " + string.Join("  ", codes);
+            Raylib.DrawTextEx(Cfg.Font, active, new Vector2(Cfg.ScreenW / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, active, 13, 1f).X / 2, y0 + ch + 24), 13, 1f, Pal.Accent);
+        }
+    }
+
+    /// Greedy word-wrap helper: returns (line, yOffset) pairs for `text` within `width` px at `size`.
+    static System.Collections.Generic.List<(string, int)> WrapLines(string text, int width, int size, int _)
+    {
+        var lines = new System.Collections.Generic.List<(string, int)>();
+        var words = text.Split(' ');
+        string cur = "";
+        int dy = 0, lh = size + 6;
+        foreach (var w in words)
+        {
+            string test = cur.Length == 0 ? w : cur + " " + w;
+            if (Raylib.MeasureTextEx(Cfg.Font, test, size, 1f).X > width && cur.Length > 0)
+            { lines.Add((cur, dy)); dy += lh; cur = w; }
+            else cur = test;
+        }
+        if (cur.Length > 0) lines.Add((cur, dy));
+        return lines;
+    }
+
     static void DrawBarracks(Game g)
     {
         var run = g.RunState;
         BenchBtns.Clear();   // clear before the shop/perk early-returns so no stale rects linger
+        BoonBtns.Clear();
         if (!g.ShopDone) { DrawRequisition(g); return; }
         if (run.PendingPerks.Count > 0) { DrawPerkChooser(g, run.PendingPerks[0]); return; }
+        if (run.BoonOffer.Count > 0) { DrawBoonOffer(g, run); return; }
         var squad = run.Squad;
         Raylib.DrawRectangle(0, 0, Cfg.ScreenW, Cfg.ScreenH, Raylib.Fade(Pal.RGBA(5, 8, 11), 0.85f));
 
         int w = 700;
         int rows = squad.Count;
-        int h = 150 + rows * 46 + Math.Min(run.Report.Count, 5) * 22 + 220;
+        const int rowPitch = 44;   // tightened so a full 6-soldier roster + debrief + map fits 800px tall
+        int h = 150 + 22 /*deploy header*/ + rows * rowPitch + Math.Min(run.Report.Count, 5) * 22 + 220;
         int x = Cfg.ScreenW / 2 - w / 2;
         int y = Cfg.ScreenH / 2 - h / 2;
         // quick slide-down entrance (≈0.15s, settles well before any click on the map/bench)
@@ -1294,11 +1451,21 @@ public static class Hud
             Raylib.DrawTextEx(Cfg.Font, modLine, new Vector2(x + w / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, modLine, 11, 1f).X / 2, y + 86), 11, 1f, Pal.TxtDim);
         }
 
+        // DEPLOY-PICKER header: how many soldiers field next mission vs the cap (which GROWS
+        // as the campaign deepens: 4 -> 5 (m3) -> 6 (m5)). Click a row's pill to deploy/bench.
         int ry = y + 100;
+        int deployed = run.Deployed.Count, cap = run.NextDeployCap;
+        bool atCap = deployed >= cap;
+        string deployHdr = $"DEPLOY  {deployed}/{cap}";
+        Color hdrCol = atCap ? Pal.Accent : Pal.Suspect;
+        Raylib.DrawTextEx(Cfg.Font, deployHdr, new Vector2(x + 30, ry), 15, 1f, hdrCol);
+        string capNote = atCap ? "(squad at capacity - bench a soldier to swap)" : "(cap grows over the campaign - field up to it)";
+        Raylib.DrawTextEx(Cfg.Font, capNote, new Vector2(x + 30 + (int)Raylib.MeasureTextEx(Cfg.Font, deployHdr, 15, 1f).X + 12, ry + 2), 11, 1f, Pal.TxtDim);
+        ry += 22;
         foreach (var u in squad)
         {
             DrawSquadRow(g, u, x + 30, ry, w - 60);
-            ry += 46;
+            ry += rowPitch;
         }
 
         // promotions / heals report
@@ -1654,20 +1821,22 @@ public static class Hud
 
     static void DrawSquadRow(Game g, Unit u, int x, int y, int w)
     {
-        Raylib.DrawRectangleRounded(new Rectangle(x, y, w, 40), 0.2f, 6, Pal.RGBA(13, 19, 27));
-        Raylib.DrawRectangle(x, y, 3, 40, Pal.Friend);
+        // benched soldiers read as "on the bench": dimmer plate + a grey accent stripe.
+        bool benched = u.Benched;
+        Raylib.DrawRectangleRounded(new Rectangle(x, y, w, 40), 0.2f, 6, benched ? Pal.RGBA(11, 15, 20) : Pal.RGBA(13, 19, 27));
+        Raylib.DrawRectangle(x, y, 3, 40, benched ? Pal.TxtDim : Pal.Friend);
 
-        Raylib.DrawTextEx(Cfg.Font, u.Name, new Vector2(x + 14, y + 5), 18, 1f, u.Benched ? Pal.TxtDim : Pal.Txt);
+        Raylib.DrawTextEx(Cfg.Font, u.Name, new Vector2(x + 14, y + 5), 18, 1f, benched ? Pal.TxtDim : Pal.Txt);
+        // class is always on the row so benching is an informed choice; WOUND is flagged in red.
         string rankLine = $"{u.RankName}  -  {u.Cls}";
         if (u.Wound > 0) rankLine += $"  WOUNDED({u.Wound})";
-        if (u.Benched)   rankLine += "  [SITTING OUT]";
-        Raylib.DrawTextEx(Cfg.Font, rankLine, new Vector2(x + 14, y + 24), 11, 1f, u.Wound > 0 ? Pal.Foe : Pal.Accent);
+        Raylib.DrawTextEx(Cfg.Font, rankLine, new Vector2(x + 14, y + 24), 11, 1f, u.Wound > 0 ? Pal.Foe : (benched ? Pal.TxtDim : Pal.Accent));
 
         // earned perks (compact 3-letter codes)
         if (u.Perks.Count > 0)
         {
             string codes = string.Join(" ", u.Perks.ConvertAll(PerkDef.Code));
-            Raylib.DrawTextEx(Cfg.Font, codes, new Vector2(x + 220, y + 27), 9, 1f, Pal.Good);
+            Raylib.DrawTextEx(Cfg.Font, codes, new Vector2(x + 220, y + 27), 9, 1f, benched ? Pal.RGBA(60, 92, 70) : Pal.Good);
         }
 
         // HP bar
@@ -1677,32 +1846,37 @@ public static class Hud
         if (frac > 0)
         {
             Color hc = frac > 0.5f ? Pal.Good : (frac > 0.25f ? Pal.Accent : Pal.Foe);
+            if (benched) hc = Raylib.Fade(hc, 0.45f);
             Raylib.DrawRectangleRounded(new Rectangle(bar.X, bar.Y, bar.Width * frac, bar.Height), 0.5f, 6, hc);
         }
         Raylib.DrawTextEx(Cfg.Font, $"{u.Hp}/{u.MaxHp} HP", new Vector2(x + 380, y + 13), 12, 1f, Pal.TxtDim);
 
-        // kills + progress — shifted left to make room for BENCH button when wounded
-        int killsX = u.Wound > 0 ? x + w - 260 : x + w - 170;
-        Raylib.DrawTextEx(Cfg.Font, $"{u.Kills} kills", new Vector2(killsX, y + 6), 12, 1f, Pal.Txt);
+        // kills + progress — shifted left to clear the always-on deploy/bench pill
+        int killsX = x + w - 264;
+        Raylib.DrawTextEx(Cfg.Font, $"{u.Kills} kills", new Vector2(killsX, y + 6), 12, 1f, benched ? Pal.TxtDim : Pal.Txt);
         int toNext = g.RunState.KillsToNext(u);
         string prog = u.Rank >= Run.Ranks.Length - 1 ? "MAX RANK" : $"{toNext} to next rank";
         Raylib.DrawTextEx(Cfg.Font, prog, new Vector2(killsX, y + 23), 11, 1f, Pal.TxtDim);
 
-        // BENCH toggle: shown only for wounded soldiers; benched = warm amber, unbenched = dim outline
-        if (u.Wound > 0)
-        {
-            string benchLabel = u.Benched ? "BENCHED" : " BENCH ";
-            Color benchBg   = u.Benched ? Pal.Accent : Pal.RGBA(20, 28, 40);
-            Color benchFg   = u.Benched ? Pal.Panel  : Pal.TxtDim;
-            Color benchBd   = u.Benched ? Pal.Accent : Pal.PanelBd;
-            var benchR = new Rectangle(x + w - 84, y + 9, 76, 22);
-            Raylib.DrawRectangleRounded(benchR, 0.3f, 6, benchBg);
-            Raylib.DrawRectangleLinesEx(benchR, 1f, benchBd);
-            Raylib.DrawTextEx(Cfg.Font, benchLabel,
-                new Vector2(benchR.X + benchR.Width / 2 - Raylib.MeasureTextEx(Cfg.Font, benchLabel, 11, 1f).X / 2,
-                            benchR.Y + 5), 11, 1f, benchFg);
-            BenchBtns.Add((u, benchR));
-        }
+        // status chip (DEPLOYED green / BENCHED grey) between the progress text and the pill.
+        string stTag = benched ? "BENCHED" : "DEPLOYED";
+        Color stCol  = benched ? Pal.TxtDim : Pal.Good;
+        Raylib.DrawTextEx(Cfg.Font, stTag, new Vector2(x + w - 168, y + 14), 11, 1f, stCol);
+
+        // DEPLOY/BENCH toggle — now on EVERY soldier (Game.ToggleBench enforces >=1 deployed and
+        // the deploy cap). The verb is the ACTION the click performs: a deployed soldier shows
+        // "BENCH", a benched one shows "DEPLOY". Registered in BenchBtns for hit-testing.
+        string pillLabel = benched ? "DEPLOY" : "BENCH";
+        Color pillBg = benched ? Raylib.Fade(Pal.Good, 0.22f) : Pal.RGBA(20, 28, 40);
+        Color pillFg = benched ? Pal.Good : Pal.Suspect;
+        Color pillBd = benched ? Pal.Good : Pal.Suspect;
+        var benchR = new Rectangle(x + w - 84, y + 9, 76, 22);
+        Raylib.DrawRectangleRounded(benchR, 0.3f, 6, pillBg);
+        Raylib.DrawRectangleLinesEx(benchR, 1f, pillBd);
+        Raylib.DrawTextEx(Cfg.Font, pillLabel,
+            new Vector2(benchR.X + benchR.Width / 2 - Raylib.MeasureTextEx(Cfg.Font, pillLabel, 11, 1f).X / 2,
+                        benchR.Y + 5), 11, 1f, pillFg);
+        BenchBtns.Add((u, benchR));
     }
 
     public static Rectangle OverlayBtn;

@@ -383,8 +383,9 @@ public static class Renderer
         if (watchers == null) return;
 
         float pulse = 0.5f + 0.5f * MathF.Sin((float)Raylib.GetTime() * 3.2f);
-        // soft red wash — well below signal level so it informs without dominating the board
-        Color wash = Raylib.Fade(Pal.Foe, 0.055f + 0.045f * pulse);
+        // soft red wash — well below signal level so it informs without dominating the board, but
+        // nudged up to a reliably-perceptible floor so "this tile is in a reaction kill-zone" reads.
+        Color wash = Raylib.Fade(Pal.Foe, 0.07f + 0.05f * pulse);
 
         // wash every watched tile (a tile may be watched by more than one enemy — the
         // overlapping fills naturally read as a denser, more dangerous kill-zone)
@@ -403,19 +404,24 @@ public static class Renderer
                 }
             }
 
-        // mark each overwatcher with a danger reticle so the SOURCE of the kill-zone reads
+        // mark each overwatcher with a danger reticle so the SOURCE of the kill-zone reads, plus a
+        // slow expanding "watching" pulse ring that draws the eye to the threat without occluding it.
+        float t = (float)Raylib.GetTime();
         foreach (var w in watchers)
         {
             float hlift = g.Grid.IsHigh(w.X, w.Y) ? ElevLift : 0f;
             var c = w.Pos - new Vector2(0, hlift + 30f);   // float the reticle just above the figure
-            Color rc = Raylib.Fade(Pal.Foe, 0.45f + 0.35f * pulse);
-            Raylib.DrawRing(c, 7.5f, 9f, 0, 360, 28, rc);
+            Color rc = Raylib.Fade(Pal.Foe, 0.5f + 0.4f * pulse);
+            // expanding sweep ring (the "actively watching" cue)
+            float sweep = (t * 0.9f + w.Bob) % 1f;
+            Raylib.DrawRing(c, 9f + sweep * 7f, 10.4f + sweep * 7f, 0, 360, 28, Raylib.Fade(Pal.Foe, (1f - sweep) * 0.35f));
+            Raylib.DrawRing(c, 7.5f, 9.2f, 0, 360, 28, rc);
             // crosshair ticks
-            Raylib.DrawLineEx(new Vector2(c.X - 11f, c.Y), new Vector2(c.X - 5f, c.Y), 1.6f, rc);
-            Raylib.DrawLineEx(new Vector2(c.X + 5f, c.Y), new Vector2(c.X + 11f, c.Y), 1.6f, rc);
-            Raylib.DrawLineEx(new Vector2(c.X, c.Y - 11f), new Vector2(c.X, c.Y - 5f), 1.6f, rc);
-            Raylib.DrawLineEx(new Vector2(c.X, c.Y + 5f), new Vector2(c.X, c.Y + 11f), 1.6f, rc);
-            Raylib.DrawCircleV(c, 1.6f, rc);
+            Raylib.DrawLineEx(new Vector2(c.X - 11f, c.Y), new Vector2(c.X - 5f, c.Y), 1.8f, rc);
+            Raylib.DrawLineEx(new Vector2(c.X + 5f, c.Y), new Vector2(c.X + 11f, c.Y), 1.8f, rc);
+            Raylib.DrawLineEx(new Vector2(c.X, c.Y - 11f), new Vector2(c.X, c.Y - 5f), 1.8f, rc);
+            Raylib.DrawLineEx(new Vector2(c.X, c.Y + 5f), new Vector2(c.X, c.Y + 11f), 1.8f, rc);
+            Raylib.DrawCircleV(c, 1.8f, rc);
         }
     }
 
@@ -488,10 +494,12 @@ public static class Renderer
                 DashedLine(prev, cur, 3f, Raylib.Fade(danger, 0.85f), phase, 9f, 7f);
                 prev = cur;
             }
-            // destination marker: a pulsing ring footprint where the unit ends up
+            // destination marker: a bold pulsing double-ring footprint where the unit ends up, so
+            // the "it moves to HERE" read is unmistakable amid the cover.
             Vector2 dest = ElevCenter(g, dx, dy);
-            Raylib.DrawRing(dest, 9f, 11f, 0, 360, 28, Raylib.Fade(danger, 0.5f + 0.35f * pulse));
-            Raylib.DrawCircleV(dest, 3f, Raylib.Fade(danger, 0.85f));
+            Raylib.DrawRing(dest, 13f, 16f, 0, 360, 32, Raylib.Fade(danger, 0.18f + 0.18f * pulse));  // soft outer halo
+            Raylib.DrawRing(dest, 9f, 12f, 0, 360, 32, Raylib.Fade(danger, 0.65f + 0.30f * pulse));   // crisp inner ring
+            Raylib.DrawCircleV(dest, 3f, Raylib.Fade(danger, 0.9f));
         }
 
         // 3) TARGET MARKER — the most important read: WHO/WHERE the attack lands.
@@ -522,15 +530,20 @@ public static class Renderer
 
         if (haveTarget)
         {
-            // aim-line from the firer's post-move position to the mark, then a bold reticle + X
+            // aim-line from the firer's post-move position to the mark — a bold animated dashed red
+            // beam (the dashes flow toward the target so "fire travels THIS way at THAT unit" reads
+            // instantly), backed by a faint solid underlay so it never breaks up against dark tiles.
             Vector2 from = ElevCenter(g, dx, dy);
-            Raylib.DrawLineEx(from, tc, 1.6f, Raylib.Fade(danger, 0.45f));
+            Raylib.DrawLineEx(from, tc, 1.4f, Raylib.Fade(danger, 0.22f));                 // faint continuous underlay
+            DashedLine(from, tc, 2.6f, Raylib.Fade(danger, 0.9f), (t * 34f) % 14f, 8f, 6f); // flowing dashed beam
+            // bold pulsing reticle ring + a crisp X on the mark
             float rr = reach + 2.5f * pulse;
-            Raylib.DrawRing(tc, rr - 2f, rr, 0, 360, 32, Raylib.Fade(danger, 0.9f));
+            Raylib.DrawRing(tc, rr, rr + 2.5f, 0, 360, 36, Raylib.Fade(danger, 0.22f + 0.18f * pulse)); // outer glow
+            Raylib.DrawRing(tc, rr - 2.5f, rr, 0, 360, 36, Raylib.Fade(danger, 0.95f));                  // crisp ring
             float k = rr * 0.7f;
-            Raylib.DrawLineEx(new Vector2(tc.X - k, tc.Y - k), new Vector2(tc.X + k, tc.Y + k), 2.4f, Raylib.Fade(danger, 0.95f));
-            Raylib.DrawLineEx(new Vector2(tc.X - k, tc.Y + k), new Vector2(tc.X + k, tc.Y - k), 2.4f, Raylib.Fade(danger, 0.95f));
-            Raylib.DrawCircleV(tc, 2.2f, Raylib.Fade(Pal.RGBA(255, 220, 220), 0.9f));
+            Raylib.DrawLineEx(new Vector2(tc.X - k, tc.Y - k), new Vector2(tc.X + k, tc.Y + k), 2.6f, Raylib.Fade(danger, 0.95f));
+            Raylib.DrawLineEx(new Vector2(tc.X - k, tc.Y + k), new Vector2(tc.X + k, tc.Y - k), 2.6f, Raylib.Fade(danger, 0.95f));
+            Raylib.DrawCircleV(tc, 2.4f, Raylib.Fade(Pal.RGBA(255, 220, 220), 0.95f));
         }
 
         // 4) a small intent caption above the acting unit so the plan reads at a glance
@@ -544,10 +557,13 @@ public static class Renderer
                     : plan.Hunker ? "HUNKER" : "HOLD";
         Vector2 cap = e.Pos - new Vector2(0, (g.Grid.IsHigh(e.X, e.Y) ? ElevLift : 0f) + 44f);
         var sz = Raylib.MeasureTextEx(Cfg.Font, verb, 14f, 1f);
-        Raylib.DrawRectangleRec(new Rectangle(cap.X - sz.X / 2f - 4, cap.Y - 1, sz.X + 8, sz.Y + 2),
-                                Raylib.Fade(Pal.RGBA(20, 4, 4), 0.7f));
+        // a definitive bordered pill (opaque dark fill + thin danger outline) so the verb reads as a
+        // hard label, not a wash — the player can name the threat at a glance.
+        var pill = new Rectangle(cap.X - sz.X / 2f - 5, cap.Y - 2, sz.X + 10, sz.Y + 4);
+        Raylib.DrawRectangleRounded(pill, 0.5f, 6, Raylib.Fade(Pal.RGBA(24, 6, 6), 0.92f));
+        Raylib.DrawRectangleLinesEx(pill, 1f, Raylib.Fade(danger, 0.7f + 0.25f * pulse));   // square outline (RoundedLines is version-volatile)
         Raylib.DrawTextEx(Cfg.Font, verb, new Vector2(cap.X - sz.X / 2f, cap.Y), 14f, 1f,
-                          Raylib.Fade(Pal.RGBA(255, 210, 210), 0.95f));
+                          Raylib.Fade(Pal.RGBA(255, 215, 215), 1f));
     }
 
     // A scrolling dashed line between two points (used by the intent telegraph's move path).
@@ -595,6 +611,23 @@ public static class Renderer
                     new Rectangle(baseRect.X + 3, baseRect.Y + 4, baseRect.Width, baseRect.Height),
                     0.18f, 5, Raylib.Fade(Pal.RGBA(0, 0, 0), 0.35f));
                 Raylib.DrawRectangleRounded(baseRect, 0.18f, 5, high ? cHi : cLo);
+                // front-face shade gradient: a soft darkening toward the bottom of the wall so the
+                // block reads as a lit 3D volume (consistent top-light), and a thin lighter catch on
+                // the upper-left of the face. Cheap (a handful of thin bands), subtle (squint holds).
+                {
+                    int bands = 4;
+                    for (int b = 0; b < bands; b++)
+                    {
+                        float fy = baseRect.Y + baseRect.Height * (0.45f + 0.55f * b / bands);
+                        float fh = baseRect.Height * 0.55f / bands + 1f;
+                        Raylib.DrawRectangleRec(new Rectangle(baseRect.X + 1, fy, baseRect.Width - 2, fh),
+                                                Raylib.Fade(Pal.RGBA(0, 0, 0), 0.05f + 0.05f * b));
+                    }
+                    // upper-left vertical light catch on the face
+                    Raylib.DrawLineEx(new Vector2(baseRect.X + 2.5f, baseRect.Y + 2f),
+                                      new Vector2(baseRect.X + 2.5f, baseRect.Y + baseRect.Height * 0.6f),
+                                      1.5f, Raylib.Fade(Pal.RGBA(255, 255, 255), high ? 0.10f : 0.07f));
+                }
                 // contact shadow at the base of the cover block — grounds it against the floor
                 Raylib.DrawRectangleRec(
                     new Rectangle(baseRect.X + 4, baseRect.Y + baseRect.Height - 1, baseRect.Width - 8, 4),
@@ -906,9 +939,12 @@ public static class Renderer
         // HP bar, rings, status codes, alert markers, VIP markers stay full-alpha (they are signal).
         float figAlpha;
         if (g.Selected == u)              figAlpha = 1.0f;          // selected: full brightness
-        else if (friend && !u.CanAct)     figAlpha = 0.60f;          // spent player: visibly dimmed
-        else if (friend)                  figAlpha = 0.82f;          // other player: gently dimmed
+        else if (friend && !u.CanAct)     figAlpha = 0.52f;          // spent player: clearly "done" (deeper dim)
+        else if (friend)                  figAlpha = 0.78f;          // other player: gently dimmed
         else                              figAlpha = 0.85f;          // enemies: barely dimmed (must spot threats)
+        // when a soldier IS selected, push the gap a touch further so the active unit stands out
+        // against the rest of the squad — but never touch enemy alpha (threats stay fully legible).
+        if (g.Selected != null && g.Selected != u && friend) figAlpha -= 0.06f;
 
         // lift the figure when it stands on raised terrain
         float hlift = g.Grid.IsHigh(u.X, u.Y) ? ElevLift : 0f;
@@ -937,18 +973,38 @@ public static class Renderer
         // a brief size pop on flinch (recoil compresses a touch) so a hit reads as a jolt
         float bodyScale = Util.Clamp(1f + u.FlinchAnim * 0.12f - u.RecoilAnim * 0.05f, 0.85f, 1.18f);
 
-        // shadow (sits on the platform top when elevated)
-        Raylib.DrawEllipse((int)foot.X, (int)(foot.Y + 17), 15, 6, Raylib.Fade(Pal.RGBA(0, 0, 0), 0.35f * figAlpha));
+        // ground contact shadow (sits on the platform top when elevated). A two-layer ellipse —
+        // a wider soft penumbra + a tighter darker core, nudged toward bottom-right (consistent
+        // top-left key light) — so the figure reads as a solid object grounded on the board rather
+        // than a flat token. Drones cast a smaller, fainter shadow that shrinks as they rise (sells
+        // the hover). Kept dark+subtle so it never competes with signal.
+        {
+            float sg = drone ? Util.Clamp(1f - hover / 22f, 0.45f, 1f) : 1f;   // drones: smaller/fainter when high
+            int scx = (int)(foot.X + 1.5f), scy = (int)(foot.Y + 18);
+            Raylib.DrawEllipse(scx, scy, 17f * sg, 7f * sg, Raylib.Fade(Pal.RGBA(0, 0, 0), 0.18f * figAlpha * sg));
+            Raylib.DrawEllipse(scx, scy, 12f * sg, 4.6f * sg, Raylib.Fade(Pal.RGBA(0, 0, 0), 0.34f * figAlpha * sg));
+        }
 
-        // selection ring — full strength (signal), plus a faint extra glow on the selected unit
+        // selection ring — full strength (signal), plus a layered glow so the eye snaps to who's
+        // acting. A wide soft bloom halo (the 5.2 post-FX amplifies it), a brighter mid ring, and
+        // four short cardinal "feet" tick-marks that make the active footprint unmistakable even
+        // against busy cover. All in the friendly Accent role colour; pulses gently.
         if (g.Selected == u)
         {
             float pulse = 0.5f + 0.5f * MathF.Sin((float)Raylib.GetTime() * 5f);
-            // soft brightening halo so the selected unit pops further
-            Raylib.DrawRing(foot + new Vector2(0, 17), 22f, 27f, 0, 360, 48,
-                            Raylib.Fade(Pal.Accent, 0.12f + 0.10f * pulse));
-            Raylib.DrawRing(foot + new Vector2(0, 17), 17, 21, 0, 360, 48,
-                            Raylib.Fade(Pal.Accent, 0.4f + 0.4f * pulse));
+            var sc = foot + new Vector2(0, 17);
+            // wide soft bloom — reads as the unit being "lit"
+            Raylib.DrawRing(sc, 24f, 32f, 0, 360, 56, Raylib.Fade(Pal.Accent, 0.07f + 0.07f * pulse));
+            Raylib.DrawRing(sc, 21f, 26f, 0, 360, 56, Raylib.Fade(Pal.Accent, 0.16f + 0.12f * pulse));
+            // crisp mid ring (the primary "this one is selected" signal)
+            Raylib.DrawRing(sc, 17f, 21f, 0, 360, 56, Raylib.Fade(Pal.Accent, 0.55f + 0.40f * pulse));
+            // four cardinal corner ticks just outside the ring, like a target bracket on the floor
+            for (int k = 0; k < 4; k++)
+            {
+                float aa = k * (MathF.PI / 2f) + MathF.PI / 4f;
+                var dd = new Vector2(MathF.Cos(aa), MathF.Sin(aa) * 0.5f);   // squashed to read flat on the ground
+                Raylib.DrawLineEx(sc + dd * 22f, sc + dd * 28f, 2.2f, Raylib.Fade(Pal.Accent, 0.5f + 0.35f * pulse));
+            }
         }
 
         // 4.4 ghost ring: soft pulsing ring on friendly units while the squad is concealed

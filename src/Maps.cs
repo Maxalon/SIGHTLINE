@@ -351,5 +351,80 @@ public static class Maps
             ".......#..#.......",
             "..................",
         },
+        new[] // HIGHLAND — an OFF-CENTRE commanding redoubt: a tier-2 ('=') vantage on the
+              // RIGHT-of-centre, walkable up a tier-1 ('^') apron that wraps its west + north
+              // (no walls — the height is openly contested, but it's a flank prize tucked toward
+              // the enemy half, not a central pyramid like ZIGGURAT/FORGE). Sparse low/high-cover
+              // firing steps bracket the slope. Seizing the redoubt dominates the right-side
+              // approach lanes and sees over low cover across the field. Biome hint: ARID.
+        {
+            "..................",
+            "..............=...",
+            "...........^^==...",
+            "..........^^==^...",
+            ".....o....^^==....",
+            "..........^^==.o..",
+            "...........^^=^...",
+            "....#......^^.....",
+            ".......o.....#....",
+            "..................",
+            "..................",
+        },
+        new[] // APPROACH — an ASYMMETRIC density gradient: the NORTH half is a dense high-cover
+              // maze (slow, safe, lots of sightline breaks) while the SOUTH half is wide-open
+              // ground (fast, exposed, no footing). The squad chooses a side — grind the covered
+              // top lane or race the open bottom flank and trade safety for tempo. No column is
+              // walled and the mid rows stay porous so either commitment stays traversable.
+        {
+            "..................",
+            "....#..##..#.#....",
+            "...o..#..#..o.....",
+            "......##..##......",
+            "....o...#...o.....",
+            ".......#..#.......",
+            ".........o........",
+            "....o.............",
+            "..................",
+            "..................",
+            "..................",
+        },
+        new[] // KILLBOX — a wide central open PLAZA ringed by a broken wall of high cover, with
+              // deliberate BREACHES at the cardinal mid-points (a north gap, a south gap, and the
+              // whole of row 5 left open east-west). Whoever holds the ring's firing slits dominates
+              // anyone caught crossing the plaza — but the gaps mean it's never a sealed bunker
+              // (unlike CITADEL); you fight FOR the ring, then fight ACROSS the killing floor.
+              // Low-cover slits on the east/west walls give covered angles into the centre.
+        {
+            "..................",
+            "....######.##.....",
+            "....#........#....",
+            "....#........#....",
+            "....o........o....",
+            "..................",
+            "....o........o....",
+            "....#........#....",
+            "....##.######.....",
+            "..................",
+            "..................",
+        },
+        new[] // TRENCHES — staggered parallel LINES of low cover spanning the width, offset row to
+              // row so there's never a clean firing lane straight down the board. Plays as advance-
+              // by-bounds: a soldier dashes from one trench to the next under cover while overwatch
+              // holds the gap, leapfrogging toward the enemy. Low cover only (no LoS blocks), so the
+              // whole field stays readable and every position is half-protected — a war of footing
+              // and tempo, distinct from FOXHOLES' tight clustered CQB warren.
+        {
+            "..................",
+            "...ooo...ooo......",
+            "..................",
+            "......ooo...ooo...",
+            "..................",
+            "...ooo...ooo......",
+            "..................",
+            "......ooo...ooo...",
+            "..................",
+            "...ooo...ooo......",
+            "..................",
+        },
     };
 }

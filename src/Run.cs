@@ -12,6 +12,65 @@ public class PerkOffer
 
 public enum RewardKind { None, Heal, BonusPerk }
 
+/// Run-scoped BOONS (Hades boons / StS relics): a pick-1-of-3 modifier offered each barracks
+/// that warps THIS run only (discarded at run end — the inverse of persistent perks). They are
+/// combinatorial and lateral (not a power ladder), so every run plays differently. APPEND-ONLY
+/// (the ordinal is the save key). Read in Combat.ComputeOdds (the aim/crit/armor ones, via a
+/// static Combat.RunBoons set each mission) and in Game (the on-kill / concealment / deploy ones).
+public enum Boon
+{
+    Marksmen,      // +aim at long range, squad-wide
+    Fervor,        // overwatch reactions crit
+    Executioners,  // +crit vs sub-half-HP targets, squad-wide
+    Fortified,     // +1 effective armor, squad-wide
+    Grenadier,     // a kill refreshes the killer's grenade
+    Scavenger,     // a kill refills +2 ammo to the killer
+    Adrenaline,    // a kill grants the killer +1 action this turn (cap 1/turn)
+    Venom,         // a player hit applies Bleed to the target
+    Ghost,         // moving near a foe does not break concealment
+    RapidDeploy,   // +1 deploy slot this run
+}
+
+public static class BoonDef
+{
+    public static readonly Boon[] All =
+    {
+        Boon.Marksmen, Boon.Fervor, Boon.Executioners, Boon.Fortified, Boon.Grenadier,
+        Boon.Scavenger, Boon.Adrenaline, Boon.Venom, Boon.Ghost, Boon.RapidDeploy,
+    };
+
+    public static string Name(Boon b) => b switch
+    {
+        Boon.Marksmen => "MARKSMEN", Boon.Fervor => "FERVOR", Boon.Executioners => "EXECUTIONERS",
+        Boon.Fortified => "FORTIFIED", Boon.Grenadier => "GRENADIER", Boon.Scavenger => "SCAVENGER",
+        Boon.Adrenaline => "ADRENALINE", Boon.Venom => "VENOM", Boon.Ghost => "GHOST",
+        Boon.RapidDeploy => "RAPID DEPLOY", _ => "BOON",
+    };
+
+    public static string Desc(Boon b) => b switch
+    {
+        Boon.Marksmen => "Squad +12 aim at long range",
+        Boon.Fervor => "Overwatch reaction shots crit",
+        Boon.Executioners => "Squad +20 crit vs targets below half HP",
+        Boon.Fortified => "Whole squad gains +1 armor (-1 damage/hit)",
+        Boon.Grenadier => "A kill refreshes the killer's grenade",
+        Boon.Scavenger => "A kill refills +2 ammo to the killer",
+        Boon.Adrenaline => "A kill grants the killer +1 action (once/turn)",
+        Boon.Venom => "Your hits make the target bleed",
+        Boon.Ghost => "Moving near foes never breaks concealment",
+        Boon.RapidDeploy => "Deploy one extra soldier all run",
+        _ => "",
+    };
+
+    // short tag for the active-boons strip
+    public static string Code(Boon b) => b switch
+    {
+        Boon.Marksmen => "MRK", Boon.Fervor => "FVR", Boon.Executioners => "EXE", Boon.Fortified => "FRT",
+        Boon.Grenadier => "GRN", Boon.Scavenger => "SCV", Boon.Adrenaline => "ADR", Boon.Venom => "VNM",
+        Boon.Ghost => "GHO", Boon.RapidDeploy => "RPD", _ => "?",
+    };
+}
+
 /// A pickable next-mission deployment: objective + a risk/reward modifier.
 public class MissionCard
 {
@@ -150,6 +209,31 @@ public class Run
 
     public const int BondThreshold = 3;       // missions two soldiers must survive together to bond
 
+    // ---- WAVE 1: deep roster + deliberate deployment + adaptive assist ----
+    // The persistent squad is now a ROSTER of up to RosterMax soldiers; each mission DEPLOYS a
+    // subset of up to DeployCap (the rest sit on the bench and recover faster). This is the
+    // XCOM/Long-War recovery valve: a wounded veteran benches and a fresh one deploys, so the
+    // squad fields its best healthy DeployCap every mission instead of limping in chipped — the
+    // single biggest counter to the campaign's geometric attrition collapse. DeployCap stays 4 so
+    // the battlefield (spawns/autopilot/render) is unchanged; only the META roster grows.
+    public const int RosterMax = 6;           // soldiers carried in the roster (deploy + bench; UI fits 6)
+
+    // Deployed squad size GROWS as the campaign deepens. Balance data: with a flat 4-soldier
+    // deploy, the run is a geometric product that collapses (4 soldiers x 2 actions vs 9-12
+    // enemies by m5) — per-mission tweaks barely moved the 2% run-completion. Reinforcing the
+    // collapse zone with extra BODIES (the only lever that scales with the enemy headcount) is
+    // the master fix from the balance audit. Early missions stay at 4 (they're already ~85%+);
+    // the squad grows to 5 mid-run and 6 for the brutal back half.
+    public const int DeployCapBase = 4;       // m1-2
+    public const int DeployCapMax = 6;        // m5-6
+    public static int DeployCapFor(int mission) => mission >= 5 ? 6 : (mission >= 3 ? 5 : 4);
+
+    // Adaptive assist (Hades God-Mode): consecutive LOST runs grant a small, capped, fully
+    // reversible difficulty relief — but ONLY at base Heat (Heat is the opt-in hard mode, so the
+    // assist never touches it). Persisted in meta.json (survives run-end, unlike the run save).
+    public int LossStreak;                    // consecutive lost runs (meta; seeded at run start)
+    public const int AssistMax = 5;           // ceiling on assist tiers
+
     public List<Unit> Squad = new();
     public int Mission;                       // current mission number (1-based)
     public int Intel;                         // requisition currency spent in the barracks shop
@@ -161,6 +245,11 @@ public class Run
     public List<PerkOffer> PendingPerks = new(); // rank-up perk choices awaiting the player
     public List<MissionCard> Offers = new();  // next-mission deployment choices (fallback)
     public MissionCard CurrentCard;           // the card the active mission was launched from
+
+    // ---- run-scoped boons (Wave 3 variance) ----
+    public List<Boon> ActiveBoons = new();    // boons chosen this run (persisted within the run)
+    public List<Boon> BoonOffer = new();      // the current pick-1-of-3 awaiting the player
+    public bool HasBoon(Boon b) => ActiveBoons.Contains(b);
 
     // ---- branching campaign map (3.3) ----
     public List<MissionNode> Map = new();     // the generated DAG of mission nodes
@@ -258,7 +347,12 @@ public class Run
             case NodeKind.Start:
                 return new MissionCard { Objective = ObjectiveFor(n), ModName = "STANDARD", Reward = RewardKind.None, RewardText = "-" };
             case NodeKind.Boss:
-                return new MissionCard { Objective = Objective.Eliminate, ModName = "BOSS", Reward = RewardKind.None, RewardText = "Warlord" };
+                // DECAPITATE, not Eliminate: balance data showed the boss mission as a forced
+                // full-clear against a buffed brick reached by an already-attrited squad (~0% of
+                // runs cleared it). "Kill the WARLORD, the rest don't matter" is a punch-through
+                // the squad can actually pull off — the WARLORD is the natural HVT (DesignateHvt
+                // picks the toughest non-special body, and skips its extra buff for an ELITE).
+                return new MissionCard { Objective = Objective.Decapitate, ModName = "BOSS", Reward = RewardKind.None, RewardText = "Warlord" };
             case NodeKind.Elite:
                 return new MissionCard { Objective = obj, ModName = "ELITE", EnemyDelta = 2, StatDelta = 1, Reward = RewardKind.BonusPerk, RewardText = "Bonus perk" };
             case NodeKind.Supply:
@@ -381,12 +475,76 @@ public class Run
         Fallen.Clear();
         Report.Clear();
         PendingPerks.Clear();
+        ActiveBoons.Clear();      // boons are run-scoped: a fresh run starts with none
+        BoonOffer.Clear();
         // generate the branching campaign map and seat the squad at its START node
         MapSeed = Util.RandInt(1, int.MaxValue - 1);
         GenerateMap(MapSeed);
         MapPos = 0;
         Map[0].Visited = true;
         CurrentCard = Map[0].Card;
+    }
+
+    // ---- adaptive assist (meta) ----
+    /// The active assist tier (0..AssistMax). Disabled above Heat 0 — Heat is the hard mode, so a
+    /// struggling player on base difficulty gets help, while anyone climbing the ladder never does.
+    public int AssistLevel => HeatLevel > 0 ? 0 : Math.Min(AssistMax, LossStreak);
+
+    /// Enemy stat-bump relief from the assist (subtracted from statDelta in SetupMission): one
+    /// point of force-wide -HP/-Aim per tier. Small + capped so it eases, never trivialises.
+    public int AssistStatRelief => AssistLevel;
+
+    /// Record a finished run for the assist meta: a win wipes the streak, a loss grows it (capped).
+    public void RecordRunResult(bool win) { LossStreak = win ? 0 : Math.Min(99, LossStreak + 1); }
+
+    // ---- deployment selection ----
+    /// The deploy cap for the NEXT mission (the one the barracks is preparing for). The RapidDeploy
+    /// boon adds a body, capped at DeployCapMax (= the battlefield spawn capacity), so it boosts the
+    /// early/mid game without ever overflowing PlayerSpawns.
+    public int NextDeployCap => Math.Min(DeployCapMax, DeployCapFor(Mission + 1) + (HasBoon(Boon.RapidDeploy) ? 1 : 0));
+
+    /// Choose the DEFAULT deployment for the next mission: field the best NextDeployCap soldiers
+    /// (healthy + senior first; the wounded sink to the bench when there are healthy alternatives),
+    /// benching the rest. Sets Unit.Benched across the whole roster. The player may override this
+    /// in the barracks; the autopilot just takes the default. Deterministic (stable ordering).
+    public void AutoDeploy()
+    {
+        int cap = NextDeployCap;
+        var ordered = new List<Unit>(Squad);
+        ordered.Sort((a, b) =>
+        {
+            int aw = a.Wound > 0 ? 1 : 0, bw = b.Wound > 0 ? 1 : 0;
+            if (aw != bw) return aw - bw;                       // healthy before wounded
+            if (a.Rank != b.Rank) return b.Rank - a.Rank;       // senior before junior
+            if (a.Hp != b.Hp) return b.Hp - a.Hp;               // healthier before hurt
+            if (a.Kills != b.Kills) return b.Kills - a.Kills;   // bloodier before green
+            return string.CompareOrdinal(a.Name, b.Name);       // stable tiebreak
+        });
+        for (int i = 0; i < ordered.Count; i++) ordered[i].Benched = i >= cap;
+    }
+
+    /// Soldiers that will deploy next mission (Benched == false), for UI/queries.
+    public List<Unit> Deployed => Squad.FindAll(u => !u.Benched);
+
+    // ---- boon offers ----
+    /// Build a fresh pick-1-of-3 boon offer from the boons not yet taken this run (fewer if the
+    /// pool is nearly exhausted; empty if all are owned). Deterministic-friendly (Util.RandInt).
+    public void GenerateBoonOffer()
+    {
+        BoonOffer.Clear();
+        var pool = new List<Boon>();
+        foreach (var b in BoonDef.All) if (!HasBoon(b)) pool.Add(b);
+        for (int i = pool.Count - 1; i > 0; i--) { int j = Util.RandInt(0, i); (pool[i], pool[j]) = (pool[j], pool[i]); }
+        for (int i = 0; i < pool.Count && i < 3; i++) BoonOffer.Add(pool[i]);
+    }
+
+    /// Adopt a boon from the current offer (no-op if not on offer or already owned).
+    public void ChooseBoon(Boon b)
+    {
+        if (!BoonOffer.Contains(b) || HasBoon(b)) return;
+        ActiveBoons.Add(b);
+        BoonOffer.Clear();
+        Report.Insert(0, $"BOON: {BoonDef.Name(b)}  ({BoonDef.Desc(b)})");
     }
 
     /// Apply promotions (from accumulated kills) and field-heal to the survivors,
@@ -451,9 +609,11 @@ public class Run
                 }
             }
 
-            // field medicine: partial heal between missions (halved under Heat harsh attrition)
+            // field medicine: partial heal between missions (halved under Heat harsh attrition).
+            // Raised 0.4 -> 0.55: balance data showed the squad limping into the mid-campaign
+            // already chipped, turning each mission into a degrading roll instead of a fresh one.
             int before = u.Hp;
-            int heal = (int)MathF.Ceiling(u.MaxHp * (harsh ? 0.2f : 0.4f));
+            int heal = (int)MathF.Ceiling(u.MaxHp * (harsh ? 0.25f : 0.55f));
             u.Hp = Math.Min(u.MaxHp, u.Hp + heal);
             if (u.Hp > before) Report.Add($"{u.Name} patched up  (+{u.Hp - before} HP)");
         }
@@ -461,20 +621,25 @@ public class Run
         // bonds: every pair of survivors that shared this mission grows closer
         AdvanceBonds();
 
-        // backfill the squad up to 4 with rookie recruits — UNLESS Heat "RELENTLESS" (rung 8)
-        // turns off reinforcements, so casualties permanently shrink the squad for the run.
-        // (At least one soldier always survives to reach the barracks; a full wipe loses the run.)
+        // backfill the ROSTER up to RosterMax with rookie recruits — UNLESS Heat "RELENTLESS"
+        // (rung 8) turns off reinforcements, so casualties permanently shrink the roster for the
+        // run. (At least one soldier always survives to reach the barracks; a full wipe loses the
+        // run.) The roster is a bench: only DeployCap deploy each mission, so a deeper roster means
+        // the wounded recover off the line while the squad still fields a full healthy complement.
         if (Heat.NoReinforcements(HeatLevel))
         {
-            if (Squad.Count < 4)
+            if (Squad.Count < NextDeployCap)
                 Report.Add($"No reinforcements (HEAT) -- deploying {Squad.Count} strong");
         }
-        else while (Squad.Count < 4)
+        else while (Squad.Count < RosterMax)
         {
             var rec = Sightline.Mission.MakeRecruit();
             Squad.Add(rec);
-            Report.Add($"{rec.Name} joins the squad  (ROOKIE {rec.Cls})");
+            Report.Add($"{rec.Name} joins the roster  (ROOKIE {rec.Cls})");
         }
+
+        // pick the default deployment for next mission (best healthy DeployCap; bench the rest).
+        AutoDeploy();
 
         if (Report.Count == 0) Report.Add("No changes this mission.");
     }

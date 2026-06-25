@@ -63,28 +63,38 @@ public static class SaveGame
     // The max-unlocked Heat is META: it survives run end (unlike save.json, which is deleted
     // when a run ends). Stored in its own tiny meta.json. Gated by Game.NoPersist at the call
     // sites exactly like the run save, so the harness never touches disk.
-    public static int LoadMetaHeat()
+    // meta.json carries several independent fields (MaxHeat, LossStreak). Always read-modify-write
+    // the whole DTO so saving one field never clobbers another. Missing fields default to 0, so an
+    // old meta.json (heat-only) still loads — append-only and forward-compatible.
+    static MetaDto LoadMetaDto()
     {
-        try
-        {
-            if (!File.Exists(MetaPath)) return 0;
-            var dto = JsonSerializer.Deserialize<MetaDto>(File.ReadAllText(MetaPath), Opts);
-            return dto == null ? 0 : Heat.Clamp(dto.MaxHeat);
-        }
-        catch { return 0; }
+        try { if (File.Exists(MetaPath)) return JsonSerializer.Deserialize<MetaDto>(File.ReadAllText(MetaPath), Opts) ?? new MetaDto(); }
+        catch { }
+        return new MetaDto();
     }
 
-    public static void SaveMetaHeat(int maxHeat)
+    static void WriteMetaDto(MetaDto dto)
     {
-        try
-        {
-            Directory.CreateDirectory(Dir);
-            File.WriteAllText(MetaPath, JsonSerializer.Serialize(new MetaDto { MaxHeat = Heat.Clamp(maxHeat) }, Opts));
-        }
+        try { Directory.CreateDirectory(Dir); File.WriteAllText(MetaPath, JsonSerializer.Serialize(dto, Opts)); }
         catch { /* a failed meta save must never crash the game */ }
     }
 
-    class MetaDto { public int MaxHeat; }
+    public static int LoadMetaHeat() => Heat.Clamp(LoadMetaDto().MaxHeat);
+
+    public static void SaveMetaHeat(int maxHeat)
+    {
+        var d = LoadMetaDto(); d.MaxHeat = Heat.Clamp(maxHeat); WriteMetaDto(d);
+    }
+
+    /// Adaptive-assist meta: how many runs the player has lost in a row (0 on a fresh profile).
+    public static int LoadMetaLossStreak() => Math.Max(0, LoadMetaDto().LossStreak);
+
+    public static void SaveMetaLossStreak(int streak)
+    {
+        var d = LoadMetaDto(); d.LossStreak = Math.Max(0, streak); WriteMetaDto(d);
+    }
+
+    class MetaDto { public int MaxHeat; public int LossStreak; }
 
     // ---- mapping ----
     static RunDto ToDto(Run r)
@@ -95,6 +105,7 @@ public static class SaveGame
             BondTally = new Dictionary<string, int>(r.BondTally),
             MapSeed = r.MapSeed, MapPos = r.MapPos,
             HeatLevel = r.HeatLevel,
+            ActiveBoons = r.ActiveBoons.ConvertAll(b => (int)b),
         };
         foreach (var u in r.Squad)
             dto.Squad.Add(new UnitDto
@@ -105,6 +116,7 @@ public static class SaveGame
                 BonusGrenades = u.BonusGrenades,
                 CustomTag = u.CustomTag,
                 Wound = u.Wound,
+                Armor = u.Armor,
                 Benched = u.Benched,
                 Perks = u.Perks.ConvertAll(p => (int)p),
                 WeaponMods = u.WeaponMods.ConvertAll(m => (int)m),
@@ -128,6 +140,7 @@ public static class SaveGame
         var r = new Run { Mission = dto.Mission, Intel = dto.Intel, Squad = new List<Unit>(), HeatLevel = Heat.Clamp(dto.HeatLevel) };
         if (dto.Fallen != null) r.Fallen = new List<string>(dto.Fallen);
         if (dto.BondTally != null) r.BondTally = new Dictionary<string, int>(dto.BondTally);
+        if (dto.ActiveBoons != null) foreach (var b in dto.ActiveBoons) r.ActiveBoons.Add((Boon)b);
         // regenerate the branching campaign map from its seed and restore the position
         if (dto.MapSeed != 0)
         {
@@ -145,6 +158,7 @@ public static class SaveGame
                 Weapon = Weapon.Make((WeaponKind)d.Weapon),
                 Kills = d.Kills, Rank = d.Rank, Alive = true,
                 BonusGrenades = d.BonusGrenades, CustomTag = d.CustomTag, Wound = d.Wound,
+                Armor = d.Armor,
                 Nickname = d.Nickname, Benched = d.Benched,
             };
             if (d.Perks != null) foreach (var p in d.Perks) u.Perks.Add((Perk)p);
@@ -181,12 +195,13 @@ public static class SaveGame
         public int MapSeed;
         public int MapPos;
         public int HeatLevel;   // append-only: chosen Heat/Ascension level (old saves default 0)
+        public List<int> ActiveBoons = new();   // append-only: run-scoped boons (old saves default empty)
     }
 
     class UnitDto
     {
         public string Name, Cls, CustomTag, Nickname;
-        public int Hp, MaxHp, Aim, Mobility, Weapon, Kills, Rank, BonusGrenades, Wound;
+        public int Hp, MaxHp, Aim, Mobility, Weapon, Kills, Rank, BonusGrenades, Wound, Armor;
         public bool Benched;
         public List<int> Perks = new();
         public List<int> WeaponMods = new();   // append-only: persisted weapon upgrades (old saves default empty)

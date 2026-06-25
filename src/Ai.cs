@@ -157,8 +157,14 @@ public static class Ai
                     if (!g.Grid.HasLineOfSight(tx, ty, p.X, p.Y)) continue;
                     var odds = OddsFrom(g, e, tx, ty, p);
                     bool canFinish = p.Hp <= e.Weapon.DmgMax;
+                    // The VIP gets a much smaller "finish it" frenzy than a soldier: balance data
+                    // showed Escort gated (~52%) because once the fragile asset was chipped into the
+                    // killable band, the WHOLE force piled on (+30 each) and deleted it in a turn.
+                    // A milder VIP finish bonus + the VIP's HP/Armor scaling (Mission.MakeVip) keeps
+                    // it a priority without an unstoppable execution swarm; soldier focus is unchanged.
+                    float finishVal = canFinish ? (p.IsVip ? 12 : 30) : 0;
                     float val = odds.HitChance + (odds.CoverLevel == 0 ? 25 : 0)
-                                + (canFinish ? 30 : 0)                   // can finish?
+                                + finishVal
                                 + (p.IsVip ? 10 : 0);                    // prioritise the VIP (was 40)
                     // VIP bias dialed 40 -> 10: balance data (Escort 34% win, many "VIP LOST")
                     // showed the +40 made the whole hostile force focus-fire the fragile asset and

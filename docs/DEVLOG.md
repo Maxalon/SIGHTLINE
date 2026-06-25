@@ -431,3 +431,49 @@ weapon-mods, AITEST/COMBATTEST PASS, no TIMEOUT). Measured: the reward sink work
 compounds). Full-run completion still gated by Escort (m4 ~37%, gear buffs soldiers not the fragile VIP) + the m6
 boss — flagged for a future tuning pass (the analytics harness is the tool). **4 waves shipped (~12 features + a
 measurement system + 2 balance passes), all on the branch / PR #53.**
+
+---
+
+## PROGRAM "CRUCIBLE" — make the campaign winnable, fair & replayable (PR #54, self-merged)
+
+Fully-autonomous orchestrator + 4 parallel research/audit agents + parallel dev agents (isolated worktrees,
+strictly disjoint files) + the `SIGHTLINE_BALANCE` flywheel as the measurement instrument. Branch
+`claude/awesome-bardeen-jd6u5q`.
+
+**The master problem (MEASURED, not asserted):** full-run completion was **~2%** — a 6-mission ironman whose
+survival is a geometric product with NO compounding survivability term and two hard single-point gates. Four
+research streams (architecture map / balance root-cause / design-precedent / combat-log+feel) converged on one
+read: *SIGHTLINE is a LONG roguelike with a TERMINAL wipe and a POWER-ONLY meta — the dead zone between FTL
+(short+instant-restart) and XCOM/Hades (long+recovery-valves+variety). Pick the XCOM/Hades lane: add recovery
+valves + lateral variety, soften the gates.*
+
+**Waves (each measured before/after with the flywheel):**
+- **Wave 1 — completability core:** deep ROSTER (carry 6) + DEPLOY-GROWTH (deploy 4→5→6 by mission, the
+  action-economy master lever) + adaptive ASSIST (Hades God-Mode loss-streak meta, base-heat only) + boss node →
+  DECAPITATE + 4 arenas + game-feel juice. (Tech-lead implemented the coupled spine; arenas/juice = parallel devs.)
+- **Wave 2 — survivability + UX:** ARMOR reward-sink (BALLISTIC PLATING, the first Intel-buyable DURABILITY,
+  folded into the one HardenedReduce chokepoint) + BULWARK/VANGUARD perks + barracks DEPLOY-PICKER + Escort fix
+  (VIP armor + cut the anti-VIP AI "finish frenzy") + Renderer readability/depth pass. (4 parallel devs.)
+- **Wave 3 — variety + readability:** 10 run-scoped BOONS (FIELD DOCTRINE pick-1-of-3 each barracks, discarded
+  at run end — the anti-same-y keystone) + always-on combat-log ledger + in-mission combat-log/active-boons HUD.
+- **Fixes (found by the flywheel, not by eye):** robust anim-queue pop (intermittent IndexOutOfRange when an
+  anim mutates `_anims`); EVAC zone 2×2→2×4 (a 5+-soldier squad couldn't fit the 4-tile zone → unwinnable →
+  TIMEOUT). Then a difficulty RECALIBRATION (the stacked squad power overshot to 54% / heat-0 ~97%/mission →
+  restored the enemy count/stat curve).
+
+**Measured arc (competent AI, heat 0-4):** 2% → 28% (Wave 2) → 54% (post-evac-fix, over-easy) → **32%**
+(recalibrated). avg ~3.6 missions cleared, no mission gate below 70%/mission, heat ladder declines to 76% at
+heat 4, AutoStep smoke-test clean (no TIMEOUT). **A 16x lift** — base-heat winnable, the 8-rung Heat ladder
+carries mastery.
+
+**Process learnings:** worktree devs MUST `git reset --hard <branch>` first (worktrees branch off near-empty
+main). Integrate by file-copy of disjoint files + an orchestrator commit; one owner per HOT file
+(Game/Hud/Renderer) per wave, append-friendly files (Unit/Combat-perks/Maps/Fx/Stats) parallelize freely. The
+tech-lead implemented the tightly-coupled completability SPINE directly (measuring before fanning out), which
+beat a fragile multi-agent scaffold dance for that work. One Hud dev returned garbled (0 tool uses) — re-launched
+cleanly; another finished but took 40min (recover-from-worktree was the fallback). The flywheel made every
+balance change PROVABLE and caught two crashes/hangs eyeballing never would.
+
+**Documented future work:** PUSH/forced-movement verb (ITB — the top depth add); perk build-trees; deliberate
+squad draft at run start; animation-speed toggle; tune the Heat-8 ceiling; raise the SmartStep batch frame cap
+(2/50 long-match frame-caps, a harness nuance — AutoStep itself never TIMEOUTs); procedural music on a real device.

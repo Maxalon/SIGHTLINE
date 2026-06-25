@@ -43,6 +43,16 @@ public static class Combat
     public const int AmbushAim  = 20;
     public const int AmbushCrit = 25;
 
+    // ---- run-scoped BOONS (Wave 3) ----
+    // The active run's boons, set once per mission by Game.SetupMission (like Stats.Enabled), so the
+    // static combat reads can see them without threading run state through every ComputeOdds call.
+    // Player-only: each read gates on the relevant unit's Team so an enemy never gets a player boon.
+    public static System.Collections.Generic.HashSet<Boon> RunBoons = new();
+    static bool HasRunBoon(Boon b) => RunBoons.Contains(b);
+    public const int BoonMarksAim  = 12;   // MARKSMEN: +aim at long range
+    public const int BoonFervorCrit = 30;  // FERVOR: +crit on overwatch reactions
+    public const int BoonExecCrit  = 20;   // EXECUTIONERS: +crit vs sub-half-HP targets
+
     // Graze band: a shot that misses by <= GrazeBand hits for minimum damage (no crit).
     // Softens the "I whiffed three 80% shots" tail without removing true misses.
     public const int GrazeBand = 15;
@@ -97,6 +107,8 @@ public static class Combat
         if (a.BondAura) hit += Unit.BondAim;     // a bonded squadmate stands adjacent
 
         if (a.FiredFromConcealment) hit += AmbushAim;
+        // run boon (player attacker): MARKSMEN sharpens the squad's long shots
+        if (a.Team == Team.Player && RunBoons.Count > 0 && HasRunBoon(Sightline.Boon.Marksmen) && dist >= Unit.LongRange) hit += BoonMarksAim;
         hit = Util.Clamp(hit, 3, 95);
 
         int crit = a.Weapon.CritBase;
@@ -114,6 +126,12 @@ public static class Combat
         // *move that turns a covered foe's flank*, so it fires when LockOn would NOT (a foe in the open,
         // never in cover, isn't a flank). Distinct trigger, distinct payoff (crit, not aim).
         if (a.HasPerk(Perk.Opportunist) && flanked) crit += Unit.OpportunistCrit;
+        // Vanguard: a BREACHER'S FINISHER — +crit ONLY vs a target that is BOTH genuinely FLANKED
+        // (you out-positioned its cover) AND ADJACENT (dist <= 1, in its face). The tightest gate of
+        // the crit perks (Opportunist needs only the flank at any range; Point Blank needs only the
+        // range vs any target) — so it pays the biggest crit. Rewards closing the distance to finish
+        // a flanked foe; goes inert at range or against an unflanked target.
+        if (a.HasPerk(Perk.Vanguard) && flanked && dist <= Unit.VanguardRange) crit += Unit.VanguardCrit;
         // First Strike (enum member GiantSlayer, reworked): an ALPHA-STRIKE/OPENER — +crit vs a target
         // still at FULL HP. Rewards focus-firing a FRESH enemy (the first shot that connects); it stops
         // helping the instant the target is chipped, so it pairs with picking targets, not finishing them
@@ -126,6 +144,12 @@ public static class Combat
         // it Resolves this shot) crits hard — Reflexes makes overwatch reliable, Guardian makes it lethal.
         if (a.HasPerk(Perk.Guardian) && IsOverwatchReaction(a)) crit += Unit.GuardianReactCrit;
         if (a.HasTrait(Trait.ColdBlood) && a.MaxHp > 0 && a.Hp * 2 <= a.MaxHp) crit += Unit.ColdBloodCrit;
+        // run boons (player attacker): FERVOR makes overwatch lethal; EXECUTIONERS finishes the wounded
+        if (a.Team == Team.Player && RunBoons.Count > 0)
+        {
+            if (HasRunBoon(Sightline.Boon.Fervor) && IsOverwatchReaction(a)) crit += BoonFervorCrit;
+            if (HasRunBoon(Sightline.Boon.Executioners) && d.MaxHp > 0 && d.Hp * 2 < d.MaxHp) crit += BoonExecCrit;
+        }
         if (d.Hunkered) crit = 0;               // hunkered can't be crit
         crit = Util.Clamp(crit, 0, 100);
 
@@ -163,15 +187,28 @@ public static class Combat
     /// keys its overwatch-only bonuses off this without needing a Game.cs edit.
     static bool IsOverwatchReaction(Unit a) => a.ReactedThisTurn;
 
-    /// HARDENED damage reduction (one source of truth for every incoming-hit path: Resolve's hit +
-    /// graze branches and the grenade blast in Anim). A Hardened defender takes HardenedFlat off any
-    /// hit, plus an extra HardenedCrit off a CRITICAL hit (crits are the spiky shots that drop
-    /// soldiers — a tank shrugs them off). Always floored at 1 (the guaranteed-damage floor still holds).
+    /// INCOMING-DAMAGE REDUCTION — the ONE source of truth for every incoming-hit path: Resolve's
+    /// hit + graze branches AND the grenade blast in Anim (which all call this with the defender).
+    /// Despite the historical name (kept stable because Anim.cs calls it), this folds in EVERY
+    /// damage-in mitigation that lives on the DEFENDER, stacking additively:
+    ///   - ARMOR (d.Armor): a persistent flat reduction bought in the shop — subtracted from every hit.
+    ///   - HARDENED perk: -HardenedFlat off any hit, plus an extra -HardenedCrit off a CRITICAL hit
+    ///     (crits are the spiky shots that drop soldiers — a tank shrugs them off).
+    ///   - BULWARK perk: an extra -BulwarkFlat WHILE the defender is HUNKERED (a deliberate hold-the-
+    ///     line trade — worthless if you never dig in).
+    /// ALWAYS floored at 1, so the guaranteed-damage floor still holds: every hit deals >= 1 no matter
+    /// how much armor/perk reduction stacks. With no armor and no perks this is a pass-through (dmg).
     public static int HardenedReduce(Unit d, int dmg, bool crit)
     {
-        if (!d.HasPerk(Perk.Hardened)) return dmg;
-        int reduced = dmg - Unit.HardenedFlat - (crit ? Unit.HardenedCrit : 0);
-        return Math.Max(1, reduced);
+        int reduce = d.Armor;                                   // persistent shop armor (flat, always)
+        if (d.HasPerk(Perk.Hardened))
+            reduce += Unit.HardenedFlat + (crit ? Unit.HardenedCrit : 0);  // tank perk: flat + extra vs crit
+        if (d.HasPerk(Perk.Bulwark) && d.Hunkered)
+            reduce += Unit.BulwarkFlat;                         // turtle perk: extra while braced
+        if (d.Team == Team.Player && RunBoons.Count > 0 && HasRunBoon(Sightline.Boon.Fortified))
+            reduce += 1;                                        // FORTIFIED boon: squad-wide +1 armor
+        if (reduce <= 0) return dmg;                            // nothing to subtract: pass through
+        return Math.Max(1, dmg - reduce);                       // guaranteed-damage floor (>= 1)
     }
 
     // Streak-breaker constants (S4-C): per clean-miss aim bonus, capped at MaxStreakBonus.
@@ -712,8 +749,84 @@ public static class Combat
             if (!sawLethalOnEnemy) fails.Add("floorWronglyProtectsEnemy");
         }
 
+        // ARMOR: a persistent flat damage-reducer folded into HardenedReduce (the shared chokepoint
+        // for every incoming-hit path). Verify it subtracts d.Armor from any hit, stacks ON TOP of
+        // the Hardened perk, and never breaks the guaranteed-damage floor (>= 1).
+        {
+            var plain = new Unit { Team = Team.Player, Hp = 20, MaxHp = 20 };                       // 0 armor, no perk
+            var armored = new Unit { Team = Team.Player, Hp = 20, MaxHp = 20, Armor = 2 };          // 2 armor, no perk
+            // No armor + no perk: pass-through (both crit and non-crit).
+            if (HardenedReduce(plain, 7, false) != 7 || HardenedReduce(plain, 7, true) != 7) fails.Add("armorNoneNoOp");
+            // Armor=2: a hit deals 2 less (crit and non-crit alike — Armor is a flat, perk-independent cut).
+            if (HardenedReduce(armored, 7, false) != 5) fails.Add("armorFlat");
+            if (HardenedReduce(armored, 7, true)  != 5) fails.Add("armorFlatCrit");
+            // Floor: armor can never drop a hit below 1 (the guaranteed-damage floor holds).
+            if (HardenedReduce(armored, 1, false) < 1) fails.Add("armorFloor");
+            var bigArmor = new Unit { Team = Team.Player, Hp = 20, MaxHp = 20, Armor = Unit.ArmorMax };
+            if (HardenedReduce(bigArmor, 2, false) < 1) fails.Add("armorMaxFloor");
+            // Armor STACKS on top of Hardened: 9-dmg crit, Armor=2 + Hardened (-HardenedFlat -HardenedCrit).
+            var armHard = new Unit { Team = Team.Player, Hp = 20, MaxHp = 20, Armor = 2 };
+            armHard.Perks.Add(Perk.Hardened);
+            int expectStack = Math.Max(1, 9 - 2 - Unit.HardenedFlat - Unit.HardenedCrit);
+            if (HardenedReduce(armHard, 9, true) != expectStack) fails.Add("armorStacksHardened");
+            // Armor reduces MORE than no armor on the same defender profile (sanity: it actually helps).
+            if (HardenedReduce(armored, 9, false) >= HardenedReduce(plain, 9, false)) fails.Add("armorActuallyReduces");
+        }
+
+        // BULWARK: an extra flat reduction WHILE HUNKERED (read in HardenedReduce off d.Hunkered).
+        // Verify it fires only when hunkered, stacks with armor/Hardened, and respects the floor.
+        {
+            var blw = new Unit { Team = Team.Player, Hp = 20, MaxHp = 20 };
+            blw.Perks.Add(Perk.Bulwark);
+            // Not hunkered: Bulwark is inert (a normal pass-through, no perk effect).
+            blw.Hunkered = false;
+            if (HardenedReduce(blw, 7, false) != 7) fails.Add("bulwarkRestingInert");
+            // Hunkered: -BulwarkFlat off the hit.
+            blw.Hunkered = true;
+            if (HardenedReduce(blw, 7, false) != 7 - Unit.BulwarkFlat) fails.Add("bulwarkHunkered");
+            // Hunkered Bulwark must reduce MORE than the same hit when standing (the whole point).
+            blw.Hunkered = false; int standing = HardenedReduce(blw, 7, false);
+            blw.Hunkered = true;  int braced   = HardenedReduce(blw, 7, false);
+            if (braced >= standing) fails.Add("bulwarkBracedStronger");
+            // Stacks with Armor while hunkered, still floored at 1.
+            var blwArm = new Unit { Team = Team.Player, Hp = 20, MaxHp = 20, Armor = 2, Hunkered = true };
+            blwArm.Perks.Add(Perk.Bulwark);
+            if (HardenedReduce(blwArm, 9, false) != Math.Max(1, 9 - 2 - Unit.BulwarkFlat)) fails.Add("bulwarkStacksArmor");
+            if (HardenedReduce(blwArm, 1, false) < 1) fails.Add("bulwarkFloor");
+        }
+
+        // VANGUARD: +crit ONLY vs a target that is BOTH flanked AND adjacent (dist <= VanguardRange).
+        // A pure ComputeOdds read; verify it fires under both conditions and is inert otherwise.
+        {
+            // local builders: a Vanguard-perked attacker and a plain one, both at attacker-X = ax.
+            Unit VanU(int ax) { var u = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = ax, Y = 5 }; u.Perks.Add(Perk.Vanguard); return u; }
+            Unit PlainU(int ax) => new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = ax, Y = 5 };
+
+            // Adjacent + flanked: target at (10,5) with cover on its EAST side (x=11) -> flanked; attacker
+            // due west at (9,5) is dist 1. Vanguard fires.
+            var gAdj = new Grid(); gAdj.Tiles[11, 5] = TileType.HighCover;
+            var adjFlankFoe = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 10, Y = 5, Hp = 10, MaxHp = 10 };
+            var vanAdj = ComputeOdds(gAdj, VanU(9), adjFlankFoe);
+            if (!vanAdj.Flanked) fails.Add("vanguardAdjSetup");           // guard: it really is a flank
+            if (vanAdj.CritChance != Util.Clamp(ComputeOdds(gAdj, PlainU(9), adjFlankFoe).CritChance + Unit.VanguardCrit, 0, 100)) fails.Add("vanguardAdjFlankFires");
+
+            // Flanked but NOT adjacent (dist 3): same flank setup, attacker at (7,5). Vanguard must NOT fire.
+            var farFlankFoe = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 10, Y = 5, Hp = 10, MaxHp = 10 };
+            var vanFar = ComputeOdds(gAdj, VanU(7), farFlankFoe);
+            if (!vanFar.Flanked) fails.Add("vanguardFarSetup");           // guard: still a flank, just at range
+            if (vanFar.CritChance != ComputeOdds(gAdj, PlainU(7), farFlankFoe).CritChance) fails.Add("vanguardFarNoOp");
+
+            // Adjacent but NOT flanked (open-ground exposed foe, no cover): attacker at (9,5), foe at (10,5).
+            // Vanguard must NOT fire (it needs the genuine flank, distinguishing it from Point Blank).
+            var gVan = new Grid();
+            var adjExposed = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 10, Y = 5, Hp = 10, MaxHp = 10 };
+            var vanExp = ComputeOdds(gVan, VanU(9), adjExposed);
+            if (vanExp.Flanked) fails.Add("vanguardExposedSetup");        // guard: adjacent but NOT a flank
+            if (vanExp.CritChance != ComputeOdds(gVan, PlainU(9), adjExposed).CritChance) fails.Add("vanguardExposedNoOp");
+        }
+
         return fails.Count == 0
-            ? "COMBATTEST: PASS (cover A-E + high-ground + tier-2 + drone/shield + ambush + graze + streak + perk-balance + build-perks + fragile-floor all hold)"
+            ? "COMBATTEST: PASS (cover A-E + high-ground + tier-2 + drone/shield + ambush + graze + streak + perk-balance + build-perks + fragile-floor + armor + bulwark + vanguard all hold)"
             : "COMBATTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 }
