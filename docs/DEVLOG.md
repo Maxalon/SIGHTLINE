@@ -490,3 +490,51 @@ PROCESS: the SHOVE worktree dev was interrupted by a worker restart mid-verify; 
 (7 files, ~375 lines) was recovered from the worktree and verified by the orchestrator (SHOVETEST/COMBATTEST PASS,
 12/12 autoplay clean) — the same recover-from-worktree fallback used in prior sessions. PUSH + perk-trees are now
 DONE; remaining future work: squad draft at run start, animation-speed toggle, AI use of SHOVE.
+
+---
+
+## PROGRAM "KEYSTONE" — decisions that matter, from run-open to each turn (fresh autonomous session)
+
+Run as orchestrator + parallel dev agents (isolated worktrees, strictly disjoint files) + read-only
+research/audit + reviewer agents + the `SIGHTLINE_BALANCE` flywheel. Branch `claude/adoring-lovelace-2f6q3c`.
+A 3-agent research fan-out (decision-quality auditor / opportunity scout / balance analyst) converged on:
+(1) the **per-turn decision space is thin** (~2 real options — "shoot best target / reposition"; anti-turtle
+is offloaded onto the enemy AI, the player has no positive advance reward); (2) the **run opening, the
+between-mission economy, and enemy identity are decision-thin**; (3) **measured gates**: mission-1 lost 20% of
+the time (a heat-3/4 alpha-strike on the green opener — a hard cap on a geometric-product run-completion), and
+the harness couldn't show the Heat ladder's *shape* (per-mission byHeat is survivorship-skewed).
+
+### Wave 1 — balance + measurement foundations (tech-lead-driven, measured)
+- **Run-completion-by-heat metric** (`Stats.cs` text + JSON `byHeatRun`) — the ladder's true shape, distinct
+  from the survivorship-skewed per-mission byHeat.
+- **Early-mission heat grace** (`Game.SetupMission`): ramp Heat's extra bodies/stats in over missions 1-3
+  (m1 ×0, m2 ×½, m3+ full) so a green 4-rookie squad doesn't eat a heat-3/4 alpha-strike on the cold opener.
+  **MEASURED: mission-1 win-rate 80% → 100%** via the flywheel. Card deltas + the per-mission growth curve are
+  untouched; heat 0 stays a true no-op.
+- *Considered + REVERTED:* a Sniper crit trim (20→15) to flatten SHARPSHOOTER dominance — the data showed it
+  only narrowed the kill gap 2×→1.4× (the real edge is 94% hit + a positive range curve, not crit) while
+  possibly costing squad DPS, so it was reverted; class balance is better solved by crossfire + the draft +
+  role value than a blunt crit nerf.
+
+### Wave 2 — per-turn tactical depth (3 parallel disjoint-file devs + orchestrator wiring + reviewer)
+| Item | Owner | Files | Outcome |
+|---|---|---|---|
+| CROSSFIRE / converging-fire bonus | Dev A | `Combat` | A target threatened by 2+ same-team attackers from angles diverging >~72° takes +10 aim/+10 crit (it can't use cover against both). Symmetric, via a static `Combat.AllUnits` roster read in `ComputeOdds` (the `RunBoons` pattern; set by `Game.RefreshCombatRoster`). `ShotOdds.Crossfire` + `+ CROSSFIRE` tooltip badge. Rewards pincering over stacking one firing line — the thinnest pillar. |
+| Smarter enemy AI | Dev C | `Ai` | Enemies seek crossfire/exposing angles, use SMOKE to cover advances / cross overwatch lanes + FLASH on 2+ clusters proactively (reason-driven, not a tic), sharper lethal-EV targeting that defers to squad focus. |
+| Anim-speed toggle (F2, 1x/2x/3x) + SHOVE reach-2 | Dev B | `Game` | Long-requested QoL (byte-stable at default 1x) + the forced-movement verb now targets within Chebyshev 2. |
+| Wiring + tooltip badge | orch | `Game`,`Hud` | `RefreshCombatRoster` (per-mission + Defend waves); `+ CROSSFIRE` badge. |
+
+Disjoint files {Combat}|{Ai}|{Game} → clean file-copy integration; Game.cs took Dev B's diff via `git apply`
+onto the Wave-1 grace commit (different regions). **QA: build 0/0; all 13 self-tests PASS** (COMBATTEST now
+covers crossfire, SHOVETEST reach-2, AITEST the AI changes); **independent reviewer APPROVE-WITH-NITS** (no
+blockers; crossfire math/lifecycle, AI no-TIMEOUT, anim-speed inertness, shove reach all verified). **Balance
+flywheel (N=30, heat 0-4): run completion 47% (vs ~50% baseline), heat-0 83%, declining ladder, all
+per-mission 81-97% / per-objective 81-100%** — depth + a smarter opponent added WITHOUT cratering
+completability; the reviewer's "symmetric crossfire favors the numerically-superior enemy" worry was checked
+against the data (enemies don't get the player-only +25 ambush, and heat-0 stayed at 83%), so crossfire kept
+symmetric.
+
+### Wave 3 — run-opening squad DRAFT (in flight) + Wave 4 enemy FACTIONS (planned)
+DRAFT: pick 4 of 6 recruits + a starting boon before mission 1, gated OUT of the harness (`!NoPersist`) so the
+flywheel/autoplay never enter the draft. FACTIONS: group the ~14 archetypes into ~3 named factions, each with
+a faction rule that warps the encounter + a readable node banner.
