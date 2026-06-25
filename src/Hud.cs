@@ -92,7 +92,12 @@ public static class Hud
     public static void Draw(Game g)
     {
         DrawTopBar(g);
-        if (g.Phase == Phase.PlayerTurn || g.Phase == Phase.EnemyTurn) DrawRoster(g);
+        if (g.Phase == Phase.PlayerTurn || g.Phase == Phase.EnemyTurn)
+        {
+            DrawRoster(g);
+            DrawBoonStrip(g);   // active run boons, just under the top bar
+            DrawCombatLog(g);   // rolling combat ledger, lower-right above the action bar
+        }
         DrawBottomBar(g);
         DrawTooltip(g);
         if ((g.Phase == Phase.PlayerTurn || g.Phase == Phase.EnemyTurn) && g.TutorialText != null)
@@ -364,6 +369,88 @@ public static class Hud
     {
         Raylib.DrawCircle(x, y + 7, 6, dot);
         Raylib.DrawTextEx(Cfg.Font, text, new Vector2(x + 14, y), 16, 1f, Pal.Txt);
+    }
+
+    // ---------------- active-boons strip ----------------
+    // Small gold chips of each run-scoped boon's short code, right-anchored just under the
+    // top bar so the player always sees which run modifiers are live. Draws nothing when the
+    // run has no boons (so heat-0 / boon-less runs stay byte-identical). Render-only.
+    static void DrawBoonStrip(Game g)
+    {
+        var boons = g.RunState?.ActiveBoons;
+        if (boons == null || boons.Count == 0) return;
+
+        const float size = 12f, padX = 7f, h = 18f, gap = 5f, y = 46f;
+        // measure right-to-left so the strip hugs the screen's right edge (clear of the
+        // left roster strip, the heat pill and the end-turn button above it)
+        float x = Cfg.ScreenW - 20f;
+        for (int i = boons.Count - 1; i >= 0; i--)
+        {
+            string code = BoonDef.Code(boons[i]);
+            float tw = Raylib.MeasureTextEx(Cfg.Font, code, size, 1f).X;
+            float w = tw + padX * 2f;
+            x -= w;
+            var chip = new Rectangle(x, y, w, h);
+            Raylib.DrawRectangleRounded(chip, 0.4f, 6, Raylib.Fade(Pal.Panel, 0.85f));
+            Raylib.DrawRectangleLinesEx(chip, 1f, Raylib.Fade(Pal.VipGold, 0.55f));
+            Raylib.DrawTextEx(Cfg.Font, code, new Vector2(x + padX, y + 3f), size, 1f, Pal.VipGold);
+            x -= gap;
+        }
+    }
+
+    // ---------------- in-mission combat log ----------------
+    // A compact, always-visible ledger of the last few consequential events (Stats.CombatLog,
+    // always-on backend) anchored lower-right above the action bar. Team-colored + outcome-tinted,
+    // very low-alpha background so it never fights the board (readability is sacred: it sits over
+    // the lower-right board corner but never occludes units/threat pips meaningfully). Render-only.
+    static void DrawCombatLog(Game g)
+    {
+        var log = Stats.CombatLog;
+        const int shown = 6;
+        const float w = 296f, lh = 14f, padX = 9f, headH = 18f, padY = 6f;
+        float bodyH = shown * lh;
+        float h = headH + bodyH + padY;
+        // bottom edge sits just above the action-button row (y 720) and the unit card (x 20..270)
+        float x = Cfg.ScreenW - w - 14f;
+        float y = 712f - h;
+        var panel = new Rectangle(x, y, w, h);
+
+        // low-alpha frame so the board reads through it
+        Raylib.DrawRectangleRounded(panel, 0.10f, 6, Raylib.Fade(Pal.RGBA(8, 12, 17), 0.62f));
+        Raylib.DrawRectangleLinesEx(panel, 1f, Raylib.Fade(Pal.PanelBd, 0.6f));
+        // tiny header
+        Raylib.DrawTextEx(Cfg.Font, "LOG", new Vector2(x + padX, y + 4f), 11, 1f, Pal.TxtDim);
+
+        float ty = y + headH;
+        int start = Math.Max(0, log.Count - shown);
+        for (int i = start; i < log.Count; i++)
+        {
+            var e = log[i];
+            // base color by team (Player=0 -> Friend, else Foe), then tint by outcome
+            Color c = e.Team == 0 ? Pal.Friend : Pal.Foe;
+            switch (e.Outcome)
+            {
+                case "KILL":  c = Pal.VipGold; break;            // bright: a death
+                case "CRIT":  c = Pal.Accent;  break;            // crit pop
+                case "GRAZE":
+                case "MISS":  c = Pal.TxtDim;  break;            // dim: low-consequence
+            }
+            string line = e.Text ?? "";
+            // clip to the panel width so long lines never spill
+            line = Clip(line, 11, (int)(w - padX * 2f));
+            Raylib.DrawTextEx(Cfg.Font, line, new Vector2(x + padX, ty), 11, 1f, c);
+            ty += lh;
+        }
+    }
+
+    /// Truncate `text` (with an ellipsis) so it fits within `maxW` px at `size`.
+    static string Clip(string text, int size, int maxW)
+    {
+        if (string.IsNullOrEmpty(text)) return text;
+        if (Raylib.MeasureTextEx(Cfg.Font, text, size, 1f).X <= maxW) return text;
+        while (text.Length > 1 && Raylib.MeasureTextEx(Cfg.Font, text + "…", size, 1f).X > maxW)
+            text = text.Substring(0, text.Length - 1);
+        return text + "…";
     }
 
     // ---------------- bottom bar ----------------

@@ -324,15 +324,13 @@ public static class Mission
         // (the +1/+1 from RELENTLESS/OVERWHELMING used to clip at 10 on later missions). 12 still
         // fits easily: spawns occupy cols 14-17 over grid.H rows (44 slots) and the collision loop
         // below relocates any overlap.
-        // Difficulty curve softened (balance data): with deploy-growth the squad now fields 5-6,
-        // but the mid-late game still sat at ~50% per mission -> a 6-mission run is a geometric
-        // product that needs ~78%/mission to clear ~25% of the time. The enemy count + per-mission
-        // stat bump were the binding driver (tanky, accurate forces by m4-5). Count grows by ~1
-        // less per mission (3+n, cap 11) and the stat bump grows ~2/3 as fast ((n-1)*2/3), so the
-        // squad's body/level/gear growth can actually out-scale the curve. Heat's statDelta/
-        // enemyDelta still stack on top, so the ladder keeps its teeth.
-        int count = Math.Clamp(3 + n + enemyDelta, 3, 11);   // deployment-card + Heat modifier
-        int bump = Math.Max(0, (n - 1) * 2 / 3 + statDelta); // stat growth per mission +/- card
+        // Difficulty RECALIBRATED to the grown squad: the curve was softened (3+n / (n-1)*2/3) back
+        // when the squad was a struggling 4-strong. Since then deploy-growth (5-6 bodies), run boons,
+        // Armor, and the Evac fix stacked huge squad power -> heat-0 hit ~97%/mission (too trivial).
+        // Restored the enemy headcount (4+n, cap 12) and the full per-mission stat bump (n-1) so the
+        // now-strong squad faces a real fight; Heat's deltas still stack for the mastery ladder.
+        int count = Math.Clamp(4 + n + enemyDelta, 3, 12);   // deployment-card + Heat modifier
+        int bump = Math.Max(0, (n - 1) + statDelta);         // stat growth per mission +/- card
         // Final mission (the WARLORD boss): de-stack the force. This was the core of the ~90% m6
         // loss wall -- the squad cleared m1-5 (m5 often wins ~100%, partly because it isn't always
         // forced Eliminate) then got alpha-struck on m6's forced full-clear. The compounding cause:
@@ -345,7 +343,7 @@ public static class Mission
         if (n >= Run.MaxMissions)
         {
             count = Math.Max(5, count - 4);
-            bump = Math.Max(0, (n - 1) * 2 / 3);             // drop the boss-card/heat StatDelta for the screen
+            bump = Math.Max(0, n - 1);                       // drop the boss-card/heat StatDelta for the screen
         }
         var rows = new List<int>();
         for (int y = 0; y < grid.H; y++) rows.Add(y);
