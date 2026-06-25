@@ -1037,7 +1037,42 @@ Before stopping:
 
 ### WIP NOTES
 
-> **PROGRAM "CRUCIBLE" — completability + variety + readability (LATEST; read first; full log in
+> **PROGRAM "KEYSTONE" — decisions that matter, run-open to each turn (LATEST; read first; full log in
+> `docs/DEVLOG.md`).** Fresh fully-autonomous dev-team session (orchestrator + 3 research agents + 5 isolated-
+> worktree dev agents + 2 reviewers + the `SIGHTLINE_BALANCE` flywheel). Branch `claude/adoring-lovelace-2f6q3c`,
+> **PR #56**. A 3-agent research fan-out (decision-quality / opportunity / balance) found: the per-turn space was
+> thin (~2 real options; anti-turtle offloaded onto enemy AI), the run opening/economy/enemy-identity were
+> decision-thin, and mission-1 lost 20% (a heat-3/4 alpha-strike on the green opener, capping a geometric-product
+> run). **5 WAVES SHIPPED, each measured:**
+> - **W1 (balance/measurement):** early-mission HEAT GRACE (ramp Heat's bodies/stats in over m1-3) — MEASURED
+>   mission-1 win 80%->100%; + a run-completion-by-HEAT metric in `Stats` (the ladder's true shape). (Reverted a
+>   Sniper crit trim — data showed it didn't fix class dominance + risked DPS.)
+> - **W2 (per-turn depth):** CROSSFIRE — a target hit from 2+ diverging angles (>~72deg) takes +10 aim/+10 crit
+>   (symmetric; static `Combat.AllUnits` read like `RunBoons`, set by `Game.RefreshCombatRoster`); + smarter
+>   enemy AI (crossfire-seeking, proactive smoke/flash); + anim-speed toggle (F2) + SHOVE reach-2. `+ CROSSFIRE`
+>   tooltip + an on-board converging-fire indicator (Renderer).
+> - **W3 (run-opening):** squad DRAFT — pick 4 of 6 operators + a starting DOCTRINE before m1 (the run's thesis);
+>   gated OUT of the harness via `!NoPersist`. `SIGHTLINE_DRAFTTEST`/`SIGHTLINE_DRAFT`.
+> - **W4 (enemy identity):** FACTIONS — the ~14 archetypes -> 3 factions warping POSITIONING (SYNDICATE sees over
+>   low cover / LEGION +aim+crit closing / WARDENS +aim long), faction-gated rosters + a telegraphed node hint +
+>   banner + faction-named HOSTILES counter. `Combat.MissionFaction` (default None == old behavior). Per
+>   Combat/Elite node, deterministic from MapSeed.
+> - **W5 (smarter opponent):** the enemy AI USES SHOVE — a rusher/Legion enemy shoves an adjacent covered soldier
+>   out of cover to expose it (or collides if pinned); `EnemyPlan.ShoveTarget` + a `Game.UpdateEnemy` exec reusing
+>   `ShoveAnim`.
+> MEASURED: heat-0 run-completion ~83% (W2) / ~33-43% overall across heat 0-4 with factions+AI-shove live —
+> winnable base, a declining Heat ladder, every per-mission rate 81-97%. 3 reviews APPROVE-WITH-NITS (nits
+> applied). Also de-flaked the COMBATTEST graze band. **14 self-tests green; build 0/0; autoplay clean (no
+> TIMEOUT).** New hooks: `SIGHTLINE_DRAFTTEST`/`SIGHTLINE_DRAFT`. **DOCUMENTED FUTURE WORK (clear runway):** the
+> Evac/Escort 13-15-turn drag (per-soldier "lift-out" extraction); a strategic OVERWORLD economy (intel scarcity
+> / route opportunity cost, R2's pick); faction-counter PREP between missions (make the telegraph actionable);
+> more player verbs / suppression-as-area-denial; procedural music on a real device. **PROCESS GOTCHAS:** worktree
+> base is unpredictable (check `git merge-base` + grep for recent symbols before integrating — file-copy only if
+> base==trunk, else 3-way cherry-pick); a cherry-pick onto a heavily-edited hot file is riskier than doing the
+> coupled work directly (so AI-shove was tech-lead-direct); ALWAYS rebuild before trusting `--no-build` self-tests
+> (a stale binary masked a real build break); reviewer "dead code" nits are hypotheses — the compiler is the arbiter.
+
+> **PROGRAM "CRUCIBLE" — completability + variety + readability (read first; full log in
 > `docs/DEVLOG.md`).** Fully-autonomous orchestrator + 4 parallel research/audit agents + parallel dev agents
 > (isolated worktrees, disjoint files) + the `SIGHTLINE_BALANCE` flywheel. Branch `claude/awesome-bardeen-jd6u5q`,
 > PR #54. The MEASURED master problem: full-run completion was **~2%** — a 6-mission geometric-product collapse
