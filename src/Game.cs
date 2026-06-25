@@ -69,6 +69,15 @@ public class Game
     public int ItemTx, ItemTy;
     public bool ItemValid;
 
+    // SHOVE targeting (forced-movement verb): pick an ADJACENT enemy to shove one tile away.
+    // Mirrors the ItemMode targeting pattern (ToggleShove/ShoveTargetOk/IssueShove + an action
+    // key + every mode-reset site). ShoveTarget is the hovered adjacent enemy (null = no valid
+    // target under the cursor); ShoveValid gates the click. Costs 1 action, never ends the turn,
+    // 1 use per soldier per turn (Unit.ShovedThisTurn) — bounded, no infinite reposition loop.
+    public bool ShoveMode;
+    public Unit ShoveTarget;
+    public bool ShoveValid;
+
     // banner
     public string BannerText = "";
     public float BannerTimer, BannerMax;
@@ -487,6 +496,10 @@ public class Game
         foreach (var u in Enemies) { u.BeginTurn(); u.OnOverwatch = false; }
         Selected = Players.FirstOrDefault(p => p.CanAct);
         AimMode = false;
+        SnapShot = false;
+        GrenadeMode = false;
+        ItemMode = false;
+        ShoveMode = false;
         Biome = Biome.For(n, _run.MapSeed);   // per-run biome variety (surfaces NEON/MAGMA across seeds)
         ShowBanner($"MISSION {n} - {Biome.Name}", false);
         StartTutorialMaybe();
@@ -653,6 +666,91 @@ public class Game
         return fails.Count == 0
             ? "CONCEALTEST: PASS (start concealed; pods gated; break arms+wakes; RevealRange breaks w/o bonus)"
             : "CONCEALTEST: FAIL (" + string.Join(",", fails) + ")";
+    }
+
+    /// Headless self-test for the SHOVE forced-movement verb. Builds a controlled open-field
+    /// scene (no random map / no run) and asserts:
+    ///   (1) shoving an enemy with a CLEAR tile behind it MOVES it there + breaks its overwatch.
+    ///   (2) shoving an enemy against a WALL deals collision damage (HP drops) + doesn't move it.
+    ///   (3) CanShove is false when there is no adjacent enemy, true when one is adjacent,
+    ///       and false once the soldier has already shoved this turn (ShovedThisTurn).
+    /// Prints SHOVETEST: PASS/FAIL. No window needed beyond tile-math (caller inits a tiny one).
+    public string ShoveSelfTest()
+    {
+        NoPersist = true;
+        var fails = new System.Collections.Generic.List<string>();
+
+        // ---- controlled scene: empty 18x11 floor, no cover, no run state ----
+        Grid = new Grid();                       // all Floor, Height 0
+        Players = new System.Collections.Generic.List<Unit>();
+        Enemies = new System.Collections.Generic.List<Unit>();
+        Vip = null; CaptiveLocked = false;
+        Objective = Objective.Eliminate;
+        EvacZone.Clear();
+        Fx = new Fx();
+
+        Unit MkP(int x, int y) {
+            var u = new Unit { Name = "S", Cls = "ASSAULT", Team = Team.Player, X = x, Y = y,
+                               Hp = 8, MaxHp = 8, Aim = 65, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+            u.Ammo = u.Weapon.Clip; u.SyncPos(); u.BeginTurn(); return u;
+        }
+        Unit MkE(int x, int y) {
+            var u = new Unit { Name = "E", Cls = "GRUNT", Team = Team.Enemy, X = x, Y = y,
+                               Hp = 6, MaxHp = 6, Aim = 60, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+            u.Ammo = u.Weapon.Clip; u.Alert = AlertLevel.Alert; u.SyncPos(); u.BeginTurn(); return u;
+        }
+
+        // Helper: run a ShoveAnim to completion (mirrors how the anim queue drives it in play).
+        void RunShove(Unit shover, Unit target, int dx, int dy)
+        {
+            var anim = new ShoveAnim(shover, target, dx, dy);
+            anim.OnStart(this);
+            for (int i = 0; i < 200 && !anim.Update(this, 0.05f); i++) { }
+        }
+
+        // ---- (1) clear destination -> the enemy SLIDES + overwatch breaks ----
+        var p1 = MkP(5, 5);
+        var e1 = MkE(6, 5);                       // directly east, adjacent
+        e1.OnOverwatch = true; e1.Hunkered = true;
+        Players.Add(p1); Enemies.Add(e1);
+        RunShove(p1, e1, 1, 0);                   // shove east -> tile (7,5) is clear floor
+        if (!(e1.X == 7 && e1.Y == 5)) fails.Add($"clearShoveDidNotMove({e1.X},{e1.Y})");
+        if (e1.OnOverwatch) fails.Add("shoveDidNotBreakOverwatch");
+        if (e1.Hunkered) fails.Add("shoveDidNotClearHunker");
+
+        // ---- (2) blocked by a wall -> collision damage, no move ----
+        Players = new System.Collections.Generic.List<Unit>();
+        Enemies = new System.Collections.Generic.List<Unit>();
+        var p2 = MkP(5, 5);
+        var e2 = MkE(6, 5);                       // adjacent east
+        Grid.Tiles[7, 5] = TileType.HighCover;   // a WALL directly behind the enemy
+        Grid.SetCoverHp(7, 5);
+        Players.Add(p2); Enemies.Add(e2);
+        int hp0 = e2.Hp;
+        RunShove(p2, e2, 1, 0);                   // shove into the wall
+        if (!(e2.X == 6 && e2.Y == 5)) fails.Add($"blockedShoveMoved({e2.X},{e2.Y})");
+        if (e2.Hp >= hp0) fails.Add($"blockedShoveNoDamage(hp={e2.Hp})");
+        if (!e2.Alive && e2.Hp > 0) fails.Add("blockedShoveDeathInconsistent");
+
+        // ---- (3) CanShove gating ----
+        Players = new System.Collections.Generic.List<Unit>();
+        Enemies = new System.Collections.Generic.List<Unit>();
+        var p3 = MkP(5, 5);
+        Players.Add(p3);
+        if (CanShove(p3)) fails.Add("canShoveWithNoEnemy");      // no enemy anywhere
+        var eFar = MkE(15, 9); Enemies.Add(eFar);
+        if (CanShove(p3)) fails.Add("canShoveWithFarEnemy");     // enemy not adjacent
+        var eAdj = MkE(6, 5); Enemies.Add(eAdj);
+        if (!CanShove(p3)) fails.Add("cannotShoveWithAdjacentEnemy");
+        if (!ShoveTargetOk(p3, eAdj)) fails.Add("adjacentEnemyNotValidTarget");
+        if (ShoveTargetOk(p3, eFar)) fails.Add("farEnemyValidTarget");
+        // once shoved this turn, CanShove must be false (anti-loop / 1-per-turn cap)
+        p3.ShovedThisTurn = true;
+        if (CanShove(p3)) fails.Add("canShoveTwiceInOneTurn");
+
+        return fails.Count == 0
+            ? "SHOVETEST: PASS (clear shove moves + breaks overwatch/hunker; blocked shove damages + holds; CanShove gates adjacency + 1/turn)"
+            : "SHOVETEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
     /// Headless self-test for the WAVE 1 deep-roster + deployment lifecycle.
@@ -868,6 +966,30 @@ public class Game
         CurY = u.Y;
         // also drop a live cloud elsewhere so the screenshot shows the deployed haze
         Grid.AddSmoke(Util.Clamp(u.X + 5, 0, Grid.W - 1), Util.Clamp(u.Y + 3, 0, Grid.H - 1), SmokeAnim.Radius, SmokeAnim.Turns);
+    }
+
+    /// Harness hook (screenshot only): stage the SHOVE targeting overlay. Wakes pods, teleports
+    /// the nearest live enemy adjacent to a soldier, selects that soldier, enters ShoveMode, and
+    /// parks the keyboard cursor on the enemy so the push arrow + destination preview render.
+    public void DebugShove()
+    {
+        DebugWakeAll();
+        var u = Players.FirstOrDefault(p => p.Alive && !p.IsVip);
+        if (u == null) return;
+        // find a clear floor tile adjacent to the soldier to seat the foe, with a clear tile
+        // BEHIND it (in the push direction) so the destination-tile preview shows.
+        var foe = Enemies.Where(e => e.Alive).OrderBy(e => Util.ChebyDist(u.X, u.Y, e.X, e.Y)).FirstOrDefault();
+        if (foe == null) return;
+        // prefer pushing east: seat foe at (u.X+1,u.Y) if its destination (u.X+2,u.Y) is clear.
+        if (Grid.IsFloor(u.X + 1, u.Y) && Grid.IsFloor(u.X + 2, u.Y) && !IsOccupiedByOther(u.X + 1, u.Y, foe))
+        { foe.X = u.X + 1; foe.Y = u.Y; foe.SyncPos(); }
+        Selected = u;
+        RecomputeMoveCost();
+        ShoveMode = true;
+        KbCursor = true;
+        CurX = foe.X; CurY = foe.Y;
+        ShoveTarget = foe;
+        ShoveValid = ShoveTargetOk(u, foe);
     }
 
     /// Harness hook (screenshot only): freeze a sample of the procedural unit-animation poses
@@ -1522,7 +1644,7 @@ public class Game
         {
             if (Raylib.IsKeyPressed(KeyboardKey.Escape))
             {
-                if (AimMode || GrenadeMode || ItemMode) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; }
+                if (AimMode || GrenadeMode || ItemMode || ShoveMode) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; }
                 else Paused = !Paused;
             }
             if (Paused) { HandlePauseMenu(); return; }
@@ -2421,8 +2543,16 @@ public class Game
     int _autoSig = -1, _autoStall;
     int _vipWaitTurns;       // SmartStep Escort: consecutive turns the VIP held for safety (anti-stall)
     int _smartConcealTurns;  // SmartStep: player turns spent concealed (hard anti-TIMEOUT cap)
+    const int AutoMaxTurns = 50;  // hard autopilot match cap: force-end a dragging match as a LOSS
     void AutoStallCheck()
     {
+        // HARD no-TIMEOUT backstop: a match still going at AutoMaxTurns is effectively stalled (normal
+        // matches resolve in ~5-15 turns; Defend caps at 8). Force-lose so the smoke test / balance
+        // batch ALWAYS terminates well before the frame cap — never a RESULT: TIMEOUT. Only ever fires
+        // in autoplay (this method is autoplay-only); real play is unaffected.
+        if (_turnCount > AutoMaxTurns)
+        { LoseRun("STALEMATE", $"Autopilot exceeded the turn cap on mission {_run.Mission}."); return; }
+
         int sig = AliveEnemies().Count * 1000
                 + AliveEnemies().Count(e => e.Active) * 10
                 + HackProgress
@@ -2924,6 +3054,14 @@ public class Game
             return;
         }
 
+        if (ShoveMode)
+        {
+            // valid target = an alive enemy standing Chebyshev-adjacent to the selected soldier.
+            ShoveTarget = (hovered != null && Selected != null) ? hovered : null;
+            ShoveValid = Selected != null && ShoveTarget != null && ShoveTargetOk(Selected, ShoveTarget);
+            return;
+        }
+
         if (AimMode)
         {
             if (hovered != null && hovered.Team == Team.Enemy && CanTarget(Selected, hovered))
@@ -2973,6 +3111,7 @@ public class Game
         if (Raylib.IsKeyPressed(KeyboardKey.Four)) ToggleGrenade();
         if (Raylib.IsKeyPressed(KeyboardKey.Five)) DoAbility();
         if (Raylib.IsKeyPressed(KeyboardKey.Six)) ToggleItem();
+        if (Raylib.IsKeyPressed(KeyboardKey.Eight)) ToggleShove();
         if (Raylib.IsKeyPressed(KeyboardKey.H)) DoHack();
         if (Raylib.IsKeyPressed(KeyboardKey.R)) DoReload();
         if (Raylib.IsKeyPressed(KeyboardKey.T)) { OpenTagEditor(Selected); return; }
@@ -2987,7 +3126,7 @@ public class Game
         if (Raylib.IsKeyPressed(KeyboardKey.Space) && HoverValid) { BoardAct(HoverX, HoverY); return; }
         if (KbCursor && Raylib.GetMouseDelta() != Vector2.Zero) KbCursor = false;  // mouse takes back over
 
-        if (Raylib.IsMouseButtonPressed(MouseButton.Right)) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; return; }
+        if (Raylib.IsMouseButtonPressed(MouseButton.Right)) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; return; }
 
         if (Raylib.IsMouseButtonPressed(MouseButton.Left))
         {
@@ -3022,6 +3161,12 @@ public class Game
         {
             if (ItemValid) IssueItem(hx, hy);
             else ItemMode = false;
+            return;
+        }
+        if (ShoveMode)
+        {
+            if (hovered != null && Selected != null && ShoveTargetOk(Selected, hovered)) IssueShove(Selected, hovered);
+            else ShoveMode = false;
             return;
         }
         if (AimMode)
@@ -3142,6 +3287,7 @@ public class Game
             case "snap": ToggleSnap(); break;
             case "grenade": ToggleGrenade(); break;
             case "item": ToggleItem(); break;
+            case "shove": ToggleShove(); break;
             case "ability": DoAbility(); break;
             case "overwatch": DoOverwatch(); break;
             case "hunker": DoHunker(); break;
@@ -3150,7 +3296,7 @@ public class Game
         }
     }
 
-    void SelectUnit(Unit u) { Selected = u; AimMode = false; SnapShot = false; Audio.Play("select"); }
+    void SelectUnit(Unit u) { Selected = u; AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; Audio.Play("select"); }
 
     void CycleSelection()
     {
@@ -3160,6 +3306,9 @@ public class Game
         Selected = actable[(idx + 1) % actable.Count];
         AimMode = false;
         SnapShot = false;
+        GrenadeMode = false;
+        ItemMode = false;
+        ShoveMode = false;
         Audio.Play("select");
     }
 
@@ -3180,6 +3329,7 @@ public class Game
         if (!HasAnyTarget(Selected)) return;
         GrenadeMode = false;
         ItemMode = false;
+        ShoveMode = false;
         AimMode = true;
         SnapShot = snap;
         AimTarget = FirstTargetFor(Selected);
@@ -3189,7 +3339,7 @@ public class Game
     {
         if (Selected == null || !Selected.CanAct || Selected.Grenades <= 0) return;
         GrenadeMode = !GrenadeMode;
-        if (GrenadeMode) { AimMode = false; SnapShot = false; }   // clear the snap variant too (review #3)
+        if (GrenadeMode) { AimMode = false; SnapShot = false; ItemMode = false; ShoveMode = false; }   // clear the snap variant too (review #3)
     }
 
     void IssueGrenade(int tx, int ty)
@@ -3207,7 +3357,7 @@ public class Game
     {
         if (Selected == null || !Selected.CanAct || Selected.ItemCharge <= 0 || Selected.Item == ItemKind.None) return;
         ItemMode = !ItemMode;
-        if (ItemMode) { AimMode = false; SnapShot = false; GrenadeMode = false; }   // clear the snap variant too (review #3)
+        if (ItemMode) { AimMode = false; SnapShot = false; GrenadeMode = false; ShoveMode = false; }   // clear the snap variant too (review #3)
     }
 
     /// Whether a utility item can legally land on (tx,ty): barricade needs an empty
@@ -3243,6 +3393,51 @@ public class Game
                 Audio.Play("hunker");
                 break;
         }
+    }
+
+    // ---- SHOVE (forced-movement verb) ----
+    /// Can the selected soldier shove right now? Needs an action, no shove spent this turn,
+    /// and at least one alive enemy standing Chebyshev-adjacent.
+    public bool CanShove(Unit u)
+    {
+        if (u == null || u.Team != Team.Player || !u.CanAct || u.ShovedThisTurn) return false;
+        foreach (var e in Enemies)
+            if (e.Alive && Util.ChebyDist(u.X, u.Y, e.X, e.Y) <= 1) return true;
+        return false;
+    }
+
+    /// Is `target` a legal shove target for `u`? An alive enemy exactly one tile away
+    /// (Chebyshev 1, never the same tile), with the shover able + not having shoved yet.
+    bool ShoveTargetOk(Unit u, Unit target)
+    {
+        if (u == null || target == null || !u.CanAct || u.ShovedThisTurn) return false;
+        if (!target.Alive || target.Team != Team.Enemy) return false;
+        int dx = target.X - u.X, dy = target.Y - u.Y;
+        if (dx == 0 && dy == 0) return false;
+        return Math.Abs(dx) <= 1 && Math.Abs(dy) <= 1;   // Chebyshev-adjacent
+    }
+
+    void ToggleShove()
+    {
+        if (!CanShove(Selected)) return;
+        ShoveMode = !ShoveMode;
+        if (ShoveMode) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; }
+    }
+
+    /// Shove an adjacent enemy 1 tile directly away (soldier -> target direction). Costs 1
+    /// action, does NOT end the turn, once per soldier per turn. The ShoveAnim resolves the
+    /// slide (clear destination -> move + break the target's overwatch/hunker) or the collision
+    /// (blocked -> small damage + stagger) when it becomes the active anim.
+    void IssueShove(Unit u, Unit target)
+    {
+        if (!ShoveTargetOk(u, target)) { ShoveMode = false; return; }
+        int dx = Math.Sign(target.X - u.X), dy = Math.Sign(target.Y - u.Y);
+        u.ActionsLeft = Math.Max(0, u.ActionsLeft - 1);   // 1 action; never ends the turn
+        u.ShovedThisTurn = true;                          // one shove per soldier per turn (anti-loop)
+        // shoving a dormant pod is aggression -> it wakes (mirrors a shot revealing a pod).
+        if (!target.Active) ActivatePod(target.PodId);
+        Enqueue(new ShoveAnim(u, target, dx, dy), Team.Player);
+        ShoveMode = false;
     }
 
     void IssueMove(int tx, int ty)
@@ -3442,6 +3637,7 @@ public class Game
         SnapShot = false;
         GrenadeMode = false;
         ItemMode = false;
+        ShoveMode = false;
     }
 
     void RequestEndTurn()
@@ -3504,6 +3700,10 @@ public class Game
         if (TutStep >= 0 && TutStep < 3) AdvanceTutorial();
         EndTurnArmed = false;
         AimMode = false;
+        SnapShot = false;
+        GrenadeMode = false;
+        ItemMode = false;
+        ShoveMode = false;
         Selected = null;
         MoveCost = null;
         Phase = Phase.EnemyTurn;
@@ -3534,6 +3734,10 @@ public class Game
         foreach (var e in Enemies) if (e.Alive) { e.ReactedThisTurn = false; e.Suppress = 0; } // OW resets; suppression expires
         Selected = Players.FirstOrDefault(p => p.CanAct);
         AimMode = false;
+        SnapShot = false;
+        GrenadeMode = false;
+        ItemMode = false;
+        ShoveMode = false;
         ShowBanner("PLAYER TURN", false);
     }
 

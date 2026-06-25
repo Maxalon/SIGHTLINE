@@ -51,6 +51,89 @@ public class MoveStepAnim : Anim
     }
 }
 
+/// SHOVE (forced-movement verb): a soldier slams an adjacent enemy one tile directly away.
+/// If the destination is clear the enemy SLIDES there (its overwatch breaks + hunker clears,
+/// and it's naturally exposed for follow-up fire). If the destination is BLOCKED it doesn't
+/// move and takes collision damage (and rams any unit in the way). All resolution is applied
+/// in OnStart (when this becomes the ACTIVE anim) via Game so kills/death are handled correctly.
+public class ShoveAnim : Anim
+{
+    public Unit Shover, Target;
+    public int Dx, Dy;          // shove direction (one of the 8 dirs, normalized to -1/0/1)
+    bool _moves;                // destination is clear -> the target slides
+    int _tx, _ty;               // destination tile (only used when _moves)
+    Vector2 _from, _to;
+    float _t;
+    const float Dur = 0.16f;    // a quick, punchy slam
+
+    public ShoveAnim(Unit shover, Unit target, int dx, int dy) { Shover = shover; Target = target; Dx = dx; Dy = dy; }
+
+    public override void OnStart(Game g)
+    {
+        // face the shover toward the target (the lunge reads in the direction of the push)
+        var face = Target.Pos - Shover.Pos;
+        if (face.LengthSquared() > 0.01f) Shover.Facing = MathF.Atan2(face.Y, face.X);
+        Shover.WalkLean = 1f;
+        Shover.Recoil = new Vector2(Dx, Dy) * 5f;          // a small lunge forward
+
+        if (!Target.Alive) { _moves = false; _from = _to = Target.Pos; return; }
+
+        _tx = Target.X + Dx; _ty = Target.Y + Dy;
+        _moves = g.Grid.IsFloor(_tx, _ty) && !g.IsOccupiedByOther(_tx, _ty, Target);
+
+        // being shoved always breaks the target's set stance (it's caught off balance).
+        Target.OnOverwatch = false;
+        Target.Hunkered = false;
+        Target.FlinchAnim = MathF.Max(Target.FlinchAnim, 0.7f);
+
+        _from = Target.Pos;
+        _to = _moves ? Util.TileCenter(_tx, _ty) : Target.Pos;
+
+        Audio.Play("hunker");
+        g.Fx.AddShake(3f);
+        g.AddHitStop(0.03f);
+
+        if (_moves)
+        {
+            // dust kicked along the slide path
+            g.Fx.Dust(_from + new Vector2(0, 8f), 4);
+            g.Fx.PopText(_from + new Vector2(0, -28), "SHOVED", Pal.Friend, 18f);
+        }
+        else
+        {
+            // blocked: a collision burst at the wall/obstacle + knockback kick back at the shover
+            var hitPt = Target.Pos + new Vector2(Dx, Dy) * (Cfg.Tile * 0.45f);
+            g.Fx.Burst(hitPt, Pal.RGBA(220, 200, 140), 12, 180f, 0.45f, 3.5f, true);
+            g.Fx.Impact(hitPt, Pal.RGBA(255, 240, 220), 14f, 0.7f, 0.12f);
+            Target.Recoil = new Vector2(-Dx, -Dy) * 5f;     // bounces off the obstacle
+
+            // collision damage to the shoved enemy; if it was rammed INTO another unit, that unit
+            // takes a lighter hit too. EnvDamage handles FX + kill/near-death + KillUnit.
+            var rammed = g.UnitAt(_tx, _ty);   // null if blocked by terrain/edge rather than a unit
+            g.EnvDamage(Target, Math.Max(1, Combat.ShoveCollisionDamage), "SLAM", Pal.RGBA(255, 210, 150));
+            if (rammed != null && rammed.Alive && rammed != Target)
+                g.EnvDamage(rammed, Math.Max(1, Combat.ShoveRammedDamage), "SLAM", Pal.RGBA(255, 210, 150));
+        }
+    }
+
+    public override bool Update(Game g, float dt)
+    {
+        _t += dt;
+        if (!_moves) return _t >= Dur;       // blocked shove: just a brief beat (damage done in OnStart)
+        if (!Target.Alive) return true;      // a collision/ram kill could have removed it
+        float k = Util.Clamp(_t / Dur, 0f, 1f);
+        Target.Pos = Vector2.Lerp(_from, _to, Util.EaseOutQuad(k));
+        if (k >= 1f)
+        {
+            Target.X = _tx; Target.Y = _ty;
+            Target.Pos = _to;
+            g.OnUnitEnteredTile(Target);     // bleed/overwatch checks fire on the new tile, like any move
+            return true;
+        }
+        return false;
+    }
+}
+
 /// A fired shot: recoil, muzzle flash, tracer beam, then resolve damage.
 public class ShotAnim : Anim
 {

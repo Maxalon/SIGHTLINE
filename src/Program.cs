@@ -113,6 +113,14 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        // SIGHTLINE_SHOVETEST=1 : SHOVE forced-movement verb (slide+break-overwatch / collision / gating).
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_SHOVETEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "shovetest");   // Unit.SyncPos + ShoveAnim use tile->px math
+            Console.WriteLine(new Game().ShoveSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         // SIGHTLINE_MISSION=<n> : start the harness on mission n (verify Hack/Evac maps).
         int startMission = int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_MISSION"), out int sm) ? sm : 1;
 
@@ -204,6 +212,7 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CARDS") == "1") game.DebugDeployCards();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CAMPAIGN") == "1") game.DebugCampaignMap();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_ITEM") == "1") game.DebugItem();
+        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_SHOVE") == "1") game.DebugShove();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_COVER") == "1") game.DebugCover();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_UNITFX") == "1") game.DebugUnitFx();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_ELEV") == "1") game.DebugElevation();
