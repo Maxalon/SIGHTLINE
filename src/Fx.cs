@@ -35,6 +35,30 @@ public class Ring
     public float RingAlpha;     // peak alpha of the ring outline
 }
 
+/// A short directional motion-streak: a fat, fast-fading line laid along a travel
+/// vector at the impact point (a "smear" frame). Reads as the round's energy raking
+/// across the tile; scale `len`/`width`/`alpha` to the hit weight (graze<hit<crit).
+public class Streak
+{
+    public Vector2 Pos, Dir;     // impact point + unit travel direction
+    public float Life, MaxLife;
+    public float Len, Width;
+    public Color Color;
+    public float Alpha;
+}
+
+/// A brief pre-shot reticle SNAP on the target: two arcs (or a thin ring) that contract
+/// inward over the wind-up beat, so a shot reads as anticipation -> release rather than an
+/// instant pop. Purely cosmetic + short; never gates the sim. Drawn by ShotAnim's beat.
+public class Reticle
+{
+    public Vector2 Pos;
+    public float Life, MaxLife;
+    public float R0, R1;         // outer radius at birth -> at death (contracts inward)
+    public Color Color;
+    public float Alpha;
+}
+
 /// One ambient atmosphere particle. Its motion is a pure, deterministic function of its
 /// frozen per-index constants (set once when the pool is built) plus the ambient time
 /// accumulator — so a given frame always reproduces (essential for the SIGHTLINE_SHOT
@@ -54,6 +78,8 @@ public class Fx
     public List<Particle> Particles = new();
     public List<FloatText> Texts = new();
     public List<Ring> Rings = new();
+    public List<Streak> Streaks = new();
+    public List<Reticle> Reticles = new();
 
     public float Shake;
     public bool ShakeOn = true;     // settings toggle
@@ -83,6 +109,16 @@ public class Fx
         {
             Rings[i].Life -= dt;
             if (Rings[i].Life <= 0) Rings.RemoveAt(i);
+        }
+        for (int i = Streaks.Count - 1; i >= 0; i--)
+        {
+            Streaks[i].Life -= dt;
+            if (Streaks[i].Life <= 0) Streaks.RemoveAt(i);
+        }
+        for (int i = Reticles.Count - 1; i >= 0; i--)
+        {
+            Reticles[i].Life -= dt;
+            if (Reticles[i].Life <= 0) Reticles.RemoveAt(i);
         }
 
         if (Shake > 0.01f)
@@ -213,6 +249,34 @@ public class Fx
         }
     }
 
+    /// A short directional motion-streak laid at the impact point along `dir` — a "smear"
+    /// frame that reads as the round's energy raking across the tile. Scale `len`/`width`/
+    /// `alpha` to the hit weight (graze short+thin+dim, crit long+fat+hot). Pairs with the
+    /// Impact flash + DirSparks; lasts only a few frames so it never lingers/occludes.
+    public void ImpactStreak(Vector2 at, Vector2 dir, Color col, float len, float width,
+                             float alpha = 0.8f, float life = 0.10f)
+    {
+        var n = dir.LengthSquared() > 0.0001f ? Vector2.Normalize(dir) : new Vector2(1f, 0f);
+        Streaks.Add(new Streak
+        {
+            Pos = at, Dir = n, Life = life, MaxLife = life,
+            Len = len, Width = width, Color = col, Alpha = alpha,
+        });
+    }
+
+    /// A pre-shot reticle SNAP on the target: a thin ring that contracts inward over the
+    /// wind-up beat, so a shot reads as anticipation -> release. Tint it to the firer's team.
+    /// Purely cosmetic; one per shot. `life` should match the shooter's wind-up beat (~0.1s).
+    public void ReticleSnap(Vector2 at, Color col, float r0 = 26f, float r1 = 13f,
+                            float alpha = 0.7f, float life = 0.11f)
+    {
+        Reticles.Add(new Reticle
+        {
+            Pos = at, Life = life, MaxLife = life,
+            R0 = r0, R1 = r1, Color = col, Alpha = alpha,
+        });
+    }
+
     /// A soft, low puff of dust under a stepping unit. Deliberately subtle + brief so
     /// movement gets a touch of grounding without cluttering the board.
     public void Dust(Vector2 at, int count = 4)
@@ -295,6 +359,21 @@ public class Fx
             }
         }
 
+        // directional smears: a fat fading line through the impact, brightest at birth,
+        // raked back along the travel vector (centred on the impact so it reads both ways).
+        foreach (var s in Streaks)
+        {
+            float k = Util.Clamp(s.Life / s.MaxLife, 0f, 1f);
+            float ext = s.Len * (0.5f + 0.5f * k);                       // contracts slightly as it fades
+            Vector2 tail = s.Pos - s.Dir * ext;
+            Vector2 head = s.Pos + s.Dir * (ext * 0.35f);               // bias the smear "ahead" of impact
+            float w = MathF.Max(1f, s.Width * (0.4f + 0.6f * k));
+            Raylib.DrawLineEx(tail, head, w * 1.8f, Raylib.Fade(s.Color, k * s.Alpha * 0.28f)); // soft halo
+            Raylib.DrawLineEx(tail, head, w, Raylib.Fade(s.Color, k * s.Alpha));
+            Raylib.DrawLineEx(s.Pos - s.Dir * (ext * 0.5f), head, MathF.Max(0.8f, w * 0.45f),
+                              Raylib.Fade(Pal.RGBA(255, 252, 245), k * s.Alpha * 0.85f));        // hot core
+        }
+
         foreach (var p in Particles)
         {
             float k = Util.Clamp(p.Life / p.MaxLife, 0f, 1f);
@@ -318,6 +397,27 @@ public class Fx
                 float coreR = p.Size * k;
                 Raylib.DrawCircleV(p.Pos, coreR * 2.2f, Raylib.Fade(p.Color, k * 0.22f));
                 Raylib.DrawCircleV(p.Pos, coreR, c);
+            }
+        }
+
+        // pre-shot reticle snap: a thin ring + four short tick marks that contract inward
+        // over the wind-up beat (alpha eases IN then OUT so it blooms then resolves cleanly).
+        foreach (var rt in Reticles)
+        {
+            float k = Util.Clamp(rt.Life / rt.MaxLife, 0f, 1f);     // 1 birth -> 0 death
+            float age = 1f - k;
+            float rad = Util.Lerp(rt.R0, rt.R1, Util.EaseOutQuad(age));
+            // ease alpha in over the first ~30% then back out, so it doesn't pop on at full
+            float env = age < 0.3f ? age / 0.3f : k / 0.7f;
+            float a = rt.Alpha * Util.Clamp(env, 0f, 1f);
+            if (a <= 0.01f) continue;
+            var col = Raylib.Fade(rt.Color, a);
+            Raylib.DrawRing(rt.Pos, MathF.Max(0f, rad - 1.4f), rad, 0, 360, 40, col);
+            for (int q = 0; q < 4; q++)
+            {
+                float ang = q * (MathF.PI / 2f);
+                var dir = new Vector2(MathF.Cos(ang), MathF.Sin(ang));
+                Raylib.DrawLineEx(rt.Pos + dir * (rad + 2f), rt.Pos + dir * (rad + 6f), 1.6f, col);
             }
         }
     }

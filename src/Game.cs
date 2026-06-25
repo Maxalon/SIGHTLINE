@@ -339,6 +339,7 @@ public class Game
         int heat = PendingHeat;
         if (NoPersist && int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_HEAT"), out int hEnv)) heat = hEnv;
         _run.HeatLevel = Sightline.Heat.Clamp(heat);
+        _run.LossStreak = _metaLossStreak;  // adaptive assist: carry the loss history into this run
         Stats.BeginRun(_run.HeatLevel);     // balance telemetry (no-op unless Stats.Enabled)
         Players = _run.Squad;
         int n = Util.Clamp(startAt, 1, Run.MaxMissions);
@@ -349,6 +350,7 @@ public class Game
     // Lazily load the persisted unlocked-max Heat once (gated by NoPersist like all save I/O,
     // so the headless harness never reads disk and stays at the default unlock of 0).
     bool _metaLoaded;
+    int _metaLossStreak;          // adaptive-assist loss streak loaded from meta.json (0 headless)
     void EnsureMetaLoaded()
     {
         if (_metaLoaded) return;
@@ -367,6 +369,7 @@ public class Game
         }
         UnlockedHeat = SaveGame.LoadMetaHeat();
         PendingHeat = Math.Min(PendingHeat, UnlockedHeat);
+        _metaLossStreak = SaveGame.LoadMetaLossStreak();
     }
 
     void SetupMission(int n)
@@ -409,13 +412,13 @@ public class Game
         }
         if (Objective == Objective.Escort)
         {
-            Vip = Mission.MakeVip();
+            Vip = Mission.MakeVip(n);      // VIP durability scales with mission depth
             Vip.X = 2; Vip.Y = 5;          // valid pre-build tile (spawn table refines it)
             Players.Add(Vip);
         }
         if (Objective == Objective.Rescue)
         {
-            Vip = Mission.MakeVip();
+            Vip = Mission.MakeVip(n);
             Vip.Name = "CAPTIVE";
             Vip.X = 2; Vip.Y = 5;          // pre-build placeholder; re-seated at centre below
             Players.Add(Vip);
@@ -426,7 +429,8 @@ public class Game
         // signature change): extra bodies + an extra stat bump as the ladder climbs.
         int heat = _run.HeatLevel;
         int enemyDelta = card.EnemyDelta + Sightline.Heat.EnemyDelta(heat);
-        int statDelta = card.StatDelta + Sightline.Heat.StatDelta(heat);
+        // adaptive assist eases the force-wide enemy stat bump (base Heat only; 0 otherwise).
+        int statDelta = card.StatDelta + Sightline.Heat.StatDelta(heat) - _run.AssistStatRelief;
 
         // reserve + connectivity-verify a key tile: the Hack terminal, or the Rescue captive's seat
         (int x, int y)? reserve = HasTerminal ? Terminal
@@ -501,12 +505,18 @@ public class Game
         Hvt = pool.Where(e => !IsSpecial(e)).OrderByDescending(e => e.MaxHp).ThenBy(e => e.PodId).FirstOrDefault()
            ?? pool.OrderByDescending(e => e.MaxHp).ThenBy(e => e.PodId).FirstOrDefault();
         if (Hvt == null) return;
-        // buff into a worthwhile target: a meaningful HP bump + a small aim edge. It is already
-        // an Enemy so every generic system (targeting/overwatch/FX/AI) treats it normally.
-        int bonus = 6 + _run.Mission;          // scales gently with mission depth
-        Hvt.MaxHp += bonus; Hvt.Hp += bonus;
-        Hvt.Aim = Math.Min(85, Hvt.Aim + 6);
-        Hvt.Name = Hvt.Cls == "ELITE" ? Hvt.Name : "HVT-" + Hvt.Name;
+        // buff a rank-and-file body into a worthwhile target: a meaningful HP bump + a small aim
+        // edge. It is already an Enemy so every generic system (targeting/overwatch/FX/AI) treats
+        // it normally. EXCEPTION: an ELITE (the WARLORD on the boss node, now a Decapitate) is
+        // ALREADY a tuned boss — double-buffing it would re-create the stat-check wall we're
+        // removing, so the ELITE keeps its own stats and only takes the HVT marker/name.
+        if (Hvt.Cls != "ELITE")
+        {
+            int bonus = 6 + _run.Mission;      // scales gently with mission depth
+            Hvt.MaxHp += bonus; Hvt.Hp += bonus;
+            Hvt.Aim = Math.Min(85, Hvt.Aim + 6);
+            Hvt.Name = "HVT-" + Hvt.Name;
+        }
     }
 
     /// Resume a saved campaign from the intro. Reloads the run and restarts its
@@ -517,6 +527,7 @@ public class Game
         if (run == null || run.Squad == null || run.Squad.Count == 0) return false;
         EnsureMetaLoaded();   // so a resumed run that gets WON can still unlock the next Heat
         _run = run;
+        _run.LossStreak = _metaLossStreak;   // adaptive assist carries across a resumed run
         Players = _run.Squad;
         int n = Util.Clamp(_run.Mission < 1 ? 1 : _run.Mission, 1, Run.MaxMissions);
         _run.CurrentCard ??= Run.StandardCard(n);
@@ -633,32 +644,41 @@ public class Game
             : "CONCEALTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
-    /// Headless self-test for the bench/short-handed lifecycle (S3-A + review fixes).
-    /// Verifies a benched veteran is NOT deployed, NOT lost from the squad, recovers
-    /// (full HP + Wound-2), and is un-benched afterwards. Prints BENCHTEST: PASS/FAIL.
+    /// Headless self-test for the WAVE 1 deep-roster + deployment lifecycle.
+    /// Verifies: AutoDeploy benches the wounded when healthy bodies exist, deploy never exceeds
+    /// DeployCap, the roster backfills toward RosterMax, and a benched (wounded) soldier is
+    /// preserved + recovers faster across a debrief. Prints BENCHTEST: PASS/FAIL.
     public string BenchSelfTest()
     {
         NoPersist = true;
         var fails = new System.Collections.Generic.List<string>();
         StartMission(1);                                  // fresh run + mission 1 deployed
-        var vet = _run.Squad.FirstOrDefault(u => !u.IsVip);
-        if (vet == null) return "BENCHTEST: FAIL (noSquad)";
-        vet.Wound = 2; vet.Hp = 1; vet.Benched = true;    // a wounded veteran, benched
+        if (_run.Squad.Count(u => !u.IsVip) < 1) return "BENCHTEST: FAIL (noSquad)";
+        int cap = _run.NextDeployCap;
+        if (_run.Deployed.Count > cap) fails.Add("startDeployedOverCap");
 
-        SetupMission(1);                                  // redeploy with the bench set
-        if (Players.Contains(vet)) fails.Add("benchedStillDeployed");
-        if (!vet.Benched) fails.Add("flagClearedAtSetup");          // Blocker 2
-        if (!_run.Squad.Contains(vet)) fails.Add("droppedAtSetup");
-        if (AlivePlayers().Count(p => !p.IsVip) > 3) fails.Add("deployedNotShortHanded");
+        // (1) AutoDeploy benches the wounded when healthy alternatives exist + caps the deploy.
+        while (_run.Squad.Count < Run.RosterMax) _run.Squad.Add(Mission.MakeRecruit());
+        var wounded = _run.Squad[0]; wounded.Wound = 2; wounded.Hp = 1;
+        foreach (var u in _run.Squad.Skip(1)) { u.Wound = 0; u.Hp = u.MaxHp; }   // the rest healthy
+        _run.AutoDeploy();
+        if (!wounded.Benched) fails.Add("woundedNotBenched");
+        if (_run.Deployed.Count != cap) fails.Add($"deployedNot{cap}");
+        if (_run.Deployed.Any(u => u.Wound > 0)) fails.Add("deployedWoundedDespiteHealthy");
 
-        EnterBarracks();                                  // simulate mission-end debrief
-        if (!_run.Squad.Contains(vet)) fails.Add("benchedLostAtBarracks");   // Blocker 1
-        if (vet.Benched) fails.Add("flagNotClearedAfterDebrief");            // Blocker 2
-        if (vet.Hp != vet.MaxHp) fails.Add("notHealed");                     // accelerated recovery
-        if (vet.Wound != 0) fails.Add($"woundNotRecovered={vet.Wound}");     // 2 -> 0 (decay 2)
+        // (2) a benched wounded soldier is preserved + recovers faster across a debrief.
+        int hp0 = wounded.Hp;
+        _run.DebriefSurvivors();                          // benched-recovery path + re-AutoDeploy
+        if (!_run.Squad.Contains(wounded)) fails.Add("benchedLostAtDebrief");
+        if (wounded.Hp <= hp0) fails.Add("benchedNotHealed");
+        if (wounded.Wound > 1) fails.Add($"benchedWoundNotRecovered={wounded.Wound}");
+
+        // (3) caps hold after a debrief.
+        if (_run.Squad.Count > Run.RosterMax) fails.Add("rosterOverMax");
+        if (_run.Deployed.Count > _run.NextDeployCap) fails.Add("deployedOverCapAfterDebrief");
 
         return fails.Count == 0
-            ? "BENCHTEST: PASS (benched veteran sits out, is preserved, recovers full HP + 2 wound steps, un-benches)"
+            ? "BENCHTEST: PASS (auto-bench wounded, deploy<=cap, roster<=max, benched recover+preserved)"
             : "BENCHTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
@@ -978,8 +998,11 @@ public class Game
         if (!finished && _run.CurrentCard != null && _run.CurrentCard.Reward == RewardKind.Heal)
             foreach (var u in _run.Squad) u.Hp = u.MaxHp;
 
+        // DebriefSurvivors reads the just-played bench state (benched soldiers recover faster),
+        // backfills the roster, then calls AutoDeploy() to set the DEFAULT deployment for next
+        // mission (best healthy DeployCap; wounded benched). So Benched is now meaningful coming
+        // out of the debrief — the player tunes it in the barracks; we must NOT clear it here.
         _run.DebriefSurvivors();
-        foreach (var u in _run.Squad) u.Benched = false;   // consumed (Blocker 2): redeploy next mission
 
         // secondary objective (3.9): award bonus intel if the optional goal was met
         if (Secondary != SecondaryKind.None)
@@ -1002,6 +1025,9 @@ public class Game
         {
             // Heat/Ascension: winning a run at the current cap unlocks the next rung (META).
             UnlockHeatOnWin();
+            // adaptive assist: a win clears the loss streak (the next run starts un-assisted).
+            _run.RecordRunResult(true);
+            if (!NoPersist) SaveGame.SaveMetaLossStreak(_run.LossStreak);
             Phase = Phase.Win; Audio.Play("win"); if (!NoPersist) SaveGame.Delete();
         }
         else
@@ -1051,7 +1077,10 @@ public class Game
         Stats.EndMission(false, _turnCount, AlivePlayers().Count(p => !p.IsVip),
                          Enemies.Count(e => !e.Alive), title);
         Stats.EndRun(false, _run.Mission - 1, title);
-        if (!NoPersist) SaveGame.Delete();
+        // adaptive assist: a lost run grows the streak, so a persistently-stuck player gets a
+        // small, capped, reversible easing on their NEXT base-Heat run (Hades God-Mode).
+        _run.RecordRunResult(false);
+        if (!NoPersist) { SaveGame.SaveMetaLossStreak(_run.LossStreak); SaveGame.Delete(); }
     }
 
     void ShowBanner(string text, bool enemy)
@@ -4214,19 +4243,22 @@ public class Game
             if (Raylib.CheckCollisionPointRec(m, rect)) { ChooseNode(id); return; }
     }
 
-    // ---------------- bench mechanic ----------------
-    /// Toggle a wounded soldier between benched / not benched.
-    /// Guards: only wounded soldiers may be benched; at least 1 deployable must remain.
-    /// Never called by the autopilot (headless runs always deploy full-strength).
+    // ---------------- deployment / bench mechanic ----------------
+    /// Toggle a roster soldier between DEPLOYED and BENCHED (the deploy-picker). With the deep
+    /// roster (up to RosterMax, deploy up to DeployCap) ANY soldier may be benched — you field
+    /// your best DeployCap and the rest recover off the line. Guards: keep at least 1 deployed,
+    /// and never deploy more than DeployCap. Never called by the autopilot (it takes AutoDeploy's
+    /// default). AutoDeploy already benches the wounded by default; this lets the player override.
     public void ToggleBench(Unit u)
     {
-        if (AutoPlay) return;
-        if (u == null || u.Wound == 0) return;   // only wounded soldiers may be benched
+        if (AutoPlay || u == null) return;
         if (!u.Benched)
         {
-            // count how many would remain deployable if we bench this soldier
-            int deployable = _run.Squad.Count(s => !s.Benched && s != u);
-            if (deployable < 1) return;           // must keep at least 1 soldier in the field
+            if (_run.Squad.Count(s => !s.Benched && s != u) < 1) return;   // keep >=1 deployed
+        }
+        else
+        {
+            if (_run.Deployed.Count >= _run.NextDeployCap) return;         // don't exceed the cap
         }
         u.Benched = !u.Benched;
         Audio.Play("select");

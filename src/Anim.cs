@@ -58,27 +58,44 @@ public class ShotAnim : Anim
     public ShotResult Res;
     public bool Reaction;
 
-    const float Fire = 0.14f;
+    // A shot reads as a 3-beat: a brief WIND-UP (anticipation — reticle snaps in, muzzle
+    // charges) -> FIRE (muzzle/tracer/impact land) -> SETTLE. The wind-up is kept short so
+    // play doesn't drag; under AutoPlay it's skipped (Anim Total is unchanged either way).
+    const float WindUp = 0.10f;
+    const float Fire = WindUp + 0.04f;   // muzzle/tracer/Apply fire just after the wind-up
     const float BeamEnd = 0.34f;
     const float Total = 0.52f;
     float _t;
     bool _applied;
     Vector2 _impact;
+    bool _windless;        // AutoPlay: collapse the wind-up so the smoke/balance harness stays fast
 
     public ShotAnim(Unit a, Unit d, ShotResult res, bool reaction = false)
     { A = a; D = d; Res = res; Reaction = reaction; }
+
+    // effective fire time — under AutoPlay the wind-up anticipation is dropped so headless
+    // runs don't slow (the visual beat is purely for a human watching).
+    float FireAt => _windless ? 0.04f : Fire;
 
     public override void OnStart(Game g)
     {
         var dir = D.Pos - A.Pos;
         if (dir.LengthSquared() > 0.01f) A.Facing = MathF.Atan2(dir.Y, dir.X);
         _impact = D.Pos;
+        _windless = g.AutoPlay;
+        if (!_windless)
+        {
+            // anticipation: a reticle snaps onto the target over the wind-up beat, tinted to
+            // the firer's team, so the eye is drawn to the impact point before the round flies.
+            Color ret = A.Team == Team.Player ? Pal.Friend : Pal.Foe;
+            g.Fx.ReticleSnap(D.Pos, ret, 26f, 13f, 0.7f, WindUp + 0.02f);
+        }
     }
 
     public override bool Update(Game g, float dt)
     {
         _t += dt;
-        if (!_applied && _t >= Fire)
+        if (!_applied && _t >= FireAt)
         {
             _applied = true;
             Apply(g);
@@ -108,47 +125,77 @@ public class ShotAnim : Anim
 
             if (Res.Graze)
             {
-                // Graze: wing-clip — lighter flash, less knockback, no cover chip, no hit-stop.
+                // Graze: wing-clip — lighter flash, less knockback, no cover chip; a tiny
+                // hit-stop so it still registers as contact (snappier than a solid hit).
                 D.Flash = 0.5f;
                 D.Recoil = dir * 2.5f;
                 D.FlinchAnim = MathF.Max(D.FlinchAnim, 0.5f);   // a small shudder (Renderer); decays in Game.Update
+                g.AddHitStop(0.03f);                            // graze: lightest freeze of the ladder
                 g.AddBloom(0.02f);
                 Color grazeTint = D.Team == Team.Player ? Pal.Friend : Pal.Foe;
                 g.Fx.Burst(D.Pos, grazeTint, 5, 110f, 0.35f, 2.5f, true);
-                // small impact frame + a thin directional spray (the round just clips them)
+                // small impact frame + a thin directional spray + a short faint smear
                 g.Fx.Impact(_impact, Pal.RGBA(220, 226, 236), 9f, 0.55f, 0.10f);
                 g.Fx.DirSparks(_impact, dir, grazeTint, 5, 150f, 0.55f, 2.2f);
+                g.Fx.ImpactStreak(_impact, dir, Pal.RGBA(210, 218, 230), 16f, 2.2f, 0.5f, 0.08f);
                 g.Fx.PopText(D.Pos + new Vector2(0, -26), "GRAZE", Pal.RGBA(190, 200, 215), 20f);
             }
             else
             {
+                bool willKill = D.Hp <= 0;                        // this blow drops the target (HP already applied above)
                 g.TryChipCover(A, D);                              // heavy weapons chew the target's cover (3.6)
                 D.Flash = 1f;
                 D.Recoil = dir * (Res.Crit ? 8f : 5f);           // knockback
                 D.FlinchAnim = Res.Crit ? 1f : 0.85f;            // hit-flinch POSE: harder on a crit (Renderer); decays in Game.Update
-                g.AddHitStop(Res.Crit ? 0.09f : 0.05f);          // freeze on impact
-                g.AddBloom(Res.Crit ? 0.09f : 0.045f);           // Phase 5.2: bloom spike on hit/crit
+                // Graded hit-stop ladder: a normal hit is SNAPPY (0.05s), a crit lands
+                // heavier (0.10s). A kill's freeze is owned by KillUnit (>=0.10s, kill-cam
+                // 0.40s) and AddHitStop is a Max, so it always dominates -> a kill reads as
+                // the weightiest beat without us double-counting here.
+                g.AddHitStop(Res.Crit ? 0.10f : 0.05f);
+                // bloom: crit spikes hotter than a hit; a KILL spikes hardest of the per-shot
+                // tier (still under the kill-cam) so the flash punches even off the kill-cam.
+                g.AddBloom(willKill ? 0.13f : (Res.Crit ? 0.09f : 0.045f));
                 Color blood = D.Team == Team.Player ? Pal.Friend : Pal.Foe;
                 g.Fx.Burst(D.Pos, blood, Res.Crit ? 22 : 13, Res.Crit ? 320f : 200f, 0.5f, 3.5f, true);
                 g.Fx.Burst(D.Pos, Pal.RGBA(230, 230, 235), 6, 120f, 0.4f, 2.5f);
 
-                // Impact frame + directional sparks, scaled by outcome: a crit throws a big
-                // hot burst + a dense, faster, tighter spray; a normal hit a medium one.
+                // Impact frame + directional sparks + smear, scaled by outcome: a crit throws
+                // a big hot burst + a dense, faster, tighter spray + a long bright smear; a
+                // normal hit a medium one. A KILL gets an extra escalation below.
                 if (Res.Crit)
                 {
                     g.Fx.Impact(_impact, Pal.Accent, 26f, 0.95f, 0.16f);
                     g.Fx.DirSparks(_impact, dir, Pal.Accent, 16, 360f, 0.5f, 3.4f);
                     g.Fx.DirSparks(_impact, dir, Pal.RGBA(255, 250, 240), 6, 280f, 0.35f, 2.6f);
+                    g.Fx.ImpactStreak(_impact, dir, Pal.Accent, 40f, 4.2f, 0.9f, 0.12f);
+                    g.Fx.AddShake(1.5f);                          // a sharper extra kick on a crit
                 }
                 else
                 {
                     g.Fx.Impact(_impact, Pal.RGBA(255, 240, 235), 16f, 0.85f, 0.12f);
                     g.Fx.DirSparks(_impact, dir, blood, 9, 230f, 0.65f, 3f);
+                    g.Fx.ImpactStreak(_impact, dir, Pal.RGBA(255, 236, 230), 26f, 3f, 0.75f, 0.10f);
+                }
+
+                // KILL escalation: a kill should feel DECISIVELY bigger than a wound. Layer a
+                // brighter/larger burst + a sharper shake + a stronger bloom spike on top of
+                // whatever KillUnit does (which fires right after, when D.Hp<=0 below). Reserved
+                // for the killing blow only, so ordinary hits stay subtle.
+                if (willKill)
+                {
+                    Color killCol = D.Team == Team.Player ? Pal.Friend : Pal.Foe;
+                    g.Fx.Impact(_impact, killCol, Res.Crit ? 34f : 28f, 1f, 0.18f);
+                    g.Fx.DirSparks(_impact, dir, Pal.RGBA(255, 250, 240), 10, 360f, 0.45f, 3f);
+                    g.Fx.ImpactStreak(_impact, dir, killCol, 48f, 5f, 0.95f, 0.13f);
+                    g.AddBloom(0.10f);                            // stacks with the hit bloom above
+                    g.Fx.AddShake(3.5f);                          // a decisive thump distinct from a wound
                 }
 
                 string txt = Res.Crit ? $"CRIT {Res.Damage}" : Res.Damage.ToString();
-                g.Fx.PopText(D.Pos + new Vector2(0, -26), txt, Res.Crit ? Pal.Accent : Pal.RGBA(255, 235, 235),
-                             Res.Crit ? 32f : 26f);
+                // crits + the killing blow get a bigger, brighter number on the impact frame.
+                float numSize = willKill ? (Res.Crit ? 36f : 32f) : (Res.Crit ? 32f : 26f);
+                Color numCol = Res.Crit ? Pal.Accent : (willKill ? Pal.RGBA(255, 252, 245) : Pal.RGBA(255, 235, 235));
+                g.Fx.PopText(D.Pos + new Vector2(0, -26), txt, numCol, numSize);
             }
 
             if (D.Hp <= 0)
@@ -173,10 +220,22 @@ public class ShotAnim : Anim
 
     public override void Draw(Game g)
     {
-        // recoil nudge handled via facing; draw tracer beam during/after fire
-        if (_t >= Fire && _t <= BeamEnd)
+        float fireAt = FireAt;
+        // WIND-UP (anticipation): before the round flies, a small charge-glow swells at the
+        // barrel so the muzzle "loads" — reads as tension before release. Skipped when windless.
+        if (!_windless && _t < fireAt && fireAt > 0.05f)
         {
-            float k = 1f - (_t - Fire) / (BeamEnd - Fire);
+            float w = Util.Clamp(_t / fireAt, 0f, 1f);           // 0 -> 1 across the wind-up
+            var dir0 = Vector2.Normalize(D.Pos - A.Pos + new Vector2(0.001f, 0f));
+            Vector2 mouth = A.Pos + dir0 * 16f;
+            float gr = 1.5f + 4.5f * w * w;                      // accelerates as fire nears
+            Raylib.DrawCircleV(mouth, gr, Raylib.Fade(Pal.Accent, 0.10f + 0.35f * w));
+            Raylib.DrawCircleV(mouth, gr * 0.45f, Raylib.Fade(Pal.RGBA(255, 250, 235), 0.20f + 0.5f * w));
+        }
+        // recoil nudge handled via facing; draw tracer beam during/after fire
+        if (_t >= fireAt && _t <= BeamEnd)
+        {
+            float k = 1f - (_t - fireAt) / (BeamEnd - fireAt);
             var dir = Vector2.Normalize(D.Pos - A.Pos + new Vector2(0.001f, 0f));
             Vector2 start = A.Pos + dir * 16f;
             // graze fires a dimmer beam than a solid hit (reinforces the lighter "GRAZE" read);

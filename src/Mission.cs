@@ -11,7 +11,10 @@ public static class Mission
     // (upper-forward / back-left / lower-forward / back-right), plus a 5th slot for the
     // VIP/captive near squad centre. Spread deliberately avoids a single-column firing-line
     // while staying in the left third (cols 0-3) so standoff to the mid-field screen holds.
-    static readonly (int x, int y)[] PlayerSpawns = { (2, 2), (0, 5), (3, 8), (1, 9), (2, 5) };
+    // Up to 6 soldier spawns (deploy size grows to 6 in the back half) + the VIP slot LAST
+    // (the seating loop always seats the VIP at PlayerSpawns[Length-1]). A loose left-side wedge
+    // in cols 0-3, all distinct, clear of the VIP's (2,5) seat.
+    static readonly (int x, int y)[] PlayerSpawns = { (2, 2), (0, 4), (3, 5), (1, 7), (0, 9), (3, 8), (2, 5) };
 
     // Per-pod column offsets for enemy spawns: vary across cols 14-17 so the right side
     // doesn't mirror a parallel firing line. Indexed by pod id (i/2), cycling if more pods.
@@ -321,8 +324,15 @@ public static class Mission
         // (the +1/+1 from RELENTLESS/OVERWHELMING used to clip at 10 on later missions). 12 still
         // fits easily: spawns occupy cols 14-17 over grid.H rows (44 slots) and the collision loop
         // below relocates any overlap.
-        int count = Math.Clamp(4 + n + enemyDelta, 3, 12);   // deployment-card + Heat modifier
-        int bump = Math.Max(0, n - 1 + statDelta);           // stat growth per mission +/- card
+        // Difficulty curve softened (balance data): with deploy-growth the squad now fields 5-6,
+        // but the mid-late game still sat at ~50% per mission -> a 6-mission run is a geometric
+        // product that needs ~78%/mission to clear ~25% of the time. The enemy count + per-mission
+        // stat bump were the binding driver (tanky, accurate forces by m4-5). Count grows by ~1
+        // less per mission (3+n, cap 11) and the stat bump grows ~2/3 as fast ((n-1)*2/3), so the
+        // squad's body/level/gear growth can actually out-scale the curve. Heat's statDelta/
+        // enemyDelta still stack on top, so the ladder keeps its teeth.
+        int count = Math.Clamp(3 + n + enemyDelta, 3, 11);   // deployment-card + Heat modifier
+        int bump = Math.Max(0, (n - 1) * 2 / 3 + statDelta); // stat growth per mission +/- card
         // Final mission (the WARLORD boss): de-stack the force. This was the core of the ~90% m6
         // loss wall -- the squad cleared m1-5 (m5 often wins ~100%, partly because it isn't always
         // forced Eliminate) then got alpha-struck on m6's forced full-clear. The compounding cause:
@@ -335,7 +345,7 @@ public static class Mission
         if (n >= Run.MaxMissions)
         {
             count = Math.Max(5, count - 4);
-            bump = Math.Max(0, n - 1);                       // drop the boss-card/heat StatDelta for the screen
+            bump = Math.Max(0, (n - 1) * 2 / 3);             // drop the boss-card/heat StatDelta for the screen
         }
         var rows = new List<int>();
         for (int y = 0; y < grid.H; y++) rows.Add(y);
@@ -477,19 +487,19 @@ public static class Mission
 
     /// The escort asset: fragile, poor aim, carries only a panicky sidearm.
     /// Lives in the player roster for one mission and never joins the persistent squad.
-    public static Unit MakeVip()
+    public static Unit MakeVip(int missionNum = 1)
     {
+        // HP 6 -> 14 (Wave A.5) -> now scales with mission depth: balance data showed Escort still
+        // gating runs (~55%, many "VIP LOST") because the fragile asset carries ZERO persistent
+        // progression while the enemy force climbs every mission. A flat 14 HP that's sturdy at m2
+        // is glass by m6. Scale it (14 + 2*mission: m2~18, m4~22, m6~26) so the asset stays a
+        // believable survivor against the late force, while still having no cover-perks, weak aim,
+        // and no frags — the squad must still screen for it.
+        int hp = 14 + 2 * Math.Max(1, missionNum);
         var u = new Unit
         {
             Name = "VIP", Cls = "VIP", Team = Team.Player,
-            // HP 6 -> 14: balance data (competent AI) showed Escort at 34% win-rate with many
-            // "VIP LOST" losses -- a 6-HP asset died in 1-2 turns once contact broke and the
-            // enemy focus-fired it. 14 makes it a sturdier asset (still no cover-perks, weak aim,
-            // no frags) that can eat a couple of hits while the squad screens for it. Paired with
-            // the dialed-down anti-VIP AI bias in Ai.Plan so the VIP stays a priority without being
-            // an instant focus-fire magnet. Measured: Escort 34% -> ~65% at heat 0, VIP-LOST losses
-            // roughly halved.
-            Hp = 14, MaxHp = 14, Aim = 45, Mobility = 6,
+            Hp = hp, MaxHp = hp, Aim = 45, Mobility = 6,
             Weapon = Weapon.Make(WeaponKind.Smg), IsVip = true,
         };
         u.Ammo = u.Weapon.Clip;

@@ -63,28 +63,38 @@ public static class SaveGame
     // The max-unlocked Heat is META: it survives run end (unlike save.json, which is deleted
     // when a run ends). Stored in its own tiny meta.json. Gated by Game.NoPersist at the call
     // sites exactly like the run save, so the harness never touches disk.
-    public static int LoadMetaHeat()
+    // meta.json carries several independent fields (MaxHeat, LossStreak). Always read-modify-write
+    // the whole DTO so saving one field never clobbers another. Missing fields default to 0, so an
+    // old meta.json (heat-only) still loads — append-only and forward-compatible.
+    static MetaDto LoadMetaDto()
     {
-        try
-        {
-            if (!File.Exists(MetaPath)) return 0;
-            var dto = JsonSerializer.Deserialize<MetaDto>(File.ReadAllText(MetaPath), Opts);
-            return dto == null ? 0 : Heat.Clamp(dto.MaxHeat);
-        }
-        catch { return 0; }
+        try { if (File.Exists(MetaPath)) return JsonSerializer.Deserialize<MetaDto>(File.ReadAllText(MetaPath), Opts) ?? new MetaDto(); }
+        catch { }
+        return new MetaDto();
     }
 
-    public static void SaveMetaHeat(int maxHeat)
+    static void WriteMetaDto(MetaDto dto)
     {
-        try
-        {
-            Directory.CreateDirectory(Dir);
-            File.WriteAllText(MetaPath, JsonSerializer.Serialize(new MetaDto { MaxHeat = Heat.Clamp(maxHeat) }, Opts));
-        }
+        try { Directory.CreateDirectory(Dir); File.WriteAllText(MetaPath, JsonSerializer.Serialize(dto, Opts)); }
         catch { /* a failed meta save must never crash the game */ }
     }
 
-    class MetaDto { public int MaxHeat; }
+    public static int LoadMetaHeat() => Heat.Clamp(LoadMetaDto().MaxHeat);
+
+    public static void SaveMetaHeat(int maxHeat)
+    {
+        var d = LoadMetaDto(); d.MaxHeat = Heat.Clamp(maxHeat); WriteMetaDto(d);
+    }
+
+    /// Adaptive-assist meta: how many runs the player has lost in a row (0 on a fresh profile).
+    public static int LoadMetaLossStreak() => Math.Max(0, LoadMetaDto().LossStreak);
+
+    public static void SaveMetaLossStreak(int streak)
+    {
+        var d = LoadMetaDto(); d.LossStreak = Math.Max(0, streak); WriteMetaDto(d);
+    }
+
+    class MetaDto { public int MaxHeat; public int LossStreak; }
 
     // ---- mapping ----
     static RunDto ToDto(Run r)
