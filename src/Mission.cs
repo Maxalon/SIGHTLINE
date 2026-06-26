@@ -93,7 +93,14 @@ public static class Mission
         }
 
         var evacSet = new HashSet<(int, int)>(evac ?? new List<(int, int)>());
-        SpawnEnemies(grid, enemies, missionNum, evacSet, enemyDelta, statDelta);
+        // SABOTAGE is the weakest objective (~65% vs ~90% peers, the m5 gate): unlike Hack/Evac
+        // which let the squad mass at ONE zone, its 3 charge sites are spread across the mid-field,
+        // so the squad must SPLIT and cross open ground while every PLANT "goes loud" (rouses pods +
+        // breaks stealth). That triple tax compounds with the full force, so we ease the ENCOUNTER:
+        // a lighter hostile force (the loud-tempo IS the difficulty) + covered fighting positions
+        // at each site (below) so the split squad can hold.
+        bool sabotageObj = sabotage != null && sabotage.Count > 0;
+        SpawnEnemies(grid, enemies, missionNum, evacSet, enemyDelta, statDelta, sabotageObj);
 
         var occupied = new HashSet<(int, int)>();
         foreach (var u in players) occupied.Add((u.X, u.Y));
@@ -123,6 +130,17 @@ public static class Mission
         // protective cover beside each soldier and hostile (both layout paths)
         foreach (var u in players) TryCover(grid, occupied, u.X + 1, u.Y, TileType.LowCover);
         foreach (var u in enemies) TryCover(grid, occupied, u.X - 1, u.Y, TileType.HighCover);
+
+        // SABOTAGE: drop covered fighting positions just OUTSIDE each charge site's reserved ring,
+        // on the squad-facing (west) side, so a split planter isn't planting in the open. Two low
+        // blocks per site (NW/SW of the site) — they don't seal the ring (it stays open floor), and
+        // EnsureConnectivity below guarantees reachability if they ever pinch a lane.
+        if (sabotage != null)
+            foreach (var s in sabotage)
+            {
+                TryCover(grid, occupied, s.x - 2, s.y - 1, TileType.LowCover);
+                TryCover(grid, occupied, s.x - 2, s.y + 1, TileType.LowCover);
+            }
 
         // 4.2 safety net: the denser mid-field cover (+ sprinkles + protective cover) must
         // never wall a hostile or objective off from the squad — carve a lane if it did.
@@ -318,7 +336,7 @@ public static class Mission
     }
 
     static void SpawnEnemies(Grid grid, List<Unit> enemies, int n, HashSet<(int, int)> evac,
-                             int enemyDelta = 0, int statDelta = 0)
+                             int enemyDelta = 0, int statDelta = 0, bool sabotage = false)
     {
         // Headcount cap raised 10 -> 12 so the top-Heat "+enemy" rungs aren't silently wasted
         // (the +1/+1 from RELENTLESS/OVERWHELMING used to clip at 10 on later missions). 12 still
@@ -331,6 +349,11 @@ public static class Mission
         // now-strong squad faces a real fight; Heat's deltas still stack for the mastery ladder.
         int count = Math.Clamp(4 + n + enemyDelta, 3, 12);   // deployment-card + Heat modifier
         int bump = Math.Max(0, (n - 1) + statDelta);         // stat growth per mission +/- card
+        // SABOTAGE relief (the weakest objective / m5 gate, ~65% -> aiming ~85%): the difficulty of
+        // this objective IS the 3x split-and-go-loud tempo, not raw bodies, so trim the force by 2
+        // (floored at 3) so a divided squad isn't also out-gunned. Stat bump is untouched and the
+        // Heat ladder still applies on top, so the mastery curve is preserved.
+        if (sabotage) count = Math.Max(3, count - 2);
         // Final mission (the WARLORD boss): de-stack the force. This was the core of the ~90% m6
         // loss wall -- the squad cleared m1-5 (m5 often wins ~100%, partly because it isn't always
         // forced Eliminate) then got alpha-struck on m6's forced full-clear. The compounding cause:
@@ -377,7 +400,12 @@ public static class Mission
                 e = MakeHostile(n == 3 ? "BREAKER" : "WARDEN", "ELITE", WeaponKind.Lmg, 14 + n * 2, 68, 6, x, y);
             else                                // a tier-appropriate rank-and-file archetype
                 e = SelectArchetype(n, r, bump, x, y);
-            if (e.Cls != "ELITE") e.Aim = Math.Min(82, e.Aim);
+            // Aim clamp raised 82 -> 88: the old 82 cap silently ATE the top-rung Heat StatDelta (+aim)
+            // for any archetype whose base + bump + Heat exceeded 82, flattening the ladder's apex. 88
+            // lets high-Heat aim bonuses land (the ladder stays meaningful at the top) while still
+            // leaving the squad some miss chance. Low Heat is unaffected (its small StatDelta keeps
+            // non-elite aim well under 88, so this is a no-op there).
+            if (e.Cls != "ELITE") e.Aim = Math.Min(88, e.Aim);
             // grenades: bruisers + the elite always; some others from mission 2 on.
             // MORTAR already carries a deep frag pouch (set in SelectArchetype) — never overwrite it.
             // ELITE grenades: mid-bosses (BREAKER/WARDEN on m3/m5, which already win at high
