@@ -2462,9 +2462,36 @@ public class Game
     /// Fire the best expected-value shot the soldier can take from where it stands — but
     /// only if that shot is worth taking (a desperate 3% poke that ends the turn is usually
     /// worse than repositioning). Returns true if it shot.
+    /// Autopilot: shoot an explosive barrel that would catch 2+ enemies (and no friendly) in its
+    /// blast — a guaranteed multi-hit AoE worth more than a single aimed shot. Exercises the
+    /// hazard system in the flywheel. Returns true if it fired.
+    bool TryShootBarrel(Unit u)
+    {
+        if (u.Ammo <= 0 || !u.CanAct) return false;
+        int bx = -1, by = -1, best = 0;
+        for (int x = 0; x < Grid.W; x++)
+            for (int y = 0; y < Grid.H; y++)
+            {
+                if (!Grid.IsBarrel(x, y)) continue;
+                if (!CanShootBarrel(u, x, y)) continue;
+                int foes = Enemies.Count(e => e.Alive && Util.ChebyDist(e.X, e.Y, x, y) <= BarrelRadius);
+                bool allyHit = Players.Any(p => p.Alive && Util.ChebyDist(p.X, p.Y, x, y) <= BarrelRadius);
+                if (allyHit || foes < 2) continue;
+                if (foes > best) { best = foes; bx = x; by = y; }
+            }
+        if (best < 2) return false;
+        if (SquadConcealed) BreakConcealment(u);
+        u.Ammo--; u.ActionsLeft = 0;
+        u.Steady = false; u.FiredFromConcealment = false;
+        SetBarrelCredit(u);
+        Enqueue(new BarrelShotAnim(u, bx, by), Team.Player);
+        return true;
+    }
+
     bool TakeBestShot(Unit u)
     {
         if (u.Ammo <= 0) return false;
+        if (TryShootBarrel(u)) return true;     // a 2+-enemy barrel beats any single shot
         var (tgt, val) = BestShotFrom(u, u.X, u.Y);
         if (tgt == null) return false;
         var odds = Combat.ComputeOdds(Grid, u, tgt);
