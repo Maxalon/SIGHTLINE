@@ -142,8 +142,16 @@ public static class Mission
                 TryCover(grid, occupied, s.x - 2, s.y + 1, TileType.LowCover);
             }
 
-        // 4.2 safety net: the denser mid-field cover (+ sprinkles + protective cover) must
-        // never wall a hostile or objective off from the squad — carve a lane if it did.
+        // Environmental hazards: scatter a few explosive barrels on open floor (both the
+        // procedural AND authored-layout paths), biased toward the contested mid-field /
+        // enemy-half so they're worth shooting (a barrel where a pod scatters is gold). A
+        // barrel tile is non-floor (Grid.IsFloor false), so PlaceBarrels' own flood check
+        // removes any barrel that would wall an objective/spawn off; the EnsureConnectivity
+        // net below is the final safeguard for both cover and barrels.
+        PlaceBarrels(grid, occupied, players, enemies, evacSet, terminal, sabotage, missionNum);
+
+        // 4.2 safety net: the denser mid-field cover (+ sprinkles + protective cover + barrels)
+        // must never wall a hostile or objective off from the squad — carve a lane if it did.
         EnsureConnectivity(grid, players, enemies, evacSet, terminal, sabotage);
 
         grid.ResetCoverHp();   // charge every cover tile to full now the terrain is final (3.6)
@@ -310,6 +318,7 @@ public static class Mission
                     case '#': g.Tiles[x, y] = TileType.HighCover; break;
                     case '^': g.Height[x, y] = 1; break;   // walkable raised plateau (tier 1)
                     case '=': g.Height[x, y] = 2; break;   // walkable raised plateau (tier 2)
+                    case 'B': g.Barrel[x, y] = true; break;// explosive barrel (tile stays floor underneath)
                     default:  break;                        // '.' open floor
                 }
             }
@@ -329,7 +338,7 @@ public static class Mission
         {
             for (int y = 0; y < g.H; y++)
                 for (int x = 0; x < g.W; x++)
-                    if (!occupied.Contains((x, y))) { g.Tiles[x, y] = TileType.Floor; g.Height[x, y] = 0; }
+                    if (!occupied.Contains((x, y))) { g.Tiles[x, y] = TileType.Floor; g.Height[x, y] = 0; g.Barrel[x, y] = false; }
             return false;
         }
         return true;
@@ -656,6 +665,67 @@ public static class Mission
                     else break;
                 }
             }
+        }
+    }
+
+    /// Scatter a SMALL number of explosive barrels (2-5, scaling gently with mission size) on
+    /// open floor, biased toward the contested mid-field / enemy half so they reward a shot
+    /// (a barrel where a pod scatters to cover is a free area-denial / chain kill). A barrel
+    /// makes its tile non-floor (Grid.IsFloor false), so it behaves as an obstacle for ALL
+    /// pathing/connectivity automatically. SAFETY: each candidate is placed only after a flood
+    /// from the squad confirms every spawn / hostile / objective tile stays reachable WITH the
+    /// barrel down; any barrel that would pinch a required lane is reverted immediately. (The
+    /// Build-level EnsureConnectivity below is a second net, but we never rely on it carving a
+    /// barrel out — barrels are non-floor and that net only clears cover, so we keep the map
+    /// connected here.)
+    static void PlaceBarrels(Grid g, HashSet<(int, int)> occupied, List<Unit> players,
+                             List<Unit> enemies, HashSet<(int, int)> evac,
+                             (int x, int y)? terminal, List<(int x, int y)> sabotage, int missionNum)
+    {
+        if (players.Count == 0) return;
+
+        // gentle count scaling: m1 -> 2, growing to a cap of 5 on later missions
+        int target = Math.Clamp(2 + missionNum / 2, 2, 5);
+        var from = players[0];
+
+        // the set of tiles that MUST remain reachable from the squad after each placement
+        var required = new List<(int x, int y)>();
+        foreach (var u in players) required.Add((u.X, u.Y));
+        foreach (var u in enemies) required.Add((u.X, u.Y));
+        foreach (var t in evac) required.Add(t);
+        if (terminal.HasValue) required.Add(terminal.Value);
+        if (sabotage != null) foreach (var s in sabotage) required.Add(s);
+
+        bool AllReachable()
+        {
+            var cost = g.CostMap(from.X, from.Y, (x, y) => false, out _, 9999);
+            foreach (var (rx, ry) in required)
+                if (!g.InBounds(rx, ry) || cost[rx, ry] < 0) return false;
+            return true;
+        }
+
+        int placed = 0, guard = 0;
+        while (placed < target && guard++ < 400)
+        {
+            // bias toward the contested mid-field / enemy half (cols 6-15), all rows.
+            int x = Util.RandInt(6, 15);
+            int y = Util.RandInt(0, g.H - 1);
+
+            // only an unreserved, currently-empty FLOOR tile is a candidate (never on cover,
+            // a spawn, the evac zone, the terminal ring, or a sabotage ring).
+            if (occupied.Contains((x, y))) continue;
+            if (!g.IsFloor(x, y)) continue;                       // cover / existing barrel / OOB
+            if (g.Barrel[x, y]) continue;
+
+            // tentatively drop the barrel, then verify connectivity; revert if it walls anything off.
+            g.Barrel[x, y] = true;
+            if (!AllReachable())
+            {
+                g.Barrel[x, y] = false;                           // would pinch a lane — skip it
+                continue;
+            }
+            occupied.Add((x, y));                                 // commit (keeps later passes off it)
+            placed++;
         }
     }
 
