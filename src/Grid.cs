@@ -14,9 +14,12 @@ public class Grid
     public int[,] Height;       // elevation layer: 0 = ground, 1 = high ground
     public int[,] Smoke;        // utility-item smoke: turns remaining a tile blocks sight (3.4)
     public int[,] CoverHp;      // hits a cover tile takes before degrading High->Low->gone (3.6)
+    public int[,] Fire;         // environmental fire: turns remaining a tile burns (hazards)
+    public bool[,] Barrel;      // explosive barrel present on a tile (hazards)
 
     public const int HighCoverHp = 2;   // chips to crack High -> Low
     public const int LowCoverHp = 1;    // chips to clear Low -> Floor
+    public const int FireTurns = 3;     // how long a freshly-lit tile burns before guttering out
 
     public Grid()
     {
@@ -24,6 +27,8 @@ public class Grid
         Height = new int[W, H];
         Smoke = new int[W, H];
         CoverHp = new int[W, H];
+        Fire = new int[W, H];
+        Barrel = new bool[W, H];
     }
 
     public enum CoverHit { None, Chipped, Downgraded, Destroyed }
@@ -106,13 +111,47 @@ public class Grid
                 if (InBounds(x, y)) Smoke[x, y] = Math.Max(Smoke[x, y], turns);
     }
 
+    // ---------- Hazards: fire + explosive barrels ----------
+    public bool IsFire(int x, int y) => InBounds(x, y) && Fire[x, y] > 0;
+    public bool IsBarrel(int x, int y) => InBounds(x, y) && Barrel[x, y];
+
+    /// Reset all hazards (called at mission build, before barrels are stamped).
+    public void ClearHazards() { Array.Clear(Fire, 0, Fire.Length); Array.Clear(Barrel, 0, Barrel.Length); }
+
+    /// Light a single tile on fire for `turns` (only floor tiles burn — cover/barrels handle
+    /// their own destruction). Never overrides a longer-burning tile down.
+    public void LightFire(int x, int y, int turns)
+    {
+        if (InBounds(x, y) && Tiles[x, y] == TileType.Floor && !Barrel[x, y]) Fire[x, y] = Math.Max(Fire[x, y], turns);
+    }
+
+    /// Lay fire over a Chebyshev `radius` of floor tiles around (cx,cy).
+    public void AddFire(int cx, int cy, int radius, int turns)
+    {
+        for (int x = cx - radius; x <= cx + radius; x++)
+            for (int y = cy - radius; y <= cy + radius; y++)
+                LightFire(x, y, turns);
+    }
+
+    /// Decay every burning tile by one turn (called once per round). Returns the count still lit.
+    public int TickFire()
+    {
+        int lit = 0;
+        for (int x = 0; x < W; x++)
+            for (int y = 0; y < H; y++)
+                if (Fire[x, y] > 0) { Fire[x, y]--; if (Fire[x, y] > 0) lit++; }
+        return lit;
+    }
+
     /// Terrain elevation at a tile (0 ground, 1 high ground). High ground grants
     /// an aim/crit edge when firing down on a lower target.
     public int HeightAt(int x, int y) => InBounds(x, y) ? Height[x, y] : 0;
     public bool IsHigh(int x, int y) => HeightAt(x, y) > 0;
 
-    /// A tile a unit can stand on (floor + in bounds). Occupancy handled by Game.
-    public bool IsFloor(int x, int y) => InBounds(x, y) && Tiles[x, y] == TileType.Floor;
+    /// A tile a unit can stand on (floor + in bounds, and not occupied by an explosive barrel).
+    /// Barrels are physical obstacles, so routing this through IsFloor makes them impassable
+    /// everywhere (pathing/CostMap, deployment, shove/extract destinations) via one chokepoint.
+    public bool IsFloor(int x, int y) => InBounds(x, y) && Tiles[x, y] == TileType.Floor && !Barrel[x, y];
 
     // ---------- Line of sight ----------
     // Supercover line between tile centres; blocked by any intermediate HighCover tile

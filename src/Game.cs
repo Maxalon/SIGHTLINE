@@ -554,6 +554,7 @@ public class Game
         // reserve + connectivity-verify a key tile: the Hack terminal, or the Rescue captive's seat
         (int x, int y)? reserve = HasTerminal ? Terminal
             : (Objective == Objective.Rescue ? (Grid.W / 2, Grid.H / 2) : ((int, int)?)null);
+        Grid.ClearHazards();              // wipe last mission's fire/barrels before terrain is rebuilt
         Mission.Build(Grid, Players, Enemies, n, EvacZone, reserve,
                       enemyDelta, statDelta, HasSabotage ? SabotageSites : null);
         if (Vip != null) { Vip.Grenades = 0; Vip.AbilityCharge = 0; }  // the asset has no kit
@@ -1060,6 +1061,19 @@ public class Game
                 if (Grid.Tiles[x, y] == TileType.HighCover && chipped < 8) { Grid.DamageCover(x, y, 1); chipped++; }
     }
 
+    /// Harness hook (screenshot only): stamp a barrel cluster near the squad + a live fire patch,
+    /// select a soldier, and arm aim so the barrel reticle/blast staging renders.
+    public void DebugHazards()
+    {
+        var u = Players.FirstOrDefault(p => p.Alive && !p.IsVip);
+        if (u == null) return;
+        int bx = Util.Clamp(u.X + 4, 1, Grid.W - 2), by = Util.Clamp(u.Y, 1, Grid.H - 2);
+        Grid.Tiles[bx, by] = TileType.Floor; Grid.Barrel[bx, by] = true;
+        Grid.Tiles[bx, by + 1] = TileType.Floor; Grid.Barrel[bx, by + 1] = true;
+        Grid.AddFire(Util.Clamp(u.X + 6, 1, Grid.W - 2), Util.Clamp(u.Y + 2, 1, Grid.H - 2), 1, Grid.FireTurns);
+        Selected = u; RecomputeMoveCost(); AimMode = true; KbCursor = true; CurX = bx; CurY = by;
+    }
+
     /// Harness hook (screenshot only): arm a smoke-carrier's item targeting preview.
     public void DebugItem()
     {
@@ -1412,6 +1426,12 @@ public class Game
             EnvDamage(mover, Unit.BleedDamage, "BLEED", Pal.RGBA(205, 45, 45));
             if (!mover.Alive) return;
         }
+        if (Grid.IsFire(mover.X, mover.Y))       // stepping into a burning tile sears + ignites
+        {
+            mover.AddStatus(StatusKind.Burning, 2);
+            EnvDamage(mover, Unit.BurnDamage, "BURN", Pal.RGBA(255, 140, 40));
+            if (!mover.Alive) return;
+        }
         if (mover.Team == Team.Player)
         {
             // 4.4: stepping within RevealRange of an already-active foe blows concealment.
@@ -1672,6 +1692,114 @@ public class Game
         Fx.PopText(u.Pos + new Vector2(0, -26), $"-{dmg} {label}", col, 20f);
         if (u.Hp <= 0) { u.Hp = 0; KillUnit(u); }
         else MarkPlayerHurt(u);
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    //  Environmental hazards: explosive barrels + spreading fire (Wave 2)
+    //  Barrels are physical obstacles (Grid.IsFloor excludes them) that chain-detonate
+    //  when shot, caught in a grenade blast, or reached by fire — dealing cover-ignoring
+    //  AoE and leaving a deny-ground fire field. Fire applies Burning + denies ground.
+    // ──────────────────────────────────────────────────────────────────────────
+    public const int BarrelDmg = 6;          // base barrel-blast damage (a touch above a frag)
+    public const int BarrelRadius = 1;       // Chebyshev blast radius
+
+    /// True when a barrel sits adjacent-or-on a soldier cluster worth detonating (AI/autopilot aid).
+    public bool BarrelNearFoesOf(int x, int y, Team victims, int radius = BarrelRadius)
+    {
+        var list = victims == Team.Player ? Players : Enemies;
+        return list.Count(u => u.Alive && Util.ChebyDist(u.X, u.Y, x, y) <= radius) >= 1;
+    }
+
+    /// Detonate the barrel at (bx,by): cover-ignoring AoE to both teams, cover demolition, a
+    /// lingering fire field, and a CHAINED detonation of any other barrel in the blast. `depth`
+    /// guards the recursion (a dense barrel field can't blow forever).
+    public void DetonateBarrel(int bx, int by, int depth = 0)
+    {
+        if (!Grid.IsBarrel(bx, by)) return;
+        Grid.Barrel[bx, by] = false;        // consumed before the blast so chains don't re-hit it
+        var center = Util.TileCenter(bx, by);
+
+        Audio.Play("crit"); Audio.Play("death");
+        Fx.AddShake(14f); AddHitStop(0.06f); AddZoomPunch(0.07f); AddBloom(0.5f);
+        float blastR = (BarrelRadius + 0.5f) * Cfg.Tile;
+        Fx.Burst(center, Pal.RGBA(255, 170, 70), 40, 380f, 0.6f, 5f, true);
+        Fx.Burst(center, Pal.RGBA(120, 70, 40), 22, 210f, 0.85f, 5f);
+        Fx.Shockwave(center, Pal.RGBA(255, 210, 150), 10f, blastR, 5f, 0.95f, 0.30f);
+        Fx.Impact(center, Pal.RGBA(255, 150, 60), blastR * 0.5f, 0.95f, 0.16f);
+
+        // cover demolition + lay fire on the floor tiles in the blast
+        var chain = new List<(int x, int y)>();
+        var wokePods = new HashSet<int>();
+        for (int x = bx - BarrelRadius; x <= bx + BarrelRadius; x++)
+            for (int y = by - BarrelRadius; y <= by + BarrelRadius; y++)
+            {
+                if (!Grid.InBounds(x, y)) continue;
+                var ch = Grid.DamageCover(x, y, Grid.HighCoverHp);
+                if (ch != Grid.CoverHit.None) CoverHitFx(x, y, ch);
+                if ((x != bx || y != by) && Grid.IsBarrel(x, y)) chain.Add((x, y));   // catch neighbours
+                Grid.LightFire(x, y, Grid.FireTurns);                                 // residue fire
+            }
+
+        // damage every unit in radius (friendly fire included), cover ignored (it's an explosion)
+        foreach (var u in Players.Concat(Enemies).ToList())
+        {
+            if (!u.Alive) continue;
+            if (u == Vip && CaptiveLocked) continue;             // the caged captive is invulnerable
+            if (Util.ChebyDist(u.X, u.Y, bx, by) > BarrelRadius) continue;
+            if (u.Team == Team.Enemy && !u.Active) wokePods.Add(u.PodId);
+            int dmg = BarrelDmg + Util.RandInt(0, 2);
+            dmg = Combat.HardenedReduce(u, dmg, crit: false);
+            if (u.Team == Team.Player && u.MaxHp >= 2 && u.Hp >= u.MaxHp) dmg = Math.Min(dmg, u.MaxHp - 1);  // fragile floor
+            u.Hp -= dmg; u.Flash = 1f; u.FlinchAnim = 1f;
+            var kick = u.Pos - center;
+            if (kick.LengthSquared() > 0.01f) u.Recoil = Vector2.Normalize(kick) * 8f;
+            Color c = u.Team == Team.Player ? Pal.Friend : Pal.Foe;
+            Fx.Burst(u.Pos, c, 12, 200f, 0.5f, 3.5f, true);
+            Fx.PopText(u.Pos + new Vector2(0, -26), dmg.ToString(), Pal.RGBA(255, 200, 140), 26f);
+            if (u.Hp <= 0)
+            {
+                u.Hp = 0;
+                bool wasLast = u.Team == Team.Enemy && AliveEnemies().Count <= 1;
+                bool byPlayer = u.Team == Team.Enemy && _barrelCreditTeam == Team.Player;
+                KillUnit(u);
+                if (byPlayer && _barrelCreditUnit != null && _barrelCreditUnit.Alive) CreditKill(_barrelCreditUnit);
+                if (byPlayer) Audio.PlayStinger(wasLast ? "lastkill" : "kill");
+            }
+            else { MarkPlayerHurt(u); u.AddStatus(StatusKind.Burning, 2); }
+        }
+        foreach (int pod in wokePods) ActivatePod(pod);
+        if (depth < 6) foreach (var (cx, cy) in chain) DetonateBarrel(cx, cy, depth + 1);   // chain reaction
+    }
+
+    // kill-credit context for a player-triggered barrel (set by the shot/grenade that lit it)
+    Team _barrelCreditTeam = Team.Enemy;
+    Unit _barrelCreditUnit = null;
+    public void SetBarrelCredit(Unit u) { _barrelCreditUnit = u; _barrelCreditTeam = u?.Team ?? Team.Enemy; }
+
+    /// Once-per-round hazard upkeep: detonate barrels reached by fire, refresh Burning on units
+    /// standing in fire, then decay the flames. Bounded (no spread loop) so it can never TIMEOUT.
+    void TickHazards()
+    {
+        // a barrel whose tile (or a neighbour) is on fire cooks off
+        var cook = new List<(int x, int y)>();
+        for (int x = 0; x < Grid.W; x++)
+            for (int y = 0; y < Grid.H; y++)
+            {
+                if (!Grid.IsBarrel(x, y)) continue;
+                bool nearFlame = false;
+                for (int dx = -1; dx <= 1 && !nearFlame; dx++)
+                    for (int dy = -1; dy <= 1 && !nearFlame; dy++)
+                        if (Grid.IsFire(x + dx, y + dy)) nearFlame = true;
+                if (nearFlame) cook.Add((x, y));
+            }
+        _barrelCreditTeam = Team.Enemy; _barrelCreditUnit = null;   // fire-cooked barrels credit no one
+        foreach (var (x, y) in cook) DetonateBarrel(x, y);
+
+        // units standing in fire keep burning (the Burning DoT does the damage in TickStatuses)
+        foreach (var u in Players.Concat(Enemies))
+            if (u.Alive && Grid.IsFire(u.X, u.Y)) u.AddStatus(StatusKind.Burning, 2);
+
+        Grid.TickFire();
     }
 
     void FeatBanner(Unit u, string what)
@@ -3189,6 +3317,9 @@ public class Game
                 AimTarget = hovered;
             if (AimTarget != null && !AimTarget.Alive) AimTarget = FirstTargetFor(Selected);
             AimValid = AimTarget != null && CanTarget(Selected, AimTarget);
+            // explosive-barrel target feedback: hovering a shootable barrel (no enemy under cursor)
+            BarrelAimValid = hovered == null && CanShootBarrel(Selected, HoverX, HoverY);
+            BarrelAimX = HoverX; BarrelAimY = HoverY;
             if (AimTarget != null)
             {
                 ShowOdds = true;
@@ -3293,6 +3424,7 @@ public class Game
         if (AimMode)
         {
             if (hovered != null && hovered.Team == Team.Enemy && CanTarget(Selected, hovered)) IssueShoot(hovered);
+            else if (CanShootBarrel(Selected, hx, hy)) IssueShootBarrel(hx, hy);   // shoot an explosive barrel
             else { AimMode = false; SnapShot = false; }
             return;
         }
@@ -3606,6 +3738,36 @@ public class Game
         _tutShot = true;
     }
 
+    // ── shootable explosive barrels (hazards) ──────────────────────────────────
+    public bool BarrelAimValid;            // hovering a shootable barrel while aiming (Renderer reticle)
+    public int BarrelAimX, BarrelAimY;
+
+    /// A soldier can shoot a barrel it has a clear LoS to, within weapon range, with ammo + an action.
+    public bool CanShootBarrel(Unit u, int x, int y)
+    {
+        if (u == null || !u.CanAct || u.Ammo <= 0) return false;
+        if (!Grid.IsBarrel(x, y)) return false;
+        if (Util.TileDist(u.X, u.Y, x, y) > u.Weapon.MaxRange) return false;
+        return Grid.HasLineOfSight(u.X, u.Y, x, y);
+    }
+
+    /// Fire at a barrel tile: a tracer flies over and detonates it (BarrelShotAnim -> DetonateBarrel).
+    /// Mirrors IssueShoot's action-cost model (RUN&GUN / SNAP / aimed-ends-turn) so it's a real shot.
+    void IssueShootBarrel(int bx, int by)
+    {
+        if (!CanShootBarrel(Selected, bx, by)) return;
+        if (SquadConcealed) BreakConcealment(Selected);   // shooting a barrel is going loud
+        Selected.Ammo--;
+        bool snap = SnapShot && !Selected.RunGun;
+        if (Selected.RunGun) { Selected.ActionsLeft = Math.Max(0, Selected.ActionsLeft - 1); Selected.RunGun = false; }
+        else if (snap)       Selected.ActionsLeft = Math.Max(0, Selected.ActionsLeft - 1);
+        else                  Selected.ActionsLeft = 0;
+        Selected.Steady = false;
+        Selected.FiredFromConcealment = false;
+        Enqueue(new BarrelShotAnim(Selected, bx, by), Team.Player);
+        AimMode = false; SnapShot = false; _tutShot = true;
+    }
+
     void DoOverwatch()
     {
         if (Selected == null || !Selected.CanAct || Selected.Ammo <= 0) return;
@@ -3854,6 +4016,7 @@ public class Game
         Phase = Phase.PlayerTurn;
         ClearIntent();                    // no enemy intent lingers into the player's turn
         Grid.TickSmoke();                 // smoke clouds decay one turn per round
+        TickHazards();                    // fire cooks off barrels + reignites units, then decays
         _refundedThisTurn.Clear();        // flank-kill refund is one per soldier per turn
         HackedThisTurn = false;           // the terminal accepts one breach cycle per turn (hold)
         if (AutoPlay) AutoStallCheck();
@@ -4598,6 +4761,46 @@ public class Game
         return fails.Count == 0
             ? "ITEMTEST: PASS (smoke blocks+decays LoS, barricade=cover, loadouts map)"
             : "ITEMTEST: FAIL (" + string.Join(",", fails) + ")";
+    }
+
+    /// Headless self-test (SIGHTLINE_HAZARDTEST): environmental-hazard mechanics — a barrel blocks
+    /// movement (IsFloor chokepoint), fire only lights floor + decays, and pathing routes around a
+    /// barrel. Window-free (grid + CostMap only).
+    public static string HazardSelfTest()
+    {
+        var fails = new List<string>();
+        var grid = new Grid();
+        for (int x = 0; x < grid.W; x++)
+            for (int y = 0; y < grid.H; y++) grid.Tiles[x, y] = TileType.Floor;
+
+        // (1) a barrel makes its tile non-floor (impassable everywhere via the IsFloor chokepoint)
+        grid.Barrel[5, 5] = true;
+        if (grid.IsFloor(5, 5)) fails.Add("barrelNotBlocking");
+        if (!grid.IsBarrel(5, 5)) fails.Add("barrelFlag");
+
+        // (2) pathing routes AROUND the barrel: a Dijkstra cost map never enters the barrel tile
+        var cost = grid.CostMap(2, 5, (x, y) => false, out _, 9999);
+        if (cost[5, 5] != -1) fails.Add("pathEntersBarrel");
+        if (cost[8, 5] <= 0) fails.Add("pathBlockedEntirely");   // far tile still reachable around it
+
+        // (3) fire lights only floor; a barrel tile won't ignite (it's not floor)
+        grid.AddFire(7, 5, 1, Grid.FireTurns);
+        if (!grid.IsFire(7, 5) || !grid.IsFire(7, 4) || !grid.IsFire(6, 6)) fails.Add("fireArea");
+        grid.LightFire(5, 5, Grid.FireTurns);
+        if (grid.IsFire(5, 5)) fails.Add("barrelTileBurns");
+
+        // (4) fire decays to nothing over FireTurns ticks
+        for (int i = 0; i < Grid.FireTurns; i++) grid.TickFire();
+        if (grid.IsFire(7, 5)) fails.Add("firePersist");
+
+        // (5) ClearHazards wipes both layers
+        grid.AddFire(3, 3, 1, Grid.FireTurns); grid.Barrel[4, 4] = true;
+        grid.ClearHazards();
+        if (grid.IsFire(3, 3) || grid.IsBarrel(4, 4)) fails.Add("clearHazards");
+
+        return fails.Count == 0
+            ? "HAZARDTEST: PASS (barrel blocks move + pathing routes around; fire lights floor only + decays; clear works)"
+            : "HAZARDTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
     /// Headless self-test (SIGHTLINE_COVERTEST): destructible cover — High chips to Low

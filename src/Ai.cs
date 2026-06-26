@@ -250,6 +250,12 @@ public static class Ai
             score += g.Grid.HeightAt(tx, ty) * 14;               // seize the high ground
             if (cover.Flanked) score -= 25;
             score -= actionsToReach * 6;                         // prefer cheaper moves slightly
+            if (g.Grid.IsFire(tx, ty)) score -= 60;              // never voluntarily stand in fire (hazards)
+            // wariness of an explosive barrel the squad could shoot to catch it in the blast
+            for (int bdx = -1; bdx <= 1; bdx++)
+                for (int bdy = -1; bdy <= 1; bdy++)
+                    if (g.Grid.IsBarrel(tx + bdx, ty + bdy)) { score -= 14; goto barrelDone; }
+            barrelDone:;
 
             // ELEVATION EXPLOITATION: when this tile gives a height advantage over the best
             // target, reward it by how much the shot quality actually improves. This captures

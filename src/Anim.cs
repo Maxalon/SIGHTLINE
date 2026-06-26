@@ -353,6 +353,57 @@ public class ShotAnim : Anim
     }
 }
 
+/// A soldier shoots an explosive barrel: a tracer flies to the barrel tile, then it detonates
+/// (Game.DetonateBarrel does the blast/chain/fire). A lightweight cousin of ShotAnim that targets
+/// a TILE, not a unit, so the barrel-shot reuses the same muzzle/tracer/audio beat.
+public class BarrelShotAnim : Anim
+{
+    public Unit A;
+    public int Tx, Ty;
+    Vector2 _to;
+    const float Fire = 0.05f, BeamEnd = 0.30f, Total = 0.42f;
+    float _t; bool _fired; bool _windless;
+
+    public BarrelShotAnim(Unit a, int tx, int ty) { A = a; Tx = tx; Ty = ty; _to = Util.TileCenter(tx, ty); }
+
+    public override void OnStart(Game g)
+    {
+        var dir = _to - A.Pos;
+        if (dir.LengthSquared() > 0.01f) A.Facing = MathF.Atan2(dir.Y, dir.X);
+        _windless = g.AutoPlay;
+    }
+
+    public override bool Update(Game g, float dt)
+    {
+        _t += dt;
+        if (!_fired && _t >= (_windless ? 0.01f : Fire))
+        {
+            _fired = true;
+            var dir = Vector2.Normalize(_to - A.Pos + new Vector2(0.001f, 0f));
+            g.Fx.Muzzle(A.Pos, dir, Pal.Accent);
+            Audio.PlayWeapon(A.Weapon.Kind);
+            g.SetBarrelCredit(A);          // attribute the chain's kills to the shooter
+            g.DetonateBarrel(Tx, Ty);      // boom (+ chain + fire) happens on impact
+        }
+        return _t >= (_windless ? 0.02f : Total);
+    }
+
+    public override void Draw(Game g)
+    {
+        if (_windless) return;
+        if (_t >= Fire && _t <= BeamEnd)
+        {
+            float k = 1f - (_t - Fire) / (BeamEnd - Fire);
+            var dir = Vector2.Normalize(_to - A.Pos + new Vector2(0.001f, 0f));
+            Vector2 start = A.Pos + dir * 16f;
+            Raylib.DrawLineEx(start, _to, 5.5f * k + 0.8f, Raylib.Fade(Pal.Accent, k * 0.30f));
+            Raylib.DrawLineEx(start, _to, 3.2f * k + 0.6f, Raylib.Fade(Pal.Accent, k));
+            float snap = k * k;
+            Raylib.DrawCircleV(start, 9f * snap + 2f, Raylib.Fade(Pal.Accent, snap * 0.85f));
+        }
+    }
+}
+
 /// A thrown grenade: arcs to a tile, then explodes — AoE damage that ignores
 /// cover, hits both teams, and clears low cover. Blast = Chebyshev radius 1.
 public class GrenadeAnim : Anim
@@ -453,6 +504,18 @@ public class GrenadeAnim : Anim
             else { g.MarkPlayerHurt(u); u.AddStatus(StatusKind.Burning, 2); }   // blast leaves them on fire
         }
         foreach (int pod in wokePods) g.ActivatePod(pod);   // the blast wakes survivors
+
+        // chain-detonate any explosive barrel caught in the frag (a grenade near a barrel cooks it
+        // off). Credit the chain's kills to the thrower; collect first so we don't mutate mid-scan.
+        var barrels = new System.Collections.Generic.List<(int x, int y)>();
+        for (int x = Tx - Radius; x <= Tx + Radius; x++)
+            for (int y = Ty - Radius; y <= Ty + Radius; y++)
+                if (g.Grid.IsBarrel(x, y)) barrels.Add((x, y));
+        if (barrels.Count > 0)
+        {
+            g.SetBarrelCredit(Thrower);
+            foreach (var (x, y) in barrels) g.DetonateBarrel(x, y);
+        }
     }
 
     public override void Draw(Game g)
