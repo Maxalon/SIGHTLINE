@@ -44,6 +44,13 @@ public static class Program
             Console.WriteLine(Combat.SelfTest());
             return;
         }
+        // SIGHTLINE_AUDIOTEST=1 : device-free validation that every weapon/stinger/baseline SFX
+        // recipe + both music beds build a non-empty, finite buffer (audio identity pass). No window.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_AUDIOTEST") == "1")
+        {
+            Console.WriteLine(Audio.SelfTest());
+            return;
+        }
         // SIGHTLINE_AMBIENTTEST=1 : per-biome ambient field stays bounded/finite/on-board (Phase 5). No window.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_AMBIENTTEST") == "1")
         {

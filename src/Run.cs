@@ -558,6 +558,7 @@ public class Run
         if (!BoonOffer.Contains(b) || HasBoon(b)) return;
         ActiveBoons.Add(b);
         BoonOffer.Clear();
+        Sightline.Stats.RecordBoon(BoonDef.Code(b));
         Report.Insert(0, $"BOON: {BoonDef.Name(b)}  ({BoonDef.Desc(b)})");
     }
 

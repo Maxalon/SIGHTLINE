@@ -159,7 +159,7 @@ public class Game
 
     static int[] BuildShopCost()
     {
-        var b = new[] { 6, 10, 16, 12, 14 };   // +BALLISTIC PLATING (survivability sink)
+        var b = new[] { 6, 10, 16, 12, 8 };    // +BALLISTIC PLATING (survivability sink, front-loaded cheap)
         var all = new int[ModBase + WeaponModDef.All.Length];
         b.CopyTo(all, 0);
         for (int i = 0; i < WeaponModDef.All.Length; i++) all[ModBase + i] = WeaponModDef.Cost(WeaponModDef.All[i]);
@@ -423,7 +423,7 @@ public class Game
         EnsureMetaLoaded();
         _run = new Run();
         _run.Start(DraftedSquad);           // builds the campaign map, seats at the START node (drafted squad if any)
-        if (DraftBoon.HasValue) _run.ActiveBoons.Add(DraftBoon.Value);   // adopt the chosen starting boon
+        if (DraftBoon.HasValue) { _run.ActiveBoons.Add(DraftBoon.Value); Stats.RecordBoon(BoonDef.Code(DraftBoon.Value)); }   // adopt the chosen starting boon
         DraftedSquad = null; DraftBoon = null;   // consumed: the harness path leaves these null (default squad)
         // adopt the dialled-in Heat for this run. The harness can't set PendingHeat (it doesn't
         // touch the intro), so it reads SIGHTLINE_HEAT here instead — defaulting to 0 so plain
@@ -1281,13 +1281,17 @@ public class Game
             // adaptive assist: a win clears the loss streak (the next run starts un-assisted).
             _run.RecordRunResult(true);
             if (!NoPersist) SaveGame.SaveMetaLossStreak(_run.LossStreak);
-            Phase = Phase.Win; Audio.Play("win"); if (!NoPersist) SaveGame.Delete();
+            Phase = Phase.Win; Audio.Play("win"); Audio.PlayStinger("victory"); if (!NoPersist) SaveGame.Delete();
         }
         else
         {
-            // intel salvage scales with survivors + depth; ONSLAUGHT pays a risk premium;
-            // higher Heat pays a flat per-mission bonus (the reward for the ladder).
-            int gained = 8 + 3 * survivors + _run.Mission;
+            // Intel salvage is DEPTH-weighted, not survivor-weighted, so a hurting squad isn't
+            // also poorer (the old 3*survivors term was a rich-get-richer / death-spiral loop —
+            // fewer survivors meant less intel meant a weaker squad). A small survivor bonus
+            // remains as a reward for keeping people alive, but depth (which tracks the rising
+            // difficulty) is the main driver so the reward sink keeps pace with the gate.
+            // ONSLAUGHT pays a risk premium; higher Heat pays a flat per-mission bonus.
+            int gained = 10 + 4 * _run.Mission + survivors;
             if (_run.CurrentCard != null && _run.CurrentCard.ModName == "ONSLAUGHT") gained += 6;
             int heatBonus = Sightline.Heat.IntelBonus(_run.HeatLevel);
             gained += heatBonus;
@@ -1328,6 +1332,9 @@ public class Game
         LoseReason = reason;
         Phase = Phase.Lose;
         Audio.Play("lose");
+        // a full squad wipe gets the heavier ominous wipe stinger; other run-enders (VIP lost,
+        // abandoned) get the standard sinking-minor lose stinger.
+        Audio.PlayStinger(AlivePlayers().Count(p => !p.IsVip) == 0 ? "squadwipe" : "lose");
         // balance telemetry: the active mission AND the run end here as a loss.
         Stats.EndMission(false, _turnCount, AlivePlayers().Count(p => !p.IsVip),
                          Enemies.Count(e => !e.Alive), title);
@@ -2633,7 +2640,7 @@ public class Game
         // PATIENCE / ANTI-TIMEOUT: don't hold forever (the escorts may never clear that
         // watcher). After several held turns, accept the risk and push toward evac so the
         // mission always resolves. Bounded — the match can never stall on a waiting VIP.
-        if (++_vipWaitTurns >= 4) { _vipWaitTurns = 0; return TryMoveTowardTile(u, gx, gy); }
+        if (++_vipWaitTurns >= 2) { _vipWaitTurns = 0; return TryMoveTowardTile(u, gx, gy); }
         return false;   // wait this turn (hold in current cover); caller hunkers (turn still ends)
     }
 
@@ -4244,6 +4251,7 @@ public class Game
             t.InstallMod(mod);   // persistent: baked into the soldier's Weapon, carried across the run
             _run.Report.Add($"{t.Name} fitted {WeaponModDef.Name(mod)}  ({WeaponModDef.Desc(mod)})");
             _run.Intel -= ShopCost[item];
+            Stats.RecordPurchase(ShopName[item]);
             Audio.Play("select");
             return;
         }
@@ -4276,6 +4284,7 @@ public class Game
                 break;
         }
         _run.Intel -= ShopCost[item];
+        Stats.RecordPurchase(ShopName[item]);
         Audio.Play("select");
     }
 
@@ -4298,6 +4307,14 @@ public class Game
     void AutoShop()
     {
         if (CanBuy(0)) DoPurchase(0);   // one heal pass if someone's hurt/wounded
+        // Survivability first: plating (item 4) compounds across the run and is the documented
+        // anti-attrition lever, so prefer it over flat firepower while we can afford it.
+        for (int guard = 0; guard < 8 && CanBuy(4); guard++)
+        {
+            int before0 = _run.Intel;
+            DoPurchase(4);
+            if (_run.Intel >= before0) break;
+        }
 
         for (int guard = 0; guard < 40; guard++)
         {

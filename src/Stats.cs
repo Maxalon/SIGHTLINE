@@ -60,6 +60,8 @@ public static class Stats
         public bool Win;
         public string LossCause = "";
         public readonly List<string> PerksPicked = new();
+        public readonly List<string> Purchases = new();   // shop items bought (incl. weapon mods)
+        public readonly List<string> BoonsPicked = new();  // run-scoped doctrine/boon picks
         public readonly List<MissionRec> Missions = new();
     }
 
@@ -131,6 +133,20 @@ public static class Stats
     {
         if (!Enabled || _run == null || string.IsNullOrEmpty(code)) return;
         _run.PerksPicked.Add(code);
+    }
+
+    // A shop purchase (item display name). Lets the flywheel see what the reward sink actually buys.
+    public static void RecordPurchase(string item)
+    {
+        if (!Enabled || _run == null || string.IsNullOrEmpty(item)) return;
+        _run.Purchases.Add(item);
+    }
+
+    // A run-scoped boon / field-doctrine pick.
+    public static void RecordBoon(string code)
+    {
+        if (!Enabled || _run == null || string.IsNullOrEmpty(code)) return;
+        _run.BoonsPicked.Add(code);
     }
 
     public static void EndMission(bool win, int turns, int survivors, int enemiesKilled, string lossCause)
@@ -242,6 +258,26 @@ public static class Stats
                 sb.AppendLine($"  {kv.Key,-14}: {kv.Value}");
         }
 
+        // Shop purchase frequency (reward-sink instrumentation)
+        var buys = new Dictionary<string, int>();
+        foreach (var r in Runs) foreach (var p in r.Purchases) Bump(buys, p);
+        if (buys.Count > 0)
+        {
+            sb.AppendLine("\nSHOP PURCHASE FREQUENCY:");
+            foreach (var kv in buys.OrderByDescending(kv => kv.Value))
+                sb.AppendLine($"  {kv.Key,-18}: {kv.Value}");
+        }
+
+        // Boon / doctrine pick frequency
+        var boons = new Dictionary<string, int>();
+        foreach (var r in Runs) foreach (var b in r.BoonsPicked) Bump(boons, b);
+        if (boons.Count > 0)
+        {
+            sb.AppendLine("\nBOON PICK FREQUENCY:");
+            foreach (var kv in boons.OrderByDescending(kv => kv.Value))
+                sb.AppendLine($"  {kv.Key,-18}: {kv.Value}");
+        }
+
         sb.AppendLine("═══════════════════════════════════════════════════════════════════════");
         return sb.ToString();
     }
@@ -284,6 +320,10 @@ public static class Stats
             foreach (var kv in m.DeathsByEnemyClass) Bump(deaths, kv.Key, kv.Value);
         var perks = new Dictionary<string, int>();
         foreach (var r in Runs) foreach (var p in r.PerksPicked) Bump(perks, p);
+        var buys = new Dictionary<string, int>();
+        foreach (var r in Runs) foreach (var p in r.Purchases) Bump(buys, p);
+        var boons = new Dictionary<string, int>();
+        foreach (var r in Runs) foreach (var b in r.BoonsPicked) Bump(boons, b);
 
         double WinRate(IEnumerable<MissionRec> ms)
         {
@@ -333,6 +373,8 @@ public static class Stats
             }).ToList(),
             soldierDeathsByEnemy = deaths.OrderByDescending(kv => kv.Value).ToDictionary(kv => kv.Key, kv => kv.Value),
             perkPicks = perks.OrderByDescending(kv => kv.Value).ToDictionary(kv => kv.Key, kv => kv.Value),
+            shopPurchases = buys.OrderByDescending(kv => kv.Value).ToDictionary(kv => kv.Key, kv => kv.Value),
+            boonPicks = boons.OrderByDescending(kv => kv.Value).ToDictionary(kv => kv.Key, kv => kv.Value),
         };
     }
 }

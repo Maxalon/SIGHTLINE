@@ -193,7 +193,7 @@ public class ShotAnim : Anim
         g.Fx.Muzzle(A.Pos, dir, Pal.Accent);
         // Graze shakes less than a solid hit.
         g.Fx.AddShake(Res.Hit ? (Res.Graze ? 2f : (Res.Crit ? 9f : 5f)) : 2.5f);
-        Audio.Play("shoot");
+        Audio.PlayWeapon(A.Weapon.Kind);   // per-weapon firing voice (rifle/shotgun/sniper/lmg/smg)
         Audio.Play(Res.Hit ? (Res.Crit ? "crit" : "hit") : "miss");
         // balance telemetry (no-op unless Stats.Enabled): one record per resolved shot, here
         // where the ShotResult is final. dmg counts only when the round connects.
@@ -288,8 +288,13 @@ public class ShotAnim : Anim
             if (D.Hp <= 0)
             {
                 D.Hp = 0;
+                bool wasLastFoe = D.Team == Team.Enemy && g.AliveEnemies().Count <= 1;   // this blow clears the field (D still counts as alive here)
                 g.KillUnit(D);
-                if (A.Team == Team.Player && D.Team == Team.Enemy) g.CreditKill(A);
+                if (A.Team == Team.Player && D.Team == Team.Enemy)
+                {
+                    g.CreditKill(A);
+                    Audio.PlayStinger(wasLastFoe ? "lastkill" : "kill");   // takedown / field-clear flourish
+                }
             }
             else g.MarkPlayerHurt(D);   // a survivor at death's door earns a feat if it lives
         }
@@ -437,8 +442,13 @@ public class GrenadeAnim : Anim
             if (u.Hp <= 0)
             {
                 u.Hp = 0;
+                bool wasLastFoe = u.Team == Team.Enemy && g.AliveEnemies().Count <= 1;
                 g.KillUnit(u);
-                if (Thrower.Team == Team.Player && u.Team == Team.Enemy) g.CreditKill(Thrower);
+                if (Thrower.Team == Team.Player && u.Team == Team.Enemy)
+                {
+                    g.CreditKill(Thrower);
+                    Audio.PlayStinger(wasLastFoe ? "lastkill" : "kill");
+                }
             }
             else { g.MarkPlayerHurt(u); u.AddStatus(StatusKind.Burning, 2); }   // blast leaves them on fire
         }
