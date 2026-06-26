@@ -1080,8 +1080,16 @@ Before stopping:
 > - **W3 (EXTRACT lift-out verb — Evac/Escort/Rescue drag):** a soldier in the evac zone can EXTRACT an
 >   adjacent ally / VIP / freed captive (key **X**, 1 action, no end-turn) — hauls them the last step into the
 >   zone, ending the long "march everyone to the corner" tail. `HasExtractAction`/`CanExtract`/`DoExtract` +
->   contextual HUD button/icon/tooltip + autopilot use in SmartEvac/SmartEscort/SmartRescue.
-> 13 self-tests green; build 0/0; autoplay clean across all objectives. **NEW HOOKS:** `SIGHTLINE_AUDIOTEST`,
+>   contextual HUD button/icon/tooltip + autopilot use in SmartEvac/SmartEscort/SmartRescue. MEASURED: lifts
+>   Escort win ~85->90% (secures the fragile VIP at the threshold); avgTurns noisy at 40 runs.
+> - **W4 (INCENDIARY item — player fire agency):** the Sharpshooter's utility item is now INCENDIARY (was a
+>   3rd Smoke) — lob it to lay a 3x3 fire field that denies ground, ignites foes, and cooks barrels (`IssueItem`
+>   case + `IncendiaryAnim` reusing `LobAnim`/`Grid.AddFire`/the barrel-cook path). Completes the hazards arc:
+>   fire is now a player VERB, not just barrel residue. Player autopilot avoids ending a move in fire
+>   (`TileExposure` +20). Independent code review of W1-W3: **no CRITICAL/HIGH findings — "ship it"** (chain
+>   recursion bounded, no fire double-count, `IsFloor`/connectivity fenced, EXTRACT occupancy/turn/win-check
+>   correct, crit-damping single-bonus invariant preserved).
+> 14 self-tests green; build 0/0; autoplay clean across all objectives + heat 0/4/8. **NEW HOOKS:** `SIGHTLINE_AUDIOTEST`,
 > `SIGHTLINE_HAZARDTEST`, `SIGHTLINE_HAZARD`. **PROCESS GOTCHA (re-confirmed + important):** `isolation:worktree`
 > dev agents branch off OLD `origin/main` (4de6fc9), NOT the current branch HEAD — a file-copy of such a worktree
 > SILENTLY REVERTS all intervening commits' changes to the copied files (it cost a Program.cs draft-hook revert,
