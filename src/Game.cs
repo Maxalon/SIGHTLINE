@@ -1067,11 +1067,18 @@ public class Game
     {
         var u = Players.FirstOrDefault(p => p.Alive && !p.IsVip);
         if (u == null) return;
-        int bx = Util.Clamp(u.X + 4, 1, Grid.W - 2), by = Util.Clamp(u.Y, 1, Grid.H - 2);
-        Grid.Tiles[bx, by] = TileType.Floor; Grid.Barrel[bx, by] = true;
+        int by = Util.Clamp(u.Y, 1, Grid.H - 2);
+        int bx = Util.Clamp(u.X + 3, 1, Grid.W - 2);
+        // clear a clean firing lane in front of the soldier so CanShootBarrel (LoS + range) holds,
+        // then seat the barrel at the end of it + a second barrel below + a live fire patch.
+        for (int x = u.X + 1; x <= bx; x++) { Grid.Tiles[x, by] = TileType.Floor; Grid.Barrel[x, by] = false; }
+        Grid.Barrel[bx, by] = true;
         Grid.Tiles[bx, by + 1] = TileType.Floor; Grid.Barrel[bx, by + 1] = true;
         Grid.AddFire(Util.Clamp(u.X + 6, 1, Grid.W - 2), Util.Clamp(u.Y + 2, 1, Grid.H - 2), 1, Grid.FireTurns);
         Selected = u; RecomputeMoveCost(); AimMode = true; KbCursor = true; CurX = bx; CurY = by;
+        // drive the hover state directly so the reticle is live on the very first rendered frame
+        HoverX = bx; HoverY = by; HoverValid = true;
+        BarrelAimValid = CanShootBarrel(u, bx, by); BarrelAimX = bx; BarrelAimY = by;
     }
 
     /// Harness hook (screenshot only): arm a smoke-carrier's item targeting preview.

@@ -157,13 +157,16 @@ public static class Renderer
         DrawGridLines(g);
         DrawPathPreview(g);
         DrawCover(g);
+        DrawBarrels(g);           // explosive drums — objects at cover/terrain level (under the figures)
         DrawHoverAndShields(g);
         DrawKbCursor(g);
         DrawEnemyIntent(g);       // telegraph: the acting hostile's planned move + target + threat
         DrawScorch(g);            // lingering burn decals where units fell (under the figures)
+        DrawFire(g);              // burning floor — deny-ground hazard, on the floor under the figures
         DrawUnits(g);
         DrawSmoke(g);
         DrawAim(g);
+        DrawBarrelAimReticle(g);  // targeting reticle + blast preview when aiming a shootable barrel
         DrawCrossfire(g);         // pincer telegraph: converging-fire prongs when the aimed/hovered shot is a crossfire
         DrawGrenade(g);
         DrawItem(g);
@@ -766,6 +769,170 @@ public static class Renderer
     {
         foreach (var u in g.Enemies) DrawUnit(g, u);
         foreach (var u in g.Players) DrawUnit(g, u);
+    }
+
+    // ---- Environmental hazards (Wave 2) -----------------------------------------------------
+    // Explosive barrels + burning floor tiles. Both are primitive-drawn in the game's
+    // geometric aesthetic and tinted to a warning hue so the squint test flags them as
+    // "dangerous / interactable" — they must never read as ordinary cover or floor.
+
+    // Explosive drums sitting on the board. A chunky rounded body with a hazard-stripe
+    // shoulder band + a soft pulsing danger glow so the volatility reads instantly. Drawn
+    // at cover/terrain z-order (objects on the board, under the units).
+    static void DrawBarrels(Game g)
+    {
+        float t = (float)Raylib.GetTime();
+        // warning palette — orange/red, distinct from cover's cool blues
+        Color drum    = Pal.RGBA(150, 64, 24);     // body
+        Color drumTop = Pal.RGBA(196, 92, 34);     // lit top
+        Color band    = Pal.RGBA(248, 196, 60);    // hazard stripe
+        Color glow    = Pal.RGBA(255, 120, 40);
+
+        for (int x = 0; x < g.Grid.W; x++)
+            for (int y = 0; y < g.Grid.H; y++)
+            {
+                if (!g.Grid.IsBarrel(x, y)) continue;
+                var r = ElevRect(g, x, y);
+                var c = ElevCenter(g, x, y);
+
+                // pulsing danger glow halo under the drum — volatility cue
+                float pulse = 0.5f + 0.5f * MathF.Sin(t * 3.2f + (x * 5 + y));
+                float gr = Cfg.Tile * (0.40f + 0.05f * pulse);
+                Raylib.DrawCircleV(c + new Vector2(0, 4f), gr, Raylib.Fade(glow, 0.10f + 0.10f * pulse));
+
+                // ground contact shadow (flattened ellipse), grounds the drum
+                Raylib.DrawEllipse((int)c.X, (int)(r.Y + r.Height - 8f), 16f, 6f, Raylib.Fade(Pal.RGBA(0, 0, 0), 0.40f));
+
+                // drum body: a tall rounded rectangle
+                float bw = r.Width * 0.46f, bh = r.Height * 0.62f;
+                var body = new Rectangle(c.X - bw * 0.5f, r.Y + r.Height * 0.5f - bh * 0.55f, bw, bh);
+                Raylib.DrawRectangleRounded(body, 0.42f, 8, drum);
+                // lit top cap (a thin lighter rounded band)
+                var cap = new Rectangle(body.X, body.Y, bw, bh * 0.22f);
+                Raylib.DrawRectangleRounded(cap, 0.9f, 8, drumTop);
+                // left light catch / right shade for volume
+                Raylib.DrawLineEx(new Vector2(body.X + 2.5f, body.Y + bh * 0.20f),
+                                  new Vector2(body.X + 2.5f, body.Y + bh * 0.85f),
+                                  1.6f, Raylib.Fade(Pal.RGBA(255, 255, 255), 0.12f));
+                Raylib.DrawLineEx(new Vector2(body.X + bw - 2.5f, body.Y + bh * 0.20f),
+                                  new Vector2(body.X + bw - 2.5f, body.Y + bh * 0.90f),
+                                  1.8f, Raylib.Fade(Pal.RGBA(0, 0, 0), 0.22f));
+
+                // two hazard rings around the belly (the warning band)
+                float b1 = body.Y + bh * 0.40f, b2 = body.Y + bh * 0.66f;
+                Raylib.DrawRectangleRec(new Rectangle(body.X, b1, bw, bh * 0.10f), band);
+                Raylib.DrawRectangleRec(new Rectangle(body.X, b2, bw, bh * 0.08f), band);
+                // a hazard "!" mark on the belly between the bands — flags it as interactable
+                float mcx = c.X, mcy = (b1 + b2) * 0.5f + bh * 0.04f;
+                Raylib.DrawLineEx(new Vector2(mcx, mcy - 4f), new Vector2(mcx, mcy + 1.5f), 2f, band);
+                Raylib.DrawCircleV(new Vector2(mcx, mcy + 4.5f), 1.3f, band);
+
+                // outline so the drum pops off busy terrain (square lines — avoid version-volatile
+                // DrawRectangleRoundedLines per the Raylib gotchas)
+                Raylib.DrawRectangleLinesEx(body, 1.4f, Raylib.Fade(Pal.RGBA(20, 8, 4), 0.6f));
+            }
+    }
+
+    // Burning floor tiles — animated flickering flames with a warm core and darker smoke
+    // edges. Alpha + height scale with the remaining fire turns (guttering as it expires).
+    // Drawn on the floor, UNDER the units (deny-ground hazard).
+    static void DrawFire(Game g)
+    {
+        float t = (float)Raylib.GetTime();
+        Color core  = Pal.RGBA(255, 224, 120);   // hot inner
+        Color flame = Pal.RGBA(244, 132, 40);    // main tongue
+        Color deep  = Pal.RGBA(176, 52, 20);     // outer/cooler
+        Color smoke = Pal.RGBA(40, 32, 30);
+
+        for (int x = 0; x < g.Grid.W; x++)
+            for (int y = 0; y < g.Grid.H; y++)
+            {
+                int turns = g.Grid.Fire[x, y];
+                if (turns <= 0) continue;
+                var c = Util.TileCenter(x, y);
+                // life 0..1 from remaining turns: near 0 = guttering/dimmer/shorter
+                float life = Util.Clamp(turns / (float)Grid.FireTurns, 0.0f, 1f);
+                float a = 0.45f + 0.45f * life;
+
+                // a warm glow wash on the tile so the deny-ground reads even at a glance
+                Raylib.DrawCircleV(c + new Vector2(0, 6f), Cfg.Tile * 0.5f, Raylib.Fade(deep, 0.10f * a));
+
+                // deterministic-ish per-tile phase so adjacent tiles flicker out of sync
+                float phase = (x * 7 + y * 13) * 0.7f;
+                // base of the flames sits a touch below tile centre
+                float baseY = c.Y + Cfg.Tile * 0.22f;
+                float h0 = Cfg.Tile * (0.42f + 0.18f * life);   // tongue height scaled by life
+
+                // 3 layered tongues: outer deep, mid flame, inner core — each a flickering triangle
+                for (int layer = 0; layer < 3; layer++)
+                {
+                    float lf = 1f - layer * 0.30f;                          // inner layers shorter
+                    float flick = 0.78f + 0.22f * MathF.Sin(t * (7f + layer * 2.3f) + phase + layer);
+                    float sway  = MathF.Sin(t * 4f + phase + layer * 1.7f) * (3f - layer);
+                    float hh = h0 * lf * flick;
+                    float hw = Cfg.Tile * (0.20f - layer * 0.045f);
+                    Color col = layer == 0 ? deep : (layer == 1 ? flame : core);
+                    var tip = new Vector2(c.X + sway, baseY - hh);
+                    var bL  = new Vector2(c.X - hw,   baseY);
+                    var bR  = new Vector2(c.X + hw,   baseY);
+                    // Raylib back-face-culls clockwise triangles in screen space (y-down), so the
+                    // winding MUST be counter-clockwise: bottom-left -> bottom-right -> tip. (See the
+                    // CLAUDE.md DrawTriangle gotcha.) The earlier bL->tip->bR order was culled.
+                    Raylib.DrawTriangle(bL, bR, tip, Raylib.Fade(col, a));
+                }
+
+                // a rising smoke puff above the flame, fading out
+                float sUp = (t * 16f + phase * 9f) % 26f;
+                Raylib.DrawCircleV(new Vector2(c.X + MathF.Sin(t * 2f + phase) * 4f, baseY - h0 - sUp),
+                                   3f + sUp * 0.10f, Raylib.Fade(smoke, 0.22f * a * (1f - sUp / 26f)));
+
+                // tiny ember sparks flicking off the top
+                for (int s = 0; s < 2; s++)
+                {
+                    float sp = (t * 1.4f + phase + s * 3.1f) % 1f;
+                    var ep = new Vector2(c.X + MathF.Sin((phase + s) * 2.3f + t) * 6f, baseY - h0 * (0.6f + sp));
+                    Raylib.DrawCircleV(ep, 1.3f, Raylib.Fade(core, (1f - sp) * 0.7f * a));
+                }
+            }
+    }
+
+    // When the selected soldier is aiming at a shootable barrel, draw a distinct red
+    // targeting reticle on it + a faint Chebyshev-1 blast-radius preview so the player
+    // sees they can detonate it and roughly what the blast will catch.
+    static void DrawBarrelAimReticle(Game g)
+    {
+        if (!g.AimMode || !g.BarrelAimValid) return;
+        var c = ElevCenter(g, g.BarrelAimX, g.BarrelAimY);
+        float t = (float)Raylib.GetTime();
+        Color col = Pal.Foe;
+
+        // faint blast-radius wash over the Chebyshev-1 footprint
+        for (int x = g.BarrelAimX - 1; x <= g.BarrelAimX + 1; x++)
+            for (int y = g.BarrelAimY - 1; y <= g.BarrelAimY + 1; y++)
+                if (g.Grid.InBounds(x, y))
+                    Raylib.DrawRectangleRec(ElevRect(g, x, y), Raylib.Fade(col, 0.10f));
+        // blast ring around the footprint
+        Raylib.DrawCircleLines((int)c.X, (int)c.Y, Cfg.Tile * 1.35f, Raylib.Fade(col, 0.45f));
+
+        // a spinning reticle on the barrel itself (4 ticking arcs — distinct from the round enemy reticle)
+        float ang = t * 70f;
+        float rr = 16f;
+        for (int i = 0; i < 4; i++)
+        {
+            float a0 = ang + i * 90f;
+            Raylib.DrawRing(c, rr, rr + 3f, a0, a0 + 50f, 8, col);
+        }
+        // crosshair ticks
+        Raylib.DrawLineEx(c + new Vector2(-22, 0), c + new Vector2(-12, 0), 2f, col);
+        Raylib.DrawLineEx(c + new Vector2( 12, 0), c + new Vector2( 22, 0), 2f, col);
+        Raylib.DrawLineEx(c + new Vector2(0, -22), c + new Vector2(0, -12), 2f, col);
+        Raylib.DrawLineEx(c + new Vector2(0,  12), c + new Vector2(0,  22), 2f, col);
+        // a small inner diamond (rotated square) to read as "explosive target"
+        float d = 6f;
+        Raylib.DrawLineEx(c + new Vector2(0, -d), c + new Vector2(d, 0), 1.8f, col);
+        Raylib.DrawLineEx(c + new Vector2(d, 0), c + new Vector2(0, d), 1.8f, col);
+        Raylib.DrawLineEx(c + new Vector2(0, d), c + new Vector2(-d, 0), 1.8f, col);
+        Raylib.DrawLineEx(c + new Vector2(-d, 0), c + new Vector2(0, -d), 1.8f, col);
     }
 
     // Nearest living enemy to a player unit (by tile distance) — used to point the selected
