@@ -13,7 +13,7 @@ public enum WeaponKind { Rifle, Shotgun, Sniper, Lmg, Smg }
 public enum AbilityKind { None, RunGun, Blitz, Steady, Suppress, Heal }
 
 /// Utility-item slot (3.4): a second throwable beyond grenades, assigned by class.
-public enum ItemKind { None, Smoke, Flash, Barricade }
+public enum ItemKind { None, Smoke, Flash, Barricade, Incendiary }
 
 /// Persistent weapon upgrades bought with Intel at the barracks requisition shop — the
 /// run's real reward sink, so kills compound into permanent firepower and a leveled squad
@@ -274,6 +274,7 @@ public class Unit
         ItemKind.Smoke     => "SMOKE",
         ItemKind.Flash     => "FLASH",
         ItemKind.Barricade => "BARRICADE",
+        ItemKind.Incendiary => "INCENDIARY",
         _ => "ITEM",
     };
     public string ItemDesc => Item switch
@@ -281,13 +282,14 @@ public class Unit
         ItemKind.Smoke     => "Lob a smoke cloud: blocks line of sight + overwatch through it for a few turns",
         ItemKind.Flash     => "Lob a flashbang: disorients everyone in the blast (-aim, no overwatch next turn)",
         ItemKind.Barricade => "Deploy a low-cover barricade on an empty tile",
+        ItemKind.Incendiary => "Lob an incendiary: sets a 3x3 fire field (denies ground, ignites foes, cooks barrels)",
         _ => "",
     };
     public static ItemKind ItemKindFor(string cls) => cls switch
     {
         "ASSAULT"      => ItemKind.Flash,      // breacher: blind the room
         "RANGER"       => ItemKind.Smoke,      // flanker: cover the approach
-        "SHARPSHOOTER" => ItemKind.Smoke,      // marksman: break enemy sightlines
+        "SHARPSHOOTER" => ItemKind.Incendiary, // marksman: area denial - flush foes from cover with fire
         "GUNNER"       => ItemKind.Barricade,  // nest-builder: drop cover
         "CORPSMAN"     => ItemKind.Smoke,      // medic: cover a casualty's extraction
         _ => ItemKind.None,

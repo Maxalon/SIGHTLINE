@@ -643,6 +643,43 @@ public class FlashAnim : LobAnim
     }
 }
 
+/// Incendiary: lobs a fire bomb that lays a 3x3 fire field (deny ground / ignite / cook
+/// barrels). The player's agency over the Wave-2 hazard system — reuses Grid.AddFire +
+/// the barrel-cook path so it composes with everything fire already does.
+public class IncendiaryAnim : LobAnim
+{
+    public const int Radius = 1;
+    public IncendiaryAnim(Unit thrower, int tx, int ty) : base(thrower, tx, ty) { Tint = Pal.RGBA(255, 150, 60); }
+    protected override int BlastRadius => Radius;
+
+    protected override void Effect(Game g)
+    {
+        Audio.Play("crit");
+        g.Fx.AddShake(6f);
+        g.Fx.Burst(Util.TileCenter(Tx, Ty), Pal.RGBA(255, 160, 70), 30, 300f, 0.5f, 5f, true);
+        g.Grid.AddFire(Tx, Ty, Radius, Grid.FireTurns);   // lay the fire field
+
+        // ignite + sear any unit caught in the initial burst (both teams); the lingering Fire
+        // field then handles step-in / standing damage via the normal hazard tick.
+        foreach (var u in g.Players.Concat(g.Enemies).ToList())
+        {
+            if (!u.Alive || Util.ChebyDist(u.X, u.Y, Tx, Ty) > Radius) continue;
+            if (u == g.Vip && g.CaptiveLocked) continue;
+            u.AddStatus(StatusKind.Burning, 2);
+        }
+        // cook off any barrel caught in the blast (credit the thrower)
+        var barrels = new System.Collections.Generic.List<(int x, int y)>();
+        for (int x = Tx - Radius; x <= Tx + Radius; x++)
+            for (int y = Ty - Radius; y <= Ty + Radius; y++)
+                if (g.Grid.IsBarrel(x, y)) barrels.Add((x, y));
+        if (barrels.Count > 0)
+        {
+            g.SetBarrelCredit(Thrower);
+            foreach (var (x, y) in barrels) g.DetonateBarrel(x, y);
+        }
+    }
+}
+
 /// A medic mends an ally: a green link + particle burst, then restores HP.
 public class HealAnim : Anim
 {

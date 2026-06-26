@@ -2661,6 +2661,7 @@ public class Game
     float TileExposure(Unit mover, int x, int y)
     {
         float threat = 0f;
+        if (Grid.IsFire(x, y)) threat += 20f;   // never voluntarily end a move standing in fire (hazards)
         foreach (var e in Enemies)
         {
             if (!e.Alive || !e.Active || e.Ammo <= 0) continue;
@@ -3685,6 +3686,9 @@ public class Game
             case ItemKind.Flash:
                 if (SquadConcealed) BreakConcealment(u);   // 4.4: a flashbang is aggression
                 Enqueue(new FlashAnim(u, tx, ty), Team.Player); break;
+            case ItemKind.Incendiary:
+                if (SquadConcealed) BreakConcealment(u);   // setting a fire is aggression
+                Enqueue(new IncendiaryAnim(u, tx, ty), Team.Player); break;
             case ItemKind.Barricade:
                 Grid.Tiles[tx, ty] = TileType.LowCover;
                 Grid.SetCoverHp(tx, ty);
