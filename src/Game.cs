@@ -271,6 +271,11 @@ public class Game
     public HashSet<int> SabotageBlown = new();
     public bool HasSabotage => Objective == Objective.Sabotage;
     public bool HasHackAction => HasTerminal || HasSabotage;
+    // EXTRACT (lift-out): on the zone-based extraction objectives, a soldier standing in the
+    // evac zone can haul an adjacent ally / VIP / freed captive aboard — pulling them the last
+    // step into the zone. Cuts the long Evac/Escort "everyone walk to the corner" drag.
+    public bool HasExtractAction => Objective == Objective.Evac || Objective == Objective.Escort
+                                    || Objective == Objective.Rescue;
 
     // DECAPITATE: one designated enemy is the High-Value Target; killing it WINS the
     // mission outright (no need to clear the map). Designated from the Enemies list in
@@ -2195,7 +2200,8 @@ public class Game
         // tempo — a near-certain finisher of a foe that already threatens the lane.
         if (EvacZone.Contains((u.X, u.Y)))
         {
-            // arrived: hold it — finish nearby threats, else overwatch / hunker.
+            // arrived: haul any adjacent straggler aboard (lift-out — cuts the drag), then hold it.
+            if (CanExtract(u)) { DoExtract(); return true; }
             if (TakeBestShot(u)) return true;
             if (u.Ammo == 0 && u.ActionsLeft > 0) { DoReload(); return true; }
             if (HoldOverwatch(u)) return true;
@@ -2266,9 +2272,12 @@ public class Game
             }
             DoHunker(); return true;     // arrived or blocked: tuck in (the VIP's gun is irrelevant)
         }
-        // escorts: clear the path AHEAD of the VIP and kill threats to it. Take the best shot;
-        // if there's nothing to shoot, push toward the evac zone to screen the VIP's route
-        // (don't hang back letting the VIP walk into fire alone), then fall through to combat.
+        // escorts: a soldier who has reached the zone hauls the asset (VIP) aboard the instant
+        // it's adjacent — the lift-out that ends the long escort walk early (win-critical pull).
+        if (EvacZone.Contains((u.X, u.Y)) && CanExtract(u)) { DoExtract(); return true; }
+        // clear the path AHEAD of the VIP and kill threats to it. Take the best shot; if there's
+        // nothing to shoot, push toward the evac zone to screen the VIP's route (don't hang back
+        // letting the VIP walk into fire alone), then fall through to combat.
         if (TakeBestShot(u)) return true;
         if (u.Ammo == 0) { DoReload(); return true; }
         var ahead = EvacZone.OrderBy(t => Util.TileDist(u.X, u.Y, t.x, t.y)).FirstOrDefault();
@@ -2302,7 +2311,9 @@ public class Game
             }
             // adjacent already (TryFreeCaptive will spring it next tick): fight from here.
         }
-        // PHASE 2 (freed) — screen the captive's extraction: kill threats, else fall to combat.
+        // PHASE 2 (freed) — screen the captive's extraction: a soldier in the zone hauls the
+        // freed captive aboard the instant it's adjacent (lift-out), else kill threats.
+        if (EvacZone.Contains((u.X, u.Y)) && CanExtract(u)) { DoExtract(); return true; }
         if (TakeBestShot(u)) return true;
         if (u.Ammo == 0) { DoReload(); return true; }
         return false;
@@ -3399,6 +3410,7 @@ public class Game
         if (Raylib.IsKeyPressed(KeyboardKey.Six)) ToggleItem();
         if (Raylib.IsKeyPressed(KeyboardKey.Eight)) ToggleShove();
         if (Raylib.IsKeyPressed(KeyboardKey.H)) DoHack();
+        if (Raylib.IsKeyPressed(KeyboardKey.X)) DoExtract();
         if (Raylib.IsKeyPressed(KeyboardKey.R)) DoReload();
         if (Raylib.IsKeyPressed(KeyboardKey.T)) { OpenTagEditor(Selected); return; }
 
@@ -3579,6 +3591,7 @@ public class Game
             case "overwatch": DoOverwatch(); break;
             case "hunker": DoHunker(); break;
             case "hack": DoHack(); break;
+            case "extract": DoExtract(); break;
             case "reload": DoReload(); break;
         }
     }
@@ -3854,6 +3867,60 @@ public class Game
         Fx.PopText(at + new Vector2(0, -30), HackProgress >= HackRequired ? "HACKED" : "HACK +1", Pal.Accent, 20f);
         Fx.Burst(at, Pal.Accent, 14, 160f, 0.5f, 3f);
         Audio.Play("reload");
+    }
+
+    /// The nearest free evac tile to (x,y) within Chebyshev `maxStep`, or null. "Free" = an evac
+    /// tile not already occupied by another unit.
+    (int x, int y)? NearestFreeEvac(int x, int y, Unit mover, int maxStep)
+    {
+        (int x, int y)? best = null; int bestD = int.MaxValue;
+        foreach (var t in EvacZone)
+        {
+            if (IsOccupiedByOther(t.x, t.y, mover)) continue;
+            int d = Util.ChebyDist(x, y, t.x, t.y);
+            if (d <= maxStep && d < bestD) { bestD = d; best = t; }
+        }
+        return best;
+    }
+
+    /// The ally a soldier standing in the evac zone could lift out: an adjacent (Chebyshev 1)
+    /// friendly that ISN'T already in the zone — the VIP/freed captive on Escort/Rescue, else any
+    /// other soldier on Evac. Returns null if `u` isn't a securing soldier in the zone, or nobody
+    /// adjacent needs a pull, or there's no free zone tile near the candidate.
+    Unit ExtractCandidate(Unit u)
+    {
+        if (u == null || u.Team != Team.Player || u.IsVip || !u.CanAct) return null;
+        if (!HasExtractAction || !EvacZone.Contains((u.X, u.Y))) return null;
+        Unit best = null;
+        foreach (var c in Players)
+        {
+            if (c == u || !c.Alive) continue;
+            if (EvacZone.Contains((c.X, c.Y))) continue;             // already secured
+            if (Util.ChebyDist(u.X, u.Y, c.X, c.Y) > 1) continue;    // must be adjacent to the puller
+            if (c.IsVip && CaptiveLocked) continue;                  // a still-caged captive can't be hauled
+            if (NearestFreeEvac(c.X, c.Y, c, 2) == null) continue;   // need a free zone tile to pull them to
+            // priority: the VIP/captive (the win-critical asset) over an ordinary soldier
+            if (best == null || (c.IsVip && !best.IsVip)) best = c;
+        }
+        return best;
+    }
+
+    public bool CanExtract(Unit u) => ExtractCandidate(u) != null;
+
+    void DoExtract()
+    {
+        var cand = ExtractCandidate(Selected);
+        if (cand == null) return;
+        var dest = NearestFreeEvac(cand.X, cand.Y, cand, 2);
+        if (dest == null) return;
+        Selected.ActionsLeft -= 1;                  // a support action — does NOT end the turn
+        cand.X = dest.Value.x; cand.Y = dest.Value.y; cand.SyncPos();
+        // feel: a quick haul-aboard flash on both soldier + asset
+        Fx.Burst(cand.Pos, cand.IsVip ? Pal.VipGold : Pal.Friend, 16, 220f, 0.5f, 4f, true);
+        Fx.PopText(cand.Pos + new Vector2(0, -28), "EXTRACTED", cand.IsVip ? Pal.VipGold : Pal.Friend, 22f);
+        Fx.AddShake(3f);
+        Audio.Play("select");
+        CheckEnd();                                 // pulling the last unit in can win outright
     }
 
     void DoReload()

@@ -555,6 +555,8 @@ public static class Hud
         Add("hunker", "HUNKER", "3", interactive && u != null && u.CanAct, u != null && u.Hunkered);
         if (g.HasHackAction)
             Add("hack", g.HasSabotage ? "PLANT" : "HACK", "H", interactive && g.CanHack(u), false);
+        if (g.HasExtractAction)
+            Add("extract", "EXTRACT", "X", interactive && g.CanExtract(u), false);
         Add("reload", "RELOAD", "R", interactive && u != null && u.CanAct && u.Ammo < u.Weapon.Clip, false);
 
         // Responsive width: fit `count` buttons (+gaps) into the bar span [bx0 .. right edge].
@@ -764,6 +766,16 @@ public static class Hud
                 Raylib.DrawLineEx(new Vector2(cx - 1f, cy), new Vector2(cx + 1f, cy), 1.5f, c);
                 break;
             }
+            case "extract":
+            {
+                // Up-arrow lifting into a landing-zone bracket (haul aboard)
+                Raylib.DrawLineEx(new Vector2(cx, cy + 6f), new Vector2(cx, cy - 5f), 1.8f, c);
+                Raylib.DrawLineEx(new Vector2(cx, cy - 5f), new Vector2(cx - 3.5f, cy - 1f), 1.8f, c);
+                Raylib.DrawLineEx(new Vector2(cx, cy - 5f), new Vector2(cx + 3.5f, cy - 1f), 1.8f, c);
+                // LZ bracket under the arrow
+                Raylib.DrawLineEx(new Vector2(cx - 6f, cy + 6f), new Vector2(cx + 6f, cy + 6f), 1.6f, c);
+                break;
+            }
             case "ability":
             {
                 // Four-point star / spark: two crossing lines at different angles
@@ -915,6 +927,7 @@ public static class Hud
             case "hack": return g.HasSabotage
                 ? $"Plant a demolition charge on an adjacent site ({g.SabotageBlown.Count}/{g.SabotageSites.Count} set). Costs 1 action."
                 : $"Work the terminal ({g.HackProgress}/{Game.HackRequired} done). Costs 1 action.";
+            case "extract": return "Haul an adjacent ally / asset aboard - pulls them into the extraction zone. Costs 1 action.";
             case "reload": return "Reload your weapon to full.";
             case "ability":
                 return g.Selected != null && g.Selected.Ability != AbilityKind.None
