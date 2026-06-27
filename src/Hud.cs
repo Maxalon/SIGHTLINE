@@ -337,6 +337,12 @@ public static class Hud
         // 5.4/5.5: a semantic glyph left of the objective text (shape redundancy, not hue alone)
         DrawObjectiveIcon(g.Objective, 344, 27, objCol);
 
+        // anti-turtle PRESSURE meter (camp-friendly objectives only): rung pips that fill as the
+        // clock escalates, so the player can read the rising threat at a glance. Draws nothing on
+        // objectives without a clock, so other modes stay byte-identical.
+        if (g.PressureClockHud)
+            DrawPressureMeter(g, 472, 12);
+
         // counts (the VIP isn't a combatant, so it's excluded from the squad tally)
         int friends = g.AlivePlayers().Count(p => !p.IsVip);
         int foes = g.AliveEnemies().Count;
@@ -376,6 +382,32 @@ public static class Hud
     {
         Raylib.DrawCircle(x, y + 7, 6, dot);
         Raylib.DrawTextEx(Cfg.Font, text, new Vector2(x + 14, y), 16, 1f, Pal.Txt);
+    }
+
+    // Anti-turtle PRESSURE meter: a tiny "PRES" label + N rung pips that fill (hollow -> solid
+    // red) as the clock escalates. The active rung pulses, and at max it shows a bright frame, so
+    // the rising threat reads at a glance without crowding the top bar. Shape-redundant (filled vs
+    // hollow), so it works in the colorblind palette too.
+    static void DrawPressureMeter(Game g, int x, int y)
+    {
+        Raylib.DrawTextEx(Cfg.Font, "PRES", new Vector2(x, y + 2), 12, 1f, Pal.TxtDim);
+        int px = x + 32;                                  // pips start after the label
+        const int pipW = 8, pipH = 12, gap = 3;
+        int rung = g.Pressure, max = Game.PressureMax;
+        bool maxed = rung >= max;
+        float pulse = 0.6f + 0.4f * (float)Math.Sin(Raylib.GetTime() * 5.0);
+        for (int i = 0; i < max; i++)
+        {
+            var r = new Rectangle(px + i * (pipW + gap), y, pipW, pipH);
+            bool filled = i < rung;
+            if (filled)
+            {
+                // the topmost active pip pulses; the rest are solid
+                Color c = (i == rung - 1) ? Raylib.Fade(Pal.Foe, pulse) : Pal.Foe;
+                Raylib.DrawRectangleRec(r, c);
+            }
+            Raylib.DrawRectangleLinesEx(r, 1f, Raylib.Fade(maxed ? Pal.Foe : Pal.TxtDim, maxed ? pulse : 0.6f));
+        }
     }
 
     // ---------------- active-boons strip ----------------
@@ -970,6 +1002,10 @@ public static class Hud
         if (o.Partial)   flags.Add(("~ PARTIAL COVER", Pal.TxtDim));
         if (o.Steady)    flags.Add(("+ STEADY", Pal.Good));
         if (o.Ambush)    flags.Add(("+ AMBUSH", Pal.Good));
+        // Surface the hidden streak-breaker: after consecutive misses this soldier's next
+        // shot quietly aims truer (the bonus is in the roll, NOT in the HIT% shown). Naming it
+        // "STEADYING" tells the player the safety net is working so a miss streak feels recoverable.
+        if (o.StreakBonus > 0) flags.Add(($"+{o.StreakBonus} STEADYING", Pal.Good));
         // snap-fire penalty: this aim-mode shot is the cheap 1-action variant (the HitChance
         // shown is already reduced by SnapAim). RUN&GUN is the free version, so no badge then.
         if (g.AimMode && g.SnapShot && a != null && !a.RunGun) flags.Add(($"SNAP {Game.SnapAim}", Pal.Foe));
@@ -1037,6 +1073,16 @@ public static class Hud
         Raylib.DrawTextEx(Cfg.Font, "DMG", new Vector2(x + pad, y + 54), 12, 1f, Pal.TxtDim);
         string dmg = $"{o.DmgMin}-{o.DmgMax}";
         Raylib.DrawTextEx(Cfg.Font, dmg, new Vector2(x + w - (int)Raylib.MeasureTextEx(Cfg.Font, dmg, 16, 1f).X - pad, y + 52), 16, 1f, Pal.Foe);
+        // Graze safety net: a near-miss still hits for this guaranteed floor instead of whiffing
+        // (so missing is never *nothing*). Shown small + dim between the label and the range, in the
+        // Accent hue used for graze FX so it reads as "the consolation hit", not the full damage.
+        if (o.GrazeFloor > 0)
+        {
+            string gz = $"GRAZE {o.GrazeFloor}";
+            int gzw = (int)Raylib.MeasureTextEx(Cfg.Font, gz, 11, 1f).X;
+            int dmgw = (int)Raylib.MeasureTextEx(Cfg.Font, dmg, 16, 1f).X;
+            Raylib.DrawTextEx(Cfg.Font, gz, new Vector2(x + w - dmgw - gzw - pad - 8, y + 56), 11, 1f, Pal.Accent);
+        }
 
         // a hairline above the badges separates them from the headline numbers
         if (flags.Count > 0)

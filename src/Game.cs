@@ -197,6 +197,39 @@ public class Game
     public const int DefendTurns = 8;
     public int Turn => _turnCount;
 
+    // ---------------- anti-turtle PRESSURE CLOCK ----------------
+    // On "camp-friendly" objectives (Eliminate / Hack / Decapitate) there is no movement
+    // pressure, so the dominant strategy is to sit in overwatch and let the enemy come. The
+    // pressure clock fixes that: after a GRACE period (so the deliberate opening this game
+    // prizes is preserved -- DESIGN.md S5), an escalating threat ramps every couple of turns,
+    // making turtling strictly worse than advancing. It's telegraphed + gradual (Into-the-Breach
+    // "communicate not compel") and tuned NOT to make a reasonable pace unwinnable.
+    public const int PressureGrace = 4;        // turns 1..4 are free (no pressure)
+    public const int PressureStep  = 2;        // one rung per this many turns after grace
+    public const int PressureMax   = 4;        // rung cap
+    public const int PressureAimPerRung = 3;   // enemy aim bonus per rung (+3..+12)
+    public int Pressure;                        // current rung 0..PressureMax (HUD reads this)
+    public bool PressureActive => Pressure > 0; // for HUD pulse
+    int _pressureWaves;                         // count of reinforcement waves the clock has dropped
+
+    // The clock only runs on objectives where camping is the exploit. Defend is already
+    // wave-based; Evac/Escort/Rescue are movement-pressured; Sabotage already makes you move
+    // to sites -- none of those need (or want) it.
+    bool PressureClockObjective() =>
+        Objective == Objective.Eliminate || Objective == Objective.Hack || Objective == Objective.Decapitate;
+
+    // HUD reads this to decide whether to draw the PRESSURE meter (only on clock objectives,
+    // and only once we're in a live mission phase).
+    public bool PressureClockHud => PressureClockObjective() && (Phase == Phase.PlayerTurn || Phase == Phase.EnemyTurn);
+
+    // Rung for a given player-turn count: 0 through grace, then one per PressureStep turns.
+    int PressureRungFor(int turn)
+    {
+        if (turn <= PressureGrace) return 0;
+        int rung = 1 + (turn - PressureGrace - 1) / PressureStep;
+        return Math.Min(rung, PressureMax);
+    }
+
     // onboarding tutorial (3.12): non-blocking contextual callouts on the first-ever run
     public int TutStep = -1;                 // -1 = inactive
     bool _tutMoved, _tutOver, _tutShot;
@@ -589,6 +622,7 @@ public class Game
         _anims.Clear();
         HitStop = 0;
         _turnCount = 1;
+        Pressure = 0; _pressureWaves = 0; Combat.PressureAim = 0;   // anti-turtle clock resets each mission
         _autoSig = -1; _autoStall = 0;
         Phase = Phase.PlayerTurn;
         // 4.4: every mission opens with the squad concealed -- UNLESS Heat "EXPOSED" strips it.
@@ -680,6 +714,15 @@ public class Game
 
     /// Harness hook (screenshot only): reveal all dormant enemies (fully alert).
     public void DebugWakeAll() { foreach (var e in Enemies) if (e.Alive) e.Alert = AlertLevel.Alert; }
+
+    /// Harness hook (screenshot only): drive the anti-turtle pressure clock to its max rung so a
+    /// single frame shows the PRESSURE meter filled in the top bar (and its escalation banner).
+    public void DebugPressure()
+    {
+        Pressure = PressureMax;
+        Combat.PressureAim = PressureMax * PressureAimPerRung;
+        ShowBanner("ENEMY REINFORCEMENTS - MAX PRESSURE", false);
+    }
 
     /// Harness hook (screenshot only): spread the three awareness tiers (4.3) across the
     /// enemies so one frame shows Unaware ("?") / Suspicious ("!") / Alert glyph states.
@@ -1260,6 +1303,7 @@ public class Game
     void EnterBarracks()
     {
         Combat.MissionFaction = Faction.None;   // defensive: clear the mission faction between missions (re-set in SetupMission) so no stale value can warp a barracks-phase odds read
+        Combat.PressureAim = 0;                  // and the anti-turtle pressure aim bonus
         // a benched soldier sat this mission out: it's still in _run.Squad (flagged) but was
         // never in Players, so it's absent from AlivePlayers(). Preserve it across the rebuild,
         // or benching would silently destroy the veteran (review Blocker 1).
@@ -1354,6 +1398,7 @@ public class Game
     void LoseRun(string title, string reason)
     {
         Combat.MissionFaction = Faction.None;   // defensive: clear the mission faction on run end (re-set next SetupMission)
+        Combat.PressureAim = 0;                  // and the anti-turtle pressure aim bonus
         LoseTitle = title;
         LoseReason = reason;
         Phase = Phase.Lose;
@@ -4039,14 +4084,21 @@ public class Game
     void SpawnDefendWave()
     {
         if (_turnCount % 2 == 0 || _turnCount >= DefendTurns) return;  // waves on odd turns, not the last
-        if (AliveEnemies().Count >= 12) return;                        // clutter cap
+        SpawnReinforcements(2 + _run.Mission / 2, 12, "WAVE");
+    }
+
+    /// Shared reinforcement spawner: drops up to `want` active wave-hostiles in from the right
+    /// board edge (already engaged), honoring a live-enemy `cap`. Used by both the DEFEND objective
+    /// and the anti-turtle PRESSURE CLOCK. Returns how many it actually added.
+    int SpawnReinforcements(int want, int cap, string label)
+    {
+        if (AliveEnemies().Count >= cap) return 0;                     // clutter cap
         int n = _run.Mission;
-        int want = 2 + n / 2;
         var rows = Enumerable.Range(0, Grid.H).OrderBy(_ => Util.RandF()).ToList();
         int added = 0;
         foreach (int y in rows)
         {
-            if (added >= want) break;
+            if (added >= want || AliveEnemies().Count >= cap) break;
             int x = Grid.W - 2;
             if (!Grid.IsFloor(x, y) || IsOccupiedByOther(x, y, null))
             {
@@ -4060,7 +4112,39 @@ public class Game
             Fx.Burst(e.Pos, Pal.Foe, 14, 160f, 0.5f, 3f, true);
             added++;
         }
-        if (added > 0) { Fx.PopText(Util.TileCenter(Grid.W - 2, 0) + new Vector2(0, -10), "WAVE", Pal.Foe, 20f); Audio.Play("turn"); RefreshCombatRoster(); }
+        if (added > 0) { Fx.PopText(Util.TileCenter(Grid.W - 2, 0) + new Vector2(0, -10), label, Pal.Foe, 20f); Audio.Play("turn"); RefreshCombatRoster(); }
+        return added;
+    }
+
+    /// Anti-turtle PRESSURE CLOCK. Called at the top of EndPlayerTurn (before the enemy acts) on
+    /// camp-friendly objectives. Recomputes the rung from the turn count, banners a telegraph when
+    /// it rises, sets Combat.PressureAim (the escalating enemy accuracy bonus), and -- at the higher
+    /// rungs -- calls in reinforcements from the right edge. Tuned so a reasonable pace stays winnable:
+    /// nothing happens during the grace period, the aim bonus is modest (+3..+12), and waves are small,
+    /// rare (one per two-turn step, max one per turn) and capped. Turtling becomes strictly worse than
+    /// closing the distance, which is the whole point.
+    void UpdatePressure()
+    {
+        if (!PressureClockObjective()) { Pressure = 0; Combat.PressureAim = 0; return; }
+        int rung = PressureRungFor(_turnCount);
+        // scale the aim bias up a touch with Heat so the clock keeps teeth on harder rungs
+        int heatBump = _run != null && _run.HeatLevel >= 4 ? 1 : 0;
+        Combat.PressureAim = rung * (PressureAimPerRung + heatBump);
+        if (rung > Pressure)
+        {
+            // telegraphed escalation -- the player sees it coming and can choose to advance
+            ShowBanner(rung >= PressureMax ? "ENEMY REINFORCEMENTS - MAX PRESSURE" : "PRESSURE RISING", false);
+            Audio.Play("turn");
+        }
+        Pressure = rung;
+        // Reinforcements kick in from rung 2 onward, once per fresh rung (not every turn) so the
+        // board doesn't flood: a small wave that scales with the rung. One per rung-up event.
+        if (rung >= 2 && rung > _pressureWaves)
+        {
+            int want = 1 + rung / 2;                       // rung2->2, rung3->2, rung4->3
+            SpawnReinforcements(want, 11 + _run.Mission, "REINFORCEMENTS");
+            _pressureWaves = rung;
+        }
     }
 
     /// CROSSFIRE wiring: re-snapshot the full live roster into Combat.AllUnits so ComputeOdds'
@@ -4102,6 +4186,7 @@ public class Game
         MoveCost = null;
         Phase = Phase.EnemyTurn;
         if (Objective == Objective.Defend) SpawnDefendWave();    // reinforcements assault the holdout
+        UpdatePressure();                                        // anti-turtle clock: escalate on camp-friendly objectives
         ResolveSuspicion();                                      // 4.3: suspicious pods confirm or lose contact
         FaceShields();                                           // AEGIS turns its barrier toward the squad
         foreach (var e in Enemies) if (e.Alive) { e.BeginTurn(); TickStatuses(e); }
@@ -4609,6 +4694,30 @@ public class Game
         var c = Players.Where(p => !p.IsVip).ToList();
         if (c.Count > 0) c[0].Wound = 2;
         if (c.Count > 1) c[1].Wound = 1;
+    }
+
+    /// Harness hook (screenshot only): arm a shot tooltip on an enemy so the randomness-
+    /// mitigation surfacing (DMG range + GRAZE floor + "+N STEADYING" streak badge) is visible.
+    /// Seats a live enemy in clean LoS of the first soldier, banks a miss streak on that soldier,
+    /// then enters aim mode locked on the enemy. The next Update's UpdateHoverAndAim recomputes
+    /// + shows the odds naturally (no special draw path), so the screenshot matches real play.
+    public void DebugTooltip()
+    {
+        var c = Players.Where(p => !p.IsVip && p.Alive).ToList();
+        if (c.Count == 0) return;
+        var s = c[0];
+        s.ConsecutiveMisses = 2;                       // bank +12 STEADYING (the streak cap)
+        SquadConcealed = false;                        // CanTarget refuses while concealed
+        var foe = Enemies.FirstOrDefault(e => e.Alive);
+        if (foe != null)
+        {
+            // Re-seat the foe a few tiles directly east of the soldier on clear floor so LoS holds.
+            int fx = Math.Min(Grid.W - 1, s.X + 4), fy = s.Y;
+            if (Grid.InBounds(fx, fy)) { foe.X = fx; foe.Y = fy; foe.SyncPos(); }
+            foe.Alert = AlertLevel.Alert;
+            Selected = s; RecomputeMoveCost();
+            AimMode = true; AimTarget = foe;
+        }
     }
 
     /// Harness hook (screenshot only): drop a soldier to show the KIA stamp + red

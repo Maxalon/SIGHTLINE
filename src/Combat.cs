@@ -30,6 +30,12 @@ public struct ShotOdds
     public bool Steady;      // attacker braced (sharpshooter ability) this shot
     public bool Ambush;      // attacker fired from concealment (one-shot bonus)
     public bool Crossfire;   // target caught in converging fire from two diverging angles
+    // ---- visible randomness-mitigation surfacing (S2-A graze + S4-C streak) ----
+    // These mirror EXISTING hidden mechanics so the HUD can show the player the safety nets
+    // (DESIGN.md 3B: reduce %-to-hit save-scum). They DO NOT change the math: HitChance above
+    // stays pure (the streak bonus is applied only inside Resolve's effHit, never here).
+    public int StreakBonus;  // S4-C: hidden +aim this soldier has banked from consecutive misses (0..MaxStreakBonus)
+    public int GrazeFloor;   // S2-A: guaranteed damage a near-miss (graze) would still deal to THIS target (>=1)
 }
 
 /// The resolved outcome of a shot.
@@ -97,6 +103,14 @@ public static class Combat
     // through every ComputeOdds call. DEFAULT None == today's behavior exactly (safety invariant).
     // Each faction read below gates on `a.Team == Team.Enemy` so a PLAYER attacker is never warped.
     public static Faction MissionFaction = Faction.None;
+
+    // Anti-turtle PRESSURE CLOCK (camp-friendly objectives only): a small, telegraphed enemy
+    // accuracy bonus that ramps after a grace period, so sitting in overwatch gets strictly
+    // worse over time. Static like MissionFaction/RunBoons so ComputeOdds reads it without a
+    // signature change. Game.UpdatePressure sets it (enemy attacker only); reset to 0 each
+    // mission. DEFAULT 0 == today's behavior exactly (safety invariant).
+    public static int PressureAim = 0;
+
     // Legion (shock assault): a closing enemy within close range hits harder. Modest — these stack
     // with the whole existing model, so kept small to avoid a swingy point-blank one-shot.
     public const int LegionCloseAim  = 12;   // +aim   for a Legion enemy attacker at dist <= 4
@@ -176,6 +190,7 @@ public static class Combat
         {
             if (MissionFaction == Faction.Legion  && dist <= Unit.CloseRange) hit += LegionCloseAim;
             if (MissionFaction == Faction.Wardens && dist >= Unit.LongRange)  hit += WardenLongAim;
+            hit += PressureAim;   // anti-turtle pressure clock: escalating enemy accuracy on camp-friendly objectives
         }
         hit = Util.Clamp(hit, 3, 95);
 
@@ -254,6 +269,14 @@ public static class Combat
             Steady = a.Steady,
             Ambush = a.FiredFromConcealment,
             Crossfire = crossfire,
+            // Surface the hidden safety nets for the tooltip (no math change — purely informational):
+            //  - StreakBonus mirrors the player-only streak-breaker that Resolve folds into effHit.
+            //  - GrazeFloor is the guaranteed damage a near-miss (graze) would still deal to THIS
+            //    defender = min weapon damage after the defender's flat reduction, floored at 1
+            //    (exactly Resolve's graze branch). FragileFloor only ever CAPS damage, so it can't
+            //    lower this guaranteed minimum.
+            StreakBonus = a.Team == Team.Player ? Math.Min(StreakBonusPerMiss * a.ConsecutiveMisses, MaxStreakBonus) : 0,
+            GrazeFloor = Math.Max(1, HardenedReduce(d, a.Weapon.DmgMin, crit: false)),
         };
     }
 
