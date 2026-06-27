@@ -111,6 +111,17 @@ public static class Combat
     // Each faction read below gates on `a.Team == Team.Enemy` so a PLAYER attacker is never warped.
     public static Faction MissionFaction = Faction.None;
 
+    // ---- faction COUNTER-PREP (one-mission, bought at the barracks requisition) ----
+    // The player can pre-empt a telegraphed faction with a one-mission counter (Run.PrepFaction,
+    // copied here by Game.SetupMission, cleared at mission end). Static like MissionFaction so the
+    // ComputeOdds reads see it without a signature change. DEFAULT None == today's behavior exactly
+    // (safety invariant). The counter ONLY bites when PrepFaction == MissionFaction (an honest bet):
+    //  - vs SYNDICATE -> HARDENED OPTICS: the squad's LOW cover can't be seen over (cancel see-over-low).
+    //  - vs LEGION    -> REACTIVE PLATING: squad-wide +PrepLegionArmor damage reduction (HardenedReduce).
+    //  - vs WARDENS   -> FIELD SMOKE: cancel the Wardens long-range aim bonus (break the long sightline).
+    public static Faction PrepFaction = Faction.None;
+    public const int PrepLegionArmor = 1;   // REACTIVE PLATING: -1 dmg/hit to every soldier next mission
+
     // Anti-turtle PRESSURE CLOCK (camp-friendly objectives only): a small, telegraphed enemy
     // accuracy bonus that ramps after a grace period, so sitting in overwatch gets strictly
     // worse over time. Static like MissionFaction/RunBoons so ComputeOdds reads it without a
@@ -147,6 +158,9 @@ public static class Combat
         // cover still blocks). Folds into seesOver below. Enemy-only (a.Team) so the player's own
         // shots are never warped. None (the default) leaves this false => today's behavior.
         bool syndicateLowSee = a.Team == Team.Enemy && MissionFaction == Faction.Syndicate && cover.Level == 1;
+        // COUNTER-PREP vs SYNDICATE (HARDENED OPTICS): the squad's cover discipline denies the
+        // see-over-low this mission. No-op unless the matching prep was bought (safety invariant).
+        if (syndicateLowSee && PrepFaction == Faction.Syndicate) syndicateLowSee = false;
 
         // high ground sees over LOW cover; a commanding 2-tier advantage sees over HIGH
         // cover too (firing down negates the target's cover; it reads as fully exposed).
@@ -201,7 +215,10 @@ public static class Combat
         if (a.Team == Team.Enemy)
         {
             if (MissionFaction == Faction.Legion  && dist <= Unit.CloseRange) hit += LegionCloseAim;
-            if (MissionFaction == Faction.Wardens && dist >= Unit.LongRange)  hit += WardenLongAim;
+            // COUNTER-PREP vs WARDENS (FIELD SMOKE): the opening smoke screen breaks the long
+            // sightline, so the Wardens long-range aim bonus is denied this mission (gated so it's
+            // a no-op unless the matching prep was bought).
+            if (MissionFaction == Faction.Wardens && dist >= Unit.LongRange && PrepFaction != Faction.Wardens) hit += WardenLongAim;
             hit += PressureAim;   // anti-turtle pressure clock: escalating enemy accuracy on camp-friendly objectives
         }
         hit = Util.Clamp(hit, 3, 95);
@@ -396,6 +413,10 @@ public static class Combat
             reduce += Unit.BulwarkFlat;                         // turtle perk: extra while braced
         if (d.Team == Team.Player && RunBoons.Count > 0 && HasRunBoon(Sightline.Boon.Fortified))
             reduce += 1;                                        // FORTIFIED boon: squad-wide +1 armor
+        // COUNTER-PREP vs LEGION (REACTIVE PLATING): squad-wide damage reduction this mission to
+        // weather the close-range alpha (only when MissionFaction matches the prep — an honest bet).
+        if (d.Team == Team.Player && PrepFaction == Faction.Legion && MissionFaction == Faction.Legion)
+            reduce += PrepLegionArmor;
         if (reduce <= 0) return dmg;                            // nothing to subtract: pass through
         return Math.Max(1, dmg - reduce);                       // guaranteed-damage floor (>= 1)
     }
@@ -1166,10 +1187,60 @@ public static class Combat
             if (ComputeOdds(gFac, legEnemy, legTarget).HitChance  != legEnemyBaseHit)  fails.Add("factionNoneRestoredHit");
             if (ComputeOdds(gFac, legEnemy, legTarget).CritChance != legEnemyBaseCrit) fails.Add("factionNoneRestoredCrit");
         }
+        MissionFaction = Faction.None;
+
+        // ---- FACTION COUNTER-PREP: each prep CANCELS its faction's edge, only when the mission's
+        // faction matches the prep (an honest, telegraphed bet). PrepFaction defaults None == no-op.
+        {
+            PrepFaction = Faction.None;   // start clean
+
+            // SYNDICATE prep (HARDENED OPTICS): the see-over-low is denied -> the enemy reads the
+            // low cover again (CoverLevel back to 1, hit drops to the no-faction baseline).
+            var gSyn2 = new Grid(); gSyn2.Tiles[6, 5] = TileType.LowCover;
+            var synEnemy2  = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy,  X = 8, Y = 5 };
+            var synTarget2 = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 5, Y = 5, Hp = 10, MaxHp = 10 };
+            MissionFaction = Faction.None;      int synPlainHit = ComputeOdds(gSyn2, synEnemy2, synTarget2).HitChance;  // low cover intact
+            MissionFaction = Faction.Syndicate; int synOnHit    = ComputeOdds(gSyn2, synEnemy2, synTarget2).HitChance;  // sees over low
+            PrepFaction = Faction.Syndicate;    var synPrep = ComputeOdds(gSyn2, synEnemy2, synTarget2);                 // prep cancels it
+            if (synOnHit <= synPlainHit)         fails.Add("prepSyndicateBaselineActive");  // guard: faction really helped first
+            if (synPrep.CoverLevel != 1)         fails.Add("prepSyndicateCoverRestored");
+            if (synPrep.HitChance  != synPlainHit) fails.Add("prepSyndicateCancels");
+            // a NON-matching prep must NOT cancel Syndicate's edge
+            PrepFaction = Faction.Legion;
+            if (ComputeOdds(gSyn2, synEnemy2, synTarget2).HitChance != synOnHit) fails.Add("prepSyndicateWrongPrepNoOp");
+            PrepFaction = Faction.None;
+
+            // WARDENS prep (FIELD SMOKE): the long-range aim bonus is denied (hit back to baseline).
+            var gWar2 = new Grid();
+            var warEnemy2  = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy,  X = 1,  Y = 5 };
+            var warTarget2 = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 12, Y = 5, Hp = 10, MaxHp = 10 };
+            MissionFaction = Faction.None;    int warPlainHit = ComputeOdds(gWar2, warEnemy2, warTarget2).HitChance;
+            MissionFaction = Faction.Wardens; int warOnHit    = ComputeOdds(gWar2, warEnemy2, warTarget2).HitChance;
+            PrepFaction = Faction.Wardens;    int warPrepHit  = ComputeOdds(gWar2, warEnemy2, warTarget2).HitChance;
+            if (warOnHit  <= warPlainHit) fails.Add("prepWardensBaselineActive");
+            if (warPrepHit != warPlainHit) fails.Add("prepWardensCancels");
+            PrepFaction = Faction.None;
+
+            // LEGION prep (REACTIVE PLATING): a soldier takes PrepLegionArmor less damage, but ONLY
+            // when the mission faction is Legion (HardenedReduce gates on both).
+            var plainD = new Unit { Team = Team.Player, Hp = 10, MaxHp = 10 };
+            MissionFaction = Faction.Legion; PrepFaction = Faction.Legion;
+            if (HardenedReduce(plainD, 7, false) != 7 - PrepLegionArmor) fails.Add("prepLegionPlating");
+            // wrong mission faction -> no plating (the bet didn't pay off)
+            MissionFaction = Faction.Wardens;
+            if (HardenedReduce(plainD, 7, false) != 7) fails.Add("prepLegionWrongMissionNoOp");
+            // an ENEMY defender is never plated by a player prep
+            var enemyD = new Unit { Team = Team.Enemy, Hp = 10, MaxHp = 10 };
+            MissionFaction = Faction.Legion;
+            if (HardenedReduce(enemyD, 7, false) != 7) fails.Add("prepLegionEnemyUnaffected");
+            PrepFaction = Faction.None; MissionFaction = Faction.None;
+            if (HardenedReduce(plainD, 7, false) != 7) fails.Add("prepLegionNoneRestored");
+        }
+        PrepFaction = Faction.None;
         MissionFaction = Faction.None;   // belt-and-braces: never leave the global static set for later tests/runtime
 
         return fails.Count == 0
-            ? "COMBATTEST: PASS (cover A-E + high-ground + tier-2 + drone/shield + ambush + graze + streak + perk-balance + build-perks + fragile-floor + armor + bulwark + vanguard + crossfire + factions all hold)"
+            ? "COMBATTEST: PASS (cover A-E + high-ground + tier-2 + drone/shield + ambush + graze + streak + perk-balance + build-perks + fragile-floor + armor + bulwark + vanguard + crossfire + factions + faction-prep all hold)"
             : "COMBATTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 }

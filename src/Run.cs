@@ -275,6 +275,24 @@ public class Run
     public List<MissionCard> Offers = new();  // next-mission deployment choices (fallback)
     public MissionCard CurrentCard;           // the card the active mission was launched from
 
+    // ---- faction COUNTER-PREP (one-mission, bought at the barracks requisition) ----
+    // The player can spend Intel to buy a one-mission counter to the faction they're about to
+    // face (telegraphed on the campaign map). Stored here, PERSISTED in the save, APPLIED + CLEARED
+    // at the next Game.SetupMission (which copies it into Combat.PrepFaction). None = no prep bought.
+    public Faction PrepFaction = Faction.None;
+
+    /// The faction the squad is about to face, as best known at the BARRACKS shop step (the node
+    /// hasn't been chosen yet). We surface the first non-None faction among the reachable next nodes
+    /// so the prep is offered for a real upcoming threat. If every reachable node is mixed-force
+    /// (None), prep is unavailable. The prep is keyed to THIS faction and only takes effect next
+    /// mission if Combat.MissionFaction actually matches (an honest, telegraphed bet).
+    public Faction UpcomingFaction()
+    {
+        foreach (var n in NextNodes())
+            if (n.Faction != Faction.None) return n.Faction;
+        return Faction.None;
+    }
+
     // ---- run-scoped boons (Wave 3 variance) ----
     public List<Boon> ActiveBoons = new();    // boons chosen this run (persisted within the run)
     public List<Boon> BoonOffer = new();      // the current pick-1-of-3 awaiting the player

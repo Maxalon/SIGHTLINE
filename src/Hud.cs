@@ -1976,9 +1976,15 @@ public static class Hud
         int items = Game.ShopName.Length;
         int ih = 80, gap = 10;
         int squadH = 40;
-        // The armory sub-screen is much shorter than the (10-item) shop list, so size the card
-        // to the active view — otherwise the tall shop card clips off the top/bottom of the screen.
-        int shopH = 104 + squadH + items * (ih + gap) + 60;
+        // Fit the whole shop card on-screen: the fixed chrome (title/intel/squad strip + proceed
+        // footer) plus the item rows must clear ScreenH. With the COUNTER-PREP item the list grew to
+        // 10 rows, so shrink the per-row height/gap until the card fits (never below a legible floor).
+        int chrome = 104 + squadH + 60;
+        int maxRows = Cfg.ScreenH - 24 - chrome;
+        while (items > 0 && items * (ih + gap) > maxRows && ih > 56) { ih -= 2; if (gap > 6) gap -= 1; }
+        // The armory sub-screen is much shorter than the shop list, so size the card to the active
+        // view — otherwise the tall shop card clips off the top/bottom of the screen.
+        int shopH = chrome + items * (ih + gap);
         int armoryH = 104 + 28 + Run.RosterMax * 52 + 64;   // fits the soldier list (the taller of the two views)
         int w = 560, h = g.ArmoryMode ? armoryH : shopH;
         int x = Cfg.ScreenW / 2 - w / 2, y = Cfg.ScreenH / 2 - h / 2;
@@ -2014,11 +2020,12 @@ public static class Hud
             Raylib.DrawRectangleRounded(r, 0.1f, 6, hover ? Pal.RGBA(24, 34, 46) : Pal.RGBA(14, 20, 28));
             Raylib.DrawRectangleLinesEx(r, 1.5f, can ? (hover ? Pal.Accent : Pal.PanelBd) : Pal.RGBA(40, 46, 54));
             Color txt = can ? Pal.Txt : Pal.TxtDim;
-            Raylib.DrawTextEx(Cfg.Font, Game.ShopName[i], new Vector2((int)r.X + 14, (int)r.Y + 10), 18, 1f, txt);
-            Raylib.DrawTextEx(Cfg.Font, Game.ShopDesc[i], new Vector2((int)r.X + 14, (int)r.Y + 35), 12, 1f, Pal.TxtDim);
+            Raylib.DrawTextEx(Cfg.Font, g.ShopNameAt(i), new Vector2((int)r.X + 14, (int)r.Y + 10), 18, 1f, txt);
+            Raylib.DrawTextEx(Cfg.Font, g.ShopDescAt(i), new Vector2((int)r.X + 14, (int)r.Y + 35), 12, 1f, Pal.TxtDim);
             Raylib.DrawTextEx(Cfg.Font, g.ShopEffect(i), new Vector2((int)r.X + 14, (int)r.Y + 55), 12, 1f, can ? Pal.Accent : Pal.TxtDim);  // concrete effect
-            string cost = $"{Game.ShopCost[i]} INTEL";
-            Color cc = run.Intel >= Game.ShopCost[i] ? Pal.Good : Pal.Foe;
+            int icost = g.ShopCostAt(i);
+            string cost = $"{icost} INTEL";
+            Color cc = run.Intel >= icost ? Pal.Good : Pal.Foe;
             Raylib.DrawTextEx(Cfg.Font, cost, new Vector2((int)(r.X + r.Width - (int)Raylib.MeasureTextEx(Cfg.Font, cost, 16, 1f).X - 14), (int)r.Y + 12), 16, 1f, cc);
             if (!can)
                 Raylib.DrawTextEx(Cfg.Font, "- unavailable -", new Vector2((int)(r.X + r.Width - (int)Raylib.MeasureTextEx(Cfg.Font, "- unavailable -", 11, 1f).X - 14), (int)r.Y + 52), 11, 1f, Pal.TxtDim);

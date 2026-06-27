@@ -106,6 +106,7 @@ public static class SaveGame
             MapSeed = r.MapSeed, MapPos = r.MapPos,
             HeatLevel = r.HeatLevel,
             ActiveBoons = r.ActiveBoons.ConvertAll(b => (int)b),
+            PrepFaction = (int)r.PrepFaction,
         };
         foreach (var u in r.Squad)
             dto.Squad.Add(new UnitDto
@@ -141,6 +142,7 @@ public static class SaveGame
         if (dto.Fallen != null) r.Fallen = new List<string>(dto.Fallen);
         if (dto.BondTally != null) r.BondTally = new Dictionary<string, int>(dto.BondTally);
         if (dto.ActiveBoons != null) foreach (var b in dto.ActiveBoons) r.ActiveBoons.Add((Boon)b);
+        r.PrepFaction = (Faction)dto.PrepFaction;   // append-only: old saves default 0 == Faction.None
         // regenerate the branching campaign map from its seed and restore the position
         if (dto.MapSeed != 0)
         {
@@ -196,6 +198,7 @@ public static class SaveGame
         public int MapPos;
         public int HeatLevel;   // append-only: chosen Heat/Ascension level (old saves default 0)
         public List<int> ActiveBoons = new();   // append-only: run-scoped boons (old saves default empty)
+        public int PrepFaction;   // append-only: faction COUNTER-PREP bought (old saves default 0 == None)
     }
 
     class UnitDto
@@ -226,6 +229,7 @@ public static class SaveGame
         {
             var src = new Run { Mission = 4, Intel = 23, Squad = new List<Unit>(), HeatLevel = 5 };
             src.Fallen.Add("DOWNED-GUY");
+            src.PrepFaction = Faction.Legion;   // a staged faction counter-prep must round-trip
             var a = new Unit
             {
                 Name = "VEGA", Cls = "ASSAULT", Team = Team.Player,
@@ -288,6 +292,7 @@ public static class SaveGame
             if (got.MapPos != srcPos) fails.Add("mapPos");
             if (got.CurrentNode == null || got.CurrentNode.Mission != 3) fails.Add("mapNode");
             if (got.HeatLevel != 5) fails.Add("heatLevel");
+            if (got.PrepFaction != Faction.Legion) fails.Add("prepFaction");
 
             // meta (unlocked-max heat) round-trips through its own meta.json
             string metaSaved = File.Exists(MetaPath) ? File.ReadAllText(MetaPath) : null;

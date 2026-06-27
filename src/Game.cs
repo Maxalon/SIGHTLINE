@@ -207,6 +207,14 @@ public class Game
     static WeaponMod ModForItem(int item) => WeaponModDef.All[item - ModBase];
     public static bool IsModItem(int item) => item >= ModBase && item < ModBase + WeaponModDef.All.Length;
 
+    // FACTION COUNTER-PREP item: a one-mission counter to the UPCOMING faction (telegraphed on the
+    // campaign map). It's the LAST shop index — its name/desc/cost are dynamic (they depend on which
+    // faction the squad is about to face), so the Hud reads them through ShopNameAt/DescAt/CostAt
+    // instead of the static arrays. The static-array slots hold a neutral placeholder.
+    public static readonly int PrepItem = ModBase + WeaponModDef.All.Length;
+    public const int PrepCost = 12;                            // a one-mission situational edge, priced like FRAG CACHE
+    static bool IsPrepItem(int item) => item == PrepItem;
+
     public static readonly int[] ShopCost = BuildShopCost();
     public static readonly string[] ShopName = BuildShopName();
     public static readonly string[] ShopDesc = BuildShopDesc();
@@ -214,17 +222,19 @@ public class Game
     static int[] BuildShopCost()
     {
         var b = new[] { 6, 10, 16, 12, 8 };    // +BALLISTIC PLATING (survivability sink, front-loaded cheap)
-        var all = new int[ModBase + WeaponModDef.All.Length];
+        var all = new int[ModBase + WeaponModDef.All.Length + 1];   // +1 for the dynamic PREP item
         b.CopyTo(all, 0);
         for (int i = 0; i < WeaponModDef.All.Length; i++) all[ModBase + i] = WeaponModDef.Cost(WeaponModDef.All[i]);
+        all[ModBase + WeaponModDef.All.Length] = PrepCost;
         return all;
     }
     static string[] BuildShopName()
     {
         var b = new[] { "FIELD MEDKIT", "COMBAT STIMS", "ADV. TRAINING", "FRAG CACHE", "BALLISTIC PLATING" };
-        var all = new string[ModBase + WeaponModDef.All.Length];
+        var all = new string[ModBase + WeaponModDef.All.Length + 1];
         b.CopyTo(all, 0);
         for (int i = 0; i < WeaponModDef.All.Length; i++) all[ModBase + i] = "WPN: " + WeaponModDef.Name(WeaponModDef.All[i]);
+        all[ModBase + WeaponModDef.All.Length] = "COUNTER-PREP";   // placeholder; ShopNameAt overrides per faction
         return all;
     }
     static string[] BuildShopDesc()
@@ -237,11 +247,39 @@ public class Game
             "+1 grenade every mission for a soldier (permanent).",
             "+1 armor to your least-armored soldier (permanent: -1 damage per hit).",
         };
-        var all = new string[ModBase + WeaponModDef.All.Length];
+        var all = new string[ModBase + WeaponModDef.All.Length + 1];
         b.CopyTo(all, 0);
         for (int i = 0; i < WeaponModDef.All.Length; i++) all[ModBase + i] = WeaponModDef.Desc(WeaponModDef.All[i]) + " (installed on a soldier)";
+        all[ModBase + WeaponModDef.All.Length] = "One-mission counter to the faction you're about to face.";
         return all;
     }
+
+    // Dynamic shop text/cost: the PREP item's name/desc reflect the UPCOMING faction so the player
+    // sees exactly what they're buying; every other item falls through to the static arrays. The Hud
+    // routes ShopName[i]/ShopDesc[i]/ShopCost[i] through these so the prep row reads correctly.
+    public string ShopNameAt(int item)
+    {
+        if (IsPrepItem(item)) return "COUNTER-PREP: " + Run.FactionName(PrepFactionOffered);
+        return (item >= 0 && item < ShopName.Length) ? ShopName[item] : "";
+    }
+    public string ShopDescAt(int item)
+    {
+        if (IsPrepItem(item)) return PrepDescFor(PrepFactionOffered);
+        return (item >= 0 && item < ShopDesc.Length) ? ShopDesc[item] : "";
+    }
+    public int ShopCostAt(int item) => (item >= 0 && item < ShopCost.Length) ? ShopCost[item] : 0;
+
+    // The faction the COUNTER-PREP item targets this barracks (the upcoming reachable threat). None
+    // if every reachable node is mixed-force -> the prep row is unavailable/greyed.
+    public Faction PrepFactionOffered => _run != null ? _run.UpcomingFaction() : Faction.None;
+
+    static string PrepDescFor(Faction f) => f switch
+    {
+        Faction.Syndicate => "HARDENED OPTICS: deny their see-over-low cover next mission.",
+        Faction.Legion    => "REACTIVE PLATING: squad takes -1 damage next mission.",
+        Faction.Wardens   => "FIELD SMOKE: break their long sightlines (no long-range aim edge).",
+        _ => "No faction telegraphed on the next mission.",
+    };
 
     // mission objective
     public Objective Objective;
@@ -642,6 +680,13 @@ public class Game
         // this mission. Read from the campaign node; None on START/SUPPLY/BOSS (mixed force) and any
         // non-campaign path. MUST be set BEFORE Mission.Build — SelectArchetype reads it at spawn time.
         Combat.MissionFaction = _run.CurrentNode?.Faction ?? Faction.None;
+
+        // FACTION COUNTER-PREP: apply the one-mission counter the player bought at the barracks, then
+        // CONSUME it (one mission only). It only bites when it matches this mission's faction (the
+        // honest bet) — Combat gates each rule on PrepFaction == MissionFaction. Cleared whether or not
+        // it matched so an un-cashed prep doesn't carry over.
+        Combat.PrepFaction = _run.PrepFaction;
+        _run.PrepFaction = Faction.None;
 
         // reserve + connectivity-verify a key tile: the Hack terminal, or the Rescue captive's seat
         (int x, int y)? reserve = HasTerminal ? Terminal
@@ -4812,6 +4857,8 @@ public class Game
     {
         if (item < 0 || item >= ShopCost.Length || _run.Intel < ShopCost[item]) return false;
         if (IsModItem(item)) return ModTarget(ModForItem(item)) != null;   // a soldier who lacks this mod
+        // COUNTER-PREP: only buyable when a faction is actually telegraphed next, and not already bought.
+        if (IsPrepItem(item)) return PrepFactionOffered != Faction.None && _run.PrepFaction == Faction.None;
         return item switch
         {
             0 => _run.Squad.Any(u => u.Hp < u.MaxHp || u.Wound > 0),  // medkit needs someone hurt or wounded
@@ -4861,6 +4908,13 @@ public class Game
     /// One-line concrete effect of a purchase, so the player can judge its value.
     public string ShopEffect(int item)
     {
+        if (IsPrepItem(item))
+        {
+            if (_run.PrepFaction != Faction.None) return "prep already secured";
+            return PrepFactionOffered == Faction.None
+                ? "no faction telegraphed next"
+                : $"counters {Run.FactionName(PrepFactionOffered)} for one mission";
+        }
         var t = ShopTarget(item);
         if (IsModItem(item))
             return t == null ? "every soldier has it" : $"{t.Name}: install {WeaponModDef.Name(ModForItem(item))}";
@@ -4881,6 +4935,16 @@ public class Game
     void DoPurchase(int item)
     {
         if (!CanBuy(item)) { Audio.Play("miss"); return; }
+        if (IsPrepItem(item))
+        {
+            var f = PrepFactionOffered;
+            _run.PrepFaction = f;   // consumed at the next SetupMission (one mission only)
+            _run.Report.Add($"COUNTER-PREP staged: {PrepDescFor(f)}");
+            _run.Intel -= ShopCost[item];
+            Stats.RecordPurchase("COUNTER-PREP");
+            Audio.Play("select");
+            return;
+        }
         if (IsModItem(item))
         {
             var mod = ModForItem(item);
@@ -4993,6 +5057,7 @@ public class Game
             for (int i = 1; i < ShopCost.Length; i++)
             {
                 if (i == 2) continue;   // perk pick is a player choice, not an auto-buy
+                if (IsPrepItem(i)) continue;   // COUNTER-PREP is a situational player call, not an auto-buy (keeps balance/autoplay sane)
                 if (CanBuy(i) && ShopCost[i] < bestCost) { best = i; bestCost = ShopCost[i]; }
             }
             if (best < 0) break;        // nothing affordable/useful left
@@ -5118,6 +5183,17 @@ public class Game
         _run.Report.Insert(0, $"Recovered 17 intel  (total {_run.Intel})");
         _shopDone = false;
         Phase = Phase.Barracks;
+    }
+
+    /// Harness hook (screenshot, SIGHTLINE_PREP): the REQUISITION screen with a faction
+    /// telegraphed on the next node so the COUNTER-PREP item is offered (and buyable).
+    public void DebugPrep()
+    {
+        DebugShop();
+        _run.Intel = 40;
+        // force a faction onto a reachable next node so UpcomingFaction() returns it
+        var next = _run.NextNodes();
+        if (next.Count > 0) next[0].Faction = Faction.Wardens;
     }
 
     /// Harness hook (screenshot): the REQUISITION screen with the ARMORY sub-panel open,
