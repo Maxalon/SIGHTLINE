@@ -236,6 +236,7 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_ITEM") == "1") game.DebugItem();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_SHOVE") == "1") game.DebugShove();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_MARK") == "1") game.DebugMark();
+        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_VERB2") == "1") game.DebugVerbs();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_COVER") == "1") game.DebugCover();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_UNITFX") == "1") game.DebugUnitFx();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_ELEV") == "1") game.DebugElevation();

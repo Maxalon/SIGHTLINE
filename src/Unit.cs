@@ -10,7 +10,7 @@ public enum WeaponKind { Rifle, Shotgun, Sniper, Lmg, Smg }
 /// Per-class signature ability (self-cast, one charge per mission).
 /// APPEND-ONLY: AbilityKind is DERIVED from Cls (never serialised), so appending Mark/Grapple
 /// is save-safe — a CORPSMAN persists as just its Cls string and re-derives its kit.
-public enum AbilityKind { None, RunGun, Blitz, Steady, Suppress, Heal, Mark, Grapple }
+public enum AbilityKind { None, RunGun, Blitz, Steady, Suppress, Heal, Mark, Grapple, Slipstream, Pin }
 
 /// Utility-item slot (3.4): a second throwable beyond grenades, assigned by class.
 public enum ItemKind { None, Smoke, Flash, Barricade, Incendiary }
@@ -196,6 +196,11 @@ public class Unit
     public int  Suppress;       // gunner debuff currently ON this unit (aim penalty)
     public bool Marked;         // sharpshooter MARK: this FOE is designated -> whole squad +aim/+crit vs it
                                 // (per-mission, set on an enemy by DoAbility(Mark), cleared at the marker's next turn)
+    public bool Slipstreaming;  // ranger SLIPSTREAM: this soldier's current free move is silent (no overwatch
+                                // provoked) — set by DoAbility(Slipstream), consumed/cleared by the move it covers
+    public int  Pinned;         // gunner SUPPRESSING FIRE: this FOE is pinned (turns remaining). While > 0 it
+                                // takes the Suppress aim debuff AND cannot use a 2-action DASH (area denial).
+                                // Decays one turn at the pinned unit's BeginTurn; never persisted (per-mission).
 
     // optional player-authored role label (overrides the auto strength tags in the
     // roster/dossier when set); persists across the run
@@ -273,6 +278,8 @@ public class Unit
         AbilityKind.Heal    => "PATCH",
         AbilityKind.Mark    => "MARK",
         AbilityKind.Grapple => "GRAPPLE",
+        AbilityKind.Slipstream => "SLIPSTREAM",
+        AbilityKind.Pin     => "SUPPR. FIRE",
         _ => "ABILITY",
     };
     public string AbilityDesc => Ability switch
@@ -284,14 +291,16 @@ public class Unit
         AbilityKind.Heal     => "Heal the most-wounded adjacent squadmate (+4 HP)",
         AbilityKind.Mark     => "Designate a foe: whole squad gets +aim/+crit vs it this round",
         AbilityKind.Grapple  => "Yank a nearby foe 1 tile toward you, out of its cover",
+        AbilityKind.Slipstream => "Free long move: doesn't end your turn AND draws no overwatch",
+        AbilityKind.Pin      => "Suppressing fire: pin a foe + its neighbours - they take -aim and can't dash next turn",
         _ => "",
     };
     public static AbilityKind AbilityKindFor(string cls) => cls switch
     {
-        "ASSAULT"      => AbilityKind.Grapple,   // verb: yank a foe out of cover (was RunGun stance)
-        "RANGER"       => AbilityKind.Blitz,
+        "ASSAULT"      => AbilityKind.Grapple,    // verb: yank a foe out of cover (was RunGun stance)
+        "RANGER"       => AbilityKind.Slipstream, // verb: free, overwatch-safe reposition (was Blitz stance)
         "SHARPSHOOTER" => AbilityKind.Mark,       // verb: focus-fire designator (was Steady stance)
-        "GUNNER"       => AbilityKind.Suppress,
+        "GUNNER"       => AbilityKind.Pin,         // verb: area-denial suppressing fire (was Suppress stance)
         "CORPSMAN"     => AbilityKind.Heal,
         _ => AbilityKind.None,
     };
@@ -498,6 +507,7 @@ public class Unit
         RunGun = false;            // ability stances don't carry between turns
         Blitz = false;
         Steady = false;
+        Slipstreaming = false;     // ranger SLIPSTREAM is a one-move stance (consumed on use)
         KillsThisTurn = 0;         // multi-kill feat is per-turn
         FiredFromConcealment = false; // ambush bonus is for one shot only (4.4)
         // note: Suppress (a debuff applied by an enemy gunner) is cleared on the
