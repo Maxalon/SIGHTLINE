@@ -1077,6 +1077,20 @@ public static class Renderer
                 Raylib.DrawCircleV(mastTop, 1.6f * s, col);                       // dish hub
                 break;
             }
+            case "LANCER":             // a PHALANX trooper: a compact body behind a raised LANCE (a long
+                                       // forward spear) + a short shoulder bar (the shield-wall shoulder).
+                                       // Reads as "formation / polearm", distinct from the rifleman wedge.
+                Raylib.DrawCircleV(At(-3f, 0), 4.5f * s, col);   // body sits back behind the lance
+                Barrel(-3f, 15f, 2.4f);                          // the long lance reaching forward
+                Raylib.DrawCircleV(At(15f, 0), 1.8f * s, col);   // the spear tip
+                Bar(-3f, 6f, 2.4f, 0.9f);                        // a shoulder bar across the back (the wall edge)
+                break;
+            case "HOUND":              // a SWARM beast: a low lean body with TWIN forward fangs/prongs (a
+                                       // predator's open maw), angrier + more angular than the HUNTER dart.
+                Wedge(7f, -4f, 4f, 1f);                          // a small lean body wedge
+                Raylib.DrawLineEx(At(7f, 0), At(12f, 3.5f), 2f * s, col);   // upper fang
+                Raylib.DrawLineEx(At(7f, 0), At(12f, -3.5f), 2f * s, col);  // lower fang
+                break;
             default:                   // fallback: a neutral pentagon
                 Raylib.DrawPoly(p, 5, 7.5f * s, 0f, col);
                 break;

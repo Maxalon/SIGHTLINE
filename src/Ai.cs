@@ -57,6 +57,24 @@ public static class Ai
         }
         Unit vip = players.Find(p => p.IsVip);   // escort: hunt the asset
 
+        // HOUND (swarmer): hunt the most ISOLATED soldier — the squad member with the FEWEST other
+        // soldiers within 2 tiles (ties broken by proximity to this hound). A lone soldier away from
+        // the pack is the prey; the squad's counter is to stay massed so no one is the obvious mark.
+        Unit prey = null;
+        if (e.Cls == "HOUND")
+        {
+            int bestIso = int.MaxValue; int bestPd = int.MaxValue;
+            foreach (var p in players)
+            {
+                if (p.IsVip) continue;                          // hounds chase soldiers, not the asset
+                int near = 0;
+                foreach (var q in players)
+                    if (q != p && !q.IsVip && Util.ChebyDist(p.X, p.Y, q.X, q.Y) <= 2) near++;
+                int pd = Util.ChebyDist(e.X, e.Y, p.X, p.Y);
+                if (near < bestIso || (near == bestIso && pd < bestPd)) { bestIso = near; bestPd = pd; prey = p; }
+            }
+        }
+
         // SPOTTER force-multiplier (3.x): a live BEACON on the field "paints" the squad's
         // priority target, so every ally's focus-fire convergence is amplified below. Computed
         // once per plan; kill the SPOTTER to break the crossfire (it doesn't fight much itself).
@@ -112,7 +130,8 @@ public static class Ai
         // still spends its action (a safe tile that happens to have a shot still shoots, and the
         // standard overwatch/hunker fallback still fires), so it re-engages the moment it can.
         bool canRetreat = e.Cls != "BERSERKER" && e.Cls != "ELITE"
-                       && e.Cls != "DRONE" && e.Cls != "SAPPER" && e.Cls != "TURRET";
+                       && e.Cls != "DRONE" && e.Cls != "SAPPER" && e.Cls != "TURRET"
+                       && e.Cls != "HOUND";   // a swarmer commits — it never breaks off (its identity is the rush)
         bool lowHp = e.Hp <= Math.Max(1, e.MaxHp * 3 / 10);   // <= ~30% MaxHp
         bool retreatMode = false;
         if (canRetreat && lowHp)
@@ -330,10 +349,16 @@ public static class Ai
             else
             {
                 float advW = (e.Cls == "BERSERKER" || e.Cls == "ELITE") ? 3.4f
+                           : (e.Cls == "HOUND") ? 3.6f                  // swarmer: hardest charger in the game (low HP, fast)
                            : (e.Cls == "DRONE") ? 3.0f                  // drone beelines (ignores cover anyway)
                            : (e.Cls == "HUNTER") ? 2.8f                 // fast flanker: presses hard to curl around cover
+                           : (e.Cls == "LANCER") ? 2.4f                 // formation trooper: advances in lockstep with the line
                            : (e.Cls == "SHIELD") ? 2.2f : 1.4f;         // shield pushes the line behind its barrier
-                score -= nd > 0 ? distNearest * advW : 0;
+                // a HOUND beelines its PREY (the isolated soldier), not the generic nearest target.
+                if (e.Cls == "HOUND" && prey != null)
+                    score -= Util.ChebyDist(tx, ty, prey.X, prey.Y) * advW;
+                else
+                    score -= nd > 0 ? distNearest * advW : 0;
             }
 
             // HUNTER — FLANK SEEKER: actively reward ending on a tile from which the nearest
@@ -349,6 +374,20 @@ public static class Ai
                 else if (tgtCov.Level == 0) score += 16;         // soldier simply has no cover from this angle
             }
             if (e.Cls == "DRONE") score -= cover.Level * 18;            // drone doesn't value cover (cancels the bonus above)
+
+            // LANCER — FORMATION FIGHTER: it is strongest IN A LINE, so reward ending adjacent to
+            // another active hostile (the squad's wall forms up and presses in lockstep). This is the
+            // INVERSE of the anti-cluster term below (LANCER is exempt from it), so a phalanx of lancers
+            // bunches DELIBERATELY — making the pack a juicy GRENADE / AoE target. Capped at +1 neighbour's
+            // worth so the whole pod doesn't infinite-collapse onto one tile.
+            if (e.Cls == "LANCER")
+            {
+                int adjLine = 0;
+                foreach (var a in activeAllies)
+                    if (Util.ChebyDist(tx, ty, a.X, a.Y) <= 1) adjLine++;
+                score += Math.Min(adjLine, 2) * 11f;             // hold the line: each shoulder-to-shoulder ally is worth holding
+            }
+
             if (vip != null) score -= Util.ChebyDist(tx, ty, vip.X, vip.Y) * 0.5f;     // lean toward the asset (was 1.0)
             if (sapTarget != null)                               // sapper: get adjacent to the cover
                 score -= Util.ChebyDist(tx, ty, sapTarget.Value.x, sapTarget.Value.y) * 3.0f;
@@ -375,8 +414,9 @@ public static class Ai
 
             // COORDINATION 4 — ANTI-CLUSTER: don't gift-wrap a grenade. Small penalty for
             // ending adjacent to many allies so the squad doesn't bunch into one AoE. Shields
-            // are exempt (they intentionally anchor a wall the line forms behind).
-            if (e.Cls != "SHIELD")
+            // are exempt (they intentionally anchor a wall the line forms behind); LANCERS are
+            // exempt too — bunching into a phalanx IS their identity (and the player's AoE lure).
+            if (e.Cls != "SHIELD" && e.Cls != "LANCER")
             {
                 int adjAllies = 0;
                 foreach (var a in activeAllies)

@@ -436,5 +436,62 @@ public static class Maps
             "...ooo...ooo......",
             "..................",
         },
+        new[] // GARRISON — a single full-height high-cover WALL across the mid-field (col 9) pierced by
+              // ONE central breach (rows 4-6) bracketed by low-cover firing steps. The whole fight
+              // funnels through the gap: hold the breach and you control the crossing, charge it and you
+              // eat the overwatch. A deliberate CHOKEPOINT set-piece (the inverse of an open plaza) that
+              // rewards a phalanx push or a patient overwatch hold. The wall has gaps top (rows 0-1) and
+              // bottom (rows 9-10) so the rims are a wide-but-exposed flank, never a sealed bunker.
+        {
+            "..................",
+            "..................",
+            ".........#........",
+            "........o#o.......",
+            "..................",   // central breach (rows 4-6 open)
+            ".........#........",
+            "..................",
+            "........o#o.......",
+            ".........#........",
+            "..................",
+            "..................",
+        },
+        new[] // PINNACLE — a VERTICALITY set-piece: TWO commanding tier-2 ('=') peaks (north-left &
+              // south-right) each walkable up a tier-1 ('^') ramp (no walls — the height is openly
+              // contested), with a tier-1 saddle bridging the centre. Whoever seizes a peak sees over
+              // low cover across the field and dominates one diagonal; the two peaks face off across the
+              // open middle. Low-cover nests give covered footing at the base of each ramp. Uses the
+              // tier-2 legend to make ELEVATION the whole point of the map.
+        {
+            "..................",
+            ".....==^...o......",
+            ".....=^^..........",
+            "....o^^...^^......",
+            "........^^^^......",
+            ".......^^.^^......",
+            "......^^...^^o....",
+            "......^^...^=.....",
+            "......o...^==.....",
+            "..................",
+            "..................",
+        },
+        new[] // REFINERY — a HAZARD set-piece: explosive BARRELS ('B') clustered around high-cover tank
+              // berms in the mid-field, so the cover you'd duck behind is wired to blow. A well-placed
+              // shot (or a foe's own grenade) chains the barrels and demolishes a whole nest — but a
+              // barrel beside YOUR cover is a liability too. Open aisles (the spawn columns, the central
+              // seam, and the top/bottom edges) keep it traversable; the barrels sit in already-open
+              // tiles adjacent to cover so connectivity holds. The most volatile arena in the rotation.
+        {
+            "..................",
+            ".......#.#........",
+            "......B#.#B.......",
+            ".......o.o........",
+            "..................",
+            "....o.B...B.o.....",
+            "..................",
+            ".......o.o........",
+            "......B#.#B.......",
+            ".......#.#........",
+            "..................",
+        },
     };
 }

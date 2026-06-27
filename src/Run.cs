@@ -953,8 +953,8 @@ public class Run
                 return "BERSERKER + MEDIC";
             default: // Combat / Start — normal force for this mission tier
                 if (m == 1)    return "GRUNTS + SCOUTS";
-                if (m == 2)    return "HUNTER + DRONE";
-                if (m == 3)    return "MORTAR + TURRET";
+                if (m == 2)    return "HOUND PACK + HUNTER";
+                if (m == 3)    return "LANCER LINE + MORTAR";
                 if (m == 4)    return "BERSERKER + DRONE";
                 if (m == 5)    return "SHIELD + MEDIC";
                 return                 "ELITE FORCE";

@@ -468,14 +468,15 @@ public static class Mission
                 ? MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 58 + bump, 8, x, y)
                 : MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 60 + bump, 6, x, y);
 
-        if (n == 2)   // MISSION 2 — light skirmishers (each ~15-20%; deliberately no dominant type).
+        if (n == 2)   // MISSION 2 — light skirmishers (each ~13-16%; deliberately no dominant type).
         {
-            if (r < 0.18f) return MakeHostile("VIPER", "SNIPER", WeaponKind.Sniper, 4 + bump, 62 + bump, 5, x, y); // 18% marksman
-            if (r < 0.35f) return MakeHostile("WASP", "DRONE", WeaponKind.Smg, 3 + bump, 60 + bump, 7, x, y);      // 17% drone
-            if (r < 0.50f) return MakeHostile("JACKAL", "HUNTER", WeaponKind.Smg, 5 + bump, 60 + bump, 9, x, y);   // 15% flanker
-            if (r < 0.65f) return MakeHostile("OGRE", "BRUISER", WeaponKind.Lmg, 9 + bump * 2, 56 + bump, 5, x, y);// 15% bruiser
-            if (r < 0.85f) return MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 58 + bump, 8, x, y);   // 20% scout
-            return MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 60 + bump, 6, x, y);                 // 15% grunt
+            if (r < 0.15f) return MakeHostile("VIPER", "SNIPER", WeaponKind.Sniper, 4 + bump, 62 + bump, 5, x, y); // 15% marksman
+            if (r < 0.30f) return MakeHostile("WASP", "DRONE", WeaponKind.Smg, 3 + bump, 60 + bump, 7, x, y);      // 15% drone
+            if (r < 0.43f) return MakeHostile("JACKAL", "HUNTER", WeaponKind.Smg, 5 + bump, 60 + bump, 9, x, y);   // 13% flanker
+            if (r < 0.58f) return MakeHostile("HOPLITE", "LANCER", WeaponKind.Rifle, 6 + bump, 58 + bump, 5, x, y);// 15% formation trooper
+            if (r < 0.72f) return MakeHostile("FERAL", "HOUND", WeaponKind.Smg, 3 + bump, 56 + bump, 9, x, y);     // 14% swarmer
+            if (r < 0.85f) return MakeHostile("OGRE", "BRUISER", WeaponKind.Lmg, 9 + bump * 2, 56 + bump, 5, x, y);// 13% bruiser
+            return MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 58 + bump, 8, x, y);                  // 15% scout
         }
 
         // MISSIONS 3+ — the full roster is available. Windows tuned for variety: every archetype
@@ -483,32 +484,40 @@ public static class Mission
         // collectively the bulk and the plain SCOUT/GRUNT now a small remainder (they carried too
         // much before). SPOTTER is a force-multiplier (see Ai.Plan): low priority body count but
         // high priority to KILL, so it's deliberately a single ~7% slot, not a swarm.
-        if (r < 0.09f) return MakeHostile("SENTRY", "TURRET", WeaponKind.Lmg, 6 + bump, 66 + bump, 0, x, y);       //  9% immobile nest
-        if (r < 0.19f) return MakeHostile("VIPER", "SNIPER", WeaponKind.Sniper, 4 + bump, 62 + bump, 5, x, y);     // 10% marksman
-        if (r < 0.28f) return MakeHostile("REAVER", "BERSERKER", WeaponKind.Shotgun, 12 + bump * 2, 58 + bump, 8, x, y); // 9% rusher
-        if (r < 0.37f) return MakeHostile("WASP", "DRONE", WeaponKind.Smg, 3 + bump, 60 + bump, 7, x, y);          //  9% drone
-        if (r < 0.46f) return MakeHostile("JACKAL", "HUNTER", WeaponKind.Smg, 5 + bump, 60 + bump, 9, x, y);       //  9% flanker
-        if (r < 0.54f)                                                                                              //  8% shield
+        if (r < 0.08f) return MakeHostile("SENTRY", "TURRET", WeaponKind.Lmg, 6 + bump, 66 + bump, 0, x, y);       //  8% immobile nest
+        if (r < 0.17f) return MakeHostile("VIPER", "SNIPER", WeaponKind.Sniper, 4 + bump, 62 + bump, 5, x, y);     //  9% marksman
+        if (r < 0.25f) return MakeHostile("REAVER", "BERSERKER", WeaponKind.Shotgun, 12 + bump * 2, 58 + bump, 8, x, y); // 8% rusher
+        if (r < 0.33f) return MakeHostile("WASP", "DRONE", WeaponKind.Smg, 3 + bump, 60 + bump, 7, x, y);          //  8% drone
+        if (r < 0.41f) return MakeHostile("JACKAL", "HUNTER", WeaponKind.Smg, 5 + bump, 60 + bump, 9, x, y);       //  8% flanker
+        // LANCER (HOPLITE): a formation trooper — see Ai.Plan. It is sturdier in a line (the AI rewards
+        // ending adjacent to another hostile, so a pod forms a wall and presses forward in lockstep),
+        // which makes it a tempting GRENADE / AoE target. Counter by breaking the formation up.
+        if (r < 0.49f) return MakeHostile("HOPLITE", "LANCER", WeaponKind.Rifle, 7 + bump, 58 + bump, 5, x, y);    //  8% formation trooper
+        // HOUND (FERAL): a fast, low-HP swarmer that hunts the ISOLATED soldier (see Ai.Plan: very high
+        // advance weight + targets the squad member with the FEWEST nearby allies, beelining to it).
+        // They spawn in pairs (the caller pods them ~2 each). Counter by staying massed / overwatching.
+        if (r < 0.56f) return MakeHostile("FERAL", "HOUND", WeaponKind.Smg, 3 + bump, 56 + bump, 9, x, y);         //  7% swarmer
+        if (r < 0.63f)                                                                                              //  7% shield
         {
             var s = MakeHostile("AEGIS", "SHIELD", WeaponKind.Rifle, 10 + bump * 2, 56 + bump, 4, x, y);
             s.ShieldDx = -1; s.ShieldDy = 0;            // shield faces the squad (west)
             return s;
         }
-        if (r < 0.61f) return MakeHostile("BREACH", "SAPPER", WeaponKind.Shotgun, 7 + bump, 56 + bump, 6, x, y);   //  7% demolition
-        if (r < 0.68f)                                                                                              //  7% grenadier
+        if (r < 0.69f) return MakeHostile("BREACH", "SAPPER", WeaponKind.Shotgun, 7 + bump, 56 + bump, 6, x, y);   //  6% demolition
+        if (r < 0.75f)                                                                                              //  6% grenadier
         {
             var m = MakeHostile("MORTAR", "MORTAR", WeaponKind.Smg, 6 + bump, 50 + bump, 5, x, y);
             m.Grenades = n >= 5 ? 3 : 2;                // a deep frag pouch — the EXISTING grenade AI uses it
             return m;
         }
-        if (r < 0.74f) return MakeHostile("ORDERLY", "MEDIC", WeaponKind.Smg, 6 + bump, 52 + bump, 6, x, y);       //  6% medic
+        if (r < 0.80f) return MakeHostile("ORDERLY", "MEDIC", WeaponKind.Smg, 6 + bump, 52 + bump, 6, x, y);       //  5% medic
         // SPOTTER (BEACON): a fragile back-line designator. It barely fights (poor SMG, low HP) but
         // while it lives it "paints" the squad's priority target — Ai.Plan amplifies focus-fire
         // convergence for ALL allies (see Ai.SpotterActive). Kill it first to break the crossfire.
-        if (r < 0.81f) return MakeHostile("BEACON", "SPOTTER", WeaponKind.Smg, 5 + bump, 48 + bump, 6, x, y);      //  7% designator
-        if (r < 0.89f) return MakeHostile("OGRE", "BRUISER", WeaponKind.Lmg, 9 + bump * 2, 56 + bump, 5, x, y);    //  8% bruiser
-        if (r < 0.95f) return MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 58 + bump, 8, x, y);       //  6% scout
-        return MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 60 + bump, 6, x, y);                     //  5% grunt
+        if (r < 0.86f) return MakeHostile("BEACON", "SPOTTER", WeaponKind.Smg, 5 + bump, 48 + bump, 6, x, y);      //  6% designator
+        if (r < 0.93f) return MakeHostile("OGRE", "BRUISER", WeaponKind.Lmg, 9 + bump * 2, 56 + bump, 5, x, y);    //  7% bruiser
+        if (r < 0.97f) return MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 58 + bump, 8, x, y);       //  4% scout
+        return MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 60 + bump, 6, x, y);                     //  3% grunt
     }
 
     /// FACTION-GATED rank-and-file pick (Phase 4 foundation). Returns one archetype drawn from the
@@ -772,5 +781,28 @@ public static class Mission
         if (!g.InBounds(x, y) || occ.Contains((x, y)) || g.Tiles[x, y] != TileType.Floor) return;
         g.Tiles[x, y] = t;
         occ.Add((x, y));
+    }
+
+    /// Screenshot-only debug (SIGHTLINE_CONTENT=1): replace the hostile force with one ALERT
+    /// copy of each NEW content archetype (a LANCER phalanx + a HOUND pack) plus a reference
+    /// pair, all in the mid-field, so the new silhouettes/AI read clearly in a single frame.
+    /// Harness-gated in Program.cs; never runs in normal play. Mirrors how other Debug* hooks
+    /// stage a clean showcase. Builds two LANCERs side-by-side (the phalanx wall) and two HOUNDs
+    /// (the pack), wired Alert so they're drawn as live foes.
+    public static void DebugContentShowcase(Game g)
+    {
+        g.Enemies.Clear();
+        void Add(string name, string cls, WeaponKind w, int hp, int aim, int mob, int x, int y)
+        {
+            var e = MakeHostile(name, cls, w, hp, aim, mob, x, y);
+            e.Alert = AlertLevel.Alert; e.PodId = -1; e.SyncPos();
+            g.Enemies.Add(e);
+        }
+        // LANCER phalanx (shoulder-to-shoulder) mid-field
+        Add("HOPLITE", "LANCER", WeaponKind.Rifle, 7, 60, 5, 9, 3);
+        Add("HOPLITE", "LANCER", WeaponKind.Rifle, 7, 60, 5, 9, 4);
+        // HOUND pack (the swarmers) lower mid-field
+        Add("FERAL", "HOUND", WeaponKind.Smg, 3, 56, 9, 10, 7);
+        Add("FERAL", "HOUND", WeaponKind.Smg, 3, 56, 9, 11, 8);
     }
 }
