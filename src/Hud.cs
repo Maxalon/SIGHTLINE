@@ -1974,19 +1974,19 @@ public static class Hud
         Raylib.DrawRectangle(0, 0, Cfg.ScreenW, Cfg.ScreenH, Raylib.Fade(Pal.RGBA(5, 8, 11), 0.85f));
 
         int items = Game.ShopName.Length;
-        int ih = 80, gap = 10;
+        int ih = 78, gap = 10;
         int squadH = 40;
-        // Fit the whole shop card on-screen: the fixed chrome (title/intel/squad strip + proceed
-        // footer) plus the item rows must clear ScreenH. With the COUNTER-PREP item the list grew to
-        // 10 rows, so shrink the per-row height/gap until the card fits (never below a legible floor).
+        // The shop list grew to ~10 items (heals/training/frag/plating + 4 weapon mods + counter-prep);
+        // a single column either clips the screen or squeezes the rows. Lay it out as a 2-COLUMN grid so
+        // every row keeps a comfortable, legible height and the whole card still clears ScreenH.
         int chrome = 104 + squadH + 60;
-        int maxRows = Cfg.ScreenH - 24 - chrome;
-        while (items > 0 && items * (ih + gap) > maxRows && ih > 56) { ih -= 2; if (gap > 6) gap -= 1; }
-        // The armory sub-screen is much shorter than the shop list, so size the card to the active
-        // view — otherwise the tall shop card clips off the top/bottom of the screen.
-        int shopH = chrome + items * (ih + gap);
-        int armoryH = 104 + 28 + Run.RosterMax * 52 + 64;   // fits the soldier list (the taller of the two views)
-        int w = 560, h = g.ArmoryMode ? armoryH : shopH;
+        const int cols = 2;
+        int rowsPerCol = (items + cols - 1) / cols;
+        int shopH = chrome + rowsPerCol * (ih + gap);
+        // The armory sub-screen is a single shorter column, so size the card to the active view —
+        // otherwise the taller shop card clips off the top/bottom of the screen.
+        int armoryH = 104 + 28 + Run.RosterMax * 52 + 64;
+        int w = g.ArmoryMode ? 560 : 760, h = g.ArmoryMode ? armoryH : shopH;
         int x = Cfg.ScreenW / 2 - w / 2, y = Cfg.ScreenH / 2 - h / 2;
         y -= (int)((1f - Util.EaseOutQuad(PanelAnim("requisition", 0.15f))) * 16f);  // slide-down entrance
         var card = new Rectangle(x, y, w, h);
@@ -2010,10 +2010,13 @@ public static class Hud
         // squad HP strip so the player can judge whether a heal/stim is worth it
         DrawSquadHpStrip(run.Squad, x + 30, y + 96, w - 60);
 
-        int iy = y + 104 + squadH;
+        int gridTop = y + 104 + squadH;
+        int colGap = 16;
+        int colW = (w - 60 - colGap) / 2;
         for (int i = 0; i < items; i++)
         {
-            var r = new Rectangle(x + 30, iy, w - 60, ih);
+            int col = i / rowsPerCol, rowInCol = i % rowsPerCol;
+            var r = new Rectangle(x + 30 + col * (colW + colGap), gridTop + rowInCol * (ih + gap), colW, ih);
             ShopBtns[i] = r;
             bool can = g.CanBuy(i);
             bool hover = can && Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), r);
@@ -2031,7 +2034,6 @@ public static class Hud
                 Raylib.DrawTextEx(Cfg.Font, "- unavailable -", new Vector2((int)(r.X + r.Width - (int)Raylib.MeasureTextEx(Cfg.Font, "- unavailable -", 11, 1f).X - 14), (int)r.Y + 52), 11, 1f, Pal.TxtDim);
             else
                 Raylib.DrawTextEx(Cfg.Font, "[ BUY ]", new Vector2((int)(r.X + r.Width - (int)Raylib.MeasureTextEx(Cfg.Font, "[ BUY ]", 12, 1f).X - 14), (int)r.Y + 54), 12, 1f, Pal.Accent);
-            iy += ih + gap;
         }
 
         ShopProceed = new Rectangle(x + w / 2 - 130, y + h - 60, 260, 44);
