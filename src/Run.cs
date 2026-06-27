@@ -88,6 +88,17 @@ public class MissionCard
 /// connected to 1-2 nodes in the next column, FTL/Slay-the-Spire style.
 public enum NodeKind { Start, Combat, Elite, Supply, Boss }
 
+/// A run-end MEMORIAL entry: a snapshot of a soldier at the moment they fell, captured for the
+/// run-summary card's KIA roll. PRESENTATION ONLY — populated from Game.KillUnit, read by Hud.
+public struct FallenRec
+{
+    public string Name;     // FullName (incl. earned nickname)
+    public string Cls;      // class
+    public string Rank;     // rank name at death
+    public int Kills;       // confirmed kills earned over the run
+    public int Mission;     // mission number on which they fell
+}
+
 public class MissionNode
 {
     public int Id;            // index into Run.Map
@@ -240,6 +251,12 @@ public class Run
     public int Intel;                         // requisition currency spent in the barracks shop
     public int HeatLevel;                     // chosen Heat/Ascension difficulty (0..Heat.Max); persisted in the run save
     public List<string> Fallen = new();       // names of KIA soldiers
+    // Run-end MEMORIAL (presentation only): a richer KIA record (full identity + rank/class/
+    // kills + the mission they fell on) accumulated across the WHOLE run, so the run-summary
+    // card can honour the fallen with more than a bare name. Read by Hud's end screen; NOT
+    // persisted (a CONTINUE resumes mid-run, rebuilding it as soldiers fall). Appended one
+    // entry per soldier death from the existing Game.KillUnit hook (see the one-line addition).
+    public readonly List<FallenRec> Memorial = new();
     // co-survival tally per soldier pair ("A|B"); a bond forms at BondThreshold
     public Dictionary<string, int> BondTally = new();
     public List<string> Report = new();       // promotion/heal lines for the barracks

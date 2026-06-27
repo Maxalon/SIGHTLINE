@@ -1352,6 +1352,11 @@ public class Game
             _run.RecordRunResult(true);
             if (!NoPersist) SaveGame.SaveMetaLossStreak(_run.LossStreak);
             Phase = Phase.Win; Audio.Play("win"); Audio.PlayStinger("victory"); if (!NoPersist) SaveGame.Delete();
+            // VICTORY FLOURISH: a celebratory burst over the board (each surviving soldier cheers,
+            // plus a centre fountain) the instant the final mission falls. The end-screen card then
+            // takes over with its own confetti. Presentation only.
+            Fx.VictoryBurst(BoardCenter, Pal.Good, 1.2f);
+            foreach (var u in Players) if (u.Alive) Fx.VictoryConfetti(u.Pos, 14, 220f);
         }
         else
         {
@@ -1584,6 +1589,10 @@ public class Game
         if (d.Team == Team.Player)
         {
             _run.Fallen.Add(d.Name);
+            // run-end MEMORIAL (presentation only): snapshot the fallen squad member's identity for
+            // the run-summary KIA roll. VIP/captive isn't a persistent squad member, so it's excluded.
+            if (!d.IsVip)
+                _run.Memorial.Add(new FallenRec { Name = d.FullName, Cls = d.Cls, Rank = d.RankName, Kills = d.Kills, Mission = _run.Mission });
             if (!d.IsVip) SecondaryFailed = true;   // a lost soldier fails the NO LOSSES bonus
             // a fallen squadmate fires up the survivors (Vengeful feat / trait)
             if (!d.IsVip)
@@ -4726,6 +4735,34 @@ public class Game
     {
         var c = Players.Where(p => !p.IsVip).ToList();
         if (c.Count > 1) { var v = c[1]; v.Nickname = "GHOST"; v.Hp = 0; KillUnit(v); }
+    }
+
+    /// Harness hook (screenshot only, SIGHTLINE_SUMMARY): stage a finished run and jump to the
+    /// VICTORY run-summary card so the rich payoff (surviving roster + MVP + KIA memorial +
+    /// totals + confetti) can be inspected. Presentation only; never runs in normal play.
+    /// Pass lose=true to view the RUN OVER variant instead.
+    public void DebugSummary(bool lose = false)
+    {
+        if (_run == null || _run.Squad == null || _run.Squad.Count == 0) { _run = new Run(); _run.Start(); }
+        _run.Intel = 86;
+        _run.HeatLevel = 3;
+        // decorate survivors: ranks, kills, a nickname/trait + an MVP.
+        var squad = _run.Squad;
+        for (int i = 0; i < squad.Count; i++)
+        {
+            var u = squad[i];
+            u.Kills = 2 + i * 3;
+            u.Rank = Math.Min(Run.Ranks.Length - 1, 1 + i);
+        }
+        if (squad.Count > 0) { squad[0].Nickname = "REAPER"; squad[0].Kills = 11; squad[0].Traits.Add(Trait.Killer); }
+        if (squad.Count > 1) squad[1].Nickname = " HALO";
+        // a couple of fallen, recorded across the run for the memorial roll.
+        _run.Memorial.Add(new FallenRec { Name = "DALES \"BISHOP\"", Cls = "RANGER",  Rank = "SERGEANT", Kills = 7, Mission = 2 });
+        _run.Memorial.Add(new FallenRec { Name = "OKONKWO",        Cls = "GUNNER",  Rank = "CORPORAL", Kills = 4, Mission = 4 });
+        _run.Memorial.Add(new FallenRec { Name = "VEGA \"ASH\"",    Cls = "ASSAULT", Rank = "ROOKIE",   Kills = 1, Mission = 5 });
+        _run.Mission = lose ? 5 : Run.MaxMissions;
+        if (lose) { LoseTitle = "RUN OVER"; LoseReason = "The squad fell on mission 5."; }
+        Phase = lose ? Phase.Lose : Phase.Win;
     }
 
     /// Harness hook (screenshot only): paint sample status effects on soldiers/foes so

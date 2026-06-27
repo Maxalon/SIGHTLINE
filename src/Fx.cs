@@ -328,6 +328,51 @@ public class Fx
         });
     }
 
+    // ── run-end / objective VICTORY FLOURISH ─────────────────────────────────────────────
+    // Celebratory bursts for "you earned this" moments (objective complete, final victory).
+    // Built on the existing particle/ring/shake primitives so it inherits the soft-glow draw;
+    // kept tasteful (a confetti spray + a soft ring + a measured shake), not a screen-filler.
+
+    static readonly Color[] _confettiCols =
+    {
+        Pal.Good, Pal.Friend, Pal.VipGold, Pal.Accent,
+        Pal.RGBA(120, 220, 255), Pal.RGBA(255, 240, 210),
+    };
+
+    /// A celebratory confetti spray from `at`: cheerful multi-hued specks lofted outward and
+    /// up, fluttering down on light drag. `count` scales the volume; `up` biases the cone
+    /// upward (a fountain) so it reads as a celebration, not an explosion.
+    public void VictoryConfetti(Vector2 at, int count = 26, float speed = 240f, float up = 0.55f)
+    {
+        for (int i = 0; i < count; i++)
+        {
+            float a = Util.RandF() * MathF.PI * 2f;
+            var dir = new Vector2(MathF.Cos(a), MathF.Sin(a) - up);   // lift the cone upward
+            float s = speed * (0.5f + Util.RandF());
+            Particles.Add(new Particle
+            {
+                Pos = at + new Vector2(Util.RandRange(-6f, 6f), Util.RandRange(-6f, 6f)),
+                Vel = dir * s,
+                Life = Util.RandRange(0.7f, 1.5f),
+                MaxLife = 1.5f,
+                Size = Util.RandRange(2.5f, 5f),
+                Drag = 2.2f,                                          // long, lazy flutter
+                Color = _confettiCols[Util.RandInt(0, _confettiCols.Length - 1)],
+                Spark = false,
+            });
+        }
+    }
+
+    /// A full victory beat at `at`: a soft expanding ring + a generous confetti fountain +
+    /// a brief bright flash + a measured shake. Use for the deciding objective / final win.
+    public void VictoryBurst(Vector2 at, Color accent, float scale = 1f)
+    {
+        Shockwave(at, accent, 8f, 120f * scale, thick: 5f, alpha: 0.85f, life: 0.5f, doubleRing: true);
+        Impact(at, Pal.RGBA(255, 252, 245), 30f * scale, alpha: 0.8f, life: 0.22f);
+        VictoryConfetti(at, (int)(34 * scale), 260f * scale);
+        AddShake(5f * scale);
+    }
+
     static Vector2 Rotate(Vector2 v, float a)
     {
         float c = MathF.Cos(a), s = MathF.Sin(a);

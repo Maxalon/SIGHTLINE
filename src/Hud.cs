@@ -1354,14 +1354,18 @@ public static class Hud
         int W = Cfg.ScreenW;
         var run = g.RunState;
 
+        // ---- in-card victory confetti (win only) — a tasteful drifting fountain that reads
+        //      as celebration behind the title; deterministic per index (no state), low alpha.
+        if (win) DrawCardConfetti(t);
+
         // ---- big held title ----
         float titleIn = PanelAnim("endTitle", 0.6f);
         string title = win ? "VICTORY"
                            : (string.IsNullOrEmpty(g.LoseTitle) ? "RUN OVER" : g.LoseTitle);
-        int tfs = 100;
+        int tfs = 92;
         Vector2 tm = Raylib.MeasureTextEx(Cfg.Font, title, tfs, 4f);
         float tx = W / 2f - tm.X / 2f;
-        float ty = 150f - (1f - Util.EaseOutBack(Util.Clamp(titleIn, 0f, 1f))) * 30f;
+        float ty = 64f - (1f - Util.EaseOutBack(Util.Clamp(titleIn, 0f, 1f))) * 30f;
         // emphatic glow that pulses (a held, "earned" feel)
         float pulse = 0.5f + 0.5f * MathF.Sin(t * 2.2f);
         for (int i = 1; i <= 4; i++)
@@ -1376,11 +1380,12 @@ public static class Hud
             ? $"All {Run.MaxMissions} missions cleared. The squad stands victorious."
             : (string.IsNullOrEmpty(g.LoseReason) ? $"The squad fell on mission {mission}." : g.LoseReason);
         Vector2 sm = Raylib.MeasureTextEx(Cfg.Font, sub, 16, 1f);
-        Raylib.DrawTextEx(Cfg.Font, sub, new Vector2(W / 2f - sm.X / 2f, ty + tfs + 6), 16, 1f, Raylib.Fade(Pal.TxtDim, subIn));
+        Raylib.DrawTextEx(Cfg.Font, sub, new Vector2(W / 2f - sm.X / 2f, ty + tfs + 2), 16, 1f, Raylib.Fade(Pal.TxtDim, subIn));
 
         // ---- counting-up stat slabs (missions / intel / kills / heat) ----
         int totalKills = 0;
-        if (run != null && run.Squad != null) foreach (var u in run.Squad) totalKills += u.Kills;
+        if (run?.Squad != null) foreach (var u in run.Squad) totalKills += u.Kills;
+        if (run?.Memorial != null) foreach (var f in run.Memorial) totalKills += f.Kills;   // count the fallen's lifetime kills too
         int missionsShown = win ? Run.MaxMissions : Math.Max(0, mission - 1);
 
         var stats = new System.Collections.Generic.List<(string label, int value, Color col)>
@@ -1389,21 +1394,21 @@ public static class Hud
             ("INTEL BANKED",     run?.Intel ?? 0, Pal.Accent),
             ("CONFIRMED KILLS",  totalKills, Pal.Friend),
         };
-        if ((run?.HeatLevel ?? 0) > 0) stats.Add(("HEAT / ASCENSION", run.HeatLevel, Pal.Foe));
+        stats.Add(("HEAT / ASCENSION", run?.HeatLevel ?? 0, (run?.HeatLevel ?? 0) > 0 ? Pal.Foe : Pal.TxtDim));
 
         float statsIn = PanelAnim("endStats", 0.3f, 0.45f);
         int n = stats.Count;
-        int slabW = 210, gap = 18;
+        int slabW = 200, gap = 16;
         int totalW = n * slabW + (n - 1) * gap;
         int sx0 = W / 2 - totalW / 2;
-        int sy = (int)(ty + tfs + 60);
+        int sy = (int)(ty + tfs + 36);
         // count-up factor: ramps 0->1 over ~0.9s after the slabs appear
         float countF = Util.EaseOutQuad(PanelAnim("endCount", 0.9f, 0.5f));
         for (int i = 0; i < n; i++)
         {
             float in_ = Util.Clamp((statsIn - i * 0.10f) / 0.6f, 0f, 1f);
             if (in_ <= 0f) continue;
-            var slab = new Rectangle(sx0 + i * (slabW + gap), sy + (int)((1f - Util.EaseOutQuad(in_)) * 16f), slabW, 92);
+            var slab = new Rectangle(sx0 + i * (slabW + gap), sy + (int)((1f - Util.EaseOutQuad(in_)) * 16f), slabW, 82);
             float a = Util.EaseOutQuad(in_);
             Raylib.DrawRectangleRounded(slab, 0.10f, 8, Raylib.Fade(Pal.Panel, 0.92f * a));
             Raylib.DrawRectangleLinesEx(slab, 1.4f, Raylib.Fade(stats[i].col, 0.55f * a));
@@ -1411,27 +1416,140 @@ public static class Hud
             // big counted number
             int shownVal = (int)MathF.Round(stats[i].value * countF);
             string num = shownVal.ToString();
-            Vector2 nmz = Raylib.MeasureTextEx(Cfg.Font, num, 46, 1f);
-            Raylib.DrawTextEx(Cfg.Font, num, new Vector2(slab.X + slab.Width / 2 - nmz.X / 2, slab.Y + 16), 46, 1f, Raylib.Fade(stats[i].col, a));
+            Vector2 nmz = Raylib.MeasureTextEx(Cfg.Font, num, 42, 1f);
+            Raylib.DrawTextEx(Cfg.Font, num, new Vector2(slab.X + slab.Width / 2 - nmz.X / 2, slab.Y + 14), 42, 1f, Raylib.Fade(stats[i].col, a));
             Vector2 lz = Raylib.MeasureTextEx(Cfg.Font, stats[i].label, 11, 1f);
-            Raylib.DrawTextEx(Cfg.Font, stats[i].label, new Vector2(slab.X + slab.Width / 2 - lz.X / 2, slab.Y + 68), 11, 1f, Raylib.Fade(Pal.TxtDim, a));
+            Raylib.DrawTextEx(Cfg.Font, stats[i].label, new Vector2(slab.X + slab.Width / 2 - lz.X / 2, slab.Y + 62), 11, 1f, Raylib.Fade(Pal.TxtDim, a));
         }
 
-        // ---- fallen roll (lose only): a quiet honour list if the squad took losses ----
-        if (!win && run?.Fallen != null && run.Fallen.Count > 0)
-        {
-            float fIn = PanelAnim("endFallen", 0.4f, 0.7f);
-            string roll = "FALLEN:  " + string.Join("   ", run.Fallen);
-            Vector2 fz = Raylib.MeasureTextEx(Cfg.Font, roll, 13, 1f);
-            Raylib.DrawTextEx(Cfg.Font, roll, new Vector2(W / 2f - fz.X / 2f, sy + 110), 13, 1f, Raylib.Fade(Pal.Foe, 0.85f * fIn));
-        }
+        // ---- two-column dossier: SURVIVING SQUAD (+ MVP) | KIA MEMORIAL ------------------
+        int dy = sy + 100;
+        int colGap = 28;
+        int colW = (totalW - colGap) / 2;
+        int lx = sx0, rx = sx0 + colW + colGap;
+        int dh = 254;
+        float rosterIn = PanelAnim("endRoster", 0.45f, 0.55f);
+        float kiaIn = PanelAnim("endKia", 0.45f, 0.7f);
+
+        // identify the MVP (top kills among the surviving squad) so it can be highlighted.
+        Unit mvp = null;
+        if (run?.Squad != null)
+            foreach (var u in run.Squad) if (u != null && !u.IsVip && (mvp == null || u.Kills > mvp.Kills)) mvp = u;
+
+        DrawSurvivorPanel(g, run, mvp, lx, dy, colW, dh, rosterIn);
+        DrawMemorialPanel(run, rx, dy, colW, dh, kiaIn);
 
         // ---- NEW RUN button (single, centred) ----
-        float btnIn = PanelAnim("endBtn", 0.3f, 0.8f);
-        int by = sy + 150;
-        OverlayBtn = new Rectangle(W / 2 - 130, by, 260, 50);
+        float btnIn = PanelAnim("endBtn", 0.3f, 0.85f);
+        int by = dy + dh + 16;
+        OverlayBtn = new Rectangle(W / 2 - 130, by, 260, 46);
         OverlayBtn2 = new Rectangle(0, 0, 0, 0);
         DrawOverlayButton(OverlayBtn, "NEW RUN", win ? Pal.Good : Pal.Friend, null, btnIn);
+    }
+
+    /// Left dossier column: the SURVIVING SQUAD roster (name/nickname, rank, kills, a trait),
+    /// with the top-kills soldier flagged MVP. Part of the run-summary payoff card.
+    static void DrawSurvivorPanel(Game g, Run run, Unit mvp, int x, int y, int w, int h, float anim)
+    {
+        if (anim <= 0f) return;
+        var panel = new Rectangle(x, y, w, h);
+        Raylib.DrawRectangleRounded(panel, 0.06f, 8, Raylib.Fade(Pal.Panel, 0.90f * anim));
+        Raylib.DrawRectangleLinesEx(panel, 1.2f, Raylib.Fade(Pal.Good, 0.40f * anim));
+        Raylib.DrawTextEx(Cfg.Font, "SURVIVING SQUAD", new Vector2(x + 14, y + 12), 15, 1f, Raylib.Fade(Pal.Good, anim));
+
+        var squad = run?.Squad;
+        int rowY = y + 40;
+        int shown = 0;
+        if (squad != null)
+        {
+            foreach (var u in squad)
+            {
+                if (u == null || u.IsVip) continue;
+                if (rowY > y + h - 26) break;
+                bool isMvp = u == mvp && u.Kills > 0;
+                float a = anim;
+                // name + nickname
+                string nm = u.FullName;
+                Raylib.DrawTextEx(Cfg.Font, nm, new Vector2(x + 14, rowY), 15, 1f, Raylib.Fade(isMvp ? Pal.VipGold : Pal.Txt, a));
+                float nmw = Raylib.MeasureTextEx(Cfg.Font, nm, 15, 1f).X;
+                if (isMvp)
+                    Raylib.DrawTextEx(Cfg.Font, "MVP", new Vector2(x + 14 + nmw + 8, rowY + 2), 12, 1f, Raylib.Fade(Pal.VipGold, a));
+                // rank + a trait code on a dim sub-line
+                string sub = $"{u.RankName} {u.Cls}";
+                if (u.Traits != null && u.Traits.Count > 0) sub += "  " + TraitDef.Name(u.Traits[0]);
+                Raylib.DrawTextEx(Cfg.Font, sub, new Vector2(x + 14, rowY + 17), 11, 1f, Raylib.Fade(Pal.TxtDim, a));
+                // kills, right-aligned
+                string ks = $"{u.Kills} K";
+                float kw = Raylib.MeasureTextEx(Cfg.Font, ks, 14, 1f).X;
+                Raylib.DrawTextEx(Cfg.Font, ks, new Vector2(x + w - 14 - kw, rowY + 4), 14, 1f, Raylib.Fade(Pal.Friend, a));
+                rowY += 34;
+                shown++;
+            }
+        }
+        if (shown == 0)
+            Raylib.DrawTextEx(Cfg.Font, "- no survivors -", new Vector2(x + 14, rowY), 13, 1f, Raylib.Fade(Pal.TxtDim, anim));
+    }
+
+    /// Right dossier column: the KIA MEMORIAL — the soldiers lost across the whole run, with
+    /// rank/class + the mission they fell on. Honours attrition; reads from Run.Memorial.
+    static void DrawMemorialPanel(Run run, int x, int y, int w, int h, float anim)
+    {
+        if (anim <= 0f) return;
+        var panel = new Rectangle(x, y, w, h);
+        Raylib.DrawRectangleRounded(panel, 0.06f, 8, Raylib.Fade(Pal.Panel, 0.90f * anim));
+        Raylib.DrawRectangleLinesEx(panel, 1.2f, Raylib.Fade(Pal.Foe, 0.40f * anim));
+        var mem = run?.Memorial;
+        int count = mem?.Count ?? 0;
+        Raylib.DrawTextEx(Cfg.Font, $"KIA MEMORIAL  ({count})", new Vector2(x + 14, y + 12), 15, 1f, Raylib.Fade(Pal.Foe, anim));
+
+        int rowY = y + 40;
+        if (count == 0)
+        {
+            Raylib.DrawTextEx(Cfg.Font, "- no losses -", new Vector2(x + 14, rowY), 13, 1f, Raylib.Fade(Pal.Good, 0.85f * anim));
+            Raylib.DrawTextEx(Cfg.Font, "The whole squad came home.", new Vector2(x + 14, rowY + 20), 11, 1f, Raylib.Fade(Pal.TxtDim, anim));
+            return;
+        }
+        // Show the most recent fallen first; cap to what fits, with an overflow tally.
+        int maxRows = (h - 50) / 34;
+        int start = Math.Max(0, count - maxRows);
+        for (int i = count - 1; i >= start; i--)
+        {
+            var f = mem[i];
+            Raylib.DrawTextEx(Cfg.Font, f.Name, new Vector2(x + 14, rowY), 15, 1f, Raylib.Fade(Pal.Txt, 0.92f * anim));
+            string sub = $"{f.Rank} {f.Cls}  -  fell on mission {f.Mission}";
+            Raylib.DrawTextEx(Cfg.Font, sub, new Vector2(x + 14, rowY + 17), 11, 1f, Raylib.Fade(Pal.TxtDim, anim));
+            rowY += 34;
+        }
+        if (start > 0)
+            Raylib.DrawTextEx(Cfg.Font, $"+ {start} more", new Vector2(x + 14, rowY), 11, 1f, Raylib.Fade(Pal.Foe, 0.8f * anim));
+    }
+
+    /// In-card celebratory confetti (win only): a deterministic drifting fountain of cheerful
+    /// specks rendered straight from time (no particle state) so it animates without touching
+    /// the live Fx system. Tasteful: low count, low alpha, behind the title text.
+    static readonly Color[] _endConfetti =
+    {
+        Pal.Good, Pal.Friend, Pal.VipGold, Pal.Accent, Pal.RGBA(120, 220, 255),
+    };
+    static void DrawCardConfetti(float t)
+    {
+        int W = Cfg.ScreenW;
+        const int N = 60;
+        for (int i = 0; i < N; i++)
+        {
+            // frozen per-speck constants from the index -> deterministic, no allocation
+            float fx = (i * 97 % 100) / 100f;           // 0..1 horizontal slot
+            float phase = (i * 53 % 100) / 100f;        // fall phase offset
+            float speed = 0.5f + (i * 31 % 100) / 100f * 0.7f;
+            float sway = 18f + (i * 17 % 40);
+            float prog = (t * speed * 0.18f + phase) % 1f;       // 0 (top) -> 1 (bottom)
+            float yy = prog * (Cfg.ScreenH + 40) - 20;
+            float xx = fx * W + MathF.Sin(t * 1.3f + i) * sway;
+            float fade = 0.16f * (1f - prog);                    // brightest at top, fades down
+            var col = _endConfetti[i % _endConfetti.Length];
+            float sz = 2.5f + (i % 3);
+            Raylib.DrawCircleV(new Vector2(xx, yy), sz, Raylib.Fade(col, fade));
+        }
     }
 
     /// The run-scoped BOON pick (Wave 3): a pick-1-of-3 doctrine card shown in the barracks before
