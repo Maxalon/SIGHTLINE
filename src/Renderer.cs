@@ -174,6 +174,8 @@ public static class Renderer
         DrawMarkIndicators(g);
         DrawMark(g);
         DrawGrapple(g);
+        DrawPinIndicators(g);     // always-on: pinned (suppressed) foes get a bracket cage marker
+        DrawPin(g);               // gunner SUPPRESSING FIRE targeting preview (zone footprint)
 
         g.ActiveAnim?.Draw(g);
         g.Fx.Draw();
@@ -1683,6 +1685,60 @@ public static class Renderer
         {
             Raylib.DrawRectangleRec(Util.TileRect(destX, destY), Raylib.Fade(Pal.Friend, 0.25f));
             Raylib.DrawRectangleLinesEx(Util.TileRect(destX, destY), 2f, Pal.Friend);
+        }
+    }
+
+    // Always-on SUPPRESSED indicator (gunner SUPPRESSING FIRE): a downward "pinned" bracket cage over
+    // every pinned foe, so area denial reads on the board (shape-redundant — it's a distinct cage glyph,
+    // not just a colour). Drawn for every pinned enemy regardless of mode (the pin holds through the enemy
+    // turn). Pulses gently so it reads as a live debuff.
+    static void DrawPinIndicators(Game g)
+    {
+        float t = (float)Raylib.GetTime();
+        foreach (var e in g.Enemies)
+        {
+            if (!e.Alive || e.Pinned <= 0) continue;
+            var c = e.Pos;
+            float r = 22f, jit = MathF.Sin(t * 7f) * 1.5f;
+            Color col = Raylib.Fade(Pal.Foe, 0.85f);
+            // four corner brackets pressing inward (a "held down" cage)
+            for (int sx = -1; sx <= 1; sx += 2)
+            for (int sy = -1; sy <= 1; sy += 2)
+            {
+                var corner = c + new Vector2(sx * r, sy * (r + jit));
+                Raylib.DrawLineEx(corner, corner - new Vector2(sx * 8f, 0), 2.2f, col);
+                Raylib.DrawLineEx(corner, corner - new Vector2(0, sy * 8f), 2.2f, col);
+            }
+            Raylib.DrawTextEx(Cfg.Font, "PINNED", new Vector2(c.X - 22, c.Y - r - 16), 11, 1f, Pal.Foe);
+        }
+    }
+
+    // SUPPRESSING FIRE targeting preview: while the gunner is in PinMode, ring every legal target and
+    // paint the 3x3 zone footprint under the hovered foe (everyone in it gets pinned).
+    static void DrawPin(Game g)
+    {
+        if (!g.PinMode || g.Selected == null) return;
+        var u = g.Selected;
+        float t = (float)Raylib.GetTime();
+        foreach (var e in g.Enemies)
+        {
+            if (!e.Alive || Util.TileDist(u.X, u.Y, e.X, e.Y) > Game.PinRange) continue;
+            if (!g.Grid.HasLineOfSight(u.X, u.Y, e.X, e.Y)) continue;
+            float pulse = 22f + MathF.Sin(t * 6f) * 2.5f;
+            Raylib.DrawCircleLines((int)e.Pos.X, (int)e.Pos.Y, pulse, Raylib.Fade(Pal.Foe, 0.55f));
+        }
+        var tgt = g.PinTarget;
+        if (tgt == null) return;
+        Color col = g.PinValid ? Pal.Foe : Pal.TxtDim;
+        Raylib.DrawLineEx(u.Pos, tgt.Pos, 1.8f, Raylib.Fade(col, 0.6f));
+        // 3x3 zone footprint (the suppression area)
+        for (int oy = -1; oy <= 1; oy++)
+        for (int ox = -1; ox <= 1; ox++)
+        {
+            int zx = tgt.X + ox, zy = tgt.Y + oy;
+            if (!g.Grid.InBounds(zx, zy)) continue;
+            Raylib.DrawRectangleRec(Util.TileRect(zx, zy), Raylib.Fade(col, 0.16f));
+            Raylib.DrawRectangleLinesEx(Util.TileRect(zx, zy), 1.4f, Raylib.Fade(col, 0.55f));
         }
     }
 

@@ -107,6 +107,24 @@ public class Game
     public Unit GrappleTarget;
     public bool GrappleValid;
 
+    // SUPPRESSING FIRE targeting (gunner ability VERB): paint a foe in line of sight -> it AND every
+    // enemy Chebyshev-adjacent to it is PINNED next turn (Combat.SuppressAim penalty + cannot DASH —
+    // EnqueuePlannedMove caps a pinned foe to a single-action move). An AREA-DENIAL verb: it controls a
+    // zone of the board, not a single foe. Mirrors the MarkMode targeting pattern; the gunner also trains
+    // overwatch on the painted tile. Costs the action + ends the turn (it's the full suppression burst).
+    public const int PinRange = 10;        // designation range (a suppressing burst reaches out)
+    public bool PinMode;
+    public Unit PinTarget;                 // hovered enemy under the cursor while in PinMode (null = none)
+    public bool PinValid;                  // gates the click (target is a legal SUPPRESS target)
+    public const int PinTurns = 2;         // turns the pin lasts (survives one enemy BeginTurn -> bites that turn)
+
+    // SLIPSTREAM (ranger ability VERB): a free, overwatch-immune long move. Set on the soldier by
+    // DoAbility(Slipstream); IssueMove reads it to make the next move cost 0 actions, and OnUnitEnteredTile
+    // skips overwatch reactions while the mover is slipstreaming. The flag is consumed when the move's
+    // destination tile is reached (or at BeginTurn). _slipDest tracks that destination so a multi-tile
+    // slipstream move stays silent across all its steps, then clears cleanly.
+    (int x, int y)? _slipDest;
+
     // banner
     public string BannerText = "";
     public float BannerTimer, BannerMax;
@@ -743,7 +761,7 @@ public class Game
         SnapShot = false;
         GrenadeMode = false;
         ItemMode = false;
-        ShoveMode = false; MarkMode = false; GrappleMode = false;
+        ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false;
         Biome = Biome.For(n, _run.MapSeed);   // per-run biome variety (surfaces NEON/MAGMA across seeds)
         string facTag = Combat.MissionFaction != Faction.None ? $" - {Run.FactionName(Combat.MissionFaction)}" : "";
         ShowBanner($"MISSION {n} - {Biome.Name}{facTag}", false);
@@ -1291,6 +1309,32 @@ public class Game
         }
     }
 
+    /// Harness hook (screenshot only): show the NEW verbs — gunner SUPPRESSING FIRE (a pinned foe's
+    /// cage marker + the gunner in PinMode painting a 3x3 zone) and the ranger's SLIPSTREAM armed pill.
+    public void DebugVerbs()
+    {
+        DebugWakeAll();
+        var u = Players.FirstOrDefault(p => p.Alive && !p.IsVip);
+        if (u == null) return;
+        u.Cls = "GUNNER";              // force the SUPPRESSING FIRE ability for the demo
+        u.AbilityCharge = 1; u.Ammo = Math.Max(u.Ammo, 1);
+        var foes = Enemies.Where(e => e.Alive && Grid.HasLineOfSight(u.X, u.Y, e.X, e.Y))
+                          .OrderBy(e => Util.ChebyDist(u.X, u.Y, e.X, e.Y)).ToList();
+        if (foes.Count >= 1) foes[0].Pinned = PinTurns;     // an already-pinned foe (cage indicator)
+        // arm a second ranger's SLIPSTREAM so the action-bar pill shows for that class too
+        var r = Players.FirstOrDefault(p => p.Alive && !p.IsVip && p != u);
+        if (r != null) { r.Cls = "RANGER"; r.Slipstreaming = true; }
+        Selected = u;
+        RecomputeMoveCost();
+        if (foes.Count >= 2)
+        {
+            PinMode = true; KbCursor = true;
+            CurX = foes[1].X; CurY = foes[1].Y;
+            PinTarget = foes[1];
+            PinValid = PinTargetOk(u, foes[1]);
+        }
+    }
+
     /// Harness hook (screenshot only): freeze a sample of the procedural unit-animation poses
     /// (fire-recoil / hit-flinch / walk-lean) on live units + drop a couple of death-scorch decals,
     /// so a static SHOT frame demonstrates the new juice (which is otherwise transient in play).
@@ -1630,6 +1674,14 @@ public class Game
                     && Util.TileDist(mover.X, mover.Y, e.X, e.Y) <= RevealRange))
                 BreakConcealment();
             CheckPodActivation();  // reveal pods while advancing (no-op while still concealed)
+        }
+        // RANGER SLIPSTREAM: a free, overwatch-immune reposition. While slipstreaming the mover draws no
+        // reaction fire; the flag is consumed when its destination tile is reached so the move ends silent.
+        if (mover.Slipstreaming)
+        {
+            if (_slipDest != null && mover.X == _slipDest.Value.x && mover.Y == _slipDest.Value.y)
+            { mover.Slipstreaming = false; _slipDest = null; }
+            return;   // skip overwatch entirely for this step (the whole point of the slipstream)
         }
         var watchers = mover.Team == Team.Player ? Enemies : Players;
         int insertAt = 1;
@@ -2081,7 +2133,7 @@ public class Game
         {
             if (Raylib.IsKeyPressed(KeyboardKey.Escape))
             {
-                if (AimMode || GrenadeMode || ItemMode || ShoveMode || MarkMode || GrappleMode) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; }
+                if (AimMode || GrenadeMode || ItemMode || ShoveMode || MarkMode || GrappleMode || PinMode) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false; }
                 else Paused = !Paused;
             }
             if (Paused) { HandlePauseMenu(); return; }
@@ -2818,6 +2870,28 @@ public class Game
                 IssueGrapple(u, tgt);
                 return false;   // free of end-turn; act with the remaining action
             }
+            case AbilityKind.Slipstream:
+            {
+                // RANGER free reposition: take it when we have no shot but need to close on a foe/objective —
+                // a 0-action, overwatch-immune move. Like Blitz it's free, so DON'T return true (act with it).
+                if (FirstTargetFor(u) == null && AliveEnemies().Count > 0) { DoAbility(); return false; }
+                return false;
+            }
+            case AbilityKind.Pin:
+            {
+                // GUNNER area denial: lay suppressing fire on a CLUSTER of foes (2+ in the 3x3) we can't
+                // cleanly kill — it ends the turn (the full burst), so prefer it over a single weak shot.
+                var tgt = BestPinTarget(u);
+                if (tgt == null) return false;
+                int cluster = 0;
+                foreach (var o in Enemies)
+                    if (o.Alive && o.Team == Team.Enemy && Util.ChebyDist(tgt.X, tgt.Y, o.X, o.Y) <= 1) cluster++;
+                var odds = Combat.ComputeOdds(Grid, u, tgt);
+                bool cleanKill = tgt.Hp <= odds.DmgMax && odds.HitChance >= 55;
+                if (cleanKill) return false;                  // just take the kill
+                if (cluster >= 2 || odds.HitChance < 45) { IssuePin(u, tgt); return true; }  // burst denies the zone
+                return false;
+            }
         }
         return false;
     }
@@ -3219,8 +3293,8 @@ public class Game
         if (CanAbility(u) && Util.Roll(45))
         {
             var kind = u.Ability;
-            // the two targeting VERBS resolve directly (DoAbility would open a mode the dumb
-            // smoke-test autopilot can't drive) -> exercise the IssueMark/IssueGrapple paths.
+            // the targeting VERBS resolve directly (DoAbility would open a mode the dumb smoke-test
+            // autopilot can't drive) -> exercise the IssueMark/IssueGrapple/IssuePin paths.
             if (kind == AbilityKind.Mark)
             {
                 var mt = BestMarkTarget(u);
@@ -3231,11 +3305,16 @@ public class Game
                 var gt = BestGrappleTarget(u);
                 if (gt != null) IssueGrapple(u, gt); // costs an action but not the turn -> fall through and shoot
             }
+            else if (kind == AbilityKind.Pin)
+            {
+                var pt = BestPinTarget(u);
+                if (pt != null) { IssuePin(u, pt); return; } // SUPPRESSING FIRE ends the turn (full burst)
+            }
             else
             {
                 DoAbility();
                 if (kind == AbilityKind.Steady || kind == AbilityKind.Suppress || kind == AbilityKind.Heal) return; // spent an action
-                // RunGun / Blitz are free stances — fall through and act with them
+                // RunGun / Blitz / Slipstream are free stances — fall through and act with them
             }
         }
 
@@ -3589,6 +3668,13 @@ public class Game
             return;
         }
 
+        if (PinMode)
+        {
+            PinTarget = (hovered != null && Selected != null) ? hovered : null;
+            PinValid = Selected != null && PinTarget != null && PinTargetOk(Selected, PinTarget);
+            return;
+        }
+
         if (AimMode)
         {
             if (hovered != null && hovered.Team == Team.Enemy && CanTarget(Selected, hovered))
@@ -3657,7 +3743,7 @@ public class Game
         if (Raylib.IsKeyPressed(KeyboardKey.Space) && HoverValid) { BoardAct(HoverX, HoverY); return; }
         if (KbCursor && Raylib.GetMouseDelta() != Vector2.Zero) KbCursor = false;  // mouse takes back over
 
-        if (Raylib.IsMouseButtonPressed(MouseButton.Right)) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; return; }
+        if (Raylib.IsMouseButtonPressed(MouseButton.Right)) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false; return; }
 
         if (Raylib.IsMouseButtonPressed(MouseButton.Left))
         {
@@ -3710,6 +3796,12 @@ public class Game
         {
             if (hovered != null && Selected != null && GrappleTargetOk(Selected, hovered)) IssueGrapple(Selected, hovered);
             else GrappleMode = false;
+            return;
+        }
+        if (PinMode)
+        {
+            if (hovered != null && Selected != null && PinTargetOk(Selected, hovered)) IssuePin(Selected, hovered);
+            else PinMode = false;
             return;
         }
         if (AimMode)
@@ -3841,7 +3933,7 @@ public class Game
         }
     }
 
-    void SelectUnit(Unit u) { Selected = u; AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; Audio.Play("select"); }
+    void SelectUnit(Unit u) { Selected = u; AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false; Audio.Play("select"); }
 
     void CycleSelection()
     {
@@ -3853,7 +3945,7 @@ public class Game
         SnapShot = false;
         GrenadeMode = false;
         ItemMode = false;
-        ShoveMode = false; MarkMode = false; GrappleMode = false;
+        ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false;
         Audio.Play("select");
     }
 
@@ -3874,7 +3966,7 @@ public class Game
         if (!HasAnyTarget(Selected)) return;
         GrenadeMode = false;
         ItemMode = false;
-        ShoveMode = false; MarkMode = false; GrappleMode = false;
+        ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false;
         AimMode = true;
         SnapShot = snap;
         AimTarget = FirstTargetFor(Selected);
@@ -3884,7 +3976,7 @@ public class Game
     {
         if (Selected == null || !Selected.CanAct || Selected.Grenades <= 0) return;
         GrenadeMode = !GrenadeMode;
-        if (GrenadeMode) { AimMode = false; SnapShot = false; ItemMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; }   // clear the snap variant too (review #3)
+        if (GrenadeMode) { AimMode = false; SnapShot = false; ItemMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false; }   // clear the snap variant too (review #3)
     }
 
     void IssueGrenade(int tx, int ty)
@@ -3902,7 +3994,7 @@ public class Game
     {
         if (Selected == null || !Selected.CanAct || Selected.ItemCharge <= 0 || Selected.Item == ItemKind.None) return;
         ItemMode = !ItemMode;
-        if (ItemMode) { AimMode = false; SnapShot = false; GrenadeMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; }   // clear the snap variant too (review #3)
+        if (ItemMode) { AimMode = false; SnapShot = false; GrenadeMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false; }   // clear the snap variant too (review #3)
     }
 
     /// Whether a utility item can legally land on (tx,ty): barricade needs an empty
@@ -3969,7 +4061,7 @@ public class Game
     {
         if (!CanShove(Selected)) return;
         ShoveMode = !ShoveMode;
-        if (ShoveMode) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; MarkMode = false; GrappleMode = false; }
+        if (ShoveMode) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; MarkMode = false; GrappleMode = false; PinMode = false; }
     }
 
     // ---- MARK (sharpshooter VERB): designate a foe; the whole squad shoots it better this round ----
@@ -3989,7 +4081,7 @@ public class Game
     {
         if (Selected == null || Selected.Ability != AbilityKind.Mark || !CanAbility(Selected)) return;
         MarkMode = !MarkMode;
-        if (MarkMode) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; GrappleMode = false; }
+        if (MarkMode) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; GrappleMode = false; PinMode = false; }
     }
 
     /// Designate `target`: set Unit.Marked so Combat.ComputeOdds gives EVERY squad member +MarkAim/
@@ -4038,7 +4130,7 @@ public class Game
     {
         if (Selected == null || Selected.Ability != AbilityKind.Grapple || !CanAbility(Selected)) return;
         GrappleMode = !GrappleMode;
-        if (GrappleMode) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; MarkMode = false; }
+        if (GrappleMode) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; MarkMode = false; PinMode = false; }
     }
 
     /// Yank `target` ONE tile TOWARD the assault (pull direction = sign(u - target)), reusing
@@ -4071,7 +4163,7 @@ public class Game
         // shoving a dormant pod is aggression -> it wakes (mirrors a shot revealing a pod).
         if (!target.Active) ActivatePod(target.PodId);
         Enqueue(new ShoveAnim(u, target, dx, dy), Team.Player);
-        ShoveMode = false; MarkMode = false; GrappleMode = false;
+        ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false;
     }
 
     void IssueMove(int tx, int ty)
@@ -4081,12 +4173,14 @@ public class Game
         if (c <= 0) return;
         int need = c <= Selected.MoveBudget ? 1 : 2;
         bool blitz = Selected.Blitz;
-        int cost = blitz ? Math.Max(0, need - 1) : need;   // Blitz: one action cheaper
+        bool slip = Selected.Slipstreaming;                 // ranger SLIPSTREAM: this move is free + silent
+        int cost = slip ? 0 : (blitz ? Math.Max(0, need - 1) : need);   // Blitz: one action cheaper
         if (cost > Selected.ActionsLeft) return;
         var path = Grid.ReconstructPath(_cameFrom, Selected.X, Selected.Y, tx, ty);
         if (path.Count == 0) return;
         Selected.ActionsLeft -= cost;
         if (blitz) Selected.Blitz = false;
+        if (slip) _slipDest = (tx, ty);                     // mark the silent move's destination (cleared on arrival)
         foreach (var (px, py) in path) Enqueue(new MoveStepAnim(Selected, px, py), Team.Player);
         AimMode = false;
         PathPreview.Clear();
@@ -4280,6 +4374,8 @@ public class Game
             AbilityKind.Heal    => u.ActionsLeft >= 1 && MostWoundedAdjacentAlly(u) != null,
             AbilityKind.Mark    => u.ActionsLeft >= 1 && HasMarkTarget(u),
             AbilityKind.Grapple => !u.ShovedThisTurn && u.ActionsLeft >= 1 && HasGrappleTarget(u),
+            AbilityKind.Slipstream => !u.Slipstreaming && u.ActionsLeft >= 1,   // free move stance (needs an action to actually move)
+            AbilityKind.Pin     => u.Ammo > 0 && u.ActionsLeft >= 1 && HasPinTarget(u),
             _ => false,
         };
     }
@@ -4341,14 +4437,88 @@ public class Game
         return best;
     }
 
+    // ---- SUPPRESSING FIRE (gunner VERB): pin a foe + its neighbours (area denial) ----
+
+    /// Is `target` a legal SUPPRESS target for gunner `u`? An alive, visible (LoS) enemy within PinRange.
+    /// (Pinning an already-pinned foe is allowed — it refreshes the zone / re-anchors it on a new cluster.)
+    bool PinTargetOk(Unit u, Unit target)
+    {
+        if (u == null || target == null || !u.CanAct || u.ActionsLeft < 1 || u.AbilityCharge <= 0 || u.Ammo <= 0) return false;
+        if (!target.Alive || target.Team != Team.Enemy) return false;
+        if (target.IsVip && CaptiveLocked) return false;             // can't suppress the caged captive
+        if (Util.TileDist(u.X, u.Y, target.X, target.Y) > PinRange) return false;
+        return Grid.HasLineOfSight(u.X, u.Y, target.X, target.Y);
+    }
+    /// Any legal SUPPRESS target for gunner `u`?
+    bool HasPinTarget(Unit u)
+    {
+        foreach (var e in Enemies) if (PinTargetOk(u, e)) return true;
+        return false;
+    }
+    /// The best AI/autopilot SUPPRESS pick: the visible foe whose 3x3 zone catches the MOST live enemies
+    /// (area denial wants a cluster), tie-broken by priority weight. Null if none visible.
+    Unit BestPinTarget(Unit u)
+    {
+        Unit best = null; int bestCluster = 0; float bestW = -1f;
+        foreach (var e in Enemies)
+        {
+            if (!PinTargetOk(u, e)) continue;
+            int cluster = 0;
+            foreach (var o in Enemies)
+                if (o.Alive && o.Team == Team.Enemy && Util.ChebyDist(e.X, e.Y, o.X, o.Y) <= 1) cluster++;
+            float w = PriorityWeight(e);
+            if (cluster > bestCluster || (cluster == bestCluster && w > bestW))
+            { bestCluster = cluster; bestW = w; best = e; }
+        }
+        return best;
+    }
+
+    void TogglePin()
+    {
+        if (Selected == null || Selected.Ability != AbilityKind.Pin || !CanAbility(Selected)) return;
+        PinMode = !PinMode;
+        if (PinMode) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; }
+    }
+
+    /// Lay down SUPPRESSING FIRE on `target`: pin it AND every enemy Chebyshev-adjacent to it for PinTurns
+    /// (Combat.SuppressAim penalty + cannot dash — see EnqueuePlannedMove). Costs the action + the charge +
+    /// a bullet and ENDS the turn (the full burst); the gunner also trains overwatch on the painted tile.
+    /// Suppressing fire is aggression -> breaks concealment + wakes the painted pod.
+    void IssuePin(Unit u, Unit target)
+    {
+        if (!PinTargetOk(u, target)) { PinMode = false; return; }
+        if (SquadConcealed) BreakConcealment();   // a suppressing burst gives the squad away (no actor -> no ambush flag)
+        u.AbilityCharge--; u.Ammo--; u.ActionsLeft = 0; u.OnOverwatch = true;
+        int pinned = 0;
+        foreach (var e in Enemies)
+        {
+            if (!e.Alive || e.Team != Team.Enemy) continue;
+            if (Util.ChebyDist(target.X, target.Y, e.X, e.Y) > 1) continue;
+            if (e.IsVip && CaptiveLocked) continue;
+            e.Pinned = PinTurns;
+            if (!e.Active) ActivatePod(e.PodId);   // suppressing a dormant foe wakes its pod
+            Fx.PopText(e.Pos + new Vector2(0, -34), "PINNED", Pal.Foe, 16f);
+            Fx.Burst(e.Pos, Pal.Foe, 8, 110f, 0.4f, 3f);
+            pinned++;
+        }
+        Fx.PopText(u.Pos + new Vector2(0, -34), "SUPPRESS", Pal.Accent, 16f);
+        Audio.Play("over");
+        PinMode = false; MarkMode = false; ShoveMode = false; GrappleMode = false;
+    }
+
+    /// Clear every PIN on the board (called at the gunner-owner's next player-turn start, mirroring how the
+    /// Suppress debuff is reset — so the pin lasts through the enemy turn it was meant to deny, then expires).
+    void ClearPins() { foreach (var e in Enemies) e.Pinned = 0; }
+
     void DoAbility()
     {
         var u = Selected;
         if (!CanAbility(u)) return;
-        // the two targeting VERBS enter a targeting mode for the human player (the AI/autopilot
-        // calls IssueMark/IssueGrapple directly via PrepAbilityFor, so it never opens a mode).
+        // the targeting VERBS enter a targeting mode for the human player (the AI/autopilot calls
+        // IssueMark/IssueGrapple/IssuePin directly via PrepAbilityFor, so it never opens a mode).
         if (u.Ability == AbilityKind.Mark)    { ToggleMark();    return; }
         if (u.Ability == AbilityKind.Grapple) { ToggleGrapple(); return; }
+        if (u.Ability == AbilityKind.Pin)     { TogglePin();     return; }
         var at = u.Pos + new Vector2(0, -34);
         switch (u.Ability)
         {
@@ -4356,6 +4526,13 @@ public class Game
                 u.RunGun = true; u.AbilityCharge--;
                 Fx.PopText(at, "RUN & GUN", Pal.Accent, 18f);
                 Fx.Burst(u.Pos, Pal.Accent, 10, 120f, 0.4f, 3f);
+                Audio.Play("reload");
+                break;
+            case AbilityKind.Slipstream:
+                // RANGER SLIPSTREAM: arm a free, overwatch-immune move (consumed by the next IssueMove).
+                u.Slipstreaming = true; u.AbilityCharge--;
+                Fx.PopText(at, "SLIPSTREAM", Pal.Accent, 18f);
+                Fx.Burst(u.Pos, Pal.Accent, 12, 150f, 0.4f, 3f);
                 Audio.Play("reload");
                 break;
             case AbilityKind.Blitz:
@@ -4401,7 +4578,7 @@ public class Game
         SnapShot = false;
         GrenadeMode = false;
         ItemMode = false;
-        ShoveMode = false; MarkMode = false; GrappleMode = false;
+        ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false;
     }
 
     void RequestEndTurn()
@@ -4512,7 +4689,7 @@ public class Game
         SnapShot = false;
         GrenadeMode = false;
         ItemMode = false;
-        ShoveMode = false; MarkMode = false; GrappleMode = false;
+        ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false;
         Selected = null;
         MoveCost = null;
         Phase = Phase.EnemyTurn;
@@ -4541,6 +4718,7 @@ public class Game
         _refundedThisTurn.Clear();        // flank-kill refund is one per soldier per turn
         HackedThisTurn = false;           // the terminal accepts one breach cycle per turn (hold)
         ClearMarks();                     // a sharpshooter's MARK lasts until the marker's next turn
+        ClearPins();                      // a gunner's SUPPRESSING FIRE pin lasts through one enemy turn, then lifts
         if (AutoPlay) AutoStallCheck();
         foreach (var p in Players) if (p.Alive) { p.BeginTurn(); TickStatuses(p); }
         foreach (var e in Enemies) if (e.Alive) { e.ReactedThisTurn = false; e.Suppress = 0; } // OW resets; suppression expires
@@ -4549,7 +4727,7 @@ public class Game
         SnapShot = false;
         GrenadeMode = false;
         ItemMode = false;
-        ShoveMode = false; MarkMode = false; GrappleMode = false;
+        ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false;
         ShowBanner("PLAYER TURN", false);
     }
 
@@ -4789,8 +4967,25 @@ public class Game
     void EnqueuePlannedMove(Unit e)
     {
         if (_aiPlan == null || _aiPlan.Path.Count == 0) return;
-        e.ActionsLeft -= _aiPlan.MoveActions;
-        foreach (var (px, py) in _aiPlan.Path) Enqueue(new MoveStepAnim(e, px, py), Team.Enemy);
+        var path = _aiPlan.Path;
+        int moveActions = _aiPlan.MoveActions;
+        // GUNNER SUPPRESSING FIRE (area denial): a PINNED foe cannot DASH — clamp a 2-action move down to a
+        // single action's worth of tiles (it can reposition a little, but can't sprint across the zone). Cost
+        // model matches CostMap (ortho 2 / diag 3 half-tiles); MoveBudget is the single-action budget.
+        if (e.Pinned > 0 && moveActions >= 2)
+        {
+            int budget = Math.Max(1, e.Mobility) * 2, acc = 0, px = e.X, py = e.Y, keep = 0;
+            foreach (var (nx, ny) in path)
+            {
+                acc += (nx != px && ny != py) ? 3 : 2;
+                if (acc > budget) break;
+                keep++; px = nx; py = ny;
+            }
+            if (keep < path.Count) { path = path.GetRange(0, keep); moveActions = keep == 0 ? 0 : 1; }
+            if (keep == 0) { Fx.PopText(e.Pos + new Vector2(0, -34), "PINNED", Pal.Foe, 16f); return; }
+        }
+        e.ActionsLeft -= moveActions;
+        foreach (var (px, py) in path) Enqueue(new MoveStepAnim(e, px, py), Team.Enemy);
         Audio.Play("move");
     }
 

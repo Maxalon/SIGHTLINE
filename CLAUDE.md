@@ -211,10 +211,12 @@ seeds (mix of WIN/LOSE, no exceptions):
   persists on the `Run.Squad` unit. Recruits TRICKLE (1/barracks above a floor of 3 — `Run.RecruitsPerBarracks/
   AttritionFloor`) so a wipe genuinely shrinks strength for a mission or two without death-spiralling.
   `SIGHTLINE_ARMORY`.
-- **VERB abilities (AGENCY W2):** **Sharpshooter MARK** (designate a foe → whole squad +10 aim/+15 crit vs it
-  until its next turn; `Unit.Marked`, `Combat.MarkAim/MarkCrit`) + **Assault GRAPPLE** (yank a nearby foe 1 tile
-  out of cover; reuses `ShoveAnim`). Append-only `AbilityKind`, save-safe; AI uses both (no TIMEOUT).
-  `SIGHTLINE_MARK`.
+- **VERB abilities — every class has a TOY (AGENCY W2+W4):** **Sharpshooter MARK** (squad focus-fire designator;
+  `Unit.Marked`, `Combat.MarkAim/MarkCrit`), **Assault GRAPPLE** (yank a foe out of cover; reuses `ShoveAnim`),
+  **Ranger SLIPSTREAM** (free, overwatch-immune long move; `Unit.Slipstreaming`), **Gunner SUPPRESSING FIRE**
+  (AoE PIN — a foe + its neighbours can't aim/DASH next turn; `Unit.Pinned`/`ClearPins`), and **Corpsman PATCH**
+  (heal adjacent ally). Append-only `AbilityKind`, save-safe; AI uses all via direct helpers (no TIMEOUT).
+  `SIGHTLINE_MARK`/`SIGHTLINE_VERB2`.
 - **FACTION-COUNTER PREP (AGENCY W3):** a barracks item (12 Intel) buys a one-mission counter to the upcoming
   faction (SYNDICATE→HARDENED OPTICS / LEGION→REACTIVE PLATING / WARDENS→FIELD SMOKE). `Run.PrepFaction`
   (persisted), `Combat.PrepFaction` static gated `==MissionFaction`. `SIGHTLINE_PREP`.
@@ -1130,6 +1132,12 @@ Before stopping:
 > 100% clean. New hooks: `SIGHTLINE_PRESSURE/_TOOLTIP/_SUMMARY/_ARMORY/_MARK/_PREP/_CONTENT`. **OPEN/NEXT
 > (documented):** more verbs for Ranger/Gunner/Corpsman; a new objective type; a strategic overworld economy;
 > audio on a real device (free CC0 assets now permitted by the owner); higher-heat ladder re-tune if needed.
+> **W4 (SHIPPED after the W1-3 merge, PR #59):** completed the verb vocabulary — **Ranger SLIPSTREAM** (free
+> overwatch-immune reposition, was BLITZ) + **Gunner SUPPRESSING FIRE** (AoE pin/area-denial, was single-foe
+> SUPPRESS), so all 5 classes now have a board-changing verb. Measured heat-0 N=30 ~57% (within variance);
+> COMBATTEST/AITEST/SAVETEST PASS, autoplay clean. Reset hygiene verified (Slipstreaming cleared in BeginTurn,
+> Pinned via ClearPins). Heat-4 ladder spot-check (pre-W4): run-completion ~43% (vs heat-0 ~60%) — healthy
+> descending ladder, missions 4-5 the intended pinch (68-73%), no hard gate.
 
 > **PROGRAM "RESONANCE" — feel, tactical depth & balance (read first).** Fully-autonomous
 > dev-team session (orchestrator + 2 research agents + balance-audit agent + 4 isolated-worktree dev agents

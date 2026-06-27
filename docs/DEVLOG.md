@@ -592,3 +592,79 @@ Wave 2 run-completion 47% (heat-0 83%) — depth + smarter AI without cratering;
 **KEYSTONE TOTAL: 5 waves, ~12 commits, ~10 agents (3 research + 5 dev + 2 review) — heat grace + run-completion
 metric, crossfire + smarter AI + anim-speed + shove-reach + crossfire visual, squad draft, enemy factions, and
 AI-uses-shove — all measured by the flywheel, 3 review rounds, 14 self-tests green, on PR #56.**
+
+---
+
+# PROGRAM "AGENCY" — decisions that matter (pressure, legibility, loadout, loss, toys, telegraph)
+
+Fully-autonomous dev-team session run as orchestrator + 2 research agents (gameplay-opportunity + balance-audit)
++ 6 isolated-worktree dev agents + 2 independent reviewers + the `SIGHTLINE_BALANCE` flywheel. Branch
+`claude/game-dev-orchestration-h41iom` → **PR #58, merged to `main`**. Three waves, 7 features + a UX polish,
+each verified (Release 0/0 + the `SIGHTLINE_*TEST` suites + autoplay + screenshots) and the two highest-risk
+waves independently reviewed. Theme: turn the run into a sequence of decisions that bite.
+
+## Research → priorities
+A gameplay-opportunity agent (read DESIGN.md + grepped the hot files) and a balance-audit agent (ran the
+flywheel) converged: the per-turn space leaned on a dominant overwatch-camp strategy (deferred across 3 prior
+programs), %-to-hit was an opaque rage surface, the barracks loadout was a false choice, casualties auto-
+backfilled so loss didn't bite, and every class "ability" was a stat-stance (no verbs). All became wave items.
+
+## Wave 1 — decision pressure & legibility (3 parallel devs, disjoint Hud regions: top-bar / tooltip / end-card)
+- **Anti-turtle PRESSURE CLOCK** (Game/Combat/Hud): graced clock (free turns 1-4) on Elim/Hack/Decapitate →
+  escalating enemy aim (`Combat.PressureAim`) + reinforcement waves (reuse Defend machinery); `PRES` rung-pip
+  meter. Turtling is now strictly worse than advancing.
+- **Visible randomness mitigation** (Combat/Hud): surfaced the hidden graze floor + streak-breaker in the shot
+  tooltip (`ShotOdds.GrazeFloor/StreakBonus`). Math unchanged — legibility only.
+- **Run-end payoff** (Hud/Fx/Game/Run): VICTORY/RUN OVER summary card (stat slabs + surviving-squad MVP + KIA
+  memorial `Run.Memorial`) + a victory flourish.
+
+## Wave 2 — barracks as a decision layer + new toys (2 parallel devs: meta vs abilities)
+- **ARMORY + meaningful ATTRITION** (Run/Mission/SaveGame/Hud/Unit/Game-shop): re-arm from a class weapon pool
+  for Intel (persists on the Run unit); recruits trickle 1/barracks above a floor of 3 so a wipe shrinks
+  strength without death-spiralling.
+- **VERB abilities** (Game/Unit/Combat/Hud/Renderer): Sharpshooter **MARK** (squad focus-fire designator) +
+  Assault **GRAPPLE** (yank a foe out of cover). Append-only `AbilityKind`; AI uses both directly (no stall).
+
+## Wave 3 — close the faction loop + content (2 parallel devs: meta vs content, fully disjoint)
+- **FACTION-COUNTER PREP** (Run/Combat/Hud/Game/SaveGame): a barracks item buys a one-mission counter to the
+  upcoming faction (HARDENED OPTICS / REACTIVE PLATING / FIELD SMOKE); `Combat.PrepFaction` gated ==MissionFaction.
+- **2 enemies + 3 arenas** (Mission/Ai/Renderer/Maps): **LANCER** (phalanx → grenade lure) + **HOUND** (swarmer
+  → hunts the isolated soldier, pairs); arenas GARRISON/PINNACLE/REFINERY. Pure Ai.Plan biases; EnemyHint
+  telegraphs them. Plus a **2-column requisition grid** polish.
+
+## Measured (flywheel, integrated build, heat-0, N=50 / 249 missions)
+Run-completion **~60%**; per-mission **81-100%** (no gate); per-objective **81-100%** — **Escort is no longer a
+cliff (92.5%)**; avg 4.58/6 cleared; **0 frame-cap hits** (no TIMEOUT). Attrition (17 RUN OVER) is the main loss
+pressure without cratering. The base is well-tuned — **no separate tuning pass was needed**; the Heat ladder
+carries mastery.
+
+## Reviews
+Wave 1+2 → **SHIP** (no CRIT/HIGH/MED; attrition floor, pressure spawn/TIMEOUT fences, static resets all
+verified). Wave 3 → **SHIP-WITH-FIXES**: one LOW defensive finding (`Combat.PrepFaction` not cleared at
+barracks/run-end) — applied a one-liner at both sites to match the "no stale static bleeds" invariant.
+
+## Process learnings (AGENCY)
+1. **The worktree-base-revert hazard is REAL and silent.** A dev that generates its patch as
+   `git diff origin/branch` AFTER origin moved (an earlier dev merged) produces a diff that BUNDLES A REVERT of
+   the earlier work (Dev E's patch was effectively "verbs MINUS armory"; applying it stripped Dev D's armory from
+   the shared files, and a clean `git apply` hid it). DETECTION: after applying, grep the integrated tree for the
+   PRIOR feature's symbols (`grep -c DoRearm`); if they vanished, you reverted them. FIX: regenerate as
+   `git diff <true-base> <devcommit> -- <explicit owned files>` (the pure feature diff) and re-apply.
+2. **Hardened protocol that PREVENTS it:** each worktree dev records `BASE=$(git rev-parse HEAD)` right after
+   reset and emits `git diff $BASE HEAD -- <explicit file list>` — never `origin/branch`, always an explicit
+   owned-file list. With this, Waves 3+4 applied 100% clean (base == HEAD, direct apply).
+3. **One Game.cs owner per wave.** Game.cs is the bottleneck; pair it with disjoint-file devs (meta/content/
+   Hud-regions) so patches don't collide. Three devs CAN share Hud.cs if they own disjoint regions (top-bar /
+   tooltip / end-card / requisition / action-bar) — the proven pattern.
+4. **The flywheel is slow under software GL** (~13 min for N=50). Use small N=30 dev sanity batches inline and
+   one orchestrator N=50 for the headline number; don't block integration on it. `tail` buffers until EOF, so a
+   batch shows no incremental stdout — read the aggregate JSON it writes at completion.
+
+## Wave 4 (in progress at handoff)
+Completing the verb vocabulary: Ranger + Gunner get genuine verbs (replacing the BLITZ/SUPPRESS stat-stances) so
+every class has a TOY, not a number — matching the MARK/GRAPPLE pattern.
+
+**AGENCY TOTAL (merged): 3 waves, ~10 commits, ~10 agents (2 research + 6 dev + 2 review) — pressure clock,
+legible odds, run-end payoff, armory, attrition, MARK/GRAPPLE verbs, faction-prep, LANCER/HOUND + 3 arenas, and
+a 2-column requisition — flywheel-measured (heat-0 ~60% run-completion, no cliff), 2 review rounds, all self-
+tests green, PR #58.**

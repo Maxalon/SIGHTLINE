@@ -182,6 +182,7 @@ public static class Combat
         if (highGround) hit += HighGroundAim;
         if (a.Steady) hit += SteadyAim;          // sharpshooter: braced shot
         if (a.Suppress > 0) hit -= a.Suppress;   // gunner: suppressed shooter
+        if (a.Pinned > 0) hit -= SuppressAim;    // gunner SUPPRESSING FIRE: pinned foe shoots wild (area denial)
         if (a.Wound > 0) hit -= Unit.WoundAim;   // attrition: a wounded shooter is shakier
         if (a.HasStatus(StatusKind.Disoriented)) hit -= Unit.DisorientAim;  // dazed: can't aim straight
         // promotion perks (attacker)
