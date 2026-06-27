@@ -144,6 +144,42 @@ public class Game
     bool _shopDone = true;
     public bool ShopDone => _shopDone;
 
+    // ---- ARMORY (re-arm a soldier with a different weapon they can carry) ----
+    // A sub-screen of REQUISITION: spend Intel to swap a soldier's weapon within their
+    // class's thematic option set (Unit.ArmoryOptions). The chosen weapon persists on the
+    // Unit (Run.Squad units survive across missions, and SaveGame round-trips Weapon.Kind),
+    // so the player's pick sticks. A flat cost keeps it readable + balance-safe (you can only
+    // pick within the role, not upgrade to a strictly-better gun).
+    public const int ArmoryCost = 7;
+    public bool ArmoryMode;          // true = the requisition screen shows the armory picker
+    public Unit ArmorySoldier;       // the soldier being re-armed (null = pick one)
+    public void ToggleArmory() { ArmoryMode = !ArmoryMode; ArmorySoldier = null; Audio.Play("select"); }
+    public List<Unit> ArmoryRoster => _run.Squad.Where(u => !u.IsVip).ToList();
+
+    /// Can this soldier be re-armed to weapon kind k right now? (different from current, affordable,
+    /// and a legal option for their class.)
+    public bool CanRearm(Unit u, WeaponKind k)
+    {
+        if (u == null || u.IsVip || u.Weapon == null) return false;
+        if (u.Weapon.Kind == k) return false;                      // already carrying it
+        if (_run.Intel < ArmoryCost) return false;
+        return System.Array.IndexOf(Weapon.ArmoryOptions(u.Cls), k) >= 0;
+    }
+
+    /// Re-arm a soldier with a new weapon: pay Intel, swap the weapon, re-bake installed mods,
+    /// reseed the clip. Persistent (the weapon is on the Unit; SaveGame stores Weapon.Kind).
+    public void DoRearm(Unit u, WeaponKind k)
+    {
+        if (!CanRearm(u, k)) { Audio.Play("miss"); return; }
+        _run.Intel -= ArmoryCost;
+        u.Weapon = Weapon.Make(k);
+        u.RefreshWeaponMods();          // re-apply any installed mods onto the fresh weapon
+        u.Ammo = u.Weapon.Clip;
+        _run.Report.Add($"{u.Name} re-armed with {u.Weapon.Name}");
+        Stats.RecordPurchase("ARMORY");
+        Audio.Play("select");
+    }
+
     // The shop is two tiers: a fixed block of consumable/stat purchases (indices 0..ModBase-1)
     // then the PERSISTENT WEAPON UPGRADES (indices ModBase..) appended from WeaponModDef — the
     // run's real reward sink, so Intel buys permanent firepower that out-paces attrition. The
@@ -1374,6 +1410,7 @@ public class Game
             string heatNote = heatBonus > 0 ? $"  (+{heatBonus} HEAT {_run.HeatLevel})" : "";
             _run.Report.Insert(0, $"Recovered {gained} intel{heatNote}  (total {_run.Intel})");
             _shopDone = false;
+            ArmoryMode = false; ArmorySoldier = null;   // open requisition in the shop view, not armory
             _run.GenerateOffers(_run.Mission + 1);
             _run.GenerateBoonOffer();                // offer a run-scoped boon pick this barracks
             Phase = Phase.Barracks;
@@ -4653,8 +4690,38 @@ public class Game
     void HandleShopClick()
     {
         if (Raylib.IsKeyPressed(KeyboardKey.Enter)) { _shopDone = true; Audio.Play("turn"); return; }
+        // [A] toggles the ARMORY sub-screen; Esc backs out of it.
+        if (Raylib.IsKeyPressed(KeyboardKey.A)) { ToggleArmory(); return; }
+        if (ArmoryMode && Raylib.IsKeyPressed(KeyboardKey.Escape))
+        {
+            if (ArmorySoldier != null) ArmorySoldier = null; else ArmoryMode = false;
+            Audio.Play("select"); return;
+        }
         if (!Raylib.IsMouseButtonPressed(MouseButton.Left)) return;
         var m = Raylib.GetMousePosition();
+
+        // the ARMORY toggle is available in both views
+        if (Raylib.CheckCollisionPointRec(m, Hud.ArmoryToggle)) { ToggleArmory(); return; }
+
+        if (ArmoryMode)
+        {
+            if (ArmorySoldier == null)
+            {
+                // pick a soldier to re-arm
+                var roster = ArmoryRoster;
+                for (int i = 0; i < Hud.ArmorySoldierBtns.Count && i < roster.Count; i++)
+                    if (Raylib.CheckCollisionPointRec(m, Hud.ArmorySoldierBtns[i])) { ArmorySoldier = roster[i]; Audio.Play("select"); return; }
+            }
+            else
+            {
+                // pick a weapon for the selected soldier
+                var opts = Weapon.ArmoryOptions(ArmorySoldier.Cls);
+                for (int i = 0; i < Hud.ArmoryWeaponBtns.Count && i < opts.Length; i++)
+                    if (Raylib.CheckCollisionPointRec(m, Hud.ArmoryWeaponBtns[i])) { DoRearm(ArmorySoldier, opts[i]); return; }
+            }
+            return;   // armory swallows other clicks while open
+        }
+
         for (int i = 0; i < Hud.ShopBtns.Length; i++)
             if (Raylib.CheckCollisionPointRec(m, Hud.ShopBtns[i])) { DoPurchase(i); return; }
         if (Raylib.CheckCollisionPointRec(m, Hud.ShopProceed)) { _shopDone = true; Audio.Play("turn"); }
@@ -4812,6 +4879,16 @@ public class Game
         _run.Report.Insert(0, $"Recovered 17 intel  (total {_run.Intel})");
         _shopDone = false;
         Phase = Phase.Barracks;
+    }
+
+    /// Harness hook (screenshot): the REQUISITION screen with the ARMORY sub-panel open,
+    /// a soldier selected so the weapon picker shows.
+    public void DebugArmory()
+    {
+        DebugShop();
+        _run.Intel = 40;
+        ArmoryMode = true;
+        ArmorySoldier = _run.Squad.FirstOrDefault(u => !u.IsVip);
     }
 
     /// Headless self-test (SIGHTLINE_DEATHTEST): kill the whole squad on an escort

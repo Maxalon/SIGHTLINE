@@ -31,6 +31,10 @@ public static class Hud
     public static System.Collections.Generic.List<(int Id, Rectangle Rect)> NodeBtns = new();
     public static Rectangle[] ShopBtns = new Rectangle[Game.ShopName.Length];
     public static Rectangle ShopProceed;
+    // ARMORY sub-screen (re-arm a soldier): a toggle button + per-soldier rows + per-weapon rows.
+    public static Rectangle ArmoryToggle;
+    public static System.Collections.Generic.List<Rectangle> ArmorySoldierBtns = new();
+    public static System.Collections.Generic.List<Rectangle> ArmoryWeaponBtns = new();
     // bench mechanic (S3-A): toggled in the barracks debrief for wounded soldiers
     public static System.Collections.Generic.List<(Unit unit, Rectangle rect)> BenchBtns = new();
     // run-scoped boon offer (Wave 3): the pick-1-of-3 boon cards in the barracks
@@ -1971,7 +1975,11 @@ public static class Hud
         int items = Game.ShopName.Length;
         int ih = 80, gap = 10;
         int squadH = 40;
-        int w = 560, h = 104 + squadH + items * (ih + gap) + 60;
+        // The armory sub-screen is much shorter than the (10-item) shop list, so size the card
+        // to the active view — otherwise the tall shop card clips off the top/bottom of the screen.
+        int shopH = 104 + squadH + items * (ih + gap) + 60;
+        int armoryH = 104 + 28 + Run.RosterMax * 52 + 64;   // fits the soldier list (the taller of the two views)
+        int w = 560, h = g.ArmoryMode ? armoryH : shopH;
         int x = Cfg.ScreenW / 2 - w / 2, y = Cfg.ScreenH / 2 - h / 2;
         y -= (int)((1f - Util.EaseOutQuad(PanelAnim("requisition", 0.15f))) * 16f);  // slide-down entrance
         var card = new Rectangle(x, y, w, h);
@@ -1982,6 +1990,15 @@ public static class Hud
         Raylib.DrawTextEx(Cfg.Font, title, new Vector2(x + w / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, title, 36, 1f).X / 2, y + 24), 36, 1f, Pal.Accent);
         string intel = $"INTEL AVAILABLE: {run.Intel}";
         Raylib.DrawTextEx(Cfg.Font, intel, new Vector2(x + w / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, intel, 16, 1f).X / 2, y + 66), 16, 1f, Pal.Good);
+
+        // ARMORY toggle (top-right of the card): swap to the re-arm sub-screen and back.
+        ArmoryToggle = new Rectangle(x + w - 132, y + 24, 108, 30);
+        bool ath = Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), ArmoryToggle);
+        Raylib.DrawRectangleRounded(ArmoryToggle, 0.3f, 6, g.ArmoryMode ? Pal.Accent : (ath ? Pal.RGBA(24, 34, 46) : Pal.RGBA(14, 20, 28)));
+        Raylib.DrawRectangleLinesEx(ArmoryToggle, 1.4f, g.ArmoryMode ? Pal.Accent : Pal.PanelBd);
+        CenterText(g.ArmoryMode ? "< SHOP" : "ARMORY [A]", ArmoryToggle, 13, g.ArmoryMode ? Pal.RGBA(3, 18, 26) : Pal.Txt);
+
+        if (g.ArmoryMode) { DrawArmory(g, x, y, w, h); return; }
 
         // squad HP strip so the player can judge whether a heal/stim is worth it
         DrawSquadHpStrip(run.Squad, x + 30, y + 96, w - 60);
@@ -2011,6 +2028,79 @@ public static class Hud
 
         ShopProceed = new Rectangle(x + w / 2 - 130, y + h - 60, 260, 44);
         bool ph = Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), ShopProceed);
+        Raylib.DrawRectangleRounded(ShopProceed, 0.3f, 8, ph ? Pal.RGBA(92, 200, 251) : Pal.Friend);
+        CenterText("PROCEED TO DEPLOYMENT", ShopProceed, 15, Pal.RGBA(3, 18, 26));
+    }
+
+    /// The ARMORY sub-screen of REQUISITION: re-arm a soldier with a different weapon their class
+    /// can carry (Weapon.ArmoryOptions). Two steps: pick a soldier, then pick a weapon. A flat
+    /// Intel cost; the choice persists on the soldier across the run.
+    static void DrawArmory(Game g, int x, int y, int w, int h)
+    {
+        var run = g.RunState;
+        ArmorySoldierBtns.Clear();
+        ArmoryWeaponBtns.Clear();
+        var mouse = Raylib.GetMousePosition();
+
+        string sub = $"ARMORY  -  re-arm a soldier ({Game.ArmoryCost} INTEL each)";
+        Raylib.DrawTextEx(Cfg.Font, sub, new Vector2(x + 30, y + 92), 14, 1f, Pal.TxtDim);
+
+        int iy = y + 118;
+        if (g.ArmorySoldier == null)
+        {
+            // STEP 1: choose a soldier
+            Raylib.DrawTextEx(Cfg.Font, "SELECT A SOLDIER", new Vector2(x + 30, iy), 13, 1f, Pal.Accent);
+            iy += 24;
+            var roster = g.ArmoryRoster;
+            foreach (var u in roster)
+            {
+                var r = new Rectangle(x + 30, iy, w - 60, 44);
+                ArmorySoldierBtns.Add(r);
+                bool hov = Raylib.CheckCollisionPointRec(mouse, r);
+                Raylib.DrawRectangleRounded(r, 0.12f, 6, hov ? Pal.RGBA(24, 34, 46) : Pal.RGBA(14, 20, 28));
+                Raylib.DrawRectangleLinesEx(r, 1.3f, hov ? Pal.Accent : Pal.PanelBd);
+                Raylib.DrawTextEx(Cfg.Font, $"{u.Name}  ({u.Cls})", new Vector2((int)r.X + 14, (int)r.Y + 8), 16, 1f, Pal.Txt);
+                string cur = $"carrying: {u.Weapon?.Name}";
+                Raylib.DrawTextEx(Cfg.Font, cur, new Vector2((int)r.X + 14, (int)r.Y + 27), 12, 1f, Pal.TxtDim);
+                int nopt = Weapon.ArmoryOptions(u.Cls).Length;
+                string opt = $"{nopt} option{(nopt > 1 ? "s" : "")} >";
+                Raylib.DrawTextEx(Cfg.Font, opt, new Vector2((int)(r.X + r.Width - (int)Raylib.MeasureTextEx(Cfg.Font, opt, 13, 1f).X - 14), (int)r.Y + 15), 13, 1f, hov ? Pal.Accent : Pal.TxtDim);
+                iy += 52;
+            }
+        }
+        else
+        {
+            // STEP 2: choose a weapon for the selected soldier
+            var u = g.ArmorySoldier;
+            Raylib.DrawTextEx(Cfg.Font, $"RE-ARM  {u.Name} ({u.Cls})", new Vector2(x + 30, iy), 14, 1f, Pal.Accent);
+            iy += 24;
+            var opts = Weapon.ArmoryOptions(u.Cls);
+            foreach (var k in opts)
+            {
+                var r = new Rectangle(x + 30, iy, w - 60, 56);
+                ArmoryWeaponBtns.Add(r);
+                bool current = u.Weapon != null && u.Weapon.Kind == k;
+                bool can = g.CanRearm(u, k);
+                bool hov = can && Raylib.CheckCollisionPointRec(mouse, r);
+                Color bg = current ? Pal.RGBA(20, 40, 30) : (hov ? Pal.RGBA(24, 34, 46) : Pal.RGBA(14, 20, 28));
+                Raylib.DrawRectangleRounded(r, 0.1f, 6, bg);
+                Raylib.DrawRectangleLinesEx(r, 1.4f, current ? Pal.Good : (can ? (hov ? Pal.Accent : Pal.PanelBd) : Pal.RGBA(40, 46, 54)));
+                var probe = Weapon.Make(k);
+                Raylib.DrawTextEx(Cfg.Font, probe.Name, new Vector2((int)r.X + 14, (int)r.Y + 8), 17, 1f, current ? Pal.Good : (can ? Pal.Txt : Pal.TxtDim));
+                Raylib.DrawTextEx(Cfg.Font, Weapon.KindBlurb(k), new Vector2((int)r.X + 14, (int)r.Y + 31), 12, 1f, Pal.TxtDim);
+                if (current)
+                    Raylib.DrawTextEx(Cfg.Font, "EQUIPPED", new Vector2((int)(r.X + r.Width - (int)Raylib.MeasureTextEx(Cfg.Font, "EQUIPPED", 13, 1f).X - 14), (int)r.Y + 20), 13, 1f, Pal.Good);
+                else if (can)
+                    Raylib.DrawTextEx(Cfg.Font, $"[ {Game.ArmoryCost} INTEL ]", new Vector2((int)(r.X + r.Width - (int)Raylib.MeasureTextEx(Cfg.Font, $"[ {Game.ArmoryCost} INTEL ]", 13, 1f).X - 14), (int)r.Y + 20), 13, 1f, Pal.Accent);
+                else
+                    Raylib.DrawTextEx(Cfg.Font, "- need intel -", new Vector2((int)(r.X + r.Width - (int)Raylib.MeasureTextEx(Cfg.Font, "- need intel -", 12, 1f).X - 14), (int)r.Y + 21), 12, 1f, Pal.Foe);
+                iy += 64;
+            }
+            Raylib.DrawTextEx(Cfg.Font, "[Esc] back to soldier list", new Vector2(x + 30, iy + 4), 12, 1f, Pal.TxtDim);
+        }
+
+        ShopProceed = new Rectangle(x + w / 2 - 130, y + h - 60, 260, 44);
+        bool ph = Raylib.CheckCollisionPointRec(mouse, ShopProceed);
         Raylib.DrawRectangleRounded(ShopProceed, 0.3f, 8, ph ? Pal.RGBA(92, 200, 251) : Pal.Friend);
         CenterText("PROCEED TO DEPLOYMENT", ShopProceed, 15, Pal.RGBA(3, 18, 26));
     }

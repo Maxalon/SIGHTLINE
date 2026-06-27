@@ -234,6 +234,9 @@ public static class SaveGame
                 CustomTag = "BREACHER", Wound = 2,
             };
             a.Benched = true;
+            // ARMORY: a player-chosen weapon (ASSAULT re-armed Rifle -> Shotgun). Must round-trip,
+            // and the installed mods must re-bake onto the SWAPPED weapon.
+            a.Weapon = Weapon.Make(WeaponKind.Shotgun);
             a.Perks.Add(Perk.Deadeye); a.Perks.Add(Perk.Tank);
             a.InstallMod(WeaponMod.Scope); a.InstallMod(WeaponMod.ExtendedMag);   // persistent weapon upgrades
             a.Nickname = "REAPER";
@@ -263,7 +266,7 @@ public static class SaveGame
             if (g0.Name != a.Name || g0.Cls != a.Cls || g0.Hp != a.Hp || g0.MaxHp != a.MaxHp ||
                 g0.Aim != a.Aim || g0.Mobility != a.Mobility || g0.Kills != a.Kills || g0.Rank != a.Rank)
                 fails.Add("unit0Stats");
-            if (g0.Weapon.Kind != WeaponKind.Rifle) fails.Add("weapon");
+            if (g0.Weapon.Kind != WeaponKind.Shotgun) fails.Add("weapon");   // ARMORY re-arm persists
             if (g0.BonusGrenades != 2) fails.Add("bonusGrenades");
             if (g0.CustomTag != "BREACHER") fails.Add("customTag");
             if (g0.Wound != 2) fails.Add("wound");
@@ -271,8 +274,8 @@ public static class SaveGame
             if (!g0.HasPerk(Perk.Deadeye) || !g0.HasPerk(Perk.Tank) || g0.Perks.Count != 2) fails.Add("perks");
             // weapon mods round-trip AND re-bake onto the rebuilt weapon's effective stats
             if (!g0.HasMod(WeaponMod.Scope) || !g0.HasMod(WeaponMod.ExtendedMag) || g0.WeaponMods.Count != 2) fails.Add("weaponMods");
-            if (g0.Weapon.AimBonus != WeaponModDef.ScopeAim) fails.Add("weaponModScopeApplied");      // Rifle base aimBonus 0 + scope
-            if (g0.Weapon.Clip != 4 + WeaponModDef.MagClip) fails.Add("weaponModMagApplied");         // Rifle base clip 4 + extended mag
+            if (g0.Weapon.AimBonus != WeaponModDef.ScopeAim) fails.Add("weaponModScopeApplied");      // Shotgun base aimBonus 0 + scope
+            if (g0.Weapon.Clip != 2 + WeaponModDef.MagClip) fails.Add("weaponModMagApplied");         // Shotgun base clip 2 + extended mag
             if (g0.Nickname != "REAPER") fails.Add("nickname");
             if (!g0.HasTrait(Trait.Killer) || !g0.HasTrait(Trait.IronWill) || g0.Traits.Count != 2) fails.Add("traits");
             if (g0.Bonds.Count != 1 || g0.Bonds[0] != "NOX") fails.Add("bonds");

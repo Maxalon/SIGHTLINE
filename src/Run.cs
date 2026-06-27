@@ -230,6 +230,17 @@ public class Run
     // the battlefield (spawns/autopilot/render) is unchanged; only the META roster grows.
     public const int RosterMax = 6;           // soldiers carried in the roster (deploy + bench; UI fits 6)
 
+    // ---- ATTRITION: recruits TRICKLE, they don't instantly backfill ----
+    // Losing soldiers must COST you. The barracks used to refill the roster to RosterMax every
+    // mission, so a wipe-to-1 was erased by the next debrief and casualties had no teeth. Now at
+    // most RecruitsPerBarracks fresh rookies join per barracks, so a bad mission leaves you
+    // genuinely short-handed (fielding 3-4 instead of 5-6) for a mission or two while the roster
+    // rebuilds. A HARD FLOOR (AttritionFloor) still guarantees a deployable squad — you can never
+    // death-spiral below it (the run is only lost on a true wipe), so attrition bites without
+    // becoming unfair. Rookies carry no rank/perks/mods — that's the price of the loss.
+    public const int RecruitsPerBarracks = 1;  // max fresh rookies the barracks supplies per mission
+    public const int AttritionFloor = 3;       // the roster is always topped up to at least this many
+
     // Deployed squad size GROWS as the campaign deepens. Balance data: with a flat 4-soldier
     // deploy, the run is a geometric product that collapses (4 soldiers x 2 actions vs 9-12
     // enemies by m5) — per-mission tweaks barely moved the 2% run-completion. Reinforcing the
@@ -705,21 +716,38 @@ public class Run
         // bonds: every pair of survivors that shared this mission grows closer
         AdvanceBonds();
 
-        // backfill the ROSTER up to RosterMax with rookie recruits — UNLESS Heat "RELENTLESS"
-        // (rung 8) turns off reinforcements, so casualties permanently shrink the roster for the
-        // run. (At least one soldier always survives to reach the barracks; a full wipe loses the
-        // run.) The roster is a bench: only DeployCap deploy each mission, so a deeper roster means
-        // the wounded recover off the line while the squad still fields a full healthy complement.
+        // ATTRITION backfill (see RecruitsPerBarracks / AttritionFloor). Recruits TRICKLE in
+        // rather than instantly refilling to RosterMax, so a wipe genuinely shrinks your strength
+        // for a mission or two. A hard floor still guarantees a deployable squad (no death-spiral).
+        // Heat "RELENTLESS" (rung 8) turns OFF all reinforcements — casualties permanently shrink
+        // the roster for the run.
         if (Heat.NoReinforcements(HeatLevel))
         {
             if (Squad.Count < NextDeployCap)
                 Report.Add($"No reinforcements (HEAT) -- deploying {Squad.Count} strong");
         }
-        else while (Squad.Count < RosterMax)
+        else
         {
-            var rec = Sightline.Mission.MakeRecruit();
-            Squad.Add(rec);
-            Report.Add($"{rec.Name} joins the roster  (ROOKIE {rec.Cls})");
+            // 1) emergency floor: if a bad mission dropped the roster below AttritionFloor, top it
+            //    straight back up to the floor (anti-death-spiral — you always have a squad to field).
+            while (Squad.Count < AttritionFloor)
+            {
+                var rec = Sightline.Mission.MakeRecruit();
+                Squad.Add(rec);
+                Report.Add($"{rec.Name} drafted to fill the ranks  (ROOKIE {rec.Cls})");
+            }
+            // 2) normal trickle: above the floor, at most RecruitsPerBarracks rookie joins per
+            //    barracks, so the roster rebuilds gradually toward RosterMax (losses still bite).
+            int added = 0;
+            while (Squad.Count < RosterMax && added < RecruitsPerBarracks)
+            {
+                var rec = Sightline.Mission.MakeRecruit();
+                Squad.Add(rec);
+                Report.Add($"{rec.Name} joins the roster  (ROOKIE {rec.Cls})");
+                added++;
+            }
+            if (Squad.Count < RosterMax)
+                Report.Add($"Roster understrength: {Squad.Count}/{RosterMax} (recruits trickle in)");
         }
 
         // pick the default deployment for next mission (best healthy DeployCap; bench the rest).

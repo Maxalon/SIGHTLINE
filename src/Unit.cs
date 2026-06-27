@@ -147,6 +147,31 @@ public class Weapon
         WeaponKind.Smg     => New("SMG",     k, 2, 4, 0, 10, 4),
         _ => New("Rifle", WeaponKind.Rifle, 3, 5, 0, 10, 4),
     };
+
+    /// The weapons a class may carry, for the barracks ARMORY (re-arm decision). Each set is
+    /// a small THEMATIC pool (2-3 options) around the class role, so the pick is a real
+    /// trade-off (e.g. an Assault leaning shotgun for breach vs SMG for mobility) rather than a
+    /// free pick of every gun — keeps balance intact. The class's default weapon leads the list.
+    public static WeaponKind[] ArmoryOptions(string cls) => cls switch
+    {
+        "ASSAULT"      => new[] { WeaponKind.Rifle, WeaponKind.Shotgun, WeaponKind.Smg },
+        "RANGER"       => new[] { WeaponKind.Shotgun, WeaponKind.Smg, WeaponKind.Rifle },
+        "SHARPSHOOTER" => new[] { WeaponKind.Sniper, WeaponKind.Rifle },
+        "GUNNER"       => new[] { WeaponKind.Lmg, WeaponKind.Rifle },
+        "CORPSMAN"     => new[] { WeaponKind.Smg, WeaponKind.Rifle, WeaponKind.Shotgun },
+        _ => new[] { WeaponKind.Rifle },
+    };
+
+    /// One-line tactical descriptor for a weapon kind (shown in the armory picker).
+    public static string KindBlurb(WeaponKind k) => k switch
+    {
+        WeaponKind.Rifle   => "balanced - gentle range falloff, 4-round clip",
+        WeaponKind.Shotgun => "brutal up close, useless at range - 2-round clip",
+        WeaponKind.Sniper  => "rewards distance, punished point-blank - high crit",
+        WeaponKind.Lmg     => "wide flat medium band, big clip - suppression",
+        WeaponKind.Smg     => "mobile close-range snap - light damage",
+        _ => "",
+    };
 }
 
 public class Unit
