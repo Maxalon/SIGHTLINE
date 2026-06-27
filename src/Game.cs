@@ -89,6 +89,24 @@ public class Game
     public Unit ShoveTarget;
     public bool ShoveValid;
 
+    // MARK targeting (sharpshooter ability VERB): designate a foe in line of sight -> the whole
+    // squad gets +aim/+crit vs it (Combat.MarkAim/MarkCrit) until the sharpshooter's next turn.
+    // Mirrors the ShoveMode pattern (ToggleMark/MarkTargetOk/IssueMark + key 5 + reset sites).
+    // A targeting verb, not a self-stance: it changes "who do we all shoot" on the board.
+    public bool MarkMode;
+    public Unit MarkTarget;     // hovered enemy under the cursor while in MarkMode (null = none)
+    public bool MarkValid;      // gates the click (target is a legal MARK target)
+    Unit _markedBy;             // the sharpshooter who placed the current MARK (clears it on their next turn)
+
+    // GRAPPLE targeting (assault ability VERB): yank a nearby foe ONE tile toward you, out of its
+    // cover (reuses ShoveAnim with the pull direction = sign(assault - target)). A forced-movement
+    // repositioning toy. Reach is Chebyshev <= GrappleReach; 1 use/soldier/turn (Unit.ShovedThisTurn,
+    // shared with SHOVE so the two repositioning verbs share one anti-loop budget).
+    public const int GrappleReach = 2;
+    public bool GrappleMode;
+    public Unit GrappleTarget;
+    public bool GrappleValid;
+
     // banner
     public string BannerText = "";
     public float BannerTimer, BannerMax;
@@ -144,6 +162,42 @@ public class Game
     bool _shopDone = true;
     public bool ShopDone => _shopDone;
 
+    // ---- ARMORY (re-arm a soldier with a different weapon they can carry) ----
+    // A sub-screen of REQUISITION: spend Intel to swap a soldier's weapon within their
+    // class's thematic option set (Unit.ArmoryOptions). The chosen weapon persists on the
+    // Unit (Run.Squad units survive across missions, and SaveGame round-trips Weapon.Kind),
+    // so the player's pick sticks. A flat cost keeps it readable + balance-safe (you can only
+    // pick within the role, not upgrade to a strictly-better gun).
+    public const int ArmoryCost = 7;
+    public bool ArmoryMode;          // true = the requisition screen shows the armory picker
+    public Unit ArmorySoldier;       // the soldier being re-armed (null = pick one)
+    public void ToggleArmory() { ArmoryMode = !ArmoryMode; ArmorySoldier = null; Audio.Play("select"); }
+    public List<Unit> ArmoryRoster => _run.Squad.Where(u => !u.IsVip).ToList();
+
+    /// Can this soldier be re-armed to weapon kind k right now? (different from current, affordable,
+    /// and a legal option for their class.)
+    public bool CanRearm(Unit u, WeaponKind k)
+    {
+        if (u == null || u.IsVip || u.Weapon == null) return false;
+        if (u.Weapon.Kind == k) return false;                      // already carrying it
+        if (_run.Intel < ArmoryCost) return false;
+        return System.Array.IndexOf(Weapon.ArmoryOptions(u.Cls), k) >= 0;
+    }
+
+    /// Re-arm a soldier with a new weapon: pay Intel, swap the weapon, re-bake installed mods,
+    /// reseed the clip. Persistent (the weapon is on the Unit; SaveGame stores Weapon.Kind).
+    public void DoRearm(Unit u, WeaponKind k)
+    {
+        if (!CanRearm(u, k)) { Audio.Play("miss"); return; }
+        _run.Intel -= ArmoryCost;
+        u.Weapon = Weapon.Make(k);
+        u.RefreshWeaponMods();          // re-apply any installed mods onto the fresh weapon
+        u.Ammo = u.Weapon.Clip;
+        _run.Report.Add($"{u.Name} re-armed with {u.Weapon.Name}");
+        Stats.RecordPurchase("ARMORY");
+        Audio.Play("select");
+    }
+
     // The shop is two tiers: a fixed block of consumable/stat purchases (indices 0..ModBase-1)
     // then the PERSISTENT WEAPON UPGRADES (indices ModBase..) appended from WeaponModDef — the
     // run's real reward sink, so Intel buys permanent firepower that out-paces attrition. The
@@ -153,6 +207,14 @@ public class Game
     static WeaponMod ModForItem(int item) => WeaponModDef.All[item - ModBase];
     public static bool IsModItem(int item) => item >= ModBase && item < ModBase + WeaponModDef.All.Length;
 
+    // FACTION COUNTER-PREP item: a one-mission counter to the UPCOMING faction (telegraphed on the
+    // campaign map). It's the LAST shop index — its name/desc/cost are dynamic (they depend on which
+    // faction the squad is about to face), so the Hud reads them through ShopNameAt/DescAt/CostAt
+    // instead of the static arrays. The static-array slots hold a neutral placeholder.
+    public static readonly int PrepItem = ModBase + WeaponModDef.All.Length;
+    public const int PrepCost = 12;                            // a one-mission situational edge, priced like FRAG CACHE
+    static bool IsPrepItem(int item) => item == PrepItem;
+
     public static readonly int[] ShopCost = BuildShopCost();
     public static readonly string[] ShopName = BuildShopName();
     public static readonly string[] ShopDesc = BuildShopDesc();
@@ -160,17 +222,19 @@ public class Game
     static int[] BuildShopCost()
     {
         var b = new[] { 6, 10, 16, 12, 8 };    // +BALLISTIC PLATING (survivability sink, front-loaded cheap)
-        var all = new int[ModBase + WeaponModDef.All.Length];
+        var all = new int[ModBase + WeaponModDef.All.Length + 1];   // +1 for the dynamic PREP item
         b.CopyTo(all, 0);
         for (int i = 0; i < WeaponModDef.All.Length; i++) all[ModBase + i] = WeaponModDef.Cost(WeaponModDef.All[i]);
+        all[ModBase + WeaponModDef.All.Length] = PrepCost;
         return all;
     }
     static string[] BuildShopName()
     {
         var b = new[] { "FIELD MEDKIT", "COMBAT STIMS", "ADV. TRAINING", "FRAG CACHE", "BALLISTIC PLATING" };
-        var all = new string[ModBase + WeaponModDef.All.Length];
+        var all = new string[ModBase + WeaponModDef.All.Length + 1];
         b.CopyTo(all, 0);
         for (int i = 0; i < WeaponModDef.All.Length; i++) all[ModBase + i] = "WPN: " + WeaponModDef.Name(WeaponModDef.All[i]);
+        all[ModBase + WeaponModDef.All.Length] = "COUNTER-PREP";   // placeholder; ShopNameAt overrides per faction
         return all;
     }
     static string[] BuildShopDesc()
@@ -183,11 +247,39 @@ public class Game
             "+1 grenade every mission for a soldier (permanent).",
             "+1 armor to your least-armored soldier (permanent: -1 damage per hit).",
         };
-        var all = new string[ModBase + WeaponModDef.All.Length];
+        var all = new string[ModBase + WeaponModDef.All.Length + 1];
         b.CopyTo(all, 0);
         for (int i = 0; i < WeaponModDef.All.Length; i++) all[ModBase + i] = WeaponModDef.Desc(WeaponModDef.All[i]) + " (installed on a soldier)";
+        all[ModBase + WeaponModDef.All.Length] = "One-mission counter to the faction you're about to face.";
         return all;
     }
+
+    // Dynamic shop text/cost: the PREP item's name/desc reflect the UPCOMING faction so the player
+    // sees exactly what they're buying; every other item falls through to the static arrays. The Hud
+    // routes ShopName[i]/ShopDesc[i]/ShopCost[i] through these so the prep row reads correctly.
+    public string ShopNameAt(int item)
+    {
+        if (IsPrepItem(item)) return "COUNTER-PREP: " + Run.FactionName(PrepFactionOffered);
+        return (item >= 0 && item < ShopName.Length) ? ShopName[item] : "";
+    }
+    public string ShopDescAt(int item)
+    {
+        if (IsPrepItem(item)) return PrepDescFor(PrepFactionOffered);
+        return (item >= 0 && item < ShopDesc.Length) ? ShopDesc[item] : "";
+    }
+    public int ShopCostAt(int item) => (item >= 0 && item < ShopCost.Length) ? ShopCost[item] : 0;
+
+    // The faction the COUNTER-PREP item targets this barracks (the upcoming reachable threat). None
+    // if every reachable node is mixed-force -> the prep row is unavailable/greyed.
+    public Faction PrepFactionOffered => _run != null ? _run.UpcomingFaction() : Faction.None;
+
+    static string PrepDescFor(Faction f) => f switch
+    {
+        Faction.Syndicate => "HARDENED OPTICS: deny their see-over-low cover next mission.",
+        Faction.Legion    => "REACTIVE PLATING: squad takes -1 damage next mission.",
+        Faction.Wardens   => "FIELD SMOKE: break their long sightlines (no long-range aim edge).",
+        _ => "No faction telegraphed on the next mission.",
+    };
 
     // mission objective
     public Objective Objective;
@@ -196,6 +288,39 @@ public class Game
     // DEFEND objective (3.8): survive this many player turns vs mid-mission waves
     public const int DefendTurns = 8;
     public int Turn => _turnCount;
+
+    // ---------------- anti-turtle PRESSURE CLOCK ----------------
+    // On "camp-friendly" objectives (Eliminate / Hack / Decapitate) there is no movement
+    // pressure, so the dominant strategy is to sit in overwatch and let the enemy come. The
+    // pressure clock fixes that: after a GRACE period (so the deliberate opening this game
+    // prizes is preserved -- DESIGN.md S5), an escalating threat ramps every couple of turns,
+    // making turtling strictly worse than advancing. It's telegraphed + gradual (Into-the-Breach
+    // "communicate not compel") and tuned NOT to make a reasonable pace unwinnable.
+    public const int PressureGrace = 4;        // turns 1..4 are free (no pressure)
+    public const int PressureStep  = 2;        // one rung per this many turns after grace
+    public const int PressureMax   = 4;        // rung cap
+    public const int PressureAimPerRung = 3;   // enemy aim bonus per rung (+3..+12)
+    public int Pressure;                        // current rung 0..PressureMax (HUD reads this)
+    public bool PressureActive => Pressure > 0; // for HUD pulse
+    int _pressureWaves;                         // count of reinforcement waves the clock has dropped
+
+    // The clock only runs on objectives where camping is the exploit. Defend is already
+    // wave-based; Evac/Escort/Rescue are movement-pressured; Sabotage already makes you move
+    // to sites -- none of those need (or want) it.
+    bool PressureClockObjective() =>
+        Objective == Objective.Eliminate || Objective == Objective.Hack || Objective == Objective.Decapitate;
+
+    // HUD reads this to decide whether to draw the PRESSURE meter (only on clock objectives,
+    // and only once we're in a live mission phase).
+    public bool PressureClockHud => PressureClockObjective() && (Phase == Phase.PlayerTurn || Phase == Phase.EnemyTurn);
+
+    // Rung for a given player-turn count: 0 through grace, then one per PressureStep turns.
+    int PressureRungFor(int turn)
+    {
+        if (turn <= PressureGrace) return 0;
+        int rung = 1 + (turn - PressureGrace - 1) / PressureStep;
+        return Math.Min(rung, PressureMax);
+    }
 
     // onboarding tutorial (3.12): non-blocking contextual callouts on the first-ever run
     public int TutStep = -1;                 // -1 = inactive
@@ -556,6 +681,13 @@ public class Game
         // non-campaign path. MUST be set BEFORE Mission.Build — SelectArchetype reads it at spawn time.
         Combat.MissionFaction = _run.CurrentNode?.Faction ?? Faction.None;
 
+        // FACTION COUNTER-PREP: apply the one-mission counter the player bought at the barracks, then
+        // CONSUME it (one mission only). It only bites when it matches this mission's faction (the
+        // honest bet) — Combat gates each rule on PrepFaction == MissionFaction. Cleared whether or not
+        // it matched so an un-cashed prep doesn't carry over.
+        Combat.PrepFaction = _run.PrepFaction;
+        _run.PrepFaction = Faction.None;
+
         // reserve + connectivity-verify a key tile: the Hack terminal, or the Rescue captive's seat
         (int x, int y)? reserve = HasTerminal ? Terminal
             : (Objective == Objective.Rescue ? (Grid.W / 2, Grid.H / 2) : ((int, int)?)null);
@@ -589,6 +721,7 @@ public class Game
         _anims.Clear();
         HitStop = 0;
         _turnCount = 1;
+        Pressure = 0; _pressureWaves = 0; Combat.PressureAim = 0;   // anti-turtle clock resets each mission
         _autoSig = -1; _autoStall = 0;
         Phase = Phase.PlayerTurn;
         // 4.4: every mission opens with the squad concealed -- UNLESS Heat "EXPOSED" strips it.
@@ -610,7 +743,7 @@ public class Game
         SnapShot = false;
         GrenadeMode = false;
         ItemMode = false;
-        ShoveMode = false;
+        ShoveMode = false; MarkMode = false; GrappleMode = false;
         Biome = Biome.For(n, _run.MapSeed);   // per-run biome variety (surfaces NEON/MAGMA across seeds)
         string facTag = Combat.MissionFaction != Faction.None ? $" - {Run.FactionName(Combat.MissionFaction)}" : "";
         ShowBanner($"MISSION {n} - {Biome.Name}{facTag}", false);
@@ -680,6 +813,15 @@ public class Game
 
     /// Harness hook (screenshot only): reveal all dormant enemies (fully alert).
     public void DebugWakeAll() { foreach (var e in Enemies) if (e.Alive) e.Alert = AlertLevel.Alert; }
+
+    /// Harness hook (screenshot only): drive the anti-turtle pressure clock to its max rung so a
+    /// single frame shows the PRESSURE meter filled in the top bar (and its escalation banner).
+    public void DebugPressure()
+    {
+        Pressure = PressureMax;
+        Combat.PressureAim = PressureMax * PressureAimPerRung;
+        ShowBanner("ENEMY REINFORCEMENTS - MAX PRESSURE", false);
+    }
 
     /// Harness hook (screenshot only): spread the three awareness tiers (4.3) across the
     /// enemies so one frame shows Unaware ("?") / Suspicious ("!") / Alert glyph states.
@@ -1126,6 +1268,29 @@ public class Game
         ShoveValid = ShoveTargetOk(u, foe);
     }
 
+    /// Harness hook (screenshot only): show the MARK verb in use — one foe already designated
+    /// (always-on indicator) + the sharpshooter in MarkMode designating a second one (preview line).
+    public void DebugMark()
+    {
+        DebugWakeAll();
+        var u = Players.FirstOrDefault(p => p.Alive && !p.IsVip);
+        if (u == null) return;
+        u.Cls = "SHARPSHOOTER";        // force the MARK ability for the demo
+        u.AbilityCharge = 1;
+        var foes = Enemies.Where(e => e.Alive && Grid.HasLineOfSight(u.X, u.Y, e.X, e.Y))
+                          .OrderBy(e => Util.ChebyDist(u.X, u.Y, e.X, e.Y)).ToList();
+        if (foes.Count >= 1) { foes[0].Marked = true; _markedBy = u; }     // already-marked foe
+        Selected = u;
+        RecomputeMoveCost();
+        if (foes.Count >= 2)
+        {
+            MarkMode = true; KbCursor = true;
+            CurX = foes[1].X; CurY = foes[1].Y;
+            MarkTarget = foes[1];
+            MarkValid = MarkTargetOk(u, foes[1]);
+        }
+    }
+
     /// Harness hook (screenshot only): freeze a sample of the procedural unit-animation poses
     /// (fire-recoil / hit-flinch / walk-lean) on live units + drop a couple of death-scorch decals,
     /// so a static SHOT frame demonstrates the new juice (which is otherwise transient in play).
@@ -1260,6 +1425,8 @@ public class Game
     void EnterBarracks()
     {
         Combat.MissionFaction = Faction.None;   // defensive: clear the mission faction between missions (re-set in SetupMission) so no stale value can warp a barracks-phase odds read
+        Combat.PressureAim = 0;                  // and the anti-turtle pressure aim bonus
+        Combat.PrepFaction = Faction.None;       // and the faction counter-prep (re-set+consumed in SetupMission)
         // a benched soldier sat this mission out: it's still in _run.Squad (flagged) but was
         // never in Players, so it's absent from AlivePlayers(). Preserve it across the rebuild,
         // or benching would silently destroy the veteran (review Blocker 1).
@@ -1308,6 +1475,11 @@ public class Game
             _run.RecordRunResult(true);
             if (!NoPersist) SaveGame.SaveMetaLossStreak(_run.LossStreak);
             Phase = Phase.Win; Audio.Play("win"); Audio.PlayStinger("victory"); if (!NoPersist) SaveGame.Delete();
+            // VICTORY FLOURISH: a celebratory burst over the board (each surviving soldier cheers,
+            // plus a centre fountain) the instant the final mission falls. The end-screen card then
+            // takes over with its own confetti. Presentation only.
+            Fx.VictoryBurst(BoardCenter, Pal.Good, 1.2f);
+            foreach (var u in Players) if (u.Alive) Fx.VictoryConfetti(u.Pos, 14, 220f);
         }
         else
         {
@@ -1325,6 +1497,7 @@ public class Game
             string heatNote = heatBonus > 0 ? $"  (+{heatBonus} HEAT {_run.HeatLevel})" : "";
             _run.Report.Insert(0, $"Recovered {gained} intel{heatNote}  (total {_run.Intel})");
             _shopDone = false;
+            ArmoryMode = false; ArmorySoldier = null;   // open requisition in the shop view, not armory
             _run.GenerateOffers(_run.Mission + 1);
             _run.GenerateBoonOffer();                // offer a run-scoped boon pick this barracks
             Phase = Phase.Barracks;
@@ -1354,6 +1527,8 @@ public class Game
     void LoseRun(string title, string reason)
     {
         Combat.MissionFaction = Faction.None;   // defensive: clear the mission faction on run end (re-set next SetupMission)
+        Combat.PressureAim = 0;                  // and the anti-turtle pressure aim bonus
+        Combat.PrepFaction = Faction.None;       // and the faction counter-prep so no stale value bleeds into the next run
         LoseTitle = title;
         LoseReason = reason;
         Phase = Phase.Lose;
@@ -1539,6 +1714,10 @@ public class Game
         if (d.Team == Team.Player)
         {
             _run.Fallen.Add(d.Name);
+            // run-end MEMORIAL (presentation only): snapshot the fallen squad member's identity for
+            // the run-summary KIA roll. VIP/captive isn't a persistent squad member, so it's excluded.
+            if (!d.IsVip)
+                _run.Memorial.Add(new FallenRec { Name = d.FullName, Cls = d.Cls, Rank = d.RankName, Kills = d.Kills, Mission = _run.Mission });
             if (!d.IsVip) SecondaryFailed = true;   // a lost soldier fails the NO LOSSES bonus
             // a fallen squadmate fires up the survivors (Vengeful feat / trait)
             if (!d.IsVip)
@@ -1902,7 +2081,7 @@ public class Game
         {
             if (Raylib.IsKeyPressed(KeyboardKey.Escape))
             {
-                if (AimMode || GrenadeMode || ItemMode || ShoveMode) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; }
+                if (AimMode || GrenadeMode || ItemMode || ShoveMode || MarkMode || GrappleMode) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; }
                 else Paused = !Paused;
             }
             if (Paused) { HandlePauseMenu(); return; }
@@ -2615,6 +2794,30 @@ public class Game
                 if (FirstTargetFor(u) == null && AliveEnemies().Count > 0) { DoAbility(); return false; }
                 return false;
             }
+            case AbilityKind.Mark:
+            {
+                // designate a high-value visible foe so the whole squad shoots it better this round.
+                // Costs an action; only worth it when we can still fire after AND there's a
+                // worthwhile target nobody's marked. Don't mark a foe we can already cleanly kill.
+                if (u.ActionsLeft < 2) return false;     // keep an action to actually shoot
+                var tgt = forcedTarget != null && MarkTargetOk(u, forcedTarget) ? forcedTarget : BestMarkTarget(u);
+                if (tgt == null) return false;
+                var odds = Combat.ComputeOdds(Grid, u, tgt);
+                if (tgt.Hp <= odds.DmgMax && odds.HitChance >= 60) return false;  // just kill it
+                IssueMark(u, tgt);
+                return false;   // didn't end the turn — fall through and act (shoot) with the action left
+            }
+            case AbilityKind.Grapple:
+            {
+                // yank a foe out of cover so the squad can hit it. Only when there's a covered foe
+                // in reach AND we can act after (the grapple costs an action but not the turn).
+                if (u.ActionsLeft < 2 || u.ShovedThisTurn) return false;
+                var tgt = BestGrappleTarget(u);
+                if (tgt == null) return false;
+                if (Grid.GetCover(tgt.X, tgt.Y, u.X, u.Y).Level <= 0) return false;  // only worth it vs a covered foe
+                IssueGrapple(u, tgt);
+                return false;   // free of end-turn; act with the remaining action
+            }
         }
         return false;
     }
@@ -3016,9 +3219,24 @@ public class Game
         if (CanAbility(u) && Util.Roll(45))
         {
             var kind = u.Ability;
-            DoAbility();
-            if (kind == AbilityKind.Steady || kind == AbilityKind.Suppress || kind == AbilityKind.Heal) return; // spent an action
-            // RunGun / Blitz are free stances — fall through and act with them
+            // the two targeting VERBS resolve directly (DoAbility would open a mode the dumb
+            // smoke-test autopilot can't drive) -> exercise the IssueMark/IssueGrapple paths.
+            if (kind == AbilityKind.Mark)
+            {
+                var mt = BestMarkTarget(u);
+                if (mt != null) IssueMark(u, mt);    // costs an action but not the turn -> fall through and shoot
+            }
+            else if (kind == AbilityKind.Grapple)
+            {
+                var gt = BestGrappleTarget(u);
+                if (gt != null) IssueGrapple(u, gt); // costs an action but not the turn -> fall through and shoot
+            }
+            else
+            {
+                DoAbility();
+                if (kind == AbilityKind.Steady || kind == AbilityKind.Suppress || kind == AbilityKind.Heal) return; // spent an action
+                // RunGun / Blitz are free stances — fall through and act with them
+            }
         }
 
         var tgt = FirstTargetFor(u);
@@ -3357,6 +3575,20 @@ public class Game
             return;
         }
 
+        if (MarkMode)
+        {
+            MarkTarget = (hovered != null && Selected != null) ? hovered : null;
+            MarkValid = Selected != null && MarkTarget != null && MarkTargetOk(Selected, MarkTarget);
+            return;
+        }
+
+        if (GrappleMode)
+        {
+            GrappleTarget = (hovered != null && Selected != null) ? hovered : null;
+            GrappleValid = Selected != null && GrappleTarget != null && GrappleTargetOk(Selected, GrappleTarget);
+            return;
+        }
+
         if (AimMode)
         {
             if (hovered != null && hovered.Team == Team.Enemy && CanTarget(Selected, hovered))
@@ -3425,7 +3657,7 @@ public class Game
         if (Raylib.IsKeyPressed(KeyboardKey.Space) && HoverValid) { BoardAct(HoverX, HoverY); return; }
         if (KbCursor && Raylib.GetMouseDelta() != Vector2.Zero) KbCursor = false;  // mouse takes back over
 
-        if (Raylib.IsMouseButtonPressed(MouseButton.Right)) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; return; }
+        if (Raylib.IsMouseButtonPressed(MouseButton.Right)) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; return; }
 
         if (Raylib.IsMouseButtonPressed(MouseButton.Left))
         {
@@ -3466,6 +3698,18 @@ public class Game
         {
             if (hovered != null && Selected != null && ShoveTargetOk(Selected, hovered)) IssueShove(Selected, hovered);
             else ShoveMode = false;
+            return;
+        }
+        if (MarkMode)
+        {
+            if (hovered != null && Selected != null && MarkTargetOk(Selected, hovered)) IssueMark(Selected, hovered);
+            else MarkMode = false;
+            return;
+        }
+        if (GrappleMode)
+        {
+            if (hovered != null && Selected != null && GrappleTargetOk(Selected, hovered)) IssueGrapple(Selected, hovered);
+            else GrappleMode = false;
             return;
         }
         if (AimMode)
@@ -3597,7 +3841,7 @@ public class Game
         }
     }
 
-    void SelectUnit(Unit u) { Selected = u; AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; Audio.Play("select"); }
+    void SelectUnit(Unit u) { Selected = u; AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; Audio.Play("select"); }
 
     void CycleSelection()
     {
@@ -3609,7 +3853,7 @@ public class Game
         SnapShot = false;
         GrenadeMode = false;
         ItemMode = false;
-        ShoveMode = false;
+        ShoveMode = false; MarkMode = false; GrappleMode = false;
         Audio.Play("select");
     }
 
@@ -3630,7 +3874,7 @@ public class Game
         if (!HasAnyTarget(Selected)) return;
         GrenadeMode = false;
         ItemMode = false;
-        ShoveMode = false;
+        ShoveMode = false; MarkMode = false; GrappleMode = false;
         AimMode = true;
         SnapShot = snap;
         AimTarget = FirstTargetFor(Selected);
@@ -3640,7 +3884,7 @@ public class Game
     {
         if (Selected == null || !Selected.CanAct || Selected.Grenades <= 0) return;
         GrenadeMode = !GrenadeMode;
-        if (GrenadeMode) { AimMode = false; SnapShot = false; ItemMode = false; ShoveMode = false; }   // clear the snap variant too (review #3)
+        if (GrenadeMode) { AimMode = false; SnapShot = false; ItemMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; }   // clear the snap variant too (review #3)
     }
 
     void IssueGrenade(int tx, int ty)
@@ -3658,7 +3902,7 @@ public class Game
     {
         if (Selected == null || !Selected.CanAct || Selected.ItemCharge <= 0 || Selected.Item == ItemKind.None) return;
         ItemMode = !ItemMode;
-        if (ItemMode) { AimMode = false; SnapShot = false; GrenadeMode = false; ShoveMode = false; }   // clear the snap variant too (review #3)
+        if (ItemMode) { AimMode = false; SnapShot = false; GrenadeMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; }   // clear the snap variant too (review #3)
     }
 
     /// Whether a utility item can legally land on (tx,ty): barricade needs an empty
@@ -3725,7 +3969,93 @@ public class Game
     {
         if (!CanShove(Selected)) return;
         ShoveMode = !ShoveMode;
-        if (ShoveMode) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; }
+        if (ShoveMode) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; MarkMode = false; GrappleMode = false; }
+    }
+
+    // ---- MARK (sharpshooter VERB): designate a foe; the whole squad shoots it better this round ----
+
+    /// Is `target` a legal MARK target for sharpshooter `u`? An alive, visible (line-of-sight)
+    /// enemy that isn't already marked. No reach cap (a designator works at range — its whole
+    /// point), but it must be in LoS so it's a real sightline call.
+    bool MarkTargetOk(Unit u, Unit target)
+    {
+        if (u == null || target == null || !u.CanAct || u.ActionsLeft < 1 || u.AbilityCharge <= 0) return false;
+        if (!target.Alive || target.Team != Team.Enemy || target.Marked) return false;
+        if (target.IsVip && CaptiveLocked) return false;             // can't mark the caged captive
+        return Grid.HasLineOfSight(u.X, u.Y, target.X, target.Y);
+    }
+
+    void ToggleMark()
+    {
+        if (Selected == null || Selected.Ability != AbilityKind.Mark || !CanAbility(Selected)) return;
+        MarkMode = !MarkMode;
+        if (MarkMode) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; GrappleMode = false; }
+    }
+
+    /// Designate `target`: set Unit.Marked so Combat.ComputeOdds gives EVERY squad member +MarkAim/
+    /// +MarkCrit vs it (Combat.cs). Costs 1 action + the ability charge; does NOT end the turn (the
+    /// sharpshooter can still fire). The mark clears at the marker's next turn (StartPlayerTurn) or
+    /// when the foe dies. Pinning a foe is aggression -> breaks concealment + wakes its pod.
+    void IssueMark(Unit u, Unit target)
+    {
+        if (!MarkTargetOk(u, target)) { MarkMode = false; return; }
+        if (SquadConcealed) BreakConcealment(u);   // calling out a target gives the squad away
+        target.Marked = true;
+        _markedBy = u;                              // remember who marked, to clear it on their next turn
+        u.AbilityCharge--; u.ActionsLeft = Math.Max(0, u.ActionsLeft - 1);
+        if (!target.Active) ActivatePod(target.PodId);
+        Fx.PopText(target.Pos + new Vector2(0, -34), "MARKED", Pal.Foe, 18f);
+        Fx.PopText(u.Pos + new Vector2(0, -34), "MARK", Pal.Good, 16f);
+        Fx.Burst(target.Pos, Pal.Foe, 10, 120f, 0.4f, 3f);
+        Audio.Play("over");
+        MarkMode = false; ShoveMode = false; GrappleMode = false;
+    }
+
+    /// Clear every MARK on the board (called at the marker's next player-turn start, so a mark
+    /// lasts through the enemy turn — the focus-fire window — then expires).
+    void ClearMarks()
+    {
+        foreach (var e in Enemies) e.Marked = false;
+        _markedBy = null;
+    }
+
+    // ---- GRAPPLE (assault VERB): yank a nearby foe 1 tile toward you, out of its cover ----
+
+    /// Is `target` a legal GRAPPLE target for assault `u`? An alive enemy within GrappleReach
+    /// (Chebyshev) that hasn't been repositioned this turn (shares the SHOVE budget). Reuses the
+    /// ShoveAnim, so it's anti-loop-bounded the same way.
+    bool GrappleTargetOk(Unit u, Unit target)
+    {
+        if (u == null || target == null || !u.CanAct || u.ShovedThisTurn || u.AbilityCharge <= 0) return false;
+        if (!target.Alive || target.Team != Team.Enemy) return false;
+        if (target.IsVip && CaptiveLocked) return false;
+        int dx = target.X - u.X, dy = target.Y - u.Y;
+        if (dx == 0 && dy == 0) return false;
+        return Math.Abs(dx) <= GrappleReach && Math.Abs(dy) <= GrappleReach;
+    }
+
+    void ToggleGrapple()
+    {
+        if (Selected == null || Selected.Ability != AbilityKind.Grapple || !CanAbility(Selected)) return;
+        GrappleMode = !GrappleMode;
+        if (GrappleMode) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; MarkMode = false; }
+    }
+
+    /// Yank `target` ONE tile TOWARD the assault (pull direction = sign(u - target)), reusing
+    /// ShoveAnim with the inverted vector. Pulls a foe out of its cover into the open. Costs 1
+    /// action + the ability charge; does NOT end the turn. Uses ShovedThisTurn as the per-turn
+    /// budget (shared with SHOVE) so a soldier can't loop reposition verbs.
+    void IssueGrapple(Unit u, Unit target)
+    {
+        if (!GrappleTargetOk(u, target)) { GrappleMode = false; return; }
+        // direction the target MOVES = toward the assault (one tile closer)
+        int dx = Math.Sign(u.X - target.X), dy = Math.Sign(u.Y - target.Y);
+        u.AbilityCharge--; u.ShovedThisTurn = true; u.ActionsLeft = Math.Max(0, u.ActionsLeft - 1);
+        if (SquadConcealed) BreakConcealment(u);   // a grapple is aggression
+        if (!target.Active) ActivatePod(target.PodId);
+        Fx.PopText(target.Pos + new Vector2(0, -34), "GRAPPLED", Pal.Friend, 18f);
+        Enqueue(new ShoveAnim(u, target, dx, dy), Team.Player);
+        GrappleMode = false; ShoveMode = false; MarkMode = false;
     }
 
     /// Shove an adjacent enemy 1 tile directly away (soldier -> target direction). Costs 1
@@ -3741,7 +4071,7 @@ public class Game
         // shoving a dormant pod is aggression -> it wakes (mirrors a shot revealing a pod).
         if (!target.Active) ActivatePod(target.PodId);
         Enqueue(new ShoveAnim(u, target, dx, dy), Team.Player);
-        ShoveMode = false;
+        ShoveMode = false; MarkMode = false; GrappleMode = false;
     }
 
     void IssueMove(int tx, int ty)
@@ -3948,6 +4278,8 @@ public class Game
             AbilityKind.Steady  => !u.Steady && u.ActionsLeft >= 1,
             AbilityKind.Suppress=> u.Ammo > 0 && HasAnyTarget(u),
             AbilityKind.Heal    => u.ActionsLeft >= 1 && MostWoundedAdjacentAlly(u) != null,
+            AbilityKind.Mark    => u.ActionsLeft >= 1 && HasMarkTarget(u),
+            AbilityKind.Grapple => !u.ShovedThisTurn && u.ActionsLeft >= 1 && HasGrappleTarget(u),
             _ => false,
         };
     }
@@ -3969,10 +4301,54 @@ public class Game
         return best;
     }
 
+    /// Any legal MARK target (visible un-marked foe) for sharpshooter `u`?
+    bool HasMarkTarget(Unit u)
+    {
+        foreach (var e in Enemies) if (MarkTargetOk(u, e)) return true;
+        return false;
+    }
+    /// Any legal GRAPPLE target (foe within reach) for assault `u`?
+    bool HasGrappleTarget(Unit u)
+    {
+        foreach (var e in Enemies) if (GrappleTargetOk(u, e)) return true;
+        return false;
+    }
+    /// The best AI/autopilot MARK pick: a live foe in LoS we'd want the squad to collapse on
+    /// (highest priority weight). Null if none visible.
+    Unit BestMarkTarget(Unit u)
+    {
+        Unit best = null; float bestW = -1f;
+        foreach (var e in Enemies)
+        {
+            if (!MarkTargetOk(u, e)) continue;
+            float w = PriorityWeight(e);
+            if (w > bestW) { bestW = w; best = e; }
+        }
+        return best;
+    }
+    /// The best AI/autopilot GRAPPLE pick: a foe in reach that's currently IN cover from us
+    /// (yanking it out is the point); fall back to the nearest foe in reach.
+    Unit BestGrappleTarget(Unit u)
+    {
+        Unit best = null; int bestScore = int.MinValue;
+        foreach (var e in Enemies)
+        {
+            if (!GrappleTargetOk(u, e)) continue;
+            int cover = Grid.GetCover(e.X, e.Y, u.X, u.Y).Level;   // how protected it is from us now
+            int score = cover * 100 - Util.ChebyDist(u.X, u.Y, e.X, e.Y);
+            if (score > bestScore) { bestScore = score; best = e; }
+        }
+        return best;
+    }
+
     void DoAbility()
     {
         var u = Selected;
         if (!CanAbility(u)) return;
+        // the two targeting VERBS enter a targeting mode for the human player (the AI/autopilot
+        // calls IssueMark/IssueGrapple directly via PrepAbilityFor, so it never opens a mode).
+        if (u.Ability == AbilityKind.Mark)    { ToggleMark();    return; }
+        if (u.Ability == AbilityKind.Grapple) { ToggleGrapple(); return; }
         var at = u.Pos + new Vector2(0, -34);
         switch (u.Ability)
         {
@@ -4025,7 +4401,7 @@ public class Game
         SnapShot = false;
         GrenadeMode = false;
         ItemMode = false;
-        ShoveMode = false;
+        ShoveMode = false; MarkMode = false; GrappleMode = false;
     }
 
     void RequestEndTurn()
@@ -4039,14 +4415,21 @@ public class Game
     void SpawnDefendWave()
     {
         if (_turnCount % 2 == 0 || _turnCount >= DefendTurns) return;  // waves on odd turns, not the last
-        if (AliveEnemies().Count >= 12) return;                        // clutter cap
+        SpawnReinforcements(2 + _run.Mission / 2, 12, "WAVE");
+    }
+
+    /// Shared reinforcement spawner: drops up to `want` active wave-hostiles in from the right
+    /// board edge (already engaged), honoring a live-enemy `cap`. Used by both the DEFEND objective
+    /// and the anti-turtle PRESSURE CLOCK. Returns how many it actually added.
+    int SpawnReinforcements(int want, int cap, string label)
+    {
+        if (AliveEnemies().Count >= cap) return 0;                     // clutter cap
         int n = _run.Mission;
-        int want = 2 + n / 2;
         var rows = Enumerable.Range(0, Grid.H).OrderBy(_ => Util.RandF()).ToList();
         int added = 0;
         foreach (int y in rows)
         {
-            if (added >= want) break;
+            if (added >= want || AliveEnemies().Count >= cap) break;
             int x = Grid.W - 2;
             if (!Grid.IsFloor(x, y) || IsOccupiedByOther(x, y, null))
             {
@@ -4060,7 +4443,39 @@ public class Game
             Fx.Burst(e.Pos, Pal.Foe, 14, 160f, 0.5f, 3f, true);
             added++;
         }
-        if (added > 0) { Fx.PopText(Util.TileCenter(Grid.W - 2, 0) + new Vector2(0, -10), "WAVE", Pal.Foe, 20f); Audio.Play("turn"); RefreshCombatRoster(); }
+        if (added > 0) { Fx.PopText(Util.TileCenter(Grid.W - 2, 0) + new Vector2(0, -10), label, Pal.Foe, 20f); Audio.Play("turn"); RefreshCombatRoster(); }
+        return added;
+    }
+
+    /// Anti-turtle PRESSURE CLOCK. Called at the top of EndPlayerTurn (before the enemy acts) on
+    /// camp-friendly objectives. Recomputes the rung from the turn count, banners a telegraph when
+    /// it rises, sets Combat.PressureAim (the escalating enemy accuracy bonus), and -- at the higher
+    /// rungs -- calls in reinforcements from the right edge. Tuned so a reasonable pace stays winnable:
+    /// nothing happens during the grace period, the aim bonus is modest (+3..+12), and waves are small,
+    /// rare (one per two-turn step, max one per turn) and capped. Turtling becomes strictly worse than
+    /// closing the distance, which is the whole point.
+    void UpdatePressure()
+    {
+        if (!PressureClockObjective()) { Pressure = 0; Combat.PressureAim = 0; return; }
+        int rung = PressureRungFor(_turnCount);
+        // scale the aim bias up a touch with Heat so the clock keeps teeth on harder rungs
+        int heatBump = _run != null && _run.HeatLevel >= 4 ? 1 : 0;
+        Combat.PressureAim = rung * (PressureAimPerRung + heatBump);
+        if (rung > Pressure)
+        {
+            // telegraphed escalation -- the player sees it coming and can choose to advance
+            ShowBanner(rung >= PressureMax ? "ENEMY REINFORCEMENTS - MAX PRESSURE" : "PRESSURE RISING", false);
+            Audio.Play("turn");
+        }
+        Pressure = rung;
+        // Reinforcements kick in from rung 2 onward, once per fresh rung (not every turn) so the
+        // board doesn't flood: a small wave that scales with the rung. One per rung-up event.
+        if (rung >= 2 && rung > _pressureWaves)
+        {
+            int want = 1 + rung / 2;                       // rung2->2, rung3->2, rung4->3
+            SpawnReinforcements(want, 11 + _run.Mission, "REINFORCEMENTS");
+            _pressureWaves = rung;
+        }
     }
 
     /// CROSSFIRE wiring: re-snapshot the full live roster into Combat.AllUnits so ComputeOdds'
@@ -4097,11 +4512,12 @@ public class Game
         SnapShot = false;
         GrenadeMode = false;
         ItemMode = false;
-        ShoveMode = false;
+        ShoveMode = false; MarkMode = false; GrappleMode = false;
         Selected = null;
         MoveCost = null;
         Phase = Phase.EnemyTurn;
         if (Objective == Objective.Defend) SpawnDefendWave();    // reinforcements assault the holdout
+        UpdatePressure();                                        // anti-turtle clock: escalate on camp-friendly objectives
         ResolveSuspicion();                                      // 4.3: suspicious pods confirm or lose contact
         FaceShields();                                           // AEGIS turns its barrier toward the squad
         foreach (var e in Enemies) if (e.Alive) { e.BeginTurn(); TickStatuses(e); }
@@ -4124,6 +4540,7 @@ public class Game
         TickHazards();                    // fire cooks off barrels + reignites units, then decays
         _refundedThisTurn.Clear();        // flank-kill refund is one per soldier per turn
         HackedThisTurn = false;           // the terminal accepts one breach cycle per turn (hold)
+        ClearMarks();                     // a sharpshooter's MARK lasts until the marker's next turn
         if (AutoPlay) AutoStallCheck();
         foreach (var p in Players) if (p.Alive) { p.BeginTurn(); TickStatuses(p); }
         foreach (var e in Enemies) if (e.Alive) { e.ReactedThisTurn = false; e.Suppress = 0; } // OW resets; suppression expires
@@ -4132,7 +4549,7 @@ public class Game
         SnapShot = false;
         GrenadeMode = false;
         ItemMode = false;
-        ShoveMode = false;
+        ShoveMode = false; MarkMode = false; GrappleMode = false;
         ShowBanner("PLAYER TURN", false);
     }
 
@@ -4442,6 +4859,8 @@ public class Game
     {
         if (item < 0 || item >= ShopCost.Length || _run.Intel < ShopCost[item]) return false;
         if (IsModItem(item)) return ModTarget(ModForItem(item)) != null;   // a soldier who lacks this mod
+        // COUNTER-PREP: only buyable when a faction is actually telegraphed next, and not already bought.
+        if (IsPrepItem(item)) return PrepFactionOffered != Faction.None && _run.PrepFaction == Faction.None;
         return item switch
         {
             0 => _run.Squad.Any(u => u.Hp < u.MaxHp || u.Wound > 0),  // medkit needs someone hurt or wounded
@@ -4491,6 +4910,13 @@ public class Game
     /// One-line concrete effect of a purchase, so the player can judge its value.
     public string ShopEffect(int item)
     {
+        if (IsPrepItem(item))
+        {
+            if (_run.PrepFaction != Faction.None) return "prep already secured";
+            return PrepFactionOffered == Faction.None
+                ? "no faction telegraphed next"
+                : $"counters {Run.FactionName(PrepFactionOffered)} for one mission";
+        }
         var t = ShopTarget(item);
         if (IsModItem(item))
             return t == null ? "every soldier has it" : $"{t.Name}: install {WeaponModDef.Name(ModForItem(item))}";
@@ -4511,6 +4937,16 @@ public class Game
     void DoPurchase(int item)
     {
         if (!CanBuy(item)) { Audio.Play("miss"); return; }
+        if (IsPrepItem(item))
+        {
+            var f = PrepFactionOffered;
+            _run.PrepFaction = f;   // consumed at the next SetupMission (one mission only)
+            _run.Report.Add($"COUNTER-PREP staged: {PrepDescFor(f)}");
+            _run.Intel -= ShopCost[item];
+            Stats.RecordPurchase("COUNTER-PREP");
+            Audio.Play("select");
+            return;
+        }
         if (IsModItem(item))
         {
             var mod = ModForItem(item);
@@ -4559,8 +4995,38 @@ public class Game
     void HandleShopClick()
     {
         if (Raylib.IsKeyPressed(KeyboardKey.Enter)) { _shopDone = true; Audio.Play("turn"); return; }
+        // [A] toggles the ARMORY sub-screen; Esc backs out of it.
+        if (Raylib.IsKeyPressed(KeyboardKey.A)) { ToggleArmory(); return; }
+        if (ArmoryMode && Raylib.IsKeyPressed(KeyboardKey.Escape))
+        {
+            if (ArmorySoldier != null) ArmorySoldier = null; else ArmoryMode = false;
+            Audio.Play("select"); return;
+        }
         if (!Raylib.IsMouseButtonPressed(MouseButton.Left)) return;
         var m = Raylib.GetMousePosition();
+
+        // the ARMORY toggle is available in both views
+        if (Raylib.CheckCollisionPointRec(m, Hud.ArmoryToggle)) { ToggleArmory(); return; }
+
+        if (ArmoryMode)
+        {
+            if (ArmorySoldier == null)
+            {
+                // pick a soldier to re-arm
+                var roster = ArmoryRoster;
+                for (int i = 0; i < Hud.ArmorySoldierBtns.Count && i < roster.Count; i++)
+                    if (Raylib.CheckCollisionPointRec(m, Hud.ArmorySoldierBtns[i])) { ArmorySoldier = roster[i]; Audio.Play("select"); return; }
+            }
+            else
+            {
+                // pick a weapon for the selected soldier
+                var opts = Weapon.ArmoryOptions(ArmorySoldier.Cls);
+                for (int i = 0; i < Hud.ArmoryWeaponBtns.Count && i < opts.Length; i++)
+                    if (Raylib.CheckCollisionPointRec(m, Hud.ArmoryWeaponBtns[i])) { DoRearm(ArmorySoldier, opts[i]); return; }
+            }
+            return;   // armory swallows other clicks while open
+        }
+
         for (int i = 0; i < Hud.ShopBtns.Length; i++)
             if (Raylib.CheckCollisionPointRec(m, Hud.ShopBtns[i])) { DoPurchase(i); return; }
         if (Raylib.CheckCollisionPointRec(m, Hud.ShopProceed)) { _shopDone = true; Audio.Play("turn"); }
@@ -4593,6 +5059,7 @@ public class Game
             for (int i = 1; i < ShopCost.Length; i++)
             {
                 if (i == 2) continue;   // perk pick is a player choice, not an auto-buy
+                if (IsPrepItem(i)) continue;   // COUNTER-PREP is a situational player call, not an auto-buy (keeps balance/autoplay sane)
                 if (CanBuy(i) && ShopCost[i] < bestCost) { best = i; bestCost = ShopCost[i]; }
             }
             if (best < 0) break;        // nothing affordable/useful left
@@ -4611,12 +5078,64 @@ public class Game
         if (c.Count > 1) c[1].Wound = 1;
     }
 
+    /// Harness hook (screenshot only): arm a shot tooltip on an enemy so the randomness-
+    /// mitigation surfacing (DMG range + GRAZE floor + "+N STEADYING" streak badge) is visible.
+    /// Seats a live enemy in clean LoS of the first soldier, banks a miss streak on that soldier,
+    /// then enters aim mode locked on the enemy. The next Update's UpdateHoverAndAim recomputes
+    /// + shows the odds naturally (no special draw path), so the screenshot matches real play.
+    public void DebugTooltip()
+    {
+        var c = Players.Where(p => !p.IsVip && p.Alive).ToList();
+        if (c.Count == 0) return;
+        var s = c[0];
+        s.ConsecutiveMisses = 2;                       // bank +12 STEADYING (the streak cap)
+        SquadConcealed = false;                        // CanTarget refuses while concealed
+        var foe = Enemies.FirstOrDefault(e => e.Alive);
+        if (foe != null)
+        {
+            // Re-seat the foe a few tiles directly east of the soldier on clear floor so LoS holds.
+            int fx = Math.Min(Grid.W - 1, s.X + 4), fy = s.Y;
+            if (Grid.InBounds(fx, fy)) { foe.X = fx; foe.Y = fy; foe.SyncPos(); }
+            foe.Alert = AlertLevel.Alert;
+            Selected = s; RecomputeMoveCost();
+            AimMode = true; AimTarget = foe;
+        }
+    }
+
     /// Harness hook (screenshot only): drop a soldier to show the KIA stamp + red
     /// death-flash (item 3.11).
     public void DebugKia()
     {
         var c = Players.Where(p => !p.IsVip).ToList();
         if (c.Count > 1) { var v = c[1]; v.Nickname = "GHOST"; v.Hp = 0; KillUnit(v); }
+    }
+
+    /// Harness hook (screenshot only, SIGHTLINE_SUMMARY): stage a finished run and jump to the
+    /// VICTORY run-summary card so the rich payoff (surviving roster + MVP + KIA memorial +
+    /// totals + confetti) can be inspected. Presentation only; never runs in normal play.
+    /// Pass lose=true to view the RUN OVER variant instead.
+    public void DebugSummary(bool lose = false)
+    {
+        if (_run == null || _run.Squad == null || _run.Squad.Count == 0) { _run = new Run(); _run.Start(); }
+        _run.Intel = 86;
+        _run.HeatLevel = 3;
+        // decorate survivors: ranks, kills, a nickname/trait + an MVP.
+        var squad = _run.Squad;
+        for (int i = 0; i < squad.Count; i++)
+        {
+            var u = squad[i];
+            u.Kills = 2 + i * 3;
+            u.Rank = Math.Min(Run.Ranks.Length - 1, 1 + i);
+        }
+        if (squad.Count > 0) { squad[0].Nickname = "REAPER"; squad[0].Kills = 11; squad[0].Traits.Add(Trait.Killer); }
+        if (squad.Count > 1) squad[1].Nickname = " HALO";
+        // a couple of fallen, recorded across the run for the memorial roll.
+        _run.Memorial.Add(new FallenRec { Name = "DALES \"BISHOP\"", Cls = "RANGER",  Rank = "SERGEANT", Kills = 7, Mission = 2 });
+        _run.Memorial.Add(new FallenRec { Name = "OKONKWO",        Cls = "GUNNER",  Rank = "CORPORAL", Kills = 4, Mission = 4 });
+        _run.Memorial.Add(new FallenRec { Name = "VEGA \"ASH\"",    Cls = "ASSAULT", Rank = "ROOKIE",   Kills = 1, Mission = 5 });
+        _run.Mission = lose ? 5 : Run.MaxMissions;
+        if (lose) { LoseTitle = "RUN OVER"; LoseReason = "The squad fell on mission 5."; }
+        Phase = lose ? Phase.Lose : Phase.Win;
     }
 
     /// Harness hook (screenshot only): paint sample status effects on soldiers/foes so
@@ -4666,6 +5185,27 @@ public class Game
         _run.Report.Insert(0, $"Recovered 17 intel  (total {_run.Intel})");
         _shopDone = false;
         Phase = Phase.Barracks;
+    }
+
+    /// Harness hook (screenshot, SIGHTLINE_PREP): the REQUISITION screen with a faction
+    /// telegraphed on the next node so the COUNTER-PREP item is offered (and buyable).
+    public void DebugPrep()
+    {
+        DebugShop();
+        _run.Intel = 40;
+        // force a faction onto a reachable next node so UpcomingFaction() returns it
+        var next = _run.NextNodes();
+        if (next.Count > 0) next[0].Faction = Faction.Wardens;
+    }
+
+    /// Harness hook (screenshot): the REQUISITION screen with the ARMORY sub-panel open,
+    /// a soldier selected so the weapon picker shows.
+    public void DebugArmory()
+    {
+        DebugShop();
+        _run.Intel = 40;
+        ArmoryMode = true;
+        ArmorySoldier = _run.Squad.FirstOrDefault(u => !u.IsVip);
     }
 
     /// Headless self-test (SIGHTLINE_DEATHTEST): kill the whole squad on an escort

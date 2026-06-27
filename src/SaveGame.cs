@@ -106,6 +106,7 @@ public static class SaveGame
             MapSeed = r.MapSeed, MapPos = r.MapPos,
             HeatLevel = r.HeatLevel,
             ActiveBoons = r.ActiveBoons.ConvertAll(b => (int)b),
+            PrepFaction = (int)r.PrepFaction,
         };
         foreach (var u in r.Squad)
             dto.Squad.Add(new UnitDto
@@ -141,6 +142,7 @@ public static class SaveGame
         if (dto.Fallen != null) r.Fallen = new List<string>(dto.Fallen);
         if (dto.BondTally != null) r.BondTally = new Dictionary<string, int>(dto.BondTally);
         if (dto.ActiveBoons != null) foreach (var b in dto.ActiveBoons) r.ActiveBoons.Add((Boon)b);
+        r.PrepFaction = (Faction)dto.PrepFaction;   // append-only: old saves default 0 == Faction.None
         // regenerate the branching campaign map from its seed and restore the position
         if (dto.MapSeed != 0)
         {
@@ -196,6 +198,7 @@ public static class SaveGame
         public int MapPos;
         public int HeatLevel;   // append-only: chosen Heat/Ascension level (old saves default 0)
         public List<int> ActiveBoons = new();   // append-only: run-scoped boons (old saves default empty)
+        public int PrepFaction;   // append-only: faction COUNTER-PREP bought (old saves default 0 == None)
     }
 
     class UnitDto
@@ -226,6 +229,7 @@ public static class SaveGame
         {
             var src = new Run { Mission = 4, Intel = 23, Squad = new List<Unit>(), HeatLevel = 5 };
             src.Fallen.Add("DOWNED-GUY");
+            src.PrepFaction = Faction.Legion;   // a staged faction counter-prep must round-trip
             var a = new Unit
             {
                 Name = "VEGA", Cls = "ASSAULT", Team = Team.Player,
@@ -234,6 +238,9 @@ public static class SaveGame
                 CustomTag = "BREACHER", Wound = 2,
             };
             a.Benched = true;
+            // ARMORY: a player-chosen weapon (ASSAULT re-armed Rifle -> Shotgun). Must round-trip,
+            // and the installed mods must re-bake onto the SWAPPED weapon.
+            a.Weapon = Weapon.Make(WeaponKind.Shotgun);
             a.Perks.Add(Perk.Deadeye); a.Perks.Add(Perk.Tank);
             a.InstallMod(WeaponMod.Scope); a.InstallMod(WeaponMod.ExtendedMag);   // persistent weapon upgrades
             a.Nickname = "REAPER";
@@ -263,7 +270,7 @@ public static class SaveGame
             if (g0.Name != a.Name || g0.Cls != a.Cls || g0.Hp != a.Hp || g0.MaxHp != a.MaxHp ||
                 g0.Aim != a.Aim || g0.Mobility != a.Mobility || g0.Kills != a.Kills || g0.Rank != a.Rank)
                 fails.Add("unit0Stats");
-            if (g0.Weapon.Kind != WeaponKind.Rifle) fails.Add("weapon");
+            if (g0.Weapon.Kind != WeaponKind.Shotgun) fails.Add("weapon");   // ARMORY re-arm persists
             if (g0.BonusGrenades != 2) fails.Add("bonusGrenades");
             if (g0.CustomTag != "BREACHER") fails.Add("customTag");
             if (g0.Wound != 2) fails.Add("wound");
@@ -271,8 +278,8 @@ public static class SaveGame
             if (!g0.HasPerk(Perk.Deadeye) || !g0.HasPerk(Perk.Tank) || g0.Perks.Count != 2) fails.Add("perks");
             // weapon mods round-trip AND re-bake onto the rebuilt weapon's effective stats
             if (!g0.HasMod(WeaponMod.Scope) || !g0.HasMod(WeaponMod.ExtendedMag) || g0.WeaponMods.Count != 2) fails.Add("weaponMods");
-            if (g0.Weapon.AimBonus != WeaponModDef.ScopeAim) fails.Add("weaponModScopeApplied");      // Rifle base aimBonus 0 + scope
-            if (g0.Weapon.Clip != 4 + WeaponModDef.MagClip) fails.Add("weaponModMagApplied");         // Rifle base clip 4 + extended mag
+            if (g0.Weapon.AimBonus != WeaponModDef.ScopeAim) fails.Add("weaponModScopeApplied");      // Shotgun base aimBonus 0 + scope
+            if (g0.Weapon.Clip != 2 + WeaponModDef.MagClip) fails.Add("weaponModMagApplied");         // Shotgun base clip 2 + extended mag
             if (g0.Nickname != "REAPER") fails.Add("nickname");
             if (!g0.HasTrait(Trait.Killer) || !g0.HasTrait(Trait.IronWill) || g0.Traits.Count != 2) fails.Add("traits");
             if (g0.Bonds.Count != 1 || g0.Bonds[0] != "NOX") fails.Add("bonds");
@@ -285,6 +292,7 @@ public static class SaveGame
             if (got.MapPos != srcPos) fails.Add("mapPos");
             if (got.CurrentNode == null || got.CurrentNode.Mission != 3) fails.Add("mapNode");
             if (got.HeatLevel != 5) fails.Add("heatLevel");
+            if (got.PrepFaction != Faction.Legion) fails.Add("prepFaction");
 
             // meta (unlocked-max heat) round-trips through its own meta.json
             string metaSaved = File.Exists(MetaPath) ? File.ReadAllText(MetaPath) : null;

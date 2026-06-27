@@ -8,9 +8,9 @@ public enum Team { Player, Enemy }
 public enum WeaponKind { Rifle, Shotgun, Sniper, Lmg, Smg }
 
 /// Per-class signature ability (self-cast, one charge per mission).
-/// APPEND-ONLY: AbilityKind is DERIVED from Cls (never serialised), so appending Heal
+/// APPEND-ONLY: AbilityKind is DERIVED from Cls (never serialised), so appending Mark/Grapple
 /// is save-safe — a CORPSMAN persists as just its Cls string and re-derives its kit.
-public enum AbilityKind { None, RunGun, Blitz, Steady, Suppress, Heal }
+public enum AbilityKind { None, RunGun, Blitz, Steady, Suppress, Heal, Mark, Grapple }
 
 /// Utility-item slot (3.4): a second throwable beyond grenades, assigned by class.
 public enum ItemKind { None, Smoke, Flash, Barricade, Incendiary }
@@ -147,6 +147,31 @@ public class Weapon
         WeaponKind.Smg     => New("SMG",     k, 2, 4, 0, 10, 4),
         _ => New("Rifle", WeaponKind.Rifle, 3, 5, 0, 10, 4),
     };
+
+    /// The weapons a class may carry, for the barracks ARMORY (re-arm decision). Each set is
+    /// a small THEMATIC pool (2-3 options) around the class role, so the pick is a real
+    /// trade-off (e.g. an Assault leaning shotgun for breach vs SMG for mobility) rather than a
+    /// free pick of every gun — keeps balance intact. The class's default weapon leads the list.
+    public static WeaponKind[] ArmoryOptions(string cls) => cls switch
+    {
+        "ASSAULT"      => new[] { WeaponKind.Rifle, WeaponKind.Shotgun, WeaponKind.Smg },
+        "RANGER"       => new[] { WeaponKind.Shotgun, WeaponKind.Smg, WeaponKind.Rifle },
+        "SHARPSHOOTER" => new[] { WeaponKind.Sniper, WeaponKind.Rifle },
+        "GUNNER"       => new[] { WeaponKind.Lmg, WeaponKind.Rifle },
+        "CORPSMAN"     => new[] { WeaponKind.Smg, WeaponKind.Rifle, WeaponKind.Shotgun },
+        _ => new[] { WeaponKind.Rifle },
+    };
+
+    /// One-line tactical descriptor for a weapon kind (shown in the armory picker).
+    public static string KindBlurb(WeaponKind k) => k switch
+    {
+        WeaponKind.Rifle   => "balanced - gentle range falloff, 4-round clip",
+        WeaponKind.Shotgun => "brutal up close, useless at range - 2-round clip",
+        WeaponKind.Sniper  => "rewards distance, punished point-blank - high crit",
+        WeaponKind.Lmg     => "wide flat medium band, big clip - suppression",
+        WeaponKind.Smg     => "mobile close-range snap - light damage",
+        _ => "",
+    };
 }
 
 public class Unit
@@ -169,6 +194,8 @@ public class Unit
     public bool Blitz;          // ranger: next move costs one action less
     public bool Steady;         // sharpshooter: next shot gets +aim/+crit
     public int  Suppress;       // gunner debuff currently ON this unit (aim penalty)
+    public bool Marked;         // sharpshooter MARK: this FOE is designated -> whole squad +aim/+crit vs it
+                                // (per-mission, set on an enemy by DoAbility(Mark), cleared at the marker's next turn)
 
     // optional player-authored role label (overrides the auto strength tags in the
     // roster/dossier when set); persists across the run
@@ -244,6 +271,8 @@ public class Unit
         AbilityKind.Steady  => "STEADY",
         AbilityKind.Suppress=> "SUPPRESS",
         AbilityKind.Heal    => "PATCH",
+        AbilityKind.Mark    => "MARK",
+        AbilityKind.Grapple => "GRAPPLE",
         _ => "ABILITY",
     };
     public string AbilityDesc => Ability switch
@@ -253,13 +282,15 @@ public class Unit
         AbilityKind.Steady   => "Next shot: +25 aim, +20 crit",
         AbilityKind.Suppress => "Pin the nearest foe: -30 aim + overwatch it",
         AbilityKind.Heal     => "Heal the most-wounded adjacent squadmate (+4 HP)",
+        AbilityKind.Mark     => "Designate a foe: whole squad gets +aim/+crit vs it this round",
+        AbilityKind.Grapple  => "Yank a nearby foe 1 tile toward you, out of its cover",
         _ => "",
     };
     public static AbilityKind AbilityKindFor(string cls) => cls switch
     {
-        "ASSAULT"      => AbilityKind.RunGun,
+        "ASSAULT"      => AbilityKind.Grapple,   // verb: yank a foe out of cover (was RunGun stance)
         "RANGER"       => AbilityKind.Blitz,
-        "SHARPSHOOTER" => AbilityKind.Steady,
+        "SHARPSHOOTER" => AbilityKind.Mark,       // verb: focus-fire designator (was Steady stance)
         "GUNNER"       => AbilityKind.Suppress,
         "CORPSMAN"     => AbilityKind.Heal,
         _ => AbilityKind.None,

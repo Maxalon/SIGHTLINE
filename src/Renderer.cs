@@ -171,6 +171,9 @@ public static class Renderer
         DrawGrenade(g);
         DrawItem(g);
         DrawShove(g);
+        DrawMarkIndicators(g);
+        DrawMark(g);
+        DrawGrapple(g);
 
         g.ActiveAnim?.Draw(g);
         g.Fx.Draw();
@@ -1074,6 +1077,20 @@ public static class Renderer
                 Raylib.DrawCircleV(mastTop, 1.6f * s, col);                       // dish hub
                 break;
             }
+            case "LANCER":             // a PHALANX trooper: a compact body behind a raised LANCE (a long
+                                       // forward spear) + a short shoulder bar (the shield-wall shoulder).
+                                       // Reads as "formation / polearm", distinct from the rifleman wedge.
+                Raylib.DrawCircleV(At(-3f, 0), 4.5f * s, col);   // body sits back behind the lance
+                Barrel(-3f, 15f, 2.4f);                          // the long lance reaching forward
+                Raylib.DrawCircleV(At(15f, 0), 1.8f * s, col);   // the spear tip
+                Bar(-3f, 6f, 2.4f, 0.9f);                        // a shoulder bar across the back (the wall edge)
+                break;
+            case "HOUND":              // a SWARM beast: a low lean body with TWIN forward fangs/prongs (a
+                                       // predator's open maw), angrier + more angular than the HUNTER dart.
+                Wedge(7f, -4f, 4f, 1f);                          // a small lean body wedge
+                Raylib.DrawLineEx(At(7f, 0), At(12f, 3.5f), 2f * s, col);   // upper fang
+                Raylib.DrawLineEx(At(7f, 0), At(12f, -3.5f), 2f * s, col);  // lower fang
+                break;
             default:                   // fallback: a neutral pentagon
                 Raylib.DrawPoly(p, 5, 7.5f * s, 0f, col);
                 break;
@@ -1577,6 +1594,95 @@ public static class Renderer
             // a small "X" to read as "blocked / impact"
             Raylib.DrawLineEx(slam + new Vector2(-5, -5), slam + new Vector2(5, 5), 2f, Pal.Foe);
             Raylib.DrawLineEx(slam + new Vector2(-5, 5), slam + new Vector2(5, -5), 2f, Pal.Foe);
+        }
+    }
+
+    // Always-on MARK indicator: a rotating diamond reticle + "MARKED" tag over every designated
+    // foe, so the squad-wide focus-fire target reads on the board (not just in the tooltip). Drawn
+    // for every marked enemy regardless of mode, since the mark persists through the enemy turn.
+    static void DrawMarkIndicators(Game g)
+    {
+        float t = (float)Raylib.GetTime();
+        foreach (var e in g.Enemies)
+        {
+            if (!e.Alive || !e.Marked) continue;
+            var c = e.Pos;
+            float ang = t * 70f;
+            float r = 26f + MathF.Sin(t * 5f) * 2.5f;
+            // a spinning open diamond reticle (focus-fire target)
+            for (int k = 0; k < 4; k++)
+            {
+                float a0 = ang + k * 90f;
+                var p0 = c + AngVec(a0) * r;
+                var p1 = c + AngVec(a0 + 90f) * r;
+                Raylib.DrawLineEx(p0, p1, 2.2f, Raylib.Fade(Pal.Foe, 0.9f));
+            }
+            // four corner ticks
+            for (int k = 0; k < 4; k++)
+            {
+                float a0 = k * 90f + 45f;
+                var pa = c + AngVec(a0) * (r - 5f);
+                var pb = c + AngVec(a0) * (r + 5f);
+                Raylib.DrawLineEx(pa, pb, 2f, Raylib.Fade(Pal.Foe, 0.85f));
+            }
+            Raylib.DrawTextEx(Cfg.Font, "MARKED", new Vector2(c.X - 22, c.Y - r - 16), 12, 1f, Pal.Foe);
+        }
+    }
+
+    static Vector2 AngVec(float deg) { float r = deg * MathF.PI / 180f; return new Vector2(MathF.Cos(r), MathF.Sin(r)); }
+
+    // MARK targeting preview: while the sharpshooter is in MarkMode, ring every legal target and
+    // draw a designator line from the soldier to the hovered foe (green=valid, dim=invalid).
+    static void DrawMark(Game g)
+    {
+        if (!g.MarkMode || g.Selected == null) return;
+        var u = g.Selected;
+        float t = (float)Raylib.GetTime();
+        foreach (var e in g.Enemies)
+        {
+            if (!e.Alive || e.Marked) continue;
+            if (!g.Grid.HasLineOfSight(u.X, u.Y, e.X, e.Y)) continue;
+            float pulse = 22f + MathF.Sin(t * 6f) * 2.5f;
+            Raylib.DrawCircleLines((int)e.Pos.X, (int)e.Pos.Y, pulse, Raylib.Fade(Pal.Good, 0.6f));
+        }
+        var tgt = g.MarkTarget;
+        if (tgt == null) return;
+        Color col = g.MarkValid ? Pal.Good : Pal.TxtDim;
+        Raylib.DrawLineEx(u.Pos, tgt.Pos, 1.8f, Raylib.Fade(col, 0.7f));
+        float ang = t * 90f;
+        Raylib.DrawRing(tgt.Pos, 20, 23, ang, ang + 70, 16, col);
+        Raylib.DrawRing(tgt.Pos, 20, 23, ang + 180, ang + 250, 16, col);
+        Raylib.DrawCircleLines((int)tgt.Pos.X, (int)tgt.Pos.Y, 26, Raylib.Fade(col, 0.6f));
+    }
+
+    // GRAPPLE targeting preview: ring every foe in reach, and on the hovered target draw a pull
+    // arrow from the foe TOWARD the assault (the tile it'll be yanked to), green=valid.
+    static void DrawGrapple(Game g)
+    {
+        if (!g.GrappleMode || g.Selected == null) return;
+        var u = g.Selected;
+        float t = (float)Raylib.GetTime();
+        foreach (var e in g.Enemies)
+        {
+            if (!e.Alive || Util.ChebyDist(u.X, u.Y, e.X, e.Y) > Game.GrappleReach) continue;
+            float pulse = 20f + MathF.Sin(t * 6f) * 2.5f;
+            Raylib.DrawCircleLines((int)e.Pos.X, (int)e.Pos.Y, pulse, Raylib.Fade(Pal.Friend, 0.7f));
+        }
+        var tgt = g.GrappleTarget;
+        if (tgt == null || !g.GrappleValid) return;
+
+        int dx = Util.Sign(u.X - tgt.X), dy = Util.Sign(u.Y - tgt.Y);   // pull direction = toward the assault
+        int destX = tgt.X + dx, destY = tgt.Y + dy;
+        var from = tgt.Pos;
+        var arrowEnd = from + new Vector2(dx, dy) * (Cfg.Tile * 0.9f);
+        Raylib.DrawLineEx(from, arrowEnd, 2.4f, Raylib.Fade(Pal.Friend, 0.9f));
+        var perp = new Vector2(-dy, dx);
+        Raylib.DrawLineEx(arrowEnd, arrowEnd - new Vector2(dx, dy) * 8f + perp * 6f, 2.2f, Raylib.Fade(Pal.Friend, 0.9f));
+        Raylib.DrawLineEx(arrowEnd, arrowEnd - new Vector2(dx, dy) * 8f - perp * 6f, 2.2f, Raylib.Fade(Pal.Friend, 0.9f));
+        if (g.Grid.IsFloor(destX, destY) && !g.IsOccupiedByOther(destX, destY, tgt))
+        {
+            Raylib.DrawRectangleRec(Util.TileRect(destX, destY), Raylib.Fade(Pal.Friend, 0.25f));
+            Raylib.DrawRectangleLinesEx(Util.TileRect(destX, destY), 2f, Pal.Friend);
         }
     }
 

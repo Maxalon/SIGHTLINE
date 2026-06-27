@@ -88,6 +88,17 @@ public class MissionCard
 /// connected to 1-2 nodes in the next column, FTL/Slay-the-Spire style.
 public enum NodeKind { Start, Combat, Elite, Supply, Boss }
 
+/// A run-end MEMORIAL entry: a snapshot of a soldier at the moment they fell, captured for the
+/// run-summary card's KIA roll. PRESENTATION ONLY — populated from Game.KillUnit, read by Hud.
+public struct FallenRec
+{
+    public string Name;     // FullName (incl. earned nickname)
+    public string Cls;      // class
+    public string Rank;     // rank name at death
+    public int Kills;       // confirmed kills earned over the run
+    public int Mission;     // mission number on which they fell
+}
+
 public class MissionNode
 {
     public int Id;            // index into Run.Map
@@ -219,6 +230,17 @@ public class Run
     // the battlefield (spawns/autopilot/render) is unchanged; only the META roster grows.
     public const int RosterMax = 6;           // soldiers carried in the roster (deploy + bench; UI fits 6)
 
+    // ---- ATTRITION: recruits TRICKLE, they don't instantly backfill ----
+    // Losing soldiers must COST you. The barracks used to refill the roster to RosterMax every
+    // mission, so a wipe-to-1 was erased by the next debrief and casualties had no teeth. Now at
+    // most RecruitsPerBarracks fresh rookies join per barracks, so a bad mission leaves you
+    // genuinely short-handed (fielding 3-4 instead of 5-6) for a mission or two while the roster
+    // rebuilds. A HARD FLOOR (AttritionFloor) still guarantees a deployable squad — you can never
+    // death-spiral below it (the run is only lost on a true wipe), so attrition bites without
+    // becoming unfair. Rookies carry no rank/perks/mods — that's the price of the loss.
+    public const int RecruitsPerBarracks = 1;  // max fresh rookies the barracks supplies per mission
+    public const int AttritionFloor = 3;       // the roster is always topped up to at least this many
+
     // Deployed squad size GROWS as the campaign deepens. Balance data: with a flat 4-soldier
     // deploy, the run is a geometric product that collapses (4 soldiers x 2 actions vs 9-12
     // enemies by m5) — per-mission tweaks barely moved the 2% run-completion. Reinforcing the
@@ -240,12 +262,36 @@ public class Run
     public int Intel;                         // requisition currency spent in the barracks shop
     public int HeatLevel;                     // chosen Heat/Ascension difficulty (0..Heat.Max); persisted in the run save
     public List<string> Fallen = new();       // names of KIA soldiers
+    // Run-end MEMORIAL (presentation only): a richer KIA record (full identity + rank/class/
+    // kills + the mission they fell on) accumulated across the WHOLE run, so the run-summary
+    // card can honour the fallen with more than a bare name. Read by Hud's end screen; NOT
+    // persisted (a CONTINUE resumes mid-run, rebuilding it as soldiers fall). Appended one
+    // entry per soldier death from the existing Game.KillUnit hook (see the one-line addition).
+    public readonly List<FallenRec> Memorial = new();
     // co-survival tally per soldier pair ("A|B"); a bond forms at BondThreshold
     public Dictionary<string, int> BondTally = new();
     public List<string> Report = new();       // promotion/heal lines for the barracks
     public List<PerkOffer> PendingPerks = new(); // rank-up perk choices awaiting the player
     public List<MissionCard> Offers = new();  // next-mission deployment choices (fallback)
     public MissionCard CurrentCard;           // the card the active mission was launched from
+
+    // ---- faction COUNTER-PREP (one-mission, bought at the barracks requisition) ----
+    // The player can spend Intel to buy a one-mission counter to the faction they're about to
+    // face (telegraphed on the campaign map). Stored here, PERSISTED in the save, APPLIED + CLEARED
+    // at the next Game.SetupMission (which copies it into Combat.PrepFaction). None = no prep bought.
+    public Faction PrepFaction = Faction.None;
+
+    /// The faction the squad is about to face, as best known at the BARRACKS shop step (the node
+    /// hasn't been chosen yet). We surface the first non-None faction among the reachable next nodes
+    /// so the prep is offered for a real upcoming threat. If every reachable node is mixed-force
+    /// (None), prep is unavailable. The prep is keyed to THIS faction and only takes effect next
+    /// mission if Combat.MissionFaction actually matches (an honest, telegraphed bet).
+    public Faction UpcomingFaction()
+    {
+        foreach (var n in NextNodes())
+            if (n.Faction != Faction.None) return n.Faction;
+        return Faction.None;
+    }
 
     // ---- run-scoped boons (Wave 3 variance) ----
     public List<Boon> ActiveBoons = new();    // boons chosen this run (persisted within the run)
@@ -688,21 +734,38 @@ public class Run
         // bonds: every pair of survivors that shared this mission grows closer
         AdvanceBonds();
 
-        // backfill the ROSTER up to RosterMax with rookie recruits — UNLESS Heat "RELENTLESS"
-        // (rung 8) turns off reinforcements, so casualties permanently shrink the roster for the
-        // run. (At least one soldier always survives to reach the barracks; a full wipe loses the
-        // run.) The roster is a bench: only DeployCap deploy each mission, so a deeper roster means
-        // the wounded recover off the line while the squad still fields a full healthy complement.
+        // ATTRITION backfill (see RecruitsPerBarracks / AttritionFloor). Recruits TRICKLE in
+        // rather than instantly refilling to RosterMax, so a wipe genuinely shrinks your strength
+        // for a mission or two. A hard floor still guarantees a deployable squad (no death-spiral).
+        // Heat "RELENTLESS" (rung 8) turns OFF all reinforcements — casualties permanently shrink
+        // the roster for the run.
         if (Heat.NoReinforcements(HeatLevel))
         {
             if (Squad.Count < NextDeployCap)
                 Report.Add($"No reinforcements (HEAT) -- deploying {Squad.Count} strong");
         }
-        else while (Squad.Count < RosterMax)
+        else
         {
-            var rec = Sightline.Mission.MakeRecruit();
-            Squad.Add(rec);
-            Report.Add($"{rec.Name} joins the roster  (ROOKIE {rec.Cls})");
+            // 1) emergency floor: if a bad mission dropped the roster below AttritionFloor, top it
+            //    straight back up to the floor (anti-death-spiral — you always have a squad to field).
+            while (Squad.Count < AttritionFloor)
+            {
+                var rec = Sightline.Mission.MakeRecruit();
+                Squad.Add(rec);
+                Report.Add($"{rec.Name} drafted to fill the ranks  (ROOKIE {rec.Cls})");
+            }
+            // 2) normal trickle: above the floor, at most RecruitsPerBarracks rookie joins per
+            //    barracks, so the roster rebuilds gradually toward RosterMax (losses still bite).
+            int added = 0;
+            while (Squad.Count < RosterMax && added < RecruitsPerBarracks)
+            {
+                var rec = Sightline.Mission.MakeRecruit();
+                Squad.Add(rec);
+                Report.Add($"{rec.Name} joins the roster  (ROOKIE {rec.Cls})");
+                added++;
+            }
+            if (Squad.Count < RosterMax)
+                Report.Add($"Roster understrength: {Squad.Count}/{RosterMax} (recruits trickle in)");
         }
 
         // pick the default deployment for next mission (best healthy DeployCap; bench the rest).
@@ -890,8 +953,8 @@ public class Run
                 return "BERSERKER + MEDIC";
             default: // Combat / Start — normal force for this mission tier
                 if (m == 1)    return "GRUNTS + SCOUTS";
-                if (m == 2)    return "HUNTER + DRONE";
-                if (m == 3)    return "MORTAR + TURRET";
+                if (m == 2)    return "HOUND PACK + HUNTER";
+                if (m == 3)    return "LANCER LINE + MORTAR";
                 if (m == 4)    return "BERSERKER + DRONE";
                 if (m == 5)    return "SHIELD + MEDIC";
                 return                 "ELITE FORCE";
