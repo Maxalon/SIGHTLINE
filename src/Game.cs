@@ -89,6 +89,24 @@ public class Game
     public Unit ShoveTarget;
     public bool ShoveValid;
 
+    // MARK targeting (sharpshooter ability VERB): designate a foe in line of sight -> the whole
+    // squad gets +aim/+crit vs it (Combat.MarkAim/MarkCrit) until the sharpshooter's next turn.
+    // Mirrors the ShoveMode pattern (ToggleMark/MarkTargetOk/IssueMark + key 5 + reset sites).
+    // A targeting verb, not a self-stance: it changes "who do we all shoot" on the board.
+    public bool MarkMode;
+    public Unit MarkTarget;     // hovered enemy under the cursor while in MarkMode (null = none)
+    public bool MarkValid;      // gates the click (target is a legal MARK target)
+    Unit _markedBy;             // the sharpshooter who placed the current MARK (clears it on their next turn)
+
+    // GRAPPLE targeting (assault ability VERB): yank a nearby foe ONE tile toward you, out of its
+    // cover (reuses ShoveAnim with the pull direction = sign(assault - target)). A forced-movement
+    // repositioning toy. Reach is Chebyshev <= GrappleReach; 1 use/soldier/turn (Unit.ShovedThisTurn,
+    // shared with SHOVE so the two repositioning verbs share one anti-loop budget).
+    public const int GrappleReach = 2;
+    public bool GrappleMode;
+    public Unit GrappleTarget;
+    public bool GrappleValid;
+
     // banner
     public string BannerText = "";
     public float BannerTimer, BannerMax;
@@ -680,7 +698,7 @@ public class Game
         SnapShot = false;
         GrenadeMode = false;
         ItemMode = false;
-        ShoveMode = false;
+        ShoveMode = false; MarkMode = false; GrappleMode = false;
         Biome = Biome.For(n, _run.MapSeed);   // per-run biome variety (surfaces NEON/MAGMA across seeds)
         string facTag = Combat.MissionFaction != Faction.None ? $" - {Run.FactionName(Combat.MissionFaction)}" : "";
         ShowBanner($"MISSION {n} - {Biome.Name}{facTag}", false);
@@ -1203,6 +1221,29 @@ public class Game
         CurX = foe.X; CurY = foe.Y;
         ShoveTarget = foe;
         ShoveValid = ShoveTargetOk(u, foe);
+    }
+
+    /// Harness hook (screenshot only): show the MARK verb in use — one foe already designated
+    /// (always-on indicator) + the sharpshooter in MarkMode designating a second one (preview line).
+    public void DebugMark()
+    {
+        DebugWakeAll();
+        var u = Players.FirstOrDefault(p => p.Alive && !p.IsVip);
+        if (u == null) return;
+        u.Cls = "SHARPSHOOTER";        // force the MARK ability for the demo
+        u.AbilityCharge = 1;
+        var foes = Enemies.Where(e => e.Alive && Grid.HasLineOfSight(u.X, u.Y, e.X, e.Y))
+                          .OrderBy(e => Util.ChebyDist(u.X, u.Y, e.X, e.Y)).ToList();
+        if (foes.Count >= 1) { foes[0].Marked = true; _markedBy = u; }     // already-marked foe
+        Selected = u;
+        RecomputeMoveCost();
+        if (foes.Count >= 2)
+        {
+            MarkMode = true; KbCursor = true;
+            CurX = foes[1].X; CurY = foes[1].Y;
+            MarkTarget = foes[1];
+            MarkValid = MarkTargetOk(u, foes[1]);
+        }
     }
 
     /// Harness hook (screenshot only): freeze a sample of the procedural unit-animation poses
@@ -1993,7 +2034,7 @@ public class Game
         {
             if (Raylib.IsKeyPressed(KeyboardKey.Escape))
             {
-                if (AimMode || GrenadeMode || ItemMode || ShoveMode) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; }
+                if (AimMode || GrenadeMode || ItemMode || ShoveMode || MarkMode || GrappleMode) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; }
                 else Paused = !Paused;
             }
             if (Paused) { HandlePauseMenu(); return; }
@@ -2706,6 +2747,30 @@ public class Game
                 if (FirstTargetFor(u) == null && AliveEnemies().Count > 0) { DoAbility(); return false; }
                 return false;
             }
+            case AbilityKind.Mark:
+            {
+                // designate a high-value visible foe so the whole squad shoots it better this round.
+                // Costs an action; only worth it when we can still fire after AND there's a
+                // worthwhile target nobody's marked. Don't mark a foe we can already cleanly kill.
+                if (u.ActionsLeft < 2) return false;     // keep an action to actually shoot
+                var tgt = forcedTarget != null && MarkTargetOk(u, forcedTarget) ? forcedTarget : BestMarkTarget(u);
+                if (tgt == null) return false;
+                var odds = Combat.ComputeOdds(Grid, u, tgt);
+                if (tgt.Hp <= odds.DmgMax && odds.HitChance >= 60) return false;  // just kill it
+                IssueMark(u, tgt);
+                return false;   // didn't end the turn — fall through and act (shoot) with the action left
+            }
+            case AbilityKind.Grapple:
+            {
+                // yank a foe out of cover so the squad can hit it. Only when there's a covered foe
+                // in reach AND we can act after (the grapple costs an action but not the turn).
+                if (u.ActionsLeft < 2 || u.ShovedThisTurn) return false;
+                var tgt = BestGrappleTarget(u);
+                if (tgt == null) return false;
+                if (Grid.GetCover(tgt.X, tgt.Y, u.X, u.Y).Level <= 0) return false;  // only worth it vs a covered foe
+                IssueGrapple(u, tgt);
+                return false;   // free of end-turn; act with the remaining action
+            }
         }
         return false;
     }
@@ -3107,9 +3172,24 @@ public class Game
         if (CanAbility(u) && Util.Roll(45))
         {
             var kind = u.Ability;
-            DoAbility();
-            if (kind == AbilityKind.Steady || kind == AbilityKind.Suppress || kind == AbilityKind.Heal) return; // spent an action
-            // RunGun / Blitz are free stances — fall through and act with them
+            // the two targeting VERBS resolve directly (DoAbility would open a mode the dumb
+            // smoke-test autopilot can't drive) -> exercise the IssueMark/IssueGrapple paths.
+            if (kind == AbilityKind.Mark)
+            {
+                var mt = BestMarkTarget(u);
+                if (mt != null) IssueMark(u, mt);    // costs an action but not the turn -> fall through and shoot
+            }
+            else if (kind == AbilityKind.Grapple)
+            {
+                var gt = BestGrappleTarget(u);
+                if (gt != null) IssueGrapple(u, gt); // costs an action but not the turn -> fall through and shoot
+            }
+            else
+            {
+                DoAbility();
+                if (kind == AbilityKind.Steady || kind == AbilityKind.Suppress || kind == AbilityKind.Heal) return; // spent an action
+                // RunGun / Blitz are free stances — fall through and act with them
+            }
         }
 
         var tgt = FirstTargetFor(u);
@@ -3448,6 +3528,20 @@ public class Game
             return;
         }
 
+        if (MarkMode)
+        {
+            MarkTarget = (hovered != null && Selected != null) ? hovered : null;
+            MarkValid = Selected != null && MarkTarget != null && MarkTargetOk(Selected, MarkTarget);
+            return;
+        }
+
+        if (GrappleMode)
+        {
+            GrappleTarget = (hovered != null && Selected != null) ? hovered : null;
+            GrappleValid = Selected != null && GrappleTarget != null && GrappleTargetOk(Selected, GrappleTarget);
+            return;
+        }
+
         if (AimMode)
         {
             if (hovered != null && hovered.Team == Team.Enemy && CanTarget(Selected, hovered))
@@ -3516,7 +3610,7 @@ public class Game
         if (Raylib.IsKeyPressed(KeyboardKey.Space) && HoverValid) { BoardAct(HoverX, HoverY); return; }
         if (KbCursor && Raylib.GetMouseDelta() != Vector2.Zero) KbCursor = false;  // mouse takes back over
 
-        if (Raylib.IsMouseButtonPressed(MouseButton.Right)) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; return; }
+        if (Raylib.IsMouseButtonPressed(MouseButton.Right)) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; return; }
 
         if (Raylib.IsMouseButtonPressed(MouseButton.Left))
         {
@@ -3557,6 +3651,18 @@ public class Game
         {
             if (hovered != null && Selected != null && ShoveTargetOk(Selected, hovered)) IssueShove(Selected, hovered);
             else ShoveMode = false;
+            return;
+        }
+        if (MarkMode)
+        {
+            if (hovered != null && Selected != null && MarkTargetOk(Selected, hovered)) IssueMark(Selected, hovered);
+            else MarkMode = false;
+            return;
+        }
+        if (GrappleMode)
+        {
+            if (hovered != null && Selected != null && GrappleTargetOk(Selected, hovered)) IssueGrapple(Selected, hovered);
+            else GrappleMode = false;
             return;
         }
         if (AimMode)
@@ -3688,7 +3794,7 @@ public class Game
         }
     }
 
-    void SelectUnit(Unit u) { Selected = u; AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; Audio.Play("select"); }
+    void SelectUnit(Unit u) { Selected = u; AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; Audio.Play("select"); }
 
     void CycleSelection()
     {
@@ -3700,7 +3806,7 @@ public class Game
         SnapShot = false;
         GrenadeMode = false;
         ItemMode = false;
-        ShoveMode = false;
+        ShoveMode = false; MarkMode = false; GrappleMode = false;
         Audio.Play("select");
     }
 
@@ -3721,7 +3827,7 @@ public class Game
         if (!HasAnyTarget(Selected)) return;
         GrenadeMode = false;
         ItemMode = false;
-        ShoveMode = false;
+        ShoveMode = false; MarkMode = false; GrappleMode = false;
         AimMode = true;
         SnapShot = snap;
         AimTarget = FirstTargetFor(Selected);
@@ -3731,7 +3837,7 @@ public class Game
     {
         if (Selected == null || !Selected.CanAct || Selected.Grenades <= 0) return;
         GrenadeMode = !GrenadeMode;
-        if (GrenadeMode) { AimMode = false; SnapShot = false; ItemMode = false; ShoveMode = false; }   // clear the snap variant too (review #3)
+        if (GrenadeMode) { AimMode = false; SnapShot = false; ItemMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; }   // clear the snap variant too (review #3)
     }
 
     void IssueGrenade(int tx, int ty)
@@ -3749,7 +3855,7 @@ public class Game
     {
         if (Selected == null || !Selected.CanAct || Selected.ItemCharge <= 0 || Selected.Item == ItemKind.None) return;
         ItemMode = !ItemMode;
-        if (ItemMode) { AimMode = false; SnapShot = false; GrenadeMode = false; ShoveMode = false; }   // clear the snap variant too (review #3)
+        if (ItemMode) { AimMode = false; SnapShot = false; GrenadeMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; }   // clear the snap variant too (review #3)
     }
 
     /// Whether a utility item can legally land on (tx,ty): barricade needs an empty
@@ -3816,7 +3922,93 @@ public class Game
     {
         if (!CanShove(Selected)) return;
         ShoveMode = !ShoveMode;
-        if (ShoveMode) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; }
+        if (ShoveMode) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; MarkMode = false; GrappleMode = false; }
+    }
+
+    // ---- MARK (sharpshooter VERB): designate a foe; the whole squad shoots it better this round ----
+
+    /// Is `target` a legal MARK target for sharpshooter `u`? An alive, visible (line-of-sight)
+    /// enemy that isn't already marked. No reach cap (a designator works at range — its whole
+    /// point), but it must be in LoS so it's a real sightline call.
+    bool MarkTargetOk(Unit u, Unit target)
+    {
+        if (u == null || target == null || !u.CanAct || u.ActionsLeft < 1 || u.AbilityCharge <= 0) return false;
+        if (!target.Alive || target.Team != Team.Enemy || target.Marked) return false;
+        if (target.IsVip && CaptiveLocked) return false;             // can't mark the caged captive
+        return Grid.HasLineOfSight(u.X, u.Y, target.X, target.Y);
+    }
+
+    void ToggleMark()
+    {
+        if (Selected == null || Selected.Ability != AbilityKind.Mark || !CanAbility(Selected)) return;
+        MarkMode = !MarkMode;
+        if (MarkMode) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; GrappleMode = false; }
+    }
+
+    /// Designate `target`: set Unit.Marked so Combat.ComputeOdds gives EVERY squad member +MarkAim/
+    /// +MarkCrit vs it (Combat.cs). Costs 1 action + the ability charge; does NOT end the turn (the
+    /// sharpshooter can still fire). The mark clears at the marker's next turn (StartPlayerTurn) or
+    /// when the foe dies. Pinning a foe is aggression -> breaks concealment + wakes its pod.
+    void IssueMark(Unit u, Unit target)
+    {
+        if (!MarkTargetOk(u, target)) { MarkMode = false; return; }
+        if (SquadConcealed) BreakConcealment(u);   // calling out a target gives the squad away
+        target.Marked = true;
+        _markedBy = u;                              // remember who marked, to clear it on their next turn
+        u.AbilityCharge--; u.ActionsLeft = Math.Max(0, u.ActionsLeft - 1);
+        if (!target.Active) ActivatePod(target.PodId);
+        Fx.PopText(target.Pos + new Vector2(0, -34), "MARKED", Pal.Foe, 18f);
+        Fx.PopText(u.Pos + new Vector2(0, -34), "MARK", Pal.Good, 16f);
+        Fx.Burst(target.Pos, Pal.Foe, 10, 120f, 0.4f, 3f);
+        Audio.Play("over");
+        MarkMode = false; ShoveMode = false; GrappleMode = false;
+    }
+
+    /// Clear every MARK on the board (called at the marker's next player-turn start, so a mark
+    /// lasts through the enemy turn — the focus-fire window — then expires).
+    void ClearMarks()
+    {
+        foreach (var e in Enemies) e.Marked = false;
+        _markedBy = null;
+    }
+
+    // ---- GRAPPLE (assault VERB): yank a nearby foe 1 tile toward you, out of its cover ----
+
+    /// Is `target` a legal GRAPPLE target for assault `u`? An alive enemy within GrappleReach
+    /// (Chebyshev) that hasn't been repositioned this turn (shares the SHOVE budget). Reuses the
+    /// ShoveAnim, so it's anti-loop-bounded the same way.
+    bool GrappleTargetOk(Unit u, Unit target)
+    {
+        if (u == null || target == null || !u.CanAct || u.ShovedThisTurn || u.AbilityCharge <= 0) return false;
+        if (!target.Alive || target.Team != Team.Enemy) return false;
+        if (target.IsVip && CaptiveLocked) return false;
+        int dx = target.X - u.X, dy = target.Y - u.Y;
+        if (dx == 0 && dy == 0) return false;
+        return Math.Abs(dx) <= GrappleReach && Math.Abs(dy) <= GrappleReach;
+    }
+
+    void ToggleGrapple()
+    {
+        if (Selected == null || Selected.Ability != AbilityKind.Grapple || !CanAbility(Selected)) return;
+        GrappleMode = !GrappleMode;
+        if (GrappleMode) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; MarkMode = false; }
+    }
+
+    /// Yank `target` ONE tile TOWARD the assault (pull direction = sign(u - target)), reusing
+    /// ShoveAnim with the inverted vector. Pulls a foe out of its cover into the open. Costs 1
+    /// action + the ability charge; does NOT end the turn. Uses ShovedThisTurn as the per-turn
+    /// budget (shared with SHOVE) so a soldier can't loop reposition verbs.
+    void IssueGrapple(Unit u, Unit target)
+    {
+        if (!GrappleTargetOk(u, target)) { GrappleMode = false; return; }
+        // direction the target MOVES = toward the assault (one tile closer)
+        int dx = Math.Sign(u.X - target.X), dy = Math.Sign(u.Y - target.Y);
+        u.AbilityCharge--; u.ShovedThisTurn = true; u.ActionsLeft = Math.Max(0, u.ActionsLeft - 1);
+        if (SquadConcealed) BreakConcealment(u);   // a grapple is aggression
+        if (!target.Active) ActivatePod(target.PodId);
+        Fx.PopText(target.Pos + new Vector2(0, -34), "GRAPPLED", Pal.Friend, 18f);
+        Enqueue(new ShoveAnim(u, target, dx, dy), Team.Player);
+        GrappleMode = false; ShoveMode = false; MarkMode = false;
     }
 
     /// Shove an adjacent enemy 1 tile directly away (soldier -> target direction). Costs 1
@@ -3832,7 +4024,7 @@ public class Game
         // shoving a dormant pod is aggression -> it wakes (mirrors a shot revealing a pod).
         if (!target.Active) ActivatePod(target.PodId);
         Enqueue(new ShoveAnim(u, target, dx, dy), Team.Player);
-        ShoveMode = false;
+        ShoveMode = false; MarkMode = false; GrappleMode = false;
     }
 
     void IssueMove(int tx, int ty)
@@ -4039,6 +4231,8 @@ public class Game
             AbilityKind.Steady  => !u.Steady && u.ActionsLeft >= 1,
             AbilityKind.Suppress=> u.Ammo > 0 && HasAnyTarget(u),
             AbilityKind.Heal    => u.ActionsLeft >= 1 && MostWoundedAdjacentAlly(u) != null,
+            AbilityKind.Mark    => u.ActionsLeft >= 1 && HasMarkTarget(u),
+            AbilityKind.Grapple => !u.ShovedThisTurn && u.ActionsLeft >= 1 && HasGrappleTarget(u),
             _ => false,
         };
     }
@@ -4060,10 +4254,54 @@ public class Game
         return best;
     }
 
+    /// Any legal MARK target (visible un-marked foe) for sharpshooter `u`?
+    bool HasMarkTarget(Unit u)
+    {
+        foreach (var e in Enemies) if (MarkTargetOk(u, e)) return true;
+        return false;
+    }
+    /// Any legal GRAPPLE target (foe within reach) for assault `u`?
+    bool HasGrappleTarget(Unit u)
+    {
+        foreach (var e in Enemies) if (GrappleTargetOk(u, e)) return true;
+        return false;
+    }
+    /// The best AI/autopilot MARK pick: a live foe in LoS we'd want the squad to collapse on
+    /// (highest priority weight). Null if none visible.
+    Unit BestMarkTarget(Unit u)
+    {
+        Unit best = null; float bestW = -1f;
+        foreach (var e in Enemies)
+        {
+            if (!MarkTargetOk(u, e)) continue;
+            float w = PriorityWeight(e);
+            if (w > bestW) { bestW = w; best = e; }
+        }
+        return best;
+    }
+    /// The best AI/autopilot GRAPPLE pick: a foe in reach that's currently IN cover from us
+    /// (yanking it out is the point); fall back to the nearest foe in reach.
+    Unit BestGrappleTarget(Unit u)
+    {
+        Unit best = null; int bestScore = int.MinValue;
+        foreach (var e in Enemies)
+        {
+            if (!GrappleTargetOk(u, e)) continue;
+            int cover = Grid.GetCover(e.X, e.Y, u.X, u.Y).Level;   // how protected it is from us now
+            int score = cover * 100 - Util.ChebyDist(u.X, u.Y, e.X, e.Y);
+            if (score > bestScore) { bestScore = score; best = e; }
+        }
+        return best;
+    }
+
     void DoAbility()
     {
         var u = Selected;
         if (!CanAbility(u)) return;
+        // the two targeting VERBS enter a targeting mode for the human player (the AI/autopilot
+        // calls IssueMark/IssueGrapple directly via PrepAbilityFor, so it never opens a mode).
+        if (u.Ability == AbilityKind.Mark)    { ToggleMark();    return; }
+        if (u.Ability == AbilityKind.Grapple) { ToggleGrapple(); return; }
         var at = u.Pos + new Vector2(0, -34);
         switch (u.Ability)
         {
@@ -4116,7 +4354,7 @@ public class Game
         SnapShot = false;
         GrenadeMode = false;
         ItemMode = false;
-        ShoveMode = false;
+        ShoveMode = false; MarkMode = false; GrappleMode = false;
     }
 
     void RequestEndTurn()
@@ -4227,7 +4465,7 @@ public class Game
         SnapShot = false;
         GrenadeMode = false;
         ItemMode = false;
-        ShoveMode = false;
+        ShoveMode = false; MarkMode = false; GrappleMode = false;
         Selected = null;
         MoveCost = null;
         Phase = Phase.EnemyTurn;
@@ -4255,6 +4493,7 @@ public class Game
         TickHazards();                    // fire cooks off barrels + reignites units, then decays
         _refundedThisTurn.Clear();        // flank-kill refund is one per soldier per turn
         HackedThisTurn = false;           // the terminal accepts one breach cycle per turn (hold)
+        ClearMarks();                     // a sharpshooter's MARK lasts until the marker's next turn
         if (AutoPlay) AutoStallCheck();
         foreach (var p in Players) if (p.Alive) { p.BeginTurn(); TickStatuses(p); }
         foreach (var e in Enemies) if (e.Alive) { e.ReactedThisTurn = false; e.Suppress = 0; } // OW resets; suppression expires
@@ -4263,7 +4502,7 @@ public class Game
         SnapShot = false;
         GrenadeMode = false;
         ItemMode = false;
-        ShoveMode = false;
+        ShoveMode = false; MarkMode = false; GrappleMode = false;
         ShowBanner("PLAYER TURN", false);
     }
 

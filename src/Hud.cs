@@ -581,7 +581,7 @@ public static class Hud
         Add("snap", "SNAP", "7", interactive && u != null && u.CanAct && u.Ammo > 0 && hasTargets, g.AimMode && g.SnapShot);
         Add("grenade", "GRENADE", "4", interactive && u != null && u.CanAct && u.Grenades > 0, g.GrenadeMode);
         if (u != null && u.Ability != AbilityKind.None)
-            Add("ability", u.AbilityName, "5", interactive && g.CanAbility(u), u.RunGun || u.Blitz || u.Steady);
+            Add("ability", u.AbilityName, "5", interactive && g.CanAbility(u), u.RunGun || u.Blitz || u.Steady || g.MarkMode || g.GrappleMode);
         if (u != null && u.Item != ItemKind.None)
             Add("item", u.ItemName, "6", interactive && u.CanAct && u.ItemCharge > 0, g.ItemMode);
         // SHOVE: forced-movement verb (1 action, no end-turn, 1/turn). Enabled only when an
@@ -1036,6 +1036,7 @@ public static class Hud
             if (a.HasPerk(Perk.PointBlank) && dist <= Unit.PointBlankRange) flags.Add(("+ POINT BLANK", Pal.Good));
             if (a.HasPerk(Perk.GiantSlayer) && d.MaxHp > 0 && d.Hp >= d.MaxHp) flags.Add(("+ FIRST STRIKE", Pal.Good));
             if (o.Crossfire)                                  flags.Add(("+ CROSSFIRE", Pal.Good));   // a squadmate threatens this target from a converging angle
+            if (o.Marked)                                     flags.Add(("+ MARKED", Pal.Good));      // a sharpshooter has designated this foe (squad-wide focus-fire bonus)
 
             // attacker penalties (red) — these quietly drag the hit% down
             if (a.Suppress > 0)                               flags.Add(("- SUPPRESSED", Pal.Foe));

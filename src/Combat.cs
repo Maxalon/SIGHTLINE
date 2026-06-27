@@ -30,6 +30,7 @@ public struct ShotOdds
     public bool Steady;      // attacker braced (sharpshooter ability) this shot
     public bool Ambush;      // attacker fired from concealment (one-shot bonus)
     public bool Crossfire;   // target caught in converging fire from two diverging angles
+    public bool Marked;      // target designated by a sharpshooter MARK (squad-wide +aim/+crit)
     // ---- visible randomness-mitigation surfacing (S2-A graze + S4-C streak) ----
     // These mirror EXISTING hidden mechanics so the HUD can show the player the safety nets
     // (DESIGN.md 3B: reduce %-to-hit save-scum). They DO NOT change the math: HitChance above
@@ -62,6 +63,12 @@ public static class Combat
     // Concealment ambush bonus: firing from concealment before breaking it.
     public const int AmbushAim  = 20;
     public const int AmbushCrit = 25;
+
+    // Sharpshooter "Mark" ability (focus-fire designator): EVERY squad member's shot vs the marked
+    // foe lands easier + crits harder. The flag lives on the target (Unit.Marked), set by the
+    // sharpshooter and cleared at the marker's next turn — a squad-wide "everyone shoot THIS one".
+    public const int MarkAim  = 10;
+    public const int MarkCrit = 15;
 
     // SHOVE (forced-movement verb): when a shoved enemy can't move (destination blocked by a
     // wall, cover, another unit, or the board edge) it slams the obstacle and takes this much
@@ -178,6 +185,11 @@ public static class Combat
         if (a.BondAura) hit += Unit.BondAim;     // a bonded squadmate stands adjacent
 
         if (a.FiredFromConcealment) hit += AmbushAim;
+        // MARK (sharpshooter focus-fire designator, player attacker vs a marked foe): the whole
+        // squad's shots vs the designated target land easier. Flat (a situational squad rule, like
+        // crossfire), so it composes cleanly with everything else.
+        bool marked = a.Team == Team.Player && d.Marked;
+        if (marked) hit += MarkAim;
         // run boon (player attacker): MARKSMEN sharpens the squad's long shots
         if (a.Team == Team.Player && RunBoons.Count > 0 && HasRunBoon(Sightline.Boon.Marksmen) && dist >= Unit.LongRange) hit += BoonMarksAim;
         // CROSSFIRE (symmetric, both teams): a target converged on from two diverging angles can't use
@@ -248,6 +260,7 @@ public static class Combat
         // Crossfire + faction crit stay FLAT (outside the damped stack): they're symmetric/enemy
         // situational rules whose self-tests assert an exact +CrossfireCrit / +LegionCloseCrit delta.
         if (crossfire) crit += CrossfireCrit;   // converging fire also crits harder (target distracted/exposed)
+        if (marked) crit += MarkCrit;           // designated foe: the whole squad crits it harder (flat, like crossfire)
         // enemy FACTION crit rule (enemy attacker only; None = no-op): LEGION's closing rush also
         // crits harder within close range. Applied before the crit clamp (and before the hunker zero).
         if (a.Team == Team.Enemy && MissionFaction == Faction.Legion && dist <= Unit.CloseRange) crit += LegionCloseCrit;
@@ -269,6 +282,7 @@ public static class Combat
             Steady = a.Steady,
             Ambush = a.FiredFromConcealment,
             Crossfire = crossfire,
+            Marked = marked,
             // Surface the hidden safety nets for the tooltip (no math change — purely informational):
             //  - StreakBonus mirrors the player-only streak-breaker that Resolve folds into effHit.
             //  - GrazeFloor is the guaranteed damage a near-miss (graze) would still deal to THIS
