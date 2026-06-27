@@ -196,6 +196,33 @@ docs/screenshot.png    README image
 ## Current state — DONE ✅
 Playable vertical slice, builds clean (0 warn/0 err), autoplay-verified across
 seeds (mix of WIN/LOSE, no exceptions):
+- **Anti-turtle PRESSURE CLOCK (AGENCY W1):** on camp-friendly objectives (Elim/Hack/Decapitate) a graced
+  clock escalates after turn 4 — enemy aim creep (`Combat.PressureAim`) + reinforcement waves — so turtling is
+  strictly worse than advancing. `PRES` rung-pip meter in the top bar; `Game.PressureRungFor/UpdatePressure/
+  SpawnReinforcements/PressureClockObjective`. `SIGHTLINE_PRESSURE`.
+- **Visible randomness mitigation (AGENCY W1):** the shot tooltip surfaces the hidden graze floor + streak-
+  breaker (`DMG GRAZE n / min-max`, `+N STEADYING`) via `ShotOdds.GrazeFloor/StreakBonus` — missing a high-%
+  shot reads as less of a betrayal (math unchanged). `SIGHTLINE_TOOLTIP`.
+- **Run-end payoff (AGENCY W1):** rich VICTORY/RUN OVER summary card (`Hud.DrawEndScreen`) — stat slabs +
+  SURVIVING SQUAD (MVP) + KIA MEMORIAL (`Run.Memorial`/`FallenRec`, not persisted) + `Fx.VictoryBurst`
+  flourish on the final win. `SIGHTLINE_SUMMARY`.
+- **ARMORY + meaningful ATTRITION (AGENCY W2):** spend Intel at the requisition ARMORY sub-screen to re-arm a
+  soldier from their class's thematic weapon pool (`Weapon.ArmoryOptions`, `Game.DoRearm`); chosen weapon
+  persists on the `Run.Squad` unit. Recruits TRICKLE (1/barracks above a floor of 3 — `Run.RecruitsPerBarracks/
+  AttritionFloor`) so a wipe genuinely shrinks strength for a mission or two without death-spiralling.
+  `SIGHTLINE_ARMORY`.
+- **VERB abilities (AGENCY W2):** **Sharpshooter MARK** (designate a foe → whole squad +10 aim/+15 crit vs it
+  until its next turn; `Unit.Marked`, `Combat.MarkAim/MarkCrit`) + **Assault GRAPPLE** (yank a nearby foe 1 tile
+  out of cover; reuses `ShoveAnim`). Append-only `AbilityKind`, save-safe; AI uses both (no TIMEOUT).
+  `SIGHTLINE_MARK`.
+- **FACTION-COUNTER PREP (AGENCY W3):** a barracks item (12 Intel) buys a one-mission counter to the upcoming
+  faction (SYNDICATE→HARDENED OPTICS / LEGION→REACTIVE PLATING / WARDENS→FIELD SMOKE). `Run.PrepFaction`
+  (persisted), `Combat.PrepFaction` static gated `==MissionFaction`. `SIGHTLINE_PREP`.
+- **New enemies + arenas (AGENCY W3):** **LANCER** (phalanx — AI bunches into a wall, a grenade lure) +
+  **HOUND** (swarmer — beelines the most-isolated soldier, spawns in pairs); pure `Ai.Plan` biases + distinct
+  silhouettes. Arenas GARRISON/PINNACLE/REFINERY (Maps 27/28/29). `SIGHTLINE_CONTENT`.
+- **2-column requisition grid (AGENCY W3):** the grown shop list (~10 items) now lays out as a clean 2-column
+  grid in `Hud.DrawRequisition`.
 - **Environmental hazards (RESONANCE W2):** explosive **barrels** on the battlefield —
   shoot one (aim over it), catch it in a grenade, or let fire reach it and it detonates
   for cover-ignoring AoE + cover demolition, chain-reacts neighbouring barrels, and leaves
@@ -1051,7 +1078,60 @@ Before stopping:
 
 ### WIP NOTES
 
-> **PROGRAM "RESONANCE" — feel, tactical depth & balance (LATEST; read first).** Fully-autonomous
+> **PROGRAM "AGENCY" — decisions that matter: pressure, legibility, loadout, loss, new toys (LATEST; read
+> first).** Fully-autonomous dev-team session run as orchestrator + 2 research agents (gameplay-opportunity +
+> balance-audit) + 6 isolated-worktree dev agents + 2 independent reviewers + the `SIGHTLINE_BALANCE` flywheel.
+> Branch `claude/game-dev-orchestration-h41iom`. **3 WAVES, 7 features + a UX polish, all measured & reviewed:**
+> - **W1 (player-facing decision pressure & legibility):** (A) **anti-turtle PRESSURE CLOCK** — the most-deferred
+>   design hole (overwatch-camp was a quiet dominant strategy across 3 prior programs). On camp-friendly
+>   objectives (Eliminate/Hack/Decapitate; the movement-pressured ones are excluded) a graced clock (free turns
+>   1-4) escalates one rung every 2 turns (cap 4): escalating enemy aim (`Combat.PressureAim` +3/rung) +
+>   reinforcement waves from rung 2 (reuse `SpawnReinforcements`/Defend machinery), telegraphed by banner +
+>   a `PRES` rung-pip meter in the top bar. Turtling is now strictly worse than advancing. (B) **Visible
+>   randomness mitigation** — the hidden graze floor + streak-breaker are now surfaced in the shot tooltip
+>   (`DMG GRAZE n / min-max` + `+N STEADYING`), so missing a high-% shot reads as less of a betrayal (math
+>   unchanged; `ShotOdds.GrazeFloor/StreakBonus`). (C) **Run-end payoff** — a rich VICTORY/RUN OVER summary card
+>   (`Hud.DrawEndScreen`): stat slabs (missions/intel/kills/heat) + SURVIVING SQUAD w/ MVP + a **KIA MEMORIAL**
+>   (`Run.Memorial`/`FallenRec`, populated in `KillUnit`, presentation-only/not persisted) + a `Fx.VictoryBurst`
+>   flourish on the final win.
+> - **W2 (the barracks becomes a real decision layer + new toys):** (D) **ARMORY** — spend Intel at the
+>   requisition to re-arm a soldier from their class's thematic weapon pool (`Weapon.ArmoryOptions`,
+>   `Game.DoRearm`/`ToggleArmory`, a REQUISITION sub-screen); kills the false-choice weapon lock. Chosen weapon
+>   rides the persistent `Run.Squad` unit (round-trips via existing `UnitDto.Weapon`). (D) **MEANINGFUL
+>   ATTRITION** — `Run.DebriefSurvivors` no longer instantly backfills to full; recruits trickle 1/barracks above
+>   a hard floor of 3 (`RecruitsPerBarracks`/`AttritionFloor`), so a bad mission leaves you short-handed for a
+>   mission or two (rookies have no rank/perks) without death-spiralling. (E) **VERB ABILITIES** — replaced the 2
+>   most stat-stance signatures with board-changing verbs (append-only `AbilityKind`, save-safe; Steady/RunGun
+>   combat paths left intact so COMBATTEST holds): **Sharpshooter MARK** (designate a foe → whole squad gets
+>   +10 aim/+15 crit vs it until its next turn — a focus-fire decision; `Combat.MarkAim/MarkCrit` read like
+>   crossfire, `Unit.Marked`) and **Assault GRAPPLE** (yank a nearby foe 1 tile out of its cover, reuses
+>   `ShoveAnim`, shares the SHOVE per-turn budget). AI uses both directly (no targeting-mode stall → no TIMEOUT).
+> - **W3 (close the faction loop + content breadth):** (F) **FACTION-COUNTER PREP** — the campaign already
+>   telegraphs the next node's faction; now a barracks requisition item (12 Intel) buys a one-mission counter:
+>   vs SYNDICATE → HARDENED OPTICS (deny see-over-low-cover), vs LEGION → REACTIVE PLATING (+1 squad armor),
+>   vs WARDENS → FIELD SMOKE (cancel long-range aim edge). `Run.PrepFaction` (persisted, append-only DTO),
+>   `Combat.PrepFaction` static gated `==MissionFaction` (no-op otherwise), applied+consumed at SetupMission;
+>   AutoShop skips it. (G) **2 enemies + 3 arenas:** **LANCER** (HOPLITE — phalanx; AI rewards ending adjacent
+>   to hostiles + exempt from anti-cluster → forms a wall → grenade lure) and **HOUND** (FERAL — fast swarmer
+>   that beelines the most-isolated soldier, never retreats, spawns in pairs); pure `Ai.Plan` biases + distinct
+>   silhouettes (no Game/Combat change). Arenas GARRISON/PINNACLE/REFINERY (Maps 27/28/29). EnemyHint telegraphs
+>   them. Plus a **2-column REQUISITION grid** polish (the shop hit ~10 items and was clipping).
+> **MEASURED (flywheel, integrated build, heat-0 N=50 / 249 missions):** run-completion **~60%**, per-mission
+> **81-100%** (no gate), per-objective **81-100%** — **Escort is no longer a cliff (92.5%)** — avg 4.58/6 cleared,
+> 0 frame-cap hits (no TIMEOUT). Attrition (17 RUN OVER) is the main loss pressure without cratering. The base is
+> **well-tuned — no tuning pass was needed**; the Heat ladder carries mastery. Build 0/0; COMBATTEST (+faction-prep
+> cases)/AITEST/SAVETEST/ITEMTEST all PASS. **Reviews:** Wave 1+2 reviewed → **SHIP** (no CRIT/HIGH/MED; attrition
+> floor, pressure spawn/TIMEOUT fences, and static resets all verified). **PROCESS GOTCHA (important, recurred &
+> solved):** a worktree dev's `git diff origin/branch` patch SILENTLY BUNDLED A REVERT of an earlier-merged dev's
+> work when origin moved between launch and patch-gen (E's patch was effectively "verbs MINUS armory" → applying it
+> stripped D's armory). FIX: regenerate the patch as `git diff <merge-base> <devcommit> -- <explicit owned files>`
+> (the pure feature diff), and for later waves the dev RECORDS `$BASE=$(git rev-parse HEAD)` right after reset and
+> diffs `git diff $BASE HEAD -- <explicit file list>` — never `origin/branch`. With that protocol, F & G applied
+> 100% clean. New hooks: `SIGHTLINE_PRESSURE/_TOOLTIP/_SUMMARY/_ARMORY/_MARK/_PREP/_CONTENT`. **OPEN/NEXT
+> (documented):** more verbs for Ranger/Gunner/Corpsman; a new objective type; a strategic overworld economy;
+> audio on a real device (free CC0 assets now permitted by the owner); higher-heat ladder re-tune if needed.
+
+> **PROGRAM "RESONANCE" — feel, tactical depth & balance (read first).** Fully-autonomous
 > dev-team session (orchestrator + 2 research agents + balance-audit agent + 4 isolated-worktree dev agents
 > + 1 reviewer + the `SIGHTLINE_BALANCE` flywheel). Branch `claude/game-dev-orchestration-1g6v1h`, PR #57.
 > MEASURED baseline at session start: run-completion **40%**; biggest *felt* gap = all 5 weapons shared ONE
