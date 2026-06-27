@@ -44,6 +44,19 @@ public static class Program
             Console.WriteLine(Combat.SelfTest());
             return;
         }
+        // SIGHTLINE_HAZARDTEST=1 : environmental-hazard mechanics (barrel blocking / fire / pathing). No window.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_HAZARDTEST") == "1")
+        {
+            Console.WriteLine(Game.HazardSelfTest());
+            return;
+        }
+        // SIGHTLINE_AUDIOTEST=1 : device-free validation that every weapon/stinger/baseline SFX
+        // recipe + both music beds build a non-empty, finite buffer (audio identity pass). No window.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_AUDIOTEST") == "1")
+        {
+            Console.WriteLine(Audio.SelfTest());
+            return;
+        }
         // SIGHTLINE_AMBIENTTEST=1 : per-biome ambient field stays bounded/finite/on-board (Phase 5). No window.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_AMBIENTTEST") == "1")
         {
@@ -226,6 +239,7 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_SHOP") == "1") game.DebugShop();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_BOON") == "1") game.DebugBoon();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_DRAFT") == "1") game.BeginDraft();
+        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_HAZARD") == "1") game.DebugHazards();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_TAGEDIT") == "1") game.DebugTagEditor();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_WOUND") == "1") game.DebugWound();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_BENCH") == "1") game.DebugBench();

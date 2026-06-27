@@ -4,6 +4,8 @@ namespace Sightline;
 /// character. Legend (one char per tile):
 ///   '.' floor   'o' low cover   '#' high cover
 ///   '^' tier-1 plateau   '=' tier-2 plateau   (both walkable high ground)
+///   'B' explosive barrel (impassable like cover, but blows up when shot — a hazard;
+///       the tile stays floor underneath, so a destroyed barrel leaves open ground)
 /// Each layout is GridH (11) rows of GridW (18) chars. Reserved tiles — player and
 /// enemy spawns, the evac zone, the terminal + its ring — are always left as open
 /// floor regardless of the template, and `Mission` verifies connectivity before
@@ -40,15 +42,18 @@ public static class Maps
             "...oo......##.....",
             "..................",
         },
-        new[] // PILLARS — a regular field of high-cover columns with open aisles
+        new[] // PILLARS — a regular field of high-cover columns with open aisles; two explosive
+              // BARRELS ('B') sit in the mid-field aisles, a tempting shot to catch a foe who
+              // ducked behind a column for cover. They drop in already-open aisle tiles, so the
+              // wide cross-aisles top/bottom and every vertical lane stay clear.
         {
             "..................",
             "...#..#..#..#..#..",
             "..................",
-            "...#..#..#..#..#..",
+            "...#..#.B#..#..#..",
             "..................",
             "...#..#..#..#..#..",
-            "..................",
+            "..............B...",
             "...#..#..#..#..#..",
             "..................",
             "...#..#..#..#..#..",
@@ -112,17 +117,19 @@ public static class Maps
             "....o.........o...",
             "..................",
         },
-        new[] // FOXHOLES — dense CQB low-cover warren with two high-cover strongpoints;
-              // short engagement ranges, lots of duck-and-move; flanks stay open
+        new[] // FOXHOLES — dense CQB low-cover warren with two high-cover strongpoints; a couple
+              // of explosive BARRELS ('B') tuck against the strongpoints — shoot one to blow a
+              // hole in an enemy nest. Short engagement ranges, lots of duck-and-move; the open
+              // central seam (col 7-8) and the flanks stay clear so the warren is still traversable.
         {
             "..................",
             "...oo.....oo......",
             ".....oo.oo........",
-            "....#.....#.......",
+            "....#B....#.......",
             "....oo..oo........",
             "..................",
             "....oo..oo........",
-            "....#.....#.......",
+            "....#....B#.......",
             ".....oo.oo........",
             "...oo.....oo......",
             "..................",
@@ -194,17 +201,20 @@ public static class Maps
         new[] // CHASM — a vertical "river" of high cover splits the board top-to-bottom,
               // pierced by two clear crossing points (rows 3 & 7) bracketed by low cover.
               // The fight funnels through the chokepoints; holding a crossing controls the
-              // flow between the two halves. Biome hint: TUNDRA (a frozen ravine).
+              // flow between the two halves. Explosive BARRELS ('B') sit just off each crossing's
+              // low-cover bracket — a shot blows the chokepoint as a foe funnels through it. The
+              // crossing rows (3 & 7) stay fully open, so neither chokepoint is ever sealed.
+              // Biome hint: TUNDRA (a frozen ravine).
         {
             "..................",
             "........##........",
-            ".......o##o.......",
+            "......Bo##o.......",
             "..................",
             "........##........",
             "........##........",
             "........##........",
             "..................",
-            ".......o##o.......",
+            ".......o##oB......",
             "........##........",
             "..................",
         },

@@ -179,45 +179,59 @@ public static class Combat
         }
         hit = Util.Clamp(hit, 3, 95);
 
+        // BASE crit: the weapon's intrinsic crit + the exposed/flanked situational +35. These are
+        // NOT damped — the +35 is the core "punish an out-of-cover foe" lever every shot reasons
+        // about. Everything OPTIONAL (ambush / high-ground / braced + every crit PERK / trait / boon)
+        // is collected into `bonuses` and given DIMINISHING RETURNS via DampedCritStack below, so a
+        // 3rd/4th crit perk still adds marginal value instead of being inert against the 100 clamp
+        // (the false-choice fix). A single optional bonus is unchanged (top tier scales at 1.0).
         int crit = a.Weapon.CritBase;
-        if (coverLevel == 0) crit += 35;        // exposed / flanked target
-        if (a.FiredFromConcealment) crit += AmbushCrit;  // ambush bonus: caught off-guard
-        if (highGround) crit += HighGroundCrit;  // shooting down rewards crits
-        if (a.Steady) crit += SteadyCrit;        // braced shot also crits harder
-        if (a.HasPerk(Perk.Deadeye)) crit += Unit.PerkCrit;   // Deadeye: flat crit, any target
+        if (coverLevel == 0) crit += 35;        // exposed / flanked target (base situational)
+
+        var critBonuses = new System.Collections.Generic.List<int>();
+        void AddCrit(int v) { if (v > 0) critBonuses.Add(v); }
+
+        if (a.FiredFromConcealment) AddCrit(AmbushCrit);  // ambush bonus: caught off-guard
+        if (highGround) AddCrit(HighGroundCrit);  // shooting down rewards crits
+        if (a.Steady) AddCrit(SteadyCrit);        // braced shot also crits harder
+        if (a.HasPerk(Perk.Deadeye)) AddCrit(Unit.PerkCrit);   // Deadeye: flat crit, any target
         // Executioner: a FINISHER — bigger crit than Deadeye, but only vs sub-half-HP prey. So it
         // BEATS Deadeye against the wounded and LOSES against the healthy (a real choice, not a subset).
-        if (a.HasPerk(Perk.Executioner) && d.MaxHp > 0 && d.Hp * 2 < d.MaxHp) crit += Unit.ExecutionerCrit;
+        if (a.HasPerk(Perk.Executioner) && d.MaxHp > 0 && d.Hp * 2 < d.MaxHp) AddCrit(Unit.ExecutionerCrit);
         // Opportunist: a FLANKER'S FINISHER — +crit ONLY vs a genuinely FLANKED target (the foe HAD
         // adjacent cover but you maneuvered to an angle it doesn't protect; cover.Flanked == true).
         // Deliberately NOT "any no-cover target" (that's LockOn's +AIM gate) — Opportunist rewards the
         // *move that turns a covered foe's flank*, so it fires when LockOn would NOT (a foe in the open,
         // never in cover, isn't a flank). Distinct trigger, distinct payoff (crit, not aim).
-        if (a.HasPerk(Perk.Opportunist) && flanked) crit += Unit.OpportunistCrit;
+        if (a.HasPerk(Perk.Opportunist) && flanked) AddCrit(Unit.OpportunistCrit);
         // Vanguard: a BREACHER'S FINISHER — +crit ONLY vs a target that is BOTH genuinely FLANKED
         // (you out-positioned its cover) AND ADJACENT (dist <= 1, in its face). The tightest gate of
         // the crit perks (Opportunist needs only the flank at any range; Point Blank needs only the
         // range vs any target) — so it pays the biggest crit. Rewards closing the distance to finish
         // a flanked foe; goes inert at range or against an unflanked target.
-        if (a.HasPerk(Perk.Vanguard) && flanked && dist <= Unit.VanguardRange) crit += Unit.VanguardCrit;
+        if (a.HasPerk(Perk.Vanguard) && flanked && dist <= Unit.VanguardRange) AddCrit(Unit.VanguardCrit);
         // First Strike (enum member GiantSlayer, reworked): an ALPHA-STRIKE/OPENER — +crit vs a target
         // still at FULL HP. Rewards focus-firing a FRESH enemy (the first shot that connects); it stops
         // helping the instant the target is chipped, so it pairs with picking targets, not finishing them
         // (the opposite end from Executioner's sub-half-HP crit). Fires on ~every new engagement, fodder
         // or boss alike — so it's a live choice, not the old dead "MaxHp >= 12" gate (see Unit.FirstStrikeCrit).
-        if (a.HasPerk(Perk.GiantSlayer) && d.MaxHp > 0 && d.Hp >= d.MaxHp) crit += Unit.FirstStrikeCrit;
+        if (a.HasPerk(Perk.GiantSlayer) && d.MaxHp > 0 && d.Hp >= d.MaxHp) AddCrit(Unit.FirstStrikeCrit);
         // Point Blank: a CLOSE-RANGE CRIT build — +crit within 2 tiles (vs CloseQuarters' +aim within 4).
-        if (a.HasPerk(Perk.PointBlank) && dist <= Unit.PointBlankRange) crit += Unit.PointBlankCrit;
+        if (a.HasPerk(Perk.PointBlank) && dist <= Unit.PointBlankRange) AddCrit(Unit.PointBlankCrit);
         // Guardian: overwatch LETHALITY. A reaction shot (ReactedThisTurn is set by Game right before
         // it Resolves this shot) crits hard — Reflexes makes overwatch reliable, Guardian makes it lethal.
-        if (a.HasPerk(Perk.Guardian) && IsOverwatchReaction(a)) crit += Unit.GuardianReactCrit;
-        if (a.HasTrait(Trait.ColdBlood) && a.MaxHp > 0 && a.Hp * 2 <= a.MaxHp) crit += Unit.ColdBloodCrit;
+        if (a.HasPerk(Perk.Guardian) && IsOverwatchReaction(a)) AddCrit(Unit.GuardianReactCrit);
+        if (a.HasTrait(Trait.ColdBlood) && a.MaxHp > 0 && a.Hp * 2 <= a.MaxHp) AddCrit(Unit.ColdBloodCrit);
         // run boons (player attacker): FERVOR makes overwatch lethal; EXECUTIONERS finishes the wounded
         if (a.Team == Team.Player && RunBoons.Count > 0)
         {
-            if (HasRunBoon(Sightline.Boon.Fervor) && IsOverwatchReaction(a)) crit += BoonFervorCrit;
-            if (HasRunBoon(Sightline.Boon.Executioners) && d.MaxHp > 0 && d.Hp * 2 < d.MaxHp) crit += BoonExecCrit;
+            if (HasRunBoon(Sightline.Boon.Fervor) && IsOverwatchReaction(a)) AddCrit(BoonFervorCrit);
+            if (HasRunBoon(Sightline.Boon.Executioners) && d.MaxHp > 0 && d.Hp * 2 < d.MaxHp) AddCrit(BoonExecCrit);
         }
+        crit += DampedCritStack(critBonuses);   // diminishing returns on the OPTIONAL stack
+
+        // Crossfire + faction crit stay FLAT (outside the damped stack): they're symmetric/enemy
+        // situational rules whose self-tests assert an exact +CrossfireCrit / +LegionCloseCrit delta.
         if (crossfire) crit += CrossfireCrit;   // converging fire also crits harder (target distracted/exposed)
         // enemy FACTION crit rule (enemy attacker only; None = no-op): LEGION's closing rush also
         // crits harder within close range. Applied before the crit clamp (and before the hunker zero).
@@ -302,6 +316,28 @@ public static class Combat
     /// it's never set for the hovered-aim preview of a selected, still-acting soldier. Guardian
     /// keys its overwatch-only bonuses off this without needing a Game.cs edit.
     static bool IsOverwatchReaction(Unit a) => a.ReactedThisTurn;
+
+    // Per-tier multipliers for the stacked OPTIONAL crit bonuses (largest first). The 1st (biggest)
+    // bonus lands at full value so a single crit perk is NEVER nerfed — this is purely an anti-STACK
+    // measure that can't crater player power. The 2nd is worth 80%, the 3rd 60%, the 4th 45%, any
+    // beyond that 30% — so a 3rd/4th crit perk still adds a few real points (no dead pick) while no
+    // combo trivially saturates to 100. Conservative on purpose: the first bonus is untouched.
+    static readonly float[] CritStackScale = { 1.0f, 0.8f, 0.6f, 0.45f, 0.3f };
+
+    /// Sum optional crit bonuses with DIMINISHING RETURNS: sort descending, scale each by CritStackScale
+    /// (largest at full weight). Keeps additional crit perks marginally useful while stopping the additive
+    /// stack from trivially hitting the 100 clamp. Empty -> 0; a single entry is returned unchanged (top
+    /// tier is 1.0), so single-perk COMBATTEST expectations still hold exactly.
+    static int DampedCritStack(System.Collections.Generic.List<int> bonuses)
+    {
+        if (bonuses.Count == 0) return 0;
+        if (bonuses.Count == 1) return bonuses[0];
+        bonuses.Sort((x, y) => y.CompareTo(x));   // descending: biggest bonus gets full weight
+        float total = 0f;
+        for (int i = 0; i < bonuses.Count; i++)
+            total += bonuses[i] * (i < CritStackScale.Length ? CritStackScale[i] : CritStackScale[CritStackScale.Length - 1]);
+        return (int)MathF.Round(total);
+    }
 
     /// INCOMING-DAMAGE REDUCTION — the ONE source of truth for every incoming-hit path: Resolve's
     /// hit + graze branches AND the grenade blast in Anim (which all call this with the defender).

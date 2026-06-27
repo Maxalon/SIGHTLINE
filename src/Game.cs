@@ -159,7 +159,7 @@ public class Game
 
     static int[] BuildShopCost()
     {
-        var b = new[] { 6, 10, 16, 12, 14 };   // +BALLISTIC PLATING (survivability sink)
+        var b = new[] { 6, 10, 16, 12, 8 };    // +BALLISTIC PLATING (survivability sink, front-loaded cheap)
         var all = new int[ModBase + WeaponModDef.All.Length];
         b.CopyTo(all, 0);
         for (int i = 0; i < WeaponModDef.All.Length; i++) all[ModBase + i] = WeaponModDef.Cost(WeaponModDef.All[i]);
@@ -271,6 +271,11 @@ public class Game
     public HashSet<int> SabotageBlown = new();
     public bool HasSabotage => Objective == Objective.Sabotage;
     public bool HasHackAction => HasTerminal || HasSabotage;
+    // EXTRACT (lift-out): on the zone-based extraction objectives, a soldier standing in the
+    // evac zone can haul an adjacent ally / VIP / freed captive aboard — pulling them the last
+    // step into the zone. Cuts the long Evac/Escort "everyone walk to the corner" drag.
+    public bool HasExtractAction => Objective == Objective.Evac || Objective == Objective.Escort
+                                    || Objective == Objective.Rescue;
 
     // DECAPITATE: one designated enemy is the High-Value Target; killing it WINS the
     // mission outright (no need to clear the map). Designated from the Enemies list in
@@ -423,7 +428,7 @@ public class Game
         EnsureMetaLoaded();
         _run = new Run();
         _run.Start(DraftedSquad);           // builds the campaign map, seats at the START node (drafted squad if any)
-        if (DraftBoon.HasValue) _run.ActiveBoons.Add(DraftBoon.Value);   // adopt the chosen starting boon
+        if (DraftBoon.HasValue) { _run.ActiveBoons.Add(DraftBoon.Value); Stats.RecordBoon(BoonDef.Code(DraftBoon.Value)); }   // adopt the chosen starting boon
         DraftedSquad = null; DraftBoon = null;   // consumed: the harness path leaves these null (default squad)
         // adopt the dialled-in Heat for this run. The harness can't set PendingHeat (it doesn't
         // touch the intro), so it reads SIGHTLINE_HEAT here instead — defaulting to 0 so plain
@@ -554,6 +559,7 @@ public class Game
         // reserve + connectivity-verify a key tile: the Hack terminal, or the Rescue captive's seat
         (int x, int y)? reserve = HasTerminal ? Terminal
             : (Objective == Objective.Rescue ? (Grid.W / 2, Grid.H / 2) : ((int, int)?)null);
+        Grid.ClearHazards();              // wipe last mission's fire/barrels before terrain is rebuilt
         Mission.Build(Grid, Players, Enemies, n, EvacZone, reserve,
                       enemyDelta, statDelta, HasSabotage ? SabotageSites : null);
         if (Vip != null) { Vip.Grenades = 0; Vip.AbilityCharge = 0; }  // the asset has no kit
@@ -1060,6 +1066,26 @@ public class Game
                 if (Grid.Tiles[x, y] == TileType.HighCover && chipped < 8) { Grid.DamageCover(x, y, 1); chipped++; }
     }
 
+    /// Harness hook (screenshot only): stamp a barrel cluster near the squad + a live fire patch,
+    /// select a soldier, and arm aim so the barrel reticle/blast staging renders.
+    public void DebugHazards()
+    {
+        var u = Players.FirstOrDefault(p => p.Alive && !p.IsVip);
+        if (u == null) return;
+        int by = Util.Clamp(u.Y, 1, Grid.H - 2);
+        int bx = Util.Clamp(u.X + 3, 1, Grid.W - 2);
+        // clear a clean firing lane in front of the soldier so CanShootBarrel (LoS + range) holds,
+        // then seat the barrel at the end of it + a second barrel below + a live fire patch.
+        for (int x = u.X + 1; x <= bx; x++) { Grid.Tiles[x, by] = TileType.Floor; Grid.Barrel[x, by] = false; }
+        Grid.Barrel[bx, by] = true;
+        Grid.Tiles[bx, by + 1] = TileType.Floor; Grid.Barrel[bx, by + 1] = true;
+        Grid.AddFire(Util.Clamp(u.X + 6, 1, Grid.W - 2), Util.Clamp(u.Y + 2, 1, Grid.H - 2), 1, Grid.FireTurns);
+        Selected = u; RecomputeMoveCost(); AimMode = true; KbCursor = true; CurX = bx; CurY = by;
+        // drive the hover state directly so the reticle is live on the very first rendered frame
+        HoverX = bx; HoverY = by; HoverValid = true;
+        BarrelAimValid = CanShootBarrel(u, bx, by); BarrelAimX = bx; BarrelAimY = by;
+    }
+
     /// Harness hook (screenshot only): arm a smoke-carrier's item targeting preview.
     public void DebugItem()
     {
@@ -1281,13 +1307,17 @@ public class Game
             // adaptive assist: a win clears the loss streak (the next run starts un-assisted).
             _run.RecordRunResult(true);
             if (!NoPersist) SaveGame.SaveMetaLossStreak(_run.LossStreak);
-            Phase = Phase.Win; Audio.Play("win"); if (!NoPersist) SaveGame.Delete();
+            Phase = Phase.Win; Audio.Play("win"); Audio.PlayStinger("victory"); if (!NoPersist) SaveGame.Delete();
         }
         else
         {
-            // intel salvage scales with survivors + depth; ONSLAUGHT pays a risk premium;
-            // higher Heat pays a flat per-mission bonus (the reward for the ladder).
-            int gained = 8 + 3 * survivors + _run.Mission;
+            // Intel salvage is DEPTH-weighted, not survivor-weighted, so a hurting squad isn't
+            // also poorer (the old 3*survivors term was a rich-get-richer / death-spiral loop —
+            // fewer survivors meant less intel meant a weaker squad). A small survivor bonus
+            // remains as a reward for keeping people alive, but depth (which tracks the rising
+            // difficulty) is the main driver so the reward sink keeps pace with the gate.
+            // ONSLAUGHT pays a risk premium; higher Heat pays a flat per-mission bonus.
+            int gained = 10 + 4 * _run.Mission + survivors;
             if (_run.CurrentCard != null && _run.CurrentCard.ModName == "ONSLAUGHT") gained += 6;
             int heatBonus = Sightline.Heat.IntelBonus(_run.HeatLevel);
             gained += heatBonus;
@@ -1328,6 +1358,9 @@ public class Game
         LoseReason = reason;
         Phase = Phase.Lose;
         Audio.Play("lose");
+        // a full squad wipe gets the heavier ominous wipe stinger; other run-enders (VIP lost,
+        // abandoned) get the standard sinking-minor lose stinger.
+        Audio.PlayStinger(AlivePlayers().Count(p => !p.IsVip) == 0 ? "squadwipe" : "lose");
         // balance telemetry: the active mission AND the run end here as a loss.
         Stats.EndMission(false, _turnCount, AlivePlayers().Count(p => !p.IsVip),
                          Enemies.Count(e => !e.Alive), title);
@@ -1403,6 +1436,12 @@ public class Game
         if (mover.HasStatus(StatusKind.Bleed))   // bleeding worsens with every step
         {
             EnvDamage(mover, Unit.BleedDamage, "BLEED", Pal.RGBA(205, 45, 45));
+            if (!mover.Alive) return;
+        }
+        if (Grid.IsFire(mover.X, mover.Y))       // stepping into a burning tile sears + ignites
+        {
+            mover.AddStatus(StatusKind.Burning, 2);
+            EnvDamage(mover, Unit.BurnDamage, "BURN", Pal.RGBA(255, 140, 40));
             if (!mover.Alive) return;
         }
         if (mover.Team == Team.Player)
@@ -1665,6 +1704,114 @@ public class Game
         Fx.PopText(u.Pos + new Vector2(0, -26), $"-{dmg} {label}", col, 20f);
         if (u.Hp <= 0) { u.Hp = 0; KillUnit(u); }
         else MarkPlayerHurt(u);
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    //  Environmental hazards: explosive barrels + spreading fire (Wave 2)
+    //  Barrels are physical obstacles (Grid.IsFloor excludes them) that chain-detonate
+    //  when shot, caught in a grenade blast, or reached by fire — dealing cover-ignoring
+    //  AoE and leaving a deny-ground fire field. Fire applies Burning + denies ground.
+    // ──────────────────────────────────────────────────────────────────────────
+    public const int BarrelDmg = 6;          // base barrel-blast damage (a touch above a frag)
+    public const int BarrelRadius = 1;       // Chebyshev blast radius
+
+    /// True when a barrel sits adjacent-or-on a soldier cluster worth detonating (AI/autopilot aid).
+    public bool BarrelNearFoesOf(int x, int y, Team victims, int radius = BarrelRadius)
+    {
+        var list = victims == Team.Player ? Players : Enemies;
+        return list.Count(u => u.Alive && Util.ChebyDist(u.X, u.Y, x, y) <= radius) >= 1;
+    }
+
+    /// Detonate the barrel at (bx,by): cover-ignoring AoE to both teams, cover demolition, a
+    /// lingering fire field, and a CHAINED detonation of any other barrel in the blast. `depth`
+    /// guards the recursion (a dense barrel field can't blow forever).
+    public void DetonateBarrel(int bx, int by, int depth = 0)
+    {
+        if (!Grid.IsBarrel(bx, by)) return;
+        Grid.Barrel[bx, by] = false;        // consumed before the blast so chains don't re-hit it
+        var center = Util.TileCenter(bx, by);
+
+        Audio.Play("crit"); Audio.Play("death");
+        Fx.AddShake(14f); AddHitStop(0.06f); AddZoomPunch(0.07f); AddBloom(0.5f);
+        float blastR = (BarrelRadius + 0.5f) * Cfg.Tile;
+        Fx.Burst(center, Pal.RGBA(255, 170, 70), 40, 380f, 0.6f, 5f, true);
+        Fx.Burst(center, Pal.RGBA(120, 70, 40), 22, 210f, 0.85f, 5f);
+        Fx.Shockwave(center, Pal.RGBA(255, 210, 150), 10f, blastR, 5f, 0.95f, 0.30f);
+        Fx.Impact(center, Pal.RGBA(255, 150, 60), blastR * 0.5f, 0.95f, 0.16f);
+
+        // cover demolition + lay fire on the floor tiles in the blast
+        var chain = new List<(int x, int y)>();
+        var wokePods = new HashSet<int>();
+        for (int x = bx - BarrelRadius; x <= bx + BarrelRadius; x++)
+            for (int y = by - BarrelRadius; y <= by + BarrelRadius; y++)
+            {
+                if (!Grid.InBounds(x, y)) continue;
+                var ch = Grid.DamageCover(x, y, Grid.HighCoverHp);
+                if (ch != Grid.CoverHit.None) CoverHitFx(x, y, ch);
+                if ((x != bx || y != by) && Grid.IsBarrel(x, y)) chain.Add((x, y));   // catch neighbours
+                Grid.LightFire(x, y, Grid.FireTurns);                                 // residue fire
+            }
+
+        // damage every unit in radius (friendly fire included), cover ignored (it's an explosion)
+        foreach (var u in Players.Concat(Enemies).ToList())
+        {
+            if (!u.Alive) continue;
+            if (u == Vip && CaptiveLocked) continue;             // the caged captive is invulnerable
+            if (Util.ChebyDist(u.X, u.Y, bx, by) > BarrelRadius) continue;
+            if (u.Team == Team.Enemy && !u.Active) wokePods.Add(u.PodId);
+            int dmg = BarrelDmg + Util.RandInt(0, 2);
+            dmg = Combat.HardenedReduce(u, dmg, crit: false);
+            if (u.Team == Team.Player && u.MaxHp >= 2 && u.Hp >= u.MaxHp) dmg = Math.Min(dmg, u.MaxHp - 1);  // fragile floor
+            u.Hp -= dmg; u.Flash = 1f; u.FlinchAnim = 1f;
+            var kick = u.Pos - center;
+            if (kick.LengthSquared() > 0.01f) u.Recoil = Vector2.Normalize(kick) * 8f;
+            Color c = u.Team == Team.Player ? Pal.Friend : Pal.Foe;
+            Fx.Burst(u.Pos, c, 12, 200f, 0.5f, 3.5f, true);
+            Fx.PopText(u.Pos + new Vector2(0, -26), dmg.ToString(), Pal.RGBA(255, 200, 140), 26f);
+            if (u.Hp <= 0)
+            {
+                u.Hp = 0;
+                bool wasLast = u.Team == Team.Enemy && AliveEnemies().Count <= 1;
+                bool byPlayer = u.Team == Team.Enemy && _barrelCreditTeam == Team.Player;
+                KillUnit(u);
+                if (byPlayer && _barrelCreditUnit != null && _barrelCreditUnit.Alive) CreditKill(_barrelCreditUnit);
+                if (byPlayer) Audio.PlayStinger(wasLast ? "lastkill" : "kill");
+            }
+            else { MarkPlayerHurt(u); u.AddStatus(StatusKind.Burning, 2); }
+        }
+        foreach (int pod in wokePods) ActivatePod(pod);
+        if (depth < 6) foreach (var (cx, cy) in chain) DetonateBarrel(cx, cy, depth + 1);   // chain reaction
+    }
+
+    // kill-credit context for a player-triggered barrel (set by the shot/grenade that lit it)
+    Team _barrelCreditTeam = Team.Enemy;
+    Unit _barrelCreditUnit = null;
+    public void SetBarrelCredit(Unit u) { _barrelCreditUnit = u; _barrelCreditTeam = u?.Team ?? Team.Enemy; }
+
+    /// Once-per-round hazard upkeep: detonate barrels reached by fire, refresh Burning on units
+    /// standing in fire, then decay the flames. Bounded (no spread loop) so it can never TIMEOUT.
+    void TickHazards()
+    {
+        // a barrel whose tile (or a neighbour) is on fire cooks off
+        var cook = new List<(int x, int y)>();
+        for (int x = 0; x < Grid.W; x++)
+            for (int y = 0; y < Grid.H; y++)
+            {
+                if (!Grid.IsBarrel(x, y)) continue;
+                bool nearFlame = false;
+                for (int dx = -1; dx <= 1 && !nearFlame; dx++)
+                    for (int dy = -1; dy <= 1 && !nearFlame; dy++)
+                        if (Grid.IsFire(x + dx, y + dy)) nearFlame = true;
+                if (nearFlame) cook.Add((x, y));
+            }
+        _barrelCreditTeam = Team.Enemy; _barrelCreditUnit = null;   // fire-cooked barrels credit no one
+        foreach (var (x, y) in cook) DetonateBarrel(x, y);
+
+        // units standing in fire keep burning (the Burning DoT does the damage in TickStatuses)
+        foreach (var u in Players.Concat(Enemies))
+            if (u.Alive && Grid.IsFire(u.X, u.Y)) u.AddStatus(StatusKind.Burning, 2);
+
+        Grid.TickFire();
     }
 
     void FeatBanner(Unit u, string what)
@@ -2053,7 +2200,8 @@ public class Game
         // tempo — a near-certain finisher of a foe that already threatens the lane.
         if (EvacZone.Contains((u.X, u.Y)))
         {
-            // arrived: hold it — finish nearby threats, else overwatch / hunker.
+            // arrived: haul any adjacent straggler aboard (lift-out — cuts the drag), then hold it.
+            if (CanExtract(u)) { DoExtract(); return true; }
             if (TakeBestShot(u)) return true;
             if (u.Ammo == 0 && u.ActionsLeft > 0) { DoReload(); return true; }
             if (HoldOverwatch(u)) return true;
@@ -2124,9 +2272,12 @@ public class Game
             }
             DoHunker(); return true;     // arrived or blocked: tuck in (the VIP's gun is irrelevant)
         }
-        // escorts: clear the path AHEAD of the VIP and kill threats to it. Take the best shot;
-        // if there's nothing to shoot, push toward the evac zone to screen the VIP's route
-        // (don't hang back letting the VIP walk into fire alone), then fall through to combat.
+        // escorts: a soldier who has reached the zone hauls the asset (VIP) aboard the instant
+        // it's adjacent — the lift-out that ends the long escort walk early (win-critical pull).
+        if (EvacZone.Contains((u.X, u.Y)) && CanExtract(u)) { DoExtract(); return true; }
+        // clear the path AHEAD of the VIP and kill threats to it. Take the best shot; if there's
+        // nothing to shoot, push toward the evac zone to screen the VIP's route (don't hang back
+        // letting the VIP walk into fire alone), then fall through to combat.
         if (TakeBestShot(u)) return true;
         if (u.Ammo == 0) { DoReload(); return true; }
         var ahead = EvacZone.OrderBy(t => Util.TileDist(u.X, u.Y, t.x, t.y)).FirstOrDefault();
@@ -2160,7 +2311,9 @@ public class Game
             }
             // adjacent already (TryFreeCaptive will spring it next tick): fight from here.
         }
-        // PHASE 2 (freed) — screen the captive's extraction: kill threats, else fall to combat.
+        // PHASE 2 (freed) — screen the captive's extraction: a soldier in the zone hauls the
+        // freed captive aboard the instant it's adjacent (lift-out), else kill threats.
+        if (EvacZone.Contains((u.X, u.Y)) && CanExtract(u)) { DoExtract(); return true; }
         if (TakeBestShot(u)) return true;
         if (u.Ammo == 0) { DoReload(); return true; }
         return false;
@@ -2327,9 +2480,36 @@ public class Game
     /// Fire the best expected-value shot the soldier can take from where it stands — but
     /// only if that shot is worth taking (a desperate 3% poke that ends the turn is usually
     /// worse than repositioning). Returns true if it shot.
+    /// Autopilot: shoot an explosive barrel that would catch 2+ enemies (and no friendly) in its
+    /// blast — a guaranteed multi-hit AoE worth more than a single aimed shot. Exercises the
+    /// hazard system in the flywheel. Returns true if it fired.
+    bool TryShootBarrel(Unit u)
+    {
+        if (u.Ammo <= 0 || !u.CanAct) return false;
+        int bx = -1, by = -1, best = 0;
+        for (int x = 0; x < Grid.W; x++)
+            for (int y = 0; y < Grid.H; y++)
+            {
+                if (!Grid.IsBarrel(x, y)) continue;
+                if (!CanShootBarrel(u, x, y)) continue;
+                int foes = Enemies.Count(e => e.Alive && Util.ChebyDist(e.X, e.Y, x, y) <= BarrelRadius);
+                bool allyHit = Players.Any(p => p.Alive && Util.ChebyDist(p.X, p.Y, x, y) <= BarrelRadius);
+                if (allyHit || foes < 2) continue;
+                if (foes > best) { best = foes; bx = x; by = y; }
+            }
+        if (best < 2) return false;
+        if (SquadConcealed) BreakConcealment(u);
+        u.Ammo--; u.ActionsLeft = 0;
+        u.Steady = false; u.FiredFromConcealment = false;
+        SetBarrelCredit(u);
+        Enqueue(new BarrelShotAnim(u, bx, by), Team.Player);
+        return true;
+    }
+
     bool TakeBestShot(Unit u)
     {
         if (u.Ammo <= 0) return false;
+        if (TryShootBarrel(u)) return true;     // a 2+-enemy barrel beats any single shot
         var (tgt, val) = BestShotFrom(u, u.X, u.Y);
         if (tgt == null) return false;
         var odds = Combat.ComputeOdds(Grid, u, tgt);
@@ -2481,6 +2661,7 @@ public class Game
     float TileExposure(Unit mover, int x, int y)
     {
         float threat = 0f;
+        if (Grid.IsFire(x, y)) threat += 20f;   // never voluntarily end a move standing in fire (hazards)
         foreach (var e in Enemies)
         {
             if (!e.Alive || !e.Active || e.Ammo <= 0) continue;
@@ -2633,7 +2814,7 @@ public class Game
         // PATIENCE / ANTI-TIMEOUT: don't hold forever (the escorts may never clear that
         // watcher). After several held turns, accept the risk and push toward evac so the
         // mission always resolves. Bounded — the match can never stall on a waiting VIP.
-        if (++_vipWaitTurns >= 4) { _vipWaitTurns = 0; return TryMoveTowardTile(u, gx, gy); }
+        if (++_vipWaitTurns >= 2) { _vipWaitTurns = 0; return TryMoveTowardTile(u, gx, gy); }
         return false;   // wait this turn (hold in current cover); caller hunkers (turn still ends)
     }
 
@@ -3182,6 +3363,9 @@ public class Game
                 AimTarget = hovered;
             if (AimTarget != null && !AimTarget.Alive) AimTarget = FirstTargetFor(Selected);
             AimValid = AimTarget != null && CanTarget(Selected, AimTarget);
+            // explosive-barrel target feedback: hovering a shootable barrel (no enemy under cursor)
+            BarrelAimValid = hovered == null && CanShootBarrel(Selected, HoverX, HoverY);
+            BarrelAimX = HoverX; BarrelAimY = HoverY;
             if (AimTarget != null)
             {
                 ShowOdds = true;
@@ -3227,6 +3411,7 @@ public class Game
         if (Raylib.IsKeyPressed(KeyboardKey.Six)) ToggleItem();
         if (Raylib.IsKeyPressed(KeyboardKey.Eight)) ToggleShove();
         if (Raylib.IsKeyPressed(KeyboardKey.H)) DoHack();
+        if (Raylib.IsKeyPressed(KeyboardKey.X)) DoExtract();
         if (Raylib.IsKeyPressed(KeyboardKey.R)) DoReload();
         if (Raylib.IsKeyPressed(KeyboardKey.T)) { OpenTagEditor(Selected); return; }
 
@@ -3286,6 +3471,7 @@ public class Game
         if (AimMode)
         {
             if (hovered != null && hovered.Team == Team.Enemy && CanTarget(Selected, hovered)) IssueShoot(hovered);
+            else if (CanShootBarrel(Selected, hx, hy)) IssueShootBarrel(hx, hy);   // shoot an explosive barrel
             else { AimMode = false; SnapShot = false; }
             return;
         }
@@ -3406,6 +3592,7 @@ public class Game
             case "overwatch": DoOverwatch(); break;
             case "hunker": DoHunker(); break;
             case "hack": DoHack(); break;
+            case "extract": DoExtract(); break;
             case "reload": DoReload(); break;
         }
     }
@@ -3499,6 +3686,9 @@ public class Game
             case ItemKind.Flash:
                 if (SquadConcealed) BreakConcealment(u);   // 4.4: a flashbang is aggression
                 Enqueue(new FlashAnim(u, tx, ty), Team.Player); break;
+            case ItemKind.Incendiary:
+                if (SquadConcealed) BreakConcealment(u);   // setting a fire is aggression
+                Enqueue(new IncendiaryAnim(u, tx, ty), Team.Player); break;
             case ItemKind.Barricade:
                 Grid.Tiles[tx, ty] = TileType.LowCover;
                 Grid.SetCoverHp(tx, ty);
@@ -3599,6 +3789,36 @@ public class Game
         _tutShot = true;
     }
 
+    // ── shootable explosive barrels (hazards) ──────────────────────────────────
+    public bool BarrelAimValid;            // hovering a shootable barrel while aiming (Renderer reticle)
+    public int BarrelAimX, BarrelAimY;
+
+    /// A soldier can shoot a barrel it has a clear LoS to, within weapon range, with ammo + an action.
+    public bool CanShootBarrel(Unit u, int x, int y)
+    {
+        if (u == null || !u.CanAct || u.Ammo <= 0) return false;
+        if (!Grid.IsBarrel(x, y)) return false;
+        if (Util.TileDist(u.X, u.Y, x, y) > u.Weapon.MaxRange) return false;
+        return Grid.HasLineOfSight(u.X, u.Y, x, y);
+    }
+
+    /// Fire at a barrel tile: a tracer flies over and detonates it (BarrelShotAnim -> DetonateBarrel).
+    /// Mirrors IssueShoot's action-cost model (RUN&GUN / SNAP / aimed-ends-turn) so it's a real shot.
+    void IssueShootBarrel(int bx, int by)
+    {
+        if (!CanShootBarrel(Selected, bx, by)) return;
+        if (SquadConcealed) BreakConcealment(Selected);   // shooting a barrel is going loud
+        Selected.Ammo--;
+        bool snap = SnapShot && !Selected.RunGun;
+        if (Selected.RunGun) { Selected.ActionsLeft = Math.Max(0, Selected.ActionsLeft - 1); Selected.RunGun = false; }
+        else if (snap)       Selected.ActionsLeft = Math.Max(0, Selected.ActionsLeft - 1);
+        else                  Selected.ActionsLeft = 0;
+        Selected.Steady = false;
+        Selected.FiredFromConcealment = false;
+        Enqueue(new BarrelShotAnim(Selected, bx, by), Team.Player);
+        AimMode = false; SnapShot = false; _tutShot = true;
+    }
+
     void DoOverwatch()
     {
         if (Selected == null || !Selected.CanAct || Selected.Ammo <= 0) return;
@@ -3651,6 +3871,60 @@ public class Game
         Fx.PopText(at + new Vector2(0, -30), HackProgress >= HackRequired ? "HACKED" : "HACK +1", Pal.Accent, 20f);
         Fx.Burst(at, Pal.Accent, 14, 160f, 0.5f, 3f);
         Audio.Play("reload");
+    }
+
+    /// The nearest free evac tile to (x,y) within Chebyshev `maxStep`, or null. "Free" = an evac
+    /// tile not already occupied by another unit.
+    (int x, int y)? NearestFreeEvac(int x, int y, Unit mover, int maxStep)
+    {
+        (int x, int y)? best = null; int bestD = int.MaxValue;
+        foreach (var t in EvacZone)
+        {
+            if (IsOccupiedByOther(t.x, t.y, mover)) continue;
+            int d = Util.ChebyDist(x, y, t.x, t.y);
+            if (d <= maxStep && d < bestD) { bestD = d; best = t; }
+        }
+        return best;
+    }
+
+    /// The ally a soldier standing in the evac zone could lift out: an adjacent (Chebyshev 1)
+    /// friendly that ISN'T already in the zone — the VIP/freed captive on Escort/Rescue, else any
+    /// other soldier on Evac. Returns null if `u` isn't a securing soldier in the zone, or nobody
+    /// adjacent needs a pull, or there's no free zone tile near the candidate.
+    Unit ExtractCandidate(Unit u)
+    {
+        if (u == null || u.Team != Team.Player || u.IsVip || !u.CanAct) return null;
+        if (!HasExtractAction || !EvacZone.Contains((u.X, u.Y))) return null;
+        Unit best = null;
+        foreach (var c in Players)
+        {
+            if (c == u || !c.Alive) continue;
+            if (EvacZone.Contains((c.X, c.Y))) continue;             // already secured
+            if (Util.ChebyDist(u.X, u.Y, c.X, c.Y) > 1) continue;    // must be adjacent to the puller
+            if (c.IsVip && CaptiveLocked) continue;                  // a still-caged captive can't be hauled
+            if (NearestFreeEvac(c.X, c.Y, c, 2) == null) continue;   // need a free zone tile to pull them to
+            // priority: the VIP/captive (the win-critical asset) over an ordinary soldier
+            if (best == null || (c.IsVip && !best.IsVip)) best = c;
+        }
+        return best;
+    }
+
+    public bool CanExtract(Unit u) => ExtractCandidate(u) != null;
+
+    void DoExtract()
+    {
+        var cand = ExtractCandidate(Selected);
+        if (cand == null) return;
+        var dest = NearestFreeEvac(cand.X, cand.Y, cand, 2);
+        if (dest == null) return;
+        Selected.ActionsLeft -= 1;                  // a support action — does NOT end the turn
+        cand.X = dest.Value.x; cand.Y = dest.Value.y; cand.SyncPos();
+        // feel: a quick haul-aboard flash on both soldier + asset
+        Fx.Burst(cand.Pos, cand.IsVip ? Pal.VipGold : Pal.Friend, 16, 220f, 0.5f, 4f, true);
+        Fx.PopText(cand.Pos + new Vector2(0, -28), "EXTRACTED", cand.IsVip ? Pal.VipGold : Pal.Friend, 22f);
+        Fx.AddShake(3f);
+        Audio.Play("select");
+        CheckEnd();                                 // pulling the last unit in can win outright
     }
 
     void DoReload()
@@ -3847,6 +4121,7 @@ public class Game
         Phase = Phase.PlayerTurn;
         ClearIntent();                    // no enemy intent lingers into the player's turn
         Grid.TickSmoke();                 // smoke clouds decay one turn per round
+        TickHazards();                    // fire cooks off barrels + reignites units, then decays
         _refundedThisTurn.Clear();        // flank-kill refund is one per soldier per turn
         HackedThisTurn = false;           // the terminal accepts one breach cycle per turn (hold)
         if (AutoPlay) AutoStallCheck();
@@ -4244,6 +4519,7 @@ public class Game
             t.InstallMod(mod);   // persistent: baked into the soldier's Weapon, carried across the run
             _run.Report.Add($"{t.Name} fitted {WeaponModDef.Name(mod)}  ({WeaponModDef.Desc(mod)})");
             _run.Intel -= ShopCost[item];
+            Stats.RecordPurchase(ShopName[item]);
             Audio.Play("select");
             return;
         }
@@ -4276,6 +4552,7 @@ public class Game
                 break;
         }
         _run.Intel -= ShopCost[item];
+        Stats.RecordPurchase(ShopName[item]);
         Audio.Play("select");
     }
 
@@ -4298,6 +4575,14 @@ public class Game
     void AutoShop()
     {
         if (CanBuy(0)) DoPurchase(0);   // one heal pass if someone's hurt/wounded
+        // Survivability first: plating (item 4) compounds across the run and is the documented
+        // anti-attrition lever, so prefer it over flat firepower while we can afford it.
+        for (int guard = 0; guard < 8 && CanBuy(4); guard++)
+        {
+            int before0 = _run.Intel;
+            DoPurchase(4);
+            if (_run.Intel >= before0) break;
+        }
 
         for (int guard = 0; guard < 40; guard++)
         {
@@ -4581,6 +4866,46 @@ public class Game
         return fails.Count == 0
             ? "ITEMTEST: PASS (smoke blocks+decays LoS, barricade=cover, loadouts map)"
             : "ITEMTEST: FAIL (" + string.Join(",", fails) + ")";
+    }
+
+    /// Headless self-test (SIGHTLINE_HAZARDTEST): environmental-hazard mechanics — a barrel blocks
+    /// movement (IsFloor chokepoint), fire only lights floor + decays, and pathing routes around a
+    /// barrel. Window-free (grid + CostMap only).
+    public static string HazardSelfTest()
+    {
+        var fails = new List<string>();
+        var grid = new Grid();
+        for (int x = 0; x < grid.W; x++)
+            for (int y = 0; y < grid.H; y++) grid.Tiles[x, y] = TileType.Floor;
+
+        // (1) a barrel makes its tile non-floor (impassable everywhere via the IsFloor chokepoint)
+        grid.Barrel[5, 5] = true;
+        if (grid.IsFloor(5, 5)) fails.Add("barrelNotBlocking");
+        if (!grid.IsBarrel(5, 5)) fails.Add("barrelFlag");
+
+        // (2) pathing routes AROUND the barrel: a Dijkstra cost map never enters the barrel tile
+        var cost = grid.CostMap(2, 5, (x, y) => false, out _, 9999);
+        if (cost[5, 5] != -1) fails.Add("pathEntersBarrel");
+        if (cost[8, 5] <= 0) fails.Add("pathBlockedEntirely");   // far tile still reachable around it
+
+        // (3) fire lights only floor; a barrel tile won't ignite (it's not floor)
+        grid.AddFire(7, 5, 1, Grid.FireTurns);
+        if (!grid.IsFire(7, 5) || !grid.IsFire(7, 4) || !grid.IsFire(6, 6)) fails.Add("fireArea");
+        grid.LightFire(5, 5, Grid.FireTurns);
+        if (grid.IsFire(5, 5)) fails.Add("barrelTileBurns");
+
+        // (4) fire decays to nothing over FireTurns ticks
+        for (int i = 0; i < Grid.FireTurns; i++) grid.TickFire();
+        if (grid.IsFire(7, 5)) fails.Add("firePersist");
+
+        // (5) ClearHazards wipes both layers
+        grid.AddFire(3, 3, 1, Grid.FireTurns); grid.Barrel[4, 4] = true;
+        grid.ClearHazards();
+        if (grid.IsFire(3, 3) || grid.IsBarrel(4, 4)) fails.Add("clearHazards");
+
+        return fails.Count == 0
+            ? "HAZARDTEST: PASS (barrel blocks move + pathing routes around; fire lights floor only + decays; clear works)"
+            : "HAZARDTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
     /// Headless self-test (SIGHTLINE_COVERTEST): destructible cover — High chips to Low

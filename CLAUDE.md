@@ -196,6 +196,20 @@ docs/screenshot.png    README image
 ## Current state — DONE ✅
 Playable vertical slice, builds clean (0 warn/0 err), autoplay-verified across
 seeds (mix of WIN/LOSE, no exceptions):
+- **Environmental hazards (RESONANCE W2):** explosive **barrels** on the battlefield —
+  shoot one (aim over it), catch it in a grenade, or let fire reach it and it detonates
+  for cover-ignoring AoE + cover demolition, chain-reacts neighbouring barrels, and leaves
+  a **fire** field that denies ground + ignites anyone who steps in (`Grid.Barrel/Fire`,
+  `Game.DetonateBarrel/TickHazards`, `BarrelShotAnim`, `Renderer` drum+flame, `Ai` avoidance,
+  connectivity-guarded `Mission.PlaceBarrels` + `'B'` arena legend). `SIGHTLINE_HAZARDTEST`.
+- **Weapon-distinct audio + stingers (RESONANCE W1):** each WeaponKind has its own firing
+  voice (`Audio.PlayWeapon`); kill/lastkill/victory/lose/squadwipe `PlayStinger`s; heavier
+  crit thud; device-free `Audio.SelfTest`/`SIGHTLINE_AUDIOTEST`.
+- **EXTRACT lift-out verb (RESONANCE W3):** a soldier in the evac zone hauls an adjacent
+  ally / VIP / freed captive aboard (key **X**, 1 action) — cuts the Evac/Escort/Rescue drag.
+- **Economy/balance (RESONANCE W1):** intel decoupled from survivor count (anti-death-spiral);
+  cheaper front-loaded armor; crit-perk diminishing returns (`Combat.DampedCritStack`); heat
+  aim-clamp 82->88; Sabotage relief. Measured run-completion 40% -> ~47-53%, monotonic heat ladder.
 - **Full-bleed UI (Phase 4.1):** the board fills the frame (Tile 64, ~79% of the
   window, dead margins reclaimed) with the HUD floating over it — screen-anchored
   bottom bar, gradient scrims, and drop-shadowed roster/unit-card panels.
@@ -1037,7 +1051,56 @@ Before stopping:
 
 ### WIP NOTES
 
-> **PROGRAM "KEYSTONE" — decisions that matter, run-open to each turn (LATEST; read first; full log in
+> **PROGRAM "RESONANCE" — feel, tactical depth & balance (LATEST; read first).** Fully-autonomous
+> dev-team session (orchestrator + 2 research agents + balance-audit agent + 4 isolated-worktree dev agents
+> + 1 reviewer + the `SIGHTLINE_BALANCE` flywheel). Branch `claude/game-dev-orchestration-1g6v1h`, PR #57.
+> MEASURED baseline at session start: run-completion **40%**; biggest *felt* gap = all 5 weapons shared ONE
+> firing sound; weak spots = Sabotage (noisy ~65-90%), Evac/Escort 13-14-turn drag, a flat/non-monotonic heat
+> ladder. **3 WAVES SHIPPED, each measured:**
+> - **W1 (audio identity + economy + balance):** per-`WeaponKind` firing voices (shotgun boom / sniper crack /
+>   smg snap / lmg chug / rifle) + crit thud + event stingers (kill/lastkill/victory/lose/squadwipe) + device-
+>   free `SelfTest`/`SIGHTLINE_AUDIOTEST` (Audio.cs/Anim.cs/Program.cs). **Economy decouple** — intel is now
+>   `10+4*mission+survivors` (was `8+3*survivors+mission`, a rich-get-richer death-spiral); BALLISTIC PLATING
+>   14->8 + AutoShop buys plating FIRST (front-load the survivability sink); VIP patience 4->2. **Stats**
+>   records shop purchases + boon picks (`shopPurchases`/`boonPicks`). **Dev B balance** (Mission/Combat,
+>   re-applied onto KEYSTONE trunk via logical merge): Sabotage force-trim + covered fighting positions; heat
+>   aim-clamp 82->88 (top-rung StatDelta was silently eaten); **crit-perk DIMINISHING RETURNS**
+>   (`Combat.DampedCritStack`, optional crit bonuses scale 1.0/0.8/0.6/0.45/0.3 so a 3rd/4th crit perk isn't a
+>   dead pick). **MEASURED: run-completion 40% -> 47-53%; heat ladder now MONOTONIC (h0 ~87% -> h4 ~25-37%,
+>   vs the broken baseline 25/37/37/37/62).**
+> - **W2 (environmental hazards — the marquee depth feature):** explosive **barrels** (new `Grid.Barrel[,]`,
+>   blocks move via the `IsFloor` chokepoint; `Game.DetonateBarrel` = cover-ignoring AoE + cover demolition +
+>   chain-detonation + a fire field; **shootable** via `BarrelShotAnim`/`CanShootBarrel`/`IssueShootBarrel` in
+>   the aim path + a grenade-chain) and spreading **fire** (`Grid.Fire[,]`, 3-turn deny-ground, applies
+>   Burning on step-in + refresh-in-flame each round via `TickHazards`). AI avoids fire (-60) / barrels (-14);
+>   autopilot shoots 2+-enemy barrels. Connectivity-guarded placement (`Mission.PlaceBarrels`, CostMap-flood
+>   verified) + a `'B'` authored-arena legend (PILLARS/FOXHOLES/CHASM). Drum + animated-flame + aim-reticle
+>   rendering (Renderer.cs). `SIGHTLINE_HAZARDTEST` PASS, `SIGHTLINE_HAZARD` shot. 18+ autoplay runs clean (no
+>   TIMEOUT). **MEASURED: 42.5% run-completion (barrels add depth without cratering; avgCleared 4.35, highest).**
+> - **W3 (EXTRACT lift-out verb — Evac/Escort/Rescue drag):** a soldier in the evac zone can EXTRACT an
+>   adjacent ally / VIP / freed captive (key **X**, 1 action, no end-turn) — hauls them the last step into the
+>   zone, ending the long "march everyone to the corner" tail. `HasExtractAction`/`CanExtract`/`DoExtract` +
+>   contextual HUD button/icon/tooltip + autopilot use in SmartEvac/SmartEscort/SmartRescue. MEASURED: lifts
+>   Escort win ~85->90% (secures the fragile VIP at the threshold); avgTurns noisy at 40 runs.
+> - **W4 (INCENDIARY item — player fire agency):** the Sharpshooter's utility item is now INCENDIARY (was a
+>   3rd Smoke) — lob it to lay a 3x3 fire field that denies ground, ignites foes, and cooks barrels (`IssueItem`
+>   case + `IncendiaryAnim` reusing `LobAnim`/`Grid.AddFire`/the barrel-cook path). Completes the hazards arc:
+>   fire is now a player VERB, not just barrel residue. Player autopilot avoids ending a move in fire
+>   (`TileExposure` +20). Independent code review of W1-W3: **no CRITICAL/HIGH findings — "ship it"** (chain
+>   recursion bounded, no fire double-count, `IsFloor`/connectivity fenced, EXTRACT occupancy/turn/win-check
+>   correct, crit-damping single-bonus invariant preserved).
+> 14 self-tests green; build 0/0; autoplay clean across all objectives + heat 0/4/8. **NEW HOOKS:** `SIGHTLINE_AUDIOTEST`,
+> `SIGHTLINE_HAZARDTEST`, `SIGHTLINE_HAZARD`. **PROCESS GOTCHA (re-confirmed + important):** `isolation:worktree`
+> dev agents branch off OLD `origin/main` (4de6fc9), NOT the current branch HEAD — a file-copy of such a worktree
+> SILENTLY REVERTS all intervening commits' changes to the copied files (it cost a Program.cs draft-hook revert,
+> caught + fixed). MITIGATION: (a) push the branch so agents can `git reset --hard origin/<branch>` as STEP 0
+> (later agents did this — verify via `git -C <wt> log -1`); (b) before integrating, `git diff <base> <wt>` and
+> if base != trunk, re-APPLY the logical diff onto trunk (don't file-copy) — done for Dev B's Combat/Mission.
+> **DOCUMENTED FUTURE WORK:** anti-turtle pressure clock on Eliminate/Hack (overwatch-camp is a quiet dominant
+> strategy); loadout/gear choice (false-choice weapons); a 2nd hazard source (incendiary item / MORTAR fire);
+> tune the Heat-4+ ceiling; procedural music on a real device.
+
+> **PROGRAM "KEYSTONE" — decisions that matter, run-open to each turn (read first; full log in
 > `docs/DEVLOG.md`).** Fresh fully-autonomous dev-team session (orchestrator + 3 research agents + 5 isolated-
 > worktree dev agents + 2 reviewers + the `SIGHTLINE_BALANCE` flywheel). Branch `claude/adoring-lovelace-2f6q3c`,
 > **PR #56**. A 3-agent research fan-out (decision-quality / opportunity / balance) found: the per-turn space was

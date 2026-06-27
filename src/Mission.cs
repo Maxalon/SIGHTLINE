@@ -93,7 +93,14 @@ public static class Mission
         }
 
         var evacSet = new HashSet<(int, int)>(evac ?? new List<(int, int)>());
-        SpawnEnemies(grid, enemies, missionNum, evacSet, enemyDelta, statDelta);
+        // SABOTAGE is the weakest objective (~65% vs ~90% peers, the m5 gate): unlike Hack/Evac
+        // which let the squad mass at ONE zone, its 3 charge sites are spread across the mid-field,
+        // so the squad must SPLIT and cross open ground while every PLANT "goes loud" (rouses pods +
+        // breaks stealth). That triple tax compounds with the full force, so we ease the ENCOUNTER:
+        // a lighter hostile force (the loud-tempo IS the difficulty) + covered fighting positions
+        // at each site (below) so the split squad can hold.
+        bool sabotageObj = sabotage != null && sabotage.Count > 0;
+        SpawnEnemies(grid, enemies, missionNum, evacSet, enemyDelta, statDelta, sabotageObj);
 
         var occupied = new HashSet<(int, int)>();
         foreach (var u in players) occupied.Add((u.X, u.Y));
@@ -124,8 +131,27 @@ public static class Mission
         foreach (var u in players) TryCover(grid, occupied, u.X + 1, u.Y, TileType.LowCover);
         foreach (var u in enemies) TryCover(grid, occupied, u.X - 1, u.Y, TileType.HighCover);
 
-        // 4.2 safety net: the denser mid-field cover (+ sprinkles + protective cover) must
-        // never wall a hostile or objective off from the squad — carve a lane if it did.
+        // SABOTAGE: drop covered fighting positions just OUTSIDE each charge site's reserved ring,
+        // on the squad-facing (west) side, so a split planter isn't planting in the open. Two low
+        // blocks per site (NW/SW of the site) — they don't seal the ring (it stays open floor), and
+        // EnsureConnectivity below guarantees reachability if they ever pinch a lane.
+        if (sabotage != null)
+            foreach (var s in sabotage)
+            {
+                TryCover(grid, occupied, s.x - 2, s.y - 1, TileType.LowCover);
+                TryCover(grid, occupied, s.x - 2, s.y + 1, TileType.LowCover);
+            }
+
+        // Environmental hazards: scatter a few explosive barrels on open floor (both the
+        // procedural AND authored-layout paths), biased toward the contested mid-field /
+        // enemy-half so they're worth shooting (a barrel where a pod scatters is gold). A
+        // barrel tile is non-floor (Grid.IsFloor false), so PlaceBarrels' own flood check
+        // removes any barrel that would wall an objective/spawn off; the EnsureConnectivity
+        // net below is the final safeguard for both cover and barrels.
+        PlaceBarrels(grid, occupied, players, enemies, evacSet, terminal, sabotage, missionNum);
+
+        // 4.2 safety net: the denser mid-field cover (+ sprinkles + protective cover + barrels)
+        // must never wall a hostile or objective off from the squad — carve a lane if it did.
         EnsureConnectivity(grid, players, enemies, evacSet, terminal, sabotage);
 
         grid.ResetCoverHp();   // charge every cover tile to full now the terrain is final (3.6)
@@ -292,6 +318,7 @@ public static class Mission
                     case '#': g.Tiles[x, y] = TileType.HighCover; break;
                     case '^': g.Height[x, y] = 1; break;   // walkable raised plateau (tier 1)
                     case '=': g.Height[x, y] = 2; break;   // walkable raised plateau (tier 2)
+                    case 'B': g.Barrel[x, y] = true; break;// explosive barrel (tile stays floor underneath)
                     default:  break;                        // '.' open floor
                 }
             }
@@ -311,14 +338,14 @@ public static class Mission
         {
             for (int y = 0; y < g.H; y++)
                 for (int x = 0; x < g.W; x++)
-                    if (!occupied.Contains((x, y))) { g.Tiles[x, y] = TileType.Floor; g.Height[x, y] = 0; }
+                    if (!occupied.Contains((x, y))) { g.Tiles[x, y] = TileType.Floor; g.Height[x, y] = 0; g.Barrel[x, y] = false; }
             return false;
         }
         return true;
     }
 
     static void SpawnEnemies(Grid grid, List<Unit> enemies, int n, HashSet<(int, int)> evac,
-                             int enemyDelta = 0, int statDelta = 0)
+                             int enemyDelta = 0, int statDelta = 0, bool sabotage = false)
     {
         // Headcount cap raised 10 -> 12 so the top-Heat "+enemy" rungs aren't silently wasted
         // (the +1/+1 from RELENTLESS/OVERWHELMING used to clip at 10 on later missions). 12 still
@@ -331,6 +358,11 @@ public static class Mission
         // now-strong squad faces a real fight; Heat's deltas still stack for the mastery ladder.
         int count = Math.Clamp(4 + n + enemyDelta, 3, 12);   // deployment-card + Heat modifier
         int bump = Math.Max(0, (n - 1) + statDelta);         // stat growth per mission +/- card
+        // SABOTAGE relief (the weakest objective / m5 gate, ~65% -> aiming ~85%): the difficulty of
+        // this objective IS the 3x split-and-go-loud tempo, not raw bodies, so trim the force by 2
+        // (floored at 3) so a divided squad isn't also out-gunned. Stat bump is untouched and the
+        // Heat ladder still applies on top, so the mastery curve is preserved.
+        if (sabotage) count = Math.Max(3, count - 2);
         // Final mission (the WARLORD boss): de-stack the force. This was the core of the ~90% m6
         // loss wall -- the squad cleared m1-5 (m5 often wins ~100%, partly because it isn't always
         // forced Eliminate) then got alpha-struck on m6's forced full-clear. The compounding cause:
@@ -377,7 +409,12 @@ public static class Mission
                 e = MakeHostile(n == 3 ? "BREAKER" : "WARDEN", "ELITE", WeaponKind.Lmg, 14 + n * 2, 68, 6, x, y);
             else                                // a tier-appropriate rank-and-file archetype
                 e = SelectArchetype(n, r, bump, x, y);
-            if (e.Cls != "ELITE") e.Aim = Math.Min(82, e.Aim);
+            // Aim clamp raised 82 -> 88: the old 82 cap silently ATE the top-rung Heat StatDelta (+aim)
+            // for any archetype whose base + bump + Heat exceeded 82, flattening the ladder's apex. 88
+            // lets high-Heat aim bonuses land (the ladder stays meaningful at the top) while still
+            // leaving the squad some miss chance. Low Heat is unaffected (its small StatDelta keeps
+            // non-elite aim well under 88, so this is a no-op there).
+            if (e.Cls != "ELITE") e.Aim = Math.Min(88, e.Aim);
             // grenades: bruisers + the elite always; some others from mission 2 on.
             // MORTAR already carries a deep frag pouch (set in SelectArchetype) — never overwrite it.
             // ELITE grenades: mid-bosses (BREAKER/WARDEN on m3/m5, which already win at high
@@ -628,6 +665,67 @@ public static class Mission
                     else break;
                 }
             }
+        }
+    }
+
+    /// Scatter a SMALL number of explosive barrels (2-5, scaling gently with mission size) on
+    /// open floor, biased toward the contested mid-field / enemy half so they reward a shot
+    /// (a barrel where a pod scatters to cover is a free area-denial / chain kill). A barrel
+    /// makes its tile non-floor (Grid.IsFloor false), so it behaves as an obstacle for ALL
+    /// pathing/connectivity automatically. SAFETY: each candidate is placed only after a flood
+    /// from the squad confirms every spawn / hostile / objective tile stays reachable WITH the
+    /// barrel down; any barrel that would pinch a required lane is reverted immediately. (The
+    /// Build-level EnsureConnectivity below is a second net, but we never rely on it carving a
+    /// barrel out — barrels are non-floor and that net only clears cover, so we keep the map
+    /// connected here.)
+    static void PlaceBarrels(Grid g, HashSet<(int, int)> occupied, List<Unit> players,
+                             List<Unit> enemies, HashSet<(int, int)> evac,
+                             (int x, int y)? terminal, List<(int x, int y)> sabotage, int missionNum)
+    {
+        if (players.Count == 0) return;
+
+        // gentle count scaling: m1 -> 2, growing to a cap of 5 on later missions
+        int target = Math.Clamp(2 + missionNum / 2, 2, 5);
+        var from = players[0];
+
+        // the set of tiles that MUST remain reachable from the squad after each placement
+        var required = new List<(int x, int y)>();
+        foreach (var u in players) required.Add((u.X, u.Y));
+        foreach (var u in enemies) required.Add((u.X, u.Y));
+        foreach (var t in evac) required.Add(t);
+        if (terminal.HasValue) required.Add(terminal.Value);
+        if (sabotage != null) foreach (var s in sabotage) required.Add(s);
+
+        bool AllReachable()
+        {
+            var cost = g.CostMap(from.X, from.Y, (x, y) => false, out _, 9999);
+            foreach (var (rx, ry) in required)
+                if (!g.InBounds(rx, ry) || cost[rx, ry] < 0) return false;
+            return true;
+        }
+
+        int placed = 0, guard = 0;
+        while (placed < target && guard++ < 400)
+        {
+            // bias toward the contested mid-field / enemy half (cols 6-15), all rows.
+            int x = Util.RandInt(6, 15);
+            int y = Util.RandInt(0, g.H - 1);
+
+            // only an unreserved, currently-empty FLOOR tile is a candidate (never on cover,
+            // a spawn, the evac zone, the terminal ring, or a sabotage ring).
+            if (occupied.Contains((x, y))) continue;
+            if (!g.IsFloor(x, y)) continue;                       // cover / existing barrel / OOB
+            if (g.Barrel[x, y]) continue;
+
+            // tentatively drop the barrel, then verify connectivity; revert if it walls anything off.
+            g.Barrel[x, y] = true;
+            if (!AllReachable())
+            {
+                g.Barrel[x, y] = false;                           // would pinch a lane — skip it
+                continue;
+            }
+            occupied.Add((x, y));                                 // commit (keeps later passes off it)
+            placed++;
         }
     }
 

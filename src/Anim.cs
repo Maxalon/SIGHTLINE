@@ -193,7 +193,7 @@ public class ShotAnim : Anim
         g.Fx.Muzzle(A.Pos, dir, Pal.Accent);
         // Graze shakes less than a solid hit.
         g.Fx.AddShake(Res.Hit ? (Res.Graze ? 2f : (Res.Crit ? 9f : 5f)) : 2.5f);
-        Audio.Play("shoot");
+        Audio.PlayWeapon(A.Weapon.Kind);   // per-weapon firing voice (rifle/shotgun/sniper/lmg/smg)
         Audio.Play(Res.Hit ? (Res.Crit ? "crit" : "hit") : "miss");
         // balance telemetry (no-op unless Stats.Enabled): one record per resolved shot, here
         // where the ShotResult is final. dmg counts only when the round connects.
@@ -288,8 +288,13 @@ public class ShotAnim : Anim
             if (D.Hp <= 0)
             {
                 D.Hp = 0;
+                bool wasLastFoe = D.Team == Team.Enemy && g.AliveEnemies().Count <= 1;   // this blow clears the field (D still counts as alive here)
                 g.KillUnit(D);
-                if (A.Team == Team.Player && D.Team == Team.Enemy) g.CreditKill(A);
+                if (A.Team == Team.Player && D.Team == Team.Enemy)
+                {
+                    g.CreditKill(A);
+                    Audio.PlayStinger(wasLastFoe ? "lastkill" : "kill");   // takedown / field-clear flourish
+                }
             }
             else g.MarkPlayerHurt(D);   // a survivor at death's door earns a feat if it lives
         }
@@ -344,6 +349,57 @@ public class ShotAnim : Anim
             float snap = k * k;       // front-loaded so it cracks then vanishes
             Raylib.DrawCircleV(start, (9f * snap + 2f) * wide, Raylib.Fade(Pal.Accent, snap * 0.85f));
             Raylib.DrawCircleV(start, (4.5f * snap + 1f) * wide, Raylib.Fade(Pal.RGBA(255, 250, 235), snap));
+        }
+    }
+}
+
+/// A soldier shoots an explosive barrel: a tracer flies to the barrel tile, then it detonates
+/// (Game.DetonateBarrel does the blast/chain/fire). A lightweight cousin of ShotAnim that targets
+/// a TILE, not a unit, so the barrel-shot reuses the same muzzle/tracer/audio beat.
+public class BarrelShotAnim : Anim
+{
+    public Unit A;
+    public int Tx, Ty;
+    Vector2 _to;
+    const float Fire = 0.05f, BeamEnd = 0.30f, Total = 0.42f;
+    float _t; bool _fired; bool _windless;
+
+    public BarrelShotAnim(Unit a, int tx, int ty) { A = a; Tx = tx; Ty = ty; _to = Util.TileCenter(tx, ty); }
+
+    public override void OnStart(Game g)
+    {
+        var dir = _to - A.Pos;
+        if (dir.LengthSquared() > 0.01f) A.Facing = MathF.Atan2(dir.Y, dir.X);
+        _windless = g.AutoPlay;
+    }
+
+    public override bool Update(Game g, float dt)
+    {
+        _t += dt;
+        if (!_fired && _t >= (_windless ? 0.01f : Fire))
+        {
+            _fired = true;
+            var dir = Vector2.Normalize(_to - A.Pos + new Vector2(0.001f, 0f));
+            g.Fx.Muzzle(A.Pos, dir, Pal.Accent);
+            Audio.PlayWeapon(A.Weapon.Kind);
+            g.SetBarrelCredit(A);          // attribute the chain's kills to the shooter
+            g.DetonateBarrel(Tx, Ty);      // boom (+ chain + fire) happens on impact
+        }
+        return _t >= (_windless ? 0.02f : Total);
+    }
+
+    public override void Draw(Game g)
+    {
+        if (_windless) return;
+        if (_t >= Fire && _t <= BeamEnd)
+        {
+            float k = 1f - (_t - Fire) / (BeamEnd - Fire);
+            var dir = Vector2.Normalize(_to - A.Pos + new Vector2(0.001f, 0f));
+            Vector2 start = A.Pos + dir * 16f;
+            Raylib.DrawLineEx(start, _to, 5.5f * k + 0.8f, Raylib.Fade(Pal.Accent, k * 0.30f));
+            Raylib.DrawLineEx(start, _to, 3.2f * k + 0.6f, Raylib.Fade(Pal.Accent, k));
+            float snap = k * k;
+            Raylib.DrawCircleV(start, 9f * snap + 2f, Raylib.Fade(Pal.Accent, snap * 0.85f));
         }
     }
 }
@@ -437,12 +493,29 @@ public class GrenadeAnim : Anim
             if (u.Hp <= 0)
             {
                 u.Hp = 0;
+                bool wasLastFoe = u.Team == Team.Enemy && g.AliveEnemies().Count <= 1;
                 g.KillUnit(u);
-                if (Thrower.Team == Team.Player && u.Team == Team.Enemy) g.CreditKill(Thrower);
+                if (Thrower.Team == Team.Player && u.Team == Team.Enemy)
+                {
+                    g.CreditKill(Thrower);
+                    Audio.PlayStinger(wasLastFoe ? "lastkill" : "kill");
+                }
             }
             else { g.MarkPlayerHurt(u); u.AddStatus(StatusKind.Burning, 2); }   // blast leaves them on fire
         }
         foreach (int pod in wokePods) g.ActivatePod(pod);   // the blast wakes survivors
+
+        // chain-detonate any explosive barrel caught in the frag (a grenade near a barrel cooks it
+        // off). Credit the chain's kills to the thrower; collect first so we don't mutate mid-scan.
+        var barrels = new System.Collections.Generic.List<(int x, int y)>();
+        for (int x = Tx - Radius; x <= Tx + Radius; x++)
+            for (int y = Ty - Radius; y <= Ty + Radius; y++)
+                if (g.Grid.IsBarrel(x, y)) barrels.Add((x, y));
+        if (barrels.Count > 0)
+        {
+            g.SetBarrelCredit(Thrower);
+            foreach (var (x, y) in barrels) g.DetonateBarrel(x, y);
+        }
     }
 
     public override void Draw(Game g)
@@ -567,6 +640,43 @@ public class FlashAnim : LobAnim
             g.Fx.PopText(u.Pos + new Vector2(0, -26), "DAZED", Pal.RGBA(255, 240, 200), 20f);
         }
         foreach (int pod in wokePods) g.ActivatePod(pod);
+    }
+}
+
+/// Incendiary: lobs a fire bomb that lays a 3x3 fire field (deny ground / ignite / cook
+/// barrels). The player's agency over the Wave-2 hazard system — reuses Grid.AddFire +
+/// the barrel-cook path so it composes with everything fire already does.
+public class IncendiaryAnim : LobAnim
+{
+    public const int Radius = 1;
+    public IncendiaryAnim(Unit thrower, int tx, int ty) : base(thrower, tx, ty) { Tint = Pal.RGBA(255, 150, 60); }
+    protected override int BlastRadius => Radius;
+
+    protected override void Effect(Game g)
+    {
+        Audio.Play("crit");
+        g.Fx.AddShake(6f);
+        g.Fx.Burst(Util.TileCenter(Tx, Ty), Pal.RGBA(255, 160, 70), 30, 300f, 0.5f, 5f, true);
+        g.Grid.AddFire(Tx, Ty, Radius, Grid.FireTurns);   // lay the fire field
+
+        // ignite + sear any unit caught in the initial burst (both teams); the lingering Fire
+        // field then handles step-in / standing damage via the normal hazard tick.
+        foreach (var u in g.Players.Concat(g.Enemies).ToList())
+        {
+            if (!u.Alive || Util.ChebyDist(u.X, u.Y, Tx, Ty) > Radius) continue;
+            if (u == g.Vip && g.CaptiveLocked) continue;
+            u.AddStatus(StatusKind.Burning, 2);
+        }
+        // cook off any barrel caught in the blast (credit the thrower)
+        var barrels = new System.Collections.Generic.List<(int x, int y)>();
+        for (int x = Tx - Radius; x <= Tx + Radius; x++)
+            for (int y = Ty - Radius; y <= Ty + Radius; y++)
+                if (g.Grid.IsBarrel(x, y)) barrels.Add((x, y));
+        if (barrels.Count > 0)
+        {
+            g.SetBarrelCredit(Thrower);
+            foreach (var (x, y) in barrels) g.DetonateBarrel(x, y);
+        }
     }
 }
 
