@@ -1426,6 +1426,7 @@ public class Game
     {
         Combat.MissionFaction = Faction.None;   // defensive: clear the mission faction between missions (re-set in SetupMission) so no stale value can warp a barracks-phase odds read
         Combat.PressureAim = 0;                  // and the anti-turtle pressure aim bonus
+        Combat.PrepFaction = Faction.None;       // and the faction counter-prep (re-set+consumed in SetupMission)
         // a benched soldier sat this mission out: it's still in _run.Squad (flagged) but was
         // never in Players, so it's absent from AlivePlayers(). Preserve it across the rebuild,
         // or benching would silently destroy the veteran (review Blocker 1).
@@ -1527,6 +1528,7 @@ public class Game
     {
         Combat.MissionFaction = Faction.None;   // defensive: clear the mission faction on run end (re-set next SetupMission)
         Combat.PressureAim = 0;                  // and the anti-turtle pressure aim bonus
+        Combat.PrepFaction = Faction.None;       // and the faction counter-prep so no stale value bleeds into the next run
         LoseTitle = title;
         LoseReason = reason;
         Phase = Phase.Lose;
