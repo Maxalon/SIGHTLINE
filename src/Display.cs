@@ -57,68 +57,95 @@ in vec4 fragColor;
 out vec4 finalColor;
 uniform sampler2D texture0;
 uniform vec2  uResolution;   // render-target size (pixels)
-uniform float uBloom;        // 0..1 bloom strength
-uniform float uChroma;       // 0..1 chromatic aberration strength
+uniform float uBloom;        // 0..1 event-reactive bloom strength (spikes on hits/kills)
+uniform float uChroma;       // 0..1 chromatic aberration strength (impact-reactive)
 uniform vec3  uGrade;        // per-biome colour multiply (default 1,1,1)
 uniform float uTime;         // accumulated time (for very slow drift; optional)
 
-// Cheap single-pass bloom via a 5-tap radial blur.
-// Sample offset scale in texel units.
-// radiusPx is in PIXELS; divide by uResolution per-axis so the kernel is square
-// regardless of aspect ratio (review Mi3).
-vec3 bloom(vec2 uv, float radiusPx) {
-    vec3 col = texture(texture0, uv).rgb;
-    float w = 1.0;
+// Rec.709 luminance.
+float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+
+// Bright-pass bloom: a weighted radial blur of ONLY the bright/emissive part of the
+// frame. SIGHTLINE is dark geometric art, so the only bright pixels are the things we
+// WANT to halo — objective glows (EVAC green / VIP gold), unit under-glows (cyan/red),
+// muzzle/impact flashes, HP bars. A soft luma threshold keeps the dark board clean.
+// radiusPx is in PIXELS; divided per-axis by uResolution so the kernel stays square
+// regardless of aspect ratio.
+vec3 brightBlur(vec2 uv, float radiusPx) {
     vec2 r1 = vec2(radiusPx) / uResolution;   // aspect-correct UV offset
-    vec2 r2 = r1 * 0.55;
-    // 4 diagonal samples
-    col += texture(texture0, uv + vec2( r1.x,  r1.y)).rgb; w += 1.0;
-    col += texture(texture0, uv - vec2( r1.x,  r1.y)).rgb; w += 1.0;
-    col += texture(texture0, uv + vec2(-r1.x,  r1.y)).rgb; w += 1.0;
-    col += texture(texture0, uv - vec2(-r1.x,  r1.y)).rgb; w += 1.0;
-    // 4 axis samples at half-radius
-    col += texture(texture0, uv + vec2(r2.x, 0.0)).rgb; w += 1.0;
-    col += texture(texture0, uv - vec2(r2.x, 0.0)).rgb; w += 1.0;
-    col += texture(texture0, uv + vec2(0.0, r2.y)).rgb; w += 1.0;
-    col += texture(texture0, uv - vec2(0.0, r2.y)).rgb; w += 1.0;
-    return col / w;
+    vec2 r2 = r1 * 0.5;
+    vec3 sum = vec3(0.0);
+    float wsum = 0.0;
+    // 12-tap: a centre + ring at r2 + ring at r1, each soft-thresholded so only
+    // genuinely bright sources contribute. Cheap enough for a single full-screen pass.
+    vec2 offs[12] = vec2[12](
+        vec2( 0.0,  0.0),
+        vec2( r2.x, 0.0), vec2(-r2.x, 0.0), vec2(0.0,  r2.y), vec2(0.0, -r2.y),
+        vec2( r1.x, r1.y), vec2(-r1.x, r1.y), vec2(r1.x, -r1.y), vec2(-r1.x, -r1.y),
+        vec2( r1.x*1.6, 0.0), vec2(-r1.x*1.6, 0.0), vec2(0.0, r1.y*1.6)
+    );
+    for (int i = 0; i < 12; i++) {
+        vec3 s = texture(texture0, uv + offs[i]).rgb;
+        // Soft bright-pass: knee at ~0.42 luma, smooth ramp so accents glow but the
+        // dark board floor does not. Square it for a punchier, less-smeary falloff.
+        float b = smoothstep(0.42, 0.85, luma(s));
+        b = b * b;
+        // weight inner taps slightly higher for a tighter core + soft outer halo.
+        float w = (i == 0) ? 1.6 : (i < 5 ? 1.0 : 0.6);
+        sum += s * b * w;
+        wsum += w;
+    }
+    return sum / wsum;
 }
 
 void main() {
     vec2 uv = fragTexCoord;
-
-    // --- chromatic aberration ---
-    // Displace R and B channels by a small offset toward/away from centre.
-    float caStr = uChroma * 0.006;
     vec2 dir = uv - 0.5;
-    float caLen = length(dir);
-    vec2 caOff = normalize(dir + vec2(0.001)) * caLen * caStr;
+    float edge = length(dir) * 1.4142;   // 0 at centre, ~1.0 at the corner
+
+    // --- chromatic aberration (impact-reactive, edges only) ---
+    // Displace R/B channels outward, scaled by distance from centre so the centre of
+    // the board stays crisp and only the framed edges fringe on a hit. Stays at 0 when
+    // uChroma is 0 (no recent impact) so it never reads as ""broken"".
+    float caStr = uChroma * 0.0085 * edge * edge;
+    vec2 caOff = normalize(dir + vec2(0.0001)) * caStr;
     float r = texture(texture0, uv + caOff).r;
     float g = texture(texture0, uv).g;
     float b = texture(texture0, uv - caOff).b;
     vec3 base = vec3(r, g, b);
 
-    // --- bloom ---
-    // Bloom radius in pixels (converted to aspect-correct UV inside bloom()).
-    float bloomRadius = 3.0;
-    // Bloom extracts only the bright part of the blurred sample (soft threshold > 0.55).
-    vec3 blurred = bloom(uv, bloomRadius);
-    vec3 bright  = max(blurred - 0.55, 0.0);   // soft threshold — only near-white areas glow
-    bright *= 1.6;                              // boost so the extracted glow is visible
-    vec3 withBloom = base + bright * uBloom * 0.55;  // subtle additive blend
+    // --- bloom (always-on soft glow + event spike) ---
+    // A constant gentle glow makes emissive accents (objective rings, unit under-glows)
+    // halo softly at all times — this is the ""shippable indie"" payoff. Combat events
+    // (uBloom) push it brighter for a punchy hit/kill flash that then decays.
+    vec3 glow = brightBlur(uv, 5.0);
+    float bloomAmt = 0.55 + uBloom * 0.9;     // baseline halo + reactive spike
+    vec3 withBloom = base + glow * bloomAmt;
 
-    // --- biome colour grading (multiplicative) ---
-    vec3 graded = withBloom * uGrade;
+    // --- colour grade: saturation + contrast + per-biome tint ---
+    // 1) biome tint (uGrade is near 1.0); amplify its deviation from neutral so missions
+    //    feel like distinct places (cool steel / warm arid / icy tundra ...).
+    vec3 tint = vec3(1.0) + (uGrade - vec3(1.0)) * 2.2;
+    vec3 graded = withBloom * tint;
+    // 2) saturation lift — the geometric palette pops a little more.
+    float lum = luma(graded);
+    graded = mix(vec3(lum), graded, 1.18);
+    // 3) gentle S-curve contrast around mid-grey: deepen shadows, keep highlights.
+    graded = clamp(graded, 0.0, 1.0);
+    graded = graded * graded * (3.0 - 2.0 * graded);   // smoothstep contrast
+    graded = mix(withBloom * tint, graded, 0.35);       // blend so it stays subtle
+    graded = clamp(graded, 0.0, 2.0);
 
-    // --- soft vignette ---
-    // Feathered from centre, darkens toward corners. Strength ~0.35 at the corner.
-    float vigRadius = length(uv - 0.5) * 1.44;  // 0..1 at the corner
-    float vig = 1.0 - vigRadius * vigRadius * 0.40;
-    vig = clamp(vig, 0.55, 1.0);               // floor 0.55: corners are never pitch-black
+    // --- vignette: a clear frame around the busy board ---
+    // Two-stage: a wide gentle darken across the outer frame + a sharper corner cinch.
+    // Centre (edge<~0.45) is untouched; corners lose ~16-20% so the eye is drawn inward.
+    float v1 = smoothstep(0.55, 1.05, edge);        // wide outer falloff
+    float v2 = smoothstep(0.80, 1.25, edge);        // tight corner cinch
+    float vig = 1.0 - v1 * 0.13 - v2 * 0.10;        // ~0.13 frame + extra ~0.10 at corners
     graded *= vig;
 
-    // Slight gamma correction to keep the output looking natural (not washed out).
-    graded = pow(clamp(graded, 0.0, 1.0), vec3(0.95));
+    // Slight gamma to keep the output natural (not washed out).
+    graded = pow(clamp(graded, 0.0, 1.0), vec3(0.96));
 
     finalColor = vec4(graded, 1.0);
 }

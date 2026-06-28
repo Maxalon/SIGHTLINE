@@ -126,23 +126,32 @@ public static class Renderer
         Raylib.DrawRectangleRounded(edge, 0.02f, 6, Pal.RGBA(7, 10, 14));
         Raylib.DrawRectangleLinesEx(edge, 2f, bm.Edge);
 
-        // floor (biome-tinted checker)
+        // floor (biome-tinted checker) — CALM the checker so units/cover pop, but LAND the
+        // biome so the room recolours distinctly. Two levers: (1) collapse the value gap
+        // between the two checker colours toward their mean (flatter, quieter floor), then
+        // darken the mean a touch so it's a low base; (2) push that mean toward the biome
+        // Tint hue so STEEL/ARID/TUNDRA/etc. read as a coloured place, not grey.
+        Color floorMean = Pal.Mix(bm.FloorA, bm.FloorB, 0.5f);
+        floorMean = Pal.Mix(floorMean, Pal.RGBA(6, 9, 13), 0.18f);       // slightly darker base
+        floorMean = Pal.Mix(floorMean, bm.Tint, 0.22f);                  // land the biome hue
+        Color fa = Pal.Mix(floorMean, bm.FloorA, 0.32f);                 // keep only a faint checker
+        Color fb = Pal.Mix(floorMean, bm.FloorB, 0.32f);
         for (int x = 0; x < g.Grid.W; x++)
             for (int y = 0; y < g.Grid.H; y++)
             {
                 if (g.Grid.Tiles[x, y] != TileType.Floor) continue;
                 var r = Util.TileRect(x, y);
-                Raylib.DrawRectangleRec(r, ((x + y) & 1) == 0 ? bm.FloorA : bm.FloorB);
+                Raylib.DrawRectangleRec(r, ((x + y) & 1) == 0 ? fa : fb);
             }
 
-        // 5.4: subtle noise grain over the floor so it reads as material, not flat colour.
-        // Alpha 0.09 keeps it well below signal level — squint test still passes.
+        // 5.4: noise grain over the floor so it reads as material, not flat colour. Bumped to
+        // 0.13 + biome-tinted to push the biome identity into the floor texture (still subtle).
         if (_noiseReady)
             for (int x = 0; x < g.Grid.W; x++)
                 for (int y = 0; y < g.Grid.H; y++)
                 {
                     if (g.Grid.Tiles[x, y] != TileType.Floor) continue;
-                    DrawNoiseRect(Util.TileRect(x, y), bm.Tint, 0.09f);
+                    DrawNoiseRect(Util.TileRect(x, y), bm.Tint, 0.13f);
                 }
 
         g.Fx.DrawAmbient();   // per-biome ambient atmosphere, under terrain/units (Wave B)
@@ -240,14 +249,27 @@ public static class Renderer
     static void DrawEvac(Game g)
     {
         if (g.EvacZone.Count == 0) return;
+        // the WIN-CONDITION must be the 2nd-most-salient thing on the board: a strong animated
+        // pulsing fill + a chevron sweep, not a thin outline. Uses the friendly Good role colour.
         float pulse = 0.5f + 0.5f * MathF.Sin((float)Raylib.GetTime() * 3f);
         int minx = int.MaxValue, miny = int.MaxValue;
         foreach (var (x, y) in g.EvacZone)
         {
             var r = Util.TileRect(x, y);
-            Raylib.DrawRectangleRec(r, Raylib.Fade(Pal.Good, 0.10f + 0.10f * pulse));
+            // glowing fill — much stronger than before so the zone reads as "go here to win"
+            Raylib.DrawRectangleRec(r, Raylib.Fade(Pal.Good, 0.16f + 0.16f * pulse));
+            // animated upward chevrons inside the tile (the "extract / lift-out" cue)
+            float ph = ((float)Raylib.GetTime() * 0.8f) % 1f;
+            for (int c = 0; c < 2; c++)
+            {
+                float cy = r.Y + r.Height * (0.85f - ((ph + c * 0.5f) % 1f) * 0.7f);
+                float cx = r.X + r.Width * 0.5f;
+                Color cc = Raylib.Fade(Pal.Good, 0.45f);
+                Raylib.DrawLineEx(new Vector2(cx - 9, cy + 5), new Vector2(cx, cy - 4), 2f, cc);
+                Raylib.DrawLineEx(new Vector2(cx, cy - 4), new Vector2(cx + 9, cy + 5), 2f, cc);
+            }
             Raylib.DrawRectangleLinesEx(new Rectangle(r.X + 2, r.Y + 2, r.Width - 4, r.Height - 4),
-                                        2f, Raylib.Fade(Pal.Good, 0.5f + 0.4f * pulse));
+                                        2.5f, Raylib.Fade(Pal.Good, 0.6f + 0.4f * pulse));
             minx = Math.Min(minx, x); miny = Math.Min(miny, y);
         }
         var at = Util.TileCenter(minx, miny);
@@ -265,10 +287,11 @@ public static class Renderer
         Color col = done ? Pal.Good : Pal.Accent;
         float pulse = 0.5f + 0.5f * MathF.Sin((float)Raylib.GetTime() * 3f);
 
-        // pad
-        Raylib.DrawRectangleRec(r, Raylib.Fade(col, 0.08f + 0.06f * pulse));
+        // pad — strong pulsing glow + a radial bloom so the hack objective reads at 2nd-salience
+        Raylib.DrawRectangleRec(r, Raylib.Fade(col, 0.13f + 0.12f * pulse));
+        Raylib.DrawCircleV(c, 24f, Raylib.Fade(col, 0.06f + 0.07f * pulse));
         Raylib.DrawRectangleLinesEx(new Rectangle(r.X + 3, r.Y + 3, r.Width - 6, r.Height - 6),
-                                    2f, Raylib.Fade(col, 0.45f + 0.4f * pulse));
+                                    2.5f, Raylib.Fade(col, 0.5f + 0.4f * pulse));
 
         // segmented hack-progress ring
         float seg = 360f / Game.HackRequired;
@@ -297,16 +320,21 @@ public static class Renderer
             bool blown = g.SabotageBlown.Contains(i);
             var r = ElevRect(g, tx, ty);
             var c = ElevCenter(g, tx, ty);
-            Color col = blown ? Pal.Good : Pal.Foe;
+            // OBJECTIVE accent (amber) — NOT red — so a charge site can never be misread as an
+            // enemy. Armed (done) flips to the friendly Good colour.
+            Color col = blown ? Pal.Good : Pal.Accent;
             float pulse = 0.5f + 0.5f * MathF.Sin((float)Raylib.GetTime() * 3f + i);
 
-            Raylib.DrawRectangleRec(r, Raylib.Fade(col, 0.07f + (blown ? 0f : 0.06f * pulse)));
+            // a strong pulsing glow fill so the win-condition site reads at 2nd-salience
+            Raylib.DrawRectangleRec(r, Raylib.Fade(col, 0.12f + (blown ? 0f : 0.14f * pulse)));
+            // a soft radial bloom centred on the charge so it glows off the muted floor
+            if (!blown) Raylib.DrawCircleV(c, 22f, Raylib.Fade(col, 0.06f + 0.07f * pulse));
             Raylib.DrawRectangleLinesEx(new Rectangle(r.X + 3, r.Y + 3, r.Width - 6, r.Height - 6),
-                                        2f, Raylib.Fade(col, blown ? 0.35f : 0.45f + 0.4f * pulse));
+                                        2.5f, Raylib.Fade(col, blown ? 0.4f : 0.5f + 0.4f * pulse));
             // charge box + light
             Raylib.DrawRectangleRec(new Rectangle(c.X - 8, c.Y - 9, 16, 18), Pal.RGBA(14, 20, 28));
             Raylib.DrawRectangleLinesEx(new Rectangle(c.X - 8, c.Y - 9, 16, 18), 1.5f, col);
-            Raylib.DrawCircleV(new Vector2(c.X, c.Y), 3.5f, Raylib.Fade(col, blown ? 0.9f : 0.5f + 0.5f * pulse));
+            Raylib.DrawCircleV(new Vector2(c.X, c.Y), 3.8f, Raylib.Fade(col, blown ? 0.9f : 0.55f + 0.45f * pulse));
 
             Raylib.DrawTextEx(Cfg.Font, blown ? "ARMED" : "CHARGE", new Vector2((int)c.X - 18, (int)r.Y - 13), 10, 1f, col);
         }
@@ -314,7 +342,10 @@ public static class Renderer
 
     static void DrawGridLines(Game g)
     {
-        Color gl = g.Biome.Grid;
+        // back the grid off so it's a quiet substrate, not a competing mesh — fade the biome
+        // grid colour rather than leaving it at full strength (it was adding muddy mid-value
+        // clutter that fought the units). Thin + low-alpha = present but recessive.
+        Color gl = Raylib.Fade(g.Biome.Grid, 0.5f);
         for (int x = 0; x <= g.Grid.W; x++)
             Raylib.DrawLineEx(new Vector2(Cfg.OriginX + x * Cfg.Tile, Cfg.OriginY),
                               new Vector2(Cfg.OriginX + x * Cfg.Tile, Cfg.OriginY + Cfg.BoardH),
@@ -361,9 +392,10 @@ public static class Renderer
                 if (!here && g.MoveCost[x, y] <= 0) continue;
                 var r = ElevRect(g, x, y);
                 var pos = new Vector2(r.X + r.Width - 9, r.Y + 9);
-                Raylib.DrawPoly(pos, 3, 5.5f, -90f, Raylib.Fade(Pal.Foe, 0.85f * pulse));
-                Raylib.DrawPolyLinesEx(pos, 3, 5.5f, -90f, 1.5f, Raylib.Fade(Pal.RGBA(255, 220, 220), 0.8f));
-                Raylib.DrawRectangle((int)pos.X - 1, (int)pos.Y - 1, 2, 2, Pal.RGBA(30, 6, 6));
+                // a single small subtle danger tick (was a loud filled triangle + bright outline)
+                // — informs "this tile is exposed" without a field of red pips drowning the units.
+                Raylib.DrawPoly(pos, 3, 4.5f, -90f, Raylib.Fade(Pal.Foe, 0.32f + 0.18f * pulse));
+                Raylib.DrawPolyLinesEx(pos, 3, 4.5f, -90f, 1.2f, Raylib.Fade(Pal.Foe, 0.45f));
             }
     }
 
@@ -598,10 +630,17 @@ public static class Renderer
 
     static void DrawCover(Game g)
     {
-        // blend the neutral cover palette toward the biome hue
+        // blend the neutral cover palette toward the biome hue, then DARKEN the whole
+        // block so terrain RECEDES behind the units/objectives (visual-hierarchy invert).
+        // Cover must read as solid, grounded and QUIET — never the loudest thing on screen.
         Color tint = g.Biome.Tint;
-        Color cHi = Pal.Mix(Pal.CoverHi, tint, 0.28f), cHiTop = Pal.Mix(Pal.CoverHiTop, tint, 0.28f);
-        Color cLo = Pal.Mix(Pal.CoverLo, tint, 0.28f), cLoTop = Pal.Mix(Pal.CoverLoTop, tint, 0.28f);
+        // pull each cover colour ~24% toward near-black so the blocks sit back as a low,
+        // muted base layer; the faux-3D shape + shadow still carry the silhouette.
+        Color shade = Pal.RGBA(8, 11, 15);
+        Color cHi = Pal.Mix(Pal.Mix(Pal.CoverHi, tint, 0.28f),    shade, 0.24f);
+        Color cHiTop = Pal.Mix(Pal.Mix(Pal.CoverHiTop, tint, 0.28f), shade, 0.24f);
+        Color cLo = Pal.Mix(Pal.Mix(Pal.CoverLo, tint, 0.28f),    shade, 0.24f);
+        Color cLoTop = Pal.Mix(Pal.Mix(Pal.CoverLoTop, tint, 0.28f), shade, 0.24f);
         for (int x = 0; x < g.Grid.W; x++)
             for (int y = 0; y < g.Grid.H; y++)
             {
@@ -645,17 +684,17 @@ public static class Renderer
                 Raylib.DrawRectangleRounded(topRect, 0.22f, 5, high ? cHiTop : cLoTop);
                 // 5.4: noise grain on the top face so cover reads as a physical object
                 DrawNoiseRect(topRect, tint, 0.10f);
-                // subtle top edge highlight (existing soft white gleam)
+                // top edge highlight — dropped to a whisper so cover stays quiet (was 0.12).
                 Raylib.DrawLineEx(new Vector2(topRect.X + 4, topRect.Y + 2),
                                   new Vector2(topRect.X + topRect.Width - 4, topRect.Y + 2),
-                                  1.5f, Raylib.Fade(Pal.RGBA(255, 255, 255), 0.12f));
-                // emissive rim — a warm bright accent on the upper edge so cover glows subtly;
-                // the 5.2 post-FX bloom will amplify this on hardware.  Keep alpha modest so
-                // the △/— shape cues still dominate.
+                                  1.5f, Raylib.Fade(Pal.RGBA(255, 255, 255), 0.05f));
+                // emissive rim — kept only as a faint structural catch on the upper edge so the
+                // block still reads as a lit volume, but well below signal so it can't compete
+                // with units/objectives or trip the bloom into making cover glow (was 0.30/0.20).
                 Color rimCol = Pal.Mix(Pal.HighEdge, Pal.RGBA(255, 255, 255), 0.45f);
                 Raylib.DrawLineEx(new Vector2(topRect.X + 5, topRect.Y + 3),
                                   new Vector2(topRect.X + topRect.Width - 5, topRect.Y + 3),
-                                  1f, Raylib.Fade(rimCol, high ? 0.30f : 0.20f));
+                                  1f, Raylib.Fade(rimCol, high ? 0.11f : 0.08f));
                 // damage state (3.6): a chipped-but-not-yet-degraded block shows fissures
                 if (g.Grid.CoverHp[x, y] > 0 && g.Grid.CoverHp[x, y] < g.Grid.MaxCoverHp(x, y))
                 {
@@ -1127,12 +1166,12 @@ public static class Renderer
         // HP bar, rings, status codes, alert markers, VIP markers stay full-alpha (they are signal).
         float figAlpha;
         if (g.Selected == u)              figAlpha = 1.0f;          // selected: full brightness
-        else if (friend && !u.CanAct)     figAlpha = 0.52f;          // spent player: clearly "done" (deeper dim)
-        else if (friend)                  figAlpha = 0.78f;          // other player: gently dimmed
-        else                              figAlpha = 0.85f;          // enemies: barely dimmed (must spot threats)
+        else if (friend && !u.CanAct)     figAlpha = 0.66f;          // spent player: "done" but still clearly readable
+        else if (friend)                  figAlpha = 0.92f;          // other player: nearly full — units must read first
+        else                              figAlpha = 1.0f;           // enemies: full — threats are top priority signal
         // when a soldier IS selected, push the gap a touch further so the active unit stands out
         // against the rest of the squad — but never touch enemy alpha (threats stay fully legible).
-        if (g.Selected != null && g.Selected != u && friend) figAlpha -= 0.06f;
+        if (g.Selected != null && g.Selected != u && friend && u.CanAct) figAlpha -= 0.05f;
 
         // lift the figure when it stands on raised terrain
         float hlift = g.Grid.IsHigh(u.X, u.Y) ? ElevLift : 0f;
@@ -1171,6 +1210,26 @@ public static class Renderer
             int scx = (int)(foot.X + 1.5f), scy = (int)(foot.Y + 18);
             Raylib.DrawEllipse(scx, scy, 17f * sg, 7f * sg, Raylib.Fade(Pal.RGBA(0, 0, 0), 0.18f * figAlpha * sg));
             Raylib.DrawEllipse(scx, scy, 12f * sg, 4.6f * sg, Raylib.Fade(Pal.RGBA(0, 0, 0), 0.34f * figAlpha * sg));
+        }
+
+        // *** team-colour UNDER-GLOW — the keystone of the inverted hierarchy ***
+        // A soft saturated radial halo beneath every LIVE unit (cyan friendly / hot red enemy /
+        // gold VIP) so units are the brightest, most-saturated objects on the board and pop off
+        // the now-muted cover. Drawn UNDER the figure so it reads as the unit being lit, not an
+        // overlay. Dormant/suspicious pods are skipped (they keep their faint awareness markers).
+        if (!inactive)
+        {
+            // hotter, more saturated glow colour for enemies so live foes burn red; the friendly
+            // glow rides the cyan team colour. Boss/HVT pick up a touch more reach.
+            Color glow = vip ? Pal.VipGold
+                       : friend ? Pal.Friend
+                       : (elite ? Pal.Elite : Pal.Foe);
+            float gpulse = 0.85f + 0.15f * MathF.Sin((float)Raylib.GetTime() * 2.4f + u.Bob);
+            float gA = (friend ? 0.30f : 0.34f) * figAlpha * gpulse;   // enemies a hair hotter
+            float gR = (elite || hvt) ? 30f : 25f;
+            // a wide soft bloom + a tighter brighter core radial (two rings read as a glow on llvmpipe)
+            Raylib.DrawCircleV(p, gR,        Raylib.Fade(glow, gA * 0.45f));
+            Raylib.DrawCircleV(p, gR * 0.68f, Raylib.Fade(glow, gA * 0.85f));
         }
 
         // selection ring — full strength (signal), plus a layered glow so the eye snaps to who's
@@ -1213,16 +1272,19 @@ public static class Renderer
             Raylib.DrawRing(foot + new Vector2(0, 17), 26f, 28f, 0, 360, 48, Raylib.Fade(hc, 0.30f + 0.40f * pulse));
         }
 
-        // body — apply figAlpha to the figure shape (bodyScale gives a brief flinch pop)
-        float bodyR = 16f * bodyScale;
+        // body — apply figAlpha to the figure shape (bodyScale gives a brief flinch pop).
+        // Figures were ~12% small for the Tile-64 board; enlarged ~16% so units out-mass the
+        // (now-muted) cover blocks. A brighter rim makes the saturated outline read at a glance.
+        float fig = 1.16f;                                  // overall figure upscale
+        float bodyR = 18.5f * bodyScale;
         Raylib.DrawCircleV(p, bodyR, Raylib.Fade(dark, figAlpha));
-        Raylib.DrawRing(p, bodyR - 2.5f, bodyR + 0.5f, 0, 360, 40, Raylib.Fade(main, figAlpha));
-        Raylib.DrawCircleV(p, bodyR - 2.5f, Raylib.Fade(main, 0.18f * figAlpha));
+        Raylib.DrawRing(p, bodyR - 2.8f, bodyR + 0.8f, 0, 360, 40, Raylib.Fade(main, figAlpha));
+        Raylib.DrawCircleV(p, bodyR - 2.8f, Raylib.Fade(main, 0.22f * figAlpha));
 
         // class silhouette — a recognizable primitive cue per class (shape-redundant, colorblind-
         // safe: meaning rides on the SHAPE, inheriting the team colour + focal figAlpha).
-        if (elite) Raylib.DrawRing(p, 18f * bodyScale, 20.5f * bodyScale, 0, 360, 40, Raylib.Fade(Pal.Elite, 0.55f * figAlpha));
-        DrawSilhouette(u, p, main, figAlpha, bodyScale, u.Facing);
+        if (elite) Raylib.DrawRing(p, 20.5f * bodyScale, 23f * bodyScale, 0, 360, 40, Raylib.Fade(Pal.Elite, 0.55f * figAlpha));
+        DrawSilhouette(u, p, main, figAlpha, bodyScale * fig, u.Facing);
 
         // DECAPITATE: a gold crown chevron + "HVT" tag above the target (full-alpha signal, drawn
         // in every alert state so the mark reads even on a dormant target). The body ring above
@@ -1249,7 +1311,20 @@ public static class Renderer
                 Raylib.DrawRing(p, 18f, 21f, 0, 360, 40, Raylib.Fade(Pal.Suspect, 0.30f + 0.45f * pulse));
                 Raylib.DrawTextEx(Cfg.Font, "!", new Vector2((int)(p.X - 2), (int)(p.Y - 33)), 20, 1f, Pal.Suspect);
             }
-            else Raylib.DrawTextEx(Cfg.Font, "?", new Vector2((int)(p.X - 4), (int)(p.Y - 32)), 18, 1f, Pal.TxtDim);
+            else
+            {
+                // Unaware pod: a DELIBERATE clean dashed ring + a clear "?" — dim but unambiguous
+                // (reads as "dormant contact here", not a muddy brown blob). Dashes = "not yet live".
+                float t = (float)Raylib.GetTime();
+                Color dim = Pal.RGBA(150, 132, 120);
+                for (int k = 0; k < 8; k++)
+                {
+                    float a0 = k * 45f + t * 14f;          // slow rotation so it reads as "scanning"
+                    Raylib.DrawRing(p, 17f, 19.5f, a0, a0 + 24f, 6, Raylib.Fade(dim, 0.55f));
+                }
+                float qw = Raylib.MeasureTextEx(Cfg.Font, "?", 22, 1f).X;
+                Raylib.DrawTextEx(Cfg.Font, "?", new Vector2((int)(p.X - qw / 2), (int)(p.Y - 12)), 22, 1f, Raylib.Fade(dim, 0.95f));
+            }
             return;
         }
 

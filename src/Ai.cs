@@ -682,6 +682,7 @@ public static class Ai
         {
             if (Util.TileDist(fx, fy, p.X, p.Y) > Game.GrenadeRange) continue;
             if (!g.Grid.HasLineOfSight(fx, fy, p.X, p.Y)) continue;   // can't blind-lob over walls / through smoke
+            if (Util.ChebyDist(fx, fy, p.X, p.Y) <= GrenadeAnim.Radius) continue;  // don't catch the thrower in its own blast
             int hits = 0, allies = 0;
             foreach (var q in g.AlivePlayers()) if (Util.ChebyDist(p.X, p.Y, q.X, q.Y) <= GrenadeAnim.Radius) hits++;
             foreach (var a in g.AliveEnemies()) if (a != e && Util.ChebyDist(p.X, p.Y, a.X, a.Y) <= GrenadeAnim.Radius) allies++;
@@ -724,9 +725,8 @@ public static class Ai
     {
         int ox = a.X, oy = a.Y;
         a.X = ax; a.Y = ay;
-        var odds = Combat.ComputeOdds(g.Grid, a, d);
-        a.X = ox; a.Y = oy;
-        return odds;
+        try { return Combat.ComputeOdds(g.Grid, a, d); }
+        finally { a.X = ox; a.Y = oy; }  // always restore the live position even if scoring throws
     }
 
     // True when a live, ALERT SPOTTER (BEACON) is on the field other than `self` — the

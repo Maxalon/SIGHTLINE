@@ -111,6 +111,11 @@ public class MissionNode
     public List<int> Next = new();  // outgoing edges (node ids in the next column)
     public bool Visited;
     public int Mission => Col + 1;
+    // Intel paid for CLEARING this node -- the routing economy / opportunity cost. SUPPLY pays an
+    // economy premium (rest stop that also banks intel), ELITE pays a risk-for-reward premium. Set
+    // deterministically in GenerateMap (depth-scaled), so it round-trips on load (the map is
+    // regenerated from MapSeed) -- NOT a persisted field.
+    public int Intel;
 }
 
 /// One rung of the Heat / Ascension ladder (Hades' Pact of Punishment / StS Ascension).
@@ -353,6 +358,13 @@ public class Run
 
         foreach (var node in Map) node.Card = CardForNode(node);
 
+        // ROUTING ECONOMY: per-node Intel reward. Base scales with depth (the rising difficulty),
+        // then SUPPLY and ELITE pay premiums so the route is a real trade-off -- a SUPPLY node is the
+        // "economy stop" (rest + bank intel for the shop), an ELITE is "risk for reward" (heavier
+        // force, but the biggest payout + a bonus perk). Deterministic from the node alone, so it
+        // round-trips on load (the map is regenerated from MapSeed). NOT persisted.
+        foreach (var node in Map) node.Intel = NodeIntel(node);
+
         // Enemy FACTIONS (Wave 4): give the main fights (Combat/Elite nodes) a faction identity so each
         // reads as a distinct opponent the player pre-plans against (the EnemyHint + banner show it; the
         // faction-gated roster + combat rule warp the encounter). START / SUPPLY / BOSS stay a mixed force
@@ -419,6 +431,22 @@ public class Run
         }
     }
 
+    /// Intel paid for clearing a node (the routing economy). Base tracks the old flat grant's
+    /// depth term (10 + 4*mission) so the overall economy is unchanged on a STANDARD route; SUPPLY
+    /// and ELITE add premiums so the branch pick trades survivability/risk for economy. START/BOSS
+    /// keep the base (the opener + finale aren't economy decisions).
+    public static int NodeIntel(MissionNode node)
+    {
+        int n = node.Mission;
+        int baseIntel = 10 + 4 * n;
+        return node.Kind switch
+        {
+            NodeKind.Supply => baseIntel + 10,   // economy route: rest + a meaningful intel bonus
+            NodeKind.Elite  => baseIntel + 14,   // risk-for-reward: heavier force, the biggest payout
+            _               => baseIntel,
+        };
+    }
+
     /// Harness jump: walk the map greedily to a node in the target mission's column,
     /// marking the path visited and adopting that node's card (so the post-mission
     /// barracks shows the correct downstream choices).
@@ -437,7 +465,8 @@ public class Run
         CurrentCard = node.Card;
     }
 
-    /// Objective rotation baseline: Eliminate / Hack / Evac / Escort, repeating.
+    /// Objective rotation baseline: an 8-objective cycle (Eliminate / Hack / Evac / Escort /
+    /// Sabotage / Rescue / Defend / Decapitate), repeating.
     public static Objective ObjectiveFor(int n) => ((n - 1) % 8) switch
     {
         1 => Objective.Hack,

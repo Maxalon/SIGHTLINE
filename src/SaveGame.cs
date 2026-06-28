@@ -294,6 +294,14 @@ public static class SaveGame
             if (got.HeatLevel != 5) fails.Add("heatLevel");
             if (got.PrepFaction != Faction.Legion) fails.Add("prepFaction");
 
+            // APPEND-ONLY GUARD: Objective is persisted as a raw ordinal (CardDto.Objective). If a
+            // future edit reorders/removes a member, saved runs load the wrong objective. Check the
+            // value order at runtime (Enum.GetValues is sorted by underlying value) so such a reorder
+            // fails this test loudly instead of silently corrupting saves.
+            var objVals = (Objective[])Enum.GetValues(typeof(Objective));
+            if (objVals.Length < 8 || objVals[0] != Objective.Eliminate || objVals[7] != Objective.Decapitate)
+                fails.Add("objectiveOrdinals");
+
             // meta (unlocked-max heat) round-trips through its own meta.json
             string metaSaved = File.Exists(MetaPath) ? File.ReadAllText(MetaPath) : null;
             try

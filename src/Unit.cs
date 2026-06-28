@@ -463,14 +463,16 @@ public class Unit
     // enemy (fodder or boss), rewarding focus-firing a new target; it goes inert once the target is chipped
     // (the opposite axis from Executioner's sub-half-HP finisher). Read in Combat.ComputeOdds via d.Hp>=MaxHp.
     public const int FirstStrikeCrit = 15;
-    // BULWARK: a DEFENSIVE/turtle survivability perk. While this soldier is HUNKERED (spent the
-    // turn to brace), every incoming hit is reduced by an EXTRA BulwarkFlat — on top of cover, the
-    // hunker -25-aim, Hardened, and Armor (all stack in HardenedReduce, the single chokepoint).
-    // Distinct from Hardened (unconditional -1/-4-crit, any time) and Tank (+3 max HP): Bulwark is
-    // CONDITIONAL on the hunker stance, so it rewards a deliberate hold-the-line playstyle and is
-    // worthless on a soldier that never digs in (a real trade, not a flat must-pick). Read in
-    // Combat.HardenedReduce off d.Hunkered (already a field on the defending Unit — no new hook).
-    public const int BulwarkFlat = 2;    // extra -damage on every incoming hit WHILE hunkered
+    // BULWARK (reworked -> "PLATING"): an ABLATIVE-armor survivability perk. The old "-2 while
+    // hunkered" was a dead pick (flywheel 5x) — the aggressive meta almost never spends a turn to
+    // hunker, so the condition rarely fired. New effect: while this soldier is at/above HALF HP its
+    // armor plating is intact and absorbs an EXTRA BulwarkFlat off every incoming hit — NO stance
+    // required, so a frontline soldier benefits just by leading the push. Once chipped below half
+    // HP the plating is spent (the bonus drops off), giving it a distinct DURABILITY CURVE: it keeps
+    // a healthy point-soldier healthy (front-loaded) but fades exactly when Hardened/Tank matter
+    // most. Distinct from Hardened (always-on, crit-weighted) and Tank (+max HP, no per-hit cut).
+    // Read in Combat.HardenedReduce off d.Hp/d.MaxHp (already on the defending Unit — no new hook).
+    public const int BulwarkFlat = 2;    // extra -damage on every incoming hit while at/above half HP
     // VANGUARD: an AGGRESSION/breach perk for a flanker who closes the distance. +crit ONLY when the
     // target is BOTH genuinely FLANKED (cover.Flanked — you out-positioned its cover) AND ADJACENT
     // (dist <= 1, point-blank). Distinct from Opportunist (+crit on a flank at ANY range) and Point
@@ -537,15 +539,15 @@ public static class PerkDef
         Perk.Marksman => "MARKSMAN",
         Perk.Deadeye => "DEADEYE",
         Perk.Tank => "TANK",
-        Perk.Sprinter => "SPRINTER",
-        Perk.Adrenal => "ADRENAL",
+        Perk.Sprinter => "OUTRUNNER",
+        Perk.Adrenal => "MOMENTUM",
         Perk.Executioner => "EXECUTIONER",
         Perk.Guardian => "GUARDIAN",
         Perk.CoolHeaded => "COOL-HEADED",
         Perk.Opportunist => "OPPORTUNIST",
         Perk.PointBlank => "POINT BLANK",
         Perk.GiantSlayer => "FIRST STRIKE",
-        Perk.Bulwark => "BULWARK",
+        Perk.Bulwark => "PLATING",
         Perk.Vanguard => "VANGUARD",
         _ => "PERK",
     };
@@ -560,15 +562,15 @@ public static class PerkDef
         Perk.Marksman => "MRK",
         Perk.Deadeye => "DDE",
         Perk.Tank => "TNK",
-        Perk.Sprinter => "SPR",
-        Perk.Adrenal => "ADR",
+        Perk.Sprinter => "OUT",
+        Perk.Adrenal => "MOM",
         Perk.Executioner => "EXC",
         Perk.Guardian => "GRD",
         Perk.CoolHeaded => "CLH",
         Perk.Opportunist => "OPP",
         Perk.PointBlank => "PBK",
         Perk.GiantSlayer => "FST",
-        Perk.Bulwark => "BLW",
+        Perk.Bulwark => "PLT",
         Perk.Vanguard => "VAN",
         _ => "?",
     };
@@ -583,15 +585,15 @@ public static class PerkDef
         Perk.Marksman => "+15 aim beyond 7 tiles",
         Perk.Deadeye => "+15 crit chance",
         Perk.Tank => "+3 max HP",
-        Perk.Sprinter => "+1 mobility",
-        Perk.Adrenal => "+1 ability charge each mission",
+        Perk.Sprinter => "+1 mobility, and moving never draws overwatch fire",
+        Perk.Adrenal => "a kill on your turn refunds +1 action (once per turn)",
         Perk.Executioner => "+25 crit vs targets below half HP (finisher)",
         Perk.Guardian => "overwatch reactions ignore the aim penalty + crit hard",
         Perk.CoolHeaded => "enemies shooting you take -8 aim; immune to Disoriented",
         Perk.Opportunist => "+18 crit vs flanked targets (out-positioned their cover)",
         Perk.PointBlank => "+20 crit within 2 tiles",
         Perk.GiantSlayer => "+15 crit vs full-HP targets (alpha strike on a fresh foe)",
-        Perk.Bulwark => "-2 more damage taken while hunkered (dig in to hold the line)",
+        Perk.Bulwark => "-2 damage from every hit while at/above half HP (ablative plating)",
         Perk.Vanguard => "+28 crit vs adjacent flanked targets (breach and finish)",
         _ => "",
     };

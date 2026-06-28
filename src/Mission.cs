@@ -83,7 +83,7 @@ public static class Mission
             u.Y = sp.y;
             u.Ammo = u.Weapon.Clip;
             u.Grenades = 1 + u.BonusGrenades + (u.HasPerk(Perk.Bandolier) ? 1 : 0);  // refill (+cache +Bandolier)
-            u.AbilityCharge = 1 + (u.HasPerk(Perk.Adrenal) ? 1 : 0);// refill (+Adrenal)
+            u.AbilityCharge = 1;                                   // refill the class signature ability
             u.ItemCharge = u.Item != ItemKind.None ? 1 : 0;        // utility item: 1 charge/mission
             u.Suppress = 0;
             u.OnOverwatch = false;
@@ -669,6 +669,7 @@ public static class Mission
                 while (g.InBounds(cx, cy) && cost[cx, cy] < 0 && guard++ < g.W + g.H)
                 {
                     if (g.Tiles[cx, cy] != TileType.Floor) g.Tiles[cx, cy] = TileType.Floor;
+                    g.Barrel[cx, cy] = false;   // a barrel keeps a tile non-walkable (IsFloor false) — clear it so the carve actually opens the lane
                     if (cx != from.X) cx += Math.Sign(from.X - cx);
                     else if (cy != from.Y) cy += Math.Sign(from.Y - cy);
                     else break;
