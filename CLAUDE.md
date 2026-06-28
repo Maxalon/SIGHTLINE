@@ -1096,7 +1096,59 @@ Before stopping:
 
 ### WIP NOTES
 
-> **PROGRAM "FRONTIER" — the campaign AROUND the fight: visual identity + strategic economy + build depth (LATEST; read first).**
+> **PROGRAM "RECKONING" — an AUDIT program: cut the bloat, re-legibilize, fix roots (LATEST; read first).**
+> Unlike the eight prior programs (which PILED features + patched symptoms while steering by a win-rate proxy),
+> this one QUESTIONED foundations. Five independent read-only auditors interrogated combat math, the run/meta
+> loop, content breadth, per-turn decision quality, and architecture+verification — every finding grounded in
+> code, not the devlog's self-report. Full audit + results: **`docs/AUDIT-2026.md`**. Branch
+> `claude/audit-game-systems-24ldmb`, **PR #61** (independently reviewed → SHIP; self-merged to main).
+> **META-DIAGNOSIS:** SIGHTLINE is a well-engineered skeleton made wide and complex by *accretion* — when a
+> system misbehaved, a NEW system was bolted on top (anti-turtle clock, crit-damping curve, rotating shop slate)
+> instead of fixing the root. Three root-fixing waves shipped, all verified (build 0/0, COMBATTEST/SAVETEST/
+> AITEST/ITEMTEST PASS, autoplay clean, flywheel-measured):
+> - **Wave 0 — fixed the broken VERIFICATION COMPASS (the deepest finding).** The project measured only "does a
+>   greedy bot win ~50% without crashing" — a proxy blind to fun, produced by a bot that never threw items and
+>   fell back to the turtle anti-pattern it fights. Now `SIGHTLINE_BALANCE` reports TEXTURE: a **greedy-vs-sloppy
+>   POLICY GAP** (swinginess proxy), per-turn **decision-richness** (meaningful-choices/turn) + **lead-swing**,
+>   the smart autopilot now exercises items/verbs, and the orphaned balance-JSON path is fixed. Harness-only
+>   (`Stats.cs`/`Program.cs`/`Game.cs`, gated behind Stats.Enabled/SmartPlay/SmartSloppy/NoPersist). New knobs
+>   `SIGHTLINE_BALANCE_SLOPPY`/`_JSON`. It immediately CONFIRMED 3 audit hypotheses empirically (Sharpshooter
+>   dominance, Evac/Escort drag, flat per-turn gradient ≈1.7 choices/turn).
+> - **Wave 1 — re-legibilized COMBAT + killed the false-choice crit cluster (keystone; corroborated by 2 audits).**
+>   `ComputeOdds` stacked ~17 crit modifiers through a 5-tier `DampedCritStack` curve → unpredictable crit%
+>   (violates "Reads clearly"). DELETED DampedCritStack (optional crit bonuses now sum FLAT); cut the flat
+>   exposed-crit **35→18** (weakens the rote expose-then-crit dominant line, shifts reward to HIT%/cover); STOPPED
+>   OFFERING Deadeye/Opportunist/PointBlank/Vanguard (4 redundant crit perks — **enum KEPT for save-compat**,
+>   removed only from `PerkDef.All` + class bias pools + their ComputeOdds branches); Executioner(finisher) vs
+>   First Strike(opener) remain as the build-defining crit pair; honest TOOLTIP shows real signed magnitudes
+>   (`EXPOSED +18 crit`, `AMBUSH +20 aim/+25 crit`, …). COMBATTEST genuinely rewritten to the flat-sum reality.
+>   (`Combat.cs`/`Unit.cs`/`Run.cs`/`Hud.cs`.)
+> - **Wave 2 — a RECOVERABLE run container + a REAL economy choice (root fixes).** (a) One-time mid-run
+>   **CHECKPOINT**: a squad wipe at mission≥3 is no longer instantly terminal — once per run, `TryReinforcements`
+>   rebuilds a fresh ROOKIE cadre (no rank/perks — the price of the wipe) and restarts the current mission,
+>   keeping Intel/heat/map; a 2nd wipe is a real loss; VIP/captive-lost stay instant. `Run.CheckpointUsed`
+>   (append-only DTO, round-trips, resets on new run). (b) **Economy DE-SEAT**: BALLISTIC PLATING no longer
+>   hard-seated first in every shop slate (autopilot bought it ~425x vs ~0) — it rotates in the pool; AutoShop
+>   rewritten to spend variedly. (`Game.cs`/`Run.cs`/`SaveGame.cs`.)
+> **MEASURED (new compass, heat 0, N=14):** run-completion **64%→68%**; RUN OVER losses 9→7; POLICY GAP +7
+> ("healthy slack"); shop spend went from PLATING-425-dominated to a real 6-item spread (PLATING 234 / MAG 66 /
+> STIMS 59 / MEDKIT 52 / FRAG 27); cut perks gone from picks, First Strike(18)/Executioner(13) healthy. Mission
+> win-rates 87–100% monotonic-ish.
+> **NEXT (evidence-backed, the compass now MEASURES these so you can prove a fix):** (1) per-turn decision
+> flatness (≈1.7 choices/turn — the deepest finding; the high-ceiling fix "firing doesn't end the turn" deserves
+> its own program); (2) SHARPSHOOTER class dominance (Sniper crit/range edge + squad-wide MARK); (3) content
+> de-bloat (Evac/Escort/Rescue = one objective in 3 costumes, Decapitate≈Eliminate, ~5 enemies are advW reskins,
+> ~20 arenas near-dup — concentrate toward the distinct, but don't strip replay variety); (4) extract a
+> `MissionContext` owning the 5 `Combat.*` statics (kills the recurring stale-static-bleed bug class). Known LOW
+> (harness-only/cosmetic): `TrySmartItem` smoke branch checks a unit's distance to itself (always 0).
+> **PROCESS:** 5 audit agents (parallel, read-only) → 3 dev waves (disjoint hot-file ownership: Wave0 Game/Program/
+> Stats, Wave1 Combat/Unit/Run/Hud, Wave2 Game/Run/SaveGame — Game.cs the bottleneck so Wave1∥Wave0 then Wave2
+> sequential) → 1 independent reviewer (SHIP). Orchestrator measured all balance centrally (devs build+self-test
+> only) to avoid slow contention. GOTCHA: smart-AI balance batches are ~12s/match — keep N≤14 and run them ALONE
+> (concurrent dev builds caused timeouts); an agent stalled on its own verify cmd (recover its on-disk work +
+> verify yourself, per prior-program notes).
+
+> **PROGRAM "FRONTIER" — the campaign AROUND the fight: visual identity + strategic economy + build depth.**
 > Fully-autonomous dev-team session: orchestrator + a 3-agent research fan-out (design-opportunity / code-audit /
 > visual-critique) + parallel isolated-worktree devs (strict one-owner-per-hot-file) + an independent reviewer +
 > the `SIGHTLINE_BALANCE` flywheel. Branch `claude/game-dev-orchestration-slwslm`, **PR #60**. Thesis (from the

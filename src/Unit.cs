@@ -520,13 +520,19 @@ public class Unit
 /// Names + one-line descriptions for promotion perks, and the perk pool.
 public static class PerkDef
 {
+    // OFFERED perks. The Perk ENUM stays append-only (save compat), but we no longer OFFER the
+    // redundant crit-perk cluster (Deadeye / Opportunist / PointBlank / Vanguard) — those were
+    // 4 overlapping conditional-crit picks (false choices). The kept crit pair is build-defining
+    // and mutually exclusive: EXECUTIONER (finisher, +crit vs sub-half-HP) vs FIRST STRIKE
+    // (opener, +crit vs full-HP). Cut perks keep their enum members + Name/Code/Desc so any
+    // already-saved soldier that owns one still loads and reads correctly.
     public static readonly Perk[] All =
     {
         Perk.LockOn, Perk.Hardened, Perk.Reflexes, Perk.Bandolier, Perk.CloseQuarters,
-        Perk.Marksman, Perk.Deadeye, Perk.Tank, Perk.Sprinter, Perk.Adrenal,
+        Perk.Marksman, Perk.Tank, Perk.Sprinter, Perk.Adrenal,
         Perk.Executioner, Perk.Guardian, Perk.CoolHeaded,
-        Perk.Opportunist, Perk.PointBlank, Perk.GiantSlayer,
-        Perk.Bulwark, Perk.Vanguard,
+        Perk.GiantSlayer,
+        Perk.Bulwark,
     };
 
     public static string Name(Perk p) => p switch

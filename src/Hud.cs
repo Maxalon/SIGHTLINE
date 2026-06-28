@@ -1036,13 +1036,21 @@ public static class Hud
         // attacker penalties — so advantages and warnings stay visually grouped.
         var flags = new System.Collections.Generic.List<(string text, Color col)>();
         // — already in the odds struct —
-        if (o.Flanked)   flags.Add(("! FLANKED", Pal.Accent));
-        if (o.Hunkered)  flags.Add(("- HUNKERED", Pal.Foe));          // target dug in: -25 aim, no crit
-        if (o.HighGround) flags.Add(("+ HIGH GROUND", Pal.Good));
-        if (o.SeesOver)  flags.Add(("+ OVER LOW COVER", Pal.Good));
-        if (o.Partial)   flags.Add(("~ PARTIAL COVER", Pal.TxtDim));
-        if (o.Steady)    flags.Add(("+ STEADY", Pal.Good));
-        if (o.Ambush)    flags.Add(("+ AMBUSH", Pal.Good));
+        // Every badge shows its SIGNED MAGNITUDE from the real Combat/Unit constants (now exact:
+        // crit is summed flat, no damping), so the player can read WHY the odds are what they are.
+        // Cover shows the HIT penalty it imposes (cover.Defense): LOW -20 / HIGH -40, halved when
+        // PARTIAL. EXPOSED (no cover) shows the +18 situational crit it grants the attacker.
+        if (o.Flanked)   flags.Add(("! FLANKED", Pal.Accent));         // cover negated + EXPOSED crit (below)
+        if (o.Hunkered)  flags.Add(("HUNKERED  -25 aim, no crit", Pal.Foe));   // target dug in
+        if (o.CoverLevel == 2 && !o.Partial) flags.Add(("HIGH COVER  -40 aim", Pal.Foe));
+        else if (o.CoverLevel == 2 && o.Partial) flags.Add(("PARTIAL HIGH  -20 aim", Pal.TxtDim));
+        else if (o.CoverLevel == 1 && !o.Partial) flags.Add(("LOW COVER  -20 aim", Pal.Foe));
+        else if (o.CoverLevel == 1 && o.Partial)  flags.Add(("PARTIAL LOW  -10 aim", Pal.TxtDim));
+        if (o.CoverLevel == 0 && !o.Hunkered) flags.Add(("EXPOSED  +18 crit", Pal.Good));
+        if (o.HighGround) flags.Add(($"HIGH GROUND  +{Combat.HighGroundAim} aim / +{Combat.HighGroundCrit} crit", Pal.Good));
+        if (o.SeesOver)  flags.Add(("OVER LOW COVER", Pal.Good));
+        if (o.Steady)    flags.Add(($"STEADY  +{Combat.SteadyAim} aim / +{Combat.SteadyCrit} crit", Pal.Good));
+        if (o.Ambush)    flags.Add(($"AMBUSH  +{Combat.AmbushAim} aim / +{Combat.AmbushCrit} crit", Pal.Good));
         // Surface the hidden streak-breaker: after consecutive misses this soldier's next
         // shot quietly aims truer (the bonus is in the roll, NOT in the HIT% shown). Naming it
         // "STEADYING" tells the player the safety net is working so a miss streak feels recoverable.
@@ -1059,27 +1067,27 @@ public static class Hud
             bool tgtSubHalf = d.MaxHp > 0 && d.Hp * 2 <  d.MaxHp;   // strictly below half (Executioner)
             bool selfHurt   = a.MaxHp > 0 && a.Hp * 2 <= a.MaxHp;   // attacker bloodied (Cold Blood)
 
-            // attacker advantages (green) — each shown only when its condition holds THIS shot
-            if (a.BondAura)                                   flags.Add(("+ BOND", Pal.Good));
-            if (a.HasTrait(Trait.Killer) && tgtHurt)          flags.Add(("+ KILLER", Pal.Good));
-            if (a.HasTrait(Trait.Vengeful) && a.AllyDown)     flags.Add(("+ VENGEFUL", Pal.Good));
-            if (a.HasTrait(Trait.ColdBlood) && selfHurt)      flags.Add(("+ COLD BLOOD", Pal.Good));
-            if (a.HasPerk(Perk.LockOn) && o.CoverLevel == 0)  flags.Add(("+ LOCK-ON", Pal.Good));
-            if (a.HasPerk(Perk.CloseQuarters) && dist <= Unit.CloseRange) flags.Add(("+ CLOSE QTRS", Pal.Good));
-            if (a.HasPerk(Perk.Marksman) && dist >= Unit.LongRange)       flags.Add(("+ MARKSMAN", Pal.Good));
-            if (a.HasPerk(Perk.Deadeye))                      flags.Add(("+ DEADEYE", Pal.Good));
-            if (a.HasPerk(Perk.Executioner) && tgtSubHalf)    flags.Add(("+ EXECUTIONER", Pal.Good));
-            if (a.HasPerk(Perk.Opportunist) && o.Flanked)     flags.Add(("+ OPPORTUNIST", Pal.Good));
-            if (a.HasPerk(Perk.PointBlank) && dist <= Unit.PointBlankRange) flags.Add(("+ POINT BLANK", Pal.Good));
-            if (a.HasPerk(Perk.GiantSlayer) && d.MaxHp > 0 && d.Hp >= d.MaxHp) flags.Add(("+ FIRST STRIKE", Pal.Good));
-            if (o.Crossfire)                                  flags.Add(("+ CROSSFIRE", Pal.Good));   // a squadmate threatens this target from a converging angle
-            if (o.Marked)                                     flags.Add(("+ MARKED", Pal.Good));      // a sharpshooter has designated this foe (squad-wide focus-fire bonus)
+            // attacker advantages (green) — each shown only when its condition holds THIS shot, with
+            // its real signed magnitude. NOTE: the redundant crit perks (Deadeye/Opportunist/Point
+            // Blank/Vanguard) are no longer offered AND no longer read by ComputeOdds, so they're
+            // intentionally absent here — only the kept Executioner / First Strike crit pair shows.
+            if (a.BondAura)                                   flags.Add(($"BOND  +{Unit.BondAim} aim", Pal.Good));
+            if (a.HasTrait(Trait.Killer) && tgtHurt)          flags.Add(($"KILLER  +{Unit.KillerAim} aim", Pal.Good));
+            if (a.HasTrait(Trait.Vengeful) && a.AllyDown)     flags.Add(($"VENGEFUL  +{Unit.VengefulAim} aim", Pal.Good));
+            if (a.HasTrait(Trait.ColdBlood) && selfHurt)      flags.Add(($"COLD BLOOD  +{Unit.ColdBloodCrit} crit", Pal.Good));
+            if (a.HasPerk(Perk.LockOn) && o.CoverLevel == 0)  flags.Add(($"LOCK-ON  +{Unit.PerkAim} aim", Pal.Good));
+            if (a.HasPerk(Perk.CloseQuarters) && dist <= Unit.CloseRange) flags.Add(($"CLOSE QTRS  +{Unit.PerkAim} aim", Pal.Good));
+            if (a.HasPerk(Perk.Marksman) && dist >= Unit.LongRange)       flags.Add(($"MARKSMAN  +{Unit.PerkAim} aim", Pal.Good));
+            if (a.HasPerk(Perk.Executioner) && tgtSubHalf)    flags.Add(($"EXECUTIONER  +{Unit.ExecutionerCrit} crit", Pal.Good));
+            if (a.HasPerk(Perk.GiantSlayer) && d.MaxHp > 0 && d.Hp >= d.MaxHp) flags.Add(($"FIRST STRIKE  +{Unit.FirstStrikeCrit} crit", Pal.Good));
+            if (o.Crossfire)                                  flags.Add(($"CROSSFIRE  +{Combat.CrossfireAim} aim / +{Combat.CrossfireCrit} crit", Pal.Good));   // a squadmate threatens this target from a converging angle
+            if (o.Marked)                                     flags.Add(($"MARKED  +{Combat.MarkAim} aim / +{Combat.MarkCrit} crit", Pal.Good));      // a sharpshooter has designated this foe (squad-wide focus-fire bonus)
             if (d.Pinned > 0)                                 flags.Add(("+ SUPPRESSED", Pal.Good));  // a gunner has pinned this foe (it shoots wild + can't dash)
 
-            // attacker penalties (red) — these quietly drag the hit% down
-            if (a.Suppress > 0)                               flags.Add(("- SUPPRESSED", Pal.Foe));
-            if (a.Wound > 0)                                  flags.Add(("- WOUNDED", Pal.Foe));
-            if (a.HasStatus(StatusKind.Disoriented))          flags.Add(("- DISORIENTED", Pal.Foe));
+            // attacker penalties (red) — these quietly drag the hit% down (signed magnitudes)
+            if (a.Suppress > 0)                               flags.Add(($"SUPPRESSED  -{a.Suppress} aim", Pal.Foe));
+            if (a.Wound > 0)                                  flags.Add(($"WOUNDED  -{Unit.WoundAim} aim", Pal.Foe));
+            if (a.HasStatus(StatusKind.Disoriented))          flags.Add(($"DISORIENTED  -{Unit.DisorientAim} aim", Pal.Foe));
 
             // target obscured in smoke (it's shootable — LoS clears the endpoint tile —
             // but harder to make out). Neutral tag: smoke is not in the hit% math.
@@ -1087,12 +1095,17 @@ public static class Hud
         }
 
         // Layout: one column when short, two when the badge list gets long, so a heavily
-        // perked veteran's tooltip stays compact instead of running tall.
+        // perked veteran's tooltip stays compact instead of running tall. Badges now carry signed
+        // magnitudes (e.g. "AMBUSH  +20 aim / +25 crit"), so the column is sized to the WIDEST badge
+        // at 12px (measured, capped) and the box widens to fit — legibility over compactness.
         const int hdr = 72, lineH = 17, fontFlag = 12, pad = 12;
-        bool twoCol = flags.Count > 5;
+        bool twoCol = flags.Count > 6;
         int rows = twoCol ? (flags.Count + 1) / 2 : flags.Count;
-        int colW = 132;                                    // width that fits "+ OVER LOW COVER" at 12px
-        int w = twoCol ? colW * 2 - 8 : 150;
+        int maxBadge = 150;
+        foreach (var f in flags)
+            maxBadge = Math.Max(maxBadge, (int)Raylib.MeasureTextEx(Cfg.Font, f.text, fontFlag, 1f).X);
+        int colW = maxBadge + 12;                          // measured width of the widest badge + gap
+        int w = twoCol ? colW * 2 - 8 : Math.Max(150, colW);
         int h = hdr + rows * lineH + (flags.Count > 0 ? 6 : 2);
 
         var m = Raylib.GetMousePosition();

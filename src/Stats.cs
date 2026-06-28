@@ -45,6 +45,15 @@ public static class Stats
         public int DamageDealt, DamageTaken;
         public bool Win;
         public string LossCause = "";
+        // ── decision-richness + swing instrumentation (balance harness only) ──────────
+        // PlayerTurns: number of player turns observed this mission. MeaningfulChoiceSum:
+        // total count of "near-best" candidate actions the smart bot weighed across those
+        // turns (a choice is "meaningful" when a runner-up's value is within ~12% of the
+        // best — i.e. the turn presented a real decision, not a forced move). Their ratio
+        // is a decision-richness proxy. LeadSwings: how many times the (sum-player-HP −
+        // sum-enemy-HP) lead changed sign during the match (a tension proxy); MaxSwing:
+        // the largest single-turn change in that lead.
+        public int PlayerTurns, MeaningfulChoiceSum, LeadSwings, MaxSwing;
         // attacker-class -> totals (player side only, for weapon/class balance)
         public readonly Dictionary<string, int> DamageByClass = new();
         public readonly Dictionary<string, int> ShotsByClass = new();
@@ -59,6 +68,9 @@ public static class Stats
         public int Heat, MissionsCleared;
         public bool Win;
         public string LossCause = "";
+        // "greedy" (optimal smart policy) or "sloppy" (smart policy + human-like error).
+        // Lets the report split win-rate by policy and surface the optimal-vs-sloppy GAP.
+        public string Policy = "greedy";
         public readonly List<string> PerksPicked = new();
         public readonly List<string> Purchases = new();   // shop items bought (incl. weapon mods)
         public readonly List<string> BoonsPicked = new();  // run-scoped doctrine/boon picks
@@ -78,10 +90,10 @@ public static class Stats
 
     public static void Reset() { Runs.Clear(); _run = null; _mission = null; }
 
-    public static void BeginRun(int heat)
+    public static void BeginRun(int heat, string policy = "greedy")
     {
         if (!Enabled) return;
-        _run = new RunRec { Heat = heat };
+        _run = new RunRec { Heat = heat, Policy = string.IsNullOrEmpty(policy) ? "greedy" : policy };
         Runs.Add(_run);
     }
 
@@ -94,6 +106,7 @@ public static class Stats
             Mission = mission, Objective = objective, Heat = heat,
             SquadStart = squad, EnemiesStart = enemies
         };
+        ResetLeadTracker();   // swings/lead are scoped to one match
     }
 
     // A resolved shot. atkTeam: 0 = player, 1 = enemy (matches Team enum ordinals).
@@ -161,6 +174,30 @@ public static class Stats
         _mission = null;
     }
 
+    // Per-player-turn snapshot from the balance autopilot (Game.SmartTurnTelemetry).
+    //   meaningfulChoices: how many near-best candidate actions the bot weighed this turn.
+    //   lead: (sum player HP) − (sum live enemy HP) right now. We track the lead's sign
+    //   changes (swings) and the largest per-turn delta across the mission.
+    static bool _haveLead; static int _lastLead;
+    public static void RecordPlayerTurn(int meaningfulChoices, int lead)
+    {
+        if (!Enabled || _mission == null) return;
+        _mission.PlayerTurns++;
+        _mission.MeaningfulChoiceSum += Math.Max(0, meaningfulChoices);
+        if (_haveLead)
+        {
+            int delta = Math.Abs(lead - _lastLead);
+            if (delta > _mission.MaxSwing) _mission.MaxSwing = delta;
+            // sign change in the lead (excluding 0→±, which isn't a true reversal)
+            if (Math.Sign(lead) != 0 && Math.Sign(_lastLead) != 0 && Math.Sign(lead) != Math.Sign(_lastLead))
+                _mission.LeadSwings++;
+        }
+        _lastLead = lead; _haveLead = true;
+    }
+    // Reset the per-mission lead tracker at each mission start (called from BeginMission's caller
+    // indirectly — we reset here to keep swings scoped to one match).
+    public static void ResetLeadTracker() { _haveLead = false; _lastLead = 0; }
+
     public static void EndRun(bool win, int missionsCleared, string lossCause)
     {
         if (!Enabled || _run == null) return;
@@ -185,6 +222,52 @@ public static class Stats
         int runWins = Runs.Count(r => r.Win);
         double avgCleared = Runs.Average(r => (double)r.MissionsCleared);
         sb.AppendLine($"\nRUN OUTCOMES:  win-rate {Pct(runWins, Runs.Count)}   avg missions cleared {avgCleared:0.0}");
+
+        // ── OPTIMAL vs SLOPPY GAP ────────────────────────────────────────────────────
+        // If the batch ran both policies, the gap between a near-optimal "greedy" bot and a
+        // human-error "sloppy" bot is a DIFFICULTY-SLACK signal: a large gap = swingy/unfair
+        // (small mistakes lose runs); both-high-and-close = healthy slack for human error.
+        var greedy = Runs.Where(r => r.Policy == "greedy").ToList();
+        var sloppy = Runs.Where(r => r.Policy == "sloppy").ToList();
+        if (greedy.Count > 0 && sloppy.Count > 0)
+        {
+            double gW = 100.0 * greedy.Count(r => r.Win) / greedy.Count;
+            double sW = 100.0 * sloppy.Count(r => r.Win) / sloppy.Count;
+            sb.AppendLine($"\nPOLICY GAP (optimal vs human-error):");
+            sb.AppendLine($"  greedy win-rate {gW,4:0}%  (n={greedy.Count})");
+            sb.AppendLine($"  sloppy win-rate {sW,4:0}%  (n={sloppy.Count})");
+            // A small |gap| (either sign) = the game tolerates human error (healthy slack); a
+            // large POSITIVE gap = sloppy play tanks the run (swingy/unforgiving). A large
+            // negative gap is just small-sample noise (sloppy got lucky) — gather more runs.
+            string verdict = gW - sW > 15 ? "swingy/unforgiving" : (Math.Abs(gW - sW) <= 15 ? "healthy slack" : "noisy (need more runs)");
+            sb.AppendLine($"  GAP {gW - sW,4:0} pts  ({verdict})");
+            // per-objective gap so a single brittle objective can't hide in the overall number
+            sb.AppendLine("  by objective (greedy / sloppy / gap):");
+            var objs = Runs.SelectMany(r => r.Missions.Select(m => m.Objective)).Distinct().OrderBy(o => o);
+            foreach (var o in objs)
+            {
+                var gm = greedy.SelectMany(r => r.Missions).Where(m => m.Objective == o).ToList();
+                var sm = sloppy.SelectMany(r => r.Missions).Where(m => m.Objective == o).ToList();
+                if (gm.Count == 0 || sm.Count == 0) continue;
+                double go = 100.0 * gm.Count(m => m.Win) / gm.Count;
+                double so = 100.0 * sm.Count(m => m.Win) / sm.Count;
+                sb.AppendLine($"    {o,-11}: {go,4:0}% / {so,4:0}% / gap {go - so,4:0}");
+            }
+        }
+
+        // ── DECISION RICHNESS + SWING (texture, not just win/loss) ────────────────────
+        // avg meaningful-choices/turn = how often the bot faced a real decision (a runner-up
+        // within ~12% of the best action). avg lead-swings/match = how often the HP-lead flipped
+        // (tension). High-and-textured > grindy-deterministic even at the same win-rate.
+        var tMissions = missions.Where(m => m.PlayerTurns > 0).ToList();
+        if (tMissions.Count > 0)
+        {
+            double choicesPerTurn = tMissions.Sum(m => (double)m.MeaningfulChoiceSum) / tMissions.Sum(m => (double)m.PlayerTurns);
+            double swingsPerMatch = tMissions.Average(m => (double)m.LeadSwings);
+            double maxSwing = tMissions.Average(m => (double)m.MaxSwing);
+            sb.AppendLine($"\nDECISION RICHNESS / SWING:");
+            sb.AppendLine($"  meaningful-choices/turn {choicesPerTurn:0.00}   lead-swings/match {swingsPerMatch:0.0}   avg max-swing {maxSwing:0.0}");
+        }
 
         // Run-completion by heat — the metric the Heat ladder is supposed to bend. The
         // per-MISSION win-rate below conflates "harder rung" with "how far the run got"
@@ -331,12 +414,37 @@ public static class Stats
             return l.Count == 0 ? 0.0 : Math.Round(100.0 * l.Count(m => m.Win) / l.Count, 1);
         }
 
+        // policy gap (greedy vs sloppy) for the machine-readable artifact
+        var greedy = Runs.Where(r => r.Policy == "greedy").ToList();
+        var sloppy = Runs.Where(r => r.Policy == "sloppy").ToList();
+        double greedyWin = greedy.Count == 0 ? 0.0 : Math.Round(100.0 * greedy.Count(r => r.Win) / greedy.Count, 1);
+        double sloppyWin = sloppy.Count == 0 ? 0.0 : Math.Round(100.0 * sloppy.Count(r => r.Win) / sloppy.Count, 1);
+
+        // decision-richness / swing aggregates
+        var tMissions = missions.Where(m => m.PlayerTurns > 0).ToList();
+        double choicesPerTurn = tMissions.Count == 0 ? 0.0
+            : Math.Round(tMissions.Sum(m => (double)m.MeaningfulChoiceSum) / Math.Max(1, tMissions.Sum(m => m.PlayerTurns)), 3);
+        double swingsPerMatch = tMissions.Count == 0 ? 0.0 : Math.Round(tMissions.Average(m => (double)m.LeadSwings), 2);
+        double avgMaxSwing = tMissions.Count == 0 ? 0.0 : Math.Round(tMissions.Average(m => (double)m.MaxSwing), 2);
+
         return new
         {
             runs = Runs.Count,
             missions = missions.Count,
             runWinRate = Runs.Count == 0 ? 0.0 : Math.Round(100.0 * Runs.Count(r => r.Win) / Runs.Count, 1),
             avgMissionsCleared = Runs.Count == 0 ? 0.0 : Math.Round(Runs.Average(r => (double)r.MissionsCleared), 2),
+            policyGap = new
+            {
+                greedyRuns = greedy.Count, greedyWinRate = greedyWin,
+                sloppyRuns = sloppy.Count, sloppyWinRate = sloppyWin,
+                gap = Math.Round(greedyWin - sloppyWin, 1)
+            },
+            decisionRichness = new
+            {
+                meaningfulChoicesPerTurn = choicesPerTurn,
+                leadSwingsPerMatch = swingsPerMatch,
+                avgMaxSwing = avgMaxSwing
+            },
             // Run-completion grouped by heat (the ladder's true shape — distinct from the
             // survivorship-skewed per-mission byHeat below).
             byHeatRun = Runs.GroupBy(r => r.Heat).OrderBy(g => g.Key).Select(g => new

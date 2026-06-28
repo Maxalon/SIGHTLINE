@@ -264,12 +264,15 @@ public class Game
     public void RefreshShopOffer()
     {
         var offer = new List<int>();
-        // (1) survivability guarantees, always present + always first (readable, never starved).
+        // (1) survivability guarantee: FIELD MEDKIT is always seated + first (healing is always
+        // reasonable, never starved). BALLISTIC PLATING is NO LONGER hard-seated — armor was the
+        // degenerate always-buy (the autopilot drained Intel into it every barracks, a non-decision).
+        // PLATING now joins the rotating pool, so it competes for slate slots and appears only
+        // sometimes — survivability-via-armor is a real choice, not a default.
         offer.Add(0);   // FIELD MEDKIT
-        offer.Add(4);   // BALLISTIC PLATING
 
         // (2) the rotating pool: everything else except prep (which is conditional + appended last).
-        var pool = new List<int> { 1, 2, 3 };                 // stims / training / frag cache
+        var pool = new List<int> { 1, 2, 3, 4 };              // stims / training / frag cache / BALLISTIC PLATING
         for (int i = 0; i < WeaponModDef.All.Length; i++) pool.Add(ModBase + i);  // weapon mods
 
         // deterministic shuffle off MapSeed+Mission so the slate is fixed per barracks + round-trips.
@@ -634,7 +637,9 @@ public class Game
         if (NoPersist && int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_HEAT"), out int hEnv)) heat = hEnv;
         _run.HeatLevel = Sightline.Heat.Clamp(heat);
         _run.LossStreak = _metaLossStreak;  // adaptive assist: carry the loss history into this run
-        Stats.BeginRun(_run.HeatLevel);     // balance telemetry (no-op unless Stats.Enabled)
+        // balance telemetry (no-op unless Stats.Enabled); tag the policy so the report can
+        // split greedy vs sloppy win-rates and surface the optimal-vs-error GAP.
+        Stats.BeginRun(_run.HeatLevel, SmartPlay && SmartSloppy ? "sloppy" : "greedy");
         Players = _run.Squad;
         int n = Util.Clamp(startAt, 1, Run.MaxMissions);
         if (n > 1) _run.JumpTo(n);           // harness: advance along the map to the requested op
@@ -2296,7 +2301,14 @@ public class Game
         if (Phase != Phase.PlayerTurn && Phase != Phase.EnemyTurn) return;
         if (_anims.Count > 0) return;
         var alivePlayers = AlivePlayers();
-        if (alivePlayers.Count == 0) { LoseRun("RUN OVER", $"The squad fell on mission {_run.Mission}."); return; }
+        if (alivePlayers.Count == 0)
+        {
+            // ONE-TIME CHECKPOINT: a squad wipe at/after the threshold mission triggers an emergency
+            // redeploy of fresh rookies to retry THIS mission (you lose your veterans, but the run
+            // survives). A second wipe — or a wipe before the threshold — is a real loss.
+            if (TryReinforcements()) return;
+            LoseRun("RUN OVER", $"The squad fell on mission {_run.Mission}."); return;
+        }
 
         if (Objective == Objective.Eliminate)
         {
@@ -2335,6 +2347,32 @@ public class Game
         }
     }
 
+    /// One-time mid-run recovery valve. Called only from the SQUAD-WIPE branch of CheckEnd (VIP/
+    /// captive-lost losses stay instant). Returns false — letting the wipe become a real loss — when
+    /// the checkpoint is already spent OR the wipe came too early (mission < 3: early failure ends
+    /// cleanly). Otherwise it burns the checkpoint, rebuilds the squad as a fresh emergency cadre of
+    /// rookies (keeping Intel / heat / map position), and RESTARTS the current mission from its start
+    /// (SetupMission re-checkpoints the save). The squad's veterans are gone — a bad mission is now
+    /// survivable but costly, not run-ending. Can fire at most once per run, so there's no loop risk.
+    bool TryReinforcements()
+    {
+        if (_run == null || _run.CheckpointUsed || _run.Mission < 3) return false;
+        _run.CheckpointUsed = true;
+
+        // fresh emergency squad: deploy as many rookies as this mission fields (fall back to the
+        // attrition floor of 3). Rookies carry no rank/perks/mods — that's the price of the wipe.
+        int cap = Math.Max(Run.AttritionFloor, Run.DeployCapFor(_run.Mission));
+        _run.Squad = new List<Unit>();
+        for (int i = 0; i < cap; i++) _run.Squad.Add(Mission.MakeRecruit());
+
+        // Intel, heat, and map position are untouched. Restart THIS mission from its start (the same
+        // setup the normal flow uses; it re-checkpoints the save). SetupMission sets its own
+        // MISSION banner, so override it AFTER with the reinforcements telegraph.
+        SetupMission(_run.Mission);
+        ShowBanner("REINFORCEMENTS DEPLOYED - hold the line.", true);
+        return true;
+    }
+
     // ---------------- player turn ----------------
     // Test-only autopilot (enabled via SIGHTLINE_AUTOPLAY): drives real player actions
     // so the whole loop can be exercised headlessly. Never enabled in normal play.
@@ -2346,6 +2384,26 @@ public class Game
     // deliberate ability/ambush use) — so headless games become a real balance gauge.
     // The default AutoStep() remains the path-coverage smoke test.
     public bool SmartPlay;
+
+    // SLOPPY policy flag (balance harness only; SIGHTLINE_BALANCE_SLOPPY or the batch's
+    // paired second policy). When set, SmartStep injects human-like error: ~15% of decisions
+    // skip overwatch / take a slightly-worse action, so the report can measure the optimal-
+    // vs-sloppy GAP (difficulty slack). Gated entirely behind SmartPlay; never affects normal
+    // play. The perturbation RNG (_sloppyRng) is seeded deterministically per run (SeedSloppy)
+    // so a batch is reproducible. A coin-flip helper that's a no-op unless sloppy is on.
+    public bool SmartSloppy;
+    System.Random _sloppyRng;
+    /// Seed the sloppy-policy RNG from the campaign index so runs are reproducible. Called by
+    /// the balance batch right after constructing the Game; harmless if SmartSloppy is off.
+    public void SeedSloppy(int seed) => _sloppyRng = new System.Random(seed);
+    /// True with probability pct ONLY when the sloppy policy is active — the single gate every
+    /// SmartStep perturbation routes through (so greedy play is byte-for-byte the optimal path).
+    bool Slip(int pct)
+    {
+        if (!SmartSloppy) return false;
+        _sloppyRng ??= new System.Random(12345);
+        return _sloppyRng.Next(100) < pct;
+    }
 
     // ════════════════════════════════════════════════════════════════════════════════
     // SmartStep — the COMPETENT headless autopilot (SIGHTLINE_SMARTPLAY / the balance
@@ -2366,9 +2424,18 @@ public class Game
     // exactly like AutoStep. The objective routing (Evac/Hack/Sabotage/Escort/Rescue/
     // Defend/Decapitate) is preserved — combat is just layered on top of it.
     // ════════════════════════════════════════════════════════════════════════════════
+    int _lastTelemetryTurn = -1;   // balance harness: record decision/swing once per player turn
+
     void SmartStep()
     {
         if (_anims.Count > 0 || Phase != Phase.PlayerTurn) return;
+        // Decision-richness + swing telemetry: record ONCE at the first idle SmartStep of each
+        // player turn (balance harness only; Stats early-outs unless Enabled). Cheap + read-only.
+        if (Stats.Enabled && _turnCount != _lastTelemetryTurn)
+        {
+            _lastTelemetryTurn = _turnCount;
+            Stats.RecordPlayerTurn(CountMeaningfulChoices(), CurrentLead());
+        }
         TryFreeCaptive();                       // free a captive a soldier already stands next to
         var u = Players.FirstOrDefault(p => p.CanAct);
         if (u == null) { EndPlayerTurn(); return; }
@@ -2499,6 +2566,112 @@ public class Game
             if (tgt != null && val > bestVal) { bestVal = val; best = p; }
         }
         return best;
+    }
+
+    // ── balance instrumentation (harness only) ──────────────────────────────────────────
+
+    /// Current HP "lead" = (sum of living soldier HP) − (sum of living, ACTIVE enemy HP).
+    /// Dormant pods don't count (they aren't in the fight yet). Sign-changes in this across a
+    /// match = lead swings (a tension proxy); fed to Stats.RecordPlayerTurn.
+    int CurrentLead()
+    {
+        int p = Players.Where(x => x.Alive && !x.IsVip).Sum(x => x.Hp);
+        int e = Enemies.Where(x => x.Alive && x.Active).Sum(x => x.Hp);
+        return p - e;
+    }
+
+    /// Decision-richness proxy for THIS player turn: across every soldier that can still act,
+    /// count how many distinct candidate shots have a value within ~12% of that soldier's best
+    /// shot (i.e. a real "which target?" choice existed, not a forced single option). Reuses
+    /// ShotValue/Combat.ComputeOdds (read-only — never mutates state). Cheap + bounded
+    /// (soldiers × live enemies). 0 when no soldier has ≥2 comparable options.
+    int CountMeaningfulChoices()
+    {
+        int total = 0;
+        foreach (var u in Players)
+        {
+            if (!u.Alive || !u.CanAct || u.IsVip || u.Ammo <= 0) continue;
+            // gather the value of every legal shot from where this soldier stands.
+            float best = 0f; int comparable = 0;
+            var vals = new List<float>();
+            foreach (var e in Enemies)
+            {
+                if (!e.Alive || (e == Vip && CaptiveLocked)) continue;
+                if (Util.TileDist(u.X, u.Y, e.X, e.Y) > u.Weapon.MaxRange) continue;
+                bool commanding = Grid.HeightAt(u.X, u.Y) - Grid.HeightAt(e.X, e.Y) >= 2;
+                if (!Grid.HasLineOfSight(u.X, u.Y, e.X, e.Y, commanding)) continue;
+                float v = ShotValue(Combat.ComputeOdds(Grid, u, e), e);
+                vals.Add(v);
+                if (v > best) best = v;
+            }
+            if (best <= 0f) continue;
+            foreach (var v in vals) if (v >= best * 0.88f) comparable++;   // within ~12% of best
+            if (comparable >= 2) total += comparable - 1;                  // count the real alternatives
+        }
+        return total;
+    }
+
+    /// Coverage hook (balance harness): occasionally throw the soldier's utility item when it's
+    /// clearly worthwhile and cheaply decidable, so item balance stops being invisible to the
+    /// flywheel. Conservative (never wastes a charge on a bad throw, never frags an ally) and
+    /// always SAFE (returns false unless it actually issued a throw — progress is guaranteed by
+    /// the caller's fallbacks). Items end the turn, so this is a deliberate commitment.
+    ///   SMOKE       — drop on a soldier badly exposed to 2+ guns (deny the enemy's sightlines).
+    ///   FLASH       — lob onto a cluster of 2+ active foes (disorients them; no ally in blast).
+    ///   INCENDIARY  — same cluster test (lays a fire field that denies ground + ignites foes).
+    ///   BARRICADE   — drop adjacent cover when the soldier is exposed and has nothing to shoot.
+    bool TrySmartItem(Unit u)
+    {
+        if (u.ItemCharge <= 0 || u.Item == ItemKind.None || u.ActionsLeft <= 0) return false;
+        Selected = u;   // IssueItem acts on Selected (already set by SmartStep, set again defensively)
+
+        switch (u.Item)
+        {
+            case ItemKind.Smoke:
+            {
+                // worth it only if this soldier is genuinely exposed (≥2 guns can hit it with no
+                // cover) AND has no good shot of its own — smoke its own tile to break the lanes.
+                if (TileExposure(u, u.X, u.Y) < 12f) return false;
+                var (tgt, _) = BestShotFrom(u, u.X, u.Y);
+                if (tgt != null) return false;                       // prefer shooting if we can
+                if (Util.TileDist(u.X, u.Y, u.X, u.Y) > ItemRange) return false;
+                if (!ItemTargetOk(u, u.X, u.Y)) return false;
+                IssueItem(u.X, u.Y); return true;
+            }
+            case ItemKind.Flash:
+            case ItemKind.Incendiary:
+            {
+                // lob onto the densest reachable cluster of ACTIVE foes (≥2), never near an ally.
+                int bx = -1, by = -1, best = 1;
+                foreach (var e in Enemies)
+                {
+                    if (!e.Alive || !e.Active) continue;
+                    if (Util.TileDist(u.X, u.Y, e.X, e.Y) > ItemRange || !ItemTargetOk(u, e.X, e.Y)) continue;
+                    if (!Grid.HasLineOfSight(u.X, u.Y, e.X, e.Y)) continue;
+                    int foes = Enemies.Count(o => o.Alive && o.Active && Util.ChebyDist(e.X, e.Y, o.X, o.Y) <= 1);
+                    bool ally = Players.Any(p => p.Alive && Util.ChebyDist(e.X, e.Y, p.X, p.Y) <= 1);
+                    if (ally || foes < 2) continue;
+                    if (foes > best) { best = foes; bx = e.X; by = e.Y; }
+                }
+                if (bx < 0) return false;
+                IssueItem(bx, by); return true;
+            }
+            case ItemKind.Barricade:
+            {
+                // drop cover when the soldier is exposed and has nothing to shoot — on an
+                // adjacent empty floor tile between it and the nearest foe.
+                if (TileExposure(u, u.X, u.Y) < 12f) return false;
+                var (tgt, _) = BestShotFrom(u, u.X, u.Y);
+                if (tgt != null) return false;
+                var foe = AliveEnemies().OrderBy(e => Util.TileDist(u.X, u.Y, e.X, e.Y)).FirstOrDefault();
+                if (foe == null) return false;
+                int dx = Math.Sign(foe.X - u.X), dy = Math.Sign(foe.Y - u.Y);
+                int tx = u.X + dx, ty = u.Y + dy;
+                if (Util.TileDist(u.X, u.Y, tx, ty) > ItemRange || !ItemTargetOk(u, tx, ty)) return false;
+                IssueItem(tx, ty); return true;
+            }
+        }
+        return false;
     }
 
     // ── objective sub-routines ────────────────────────────────────────────────────────
@@ -2684,8 +2857,15 @@ public class Game
         // 1 — deliberate ability prep that improves THIS turn's outcome.
         if (PrepAbility(u)) return;
 
-        // 2 — best shot by expected value (only when it's actually worth firing).
-        if (TakeBestShot(u)) return;
+        // 2 — best shot by expected value (only when it's actually worth firing). SLOPPY: ~15%
+        //     of the time mis-judge and skip an otherwise-good shot (a human hesitation) — falls
+        //     through to a worse action below, so the GAP measures the cost of that error.
+        if (!Slip(15) && TakeBestShot(u)) return;
+
+        // 2b — TOY COVERAGE (harness): occasionally commit a utility item when it's clearly the
+        //      right call (smoke when pinned in the open, flash/incendiary a cluster, drop cover).
+        //      Ends the turn, so it comes after shooting but before the positional fallbacks.
+        if (TrySmartItem(u)) return;
 
         // 3 — out of ammo: reload now so next step can fire.
         if (u.Ammo == 0 && u.ActionsLeft > 0) { DoReload(); return; }
@@ -2697,7 +2877,8 @@ public class Game
         //     nearest foe (cover + flank − exposure). If we're already well-placed and a foe
         //     is in sight, hold overwatch; otherwise keep closing. Always ends in hunker.
         if (SmartApproach(u)) return;
-        if (HoldOverwatch(u)) return;
+        // SLOPPY: ~15% of the time forget to set overwatch (a common human omission).
+        if (!Slip(15) && HoldOverwatch(u)) return;
         if (SmartReposition(u)) return;     // shuffle into the best adjacent cover if any
         DoHunker();                         // guarantees progress
     }
@@ -2792,6 +2973,26 @@ public class Game
         return (best, bestVal);
     }
 
+    /// The 2nd-highest-value targetable foe from the soldier's current tile, or null if it has
+    /// fewer than two shots. Used ONLY by the sloppy policy to model a human mis-prioritisation
+    /// (it's a worse-but-legal shot, so the turn still progresses). Read-only.
+    Unit SecondBestTarget(Unit u)
+    {
+        if (u.Ammo <= 0) return null;
+        Unit best = null, second = null; float bv = float.NegativeInfinity, sv = float.NegativeInfinity;
+        foreach (var e in Enemies)
+        {
+            if (!e.Alive || (e == Vip && CaptiveLocked)) continue;
+            if (Util.TileDist(u.X, u.Y, e.X, e.Y) > u.Weapon.MaxRange) continue;
+            bool commanding = Grid.HeightAt(u.X, u.Y) - Grid.HeightAt(e.X, e.Y) >= 2;
+            if (!Grid.HasLineOfSight(u.X, u.Y, e.X, e.Y, commanding)) continue;
+            float v = ShotValue(Combat.ComputeOdds(Grid, u, e), e);
+            if (v > bv) { sv = bv; second = best; bv = v; best = e; }
+            else if (v > sv) { sv = v; second = e; }
+        }
+        return second;
+    }
+
     /// Fire the best expected-value shot the soldier can take from where it stands — but
     /// only if that shot is worth taking (a desperate 3% poke that ends the turn is usually
     /// worse than repositioning). Returns true if it shot.
@@ -2826,6 +3027,9 @@ public class Game
         if (u.Ammo <= 0) return false;
         if (TryShootBarrel(u)) return true;     // a 2+-enemy barrel beats any single shot
         var (tgt, val) = BestShotFrom(u, u.X, u.Y);
+        // SLOPPY: ~15% of the time aim at the 2nd-best target instead (a human mis-prioritisation)
+        // — still a real shot, just a worse pick, so the run is harder but never stalls.
+        if (Slip(15)) { var alt = SecondBestTarget(u); if (alt != null) tgt = alt; }
         if (tgt == null) return false;
         var odds = Combat.ComputeOdds(Grid, u, tgt);
         // worth firing? a hit chance floor OR a likely finisher (a near-certain kill of a
@@ -5314,42 +5518,42 @@ public class Game
         if (Raylib.CheckCollisionPointRec(m, Hud.ShopProceed)) { _shopDone = true; Audio.Play("turn"); }
     }
 
-    // autopilot: spend Intel sensibly so the BALANCE analytics reflect the new power curve.
-    // Priority: (1) field-treat a wounded/hurt soldier (cheap survivability), then (2) sink the
-    // rest into PERSISTENT WEAPON UPGRADES — the reward sink that lets a leveled squad out-gun a
-    // fresh one and outpace attrition. Greedy by cheapest affordable so more upgrades land per
-    // barracks. ALWAYS terminates: every DoPurchase that fires reduces Intel by a positive cost,
-    // and the cap bounds the loop regardless (defensive against a future zero-cost item).
+    // autopilot: spend Intel as a varied, realistic economy so the BALANCE analytics reflect a real
+    // player's spread rather than the old degenerate "buy armor to zero" loop. Each pass buys the
+    // SINGLE most useful affordable item it can and STOPS when nothing useful/affordable remains:
+    //   1) heal — if a soldier is hurt or wounded (cheap, high-value survivability),
+    //   2) armor (PLATING) — if a soldier is still under the armor cap (compounding survivability),
+    //   3) else the cheapest other beneficial item in the slate (weapon mod / frag / stims).
+    // Perk pick (2, needs the chooser flow) and COUNTER-PREP (a situational call) are left to the
+    // player. ALWAYS terminates: every DoPurchase that fires reduces Intel by a positive cost, and
+    // the iteration cap bounds the loop defensively against any future zero-cost item.
     void AutoShop()
     {
         var offer = ShopOffer();        // buy only from this barracks' rotating slate
 
-        if (offer.Contains(0) && CanBuy(0)) DoPurchase(0);   // one heal pass if someone's hurt/wounded
-        // Survivability first: plating (item 4) compounds across the run and is the documented
-        // anti-attrition lever, so prefer it over flat firepower while it's offered + affordable.
-        for (int guard = 0; guard < 8 && offer.Contains(4) && CanBuy(4); guard++)
-        {
-            int before0 = _run.Intel;
-            DoPurchase(4);
-            if (_run.Intel >= before0) break;
-        }
-
         for (int guard = 0; guard < 40; guard++)
         {
-            // cheapest affordable PERMANENT upgrade WITHIN THE OFFER (weapon mods / plating / frag /
-            // stims). Skip the heal (0, done) and the perk pick (2, needs the chooser flow) and PREP
-            // (situational player call). Greedy by cost so the leveled squad sinks intel into the
-            // reward sink AND the analytics show a spread across whatever the slate offered.
-            int best = -1, bestCost = int.MaxValue;
-            foreach (int i in offer)
+            int pick = -1;
+            // 1) heal a hurt/wounded soldier first (only ever needed once per pass — CanBuy(0)
+            //    goes false once everyone is topped up).
+            if (offer.Contains(0) && CanBuy(0)) pick = 0;
+            // 2) else top up armor while a soldier is under the cap and it's on this slate.
+            else if (offer.Contains(4) && CanBuy(4)) pick = 4;
+            else
             {
-                if (i == 0 || i == 2) continue;   // heal done; perk pick is a player choice
-                if (IsPrepItem(i)) continue;      // COUNTER-PREP is a situational player call, not an auto-buy
-                if (CanBuy(i) && ShopCostAt(i) < bestCost) { best = i; bestCost = ShopCostAt(i); }
+                // 3) else the cheapest other beneficial item in the slate (weapon mods / frag /
+                //    stims). Skip the perk pick (2) and PREP (situational player calls).
+                int bestCost = int.MaxValue;
+                foreach (int i in offer)
+                {
+                    if (i == 0 || i == 2 || i == 4) continue;
+                    if (IsPrepItem(i)) continue;
+                    if (CanBuy(i) && ShopCostAt(i) < bestCost) { pick = i; bestCost = ShopCostAt(i); }
+                }
             }
-            if (best < 0) break;        // nothing affordable/useful left in the slate
+            if (pick < 0) break;        // nothing useful/affordable left
             int before = _run.Intel;
-            DoPurchase(best);
+            DoPurchase(pick);
             if (_run.Intel >= before) break;   // safety: never spin on a no-op purchase
         }
         _shopDone = true;

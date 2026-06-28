@@ -265,6 +265,14 @@ public class Run
     public List<Unit> Squad = new();
     public int Mission;                       // current mission number (1-based)
     public int Intel;                         // requisition currency spent in the barracks shop
+    // ---- one-time mid-run checkpoint ("REINFORCEMENTS") ----
+    // The 6-mission single-life ironman is a geometric-collapse container: one bad mission ends the
+    // whole run with zero recovery surface. This flag grants ONE emergency redeploy of fresh rookies
+    // to retry the current mission after a squad wipe (at/after a threshold mission) — a bad mission
+    // becomes survivable-but-costly (you lose your veterans) instead of run-ending. Set true the
+    // moment the checkpoint fires, so a SECOND wipe is a real loss. Persisted (append-only DTO field;
+    // old saves default false). Reset in Start().
+    public bool CheckpointUsed;
     public int HeatLevel;                     // chosen Heat/Ascension difficulty (0..Heat.Max); persisted in the run save
     public List<string> Fallen = new();       // names of KIA soldiers
     // Run-end MEMORIAL (presentation only): a richer KIA record (full identity + rank/class/
@@ -561,6 +569,7 @@ public class Run
         Squad = drafted ?? Sightline.Mission.NewRunSquad();
         Mission = 0;
         Intel = 0;
+        CheckpointUsed = false;   // the one-time REINFORCEMENTS redeploy is fresh each run
         Fallen.Clear();
         Report.Clear();
         PendingPerks.Clear();
@@ -859,17 +868,17 @@ public class Run
     static Perk[] ClassLine(string cls) => (cls ?? "").ToUpperInvariant() switch
     {
         // Precision marksmen: long-range aim + crit + a defensive overwatch lean.
-        "SHARPSHOOTER" => new[] { Perk.Marksman, Perk.Deadeye, Perk.LockOn, Perk.Executioner,
+        "SHARPSHOOTER" => new[] { Perk.Marksman, Perk.LockOn, Perk.Executioner,
                                   Perk.Guardian, Perk.Reflexes },
-        // Close-range bruisers: point-blank crit + alpha-strike finishers + mobility to close.
-        "ASSAULT"      => new[] { Perk.CloseQuarters, Perk.PointBlank, Perk.Vanguard, Perk.Opportunist,
-                                  Perk.GiantSlayer, Perk.Bandolier },
+        // Close-range bruisers: alpha-strike finisher + mobility to close + extra ordnance.
+        "ASSAULT"      => new[] { Perk.CloseQuarters, Perk.GiantSlayer, Perk.Sprinter,
+                                  Perk.Bandolier, Perk.Adrenal },
         // Heavy weapons: durability + reaction-fire control to anchor the line.
         "GUNNER"       => new[] { Perk.Tank, Perk.Bulwark, Perk.Hardened, Perk.Reflexes,
                                   Perk.Guardian, Perk.LockOn, Perk.CoolHeaded },
-        // Skirmishers: speed + flanking crit + first-contact alpha.
-        "RANGER"       => new[] { Perk.Sprinter, Perk.Opportunist, Perk.PointBlank, Perk.Vanguard,
-                                  Perk.GiantSlayer, Perk.CloseQuarters },
+        // Skirmishers: speed + first-contact alpha + closing aim.
+        "RANGER"       => new[] { Perk.Sprinter, Perk.GiantSlayer, Perk.CloseQuarters,
+                                  Perk.LockOn, Perk.Adrenal },
         // Field medics: stay alive + keep the kit topped up to support the squad.
         "CORPSMAN"     => new[] { Perk.Hardened, Perk.Tank, Perk.CoolHeaded, Perk.Bandolier,
                                   Perk.Adrenal },
