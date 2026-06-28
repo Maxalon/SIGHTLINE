@@ -224,14 +224,16 @@ public static class Combat
         }
         hit = Util.Clamp(hit, 3, 95);
 
-        // BASE crit: the weapon's intrinsic crit + the exposed/flanked situational +35. These are
-        // NOT damped — the +35 is the core "punish an out-of-cover foe" lever every shot reasons
-        // about. Everything OPTIONAL (ambush / high-ground / braced + every crit PERK / trait / boon)
-        // is collected into `bonuses` and given DIMINISHING RETURNS via DampedCritStack below, so a
-        // 3rd/4th crit perk still adds marginal value instead of being inert against the 100 clamp
-        // (the false-choice fix). A single optional bonus is unchanged (top tier scales at 1.0).
+        // BASE crit: the weapon's intrinsic crit + the exposed situational bonus. Every OPTIONAL crit
+        // source (ambush / high-ground / braced + the crit PERKS / traits / boons) is summed FLAT below
+        // — no diminishing-returns curve — so the displayed crit% is a predictable sum the player can
+        // reason about (the legibility fix; the old DampedCritStack made the number unpredictable).
+        // The exposed bonus is +18 (was +35): a smaller, still-meaningful punish for an out-of-cover
+        // foe. Cutting it shifts the reward for positioning toward HIT% (cover defense lowers their
+        // hit) and away from a rote expose-then-crit dominant strategy — crit becomes a build payoff,
+        // not a free reward for any uncovered shot.
         int crit = a.Weapon.CritBase;
-        if (coverLevel == 0) crit += 35;        // exposed / flanked target (base situational)
+        if (coverLevel == 0) crit += 18;        // exposed / flanked target (base situational)
 
         var critBonuses = new System.Collections.Generic.List<int>();
         void AddCrit(int v) { if (v > 0) critBonuses.Add(v); }
@@ -239,30 +241,14 @@ public static class Combat
         if (a.FiredFromConcealment) AddCrit(AmbushCrit);  // ambush bonus: caught off-guard
         if (highGround) AddCrit(HighGroundCrit);  // shooting down rewards crits
         if (a.Steady) AddCrit(SteadyCrit);        // braced shot also crits harder
-        if (a.HasPerk(Perk.Deadeye)) AddCrit(Unit.PerkCrit);   // Deadeye: flat crit, any target
-        // Executioner: a FINISHER — bigger crit than Deadeye, but only vs sub-half-HP prey. So it
-        // BEATS Deadeye against the wounded and LOSES against the healthy (a real choice, not a subset).
+        // Executioner: a FINISHER — +crit only vs sub-half-HP prey (the opposite end from First Strike).
         if (a.HasPerk(Perk.Executioner) && d.MaxHp > 0 && d.Hp * 2 < d.MaxHp) AddCrit(Unit.ExecutionerCrit);
-        // Opportunist: a FLANKER'S FINISHER — +crit ONLY vs a genuinely FLANKED target (the foe HAD
-        // adjacent cover but you maneuvered to an angle it doesn't protect; cover.Flanked == true).
-        // Deliberately NOT "any no-cover target" (that's LockOn's +AIM gate) — Opportunist rewards the
-        // *move that turns a covered foe's flank*, so it fires when LockOn would NOT (a foe in the open,
-        // never in cover, isn't a flank). Distinct trigger, distinct payoff (crit, not aim).
-        if (a.HasPerk(Perk.Opportunist) && flanked) AddCrit(Unit.OpportunistCrit);
-        // Vanguard: a BREACHER'S FINISHER — +crit ONLY vs a target that is BOTH genuinely FLANKED
-        // (you out-positioned its cover) AND ADJACENT (dist <= 1, in its face). The tightest gate of
-        // the crit perks (Opportunist needs only the flank at any range; Point Blank needs only the
-        // range vs any target) — so it pays the biggest crit. Rewards closing the distance to finish
-        // a flanked foe; goes inert at range or against an unflanked target.
-        if (a.HasPerk(Perk.Vanguard) && flanked && dist <= Unit.VanguardRange) AddCrit(Unit.VanguardCrit);
         // First Strike (enum member GiantSlayer, reworked): an ALPHA-STRIKE/OPENER — +crit vs a target
         // still at FULL HP. Rewards focus-firing a FRESH enemy (the first shot that connects); it stops
         // helping the instant the target is chipped, so it pairs with picking targets, not finishing them
-        // (the opposite end from Executioner's sub-half-HP crit). Fires on ~every new engagement, fodder
-        // or boss alike — so it's a live choice, not the old dead "MaxHp >= 12" gate (see Unit.FirstStrikeCrit).
+        // (the opposite end from Executioner's sub-half-HP crit). Executioner vs First Strike is the
+        // kept, build-defining, mutually-exclusive crit PAIR — a real choice, not a redundant stack.
         if (a.HasPerk(Perk.GiantSlayer) && d.MaxHp > 0 && d.Hp >= d.MaxHp) AddCrit(Unit.FirstStrikeCrit);
-        // Point Blank: a CLOSE-RANGE CRIT build — +crit within 2 tiles (vs CloseQuarters' +aim within 4).
-        if (a.HasPerk(Perk.PointBlank) && dist <= Unit.PointBlankRange) AddCrit(Unit.PointBlankCrit);
         // Guardian: overwatch LETHALITY. A reaction shot (ReactedThisTurn is set by Game right before
         // it Resolves this shot) crits hard — Reflexes makes overwatch reliable, Guardian makes it lethal.
         if (a.HasPerk(Perk.Guardian) && IsOverwatchReaction(a)) AddCrit(Unit.GuardianReactCrit);
@@ -273,7 +259,7 @@ public static class Combat
             if (HasRunBoon(Sightline.Boon.Fervor) && IsOverwatchReaction(a)) AddCrit(BoonFervorCrit);
             if (HasRunBoon(Sightline.Boon.Executioners) && d.MaxHp > 0 && d.Hp * 2 < d.MaxHp) AddCrit(BoonExecCrit);
         }
-        crit += DampedCritStack(critBonuses);   // diminishing returns on the OPTIONAL stack
+        foreach (var b in critBonuses) crit += b;   // FLAT sum: crit% is a predictable total
 
         // Crossfire + faction crit stay FLAT (outside the damped stack): they're symmetric/enemy
         // situational rules whose self-tests assert an exact +CrossfireCrit / +LegionCloseCrit delta.
@@ -371,28 +357,6 @@ public static class Combat
     /// it's never set for the hovered-aim preview of a selected, still-acting soldier. Guardian
     /// keys its overwatch-only bonuses off this without needing a Game.cs edit.
     static bool IsOverwatchReaction(Unit a) => a.ReactedThisTurn;
-
-    // Per-tier multipliers for the stacked OPTIONAL crit bonuses (largest first). The 1st (biggest)
-    // bonus lands at full value so a single crit perk is NEVER nerfed — this is purely an anti-STACK
-    // measure that can't crater player power. The 2nd is worth 80%, the 3rd 60%, the 4th 45%, any
-    // beyond that 30% — so a 3rd/4th crit perk still adds a few real points (no dead pick) while no
-    // combo trivially saturates to 100. Conservative on purpose: the first bonus is untouched.
-    static readonly float[] CritStackScale = { 1.0f, 0.8f, 0.6f, 0.45f, 0.3f };
-
-    /// Sum optional crit bonuses with DIMINISHING RETURNS: sort descending, scale each by CritStackScale
-    /// (largest at full weight). Keeps additional crit perks marginally useful while stopping the additive
-    /// stack from trivially hitting the 100 clamp. Empty -> 0; a single entry is returned unchanged (top
-    /// tier is 1.0), so single-perk COMBATTEST expectations still hold exactly.
-    static int DampedCritStack(System.Collections.Generic.List<int> bonuses)
-    {
-        if (bonuses.Count == 0) return 0;
-        if (bonuses.Count == 1) return bonuses[0];
-        bonuses.Sort((x, y) => y.CompareTo(x));   // descending: biggest bonus gets full weight
-        float total = 0f;
-        for (int i = 0; i < bonuses.Count; i++)
-            total += bonuses[i] * (i < CritStackScale.Length ? CritStackScale[i] : CritStackScale[CritStackScale.Length - 1]);
-        return (int)MathF.Round(total);
-    }
 
     /// INCOMING-DAMAGE REDUCTION — the ONE source of truth for every incoming-hit path: Resolve's
     /// hit + graze branches AND the grenade blast in Anim (which all call this with the defender).
@@ -762,31 +726,29 @@ public static class Combat
             if (oddsNoStreak.HitChance != oddsZeroMisses.HitChance) fails.Add("streakVisibleInOdds");
         }
 
-        // PERK BALANCE: Executioner must now BEAT Deadeye vs a sub-half-HP target (finisher),
-        // and LOSE to Deadeye vs a healthy target (so it's a real choice, not a dominated subset).
+        // PERK BALANCE: the kept, mutually-exclusive crit PAIR is Executioner (finisher: +crit vs
+        // sub-half-HP) vs First Strike (opener: +crit vs full-HP). Each fires under its OWN condition
+        // and is a no-op otherwise, so the pick is a real choice (one for finishing, one for opening).
         {
             var gP = new Grid();   // no cover -> identical baseline for both perks
             var baseA = new Unit { Aim = 65, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 3, Y = 5 };
-            var ddeA  = new Unit { Aim = 65, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 3, Y = 5 };
+            var fsA   = new Unit { Aim = 65, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 3, Y = 5 };
             var excA  = new Unit { Aim = 65, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 3, Y = 5 };
-            ddeA.Perks.Add(Perk.Deadeye);
+            fsA.Perks.Add(Perk.GiantSlayer);    // FIRST STRIKE
             excA.Perks.Add(Perk.Executioner);
 
-            // Wounded target (below half HP): Executioner's bonus applies and exceeds Deadeye's flat one.
+            // Wounded target (below half HP): Executioner's bonus applies, First Strike is inert.
             var wounded = new Unit { Aim = 65, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 7, Y = 5, Hp = 2, MaxHp = 10 };
             int baseCritW = ComputeOdds(gP, baseA, wounded).CritChance;
-            int ddeCritW  = ComputeOdds(gP, ddeA,  wounded).CritChance;
             int excCritW  = ComputeOdds(gP, excA,  wounded).CritChance;
-            if (ddeCritW != baseCritW + Unit.PerkCrit) fails.Add("deadeyeFlat");
             if (excCritW != baseCritW + Unit.ExecutionerCrit) fails.Add("execBonus");
-            if (excCritW <= ddeCritW) fails.Add("execNotBeatDeadeyeOnWounded");   // the un-domination check
+            if (ComputeOdds(gP, fsA, wounded).CritChance != baseCritW) fails.Add("firstStrikeWoundedNoOp");
 
-            // Healthy target (full HP): Executioner does nothing, so Deadeye wins (real trade-off).
+            // Healthy target (full HP): First Strike's bonus applies, Executioner is inert.
             var healthy = new Unit { Aim = 65, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 7, Y = 5, Hp = 10, MaxHp = 10 };
-            int ddeCritH = ComputeOdds(gP, ddeA, healthy).CritChance;
-            int excCritH = ComputeOdds(gP, excA, healthy).CritChance;
-            if (excCritH != ComputeOdds(gP, baseA, healthy).CritChance) fails.Add("execHealthyNoOp");
-            if (ddeCritH <= excCritH) fails.Add("deadeyeNotBeatExecOnHealthy");
+            int baseCritH = ComputeOdds(gP, baseA, healthy).CritChance;
+            if (ComputeOdds(gP, excA, healthy).CritChance != baseCritH) fails.Add("execHealthyNoOp");
+            if (ComputeOdds(gP, fsA, healthy).CritChance != baseCritH + Unit.FirstStrikeCrit) fails.Add("firstStrikeHealthyBonus");
         }
 
         // COOL-HEADED (reworked): a DEFENDER composure perk. (1) An attacker shooting a CoolHeaded
@@ -879,61 +841,24 @@ public static class Combat
             grd.ReactedThisTurn = false;
         }
 
-        // BUILD-VARIETY PERKS (Opportunist / Point Blank / First Strike): each is a pure ComputeOdds
-        // read that fires ONLY under its condition and NOT otherwise, and is DISTINCT from the others.
+        // KEPT CRIT PERK (First Strike, enum member GiantSlayer): a pure ComputeOdds read that fires
+        // ONLY vs a FULL-HP target and is a no-op once the target is chipped. The opener half of the
+        // mutually-exclusive crit pair (Executioner is the finisher, tested above). The four redundant
+        // conditional-crit perks (Deadeye / Opportunist / Point Blank / Vanguard) are no longer offered
+        // and no longer read by ComputeOdds, so they're intentionally not tested here.
         {
             var gV = new Grid();
             Unit Perked(Perk p) { var u = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 3, Y = 5 }; u.Perks.Add(p); return u; }
             Unit Plain() => new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 3, Y = 5 };
 
-            // ---- OPPORTUNIST: +crit ONLY on a GENUINE FLANK (foe HAD cover, hit from an unprotected
-            // angle), NOT on a merely-exposed (open-ground) foe, NOT on a covered foe ----
-            // Genuine flank: attacker at x=3 (west), target at (7,5) with cover on its EAST side (x=8) —
-            // the facing (west) neighbour is open so cover.Level collapses to 0 but cover.Flanked is true.
-            var gFlank = new Grid(); gFlank.Tiles[8, 5] = TileType.HighCover;
-            var flankFoe = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 7, Y = 5, Hp = 10, MaxHp = 10 };
-            var oppFlankOdds = ComputeOdds(gFlank, Perked(Perk.Opportunist), flankFoe);
-            if (!oppFlankOdds.Flanked) fails.Add("opportunistFlankSetup");        // guard: the foe really is flanked (had cover)
-            if (oppFlankOdds.CritChance != Util.Clamp(ComputeOdds(gFlank, Plain(), flankFoe).CritChance + Unit.OpportunistCrit, 0, 100)) fails.Add("opportunistFlankFires");
-            // Merely exposed (open ground, NO adjacent cover => not a flank): Opportunist must NOT fire,
-            // even though coverLevel is also 0 here. This is the LockOn-vs-Opportunist differentiation.
-            var exposed = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 7, Y = 5, Hp = 10, MaxHp = 10 };
-            var oppExpOdds = ComputeOdds(gV, Perked(Perk.Opportunist), exposed);
-            if (oppExpOdds.CoverLevel != 0 || oppExpOdds.Flanked) fails.Add("opportunistExposedSetup");  // guard: exposed, NOT flanked
-            if (oppExpOdds.CritChance != ComputeOdds(gV, Plain(), exposed).CritChance) fails.Add("opportunistExposedNoOp");
-            // Covered target (full high cover on the facing side, coverLevel==2): Opportunist must NOT fire.
-            var gCov = new Grid(); gCov.Tiles[5, 5] = TileType.HighCover;
-            var coveredFoe = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 6, Y = 5, Hp = 10, MaxHp = 10 };
-            var oppCovOdds = ComputeOdds(gCov, Perked(Perk.Opportunist), coveredFoe);
-            if (oppCovOdds.CoverLevel == 0) fails.Add("opportunistCoverSetup");   // guard: the foe really is covered
-            if (oppCovOdds.CritChance != ComputeOdds(gCov, Plain(), coveredFoe).CritChance) fails.Add("opportunistCoveredNoOp");
-
-            // ---- POINT BLANK: +crit within 2 tiles; nothing beyond (same NO-COVER state both times) ----
-            var pbClose = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 5, Y = 5, Hp = 10, MaxHp = 10 };  // dist 2 from x=3
-            var pbFar   = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 8, Y = 5, Hp = 10, MaxHp = 10 };  // dist 5 from x=3
-            int pbCloseOn  = ComputeOdds(gV, Perked(Perk.PointBlank), pbClose).CritChance;
-            int pbCloseOff = ComputeOdds(gV, Plain(),               pbClose).CritChance;
-            if (pbCloseOn != Util.Clamp(pbCloseOff + Unit.PointBlankCrit, 0, 100)) fails.Add("pointBlankClose");
-            if (ComputeOdds(gV, Perked(Perk.PointBlank), pbFar).CritChance != ComputeOdds(gV, Plain(), pbFar).CritChance) fails.Add("pointBlankFarNoOp");
-
-            // ---- FIRST STRIKE (enum member GiantSlayer, reworked): +crit vs a FULL-HP target; nothing
-            // once it's been chipped (same cover/range both times). The alpha-strike / opener perk ----
+            // FIRST STRIKE: +crit vs a FULL-HP target; nothing once it's been chipped (same cover/range
+            // both times). The alpha-strike / opener perk. Now a FLAT add (no damping), so the delta is exact.
             var fresh   = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 7, Y = 5, Hp = 10, MaxHp = 10 };  // full HP -> fires
             var chipped = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 7, Y = 5, Hp = 9,  MaxHp = 10 };  // 1 dmg taken -> inert
             int fsFresh = ComputeOdds(gV, Perked(Perk.GiantSlayer), fresh).CritChance;
             int plainFr = ComputeOdds(gV, Plain(),                  fresh).CritChance;
             if (fsFresh != Util.Clamp(plainFr + Unit.FirstStrikeCrit, 0, 100)) fails.Add("firstStrikeFull");
             if (ComputeOdds(gV, Perked(Perk.GiantSlayer), chipped).CritChance != ComputeOdds(gV, Plain(), chipped).CritChance) fails.Add("firstStrikeChippedNoOp");
-
-            // ---- DISTINCTNESS: the three perks key off independent conditions ----
-            // Against a FLANKED, point-blank, FULL-HP target all three fire; against an exposed-but-not-
-            // flanked, far, chipped target none do. (A sanity check that they're not the same gate.)
-            // allYes: target at (5,5) [dist 2 from x=3], cover on its EAST side (x=6) = flanked, full HP.
-            var gAll = new Grid(); gAll.Tiles[6, 5] = TileType.HighCover;
-            var allYes = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 5, Y = 5, Hp = 14, MaxHp = 14 };
-            if (ComputeOdds(gAll, Perked(Perk.Opportunist), allYes).CritChance <= ComputeOdds(gAll, Plain(), allYes).CritChance) fails.Add("distinctOppFires");
-            if (ComputeOdds(gAll, Perked(Perk.PointBlank),  allYes).CritChance <= ComputeOdds(gAll, Plain(), allYes).CritChance) fails.Add("distinctPbFires");
-            if (ComputeOdds(gAll, Perked(Perk.GiantSlayer), allYes).CritChance <= ComputeOdds(gAll, Plain(), allYes).CritChance) fails.Add("distinctFsFires");
         }
 
         // FRAGILE-UNIT ONE-SHOT FLOOR: a full-HP PLAYER unit can't be dropped below 1 HP by a single
@@ -1062,35 +987,9 @@ public static class Combat
             if (IgnoresOverwatch(null)) fails.Add("outrunnerNullSafe");
         }
 
-        // VANGUARD: +crit ONLY vs a target that is BOTH flanked AND adjacent (dist <= VanguardRange).
-        // A pure ComputeOdds read; verify it fires under both conditions and is inert otherwise.
-        {
-            // local builders: a Vanguard-perked attacker and a plain one, both at attacker-X = ax.
-            Unit VanU(int ax) { var u = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = ax, Y = 5 }; u.Perks.Add(Perk.Vanguard); return u; }
-            Unit PlainU(int ax) => new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = ax, Y = 5 };
-
-            // Adjacent + flanked: target at (10,5) with cover on its EAST side (x=11) -> flanked; attacker
-            // due west at (9,5) is dist 1. Vanguard fires.
-            var gAdj = new Grid(); gAdj.Tiles[11, 5] = TileType.HighCover;
-            var adjFlankFoe = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 10, Y = 5, Hp = 10, MaxHp = 10 };
-            var vanAdj = ComputeOdds(gAdj, VanU(9), adjFlankFoe);
-            if (!vanAdj.Flanked) fails.Add("vanguardAdjSetup");           // guard: it really is a flank
-            if (vanAdj.CritChance != Util.Clamp(ComputeOdds(gAdj, PlainU(9), adjFlankFoe).CritChance + Unit.VanguardCrit, 0, 100)) fails.Add("vanguardAdjFlankFires");
-
-            // Flanked but NOT adjacent (dist 3): same flank setup, attacker at (7,5). Vanguard must NOT fire.
-            var farFlankFoe = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 10, Y = 5, Hp = 10, MaxHp = 10 };
-            var vanFar = ComputeOdds(gAdj, VanU(7), farFlankFoe);
-            if (!vanFar.Flanked) fails.Add("vanguardFarSetup");           // guard: still a flank, just at range
-            if (vanFar.CritChance != ComputeOdds(gAdj, PlainU(7), farFlankFoe).CritChance) fails.Add("vanguardFarNoOp");
-
-            // Adjacent but NOT flanked (open-ground exposed foe, no cover): attacker at (9,5), foe at (10,5).
-            // Vanguard must NOT fire (it needs the genuine flank, distinguishing it from Point Blank).
-            var gVan = new Grid();
-            var adjExposed = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 10, Y = 5, Hp = 10, MaxHp = 10 };
-            var vanExp = ComputeOdds(gVan, VanU(9), adjExposed);
-            if (vanExp.Flanked) fails.Add("vanguardExposedSetup");        // guard: adjacent but NOT a flank
-            if (vanExp.CritChance != ComputeOdds(gVan, PlainU(9), adjExposed).CritChance) fails.Add("vanguardExposedNoOp");
-        }
+        // (VANGUARD perk cut from the offered pool + its ComputeOdds crit branch removed — the
+        // false-choice crit cluster is gone; the kept crit pair is Executioner / First Strike, tested
+        // above. The enum member + Name/Code/Desc stay for save compatibility.)
 
         // CROSSFIRE: a target converged on from two diverging angles (a flanking ally with LoS) reads
         // as InCrossfire -> +CrossfireAim hit / +CrossfireCrit crit; a same-angle ally (no divergence)

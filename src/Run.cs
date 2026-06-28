@@ -859,17 +859,17 @@ public class Run
     static Perk[] ClassLine(string cls) => (cls ?? "").ToUpperInvariant() switch
     {
         // Precision marksmen: long-range aim + crit + a defensive overwatch lean.
-        "SHARPSHOOTER" => new[] { Perk.Marksman, Perk.Deadeye, Perk.LockOn, Perk.Executioner,
+        "SHARPSHOOTER" => new[] { Perk.Marksman, Perk.LockOn, Perk.Executioner,
                                   Perk.Guardian, Perk.Reflexes },
-        // Close-range bruisers: point-blank crit + alpha-strike finishers + mobility to close.
-        "ASSAULT"      => new[] { Perk.CloseQuarters, Perk.PointBlank, Perk.Vanguard, Perk.Opportunist,
-                                  Perk.GiantSlayer, Perk.Bandolier },
+        // Close-range bruisers: alpha-strike finisher + mobility to close + extra ordnance.
+        "ASSAULT"      => new[] { Perk.CloseQuarters, Perk.GiantSlayer, Perk.Sprinter,
+                                  Perk.Bandolier, Perk.Adrenal },
         // Heavy weapons: durability + reaction-fire control to anchor the line.
         "GUNNER"       => new[] { Perk.Tank, Perk.Bulwark, Perk.Hardened, Perk.Reflexes,
                                   Perk.Guardian, Perk.LockOn, Perk.CoolHeaded },
-        // Skirmishers: speed + flanking crit + first-contact alpha.
-        "RANGER"       => new[] { Perk.Sprinter, Perk.Opportunist, Perk.PointBlank, Perk.Vanguard,
-                                  Perk.GiantSlayer, Perk.CloseQuarters },
+        // Skirmishers: speed + first-contact alpha + closing aim.
+        "RANGER"       => new[] { Perk.Sprinter, Perk.GiantSlayer, Perk.CloseQuarters,
+                                  Perk.LockOn, Perk.Adrenal },
         // Field medics: stay alive + keep the kit topped up to support the squad.
         "CORPSMAN"     => new[] { Perk.Hardened, Perk.Tank, Perk.CoolHeaded, Perk.Bandolier,
                                   Perk.Adrenal },
