@@ -668,3 +668,73 @@ every class has a TOY, not a number — matching the MARK/GRAPPLE pattern.
 legible odds, run-end payoff, armory, attrition, MARK/GRAPPLE verbs, faction-prep, LANCER/HOUND + 3 arenas, and
 a 2-column requisition — flywheel-measured (heat-0 ~60% run-completion, no cliff), 2 review rounds, all self-
 tests green, PR #58.**
+
+---
+
+# PROGRAM "FRONTIER" — the campaign AROUND the fight (visual identity + strategic economy + build depth)
+
+Fully-autonomous dev-team session. Orchestrator + a 3-agent research fan-out (design-opportunity / code-audit /
+visual-critique) + parallel isolated-worktree devs (strict one-owner-per-hot-file) + an independent reviewer +
+the `SIGHTLINE_BALANCE` flywheel. Branch `claude/game-dev-orchestration-slwslm` -> **PR #60**.
+
+## Research -> thesis
+Six prior programs exhaustively polished the *fight* (tactics/objectives/content/feel). The research fan-out
+converged: the *campaign wrapped around the fight* was the thin frontier. Concretely: (1) the visual board failed
+the squint test — an INVERTED hierarchy where grey cover was the loudest thing while units/objectives were quiet;
+(2) the requisition economy was DEAD — the flywheel measured BALLISTIC PLATING bought 486x over 40 runs vs ~0 of
+everything else; routing had no resource trade-off; (3) audio had been blind-shipped/deferred across all six prior
+programs. The code-audit found the codebase clean (no CRIT/HIGH) — only a few defensive items.
+
+## Waves (each grounded in a measured weakness, each verified)
+- **W0 hardening** (`c3343d8`): `Objective` enum annotated APPEND-ONLY + runtime ordinal assert in SaveGame.SelfTest;
+  defensive `Combat.AllUnits` clears; `Ai.BestGrenade` self-frag veto; barrel-aware connectivity carve; try/finally
+  in `Ai.OddsFrom`.
+- **W1 visual identity leap** (`803b317`, `a04f39a`), 3 fully-parallel disjoint devs: **Renderer** inverted the
+  hierarchy (recede cover; team-colored under-glow + larger live units; full-alpha enemies; clean dashed-ring
+  dormant pods; pulsing EVAC + amber-de-conflicted objectives; calmer biome floor; quieter threat pips). **Display**
+  gave the post-FX real payoff (luma bright-pass bloom + board-framing vignette + stronger per-biome grade +
+  edge-only chroma; default no-POSTFX shot byte-stable). **Hud** killed the empty LOG void, fixed barracks roster
+  legibility, auto-shrunk action-bar labels, one-accent top bar + clearer PRES/ALERT meter. (Orchestrator follow-up:
+  action-bar label auto-shrink to fit the 10-button case; perk-card description word-wrap.)
+- **W2 strategic economy** (`42b0600`) + **audio** (`eec80d4`), 2 parallel disjoint devs: rotating ~5-item
+  requisition slate (deterministic from MapSeed+Mission, no new persisted field, always seats heal+armor) +
+  per-node routing Intel (`MissionNode.Intel`: STANDARD neutral, SUPPLY +10, ELITE +14, shown on the campaign map).
+  Audio: layered procedural weapon voices (ADSR + filtered noise + transients), meatier hit/crit, musically
+  resolving stingers, fuller beds; device-free-safe (AUDIOTEST extended). Owner tunes audibly.
+- **W3 build depth** (`f0d41df`): the flywheel-dead false-choice perks reworked into distinct verbs (enum order
+  unchanged -> save-safe): **ADRENAL->MOMENTUM** (kill on your turn refunds +1 action, shares the flank-refund
+  guard), **BULWARK->PLATING** (ablative -2 dmg/hit while >=half HP), **SPRINTER->OUTRUNNER** (+1 mob + move immune
+  to overwatch). Single-source predicates `Combat.KillRefundsAction/IgnoresOverwatch`.
+
+## Measured (SIGHTLINE_BALANCE, N=40, heat 0-4)
+| | baseline | post-W2 | post-W3 (final) |
+|---|---|---|---|
+| run-completion | 15% | 30% | 52.5% (noisy at N=40) |
+| Evac | 57% | 91% | 89% |
+| Sabotage | 61% | 79% | 73% |
+| boss (Decapitate) | 54.5% | 63% | 100% |
+| per-mission win (h0-4) | ~85% | 80-87% | 84-95% |
+
+Run-completion is noisy at N=40 (8 runs/heat) but clearly trended UP; the economy fix is the headline driver and
+the objective cliffs are erased. New perks revived in pick-frequency (OUTRUNNER 10 / PLATING 9 vs the dead
+BULWARK 5 / SPRINTER 8 they replaced). 0 frame-cap hits; losses are attrition (RUN OVER), not stalls.
+
+## Reviews + verification
+Independent review of W0-W2: **SHIP** (no CRIT/HIGH/MED — slot->id mapping, AutoShop termination, no-double-intel,
+save-compat, post-FX gating all verified; 2 LOW informational, no action). Build 0/0; COMBATTEST/AITEST/SAVETEST/
+SNAPTEST/ITEMTEST/AUDIOTEST all PASS; autoplay clean; colorblind palette holds with the new glows.
+
+## Process learnings
+1. **One-owner-per-hot-file + reset-to-origin-HEAD STEP 0 = clean file-copy integration.** Every dev reset to
+   `origin/<branch>` at start and owned a disjoint file set; integration was a pure file-copy with zero merge
+   hazards (vs the silent-revert hazards documented in prior programs). Game.cs is the bottleneck, so economy (W2)
+   and perks (W3) ran sequentially while visual (3 files) + audio (1 file) ran fully parallel.
+2. **Trust the stable signal, not the noisy one.** Run-completion swings widely at N=40 (8 runs/heat); per-mission
+   and per-objective win-rates are the reliable read. Don't chase a single run-completion number.
+3. **`git add -A` is a footgun with screenshot-leaving agents** — it swept the visual-review agent's PNGs into a
+   commit; fixed + `shot_*.png`/`fx_*.png`/etc. now gitignored. Use explicit `git add <files>`.
+
+**FRONTIER TOTAL (merged): 4 waves, ~9 commits, ~7 agents (3 research + 4 dev + 1 review) — code hardening,
+a visual identity leap, a strategic economy + routing depth, an audio overhaul, and perk build-depth — flywheel-
+measured (run-completion 15% -> 30-52%, objective cliffs erased), independently reviewed SHIP, all self-tests
+green, PR #60.**

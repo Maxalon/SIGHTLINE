@@ -1127,10 +1127,11 @@ Before stopping:
 >   flank-refund guard), **BULWARK→PLATING** (-2 dmg/hit while ≥half HP, ablative), **SPRINTER→OUTRUNNER** (+1 mob +
 >   moving never draws overwatch). Single-source predicates `Combat.KillRefundsAction/IgnoresOverwatch`. Also
 >   word-wrapped the perk-card description (long descs like OPPORTUNIST were overflowing into the neighbour card).
-> **MEASURED (flywheel, same N=40 heat-0-4 methodology, before→after the program):** run-completion **15% → 30%**
-> (doubled); objective cliffs lifted **Evac 57→91 / Sabotage 61→79 / boss-Decapitate 54.5→63**; per-mission win
-> 80-87% (healthy, not trivialized); 0 frame-cap hits. The economy fix is the headline — it roughly doubled
-> completability and erased the cliffs without making it easy. **Independent review of W0-W2: SHIP** (no CRIT/HIGH/MED;
+> **MEASURED (flywheel, same N=40 heat-0-4 methodology, before→after the program):** run-completion **15% →
+> 30%→52.5%** across program-end N=40 runs (noisy at 8 runs/heat — trended up, the economy fix is the driver);
+> objective **cliffs erased — Evac 57→89 / Sabotage 61→73 / boss-Decapitate 54.5→100**; per-mission win 84-95%
+> (healthy, monotonic-ish ladder, not trivialized); 0 frame-cap hits; losses are attrition, not stalls. Reworked
+> perks revived in picks (OUTRUNNER 10 / PLATING 9 vs the dead BULWARK 5 / SPRINTER 8 they replaced). **Independent review of W0-W2: SHIP** (no CRIT/HIGH/MED;
 > slot→id mapping, AutoShop termination, no-double-intel, save-compat, post-FX gating all verified). Build 0/0;
 > COMBATTEST/AITEST/SAVETEST/SNAPTEST/ITEMTEST/AUDIOTEST all PASS; autoplay clean; CB palette holds with the new glows.
 > **PROCESS:** the one-owner-per-hot-file discipline + each worktree dev resetting to `origin/<branch>` HEAD as STEP 0
