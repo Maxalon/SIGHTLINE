@@ -108,3 +108,43 @@ The prerequisite. You cannot tune texture you cannot see.
   future, dedicated program.
 
 *Hard rules unchanged: NO CI/Actions, ship compiling code to `main`, verify headlessly.*
+
+---
+
+## Results (shipped — Waves 0–2, PR #61, independently reviewed SHIP)
+
+Measured with the **new** compass (heat 0, N=14, greedy+sloppy):
+
+| Metric | Before-ish (post-W1) | After W2 | Note |
+|--------|----------------------|----------|------|
+| Run completion | 64% | **68%** | checkpoint gives a recovery surface |
+| RUN OVER losses | 9 | **7** | fewer terminal wipes |
+| Policy GAP (greedy−sloppy) | (noisy) | **+7 pts (healthy slack)** | human error isn't punished harshly |
+| Shop purchases | PLATING **425** vs ~0 | PLATING 234 / **MAG 66 / STIMS 59 / MEDKIT 52 / FRAG 27** | the dead economy is now a real spread |
+| Perk picks | crit cluster | **First Strike 18 / Executioner 13** + spread; cut perks gone | false choices removed, kept pair healthy |
+
+The compass also *empirically confirmed* three audit hypotheses it was built to detect:
+- **SHARPSHOOTER dominance** (89% hit, 120 kills vs ~76 for others) — the dominant-class finding.
+- **Evac/Escort drag** (~9–10 turns/mission vs ~3 for Eliminate/Hack) — the draggy-objective finding.
+- **Flat per-turn gradient** (meaningful-choices/turn ≈ 1.7–2.1, below the 3–5 "interesting decisions" band).
+
+All three waves: build 0/0; COMBATTEST/SAVETEST/AITEST/ITEMTEST PASS; autoplay clean; honest
+tooltip confirmed by screenshot; independent review = **SHIP** (no CRITICAL/HIGH/MEDIUM).
+
+## What remains (evidence-backed roadmap for the next program)
+
+The compass now *measures* these, so the next program can fix them and prove it:
+1. **Per-turn decision flatness** (the deepest finding; meaningful-choices/turn ≈ 1.7). The
+   high-ceiling fix is structural — "firing doesn't end the turn → position-after-acting
+   becomes the core bet" — and deserves its own dedicated, carefully-verified program.
+2. **Class dominance** — SHARPSHOOTER's Sniper crit/range edge + the squad-wide MARK
+   multiplier make it the first pick; normalize toward a real composition decision.
+3. **Content de-bloat** — the audit's third thrust. Evac/Escort/Rescue are one objective in
+   three costumes; Decapitate ≈ Eliminate; ~5 enemy archetypes are `advW`-constant reskins;
+   ~20 arenas are near-duplicates. Concentrate toward the distinct, but verify it doesn't
+   just strip replay variety.
+4. **Architecture** — extract a `MissionContext` owning the 5 `Combat.*` statics to kill the
+   recurring stale-static-bleed bug class (bounded, high future-throughput value).
+
+Known LOW (harness-only, cosmetic): `TrySmartItem` smoke branch computes a unit's distance
+to itself (always 0) — a vacuous condition with no behavioral impact.
