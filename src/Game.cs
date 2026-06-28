@@ -1747,6 +1747,11 @@ public class Game
             { mover.Slipstreaming = false; _slipDest = null; }
             return;   // skip overwatch entirely for this step (the whole point of the slipstream)
         }
+        // OUTRUNNER (perk Sprinter, reworked): this soldier slips past reaction fire — moving never
+        // draws OVERWATCH (like a permanent, passive slipstream). A mobility verb for a flanker who has
+        // to cross open lanes; concealment-break + pod checks above still run (only the watcher loop is
+        // skipped). Single source of truth for the gate is Combat.IgnoresOverwatch (also COMBATTEST'd).
+        if (Combat.IgnoresOverwatch(mover)) return;
         var watchers = mover.Team == Team.Player ? Enemies : Players;
         int insertAt = 1;
         foreach (var w in watchers)
@@ -1923,6 +1928,21 @@ public class Game
                 _refundedThisTurn.Add(killer);
                 Fx.PopText(killer.Pos + new Vector2(0, -16), "ADRENALINE", Pal.Accent, 18f);
             }
+        }
+
+        // MOMENTUM (perk Adrenal, reworked): any kill on the player's turn refunds +1 action, capped
+        // ONCE per soldier per turn via the SAME _refundedThisTurn guard the flank-kill refund + the
+        // Adrenaline boon use — so perk + boon + flank-kill can never compound into an endless chain
+        // (the autopilot's CanAct loop stays bounded -> no TIMEOUT). Distinct from the universal flank-
+        // kill refund: MOMENTUM fires on ANY kill (no flank required), making an aggressive chainer.
+        if (Phase == Phase.PlayerTurn && Combat.KillRefundsAction(killer) && !_refundedThisTurn.Contains(killer))
+        {
+            killer.ActionsLeft++;
+            _refundedThisTurn.Add(killer);
+            Fx.PopText(killer.Pos + new Vector2(0, -40), "+1 ACTION", Pal.Accent, 22f);
+            Fx.PopText(killer.Pos + new Vector2(0, -22), "MOMENTUM", Pal.Good, 16f);
+            Fx.Burst(killer.Pos, Pal.Accent, 10, 140f, 0.42f, 3f, true);
+            Audio.Play("over");
         }
     }
 

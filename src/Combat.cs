@@ -401,8 +401,9 @@ public static class Combat
     ///   - ARMOR (d.Armor): a persistent flat reduction bought in the shop — subtracted from every hit.
     ///   - HARDENED perk: -HardenedFlat off any hit, plus an extra -HardenedCrit off a CRITICAL hit
     ///     (crits are the spiky shots that drop soldiers — a tank shrugs them off).
-    ///   - BULWARK perk: an extra -BulwarkFlat WHILE the defender is HUNKERED (a deliberate hold-the-
-    ///     line trade — worthless if you never dig in).
+    ///   - BULWARK perk ("PLATING"): an extra -BulwarkFlat off every hit WHILE the defender is at/above
+    ///     HALF HP — ablative armor that's intact while healthy and spent once chipped below half (a
+    ///     durability curve, no stance required; distinct from Hardened's always-on/crit-weighted cut).
     /// ALWAYS floored at 1, so the guaranteed-damage floor still holds: every hit deals >= 1 no matter
     /// how much armor/perk reduction stacks. With no armor and no perks this is a pass-through (dmg).
     public static int HardenedReduce(Unit d, int dmg, bool crit)
@@ -410,8 +411,8 @@ public static class Combat
         int reduce = d.Armor;                                   // persistent shop armor (flat, always)
         if (d.HasPerk(Perk.Hardened))
             reduce += Unit.HardenedFlat + (crit ? Unit.HardenedCrit : 0);  // tank perk: flat + extra vs crit
-        if (d.HasPerk(Perk.Bulwark) && d.Hunkered)
-            reduce += Unit.BulwarkFlat;                         // turtle perk: extra while braced
+        if (d.HasPerk(Perk.Bulwark) && d.MaxHp > 0 && d.Hp * 2 >= d.MaxHp)
+            reduce += Unit.BulwarkFlat;                         // PLATING: ablative armor while at/above half HP
         if (d.Team == Team.Player && RunBoons.Count > 0 && HasRunBoon(Sightline.Boon.Fortified))
             reduce += 1;                                        // FORTIFIED boon: squad-wide +1 armor
         // COUNTER-PREP vs LEGION (REACTIVE PLATING): squad-wide damage reduction this mission to
@@ -421,6 +422,25 @@ public static class Combat
         if (reduce <= 0) return dmg;                            // nothing to subtract: pass through
         return Math.Max(1, dmg - reduce);                       // guaranteed-damage floor (>= 1)
     }
+
+    // ---- reworked-perk RULE PREDICATES (single source of truth, called by Game + COMBATTEST) ----
+    // These encode the GATING for two perks whose EFFECT is a Game-side action (an action refund /
+    // skipping the overwatch loop) rather than a combat-odds read, so the condition can still be
+    // unit-tested in COMBATTEST without duplicating the Game logic.
+
+    /// MOMENTUM (perk Adrenal, reworked): a KILL on the player's own turn refunds the killer +1
+    /// action — capped at once per soldier per turn (Game enforces the per-turn cap via the same
+    /// _refundedThisTurn guard the flank-kill refund uses, so the two never compound). Distinct from
+    /// the universal flank-kill refund: MOMENTUM fires on ANY kill (no flank required), turning a
+    /// soldier into an aggressive chainer. Returns true only for a real player combatant with the perk.
+    public static bool KillRefundsAction(Unit killer)
+        => killer != null && killer.Team == Team.Player && !killer.IsVip && killer.HasPerk(Perk.Adrenal);
+
+    /// OUTRUNNER (perk Sprinter, reworked): this soldier ignores enemy OVERWATCH reaction fire while
+    /// moving (Game skips the overwatch loop for its steps, like a Ranger SLIPSTREAM). A mobility VERB
+    /// for a flanker who must cross open lanes — no aim/crit/stat, distinct from every other perk.
+    public static bool IgnoresOverwatch(Unit mover)
+        => mover != null && mover.HasPerk(Perk.Sprinter);
 
     // Streak-breaker constants (S4-C): per clean-miss aim bonus, capped at MaxStreakBonus.
     // Applied INSIDE Resolve only (hidden from the ComputeOdds display — DESIGN.md 3B).
@@ -987,26 +1007,59 @@ public static class Combat
             if (HardenedReduce(armored, 9, false) >= HardenedReduce(plain, 9, false)) fails.Add("armorActuallyReduces");
         }
 
-        // BULWARK: an extra flat reduction WHILE HUNKERED (read in HardenedReduce off d.Hunkered).
-        // Verify it fires only when hunkered, stacks with armor/Hardened, and respects the floor.
+        // BULWARK ("PLATING", reworked): an extra flat reduction off EVERY hit WHILE the defender is
+        // at/above HALF HP — ablative armor, no stance required (read in HardenedReduce off d.Hp/d.MaxHp).
+        // Verify it fires while healthy, drops off once chipped below half, ignores the hunker stance,
+        // stacks with armor/Hardened, and respects the guaranteed-damage floor (>= 1).
         {
-            var blw = new Unit { Team = Team.Player, Hp = 20, MaxHp = 20 };
-            blw.Perks.Add(Perk.Bulwark);
-            // Not hunkered: Bulwark is inert (a normal pass-through, no perk effect).
-            blw.Hunkered = false;
-            if (HardenedReduce(blw, 7, false) != 7) fails.Add("bulwarkRestingInert");
-            // Hunkered: -BulwarkFlat off the hit.
-            blw.Hunkered = true;
-            if (HardenedReduce(blw, 7, false) != 7 - Unit.BulwarkFlat) fails.Add("bulwarkHunkered");
-            // Hunkered Bulwark must reduce MORE than the same hit when standing (the whole point).
-            blw.Hunkered = false; int standing = HardenedReduce(blw, 7, false);
-            blw.Hunkered = true;  int braced   = HardenedReduce(blw, 7, false);
-            if (braced >= standing) fails.Add("bulwarkBracedStronger");
-            // Stacks with Armor while hunkered, still floored at 1.
-            var blwArm = new Unit { Team = Team.Player, Hp = 20, MaxHp = 20, Armor = 2, Hunkered = true };
+            // Healthy (Hp==MaxHp): -BulwarkFlat off the hit (crit and non-crit alike).
+            var blwFull = new Unit { Team = Team.Player, Hp = 20, MaxHp = 20 };
+            blwFull.Perks.Add(Perk.Bulwark);
+            if (HardenedReduce(blwFull, 7, false) != 7 - Unit.BulwarkFlat) fails.Add("bulwarkHealthyFires");
+            if (HardenedReduce(blwFull, 7, true)  != 7 - Unit.BulwarkFlat) fails.Add("bulwarkHealthyCritFires");
+            // Exactly half HP: boundary is inclusive (at/above half) -> still fires.
+            var blwHalf = new Unit { Team = Team.Player, Hp = 10, MaxHp = 20 };
+            blwHalf.Perks.Add(Perk.Bulwark);
+            if (HardenedReduce(blwHalf, 7, false) != 7 - Unit.BulwarkFlat) fails.Add("bulwarkHalfBoundaryFires");
+            // Chipped below half (Hp*2 < MaxHp): the plating is spent -> inert (a plain pass-through).
+            var blwLow = new Unit { Team = Team.Player, Hp = 9, MaxHp = 20 };
+            blwLow.Perks.Add(Perk.Bulwark);
+            if (HardenedReduce(blwLow, 7, false) != 7) fails.Add("bulwarkBelowHalfInert");
+            // Healthy must reduce MORE than the same defender once it drops below half (the durability curve).
+            if (HardenedReduce(blwFull, 7, false) >= HardenedReduce(blwLow, 7, false)) fails.Add("bulwarkCurve");
+            // No longer stance-gated: a HEALTHY non-hunkered Bulwark still fires (the old version needed hunker).
+            blwFull.Hunkered = false;
+            if (HardenedReduce(blwFull, 7, false) != 7 - Unit.BulwarkFlat) fails.Add("bulwarkNoStanceNeeded");
+            // Stacks with Armor while healthy, still floored at 1.
+            var blwArm = new Unit { Team = Team.Player, Hp = 20, MaxHp = 20, Armor = 2 };
             blwArm.Perks.Add(Perk.Bulwark);
             if (HardenedReduce(blwArm, 9, false) != Math.Max(1, 9 - 2 - Unit.BulwarkFlat)) fails.Add("bulwarkStacksArmor");
             if (HardenedReduce(blwArm, 1, false) < 1) fails.Add("bulwarkFloor");
+        }
+
+        // MOMENTUM (perk Adrenal, reworked): the KillRefundsAction GATE — fires for a player combatant
+        // WITH the perk, is a no-op without it / for the VIP / for an enemy (the Game-side per-turn cap
+        // + PlayerTurn guard are exercised by SNAPTEST's flank-refund machinery; here we lock the gate).
+        {
+            var momP = new Unit { Team = Team.Player }; momP.Perks.Add(Perk.Adrenal);
+            if (!KillRefundsAction(momP)) fails.Add("momentumPlayerPerkFires");
+            var noPerk = new Unit { Team = Team.Player };
+            if (KillRefundsAction(noPerk)) fails.Add("momentumNoPerkNoOp");
+            var momVip = new Unit { Team = Team.Player, IsVip = true }; momVip.Perks.Add(Perk.Adrenal);
+            if (KillRefundsAction(momVip)) fails.Add("momentumVipExcluded");
+            var momE = new Unit { Team = Team.Enemy }; momE.Perks.Add(Perk.Adrenal);
+            if (KillRefundsAction(momE)) fails.Add("momentumEnemyExcluded");
+            if (KillRefundsAction(null)) fails.Add("momentumNullSafe");
+        }
+
+        // OUTRUNNER (perk Sprinter, reworked): the IgnoresOverwatch GATE — true only with the perk, so
+        // the Game OnUnitEnteredTile loop skips reaction fire for this mover (no aim/crit, pure mobility).
+        {
+            var outU = new Unit { Team = Team.Player }; outU.Perks.Add(Perk.Sprinter);
+            if (!IgnoresOverwatch(outU)) fails.Add("outrunnerPerkFires");
+            var plainMover = new Unit { Team = Team.Player };
+            if (IgnoresOverwatch(plainMover)) fails.Add("outrunnerNoPerkNoOp");
+            if (IgnoresOverwatch(null)) fails.Add("outrunnerNullSafe");
         }
 
         // VANGUARD: +crit ONLY vs a target that is BOTH flanked AND adjacent (dist <= VanguardRange).
@@ -1241,7 +1294,7 @@ public static class Combat
         MissionFaction = Faction.None;   // belt-and-braces: never leave the global static set for later tests/runtime
 
         return fails.Count == 0
-            ? "COMBATTEST: PASS (cover A-E + high-ground + tier-2 + drone/shield + ambush + graze + streak + perk-balance + build-perks + fragile-floor + armor + bulwark + vanguard + crossfire + factions + faction-prep all hold)"
+            ? "COMBATTEST: PASS (cover A-E + high-ground + tier-2 + drone/shield + ambush + graze + streak + perk-balance + build-perks + fragile-floor + armor + bulwark-plating + momentum + outrunner + vanguard + crossfire + factions + faction-prep all hold)"
             : "COMBATTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 }

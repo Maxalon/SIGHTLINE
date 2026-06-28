@@ -83,7 +83,7 @@ public static class Mission
             u.Y = sp.y;
             u.Ammo = u.Weapon.Clip;
             u.Grenades = 1 + u.BonusGrenades + (u.HasPerk(Perk.Bandolier) ? 1 : 0);  // refill (+cache +Bandolier)
-            u.AbilityCharge = 1 + (u.HasPerk(Perk.Adrenal) ? 1 : 0);// refill (+Adrenal)
+            u.AbilityCharge = 1;                                   // refill the class signature ability
             u.ItemCharge = u.Item != ItemKind.None ? 1 : 0;        // utility item: 1 charge/mission
             u.Suppress = 0;
             u.OnOverwatch = false;

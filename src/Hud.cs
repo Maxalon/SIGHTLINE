@@ -2317,9 +2317,14 @@ public static class Hud
 
         string name = PerkDef.Name(p);
         Raylib.DrawTextEx(Cfg.Font, name, new Vector2((int)(r.X + r.Width / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, name, 22, 1f).X / 2), (int)r.Y + 28), 22, 1f, hover ? Pal.Accent : Pal.Txt);
-        // word-wrapped one-line description (kept short by design)
+        // description, word-wrapped to the card width so a long perk text never spills into the
+        // neighbouring card (each line centred, stacked under the name).
         string desc = PerkDef.Desc(p);
-        Raylib.DrawTextEx(Cfg.Font, desc, new Vector2((int)(r.X + r.Width / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, desc, 14, 1f).X / 2), (int)r.Y + 78), 14, 1f, Pal.TxtDim);
+        var dlines = WrapText(desc, 14, (int)r.Width - 28);
+        for (int li = 0; li < dlines.Count; li++)
+            Raylib.DrawTextEx(Cfg.Font, dlines[li],
+                new Vector2((int)(r.X + r.Width / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, dlines[li], 14, 1f).X / 2), (int)r.Y + 72 + li * 18),
+                14, 1f, Pal.TxtDim);
 
         Raylib.DrawTextEx(Cfg.Font, "SELECT", new Vector2((int)(r.X + r.Width / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, "SELECT", 13, 1f).X / 2), (int)(r.Y + r.Height - 32)), 13, 1f, hover ? Pal.Accent : Pal.TxtDim);
     }
