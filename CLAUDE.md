@@ -196,6 +196,22 @@ docs/screenshot.png    README image
 ## Current state — DONE ✅
 Playable vertical slice, builds clean (0 warn/0 err), autoplay-verified across
 seeds (mix of WIN/LOSE, no exceptions):
+- **VISUAL IDENTITY LEAP (FRONTIER W1):** the board now reads by hierarchy — cover recedes (dark, low-emissive),
+  live units carry a team-colored under-glow + larger figures, objectives (pulsing EVAC, amber charges/terminal)
+  are 2nd-most-salient, dormant pods are clean dashed "?" rings, the floor is calmer + biome-distinct. Post-FX has
+  real payoff (bright-pass bloom + board-framing vignette + per-biome grade). HUD polished (no empty LOG void,
+  legible barracks roster, auto-fit action labels, one-accent top bar). (`Renderer`/`Display`/`Hud`.)
+- **STRATEGIC ECONOMY (FRONTIER W2):** the requisition is a ROTATING ~5-item slate per barracks (always seats
+  heal+armor; deterministic from MapSeed+Mission, not persisted) instead of a flat always-buy-armor list, and
+  campaign ROUTING is now a resource decision — each node shows its **+N INTEL** reward (SUPPLY +10 economy stop /
+  ELITE +14 risk-for-reward). MEASURED: fixed the dead economy + roughly doubled run-completion (15%→30%) and
+  lifted the Evac/Sabotage/boss cliffs. (`Game.ShopOffer`/`Run.NodeIntel`.)
+- **AUDIO OVERHAUL (FRONTIER W2, blind):** richer layered procedural weapon voices (ADSR + filtered noise +
+  transients), meatier hit/crit, musically-resolving stingers, fuller ambient/combat beds — still device-free-safe
+  (`SIGHTLINE_AUDIOTEST`). Owner tunes audibly on a real device.
+- **PERK BUILD-DEPTH (FRONTIER W3):** the deadest false-choice perks are now distinct verbs — **MOMENTUM** (kill on
+  your turn refunds +1 action), **PLATING** (ablative -2 dmg/hit while ≥half HP), **OUTRUNNER** (+1 mob + move
+  immune to overwatch). (`Combat.KillRefundsAction/IgnoresOverwatch`; enum stayed append-only.)
 - **Anti-turtle PRESSURE CLOCK (AGENCY W1):** on camp-friendly objectives (Elim/Hack/Decapitate) a graced
   clock escalates after turn 4 — enemy aim creep (`Combat.PressureAim`) + reinforcement waves — so turtling is
   strictly worse than advancing. `PRES` rung-pip meter in the top bar; `Game.PressureRungFor/UpdatePressure/
@@ -1080,7 +1096,52 @@ Before stopping:
 
 ### WIP NOTES
 
-> **PROGRAM "AGENCY" — decisions that matter: pressure, legibility, loadout, loss, new toys (LATEST; read
+> **PROGRAM "FRONTIER" — the campaign AROUND the fight: visual identity + strategic economy + build depth (LATEST; read first).**
+> Fully-autonomous dev-team session: orchestrator + a 3-agent research fan-out (design-opportunity / code-audit /
+> visual-critique) + parallel isolated-worktree devs (strict one-owner-per-hot-file) + an independent reviewer +
+> the `SIGHTLINE_BALANCE` flywheel. Branch `claude/game-dev-orchestration-slwslm`, **PR #60**. Thesis (from the
+> research): six prior programs exhaustively polished the *fight*; the *campaign wrapped around it* (look, economy,
+> audio) was the thin frontier. Every wave grounded in a MEASURED weakness.
+> - **Wave 0 — hardening (`c3343d8`):** code-audit follow-ups (no CRIT/HIGH found). `Objective` enum annotated
+>   APPEND-ONLY + a runtime ordinal assert in SaveGame.SelfTest; defensive `Combat.AllUnits` clears at barracks/
+>   run-end; `Ai.BestGrenade` self-frag veto; barrel-aware connectivity carve; try/finally in `Ai.OddsFrom`.
+> - **Wave 1 — VISUAL IDENTITY LEAP (`803b317`, `a04f39a`):** 3 disjoint devs. The board failed the squint test
+>   (inverted hierarchy: grey cover was loudest). **Renderer** — recede cover (darker tops, cut emissive rim/gleam),
+>   team-colored under-glow + ~16% larger live units, full-alpha enemies, clean dashed-ring dormant pods, pulsing
+>   EVAC + amber (de-conflicted from enemy-red) objectives, calmer biome floor, quieter threat pips → units >
+>   objectives > enemies > cover. **Display** — real post-FX payoff (luma bright-pass bloom, board-framing vignette,
+>   stronger per-biome grade, edge-only impact chroma); default no-POSTFX shot stays byte-stable. **Hud** — killed
+>   the empty LOG void, fixed barracks roster legibility, auto-shrink action-bar labels (no more "OVER…"), one-accent
+>   top-bar + clearer PRES/ALERT meter.
+> - **Wave 2 — STRATEGIC ECONOMY (`42b0600`) + AUDIO (`eec80d4`):** MEASURED dead economy (smart AI bought
+>   BALLISTIC PLATING 486x vs ~0 of everything else over 40 runs). **Rotating requisition** — a ~5-item slate per
+>   barracks (deterministic from MapSeed+Mission, NO new persisted field) always seating heal+armor + a rotating
+>   pool + conditional COUNTER-PREP; Hud/HandleShopClick/AutoShop map slot->id. **Routing economy** — `MissionNode.Intel`
+>   (derived, not persisted): base `10+4*mission` (STANDARD economy-neutral), SUPPLY +10, ELITE +14; campaign map
+>   shows each node's +N INTEL. **Audio** (disjoint, blind) — ADSR envelopes + filtered noise + click transients give
+>   each WeaponKind a distinct layered voice, meatier hit/crit, musically-resolving stingers, fuller ambient/combat
+>   beds; device-free safety preserved (AUDIOTEST extended to assert cue presence + near-zero loop endpoints). Owner
+>   tunes audibly (no device here).
+> - **Wave 3 — BUILD DEPTH (`f0d41df`):** flywheel-dead perks reworked into distinct verbs (enum order unchanged →
+>   save-safe; effects only): **ADRENAL→MOMENTUM** (any kill on your turn refunds +1 action, 1/turn, shares the
+>   flank-refund guard), **BULWARK→PLATING** (-2 dmg/hit while ≥half HP, ablative), **SPRINTER→OUTRUNNER** (+1 mob +
+>   moving never draws overwatch). Single-source predicates `Combat.KillRefundsAction/IgnoresOverwatch`. Also
+>   word-wrapped the perk-card description (long descs like OPPORTUNIST were overflowing into the neighbour card).
+> **MEASURED (flywheel, same N=40 heat-0-4 methodology, before→after the program):** run-completion **15% → 30%**
+> (doubled); objective cliffs lifted **Evac 57→91 / Sabotage 61→79 / boss-Decapitate 54.5→63**; per-mission win
+> 80-87% (healthy, not trivialized); 0 frame-cap hits. The economy fix is the headline — it roughly doubled
+> completability and erased the cliffs without making it easy. **Independent review of W0-W2: SHIP** (no CRIT/HIGH/MED;
+> slot→id mapping, AutoShop termination, no-double-intel, save-compat, post-FX gating all verified). Build 0/0;
+> COMBATTEST/AITEST/SAVETEST/SNAPTEST/ITEMTEST/AUDIOTEST all PASS; autoplay clean; CB palette holds with the new glows.
+> **PROCESS:** the one-owner-per-hot-file discipline + each worktree dev resetting to `origin/<branch>` HEAD as STEP 0
+> made every integration a clean file-copy (no merge hazards this program). Game.cs is the bottleneck → economy (W2)
+> and perks (W3) ran sequentially; visual (3 files) + audio (1 file) ran fully parallel. **OPEN/NEXT (documented):**
+> onboarding is still thin (deep but impenetrable to new players — design-audit #3); more verb-perks / active toys;
+> a new objective; the audio needs an audible tuning pass on a real device; Escort dipped slightly (80%, within noise)
+> — watch VIP survivability. (Gotcha fixed this session: a stray `git add -A` swept the visual agent's screenshots
+> into the tree — removed + `shot_*.png`/`fx_*.png`/etc. now gitignored.)
+
+> **PROGRAM "AGENCY" — decisions that matter: pressure, legibility, loadout, loss, new toys (read
 > first).** Fully-autonomous dev-team session run as orchestrator + 2 research agents (gameplay-opportunity +
 > balance-audit) + 6 isolated-worktree dev agents + 2 independent reviewers + the `SIGHTLINE_BALANCE` flywheel.
 > Branch `claude/game-dev-orchestration-h41iom`. **3 WAVES, 7 features + a UX polish, all measured & reviewed:**
