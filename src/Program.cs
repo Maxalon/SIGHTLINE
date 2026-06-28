@@ -310,6 +310,15 @@ public static class Program
     // balance report. Heat is cycled 0..4 across the batch (or pinned via SIGHTLINE_BALANCE_HEAT)
     // so the report shows a difficulty curve. Fast + headless: one window, minimal per-frame
     // draw (the autoplay path), uncapped FPS, hard per-match frame cap so it can never hang.
+    //
+    // Each campaign is now played under BOTH a near-optimal "greedy" policy and a human-error
+    // "sloppy" policy (the report shows the optimal-vs-sloppy GAP = difficulty slack), plus the
+    // bot now exercises utility items + every class verb-ability so item/ability balance is
+    // measured, and per-turn decision-richness + lead-swing texture is instrumented. Knobs:
+    //   SIGHTLINE_BALANCE_HEAT=<h>  pin a heat rung (else cycle 0..4)
+    //   SIGHTLINE_BALANCE_DUMB=1    use the dumb smoke-test autopilot (single policy, baseline)
+    //   SIGHTLINE_BALANCE_SLOPPY=1  run ONLY the sloppy policy (else greedy+sloppy paired)
+    //   SIGHTLINE_BALANCE_JSON=<p>  override the JSON artifact path (else <tmp>/balance.json)
     static void BalanceBatch(int runs)
     {
         // Cumulative telemetry across the whole batch (NOT reset per match).
@@ -336,53 +345,76 @@ public static class Program
 
         const int frameCap = 20000;           // per-match safety cap; a hit cap counts as a loss
         int wins = 0, losses = 0, capped = 0;
+        bool aborted = false;
         var sw = System.Diagnostics.Stopwatch.StartNew();
 
-        for (int i = 0; i < runs && !Raylib.WindowShouldClose(); i++)
+        // POLICY MIX: by default the competent batch runs BOTH the near-optimal "greedy" policy
+        // and a human-error "sloppy" policy on the SAME heat schedule, so the report can show the
+        // optimal-vs-sloppy GAP (difficulty slack). SIGHTLINE_BALANCE_SLOPPY=1 forces sloppy-only;
+        // the dumb smoke-test baseline (SIGHTLINE_BALANCE_DUMB) never has a meaningful policy split.
+        bool sloppyOnly = Environment.GetEnvironmentVariable("SIGHTLINE_BALANCE_SLOPPY") == "1";
+        bool[] sloppyModes = dumb ? new[] { false }
+                            : sloppyOnly ? new[] { true }
+                            : new[] { false, true };   // greedy then sloppy
+
+        // Run a single campaign (heat `heat`, policy `sloppy`, deterministic sloppy seed `seed`)
+        // to a decision. Returns false if the window closed mid-match (abort the batch).
+        bool RunOne(int heat, bool sloppy, int seed)
         {
-            int heat = pinHeat ? Sightline.Heat.Clamp(fixedHeat) : (i % 5);
             // StartMission reads SIGHTLINE_HEAT when NoPersist is set — dial it in before starting.
             Environment.SetEnvironmentVariable("SIGHTLINE_HEAT", heat.ToString());
-
-            var game = new Game { NoPersist = true, AutoPlay = true, SmartPlay = !dumb };
-            game.StartMission(1);   // fires Stats.BeginRun internally
+            var game = new Game { NoPersist = true, AutoPlay = true, SmartPlay = !dumb, SmartSloppy = !dumb && sloppy };
+            game.SeedSloppy(seed);   // reproducible per-run perturbation (no-op unless sloppy)
+            game.StartMission(1);    // fires Stats.BeginRun internally (tags the policy)
 
             int frame = 0;
-            bool decided = false;
             while (!Raylib.WindowShouldClose())
             {
                 game.Update(1f / 60f);
                 Display.RenderFrame(() => Raylib.ClearBackground(Pal.Bg));   // minimal draw
                 frame++;
-                if (game.Phase == Phase.Win) { wins++; decided = true; break; }
-                if (game.Phase == Phase.Lose) { losses++; decided = true; break; }
+                if (game.Phase == Phase.Win) { wins++; return true; }
+                if (game.Phase == Phase.Lose) { losses++; return true; }
                 if (frame >= frameCap)
                 {
                     // Treat a frame-cap as a loss so the batch never hangs. EndRun is no-op if
                     // the run already finalised; defensively close the run record for the report.
                     capped++; losses++;
                     Stats.EndRun(false, game.RunState != null ? game.RunState.Mission - 1 : 0, "frame-cap");
-                    break;
+                    return true;
                 }
             }
-            if (!decided && frame < frameCap)
-            {
-                // window closed mid-match (Xvfb teardown / Ctrl-C): close the run record and stop.
-                Stats.EndRun(false, game.RunState != null ? game.RunState.Mission - 1 : 0, "aborted");
-                break;
-            }
+            // window closed mid-match (Xvfb teardown / Ctrl-C): close the run record and stop.
+            Stats.EndRun(false, game.RunState != null ? game.RunState.Mission - 1 : 0, "aborted");
+            return false;
+        }
 
-            if ((i + 1) % 5 == 0 || i + 1 == runs)
-                Console.WriteLine($"run {i + 1}/{runs}  (W:{wins} L:{losses} cap:{capped})  {sw.Elapsed.TotalSeconds:0.0}s");
+        int done = 0, totalMatches = runs * sloppyModes.Length;
+        for (int i = 0; i < runs && !aborted && !Raylib.WindowShouldClose(); i++)
+        {
+            int heat = pinHeat ? Sightline.Heat.Clamp(fixedHeat) : (i % 5);
+            foreach (bool sloppy in sloppyModes)
+            {
+                if (aborted || Raylib.WindowShouldClose()) break;
+                // Seed the sloppy RNG from the campaign index so the perturbation is reproducible.
+                if (!RunOne(heat, sloppy, 1000 + i)) { aborted = true; break; }
+                done++;
+                if (done % 5 == 0 || done == totalMatches)
+                    Console.WriteLine($"match {done}/{totalMatches}  (W:{wins} L:{losses} cap:{capped})  {sw.Elapsed.TotalSeconds:0.0}s");
+            }
         }
 
         sw.Stop();
         Console.WriteLine();
         Console.WriteLine(Stats.Report());
-        Console.WriteLine($"batch wall-time: {sw.Elapsed.TotalSeconds:0.0}s  ({runs} runs, frame-cap hits: {capped})");
+        Console.WriteLine($"batch wall-time: {sw.Elapsed.TotalSeconds:0.0}s  ({totalMatches} matches across {runs} campaigns × {sloppyModes.Length} policy, frame-cap hits: {capped})");
 
-        // Optional machine-readable aggregate alongside the printed report.
-        string jsonPath = "/tmp/claude-0/-home-user-temporary-name/809199e3-983c-51d2-b8f8-28bff90d918a/scratchpad/balance.json";
+        // Optional machine-readable aggregate alongside the printed report. The path honours
+        // SIGHTLINE_BALANCE_JSON if set, else lands in the system temp dir (a stable, always-
+        // present location) — never a stale per-session scratchpad. WriteJson swallows IO errors.
+        string jsonPath = Environment.GetEnvironmentVariable("SIGHTLINE_BALANCE_JSON");
+        if (string.IsNullOrEmpty(jsonPath))
+            jsonPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "balance.json");
         Stats.WriteJson(jsonPath);
         Console.WriteLine($"aggregate JSON -> {jsonPath}");
 
