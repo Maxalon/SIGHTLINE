@@ -7,6 +7,9 @@ using Raylib_cs;
 namespace Sightline;
 
 public enum Phase { Intro, PlayerTurn, EnemyTurn, Barracks, Win, Lose, Draft }
+// APPEND-ONLY: serialized as a raw (int) in SaveGame (CardDto.Objective). Never reorder or
+// remove a member — a saved run stores the ordinal, so a reorder silently corrupts the loaded
+// objective. Add new objectives at the END only. (SaveGame.SelfTest asserts the tail ordinal.)
 public enum Objective { Eliminate, Evac, Hack, Escort, Sabotage, Rescue, Defend, Decapitate }
 public enum SecondaryKind { None, NoLosses, Swift, CleanSweep }  // optional per-mission bonus goal (3.9)
 enum AiStage { PickNext, Telegraph, ActAfterMove }
@@ -1471,6 +1474,8 @@ public class Game
         Combat.MissionFaction = Faction.None;   // defensive: clear the mission faction between missions (re-set in SetupMission) so no stale value can warp a barracks-phase odds read
         Combat.PressureAim = 0;                  // and the anti-turtle pressure aim bonus
         Combat.PrepFaction = Faction.None;       // and the faction counter-prep (re-set+consumed in SetupMission)
+        Combat.RunBoons = new System.Collections.Generic.HashSet<Boon>(_run.ActiveBoons);  // keep run boons valid; AllUnits cleared so no stale roster is read off-mission
+        Combat.AllUnits = System.Array.Empty<Unit>();
         // a benched soldier sat this mission out: it's still in _run.Squad (flagged) but was
         // never in Players, so it's absent from AlivePlayers(). Preserve it across the rebuild,
         // or benching would silently destroy the veteran (review Blocker 1).
@@ -1573,6 +1578,7 @@ public class Game
         Combat.MissionFaction = Faction.None;   // defensive: clear the mission faction on run end (re-set next SetupMission)
         Combat.PressureAim = 0;                  // and the anti-turtle pressure aim bonus
         Combat.PrepFaction = Faction.None;       // and the faction counter-prep so no stale value bleeds into the next run
+        Combat.AllUnits = System.Array.Empty<Unit>();  // drop the crossfire roster on run end (re-set next SetupMission)
         LoseTitle = title;
         LoseReason = reason;
         Phase = Phase.Lose;

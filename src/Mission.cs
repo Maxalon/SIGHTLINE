@@ -669,6 +669,7 @@ public static class Mission
                 while (g.InBounds(cx, cy) && cost[cx, cy] < 0 && guard++ < g.W + g.H)
                 {
                     if (g.Tiles[cx, cy] != TileType.Floor) g.Tiles[cx, cy] = TileType.Floor;
+                    g.Barrel[cx, cy] = false;   // a barrel keeps a tile non-walkable (IsFloor false) — clear it so the carve actually opens the lane
                     if (cx != from.X) cx += Math.Sign(from.X - cx);
                     else if (cy != from.Y) cy += Math.Sign(from.Y - cy);
                     else break;

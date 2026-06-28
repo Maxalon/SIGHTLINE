@@ -437,7 +437,8 @@ public class Run
         CurrentCard = node.Card;
     }
 
-    /// Objective rotation baseline: Eliminate / Hack / Evac / Escort, repeating.
+    /// Objective rotation baseline: an 8-objective cycle (Eliminate / Hack / Evac / Escort /
+    /// Sabotage / Rescue / Defend / Decapitate), repeating.
     public static Objective ObjectiveFor(int n) => ((n - 1) % 8) switch
     {
         1 => Objective.Hack,
