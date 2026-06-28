@@ -265,6 +265,14 @@ public class Run
     public List<Unit> Squad = new();
     public int Mission;                       // current mission number (1-based)
     public int Intel;                         // requisition currency spent in the barracks shop
+    // ---- one-time mid-run checkpoint ("REINFORCEMENTS") ----
+    // The 6-mission single-life ironman is a geometric-collapse container: one bad mission ends the
+    // whole run with zero recovery surface. This flag grants ONE emergency redeploy of fresh rookies
+    // to retry the current mission after a squad wipe (at/after a threshold mission) — a bad mission
+    // becomes survivable-but-costly (you lose your veterans) instead of run-ending. Set true the
+    // moment the checkpoint fires, so a SECOND wipe is a real loss. Persisted (append-only DTO field;
+    // old saves default false). Reset in Start().
+    public bool CheckpointUsed;
     public int HeatLevel;                     // chosen Heat/Ascension difficulty (0..Heat.Max); persisted in the run save
     public List<string> Fallen = new();       // names of KIA soldiers
     // Run-end MEMORIAL (presentation only): a richer KIA record (full identity + rank/class/
@@ -561,6 +569,7 @@ public class Run
         Squad = drafted ?? Sightline.Mission.NewRunSquad();
         Mission = 0;
         Intel = 0;
+        CheckpointUsed = false;   // the one-time REINFORCEMENTS redeploy is fresh each run
         Fallen.Clear();
         Report.Clear();
         PendingPerks.Clear();

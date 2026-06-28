@@ -264,12 +264,15 @@ public class Game
     public void RefreshShopOffer()
     {
         var offer = new List<int>();
-        // (1) survivability guarantees, always present + always first (readable, never starved).
+        // (1) survivability guarantee: FIELD MEDKIT is always seated + first (healing is always
+        // reasonable, never starved). BALLISTIC PLATING is NO LONGER hard-seated — armor was the
+        // degenerate always-buy (the autopilot drained Intel into it every barracks, a non-decision).
+        // PLATING now joins the rotating pool, so it competes for slate slots and appears only
+        // sometimes — survivability-via-armor is a real choice, not a default.
         offer.Add(0);   // FIELD MEDKIT
-        offer.Add(4);   // BALLISTIC PLATING
 
         // (2) the rotating pool: everything else except prep (which is conditional + appended last).
-        var pool = new List<int> { 1, 2, 3 };                 // stims / training / frag cache
+        var pool = new List<int> { 1, 2, 3, 4 };              // stims / training / frag cache / BALLISTIC PLATING
         for (int i = 0; i < WeaponModDef.All.Length; i++) pool.Add(ModBase + i);  // weapon mods
 
         // deterministic shuffle off MapSeed+Mission so the slate is fixed per barracks + round-trips.
@@ -2298,7 +2301,14 @@ public class Game
         if (Phase != Phase.PlayerTurn && Phase != Phase.EnemyTurn) return;
         if (_anims.Count > 0) return;
         var alivePlayers = AlivePlayers();
-        if (alivePlayers.Count == 0) { LoseRun("RUN OVER", $"The squad fell on mission {_run.Mission}."); return; }
+        if (alivePlayers.Count == 0)
+        {
+            // ONE-TIME CHECKPOINT: a squad wipe at/after the threshold mission triggers an emergency
+            // redeploy of fresh rookies to retry THIS mission (you lose your veterans, but the run
+            // survives). A second wipe — or a wipe before the threshold — is a real loss.
+            if (TryReinforcements()) return;
+            LoseRun("RUN OVER", $"The squad fell on mission {_run.Mission}."); return;
+        }
 
         if (Objective == Objective.Eliminate)
         {
@@ -2335,6 +2345,32 @@ public class Game
         {
             if (alivePlayers.All(p => EvacZone.Contains((p.X, p.Y)))) EnterBarracks();
         }
+    }
+
+    /// One-time mid-run recovery valve. Called only from the SQUAD-WIPE branch of CheckEnd (VIP/
+    /// captive-lost losses stay instant). Returns false — letting the wipe become a real loss — when
+    /// the checkpoint is already spent OR the wipe came too early (mission < 3: early failure ends
+    /// cleanly). Otherwise it burns the checkpoint, rebuilds the squad as a fresh emergency cadre of
+    /// rookies (keeping Intel / heat / map position), and RESTARTS the current mission from its start
+    /// (SetupMission re-checkpoints the save). The squad's veterans are gone — a bad mission is now
+    /// survivable but costly, not run-ending. Can fire at most once per run, so there's no loop risk.
+    bool TryReinforcements()
+    {
+        if (_run == null || _run.CheckpointUsed || _run.Mission < 3) return false;
+        _run.CheckpointUsed = true;
+
+        // fresh emergency squad: deploy as many rookies as this mission fields (fall back to the
+        // attrition floor of 3). Rookies carry no rank/perks/mods — that's the price of the wipe.
+        int cap = Math.Max(Run.AttritionFloor, Run.DeployCapFor(_run.Mission));
+        _run.Squad = new List<Unit>();
+        for (int i = 0; i < cap; i++) _run.Squad.Add(Mission.MakeRecruit());
+
+        // Intel, heat, and map position are untouched. Restart THIS mission from its start (the same
+        // setup the normal flow uses; it re-checkpoints the save). SetupMission sets its own
+        // MISSION banner, so override it AFTER with the reinforcements telegraph.
+        SetupMission(_run.Mission);
+        ShowBanner("REINFORCEMENTS DEPLOYED - hold the line.", true);
+        return true;
     }
 
     // ---------------- player turn ----------------
@@ -5482,42 +5518,42 @@ public class Game
         if (Raylib.CheckCollisionPointRec(m, Hud.ShopProceed)) { _shopDone = true; Audio.Play("turn"); }
     }
 
-    // autopilot: spend Intel sensibly so the BALANCE analytics reflect the new power curve.
-    // Priority: (1) field-treat a wounded/hurt soldier (cheap survivability), then (2) sink the
-    // rest into PERSISTENT WEAPON UPGRADES — the reward sink that lets a leveled squad out-gun a
-    // fresh one and outpace attrition. Greedy by cheapest affordable so more upgrades land per
-    // barracks. ALWAYS terminates: every DoPurchase that fires reduces Intel by a positive cost,
-    // and the cap bounds the loop regardless (defensive against a future zero-cost item).
+    // autopilot: spend Intel as a varied, realistic economy so the BALANCE analytics reflect a real
+    // player's spread rather than the old degenerate "buy armor to zero" loop. Each pass buys the
+    // SINGLE most useful affordable item it can and STOPS when nothing useful/affordable remains:
+    //   1) heal — if a soldier is hurt or wounded (cheap, high-value survivability),
+    //   2) armor (PLATING) — if a soldier is still under the armor cap (compounding survivability),
+    //   3) else the cheapest other beneficial item in the slate (weapon mod / frag / stims).
+    // Perk pick (2, needs the chooser flow) and COUNTER-PREP (a situational call) are left to the
+    // player. ALWAYS terminates: every DoPurchase that fires reduces Intel by a positive cost, and
+    // the iteration cap bounds the loop defensively against any future zero-cost item.
     void AutoShop()
     {
         var offer = ShopOffer();        // buy only from this barracks' rotating slate
 
-        if (offer.Contains(0) && CanBuy(0)) DoPurchase(0);   // one heal pass if someone's hurt/wounded
-        // Survivability first: plating (item 4) compounds across the run and is the documented
-        // anti-attrition lever, so prefer it over flat firepower while it's offered + affordable.
-        for (int guard = 0; guard < 8 && offer.Contains(4) && CanBuy(4); guard++)
-        {
-            int before0 = _run.Intel;
-            DoPurchase(4);
-            if (_run.Intel >= before0) break;
-        }
-
         for (int guard = 0; guard < 40; guard++)
         {
-            // cheapest affordable PERMANENT upgrade WITHIN THE OFFER (weapon mods / plating / frag /
-            // stims). Skip the heal (0, done) and the perk pick (2, needs the chooser flow) and PREP
-            // (situational player call). Greedy by cost so the leveled squad sinks intel into the
-            // reward sink AND the analytics show a spread across whatever the slate offered.
-            int best = -1, bestCost = int.MaxValue;
-            foreach (int i in offer)
+            int pick = -1;
+            // 1) heal a hurt/wounded soldier first (only ever needed once per pass — CanBuy(0)
+            //    goes false once everyone is topped up).
+            if (offer.Contains(0) && CanBuy(0)) pick = 0;
+            // 2) else top up armor while a soldier is under the cap and it's on this slate.
+            else if (offer.Contains(4) && CanBuy(4)) pick = 4;
+            else
             {
-                if (i == 0 || i == 2) continue;   // heal done; perk pick is a player choice
-                if (IsPrepItem(i)) continue;      // COUNTER-PREP is a situational player call, not an auto-buy
-                if (CanBuy(i) && ShopCostAt(i) < bestCost) { best = i; bestCost = ShopCostAt(i); }
+                // 3) else the cheapest other beneficial item in the slate (weapon mods / frag /
+                //    stims). Skip the perk pick (2) and PREP (situational player calls).
+                int bestCost = int.MaxValue;
+                foreach (int i in offer)
+                {
+                    if (i == 0 || i == 2 || i == 4) continue;
+                    if (IsPrepItem(i)) continue;
+                    if (CanBuy(i) && ShopCostAt(i) < bestCost) { pick = i; bestCost = ShopCostAt(i); }
+                }
             }
-            if (best < 0) break;        // nothing affordable/useful left in the slate
+            if (pick < 0) break;        // nothing useful/affordable left
             int before = _run.Intel;
-            DoPurchase(best);
+            DoPurchase(pick);
             if (_run.Intel >= before) break;   // safety: never spin on a no-op purchase
         }
         _shopDone = true;
