@@ -1970,13 +1970,16 @@ public static class Hud
             string gly = NodeGlyph(n.Kind);
             Raylib.DrawTextEx(Cfg.Font, gly, new Vector2((int)(p.X - (int)Raylib.MeasureTextEx(Cfg.Font, gly, 14, 1f).X / 2), (int)(p.Y - 7)), 14, 1f, Pal.RGBA(8, 12, 18));
 
-            if (canPick)  // label the choices with their objective + an intel hint
+            if (canPick)  // label the choices with their objective + an intel reward + an enemy hint
             {
                 string lbl = ObjName(n.Card.Objective);
                 Raylib.DrawTextEx(Cfg.Font, lbl, new Vector2((int)(p.X - (int)Raylib.MeasureTextEx(Cfg.Font, lbl, 10, 1f).X / 2), (int)(p.Y + rad + 3)), 10, 1f, Pal.Txt);
+                // routing economy: the Intel reward for clearing this node (SUPPLY/ELITE pay premiums)
+                string intelLbl = $"+{n.Intel} INTEL";
+                Raylib.DrawTextEx(Cfg.Font, intelLbl, new Vector2((int)(p.X - (int)Raylib.MeasureTextEx(Cfg.Font, intelLbl, 9, 1f).X / 2), (int)(p.Y + rad + 14)), 9, 1f, Pal.Good);
                 // enemy intel hint: a short flavour line so the pick is informed
                 string hint = Run.EnemyHint(n);
-                Raylib.DrawTextEx(Cfg.Font, hint, new Vector2((int)(p.X - (int)Raylib.MeasureTextEx(Cfg.Font, hint, 9, 1f).X / 2), (int)(p.Y + rad + 15)), 9, 1f, Pal.TxtDim);
+                Raylib.DrawTextEx(Cfg.Font, hint, new Vector2((int)(p.X - (int)Raylib.MeasureTextEx(Cfg.Font, hint, 9, 1f).X / 2), (int)(p.Y + rad + 25)), 9, 1f, Pal.TxtDim);
             }
         }
 
@@ -1985,7 +1988,8 @@ public static class Hud
         {
             var c = hovered.Card;
             string l1 = $"{c.ModName}  -  {ObjName(c.Objective)}";
-            string l2 = c.EnemyDelta > 0 ? "Heavy resistance" : (c.EnemyDelta < 0 ? "Light resistance" : "Standard force");
+            string force = c.EnemyDelta > 0 ? "Heavy resistance" : (c.EnemyDelta < 0 ? "Light resistance" : "Standard force");
+            string l2 = $"{force}   +{hovered.Intel} intel";   // routing economy: payout shown alongside risk
             string l3 = c.Reward != RewardKind.None ? "+ " + c.RewardText : null;
             string l4 = Run.EnemyHint(hovered);   // enemy intel hint (S4-A)
             int tw = Math.Max((int)Raylib.MeasureTextEx(Cfg.Font, l1, 13, 1f).X,
@@ -2011,12 +2015,15 @@ public static class Hud
         var run = g.RunState;
         Raylib.DrawRectangle(0, 0, Cfg.ScreenW, Cfg.ScreenH, Raylib.Fade(Pal.RGBA(5, 8, 11), 0.85f));
 
-        int items = Game.ShopName.Length;
+        // ROTATING OFFER: only the items in this barracks' slate are shown (a smaller, prioritised
+        // set), so the player chooses among ~5 rather than buying the one obvious item out of ~10.
+        // ShopBtns are indexed by SLOT; the underlying item id is offer[slot].
+        var offer = g.ShopOffer();
+        int items = offer.Count;
         int ih = 78, gap = 10;
         int squadH = 40;
-        // The shop list grew to ~10 items (heals/training/frag/plating + 4 weapon mods + counter-prep);
-        // a single column either clips the screen or squeezes the rows. Lay it out as a 2-COLUMN grid so
-        // every row keeps a comfortable, legible height and the whole card still clears ScreenH.
+        // Lay the slate out as a 2-COLUMN grid so every row keeps a comfortable, legible height and
+        // the whole card still clears ScreenH (the slate is ~5-6 items).
         int chrome = 104 + squadH + 60;
         const int cols = 2;
         int rowsPerCol = (items + cols - 1) / cols;
@@ -2051,11 +2058,12 @@ public static class Hud
         int gridTop = y + 104 + squadH;
         int colGap = 16;
         int colW = (w - 60 - colGap) / 2;
-        for (int i = 0; i < items; i++)
+        for (int slot = 0; slot < items && slot < ShopBtns.Length; slot++)
         {
-            int col = i / rowsPerCol, rowInCol = i % rowsPerCol;
+            int i = offer[slot];   // underlying item id for this slate slot
+            int col = slot / rowsPerCol, rowInCol = slot % rowsPerCol;
             var r = new Rectangle(x + 30 + col * (colW + colGap), gridTop + rowInCol * (ih + gap), colW, ih);
-            ShopBtns[i] = r;
+            ShopBtns[slot] = r;
             bool can = g.CanBuy(i);
             bool hover = can && Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), r);
             Raylib.DrawRectangleRounded(r, 0.1f, 6, hover ? Pal.RGBA(24, 34, 46) : Pal.RGBA(14, 20, 28));

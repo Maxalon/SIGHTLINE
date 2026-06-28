@@ -236,6 +236,57 @@ public class Game
     public const int PrepCost = 12;                            // a one-mission situational edge, priced like FRAG CACHE
     static bool IsPrepItem(int item) => item == PrepItem;
 
+    // ---------------- rotating requisition offer ----------------
+    // Showing ALL ~10 items every barracks made BALLISTIC PLATING the obvious always-buy and let
+    // the rest rot (measured: 486 plating buys vs ~zero of everything else over 40 runs). Instead
+    // we present a ROTATING SLATE of ~5 items, chosen deterministically per barracks from
+    // MapSeed+Mission (like the boon offer, so it round-trips on load and the harness is stable).
+    // This turns "buy the obvious thing" into "prioritise among a limited slate". GUARANTEE: the
+    // slate always includes a survivability option (FIELD MEDKIT and BALLISTIC PLATING), so the
+    // player is never starved of healing/armor. Slot order in the returned list is the display
+    // order (Hud) and the click/buy index space (HandleShopClick / AutoShop map slot -> item id).
+    public const int ShopOfferSize = 5;          // target rotating-slate size (excl. the conditional PREP slot)
+    List<int> _shopOfferCache;                   // recomputed each EnterBarracks (derived, not persisted)
+
+    /// The rotating requisition slate (a list of underlying item ids) for THIS barracks. Cached so
+    /// it's stable across frames within a barracks; rebuilt by RefreshShopOffer at EnterBarracks /
+    /// debug-shop entry. Falls back to building on demand (covers any path that reaches the shop
+    /// without an explicit refresh).
+    public List<int> ShopOffer()
+    {
+        if (_shopOfferCache == null) RefreshShopOffer();
+        return _shopOfferCache;
+    }
+
+    /// (Re)build the rotating slate deterministically from MapSeed+Mission. Always seats the two
+    /// survivability options first, then fills the remaining slots from a seed-shuffled pool of the
+    /// rest, then appends the situational COUNTER-PREP slot only when a faction is telegraphed.
+    public void RefreshShopOffer()
+    {
+        var offer = new List<int>();
+        // (1) survivability guarantees, always present + always first (readable, never starved).
+        offer.Add(0);   // FIELD MEDKIT
+        offer.Add(4);   // BALLISTIC PLATING
+
+        // (2) the rotating pool: everything else except prep (which is conditional + appended last).
+        var pool = new List<int> { 1, 2, 3 };                 // stims / training / frag cache
+        for (int i = 0; i < WeaponModDef.All.Length; i++) pool.Add(ModBase + i);  // weapon mods
+
+        // deterministic shuffle off MapSeed+Mission so the slate is fixed per barracks + round-trips.
+        int seed = (_run != null ? _run.MapSeed : 0) * 131 + (_run != null ? _run.Mission : 0) * 7 + 17;
+        var rng = new Random(seed);
+        for (int i = pool.Count - 1; i > 0; i--) { int j = rng.Next(i + 1); (pool[i], pool[j]) = (pool[j], pool[i]); }
+
+        int want = ShopOfferSize - offer.Count;               // fill the rest of the slate
+        for (int i = 0; i < pool.Count && offer.Count < ShopOfferSize; i++) offer.Add(pool[i]);
+
+        // (3) COUNTER-PREP: a situational extra slot, only when a faction is actually telegraphed
+        // next (otherwise it's a dead, greyed row). It's an ADD-ON, not a slate slot it could crowd out.
+        if (PrepFactionOffered != Faction.None) offer.Add(PrepItem);
+
+        _shopOfferCache = offer;
+    }
+
     public static readonly int[] ShopCost = BuildShopCost();
     public static readonly string[] ShopName = BuildShopName();
     public static readonly string[] ShopDesc = BuildShopDesc();
@@ -1538,7 +1589,13 @@ public class Game
             // remains as a reward for keeping people alive, but depth (which tracks the rising
             // difficulty) is the main driver so the reward sink keeps pace with the gate.
             // ONSLAUGHT pays a risk premium; higher Heat pays a flat per-mission bonus.
-            int gained = 10 + 4 * _run.Mission + survivors;
+            // Routing economy: the cleared node carries its own Intel reward (SUPPLY/ELITE pay
+            // premiums -- the route is a trade-off). Falls back to the old flat depth term when no
+            // map node is current (legacy deploy-card path / harness). A small survivor bonus stays
+            // as a reward for keeping people alive.
+            var clearedNode = _run.CurrentNode;
+            int nodeIntel = clearedNode != null ? clearedNode.Intel : (10 + 4 * _run.Mission);
+            int gained = nodeIntel + survivors;
             if (_run.CurrentCard != null && _run.CurrentCard.ModName == "ONSLAUGHT") gained += 6;
             int heatBonus = Sightline.Heat.IntelBonus(_run.HeatLevel);
             gained += heatBonus;
@@ -1546,6 +1603,7 @@ public class Game
             string heatNote = heatBonus > 0 ? $"  (+{heatBonus} HEAT {_run.HeatLevel})" : "";
             _run.Report.Insert(0, $"Recovered {gained} intel{heatNote}  (total {_run.Intel})");
             _shopDone = false;
+            RefreshShopOffer();                         // roll this barracks' rotating requisition slate
             ArmoryMode = false; ArmorySoldier = null;   // open requisition in the shop view, not armory
             _run.GenerateOffers(_run.Mission + 1);
             _run.GenerateBoonOffer();                // offer a run-scoped boon pick this barracks
@@ -5228,8 +5286,11 @@ public class Game
             return;   // armory swallows other clicks while open
         }
 
-        for (int i = 0; i < Hud.ShopBtns.Length; i++)
-            if (Raylib.CheckCollisionPointRec(m, Hud.ShopBtns[i])) { DoPurchase(i); return; }
+        // ShopBtns are laid out by the Hud over the ROTATING OFFER (display order); map the clicked
+        // slot back to its underlying item id before purchasing.
+        var offer = ShopOffer();
+        for (int i = 0; i < Hud.ShopBtns.Length && i < offer.Count; i++)
+            if (Raylib.CheckCollisionPointRec(m, Hud.ShopBtns[i])) { DoPurchase(offer[i]); return; }
         if (Raylib.CheckCollisionPointRec(m, Hud.ShopProceed)) { _shopDone = true; Audio.Play("turn"); }
     }
 
@@ -5241,10 +5302,12 @@ public class Game
     // and the cap bounds the loop regardless (defensive against a future zero-cost item).
     void AutoShop()
     {
-        if (CanBuy(0)) DoPurchase(0);   // one heal pass if someone's hurt/wounded
+        var offer = ShopOffer();        // buy only from this barracks' rotating slate
+
+        if (offer.Contains(0) && CanBuy(0)) DoPurchase(0);   // one heal pass if someone's hurt/wounded
         // Survivability first: plating (item 4) compounds across the run and is the documented
-        // anti-attrition lever, so prefer it over flat firepower while we can afford it.
-        for (int guard = 0; guard < 8 && CanBuy(4); guard++)
+        // anti-attrition lever, so prefer it over flat firepower while it's offered + affordable.
+        for (int guard = 0; guard < 8 && offer.Contains(4) && CanBuy(4); guard++)
         {
             int before0 = _run.Intel;
             DoPurchase(4);
@@ -5253,17 +5316,18 @@ public class Game
 
         for (int guard = 0; guard < 40; guard++)
         {
-            // cheapest affordable PERMANENT upgrade: weapon mods + plating (4) + frag (3) + stims
-            // (1). Skip the heal (0, done) and the perk pick (2, needs the chooser flow). Greedy by
-            // cost so a leveled squad sinks intel into firepower AND survivability (the reward sink).
+            // cheapest affordable PERMANENT upgrade WITHIN THE OFFER (weapon mods / plating / frag /
+            // stims). Skip the heal (0, done) and the perk pick (2, needs the chooser flow) and PREP
+            // (situational player call). Greedy by cost so the leveled squad sinks intel into the
+            // reward sink AND the analytics show a spread across whatever the slate offered.
             int best = -1, bestCost = int.MaxValue;
-            for (int i = 1; i < ShopCost.Length; i++)
+            foreach (int i in offer)
             {
-                if (i == 2) continue;   // perk pick is a player choice, not an auto-buy
-                if (IsPrepItem(i)) continue;   // COUNTER-PREP is a situational player call, not an auto-buy (keeps balance/autoplay sane)
-                if (CanBuy(i) && ShopCost[i] < bestCost) { best = i; bestCost = ShopCost[i]; }
+                if (i == 0 || i == 2) continue;   // heal done; perk pick is a player choice
+                if (IsPrepItem(i)) continue;      // COUNTER-PREP is a situational player call, not an auto-buy
+                if (CanBuy(i) && ShopCostAt(i) < bestCost) { best = i; bestCost = ShopCostAt(i); }
             }
-            if (best < 0) break;        // nothing affordable/useful left
+            if (best < 0) break;        // nothing affordable/useful left in the slate
             int before = _run.Intel;
             DoPurchase(best);
             if (_run.Intel >= before) break;   // safety: never spin on a no-op purchase
@@ -5385,6 +5449,7 @@ public class Game
         if (_run.Squad.Count > 0) _run.Squad[0].Hp = Math.Max(1, _run.Squad[0].Hp - 4);  // wound for the medkit demo
         _run.Report.Insert(0, $"Recovered 17 intel  (total {_run.Intel})");
         _shopDone = false;
+        RefreshShopOffer();
         Phase = Phase.Barracks;
     }
 
@@ -5397,6 +5462,7 @@ public class Game
         // force a faction onto a reachable next node so UpcomingFaction() returns it
         var next = _run.NextNodes();
         if (next.Count > 0) next[0].Faction = Faction.Wardens;
+        RefreshShopOffer();   // re-roll now that a faction is telegraphed, so the PREP slot shows
     }
 
     /// Harness hook (screenshot): the REQUISITION screen with the ARMORY sub-panel open,
