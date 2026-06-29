@@ -440,11 +440,15 @@ public static class Combat
     public static bool KillRefundsAction(Unit killer)
         => killer != null && killer.Team == Team.Player && !killer.IsVip && killer.HasPerk(Perk.Adrenal);
 
-    /// OUTRUNNER (perk Sprinter, reworked): this soldier ignores enemy OVERWATCH reaction fire while
-    /// moving (Game skips the overwatch loop for its steps, like a Ranger SLIPSTREAM). A mobility VERB
-    /// for a flanker who must cross open lanes — no aim/crit/stat, distinct from every other perk.
+    /// This soldier ignores enemy OVERWATCH reaction fire while moving (Game skips the overwatch loop
+    /// for its steps, like a Ranger SLIPSTREAM). Two perks grant it:
+    ///  - OUTRUNNER (Sprinter): ALWAYS, a mobility verb for a flanker who must cross open lanes.
+    ///  - SKIRMISHER (TEMPO wave 5): only AFTER the soldier has fired this turn — the "shoot, then
+    ///    slip away to safety without eating reaction fire" build that the keystone's free second
+    ///    action enables (rewards shoot-then-reposition over standing still).
     public static bool IgnoresOverwatch(Unit mover)
-        => mover != null && mover.HasPerk(Perk.Sprinter);
+        => mover != null && (mover.HasPerk(Perk.Sprinter)
+            || (mover.HasPerk(Perk.Skirmisher) && mover.FiredThisTurn));
 
     // Streak-breaker constants (S4-C): per clean-miss aim bonus, capped at MaxStreakBonus.
     // Applied INSIDE Resolve only (hidden from the ComputeOdds display — DESIGN.md 3B).
@@ -1025,6 +1029,15 @@ public static class Combat
             var plainMover = new Unit { Team = Team.Player };
             if (IgnoresOverwatch(plainMover)) fails.Add("outrunnerNoPerkNoOp");
             if (IgnoresOverwatch(null)) fails.Add("outrunnerNullSafe");
+        }
+
+        // SKIRMISHER (TEMPO wave 5): ignores overwatch ONLY after firing this turn (shoot-then-slip),
+        // unlike OUTRUNNER which always does. So a fresh SKIRMISHER mover still eats overwatch.
+        {
+            var skU = new Unit { Team = Team.Player }; skU.Perks.Add(Perk.Skirmisher);
+            if (IgnoresOverwatch(skU)) fails.Add("skirmisherPreFireShouldEatOverwatch");
+            skU.FiredThisTurn = true;
+            if (!IgnoresOverwatch(skU)) fails.Add("skirmisherPostFireShouldSlip");
         }
 
         // (VANGUARD perk cut from the offered pool + its ComputeOdds crit branch removed — the

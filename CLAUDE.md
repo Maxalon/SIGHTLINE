@@ -463,7 +463,9 @@ seeds (mix of WIN/LOSE, no exceptions):
   barracks (`Perk`/`Unit.Perks`/`PerkDef`, `Run.PendingPerks`, `Hud.DrawPerkChooser`).
   13 perks (LockOn/Hardened/Reflexes/Bandolier/CloseQuarters/Marksman/Deadeye/Tank/
   Sprinter/Adrenal + S7 **Executioner** +crit vs ½-HP / **Guardian** +overwatch aim /
-  **CoolHeaded** divert incoming aim) make each soldier a build; autopilot auto-picks.
+  **CoolHeaded** divert incoming aim + TEMPO W5 **Skirmisher** (post-fire move ignores
+  overwatch) / **Gunslinger** (full-aim double-tap)) make each soldier a build; autopilot
+  auto-picks. New perks must be added to a `Run.ClassLine` to actually surface in offers.
 - **Class signature abilities:** each class has one self-cast signature (key **5**,
   1 charge/mission, refilled like grenades): Assault **RUN&GUN** (next shot costs 1
   action instead of ending the turn), Ranger **BLITZ** (next move costs one action
@@ -1146,6 +1148,16 @@ Before stopping:
 >   `Combat.BeginMission/EndMission/EndRun` owning the lifecycle: SetupMission→BeginMission (faction set BEFORE Mission.Build so
 >   the spawn roster sees it), barracks→EndMission (refreshes run-scoped RunBoons, clears the 4 mission-scoped), run-end→EndRun.
 >   Behaviour-preserving; the DYNAMIC mid-mission updates (PressureAim ramp, AllUnits re-snap on roster growth) are unchanged.
+> - **WAVE 5 — tempo-exploiting BUILD VARIETY (the keystone's payoff).** The keystone freed a second action after firing;
+>   nothing yet rewarded HOW you spend it. Two append-only (save-safe) perks make it a build axis: **SKIRMISHER** (after you
+>   fire, your repositioning move draws NO overwatch — "shoot, then slip away"; folds into `Combat.IgnoresOverwatch` gated on
+>   `FiredThisTurn`, distinct from OUTRUNNER's always-on) and **GUNSLINGER** (your rushed 2nd shot fires at FULL aim instead of
+>   the SnapAim penalty — the "double-tap" build; the lone rushed-penalty read in IssueShoot/hover/HUD now checks
+>   `!HasPerk(Gunslinger)`, HUD shows a DOUBLE-TAP badge). Themed into the class offer-lines (SKIRMISHER → Assault/Ranger,
+>   GUNSLINGER → Sharpshooter/Gunner). MEASURED (heat0, N=16): both are REAL picks (GUNSLINGER 20 / SKIRMISHER 12, competing
+>   with the old perks — not strictly better); win-rate within noise; depth holds (~5.9). COMBATTEST gained the SKIRMISHER
+>   overwatch-gate cases. (Without the class-line biasing they were offered ~never — GOTCHA: a new perk must be added to a
+>   `Run.ClassLine` to actually surface in offers, not just to `PerkDef.All`.)
 > - **WAVE 3 (content de-bloat — DEFERRED, documented).** The audit's #3 (merge enemy reskins / trim arenas / shorten draggy
 >   objectives) was deliberately NOT executed: removing content risks stripping replay variety for marginal clarity gain, and
 >   the audit itself counseled caution there. Left as clear FUTURE work — the spawn pool (`Mission.SelectArchetype`) + arena

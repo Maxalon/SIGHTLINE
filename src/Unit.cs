@@ -31,7 +31,10 @@ public enum WeaponMod { Scope, ExtendedMag, HollowPoint, Stabilizer }
 public enum Perk { LockOn, Hardened, Reflexes, Bandolier, CloseQuarters, Marksman, Deadeye, Tank, Sprinter, Adrenal,
     Executioner, Guardian, CoolHeaded,
     Opportunist, PointBlank, GiantSlayer,
-    Bulwark, Vanguard }
+    Bulwark, Vanguard,
+    // TEMPO wave 5 — build choices that exploit the new "firing doesn't end the turn" second action:
+    Skirmisher,   // after you fire, your repositioning move this turn ignores enemy overwatch (shoot-then-slip)
+    Gunslinger }  // your rushed SECOND shot this turn fires at FULL aim instead of the penalty (double-tap)
 
 /// Battlefield traits earned by FEATS (see Game feat hooks + Run.DebriefSurvivors).
 /// Each is a small passive read in Combat.ComputeOdds, so veterans matter.
@@ -541,6 +544,7 @@ public static class PerkDef
         Perk.Executioner, Perk.Guardian, Perk.CoolHeaded,
         Perk.GiantSlayer,
         Perk.Bulwark,
+        Perk.Skirmisher, Perk.Gunslinger,   // TEMPO wave 5: the two ways to spend the post-shot action
     };
 
     public static string Name(Perk p) => p switch
@@ -563,6 +567,8 @@ public static class PerkDef
         Perk.GiantSlayer => "FIRST STRIKE",
         Perk.Bulwark => "PLATING",
         Perk.Vanguard => "VANGUARD",
+        Perk.Skirmisher => "SKIRMISHER",
+        Perk.Gunslinger => "GUNSLINGER",
         _ => "PERK",
     };
 
@@ -586,6 +592,8 @@ public static class PerkDef
         Perk.GiantSlayer => "FST",
         Perk.Bulwark => "PLT",
         Perk.Vanguard => "VAN",
+        Perk.Skirmisher => "SKR",
+        Perk.Gunslinger => "GUN",
         _ => "?",
     };
 
@@ -609,6 +617,8 @@ public static class PerkDef
         Perk.GiantSlayer => "+15 crit vs full-HP targets (alpha strike on a fresh foe)",
         Perk.Bulwark => "-2 damage from every hit while at/above half HP (ablative plating)",
         Perk.Vanguard => "+28 crit vs adjacent flanked targets (breach and finish)",
+        Perk.Skirmisher => "after you fire, your move this turn draws no overwatch (shoot, then slip away)",
+        Perk.Gunslinger => "your rushed second shot each turn fires at full aim (double-tap)",
         _ => "",
     };
 }

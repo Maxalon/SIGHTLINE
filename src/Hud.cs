@@ -1055,8 +1055,10 @@ public static class Hud
         // "STEADYING" tells the player the safety net is working so a miss streak feels recoverable.
         if (o.StreakBonus > 0) flags.Add(($"+{o.StreakBonus} STEADYING", Pal.Good));
         // TEMPO: a SECOND shot in the same turn is a rushed follow-up at the SnapAim penalty (the
-        // HitChance shown already reflects it). RUN&GUN's bonus shot is full aim, so no badge then.
-        if (g.AimMode && a != null && a.FiredThisTurn && !a.RunGun) flags.Add(($"RUSHED {Game.SnapAim}", Pal.Foe));
+        // HitChance shown already reflects it). RUN&GUN's bonus shot + the GUNSLINGER perk are full
+        // aim — GUNSLINGER instead gets a "DOUBLE-TAP" confirmation badge.
+        if (g.AimMode && a != null && a.FiredThisTurn && !a.RunGun)
+            flags.Add(a.HasPerk(Perk.Gunslinger) ? ("DOUBLE-TAP", Pal.Good) : ($"RUSHED {Game.SnapAim}", Pal.Foe));
 
         // — modifiers that read live attacker/target state (mirror Combat.ComputeOdds) —
         if (a != null && d != null)
