@@ -145,7 +145,7 @@ public class Weapon
     {
         WeaponKind.Rifle   => New("Rifle",   k, 3, 5, 0, 10, 4),
         WeaponKind.Shotgun => New("Shotgun", k, 4, 7, 0, 15, 2),
-        WeaponKind.Sniper  => New("Marksman",k, 5, 7, 5, 14, 3),
+        WeaponKind.Sniper  => New("Marksman",k, 5, 7, 3, 14, 3),
         WeaponKind.Lmg     => New("LMG",     k, 3, 6, 3,  5, 5),
         WeaponKind.Smg     => New("SMG",     k, 2, 4, 0, 10, 4),
         _ => New("Rifle", WeaponKind.Rifle, 3, 5, 0, 10, 4),
@@ -198,8 +198,12 @@ public class Unit
     // Assault's signature double-tap). Reset in BeginTurn.
     public bool FiredThisTurn;
 
-    // class signature ability (see AbilityKind); charge refilled each mission
-    public int AbilityCharge;
+    // Renewable signature ability: a per-unit COOLDOWN (turns remaining until usable again).
+    // 0 == ready. Set to AbilityCooldownFor(Ability) on use; ticked down 1 at the unit's BeginTurn.
+    // TRANSIENT per-mission state (like the old AbilityCharge) — NEVER persisted; rebuilt by
+    // Mission.Build / Game.SetupMission. Old saves load unchanged (no DTO field).
+    public int AbilityCd;
+    public bool AbilityReady => AbilityCd <= 0;
     public bool RunGun;         // assault: next shot costs 1 action, doesn't end the turn
     public bool Blitz;          // ranger: next move costs one action less
     public bool Steady;         // sharpshooter: next shot gets +aim/+crit
@@ -315,6 +319,23 @@ public class Unit
         _ => AbilityKind.None,
     };
 
+    // Turns of cooldown after use. Stronger / turn-defining verbs cost more. 0 == every turn.
+    // Counts the USER's own turns (ticked at their BeginTurn), so "Cd 3" = skip ~2 turns then usable.
+    public static int AbilityCooldownFor(AbilityKind k) => k switch
+    {
+        AbilityKind.Heal       => 3,   // squad sustain — strongest meta lever, keep scarce
+        AbilityKind.Slipstream => 3,   // free overwatch-immune move — mobility is oppressive if spammed
+        AbilityKind.Mark       => 2,   // squad-wide focus-fire amp — strong but already action-costed
+        AbilityKind.Pin        => 2,   // AoE area-denial; also ENDS the turn, so naturally rate-limited
+        AbilityKind.Grapple    => 2,   // single-foe reposition; shares ShovedThisTurn budget too
+        // legacy stances (only reachable if a class is ever re-pointed at them):
+        AbilityKind.Steady     => 2,
+        AbilityKind.Suppress   => 2,
+        AbilityKind.RunGun     => 1,
+        AbilityKind.Blitz      => 1,
+        _ => 0,
+    };
+
     // ---- utility item (3.4): a second throwable slot, 1 charge/mission, by class ----
     public int ItemCharge;                       // remaining uses this mission (refilled in Mission.Build)
     public ItemKind Item => ItemKindFor(Cls);    // derived from class (never persisted)
@@ -365,6 +386,14 @@ public class Unit
     public bool IsVip;          // escort objective: the asset to extract (mission-only, never persists)
     public bool Enraged;        // elite boss: one-time low-HP rage trigger
     public int ShieldDx, ShieldDy;  // SHIELD archetype: facing dir its frontal shield blocks (3.7)
+
+    // SIEGE / BOMBARD artillery charge (telegraphed area-denial). Transient per-mission state,
+    // never persisted (enemies aren't saved). ChargeTurns is set to Game.SiegeFuse when a strike
+    // is charged on the BOMBARD's turn; the strike resolves in Game.TickSiegeStrikes at the start
+    // of the NEXT enemy turn (it is NOT decremented in BeginTurn — the single authoritative
+    // resolve/decrement lives in TickSiegeStrikes so the charge survives across the unit's turns).
+    public int ChargeTurns;          // >0 == a strike is in flight (the 3x3 danger zone is live)
+    public int ChargeX, ChargeY;     // center tile of the charged 3x3 danger zone
 
     // meta / campaign progression (persists across missions)
     public int Kills;
@@ -511,6 +540,7 @@ public class Unit
 
     public void BeginTurn()
     {
+        if (AbilityCd > 0) AbilityCd--;   // signature ability cools down one of THIS unit's turns
         ActionsLeft = 2;
         OnOverwatch = false;
         Hunkered = false;

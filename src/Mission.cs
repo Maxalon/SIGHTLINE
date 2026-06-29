@@ -34,14 +34,14 @@ public static class Mission
     // newest biomes also theme; PickLayout falls back to a random arena past the end.
     static readonly int[] BiomeLayoutHint =
     {
-        11,  // STEEL   → BASTION (industrial fortress, tier-2 keep)
-        13,  // ARID    → SPUR (sun-baked diagonal high-ground spine)
+        29,  // STEEL   → STEPWELL (stepped tier-2 pyramid with split flanking lanes)
+        31,  // ARID    → ENTRENCHED (asymmetric dug-in trench network)
         12,  // TUNDRA  → CHASM (a frozen ravine split by a cover river)
         10,  // VERDANT → THICKET (dense organic cover clusters)
         14,  // ASH     → HOOK (a ruined outpost with an asymmetric flank)
-        9,   // VOID    → RUINS (open eerie arena, long sightlines)
+        30,  // VOID    → COLONNADE (cavernous long-sightline pillar gallery)
         15,  // NEON    → GRID (orthogonal server-room rack lattice)
-        16,  // MAGMA   → FORGE (commanding tier-2 foundry platform)
+        28,  // MAGMA   → CRUCIBLE (barrel-rigged refinery throat chokepoint)
     };
 
     /// The four starting soldiers for a fresh run.
@@ -50,7 +50,7 @@ public static class Mission
         var squad = new List<Unit>();
         squad.Add(MakeSoldier("VEGA",   "ASSAULT",      WeaponKind.Rifle,   8, 70, 7));
         squad.Add(MakeSoldier("KRESS",  "RANGER",       WeaponKind.Shotgun, 7, 70, 8));
-        squad.Add(MakeSoldier("NOX",    "SHARPSHOOTER", WeaponKind.Sniper,  6, 76, 6));
+        squad.Add(MakeSoldier("NOX",    "SHARPSHOOTER", WeaponKind.Sniper,  6, 72, 6));
         squad.Add(MakeSoldier("BISHOP", "GUNNER",       WeaponKind.Lmg,    10, 62, 6));
         return squad;
     }
@@ -83,7 +83,7 @@ public static class Mission
             u.Y = sp.y;
             u.Ammo = u.Weapon.Clip;
             u.Grenades = 1 + u.BonusGrenades + (u.HasPerk(Perk.Bandolier) ? 1 : 0);  // refill (+cache +Bandolier)
-            u.AbilityCharge = 1;                                   // refill the class signature ability
+            u.AbilityCd = 0;                                       // signature ability ready (off cooldown)
             u.ItemCharge = u.Item != ItemKind.None ? 1 : 0;        // utility item: 1 charge/mission
             u.Suppress = 0;
             u.OnOverwatch = false;
@@ -383,6 +383,7 @@ public static class Mission
         for (int i = rows.Count - 1; i > 0; i--) { int j = Util.RandInt(0, i); (rows[i], rows[j]) = (rows[j], rows[i]); }
 
         var used = new HashSet<(int, int)>();
+        bool siegeSpawned = false;    // hard cap: at most ONE SIEGE/BOMBARD artillery per mission (fairness)
         for (int i = 0; i < count; i++)
         {
             int y = rows[i % rows.Count];
@@ -409,6 +410,13 @@ public static class Mission
                 e = MakeHostile(n == 3 ? "BREAKER" : "WARDEN", "ELITE", WeaponKind.Lmg, 14 + n * 2, 68, 6, x, y);
             else                                // a tier-appropriate rank-and-file archetype
                 e = SelectArchetype(n, r, bump, x, y);
+            // FAIRNESS CAP: at most one SIEGE/BOMBARD per mission. SelectArchetype is stateless, so a
+            // second roll could yield another -> demote any extra BOMBARD to a plain GRUNT here.
+            if (e.Cls == "BOMBARD")
+            {
+                if (siegeSpawned) e = MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 60 + bump, 6, x, y);
+                else siegeSpawned = true;
+            }
             // Aim clamp raised 82 -> 88: the old 82 cap silently ATE the top-rung Heat StatDelta (+aim)
             // for any archetype whose base + bump + Heat exceeded 82, flattening the ladder's apex. 88
             // lets high-Heat aim bonuses land (the ladder stays meaningful at the top) while still
@@ -423,7 +431,7 @@ public static class Mission
             // only for the m3/m5 named elites; the final boss is finalMission && i==0.
             if (e.Cls == "ELITE") e.Grenades = midBoss ? 2 : 1;
             else if (e.Cls == "MORTAR") { /* keep MORTAR's 2-3 grenades from SelectArchetype */ }
-            else if (n >= 2 && e.Cls != "MEDIC" && e.Cls != "SAPPER" && (e.Cls == "BRUISER" || Util.Roll(22))) e.Grenades = 1;
+            else if (n >= 2 && e.Cls != "MEDIC" && e.Cls != "SAPPER" && e.Cls != "BOMBARD" && (e.Cls == "BRUISER" || Util.Roll(22))) e.Grenades = 1;
             // utility items (S2-B): snipers/scouts carry smoke to cover their movement;
             // some grunts get smoke from mission 3+. Flash given to berserkers (mission 3+)
             // to disorient the squad before charging. Never given to ELITE/MEDIC/TURRET/
@@ -475,7 +483,7 @@ public static class Mission
             if (r < 0.43f) return MakeHostile("JACKAL", "HUNTER", WeaponKind.Smg, 5 + bump, 60 + bump, 9, x, y);   // 13% flanker
             if (r < 0.58f) return MakeHostile("HOPLITE", "LANCER", WeaponKind.Rifle, 6 + bump, 58 + bump, 5, x, y);// 15% formation trooper
             if (r < 0.72f) return MakeHostile("FERAL", "HOUND", WeaponKind.Smg, 3 + bump, 56 + bump, 9, x, y);     // 14% swarmer
-            if (r < 0.85f) return MakeHostile("OGRE", "BRUISER", WeaponKind.Lmg, 9 + bump * 2, 56 + bump, 5, x, y);// 13% bruiser
+            if (r < 0.85f) return MakeHostile("OGRE", "BRUISER", WeaponKind.Lmg, 9 + bump, 56 + bump, 5, x, y);// 13% bruiser
             return MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 58 + bump, 8, x, y);                  // 15% scout
         }
 
@@ -486,7 +494,7 @@ public static class Mission
         // high priority to KILL, so it's deliberately a single ~7% slot, not a swarm.
         if (r < 0.08f) return MakeHostile("SENTRY", "TURRET", WeaponKind.Lmg, 6 + bump, 66 + bump, 0, x, y);       //  8% immobile nest
         if (r < 0.17f) return MakeHostile("VIPER", "SNIPER", WeaponKind.Sniper, 4 + bump, 62 + bump, 5, x, y);     //  9% marksman
-        if (r < 0.25f) return MakeHostile("REAVER", "BERSERKER", WeaponKind.Shotgun, 12 + bump * 2, 58 + bump, 8, x, y); // 8% rusher
+        if (r < 0.25f) return MakeHostile("REAVER", "BERSERKER", WeaponKind.Shotgun, 12 + bump, 58 + bump, 8, x, y); // 8% rusher
         if (r < 0.33f) return MakeHostile("WASP", "DRONE", WeaponKind.Smg, 3 + bump, 60 + bump, 7, x, y);          //  8% drone
         if (r < 0.41f) return MakeHostile("JACKAL", "HUNTER", WeaponKind.Smg, 5 + bump, 60 + bump, 9, x, y);       //  8% flanker
         // LANCER (HOPLITE): a formation trooper — see Ai.Plan. It is sturdier in a line (the AI rewards
@@ -515,9 +523,14 @@ public static class Mission
         // while it lives it "paints" the squad's priority target — Ai.Plan amplifies focus-fire
         // convergence for ALL allies (see Ai.SpotterActive). Kill it first to break the crossfire.
         if (r < 0.86f) return MakeHostile("BEACON", "SPOTTER", WeaponKind.Smg, 5 + bump, 48 + bump, 6, x, y);      //  6% designator
-        if (r < 0.93f) return MakeHostile("OGRE", "BRUISER", WeaponKind.Lmg, 9 + bump * 2, 56 + bump, 5, x, y);    //  7% bruiser
-        if (r < 0.97f) return MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 58 + bump, 8, x, y);       //  4% scout
-        return MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 60 + bump, 6, x, y);                     //  3% grunt
+        // SIEGE (BOMBARD): a fragile back-line artillery piece. It does NOT fire — it CHARGES a
+        // telegraphed 3x3 strike (shown for a full player turn) that lands cover-ignoring next enemy
+        // turn (see Ai.Plan/Game.TickSiegeStrikes). Forces RELOCATION (a non-shoot tactical axis).
+        // Rare (~5%); capped at 1 per mission by the post-pick guard in SpawnEnemies.
+        if (r < 0.91f) return MakeHostile("SIEGE", "BOMBARD", WeaponKind.Smg, 7 + bump, 48 + bump, 4, x, y);       //  5% artillery
+        if (r < 0.96f) return MakeHostile("OGRE", "BRUISER", WeaponKind.Lmg, 9 + bump, 56 + bump, 5, x, y);    //  5% bruiser
+        if (r < 0.99f) return MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 58 + bump, 8, x, y);       //  3% scout
+        return MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 60 + bump, 6, x, y);                     //  1% grunt
     }
 
     /// FACTION-GATED rank-and-file pick (Phase 4 foundation). Returns one archetype drawn from the
@@ -546,23 +559,26 @@ public static class Mission
 
             // LEGION (shock assault) — BERSERKER, BRUISER, HUNTER, SCOUT (+ GRUNT filler).
             case Faction.Legion:
-                if (r < 0.26f) return MakeHostile("REAVER", "BERSERKER", WeaponKind.Shotgun, 12 + bump * 2, 58 + bump, 8, x, y);
-                if (r < 0.50f) return MakeHostile("OGRE", "BRUISER", WeaponKind.Lmg, 9 + bump * 2, 56 + bump, 5, x, y);
+                if (r < 0.26f) return MakeHostile("REAVER", "BERSERKER", WeaponKind.Shotgun, 12 + bump, 58 + bump, 8, x, y);
+                if (r < 0.50f) return MakeHostile("OGRE", "BRUISER", WeaponKind.Lmg, 9 + bump, 56 + bump, 5, x, y);
                 if (r < 0.74f) return MakeHostile("JACKAL", "HUNTER", WeaponKind.Smg, 5 + bump, 60 + bump, 9, x, y);
                 if (r < 0.90f) return MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 58 + bump, 8, x, y);
                 return MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 60 + bump, 6, x, y);              // filler
 
-            // WARDENS (precision/control) — SNIPER, MORTAR, MEDIC, GRUNT (+ SCOUT filler).
+            // WARDENS (precision/control / area-denial) — SNIPER, MORTAR, SIEGE artillery, MEDIC,
+            // GRUNT (+ SCOUT filler). The standoff faction: thematically perfect for the telegraphed
+            // artillery (capped at 1/mission by the SpawnEnemies post-pick guard).
             case Faction.Wardens:
             default:
-                if (r < 0.28f) return MakeHostile("VIPER", "SNIPER", WeaponKind.Sniper, 4 + bump, 62 + bump, 5, x, y);
-                if (r < 0.50f)
+                if (r < 0.26f) return MakeHostile("VIPER", "SNIPER", WeaponKind.Sniper, 4 + bump, 62 + bump, 5, x, y);
+                if (r < 0.46f)
                 {
                     var m = MakeHostile("MORTAR", "MORTAR", WeaponKind.Smg, 6 + bump, 50 + bump, 5, x, y);
                     m.Grenades = n >= 5 ? 3 : 2;                // a deep frag pouch — the EXISTING grenade AI uses it
                     return m;
                 }
-                if (r < 0.70f) return MakeHostile("ORDERLY", "MEDIC", WeaponKind.Smg, 6 + bump, 52 + bump, 6, x, y);
+                if (r < 0.58f && n >= 3) return MakeHostile("SIEGE", "BOMBARD", WeaponKind.Smg, 7 + bump, 48 + bump, 4, x, y);   // 12% artillery (m3+ only — fairness tier)
+                if (r < 0.74f) return MakeHostile("ORDERLY", "MEDIC", WeaponKind.Smg, 6 + bump, 52 + bump, 6, x, y);
                 if (r < 0.90f) return MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 60 + bump, 6, x, y);
                 return MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 58 + bump, 8, x, y);              // filler
         }
@@ -580,7 +596,7 @@ public static class Mission
         {
             case 0: return MakeSoldier(name, "ASSAULT", WeaponKind.Rifle, 8, 66, 7);
             case 1: return MakeSoldier(name, "RANGER", WeaponKind.Shotgun, 7, 66, 8);
-            case 2: return MakeSoldier(name, "SHARPSHOOTER", WeaponKind.Sniper, 6, 72, 6);
+            case 2: return MakeSoldier(name, "SHARPSHOOTER", WeaponKind.Sniper, 6, 68, 6);
             case 3: return MakeSoldier(name, "CORPSMAN", WeaponKind.Smg, 7, 62, 8);
             default: return MakeSoldier(name, "GUNNER", WeaponKind.Lmg, 10, 58, 6);
         }
@@ -618,7 +634,7 @@ public static class Mission
         var u = new Unit { Name = name, Cls = cls, Team = Team.Player, Hp = hp, MaxHp = hp, Aim = aim, Mobility = mob, Weapon = Weapon.Make(w) };
         u.Ammo = u.Weapon.Clip;
         u.Grenades = 1;
-        u.AbilityCharge = 1;
+        u.AbilityCd = 0;
         // (Gunner's niche is its top HP (10) + PIN area-denial; an innate armor on top inflated the
         // overall win-rate well past redistribution-neutral, so it's intentionally NOT granted.)
         return u;

@@ -44,10 +44,24 @@ public static class Program
             Console.WriteLine(Combat.SelfTest());
             return;
         }
+        // SIGHTLINE_EVENTTEST=1 : between-mission FIELD EVENT selection/placement/outcomes + save round-trip (W4). No window.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_EVENTTEST") == "1")
+        {
+            Console.WriteLine(EventCatalog.SelfTest());
+            return;
+        }
         // SIGHTLINE_HAZARDTEST=1 : environmental-hazard mechanics (barrel blocking / fire / pathing). No window.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_HAZARDTEST") == "1")
         {
             Console.WriteLine(Game.HazardSelfTest());
+            return;
+        }
+        // SIGHTLINE_SIEGETEST=1 : SIEGE/BOMBARD charge->telegraph->detonate->interrupt + no-target fallback.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_SIEGETEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "siegetest");   // Game uses tile math + Fx; tiny window
+            Console.WriteLine(new Game().SiegeSelfTest());
+            Raylib.CloseWindow();
             return;
         }
         // SIGHTLINE_AUDIOTEST=1 : device-free validation that every weapon/stinger/baseline SFX
@@ -93,6 +107,14 @@ public static class Program
         if (Environment.GetEnvironmentVariable("SIGHTLINE_ITEMTEST") == "1")
         {
             Console.WriteLine(Game.ItemSelfTest());
+            return;
+        }
+        // SIGHTLINE_CDTEST=1 : renewable signature-ability cooldown (set on use, ticks at BeginTurn).
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_CDTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "cdtest");   // Game uses tile math + Fx; tiny window
+            Console.WriteLine(new Game().CdSelfTest());
+            Raylib.CloseWindow();
             return;
         }
         // SIGHTLINE_CONCEALTEST=1 : concealment gating + ambush break check (item 4.4).
@@ -231,6 +253,7 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_PRESSURE") == "1") game.DebugPressure();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CONCEAL") == "1") game.DebugConcealment();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_INTENT") == "1") game.DebugIntent();
+        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_SIEGE") == "1") game.DebugSiege();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CARDS") == "1") game.DebugDeployCards();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CAMPAIGN") == "1") game.DebugCampaignMap();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_ITEM") == "1") game.DebugItem();
@@ -244,6 +267,7 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_PREP") == "1") game.DebugPrep();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_ARMORY") == "1") game.DebugArmory();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_BOON") == "1") game.DebugBoon();
+        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_EVENT") == "1") game.DebugEvent();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_DRAFT") == "1") game.BeginDraft();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_HAZARD") == "1") game.DebugHazards();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_TAGEDIT") == "1") game.DebugTagEditor();

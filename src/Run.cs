@@ -24,7 +24,7 @@ public enum Boon
     Executioners,  // +crit vs sub-half-HP targets, squad-wide
     Fortified,     // +1 effective armor, squad-wide
     Grenadier,     // a kill refreshes the killer's grenade
-    Scavenger,     // a kill refills +2 ammo to the killer
+    Scavenger,     // a kill heals the killer +2 HP (run sustain)
     Adrenaline,    // a kill grants the killer +1 action this turn (cap 1/turn)
     Venom,         // a player hit applies Bleed to the target
     Ghost,         // moving near a foe does not break concealment
@@ -54,7 +54,7 @@ public static class BoonDef
         Boon.Executioners => "Squad +20 crit vs targets below half HP",
         Boon.Fortified => "Whole squad gains +1 armor (-1 damage/hit)",
         Boon.Grenadier => "A kill refreshes the killer's grenade",
-        Boon.Scavenger => "A kill refills +2 ammo to the killer",
+        Boon.Scavenger => "A kill heals the killer +2 HP",
         Boon.Adrenaline => "A kill grants the killer +1 action (once/turn)",
         Boon.Venom => "Your hits make the target bleed",
         Boon.Ghost => "Moving near foes never breaks concealment",
@@ -86,7 +86,7 @@ public class MissionCard
 /// objective + difficulty + reward (carried in Card) plus a node "kind" that
 /// flavours the encounter. Nodes are laid out in columns (one per mission) and
 /// connected to 1-2 nodes in the next column, FTL/Slay-the-Spire style.
-public enum NodeKind { Start, Combat, Elite, Supply, Boss }
+public enum NodeKind { Start, Combat, Elite, Supply, Boss, Event }   // Event appended (save-safe; W4 "?" beats)
 
 /// A run-end MEMORIAL entry: a snapshot of a soldier at the moment they fell, captured for the
 /// run-summary card's KIA roll. PRESENTATION ONLY — populated from Game.KillUnit, read by Hud.
@@ -364,6 +364,23 @@ public class Run
         for (int e = 0; e < elites && k < mids.Count; e++, k++) mids[k].Kind = NodeKind.Elite;
         for (int s = 0; s < supplies && k < mids.Count; s++, k++) mids[k].Kind = NodeKind.Supply;
 
+        // W4 — between-mission FIELD EVENTS ("?" beats): stamp 1-2 of the still-Combat mids as
+        // Event nodes. Uses the same seeded rng (deterministic -> round-trips on load), sits only
+        // in mid columns (never Start/Boss), and leaves the edge-wiring + fix-up below untouched so
+        // connectivity holds (events never make a whole column, so a fight path to BOSS always
+        // remains). Events are NOT fights: ChooseNode intercepts them before SetupMission.
+        int events = Math.Clamp(mids.Count / 4, 1, 2);
+        int placed = 0;
+        for (; k < mids.Count && placed < events; k++)
+        {
+            var cand = mids[k];
+            // never make a whole column events (a fight path must remain in every mid column)
+            int colCombat = Map.FindAll(n => n.Col == cand.Col && n.Kind == NodeKind.Combat).Count;
+            if (colCombat <= 1) continue;   // this is the column's last fight node — leave it a fight
+            cand.Kind = NodeKind.Event;
+            placed++;
+        }
+
         foreach (var node in Map) node.Card = CardForNode(node);
 
         // ROUTING ECONOMY: per-node Intel reward. Base scales with depth (the rising difficulty),
@@ -434,6 +451,10 @@ public class Run
                 return new MissionCard { Objective = obj, ModName = "ELITE", EnemyDelta = 2, StatDelta = 1, Reward = RewardKind.BonusPerk, RewardText = "Bonus perk" };
             case NodeKind.Supply:
                 return new MissionCard { Objective = obj, ModName = "SUPPLY", EnemyDelta = -1, StatDelta = -1, Reward = RewardKind.Heal, RewardText = "Full squad heal" };
+            case NodeKind.Event:
+                // sentinel: an event is never built into a mission (ChooseNode intercepts it), but
+                // a non-null Card keeps any generic node.Card read null-safe.
+                return new MissionCard { Objective = Objective.Eliminate, ModName = "EVENT", Reward = RewardKind.None, RewardText = "-" };
             default:
                 return new MissionCard { Objective = obj, ModName = "STANDARD", Reward = RewardKind.None, RewardText = "-" };
         }
@@ -451,6 +472,7 @@ public class Run
         {
             NodeKind.Supply => baseIntel + 10,   // economy route: rest + a meaningful intel bonus
             NodeKind.Elite  => baseIntel + 14,   // risk-for-reward: heavier force, the biggest payout
+            NodeKind.Event  => 0,                // no clear-intel: an event's rewards come from the choice
             _               => baseIntel,
         };
     }
@@ -466,11 +488,26 @@ public class Run
         var node = Map[0];
         while (node.Col < targetCol && node.Next.Count > 0)
         {
-            node = Map[node.Next[0]];
+            node = Map[NonEventNext(node)];
+            node.Visited = true;
+            MapPos = node.Id;
+        }
+        // harness fidelity: if we landed on an Event node (no fight), hop one more edge to a real
+        // node so SIGHTLINE_MISSION builds an actual mission rather than the EVENT sentinel card.
+        if (node.Kind == NodeKind.Event && node.Next.Count > 0)
+        {
+            node = Map[NonEventNext(node)];
             node.Visited = true;
             MapPos = node.Id;
         }
         CurrentCard = node.Card;
+    }
+
+    /// The first non-Event outgoing node id (falls back to Next[0] if all are events).
+    int NonEventNext(MissionNode node)
+    {
+        foreach (int id in node.Next) if (Map[id].Kind != NodeKind.Event) return id;
+        return node.Next[0];
     }
 
     /// Objective rotation baseline: an 8-objective cycle (Eliminate / Hack / Evac / Escort /
@@ -969,12 +1006,14 @@ public class Run
             {
                 Faction.Syndicate => "SYNDICATE: drones + shields",
                 Faction.Legion    => "LEGION: berserkers rush",
-                Faction.Wardens   => "WARDENS: snipers + mortars",
+                Faction.Wardens   => "WARDENS: snipers + artillery",
                 _ => FactionName(node.Faction),
             };
         int m = node.Mission;   // 1-based column == mission number
         switch (node.Kind)
         {
+            case NodeKind.Event:
+                return "UNKNOWN SIGNAL";   // a "?" beat: a situation + choices, not a fight
             case NodeKind.Boss:
                 // GenerateMap only ever places ONE Boss node, at the final column, so the
                 // capstone WARLORD is the boss. (BREAKER m3 / WARDEN m5 appear as mid-bosses
@@ -993,7 +1032,7 @@ public class Run
                 if (m == 1)    return "GRUNTS + SCOUTS";
                 if (m == 2)    return "HOUND PACK + HUNTER";
                 if (m == 3)    return "LANCER LINE + MORTAR";
-                if (m == 4)    return "BERSERKER + DRONE";
+                if (m == 4)    return "BERSERKER + ARTILLERY";
                 if (m == 5)    return "SHIELD + MEDIC";
                 return                 "ELITE FORCE";
         }

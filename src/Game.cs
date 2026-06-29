@@ -296,7 +296,7 @@ public class Game
 
     static int[] BuildShopCost()
     {
-        var b = new[] { 6, 10, 16, 12, 8 };    // +BALLISTIC PLATING (survivability sink, front-loaded cheap)
+        var b = new[] { 6, 8, 16, 8, 8 };    // STIMS 8 / FRAG CACHE 8 (revived sinks) +BALLISTIC PLATING (survivability, front-loaded cheap)
         var all = new int[ModBase + WeaponModDef.All.Length + 1];   // +1 for the dynamic PREP item
         b.CopyTo(all, 0);
         for (int i = 0; i < WeaponModDef.All.Length; i++) all[ModBase + i] = WeaponModDef.Cost(WeaponModDef.All[i]);
@@ -317,7 +317,7 @@ public class Game
         var b = new[]
         {
             "Heal your most-wounded soldier to full.",
-            "+2 max HP to your frailest soldier (permanent).",
+            "+3 max HP to your frailest soldier (permanent).",
             "Grant a soldier a bonus perk choice.",
             "+1 grenade every mission for a soldier (permanent).",
             "+1 armor to your least-armored soldier (permanent: -1 damage per hit).",
@@ -766,7 +766,7 @@ public class Game
         Grid.ClearHazards();              // wipe last mission's fire/barrels before terrain is rebuilt
         Mission.Build(Grid, Players, Enemies, n, EvacZone, reserve,
                       enemyDelta, statDelta, HasSabotage ? SabotageSites : null);
-        if (Vip != null) { Vip.Grenades = 0; Vip.AbilityCharge = 0; }  // the asset has no kit
+        if (Vip != null) { Vip.Grenades = 0; Vip.AbilityCd = 99; }  // the asset has no kit (never ready)
         if (Objective == Objective.Rescue && Vip != null)
         {
             // seat the caged captive mid-field and clear its tile + ring so soldiers can reach it
@@ -943,6 +943,25 @@ public class Game
         IntentPlan = plan;
         IntentDest = dest;
         ShowBanner("ENEMY INTENT", true);
+    }
+
+    /// Harness hook (screenshot only): stage a live SIEGE strike so one SHOT frame shows the
+    /// persistent pulsing 3x3 danger zone + source line + warning triangle (DrawSiegeZones). Wakes
+    /// all, forces one live enemy to BOMBARD, charges it over the nearest soldier cluster.
+    public void DebugSiege()
+    {
+        DebugWakeAll();
+        Unit foe = Enemies.FirstOrDefault(e => e.Alive);
+        if (foe == null) return;
+        foe.Cls = "BOMBARD";
+        var (bx, by, hits) = (foe.X, foe.Y, 0);
+        // center the zone on the nearest soldier (the strike's intended target)
+        Unit nearest = null; int nd = int.MaxValue;
+        foreach (var p in AlivePlayers())
+        { int d = Util.ChebyDist(foe.X, foe.Y, p.X, p.Y); if (d < nd) { nd = d; nearest = p; } }
+        if (nearest != null) { bx = nearest.X; by = nearest.Y; }
+        foe.ChargeX = bx; foe.ChargeY = by; foe.ChargeTurns = SiegeFuse;
+        ShowBanner("ARTILLERY INCOMING", true);
     }
 
     /// Headless self-test for 4.4 concealment: starts concealed, pods are gated from
@@ -1348,7 +1367,7 @@ public class Game
         var u = Players.FirstOrDefault(p => p.Alive && !p.IsVip);
         if (u == null) return;
         u.Cls = "SHARPSHOOTER";        // force the MARK ability for the demo
-        u.AbilityCharge = 1;
+        u.AbilityCd = 0;
         var foes = Enemies.Where(e => e.Alive && Grid.HasLineOfSight(u.X, u.Y, e.X, e.Y))
                           .OrderBy(e => Util.ChebyDist(u.X, u.Y, e.X, e.Y)).ToList();
         if (foes.Count >= 1) { foes[0].Marked = true; _markedBy = u; }     // already-marked foe
@@ -1371,7 +1390,7 @@ public class Game
         var u = Players.FirstOrDefault(p => p.Alive && !p.IsVip);
         if (u == null) return;
         u.Cls = "GUNNER";              // force the SUPPRESSING FIRE ability for the demo
-        u.AbilityCharge = 1; u.Ammo = Math.Max(u.Ammo, 1);
+        u.AbilityCd = 0; u.Ammo = Math.Max(u.Ammo, 1);
         var foes = Enemies.Where(e => e.Alive && Grid.HasLineOfSight(u.X, u.Y, e.X, e.Y))
                           .OrderBy(e => Util.ChebyDist(u.X, u.Y, e.X, e.Y)).ToList();
         if (foes.Count >= 1) foes[0].Pinned = PinTurns;     // an already-pinned foe (cage indicator)
@@ -1763,7 +1782,7 @@ public class Game
             // overwatch reaction aim: base -10; Reflexes makes it near-certain, Guardian adds a
             // precision bump. ADDITIVE (not a ternary) so a soldier with BOTH gets both (review
             // S7: the old ternary silently discarded Guardian whenever Reflexes was also held).
-            int reactMod = -10 + (w.HasPerk(Perk.Reflexes) ? 110 : 0) + (w.HasPerk(Perk.Guardian) ? Unit.GuardianAim : 0);
+            int reactMod = -10 + (w.HasPerk(Perk.Reflexes) ? 75 : 0) + (w.HasPerk(Perk.Guardian) ? Unit.GuardianAim : 0);
             var res = Combat.Resolve(Grid, w, mover, reactMod);
             Fx.PopText(w.Pos + new Vector2(0, -30), "OVERWATCH", Pal.Accent, 18f);
             Audio.Play("over");
@@ -1815,6 +1834,10 @@ public class Game
 
     public void KillUnit(Unit d)
     {
+        // SIEGE interrupt: killing a charging BOMBARD cancels its strike (the zone reads off live
+        // enemies, so it clears automatically; this is a cosmetic confirmation of the interrupt).
+        if (d.Cls == "BOMBARD" && d.ChargeTurns > 0)
+            Fx.PopText(d.Pos + new Vector2(0, -34), "STRIKE ABORTED", Pal.Good, 16f);
         d.Alive = false;
         d.Hp = 0;
         // balance telemetry (no-op unless Stats.Enabled): attribute this kill to the unit
@@ -1914,8 +1937,12 @@ public class Game
         {
             if (_run.HasBoon(Boon.Grenadier) && killer.Grenades < 1 + killer.BonusGrenades + (killer.HasPerk(Perk.Bandolier) ? 1 : 0))
                 killer.Grenades++;                                   // a kill tops the grenade back up
-            if (_run.HasBoon(Boon.Scavenger))
-                killer.Ammo = Math.Min(killer.Weapon.Clip, killer.Ammo + 2);   // scavenge ammo
+            if (_run.HasBoon(Boon.Scavenger) && killer.Hp < killer.MaxHp)
+            {
+                int before = killer.Hp;
+                killer.Hp = Math.Min(killer.MaxHp, killer.Hp + 2);   // SCAVENGER (re-themed): a kill heals the killer +2 HP (run sustain)
+                if (killer.Hp > before) Fx.PopText(killer.Pos + new Vector2(0, -16), $"+{killer.Hp - before}", Pal.Good, 18f);
+            }
             // ADRENALINE: a kill on the player's turn refunds +1 action, capped once/turn per soldier
             // (shares the flank-kill refund guard so the two never compound into an endless chain).
             if (_run.HasBoon(Boon.Adrenaline) && Phase == Phase.PlayerTurn && !_refundedThisTurn.Contains(killer))
@@ -2028,6 +2055,78 @@ public class Game
     // ──────────────────────────────────────────────────────────────────────────
     public const int BarrelDmg = 6;          // base barrel-blast damage (a touch above a frag)
     public const int BarrelRadius = 1;       // Chebyshev blast radius
+
+    // SIEGE / BOMBARD artillery (telegraphed area-denial). A charging SIEGE marks a 3x3 zone on its
+    // turn that is shown for the player's WHOLE next turn, then detonates at the start of the
+    // following enemy turn (TickSiegeStrikes) for heavy cover-ignoring AoE — unless it's killed
+    // (interrupt) or the squad vacates. No fire field / no cover demolition (its identity is "move").
+    public const int SiegeFuse   = 1;        // ChargeTurns value set at charge time (see TickSiegeStrikes timing)
+    public const int SiegeRadius = 1;        // Chebyshev radius -> a 3x3 zone
+    public const int SiegeDmg    = 7;        // cover-ignoring base AoE (a touch above BarrelDmg=6)
+
+    /// True when any live BOMBARD has a strike charged (drives the HUD/banner "strike inbound" cue).
+    public bool SiegeActive
+    {
+        get { foreach (var e in Enemies) if (e.Alive && e.Cls == "BOMBARD" && e.ChargeTurns > 0) return true; return false; }
+    }
+
+    /// True if (x,y) is inside a live BOMBARD strike zone. Cover-ignoring, so cover doesn't save you —
+    /// the only outs are KILL the artillery or VACATE the tile. Read by the smart autopilot (flee) and
+    /// the renderer/self-test. Reads live charge state, so a killed SIEGE's zone auto-clears.
+    public bool InSiegeZone(int x, int y)
+    {
+        foreach (var e in Enemies)
+            if (e.Alive && e.Cls == "BOMBARD" && e.ChargeTurns > 0
+                && Util.ChebyDist(x, y, e.ChargeX, e.ChargeY) <= SiegeRadius) return true;
+        return false;
+    }
+
+    /// Resolve every charged BOMBARD strike at the START of the enemy turn (before any hostile acts
+    /// and before reinforcements/pressure add bodies — see EndPlayerTurn). Cover-ignoring 3x3 AoE on
+    /// the charged center; both teams in the zone are hit (friendly fire, consistent with every other
+    /// AoE; the AI never centers on its own). A dead SIEGE's strike never fires (the kill-interrupt).
+    /// Bounded (one pass over the tiny enemy list) -> can never loop/TIMEOUT. NO fire / NO cover demo.
+    void TickSiegeStrikes()
+    {
+        foreach (var e in Enemies.ToList())   // ToList: a strike can kill units; don't mutate mid-scan
+        {
+            if (!e.Alive || e.Cls != "BOMBARD" || e.ChargeTurns <= 0) continue;
+            e.ChargeTurns = 0;                // consume the charge (fired)
+            DetonateSiege(e, e.ChargeX, e.ChargeY);
+        }
+    }
+
+    /// The strike lands: cover-ignoring 3x3 AoE on (cx,cy), reusing the DetonateBarrel pattern
+    /// (HardenedReduce + fragile-floor for full-HP players + pod-wake), but WITHOUT cover demolition
+    /// or a lingering fire field (keep it clean — its identity is forcing relocation, not terrain
+    /// destruction). Damage routes through EnvDamage (kill / near-death / FX handled once). Synchronous.
+    void DetonateSiege(Unit src, int cx, int cy)
+    {
+        var center = Util.TileCenter(cx, cy);
+        Audio.Play("crit"); Audio.Play("death");
+        Fx.AddShake(13f); AddHitStop(0.06f); AddZoomPunch(0.06f); AddBloom(0.4f);
+        float blastR = (SiegeRadius + 0.5f) * Cfg.Tile;
+        Fx.Burst(center, Pal.RGBA(255, 140, 90), 38, 360f, 0.6f, 5f, true);
+        Fx.Shockwave(center, Pal.RGBA(255, 180, 130), 10f, blastR, 5f, 0.95f, 0.30f);
+        Fx.Impact(center, Pal.RGBA(255, 130, 70), blastR * 0.5f, 0.95f, 0.16f);
+
+        var wokePods = new HashSet<int>();
+        foreach (var u in Players.Concat(Enemies).ToList())
+        {
+            if (!u.Alive) continue;
+            if (u == src) continue;                              // the firing artillery never catches itself in its own strike
+            if (u == Vip && CaptiveLocked) continue;             // the caged captive is invulnerable
+            if (Util.ChebyDist(u.X, u.Y, cx, cy) > SiegeRadius) continue;
+            if (u.Team == Team.Enemy && !u.Active) wokePods.Add(u.PodId);
+            int dmg = SiegeDmg + Util.RandInt(0, 2);
+            dmg = Combat.HardenedReduce(u, dmg, crit: false);
+            if (u.Team == Team.Player && u.MaxHp >= 2 && u.Hp >= u.MaxHp) dmg = Math.Min(dmg, u.MaxHp - 1);  // fragile floor
+            // EnvDamage = the single source-less-damage helper (FX + kill/near-death). No kill-credit
+            // to a player — this is enemy artillery (consistent with a fire-cooked barrel crediting no one).
+            EnvDamage(u, Math.Max(1, dmg), "STRIKE", Pal.RGBA(255, 160, 90));
+        }
+        foreach (int pod in wokePods) ActivatePod(pod);
+    }
 
     /// True when a barrel sits adjacent-or-on a soldier cluster worth detonating (AI/autopilot aid).
     public bool BarrelNearFoesOf(int x, int y, Team victims, int radius = BarrelRadius)
@@ -2270,13 +2369,25 @@ public class Game
                 {
                     if (AutoPlay) _run.ChooseBoon(_run.BoonOffer[0]); else HandleBoonClick();
                 }
+                else if (EventPending)                   // W4: resolve a "?" FIELD EVENT before the node pick
+                {
+                    if (AutoPlay) ResolveEvent(AutoEventChoice()); else HandleEventClick();
+                }
                 else
                 {
                     // debrief screen: bench toggles are available before choosing a node/card
                     if (!AutoPlay) HandleBenchClick();
                     if (_run.NextNodes().Count > 0)      // pick the next node on the campaign map
                     {
-                        if (AutoPlay) ChooseNode(_run.NextNodes()[0].Id); else HandleNodeClick();
+                        if (AutoPlay)
+                        {
+                            // Prefer an Event node when reachable so autoplay/balance always exercise
+                            // the "?" path (and continuously verify the event mission-lockstep fix).
+                            var nn = _run.NextNodes();
+                            var ev = nn.FirstOrDefault(x => x.Kind == NodeKind.Event);
+                            ChooseNode((ev ?? nn[0]).Id);
+                        }
+                        else HandleNodeClick();
                     }
                     else if (AutoPlay) ChooseCard(0);    // fallback: deployment cards
                     else HandleCardClick();
@@ -2435,6 +2546,18 @@ public class Game
         if (u == null) { EndPlayerTurn(); return; }
         Selected = u;
         RecomputeMoveCost();
+
+        // ── SIEGE response (non-shoot tactical axis): a soldier standing in a charged strike zone
+        // must (a) interrupt the artillery if it has a good shot at it (PriorityWeight 24 already
+        // biases TakeBestShot toward the BOMBARD), else (b) step OUT of the zone. This makes the
+        // autopilot exercise the intended "relocate / focus the source" play so balance reflects it,
+        // and the SmartFleeSiege fall-through always reaches a guaranteed-progress action (no TIMEOUT).
+        if (!SquadConcealed && InSiegeZone(u.X, u.Y))
+        {
+            if (!Slip(15) && TakeBestShot(u)) return;   // interrupt: kill the charging SIEGE if we can
+            if (SmartFleeSiege(u)) return;              // vacate: step to the best out-of-zone tile
+            // penned in (rare): fall through to normal routing -> always ends in DoHunker.
+        }
 
         // ── CONCEALMENT / AMBUSH (4.4): spend the opener deliberately ──────────────────
         // While concealed the squad can reposition freely AND pods can't wake by sight, so
@@ -2934,6 +3057,7 @@ public class Game
         {
             case "ELITE":     return 30f;   // boss / mid-boss: ends the mission, hits hard
             case "WARLORD":   return 32f;
+            case "BOMBARD":   return 24f;   // SIEGE artillery: silence it to cancel the telegraphed strike
             case "SNIPER":    return 22f;   // long-range chip from safety
             case "MORTAR":    return 22f;   // back-line AoE we can't easily reach
             case "MEDIC":     return 20f;   // undoes our damage — kill it to stop the heals
@@ -3249,6 +3373,7 @@ public class Game
     {
         float threat = 0f;
         if (Grid.IsFire(x, y)) threat += 20f;   // never voluntarily end a move standing in fire (hazards)
+        if (InSiegeZone(x, y)) threat += 30f;   // a charged SIEGE strike WILL land here -> vacate (cover-ignoring)
         foreach (var e in Enemies)
         {
             if (!e.Alive || !e.Active || e.Ammo <= 0) continue;
@@ -3342,6 +3467,31 @@ public class Game
         // nothing scored better than standing still: if we have a goal, still close on it so
         // the match never stalls (guaranteed progress). Otherwise stay put (caller hunkers).
         if (advance != null) return TryMoveTowardTile(u, advance.Value.x, advance.Value.y);
+        return false;
+    }
+
+    /// SIEGE flee: move `u` to the best reachable tile NOT inside any live strike zone (cover-aware
+    /// via ScoreDestTile, which now penalizes zone tiles by +30, so this picks a safe-AND-good spot).
+    /// Returns false only if no out-of-zone tile is reachable (very rare given squad mobility vs a 3x3)
+    /// — the caller then falls through to normal routing, which always ends in DoHunker (no TIMEOUT).
+    bool SmartFleeSiege(Unit u)
+    {
+        if (MoveCost == null) return false;
+        var nearest = AliveEnemies().OrderBy(e => Util.TileDist(u.X, u.Y, e.X, e.Y)).FirstOrDefault();
+        (int x, int y)? adv = nearest != null ? (nearest.X, nearest.Y) : ((int, int)?)null;
+        int bx = -1, by = -1; float best = float.NegativeInfinity;
+        for (int x = 0; x < Grid.W; x++)
+            for (int y = 0; y < Grid.H; y++)
+            {
+                int c = MoveCost[x, y]; if (c <= 0) continue;
+                int need = c <= u.MoveBudget ? 1 : 2;
+                int cost = u.Blitz ? Math.Max(0, need - 1) : need;
+                if (cost > u.ActionsLeft) continue;
+                if (InSiegeZone(x, y)) continue;                  // must leave the zone
+                float s = ScoreDestTile(u, x, y, need, nearest, adv);
+                if (s > best) { best = s; bx = x; by = y; }
+            }
+        if (bx >= 0) { IssueMove(bx, by); return true; }
         return false;
     }
 
@@ -4378,7 +4528,7 @@ public class Game
     /// point), but it must be in LoS so it's a real sightline call.
     bool MarkTargetOk(Unit u, Unit target)
     {
-        if (u == null || target == null || !u.CanAct || u.ActionsLeft < 1 || u.AbilityCharge <= 0) return false;
+        if (u == null || target == null || !u.CanAct || u.ActionsLeft < 1 || u.AbilityCd > 0) return false;
         if (!target.Alive || target.Team != Team.Enemy || target.Marked) return false;
         if (target.IsVip && CaptiveLocked) return false;             // can't mark the caged captive
         return Grid.HasLineOfSight(u.X, u.Y, target.X, target.Y);
@@ -4401,7 +4551,7 @@ public class Game
         if (SquadConcealed) BreakConcealment(u);   // calling out a target gives the squad away
         target.Marked = true;
         _markedBy = u;                              // remember who marked, to clear it on their next turn
-        u.AbilityCharge--; u.ActionsLeft = Math.Max(0, u.ActionsLeft - 1);
+        u.AbilityCd = Unit.AbilityCooldownFor(u.Ability); u.ActionsLeft = Math.Max(0, u.ActionsLeft - 1);
         if (!target.Active) ActivatePod(target.PodId);
         Fx.PopText(target.Pos + new Vector2(0, -34), "MARKED", Pal.Foe, 18f);
         Fx.PopText(u.Pos + new Vector2(0, -34), "MARK", Pal.Good, 16f);
@@ -4425,7 +4575,7 @@ public class Game
     /// ShoveAnim, so it's anti-loop-bounded the same way.
     bool GrappleTargetOk(Unit u, Unit target)
     {
-        if (u == null || target == null || !u.CanAct || u.ShovedThisTurn || u.AbilityCharge <= 0) return false;
+        if (u == null || target == null || !u.CanAct || u.ShovedThisTurn || u.AbilityCd > 0) return false;
         if (!target.Alive || target.Team != Team.Enemy) return false;
         if (target.IsVip && CaptiveLocked) return false;
         int dx = target.X - u.X, dy = target.Y - u.Y;
@@ -4449,7 +4599,7 @@ public class Game
         if (!GrappleTargetOk(u, target)) { GrappleMode = false; return; }
         // direction the target MOVES = toward the assault (one tile closer)
         int dx = Math.Sign(u.X - target.X), dy = Math.Sign(u.Y - target.Y);
-        u.AbilityCharge--; u.ShovedThisTurn = true; u.ActionsLeft = Math.Max(0, u.ActionsLeft - 1);
+        u.AbilityCd = Unit.AbilityCooldownFor(u.Ability); u.ShovedThisTurn = true; u.ActionsLeft = Math.Max(0, u.ActionsLeft - 1);
         if (SquadConcealed) BreakConcealment(u);   // a grapple is aggression
         if (!target.Active) ActivatePod(target.PodId);
         Fx.PopText(target.Pos + new Vector2(0, -34), "GRAPPLED", Pal.Friend, 18f);
@@ -4676,7 +4826,7 @@ public class Game
     // Whether the selected unit could fire its signature ability right now.
     public bool CanAbility(Unit u)
     {
-        if (u == null || u.Team != Team.Player || !u.CanAct || u.AbilityCharge <= 0) return false;
+        if (u == null || u.Team != Team.Player || !u.CanAct || u.AbilityCd > 0) return false;
         return u.Ability switch
         {
             AbilityKind.RunGun  => !u.RunGun,
@@ -4755,7 +4905,7 @@ public class Game
     /// (Pinning an already-pinned foe is allowed — it refreshes the zone / re-anchors it on a new cluster.)
     bool PinTargetOk(Unit u, Unit target)
     {
-        if (u == null || target == null || !u.CanAct || u.ActionsLeft < 1 || u.AbilityCharge <= 0 || u.Ammo <= 0) return false;
+        if (u == null || target == null || !u.CanAct || u.ActionsLeft < 1 || u.AbilityCd > 0 || u.Ammo <= 0) return false;
         if (!target.Alive || target.Team != Team.Enemy) return false;
         if (target.IsVip && CaptiveLocked) return false;             // can't suppress the caged captive
         if (Util.TileDist(u.X, u.Y, target.X, target.Y) > PinRange) return false;
@@ -4800,7 +4950,7 @@ public class Game
     {
         if (!PinTargetOk(u, target)) { PinMode = false; return; }
         if (SquadConcealed) BreakConcealment();   // a suppressing burst gives the squad away (no actor -> no ambush flag)
-        u.AbilityCharge--; u.Ammo--; u.ActionsLeft = 0; u.OnOverwatch = true;
+        u.AbilityCd = Unit.AbilityCooldownFor(u.Ability); u.Ammo--; u.ActionsLeft = 0; u.OnOverwatch = true;
         int pinned = 0;
         foreach (var e in Enemies)
         {
@@ -4835,26 +4985,26 @@ public class Game
         switch (u.Ability)
         {
             case AbilityKind.RunGun:
-                u.RunGun = true; u.AbilityCharge--;
+                u.RunGun = true; u.AbilityCd = Unit.AbilityCooldownFor(u.Ability);
                 Fx.PopText(at, "RUN & GUN", Pal.Accent, 18f);
                 Fx.Burst(u.Pos, Pal.Accent, 10, 120f, 0.4f, 3f);
                 Audio.Play("reload");
                 break;
             case AbilityKind.Slipstream:
                 // RANGER SLIPSTREAM: arm a free, overwatch-immune move (consumed by the next IssueMove).
-                u.Slipstreaming = true; u.AbilityCharge--;
+                u.Slipstreaming = true; u.AbilityCd = Unit.AbilityCooldownFor(u.Ability);
                 Fx.PopText(at, "SLIPSTREAM", Pal.Accent, 18f);
                 Fx.Burst(u.Pos, Pal.Accent, 12, 150f, 0.4f, 3f);
                 Audio.Play("reload");
                 break;
             case AbilityKind.Blitz:
-                u.Blitz = true; u.AbilityCharge--;
+                u.Blitz = true; u.AbilityCd = Unit.AbilityCooldownFor(u.Ability);
                 Fx.PopText(at, "BLITZ", Pal.Accent, 18f);
                 Fx.Burst(u.Pos, Pal.Accent, 10, 120f, 0.4f, 3f);
                 Audio.Play("reload");
                 break;
             case AbilityKind.Steady:
-                u.Steady = true; u.AbilityCharge--; u.ActionsLeft -= 1;
+                u.Steady = true; u.AbilityCd = Unit.AbilityCooldownFor(u.Ability); u.ActionsLeft -= 1;
                 Fx.PopText(at, "STEADY", Pal.Good, 18f);
                 Fx.Burst(u.Pos, Pal.Good, 10, 120f, 0.4f, 3f);
                 Audio.Play("reload");
@@ -4865,7 +5015,7 @@ public class Game
                 // 4.4 (review Mi1): pinning fire breaks stealth, but Suppress isn't a damage
                 // shot (no Combat.Resolve), so pass no actor - no dangling ambush flag.
                 if (SquadConcealed) BreakConcealment();
-                u.AbilityCharge--; u.Ammo--; u.ActionsLeft = 0; u.OnOverwatch = true;
+                u.AbilityCd = Unit.AbilityCooldownFor(u.Ability); u.Ammo--; u.ActionsLeft = 0; u.OnOverwatch = true;
                 t.Suppress = Combat.SuppressAim;
                 Fx.PopText(t.Pos + new Vector2(0, -34), "SUPPRESSED", Pal.Foe, 18f);
                 Fx.PopText(at, "SUPPRESS", Pal.Accent, 16f);
@@ -4878,7 +5028,7 @@ public class Game
                 int healed = Math.Min(Unit.PatchHeal, ally.MaxHp - ally.Hp);
                 if (healed <= 0) return;
                 ally.Hp += healed;
-                u.AbilityCharge--; u.ActionsLeft -= 1;     // patching costs one action (like STEADY)
+                u.AbilityCd = Unit.AbilityCooldownFor(u.Ability); u.ActionsLeft -= 1;     // patching costs one action (like STEADY)
                 Fx.PopText(ally.Pos + new Vector2(0, -34), $"+{healed}", Pal.Good, 20f);
                 Fx.Burst(ally.Pos, Pal.Good, 12, 120f, 0.45f, 3f);
                 Fx.PopText(at, "PATCH", Pal.Good, 16f);
@@ -5005,6 +5155,7 @@ public class Game
         Selected = null;
         MoveCost = null;
         Phase = Phase.EnemyTurn;
+        TickSiegeStrikes();                                      // charged artillery lands BEFORE any enemy acts / before reinforcements
         if (Objective == Objective.Defend) SpawnDefendWave();    // reinforcements assault the holdout
         UpdatePressure();                                        // anti-turtle clock: escalate on camp-friendly objectives
         ResolveSuspicion();                                      // 4.3: suspicious pods confirm or lose contact
@@ -5186,7 +5337,21 @@ public class Game
             var e = _aiUnits[_aiIdx];
             if (e.Alive)
             {
-                if (_aiPlan.SapTile != null && e.ActionsLeft > 0 &&
+                if (_aiPlan.SiegeCharge != null && e.Cls == "BOMBARD" && e.ChargeTurns == 0 && e.ActionsLeft > 0)
+                {
+                    // SIEGE charges a telegraphed strike: NO damage now — the 3x3 danger zone IS the
+                    // telegraph (drawn for the whole next player turn); it lands at the top of the
+                    // following enemy turn (TickSiegeStrikes). Spends the action -> no dead turn.
+                    e.ActionsLeft = 0;
+                    var (cx, cy) = _aiPlan.SiegeCharge.Value;
+                    e.ChargeX = cx; e.ChargeY = cy;
+                    e.ChargeTurns = SiegeFuse;
+                    Fx.PopText(e.Pos + new Vector2(0, -30), "CHARGING STRIKE", Pal.Foe, 16f);
+                    ShowBanner("ARTILLERY INCOMING", true);
+                    Audio.Play("over");                          // a charge "whine" stand-in
+                    Enqueue(new WaitAnim(0.25f), Team.Enemy);
+                }
+                else if (_aiPlan.SapTile != null && e.ActionsLeft > 0 &&
                     Grid.IsCover(_aiPlan.SapTile.Value.x, _aiPlan.SapTile.Value.y) &&
                     Util.ChebyDist(e.X, e.Y, _aiPlan.SapTile.Value.x, _aiPlan.SapTile.Value.y) <= 1)
                 {
@@ -5538,8 +5703,8 @@ public class Game
                 break;
             case 1:
                 var weak = _run.Squad.OrderBy(u => u.MaxHp).First();
-                weak.MaxHp += 2; weak.Hp += 2;
-                _run.Report.Add($"{weak.Name} stimmed  (+2 max HP)");
+                weak.MaxHp += 3; weak.Hp += 3;
+                _run.Report.Add($"{weak.Name} stimmed  (+3 max HP)");
                 break;
             case 2:
                 if (!_run.TryQueueBonusPerk("requisition")) { Audio.Play("miss"); return; }
@@ -5958,6 +6123,82 @@ public class Game
             : "SNAPTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
+    /// Headless self-test (SIGHTLINE_CDTEST): renewable signature-ability COOLDOWN.
+    /// (a) fresh soldiers AbilityReady; (b) a Corpsman Heal sets Cd 3 and CanAbility -> false;
+    /// (c) 3x BeginTurn ticks 3->0 and CanAbility -> true again; (d) per-kind wiring: a
+    /// Sharpshooter Mark -> Cd 2 and a Gunner Pin -> Cd 2. Deterministic; tiny scene (no run).
+    public string CdSelfTest()
+    {
+        NoPersist = true;
+        var fails = new List<string>();
+
+        // open arena so LoS / targeting always succeed
+        Grid = new Grid();
+        for (int x = 0; x < Grid.W; x++)
+            for (int y = 0; y < Grid.H; y++) Grid.Tiles[x, y] = TileType.Floor;
+        Players = new List<Unit>();
+        Enemies = new List<Unit>();
+
+        // (a) AbilityCooldownFor wiring is per-kind
+        if (Unit.AbilityCooldownFor(AbilityKind.Heal) != 3) fails.Add("cdHeal!=3");
+        if (Unit.AbilityCooldownFor(AbilityKind.Slipstream) != 3) fails.Add("cdSlip!=3");
+        if (Unit.AbilityCooldownFor(AbilityKind.Mark) != 2) fails.Add("cdMark!=2");
+        if (Unit.AbilityCooldownFor(AbilityKind.Pin) != 2) fails.Add("cdPin!=2");
+        if (Unit.AbilityCooldownFor(AbilityKind.None) != 0) fails.Add("cdNone!=0");
+
+        // helper to make a fresh, ready player unit at (x,y)
+        Unit Make(string cls, int x, int y) {
+            var u = new Unit { Name = cls, Cls = cls, Team = Team.Player, Hp = 10, MaxHp = 10,
+                               Aim = 70, Mobility = 6, Weapon = Weapon.Make(WeaponKind.Rifle), X = x, Y = y };
+            u.Ammo = u.Weapon.Clip; u.AbilityCd = 0; u.ActionsLeft = 2; u.SyncPos();
+            return u;
+        }
+
+        // --- (b)+(c) Corpsman Heal: Cd 3, gate off, ticks back to ready ---
+        var medic = Make("CORPSMAN", 5, 5);
+        var hurt  = Make("ASSAULT", 6, 5); hurt.Hp = 3;   // adjacent wounded ally
+        Players.Add(medic); Players.Add(hurt);
+        if (!medic.AbilityReady) fails.Add("medicNotReadyAtStart");
+        if (!CanAbility(medic)) fails.Add("medicCannotHealReady");
+        Selected = medic;
+        DoAbility();                                       // routes to the Heal case -> spends cooldown
+        if (medic.AbilityCd != 3) fails.Add("healCd!=3(" + medic.AbilityCd + ")");
+        if (CanAbility(medic)) fails.Add("healStillUsableOnCd");
+        // re-wound the ally so a heal target persists, then cool down 3 of the medic's turns
+        hurt.Hp = 3;
+        for (int i = 0; i < 3; i++) medic.BeginTurn();     // BeginTurn ticks Cd 3->2->1->0 (also refills ActionsLeft)
+        if (medic.AbilityCd != 0) fails.Add("healCdNotTickedTo0(" + medic.AbilityCd + ")");
+        if (!medic.AbilityReady) fails.Add("medicNotReadyAfterCooldown");
+        if (!CanAbility(medic)) fails.Add("medicCannotHealAfterCooldown");
+
+        // --- (d) Sharpshooter Mark -> Cd 2 ---
+        var sniper = Make("SHARPSHOOTER", 2, 2);
+        Players.Add(sniper);
+        var foe1 = new Unit { Name = "G", Cls = "GRUNT", Team = Team.Enemy, Hp = 6, MaxHp = 6,
+                              Aim = 50, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle), X = 4, Y = 2, Alert = AlertLevel.Alert };
+        foe1.SyncPos(); Enemies.Add(foe1);
+        if (sniper.Ability != AbilityKind.Mark) fails.Add("sniperWrongAbility");
+        if (!CanAbility(sniper)) fails.Add("sniperCannotMarkReady");
+        IssueMark(sniper, foe1);
+        if (sniper.AbilityCd != 2) fails.Add("markCd!=2(" + sniper.AbilityCd + ")");
+        if (CanAbility(sniper)) fails.Add("markStillUsableOnCd");
+
+        // --- (d) Gunner Pin -> Cd 2 ---
+        var gunner = Make("GUNNER", 8, 8); gunner.Ammo = Math.Max(gunner.Ammo, 1);
+        Players.Add(gunner);
+        var foe2 = new Unit { Name = "S", Cls = "SCOUT", Team = Team.Enemy, Hp = 5, MaxHp = 5,
+                              Aim = 50, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Smg), X = 9, Y = 8, Alert = AlertLevel.Alert };
+        foe2.SyncPos(); Enemies.Add(foe2);
+        if (gunner.Ability != AbilityKind.Pin) fails.Add("gunnerWrongAbility");
+        if (!CanAbility(gunner)) fails.Add("gunnerCannotPinReady");
+        IssuePin(gunner, foe2);
+        if (gunner.AbilityCd != 2) fails.Add("pinCd!=2(" + gunner.AbilityCd + ")");
+
+        return fails.Count == 0
+            ? "CDTEST: PASS (fresh=ready; Heal Cd3 gates+ticks to ready; Mark Cd2; Pin Cd2)"
+            : "CDTEST: FAIL (" + string.Join(",", fails) + ")";
+    }
+
     /// Headless self-test (SIGHTLINE_ITEMTEST): the utility-item mechanics — smoke
     /// blocks + decays line of sight, a barricade lays cover, loadouts map per class.
     /// Window-free (grid + tile math only).
@@ -6033,6 +6274,103 @@ public class Game
         return fails.Count == 0
             ? "HAZARDTEST: PASS (barrel blocks move + pathing routes around; fire lights floor only + decays; clear works)"
             : "HAZARDTEST: FAIL (" + string.Join(",", fails) + ")";
+    }
+
+    /// Headless self-test (SIGHTLINE_SIEGETEST): the full SIEGE charge/telegraph/detonate/interrupt
+    /// cycle + the no-target fallback (no TIMEOUT). Drives the real Ai.Plan + TickSiegeStrikes paths
+    /// on a controlled open field. Prints SIEGETEST: PASS/FAIL.
+    public string SiegeSelfTest()
+    {
+        NoPersist = true;
+        var fails = new List<string>();
+
+        // ---- controlled scene: empty open field, perfect LoS, no concealment ----
+        Grid = new Grid();
+        Players = new List<Unit>();
+        Enemies = new List<Unit>();
+        Vip = null; CaptiveLocked = false; SquadConcealed = false;
+        Objective = Objective.Eliminate; EvacZone.Clear();
+        Phase = Phase.EnemyTurn;
+
+        Unit MkP(int x, int y) {
+            var u = new Unit { Name = "SOLDIER", Cls = "ASSAULT", Team = Team.Player, X = x, Y = y,
+                               Hp = 8, MaxHp = 8, Aim = 65, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+            u.Ammo = u.Weapon.Clip; u.SyncPos(); u.BeginTurn(); return u;
+        }
+        Unit MkSiege(int x, int y) {
+            var u = new Unit { Name = "SIEGE", Cls = "BOMBARD", Team = Team.Enemy, X = x, Y = y,
+                               Hp = 7, MaxHp = 7, Aim = 48, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Smg) };
+            u.Ammo = u.Weapon.Clip; u.Alert = AlertLevel.Alert; u.SyncPos(); u.BeginTurn(); return u;
+        }
+
+        // ---- 1. Ai.Plan charges a strike centered on the soldier cluster ----
+        var siege = MkSiege(5, 5);
+        var a = MkP(10, 5);          // the strike target (clustered alone but valid)
+        var b = MkP(10, 6);          // adjacent -> also caught in the 3x3 around (10,5) or (10,6)
+        Players.Add(a); Players.Add(b); Enemies.Add(siege);
+
+        var plan = Ai.Plan(this, siege);
+        if (plan.SiegeCharge == null) fails.Add("noCharge");
+        else
+        {
+            // execute the charge branch by hand (UpdateEnemy's branch, minus the anim queue):
+            var (cx, cy) = plan.SiegeCharge.Value;
+            // the chosen center must catch both clustered soldiers (a 3x3 over (10,5) or (10,6) does)
+            int caught = Players.Count(p => Util.ChebyDist(p.X, p.Y, cx, cy) <= SiegeRadius);
+            if (caught < 2) fails.Add($"chargeCenterHits={caught}");
+            siege.ChargeX = cx; siege.ChargeY = cy; siege.ChargeTurns = SiegeFuse;
+            if (siege.ChargeTurns != SiegeFuse) fails.Add("chargeTurns");
+
+            // ---- 2. telegraph predicate: zone tiles read in, far tiles read out ----
+            if (!InSiegeZone(cx, cy)) fails.Add("zoneCenterFalse");
+            if (!InSiegeZone(cx + 1, cy)) fails.Add("zoneEdgeFalse");
+            if (InSiegeZone(cx + 5, cy)) fails.Add("zoneFarTrue");
+
+            // ---- 3. detonate hits in-zone, spares out-of-zone, consumes the charge ----
+            a.X = cx; a.Y = cy; a.SyncPos(); a.Hp = a.MaxHp; int aHp0 = a.Hp;   // A in the zone center
+            b.X = cx + 6; b.Y = cy; b.SyncPos(); b.Hp = b.MaxHp; int bHp0 = b.Hp; // B well outside
+            // ensure no occupancy overlap with the gunner
+            siege.X = 0; siege.Y = 0; siege.SyncPos();
+            TickSiegeStrikes();
+            if (!a.Alive) { /* A may die at very low rolls — but at 8 HP a 7-9 strike won't one-shot via fragile floor */ }
+            if (a.Hp >= aHp0) fails.Add("inZoneNotHit");
+            if (b.Hp != bHp0) fails.Add("outZoneHit");
+            if (siege.ChargeTurns != 0) fails.Add("chargeNotConsumed");
+            if (InSiegeZone(cx, cy)) fails.Add("zoneNotClearedAfterFire");
+        }
+
+        // ---- 4. interrupt: a dead SIEGE's strike never fires ----
+        Players.Clear(); Enemies.Clear();
+        var siege2 = MkSiege(5, 5);
+        var c = MkP(10, 5);
+        Players.Add(c); Enemies.Add(siege2);
+        siege2.ChargeX = c.X; siege2.ChargeY = c.Y; siege2.ChargeTurns = SiegeFuse;
+        if (!InSiegeZone(c.X, c.Y)) fails.Add("preKillNoZone");
+        siege2.Alive = false;                       // kill it (interrupt) — don't route through KillUnit (no _run)
+        if (InSiegeZone(c.X, c.Y)) fails.Add("deadSiegeZoneLive");   // dead -> zone clears
+        int cHp0 = c.Hp;
+        TickSiegeStrikes();
+        if (c.Hp != cHp0) fails.Add("deadSiegeStillFired");
+
+        // ---- 5. no-target fallback (no dead turn): with no soldier in reach, Ai.Plan still spends an
+        //         action (a move/shoot/overwatch/hunker) and does NOT return an empty no-op plan ----
+        Players.Clear(); Enemies.Clear();
+        var siege3 = MkSiege(2, 2);
+        var far = MkP(2, 2);                         // place far away after building the grid below
+        // put the lone soldier in indirect reach so BestSiege finds it... then move it adjacent to an
+        // ALLY enemy so the "never shell our own" veto trips and BestSiege returns hits==0 (fallback).
+        var ally = MkSiege(15, 9); ally.Cls = "GRUNT";  // an ordinary ally next to the soldier
+        far.X = 15; far.Y = 9 - 1; far.SyncPos();        // adjacent to the ally -> any 3x3 catches the ally
+        Players.Add(far); Enemies.Add(siege3); Enemies.Add(ally);
+        var fb = Ai.Plan(this, siege3);
+        if (fb.SiegeCharge != null) fails.Add("fallbackStillCharged");   // veto should have blocked the charge
+        bool spends = fb.Path.Count > 0 || fb.ShootTarget != null || fb.Overwatch || fb.Hunker
+                      || fb.Grenade || fb.SapTile != null || fb.HealTarget != null || fb.UseItem || fb.ShoveTarget != null;
+        if (!spends) fails.Add("fallbackDeadTurn");
+
+        return fails.Count == 0
+            ? "SIEGETEST: PASS (charge sets zone; telegraph reads; detonate hits in-zone/spares out; kill cancels; no-target falls through)"
+            : "SIEGETEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
     /// Headless self-test (SIGHTLINE_COVERTEST): destructible cover — High chips to Low
@@ -6136,11 +6474,123 @@ public class Game
         var cur = _run.CurrentNode;
         if (cur == null || !cur.Next.Contains(nodeId)) return;
         var node = _run.Map[nodeId];
-        _run.MapPos = nodeId;
+        _run.MapPos = nodeId;        // advance position == "this node is resolved once"
         node.Visited = true;
-        _run.CurrentCard = node.Card;
         Audio.Play("select");
+        if (node.Kind == NodeKind.Event)
+        {
+            // W4 C1 fix: an Event occupies its campaign COLUMN's mission slot without a fight. Keep the
+            // mission counter in lockstep with the column so the run still reaches MaxMissions at the
+            // Boss (the win gate is _run.Mission >= MaxMissions) — otherwise an event route can never win.
+            _run.Mission = node.Mission;     // = Col + 1
+            EnterEvent(node);                // resolve a "?" beat, don't deploy
+            return;
+        }
+        _run.CurrentCard = node.Card;
         NextMission();
+    }
+
+    // ---------------- W4: between-mission FIELD EVENTS ("?" nodes) ----------------
+    // An Event node presents a situation + choices INSIDE the barracks phase (no fight). It is
+    // resolved-once via MapPos (already advanced to this node in ChooseNode), so reload can never
+    // re-trigger it; the outcome bakes into persisted Run state and is checkpointed on resolution.
+    GameEvent _activeEvent;
+    MissionNode _eventNode;
+    public bool EventPending => _activeEvent != null;
+    public GameEvent ActiveEvent => _activeEvent;
+
+    void EnterEvent(MissionNode node)
+    {
+        _eventNode = node;
+        _activeEvent = EventCatalog.ForNode(_run, node);
+        // stay in Phase.Barracks; the Update switch's EventPending branch renders/handles it.
+    }
+
+    /// Is a choice's outcome legal given current Intel/roster (so the autopilot never picks an
+    /// illegal one and the HUD can grey it out)? Cost is the up-front intel a choice spends.
+    public bool ChoiceLegal(EventChoice ch)
+    {
+        // affordability: any negative-intel mutation (a costed buy / a rescue cost / a paid gamble)
+        int cost = 0;
+        if (ch.Outcome.Kind == EventOutcomeKind.Intel && ch.Outcome.Amount < 0) cost += -ch.Outcome.Amount;
+        if (ch.HasSecond && ch.Outcome2.Kind == EventOutcomeKind.Intel && ch.Outcome2.Amount < 0) cost += -ch.Outcome2.Amount;
+        if (cost > 0 && _run.Intel < cost) return false;
+        // roster: a recruit requires a free roster slot
+        if (ch.Outcome.Kind == EventOutcomeKind.Recruit && _run.Squad.Count >= Run.RosterMax) return false;
+        return true;
+    }
+
+    /// Autopilot/balance default: prefer a SAFE, beneficial legal choice (no intel cost, no gamble,
+    /// no self-wound, no heat) so the balance harness models SENSIBLE play — a human wouldn't gamble
+    /// half their intel or wound a soldier on every event. Falls back to the first legal choice, then
+    /// the last (always a no-op/safe option). Always returns a legal index -> one-tick resolve, no stall.
+    int AutoEventChoice()
+    {
+        if (_activeEvent == null) return 0;
+        int firstLegal = -1;
+        for (int i = 0; i < _activeEvent.Choices.Length; i++)
+        {
+            if (!ChoiceLegal(_activeEvent.Choices[i])) continue;
+            if (firstLegal < 0) firstLegal = i;
+            if (IsSafeChoice(_activeEvent.Choices[i])) return i;   // prefer a downside-free benefit
+        }
+        return firstLegal >= 0 ? firstLegal : _activeEvent.Choices.Length - 1;
+    }
+
+    /// A choice with no downside in either outcome (no intel spend, gamble, self-wound, or heat gain).
+    static bool IsSafeChoice(EventChoice ch)
+        => !HasDownside(ch.Outcome) && (!ch.HasSecond || !HasDownside(ch.Outcome2));
+    static bool HasDownside(EventOutcome o)
+        => (o.Kind == EventOutcomeKind.Intel && o.Amount < 0)
+           || o.Kind == EventOutcomeKind.GambleIntel
+           || o.Kind == EventOutcomeKind.WoundSoldier
+           || o.Kind == EventOutcomeKind.AddHeat;
+
+    void ResolveEvent(int choiceIdx)
+    {
+        if (_activeEvent == null) return;
+        if (choiceIdx < 0 || choiceIdx >= _activeEvent.Choices.Length) choiceIdx = AutoEventChoice();
+        var ch = _activeEvent.Choices[choiceIdx];
+        if (!ChoiceLegal(ch)) return;   // ignore clicks on illegal choices
+        string line = EventCatalog.Apply(_run, ch.Outcome, _eventNode);
+        if (ch.HasSecond)
+        {
+            string line2 = EventCatalog.Apply(_run, ch.Outcome2, _eventNode);
+            line = line + "; " + line2;
+        }
+        _run.Report.Insert(0, $"EVENT: {_activeEvent.Title} -- {line}");
+        Audio.Play("turn");
+        _activeEvent = null; _eventNode = null;
+        // The event node is now CurrentNode (MapPos already advanced), so NextNodes() offers its
+        // outgoing edges -> the player picks the next real node (the same barracks pass surfaces any
+        // queued PendingPerks first). W4 M1/M2 fix: do NOT checkpoint mid-barracks — the outcome
+        // (incl. any queued perk) bakes into Run state and is saved at the NEXT mission start, exactly
+        // like shop/perk/boon picks. Saving here would (a) lose a queued PendingPerk on a quit before
+        // the pick (not persisted) and (b) make CONTINUE replay an already-cleared mission.
+    }
+
+    void HandleEventClick()
+    {
+        if (_activeEvent == null) return;
+        if (!Raylib.IsMouseButtonPressed(MouseButton.Left)) return;
+        var m = Raylib.GetMousePosition();
+        for (int i = 0; i < Hud.EventBtns.Length && i < _activeEvent.Choices.Length; i++)
+            if (Raylib.CheckCollisionPointRec(m, Hud.EventBtns[i]) && ChoiceLegal(_activeEvent.Choices[i]))
+            { ResolveEvent(i); return; }
+    }
+
+    /// Harness (screenshot): show the event screen at a mid column.
+    public void DebugEvent()
+    {
+        _run.JumpTo(3);
+        _run.DebriefSurvivors();
+        _run.PendingPerks.Clear();
+        _shopDone = true;
+        // synthesize an event node so the screen shows even if this seed placed none on the route
+        var node = _run.CurrentNode ?? (_run.Map.Count > 0 ? _run.Map[0] : null);
+        _eventNode = node;
+        _activeEvent = EventCatalog.All.Length > 0 ? EventCatalog.All[0] : null;
+        Phase = Phase.Barracks;
     }
 
     void HandleNodeClick()

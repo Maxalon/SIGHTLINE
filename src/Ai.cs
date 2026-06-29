@@ -18,6 +18,7 @@ public class EnemyPlan
     public bool UseItem;          // use a utility item (smoke/flash) this turn
     public Unit ShoveTarget;      // rusher/Legion: shove this soldier OUT of cover to expose it (Wave 5)
     public int ItemTx, ItemTy;    // item aim tile
+    public (int x, int y)? SiegeCharge; // BOMBARD: charge a telegraphed strike centered here (else null)
 }
 
 /// Tactical decision-making for a single enemy. Greedy, but reads as competent:
@@ -118,6 +119,26 @@ public static class Ai
                     return hp;
                 }
             }
+        }
+
+        // BOMBARD (SIEGE artillery): a dedicated archetype path, like MEDIC. It does NOT fire — on its
+        // turn it CHARGES a telegraphed 3x3 strike (resolved next enemy turn by Game.TickSiegeStrikes).
+        //   (1) If it's ALREADY charging (ChargeTurns>0): a shell is in flight; don't stack a second
+        //       one. Fall through to the generic tile loop so the frail piece ducks to cover / holds.
+        //   (2) Else pick the strike center that catches the most soldiers in a 3x3 (BestSiege).
+        //       Indirect fire -> NO LoS requirement (it can shell a soldier behind high cover, forcing
+        //       MOVEMENT, not just an LoS-break). Charge from the CURRENT tile (v1: stand and shell).
+        //   (3) If nothing's worth shelling, fall through to the normal loop (move/shoot SMG/hunker) so
+        //       the turn always spends an action -> NO dead turn / NO TIMEOUT (same safety as MORTAR).
+        if (e.Cls == "BOMBARD" && e.ChargeTurns == 0)
+        {
+            var (bx, by, hits) = BestSiege(g, e);
+            if (hits >= 1)
+            {
+                var sp = new EnemyPlan { SiegeCharge = (bx, by) };   // no move, no shot — the charge is the action
+                return sp;
+            }
+            // else: fall through to the generic combat loop (advance / fallback SMG shot / hunker).
         }
 
         // COORDINATION 2 — SELF-PRESERVATION / FIGHTING RETREAT (decision):
@@ -664,6 +685,29 @@ public static class Ai
             { bestHits = hits; bestAllies = allies; bx = p.X; by = p.Y; }
         }
         return (bx, by, bestHits, bestAllies);
+    }
+
+    // Best 3x3 SIEGE strike center: the soldier-tile whose SiegeRadius block catches the MOST
+    // soldiers, catching NO active SIEGE ally in the blast (it's friendly-fire AoE, so the AI must
+    // not shell its own). INDIRECT fire -> NO LoS requirement (the whole point: it can shell a
+    // soldier hiding behind high cover, forcing them to RELOCATE, not just break LoS). Skips the
+    // fragile VIP (don't waste the shell on the soft asset). Returns (cx, cy, hits); hits==0 when
+    // nothing is worth shelling (the caller then falls through to the generic loop -> no dead turn).
+    static (int x, int y, int hits) BestSiege(Game g, Unit e)
+    {
+        int bx = -1, by = -1, best = 0;
+        foreach (var p in g.AlivePlayers())
+        {
+            if (p.IsVip) continue;                               // don't waste the shell on the fragile asset
+            int hits = 0, allies = 0;
+            foreach (var q in g.AlivePlayers())
+                if (Util.ChebyDist(p.X, p.Y, q.X, q.Y) <= Game.SiegeRadius) hits++;
+            foreach (var a in g.AliveEnemies())
+                if (a != e && a.Active && Util.ChebyDist(p.X, p.Y, a.X, a.Y) <= Game.SiegeRadius) allies++;
+            if (allies > 0) continue;                            // never shell our own
+            if (hits > best) { best = hits; bx = p.X; by = p.Y; }
+        }
+        return (bx, by, best);
     }
 
     // Best grenade aim tile thrown from (fx,fy): pick a soldier's tile in range that
