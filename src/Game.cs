@@ -674,8 +674,12 @@ public class Game
     void SetupMission(int n)
     {
         _run.Mission = n;
-        // publish this run's boons to the static combat reads (Marksmen/Fervor/Executioners/Fortified)
-        Combat.RunBoons = new System.Collections.Generic.HashSet<Boon>(_run.ActiveBoons);
+        // TEMPO wave 4: publish ALL this mission's combat statics in one lifecycle call — the run's
+        // boons, the mission faction (read by the spawn roster in Mission.Build below, so it MUST be
+        // set first), the bought counter-prep, and a clean PressureAim/AllUnits. Replaces the four
+        // scattered manual resets that used to live here / at lines further down.
+        Combat.BeginMission(_run.ActiveBoons, _run.CurrentNode?.Faction ?? Faction.None, _run.PrepFaction);
+        _run.PrepFaction = Faction.None;   // counter-prep is one mission only — consume it
         Stats.ClearLog();   // fresh combat-log ledger each mission
         // reset camera to identity each new mission (auto-cam will gently ease in if enabled)
         CamZoom = 1f; CamPan = Vector2.Zero; _autoCamManual = false;
@@ -752,18 +756,9 @@ public class Game
         // adaptive assist eases the force-wide enemy stat bump (base Heat only; 0 otherwise).
         int statDelta = card.StatDelta + heatStat - _run.AssistStatRelief;
 
-        // Enemy FACTIONS (Wave 4): set the active mission's faction so BOTH the faction-gated spawn
-        // roster (Mission.SelectArchetype) AND the faction combat rule (Combat.ComputeOdds) take effect
-        // this mission. Read from the campaign node; None on START/SUPPLY/BOSS (mixed force) and any
-        // non-campaign path. MUST be set BEFORE Mission.Build — SelectArchetype reads it at spawn time.
-        Combat.MissionFaction = _run.CurrentNode?.Faction ?? Faction.None;
-
-        // FACTION COUNTER-PREP: apply the one-mission counter the player bought at the barracks, then
-        // CONSUME it (one mission only). It only bites when it matches this mission's faction (the
-        // honest bet) — Combat gates each rule on PrepFaction == MissionFaction. Cleared whether or not
-        // it matched so an un-cashed prep doesn't carry over.
-        Combat.PrepFaction = _run.PrepFaction;
-        _run.PrepFaction = Faction.None;
+        // (MissionFaction + PrepFaction were published above by Combat.BeginMission — the faction is
+        // set before Mission.Build so the faction-gated spawn roster sees it; the counter-prep only
+        // bites when PrepFaction == MissionFaction, and was consumed off _run right after BeginMission.)
 
         // reserve + connectivity-verify a key tile: the Hack terminal, or the Rescue captive's seat
         (int x, int y)? reserve = HasTerminal ? Terminal
@@ -798,7 +793,7 @@ public class Game
         _anims.Clear();
         HitStop = 0;
         _turnCount = 1;
-        Pressure = 0; _pressureWaves = 0; Combat.PressureAim = 0;   // anti-turtle clock resets each mission
+        Pressure = 0; _pressureWaves = 0;   // anti-turtle clock resets each mission (Combat.PressureAim cleared by BeginMission)
         _autoSig = -1; _autoStall = 0;
         Phase = Phase.PlayerTurn;
         // 4.4: every mission opens with the squad concealed -- UNLESS Heat "EXPOSED" strips it.
@@ -1527,11 +1522,10 @@ public class Game
 
     void EnterBarracks()
     {
-        Combat.MissionFaction = Faction.None;   // defensive: clear the mission faction between missions (re-set in SetupMission) so no stale value can warp a barracks-phase odds read
-        Combat.PressureAim = 0;                  // and the anti-turtle pressure aim bonus
-        Combat.PrepFaction = Faction.None;       // and the faction counter-prep (re-set+consumed in SetupMission)
-        Combat.RunBoons = new System.Collections.Generic.HashSet<Boon>(_run.ActiveBoons);  // keep run boons valid; AllUnits cleared so no stale roster is read off-mission
-        Combat.AllUnits = System.Array.Empty<Unit>();
+        // TEMPO wave 4: drop every mission-scoped combat static in one call so no stale value warps a
+        // barracks-phase odds read; RunBoons is refreshed to the run's current boons (a FIELD DOCTRINE
+        // pick may have just changed them).
+        Combat.EndMission(_run.ActiveBoons);
         // a benched soldier sat this mission out: it's still in _run.Squad (flagged) but was
         // never in Players, so it's absent from AlivePlayers(). Preserve it across the rebuild,
         // or benching would silently destroy the veteran (review Blocker 1).
@@ -1638,10 +1632,7 @@ public class Game
     /// End the run as a loss and clear the checkpoint so the intro stops offering CONTINUE.
     void LoseRun(string title, string reason)
     {
-        Combat.MissionFaction = Faction.None;   // defensive: clear the mission faction on run end (re-set next SetupMission)
-        Combat.PressureAim = 0;                  // and the anti-turtle pressure aim bonus
-        Combat.PrepFaction = Faction.None;       // and the faction counter-prep so no stale value bleeds into the next run
-        Combat.AllUnits = System.Array.Empty<Unit>();  // drop the crossfire roster on run end (re-set next SetupMission)
+        Combat.EndRun();   // TEMPO wave 4: clear every mission-scoped combat static (+ run boons) on run end
         LoseTitle = title;
         LoseReason = reason;
         Phase = Phase.Lose;

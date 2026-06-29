@@ -129,6 +129,46 @@ public static class Combat
     // mission. DEFAULT 0 == today's behavior exactly (safety invariant).
     public static int PressureAim = 0;
 
+    // ──────────────────────────────────────────────────────────────────────────────────────────
+    // MISSION-STATIC LIFECYCLE (PROGRAM TEMPO wave 4). The five per-mission combat statics above
+    // (RunBoons / AllUnits / MissionFaction / PrepFaction / PressureAim) were previously set and
+    // cleared at ~14 scattered call sites with "defensive: clear ... so no stale value can warp ..."
+    // comments — proof that stale-static bleed had bitten the project. These three methods own the
+    // lifecycle so a mission cannot start or end with a stale value: SetupMission calls BeginMission,
+    // the barracks calls EndMission, run-end calls EndRun. (The DYNAMIC mid-mission updates —
+    // PressureAim ramping, AllUnits re-snapped when the roster grows — still happen in Game; only the
+    // lifecycle resets are centralised here.) DEFAULT values == today's behaviour exactly.
+
+    /// Publish a fresh mission's statics in one shot (Game.SetupMission, before Mission.Build so the
+    /// faction-gated spawn roster sees the faction). RunBoons is the run's active boons; AllUnits is
+    /// left empty for Game.RefreshCombatRoster to populate with the live roster.
+    public static void BeginMission(System.Collections.Generic.IEnumerable<Boon> runBoons, Faction faction, Faction prepFaction)
+    {
+        RunBoons = runBoons == null ? new System.Collections.Generic.HashSet<Boon>() : new System.Collections.Generic.HashSet<Boon>(runBoons);
+        MissionFaction = faction;
+        PrepFaction = prepFaction;
+        PressureAim = 0;
+        AllUnits = System.Array.Empty<Unit>();
+    }
+
+    /// Mission over (barracks): drop every MISSION-scoped static so no stale value warps a
+    /// barracks-phase odds read or the next mission. RunBoons is RUN-scoped, so refresh it to the
+    /// run's current boons (which may have just changed via a FIELD DOCTRINE pick) rather than clear.
+    public static void EndMission(System.Collections.Generic.IEnumerable<Boon> runBoons)
+    {
+        MissionFaction = Faction.None;
+        PrepFaction = Faction.None;
+        PressureAim = 0;
+        AllUnits = System.Array.Empty<Unit>();
+        RunBoons = runBoons == null ? new System.Collections.Generic.HashSet<Boon>() : new System.Collections.Generic.HashSet<Boon>(runBoons);
+    }
+
+    /// Run over: clear everything, including the run-scoped boons (re-set next run's BeginMission).
+    public static void EndRun()
+    {
+        EndMission(null);
+    }
+
     // Legion (shock assault): a closing enemy within close range hits harder. Modest — these stack
     // with the whole existing model, so kept small to avoid a swingy point-blank one-shot.
     public const int LegionCloseAim  = 12;   // +aim   for a Legion enemy attacker at dist <= 4
