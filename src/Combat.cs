@@ -304,7 +304,7 @@ public static class Combat
         // Crossfire + faction crit stay FLAT (outside the damped stack): they're symmetric/enemy
         // situational rules whose self-tests assert an exact +CrossfireCrit / +LegionCloseCrit delta.
         if (crossfire) crit += CrossfireCrit;   // converging fire also crits harder (target distracted/exposed)
-        if (marked) crit += MarkCrit;           // designated foe: the whole squad crits it harder (flat, like crossfire)
+        if (marked) crit += MarkCrit;           // designated foe (TEMPO wave 2: MarkCrit now 0 — MARK is an aim-only designator; kept as a single source so re-enabling it is a one-const change)
         // enemy FACTION crit rule (enemy attacker only; None = no-op): LEGION's closing rush also
         // crits harder within close range. Applied before the crit clamp (and before the hunker zero).
         if (a.Team == Team.Enemy && MissionFaction == Faction.Legion && dist <= Unit.CloseRange) crit += LegionCloseCrit;
