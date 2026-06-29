@@ -145,7 +145,7 @@ public class Weapon
     {
         WeaponKind.Rifle   => New("Rifle",   k, 3, 5, 0, 10, 4),
         WeaponKind.Shotgun => New("Shotgun", k, 4, 7, 0, 15, 2),
-        WeaponKind.Sniper  => New("Marksman",k, 5, 7, 5, 14, 3),
+        WeaponKind.Sniper  => New("Marksman",k, 5, 7, 3, 14, 3),
         WeaponKind.Lmg     => New("LMG",     k, 3, 6, 3,  5, 5),
         WeaponKind.Smg     => New("SMG",     k, 2, 4, 0, 10, 4),
         _ => New("Rifle", WeaponKind.Rifle, 3, 5, 0, 10, 4),

@@ -296,7 +296,7 @@ public class Game
 
     static int[] BuildShopCost()
     {
-        var b = new[] { 6, 10, 16, 12, 8 };    // +BALLISTIC PLATING (survivability sink, front-loaded cheap)
+        var b = new[] { 6, 8, 16, 8, 8 };    // STIMS 8 / FRAG CACHE 8 (revived sinks) +BALLISTIC PLATING (survivability, front-loaded cheap)
         var all = new int[ModBase + WeaponModDef.All.Length + 1];   // +1 for the dynamic PREP item
         b.CopyTo(all, 0);
         for (int i = 0; i < WeaponModDef.All.Length; i++) all[ModBase + i] = WeaponModDef.Cost(WeaponModDef.All[i]);
@@ -317,7 +317,7 @@ public class Game
         var b = new[]
         {
             "Heal your most-wounded soldier to full.",
-            "+2 max HP to your frailest soldier (permanent).",
+            "+3 max HP to your frailest soldier (permanent).",
             "Grant a soldier a bonus perk choice.",
             "+1 grenade every mission for a soldier (permanent).",
             "+1 armor to your least-armored soldier (permanent: -1 damage per hit).",
@@ -1763,7 +1763,7 @@ public class Game
             // overwatch reaction aim: base -10; Reflexes makes it near-certain, Guardian adds a
             // precision bump. ADDITIVE (not a ternary) so a soldier with BOTH gets both (review
             // S7: the old ternary silently discarded Guardian whenever Reflexes was also held).
-            int reactMod = -10 + (w.HasPerk(Perk.Reflexes) ? 110 : 0) + (w.HasPerk(Perk.Guardian) ? Unit.GuardianAim : 0);
+            int reactMod = -10 + (w.HasPerk(Perk.Reflexes) ? 75 : 0) + (w.HasPerk(Perk.Guardian) ? Unit.GuardianAim : 0);
             var res = Combat.Resolve(Grid, w, mover, reactMod);
             Fx.PopText(w.Pos + new Vector2(0, -30), "OVERWATCH", Pal.Accent, 18f);
             Audio.Play("over");
@@ -1914,8 +1914,12 @@ public class Game
         {
             if (_run.HasBoon(Boon.Grenadier) && killer.Grenades < 1 + killer.BonusGrenades + (killer.HasPerk(Perk.Bandolier) ? 1 : 0))
                 killer.Grenades++;                                   // a kill tops the grenade back up
-            if (_run.HasBoon(Boon.Scavenger))
-                killer.Ammo = Math.Min(killer.Weapon.Clip, killer.Ammo + 2);   // scavenge ammo
+            if (_run.HasBoon(Boon.Scavenger) && killer.Hp < killer.MaxHp)
+            {
+                int before = killer.Hp;
+                killer.Hp = Math.Min(killer.MaxHp, killer.Hp + 2);   // SCAVENGER (re-themed): a kill heals the killer +2 HP (run sustain)
+                if (killer.Hp > before) Fx.PopText(killer.Pos + new Vector2(0, -16), $"+{killer.Hp - before}", Pal.Good, 18f);
+            }
             // ADRENALINE: a kill on the player's turn refunds +1 action, capped once/turn per soldier
             // (shares the flank-kill refund guard so the two never compound into an endless chain).
             if (_run.HasBoon(Boon.Adrenaline) && Phase == Phase.PlayerTurn && !_refundedThisTurn.Contains(killer))
@@ -5538,8 +5542,8 @@ public class Game
                 break;
             case 1:
                 var weak = _run.Squad.OrderBy(u => u.MaxHp).First();
-                weak.MaxHp += 2; weak.Hp += 2;
-                _run.Report.Add($"{weak.Name} stimmed  (+2 max HP)");
+                weak.MaxHp += 3; weak.Hp += 3;
+                _run.Report.Add($"{weak.Name} stimmed  (+3 max HP)");
                 break;
             case 2:
                 if (!_run.TryQueueBonusPerk("requisition")) { Audio.Play("miss"); return; }

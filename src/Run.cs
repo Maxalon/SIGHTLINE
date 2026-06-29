@@ -24,7 +24,7 @@ public enum Boon
     Executioners,  // +crit vs sub-half-HP targets, squad-wide
     Fortified,     // +1 effective armor, squad-wide
     Grenadier,     // a kill refreshes the killer's grenade
-    Scavenger,     // a kill refills +2 ammo to the killer
+    Scavenger,     // a kill heals the killer +2 HP (run sustain)
     Adrenaline,    // a kill grants the killer +1 action this turn (cap 1/turn)
     Venom,         // a player hit applies Bleed to the target
     Ghost,         // moving near a foe does not break concealment
@@ -54,7 +54,7 @@ public static class BoonDef
         Boon.Executioners => "Squad +20 crit vs targets below half HP",
         Boon.Fortified => "Whole squad gains +1 armor (-1 damage/hit)",
         Boon.Grenadier => "A kill refreshes the killer's grenade",
-        Boon.Scavenger => "A kill refills +2 ammo to the killer",
+        Boon.Scavenger => "A kill heals the killer +2 HP",
         Boon.Adrenaline => "A kill grants the killer +1 action (once/turn)",
         Boon.Venom => "Your hits make the target bleed",
         Boon.Ghost => "Moving near foes never breaks concealment",
