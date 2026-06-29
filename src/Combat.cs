@@ -68,7 +68,7 @@ public static class Combat
     // foe lands easier + crits harder. The flag lives on the target (Unit.Marked), set by the
     // sharpshooter and cleared at the marker's next turn — a squad-wide "everyone shoot THIS one".
     public const int MarkAim  = 10;
-    public const int MarkCrit = 15;
+    public const int MarkCrit = 0;
 
     // SHOVE (forced-movement verb): when a shoved enemy can't move (destination blocked by a
     // wall, cover, another unit, or the board edge) it slams the obstacle and takes this much

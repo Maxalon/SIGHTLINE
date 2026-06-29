@@ -1080,7 +1080,7 @@ public static class Hud
             if (a.HasPerk(Perk.Executioner) && tgtSubHalf)    flags.Add(($"EXECUTIONER  +{Unit.ExecutionerCrit} crit", Pal.Good));
             if (a.HasPerk(Perk.GiantSlayer) && d.MaxHp > 0 && d.Hp >= d.MaxHp) flags.Add(($"FIRST STRIKE  +{Unit.FirstStrikeCrit} crit", Pal.Good));
             if (o.Crossfire)                                  flags.Add(($"CROSSFIRE  +{Combat.CrossfireAim} aim / +{Combat.CrossfireCrit} crit", Pal.Good));   // a squadmate threatens this target from a converging angle
-            if (o.Marked)                                     flags.Add(($"MARKED  +{Combat.MarkAim} aim / +{Combat.MarkCrit} crit", Pal.Good));      // a sharpshooter has designated this foe (squad-wide focus-fire bonus)
+            if (o.Marked)                                     flags.Add(($"MARKED  +{Combat.MarkAim} aim", Pal.Good));      // a sharpshooter has designated this foe (squad-wide focus-fire bonus)
             if (d.Pinned > 0)                                 flags.Add(("+ SUPPRESSED", Pal.Good));  // a gunner has pinned this foe (it shoots wild + can't dash)
 
             // attacker penalties (red) — these quietly drag the hit% down (signed magnitudes)
