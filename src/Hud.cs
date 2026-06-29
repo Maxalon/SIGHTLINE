@@ -31,6 +31,7 @@ public static class Hud
     public static System.Collections.Generic.List<(int Id, Rectangle Rect)> NodeBtns = new();
     public static Rectangle[] ShopBtns = new Rectangle[Game.ShopName.Length];
     public static Rectangle ShopProceed;
+    public static Rectangle[] EventBtns = new Rectangle[3];   // W4: FIELD EVENT choice buttons
     // ARMORY sub-screen (re-arm a soldier): a toggle button + per-soldier rows + per-weapon rows.
     public static Rectangle ArmoryToggle;
     public static System.Collections.Generic.List<Rectangle> ArmorySoldierBtns = new();
@@ -1680,6 +1681,71 @@ public static class Hud
     }
 
     // ============================================================================
+    //  W4 — FIELD EVENT screen ("?" beat). Mirrors DrawBoonOffer: scrim + panel + title +
+    //  word-wrapped flavor + 2-3 stacked choice buttons (label + outcome preview sub-line).
+    //  Illegal choices (unaffordable / roster full) are greyed out + non-clickable. Rects are
+    //  cached in EventBtns; Game.HandleEventClick hit-tests them.
+    // ============================================================================
+    static void DrawEventScreen(Game g)
+    {
+        for (int i = 0; i < EventBtns.Length; i++) EventBtns[i] = new Rectangle(0, 0, 0, 0);
+        var ev = g.ActiveEvent;
+        if (ev == null) return;
+
+        Raylib.DrawRectangle(0, 0, Cfg.ScreenW, Cfg.ScreenH, Raylib.Fade(Pal.RGBA(5, 8, 11), 0.9f));
+
+        int n = ev.Choices.Length;
+        int w = 620;
+        int btnH = 64, btnGap = 14;
+        // panel sizes to fit the (wrapped) flavor + the choice stack
+        var flavorLines = WrapText(ev.Flavor, 15, w - 64);
+        int flavorH = flavorLines.Count * 21;
+        int h = 150 + flavorH + n * (btnH + btnGap) + 30;
+        int x = Cfg.ScreenW / 2 - w / 2;
+        int y = Cfg.ScreenH / 2 - h / 2;
+        y -= (int)((1f - Util.EaseOutQuad(PanelAnim("event", 0.15f))) * 16f);
+        var card = new Rectangle(x, y, w, h);
+        PanelShadow(card, 1f);
+        Raylib.DrawRectangleRounded(card, 0.04f, 8, Pal.Panel);
+        Raylib.DrawRectangleLinesEx(card, 1.8f, Pal.Suspect);
+
+        // "?" chip + title
+        Raylib.DrawTextEx(Cfg.Font, "?", new Vector2(x + 34, y + 26), 40, 1f, Pal.Suspect);
+        Raylib.DrawTextEx(Cfg.Font, ev.Title, new Vector2(x + 72, y + 32), 30, 1f, Pal.Txt);
+        string sub = $"FIELD EVENT   |   INTEL {g.RunState.Intel}";
+        Raylib.DrawTextEx(Cfg.Font, sub, new Vector2(x + 72, y + 66), 12, 1f, Pal.TxtDim);
+
+        // flavor (word-wrapped)
+        int fy = y + 96;
+        foreach (var ln in flavorLines)
+        {
+            Raylib.DrawTextEx(Cfg.Font, ln, new Vector2(x + 32, fy), 15, 1f, Pal.TxtDim);
+            fy += 21;
+        }
+
+        // choice buttons
+        var mouse = Raylib.GetMousePosition();
+        int by = fy + 16;
+        for (int i = 0; i < n && i < EventBtns.Length; i++)
+        {
+            var ch = ev.Choices[i];
+            bool legal = g.ChoiceLegal(ch);
+            var r = new Rectangle(x + 32, by, w - 64, btnH);
+            EventBtns[i] = r;
+            bool hover = legal && Raylib.CheckCollisionPointRec(mouse, r);
+            Color fill = !legal ? Pal.RGBA(18, 22, 28) : (hover ? Pal.RGBA(30, 40, 52) : Pal.RGBA(20, 28, 38));
+            Color bd = !legal ? Pal.PanelBd : (hover ? Pal.Suspect : Pal.PanelBd);
+            Raylib.DrawRectangleRounded(r, 0.10f, 6, fill);
+            Raylib.DrawRectangleLinesEx(r, hover ? 2.2f : 1.4f, bd);
+            Color lblCol = !legal ? Pal.TxtDim : (hover ? Pal.Suspect : Pal.Txt);
+            Raylib.DrawTextEx(Cfg.Font, ch.Label, new Vector2((int)r.X + 16, (int)r.Y + 12), 18, 1f, lblCol);
+            string prev = legal ? ch.Preview : ch.Preview + "   (need more intel / roster full)";
+            Raylib.DrawTextEx(Cfg.Font, prev, new Vector2((int)r.X + 16, (int)r.Y + 38), 13, 1f, legal ? Pal.TxtDim : Pal.Foe);
+            by += btnH + btnGap;
+        }
+    }
+
+    // ============================================================================
     //  RUN-OPENING SQUAD DRAFT (Wave 3) — "ASSEMBLE STRIKE TEAM".
     //  Pick DraftCap recruits of 6 (each card shows name/class/weapon/HP-AIM-MOB + a
     //  role one-liner + its signature ability) AND one of 3 starting boons, then DEPLOY.
@@ -1838,6 +1904,7 @@ public static class Hud
         if (!g.ShopDone) { DrawRequisition(g); return; }
         if (run.PendingPerks.Count > 0) { DrawPerkChooser(g, run.PendingPerks[0]); return; }
         if (run.BoonOffer.Count > 0) { DrawBoonOffer(g, run); return; }
+        if (g.EventPending) { DrawEventScreen(g); return; }   // W4: a "?" FIELD EVENT takes over the barracks frame
         var squad = run.Squad;
         Raylib.DrawRectangle(0, 0, Cfg.ScreenW, Cfg.ScreenH, Raylib.Fade(Pal.RGBA(5, 8, 11), 0.85f));
 
@@ -1927,12 +1994,14 @@ public static class Hud
         NodeKind.Elite => Pal.Elite,
         NodeKind.Supply => Pal.Good,
         NodeKind.Boss => Pal.Foe,
+        NodeKind.Event => Pal.Suspect,    // W4: amber "?" — the interactive choice beat
         _ => Pal.Friend,
     };
 
     static string NodeGlyph(NodeKind k) => k switch
     {
-        NodeKind.Start => "S", NodeKind.Elite => "!", NodeKind.Supply => "+", NodeKind.Boss => "X", _ => "*",
+        NodeKind.Start => "S", NodeKind.Elite => "!", NodeKind.Supply => "+", NodeKind.Boss => "X",
+        NodeKind.Event => "?", _ => "*",
     };
 
     /// Draw the branching campaign DAG inside `region`: columns left-to-right (one per
@@ -1991,11 +2060,15 @@ public static class Hud
 
             if (canPick)  // label the choices with their objective + an intel reward + an enemy hint
             {
-                string lbl = ObjName(n.Card.Objective);
-                Raylib.DrawTextEx(Cfg.Font, lbl, new Vector2((int)(p.X - (int)Raylib.MeasureTextEx(Cfg.Font, lbl, 10, 1f).X / 2), (int)(p.Y + rad + 3)), 10, 1f, Pal.Txt);
-                // routing economy: the Intel reward for clearing this node (SUPPLY/ELITE pay premiums)
-                string intelLbl = $"+{n.Intel} INTEL";
-                Raylib.DrawTextEx(Cfg.Font, intelLbl, new Vector2((int)(p.X - (int)Raylib.MeasureTextEx(Cfg.Font, intelLbl, 9, 1f).X / 2), (int)(p.Y + rad + 14)), 9, 1f, Pal.Good);
+                // W4: an Event node is a "?" choice beat, not a fight — label it EVENT, no +intel line.
+                string lbl = n.Kind == NodeKind.Event ? "EVENT" : ObjName(n.Card.Objective);
+                Raylib.DrawTextEx(Cfg.Font, lbl, new Vector2((int)(p.X - (int)Raylib.MeasureTextEx(Cfg.Font, lbl, 10, 1f).X / 2), (int)(p.Y + rad + 3)), 10, 1f, n.Kind == NodeKind.Event ? Pal.Suspect : Pal.Txt);
+                if (n.Kind != NodeKind.Event)
+                {
+                    // routing economy: the Intel reward for clearing this node (SUPPLY/ELITE pay premiums)
+                    string intelLbl = $"+{n.Intel} INTEL";
+                    Raylib.DrawTextEx(Cfg.Font, intelLbl, new Vector2((int)(p.X - (int)Raylib.MeasureTextEx(Cfg.Font, intelLbl, 9, 1f).X / 2), (int)(p.Y + rad + 14)), 9, 1f, Pal.Good);
+                }
                 // enemy intel hint: a short flavour line so the pick is informed
                 string hint = Run.EnemyHint(n);
                 Raylib.DrawTextEx(Cfg.Font, hint, new Vector2((int)(p.X - (int)Raylib.MeasureTextEx(Cfg.Font, hint, 9, 1f).X / 2), (int)(p.Y + rad + 25)), 9, 1f, Pal.TxtDim);

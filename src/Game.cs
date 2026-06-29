@@ -2369,13 +2369,25 @@ public class Game
                 {
                     if (AutoPlay) _run.ChooseBoon(_run.BoonOffer[0]); else HandleBoonClick();
                 }
+                else if (EventPending)                   // W4: resolve a "?" FIELD EVENT before the node pick
+                {
+                    if (AutoPlay) ResolveEvent(AutoEventChoice()); else HandleEventClick();
+                }
                 else
                 {
                     // debrief screen: bench toggles are available before choosing a node/card
                     if (!AutoPlay) HandleBenchClick();
                     if (_run.NextNodes().Count > 0)      // pick the next node on the campaign map
                     {
-                        if (AutoPlay) ChooseNode(_run.NextNodes()[0].Id); else HandleNodeClick();
+                        if (AutoPlay)
+                        {
+                            // Prefer an Event node when reachable so autoplay/balance always exercise
+                            // the "?" path (and continuously verify the event mission-lockstep fix).
+                            var nn = _run.NextNodes();
+                            var ev = nn.FirstOrDefault(x => x.Kind == NodeKind.Event);
+                            ChooseNode((ev ?? nn[0]).Id);
+                        }
+                        else HandleNodeClick();
                     }
                     else if (AutoPlay) ChooseCard(0);    // fallback: deployment cards
                     else HandleCardClick();
@@ -6462,11 +6474,107 @@ public class Game
         var cur = _run.CurrentNode;
         if (cur == null || !cur.Next.Contains(nodeId)) return;
         var node = _run.Map[nodeId];
-        _run.MapPos = nodeId;
+        _run.MapPos = nodeId;        // advance position == "this node is resolved once"
         node.Visited = true;
-        _run.CurrentCard = node.Card;
         Audio.Play("select");
+        if (node.Kind == NodeKind.Event)
+        {
+            // W4 C1 fix: an Event occupies its campaign COLUMN's mission slot without a fight. Keep the
+            // mission counter in lockstep with the column so the run still reaches MaxMissions at the
+            // Boss (the win gate is _run.Mission >= MaxMissions) — otherwise an event route can never win.
+            _run.Mission = node.Mission;     // = Col + 1
+            EnterEvent(node);                // resolve a "?" beat, don't deploy
+            return;
+        }
+        _run.CurrentCard = node.Card;
         NextMission();
+    }
+
+    // ---------------- W4: between-mission FIELD EVENTS ("?" nodes) ----------------
+    // An Event node presents a situation + choices INSIDE the barracks phase (no fight). It is
+    // resolved-once via MapPos (already advanced to this node in ChooseNode), so reload can never
+    // re-trigger it; the outcome bakes into persisted Run state and is checkpointed on resolution.
+    GameEvent _activeEvent;
+    MissionNode _eventNode;
+    public bool EventPending => _activeEvent != null;
+    public GameEvent ActiveEvent => _activeEvent;
+
+    void EnterEvent(MissionNode node)
+    {
+        _eventNode = node;
+        _activeEvent = EventCatalog.ForNode(_run, node);
+        // stay in Phase.Barracks; the Update switch's EventPending branch renders/handles it.
+    }
+
+    /// Is a choice's outcome legal given current Intel/roster (so the autopilot never picks an
+    /// illegal one and the HUD can grey it out)? Cost is the up-front intel a choice spends.
+    public bool ChoiceLegal(EventChoice ch)
+    {
+        // affordability: any negative-intel mutation (a costed buy / a rescue cost / a paid gamble)
+        int cost = 0;
+        if (ch.Outcome.Kind == EventOutcomeKind.Intel && ch.Outcome.Amount < 0) cost += -ch.Outcome.Amount;
+        if (ch.HasSecond && ch.Outcome2.Kind == EventOutcomeKind.Intel && ch.Outcome2.Amount < 0) cost += -ch.Outcome2.Amount;
+        if (cost > 0 && _run.Intel < cost) return false;
+        // roster: a recruit requires a free roster slot
+        if (ch.Outcome.Kind == EventOutcomeKind.Recruit && _run.Squad.Count >= Run.RosterMax) return false;
+        return true;
+    }
+
+    /// Autopilot/balance-safe default: the FIRST legal choice, else the last (always a no-op/safe
+    /// option). Always returns a legal index so the harness resolves in one tick (no stall).
+    int AutoEventChoice()
+    {
+        if (_activeEvent == null) return 0;
+        for (int i = 0; i < _activeEvent.Choices.Length; i++)
+            if (ChoiceLegal(_activeEvent.Choices[i])) return i;
+        return _activeEvent.Choices.Length - 1;
+    }
+
+    void ResolveEvent(int choiceIdx)
+    {
+        if (_activeEvent == null) return;
+        if (choiceIdx < 0 || choiceIdx >= _activeEvent.Choices.Length) choiceIdx = AutoEventChoice();
+        var ch = _activeEvent.Choices[choiceIdx];
+        if (!ChoiceLegal(ch)) return;   // ignore clicks on illegal choices
+        string line = EventCatalog.Apply(_run, ch.Outcome, _eventNode);
+        if (ch.HasSecond)
+        {
+            string line2 = EventCatalog.Apply(_run, ch.Outcome2, _eventNode);
+            line = line + "; " + line2;
+        }
+        _run.Report.Insert(0, $"EVENT: {_activeEvent.Title} -- {line}");
+        Audio.Play("turn");
+        _activeEvent = null; _eventNode = null;
+        // The event node is now CurrentNode (MapPos already advanced), so NextNodes() offers its
+        // outgoing edges -> the player picks the next real node (the same barracks pass surfaces any
+        // queued PendingPerks first). W4 M1/M2 fix: do NOT checkpoint mid-barracks — the outcome
+        // (incl. any queued perk) bakes into Run state and is saved at the NEXT mission start, exactly
+        // like shop/perk/boon picks. Saving here would (a) lose a queued PendingPerk on a quit before
+        // the pick (not persisted) and (b) make CONTINUE replay an already-cleared mission.
+    }
+
+    void HandleEventClick()
+    {
+        if (_activeEvent == null) return;
+        if (!Raylib.IsMouseButtonPressed(MouseButton.Left)) return;
+        var m = Raylib.GetMousePosition();
+        for (int i = 0; i < Hud.EventBtns.Length && i < _activeEvent.Choices.Length; i++)
+            if (Raylib.CheckCollisionPointRec(m, Hud.EventBtns[i]) && ChoiceLegal(_activeEvent.Choices[i]))
+            { ResolveEvent(i); return; }
+    }
+
+    /// Harness (screenshot): show the event screen at a mid column.
+    public void DebugEvent()
+    {
+        _run.JumpTo(3);
+        _run.DebriefSurvivors();
+        _run.PendingPerks.Clear();
+        _shopDone = true;
+        // synthesize an event node so the screen shows even if this seed placed none on the route
+        var node = _run.CurrentNode ?? (_run.Map.Count > 0 ? _run.Map[0] : null);
+        _eventNode = node;
+        _activeEvent = EventCatalog.All.Length > 0 ? EventCatalog.All[0] : null;
+        Phase = Phase.Barracks;
     }
 
     void HandleNodeClick()

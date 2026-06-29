@@ -86,7 +86,7 @@ public class MissionCard
 /// objective + difficulty + reward (carried in Card) plus a node "kind" that
 /// flavours the encounter. Nodes are laid out in columns (one per mission) and
 /// connected to 1-2 nodes in the next column, FTL/Slay-the-Spire style.
-public enum NodeKind { Start, Combat, Elite, Supply, Boss }
+public enum NodeKind { Start, Combat, Elite, Supply, Boss, Event }   // Event appended (save-safe; W4 "?" beats)
 
 /// A run-end MEMORIAL entry: a snapshot of a soldier at the moment they fell, captured for the
 /// run-summary card's KIA roll. PRESENTATION ONLY — populated from Game.KillUnit, read by Hud.
@@ -364,6 +364,23 @@ public class Run
         for (int e = 0; e < elites && k < mids.Count; e++, k++) mids[k].Kind = NodeKind.Elite;
         for (int s = 0; s < supplies && k < mids.Count; s++, k++) mids[k].Kind = NodeKind.Supply;
 
+        // W4 — between-mission FIELD EVENTS ("?" beats): stamp 1-2 of the still-Combat mids as
+        // Event nodes. Uses the same seeded rng (deterministic -> round-trips on load), sits only
+        // in mid columns (never Start/Boss), and leaves the edge-wiring + fix-up below untouched so
+        // connectivity holds (events never make a whole column, so a fight path to BOSS always
+        // remains). Events are NOT fights: ChooseNode intercepts them before SetupMission.
+        int events = Math.Clamp(mids.Count / 4, 1, 2);
+        int placed = 0;
+        for (; k < mids.Count && placed < events; k++)
+        {
+            var cand = mids[k];
+            // never make a whole column events (a fight path must remain in every mid column)
+            int colCombat = Map.FindAll(n => n.Col == cand.Col && n.Kind == NodeKind.Combat).Count;
+            if (colCombat <= 1) continue;   // this is the column's last fight node — leave it a fight
+            cand.Kind = NodeKind.Event;
+            placed++;
+        }
+
         foreach (var node in Map) node.Card = CardForNode(node);
 
         // ROUTING ECONOMY: per-node Intel reward. Base scales with depth (the rising difficulty),
@@ -434,6 +451,10 @@ public class Run
                 return new MissionCard { Objective = obj, ModName = "ELITE", EnemyDelta = 2, StatDelta = 1, Reward = RewardKind.BonusPerk, RewardText = "Bonus perk" };
             case NodeKind.Supply:
                 return new MissionCard { Objective = obj, ModName = "SUPPLY", EnemyDelta = -1, StatDelta = -1, Reward = RewardKind.Heal, RewardText = "Full squad heal" };
+            case NodeKind.Event:
+                // sentinel: an event is never built into a mission (ChooseNode intercepts it), but
+                // a non-null Card keeps any generic node.Card read null-safe.
+                return new MissionCard { Objective = Objective.Eliminate, ModName = "EVENT", Reward = RewardKind.None, RewardText = "-" };
             default:
                 return new MissionCard { Objective = obj, ModName = "STANDARD", Reward = RewardKind.None, RewardText = "-" };
         }
@@ -451,6 +472,7 @@ public class Run
         {
             NodeKind.Supply => baseIntel + 10,   // economy route: rest + a meaningful intel bonus
             NodeKind.Elite  => baseIntel + 14,   // risk-for-reward: heavier force, the biggest payout
+            NodeKind.Event  => 0,                // no clear-intel: an event's rewards come from the choice
             _               => baseIntel,
         };
     }
@@ -975,6 +997,8 @@ public class Run
         int m = node.Mission;   // 1-based column == mission number
         switch (node.Kind)
         {
+            case NodeKind.Event:
+                return "UNKNOWN SIGNAL";   // a "?" beat: a situation + choices, not a fight
             case NodeKind.Boss:
                 // GenerateMap only ever places ONE Boss node, at the final column, so the
                 // capstone WARLORD is the boss. (BREAKER m3 / WARDEN m5 appear as mid-bosses

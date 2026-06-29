@@ -44,6 +44,12 @@ public static class Program
             Console.WriteLine(Combat.SelfTest());
             return;
         }
+        // SIGHTLINE_EVENTTEST=1 : between-mission FIELD EVENT selection/placement/outcomes + save round-trip (W4). No window.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_EVENTTEST") == "1")
+        {
+            Console.WriteLine(EventCatalog.SelfTest());
+            return;
+        }
         // SIGHTLINE_HAZARDTEST=1 : environmental-hazard mechanics (barrel blocking / fire / pathing). No window.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_HAZARDTEST") == "1")
         {
@@ -261,6 +267,7 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_PREP") == "1") game.DebugPrep();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_ARMORY") == "1") game.DebugArmory();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_BOON") == "1") game.DebugBoon();
+        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_EVENT") == "1") game.DebugEvent();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_DRAFT") == "1") game.BeginDraft();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_HAZARD") == "1") game.DebugHazards();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_TAGEDIT") == "1") game.DebugTagEditor();
