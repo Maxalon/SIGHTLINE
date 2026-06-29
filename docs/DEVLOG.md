@@ -738,3 +738,80 @@ SNAPTEST/ITEMTEST/AUDIOTEST all PASS; autoplay clean; colorblind palette holds w
 a visual identity leap, a strategic economy + routing depth, an audio overhaul, and perk build-depth — flywheel-
 measured (run-completion 15% -> 30-52%, objective cliffs erased), independently reviewed SHIP, all self-tests
 green, PR #60.**
+
+---
+
+# PROGRAM "VANGUARD" — per-turn depth + a new tactical axis + run-to-run variety
+
+Fresh fully-autonomous session, run as a dev team (orchestrator + research fan-out + per-wave
+design-spec agents + dev agents + an independent reviewer per wave + a final cross-wave integration
+reviewer + the `SIGHTLINE_BALANCE` flywheel). Branch `claude/stoic-knuth-zb11k0`, **PR #64**.
+
+## Research → thesis
+A 3-agent read-only fan-out (design opportunity / code change-surface / balance) converged on the
+SAME deepest finding every prior program circled but never fully closed: **per-turn decisions are
+categorically flat.** The action economy is solid post-TEMPO, but the impactful verbs (class
+abilities/items) were once-per-mission charges, so the average turn collapsed to "move to cover →
+best-EV shot → reposition," and a greedy no-lookahead bot clears missions. The two highest-leverage
+fixes (both auditors agreed): make verbs **renewable/regularly-relevant**, and add **enemy threats
+that demand a non-shoot response**. Plus the run-to-run loop still felt same-y (no "?" beats), and the
+balance audit surfaced surviving roots (Sharpshooter *aim* dominance, boss HP inversion, dead choices).
+
+## Waves (Game.cs is the single serialization point → W1-W4 sequential, one owner each; W5 parallel)
+- **W1 — balance root-fixes** (`a95e87f`): Sharpshooter aim trim (the root nobody had touched), boss
+  de-inversion (BERSERKER/BRUISER HP ×2→×1), Reflexes overwatch +110→+75, revived COMBAT STIMS / FRAG
+  CACHE / SCAVENGER. Measured: Sharpshooter de-dominated, all 3 dead choices revived.
+- **W2 — renewable ability economy** (`661e62d`, keystone): `AbilityCharge` → per-unit cooldown
+  `AbilityCd` (Heal/Slipstream 3, Mark/Pin/Grapple 2), ticked at the unit's BeginTurn. Transient,
+  save-safe, autopilot-transparent. `SIGHTLINE_CDTEST`.
+- **W3 — SIEGE/BOMBARD artillery** (`82925b5`, new tactical axis): charges a telegraphed 3×3 strike,
+  detonates next enemy turn unless relocated/LoS-broken/killed. Indirect, m3+, 1/mission cap.
+  `SIGHTLINE_SIEGETEST`. Review fixes: Wardens-roster m3+ gate, no self-blast.
+- **W4 — between-mission field events** (`525c396`, run variety): roguelike "?" nodes, 10 trade-off
+  events, `NodeKind.Event` (append-only), `src/Events.cs`, deterministic + save-safe. `SIGHTLINE_EVENTTEST`.
+  **Independent review caught a CRITICAL autoplay missed:** an event consumed a campaign column without
+  incrementing the mission counter → event routes were un-winnable. Fixed via column/mission lockstep
+  (`_run.Mission = node.Mission`), verified by biasing autopilot to PREFER events → WIN mission=6. Also
+  removed a mid-barracks save (M1/M2: lost a queued perk on reload + replayed a mission on CONTINUE).
+- **W5 — 4 new authored arenas** (`9343960`): CRUCIBLE / STEPWELL / COLONNADE / ENTRENCHED (32 templates
+  total). Built in PARALLEL in an isolated worktree on a disjoint file set (Maps.cs + Mission.cs),
+  integrated by clean file-copy — the worktree-parallelism the architecture audit identified as safe.
+- **Polish** (`8142b8e`): `AutoEventChoice` now prefers a SAFE beneficial choice so the flywheel models
+  sensible play (the naive "first legal" default was gambling/wounding on every event, dragging measured
+  completion — a measurement artifact, not real difficulty); harness `JumpTo` skips event nodes.
+
+## Measured (flywheel, post-fix)
+| Heat | N (campaigns) | Run-completion | avg cleared | policy gap |
+|------|---------------|----------------|-------------|------------|
+| 0    | 24            | **70.8%**      | 5.29 / 6    | +8.3 (greedy 75 / sloppy 67) |
+| 4    | 16            | **50.0%**      | 4.50 / 6    | 0          |
+
+Clean **descending** heat ladder (h0 winnable, h4 meaningfully harder); per-mission 76-100%; decision
+richness ~5.3-6.6/turn. Class field tightened (Sharpshooter still top single-target, no longer runaway);
+dead choices revived (FRAG CACHE 3→95, STIMS 41→87, SCAVENGER a top boon); boons now evenly picked.
+
+## Process learnings (VANGUARD)
+- **Reviews catch what autoplay can't.** The W4 C1 un-winnable-run bug was invisible to autoplay (the
+  dumb bot routes through Combat siblings, not events) and to all self-tests — only a human-style
+  reviewer tracing the win gate found it. Per-wave independent review + a final cross-wave integration
+  review (interactions: renewable-Heal × sustain, artillery × VIP/objectives, events × mission-count ×
+  checkpoint) is the net.
+- **Trust the ladder shape over a single sample.** A pre-fix run showed h0=50% < h4=75% (inverted) — the
+  tell that h0 wasn't truly 50%-hard. The cause was a measurement artifact (the event-preferring
+  autopilot making bad "first legal" choices). Fixing the BOT's policy (sensible event choices), not the
+  game, restored h0 to 70.8% and a correct descending ladder. Measure the measurer.
+- **Game.cs is the bottleneck; spec-then-build scales.** Each Game.cs-touching wave got a read-only
+  design-spec agent first (line numbers go stale fast across waves — devs must search, not trust them),
+  then a single owner. Disjoint content (arenas) ran truly parallel in a worktree with zero conflict.
+
+## Open / next (documented, evidence-backed)
+- Defend objective dipped on a small sample (artillery-forces-movement vs hold-the-zone tension) — gate
+  BOMBARD off Defend, or accept it as designed tension; measure first.
+- The renewable-Heal + SCAVENGER + event-heal sustain stack is bounded but un-co-measured.
+- A 2nd disruptor enemy type; more events; the heat-ladder spawn-cap/aim-clamp ceiling (balance-audit R4)
+  is still the open difficulty-scaling root.
+
+**VANGUARD TOTAL (PR #64): 5 waves + a polish pass, 7 commits, ~13 agents (3 research + 3 spec + 5 dev +
+4 review/integration) — per-turn depth (renewable verbs), a new tactical axis (telegraphed artillery),
+run-to-run variety (field events), a balance root-fix pass, and 4 arenas. 13 self-tests green, build 0/0,
+flywheel-validated (h0 70.8% / h4 50%, clean ladder), all reviews SHIP.**
