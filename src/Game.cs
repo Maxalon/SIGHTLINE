@@ -674,8 +674,12 @@ public class Game
     void SetupMission(int n)
     {
         _run.Mission = n;
-        // publish this run's boons to the static combat reads (Marksmen/Fervor/Executioners/Fortified)
-        Combat.RunBoons = new System.Collections.Generic.HashSet<Boon>(_run.ActiveBoons);
+        // TEMPO wave 4: publish ALL this mission's combat statics in one lifecycle call — the run's
+        // boons, the mission faction (read by the spawn roster in Mission.Build below, so it MUST be
+        // set first), the bought counter-prep, and a clean PressureAim/AllUnits. Replaces the four
+        // scattered manual resets that used to live here / at lines further down.
+        Combat.BeginMission(_run.ActiveBoons, _run.CurrentNode?.Faction ?? Faction.None, _run.PrepFaction);
+        _run.PrepFaction = Faction.None;   // counter-prep is one mission only — consume it
         Stats.ClearLog();   // fresh combat-log ledger each mission
         // reset camera to identity each new mission (auto-cam will gently ease in if enabled)
         CamZoom = 1f; CamPan = Vector2.Zero; _autoCamManual = false;
@@ -752,18 +756,9 @@ public class Game
         // adaptive assist eases the force-wide enemy stat bump (base Heat only; 0 otherwise).
         int statDelta = card.StatDelta + heatStat - _run.AssistStatRelief;
 
-        // Enemy FACTIONS (Wave 4): set the active mission's faction so BOTH the faction-gated spawn
-        // roster (Mission.SelectArchetype) AND the faction combat rule (Combat.ComputeOdds) take effect
-        // this mission. Read from the campaign node; None on START/SUPPLY/BOSS (mixed force) and any
-        // non-campaign path. MUST be set BEFORE Mission.Build — SelectArchetype reads it at spawn time.
-        Combat.MissionFaction = _run.CurrentNode?.Faction ?? Faction.None;
-
-        // FACTION COUNTER-PREP: apply the one-mission counter the player bought at the barracks, then
-        // CONSUME it (one mission only). It only bites when it matches this mission's faction (the
-        // honest bet) — Combat gates each rule on PrepFaction == MissionFaction. Cleared whether or not
-        // it matched so an un-cashed prep doesn't carry over.
-        Combat.PrepFaction = _run.PrepFaction;
-        _run.PrepFaction = Faction.None;
+        // (MissionFaction + PrepFaction were published above by Combat.BeginMission — the faction is
+        // set before Mission.Build so the faction-gated spawn roster sees it; the counter-prep only
+        // bites when PrepFaction == MissionFaction, and was consumed off _run right after BeginMission.)
 
         // reserve + connectivity-verify a key tile: the Hack terminal, or the Rescue captive's seat
         (int x, int y)? reserve = HasTerminal ? Terminal
@@ -798,7 +793,7 @@ public class Game
         _anims.Clear();
         HitStop = 0;
         _turnCount = 1;
-        Pressure = 0; _pressureWaves = 0; Combat.PressureAim = 0;   // anti-turtle clock resets each mission
+        Pressure = 0; _pressureWaves = 0;   // anti-turtle clock resets each mission (Combat.PressureAim cleared by BeginMission)
         _autoSig = -1; _autoStall = 0;
         Phase = Phase.PlayerTurn;
         // 4.4: every mission opens with the squad concealed -- UNLESS Heat "EXPOSED" strips it.
@@ -1527,11 +1522,10 @@ public class Game
 
     void EnterBarracks()
     {
-        Combat.MissionFaction = Faction.None;   // defensive: clear the mission faction between missions (re-set in SetupMission) so no stale value can warp a barracks-phase odds read
-        Combat.PressureAim = 0;                  // and the anti-turtle pressure aim bonus
-        Combat.PrepFaction = Faction.None;       // and the faction counter-prep (re-set+consumed in SetupMission)
-        Combat.RunBoons = new System.Collections.Generic.HashSet<Boon>(_run.ActiveBoons);  // keep run boons valid; AllUnits cleared so no stale roster is read off-mission
-        Combat.AllUnits = System.Array.Empty<Unit>();
+        // TEMPO wave 4: drop every mission-scoped combat static in one call so no stale value warps a
+        // barracks-phase odds read; RunBoons is refreshed to the run's current boons (a FIELD DOCTRINE
+        // pick may have just changed them).
+        Combat.EndMission(_run.ActiveBoons);
         // a benched soldier sat this mission out: it's still in _run.Squad (flagged) but was
         // never in Players, so it's absent from AlivePlayers(). Preserve it across the rebuild,
         // or benching would silently destroy the veteran (review Blocker 1).
@@ -1638,10 +1632,7 @@ public class Game
     /// End the run as a loss and clear the checkpoint so the intro stops offering CONTINUE.
     void LoseRun(string title, string reason)
     {
-        Combat.MissionFaction = Faction.None;   // defensive: clear the mission faction on run end (re-set next SetupMission)
-        Combat.PressureAim = 0;                  // and the anti-turtle pressure aim bonus
-        Combat.PrepFaction = Faction.None;       // and the faction counter-prep so no stale value bleeds into the next run
-        Combat.AllUnits = System.Array.Empty<Unit>();  // drop the crossfire roster on run end (re-set next SetupMission)
+        Combat.EndRun();   // TEMPO wave 4: clear every mission-scoped combat static (+ run boons) on run end
         LoseTitle = title;
         LoseReason = reason;
         Phase = Phase.Lose;
@@ -1929,7 +1920,8 @@ public class Game
             // (shares the flank-kill refund guard so the two never compound into an endless chain).
             if (_run.HasBoon(Boon.Adrenaline) && Phase == Phase.PlayerTurn && !_refundedThisTurn.Contains(killer))
             {
-                killer.ActionsLeft++;
+                killer.ActionsLeft = Math.Min(3, killer.ActionsLeft + 1);
+                killer.FiredThisTurn = false;   // TEMPO: a kill-refund re-enables firing (the aggressive chain)
                 _refundedThisTurn.Add(killer);
                 Fx.PopText(killer.Pos + new Vector2(0, -16), "ADRENALINE", Pal.Accent, 18f);
             }
@@ -1942,7 +1934,8 @@ public class Game
         // kill refund: MOMENTUM fires on ANY kill (no flank required), making an aggressive chainer.
         if (Phase == Phase.PlayerTurn && Combat.KillRefundsAction(killer) && !_refundedThisTurn.Contains(killer))
         {
-            killer.ActionsLeft++;
+            killer.ActionsLeft = Math.Min(3, killer.ActionsLeft + 1);
+            killer.FiredThisTurn = false;   // TEMPO: a kill-refund re-enables firing (the aggressive chain)
             _refundedThisTurn.Add(killer);
             Fx.PopText(killer.Pos + new Vector2(0, -40), "+1 ACTION", Pal.Accent, 22f);
             Fx.PopText(killer.Pos + new Vector2(0, -22), "MOMENTUM", Pal.Good, 16f);
@@ -1975,7 +1968,8 @@ public class Game
         bool flankKill = sa.Res.Odds.Flanked;
         if (!flankKill || _refundedThisTurn.Contains(killer)) return;
         _refundedThisTurn.Add(killer);
-        killer.ActionsLeft += 1;
+        killer.ActionsLeft = Math.Min(3, killer.ActionsLeft + 1);
+        killer.FiredThisTurn = false;   // TEMPO: a flank-kill re-enables firing (the aggressive chain)
         Fx.PopText(killer.Pos + new Vector2(0, -46), "+1 ACTION", Pal.Accent, 22f);
         Fx.PopText(killer.Pos + new Vector2(0, -28), "MOMENTUM", Pal.Good, 16f);
         Fx.Burst(killer.Pos, Pal.Accent, 12, 150f, 0.45f, 3f, true);
@@ -2580,18 +2574,24 @@ public class Game
         return p - e;
     }
 
-    /// Decision-richness proxy for THIS player turn: across every soldier that can still act,
-    /// count how many distinct candidate shots have a value within ~12% of that soldier's best
-    /// shot (i.e. a real "which target?" choice existed, not a forced single option). Reuses
-    /// ShotValue/Combat.ComputeOdds (read-only — never mutates state). Cheap + bounded
-    /// (soldiers × live enemies). 0 when no soldier has ≥2 comparable options.
+    /// Decision-richness proxy for THIS player turn. Two axes of real choice, summed across every
+    /// soldier that can still act:
+    ///   (a) WHICH TARGET — how many distinct candidate shots are within ~12% of the soldier's best
+    ///       shot (a real "who do I shoot?" call, not a forced single option).
+    ///   (b) WHERE TO STAND AFTER FIRING (TEMPO) — because the aimed shot no longer ends the turn,
+    ///       a soldier that has a shot AND a spare action faces a genuine "where do I end up after
+    ///       firing?" bet: how many distinct safe destinations (low exposure / good cover) are
+    ///       near-best. This axis simply DID NOT EXIST before the tempo change (firing zeroed the
+    ///       budget), so its contribution is new decision depth, not a re-weighting. Capped per
+    ///       soldier so an open map can't trivially inflate it.
+    /// Reuses ShotValue/ComputeOdds/TileExposure (read-only — never mutates state). Cheap + bounded.
     int CountMeaningfulChoices()
     {
         int total = 0;
         foreach (var u in Players)
         {
             if (!u.Alive || !u.CanAct || u.IsVip || u.Ammo <= 0) continue;
-            // gather the value of every legal shot from where this soldier stands.
+            // (a) which target — gather the value of every legal shot from where this soldier stands.
             float best = 0f; int comparable = 0;
             var vals = new List<float>();
             foreach (var e in Enemies)
@@ -2604,9 +2604,38 @@ public class Game
                 vals.Add(v);
                 if (v > best) best = v;
             }
-            if (best <= 0f) continue;
+            if (best <= 0f) continue;                                      // no shot -> no shot/positioning decision
             foreach (var v in vals) if (v >= best * 0.88f) comparable++;   // within ~12% of best
-            if (comparable >= 2) total += comparable - 1;                  // count the real alternatives
+            if (comparable >= 2) total += comparable - 1;                  // count the real target alternatives
+
+            // (b) where to stand after firing — only when the soldier can fire AND still has an
+            // action left to move (the post-shot positioning bet). Score each 1-action-reachable
+            // tile by safety (low exposure) + cover + height; count distinct near-best destinations.
+            if (u.ActionsLeft >= 2)
+            {
+                float SafetyAt(int x, int y)
+                {
+                    float s = 24f - TileExposure(u, x, y);
+                    var foe = AliveEnemies().OrderBy(en => Util.TileDist(x, y, en.X, en.Y)).FirstOrDefault();
+                    if (foe != null) s += Grid.GetCover(x, y, foe.X, foe.Y).Level * 8f;
+                    s += Grid.HeightAt(x, y) * 5f;
+                    return s;
+                }
+                var pcost = Grid.CostMap(u.X, u.Y, (x, y) => IsOccupiedByOther(x, y, u), out _, u.MoveBudget * 2);
+                float pbest = SafetyAt(u.X, u.Y); var pvals = new List<float> { pbest };
+                for (int x = 0; x < Grid.W; x++)
+                    for (int y = 0; y < Grid.H; y++)
+                    {
+                        if (pcost[x, y] <= 0 || pcost[x, y] > u.MoveBudget) continue;  // 1-action steps only
+                        float s = SafetyAt(x, y); pvals.Add(s); if (s > pbest) pbest = s;
+                    }
+                if (pbest > 0f)
+                {
+                    int pComparable = 0;
+                    foreach (var s in pvals) if (s >= pbest * 0.85f) pComparable++;
+                    if (pComparable >= 2) total += Math.Min(2, pComparable - 1);       // capped: anti-inflation
+                }
+            }
         }
         return total;
     }
@@ -3038,7 +3067,10 @@ public class Game
         bool decent   = odds.HitChance >= 45;
         // if the soldier has BOTH actions, a weak shot is fine via SNAP (keeps acting); a
         // turn-ending aimed shot should clear a higher bar. Either way, take a real chance.
-        bool twoActions = u.ActionsLeft >= 2 && !u.RunGun;
+        // TEMPO: firing no longer ends the turn, so a marginal shot is cheap (the soldier keeps an
+        // action to reposition). With two actions in hand, take any real chance; with one, hold a
+        // higher bar so we don't waste the soldier's only action on a coin-flip.
+        bool twoActions = u.ActionsLeft >= 2;
         if (!finisher && !decent && !(twoActions && odds.HitChance >= 30)) return false;
         AutoShootSmart(u, tgt);
         return true;
@@ -3055,21 +3087,11 @@ public class Game
         return odds.HitChance >= 60 || (tgt.Hp <= odds.DmgMax && odds.HitChance >= 50);
     }
 
-    /// Fire at `tgt`, choosing the AIMED vs SNAP variant intelligently. With both actions in
-    /// hand, prefer a SNAP (1 action, no end-turn, -15 aim) so the soldier keeps its tempo
-    /// (move + shoot, or two snaps), UNLESS this shot is a likely KILL — then commit the full
-    /// AIMED shot so the -15 doesn't cost the kill. (This is intentionally consistent with
-    /// TakeBestShot, which decides to fire a marginal shot precisely BECAUSE it can snap it and
-    /// keep acting — so we must actually snap it, not silently spend the whole turn aiming.)
-    /// Bounded exactly like AutoShoot (a snap always costs ≥1 action, so the turn still ends).
+    /// Fire at `tgt`. TEMPO: the aimed shot is now always 1 action and never ends the turn, so
+    /// there's no SNAP/AIMED decision to make — fire at full aim and let the soldier keep its
+    /// second action for repositioning (handled by SmartRetreatAfterShot in the cascade).
     void AutoShootSmart(Unit u, Unit tgt)
     {
-        if (u.ActionsLeft >= 2 && !u.RunGun)
-        {
-            var odds = Combat.ComputeOdds(Grid, u, tgt);
-            bool likelyKill = tgt.Hp <= odds.DmgMax && odds.HitChance >= 55;
-            if (!likelyKill) SnapShot = true;     // keep the second action; aim only to secure a kill
-        }
         IssueShoot(tgt);
     }
 
@@ -3976,10 +3998,10 @@ public class Game
             {
                 ShowOdds = true;
                 HoverOdds = Combat.ComputeOdds(Grid, Selected, AimTarget);
-                // SNAP lowers the displayed hit% by the same penalty Resolve will apply, so
-                // the number the player sees is truthful (perfect-information contract). RUN&GUN
-                // is the free version, so no penalty when it's queued. Crit isn't aimMod-scaled.
-                if (SnapShot && !Selected.RunGun)
+                // TEMPO: a rushed SECOND shot this turn lowers the displayed hit% by the same penalty
+                // Resolve will apply, so the number the player sees stays truthful (perfect-info
+                // contract). RUN&GUN's bonus shot is full aim, so no penalty when it's queued.
+                if (Selected.FiredThisTurn && !Selected.RunGun)
                     HoverOdds.HitChance = Util.Clamp(HoverOdds.HitChance + SnapAim, 1, 99);
             }
             return;
@@ -3991,6 +4013,8 @@ public class Game
         {
             ShowOdds = true;
             HoverOdds = Combat.ComputeOdds(Grid, Selected, hovered);
+            if (Selected.FiredThisTurn && !Selected.RunGun)   // TEMPO: a rushed 2nd shot shows its penalty
+                HoverOdds.HitChance = Util.Clamp(HoverOdds.HitChance + SnapAim, 1, 99);
         }
         // path preview to reachable floor
         else if (Selected != null && Selected.CanAct && MoveCost != null && HoverValid &&
@@ -4009,7 +4033,6 @@ public class Game
         if (Raylib.IsKeyPressed(KeyboardKey.Enter)) { RequestEndTurn(); return; }
         if (Raylib.IsKeyPressed(KeyboardKey.Tab)) CycleSelection();
         if (Raylib.IsKeyPressed(KeyboardKey.One)) ToggleAim();
-        if (Raylib.IsKeyPressed(KeyboardKey.Seven)) ToggleSnap();
         if (Raylib.IsKeyPressed(KeyboardKey.Two)) DoOverwatch();
         if (Raylib.IsKeyPressed(KeyboardKey.Three)) DoHunker();
         if (Raylib.IsKeyPressed(KeyboardKey.Four)) ToggleGrenade();
@@ -4208,7 +4231,6 @@ public class Game
         switch (id)
         {
             case "shoot": ToggleAim(); break;
-            case "snap": ToggleSnap(); break;
             case "grenade": ToggleGrenade(); break;
             case "item": ToggleItem(); break;
             case "shove": ToggleShove(); break;
@@ -4237,16 +4259,13 @@ public class Game
         Audio.Play("select");
     }
 
-    // FIRE: enter aim mode for the AIMED shot (full aim, ends the turn).
+    // FIRE: enter aim mode. TEMPO: the shot is 1 action and does NOT end the turn (one shot/turn).
     void ToggleAim() => EnterAim(false);
-    // SNAP: enter the SAME aim mode but flag the pending shot as a snap (1 action, no
-    // end-turn, -SnapAim). Generalises Assault's free RUN&GUN to every soldier as a paid,
-    // less-accurate option, so "shoot" is a real per-turn decision.
-    void ToggleSnap() => EnterAim(true);
 
     void EnterAim(bool snap)
     {
         if (Selected == null || !Selected.CanAct || Selected.Ammo <= 0) return;
+
         // pressing the active variant again toggles aim OFF; switching variants (FIRE<->SNAP)
         // just re-flags the pending shot and keeps the current target lock.
         if (AimMode && SnapShot == snap) { AimMode = false; SnapShot = false; return; }
@@ -4482,15 +4501,19 @@ public class Game
         if (!CanTarget(Selected, target)) return;
         if (SquadConcealed) BreakConcealment(Selected);  // 4.4: the ambush shot springs the trap
         Selected.Ammo--;
-        // Action cost + accuracy by shot variant:
-        //  - RUN&GUN (Assault ability): free no-penalty shot — costs 1 action, no end-turn.
-        //  - SNAP: costs 1 action, no end-turn, at the SnapAim penalty (folded into aimMod).
-        //  - AIMED (default): full aim, ENDS the turn.
-        bool snap = SnapShot && !Selected.RunGun;        // RunGun's free shot takes priority over snap
+        // TEMPO action cost: a shot costs 1 action and does NOT end the turn — the soldier keeps its
+        // second action to REPOSITION (duck into cover / break LoS), take a rushed FOLLOW-UP shot, or
+        // a support action. The FIRST shot each turn is full aim; a SECOND shot the same turn is
+        // "rushed" at the SnapAim penalty (so the 2-shots/turn DPS ceiling matches the old double-snap,
+        // but the new bet is "duck vs double-tap"). RUN&GUN is the Assault's free bonus shot (full aim).
         int aimMod = 0;
-        if (Selected.RunGun) { Selected.ActionsLeft = Math.Max(0, Selected.ActionsLeft - 1); Selected.RunGun = false; }
-        else if (snap)       { Selected.ActionsLeft = Math.Max(0, Selected.ActionsLeft - 1); aimMod = SnapAim; }
-        else                   Selected.ActionsLeft = 0;
+        if (Selected.RunGun) { Selected.RunGun = false; Selected.ActionsLeft = Math.Max(0, Selected.ActionsLeft - 1); }
+        else
+        {
+            if (Selected.FiredThisTurn) aimMod = SnapAim;   // a rushed follow-up shot
+            Selected.FiredThisTurn = true;
+            Selected.ActionsLeft = Math.Max(0, Selected.ActionsLeft - 1);
+        }
         var res = Combat.Resolve(Grid, Selected, target, aimMod);
         Selected.Steady = false;                         // braced shot consumed
         Selected.FiredFromConcealment = false;           // ambush bonus is for this one shot only
@@ -4521,10 +4544,9 @@ public class Game
         if (!CanShootBarrel(Selected, bx, by)) return;
         if (SquadConcealed) BreakConcealment(Selected);   // shooting a barrel is going loud
         Selected.Ammo--;
-        bool snap = SnapShot && !Selected.RunGun;
-        if (Selected.RunGun) { Selected.ActionsLeft = Math.Max(0, Selected.ActionsLeft - 1); Selected.RunGun = false; }
-        else if (snap)       Selected.ActionsLeft = Math.Max(0, Selected.ActionsLeft - 1);
-        else                  Selected.ActionsLeft = 0;
+        // TEMPO: 1 action, no end-turn (mirrors IssueShoot). A 2nd shot/turn is a rushed follow-up.
+        if (Selected.RunGun) { Selected.RunGun = false; Selected.ActionsLeft = Math.Max(0, Selected.ActionsLeft - 1); }
+        else                 { Selected.FiredThisTurn = true; Selected.ActionsLeft = Math.Max(0, Selected.ActionsLeft - 1); }
         Selected.Steady = false;
         Selected.FiredFromConcealment = false;
         Enqueue(new BarrelShotAnim(Selected, bx, by), Team.Player);
@@ -5229,10 +5251,13 @@ public class Game
                     e.ActionsLeft > 0 && e.Ammo > 0 && CanTarget(e, _aiPlan.ShootTarget))
                 {
                     e.Ammo--;
-                    e.ActionsLeft = 0;
+                    // TEMPO: the enemy shot is 1 action and does NOT end the turn (mirrors the player).
+                    e.FiredThisTurn = true;
+                    e.ActionsLeft = Math.Max(0, e.ActionsLeft - 1);
                     var res = Combat.Resolve(Grid, e, _aiPlan.ShootTarget);
                     Enqueue(new WaitAnim(0.2f), Team.Enemy);
                     Enqueue(new ShotAnim(e, _aiPlan.ShootTarget, res), Team.Enemy);
+                    TryEnemyReposition(e);   // shoot-then-reposition: duck to cover / advance with the spare action
                 }
                 else if (_aiPlan.Overwatch && e.ActionsLeft > 0 && e.Ammo > 0 && !e.HasStatus(StatusKind.Disoriented))
                 {
@@ -5273,6 +5298,65 @@ public class Game
             if (keep == 0) { Fx.PopText(e.Pos + new Vector2(0, -34), "PINNED", Pal.Foe, 16f); return; }
         }
         e.ActionsLeft -= moveActions;
+        foreach (var (px, py) in path) Enqueue(new MoveStepAnim(e, px, py), Team.Enemy);
+        Audio.Play("move");
+    }
+
+    // TEMPO mirror: after an enemy fires (a 1-action, non-turn-ending shot) it spends any remaining
+    // action to REPOSITION — duck to cover / break the squad's line of fire (kiters + standard) or
+    // close the gap (rushers). Mirrors the player's new shoot-then-move so the tempo buff is
+    // SYMMETRIC, not a one-sided player advantage. Only "stationary shooters" (an enemy already in
+    // range that didn't burn both actions moving) have a spare action here, so it adds little extra
+    // movement. Bounded + safe: one fresh CostMap, a single ≤1-action move, enqueued exactly once
+    // (the AI state machine gives each enemy ONE ActAfterMove pass — no re-entry, no loop/TIMEOUT).
+    void TryEnemyReposition(Unit e)
+    {
+        if (!e.Alive || e.ActionsLeft <= 0 || e.Mobility <= 0) return;
+        var players = AlivePlayers();
+        if (players.Count == 0) return;
+
+        // exposure of a tile = how readily the squad can shoot a unit standing there (less cover =
+        // more exposed). Mirrors why a player ducks after firing.
+        float ExposureAt(int tx, int ty)
+        {
+            float ex = 0f;
+            foreach (var p in players)
+            {
+                if (!p.Alive || p.Ammo <= 0) continue;
+                if (Util.TileDist(tx, ty, p.X, p.Y) > p.Weapon.MaxRange) continue;
+                if (!Grid.HasLineOfSight(p.X, p.Y, tx, ty)) continue;
+                int cov = Grid.GetCover(tx, ty, p.X, p.Y).Level;   // cover of (tx,ty) vs attacker p
+                ex += cov == 2 ? 1f : (cov == 1 ? 2f : 3.5f);      // high cover safest; exposed worst
+            }
+            return ex;
+        }
+
+        float curExp = ExposureAt(e.X, e.Y);
+        // An enemy with a meaningfully-exposed firing angle ducks for cover after shooting; a
+        // well-covered shooter holds its ground. Purely DEFENSIVE (reduce exposure); we do NOT
+        // advance rushers here, to keep the mirror a fair "shoot-then-cover" parity with the player
+        // rather than an extra aggression buff. The 2.0 gate is the measured sweet spot — enough
+        // enemy self-preservation to reward the player's positioning, not so much it craters the
+        // sloppy-play floor (3.5 was too forgiving at 75%, full-aggression too punishing at 50%).
+        if (curExp < 2.0f) return;
+
+        Func<int, int, bool> blocked = (x, y) => IsOccupiedByOther(x, y, e);
+        var cost = Grid.CostMap(e.X, e.Y, blocked, out var cameFrom, e.MoveBudget * 2);
+
+        (int x, int y) best = (e.X, e.Y); float bestScore = 0.01f; bool found = false;
+        for (int x = 0; x < Grid.W; x++)
+            for (int y = 0; y < Grid.H; y++)
+            {
+                int c = cost[x, y];
+                if (c <= 0 || c > e.MoveBudget) continue;   // single-action steps only
+                float score = (curExp - ExposureAt(x, y)) * 6f;   // duck: reduce exposure
+                if (score > bestScore) { bestScore = score; best = (x, y); found = true; }
+            }
+
+        if (!found || (best.x == e.X && best.y == e.Y)) return;
+        var path = Grid.ReconstructPath(cameFrom, e.X, e.Y, best.x, best.y);
+        if (path.Count == 0) return;
+        e.ActionsLeft = Math.Max(0, e.ActionsLeft - 1);
         foreach (var (px, py) in path) Enqueue(new MoveStepAnim(e, px, py), Team.Enemy);
         Audio.Play("move");
     }
@@ -5777,12 +5861,12 @@ public class Game
             : "STATUSTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
-    /// Headless self-test (SIGHTLINE_SNAPTEST): the per-turn DEPTH mechanics —
-    ///   (1) a SNAP shot costs exactly 1 action and does NOT end the turn (and the snap flag
-    ///       is consumed), while an AIMED shot still ends the turn (ActionsLeft -> 0);
-    ///   (2) a player flank-kill (exposed target) refunds +1 action ONCE per soldier per turn
-    ///       (a second flank-kill the same turn grants nothing), and a kill on a COVERED target
-    ///       refunds nothing.
+    /// Headless self-test (SIGHTLINE_SNAPTEST): the TEMPO per-turn action economy —
+    ///   (1) the first aimed shot costs exactly 1 action and does NOT end the turn, setting FiredThisTurn;
+    ///   (1b) a SECOND shot the same turn is allowed (a rushed follow-up — costs 1 action + ammo);
+    ///   (1c) RUN&GUN gives a FREE bonus shot (doesn't consume the turn's full shot);
+    ///   (2) a player flank-kill refunds +1 action AND re-enables firing, ONCE per soldier per turn
+    ///       (a second flank-kill the same turn grants nothing); a COVERED kill refunds nothing.
     /// Drives the real IssueShoot / TryFlankKillRefund paths on a controlled open field.
     public string SnapRefundSelfTest()
     {
@@ -5809,40 +5893,50 @@ public class Game
             u.Ammo = u.Weapon.Clip; u.Alert = AlertLevel.Alert; u.SyncPos(); u.BeginTurn(); return u;
         }
 
-        // ---- 1. SNAP shot: 1 action, no end-turn, flag consumed ----
+        // ---- 1. TEMPO: an aimed shot costs 1 action, does NOT end the turn, sets FiredThisTurn ----
         var shooter = MkP(5, 5);
         var dummy   = MkE(9, 5, 6);            // full HP so the shot can't kill (isolates the action cost)
         Players.Add(shooter); Enemies.Add(dummy);
-        Selected = shooter; SnapShot = true;
+        Selected = shooter;
         IssueShoot(dummy);
-        if (shooter.ActionsLeft != 1) fails.Add($"snapCost={shooter.ActionsLeft}(want1)");
-        if (SnapShot) fails.Add("snapFlagNotConsumed");
-        if (AimMode) fails.Add("snapLeftAimModeOn");
+        if (shooter.ActionsLeft != 1) fails.Add($"shotCost={shooter.ActionsLeft}(want1)");
+        if (!shooter.FiredThisTurn) fails.Add("firedFlagNotSet");
+        if (AimMode) fails.Add("shotLeftAimModeOn");
         _anims.Clear();                         // discard the queued ShotAnim; we don't pump frames here
 
-        // ---- 1b. AIMED shot still ends the turn ----
-        var shooter2 = MkP(5, 7);
-        Players.Add(shooter2);
-        Selected = shooter2; SnapShot = false;
+        // ---- 1b. a SECOND shot the same turn is allowed (a rushed follow-up: costs 1 action + ammo) ----
+        int ammoBefore = shooter.Ammo;
         IssueShoot(dummy);
-        if (shooter2.ActionsLeft != 0) fails.Add($"aimedCost={shooter2.ActionsLeft}(want0)");
+        if (shooter.ActionsLeft != 0) fails.Add($"secondShotAction={shooter.ActionsLeft}(want0)");
+        if (shooter.Ammo != ammoBefore - 1) fails.Add("secondShotNoAmmoSpent");
         _anims.Clear();
 
-        // ---- 2. flank-kill refund: once per soldier per turn, exposed only ----
+        // ---- 1c. RUN&GUN gives a FREE bonus shot (doesn't consume the turn's full shot) ----
+        var rg = MkP(2, 2);
+        Players.Add(rg);
+        Selected = rg; rg.RunGun = true;
+        IssueShoot(dummy);
+        if (rg.ActionsLeft != 1) fails.Add($"rungunCost={rg.ActionsLeft}(want1)");
+        if (rg.RunGun) fails.Add("rungunNotConsumed");
+        if (rg.FiredThisTurn) fails.Add("rungunSetFiredFlag");   // the bonus shot leaves the full shot available
+        _anims.Clear();
+
+        // ---- 2. flank-kill refund: +1 action AND re-enables firing, once per soldier per turn ----
         // Build a flanked shot result and stage its ShotAnim as the ACTIVE anim, exactly as the
         // live kill path does (KillUnit -> TryFlankKillRefund reads ActiveAnim's ShotResult).
         var killer = MkP(5, 9);
         var victim = MkE(7, 9, 1);
         Players.Add(killer); Enemies.Add(victim);
-        killer.ActionsLeft = 0;                 // as if an aimed flank-shot just ended the turn
+        killer.ActionsLeft = 1; killer.FiredThisTurn = true;   // as if a flank-shot just fired (1 action, no end-turn)
         var flankRes = new ShotResult { Hit = true, Damage = 5, Odds = new ShotOdds { Flanked = true, CoverLevel = 0 } };
         _anims.Clear(); _anims.Add(new ShotAnim(killer, victim, flankRes));   // active anim = this shot
         _refundedThisTurn.Clear();
         victim.Alive = false;                   // the victim has just been downed
         TryFlankKillRefund(victim);
-        if (killer.ActionsLeft != 1) fails.Add($"refund1={killer.ActionsLeft}(want1)");
+        if (killer.ActionsLeft != 2) fails.Add($"refund1={killer.ActionsLeft}(want2)");
+        if (killer.FiredThisTurn) fails.Add("refundDidNotReEnableFire");   // a kill-refund clears FiredThisTurn
         TryFlankKillRefund(victim);             // second flank-kill same turn -> capped, no extra
-        if (killer.ActionsLeft != 1) fails.Add($"refundCap={killer.ActionsLeft}(want1)");
+        if (killer.ActionsLeft != 2) fails.Add($"refundCap={killer.ActionsLeft}(want2)");
 
         // ---- 2b. a COVERED kill refunds nothing ----
         var killer2 = MkP(3, 9);
@@ -5858,7 +5952,7 @@ public class Game
         _anims.Clear();
 
         return fails.Count == 0
-            ? "SNAPTEST: PASS (snap=1 action/no-end-turn, aimed ends turn, flank-kill refunds once/turn, covered kill refunds nothing)"
+            ? "SNAPTEST: PASS (shot=1 action/no-end-turn, rushed 2nd shot, RUN&GUN free bonus, flank-kill refunds+re-enables once/turn, covered kill refunds nothing)"
             : "SNAPTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 

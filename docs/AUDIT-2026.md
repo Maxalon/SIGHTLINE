@@ -148,3 +148,22 @@ The compass now *measures* these, so the next program can fix them and prove it:
 
 Known LOW (harness-only, cosmetic): `TrySmartItem` smoke branch computes a unit's distance
 to itself (always 0) — a vacuous condition with no behavioral impact.
+
+---
+
+## Status: PROGRAM "TEMPO" addressed #1, #2, #4 (see CLAUDE.md WIP NOTES)
+
+- **#1 Per-turn decision flatness — FIXED (keystone).** "Firing no longer ends the turn": a shot
+  is 1 action, so position-after-acting (shoot→reposition) is the new core bet; a 2nd shot is a
+  rushed follow-up (preserves the load-bearing ~2-shots/turn ceiling). MEASURED: meaningful-choices/
+  turn **1.76 → 6.15** at IDENTICAL run-completion (67.9 → 68.8%), holds at heat-4 (7.43 / 50%).
+- **#2 Class dominance — PARTIAL.** Sniper crit/dmg/range trimmed, MARK crit amp removed, Ranger
+  given a close-range niche. The crit-trim hypothesis here proved INSUFFICIENT — Sharpshooter's
+  lead is damage+aim driven, so it remains the top single-target dealer (a sniper, thematically)
+  while the other three classes are tightly grouped with clear niches. Finishing it (a measured
+  damage/aim pass) is the open follow-up.
+- **#3 Content de-bloat — DEFERRED (deliberate).** Removing enemies/arenas risks stripping replay
+  variety for marginal clarity; recommend doing it as a VALUE-ADD instead (shorten the Evac/Escort
+  ~10-turn drag via a closer win tolerance), not a removal.
+- **#4 Architecture — DONE.** `Combat.BeginMission/EndMission/EndRun` own the 5 mission statics;
+  the ~14 scattered defensive resets are gone, stale-static bleed is structurally impossible.

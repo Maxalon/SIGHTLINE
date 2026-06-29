@@ -91,7 +91,7 @@ public class Weapon
             case WeaponKind.Shotgun: // brutal up close, useless at range
                 return (int)Util.Clamp(Soften((5 - dist) * 8), -45, 30);
             case WeaponKind.Sniper:  // rewards distance, punished point-blank
-                return (int)Util.Clamp((dist - 3) * 3, -15, 18);   // already long-ranged; scope adds none here
+                return (int)Util.Clamp((dist - 4) * 4, -30, 16);   // already long-ranged; scope adds none here
             case WeaponKind.Smg:     // slight close-range edge
                 return (int)Util.Clamp(Soften((7 - dist) * 2), -12, 12);
             case WeaponKind.Lmg:     // suppression gun: wide flat medium band, gentle long falloff
@@ -142,7 +142,7 @@ public class Weapon
     {
         WeaponKind.Rifle   => New("Rifle",   k, 3, 5, 0, 10, 4),
         WeaponKind.Shotgun => New("Shotgun", k, 4, 7, 0, 15, 2),
-        WeaponKind.Sniper  => New("Marksman",k, 5, 8, 5, 20, 3),
+        WeaponKind.Sniper  => New("Marksman",k, 5, 7, 5, 14, 3),
         WeaponKind.Lmg     => New("LMG",     k, 3, 6, 3,  5, 5),
         WeaponKind.Smg     => New("SMG",     k, 2, 4, 0, 10, 4),
         _ => New("Rifle", WeaponKind.Rifle, 3, 5, 0, 10, 4),
@@ -187,6 +187,13 @@ public class Unit
     public int Ammo;
     public int Grenades;        // thrown AoE charges (refilled each mission)
     public int BonusGrenades;   // permanent extra grenade capacity (FRAG CACHE purchase)
+
+    // TEMPO (PROGRAM TEMPO): an aimed shot now costs 1 action and does NOT end the turn — so a
+    // soldier can move-then-shoot OR shoot-then-reposition (the "where do I end up after firing"
+    // bet). FiredThisTurn caps offensive output at ONE shot/turn (flat DPS, no double-tap) — the
+    // spare action goes to movement/support, never a second bullet (RUN&GUN bypasses this for the
+    // Assault's signature double-tap). Reset in BeginTurn.
+    public bool FiredThisTurn;
 
     // class signature ability (see AbilityKind); charge refilled each mission
     public int AbilityCharge;
@@ -506,6 +513,7 @@ public class Unit
         Hunkered = false;
         ReactedThisTurn = false;
         ShovedThisTurn = false;    // SHOVE: one per soldier per turn
+        FiredThisTurn = false;     // TEMPO: one offensive shot per turn (reset each turn)
         RunGun = false;            // ability stances don't carry between turns
         Blitz = false;
         Steady = false;

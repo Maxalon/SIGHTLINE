@@ -196,6 +196,19 @@ docs/screenshot.png    README image
 ## Current state — DONE ✅
 Playable vertical slice, builds clean (0 warn/0 err), autoplay-verified across
 seeds (mix of WIN/LOSE, no exceptions):
+- **PER-TURN TEMPO (PROGRAM TEMPO W1):** firing no longer ends the turn — a shot is 1 action, so a soldier
+  **moves-then-shoots OR shoots-then-repositions** (ducks to cover / breaks LoS — the new "where do I end up after
+  firing?" bet); a 2nd shot the same turn is a rushed follow-up (SnapAim penalty), RUN&GUN is a free bonus shot,
+  and a kill-refund re-enables firing for aggressive chains. The enemy AI mirrors it (a shooter caught exposed ducks
+  to cover after firing). MEASURED: per-turn meaningful-choices 1.76 → 6.15 at neutral run-completion (~68%). SNAP
+  retired. (`Game.IssueShoot`/`Unit.FiredThisTurn`/`Game.TryEnemyReposition`; `SIGHTLINE_SNAPTEST`.)
+- **CLASS NICHES (TEMPO W2):** Sharpshooter sharpened long / punished point-blank (Sniper crit 20→14, dmg 8→7,
+  harsher close RangeMod); Ranger owns close range (+4 aim, pairs with the Shotgun's close bonus); MARK is now an
+  aim-only designator (squad-wide crit amp removed). Each class has a clearer niche (close/long/tanky-area/flex).
+  (`Unit.RangeMod`/`Weapon.Make`/`Combat.MarkCrit`.)
+- **MISSION-STATIC LIFECYCLE (TEMPO W4):** the 5 per-mission `Combat` statics (RunBoons/AllUnits/MissionFaction/
+  PrepFaction/PressureAim) are owned by `Combat.BeginMission/EndMission/EndRun` (one set + one clear per lifecycle),
+  replacing ~14 scattered defensive resets — stale-static bleed is now structurally impossible.
 - **VISUAL IDENTITY LEAP (FRONTIER W1):** the board now reads by hierarchy — cover recedes (dark, low-emissive),
   live units carry a team-colored under-glow + larger figures, objectives (pulsing EVAC, amber charges/terminal)
   are 2nd-most-salient, dormant pods are clean dashed "?" rings, the floor is calmer + biome-distinct. Post-FX has
@@ -1096,7 +1109,61 @@ Before stopping:
 
 ### WIP NOTES
 
-> **PROGRAM "RECKONING" — an AUDIT program: cut the bloat, re-legibilize, fix roots (LATEST; read first).**
+> **PROGRAM "TEMPO" — per-turn decision DEPTH + class normalization + a static-lifecycle refactor (LATEST; read first).**
+> This program executed the evidence-backed roadmap PROGRAM RECKONING's audit left behind (`docs/AUDIT-2026.md` "What
+> remains"): it fixed the audit's DEEPEST finding (flat per-turn decisions) plus class dominance and the stale-static bug
+> class. Run as a dev team: 3 read-only research/design agents (action-economy redesign + change-surface audit + class/content
+> plans) → tech-lead-direct on the coupled keystone (Game.cs is the bottleneck) + a delegated dev for the isolated class
+> tuning + an independent reviewer (verdict SHIP, no CRIT/HIGH/MED) → every wave MEASURED on the `SIGHTLINE_BALANCE` flywheel.
+> Branch `claude/game-dev-orchestration-34ovtx`. Four waves, all on `main`:
+> - **WAVE 1 (KEYSTONE) — "firing no longer ends the turn" (the audit's #1, flagged as deserving its own program).** Root
+>   cause of flat turns: an aimed shot zeroed the action budget (`IssueShoot` ActionsLeft=0), collapsing "where do I stand"
+>   into a tooltip lookup. FIX: a shot now costs 1 action and does NOT end the turn, so a soldier can move→shoot OR
+>   **shoot→reposition** (duck to cover / break LoS) — the new core bet. A 2nd shot/turn is a **rushed follow-up** at the
+>   SnapAim penalty (preserves the old ~2-shots/turn DPS ceiling so the enemy-count tuning still holds; the real decision is
+>   "duck vs double-tap"). RUN&GUN became a free bonus shot; kill-refunds (MOMENTUM/flank/Adrenaline) clear `FiredThisTurn` so
+>   aggressive chains live (capped `Min(3)` + once/turn via `_refundedThisTurn`). Enemy AI MIRRORS it (`Game.TryEnemyReposition`:
+>   a shooter caught exposed ducks to cover after firing — gated `curExp>=2.0` so it doesn't crater the sloppy-play floor).
+>   SNAP retired (the full-aim non-ending shot dominates it). Decision-richness metric (`CountMeaningfulChoices`) extended to
+>   count post-shot positioning. **MEASURED (heat0, N=24): meaningful-choices/turn 1.76 → 6.15 (3.5×, into the 3-5 target band)
+>   at IDENTICAL run-completion (67.9 → 68.8%); policyGap -7 → +12 (greedy 75 / sloppy 62, BOTH in the healthy band — skill now
+>   matters without punishing). HEAT-4 holds: depth 7.43, run-completion 50% (clean descending ladder).** Files: `Game.cs`
+>   (IssueShoot/IssueShootBarrel/TryEnemyReposition/CountMeaningfulChoices/SmartCombatStep/TakeBestShot/AutoShootSmart/hover-odds),
+>   `Unit.cs` (`FiredThisTurn` + BeginTurn reset), `Hud.cs` (FIRE/retired-SNAP/RUSHED badge/rules). SNAPTEST rewritten to the
+>   new invariants. `SIGHTLINE_SNAPTEST`.
+> - **WAVE 2 — class normalization (audit's #2: SHARPSHOOTER was the strict first pick, 128k/88.7% hit).** SAVE-SAFE data
+>   tuning only: Sniper CritBase 20→14, DmgMax 8→7, RangeMod harsher point-blank ((dist-4)*4, -30..16); MARK squad-wide crit
+>   amp removed (MarkCrit 15→0, keep the +10 aim designator); Ranger base Aim +4 (KRESS 66→70, recruit 62→66) so it OWNS close
+>   range (Shotgun +30 close vs Sniper's new -30). MEASURED: Ranger's close-range niche emerged; the false-choice MARK crit is
+>   gone; win-rate stayed neutral; the other 3 classes are now tightly grouped with clear niches (close / long / tanky-area /
+>   flex). HONEST FINDING: the audit's crit-trim hypothesis was INSUFFICIENT — Sharpshooter's dominance is damage+aim driven, so
+>   it remains the top SINGLE-TARGET dealer (thematically a sniper) but is no longer strictly dominant. (Gunner innate-armor was
+>   tried + DROPPED — it inflated win-rate past redistribution-neutral; Gunner's niche stays top HP + PIN area-denial.) Per-class
+>   kill counts are genuinely NOISY even at N=24 (Gunner survival cascades into who scores) — don't over-tune on one sample.
+> - **WAVE 4 — mission-static LIFECYCLE refactor (audit's #4; kills the stale-static bug class).** The 5 per-mission Combat
+>   statics (RunBoons/AllUnits/MissionFaction/PrepFaction/PressureAim) were set/cleared at ~14 scattered sites, several
+>   commented "defensive: clear ... so no stale value can warp ..." (proof the bug had already bitten). Extracted
+>   `Combat.BeginMission/EndMission/EndRun` owning the lifecycle: SetupMission→BeginMission (faction set BEFORE Mission.Build so
+>   the spawn roster sees it), barracks→EndMission (refreshes run-scoped RunBoons, clears the 4 mission-scoped), run-end→EndRun.
+>   Behaviour-preserving; the DYNAMIC mid-mission updates (PressureAim ramp, AllUnits re-snap on roster growth) are unchanged.
+> - **WAVE 3 (content de-bloat — DEFERRED, documented).** The audit's #3 (merge enemy reskins / trim arenas / shorten draggy
+>   objectives) was deliberately NOT executed: removing content risks stripping replay variety for marginal clarity gain, and
+>   the audit itself counseled caution there. Left as clear FUTURE work — the spawn pool (`Mission.SelectArchetype`) + arena
+>   selection (`Mission.PickLayout`) are the levers; do it as a VALUE-ADD (e.g. shorten Evac/Escort via a closer win tolerance,
+>   the avgTurns-10 drag), NOT a removal.
+> Build 0/0; COMBATTEST/AITEST/SAVETEST/SNAPTEST/ITEMTEST PASS; autoplay clean (WIN/LOSE mix, no exceptions/TIMEOUT);
+> independent review = **SHIP** (5 risk areas — autopilot stall, shoot-chain bound, enemy-reposition safety, lifecycle
+> correctness, metric null-safety — all traced clean). **PROCESS GOTCHAS:** (a) the keystone's FIRST cut hard-capped at ONE
+> shot/turn, which halved player DPS (the old SNAP double-tap was load-bearing for the enemy-count tuning) and cratered
+> win-rate to 10.7% — restoring a penalized 2nd shot fixed it (lesson: the ~2-shots/turn ceiling is load-bearing, don't change
+> it while adding positional depth). (b) The enemy reposition is a STRONG difficulty lever — the exposure gate swung win-rate
+> 75% (gate 3.5) ↔ 50% (full-aggression); 2.0 is the measured sweet spot for balance-neutral. (c) Per-class balance is
+> measurement-bound: N=14 is too noisy, N=24 is the floor, and even then it's noisy. **NEXT (documented):** finish class
+> normalization (Sharpshooter's damage/aim lead, not just crit — needs a few measured iterations); the deferred content
+> de-bloat as value-adds; more tempo-exploiting perks/verbs now that the second action is free (a "skirmisher" duck-perk, a
+> no-penalty double-tap perk); heat-ladder re-tune if the +12 policy-gap proves too swingy for real (non-bot) players.
+
+> **PROGRAM "RECKONING" — an AUDIT program: cut the bloat, re-legibilize, fix roots (read after TEMPO).**
 > Unlike the eight prior programs (which PILED features + patched symptoms while steering by a win-rate proxy),
 > this one QUESTIONED foundations. Five independent read-only auditors interrogated combat math, the run/meta
 > loop, content breadth, per-turn decision quality, and architecture+verification — every finding grounded in

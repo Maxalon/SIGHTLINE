@@ -49,7 +49,7 @@ public static class Mission
     {
         var squad = new List<Unit>();
         squad.Add(MakeSoldier("VEGA",   "ASSAULT",      WeaponKind.Rifle,   8, 70, 7));
-        squad.Add(MakeSoldier("KRESS",  "RANGER",       WeaponKind.Shotgun, 7, 66, 8));
+        squad.Add(MakeSoldier("KRESS",  "RANGER",       WeaponKind.Shotgun, 7, 70, 8));
         squad.Add(MakeSoldier("NOX",    "SHARPSHOOTER", WeaponKind.Sniper,  6, 76, 6));
         squad.Add(MakeSoldier("BISHOP", "GUNNER",       WeaponKind.Lmg,    10, 62, 6));
         return squad;
@@ -579,7 +579,7 @@ public static class Mission
         switch (Util.RandInt(0, 4))
         {
             case 0: return MakeSoldier(name, "ASSAULT", WeaponKind.Rifle, 8, 66, 7);
-            case 1: return MakeSoldier(name, "RANGER", WeaponKind.Shotgun, 7, 62, 8);
+            case 1: return MakeSoldier(name, "RANGER", WeaponKind.Shotgun, 7, 66, 8);
             case 2: return MakeSoldier(name, "SHARPSHOOTER", WeaponKind.Sniper, 6, 72, 6);
             case 3: return MakeSoldier(name, "CORPSMAN", WeaponKind.Smg, 7, 62, 8);
             default: return MakeSoldier(name, "GUNNER", WeaponKind.Lmg, 10, 58, 6);
@@ -619,6 +619,8 @@ public static class Mission
         u.Ammo = u.Weapon.Clip;
         u.Grenades = 1;
         u.AbilityCharge = 1;
+        // (Gunner's niche is its top HP (10) + PIN area-denial; an innate armor on top inflated the
+        // overall win-rate well past redistribution-neutral, so it's intentionally NOT granted.)
         return u;
     }
 

@@ -602,10 +602,10 @@ public static class Hud
         void Add(string id, string label, string key, bool enabled, bool sel)
             => specs.Add((id, label, key, enabled, sel));
 
-        Add("shoot", "FIRE", "1", interactive && u != null && u.CanAct && u.Ammo > 0 && hasTargets, g.AimMode && !g.SnapShot);
-        // SNAP: a 1-action, no-end-turn shot at an aim penalty (per-turn DEPTH). Selected
-        // highlight only when the pending aim-mode shot is the snap variant.
-        Add("snap", "SNAP", "7", interactive && u != null && u.CanAct && u.Ammo > 0 && hasTargets, g.AimMode && g.SnapShot);
+        // TEMPO: FIRE is 1 action and does NOT end the turn. The soldier keeps its second action to
+        // reposition, take a rushed FOLLOW-UP shot (at -aim), or a support act. SNAP is retired (the
+        // default full-aim non-ending shot replaces it; the 2nd shot/turn carries the penalty).
+        Add("shoot", "FIRE", "1", interactive && u != null && u.CanAct && u.Ammo > 0 && hasTargets, g.AimMode);
         Add("grenade", "GRENADE", "4", interactive && u != null && u.CanAct && u.Grenades > 0, g.GrenadeMode);
         if (u != null && u.Ability != AbilityKind.None)
             Add("ability", u.AbilityName, "5", interactive && g.CanAbility(u), u.RunGun || u.Blitz || u.Steady || u.Slipstreaming || g.MarkMode || g.GrappleMode || g.PinMode);
@@ -991,8 +991,7 @@ public static class Hud
     {
         switch (id)
         {
-            case "shoot": return "Aimed shot at a target in range + line of sight. Full aim, ends the turn.";
-            case "snap": return $"Snap shot: costs 1 action and does NOT end the turn, but at {Game.SnapAim} aim. Fire and keep acting.";
+            case "shoot": return "Aimed shot at a target in range + line of sight. Full aim, costs 1 action and does NOT end the turn — keep your other action to reposition (one shot/turn).";
             case "grenade": return "Lob a grenade: AoE that ignores cover, hits both teams, clears low cover.";
             case "shove": return "Shove an adjacent enemy 1 tile back (breaks its overwatch + exposes it). Blocked = collision damage. 1 action, won't end your turn, once/turn.";
             case "overwatch": return "Watch: fire a reaction shot at the first foe that moves in sight.";
@@ -1055,9 +1054,9 @@ public static class Hud
         // shot quietly aims truer (the bonus is in the roll, NOT in the HIT% shown). Naming it
         // "STEADYING" tells the player the safety net is working so a miss streak feels recoverable.
         if (o.StreakBonus > 0) flags.Add(($"+{o.StreakBonus} STEADYING", Pal.Good));
-        // snap-fire penalty: this aim-mode shot is the cheap 1-action variant (the HitChance
-        // shown is already reduced by SnapAim). RUN&GUN is the free version, so no badge then.
-        if (g.AimMode && g.SnapShot && a != null && !a.RunGun) flags.Add(($"SNAP {Game.SnapAim}", Pal.Foe));
+        // TEMPO: a SECOND shot in the same turn is a rushed follow-up at the SnapAim penalty (the
+        // HitChance shown already reflects it). RUN&GUN's bonus shot is full aim, so no badge then.
+        if (g.AimMode && a != null && a.FiredThisTurn && !a.RunGun) flags.Add(($"RUSHED {Game.SnapAim}", Pal.Foe));
 
         // — modifiers that read live attacker/target state (mirror Combat.ComputeOdds) —
         if (a != null && d != null)
@@ -1081,7 +1080,7 @@ public static class Hud
             if (a.HasPerk(Perk.Executioner) && tgtSubHalf)    flags.Add(($"EXECUTIONER  +{Unit.ExecutionerCrit} crit", Pal.Good));
             if (a.HasPerk(Perk.GiantSlayer) && d.MaxHp > 0 && d.Hp >= d.MaxHp) flags.Add(($"FIRST STRIKE  +{Unit.FirstStrikeCrit} crit", Pal.Good));
             if (o.Crossfire)                                  flags.Add(($"CROSSFIRE  +{Combat.CrossfireAim} aim / +{Combat.CrossfireCrit} crit", Pal.Good));   // a squadmate threatens this target from a converging angle
-            if (o.Marked)                                     flags.Add(($"MARKED  +{Combat.MarkAim} aim / +{Combat.MarkCrit} crit", Pal.Good));      // a sharpshooter has designated this foe (squad-wide focus-fire bonus)
+            if (o.Marked)                                     flags.Add(($"MARKED  +{Combat.MarkAim} aim", Pal.Good));      // a sharpshooter has designated this foe (squad-wide focus-fire bonus)
             if (d.Pinned > 0)                                 flags.Add(("+ SUPPRESSED", Pal.Good));  // a gunner has pinned this foe (it shoots wild + can't dash)
 
             // attacker penalties (red) — these quietly drag the hit% down (signed magnitudes)
@@ -1245,7 +1244,7 @@ public static class Hud
         string[] rules =
         {
             $"Lead one squad through {Run.MaxMissions} escalating missions.",
-            "2 actions per soldier — move, then fire (firing ends the turn).",
+            "2 actions per soldier — firing is 1 action (one shot/turn), so move AND shoot, in either order.",
             "Hug cover to cut enemy aim; get flanked and you're exposed.",
             "Seize the high ground for an aim and crit edge.",
             "Each class wields a signature ability (key 5), once per mission.",
