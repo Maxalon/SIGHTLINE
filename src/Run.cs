@@ -488,11 +488,26 @@ public class Run
         var node = Map[0];
         while (node.Col < targetCol && node.Next.Count > 0)
         {
-            node = Map[node.Next[0]];
+            node = Map[NonEventNext(node)];
+            node.Visited = true;
+            MapPos = node.Id;
+        }
+        // harness fidelity: if we landed on an Event node (no fight), hop one more edge to a real
+        // node so SIGHTLINE_MISSION builds an actual mission rather than the EVENT sentinel card.
+        if (node.Kind == NodeKind.Event && node.Next.Count > 0)
+        {
+            node = Map[NonEventNext(node)];
             node.Visited = true;
             MapPos = node.Id;
         }
         CurrentCard = node.Card;
+    }
+
+    /// The first non-Event outgoing node id (falls back to Next[0] if all are events).
+    int NonEventNext(MissionNode node)
+    {
+        foreach (int id in node.Next) if (Map[id].Kind != NodeKind.Event) return id;
+        return node.Next[0];
     }
 
     /// Objective rotation baseline: an 8-objective cycle (Eliminate / Hack / Evac / Escort /

@@ -196,6 +196,21 @@ docs/screenshot.png    README image
 ## Current state — DONE ✅
 Playable vertical slice, builds clean (0 warn/0 err), autoplay-verified across
 seeds (mix of WIN/LOSE, no exceptions):
+- **RENEWABLE ABILITY ECONOMY (PROGRAM VANGUARD W2):** class signature verbs (Mark/Grapple/Slipstream/Suppress/
+  Heal) are no longer 1-charge-per-mission — they run on a per-unit COOLDOWN (`Unit.AbilityCd`, ticked at the
+  unit's `BeginTurn`; Heal/Slipstream 3, Mark/Pin/Grapple 2), so using your verb is a recurring per-turn decision.
+  Transient (not persisted); HUD shows `(N)` cooldown. `SIGHTLINE_CDTEST`.
+- **SIEGE/BOMBARD artillery (VANGUARD W3):** a telegraphed disruptor enemy that demands a NON-SHOOT response —
+  it charges a 3×3 strike, shows the danger zone for your whole next turn, then detonates cover-ignoring AoE unless
+  you relocate / break LoS / kill it. m3+, 1/mission cap. (`Unit.ChargeTurns`, `Ai.BestSiege`, `Game.TickSiegeStrikes/
+  DetonateSiege`, `Renderer.DrawSiegeZones`; `SIGHTLINE_SIEGETEST`/`SIGHTLINE_SIEGE`.)
+- **FIELD EVENTS (VANGUARD W4):** roguelike "?" nodes on the campaign map — a situation + 2-3 trade-off choices that
+  mutate persistent run state (10 events, every choice a trade-off/gamble), so runs branch and feel different.
+  `NodeKind.Event` (append-only), `src/Events.cs`, `Hud.DrawEventScreen`; deterministic+save-safe; `SIGHTLINE_EVENTTEST`.
+- **32 authored arenas (VANGUARD W5):** +CRUCIBLE/STEPWELL/COLONNADE/ENTRENCHED (indices 28-31), biome-themed,
+  connectivity-guarded. `SIGHTLINE_MAP=<idx>` forces one.
+- **BALANCE root-fixes (VANGUARD W1):** Sharpshooter aim de-domination, boss de-inversion (BERSERKER/BRUISER HP),
+  Reflexes overwatch +110→+75, and revived dead choices (COMBAT STIMS/FRAG CACHE/SCAVENGER boon now real picks).
 - **PER-TURN TEMPO (PROGRAM TEMPO W1):** firing no longer ends the turn — a shot is 1 action, so a soldier
   **moves-then-shoots OR shoots-then-repositions** (ducks to cover / breaks LoS — the new "where do I end up after
   firing?" bet); a 2nd shot the same turn is a rushed follow-up (SnapAim penalty), RUN&GUN is a free bonus shot,
@@ -1111,7 +1126,73 @@ Before stopping:
 
 ### WIP NOTES
 
-> **PROGRAM "TEMPO" — per-turn decision DEPTH + class normalization + a static-lifecycle refactor (LATEST; read first).**
+> **PROGRAM "VANGUARD" — per-turn DEPTH + a new tactical AXIS + run-to-run VARIETY (LATEST; read first).**
+> Fully-autonomous dev-team session (orchestrator + a 3-agent read-only research fan-out + per-wave design-spec
+> agents + dev agents + an independent reviewer per wave + a final cross-wave integration reviewer + the
+> `SIGHTLINE_BALANCE` flywheel). Branch `claude/stoic-knuth-zb11k0`. The research converged on the SAME deepest
+> finding every prior program circled but didn't fully close: per-turn decisions are **categorically flat** — the
+> action economy is solid post-TEMPO, but the impactful verbs (class abilities/items) were once-per-mission charges,
+> so the average turn was "move to cover, fire best-EV shot, reposition" and a greedy no-lookahead bot clears
+> missions. VANGUARD attacks that on three fronts. **5 waves, all measured + reviewed + on the branch:**
+> - **W1 — balance root-fixes (`a95e87f`).** The audit's surviving roots: Sharpshooter dominance is AIM-driven
+>   (everyone trimmed its crit, nobody its aim) → NOX 76→72 / recruit 72→68 / Sniper AimBonus 5→3; boss-inversion
+>   (BERSERKER/BRUISER HP bump *2→*1 so the WARLORD is the toughest body again); overwatch-camp (Reflexes overwatch
+>   +110→+75 — reliable, not auto-99); revived dead choices (COMBAT STIMS 10→8 intel & +2→+3 HP; FRAG CACHE 12→8;
+>   SCAVENGER boon re-themed +2 ammo/kill → heal killer +2 HP/kill). MEASURED: Sharpshooter de-dominated (dmg
+>   1265→1146, the field tightened), and the 3 dead choices REVIVED (FRAG CACHE 3→95 picks, STIMS 41→87, SCAVENGER
+>   the top boon). Save-safe (constants + one boon-effect swap; no enum reorder).
+> - **W2 — RENEWABLE ABILITY ECONOMY (`661e62d`, the keystone).** Replaced the 1-charge-per-mission
+>   `Unit.AbilityCharge` with a per-unit COOLDOWN `Unit.AbilityCd` (0=ready, ticked at the unit's own `BeginTurn`,
+>   set to `Unit.AbilityCooldownFor(kind)` on use): Heal 3 / Slipstream 3 / Mark·Pin·Grapple 2 / legacy stances
+>   1-2. Class signature verbs are now a RECURRING per-turn decision, not occasional spice. Transient per-mission
+>   state (NOT persisted — no SaveGame/DTO change; old saves load unchanged); action/ammo/end-turn costs unchanged
+>   (balance-neutral apart from renewal); autopilot transparent (both bots already gate via `CanAbility`). HUD shows
+>   `(N)` cooldown. New `SIGHTLINE_CDTEST`. MEASURED: run-completion stable (Heal Cd-3 keeps attrition intact — no
+>   Corpsman runaway). NOTE: the bot-measured decision-richness metric undersells this (it weights target+position,
+>   not verb choice) — the human win (a real verb decision most turns) is the point.
+> - **W3 — SIEGE/BOMBARD artillery (`82925b5`, a new tactical AXIS).** A telegraphed disruptor enemy demanding a
+>   NON-SHOOT response: on its turn it CHARGES a 3×3 strike, telegraphs the danger zone for the player's whole next
+>   turn (pulsing red zone + dashed source line + "ARTILLERY INCOMING"), then detonates for heavy cover-ignoring AoE
+>   at the top of the next enemy turn — UNLESS the squad relocates / breaks LoS / kills it first. Transient
+>   `Unit.ChargeTurns/X/Y` (enemies aren't persisted → no save change); `Ai.BestSiege` (indirect, no-LoS, never
+>   centers on allies); `Game.TickSiegeStrikes`/`DetonateSiege` (EnvDamage pattern, fragile-floor, pod-wake, skips
+>   the firing gun); `Renderer.DrawSiegeZones`; autopilot parity via a `TileExposure` zone penalty + `SmartFleeSiege`
+>   (no TIMEOUT). Spawn m3+, ~5% cascade / Wardens roster, hard cap 1/mission. New `SIGHTLINE_SIEGETEST`/
+>   `SIGHTLINE_SIEGE`. Review fixes: gated the Wardens-roster BOMBARD behind m3+ (was a mission-2 fairness breach);
+>   the artillery no longer catches itself in its own blast. MEASURED: per-mission win 90-100%, no crater.
+> - **W4 — between-mission FIELD EVENTS (`525c396`, run-to-run VARIETY).** Roguelike "?" nodes on the campaign map:
+>   entering an Event node presents a situation + 2-3 choices with real trade-offs that mutate persistent run state,
+>   so runs branch and feel different. New `src/Events.cs` (10 events: ABANDONED CACHE / WOUNDED MEDIC / DEFECTOR /
+>   BLACK MARKET / TRAINING DRILL / DISTRESS BEACON / WAR PROFITEER / CURSED RELIC / ARMS DEPOT / OLD SOLDIER'S
+>   GRAVE — every choice carries a trade-off/gamble/opportunity-cost, no pure free power). `NodeKind.Event` appended
+>   (append-only); `GenerateMap` stamps 1-2 events onto mid Combat nodes deterministically; seed-derived
+>   non-repeating selection + seeded gamble rolls (no save-scum). Outcomes bake into already-persisted Run/Unit
+>   fields; `Hud.DrawEventScreen` + "?" node glyph; new `SIGHTLINE_EVENTTEST`/`SIGHTLINE_EVENT`. **Independent
+>   review caught a CRITICAL autoplay missed** (the dumb bot routes through Combat siblings, not events): C1 — an
+>   event consumed a campaign COLUMN without incrementing `_run.Mission`, so the win gate (`Mission >= MaxMissions`)
+>   never fired on an event route → FIX: `ChooseNode` sets `_run.Mission = node.Mission` (column lockstep), verified
+>   by biasing autopilot to PREFER event nodes → `WIN mission=6` through event routes. M1/M2 — removed the
+>   mid-barracks `SaveGame.Save` (was losing a queued PendingPerk on reload + replaying a cleared mission on
+>   CONTINUE); the outcome now bakes at the next mission-start checkpoint, matching shop/perk/boon granularity.
+> - **W5 — 4 new authored arenas (`9343960`, parallel content lane).** CRUCIBLE (barrel-rigged chokepoint, MAGMA) /
+>   STEPWELL (tier-2 stepped pyramid, STEEL) / COLONNADE (long-sightline pillar gallery, VOID) / ENTRENCHED
+>   (asymmetric trenches, ARID). Built in an ISOLATED WORKTREE in parallel with W4 on a strictly-disjoint file set
+>   (Maps.cs + Mission.cs — W4 owns Game/Hud/Run/Events/Program), integrated by clean file-copy (zero conflict).
+>   The arenas dev also caught that CLAUDE.md's authored-arena COUNT was stale: there are now **32 templates**
+>   (indices 0-31), not the "29" the old notes implied.
+> **PROCESS:** Game.cs is the single serialization point, so the four Game.cs-touching waves (W1-W4) ran
+> SEQUENTIALLY (one owner each), each: design-spec agent → dev → independent reviewer → orchestrator measures on the
+> flywheel → commit. W5 (disjoint files) ran in PARALLEL in a worktree. Every wave's spec is in
+> `scratchpad/W{2,3,4}-spec.md`. The per-wave reviews caught real bugs autoplay can't (the W4 C1 un-winnable-run
+> bug above is the headline). Build 0/0; CDTEST/SIEGETEST/EVENTTEST + COMBATTEST/AITEST/SAVETEST/SNAPTEST/ITEMTEST
+> all PASS; autoplay clean (no TIMEOUT, WINs through event routes); cross-wave integration review = **SHIP** (no
+> CRIT/HIGH/MED). FINAL MEASURE (N=24 heat0 + N=12 heat4) — see DEVLOG.md for the table. **OPEN/NEXT (documented):**
+> the renewable-Heal + SCAVENGER + event-heal sustain stack is bounded but un-co-measured (balance watch);
+> `JumpTo` can land the SIGHTLINE_MISSION harness on an event node (harness-only fidelity nit); more verb-renewal
+> tuning now that abilities recur; a 2nd disruptor enemy type; more events; the heat-ladder spawn-cap/aim-clamp
+> ceiling (R4 in the balance audit) is still the open difficulty-scaling root.
+
+> **PROGRAM "TEMPO" — per-turn decision DEPTH + class normalization + a static-lifecycle refactor.**
 > This program executed the evidence-backed roadmap PROGRAM RECKONING's audit left behind (`docs/AUDIT-2026.md` "What
 > remains"): it fixed the audit's DEEPEST finding (flat per-turn decisions) plus class dominance and the stale-static bug
 > class. Run as a dev team: 3 read-only research/design agents (action-economy redesign + change-surface audit + class/content

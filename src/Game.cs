@@ -6520,15 +6520,31 @@ public class Game
         return true;
     }
 
-    /// Autopilot/balance-safe default: the FIRST legal choice, else the last (always a no-op/safe
-    /// option). Always returns a legal index so the harness resolves in one tick (no stall).
+    /// Autopilot/balance default: prefer a SAFE, beneficial legal choice (no intel cost, no gamble,
+    /// no self-wound, no heat) so the balance harness models SENSIBLE play — a human wouldn't gamble
+    /// half their intel or wound a soldier on every event. Falls back to the first legal choice, then
+    /// the last (always a no-op/safe option). Always returns a legal index -> one-tick resolve, no stall.
     int AutoEventChoice()
     {
         if (_activeEvent == null) return 0;
+        int firstLegal = -1;
         for (int i = 0; i < _activeEvent.Choices.Length; i++)
-            if (ChoiceLegal(_activeEvent.Choices[i])) return i;
-        return _activeEvent.Choices.Length - 1;
+        {
+            if (!ChoiceLegal(_activeEvent.Choices[i])) continue;
+            if (firstLegal < 0) firstLegal = i;
+            if (IsSafeChoice(_activeEvent.Choices[i])) return i;   // prefer a downside-free benefit
+        }
+        return firstLegal >= 0 ? firstLegal : _activeEvent.Choices.Length - 1;
     }
+
+    /// A choice with no downside in either outcome (no intel spend, gamble, self-wound, or heat gain).
+    static bool IsSafeChoice(EventChoice ch)
+        => !HasDownside(ch.Outcome) && (!ch.HasSecond || !HasDownside(ch.Outcome2));
+    static bool HasDownside(EventOutcome o)
+        => (o.Kind == EventOutcomeKind.Intel && o.Amount < 0)
+           || o.Kind == EventOutcomeKind.GambleIntel
+           || o.Kind == EventOutcomeKind.WoundSoldier
+           || o.Kind == EventOutcomeKind.AddHeat;
 
     void ResolveEvent(int choiceIdx)
     {
