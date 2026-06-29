@@ -608,7 +608,10 @@ public static class Hud
         Add("shoot", "FIRE", "1", interactive && u != null && u.CanAct && u.Ammo > 0 && hasTargets, g.AimMode);
         Add("grenade", "GRENADE", "4", interactive && u != null && u.CanAct && u.Grenades > 0, g.GrenadeMode);
         if (u != null && u.Ability != AbilityKind.None)
-            Add("ability", u.AbilityName, "5", interactive && g.CanAbility(u), u.RunGun || u.Blitz || u.Steady || u.Slipstreaming || g.MarkMode || g.GrappleMode || g.PinMode);
+        {
+            string abLabel = u.AbilityCd > 0 ? $"{u.AbilityName} ({u.AbilityCd})" : u.AbilityName;   // append remaining cooldown
+            Add("ability", abLabel, "5", interactive && g.CanAbility(u), u.RunGun || u.Blitz || u.Steady || u.Slipstreaming || g.MarkMode || g.GrappleMode || g.PinMode);
+        }
         if (u != null && u.Item != ItemKind.None)
             Add("item", u.ItemName, "6", interactive && u.CanAct && u.ItemCharge > 0, g.ItemMode);
         // SHOVE: forced-movement verb (1 action, no end-turn, 1/turn). Enabled only when an
@@ -1003,7 +1006,9 @@ public static class Hud
             case "reload": return "Reload your weapon to full.";
             case "ability":
                 return g.Selected != null && g.Selected.Ability != AbilityKind.None
-                    ? g.Selected.AbilityDesc + "  (1 charge/mission)"
+                    ? g.Selected.AbilityDesc + (g.Selected.AbilityCd > 0
+                        ? $"  (cooldown: {g.Selected.AbilityCd} turn{(g.Selected.AbilityCd == 1 ? "" : "s")})"
+                        : $"  (cooldown {Unit.AbilityCooldownFor(g.Selected.Ability)} turn{(Unit.AbilityCooldownFor(g.Selected.Ability) == 1 ? "" : "s")})")
                     : "";
             case "item":
                 return g.Selected != null && g.Selected.Item != ItemKind.None

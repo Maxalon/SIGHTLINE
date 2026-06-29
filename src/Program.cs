@@ -95,6 +95,14 @@ public static class Program
             Console.WriteLine(Game.ItemSelfTest());
             return;
         }
+        // SIGHTLINE_CDTEST=1 : renewable signature-ability cooldown (set on use, ticks at BeginTurn).
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_CDTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "cdtest");   // Game uses tile math + Fx; tiny window
+            Console.WriteLine(new Game().CdSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         // SIGHTLINE_CONCEALTEST=1 : concealment gating + ambush break check (item 4.4).
         if (Environment.GetEnvironmentVariable("SIGHTLINE_CONCEALTEST") == "1")
         {

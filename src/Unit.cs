@@ -198,8 +198,12 @@ public class Unit
     // Assault's signature double-tap). Reset in BeginTurn.
     public bool FiredThisTurn;
 
-    // class signature ability (see AbilityKind); charge refilled each mission
-    public int AbilityCharge;
+    // Renewable signature ability: a per-unit COOLDOWN (turns remaining until usable again).
+    // 0 == ready. Set to AbilityCooldownFor(Ability) on use; ticked down 1 at the unit's BeginTurn.
+    // TRANSIENT per-mission state (like the old AbilityCharge) — NEVER persisted; rebuilt by
+    // Mission.Build / Game.SetupMission. Old saves load unchanged (no DTO field).
+    public int AbilityCd;
+    public bool AbilityReady => AbilityCd <= 0;
     public bool RunGun;         // assault: next shot costs 1 action, doesn't end the turn
     public bool Blitz;          // ranger: next move costs one action less
     public bool Steady;         // sharpshooter: next shot gets +aim/+crit
@@ -313,6 +317,23 @@ public class Unit
         "GUNNER"       => AbilityKind.Pin,         // verb: area-denial suppressing fire (was Suppress stance)
         "CORPSMAN"     => AbilityKind.Heal,
         _ => AbilityKind.None,
+    };
+
+    // Turns of cooldown after use. Stronger / turn-defining verbs cost more. 0 == every turn.
+    // Counts the USER's own turns (ticked at their BeginTurn), so "Cd 3" = skip ~2 turns then usable.
+    public static int AbilityCooldownFor(AbilityKind k) => k switch
+    {
+        AbilityKind.Heal       => 3,   // squad sustain — strongest meta lever, keep scarce
+        AbilityKind.Slipstream => 3,   // free overwatch-immune move — mobility is oppressive if spammed
+        AbilityKind.Mark       => 2,   // squad-wide focus-fire amp — strong but already action-costed
+        AbilityKind.Pin        => 2,   // AoE area-denial; also ENDS the turn, so naturally rate-limited
+        AbilityKind.Grapple    => 2,   // single-foe reposition; shares ShovedThisTurn budget too
+        // legacy stances (only reachable if a class is ever re-pointed at them):
+        AbilityKind.Steady     => 2,
+        AbilityKind.Suppress   => 2,
+        AbilityKind.RunGun     => 1,
+        AbilityKind.Blitz      => 1,
+        _ => 0,
     };
 
     // ---- utility item (3.4): a second throwable slot, 1 charge/mission, by class ----
@@ -511,6 +532,7 @@ public class Unit
 
     public void BeginTurn()
     {
+        if (AbilityCd > 0) AbilityCd--;   // signature ability cools down one of THIS unit's turns
         ActionsLeft = 2;
         OnOverwatch = false;
         Hunkered = false;

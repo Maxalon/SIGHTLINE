@@ -766,7 +766,7 @@ public class Game
         Grid.ClearHazards();              // wipe last mission's fire/barrels before terrain is rebuilt
         Mission.Build(Grid, Players, Enemies, n, EvacZone, reserve,
                       enemyDelta, statDelta, HasSabotage ? SabotageSites : null);
-        if (Vip != null) { Vip.Grenades = 0; Vip.AbilityCharge = 0; }  // the asset has no kit
+        if (Vip != null) { Vip.Grenades = 0; Vip.AbilityCd = 99; }  // the asset has no kit (never ready)
         if (Objective == Objective.Rescue && Vip != null)
         {
             // seat the caged captive mid-field and clear its tile + ring so soldiers can reach it
@@ -1348,7 +1348,7 @@ public class Game
         var u = Players.FirstOrDefault(p => p.Alive && !p.IsVip);
         if (u == null) return;
         u.Cls = "SHARPSHOOTER";        // force the MARK ability for the demo
-        u.AbilityCharge = 1;
+        u.AbilityCd = 0;
         var foes = Enemies.Where(e => e.Alive && Grid.HasLineOfSight(u.X, u.Y, e.X, e.Y))
                           .OrderBy(e => Util.ChebyDist(u.X, u.Y, e.X, e.Y)).ToList();
         if (foes.Count >= 1) { foes[0].Marked = true; _markedBy = u; }     // already-marked foe
@@ -1371,7 +1371,7 @@ public class Game
         var u = Players.FirstOrDefault(p => p.Alive && !p.IsVip);
         if (u == null) return;
         u.Cls = "GUNNER";              // force the SUPPRESSING FIRE ability for the demo
-        u.AbilityCharge = 1; u.Ammo = Math.Max(u.Ammo, 1);
+        u.AbilityCd = 0; u.Ammo = Math.Max(u.Ammo, 1);
         var foes = Enemies.Where(e => e.Alive && Grid.HasLineOfSight(u.X, u.Y, e.X, e.Y))
                           .OrderBy(e => Util.ChebyDist(u.X, u.Y, e.X, e.Y)).ToList();
         if (foes.Count >= 1) foes[0].Pinned = PinTurns;     // an already-pinned foe (cage indicator)
@@ -4382,7 +4382,7 @@ public class Game
     /// point), but it must be in LoS so it's a real sightline call.
     bool MarkTargetOk(Unit u, Unit target)
     {
-        if (u == null || target == null || !u.CanAct || u.ActionsLeft < 1 || u.AbilityCharge <= 0) return false;
+        if (u == null || target == null || !u.CanAct || u.ActionsLeft < 1 || u.AbilityCd > 0) return false;
         if (!target.Alive || target.Team != Team.Enemy || target.Marked) return false;
         if (target.IsVip && CaptiveLocked) return false;             // can't mark the caged captive
         return Grid.HasLineOfSight(u.X, u.Y, target.X, target.Y);
@@ -4405,7 +4405,7 @@ public class Game
         if (SquadConcealed) BreakConcealment(u);   // calling out a target gives the squad away
         target.Marked = true;
         _markedBy = u;                              // remember who marked, to clear it on their next turn
-        u.AbilityCharge--; u.ActionsLeft = Math.Max(0, u.ActionsLeft - 1);
+        u.AbilityCd = Unit.AbilityCooldownFor(u.Ability); u.ActionsLeft = Math.Max(0, u.ActionsLeft - 1);
         if (!target.Active) ActivatePod(target.PodId);
         Fx.PopText(target.Pos + new Vector2(0, -34), "MARKED", Pal.Foe, 18f);
         Fx.PopText(u.Pos + new Vector2(0, -34), "MARK", Pal.Good, 16f);
@@ -4429,7 +4429,7 @@ public class Game
     /// ShoveAnim, so it's anti-loop-bounded the same way.
     bool GrappleTargetOk(Unit u, Unit target)
     {
-        if (u == null || target == null || !u.CanAct || u.ShovedThisTurn || u.AbilityCharge <= 0) return false;
+        if (u == null || target == null || !u.CanAct || u.ShovedThisTurn || u.AbilityCd > 0) return false;
         if (!target.Alive || target.Team != Team.Enemy) return false;
         if (target.IsVip && CaptiveLocked) return false;
         int dx = target.X - u.X, dy = target.Y - u.Y;
@@ -4453,7 +4453,7 @@ public class Game
         if (!GrappleTargetOk(u, target)) { GrappleMode = false; return; }
         // direction the target MOVES = toward the assault (one tile closer)
         int dx = Math.Sign(u.X - target.X), dy = Math.Sign(u.Y - target.Y);
-        u.AbilityCharge--; u.ShovedThisTurn = true; u.ActionsLeft = Math.Max(0, u.ActionsLeft - 1);
+        u.AbilityCd = Unit.AbilityCooldownFor(u.Ability); u.ShovedThisTurn = true; u.ActionsLeft = Math.Max(0, u.ActionsLeft - 1);
         if (SquadConcealed) BreakConcealment(u);   // a grapple is aggression
         if (!target.Active) ActivatePod(target.PodId);
         Fx.PopText(target.Pos + new Vector2(0, -34), "GRAPPLED", Pal.Friend, 18f);
@@ -4680,7 +4680,7 @@ public class Game
     // Whether the selected unit could fire its signature ability right now.
     public bool CanAbility(Unit u)
     {
-        if (u == null || u.Team != Team.Player || !u.CanAct || u.AbilityCharge <= 0) return false;
+        if (u == null || u.Team != Team.Player || !u.CanAct || u.AbilityCd > 0) return false;
         return u.Ability switch
         {
             AbilityKind.RunGun  => !u.RunGun,
@@ -4759,7 +4759,7 @@ public class Game
     /// (Pinning an already-pinned foe is allowed — it refreshes the zone / re-anchors it on a new cluster.)
     bool PinTargetOk(Unit u, Unit target)
     {
-        if (u == null || target == null || !u.CanAct || u.ActionsLeft < 1 || u.AbilityCharge <= 0 || u.Ammo <= 0) return false;
+        if (u == null || target == null || !u.CanAct || u.ActionsLeft < 1 || u.AbilityCd > 0 || u.Ammo <= 0) return false;
         if (!target.Alive || target.Team != Team.Enemy) return false;
         if (target.IsVip && CaptiveLocked) return false;             // can't suppress the caged captive
         if (Util.TileDist(u.X, u.Y, target.X, target.Y) > PinRange) return false;
@@ -4804,7 +4804,7 @@ public class Game
     {
         if (!PinTargetOk(u, target)) { PinMode = false; return; }
         if (SquadConcealed) BreakConcealment();   // a suppressing burst gives the squad away (no actor -> no ambush flag)
-        u.AbilityCharge--; u.Ammo--; u.ActionsLeft = 0; u.OnOverwatch = true;
+        u.AbilityCd = Unit.AbilityCooldownFor(u.Ability); u.Ammo--; u.ActionsLeft = 0; u.OnOverwatch = true;
         int pinned = 0;
         foreach (var e in Enemies)
         {
@@ -4839,26 +4839,26 @@ public class Game
         switch (u.Ability)
         {
             case AbilityKind.RunGun:
-                u.RunGun = true; u.AbilityCharge--;
+                u.RunGun = true; u.AbilityCd = Unit.AbilityCooldownFor(u.Ability);
                 Fx.PopText(at, "RUN & GUN", Pal.Accent, 18f);
                 Fx.Burst(u.Pos, Pal.Accent, 10, 120f, 0.4f, 3f);
                 Audio.Play("reload");
                 break;
             case AbilityKind.Slipstream:
                 // RANGER SLIPSTREAM: arm a free, overwatch-immune move (consumed by the next IssueMove).
-                u.Slipstreaming = true; u.AbilityCharge--;
+                u.Slipstreaming = true; u.AbilityCd = Unit.AbilityCooldownFor(u.Ability);
                 Fx.PopText(at, "SLIPSTREAM", Pal.Accent, 18f);
                 Fx.Burst(u.Pos, Pal.Accent, 12, 150f, 0.4f, 3f);
                 Audio.Play("reload");
                 break;
             case AbilityKind.Blitz:
-                u.Blitz = true; u.AbilityCharge--;
+                u.Blitz = true; u.AbilityCd = Unit.AbilityCooldownFor(u.Ability);
                 Fx.PopText(at, "BLITZ", Pal.Accent, 18f);
                 Fx.Burst(u.Pos, Pal.Accent, 10, 120f, 0.4f, 3f);
                 Audio.Play("reload");
                 break;
             case AbilityKind.Steady:
-                u.Steady = true; u.AbilityCharge--; u.ActionsLeft -= 1;
+                u.Steady = true; u.AbilityCd = Unit.AbilityCooldownFor(u.Ability); u.ActionsLeft -= 1;
                 Fx.PopText(at, "STEADY", Pal.Good, 18f);
                 Fx.Burst(u.Pos, Pal.Good, 10, 120f, 0.4f, 3f);
                 Audio.Play("reload");
@@ -4869,7 +4869,7 @@ public class Game
                 // 4.4 (review Mi1): pinning fire breaks stealth, but Suppress isn't a damage
                 // shot (no Combat.Resolve), so pass no actor - no dangling ambush flag.
                 if (SquadConcealed) BreakConcealment();
-                u.AbilityCharge--; u.Ammo--; u.ActionsLeft = 0; u.OnOverwatch = true;
+                u.AbilityCd = Unit.AbilityCooldownFor(u.Ability); u.Ammo--; u.ActionsLeft = 0; u.OnOverwatch = true;
                 t.Suppress = Combat.SuppressAim;
                 Fx.PopText(t.Pos + new Vector2(0, -34), "SUPPRESSED", Pal.Foe, 18f);
                 Fx.PopText(at, "SUPPRESS", Pal.Accent, 16f);
@@ -4882,7 +4882,7 @@ public class Game
                 int healed = Math.Min(Unit.PatchHeal, ally.MaxHp - ally.Hp);
                 if (healed <= 0) return;
                 ally.Hp += healed;
-                u.AbilityCharge--; u.ActionsLeft -= 1;     // patching costs one action (like STEADY)
+                u.AbilityCd = Unit.AbilityCooldownFor(u.Ability); u.ActionsLeft -= 1;     // patching costs one action (like STEADY)
                 Fx.PopText(ally.Pos + new Vector2(0, -34), $"+{healed}", Pal.Good, 20f);
                 Fx.Burst(ally.Pos, Pal.Good, 12, 120f, 0.45f, 3f);
                 Fx.PopText(at, "PATCH", Pal.Good, 16f);
@@ -5960,6 +5960,82 @@ public class Game
         return fails.Count == 0
             ? "SNAPTEST: PASS (shot=1 action/no-end-turn, rushed 2nd shot, RUN&GUN free bonus, flank-kill refunds+re-enables once/turn, covered kill refunds nothing)"
             : "SNAPTEST: FAIL (" + string.Join(",", fails) + ")";
+    }
+
+    /// Headless self-test (SIGHTLINE_CDTEST): renewable signature-ability COOLDOWN.
+    /// (a) fresh soldiers AbilityReady; (b) a Corpsman Heal sets Cd 3 and CanAbility -> false;
+    /// (c) 3x BeginTurn ticks 3->0 and CanAbility -> true again; (d) per-kind wiring: a
+    /// Sharpshooter Mark -> Cd 2 and a Gunner Pin -> Cd 2. Deterministic; tiny scene (no run).
+    public string CdSelfTest()
+    {
+        NoPersist = true;
+        var fails = new List<string>();
+
+        // open arena so LoS / targeting always succeed
+        Grid = new Grid();
+        for (int x = 0; x < Grid.W; x++)
+            for (int y = 0; y < Grid.H; y++) Grid.Tiles[x, y] = TileType.Floor;
+        Players = new List<Unit>();
+        Enemies = new List<Unit>();
+
+        // (a) AbilityCooldownFor wiring is per-kind
+        if (Unit.AbilityCooldownFor(AbilityKind.Heal) != 3) fails.Add("cdHeal!=3");
+        if (Unit.AbilityCooldownFor(AbilityKind.Slipstream) != 3) fails.Add("cdSlip!=3");
+        if (Unit.AbilityCooldownFor(AbilityKind.Mark) != 2) fails.Add("cdMark!=2");
+        if (Unit.AbilityCooldownFor(AbilityKind.Pin) != 2) fails.Add("cdPin!=2");
+        if (Unit.AbilityCooldownFor(AbilityKind.None) != 0) fails.Add("cdNone!=0");
+
+        // helper to make a fresh, ready player unit at (x,y)
+        Unit Make(string cls, int x, int y) {
+            var u = new Unit { Name = cls, Cls = cls, Team = Team.Player, Hp = 10, MaxHp = 10,
+                               Aim = 70, Mobility = 6, Weapon = Weapon.Make(WeaponKind.Rifle), X = x, Y = y };
+            u.Ammo = u.Weapon.Clip; u.AbilityCd = 0; u.ActionsLeft = 2; u.SyncPos();
+            return u;
+        }
+
+        // --- (b)+(c) Corpsman Heal: Cd 3, gate off, ticks back to ready ---
+        var medic = Make("CORPSMAN", 5, 5);
+        var hurt  = Make("ASSAULT", 6, 5); hurt.Hp = 3;   // adjacent wounded ally
+        Players.Add(medic); Players.Add(hurt);
+        if (!medic.AbilityReady) fails.Add("medicNotReadyAtStart");
+        if (!CanAbility(medic)) fails.Add("medicCannotHealReady");
+        Selected = medic;
+        DoAbility();                                       // routes to the Heal case -> spends cooldown
+        if (medic.AbilityCd != 3) fails.Add("healCd!=3(" + medic.AbilityCd + ")");
+        if (CanAbility(medic)) fails.Add("healStillUsableOnCd");
+        // re-wound the ally so a heal target persists, then cool down 3 of the medic's turns
+        hurt.Hp = 3;
+        for (int i = 0; i < 3; i++) medic.BeginTurn();     // BeginTurn ticks Cd 3->2->1->0 (also refills ActionsLeft)
+        if (medic.AbilityCd != 0) fails.Add("healCdNotTickedTo0(" + medic.AbilityCd + ")");
+        if (!medic.AbilityReady) fails.Add("medicNotReadyAfterCooldown");
+        if (!CanAbility(medic)) fails.Add("medicCannotHealAfterCooldown");
+
+        // --- (d) Sharpshooter Mark -> Cd 2 ---
+        var sniper = Make("SHARPSHOOTER", 2, 2);
+        Players.Add(sniper);
+        var foe1 = new Unit { Name = "G", Cls = "GRUNT", Team = Team.Enemy, Hp = 6, MaxHp = 6,
+                              Aim = 50, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle), X = 4, Y = 2, Alert = AlertLevel.Alert };
+        foe1.SyncPos(); Enemies.Add(foe1);
+        if (sniper.Ability != AbilityKind.Mark) fails.Add("sniperWrongAbility");
+        if (!CanAbility(sniper)) fails.Add("sniperCannotMarkReady");
+        IssueMark(sniper, foe1);
+        if (sniper.AbilityCd != 2) fails.Add("markCd!=2(" + sniper.AbilityCd + ")");
+        if (CanAbility(sniper)) fails.Add("markStillUsableOnCd");
+
+        // --- (d) Gunner Pin -> Cd 2 ---
+        var gunner = Make("GUNNER", 8, 8); gunner.Ammo = Math.Max(gunner.Ammo, 1);
+        Players.Add(gunner);
+        var foe2 = new Unit { Name = "S", Cls = "SCOUT", Team = Team.Enemy, Hp = 5, MaxHp = 5,
+                              Aim = 50, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Smg), X = 9, Y = 8, Alert = AlertLevel.Alert };
+        foe2.SyncPos(); Enemies.Add(foe2);
+        if (gunner.Ability != AbilityKind.Pin) fails.Add("gunnerWrongAbility");
+        if (!CanAbility(gunner)) fails.Add("gunnerCannotPinReady");
+        IssuePin(gunner, foe2);
+        if (gunner.AbilityCd != 2) fails.Add("pinCd!=2(" + gunner.AbilityCd + ")");
+
+        return fails.Count == 0
+            ? "CDTEST: PASS (fresh=ready; Heal Cd3 gates+ticks to ready; Mark Cd2; Pin Cd2)"
+            : "CDTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
     /// Headless self-test (SIGHTLINE_ITEMTEST): the utility-item mechanics — smoke

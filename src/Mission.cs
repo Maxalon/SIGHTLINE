@@ -83,7 +83,7 @@ public static class Mission
             u.Y = sp.y;
             u.Ammo = u.Weapon.Clip;
             u.Grenades = 1 + u.BonusGrenades + (u.HasPerk(Perk.Bandolier) ? 1 : 0);  // refill (+cache +Bandolier)
-            u.AbilityCharge = 1;                                   // refill the class signature ability
+            u.AbilityCd = 0;                                       // signature ability ready (off cooldown)
             u.ItemCharge = u.Item != ItemKind.None ? 1 : 0;        // utility item: 1 charge/mission
             u.Suppress = 0;
             u.OnOverwatch = false;
@@ -618,7 +618,7 @@ public static class Mission
         var u = new Unit { Name = name, Cls = cls, Team = Team.Player, Hp = hp, MaxHp = hp, Aim = aim, Mobility = mob, Weapon = Weapon.Make(w) };
         u.Ammo = u.Weapon.Clip;
         u.Grenades = 1;
-        u.AbilityCharge = 1;
+        u.AbilityCd = 0;
         // (Gunner's niche is its top HP (10) + PIN area-denial; an innate armor on top inflated the
         // overall win-rate well past redistribution-neutral, so it's intentionally NOT granted.)
         return u;
