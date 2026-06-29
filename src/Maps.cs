@@ -493,5 +493,82 @@ public static class Maps
             ".......#.#........",
             "..................",
         },
+        new[] // CRUCIBLE — a barrel-RIGGED central chokepoint: two high-cover bastions clamp the
+              // mid-field into a narrow crossing (the open centre column), with explosive BARRELS ('B')
+              // wired into the throat so the contested ground is itself a hazard — shoot a barrel as a
+              // foe funnels through and the whole choke goes up, demolishing the bastions' inner wall.
+              // The crossing column (col 9) and the top/bottom edge rows stay clear, and the flanks
+              // are wide-open exposed lanes (fast but no cover). Hold the throat or burn it down.
+              // Biome hint: MAGMA (a volatile refinery throat).
+        {
+            "..................",
+            "......##...##.....",
+            "......#o...o#.....",
+            "......#B...B#.....",
+            "......##...##.....",
+            "..................",   // row 5: the open crossing seam
+            "......##...##.....",
+            "......#B...B#.....",
+            "......#o...o#.....",
+            "......##...##.....",
+            "..................",
+        },
+        new[] // STEPWELL — a stepped pyramid with a commanding tier-2 ('=') summit, but UNLIKE the
+              // symmetric ZIGGURAT/FORGE it is wrapped by two DISTINCT flanking lanes: a covered
+              // low-cover gully along the NORTH and an open ramp-up along the SOUTH. Walk the tier-1
+              // ('^') apron up onto the summit to dominate the field, or sweep a flank to avoid the
+              // exposed climb. High cover anchors the corners as firing steps onto the slope.
+              // Biome hint: STEEL.
+        {
+            "..................",
+            "....o.o....o.o....",
+            ".......^^^^.......",
+            "....#.^^==^^.#....",
+            "......^^==^^......",
+            "......^^==^^......",
+            "....#.^^^^^^.#....",
+            ".......^^^^.......",
+            "..................",
+            "....o........o....",
+            "..................",
+        },
+        new[] // COLONNADE — a long-sightline GALLERY: two ranks of paired high-cover pillars march
+              // down the field in a regular rhythm, leaving wide firing lanes BETWEEN the ranks that
+              // reward ranged duelling, while the pillars themselves give covered bounding steps from
+              // one rank to the next. Low-cover plinths dot the central aisle as half-cover footholds.
+              // No column is walled (each pillar pair has open tiles either side) and the long axis
+              // stays readable end-to-end. Biome hint: VOID (a cavernous hall).
+        {
+            "..................",
+            ".....##....##.....",
+            ".....##....##.....",
+            "........oo........",
+            ".....##....##.....",
+            ".....##....##.....",
+            "........oo........",
+            ".....##....##.....",
+            ".....##....##.....",
+            "..................",
+            "..................",
+        },
+        new[] // ENTRENCHED — an ASYMMETRIC trench network: the NORTH half is a dense zig-zag warren of
+              // low-cover trench lines (slow, half-protected advance-by-bounds) anchored by a high-cover
+              // strongpoint, while the SOUTH half is wide-open exposed ground broken only by a lone
+              // forward redoubt. The squad chooses the grinding covered top or the fast exposed bottom.
+              // Low cover only up top means the whole field stays readable; no lane is fully sealed.
+              // Biome hint: ARID (a dug-in desert front).
+        {
+            "..................",
+            "....ooo..#.ooo....",
+            "......oo..oo......",
+            "....oo..oo..oo....",
+            "......oo..oo......",
+            "....ooo..#.ooo....",
+            "..................",
+            "..................",
+            ".........#........",
+            ".......o...o......",
+            "..................",
+        },
     };
 }

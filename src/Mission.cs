@@ -34,14 +34,14 @@ public static class Mission
     // newest biomes also theme; PickLayout falls back to a random arena past the end.
     static readonly int[] BiomeLayoutHint =
     {
-        11,  // STEEL   → BASTION (industrial fortress, tier-2 keep)
-        13,  // ARID    → SPUR (sun-baked diagonal high-ground spine)
+        29,  // STEEL   → STEPWELL (stepped tier-2 pyramid with split flanking lanes)
+        31,  // ARID    → ENTRENCHED (asymmetric dug-in trench network)
         12,  // TUNDRA  → CHASM (a frozen ravine split by a cover river)
         10,  // VERDANT → THICKET (dense organic cover clusters)
         14,  // ASH     → HOOK (a ruined outpost with an asymmetric flank)
-        9,   // VOID    → RUINS (open eerie arena, long sightlines)
+        30,  // VOID    → COLONNADE (cavernous long-sightline pillar gallery)
         15,  // NEON    → GRID (orthogonal server-room rack lattice)
-        16,  // MAGMA   → FORGE (commanding tier-2 foundry platform)
+        28,  // MAGMA   → CRUCIBLE (barrel-rigged refinery throat chokepoint)
     };
 
     /// The four starting soldiers for a fresh run.
