@@ -188,6 +188,13 @@ public class Unit
     public int Grenades;        // thrown AoE charges (refilled each mission)
     public int BonusGrenades;   // permanent extra grenade capacity (FRAG CACHE purchase)
 
+    // TEMPO (PROGRAM TEMPO): an aimed shot now costs 1 action and does NOT end the turn — so a
+    // soldier can move-then-shoot OR shoot-then-reposition (the "where do I end up after firing"
+    // bet). FiredThisTurn caps offensive output at ONE shot/turn (flat DPS, no double-tap) — the
+    // spare action goes to movement/support, never a second bullet (RUN&GUN bypasses this for the
+    // Assault's signature double-tap). Reset in BeginTurn.
+    public bool FiredThisTurn;
+
     // class signature ability (see AbilityKind); charge refilled each mission
     public int AbilityCharge;
     public bool RunGun;         // assault: next shot costs 1 action, doesn't end the turn
@@ -506,6 +513,7 @@ public class Unit
         Hunkered = false;
         ReactedThisTurn = false;
         ShovedThisTurn = false;    // SHOVE: one per soldier per turn
+        FiredThisTurn = false;     // TEMPO: one offensive shot per turn (reset each turn)
         RunGun = false;            // ability stances don't carry between turns
         Blitz = false;
         Steady = false;
