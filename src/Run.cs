@@ -867,18 +867,18 @@ public class Run
     // Used only to BIAS the offer (see MakePerkOffer) -- it never restricts what can be granted.
     static Perk[] ClassLine(string cls) => (cls ?? "").ToUpperInvariant() switch
     {
-        // Precision marksmen: long-range aim + crit + a defensive overwatch lean.
+        // Precision marksmen: long-range aim + crit + a defensive overwatch lean + double-tap.
         "SHARPSHOOTER" => new[] { Perk.Marksman, Perk.LockOn, Perk.Executioner,
-                                  Perk.Guardian, Perk.Reflexes },
-        // Close-range bruisers: alpha-strike finisher + mobility to close + extra ordnance.
+                                  Perk.Guardian, Perk.Reflexes, Perk.Gunslinger },
+        // Close-range bruisers: alpha-strike finisher + mobility to close + shoot-then-slip.
         "ASSAULT"      => new[] { Perk.CloseQuarters, Perk.GiantSlayer, Perk.Sprinter,
-                                  Perk.Bandolier, Perk.Adrenal },
-        // Heavy weapons: durability + reaction-fire control to anchor the line.
+                                  Perk.Bandolier, Perk.Adrenal, Perk.Skirmisher },
+        // Heavy weapons: durability + reaction-fire control to anchor the line + double-tap.
         "GUNNER"       => new[] { Perk.Tank, Perk.Bulwark, Perk.Hardened, Perk.Reflexes,
-                                  Perk.Guardian, Perk.LockOn, Perk.CoolHeaded },
-        // Skirmishers: speed + first-contact alpha + closing aim.
+                                  Perk.Guardian, Perk.LockOn, Perk.CoolHeaded, Perk.Gunslinger },
+        // Skirmishers: speed + first-contact alpha + closing aim + shoot-then-slip.
         "RANGER"       => new[] { Perk.Sprinter, Perk.GiantSlayer, Perk.CloseQuarters,
-                                  Perk.LockOn, Perk.Adrenal },
+                                  Perk.LockOn, Perk.Adrenal, Perk.Skirmisher },
         // Field medics: stay alive + keep the kit topped up to support the squad.
         "CORPSMAN"     => new[] { Perk.Hardened, Perk.Tank, Perk.CoolHeaded, Perk.Bandolier,
                                   Perk.Adrenal },

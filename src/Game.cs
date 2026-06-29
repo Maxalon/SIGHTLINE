@@ -4000,8 +4000,8 @@ public class Game
                 HoverOdds = Combat.ComputeOdds(Grid, Selected, AimTarget);
                 // TEMPO: a rushed SECOND shot this turn lowers the displayed hit% by the same penalty
                 // Resolve will apply, so the number the player sees stays truthful (perfect-info
-                // contract). RUN&GUN's bonus shot is full aim, so no penalty when it's queued.
-                if (Selected.FiredThisTurn && !Selected.RunGun)
+                // contract). RUN&GUN's bonus shot + the GUNSLINGER perk are full aim — no penalty.
+                if (Selected.FiredThisTurn && !Selected.RunGun && !Selected.HasPerk(Perk.Gunslinger))
                     HoverOdds.HitChance = Util.Clamp(HoverOdds.HitChance + SnapAim, 1, 99);
             }
             return;
@@ -4013,7 +4013,7 @@ public class Game
         {
             ShowOdds = true;
             HoverOdds = Combat.ComputeOdds(Grid, Selected, hovered);
-            if (Selected.FiredThisTurn && !Selected.RunGun)   // TEMPO: a rushed 2nd shot shows its penalty
+            if (Selected.FiredThisTurn && !Selected.RunGun && !Selected.HasPerk(Perk.Gunslinger))   // TEMPO: a rushed 2nd shot shows its penalty (GUNSLINGER negates it)
                 HoverOdds.HitChance = Util.Clamp(HoverOdds.HitChance + SnapAim, 1, 99);
         }
         // path preview to reachable floor
@@ -4510,7 +4510,9 @@ public class Game
         if (Selected.RunGun) { Selected.RunGun = false; Selected.ActionsLeft = Math.Max(0, Selected.ActionsLeft - 1); }
         else
         {
-            if (Selected.FiredThisTurn) aimMod = SnapAim;   // a rushed follow-up shot
+            // a rushed follow-up shot takes the SnapAim penalty — UNLESS the soldier has GUNSLINGER
+            // (TEMPO wave 5: the double-tap build fires its 2nd shot at full aim).
+            if (Selected.FiredThisTurn && !Selected.HasPerk(Perk.Gunslinger)) aimMod = SnapAim;
             Selected.FiredThisTurn = true;
             Selected.ActionsLeft = Math.Max(0, Selected.ActionsLeft - 1);
         }
