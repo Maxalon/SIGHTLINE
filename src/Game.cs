@@ -945,6 +945,25 @@ public class Game
         ShowBanner("ENEMY INTENT", true);
     }
 
+    /// Harness hook (screenshot only): stage a live SIEGE strike so one SHOT frame shows the
+    /// persistent pulsing 3x3 danger zone + source line + warning triangle (DrawSiegeZones). Wakes
+    /// all, forces one live enemy to BOMBARD, charges it over the nearest soldier cluster.
+    public void DebugSiege()
+    {
+        DebugWakeAll();
+        Unit foe = Enemies.FirstOrDefault(e => e.Alive);
+        if (foe == null) return;
+        foe.Cls = "BOMBARD";
+        var (bx, by, hits) = (foe.X, foe.Y, 0);
+        // center the zone on the nearest soldier (the strike's intended target)
+        Unit nearest = null; int nd = int.MaxValue;
+        foreach (var p in AlivePlayers())
+        { int d = Util.ChebyDist(foe.X, foe.Y, p.X, p.Y); if (d < nd) { nd = d; nearest = p; } }
+        if (nearest != null) { bx = nearest.X; by = nearest.Y; }
+        foe.ChargeX = bx; foe.ChargeY = by; foe.ChargeTurns = SiegeFuse;
+        ShowBanner("ARTILLERY INCOMING", true);
+    }
+
     /// Headless self-test for 4.4 concealment: starts concealed, pods are gated from
     /// escalating while concealed, and breaking concealment ungates them + arms the
     /// breaking actor's ambush bonus. Prints CONCEALTEST: PASS/FAIL.
@@ -1815,6 +1834,10 @@ public class Game
 
     public void KillUnit(Unit d)
     {
+        // SIEGE interrupt: killing a charging BOMBARD cancels its strike (the zone reads off live
+        // enemies, so it clears automatically; this is a cosmetic confirmation of the interrupt).
+        if (d.Cls == "BOMBARD" && d.ChargeTurns > 0)
+            Fx.PopText(d.Pos + new Vector2(0, -34), "STRIKE ABORTED", Pal.Good, 16f);
         d.Alive = false;
         d.Hp = 0;
         // balance telemetry (no-op unless Stats.Enabled): attribute this kill to the unit
@@ -2032,6 +2055,78 @@ public class Game
     // ──────────────────────────────────────────────────────────────────────────
     public const int BarrelDmg = 6;          // base barrel-blast damage (a touch above a frag)
     public const int BarrelRadius = 1;       // Chebyshev blast radius
+
+    // SIEGE / BOMBARD artillery (telegraphed area-denial). A charging SIEGE marks a 3x3 zone on its
+    // turn that is shown for the player's WHOLE next turn, then detonates at the start of the
+    // following enemy turn (TickSiegeStrikes) for heavy cover-ignoring AoE — unless it's killed
+    // (interrupt) or the squad vacates. No fire field / no cover demolition (its identity is "move").
+    public const int SiegeFuse   = 1;        // ChargeTurns value set at charge time (see TickSiegeStrikes timing)
+    public const int SiegeRadius = 1;        // Chebyshev radius -> a 3x3 zone
+    public const int SiegeDmg    = 7;        // cover-ignoring base AoE (a touch above BarrelDmg=6)
+
+    /// True when any live BOMBARD has a strike charged (drives the HUD/banner "strike inbound" cue).
+    public bool SiegeActive
+    {
+        get { foreach (var e in Enemies) if (e.Alive && e.Cls == "BOMBARD" && e.ChargeTurns > 0) return true; return false; }
+    }
+
+    /// True if (x,y) is inside a live BOMBARD strike zone. Cover-ignoring, so cover doesn't save you —
+    /// the only outs are KILL the artillery or VACATE the tile. Read by the smart autopilot (flee) and
+    /// the renderer/self-test. Reads live charge state, so a killed SIEGE's zone auto-clears.
+    public bool InSiegeZone(int x, int y)
+    {
+        foreach (var e in Enemies)
+            if (e.Alive && e.Cls == "BOMBARD" && e.ChargeTurns > 0
+                && Util.ChebyDist(x, y, e.ChargeX, e.ChargeY) <= SiegeRadius) return true;
+        return false;
+    }
+
+    /// Resolve every charged BOMBARD strike at the START of the enemy turn (before any hostile acts
+    /// and before reinforcements/pressure add bodies — see EndPlayerTurn). Cover-ignoring 3x3 AoE on
+    /// the charged center; both teams in the zone are hit (friendly fire, consistent with every other
+    /// AoE; the AI never centers on its own). A dead SIEGE's strike never fires (the kill-interrupt).
+    /// Bounded (one pass over the tiny enemy list) -> can never loop/TIMEOUT. NO fire / NO cover demo.
+    void TickSiegeStrikes()
+    {
+        foreach (var e in Enemies.ToList())   // ToList: a strike can kill units; don't mutate mid-scan
+        {
+            if (!e.Alive || e.Cls != "BOMBARD" || e.ChargeTurns <= 0) continue;
+            e.ChargeTurns = 0;                // consume the charge (fired)
+            DetonateSiege(e, e.ChargeX, e.ChargeY);
+        }
+    }
+
+    /// The strike lands: cover-ignoring 3x3 AoE on (cx,cy), reusing the DetonateBarrel pattern
+    /// (HardenedReduce + fragile-floor for full-HP players + pod-wake), but WITHOUT cover demolition
+    /// or a lingering fire field (keep it clean — its identity is forcing relocation, not terrain
+    /// destruction). Damage routes through EnvDamage (kill / near-death / FX handled once). Synchronous.
+    void DetonateSiege(Unit src, int cx, int cy)
+    {
+        var center = Util.TileCenter(cx, cy);
+        Audio.Play("crit"); Audio.Play("death");
+        Fx.AddShake(13f); AddHitStop(0.06f); AddZoomPunch(0.06f); AddBloom(0.4f);
+        float blastR = (SiegeRadius + 0.5f) * Cfg.Tile;
+        Fx.Burst(center, Pal.RGBA(255, 140, 90), 38, 360f, 0.6f, 5f, true);
+        Fx.Shockwave(center, Pal.RGBA(255, 180, 130), 10f, blastR, 5f, 0.95f, 0.30f);
+        Fx.Impact(center, Pal.RGBA(255, 130, 70), blastR * 0.5f, 0.95f, 0.16f);
+
+        var wokePods = new HashSet<int>();
+        foreach (var u in Players.Concat(Enemies).ToList())
+        {
+            if (!u.Alive) continue;
+            if (u == src) continue;                              // the firing artillery never catches itself in its own strike
+            if (u == Vip && CaptiveLocked) continue;             // the caged captive is invulnerable
+            if (Util.ChebyDist(u.X, u.Y, cx, cy) > SiegeRadius) continue;
+            if (u.Team == Team.Enemy && !u.Active) wokePods.Add(u.PodId);
+            int dmg = SiegeDmg + Util.RandInt(0, 2);
+            dmg = Combat.HardenedReduce(u, dmg, crit: false);
+            if (u.Team == Team.Player && u.MaxHp >= 2 && u.Hp >= u.MaxHp) dmg = Math.Min(dmg, u.MaxHp - 1);  // fragile floor
+            // EnvDamage = the single source-less-damage helper (FX + kill/near-death). No kill-credit
+            // to a player — this is enemy artillery (consistent with a fire-cooked barrel crediting no one).
+            EnvDamage(u, Math.Max(1, dmg), "STRIKE", Pal.RGBA(255, 160, 90));
+        }
+        foreach (int pod in wokePods) ActivatePod(pod);
+    }
 
     /// True when a barrel sits adjacent-or-on a soldier cluster worth detonating (AI/autopilot aid).
     public bool BarrelNearFoesOf(int x, int y, Team victims, int radius = BarrelRadius)
@@ -2439,6 +2534,18 @@ public class Game
         if (u == null) { EndPlayerTurn(); return; }
         Selected = u;
         RecomputeMoveCost();
+
+        // ── SIEGE response (non-shoot tactical axis): a soldier standing in a charged strike zone
+        // must (a) interrupt the artillery if it has a good shot at it (PriorityWeight 24 already
+        // biases TakeBestShot toward the BOMBARD), else (b) step OUT of the zone. This makes the
+        // autopilot exercise the intended "relocate / focus the source" play so balance reflects it,
+        // and the SmartFleeSiege fall-through always reaches a guaranteed-progress action (no TIMEOUT).
+        if (!SquadConcealed && InSiegeZone(u.X, u.Y))
+        {
+            if (!Slip(15) && TakeBestShot(u)) return;   // interrupt: kill the charging SIEGE if we can
+            if (SmartFleeSiege(u)) return;              // vacate: step to the best out-of-zone tile
+            // penned in (rare): fall through to normal routing -> always ends in DoHunker.
+        }
 
         // ── CONCEALMENT / AMBUSH (4.4): spend the opener deliberately ──────────────────
         // While concealed the squad can reposition freely AND pods can't wake by sight, so
@@ -2938,6 +3045,7 @@ public class Game
         {
             case "ELITE":     return 30f;   // boss / mid-boss: ends the mission, hits hard
             case "WARLORD":   return 32f;
+            case "BOMBARD":   return 24f;   // SIEGE artillery: silence it to cancel the telegraphed strike
             case "SNIPER":    return 22f;   // long-range chip from safety
             case "MORTAR":    return 22f;   // back-line AoE we can't easily reach
             case "MEDIC":     return 20f;   // undoes our damage — kill it to stop the heals
@@ -3253,6 +3361,7 @@ public class Game
     {
         float threat = 0f;
         if (Grid.IsFire(x, y)) threat += 20f;   // never voluntarily end a move standing in fire (hazards)
+        if (InSiegeZone(x, y)) threat += 30f;   // a charged SIEGE strike WILL land here -> vacate (cover-ignoring)
         foreach (var e in Enemies)
         {
             if (!e.Alive || !e.Active || e.Ammo <= 0) continue;
@@ -3346,6 +3455,31 @@ public class Game
         // nothing scored better than standing still: if we have a goal, still close on it so
         // the match never stalls (guaranteed progress). Otherwise stay put (caller hunkers).
         if (advance != null) return TryMoveTowardTile(u, advance.Value.x, advance.Value.y);
+        return false;
+    }
+
+    /// SIEGE flee: move `u` to the best reachable tile NOT inside any live strike zone (cover-aware
+    /// via ScoreDestTile, which now penalizes zone tiles by +30, so this picks a safe-AND-good spot).
+    /// Returns false only if no out-of-zone tile is reachable (very rare given squad mobility vs a 3x3)
+    /// — the caller then falls through to normal routing, which always ends in DoHunker (no TIMEOUT).
+    bool SmartFleeSiege(Unit u)
+    {
+        if (MoveCost == null) return false;
+        var nearest = AliveEnemies().OrderBy(e => Util.TileDist(u.X, u.Y, e.X, e.Y)).FirstOrDefault();
+        (int x, int y)? adv = nearest != null ? (nearest.X, nearest.Y) : ((int, int)?)null;
+        int bx = -1, by = -1; float best = float.NegativeInfinity;
+        for (int x = 0; x < Grid.W; x++)
+            for (int y = 0; y < Grid.H; y++)
+            {
+                int c = MoveCost[x, y]; if (c <= 0) continue;
+                int need = c <= u.MoveBudget ? 1 : 2;
+                int cost = u.Blitz ? Math.Max(0, need - 1) : need;
+                if (cost > u.ActionsLeft) continue;
+                if (InSiegeZone(x, y)) continue;                  // must leave the zone
+                float s = ScoreDestTile(u, x, y, need, nearest, adv);
+                if (s > best) { best = s; bx = x; by = y; }
+            }
+        if (bx >= 0) { IssueMove(bx, by); return true; }
         return false;
     }
 
@@ -5009,6 +5143,7 @@ public class Game
         Selected = null;
         MoveCost = null;
         Phase = Phase.EnemyTurn;
+        TickSiegeStrikes();                                      // charged artillery lands BEFORE any enemy acts / before reinforcements
         if (Objective == Objective.Defend) SpawnDefendWave();    // reinforcements assault the holdout
         UpdatePressure();                                        // anti-turtle clock: escalate on camp-friendly objectives
         ResolveSuspicion();                                      // 4.3: suspicious pods confirm or lose contact
@@ -5190,7 +5325,21 @@ public class Game
             var e = _aiUnits[_aiIdx];
             if (e.Alive)
             {
-                if (_aiPlan.SapTile != null && e.ActionsLeft > 0 &&
+                if (_aiPlan.SiegeCharge != null && e.Cls == "BOMBARD" && e.ChargeTurns == 0 && e.ActionsLeft > 0)
+                {
+                    // SIEGE charges a telegraphed strike: NO damage now — the 3x3 danger zone IS the
+                    // telegraph (drawn for the whole next player turn); it lands at the top of the
+                    // following enemy turn (TickSiegeStrikes). Spends the action -> no dead turn.
+                    e.ActionsLeft = 0;
+                    var (cx, cy) = _aiPlan.SiegeCharge.Value;
+                    e.ChargeX = cx; e.ChargeY = cy;
+                    e.ChargeTurns = SiegeFuse;
+                    Fx.PopText(e.Pos + new Vector2(0, -30), "CHARGING STRIKE", Pal.Foe, 16f);
+                    ShowBanner("ARTILLERY INCOMING", true);
+                    Audio.Play("over");                          // a charge "whine" stand-in
+                    Enqueue(new WaitAnim(0.25f), Team.Enemy);
+                }
+                else if (_aiPlan.SapTile != null && e.ActionsLeft > 0 &&
                     Grid.IsCover(_aiPlan.SapTile.Value.x, _aiPlan.SapTile.Value.y) &&
                     Util.ChebyDist(e.X, e.Y, _aiPlan.SapTile.Value.x, _aiPlan.SapTile.Value.y) <= 1)
                 {
@@ -6113,6 +6262,103 @@ public class Game
         return fails.Count == 0
             ? "HAZARDTEST: PASS (barrel blocks move + pathing routes around; fire lights floor only + decays; clear works)"
             : "HAZARDTEST: FAIL (" + string.Join(",", fails) + ")";
+    }
+
+    /// Headless self-test (SIGHTLINE_SIEGETEST): the full SIEGE charge/telegraph/detonate/interrupt
+    /// cycle + the no-target fallback (no TIMEOUT). Drives the real Ai.Plan + TickSiegeStrikes paths
+    /// on a controlled open field. Prints SIEGETEST: PASS/FAIL.
+    public string SiegeSelfTest()
+    {
+        NoPersist = true;
+        var fails = new List<string>();
+
+        // ---- controlled scene: empty open field, perfect LoS, no concealment ----
+        Grid = new Grid();
+        Players = new List<Unit>();
+        Enemies = new List<Unit>();
+        Vip = null; CaptiveLocked = false; SquadConcealed = false;
+        Objective = Objective.Eliminate; EvacZone.Clear();
+        Phase = Phase.EnemyTurn;
+
+        Unit MkP(int x, int y) {
+            var u = new Unit { Name = "SOLDIER", Cls = "ASSAULT", Team = Team.Player, X = x, Y = y,
+                               Hp = 8, MaxHp = 8, Aim = 65, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+            u.Ammo = u.Weapon.Clip; u.SyncPos(); u.BeginTurn(); return u;
+        }
+        Unit MkSiege(int x, int y) {
+            var u = new Unit { Name = "SIEGE", Cls = "BOMBARD", Team = Team.Enemy, X = x, Y = y,
+                               Hp = 7, MaxHp = 7, Aim = 48, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Smg) };
+            u.Ammo = u.Weapon.Clip; u.Alert = AlertLevel.Alert; u.SyncPos(); u.BeginTurn(); return u;
+        }
+
+        // ---- 1. Ai.Plan charges a strike centered on the soldier cluster ----
+        var siege = MkSiege(5, 5);
+        var a = MkP(10, 5);          // the strike target (clustered alone but valid)
+        var b = MkP(10, 6);          // adjacent -> also caught in the 3x3 around (10,5) or (10,6)
+        Players.Add(a); Players.Add(b); Enemies.Add(siege);
+
+        var plan = Ai.Plan(this, siege);
+        if (plan.SiegeCharge == null) fails.Add("noCharge");
+        else
+        {
+            // execute the charge branch by hand (UpdateEnemy's branch, minus the anim queue):
+            var (cx, cy) = plan.SiegeCharge.Value;
+            // the chosen center must catch both clustered soldiers (a 3x3 over (10,5) or (10,6) does)
+            int caught = Players.Count(p => Util.ChebyDist(p.X, p.Y, cx, cy) <= SiegeRadius);
+            if (caught < 2) fails.Add($"chargeCenterHits={caught}");
+            siege.ChargeX = cx; siege.ChargeY = cy; siege.ChargeTurns = SiegeFuse;
+            if (siege.ChargeTurns != SiegeFuse) fails.Add("chargeTurns");
+
+            // ---- 2. telegraph predicate: zone tiles read in, far tiles read out ----
+            if (!InSiegeZone(cx, cy)) fails.Add("zoneCenterFalse");
+            if (!InSiegeZone(cx + 1, cy)) fails.Add("zoneEdgeFalse");
+            if (InSiegeZone(cx + 5, cy)) fails.Add("zoneFarTrue");
+
+            // ---- 3. detonate hits in-zone, spares out-of-zone, consumes the charge ----
+            a.X = cx; a.Y = cy; a.SyncPos(); a.Hp = a.MaxHp; int aHp0 = a.Hp;   // A in the zone center
+            b.X = cx + 6; b.Y = cy; b.SyncPos(); b.Hp = b.MaxHp; int bHp0 = b.Hp; // B well outside
+            // ensure no occupancy overlap with the gunner
+            siege.X = 0; siege.Y = 0; siege.SyncPos();
+            TickSiegeStrikes();
+            if (!a.Alive) { /* A may die at very low rolls — but at 8 HP a 7-9 strike won't one-shot via fragile floor */ }
+            if (a.Hp >= aHp0) fails.Add("inZoneNotHit");
+            if (b.Hp != bHp0) fails.Add("outZoneHit");
+            if (siege.ChargeTurns != 0) fails.Add("chargeNotConsumed");
+            if (InSiegeZone(cx, cy)) fails.Add("zoneNotClearedAfterFire");
+        }
+
+        // ---- 4. interrupt: a dead SIEGE's strike never fires ----
+        Players.Clear(); Enemies.Clear();
+        var siege2 = MkSiege(5, 5);
+        var c = MkP(10, 5);
+        Players.Add(c); Enemies.Add(siege2);
+        siege2.ChargeX = c.X; siege2.ChargeY = c.Y; siege2.ChargeTurns = SiegeFuse;
+        if (!InSiegeZone(c.X, c.Y)) fails.Add("preKillNoZone");
+        siege2.Alive = false;                       // kill it (interrupt) — don't route through KillUnit (no _run)
+        if (InSiegeZone(c.X, c.Y)) fails.Add("deadSiegeZoneLive");   // dead -> zone clears
+        int cHp0 = c.Hp;
+        TickSiegeStrikes();
+        if (c.Hp != cHp0) fails.Add("deadSiegeStillFired");
+
+        // ---- 5. no-target fallback (no dead turn): with no soldier in reach, Ai.Plan still spends an
+        //         action (a move/shoot/overwatch/hunker) and does NOT return an empty no-op plan ----
+        Players.Clear(); Enemies.Clear();
+        var siege3 = MkSiege(2, 2);
+        var far = MkP(2, 2);                         // place far away after building the grid below
+        // put the lone soldier in indirect reach so BestSiege finds it... then move it adjacent to an
+        // ALLY enemy so the "never shell our own" veto trips and BestSiege returns hits==0 (fallback).
+        var ally = MkSiege(15, 9); ally.Cls = "GRUNT";  // an ordinary ally next to the soldier
+        far.X = 15; far.Y = 9 - 1; far.SyncPos();        // adjacent to the ally -> any 3x3 catches the ally
+        Players.Add(far); Enemies.Add(siege3); Enemies.Add(ally);
+        var fb = Ai.Plan(this, siege3);
+        if (fb.SiegeCharge != null) fails.Add("fallbackStillCharged");   // veto should have blocked the charge
+        bool spends = fb.Path.Count > 0 || fb.ShootTarget != null || fb.Overwatch || fb.Hunker
+                      || fb.Grenade || fb.SapTile != null || fb.HealTarget != null || fb.UseItem || fb.ShoveTarget != null;
+        if (!spends) fails.Add("fallbackDeadTurn");
+
+        return fails.Count == 0
+            ? "SIEGETEST: PASS (charge sets zone; telegraph reads; detonate hits in-zone/spares out; kill cancels; no-target falls through)"
+            : "SIEGETEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
     /// Headless self-test (SIGHTLINE_COVERTEST): destructible cover — High chips to Low

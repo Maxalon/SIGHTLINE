@@ -387,6 +387,14 @@ public class Unit
     public bool Enraged;        // elite boss: one-time low-HP rage trigger
     public int ShieldDx, ShieldDy;  // SHIELD archetype: facing dir its frontal shield blocks (3.7)
 
+    // SIEGE / BOMBARD artillery charge (telegraphed area-denial). Transient per-mission state,
+    // never persisted (enemies aren't saved). ChargeTurns is set to Game.SiegeFuse when a strike
+    // is charged on the BOMBARD's turn; the strike resolves in Game.TickSiegeStrikes at the start
+    // of the NEXT enemy turn (it is NOT decremented in BeginTurn — the single authoritative
+    // resolve/decrement lives in TickSiegeStrikes so the charge survives across the unit's turns).
+    public int ChargeTurns;          // >0 == a strike is in flight (the 3x3 danger zone is live)
+    public int ChargeX, ChargeY;     // center tile of the charged 3x3 danger zone
+
     // meta / campaign progression (persists across missions)
     public int Kills;
     public int Rank;            // index into Run.Ranks

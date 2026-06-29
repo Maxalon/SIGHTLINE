@@ -969,7 +969,7 @@ public class Run
             {
                 Faction.Syndicate => "SYNDICATE: drones + shields",
                 Faction.Legion    => "LEGION: berserkers rush",
-                Faction.Wardens   => "WARDENS: snipers + mortars",
+                Faction.Wardens   => "WARDENS: snipers + artillery",
                 _ => FactionName(node.Faction),
             };
         int m = node.Mission;   // 1-based column == mission number
@@ -993,7 +993,7 @@ public class Run
                 if (m == 1)    return "GRUNTS + SCOUTS";
                 if (m == 2)    return "HOUND PACK + HUNTER";
                 if (m == 3)    return "LANCER LINE + MORTAR";
-                if (m == 4)    return "BERSERKER + DRONE";
+                if (m == 4)    return "BERSERKER + ARTILLERY";
                 if (m == 5)    return "SHIELD + MEDIC";
                 return                 "ELITE FORCE";
         }

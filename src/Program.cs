@@ -50,6 +50,14 @@ public static class Program
             Console.WriteLine(Game.HazardSelfTest());
             return;
         }
+        // SIGHTLINE_SIEGETEST=1 : SIEGE/BOMBARD charge->telegraph->detonate->interrupt + no-target fallback.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_SIEGETEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "siegetest");   // Game uses tile math + Fx; tiny window
+            Console.WriteLine(new Game().SiegeSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         // SIGHTLINE_AUDIOTEST=1 : device-free validation that every weapon/stinger/baseline SFX
         // recipe + both music beds build a non-empty, finite buffer (audio identity pass). No window.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_AUDIOTEST") == "1")
@@ -239,6 +247,7 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_PRESSURE") == "1") game.DebugPressure();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CONCEAL") == "1") game.DebugConcealment();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_INTENT") == "1") game.DebugIntent();
+        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_SIEGE") == "1") game.DebugSiege();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CARDS") == "1") game.DebugDeployCards();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CAMPAIGN") == "1") game.DebugCampaignMap();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_ITEM") == "1") game.DebugItem();

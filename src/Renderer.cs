@@ -160,6 +160,7 @@ public static class Renderer
         DrawMoveOverlay(g);
         DrawOverwatchThreat(g);   // tiles each active overwatching enemy covers (reaction-fire danger)
         DrawThreat(g);
+        DrawSiegeZones(g);        // persistent pulsing 3x3 danger zone of any charging SIEGE artillery
         DrawEvac(g);
         DrawTerminal(g);
         DrawSabotage(g);
@@ -397,6 +398,35 @@ public static class Renderer
                 Raylib.DrawPoly(pos, 3, 4.5f, -90f, Raylib.Fade(Pal.Foe, 0.32f + 0.18f * pulse));
                 Raylib.DrawPolyLinesEx(pos, 3, 4.5f, -90f, 1.2f, Raylib.Fade(Pal.Foe, 0.45f));
             }
+    }
+
+    // SIEGE artillery danger zone: a persistent, bold pulsing-red 3x3 over each charging BOMBARD's
+    // aimed center, shown for the WHOLE player turn (and as the shell lands) so the squad has a full
+    // turn to react. Reads the LIVE charge state straight off the enemies (NOT a cached list), so a
+    // killed SIEGE's zone clears on the next frame (the kill-interrupt). Bolder than DrawThreat's
+    // corner pips — this is an "it WILL hit here" warning. Uses Pal.Foe (colorblind-safe danger hue)
+    // + a rotating warning triangle (shape redundancy) + a dashed source->zone line.
+    static void DrawSiegeZones(Game g)
+    {
+        float t = (float)Raylib.GetTime();
+        float pulse = 0.55f + 0.45f * MathF.Sin(t * 5f);
+        foreach (var e in g.Enemies)
+        {
+            if (!e.Alive || e.Cls != "BOMBARD" || e.ChargeTurns <= 0) continue;   // live charge only
+            for (int dx = -Game.SiegeRadius; dx <= Game.SiegeRadius; dx++)
+                for (int dy = -Game.SiegeRadius; dy <= Game.SiegeRadius; dy++)
+                {
+                    int x = e.ChargeX + dx, y = e.ChargeY + dy;
+                    if (!g.Grid.InBounds(x, y)) continue;
+                    var r = ElevRect(g, x, y);
+                    Raylib.DrawRectangleRec(r, Raylib.Fade(Pal.Foe, 0.16f + 0.12f * pulse));        // pulsing red fill
+                    Raylib.DrawRectangleLinesEx(r, 1.5f, Raylib.Fade(Pal.Foe, 0.55f + 0.30f * pulse));
+                }
+            // a rotating warning triangle at the center (non-color shape cue) + a dashed line gun->zone
+            var cc = ElevCenter(g, e.ChargeX, e.ChargeY);
+            Raylib.DrawPoly(cc, 3, 9f, -90f + t * 40f, Raylib.Fade(Pal.Foe, 0.7f));
+            DashedLine(e.Pos, cc, 2.4f, Raylib.Fade(Pal.Foe, 0.8f), (t * 30f) % 14f, 8f, 6f);
+        }
     }
 
     // Enemy-overwatch danger overlay (player turn only): every Active enemy that is on
@@ -1132,6 +1162,19 @@ public static class Renderer
                 Raylib.DrawLineEx(At(7f, 0), At(12f, 3.5f), 2f * s, col);   // upper fang
                 Raylib.DrawLineEx(At(7f, 0), At(12f, -3.5f), 2f * s, col);  // lower fang
                 break;
+            case "BOMBARD":            // a STOUT howitzer: a heavy squat body + a short fat tube angled
+                                       // up-forward (artillery), distinct from the MORTAR's thin back-tube.
+                                       // The pulsing charging core is drawn separately while ChargeTurns>0.
+            {
+                Raylib.DrawRectanglePro(new Rectangle(p.X, p.Y, 13f * s, 9f * s), new Vector2(6.5f * s, 4.5f * s),
+                                        MathF.Atan2(fdir.Y, fdir.X) * 180f / MathF.PI, col);   // squat carriage
+                // a short fat muzzle, tilted up (artillery elevation): along facing but lifted
+                var muzBase = At(2f, 0);
+                var muzTip = At(8f, 0) + new Vector2(0, -7f * s);
+                Raylib.DrawLineEx(muzBase, muzTip, 4f * s, col);
+                Raylib.DrawCircleV(muzTip, 2.2f * s, col);                                      // muzzle mouth
+                break;
+            }
             default:                   // fallback: a neutral pentagon
                 Raylib.DrawPoly(p, 5, 7.5f * s, 0f, col);
                 break;
@@ -1450,6 +1493,16 @@ public static class Renderer
                     Raylib.DrawRing(tgt, 13f, 14.6f, 0, 360, 24, Raylib.Fade(Pal.Foe, pulse + 0.12f));
                 }
             }
+        }
+
+        // bombard: a pulsing CHARGING CORE while a strike is winding up (ChargeTurns>0) so the
+        // "it's about to fire" reads on the unit itself. Signal-level (full alpha) — a danger cue.
+        if (u.Team == Team.Enemy && u.Cls == "BOMBARD" && u.ChargeTurns > 0)
+        {
+            float ct = (float)Raylib.GetTime();
+            float cp = 0.5f + 0.5f * MathF.Sin(ct * 7f);
+            Raylib.DrawCircleV(p, (3.5f + 2.5f * cp), Raylib.Fade(Pal.RGBA(255, 180, 120), 0.55f + 0.35f * cp));
+            Raylib.DrawRing(p, 10f, 12f, 0, 360, 28, Raylib.Fade(Pal.Foe, 0.35f + 0.45f * cp));
         }
 
         // damage flash — always at full strength (it's momentary feedback)
