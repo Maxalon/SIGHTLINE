@@ -304,6 +304,12 @@ public class Run
     // at the next Game.SetupMission (which copies it into Combat.PrepFaction). None = no prep bought.
     public Faction PrepFaction = Faction.None;
 
+    // The faction of the mission just played, captured by Game.EnterBarracks BEFORE Combat.EndMission
+    // clears Combat.MissionFaction. DebriefSurvivors reads it to stamp a soldier's VENDETTA grudge on
+    // a survived near-death (no per-hit faction tracking — the mission's faction is who nearly killed
+    // them). TRANSIENT (set fresh each barracks; never persisted). None on harness/debug debrief paths.
+    public Faction LastMissionFaction = Faction.None;
+
     /// The faction the squad is about to face, as best known at the BARRACKS shop step (the node
     /// hasn't been chosen yet). We surface the first non-None faction among the reachable next nodes
     /// so the prep is offered for a real upcoming threat. If every reachable node is mixed-force
@@ -790,7 +796,25 @@ public class Run
             if (u.FeatClutch)    GrantTrait(u, Trait.ColdBlood);
             if (u.FeatVengeful)  GrantTrait(u, Trait.Vengeful);
             if (u.WasNearDeath)  GrantTrait(u, Trait.IronWill);
-            u.FeatMultiKill = u.FeatClutch = u.FeatVengeful = u.WasNearDeath = u.AllyDown = false;
+
+            // SCARS (W5): the COST side of survival — lasting trauma marks (mirror the trait grants).
+            // A survived near-death deepens the soldier: it counts toward ShellShocked@2 / HardBitten@3
+            // and (if the mission's faction is known + not yet held) brands a VENDETTA grudge. Walking
+            // out of fire leaves a BURN-SCARRED mark. GrantScar is idempotent (no double-add / double-HP).
+            if (u.WasNearDeath)
+            {
+                u.NearDeathCount++;
+                if (LastMissionFaction != Faction.None && u.VendettaFaction == Faction.None)
+                {
+                    u.VendettaFaction = LastMissionFaction;
+                    GrantScar(u, Scar.Vendetta);
+                }
+                if (u.NearDeathCount >= 2) GrantScar(u, Scar.ShellShocked);
+                if (u.NearDeathCount >= 3) GrantScar(u, Scar.HardBitten);
+            }
+            if (u.FeatBurned) GrantScar(u, Scar.BurnScarred);
+
+            u.FeatMultiKill = u.FeatClutch = u.FeatVengeful = u.WasNearDeath = u.FeatBurned = u.AllyDown = false;
 
             // promotions: advance rank while kills clear the next threshold
             while (u.Rank < Ranks.Length - 1 && u.Kills >= KillReq[u.Rank + 1])
@@ -882,6 +906,19 @@ public class Run
         if (t == Trait.IronWill) { u.MaxHp += Unit.IronWillHp; u.Hp += Unit.IronWillHp; }
         AssignNickname(u);   // no-op if already nicknamed
         Report.Add($"{u.Name} earned {TraitDef.Name(t)}  ({TraitDef.Feat(t)})");
+    }
+
+    /// Grant a SCAR (the cost mirror of GrantTrait): add it if absent, apply any one-time on-grant
+    /// stat (BurnScarred toughens with scar tissue, +max HP, like IronWill), and log it to the
+    /// barracks report. IDEMPOTENT — a soldier that already bears the scar is untouched (no double
+    /// add, no double HP), so re-grants across missions are safe.
+    void GrantScar(Unit u, Scar s)
+    {
+        if (u.HasScar(s)) return;
+        u.Scars.Add(s);
+        if (s == Scar.BurnScarred) { u.MaxHp += Unit.BurnScarHp; u.Hp += Unit.BurnScarHp; }
+        AssignNickname(u);   // a scar can also earn a callsign (no-op if already nicknamed)
+        Report.Add($"{u.Name} bears a scar: {ScarDef.Name(s)}  ({ScarDef.Trauma(s)})");
     }
 
     /// Give an un-nicknamed soldier a callsign not already used in the squad.

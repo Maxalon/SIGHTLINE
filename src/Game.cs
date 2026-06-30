@@ -830,7 +830,7 @@ public class Game
         foreach (var u in Players) u.BeginTurn();
         // per-mission feat tracking + status effects start clean each mission
         foreach (var u in Players)
-        { u.FeatMultiKill = u.FeatClutch = u.FeatVengeful = u.WasNearDeath = u.AllyDown = false; u.BondAura = false; u.ConsecutiveMisses = 0; u.Statuses.Clear(); }
+        { u.FeatMultiKill = u.FeatClutch = u.FeatVengeful = u.WasNearDeath = u.FeatBurned = u.AllyDown = false; u.BondAura = false; u.ConsecutiveMisses = 0; u.Statuses.Clear(); }
         _missionKia.Clear();
         Scorches.Clear();            // death decals don't carry between missions
         _refundedThisTurn.Clear();   // flank-kill refund is per-turn; clear it for the mission's first turn too (review #2)
@@ -1689,6 +1689,10 @@ public class Game
 
     void EnterBarracks()
     {
+        // W5 SCARS: capture the just-played mission's faction BEFORE EndMission clears it, so
+        // DebriefSurvivors can brand a VENDETTA grudge on a survived near-death (the faction that
+        // nearly killed them). None on a mixed-force mission -> no grudge stamped (inert).
+        _run.LastMissionFaction = Combat.MissionFaction;
         // TEMPO wave 4: drop every mission-scoped combat static in one call so no stale value warps a
         // barracks-phase odds read; RunBoons is refreshed to the run's current boons (a FIELD DOCTRINE
         // pick may have just changed them).
@@ -2200,7 +2204,13 @@ public class Game
         Fx.Burst(u.Pos, col, 8, 130f, 0.4f, 3f, true);
         Fx.PopText(u.Pos + new Vector2(0, -26), $"-{dmg} {label}", col, 20f);
         if (u.Hp <= 0) { u.Hp = 0; KillUnit(u); }
-        else MarkPlayerHurt(u);
+        else
+        {
+            MarkPlayerHurt(u);
+            // SCAR trauma flag (W5): a soldier that takes FIRE damage and lives bears the BURN-SCARRED
+            // mark at debrief. "BURN" is the fire/Burning DoT label (status tick + stepping into fire).
+            if (u.Team == Team.Player && !u.IsVip && label == "BURN") u.FeatBurned = true;
+        }
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -6649,6 +6659,125 @@ public class Game
         return fails.Count == 0
             ? "CDTEST: PASS (fresh=ready; Heal Cd3 gates+ticks to ready; Mark Cd2; Pin Cd2)"
             : "CDTEST: FAIL (" + string.Join(",", fails) + ")";
+    }
+
+    /// Headless self-test (SIGHTLINE_SCARTEST): the W5 SCARS — earn each via the trauma flags
+    /// through the real DebriefSurvivors path, then assert the Combat reads fire:
+    ///   ShellShocked  -> -mobility (MoveBudget) AND Disorient/Stun immunity (AddStatus)
+    ///   BurnScarred   -> +max HP on grant (idempotent) AND -aim while Burning
+    ///   HardBitten    -> +crit while bloodied, -aim at full HP
+    ///   Vendetta      -> +aim/+crit vs MissionFaction == VendettaFaction (inert otherwise)
+    /// Window-free (grid + tile math + static Combat reads only).
+    public string ScarSelfTest()
+    {
+        NoPersist = true;
+        var fails = new List<string>();
+        Faction savedMission = Combat.MissionFaction;   // restore at the end (don't bleed into runtime)
+        try
+        {
+            // open arena so ComputeOdds has clear LoS
+            var grid = new Grid();
+            for (int x = 0; x < grid.W; x++)
+                for (int y = 0; y < grid.H; y++) grid.Tiles[x, y] = TileType.Floor;
+
+            // --- (1) EARNING via the real Run.DebriefSurvivors path ---
+            // A run whose just-played mission was a WARDENS fight; one soldier survived a near-death
+            // AND walked out of fire. Debrief must brand: Vendetta(Wardens), and (NearDeathCount 1->,
+            // not yet 2) BurnScarred. A second near-death debrief pushes NearDeathCount to 2 -> ShellShocked,
+            // a third -> HardBitten.
+            var run = new Run { Mission = 2, Squad = new List<Unit>() };
+            run.LastMissionFaction = Faction.Wardens;
+            var vet = new Unit { Name = "VEGA", Cls = "ASSAULT", Team = Team.Player, Hp = 4, MaxHp = 12,
+                                 Aim = 70, Mobility = 7, Weapon = Weapon.Make(WeaponKind.Rifle), Rank = 1, Kills = 0 };
+            run.Squad.Add(vet);
+            int hpBefore = vet.MaxHp;
+
+            // mission 1 debrief: near-death + burned under Wardens. A near-death also grants the
+            // IronWill TRAIT (+IronWillHp max HP), so the expected bump is BurnScarHp + IronWillHp.
+            vet.WasNearDeath = true; vet.FeatBurned = true;
+            run.DebriefSurvivors();
+            if (!vet.HasScar(Scar.Vendetta)) fails.Add("noVendettaGrant");
+            if (vet.VendettaFaction != Faction.Wardens) fails.Add("vendettaFaction");
+            if (!vet.HasScar(Scar.BurnScarred)) fails.Add("noBurnScarGrant");
+            if (vet.MaxHp != hpBefore + Unit.BurnScarHp + Unit.IronWillHp) fails.Add("burnScarHpNotApplied");
+            if (vet.NearDeathCount != 1) fails.Add("nearDeathCount1");
+            if (vet.HasScar(Scar.ShellShocked)) fails.Add("shellShockedTooEarly");
+
+            // idempotency: a second BURN with the scar already held must NOT re-add or re-bump HP
+            int hpAfterBurn = vet.MaxHp;
+            vet.FeatBurned = true; vet.WasNearDeath = false;
+            run.DebriefSurvivors();
+            if (vet.Scars.FindAll(s => s == Scar.BurnScarred).Count != 1) fails.Add("burnScarDoubleAdd");
+            if (vet.MaxHp != hpAfterBurn) fails.Add("burnScarDoubleHp");
+
+            // mission debriefs to push NearDeathCount 1 -> 2 (ShellShocked) -> 3 (HardBitten)
+            vet.WasNearDeath = true; run.DebriefSurvivors();
+            if (vet.NearDeathCount != 2 || !vet.HasScar(Scar.ShellShocked)) fails.Add("shellShockedAt2");
+            if (vet.HasScar(Scar.HardBitten)) fails.Add("hardBittenTooEarly");
+            vet.WasNearDeath = true; run.DebriefSurvivors();
+            if (vet.NearDeathCount != 3 || !vet.HasScar(Scar.HardBitten)) fails.Add("hardBittenAt3");
+
+            // --- (2) SHELL-SHOCKED reads ---
+            // -mob in MoveBudget (vs an unscarred clone with the same Mobility)
+            var clean = new Unit { Mobility = vet.Mobility, Weapon = Weapon.Make(WeaponKind.Rifle) };
+            if (vet.MoveBudget != clean.MoveBudget - Unit.ShellShockMob * 2) fails.Add("shellShockMobBudget");
+            // Disorient + Stun immunity via AddStatus (no-op when ShellShocked)
+            vet.AddStatus(StatusKind.Disoriented, 3);
+            vet.AddStatus(StatusKind.Stun, 3);
+            if (vet.HasStatus(StatusKind.Disoriented)) fails.Add("shellShockDisorientNotImmune");
+            if (vet.HasStatus(StatusKind.Stun)) fails.Add("shellShockStunNotImmune");
+            // a non-scarred soldier is still affected (proves the gate is the scar, not a global change)
+            var ctrl = new Unit { Weapon = Weapon.Make(WeaponKind.Rifle) };
+            ctrl.AddStatus(StatusKind.Stun, 3);
+            if (!ctrl.HasStatus(StatusKind.Stun)) fails.Add("controlStunImmuneWrong");
+
+            // --- (3) Combat aim/crit reads (build controlled attacker/defender pairs) ---
+            Combat.MissionFaction = Faction.None;   // baseline: no faction gate active
+            var foe = new Unit { Name = "G", Cls = "GRUNT", Team = Team.Enemy, Hp = 6, MaxHp = 6,
+                                 Aim = 50, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle), X = 8, Y = 5,
+                                 Alert = AlertLevel.Alert };
+
+            Unit Shooter() => new Unit { Cls = "ASSAULT", Team = Team.Player, Aim = 70, Mobility = 6,
+                                         Weapon = Weapon.Make(WeaponKind.Rifle), X = 5, Y = 5, Hp = 12, MaxHp = 12 };
+
+            // HARD-BITTEN: -aim at FULL HP, +crit while bloodied
+            var hbFull = Shooter(); hbFull.Scars.Add(Scar.HardBitten); hbFull.Hp = hbFull.MaxHp;
+            var plain  = Shooter();
+            int fullAimOn  = Combat.ComputeOdds(grid, hbFull, foe).HitChance;
+            int fullAimOff = Combat.ComputeOdds(grid, plain,  foe).HitChance;
+            if (fullAimOn >= fullAimOff) fails.Add("hardBittenFullAimNotPenalised");
+
+            var hbLow = Shooter(); hbLow.Scars.Add(Scar.HardBitten); hbLow.Hp = 3;   // bloodied
+            var plainLow = Shooter(); plainLow.Hp = 3;
+            int lowCritOn  = Combat.ComputeOdds(grid, hbLow, foe).CritChance;
+            int lowCritOff = Combat.ComputeOdds(grid, plainLow, foe).CritChance;
+            if (lowCritOn <= lowCritOff) fails.Add("hardBittenBloodiedCritMissing");
+
+            // BURN-SCARRED: -aim while Burning (vs not burning)
+            var bsBurn = Shooter(); bsBurn.Scars.Add(Scar.BurnScarred); bsBurn.AddStatus(StatusKind.Burning, 2);
+            var bsCalm = Shooter(); bsCalm.Scars.Add(Scar.BurnScarred);
+            int burnAim = Combat.ComputeOdds(grid, bsBurn, foe).HitChance;
+            int calmAim = Combat.ComputeOdds(grid, bsCalm, foe).HitChance;
+            if (burnAim >= calmAim) fails.Add("burnScarBurnAimNotPenalised");
+
+            // VENDETTA: +aim/+crit vs MissionFaction == VendettaFaction; inert when mismatched
+            var venom = Shooter(); venom.Scars.Add(Scar.Vendetta); venom.VendettaFaction = Faction.Wardens;
+            Combat.MissionFaction = Faction.None;
+            var vNone = Combat.ComputeOdds(grid, venom, foe);
+            Combat.MissionFaction = Faction.Legion;          // mismatched faction -> inert
+            var vMiss = Combat.ComputeOdds(grid, venom, foe);
+            Combat.MissionFaction = Faction.Wardens;         // matched -> +aim/+crit
+            var vOn   = Combat.ComputeOdds(grid, venom, foe);
+            if (vMiss.HitChance != vNone.HitChance) fails.Add("vendettaMismatchNotInert");
+            if (vOn.HitChance <= vNone.HitChance) fails.Add("vendettaAimMissing");
+            if (vOn.CritChance <= vNone.CritChance) fails.Add("vendettaCritMissing");
+
+            return fails.Count == 0
+                ? "SCARTEST: PASS (earn via debrief; ShellShocked -mob+immune; BurnScarred +HP/-aim; HardBitten crit/full-aim; Vendetta faction-gated)"
+                : "SCARTEST: FAIL (" + string.Join(",", fails) + ")";
+        }
+        catch (Exception e) { return "SCARTEST: FAIL (exception " + e.Message + ")"; }
+        finally { Combat.MissionFaction = savedMission; }
     }
 
     /// Headless self-test (SIGHTLINE_ITEMTEST): the utility-item mechanics — smoke

@@ -256,6 +256,20 @@ public static class Combat
         if (a.HasTrait(Trait.Vengeful) && a.AllyDown) hit += Unit.VengefulAim;
         if (a.BondAura) hit += Unit.BondAim;     // a bonded squadmate stands adjacent
 
+        // SCARS — aim reads (attacker; each gates on HasScar, inert otherwise):
+        //  BURN-SCARRED: fire-shy — loses aim while on fire. (Simplification: gated on a.HasStatus(Burning)
+        //  alone, NOT board-fire adjacency — see the W5 report. ComputeOdds is static with no live Grid.Fire
+        //  context for the ATTACKER's tile, and threading that in for one scar isn't worth fragile plumbing;
+        //  Burning is the dominant, correct trigger.)
+        if (a.HasScar(Scar.BurnScarred) && a.HasStatus(StatusKind.Burning)) hit -= Unit.BurnShyAim;
+        //  HARD-BITTEN: only fights well when it's grim — penalised at FULL HP (the +crit-while-bloodied
+        //  upside lives in the crit block below).
+        if (a.HasScar(Scar.HardBitten) && a.MaxHp > 0 && a.Hp >= a.MaxHp) hit -= Unit.HardBittenFullAim;
+        //  VENDETTA: a grudge — sharper vs the faction that scarred this soldier (gated on the mission's
+        //  faction matching, mirroring the PrepFaction/MissionFaction gate). Inert when None/mismatched.
+        bool vendetta = a.HasScar(Scar.Vendetta) && a.VendettaFaction != Faction.None && MissionFaction == a.VendettaFaction;
+        if (vendetta) hit += Unit.VendettaAim;
+
         if (a.FiredFromConcealment) hit += AmbushAim;
         // MARK (sharpshooter focus-fire designator, player attacker vs a marked foe): the whole
         // squad's shots vs the designated target land easier. Flat (a situational squad rule, like
@@ -312,6 +326,11 @@ public static class Combat
         // bonus ONCE (no double-count, R2) — a Sentinel who also owns Guardian crits no harder.
         if ((a.HasPerk(Perk.Guardian) || a.HasSpec(Spec.Sentinel)) && IsOverwatchReaction(a)) AddCrit(Unit.GuardianReactCrit);
         if (a.HasTrait(Trait.ColdBlood) && a.MaxHp > 0 && a.Hp * 2 <= a.MaxHp) AddCrit(Unit.ColdBloodCrit);
+        // SCARS — crit reads (attacker; flat sum, gated on HasScar):
+        //  HARD-BITTEN: +crit while bloodied (<= half HP) — the defiant upside of the full-HP aim penalty.
+        if (a.HasScar(Scar.HardBitten) && a.MaxHp > 0 && a.Hp * 2 <= a.MaxHp) AddCrit(Unit.HardBittenCrit);
+        //  VENDETTA: the grudge also crits harder vs the scarring faction (same gate as the aim bonus above).
+        if (vendetta) AddCrit(Unit.VendettaCrit);
         // run boons (player attacker): FERVOR makes overwatch lethal; EXECUTIONERS finishes the wounded
         if (a.Team == Team.Player && RunBoons.Count > 0)
         {

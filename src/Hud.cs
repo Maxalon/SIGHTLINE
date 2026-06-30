@@ -2377,6 +2377,16 @@ public static class Hud
         if (u.Bonds.Count > 0) traits += "    Bonds: " + string.Join(", ", u.Bonds);
         Raylib.DrawTextEx(Cfg.Font, traits, new Vector2(x, y + 44), 12, 1f, u.Traits.Count == 0 && u.Bonds.Count == 0 ? Pal.TxtDim : Pal.VipGold);
 
+        // SCARS (W5): the cost side of identity, in a distinct rust-red next to the gold traits.
+        if (u.Scars.Count > 0)
+        {
+            float tw = Raylib.MeasureTextEx(Cfg.Font, traits + "    ", 12, 1f).X;
+            string scars = "Scars: " + string.Join(", ", u.Scars.ConvertAll(ScarDef.Name));
+            if (u.VendettaFaction != Faction.None && u.HasScar(Scar.Vendetta))
+                scars += $" (vs {Run.FactionName(u.VendettaFaction)})";
+            Raylib.DrawTextEx(Cfg.Font, scars, new Vector2(x + tw, y + 44), 12, 1f, Pal.FoeDk);
+        }
+
         if (u.Wound > 0)
             Raylib.DrawTextEx(Cfg.Font, $"WOUNDED ({u.Wound} mission{(u.Wound > 1 ? "s" : "")})  -{Unit.WoundAim} aim / -{Unit.WoundMob} mob", new Vector2(x, y + 66), 12, 1f, Pal.Foe);
         else if (!string.IsNullOrEmpty(u.CustomTag))

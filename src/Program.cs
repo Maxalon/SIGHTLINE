@@ -163,6 +163,14 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        // SIGHTLINE_SCARTEST=1 : SCARS & VENDETTAS (trauma-earned scars; -mob/status-immunity/burn-shy/bloodied-crit/vendetta reads).
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_SCARTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "scartest");
+            Console.WriteLine(new Game().ScarSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         // SIGHTLINE_FIELDTEST=1 : FIELD CRAFT verbs (DRAG pulls an ally one tile / VAULT crosses a cover tile / gating).
         if (Environment.GetEnvironmentVariable("SIGHTLINE_FIELDTEST") == "1")
         {

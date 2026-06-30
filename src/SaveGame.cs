@@ -126,6 +126,9 @@ public static class SaveGame
                 Traits = u.Traits.ConvertAll(t => (int)t),
                 Bonds = new List<string>(u.Bonds),
                 Spec = (int)u.Spec,
+                Scars = u.Scars.ConvertAll(s => (int)s),
+                VendettaFaction = (int)u.VendettaFaction,
+                NearDeathCount = u.NearDeathCount,
             });
         var c = r.CurrentCard;
         if (c != null)
@@ -175,6 +178,10 @@ public static class SaveGame
             u.Ammo = u.Weapon.Clip;
             if (d.Traits != null) foreach (var t in d.Traits) u.Traits.Add((Trait)t);
             if (d.Bonds != null) u.Bonds = new List<string>(d.Bonds);
+            // W5 SCARS (append-only): old saves have no Scars list -> empty / None / 0 (inert).
+            if (d.Scars != null) foreach (var s in d.Scars) u.Scars.Add((Scar)s);
+            u.VendettaFaction = (Faction)d.VendettaFaction;
+            u.NearDeathCount = d.NearDeathCount;
             r.Squad.Add(u);
         }
         var cd = dto.Card;
@@ -216,6 +223,9 @@ public static class SaveGame
         public List<int> Traits = new();
         public List<string> Bonds = new();
         public int Spec;   // append-only: class specialization fork (old saves default 0 == Spec.None)
+        public List<int> Scars = new();   // append-only: W5 trauma scars (old saves default empty)
+        public int VendettaFaction;       // append-only: faction that scarred this soldier (old saves default 0 == None)
+        public int NearDeathCount;        // append-only: survived near-deaths (old saves default 0)
     }
 
     class CardDto
@@ -254,6 +264,10 @@ public static class SaveGame
             a.Traits.Add(Trait.Killer); a.Traits.Add(Trait.IronWill);
             a.Bonds.Add("NOX");
             a.Spec = Spec.Breacher;   // a chosen class specialization fork must round-trip
+            // W5 SCARS: earned trauma identity must round-trip (scars by ordinal + vendetta + count)
+            a.Scars.Add(Scar.ShellShocked); a.Scars.Add(Scar.Vendetta);
+            a.VendettaFaction = Faction.Wardens;
+            a.NearDeathCount = 2;
             src.Squad.Add(a);
             var n = new Unit { Name = "NOX", Cls = "SHARPSHOOTER", Team = Team.Player, Hp = 6, MaxHp = 6, Aim = 76, Mobility = 6, Weapon = Weapon.Make(WeaponKind.Sniper), Kills = 2, Rank = 1 };
             n.Bonds.Add("VEGA");
@@ -292,6 +306,10 @@ public static class SaveGame
             if (!g0.HasTrait(Trait.Killer) || !g0.HasTrait(Trait.IronWill) || g0.Traits.Count != 2) fails.Add("traits");
             if (g0.Bonds.Count != 1 || g0.Bonds[0] != "NOX") fails.Add("bonds");
             if (g0.Spec != Spec.Breacher) fails.Add("spec");
+            // W5 SCARS round-trip
+            if (!g0.HasScar(Scar.ShellShocked) || !g0.HasScar(Scar.Vendetta) || g0.Scars.Count != 2) fails.Add("scars");
+            if (g0.VendettaFaction != Faction.Wardens) fails.Add("vendettaFaction");
+            if (g0.NearDeathCount != 2) fails.Add("nearDeathCount");
             if (!got.BondTally.TryGetValue(Run.BondKey("VEGA", "NOX"), out var bt) || bt != 3) fails.Add("bondTally");
             if (got.CurrentCard == null || got.CurrentCard.Objective != Objective.Hack ||
                 got.CurrentCard.EnemyDelta != 2 || got.CurrentCard.Reward != RewardKind.BonusPerk)
@@ -336,6 +354,9 @@ public static class SaveGame
             var specVals = (Spec[])Enum.GetValues(typeof(Spec));
             if (specVals.Length < 11 || specVals[0] != Spec.None || specVals[^1] != Spec.CombatMedic)
                 fails.Add("specOrdinals");
+            var scarVals = (Scar[])Enum.GetValues(typeof(Scar));
+            if (scarVals.Length < 4 || scarVals[0] != Scar.ShellShocked || scarVals[^1] != Scar.Vendetta)
+                fails.Add("scarOrdinals");
 
             // meta (unlocked-max heat) round-trips through its own meta.json
             string metaSaved = File.Exists(MetaPath) ? File.ReadAllText(MetaPath) : null;
