@@ -10,6 +10,14 @@ public class PerkOffer
     public Perk A, B;
 }
 
+/// A one-time CLASS SPECIALIZATION FORK choice (W2), offered the first time a soldier reaches
+/// Unit.SpecRank: pick A or B. Resolved in the barracks AFTER the perk chooser, BEFORE the boon.
+public class SpecOffer
+{
+    public Unit Unit;
+    public Spec A, B;
+}
+
 public enum RewardKind { None, Heal, BonusPerk }
 
 /// Run-scoped BOONS (Hades boons / StS relics): a pick-1-of-3 modifier offered each barracks
@@ -286,6 +294,7 @@ public class Run
     public Dictionary<string, int> BondTally = new();
     public List<string> Report = new();       // promotion/heal lines for the barracks
     public List<PerkOffer> PendingPerks = new(); // rank-up perk choices awaiting the player
+    public List<SpecOffer> PendingSpecs = new(); // W2: one-time class-specialization forks awaiting the player
     public List<MissionCard> Offers = new();  // next-mission deployment choices (fallback)
     public MissionCard CurrentCard;           // the card the active mission was launched from
 
@@ -611,6 +620,7 @@ public class Run
         Fallen.Clear();
         Report.Clear();
         PendingPerks.Clear();
+        PendingSpecs.Clear();     // W2: specialization forks reset with the run
         ActiveBoons.Clear();      // boons are run-scoped: a fresh run starts with none
         BoonOffer.Clear();
         // generate the branching campaign map and seat the squad at its START node
@@ -745,6 +755,7 @@ public class Run
     {
         Report.Clear();
         PendingPerks.Clear();
+        PendingSpecs.Clear();
         // Heat "LINGERING WOUNDS": wounds bite a mission longer and field medicine is halved.
         bool harsh = Heat.HarshAttrition(HeatLevel);
         foreach (var u in Squad.ToList())
@@ -796,6 +807,18 @@ public class Run
                     string buff = ApplyStatBoost(u, u.Rank);
                     Report.Add($"{u.Name} promoted to {Ranks[u.Rank]}  ({buff})");
                 }
+            }
+
+            // W2 CLASS SPECIALIZATION: the first time a soldier reaches SpecRank (Corporal) it picks a
+            // one-time fork that changes HOW its class plays. Offered once (not yet specialized, no
+            // pending offer already queued, and the class actually has a 2-fork table).
+            if (u.Rank >= Unit.SpecRank && u.Spec == Spec.None
+                && !PendingSpecs.Any(o => o.Unit == u)
+                && SpecDef.OptionsFor(u.Cls).Length == 2)
+            {
+                var opts = SpecDef.OptionsFor(u.Cls);
+                PendingSpecs.Add(new SpecOffer { Unit = u, A = opts[0], B = opts[1] });
+                Report.Add($"{u.Name} can SPECIALIZE  (choose a fork)");
             }
 
             // field medicine: partial heal between missions (halved under Heat harsh attrition).

@@ -106,6 +106,10 @@ public class Game
     // repositioning toy. Reach is Chebyshev <= GrappleReach; 1 use/soldier/turn (Unit.ShovedThisTurn,
     // shared with SHOVE so the two repositioning verbs share one anti-loop budget).
     public const int GrappleReach = 2;
+    /// Effective GRAPPLE reach for `u`: 1 (adjacent only) for a JUGGERNAUT (the armor fork's verb
+    /// nerf — it must close in), else GrappleReach. Single source of truth (GrappleTargetOk + the
+    /// Renderer grapple-highlight both call this). Inert on Spec.None.
+    public int GrappleReachFor(Unit u) => u != null && u.HasSpec(Spec.Juggernaut) ? 1 : GrappleReach;
     public bool GrappleMode;
     public Unit GrappleTarget;
     public bool GrappleValid;
@@ -1145,7 +1149,6 @@ public class Game
                                Hp = 8, MaxHp = 8, Aim = 65, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
             u.Ammo = u.Weapon.Clip; u.SyncPos(); u.BeginTurn(); return u;
         }
-        void RunAnim(Anim a) { a.OnStart(this); for (int i = 0; i < 200 && !a.Update(this, 0.05f); i++) { } }
 
         // ---- (1) DRAG (reach-2 semantics): a LAGGING ally (Chebyshev 2) is pulled one tile closer ----
         var dragger = MkP(5, 5);
@@ -1195,13 +1198,15 @@ public class Game
         Grid.Tiles[7, 5] = TileType.LowCover; Grid.SetCoverHp(7, 5);
         if (VaultTargetOk(v, 7, 5)) fails.Add("vaultOntoCoverValid");
         Grid.Tiles[7, 5] = TileType.Floor;
-        // execute the vault
-        int vx0 = v.X;
-        RunAnim(new MoveStepAnim(v, 7, 5));
+        // execute via IssueVault (the real path: validates, spends 1 action, sets VaultedThisTurn, hops over cover)
+        int vx0 = v.X, vact0 = v.ActionsLeft;
+        IssueVault(7, 5);
+        while (_anims.Count > 0) { var a = _anims[0]; a.OnStart(this); for (int i = 0; i < 200 && !a.Update(this, 0.05f); i++) { } if (_anims.Count > 0 && _anims[0] == a) _anims.RemoveAt(0); }
         if (!(v.X == 7 && v.Y == 5)) fails.Add($"vaultDidNotLand({v.X},{v.Y})");
         if (v.X == vx0) fails.Add("vaultDidNotMove");
-        // once-per-turn cap
-        v.VaultedThisTurn = true;
+        if (v.ActionsLeft != vact0 - 1) fails.Add("vaultDidNotSpendAction");
+        if (!v.VaultedThisTurn) fails.Add("vaultDidNotSetFlag");
+        // once-per-turn cap (the flag is now set by IssueVault)
         if (CanVault(v)) fails.Add("canVaultTwiceInOneTurn");
 
         return fails.Count == 0
@@ -1622,6 +1627,7 @@ public class Game
         _run.JumpTo(2);
         _run.DebriefSurvivors();
         _run.PendingPerks.Clear();
+        _run.PendingSpecs.Clear();
         _shopDone = true;
         Phase = Phase.Barracks;
     }
@@ -1633,6 +1639,7 @@ public class Game
         _run.JumpTo(3);                  // visit cols 0-2; current sits at mission 3
         _run.DebriefSurvivors();
         _run.PendingPerks.Clear();       // skip promotions for the screenshot
+        _run.PendingSpecs.Clear();
         _shopDone = true;                // skip requisition for the screenshot
         Phase = Phase.Barracks;
     }
@@ -1643,6 +1650,7 @@ public class Game
         _run.JumpTo(2);
         _run.DebriefSurvivors();
         _run.PendingPerks.Clear();
+        _run.PendingSpecs.Clear();
         _shopDone = true;
         _run.GenerateBoonOffer();        // populate the pick-1-of-3 doctrine card
         Phase = Phase.Barracks;
@@ -2478,6 +2486,10 @@ public class Game
                 else if (_run.PendingPerks.Count > 0)    // then resolve rank-up perk picks
                 {
                     if (AutoPlay) ChoosePerk(0); else HandlePerkClick();
+                }
+                else if (_run.PendingSpecs.Count > 0)    // W2: then a one-time class SPECIALIZATION fork
+                {
+                    if (AutoPlay) ChooseSpec(0); else HandleSpecClick();
                 }
                 else if (_run.BoonOffer.Count > 0)       // then pick a run-scoped boon
                 {
@@ -4762,6 +4774,8 @@ public class Game
         if (!MarkTargetOk(u, target)) { MarkMode = false; return; }
         if (SquadConcealed) BreakConcealment(u);   // calling out a target gives the squad away
         target.Marked = true;
+        // HEADHUNTER fork: this marker ALSO paints squad-wide +crit (only a Headhunter's mark does).
+        target.MarkedByHeadhunter = u.HasSpec(Spec.Headhunter);
         _markedBy = u;                              // remember who marked, to clear it on their next turn
         u.AbilityCd = Unit.AbilityCooldownFor(u.Ability); u.ActionsLeft = Math.Max(0, u.ActionsLeft - 1);
         if (!target.Active) ActivatePod(target.PodId);
@@ -4776,7 +4790,7 @@ public class Game
     /// lasts through the enemy turn — the focus-fire window — then expires).
     void ClearMarks()
     {
-        foreach (var e in Enemies) e.Marked = false;
+        foreach (var e in Enemies) { e.Marked = false; e.MarkedByHeadhunter = false; }
         _markedBy = null;
     }
 
@@ -4792,7 +4806,8 @@ public class Game
         if (target.IsVip && CaptiveLocked) return false;
         int dx = target.X - u.X, dy = target.Y - u.Y;
         if (dx == 0 && dy == 0) return false;
-        return Math.Abs(dx) <= GrappleReach && Math.Abs(dy) <= GrappleReach;
+        int reach = GrappleReachFor(u);   // JUGGERNAUT fork: adjacent-only (1); else GrappleReach (2)
+        return Math.Abs(dx) <= reach && Math.Abs(dy) <= reach;
     }
 
     void ToggleGrapple()
@@ -4816,6 +4831,15 @@ public class Game
         if (!target.Active) ActivatePod(target.PodId);
         Fx.PopText(target.Pos + new Vector2(0, -34), "GRAPPLED", Pal.Friend, 18f);
         Enqueue(new ShoveAnim(u, target, dx, dy), Team.Player);
+        // BREACHER fork: the grapple also STAGGERS — the yanked foe loses overwatch + hunker and takes
+        // chip damage (the ShoveAnim already clears OnOverwatch/Hunkered on a successful slide, but
+        // Breacher guarantees it even on a blocked grapple + adds the chip damage). Inert on Spec.None.
+        if (u.HasSpec(Spec.Breacher) && target.Alive)
+        {
+            target.OnOverwatch = false; target.Hunkered = false;
+            Fx.PopText(target.Pos + new Vector2(0, -18), "STAGGER", Pal.Foe, 16f);
+            EnvDamage(target, Combat.ShoveCollisionDamage, "STAGGER", Pal.Foe);
+        }
         GrappleMode = false; ShoveMode = false; MarkMode = false;
     }
 
@@ -4855,6 +4879,7 @@ public class Game
     {
         if (u == null || ally == null || !u.CanAct || u.ActionsLeft < 1 || u.DraggedThisTurn) return false;
         if (ally == u || !ally.Alive || ally.Team != Team.Player) return false;
+        if (ally.IsVip && CaptiveLocked) return false;          // caged captive is immovable until freed (mirrors Mark/Grapple/Pin/Extract)
         int dx = ally.X - u.X, dy = ally.Y - u.Y;
         if (dx == 0 && dy == 0) return false;
         if (Math.Abs(dx) > DragReach || Math.Abs(dy) > DragReach) return false;   // within drag reach (Chebyshev<=2)
@@ -4950,8 +4975,12 @@ public class Game
         if (c <= 0) return;
         int need = c <= Selected.MoveBudget ? 1 : 2;
         bool blitz = Selected.Blitz;
-        bool slip = Selected.Slipstreaming;                 // ranger SLIPSTREAM: this move is free + silent
-        int cost = slip ? 0 : (blitz ? Math.Max(0, need - 1) : need);   // Blitz: one action cheaper
+        bool slip = Selected.Slipstreaming;                 // ranger SLIPSTREAM: this move is silent (no overwatch)
+        // SLIPSTREAM action cost: the standard reposition is a DISCOUNTED one-action move (silent, never
+        // a 2-action dash). PATHFINDER (Ranger fork) makes it TRULY FREE (0 actions) — that strictly-cheaper
+        // action-economy gain is the fork's load-bearing differentiator (not just a faster cooldown).
+        int slipCost = Selected.HasSpec(Spec.Pathfinder) ? 0 : 1;
+        int cost = slip ? slipCost : (blitz ? Math.Max(0, need - 1) : need);   // Blitz: one action cheaper
         if (cost > Selected.ActionsLeft) return;
         var path = Grid.ReconstructPath(_cameFrom, Selected.X, Selected.Y, tx, ty);
         if (path.Count == 0) return;
@@ -5167,12 +5196,16 @@ public class Game
     Unit MostWoundedAdjacentAlly(Unit medic)
     {
         if (medic == null) return null;
+        // COMBAT MEDIC fork: longer reach (Cheby<=2) AND may patch SELF; the default PATCH is Cheby<=1
+        // and skips self. (No new targeting mode — auto-target the most-wounded eligible ally; bounded Cd 3.)
+        int reach = medic.HasSpec(Spec.CombatMedic) ? 2 : 1;
+        bool allowSelf = medic.HasSpec(Spec.CombatMedic);
         Unit best = null;
         float worst = 1f;
         foreach (var p in AlivePlayers())
         {
-            if (p == medic || p.IsVip || p.Hp >= p.MaxHp || p.MaxHp <= 0) continue;
-            if (Util.ChebyDist(medic.X, medic.Y, p.X, p.Y) > 1) continue;
+            if ((p == medic && !allowSelf) || p.IsVip || p.Hp >= p.MaxHp || p.MaxHp <= 0) continue;
+            if (Util.ChebyDist(medic.X, medic.Y, p.X, p.Y) > reach) continue;
             float frac = (float)p.Hp / p.MaxHp;
             if (best == null || frac < worst) { best = p; worst = frac; }
         }
@@ -5271,11 +5304,14 @@ public class Game
         if (!PinTargetOk(u, target)) { PinMode = false; return; }
         if (SquadConcealed) BreakConcealment();   // a suppressing burst gives the squad away (no actor -> no ambush flag)
         u.AbilityCd = Unit.AbilityCooldownFor(u.Ability); u.Ammo--; u.ActionsLeft = 0; u.OnOverwatch = true;
+        // SPEC FORK footprint: AREA DENIAL widens the pin to a 5x5 (Cheby<=2); ANCHOR (Spec.Bulwark)
+        // shrinks it to the single target only (radius 0 — paired with its +2 armor); default 3x3 (1).
+        int pinRadius = u.HasSpec(Spec.AreaDenial) ? 2 : (u.HasSpec(Spec.Bulwark) ? 0 : 1);
         int pinned = 0;
         foreach (var e in Enemies)
         {
             if (!e.Alive || e.Team != Team.Enemy) continue;
-            if (Util.ChebyDist(target.X, target.Y, e.X, e.Y) > 1) continue;
+            if (Util.ChebyDist(target.X, target.Y, e.X, e.Y) > pinRadius) continue;
             if (e.IsVip && CaptiveLocked) continue;
             e.Pinned = PinTurns;
             if (!e.Active) ActivatePod(e.PodId);   // suppressing a dormant foe wakes its pod
@@ -5312,7 +5348,14 @@ public class Game
                 break;
             case AbilityKind.Slipstream:
                 // RANGER SLIPSTREAM: arm a free, overwatch-immune move (consumed by the next IssueMove).
-                u.Slipstreaming = true; u.AbilityCd = Unit.AbilityCooldownFor(u.Ability);
+                u.Slipstreaming = true;
+                // PATHFINDER fork: faster cooldown (3->2) AND a truly-free move (IssueMove zeroes the
+                // slip action cost for Pathfinder — the standard slip still spends 1). Only Pathfinder
+                // touches AbilityCd here (the call site), so AbilityCooldownFor / CDTEST stay green (R6).
+                u.AbilityCd = u.HasSpec(Spec.Pathfinder) ? 2 : Unit.AbilityCooldownFor(u.Ability);
+                // PHANTOM fork: the next shot strikes from ambush (reuses the built concealment-ambush
+                // path; cleared in BeginTurn, consumed by the next shot).
+                if (u.HasSpec(Spec.Phantom)) u.FiredFromConcealment = true;
                 Fx.PopText(at, "SLIPSTREAM", Pal.Accent, 18f);
                 Fx.Burst(u.Pos, Pal.Accent, 12, 150f, 0.4f, 3f);
                 Audio.Play("reload");
@@ -5345,10 +5388,18 @@ public class Game
             case AbilityKind.Heal:
                 var ally = MostWoundedAdjacentAlly(u);
                 if (ally == null) return;
-                int healed = Math.Min(Unit.PatchHeal, ally.MaxHp - ally.Hp);
+                // COMBAT MEDIC fork heals 1 less (PatchHeal-1) — the trade for self-target + reach 2.
+                int baseHeal = u.HasSpec(Spec.CombatMedic) ? Unit.PatchHeal - 1 : Unit.PatchHeal;
+                int healed = Math.Min(baseHeal, ally.MaxHp - ally.Hp);
                 if (healed <= 0) return;
                 ally.Hp += healed;
                 u.AbilityCd = Unit.AbilityCooldownFor(u.Ability); u.ActionsLeft -= 1;     // patching costs one action (like STEADY)
+                // FIELD SURGEON fork: PATCH also clears the patient's wound + all status effects (triage).
+                if (u.HasSpec(Spec.FieldSurgeon))
+                {
+                    ally.Wound = 0; ally.Statuses.Clear();
+                    Fx.PopText(ally.Pos + new Vector2(0, -50), "TRIAGE", Pal.Good, 16f);
+                }
                 Fx.PopText(ally.Pos + new Vector2(0, -34), $"+{healed}", Pal.Good, 20f);
                 Fx.Burst(ally.Pos, Pal.Good, 12, 120f, 0.45f, 3f);
                 Fx.PopText(at, "PATCH", Pal.Good, 16f);
@@ -5873,6 +5924,31 @@ public class Game
             OpenTagEditor(_run.PendingPerks[0].Unit);
         else if (Raylib.CheckCollisionPointRec(m, Hud.PerkBtnA)) ChoosePerk(0);
         else if (Raylib.CheckCollisionPointRec(m, Hud.PerkBtnB)) ChoosePerk(1);
+    }
+
+    /// CLASS SPECIALIZATION FORK pick (W2): apply the chosen fork to the soldier + record telemetry.
+    /// Mirrors ChoosePerk. In balance/smart mode the pick is randomized (Util.Roll) so win-rate-by-spec
+    /// is measurable; the AutoPlay smoke test stays deterministic at 0 so it never stalls.
+    void ChooseSpec(int which)
+    {
+        if (_run.PendingSpecs.Count == 0) return;
+        var off = _run.PendingSpecs[0];
+        // balance flywheel: randomize so both forks of each pair are exercised; smoke-test stays at `which`.
+        if (SmartPlay && (which == 0 || which == 1)) which = Util.Roll(50f) ? 0 : 1;
+        Spec s = which == 0 ? off.A : off.B;
+        off.Unit.Spec = s;
+        Stats.RecordSpec(SpecDef.Code(s));   // balance telemetry (no-op unless Stats.Enabled)
+        _run.Report.Add($"{off.Unit.Name} specializes -> {SpecDef.Name(s)}");
+        _run.PendingSpecs.RemoveAt(0);
+        Audio.Play("select");
+    }
+
+    void HandleSpecClick()
+    {
+        if (!Raylib.IsMouseButtonPressed(MouseButton.Left)) return;
+        var m = Raylib.GetMousePosition();
+        if (Raylib.CheckCollisionPointRec(m, Hud.SpecBtnA)) ChooseSpec(0);
+        else if (Raylib.CheckCollisionPointRec(m, Hud.SpecBtnB)) ChooseSpec(1);
     }
 
     // ---------------- custom tag editor ----------------
@@ -6905,6 +6981,7 @@ public class Game
         _run.JumpTo(3);
         _run.DebriefSurvivors();
         _run.PendingPerks.Clear();
+        _run.PendingSpecs.Clear();
         _shopDone = true;
         // synthesize an event node so the screen shows even if this seed placed none on the route
         var node = _run.CurrentNode ?? (_run.Map.Count > 0 ? _run.Map[0] : null);

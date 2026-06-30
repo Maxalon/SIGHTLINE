@@ -1794,7 +1794,7 @@ public static class Renderer
         float t = (float)Raylib.GetTime();
         foreach (var e in g.Enemies)
         {
-            if (!e.Alive || Util.ChebyDist(u.X, u.Y, e.X, e.Y) > Game.GrappleReach) continue;
+            if (!e.Alive || Util.ChebyDist(u.X, u.Y, e.X, e.Y) > g.GrappleReachFor(u)) continue;   // JUGGERNAUT: reach 1
             float pulse = 20f + MathF.Sin(t * 6f) * 2.5f;
             Raylib.DrawCircleLines((int)e.Pos.X, (int)e.Pos.Y, pulse, Raylib.Fade(Pal.Friend, 0.7f));
         }

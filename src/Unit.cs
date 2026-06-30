@@ -42,6 +42,22 @@ public enum Perk { LockOn, Hardened, Reflexes, Bandolier, CloseQuarters, Marksma
 // APPEND-ONLY — new members at the END only; never reorder/remove (persisted by ordinal).
 public enum Trait { Killer, ColdBlood, IronWill, Vengeful }
 
+/// CLASS SPECIALIZATION FORK (W2): a one-time, run-divergent pick-1-of-2 offered the first time a
+/// soldier reaches Unit.SpecRank (CORPORAL). Each fork augments/replaces the class's signature VERB
+/// or a core RULE, so progression becomes HORIZONTAL (changes HOW the class plays, not just stats).
+/// APPEND-ONLY: persisted by raw (int)Spec via SaveGame (UnitDto.Spec), so new members go at the END
+/// only — never reorder/remove. Spec.None (= ordinal 0) is the inert default (old saves / rookies),
+/// and every fork read no-ops on None (mirrors how Combat.MissionFaction == None no-ops).
+public enum Spec
+{
+    None,
+    Breacher, Juggernaut,        // Assault (GRAPPLE)
+    Phantom, Pathfinder,         // Ranger (SLIPSTREAM)
+    Sentinel, Headhunter,        // Sharpshooter (MARK)
+    AreaDenial, Bulwark,         // Gunner (PIN) -- display name of Bulwark = "ANCHOR"
+    FieldSurgeon, CombatMedic,   // Corpsman (HEAL)
+}
+
 /// Transient combat status effects (per-mission, never persisted). Burning/Bleed are
 /// damage-over-time, Stun costs an action, Disoriented dulls aim + denies overwatch.
 public enum StatusKind { Burning, Bleed, Stun, Disoriented }
@@ -226,6 +242,17 @@ public class Unit
     public System.Collections.Generic.List<Perk> Perks = new();
     public bool HasPerk(Perk p) => Perks.Contains(p);
 
+    // CLASS SPECIALIZATION FORK (W2): the soldier's chosen fork (persists across the run; one-time
+    // pick at SpecRank). Spec.None = not yet specialized (rookies + old saves). Every fork read gates
+    // on HasSpec(Spec.X) and is inert on None.
+    public Spec Spec = Spec.None;
+    public bool HasSpec(Spec s) => Spec == s;
+    public bool IsSpecialized => Spec != Spec.None;
+    public const int SpecRank = 2;          // Run.Ranks[2] == "CORPORAL" — the first real promotion (KillReq[2]=3)
+    // HEADHUNTER (Sharpshooter fork): a foe MARKED by a Headhunter takes squad-wide +crit (only this
+    // marker grants the crit). Transient per-mission state — never persisted; cleared in ClearMarks.
+    public bool MarkedByHeadhunter;
+
     // ---- persistent weapon upgrades (the Intel reward sink): installed weapon mods ----
     // Bought at the barracks shop; baked into Weapon.ApplyMods so the effect flows through
     // every combat read. Persisted by SaveGame (as a list of ints). Each mod is one-per-soldier
@@ -307,7 +334,7 @@ public class Unit
         AbilityKind.Heal     => "Heal the most-wounded adjacent squadmate (+4 HP)",
         AbilityKind.Mark     => "Designate a foe: whole squad gets +aim/+crit vs it this round",
         AbilityKind.Grapple  => "Yank a nearby foe 1 tile toward you, out of its cover",
-        AbilityKind.Slipstream => "Free long move: doesn't end your turn AND draws no overwatch",
+        AbilityKind.Slipstream => "Silent reposition: a 1-action move that draws no overwatch (PATHFINDER: free)",
         AbilityKind.Pin      => "Suppressing fire: pin a foe + its neighbours - they take -aim and can't dash next turn",
         _ => "",
     };
@@ -639,6 +666,83 @@ public static class PerkDef
         Perk.Vanguard => "+28 crit vs adjacent flanked targets (breach and finish)",
         Perk.Skirmisher => "after you fire, your move this turn draws no overwatch (shoot, then slip away)",
         Perk.Gunslinger => "your rushed second shot each turn fires at full aim (double-tap)",
+        _ => "",
+    };
+}
+
+/// Names + codes + descriptions for CLASS SPECIALIZATION FORKS (W2), and the per-class option pairs.
+/// Mirrors PerkDef. One source of truth, read by the barracks chooser (Hud) + telemetry (Stats).
+public static class SpecDef
+{
+    /// The 2 forks offered to a soldier of class `cls` (empty if the class has no fork table).
+    public static Spec[] OptionsFor(string cls) => cls switch
+    {
+        "ASSAULT"      => new[] { Spec.Breacher,    Spec.Juggernaut },
+        "RANGER"       => new[] { Spec.Phantom,     Spec.Pathfinder },
+        "SHARPSHOOTER" => new[] { Spec.Sentinel,    Spec.Headhunter },
+        "GUNNER"       => new[] { Spec.AreaDenial,  Spec.Bulwark    },
+        "CORPSMAN"     => new[] { Spec.FieldSurgeon, Spec.CombatMedic },
+        _ => System.Array.Empty<Spec>(),
+    };
+
+    public static string Name(Spec s) => s switch
+    {
+        Spec.Breacher     => "BREACHER",
+        Spec.Juggernaut   => "JUGGERNAUT",
+        Spec.Phantom      => "PHANTOM",
+        Spec.Pathfinder   => "PATHFINDER",
+        Spec.Sentinel     => "SENTINEL",
+        Spec.Headhunter   => "HEADHUNTER",
+        Spec.AreaDenial   => "AREA DENIAL",
+        Spec.Bulwark      => "ANCHOR",            // distinct display name from Perk.Bulwark ("PLATING")
+        Spec.FieldSurgeon => "FIELD SURGEON",
+        Spec.CombatMedic  => "COMBAT MEDIC",
+        _ => "SPEC",
+    };
+
+    public static string Code(Spec s) => s switch
+    {
+        Spec.Breacher     => "BRC",
+        Spec.Juggernaut   => "JUG",
+        Spec.Phantom      => "PHN",
+        Spec.Pathfinder   => "PTH",
+        Spec.Sentinel     => "SNT",
+        Spec.Headhunter   => "HHT",
+        Spec.AreaDenial   => "ADN",
+        Spec.Bulwark      => "ANC",
+        Spec.FieldSurgeon => "SRG",
+        Spec.CombatMedic  => "MED",
+        _ => "?",
+    };
+
+    public static string Desc(Spec s) => s switch
+    {
+        Spec.Breacher     => "GRAPPLE also staggers: the foe loses overwatch + hunker and takes chip damage",
+        Spec.Juggernaut   => "+2 innate armor, but GRAPPLE reach drops to adjacent only (must close in)",
+        Spec.Phantom      => "after a SLIPSTREAM, your next shot strikes from ambush (+aim/+crit)",
+        Spec.Pathfinder   => "SLIPSTREAM is truly free (0 actions) and cools down faster (3 -> 2)",
+        Spec.Sentinel     => "your overwatch reactions ignore the aim penalty and crit hard (built-in Guardian)",
+        Spec.Headhunter   => "your MARK also paints the foe for squad-wide +crit (not just +aim)",
+        Spec.AreaDenial   => "SUPPRESSING FIRE pins a wider 5x5 footprint (denies a whole zone)",
+        Spec.Bulwark      => "+2 innate armor, but SUPPRESSING FIRE pins only the single target (no splash)",
+        Spec.FieldSurgeon => "PATCH also clears the patient's wound and all status effects (triage)",
+        Spec.CombatMedic  => "PATCH reaches farther (2 tiles), can target yourself, but heals 1 less",
+        _ => "",
+    };
+
+    /// A one-line evocative fantasy blurb for the chooser card (flavour above the mechanical Desc).
+    public static string Fantasy(Spec s) => s switch
+    {
+        Spec.Breacher     => "Hit first, hit hard — leave them reeling.",
+        Spec.Juggernaut   => "An armored wall that drags the fight to itself.",
+        Spec.Phantom      => "Slip the lines, then strike from nowhere.",
+        Spec.Pathfinder   => "Always moving. Never caught.",
+        Spec.Sentinel     => "Nothing crosses your lane and lives.",
+        Spec.Headhunter   => "Paint the target. The squad does the rest.",
+        Spec.AreaDenial   => "Own the ground. Make them flinch.",
+        Spec.Bulwark      => "The anchor that doesn't break.",
+        Spec.FieldSurgeon => "Back in the fight, whole again.",
+        Spec.CombatMedic  => "A medic who keeps shooting — and keeps everyone up.",
         _ => "",
     };
 }

@@ -125,6 +125,7 @@ public static class SaveGame
                 Nickname = u.Nickname,
                 Traits = u.Traits.ConvertAll(t => (int)t),
                 Bonds = new List<string>(u.Bonds),
+                Spec = (int)u.Spec,
             });
         var c = r.CurrentCard;
         if (c != null)
@@ -164,6 +165,7 @@ public static class SaveGame
                 BonusGrenades = d.BonusGrenades, CustomTag = d.CustomTag, Wound = d.Wound,
                 Armor = d.Armor,
                 Nickname = d.Nickname, Benched = d.Benched,
+                Spec = (Spec)d.Spec,   // append-only: old saves default 0 == Spec.None
             };
             if (d.Perks != null) foreach (var p in d.Perks) u.Perks.Add((Perk)p);
             // installed weapon mods: add them, then re-bake the freshly-built weapon's stats
@@ -213,6 +215,7 @@ public static class SaveGame
         public List<int> WeaponMods = new();   // append-only: persisted weapon upgrades (old saves default empty)
         public List<int> Traits = new();
         public List<string> Bonds = new();
+        public int Spec;   // append-only: class specialization fork (old saves default 0 == Spec.None)
     }
 
     class CardDto
@@ -250,6 +253,7 @@ public static class SaveGame
             a.Nickname = "REAPER";
             a.Traits.Add(Trait.Killer); a.Traits.Add(Trait.IronWill);
             a.Bonds.Add("NOX");
+            a.Spec = Spec.Breacher;   // a chosen class specialization fork must round-trip
             src.Squad.Add(a);
             var n = new Unit { Name = "NOX", Cls = "SHARPSHOOTER", Team = Team.Player, Hp = 6, MaxHp = 6, Aim = 76, Mobility = 6, Weapon = Weapon.Make(WeaponKind.Sniper), Kills = 2, Rank = 1 };
             n.Bonds.Add("VEGA");
@@ -287,6 +291,7 @@ public static class SaveGame
             if (g0.Nickname != "REAPER") fails.Add("nickname");
             if (!g0.HasTrait(Trait.Killer) || !g0.HasTrait(Trait.IronWill) || g0.Traits.Count != 2) fails.Add("traits");
             if (g0.Bonds.Count != 1 || g0.Bonds[0] != "NOX") fails.Add("bonds");
+            if (g0.Spec != Spec.Breacher) fails.Add("spec");
             if (!got.BondTally.TryGetValue(Run.BondKey("VEGA", "NOX"), out var bt) || bt != 3) fails.Add("bondTally");
             if (got.CurrentCard == null || got.CurrentCard.Objective != Objective.Hack ||
                 got.CurrentCard.EnemyDelta != 2 || got.CurrentCard.Reward != RewardKind.BonusPerk)
@@ -328,6 +333,9 @@ public static class SaveGame
             var factionVals = (Faction[])Enum.GetValues(typeof(Faction));
             if (factionVals.Length < 4 || factionVals[0] != Faction.None || factionVals[factionVals.Length - 1] != Faction.Wardens)
                 fails.Add("factionOrdinals");
+            var specVals = (Spec[])Enum.GetValues(typeof(Spec));
+            if (specVals.Length < 11 || specVals[0] != Spec.None || specVals[^1] != Spec.CombatMedic)
+                fails.Add("specOrdinals");
 
             // meta (unlocked-max heat) round-trips through its own meta.json
             string metaSaved = File.Exists(MetaPath) ? File.ReadAllText(MetaPath) : null;

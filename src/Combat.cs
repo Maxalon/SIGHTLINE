@@ -70,6 +70,12 @@ public static class Combat
     // sharpshooter and cleared at the marker's next turn — a squad-wide "everyone shoot THIS one".
     public const int MarkAim  = 10;
     public const int MarkCrit = 0;
+    // HEADHUNTER (Sharpshooter spec fork): when this sharpshooter MARKs a foe it also paints it for
+    // squad-wide +crit (only a Headhunter's marker grants the crit — read via Unit.MarkedByHeadhunter).
+    public const int HeadhunterMarkCrit = 15;
+    // W2 SPEC FORKS: innate armor granted by JUGGERNAUT (Assault) and ANCHOR (Gunner Spec.Bulwark),
+    // each folded into HardenedReduce (a SEPARATE read from the shop d.Armor). Paired with a verb nerf.
+    public const int SpecArmor = 2;
 
     // SHOVE (forced-movement verb): when a shoved enemy can't move (destination blocked by a
     // wall, cover, another unit, or the board edge) it slams the obstacle and takes this much
@@ -292,7 +298,9 @@ public static class Combat
         if (a.HasPerk(Perk.GiantSlayer) && d.MaxHp > 0 && d.Hp >= d.MaxHp) AddCrit(Unit.FirstStrikeCrit);
         // Guardian: overwatch LETHALITY. A reaction shot (ReactedThisTurn is set by Game right before
         // it Resolves this shot) crits hard — Reflexes makes overwatch reliable, Guardian makes it lethal.
-        if (a.HasPerk(Perk.Guardian) && IsOverwatchReaction(a)) AddCrit(Unit.GuardianReactCrit);
+        // SENTINEL (Sharpshooter spec fork) grants the SAME built-in. The || means perk+spec add the
+        // bonus ONCE (no double-count, R2) — a Sentinel who also owns Guardian crits no harder.
+        if ((a.HasPerk(Perk.Guardian) || a.HasSpec(Spec.Sentinel)) && IsOverwatchReaction(a)) AddCrit(Unit.GuardianReactCrit);
         if (a.HasTrait(Trait.ColdBlood) && a.MaxHp > 0 && a.Hp * 2 <= a.MaxHp) AddCrit(Unit.ColdBloodCrit);
         // run boons (player attacker): FERVOR makes overwatch lethal; EXECUTIONERS finishes the wounded
         if (a.Team == Team.Player && RunBoons.Count > 0)
@@ -306,6 +314,9 @@ public static class Combat
         // situational rules whose self-tests assert an exact +CrossfireCrit / +LegionCloseCrit delta.
         if (crossfire) crit += CrossfireCrit;   // converging fire also crits harder (target distracted/exposed)
         if (marked) crit += MarkCrit;           // designated foe (TEMPO wave 2: MarkCrit now 0 — MARK is an aim-only designator; kept as a single source so re-enabling it is a one-const change)
+        // HEADHUNTER (Sharpshooter spec fork): a foe marked specifically by a Headhunter ALSO grants
+        // squad-wide +crit (gated to that marker only, inert on a plain MARK / no spec). Flat, like crossfire.
+        if (marked && d.MarkedByHeadhunter) crit += HeadhunterMarkCrit;
         // enemy FACTION crit rule (enemy attacker only; None = no-op): LEGION's closing rush also
         // crits harder within close range. Applied before the crit clamp (and before the hunker zero).
         if (a.Team == Team.Enemy && MissionFaction == Faction.Legion && dist <= Unit.CloseRange) crit += LegionCloseCrit;
@@ -418,6 +429,11 @@ public static class Combat
             reduce += Unit.HardenedFlat + (crit ? Unit.HardenedCrit : 0);  // tank perk: flat + extra vs crit
         if (d.HasPerk(Perk.Bulwark) && d.MaxHp > 0 && d.Hp * 2 >= d.MaxHp)
             reduce += Unit.BulwarkFlat;                         // PLATING: ablative armor while at/above half HP
+        // W2 SPEC FORKS: JUGGERNAUT (Assault) + ANCHOR (Gunner Spec.Bulwark) carry +2 innate armor —
+        // paid for by a real verb nerf (GRAPPLE reach / PIN footprint), so it's not free stats. Read
+        // SEPARATELY from the shop d.Armor (don't mutate it). Inert on Spec.None.
+        if (d.HasSpec(Spec.Juggernaut)) reduce += SpecArmor;    // JUGGERNAUT: armored bruiser (reach 2->1)
+        if (d.HasSpec(Spec.Bulwark))    reduce += SpecArmor;    // ANCHOR: immovable wall (PIN footprint -> single)
         if (d.Team == Team.Player && RunBoons.Count > 0 && HasRunBoon(Sightline.Boon.Fortified))
             reduce += 1;                                        // FORTIFIED boon: squad-wide +1 armor
         // COUNTER-PREP vs LEGION (REACTIVE PLATING): squad-wide damage reduction this mission to
@@ -470,7 +486,8 @@ public static class Combat
         // Guardian: cancel the standard -10 overwatch reaction penalty (which Game folds into aimMod,
         // invisible to ComputeOdds) so its reactions fire at full accuracy. Applied here, not in
         // ComputeOdds, because the penalty it offsets isn't part of the displayed HitChance either.
-        int guardianBonus = (a.HasPerk(Perk.Guardian) && IsOverwatchReaction(a)) ? Unit.GuardianReactAim : 0;
+        // SENTINEL (spec fork) grants the same penalty-cancel as Guardian. || => once only (R2 no double).
+        int guardianBonus = ((a.HasPerk(Perk.Guardian) || a.HasSpec(Spec.Sentinel)) && IsOverwatchReaction(a)) ? Unit.GuardianReactAim : 0;
         int effHit = Util.Clamp(odds.HitChance + aimMod + streakBonus + guardianBonus, 1, 99);
 
         var res = new ShotResult { Odds = odds };
@@ -1246,8 +1263,60 @@ public static class Combat
         PrepFaction = Faction.None;
         MissionFaction = Faction.None;   // belt-and-braces: never leave the global static set for later tests/runtime
 
+        // W2 SPEC FORKS — armor: JUGGERNAUT (Assault) and ANCHOR (Gunner Spec.Bulwark) carry +SpecArmor
+        // innate armor, folded into HardenedReduce on top of the shop d.Armor / the Hardened perk.
+        {
+            var plainS = new Unit { Team = Team.Player, Hp = 20, MaxHp = 20 };
+            if (HardenedReduce(plainS, 7, false) != 7) fails.Add("specArmorNoOpWithoutSpec");
+            var jug = new Unit { Team = Team.Player, Hp = 20, MaxHp = 20, Spec = Spec.Juggernaut };
+            if (HardenedReduce(jug, 7, false) != 7 - SpecArmor) fails.Add("juggernautArmor");
+            if (HardenedReduce(jug, 7, true)  != 7 - SpecArmor) fails.Add("juggernautArmorCrit");
+            var anc = new Unit { Team = Team.Player, Hp = 20, MaxHp = 20, Spec = Spec.Bulwark };   // Spec.Bulwark = ANCHOR
+            if (HardenedReduce(anc, 7, false) != 7 - SpecArmor) fails.Add("anchorArmor");
+            // STACKS on top of the shop d.Armor (a separate read), and respects the >=1 floor.
+            var jugArmored = new Unit { Team = Team.Player, Hp = 20, MaxHp = 20, Armor = 2, Spec = Spec.Juggernaut };
+            if (HardenedReduce(jugArmored, 7, false) != 7 - 2 - SpecArmor) fails.Add("juggernautStacksShopArmor");
+            if (HardenedReduce(jugArmored, 1, false) < 1) fails.Add("specArmorFloor");
+        }
+
+        // W2 SPEC FORK — SENTINEL (Sharpshooter): overwatch crit == Guardian, and the perk+spec stack
+        // adds the bonus ONCE (the || single-add, R2 — no double-count) on a reaction shot only.
+        {
+            var gS = new Grid();
+            var foeS = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 7, Y = 5, Hp = 10, MaxHp = 10 };
+            var baseSh = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 3, Y = 5, ReactedThisTurn = true };
+            var sentinel = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 3, Y = 5, ReactedThisTurn = true, Spec = Spec.Sentinel };
+            var guardian = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 3, Y = 5, ReactedThisTurn = true };
+            guardian.Perks.Add(Perk.Guardian);
+            var both = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 3, Y = 5, ReactedThisTurn = true, Spec = Spec.Sentinel };
+            both.Perks.Add(Perk.Guardian);
+            int baseCrit = ComputeOdds(gS, baseSh, foeS).CritChance;
+            int sentCrit = ComputeOdds(gS, sentinel, foeS).CritChance;
+            int grdCrit  = ComputeOdds(gS, guardian, foeS).CritChance;
+            int bothCrit = ComputeOdds(gS, both, foeS).CritChance;
+            if (sentCrit != grdCrit) fails.Add("sentinelEqualsGuardianCrit");
+            if (sentCrit <= baseCrit) fails.Add("sentinelReactCritFires");
+            if (bothCrit != sentCrit) fails.Add("sentinelGuardianNoDoubleCount");   // R2: || => once only
+            // not reacting: Sentinel is inert (overwatch-only rule)
+            var sentResting = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 3, Y = 5, Spec = Spec.Sentinel };
+            var plainResting = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 3, Y = 5 };
+            if (ComputeOdds(gS, sentResting, foeS).CritChance != ComputeOdds(gS, plainResting, foeS).CritChance) fails.Add("sentinelRestingInert");
+        }
+
+        // W2 SPEC FORK — HEADHUNTER (Sharpshooter): a foe MARKED by a Headhunter takes squad-wide
+        // +HeadhunterMarkCrit; a plain mark (MarkedByHeadhunter=false) grants the +aim but NOT the crit.
+        {
+            var gH = new Grid();
+            var shooterH = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 3, Y = 5 };
+            var plainMark = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 7, Y = 5, Hp = 10, MaxHp = 10, Marked = true };
+            var hhMark    = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 7, Y = 5, Hp = 10, MaxHp = 10, Marked = true, MarkedByHeadhunter = true };
+            int plainMarkCrit = ComputeOdds(gH, shooterH, plainMark).CritChance;
+            int hhMarkCrit    = ComputeOdds(gH, shooterH, hhMark).CritChance;
+            if (hhMarkCrit != Util.Clamp(plainMarkCrit + HeadhunterMarkCrit, 0, 100)) fails.Add("headhunterMarkCrit");
+        }
+
         return fails.Count == 0
-            ? "COMBATTEST: PASS (cover A-E + high-ground + tier-2 + drone/shield + ambush + graze + streak + perk-balance + build-perks + fragile-floor + armor + bulwark-plating + momentum + outrunner + vanguard + crossfire + factions + faction-prep all hold)"
+            ? "COMBATTEST: PASS (cover A-E + high-ground + tier-2 + drone/shield + ambush + graze + streak + perk-balance + build-perks + fragile-floor + armor + bulwark-plating + momentum + outrunner + vanguard + crossfire + factions + faction-prep + spec-forks all hold)"
             : "COMBATTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 }
