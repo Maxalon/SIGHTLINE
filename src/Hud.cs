@@ -26,6 +26,7 @@ public static class Hud
     public static Rectangle PauseResume, PauseMute, PauseShake, PauseThreat, PauseFullscreen, PauseWindow, PauseAbandon;
     public static Rectangle PauseBright, PauseColorblind, PauseAutoCam;
     public static Rectangle PerkBtnA, PerkBtnB, PerkTagBtn;
+    public static Rectangle SpecBtnA, SpecBtnB;   // W2: class-specialization fork chooser buttons
     public static Rectangle HeatMinus, HeatPlus;   // intro Heat/Ascension +/- selector
     public static Rectangle[] MissionCards = new Rectangle[3];
     public static System.Collections.Generic.List<(int Id, Rectangle Rect)> NodeBtns = new();
@@ -340,7 +341,14 @@ public static class Hud
             case Objective.Escort: objTxt = "ESCORT VIP"; objCol = Pal.VipGold; break;
             case Objective.Rescue: objTxt = g.CaptiveLocked ? "RESCUE CAPTIVE" : "EXTRACT CAPTIVE"; objCol = Pal.VipGold; break;
             case Objective.Defend: objTxt = $"DEFEND {Math.Min(g.Turn, Game.DefendTurns)}/{Game.DefendTurns}"; objCol = Pal.Accent; break;
-            case Objective.Decapitate: objTxt = "KILL HVT"; objCol = Pal.VipGold; break;
+            case Objective.Decapitate:
+                // W4 GUARDED HVT: read the guarded state at a glance — danger-red "HVT GUARDED" while
+                // a bodyguard shields it (peel the guards first), gold "HVT EXPOSED" once it's open to
+                // a kill. Falls back to the plain "KILL HVT" if the HVT is somehow null.
+                if (g.HasHvt && g.Hvt.HvtGuarded) { objTxt = "HVT GUARDED"; objCol = Pal.Foe; }
+                else if (g.HasHvt)                { objTxt = "HVT EXPOSED"; objCol = Pal.VipGold; }
+                else                              { objTxt = "KILL HVT"; objCol = Pal.VipGold; }
+                break;
             default: objTxt = "ELIMINATE"; objCol = Pal.Accent; break;
         }
         Raylib.DrawTextEx(Cfg.Font, objTxt, new Vector2(360, 19), 16, 1f, objCol);
@@ -618,6 +626,10 @@ public static class Hud
         // SHOVE: forced-movement verb (1 action, no end-turn, 1/turn). Enabled only when an
         // enemy is adjacent (CanShove), so it surfaces exactly when it's usable.
         Add("shove", "SHOVE", "8", interactive && g.CanShove(u), g.ShoveMode);
+        // FIELD CRAFT (W1): two universal positioning verbs. DRAG pulls an adjacent ally toward you;
+        // VAULT leaps an adjacent cover tile. Both surface only when usable (CanDrag/CanVault).
+        Add("drag", "DRAG", "7", interactive && g.CanDrag(u), g.DragMode);
+        Add("vault", "VAULT", "9", interactive && g.CanVault(u), g.VaultMode);
         Add("overwatch", "OVERWATCH", "2", interactive && u != null && u.CanAct && u.Ammo > 0, false);
         Add("hunker", "HUNKER", "3", interactive && u != null && u.CanAct, u != null && u.Hunkered);
         if (g.HasHackAction)
@@ -892,6 +904,32 @@ public static class Hud
                 Raylib.DrawLineEx(new Vector2(cx + 5f, cy + 3f), new Vector2(cx + 8f, cy), 1.7f, c);
                 break;
             }
+            case "drag":
+            {
+                // A box being pulled toward a hook on the left (arrow points back toward the dragger).
+                var box = new Rectangle(cx + 1f, cy - 4f, 7f, 8f);                                          // the ally being pulled
+                Raylib.DrawRectangleLinesEx(box, 1.3f, c);
+                // a tug line + leftward arrow toward the dragger
+                Raylib.DrawLineEx(new Vector2(cx + 1f, cy), new Vector2(cx - 8f, cy), 1.7f, c);
+                Raylib.DrawLineEx(new Vector2(cx - 8f, cy), new Vector2(cx - 5f, cy - 3f), 1.7f, c);
+                Raylib.DrawLineEx(new Vector2(cx - 8f, cy), new Vector2(cx - 5f, cy + 3f), 1.7f, c);
+                break;
+            }
+            case "vault":
+            {
+                // An up-arc leaping over a low bar (the cover tile being vaulted).
+                Raylib.DrawLineEx(new Vector2(cx - 7f, cy + 5f), new Vector2(cx + 7f, cy + 5f), 1.8f, c);   // the cover bar
+                // a leaping arc over it
+                var p0 = new Vector2(cx - 7f, cy + 3f);
+                var p1 = new Vector2(cx,      cy - 7f);
+                var p2 = new Vector2(cx + 7f, cy + 3f);
+                Raylib.DrawLineEx(p0, p1, 1.6f, c);
+                Raylib.DrawLineEx(p1, p2, 1.6f, c);
+                // arrowhead at the landing
+                Raylib.DrawLineEx(p2, new Vector2(cx + 4f, cy + 1f), 1.5f, c);
+                Raylib.DrawLineEx(p2, new Vector2(cx + 9f, cy + 1f), 1.5f, c);
+                break;
+            }
         }
     }
 
@@ -998,6 +1036,8 @@ public static class Hud
             case "shoot": return "Aimed shot at a target in range + line of sight. Full aim, costs 1 action and does NOT end the turn — keep your other action to reposition (one shot/turn).";
             case "grenade": return "Lob a grenade: AoE that ignores cover, hits both teams, clears low cover.";
             case "shove": return "Shove an adjacent enemy 1 tile back (breaks its overwatch + exposes it). Blocked = collision damage. 1 action, won't end your turn, once/turn.";
+            case "drag": return "Pull an adjacent ally 1 tile toward you (saves wounded, speeds the march to evac). 1 action, won't end your turn, once/turn.";
+            case "vault": return "Leap an adjacent cover tile to the open floor beyond it - cross an impassable screen to flank or escape. 1 action, won't end your turn, once/turn.";
             case "overwatch": return "Watch: fire a reaction shot at the first foe that moves in sight.";
             case "hunker": return "Hunker down for extra cover defense; you can't be crit.";
             case "hack": return g.HasSabotage
@@ -1903,6 +1943,7 @@ public static class Hud
         BoonBtns.Clear();
         if (!g.ShopDone) { DrawRequisition(g); return; }
         if (run.PendingPerks.Count > 0) { DrawPerkChooser(g, run.PendingPerks[0]); return; }
+        if (run.PendingSpecs.Count > 0) { DrawSpecChooser(g, run.PendingSpecs[0]); return; }   // W2: fork pick
         if (run.BoonOffer.Count > 0) { DrawBoonOffer(g, run); return; }
         if (g.EventPending) { DrawEventScreen(g); return; }   // W4: a "?" FIELD EVENT takes over the barracks frame
         var squad = run.Squad;
@@ -2327,6 +2368,7 @@ public static class Hud
         Raylib.DrawTextEx(Cfg.Font, stats, new Vector2(x, y), 13, 1f, Pal.Txt);
         string perks = u.Perks.Count == 0 ? "Perks: none yet"
             : "Perks: " + string.Join(", ", u.Perks.ConvertAll(PerkDef.Name));
+        if (u.IsSpecialized) perks += "    [" + SpecDef.Name(u.Spec) + "]";   // W2: show the chosen fork
         Raylib.DrawTextEx(Cfg.Font, perks, new Vector2(x, y + 22), 13, 1f, Pal.Good);
 
         // earned traits + bonds (3.2): what makes this veteran distinct
@@ -2419,6 +2461,68 @@ public static class Hud
                 14, 1f, Pal.TxtDim);
 
         Raylib.DrawTextEx(Cfg.Font, "SELECT", new Vector2((int)(r.X + r.Width / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, "SELECT", 13, 1f).X / 2), (int)(r.Y + r.Height - 32)), 13, 1f, hover ? Pal.Accent : Pal.TxtDim);
+    }
+
+    /// W2 CLASS SPECIALIZATION FORK chooser (a one-time pick at Corporal). Near-copy of DrawPerkChooser:
+    /// a framed card, the soldier dossier, and two fork cards (Name + flavour + word-wrapped mechanics).
+    static void DrawSpecChooser(Game g, SpecOffer off)
+    {
+        Raylib.DrawRectangle(0, 0, Cfg.ScreenW, Cfg.ScreenH, Raylib.Fade(Pal.RGBA(5, 8, 11), 0.88f));
+        int w = 680, h = 452;
+        int x = Cfg.ScreenW / 2 - w / 2, y = Cfg.ScreenH / 2 - h / 2;
+        y -= (int)((1f - Util.EaseOutQuad(PanelAnim("specchooser", 0.15f))) * 16f);  // slide-down entrance
+        var card = new Rectangle(x, y, w, h);
+        Raylib.DrawRectangleRounded(card, 0.04f, 8, Pal.Panel);
+        Raylib.DrawRectangleLinesEx(card, 1.5f, Pal.Accent);
+
+        string title = "SPECIALIZE";
+        Raylib.DrawTextEx(Cfg.Font, title, new Vector2(x + w / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, title, 36, 1f).X / 2, y + 22), 36, 1f, Pal.Accent);
+        string sub = $"{off.Unit.FullName}  -  {off.Unit.Cls}  -  CHOOSE A PERMANENT FORK";
+        Raylib.DrawTextEx(Cfg.Font, sub, new Vector2(x + w / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, sub, 14, 1f).X / 2, y + 64), 14, 1f, Pal.TxtDim);
+
+        // dossier so the fork can be picked for the soldier's build
+        var dossier = new Rectangle(x + 20, y + 88, w - 40, 96);
+        Raylib.DrawRectangleRounded(dossier, 0.08f, 6, Pal.RGBA(13, 19, 27));
+        Raylib.DrawRectangleLinesEx(dossier, 1f, Pal.PanelBd);
+        DrawDossier(off.Unit, x + 34, y + 98, w - 68);
+
+        int cw = (w - 60) / 2, ch = 178, cy = y + 196, gap = 20;
+        SpecBtnA = new Rectangle(x + 20, cy, cw, ch);
+        SpecBtnB = new Rectangle(x + 20 + cw + gap, cy, cw, ch);
+        DrawSpecCard(SpecBtnA, off.A);
+        DrawSpecCard(SpecBtnB, off.B);
+
+        string foot = "This choice is permanent for this soldier";
+        Raylib.DrawTextEx(Cfg.Font, foot, new Vector2(x + w / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, foot, 12, 1f).X / 2, y + h - 26), 12, 1f, Pal.TxtDim);
+    }
+
+    static void DrawSpecCard(Rectangle r, Spec s)
+    {
+        bool hover = Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), r);
+        Raylib.DrawRectangleRounded(r, 0.08f, 8, hover ? Pal.RGBA(24, 34, 46) : Pal.RGBA(14, 20, 28));
+        Raylib.DrawRectangleLinesEx(r, 1.5f, hover ? Pal.Accent : Pal.PanelBd);
+        Raylib.DrawRectangle((int)r.X, (int)r.Y, 4, (int)r.Height, hover ? Pal.Accent : Pal.Friend);
+
+        string name = SpecDef.Name(s);
+        Raylib.DrawTextEx(Cfg.Font, name, new Vector2((int)(r.X + r.Width / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, name, 22, 1f).X / 2), (int)r.Y + 18), 22, 1f, hover ? Pal.Accent : Pal.Txt);
+        // flavour line (italic-feel via dim accent), then the mechanical description word-wrapped.
+        string fant = SpecDef.Fantasy(s);
+        var flines = WrapText(fant, 12, (int)r.Width - 24);
+        int fy = (int)r.Y + 50;
+        for (int li = 0; li < flines.Count; li++)
+            Raylib.DrawTextEx(Cfg.Font, flines[li],
+                new Vector2((int)(r.X + r.Width / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, flines[li], 12, 1f).X / 2), fy + li * 16),
+                12, 1f, hover ? Pal.Accent : Pal.VipGold);
+
+        string desc = SpecDef.Desc(s);
+        var dlines = WrapText(desc, 13, (int)r.Width - 24);
+        int dy0 = fy + flines.Count * 16 + 10;
+        for (int li = 0; li < dlines.Count; li++)
+            Raylib.DrawTextEx(Cfg.Font, dlines[li],
+                new Vector2((int)(r.X + r.Width / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, dlines[li], 13, 1f).X / 2), dy0 + li * 17),
+                13, 1f, Pal.TxtDim);
+
+        Raylib.DrawTextEx(Cfg.Font, "SELECT", new Vector2((int)(r.X + r.Width / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, "SELECT", 13, 1f).X / 2), (int)(r.Y + r.Height - 28)), 13, 1f, hover ? Pal.Accent : Pal.TxtDim);
     }
 
     static void DrawSquadRow(Game g, Unit u, int x, int y, int w)

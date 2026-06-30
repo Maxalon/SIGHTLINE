@@ -163,6 +163,14 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        // SIGHTLINE_FIELDTEST=1 : FIELD CRAFT verbs (DRAG pulls an ally one tile / VAULT crosses a cover tile / gating).
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_FIELDTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "fieldtest");   // Unit.SyncPos + Move/Shove anims use tile->px math
+            Console.WriteLine(new Game().FieldSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         // SIGHTLINE_MISSION=<n> : start the harness on mission n (verify Hack/Evac maps).
         int startMission = int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_MISSION"), out int sm) ? sm : 1;
 

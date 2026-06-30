@@ -106,6 +106,10 @@ public class Game
     // repositioning toy. Reach is Chebyshev <= GrappleReach; 1 use/soldier/turn (Unit.ShovedThisTurn,
     // shared with SHOVE so the two repositioning verbs share one anti-loop budget).
     public const int GrappleReach = 2;
+    /// Effective GRAPPLE reach for `u`: 1 (adjacent only) for a JUGGERNAUT (the armor fork's verb
+    /// nerf — it must close in), else GrappleReach. Single source of truth (GrappleTargetOk + the
+    /// Renderer grapple-highlight both call this). Inert on Spec.None.
+    public int GrappleReachFor(Unit u) => u != null && u.HasSpec(Spec.Juggernaut) ? 1 : GrappleReach;
     public bool GrappleMode;
     public Unit GrappleTarget;
     public bool GrappleValid;
@@ -120,6 +124,26 @@ public class Game
     public Unit PinTarget;                 // hovered enemy under the cursor while in PinMode (null = none)
     public bool PinValid;                  // gates the click (target is a legal SUPPRESS target)
     public const int PinTurns = 2;         // turns the pin lasts (survives one enemy BeginTurn -> bites that turn)
+
+    // DRAG targeting (FIELD CRAFT W1, universal): pull a LAGGING ally (Chebyshev 1..DragReach) one
+    // tile TOWARD the dragger. Reach-2 is the useful version: a Chebyshev-2 ally is pulled to the
+    // tile 1 away (legal + useful — closes the gap); an already-adjacent (Chebyshev-1) ally has its
+    // only toward-tile == the dragger's own tile, so it's illegal (correct: you can't pull someone
+    // already beside you). Mirrors the ShoveMode pattern (ToggleDrag/DragTargetOk/IssueDrag + key 7 +
+    // every mode-reset site). Costs 1 action, never ends the turn, once/soldier/turn (DraggedThisTurn).
+    public const int DragReach = 2;
+    public bool DragMode;
+    public Unit DragTarget;
+    public bool DragValid;
+
+    // VAULT targeting (FIELD CRAFT W1, universal): leap an adjacent cover tile to the empty floor on
+    // its far side (a straight 2-tile hop with a cover tile between). A NEW capability — all cover
+    // blocks movement, so vaulting crosses an otherwise-impassable screen. Mirrors the ItemMode tile-
+    // targeting pattern (ToggleVault/VaultTargetOk/IssueVault + key 9 + reset sites). Once per turn
+    // (Unit.VaultedThisTurn), 1 action, never ends the turn.
+    public bool VaultMode;
+    public int VaultTx, VaultTy;
+    public bool VaultValid;
 
     // SLIPSTREAM (ranger ability VERB): a free, overwatch-immune long move. Set on the soldier by
     // DoAbility(Slipstream); IssueMove reads it to make the next move cost 0 actions, and OnUnitEnteredTile
@@ -482,6 +506,11 @@ public class Game
     // SetupMission after Mission.Build; null on every other objective.
     public Unit Hvt;
     public bool HasHvt => Objective == Objective.Decapitate && Hvt != null;
+    // DECAPITATE GUARDED HVT (W4): up to 2 bodyguards picked near the HVT. While any is alive within
+    // Combat.HvtGuardRange of the HVT, the HVT takes reduced (never zero) damage — peel the guards or
+    // pull the HVT out of the bubble to execute it. Transient (enemies aren't persisted). Recomputed
+    // by UpdateHvtGuard at every turn boundary + after any death (see KillUnit / StartPlayerTurn / etc).
+    readonly List<Unit> _hvtGuards = new();
 
     public bool CanHack(Unit u)
     {
@@ -815,7 +844,7 @@ public class Game
         SnapShot = false;
         GrenadeMode = false;
         ItemMode = false;
-        ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false;
+        ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false; DragMode = false; VaultMode = false;
         Biome = Biome.For(n, _run.MapSeed);   // per-run biome variety (surfaces NEON/MAGMA across seeds)
         string facTag = Combat.MissionFaction != Faction.None ? $" - {Run.FactionName(Combat.MissionFaction)}" : "";
         ShowBanner($"MISSION {n} - {Biome.Name}{facTag}", false);
@@ -858,6 +887,32 @@ public class Game
             Hvt.Aim = Math.Min(85, Hvt.Aim + 6);
             Hvt.Name = "HVT-" + Hvt.Name;
         }
+
+        // GUARDED HVT (W4): pick up to 2 nearest alive non-special bodyguards (reuse the same
+        // exclusion set; never the HVT itself). While a guard lives near the HVT it takes reduced
+        // damage, so killing the HVT becomes a positioning puzzle (peel the guards / GRAPPLE it out)
+        // instead of a turn-1 snipe. <2 eligible enemies is fine (a 1-guard or 0-guard HVT just
+        // unguards sooner — no NRE). Guards are recomputed-for-protection each boundary in UpdateHvtGuard.
+        _hvtGuards.Clear();
+        foreach (var u in Enemies) u.IsHvtGuard = false;   // clean slate (no stale guards from a prior mission)
+        Hvt.HvtGuarded = false;
+        foreach (var g in pool.Where(e => e != Hvt && e.Alive && !IsSpecial(e))
+                              .OrderBy(e => Util.ChebyDist(e.X, e.Y, Hvt.X, Hvt.Y))
+                              .Take(2))
+        { g.IsHvtGuard = true; _hvtGuards.Add(g); }
+        UpdateHvtGuard();
+    }
+
+    // GUARDED HVT (W4): recompute whether the HVT is currently protected. The HVT is GUARDED while
+    // ANY of its (alive) bodyguards stands within Chebyshev Combat.HvtGuardRange of it. Mirrors how
+    // FaceShields() runs each enemy turn; called at every turn boundary AND right after any death
+    // (KillUnit) so killing the last in-range guard immediately exposes the HVT (no lag). Inert unless
+    // HasHvt (gated), so it never touches non-Decapitate missions.
+    void UpdateHvtGuard()
+    {
+        if (!HasHvt || !Hvt.Alive) { if (Hvt != null) Hvt.HvtGuarded = false; return; }
+        Hvt.HvtGuarded = _hvtGuards.Any(g => g != null && g.Alive
+                                          && Util.ChebyDist(g.X, g.Y, Hvt.X, Hvt.Y) <= Combat.HvtGuardRange);
     }
 
     /// Resume a saved campaign from the intro. Reloads the run and restarts its
@@ -869,7 +924,8 @@ public class Game
         EnsureMetaLoaded();   // so a resumed run that gets WON can still unlock the next Heat
         _run = run;
         _run.LossStreak = _metaLossStreak;   // adaptive assist carries across a resumed run
-        Players = _run.Squad;
+        // (no Players assignment here: SetupMission(n) below rebuilds Players as a fresh per-mission
+        // copy — aliasing Players = _run.Squad reintroduces the VIP-duplication bug, so leave it out.)
         int n = Util.Clamp(_run.Mission < 1 ? 1 : _run.Mission, 1, Run.MaxMissions);
         _run.CurrentCard ??= Run.StandardCard(n);
         SetupMission(n);
@@ -1098,6 +1154,95 @@ public class Game
         return fails.Count == 0
             ? "SHOVETEST: PASS (reach 2: clear shove moves + breaks overwatch/hunker; blocked shove damages + holds; CanShove gates Chebyshev<=2 + 1/turn)"
             : "SHOVETEST: FAIL (" + string.Join(",", fails) + ")";
+    }
+
+    /// Headless self-test for the FIELD CRAFT (W1) verbs DRAG + VAULT. Verifies: DRAG pulls a
+    /// LAGGING ally (Chebyshev 2) one tile toward the dragger, an already-adjacent (Chebyshev 1)
+    /// ally is NOT draggable (no legal closer tile), and the once-per-turn cap holds; VAULT crosses
+    /// a cover tile to the floor beyond (gating on a cover tile between, landing legality, and
+    /// once-per-turn). Prints FIELDTEST: PASS/FAIL.
+    public string FieldSelfTest()
+    {
+        NoPersist = true;
+        var fails = new System.Collections.Generic.List<string>();
+
+        Grid = new Grid();                       // all Floor, Height 0
+        Players = new System.Collections.Generic.List<Unit>();
+        Enemies = new System.Collections.Generic.List<Unit>();
+        Vip = null; CaptiveLocked = false;
+        Objective = Objective.Eliminate;
+        EvacZone.Clear();
+        Fx = new Fx();
+        DragMode = VaultMode = false;
+
+        Unit MkP(int x, int y) {
+            var u = new Unit { Name = "S", Cls = "ASSAULT", Team = Team.Player, X = x, Y = y,
+                               Hp = 8, MaxHp = 8, Aim = 65, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+            u.Ammo = u.Weapon.Clip; u.SyncPos(); u.BeginTurn(); return u;
+        }
+
+        // ---- (1) DRAG (reach-2 semantics): a LAGGING ally (Chebyshev 2) is pulled one tile closer ----
+        var dragger = MkP(5, 5);
+        // (1a) too far: a Chebyshev-3 ally is out of DragReach -> illegal
+        var farAlly = MkP(8, 5);                 // 3 east
+        Players.Add(dragger); Players.Add(farAlly);
+        Selected = dragger;
+        if (DragTargetOk(dragger, farAlly)) fails.Add("dragChebyshev3Valid");
+        // (1b) Chebyshev-1 (already adjacent): NOT draggable — its only toward-tile is the dragger
+        var adjAlly = MkP(6, 5);                  // 1 east
+        Players.Add(adjAlly);
+        if (DragTargetOk(dragger, adjAlly)) fails.Add("dragChebyshev1Valid");   // no legal closer tile
+        // (1c) Chebyshev-2: draggable, lands one tile closer (the intermediate floor tile)
+        Players.Remove(farAlly); Players.Remove(adjAlly);
+        var ally = MkP(7, 5);                     // 2 east of the dragger
+        Players.Add(ally);
+        if (!DragTargetOk(dragger, ally)) fails.Add("dragChebyshev2NotValid");
+        if (!CanDrag(dragger)) fails.Add("cannotDragLaggingAlly");
+        int ax0 = ally.X;                         // 7
+        // execute via IssueDrag (the real path: validates, spends the action, enqueues ShoveAnim)
+        IssueDrag(ally);
+        // drive the enqueued ShoveAnim to completion (the anim queue would otherwise)
+        while (_anims.Count > 0) { var a = _anims[0]; a.OnStart(this); for (int i = 0; i < 200 && !a.Update(this, 0.05f); i++) { } if (_anims.Count > 0 && _anims[0] == a) _anims.RemoveAt(0); }
+        // ally moved one tile WEST (toward the dragger): 7 -> 6
+        if (!(ally.X == ax0 - 1 && ally.Y == 5)) fails.Add($"dragDidNotPullCloser({ally.X},{ally.Y})");
+        if (!dragger.DraggedThisTurn) fails.Add("dragDidNotSetFlag");
+        // once-per-turn cap (the flag is now set by IssueDrag) — re-seat a fresh reach-2 ally
+        ally.X = 7; ally.Y = 5; ally.SyncPos();
+        if (CanDrag(dragger)) fails.Add("canDragTwiceInOneTurn");
+
+        // ---- (2) VAULT: cross a cover tile to the floor beyond ----
+        Players = new System.Collections.Generic.List<Unit>();
+        Enemies = new System.Collections.Generic.List<Unit>();
+        var v = MkP(5, 5);
+        Players.Add(v); Selected = v;
+        // no cover anywhere yet -> no legal vault
+        if (CanVault(v)) fails.Add("canVaultWithNoCover");
+        if (VaultTargetOk(v, 7, 5)) fails.Add("vaultOverFloorValid");          // (6,5) is floor, not cover
+        Grid.Tiles[6, 5] = TileType.HighCover; Grid.SetCoverHp(6, 5);          // cover directly east
+        if (!VaultTargetOk(v, 7, 5)) fails.Add("vaultOverCoverInvalid");        // land (7,5) clear floor
+        if (!CanVault(v)) fails.Add("cannotVaultWithCover");
+        // landing blocked by an occupant -> illegal
+        var occ = MkP(7, 5); Players.Add(occ);
+        if (VaultTargetOk(v, 7, 5)) fails.Add("vaultOntoOccupiedValid");
+        Players.Remove(occ);
+        // landing on a cover tile -> illegal (must be floor)
+        Grid.Tiles[7, 5] = TileType.LowCover; Grid.SetCoverHp(7, 5);
+        if (VaultTargetOk(v, 7, 5)) fails.Add("vaultOntoCoverValid");
+        Grid.Tiles[7, 5] = TileType.Floor;
+        // execute via IssueVault (the real path: validates, spends 1 action, sets VaultedThisTurn, hops over cover)
+        int vx0 = v.X, vact0 = v.ActionsLeft;
+        IssueVault(7, 5);
+        while (_anims.Count > 0) { var a = _anims[0]; a.OnStart(this); for (int i = 0; i < 200 && !a.Update(this, 0.05f); i++) { } if (_anims.Count > 0 && _anims[0] == a) _anims.RemoveAt(0); }
+        if (!(v.X == 7 && v.Y == 5)) fails.Add($"vaultDidNotLand({v.X},{v.Y})");
+        if (v.X == vx0) fails.Add("vaultDidNotMove");
+        if (v.ActionsLeft != vact0 - 1) fails.Add("vaultDidNotSpendAction");
+        if (!v.VaultedThisTurn) fails.Add("vaultDidNotSetFlag");
+        // once-per-turn cap (the flag is now set by IssueVault)
+        if (CanVault(v)) fails.Add("canVaultTwiceInOneTurn");
+
+        return fails.Count == 0
+            ? "FIELDTEST: PASS (DRAG reach-2: a Chebyshev-2 lagging ally is pulled one tile closer; Chebyshev-1 ally not draggable; Chebyshev-3 out of reach; 1-per-turn cap. VAULT crosses a cover tile to clear floor + gates cover-between/landing/1-per-turn)"
+            : "FIELDTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
     /// Headless self-test for the WAVE 1 deep-roster + deployment lifecycle.
@@ -1513,6 +1658,7 @@ public class Game
         _run.JumpTo(2);
         _run.DebriefSurvivors();
         _run.PendingPerks.Clear();
+        _run.PendingSpecs.Clear();
         _shopDone = true;
         Phase = Phase.Barracks;
     }
@@ -1524,6 +1670,7 @@ public class Game
         _run.JumpTo(3);                  // visit cols 0-2; current sits at mission 3
         _run.DebriefSurvivors();
         _run.PendingPerks.Clear();       // skip promotions for the screenshot
+        _run.PendingSpecs.Clear();
         _shopDone = true;                // skip requisition for the screenshot
         Phase = Phase.Barracks;
     }
@@ -1534,6 +1681,7 @@ public class Game
         _run.JumpTo(2);
         _run.DebriefSurvivors();
         _run.PendingPerks.Clear();
+        _run.PendingSpecs.Clear();
         _shopDone = true;
         _run.GenerateBoonOffer();        // populate the pick-1-of-3 doctrine card
         Phase = Phase.Barracks;
@@ -1853,11 +2001,16 @@ public class Game
         Stats.RecordKill(killer?.Cls ?? "?", killer != null ? (int)killer.Team : 1, d.Cls, (int)d.Team);
         if (d.Team == Team.Player)
         {
-            _run.Fallen.Add(d.Name);
-            // run-end MEMORIAL (presentation only): snapshot the fallen squad member's identity for
-            // the run-summary KIA roll. VIP/captive isn't a persistent squad member, so it's excluded.
-            if (!d.IsVip)
-                _run.Memorial.Add(new FallenRec { Name = d.FullName, Cls = d.Cls, Rank = d.RankName, Kills = d.Kills, Mission = _run.Mission });
+            // _run is null only in controlled test scenes (normal play always has a Run) — guard
+            // the run-state writes so a no-Run scene can't NRE here.
+            if (_run != null)
+            {
+                _run.Fallen.Add(d.Name);
+                // run-end MEMORIAL (presentation only): snapshot the fallen squad member's identity for
+                // the run-summary KIA roll. VIP/captive isn't a persistent squad member, so it's excluded.
+                if (!d.IsVip)
+                    _run.Memorial.Add(new FallenRec { Name = d.FullName, Cls = d.Cls, Rank = d.RankName, Kills = d.Kills, Mission = _run.Mission });
+            }
             if (!d.IsVip) SecondaryFailed = true;   // a lost soldier fails the NO LOSSES bonus
             // a fallen squadmate fires up the survivors (Vengeful feat / trait)
             if (!d.IsVip)
@@ -1903,6 +2056,9 @@ public class Game
         // purge any queued movement for the dead unit
         _anims.RemoveAll(a => a is MoveStepAnim m && m.Unit == d);
         if (Selected == d) Selected = null;
+        // DECAPITATE: a death may have removed the HVT's last in-range guard — re-evaluate now so the
+        // HVT is immediately exposed (the telegraph + reduced-damage gate flip the same frame).
+        UpdateHvtGuard();
     }
 
     /// True when killing `d` decides the mission (last hostile on an Eliminate, a squad
@@ -2315,7 +2471,7 @@ public class Game
         {
             if (Raylib.IsKeyPressed(KeyboardKey.Escape))
             {
-                if (AimMode || GrenadeMode || ItemMode || ShoveMode || MarkMode || GrappleMode || PinMode) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false; }
+                if (AimMode || GrenadeMode || ItemMode || ShoveMode || MarkMode || GrappleMode || PinMode || DragMode || VaultMode) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false; DragMode = false; VaultMode = false; }
                 else Paused = !Paused;
             }
             if (Paused) { HandlePauseMenu(); return; }
@@ -2325,6 +2481,13 @@ public class Game
 
         float t = MathF.Min(dt, 0.05f);
         Fx.Update(t);
+        // DECAPITATE telegraph: a guarded HVT hit was softened this frame — pop a single "GUARDED"
+        // float at the HVT (Combat can't reach Fx; it just raises the one-shot flag, drained here).
+        if (Combat.HvtGuardReducePending)
+        {
+            Combat.HvtGuardReducePending = false;
+            if (HasHvt && Hvt.Alive) Fx.PopText(Hvt.Pos + new Vector2(0, -42), "GUARDED", Pal.Foe, 18f);
+        }
         foreach (var u in Players) DecayUnitFx(u, t);
         foreach (var u in Enemies) DecayUnitFx(u, t);
         for (int i = Scorches.Count - 1; i >= 0; i--)   // death scorch decals fade out
@@ -2364,6 +2527,10 @@ public class Game
                 else if (_run.PendingPerks.Count > 0)    // then resolve rank-up perk picks
                 {
                     if (AutoPlay) ChoosePerk(0); else HandlePerkClick();
+                }
+                else if (_run.PendingSpecs.Count > 0)    // W2: then a one-time class SPECIALIZATION fork
+                {
+                    if (AutoPlay) ChooseSpec(0); else HandleSpecClick();
                 }
                 else if (_run.BoonOffer.Count > 0)       // then pick a run-scoped boon
                 {
@@ -2842,6 +3009,7 @@ public class Game
         {
             // arrived: haul any adjacent straggler aboard (lift-out — cuts the drag), then hold it.
             if (CanExtract(u)) { DoExtract(); return true; }
+            if (TrySmartDrag(u)) return true;   // pull a lagging ally one step closer to the zone
             if (TakeBestShot(u)) return true;
             if (u.Ammo == 0 && u.ActionsLeft > 0) { DoReload(); return true; }
             if (HoldOverwatch(u)) return true;
@@ -2862,6 +3030,7 @@ public class Game
                 .OrderBy(e => Util.TileDist(u.X, u.Y, e.X, e.Y)).FirstOrDefault();
             if (blocker != null) { IssueGrenade(blocker.X, blocker.Y); return true; }
         }
+        if (TrySmartDrag(u)) return true;   // can't advance: at least pull a straggler forward
         if (u.Ammo == 0) { DoReload(); return true; }
         DoHunker(); return true;
     }
@@ -2870,6 +3039,59 @@ public class Game
     /// of (tx,ty) — the friendly-fire safety check shared by every SmartStep grenade path.
     bool NoAllyInBlast(int tx, int ty)
         => !AlivePlayers().Any(f => Util.ChebyDist(tx, ty, f.X, f.Y) <= GrenadeAnim.Radius);
+
+    /// Chebyshev distance from (x,y) to the nearest extraction tile (0 inside the zone).
+    int DistToEvac(int x, int y)
+    {
+        if (EvacZone.Count == 0) return 0;
+        int best = int.MaxValue;
+        foreach (var t in EvacZone) best = Math.Min(best, Util.ChebyDist(x, y, t.x, t.y));
+        return best;
+    }
+
+    /// FIELD CRAFT autopilot (W1, bounded): on the march-to-the-corner objectives, if `u` is within
+    /// drag reach of a friendly that lags BEHIND it (farther from evac) and DRAGging that ally pulls it
+    /// one step CLOSER to evac, do it. The once-per-turn DraggedThisTurn flag bounds it to a single pull,
+    /// so it
+    /// can never loop; callers still fall through to their normal logic, so it's never the sole stalling
+    /// action. Returns true iff a drag was issued.
+    bool TrySmartDrag(Unit u)
+    {
+        if (!CanDrag(u)) return false;
+        int myDist = DistToEvac(u.X, u.Y);
+        Unit best = null; int bestGain = 0;
+        foreach (var a in Players)
+        {
+            if (!DragTargetOk(u, a)) continue;
+            int allyDist = DistToEvac(a.X, a.Y);
+            if (allyDist <= myDist) continue;                 // only pull a straggler that's BEHIND us
+            int landDist = DistToEvac(a.X + Math.Sign(u.X - a.X), a.Y + Math.Sign(u.Y - a.Y));
+            int gain = allyDist - landDist;                   // how much closer the pull lands the ally
+            if (gain > bestGain) { bestGain = gain; best = a; }
+        }
+        if (best != null) { IssueDrag(best); return true; }
+        return false;
+    }
+
+    /// FIELD CRAFT autopilot (W1, bounded): in combat, if a badly-wounded ally (≤⅓ HP) sits within
+    /// drag reach and pulling it toward `u` lands it on a LESS-exposed tile (or at least no worse),
+    /// drag it out of the line of fire. Once/turn via DraggedThisTurn; falls through otherwise.
+    bool TryRescueDrag(Unit u)
+    {
+        if (!CanDrag(u)) return false;
+        Unit best = null; float bestDrop = 0.01f;          // require a real exposure reduction
+        foreach (var a in Players)
+        {
+            if (a == u || a.IsVip) continue;               // the VIP is handled by the escort brain
+            if (a.Hp * 3 > a.MaxHp) continue;              // only genuinely-wounded allies (≤ 1/3 HP)
+            if (!DragTargetOk(u, a)) continue;
+            int lx = a.X + Math.Sign(u.X - a.X), ly = a.Y + Math.Sign(u.Y - a.Y);
+            float drop = TileExposure(a, a.X, a.Y) - TileExposure(a, lx, ly);   // positive = safer landing
+            if (drop > bestDrop) { bestDrop = drop; best = a; }
+        }
+        if (best != null) { IssueDrag(best); return true; }
+        return false;
+    }
 
     bool SmartHack(Unit u)
     {
@@ -2915,6 +3137,9 @@ public class Game
         // escorts: a soldier who has reached the zone hauls the asset (VIP) aboard the instant
         // it's adjacent — the lift-out that ends the long escort walk early (win-critical pull).
         if (EvacZone.Contains((u.X, u.Y)) && CanExtract(u)) { DoExtract(); return true; }
+        // FIELD CRAFT: even outside the zone, a soldier adjacent to the lagging VIP can DRAG it one
+        // step toward evac (accelerates the fragile asset's march). Bounded once/turn; falls through.
+        if (TrySmartDrag(u)) return true;
         // clear the path AHEAD of the VIP and kill threats to it. Take the best shot; if there's
         // nothing to shoot, push toward the evac zone to screen the VIP's route (don't hang back
         // letting the VIP walk into fire alone), then fall through to combat.
@@ -2954,6 +3179,8 @@ public class Game
         // PHASE 2 (freed) — screen the captive's extraction: a soldier in the zone hauls the
         // freed captive aboard the instant it's adjacent (lift-out), else kill threats.
         if (EvacZone.Contains((u.X, u.Y)) && CanExtract(u)) { DoExtract(); return true; }
+        // FIELD CRAFT: pull the freed captive (or a lagging ally) one step toward evac if adjacent.
+        if (!CaptiveLocked && TrySmartDrag(u)) return true;
         if (TakeBestShot(u)) return true;
         if (u.Ammo == 0) { DoReload(); return true; }
         return false;
@@ -2977,6 +3204,19 @@ public class Game
     {
         if (Hvt != null && Hvt.Alive)
         {
+            // GUARDED HVT (W4): while the HVT shrugs off damage, PEEL its bodyguards first — shoot a
+            // living, in-range guard this soldier can hit (bounded: at most 2 guards). If none is
+            // reachable, fall through to grind the HVT directly (reduced-not-zero damage → no stall).
+            if (Hvt.HvtGuarded && u.Ammo > 0)
+            {
+                Unit guard = _hvtGuards
+                    .Where(g => g != null && g.Alive
+                                && Util.ChebyDist(g.X, g.Y, Hvt.X, Hvt.Y) <= Combat.HvtGuardRange
+                                && CanTarget(u, g))
+                    .OrderBy(g => g.Hp)
+                    .FirstOrDefault();
+                if (guard != null) { AutoShootSmart(u, guard); return true; }
+            }
             // shoot the HVT on sight (prep a steady shot first if it sharpens the kill).
             if (u.Ammo > 0 && CanTarget(u, Hvt))
             {
@@ -3024,6 +3264,13 @@ public class Game
 
         // 4 — grenade: catch a cluster, or flush a target our gun can't crack.
         if (u.Grenades > 0 && SmartGrenade(u)) return;
+
+        // 4b — FIELD CRAFT (W1): if a badly-wounded ally is within drag reach, pull it one tile
+        //      toward us (out of the open / back toward the squad). Bounded once/turn (DraggedThisTurn),
+        //      a free repositioning support act; falls through if no good pull exists. (Rarely satisfiable
+        //      under the greedy bot's spacing — soldiers cluster at Chebyshev-1, which is non-draggable —
+        //      so DRAG is primarily a player tool; this keeps the autopilot path covered when it does align.)
+        if (TryRescueDrag(u)) return;
 
         // 5 — no shot available this turn: maneuver toward a covered firing position on the
         //     nearest foe (cover + flank − exposure). If we're already well-placed and a foe
@@ -4114,6 +4361,21 @@ public class Game
             return;
         }
 
+        if (DragMode)
+        {
+            // valid target = an adjacent alive friendly with a legal landing tile (one step toward us).
+            DragTarget = (hovered != null && Selected != null) ? hovered : null;
+            DragValid = Selected != null && DragTarget != null && DragTargetOk(Selected, DragTarget);
+            return;
+        }
+
+        if (VaultMode)
+        {
+            VaultTx = HoverX; VaultTy = HoverY;
+            VaultValid = HoverValid && Selected != null && VaultTargetOk(Selected, HoverX, HoverY);
+            return;
+        }
+
         if (MarkMode)
         {
             MarkTarget = (hovered != null && Selected != null) ? hovered : null;
@@ -4189,6 +4451,8 @@ public class Game
         if (Raylib.IsKeyPressed(KeyboardKey.Five)) DoAbility();
         if (Raylib.IsKeyPressed(KeyboardKey.Six)) ToggleItem();
         if (Raylib.IsKeyPressed(KeyboardKey.Eight)) ToggleShove();
+        if (Raylib.IsKeyPressed(KeyboardKey.Seven)) ToggleDrag();
+        if (Raylib.IsKeyPressed(KeyboardKey.Nine)) ToggleVault();
         if (Raylib.IsKeyPressed(KeyboardKey.H)) DoHack();
         if (Raylib.IsKeyPressed(KeyboardKey.X)) DoExtract();
         if (Raylib.IsKeyPressed(KeyboardKey.R)) DoReload();
@@ -4204,7 +4468,7 @@ public class Game
         if (Raylib.IsKeyPressed(KeyboardKey.Space) && HoverValid) { BoardAct(HoverX, HoverY); return; }
         if (KbCursor && Raylib.GetMouseDelta() != Vector2.Zero) KbCursor = false;  // mouse takes back over
 
-        if (Raylib.IsMouseButtonPressed(MouseButton.Right)) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false; return; }
+        if (Raylib.IsMouseButtonPressed(MouseButton.Right)) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false; DragMode = false; VaultMode = false; return; }
 
         if (Raylib.IsMouseButtonPressed(MouseButton.Left))
         {
@@ -4245,6 +4509,18 @@ public class Game
         {
             if (hovered != null && Selected != null && ShoveTargetOk(Selected, hovered)) IssueShove(Selected, hovered);
             else ShoveMode = false;
+            return;
+        }
+        if (DragMode)
+        {
+            if (hovered != null && Selected != null && DragTargetOk(Selected, hovered)) IssueDrag(hovered);
+            else DragMode = false;
+            return;
+        }
+        if (VaultMode)
+        {
+            if (Selected != null && VaultTargetOk(Selected, hx, hy)) IssueVault(hx, hy);
+            else VaultMode = false;
             return;
         }
         if (MarkMode)
@@ -4384,6 +4660,8 @@ public class Game
             case "grenade": ToggleGrenade(); break;
             case "item": ToggleItem(); break;
             case "shove": ToggleShove(); break;
+            case "drag": ToggleDrag(); break;
+            case "vault": ToggleVault(); break;
             case "ability": DoAbility(); break;
             case "overwatch": DoOverwatch(); break;
             case "hunker": DoHunker(); break;
@@ -4393,7 +4671,7 @@ public class Game
         }
     }
 
-    void SelectUnit(Unit u) { Selected = u; AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false; Audio.Play("select"); }
+    void SelectUnit(Unit u) { Selected = u; AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false; DragMode = false; VaultMode = false; Audio.Play("select"); }
 
     void CycleSelection()
     {
@@ -4405,7 +4683,7 @@ public class Game
         SnapShot = false;
         GrenadeMode = false;
         ItemMode = false;
-        ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false;
+        ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false; DragMode = false; VaultMode = false;
         Audio.Play("select");
     }
 
@@ -4423,7 +4701,7 @@ public class Game
         if (!HasAnyTarget(Selected)) return;
         GrenadeMode = false;
         ItemMode = false;
-        ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false;
+        ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false; DragMode = false; VaultMode = false;
         AimMode = true;
         SnapShot = snap;
         AimTarget = FirstTargetFor(Selected);
@@ -4433,7 +4711,7 @@ public class Game
     {
         if (Selected == null || !Selected.CanAct || Selected.Grenades <= 0) return;
         GrenadeMode = !GrenadeMode;
-        if (GrenadeMode) { AimMode = false; SnapShot = false; ItemMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false; }   // clear the snap variant too (review #3)
+        if (GrenadeMode) { AimMode = false; SnapShot = false; ItemMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false; DragMode = false; VaultMode = false; }   // clear the snap variant too (review #3)
     }
 
     void IssueGrenade(int tx, int ty)
@@ -4451,7 +4729,7 @@ public class Game
     {
         if (Selected == null || !Selected.CanAct || Selected.ItemCharge <= 0 || Selected.Item == ItemKind.None) return;
         ItemMode = !ItemMode;
-        if (ItemMode) { AimMode = false; SnapShot = false; GrenadeMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false; }   // clear the snap variant too (review #3)
+        if (ItemMode) { AimMode = false; SnapShot = false; GrenadeMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false; DragMode = false; VaultMode = false; }   // clear the snap variant too (review #3)
     }
 
     /// Whether a utility item can legally land on (tx,ty): barricade needs an empty
@@ -4518,7 +4796,7 @@ public class Game
     {
         if (!CanShove(Selected)) return;
         ShoveMode = !ShoveMode;
-        if (ShoveMode) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; MarkMode = false; GrappleMode = false; PinMode = false; }
+        if (ShoveMode) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; MarkMode = false; GrappleMode = false; PinMode = false; DragMode = false; VaultMode = false; }
     }
 
     // ---- MARK (sharpshooter VERB): designate a foe; the whole squad shoots it better this round ----
@@ -4538,7 +4816,7 @@ public class Game
     {
         if (Selected == null || Selected.Ability != AbilityKind.Mark || !CanAbility(Selected)) return;
         MarkMode = !MarkMode;
-        if (MarkMode) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; GrappleMode = false; PinMode = false; }
+        if (MarkMode) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; GrappleMode = false; PinMode = false; DragMode = false; VaultMode = false; }
     }
 
     /// Designate `target`: set Unit.Marked so Combat.ComputeOdds gives EVERY squad member +MarkAim/
@@ -4550,6 +4828,8 @@ public class Game
         if (!MarkTargetOk(u, target)) { MarkMode = false; return; }
         if (SquadConcealed) BreakConcealment(u);   // calling out a target gives the squad away
         target.Marked = true;
+        // HEADHUNTER fork: this marker ALSO paints squad-wide +crit (only a Headhunter's mark does).
+        target.MarkedByHeadhunter = u.HasSpec(Spec.Headhunter);
         _markedBy = u;                              // remember who marked, to clear it on their next turn
         u.AbilityCd = Unit.AbilityCooldownFor(u.Ability); u.ActionsLeft = Math.Max(0, u.ActionsLeft - 1);
         if (!target.Active) ActivatePod(target.PodId);
@@ -4564,7 +4844,7 @@ public class Game
     /// lasts through the enemy turn — the focus-fire window — then expires).
     void ClearMarks()
     {
-        foreach (var e in Enemies) e.Marked = false;
+        foreach (var e in Enemies) { e.Marked = false; e.MarkedByHeadhunter = false; }
         _markedBy = null;
     }
 
@@ -4580,14 +4860,15 @@ public class Game
         if (target.IsVip && CaptiveLocked) return false;
         int dx = target.X - u.X, dy = target.Y - u.Y;
         if (dx == 0 && dy == 0) return false;
-        return Math.Abs(dx) <= GrappleReach && Math.Abs(dy) <= GrappleReach;
+        int reach = GrappleReachFor(u);   // JUGGERNAUT fork: adjacent-only (1); else GrappleReach (2)
+        return Math.Abs(dx) <= reach && Math.Abs(dy) <= reach;
     }
 
     void ToggleGrapple()
     {
         if (Selected == null || Selected.Ability != AbilityKind.Grapple || !CanAbility(Selected)) return;
         GrappleMode = !GrappleMode;
-        if (GrappleMode) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; MarkMode = false; PinMode = false; }
+        if (GrappleMode) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; MarkMode = false; PinMode = false; DragMode = false; VaultMode = false; }
     }
 
     /// Yank `target` ONE tile TOWARD the assault (pull direction = sign(u - target)), reusing
@@ -4604,6 +4885,15 @@ public class Game
         if (!target.Active) ActivatePod(target.PodId);
         Fx.PopText(target.Pos + new Vector2(0, -34), "GRAPPLED", Pal.Friend, 18f);
         Enqueue(new ShoveAnim(u, target, dx, dy), Team.Player);
+        // BREACHER fork: the grapple also STAGGERS — the yanked foe loses overwatch + hunker and takes
+        // chip damage (the ShoveAnim already clears OnOverwatch/Hunkered on a successful slide, but
+        // Breacher guarantees it even on a blocked grapple + adds the chip damage). Inert on Spec.None.
+        if (u.HasSpec(Spec.Breacher) && target.Alive)
+        {
+            target.OnOverwatch = false; target.Hunkered = false;
+            Fx.PopText(target.Pos + new Vector2(0, -18), "STAGGER", Pal.Foe, 16f);
+            EnvDamage(target, Combat.ShoveCollisionDamage, "STAGGER", Pal.Foe);
+        }
         GrappleMode = false; ShoveMode = false; MarkMode = false;
     }
 
@@ -4620,7 +4910,116 @@ public class Game
         // shoving a dormant pod is aggression -> it wakes (mirrors a shot revealing a pod).
         if (!target.Active) ActivatePod(target.PodId);
         Enqueue(new ShoveAnim(u, target, dx, dy), Team.Player);
-        ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false;
+        ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false; DragMode = false; VaultMode = false;
+    }
+
+    // ---- DRAG (FIELD CRAFT W1, universal): pull an adjacent ALLY one tile toward you ----
+    /// Can the selected soldier DRAG right now? Needs an action, no drag spent this turn, and at
+    /// least one adjacent (Chebyshev==1) alive friendly with a legal landing tile (one step toward us).
+    public bool CanDrag(Unit u)
+    {
+        if (u == null || u.Team != Team.Player || !u.CanAct || u.ActionsLeft < 1 || u.DraggedThisTurn) return false;
+        foreach (var a in Players)
+            if (DragTargetOk(u, a)) return true;
+        return false;
+    }
+
+    /// Is `ally` a legal DRAG target for `u`? An alive friendly (incl. VIP/freed captive) within
+    /// Chebyshev DragReach (1..2), not self, where the tile one step CLOSER to the dragger
+    /// (dir = sign(u - ally)) is in-bounds floor + unoccupied + NOT the dragger's own tile. A
+    /// Chebyshev-1 ally fails (its only toward-tile is the dragger) — by design, you can't pull
+    /// someone already beside you; a Chebyshev-2 ally is pulled to the tile 1 away (legal + useful).
+    bool DragTargetOk(Unit u, Unit ally)
+    {
+        if (u == null || ally == null || !u.CanAct || u.ActionsLeft < 1 || u.DraggedThisTurn) return false;
+        if (ally == u || !ally.Alive || ally.Team != Team.Player) return false;
+        if (ally.IsVip && CaptiveLocked) return false;          // caged captive is immovable until freed (mirrors Mark/Grapple/Pin/Extract)
+        int dx = ally.X - u.X, dy = ally.Y - u.Y;
+        if (dx == 0 && dy == 0) return false;
+        if (Math.Abs(dx) > DragReach || Math.Abs(dy) > DragReach) return false;   // within drag reach (Chebyshev<=2)
+        int lx = ally.X + Math.Sign(u.X - ally.X), ly = ally.Y + Math.Sign(u.Y - ally.Y);   // one step toward the dragger
+        if (lx == u.X && ly == u.Y) return false;                        // never onto the dragger's own tile (a Chebyshev-1 ally hits this)
+        return Grid.IsFloor(lx, ly) && !IsOccupiedByOther(lx, ly, ally);
+    }
+
+    void ToggleDrag()
+    {
+        if (!CanDrag(Selected)) return;
+        DragMode = !DragMode;
+        if (DragMode) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false; VaultMode = false; }
+    }
+
+    /// Pull `ally` ONE tile toward the dragger (move dir = sign(u - ally)), reusing ShoveAnim with the
+    /// friendly target — the slide routes the dragged unit's arrival through OnUnitEnteredTile
+    /// (overwatch/bleed/fire/concealment-reveal apply like any move). Costs 1 action; does NOT end the
+    /// turn; once/soldier/turn (DraggedThisTurn). Moving an ally is not aggression -> does NOT break
+    /// concealment, but if the ally lands within RevealRange of an active foe the normal reveal fires.
+    void IssueDrag(Unit ally)
+    {
+        if (!DragTargetOk(Selected, ally)) { DragMode = false; return; }
+        var u = Selected;
+        int dx = Math.Sign(u.X - ally.X), dy = Math.Sign(u.Y - ally.Y);   // direction the ally MOVES (toward us)
+        u.ActionsLeft = Math.Max(0, u.ActionsLeft - 1);   // 1 action; never ends the turn
+        u.DraggedThisTurn = true;                         // one drag per soldier per turn (anti-loop)
+        Fx.PopText(ally.Pos + new Vector2(0, -32), "DRAG", Pal.Friend, 17f);
+        Fx.Burst(ally.Pos, Pal.Friend, 8, 100f, 0.35f, 2.5f);
+        Audio.Play("move");
+        Enqueue(new ShoveAnim(u, ally, dx, dy), Team.Player);
+        DragMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false; VaultMode = false;
+    }
+
+    // ---- VAULT (FIELD CRAFT W1, universal): leap an adjacent cover tile to the floor on its far side ----
+    /// Can the selected soldier VAULT right now? Needs an action, no vault spent this turn, and at least
+    /// one legal vault landing tile (a 2-step straight hop over a cover tile to empty floor).
+    public bool CanVault(Unit u)
+    {
+        if (u == null || u.Team != Team.Player || !u.CanAct || u.ActionsLeft < 1 || u.VaultedThisTurn) return false;
+        for (int sx = -1; sx <= 1; sx++)
+            for (int sy = -1; sy <= 1; sy++)
+            {
+                if (sx == 0 && sy == 0) continue;
+                if (VaultTargetOk(u, u.X + sx * 2, u.Y + sy * 2)) return true;
+            }
+        return false;
+    }
+
+    /// Is (tx,ty) a legal VAULT landing for `u`? Exactly 2 tiles away in a straight line (orthogonal or
+    /// diagonal), the single tile between is a COVER tile (Low/High — not floor/barrel), and the landing
+    /// is in-bounds, floor, and unoccupied.
+    bool VaultTargetOk(Unit u, int tx, int ty)
+    {
+        if (u == null || !u.CanAct || u.ActionsLeft < 1 || u.VaultedThisTurn) return false;
+        int dx = tx - u.X, dy = ty - u.Y;
+        // must be a straight 2-tile hop (ortho: (±2,0)/(0,±2); diag: (±2,±2))
+        bool straight = (Math.Abs(dx) == 2 && dy == 0) || (dx == 0 && Math.Abs(dy) == 2) || (Math.Abs(dx) == 2 && Math.Abs(dy) == 2);
+        if (!straight) return false;
+        int mx = u.X + Math.Sign(dx), my = u.Y + Math.Sign(dy);          // the tile we vault over
+        if (!Grid.IsCover(mx, my)) return false;                         // must clear an actual cover tile
+        return Grid.IsFloor(tx, ty) && !IsOccupiedByOther(tx, ty, u);
+    }
+
+    void ToggleVault()
+    {
+        if (!CanVault(Selected)) return;
+        VaultMode = !VaultMode;
+        if (VaultMode) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false; DragMode = false; }
+    }
+
+    /// Hop the selected soldier to the landing tile (a single MoveStepAnim so arrival routes through
+    /// OnUnitEnteredTile — overwatch/concealment(RevealRange)/bleed/fire all apply). Costs 1 action;
+    /// does NOT end the turn; once/soldier/turn (VaultedThisTurn). A vault is a positional move, not a
+    /// shot, so it doesn't break concealment unless it lands within RevealRange of an active foe.
+    void IssueVault(int tx, int ty)
+    {
+        if (!VaultTargetOk(Selected, tx, ty)) { VaultMode = false; return; }
+        var u = Selected;
+        u.ActionsLeft = Math.Max(0, u.ActionsLeft - 1);   // 1 action; never ends the turn
+        u.VaultedThisTurn = true;                         // one vault per soldier per turn (anti-loop)
+        Fx.PopText(u.Pos + new Vector2(0, -32), "VAULT", Pal.Good, 17f);
+        Fx.Burst(u.Pos, Pal.Good, 8, 110f, 0.35f, 2.5f);
+        Audio.Play("move");
+        Enqueue(new MoveStepAnim(u, tx, ty), Team.Player);
+        VaultMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false; DragMode = false;
     }
 
     void IssueMove(int tx, int ty)
@@ -4630,8 +5029,12 @@ public class Game
         if (c <= 0) return;
         int need = c <= Selected.MoveBudget ? 1 : 2;
         bool blitz = Selected.Blitz;
-        bool slip = Selected.Slipstreaming;                 // ranger SLIPSTREAM: this move is free + silent
-        int cost = slip ? 0 : (blitz ? Math.Max(0, need - 1) : need);   // Blitz: one action cheaper
+        bool slip = Selected.Slipstreaming;                 // ranger SLIPSTREAM: this move is silent (no overwatch)
+        // SLIPSTREAM action cost: the standard reposition is a DISCOUNTED one-action move (silent, never
+        // a 2-action dash). PATHFINDER (Ranger fork) makes it TRULY FREE (0 actions) — that strictly-cheaper
+        // action-economy gain is the fork's load-bearing differentiator (not just a faster cooldown).
+        int slipCost = Selected.HasSpec(Spec.Pathfinder) ? 0 : 1;
+        int cost = slip ? slipCost : (blitz ? Math.Max(0, need - 1) : need);   // Blitz: one action cheaper
         if (cost > Selected.ActionsLeft) return;
         var path = Grid.ReconstructPath(_cameFrom, Selected.X, Selected.Y, tx, ty);
         if (path.Count == 0) return;
@@ -4847,12 +5250,16 @@ public class Game
     Unit MostWoundedAdjacentAlly(Unit medic)
     {
         if (medic == null) return null;
+        // COMBAT MEDIC fork: longer reach (Cheby<=2) AND may patch SELF; the default PATCH is Cheby<=1
+        // and skips self. (No new targeting mode — auto-target the most-wounded eligible ally; bounded Cd 3.)
+        int reach = medic.HasSpec(Spec.CombatMedic) ? 2 : 1;
+        bool allowSelf = medic.HasSpec(Spec.CombatMedic);
         Unit best = null;
         float worst = 1f;
         foreach (var p in AlivePlayers())
         {
-            if (p == medic || p.IsVip || p.Hp >= p.MaxHp || p.MaxHp <= 0) continue;
-            if (Util.ChebyDist(medic.X, medic.Y, p.X, p.Y) > 1) continue;
+            if ((p == medic && !allowSelf) || p.IsVip || p.Hp >= p.MaxHp || p.MaxHp <= 0) continue;
+            if (Util.ChebyDist(medic.X, medic.Y, p.X, p.Y) > reach) continue;
             float frac = (float)p.Hp / p.MaxHp;
             if (best == null || frac < worst) { best = p; worst = frac; }
         }
@@ -4939,7 +5346,7 @@ public class Game
     {
         if (Selected == null || Selected.Ability != AbilityKind.Pin || !CanAbility(Selected)) return;
         PinMode = !PinMode;
-        if (PinMode) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; }
+        if (PinMode) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; DragMode = false; VaultMode = false; }
     }
 
     /// Lay down SUPPRESSING FIRE on `target`: pin it AND every enemy Chebyshev-adjacent to it for PinTurns
@@ -4951,11 +5358,14 @@ public class Game
         if (!PinTargetOk(u, target)) { PinMode = false; return; }
         if (SquadConcealed) BreakConcealment();   // a suppressing burst gives the squad away (no actor -> no ambush flag)
         u.AbilityCd = Unit.AbilityCooldownFor(u.Ability); u.Ammo--; u.ActionsLeft = 0; u.OnOverwatch = true;
+        // SPEC FORK footprint: AREA DENIAL widens the pin to a 5x5 (Cheby<=2); ANCHOR (Spec.Bulwark)
+        // shrinks it to the single target only (radius 0 — paired with its +2 armor); default 3x3 (1).
+        int pinRadius = u.HasSpec(Spec.AreaDenial) ? 2 : (u.HasSpec(Spec.Bulwark) ? 0 : 1);
         int pinned = 0;
         foreach (var e in Enemies)
         {
             if (!e.Alive || e.Team != Team.Enemy) continue;
-            if (Util.ChebyDist(target.X, target.Y, e.X, e.Y) > 1) continue;
+            if (Util.ChebyDist(target.X, target.Y, e.X, e.Y) > pinRadius) continue;
             if (e.IsVip && CaptiveLocked) continue;
             e.Pinned = PinTurns;
             if (!e.Active) ActivatePod(e.PodId);   // suppressing a dormant foe wakes its pod
@@ -4992,7 +5402,14 @@ public class Game
                 break;
             case AbilityKind.Slipstream:
                 // RANGER SLIPSTREAM: arm a free, overwatch-immune move (consumed by the next IssueMove).
-                u.Slipstreaming = true; u.AbilityCd = Unit.AbilityCooldownFor(u.Ability);
+                u.Slipstreaming = true;
+                // PATHFINDER fork: faster cooldown (3->2) AND a truly-free move (IssueMove zeroes the
+                // slip action cost for Pathfinder — the standard slip still spends 1). Only Pathfinder
+                // touches AbilityCd here (the call site), so AbilityCooldownFor / CDTEST stay green (R6).
+                u.AbilityCd = u.HasSpec(Spec.Pathfinder) ? 2 : Unit.AbilityCooldownFor(u.Ability);
+                // PHANTOM fork: the next shot strikes from ambush (reuses the built concealment-ambush
+                // path; cleared in BeginTurn, consumed by the next shot).
+                if (u.HasSpec(Spec.Phantom)) u.FiredFromConcealment = true;
                 Fx.PopText(at, "SLIPSTREAM", Pal.Accent, 18f);
                 Fx.Burst(u.Pos, Pal.Accent, 12, 150f, 0.4f, 3f);
                 Audio.Play("reload");
@@ -5025,10 +5442,18 @@ public class Game
             case AbilityKind.Heal:
                 var ally = MostWoundedAdjacentAlly(u);
                 if (ally == null) return;
-                int healed = Math.Min(Unit.PatchHeal, ally.MaxHp - ally.Hp);
+                // COMBAT MEDIC fork heals 1 less (PatchHeal-1) — the trade for self-target + reach 2.
+                int baseHeal = u.HasSpec(Spec.CombatMedic) ? Unit.PatchHeal - 1 : Unit.PatchHeal;
+                int healed = Math.Min(baseHeal, ally.MaxHp - ally.Hp);
                 if (healed <= 0) return;
                 ally.Hp += healed;
                 u.AbilityCd = Unit.AbilityCooldownFor(u.Ability); u.ActionsLeft -= 1;     // patching costs one action (like STEADY)
+                // FIELD SURGEON fork: PATCH also clears the patient's wound + all status effects (triage).
+                if (u.HasSpec(Spec.FieldSurgeon))
+                {
+                    ally.Wound = 0; ally.Statuses.Clear();
+                    Fx.PopText(ally.Pos + new Vector2(0, -50), "TRIAGE", Pal.Good, 16f);
+                }
                 Fx.PopText(ally.Pos + new Vector2(0, -34), $"+{healed}", Pal.Good, 20f);
                 Fx.Burst(ally.Pos, Pal.Good, 12, 120f, 0.45f, 3f);
                 Fx.PopText(at, "PATCH", Pal.Good, 16f);
@@ -5040,7 +5465,7 @@ public class Game
         SnapShot = false;
         GrenadeMode = false;
         ItemMode = false;
-        ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false;
+        ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false; DragMode = false; VaultMode = false;
     }
 
     void RequestEndTurn()
@@ -5151,7 +5576,7 @@ public class Game
         SnapShot = false;
         GrenadeMode = false;
         ItemMode = false;
-        ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false;
+        ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false; DragMode = false; VaultMode = false;
         Selected = null;
         MoveCost = null;
         Phase = Phase.EnemyTurn;
@@ -5160,6 +5585,7 @@ public class Game
         UpdatePressure();                                        // anti-turtle clock: escalate on camp-friendly objectives
         ResolveSuspicion();                                      // 4.3: suspicious pods confirm or lose contact
         FaceShields();                                           // AEGIS turns its barrier toward the squad
+        UpdateHvtGuard();                                        // DECAPITATE: refresh the HVT's guarded state at the boundary
         foreach (var e in Enemies) if (e.Alive) { e.BeginTurn(); TickStatuses(e); }
         _aiUnits = AliveEnemies().Where(e => e.Active).ToList();  // dormant/suspicious pods don't act
         PlanEnemySquad();                                        // shared focus + overwatch map (advisory)
@@ -5182,6 +5608,7 @@ public class Game
         HackedThisTurn = false;           // the terminal accepts one breach cycle per turn (hold)
         ClearMarks();                     // a sharpshooter's MARK lasts until the marker's next turn
         ClearPins();                      // a gunner's SUPPRESSING FIRE pin lasts through one enemy turn, then lifts
+        UpdateHvtGuard();                 // DECAPITATE: refresh the HVT's guarded state at the boundary (a guard may have moved)
         if (AutoPlay) AutoStallCheck();
         foreach (var p in Players) if (p.Alive) { p.BeginTurn(); TickStatuses(p); }
         foreach (var e in Enemies) if (e.Alive) { e.ReactedThisTurn = false; e.Suppress = 0; } // OW resets; suppression expires
@@ -5190,7 +5617,7 @@ public class Game
         SnapShot = false;
         GrenadeMode = false;
         ItemMode = false;
-        ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false;
+        ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false; DragMode = false; VaultMode = false;
         ShowBanner("PLAYER TURN", false);
     }
 
@@ -5553,6 +5980,31 @@ public class Game
             OpenTagEditor(_run.PendingPerks[0].Unit);
         else if (Raylib.CheckCollisionPointRec(m, Hud.PerkBtnA)) ChoosePerk(0);
         else if (Raylib.CheckCollisionPointRec(m, Hud.PerkBtnB)) ChoosePerk(1);
+    }
+
+    /// CLASS SPECIALIZATION FORK pick (W2): apply the chosen fork to the soldier + record telemetry.
+    /// Mirrors ChoosePerk. In balance/smart mode the pick is randomized (Util.Roll) so win-rate-by-spec
+    /// is measurable; the AutoPlay smoke test stays deterministic at 0 so it never stalls.
+    void ChooseSpec(int which)
+    {
+        if (_run.PendingSpecs.Count == 0) return;
+        var off = _run.PendingSpecs[0];
+        // balance flywheel: randomize so both forks of each pair are exercised; smoke-test stays at `which`.
+        if (SmartPlay && (which == 0 || which == 1)) which = Util.Roll(50f) ? 0 : 1;
+        Spec s = which == 0 ? off.A : off.B;
+        off.Unit.Spec = s;
+        Stats.RecordSpec(SpecDef.Code(s));   // balance telemetry (no-op unless Stats.Enabled)
+        _run.Report.Add($"{off.Unit.Name} specializes -> {SpecDef.Name(s)}");
+        _run.PendingSpecs.RemoveAt(0);
+        Audio.Play("select");
+    }
+
+    void HandleSpecClick()
+    {
+        if (!Raylib.IsMouseButtonPressed(MouseButton.Left)) return;
+        var m = Raylib.GetMousePosition();
+        if (Raylib.CheckCollisionPointRec(m, Hud.SpecBtnA)) ChooseSpec(0);
+        else if (Raylib.CheckCollisionPointRec(m, Hud.SpecBtnB)) ChooseSpec(1);
     }
 
     // ---------------- custom tag editor ----------------
@@ -6585,6 +7037,7 @@ public class Game
         _run.JumpTo(3);
         _run.DebriefSurvivors();
         _run.PendingPerks.Clear();
+        _run.PendingSpecs.Clear();
         _shopDone = true;
         // synthesize an event node so the screen shows even if this seed placed none on the route
         var node = _run.CurrentNode ?? (_run.Map.Count > 0 ? _run.Map[0] : null);

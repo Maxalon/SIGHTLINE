@@ -1313,6 +1313,27 @@ public static class Renderer
             var hc = Pal.VipGold;
             Raylib.DrawRing(foot + new Vector2(0, 17), 20f, 24f, 0, 360, 48, Raylib.Fade(hc, 0.85f));
             Raylib.DrawRing(foot + new Vector2(0, 17), 26f, 28f, 0, 360, 48, Raylib.Fade(hc, 0.30f + 0.40f * pulse));
+
+            // GUARDED telegraph (W4): while the HVT is protected, ring it in a pulsing SHIELD aura
+            // (danger colour) + draw a faint link line to each living in-range guard so the player can
+            // read "kill these to expose it." No gotcha — the bodyguard relationship is fully visible.
+            if (u.HvtGuarded)
+            {
+                float gp = 0.5f + 0.5f * MathF.Sin((float)Raylib.GetTime() * 5.5f);
+                // a domed shield arc above the HVT (reads as a protective bubble)
+                Raylib.DrawRing(p, 22f, 26f, 200, 340, 28, Raylib.Fade(Pal.Foe, 0.35f + 0.45f * gp));
+                Raylib.DrawRing(p, 26f, 28.5f, 200, 340, 28, Raylib.Fade(Pal.Foe, 0.18f + 0.18f * gp));
+                foreach (var gd in g.Enemies)
+                {
+                    if (gd == null || !gd.Alive || !gd.IsHvtGuard) continue;
+                    if (Util.ChebyDist(gd.X, gd.Y, u.X, u.Y) > Combat.HvtGuardRange) continue;
+                    Raylib.DrawLineEx(p, gd.Pos, 1.5f, Raylib.Fade(Pal.Foe, 0.30f + 0.25f * gp));   // faint guard link
+                    // small downward chevron marker over the guard: "kill me to peel the screen"
+                    Vector2 mk = gd.Pos + new Vector2(0, -40f);
+                    Raylib.DrawLineEx(mk + new Vector2(-5f, -4f), mk, 2f, Pal.Foe);
+                    Raylib.DrawLineEx(mk + new Vector2(5f, -4f), mk, 2f, Pal.Foe);
+                }
+            }
         }
 
         // body — apply figAlpha to the figure shape (bodyScale gives a brief flinch pop).
@@ -1794,7 +1815,7 @@ public static class Renderer
         float t = (float)Raylib.GetTime();
         foreach (var e in g.Enemies)
         {
-            if (!e.Alive || Util.ChebyDist(u.X, u.Y, e.X, e.Y) > Game.GrappleReach) continue;
+            if (!e.Alive || Util.ChebyDist(u.X, u.Y, e.X, e.Y) > g.GrappleReachFor(u)) continue;   // JUGGERNAUT: reach 1
             float pulse = 20f + MathF.Sin(t * 6f) * 2.5f;
             Raylib.DrawCircleLines((int)e.Pos.X, (int)e.Pos.Y, pulse, Raylib.Fade(Pal.Friend, 0.7f));
         }

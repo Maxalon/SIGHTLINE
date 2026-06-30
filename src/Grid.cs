@@ -167,7 +167,7 @@ public class Grid
         int guard = 0;
         while (true)
         {
-            if (guard++ > 1000) break;
+            if (guard++ > 1000) return false;  // fail closed: deny sight rather than grant a free sightline on runaway
             if (cx == x1 && cy == y1) return true;
             int e2 = 2 * err;
             if (e2 > -dy) { err -= dy; cx += sx; }
@@ -177,7 +177,6 @@ public class Grid
             bool blocked = overHighCover ? IsSmoke(cx, cy) : BlocksSight(cx, cy);
             if (blocked) return false;
         }
-        return true;
     }
 
     // ---------- Cover ----------

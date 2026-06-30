@@ -191,10 +191,17 @@ public class ShotAnim : Anim
         var dir = Vector2.Normalize(D.Pos - A.Pos + new Vector2(0.001f, 0f));
         Color muzzleCol = A.Team == Team.Player ? Pal.Friend : Pal.Foe;
         g.Fx.Muzzle(A.Pos, dir, Pal.Accent);
+        // a transient additive muzzle LIGHT at the barrel — flares the moment of fire so the
+        // shot reads as a burst of light (the bloom bright-pass haloes it). Crit kicks brighter.
+        Vector2 mouth = A.Pos + dir * 16f;
+        g.Fx.Flash(mouth, Pal.Accent, (Res.Hit && Res.Crit) ? 20f : 15f, 0.10f, 0.5f);
         // Graze shakes less than a solid hit.
         g.Fx.AddShake(Res.Hit ? (Res.Graze ? 2f : (Res.Crit ? 9f : 5f)) : 2.5f);
-        Audio.PlayWeapon(A.Weapon.Kind);   // per-weapon firing voice (rifle/shotgun/sniper/lmg/smg)
-        Audio.Play(Res.Hit ? (Res.Crit ? "crit" : "hit") : "miss");
+        // per-shot pitch variation + stereo pan so repeated fire doesn't sound identical: pan
+        // by the firer's screen-x, pitch by a small deterministic jitter (handled in Audio).
+        float panX = Util.Clamp(A.Pos.X / (float)Cfg.ScreenW, 0f, 1f);
+        Audio.PlayWeapon(A.Weapon.Kind, 0.06f, panX);   // per-weapon firing voice (rifle/shotgun/sniper/lmg/smg)
+        Audio.Play(Res.Hit ? (Res.Crit ? "crit" : "hit") : "miss", 0.05f, Util.Clamp(D.Pos.X / (float)Cfg.ScreenW, 0f, 1f));
         // balance telemetry (no-op unless Stats.Enabled): one record per resolved shot, here
         // where the ShotResult is final. dmg counts only when the round connects.
         Stats.RecordShot(A.Cls, (int)A.Team, Res.Hit, Res.Crit, Res.Graze, Res.Hit ? Res.Damage : 0);
@@ -223,6 +230,7 @@ public class ShotAnim : Anim
                 g.Fx.Burst(D.Pos, grazeTint, 5, 110f, 0.35f, 2.5f, true);
                 // small impact frame + a thin directional spray + a short faint smear
                 g.Fx.Impact(_impact, Pal.RGBA(220, 226, 236), 9f, 0.55f, 0.10f);
+                g.Fx.Flash(_impact, Pal.RGBA(210, 220, 235), 9f, 0.09f, 0.32f);   // a faint impact spark light
                 g.Fx.DirSparks(_impact, dir, grazeTint, 5, 150f, 0.55f, 2.2f);
                 g.Fx.ImpactStreak(_impact, dir, Pal.RGBA(210, 218, 230), 16f, 2.2f, 0.5f, 0.08f);
                 g.Fx.PopText(D.Pos + new Vector2(0, -26), "GRAZE", Pal.RGBA(190, 200, 215), 20f);
@@ -252,6 +260,7 @@ public class ShotAnim : Anim
                 if (Res.Crit)
                 {
                     g.Fx.Impact(_impact, Pal.Accent, 26f, 0.95f, 0.16f);
+                    g.Fx.Flash(_impact, Pal.Accent, 30f, 0.14f, 0.6f);   // bright crit impact light
                     g.Fx.DirSparks(_impact, dir, Pal.Accent, 16, 360f, 0.5f, 3.4f);
                     g.Fx.DirSparks(_impact, dir, Pal.RGBA(255, 250, 240), 6, 280f, 0.35f, 2.6f);
                     g.Fx.ImpactStreak(_impact, dir, Pal.Accent, 40f, 4.2f, 0.9f, 0.12f);
@@ -260,6 +269,7 @@ public class ShotAnim : Anim
                 else
                 {
                     g.Fx.Impact(_impact, Pal.RGBA(255, 240, 235), 16f, 0.85f, 0.12f);
+                    g.Fx.Flash(_impact, Pal.RGBA(255, 238, 226), 17f, 0.11f, 0.45f);   // hit impact light
                     g.Fx.DirSparks(_impact, dir, blood, 9, 230f, 0.65f, 3f);
                     g.Fx.ImpactStreak(_impact, dir, Pal.RGBA(255, 236, 230), 26f, 3f, 0.75f, 0.10f);
                 }
@@ -272,6 +282,7 @@ public class ShotAnim : Anim
                 {
                     Color killCol = D.Team == Team.Player ? Pal.Friend : Pal.Foe;
                     g.Fx.Impact(_impact, killCol, Res.Crit ? 34f : 28f, 1f, 0.18f);
+                    g.Fx.Flash(_impact, killCol, Res.Crit ? 40f : 34f, 0.18f, 0.62f);   // decisive kill light burst
                     g.Fx.DirSparks(_impact, dir, Pal.RGBA(255, 250, 240), 10, 360f, 0.45f, 3f);
                     g.Fx.ImpactStreak(_impact, dir, killCol, 48f, 5f, 0.95f, 0.13f);
                     g.AddBloom(0.10f);                            // stacks with the hit bloom above
@@ -307,6 +318,15 @@ public class ShotAnim : Anim
             // a faint ricochet spit where the round strikes air/terrain (small — it whiffed)
             g.Fx.DirSparks(_impact, dir, Pal.RGBA(170, 180, 195), 4, 150f, 0.9f, 2f);
             g.Fx.PopText(D.Pos + new Vector2(0, -26), "MISS", Pal.TxtDim, 24f);
+        }
+
+        // tracer WAKE: drop a few dim, fading glow dots along the beam so the round leaves a brief
+        // vapour trail rather than a clean instant beam (deterministic; skipped under AutoPlay).
+        if (!_windless)
+        {
+            Vector2 start = A.Pos + dir * 16f;
+            Color wakeCol = Res.Hit ? (Res.Graze ? Pal.RGBA(150, 160, 180) : Pal.Accent) : Pal.RGBA(160, 170, 188);
+            g.Fx.TracerWake(start, _impact, Raylib.Fade(wakeCol, 0.6f), 3, 2.3f, 0.13f);
         }
 
         // combat-log ledger (always-on readability): one terse line per shot with the rolled odds
@@ -436,8 +456,11 @@ public class GrenadeAnim : Anim
 
     void Explode(Game g)
     {
-        Audio.Play("crit");
-        Audio.Play("death");
+        float pan = Util.Clamp(_to.X / (float)Cfg.ScreenW, 0f, 1f);
+        Audio.Play("crit", 0.05f, pan);
+        Audio.Play("death", 0.04f, pan);
+        // a brief additive flash of LIGHT at the detonation core (the bloom haloes it)
+        g.Fx.Flash(_to, Pal.RGBA(255, 226, 180), (Radius + 0.5f) * Cfg.Tile * 0.5f, 0.16f, 0.6f);
         g.Fx.AddShake(12f);
         g.AddHitStop(0.07f);
         g.AddZoomPunch(0.06f);
@@ -523,8 +546,10 @@ public class GrenadeAnim : Anim
         if (_t < Flight)
         {
             float k = _t / Flight;
-            Vector2 p = Vector2.Lerp(_from, _to, k);
-            p.Y -= MathF.Sin(k * MathF.PI) * 70f;          // parabolic arc
+            Vector2 p = ArcAt(k);
+            // fading arc TRAIL: sample a few earlier points along the parabola so the thrown
+            // ordnance reads as motion (deterministic — pure function of _t). Drawn behind the head.
+            DrawArcTrail(k, Pal.Accent);
             Raylib.DrawCircleV(p + new Vector2(2, 3), 5f, Raylib.Fade(Pal.RGBA(0, 0, 0), 0.4f));
             Raylib.DrawCircleV(p, 5f, Pal.Accent);
             Raylib.DrawCircleV(p, 2.5f, Pal.RGBA(255, 240, 200));
@@ -535,6 +560,31 @@ public class GrenadeAnim : Anim
             float rad = Util.Lerp(8f, (Radius + 0.5f) * Cfg.Tile, Util.EaseOutQuad(k));
             Raylib.DrawCircleV(_to, rad, Raylib.Fade(Pal.Accent, (1f - k) * 0.4f));
             Raylib.DrawRing(_to, rad - 4, rad, 0, 360, 40, Raylib.Fade(Pal.RGBA(255, 230, 190), 1f - k));
+        }
+    }
+
+    // position on the parabolic arc at normalised flight progress k in [0,1].
+    Vector2 ArcAt(float k)
+    {
+        Vector2 p = Vector2.Lerp(_from, _to, k);
+        p.Y -= MathF.Sin(k * MathF.PI) * 70f;
+        return p;
+    }
+
+    // a short dimming poly-line of the last ~6 arc samples behind the grenade head.
+    void DrawArcTrail(float k, Color col)
+    {
+        const int N = 6;
+        Vector2 prev = ArcAt(k);
+        for (int i = 1; i <= N; i++)
+        {
+            float kk = k - i * 0.018f;
+            if (kk < 0f) break;
+            Vector2 cur = ArcAt(kk);
+            float a = 0.34f * (1f - i / (float)(N + 1));
+            Raylib.DrawLineEx(prev, cur, MathF.Max(1f, 3.2f * (1f - i / (float)(N + 2))),
+                              Raylib.Fade(col, a));
+            prev = cur;
         }
     }
 }
@@ -577,8 +627,8 @@ public abstract class LobAnim : Anim
         if (_t < Flight)
         {
             float k = _t / Flight;
-            Vector2 p = Vector2.Lerp(_from, _to, k);
-            p.Y -= MathF.Sin(k * MathF.PI) * 64f;          // parabolic arc
+            Vector2 p = ArcAt(k);
+            DrawArcTrail(k, Tint);   // fading motion trail behind the thrown item (deterministic)
             Raylib.DrawCircleV(p + new Vector2(2, 3), 5f, Raylib.Fade(Pal.RGBA(0, 0, 0), 0.4f));
             Raylib.DrawCircleV(p, 5f, Tint);
             Raylib.DrawCircleV(p, 2.5f, Pal.RGBA(245, 245, 245));
@@ -588,6 +638,29 @@ public abstract class LobAnim : Anim
             float k = (_t - Flight) / (Total - Flight);
             float rad = Util.Lerp(8f, (BlastRadius + 0.5f) * Cfg.Tile, Util.EaseOutQuad(k));
             Raylib.DrawCircleV(_to, rad, Raylib.Fade(Tint, (1f - k) * 0.4f));
+        }
+    }
+
+    Vector2 ArcAt(float k)
+    {
+        Vector2 p = Vector2.Lerp(_from, _to, k);
+        p.Y -= MathF.Sin(k * MathF.PI) * 64f;
+        return p;
+    }
+
+    void DrawArcTrail(float k, Color col)
+    {
+        const int N = 6;
+        Vector2 prev = ArcAt(k);
+        for (int i = 1; i <= N; i++)
+        {
+            float kk = k - i * 0.018f;
+            if (kk < 0f) break;
+            Vector2 cur = ArcAt(kk);
+            float a = 0.30f * (1f - i / (float)(N + 1));
+            Raylib.DrawLineEx(prev, cur, MathF.Max(1f, 3f * (1f - i / (float)(N + 2))),
+                              Raylib.Fade(col, a));
+            prev = cur;
         }
     }
 }

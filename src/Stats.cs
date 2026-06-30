@@ -72,6 +72,7 @@ public static class Stats
         // Lets the report split win-rate by policy and surface the optimal-vs-sloppy GAP.
         public string Policy = "greedy";
         public readonly List<string> PerksPicked = new();
+        public readonly List<string> SpecsPicked = new();  // W2: class-specialization fork picks
         public readonly List<string> Purchases = new();   // shop items bought (incl. weapon mods)
         public readonly List<string> BoonsPicked = new();  // run-scoped doctrine/boon picks
         public readonly List<MissionRec> Missions = new();
@@ -146,6 +147,13 @@ public static class Stats
     {
         if (!Enabled || _run == null || string.IsNullOrEmpty(code)) return;
         _run.PerksPicked.Add(code);
+    }
+
+    // A class-specialization fork pick (W2). Lets the flywheel measure win-rate by spec + balance forks.
+    public static void RecordSpec(string code)
+    {
+        if (!Enabled || _run == null || string.IsNullOrEmpty(code)) return;
+        _run.SpecsPicked.Add(code);
     }
 
     // A shop purchase (item display name). Lets the flywheel see what the reward sink actually buys.
@@ -403,6 +411,8 @@ public static class Stats
             foreach (var kv in m.DeathsByEnemyClass) Bump(deaths, kv.Key, kv.Value);
         var perks = new Dictionary<string, int>();
         foreach (var r in Runs) foreach (var p in r.PerksPicked) Bump(perks, p);
+        var specs = new Dictionary<string, int>();
+        foreach (var r in Runs) foreach (var p in r.SpecsPicked) Bump(specs, p);
         var buys = new Dictionary<string, int>();
         foreach (var r in Runs) foreach (var p in r.Purchases) Bump(buys, p);
         var boons = new Dictionary<string, int>();
@@ -481,6 +491,7 @@ public static class Stats
             }).ToList(),
             soldierDeathsByEnemy = deaths.OrderByDescending(kv => kv.Value).ToDictionary(kv => kv.Key, kv => kv.Value),
             perkPicks = perks.OrderByDescending(kv => kv.Value).ToDictionary(kv => kv.Key, kv => kv.Value),
+            specPicks = specs.OrderByDescending(kv => kv.Value).ToDictionary(kv => kv.Key, kv => kv.Value),
             shopPurchases = buys.OrderByDescending(kv => kv.Value).ToDictionary(kv => kv.Key, kv => kv.Value),
             boonPicks = boons.OrderByDescending(kv => kv.Value).ToDictionary(kv => kv.Key, kv => kv.Value),
         };
