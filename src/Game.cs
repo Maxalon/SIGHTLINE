@@ -589,10 +589,19 @@ public class Game
     public List<Boon> DraftBoonOffer = new();   // the 3 starting boons on offer
     public HashSet<Unit> DraftPicked = new();   // candidates currently selected
     public Boon? DraftSelectedBoon;             // the selected starting boon (null until chosen)
+    // W6 RUN CONTRACT: the run-long ruleset trade-off picked at the draft. null == STANDARD (Contract.None,
+    // the opt-out), so the draft never BLOCKS on a contract — DraftReady ignores it. Threaded into
+    // _run.Contract on CONFIRM (mirrors DraftSelectedBoon -> DraftBoon -> ActiveBoons).
+    public Contract? DraftSelectedContract;     // the selected contract (null until clicked == STANDARD/None)
     public const int DraftCap = 4;              // founding core size (roster still backfills to 6 over the run)
     // Threaded into StartMission's new Run on CONFIRM (then cleared back to null/empty):
     public List<Unit> DraftedSquad;             // the confirmed 4 picked Units (null = default squad)
     public Boon? DraftBoon;                     // the confirmed starting boon (null = none)
+    public Contract DraftContract = Contract.None;  // the confirmed contract (None = STANDARD)
+    // W6 harness hook: SIGHTLINE_CONTRACT forces a contract on the autopilot/balance run so the smoke
+    // test can verify each for no-crash/no-TIMEOUT. Program.cs sets this (a public field) BEFORE
+    // StartMission; default None keeps plain autoplay byte-stable. Only honoured under NoPersist.
+    public Contract ForcedContract = Contract.None;
 
     /// Set up + enter the run-opening DRAFT (interactive new-run path only). Builds the candidate
     /// pool + the starting-boon offer and switches to Phase.Draft. NEVER called by the harness
@@ -603,6 +612,7 @@ public class Game
         DraftBoonOffer = Run.GenerateDraftBoonOffer();
         DraftPicked = new HashSet<Unit>();
         DraftSelectedBoon = null;
+        DraftSelectedContract = null;   // default STANDARD (Contract.None) until a contract card is clicked
         Phase = Phase.Draft;
         Audio.Play("select");
     }
@@ -630,6 +640,15 @@ public class Game
                 Audio.Play("select");
                 return;
             }
+            // contract cards (single-select; clicking the held one toggles back to STANDARD/None)
+            foreach (var (contract, rect) in Hud.DraftContractBtns)
+            {
+                if (!Raylib.CheckCollisionPointRec(m, rect)) continue;
+                DraftSelectedContract = (DraftSelectedContract.HasValue && DraftSelectedContract.Value == contract)
+                    ? (Contract?)null : contract;   // re-click to deselect -> STANDARD
+                Audio.Play("select");
+                return;
+            }
             // confirm
             if (DraftReady && Raylib.CheckCollisionPointRec(m, Hud.DraftConfirm)) { ConfirmDraft(); return; }
         }
@@ -645,8 +664,9 @@ public class Game
     {
         DraftedSquad = new List<Unit>(DraftPicked);
         DraftBoon = DraftSelectedBoon;
+        DraftContract = DraftSelectedContract ?? Contract.None;   // null == STANDARD
         Audio.Play("turn");
-        StartMission();   // threads DraftedSquad/DraftBoon into the new Run, then clears them
+        StartMission();   // threads DraftedSquad/DraftBoon/DraftContract into the new Run, then clears them
     }
 
     // ---------------- lifecycle ----------------
@@ -658,7 +678,14 @@ public class Game
         _run = new Run();
         _run.Start(DraftedSquad);           // builds the campaign map, seats at the START node (drafted squad if any)
         if (DraftBoon.HasValue) { _run.ActiveBoons.Add(DraftBoon.Value); Stats.RecordBoon(BoonDef.Code(DraftBoon.Value)); }   // adopt the chosen starting boon
-        DraftedSquad = null; DraftBoon = null;   // consumed: the harness path leaves these null (default squad)
+        // W6 RUN CONTRACT: adopt the drafted contract (interactive path). The harness never runs the
+        // draft, so DraftContract stays None there -> no balance change. The SIGHTLINE_CONTRACT hook
+        // (ForcedContract, set by Program.cs) overrides it under NoPersist so the balance bot can
+        // smoke-test each contract for no-crash/no-TIMEOUT. Default None = STANDARD = byte-stable.
+        _run.Contract = NoPersist && ForcedContract != Contract.None ? ForcedContract : DraftContract;
+        if (_run.Contract != Contract.None) Stats.RecordContract(ContractDef.Code(_run.Contract));
+        DraftedSquad = null; DraftBoon = null; DraftContract = Contract.None;   // consumed: the harness path leaves these default
+        _spearheadSurgeUsed = false;   // W6 SPEARHEAD turn-1 action surge is fresh each run (and per mission, below)
         // adopt the dialled-in Heat for this run. The harness can't set PendingHeat (it doesn't
         // touch the intro), so it reads SIGHTLINE_HEAT here instead — defaulting to 0 so plain
         // autoplay/screenshots are byte-stable.
@@ -825,12 +852,24 @@ public class Game
         Pressure = 0; _pressureWaves = 0;   // anti-turtle clock resets each mission (Combat.PressureAim cleared by BeginMission)
         _autoSig = -1; _autoStall = 0;
         Phase = Phase.PlayerTurn;
-        // 4.4: every mission opens with the squad concealed -- UNLESS Heat "EXPOSED" strips it.
-        SquadConcealed = !Sightline.Heat.Exposed(_run.HeatLevel);
+        // 4.4: every mission opens with the squad concealed -- UNLESS Heat "EXPOSED" strips it, OR
+        // CONTRACT "SPEARHEAD" (aggressive doctrine: open loud, no ambush). Inert as None.
+        SquadConcealed = !Sightline.Heat.Exposed(_run.HeatLevel)
+                         && _run.Contract != Contract.Spearhead;
+        _spearheadSurgeUsed = false;          // the turn-1 action surge is fresh each mission
         foreach (var u in Players) u.BeginTurn();
+        // CONTRACT "SPEARHEAD": a turn-1 alpha — every soldier gets +1 action on the mission's first
+        // player turn (this is it: SetupMission runs once/mission and BeginTurn just seated 2 actions).
+        // Gated by _spearheadSurgeUsed so it fires EXACTLY once per mission and never stacks. The VIP
+        // (added to Players for Escort/Rescue) is excluded — the asset has no kit. Inert as None.
+        if (_run.Contract == Contract.Spearhead && !_spearheadSurgeUsed)
+        {
+            _spearheadSurgeUsed = true;
+            foreach (var u in Players) if (u.Alive && !u.IsVip) u.ActionsLeft += 1;
+        }
         // per-mission feat tracking + status effects start clean each mission
         foreach (var u in Players)
-        { u.FeatMultiKill = u.FeatClutch = u.FeatVengeful = u.WasNearDeath = u.AllyDown = false; u.BondAura = false; u.ConsecutiveMisses = 0; u.Statuses.Clear(); }
+        { u.FeatMultiKill = u.FeatClutch = u.FeatVengeful = u.WasNearDeath = u.FeatBurned = u.AllyDown = false; u.BondAura = false; u.ConsecutiveMisses = 0; u.Statuses.Clear(); }
         _missionKia.Clear();
         Scorches.Clear();            // death decals don't carry between missions
         _refundedThisTurn.Clear();   // flank-kill refund is per-turn; clear it for the mission's first turn too (review #2)
@@ -1689,6 +1728,10 @@ public class Game
 
     void EnterBarracks()
     {
+        // W5 SCARS: capture the just-played mission's faction BEFORE EndMission clears it, so
+        // DebriefSurvivors can brand a VENDETTA grudge on a survived near-death (the faction that
+        // nearly killed them). None on a mixed-force mission -> no grudge stamped (inert).
+        _run.LastMissionFaction = Combat.MissionFaction;
         // TEMPO wave 4: drop every mission-scoped combat static in one call so no stale value warps a
         // barracks-phase odds read; RunBoons is refreshed to the run's current boons (a FIELD DOCTRINE
         // pick may have just changed them).
@@ -1765,8 +1808,18 @@ public class Game
             if (_run.CurrentCard != null && _run.CurrentCard.ModName == "ONSLAUGHT") gained += 6;
             int heatBonus = Sightline.Heat.IntelBonus(_run.HeatLevel);
             gained += heatBonus;
+            // CONTRACT "HIGH STAKES": +50% mission Intel (the reward side of "no field-heal" above).
+            // Applied to the whole grant. Inert as None.
+            string stakesNote = "";
+            if (_run.Contract == Contract.HighStakes)
+            {
+                int bonus = gained / 2;       // +50%, integer (floor) so it's deterministic
+                gained += bonus;
+                stakesNote = $"  (+{bonus} STAKES)";
+            }
             _run.Intel += gained;
             string heatNote = heatBonus > 0 ? $"  (+{heatBonus} HEAT {_run.HeatLevel})" : "";
+            heatNote += stakesNote;
             _run.Report.Insert(0, $"Recovered {gained} intel{heatNote}  (total {_run.Intel})");
             _shopDone = false;
             RefreshShopOffer();                         // roll this barracks' rotating requisition slate
@@ -2200,7 +2253,13 @@ public class Game
         Fx.Burst(u.Pos, col, 8, 130f, 0.4f, 3f, true);
         Fx.PopText(u.Pos + new Vector2(0, -26), $"-{dmg} {label}", col, 20f);
         if (u.Hp <= 0) { u.Hp = 0; KillUnit(u); }
-        else MarkPlayerHurt(u);
+        else
+        {
+            MarkPlayerHurt(u);
+            // SCAR trauma flag (W5): a soldier that takes FIRE damage and lives bears the BURN-SCARRED
+            // mark at debrief. "BURN" is the fire/Burning DoT label (status tick + stepping into fire).
+            if (u.Team == Team.Player && !u.IsVip && label == "BURN") u.FeatBurned = true;
+        }
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -4116,6 +4175,10 @@ public class Game
     // take over. Heat's tighter-contact does NOT shrink it (noise carries regardless of stealth).
     public const int HackNoiseRange = 2;
     public bool SquadConcealed;        // 4.4: squad starts each mission concealed (set in SetupMission)
+    // W6 CONTRACT "SPEARHEAD": the once-per-mission turn-1 +1-action surge. Set false at each mission
+    // SETUP (its own first turn), flipped true the moment the surge is granted, so it fires EXACTLY
+    // once per mission and never stacks across turns. Inert unless _run.Contract == Spearhead.
+    bool _spearheadSurgeUsed;
 
     // Closest distance at which any living soldier currently has line of sight on this
     // enemy (within SightRange), or -1 if it is unseen.
@@ -6575,6 +6638,66 @@ public class Game
             : "SNAPTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
+    /// Headless self-test (SIGHTLINE_CONTRACTTEST): the W6 run contracts. Pure run-state logic, no
+    /// window. Asserts each contract's read FIRES and is INERT as None:
+    ///   (a) ContractDef wiring (All excludes None; ordinals; names/codes).
+    ///   (b) None == STANDARD: backfill + field-heal happen, no kill bonus (the no-regression baseline).
+    ///   (c) IronVeterans: no recruit backfill AND survivors bank +1 promotion-kill credit/mission.
+    ///   (d) HighStakes: no field-heal in DebriefSurvivors (survivors carry damage forward).
+    public string ContractSelfTest()
+    {
+        NoPersist = true;
+        var fails = new List<string>();
+
+        // (a) ContractDef wiring + append-only ordinals
+        if (ContractDef.All.Length != 3) fails.Add("allCount");
+        if (System.Array.IndexOf(ContractDef.All, Contract.None) >= 0) fails.Add("allHasNone");
+        var cv = (Contract[])Enum.GetValues(typeof(Contract));
+        if (cv.Length < 4 || cv[0] != Contract.None || cv[^1] != Contract.Spearhead) fails.Add("ordinals");
+        if (ContractDef.Name(Contract.IronVeterans) != "IRON VETERANS") fails.Add("name");
+        if (ContractDef.Code(Contract.HighStakes) != "HST") fails.Add("code");
+
+        // Build a tiny run with two healthy-but-chipped survivors below the recruit floor, so a
+        // backfill WOULD normally fire and a field-heal WOULD normally raise HP.
+        Run MakeRun(Contract c)
+        {
+            var r = new Run { Mission = 2, Contract = c, Squad = new List<Unit>() };
+            for (int i = 0; i < 2; i++)
+            {
+                var u = new Unit { Name = "S" + i, Cls = "ASSAULT", Team = Team.Player,
+                                   Hp = 5, MaxHp = 10, Aim = 70, Mobility = 6,
+                                   Weapon = Weapon.Make(WeaponKind.Rifle), Alive = true,
+                                   Kills = 0, Rank = 0 };
+                r.Squad.Add(u);
+            }
+            return r;
+        }
+
+        // (b) None baseline: backfill to the AttritionFloor happens; field-heal raises HP; no kill bonus.
+        var rNone = MakeRun(Contract.None);
+        rNone.DebriefSurvivors();
+        if (rNone.Squad.Count < Run.AttritionFloor) fails.Add("none:noBackfill");
+        if (rNone.Squad[0].Hp <= 5) fails.Add("none:noHeal");     // 0.55*10 ceil = +6 -> capped 10
+        if (rNone.Squad[0].Kills != 0) fails.Add("none:killBonus");
+
+        // (c) IronVeterans: NO backfill (squad stays 2 even below the floor) + each survivor +1 kill.
+        var rIron = MakeRun(Contract.IronVeterans);
+        rIron.DebriefSurvivors();
+        if (rIron.Squad.Count != 2) fails.Add("iron:backfilled");
+        if (rIron.Squad[0].Kills != 1) fails.Add("iron:noKillBonus(" + rIron.Squad[0].Kills + ")");
+
+        // (d) HighStakes: NO field-heal (HP unchanged at 5); backfill still happens (it's a heal contract,
+        // not a recruit one) so the floor is met.
+        var rStakes = MakeRun(Contract.HighStakes);
+        rStakes.DebriefSurvivors();
+        if (rStakes.Squad[0].Hp != 5) fails.Add("stakes:healed(" + rStakes.Squad[0].Hp + ")");
+        if (rStakes.Squad.Count < Run.AttritionFloor) fails.Add("stakes:noBackfill");
+
+        return fails.Count == 0
+            ? "CONTRACTTEST: PASS (None inert; IronVeterans no-backfill+fast-rank; HighStakes no-heal)"
+            : "CONTRACTTEST: FAIL (" + string.Join(",", fails) + ")";
+    }
+
     /// Headless self-test (SIGHTLINE_CDTEST): renewable signature-ability COOLDOWN.
     /// (a) fresh soldiers AbilityReady; (b) a Corpsman Heal sets Cd 3 and CanAbility -> false;
     /// (c) 3x BeginTurn ticks 3->0 and CanAbility -> true again; (d) per-kind wiring: a
@@ -6649,6 +6772,125 @@ public class Game
         return fails.Count == 0
             ? "CDTEST: PASS (fresh=ready; Heal Cd3 gates+ticks to ready; Mark Cd2; Pin Cd2)"
             : "CDTEST: FAIL (" + string.Join(",", fails) + ")";
+    }
+
+    /// Headless self-test (SIGHTLINE_SCARTEST): the W5 SCARS — earn each via the trauma flags
+    /// through the real DebriefSurvivors path, then assert the Combat reads fire:
+    ///   ShellShocked  -> -mobility (MoveBudget) AND Disorient/Stun immunity (AddStatus)
+    ///   BurnScarred   -> +max HP on grant (idempotent) AND -aim while Burning
+    ///   HardBitten    -> +crit while bloodied, -aim at full HP
+    ///   Vendetta      -> +aim/+crit vs MissionFaction == VendettaFaction (inert otherwise)
+    /// Window-free (grid + tile math + static Combat reads only).
+    public string ScarSelfTest()
+    {
+        NoPersist = true;
+        var fails = new List<string>();
+        Faction savedMission = Combat.MissionFaction;   // restore at the end (don't bleed into runtime)
+        try
+        {
+            // open arena so ComputeOdds has clear LoS
+            var grid = new Grid();
+            for (int x = 0; x < grid.W; x++)
+                for (int y = 0; y < grid.H; y++) grid.Tiles[x, y] = TileType.Floor;
+
+            // --- (1) EARNING via the real Run.DebriefSurvivors path ---
+            // A run whose just-played mission was a WARDENS fight; one soldier survived a near-death
+            // AND walked out of fire. Debrief must brand: Vendetta(Wardens), and (NearDeathCount 1->,
+            // not yet 2) BurnScarred. A second near-death debrief pushes NearDeathCount to 2 -> ShellShocked,
+            // a third -> HardBitten.
+            var run = new Run { Mission = 2, Squad = new List<Unit>() };
+            run.LastMissionFaction = Faction.Wardens;
+            var vet = new Unit { Name = "VEGA", Cls = "ASSAULT", Team = Team.Player, Hp = 4, MaxHp = 12,
+                                 Aim = 70, Mobility = 7, Weapon = Weapon.Make(WeaponKind.Rifle), Rank = 1, Kills = 0 };
+            run.Squad.Add(vet);
+            int hpBefore = vet.MaxHp;
+
+            // mission 1 debrief: near-death + burned under Wardens. A near-death also grants the
+            // IronWill TRAIT (+IronWillHp max HP), so the expected bump is BurnScarHp + IronWillHp.
+            vet.WasNearDeath = true; vet.FeatBurned = true;
+            run.DebriefSurvivors();
+            if (!vet.HasScar(Scar.Vendetta)) fails.Add("noVendettaGrant");
+            if (vet.VendettaFaction != Faction.Wardens) fails.Add("vendettaFaction");
+            if (!vet.HasScar(Scar.BurnScarred)) fails.Add("noBurnScarGrant");
+            if (vet.MaxHp != hpBefore + Unit.BurnScarHp + Unit.IronWillHp) fails.Add("burnScarHpNotApplied");
+            if (vet.NearDeathCount != 1) fails.Add("nearDeathCount1");
+            if (vet.HasScar(Scar.ShellShocked)) fails.Add("shellShockedTooEarly");
+
+            // idempotency: a second BURN with the scar already held must NOT re-add or re-bump HP
+            int hpAfterBurn = vet.MaxHp;
+            vet.FeatBurned = true; vet.WasNearDeath = false;
+            run.DebriefSurvivors();
+            if (vet.Scars.FindAll(s => s == Scar.BurnScarred).Count != 1) fails.Add("burnScarDoubleAdd");
+            if (vet.MaxHp != hpAfterBurn) fails.Add("burnScarDoubleHp");
+
+            // mission debriefs to push NearDeathCount 1 -> 2 (ShellShocked) -> 3 (HardBitten)
+            vet.WasNearDeath = true; run.DebriefSurvivors();
+            if (vet.NearDeathCount != 2 || !vet.HasScar(Scar.ShellShocked)) fails.Add("shellShockedAt2");
+            if (vet.HasScar(Scar.HardBitten)) fails.Add("hardBittenTooEarly");
+            vet.WasNearDeath = true; run.DebriefSurvivors();
+            if (vet.NearDeathCount != 3 || !vet.HasScar(Scar.HardBitten)) fails.Add("hardBittenAt3");
+
+            // --- (2) SHELL-SHOCKED reads ---
+            // -mob in MoveBudget (vs an unscarred clone with the same Mobility)
+            var clean = new Unit { Mobility = vet.Mobility, Weapon = Weapon.Make(WeaponKind.Rifle) };
+            if (vet.MoveBudget != clean.MoveBudget - Unit.ShellShockMob * 2) fails.Add("shellShockMobBudget");
+            // Disorient + Stun immunity via AddStatus (no-op when ShellShocked)
+            vet.AddStatus(StatusKind.Disoriented, 3);
+            vet.AddStatus(StatusKind.Stun, 3);
+            if (vet.HasStatus(StatusKind.Disoriented)) fails.Add("shellShockDisorientNotImmune");
+            if (vet.HasStatus(StatusKind.Stun)) fails.Add("shellShockStunNotImmune");
+            // a non-scarred soldier is still affected (proves the gate is the scar, not a global change)
+            var ctrl = new Unit { Weapon = Weapon.Make(WeaponKind.Rifle) };
+            ctrl.AddStatus(StatusKind.Stun, 3);
+            if (!ctrl.HasStatus(StatusKind.Stun)) fails.Add("controlStunImmuneWrong");
+
+            // --- (3) Combat aim/crit reads (build controlled attacker/defender pairs) ---
+            Combat.MissionFaction = Faction.None;   // baseline: no faction gate active
+            var foe = new Unit { Name = "G", Cls = "GRUNT", Team = Team.Enemy, Hp = 6, MaxHp = 6,
+                                 Aim = 50, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle), X = 8, Y = 5,
+                                 Alert = AlertLevel.Alert };
+
+            Unit Shooter() => new Unit { Cls = "ASSAULT", Team = Team.Player, Aim = 70, Mobility = 6,
+                                         Weapon = Weapon.Make(WeaponKind.Rifle), X = 5, Y = 5, Hp = 12, MaxHp = 12 };
+
+            // HARD-BITTEN: -aim at FULL HP, +crit while bloodied
+            var hbFull = Shooter(); hbFull.Scars.Add(Scar.HardBitten); hbFull.Hp = hbFull.MaxHp;
+            var plain  = Shooter();
+            int fullAimOn  = Combat.ComputeOdds(grid, hbFull, foe).HitChance;
+            int fullAimOff = Combat.ComputeOdds(grid, plain,  foe).HitChance;
+            if (fullAimOn >= fullAimOff) fails.Add("hardBittenFullAimNotPenalised");
+
+            var hbLow = Shooter(); hbLow.Scars.Add(Scar.HardBitten); hbLow.Hp = 3;   // bloodied
+            var plainLow = Shooter(); plainLow.Hp = 3;
+            int lowCritOn  = Combat.ComputeOdds(grid, hbLow, foe).CritChance;
+            int lowCritOff = Combat.ComputeOdds(grid, plainLow, foe).CritChance;
+            if (lowCritOn <= lowCritOff) fails.Add("hardBittenBloodiedCritMissing");
+
+            // BURN-SCARRED: -aim while Burning (vs not burning)
+            var bsBurn = Shooter(); bsBurn.Scars.Add(Scar.BurnScarred); bsBurn.AddStatus(StatusKind.Burning, 2);
+            var bsCalm = Shooter(); bsCalm.Scars.Add(Scar.BurnScarred);
+            int burnAim = Combat.ComputeOdds(grid, bsBurn, foe).HitChance;
+            int calmAim = Combat.ComputeOdds(grid, bsCalm, foe).HitChance;
+            if (burnAim >= calmAim) fails.Add("burnScarBurnAimNotPenalised");
+
+            // VENDETTA: +aim/+crit vs MissionFaction == VendettaFaction; inert when mismatched
+            var venom = Shooter(); venom.Scars.Add(Scar.Vendetta); venom.VendettaFaction = Faction.Wardens;
+            Combat.MissionFaction = Faction.None;
+            var vNone = Combat.ComputeOdds(grid, venom, foe);
+            Combat.MissionFaction = Faction.Legion;          // mismatched faction -> inert
+            var vMiss = Combat.ComputeOdds(grid, venom, foe);
+            Combat.MissionFaction = Faction.Wardens;         // matched -> +aim/+crit
+            var vOn   = Combat.ComputeOdds(grid, venom, foe);
+            if (vMiss.HitChance != vNone.HitChance) fails.Add("vendettaMismatchNotInert");
+            if (vOn.HitChance <= vNone.HitChance) fails.Add("vendettaAimMissing");
+            if (vOn.CritChance <= vNone.CritChance) fails.Add("vendettaCritMissing");
+
+            return fails.Count == 0
+                ? "SCARTEST: PASS (earn via debrief; ShellShocked -mob+immune; BurnScarred +HP/-aim; HardBitten crit/full-aim; Vendetta faction-gated)"
+                : "SCARTEST: FAIL (" + string.Join(",", fails) + ")";
+        }
+        catch (Exception e) { return "SCARTEST: FAIL (exception " + e.Message + ")"; }
+        finally { Combat.MissionFaction = savedMission; }
     }
 
     /// Headless self-test (SIGHTLINE_ITEMTEST): the utility-item mechanics — smoke

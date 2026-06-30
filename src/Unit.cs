@@ -42,6 +42,14 @@ public enum Perk { LockOn, Hardened, Reflexes, Bandolier, CloseQuarters, Marksma
 // APPEND-ONLY — new members at the END only; never reorder/remove (persisted by ordinal).
 public enum Trait { Killer, ColdBlood, IronWill, Vengeful }
 
+/// SCARS (W5): the COST side of soldier identity — lasting marks left by TRAUMA, the dark
+/// mirror of the positive feat→trait system. Each is EARNED by surviving a brutal mission
+/// (near-death / fire) and is a clear DRAWBACK paired with a defiant upside (roughly a wash),
+/// so it characterises a veteran without breaking balance. Granted in Run.DebriefSurvivors
+/// (mirroring GrantTrait); read passively in Combat.ComputeOdds / Unit.MoveBudget / Unit.AddStatus.
+// APPEND-ONLY — new members at the END only; never reorder/remove (persisted by ordinal).
+public enum Scar { ShellShocked, BurnScarred, HardBitten, Vendetta }
+
 /// CLASS SPECIALIZATION FORK (W2): a one-time, run-divergent pick-1-of-2 offered the first time a
 /// soldier reaches Unit.SpecRank (CORPORAL). Each fork augments/replaces the class's signature VERB
 /// or a core RULE, so progression becomes HORIZONTAL (changes HOW the class plays, not just stats).
@@ -276,6 +284,16 @@ public class Unit
     public bool HasTrait(Trait t) => Traits.Contains(t);
     public System.Collections.Generic.List<string> Bonds = new();  // names of bonded squadmates
 
+    // ---- SCARS (W5): earned-through-trauma identity (the cost mirror of Traits), all persist ----
+    public System.Collections.Generic.List<Scar> Scars = new();
+    public bool HasScar(Scar s) => Scars.Contains(s);
+    // The faction that nearly killed this soldier (set at debrief = the mission's faction on the
+    // first survived near-death). Read by the VENDETTA scar (a grudge). Persisted; default None.
+    public Faction VendettaFaction = Faction.None;
+    // How many missions this soldier has survived a near-death — drives ShellShocked@2 / HardBitten@3.
+    // Persisted; default 0 (rookies / old saves).
+    public int NearDeathCount;
+
     // a name with the earned nickname folded in, e.g. VEGA "REAPER"
     public string FullName => string.IsNullOrEmpty(Nickname) ? Name : $"{Name} \"{Nickname}\"";
 
@@ -291,6 +309,9 @@ public class Unit
     {
         // COOL-HEADED composure: this soldier is immune to Disoriented — the daze slides right off.
         if (k == StatusKind.Disoriented && HasPerk(Perk.CoolHeaded)) return;
+        // SHELL-SHOCKED (W5): unshakeable nerves — Disoriented and Stun just don't take hold (inert
+        // without the scar). The flip side of the lasting -mobility caution; the soldier has seen worse.
+        if ((k == StatusKind.Disoriented || k == StatusKind.Stun) && HasScar(Scar.ShellShocked)) return;
         foreach (var s in Statuses) if (s.Kind == k) { s.Turns = Math.Max(s.Turns, turns); return; }
         Statuses.Add(new Status { Kind = k, Turns = turns });
     }
@@ -300,6 +321,7 @@ public class Unit
     public bool FeatClutch;     // a kill while bloodied (<= 1/4 HP)
     public bool FeatVengeful;   // a kill after a squadmate fell this mission
     public bool WasNearDeath;   // dropped to <= 1/4 HP at some point this mission (survived = feat)
+    public bool FeatBurned;     // took fire/burn damage this mission (survived = BURN-SCARRED scar)
     public bool AllyDown;       // a squadmate has been killed this mission
     public int KillsThisTurn;   // reset each BeginTurn (multi-kill detection)
     public bool BondAura;       // a bonded squadmate is adjacent (refreshed each frame by Game)
@@ -481,7 +503,9 @@ public class Unit
     public float FlinchAnim;    // 0..1 hit-flinch: a quick shudder/scale-pop when struck
     public float WalkLean;      // 0..1 walk lean: leans into the direction of travel while stepping
 
-    public int MoveBudget => Math.Max(1, Mobility - (Wound > 0 ? WoundMob : 0)) * 2;  // half-tile budget (−mob while wounded)
+    // half-tile budget. Wound (-mob while wounded) and the SHELL-SHOCKED scar (-mob lasting caution)
+    // both subtract mobility, mirroring each other; floored at 1 tile so a unit can always move.
+    public int MoveBudget => Math.Max(1, Mobility - (Wound > 0 ? WoundMob : 0) - (HasScar(Scar.ShellShocked) ? ShellShockMob : 0)) * 2;
     public bool CanAct => Alive && ActionsLeft > 0;
 
     public Unit()
@@ -552,6 +576,15 @@ public class Unit
     public const int VengefulAim = 12;   // Vengeful: +aim while a squadmate has fallen this mission
     public const int IronWillHp = 2;     // IronWill: permanent +max HP (granted at debrief)
     public const int BondAim = 10;       // Bond: +aim while a bonded squadmate is adjacent
+
+    // SCAR magnitudes (W5) — read in Combat.ComputeOdds / Unit.MoveBudget / Unit.AddStatus.
+    public const int ShellShockMob   = 1;   // SHELL-SHOCKED: -mob (lasting caution); + immune to Disorient/Stun
+    public const int BurnScarHp      = 3;   // BURN-SCARRED: +max HP scar tissue (applied once on grant, like IronWill)
+    public const int BurnShyAim      = 8;   // BURN-SCARRED: -aim while Burning (fire-shy)
+    public const int HardBittenCrit  = 12;  // HARD-BITTEN: +crit while bloodied (<= half HP)
+    public const int HardBittenFullAim = 5; // HARD-BITTEN: -aim at FULL HP (only fights well when it's grim)
+    public const int VendettaAim     = 10;  // VENDETTA: +aim vs the faction that scarred this soldier
+    public const int VendettaCrit    = 8;   // VENDETTA: +crit vs that faction
 
     // CORPSMAN PATCH ability: HP restored to the most-wounded adjacent squadmate (capped at MaxHp)
     public const int PatchHeal = 4;
@@ -852,6 +885,49 @@ public static class TraitDef
         Trait.ColdBlood => "a clutch kill while bloodied",
         Trait.IronWill  => "surviving near death",
         Trait.Vengeful  => "avenging a fallen squadmate",
+        _ => "",
+    };
+}
+
+/// Names + codes + descriptions for earned SCARS (W5), and the trauma that grants each.
+/// Mirrors TraitDef. Codes are 3-letter, chosen NOT to collide with the status codes
+/// (BRN already = Burning), so BURN-SCARRED uses "SCR" rather than "BRN".
+public static class ScarDef
+{
+    public static string Name(Scar s) => s switch
+    {
+        Scar.ShellShocked => "SHELL-SHOCKED",
+        Scar.BurnScarred  => "BURN-SCARRED",
+        Scar.HardBitten   => "HARD-BITTEN",
+        Scar.Vendetta     => "VENDETTA",
+        _ => "SCAR",
+    };
+
+    public static string Code(Scar s) => s switch
+    {
+        Scar.ShellShocked => "SHK",
+        Scar.BurnScarred  => "SCR",   // NOT "BRN" — that's the Burning status code
+        Scar.HardBitten   => "GRZ",
+        Scar.Vendetta     => "VND",
+        _ => "?",
+    };
+
+    public static string Desc(Scar s) => s switch
+    {
+        Scar.ShellShocked => $"-{Unit.ShellShockMob} mobility, but immune to Disorient + Stun",
+        Scar.BurnScarred  => $"+{Unit.BurnScarHp} max HP, but -{Unit.BurnShyAim} aim while burning",
+        Scar.HardBitten   => $"+{Unit.HardBittenCrit} crit while bloodied, -{Unit.HardBittenFullAim} aim at full HP",
+        Scar.Vendetta     => $"+{Unit.VendettaAim} aim / +{Unit.VendettaCrit} crit vs the faction that scarred you",
+        _ => "",
+    };
+
+    // short note describing the trauma that earns the scar (barracks report)
+    public static string Trauma(Scar s) => s switch
+    {
+        Scar.ShellShocked => "surviving two brushes with death",
+        Scar.BurnScarred  => "walking out of the fire",
+        Scar.HardBitten   => "a third brush with death",
+        Scar.Vendetta     => "a grudge against the foe that nearly took them",
         _ => "",
     };
 }

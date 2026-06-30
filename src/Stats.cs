@@ -75,6 +75,7 @@ public static class Stats
         public readonly List<string> SpecsPicked = new();  // W2: class-specialization fork picks
         public readonly List<string> Purchases = new();   // shop items bought (incl. weapon mods)
         public readonly List<string> BoonsPicked = new();  // run-scoped doctrine/boon picks
+        public readonly List<string> ContractsPicked = new();  // W6 run-contract picks (usually 0-1/run)
         public readonly List<MissionRec> Missions = new();
     }
 
@@ -168,6 +169,13 @@ public static class Stats
     {
         if (!Enabled || _run == null || string.IsNullOrEmpty(code)) return;
         _run.BoonsPicked.Add(code);
+    }
+
+    // A run CONTRACT (W6) pick. Lets a future batch show contract usage / win-rate by contract.
+    public static void RecordContract(string code)
+    {
+        if (!Enabled || _run == null || string.IsNullOrEmpty(code)) return;
+        _run.ContractsPicked.Add(code);
     }
 
     public static void EndMission(bool win, int turns, int survivors, int enemiesKilled, string lossCause)

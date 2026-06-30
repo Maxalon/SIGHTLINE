@@ -44,6 +44,7 @@ public static class Hud
     // run-opening squad DRAFT (Wave 3): candidate cards + starting-boon cards + the DEPLOY button
     public static System.Collections.Generic.List<(Unit unit, Rectangle rect)> DraftCardBtns = new();
     public static System.Collections.Generic.List<(Boon boon, Rectangle rect)> DraftBoonBtns = new();
+    public static System.Collections.Generic.List<(Contract contract, Rectangle rect)> DraftContractBtns = new();
     public static Rectangle DraftConfirm;
 
     // ---------------- UI motion (panel pop-in juice) ----------------
@@ -1796,6 +1797,7 @@ public static class Hud
     {
         DraftCardBtns.Clear();
         DraftBoonBtns.Clear();
+        DraftContractBtns.Clear();
 
         float t = (float)Raylib.GetTime();
         DrawTacticalBackdrop(t, Pal.Friend, 0f);
@@ -1865,15 +1867,15 @@ public static class Hud
         }
 
         // ---- starting boon (pick 1 of 3) ----
-        int boonY = y0 + 2 * (chH + gy) + 16;
+        int boonY = y0 + 2 * (chH + gy) + 10;
         string bh = "STARTING DOCTRINE";
         var bhm = Raylib.MeasureTextEx(Cfg.Font, bh, 18, 1f);
         Raylib.DrawTextEx(Cfg.Font, bh, new Vector2(W / 2f - bhm.X / 2f, boonY - 4), 18, 1f, Pal.VipGold);
 
-        int bn = g.DraftBoonOffer.Count, bcw = 296, bgap = 22, bch = 86;
+        int bn = g.DraftBoonOffer.Count, bcw = 296, bgap = 22, bch = 74;
         int btotal = bn * bcw + (bn - 1) * bgap;
         int bx0 = W / 2 - btotal / 2;
-        int by = boonY + 24;
+        int by = boonY + 20;
         for (int i = 0; i < bn; i++)
         {
             var boon = g.DraftBoonOffer[i];
@@ -1889,16 +1891,50 @@ public static class Hud
             DraftBoonBtns.Add((boon, r));
         }
 
+        // ---- run CONTRACT (W6): a compact selector row (STANDARD opt-out + the 3 contracts) ----
+        // Mirrors the boon row but more compact. STANDARD (= Contract.None) is the default if nothing
+        // is clicked, so the row never blocks the deploy. The selected card highlights.
+        int conY = by + bch + 10;
+        string ch = "RUN CONTRACT  (optional)";
+        var chm = Raylib.MeasureTextEx(Cfg.Font, ch, 16, 1f);
+        Raylib.DrawTextEx(Cfg.Font, ch, new Vector2(W / 2f - chm.X / 2f, conY - 2), 16, 1f, Pal.Accent);
+
+        // cards: STANDARD then the 3 contracts (None == STANDARD opt-out)
+        var conCards = new Contract[] { Contract.None, Contract.IronVeterans, Contract.HighStakes, Contract.Spearhead };
+        int cn = conCards.Length, ccw = 222, cgap = 16, cch = 64;
+        int ctotal = cn * ccw + (cn - 1) * cgap;
+        int cx0 = W / 2 - ctotal / 2;
+        int cy = conY + 22;
+        // selected? null DraftSelectedContract means STANDARD (Contract.None) is the effective pick.
+        Contract effSel = g.DraftSelectedContract ?? Contract.None;
+        for (int i = 0; i < cn; i++)
+        {
+            var c = conCards[i];
+            var r = new Rectangle(cx0 + i * (ccw + cgap), cy, ccw, cch);
+            bool sel = effSel == c;
+            bool hover = Raylib.CheckCollisionPointRec(mouse, r);
+            PanelShadow(r, 1f);
+            Raylib.DrawRectangleRounded(r, 0.10f, 8, sel ? Pal.RGBA(14, 34, 44) : (hover ? Pal.RGBA(24, 34, 46) : Pal.Panel));
+            Raylib.DrawRectangleLinesEx(r, sel ? 3f : 1.5f, sel ? Pal.Accent : (hover ? Pal.Friend : Pal.PanelBd));
+            Raylib.DrawTextEx(Cfg.Font, ContractDef.Name(c), new Vector2((int)r.X + 12, (int)r.Y + 8), 16, 1f, sel ? Pal.Accent : Pal.Txt);
+            foreach (var (line, dy) in WrapLines(ContractDef.Desc(c), ccw - 22, 11, 0))
+                Raylib.DrawTextEx(Cfg.Font, line, new Vector2((int)r.X + 12, (int)r.Y + 30 + dy), 11, 1f, Pal.TxtDim);
+            // STANDARD card is the implicit opt-out: still clickable (deselects back to None), but
+            // the input handler only registers the 3 real contracts -> clicking STANDARD is a no-op
+            // selection-wise; we add it to the rects anyway so a future tweak can wire it.
+            if (c != Contract.None) DraftContractBtns.Add((c, r));
+        }
+
         // ---- mission-1 + heat preview ----
         string m1 = $"FIRST OP: {ObjectiveLabel(Run.ObjectiveFor(1))}   ·   HEAT {g.PendingHeat}";
         var m1m = Raylib.MeasureTextEx(Cfg.Font, m1, 14, 1f);
-        int infoY = by + bch + 14;
+        int infoY = cy + cch + 10;
         Raylib.DrawTextEx(Cfg.Font, m1, new Vector2(W / 2f - m1m.X / 2f, infoY), 14, 1f, Pal.TxtDim);
 
         // ---- DEPLOY button (greyed until exactly DraftCap soldiers + a boon are chosen) ----
         bool ready = g.DraftReady;
-        int dbw = 280, dbh = 50;
-        DraftConfirm = new Rectangle(W / 2 - dbw / 2, infoY + 26, dbw, dbh);
+        int dbw = 280, dbh = 46;
+        DraftConfirm = new Rectangle(W / 2 - dbw / 2, infoY + 22, dbw, dbh);
         bool dhover = ready && Raylib.CheckCollisionPointRec(mouse, DraftConfirm);
         Color deployCol = ready ? (dhover ? Pal.RGBA(92, 200, 251) : Pal.Good) : Pal.RGBA(40, 50, 63);
         if (dhover) Raylib.DrawRectangleRounded(new Rectangle(DraftConfirm.X - 3, DraftConfirm.Y - 3, dbw + 6, dbh + 6), 0.3f, 8, Raylib.Fade(deployCol, 0.25f));
@@ -2376,6 +2412,16 @@ public static class Hud
             : "Traits: " + string.Join(", ", u.Traits.ConvertAll(TraitDef.Name));
         if (u.Bonds.Count > 0) traits += "    Bonds: " + string.Join(", ", u.Bonds);
         Raylib.DrawTextEx(Cfg.Font, traits, new Vector2(x, y + 44), 12, 1f, u.Traits.Count == 0 && u.Bonds.Count == 0 ? Pal.TxtDim : Pal.VipGold);
+
+        // SCARS (W5): the cost side of identity, in a distinct rust-red next to the gold traits.
+        if (u.Scars.Count > 0)
+        {
+            float tw = Raylib.MeasureTextEx(Cfg.Font, traits + "    ", 12, 1f).X;
+            string scars = "Scars: " + string.Join(", ", u.Scars.ConvertAll(ScarDef.Name));
+            if (u.VendettaFaction != Faction.None && u.HasScar(Scar.Vendetta))
+                scars += $" (vs {Run.FactionName(u.VendettaFaction)})";
+            Raylib.DrawTextEx(Cfg.Font, scars, new Vector2(x + tw, y + 44), 12, 1f, Pal.FoeDk);
+        }
 
         if (u.Wound > 0)
             Raylib.DrawTextEx(Cfg.Font, $"WOUNDED ({u.Wound} mission{(u.Wound > 1 ? "s" : "")})  -{Unit.WoundAim} aim / -{Unit.WoundMob} mob", new Vector2(x, y + 66), 12, 1f, Pal.Foe);

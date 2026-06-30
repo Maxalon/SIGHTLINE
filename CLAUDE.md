@@ -196,6 +196,13 @@ docs/screenshot.png    README image
 ## Current state — DONE ✅
 Playable vertical slice, builds clean (0 warn/0 err), autoplay-verified across
 seeds (mix of WIN/LOSE, no exceptions):
+- **SCARS & VENDETTAS (PROGRAM VANTAGE II / W5):** the COST side of soldier identity — surviving trauma leaves
+  lasting marks (append-only `Scar` enum, persisted): SHELL-SHOCKED (-1 mob, immune to Disorient/Stun),
+  BURN-SCARRED (+3 HP, -aim while burning), HARD-BITTEN (+crit bloodied, -aim at full HP), VENDETTA (+aim/+crit
+  vs the faction that nearly killed you). Earned in `Run.DebriefSurvivors` from trauma flags; `SIGHTLINE_SCARTEST`.
+- **RUN CONTRACTS (PROGRAM VANTAGE II / W6):** opt-in run-modifier rulesets chosen at the draft (default None =
+  zero base-balance change) — IRON VETERANS (no recruit backfill, faster veterancy), HIGH STAKES (+50% Intel, no
+  field-heal), SPEARHEAD (open unconcealed, turn-1 +1-action alpha). `Run.Contract` persisted; `SIGHTLINE_CONTRACT`.
 - **FIELD CRAFT positioning verbs (PROGRAM VANTAGE W1):** two UNIVERSAL "play the geometry" verbs — **DRAG**
   (key 7, reach-2: pull a lagging ally one tile toward you — rescue/accelerate the corner-march) + **VAULT**
   (key 9: leap an adjacent cover tile to the far floor in one action — cross an otherwise-impassable cover
@@ -1140,7 +1147,38 @@ Before stopping:
 
 ### WIP NOTES
 
-> **PROGRAM "VANTAGE" — player decision-space ≥ the AI's + HORIZONTAL progression + STRIKING feel (LATEST; read first).**
+> **PROGRAM "VANTAGE II" — deepen the run-to-run loop: STAKES (scars) + VARIETY (contracts) (LATEST; read first).**
+> Same fully-autonomous dev-team session, continued after VANTAGE I merged (PR #65). Two more waves on the campaign/
+> run-to-run layer (complementing VANTAGE I's per-mission/per-soldier depth), each spec→dev→independent-review→
+> flywheel-measure→commit. Restarted the branch from the merged main (the prior PR was finished), opened a NEW PR.
+> - **W5 — SCARS & VENDETTAS (`b9ffc11`).** All prior soldier-identity was POSITIVE (feats→traits/nicknames/bonds);
+>   this adds the COST of trauma, deepening Pillar 5 ("stakes that bite", DESIGN's thinnest). Mirrors the feat→trait
+>   system: an APPEND-ONLY `Scar` enum + `Unit.Scars`/`VendettaFaction`/`NearDeathCount`/`FeatBurned` (persisted via
+>   UnitDto + `scarOrdinals` SAVETEST guard), earned in `Run.DebriefSurvivors` from trauma flags, read in
+>   `Combat.ComputeOdds`. SHELL-SHOCKED (survived 2+ near-deaths: -1 mob, immune to Disorient/Stun); BURN-SCARRED
+>   (survived fire: +3 HP, -aim while burning); HARD-BITTEN (3+ near-deaths: +crit bloodied, -aim at full HP — fights
+>   better when it's grim); VENDETTA (+aim/+crit vs the faction that nearly killed you, all run). Each a clear
+>   drawback + defiant upside (~a wash, low balance risk); inert on un-scarred units. Dossier shows scars (rust) + the
+>   vendetta faction. New `SIGHTLINE_SCARTEST`.
+> - **W6 — RUN CONTRACTS (`591b196`).** Boons are run BUFFS, Heat is run DIFFICULTY; a CONTRACT changes the RULES of
+>   a whole run — a trade-off chosen at the run-opening DRAFT, so two runs play differently in KIND (DESIGN §3.F
+>   variety). **Default = `Contract.None` and the headless/autopilot path never runs the draft → ZERO base-balance
+>   regression** (the safest possible add; all 3 forced contracts smoke-tested clean). APPEND-ONLY `Contract` enum +
+>   `Run.Contract` (persisted via RunDto + `contractOrdinals` guard). IRON VETERANS (no recruit backfill — a wipe
+>   shrinks the squad — but +1 promotion-kill/mission: fewer bodies, faster veterans); HIGH STAKES (+50% Intel but no
+>   between-mission field-heal); SPEARHEAD (open UNCONCEALED — no ambush — but a once-per-mission turn-1 +1-action
+>   alpha). Compact contract row in the draft UI (STANDARD opt-out default). New `SIGHTLINE_CONTRACT`/`_CONTRACTTEST`.
+> **PROCESS/REVIEW:** both Game.cs-touching, ran sequentially; each reviewed by an independent read-only pass over the
+> committed shas (no build, so it runs parallel to the next wave). Review of W5+W6 = **SHIP, no CRIT/HIGH/MED** (two
+> no-action LOW notes: a grenade-ignite FeatBurned one-tick delay, and intended IronVeterans/HighStakes design notes).
+> Build 0/0; SAVETEST/COMBATTEST/CDTEST/AITEST/FIELDTEST/SCARTEST/CONTRACTTEST all PASS; autoplay clean. MEASURED
+> (heat-0 N=20, contracts at None default): run-completion **67.5%** (≈ VANTAGE I's 66.7% — confirms no regression),
+> policy gap +25 (greedy 80 / sloppy 55 — skill beats sloppy), choices/turn 5.17. **OPEN/NEXT:** scars/contracts are
+> player-facing variety the greedy bot doesn't exercise (like DRAG) — a future flywheel pass could force-pick them to
+> measure per-contract/per-scar win-rate; more contracts/scars; the still-open VANTAGE I items (win-rate-by-spec
+> tuning, Evac/Escort drag, real CC0 audio into the W3 loader, the deferred Game.cs harness split).
+
+> **PROGRAM "VANTAGE" — player decision-space ≥ the AI's + HORIZONTAL progression + STRIKING feel.**
 > Fully-autonomous dev-team session (orchestrator + a 3-agent read-only research fan-out + per-wave design-spec
 > agents + dev agents in isolated worktrees + independent reviewers per wave + the `SIGHTLINE_BALANCE` flywheel).
 > Branch `claude/game-dev-orchestration-7riqqm`. The research converged on the deepest unfixed finding across
