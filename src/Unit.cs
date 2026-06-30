@@ -5,6 +5,7 @@ namespace Sightline;
 
 public enum Team { Player, Enemy }
 
+// APPEND-ONLY — new members at the END only; never reorder/remove (persisted by ordinal).
 public enum WeaponKind { Rifle, Shotgun, Sniper, Lmg, Smg }
 
 /// Per-class signature ability (self-cast, one charge per mission).
@@ -38,6 +39,7 @@ public enum Perk { LockOn, Hardened, Reflexes, Bandolier, CloseQuarters, Marksma
 
 /// Battlefield traits earned by FEATS (see Game feat hooks + Run.DebriefSurvivors).
 /// Each is a small passive read in Combat.ComputeOdds, so veterans matter.
+// APPEND-ONLY — new members at the END only; never reorder/remove (persisted by ordinal).
 public enum Trait { Killer, ColdBlood, IronWill, Vengeful }
 
 /// Transient combat status effects (per-mission, never persisted). Burning/Bleed are
@@ -454,7 +456,6 @@ public class Unit
 
     // perk magnitudes (kept here so Combat/Mission/Hud read one source)
     public const int PerkAim = 15;       // LockOn / CloseQuarters / Marksman
-    public const int PerkCrit = 15;      // Deadeye (unconditional crit)
     public const int CloseRange = 4;     // CloseQuarters threshold (tiles)
     public const int LongRange = 7;      // Marksman threshold (tiles)
     // Executioner: FINISHER crit vs targets already below half HP. Set higher than Deadeye's
@@ -486,16 +487,6 @@ public class Unit
     // enforced in Unit.AddStatus). A survivability pick a frail flanker/point-soldier wants; not a damage perk.
     public const int CoolHeadedEvade = 8;   // -aim to ANY attacker firing at a CoolHeaded soldier
     // ---- build-variety perks: pure CRIT/AIM reads in Combat.ComputeOdds (no new state/hooks) ----
-    // Opportunist: a FLANKER'S FINISHER — +crit ONLY vs a genuinely FLANKED target (cover.Flanked: the
-    // foe HAD adjacent cover but you reached an angle it doesn't protect). Distinct from LockOn (+AIM vs
-    // ANY no-cover target — exposed OR flanked) and Deadeye (+crit unconditionally): Opportunist rewards
-    // the *maneuver that turns a covered foe's flank*, so it pays off exactly when you out-positioned cover.
-    public const int OpportunistCrit = 18;
-    // Point Blank: a CLOSE-RANGE CRIT build — +crit within 2 tiles. Distinct from CloseQuarters
-    // (+AIM within 4 tiles, a wider band that helps you hit): Point Blank is tighter and adds CRIT,
-    // so a shotgun/assault rusher hits HARDER in your face rather than just more reliably nearby.
-    public const int PointBlankCrit = 20;
-    public const int PointBlankRange = 2;   // crit applies at dist <= 2 tiles
     // First Strike (enum member is still `GiantSlayer` for save-ordinal stability; reworked from the old
     // dead "+aim vs MaxHp>=12" — ~70% of foes are sub-12 fodder, so it almost never fired). New effect: an
     // ALPHA-STRIKE/OPENER — +crit vs a target at FULL HP. Fires on the FIRST connecting shot at any fresh
@@ -512,14 +503,6 @@ public class Unit
     // most. Distinct from Hardened (always-on, crit-weighted) and Tank (+max HP, no per-hit cut).
     // Read in Combat.HardenedReduce off d.Hp/d.MaxHp (already on the defending Unit — no new hook).
     public const int BulwarkFlat = 2;    // extra -damage on every incoming hit while at/above half HP
-    // VANGUARD: an AGGRESSION/breach perk for a flanker who closes the distance. +crit ONLY when the
-    // target is BOTH genuinely FLANKED (cover.Flanked — you out-positioned its cover) AND ADJACENT
-    // (dist <= 1, point-blank). Distinct from Opportunist (+crit on a flank at ANY range) and Point
-    // Blank (+crit within 2 tiles vs ANY target, no flank needed): Vanguard demands you both flank
-    // AND get in its face, the tightest gate of the three, so it pays the biggest crit. A pure
-    // ComputeOdds read (flank flag + range), no new state.
-    public const int VanguardCrit = 28;
-    public const int VanguardRange = 1;  // crit applies at dist <= 1 tile (adjacent) AND flanked
     public const int WoundAim = 12;      // aim penalty while Wound > 0
     public const int WoundMob = 1;       // mobility penalty while Wound > 0
 

@@ -13,6 +13,7 @@ namespace Sightline;
 ///     (a closing-rush reward) — counter by kiting / killing them before they reach you.
 ///   - Wardens (precision/control): an enemy attacker at long range (dist >= Unit.LongRange) gets
 ///     +aim (precision back-line) — counter by closing / breaking line of sight.
+// APPEND-ONLY — new members at the END only; never reorder/remove (persisted by ordinal).
 public enum Faction { None, Syndicate, Legion, Wardens }
 
 /// Precomputed odds for a shot from attacker -> defender.

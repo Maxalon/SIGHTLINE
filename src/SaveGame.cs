@@ -307,6 +307,28 @@ public static class SaveGame
             if (objVals.Length < 8 || objVals[0] != Objective.Eliminate || objVals[7] != Objective.Decapitate)
                 fails.Add("objectiveOrdinals");
 
+            // Same append-only guard for every other enum persisted by raw (int) ordinal in the
+            // DTOs (Unit weapon/perks/mods/traits, Run boons, mission faction). A future reorder or
+            // removal silently corrupts existing saves — these checks make that fail SAVETEST loudly.
+            var weaponVals = (WeaponKind[])Enum.GetValues(typeof(WeaponKind));
+            if (weaponVals.Length < 5 || weaponVals[0] != WeaponKind.Rifle || weaponVals[weaponVals.Length - 1] != WeaponKind.Smg)
+                fails.Add("weaponKindOrdinals");
+            var perkVals = (Perk[])Enum.GetValues(typeof(Perk));
+            if (perkVals.Length < 20 || perkVals[0] != Perk.LockOn || perkVals[perkVals.Length - 1] != Perk.Gunslinger)
+                fails.Add("perkOrdinals");
+            var modVals = (WeaponMod[])Enum.GetValues(typeof(WeaponMod));
+            if (modVals.Length < 4 || modVals[0] != WeaponMod.Scope || modVals[modVals.Length - 1] != WeaponMod.Stabilizer)
+                fails.Add("weaponModOrdinals");
+            var traitVals = (Trait[])Enum.GetValues(typeof(Trait));
+            if (traitVals.Length < 4 || traitVals[0] != Trait.Killer || traitVals[traitVals.Length - 1] != Trait.Vengeful)
+                fails.Add("traitOrdinals");
+            var boonVals = (Boon[])Enum.GetValues(typeof(Boon));
+            if (boonVals.Length < 10 || boonVals[0] != Boon.Marksmen || boonVals[boonVals.Length - 1] != Boon.RapidDeploy)
+                fails.Add("boonOrdinals");
+            var factionVals = (Faction[])Enum.GetValues(typeof(Faction));
+            if (factionVals.Length < 4 || factionVals[0] != Faction.None || factionVals[factionVals.Length - 1] != Faction.Wardens)
+                fails.Add("factionOrdinals");
+
             // meta (unlocked-max heat) round-trips through its own meta.json
             string metaSaved = File.Exists(MetaPath) ? File.ReadAllText(MetaPath) : null;
             try

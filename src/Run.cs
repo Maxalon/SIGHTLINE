@@ -17,6 +17,7 @@ public enum RewardKind { None, Heal, BonusPerk }
 /// combinatorial and lateral (not a power ladder), so every run plays differently. APPEND-ONLY
 /// (the ordinal is the save key). Read in Combat.ComputeOdds (the aim/crit/armor ones, via a
 /// static Combat.RunBoons set each mission) and in Game (the on-kill / concealment / deploy ones).
+// APPEND-ONLY — new members at the END only; never reorder/remove (persisted by ordinal).
 public enum Boon
 {
     Marksmen,      // +aim at long range, squad-wide

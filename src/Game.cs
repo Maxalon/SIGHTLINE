@@ -869,7 +869,8 @@ public class Game
         EnsureMetaLoaded();   // so a resumed run that gets WON can still unlock the next Heat
         _run = run;
         _run.LossStreak = _metaLossStreak;   // adaptive assist carries across a resumed run
-        Players = _run.Squad;
+        // (no Players assignment here: SetupMission(n) below rebuilds Players as a fresh per-mission
+        // copy — aliasing Players = _run.Squad reintroduces the VIP-duplication bug, so leave it out.)
         int n = Util.Clamp(_run.Mission < 1 ? 1 : _run.Mission, 1, Run.MaxMissions);
         _run.CurrentCard ??= Run.StandardCard(n);
         SetupMission(n);
@@ -1853,11 +1854,16 @@ public class Game
         Stats.RecordKill(killer?.Cls ?? "?", killer != null ? (int)killer.Team : 1, d.Cls, (int)d.Team);
         if (d.Team == Team.Player)
         {
-            _run.Fallen.Add(d.Name);
-            // run-end MEMORIAL (presentation only): snapshot the fallen squad member's identity for
-            // the run-summary KIA roll. VIP/captive isn't a persistent squad member, so it's excluded.
-            if (!d.IsVip)
-                _run.Memorial.Add(new FallenRec { Name = d.FullName, Cls = d.Cls, Rank = d.RankName, Kills = d.Kills, Mission = _run.Mission });
+            // _run is null only in controlled test scenes (normal play always has a Run) — guard
+            // the run-state writes so a no-Run scene can't NRE here.
+            if (_run != null)
+            {
+                _run.Fallen.Add(d.Name);
+                // run-end MEMORIAL (presentation only): snapshot the fallen squad member's identity for
+                // the run-summary KIA roll. VIP/captive isn't a persistent squad member, so it's excluded.
+                if (!d.IsVip)
+                    _run.Memorial.Add(new FallenRec { Name = d.FullName, Cls = d.Cls, Rank = d.RankName, Kills = d.Kills, Mission = _run.Mission });
+            }
             if (!d.IsVip) SecondaryFailed = true;   // a lost soldier fails the NO LOSSES bonus
             // a fallen squadmate fires up the survivors (Vengeful feat / trait)
             if (!d.IsVip)
