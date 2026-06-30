@@ -196,6 +196,20 @@ docs/screenshot.png    README image
 ## Current state — DONE ✅
 Playable vertical slice, builds clean (0 warn/0 err), autoplay-verified across
 seeds (mix of WIN/LOSE, no exceptions):
+- **FIELD CRAFT positioning verbs (PROGRAM VANTAGE W1):** two UNIVERSAL "play the geometry" verbs — **DRAG**
+  (key 7, reach-2: pull a lagging ally one tile toward you — rescue/accelerate the corner-march) + **VAULT**
+  (key 9: leap an adjacent cover tile to the far floor in one action — cross an otherwise-impassable cover
+  screen). 1 action, never end the turn, once/turn; arrival routes through OnUnitEnteredTile. `SIGHTLINE_FIELDTEST`.
+- **CLASS SPECIALIZATION FORKS (PROGRAM VANTAGE W2):** horizontal progression — a one-time pick-1-of-2 `Spec`
+  at a soldier's first Corporal promotion that swaps/augments its signature verb or a core rule (10 forks, 2/class:
+  Breacher/Juggernaut, Phantom/Pathfinder, Sentinel/Headhunter, AreaDenial/Anchor, FieldSurgeon/CombatMedic).
+  Append-only `Unit.Spec`, persisted + SAVETEST-guarded; offered in the barracks after perks; `specPicks` telemetry.
+- **GUARDED HVT — Decapitate teeth (PROGRAM VANTAGE W4):** the HVT takes reduced (never zero) damage while a
+  designated bodyguard lives within 2 tiles, so the kill is a peel-then-execute positioning puzzle (telegraphed
+  shield-dome aura + "HVT GUARDED" readout). `Game.UpdateHvtGuard`, `Combat.HvtGuardReduce`.
+- **AUDIO + LIGHT polish (PROGRAM VANTAGE W3):** transient additive muzzle/impact lights (bloom haloes them),
+  tracer/grenade arc trails, damage-number arc+punch, audio pan/pitch, + a sample-asset loader (assets/sfx,
+  assets/music tried first; procedural synth fallback) so real CC0 audio can drop in with no call-site changes.
 - **RENEWABLE ABILITY ECONOMY (PROGRAM VANGUARD W2):** class signature verbs (Mark/Grapple/Slipstream/Suppress/
   Heal) are no longer 1-charge-per-mission — they run on a per-unit COOLDOWN (`Unit.AbilityCd`, ticked at the
   unit's `BeginTurn`; Heal/Slipstream 3, Mark/Pin/Grapple 2), so using your verb is a recurring per-turn decision.
@@ -1126,7 +1140,75 @@ Before stopping:
 
 ### WIP NOTES
 
-> **PROGRAM "VANGUARD" — per-turn DEPTH + a new tactical AXIS + run-to-run VARIETY (LATEST; read first).**
+> **PROGRAM "VANTAGE" — player decision-space ≥ the AI's + HORIZONTAL progression + STRIKING feel (LATEST; read first).**
+> Fully-autonomous dev-team session (orchestrator + a 3-agent read-only research fan-out + per-wave design-spec
+> agents + dev agents in isolated worktrees + independent reviewers per wave + the `SIGHTLINE_BALANCE` flywheel).
+> Branch `claude/game-dev-orchestration-7riqqm`. The research converged on the deepest unfixed finding across
+> DESIGN §4 / AUDIT #3-4 and three fresh reports: **the player's per-turn AND per-run decision space is shallower
+> than the enemy AI's, and progression is almost entirely a POWER axis, not an identity/strategy axis.** Five waves,
+> all measured + reviewed + on the branch:
+> - **W0 — hardening (`e94ecbb`).** Architecture-audit follow-ups, prerequisite for the enum-adding waves: extended
+>   the append-only SAVETEST ordinal guard from just `Objective` to ALL SIX persisted-by-ordinal enums
+>   (WeaponKind/Perk/WeaponMod/Trait/Boon/Faction) + APPEND-ONLY banners — a reorder/removal now fails SAVETEST
+>   loudly instead of silently corrupting saves. LoS runaway guard fails CLOSED (deny sight); KillUnit guards `_run`
+>   null; deleted 6 dead crit-perk constants + a dead Players-alias line. (Deferred the big Game.cs harness-code
+>   extraction — H3 — since the gameplay waves are sequential anyway; documented for a future throughput pass.)
+> - **W1 — FIELD CRAFT verbs (`46891b2`, best impact/effort).** Two UNIVERSAL positioning verbs that let the player
+>   "play the geometry" the AI already plays, both anti-turtle/pro-tempo (no dominant-defensive regression): **DRAG**
+>   (key 7, reach-2 — pull a lagging ally one tile toward you: rescue the wounded, accelerate the Evac/Escort/Rescue
+>   corner-march, team cohesion) + **VAULT** (key 9 — leap an adjacent cover tile to the floor on its far side in one
+>   action; since ALL cover blocks movement this is a genuinely NEW capability: cross/flank/breach an otherwise
+>   -impassable cover screen). Both 1 action, never end the turn, once/turn (Unit.DraggedThisTurn/VaultedThisTurn);
+>   arrival routes through OnUnitEnteredTile so overwatch/concealment/bleed/fire apply. HUD buttons+glyphs+help;
+>   bounded autopilot DRAG in the drag-objectives. New `SIGHTLINE_FIELDTEST`. (GOTCHA caught by wiring+running the
+>   self-test myself: the dev's first DRAG was DEAD — a Chebyshev-1 ally's only "toward" tile is the dragger's own,
+>   so nothing was ever draggable; fixed to reach-2 = pull a *lagging* ally, which is the useful version anyway.)
+> - **W2 — CLASS SPECIALIZATION FORKS (`496c435`, the horizontal-progression keystone).** The 9-program-old wish
+>   (DESIGN §3.F): a one-time pick-1-of-2 SPECIALIZATION at a soldier's first Corporal promotion that changes HOW
+>   the class plays — swaps/augments its signature VERB or a core RULE, not a +N% stat — so two same-draft runs
+>   diverge in kind. New APPEND-ONLY `Spec` enum (None + 10), persisted via UnitDto + `specOrdinals` SAVETEST guard;
+>   every read inert on `Spec.None` (old saves/rookies). 10 forks (2/class): Assault BREACHER(grapple staggers)/
+>   JUGGERNAUT(+2 armor, reach-1); Ranger PHANTOM(slipstream arms an ambush shot)/PATHFINDER(slipstream free + faster
+>   cd — base slip now costs 1 action so this is a real gain); Sharpshooter SENTINEL(overwatch ignores penalty +
+>   crits)/HEADHUNTER(mark = squad focus-fire crit); Gunner AREA DENIAL(pin 5×5)/ANCHOR(+2 armor, pin single);
+>   Corpsman FIELD SURGEON(patch clears wound+status)/COMBAT MEDIC(patch self + range, −1 heal). Offered in the
+>   barracks after perks/before boon; AutoPlay auto-resolves (no stall); balance mode randomizes the pick
+>   (`specPicks` telemetry). Sentinel+Guardian use `||` so the overwatch bonus is granted ONCE; the two +2-armor
+>   forks read SEPARATELY from shop armor. COMBATTEST cases added. MEASURED: all 10 forks reachable+chosen; the
+>   **policy gap flipped from a PATHOLOGICAL −16.7 (sloppy beat greedy) to a healthy +8.3** (greedy 70.8 / sloppy
+>   62.5 — skill now matters, in the audit's +7-12 band).
+> - **W3 — audio + light overhaul (`e4e7981`, the 'good→striking' lever; DISJOINT worktree, ran PARALLEL).**
+>   Transient additive muzzle/impact lights (the bloom bright-pass haloes them for free); tracer wake + grenade/lob
+>   arc trails; damage-number sideways arc + scale-punch + spawn flash; per-shot pitch variation + stereo pan in
+>   Audio.Play/PlayWeapon (default params keep every call site compiling). **Sample-asset architecture**: an
+>   `assets/sfx`+`assets/music` file loader is tried FIRST with the procedural synth as fallback, so real CC0 audio
+>   (now permitted) can drop in with NO call-site changes — the synth path stays active here (no device, blind).
+>   ALL new visuals deterministic (anim `_t` / frozen FNV hashes, no fresh RNG) so the headless harness stays
+>   reproducible; audio crash-safe behind device-ready.
+> - **W4 — Decapitate TEETH: the GUARDED HVT (`d25a2a5`).** Fixes the measured weakness (Decapitate was a trivial
+>   turn-1 snipe: 2.7 turns, 97-100%). The HVT designates ≤2 nearby bodyguards; while a guard lives within 2 tiles
+>   the HVT takes REDUCED (never zero — TIMEOUT-safe: a naive bot still grinds it down) damage, so the kill becomes
+>   a positioning puzzle: peel the guards, or GRAPPLE/flank the HVT out of its bubble (synergy with the W1/W2 verbs).
+>   Telegraphed (no gotcha): red shield-dome aura + guard link-lines/chevrons, "HVT GUARDED"/"HVT EXPOSED" top-bar
+>   readout, a one-shot GUARDED float on a softened hit. Reduction routes through `Combat.HardenedReduce` (the single
+>   shot+grenade chokepoint); transient guard flags (no save change); `SmartDecapitate` peels guards first (bounded,
+>   falls through). MEASURED: 100%→94% (teeth bite); avg-turns barely moves (2.8→2.9) because the OPTIMAL bot peels
+>   guards efficiently — the human design win (a real "expose-then-execute" decision) is undersold by the bot metric.
+> **PROCESS:** Game.cs is the single serialization point, so the Game.cs-touching waves (W0→W1→W2→W4) ran
+> SEQUENTIALLY (one owner each), each: design-spec agent → dev → independent reviewer → orchestrator measures on the
+> flywheel → commit. W3 (disjoint Audio/Fx/Anim) ran in PARALLEL in a worktree, integrated by clean file-copy.
+> Specs in `scratchpad/W{1,2,4}-spec.md`. Two independent review passes (W0/W1/W3 then W2/W4): the first found one MED
+> (DRAG could move the locked RESCUE captive — fixed, M1) + LOWs; the second = **SHIP, no CRIT/HIGH/MED**. Build 0/0;
+> SAVETEST/COMBATTEST/CDTEST/AITEST/FIELDTEST all PASS; autoplay clean (no TIMEOUT). FINAL MEASURE (heat-0 N=24):
+> run-completion 66.7% (healthy band — heat-0 was arguably too easy at 79%), **policy gap −16.7→+8.3 (the headline:
+> the inverted gap was the real pathology, now fixed)**, choices/turn 5.57. New hooks: `SIGHTLINE_FIELDTEST`.
+> **OPEN/NEXT (documented):** win-rate-by-spec instrumentation to prove no single fork dominates (specPicks shows all
+> reachable; deeper per-fork win-rate tuning is the open follow-up); W4 guarded-HVT could bite harder for the optimal
+> bot (raise HvtGuardReduce/range) if desired; the deferred Game.cs harness-code extraction (audit H3) for throughput;
+> the still-draggy Evac/Escort (~8-10 turns even with DRAG); real CC0 SFX/music can now drop into the W3 loader; a
+> Corpsman rarely reaches rank-2 so its specs seldom fire (kill-gated) — consider a support-XP path.
+
+> **PROGRAM "VANGUARD" — per-turn DEPTH + a new tactical AXIS + run-to-run VARIETY.**
 > Fully-autonomous dev-team session (orchestrator + a 3-agent read-only research fan-out + per-wave design-spec
 > agents + dev agents + an independent reviewer per wave + a final cross-wave integration reviewer + the
 > `SIGHTLINE_BALANCE` flywheel). Branch `claude/stoic-knuth-zb11k0`. The research converged on the SAME deepest

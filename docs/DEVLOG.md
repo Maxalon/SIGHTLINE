@@ -25,6 +25,57 @@ and passes the autoplay smoke test (no exceptions / no TIMEOUT).
 
 ---
 
+## PROGRAM "VANTAGE" — player decision-space ≥ the AI's, horizontal progression, striking feel
+
+**Thesis (from a 3-agent read-only research fan-out + DESIGN §4 / AUDIT #3-4):** SIGHTLINE's enemy AI is more
+positionally sophisticated than the *player's* verb-set, and progression is almost entirely a POWER axis, not an
+identity/strategy axis. The program closes both gaps and lifts the game's feel. Branch
+`claude/game-dev-orchestration-7riqqm`.
+
+**Team / process.** Orchestrator (tech lead) + 3 parallel read-only research agents (gameplay-depth opportunities,
+code/architecture audit, visual/audio critique) → per-wave design-spec agents → developers (the disjoint audio wave
+in an isolated worktree; the Game.cs waves sequentially in the main tree) → two independent reviewer passes → the
+`SIGHTLINE_BALANCE` flywheel, measured centrally by the orchestrator. Game.cs is the single serialization point, so
+the four Game.cs-touching waves ran one-owner-at-a-time; the audio/light wave (disjoint Audio/Fx/Anim) ran in
+parallel and integrated by clean file-copy.
+
+**Waves (all on the branch, each built 0/0 + self-tested + reviewed + measured):**
+- **W0 hardening (`e94ecbb`).** Extended the append-only SAVETEST ordinal guard from `Objective` alone to all six
+  persisted-by-ordinal enums (the prerequisite for the enum-adding waves) + banners; LoS fail-closed; KillUnit
+  `_run` null-guard; dead crit-constant cull. (Deferred the big Game.cs harness-code split — sequential waves don't
+  need it.)
+- **W1 FIELD CRAFT verbs (`46891b2`).** Universal DRAG (reach-2 ally pull) + VAULT (cross an impassable cover tile)
+  — proactive positioning the AI already does, both anti-turtle. `SIGHTLINE_FIELDTEST`. *QA catch:* wiring + running
+  the new self-test myself surfaced that the dev's first DRAG was dead (adjacent-only → landing tile = the dragger);
+  bounced back to the dev, fixed to reach-2.
+- **W2 class specialization forks (`496c435`).** The horizontal-progression keystone: a one-time pick-1-of-2 `Spec`
+  per soldier (10 forks) that changes HOW a class plays. Append-only enum, persisted + guarded.
+- **W3 audio + light (`e4e7981`, parallel worktree).** Transient muzzle/impact lights, trails, damage-number juice,
+  audio pan/pitch, and a sample-asset loader with synth fallback (real CC0 audio can drop in later, no call-site
+  changes). All deterministic; audio blind-but-crash-safe.
+- **W4 Decapitate teeth (`d25a2a5`).** The GUARDED HVT: reduced-not-zero damage while a bodyguard is near, turning a
+  turn-1 snipe into a peel-then-execute puzzle (telegraphed; TIMEOUT-safe).
+
+**Reviews.** Two independent read-only passes (review-by-committed-sha, no build, to not race the live tree): the
+first (W0/W1/W3) found one MED — DRAG could move the locked RESCUE captive — fixed (M1) + a vault-test coverage nit
+(L2); the second (W2/W4) = **SHIP, no CRIT/HIGH/MED**.
+
+**Measured (flywheel, heat-0, N=24 greedy+sloppy).** Run-completion 79%→**66.7%** (still the healthy/winnable band —
+heat-0 was arguably too easy; RECKONING shipped 68%). The headline: **policy gap −16.7 → +8.3** — the baseline had an
+INVERTED gap (sloppy play beat greedy, a real pathology); the new verbs + forks give skilled play more to leverage,
+landing the gap squarely in the audit's healthy +7-12 band. Choices/turn 5.57 (healthy). All 10 specialization forks
+reachable + chosen. Decapitate 100%→94% (teeth bite; the optimal bot's guard-peeling masks it in avg-turns — a
+bot-metric-undersells-human-design case). Build 0/0; SAVETEST/COMBATTEST/CDTEST/AITEST/FIELDTEST PASS; autoplay clean.
+
+**Process learnings.** (1) Wiring + running a dev's self-test *yourself* is worth it — it caught a dead verb the
+dev's own (unwired) verification missed. (2) Reviewing committed shas (not the working tree) lets a reviewer run
+fully parallel with the next wave's live edits. (3) The bot-measured `avgTurns` undersells human-facing teeth when
+the smart bot adapts (W4) — read win-rate + the design intent, not just the turn count. (4) The inverted policy gap
+was the most valuable thing the flywheel surfaced — a win-rate that *looks* fine (79%) hid that skill was being
+punished; the program's real win is fixing that, not the headline completion %.
+
+---
+
 ## Backlog (from PM/Research, sprint-ordered by file-disjointness)
 
 | # | Title | Impact | Effort | Primary files |
