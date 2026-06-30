@@ -74,6 +74,21 @@ the smart bot adapts (W4) — read win-rate + the design intent, not just the tu
 was the most valuable thing the flywheel surfaced — a win-rate that *looks* fine (79%) hid that skill was being
 punished; the program's real win is fixing that, not the headline completion %.
 
+### VANTAGE II (continuation, new PR) — deepen the run-to-run loop
+
+After VANTAGE I merged, two more waves on the campaign/run-to-run layer (branch restarted from the merged main):
+- **W5 — SCARS & VENDETTAS** (`b9ffc11`): the COST side of soldier identity (Pillar 5 stakes). An append-only `Scar`
+  enum mirroring the feat→trait system — trauma leaves lasting marks (shell-shock, burns, hard-bitten grit, a
+  faction vendetta), each a drawback + a defiant upside.
+- **W6 — RUN CONTRACTS** (`591b196`): opt-in run-modifier rulesets picked at the draft (IRON VETERANS / HIGH STAKES /
+  SPEARHEAD). Default `None` + the headless path never runs the draft → **zero base-balance regression** by
+  construction — the safest possible kind of addition.
+
+Independent review of W5+W6 = **SHIP** (no CRIT/HIGH/MED). Build 0/0; SCARTEST/CONTRACTTEST + the full suite PASS;
+autoplay clean. Measured (heat-0 N=20, contracts at default None): run-completion **67.5%** (≈ VANTAGE I's 66.7% —
+no regression), policy gap +25 (skill beats sloppy), choices/turn 5.17. Learning: a default-None opt-in modifier is
+the lowest-risk way to add variety — it's provably inert on the measured path, so it can't regress the base.
+
 ---
 
 ## Backlog (from PM/Research, sprint-ordered by file-disjointness)
