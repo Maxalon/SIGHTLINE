@@ -376,6 +376,11 @@ public class Unit
     // "shove always costs 1 action" this double-bounds it (no infinite reposition loop). Reset
     // every BeginTurn; never persisted (per-turn combat state only).
     public bool ShovedThisTurn;
+    // FIELD CRAFT (W1): two universal positioning verbs, each once per soldier per turn (reset in
+    // BeginTurn). DRAG pulls an adjacent ally one tile toward the dragger; VAULT leaps the soldier
+    // over an adjacent cover tile to the floor on its far side. Per-turn combat state, never persisted.
+    public bool DraggedThisTurn;
+    public bool VaultedThisTurn;
     public bool Alive = true;
 
     // Awareness tier (4.3): enemies escalate Unaware -> Suspicious -> Alert instead of
@@ -529,6 +534,8 @@ public class Unit
         Hunkered = false;
         ReactedThisTurn = false;
         ShovedThisTurn = false;    // SHOVE: one per soldier per turn
+        DraggedThisTurn = false;   // FIELD CRAFT: DRAG once per soldier per turn
+        VaultedThisTurn = false;   // FIELD CRAFT: VAULT once per soldier per turn
         FiredThisTurn = false;     // TEMPO: one offensive shot per turn (reset each turn)
         RunGun = false;            // ability stances don't carry between turns
         Blitz = false;

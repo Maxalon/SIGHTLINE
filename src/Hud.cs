@@ -618,6 +618,10 @@ public static class Hud
         // SHOVE: forced-movement verb (1 action, no end-turn, 1/turn). Enabled only when an
         // enemy is adjacent (CanShove), so it surfaces exactly when it's usable.
         Add("shove", "SHOVE", "8", interactive && g.CanShove(u), g.ShoveMode);
+        // FIELD CRAFT (W1): two universal positioning verbs. DRAG pulls an adjacent ally toward you;
+        // VAULT leaps an adjacent cover tile. Both surface only when usable (CanDrag/CanVault).
+        Add("drag", "DRAG", "7", interactive && g.CanDrag(u), g.DragMode);
+        Add("vault", "VAULT", "9", interactive && g.CanVault(u), g.VaultMode);
         Add("overwatch", "OVERWATCH", "2", interactive && u != null && u.CanAct && u.Ammo > 0, false);
         Add("hunker", "HUNKER", "3", interactive && u != null && u.CanAct, u != null && u.Hunkered);
         if (g.HasHackAction)
@@ -892,6 +896,32 @@ public static class Hud
                 Raylib.DrawLineEx(new Vector2(cx + 5f, cy + 3f), new Vector2(cx + 8f, cy), 1.7f, c);
                 break;
             }
+            case "drag":
+            {
+                // A box being pulled toward a hook on the left (arrow points back toward the dragger).
+                var box = new Rectangle(cx + 1f, cy - 4f, 7f, 8f);                                          // the ally being pulled
+                Raylib.DrawRectangleLinesEx(box, 1.3f, c);
+                // a tug line + leftward arrow toward the dragger
+                Raylib.DrawLineEx(new Vector2(cx + 1f, cy), new Vector2(cx - 8f, cy), 1.7f, c);
+                Raylib.DrawLineEx(new Vector2(cx - 8f, cy), new Vector2(cx - 5f, cy - 3f), 1.7f, c);
+                Raylib.DrawLineEx(new Vector2(cx - 8f, cy), new Vector2(cx - 5f, cy + 3f), 1.7f, c);
+                break;
+            }
+            case "vault":
+            {
+                // An up-arc leaping over a low bar (the cover tile being vaulted).
+                Raylib.DrawLineEx(new Vector2(cx - 7f, cy + 5f), new Vector2(cx + 7f, cy + 5f), 1.8f, c);   // the cover bar
+                // a leaping arc over it
+                var p0 = new Vector2(cx - 7f, cy + 3f);
+                var p1 = new Vector2(cx,      cy - 7f);
+                var p2 = new Vector2(cx + 7f, cy + 3f);
+                Raylib.DrawLineEx(p0, p1, 1.6f, c);
+                Raylib.DrawLineEx(p1, p2, 1.6f, c);
+                // arrowhead at the landing
+                Raylib.DrawLineEx(p2, new Vector2(cx + 4f, cy + 1f), 1.5f, c);
+                Raylib.DrawLineEx(p2, new Vector2(cx + 9f, cy + 1f), 1.5f, c);
+                break;
+            }
         }
     }
 
@@ -998,6 +1028,8 @@ public static class Hud
             case "shoot": return "Aimed shot at a target in range + line of sight. Full aim, costs 1 action and does NOT end the turn — keep your other action to reposition (one shot/turn).";
             case "grenade": return "Lob a grenade: AoE that ignores cover, hits both teams, clears low cover.";
             case "shove": return "Shove an adjacent enemy 1 tile back (breaks its overwatch + exposes it). Blocked = collision damage. 1 action, won't end your turn, once/turn.";
+            case "drag": return "Pull an adjacent ally 1 tile toward you (saves wounded, speeds the march to evac). 1 action, won't end your turn, once/turn.";
+            case "vault": return "Leap an adjacent cover tile to the open floor beyond it - cross an impassable screen to flank or escape. 1 action, won't end your turn, once/turn.";
             case "overwatch": return "Watch: fire a reaction shot at the first foe that moves in sight.";
             case "hunker": return "Hunker down for extra cover defense; you can't be crit.";
             case "hack": return g.HasSabotage
