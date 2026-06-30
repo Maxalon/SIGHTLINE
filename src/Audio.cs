@@ -63,9 +63,34 @@ public static class Audio
         Raylib.SetMasterVolume(MasterVol);
 
         BuildRecipes();
-        foreach (var kv in _recipes) LoadRecipe(kv.Key, kv.Value.dur, kv.Value.fill);
+        // FILE-FIRST, SYNTH-FALLBACK: for each cue, try a dropped-in CC0 sample
+        // (assets/sfx/<id>.wav or .ogg) FIRST; only synthesise the procedural recipe if no
+        // valid file is present. The sandbox ships NO asset files, so the procedural path stays
+        // the active one (and all self-tests pass) — this just lets real audio drop in later
+        // with zero call-site changes.
+        foreach (var kv in _recipes)
+        {
+            if (LoadFile(kv.Key, $"assets/sfx/{kv.Key}.wav") || LoadFile(kv.Key, $"assets/sfx/{kv.Key}.ogg"))
+                continue;
+            LoadRecipe(kv.Key, kv.Value.dur, kv.Value.fill);
+        }
 
         InitMusic();
+    }
+
+    /// Try to load a real sound FILE into the cue table. Returns true only if the file exists
+    /// AND loads to a valid Sound (so a missing/corrupt file cleanly falls through to the synth
+    /// fallback). Guarded — safe with no device (callers only reach here when _ready).
+    static bool LoadFile(string id, string path)
+    {
+        try
+        {
+            if (!File.Exists(path)) return false;
+            var s = Raylib.LoadSound(path);
+            if (Raylib.IsSoundValid(s)) { _snd[id] = s; return true; }
+        }
+        catch { }
+        return false;
     }
 
     /// Register every SFX recipe into _recipes WITHOUT touching the audio device. Called by
@@ -217,12 +242,16 @@ public static class Audio
         });
     }
 
-    // RIFLE = the baseline firing voice (shared by "shoot" + "w_rifle"): click + crack + body.
+    // RIFLE = the baseline firing voice (shared by "shoot" + "w_rifle"): a sharp mechanism
+    // CLICK + a bright powder CRACK + a saw BODY with a quick pitch-drop, now with a tiny
+    // second transient click (the action cycling) + a faint low thump for more "weight".
     static void FillRifle(float[] b)
     {
-        Click(b, 0, 0.30f);
+        Click(b, 0, 0.34f);                                       // sharper attack transient
+        Click(b, 0.012f, 0.16f);                                  // a faint 2nd click (action cycle)
         Noise(b, 0, 0.09f, 0.46f, lp: 0.8f);
         Tone(b, 200, 0, 0.10f, Wv.Saw, 0.34f, slideTo: 95, atk: 0.0008f, dec: 4.5f);
+        Tone(b, 95, 0, 0.06f, Wv.Sine, 0.20f, slideTo: 60, atk: 0.0008f, dec: 5f);   // low body thump
     }
 
     /// Map a weapon kind to its firing-voice sound id. Falls back to the rifle voice.
@@ -235,8 +264,10 @@ public static class Audio
         _                  => "w_rifle",
     };
 
-    /// Play the firing voice for a given weapon kind (no-op headless / muted).
-    public static void PlayWeapon(WeaponKind k) => Play(WeaponSound(k));
+    /// Play the firing voice for a given weapon kind (no-op headless / muted). Optional
+    /// per-shot pitch jitter + stereo pan (defaults preserve existing call sites).
+    public static void PlayWeapon(WeaponKind k, float pitchVar = 0f, float panX = -1f)
+        => Play(WeaponSound(k), pitchVar, panX);
 
     /// Play an event stinger by name: "kill" / "lastkill" / "victory" / "lose" / "squadwipe".
     /// Unknown names are a safe no-op. (No-op headless / muted.)
@@ -252,12 +283,29 @@ public static class Audio
         }
     }
 
+    /// Load a music bed FILE if present + valid, else synthesise the procedural bed from
+    /// `synth` (a .wav byte buffer). Same file-first / synth-fallback contract as LoadFile,
+    /// so a dropped-in assets/music/<name>.ogg overrides the synth with zero call-site change.
+    static Music LoadMusicFile(string path, Func<byte[]> synth)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                var m = Raylib.LoadMusicStream(path);
+                if (Raylib.IsMusicValid(m)) return m;
+            }
+        }
+        catch { }
+        return Raylib.LoadMusicStreamFromMemory(".wav", synth());
+    }
+
     static void InitMusic()
     {
         try
         {
-            _ambient = Raylib.LoadMusicStreamFromMemory(".wav", BuildAmbient());
-            _combat = Raylib.LoadMusicStreamFromMemory(".wav", BuildCombat());
+            _ambient = LoadMusicFile("assets/music/ambient.ogg", BuildAmbient);
+            _combat = LoadMusicFile("assets/music/combat.ogg", BuildCombat);
             _ambient.Looping = true;
             _combat.Looping = true;
             Raylib.PlayMusicStream(_ambient);
@@ -363,10 +411,33 @@ public static class Audio
         return EncodeWav(b, 0.8f / peak);
     }
 
-    public static void Play(string id)
+    // a cheap rolling counter so successive shots get a deterministic, non-repeating pitch
+    // jitter (NOT Random — keeps the headless harness reproducible + avoids a machine-gun
+    // "exactly the same sample" feel). Bounded; wraps harmlessly.
+    static int _pitchSeq;
+
+    /// Play a sound. Optional `pitchVar` (±semitone-ish randomisation amount, 0=off) detunes
+    /// the sample each call via a rolling counter; `panX` (0..1 = screen-x; <0 = centred/off)
+    /// pans it in stereo. Defaults keep every existing call site unchanged + crash-safe headless.
+    public static void Play(string id, float pitchVar = 0f, float panX = -1f)
     {
         if (!_ready || !Enabled) return;
-        if (_snd.TryGetValue(id, out var s)) Raylib.PlaySound(s);
+        if (!_snd.TryGetValue(id, out var s)) return;
+        if (pitchVar > 0f)
+        {
+            // map the rolling counter to a triangular-ish offset in [-1,1], scale to pitchVar.
+            int q = _pitchSeq++ & 7;
+            float u = (q / 7f) * 2f - 1f;                 // -1..1 deterministic sweep
+            Raylib.SetSoundPitch(s, 1f + pitchVar * u);
+        }
+        else Raylib.SetSoundPitch(s, 1f);
+        if (panX >= 0f)
+            // Raylib pan: 0.5 = centre, 0 = right, 1 = left. Map screen-x so left of screen
+            // pans left: panLeftFraction = 1 - screenXFraction.
+            Raylib.SetSoundPan(s, Util.Clamp(1f - panX, 0f, 1f));
+        else
+            Raylib.SetSoundPan(s, 0.5f);
+        Raylib.PlaySound(s);
     }
 
     public static void ToggleMute() { Enabled = !Enabled; }

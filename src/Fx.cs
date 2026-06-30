@@ -19,6 +19,22 @@ public class FloatText
     public string Text;
     public Color Color;
     public float Life, MaxLife, Size, Rise;
+    public float Drift;     // horizontal arc velocity (px/s); 0 = pure vertical rise (small hits)
+    public float Pop;       // scale-punch weight: 0 = subtle, 1 = hard EaseOutBack pop (big hits/crits/kills)
+}
+
+/// A transient additive "light": a soft radial glow disc that flares bright then decays
+/// over a short life (~0.12s). Drawn additively so overlaps build up and the post-FX
+/// bright-pass bloom haloes them for free. Used for muzzle flashes + impact pops so a
+/// shot reads as a burst of LIGHT, not just sparks. Deterministic: position is fixed at
+/// spawn, alpha/radius are a pure function of remaining life.
+public class FxLight
+{
+    public Vector2 Pos;
+    public float Life, MaxLife;
+    public float Radius;
+    public Color Color;
+    public float Peak;      // peak alpha of the core (kept tasteful, ~0.5)
 }
 
 /// A short-lived radial pulse: a filled "impact frame" flash and/or an expanding
@@ -80,6 +96,7 @@ public class Fx
     public List<Ring> Rings = new();
     public List<Streak> Streaks = new();
     public List<Reticle> Reticles = new();
+    public List<FxLight> Lights = new();
 
     public float Shake;
     public bool ShakeOn = true;     // settings toggle
@@ -104,6 +121,17 @@ public class Fx
             t.Life -= dt;
             if (t.Life <= 0) { Texts.RemoveAt(i); continue; }
             t.Pos.Y -= t.Rise * dt;
+            // big hits arc sideways as they rise; the drift decays so the number settles.
+            if (t.Drift != 0f)
+            {
+                t.Pos.X += t.Drift * dt;
+                t.Drift *= 1f - 2.2f * dt;
+            }
+        }
+        for (int i = Lights.Count - 1; i >= 0; i--)
+        {
+            Lights[i].Life -= dt;
+            if (Lights[i].Life <= 0) Lights.RemoveAt(i);
         }
         for (int i = Rings.Count - 1; i >= 0; i--)
         {
@@ -264,6 +292,46 @@ public class Fx
         });
     }
 
+    /// A transient additive light at `pos`: a soft radial glow that flares then decays over
+    /// `life` (~0.12s). Drawn additively (it brightens whatever it overlaps) so muzzle/impact
+    /// flashes read as a punch of LIGHT and the post-FX bloom haloes them. Keep `peak` tasteful
+    /// (~0.5) so it lights the moment without blinding. Kill/crit pass a bigger radius + peak.
+    public void Flash(Vector2 pos, Color col, float radius, float life = 0.12f, float peak = 0.5f)
+    {
+        Lights.Add(new FxLight
+        {
+            Pos = pos, Life = life, MaxLife = life,
+            Radius = radius, Color = col, Peak = peak,
+        });
+    }
+
+    /// A "tracer wake": a few dim, fast-fading glow dots dropped along a beam line so the
+    /// round leaves a brief vapour trail rather than a clean instant beam. Deterministic
+    /// (positions are fixed fractions of the line). `count` segments between start->end.
+    public void TracerWake(Vector2 start, Vector2 end, Color col, int count = 3,
+                           float size = 2.4f, float life = 0.14f)
+    {
+        for (int i = 1; i <= count; i++)
+        {
+            float f = i / (float)(count + 1);
+            var p = Vector2.Lerp(start, end, f);
+            // each segment slightly smaller + shorter-lived the further down the beam, so the
+            // wake "thins" toward the impact (reads as the round outrunning its own vapour).
+            float k = 1f - 0.35f * f;
+            Particles.Add(new Particle
+            {
+                Pos = p,
+                Vel = Vector2.Zero,
+                Life = life * k,
+                MaxLife = life,
+                Size = size * k,
+                Drag = 0f,
+                Color = col,
+                Spark = false,
+            });
+        }
+    }
+
     /// A pre-shot reticle SNAP on the target: a thin ring that contracts inward over the
     /// wind-up beat, so a shot reads as anticipation -> release. Tint it to the firer's team.
     /// Purely cosmetic; one per shot. `life` should match the shooter's wind-up beat (~0.1s).
@@ -301,6 +369,18 @@ public class Fx
 
     public void PopText(Vector2 at, string text, Color col, float size = 26f)
     {
+        // Big hits/crits/kills (they pass a larger `size`) get extra JUICE: a sideways arc +
+        // a harder scale-punch + a brief spawn brightness flash. Small hits stay subtle.
+        // The arc DIRECTION is a frozen per-text hash (deterministic — no RNG drift), so the
+        // headless shot reproduces. Threshold ~30 matches the crit/kill number sizes in Anim.
+        float weight = Util.Clamp((size - 26f) / 10f, 0f, 1f);   // 0 at 26 (normal) -> 1 at 36 (kill-crit)
+        float drift = 0f;
+        if (weight > 0.01f)
+        {
+            uint h = HashStr(text) ^ (uint)((int)at.X * 73856093) ^ (uint)((int)at.Y * 19349663);
+            float dir = (Hash01(h) < 0.5f) ? -1f : 1f;           // arc left or right, frozen per number
+            drift = dir * (26f + 22f * weight) * weight;          // bigger hits arc wider
+        }
         Texts.Add(new FloatText
         {
             Pos = at,
@@ -309,8 +389,12 @@ public class Fx
             Life = 1.1f,
             MaxLife = 1.1f,
             Size = size,
-            Rise = 46f,
+            Rise = 46f + 18f * weight,                            // big hits launch a touch faster
+            Drift = drift,
+            Pop = weight,
         });
+        // a brief additive light under a big number so the impact reads as a flash of damage.
+        if (weight > 0.4f) Flash(at + new Vector2(0, 12), col, 22f + 14f * weight, 0.10f, 0.30f * weight);
     }
 
     /// A prominent, slow-fading, barely-rising stamp (e.g. a KIA marker on death).
@@ -381,6 +465,27 @@ public class Fx
 
     public void Draw()
     {
+        // transient additive lights first (muzzle/impact flares): drawn in additive blend so they
+        // brighten the board + bloom for free. A soft outer halo + a hot core, both flaring in
+        // quickly then fading — alpha eases UP over the first ~25% then decays, so they "pop".
+        if (Lights.Count > 0)
+        {
+            Raylib.BeginBlendMode(BlendMode.Additive);
+            foreach (var l in Lights)
+            {
+                float k = Util.Clamp(l.Life / l.MaxLife, 0f, 1f);   // 1 birth -> 0 death
+                float age = 1f - k;
+                float env = age < 0.25f ? age / 0.25f : k / 0.75f;  // ramp in fast, fade out
+                float a = l.Peak * Util.Clamp(env, 0f, 1f);
+                if (a <= 0.01f) continue;
+                Raylib.DrawCircleV(l.Pos, l.Radius * 1.8f, Raylib.Fade(l.Color, a * 0.30f));
+                Raylib.DrawCircleV(l.Pos, l.Radius,        Raylib.Fade(l.Color, a * 0.65f));
+                Raylib.DrawCircleV(l.Pos, l.Radius * 0.45f,
+                                   Raylib.Fade(Pal.RGBA(255, 252, 245), a * 0.9f));
+            }
+            Raylib.EndBlendMode();
+        }
+
         // radial pulses first, so sparks/embers layer over the flash
         foreach (var r in Rings)
         {
@@ -472,13 +577,25 @@ public class Fx
         foreach (var t in Texts)
         {
             float k = Util.Clamp(t.Life / t.MaxLife, 0f, 1f);
-            float pop = t.Life > t.MaxLife - 0.12f ? Util.EaseOutBack((t.MaxLife - t.Life) / 0.12f) : 1f;
-            int fs = (int)(t.Size * (0.6f + 0.4f * pop));
+            // big hits (t.Pop>0) get a longer, springier EaseOutBack pop and start smaller, so
+            // the number SNAPS up to size; small hits keep the gentle original pop.
+            float popDur = 0.12f + 0.10f * t.Pop;
+            float pop = t.Life > t.MaxLife - popDur ? Util.EaseOutBack((t.MaxLife - t.Life) / popDur) : 1f;
+            float minScale = 0.6f - 0.25f * t.Pop;      // bigger hits start tinier -> harder punch
+            int fs = (int)(t.Size * (minScale + (1f - minScale) * pop));
             int w = (int)Raylib.MeasureTextEx(Cfg.Font, t.Text, fs, 1f).X;
             int x = (int)(t.Pos.X - w / 2f);
             int y = (int)t.Pos.Y;
             Raylib.DrawTextEx(Cfg.Font, t.Text, new Vector2(x + 2, y + 2), fs, 1f, Raylib.Fade(Pal.RGBA(0, 0, 0), k * 0.6f));
-            Raylib.DrawTextEx(Cfg.Font, t.Text, new Vector2(x, y), fs, 1f, Raylib.Fade(t.Color, k));
+            // 1-frame spawn brightness flash on big numbers: blow the colour toward white for the
+            // first couple frames of life (front-loaded, decays instantly) so the hit "flashes".
+            Color c = t.Color;
+            if (t.Pop > 0.4f)
+            {
+                float fl = Util.Clamp((t.MaxLife - t.Life) / 0.05f, 0f, 1f);   // 0 at spawn -> 1 after ~3 frames
+                c = Pal.Mix(Pal.RGBA(255, 255, 255), t.Color, fl);
+            }
+            Raylib.DrawTextEx(Cfg.Font, t.Text, new Vector2(x, y), fs, 1f, Raylib.Fade(c, k));
         }
     }
 
@@ -670,6 +787,16 @@ public class Fx
 
     // fractional part in [0,1) — used to wrap the field so it loops seamlessly with no respawn.
     static float Frac(float v) { v -= MathF.Floor(v); return v < 0f ? v + 1f : v; }
+
+    // deterministic string -> uint hash (FNV-1a). Used to freeze a floating number's arc
+    // direction so big hits curve consistently (no RNG drift -> reproducible in the harness).
+    static uint HashStr(string s)
+    {
+        uint h = 2166136261u;
+        if (s != null)
+            for (int i = 0; i < s.Length; i++) { h ^= s[i]; h *= 16777619u; }
+        return h;
+    }
 
     // deterministic uint->[0,1) hash (xorshift-mix). Used ONLY at pool-build time to freeze
     // per-particle constants; never per frame. Replaces RNG so the field is reproducible.
