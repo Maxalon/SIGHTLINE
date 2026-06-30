@@ -40,6 +40,69 @@ public enum Boon
     RapidDeploy,   // +1 deploy slot this run
 }
 
+/// RUN CONTRACTS (W6): an opt-in, run-long RULESET trade-off chosen at the run-opening draft.
+/// Boons are run BUFFS and Heat is run DIFFICULTY; a Contract changes the KIND of a run (two runs
+/// play differently — DESIGN §3.F horizontal variety). DEFAULT = None, and the headless/autopilot
+/// path never runs the draft, so Run.Contract stays None there → ZERO base-balance regression.
+/// Each contract effect gates on `Run.Contract == X` and is INERT (a pure no-op) as None.
+// APPEND-ONLY — new members at the END only; never reorder/remove (persisted by ordinal).
+public enum Contract
+{
+    None,          // STANDARD — no ruleset change (the default; the only headless value)
+    IronVeterans,  // no recruit backfill, but survivors gain rank faster (fewer bodies ↔ stronger vets)
+    HighStakes,    // +50% mission Intel, but no between-mission field-heal (richer ↔ riskier)
+    Spearhead,     // open unconcealed (no ambush), but every soldier gets +1 action on mission turn 1
+}
+
+/// Names / codes / descriptions for the run contracts (mirrors BoonDef). `All` excludes None
+/// (None is the implicit "STANDARD" opt-out shown in the draft).
+public static class ContractDef
+{
+    public static readonly Contract[] All = { Contract.IronVeterans, Contract.HighStakes, Contract.Spearhead };
+
+    public static string Name(Contract c) => c switch
+    {
+        Contract.IronVeterans => "IRON VETERANS",
+        Contract.HighStakes   => "HIGH STAKES",
+        Contract.Spearhead    => "SPEARHEAD",
+        _ => "STANDARD",
+    };
+
+    public static string Code(Contract c) => c switch
+    {
+        Contract.IronVeterans => "IRV",
+        Contract.HighStakes   => "HST",
+        Contract.Spearhead    => "SPR",
+        _ => "STD",
+    };
+
+    public static string Desc(Contract c) => c switch
+    {
+        Contract.IronVeterans => "No replacement recruits, but survivors rank up faster",
+        Contract.HighStakes   => "+50% mission Intel, but no field-heal between missions",
+        Contract.Spearhead    => "Open unconcealed (no ambush), but +1 action on turn 1",
+        _ => "No ruleset change",
+    };
+
+    public static string Flavor(Contract c) => c switch
+    {
+        Contract.IronVeterans => "The few. The proven.",
+        Contract.HighStakes   => "Everything to gain. Everything to lose.",
+        Contract.Spearhead    => "Hit first. Hit hard.",
+        _ => "Standard rules of engagement.",
+    };
+
+    /// Parse a SIGHTLINE_CONTRACT env value (case-insensitive: ironveterans|highstakes|spearhead)
+    /// to a Contract; unknown/null => None. Lets the Program.cs harness hook be a one-liner.
+    public static Contract Parse(string s) => (s ?? "").Trim().ToLowerInvariant() switch
+    {
+        "ironveterans" or "iron" or "irv" => Contract.IronVeterans,
+        "highstakes"   or "stakes" or "hst" => Contract.HighStakes,
+        "spearhead"    or "spr" => Contract.Spearhead,
+        _ => Contract.None,
+    };
+}
+
 public static class BoonDef
 {
     public static readonly Boon[] All =
@@ -326,6 +389,14 @@ public class Run
     public List<Boon> ActiveBoons = new();    // boons chosen this run (persisted within the run)
     public List<Boon> BoonOffer = new();      // the current pick-1-of-3 awaiting the player
     public bool HasBoon(Boon b) => ActiveBoons.Contains(b);
+
+    // ---- run CONTRACT (W6): an opt-in run-long ruleset trade-off chosen at the draft ----
+    // Default None == STANDARD (no ruleset change). Persisted in the run save (RunDto.Contract,
+    // append-only; old saves default 0 == None). The headless/autopilot path never runs the draft,
+    // so Contract stays None there -> ZERO base-balance regression. Each effect gates on
+    // `Contract == X` and is INERT (a no-op) as None.
+    public Contract Contract = Contract.None;
+    public bool HasContract(Contract c) => Contract == c;
 
     // ---- branching campaign map (3.3) ----
     public List<MissionNode> Map = new();     // the generated DAG of mission nodes
@@ -629,6 +700,7 @@ public class Run
         PendingSpecs.Clear();     // W2: specialization forks reset with the run
         ActiveBoons.Clear();      // boons are run-scoped: a fresh run starts with none
         BoonOffer.Clear();
+        Contract = Contract.None; // contract is set from the draft in StartMission (default STANDARD)
         // generate the branching campaign map and seat the squad at its START node
         MapSeed = Util.RandInt(1, int.MaxValue - 1);
         GenerateMap(MapSeed);
@@ -816,6 +888,11 @@ public class Run
 
             u.FeatMultiKill = u.FeatClutch = u.FeatVengeful = u.WasNearDeath = u.FeatBurned = u.AllyDown = false;
 
+            // CONTRACT "IRON VETERANS": the few grow fast. Each surviving soldier banks +1 bonus
+            // promotion-kill credit per mission cleared (the recruit backfill below is also disabled
+            // under this contract), so a small squad ranks up quicker. Inert as None.
+            if (Contract == Contract.IronVeterans) u.Kills += 1;
+
             // promotions: advance rank while kills clear the next threshold
             while (u.Rank < Ranks.Length - 1 && u.Kills >= KillReq[u.Rank + 1])
             {
@@ -848,10 +925,17 @@ public class Run
             // field medicine: partial heal between missions (halved under Heat harsh attrition).
             // Raised 0.4 -> 0.55: balance data showed the squad limping into the mid-campaign
             // already chipped, turning each mission into a degrading roll instead of a fresh one.
-            int before = u.Hp;
-            int heal = (int)MathF.Ceiling(u.MaxHp * (harsh ? 0.25f : 0.55f));
-            u.Hp = Math.Min(u.MaxHp, u.Hp + heal);
-            if (u.Hp > before) Report.Add($"{u.Name} patched up  (+{u.Hp - before} HP)");
+            // CONTRACT "HIGH STAKES": no free field-heal — survivors carry their damage forward (the
+            // risk side of +50% Intel). The bench full-heal above still applies (a benched soldier
+            // wasn't in the field). Inert as None. (A SUPPLY/RECON card full heal in EnterBarracks is
+            // a separate, explicit reward and still fires.)
+            if (Contract != Contract.HighStakes)
+            {
+                int before = u.Hp;
+                int heal = (int)MathF.Ceiling(u.MaxHp * (harsh ? 0.25f : 0.55f));
+                u.Hp = Math.Min(u.MaxHp, u.Hp + heal);
+                if (u.Hp > before) Report.Add($"{u.Name} patched up  (+{u.Hp - before} HP)");
+            }
         }
 
         // bonds: every pair of survivors that shared this mission grows closer
@@ -861,11 +945,14 @@ public class Run
         // rather than instantly refilling to RosterMax, so a wipe genuinely shrinks your strength
         // for a mission or two. A hard floor still guarantees a deployable squad (no death-spiral).
         // Heat "RELENTLESS" (rung 8) turns OFF all reinforcements — casualties permanently shrink
-        // the roster for the run.
-        if (Heat.NoReinforcements(HeatLevel))
+        // the roster for the run. CONTRACT "IRON VETERANS" does the same (no backfill at all): a wipe
+        // genuinely shrinks the squad, the survivors are stronger (faster ranks above). Inert as None.
+        bool noBackfill = Heat.NoReinforcements(HeatLevel) || Contract == Contract.IronVeterans;
+        if (noBackfill)
         {
+            string why = Contract == Contract.IronVeterans ? "CONTRACT" : "HEAT";
             if (Squad.Count < NextDeployCap)
-                Report.Add($"No reinforcements (HEAT) -- deploying {Squad.Count} strong");
+                Report.Add($"No reinforcements ({why}) -- deploying {Squad.Count} strong");
         }
         else
         {

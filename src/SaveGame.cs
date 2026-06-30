@@ -108,6 +108,7 @@ public static class SaveGame
             ActiveBoons = r.ActiveBoons.ConvertAll(b => (int)b),
             PrepFaction = (int)r.PrepFaction,
             CheckpointUsed = r.CheckpointUsed,
+            Contract = (int)r.Contract,
         };
         foreach (var u in r.Squad)
             dto.Squad.Add(new UnitDto
@@ -149,6 +150,7 @@ public static class SaveGame
         if (dto.ActiveBoons != null) foreach (var b in dto.ActiveBoons) r.ActiveBoons.Add((Boon)b);
         r.PrepFaction = (Faction)dto.PrepFaction;   // append-only: old saves default 0 == Faction.None
         r.CheckpointUsed = dto.CheckpointUsed;      // append-only: old saves default false
+        r.Contract = (Contract)dto.Contract;        // append-only: old saves default 0 == Contract.None
         // regenerate the branching campaign map from its seed and restore the position
         if (dto.MapSeed != 0)
         {
@@ -211,6 +213,7 @@ public static class SaveGame
         public List<int> ActiveBoons = new();   // append-only: run-scoped boons (old saves default empty)
         public int PrepFaction;   // append-only: faction COUNTER-PREP bought (old saves default 0 == None)
         public bool CheckpointUsed;   // append-only: the one-time REINFORCEMENTS redeploy spent (old saves default false)
+        public int Contract;   // append-only: W6 run contract (old saves default 0 == Contract.None)
     }
 
     class UnitDto
@@ -247,6 +250,7 @@ public static class SaveGame
             src.Fallen.Add("DOWNED-GUY");
             src.PrepFaction = Faction.Legion;   // a staged faction counter-prep must round-trip
             src.CheckpointUsed = true;          // the one-time REINFORCEMENTS flag must round-trip
+            src.Contract = Contract.HighStakes; // a chosen run contract (W6) must round-trip
             var a = new Unit
             {
                 Name = "VEGA", Cls = "ASSAULT", Team = Team.Player,
@@ -321,6 +325,7 @@ public static class SaveGame
             if (got.HeatLevel != 5) fails.Add("heatLevel");
             if (got.PrepFaction != Faction.Legion) fails.Add("prepFaction");
             if (!got.CheckpointUsed) fails.Add("checkpointUsed");
+            if (got.Contract != Contract.HighStakes) fails.Add("contract");
 
             // APPEND-ONLY GUARD: Objective is persisted as a raw ordinal (CardDto.Objective). If a
             // future edit reorders/removes a member, saved runs load the wrong objective. Check the
@@ -357,6 +362,9 @@ public static class SaveGame
             var scarVals = (Scar[])Enum.GetValues(typeof(Scar));
             if (scarVals.Length < 4 || scarVals[0] != Scar.ShellShocked || scarVals[^1] != Scar.Vendetta)
                 fails.Add("scarOrdinals");
+            var contractVals = (Contract[])Enum.GetValues(typeof(Contract));
+            if (contractVals.Length < 4 || contractVals[0] != Contract.None || contractVals[^1] != Contract.Spearhead)
+                fails.Add("contractOrdinals");
 
             // meta (unlocked-max heat) round-trips through its own meta.json
             string metaSaved = File.Exists(MetaPath) ? File.ReadAllText(MetaPath) : null;
