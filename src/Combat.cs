@@ -136,6 +136,15 @@ public static class Combat
     // mission. DEFAULT 0 == today's behavior exactly (safety invariant).
     public static int PressureAim = 0;
 
+    // DECAPITATE GUARDED HVT (W4): while a designated guard lives within HvtGuardRange of the HVT,
+    // incoming damage to the HVT is reduced by HvtGuardReduce — floored at 1 so it is NEVER zeroed
+    // (a naive bot still grinds the HVT down → no TIMEOUT). The state (Unit.HvtGuarded) is owned by
+    // Game.UpdateHvtGuard; HardenedReduce just reads it. HvtGuardReducePending is a one-shot signal
+    // Game.Update drains to pop a single "GUARDED" float when a hit was actually softened (not spammy).
+    public const int HvtGuardRange  = 2;   // Chebyshev: a guard within 2 tiles protects the HVT
+    public const int HvtGuardReduce = 3;   // damage subtracted per hit while guarded (floored to >=1)
+    public static bool HvtGuardReducePending = false;   // set when a reduction fires; drained by Game.Update
+
     // ──────────────────────────────────────────────────────────────────────────────────────────
     // MISSION-STATIC LIFECYCLE (PROGRAM TEMPO wave 4). The five per-mission combat statics above
     // (RunBoons / AllUnits / MissionFaction / PrepFaction / PressureAim) were previously set and
@@ -155,6 +164,7 @@ public static class Combat
         MissionFaction = faction;
         PrepFaction = prepFaction;
         PressureAim = 0;
+        HvtGuardReducePending = false;
         AllUnits = System.Array.Empty<Unit>();
     }
 
@@ -440,6 +450,16 @@ public static class Combat
         // weather the close-range alpha (only when MissionFaction matches the prep — an honest bet).
         if (d.Team == Team.Player && PrepFaction == Faction.Legion && MissionFaction == Faction.Legion)
             reduce += PrepLegionArmor;
+        // DECAPITATE GUARDED HVT (W4): the HVT shrugs off part of every hit while a bodyguard is near.
+        // FLOOR at 1 (never zero) so a naive bot still whittles it down — this is the no-TIMEOUT guarantee.
+        // Mark the reduction (only when it actually shaved off damage) for a one-shot "GUARDED" float.
+        if (d.HvtGuarded && d.Team == Team.Enemy)
+        {
+            int before = Math.Max(1, dmg - reduce);
+            int after  = Math.Max(1, before - HvtGuardReduce);
+            if (after < before) HvtGuardReducePending = true;
+            return after;
+        }
         if (reduce <= 0) return dmg;                            // nothing to subtract: pass through
         return Math.Max(1, dmg - reduce);                       // guaranteed-damage floor (>= 1)
     }

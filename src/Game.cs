@@ -506,6 +506,11 @@ public class Game
     // SetupMission after Mission.Build; null on every other objective.
     public Unit Hvt;
     public bool HasHvt => Objective == Objective.Decapitate && Hvt != null;
+    // DECAPITATE GUARDED HVT (W4): up to 2 bodyguards picked near the HVT. While any is alive within
+    // Combat.HvtGuardRange of the HVT, the HVT takes reduced (never zero) damage — peel the guards or
+    // pull the HVT out of the bubble to execute it. Transient (enemies aren't persisted). Recomputed
+    // by UpdateHvtGuard at every turn boundary + after any death (see KillUnit / StartPlayerTurn / etc).
+    readonly List<Unit> _hvtGuards = new();
 
     public bool CanHack(Unit u)
     {
@@ -882,6 +887,32 @@ public class Game
             Hvt.Aim = Math.Min(85, Hvt.Aim + 6);
             Hvt.Name = "HVT-" + Hvt.Name;
         }
+
+        // GUARDED HVT (W4): pick up to 2 nearest alive non-special bodyguards (reuse the same
+        // exclusion set; never the HVT itself). While a guard lives near the HVT it takes reduced
+        // damage, so killing the HVT becomes a positioning puzzle (peel the guards / GRAPPLE it out)
+        // instead of a turn-1 snipe. <2 eligible enemies is fine (a 1-guard or 0-guard HVT just
+        // unguards sooner — no NRE). Guards are recomputed-for-protection each boundary in UpdateHvtGuard.
+        _hvtGuards.Clear();
+        foreach (var u in Enemies) u.IsHvtGuard = false;   // clean slate (no stale guards from a prior mission)
+        Hvt.HvtGuarded = false;
+        foreach (var g in pool.Where(e => e != Hvt && e.Alive && !IsSpecial(e))
+                              .OrderBy(e => Util.ChebyDist(e.X, e.Y, Hvt.X, Hvt.Y))
+                              .Take(2))
+        { g.IsHvtGuard = true; _hvtGuards.Add(g); }
+        UpdateHvtGuard();
+    }
+
+    // GUARDED HVT (W4): recompute whether the HVT is currently protected. The HVT is GUARDED while
+    // ANY of its (alive) bodyguards stands within Chebyshev Combat.HvtGuardRange of it. Mirrors how
+    // FaceShields() runs each enemy turn; called at every turn boundary AND right after any death
+    // (KillUnit) so killing the last in-range guard immediately exposes the HVT (no lag). Inert unless
+    // HasHvt (gated), so it never touches non-Decapitate missions.
+    void UpdateHvtGuard()
+    {
+        if (!HasHvt || !Hvt.Alive) { if (Hvt != null) Hvt.HvtGuarded = false; return; }
+        Hvt.HvtGuarded = _hvtGuards.Any(g => g != null && g.Alive
+                                          && Util.ChebyDist(g.X, g.Y, Hvt.X, Hvt.Y) <= Combat.HvtGuardRange);
     }
 
     /// Resume a saved campaign from the intro. Reloads the run and restarts its
@@ -2025,6 +2056,9 @@ public class Game
         // purge any queued movement for the dead unit
         _anims.RemoveAll(a => a is MoveStepAnim m && m.Unit == d);
         if (Selected == d) Selected = null;
+        // DECAPITATE: a death may have removed the HVT's last in-range guard — re-evaluate now so the
+        // HVT is immediately exposed (the telegraph + reduced-damage gate flip the same frame).
+        UpdateHvtGuard();
     }
 
     /// True when killing `d` decides the mission (last hostile on an Eliminate, a squad
@@ -2447,6 +2481,13 @@ public class Game
 
         float t = MathF.Min(dt, 0.05f);
         Fx.Update(t);
+        // DECAPITATE telegraph: a guarded HVT hit was softened this frame — pop a single "GUARDED"
+        // float at the HVT (Combat can't reach Fx; it just raises the one-shot flag, drained here).
+        if (Combat.HvtGuardReducePending)
+        {
+            Combat.HvtGuardReducePending = false;
+            if (HasHvt && Hvt.Alive) Fx.PopText(Hvt.Pos + new Vector2(0, -42), "GUARDED", Pal.Foe, 18f);
+        }
         foreach (var u in Players) DecayUnitFx(u, t);
         foreach (var u in Enemies) DecayUnitFx(u, t);
         for (int i = Scorches.Count - 1; i >= 0; i--)   // death scorch decals fade out
@@ -3163,6 +3204,19 @@ public class Game
     {
         if (Hvt != null && Hvt.Alive)
         {
+            // GUARDED HVT (W4): while the HVT shrugs off damage, PEEL its bodyguards first — shoot a
+            // living, in-range guard this soldier can hit (bounded: at most 2 guards). If none is
+            // reachable, fall through to grind the HVT directly (reduced-not-zero damage → no stall).
+            if (Hvt.HvtGuarded && u.Ammo > 0)
+            {
+                Unit guard = _hvtGuards
+                    .Where(g => g != null && g.Alive
+                                && Util.ChebyDist(g.X, g.Y, Hvt.X, Hvt.Y) <= Combat.HvtGuardRange
+                                && CanTarget(u, g))
+                    .OrderBy(g => g.Hp)
+                    .FirstOrDefault();
+                if (guard != null) { AutoShootSmart(u, guard); return true; }
+            }
             // shoot the HVT on sight (prep a steady shot first if it sharpens the kill).
             if (u.Ammo > 0 && CanTarget(u, Hvt))
             {
@@ -5531,6 +5585,7 @@ public class Game
         UpdatePressure();                                        // anti-turtle clock: escalate on camp-friendly objectives
         ResolveSuspicion();                                      // 4.3: suspicious pods confirm or lose contact
         FaceShields();                                           // AEGIS turns its barrier toward the squad
+        UpdateHvtGuard();                                        // DECAPITATE: refresh the HVT's guarded state at the boundary
         foreach (var e in Enemies) if (e.Alive) { e.BeginTurn(); TickStatuses(e); }
         _aiUnits = AliveEnemies().Where(e => e.Active).ToList();  // dormant/suspicious pods don't act
         PlanEnemySquad();                                        // shared focus + overwatch map (advisory)
@@ -5553,6 +5608,7 @@ public class Game
         HackedThisTurn = false;           // the terminal accepts one breach cycle per turn (hold)
         ClearMarks();                     // a sharpshooter's MARK lasts until the marker's next turn
         ClearPins();                      // a gunner's SUPPRESSING FIRE pin lasts through one enemy turn, then lifts
+        UpdateHvtGuard();                 // DECAPITATE: refresh the HVT's guarded state at the boundary (a guard may have moved)
         if (AutoPlay) AutoStallCheck();
         foreach (var p in Players) if (p.Alive) { p.BeginTurn(); TickStatuses(p); }
         foreach (var e in Enemies) if (e.Alive) { e.ReactedThisTurn = false; e.Suppress = 0; } // OW resets; suppression expires

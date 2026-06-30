@@ -341,7 +341,14 @@ public static class Hud
             case Objective.Escort: objTxt = "ESCORT VIP"; objCol = Pal.VipGold; break;
             case Objective.Rescue: objTxt = g.CaptiveLocked ? "RESCUE CAPTIVE" : "EXTRACT CAPTIVE"; objCol = Pal.VipGold; break;
             case Objective.Defend: objTxt = $"DEFEND {Math.Min(g.Turn, Game.DefendTurns)}/{Game.DefendTurns}"; objCol = Pal.Accent; break;
-            case Objective.Decapitate: objTxt = "KILL HVT"; objCol = Pal.VipGold; break;
+            case Objective.Decapitate:
+                // W4 GUARDED HVT: read the guarded state at a glance — danger-red "HVT GUARDED" while
+                // a bodyguard shields it (peel the guards first), gold "HVT EXPOSED" once it's open to
+                // a kill. Falls back to the plain "KILL HVT" if the HVT is somehow null.
+                if (g.HasHvt && g.Hvt.HvtGuarded) { objTxt = "HVT GUARDED"; objCol = Pal.Foe; }
+                else if (g.HasHvt)                { objTxt = "HVT EXPOSED"; objCol = Pal.VipGold; }
+                else                              { objTxt = "KILL HVT"; objCol = Pal.VipGold; }
+                break;
             default: objTxt = "ELIMINATE"; objCol = Pal.Accent; break;
         }
         Raylib.DrawTextEx(Cfg.Font, objTxt, new Vector2(360, 19), 16, 1f, objCol);

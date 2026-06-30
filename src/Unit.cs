@@ -421,6 +421,14 @@ public class Unit
     public bool Enraged;        // elite boss: one-time low-HP rage trigger
     public int ShieldDx, ShieldDy;  // SHIELD archetype: facing dir its frontal shield blocks (3.7)
 
+    // DECAPITATE GUARDED HVT (W4). Transient per-mission, never persisted (enemies aren't saved).
+    // IsHvtGuard: this enemy is one of the (<=2) bodyguards the Game picked near the HVT.
+    // HvtGuarded: set ONLY on the HVT, recomputed at every turn boundary + after any death by
+    // Game.UpdateHvtGuard — true while any living guard is within Chebyshev HvtGuardRange of it.
+    // Combat.HardenedReduce reads HvtGuarded to soften (never zero) incoming damage to the HVT.
+    public bool IsHvtGuard;
+    public bool HvtGuarded;
+
     // SIEGE / BOMBARD artillery charge (telegraphed area-denial). Transient per-mission state,
     // never persisted (enemies aren't saved). ChargeTurns is set to Game.SiegeFuse when a strike
     // is charged on the BOMBARD's turn; the strike resolves in Game.TickSiegeStrikes at the start
