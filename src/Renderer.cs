@@ -10,6 +10,43 @@ public static class Renderer
     // how far raised terrain (and anything standing on it) lifts on screen
     public const float ElevLift = 8f;
 
+    // UNDERTOW W7 — board-space key light. A single fixed, deterministic light source
+    // placed off the upper-left of the board (matching the top-left face-catch convention
+    // used on cover/plateaus) turns the flat checker into a LIT space: tiles nearer the
+    // light read brighter/warmer, far tiles fall off toward the corner shadow. Pure
+    // function of tile centre -> constant, so the SIGHTLINE_SHOT harness stays byte-stable
+    // and the balance flywheel is unaffected (it never renders). NOT hue-only: it moves
+    // VALUE, so it survives the colorblind palette and can't carry meaning by itself.
+    // Light origin in board-fraction space (0,0 = top-left tile centre .. 1,1 = bottom-right).
+    static readonly Vector2 LightOrigin = new(0.28f, 0.10f);
+    // Returns a light factor in ~[-1, +1]: +1 fully lit (at the origin), 0 at mid-fall,
+    // negative in the far corner shadow. Deterministic; depends only on tile coords.
+    static float FloorLight(Game g, int x, int y)
+    {
+        float fx = g.Grid.W > 1 ? x / (float)(g.Grid.W - 1) : 0.5f;
+        float fy = g.Grid.H > 1 ? y / (float)(g.Grid.H - 1) : 0.5f;
+        // squared radial falloff from the light origin, plus a mild directional term so
+        // the gradient has a consistent "sun" direction rather than a flat bullseye.
+        float dx = fx - LightOrigin.X, dy = fy - LightOrigin.Y;
+        float dist = MathF.Sqrt(dx * dx + dy * dy);          // 0 at origin .. ~1.2 far corner
+        float radial = 1f - Util.Clamp(dist / 1.05f, 0f, 1f);// 1 near light -> 0 far
+        radial = radial * radial;                            // squared falloff = softer core, deeper corners
+        // directional bias: down-right of the origin sits a touch darker (raking light).
+        float dirBias = Util.Clamp((dx + dy) * 0.5f + 0.5f, 0f, 1f); // 0 up-left .. 1 down-right
+        float lit = radial * 1.15f - dirBias * 0.35f;        // combine; corner goes slightly negative
+        return Math.Clamp(lit, -0.55f, 1f);
+    }
+
+    // Apply a key-light factor (from FloorLight) to a surface colour: lift toward white on the
+    // lit side, sink toward near-black in shadow. Moves VALUE only (colorblind-safe). `amt` caps
+    // how far the light can push so terrain stays QUIET relative to units.
+    static Color KeyLit(Color c, float lit, float amt)
+    {
+        return lit >= 0f
+            ? Pal.Mix(c, Pal.RGBA(255, 252, 244), lit * amt)
+            : Pal.Mix(c, Pal.RGBA(3, 5, 9), -lit * amt);
+    }
+
     // --- 5.4 Procedural noise overlay -----------------------------------------
     // A 128x128 tiling Perlin-noise texture generated once after the GL context is
     // ready (lazy-init on the first DrawBoard call).  Drawn at low alpha over floor
@@ -279,12 +316,25 @@ public static class Renderer
         floorMean = Pal.Mix(floorMean, bm.Tint, 0.40f);                  // LAND the biome hue (marquee)
         Color fa = Pal.Mix(floorMean, bm.FloorA, 0.40f);                 // keep a readable checker
         Color fb = Pal.Mix(floorMean, bm.FloorB, 0.40f);
+        // UNDERTOW W7 — bake the board key light into the floor value so the room reads as a
+        // lit space, not a flat wash. Lit tiles lift toward a warm-white; shadowed corner tiles
+        // sink toward the biome-tinted deep. The tint on BOTH endpoints keeps the biome hue
+        // (STEEL cool / ARID warm / …) intact — the light only reshapes VALUE across the board.
+        Color litCol = Pal.Mix(Pal.RGBA(255, 250, 236), bm.Tint, 0.30f); // warm key, tinted toward biome
+        Color shadeCol = Pal.Mix(Pal.RGBA(4, 6, 10), bm.Tint, 0.18f);    // cool deep, tinted toward biome
         for (int x = 0; x < g.Grid.W; x++)
             for (int y = 0; y < g.Grid.H; y++)
             {
                 if (g.Grid.Tiles[x, y] != TileType.Floor) continue;
                 var r = Util.TileRect(x, y);
-                Raylib.DrawRectangleRec(r, ((x + y) & 1) == 0 ? fa : fb);
+                Color baseCol = ((x + y) & 1) == 0 ? fa : fb;
+                float lit = FloorLight(g, x, y);
+                // positive light -> lift toward the warm key (capped so the floor never rivals
+                // units); negative -> sink toward the cool deep so far corners genuinely recede.
+                Color lc = lit >= 0f
+                    ? Pal.Mix(baseCol, litCol, lit * 0.16f)
+                    : Pal.Mix(baseCol, shadeCol, -lit * 0.34f);
+                Raylib.DrawRectangleRec(r, lc);
             }
 
         // 5.4: noise grain over the floor so it reads as material, not flat colour. Bumped to
@@ -370,7 +420,10 @@ public static class Renderer
                 var top = new Rectangle(r.X, r.Y - lift, r.Width, r.Height);
                 Color ca = h >= 2 ? Pal.Mix(hiA, Pal.RGBA(255, 255, 255), 0.12f) : hiA;
                 Color cb = h >= 2 ? Pal.Mix(hiB, Pal.RGBA(255, 255, 255), 0.12f) : hiB;
-                Raylib.DrawRectangleRec(top, ((x + y) & 1) == 0 ? ca : cb);
+                // UNDERTOW W7 — same board key light on the plateau top so raised ground reads as
+                // a lit surface consistent with the floor/cover (VALUE only; colorblind-safe).
+                float plit = FloorLight(g, x, y);
+                Raylib.DrawRectangleRec(top, KeyLit(((x + y) & 1) == 0 ? ca : cb, plit, 0.14f));
                 // contact shadow at the base of the front wall — grounds the plateau
                 if (belowH < h)
                     Raylib.DrawRectangleRec(
@@ -883,35 +936,52 @@ public static class Renderer
         // block so terrain RECEDES behind the units/objectives (visual-hierarchy invert).
         // Cover must read as solid, grounded and QUIET — never the loudest thing on screen.
         Color tint = g.Biome.Tint;
-        // pull each cover colour toward near-black so the blocks sit back as a low, muted base
-        // layer; the faux-3D shape + shadow still carry the silhouette. HORIZON W5: the enlarged
-        // units are now the loudest board element, so cover recedes FURTHER — the walls stay at
-        // ~0.24 toward black but the (previously loudest) TOP FACES drop an extra ~12% so the
-        // biggest bright surface stops competing with the figures. Squint test: units > cover.
+        // UNDERTOW W7 — the HORIZON W5 pass over-receded cover into near-invisibility (stacked
+        // ~0.24 wall / ~0.36 top mixes toward black). Cover is a real tactics-readability need:
+        // it must read as a CLEAR, distinct solid — quiet, but never lost against the floor.
+        // Dial the recede WAY back (walls 0.24->0.10, tops 0.36->0.14) so the blocks read as
+        // grounded volumes, then let the rim/edge light (below) do the "pop", and keep the
+        // squint hierarchy with units by NOT letting the top faces cross the bloom knee.
         Color shade = Pal.RGBA(8, 11, 15);
-        Color cHi = Pal.Mix(Pal.Mix(Pal.CoverHi, tint, 0.28f),    shade, 0.24f);
-        Color cHiTop = Pal.Mix(Pal.Mix(Pal.CoverHiTop, tint, 0.28f), shade, 0.36f);   // top face receded (was 0.24)
-        Color cLo = Pal.Mix(Pal.Mix(Pal.CoverLo, tint, 0.28f),    shade, 0.24f);
-        Color cLoTop = Pal.Mix(Pal.Mix(Pal.CoverLoTop, tint, 0.28f), shade, 0.36f);   // top face receded (was 0.24)
+        Color cHi = Pal.Mix(Pal.Mix(Pal.CoverHi, tint, 0.28f),    shade, 0.10f);
+        Color cHiTop = Pal.Mix(Pal.Mix(Pal.CoverHiTop, tint, 0.28f), shade, 0.14f);   // top face reads clearly (was 0.36)
+        Color cLo = Pal.Mix(Pal.Mix(Pal.CoverLo, tint, 0.28f),    shade, 0.10f);
+        Color cLoTop = Pal.Mix(Pal.Mix(Pal.CoverLoTop, tint, 0.28f), shade, 0.14f);   // top face reads clearly (was 0.36)
         for (int x = 0; x < g.Grid.W; x++)
             for (int y = 0; y < g.Grid.H; y++)
             {
                 var t = g.Grid.Tiles[x, y];
                 if (t == TileType.Floor) continue;
                 var r = Util.TileRect(x, y);
+                // UNDERTOW W7 — ground the block: a soft AO pool under the cover's footprint,
+                // drawn on the FLOOR (before the lift) so the block reads as sitting IN the room,
+                // not floating over a flat plane. Cheap (2 rounded rects), deterministic.
+                {
+                    var foot = Util.TileRect(x, y);
+                    foot.Y -= g.Grid.HeightAt(x, y) * ElevLift;
+                    Raylib.DrawRectangleRounded(
+                        new Rectangle(foot.X + 3, foot.Y + foot.Height - 12, foot.Width - 6, 14),
+                        0.6f, 6, Raylib.Fade(Pal.RGBA(0, 0, 0), 0.20f));
+                }
                 r.Y -= g.Grid.HeightAt(x, y) * ElevLift;   // sit cover on the plateau top (per tier)
                 bool high = t == TileType.HighCover;
+                // per-tile key light [-.55,1]: cover on the lit side reads a touch brighter, far
+                // corner blocks sink — so the 3D forms pop consistently with the floor gradient.
+                float klit = FloorLight(g, x, y);
                 float inset = 5f;
                 float lift = high ? 16f : 8f;
                 var baseRect = new Rectangle(r.X + inset, r.Y + inset + lift,
                                              r.Width - inset * 2, r.Height - inset * 2 - lift);
                 var topRect = new Rectangle(r.X + inset, r.Y + inset,
                                             r.Width - inset * 2, r.Height - inset * 2 - lift);
+                // apply the key light to the wall + top faces (VALUE only — survives colorblind).
+                Color wallCol = KeyLit(high ? cHi : cLo, klit, 0.13f);
+                Color topCol  = KeyLit(high ? cHiTop : cLoTop, klit, 0.16f);
                 // drop shadow
                 Raylib.DrawRectangleRounded(
                     new Rectangle(baseRect.X + 3, baseRect.Y + 4, baseRect.Width, baseRect.Height),
                     0.18f, 5, Raylib.Fade(Pal.RGBA(0, 0, 0), 0.35f));
-                Raylib.DrawRectangleRounded(baseRect, 0.18f, 5, high ? cHi : cLo);
+                Raylib.DrawRectangleRounded(baseRect, 0.18f, 5, wallCol);
                 // front-face shade gradient: a soft darkening toward the bottom of the wall so the
                 // block reads as a lit 3D volume (consistent top-light), and a thin lighter catch on
                 // the upper-left of the face. Cheap (a handful of thin bands), subtle (squint holds).
@@ -933,22 +1003,28 @@ public static class Renderer
                 Raylib.DrawRectangleRec(
                     new Rectangle(baseRect.X + 4, baseRect.Y + baseRect.Height - 1, baseRect.Width - 8, 4),
                     Raylib.Fade(Pal.RGBA(0, 0, 0), 0.22f));
-                Raylib.DrawRectangleRounded(topRect, 0.22f, 5, high ? cHiTop : cLoTop);
+                Raylib.DrawRectangleRounded(topRect, 0.22f, 5, topCol);
                 // 5.4: noise grain on the top face so cover reads as a physical object
                 DrawNoiseRect(topRect, tint, 0.10f);
-                // top edge highlight — a whisper so cover stays quiet (HORIZON W5: 0.05 -> 0.035).
+                // top edge highlight — a clear (but quiet) catch on the light-facing upper edge so
+                // the top face reads as a distinct lit plane. UNDERTOW W7: with cover no longer
+                // over-receded, this can lift back toward a legible whisper (0.035 -> 0.06).
                 Raylib.DrawLineEx(new Vector2(topRect.X + 4, topRect.Y + 2),
                                   new Vector2(topRect.X + topRect.Width - 4, topRect.Y + 2),
-                                  1.5f, Raylib.Fade(Pal.RGBA(255, 255, 255), 0.035f));
-                // emissive rim — kept only as a faint structural catch on the upper edge so the
-                // block still reads as a lit volume, but well below signal so it can't compete
-                // with the enlarged units/objectives or trip the bloom into making cover glow.
-                // HORIZON W5: dimmed a further ~30% (was 0.11/0.08) so it can't cross the (now
-                // lower) bloom bright-pass knee — only units/objectives should flood light.
+                                  1.5f, Raylib.Fade(Pal.RGBA(255, 255, 255), 0.06f));
+                // structural rim — a narrow bright accent on the top's light edge (upper + left)
+                // so the 3D form pops. UNDERTOW W7: restored toward the pre-W5 catch (0.13/0.10)
+                // now that cover reads as a solid — still tuned to sit just UNDER the bloom knee
+                // (~0.36 luma) so cover never floods; only units/objectives cross it.
                 Color rimCol = Pal.Mix(Pal.HighEdge, Pal.RGBA(255, 255, 255), 0.45f);
+                float rimA = high ? 0.13f : 0.10f;
                 Raylib.DrawLineEx(new Vector2(topRect.X + 5, topRect.Y + 3),
                                   new Vector2(topRect.X + topRect.Width - 5, topRect.Y + 3),
-                                  1f, Raylib.Fade(rimCol, high ? 0.075f : 0.055f));
+                                  1f, Raylib.Fade(rimCol, rimA));
+                // left vertical rim on the top face — completes the "lit from upper-left" read.
+                Raylib.DrawLineEx(new Vector2(topRect.X + 3, topRect.Y + 4),
+                                  new Vector2(topRect.X + 3, topRect.Y + topRect.Height - 4),
+                                  1f, Raylib.Fade(rimCol, rimA * 0.7f));
                 // damage state (3.6): a chipped-but-not-yet-degraded block shows fissures
                 if (g.Grid.CoverHp[x, y] > 0 && g.Grid.CoverHp[x, y] < g.Grid.MaxCoverHp(x, y))
                 {
