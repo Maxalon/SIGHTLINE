@@ -342,3 +342,22 @@ seeds (mix of WIN/LOSE, no exceptions):
 
 ---
 
+
+## PROGRAM COUNTERPLAY additions
+
+- **Cross-run VETERAN reserve.** Promoted survivors (Rank≥1) of a finished run retire into a persistent
+  reserve (`meta.json`, append-only `UnitDto` list, dedup-by-name, capped 12 most-storied). A new run's DRAFT
+  recalls up to 2 as gold "VETERAN" cards carrying their full rank/perks/traits/spec/scars/nickname; the rest
+  are fresh recruits. WAR ROOM shows `VETERANS n/12`. `SaveGame.LoadVeterans/EnshrineVeterans`,
+  `Run.GenerateDraftPool(veterans)`, `Game.AwardMetaRunEnd`. Save-safe + NoPersist-gated. `SIGHTLINE_VETTEST`.
+- **Focused (cone) overwatch.** FOCUS (key F / action button) braces a 90° kill-lane toward the aimed tile:
+  reacts only inside the cone but at +15 braced aim, vs the default WIDE watch. The cone gates both the
+  reaction (`Game.OnUnitEnteredTile`) and the AI's `PlayerOverwatchTiles` via `Game.InOwCone`, so the enemy AI
+  reads and can exploit the blind zone. Renderer draws the gold kill-lane. Additive (default overwatch
+  unchanged). `SIGHTLINE_OWTEST` / `SIGHTLINE_FOCUSOW`.
+- **Biome visual identity** pushed above the squint-test floor (per-biome floor/signature/ambient/grade), plus
+  legible dormant pods (slate ring + ?/! glyph) and a punchier enemy-intent reticle/carets.
+- **3 new authored arenas** — CAUSEWAY (tier-1 land-bridge chokepoint), REDANS (diagonal sawtooth gauntlet),
+  DONJON (walled tier-2 keep with a gated ramp). Arena pool 32→35.
+- **Game.cs sliced** into `Game.Autopilot.cs` (balance/smoke AI) + `Game.Harness.cs` (Debug/SelfTest hooks) —
+  behaviour-neutral, 7648→4707 lines.

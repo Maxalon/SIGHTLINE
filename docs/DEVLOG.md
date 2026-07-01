@@ -924,3 +924,79 @@ actually succeeding — trust the completion notification, not an idle-waiter. B
 (new HORDETEST/METATEST/CODEXTEST/MODETEST + all prior); all four modes autoplay clean; campaign balance held
 (heat-0 80%). No CI; free-licensed assets only. Open: real CC0 audio on a device; endless difficulty tuning on a
 device; a veteran carry-over between runs; the deferred full Game.cs partial-split.
+
+---
+
+## PROGRAM "COUNTERPLAY" — player counterplay + visual identity + code health (fresh autonomous session)
+
+Fully-autonomous dev-team session run as orchestrator + a 4-lens research fan-out (design opportunity / code
+architecture / meta-replay / visual critique, run as a `Workflow`) + isolated-worktree dev agents on strictly
+disjoint files + an independent reviewer + the `SIGHTLINE_BALANCE` flywheel. Branch
+`claude/game-dev-orchestration-mxc8ok`. No human input.
+
+**Thesis (from the research fan-out, grounded in the current code):** three converging frontiers on a very mature
+game — (1) the player's *reactive/positional* toolkit is thinner than the enemy AI's (overwatch is a flat binary);
+(2) the 8 biomes render **below the squint-test perception floor** (they read as one recolored board despite bespoke
+per-biome data); (3) `Game.cs` (7648 lines) is the parallelization bottleneck, but ~3000 of those lines are two
+behaviour-neutral blocks (the autopilot + the harness) that can slice out at near-zero risk. Plus the single
+most-deferred item across all ~11 prior programs: **cross-run veteran carry-over** — every run still rebuilt the same
+rookies.
+
+**Waves (each built 0/0 + self-tested + verified; the marquee independently reviewed):**
+- **W0 — Game.cs partial split (`eefad24`), parallel worktree dev.** Behaviour-neutral slice of `Game.cs`
+  **7648 → 4707** into `Game.Autopilot.cs` (1475, the SmartStep/AutoStep balance+smoke AI) and `Game.Harness.cs`
+  (1558, every `Debug*`/`*SelfTest` headless hook). The dev **proved neutrality at the IL level** (Mono.Cecil,
+  0-line normalized per-method diff) — stronger than a screenshot md5 (which is RNG-non-deterministic even on the
+  pristine baseline). Shrinks the merge bottleneck for every future wave.
+- **W1 — land the biome identity (`f1a79a6`), parallel worktree dev.** Pushed per-biome floor-checker
+  differentiation (Tint pull 0.22→0.40), signature alphas (~1.6-2×), ambient density (+12%), and the post-FX grade
+  gain above the perception floor so STEEL/ARID/TUNDRA/VERDANT/ASH/VOID/NEON/MAGMA read as **distinct places** while
+  the squint hierarchy (units > objectives > cover) holds in both palettes. Also: dormant pods got a legible slate
+  under-ring + crisper ?/! glyphs (they were near-invisible brown), and the enemy-intent reticle/carets got contrast
+  + an entrance pop. Disjoint files (Renderer/Util/Fx/Display) → ran fully parallel with W0.
+- **W2 — cross-run VETERAN legacy (`212fe9a`), tech-lead (coupled spine).** Promoted survivors of a finished run
+  (Rank≥1, Alive, non-VIP) retire into a persistent reserve in `meta.json` (append-only `List<UnitDto>`, dedup-by-name,
+  capped 12 most-storied). A new run's DRAFT recalls up to 2 as gold "VETERAN" cards carrying full progression
+  (rank/perks/traits/spec/scars/nickname); the rest fresh, so a returning legend is a bonus, never the whole squad.
+  Reused the run-save `UnitDto` via extracted `ToUnitDto`/`FromUnitDto` helpers (one mapping, two consumers). WAR ROOM
+  shows `VETERANS n/12`. Save-safe + `NoPersist`-gated (byte-stable harness). New `SIGHTLINE_VETTEST`.
+- **W3 — FOCUSED overwatch (`2b3a5cf`), tech-lead.** FOCUS (key F / button) braces a 90° cone toward the aimed tile:
+  reacts only inside the lane but at +15 braced aim, vs the default WIDE watch (any direction, base accuracy). The
+  cone gates BOTH the reaction (`OnUnitEnteredTile`) AND the AI's `PlayerOverwatchTiles` via the identical `InOwCone`
+  test, so the routing AI reads and can exploit the blind zone. **Purely additive** — default overwatch is
+  byte-for-byte unchanged, so base balance can't regress by construction (the flywheel autopilot only uses the wide
+  watch). New `SIGHTLINE_OWTEST` (cone geometry) + `SIGHTLINE_FOCUSOW` shot.
+- **Content — 3 authored arenas (`1a3b230`), parallel worktree dev.** CAUSEWAY (TUNDRA, tier-1 land-bridge
+  chokepoint), REDANS (ASH, diagonal sawtooth gauntlet + knoll), DONJON (STEEL, walled tier-2 keep with a gated
+  ramp). Pool 32→35, biome-affinity retargeted. Disjoint (Maps/Mission) → parallel with W3.
+
+**Independent review (veteran wave, the riskiest — it touches the save format):** **SHIP**, no CRIT/HIGH/MED. The
+reviewer verified back-compat empirically against a hand-written old-style `meta.json`, diffed the extracted
+`ToUnitDto`/`FromUnitDto` field-by-field against the original inline code (behaviour-identical; weapon-mod re-bake
+still precedes ammo seeding), and confirmed the `NoPersist` byte-stability (a stocked reserve produces an md5-identical
+shot; an autoplay win writes no `meta.json`). Two non-gating LOW notes: 2 veterans/run is a persistent power floor to
+watch via the flywheel; recall restored snapshot `Hp` not `MaxHp` — applied a one-liner freshen (full HP / no wound on
+recall) in the W3 commit.
+
+**Verification.** Build **0/0** Release + Debug. **All 28 self-tests PASS** on the final integrated tree (new OWTEST +
+VETTEST + the full prior suite). Autoplay clean across missions + the 3 new arenas (no exceptions, no TIMEOUT).
+Screenshots verified: biome sweep, veteran draft, WAR ROOM veteran count, focused-overwatch cone, all 3 arenas.
+
+**Process learnings (COUNTERPLAY).**
+1. **The slice was the keystone-enabler.** Doing the Game.cs split FIRST (in parallel with the disjoint visual wave)
+   shrank the bottleneck so the two Game.cs-heavy gameplay waves (veterans, overwatch) ran on a smaller, cleaner file.
+   A behaviour-neutral move is verifiable to a very high bar — an **IL-level diff** beats a flaky screenshot md5.
+2. **"Additive-by-construction" is the safest way to add a gameplay mechanic.** Focused overwatch leaves the default
+   verb untouched and the autopilot never uses it, so it *cannot* regress the measured base — the same property the
+   boons/contracts default-None pattern relies on.
+3. **Reuse the existing DTO for new persistence.** The veteran reserve reused the run-save `UnitDto` via one extracted
+   mapping, so save-safety inherits the already-proven append-only round-trip (SAVETEST covers it) rather than adding
+   a parallel format to get wrong.
+4. **Harness quirk logged:** `R=$(... xvfb-run ... | grep)` command-substitution silently drops the child's stdout
+   under `xvfb-run`; run each self-test as a direct `echo -n; CMD | grep` statement (not captured in `$()`, not a
+   shell function/`for` loop) or the whole sweep reads as empty. (Not a code issue — every test passes when run
+   directly.)
+
+**COUNTERPLAY TOTAL: 5 waves, ~7 commits, ~5 agents (4 research + 2 dev worktrees + 1 review) — the Game.cs split,
+the biome-identity leap, cross-run veteran legacy (the long-deferred replay keystone), focused overwatch, and 3
+arenas — 28 self-tests green, build 0/0, flywheel no-regression, review SHIP. Merged to `main`.**
