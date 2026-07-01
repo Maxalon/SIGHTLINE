@@ -946,7 +946,6 @@ public partial class Game
         _missionKia.Clear();
         Scorches.Clear();            // death decals don't carry between missions
         _refundedThisTurn.Clear();   // flank-kill refund is per-turn; clear it for the mission's first turn too (review #2)
-        _vipWaitTurns = 0;           // SmartStep Escort: VIP-hold patience (anti-TIMEOUT)
         _smartConcealTurns = 0;      // SmartStep: concealed-turn counter (hard anti-TIMEOUT cap)
         DeathFlash = 0;
         // per-mission bonus goal is a CAMPAIGN feature only — no secondary in LAST STAND or SKIRMISH/DAILY.
@@ -2287,7 +2286,6 @@ public partial class Game
     // player turns (e.g. only unreachable dormant pods remain), force a pod awake
     // so the match always resolves. Test-only; never runs in normal play.
     int _autoSig = -1, _autoStall;
-    int _vipWaitTurns;       // SmartStep Escort: consecutive turns the VIP held for safety (anti-stall)
     int _smartConcealTurns;  // SmartStep: player turns spent concealed (hard anti-TIMEOUT cap)
     const int AutoMaxTurns = 50;  // hard autopilot match cap: force-end a dragging match as a LOSS
 

@@ -15,8 +15,8 @@ namespace Sightline;
 //                   best-target selection, deliberate ability/ambush use) so headless games are a
 //                   real balance gauge. Routed to via SMARTPLAY / the balance runner.
 // The public entry FLAGS (AutoPlay/SmartPlay/SmartSloppy), the Slip()/SeedSloppy perturbation
-// gate, and the anti-stall FIELDS (_lastTelemetryTurn/_autoSig/_autoStall/_vipWaitTurns/
-// _smartConcealTurns) stay in Game.cs (they're read from the reset/turn-flow code too).
+// gate, and the anti-stall FIELDS (_lastTelemetryTurn/_autoSig/_autoStall/_smartConcealTurns)
+// stay in Game.cs (they're read from the reset/turn-flow code too).
 // This is a pure mechanical slice of Game.cs — no behaviour change.
 public partial class Game
 {
@@ -1173,48 +1173,6 @@ public partial class Game
     /// VIP/asset advance toward (gx,gy). The asset dies in one or two hits and the enemy AI
     /// hunts it, so this is SURVIVAL-FIRST: only bound forward into a tile that's genuinely
     /// SAFE (no live enemy can shoot it there — exposure 0 — or it ends in cover). Among safe
-    /// forward tiles, take the one that closes the most distance. If NO safe forward tile
-    /// exists, WAIT in place (let the escorts clear the lane) — UNLESS no active enemy can
-    /// even see the asset right now (the lane is already clear → just walk), which also doubles
-    /// as the anti-stall escape (a clear board → beeline → reach evac → win). Returns true if
-    /// it issued a move; false means "hold here" (the caller hunkers — turn still ends).
-    bool VipAdvance(Unit u, int gx, int gy)
-    {
-        if (MoveCost == null) return TryMoveTowardTile(u, gx, gy);
-        int hereDist = Util.ChebyDist(u.X, u.Y, gx, gy);
-        int bx = -1, by = -1; int bestProg = 0; float bestScore = float.NegativeInfinity;
-        for (int x = 0; x < Grid.W; x++)
-            for (int y = 0; y < Grid.H; y++)
-            {
-                int c = MoveCost[x, y];
-                if (c <= 0) continue;
-                int need = c <= u.MoveBudget ? 1 : 2;
-                int cost = u.Blitz ? Math.Max(0, need - 1) : need;
-                if (cost > u.ActionsLeft) continue;
-                int prog = hereDist - Util.ChebyDist(x, y, gx, gy);     // tiles closer to evac
-                if (prog <= 0) continue;                                // forward only
-                float expo = TileExposure(u, x, y);
-                var nearest = AliveEnemies().OrderBy(e => Util.ChebyDist(x, y, e.X, e.Y)).FirstOrDefault();
-                int cov = nearest != null ? Grid.GetCover(x, y, nearest.X, nearest.Y).Level : 2;
-                bool safe = expo <= 0f || cov >= 1;                     // no exposed-gun OR in cover
-                if (!safe) continue;
-                // among safe forward tiles, maximise progress, then cover, then least exposure.
-                float score = prog * 4f + cov * 3f - expo;
-                if (score > bestScore) { bestScore = score; bx = x; by = y; bestProg = prog; }
-            }
-        if (bx >= 0) { _vipWaitTurns = 0; IssueMove(bx, by); return true; }   // safe step: reset patience
-        // no SAFE forward tile. If the asset is currently unseen by any active foe, the lane
-        // is clear enough — just beeline (also doubles as an anti-stall valve: a cleared board
-        // ends in a win). Otherwise hold and let the escorts clear the lane.
-        bool unseen = !Enemies.Any(e => e.Alive && e.Active && Grid.HasLineOfSight(e.X, e.Y, u.X, u.Y));
-        if (unseen) { _vipWaitTurns = 0; return TryMoveTowardTile(u, gx, gy); }
-        // PATIENCE / ANTI-TIMEOUT: don't hold forever (the escorts may never clear that
-        // watcher). After several held turns, accept the risk and push toward evac so the
-        // mission always resolves. Bounded — the match can never stall on a waiting VIP.
-        if (++_vipWaitTurns >= 2) { _vipWaitTurns = 0; return TryMoveTowardTile(u, gx, gy); }
-        return false;   // wait this turn (hold in current cover); caller hunkers (turn still ends)
-    }
-
     /// Hold overwatch when it's the right call: the soldier has ammo + an action, isn't
     /// disoriented, and a live enemy is near enough to plausibly walk into the lane this
     /// enemy turn (so we don't waste overwatch staring at an empty board). Returns true if set.
