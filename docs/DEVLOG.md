@@ -1013,3 +1013,92 @@ Two parallel disjoint-file dev worktrees off the merged main:
 Fully disjoint file sets → clean file-copy integration, zero conflicts. Build 0/0; COMBATTEST/AITEST/SAVETEST/
 CODEXTEST/VETTEST PASS; autoplay clean (incl. forced-all-STRIKER/SCREENER stress). A second, tighter demonstration
 of the one-owner-per-hot-file parallel-dev pattern.
+
+---
+
+# PROGRAM "UNDERTOW" — the missing half of the action economy (interrupt + morale) + balance roots + board depth
+
+Fully-autonomous dev-team session run as: orchestrator + a **6-lens research fan-out** (a `Workflow`: scout →
+synthesize → **adversarial verify**) → per-wave dev/review/QA, with the `SIGHTLINE_BALANCE` flywheel as the compass.
+No human input. Branch `claude/game-dev-orchestration-v20urn`, **PR #71**.
+
+## Research → thesis
+Six read-only research lenses (tactical-depth / enemy-AI / run-meta / content / presentation / code-health),
+grounded in the CURRENT code AND a fresh measured baseline. An adversarial-verify pass then **caught four real
+flaws in the synthesis before any dev touched code**: a rehash of the already-shipped `PlanEnemySquad` coordination
+(a proposed parallel `SquadPlan` object), a hand-rolled reimplementation of the wired-but-orphaned `StatusKind.Stun`,
+a "pod commander" grounded on a non-existent pod-leader, and a phantom cross-wave dependency.
+
+**Thesis:** the measured baseline has one root disease — attrition is one-directional and the enemy has no will-state,
+so a match tips once and **never tips back** (lead-swings/match 0.48, policy gap +29.2, comebacks structurally
+impossible). Every "add HP / add an aim-slider" fix makes it worse. The cure is the **missing half of the action
+economy**: mechanics that **SUBTRACT the enemy's tempo/will** rather than add HP to the winner — an *earnable*
+comeback lever for a behind player.
+
+**Measured baseline (flywheel, N=24/heat, greedy+sloppy):** run 60.4%, gap +29.2, lead-swings 0.48, choices/turn 5.20,
+Evac 10.9 / Escort 8.2 turns (drag), PLATING bought 369×, LockOn perk 34 (dead-perk superset; Hardened 2 / Tank 4).
+
+## Waves (each built 0/0 + self-tested + flywheel-measured; a final cross-wave review = SHIP)
+- **W1 — correctness.** `KillUnit` made idempotent + purges surplus queued reaction `ShotAnim`s aimed at a
+  dead unit — fixes a double-kill that double-counted Fallen/Memorial/RecordKill/CreditKill and corrupted the
+  class-lethality telemetry the flywheel ranks. `SIGHTLINE_DKTEST`.
+- **W2 — interrupt economy (keystone).** **BRACE** (key B): a disrupting reaction stance. On a hit it STAGGERS the
+  mover — zeroes its remaining actions THIS turn (post-move offense denied via the `ActAfterMove` ActionsLeft gate) —
+  for reduced, non-crit damage. Trade a kill you won't land for tempo. Bounded (one reaction/soldier/turn),
+  TIMEOUT-safe, autopilot-probed. `SIGHTLINE_STAGGERTEST`.
+- **W3 — enemy pod MORALE / ROUT.** Pods (spawned ~2 strong) carry shared morale: chewed to ≤ half spawn strength,
+  the survivors ROUT — flee toward their own edge (overriding the never-retreat archetype exemption), drop overwatch,
+  shoot wild (Routed −18 aim), then rally. **The second kill in a pod is now worth far more than the first** — a
+  routed pod stops trading, so the player's HP-sum stabilizes (directly targets the 0.48 lead-swings root).
+  `SIGHTLINE_MORALETEST`.
+- **W4 — sequenced coordination.** The counterweight to W2/W3 (which softened the +29 punish-gap toward ~0). Enemy
+  pods coordinated only via a focus map computed ONCE per turn, so a shove/breach that EXPOSED a soldier was never
+  noticed by the units acting after it. Fix, both advisory-only: SORT the turn order so setup verbs (SAPPER breach /
+  STRIKER + adjacent shove) act BEFORE finishers, and RECOMPUTE the shared focus per-unit in PickNext so the pod
+  collapses on the freshly-exposed target THIS turn. AITEST extended.
+- **W5 — balance roots.** (a) **LockOn de-superset**: +aim only vs a FLANKED target, not any exposed one (it was a
+  superset of the situational aim perks → dominated picks). (b) **De-throne PLATING**: removed the autopilot's
+  "always top up armor" preference (the BOT rule, not the mechanic, that drove 369 buys). COMBATTEST gains a
+  lockOn no-op assertion.
+- **W6 — de-drag Evac/Escort (parallel worktree dev, orchestrator-reviewed + integrated).** EVAC: a DEPLOY BEACON
+  action (key G — moved off B during integration to dodge the W2 BRACE collision) plants a forward evac beacon whose
+  walkable 3×3 is UNIONED into `EvacZone` alongside the fixed far-corner FALLBACK (always present → a dead planter
+  can't soft-lock). ESCORT: `LeashVip()` auto-follows the squad's forward element so the fragile asset is no longer
+  hand-walked. `SIGHTLINE_BEACONTEST`.
+- **W7 — board depth / presentation (parallel worktree dev).** A deterministic board key-light + restored cover
+  legibility (a prior pass over-receded cover into near-black) + contact-shadow AO. `Renderer.cs` only; byte-stable +
+  colorblind-safe.
+
+## Measured (flywheel, N=24/heat)
+| | baseline | W2-fix + W3 | + W5 | 6-wave (+W6) | 7-wave (+W4) |
+|---|---|---|---|---|---|
+| run-completion | 60.4% | 72.9% | 66.7% | 66.7% | _(pending)_ |
+| **lead-swings/match** | **0.48** | **0.59** | 0.58 | 0.53 | _(pending)_ |
+| policy gap | +29.2 | +4.2 | ~0 | ~0 | _(pending)_ |
+| choices/turn | 5.20 | 6.09 | 6.16 | 5.44 | _(pending)_ |
+| Evac turns | 10.9 | — | — | **7.8** | _(pending)_ |
+| PLATING buys | 369 | — | **203** | — | — |
+| dead perks (HRD/TNK) | 2 / 4 | — | **11 / 11** | — | — |
+
+**Headline:** the comeback thesis delivered — lead-swings 0.48→0.59, the +29 punish-spiral gap collapsed to a
+forgiving band, run-completion up, the dead economy/perk roots fixed, and the Evac march de-dragged (10.9→7.8t).
+A caught-and-corrected **inverted-gap artifact** (−25) taught the key lesson: an over-eager autopilot BRACE probe
+made the *greedy* policy self-sabotage; narrowing it to the genuinely-optimal use (protect a threatened wounded
+soldier) restored a positive gap — *measure the measurer* (per VANGUARD). (Open follow-up: the ESCORT leash lifted
+win% but the corner-fight residual left escort turns UP, ~14t — a fight, not empty walking, but not the intended
+de-drag; a forward beacon for Escort is the clean fix.)
+
+## Process learnings (UNDERTOW)
+1. **Adversarially verify the RESEARCH, not just the code.** The verify pass rejected/sharpened 4 of 6 synthesized
+   waves against the live code BEFORE a dev ran — killing a parallel `SquadPlan` object that would have shadowed the
+   already-shipped coordination, and a "commander" grounded on a non-existent pod-leader. Cheap; saved wasted dev
+   effort each.
+2. **Reuse the wired mechanism.** W2 denies an action via the same `ActionsLeft` gate every enemy verb already
+   checks; W3's rout reuses the `retreatMode` scoring seam + a per-unit-field aim read — no new subsystems, so
+   save-safety/TIMEOUT-safety come for free.
+3. **The flywheel gap is the load-bearing signal, and it's noisy.** A single inverted-gap run flagged a bot-policy
+   bug (not a game bug); fixing the probe restored it. Trust the trend, not one N=24 sample.
+4. **A worktree dev can silently branch off a STALE base.** The W6 dev's isolated worktree branched off the old
+   pre-program `main`, so its single commit sat on top of `0eae874`, not the 6-wave tip — a naive file-copy would
+   have REVERTED W1-W5/W7. Caught via `git merge-base`; integrated instead by `cherry-pick -n` + a hand-resolved
+   key-collision (BEACON B→G). **Always check the merge-base of a delegated worktree before integrating.**
