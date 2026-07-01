@@ -255,6 +255,10 @@ public static class Combat
         if (a.HasPerk(Perk.LockOn) && coverLevel == 0) hit += Unit.PerkAim;
         if (a.HasPerk(Perk.CloseQuarters) && dist <= Unit.CloseRange) hit += Unit.PerkAim;
         if (a.HasPerk(Perk.Marksman) && dist >= Unit.LongRange) hit += Unit.PerkAim;
+        // SIEGEBREAKER (anti-turtle): +aim vs a HUNKERED target — claws back part of the -25 hunker
+        // penalty applied above, so a camped/hunkered foe can still be dug out. Inert vs any active
+        // (non-hunkered) enemy, so it's a situational pick, not a flat aim upgrade like LockOn.
+        if (a.HasPerk(Perk.Siegebreaker) && d.Hunkered) hit += Unit.SiegebreakerAim;
         // CoolHeaded (composure) is a DEFENDER perk now: a CoolHeaded TARGET is hard to rattle, so any
         // attacker firing at it loses CoolHeadedEvade aim (its daze-immunity half lives in Unit.AddStatus).
         // A survivability pick, distinct from the attacker-side aim line (LockOn/CloseQuarters/Marksman).
@@ -335,6 +339,15 @@ public static class Combat
         // (the opposite end from Executioner's sub-half-HP crit). Executioner vs First Strike is the
         // kept, build-defining, mutually-exclusive crit PAIR — a real choice, not a redundant stack.
         if (a.HasPerk(Perk.GiantSlayer) && d.MaxHp > 0 && d.Hp >= d.MaxHp) AddCrit(Unit.FirstStrikeCrit);
+        // VANTAGE (elevation specialist): +crit while this attacker fires from HIGH GROUND — an earned,
+        // positional crit payoff (inert on flat ground). Stacks additively with the always-on
+        // HighGroundCrit situational bonus, turning "hold the vantage" into a real build axis.
+        if (a.HasPerk(Perk.Vantage) && highGround) AddCrit(Unit.VantageCrit);
+        // BREAKER (combined-arms punish): +crit vs a target the squad has SUPPRESSED or PINNED (both set
+        // by a gunner's verb). Rewards the follow-up shot after a foe is locked down; inert vs an
+        // unrattled enemy. A pin-punisher axis, orthogonal to the HP-based (Executioner/First Strike)
+        // and cover-based (LockOn) crit perks.
+        if (a.HasPerk(Perk.Breaker) && (d.Suppress > 0 || d.Pinned > 0)) AddCrit(Unit.BreakerCrit);
         // Guardian: overwatch LETHALITY. A reaction shot (ReactedThisTurn is set by Game right before
         // it Resolves this shot) crits hard — Reflexes makes overwatch reliable, Guardian makes it lethal.
         // SENTINEL (Sharpshooter spec fork) grants the SAME built-in. The || means perk+spec add the
@@ -1004,6 +1017,59 @@ public static class Combat
             if (ComputeOdds(gV, Perked(Perk.GiantSlayer), chipped).CritChance != ComputeOdds(gV, Plain(), chipped).CritChance) fails.Add("firstStrikeChippedNoOp");
         }
 
+        // HORIZON wave 6 — THREE MORE build perks, each a pure ComputeOdds read that fires ONLY under its
+        // condition and is an exact no-op otherwise. Deltas are FLAT (no damping), so we assert them exactly.
+        {
+            // Attacker at (3,5), enemy target at (7,5), Hp<MaxHp so First Strike can never contaminate the
+            // crit deltas here (Breaker/Vantage are the only perk sources in play).
+            Unit MkPerk(Perk p) { var u = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 3, Y = 5 }; u.Perks.Add(p); return u; }
+            Unit MkPlain() => new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 3, Y = 5 };
+
+            // ---- VANTAGE: +VantageCrit crit ONLY while the attacker fires from HIGH GROUND; inert on flat
+            // ground. Compare perked-vs-plain on the SAME elevation so the always-on HighGround bonuses
+            // cancel and only the Vantage delta remains. ----
+            var gW6Hi = new Grid();
+            var vTgt = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 7, Y = 5, Hp = 9, MaxHp = 10 };
+            // flat ground: Vantage is inert (perked == plain).
+            if (ComputeOdds(gW6Hi, MkPerk(Perk.Vantage), vTgt).CritChance != ComputeOdds(gW6Hi, MkPlain(), vTgt).CritChance) fails.Add("vantageFlatNoOp");
+            // raise the attacker's tile -> high ground; now Vantage adds exactly VantageCrit over a plain
+            // attacker on the same high ground.
+            gW6Hi.Height[3, 5] = 1;
+            int vHiPerk  = ComputeOdds(gW6Hi, MkPerk(Perk.Vantage), vTgt).CritChance;
+            int vHiPlain = ComputeOdds(gW6Hi, MkPlain(),           vTgt).CritChance;
+            if (vHiPerk != Util.Clamp(vHiPlain + Unit.VantageCrit, 0, 100)) fails.Add("vantageHighGroundFires");
+
+            // ---- BREAKER: +BreakerCrit crit vs a SUPPRESSED or PINNED target; inert vs an unrattled one.
+            // The suppress/pin flags live on the DEFENDER and carry no intrinsic crit change, so the whole
+            // delta is the perk. ----
+            var gW6Br = new Grid();
+            var brFresh = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 7, Y = 5, Hp = 9, MaxHp = 10 };                 // not rattled
+            var brSupp  = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 7, Y = 5, Hp = 9, MaxHp = 10, Suppress = 30 };   // suppressed
+            var brPin   = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 7, Y = 5, Hp = 9, MaxHp = 10, Pinned = 2 };      // pinned
+            // unrattled target -> Breaker is inert (perked == plain).
+            if (ComputeOdds(gW6Br, MkPerk(Perk.Breaker), brFresh).CritChance != ComputeOdds(gW6Br, MkPlain(), brFresh).CritChance) fails.Add("breakerFreshNoOp");
+            // suppressed target -> +BreakerCrit exactly.
+            if (ComputeOdds(gW6Br, MkPerk(Perk.Breaker), brSupp).CritChance != Util.Clamp(ComputeOdds(gW6Br, MkPlain(), brSupp).CritChance + Unit.BreakerCrit, 0, 100)) fails.Add("breakerSuppressedFires");
+            // pinned target -> +BreakerCrit exactly (the || branch).
+            if (ComputeOdds(gW6Br, MkPerk(Perk.Breaker), brPin).CritChance != Util.Clamp(ComputeOdds(gW6Br, MkPlain(), brPin).CritChance + Unit.BreakerCrit, 0, 100)) fails.Add("breakerPinnedFires");
+
+            // ---- SIEGEBREAKER: +SiegebreakerAim aim vs a HUNKERED target; inert vs an active one. A
+            // hunkered target zeroes crit, so we assert on HIT (both attackers see the same -25 hunker
+            // penalty; only the perked one claws SiegebreakerAim back). ----
+            var gW6Sg = new Grid();
+            var sgActive = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 7, Y = 5, Hp = 9, MaxHp = 10 };                  // not hunkered
+            var sgHunk   = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 7, Y = 5, Hp = 9, MaxHp = 10, Hunkered = true };  // hunkered
+            // active target -> Siegebreaker is inert (perked hit == plain hit).
+            if (ComputeOdds(gW6Sg, MkPerk(Perk.Siegebreaker), sgActive).HitChance != ComputeOdds(gW6Sg, MkPlain(), sgActive).HitChance) fails.Add("siegebreakerActiveNoOp");
+            // hunkered target -> +SiegebreakerAim exactly over a plain attacker vs the same hunkered foe.
+            int sgPerkHit  = ComputeOdds(gW6Sg, MkPerk(Perk.Siegebreaker), sgHunk).HitChance;
+            int sgPlainHit = ComputeOdds(gW6Sg, MkPlain(),                 sgHunk).HitChance;
+            if (sgPerkHit != Util.Clamp(sgPlainHit + Unit.SiegebreakerAim, 3, 95)) fails.Add("siegebreakerHunkeredFires");
+            // sanity: the hunkered foe really is harder to hit than the active one (the -25 penalty is live),
+            // so the perk is clawing back a real deficit rather than padding an already-easy shot.
+            if (sgPlainHit >= ComputeOdds(gW6Sg, MkPlain(), sgActive).HitChance) fails.Add("siegebreakerHunkerPenaltyLive");
+        }
+
         // FRAGILE-UNIT ONE-SHOT FLOOR: a full-HP PLAYER unit can't be dropped below 1 HP by a single
         // shot (capped at MaxHp-1); enemies are NOT protected. Use Sniper (DmgMin=5) vs a 4-HP unit so
         // EVERY hit (crit or not) would otherwise be lethal — the floor must always leave HP >= 1.
@@ -1397,7 +1463,7 @@ public static class Combat
         }
 
         return fails.Count == 0
-            ? "COMBATTEST: PASS (cover A-E + high-ground + tier-2 + drone/shield + ambush + graze + streak + perk-balance + build-perks + fragile-floor + armor + bulwark-plating + momentum + outrunner + vanguard + crossfire + factions + faction-prep + spec-forks all hold)"
+            ? "COMBATTEST: PASS (cover A-E + high-ground + tier-2 + drone/shield + ambush + graze + streak + perk-balance + build-perks + vantage/breaker/siegebreaker + fragile-floor + armor + bulwark-plating + momentum + outrunner + vanguard + crossfire + factions + faction-prep + spec-forks all hold)"
             : "COMBATTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 }

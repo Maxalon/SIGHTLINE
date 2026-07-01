@@ -35,7 +35,12 @@ public enum Perk { LockOn, Hardened, Reflexes, Bandolier, CloseQuarters, Marksma
     Bulwark, Vanguard,
     // TEMPO wave 5 — build choices that exploit the new "firing doesn't end the turn" second action:
     Skirmisher,   // after you fire, your repositioning move this turn ignores enemy overwatch (shoot-then-slip)
-    Gunslinger }  // your rushed SECOND shot this turn fires at FULL aim instead of the penalty (double-tap)
+    Gunslinger,   // your rushed SECOND shot this turn fires at FULL aim instead of the penalty (double-tap)
+    // HORIZON wave 6 — three more pure ComputeOdds-read build perks (no new state/hooks; auto-flow into
+    // the offer pool, dossier, and save via PerkDef + the append-only ordinal):
+    Vantage,      // +crit while firing from HIGH GROUND (elevation specialist)
+    Breaker,      // +crit vs a SUPPRESSED or PINNED target (combined-arms punish)
+    Siegebreaker }// +aim vs a HUNKERED target (anti-turtle / dig-them-out)
 
 /// Battlefield traits earned by FEATS (see Game feat hooks + Run.DebriefSurvivors).
 /// Each is a small passive read in Combat.ComputeOdds, so veterans matter.
@@ -581,6 +586,22 @@ public class Unit
     // most. Distinct from Hardened (always-on, crit-weighted) and Tank (+max HP, no per-hit cut).
     // Read in Combat.HardenedReduce off d.Hp/d.MaxHp (already on the defending Unit — no new hook).
     public const int BulwarkFlat = 2;    // extra -damage on every incoming hit while at/above half HP
+    // ---- three MORE build-variety perks: pure CRIT/AIM reads in Combat.ComputeOdds (no new state/hooks) ----
+    // VANTAGE: a HIGH-GROUND specialist. +crit ONLY when this attacker fires from elevated terrain
+    // (highGround already computed in ComputeOdds). Distinct from the always-on HighGroundCrit
+    // situational bonus: this is an EARNED payoff that turns holding the vantage into a build, and it
+    // is inert on the flat ground everyone else fights on — a positioning reward, not a free stack.
+    public const int VantageCrit = 15;   // +crit while firing from high ground (elevation build)
+    // BREAKER: a COMBINED-ARMS finisher — +crit vs a target the squad has SUPPRESSED or PINNED
+    // (d.Suppress>0 || d.Pinned>0, both set by a gunner's suppress/pin verb). Rewards the setup shot
+    // AFTER the gunner locks a foe down; inert vs an unrattled enemy. A pin-punisher axis, orthogonal
+    // to the HP-based (Executioner/First Strike) and cover-based (LockOn) crit perks.
+    public const int BreakerCrit = 20;   // +crit vs a suppressed/pinned target (punish the pinned)
+    // SIEGEBREAKER: an ANTI-TURTLE aim perk. +aim vs a HUNKERED target — a hunkered foe costs the
+    // attacker -25 aim, so this claws back a chunk and rewards cracking a defensive/camped enemy.
+    // Distinct axis (the TARGET's stance) from the range/cover aim perks (LockOn/CloseQuarters/Marksman);
+    // inert vs any active (non-hunkered) foe, so it's a situational pick, not a flat aim upgrade.
+    public const int SiegebreakerAim = 15; // +aim vs a hunkered target (dig them out)
     public const int WoundAim = 12;      // aim penalty while Wound > 0
     public const int WoundMob = 1;       // mobility penalty while Wound > 0
 
@@ -649,6 +670,7 @@ public static class PerkDef
         Perk.GiantSlayer,
         Perk.Bulwark,
         Perk.Skirmisher, Perk.Gunslinger,   // TEMPO wave 5: the two ways to spend the post-shot action
+        Perk.Vantage, Perk.Breaker, Perk.Siegebreaker,  // HORIZON wave 6: elevation / pin-punish / anti-turtle
     };
 
     public static string Name(Perk p) => p switch
@@ -673,6 +695,9 @@ public static class PerkDef
         Perk.Vanguard => "VANGUARD",
         Perk.Skirmisher => "SKIRMISHER",
         Perk.Gunslinger => "GUNSLINGER",
+        Perk.Vantage => "VANTAGE",
+        Perk.Breaker => "BREAKER",
+        Perk.Siegebreaker => "SIEGEBREAKER",
         _ => "PERK",
     };
 
@@ -698,6 +723,9 @@ public static class PerkDef
         Perk.Vanguard => "VAN",
         Perk.Skirmisher => "SKR",
         Perk.Gunslinger => "GUN",
+        Perk.Vantage => "VNT",
+        Perk.Breaker => "BRK",
+        Perk.Siegebreaker => "SGE",
         _ => "?",
     };
 
@@ -723,6 +751,9 @@ public static class PerkDef
         Perk.Vanguard => "+28 crit vs adjacent flanked targets (breach and finish)",
         Perk.Skirmisher => "after you fire, your move this turn draws no overwatch (shoot, then slip away)",
         Perk.Gunslinger => "your rushed second shot each turn fires at full aim (double-tap)",
+        Perk.Vantage => "+15 crit while firing from high ground (hold the vantage)",
+        Perk.Breaker => "+20 crit vs a suppressed or pinned target (punish the pinned)",
+        Perk.Siegebreaker => "+15 aim vs a hunkered target (dig them out)",
         _ => "",
     };
 }
