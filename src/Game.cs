@@ -6,7 +6,7 @@ using Raylib_cs;
 
 namespace Sightline;
 
-public enum Phase { Intro, PlayerTurn, EnemyTurn, Barracks, Win, Lose, Draft, WarRoom }   // WarRoom appended (W3; not persisted)
+public enum Phase { Intro, PlayerTurn, EnemyTurn, Barracks, Win, Lose, Draft, WarRoom, Codex }   // WarRoom (W3), Codex (W6) appended; neither persisted
 // APPEND-ONLY: serialized as a raw (int) in SaveGame (CardDto.Objective). Never reorder or
 // remove a member — a saved run stores the ordinal, so a reorder silently corrupts the loaded
 // objective. Add new objectives at the END only. (SaveGame.SelfTest asserts the tail ordinal.)
@@ -2727,6 +2727,7 @@ public partial class Game
             case Phase.Lose: HandleOverlayClick(); break;
             case Phase.Draft: HandleDraftClick(); break;
             case Phase.WarRoom: HandleWarRoomClick(); break;   // W3: cross-run meta screen
+            case Phase.Codex: HandleCodexInput(); break;       // W6: field manual / reference
         }
 
         CheckEnd();
@@ -4881,6 +4882,7 @@ public partial class Game
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseBright)) Display.CycleBrightness();
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseColorblind)) Display.ToggleColorblind();
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseAutoCam)) { Display.ToggleAutoCam(); if (!Display.AutoCam) { CamZoom = 1f; CamPan = Vector2.Zero; } }
+        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseCodex)) { BeginCodex(); }   // W6: open the field manual (remembers this phase for BACK)
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseAbandon)) { Paused = false; Phase = Phase.Lose; LoseTitle = "RUN ABANDONED"; LoseReason = "You called off the campaign."; Audio.Play("lose"); }
     }
 
@@ -7556,6 +7558,15 @@ public partial class Game
                             Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.OverlayBtn4))
                            || Raylib.IsKeyPressed(KeyboardKey.W);
             if (warRoom) { BeginWarRoom(); return; }
+        }
+
+        // PROGRAM HORIZON W6: intro CODEX — open the field-manual reference (button or key K).
+        if (Phase == Phase.Intro)
+        {
+            bool codex = (Raylib.IsMouseButtonPressed(MouseButton.Left) &&
+                          Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.OverlayBtn5))
+                         || Raylib.IsKeyPressed(KeyboardKey.K);
+            if (codex) { BeginCodex(); return; }
         }
 
         bool click = Raylib.IsMouseButtonPressed(MouseButton.Left) &&

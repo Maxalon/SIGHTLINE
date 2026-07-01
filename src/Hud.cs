@@ -24,7 +24,11 @@ public static class Hud
     public static UiButton[] ActionButtons = Array.Empty<UiButton>();
     public static System.Collections.Generic.List<(Rectangle rect, Unit unit)> RosterChips = new();
     public static Rectangle PauseResume, PauseMute, PauseShake, PauseThreat, PauseFullscreen, PauseWindow, PauseAbandon;
-    public static Rectangle PauseBright, PauseColorblind, PauseAutoCam;
+    public static Rectangle PauseBright, PauseColorblind, PauseAutoCam, PauseCodex;
+    // CODEX / FIELD MANUAL (W6): category tab rects + BACK, published by DrawCodex for hit-testing.
+    public static readonly System.Collections.Generic.List<Rectangle> CodexTabBtns = new();
+    public static Rectangle CodexBack;
+    public static float CodexScrollMax;   // clamp bound for Game.CodexScroll (content overflow px)
     public static Rectangle PerkBtnA, PerkBtnB, PerkTagBtn;
     public static Rectangle SpecBtnA, SpecBtnB;   // W2: class-specialization fork chooser buttons
     public static Rectangle HeatMinus, HeatPlus;   // intro Heat/Ascension +/- selector
@@ -196,7 +200,7 @@ public static class Hud
         // scrim fades in with the card so the pause lands rather than snaps
         float in_ = PanelAnim("pause", 0.13f);
         Raylib.DrawRectangle(0, 0, Cfg.ScreenW, Cfg.ScreenH, Raylib.Fade(Pal.RGBA(5, 8, 11), 0.82f * Util.EaseOutQuad(in_)));
-        int w = 440, h = 665;
+        int w = 440, h = 718;
         int x = Cfg.ScreenW / 2 - w / 2, y = Cfg.ScreenH / 2 - h / 2;
         y -= (int)((1f - Util.EaseOutQuad(in_)) * 14f);
         var card = new Rectangle(x, y, w, h);
@@ -215,6 +219,7 @@ public static class Hud
         PauseBright     = new Rectangle(bx, by, bw, bh); by += bh + gap;
         PauseColorblind = new Rectangle(bx, by, bw, bh); by += bh + gap;
         PauseAutoCam    = new Rectangle(bx, by, bw, bh); by += bh + gap;
+        PauseCodex      = new Rectangle(bx, by, bw, bh); by += bh + gap;
         PauseAbandon    = new Rectangle(bx, by, bw, bh);
 
         DrawButtonRect(PauseResume, "RESUME", "ESC", true, false, Pal.Friend);
@@ -226,6 +231,7 @@ public static class Hud
         DrawButtonRect(PauseBright, "BRIGHTNESS: " + Display.BrightLabel, "", true, false, Pal.Accent);
         DrawButtonRect(PauseColorblind, Pal.Colorblind ? "COLORBLIND: ON" : "COLORBLIND: OFF", "", true, Pal.Colorblind, Pal.Accent);
         DrawButtonRect(PauseAutoCam, Display.AutoCam ? "AUTO-CAM: ON" : "AUTO-CAM: OFF", "", true, Display.AutoCam, Pal.Accent);
+        DrawButtonRect(PauseCodex, "FIELD MANUAL", "K", true, false, Pal.Good);
         DrawButtonRect(PauseAbandon, "ABANDON RUN", "", true, false, Pal.Foe);
 
         string ctl = "Wheel zoom  -  Middle-drag pan  -  [C] reset camera  -  Arrows/WASD + [Space]";
@@ -1249,6 +1255,8 @@ public static class Hud
             DrawDraft(g);
         else if (g.Phase == Phase.WarRoom)
             DrawWarRoom(g);
+        else if (g.Phase == Phase.Codex)
+            DrawCodex(g);
     }
 
     // ============================================================================
@@ -1365,10 +1373,17 @@ public static class Hud
             Raylib.Fade(bestWave > 0 ? Pal.Foe : Pal.TxtDim, 0.8f * Util.EaseOutQuad(Util.Clamp(lsIn, 0f, 1f))));
 
         // PROGRAM HORIZON W3: WAR ROOM (cross-run meta-progression) — a tertiary button below LAST STAND.
+        // Sits alongside the CODEX (W6) as a two-up row so neither crowds the footer.
         float wrIn = PanelAnim("introWarRoom", 0.3f, 0.68f);
         int wrBy = lsBy + 74;
-        OverlayBtn4 = new Rectangle(W / 2 - 130, wrBy, 260, 40);
+        int miniW = 126, miniGap = 8;
+        OverlayBtn4 = new Rectangle(W / 2 - miniW - miniGap / 2, wrBy, miniW, 40);
         DrawOverlayButton(OverlayBtn4, "WAR ROOM", Pal.Accent, "W", wrIn);
+
+        // PROGRAM HORIZON W6: CODEX / FIELD MANUAL — the in-game reference (button or key K).
+        float cxIn = PanelAnim("introCodex", 0.3f, 0.72f);
+        OverlayBtn5 = new Rectangle(W / 2 + miniGap / 2, wrBy, miniW, 40);
+        DrawOverlayButton(OverlayBtn5, "FIELD MANUAL", Pal.Good, "K", cxIn);
 
         // a faint version/footer stamp
         Raylib.DrawTextEx(Cfg.Font, "GEOMETRY · PARTICLES · NO QUARTER", new Vector2(W / 2f - 150, H - 30), 11, 1f, Raylib.Fade(Pal.TxtDim, 0.6f));
@@ -1643,6 +1658,160 @@ public static class Hud
         int by = Cfg.ScreenH - 66;
         WarRoomBack = new Rectangle(W / 2 - 120, by, 240, 44);
         DrawOverlayButton(WarRoomBack, "BACK", Pal.Friend, "Esc", backIn);
+    }
+
+    // ============================================================================
+    //  CODEX / FIELD MANUAL (PROGRAM HORIZON W6) — a browsable read-only reference.
+    //  Left: a category tab column (selected highlighted). Right: a scrollable panel
+    //  of the current category's entries (title + code chip + wrapped desc; a
+    //  DrawCodexGlyph silhouette left of the text for ENEMIES/CLASSES). All content
+    //  is assembled by Codex.Build() from the existing Def strings — no new data.
+    // ============================================================================
+    static void DrawCodex(Game g)
+    {
+        float t = (float)Raylib.GetTime();
+        DrawTacticalBackdrop(t, Pal.Good, 0f);
+        CodexTabBtns.Clear();
+
+        var cats = g.CodexCats;
+        int W = Cfg.ScreenW;
+
+        // ---- title ----
+        float titleIn = PanelAnim("codexTitle", 0.5f);
+        string title = "FIELD MANUAL";
+        int tfs = 56;
+        Vector2 tm = Raylib.MeasureTextEx(Cfg.Font, title, tfs, 4f);
+        float tx = W / 2f - tm.X / 2f;
+        float ty = 34f - (1f - Util.EaseOutBack(Util.Clamp(titleIn, 0f, 1f))) * 20f;
+        for (int i = 1; i <= 3; i++)
+            Raylib.DrawTextEx(Cfg.Font, title, new Vector2(tx, ty - i), tfs, 4f, Raylib.Fade(Pal.Good, 0.10f * titleIn));
+        Raylib.DrawTextEx(Cfg.Font, title, new Vector2(tx, ty), tfs, 4f, Raylib.Fade(Pal.Txt, titleIn));
+        DrawCornerBrackets(new Rectangle(tx - 20, ty + 6, tm.X + 40, tfs - 8), Raylib.Fade(Pal.Good, 0.5f * titleIn), 16f);
+        string subtitle = "The whole vocabulary — enemies, classes, and every earned edge.";
+        Vector2 sm = Raylib.MeasureTextEx(Cfg.Font, subtitle, 13, 1f);
+        Raylib.DrawTextEx(Cfg.Font, subtitle, new Vector2(W / 2f - sm.X / 2f, ty + tfs + 4), 13, 1f, Raylib.Fade(Pal.TxtDim, titleIn));
+
+        if (cats == null || cats.Count == 0)
+        {
+            CodexBack = new Rectangle(W / 2 - 120, Cfg.ScreenH - 66, 240, 44);
+            DrawOverlayButton(CodexBack, "BACK", Pal.Friend, "Esc", 1f);
+            return;
+        }
+        int tab = Math.Clamp(g.CodexTab, 0, cats.Count - 1);
+
+        // ---- layout: tab column (left) + content panel (right) ----
+        int top = (int)(ty + tfs + 34);
+        int marginX = 60;
+        int tabW = 190, colGap = 20;
+        int panelX = marginX + tabW + colGap;
+        int panelW = W - panelX - marginX;
+        int panelH = Cfg.ScreenH - top - 82;
+
+        // tab column
+        float tabsIn = PanelAnim("codexTabs", 0.4f, 0.12f);
+        int tabH = 34, tabGap = 6;
+        int tabTotal = cats.Count * (tabH + tabGap);
+        // if the tab list ever grows past the column, shrink the row height to fit (defensive).
+        if (tabTotal > panelH) { tabH = Math.Max(22, (panelH - cats.Count * tabGap) / cats.Count); }
+        int tyy = top;
+        for (int i = 0; i < cats.Count; i++)
+        {
+            var r = new Rectangle(marginX, tyy, tabW, tabH);
+            CodexTabBtns.Add(r);
+            bool sel = i == tab;
+            bool hover = Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), r);
+            Color bg = sel ? Pal.RGBA(24, 40, 32) : (hover ? Pal.RGBA(20, 30, 40) : Pal.Panel);
+            Raylib.DrawRectangleRounded(r, 0.16f, 6, Raylib.Fade(bg, tabsIn));
+            Raylib.DrawRectangleLinesEx(r, 1.4f, Raylib.Fade(sel ? Pal.Good : Pal.PanelBd, tabsIn));
+            if (sel) Raylib.DrawRectangle((int)r.X, (int)r.Y, 3, (int)r.Height, Raylib.Fade(Pal.Good, tabsIn));
+            Color tc = sel ? Pal.Good : (hover ? Pal.Txt : Pal.TxtDim);
+            Raylib.DrawTextEx(Cfg.Font, cats[i].Name, new Vector2(r.X + 14, r.Y + tabH / 2 - 7), 14, 1f, Raylib.Fade(tc, tabsIn));
+            // entry count chip on the right
+            string cnt = cats[i].Entries.Count.ToString();
+            Vector2 cw = Raylib.MeasureTextEx(Cfg.Font, cnt, 11, 1f);
+            Raylib.DrawTextEx(Cfg.Font, cnt, new Vector2(r.X + tabW - cw.X - 12, r.Y + tabH / 2 - 6), 11, 1f, Raylib.Fade(Pal.TxtDim, tabsIn));
+            tyy += tabH + tabGap;
+        }
+
+        // content panel
+        float panIn = PanelAnim("codexPanel", 0.4f, 0.18f);
+        var panel = new Rectangle(panelX, top, panelW, panelH);
+        Raylib.DrawRectangleRounded(panel, 0.03f, 8, Raylib.Fade(Pal.Panel, 0.92f * panIn));
+        Raylib.DrawRectangleLinesEx(panel, 1.2f, Raylib.Fade(Pal.Good, 0.4f * panIn));
+
+        var cat = cats[tab];
+        bool glyph = cat.HasGlyph;
+        int pad = 18;
+        int contentX = panelX + pad;
+        int contentW = panelW - pad * 2;
+        int glyphCol = glyph ? 52 : 0;   // width reserved for the silhouette preview
+        int textX = contentX + glyphCol;
+        int textW = contentW - glyphCol;
+
+        // Scissor the panel so scrolled rows clip cleanly at the panel edges.
+        Raylib.BeginScissorMode((int)panel.X + 1, (int)panel.Y + 1, (int)panel.Width - 2, (int)panel.Height - 2);
+        float scroll = g.CodexScroll;
+        int rowY = top + pad - (int)scroll;
+        int drawnBottom = rowY;
+        foreach (var en in cat.Entries)
+        {
+            // measure the wrapped body first so we can size + skip the row.
+            var lines = WrapText(en.Desc.Replace("\n", " • "), 13, textW);
+            int rowH = 24 + lines.Count * 17 + 12;   // header + body + spacing
+            int rowBottom = rowY + rowH;
+
+            // only draw rows that intersect the panel viewport (cheap culling).
+            if (rowBottom >= top && rowY <= top + panelH)
+            {
+                // header: title + optional code chip
+                Raylib.DrawTextEx(Cfg.Font, en.Title, new Vector2(textX, rowY), 17, 1f, Pal.Txt);
+                if (!string.IsNullOrEmpty(en.Code))
+                {
+                    int titW = (int)Raylib.MeasureTextEx(Cfg.Font, en.Title, 17, 1f).X;
+                    var chip = new Rectangle(textX + titW + 10, rowY + 1, Raylib.MeasureTextEx(Cfg.Font, en.Code, 11, 1f).X + 14, 16);
+                    Raylib.DrawRectangleRounded(chip, 0.4f, 6, Raylib.Fade(Pal.Good, 0.18f));
+                    Raylib.DrawRectangleLinesEx(chip, 1f, Raylib.Fade(Pal.Good, 0.5f));
+                    CenterText(en.Code, chip, 11, Pal.Good);
+                }
+                // body
+                int by2 = rowY + 24;
+                foreach (var ln in lines) { Raylib.DrawTextEx(Cfg.Font, ln, new Vector2(textX, by2), 13, 1f, Pal.TxtDim); by2 += 17; }
+                // silhouette preview (ENEMIES/CLASSES), centred in the reserved glyph column
+                if (glyph && !string.IsNullOrEmpty(en.Glyph))
+                {
+                    var gp = new Vector2(contentX + glyphCol / 2f - 4f, rowY + rowH / 2f - 6f);
+                    // team-tinted: classes friendly-blue, enemies foe-red (ELITE gold).
+                    Color gc = cat.Name == "CLASSES" ? Pal.Friend : (en.Glyph == "ELITE" ? Pal.VipGold : Pal.Foe);
+                    Renderer.DrawCodexGlyph(en.Glyph, gp, gc, 1.4f, 0f);
+                }
+                // thin divider under the row
+                Raylib.DrawLine(textX, rowBottom - 6, textX + textW, rowBottom - 6, Raylib.Fade(Pal.PanelBd, 0.5f));
+            }
+            rowY = rowBottom;
+            drawnBottom = rowBottom;
+        }
+        Raylib.EndScissorMode();
+
+        // scroll clamp bound: total content height beyond the viewport (consumed by Game.HandleCodexInput).
+        int contentHeight = (drawnBottom + (int)scroll) - (top + pad);
+        CodexScrollMax = MathF.Max(0f, contentHeight - (panelH - pad * 2));
+
+        // a subtle scrollbar when the content overflows
+        if (CodexScrollMax > 1f)
+        {
+            float frac = panelH / (float)(contentHeight + pad);
+            float barH = MathF.Max(30f, panelH * Util.Clamp(frac, 0.05f, 1f));
+            float barT = (scroll / MathF.Max(1f, CodexScrollMax)) * (panelH - barH);
+            var bar = new Rectangle(panel.X + panel.Width - 6, panel.Y + 2 + barT, 4, barH);
+            Raylib.DrawRectangleRounded(bar, 0.5f, 4, Raylib.Fade(Pal.Good, 0.5f));
+        }
+
+        // ---- footer hint + BACK ----
+        Raylib.DrawTextEx(Cfg.Font, "Up/Down select  ·  Wheel scroll  ·  [Esc]/[K] back",
+            new Vector2(panelX, Cfg.ScreenH - 70), 12, 1f, Raylib.Fade(Pal.TxtDim, 0.85f));
+        float backIn = PanelAnim("codexBack", 0.3f, 0.3f);
+        CodexBack = new Rectangle(W - marginX - 200, Cfg.ScreenH - 74, 200, 44);
+        DrawOverlayButton(CodexBack, "BACK", Pal.Friend, "Esc", backIn);
     }
 
     static void DrawWarPanel(Rectangle panel, string header, Color accent, float anim)
@@ -2835,6 +3004,7 @@ public static class Hud
     public static Rectangle OverlayBtn2;   // intro CONTINUE-run button (when a save exists)
     public static Rectangle OverlayBtn3;   // intro LAST STAND (endless) button (PROGRAM HORIZON W2)
     public static Rectangle OverlayBtn4;   // intro WAR ROOM (cross-run meta) button (PROGRAM HORIZON W3)
+    public static Rectangle OverlayBtn5;   // intro CODEX (field manual) button (PROGRAM HORIZON W6)
 
     // WAR ROOM (W3): the BACK button + per-unlock BUY buttons, published by DrawWarRoom for hit-testing.
     public static Rectangle WarRoomBack;

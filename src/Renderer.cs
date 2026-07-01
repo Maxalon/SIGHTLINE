@@ -1323,6 +1323,16 @@ public static class Renderer
         }
     }
 
+    /// CODEX (W6) preview glyph: draw a class/archetype silhouette in isolation (bestiary / class
+    /// cards) — presentation only, reuses the exact same DrawSilhouette shapes the board uses so the
+    /// codex art can never drift from the in-game art. `cls` is the archetype string (e.g. "SNIPER"),
+    /// `ang` the facing in radians (default east). No Unit/board state is touched.
+    public static void DrawCodexGlyph(string cls, Vector2 p, Color c, float scale, float ang = 0f)
+    {
+        var stub = new Unit { Cls = cls };
+        DrawSilhouette(stub, p, c, 1f, scale, ang);
+    }
+
     // A filled triangle that is robust to vertex winding: Raylib's DrawTriangle backface-culls by
     // winding order, so we compute the signed area and swap two verts if needed. Lets the oriented
     // silhouette wedges fill correctly no matter which way a unit is facing.

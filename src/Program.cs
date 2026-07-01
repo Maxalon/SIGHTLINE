@@ -44,6 +44,15 @@ public static class Program
             Console.WriteLine(Combat.SelfTest());
             return;
         }
+        // SIGHTLINE_CODEXTEST=1 : CODEX / FIELD MANUAL content-completeness (W6) — every documented enum
+        // has a non-empty Name+Desc and the bestiary covers every archetype. Tiny window (Game/Unit ctors).
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_CODEXTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "codextest");
+            Console.WriteLine(new Game().CodexSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         // SIGHTLINE_EVENTTEST=1 : between-mission FIELD EVENT selection/placement/outcomes + save round-trip (W4). No window.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_EVENTTEST") == "1")
         {
@@ -322,6 +331,7 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_EVENT") == "1") game.DebugEvent();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_DRAFT") == "1") game.BeginDraft();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_WARROOM") == "1") game.DebugWarRoom();   // W3 cross-run meta screen
+        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CODEX") == "1") game.DebugCodex();       // W6 field-manual reference screen
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_HAZARD") == "1") game.DebugHazards();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_TAGEDIT") == "1") game.DebugTagEditor();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_WOUND") == "1") game.DebugWound();
