@@ -1417,6 +1417,8 @@ public partial class Game
         {
             if (!w.Alive || !w.OnOverwatch || w.ReactedThisTurn || w.Ammo <= 0) continue;
             if (!CanTarget(w, mover)) continue;
+            // COUNTERPLAY: a FOCUSED watcher only reacts to movers inside its braced cone (blind outside).
+            if (w.OwFocused && !InOwCone(w, mover.X, mover.Y)) continue;
             // 4.4 (review M1): a player's overwatch shot is still a shot — it reveals the
             // squad. No actor -> no ambush bonus on a reaction (it already has its own mod).
             if (w.Team == Team.Player && SquadConcealed) BreakConcealment();
@@ -1426,7 +1428,8 @@ public partial class Game
             // overwatch reaction aim: base -10; Reflexes makes it near-certain, Guardian adds a
             // precision bump. ADDITIVE (not a ternary) so a soldier with BOTH gets both (review
             // S7: the old ternary silently discarded Guardian whenever Reflexes was also held).
-            int reactMod = -10 + (w.HasPerk(Perk.Reflexes) ? 75 : 0) + (w.HasPerk(Perk.Guardian) ? Unit.GuardianAim : 0);
+            int reactMod = -10 + (w.HasPerk(Perk.Reflexes) ? 75 : 0) + (w.HasPerk(Perk.Guardian) ? Unit.GuardianAim : 0)
+                              + (w.OwFocused ? Combat.FocusOwAim : 0);   // COUNTERPLAY: braced kill-lane aim
             var res = Combat.Resolve(Grid, w, mover, reactMod);
             Fx.PopText(w.Pos + new Vector2(0, -30), "OVERWATCH", Pal.Accent, 18f);
             Audio.Play("over");
@@ -2571,6 +2574,7 @@ public partial class Game
         if (Raylib.IsKeyPressed(KeyboardKey.Tab)) CycleSelection();
         if (Raylib.IsKeyPressed(KeyboardKey.One)) ToggleAim();
         if (Raylib.IsKeyPressed(KeyboardKey.Two)) DoOverwatch();
+        if (Raylib.IsKeyPressed(KeyboardKey.F)) DoFocusOverwatch();   // COUNTERPLAY: braced cone watch
         if (Raylib.IsKeyPressed(KeyboardKey.Three)) DoHunker();
         if (Raylib.IsKeyPressed(KeyboardKey.Four)) ToggleGrenade();
         if (Raylib.IsKeyPressed(KeyboardKey.Five)) DoAbility();
@@ -2790,6 +2794,7 @@ public partial class Game
             case "vault": ToggleVault(); break;
             case "ability": DoAbility(); break;
             case "overwatch": DoOverwatch(); break;
+            case "focusow": DoFocusOverwatch(); break;
             case "hunker": DoHunker(); break;
             case "hack": DoHack(); break;
             case "extract": DoExtract(); break;
@@ -3246,6 +3251,63 @@ public partial class Game
         Audio.Play("over");
         AimMode = false;
         _tutOver = true;
+    }
+
+    /// COUNTERPLAY — FOCUSED overwatch: brace a 90-degree kill-lane toward the aimed tile instead of a
+    /// wide watch. Reacts only inside the cone but with +FocusOwAim (a braced shot). The direction is the
+    /// current cursor/hover tile; if that gives no usable direction, it orients toward the nearest visible
+    /// enemy; if there's still none it falls back to a plain WIDE watch so the action is never wasted.
+    void DoFocusOverwatch()
+    {
+        if (Selected == null || !Selected.CanAct || Selected.Ammo <= 0) return;
+        if (Selected.HasStatus(StatusKind.Disoriented))
+        { Fx.PopText(Selected.Pos + new Vector2(0, -30), "DISORIENTED", Pal.Foe, 16f); return; }
+
+        int dx = 0, dy = 0;
+        if (HoverValid && (HoverX != Selected.X || HoverY != Selected.Y))
+        { dx = HoverX - Selected.X; dy = HoverY - Selected.Y; }
+        else
+        {
+            // no aimed tile -> orient toward the nearest visible enemy
+            Unit near = null; int nd = int.MaxValue;
+            foreach (var e in Enemies)
+            {
+                if (!e.Alive || !e.Active) continue;
+                int d = Util.ChebyDist(Selected.X, Selected.Y, e.X, e.Y);
+                if (d < nd && Grid.HasLineOfSight(Selected.X, Selected.Y, e.X, e.Y)) { nd = d; near = e; }
+            }
+            if (near != null) { dx = near.X - Selected.X; dy = near.Y - Selected.Y; }
+        }
+
+        Selected.OnOverwatch = true;
+        Selected.ActionsLeft = 0;
+        if (dx == 0 && dy == 0)
+        {
+            // truly no direction -> a plain wide watch (never waste the action)
+            Selected.OwFocused = false;
+            Fx.PopText(Selected.Pos + new Vector2(0, -30), "OVERWATCH", Pal.Accent, 18f);
+        }
+        else
+        {
+            Selected.OwFocused = true;
+            Selected.OwDirX = dx; Selected.OwDirY = dy;
+            Fx.PopText(Selected.Pos + new Vector2(0, -30), "FOCUS", Pal.VipGold, 18f);
+        }
+        Audio.Play("over");
+        AimMode = false;
+        _tutOver = true;
+    }
+
+    /// True when tile (tx,ty) lies inside watcher w's braced 90-degree overwatch cone (centre = OwDir).
+    public bool InOwCone(Unit w, int tx, int ty)
+    {
+        int tox = tx - w.X, toy = ty - w.Y;
+        if (tox == 0 && toy == 0) return true;
+        float dl = MathF.Sqrt(w.OwDirX * (float)w.OwDirX + w.OwDirY * (float)w.OwDirY);
+        if (dl < 0.01f) return true;   // no direction (defensive) -> behave as a wide watch
+        float tl = MathF.Sqrt(tox * (float)tox + toy * (float)toy);
+        float dot = (w.OwDirX * tox + w.OwDirY * toy) / (dl * tl);
+        return dot >= 0.70710678f;     // within +-45 degrees of the cone centre (90-degree arc)
     }
 
     void DoHunker()
@@ -3827,6 +3889,9 @@ public partial class Game
                         if (Util.TileDist(w.X, w.Y, x, y) > w.Weapon.MaxRange) continue;
                         bool commanding = Grid.HeightAt(w.X, w.Y) - Grid.HeightAt(x, y) >= 2;
                         if (!Grid.HasLineOfSight(w.X, w.Y, x, y, commanding)) continue;
+                        // COUNTERPLAY: a FOCUSED watcher threatens only its cone, so the AI reads (and can
+                        // exploit) the blind zone — mirror the exact reaction gate in OnUnitEnteredTile.
+                        if (w.OwFocused && !InOwCone(w, x, y)) continue;
                         PlayerOverwatchTiles.Add((x, y));
                         break;   // one watcher is enough to mark the tile threatened
                     }

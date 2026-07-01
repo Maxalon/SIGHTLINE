@@ -425,6 +425,12 @@ public class Unit
 
     public int ActionsLeft;
     public bool OnOverwatch;
+    // COUNTERPLAY: FOCUSED overwatch — the soldier braces a 90-degree cone toward (OwDirX,OwDirY).
+    // It reacts only to movers inside the cone but with a braced +aim bonus (a kill-lane), vs the
+    // default WIDE watch which reacts in any direction at base accuracy. Transient — same lifecycle
+    // as OnOverwatch (armed on the player turn, reset in BeginTurn).
+    public bool OwFocused;
+    public int OwDirX, OwDirY;   // cone centre direction (raw dx,dy toward the aimed tile)
     public bool Hunkered;
     public bool ReactedThisTurn; // overwatch fired this round
     // SHOVE (forced-movement verb): a soldier may shove at most ONCE per turn. Combined with
@@ -607,6 +613,7 @@ public class Unit
         if (AbilityCd > 0) AbilityCd--;   // signature ability cools down one of THIS unit's turns
         ActionsLeft = 2;
         OnOverwatch = false;
+        OwFocused = false;         // focused-overwatch cone is per-arming (same lifecycle as OnOverwatch)
         Hunkered = false;
         ReactedThisTurn = false;
         ShovedThisTurn = false;    // SHOVE: one per soldier per turn

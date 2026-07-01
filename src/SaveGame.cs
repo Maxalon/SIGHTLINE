@@ -306,12 +306,21 @@ public static class SaveGame
     // flywheel/harness never read or write it (byte-stable).
     public const int MaxVeterans = 12;   // reserve cap; least-storied are dropped when it overflows
 
-    /// The recruitable veteran reserve, most-storied first (empty on a fresh profile).
+    /// The recruitable veteran reserve, most-storied first (empty on a fresh profile). A recalled veteran
+    /// arrives FRESH for the new campaign — full HP and no carried wound (between-run downtime); their
+    /// earned rank/perks/traits/spec/scars carry over. (Mission.Build also re-heals on deploy, so this is
+    /// belt-and-suspenders, but it makes the draft card's HP read truthful.)
     public static List<Unit> LoadVeterans()
     {
         var dtos = LoadMetaDto().Veterans;
         var list = new List<Unit>();
-        if (dtos != null) foreach (var d in dtos) list.Add(FromUnitDto(d, fromReserve: true));
+        if (dtos != null)
+            foreach (var d in dtos)
+            {
+                var u = FromUnitDto(d, fromReserve: true);
+                u.Hp = u.MaxHp; u.Wound = 0;
+                list.Add(u);
+            }
         return list;
     }
 

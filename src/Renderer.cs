@@ -308,6 +308,7 @@ public static class Renderer
         DrawElevation(g);
         DrawMoveOverlay(g);
         DrawOverwatchThreat(g);   // tiles each active overwatching enemy covers (reaction-fire danger)
+        DrawFocusCones(g);        // COUNTERPLAY: the player's braced FOCUSED-overwatch kill-lanes (gold)
         DrawThreat(g);
         DrawSiegeZones(g);        // persistent pulsing 3x3 danger zone of any charging SIEGE artillery
         DrawEvac(g);
@@ -596,6 +597,50 @@ public static class Renderer
     // Kept deliberately SUBTLE (low alpha) and visually DISTINCT from DrawThreat's corner
     // pips: this is a soft full-tile wash + a watcher reticle, not a per-tile triangle, so a
     // squint still reads the selected unit, the nearest foe and the objective first.
+    // COUNTERPLAY: the player's FOCUSED overwatch braced cones — a friendly gold kill-lane wash over the
+    // tiles a focused watcher actually covers (mirrors the reaction gate: range + LoS + InOwCone), plus the
+    // two cone-edge rays from the soldier so the "braced this way" read is unmistakable.
+    static void DrawFocusCones(Game g)
+    {
+        if (g.Phase != Phase.PlayerTurn) return;
+        System.Collections.Generic.List<Unit> watchers = null;
+        foreach (var p in g.Players)
+            if (p.Alive && p.OnOverwatch && p.OwFocused && p.Ammo > 0)
+                (watchers ??= new System.Collections.Generic.List<Unit>()).Add(p);
+        if (watchers == null) return;
+
+        float pulse = 0.5f + 0.5f * MathF.Sin((float)Raylib.GetTime() * 3.0f);
+        Color wash = Raylib.Fade(Pal.VipGold, 0.06f + 0.05f * pulse);
+        for (int x = 0; x < g.Grid.W; x++)
+            for (int y = 0; y < g.Grid.H; y++)
+            {
+                if (!g.Grid.IsFloor(x, y)) continue;
+                foreach (var w in watchers)
+                {
+                    if (Util.TileDist(w.X, w.Y, x, y) > w.Weapon.MaxRange) continue;
+                    bool commanding = g.Grid.HeightAt(w.X, w.Y) - g.Grid.HeightAt(x, y) >= 2;
+                    if (!g.Grid.HasLineOfSight(w.X, w.Y, x, y, commanding)) continue;
+                    if (!g.InOwCone(w, x, y)) continue;
+                    Raylib.DrawRectangleRec(ElevRect(g, x, y), wash);
+                    break;
+                }
+            }
+        // cone-edge rays + a braced reticle at the soldier
+        foreach (var w in watchers)
+        {
+            float hlift = g.Grid.IsHigh(w.X, w.Y) ? ElevLift : 0f;
+            var c = w.Pos - new Vector2(0, hlift);
+            float ang = MathF.Atan2(w.OwDirY, w.OwDirX);
+            float len = w.Weapon.MaxRange * Cfg.Tile;
+            Color edge = Raylib.Fade(Pal.VipGold, 0.30f + 0.15f * pulse);
+            for (int s = -1; s <= 1; s += 2)
+            {
+                float a = ang + s * 0.7853982f;   // +-45 degrees
+                Raylib.DrawLineEx(c, c + new Vector2(MathF.Cos(a) * len, MathF.Sin(a) * len), 1.4f, edge);
+            }
+        }
+    }
+
     static void DrawOverwatchThreat(Game g)
     {
         if (g.Phase != Phase.PlayerTurn) return;

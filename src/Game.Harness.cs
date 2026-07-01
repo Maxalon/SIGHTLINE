@@ -1612,6 +1612,39 @@ public partial class Game
             : "VETTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
+    // ── OWTEST (SIGHTLINE_OWTEST): FOCUSED-overwatch braced-cone geometry — a mover ahead of the cone
+    // centre is covered, one behind / perpendicular / outside the 90-degree arc is NOT, and a zero-direction
+    // (degenerate) watcher behaves as a wide watch. This is the exact gate OnUnitEnteredTile + the AI's
+    // PlayerOverwatchTiles both consult, so a correct cone here means the reaction + the AI routing agree. ──
+    public string OwSelfTest()
+    {
+        var fails = new List<string>();
+        var w = new Unit { X = 5, Y = 5, OwFocused = true, OwDirX = 1, OwDirY = 0 };   // braced facing east (+X)
+        if (!InOwCone(w, 9, 5)) fails.Add("aheadNotInCone");         // straight ahead
+        if (!InOwCone(w, 9, 3)) fails.Add("nearAxisNotInCone");      // ~27deg off-axis, inside the arc
+        if (InOwCone(w, 5, 1)) fails.Add("perpInCone");              // 90deg (perpendicular) -> outside
+        if (InOwCone(w, 1, 5)) fails.Add("behindInCone");           // 180deg (behind) -> outside
+        if (InOwCone(w, 9, 0)) fails.Add("justOutsideInCone");      // ~51deg -> just outside the 45deg edge
+        if (!InOwCone(w, 5, 5)) fails.Add("selfNotInCone");         // degenerate same-tile -> in
+        var wide = new Unit { X = 5, Y = 5, OwFocused = false, OwDirX = 0, OwDirY = 0 };
+        if (!InOwCone(wide, 1, 5)) fails.Add("zeroDirNotWide");     // no direction -> behaves as wide (all-true)
+        return fails.Count == 0
+            ? "OWTEST: PASS (cone covers the braced arc, blind behind/perpendicular/outside; zero-dir = wide)"
+            : "OWTEST: FAIL (" + string.Join(",", fails) + ")";
+    }
+
+    /// Harness (screenshot): arm a FOCUSED overwatch on a soldier so the gold cone kill-lane renders.
+    public void DebugFocusOw()
+    {
+        StartMission(1);
+        var u = Players.Find(p => p.Alive && !p.IsVip);
+        if (u != null)
+        {
+            Selected = u;
+            u.OnOverwatch = true; u.OwFocused = true; u.OwDirX = 1; u.OwDirY = 0;   // brace east toward the enemy side
+        }
+    }
+
     /// Harness (screenshot): the run-opening DRAFT with recalled VETERANS seeded into the pool, so the
     /// gold veteran cards + carried-progression dossier are visible (BeginDraft suppresses veterans under
     /// NoPersist for byte-stability, so this injects demo veterans directly).

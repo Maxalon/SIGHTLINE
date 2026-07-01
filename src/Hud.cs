@@ -659,6 +659,7 @@ public static class Hud
         Add("drag", "DRAG", "7", interactive && g.CanDrag(u), g.DragMode);
         Add("vault", "VAULT", "9", interactive && g.CanVault(u), g.VaultMode);
         Add("overwatch", "OVERWATCH", "2", interactive && u != null && u.CanAct && u.Ammo > 0, false);
+        Add("focusow", "FOCUS", "F", interactive && u != null && u.CanAct && u.Ammo > 0, false);   // braced cone watch
         Add("hunker", "HUNKER", "3", interactive && u != null && u.CanAct, u != null && u.Hunkered);
         if (g.HasHackAction)
             Add("hack", g.HasSabotage ? "PLANT" : "HACK", "H", interactive && g.CanHack(u), false);
