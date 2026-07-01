@@ -484,6 +484,24 @@ public static class Renderer
         }
         var at = Util.TileCenter(minx, miny);
         Raylib.DrawTextEx(Cfg.Font, "EVAC", new Vector2((int)at.X - 4, (int)(at.Y - Cfg.Tile / 2 + 4)), 14, 1f, Pal.Good);
+
+        // Forward BEACON marker: a raised mast + pulsing broadcast rings on its centre tile, so the
+        // player-planted extraction point reads as a distinct, deliberate object (not just more zone).
+        if (g.BeaconPlanted)
+        {
+            var bc = Util.TileCenter(g.BeaconTile.x, g.BeaconTile.y);
+            float bp = 0.5f + 0.5f * MathF.Sin((float)Raylib.GetTime() * 4f);
+            // expanding broadcast rings
+            for (int ring = 0; ring < 2; ring++)
+            {
+                float rr = 8f + ((float)Raylib.GetTime() * 22f + ring * 14f) % 26f;
+                Raylib.DrawCircleLines((int)bc.X, (int)bc.Y, rr, Raylib.Fade(Pal.Good, 0.4f * (1f - rr / 34f)));
+            }
+            // the mast + emitter
+            Raylib.DrawLineEx(new Vector2(bc.X, bc.Y + 8f), new Vector2(bc.X, bc.Y - 10f), 2.4f, Pal.Good);
+            Raylib.DrawCircleV(new Vector2(bc.X, bc.Y - 11f), 3f + 1.5f * bp, Raylib.Fade(Pal.Good, 0.6f + 0.4f * bp));
+            Raylib.DrawTextEx(Cfg.Font, "BEACON", new Vector2((int)bc.X - 20, (int)(bc.Y + Cfg.Tile / 2 - 6)), 12, 1f, Pal.Good);
+        }
     }
 
     // Hack objective: a console tile with a segmented progress ring.

@@ -1836,6 +1836,170 @@ public partial class Game
         Phase = Phase.Draft;
     }
 
+    // ── BEACONTEST (SIGHTLINE_BEACONTEST): UNDERTOW W6 — the Evac forward-beacon + the Escort VIP leash.
+    // Drives the REAL primitives (DoBeacon / the CheckEnd Evac predicate / LeashVip) on a controlled
+    // all-floor scene so it's deterministic + window-free. Asserts:
+    //   (Evac)  planting adds the walkable 3x3 to EvacZone; the fixed fallback corner STILL counts; a
+    //           non-floor / non-Evac plant refuses gracefully; standing all soldiers on beacon tiles wins;
+    //           the beacon is one-per-mission.
+    //   (Escort) the leash steps the VIP TOWARD the nearest soldier, never off-board / onto an occupied
+    //           tile, and short-circuits (holds) once it is already adjacent.
+    public string BeaconSelfTest()
+    {
+        NoPersist = true;
+        var fails = new List<string>();
+
+        Grid = new Grid();                       // all Floor, Height 0
+        Players = new List<Unit>();
+        Enemies = new List<Unit>();
+        Vip = null; CaptiveLocked = false;
+        Fx = new Fx();
+        Mode = GameMode.Campaign;
+
+        Unit MkP(int x, int y) {
+            var u = new Unit { Name = "S", Cls = "ASSAULT", Team = Team.Player, X = x, Y = y,
+                               Hp = 8, MaxHp = 8, Aim = 65, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+            u.Ammo = u.Weapon.Clip; u.SyncPos(); u.BeginTurn(); return u;
+        }
+
+        // ---------- (A) EVAC forward beacon ----------
+        Objective = Objective.Evac;
+        BeaconPlanted = false; BeaconZone.Clear(); BeaconTile = default;
+        EvacZone.Clear();
+        // a fixed 2x4 fallback corner (top-right), exactly like SetupMission's build
+        for (int ey = 0; ey < 4; ey++) { EvacZone.Add((Grid.W - 2, ey)); EvacZone.Add((Grid.W - 1, ey)); }
+        var corner = new List<(int x, int y)>(EvacZone);
+
+        // a planter mid-board (all floor, so its full 3x3 is walkable and NONE overlaps the corner). A
+        // second soldier sits OFF every evac tile so the plant doesn't complete the extraction (which
+        // would route CheckEnd -> EnterBarracks and need run state this window-free scene doesn't build).
+        var planter = MkP(Grid.W / 2, Grid.H / 2);
+        var lagger = MkP(1, 1);                             // far from the corner AND the beacon 3x3
+        Players.Add(planter); Players.Add(lagger);
+        Selected = planter;
+        if (!CanBeacon(planter)) fails.Add("cannotBeaconOnFloorEvac");
+        int act0 = planter.ActionsLeft;
+        DoBeacon();
+        if (!BeaconPlanted) fails.Add("beaconNotPlanted");
+        if (planter.ActionsLeft != act0 - 1) fails.Add("beaconDidNotSpendAction");
+        // the walkable 3x3 around the planter must ALL be evac tiles now
+        for (int dx = -1; dx <= 1; dx++)
+            for (int dy = -1; dy <= 1; dy++)
+            {
+                var t = (planter.X + dx, planter.Y + dy);
+                if (!EvacZone.Contains(t)) fails.Add($"beacon3x3Missing({t.Item1},{t.Item2})");
+            }
+        // the beacon centre is where the planter stood
+        if (BeaconTile != (planter.X, planter.Y)) fails.Add("beaconTileWrong");
+        // the FALLBACK corner must STILL count (union, not replace) — the load-bearing safety invariant
+        foreach (var t in corner) if (!EvacZone.Contains(t)) fails.Add($"fallbackCornerLost({t.x},{t.y})");
+        // one-per-mission: a second plant is refused
+        if (CanBeacon(planter)) fails.Add("canBeaconTwice");
+
+        // WIN: stand every living soldier on a beacon tile -> the Evac predicate passes.
+        Players.Clear();
+        var s1 = MkP(BeaconTile.x, BeaconTile.y);
+        var s2 = MkP(BeaconTile.x + 1, BeaconTile.y);       // a ring tile of the beacon
+        Players.Add(s1); Players.Add(s2);
+        bool evacWin = AlivePlayers().All(p => EvacZone.Contains((p.X, p.Y)));
+        if (!evacWin) fails.Add("beaconStandDoesNotWin");
+        // and the fallback corner still wins too (safety): move a soldier off the beacon into the corner
+        s2.X = corner[0].x; s2.Y = corner[0].y; s2.SyncPos();
+        if (!AlivePlayers().All(p => EvacZone.Contains((p.X, p.Y)))) fails.Add("mixedBeaconCornerNoWin");
+
+        // graceful refusal: a planter NOT on floor cannot beacon (and never crashes)
+        BeaconPlanted = false; BeaconZone.Clear();
+        var wallStander = MkP(3, 3);
+        Grid.Tiles[3, 3] = TileType.HighCover;              // now standing on non-floor
+        Players.Clear(); Players.Add(wallStander); Selected = wallStander;
+        if (CanBeacon(wallStander)) fails.Add("beaconOnNonFloorAllowed");
+        DoBeacon();                                         // must be a graceful no-op
+        if (BeaconPlanted) fails.Add("beaconPlantedOnNonFloor");
+        Grid.Tiles[3, 3] = TileType.Floor;
+        // Escort must NOT offer a beacon (asset defines the extraction point)
+        Objective = Objective.Escort;
+        if (HasBeaconAction) fails.Add("beaconOfferedOnEscort");
+        Objective = Objective.Evac;
+
+        // ---------- (B) ESCORT VIP leash ----------
+        Objective = Objective.Escort;
+        CaptiveLocked = false;
+        EvacZone.Clear();                                   // no zone: the leash follows the soldier (not evac)
+        Players = new List<Unit>();
+        Enemies = new List<Unit>();
+        // an anchor soldier far to the east; the VIP starts far to the west (not adjacent)
+        var anchor = MkP(14, 5);
+        Vip = Mission.MakeVip(1); Vip.X = 3; Vip.Y = 5; Vip.SyncPos(); Vip.BeginTurn();
+        Players.Add(anchor); Players.Add(Vip);
+        int vipStartDist = Util.ChebyDist(Vip.X, Vip.Y, anchor.X, anchor.Y);
+        int vx0 = Vip.X, vy0 = Vip.Y;
+        LeashVip();
+        int vipNewDist = Util.ChebyDist(Vip.X, Vip.Y, anchor.X, anchor.Y);
+        if (vipNewDist >= vipStartDist) fails.Add("leashDidNotCloseGap");                 // must step toward the soldier
+        if (!(Vip.X == vx0 && Vip.Y == vy0) && !Grid.InBounds(Vip.X, Vip.Y)) fails.Add("leashWentOffBoard");
+        if (IsOccupiedByOther(Vip.X, Vip.Y, Vip)) fails.Add("leashOntoOccupiedTile");
+        // step it repeatedly (a turn boundary each call): it must CONVERGE and never overshoot onto the soldier
+        for (int i = 0; i < 8; i++)
+        {
+            LeashVip();
+            if (Vip.X == anchor.X && Vip.Y == anchor.Y) { fails.Add("leashSteppedOntoSoldier"); break; }
+        }
+        if (Util.ChebyDist(Vip.X, Vip.Y, anchor.X, anchor.Y) > 1) fails.Add("leashDidNotReachAdjacency");
+        // once adjacent, the leash HOLDS (short-circuit) — no further movement
+        int hx = Vip.X, hy = Vip.Y;
+        LeashVip();
+        if (!(Vip.X == hx && Vip.Y == hy)) fails.Add("leashMovedWhileAdjacent");
+        // a caged (Rescue-style) or dead VIP never moves via the escort leash
+        Objective = Objective.Escort; CaptiveLocked = true;
+        int cx = Vip.X, cy = Vip.Y; Vip.X = 3; Vip.Y = 5; Vip.SyncPos();   // re-separate it
+        LeashVip();
+        if (!(Vip.X == 3 && Vip.Y == 5)) fails.Add("leashMovedCagedVip");
+        CaptiveLocked = false;
+
+        // SQUAD-AT-EVAC: once a soldier has reached the zone, the leash heads the VIP INTO the zone (the win
+        // is the VIP on an evac tile) rather than parking it adjacent forever. Build a small corner zone,
+        // seat the anchor IN it, put the VIP one step outside, and assert the leash closes onto an evac tile.
+        Players = new List<Unit>();
+        EvacZone.Clear();
+        for (int ey = 0; ey < 3; ey++) { EvacZone.Add((Grid.W - 1, ey)); EvacZone.Add((Grid.W - 2, ey)); }
+        var zoneSoldier = MkP(Grid.W - 1, 1);               // a soldier standing in the zone
+        Vip = Mission.MakeVip(1); Vip.X = Grid.W - 4; Vip.Y = 1; Vip.SyncPos(); Vip.BeginTurn();   // just outside
+        Players.Add(zoneSoldier); Players.Add(Vip);
+        int vipToZone0 = DistToEvac(Vip.X, Vip.Y);
+        for (int i = 0; i < 6 && !EvacZone.Contains((Vip.X, Vip.Y)); i++) LeashVip();
+        if (!EvacZone.Contains((Vip.X, Vip.Y))) fails.Add($"leashDidNotEnterZone({Vip.X},{Vip.Y})");
+        if (DistToEvac(Vip.X, Vip.Y) > vipToZone0) fails.Add("leashMovedAwayFromZone");
+
+        return fails.Count == 0
+            ? "BEACONTEST: PASS (Evac: plant adds walkable 3x3 to EvacZone + fallback corner still wins; non-floor/Escort refuse gracefully; all-on-beacon wins; 1/mission. Escort: leash steps VIP toward nearest soldier, converges to adjacency, never off-board/occupied/onto-soldier, holds when adjacent, inert while caged, and walks INTO the zone once the squad has arrived)"
+            : "BEACONTEST: FAIL (" + string.Join(",", fails) + ")";
+    }
+
+    /// Harness (screenshot): plant a forward EVAC beacon so the render shows the beacon 3x3 zone + the
+    /// mast/broadcast marker alongside the fixed far-corner fallback. Forces Evac, walks a soldier to a
+    /// clear forward floor tile past mid-field, then drops the beacon there via the real DoBeacon path.
+    public void DebugBeacon()
+    {
+        if (Objective != Objective.Evac) DebugForceObjective(Objective.Evac);
+        var u = Players.FirstOrDefault(p => p.Alive && !p.IsVip);
+        if (u == null) return;
+        // seat the soldier on a clear forward floor tile (past mid-field) so its full 3x3 is walkable.
+        for (int x = Grid.W - 4; x >= Grid.W / 2 && !BeaconPlanted; x--)
+            for (int y = 2; y < Grid.H - 2 && !BeaconPlanted; y++)
+            {
+                if (!Grid.IsFloor(x, y) || IsOccupiedByOther(x, y, u) || EvacZone.Contains((x, y))) continue;
+                // require the full ring to be floor so the demo beacon reads as a clean 3x3
+                bool ringOk = true;
+                for (int dx = -1; dx <= 1 && ringOk; dx++)
+                    for (int dy = -1; dy <= 1 && ringOk; dy++)
+                        if (!Grid.IsFloor(x + dx, y + dy)) ringOk = false;
+                if (!ringOk) continue;
+                u.X = x; u.Y = y; u.SyncPos();
+                Selected = u;
+                DoBeacon();
+            }
+    }
+
     /// Harness (screenshot): show the event screen at a mid column.
     public void DebugEvent()
     {

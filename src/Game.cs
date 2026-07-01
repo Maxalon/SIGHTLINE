@@ -390,7 +390,25 @@ public partial class Game
 
     // mission objective
     public Objective Objective;
+    // The extraction zone the WIN test reads: the UNION of the FIXED far-corner fallback (always
+    // present so the win is ALWAYS reachable — a dead planter must never soft-lock the mission) and,
+    // once a soldier plants one, a forward 3x3 BEACON zone. Every EvacZone read (renderer / threat /
+    // HUD / autopilot / CheckEnd) treats the two as one set — planting just widens it, cutting the
+    // long empty march to the corner without touching difficulty.
     public List<(int x, int y)> EvacZone = new();
+    // BEACON (Evac only, one per mission): a soldier spends 1 action to drop a forward evac beacon on
+    // their tile; its walkable 3x3 (centre + ring) is UNIONed into EvacZone. These fields are per-mission
+    // transient (reset in SetupMission) — no persisted state, so no enum/ordinal churn.
+    public bool BeaconPlanted;                       // true once the single beacon has been dropped
+    public (int x, int y) BeaconTile;                // the beacon's centre tile (for the renderer marker)
+    public List<(int x, int y)> BeaconZone = new();  // the walkable 3x3 tiles the beacon added to EvacZone
+    // A soldier may DEPLOY a beacon only on the plain Evac objective (Escort/Rescue keep the fixed corner —
+    // the fragile asset defines the extraction point), the beacon hasn't been used yet, and it's a real
+    // player soldier standing on WALKABLE FLOOR (a non-floor planter refuses gracefully, never crashes).
+    public bool HasBeaconAction => Objective == Objective.Evac && Mode != GameMode.Endless;
+    public bool CanBeacon(Unit u)
+        => HasBeaconAction && !BeaconPlanted && u != null && u.Team == Team.Player && !u.IsVip
+           && u.CanAct && Grid.IsFloor(u.X, u.Y) && !EvacZone.Contains((u.X, u.Y));
 
     // DEFEND objective (3.8): survive this many player turns vs mid-mission waves
     public const int DefendTurns = 8;
@@ -798,6 +816,7 @@ public partial class Game
         // objective-gated setup block below (evac/terminal/sabotage/escort/rescue) is a no-op.
         if (Mode == GameMode.Endless) Objective = Objective.Eliminate;
         EvacZone.Clear();
+        BeaconPlanted = false; BeaconZone.Clear(); BeaconTile = default;   // forward evac beacon is fresh each mission
         HackProgress = 0;
         SabotageSites.Clear();
         SabotageBlown.Clear();
@@ -2635,6 +2654,7 @@ public partial class Game
         if (Raylib.IsKeyPressed(KeyboardKey.Seven)) ToggleDrag();
         if (Raylib.IsKeyPressed(KeyboardKey.Nine)) ToggleVault();
         if (Raylib.IsKeyPressed(KeyboardKey.H)) DoHack();
+        if (Raylib.IsKeyPressed(KeyboardKey.G)) DoBeacon();          // UNDERTOW W6: deploy forward evac beacon (moved off B — collided with W2 BRACE)
         if (Raylib.IsKeyPressed(KeyboardKey.X)) DoExtract();
         if (Raylib.IsKeyPressed(KeyboardKey.R)) DoReload();
         if (Raylib.IsKeyPressed(KeyboardKey.T)) { OpenTagEditor(Selected); return; }
@@ -2850,6 +2870,7 @@ public partial class Game
             case "brace": DoBrace(); break;
             case "hunker": DoHunker(); break;
             case "hack": DoHack(); break;
+            case "beacon": DoBeacon(); break;
             case "extract": DoExtract(); break;
             case "reload": DoReload(); break;
         }
@@ -3424,6 +3445,38 @@ public partial class Game
         Audio.Play("reload");
     }
 
+    /// DEPLOY BEACON (Evac only, one/mission): the selected soldier spends ONE action to drop a
+    /// forward extraction beacon on THEIR tile. Its walkable 3x3 (centre + ring, floor tiles only —
+    /// non-floor tiles are clipped) is UNIONed into EvacZone alongside the fixed far-corner fallback,
+    /// so the squad can extract HERE instead of marching to the corner. Modelled on DoHack (validate,
+    /// spend 1 action, no turn-end, FX). Refuses gracefully if CanBeacon is false (never crashes).
+    void DoBeacon()
+    {
+        if (!CanBeacon(Selected)) return;
+        var u = Selected;
+        u.ActionsLeft -= 1;
+        AimMode = false;
+        BeaconPlanted = true;
+        BeaconTile = (u.X, u.Y);
+        BeaconZone.Clear();
+        // stamp the 3x3, skipping non-floor / off-board tiles and any tile already in the fallback zone
+        for (int dx = -1; dx <= 1; dx++)
+            for (int dy = -1; dy <= 1; dy++)
+            {
+                int bx = u.X + dx, by = u.Y + dy;
+                if (!Grid.IsFloor(bx, by)) continue;          // clip walls / cover / off-board
+                if (EvacZone.Contains((bx, by))) continue;    // don't double-count the fallback corner
+                BeaconZone.Add((bx, by));
+                EvacZone.Add((bx, by));
+            }
+        var at = Util.TileCenter(u.X, u.Y);
+        Fx.PopText(at + new Vector2(0, -30), "BEACON SET", Pal.Good, 22f);
+        Fx.Burst(at, Pal.Good, 22, 240f, 0.6f, 4.5f, true);
+        Fx.AddShake(4f);
+        Audio.Play("reload");
+        CheckEnd();   // planting where the squad already stands can complete the extraction outright
+    }
+
     /// The nearest free evac tile to (x,y) within Chebyshev `maxStep`, or null. "Free" = an evac
     /// tile not already occupied by another unit.
     (int x, int y)? NearestFreeEvac(int x, int y, Unit mover, int maxStep)
@@ -3863,6 +3916,7 @@ public partial class Game
     {
         _turnCount++;
         Phase = Phase.PlayerTurn;
+        LeashVip();                       // ESCORT: the asset tags along with the squad (no hand-walking)
         ClearIntent();                    // no enemy intent lingers into the player's turn
         Grid.TickSmoke();                 // smoke clouds decay one turn per round
         TickHazards();                    // fire cooks off barrels + reignites units, then decays
@@ -3881,6 +3935,84 @@ public partial class Game
         ItemMode = false;
         ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false; DragMode = false; VaultMode = false;
         ShowBanner("PLAYER TURN", false);
+    }
+
+    /// ESCORT VIP LEASH: at the start of each player turn the fragile asset TAGS ALONG with the squad
+    /// instead of being hand-walked (the old "drag" that made Escort a 10-turn micro-chore). If the VIP
+    /// is alive, mobile (not caged), and NOT already Chebyshev-adjacent to a living non-VIP soldier, it
+    /// auto-steps toward the NEAREST such soldier — up to its Mobility — preferring a SAFE tile (in cover
+    /// and out of an active enemy's line of fire when a safer option exists). The player still advances /
+    /// clears; the VIP follows. It stays fully player-selectable (manual override intact) and never
+    /// auto-charges toward evac or into danger alone. Deterministic + TIMEOUT-safe: it always moves toward
+    /// an EXISTING soldier, so it strictly converges (and short-circuits the instant it's adjacent).
+    void LeashVip()
+    {
+        if (Objective != Objective.Escort) return;
+        if (Vip == null || !Vip.Alive || CaptiveLocked || Vip.MoveBudget <= 0) return;
+        // the soldiers the asset follows: living, non-VIP squad members
+        var soldiers = Players.Where(p => p.Alive && !p.IsVip).ToList();
+        if (soldiers.Count == 0) return;                       // nobody to follow (a wipe handles the loss)
+        if (EvacZone.Contains((Vip.X, Vip.Y))) return;         // already extracted position — win check handles it
+        // The asset FOLLOWS the squad toward evac. The leash anchor is the nearest soldier that is CLOSER to
+        // evac than the VIP (the squad's forward element) — following the SPEARHEAD, not a straggler parked
+        // beside the VIP at spawn (that mutual "VIP holds beside laggard, laggard waits by VIP" deadlock froze
+        // the asset at spawn for a whole match). If NO soldier is ahead of the VIP (it's already the most
+        // forward), tag along toward the plain nearest soldier and hold once beside it (don't charge alone).
+        int vipEvac = DistToEvac(Vip.X, Vip.Y);
+        var ahead = soldiers.Where(s => DistToEvac(s.X, s.Y) < vipEvac).ToList();
+        var anchor = (ahead.Count > 0 ? ahead : soldiers)
+                     .OrderBy(s => Util.ChebyDist(Vip.X, Vip.Y, s.X, s.Y)).First();
+        // Hold when tucked beside the FORWARD element (the spearhead) — the VIP has kept pace and shouldn't
+        // charge on alone into the contested corner ahead of its escort. If it's already the most-forward
+        // unit (nothing `ahead`), hold beside the nearest soldier. Never hold merely beside a straggler
+        // BEHIND the VIP — that laggard/VIP mutual wait froze the asset at spawn for a whole match.
+        bool besideForward = ahead.Count > 0
+            ? ahead.Any(s => Util.ChebyDist(Vip.X, Vip.Y, s.X, s.Y) <= 1)
+            : soldiers.Any(s => Util.ChebyDist(Vip.X, Vip.Y, s.X, s.Y) <= 1);
+        // reachable tiles within ONE move (VIP.MoveBudget), never onto an occupied / off-board / non-floor
+        // tile (CostMap only relaxes walkable floor and honours the occupancy blocker).
+        var cost = Grid.CostMap(Vip.X, Vip.Y, (x, y) => IsOccupiedByOther(x, y, Vip), out var _cf, Vip.MoveBudget);
+        // If a FREE evac tile is reachable THIS move, step straight into the zone — that is the win, and it
+        // stops the "walled one lane short of the corner while soldiers crowd the doorway" stall outright.
+        (int x, int y)? reachEvac = null; int reachEvacCost = int.MaxValue;
+        foreach (var t in EvacZone)
+        {
+            if (IsOccupiedByOther(t.x, t.y, Vip)) continue;
+            int c = cost[t.x, t.y];
+            if (c > 0 && c < reachEvacCost) { reachEvacCost = c; reachEvac = t; }
+        }
+        if (reachEvac != null) { Vip.X = reachEvac.Value.x; Vip.Y = reachEvac.Value.y; Vip.SyncPos();
+                                 Fx.Burst(Vip.Pos, Pal.VipGold, 10, 140f, 0.4f, 3.5f); return; }
+        if (besideForward) return;                             // tucked beside the SPEARHEAD, zone not yet in reach
+        // Measure progress by the ACTUAL walkable path distance to the anchor (a Dijkstra field FROM it), not
+        // Chebyshev — so the VIP steps correctly AROUND walls/screens toward the squad instead of stalling when
+        // the straight line is blocked (the Chebyshev test let a walled-off VIP get stuck a lane short).
+        var goalField = Grid.CostMap(anchor.X, anchor.Y, (x, y) => IsOccupiedByOther(x, y, Vip), out _, 9999);
+        int hereDist = goalField[Vip.X, Vip.Y];
+        var foes = Enemies.Where(e => e.Alive && e.Active && e.Ammo > 0).ToList();   // active shooters (hoisted)
+        int bx = -1, by = -1; float bestScore = float.NegativeInfinity;
+        for (int x = 0; x < Grid.W; x++)
+            for (int y = 0; y < Grid.H; y++)
+            {
+                if (cost[x, y] < 0) continue;                  // unreachable this turn
+                if (x == Vip.X && y == Vip.Y) continue;        // must actually move
+                int d = goalField[x, y];
+                if (d < 0) continue;                           // can't reach the anchor from here at all
+                if (hereDist >= 0 && d >= hereDist) continue;  // only tiles that close the path gap
+                // safety: prefer cover from the nearest active shooter + tiles no active foe can see.
+                float safety = 0f;
+                var near = foes.OrderBy(e => Util.ChebyDist(x, y, e.X, e.Y)).FirstOrDefault();
+                if (near != null) safety += Grid.GetCover(x, y, near.X, near.Y).Level * 3f;
+                if (!foes.Any(e => Grid.HasLineOfSight(e.X, e.Y, x, y))) safety += 6f;   // fully unseen tile
+                // progress dominates (the leash must converge), then safety, then a mild cost tie-break.
+                float score = (hereDist - d) * 2f + safety - cost[x, y] * 0.1f;
+                if (score > bestScore) { bestScore = score; bx = x; by = y; }
+            }
+        if (bx < 0) return;                                    // no closing tile reachable — hold this turn
+        Vip.X = bx; Vip.Y = by; Vip.SyncPos();
+        Fx.Burst(Vip.Pos, Pal.VipGold, 8, 120f, 0.35f, 3f);   // a small tag-along puff (feel only)
+        // (win detection stays with the normal CheckEnd calls after the player's actions — calling it here,
+        //  mid-StartPlayerTurn before the turn is fully seated, would re-enter EnterBarracks on stale state.)
     }
 
     // ---------------- squad coordination ----------------

@@ -664,6 +664,8 @@ public static class Hud
         Add("hunker", "HUNKER", "3", interactive && u != null && u.CanAct, u != null && u.Hunkered);
         if (g.HasHackAction)
             Add("hack", g.HasSabotage ? "PLANT" : "HACK", "H", interactive && g.CanHack(u), false);
+        if (g.HasBeaconAction && !g.BeaconPlanted)
+            Add("beacon", "BEACON", "G", interactive && g.CanBeacon(u), false);
         if (g.HasExtractAction)
             Add("extract", "EXTRACT", "X", interactive && g.CanExtract(u), false);
         Add("reload", "RELOAD", "R", interactive && u != null && u.CanAct && u.Ammo < u.Weapon.Clip, false);
@@ -911,6 +913,20 @@ public static class Hud
                 Raylib.DrawLineEx(new Vector2(cx - 6f, cy + 6f), new Vector2(cx + 6f, cy + 6f), 1.6f, c);
                 break;
             }
+            case "beacon":
+            {
+                // A beacon mast with two broadcast arcs (a forward extraction signal being raised).
+                Raylib.DrawLineEx(new Vector2(cx, cy + 6f), new Vector2(cx, cy - 3f), 1.8f, c);   // the mast
+                Raylib.DrawCircleV(new Vector2(cx, cy - 4f), 1.6f, c);                            // the emitter
+                Raylib.DrawLineEx(new Vector2(cx - 6f, cy + 6f), new Vector2(cx + 6f, cy + 6f), 1.6f, c); // base
+                // two rising signal arcs off the emitter (left + right)
+                foreach (int s in new[] { -1, 1 })
+                {
+                    Raylib.DrawLineEx(new Vector2(cx + s * 2f, cy - 6f), new Vector2(cx + s * 4f, cy - 8f), 1.3f, c);
+                    Raylib.DrawLineEx(new Vector2(cx + s * 4f, cy - 3f), new Vector2(cx + s * 6f, cy - 5f), 1.3f, c);
+                }
+                break;
+            }
             case "ability":
             {
                 // Four-point star / spark: two crossing lines at different angles
@@ -1091,6 +1107,7 @@ public static class Hud
             case "hack": return g.HasSabotage
                 ? $"Plant a demolition charge on an adjacent site ({g.SabotageBlown.Count}/{g.SabotageSites.Count} set). Costs 1 action."
                 : $"Work the terminal ({g.HackProgress}/{Game.HackRequired} done). Costs 1 action.";
+            case "beacon": return "Deploy a forward evac beacon on your tile: opens a 3x3 extraction zone right here (in addition to the far corner). One per mission. Costs 1 action, won't end your turn.";
             case "extract": return "Haul an adjacent ally / asset aboard - pulls them into the extraction zone. Costs 1 action.";
             case "reload": return "Reload your weapon to full.";
             case "ability":

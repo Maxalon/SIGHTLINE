@@ -139,9 +139,12 @@ public partial class Game
             return site != default && TryMoveTowardTile(u, site.x, site.y);
         }
         // VIP / freed captive: walk to the extraction zone (concealed → no enemy fire, so just
-        // beeline; VipAdvance's exposure scoring is moot while hidden).
+        // beeline; VipAdvance's exposure scoring is moot while hidden). EXCEPTION: on ESCORT the LEASH
+        // (LeashVip) owns the asset's movement — it FOLLOWS the squad, so the concealed race must NOT
+        // also self-walk it to the corner (the two would fight each turn). Let it hold; the leash steps it.
         if (u.IsVip)
         {
+            if (Objective == Objective.Escort) return false;   // leash-owned; hold (caller hunkers)
             if (CaptiveLocked) return false;   // caged: can't move (hunker)
             if (EvacZone.Contains((u.X, u.Y))) return false;
             var g = EvacZone.Where(t => !IsOccupiedByOther(t.x, t.y, u))
@@ -152,8 +155,18 @@ public partial class Game
         if (Objective == Objective.Rescue && CaptiveLocked && Vip != null
             && Util.ChebyDist(u.X, u.Y, Vip.X, Vip.Y) > 1)
             return TryMoveTowardTile(u, Vip.X, Vip.Y);
-        // Evac/Escort soldiers: move toward the extraction zone to get into position.
-        var ahead = EvacZone.OrderBy(t => Util.TileDist(u.X, u.Y, t.x, t.y)).FirstOrDefault();
+        // EVAC (concealed): drop the forward beacon at a mid-field staging point WHILE STILL HIDDEN —
+        // DoBeacon is silent (it doesn't break concealment), so the squad opens a near extraction zone and
+        // converges there covertly instead of marching all the way to the far corner. This is what actually
+        // cuts the empty-walk turns (the open-with-a-covert-approach path is the common one). Fallback corner
+        // stays, so it never soft-locks. After it's planted, everyone beelines to the nearest evac tile (the
+        // beacon), so the concealed staging point is already the win position when stealth breaks.
+        if (Objective == Objective.Evac && CanBeacon(u) && u.X >= Grid.W / 2 && DistToEvac(u.X, u.Y) > 2)
+        { DoBeacon(); return true; }
+        // Evac/Escort soldiers: move toward the NEAREST extraction tile (beacon once planted, else corner).
+        var ahead = EvacZone.Where(t => !IsOccupiedByOther(t.x, t.y, u))
+                            .OrderBy(t => Util.TileDist(u.X, u.Y, t.x, t.y)).FirstOrDefault();
+        if (ahead == default) ahead = EvacZone.OrderBy(t => Util.TileDist(u.X, u.Y, t.x, t.y)).FirstOrDefault();
         if (ahead != default && !EvacZone.Contains((u.X, u.Y)))
             return TryMoveTowardTile(u, ahead.x, ahead.y);
         return false;   // already staged: hold concealed (caller hunkers)
@@ -323,6 +336,13 @@ public partial class Game
 
     bool SmartEvac(Unit u)
     {
+        // FORWARD BEACON: the win no longer requires marching to the far corner — a soldier can drop a
+        // beacon ONCE and extract the squad there. Plant it as soon as the point man has pushed past the
+        // half-way line (a forward, defensible spot), which collapses the long empty walk. CanBeacon
+        // already gates it (Evac-only, once/mission, on walkable floor not already an evac tile), and the
+        // fixed corner remains as the fallback, so this can never soft-lock the mission.
+        if (CanBeacon(u) && u.X >= Grid.W / 2 && DistToEvac(u.X, u.Y) > 2)
+        { DoBeacon(); return true; }
         // EXTRACTION IS A RACE: the longer the squad lingers the more pods wake and grind it
         // down (smart positioning that adds turns LOSES Evac). So beeline to the zone FIRST;
         // only fight when genuinely blocked. Exception: take a kill ONLY when it doesn't cost
@@ -444,32 +464,48 @@ public partial class Game
     {
         if (u.IsVip)
         {
-            // the asset is fragile (6 HP) and the enemy AI hunts it, so SURVIVAL beats raw
-            // speed here (unlike Evac where the whole squad must arrive): advance toward evac
-            // along the SAFEST route — minimise exposure, hug cover — rather than sprinting
-            // through the open. VipAdvance falls back to a plain beeline if no path is safer.
-            if (!EvacZone.Contains((u.X, u.Y)))
+            // The LEASH (StartPlayerTurn -> LeashVip) now walks the asset toward the squad each turn —
+            // it FOLLOWS the advance instead of being hand-driven. So the VIP's own turn just tucks in
+            // (its gun is irrelevant); no more per-soldier micro-walking the fragile asset to the corner.
+            // LAST-SURVIVOR FALLBACK: if the whole squad has fallen, there's nobody to follow — the leash
+            // holds it in place, which would livelock to the turn cap. So the lone VIP self-races to evac
+            // (win if it makes it, else it dies to the foes en route) — either way the match RESOLVES.
+            if (!Players.Any(p => p.Alive && !p.IsVip) && !EvacZone.Contains((u.X, u.Y)))
             {
-                var goal = EvacZone.Where(t => !IsOccupiedByOther(t.x, t.y, u))
-                                   .OrderBy(t => Util.TileDist(u.X, u.Y, t.x, t.y)).FirstOrDefault();
-                if (goal != default && VipAdvance(u, goal.x, goal.y)) return true;
+                var g = EvacZone.Where(t => !IsOccupiedByOther(t.x, t.y, u))
+                                .OrderBy(t => Util.TileDist(u.X, u.Y, t.x, t.y)).FirstOrDefault();
+                if (g != default && TryMoveTowardTile(u, g.x, g.y)) return true;
             }
-            DoHunker(); return true;     // arrived or blocked: tuck in (the VIP's gun is irrelevant)
+            DoHunker(); return true;
         }
         // escorts: a soldier who has reached the zone hauls the asset (VIP) aboard the instant
-        // it's adjacent — the lift-out that ends the long escort walk early (win-critical pull).
+        // it's adjacent — the lift-out that ends the escort the moment the VIP is beside the zone.
         if (EvacZone.Contains((u.X, u.Y)) && CanExtract(u)) { DoExtract(); return true; }
-        // FIELD CRAFT: even outside the zone, a soldier adjacent to the lagging VIP can DRAG it one
-        // step toward evac (accelerates the fragile asset's march). Bounded once/turn; falls through.
-        if (TrySmartDrag(u)) return true;
-        // clear the path AHEAD of the VIP and kill threats to it. Take the best shot; if there's
-        // nothing to shoot, push toward the evac zone to screen the VIP's route (don't hang back
-        // letting the VIP walk into fire alone), then fall through to combat.
+        bool inZone = EvacZone.Contains((u.X, u.Y));
+        // Take a FREE finisher on a threat first (a strong shot doesn't cost the advance materially).
+        if (HasStrongShot(u) && TakeBestShot(u)) return true;
+        if (!inZone)
+        {
+            // ADVANCE to the zone the SAFE (cover-aware) way, not a naked beeline — SmartMoveToward hugs
+            // cover / avoids exposure while still closing on the nearest evac tile (and falls back to a plain
+            // step so progress is guaranteed). Racing the squad naked into the far corner (which sits in the
+            // enemy spawn zone) got soldiers killed → squad wipes → lone-VIP stalemates that ballooned turns.
+            var ahead = EvacZone.Where(t => !IsOccupiedByOther(t.x, t.y, u))
+                                .OrderBy(t => Util.TileDist(u.X, u.Y, t.x, t.y)).FirstOrDefault();
+            if (ahead == default) ahead = EvacZone.OrderBy(t => Util.TileDist(u.X, u.Y, t.x, t.y)).FirstOrDefault();
+            if (ahead != default && SmartMoveToward(u, ahead.x, ahead.y)) return true;
+            // jammed: clear a blocker / re-arm, then HOLD (never fall through to free-roaming combat — that
+            // scatters the escort off the route and abandons the asset mid-field).
+            if (TakeBestShot(u)) return true;
+            if (u.Ammo == 0) { DoReload(); return true; }
+            DoHunker(); return true;
+        }
+        // IN the zone, VIP not yet extractable: HOLD the zone (shoot what's in reach, watch, hunker) so the
+        // squad stays CONSOLIDATED for the leashed VIP to arrive — do NOT wander off hunting the last foes.
         if (TakeBestShot(u)) return true;
         if (u.Ammo == 0) { DoReload(); return true; }
-        var ahead = EvacZone.OrderBy(t => Util.TileDist(u.X, u.Y, t.x, t.y)).FirstOrDefault();
-        if (ahead != default && SmartMoveToward(u, ahead.x, ahead.y)) return true;
-        return false;
+        if (u.ActionsLeft > 0 && u.Ammo > 0 && !u.HasStatus(StatusKind.Disoriented)) { DoOverwatch(); return true; }
+        DoHunker(); return true;
     }
 
     bool SmartRescue(Unit u)
@@ -1252,6 +1288,8 @@ public partial class Game
         // EVAC objective: get everyone to the extraction zone
         if (Objective == Objective.Evac)
         {
+            // drop the forward beacon once the point man is past mid-field (cuts the march to the corner)
+            if (CanBeacon(u) && u.X >= Grid.W / 2 && DistToEvac(u.X, u.Y) > 2) { DoBeacon(); return; }
             if (!EvacZone.Contains((u.X, u.Y)))
             {
                 var cand = EvacZone.Where(t => !IsOccupiedByOther(t.x, t.y, u))
@@ -1304,17 +1342,19 @@ public partial class Game
         {
             if (u.IsVip)
             {
-                if (!EvacZone.Contains((u.X, u.Y)))
-                {
-                    var cand = EvacZone.Where(t => !IsOccupiedByOther(t.x, t.y, u))
-                                       .OrderBy(t => Util.TileDist(u.X, u.Y, t.x, t.y)).ToList();
-                    if (cand.Count > 0 && TryMoveTowardTile(u, cand[0].x, cand[0].y)) return;
-                }
-                DoHunker(); return;        // arrived or no path this turn
+                // the LEASH (LeashVip) tags the asset along with the squad at each turn boundary — the
+                // VIP no longer self-walks to the corner (which would fight the leash). Just tuck in.
+                DoHunker(); return;
             }
             var st = FirstTargetFor(u);
             if (st != null && u.Ammo > 0) { IssueShoot(st); return; }
             if (u.Ammo == 0) { DoReload(); return; }
+            // reached the zone + adjacent to the leashed VIP? haul it aboard (the escort-ending pull).
+            if (EvacZone.Contains((u.X, u.Y)) && CanExtract(u)) { DoExtract(); return; }
+            // otherwise advance to the evac zone so the squad drags the leashed VIP along and can extract it.
+            var ez = EvacZone.Where(t => !IsOccupiedByOther(t.x, t.y, u))
+                             .OrderBy(t => Util.TileDist(u.X, u.Y, t.x, t.y)).FirstOrDefault();
+            if (ez != default && !EvacZone.Contains((u.X, u.Y)) && TryMoveTowardTile(u, ez.x, ez.y)) return;
             var foe = AliveEnemies().OrderBy(e => Util.TileDist(u.X, u.Y, e.X, e.Y)).FirstOrDefault();
             if (foe != null && TryMoveTowardTile(u, foe.X, foe.Y)) return;
             DoHunker(); return;
