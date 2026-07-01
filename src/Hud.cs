@@ -1097,6 +1097,7 @@ public static class Hud
         if (o.SeesOver)  flags.Add(("OVER LOW COVER", Pal.Good));
         if (o.Steady)    flags.Add(($"STEADY  +{Combat.SteadyAim} aim / +{Combat.SteadyCrit} crit", Pal.Good));
         if (o.Ambush)    flags.Add(($"AMBUSH  +{Combat.AmbushAim} aim / +{Combat.AmbushCrit} crit", Pal.Good));
+        if (o.ExposedFire) flags.Add(($"EXPOSED BY FIRE  +{Combat.ExposedFireAim} aim / +{Combat.ExposedFireCrit} crit", Pal.Good));   // HORIZON: target fired last turn + stayed put
         // Surface the hidden streak-breaker: after consecutive misses this soldier's next
         // shot quietly aims truer (the bonus is in the roll, NOT in the HIT% shown). Naming it
         // "STEADYING" tells the player the safety net is working so a miss streak feels recoverable.

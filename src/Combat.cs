@@ -30,6 +30,7 @@ public struct ShotOdds
     public bool Partial;     // diagonal-at-range: target only partly obscured (half cover)
     public bool Steady;      // attacker braced (sharpshooter ability) this shot
     public bool Ambush;      // attacker fired from concealment (one-shot bonus)
+    public bool ExposedFire; // target fired last turn and stayed put — exposed by fire (HORIZON W1)
     public bool Crossfire;   // target caught in converging fire from two diverging angles
     public bool Marked;      // target designated by a sharpshooter MARK (squad-wide +aim/+crit)
     // ---- visible randomness-mitigation surfacing (S2-A graze + S4-C streak) ----
@@ -64,6 +65,10 @@ public static class Combat
     // Concealment ambush bonus: firing from concealment before breaking it.
     public const int AmbushAim  = 20;
     public const int AmbushCrit = 25;
+    // HORIZON W1 — EXPOSED BY FIRE: a unit that fired last turn and didn't move afterward is easier
+    // to hit on the opponent's turn (symmetric to the ambush; makes "duck vs double-tap" a real bet).
+    public const int ExposedFireAim  = 12;
+    public const int ExposedFireCrit = 12;
 
     // Sharpshooter "Mark" ability (focus-fire designator): EVERY squad member's shot vs the marked
     // foe lands easier + crits harder. The flag lives on the target (Unit.Marked), set by the
@@ -271,6 +276,11 @@ public static class Combat
         if (vendetta) hit += Unit.VendettaAim;
 
         if (a.FiredFromConcealment) hit += AmbushAim;
+        // HORIZON W1 — EXPOSED BY FIRE (symmetric, BOTH teams): a defender that fired this turn and
+        // stayed put is easier to hit until it moves. The a.Team != d.Team guard is the only team gate
+        // (do NOT restrict to one team). Cleared by OnUnitEnteredTile on any tile entry after firing.
+        bool exposedByFire = a.Team != d.Team && d.FiredThisTurn && !d.MovedAfterFire;
+        if (exposedByFire) hit += ExposedFireAim;
         // MARK (sharpshooter focus-fire designator, player attacker vs a marked foe): the whole
         // squad's shots vs the designated target land easier. Flat (a situational squad rule, like
         // crossfire), so it composes cleanly with everything else.
@@ -310,6 +320,7 @@ public static class Combat
         void AddCrit(int v) { if (v > 0) critBonuses.Add(v); }
 
         if (a.FiredFromConcealment) AddCrit(AmbushCrit);  // ambush bonus: caught off-guard
+        if (exposedByFire) AddCrit(ExposedFireCrit);      // HORIZON: fired-and-stationary foe is exposed
         if (highGround) AddCrit(HighGroundCrit);  // shooting down rewards crits
         if (a.Steady) AddCrit(SteadyCrit);        // braced shot also crits harder
         // Executioner: a FINISHER — +crit only vs sub-half-HP prey (the opposite end from First Strike).
@@ -366,6 +377,7 @@ public static class Combat
             Partial = partial,
             Steady = a.Steady,
             Ambush = a.FiredFromConcealment,
+            ExposedFire = exposedByFire,
             Crossfire = crossfire,
             Marked = marked,
             // Surface the hidden safety nets for the tooltip (no math change — purely informational):
@@ -680,6 +692,32 @@ public static class Combat
         if (!yesAmb.Ambush) fails.Add("ambushFlag");
         if (yesAmb.HitChance != Util.Clamp(noAmb.HitChance + AmbushAim, 3, 95)) fails.Add("ambushHit");
         if (yesAmb.CritChance != Util.Clamp(noAmb.CritChance + AmbushCrit, 0, 100)) fails.Add("ambushCrit");
+
+        // EXPOSED BY FIRE (HORIZON W1): a DEFENDER that fired this turn and hasn't moved is easier
+        // to hit by the opposing team (+ExposedFireAim / +ExposedFireCrit), symmetric to the ambush.
+        {
+            var gEf = new Grid();
+            var efA = new Unit { Aim = 65, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 3, Y = 5 };
+            var efD = new Unit { Aim = 65, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy,  X = 7, Y = 5, Hp = 8, MaxHp = 8 };
+            var efBase = ComputeOdds(gEf, efA, efD);                 // defender hasn't fired -> no bonus
+            if (efBase.ExposedFire) fails.Add("exposedFireBaseFlag");
+            // (a) defender fired + stayed put, opposing team -> exactly +ExposedFireAim / +ExposedFireCrit
+            efD.FiredThisTurn = true; efD.MovedAfterFire = false;
+            var efYes = ComputeOdds(gEf, efA, efD);
+            if (!efYes.ExposedFire) fails.Add("exposedFireFlag");
+            if (efYes.HitChance != Util.Clamp(efBase.HitChance + ExposedFireAim, 3, 95)) fails.Add("exposedFireHit");
+            if (efYes.CritChance != Util.Clamp(efBase.CritChance + ExposedFireCrit, 0, 100)) fails.Add("exposedFireCrit");
+            // (b) defender fired but MOVED afterward -> no bonus
+            efD.MovedAfterFire = true;
+            var efMoved = ComputeOdds(gEf, efA, efD);
+            if (efMoved.ExposedFire) fails.Add("exposedFireMovedFlag");
+            if (efMoved.HitChance != efBase.HitChance || efMoved.CritChance != efBase.CritChance) fails.Add("exposedFireMovedBonus");
+            // (c) SAME-team attacker vs a fired-and-stationary unit -> no bonus (team gate)
+            efD.MovedAfterFire = false;
+            var efFriend = new Unit { Aim = 65, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 3, Y = 5 };
+            var efSame = ComputeOdds(gEf, efFriend, efD);
+            if (efSame.ExposedFire) fails.Add("exposedFireSameTeamFlag");
+        }
 
         // GRAZE + guaranteed-damage floor (S2-A)
         // Reproduce "a shot that misses by <= 15" by exercising Resolve directly.

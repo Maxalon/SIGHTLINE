@@ -1931,6 +1931,7 @@ public class Game
     // ---------------- combat events ----------------
     public void OnUnitEnteredTile(Unit mover)
     {
+        if (mover.FiredThisTurn) mover.MovedAfterFire = true;   // HORIZON: any tile entry after firing clears exposed-by-fire
         if (!mover.Alive) return;
         if (mover.HasStatus(StatusKind.Bleed))   // bleeding worsens with every step
         {
@@ -3308,6 +3309,10 @@ public class Game
         // 1 — deliberate ability prep that improves THIS turn's outcome.
         if (PrepAbility(u)) return;
 
+        // 1b — TEMPO (HORIZON W1): if we already fired and haven't moved, weigh ducking to safety
+        //      vs a rushed 2nd shot. Ducks to cover ONLY when clearly better (never skips a finisher).
+        if (u.FiredThisTurn && !u.MovedAfterFire && u.ActionsLeft > 0 && SmartRetreatAfterShot(u)) return;
+
         // 2 — best shot by expected value (only when it's actually worth firing). SLOPPY: ~15%
         //     of the time mis-judge and skip an otherwise-good shot (a human hesitation) — falls
         //     through to a worse action below, so the GAP measures the cost of that error.
@@ -3519,10 +3524,61 @@ public class Game
 
     /// Fire at `tgt`. TEMPO: the aimed shot is now always 1 action and never ends the turn, so
     /// there's no SNAP/AIMED decision to make — fire at full aim and let the soldier keep its
-    /// second action for repositioning (handled by SmartRetreatAfterShot in the cascade).
+    /// second action for repositioning. The "duck vs double-tap" bet is played the NEXT SmartStep:
+    /// SmartCombatStep calls SmartRetreatAfterShot before its rushed-2nd-shot path (see below).
     void AutoShootSmart(Unit u, Unit tgt)
     {
         IssueShoot(tgt);
+    }
+
+    /// HORIZON W1 — the post-shot tempo bet. Called once the unit has already FIRED this turn and
+    /// hasn't moved since (so it's EXPOSED BY FIRE), with an action still in hand. Weighs ducking to
+    /// a safer tile against a rushed 2nd shot: if a genuine FINISHER is available from here, keep the
+    /// shot (return false, let the cascade take the kill); if we're already safe, or no tile is
+    /// meaningfully safer, don't move (return false, let the rushed shot / other actions run). Only
+    /// when ducking clearly reduces exposure do we issue a real move and return true. Preconditions
+    /// (FiredThisTurn && !MovedAfterFire && ActionsLeft > 0) are checked by the caller.
+    /// CRITICAL: never return true without issuing a real move (a stall would risk a TIMEOUT).
+    bool SmartRetreatAfterShot(Unit u)
+    {
+        if (MoveCost == null) return false;
+
+        // Don't duck away from a near-certain finishing 2nd shot from the current tile.
+        var (fTgt, _) = BestShotFrom(u, u.X, u.Y);
+        if (fTgt != null)
+        {
+            var fOdds = Combat.ComputeOdds(Grid, u, fTgt);
+            if (fTgt.Hp <= fOdds.DmgMax && fOdds.HitChance >= 50) return false;   // let the cascade take the kill
+        }
+
+        float curExp = TileExposure(u, u.X, u.Y);
+        if (curExp < 1.5f) return false;                    // already safe — no reason to duck
+
+        // Mirror the SafetyAt scoring from CountMeaningfulChoices: minimize exposure, then prefer
+        // more cover vs the nearest alive foe, then higher ground (as tie-breaks folded into a score).
+        var nearest = AliveEnemies().OrderBy(en => Util.TileDist(u.X, u.Y, en.X, en.Y)).FirstOrDefault();
+        float Safety(int x, int y)
+        {
+            float s = -TileExposure(u, x, y);
+            if (nearest != null) s += Grid.GetCover(x, y, nearest.X, nearest.Y).Level * 8f;
+            s += Grid.HeightAt(x, y) * 5f;
+            return s;
+        }
+
+        var pcost = Grid.CostMap(u.X, u.Y, (x, y) => IsOccupiedByOther(x, y, u), out _, u.MoveBudget * 2);
+        int bx = -1, by = -1; float bestSafety = Safety(u.X, u.Y); float bestExp = curExp;
+        for (int x = 0; x < Grid.W; x++)
+            for (int y = 0; y < Grid.H; y++)
+            {
+                int c = pcost[x, y];
+                if (c <= 0 || c > u.MoveBudget) continue;    // 1-action-reachable steps only
+                float s = Safety(x, y);
+                if (s > bestSafety) { bestSafety = s; bx = x; by = y; bestExp = TileExposure(u, x, y); }
+            }
+
+        // only duck if the chosen tile meaningfully reduces exposure (else a rushed shot is better).
+        if (bx >= 0 && bestExp <= curExp - 1.5f) { IssueMove(bx, by); return true; }
+        return false;
     }
 
     /// Prep a class ability when it improves THIS soldier's turn. Deliberate (never random):
@@ -5130,6 +5186,7 @@ public class Game
             // (TEMPO wave 5: the double-tap build fires its 2nd shot at full aim).
             if (Selected.FiredThisTurn && !Selected.HasPerk(Perk.Gunslinger)) aimMod = SnapAim;
             Selected.FiredThisTurn = true;
+            Selected.MovedAfterFire = false;   // HORIZON: fired-and-stationary => exposed until we move
             Selected.ActionsLeft = Math.Max(0, Selected.ActionsLeft - 1);
         }
         var res = Combat.Resolve(Grid, Selected, target, aimMod);
@@ -5164,7 +5221,7 @@ public class Game
         Selected.Ammo--;
         // TEMPO: 1 action, no end-turn (mirrors IssueShoot). A 2nd shot/turn is a rushed follow-up.
         if (Selected.RunGun) { Selected.RunGun = false; Selected.ActionsLeft = Math.Max(0, Selected.ActionsLeft - 1); }
-        else                 { Selected.FiredThisTurn = true; Selected.ActionsLeft = Math.Max(0, Selected.ActionsLeft - 1); }
+        else                 { Selected.FiredThisTurn = true; Selected.MovedAfterFire = false; Selected.ActionsLeft = Math.Max(0, Selected.ActionsLeft - 1); }
         Selected.Steady = false;
         Selected.FiredFromConcealment = false;
         Enqueue(new BarrelShotAnim(Selected, bx, by), Team.Player);
@@ -5910,6 +5967,7 @@ public class Game
                     e.Ammo--;
                     // TEMPO: the enemy shot is 1 action and does NOT end the turn (mirrors the player).
                     e.FiredThisTurn = true;
+                    e.MovedAfterFire = false;   // HORIZON: fired-and-stationary => exposed until it moves
                     e.ActionsLeft = Math.Max(0, e.ActionsLeft - 1);
                     var res = Combat.Resolve(Grid, e, _aiPlan.ShootTarget);
                     Enqueue(new WaitAnim(0.2f), Team.Enemy);
@@ -6609,7 +6667,7 @@ public class Game
         var killer = MkP(5, 9);
         var victim = MkE(7, 9, 1);
         Players.Add(killer); Enemies.Add(victim);
-        killer.ActionsLeft = 1; killer.FiredThisTurn = true;   // as if a flank-shot just fired (1 action, no end-turn)
+        killer.ActionsLeft = 1; killer.FiredThisTurn = true; killer.MovedAfterFire = false;   // as if a flank-shot just fired (1 action, no end-turn)
         var flankRes = new ShotResult { Hit = true, Damage = 5, Odds = new ShotOdds { Flanked = true, CoverLevel = 0 } };
         _anims.Clear(); _anims.Add(new ShotAnim(killer, victim, flankRes));   // active anim = this shot
         _refundedThisTurn.Clear();
