@@ -6,7 +6,7 @@ using Raylib_cs;
 
 namespace Sightline;
 
-public enum Phase { Intro, PlayerTurn, EnemyTurn, Barracks, Win, Lose, Draft }
+public enum Phase { Intro, PlayerTurn, EnemyTurn, Barracks, Win, Lose, Draft, WarRoom }   // WarRoom appended (W3; not persisted)
 // APPEND-ONLY: serialized as a raw (int) in SaveGame (CardDto.Objective). Never reorder or
 // remove a member — a saved run stores the ordinal, so a reorder silently corrupts the loaded
 // objective. Add new objectives at the END only. (SaveGame.SelfTest asserts the tail ordinal.)
@@ -703,10 +703,37 @@ public partial class Game
         // balance telemetry (no-op unless Stats.Enabled); tag the policy so the report can
         // split greedy vs sloppy win-rates and surface the optimal-vs-error GAP.
         Stats.BeginRun(_run.HeatLevel, SmartPlay && SmartSloppy ? "sloppy" : "greedy");
+        // PROGRAM HORIZON W3 (WAR ROOM): apply purchased cross-run UNLOCKS to the founding run. ADDITIVE
+        // only, campaign only, and STRICTLY gated behind !NoPersist — the flywheel/harness never read
+        // meta, so a measured/screenshot run is byte-identical to today (a fresh profile owns none anyway).
+        ApplyMetaUnlocks();
         Players = _run.Squad;
         int n = Util.Clamp(startAt, 1, Run.MaxMissions);
         if (n > 1) _run.JumpTo(n);           // harness: advance along the map to the requested op
         SetupMission(n);
+    }
+
+    /// Apply the persisted WAR ROOM unlocks to the just-started campaign run. No-op under NoPersist
+    /// (harness/flywheel) and in endless (never called from BeginEndless), so measurement stays clean.
+    void ApplyMetaUnlocks()
+    {
+        if (NoPersist) return;
+        if (SaveGame.HasUnlock((int)MetaUnlock.StartIntel))
+            _run.Intel += 15;
+        if (SaveGame.HasUnlock((int)MetaUnlock.StartBoon))
+        {
+            // grant one random boon not already active this run (a fresh run owns none).
+            var pool = new List<Boon>();
+            foreach (var b in BoonDef.All) if (!_run.HasBoon(b)) pool.Add(b);
+            if (pool.Count > 0)
+            {
+                var pick = pool[Util.RandInt(0, pool.Count - 1)];
+                _run.ActiveBoons.Add(pick);
+                Stats.RecordBoon(BoonDef.Code(pick));
+            }
+        }
+        if (SaveGame.HasUnlock((int)MetaUnlock.StartArmor))
+            foreach (var u in _run.Squad) u.Armor += 1;
     }
 
     // Lazily load the persisted unlocked-max Heat once (gated by NoPersist like all save I/O,
@@ -1806,6 +1833,8 @@ public partial class Game
             // adaptive assist: a win clears the loss streak (the next run starts un-assisted).
             _run.RecordRunResult(true);
             if (!NoPersist) SaveGame.SaveMetaLossStreak(_run.LossStreak);
+            // W3 WAR ROOM: bank salvage, enshrine the victorious squad + fallen, and check achievements.
+            AwardMetaRunEnd(true);
             Phase = Phase.Win; Audio.Play("win"); Audio.PlayStinger("victory"); if (!NoPersist) SaveGame.Delete();
             // VICTORY FLOURISH: a celebratory burst over the board (each surviving soldier cheers,
             // plus a centre fountain) the instant the final mission falls. The end-screen card then
@@ -1891,6 +1920,57 @@ public partial class Game
         // small, capped, reversible easing on their NEXT base-Heat run (Hades God-Mode).
         _run.RecordRunResult(false);
         if (!NoPersist) { SaveGame.SaveMetaLossStreak(_run.LossStreak); SaveGame.Delete(); }
+        // W3 WAR ROOM: bank consolation salvage, enshrine the fallen, and check the DEEP achievement.
+        AwardMetaRunEnd(false);
+    }
+
+    // ---- PROGRAM HORIZON W3 (WAR ROOM): cross-run meta award/record ----
+    // Bank salvage, populate the HALL OF FAME (Legends), record lifetime totals, and unlock any
+    // freshly-earned achievements (each grants a one-time salvage bounty). STRICTLY gated behind
+    // !NoPersist — the flywheel/harness never touch meta, so balance/screenshots stay byte-stable.
+    void AwardMetaRunEnd(bool win)
+    {
+        if (NoPersist || _run == null) return;
+        int heat = _run.HeatLevel;
+        int missions = win ? _run.Mission : Math.Max(0, _run.Mission - 1);
+
+        // 1) SALVAGE bounty
+        int salvage = win ? (25 + 6 * _run.Mission + 5 * heat) : (4 * Math.Max(0, _run.Mission - 1) + 2 * heat);
+        if (salvage > 0) { SaveGame.AddSalvage(salvage); _run.Report.Insert(0, $"SALVAGE +{salvage}"); }
+
+        // 2) HALL OF FAME — surviving squad (won runs) as legends, plus this run's fallen (KIA).
+        var legends = new List<SaveGame.LegendDto>();
+        if (win)
+            foreach (var u in _run.Squad)
+                if (u.Alive && !u.IsVip)
+                    legends.Add(new SaveGame.LegendDto { Name = u.FullName, Cls = u.Cls, Rank = u.RankName, Kills = u.Kills, Heat = heat, Won = true });
+        foreach (var f in _run.Memorial)
+            legends.Add(new SaveGame.LegendDto { Name = f.Name, Cls = f.Cls, Rank = f.Rank, Kills = f.Kills, Heat = heat, Won = false });
+        if (legends.Count > 0) SaveGame.AddLegends(legends);
+
+        // 3) lifetime totals
+        SaveGame.RecordRunTotals(win, missions);
+
+        // 4) ACHIEVEMENTS (each a one-time salvage bounty on first unlock)
+        if (win)
+        {
+            TryAchievement("FIRST_WIN");
+            if (heat >= 3) TryAchievement("HEAT3");
+            if (heat >= 6) TryAchievement("HEAT6");
+            if (_run.Memorial.Count == 0) TryAchievement("FLAWLESS");   // no soldier lost all run
+        }
+        if (_run.Mission >= Run.MaxMissions) TryAchievement("DEEP");     // reached mission 6 (win or loss)
+    }
+
+    /// Try to unlock an achievement; on a NEW unlock, bank the bounty + a report line.
+    void TryAchievement(string id)
+    {
+        if (NoPersist) return;
+        if (SaveGame.UnlockAchievement(id))
+        {
+            SaveGame.AddSalvage(MetaProg.AchievementSalvage);
+            _run.Report.Insert(0, $"ACHIEVEMENT: {MetaProg.AchievementName(id)}  (+{MetaProg.AchievementSalvage} salvage)");
+        }
     }
 
     void ShowBanner(string text, bool enemy)
@@ -2646,6 +2726,7 @@ public partial class Game
             case Phase.Win:
             case Phase.Lose: HandleOverlayClick(); break;
             case Phase.Draft: HandleDraftClick(); break;
+            case Phase.WarRoom: HandleWarRoomClick(); break;   // W3: cross-run meta screen
         }
 
         CheckEnd();
@@ -7466,6 +7547,15 @@ public partial class Game
                             Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.OverlayBtn3))
                            || Raylib.IsKeyPressed(KeyboardKey.L);
             if (endless) { BeginEndless(); return; }
+        }
+
+        // PROGRAM HORIZON W3: intro WAR ROOM — open the cross-run meta screen (button or key W).
+        if (Phase == Phase.Intro)
+        {
+            bool warRoom = (Raylib.IsMouseButtonPressed(MouseButton.Left) &&
+                            Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.OverlayBtn4))
+                           || Raylib.IsKeyPressed(KeyboardKey.W);
+            if (warRoom) { BeginWarRoom(); return; }
         }
 
         bool click = Raylib.IsMouseButtonPressed(MouseButton.Left) &&

@@ -1247,6 +1247,8 @@ public static class Hud
             DrawEndScreen(g, false);
         else if (g.Phase == Phase.Draft)
             DrawDraft(g);
+        else if (g.Phase == Phase.WarRoom)
+            DrawWarRoom(g);
     }
 
     // ============================================================================
@@ -1361,6 +1363,12 @@ public static class Hud
         Vector2 bwm = Raylib.MeasureTextEx(Cfg.Font, bestTxt, 12, 1f);
         Raylib.DrawTextEx(Cfg.Font, bestTxt, new Vector2(W / 2f - bwm.X / 2f, lsBy + 50), 12, 1f,
             Raylib.Fade(bestWave > 0 ? Pal.Foe : Pal.TxtDim, 0.8f * Util.EaseOutQuad(Util.Clamp(lsIn, 0f, 1f))));
+
+        // PROGRAM HORIZON W3: WAR ROOM (cross-run meta-progression) — a tertiary button below LAST STAND.
+        float wrIn = PanelAnim("introWarRoom", 0.3f, 0.68f);
+        int wrBy = lsBy + 74;
+        OverlayBtn4 = new Rectangle(W / 2 - 130, wrBy, 260, 40);
+        DrawOverlayButton(OverlayBtn4, "WAR ROOM", Pal.Accent, "W", wrIn);
 
         // a faint version/footer stamp
         Raylib.DrawTextEx(Cfg.Font, "GEOMETRY · PARTICLES · NO QUARTER", new Vector2(W / 2f - 150, H - 30), 11, 1f, Raylib.Fade(Pal.TxtDim, 0.6f));
@@ -1582,6 +1590,155 @@ public static class Hud
         OverlayBtn = new Rectangle(W / 2 - 130, by, 260, 46);
         OverlayBtn2 = new Rectangle(0, 0, 0, 0);
         DrawOverlayButton(OverlayBtn, "NEW RUN", win ? Pal.Good : Pal.Friend, null, btnIn);
+    }
+
+    // ============================================================================
+    //  WAR ROOM  — cross-run meta-progression (PROGRAM HORIZON W3). Persistent SALVAGE,
+    //  lifetime stats, achievements, a HALL OF FAME, and an additive unlock shop. All
+    //  data comes from the cached g.WarRoom snapshot (loaded on entry; no per-frame I/O).
+    // ============================================================================
+    static void DrawWarRoom(Game g)
+    {
+        float t = (float)Raylib.GetTime();
+        DrawTacticalBackdrop(t, Pal.Accent, 0f);
+        var p = g.WarRoom;
+        if (p == null) return;
+
+        int W = Cfg.ScreenW;
+
+        // ---- title + SALVAGE readout ----
+        float titleIn = PanelAnim("warTitle", 0.5f);
+        string title = "WAR ROOM";
+        int tfs = 64;
+        Vector2 tm = Raylib.MeasureTextEx(Cfg.Font, title, tfs, 4f);
+        float tx = W / 2f - tm.X / 2f;
+        float ty = 40f - (1f - Util.EaseOutBack(Util.Clamp(titleIn, 0f, 1f))) * 22f;
+        for (int i = 1; i <= 3; i++)
+            Raylib.DrawTextEx(Cfg.Font, title, new Vector2(tx, ty - i), tfs, 4f, Raylib.Fade(Pal.Accent, 0.10f * titleIn));
+        Raylib.DrawTextEx(Cfg.Font, title, new Vector2(tx, ty), tfs, 4f, Raylib.Fade(Pal.Txt, titleIn));
+        DrawCornerBrackets(new Rectangle(tx - 20, ty + 6, tm.X + 40, tfs - 8), Raylib.Fade(Pal.Accent, 0.5f * titleIn), 16f);
+
+        // SALVAGE bank + lifetime stat strip, centred under the title
+        string salv = $"SALVAGE  {p.Salvage}";
+        Vector2 svm = Raylib.MeasureTextEx(Cfg.Font, salv, 26, 1f);
+        Raylib.DrawTextEx(Cfg.Font, salv, new Vector2(W / 2f - svm.X / 2f, ty + tfs + 6), 26, 1f, Raylib.Fade(Pal.VipGold, titleIn));
+        string life = $"RUNS {p.Runs}   ·   WINS {p.Wins}   ·   BEST MISSION {p.BestMissions}   ·   BEST WAVE {p.BestWave}";
+        Vector2 lfm = Raylib.MeasureTextEx(Cfg.Font, life, 13, 1f);
+        Raylib.DrawTextEx(Cfg.Font, life, new Vector2(W / 2f - lfm.X / 2f, ty + tfs + 40), 13, 1f, Raylib.Fade(Pal.TxtDim, titleIn));
+
+        // ---- three-column layout: ACHIEVEMENTS | HALL OF FAME | UNLOCKS ----
+        int top = (int)(ty + tfs + 66);
+        int colGap = 24;
+        int marginX = 60;
+        int colW = (W - marginX * 2 - colGap * 2) / 3;
+        int colH = Cfg.ScreenH - top - 92;
+        int c0 = marginX, c1 = marginX + colW + colGap, c2 = marginX + (colW + colGap) * 2;
+
+        DrawWarAchievements(p, c0, top, colW, colH, PanelAnim("warAch", 0.4f, 0.15f));
+        DrawWarHallOfFame(p, c1, top, colW, colH, PanelAnim("warHof", 0.4f, 0.25f));
+        DrawWarUnlocks(g, p, c2, top, colW, colH, PanelAnim("warUnl", 0.4f, 0.35f));
+
+        // ---- BACK button (centred, bottom) ----
+        float backIn = PanelAnim("warBack", 0.3f, 0.5f);
+        int by = Cfg.ScreenH - 66;
+        WarRoomBack = new Rectangle(W / 2 - 120, by, 240, 44);
+        DrawOverlayButton(WarRoomBack, "BACK", Pal.Friend, "Esc", backIn);
+    }
+
+    static void DrawWarPanel(Rectangle panel, string header, Color accent, float anim)
+    {
+        Raylib.DrawRectangleRounded(panel, 0.05f, 8, Raylib.Fade(Pal.Panel, 0.90f * anim));
+        Raylib.DrawRectangleLinesEx(panel, 1.2f, Raylib.Fade(accent, 0.40f * anim));
+        Raylib.DrawRectangle((int)panel.X, (int)panel.Y, 3, (int)panel.Height, Raylib.Fade(accent, anim));
+        Raylib.DrawTextEx(Cfg.Font, header, new Vector2(panel.X + 14, panel.Y + 12), 15, 1f, Raylib.Fade(accent, anim));
+    }
+
+    static void DrawWarAchievements(Game.WarRoomProfile p, int x, int y, int w, int h, float anim)
+    {
+        if (anim <= 0f) return;
+        DrawWarPanel(new Rectangle(x, y, w, h), "ACHIEVEMENTS", Pal.Accent, anim);
+        int rowY = y + 44;
+        foreach (var a in MetaProg.All)
+        {
+            if (rowY > y + h - 30) break;
+            bool got = p.Achievements.Contains(a.Id);
+            Color nameCol = got ? Pal.VipGold : Pal.TxtDim;
+            float rowA = anim * (got ? 1f : 0.55f);
+            // a small filled/empty marker
+            var mk = new Rectangle(x + 14, rowY + 2, 12, 12);
+            if (got) Raylib.DrawRectangleRounded(mk, 0.3f, 4, Raylib.Fade(Pal.VipGold, rowA));
+            else Raylib.DrawRectangleLinesEx(mk, 1.2f, Raylib.Fade(Pal.TxtDim, rowA));
+            Raylib.DrawTextEx(Cfg.Font, a.Name, new Vector2(x + 34, rowY), 14, 1f, Raylib.Fade(nameCol, rowA));
+            Raylib.DrawTextEx(Cfg.Font, a.Desc, new Vector2(x + 34, rowY + 16), 11, 1f, Raylib.Fade(Pal.TxtDim, rowA));
+            rowY += 38;
+        }
+    }
+
+    static void DrawWarHallOfFame(Game.WarRoomProfile p, int x, int y, int w, int h, float anim)
+    {
+        if (anim <= 0f) return;
+        DrawWarPanel(new Rectangle(x, y, w, h), "HALL OF FAME", Pal.Friend, anim);
+        int rowY = y + 44;
+        if (p.Legends == null || p.Legends.Count == 0)
+        {
+            Raylib.DrawTextEx(Cfg.Font, "- no legends yet -", new Vector2(x + 14, rowY), 13, 1f, Raylib.Fade(Pal.TxtDim, anim));
+            Raylib.DrawTextEx(Cfg.Font, "Finish a run to enshrine them.", new Vector2(x + 14, rowY + 18), 11, 1f, Raylib.Fade(Pal.TxtDim, anim));
+            return;
+        }
+        foreach (var l in p.Legends)
+        {
+            if (rowY > y + h - 30) break;
+            Color tag = l.Won ? Pal.VipGold : Pal.TxtDim;
+            string status = l.Won ? "WON" : "KIA";
+            Raylib.DrawTextEx(Cfg.Font, status, new Vector2(x + 14, rowY + 2), 11, 1f, Raylib.Fade(tag, anim));
+            Raylib.DrawTextEx(Cfg.Font, l.Name ?? "", new Vector2(x + 48, rowY), 14, 1f, Raylib.Fade(l.Won ? Pal.Txt : Pal.TxtDim, anim));
+            string sub = $"{l.Rank} {l.Cls}  ·  {l.Kills} K  ·  H{l.Heat}";
+            Raylib.DrawTextEx(Cfg.Font, sub, new Vector2(x + 48, rowY + 16), 11, 1f, Raylib.Fade(Pal.TxtDim, anim));
+            rowY += 34;
+        }
+    }
+
+    static void DrawWarUnlocks(Game g, Game.WarRoomProfile p, int x, int y, int w, int h, float anim)
+    {
+        WarRoomBuyBtns.Clear();
+        if (anim <= 0f) return;
+        DrawWarPanel(new Rectangle(x, y, w, h), "UNLOCKS", Pal.Good, anim);
+        int rowY = y + 44;
+        foreach (var u in MetaProg.AllUnlocks)
+        {
+            if (rowY > y + h - 74) break;
+            bool owned = p.Unlocks.Contains((int)u);
+            int cost = MetaProg.UnlockCost(u);
+            bool afford = p.Salvage >= cost;
+
+            var card = new Rectangle(x + 12, rowY, w - 24, 72);
+            Raylib.DrawRectangleRounded(card, 0.08f, 6, Raylib.Fade(Pal.RGBA(14, 20, 28), 0.9f * anim));
+            Raylib.DrawRectangleLinesEx(card, 1f, Raylib.Fade(owned ? Pal.Good : Pal.PanelBd, 0.6f * anim));
+
+            Raylib.DrawTextEx(Cfg.Font, MetaProg.UnlockName(u), new Vector2(card.X + 12, card.Y + 8), 14, 1f, Raylib.Fade(Pal.Txt, anim));
+            // word-wrapped description, up to 2 lines
+            var descLines = WrapText(MetaProg.UnlockDesc(u), 11, (int)card.Width - 24);
+            for (int li = 0; li < descLines.Count && li < 2; li++)
+                Raylib.DrawTextEx(Cfg.Font, descLines[li], new Vector2(card.X + 12, card.Y + 26 + li * 13), 11, 1f, Raylib.Fade(Pal.TxtDim, anim));
+
+            // BUY / OWNED chip, right side
+            var chip = new Rectangle(card.X + card.Width - 92, card.Y + card.Height - 26, 80, 20);
+            if (owned)
+            {
+                Raylib.DrawRectangleRounded(chip, 0.3f, 6, Raylib.Fade(Pal.Good, 0.22f * anim));
+                CenterText("OWNED", chip, 12, Raylib.Fade(Pal.Good, anim));
+            }
+            else
+            {
+                bool hover = afford && Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), chip);
+                Color chipCol = afford ? (hover ? Pal.Good : Pal.RGBA(30, 44, 34)) : Pal.RGBA(30, 24, 24);
+                Raylib.DrawRectangleRounded(chip, 0.3f, 6, Raylib.Fade(chipCol, anim));
+                Raylib.DrawRectangleLinesEx(chip, 1f, Raylib.Fade(afford ? Pal.Good : Pal.Foe, 0.6f * anim));
+                CenterText($"BUY {cost}", chip, 12, Raylib.Fade(afford ? Pal.Txt : Pal.TxtDim, anim));
+                WarRoomBuyBtns.Add((u, chip));   // hit-testable regardless of affordability (Game refuses)
+            }
+            rowY += 82;
+        }
     }
 
     /// Left dossier column: the SURVIVING SQUAD roster (name/nickname, rank, kills, a trait),
@@ -2677,6 +2834,11 @@ public static class Hud
     public static Rectangle OverlayBtn;
     public static Rectangle OverlayBtn2;   // intro CONTINUE-run button (when a save exists)
     public static Rectangle OverlayBtn3;   // intro LAST STAND (endless) button (PROGRAM HORIZON W2)
+    public static Rectangle OverlayBtn4;   // intro WAR ROOM (cross-run meta) button (PROGRAM HORIZON W3)
+
+    // WAR ROOM (W3): the BACK button + per-unlock BUY buttons, published by DrawWarRoom for hit-testing.
+    public static Rectangle WarRoomBack;
+    public static readonly System.Collections.Generic.List<(MetaUnlock unlock, Rectangle rect)> WarRoomBuyBtns = new();
 
     /// Intro Heat/Ascension selector: a side panel with a HEAT dial (+/- buttons, arrows/A-D),
     /// the unlocked ceiling, and the live list of modifiers active at the dialled level. Heat

@@ -146,6 +146,8 @@ public partial class Game
         {
             best = Math.Max(SaveGame.LoadMetaBestWave(), wavesSurvived);
             SaveGame.SaveMetaBestWave(best);
+            // W3 WAR ROOM: bank endless salvage, enshrine the fallen + surviving squad, check STAND*.
+            AwardMetaEndless(wavesSurvived);
         }
         EndlessBestWave = best;
         LoseTitle = "LAST STAND";
@@ -157,6 +159,31 @@ public partial class Game
         Stats.EndMission(false, _turnCount, AlivePlayers().Count(p => !p.IsVip),
                          Enemies.Count(e => !e.Alive), "last-stand");
         Stats.EndRun(false, wavesSurvived, "last-stand");
+    }
+
+    /// PROGRAM HORIZON W3 (WAR ROOM): bank endless salvage + enshrine legends + check STAND achievements.
+    /// Called only from EndEndless under !NoPersist (the guard is at the call site + re-asserted here).
+    void AwardMetaEndless(int wavesSurvived)
+    {
+        if (NoPersist || _run == null) return;
+        int heat = _run.HeatLevel;
+        // 1) SALVAGE — scales with depth + heat
+        int salvage = 3 * wavesSurvived + 3 * heat;
+        if (salvage > 0) { SaveGame.AddSalvage(salvage); _run.Report.Insert(0, $"SALVAGE +{salvage}"); }
+
+        // 2) HALL OF FAME — the fallen (KIA) + any survivors (Won iff it was a deep stand, wave>=10).
+        var legends = new List<SaveGame.LegendDto>();
+        bool deepStand = wavesSurvived >= 10;
+        foreach (var u in _run.Squad)
+            if (u.Alive && !u.IsVip)
+                legends.Add(new SaveGame.LegendDto { Name = u.FullName, Cls = u.Cls, Rank = u.RankName, Kills = u.Kills, Heat = heat, Won = deepStand });
+        foreach (var f in _run.Memorial)
+            legends.Add(new SaveGame.LegendDto { Name = f.Name, Cls = f.Cls, Rank = f.Rank, Kills = f.Kills, Heat = heat, Won = false });
+        if (legends.Count > 0) SaveGame.AddLegends(legends);
+
+        // 3) STAND achievements (one-time salvage bounty on first unlock)
+        if (wavesSurvived >= 5) TryAchievement("STAND5");
+        if (wavesSurvived >= 10) TryAchievement("STAND10");
     }
 
     // Cached BEST WAVE for HUD/end-card readouts. Loaded lazily (once) so the intro can show it
