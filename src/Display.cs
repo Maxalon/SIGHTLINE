@@ -130,11 +130,14 @@ void main() {
     // --- colour grade: saturation + contrast + per-biome tint ---
     // 1) biome tint (uGrade is near 1.0); amplify its deviation from neutral so missions
     //    feel like distinct places (cool steel / warm arid / icy tundra ...).
-    vec3 tint = vec3(1.0) + (uGrade - vec3(1.0)) * 2.2;
+    //    W6: grade amp 2.2 -> 2.6 (biome tint reads a touch harder on-device); still
+    //    readability-clamped by the 0.35 blend below + the final clamp/gamma, and OFF in the
+    //    plain SIGHTLINE_SHOT harness so it never affects headless byte-stability.
+    vec3 tint = vec3(1.0) + (uGrade - vec3(1.0)) * 2.6;
     vec3 graded = withBloom * tint;
     // 2) saturation lift — the geometric palette pops a little more.
     float lum = luma(graded);
-    graded = mix(vec3(lum), graded, 1.18);
+    graded = mix(vec3(lum), graded, 1.22);
     // 3) gentle S-curve contrast around mid-grey: deepen shadows, keep highlights.
     graded = clamp(graded, 0.0, 1.0);
     graded = graded * graded * (3.0 - 2.0 * graded);   // smoothstep contrast

@@ -659,6 +659,7 @@ public static class Hud
         Add("drag", "DRAG", "7", interactive && g.CanDrag(u), g.DragMode);
         Add("vault", "VAULT", "9", interactive && g.CanVault(u), g.VaultMode);
         Add("overwatch", "OVERWATCH", "2", interactive && u != null && u.CanAct && u.Ammo > 0, false);
+        Add("focusow", "FOCUS", "F", interactive && u != null && u.CanAct && u.Ammo > 0, false);   // braced cone watch
         Add("hunker", "HUNKER", "3", interactive && u != null && u.CanAct, u != null && u.Hunkered);
         if (g.HasHackAction)
             Add("hack", g.HasSabotage ? "PLANT" : "HACK", "H", interactive && g.CanHack(u), false);
@@ -1747,7 +1748,7 @@ public static class Hud
         string salv = $"SALVAGE  {p.Salvage}";
         Vector2 svm = Raylib.MeasureTextEx(Cfg.Font, salv, 26, 1f);
         Raylib.DrawTextEx(Cfg.Font, salv, new Vector2(W / 2f - svm.X / 2f, ty + tfs + 6), 26, 1f, Raylib.Fade(Pal.VipGold, titleIn));
-        string life = $"RUNS {p.Runs}   ·   WINS {p.Wins}   ·   BEST MISSION {p.BestMissions}   ·   BEST WAVE {p.BestWave}";
+        string life = $"RUNS {p.Runs}   ·   WINS {p.Wins}   ·   BEST MISSION {p.BestMissions}   ·   BEST WAVE {p.BestWave}   ·   VETERANS {p.Veterans}/{SaveGame.MaxVeterans}";
         Vector2 lfm = Raylib.MeasureTextEx(Cfg.Font, life, 13, 1f);
         Raylib.DrawTextEx(Cfg.Font, life, new Vector2(W / 2f - lfm.X / 2f, ty + tfs + 40), 13, 1f, Raylib.Fade(Pal.TxtDim, titleIn));
 
@@ -2305,26 +2306,51 @@ public static class Hud
             // a card is "blocked" (can't add more) only matters visually when not already picked
             bool full = !sel && picked >= Game.DraftCap;
 
+            bool vet = u.FromReserve;   // COUNTERPLAY: a recalled veteran carrying earned progression
             PanelShadow(r, 1f);
             Color body = sel ? Pal.RGBA(20, 38, 30) : (hover && !full ? Pal.RGBA(24, 34, 46) : Pal.Panel);
+            if (vet && !sel) body = Pal.Mix(body, Pal.VipGold, 0.10f);   // warm the veteran card
             Raylib.DrawRectangleRounded(r, 0.07f, 8, full ? Raylib.Fade(body, 0.55f) : body);
-            Color bd = sel ? Pal.Good : (hover && !full ? Pal.Friend : Pal.PanelBd);
-            Raylib.DrawRectangleLinesEx(r, sel ? 3f : 1.5f, full ? Raylib.Fade(bd, 0.5f) : bd);
+            Color bd = sel ? Pal.Good : (vet ? Pal.VipGold : (hover && !full ? Pal.Friend : Pal.PanelBd));
+            Raylib.DrawRectangleLinesEx(r, sel ? 3f : (vet ? 2f : 1.5f), full ? Raylib.Fade(bd, 0.5f) : bd);
 
             float a = full ? 0.55f : 1f;
             int px = (int)r.X + 16, py = (int)r.Y + 12;
-            // name + class
-            Raylib.DrawTextEx(Cfg.Font, u.Name, new Vector2(px, py), 22, 1f, Raylib.Fade(Pal.Txt, a));
-            int nw = (int)Raylib.MeasureTextEx(Cfg.Font, u.Name, 22, 1f).X;
-            Raylib.DrawTextEx(Cfg.Font, u.Cls, new Vector2(px + nw + 8, py + 5), 13, 1f, Raylib.Fade(Pal.Friend, a));
+            // VETERAN ribbon (top-right corner). A small gold diamond marker (drawn, not a font glyph —
+            // the baked atlas has no star) + the word, so it reads in any palette.
+            if (vet)
+            {
+                string vtag = "VETERAN";
+                var vm = Raylib.MeasureTextEx(Cfg.Font, vtag, 12, 1f);
+                float vx = r.X + cw - vm.X - 12;
+                Raylib.DrawTextEx(Cfg.Font, vtag, new Vector2(vx, py + 2), 12, 1f, Raylib.Fade(Pal.VipGold, a));
+                float dcy = py + 8;
+                Raylib.DrawPoly(new Vector2(vx - 8, dcy), 4, 4f, 45f, Raylib.Fade(Pal.VipGold, a));
+            }
+            // name — nickname shown for veterans who earned one; class label drawn inline ONLY for fresh
+            // recruits (a veteran's longer FullName + the corner ribbon would collide; its class goes in
+            // the dossier line below instead).
+            string nm = vet ? u.FullName : u.Name;
+            Raylib.DrawTextEx(Cfg.Font, nm, new Vector2(px, py), 22, 1f, Raylib.Fade(Pal.Txt, a));
+            if (!vet)
+            {
+                int nw = (int)Raylib.MeasureTextEx(Cfg.Font, nm, 22, 1f).X;
+                Raylib.DrawTextEx(Cfg.Font, u.Cls, new Vector2(px + nw + 8, py + 5), 13, 1f, Raylib.Fade(Pal.Friend, a));
+            }
             // weapon
             string wpn = u.Weapon != null ? u.Weapon.Name : "-";
             Raylib.DrawTextEx(Cfg.Font, wpn, new Vector2(px, py + 30), 13, 1f, Raylib.Fade(Pal.TxtDim, a));
             // stat line
             string stats = $"HP {u.MaxHp}    AIM {u.Aim}    MOB {u.Mobility}";
             Raylib.DrawTextEx(Cfg.Font, stats, new Vector2(px, py + 52), 15, 1f, Raylib.Fade(Pal.Txt, a));
-            // role one-liner
-            Raylib.DrawTextEx(Cfg.Font, ClassBlurb(u.Cls), new Vector2(px, py + 76), 12, 1f, Raylib.Fade(Pal.TxtDim, a));
+            // role one-liner — for veterans, a dossier of class + earned progression instead of the class blurb
+            if (vet)
+            {
+                string dossier = $"{u.Cls} · {u.RankName} · {u.Kills}k · {u.Perks.Count}P/{u.Traits.Count}T";
+                Raylib.DrawTextEx(Cfg.Font, dossier, new Vector2(px, py + 76), 12, 1f, Raylib.Fade(Pal.VipGold, a));
+            }
+            else
+                Raylib.DrawTextEx(Cfg.Font, ClassBlurb(u.Cls), new Vector2(px, py + 76), 12, 1f, Raylib.Fade(Pal.TxtDim, a));
             // signature ability
             Raylib.DrawTextEx(Cfg.Font, "ABILITY: " + u.AbilityName, new Vector2(px, py + 96), 12, 1f, Raylib.Fade(Pal.Accent, a));
             // pick state line

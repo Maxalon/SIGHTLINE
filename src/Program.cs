@@ -39,6 +39,21 @@ public static class Program
             Console.WriteLine(Game.DraftSelfTest());
             return;
         }
+        // SIGHTLINE_VETTEST=1 : cross-run VETERAN reserve — enshrine/recall carries progression, dedupe,
+        // cap, draft seats <= MaxDraftVeterans. Pure Run/SaveGame logic (preserves the real meta.json). No window.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_VETTEST") == "1")
+        {
+            Console.WriteLine(Game.VetSelfTest());
+            return;
+        }
+        // SIGHTLINE_OWTEST=1 : FOCUSED-overwatch braced-cone geometry (in-arc covered, behind/perp/outside blind).
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_OWTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "owtest");   // Game ctor uses tile math
+            Console.WriteLine(new Game().OwSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         if (Environment.GetEnvironmentVariable("SIGHTLINE_COMBATTEST") == "1")
         {
             Console.WriteLine(Combat.SelfTest());
@@ -360,6 +375,8 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_BOON") == "1") game.DebugBoon();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_EVENT") == "1") game.DebugEvent();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_DRAFT") == "1") game.BeginDraft();
+        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_VETDRAFT") == "1") game.DebugVetDraft();   // draft w/ recalled veterans
+        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_FOCUSOW") == "1") game.DebugFocusOw();      // focused-overwatch cone
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_WARROOM") == "1") game.DebugWarRoom();   // W3 cross-run meta screen
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CODEX") == "1") game.DebugCodex();       // W6 field-manual reference screen
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_HAZARD") == "1") game.DebugHazards();

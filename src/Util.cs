@@ -134,24 +134,35 @@ public class Biome
 
     public static readonly Biome[] All =
     {
-        new Biome { Name = "STEEL",   FloorA = Pal.RGBA(22, 29, 38), FloorB = Pal.RGBA(26, 34, 44), Grid = Pal.RGBA(33, 43, 56), Edge = Pal.RGBA(30, 39, 51), Tint = Pal.RGBA(44, 58, 74),
-                    Ambient = AmbientKind.Dust,  AmbCol = Pal.RGBA(120, 140, 165), AmbCount = 44, AmbSpeed = 10f, AmbSize = 1.6f, AmbAlpha = 0.15f },
-        new Biome { Name = "ARID",    FloorA = Pal.RGBA(40, 33, 23), FloorB = Pal.RGBA(46, 38, 27), Grid = Pal.RGBA(62, 50, 33), Edge = Pal.RGBA(64, 52, 34), Tint = Pal.RGBA(92, 72, 38),
-                    Ambient = AmbientKind.Gust,  AmbCol = Pal.RGBA(176, 150, 104), AmbCount = 54, AmbSpeed = 92f, AmbSize = 1.7f, AmbAlpha = 0.14f },
-        new Biome { Name = "TUNDRA",  FloorA = Pal.RGBA(23, 33, 42), FloorB = Pal.RGBA(28, 39, 49), Grid = Pal.RGBA(42, 56, 70), Edge = Pal.RGBA(44, 58, 74), Tint = Pal.RGBA(58, 84, 108),
-                    Ambient = AmbientKind.Snow,  AmbCol = Pal.RGBA(206, 222, 238), AmbCount = 64, AmbSpeed = 30f, AmbSize = 2.0f, AmbAlpha = 0.20f },
-        new Biome { Name = "VERDANT", FloorA = Pal.RGBA(21, 35, 26), FloorB = Pal.RGBA(25, 41, 30), Grid = Pal.RGBA(38, 58, 42), Edge = Pal.RGBA(38, 60, 44), Tint = Pal.RGBA(50, 84, 56),
-                    Ambient = AmbientKind.Spore, AmbCol = Pal.RGBA(150, 200, 140), AmbCount = 40, AmbSpeed = 13f, AmbSize = 1.8f, AmbAlpha = 0.16f },
-        new Biome { Name = "ASH",     FloorA = Pal.RGBA(34, 27, 27), FloorB = Pal.RGBA(40, 31, 31), Grid = Pal.RGBA(56, 42, 42), Edge = Pal.RGBA(58, 40, 40), Tint = Pal.RGBA(86, 56, 52),
-                    Ambient = AmbientKind.Ash,   AmbCol = Pal.RGBA(150, 138, 132), AmbCount = 58, AmbSpeed = 22f, AmbSize = 2.0f, AmbAlpha = 0.18f },
-        new Biome { Name = "VOID",    FloorA = Pal.RGBA(28, 24, 41), FloorB = Pal.RGBA(33, 28, 48), Grid = Pal.RGBA(50, 41, 68), Edge = Pal.RGBA(52, 42, 72), Tint = Pal.RGBA(72, 56, 102),
-                    Ambient = AmbientKind.Mote,  AmbCol = Pal.RGBA(170, 150, 210), AmbCount = 42, AmbSpeed = 8f,  AmbSize = 1.7f, AmbAlpha = 0.18f },
+        // HORIZON W6 — LAND THE BIOME. FloorA/FloorB pushed apart (wider value gap = a checker the
+        // eye can still see after the mean is pulled toward Tint) and each Tint driven further into
+        // its own hue corner so the 8 rooms read as DISTINCT PLACES at a glance. Kept DARK (mean
+        // stays a low base after DrawBoard's darken) so units/objectives/cover keep the hierarchy.
+        // AmbAlpha bumped a touch (Fx multiplies ×1.5, clamps ≤0.34) so motion is a FELT secondary cue.
+        // STEEL — cold steel-blue.
+        new Biome { Name = "STEEL",   FloorA = Pal.RGBA(20, 28, 39), FloorB = Pal.RGBA(30, 41, 54), Grid = Pal.RGBA(33, 43, 56), Edge = Pal.RGBA(30, 39, 51), Tint = Pal.RGBA(50, 74, 104),
+                    Ambient = AmbientKind.Dust,  AmbCol = Pal.RGBA(120, 140, 165), AmbCount = 44, AmbSpeed = 10f, AmbSize = 1.6f, AmbAlpha = 0.18f },
+        // ARID — warm dune sand.
+        new Biome { Name = "ARID",    FloorA = Pal.RGBA(41, 33, 21), FloorB = Pal.RGBA(56, 46, 28), Grid = Pal.RGBA(62, 50, 33), Edge = Pal.RGBA(64, 52, 34), Tint = Pal.RGBA(120, 88, 40),
+                    Ambient = AmbientKind.Gust,  AmbCol = Pal.RGBA(190, 160, 108), AmbCount = 54, AmbSpeed = 92f, AmbSize = 1.8f, AmbAlpha = 0.17f },
+        // TUNDRA — pale cyan-white frost.
+        new Biome { Name = "TUNDRA",  FloorA = Pal.RGBA(24, 36, 46), FloorB = Pal.RGBA(36, 51, 63), Grid = Pal.RGBA(42, 56, 70), Edge = Pal.RGBA(44, 58, 74), Tint = Pal.RGBA(96, 132, 158),
+                    Ambient = AmbientKind.Snow,  AmbCol = Pal.RGBA(210, 226, 242), AmbCount = 64, AmbSpeed = 30f, AmbSize = 2.0f, AmbAlpha = 0.22f },
+        // VERDANT — overgrown green.
+        new Biome { Name = "VERDANT", FloorA = Pal.RGBA(19, 35, 24), FloorB = Pal.RGBA(28, 50, 33), Grid = Pal.RGBA(38, 58, 42), Edge = Pal.RGBA(38, 60, 44), Tint = Pal.RGBA(58, 108, 62),
+                    Ambient = AmbientKind.Spore, AmbCol = Pal.RGBA(158, 208, 146), AmbCount = 40, AmbSpeed = 13f, AmbSize = 1.9f, AmbAlpha = 0.19f },
+        // ASH — desaturated soot grey.
+        new Biome { Name = "ASH",     FloorA = Pal.RGBA(31, 28, 27), FloorB = Pal.RGBA(45, 40, 39), Grid = Pal.RGBA(56, 42, 42), Edge = Pal.RGBA(58, 40, 40), Tint = Pal.RGBA(92, 78, 74),
+                    Ambient = AmbientKind.Ash,   AmbCol = Pal.RGBA(158, 146, 140), AmbCount = 58, AmbSpeed = 22f, AmbSize = 2.1f, AmbAlpha = 0.21f },
+        // VOID — violet-black.
+        new Biome { Name = "VOID",    FloorA = Pal.RGBA(27, 22, 42), FloorB = Pal.RGBA(40, 32, 58), Grid = Pal.RGBA(50, 41, 68), Edge = Pal.RGBA(52, 42, 72), Tint = Pal.RGBA(96, 68, 140),
+                    Ambient = AmbientKind.Mote,  AmbCol = Pal.RGBA(182, 158, 224), AmbCount = 42, AmbSpeed = 8f,  AmbSize = 1.8f, AmbAlpha = 0.22f },
         // NEON: a dim cyber-grid arcology — cool slate floor lit by teal grid lines; cover reads cyan-tinted.
-        new Biome { Name = "NEON",    FloorA = Pal.RGBA(16, 28, 34), FloorB = Pal.RGBA(20, 34, 41), Grid = Pal.RGBA(34, 78, 92), Edge = Pal.RGBA(36, 90, 104), Tint = Pal.RGBA(46, 96, 110),
-                    Ambient = AmbientKind.Scan,  AmbCol = Pal.RGBA(90, 200, 210), AmbCount = 50, AmbSpeed = 40f, AmbSize = 1.7f, AmbAlpha = 0.15f },
+        new Biome { Name = "NEON",    FloorA = Pal.RGBA(14, 28, 33), FloorB = Pal.RGBA(20, 42, 49), Grid = Pal.RGBA(34, 78, 92), Edge = Pal.RGBA(36, 90, 104), Tint = Pal.RGBA(38, 118, 130),
+                    Ambient = AmbientKind.Scan,  AmbCol = Pal.RGBA(96, 208, 218), AmbCount = 50, AmbSpeed = 40f, AmbSize = 1.8f, AmbAlpha = 0.18f },
         // MAGMA: a volcanic foundry — dark basalt floor veined with a warm ember tint on cover/plateaus.
-        new Biome { Name = "MAGMA",   FloorA = Pal.RGBA(32, 22, 20), FloorB = Pal.RGBA(40, 26, 22), Grid = Pal.RGBA(74, 44, 32), Edge = Pal.RGBA(96, 50, 30), Tint = Pal.RGBA(132, 64, 34),
-                    Ambient = AmbientKind.Ember, AmbCol = Pal.RGBA(255, 150, 70),  AmbCount = 52, AmbSpeed = 34f, AmbSize = 1.9f, AmbAlpha = 0.22f },
+        new Biome { Name = "MAGMA",   FloorA = Pal.RGBA(30, 20, 18), FloorB = Pal.RGBA(48, 30, 24), Grid = Pal.RGBA(74, 44, 32), Edge = Pal.RGBA(96, 50, 30), Tint = Pal.RGBA(150, 70, 34),
+                    Ambient = AmbientKind.Ember, AmbCol = Pal.RGBA(255, 156, 74),  AmbCount = 52, AmbSpeed = 34f, AmbSize = 2.0f, AmbAlpha = 0.24f },
     };
 
     public static Biome For(int missionNum) => All[(missionNum - 1 + All.Length) % All.Length];
@@ -162,6 +173,12 @@ public class Biome
     /// caller that wants the fixed cycle; Game switches to this at integration.
     public static Biome For(int missionNum, int runSeed)
     {
+        // TEST HOOK (byte-stable no-op unless SIGHTLINE_FORCEBIOME is set): pin the biome to a fixed
+        // index so the headless screenshot harness can sweep all 8 biomes deterministically despite
+        // MapSeed being random per process. Gameplay/normal runs never set it, so this is inert.
+        var force = System.Environment.GetEnvironmentVariable("SIGHTLINE_FORCEBIOME");
+        if (force != null && int.TryParse(force, out int fi))
+            return All[((fi % All.Length) + All.Length) % All.Length];
         int idx = (int)(((uint)runSeed + (uint)(missionNum - 1)) % (uint)All.Length);
         return All[idx];
     }

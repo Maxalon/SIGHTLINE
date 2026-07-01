@@ -226,6 +226,9 @@ public static class SaveGame
         public int TotalRuns, TotalWins, BestMissions;
         // W4 SEEDED DAILY (append-only): the last-played day (yyyymmdd) + its best (fewest win-turns; 0 = uncleared).
         public int DailyStamp, DailyBest;
+        // COUNTERPLAY (append-only): the cross-run VETERAN reserve — promoted survivors of finished runs,
+        // recallable in a future run's draft. Old profiles have no list -> null -> empty (inert).
+        public List<UnitDto> Veterans;
     }
 
     /// A HALL OF FAME entry (WAR ROOM): a soldier snapshot at run end — a fallen KIA (Won=false) or a
@@ -242,6 +245,108 @@ public static class SaveGame
     public static string MetaPathPublic => MetaPath;
 
     // ---- mapping ----
+    // A single Unit <-> UnitDto mapping, reused by the run save (ToDto/FromDto) AND the cross-run
+    // VETERAN reserve (EnshrineVeterans/LoadVeterans), so both persist the identical persistent
+    // field set. Transient per-mission state (ammo/pos/grenades/statuses) is intentionally excluded —
+    // it is rebuilt by Mission.Build on deploy.
+    static UnitDto ToUnitDto(Unit u) => new UnitDto
+    {
+        Name = u.Name, Cls = u.Cls,
+        Hp = u.Hp, MaxHp = u.MaxHp, Aim = u.Aim, Mobility = u.Mobility,
+        Weapon = (int)u.Weapon.Kind, Kills = u.Kills, Rank = u.Rank,
+        BonusGrenades = u.BonusGrenades,
+        CustomTag = u.CustomTag,
+        Wound = u.Wound,
+        Armor = u.Armor,
+        Benched = u.Benched,
+        Perks = u.Perks.ConvertAll(p => (int)p),
+        WeaponMods = u.WeaponMods.ConvertAll(m => (int)m),
+        Nickname = u.Nickname,
+        Traits = u.Traits.ConvertAll(t => (int)t),
+        Bonds = new List<string>(u.Bonds),
+        Spec = (int)u.Spec,
+        Scars = u.Scars.ConvertAll(s => (int)s),
+        VendettaFaction = (int)u.VendettaFaction,
+        NearDeathCount = u.NearDeathCount,
+    };
+
+    /// Rebuild a Unit from a persisted UnitDto (Team.Player, Alive, weapon mods re-baked, ammo seeded).
+    /// Shared by the run load and the veteran reserve. `fromReserve` tags a returning veteran for the
+    /// draft-screen display (transient, never persisted).
+    static Unit FromUnitDto(UnitDto d, bool fromReserve = false)
+    {
+        var u = new Unit
+        {
+            Name = d.Name, Cls = d.Cls, Team = Team.Player,
+            Hp = d.Hp, MaxHp = d.MaxHp, Aim = d.Aim, Mobility = d.Mobility,
+            Weapon = Weapon.Make((WeaponKind)d.Weapon),
+            Kills = d.Kills, Rank = d.Rank, Alive = true,
+            BonusGrenades = d.BonusGrenades, CustomTag = d.CustomTag, Wound = d.Wound,
+            Armor = d.Armor,
+            Nickname = d.Nickname, Benched = d.Benched,
+            Spec = (Spec)d.Spec,
+            FromReserve = fromReserve,
+        };
+        if (d.Perks != null) foreach (var p in d.Perks) u.Perks.Add((Perk)p);
+        if (d.WeaponMods != null) foreach (var m in d.WeaponMods) u.WeaponMods.Add((WeaponMod)m);
+        u.RefreshWeaponMods();
+        u.Ammo = u.Weapon.Clip;
+        if (d.Traits != null) foreach (var t in d.Traits) u.Traits.Add((Trait)t);
+        if (d.Bonds != null) u.Bonds = new List<string>(d.Bonds);
+        if (d.Scars != null) foreach (var s in d.Scars) u.Scars.Add((Scar)s);
+        u.VendettaFaction = (Faction)d.VendettaFaction;
+        u.NearDeathCount = d.NearDeathCount;
+        return u;
+    }
+
+    // ---- cross-run VETERAN reserve (persisted in meta.json, append-only) ----
+    // Soldiers who distinguished themselves (promoted survivors of a finished run) retire into a
+    // persistent reserve the next run's DRAFT can recall — carrying their rank/perks/traits/spec/scars.
+    // Whole-DTO read-modify-write like every other meta field; NoPersist-gated at the call sites so the
+    // flywheel/harness never read or write it (byte-stable).
+    public const int MaxVeterans = 12;   // reserve cap; least-storied are dropped when it overflows
+
+    /// The recruitable veteran reserve, most-storied first (empty on a fresh profile). A recalled veteran
+    /// arrives FRESH for the new campaign — full HP and no carried wound (between-run downtime); their
+    /// earned rank/perks/traits/spec/scars carry over. (Mission.Build also re-heals on deploy, so this is
+    /// belt-and-suspenders, but it makes the draft card's HP read truthful.)
+    public static List<Unit> LoadVeterans()
+    {
+        var dtos = LoadMetaDto().Veterans;
+        var list = new List<Unit>();
+        if (dtos != null)
+            foreach (var d in dtos)
+            {
+                var u = FromUnitDto(d, fromReserve: true);
+                u.Hp = u.MaxHp; u.Wound = 0;
+                list.Add(u);
+            }
+        return list;
+    }
+
+    public static int VeteranCount() => LoadMetaDto().Veterans?.Count ?? 0;
+
+    /// Retire the given survivors into the reserve: snapshot each, dedupe by name (keep the newer,
+    /// more-storied record), then cap to MaxVeterans keeping the most-storied. Idempotent per name.
+    public static void EnshrineVeterans(IEnumerable<Unit> vets)
+    {
+        if (vets == null) return;
+        var add = new List<Unit>(vets);
+        if (add.Count == 0) return;
+        var d = LoadMetaDto();
+        d.Veterans ??= new List<UnitDto>();
+        foreach (var v in add)
+        {
+            if (v == null || string.IsNullOrEmpty(v.Name)) continue;
+            d.Veterans.RemoveAll(e => e.Name == v.Name);   // newest record wins for a returning name
+            d.Veterans.Add(ToUnitDto(v));
+        }
+        // keep the most-storied (kills, then rank) when over the cap
+        d.Veterans.Sort((x, y) => (y.Kills * 4 + y.Rank).CompareTo(x.Kills * 4 + x.Rank));
+        if (d.Veterans.Count > MaxVeterans) d.Veterans.RemoveRange(MaxVeterans, d.Veterans.Count - MaxVeterans);
+        WriteMetaDto(d);
+    }
+
     static RunDto ToDto(Run r)
     {
         var dto = new RunDto
@@ -256,26 +361,7 @@ public static class SaveGame
             Contract = (int)r.Contract,
         };
         foreach (var u in r.Squad)
-            dto.Squad.Add(new UnitDto
-            {
-                Name = u.Name, Cls = u.Cls,
-                Hp = u.Hp, MaxHp = u.MaxHp, Aim = u.Aim, Mobility = u.Mobility,
-                Weapon = (int)u.Weapon.Kind, Kills = u.Kills, Rank = u.Rank,
-                BonusGrenades = u.BonusGrenades,
-                CustomTag = u.CustomTag,
-                Wound = u.Wound,
-                Armor = u.Armor,
-                Benched = u.Benched,
-                Perks = u.Perks.ConvertAll(p => (int)p),
-                WeaponMods = u.WeaponMods.ConvertAll(m => (int)m),
-                Nickname = u.Nickname,
-                Traits = u.Traits.ConvertAll(t => (int)t),
-                Bonds = new List<string>(u.Bonds),
-                Spec = (int)u.Spec,
-                Scars = u.Scars.ConvertAll(s => (int)s),
-                VendettaFaction = (int)u.VendettaFaction,
-                NearDeathCount = u.NearDeathCount,
-            });
+            dto.Squad.Add(ToUnitDto(u));
         var c = r.CurrentCard;
         if (c != null)
             dto.Card = new CardDto
@@ -304,33 +390,10 @@ public static class SaveGame
             r.MapPos = (dto.MapPos >= 0 && dto.MapPos < r.Map.Count) ? dto.MapPos : 0;
             if (r.CurrentNode != null) r.CurrentNode.Visited = true;
         }
+        // installed weapon mods are re-baked BEFORE ammo seeding inside FromUnitDto so an EXTENDED MAG
+        // is reflected in the starting clip; all append-only fields default inert for old saves.
         foreach (var d in dto.Squad)
-        {
-            var u = new Unit
-            {
-                Name = d.Name, Cls = d.Cls, Team = Team.Player,
-                Hp = d.Hp, MaxHp = d.MaxHp, Aim = d.Aim, Mobility = d.Mobility,
-                Weapon = Weapon.Make((WeaponKind)d.Weapon),
-                Kills = d.Kills, Rank = d.Rank, Alive = true,
-                BonusGrenades = d.BonusGrenades, CustomTag = d.CustomTag, Wound = d.Wound,
-                Armor = d.Armor,
-                Nickname = d.Nickname, Benched = d.Benched,
-                Spec = (Spec)d.Spec,   // append-only: old saves default 0 == Spec.None
-            };
-            if (d.Perks != null) foreach (var p in d.Perks) u.Perks.Add((Perk)p);
-            // installed weapon mods: add them, then re-bake the freshly-built weapon's stats
-            // BEFORE seeding ammo so an EXTENDED MAG is reflected in the starting clip.
-            if (d.WeaponMods != null) foreach (var m in d.WeaponMods) u.WeaponMods.Add((WeaponMod)m);
-            u.RefreshWeaponMods();
-            u.Ammo = u.Weapon.Clip;
-            if (d.Traits != null) foreach (var t in d.Traits) u.Traits.Add((Trait)t);
-            if (d.Bonds != null) u.Bonds = new List<string>(d.Bonds);
-            // W5 SCARS (append-only): old saves have no Scars list -> empty / None / 0 (inert).
-            if (d.Scars != null) foreach (var s in d.Scars) u.Scars.Add((Scar)s);
-            u.VendettaFaction = (Faction)d.VendettaFaction;
-            u.NearDeathCount = d.NearDeathCount;
-            r.Squad.Add(u);
-        }
+            r.Squad.Add(FromUnitDto(d));
         var cd = dto.Card;
         r.CurrentCard = cd == null
             ? Run.StandardCard(Math.Max(1, dto.Mission))

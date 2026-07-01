@@ -147,8 +147,10 @@ for `SIGHTLINE_` for the authoritative set.
 Sightline.csproj     net8.0, Nullable disabled, Raylib-cs 8.0.0
 src/
   Program.cs    entry + window loop + env-gated test harness
-  Game.cs       state machine, input, turn flow, overwatch, AI staging, autopilot
-                (now `partial`; feature slices live in Game.*.cs: Endless/Meta/Modes/Codex)
+  Game.cs       state machine, input, turn flow, overwatch, AI staging (4707 lines)
+                (`partial`; slices in Game.*.cs: Autopilot/Harness/Endless/Meta/Modes/Codex)
+  Game.Autopilot.cs  SmartStep/AutoStep balance + smoke-test AI (headless-only)
+  Game.Harness.cs    every Debug*/*SelfTest env-gated hook (headless-only)
   Grid.cs       tiles, line-of-sight (Bresenham), cover queries, 8-dir Dijkstra
   Unit.cs       Unit + Weapon + enums (Team/WeaponKind); per-weapon range curves
   Combat.cs     ComputeOdds (hit/crit/dmg) + Resolve (rolls a shot)
@@ -227,15 +229,18 @@ docs/screenshot.png    README image
 
 Playable, feature-complete vertical slice; builds clean (0 warn / 0 err), autoplay-verified
 across seeds. Four game modes (DEPLOY campaign / LAST STAND endless / SKIRMISH / DAILY), a
-cross-run meta profile (WAR ROOM), a deep per-run loop (perks, specs, traits, scars, boons,
-contracts, branching campaign map, field events), a broad enemy/objective/arena roster, and a
-full juice/audio/post-FX presentation layer.
+cross-run meta profile (WAR ROOM) that now carries a **persistent VETERAN reserve** (promoted
+survivors are recruitable in future runs), a deep per-run loop (perks, specs, traits, scars,
+boons, contracts, branching campaign map, field events), a broad enemy/objective/arena roster
+(35 authored arenas), reactive verbs incl. **focused (cone) overwatch**, distinct **per-biome
+visual identity**, and a full juice/audio/post-FX presentation layer. `Game.cs` is sliced into
+`Game.Autopilot.cs` + `Game.Harness.cs` (+ the older Endless/Meta/Modes/Codex slices).
 
 **The exhaustive feature list is in [`docs/FEATURES.md`](docs/FEATURES.md).** The build
 history and open/next backlog are in [`docs/ROADMAP.md`](docs/ROADMAP.md) and the "OPEN/NEXT"
 sections of [`docs/DEVLOG.md`](docs/DEVLOG.md). Recurring open threads: on-device audio
-tuning, endless-mode difficulty curve, deeper cross-run veteran carry-over, and per-fork /
-per-heat balance tuning via the flywheel.
+tuning, endless-mode difficulty curve, watch the veteran-recall power floor via the flywheel,
+and per-fork / per-heat balance tuning.
 
 ---
 

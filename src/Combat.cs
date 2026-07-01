@@ -69,6 +69,10 @@ public static class Combat
     // to hit on the opponent's turn (symmetric to the ambush; makes "duck vs double-tap" a real bet).
     public const int ExposedFireAim  = 12;
     public const int ExposedFireCrit = 12;
+    // COUNTERPLAY — FOCUSED OVERWATCH: a soldier who braced a 90-degree cone reacts at this much extra
+    // aim within the lane (vs the default -10 wide watch). The trade is coverage: it's blind outside the
+    // cone. Additive to the reaction aim mod, so it stacks with Reflexes/Guardian.
+    public const int FocusOwAim = 15;
 
     // Sharpshooter "Mark" ability (focus-fire designator): EVERY squad member's shot vs the marked
     // foe lands easier + crits harder. The flag lives on the target (Unit.Marked), set by the

@@ -19,6 +19,16 @@ public static class Renderer
     static Texture2D _noise;
     static bool _noiseReady;
 
+    // W6 Task 3 — enemy-intent ENTRANCE POP. When a NEW hostile's telegraph appears (IntentUnit
+    // changes), snap the eye to the mark: the target reticle enters with a brief scale/brightness
+    // pop that eases out over ~POP_DUR seconds. We can't touch Game.cs, so we detect the change
+    // renderer-side (a ref compare) and stamp the start time. Deterministic in the fixed-time
+    // screenshot harness (GetTime is fixed per frame) — does NOT change the beat length; the beat
+    // still clears on Game.ClearIntent. Purely a visual entrance.
+    static object _lastIntentUnit;
+    static float _intentPopStart = -100f;
+    const float PopDur = 0.35f;
+
     /// Free the GPU texture — call once after the window is closed.
     public static void UnloadNoise()
     {
@@ -93,9 +103,14 @@ public static class Renderer
 
                 switch (bm.Ambient)
                 {
-                    case AmbientKind.Ember:   // MAGMA — glowing emissive fissures across ~1/3 of tiles
+                    // W6 — LAND THE SIGNATURE. Each biome's structural cue was near-invisible
+                    // (alpha 0.06–0.30, sparse). Alphas/coverage ~1.6–2× so the cue actually READS
+                    // as a secondary "this is a place" texture — still low-saturation, still below
+                    // the unit/objective/cover hierarchy, and kept clear of the red/amber/cyan
+                    // SIGNAL hues (the teal/violet lattice stays a dim structural grid, not a halo).
+                    case AmbientKind.Ember:   // MAGMA — glowing emissive fissures across ~40% of tiles
                     {
-                        if (SHash(gx, gy, 11) > 0.34f) break;
+                        if (SHash(gx, gy, 11) > 0.40f) break;
                         float ph = SHash(gx, gy, 13) * 6.28f;
                         float pulse = 0.55f + 0.45f * MathF.Sin(t * 2.2f + ph);   // veins breathe
                         var lava = Pal.RGBA(255, 120, 40);
@@ -106,26 +121,26 @@ public static class Renderer
                         {
                             float side = ((k & 1) == 0 ? -1f : 1f) * (5f + SHash(gx, gy, k * 7) * 9f);
                             Vector2 pb = new(cx + side, r.Y + 4 + k * (r.Height - 8) / 3f);
-                            Raylib.DrawLineEx(pa, pb, 2.4f, Raylib.Fade(lava, 0.30f * pulse));   // hot glow
-                            Raylib.DrawLineEx(pa, pb, 1.1f, Raylib.Fade(Pal.RGBA(255, 220, 150), 0.55f * pulse)); // core
+                            Raylib.DrawLineEx(pa, pb, 2.6f, Raylib.Fade(lava, 0.44f * pulse));   // hot glow
+                            Raylib.DrawLineEx(pa, pb, 1.2f, Raylib.Fade(Pal.RGBA(255, 220, 150), 0.72f * pulse)); // core
                             pa = pb;
                         }
                         break;
                     }
                     case AmbientKind.Snow:    // TUNDRA — pale frost sheen (cool diagonal light streaks)
                     {
-                        if (SHash(gx, gy, 21) > 0.5f) break;
+                        if (SHash(gx, gy, 21) > 0.55f) break;
                         var frost = Pal.RGBA(210, 232, 248);
                         float off = SHash(gx, gy, 23) * r.Width * 0.5f;
                         for (int k = 0; k < 2; k++)
                         {
                             float sx = r.X + off + k * 10f;
                             Raylib.DrawLineEx(new Vector2(sx, r.Y + r.Height - 4),
-                                              new Vector2(sx + 12f, r.Y + 4), 1.4f, Raylib.Fade(frost, 0.10f));
+                                              new Vector2(sx + 12f, r.Y + 4), 1.5f, Raylib.Fade(frost, 0.18f));
                         }
                         // a few frost crystals (tiny bright dots) on some tiles
-                        if (SHash(gx, gy, 25) < 0.28f)
-                            Raylib.DrawCircleV(new Vector2(cx, cy), 1.3f, Raylib.Fade(frost, 0.28f));
+                        if (SHash(gx, gy, 25) < 0.32f)
+                            Raylib.DrawCircleV(new Vector2(cx, cy), 1.5f, Raylib.Fade(frost, 0.44f));
                         break;
                     }
                     case AmbientKind.Mote:    // VOID — faint glowing violet grid lines (a lattice)
@@ -133,22 +148,22 @@ public static class Renderer
                     {
                         var glow = bm.Ambient == AmbientKind.Scan ? Pal.RGBA(60, 200, 214) : Pal.RGBA(150, 120, 220);
                         float pulse = 0.5f + 0.5f * MathF.Sin(t * 1.3f + (gx + gy) * 0.5f);
-                        float a = (bm.Ambient == AmbientKind.Scan ? 0.16f : 0.13f) * (0.6f + 0.4f * pulse);
+                        float a = (bm.Ambient == AmbientKind.Scan ? 0.24f : 0.22f) * (0.6f + 0.4f * pulse);
                         // left + top tile borders form a continuous lattice across the board
                         Raylib.DrawLineEx(new Vector2(r.X, r.Y), new Vector2(r.X, r.Y + r.Height), 1f, Raylib.Fade(glow, a));
                         Raylib.DrawLineEx(new Vector2(r.X, r.Y), new Vector2(r.X + r.Width, r.Y), 1f, Raylib.Fade(glow, a));
                         // a brighter node dot at ~1/4 of intersections (the bloom catches these)
                         if (((gx + gy) & 3) == 0)
-                            Raylib.DrawCircleV(new Vector2(r.X, r.Y), 1.6f, Raylib.Fade(glow, a * 2.4f));
+                            Raylib.DrawCircleV(new Vector2(r.X, r.Y), 1.8f, Raylib.Fade(glow, a * 2.4f));
                         break;
                     }
                     case AmbientKind.Ash:     // ASH — darker soot streaks/smudges
                     {
-                        if (SHash(gx, gy, 31) > 0.45f) break;
+                        if (SHash(gx, gy, 31) > 0.52f) break;
                         var soot = Pal.RGBA(18, 12, 12);
                         float sx = r.X + 4 + SHash(gx, gy, 33) * (r.Width - 8);
                         float sy = r.Y + 4 + SHash(gx, gy, 35) * (r.Height - 8);
-                        Raylib.DrawCircleV(new Vector2(sx, sy), 4f + SHash(gx, gy, 37) * 5f, Raylib.Fade(soot, 0.22f));
+                        Raylib.DrawCircleV(new Vector2(sx, sy), 4.5f + SHash(gx, gy, 37) * 5f, Raylib.Fade(soot, 0.34f));
                         break;
                     }
                     case AmbientKind.Gust:    // ARID — warm horizontal dune banding
@@ -157,9 +172,9 @@ public static class Renderer
                         int band = (gy & 1);
                         // two thin warm bands per tile, offset by row parity, so the board reads as strata
                         float y0 = r.Y + r.Height * (band == 0 ? 0.34f : 0.62f);
-                        Raylib.DrawLineEx(new Vector2(r.X, y0), new Vector2(r.X + r.Width, y0), 1.6f, Raylib.Fade(sand, 0.10f));
+                        Raylib.DrawLineEx(new Vector2(r.X, y0), new Vector2(r.X + r.Width, y0), 1.7f, Raylib.Fade(sand, 0.18f));
                         float y1 = r.Y + r.Height * (band == 0 ? 0.72f : 0.20f);
-                        Raylib.DrawLineEx(new Vector2(r.X, y1), new Vector2(r.X + r.Width, y1), 1.2f, Raylib.Fade(sand, 0.07f));
+                        Raylib.DrawLineEx(new Vector2(r.X, y1), new Vector2(r.X + r.Width, y1), 1.3f, Raylib.Fade(sand, 0.12f));
                         break;
                     }
                     case AmbientKind.Spore:   // VERDANT — mossy green speckle
@@ -167,10 +182,10 @@ public static class Renderer
                         var moss = Pal.RGBA(90, 150, 80);
                         for (int k = 0; k < 3; k++)
                         {
-                            if (SHash(gx, gy, 41 + k) > 0.55f) continue;
+                            if (SHash(gx, gy, 41 + k) > 0.58f) continue;
                             float mx = r.X + 5 + SHash(gx, gy, 51 + k) * (r.Width - 10);
                             float my = r.Y + 5 + SHash(gx, gy, 61 + k) * (r.Height - 10);
-                            Raylib.DrawCircleV(new Vector2(mx, my), 1.6f + SHash(gx, gy, 71 + k) * 1.4f, Raylib.Fade(moss, 0.18f));
+                            Raylib.DrawCircleV(new Vector2(mx, my), 1.8f + SHash(gx, gy, 71 + k) * 1.5f, Raylib.Fade(moss, 0.30f));
                         }
                         break;
                     }
@@ -178,10 +193,10 @@ public static class Renderer
                     {
                         var seam = Pal.RGBA(120, 140, 165);
                         // a subtle rivet/seam cross on a scattered subset of tiles
-                        if (SHash(gx, gy, 91) > 0.5f) break;
-                        Raylib.DrawLineEx(new Vector2(r.X + 6, cy), new Vector2(r.X + r.Width - 6, cy), 1f, Raylib.Fade(seam, 0.06f));
-                        Raylib.DrawCircleV(new Vector2(r.X + 6, cy), 1.1f, Raylib.Fade(seam, 0.14f));
-                        Raylib.DrawCircleV(new Vector2(r.X + r.Width - 6, cy), 1.1f, Raylib.Fade(seam, 0.14f));
+                        if (SHash(gx, gy, 91) > 0.55f) break;
+                        Raylib.DrawLineEx(new Vector2(r.X + 6, cy), new Vector2(r.X + r.Width - 6, cy), 1f, Raylib.Fade(seam, 0.13f));
+                        Raylib.DrawCircleV(new Vector2(r.X + 6, cy), 1.3f, Raylib.Fade(seam, 0.26f));
+                        Raylib.DrawCircleV(new Vector2(r.X + r.Width - 6, cy), 1.3f, Raylib.Fade(seam, 0.26f));
                         break;
                     }
                 }
@@ -252,15 +267,18 @@ public static class Renderer
         Raylib.DrawRectangleLinesEx(edge, 2f, bm.Edge);
 
         // floor (biome-tinted checker) — CALM the checker so units/cover pop, but LAND the
-        // biome so the room recolours distinctly. Two levers: (1) collapse the value gap
-        // between the two checker colours toward their mean (flatter, quieter floor), then
-        // darken the mean a touch so it's a low base; (2) push that mean toward the biome
-        // Tint hue so STEEL/ARID/TUNDRA/etc. read as a coloured place, not grey.
+        // biome so the room recolours distinctly. Two levers: (1) keep a readable value gap
+        // between the two checker colours (the floor has TEXTURE, not a flat wash), darken the
+        // mean a touch so it's a low base; (2) push that mean STRONGLY toward the biome Tint hue
+        // so STEEL/ARID/TUNDRA/… read as distinct coloured PLACES, not one recolored grey board.
+        // W6: Tint pull 0.22 -> 0.40 (the marquee lever — biomes now diverge in hue at a glance);
+        // checker retention 0.32 -> 0.40 so the strengthened FloorA/FloorB pair still reads as a
+        // checker after the tint. Mean stays dark enough that units/objectives keep the hierarchy.
         Color floorMean = Pal.Mix(bm.FloorA, bm.FloorB, 0.5f);
-        floorMean = Pal.Mix(floorMean, Pal.RGBA(6, 9, 13), 0.18f);       // slightly darker base
-        floorMean = Pal.Mix(floorMean, bm.Tint, 0.22f);                  // land the biome hue
-        Color fa = Pal.Mix(floorMean, bm.FloorA, 0.32f);                 // keep only a faint checker
-        Color fb = Pal.Mix(floorMean, bm.FloorB, 0.32f);
+        floorMean = Pal.Mix(floorMean, Pal.RGBA(6, 9, 13), 0.16f);       // slightly darker base
+        floorMean = Pal.Mix(floorMean, bm.Tint, 0.40f);                  // LAND the biome hue (marquee)
+        Color fa = Pal.Mix(floorMean, bm.FloorA, 0.40f);                 // keep a readable checker
+        Color fb = Pal.Mix(floorMean, bm.FloorB, 0.40f);
         for (int x = 0; x < g.Grid.W; x++)
             for (int y = 0; y < g.Grid.H; y++)
             {
@@ -290,6 +308,7 @@ public static class Renderer
         DrawElevation(g);
         DrawMoveOverlay(g);
         DrawOverwatchThreat(g);   // tiles each active overwatching enemy covers (reaction-fire danger)
+        DrawFocusCones(g);        // COUNTERPLAY: the player's braced FOCUSED-overwatch kill-lanes (gold)
         DrawThreat(g);
         DrawSiegeZones(g);        // persistent pulsing 3x3 danger zone of any charging SIEGE artillery
         DrawEvac(g);
@@ -578,6 +597,50 @@ public static class Renderer
     // Kept deliberately SUBTLE (low alpha) and visually DISTINCT from DrawThreat's corner
     // pips: this is a soft full-tile wash + a watcher reticle, not a per-tile triangle, so a
     // squint still reads the selected unit, the nearest foe and the objective first.
+    // COUNTERPLAY: the player's FOCUSED overwatch braced cones — a friendly gold kill-lane wash over the
+    // tiles a focused watcher actually covers (mirrors the reaction gate: range + LoS + InOwCone), plus the
+    // two cone-edge rays from the soldier so the "braced this way" read is unmistakable.
+    static void DrawFocusCones(Game g)
+    {
+        if (g.Phase != Phase.PlayerTurn) return;
+        System.Collections.Generic.List<Unit> watchers = null;
+        foreach (var p in g.Players)
+            if (p.Alive && p.OnOverwatch && p.OwFocused && p.Ammo > 0)
+                (watchers ??= new System.Collections.Generic.List<Unit>()).Add(p);
+        if (watchers == null) return;
+
+        float pulse = 0.5f + 0.5f * MathF.Sin((float)Raylib.GetTime() * 3.0f);
+        Color wash = Raylib.Fade(Pal.VipGold, 0.06f + 0.05f * pulse);
+        for (int x = 0; x < g.Grid.W; x++)
+            for (int y = 0; y < g.Grid.H; y++)
+            {
+                if (!g.Grid.IsFloor(x, y)) continue;
+                foreach (var w in watchers)
+                {
+                    if (Util.TileDist(w.X, w.Y, x, y) > w.Weapon.MaxRange) continue;
+                    bool commanding = g.Grid.HeightAt(w.X, w.Y) - g.Grid.HeightAt(x, y) >= 2;
+                    if (!g.Grid.HasLineOfSight(w.X, w.Y, x, y, commanding)) continue;
+                    if (!g.InOwCone(w, x, y)) continue;
+                    Raylib.DrawRectangleRec(ElevRect(g, x, y), wash);
+                    break;
+                }
+            }
+        // cone-edge rays + a braced reticle at the soldier
+        foreach (var w in watchers)
+        {
+            float hlift = g.Grid.IsHigh(w.X, w.Y) ? ElevLift : 0f;
+            var c = w.Pos - new Vector2(0, hlift);
+            float ang = MathF.Atan2(w.OwDirY, w.OwDirX);
+            float len = w.Weapon.MaxRange * Cfg.Tile;
+            Color edge = Raylib.Fade(Pal.VipGold, 0.30f + 0.15f * pulse);
+            for (int s = -1; s <= 1; s += 2)
+            {
+                float a = ang + s * 0.7853982f;   // +-45 degrees
+                Raylib.DrawLineEx(c, c + new Vector2(MathF.Cos(a) * len, MathF.Sin(a) * len), 1.4f, edge);
+            }
+        }
+    }
+
     static void DrawOverwatchThreat(Game g)
     {
         if (g.Phase != Phase.PlayerTurn) return;
@@ -669,6 +732,13 @@ public static class Renderer
         float pulse = 0.6f + 0.4f * MathF.Sin(t * 5f);
         Color danger = Pal.Foe;
 
+        // W6 Task 3: detect a NEW telegraph (unit changed) and stamp the entrance-pop start. `pop`
+        // is 1 at entry and eases to 0 over PopDur — the reticle uses it for a scale + brightness
+        // punch so the eye SNAPS to the mark the instant the enemy beat begins.
+        if (!ReferenceEquals(e, _lastIntentUnit)) { _lastIntentUnit = e; _intentPopStart = t; }
+        float popT = Util.Clamp((t - _intentPopStart) / PopDur, 0f, 1f);
+        float pop = 1f - Util.EaseOutQuad(popT);           // 1 -> 0 over PopDur (fast in, settles)
+
         var (dx, dy) = g.IntentDest;            // where the unit will stand after moving
 
         // 1) THREATENED TILES — a faint red wash on every floor tile the unit could fire on from
@@ -743,16 +813,28 @@ public static class Renderer
             // beam (the dashes flow toward the target so "fire travels THIS way at THAT unit" reads
             // instantly), backed by a faint solid underlay so it never breaks up against dark tiles.
             Vector2 from = ElevCenter(g, dx, dy);
-            Raylib.DrawLineEx(from, tc, 1.4f, Raylib.Fade(danger, 0.22f));                 // faint continuous underlay
-            DashedLine(from, tc, 2.6f, Raylib.Fade(danger, 0.9f), (t * 34f) % 14f, 8f, 6f); // flowing dashed beam
-            // bold pulsing reticle ring + a crisp X on the mark
-            float rr = reach + 2.5f * pulse;
-            Raylib.DrawRing(tc, rr, rr + 2.5f, 0, 360, 36, Raylib.Fade(danger, 0.22f + 0.18f * pulse)); // outer glow
-            Raylib.DrawRing(tc, rr - 2.5f, rr, 0, 360, 36, Raylib.Fade(danger, 0.95f));                  // crisp ring
-            float k = rr * 0.7f;
-            Raylib.DrawLineEx(new Vector2(tc.X - k, tc.Y - k), new Vector2(tc.X + k, tc.Y + k), 2.6f, Raylib.Fade(danger, 0.95f));
-            Raylib.DrawLineEx(new Vector2(tc.X - k, tc.Y + k), new Vector2(tc.X + k, tc.Y - k), 2.6f, Raylib.Fade(danger, 0.95f));
-            Raylib.DrawCircleV(tc, 2.4f, Raylib.Fade(Pal.RGBA(255, 220, 220), 0.95f));
+            Raylib.DrawLineEx(from, tc, 1.8f, Raylib.Fade(danger, 0.28f));                 // faint continuous underlay
+            DashedLine(from, tc, 3.0f, Raylib.Fade(danger, 0.95f), (t * 34f) % 14f, 8f, 6f); // flowing dashed beam
+            // W6 Task 3 — BOLD reticle so the mark snaps out during the enemy beat. Bigger base
+            // radius + a heavier crisp ring + brighter X, plus an ENTRANCE POP: on appear the ring
+            // flares out ~10px and the whole mark brightens, then eases back to the settled size.
+            // Four crosshair tick-marks (cardinal) added for a clear "locked on target" read that
+            // survives the colorblind palette (shape, not just hue).
+            float rr = (reach + 3.5f) + 2.5f * pulse + 12f * pop;                          // pop expands the ring
+            float ptA = 0.35f * pop;                                                        // extra brightness on entry
+            Raylib.DrawRing(tc, rr + 2.5f, rr + 6f + 4f * pop, 0, 360, 40, Raylib.Fade(danger, (0.20f + 0.16f * pulse) + ptA)); // wide glow
+            Raylib.DrawRing(tc, rr, rr + 3.2f, 0, 360, 40, Raylib.Fade(danger, 1.0f));      // heavy crisp ring
+            float k = rr * 0.62f;
+            Raylib.DrawLineEx(new Vector2(tc.X - k, tc.Y - k), new Vector2(tc.X + k, tc.Y + k), 3.2f, Raylib.Fade(danger, 1.0f));
+            Raylib.DrawLineEx(new Vector2(tc.X - k, tc.Y + k), new Vector2(tc.X + k, tc.Y - k), 3.2f, Raylib.Fade(danger, 1.0f));
+            // cardinal crosshair ticks just outside the ring (a target-lock bracket)
+            for (int c = 0; c < 4; c++)
+            {
+                float aa = c * (MathF.PI / 2f);
+                var dd = new Vector2(MathF.Cos(aa), MathF.Sin(aa));
+                Raylib.DrawLineEx(tc + dd * (rr + 3f), tc + dd * (rr + 8f + 4f * pop), 2.6f, Raylib.Fade(danger, 0.9f + 0.1f * pop));
+            }
+            Raylib.DrawCircleV(tc, 3.0f + 2f * pop, Raylib.Fade(Pal.RGBA(255, 225, 225), 1.0f));   // bright centre dot
         }
 
         // 4) a small intent caption above the acting unit so the plan reads at a glance
@@ -1354,8 +1436,11 @@ public static class Renderer
         bool unaware    = u.Team == Team.Enemy && u.Alert == AlertLevel.Unaware;
         bool suspicious = u.Team == Team.Enemy && u.Alert == AlertLevel.Suspicious;
         bool inactive   = unaware || suspicious;   // not yet a live combatant: no facing/pips
-        Color main = vip ? Pal.VipGold : (friend ? Pal.Friend : (unaware ? Pal.RGBA(120, 96, 96) : (suspicious ? Pal.Suspect : (elite ? Pal.Elite : Pal.Foe))));
-        Color dark = vip ? Pal.VipDk  : (friend ? Pal.FriendDk : (unaware ? Pal.RGBA(46, 38, 42) : (suspicious ? Pal.SuspectDk : (elite ? Pal.EliteDk : Pal.FoeDk))));
+        // W6 Task 2: Unaware pod body shifted from a muddy warm brown to a COLD DESATURATED SLATE
+        // (matches the new slate under-ring + "?" glyph) so a dormant contact reads as a quiet,
+        // neutral "sleeping threat" — distinct from the amber SUSPICIOUS body and the hot LIVE red.
+        Color main = vip ? Pal.VipGold : (friend ? Pal.Friend : (unaware ? Pal.RGBA(150, 164, 180) : (suspicious ? Pal.Suspect : (elite ? Pal.Elite : Pal.Foe))));
+        Color dark = vip ? Pal.VipDk  : (friend ? Pal.FriendDk : (unaware ? Pal.RGBA(44, 52, 62) : (suspicious ? Pal.SuspectDk : (elite ? Pal.EliteDk : Pal.FoeDk))));
 
         // 5.3-B focal-point alpha: selected unit = full; spent players dimmed; enemies visible.
         // HP bar, rings, status codes, alert markers, VIP markers stay full-alpha (they are signal).
@@ -1411,7 +1496,7 @@ public static class Renderer
         // A soft saturated radial halo beneath every LIVE unit (cyan friendly / hot red enemy /
         // gold VIP) so units are the brightest, most-saturated objects on the board and pop off
         // the now-muted cover. Drawn UNDER the figure so it reads as the unit being lit, not an
-        // overlay. Dormant/suspicious pods are skipped (they keep their faint awareness markers).
+        // overlay. Inactive pods get a SEPARATE, subordinate slate under-glow below (Task 2).
         if (!inactive)
         {
             // hotter, more saturated glow colour for enemies so live foes burn red; the friendly
@@ -1425,6 +1510,19 @@ public static class Renderer
             // a wide soft bloom + a tighter brighter core radial (two rings read as a glow on llvmpipe)
             Raylib.DrawCircleV(p, gR,        Raylib.Fade(glow, gA * 0.45f));
             Raylib.DrawCircleV(p, gR * 0.68f, Raylib.Fade(glow, gA * 0.85f));
+        }
+        else
+        {
+            // W6 Task 2 — a DORMANT/SUSPICIOUS pod is REAL, planned-around information (perfect-info
+            // pillar), but with no under-glow it vanished into the dark board as a muddy brown blob.
+            // Give it a DESATURATED SLATE under-ring so "sleeping threat here" reads at a glance —
+            // deliberately DIM + de-saturated (a cold slate, NOT the hot-red live-foe halo) and
+            // clearly subordinate: much lower alpha/reach than a live foe's burn. Suspicious pods get
+            // a faint warm bias (their amber ring/ ! carries the tier); Unaware stays cold slate.
+            Color podGlow = suspicious ? Pal.RGBA(150, 120, 92) : Pal.RGBA(96, 108, 124);
+            float pR = 27f;
+            Raylib.DrawCircleV(p, pR,        Raylib.Fade(podGlow, 0.16f));   // soft seat so it doesn't vanish
+            Raylib.DrawCircleV(p, pR * 0.66f, Raylib.Fade(podGlow, 0.24f));
         }
 
         // selection ring — full strength (signal), plus a layered glow so the eye snaps to who's
@@ -1479,11 +1577,15 @@ public static class Renderer
                 {
                     if (gd == null || !gd.Alive || !gd.IsHvtGuard) continue;
                     if (Util.ChebyDist(gd.X, gd.Y, u.X, u.Y) > Combat.HvtGuardRange) continue;
-                    Raylib.DrawLineEx(p, gd.Pos, 1.5f, Raylib.Fade(Pal.Foe, 0.30f + 0.25f * gp));   // faint guard link
-                    // small downward chevron marker over the guard: "kill me to peel the screen"
-                    Vector2 mk = gd.Pos + new Vector2(0, -40f);
-                    Raylib.DrawLineEx(mk + new Vector2(-5f, -4f), mk, 2f, Pal.Foe);
-                    Raylib.DrawLineEx(mk + new Vector2(5f, -4f), mk, 2f, Pal.Foe);
+                    Raylib.DrawLineEx(p, gd.Pos, 1.8f, Raylib.Fade(Pal.Foe, 0.38f + 0.28f * gp));   // guard link
+                    // W6 Task 3 — a BOLDER downward guard caret: "kill me to peel the screen". Bigger,
+                    // heavier, pulsing + a thin dark backing stroke so it reads against the dark board.
+                    Vector2 mk = gd.Pos + new Vector2(0, -42f);
+                    float cw = 8f, ch = 6f, thk = 3.0f;
+                    Raylib.DrawLineEx(mk + new Vector2(-cw, -ch - 1f), mk + new Vector2(0, 1f), thk + 1.4f, Raylib.Fade(Pal.RGBA(20, 4, 4), 0.8f)); // shadow
+                    Raylib.DrawLineEx(mk + new Vector2(cw, -ch - 1f), mk + new Vector2(0, 1f), thk + 1.4f, Raylib.Fade(Pal.RGBA(20, 4, 4), 0.8f));
+                    Raylib.DrawLineEx(mk + new Vector2(-cw, -ch), mk, thk, Raylib.Fade(Pal.Foe, 0.9f + 0.1f * gp));
+                    Raylib.DrawLineEx(mk + new Vector2(cw, -ch), mk, thk, Raylib.Fade(Pal.Foe, 0.9f + 0.1f * gp));
                 }
             }
         }
@@ -1526,25 +1628,33 @@ public static class Renderer
             if (suspicious)
             {
                 // pulsing amber ring + "!" so being spotted reads instantly as a warning
-                // (W5: sized to sit around the enlarged body).
+                // (W5: sized to sit around the enlarged body). W6: crisper amber ring (double band)
+                // + a shadow-backed "!" so the SUSPICIOUS tier snaps out — but still below a live foe.
                 float pulse = 0.5f + 0.5f * MathF.Sin((float)Raylib.GetTime() * 6f);
-                Raylib.DrawRing(p, 24f, 27f, 0, 360, 44, Raylib.Fade(Pal.Suspect, 0.30f + 0.45f * pulse));
-                Raylib.DrawTextEx(Cfg.Font, "!", new Vector2((int)(p.X - 2), (int)(p.Y - 40)), 20, 1f, Pal.Suspect);
+                Raylib.DrawRing(p, 24f, 28f, 0, 360, 44, Raylib.Fade(Pal.Suspect, 0.42f + 0.48f * pulse));
+                Raylib.DrawRing(p, 28f, 29.5f, 0, 360, 44, Raylib.Fade(Pal.Suspect, 0.18f + 0.20f * pulse));
+                var qp = new Vector2((int)(p.X - 2), (int)(p.Y - 42));
+                Raylib.DrawTextEx(Cfg.Font, "!", qp + new Vector2(1.2f, 1.2f), 22, 1f, Raylib.Fade(Pal.RGBA(8, 6, 2), 0.85f)); // drop shadow for contrast
+                Raylib.DrawTextEx(Cfg.Font, "!", qp, 22, 1f, Pal.Suspect);
             }
             else
             {
                 // Unaware pod: a DELIBERATE clean dashed ring + a clear "?" — dim but unambiguous
                 // (reads as "dormant contact here", not a muddy brown blob). Dashes = "not yet live".
-                // W5: ring bumped to circle the bigger body.
+                // W6: brighter, slightly heavier desaturated-slate dashed ring + a shadow-backed "?"
+                // so the DORMANT tier reads at a glance against any biome floor — still cold/quiet,
+                // still clearly subordinate to the amber SUSPICIOUS ring and the hot-red LIVE halo.
                 float t = (float)Raylib.GetTime();
-                Color dim = Pal.RGBA(150, 132, 120);
+                Color dim = Pal.RGBA(176, 190, 205);   // cold desaturated slate (was warm brown)
                 for (int k = 0; k < 8; k++)
                 {
                     float a0 = k * 45f + t * 14f;          // slow rotation so it reads as "scanning"
-                    Raylib.DrawRing(p, 23f, 25.5f, a0, a0 + 24f, 6, Raylib.Fade(dim, 0.55f));
+                    Raylib.DrawRing(p, 23f, 26f, a0, a0 + 26f, 6, Raylib.Fade(dim, 0.68f));
                 }
-                float qw = Raylib.MeasureTextEx(Cfg.Font, "?", 22, 1f).X;
-                Raylib.DrawTextEx(Cfg.Font, "?", new Vector2((int)(p.X - qw / 2), (int)(p.Y - 12)), 22, 1f, Raylib.Fade(dim, 0.95f));
+                float qw = Raylib.MeasureTextEx(Cfg.Font, "?", 23, 1f).X;
+                var qp = new Vector2((int)(p.X - qw / 2), (int)(p.Y - 13));
+                Raylib.DrawTextEx(Cfg.Font, "?", qp + new Vector2(1.2f, 1.2f), 23, 1f, Raylib.Fade(Pal.RGBA(6, 8, 12), 0.85f)); // drop shadow
+                Raylib.DrawTextEx(Cfg.Font, "?", qp, 23, 1f, Raylib.Fade(dim, 1.0f));
             }
             return;
         }

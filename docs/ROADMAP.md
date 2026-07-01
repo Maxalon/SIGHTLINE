@@ -626,3 +626,21 @@ stand and are reinforced by DESIGN.md §3D/E/G.
 
 ---
 
+
+## PROGRAM "COUNTERPLAY" — closed items (see docs/DEVLOG.md for the full write-up)
+
+- [x] **Cross-run veteran carry-over** (the long-deferred replay keystone). Promoted survivors of a finished
+      run retire into a persistent VETERAN reserve (`meta.json`, append-only, capped 12); a new run's DRAFT
+      recalls up to 2, carrying rank/perks/traits/spec/scars. `SIGHTLINE_VETTEST`.
+- [x] **Game.cs partial split** (deferred across many programs). `Game.cs` 7648→4707; the autopilot →
+      `Game.Autopilot.cs`, the Debug/SelfTest harness → `Game.Harness.cs`. Behaviour-neutral (proven
+      IL-identical per method).
+- [x] **Biome visual identity** lands above the squint-test floor (floor/signature/ambient/grade); dormant-pod
+      + enemy-intent legibility.
+- [x] **Focused (cone) overwatch** — a directional braced kill-lane (+aim, blind outside) vs the wide watch;
+      purely additive so the base can't regress. `SIGHTLINE_OWTEST`.
+- [x] **3 new authored arenas** — CAUSEWAY / REDANS / DONJON (pool 32→35).
+
+Open / next: watch the veteran-recall power floor via the flywheel (a persistent 2-of-6 veteran draft could
+ease low-Heat difficulty over many runs); on-device audio; endless difficulty curve; the design fan-out's other
+player-verb ideas (universal suppress, objective-interaction forks, a banked enemy-turn reaction).
