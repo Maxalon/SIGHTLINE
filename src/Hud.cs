@@ -334,6 +334,10 @@ public static class Hud
         {
             Raylib.DrawTextEx(Cfg.Font, "LAST STAND", new Vector2(200, 19), 16, 1f, Raylib.Fade(Pal.Foe, 0.85f));
         }
+        else if (g.Mode == GameMode.Skirmish)
+        {
+            Raylib.DrawTextEx(Cfg.Font, g.DailyMode ? "DAILY" : "SKIRMISH", new Vector2(200, 19), 16, 1f, Raylib.Fade(g.DailyMode ? Pal.Accent : Pal.Friend, 0.85f));
+        }
         else
         {
             Raylib.DrawTextEx(Cfg.Font, $"MISSION {g.RunState.Mission}/{Run.MaxMissions}", new Vector2(200, 19), 16, 1f, Pal.TxtDim);
@@ -347,6 +351,11 @@ public static class Hud
         if (g.Mode == GameMode.Endless)
         {
             Raylib.DrawTextEx(Cfg.Font, g.EndlessHud, new Vector2(360, 19), 16, 1f, Pal.Foe);
+        }
+        // PROGRAM HORIZON W4: SKIRMISH/DAILY show "SKIRMISH — <OBJ>" or "DAILY <stamp>  BEST n".
+        else if (g.Mode == GameMode.Skirmish)
+        {
+            Raylib.DrawTextEx(Cfg.Font, g.SkirmishHud, new Vector2(360, 19), 16, 1f, g.DailyMode ? Pal.Accent : Pal.Friend);
         }
         else
         {
@@ -1257,6 +1266,8 @@ public static class Hud
             DrawWarRoom(g);
         else if (g.Phase == Phase.Codex)
             DrawCodex(g);
+        else if (g.Phase == Phase.SkirmishSetup)
+            DrawSkirmishSetup(g);
     }
 
     // ============================================================================
@@ -1384,6 +1395,15 @@ public static class Hud
         float cxIn = PanelAnim("introCodex", 0.3f, 0.72f);
         OverlayBtn5 = new Rectangle(W / 2 + miniGap / 2, wrBy, miniW, 40);
         DrawOverlayButton(OverlayBtn5, "FIELD MANUAL", Pal.Good, "K", cxIn);
+
+        // PROGRAM HORIZON W4: SKIRMISH (one custom fight) + DAILY (seeded challenge) — a two-up row
+        // completing the modes offering (DEPLOY / LAST STAND / SKIRMISH / DAILY). Sits below WAR ROOM/CODEX.
+        float smIn = PanelAnim("introSkirmish", 0.3f, 0.76f);
+        int smBy = wrBy + 48;
+        OverlayBtn6 = new Rectangle(W / 2 - miniW - miniGap / 2, smBy, miniW, 40);
+        DrawOverlayButton(OverlayBtn6, "SKIRMISH", Pal.Friend, "S", smIn);
+        OverlayBtn7 = new Rectangle(W / 2 + miniGap / 2, smBy, miniW, 40);
+        DrawOverlayButton(OverlayBtn7, "DAILY", Pal.Accent, "Y", smIn);
 
         // a faint version/footer stamp
         Raylib.DrawTextEx(Cfg.Font, "GEOMETRY · PARTICLES · NO QUARTER", new Vector2(W / 2f - 150, H - 30), 11, 1f, Raylib.Fade(Pal.TxtDim, 0.6f));
@@ -1536,6 +1556,17 @@ public static class Hud
             sub = $"SURVIVED {g.Wave} WAVE{(g.Wave == 1 ? "" : "S")}"
                 + (best > 0 ? $"   ·   BEST {best}" : "");
         }
+        else if (g.Mode == GameMode.Skirmish)
+        {
+            // PROGRAM HORIZON W4: SKIRMISH/DAILY end card — the single-mission result + (daily) the best.
+            string label = g.DailyMode ? $"DAILY {g.DailyStamp}" : "SKIRMISH";
+            if (win)
+            {
+                sub = $"{label} — {Game.SkirmishObjectiveLabel(g.Objective)} cleared in {g.Turn} turn{(g.Turn == 1 ? "" : "s")}";
+                if (g.DailyMode && g.DailyBest > 0) sub += $"   ·   BEST {g.DailyBest}";
+            }
+            else sub = string.IsNullOrEmpty(g.LoseReason) ? $"{label} failed." : $"{label} — {g.LoseReason}";
+        }
         else sub = win
             ? $"All {Run.MaxMissions} missions cleared. The squad stands victorious."
             : (string.IsNullOrEmpty(g.LoseReason) ? $"The squad fell on mission {mission}." : g.LoseReason);
@@ -1605,6 +1636,85 @@ public static class Hud
         OverlayBtn = new Rectangle(W / 2 - 130, by, 260, 46);
         OverlayBtn2 = new Rectangle(0, 0, 0, 0);
         DrawOverlayButton(OverlayBtn, "NEW RUN", win ? Pal.Good : Pal.Friend, null, btnIn);
+    }
+
+    // ============================================================================
+    //  SKIRMISH SETUP  — pick ONE fight's OBJECTIVE + HEAT, then START (PROGRAM HORIZON W4).
+    //  A compact centred panel over the tactical backdrop: an objective cycler (◀ label ▶),
+    //  a heat dial (- N +), and START / BACK. Rects are published for Game.HandleSkirmishSetup.
+    // ============================================================================
+    static void DrawSkirmishSetup(Game g)
+    {
+        float t = (float)Raylib.GetTime();
+        DrawTacticalBackdrop(t, Pal.Friend, 0.15f);
+        int W = Cfg.ScreenW;
+
+        // title
+        float titleIn = PanelAnim("skTitle", 0.5f);
+        string title = "SKIRMISH";
+        int tfs = 64;
+        Vector2 tm = Raylib.MeasureTextEx(Cfg.Font, title, tfs, 4f);
+        float tx = W / 2f - tm.X / 2f;
+        float ty = 120f - (1f - Util.EaseOutBack(Util.Clamp(titleIn, 0f, 1f))) * 22f;
+        for (int i = 1; i <= 3; i++)
+            Raylib.DrawTextEx(Cfg.Font, title, new Vector2(tx, ty - i), tfs, 4f, Raylib.Fade(Pal.Friend, 0.10f * titleIn));
+        Raylib.DrawTextEx(Cfg.Font, title, new Vector2(tx, ty), tfs, 4f, Raylib.Fade(Pal.Txt, titleIn));
+        DrawCornerBrackets(new Rectangle(tx - 20, ty + 6, tm.X + 40, tfs - 8), Raylib.Fade(Pal.Friend, 0.5f * titleIn), 16f);
+
+        string blurb = "One custom fight — pick the objective and the heat, then deploy.";
+        Vector2 bm = Raylib.MeasureTextEx(Cfg.Font, blurb, 15, 1f);
+        Raylib.DrawTextEx(Cfg.Font, blurb, new Vector2(W / 2f - bm.X / 2f, ty + tfs + 4), 15, 1f, Raylib.Fade(Pal.TxtDim, titleIn));
+
+        // centred panel
+        float pIn = PanelAnim("skPanel", 0.4f, 0.2f);
+        int pw = 460, ph = 260;
+        int px = W / 2 - pw / 2, py = (int)(ty + tfs + 40);
+        var panel = new Rectangle(px, py, pw, ph);
+        Raylib.DrawRectangleRounded(panel, 0.06f, 8, Raylib.Fade(Pal.Panel, 0.94f * pIn));
+        Raylib.DrawRectangleLinesEx(panel, 1.5f, Raylib.Fade(Pal.Friend, 0.5f * pIn));
+
+        // --- OBJECTIVE cycler ---
+        int rowY = py + 34;
+        Raylib.DrawTextEx(Cfg.Font, "OBJECTIVE", new Vector2(px + 28, rowY), 13, 1f, Raylib.Fade(Pal.TxtDim, pIn));
+        int cyc = rowY + 26, cycH = 44;
+        SkirmObjPrev = new Rectangle(px + 28, cyc, 44, cycH);
+        SkirmObjNext = new Rectangle(px + pw - 28 - 44, cyc, 44, cycH);
+        DrawOverlayButton(SkirmObjPrev, "<", Pal.Friend, null, pIn);
+        DrawOverlayButton(SkirmObjNext, ">", Pal.Friend, null, pIn);
+        var objBox = new Rectangle(px + 84, cyc, pw - 84 * 2, cycH);
+        Raylib.DrawRectangleRounded(objBox, 0.16f, 8, Raylib.Fade(Pal.Bg, 0.6f * pIn));
+        Raylib.DrawRectangleLinesEx(objBox, 1.2f, Raylib.Fade(Pal.Accent, 0.4f * pIn));
+        string objLabel = Game.SkirmishObjectiveLabel(g.SkirmishObjective);
+        DrawObjectiveIcon(g.SkirmishObjective, objBox.X + 26, objBox.Y + objBox.Height / 2, Pal.Accent);
+        Vector2 om = Raylib.MeasureTextEx(Cfg.Font, objLabel, 22, 1f);
+        Raylib.DrawTextEx(Cfg.Font, objLabel, new Vector2(objBox.X + objBox.Width / 2 - om.X / 2 + 12, objBox.Y + objBox.Height / 2 - om.Y / 2), 22, 1f, Raylib.Fade(Pal.Txt, pIn));
+
+        // --- HEAT dial ---
+        int hRowY = cyc + cycH + 28;
+        Raylib.DrawTextEx(Cfg.Font, "HEAT / ASCENSION", new Vector2(px + 28, hRowY), 13, 1f, Raylib.Fade(Pal.TxtDim, pIn));
+        int hy = hRowY + 26, hH = 40;
+        SkirmHeatMinus = new Rectangle(px + 28, hy, 44, hH);
+        SkirmHeatPlus  = new Rectangle(px + 28 + 44 + 8 + 120, hy, 44, hH);
+        DrawOverlayButton(SkirmHeatMinus, "-", Pal.Foe, null, pIn);
+        DrawOverlayButton(SkirmHeatPlus, "+", Pal.Foe, null, pIn);
+        var heatBox = new Rectangle(px + 28 + 44 + 8, hy, 120, hH);
+        Raylib.DrawRectangleRounded(heatBox, 0.2f, 8, Raylib.Fade(Pal.Bg, 0.6f * pIn));
+        string heatTxt = g.SkirmishHeat > 0 ? $"HEAT {g.SkirmishHeat}" : "STANDARD";
+        Color heatCol = g.SkirmishHeat > 0 ? Pal.Foe : Pal.TxtDim;
+        CenterText(heatTxt, heatBox, 18, Raylib.Fade(heatCol, pIn));
+        string cap = g.UnlockedHeat > 0 ? $"unlocked to {g.UnlockedHeat}" : "win at heat to unlock more";
+        Raylib.DrawTextEx(Cfg.Font, cap, new Vector2(px + 28 + 44 + 8 + 120 + 44 + 14, hy + 12), 12, 1f, Raylib.Fade(Pal.TxtDim, 0.8f * pIn));
+
+        // --- START / BACK ---
+        float btnIn = PanelAnim("skBtns", 0.3f, 0.35f);
+        int bY = py + ph - 56;
+        SkirmStart = new Rectangle(px + pw / 2 - 8 - 150, bY, 150, 44);
+        SkirmBack  = new Rectangle(px + pw / 2 + 8, bY, 130, 44);
+        DrawOverlayButton(SkirmStart, "DEPLOY", Pal.Good, null, btnIn);
+        DrawOverlayButton(SkirmBack, "BACK", Pal.TxtDim, "Esc", btnIn);
+
+        Raylib.DrawTextEx(Cfg.Font, "< > objective   ·   +/- heat   ·   ENTER deploy",
+            new Vector2(W / 2f - 170, py + ph + 18), 12, 1f, Raylib.Fade(Pal.TxtDim, 0.6f));
     }
 
     // ============================================================================
@@ -3005,6 +3115,11 @@ public static class Hud
     public static Rectangle OverlayBtn3;   // intro LAST STAND (endless) button (PROGRAM HORIZON W2)
     public static Rectangle OverlayBtn4;   // intro WAR ROOM (cross-run meta) button (PROGRAM HORIZON W3)
     public static Rectangle OverlayBtn5;   // intro CODEX (field manual) button (PROGRAM HORIZON W6)
+    public static Rectangle OverlayBtn6;   // intro SKIRMISH (one custom fight) button (PROGRAM HORIZON W4)
+    public static Rectangle OverlayBtn7;   // intro DAILY (seeded challenge) button (PROGRAM HORIZON W4)
+
+    // SKIRMISH setup (W4): objective cycler + heat dial + START/BACK, published by DrawSkirmishSetup.
+    public static Rectangle SkirmObjPrev, SkirmObjNext, SkirmHeatMinus, SkirmHeatPlus, SkirmStart, SkirmBack;
 
     // WAR ROOM (W3): the BACK button + per-unlock BUY buttons, published by DrawWarRoom for hit-testing.
     public static Rectangle WarRoomBack;

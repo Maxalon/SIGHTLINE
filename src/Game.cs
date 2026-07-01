@@ -6,15 +6,16 @@ using Raylib_cs;
 
 namespace Sightline;
 
-public enum Phase { Intro, PlayerTurn, EnemyTurn, Barracks, Win, Lose, Draft, WarRoom, Codex }   // WarRoom (W3), Codex (W6) appended; neither persisted
+public enum Phase { Intro, PlayerTurn, EnemyTurn, Barracks, Win, Lose, Draft, WarRoom, Codex, SkirmishSetup }   // WarRoom (W3), Codex (W6), SkirmishSetup (W4) appended; none persisted
 // APPEND-ONLY: serialized as a raw (int) in SaveGame (CardDto.Objective). Never reorder or
 // remove a member — a saved run stores the ordinal, so a reorder silently corrupts the loaded
 // objective. Add new objectives at the END only. (SaveGame.SelfTest asserts the tail ordinal.)
 public enum Objective { Eliminate, Evac, Hack, Escort, Sabotage, Rescue, Defend, Decapitate }
 public enum SecondaryKind { None, NoLosses, Swift, CleanSweep }  // optional per-mission bonus goal (3.9)
-// PROGRAM HORIZON W2: game modes. Campaign = the 6-mission run (all prior behaviour); Endless =
-// LAST STAND horde survival on one arena. APPEND-ONLY (Mode isn't persisted, but keep it stable).
-public enum GameMode { Campaign, Endless }
+// PROGRAM HORIZON W2/W4: game modes. Campaign = the 6-mission run (all prior behaviour); Endless =
+// LAST STAND horde survival on one arena; Skirmish = a SINGLE-MISSION mode (both free SKIRMISH and the
+// seeded DAILY, differentiated by Game.DailyMode). APPEND-ONLY (Mode isn't persisted, but keep it stable).
+public enum GameMode { Campaign, Endless, Skirmish }
 enum AiStage { PickNext, Telegraph, ActAfterMove }
 
 public partial class Game
@@ -414,7 +415,10 @@ public partial class Game
     // wave-based; Evac/Escort/Rescue are movement-pressured; Sabotage already makes you move
     // to sites -- none of those need (or want) it.
     bool PressureClockObjective() =>
-        Objective == Objective.Eliminate || Objective == Objective.Hack || Objective == Objective.Decapitate;
+        // PROGRAM HORIZON W4: no anti-turtle clock in SKIRMISH/DAILY — a single fight isn't a camp
+        // exploit, and the reinforcement waves would muddy the seeded daily's determinism.
+        Mode != GameMode.Skirmish &&
+        (Objective == Objective.Eliminate || Objective == Objective.Hack || Objective == Objective.Decapitate);
 
     // HUD reads this to decide whether to draw the PRESSURE meter (only on clock objectives,
     // and only once we're in a live mission phase).
@@ -920,7 +924,8 @@ public partial class Game
         _vipWaitTurns = 0;           // SmartStep Escort: VIP-hold patience (anti-TIMEOUT)
         _smartConcealTurns = 0;      // SmartStep: concealed-turn counter (hard anti-TIMEOUT cap)
         DeathFlash = 0;
-        if (Mode != GameMode.Endless) RollSecondary(n);   // no per-mission bonus goal in LAST STAND
+        // per-mission bonus goal is a CAMPAIGN feature only — no secondary in LAST STAND or SKIRMISH/DAILY.
+        if (Mode == GameMode.Campaign) RollSecondary(n);
         else { Secondary = SecondaryKind.None; SecondaryFailed = false; }
         foreach (var u in Enemies) { u.BeginTurn(); u.OnOverwatch = false; }
         Selected = Players.FirstOrDefault(p => p.CanAct);
@@ -930,17 +935,19 @@ public partial class Game
         ItemMode = false;
         ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false; DragMode = false; VaultMode = false;
         Biome = Biome.For(n, _run.MapSeed);   // per-run biome variety (surfaces NEON/MAGMA across seeds)
-        if (Mode != GameMode.Endless)
+        if (Mode == GameMode.Campaign)
         {
             string facTag = Combat.MissionFaction != Faction.None ? $" - {Run.FactionName(Combat.MissionFaction)}" : "";
             ShowBanner($"MISSION {n} - {Biome.Name}{facTag}", false);
-            StartTutorialMaybe();
+            StartTutorialMaybe();   // first-run onboarding is a campaign-only feature
         }
+        else if (Mode == GameMode.Skirmish)
+            ShowBanner($"{(DailyMode ? $"DAILY {DailyStamp}" : "SKIRMISH")} - {SkirmishObjectiveLabel(Objective)} - {Biome.Name}", false);
         else ShowBanner($"LAST STAND - {Biome.Name}", false);   // SpawnEndlessWave already banner'd WAVE 1
 
-        // checkpoint the run at the start of each mission (normal play only). LAST STAND is
-        // transient — it is never resumable, so it never writes save.json.
-        if (!NoPersist && Mode != GameMode.Endless) SaveGame.Save(_run);
+        // checkpoint the run at the start of each mission (CAMPAIGN only). LAST STAND, SKIRMISH, and
+        // the DAILY are all transient single-mode fights — never resumable, so they never write save.json.
+        if (!NoPersist && Mode == GameMode.Campaign) SaveGame.Save(_run);
 
         // balance telemetry (no-op unless Stats.Enabled): record the encounter we just built.
         Stats.BeginMission(n, Objective.ToString(), _run.HeatLevel,
@@ -2728,6 +2735,7 @@ public partial class Game
             case Phase.Draft: HandleDraftClick(); break;
             case Phase.WarRoom: HandleWarRoomClick(); break;   // W3: cross-run meta screen
             case Phase.Codex: HandleCodexInput(); break;       // W6: field manual / reference
+            case Phase.SkirmishSetup: HandleSkirmishSetup(); break;  // W4: skirmish objective/heat picker
         }
 
         CheckEnd();
@@ -2740,6 +2748,9 @@ public partial class Game
         // PROGRAM HORIZON W2: LAST STAND runs its own end/advance logic (wipe = run over; clearing a
         // wave spawns the next). It NEVER touches the campaign objective ladder or the checkpoint valve.
         if (Mode == GameMode.Endless) { CheckEndless(); return; }
+        // PROGRAM HORIZON W4: SKIRMISH / DAILY are single-mission — reuse the SAME per-objective win
+        // tests, but route to Phase.Win/Lose (no barracks / checkpoint valve / save.json).
+        if (Mode == GameMode.Skirmish) { CheckSkirmish(); return; }
         var alivePlayers = AlivePlayers();
         if (alivePlayers.Count == 0)
         {
@@ -7569,6 +7580,24 @@ public partial class Game
             if (codex) { BeginCodex(); return; }
         }
 
+        // PROGRAM HORIZON W4: intro SKIRMISH — open the single-fight setup (button or key S).
+        if (Phase == Phase.Intro)
+        {
+            bool skirmish = (Raylib.IsMouseButtonPressed(MouseButton.Left) &&
+                             Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.OverlayBtn6))
+                            || Raylib.IsKeyPressed(KeyboardKey.S);
+            if (skirmish) { BeginSkirmishSetup(); return; }
+        }
+
+        // PROGRAM HORIZON W4: intro DAILY — jump into today's seeded challenge (button or key Y).
+        if (Phase == Phase.Intro)
+        {
+            bool daily = (Raylib.IsMouseButtonPressed(MouseButton.Left) &&
+                          Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.OverlayBtn7))
+                         || Raylib.IsKeyPressed(KeyboardKey.Y);
+            if (daily) { BeginDaily(); return; }
+        }
+
         bool click = Raylib.IsMouseButtonPressed(MouseButton.Left) &&
                      Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.OverlayBtn);
         bool enter = Raylib.IsKeyPressed(KeyboardKey.Enter);
@@ -7579,9 +7608,10 @@ public partial class Game
         // founding squad + starting boon). The harness NEVER reaches here (it calls StartMission
         // DIRECTLY, bypassing the intro), but gate on !NoPersist defensively so the smoke test /
         // balance batch can never enter Phase.Draft (which would have no autopilot path -> hang).
-        // PROGRAM HORIZON W2: NEW RUN after a LAST STAND returns to the CAMPAIGN — reset the mode so
-        // the fresh run isn't left in endless (which has no campaign flow).
-        else { Mode = GameMode.Campaign; if (!NoPersist) BeginDraft(); else StartMission(); }
+        // PROGRAM HORIZON W2/W4: NEW RUN after a LAST STAND / SKIRMISH / DAILY returns to the CAMPAIGN —
+        // reset the mode so the fresh run isn't left in a single-mission mode. Also clear any daily-forced
+        // arena so the campaign picks arenas normally (interactive only — the harness keeps SIGHTLINE_MAP).
+        else { Mode = GameMode.Campaign; DailyMode = false; if (!NoPersist) Mission.ForcedLayout = -1; if (!NoPersist) BeginDraft(); else StartMission(); }
     }
 
     // ---------------- draw ----------------

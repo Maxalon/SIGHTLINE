@@ -104,6 +104,22 @@ public static class SaveGame
         var d = LoadMetaDto(); d.BestWave = Math.Max(0, wave); WriteMetaDto(d);
     }
 
+    /// PROGRAM HORIZON W4 (SEEDED DAILY): the persisted best for a given day's challenge. Stored as a
+    /// (stamp, best) pair — a NEW day (different stamp) reads 0 (unplayed today). "Best" is the fewest
+    /// turns to a WIN (lower is better; 0 = not yet cleared). Append-only, whole-DTO read-modify-write
+    /// so it never clobbers MaxHeat/LossStreak/BestWave/salvage/etc. Gated by NoPersist at the call sites.
+    public static int LoadDailyBest(int stamp)
+    {
+        var d = LoadMetaDto();
+        return d.DailyStamp == stamp ? Math.Max(0, d.DailyBest) : 0;   // a different/older day = unplayed
+    }
+
+    public static void SaveDailyResult(int stamp, int best)
+    {
+        var d = LoadMetaDto();
+        d.DailyStamp = stamp; d.DailyBest = Math.Max(0, best); WriteMetaDto(d);
+    }
+
     // ---- PROGRAM HORIZON W3 (WAR ROOM): cross-run meta-progression ----
     // A persistent SALVAGE currency + ACHIEVEMENTS + additive UNLOCKS + a HALL OF FAME (Legends) +
     // lifetime run totals, all in the shared meta.json (append-only, whole-DTO read-modify-write so a
@@ -208,6 +224,8 @@ public static class SaveGame
         public List<int> Unlocks;
         public List<LegendDto> Legends;
         public int TotalRuns, TotalWins, BestMissions;
+        // W4 SEEDED DAILY (append-only): the last-played day (yyyymmdd) + its best (fewest win-turns; 0 = uncleared).
+        public int DailyStamp, DailyBest;
     }
 
     /// A HALL OF FAME entry (WAR ROOM): a soldier snapshot at run end — a fallen KIA (Won=false) or a

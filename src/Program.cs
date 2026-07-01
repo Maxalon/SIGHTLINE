@@ -220,6 +220,15 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        // SIGHTLINE_MODETEST=1 : SKIRMISH + SEEDED DAILY (W4) — daily seed determinism, single-mission
+        // end sets Phase (Win/Lose, not Barracks), daily stamp/best round-trips. Tiny window (tile math).
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_MODETEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "modetest");
+            Console.WriteLine(new Game().ModeSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         // SIGHTLINE_MISSION=<n> : start the harness on mission n (verify Hack/Evac maps).
         int startMission = int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_MISSION"), out int sm) ? sm : 1;
 
@@ -296,13 +305,27 @@ public static class Program
         // endless horde mode (BeginEndless) instead of a campaign mission. AutoPlay/SmartPlay/NoPersist
         // must be set BEFORE BeginEndless (it reads NoPersist for the heat dial-in).
         bool endless = Environment.GetEnvironmentVariable("SIGHTLINE_ENDLESS") == "1";
+        // PROGRAM HORIZON W4: SKIRMISH / SEEDED DAILY harness entry.
+        //   SIGHTLINE_SKIRMISH=<objective>  -> BeginSkirmish(objective, heat) — a single custom fight.
+        //   SIGHTLINE_DAILY=<yyyymmdd>      -> BeginDaily() — the deterministic seeded challenge for
+        //     that stamp (ResolveDailyStamp reads the same env under NoPersist -> reproducible).
+        string skirmishObj = Environment.GetEnvironmentVariable("SIGHTLINE_SKIRMISH");
+        bool daily = int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_DAILY"), out int _dailyStamp) && _dailyStamp > 0;
         if (autoplay) game.AutoPlay = true;
         if (smartplay) game.SmartPlay = true;
         if ((shot || autoplay) && !introShot)
         {
-            if (endless) game.BeginEndless();
+            if (daily) game.BeginDaily();
+            else if (!string.IsNullOrEmpty(skirmishObj))
+            {
+                int skHeat = int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_HEAT"), out int _sh) ? _sh : 0;
+                game.BeginSkirmish(ParseObjective(skirmishObj), skHeat);
+            }
+            else if (endless) game.BeginEndless();
             else game.StartMission(startMission);
         }
+        // SIGHTLINE_SKIRMISHSETUP=1 (shot only): screenshot the skirmish objective/heat picker screen.
+        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_SKIRMISHSETUP") == "1") game.DebugSkirmishSetup();
         // force an objective for verification (e.g. SIGHTLINE_OBJ=sabotage|rescue), shot or autoplay
         switch (Environment.GetEnvironmentVariable("SIGHTLINE_OBJ"))
         {
@@ -523,6 +546,24 @@ public static class Program
         Display.Shutdown();
         Renderer.UnloadNoise();
         Raylib.CloseWindow();
+    }
+
+    // PROGRAM HORIZON W4: parse a SIGHTLINE_SKIRMISH=<objective> string into an Objective (case-
+    // insensitive; a few aliases). Defaults to Eliminate on an empty/unknown value.
+    static Objective ParseObjective(string s)
+    {
+        switch ((s ?? "").Trim().ToLowerInvariant())
+        {
+            case "eliminate": case "elim": return Objective.Eliminate;
+            case "evac": case "extract": return Objective.Evac;
+            case "hack": return Objective.Hack;
+            case "escort": return Objective.Escort;
+            case "sabotage": return Objective.Sabotage;
+            case "rescue": return Objective.Rescue;
+            case "defend": return Objective.Defend;
+            case "decapitate": case "decap": return Objective.Decapitate;
+            default: return Objective.Eliminate;
+        }
     }
 
     // SIGHTLINE_WOUNDTEST: a survivor that ends a mission badly hurt carries a Wound
