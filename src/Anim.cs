@@ -360,15 +360,20 @@ public class ShotAnim : Anim
             // graze fires a dimmer beam than a solid hit (reinforces the lighter "GRAZE" read);
             // a crit's tracer runs a touch hotter/thicker.
             Color beam = Res.Hit ? (Res.Graze ? Pal.RGBA(165, 175, 195) : Pal.Accent) : Pal.RGBA(170, 180, 195);
-            float wide = (Res.Hit && Res.Crit) ? 1.25f : 1f;
-            // outer glow trail (fades along the beam) -> bright core -> hot white center
-            Raylib.DrawLineEx(start, _impact, (5.5f * k + 0.8f) * wide, Raylib.Fade(beam, k * 0.30f));
-            Raylib.DrawLineEx(start, _impact, (3.2f * k + 0.6f) * wide, Raylib.Fade(beam, k));
-            Raylib.DrawLineEx(start, _impact, 1.3f * wide, Raylib.Fade(Pal.RGBA(255, 255, 255), k * 0.9f));
-            // muzzle snap: a quick bright flash-disc at the barrel, biggest at the instant of fire
+            float wide = (Res.Hit && Res.Crit) ? 1.35f : 1f;
+            // HORIZON W5 — a FATTER, BRIGHTER core so the tracer reliably crosses the bloom
+            // bright-pass knee (a volley visibly lights the screen on hardware). Three-layer:
+            // a wide outer glow (fades along the beam) -> a bright saturated core -> a hot,
+            // now-thicker white centre held at full alpha for the length of the beam so the
+            // luma stays above the (lowered) knee end-to-end, not just at the muzzle.
+            Raylib.DrawLineEx(start, _impact, (7f * k + 1.2f) * wide, Raylib.Fade(beam, k * 0.34f));
+            Raylib.DrawLineEx(start, _impact, (4f * k + 0.8f) * wide, Raylib.Fade(beam, k));
+            Raylib.DrawLineEx(start, _impact, (2.2f * k + 0.9f) * wide, Raylib.Fade(Pal.RGBA(255, 255, 255), 0.55f + k * 0.45f));
+            // muzzle snap: a quick bright flash-disc at the barrel, biggest at the instant of fire.
+            // W5: a bigger, hotter crack (the bloom haloes it) so the shot lands with weight.
             float snap = k * k;       // front-loaded so it cracks then vanishes
-            Raylib.DrawCircleV(start, (9f * snap + 2f) * wide, Raylib.Fade(Pal.Accent, snap * 0.85f));
-            Raylib.DrawCircleV(start, (4.5f * snap + 1f) * wide, Raylib.Fade(Pal.RGBA(255, 250, 235), snap));
+            Raylib.DrawCircleV(start, (12f * snap + 2.5f) * wide, Raylib.Fade(Pal.Accent, snap * 0.9f));
+            Raylib.DrawCircleV(start, (6f * snap + 1.2f) * wide, Raylib.Fade(Pal.RGBA(255, 250, 235), snap));
         }
     }
 }
