@@ -1386,6 +1386,24 @@ public static class Renderer
                 Raylib.DrawLineEx(At(7f, 0), At(12f, 3.5f), 2f * s, col);   // upper fang
                 Raylib.DrawLineEx(At(7f, 0), At(12f, -3.5f), 2f * s, col);  // lower fang
                 break;
+            case "STRIKER":            // a LEAPER (WRAITH): a slim forward dart with two BACKWARD motion-
+                                       // streaks (a blur of speed), so it reads as "fast repositioner",
+                                       // distinct from the HUNTER dart (plain) and HOUND (fanged maw).
+                Wedge(9f, -3f, 3.5f, 1f);                        // a sharp forward dart body
+                Raylib.DrawLineEx(At(-3f,  2.5f), At(-10f,  4.5f), 1.6f * s, Raylib.Fade(c, a * 0.8f));  // trailing streak
+                Raylib.DrawLineEx(At(-3f, -2.5f), At(-10f, -4.5f), 1.6f * s, Raylib.Fade(c, a * 0.8f));  // trailing streak
+                Raylib.DrawLineEx(At(-3f,  0f),   At( -8f,  0f),   1.4f * s, Raylib.Fade(c, a * 0.5f));  // faint center wake
+                break;
+            case "SCREENER":           // a ZONER (HAZE): a compact CANISTER body + a small forward EMITTER
+                                       // nozzle venting a puff of three haze dots — reads as "smoke/gas
+                                       // dispenser", distinct from the SPOTTER's antenna + the MEDIC circle.
+                Raylib.DrawRectanglePro(new Rectangle(p.X, p.Y, 8f * s, 10f * s), new Vector2(4f * s, 5f * s),
+                                        MathF.Atan2(fdir.Y, fdir.X) * 180f / MathF.PI, col);   // upright canister
+                Raylib.DrawLineEx(At(3f, 0), At(7f, 0), 2.2f * s, col);                        // emitter nozzle
+                Raylib.DrawCircleV(At(9.5f,  0.5f), 2.0f * s, Raylib.Fade(c, a * 0.55f));      // venting haze puff
+                Raylib.DrawCircleV(At(11.5f, 2.5f), 1.6f * s, Raylib.Fade(c, a * 0.40f));
+                Raylib.DrawCircleV(At(11.5f, -2f),  1.4f * s, Raylib.Fade(c, a * 0.30f));
+                break;
             case "BOMBARD":            // a STOUT howitzer: a heavy squat body + a short fat tube angled
                                        // up-forward (artillery), distinct from the MORTAR's thin back-tube.
                                        // The pulsing charging core is drawn separately while ChargeTurns>0.

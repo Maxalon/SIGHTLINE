@@ -361,3 +361,9 @@ seeds (mix of WIN/LOSE, no exceptions):
   DONJON (walled tier-2 keep with a gated ramp). Arena pool 32→35.
 - **Game.cs sliced** into `Game.Autopilot.cs` (balance/smoke AI) + `Game.Harness.cs` (Debug/SelfTest hooks) —
   behaviour-neutral, 7648→4707 lines.
+
+### COUNTERPLAY follow-up (content variety)
+- **Perks (16→19):** VANTAGE (+crit on high ground), BREAKER (+crit vs suppressed/pinned), SIEGEBREAKER
+  (+aim vs hunkered) — situational, orthogonal to the HP/cover crit axes.
+- **Enemies (→19 archetypes):** STRIKER "WRAITH" (fast overwatch-discounting flanker; body-block or focus it)
+  and SCREENER "HAZE" (back-line zoner smoking your firing lane; reposition or kill it first). Both in the Codex.

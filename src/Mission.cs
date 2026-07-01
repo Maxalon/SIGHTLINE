@@ -476,15 +476,20 @@ public static class Mission
                 ? MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 58 + bump, 8, x, y)
                 : MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 60 + bump, 6, x, y);
 
-        if (n == 2)   // MISSION 2 — light skirmishers (each ~13-16%; deliberately no dominant type).
+        if (n == 2)   // MISSION 2 — light skirmishers (each ~11-14%; deliberately no dominant type).
         {
-            if (r < 0.15f) return MakeHostile("VIPER", "SNIPER", WeaponKind.Sniper, 4 + bump, 62 + bump, 5, x, y); // 15% marksman
-            if (r < 0.30f) return MakeHostile("WASP", "DRONE", WeaponKind.Smg, 3 + bump, 60 + bump, 7, x, y);      // 15% drone
-            if (r < 0.43f) return MakeHostile("JACKAL", "HUNTER", WeaponKind.Smg, 5 + bump, 60 + bump, 9, x, y);   // 13% flanker
-            if (r < 0.58f) return MakeHostile("HOPLITE", "LANCER", WeaponKind.Rifle, 6 + bump, 58 + bump, 5, x, y);// 15% formation trooper
-            if (r < 0.72f) return MakeHostile("FERAL", "HOUND", WeaponKind.Smg, 3 + bump, 56 + bump, 9, x, y);     // 14% swarmer
-            if (r < 0.85f) return MakeHostile("OGRE", "BRUISER", WeaponKind.Lmg, 9 + bump, 56 + bump, 5, x, y);// 13% bruiser
-            return MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 58 + bump, 8, x, y);                  // 15% scout
+            if (r < 0.13f) return MakeHostile("VIPER", "SNIPER", WeaponKind.Sniper, 4 + bump, 62 + bump, 5, x, y); // 13% marksman
+            if (r < 0.26f) return MakeHostile("WASP", "DRONE", WeaponKind.Smg, 3 + bump, 60 + bump, 7, x, y);      // 13% drone
+            if (r < 0.38f) return MakeHostile("JACKAL", "HUNTER", WeaponKind.Smg, 5 + bump, 60 + bump, 9, x, y);   // 12% flanker
+            // STRIKER (WRAITH): a fast, fragile LEAPER — see Ai.Plan. It rushes THROUGH player overwatch
+            // (discounts the kill-zone like a berserker) to end on your soldier's flanked/soft side.
+            // Appears from m2 as the light-skirmish flank threat. Counter: don't camp overwatch alone —
+            // body-block or focus it (it's glass). Spawns here at ~11%.
+            if (r < 0.49f) return MakeHostile("WRAITH", "STRIKER", WeaponKind.Smg, 4 + bump, 60 + bump, 9, x, y);  // 11% leaper
+            if (r < 0.62f) return MakeHostile("HOPLITE", "LANCER", WeaponKind.Rifle, 6 + bump, 58 + bump, 5, x, y);// 13% formation trooper
+            if (r < 0.74f) return MakeHostile("FERAL", "HOUND", WeaponKind.Smg, 3 + bump, 56 + bump, 9, x, y);     // 12% swarmer
+            if (r < 0.86f) return MakeHostile("OGRE", "BRUISER", WeaponKind.Lmg, 9 + bump, 56 + bump, 5, x, y);// 12% bruiser
+            return MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 58 + bump, 8, x, y);                  // 14% scout
         }
 
         // MISSIONS 3+ — the full roster is available. Windows tuned for variety: every archetype
@@ -492,44 +497,60 @@ public static class Mission
         // collectively the bulk and the plain SCOUT/GRUNT now a small remainder (they carried too
         // much before). SPOTTER is a force-multiplier (see Ai.Plan): low priority body count but
         // high priority to KILL, so it's deliberately a single ~7% slot, not a swarm.
-        if (r < 0.08f) return MakeHostile("SENTRY", "TURRET", WeaponKind.Lmg, 6 + bump, 66 + bump, 0, x, y);       //  8% immobile nest
-        if (r < 0.17f) return MakeHostile("VIPER", "SNIPER", WeaponKind.Sniper, 4 + bump, 62 + bump, 5, x, y);     //  9% marksman
-        if (r < 0.25f) return MakeHostile("REAVER", "BERSERKER", WeaponKind.Shotgun, 12 + bump, 58 + bump, 8, x, y); // 8% rusher
-        if (r < 0.33f) return MakeHostile("WASP", "DRONE", WeaponKind.Smg, 3 + bump, 60 + bump, 7, x, y);          //  8% drone
-        if (r < 0.41f) return MakeHostile("JACKAL", "HUNTER", WeaponKind.Smg, 5 + bump, 60 + bump, 9, x, y);       //  8% flanker
+        if (r < 0.07f) return MakeHostile("SENTRY", "TURRET", WeaponKind.Lmg, 6 + bump, 66 + bump, 0, x, y);       //  7% immobile nest
+        if (r < 0.15f) return MakeHostile("VIPER", "SNIPER", WeaponKind.Sniper, 4 + bump, 62 + bump, 5, x, y);     //  8% marksman
+        if (r < 0.22f) return MakeHostile("REAVER", "BERSERKER", WeaponKind.Shotgun, 12 + bump, 58 + bump, 8, x, y); // 7% rusher
+        if (r < 0.29f) return MakeHostile("WASP", "DRONE", WeaponKind.Smg, 3 + bump, 60 + bump, 7, x, y);          //  7% drone
+        if (r < 0.36f) return MakeHostile("JACKAL", "HUNTER", WeaponKind.Smg, 5 + bump, 60 + bump, 9, x, y);       //  7% flanker
+        // STRIKER (WRAITH): a fast, fragile LEAPER — see Ai.Plan. Highest-tier flank threat: it rushes
+        // THROUGH player overwatch (it discounts the kill-zone like a berserker) and seeks to END on the
+        // soldier's flanked/soft side even harder than the HUNTER. Counter: overwatch-camping does NOT
+        // stop it — body-block the flank or focus it down (it's glass). ~7% slot.
+        if (r < 0.43f) return MakeHostile("WRAITH", "STRIKER", WeaponKind.Smg, 4 + bump, 60 + bump, 9, x, y);      //  7% leaper
         // LANCER (HOPLITE): a formation trooper — see Ai.Plan. It is sturdier in a line (the AI rewards
         // ending adjacent to another hostile, so a pod forms a wall and presses forward in lockstep),
         // which makes it a tempting GRENADE / AoE target. Counter by breaking the formation up.
-        if (r < 0.49f) return MakeHostile("HOPLITE", "LANCER", WeaponKind.Rifle, 7 + bump, 58 + bump, 5, x, y);    //  8% formation trooper
+        if (r < 0.50f) return MakeHostile("HOPLITE", "LANCER", WeaponKind.Rifle, 7 + bump, 58 + bump, 5, x, y);    //  7% formation trooper
         // HOUND (FERAL): a fast, low-HP swarmer that hunts the ISOLATED soldier (see Ai.Plan: very high
         // advance weight + targets the squad member with the FEWEST nearby allies, beelining to it).
         // They spawn in pairs (the caller pods them ~2 each). Counter by staying massed / overwatching.
-        if (r < 0.56f) return MakeHostile("FERAL", "HOUND", WeaponKind.Smg, 3 + bump, 56 + bump, 9, x, y);         //  7% swarmer
-        if (r < 0.63f)                                                                                              //  7% shield
+        if (r < 0.57f) return MakeHostile("FERAL", "HOUND", WeaponKind.Smg, 3 + bump, 56 + bump, 9, x, y);         //  7% swarmer
+        if (r < 0.63f)                                                                                              //  6% shield
         {
             var s = MakeHostile("AEGIS", "SHIELD", WeaponKind.Rifle, 10 + bump * 2, 56 + bump, 4, x, y);
             s.ShieldDx = -1; s.ShieldDy = 0;            // shield faces the squad (west)
             return s;
         }
         if (r < 0.69f) return MakeHostile("BREACH", "SAPPER", WeaponKind.Shotgun, 7 + bump, 56 + bump, 6, x, y);   //  6% demolition
-        if (r < 0.75f)                                                                                              //  6% grenadier
+        if (r < 0.74f)                                                                                              //  5% grenadier
         {
             var m = MakeHostile("MORTAR", "MORTAR", WeaponKind.Smg, 6 + bump, 50 + bump, 5, x, y);
             m.Grenades = n >= 5 ? 3 : 2;                // a deep frag pouch — the EXISTING grenade AI uses it
             return m;
         }
-        if (r < 0.80f) return MakeHostile("ORDERLY", "MEDIC", WeaponKind.Smg, 6 + bump, 52 + bump, 6, x, y);       //  5% medic
+        if (r < 0.79f) return MakeHostile("ORDERLY", "MEDIC", WeaponKind.Smg, 6 + bump, 52 + bump, 6, x, y);       //  5% medic
         // SPOTTER (BEACON): a fragile back-line designator. It barely fights (poor SMG, low HP) but
         // while it lives it "paints" the squad's priority target — Ai.Plan amplifies focus-fire
         // convergence for ALL allies (see Ai.SpotterActive). Kill it first to break the crossfire.
-        if (r < 0.86f) return MakeHostile("BEACON", "SPOTTER", WeaponKind.Smg, 5 + bump, 48 + bump, 6, x, y);      //  6% designator
+        if (r < 0.84f) return MakeHostile("BEACON", "SPOTTER", WeaponKind.Smg, 5 + bump, 48 + bump, 6, x, y);      //  5% designator
+        // SCREENER (HAZE): a fragile back-line AREA-DENIAL zoner. It barely fights — its action is a
+        // PROACTIVE SMOKE dropped ON your firing lane (see Ai.Plan/BestScreen), blinding your soldiers'
+        // sightlines and FORCING you to reposition to re-acquire targets. Reuses the enemy smoke exec.
+        // Counter: push through / around the cloud, or kill it before it screens. Carries the smoke
+        // charge (set in SpawnEnemies). ~6% slot.
+        if (r < 0.90f)                                                                                              //  6% zoner
+        {
+            var z = MakeHostile("HAZE", "SCREENER", WeaponKind.Smg, 5 + bump, 46 + bump, 6, x, y);
+            z.EnemyItem = ItemKind.Smoke; z.ItemCharge = 2;   // a deep smoke pouch — the EXISTING smoke AI uses it
+            return z;
+        }
         // SIEGE (BOMBARD): a fragile back-line artillery piece. It does NOT fire — it CHARGES a
         // telegraphed 3x3 strike (shown for a full player turn) that lands cover-ignoring next enemy
         // turn (see Ai.Plan/Game.TickSiegeStrikes). Forces RELOCATION (a non-shoot tactical axis).
         // Rare (~5%); capped at 1 per mission by the post-pick guard in SpawnEnemies.
-        if (r < 0.91f) return MakeHostile("SIEGE", "BOMBARD", WeaponKind.Smg, 7 + bump, 48 + bump, 4, x, y);       //  5% artillery
-        if (r < 0.96f) return MakeHostile("OGRE", "BRUISER", WeaponKind.Lmg, 9 + bump, 56 + bump, 5, x, y);    //  5% bruiser
-        if (r < 0.99f) return MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 58 + bump, 8, x, y);       //  3% scout
+        if (r < 0.95f) return MakeHostile("SIEGE", "BOMBARD", WeaponKind.Smg, 7 + bump, 48 + bump, 4, x, y);       //  5% artillery
+        if (r < 0.98f) return MakeHostile("OGRE", "BRUISER", WeaponKind.Lmg, 9 + bump, 56 + bump, 5, x, y);    //  3% bruiser
+        if (r < 0.99f) return MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 58 + bump, 8, x, y);       //  1% scout
         return MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 60 + bump, 6, x, y);                     //  1% grunt
     }
 

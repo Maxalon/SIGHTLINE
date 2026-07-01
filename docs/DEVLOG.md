@@ -1000,3 +1000,16 @@ Screenshots verified: biome sweep, veteran draft, WAR ROOM veteran count, focuse
 **COUNTERPLAY TOTAL: 5 waves, ~7 commits, ~5 agents (4 research + 2 dev worktrees + 1 review) — the Game.cs split,
 the biome-identity leap, cross-run veteran legacy (the long-deferred replay keystone), focused overwatch, and 3
 arenas — 28 self-tests green, build 0/0, flywheel no-regression, review SHIP. Merged to `main`.**
+
+### COUNTERPLAY follow-up — content variety wave (new PR, on top of the merged #69)
+
+Two parallel disjoint-file dev worktrees off the merged main:
+- **3 build-defining perks** (`Unit`/`Combat`/`SaveGame`, `4368ac8`): VANTAGE (+15 crit on high ground),
+  BREAKER (+20 crit vs suppressed/pinned), SIEGEBREAKER (+15 aim vs hunkered) — pure ComputeOdds reads,
+  append-only enum, COMBATTEST extended with per-perk fires/no-op assertions.
+- **2 enemy archetypes** (`Ai`/`Mission`/`Renderer`, `ecff3a7`): STRIKER "WRAITH" (fast overwatch-discounting
+  flanker) + SCREENER "HAZE" (back-line zoner that proactively smokes your firing lane) — Ai.Plan biases
+  reusing the existing exec chain (zero Game.cs), distinct glyphs, added to the Codex bestiary (orchestrator glue).
+Fully disjoint file sets → clean file-copy integration, zero conflicts. Build 0/0; COMBATTEST/AITEST/SAVETEST/
+CODEXTEST/VETTEST PASS; autoplay clean (incl. forced-all-STRIKER/SCREENER stress). A second, tighter demonstration
+of the one-owner-per-hot-file parallel-dev pattern.

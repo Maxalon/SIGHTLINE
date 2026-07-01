@@ -470,7 +470,7 @@ public static class SaveGame
             // ARMORY: a player-chosen weapon (ASSAULT re-armed Rifle -> Shotgun). Must round-trip,
             // and the installed mods must re-bake onto the SWAPPED weapon.
             a.Weapon = Weapon.Make(WeaponKind.Shotgun);
-            a.Perks.Add(Perk.Deadeye); a.Perks.Add(Perk.Tank);
+            a.Perks.Add(Perk.Deadeye); a.Perks.Add(Perk.Tank); a.Perks.Add(Perk.Vantage);   // incl. a HORIZON-w6 perk -> round-trips by ordinal
             a.InstallMod(WeaponMod.Scope); a.InstallMod(WeaponMod.ExtendedMag);   // persistent weapon upgrades
             a.Nickname = "REAPER";
             a.Traits.Add(Trait.Killer); a.Traits.Add(Trait.IronWill);
@@ -509,7 +509,7 @@ public static class SaveGame
             if (g0.CustomTag != "BREACHER") fails.Add("customTag");
             if (g0.Wound != 2) fails.Add("wound");
             if (!g0.Benched) fails.Add("benched");
-            if (!g0.HasPerk(Perk.Deadeye) || !g0.HasPerk(Perk.Tank) || g0.Perks.Count != 2) fails.Add("perks");
+            if (!g0.HasPerk(Perk.Deadeye) || !g0.HasPerk(Perk.Tank) || !g0.HasPerk(Perk.Vantage) || g0.Perks.Count != 3) fails.Add("perks");
             // weapon mods round-trip AND re-bake onto the rebuilt weapon's effective stats
             if (!g0.HasMod(WeaponMod.Scope) || !g0.HasMod(WeaponMod.ExtendedMag) || g0.WeaponMods.Count != 2) fails.Add("weaponMods");
             if (g0.Weapon.AimBonus != WeaponModDef.ScopeAim) fails.Add("weaponModScopeApplied");      // Shotgun base aimBonus 0 + scope
@@ -550,7 +550,7 @@ public static class SaveGame
             if (weaponVals.Length < 5 || weaponVals[0] != WeaponKind.Rifle || weaponVals[weaponVals.Length - 1] != WeaponKind.Smg)
                 fails.Add("weaponKindOrdinals");
             var perkVals = (Perk[])Enum.GetValues(typeof(Perk));
-            if (perkVals.Length < 20 || perkVals[0] != Perk.LockOn || perkVals[perkVals.Length - 1] != Perk.Gunslinger)
+            if (perkVals.Length < 20 || perkVals[0] != Perk.LockOn || perkVals[perkVals.Length - 1] != Perk.Siegebreaker)
                 fails.Add("perkOrdinals");
             var modVals = (WeaponMod[])Enum.GetValues(typeof(WeaponMod));
             if (modVals.Length < 4 || modVals[0] != WeaponMod.Scope || modVals[modVals.Length - 1] != WeaponMod.Stabilizer)

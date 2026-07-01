@@ -152,7 +152,8 @@ public static class Ai
         // standard overwatch/hunker fallback still fires), so it re-engages the moment it can.
         bool canRetreat = e.Cls != "BERSERKER" && e.Cls != "ELITE"
                        && e.Cls != "DRONE" && e.Cls != "SAPPER" && e.Cls != "TURRET"
-                       && e.Cls != "HOUND";   // a swarmer commits — it never breaks off (its identity is the rush)
+                       && e.Cls != "HOUND"      // a swarmer commits — it never breaks off (its identity is the rush)
+                       && e.Cls != "STRIKER";   // a leaper commits to the flank too (fragile, but never disengages)
         bool lowHp = e.Hp <= Math.Max(1, e.MaxHp * 3 / 10);   // <= ~30% MaxHp
         bool retreatMode = false;
         if (canRetreat && lowHp)
@@ -367,10 +368,29 @@ public static class Ai
                     score += 10;                                 // stay in contact to keep painting
                 if (distNearest <= 2) score -= 24;               // never let the squad close on it
             }
+            else if (e.Cls == "SCREENER")                       // area-denial: hold a smoke standoff, keep LoS to screen
+            {
+                // A SCREENER (HAZE) is a ZONER — its whole value is the SMOKE it lays (handled by the
+                // shared UseItem AI below), not its gun. It plays exactly like a SPOTTER positionally:
+                // holds a mid standoff out of the brawl, hugs cover (it's frail), and keeps line of
+                // sight to the nearest soldier so it can actually place a screen on the squad's lane.
+                // It never charges in — the counter-play is to push through / around the cloud (or kill
+                // it), NOT to trade with a body that hangs back. Distinct from a SNIPER's kite (it does
+                // NOT want max distance — it wants smoke range) and from the SPOTTER (which paints, not
+                // screens); both keep-LoS, but only the SCREENER converts that LoS into a blinding cloud.
+                int want = Math.Max(3, Game.ItemRange - 2);      // sit within throwing range of the squad's lane
+                score -= Math.Abs(distNearest - want) * 1.4f;    // settle around the standoff band
+                score += cover.Level * 16;                       // value cover heavily (it's frail)
+                score += g.Grid.HeightAt(tx, ty) * 8;
+                if (nearest != null && g.Grid.HasLineOfSight(tx, ty, nearest.X, nearest.Y))
+                    score += 10;                                 // must SEE the lane it means to screen
+                if (distNearest <= 2) score -= 22;               // never let the squad close on it
+            }
             else
             {
                 float advW = (e.Cls == "BERSERKER" || e.Cls == "ELITE") ? 3.4f
                            : (e.Cls == "HOUND") ? 3.6f                  // swarmer: hardest charger in the game (low HP, fast)
+                           : (e.Cls == "STRIKER") ? 3.5f                // leaper: rushes hard THROUGH overwatch to end flanking
                            : (e.Cls == "DRONE") ? 3.0f                  // drone beelines (ignores cover anyway)
                            : (e.Cls == "HUNTER") ? 2.8f                 // fast flanker: presses hard to curl around cover
                            : (e.Cls == "LANCER") ? 2.4f                 // formation trooper: advances in lockstep with the line
@@ -393,6 +413,19 @@ public static class Ai
                 var tgtCov = g.Grid.GetCover(nearest.X, nearest.Y, tx, ty);
                 if (tgtCov.Flanked)      score += 34;            // soldier's cover doesn't protect from here
                 else if (tgtCov.Level == 0) score += 16;         // soldier simply has no cover from this angle
+            }
+            // STRIKER — LEAPER / FLANK FINISHER: a fast, fragile repositioner (WRAITH) whose identity is
+            // to END the turn on the soldier's SOFT side, no matter what. It seeks the flank even harder
+            // than the HUNTER (bigger flank/expose rewards) AND is drawn to end ADJACENT so it slips past
+            // a diagonal corner into a point-blank flank. Combined with its overwatch discount below
+            // (it accepts reaction fire to close, like a BERSERKER), this makes it the archetype that
+            // punishes turtling behind cover + overwatch: you can't just camp a lane — it curls around.
+            if (e.Cls == "STRIKER" && nearest != null)
+            {
+                var tgtCov = g.Grid.GetCover(nearest.X, nearest.Y, tx, ty);
+                if (tgtCov.Flanked)      score += 42;            // hardest flank-seeker in the game
+                else if (tgtCov.Level == 0) score += 20;         // no cover from here is still good
+                if (distNearest == 1)    score += 10;            // end adjacent: point-blank slips the corner
             }
             if (e.Cls == "DRONE") score -= cover.Level * 18;            // drone doesn't value cover (cancels the bonus above)
 
@@ -422,7 +455,10 @@ public static class Ai
             // overwatch an area-denial tool instead of a free kill farm.
             if (owTiles.Count > 0)
             {
-                float owEnd = (e.Cls == "BERSERKER" || e.Cls == "ELITE" || e.Cls == "DRONE") ? 9f : 26f;
+                // STRIKER (leaper) discounts overwatch like the other rushers: it "phases" through the
+                // kill-zone to reach the flank, so camping a lane on overwatch does NOT deter it — the
+                // squad must body-block or kill it, not just watch. This is the whole point of the archetype.
+                float owEnd = (e.Cls == "BERSERKER" || e.Cls == "ELITE" || e.Cls == "DRONE" || e.Cls == "STRIKER") ? 9f : 26f;
                 if (owTiles.Contains((tx, ty))) score -= owEnd;        // end here = eat the shot
                 if (c > 0)                                             // only an actual move has a route to skirt
                 {
@@ -551,7 +587,26 @@ public static class Ai
                     && g.Grid.GetCover(bestTile.x, bestTile.y, nearest.X, nearest.Y).Level == 0;
 
                 bool wantSmoke = endsWatched || routeWatched || exposedAdvance;
-                if (wantSmoke)
+                // SCREENER (HAZE) — AREA-DENIAL ZONER: this archetype's PRIMARY action is a PROACTIVE
+                // smoke on the squad's own firing lane (not just a reactive self-screen). Rather than
+                // wait to eat overwatch, it drops a cloud ON the frontline soldier(s) to blind their
+                // sightlines, forcing the squad to abandon the tile / reposition to re-acquire targets.
+                // BestScreen picks the soldier tile (in throw range, LoS clear so it isn't a blind lob,
+                // catching NO fellow enemy's shot) that screens the most soldiers. This layers on top of
+                // the reactive reasons above; a SCREENER prefers to screen even when not personally
+                // threatened. Progress-safe: if BestScreen finds nothing it falls through to shoot/hunker.
+                if (e.Cls == "SCREENER")
+                {
+                    var (zx, zy, zGood) = BestScreen(g, e, bestTile.x, bestTile.y);
+                    if (zGood && Util.Roll(88))     // a zoner screens aggressively (small damper only)
+                    {
+                        plan.UseItem = true; plan.ItemTx = zx; plan.ItemTy = zy;
+                        if (plan.ShootTarget != null &&
+                            Util.ChebyDist(zx, zy, plan.ShootTarget.X, plan.ShootTarget.Y) <= SmokeAnim.Radius)
+                            plan.ShootTarget = null;
+                    }
+                }
+                if (!plan.UseItem && wantSmoke)
                 {
                     var (sx, sy, smokeGood) = BestSmoke(g, e, bestTile.x, bestTile.y);
                     // strong reasons (about to eat overwatch) fire almost always; a softer
@@ -666,6 +721,47 @@ public static class Ai
         if (eCover.Flanked)   // smoke lands on the unit's own tile, so range is trivially ok
             return (fx, fy, true);
         return (0, 0, false);
+    }
+
+    // Best PROACTIVE SCREEN tile thrown from (fx,fy) for a SCREENER (HAZE) zoner: land a smoke cloud
+    // ON the squad's firing lane to blind it and force a reposition. We aim at a soldier's own tile
+    // (the radius-1 cloud then also covers its neighbours), choosing the soldier whose cloud screens
+    // the MOST soldiers. Constraints for FAIRNESS + no self-harm:
+    //   - in throw range of the post-move tile, and LoS from it (no blind lob over a wall);
+    //   - the cloud must NOT sit on/adjacent to a fellow enemy (it would blind our OWN sightlines);
+    //   - the cloud must NOT blind a fellow enemy's EXISTING shot on that soldier (don't screen our
+    //     own kill). A screen that only cuts THIS screener's weak SMG shot is fine (that's the trade).
+    // Returns (tx, ty, worthDoing). worthDoing == false -> caller falls through to shoot/hunker (no
+    // dead turn / no TIMEOUT). Never targets the fragile VIP (screening the asset wastes the cloud).
+    static (int x, int y, bool good) BestScreen(Game g, Unit e, int fx, int fy)
+    {
+        int bx = -1, by = -1, best = 0;
+        foreach (var p in g.AlivePlayers())
+        {
+            if (p.IsVip) continue;
+            if (Util.TileDist(fx, fy, p.X, p.Y) > Game.ItemRange) continue;
+            if (!g.Grid.HasLineOfSight(fx, fy, p.X, p.Y)) continue;         // must see the lane it screens
+            // don't drop the cloud on/next to a fellow enemy (it would blind our own team's sightlines)
+            bool allyInCloud = false;
+            foreach (var a in g.AliveEnemies())
+                if (a != e && Util.ChebyDist(p.X, p.Y, a.X, a.Y) <= SmokeAnim.Radius) { allyInCloud = true; break; }
+            if (allyInCloud) continue;
+            // don't screen a shot a fellow enemy already has on this soldier (don't smoke our own kill)
+            bool screensAllyShot = false;
+            foreach (var a in g.AliveEnemies())
+            {
+                if (a == e || !a.Active) continue;
+                if (Util.TileDist(a.X, a.Y, p.X, p.Y) <= a.Weapon.MaxRange
+                    && g.Grid.HasLineOfSight(a.X, a.Y, p.X, p.Y)) { screensAllyShot = true; break; }
+            }
+            if (screensAllyShot) continue;
+            // score: how many soldiers this radius-1 cloud would blind (a lane through a cluster is best)
+            int hits = 0;
+            foreach (var q in g.AlivePlayers())
+                if (!q.IsVip && Util.ChebyDist(p.X, p.Y, q.X, q.Y) <= SmokeAnim.Radius) hits++;
+            if (hits > best) { best = hits; bx = p.X; by = p.Y; }
+        }
+        return best > 0 ? (bx, by, true) : (0, 0, false);
     }
 
     // Best flash aim tile thrown from (fx,fy): pick a tile where 2+ players cluster
