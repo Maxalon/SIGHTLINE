@@ -24,7 +24,11 @@ public static class Hud
     public static UiButton[] ActionButtons = Array.Empty<UiButton>();
     public static System.Collections.Generic.List<(Rectangle rect, Unit unit)> RosterChips = new();
     public static Rectangle PauseResume, PauseMute, PauseShake, PauseThreat, PauseFullscreen, PauseWindow, PauseAbandon;
-    public static Rectangle PauseBright, PauseColorblind, PauseAutoCam;
+    public static Rectangle PauseBright, PauseColorblind, PauseAutoCam, PauseCodex;
+    // CODEX / FIELD MANUAL (W6): category tab rects + BACK, published by DrawCodex for hit-testing.
+    public static readonly System.Collections.Generic.List<Rectangle> CodexTabBtns = new();
+    public static Rectangle CodexBack;
+    public static float CodexScrollMax;   // clamp bound for Game.CodexScroll (content overflow px)
     public static Rectangle PerkBtnA, PerkBtnB, PerkTagBtn;
     public static Rectangle SpecBtnA, SpecBtnB;   // W2: class-specialization fork chooser buttons
     public static Rectangle HeatMinus, HeatPlus;   // intro Heat/Ascension +/- selector
@@ -196,7 +200,7 @@ public static class Hud
         // scrim fades in with the card so the pause lands rather than snaps
         float in_ = PanelAnim("pause", 0.13f);
         Raylib.DrawRectangle(0, 0, Cfg.ScreenW, Cfg.ScreenH, Raylib.Fade(Pal.RGBA(5, 8, 11), 0.82f * Util.EaseOutQuad(in_)));
-        int w = 440, h = 665;
+        int w = 440, h = 718;
         int x = Cfg.ScreenW / 2 - w / 2, y = Cfg.ScreenH / 2 - h / 2;
         y -= (int)((1f - Util.EaseOutQuad(in_)) * 14f);
         var card = new Rectangle(x, y, w, h);
@@ -215,6 +219,7 @@ public static class Hud
         PauseBright     = new Rectangle(bx, by, bw, bh); by += bh + gap;
         PauseColorblind = new Rectangle(bx, by, bw, bh); by += bh + gap;
         PauseAutoCam    = new Rectangle(bx, by, bw, bh); by += bh + gap;
+        PauseCodex      = new Rectangle(bx, by, bw, bh); by += bh + gap;
         PauseAbandon    = new Rectangle(bx, by, bw, bh);
 
         DrawButtonRect(PauseResume, "RESUME", "ESC", true, false, Pal.Friend);
@@ -226,6 +231,7 @@ public static class Hud
         DrawButtonRect(PauseBright, "BRIGHTNESS: " + Display.BrightLabel, "", true, false, Pal.Accent);
         DrawButtonRect(PauseColorblind, Pal.Colorblind ? "COLORBLIND: ON" : "COLORBLIND: OFF", "", true, Pal.Colorblind, Pal.Accent);
         DrawButtonRect(PauseAutoCam, Display.AutoCam ? "AUTO-CAM: ON" : "AUTO-CAM: OFF", "", true, Display.AutoCam, Pal.Accent);
+        DrawButtonRect(PauseCodex, "FIELD MANUAL", "K", true, false, Pal.Good);
         DrawButtonRect(PauseAbandon, "ABANDON RUN", "", true, false, Pal.Foe);
 
         string ctl = "Wheel zoom  -  Middle-drag pan  -  [C] reset camera  -  Arrows/WASD + [Space]";
@@ -324,6 +330,14 @@ public static class Hud
             Raylib.DrawRectangleLinesEx(cpill, 1.5f, Raylib.Fade(Pal.Friend, 0.5f * pulse));
             CenterText("CONCEALED", cpill, 14, Raylib.Fade(Pal.Friend, pulse));
         }
+        else if (g.Mode == GameMode.Endless)
+        {
+            Raylib.DrawTextEx(Cfg.Font, "LAST STAND", new Vector2(200, 19), 16, 1f, Raylib.Fade(Pal.Foe, 0.85f));
+        }
+        else if (g.Mode == GameMode.Skirmish)
+        {
+            Raylib.DrawTextEx(Cfg.Font, g.DailyMode ? "DAILY" : "SKIRMISH", new Vector2(200, 19), 16, 1f, Raylib.Fade(g.DailyMode ? Pal.Accent : Pal.Friend, 0.85f));
+        }
         else
         {
             Raylib.DrawTextEx(Cfg.Font, $"MISSION {g.RunState.Mission}/{Run.MaxMissions}", new Vector2(200, 19), 16, 1f, Pal.TxtDim);
@@ -333,6 +347,18 @@ public static class Hud
         // the secondary-bonus tracker + the pressure meter. The exception is a gold ASSET/HVT
         // objective (escort/rescue/decapitate), where gold is the semantic role for the thing you
         // protect or hunt — and the objective glyph carries the type by shape regardless of hue.
+        // PROGRAM HORIZON W2: LAST STAND replaces the objective readout with the WAVE/BEST counter.
+        if (g.Mode == GameMode.Endless)
+        {
+            Raylib.DrawTextEx(Cfg.Font, g.EndlessHud, new Vector2(360, 19), 16, 1f, Pal.Foe);
+        }
+        // PROGRAM HORIZON W4: SKIRMISH/DAILY show "SKIRMISH — <OBJ>" or "DAILY <stamp>  BEST n".
+        else if (g.Mode == GameMode.Skirmish)
+        {
+            Raylib.DrawTextEx(Cfg.Font, g.SkirmishHud, new Vector2(360, 19), 16, 1f, g.DailyMode ? Pal.Accent : Pal.Friend);
+        }
+        else
+        {
         string objTxt; Color objCol;
         switch (g.Objective)
         {
@@ -363,6 +389,7 @@ public static class Hud
         // collides with the SQUAD tally.
         if (g.PressureClockHud)
             DrawPressureMeter(g, 460, 12);
+        }   // end non-endless objective readout (PROGRAM HORIZON W2)
 
         // counts (the VIP isn't a combatant, so it's excluded from the squad tally). Centered, but
         // shifted right of board-center so the left of the bar (objective + pressure meter) has room.
@@ -1097,6 +1124,7 @@ public static class Hud
         if (o.SeesOver)  flags.Add(("OVER LOW COVER", Pal.Good));
         if (o.Steady)    flags.Add(($"STEADY  +{Combat.SteadyAim} aim / +{Combat.SteadyCrit} crit", Pal.Good));
         if (o.Ambush)    flags.Add(($"AMBUSH  +{Combat.AmbushAim} aim / +{Combat.AmbushCrit} crit", Pal.Good));
+        if (o.ExposedFire) flags.Add(($"EXPOSED BY FIRE  +{Combat.ExposedFireAim} aim / +{Combat.ExposedFireCrit} crit", Pal.Good));   // HORIZON: target fired last turn + stayed put
         // Surface the hidden streak-breaker: after consecutive misses this soldier's next
         // shot quietly aims truer (the bonus is in the roll, NOT in the HIT% shown). Naming it
         // "STEADYING" tells the player the safety net is working so a miss streak feels recoverable.
@@ -1234,6 +1262,12 @@ public static class Hud
             DrawEndScreen(g, false);
         else if (g.Phase == Phase.Draft)
             DrawDraft(g);
+        else if (g.Phase == Phase.WarRoom)
+            DrawWarRoom(g);
+        else if (g.Phase == Phase.Codex)
+            DrawCodex(g);
+        else if (g.Phase == Phase.SkirmishSetup)
+            DrawSkirmishSetup(g);
     }
 
     // ============================================================================
@@ -1336,6 +1370,40 @@ public static class Hud
             OverlayBtn2 = new Rectangle(0, 0, 0, 0);
             DrawOverlayButton(OverlayBtn, btn, Pal.Friend, null, btnIn);
         }
+
+        // PROGRAM HORIZON W2: LAST STAND (endless horde survival) — a secondary mode button below
+        // DEPLOY/CONTINUE, with a persisted BEST WAVE label so the run has a target to beat.
+        float lsIn = PanelAnim("introLastStand", 0.3f, 0.62f);
+        int lsBy = by + 62;
+        OverlayBtn3 = new Rectangle(W / 2 - 130, lsBy, 260, 44);
+        DrawOverlayButton(OverlayBtn3, "LAST STAND", Pal.Foe, "L", lsIn);
+        int bestWave = g.EndlessBestWave;
+        string bestTxt = bestWave > 0 ? $"BEST: {bestWave} WAVE{(bestWave == 1 ? "" : "S")}" : "ENDLESS HORDE SURVIVAL";
+        Vector2 bwm = Raylib.MeasureTextEx(Cfg.Font, bestTxt, 12, 1f);
+        Raylib.DrawTextEx(Cfg.Font, bestTxt, new Vector2(W / 2f - bwm.X / 2f, lsBy + 50), 12, 1f,
+            Raylib.Fade(bestWave > 0 ? Pal.Foe : Pal.TxtDim, 0.8f * Util.EaseOutQuad(Util.Clamp(lsIn, 0f, 1f))));
+
+        // PROGRAM HORIZON W3: WAR ROOM (cross-run meta-progression) — a tertiary button below LAST STAND.
+        // Sits alongside the CODEX (W6) as a two-up row so neither crowds the footer.
+        float wrIn = PanelAnim("introWarRoom", 0.3f, 0.68f);
+        int wrBy = lsBy + 74;
+        int miniW = 126, miniGap = 8;
+        OverlayBtn4 = new Rectangle(W / 2 - miniW - miniGap / 2, wrBy, miniW, 40);
+        DrawOverlayButton(OverlayBtn4, "WAR ROOM", Pal.Accent, "W", wrIn);
+
+        // PROGRAM HORIZON W6: CODEX / FIELD MANUAL — the in-game reference (button or key K).
+        float cxIn = PanelAnim("introCodex", 0.3f, 0.72f);
+        OverlayBtn5 = new Rectangle(W / 2 + miniGap / 2, wrBy, miniW, 40);
+        DrawOverlayButton(OverlayBtn5, "FIELD MANUAL", Pal.Good, "K", cxIn);
+
+        // PROGRAM HORIZON W4: SKIRMISH (one custom fight) + DAILY (seeded challenge) — a two-up row
+        // completing the modes offering (DEPLOY / LAST STAND / SKIRMISH / DAILY). Sits below WAR ROOM/CODEX.
+        float smIn = PanelAnim("introSkirmish", 0.3f, 0.76f);
+        int smBy = wrBy + 48;
+        OverlayBtn6 = new Rectangle(W / 2 - miniW - miniGap / 2, smBy, miniW, 40);
+        DrawOverlayButton(OverlayBtn6, "SKIRMISH", Pal.Friend, "S", smIn);
+        OverlayBtn7 = new Rectangle(W / 2 + miniGap / 2, smBy, miniW, 40);
+        DrawOverlayButton(OverlayBtn7, "DAILY", Pal.Accent, "Y", smIn);
 
         // a faint version/footer stamp
         Raylib.DrawTextEx(Cfg.Font, "GEOMETRY · PARTICLES · NO QUARTER", new Vector2(W / 2f - 150, H - 30), 11, 1f, Raylib.Fade(Pal.TxtDim, 0.6f));
@@ -1480,7 +1548,26 @@ public static class Hud
         // ---- subtitle / reason ----
         float subIn = PanelAnim("endSub", 0.4f, 0.2f);
         int mission = run?.Mission ?? 1;
-        string sub = win
+        string sub;
+        if (g.Mode == GameMode.Endless)
+        {
+            // PROGRAM HORIZON W2: LAST STAND end card — waves survived + the persisted best.
+            int best = g.EndlessBestWave;
+            sub = $"SURVIVED {g.Wave} WAVE{(g.Wave == 1 ? "" : "S")}"
+                + (best > 0 ? $"   ·   BEST {best}" : "");
+        }
+        else if (g.Mode == GameMode.Skirmish)
+        {
+            // PROGRAM HORIZON W4: SKIRMISH/DAILY end card — the single-mission result + (daily) the best.
+            string label = g.DailyMode ? $"DAILY {g.DailyStamp}" : "SKIRMISH";
+            if (win)
+            {
+                sub = $"{label} — {Game.SkirmishObjectiveLabel(g.Objective)} cleared in {g.Turn} turn{(g.Turn == 1 ? "" : "s")}";
+                if (g.DailyMode && g.DailyBest > 0) sub += $"   ·   BEST {g.DailyBest}";
+            }
+            else sub = string.IsNullOrEmpty(g.LoseReason) ? $"{label} failed." : $"{label} — {g.LoseReason}";
+        }
+        else sub = win
             ? $"All {Run.MaxMissions} missions cleared. The squad stands victorious."
             : (string.IsNullOrEmpty(g.LoseReason) ? $"The squad fell on mission {mission}." : g.LoseReason);
         Vector2 sm = Raylib.MeasureTextEx(Cfg.Font, sub, 16, 1f);
@@ -1549,6 +1636,388 @@ public static class Hud
         OverlayBtn = new Rectangle(W / 2 - 130, by, 260, 46);
         OverlayBtn2 = new Rectangle(0, 0, 0, 0);
         DrawOverlayButton(OverlayBtn, "NEW RUN", win ? Pal.Good : Pal.Friend, null, btnIn);
+    }
+
+    // ============================================================================
+    //  SKIRMISH SETUP  — pick ONE fight's OBJECTIVE + HEAT, then START (PROGRAM HORIZON W4).
+    //  A compact centred panel over the tactical backdrop: an objective cycler (◀ label ▶),
+    //  a heat dial (- N +), and START / BACK. Rects are published for Game.HandleSkirmishSetup.
+    // ============================================================================
+    static void DrawSkirmishSetup(Game g)
+    {
+        float t = (float)Raylib.GetTime();
+        DrawTacticalBackdrop(t, Pal.Friend, 0.15f);
+        int W = Cfg.ScreenW;
+
+        // title
+        float titleIn = PanelAnim("skTitle", 0.5f);
+        string title = "SKIRMISH";
+        int tfs = 64;
+        Vector2 tm = Raylib.MeasureTextEx(Cfg.Font, title, tfs, 4f);
+        float tx = W / 2f - tm.X / 2f;
+        float ty = 120f - (1f - Util.EaseOutBack(Util.Clamp(titleIn, 0f, 1f))) * 22f;
+        for (int i = 1; i <= 3; i++)
+            Raylib.DrawTextEx(Cfg.Font, title, new Vector2(tx, ty - i), tfs, 4f, Raylib.Fade(Pal.Friend, 0.10f * titleIn));
+        Raylib.DrawTextEx(Cfg.Font, title, new Vector2(tx, ty), tfs, 4f, Raylib.Fade(Pal.Txt, titleIn));
+        DrawCornerBrackets(new Rectangle(tx - 20, ty + 6, tm.X + 40, tfs - 8), Raylib.Fade(Pal.Friend, 0.5f * titleIn), 16f);
+
+        string blurb = "One custom fight — pick the objective and the heat, then deploy.";
+        Vector2 bm = Raylib.MeasureTextEx(Cfg.Font, blurb, 15, 1f);
+        Raylib.DrawTextEx(Cfg.Font, blurb, new Vector2(W / 2f - bm.X / 2f, ty + tfs + 4), 15, 1f, Raylib.Fade(Pal.TxtDim, titleIn));
+
+        // centred panel
+        float pIn = PanelAnim("skPanel", 0.4f, 0.2f);
+        int pw = 460, ph = 260;
+        int px = W / 2 - pw / 2, py = (int)(ty + tfs + 40);
+        var panel = new Rectangle(px, py, pw, ph);
+        Raylib.DrawRectangleRounded(panel, 0.06f, 8, Raylib.Fade(Pal.Panel, 0.94f * pIn));
+        Raylib.DrawRectangleLinesEx(panel, 1.5f, Raylib.Fade(Pal.Friend, 0.5f * pIn));
+
+        // --- OBJECTIVE cycler ---
+        int rowY = py + 34;
+        Raylib.DrawTextEx(Cfg.Font, "OBJECTIVE", new Vector2(px + 28, rowY), 13, 1f, Raylib.Fade(Pal.TxtDim, pIn));
+        int cyc = rowY + 26, cycH = 44;
+        SkirmObjPrev = new Rectangle(px + 28, cyc, 44, cycH);
+        SkirmObjNext = new Rectangle(px + pw - 28 - 44, cyc, 44, cycH);
+        DrawOverlayButton(SkirmObjPrev, "<", Pal.Friend, null, pIn);
+        DrawOverlayButton(SkirmObjNext, ">", Pal.Friend, null, pIn);
+        var objBox = new Rectangle(px + 84, cyc, pw - 84 * 2, cycH);
+        Raylib.DrawRectangleRounded(objBox, 0.16f, 8, Raylib.Fade(Pal.Bg, 0.6f * pIn));
+        Raylib.DrawRectangleLinesEx(objBox, 1.2f, Raylib.Fade(Pal.Accent, 0.4f * pIn));
+        string objLabel = Game.SkirmishObjectiveLabel(g.SkirmishObjective);
+        DrawObjectiveIcon(g.SkirmishObjective, objBox.X + 26, objBox.Y + objBox.Height / 2, Pal.Accent);
+        Vector2 om = Raylib.MeasureTextEx(Cfg.Font, objLabel, 22, 1f);
+        Raylib.DrawTextEx(Cfg.Font, objLabel, new Vector2(objBox.X + objBox.Width / 2 - om.X / 2 + 12, objBox.Y + objBox.Height / 2 - om.Y / 2), 22, 1f, Raylib.Fade(Pal.Txt, pIn));
+
+        // --- HEAT dial ---
+        int hRowY = cyc + cycH + 28;
+        Raylib.DrawTextEx(Cfg.Font, "HEAT / ASCENSION", new Vector2(px + 28, hRowY), 13, 1f, Raylib.Fade(Pal.TxtDim, pIn));
+        int hy = hRowY + 26, hH = 40;
+        SkirmHeatMinus = new Rectangle(px + 28, hy, 44, hH);
+        SkirmHeatPlus  = new Rectangle(px + 28 + 44 + 8 + 120, hy, 44, hH);
+        DrawOverlayButton(SkirmHeatMinus, "-", Pal.Foe, null, pIn);
+        DrawOverlayButton(SkirmHeatPlus, "+", Pal.Foe, null, pIn);
+        var heatBox = new Rectangle(px + 28 + 44 + 8, hy, 120, hH);
+        Raylib.DrawRectangleRounded(heatBox, 0.2f, 8, Raylib.Fade(Pal.Bg, 0.6f * pIn));
+        string heatTxt = g.SkirmishHeat > 0 ? $"HEAT {g.SkirmishHeat}" : "STANDARD";
+        Color heatCol = g.SkirmishHeat > 0 ? Pal.Foe : Pal.TxtDim;
+        CenterText(heatTxt, heatBox, 18, Raylib.Fade(heatCol, pIn));
+        string cap = g.UnlockedHeat > 0 ? $"unlocked to {g.UnlockedHeat}" : "win at heat to unlock more";
+        Raylib.DrawTextEx(Cfg.Font, cap, new Vector2(px + 28 + 44 + 8 + 120 + 44 + 14, hy + 12), 12, 1f, Raylib.Fade(Pal.TxtDim, 0.8f * pIn));
+
+        // --- START / BACK ---
+        float btnIn = PanelAnim("skBtns", 0.3f, 0.35f);
+        int bY = py + ph - 56;
+        SkirmStart = new Rectangle(px + pw / 2 - 8 - 150, bY, 150, 44);
+        SkirmBack  = new Rectangle(px + pw / 2 + 8, bY, 130, 44);
+        DrawOverlayButton(SkirmStart, "DEPLOY", Pal.Good, null, btnIn);
+        DrawOverlayButton(SkirmBack, "BACK", Pal.TxtDim, "Esc", btnIn);
+
+        Raylib.DrawTextEx(Cfg.Font, "< > objective   ·   +/- heat   ·   ENTER deploy",
+            new Vector2(W / 2f - 170, py + ph + 18), 12, 1f, Raylib.Fade(Pal.TxtDim, 0.6f));
+    }
+
+    // ============================================================================
+    //  WAR ROOM  — cross-run meta-progression (PROGRAM HORIZON W3). Persistent SALVAGE,
+    //  lifetime stats, achievements, a HALL OF FAME, and an additive unlock shop. All
+    //  data comes from the cached g.WarRoom snapshot (loaded on entry; no per-frame I/O).
+    // ============================================================================
+    static void DrawWarRoom(Game g)
+    {
+        float t = (float)Raylib.GetTime();
+        DrawTacticalBackdrop(t, Pal.Accent, 0f);
+        var p = g.WarRoom;
+        if (p == null) return;
+
+        int W = Cfg.ScreenW;
+
+        // ---- title + SALVAGE readout ----
+        float titleIn = PanelAnim("warTitle", 0.5f);
+        string title = "WAR ROOM";
+        int tfs = 64;
+        Vector2 tm = Raylib.MeasureTextEx(Cfg.Font, title, tfs, 4f);
+        float tx = W / 2f - tm.X / 2f;
+        float ty = 40f - (1f - Util.EaseOutBack(Util.Clamp(titleIn, 0f, 1f))) * 22f;
+        for (int i = 1; i <= 3; i++)
+            Raylib.DrawTextEx(Cfg.Font, title, new Vector2(tx, ty - i), tfs, 4f, Raylib.Fade(Pal.Accent, 0.10f * titleIn));
+        Raylib.DrawTextEx(Cfg.Font, title, new Vector2(tx, ty), tfs, 4f, Raylib.Fade(Pal.Txt, titleIn));
+        DrawCornerBrackets(new Rectangle(tx - 20, ty + 6, tm.X + 40, tfs - 8), Raylib.Fade(Pal.Accent, 0.5f * titleIn), 16f);
+
+        // SALVAGE bank + lifetime stat strip, centred under the title
+        string salv = $"SALVAGE  {p.Salvage}";
+        Vector2 svm = Raylib.MeasureTextEx(Cfg.Font, salv, 26, 1f);
+        Raylib.DrawTextEx(Cfg.Font, salv, new Vector2(W / 2f - svm.X / 2f, ty + tfs + 6), 26, 1f, Raylib.Fade(Pal.VipGold, titleIn));
+        string life = $"RUNS {p.Runs}   ·   WINS {p.Wins}   ·   BEST MISSION {p.BestMissions}   ·   BEST WAVE {p.BestWave}";
+        Vector2 lfm = Raylib.MeasureTextEx(Cfg.Font, life, 13, 1f);
+        Raylib.DrawTextEx(Cfg.Font, life, new Vector2(W / 2f - lfm.X / 2f, ty + tfs + 40), 13, 1f, Raylib.Fade(Pal.TxtDim, titleIn));
+
+        // ---- three-column layout: ACHIEVEMENTS | HALL OF FAME | UNLOCKS ----
+        int top = (int)(ty + tfs + 66);
+        int colGap = 24;
+        int marginX = 60;
+        int colW = (W - marginX * 2 - colGap * 2) / 3;
+        int colH = Cfg.ScreenH - top - 92;
+        int c0 = marginX, c1 = marginX + colW + colGap, c2 = marginX + (colW + colGap) * 2;
+
+        DrawWarAchievements(p, c0, top, colW, colH, PanelAnim("warAch", 0.4f, 0.15f));
+        DrawWarHallOfFame(p, c1, top, colW, colH, PanelAnim("warHof", 0.4f, 0.25f));
+        DrawWarUnlocks(g, p, c2, top, colW, colH, PanelAnim("warUnl", 0.4f, 0.35f));
+
+        // ---- BACK button (centred, bottom) ----
+        float backIn = PanelAnim("warBack", 0.3f, 0.5f);
+        int by = Cfg.ScreenH - 66;
+        WarRoomBack = new Rectangle(W / 2 - 120, by, 240, 44);
+        DrawOverlayButton(WarRoomBack, "BACK", Pal.Friend, "Esc", backIn);
+    }
+
+    // ============================================================================
+    //  CODEX / FIELD MANUAL (PROGRAM HORIZON W6) — a browsable read-only reference.
+    //  Left: a category tab column (selected highlighted). Right: a scrollable panel
+    //  of the current category's entries (title + code chip + wrapped desc; a
+    //  DrawCodexGlyph silhouette left of the text for ENEMIES/CLASSES). All content
+    //  is assembled by Codex.Build() from the existing Def strings — no new data.
+    // ============================================================================
+    static void DrawCodex(Game g)
+    {
+        float t = (float)Raylib.GetTime();
+        DrawTacticalBackdrop(t, Pal.Good, 0f);
+        CodexTabBtns.Clear();
+
+        var cats = g.CodexCats;
+        int W = Cfg.ScreenW;
+
+        // ---- title ----
+        float titleIn = PanelAnim("codexTitle", 0.5f);
+        string title = "FIELD MANUAL";
+        int tfs = 56;
+        Vector2 tm = Raylib.MeasureTextEx(Cfg.Font, title, tfs, 4f);
+        float tx = W / 2f - tm.X / 2f;
+        float ty = 34f - (1f - Util.EaseOutBack(Util.Clamp(titleIn, 0f, 1f))) * 20f;
+        for (int i = 1; i <= 3; i++)
+            Raylib.DrawTextEx(Cfg.Font, title, new Vector2(tx, ty - i), tfs, 4f, Raylib.Fade(Pal.Good, 0.10f * titleIn));
+        Raylib.DrawTextEx(Cfg.Font, title, new Vector2(tx, ty), tfs, 4f, Raylib.Fade(Pal.Txt, titleIn));
+        DrawCornerBrackets(new Rectangle(tx - 20, ty + 6, tm.X + 40, tfs - 8), Raylib.Fade(Pal.Good, 0.5f * titleIn), 16f);
+        string subtitle = "The whole vocabulary — enemies, classes, and every earned edge.";
+        Vector2 sm = Raylib.MeasureTextEx(Cfg.Font, subtitle, 13, 1f);
+        Raylib.DrawTextEx(Cfg.Font, subtitle, new Vector2(W / 2f - sm.X / 2f, ty + tfs + 4), 13, 1f, Raylib.Fade(Pal.TxtDim, titleIn));
+
+        if (cats == null || cats.Count == 0)
+        {
+            CodexBack = new Rectangle(W / 2 - 120, Cfg.ScreenH - 66, 240, 44);
+            DrawOverlayButton(CodexBack, "BACK", Pal.Friend, "Esc", 1f);
+            return;
+        }
+        int tab = Math.Clamp(g.CodexTab, 0, cats.Count - 1);
+
+        // ---- layout: tab column (left) + content panel (right) ----
+        int top = (int)(ty + tfs + 34);
+        int marginX = 60;
+        int tabW = 190, colGap = 20;
+        int panelX = marginX + tabW + colGap;
+        int panelW = W - panelX - marginX;
+        int panelH = Cfg.ScreenH - top - 82;
+
+        // tab column
+        float tabsIn = PanelAnim("codexTabs", 0.4f, 0.12f);
+        int tabH = 34, tabGap = 6;
+        int tabTotal = cats.Count * (tabH + tabGap);
+        // if the tab list ever grows past the column, shrink the row height to fit (defensive).
+        if (tabTotal > panelH) { tabH = Math.Max(22, (panelH - cats.Count * tabGap) / cats.Count); }
+        int tyy = top;
+        for (int i = 0; i < cats.Count; i++)
+        {
+            var r = new Rectangle(marginX, tyy, tabW, tabH);
+            CodexTabBtns.Add(r);
+            bool sel = i == tab;
+            bool hover = Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), r);
+            Color bg = sel ? Pal.RGBA(24, 40, 32) : (hover ? Pal.RGBA(20, 30, 40) : Pal.Panel);
+            Raylib.DrawRectangleRounded(r, 0.16f, 6, Raylib.Fade(bg, tabsIn));
+            Raylib.DrawRectangleLinesEx(r, 1.4f, Raylib.Fade(sel ? Pal.Good : Pal.PanelBd, tabsIn));
+            if (sel) Raylib.DrawRectangle((int)r.X, (int)r.Y, 3, (int)r.Height, Raylib.Fade(Pal.Good, tabsIn));
+            Color tc = sel ? Pal.Good : (hover ? Pal.Txt : Pal.TxtDim);
+            Raylib.DrawTextEx(Cfg.Font, cats[i].Name, new Vector2(r.X + 14, r.Y + tabH / 2 - 7), 14, 1f, Raylib.Fade(tc, tabsIn));
+            // entry count chip on the right
+            string cnt = cats[i].Entries.Count.ToString();
+            Vector2 cw = Raylib.MeasureTextEx(Cfg.Font, cnt, 11, 1f);
+            Raylib.DrawTextEx(Cfg.Font, cnt, new Vector2(r.X + tabW - cw.X - 12, r.Y + tabH / 2 - 6), 11, 1f, Raylib.Fade(Pal.TxtDim, tabsIn));
+            tyy += tabH + tabGap;
+        }
+
+        // content panel
+        float panIn = PanelAnim("codexPanel", 0.4f, 0.18f);
+        var panel = new Rectangle(panelX, top, panelW, panelH);
+        Raylib.DrawRectangleRounded(panel, 0.03f, 8, Raylib.Fade(Pal.Panel, 0.92f * panIn));
+        Raylib.DrawRectangleLinesEx(panel, 1.2f, Raylib.Fade(Pal.Good, 0.4f * panIn));
+
+        var cat = cats[tab];
+        bool glyph = cat.HasGlyph;
+        int pad = 18;
+        int contentX = panelX + pad;
+        int contentW = panelW - pad * 2;
+        int glyphCol = glyph ? 52 : 0;   // width reserved for the silhouette preview
+        int textX = contentX + glyphCol;
+        int textW = contentW - glyphCol;
+
+        // Scissor the panel so scrolled rows clip cleanly at the panel edges.
+        Raylib.BeginScissorMode((int)panel.X + 1, (int)panel.Y + 1, (int)panel.Width - 2, (int)panel.Height - 2);
+        float scroll = g.CodexScroll;
+        int rowY = top + pad - (int)scroll;
+        int drawnBottom = rowY;
+        foreach (var en in cat.Entries)
+        {
+            // measure the wrapped body first so we can size + skip the row.
+            var lines = WrapText(en.Desc.Replace("\n", " • "), 13, textW);
+            int rowH = 24 + lines.Count * 17 + 12;   // header + body + spacing
+            int rowBottom = rowY + rowH;
+
+            // only draw rows that intersect the panel viewport (cheap culling).
+            if (rowBottom >= top && rowY <= top + panelH)
+            {
+                // header: title + optional code chip
+                Raylib.DrawTextEx(Cfg.Font, en.Title, new Vector2(textX, rowY), 17, 1f, Pal.Txt);
+                if (!string.IsNullOrEmpty(en.Code))
+                {
+                    int titW = (int)Raylib.MeasureTextEx(Cfg.Font, en.Title, 17, 1f).X;
+                    var chip = new Rectangle(textX + titW + 10, rowY + 1, Raylib.MeasureTextEx(Cfg.Font, en.Code, 11, 1f).X + 14, 16);
+                    Raylib.DrawRectangleRounded(chip, 0.4f, 6, Raylib.Fade(Pal.Good, 0.18f));
+                    Raylib.DrawRectangleLinesEx(chip, 1f, Raylib.Fade(Pal.Good, 0.5f));
+                    CenterText(en.Code, chip, 11, Pal.Good);
+                }
+                // body
+                int by2 = rowY + 24;
+                foreach (var ln in lines) { Raylib.DrawTextEx(Cfg.Font, ln, new Vector2(textX, by2), 13, 1f, Pal.TxtDim); by2 += 17; }
+                // silhouette preview (ENEMIES/CLASSES), centred in the reserved glyph column
+                if (glyph && !string.IsNullOrEmpty(en.Glyph))
+                {
+                    var gp = new Vector2(contentX + glyphCol / 2f - 4f, rowY + rowH / 2f - 6f);
+                    // team-tinted: classes friendly-blue, enemies foe-red (ELITE gold).
+                    Color gc = cat.Name == "CLASSES" ? Pal.Friend : (en.Glyph == "ELITE" ? Pal.VipGold : Pal.Foe);
+                    Renderer.DrawCodexGlyph(en.Glyph, gp, gc, 1.4f, 0f);
+                }
+                // thin divider under the row
+                Raylib.DrawLine(textX, rowBottom - 6, textX + textW, rowBottom - 6, Raylib.Fade(Pal.PanelBd, 0.5f));
+            }
+            rowY = rowBottom;
+            drawnBottom = rowBottom;
+        }
+        Raylib.EndScissorMode();
+
+        // scroll clamp bound: total content height beyond the viewport (consumed by Game.HandleCodexInput).
+        int contentHeight = (drawnBottom + (int)scroll) - (top + pad);
+        CodexScrollMax = MathF.Max(0f, contentHeight - (panelH - pad * 2));
+
+        // a subtle scrollbar when the content overflows
+        if (CodexScrollMax > 1f)
+        {
+            float frac = panelH / (float)(contentHeight + pad);
+            float barH = MathF.Max(30f, panelH * Util.Clamp(frac, 0.05f, 1f));
+            float barT = (scroll / MathF.Max(1f, CodexScrollMax)) * (panelH - barH);
+            var bar = new Rectangle(panel.X + panel.Width - 6, panel.Y + 2 + barT, 4, barH);
+            Raylib.DrawRectangleRounded(bar, 0.5f, 4, Raylib.Fade(Pal.Good, 0.5f));
+        }
+
+        // ---- footer hint + BACK ----
+        Raylib.DrawTextEx(Cfg.Font, "Up/Down select  ·  Wheel scroll  ·  [Esc]/[K] back",
+            new Vector2(panelX, Cfg.ScreenH - 70), 12, 1f, Raylib.Fade(Pal.TxtDim, 0.85f));
+        float backIn = PanelAnim("codexBack", 0.3f, 0.3f);
+        CodexBack = new Rectangle(W - marginX - 200, Cfg.ScreenH - 74, 200, 44);
+        DrawOverlayButton(CodexBack, "BACK", Pal.Friend, "Esc", backIn);
+    }
+
+    static void DrawWarPanel(Rectangle panel, string header, Color accent, float anim)
+    {
+        Raylib.DrawRectangleRounded(panel, 0.05f, 8, Raylib.Fade(Pal.Panel, 0.90f * anim));
+        Raylib.DrawRectangleLinesEx(panel, 1.2f, Raylib.Fade(accent, 0.40f * anim));
+        Raylib.DrawRectangle((int)panel.X, (int)panel.Y, 3, (int)panel.Height, Raylib.Fade(accent, anim));
+        Raylib.DrawTextEx(Cfg.Font, header, new Vector2(panel.X + 14, panel.Y + 12), 15, 1f, Raylib.Fade(accent, anim));
+    }
+
+    static void DrawWarAchievements(Game.WarRoomProfile p, int x, int y, int w, int h, float anim)
+    {
+        if (anim <= 0f) return;
+        DrawWarPanel(new Rectangle(x, y, w, h), "ACHIEVEMENTS", Pal.Accent, anim);
+        int rowY = y + 44;
+        foreach (var a in MetaProg.All)
+        {
+            if (rowY > y + h - 30) break;
+            bool got = p.Achievements.Contains(a.Id);
+            Color nameCol = got ? Pal.VipGold : Pal.TxtDim;
+            float rowA = anim * (got ? 1f : 0.55f);
+            // a small filled/empty marker
+            var mk = new Rectangle(x + 14, rowY + 2, 12, 12);
+            if (got) Raylib.DrawRectangleRounded(mk, 0.3f, 4, Raylib.Fade(Pal.VipGold, rowA));
+            else Raylib.DrawRectangleLinesEx(mk, 1.2f, Raylib.Fade(Pal.TxtDim, rowA));
+            Raylib.DrawTextEx(Cfg.Font, a.Name, new Vector2(x + 34, rowY), 14, 1f, Raylib.Fade(nameCol, rowA));
+            Raylib.DrawTextEx(Cfg.Font, a.Desc, new Vector2(x + 34, rowY + 16), 11, 1f, Raylib.Fade(Pal.TxtDim, rowA));
+            rowY += 38;
+        }
+    }
+
+    static void DrawWarHallOfFame(Game.WarRoomProfile p, int x, int y, int w, int h, float anim)
+    {
+        if (anim <= 0f) return;
+        DrawWarPanel(new Rectangle(x, y, w, h), "HALL OF FAME", Pal.Friend, anim);
+        int rowY = y + 44;
+        if (p.Legends == null || p.Legends.Count == 0)
+        {
+            Raylib.DrawTextEx(Cfg.Font, "- no legends yet -", new Vector2(x + 14, rowY), 13, 1f, Raylib.Fade(Pal.TxtDim, anim));
+            Raylib.DrawTextEx(Cfg.Font, "Finish a run to enshrine them.", new Vector2(x + 14, rowY + 18), 11, 1f, Raylib.Fade(Pal.TxtDim, anim));
+            return;
+        }
+        foreach (var l in p.Legends)
+        {
+            if (rowY > y + h - 30) break;
+            Color tag = l.Won ? Pal.VipGold : Pal.TxtDim;
+            string status = l.Won ? "WON" : "KIA";
+            Raylib.DrawTextEx(Cfg.Font, status, new Vector2(x + 14, rowY + 2), 11, 1f, Raylib.Fade(tag, anim));
+            Raylib.DrawTextEx(Cfg.Font, l.Name ?? "", new Vector2(x + 48, rowY), 14, 1f, Raylib.Fade(l.Won ? Pal.Txt : Pal.TxtDim, anim));
+            string sub = $"{l.Rank} {l.Cls}  ·  {l.Kills} K  ·  H{l.Heat}";
+            Raylib.DrawTextEx(Cfg.Font, sub, new Vector2(x + 48, rowY + 16), 11, 1f, Raylib.Fade(Pal.TxtDim, anim));
+            rowY += 34;
+        }
+    }
+
+    static void DrawWarUnlocks(Game g, Game.WarRoomProfile p, int x, int y, int w, int h, float anim)
+    {
+        WarRoomBuyBtns.Clear();
+        if (anim <= 0f) return;
+        DrawWarPanel(new Rectangle(x, y, w, h), "UNLOCKS", Pal.Good, anim);
+        int rowY = y + 44;
+        foreach (var u in MetaProg.AllUnlocks)
+        {
+            if (rowY > y + h - 74) break;
+            bool owned = p.Unlocks.Contains((int)u);
+            int cost = MetaProg.UnlockCost(u);
+            bool afford = p.Salvage >= cost;
+
+            var card = new Rectangle(x + 12, rowY, w - 24, 72);
+            Raylib.DrawRectangleRounded(card, 0.08f, 6, Raylib.Fade(Pal.RGBA(14, 20, 28), 0.9f * anim));
+            Raylib.DrawRectangleLinesEx(card, 1f, Raylib.Fade(owned ? Pal.Good : Pal.PanelBd, 0.6f * anim));
+
+            Raylib.DrawTextEx(Cfg.Font, MetaProg.UnlockName(u), new Vector2(card.X + 12, card.Y + 8), 14, 1f, Raylib.Fade(Pal.Txt, anim));
+            // word-wrapped description, up to 2 lines
+            var descLines = WrapText(MetaProg.UnlockDesc(u), 11, (int)card.Width - 24);
+            for (int li = 0; li < descLines.Count && li < 2; li++)
+                Raylib.DrawTextEx(Cfg.Font, descLines[li], new Vector2(card.X + 12, card.Y + 26 + li * 13), 11, 1f, Raylib.Fade(Pal.TxtDim, anim));
+
+            // BUY / OWNED chip, right side
+            var chip = new Rectangle(card.X + card.Width - 92, card.Y + card.Height - 26, 80, 20);
+            if (owned)
+            {
+                Raylib.DrawRectangleRounded(chip, 0.3f, 6, Raylib.Fade(Pal.Good, 0.22f * anim));
+                CenterText("OWNED", chip, 12, Raylib.Fade(Pal.Good, anim));
+            }
+            else
+            {
+                bool hover = afford && Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), chip);
+                Color chipCol = afford ? (hover ? Pal.Good : Pal.RGBA(30, 44, 34)) : Pal.RGBA(30, 24, 24);
+                Raylib.DrawRectangleRounded(chip, 0.3f, 6, Raylib.Fade(chipCol, anim));
+                Raylib.DrawRectangleLinesEx(chip, 1f, Raylib.Fade(afford ? Pal.Good : Pal.Foe, 0.6f * anim));
+                CenterText($"BUY {cost}", chip, 12, Raylib.Fade(afford ? Pal.Txt : Pal.TxtDim, anim));
+                WarRoomBuyBtns.Add((u, chip));   // hit-testable regardless of affordability (Game refuses)
+            }
+            rowY += 82;
+        }
     }
 
     /// Left dossier column: the SURVIVING SQUAD roster (name/nickname, rank, kills, a trait),
@@ -2643,6 +3112,18 @@ public static class Hud
 
     public static Rectangle OverlayBtn;
     public static Rectangle OverlayBtn2;   // intro CONTINUE-run button (when a save exists)
+    public static Rectangle OverlayBtn3;   // intro LAST STAND (endless) button (PROGRAM HORIZON W2)
+    public static Rectangle OverlayBtn4;   // intro WAR ROOM (cross-run meta) button (PROGRAM HORIZON W3)
+    public static Rectangle OverlayBtn5;   // intro CODEX (field manual) button (PROGRAM HORIZON W6)
+    public static Rectangle OverlayBtn6;   // intro SKIRMISH (one custom fight) button (PROGRAM HORIZON W4)
+    public static Rectangle OverlayBtn7;   // intro DAILY (seeded challenge) button (PROGRAM HORIZON W4)
+
+    // SKIRMISH setup (W4): objective cycler + heat dial + START/BACK, published by DrawSkirmishSetup.
+    public static Rectangle SkirmObjPrev, SkirmObjNext, SkirmHeatMinus, SkirmHeatPlus, SkirmStart, SkirmBack;
+
+    // WAR ROOM (W3): the BACK button + per-unlock BUY buttons, published by DrawWarRoom for hit-testing.
+    public static Rectangle WarRoomBack;
+    public static readonly System.Collections.Generic.List<(MetaUnlock unlock, Rectangle rect)> WarRoomBuyBtns = new();
 
     /// Intro Heat/Ascension selector: a side panel with a HEAT dial (+/- buttons, arrows/A-D),
     /// the unlocked ceiling, and the live list of modifiers active at the dialled level. Heat

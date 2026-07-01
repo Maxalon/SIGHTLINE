@@ -1,0 +1,23 @@
+SIGHTLINE — music drop-in folder (HORIZON W7)
+=============================================
+
+The game synthesises two looping beds (a calm AMBIENT bed + a tense COMBAT bed) procedurally and
+crossfades them by intensity (src/Audio.cs). The loader is FILE-FIRST: drop a real loop in here and
+it overrides the synth automatically — no code changes.
+
+HOW
+  ambient.ogg  — the exploration / low-intensity bed (loops)
+  combat.ogg   — the high-intensity bed (loops)
+  (Sightline.csproj copies assets/music/** to the build output, so committed files ship.)
+
+GUIDELINES (keep the repo lean + legal)
+  - CC0 / public-domain ONLY (free to use AND redistribute, incl. in a shipped game).
+    Good sources: freesound.org (License = CC0), incompetech (check the CC0/attribution terms),
+    or your own generated loops.
+  - Must LOOP seamlessly (the game just streams it on repeat). Trim to a clean loop point.
+  - .ogg strongly preferred (small; the bundled Raylib decodes OGG). Keep each file modest
+    (a minute-ish loop as a compact .ogg is fine); avoid large uncompressed WAVs in the repo.
+  - Record what you added + its source/license below.
+
+FILES ADDED
+  (none yet — both beds are procedural)

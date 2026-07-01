@@ -224,6 +224,12 @@ public class Unit
     // Assault's signature double-tap). Reset in BeginTurn.
     public bool FiredThisTurn;
 
+    // HORIZON W1 — EXPOSED BY FIRE: a unit that fired this turn and did NOT move afterward is
+    // easier to hit on the opponent's turn (symmetric to the player's concealment ambush). Set false
+    // alongside FiredThisTurn wherever a real shot fires; flipped true by OnUnitEnteredTile (any tile
+    // entry after firing = ducked). TRANSIENT — reset in BeginTurn, never persisted.
+    public bool MovedAfterFire;
+
     // Renewable signature ability: a per-unit COOLDOWN (turns remaining until usable again).
     // 0 == ready. Set to AbilityCooldownFor(Ability) on use; ticked down 1 at the unit's BeginTurn.
     // TRANSIENT per-mission state (like the old AbilityCharge) — NEVER persisted; rebuilt by
@@ -605,6 +611,7 @@ public class Unit
         DraggedThisTurn = false;   // FIELD CRAFT: DRAG once per soldier per turn
         VaultedThisTurn = false;   // FIELD CRAFT: VAULT once per soldier per turn
         FiredThisTurn = false;     // TEMPO: one offensive shot per turn (reset each turn)
+        MovedAfterFire = false;    // HORIZON: exposed-by-fire flag is per-turn
         RunGun = false;            // ability stances don't carry between turns
         Blitz = false;
         Steady = false;

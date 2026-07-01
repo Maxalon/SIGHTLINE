@@ -63,6 +63,131 @@ public static class Renderer
     }
     // --------------------------------------------------------------------------
 
+    // deterministic uint->[0,1) hash (xorshift-mix). Used ONLY for the frozen per-tile
+    // biome-signature constants below — a pure function of tile coords, no RNG in the draw
+    // path, so the SIGHTLINE_SHOT harness stays byte-reproducible.
+    static float SHash(int a, int b, int salt)
+    {
+        uint x = (uint)(a * 73856093) ^ (uint)(b * 19349663) ^ (uint)(salt * 83492791);
+        x ^= x >> 16; x *= 0x7FEB352Du;
+        x ^= x >> 15; x *= 0x846CA68Bu;
+        x ^= x >> 16;
+        return (x & 0xFFFFFFu) / 16777216f;
+    }
+
+    // HORIZON W5 — one BOLD, cheap, DETERMINISTIC structural cue per biome, drawn over the
+    // FLOOR tiles so each mission reads as a distinct *place*. All positions/alphas are pure
+    // functions of tile coords + frozen constants (SHash) or a slow global time (for a gentle
+    // shimmer that reproduces at the harness's fixed frame). Kept restrained so the squint test
+    // holds (units still dominate); the emissive cues (magma/void-neon) are what the bloom
+    // catches. Runs once per floor tile — a handful of primitives each, no allocation.
+    static void DrawBiomeSignature(Game g, Biome bm)
+    {
+        float t = (float)Raylib.GetTime();
+        for (int gx = 0; gx < g.Grid.W; gx++)
+            for (int gy = 0; gy < g.Grid.H; gy++)
+            {
+                if (g.Grid.Tiles[gx, gy] != TileType.Floor) continue;
+                var r = Util.TileRect(gx, gy);
+                float cx = r.X + r.Width * 0.5f, cy = r.Y + r.Height * 0.5f;
+
+                switch (bm.Ambient)
+                {
+                    case AmbientKind.Ember:   // MAGMA — glowing emissive fissures across ~1/3 of tiles
+                    {
+                        if (SHash(gx, gy, 11) > 0.34f) break;
+                        float ph = SHash(gx, gy, 13) * 6.28f;
+                        float pulse = 0.55f + 0.45f * MathF.Sin(t * 2.2f + ph);   // veins breathe
+                        var lava = Pal.RGBA(255, 120, 40);
+                        // a jagged crack: 3 segments zig-zagging across the tile
+                        float ax = r.X + 6 + SHash(gx, gy, 1) * (r.Width - 12);
+                        Vector2 pa = new(ax, r.Y + 4);
+                        for (int k = 1; k <= 3; k++)
+                        {
+                            float side = ((k & 1) == 0 ? -1f : 1f) * (5f + SHash(gx, gy, k * 7) * 9f);
+                            Vector2 pb = new(cx + side, r.Y + 4 + k * (r.Height - 8) / 3f);
+                            Raylib.DrawLineEx(pa, pb, 2.4f, Raylib.Fade(lava, 0.30f * pulse));   // hot glow
+                            Raylib.DrawLineEx(pa, pb, 1.1f, Raylib.Fade(Pal.RGBA(255, 220, 150), 0.55f * pulse)); // core
+                            pa = pb;
+                        }
+                        break;
+                    }
+                    case AmbientKind.Snow:    // TUNDRA — pale frost sheen (cool diagonal light streaks)
+                    {
+                        if (SHash(gx, gy, 21) > 0.5f) break;
+                        var frost = Pal.RGBA(210, 232, 248);
+                        float off = SHash(gx, gy, 23) * r.Width * 0.5f;
+                        for (int k = 0; k < 2; k++)
+                        {
+                            float sx = r.X + off + k * 10f;
+                            Raylib.DrawLineEx(new Vector2(sx, r.Y + r.Height - 4),
+                                              new Vector2(sx + 12f, r.Y + 4), 1.4f, Raylib.Fade(frost, 0.10f));
+                        }
+                        // a few frost crystals (tiny bright dots) on some tiles
+                        if (SHash(gx, gy, 25) < 0.28f)
+                            Raylib.DrawCircleV(new Vector2(cx, cy), 1.3f, Raylib.Fade(frost, 0.28f));
+                        break;
+                    }
+                    case AmbientKind.Mote:    // VOID — faint glowing violet grid lines (a lattice)
+                    case AmbientKind.Scan:    // NEON — faint glowing teal grid lines
+                    {
+                        var glow = bm.Ambient == AmbientKind.Scan ? Pal.RGBA(60, 200, 214) : Pal.RGBA(150, 120, 220);
+                        float pulse = 0.5f + 0.5f * MathF.Sin(t * 1.3f + (gx + gy) * 0.5f);
+                        float a = (bm.Ambient == AmbientKind.Scan ? 0.16f : 0.13f) * (0.6f + 0.4f * pulse);
+                        // left + top tile borders form a continuous lattice across the board
+                        Raylib.DrawLineEx(new Vector2(r.X, r.Y), new Vector2(r.X, r.Y + r.Height), 1f, Raylib.Fade(glow, a));
+                        Raylib.DrawLineEx(new Vector2(r.X, r.Y), new Vector2(r.X + r.Width, r.Y), 1f, Raylib.Fade(glow, a));
+                        // a brighter node dot at ~1/4 of intersections (the bloom catches these)
+                        if (((gx + gy) & 3) == 0)
+                            Raylib.DrawCircleV(new Vector2(r.X, r.Y), 1.6f, Raylib.Fade(glow, a * 2.4f));
+                        break;
+                    }
+                    case AmbientKind.Ash:     // ASH — darker soot streaks/smudges
+                    {
+                        if (SHash(gx, gy, 31) > 0.45f) break;
+                        var soot = Pal.RGBA(18, 12, 12);
+                        float sx = r.X + 4 + SHash(gx, gy, 33) * (r.Width - 8);
+                        float sy = r.Y + 4 + SHash(gx, gy, 35) * (r.Height - 8);
+                        Raylib.DrawCircleV(new Vector2(sx, sy), 4f + SHash(gx, gy, 37) * 5f, Raylib.Fade(soot, 0.22f));
+                        break;
+                    }
+                    case AmbientKind.Gust:    // ARID — warm horizontal dune banding
+                    {
+                        var sand = Pal.RGBA(150, 118, 66);
+                        int band = (gy & 1);
+                        // two thin warm bands per tile, offset by row parity, so the board reads as strata
+                        float y0 = r.Y + r.Height * (band == 0 ? 0.34f : 0.62f);
+                        Raylib.DrawLineEx(new Vector2(r.X, y0), new Vector2(r.X + r.Width, y0), 1.6f, Raylib.Fade(sand, 0.10f));
+                        float y1 = r.Y + r.Height * (band == 0 ? 0.72f : 0.20f);
+                        Raylib.DrawLineEx(new Vector2(r.X, y1), new Vector2(r.X + r.Width, y1), 1.2f, Raylib.Fade(sand, 0.07f));
+                        break;
+                    }
+                    case AmbientKind.Spore:   // VERDANT — mossy green speckle
+                    {
+                        var moss = Pal.RGBA(90, 150, 80);
+                        for (int k = 0; k < 3; k++)
+                        {
+                            if (SHash(gx, gy, 41 + k) > 0.55f) continue;
+                            float mx = r.X + 5 + SHash(gx, gy, 51 + k) * (r.Width - 10);
+                            float my = r.Y + 5 + SHash(gx, gy, 61 + k) * (r.Height - 10);
+                            Raylib.DrawCircleV(new Vector2(mx, my), 1.6f + SHash(gx, gy, 71 + k) * 1.4f, Raylib.Fade(moss, 0.18f));
+                        }
+                        break;
+                    }
+                    default:                  // STEEL (Dust) — faint industrial panel seams
+                    {
+                        var seam = Pal.RGBA(120, 140, 165);
+                        // a subtle rivet/seam cross on a scattered subset of tiles
+                        if (SHash(gx, gy, 91) > 0.5f) break;
+                        Raylib.DrawLineEx(new Vector2(r.X + 6, cy), new Vector2(r.X + r.Width - 6, cy), 1f, Raylib.Fade(seam, 0.06f));
+                        Raylib.DrawCircleV(new Vector2(r.X + 6, cy), 1.1f, Raylib.Fade(seam, 0.14f));
+                        Raylib.DrawCircleV(new Vector2(r.X + r.Width - 6, cy), 1.1f, Raylib.Fade(seam, 0.14f));
+                        break;
+                    }
+                }
+            }
+    }
+
     // 5.5: a tiny shape glyph for a status effect (drawn beside its code under the
     // figure) so the effect is distinguishable by SHAPE, not colour alone — flame /
     // droplet / star-burst / swirl. Centred at (gx, gy), ~5px, inherits the status colour.
@@ -154,6 +279,12 @@ public static class Renderer
                     DrawNoiseRect(Util.TileRect(x, y), bm.Tint, 0.13f);
                 }
 
+        // HORIZON W5: one BOLD structural signature per biome so a mission reads as a distinct
+        // *place*, not just a colour tint (magma fissures / frost sheen / void-neon grid glow /
+        // ash soot / arid dune banding / verdant speckle / steel seams). Deterministic (a pure
+        // function of tile coords + frozen constants — no RNG), on the floor under terrain/units.
+        DrawBiomeSignature(g, bm);
+
         g.Fx.DrawAmbient();   // per-biome ambient atmosphere, under terrain/units (Wave B)
 
         DrawElevation(g);
@@ -196,10 +327,13 @@ public static class Renderer
     // high ground reads clearly. Drawn back-to-front (top rows first).
     static void DrawElevation(Game g)
     {
-        // biome-tinted plateau faces (keeps each mission reading as a distinct place)
+        // biome-tinted plateau faces (keeps each mission reading as a distinct place).
+        // HORIZON W5: the raised top faces are a big bright surface — pull them ~12% toward
+        // near-black so plateaus RECEDE behind the enlarged units (squint: units > terrain).
         Color tint = g.Biome.Tint;
-        Color hiA = Pal.Mix(Pal.HighA, tint, 0.34f);
-        Color hiB = Pal.Mix(Pal.HighB, tint, 0.34f);
+        Color shade = Pal.RGBA(8, 11, 15);
+        Color hiA = Pal.Mix(Pal.Mix(Pal.HighA, tint, 0.34f), shade, 0.12f);
+        Color hiB = Pal.Mix(Pal.Mix(Pal.HighB, tint, 0.34f), shade, 0.12f);
         for (int y = 0; y < g.Grid.H; y++)
             for (int x = 0; x < g.Grid.W; x++)
             {
@@ -229,20 +363,23 @@ public static class Renderer
                 Raylib.DrawLineEx(new Vector2(top.X, top.Y + top.Height - 1),
                                   new Vector2(top.X + top.Width, top.Y + top.Height - 1),
                                   2f, Raylib.Fade(Pal.HighEdge, 0.5f));
-                // emissive rim: a narrow bright inner accent — the 5.2 bloom will catch this on hardware
+                // emissive rim: a narrow bright inner accent — the 5.2 bloom will catch this on
+                // hardware. HORIZON W5: dimmed (was 0.55/0.40) so the front edge still reads the
+                // height tier but sits below the (lowered) bloom knee — cover/terrain never floods.
                 Raylib.DrawLineEx(new Vector2(top.X + 1, top.Y + top.Height - 2),
                                   new Vector2(top.X + top.Width - 1, top.Y + top.Height - 2),
-                                  1f, Raylib.Fade(Pal.RGBA(200, 230, 255), h >= 2 ? 0.55f : 0.40f));
+                                  1f, Raylib.Fade(Pal.RGBA(200, 230, 255), h >= 2 ? 0.34f : 0.24f));
                 // top-edge highlight where it meets a lower tile above
                 if (g.Grid.HeightAt(x, y - 1) < h)
                 {
                     Raylib.DrawLineEx(new Vector2(top.X, top.Y),
                                       new Vector2(top.X + top.Width, top.Y),
                                       1.5f, Raylib.Fade(Pal.HighEdge, 0.35f));
-                    // emissive rim on the exposed top edge (slightly brighter, 1px inner)
+                    // emissive rim on the exposed top edge (1px inner) — HORIZON W5 dimmed
+                    // (was 0.45/0.30) to keep terrain below the bloom knee.
                     Raylib.DrawLineEx(new Vector2(top.X + 1, top.Y + 1),
                                       new Vector2(top.X + top.Width - 1, top.Y + 1),
-                                      1f, Raylib.Fade(Pal.RGBA(200, 230, 255), h >= 2 ? 0.45f : 0.30f));
+                                      1f, Raylib.Fade(Pal.RGBA(200, 230, 255), h >= 2 ? 0.28f : 0.18f));
                 }
             }
     }
@@ -664,13 +801,16 @@ public static class Renderer
         // block so terrain RECEDES behind the units/objectives (visual-hierarchy invert).
         // Cover must read as solid, grounded and QUIET — never the loudest thing on screen.
         Color tint = g.Biome.Tint;
-        // pull each cover colour ~24% toward near-black so the blocks sit back as a low,
-        // muted base layer; the faux-3D shape + shadow still carry the silhouette.
+        // pull each cover colour toward near-black so the blocks sit back as a low, muted base
+        // layer; the faux-3D shape + shadow still carry the silhouette. HORIZON W5: the enlarged
+        // units are now the loudest board element, so cover recedes FURTHER — the walls stay at
+        // ~0.24 toward black but the (previously loudest) TOP FACES drop an extra ~12% so the
+        // biggest bright surface stops competing with the figures. Squint test: units > cover.
         Color shade = Pal.RGBA(8, 11, 15);
         Color cHi = Pal.Mix(Pal.Mix(Pal.CoverHi, tint, 0.28f),    shade, 0.24f);
-        Color cHiTop = Pal.Mix(Pal.Mix(Pal.CoverHiTop, tint, 0.28f), shade, 0.24f);
+        Color cHiTop = Pal.Mix(Pal.Mix(Pal.CoverHiTop, tint, 0.28f), shade, 0.36f);   // top face receded (was 0.24)
         Color cLo = Pal.Mix(Pal.Mix(Pal.CoverLo, tint, 0.28f),    shade, 0.24f);
-        Color cLoTop = Pal.Mix(Pal.Mix(Pal.CoverLoTop, tint, 0.28f), shade, 0.24f);
+        Color cLoTop = Pal.Mix(Pal.Mix(Pal.CoverLoTop, tint, 0.28f), shade, 0.36f);   // top face receded (was 0.24)
         for (int x = 0; x < g.Grid.W; x++)
             for (int y = 0; y < g.Grid.H; y++)
             {
@@ -714,17 +854,19 @@ public static class Renderer
                 Raylib.DrawRectangleRounded(topRect, 0.22f, 5, high ? cHiTop : cLoTop);
                 // 5.4: noise grain on the top face so cover reads as a physical object
                 DrawNoiseRect(topRect, tint, 0.10f);
-                // top edge highlight — dropped to a whisper so cover stays quiet (was 0.12).
+                // top edge highlight — a whisper so cover stays quiet (HORIZON W5: 0.05 -> 0.035).
                 Raylib.DrawLineEx(new Vector2(topRect.X + 4, topRect.Y + 2),
                                   new Vector2(topRect.X + topRect.Width - 4, topRect.Y + 2),
-                                  1.5f, Raylib.Fade(Pal.RGBA(255, 255, 255), 0.05f));
+                                  1.5f, Raylib.Fade(Pal.RGBA(255, 255, 255), 0.035f));
                 // emissive rim — kept only as a faint structural catch on the upper edge so the
                 // block still reads as a lit volume, but well below signal so it can't compete
-                // with units/objectives or trip the bloom into making cover glow (was 0.30/0.20).
+                // with the enlarged units/objectives or trip the bloom into making cover glow.
+                // HORIZON W5: dimmed a further ~30% (was 0.11/0.08) so it can't cross the (now
+                // lower) bloom bright-pass knee — only units/objectives should flood light.
                 Color rimCol = Pal.Mix(Pal.HighEdge, Pal.RGBA(255, 255, 255), 0.45f);
                 Raylib.DrawLineEx(new Vector2(topRect.X + 5, topRect.Y + 3),
                                   new Vector2(topRect.X + topRect.Width - 5, topRect.Y + 3),
-                                  1f, Raylib.Fade(rimCol, high ? 0.11f : 0.08f));
+                                  1f, Raylib.Fade(rimCol, high ? 0.075f : 0.055f));
                 // damage state (3.6): a chipped-but-not-yet-degraded block shows fissures
                 if (g.Grid.CoverHp[x, y] > 0 && g.Grid.CoverHp[x, y] < g.Grid.MaxCoverHp(x, y))
                 {
@@ -1181,6 +1323,16 @@ public static class Renderer
         }
     }
 
+    /// CODEX (W6) preview glyph: draw a class/archetype silhouette in isolation (bestiary / class
+    /// cards) — presentation only, reuses the exact same DrawSilhouette shapes the board uses so the
+    /// codex art can never drift from the in-game art. `cls` is the archetype string (e.g. "SNIPER"),
+    /// `ang` the facing in radians (default east). No Unit/board state is touched.
+    public static void DrawCodexGlyph(string cls, Vector2 p, Color c, float scale, float ang = 0f)
+    {
+        var stub = new Unit { Cls = cls };
+        DrawSilhouette(stub, p, c, 1f, scale, ang);
+    }
+
     // A filled triangle that is robust to vertex winding: Raylib's DrawTriangle backface-culls by
     // winding order, so we compute the signed area and swap two verts if needed. Lets the oriented
     // silhouette wedges fill correctly no matter which way a unit is facing.
@@ -1268,8 +1420,8 @@ public static class Renderer
                        : friend ? Pal.Friend
                        : (elite ? Pal.Elite : Pal.Foe);
             float gpulse = 0.85f + 0.15f * MathF.Sin((float)Raylib.GetTime() * 2.4f + u.Bob);
-            float gA = (friend ? 0.30f : 0.34f) * figAlpha * gpulse;   // enemies a hair hotter
-            float gR = (elite || hvt) ? 30f : 25f;
+            float gA = (friend ? 0.32f : 0.36f) * figAlpha * gpulse;   // enemies a hair hotter (W5: nudged up)
+            float gR = (elite || hvt) ? 37f : 31f;                     // W5: haloes the enlarged body
             // a wide soft bloom + a tighter brighter core radial (two rings read as a glow on llvmpipe)
             Raylib.DrawCircleV(p, gR,        Raylib.Fade(glow, gA * 0.45f));
             Raylib.DrawCircleV(p, gR * 0.68f, Raylib.Fade(glow, gA * 0.85f));
@@ -1337,17 +1489,20 @@ public static class Renderer
         }
 
         // body — apply figAlpha to the figure shape (bodyScale gives a brief flinch pop).
-        // Figures were ~12% small for the Tile-64 board; enlarged ~16% so units out-mass the
-        // (now-muted) cover blocks. A brighter rim makes the saturated outline read at a glance.
-        float fig = 1.16f;                                  // overall figure upscale
-        float bodyR = 18.5f * bodyScale;
+        // HORIZON W5 — units DOMINATE their tile: bodyR 18.5 -> 24 and the class silhouette
+        // scaled up ~1.6x (fig) so the per-class SHAPE reads as the body OUTLINE at play
+        // distance, not a tiny inner detail. Paired with the receded cover (DrawCover/
+        // DrawElevation), this restores the squint hierarchy: units > objectives > enemies >
+        // cover. A slightly heavier, brighter rim makes the saturated outline read at a glance.
+        float fig = 1.85f;                                  // overall silhouette upscale (was 1.16)
+        float bodyR = 24f * bodyScale;                      // grown body disc (was 18.5)
         Raylib.DrawCircleV(p, bodyR, Raylib.Fade(dark, figAlpha));
-        Raylib.DrawRing(p, bodyR - 2.8f, bodyR + 0.8f, 0, 360, 40, Raylib.Fade(main, figAlpha));
-        Raylib.DrawCircleV(p, bodyR - 2.8f, Raylib.Fade(main, 0.22f * figAlpha));
+        Raylib.DrawRing(p, bodyR - 3.4f, bodyR + 1f, 0, 360, 48, Raylib.Fade(main, figAlpha));
+        Raylib.DrawCircleV(p, bodyR - 3.4f, Raylib.Fade(main, 0.22f * figAlpha));
 
         // class silhouette — a recognizable primitive cue per class (shape-redundant, colorblind-
         // safe: meaning rides on the SHAPE, inheriting the team colour + focal figAlpha).
-        if (elite) Raylib.DrawRing(p, 20.5f * bodyScale, 23f * bodyScale, 0, 360, 40, Raylib.Fade(Pal.Elite, 0.55f * figAlpha));
+        if (elite) Raylib.DrawRing(p, 26.5f * bodyScale, 29.5f * bodyScale, 0, 360, 48, Raylib.Fade(Pal.Elite, 0.55f * figAlpha));
         DrawSilhouette(u, p, main, figAlpha, bodyScale * fig, u.Facing);
 
         // DECAPITATE: a gold crown chevron + "HVT" tag above the target (full-alpha signal, drawn
@@ -1371,20 +1526,22 @@ public static class Renderer
             if (suspicious)
             {
                 // pulsing amber ring + "!" so being spotted reads instantly as a warning
+                // (W5: sized to sit around the enlarged body).
                 float pulse = 0.5f + 0.5f * MathF.Sin((float)Raylib.GetTime() * 6f);
-                Raylib.DrawRing(p, 18f, 21f, 0, 360, 40, Raylib.Fade(Pal.Suspect, 0.30f + 0.45f * pulse));
-                Raylib.DrawTextEx(Cfg.Font, "!", new Vector2((int)(p.X - 2), (int)(p.Y - 33)), 20, 1f, Pal.Suspect);
+                Raylib.DrawRing(p, 24f, 27f, 0, 360, 44, Raylib.Fade(Pal.Suspect, 0.30f + 0.45f * pulse));
+                Raylib.DrawTextEx(Cfg.Font, "!", new Vector2((int)(p.X - 2), (int)(p.Y - 40)), 20, 1f, Pal.Suspect);
             }
             else
             {
                 // Unaware pod: a DELIBERATE clean dashed ring + a clear "?" — dim but unambiguous
                 // (reads as "dormant contact here", not a muddy brown blob). Dashes = "not yet live".
+                // W5: ring bumped to circle the bigger body.
                 float t = (float)Raylib.GetTime();
                 Color dim = Pal.RGBA(150, 132, 120);
                 for (int k = 0; k < 8; k++)
                 {
                     float a0 = k * 45f + t * 14f;          // slow rotation so it reads as "scanning"
-                    Raylib.DrawRing(p, 17f, 19.5f, a0, a0 + 24f, 6, Raylib.Fade(dim, 0.55f));
+                    Raylib.DrawRing(p, 23f, 25.5f, a0, a0 + 24f, 6, Raylib.Fade(dim, 0.55f));
                 }
                 float qw = Raylib.MeasureTextEx(Cfg.Font, "?", 22, 1f).X;
                 Raylib.DrawTextEx(Cfg.Font, "?", new Vector2((int)(p.X - qw / 2), (int)(p.Y - 12)), 22, 1f, Raylib.Fade(dim, 0.95f));
@@ -1408,18 +1565,19 @@ public static class Renderer
         }
         var fdir = new Vector2(MathF.Cos(aimAng), MathF.Sin(aimAng));
         var perp = new Vector2(-fdir.Y, fdir.X);
-        Raylib.DrawLineEx(p + fdir * 13f, p + fdir * 21f, 3f, Raylib.Fade(main, figAlpha));
+        // W5: pushed past the enlarged (24px) body so the facing tick reads beyond the silhouette
+        Raylib.DrawLineEx(p + fdir * 20f, p + fdir * 28f, 3f, Raylib.Fade(main, figAlpha));
         if (g.Selected == u && friend && !vip)
         {
             // a soft directional aim chevron a little further out, pointing at the target
-            var tip = p + fdir * 27f;
+            var tip = p + fdir * 34f;
             Raylib.DrawLineEx(tip, tip - fdir * 6f + perp * 5f, 2f, Raylib.Fade(main, 0.85f * figAlpha));
             Raylib.DrawLineEx(tip, tip - fdir * 6f - perp * 5f, 2f, Raylib.Fade(main, 0.85f * figAlpha));
         }
         else if (u.Team == Team.Enemy)
         {
             // tiny arrowhead on the barrel so enemy facing is unmistakable
-            var tip = p + fdir * 21f;
+            var tip = p + fdir * 28f;
             Raylib.DrawLineEx(tip, tip - fdir * 4.5f + perp * 3.5f, 2f, Raylib.Fade(main, figAlpha));
             Raylib.DrawLineEx(tip, tip - fdir * 4.5f - perp * 3.5f, 2f, Raylib.Fade(main, figAlpha));
         }
@@ -1481,11 +1639,11 @@ public static class Renderer
             Raylib.DrawCircleV(new Vector2(p.X, p.Y - 12), 2.4f, Raylib.Fade(Pal.Foe, figAlpha));
         }
 
-        // shield: a thick barrier arc on the barred (facing) side
+        // shield: a thick barrier arc on the barred (facing) side (W5: on the enlarged body edge)
         if (u.Team == Team.Enemy && u.Cls == "SHIELD" && (u.ShieldDx != 0 || u.ShieldDy != 0))
         {
             float ang = MathF.Atan2(u.ShieldDy, u.ShieldDx) * 180f / MathF.PI;
-            Raylib.DrawRing(p, 18f, 22f, ang - 55, ang + 55, 24, Raylib.Fade(Pal.RGBA(150, 200, 240), figAlpha));
+            Raylib.DrawRing(p, 24f, 28f, ang - 55, ang + 55, 28, Raylib.Fade(Pal.RGBA(150, 200, 240), figAlpha));
         }
 
         // spotter: an outward radar "scan" pulse + a painted-target line so the force-multiplier
@@ -1526,34 +1684,54 @@ public static class Renderer
             Raylib.DrawRing(p, 10f, 12f, 0, 360, 28, Raylib.Fade(Pal.Foe, 0.35f + 0.45f * cp));
         }
 
-        // damage flash — always at full strength (it's momentary feedback)
+        // damage flash — always at full strength (it's momentary feedback). Grown with the
+        // W5 body so the whole figure whites-out on a hit (reads as a solid jolt).
         if (u.Flash > 0.01f)
-            Raylib.DrawCircleV(p, 17f, Raylib.Fade(Pal.RGBA(255, 255, 255), u.Flash * 0.8f));
+            Raylib.DrawCircleV(p, 22f, Raylib.Fade(Pal.RGBA(255, 255, 255), u.Flash * 0.8f));
+
+        // HORIZON W5 — EXPOSED-BY-FIRE on-board marker (the on-board half of the W1 telegraph):
+        // a unit that FIRED this turn but still has an action banked is sitting where it fired,
+        // exposed, and could reposition — firing-and-staying-put is punishable, so telegraph it.
+        // A small pulsing team-coloured downward chevron above the figure (full-alpha SIGNAL,
+        // shape-distinct from the OW dot / stance tags / status glyphs). Uses the exact W1 exposure
+        // condition (FiredThisTurn && !MovedAfterFire): the cue clears the instant the unit ducks
+        // to a new tile after firing. Never shown on dormant/suspicious pods.
+        if (u.FiredThisTurn && !u.MovedAfterFire && !inactive)
+        {
+            float ep = 0.55f + 0.45f * MathF.Sin((float)Raylib.GetTime() * 5.2f + u.Bob);
+            Color ec = friend ? Pal.Friend : (elite ? Pal.Elite : Pal.Foe);
+            float cx = p.X + 15f, cyt = p.Y - 15f;          // upper-right of the figure
+            // an open downward chevron (▽ outline) — "pinned in the open" cue
+            Raylib.DrawLineEx(new Vector2(cx - 5f, cyt - 3.5f), new Vector2(cx, cyt + 3f), 2f, Raylib.Fade(ec, 0.55f + 0.4f * ep));
+            Raylib.DrawLineEx(new Vector2(cx, cyt + 3f), new Vector2(cx + 5f, cyt - 3.5f), 2f, Raylib.Fade(ec, 0.55f + 0.4f * ep));
+            // a small emissive dot at the vertex so it reads even when squinting
+            Raylib.DrawCircleV(new Vector2(cx, cyt + 3.5f), 1.6f, Raylib.Fade(ec, 0.7f + 0.3f * ep));
+        }
 
         // hp pips
         DrawHpPips(u, p);
 
-        // status icons
-        float ix = p.X - 10, iy = p.Y - 27;
+        // status icons — W5: lifted to clear the enlarged (24px) body + the raised HP pips.
+        float ix = p.X - 10, iy = p.Y - 35;
         if (u.OnOverwatch)
         {
-            Raylib.DrawCircle((int)p.X, (int)(p.Y - 26), 6f, Raylib.Fade(Pal.Accent, 0.25f));
-            Raylib.DrawTextEx(Cfg.Font, "OW", new Vector2((int)(p.X - 9), (int)(p.Y - 31)), 10, 1f, Pal.Accent);
+            Raylib.DrawCircle((int)p.X, (int)(p.Y - 34), 6f, Raylib.Fade(Pal.Accent, 0.25f));
+            Raylib.DrawTextEx(Cfg.Font, "OW", new Vector2((int)(p.X - 9), (int)(p.Y - 39)), 10, 1f, Pal.Accent);
         }
         if (u.Hunkered)
-            Raylib.DrawPoly(new Vector2(p.X, p.Y - 27), 4, 6f, 45f, Pal.Good);
+            Raylib.DrawPoly(new Vector2(p.X, p.Y - 35), 4, 6f, 45f, Pal.Good);
 
-        // active ability stance tag (friendly) / suppression tag (enemy)
-        if (u.RunGun) Raylib.DrawTextEx(Cfg.Font, "R&G", new Vector2((int)(p.X + 13), (int)(p.Y - 30)), 11, 1f, Pal.Accent);
-        else if (u.Blitz) Raylib.DrawTextEx(Cfg.Font, "BLZ", new Vector2((int)(p.X + 13), (int)(p.Y - 30)), 11, 1f, Pal.Accent);
-        else if (u.Steady) Raylib.DrawTextEx(Cfg.Font, "AIM", new Vector2((int)(p.X + 13), (int)(p.Y - 30)), 11, 1f, Pal.Good);
+        // active ability stance tag (friendly) / suppression tag (enemy) — pushed out past the wider body
+        if (u.RunGun) Raylib.DrawTextEx(Cfg.Font, "R&G", new Vector2((int)(p.X + 18), (int)(p.Y - 34)), 11, 1f, Pal.Accent);
+        else if (u.Blitz) Raylib.DrawTextEx(Cfg.Font, "BLZ", new Vector2((int)(p.X + 18), (int)(p.Y - 34)), 11, 1f, Pal.Accent);
+        else if (u.Steady) Raylib.DrawTextEx(Cfg.Font, "AIM", new Vector2((int)(p.X + 18), (int)(p.Y - 34)), 11, 1f, Pal.Good);
         if (u.Team == Team.Enemy && u.Suppress > 0)
-            Raylib.DrawTextEx(Cfg.Font, "SUPP", new Vector2((int)(p.X + 12), (int)(p.Y - 30)), 11, 1f, Pal.Foe);
+            Raylib.DrawTextEx(Cfg.Font, "SUPP", new Vector2((int)(p.X + 17), (int)(p.Y - 34)), 11, 1f, Pal.Foe);
 
-        // combat status effects (3.5): stacked codes below the figure
+        // combat status effects (3.5): stacked codes below the figure — W5: dropped to clear the bigger body
         if (u.Statuses.Count > 0)
         {
-            int sx = (int)p.X - 14, sy = (int)p.Y + 18;
+            int sx = (int)p.X - 14, sy = (int)p.Y + 26;
             foreach (var s in u.Statuses)
             {
                 if (s.Turns <= 0) continue;
@@ -1601,7 +1779,7 @@ public static class Renderer
         int segs = (int)MathF.Ceiling(max / (float)per);
         float totalW = segs * 6f - 2f;
         float sx = p.X - totalW / 2f;
-        float y = p.Y - 23f;
+        float y = p.Y - 30f;   // W5: lifted to clear the enlarged (24px) body disc
         for (int i = 0; i < segs; i++)
         {
             int hpAtSeg = (i + 1) * per;

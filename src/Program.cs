@@ -44,6 +44,15 @@ public static class Program
             Console.WriteLine(Combat.SelfTest());
             return;
         }
+        // SIGHTLINE_CODEXTEST=1 : CODEX / FIELD MANUAL content-completeness (W6) — every documented enum
+        // has a non-empty Name+Desc and the bestiary covers every archetype. Tiny window (Game/Unit ctors).
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_CODEXTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "codextest");
+            Console.WriteLine(new Game().CodexSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         // SIGHTLINE_EVENTTEST=1 : between-mission FIELD EVENT selection/placement/outcomes + save round-trip (W4). No window.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_EVENTTEST") == "1")
         {
@@ -69,6 +78,13 @@ public static class Program
         if (Environment.GetEnvironmentVariable("SIGHTLINE_AUDIOTEST") == "1")
         {
             Console.WriteLine(Audio.SelfTest());
+            return;
+        }
+        // SIGHTLINE_AUDIOASSETS=1 : device-free report of which cues resolve to a dropped-in CC0
+        // FILE vs the procedural synth (HORIZON W7). No window; 0 files = the current default.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_AUDIOASSETS") == "1")
+        {
+            Console.Write(Audio.AudioAssetsReport());
             return;
         }
         // SIGHTLINE_AMBIENTTEST=1 : per-biome ambient field stays bounded/finite/on-board (Phase 5). No window.
@@ -187,6 +203,32 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        // SIGHTLINE_HORDETEST=1 : LAST STAND endless horde — wave count/scale escalation + alive-cap + meta BestWave round-trip (HORIZON W2).
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_HORDETEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "hordetest");   // SpawnEndless* + SetupMission use tile->px math
+            Console.WriteLine(new Game().HordeSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
+        // SIGHTLINE_METATEST=1 : WAR ROOM cross-run meta — salvage/achievements/unlocks/legends/totals
+        // round-trip + the unlock byte-stability invariant (applies under !NoPersist, inert under NoPersist).
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_METATEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "metatest");   // StartMission -> Unit.SyncPos uses tile->px math
+            Console.WriteLine(new Game().MetaSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
+        // SIGHTLINE_MODETEST=1 : SKIRMISH + SEEDED DAILY (W4) — daily seed determinism, single-mission
+        // end sets Phase (Win/Lose, not Barracks), daily stamp/best round-trips. Tiny window (tile math).
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_MODETEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "modetest");
+            Console.WriteLine(new Game().ModeSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         // SIGHTLINE_MISSION=<n> : start the harness on mission n (verify Hack/Evac maps).
         int startMission = int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_MISSION"), out int sm) ? sm : 1;
 
@@ -259,9 +301,31 @@ public static class Program
             Mission.ForcedLayout = forcedMap;
         bool introShot = shot && Environment.GetEnvironmentVariable("SIGHTLINE_INTRO") == "1";
         if (introShot) { var r = new Run(); r.Start(); r.Mission = 3; SaveGame.Save(r); }
-        if ((shot || autoplay) && !introShot) game.StartMission(startMission);
+        // PROGRAM HORIZON W2: LAST STAND harness entry. SIGHTLINE_ENDLESS=1 boots straight into the
+        // endless horde mode (BeginEndless) instead of a campaign mission. AutoPlay/SmartPlay/NoPersist
+        // must be set BEFORE BeginEndless (it reads NoPersist for the heat dial-in).
+        bool endless = Environment.GetEnvironmentVariable("SIGHTLINE_ENDLESS") == "1";
+        // PROGRAM HORIZON W4: SKIRMISH / SEEDED DAILY harness entry.
+        //   SIGHTLINE_SKIRMISH=<objective>  -> BeginSkirmish(objective, heat) — a single custom fight.
+        //   SIGHTLINE_DAILY=<yyyymmdd>      -> BeginDaily() — the deterministic seeded challenge for
+        //     that stamp (ResolveDailyStamp reads the same env under NoPersist -> reproducible).
+        string skirmishObj = Environment.GetEnvironmentVariable("SIGHTLINE_SKIRMISH");
+        bool daily = int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_DAILY"), out int _dailyStamp) && _dailyStamp > 0;
         if (autoplay) game.AutoPlay = true;
         if (smartplay) game.SmartPlay = true;
+        if ((shot || autoplay) && !introShot)
+        {
+            if (daily) game.BeginDaily();
+            else if (!string.IsNullOrEmpty(skirmishObj))
+            {
+                int skHeat = int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_HEAT"), out int _sh) ? _sh : 0;
+                game.BeginSkirmish(ParseObjective(skirmishObj), skHeat);
+            }
+            else if (endless) game.BeginEndless();
+            else game.StartMission(startMission);
+        }
+        // SIGHTLINE_SKIRMISHSETUP=1 (shot only): screenshot the skirmish objective/heat picker screen.
+        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_SKIRMISHSETUP") == "1") game.DebugSkirmishSetup();
         // force an objective for verification (e.g. SIGHTLINE_OBJ=sabotage|rescue), shot or autoplay
         switch (Environment.GetEnvironmentVariable("SIGHTLINE_OBJ"))
         {
@@ -296,6 +360,8 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_BOON") == "1") game.DebugBoon();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_EVENT") == "1") game.DebugEvent();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_DRAFT") == "1") game.BeginDraft();
+        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_WARROOM") == "1") game.DebugWarRoom();   // W3 cross-run meta screen
+        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CODEX") == "1") game.DebugCodex();       // W6 field-manual reference screen
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_HAZARD") == "1") game.DebugHazards();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_TAGEDIT") == "1") game.DebugTagEditor();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_WOUND") == "1") game.DebugWound();
@@ -342,6 +408,14 @@ public static class Program
             }
             if (autoplay)
             {
+                // PROGRAM HORIZON W2: LAST STAND reports WAVES SURVIVED. A hard wave cap (30) plus the
+                // Lose/frame-cap paths guarantee the endless autopilot always terminates (no TIMEOUT).
+                if (game.Mode == GameMode.Endless)
+                {
+                    if (game.Phase == Phase.Lose || game.Wave >= 30 || frame >= autoCap)
+                    { Console.WriteLine($"RESULT: ENDLESS waves={game.Wave} frame={frame}"); break; }
+                    continue;   // still surviving — keep fighting
+                }
                 if (game.Phase == Phase.Win) { Console.WriteLine($"RESULT: WIN mission={game.RunState.Mission} frame={frame}"); break; }
                 if (game.Phase == Phase.Lose) { Console.WriteLine($"RESULT: LOSE mission={game.RunState.Mission} frame={frame}"); break; }
                 if (frame >= autoCap) { Console.WriteLine($"RESULT: TIMEOUT mission={game.RunState.Mission} frame={frame}"); break; }
@@ -472,6 +546,24 @@ public static class Program
         Display.Shutdown();
         Renderer.UnloadNoise();
         Raylib.CloseWindow();
+    }
+
+    // PROGRAM HORIZON W4: parse a SIGHTLINE_SKIRMISH=<objective> string into an Objective (case-
+    // insensitive; a few aliases). Defaults to Eliminate on an empty/unknown value.
+    static Objective ParseObjective(string s)
+    {
+        switch ((s ?? "").Trim().ToLowerInvariant())
+        {
+            case "eliminate": case "elim": return Objective.Eliminate;
+            case "evac": case "extract": return Objective.Evac;
+            case "hack": return Objective.Hack;
+            case "escort": return Objective.Escort;
+            case "sabotage": return Objective.Sabotage;
+            case "rescue": return Objective.Rescue;
+            case "defend": return Objective.Defend;
+            case "decapitate": case "decap": return Objective.Decapitate;
+            default: return Objective.Eliminate;
+        }
     }
 
     // SIGHTLINE_WOUNDTEST: a survivor that ends a mission badly hurt carries a Wound

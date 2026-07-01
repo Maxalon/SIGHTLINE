@@ -6,16 +6,24 @@ using Raylib_cs;
 
 namespace Sightline;
 
-public enum Phase { Intro, PlayerTurn, EnemyTurn, Barracks, Win, Lose, Draft }
+public enum Phase { Intro, PlayerTurn, EnemyTurn, Barracks, Win, Lose, Draft, WarRoom, Codex, SkirmishSetup }   // WarRoom (W3), Codex (W6), SkirmishSetup (W4) appended; none persisted
 // APPEND-ONLY: serialized as a raw (int) in SaveGame (CardDto.Objective). Never reorder or
 // remove a member — a saved run stores the ordinal, so a reorder silently corrupts the loaded
 // objective. Add new objectives at the END only. (SaveGame.SelfTest asserts the tail ordinal.)
 public enum Objective { Eliminate, Evac, Hack, Escort, Sabotage, Rescue, Defend, Decapitate }
 public enum SecondaryKind { None, NoLosses, Swift, CleanSweep }  // optional per-mission bonus goal (3.9)
+// PROGRAM HORIZON W2/W4: game modes. Campaign = the 6-mission run (all prior behaviour); Endless =
+// LAST STAND horde survival on one arena; Skirmish = a SINGLE-MISSION mode (both free SKIRMISH and the
+// seeded DAILY, differentiated by Game.DailyMode). APPEND-ONLY (Mode isn't persisted, but keep it stable).
+public enum GameMode { Campaign, Endless, Skirmish }
 enum AiStage { PickNext, Telegraph, ActAfterMove }
 
-public class Game
+public partial class Game
 {
+    // PROGRAM HORIZON W2: which mode this game instance is running. Default Campaign keeps every
+    // existing path byte-identical; the endless logic lives in the Game.Endless.cs partial.
+    public GameMode Mode = GameMode.Campaign;
+    public int Wave;   // LAST STAND: current wave (0 until the first spawns). HUD/end card read it.
     public Grid Grid = new();
     public List<Unit> Players = new();
     public List<Unit> Enemies = new();
@@ -407,7 +415,10 @@ public class Game
     // wave-based; Evac/Escort/Rescue are movement-pressured; Sabotage already makes you move
     // to sites -- none of those need (or want) it.
     bool PressureClockObjective() =>
-        Objective == Objective.Eliminate || Objective == Objective.Hack || Objective == Objective.Decapitate;
+        // PROGRAM HORIZON W4: no anti-turtle clock in SKIRMISH/DAILY — a single fight isn't a camp
+        // exploit, and the reinforcement waves would muddy the seeded daily's determinism.
+        Mode != GameMode.Skirmish &&
+        (Objective == Objective.Eliminate || Objective == Objective.Hack || Objective == Objective.Decapitate);
 
     // HUD reads this to decide whether to draw the PRESSURE meter (only on clock objectives,
     // and only once we're in a live mission phase).
@@ -696,10 +707,37 @@ public class Game
         // balance telemetry (no-op unless Stats.Enabled); tag the policy so the report can
         // split greedy vs sloppy win-rates and surface the optimal-vs-error GAP.
         Stats.BeginRun(_run.HeatLevel, SmartPlay && SmartSloppy ? "sloppy" : "greedy");
+        // PROGRAM HORIZON W3 (WAR ROOM): apply purchased cross-run UNLOCKS to the founding run. ADDITIVE
+        // only, campaign only, and STRICTLY gated behind !NoPersist — the flywheel/harness never read
+        // meta, so a measured/screenshot run is byte-identical to today (a fresh profile owns none anyway).
+        ApplyMetaUnlocks();
         Players = _run.Squad;
         int n = Util.Clamp(startAt, 1, Run.MaxMissions);
         if (n > 1) _run.JumpTo(n);           // harness: advance along the map to the requested op
         SetupMission(n);
+    }
+
+    /// Apply the persisted WAR ROOM unlocks to the just-started campaign run. No-op under NoPersist
+    /// (harness/flywheel) and in endless (never called from BeginEndless), so measurement stays clean.
+    void ApplyMetaUnlocks()
+    {
+        if (NoPersist) return;
+        if (SaveGame.HasUnlock((int)MetaUnlock.StartIntel))
+            _run.Intel += 15;
+        if (SaveGame.HasUnlock((int)MetaUnlock.StartBoon))
+        {
+            // grant one random boon not already active this run (a fresh run owns none).
+            var pool = new List<Boon>();
+            foreach (var b in BoonDef.All) if (!_run.HasBoon(b)) pool.Add(b);
+            if (pool.Count > 0)
+            {
+                var pick = pool[Util.RandInt(0, pool.Count - 1)];
+                _run.ActiveBoons.Add(pick);
+                Stats.RecordBoon(BoonDef.Code(pick));
+            }
+        }
+        if (SaveGame.HasUnlock((int)MetaUnlock.StartArmor))
+            foreach (var u in _run.Squad) u.Armor += 1;
     }
 
     // Lazily load the persisted unlocked-max Heat once (gated by NoPersist like all save I/O,
@@ -750,6 +788,9 @@ public class Game
         // objective + difficulty come from the chosen deployment card (Run.ObjectiveFor baseline)
         var card = _run.CurrentCard ?? Run.StandardCard(n);
         Objective = card.Objective;
+        // PROGRAM HORIZON W2: LAST STAND is a pure kill-the-horde arena — force Eliminate so every
+        // objective-gated setup block below (evac/terminal/sabotage/escort/rescue) is a no-op.
+        if (Mode == GameMode.Endless) Objective = Objective.Eliminate;
         EvacZone.Clear();
         HackProgress = 0;
         SabotageSites.Clear();
@@ -822,6 +863,10 @@ public class Game
         Grid.ClearHazards();              // wipe last mission's fire/barrels before terrain is rebuilt
         Mission.Build(Grid, Players, Enemies, n, EvacZone, reserve,
                       enemyDelta, statDelta, HasSabotage ? SabotageSites : null);
+        // PROGRAM HORIZON W2: Mission.Build laid out the arena + spawned a normal campaign force.
+        // For LAST STAND we don't want that force — clear it and drop in the first horde wave (the
+        // arena/terrain stays). SpawnEndlessWave uses the SpawnReinforcements machinery.
+        if (Mode == GameMode.Endless) { Enemies.Clear(); SpawnEndlessWave(1); }
         if (Vip != null) { Vip.Grenades = 0; Vip.AbilityCd = 99; }  // the asset has no kit (never ready)
         if (Objective == Objective.Rescue && Vip != null)
         {
@@ -854,7 +899,10 @@ public class Game
         Phase = Phase.PlayerTurn;
         // 4.4: every mission opens with the squad concealed -- UNLESS Heat "EXPOSED" strips it, OR
         // CONTRACT "SPEARHEAD" (aggressive doctrine: open loud, no ambush). Inert as None.
-        SquadConcealed = !Sightline.Heat.Exposed(_run.HeatLevel)
+        // PROGRAM HORIZON W2: LAST STAND opens LOUD — the foes are an already-engaged horde, so there
+        // is no ambush window; the squad starts unconcealed and fights immediately.
+        SquadConcealed = Mode != GameMode.Endless
+                         && !Sightline.Heat.Exposed(_run.HeatLevel)
                          && _run.Contract != Contract.Spearhead;
         _spearheadSurgeUsed = false;          // the turn-1 action surge is fresh each mission
         foreach (var u in Players) u.BeginTurn();
@@ -876,7 +924,9 @@ public class Game
         _vipWaitTurns = 0;           // SmartStep Escort: VIP-hold patience (anti-TIMEOUT)
         _smartConcealTurns = 0;      // SmartStep: concealed-turn counter (hard anti-TIMEOUT cap)
         DeathFlash = 0;
-        RollSecondary(n);
+        // per-mission bonus goal is a CAMPAIGN feature only — no secondary in LAST STAND or SKIRMISH/DAILY.
+        if (Mode == GameMode.Campaign) RollSecondary(n);
+        else { Secondary = SecondaryKind.None; SecondaryFailed = false; }
         foreach (var u in Enemies) { u.BeginTurn(); u.OnOverwatch = false; }
         Selected = Players.FirstOrDefault(p => p.CanAct);
         AimMode = false;
@@ -885,12 +935,19 @@ public class Game
         ItemMode = false;
         ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false; DragMode = false; VaultMode = false;
         Biome = Biome.For(n, _run.MapSeed);   // per-run biome variety (surfaces NEON/MAGMA across seeds)
-        string facTag = Combat.MissionFaction != Faction.None ? $" - {Run.FactionName(Combat.MissionFaction)}" : "";
-        ShowBanner($"MISSION {n} - {Biome.Name}{facTag}", false);
-        StartTutorialMaybe();
+        if (Mode == GameMode.Campaign)
+        {
+            string facTag = Combat.MissionFaction != Faction.None ? $" - {Run.FactionName(Combat.MissionFaction)}" : "";
+            ShowBanner($"MISSION {n} - {Biome.Name}{facTag}", false);
+            StartTutorialMaybe();   // first-run onboarding is a campaign-only feature
+        }
+        else if (Mode == GameMode.Skirmish)
+            ShowBanner($"{(DailyMode ? $"DAILY {DailyStamp}" : "SKIRMISH")} - {SkirmishObjectiveLabel(Objective)} - {Biome.Name}", false);
+        else ShowBanner($"LAST STAND - {Biome.Name}", false);   // SpawnEndlessWave already banner'd WAVE 1
 
-        // checkpoint the run at the start of each mission (normal play only)
-        if (!NoPersist) SaveGame.Save(_run);
+        // checkpoint the run at the start of each mission (CAMPAIGN only). LAST STAND, SKIRMISH, and
+        // the DAILY are all transient single-mode fights — never resumable, so they never write save.json.
+        if (!NoPersist && Mode == GameMode.Campaign) SaveGame.Save(_run);
 
         // balance telemetry (no-op unless Stats.Enabled): record the encounter we just built.
         Stats.BeginMission(n, Objective.ToString(), _run.HeatLevel,
@@ -1783,6 +1840,8 @@ public class Game
             // adaptive assist: a win clears the loss streak (the next run starts un-assisted).
             _run.RecordRunResult(true);
             if (!NoPersist) SaveGame.SaveMetaLossStreak(_run.LossStreak);
+            // W3 WAR ROOM: bank salvage, enshrine the victorious squad + fallen, and check achievements.
+            AwardMetaRunEnd(true);
             Phase = Phase.Win; Audio.Play("win"); Audio.PlayStinger("victory"); if (!NoPersist) SaveGame.Delete();
             // VICTORY FLOURISH: a celebratory burst over the board (each surviving soldier cheers,
             // plus a centre fountain) the instant the final mission falls. The end-screen card then
@@ -1868,6 +1927,57 @@ public class Game
         // small, capped, reversible easing on their NEXT base-Heat run (Hades God-Mode).
         _run.RecordRunResult(false);
         if (!NoPersist) { SaveGame.SaveMetaLossStreak(_run.LossStreak); SaveGame.Delete(); }
+        // W3 WAR ROOM: bank consolation salvage, enshrine the fallen, and check the DEEP achievement.
+        AwardMetaRunEnd(false);
+    }
+
+    // ---- PROGRAM HORIZON W3 (WAR ROOM): cross-run meta award/record ----
+    // Bank salvage, populate the HALL OF FAME (Legends), record lifetime totals, and unlock any
+    // freshly-earned achievements (each grants a one-time salvage bounty). STRICTLY gated behind
+    // !NoPersist — the flywheel/harness never touch meta, so balance/screenshots stay byte-stable.
+    void AwardMetaRunEnd(bool win)
+    {
+        if (NoPersist || _run == null) return;
+        int heat = _run.HeatLevel;
+        int missions = win ? _run.Mission : Math.Max(0, _run.Mission - 1);
+
+        // 1) SALVAGE bounty
+        int salvage = win ? (25 + 6 * _run.Mission + 5 * heat) : (4 * Math.Max(0, _run.Mission - 1) + 2 * heat);
+        if (salvage > 0) { SaveGame.AddSalvage(salvage); _run.Report.Insert(0, $"SALVAGE +{salvage}"); }
+
+        // 2) HALL OF FAME — surviving squad (won runs) as legends, plus this run's fallen (KIA).
+        var legends = new List<SaveGame.LegendDto>();
+        if (win)
+            foreach (var u in _run.Squad)
+                if (u.Alive && !u.IsVip)
+                    legends.Add(new SaveGame.LegendDto { Name = u.FullName, Cls = u.Cls, Rank = u.RankName, Kills = u.Kills, Heat = heat, Won = true });
+        foreach (var f in _run.Memorial)
+            legends.Add(new SaveGame.LegendDto { Name = f.Name, Cls = f.Cls, Rank = f.Rank, Kills = f.Kills, Heat = heat, Won = false });
+        if (legends.Count > 0) SaveGame.AddLegends(legends);
+
+        // 3) lifetime totals
+        SaveGame.RecordRunTotals(win, missions);
+
+        // 4) ACHIEVEMENTS (each a one-time salvage bounty on first unlock)
+        if (win)
+        {
+            TryAchievement("FIRST_WIN");
+            if (heat >= 3) TryAchievement("HEAT3");
+            if (heat >= 6) TryAchievement("HEAT6");
+            if (_run.Memorial.Count == 0) TryAchievement("FLAWLESS");   // no soldier lost all run
+        }
+        if (_run.Mission >= Run.MaxMissions) TryAchievement("DEEP");     // reached mission 6 (win or loss)
+    }
+
+    /// Try to unlock an achievement; on a NEW unlock, bank the bounty + a report line.
+    void TryAchievement(string id)
+    {
+        if (NoPersist) return;
+        if (SaveGame.UnlockAchievement(id))
+        {
+            SaveGame.AddSalvage(MetaProg.AchievementSalvage);
+            _run.Report.Insert(0, $"ACHIEVEMENT: {MetaProg.AchievementName(id)}  (+{MetaProg.AchievementSalvage} salvage)");
+        }
     }
 
     void ShowBanner(string text, bool enemy)
@@ -1931,6 +2041,7 @@ public class Game
     // ---------------- combat events ----------------
     public void OnUnitEnteredTile(Unit mover)
     {
+        if (mover.FiredThisTurn) mover.MovedAfterFire = true;   // HORIZON: any tile entry after firing clears exposed-by-fire
         if (!mover.Alive) return;
         if (mover.HasStatus(StatusKind.Bleed))   // bleeding worsens with every step
         {
@@ -2622,6 +2733,9 @@ public class Game
             case Phase.Win:
             case Phase.Lose: HandleOverlayClick(); break;
             case Phase.Draft: HandleDraftClick(); break;
+            case Phase.WarRoom: HandleWarRoomClick(); break;   // W3: cross-run meta screen
+            case Phase.Codex: HandleCodexInput(); break;       // W6: field manual / reference
+            case Phase.SkirmishSetup: HandleSkirmishSetup(); break;  // W4: skirmish objective/heat picker
         }
 
         CheckEnd();
@@ -2631,6 +2745,12 @@ public class Game
     {
         if (Phase != Phase.PlayerTurn && Phase != Phase.EnemyTurn) return;
         if (_anims.Count > 0) return;
+        // PROGRAM HORIZON W2: LAST STAND runs its own end/advance logic (wipe = run over; clearing a
+        // wave spawns the next). It NEVER touches the campaign objective ladder or the checkpoint valve.
+        if (Mode == GameMode.Endless) { CheckEndless(); return; }
+        // PROGRAM HORIZON W4: SKIRMISH / DAILY are single-mission — reuse the SAME per-objective win
+        // tests, but route to Phase.Win/Lose (no barracks / checkpoint valve / save.json).
+        if (Mode == GameMode.Skirmish) { CheckSkirmish(); return; }
         var alivePlayers = AlivePlayers();
         if (alivePlayers.Count == 0)
         {
@@ -3308,6 +3428,10 @@ public class Game
         // 1 — deliberate ability prep that improves THIS turn's outcome.
         if (PrepAbility(u)) return;
 
+        // 1b — TEMPO (HORIZON W1): if we already fired and haven't moved, weigh ducking to safety
+        //      vs a rushed 2nd shot. Ducks to cover ONLY when clearly better (never skips a finisher).
+        if (u.FiredThisTurn && !u.MovedAfterFire && u.ActionsLeft > 0 && SmartRetreatAfterShot(u)) return;
+
         // 2 — best shot by expected value (only when it's actually worth firing). SLOPPY: ~15%
         //     of the time mis-judge and skip an otherwise-good shot (a human hesitation) — falls
         //     through to a worse action below, so the GAP measures the cost of that error.
@@ -3519,10 +3643,61 @@ public class Game
 
     /// Fire at `tgt`. TEMPO: the aimed shot is now always 1 action and never ends the turn, so
     /// there's no SNAP/AIMED decision to make — fire at full aim and let the soldier keep its
-    /// second action for repositioning (handled by SmartRetreatAfterShot in the cascade).
+    /// second action for repositioning. The "duck vs double-tap" bet is played the NEXT SmartStep:
+    /// SmartCombatStep calls SmartRetreatAfterShot before its rushed-2nd-shot path (see below).
     void AutoShootSmart(Unit u, Unit tgt)
     {
         IssueShoot(tgt);
+    }
+
+    /// HORIZON W1 — the post-shot tempo bet. Called once the unit has already FIRED this turn and
+    /// hasn't moved since (so it's EXPOSED BY FIRE), with an action still in hand. Weighs ducking to
+    /// a safer tile against a rushed 2nd shot: if a genuine FINISHER is available from here, keep the
+    /// shot (return false, let the cascade take the kill); if we're already safe, or no tile is
+    /// meaningfully safer, don't move (return false, let the rushed shot / other actions run). Only
+    /// when ducking clearly reduces exposure do we issue a real move and return true. Preconditions
+    /// (FiredThisTurn && !MovedAfterFire && ActionsLeft > 0) are checked by the caller.
+    /// CRITICAL: never return true without issuing a real move (a stall would risk a TIMEOUT).
+    bool SmartRetreatAfterShot(Unit u)
+    {
+        if (MoveCost == null) return false;
+
+        // Don't duck away from a near-certain finishing 2nd shot from the current tile.
+        var (fTgt, _) = BestShotFrom(u, u.X, u.Y);
+        if (fTgt != null)
+        {
+            var fOdds = Combat.ComputeOdds(Grid, u, fTgt);
+            if (fTgt.Hp <= fOdds.DmgMax && fOdds.HitChance >= 50) return false;   // let the cascade take the kill
+        }
+
+        float curExp = TileExposure(u, u.X, u.Y);
+        if (curExp < 1.5f) return false;                    // already safe — no reason to duck
+
+        // Mirror the SafetyAt scoring from CountMeaningfulChoices: minimize exposure, then prefer
+        // more cover vs the nearest alive foe, then higher ground (as tie-breaks folded into a score).
+        var nearest = AliveEnemies().OrderBy(en => Util.TileDist(u.X, u.Y, en.X, en.Y)).FirstOrDefault();
+        float Safety(int x, int y)
+        {
+            float s = -TileExposure(u, x, y);
+            if (nearest != null) s += Grid.GetCover(x, y, nearest.X, nearest.Y).Level * 8f;
+            s += Grid.HeightAt(x, y) * 5f;
+            return s;
+        }
+
+        var pcost = Grid.CostMap(u.X, u.Y, (x, y) => IsOccupiedByOther(x, y, u), out _, u.MoveBudget * 2);
+        int bx = -1, by = -1; float bestSafety = Safety(u.X, u.Y); float bestExp = curExp;
+        for (int x = 0; x < Grid.W; x++)
+            for (int y = 0; y < Grid.H; y++)
+            {
+                int c = pcost[x, y];
+                if (c <= 0 || c > u.MoveBudget) continue;    // 1-action-reachable steps only
+                float s = Safety(x, y);
+                if (s > bestSafety) { bestSafety = s; bx = x; by = y; bestExp = TileExposure(u, x, y); }
+            }
+
+        // only duck if the chosen tile meaningfully reduces exposure (else a rushed shot is better).
+        if (bx >= 0 && bestExp <= curExp - 1.5f) { IssueMove(bx, by); return true; }
+        return false;
     }
 
     /// Prep a class ability when it improves THIS soldier's turn. Deliberate (never random):
@@ -3889,7 +4064,13 @@ public class Game
         // batch ALWAYS terminates well before the frame cap — never a RESULT: TIMEOUT. Only ever fires
         // in autoplay (this method is autoplay-only); real play is unaffected.
         if (_turnCount > AutoMaxTurns)
-        { LoseRun("STALEMATE", $"Autopilot exceeded the turn cap on mission {_run.Mission}."); return; }
+        {
+            // PROGRAM HORIZON W2: in LAST STAND the "turn cap" just ends the horde run cleanly at the
+            // waves survived so far (route through EndEndless, not the campaign LoseRun).
+            if (Mode == GameMode.Endless) { EndEndless(); return; }
+            LoseRun("STALEMATE", $"Autopilot exceeded the turn cap on mission {_run.Mission}.");
+            return;
+        }
 
         int sig = AliveEnemies().Count * 1000
                 + AliveEnemies().Count(e => e.Active) * 10
@@ -4712,6 +4893,7 @@ public class Game
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseBright)) Display.CycleBrightness();
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseColorblind)) Display.ToggleColorblind();
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseAutoCam)) { Display.ToggleAutoCam(); if (!Display.AutoCam) { CamZoom = 1f; CamPan = Vector2.Zero; } }
+        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseCodex)) { BeginCodex(); }   // W6: open the field manual (remembers this phase for BACK)
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseAbandon)) { Paused = false; Phase = Phase.Lose; LoseTitle = "RUN ABANDONED"; LoseReason = "You called off the campaign."; Audio.Play("lose"); }
     }
 
@@ -5130,6 +5312,7 @@ public class Game
             // (TEMPO wave 5: the double-tap build fires its 2nd shot at full aim).
             if (Selected.FiredThisTurn && !Selected.HasPerk(Perk.Gunslinger)) aimMod = SnapAim;
             Selected.FiredThisTurn = true;
+            Selected.MovedAfterFire = false;   // HORIZON: fired-and-stationary => exposed until we move
             Selected.ActionsLeft = Math.Max(0, Selected.ActionsLeft - 1);
         }
         var res = Combat.Resolve(Grid, Selected, target, aimMod);
@@ -5164,7 +5347,7 @@ public class Game
         Selected.Ammo--;
         // TEMPO: 1 action, no end-turn (mirrors IssueShoot). A 2nd shot/turn is a rushed follow-up.
         if (Selected.RunGun) { Selected.RunGun = false; Selected.ActionsLeft = Math.Max(0, Selected.ActionsLeft - 1); }
-        else                 { Selected.FiredThisTurn = true; Selected.ActionsLeft = Math.Max(0, Selected.ActionsLeft - 1); }
+        else                 { Selected.FiredThisTurn = true; Selected.MovedAfterFire = false; Selected.ActionsLeft = Math.Max(0, Selected.ActionsLeft - 1); }
         Selected.Steady = false;
         Selected.FiredFromConcealment = false;
         Enqueue(new BarrelShotAnim(Selected, bx, by), Team.Player);
@@ -5910,6 +6093,7 @@ public class Game
                     e.Ammo--;
                     // TEMPO: the enemy shot is 1 action and does NOT end the turn (mirrors the player).
                     e.FiredThisTurn = true;
+                    e.MovedAfterFire = false;   // HORIZON: fired-and-stationary => exposed until it moves
                     e.ActionsLeft = Math.Max(0, e.ActionsLeft - 1);
                     var res = Combat.Resolve(Grid, e, _aiPlan.ShootTarget);
                     Enqueue(new WaitAnim(0.2f), Team.Enemy);
@@ -6609,7 +6793,7 @@ public class Game
         var killer = MkP(5, 9);
         var victim = MkE(7, 9, 1);
         Players.Add(killer); Enemies.Add(victim);
-        killer.ActionsLeft = 1; killer.FiredThisTurn = true;   // as if a flank-shot just fired (1 action, no end-turn)
+        killer.ActionsLeft = 1; killer.FiredThisTurn = true; killer.MovedAfterFire = false;   // as if a flank-shot just fired (1 action, no end-turn)
         var flankRes = new ShotResult { Hit = true, Damage = 5, Odds = new ShotOdds { Flanked = true, CoverLevel = 0 } };
         _anims.Clear(); _anims.Add(new ShotAnim(killer, victim, flankRes));   // active anim = this shot
         _refundedThisTurn.Clear();
@@ -7369,6 +7553,51 @@ public class Game
             if (cont && ContinueRun()) return;
         }
 
+        // PROGRAM HORIZON W2: intro LAST STAND — begin the endless horde mode (button or key L).
+        if (Phase == Phase.Intro)
+        {
+            bool endless = (Raylib.IsMouseButtonPressed(MouseButton.Left) &&
+                            Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.OverlayBtn3))
+                           || Raylib.IsKeyPressed(KeyboardKey.L);
+            if (endless) { BeginEndless(); return; }
+        }
+
+        // PROGRAM HORIZON W3: intro WAR ROOM — open the cross-run meta screen (button or key W).
+        if (Phase == Phase.Intro)
+        {
+            bool warRoom = (Raylib.IsMouseButtonPressed(MouseButton.Left) &&
+                            Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.OverlayBtn4))
+                           || Raylib.IsKeyPressed(KeyboardKey.W);
+            if (warRoom) { BeginWarRoom(); return; }
+        }
+
+        // PROGRAM HORIZON W6: intro CODEX — open the field-manual reference (button or key K).
+        if (Phase == Phase.Intro)
+        {
+            bool codex = (Raylib.IsMouseButtonPressed(MouseButton.Left) &&
+                          Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.OverlayBtn5))
+                         || Raylib.IsKeyPressed(KeyboardKey.K);
+            if (codex) { BeginCodex(); return; }
+        }
+
+        // PROGRAM HORIZON W4: intro SKIRMISH — open the single-fight setup (button or key S).
+        if (Phase == Phase.Intro)
+        {
+            bool skirmish = (Raylib.IsMouseButtonPressed(MouseButton.Left) &&
+                             Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.OverlayBtn6))
+                            || Raylib.IsKeyPressed(KeyboardKey.S);
+            if (skirmish) { BeginSkirmishSetup(); return; }
+        }
+
+        // PROGRAM HORIZON W4: intro DAILY — jump into today's seeded challenge (button or key Y).
+        if (Phase == Phase.Intro)
+        {
+            bool daily = (Raylib.IsMouseButtonPressed(MouseButton.Left) &&
+                          Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.OverlayBtn7))
+                         || Raylib.IsKeyPressed(KeyboardKey.Y);
+            if (daily) { BeginDaily(); return; }
+        }
+
         bool click = Raylib.IsMouseButtonPressed(MouseButton.Left) &&
                      Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.OverlayBtn);
         bool enter = Raylib.IsKeyPressed(KeyboardKey.Enter);
@@ -7379,8 +7608,10 @@ public class Game
         // founding squad + starting boon). The harness NEVER reaches here (it calls StartMission
         // DIRECTLY, bypassing the intro), but gate on !NoPersist defensively so the smoke test /
         // balance batch can never enter Phase.Draft (which would have no autopilot path -> hang).
-        else if (!NoPersist) BeginDraft();
-        else StartMission();
+        // PROGRAM HORIZON W2/W4: NEW RUN after a LAST STAND / SKIRMISH / DAILY returns to the CAMPAIGN —
+        // reset the mode so the fresh run isn't left in a single-mission mode. Also clear any daily-forced
+        // arena so the campaign picks arenas normally (interactive only — the harness keeps SIGHTLINE_MAP).
+        else { Mode = GameMode.Campaign; DailyMode = false; if (!NoPersist) Mission.ForcedLayout = -1; if (!NoPersist) BeginDraft(); else StartMission(); }
     }
 
     // ---------------- draw ----------------

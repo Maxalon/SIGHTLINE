@@ -201,8 +201,12 @@ public static class Util
         return tx >= 0 && ty >= 0 && tx < Cfg.GridW && ty < Cfg.GridH;
     }
 
-    // shared rng
-    public static readonly Random Rng = new();
+    // shared rng. Reseedable so a SEEDED mode (PROGRAM HORIZON W4 DAILY) can make the whole
+    // procedural board (arena sprinkles / barrels / pod scatter) reproducible for a given day.
+    // Default construction seeds from the system clock (unchanged for every other mode).
+    public static Random Rng = new();
+    /// Reseed the shared RNG deterministically (SEEDED DAILY). Pass 0 to return to a clock seed.
+    public static void Reseed(int seed) => Rng = seed == 0 ? new Random() : new Random(seed);
     public static int   RandInt(int aIncl, int bIncl) => Rng.Next(aIncl, bIncl + 1);
     public static float RandF() => (float)Rng.NextDouble();
     public static bool  Roll(float pct) => Rng.NextDouble() * 100.0 < pct;

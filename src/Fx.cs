@@ -653,7 +653,11 @@ public class Fx
         _ambCol = biome.AmbCol;
         _ambBaseSpeed = biome.AmbSpeed;
         _ambBaseSize = biome.AmbSize;
-        _ambAlpha = biome.AmbAlpha;
+        // HORIZON W5: push the ambient field alpha up ~50% (clamped ≤0.34 so it's still SUBTLE
+        // and passes the squint test / AMBIENTTEST) so the biome atmosphere (snow/embers/dust/
+        // motes) is actually FELT in a still frame — a lever on Biome.AmbAlpha we own here
+        // (Util.cs is out of this wave's scope). Bounded, deterministic, finite.
+        _ambAlpha = Util.Clamp(biome.AmbAlpha * 1.5f, 0f, 0.34f);
         _ambCount = Util.Clamp(biome.AmbCount, 0, AmbCap);
         if (_amb.Length < _ambCount) _amb = new AmbientP[_ambCount];
 

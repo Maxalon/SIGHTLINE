@@ -527,12 +527,92 @@ public static class Audio
                        ?? ValidateMusic("combat",  BuildCombat());
             if (mErr != null) return "AUDIOTEST: FAIL " + mErr;
 
+            // HORIZON W7 — validate any DROPPED-IN audio files (device-free: header magic + size
+            // budget). The repo ships none, so this is a no-op today; once real CC0 files are added
+            // it guards against a corrupt/oversized/mis-encoded drop-in slipping in.
+            string aErr = ValidateDropInAssets();
+            if (aErr != null) return "AUDIOTEST: FAIL " + aErr;
+
             return "AUDIOTEST: PASS";
         }
         catch (Exception e)
         {
             return "AUDIOTEST: FAIL " + e.GetType().Name + ": " + e.Message;
         }
+    }
+
+    // HORIZON W7 — the cue ids the FILE-FIRST loader will look for under assets/sfx/<id>.{ogg,wav}
+    // (kept in sync with BuildRecipes + the CREDITS convention). Music beds are ambient/combat.
+    static readonly string[] SfxCueIds =
+    {
+        "w_rifle","w_shotgun","w_sniper","w_lmg","w_smg",
+        "shoot","hit","crit","miss","over","death",
+        "select","move","reload","hunker","turn","win","lose",
+        "st_kill","st_lastkill","st_victory","st_lose","st_squadwipe",
+    };
+    const long MaxSfxBytes   = 400 * 1024;    // keep the repo lean — reject an oversized SFX drop-in
+    const long MaxMusicBytes = 4 * 1024 * 1024;
+
+    // Device-free validation of any dropped-in audio FILE: correct extension, a valid container
+    // magic (RIFF/WAVE for .wav, OggS for .ogg), non-empty, and within the size budget. Returns
+    // null on OK/absent, or an error string. (A device would still validate it loads to a Sound.)
+    static string ValidateAudioFile(string path, long maxBytes)
+    {
+        try
+        {
+            if (!File.Exists(path)) return null;              // absent -> synth fallback, fine
+            var fi = new FileInfo(path);
+            if (fi.Length < 16) return $"'{path}' too small ({fi.Length}B)";
+            if (fi.Length > maxBytes) return $"'{path}' too large ({fi.Length}B > {maxBytes}B budget)";
+            byte[] head = new byte[4];
+            using (var fs = File.OpenRead(path)) { if (fs.Read(head, 0, 4) < 4) return $"'{path}' unreadable header"; }
+            string ext = Path.GetExtension(path).ToLowerInvariant();
+            bool ok = ext == ".wav" ? (head[0] == 'R' && head[1] == 'I' && head[2] == 'F' && head[3] == 'F')
+                    : ext == ".ogg" ? (head[0] == 'O' && head[1] == 'g' && head[2] == 'g' && head[3] == 'S')
+                    : false;
+            if (!ok) return $"'{path}' bad/unsupported magic for {ext} (use CC0 .ogg or .wav)";
+            return null;
+        }
+        catch (Exception e) { return $"'{path}' {e.GetType().Name}"; }
+    }
+
+    // Validate every possible drop-in location (SFX cues + the two music beds). No-op if none present.
+    static string ValidateDropInAssets()
+    {
+        foreach (var id in SfxCueIds)
+        {
+            string e = ValidateAudioFile($"assets/sfx/{id}.ogg", MaxSfxBytes)
+                    ?? ValidateAudioFile($"assets/sfx/{id}.wav", MaxSfxBytes);
+            if (e != null) return e;
+        }
+        return ValidateAudioFile("assets/music/ambient.ogg", MaxMusicBytes)
+            ?? ValidateAudioFile("assets/music/combat.ogg",  MaxMusicBytes);
+    }
+
+    /// Device-free report: which cues would resolve to a real dropped-in FILE vs the procedural
+    /// synth. For the SIGHTLINE_AUDIOASSETS harness hook so the owner can confirm drop-ins are found.
+    public static string AudioAssetsReport()
+    {
+        var sb = new System.Text.StringBuilder();
+        int files = 0;
+        sb.AppendLine("AUDIO ASSETS (file overrides vs procedural synth):");
+        foreach (var id in SfxCueIds)
+        {
+            string f = File.Exists($"assets/sfx/{id}.ogg") ? $"assets/sfx/{id}.ogg"
+                     : File.Exists($"assets/sfx/{id}.wav") ? $"assets/sfx/{id}.wav" : null;
+            if (f != null) files++;
+            sb.AppendLine($"  {id,-14} {(f != null ? "FILE  " + f : "synth")}");
+        }
+        foreach (var m in new[] { "ambient", "combat" })
+        {
+            bool has = File.Exists($"assets/music/{m}.ogg");
+            if (has) files++;
+            sb.AppendLine($"  music:{m,-8} {(has ? "FILE  assets/music/" + m + ".ogg" : "synth")}");
+        }
+        sb.AppendLine($"resolved files: {files} / {SfxCueIds.Length + 2}  (0 = fully procedural, the current default)");
+        string v = ValidateDropInAssets();
+        sb.AppendLine(v == null ? "validation: OK (all present files pass magic/size checks)" : "validation: FAIL " + v);
+        return sb.ToString();
     }
 
     // Validate an encoded WAV is non-empty + the loop endpoints are continuous (no click).

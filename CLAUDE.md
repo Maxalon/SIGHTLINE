@@ -196,6 +196,21 @@ docs/screenshot.png    README image
 ## Current state — DONE ✅
 Playable vertical slice, builds clean (0 warn/0 err), autoplay-verified across
 seeds (mix of WIN/LOSE, no exceptions):
+- **FOUR GAME MODES (PROGRAM HORIZON):** the intro now offers DEPLOY (the 6-mission campaign) / **LAST STAND**
+  (endless horde survival, W2 — escalating full-roster waves on one arena, persistent BEST WAVE) / **SKIRMISH**
+  (W4 — one fight with a chosen objective+heat) / **DAILY** (W4 — a deterministic date-seeded challenge with a
+  local best). Modes share the tactical kernel; endless/skirmish/daily are single-session (no campaign wrapper).
+- **CROSS-RUN META-PROGRESSION — WAR ROOM (HORIZON W3):** the game finally has LEGS beyond one sitting. A persistent
+  profile (meta.json, append-only) banks SALVAGE currency, 7 ACHIEVEMENTS, a HALL OF FAME (fallen KIA + won-run
+  legends), lifetime totals, and 3 additive UNLOCKS (StartIntel/StartBoon/StartArmor) bought with salvage — all
+  strictly gated behind `!NoPersist` so the flywheel/harness stay byte-stable. `src/Meta.cs`, `src/Game.Meta.cs`.
+- **CODEX / FIELD MANUAL (HORIZON W6):** a browsable in-game reference (bestiary + classes + perks/boons/contracts/
+  specs/traits/scars/weapon-mods/status/objectives) from the intro (key K) + pause menu — closes the onboarding gap.
+- **EXPOSED BY FIRE + honest flywheel (HORIZON W1):** a unit that fires and doesn't move is easier to hit next turn
+  (the real "duck vs double-tap" bet); the balance bot now actually repositions after firing (the metric was an
+  artifact before). **Visual identity leap (HORIZON W5):** units DOMINATE the board (bigger figures + silhouettes),
+  cover recedes, biomes gained structural signatures, kills flood the bloom. **Audio drop-in ready (HORIZON W7):**
+  csproj ships `assets/sfx|music`; drop in CC0 files to override the synth (see assets/*/CREDITS.txt).
 - **SCARS & VENDETTAS (PROGRAM VANTAGE II / W5):** the COST side of soldier identity — surviving trauma leaves
   lasting marks (append-only `Scar` enum, persisted): SHELL-SHOCKED (-1 mob, immune to Disorient/Stun),
   BURN-SCARRED (+3 HP, -aim while burning), HARD-BITTEN (+crit bloodied, -aim at full HP), VENDETTA (+aim/+crit
@@ -1147,7 +1162,67 @@ Before stopping:
 
 ### WIP NOTES
 
-> **PROGRAM "VANTAGE II" — deepen the run-to-run loop: STAKES (scars) + VARIETY (contracts) (LATEST; read first).**
+> **PROGRAM "HORIZON" — give SIGHTLINE LEGS: new modes + cross-run meta + combat integrity + visual identity (LATEST; read first).**
+> Fully-autonomous dev-team session (orchestrator + a 4-lens code-grounded research fan-out + per-wave dev agents
+> [one in an isolated worktree] + the SIGHTLINE_BALANCE flywheel). Branch `claude/game-dev-orchestration-a6jxac`,
+> **PR #67**. Research (combat-depth / meta-loop / presentation / blue-sky, all grounded in the actual code, not the
+> devlog's self-report) converged: the game is tactically deep but has (a) NO reason to replay beyond one ~30-min
+> sitting [LEGS — only MaxHeat+LossStreak ever persisted; saves deleted; same 4 soldiers every run], (b) a
+> MEASUREMENT-INTEGRITY gap, (c) presentation that under-sells the engine. HORIZON attacks all three. **7 waves, all
+> committed + pushed + verified:**
+> - **W1 — combat integrity + honest flywheel (`f36f0e3`).** The balance bot's promised `SmartRetreatAfterShot`
+>   NEVER EXISTED, so the smart AI never repositioned after firing — the "post-shot positioning" the tempo metric
+>   counts was never actually played (the celebrated ~6.15 choices/turn was partly an artifact). Implemented it. Added
+>   **EXPOSED BY FIRE**: a unit that fired and didn't move is +12 aim/+12 crit to hit on the opponent's turn
+>   (symmetric to the ambush; transient `Unit.MovedAfterFire`), turning post-shot "duck vs double-tap" into a real
+>   hedge-vs-gamble + giving the enemy a reason to punish a stationary shooter. Tooltip badge + on-board chevron (W5).
+>   MEASURED (honest flywheel, heat-0 N=20): run-completion 80%, policy gap +10, choices/turn 6.16. `Unit.MovedAfterFire`.
+> - **W2 — LAST STAND endless horde mode (`86b3cb8`, FLAGSHIP).** New game mode from the intro (key L): hold one arena
+>   vs escalating FULL-ROSTER waves (`Mission.MakeEndlessHostile`→`SelectArchetype`; snipers/shields/drones/berserkers/
+>   siege deepen the swarm) until wiped. Reports WAVES SURVIVED + persistent BEST WAVE. Logic isolated in a new
+>   `src/Game.Endless.cs`; **`class Game`→`partial class Game`** (so future waves add partials, not core-file churn).
+>   `SIGHTLINE_ENDLESS`/`_HORDETEST`.
+> - **W3 — WAR ROOM cross-run meta-progression (`a8112a7`, the "legs" keystone).** Persistent profile (meta.json,
+>   append-only): SALVAGE currency, 7 ACHIEVEMENTS, a HALL OF FAME (fallen KIA + won-run legends), lifetime totals,
+>   and 3 ADDITIVE UNLOCKS (StartIntel/StartBoon/StartArmor) bought with salvage. WAR ROOM screen off the intro (key
+>   W). **SAFETY INVARIANT: every meta read/write gated behind `!NoPersist` → the flywheel + all `SIGHTLINE_*`
+>   harnesses never touch meta and never get unlocks → balance + screenshots stay byte-stable** (verified: an autoplay
+>   campaign writes NO meta.json). `src/Meta.cs`, `src/Game.Meta.cs`. `SIGHTLINE_METATEST`/`_WARROOM`.
+> - **W5 — visual identity leap (`970fea2`, PARALLEL worktree).** Fixed the inverted hierarchy (units were the SMALLEST
+>   thing on the board): bodyR 18.5→24 + silhouette-as-outline + receded cover ⇒ squint test now units>objectives>
+>   enemies>cover. Per-biome STRUCTURAL signatures (magma fissures/tundra frost/void-neon grid/dune banding/soot/
+>   speckle), louder ambient, fatter tracer + lower bloom knee so kills flood light, the W1 exposed-by-fire on-board
+>   marker. Renderer/Fx/Display/Anim only. Integrated via **3-way cherry-pick** (the worktree branched off the
+>   pre-VANTAGE base `790304e`; clean auto-merge with VANTAGE's lights/trails — a file-copy would have reverted them).
+> - **W6 — CODEX / FIELD MANUAL (`4d62415`, onboarding gap).** A browsable in-game reference (17-enemy bestiary with
+>   silhouettes + role blurbs, classes, perks/boons/contracts/specs/traits/scars/weapon-mods/status/objectives) built
+>   entirely from the EXISTING Def strings — zero balance change. Intro (key K) + pause menu. `Codex.SelfTest` is a
+>   content-completeness guard (a future enum add that forgets its strings fails CODEXTEST). `src/Codex.cs`,
+>   `src/Game.Codex.cs`. `SIGHTLINE_CODEXTEST`/`_CODEX`.
+> - **W7 — audio drop-in infrastructure (`42991d9`).** Real CC0 audio is now permitted but nothing could load: the
+>   csproj never shipped `assets/sfx|music` (BUG — the file-first loader reads them at runtime = the output dir).
+>   Fixed the glob (confirmed: `bin/.../assets/{sfx,music}/` now ship), added drop-in folders + `CREDITS.txt`
+>   (cue-id convention + CC0 sourcing/size guidance), hardened `Audio.SelfTest` (device-free magic/size validation of
+>   any present file), + a `SIGHTLINE_AUDIOASSETS` report. Owner drops in files (audio can't be HEARD here — plumbing
+>   only; NOT sourcing external audio blind to avoid unverifiable licensing/quality risk).
+> - **W4 — SEEDED DAILY + SKIRMISH (`b3451ee`).** Two single-mission modes complete the intro offering (DEPLOY /
+>   LAST STAND / SKIRMISH / DAILY). SKIRMISH (key S): pick objective+heat → one fight on a random arena. DAILY (key Y):
+>   a deterministic date-seeded challenge (FNV-1a of yyyymmdd → objective+arena+heat) with a persistent local BEST;
+>   headless reads `SIGHTLINE_DAILY` (never `DateTime.Now`). `Util.Reseed` makes the daily board fully reproducible
+>   (verified: same seed → identical frame count). `src/Game.Modes.cs`. `SIGHTLINE_SKIRMISH`/`_DAILY`/`_MODETEST`.
+> **PROCESS:** Game.cs is the single serialization point, so Game.cs-touching waves (W1,W2,W3,W6,W4) ran SEQUENTIALLY
+> (one owner each: spec → dev agent → orchestrator build+self-tests+flywheel+screenshot → commit); the disjoint visual
+> wave (W5, Renderer/Fx/Display/Anim) ran in PARALLEL in a worktree, integrated by 3-way cherry-pick (NOT file-copy).
+> GOTCHA re-confirmed: an agent's transcript-STUB file can read "static/dead" while the agent is actually
+> working+succeeding (W2) — trust the completion NOTIFICATION, not an idle-waiter on the stub. Build 0/0; the full
+> self-test sweep PASSES incl. new HORDETEST/METATEST/CODEXTEST/MODETEST + COMBATTEST/SAVETEST/AITEST/SNAPTEST/
+> CONCEALTEST/AMBIENTTEST; all four modes autoplay clean (no TIMEOUT); campaign balance held (heat-0 80%). NO CI;
+> free-licensed assets only. **OPEN/NEXT (documented):** source real CC0 audio into the W7 loader on a device;
+> endless difficulty-curve tuning on-device (the campaign bot caps ~wave 3-4 in a stand-and-fight horde, humans go
+> further); a veteran carry-over between runs (deeper meta); more achievements/unlocks; the deferred full Game.cs
+> partial-split for throughput (W2 started it: Game is now `partial`, new features live in Game.*.cs partials).
+
+> **PROGRAM "VANTAGE II" — deepen the run-to-run loop: STAKES (scars) + VARIETY (contracts) (prior program).**
 > Same fully-autonomous dev-team session, continued after VANTAGE I merged (PR #65). Two more waves on the campaign/
 > run-to-run layer (complementing VANTAGE I's per-mission/per-soldier depth), each spec→dev→independent-review→
 > flywheel-measure→commit. Restarted the branch from the merged main (the prior PR was finished), opened a NEW PR.

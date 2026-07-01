@@ -86,9 +86,11 @@ vec3 brightBlur(vec2 uv, float radiusPx) {
     );
     for (int i = 0; i < 12; i++) {
         vec3 s = texture(texture0, uv + offs[i]).rgb;
-        // Soft bright-pass: knee at ~0.42 luma, smooth ramp so accents glow but the
-        // dark board floor does not. Square it for a punchier, less-smeary falloff.
-        float b = smoothstep(0.42, 0.85, luma(s));
+        // Soft bright-pass: knee at ~0.36 luma (HORIZON W5: lowered from 0.42 so the
+        // fattened tracer core + unit under-glows + objective glows reliably cross the
+        // knee and BLOOM, while the (now further-receded) dark board floor + muted cover
+        // stay below it and never wash. Square it for a punchier, less-smeary falloff.
+        float b = smoothstep(0.36, 0.85, luma(s));
         b = b * b;
         // weight inner taps slightly higher for a tighter core + soft outer halo.
         float w = (i == 0) ? 1.6 : (i < 5 ? 1.0 : 0.6);
@@ -119,7 +121,10 @@ void main() {
     // halo softly at all times — this is the ""shippable indie"" payoff. Combat events
     // (uBloom) push it brighter for a punchy hit/kill flash that then decays.
     vec3 glow = brightBlur(uv, 5.0);
-    float bloomAmt = 0.55 + uBloom * 0.9;     // baseline halo + reactive spike
+    // HORIZON W5 — keep the resting halo restrained (0.5, not a baseline wash) but RAISE the
+    // reactive ceiling so a KILL/crit (Game.AddBloom spikes uBloom, then decays) visibly
+    // FLOODS the screen with light before settling. Reactive, not always-on.
+    float bloomAmt = 0.5 + uBloom * 1.7;      // restrained baseline halo + a big reactive spike
     vec3 withBloom = base + glow * bloomAmt;
 
     // --- colour grade: saturation + contrast + per-biome tint ---

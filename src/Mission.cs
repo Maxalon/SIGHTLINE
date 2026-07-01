@@ -658,6 +658,20 @@ public static class Mission
         return e;
     }
 
+    /// LAST STAND (HORIZON W2): a horde hostile at difficulty `tier` (the endless wave-scale). Low
+    /// tiers are light skirmishers; tier >= 3 unlocks the FULL archetype roster (snipers/shields/
+    /// drones/berserkers/siege/etc.), and HP/aim rise with the tier (bump capped + aim clamped so
+    /// bodies stay killable). Reuses the campaign archetype cascade so the horde has real variety,
+    /// not just grunts. `tier` is Game.EndlessWaveScale(wave) (= 1 + wave/2 + Heat).
+    public static Unit MakeEndlessHostile(int tier, int x, int y)
+    {
+        int n = Math.Clamp(tier, 1, 6);           // roster depth: n>=3 opens the full cascade in SelectArchetype
+        int bump = Math.Min(tier, 12);            // HP/aim bump rises with the tier (capped so it stays killable)
+        var e = SelectArchetype(n, Util.RandF(), bump, x, y);
+        e.Aim = Math.Min(88, e.Aim);              // clamp: escalation comes from numbers + toughness, not auto-hits
+        return e;
+    }
+
     /// Procedural-path safety net: every hostile / objective tile must stay reachable
     /// from the squad over walkable terrain. If a generated structure walled one off,
     /// carve an L-shaped lane back toward the squad by clearing the blocking cover. Runs

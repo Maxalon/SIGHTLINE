@@ -94,7 +94,152 @@ public static class SaveGame
         var d = LoadMetaDto(); d.LossStreak = Math.Max(0, streak); WriteMetaDto(d);
     }
 
-    class MetaDto { public int MaxHeat; public int LossStreak; }
+    /// PROGRAM HORIZON W2 (LAST STAND): the best endless wave ever reached, persisted across
+    /// sessions in the shared meta.json (append-only, whole-DTO read-modify-write so it never
+    /// clobbers MaxHeat/LossStreak). 0 on a fresh profile.
+    public static int LoadMetaBestWave() => Math.Max(0, LoadMetaDto().BestWave);
+
+    public static void SaveMetaBestWave(int wave)
+    {
+        var d = LoadMetaDto(); d.BestWave = Math.Max(0, wave); WriteMetaDto(d);
+    }
+
+    /// PROGRAM HORIZON W4 (SEEDED DAILY): the persisted best for a given day's challenge. Stored as a
+    /// (stamp, best) pair — a NEW day (different stamp) reads 0 (unplayed today). "Best" is the fewest
+    /// turns to a WIN (lower is better; 0 = not yet cleared). Append-only, whole-DTO read-modify-write
+    /// so it never clobbers MaxHeat/LossStreak/BestWave/salvage/etc. Gated by NoPersist at the call sites.
+    public static int LoadDailyBest(int stamp)
+    {
+        var d = LoadMetaDto();
+        return d.DailyStamp == stamp ? Math.Max(0, d.DailyBest) : 0;   // a different/older day = unplayed
+    }
+
+    public static void SaveDailyResult(int stamp, int best)
+    {
+        var d = LoadMetaDto();
+        d.DailyStamp = stamp; d.DailyBest = Math.Max(0, best); WriteMetaDto(d);
+    }
+
+    // ---- PROGRAM HORIZON W3 (WAR ROOM): cross-run meta-progression ----
+    // A persistent SALVAGE currency + ACHIEVEMENTS + additive UNLOCKS + a HALL OF FAME (Legends) +
+    // lifetime run totals, all in the shared meta.json (append-only, whole-DTO read-modify-write so a
+    // write never clobbers MaxHeat/LossStreak/BestWave). Gated by Game.NoPersist at the CALL sites, so
+    // the flywheel/harness never touch these => balance stays byte-stable. Fresh profile = all defaults.
+
+    /// Persistent SALVAGE currency (0 on a fresh profile).
+    public static int LoadSalvage() => Math.Max(0, LoadMetaDto().Salvage);
+
+    /// Add to the SALVAGE bank (clamped >= 0). No-op for non-positive amounts.
+    public static void AddSalvage(int amount)
+    {
+        if (amount <= 0) return;
+        var d = LoadMetaDto(); d.Salvage = Math.Max(0, d.Salvage) + amount; WriteMetaDto(d);
+    }
+
+    /// Spend SALVAGE; returns false (and spends nothing) if the bank is insufficient.
+    public static bool SpendSalvage(int cost)
+    {
+        if (cost <= 0) return true;
+        var d = LoadMetaDto();
+        if (d.Salvage < cost) return false;
+        d.Salvage -= cost; WriteMetaDto(d);
+        return true;
+    }
+
+    /// The unlocked achievement ids (empty on a fresh profile).
+    public static List<string> LoadAchievements() => LoadMetaDto().Achievements ?? new List<string>();
+
+    /// Unlock an achievement by id; returns true if it was NEWLY unlocked (false if already had).
+    public static bool UnlockAchievement(string id)
+    {
+        if (string.IsNullOrEmpty(id)) return false;
+        var d = LoadMetaDto();
+        d.Achievements ??= new List<string>();
+        if (d.Achievements.Contains(id)) return false;
+        d.Achievements.Add(id); WriteMetaDto(d);
+        return true;
+    }
+
+    /// The purchased meta-unlock ordinals (empty on a fresh profile).
+    public static List<int> LoadUnlocks() => LoadMetaDto().Unlocks ?? new List<int>();
+
+    /// Grant a meta-unlock (idempotent).
+    public static void AddUnlock(int unlock)
+    {
+        var d = LoadMetaDto();
+        d.Unlocks ??= new List<int>();
+        if (d.Unlocks.Contains(unlock)) return;
+        d.Unlocks.Add(unlock); WriteMetaDto(d);
+    }
+
+    /// Whether a meta-unlock has been purchased.
+    public static bool HasUnlock(int unlock)
+    {
+        var u = LoadMetaDto().Unlocks;
+        return u != null && u.Contains(unlock);
+    }
+
+    /// The HALL OF FAME legends, most-recent first (empty on a fresh profile).
+    public static List<LegendDto> LoadLegends() => LoadMetaDto().Legends ?? new List<LegendDto>();
+
+    /// Prepend legends (most-recent first) and cap the stored history at 40.
+    public static void AddLegends(IEnumerable<LegendDto> legends)
+    {
+        if (legends == null) return;
+        var add = new List<LegendDto>(legends);
+        if (add.Count == 0) return;
+        var d = LoadMetaDto();
+        d.Legends ??= new List<LegendDto>();
+        // newest first: the just-ended run's entries lead the list
+        d.Legends.InsertRange(0, add);
+        if (d.Legends.Count > 40) d.Legends.RemoveRange(40, d.Legends.Count - 40);
+        WriteMetaDto(d);
+    }
+
+    /// Lifetime run totals: (runs started+finished, wins, best missions reached).
+    public static (int runs, int wins, int best) LoadRunTotals()
+    {
+        var d = LoadMetaDto();
+        return (Math.Max(0, d.TotalRuns), Math.Max(0, d.TotalWins), Math.Max(0, d.BestMissions));
+    }
+
+    /// Record a finished run: increments totals, wins on a victory, and tracks the deepest mission.
+    public static void RecordRunTotals(bool win, int missions)
+    {
+        var d = LoadMetaDto();
+        d.TotalRuns = Math.Max(0, d.TotalRuns) + 1;
+        if (win) d.TotalWins = Math.Max(0, d.TotalWins) + 1;
+        d.BestMissions = Math.Max(Math.Max(0, d.BestMissions), missions);
+        WriteMetaDto(d);
+    }
+
+    // append-only: new fields default to 0 / null, so an old meta.json (heat/streak/bestwave only)
+    // still loads. Lists default null -> the accessors coalesce to empty (never NRE).
+    class MetaDto
+    {
+        public int MaxHeat; public int LossStreak; public int BestWave;
+        // W3 WAR ROOM (all append-only):
+        public int Salvage;
+        public List<string> Achievements;
+        public List<int> Unlocks;
+        public List<LegendDto> Legends;
+        public int TotalRuns, TotalWins, BestMissions;
+        // W4 SEEDED DAILY (append-only): the last-played day (yyyymmdd) + its best (fewest win-turns; 0 = uncleared).
+        public int DailyStamp, DailyBest;
+    }
+
+    /// A HALL OF FAME entry (WAR ROOM): a soldier snapshot at run end — a fallen KIA (Won=false) or a
+    /// survivor of a WON run (Won=true). Public so Game/Hud can build + read them. Persisted in meta.json.
+    public class LegendDto
+    {
+        public string Name, Cls, Rank;
+        public int Kills, Heat;
+        public bool Won;
+    }
+
+    /// Test-only accessor to the meta.json path (used by Game.HordeSelfTest to preserve/restore any
+    /// real meta while it round-trips BestWave). Not for gameplay use.
+    public static string MetaPathPublic => MetaPath;
 
     // ---- mapping ----
     static RunDto ToDto(Run r)
@@ -374,6 +519,38 @@ public static class SaveGame
                 if (LoadMetaHeat() != 4) fails.Add("metaHeat");
                 SaveMetaHeat(99);                       // clamped to the ladder ceiling on read/write
                 if (LoadMetaHeat() != Heat.Max) fails.Add("metaHeatClamp");
+
+                // W3 WAR ROOM meta round-trips (all append-only, whole-DTO r-m-w — must not clobber heat).
+                // salvage add/spend
+                int s0 = LoadSalvage();
+                AddSalvage(50);
+                if (LoadSalvage() != s0 + 50) fails.Add("metaSalvageAdd");
+                if (!SpendSalvage(30) || LoadSalvage() != s0 + 20) fails.Add("metaSalvageSpend");
+                if (SpendSalvage(9999)) fails.Add("metaSalvageOverspend");   // must refuse + spend nothing
+                if (LoadSalvage() != s0 + 20) fails.Add("metaSalvageOverspendMutated");
+                // achievements: unlock is idempotent
+                if (!UnlockAchievement("TEST_ACH")) fails.Add("metaAchNew");
+                if (UnlockAchievement("TEST_ACH")) fails.Add("metaAchDup");
+                if (!LoadAchievements().Contains("TEST_ACH")) fails.Add("metaAchLoad");
+                // unlocks: add/has
+                AddUnlock(2);
+                if (!HasUnlock(2)) fails.Add("metaUnlockHas");
+                if (HasUnlock(1)) fails.Add("metaUnlockPhantom");
+                // legends: prepend (newest first) + cap at 40
+                AddLegends(new[] { new LegendDto { Name = "ALPHA", Cls = "ASSAULT", Rank = "SGT", Kills = 9, Heat = 3, Won = true } });
+                AddLegends(new[] { new LegendDto { Name = "BRAVO", Cls = "RANGER", Rank = "PVT", Kills = 1, Heat = 0, Won = false } });
+                var legs = LoadLegends();
+                if (legs.Count < 2 || legs[0].Name != "BRAVO" || legs[1].Name != "ALPHA") fails.Add("metaLegendsPrepend");
+                for (int i = 0; i < 60; i++) AddLegends(new[] { new LegendDto { Name = "F" + i } });
+                if (LoadLegends().Count != 40) fails.Add("metaLegendsCap");
+                // run totals
+                var (r0, w0, b0) = LoadRunTotals();
+                RecordRunTotals(true, 6);
+                RecordRunTotals(false, 3);
+                var (r1, w1, b1) = LoadRunTotals();
+                if (r1 != r0 + 2 || w1 != w0 + 1 || b1 != Math.Max(b0, 6)) fails.Add("metaRunTotals");
+                // whole-DTO r-m-w must NOT have clobbered heat set above (99 -> clamped Heat.Max)
+                if (LoadMetaHeat() != Heat.Max) fails.Add("metaW3ClobberedHeat");
             }
             finally
             {
