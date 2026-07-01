@@ -883,6 +883,59 @@ public partial class Game
                $"fallen={_run.Fallen.Count} before=[{string.Join(",", before)}] after=[{string.Join(",", after)}]";
     }
 
+    /// SIGHTLINE_DKTEST — UNDERTOW W1: a death is processed EXACTLY ONCE. Asserts (1) KillUnit is
+    /// idempotent (a 2nd call on a corpse does NOT re-add _run.Fallen/Memorial), and (2) a SURPLUS
+    /// queued reaction ShotAnim aimed at a unit that just died is PURGED — so it can't re-resolve on
+    /// the corpse and double-count Stats.RecordShot/CreditKill + replay the death FX — while the
+    /// active blow and shots at OTHER targets are kept. This corrects the class-lethality telemetry
+    /// the flywheel ranks. Needs a tiny window (Game uses tile math). Returns a one-line report.
+    public string DoubleKillTest()
+    {
+        NoPersist = true;
+        var fails = new System.Collections.Generic.List<string>();
+        _run = new Run(); _run.Start();
+        SetupMission(1);
+
+        // (1) idempotency: killing a soldier twice adds EXACTLY one Fallen + one Memorial entry.
+        var s = Players.First(u => u.Alive && !u.IsVip);
+        int fb = _run.Fallen.Count, mb = _run.Memorial.Count;
+        s.Hp = 0; KillUnit(s);
+        int fa1 = _run.Fallen.Count, ma1 = _run.Memorial.Count;
+        KillUnit(s);                                         // corpse — must be a no-op
+        int fa2 = _run.Fallen.Count, ma2 = _run.Memorial.Count;
+        if (fa1 - fb != 1) fails.Add($"fallenFirst={fa1 - fb}");
+        if (ma1 - mb != 1) fails.Add($"memorialFirst={ma1 - mb}");
+        if (fa2 != fa1)    fails.Add($"fallenReKill={fa2 - fa1}");
+        if (ma2 != ma1)    fails.Add($"memorialReKill={ma2 - ma1}");
+        if (s.Alive)       fails.Add("soldierStillAlive");
+
+        // (2) surplus-reaction purge: queue an ACTIVE reaction + a SURPLUS reaction both aimed at one
+        // enemy, plus a reaction at a DIFFERENT enemy + a queued move for the dying enemy. KillUnit
+        // keeps the active shot ([0]) + the other-target shot; drops the surplus corpse-shot + the
+        // dead unit's queued move.
+        var e  = Enemies.First(x => x.Alive);
+        var e2 = Enemies.First(x => x.Alive && x != e);
+        var a1 = Players.First(u => u.Alive && !u.IsVip);
+        _anims.Clear();
+        var res = Combat.Resolve(Grid, a1, e);
+        Enqueue(new ShotAnim(a1, e,  res, reaction: true), Team.Player);  // [0] = ACTIVE (the killing blow)
+        Enqueue(new ShotAnim(a1, e,  res, reaction: true), Team.Player);  // [1] = SURPLUS at the corpse
+        Enqueue(new ShotAnim(a1, e2, res, reaction: true), Team.Player);  // [2] = shot at ANOTHER foe (keep)
+        Enqueue(new MoveStepAnim(e, e.X, e.Y), Team.Player);             // dead unit's queued move (drop)
+        e.Hp = 0; KillUnit(e);
+        int shotsAtE  = _anims.Count(x => x is ShotAnim sh && sh.D == e);
+        int shotsAtE2 = _anims.Count(x => x is ShotAnim sh && sh.D == e2);
+        int movesForE = _anims.Count(x => x is MoveStepAnim mm && mm.Unit == e);
+        if (shotsAtE  != 1) fails.Add($"shotsAtCorpse={shotsAtE}");       // only the active one survives
+        if (shotsAtE2 != 1) fails.Add($"otherTargetShotDropped={shotsAtE2}");
+        if (movesForE != 0) fails.Add($"deadMoveKept={movesForE}");
+        _anims.Clear();
+
+        return fails.Count == 0
+            ? "DKTEST: PASS (KillUnit idempotent; surplus corpse-reaction purged; active + other-target kept)"
+            : "DKTEST: FAIL (" + string.Join(",", fails) + ")";
+    }
+
     /// Headless self-test (SIGHTLINE_STATUSTEST): status effects tick, decay, and read
     /// correctly — burning/bleed DoT, stun (lose an action), disoriented (aim + no
     /// overwatch). Needs a tiny window (Game uses tile math). Returns a one-line report.

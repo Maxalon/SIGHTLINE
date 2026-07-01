@@ -120,6 +120,15 @@ public static class Program
             Console.WriteLine(WoundTest());
             return;
         }
+        // SIGHTLINE_DKTEST=1 : UNDERTOW W1 — a death is processed exactly once (KillUnit idempotent +
+        // surplus corpse-reaction purge). Needs a tiny window for tile math.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_DKTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "dktest");
+            Console.WriteLine(new Game().DoubleKillTest());
+            Raylib.CloseWindow();
+            return;
+        }
         // SIGHTLINE_TRAITTEST=1 : feats -> traits/nicknames + bonds round-trip (item 3.2). No window.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_TRAITTEST") == "1")
         {

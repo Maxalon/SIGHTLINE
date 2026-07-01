@@ -1481,6 +1481,13 @@ public partial class Game
 
     public void KillUnit(Unit d)
     {
+        // IDEMPOTENT: a death is processed exactly once. A surplus blow reaching an already-dead
+        // unit (e.g. a 3rd non-lethal overwatch reaction resolving on the corpse, or an AoE that
+        // overlaps a body) must NOT re-run the kill — doing so double-counted _run.Fallen/Memorial,
+        // Stats.RecordKill, CreditKill and replayed the death FX, corrupting the class-lethality
+        // telemetry the flywheel ranks (UNDERTOW W1). The queued-reaction purge below is the primary
+        // guard; this makes KillUnit robust to every double-call path.
+        if (!d.Alive) return;
         // SIEGE interrupt: killing a charging BOMBARD cancels its strike (the zone reads off live
         // enemies, so it clears automatically; this is a cosmetic confirmation of the interrupt).
         if (d.Cls == "BOMBARD" && d.ChargeTurns > 0)
@@ -1552,8 +1559,13 @@ public partial class Game
             Fx.AddShake(11f);
         }
 
-        // purge any queued movement for the dead unit
-        _anims.RemoveAll(a => a is MoveStepAnim m && m.Unit == d);
+        // purge any queued movement for the dead unit, AND any queued reaction shots aimed AT it:
+        // when several overwatchers react to one mover, the first lethal reaction kills it while the
+        // others are still queued — a surplus reaction must not resolve on the corpse (that path
+        // re-ran Stats.RecordShot + CreditKill + the death FX). The active anim (the blow that caused
+        // this death) is excluded so the current shot still finishes normally.
+        _anims.RemoveAll(a => (a is MoveStepAnim m && m.Unit == d)
+                           || (a is ShotAnim s && s.D == d && a != ActiveAnim));
         if (Selected == d) Selected = null;
         // DECAPITATE: a death may have removed the HVT's last in-range guard — re-evaluate now so the
         // HVT is immediately exposed (the telegraph + reduced-damage gate flip the same frame).
