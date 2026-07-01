@@ -34,11 +34,11 @@ public static class Mission
     // newest biomes also theme; PickLayout falls back to a random arena past the end.
     static readonly int[] BiomeLayoutHint =
     {
-        29,  // STEEL   → STEPWELL (stepped tier-2 pyramid with split flanking lanes)
+        34,  // STEEL   → DONJON (walled tier-2 keep taken by a single ramp)
         31,  // ARID    → ENTRENCHED (asymmetric dug-in trench network)
-        12,  // TUNDRA  → CHASM (a frozen ravine split by a cover river)
+        32,  // TUNDRA  → CAUSEWAY (a frozen ford: an elevated land-bridge crossing)
         10,  // VERDANT → THICKET (dense organic cover clusters)
-        14,  // ASH     → HOOK (a ruined outpost with an asymmetric flank)
+        33,  // ASH     → REDANS (a ruined earthworks line: diagonal sawtooth gauntlet)
         30,  // VOID    → COLONNADE (cavernous long-sightline pillar gallery)
         15,  // NEON    → GRID (orthogonal server-room rack lattice)
         28,  // MAGMA   → CRUCIBLE (barrel-rigged refinery throat chokepoint)

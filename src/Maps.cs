@@ -570,5 +570,64 @@ public static class Maps
             ".......o...o......",
             "..................",
         },
+        new[] // CAUSEWAY — a raised tier-1 land-BRIDGE spans the mid-field as the ONLY good crossing:
+              // walk up onto it and you command the centre, but you're the exposed high silhouette on
+              // it. Impassable high-cover BANKS bracket the bridge (cols 7 & 12) so the fight funnels
+              // ONTO and ACROSS the elevated span, and low-cover shorelines give covered footing at
+              // each ramp. Unlike CHASM's cover river this chokepoint is ELEVATION, not a wall — you
+              // seize the height OR skirt the open ends. Biome hint: TUNDRA (a frozen ford).
+        {
+            "..................",
+            "..................",
+            ".......#....#.....",
+            "....o..#....#..o..",
+            "......^^^^^^^^....",
+            "......^^^^^^^^....",
+            "......^^^^^^^^....",
+            "....o..#....#..o..",
+            ".......#....#.....",
+            "..................",
+            "..................",
+        },
+        new[] // REDANS — an ASYMMETRIC diagonal GAUNTLET: a staggered sawtooth of angular high-cover
+              // fieldworks marches corner-to-corner so every advance up the slant is enfiladed by the
+              // NEXT work's firing face — you're never safe in the open between them. A tier-1 KNOLL
+              // anchors the upper-right flank as commanding high ground; seize it to see over the works
+              // and break the gauntlet, or grind the covered zig-zag lane. Low-cover nests give footing
+              // between the teeth. Distinct from SPUR's clean spine — this is repeated angular works.
+              // Biome hint: ASH (a ruined earthworks line).
+        {
+            "..................",
+            "....#......^^.....",
+            "...#.#....^^^^....",
+            "....#......^^.....",
+            ".....#....o.......",
+            "......#....#......",
+            ".......o..#.#.....",
+            "....o...#....#....",
+            ".........#...#....",
+            "..........#.......",
+            "..................",
+        },
+        new[] // DONJON — a walled tier-2 ('=') KEEP whose commanding core is reached by a SINGLE
+              // walkable tier-1 ('^') RAMP on the west face; the other three faces are high-cover walls
+              // pierced only by firing SLITS (the gaps in row 2 & the flanks). Unlike BASTION (breach
+              // the wall) you take the keep by fighting to the ramp mouth and climbing — a set-piece
+              // assault on a gated vantage. Scattered pillars + low-cover nests bracket the two open
+              // approach lanes. The tier-2 summit sees over all cover and dominates the field.
+              // Biome hint: STEEL.
+        {
+            "..................",
+            "......#####.......",
+            "......#.#.#.......",
+            "......#.=.#..o....",
+            "....o.^^==.#......",
+            "......^.==.#......",
+            "....o.^^==.#......",
+            "......#.=.#..o....",
+            "......#####.......",
+            "..................",
+            "..................",
+        },
     };
 }
