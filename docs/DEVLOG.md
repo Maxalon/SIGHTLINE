@@ -881,3 +881,42 @@ dead choices revived (FRAG CACHE 3→95, STIMS 41→87, SCAVENGER a top boon); b
 4 review/integration) — per-turn depth (renewable verbs), a new tactical axis (telegraphed artillery),
 run-to-run variety (field events), a balance root-fix pass, and 4 arenas. 13 self-tests green, build 0/0,
 flywheel-validated (h0 70.8% / h4 50%, clean ladder), all reviews SHIP.**
+
+---
+
+## PROGRAM "HORIZON" — legs (modes + cross-run meta) + integrity + identity
+
+Fully-autonomous dev-team session (orchestrator + a 4-lens code-grounded research fan-out — combat-depth /
+meta-loop / presentation / blue-sky — + per-wave dev agents, one in an isolated worktree, + the
+`SIGHTLINE_BALANCE` flywheel). Branch `claude/game-dev-orchestration-a6jxac`, PR #67.
+
+**Thesis (from research, grounded in code not the devlog):** SIGHTLINE is tactically deep but (a) has no reason
+to replay beyond one ~30-min sitting — only `MaxHeat`+`LossStreak` ever persisted, saves are deleted, every run
+rebuilds the same 4 soldiers; (b) has a measurement-integrity gap; (c) under-sells the engine visually. Seven waves:
+
+- **W1 combat integrity + honest flywheel** (`f36f0e3`): the balance bot's promised `SmartRetreatAfterShot` never
+  existed → the smart AI never repositioned after firing, so the "post-shot positioning" the tempo metric counts was
+  never played (the ~6.15 choices/turn was partly an artifact). Implemented it. Added EXPOSED BY FIRE (a unit that
+  fired and didn't move is +12 aim/+12 crit to hit next turn, symmetric to the ambush) → post-shot "duck vs
+  double-tap" is now a real bet. Measured (honest flywheel, heat-0 N=20): run-completion 80%, policy gap +10.
+- **W2 LAST STAND endless horde** (`86b3cb8`, flagship): a new mode reusing the kernel — escalating full-roster
+  waves on one arena, WAVES SURVIVED + persistent BEST WAVE. `class Game`→`partial`; logic in `Game.Endless.cs`.
+- **W3 WAR ROOM cross-run meta** (`a8112a7`, keystone): persistent SALVAGE, achievements, a Hall of Fame, and
+  additive unlocks — all gated behind `!NoPersist` so the flywheel/harness stay byte-stable (verified: an autoplay
+  campaign writes no meta.json). `Meta.cs` + `Game.Meta.cs`.
+- **W5 visual identity leap** (`970fea2`, parallel worktree): fixed the inverted hierarchy (units were the smallest
+  thing on the board) — bigger unit figures/silhouettes, receded cover, per-biome structural signatures, bloom punch.
+  Integrated by a 3-way cherry-pick (worktree branched off the pre-VANTAGE base; a file-copy would have reverted
+  VANTAGE's lights).
+- **W6 CODEX / FIELD MANUAL** (`4d62415`): a browsable in-game reference built from existing Def strings (onboarding).
+- **W7 audio drop-in infra** (`42991d9`): fixed the csproj so `assets/sfx|music` actually ship (the file-first loader
+  could never find drop-ins); folders + CREDITS + device-free file validation. Owner adds CC0 files.
+- **W4 SEEDED DAILY + SKIRMISH** (`b3451ee`): two single-mission modes complete the intro (DEPLOY / LAST STAND /
+  SKIRMISH / DAILY); the daily is deterministic (same date-seed → identical sim).
+
+**Process:** Game.cs is the serialization point → its waves ran sequentially (one owner each); the disjoint visual
+wave ran in parallel in a worktree. Gotcha re-confirmed: an agent's transcript-stub can look dead while the agent is
+actually succeeding — trust the completion notification, not an idle-waiter. Build 0/0; full self-test sweep PASSES
+(new HORDETEST/METATEST/CODEXTEST/MODETEST + all prior); all four modes autoplay clean; campaign balance held
+(heat-0 80%). No CI; free-licensed assets only. Open: real CC0 audio on a device; endless difficulty tuning on a
+device; a veteran carry-over between runs; the deferred full Game.cs partial-split.
