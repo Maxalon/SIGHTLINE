@@ -775,15 +775,32 @@ public class Run
     // ---- run-opening squad draft (Wave 3) ----
     /// The number of recruits offered in the run-opening draft (pick DraftCap of these).
     public const int DraftPoolSize = 6;
+    // COUNTERPLAY: at most this many of the draft's DraftPoolSize candidates are recalled VETERANS
+    // (the rest are fresh recruits), so a returning legacy is a bonus option, never the whole squad —
+    // this bounds the power creep while giving the run continuity.
+    public const int MaxDraftVeterans = 2;
 
-    /// Build the run-opening DRAFT candidate pool: DraftPoolSize fresh recruits with class
-    /// VARIETY (no more than 2 of any single class) so the pick is a real "what squad thesis"
-    /// decision, not a random dump. Deterministic-friendly (Mission.MakeRecruit -> Util.RandInt).
-    /// Pure construction — does NOT touch run state, so it's safe to call from the self-test.
-    public static List<Unit> GenerateDraftPool()
+    /// Build the run-opening DRAFT candidate pool: up to MaxDraftVeterans recalled VETERANS (most-storied
+    /// first, from the cross-run reserve) followed by fresh recruits with class VARIETY (no more than 2 of
+    /// any single class) so the pick is a real "what squad thesis" decision, not a random dump.
+    /// Deterministic-friendly (Mission.MakeRecruit -> Util.RandInt). Pure construction — does NOT touch
+    /// run state, so it's safe to call from the self-test. `veterans` null/empty == the all-fresh pool
+    /// (the harness/self-test path, byte-stable).
+    public static List<Unit> GenerateDraftPool(List<Unit> veterans = null)
     {
         var pool = new List<Unit>();
         var classCount = new Dictionary<string, int>();
+        // Phase 0 — seat up to MaxDraftVeterans recalled veterans (already most-storied-first from the
+        // reserve). They bypass the class-variety cap (a returning legend is a deliberate exception) but
+        // still count toward the pool size, so the fresh phases fill the remainder.
+        if (veterans != null)
+            foreach (var v in veterans)
+            {
+                if (pool.Count >= MaxDraftVeterans) break;
+                pool.Add(v);
+                classCount.TryGetValue(v.Cls, out int vc);
+                classCount[v.Cls] = vc + 1;
+            }
         // Phase 1 — seed DISTINCT classes first (cap 1 each), so the draft always offers a broad spread
         // (with 5 classes and a 6-card pool, every class appears at least once: the choice is which to
         // DOUBLE up + who to leave behind, not "which 3 classes did the dice give me"). Bounded re-roll.

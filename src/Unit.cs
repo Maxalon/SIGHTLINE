@@ -446,6 +446,8 @@ public class Unit
     public int PodId = -1;      // activation-pod grouping (enemies only)
 
     public bool IsVip;          // escort objective: the asset to extract (mission-only, never persists)
+    public bool FromReserve;    // COUNTERPLAY: a returning VETERAN recalled from the cross-run reserve
+                                // (draft-screen display flag; transient, never persisted)
     public bool Enraged;        // elite boss: one-time low-HP rage trigger
     public int ShieldDx, ShieldDy;  // SHIELD archetype: facing dir its frontal shield blocks (3.7)
 

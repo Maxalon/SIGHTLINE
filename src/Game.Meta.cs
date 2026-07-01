@@ -20,6 +20,7 @@ public partial class Game
     {
         public int Salvage;
         public int Runs, Wins, BestMissions, BestWave;
+        public int Veterans;   // COUNTERPLAY: size of the cross-run veteran reserve
         public HashSet<string> Achievements = new();
         public HashSet<int> Unlocks = new();
         public List<SaveGame.LegendDto> Legends = new();
@@ -44,6 +45,7 @@ public partial class Game
         var (runs, wins, best) = SaveGame.LoadRunTotals();
         p.Runs = runs; p.Wins = wins; p.BestMissions = best;
         p.BestWave = SaveGame.LoadMetaBestWave();
+        p.Veterans = SaveGame.VeteranCount();
         foreach (var a in SaveGame.LoadAchievements()) p.Achievements.Add(a);
         foreach (var u in SaveGame.LoadUnlocks()) p.Unlocks.Add(u);
         p.Legends = SaveGame.LoadLegends();
@@ -94,7 +96,7 @@ public partial class Game
         WarRoom = new WarRoomProfile
         {
             Salvage = 155,
-            Runs = 12, Wins = 3, BestMissions = 6, BestWave = 14,
+            Runs = 12, Wins = 3, BestMissions = 6, BestWave = 14, Veterans = 5,
         };
         WarRoom.Achievements.Add("FIRST_WIN");
         WarRoom.Achievements.Add("HEAT3");

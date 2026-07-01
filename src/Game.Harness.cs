@@ -1540,6 +1540,97 @@ public partial class Game
             : "DRAFTTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
+    // ── VETTEST (SIGHTLINE_VETTEST): the cross-run VETERAN reserve — enshrine promoted survivors, recall
+    // them into a future draft carrying rank/perks/traits/spec/scars, dedupe by name, cap the reserve, and
+    // keep the fresh/harness draft path an all-rookie pool. Preserves/restores the real meta.json. ──────
+    public static string VetSelfTest()
+    {
+        var fails = new List<string>();
+        string metaSaved = System.IO.File.Exists(SaveGame.MetaPathPublic)
+            ? System.IO.File.ReadAllText(SaveGame.MetaPathPublic) : null;
+        try
+        {
+            try { if (System.IO.File.Exists(SaveGame.MetaPathPublic)) System.IO.File.Delete(SaveGame.MetaPathPublic); } catch { }
+
+            // (1) a fresh profile has no veterans, and an all-fresh draft pool carries NO reserve unit
+            if (SaveGame.LoadVeterans().Count != 0) fails.Add("freshNotEmpty");
+            foreach (var u in Run.GenerateDraftPool()) if (u.FromReserve) fails.Add("freshPoolHasVet");
+
+            // (2) enshrine a promoted, storied veteran -> it round-trips with its progression intact
+            var v = new Unit { Name = "VEGA", Cls = "ASSAULT", Team = Team.Player, MaxHp = 12, Hp = 12, Aim = 80, Mobility = 8, Kills = 9, Rank = 3, Alive = true };
+            v.Nickname = "REAPER"; v.Weapon = Weapon.Make(WeaponKind.Rifle);
+            v.Perks.Add(Perk.Deadeye); v.Perks.Add(Perk.Tank);
+            v.Traits.Add(Trait.Killer); v.Spec = Spec.Breacher; v.Scars.Add(Scar.ShellShocked);
+            SaveGame.EnshrineVeterans(new[] { v });
+            var got = SaveGame.LoadVeterans();
+            if (got.Count != 1) fails.Add($"enshrineCount={got.Count}");
+            else
+            {
+                var g0 = got[0];
+                if (g0.Name != "VEGA" || g0.Rank != 3 || g0.Kills != 9) fails.Add("vetStats");
+                if (!g0.HasPerk(Perk.Deadeye) || !g0.HasPerk(Perk.Tank)) fails.Add("vetPerks");
+                if (!g0.HasTrait(Trait.Killer) || g0.Spec != Spec.Breacher || !g0.HasScar(Scar.ShellShocked)) fails.Add("vetIdentity");
+                if (g0.Nickname != "REAPER") fails.Add("vetNick");
+                if (!g0.FromReserve) fails.Add("vetNotFlagged");
+            }
+
+            // (3) dedupe by name — a returning name updates in place (newer record wins), not duplicated
+            var v2 = new Unit { Name = "VEGA", Cls = "ASSAULT", Team = Team.Player, MaxHp = 12, Hp = 12, Aim = 82, Kills = 14, Rank = 4, Alive = true, Weapon = Weapon.Make(WeaponKind.Rifle) };
+            SaveGame.EnshrineVeterans(new[] { v2 });
+            var ded = SaveGame.LoadVeterans();
+            if (ded.Count != 1) fails.Add($"dedupeCount={ded.Count}");
+            else if (ded[0].Kills != 14 || ded[0].Rank != 4) fails.Add("dedupeNotUpdated");
+
+            // (4) cap at MaxVeterans, keeping the most-storied (highest kills). Enshrine MaxVeterans+4 fresh
+            //     names with ASCENDING kills; the lowest-kills few must be dropped.
+            int extra = SaveGame.MaxVeterans + 4;
+            var batch = new List<Unit>();
+            for (int i = 0; i < extra; i++)
+                batch.Add(new Unit { Name = $"OP{i}", Cls = "RANGER", Team = Team.Player, MaxHp = 8, Hp = 8, Kills = 20 + i, Rank = 2, Alive = true, Weapon = Weapon.Make(WeaponKind.Shotgun) });
+            SaveGame.EnshrineVeterans(batch);
+            var capped = SaveGame.LoadVeterans();
+            if (capped.Count != SaveGame.MaxVeterans) fails.Add($"cap={capped.Count}(want{SaveGame.MaxVeterans})");
+            if (capped.Exists(u => u.Name == "OP0")) fails.Add("capKeptLeastStoried");   // OP0 (lowest kills) must be gone
+            if (!capped.Exists(u => u.Name == $"OP{extra - 1}")) fails.Add("capDroppedMostStoried");
+
+            // (5) a draft recalls up to MaxDraftVeterans of them (FromReserve), pool stays DraftPoolSize
+            var pool = Run.GenerateDraftPool(SaveGame.LoadVeterans());
+            if (pool.Count != Run.DraftPoolSize) fails.Add($"vetPoolSize={pool.Count}");
+            int vetInPool = pool.FindAll(u => u.FromReserve).Count;
+            if (vetInPool == 0 || vetInPool > Run.MaxDraftVeterans) fails.Add($"vetInPool={vetInPool}(want1..{Run.MaxDraftVeterans})");
+            int freshInPool = pool.FindAll(u => !u.FromReserve).Count;
+            if (freshInPool != Run.DraftPoolSize - vetInPool) fails.Add("poolFreshFill");
+        }
+        catch (Exception e) { return "VETTEST: FAIL (exception " + e.Message + ")"; }
+        finally
+        {
+            if (metaSaved != null) { try { System.IO.File.WriteAllText(SaveGame.MetaPathPublic, metaSaved); } catch { } }
+            else { try { if (System.IO.File.Exists(SaveGame.MetaPathPublic)) System.IO.File.Delete(SaveGame.MetaPathPublic); } catch { } }
+        }
+        return fails.Count == 0
+            ? $"VETTEST: PASS (enshrine+recall carries rank/perks/traits/spec/scars; dedupe; cap {SaveGame.MaxVeterans}; draft seats <={Run.MaxDraftVeterans} veterans)"
+            : "VETTEST: FAIL (" + string.Join(",", fails) + ")";
+    }
+
+    /// Harness (screenshot): the run-opening DRAFT with recalled VETERANS seeded into the pool, so the
+    /// gold veteran cards + carried-progression dossier are visible (BeginDraft suppresses veterans under
+    /// NoPersist for byte-stability, so this injects demo veterans directly).
+    public void DebugVetDraft()
+    {
+        var demo = new List<Unit>();
+        var a = new Unit { Name = "VEGA", Cls = "ASSAULT", Team = Team.Player, MaxHp = 13, Hp = 13, Aim = 82, Mobility = 8, Kills = 21, Rank = 4, Alive = true, Weapon = Weapon.Make(WeaponKind.Rifle), FromReserve = true };
+        a.Nickname = "REAPER"; a.Perks.Add(Perk.Deadeye); a.Perks.Add(Perk.Tank); a.Perks.Add(Perk.LockOn); a.Traits.Add(Trait.Killer); a.Traits.Add(Trait.ColdBlood);
+        var b = new Unit { Name = "NOX", Cls = "SHARPSHOOTER", Team = Team.Player, MaxHp = 8, Hp = 8, Aim = 88, Mobility = 6, Kills = 15, Rank = 3, Alive = true, Weapon = Weapon.Make(WeaponKind.Sniper), FromReserve = true };
+        b.Nickname = "GHOST"; b.Perks.Add(Perk.Marksman); b.Traits.Add(Trait.Vengeful);
+        demo.Add(a); demo.Add(b);
+        DraftPool = Run.GenerateDraftPool(demo);
+        DraftBoonOffer = Run.GenerateDraftBoonOffer();
+        DraftPicked = new HashSet<Unit>();
+        DraftSelectedBoon = null;
+        DraftSelectedContract = null;
+        Phase = Phase.Draft;
+    }
+
     /// Harness (screenshot): show the event screen at a mid column.
     public void DebugEvent()
     {

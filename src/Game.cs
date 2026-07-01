@@ -619,7 +619,9 @@ public partial class Game
     /// (the autoplay/balance/screenshot paths call StartMission directly).
     public void BeginDraft()
     {
-        DraftPool = Run.GenerateDraftPool();
+        // COUNTERPLAY: recall the cross-run VETERAN reserve into the draft (up to Run.MaxDraftVeterans of
+        // them). Under NoPersist (harness) no disk is read -> an all-fresh pool -> byte-stable + no TIMEOUT.
+        DraftPool = Run.GenerateDraftPool(NoPersist ? null : SaveGame.LoadVeterans());
         DraftBoonOffer = Run.GenerateDraftBoonOffer();
         DraftPicked = new HashSet<Unit>();
         DraftSelectedBoon = null;
@@ -1280,6 +1282,13 @@ public partial class Game
 
         // 3) lifetime totals
         SaveGame.RecordRunTotals(win, missions);
+
+        // 3b) VETERAN reserve (COUNTERPLAY): promoted survivors of this run retire into the persistent
+        // reserve, recallable by a future run's draft carrying their rank/perks/traits/spec/scars. Applies
+        // on a WIN or a survivable loss (a squad wipe leaves no survivors -> enshrines nobody). A Rank>=1
+        // (promoted-at-least-once) gate keeps green rookies out so the reserve stays a roster of legends.
+        var vets = _run.Squad.Where(u => u.Alive && !u.IsVip && u.Rank >= 1).ToList();
+        if (vets.Count > 0) SaveGame.EnshrineVeterans(vets);
 
         // 4) ACHIEVEMENTS (each a one-time salvage bounty on first unlock)
         if (win)
