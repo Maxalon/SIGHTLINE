@@ -324,6 +324,10 @@ public static class Hud
             Raylib.DrawRectangleLinesEx(cpill, 1.5f, Raylib.Fade(Pal.Friend, 0.5f * pulse));
             CenterText("CONCEALED", cpill, 14, Raylib.Fade(Pal.Friend, pulse));
         }
+        else if (g.Mode == GameMode.Endless)
+        {
+            Raylib.DrawTextEx(Cfg.Font, "LAST STAND", new Vector2(200, 19), 16, 1f, Raylib.Fade(Pal.Foe, 0.85f));
+        }
         else
         {
             Raylib.DrawTextEx(Cfg.Font, $"MISSION {g.RunState.Mission}/{Run.MaxMissions}", new Vector2(200, 19), 16, 1f, Pal.TxtDim);
@@ -333,6 +337,13 @@ public static class Hud
         // the secondary-bonus tracker + the pressure meter. The exception is a gold ASSET/HVT
         // objective (escort/rescue/decapitate), where gold is the semantic role for the thing you
         // protect or hunt — and the objective glyph carries the type by shape regardless of hue.
+        // PROGRAM HORIZON W2: LAST STAND replaces the objective readout with the WAVE/BEST counter.
+        if (g.Mode == GameMode.Endless)
+        {
+            Raylib.DrawTextEx(Cfg.Font, g.EndlessHud, new Vector2(360, 19), 16, 1f, Pal.Foe);
+        }
+        else
+        {
         string objTxt; Color objCol;
         switch (g.Objective)
         {
@@ -363,6 +374,7 @@ public static class Hud
         // collides with the SQUAD tally.
         if (g.PressureClockHud)
             DrawPressureMeter(g, 460, 12);
+        }   // end non-endless objective readout (PROGRAM HORIZON W2)
 
         // counts (the VIP isn't a combatant, so it's excluded from the squad tally). Centered, but
         // shifted right of board-center so the left of the bar (objective + pressure meter) has room.
@@ -1338,6 +1350,18 @@ public static class Hud
             DrawOverlayButton(OverlayBtn, btn, Pal.Friend, null, btnIn);
         }
 
+        // PROGRAM HORIZON W2: LAST STAND (endless horde survival) — a secondary mode button below
+        // DEPLOY/CONTINUE, with a persisted BEST WAVE label so the run has a target to beat.
+        float lsIn = PanelAnim("introLastStand", 0.3f, 0.62f);
+        int lsBy = by + 62;
+        OverlayBtn3 = new Rectangle(W / 2 - 130, lsBy, 260, 44);
+        DrawOverlayButton(OverlayBtn3, "LAST STAND", Pal.Foe, "L", lsIn);
+        int bestWave = g.EndlessBestWave;
+        string bestTxt = bestWave > 0 ? $"BEST: {bestWave} WAVE{(bestWave == 1 ? "" : "S")}" : "ENDLESS HORDE SURVIVAL";
+        Vector2 bwm = Raylib.MeasureTextEx(Cfg.Font, bestTxt, 12, 1f);
+        Raylib.DrawTextEx(Cfg.Font, bestTxt, new Vector2(W / 2f - bwm.X / 2f, lsBy + 50), 12, 1f,
+            Raylib.Fade(bestWave > 0 ? Pal.Foe : Pal.TxtDim, 0.8f * Util.EaseOutQuad(Util.Clamp(lsIn, 0f, 1f))));
+
         // a faint version/footer stamp
         Raylib.DrawTextEx(Cfg.Font, "GEOMETRY · PARTICLES · NO QUARTER", new Vector2(W / 2f - 150, H - 30), 11, 1f, Raylib.Fade(Pal.TxtDim, 0.6f));
     }
@@ -1481,7 +1505,15 @@ public static class Hud
         // ---- subtitle / reason ----
         float subIn = PanelAnim("endSub", 0.4f, 0.2f);
         int mission = run?.Mission ?? 1;
-        string sub = win
+        string sub;
+        if (g.Mode == GameMode.Endless)
+        {
+            // PROGRAM HORIZON W2: LAST STAND end card — waves survived + the persisted best.
+            int best = g.EndlessBestWave;
+            sub = $"SURVIVED {g.Wave} WAVE{(g.Wave == 1 ? "" : "S")}"
+                + (best > 0 ? $"   ·   BEST {best}" : "");
+        }
+        else sub = win
             ? $"All {Run.MaxMissions} missions cleared. The squad stands victorious."
             : (string.IsNullOrEmpty(g.LoseReason) ? $"The squad fell on mission {mission}." : g.LoseReason);
         Vector2 sm = Raylib.MeasureTextEx(Cfg.Font, sub, 16, 1f);
@@ -2644,6 +2676,7 @@ public static class Hud
 
     public static Rectangle OverlayBtn;
     public static Rectangle OverlayBtn2;   // intro CONTINUE-run button (when a save exists)
+    public static Rectangle OverlayBtn3;   // intro LAST STAND (endless) button (PROGRAM HORIZON W2)
 
     /// Intro Heat/Ascension selector: a side panel with a HEAT dial (+/- buttons, arrows/A-D),
     /// the unlocked ceiling, and the live list of modifiers active at the dialled level. Heat

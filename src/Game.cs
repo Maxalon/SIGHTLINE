@@ -12,10 +12,17 @@ public enum Phase { Intro, PlayerTurn, EnemyTurn, Barracks, Win, Lose, Draft }
 // objective. Add new objectives at the END only. (SaveGame.SelfTest asserts the tail ordinal.)
 public enum Objective { Eliminate, Evac, Hack, Escort, Sabotage, Rescue, Defend, Decapitate }
 public enum SecondaryKind { None, NoLosses, Swift, CleanSweep }  // optional per-mission bonus goal (3.9)
+// PROGRAM HORIZON W2: game modes. Campaign = the 6-mission run (all prior behaviour); Endless =
+// LAST STAND horde survival on one arena. APPEND-ONLY (Mode isn't persisted, but keep it stable).
+public enum GameMode { Campaign, Endless }
 enum AiStage { PickNext, Telegraph, ActAfterMove }
 
-public class Game
+public partial class Game
 {
+    // PROGRAM HORIZON W2: which mode this game instance is running. Default Campaign keeps every
+    // existing path byte-identical; the endless logic lives in the Game.Endless.cs partial.
+    public GameMode Mode = GameMode.Campaign;
+    public int Wave;   // LAST STAND: current wave (0 until the first spawns). HUD/end card read it.
     public Grid Grid = new();
     public List<Unit> Players = new();
     public List<Unit> Enemies = new();
@@ -750,6 +757,9 @@ public class Game
         // objective + difficulty come from the chosen deployment card (Run.ObjectiveFor baseline)
         var card = _run.CurrentCard ?? Run.StandardCard(n);
         Objective = card.Objective;
+        // PROGRAM HORIZON W2: LAST STAND is a pure kill-the-horde arena — force Eliminate so every
+        // objective-gated setup block below (evac/terminal/sabotage/escort/rescue) is a no-op.
+        if (Mode == GameMode.Endless) Objective = Objective.Eliminate;
         EvacZone.Clear();
         HackProgress = 0;
         SabotageSites.Clear();
@@ -822,6 +832,10 @@ public class Game
         Grid.ClearHazards();              // wipe last mission's fire/barrels before terrain is rebuilt
         Mission.Build(Grid, Players, Enemies, n, EvacZone, reserve,
                       enemyDelta, statDelta, HasSabotage ? SabotageSites : null);
+        // PROGRAM HORIZON W2: Mission.Build laid out the arena + spawned a normal campaign force.
+        // For LAST STAND we don't want that force — clear it and drop in the first horde wave (the
+        // arena/terrain stays). SpawnEndlessWave uses the SpawnReinforcements machinery.
+        if (Mode == GameMode.Endless) { Enemies.Clear(); SpawnEndlessWave(1); }
         if (Vip != null) { Vip.Grenades = 0; Vip.AbilityCd = 99; }  // the asset has no kit (never ready)
         if (Objective == Objective.Rescue && Vip != null)
         {
@@ -854,7 +868,10 @@ public class Game
         Phase = Phase.PlayerTurn;
         // 4.4: every mission opens with the squad concealed -- UNLESS Heat "EXPOSED" strips it, OR
         // CONTRACT "SPEARHEAD" (aggressive doctrine: open loud, no ambush). Inert as None.
-        SquadConcealed = !Sightline.Heat.Exposed(_run.HeatLevel)
+        // PROGRAM HORIZON W2: LAST STAND opens LOUD — the foes are an already-engaged horde, so there
+        // is no ambush window; the squad starts unconcealed and fights immediately.
+        SquadConcealed = Mode != GameMode.Endless
+                         && !Sightline.Heat.Exposed(_run.HeatLevel)
                          && _run.Contract != Contract.Spearhead;
         _spearheadSurgeUsed = false;          // the turn-1 action surge is fresh each mission
         foreach (var u in Players) u.BeginTurn();
@@ -876,7 +893,8 @@ public class Game
         _vipWaitTurns = 0;           // SmartStep Escort: VIP-hold patience (anti-TIMEOUT)
         _smartConcealTurns = 0;      // SmartStep: concealed-turn counter (hard anti-TIMEOUT cap)
         DeathFlash = 0;
-        RollSecondary(n);
+        if (Mode != GameMode.Endless) RollSecondary(n);   // no per-mission bonus goal in LAST STAND
+        else { Secondary = SecondaryKind.None; SecondaryFailed = false; }
         foreach (var u in Enemies) { u.BeginTurn(); u.OnOverwatch = false; }
         Selected = Players.FirstOrDefault(p => p.CanAct);
         AimMode = false;
@@ -885,12 +903,17 @@ public class Game
         ItemMode = false;
         ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false; DragMode = false; VaultMode = false;
         Biome = Biome.For(n, _run.MapSeed);   // per-run biome variety (surfaces NEON/MAGMA across seeds)
-        string facTag = Combat.MissionFaction != Faction.None ? $" - {Run.FactionName(Combat.MissionFaction)}" : "";
-        ShowBanner($"MISSION {n} - {Biome.Name}{facTag}", false);
-        StartTutorialMaybe();
+        if (Mode != GameMode.Endless)
+        {
+            string facTag = Combat.MissionFaction != Faction.None ? $" - {Run.FactionName(Combat.MissionFaction)}" : "";
+            ShowBanner($"MISSION {n} - {Biome.Name}{facTag}", false);
+            StartTutorialMaybe();
+        }
+        else ShowBanner($"LAST STAND - {Biome.Name}", false);   // SpawnEndlessWave already banner'd WAVE 1
 
-        // checkpoint the run at the start of each mission (normal play only)
-        if (!NoPersist) SaveGame.Save(_run);
+        // checkpoint the run at the start of each mission (normal play only). LAST STAND is
+        // transient — it is never resumable, so it never writes save.json.
+        if (!NoPersist && Mode != GameMode.Endless) SaveGame.Save(_run);
 
         // balance telemetry (no-op unless Stats.Enabled): record the encounter we just built.
         Stats.BeginMission(n, Objective.ToString(), _run.HeatLevel,
@@ -2632,6 +2655,9 @@ public class Game
     {
         if (Phase != Phase.PlayerTurn && Phase != Phase.EnemyTurn) return;
         if (_anims.Count > 0) return;
+        // PROGRAM HORIZON W2: LAST STAND runs its own end/advance logic (wipe = run over; clearing a
+        // wave spawns the next). It NEVER touches the campaign objective ladder or the checkpoint valve.
+        if (Mode == GameMode.Endless) { CheckEndless(); return; }
         var alivePlayers = AlivePlayers();
         if (alivePlayers.Count == 0)
         {
@@ -3945,7 +3971,13 @@ public class Game
         // batch ALWAYS terminates well before the frame cap — never a RESULT: TIMEOUT. Only ever fires
         // in autoplay (this method is autoplay-only); real play is unaffected.
         if (_turnCount > AutoMaxTurns)
-        { LoseRun("STALEMATE", $"Autopilot exceeded the turn cap on mission {_run.Mission}."); return; }
+        {
+            // PROGRAM HORIZON W2: in LAST STAND the "turn cap" just ends the horde run cleanly at the
+            // waves survived so far (route through EndEndless, not the campaign LoseRun).
+            if (Mode == GameMode.Endless) { EndEndless(); return; }
+            LoseRun("STALEMATE", $"Autopilot exceeded the turn cap on mission {_run.Mission}.");
+            return;
+        }
 
         int sig = AliveEnemies().Count * 1000
                 + AliveEnemies().Count(e => e.Active) * 10
@@ -7427,6 +7459,15 @@ public class Game
             if (cont && ContinueRun()) return;
         }
 
+        // PROGRAM HORIZON W2: intro LAST STAND — begin the endless horde mode (button or key L).
+        if (Phase == Phase.Intro)
+        {
+            bool endless = (Raylib.IsMouseButtonPressed(MouseButton.Left) &&
+                            Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.OverlayBtn3))
+                           || Raylib.IsKeyPressed(KeyboardKey.L);
+            if (endless) { BeginEndless(); return; }
+        }
+
         bool click = Raylib.IsMouseButtonPressed(MouseButton.Left) &&
                      Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.OverlayBtn);
         bool enter = Raylib.IsKeyPressed(KeyboardKey.Enter);
@@ -7437,8 +7478,9 @@ public class Game
         // founding squad + starting boon). The harness NEVER reaches here (it calls StartMission
         // DIRECTLY, bypassing the intro), but gate on !NoPersist defensively so the smoke test /
         // balance batch can never enter Phase.Draft (which would have no autopilot path -> hang).
-        else if (!NoPersist) BeginDraft();
-        else StartMission();
+        // PROGRAM HORIZON W2: NEW RUN after a LAST STAND returns to the CAMPAIGN — reset the mode so
+        // the fresh run isn't left in endless (which has no campaign flow).
+        else { Mode = GameMode.Campaign; if (!NoPersist) BeginDraft(); else StartMission(); }
     }
 
     // ---------------- draw ----------------

@@ -94,7 +94,22 @@ public static class SaveGame
         var d = LoadMetaDto(); d.LossStreak = Math.Max(0, streak); WriteMetaDto(d);
     }
 
-    class MetaDto { public int MaxHeat; public int LossStreak; }
+    /// PROGRAM HORIZON W2 (LAST STAND): the best endless wave ever reached, persisted across
+    /// sessions in the shared meta.json (append-only, whole-DTO read-modify-write so it never
+    /// clobbers MaxHeat/LossStreak). 0 on a fresh profile.
+    public static int LoadMetaBestWave() => Math.Max(0, LoadMetaDto().BestWave);
+
+    public static void SaveMetaBestWave(int wave)
+    {
+        var d = LoadMetaDto(); d.BestWave = Math.Max(0, wave); WriteMetaDto(d);
+    }
+
+    // append-only: new fields default to 0, so an old meta.json (heat/streak only) still loads.
+    class MetaDto { public int MaxHeat; public int LossStreak; public int BestWave; }
+
+    /// Test-only accessor to the meta.json path (used by Game.HordeSelfTest to preserve/restore any
+    /// real meta while it round-trips BestWave). Not for gameplay use.
+    public static string MetaPathPublic => MetaPath;
 
     // ---- mapping ----
     static RunDto ToDto(Run r)

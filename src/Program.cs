@@ -187,6 +187,14 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        // SIGHTLINE_HORDETEST=1 : LAST STAND endless horde — wave count/scale escalation + alive-cap + meta BestWave round-trip (HORIZON W2).
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_HORDETEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "hordetest");   // SpawnEndless* + SetupMission use tile->px math
+            Console.WriteLine(new Game().HordeSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         // SIGHTLINE_MISSION=<n> : start the harness on mission n (verify Hack/Evac maps).
         int startMission = int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_MISSION"), out int sm) ? sm : 1;
 
@@ -259,9 +267,17 @@ public static class Program
             Mission.ForcedLayout = forcedMap;
         bool introShot = shot && Environment.GetEnvironmentVariable("SIGHTLINE_INTRO") == "1";
         if (introShot) { var r = new Run(); r.Start(); r.Mission = 3; SaveGame.Save(r); }
-        if ((shot || autoplay) && !introShot) game.StartMission(startMission);
+        // PROGRAM HORIZON W2: LAST STAND harness entry. SIGHTLINE_ENDLESS=1 boots straight into the
+        // endless horde mode (BeginEndless) instead of a campaign mission. AutoPlay/SmartPlay/NoPersist
+        // must be set BEFORE BeginEndless (it reads NoPersist for the heat dial-in).
+        bool endless = Environment.GetEnvironmentVariable("SIGHTLINE_ENDLESS") == "1";
         if (autoplay) game.AutoPlay = true;
         if (smartplay) game.SmartPlay = true;
+        if ((shot || autoplay) && !introShot)
+        {
+            if (endless) game.BeginEndless();
+            else game.StartMission(startMission);
+        }
         // force an objective for verification (e.g. SIGHTLINE_OBJ=sabotage|rescue), shot or autoplay
         switch (Environment.GetEnvironmentVariable("SIGHTLINE_OBJ"))
         {
@@ -342,6 +358,14 @@ public static class Program
             }
             if (autoplay)
             {
+                // PROGRAM HORIZON W2: LAST STAND reports WAVES SURVIVED. A hard wave cap (30) plus the
+                // Lose/frame-cap paths guarantee the endless autopilot always terminates (no TIMEOUT).
+                if (game.Mode == GameMode.Endless)
+                {
+                    if (game.Phase == Phase.Lose || game.Wave >= 30 || frame >= autoCap)
+                    { Console.WriteLine($"RESULT: ENDLESS waves={game.Wave} frame={frame}"); break; }
+                    continue;   // still surviving — keep fighting
+                }
                 if (game.Phase == Phase.Win) { Console.WriteLine($"RESULT: WIN mission={game.RunState.Mission} frame={frame}"); break; }
                 if (game.Phase == Phase.Lose) { Console.WriteLine($"RESULT: LOSE mission={game.RunState.Mission} frame={frame}"); break; }
                 if (frame >= autoCap) { Console.WriteLine($"RESULT: TIMEOUT mission={game.RunState.Mission} frame={frame}"); break; }
