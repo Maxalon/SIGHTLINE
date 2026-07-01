@@ -462,6 +462,8 @@ public class Unit
     public AlertLevel Alert = AlertLevel.Alert;
     public bool Active => Alert == AlertLevel.Alert;
     public int PodId = -1;      // activation-pod grouping (enemies only)
+    public int Routed;          // UNDERTOW W3: turns of ROUT remaining (enemies only; counts down in BeginTurn,
+                                // rallies at 0). While >0 the unit flees + won't overwatch + shoots wild. Transient.
 
     public bool IsVip;          // escort objective: the asset to extract (mission-only, never persists)
     public bool FromReserve;    // COUNTERPLAY: a returning VETERAN recalled from the cross-run reserve
@@ -636,9 +638,15 @@ public class Unit
     public const int BleedDamage = 1;    // Bleed: HP lost per tile moved
     public const int DisorientAim = 15;  // Disoriented: aim penalty (+ no overwatch)
 
+    // UNDERTOW W3 — ROUT: a broken enemy fights wild. While Routed>0 (set when its pod's morale
+    // breaks — see Game.BreakPodMorale), it flees toward its own edge, won't hold overwatch, and
+    // shoots at a heavy aim penalty. It counts down one of the unit's turns at a time and RALLIES at 0.
+    public const int RoutAim = 18;       // aim penalty while routed (a panicked unit can't shoot straight)
+
     public void BeginTurn()
     {
         if (AbilityCd > 0) AbilityCd--;   // signature ability cools down one of THIS unit's turns
+        if (Routed > 0) Routed--;         // UNDERTOW W3: a routed pod rallies one turn at a time
         ActionsLeft = 2;
         OnOverwatch = false;
         OwFocused = false;         // focused-overwatch cone is per-arming (same lifecycle as OnOverwatch)

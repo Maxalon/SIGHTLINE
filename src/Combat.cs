@@ -251,6 +251,7 @@ public static class Combat
         if (a.Pinned > 0) hit -= SuppressAim;    // gunner SUPPRESSING FIRE: pinned foe shoots wild (area denial)
         if (a.Wound > 0) hit -= Unit.WoundAim;   // attrition: a wounded shooter is shakier
         if (a.HasStatus(StatusKind.Disoriented)) hit -= Unit.DisorientAim;  // dazed: can't aim straight
+        if (a.Routed > 0) hit -= Unit.RoutAim;   // UNDERTOW W3: a broken/routing unit shoots wild
         // promotion perks (attacker)
         if (a.HasPerk(Perk.LockOn) && coverLevel == 0) hit += Unit.PerkAim;
         if (a.HasPerk(Perk.CloseQuarters) && dist <= Unit.CloseRange) hit += Unit.PerkAim;

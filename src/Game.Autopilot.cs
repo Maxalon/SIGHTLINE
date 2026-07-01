@@ -1189,13 +1189,17 @@ public partial class Game
         var pushers = Enemies.Where(e => e.Alive && e.Active
             && Util.TileDist(u.X, u.Y, e.X, e.Y) <= e.Weapon.MaxRange + e.Mobility).ToList();
         if (pushers.Count == 0) return false;
-        // UNDERTOW W2 probe: choose BRACE (deny the pusher's action) over a LETHAL overwatch when the
-        // nearest pusher is too durable to drop on a single reaction — trade a kill we won't land for
-        // tempo denial (the "can't finish -> disrupt" read a human makes). Otherwise a normal watch to
-        // actually kill it. This keeps brace a bounded, sensible pick AND makes the flywheel exercise it.
+        // UNDERTOW W2 probe: BRACE is a LOSING-POSITION tool — denying a pusher's action buys a turn but
+        // forgoes damage, so ROUTINE bracing loses the attrition race (it inverts the policy gap). A good
+        // player braces only to PROTECT a threatened wounded soldier from a finishing blow it can't
+        // prevent by killing the shooter. Gate on exactly that: a durable pusher + a low-HP squadmate in
+        // its reach. Otherwise a normal lethal watch. This keeps brace a rare, genuinely-good pick and
+        // makes the flywheel exercise it in the comeback situations it's for.
         var pusher = pushers.OrderBy(e => Util.TileDist(u.X, u.Y, e.X, e.Y)).First();
         bool cantKillOnReaction = pusher.Hp > u.Weapon.DmgMax;
-        if (cantKillOnReaction) DoBrace(); else DoOverwatch();
+        bool woundedUnderThreat = Players.Any(p => p.Alive && !p.IsVip && p.MaxHp > 0 && p.Hp * 2 <= p.MaxHp
+            && pushers.Any(e => Util.TileDist(p.X, p.Y, e.X, e.Y) <= e.Weapon.MaxRange + e.Mobility));
+        if (cantKillOnReaction && woundedUnderThreat) DoBrace(); else DoOverwatch();
         return true;
     }
 

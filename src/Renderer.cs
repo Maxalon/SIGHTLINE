@@ -1934,6 +1934,10 @@ public static class Renderer
         else if (u.Steady) Raylib.DrawTextEx(Cfg.Font, "AIM", new Vector2((int)(p.X + 18), (int)(p.Y - 34)), 11, 1f, Pal.Good);
         if (u.Team == Team.Enemy && u.Suppress > 0)
             Raylib.DrawTextEx(Cfg.Font, "SUPP", new Vector2((int)(p.X + 17), (int)(p.Y - 34)), 11, 1f, Pal.Foe);
+        // UNDERTOW W3 — a ROUTED (broken) enemy reads clearly: it's fleeing + shooting wild, so the
+        // player knows this threat is temporarily neutralized (the earned comeback beat).
+        if (u.Team == Team.Enemy && u.Routed > 0)
+            Raylib.DrawTextEx(Cfg.Font, "ROUT", new Vector2((int)(p.X + 17), (int)(p.Y - 34)), 11, 1f, Pal.Good);
 
         // combat status effects (3.5): stacked codes below the figure — W5: dropped to clear the bigger body
         if (u.Statuses.Count > 0)

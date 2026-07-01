@@ -987,6 +987,74 @@ public partial class Game
             : "STAGGERTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
+    /// SIGHTLINE_MORALETEST — UNDERTOW W3: enemy pod MORALE / ROUT. On a controlled scene asserts:
+    /// (1) killing one of a 2-unit pod ROUTS the survivor (BreakPodMorale threshold), (2) a routed unit
+    /// shoots WILD (Combat aim penalty), (3) a routed unit FLEES (Ai.Plan moves it farther from the
+    /// squad) and does NOT hold overwatch, (4) the rout RALLIES (Routed decays in BeginTurn). Returns a
+    /// one-line report.
+    public string MoraleSelfTest()
+    {
+        NoPersist = true;
+        var fails = new System.Collections.Generic.List<string>();
+        _run = new Run(); _run.Start();          // KillUnit reads run state; enemy death doesn't touch Fallen but be safe
+
+        // ---- controlled scene: empty 18x11 floor, no cover (LoS always clear) ----
+        Grid = new Grid();
+        Players = new System.Collections.Generic.List<Unit>();
+        Enemies = new System.Collections.Generic.List<Unit>();
+        Vip = null; CaptiveLocked = false; Hvt = null;
+        Objective = Objective.Eliminate;
+        EvacZone.Clear();
+
+        Unit MkP(string name, int x, int y) {
+            var u = new Unit { Name = name, Cls = "ASSAULT", Team = Team.Player, X = x, Y = y,
+                               Hp = 8, MaxHp = 8, Aim = 65, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+            u.Ammo = u.Weapon.Clip; u.SyncPos(); u.BeginTurn(); return u;
+        }
+        Unit MkE(string name, int x, int y, int pod) {
+            var u = new Unit { Name = name, Cls = "GRUNT", Team = Team.Enemy, X = x, Y = y,
+                               Hp = 6, MaxHp = 6, Aim = 60, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle), PodId = pod };
+            u.Ammo = u.Weapon.Clip; u.Alert = AlertLevel.Alert; u.SyncPos(); u.BeginTurn(); return u;
+        }
+
+        var sol = MkP("SOL", 4, 5);
+        Players.Add(sol);
+        var e1 = MkE("E1", 8, 5, 0);
+        var e2 = MkE("E2", 9, 5, 0);             // same pod 0, spawn size 2
+        Enemies.Add(e1); Enemies.Add(e2);
+        _podOrig.Clear(); _podOrig[0] = 2;
+
+        // (1) killing one of the 2-unit pod routs the survivor
+        e1.Hp = 0; KillUnit(e1);
+        if (e2.Routed != RoutDuration) fails.Add($"survivorNotRouted={e2.Routed}");
+
+        // (2) a routed unit shoots WILD (Combat aim penalty vs the same unit calm)
+        int routedHit = Combat.ComputeOdds(Grid, e2, sol).HitChance;
+        e2.Routed = 0;
+        int calmHit = Combat.ComputeOdds(Grid, e2, sol).HitChance;
+        e2.Routed = RoutDuration;                // restore for the flee check
+        if (routedHit >= calmHit) fails.Add($"routNoAimPenalty r={routedHit} c={calmHit}");
+
+        // (3) a routed unit FLEES (Ai.Plan moves it FARTHER from the soldier) and won't overwatch
+        _aiUnits = AliveEnemies().Where(x => x.Active).ToList();
+        PlanEnemySquad();
+        var plan = Ai.Plan(this, e2);
+        var dest = plan.Path.Count > 0 ? plan.Path[^1] : (x: e2.X, y: e2.Y);
+        float distNow  = Util.TileDist(e2.X, e2.Y, sol.X, sol.Y);
+        float distDest = Util.TileDist(dest.x, dest.y, sol.X, sol.Y);
+        if (distDest <= distNow) fails.Add($"routedDidNotFlee now={distNow:0.0} dest={distDest:0.0}");
+        if (plan.Overwatch) fails.Add("routedHeldOverwatch");
+
+        // (4) rout RALLIES: BeginTurn counts Routed down
+        int before = e2.Routed;
+        e2.BeginTurn();
+        if (e2.Routed != before - 1) fails.Add($"routDidNotDecay {before}->{e2.Routed}");
+
+        return fails.Count == 0
+            ? "MORALETEST: PASS (pod break routs survivor; routed flees + drops watch + shoots wild; rallies over turns)"
+            : "MORALETEST: FAIL (" + string.Join(",", fails) + ")";
+    }
+
     /// Headless self-test (SIGHTLINE_STATUSTEST): status effects tick, decay, and read
     /// correctly — burning/bleed DoT, stun (lose an action), disoriented (aim + no
     /// overwatch). Needs a tiny window (Game uses tile math). Returns a one-line report.

@@ -137,6 +137,14 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        // SIGHTLINE_MORALETEST=1 : UNDERTOW W3 — enemy pod morale / rout.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_MORALETEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "moraletest");
+            Console.WriteLine(new Game().MoraleSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         // SIGHTLINE_TRAITTEST=1 : feats -> traits/nicknames + bonds round-trip (item 3.2). No window.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_TRAITTEST") == "1")
         {

@@ -569,6 +569,10 @@ public partial class Game
     bool  _autoCamManual;   // true = player manually moved camera; suppresses auto-follow until C-reset
     public float DeathFlash;                 // 0..1 red full-screen pulse on a soldier's death
     readonly List<string> _missionKia = new(); // soldiers KIA this mission (for the debrief)
+    // UNDERTOW W3 — pod MORALE: a pod that drops to <= half its original strength ROUTS its survivors.
+    // _podOrig snapshots each pod's spawn size at mission start; the break/threshold logic is BreakPodMorale.
+    readonly Dictionary<int, int> _podOrig = new();
+    public const int RoutDuration = 2;         // enemy turns a broken pod flees before it can rally (decrements in BeginTurn)
 
     // Death scorch decals: where a unit fell, a dark team-tinted burn mark lingers on the tile
     // and fades over ~ScorchLife seconds (decayed in Update, drawn under units in Renderer, cleared
@@ -929,7 +933,11 @@ public partial class Game
         // per-mission bonus goal is a CAMPAIGN feature only — no secondary in LAST STAND or SKIRMISH/DAILY.
         if (Mode == GameMode.Campaign) RollSecondary(n);
         else { Secondary = SecondaryKind.None; SecondaryFailed = false; }
-        foreach (var u in Enemies) { u.BeginTurn(); u.OnOverwatch = false; }
+        foreach (var u in Enemies) { u.BeginTurn(); u.OnOverwatch = false; u.Routed = 0; }
+        // UNDERTOW W3: snapshot each pod's spawn strength so BreakPodMorale can tell when a pod has
+        // been chewed down to <= half and should rout its survivors (wave hostiles are PodId<0, ungrouped).
+        _podOrig.Clear();
+        foreach (var e in Enemies) if (e.PodId >= 0) _podOrig[e.PodId] = _podOrig.GetValueOrDefault(e.PodId) + 1;
         Selected = Players.FirstOrDefault(p => p.CanAct);
         AimMode = false;
         SnapShot = false;
@@ -1575,6 +1583,32 @@ public partial class Game
         // DECAPITATE: a death may have removed the HVT's last in-range guard — re-evaluate now so the
         // HVT is immediately exposed (the telegraph + reduced-damage gate flip the same frame).
         UpdateHvtGuard();
+        // UNDERTOW W3: a hostile's death may break its pod's morale (rout the survivors).
+        if (d.Team == Team.Enemy && d.PodId >= 0) BreakPodMorale(d);
+    }
+
+    /// UNDERTOW W3 — pod ROUT: when a pod is chewed down to <= half its spawn strength (a lone survivor
+    /// of a 2-unit pod always qualifies), its remaining ACTIVE members break and ROUT for RoutDuration
+    /// turns — they flee toward their own edge, drop overwatch, and shoot wild (Unit.Routed drives
+    /// Ai.Plan + Combat). This makes the SECOND kill in a pod worth far more than the first: focus-firing
+    /// a pod down is a genuine, earnable comeback swing (a routed pod stops trading -> the player's
+    /// HP-sum stabilizes). Survivors RALLY when Routed counts back to 0 (BeginTurn), so it's never a stall.
+    void BreakPodMorale(Unit dead)
+    {
+        int pod = dead.PodId;
+        if (pod < 0) return;
+        var mates = Enemies.Where(e => e.Alive && e.PodId == pod).ToList();
+        if (mates.Count == 0) return;                       // whole pod gone — no one left to break
+        int orig = _podOrig.GetValueOrDefault(pod, mates.Count + 1);
+        if (mates.Count > Math.Max(1, orig / 2)) return;    // still at fighting strength — holds the line
+        bool broke = false;
+        foreach (var m in mates)
+            if (m.Active && m.Routed == 0) { m.Routed = RoutDuration; broke = true; }
+        if (!broke) return;                                 // survivors dormant or already routing
+        var ldr = mates.FirstOrDefault(m => m.Active) ?? mates[0];
+        Fx.PopText(ldr.Pos + new Vector2(0, -34), "BROKEN", Pal.Good, 20f);
+        Fx.Flash(ldr.Pos, Pal.Good, 26f, 0.2f, 0.5f);
+        ShowBanner("POD ROUTED", false);
     }
 
     /// True when killing `d` decides the mission (last hostile on an Eliminate, a squad
