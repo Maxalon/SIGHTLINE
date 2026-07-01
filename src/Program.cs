@@ -80,6 +80,13 @@ public static class Program
             Console.WriteLine(Audio.SelfTest());
             return;
         }
+        // SIGHTLINE_AUDIOASSETS=1 : device-free report of which cues resolve to a dropped-in CC0
+        // FILE vs the procedural synth (HORIZON W7). No window; 0 files = the current default.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_AUDIOASSETS") == "1")
+        {
+            Console.Write(Audio.AudioAssetsReport());
+            return;
+        }
         // SIGHTLINE_AMBIENTTEST=1 : per-biome ambient field stays bounded/finite/on-board (Phase 5). No window.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_AMBIENTTEST") == "1")
         {

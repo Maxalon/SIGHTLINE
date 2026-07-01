@@ -17,6 +17,12 @@
   <ItemGroup>
     <None Include="assets/NotoMono-Regular.ttf" CopyToOutputDirectory="PreserveNewest" />
     <None Include="assets/NotoMono-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" />
+    <!-- HORIZON W7 — ship any dropped-in CC0 audio so the file-first/synth-fallback loader can
+         actually find it at runtime (working dir = output dir; previously these were NOT copied,
+         so a dropped-in file could never load). Globs match nothing until files are added, so this
+         is a no-op on the current asset-free repo. Keep committed audio small (see assets/*/CREDITS.txt). -->
+    <None Include="assets/sfx/**" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="assets/music/**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

@@ -1,0 +1,27 @@
+SIGHTLINE — sound-effect drop-in folder (HORIZON W7)
+====================================================
+
+The game synthesises all SFX procedurally at runtime (see src/Audio.cs). But the loader is
+FILE-FIRST: for every cue it looks here for a real sample and only falls back to the synth if
+none is found. So you can upgrade the audio by dropping files in — no code changes needed.
+
+HOW
+  Put a file named  <cue-id>.ogg   (or .wav)  in this folder.
+  On the next launch it overrides that cue's procedural sound automatically.
+  (Sightline.csproj copies assets/sfx/** to the build output, so committed files ship.)
+
+CUE IDS (drop any subset; the rest stay procedural)
+  Weapons : w_rifle  w_shotgun  w_sniper  w_lmg  w_smg
+  Combat  : shoot  hit  crit  miss  over  death
+  UI/turn : select  move  reload  hunker  turn  win  lose
+  Stingers: st_kill  st_lastkill  st_victory  st_lose  st_squadwipe
+
+GUIDELINES (keep the repo lean + legal)
+  - CC0 / public-domain ONLY (free to use AND redistribute in any context, incl. a shipped game).
+    Good sources: freesound.org (filter License = CC0), kenney.nl, sonniss GDC bundles (CC0).
+  - Mono, 22–44 kHz, trimmed tight. Keep each file small (well under ~200 KB); no large binaries.
+  - Prefer .ogg (the bundled Raylib decodes OGG/MP3/QOA/WAV). SFX are short one-shots.
+  - Record what you added + its source/license below.
+
+FILES ADDED
+  (none yet — all cues are procedural)
