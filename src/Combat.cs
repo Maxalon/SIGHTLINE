@@ -253,7 +253,12 @@ public static class Combat
         if (a.HasStatus(StatusKind.Disoriented)) hit -= Unit.DisorientAim;  // dazed: can't aim straight
         if (a.Routed > 0) hit -= Unit.RoutAim;   // UNDERTOW W3: a broken/routing unit shoots wild
         // promotion perks (attacker)
-        if (a.HasPerk(Perk.LockOn) && coverLevel == 0) hit += Unit.PerkAim;
+        // UNDERTOW W5 — LockOn de-superset: fires only vs a FLANKED target (its cover doesn't protect from
+        // this angle), not vs ANY exposed target. "coverLevel==0" was the MODAL combat state, so LockOn was
+        // a strict superset of the range/state-gated aim perks (CloseQuarters/Marksman) and dominated picks
+        // (34 vs ~2-4). As a FLANK reward it's now a positional perk that rewards out-positioning — a real
+        // build choice, not the biggest always-on number. (flanked already accounts for seesOver.)
+        if (a.HasPerk(Perk.LockOn) && flanked) hit += Unit.PerkAim;
         if (a.HasPerk(Perk.CloseQuarters) && dist <= Unit.CloseRange) hit += Unit.PerkAim;
         if (a.HasPerk(Perk.Marksman) && dist >= Unit.LongRange) hit += Unit.PerkAim;
         // SIEGEBREAKER (anti-turtle): +aim vs a HUNKERED target — claws back part of the -25 hunker
@@ -1069,6 +1074,12 @@ public static class Combat
             // sanity: the hunkered foe really is harder to hit than the active one (the -25 penalty is live),
             // so the perk is clawing back a real deficit rather than padding an already-easy shot.
             if (sgPlainHit >= ComputeOdds(gW6Sg, MkPlain(), sgActive).HitChance) fails.Add("siegebreakerHunkerPenaltyLive");
+
+            // ---- UNDERTOW W5 — LOCKON de-superset: +PerkAim aim only vs a FLANKED target, NOT vs a merely
+            // EXPOSED one. On the open field sgActive has NO cover (exposed, coverLevel==0) but is NOT
+            // flanked, so LockOn must now be INERT here (it used to fire on any exposed target — the
+            // superset that killed the situational perks). ----
+            if (ComputeOdds(gW6Sg, MkPerk(Perk.LockOn), sgActive).HitChance != ComputeOdds(gW6Sg, MkPlain(), sgActive).HitChance) fails.Add("lockOnExposedNoOp");
         }
 
         // FRAGILE-UNIT ONE-SHOT FLOOR: a full-HP PLAYER unit can't be dropped below 1 HP by a single

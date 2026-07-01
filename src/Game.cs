@@ -4506,16 +4506,17 @@ public partial class Game
             // 1) heal a hurt/wounded soldier first (only ever needed once per pass — CanBuy(0)
             //    goes false once everyone is topped up).
             if (offer.Contains(0) && CanBuy(0)) pick = 0;
-            // 2) else top up armor while a soldier is under the cap and it's on this slate.
-            else if (offer.Contains(4) && CanBuy(4)) pick = 4;
             else
             {
-                // 3) else the cheapest other beneficial item in the slate (weapon mods / frag /
-                //    stims). Skip the perk pick (2) and PREP (situational player calls).
+                // 2) else the cheapest beneficial item in the slate. UNDERTOW W5: BALLISTIC PLATING (item 4)
+                //    is NO LONGER a dedicated 2nd priority — that "always top up armor" rule is exactly why
+                //    the flywheel bought it 369x (a dead economy the audit flagged). Armor now competes on
+                //    cost with stims/frag/mags like everything else, so purchases spread. Skip only the perk
+                //    pick (2, a real choice) and PREP (situational player calls).
                 int bestCost = int.MaxValue;
                 foreach (int i in offer)
                 {
-                    if (i == 0 || i == 2 || i == 4) continue;
+                    if (i == 2) continue;
                     if (IsPrepItem(i)) continue;
                     if (CanBuy(i) && ShopCostAt(i) < bestCost) { pick = i; bestCost = ShopCostAt(i); }
                 }
