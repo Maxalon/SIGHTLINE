@@ -5,6 +5,10 @@ goals, who (which agent role) did what, review/QA outcomes, and merge decisions.
 It complements `CLAUDE.md` (the build/continuity contract) and `docs/DESIGN.md`
 (the rationale contract). The orchestrator (tech lead) maintains this file.
 
+> **Raw history:** the unabridged per-session WIP notes that used to live in `CLAUDE.md`
+> were migrated to [`docs/DEVLOG-ARCHIVE.md`](DEVLOG-ARCHIVE.md) on 2026-07-01. This is
+> the curated log; append session write-ups here, not to `CLAUDE.md`.
+
 **Team roles** (realised as subagents):
 - **PM / Research** — surveys the codebase + design docs, produces the prioritized backlog.
 - **Architect** — turns a backlog item into a precise, file-by-file implementation plan.
