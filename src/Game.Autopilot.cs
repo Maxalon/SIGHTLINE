@@ -1186,10 +1186,16 @@ public partial class Game
     {
         if (u.Ammo <= 0 || u.ActionsLeft <= 0 || u.HasStatus(StatusKind.Disoriented)) return false;
         // a foe that's active and within a turn's move + weapon reach is a credible pusher.
-        bool foesWillPush = Enemies.Any(e => e.Alive && e.Active
-            && Util.TileDist(u.X, u.Y, e.X, e.Y) <= e.Weapon.MaxRange + e.Mobility);
-        if (!foesWillPush) return false;
-        DoOverwatch();
+        var pushers = Enemies.Where(e => e.Alive && e.Active
+            && Util.TileDist(u.X, u.Y, e.X, e.Y) <= e.Weapon.MaxRange + e.Mobility).ToList();
+        if (pushers.Count == 0) return false;
+        // UNDERTOW W2 probe: choose BRACE (deny the pusher's action) over a LETHAL overwatch when the
+        // nearest pusher is too durable to drop on a single reaction — trade a kill we won't land for
+        // tempo denial (the "can't finish -> disrupt" read a human makes). Otherwise a normal watch to
+        // actually kill it. This keeps brace a bounded, sensible pick AND makes the flywheel exercise it.
+        var pusher = pushers.OrderBy(e => Util.TileDist(u.X, u.Y, e.X, e.Y)).First();
+        bool cantKillOnReaction = pusher.Hp > u.Weapon.DmgMax;
+        if (cantKillOnReaction) DoBrace(); else DoOverwatch();
         return true;
     }
 

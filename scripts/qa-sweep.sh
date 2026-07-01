@@ -15,6 +15,8 @@ echo "=== BUILD (Release) ==="
 dotnet build -c Release 2>&1 | grep -E "error|Error|Warning\(s\)|Build succeeded" | head -20
 
 echo "=== SELF-TESTS ==="
+echo -n "DKTEST     : "; SIGHTLINE_DKTEST=1     run | grep -oE "DKTEST: (PASS|FAIL)" | head -1
+echo -n "STAGGERTEST: "; SIGHTLINE_STAGGERTEST=1 run | grep -oE "STAGGERTEST: (PASS|FAIL)" | head -1
 echo -n "COMBATTEST : "; SIGHTLINE_COMBATTEST=1 run | grep -oE "COMBATTEST: (PASS|FAIL)" | head -1
 echo -n "SAVETEST   : "; SIGHTLINE_SAVETEST=1  run | grep -oE "SAVETEST: (PASS|FAIL)" | head -1
 echo -n "AITEST     : "; SIGHTLINE_AITEST=1    run | grep -oE "AITEST: (PASS|FAIL)" | head -1

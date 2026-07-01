@@ -660,6 +660,7 @@ public static class Hud
         Add("vault", "VAULT", "9", interactive && g.CanVault(u), g.VaultMode);
         Add("overwatch", "OVERWATCH", "2", interactive && u != null && u.CanAct && u.Ammo > 0, false);
         Add("focusow", "FOCUS", "F", interactive && u != null && u.CanAct && u.Ammo > 0, false);   // braced cone watch
+        Add("brace", "BRACE", "B", interactive && u != null && u.CanAct && u.Ammo > 0, false);      // UNDERTOW W2: disrupting interrupt watch
         Add("hunker", "HUNKER", "3", interactive && u != null && u.CanAct, u != null && u.Hunkered);
         if (g.HasHackAction)
             Add("hack", g.HasSabotage ? "PLANT" : "HACK", "H", interactive && g.CanHack(u), false);
@@ -828,6 +829,22 @@ public static class Hud
                 }
                 // pupil dot
                 Raylib.DrawCircleV(new Vector2(cx, cy), r2, c);
+                break;
+            }
+            case "brace":
+            {
+                // Interrupt glyph: two facing brackets clamping a centre bar (a "hold/stagger" cue).
+                float hw = 6f, hh = 6f;
+                // left bracket [
+                Raylib.DrawLineEx(new Vector2(cx - hw, cy - hh), new Vector2(cx - hw, cy + hh), 1.8f, c);
+                Raylib.DrawLineEx(new Vector2(cx - hw, cy - hh), new Vector2(cx - hw + 3f, cy - hh), 1.6f, c);
+                Raylib.DrawLineEx(new Vector2(cx - hw, cy + hh), new Vector2(cx - hw + 3f, cy + hh), 1.6f, c);
+                // right bracket ]
+                Raylib.DrawLineEx(new Vector2(cx + hw, cy - hh), new Vector2(cx + hw, cy + hh), 1.8f, c);
+                Raylib.DrawLineEx(new Vector2(cx + hw, cy - hh), new Vector2(cx + hw - 3f, cy - hh), 1.6f, c);
+                Raylib.DrawLineEx(new Vector2(cx + hw, cy + hh), new Vector2(cx + hw - 3f, cy + hh), 1.6f, c);
+                // centre bar being clamped
+                Raylib.DrawLineEx(new Vector2(cx - 2.5f, cy), new Vector2(cx + 2.5f, cy), 2.2f, c);
                 break;
             }
             case "hunker":
@@ -1068,6 +1085,8 @@ public static class Hud
             case "drag": return "Pull an adjacent ally 1 tile toward you (saves wounded, speeds the march to evac). 1 action, won't end your turn, once/turn.";
             case "vault": return "Leap an adjacent cover tile to the open floor beyond it - cross an impassable screen to flank or escape. 1 action, won't end your turn, once/turn.";
             case "overwatch": return "Watch: fire a reaction shot at the first foe that moves in sight.";
+            case "focusow": return "Braced kill-lane: reaction fire only inside a 90-degree cone toward the aimed tile, but at +aim. Blind outside the cone.";
+            case "brace": return "Brace a DISRUPTING reaction: on a hit it STAGGERS the mover (denies its action this turn) for reduced damage. Deny the enemy's alpha instead of going for the kill.";
             case "hunker": return "Hunker down for extra cover defense; you can't be crit.";
             case "hack": return g.HasSabotage
                 ? $"Plant a demolition charge on an adjacent site ({g.SabotageBlown.Count}/{g.SabotageSites.Count} set). Costs 1 action."

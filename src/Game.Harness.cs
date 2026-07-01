@@ -936,6 +936,57 @@ public partial class Game
             : "DKTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
+    /// SIGHTLINE_STAGGERTEST — UNDERTOW W2: the BRACE interrupt. Asserts (1) a BRACED watcher enqueues a
+    /// STAGGER reaction while a plain watch does not, and (2) a braced reaction that HITS a surviving
+    /// target zeroes its remaining actions this turn (its post-move offense is denied) + drops any held
+    /// watch, non-lethally. Uses the anim-drain pump so ShotAnim.Apply actually runs. Tiny window for
+    /// tile math. Returns a one-line report.
+    public string StaggerSelfTest()
+    {
+        NoPersist = true;
+        var fails = new System.Collections.Generic.List<string>();
+        _run = new Run(); _run.Start();
+        SetupMission(1);
+
+        var w = Players.First(u => u.Alive && !u.IsVip);
+        var e = Enemies.First(x => x.Alive);
+        e.X = w.X + 1; e.Y = w.Y; e.SyncPos(); e.Alert = AlertLevel.Alert;   // adjacent, clear LoS
+
+        // (1) reaction-site branch: a BRACED watcher enqueues a Stagger-flagged reaction; a plain watch doesn't.
+        w.OnOverwatch = true; w.OwBrace = true; w.OwFocused = false; w.ReactedThisTurn = false; w.Ammo = 5;
+        _anims.Clear();
+        OnUnitEnteredTile(e);
+        var braceShot = _anims.OfType<ShotAnim>().FirstOrDefault(s => s.D == e);
+        if (braceShot == null) fails.Add("noBraceReaction");
+        else if (!braceShot.Stagger) fails.Add("braceReactionNotFlagged");
+
+        w.OnOverwatch = true; w.OwBrace = false; w.OwFocused = false; w.ReactedThisTurn = false; w.Ammo = 5;
+        _anims.Clear();
+        OnUnitEnteredTile(e);
+        var owShot = _anims.OfType<ShotAnim>().FirstOrDefault(s => s.D == e);
+        if (owShot != null && owShot.Stagger) fails.Add("plainOverwatchStaggered");
+        _anims.Clear();
+
+        // (2) Apply effect: a braced reaction that HITS zeroes the surviving target's remaining actions this
+        // turn + drops its watch (deterministic — forced-hit, small non-lethal damage).
+        e.Hp = e.MaxHp; e.ActionsLeft = 2; e.OnOverwatch = true;
+        var res = new ShotResult { Hit = true, Crit = false, Graze = false, Damage = 1 };
+        Enqueue(new ShotAnim(w, e, res, reaction: true) { Stagger = true }, Team.Player);
+        while (_anims.Count > 0)
+        {
+            var a = _anims[0]; a.OnStart(this);
+            for (int i = 0; i < 200 && !a.Update(this, 0.05f); i++) { }
+            if (_anims.Count > 0 && _anims[0] == a) _anims.RemoveAt(0);
+        }
+        if (e.ActionsLeft != 0) fails.Add($"notStaggered={e.ActionsLeft}");
+        if (!e.Alive)          fails.Add("staggerKilledSurvivor");
+        if (e.OnOverwatch)     fails.Add("staggerKeptWatch");
+
+        return fails.Count == 0
+            ? "STAGGERTEST: PASS (brace flags a disrupting reaction; plain watch doesn't; a hit zeroes the target's actions + drops its watch, non-lethally)"
+            : "STAGGERTEST: FAIL (" + string.Join(",", fails) + ")";
+    }
+
     /// Headless self-test (SIGHTLINE_STATUSTEST): status effects tick, decay, and read
     /// correctly — burning/bleed DoT, stun (lose an action), disoriented (aim + no
     /// overwatch). Needs a tiny window (Game uses tile math). Returns a one-line report.

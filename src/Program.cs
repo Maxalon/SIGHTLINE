@@ -129,6 +129,14 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        // SIGHTLINE_STAGGERTEST=1 : UNDERTOW W2 — BRACE interrupt (disrupting reaction staggers on hit).
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_STAGGERTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "staggertest");
+            Console.WriteLine(new Game().StaggerSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         // SIGHTLINE_TRAITTEST=1 : feats -> traits/nicknames + bonds round-trip (item 3.2). No window.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_TRAITTEST") == "1")
         {

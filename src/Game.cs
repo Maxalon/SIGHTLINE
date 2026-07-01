@@ -1431,9 +1431,14 @@ public partial class Game
             int reactMod = -10 + (w.HasPerk(Perk.Reflexes) ? 75 : 0) + (w.HasPerk(Perk.Guardian) ? Unit.GuardianAim : 0)
                               + (w.OwFocused ? Combat.FocusOwAim : 0);   // COUNTERPLAY: braced kill-lane aim
             var res = Combat.Resolve(Grid, w, mover, reactMod);
-            Fx.PopText(w.Pos + new Vector2(0, -30), "OVERWATCH", Pal.Accent, 18f);
+            // UNDERTOW W2 — BRACE: a disrupting reaction. It STAGGERS on a hit (ShotAnim.Apply zeroes the
+            // mover's remaining actions) but deals reduced damage + never crits, so it's a real trade vs a
+            // lethal overwatch (deny tempo instead of going for the kill), not a strict upgrade.
+            bool brace = w.OwBrace;
+            if (brace && res.Hit) { res.Damage = Math.Max(1, res.Damage / 2); res.Crit = false; }
+            Fx.PopText(w.Pos + new Vector2(0, -30), brace ? "BRACE" : "OVERWATCH", brace ? Pal.Good : Pal.Accent, 18f);
             Audio.Play("over");
-            var shot = new ShotAnim(w, mover, res, reaction: true);
+            var shot = new ShotAnim(w, mover, res, reaction: true) { Stagger = brace };
             // OnStart runs when this reaction becomes the active anim (Started is false),
             // by which point the mover has settled on the reacted-to tile.
             _anims.Insert(Math.Min(insertAt, _anims.Count), shot);
@@ -2587,6 +2592,7 @@ public partial class Game
         if (Raylib.IsKeyPressed(KeyboardKey.One)) ToggleAim();
         if (Raylib.IsKeyPressed(KeyboardKey.Two)) DoOverwatch();
         if (Raylib.IsKeyPressed(KeyboardKey.F)) DoFocusOverwatch();   // COUNTERPLAY: braced cone watch
+        if (Raylib.IsKeyPressed(KeyboardKey.B)) DoBrace();            // UNDERTOW W2: disrupting interrupt watch
         if (Raylib.IsKeyPressed(KeyboardKey.Three)) DoHunker();
         if (Raylib.IsKeyPressed(KeyboardKey.Four)) ToggleGrenade();
         if (Raylib.IsKeyPressed(KeyboardKey.Five)) DoAbility();
@@ -2807,6 +2813,7 @@ public partial class Game
             case "ability": DoAbility(); break;
             case "overwatch": DoOverwatch(); break;
             case "focusow": DoFocusOverwatch(); break;
+            case "brace": DoBrace(); break;
             case "hunker": DoHunker(); break;
             case "hack": DoHack(); break;
             case "extract": DoExtract(); break;
@@ -3305,6 +3312,26 @@ public partial class Game
             Selected.OwDirX = dx; Selected.OwDirY = dy;
             Fx.PopText(Selected.Pos + new Vector2(0, -30), "FOCUS", Pal.VipGold, 18f);
         }
+        Audio.Play("over");
+        AimMode = false;
+        _tutOver = true;
+    }
+
+    /// UNDERTOW W2 — BRACE: the INTERRUPT half of the reaction economy. Instead of a lethal overwatch,
+    /// the soldier holds a DISRUPTING reaction: its reaction shot deals reduced damage but, on a hit,
+    /// STAGGERS the mover (zeroes its remaining actions this turn -> its post-move offense is denied).
+    /// A behind player trades a kill for tempo — the earnable comeback lever. Rides the OnOverwatch
+    /// plumbing (threat map, ReactedThisTurn one-reaction cap); the reaction site reads OwBrace.
+    void DoBrace()
+    {
+        if (Selected == null || !Selected.CanAct || Selected.Ammo <= 0) return;
+        if (Selected.HasStatus(StatusKind.Disoriented))
+        { Fx.PopText(Selected.Pos + new Vector2(0, -30), "DISORIENTED", Pal.Foe, 16f); return; }
+        Selected.OnOverwatch = true;
+        Selected.OwBrace = true;
+        Selected.OwFocused = false;   // brace is a wide disrupting watch, not a cone
+        Selected.ActionsLeft = 0;
+        Fx.PopText(Selected.Pos + new Vector2(0, -30), "BRACE", Pal.Good, 18f);
         Audio.Play("over");
         AimMode = false;
         _tutOver = true;

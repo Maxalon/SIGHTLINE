@@ -1919,8 +1919,11 @@ public static class Renderer
         float ix = p.X - 10, iy = p.Y - 35;
         if (u.OnOverwatch)
         {
-            Raylib.DrawCircle((int)p.X, (int)(p.Y - 34), 6f, Raylib.Fade(Pal.Accent, 0.25f));
-            Raylib.DrawTextEx(Cfg.Font, "OW", new Vector2((int)(p.X - 9), (int)(p.Y - 39)), 10, 1f, Pal.Accent);
+            // UNDERTOW W2 — a BRACED watcher reads distinctly (green "BRC") from a lethal watch (accent "OW"):
+            // it disrupts rather than kills, so its badge shouldn't imply a kill-lane.
+            Color owc = u.OwBrace ? Pal.Good : Pal.Accent;
+            Raylib.DrawCircle((int)p.X, (int)(p.Y - 34), 6f, Raylib.Fade(owc, 0.25f));
+            Raylib.DrawTextEx(Cfg.Font, u.OwBrace ? "BRC" : "OW", new Vector2((int)(p.X - (u.OwBrace ? 11 : 9)), (int)(p.Y - 39)), 10, 1f, owc);
         }
         if (u.Hunkered)
             Raylib.DrawPoly(new Vector2(p.X, p.Y - 35), 4, 6f, 45f, Pal.Good);

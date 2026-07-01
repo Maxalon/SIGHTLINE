@@ -436,6 +436,13 @@ public class Unit
     // as OnOverwatch (armed on the player turn, reset in BeginTurn).
     public bool OwFocused;
     public int OwDirX, OwDirY;   // cone centre direction (raw dx,dy toward the aimed tile)
+    // UNDERTOW W2: BRACE — the INTERRUPT half of the reaction economy. A braced soldier holds a
+    // DISRUPTING reaction instead of a lethal one: its reaction shot deals reduced damage but, on a
+    // hit, STAGGERS the mover (zeroes its remaining actions this turn -> its post-move offense is
+    // denied). It's the inverse of overwatch (trade lethality for tempo denial) and a real comeback
+    // lever for a behind player. Rides the OnOverwatch plumbing (armed on the player turn, reset in
+    // BeginTurn; same ReactedThisTurn one-reaction cap). Transient, never persisted.
+    public bool OwBrace;
     public bool Hunkered;
     public bool ReactedThisTurn; // overwatch fired this round
     // SHOVE (forced-movement verb): a soldier may shove at most ONCE per turn. Combined with
@@ -635,6 +642,7 @@ public class Unit
         ActionsLeft = 2;
         OnOverwatch = false;
         OwFocused = false;         // focused-overwatch cone is per-arming (same lifecycle as OnOverwatch)
+        OwBrace = false;           // UNDERTOW W2: brace is per-arming, same lifecycle as OnOverwatch
         Hunkered = false;
         ReactedThisTurn = false;
         ShovedThisTurn = false;    // SHOVE: one per soldier per turn
