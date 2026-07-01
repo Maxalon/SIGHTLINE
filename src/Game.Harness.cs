@@ -503,8 +503,48 @@ public partial class Game
         int by = bplan.Path.Count > 0 ? bplan.Path[bplan.Path.Count - 1].y : bold.Y;
         if (Util.TileDist(bx, by, faraway.X, faraway.Y) >= startDist) fails.Add("fullHpDidNotAdvance");
 
+        // ---- UNDERTOW W4 — sequenced coordination: setup-first ordering + incremental focus recompute ----
+        {
+            Grid = new Grid();
+            Players = new System.Collections.Generic.List<Unit>();
+            Enemies = new System.Collections.Generic.List<Unit>();
+            Unit MkE2(string n, string cls, int x, int y) {
+                var u = new Unit { Name = n, Cls = cls, Team = Team.Enemy, X = x, Y = y, Hp = 6, MaxHp = 6,
+                                   Aim = 60, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+                u.Ammo = u.Weapon.Clip; u.Alert = AlertLevel.Alert; u.SyncPos(); return u;
+            }
+            Unit MkP2(string n, int x, int y, int hp) {
+                var u = new Unit { Name = n, Cls = "ASSAULT", Team = Team.Player, X = x, Y = y, Hp = hp, MaxHp = 8,
+                                   Aim = 65, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+                u.Ammo = u.Weapon.Clip; u.SyncPos(); return u;
+            }
+            // (a) IsSetupUnit: a SAPPER is a setup verb; a plain grunt far from any covered soldier is not.
+            var sapper = MkE2("SAP", "SAPPER", 8, 5);
+            var plain  = MkE2("GRT", "GRUNT",  9, 1);
+            var solF   = MkP2("SF", 4, 5, 8);
+            Players.Add(solF); Enemies.Add(plain); Enemies.Add(sapper);   // sapper added SECOND
+            if (!IsSetupUnit(sapper)) fails.Add("sapperNotSetup");
+            if (IsSetupUnit(plain))   fails.Add("gruntIsSetup");
+            // (b) the stable OrderBy puts the setup unit FIRST even though it was added last.
+            var ordered = AliveEnemies().Where(e => e.Active).ToList().OrderBy(e => IsSetupUnit(e) ? 0 : 1).ToList();
+            if (ordered.Count < 1 || ordered[0].Cls != "SAPPER") fails.Add("setupNotFirst");
+
+            // (c) incremental focus recompute responds to a LIVE board change: two exposed, shootable
+            //     soldiers -> focus picks the lower-HP one; drop the OTHER's HP and re-run -> focus flips.
+            Players.Clear();
+            var sHi = MkP2("HI", 6, 5, 8);
+            var sLo = MkP2("LO", 6, 6, 3);
+            Players.Add(sHi); Players.Add(sLo);
+            _aiUnits = AliveEnemies().Where(e => e.Active).ToList();
+            PlanEnemySquad();
+            if (EnemyFocus != sLo) fails.Add("focusNotLowHp=" + (EnemyFocus?.Name ?? "null"));
+            sHi.Hp = 1;                                   // a mid-turn hit/exposure drops the other soldier
+            PlanEnemySquad();                             // W4 recompute must see it and flip the focus
+            if (EnemyFocus != sHi) fails.Add("focusDidNotFlipLive=" + (EnemyFocus?.Name ?? "null"));
+        }
+
         return fails.Count == 0
-            ? "AITEST: PASS (focus picks killable+exposed; Ai.Plan biases to focus + flips; overwatch map mirrors reaction; retreat plan still acts)"
+            ? "AITEST: PASS (focus picks killable+exposed; Ai.Plan biases to focus + flips; overwatch map mirrors reaction; retreat plan still acts; W4 setup-first + live focus recompute)"
             : "AITEST: FAIL (" + string.Join(",", fails) + ")";
     }
 

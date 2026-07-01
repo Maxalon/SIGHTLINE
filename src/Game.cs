@@ -3903,6 +3903,11 @@ public partial class Game
         UpdateHvtGuard();                                        // DECAPITATE: refresh the HVT's guarded state at the boundary
         foreach (var e in Enemies) if (e.Alive) { e.BeginTurn(); TickStatuses(e); }
         _aiUnits = AliveEnemies().Where(e => e.Active).ToList();  // dormant/suspicious pods don't act
+        // UNDERTOW W4 — sequenced coordination: act SETUP verbs before FINISHERS. A SAPPER breach or a
+        // STRIKER/adjacent shove EXPOSES a soldier; ordering those units first lets the incremental focus
+        // recompute in PickNext collapse the pod onto the freshly-exposed target THIS SAME turn. Stable
+        // OrderBy — every unit still acts exactly once, so it's TIMEOUT-safe (only reorders a bounded list).
+        _aiUnits = _aiUnits.OrderBy(e => IsSetupUnit(e) ? 0 : 1).ToList();
         PlanEnemySquad();                                        // shared focus + overwatch map (advisory)
         _aiIdx = 0;
         _aiStage = AiStage.PickNext;
@@ -4024,6 +4029,18 @@ public partial class Game
     //                            can route around the kill zone (overwatch-aware movement).
     // Both are biases only; per-unit scoring still lets the fundamentals dominate, so no enemy
     // is ever forced into a no-progress choice (stall/timeout invariants are preserved).
+    /// UNDERTOW W4: true when this unit can EXPOSE a soldier THIS turn (a setup verb) — a SAPPER (breach
+    /// cover), a STRIKER (leap-shove), or any enemy standing adjacent to an IN-COVER soldier it could shove
+    /// out. These are ordered to act BEFORE the finishers so the pod collapses on the opening they create.
+    bool IsSetupUnit(Unit e)
+    {
+        if (e.Cls == "SAPPER" || e.Cls == "STRIKER") return true;
+        foreach (var p in Players)
+            if (p.Alive && !p.IsVip && Util.ChebyDist(e.X, e.Y, p.X, p.Y) == 1
+                && Grid.GetCover(p.X, p.Y, e.X, e.Y).Level > 0) return true;
+        return false;
+    }
+
     void PlanEnemySquad()
     {
         // ---- 1. shared focus target ----------------------------------------------------
@@ -4124,6 +4141,12 @@ public partial class Game
                 Fx.AddShake(8f);
                 ShowBanner(e.Name + " ENRAGED", true);
             }
+            // UNDERTOW W4 — incremental coordination: recompute the shared focus against the CURRENT board
+            // right before this unit plans, so a shove/breach an EARLIER unit just landed (exposing a
+            // soldier) redirects the pod onto that fresh opening THIS turn — vs the once-per-turn snapshot
+            // that never saw the setup. Advisory only (Ai.Plan reads focus as a bias), so no unit is ever
+            // forced into a no-progress choice; the stall/TIMEOUT invariants hold.
+            PlanEnemySquad();
             _aiPlan = Ai.Plan(this, e);
 
             // TELEGRAPH (non-autoplay only): before the unit moves/acts, hold a brief beat and
