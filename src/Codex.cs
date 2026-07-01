@@ -5,7 +5,7 @@ namespace Sightline;
 
 // PROGRAM HORIZON — Wave 6: CODEX / FIELD MANUAL (onboarding + legibility).
 //
-// A browsable in-game reference that surfaces the game's hidden depth (17 enemy archetypes, 5 classes,
+// A browsable in-game reference that surfaces the game's hidden depth (19 enemy archetypes, 5 classes,
 // the perk / boon / contract / spec / trait / scar / weapon-mod / status vocabularies, and the objective
 // rotation) so a new player can actually LEARN the systems. This is PRESENTATION/DATA ONLY: every entry
 // is assembled from the EXISTING Name/Desc/Code static methods + enum iteration + a small hardcoded
@@ -77,6 +77,8 @@ public static class Codex
         ("MORTAR",  "MORTAR",    "Back-line grenadier with a deep frag pouch. Lobs at clusters from cover."),
         ("BEACON",  "SPOTTER",   "Fragile designator — paints your priority target, amplifying enemy focus-fire. Kill it first."),
         ("SIEGE",   "BOMBARD",   "Artillery — telegraphs a cover-ignoring 3x3 strike a turn ahead. Relocate or kill it."),
+        ("WRAITH",  "STRIKER",   "Fast flanker that slips past overwatch and strikes your soldiers' exposed side. Body-block it or focus it — it's glass."),
+        ("HAZE",    "SCREENER",  "Back-line zoner — drops smoke on your firing lane to blind your shots. Reposition through the cloud, or kill it before it screens."),
         ("WARLORD", "ELITE",     "Named boss / mid-boss — tough, carries grenades, and rages at low HP."),
     };
 
@@ -275,7 +277,7 @@ public static class Codex
         string[] required =
         {
             "GRUNT","SCOUT","SNIPER","TURRET","BERSERKER","DRONE","SHIELD","SAPPER","MEDIC",
-            "BRUISER","HUNTER","LANCER","HOUND","MORTAR","SPOTTER","BOMBARD","ELITE",
+            "BRUISER","HUNTER","LANCER","HOUND","MORTAR","SPOTTER","BOMBARD","STRIKER","SCREENER","ELITE",
         };
         var covered = new HashSet<string>();
         foreach (var b in Bestiary) covered.Add(b.Cls);
