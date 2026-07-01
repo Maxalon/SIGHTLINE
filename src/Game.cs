@@ -390,7 +390,25 @@ public partial class Game
 
     // mission objective
     public Objective Objective;
+    // The extraction zone the WIN test reads: the UNION of the FIXED far-corner fallback (always
+    // present so the win is ALWAYS reachable — a dead planter must never soft-lock the mission) and,
+    // once a soldier plants one, a forward 3x3 BEACON zone. Every EvacZone read (renderer / threat /
+    // HUD / autopilot / CheckEnd) treats the two as one set — planting just widens it, cutting the
+    // long empty march to the corner without touching difficulty.
     public List<(int x, int y)> EvacZone = new();
+    // BEACON (Evac only, one per mission): a soldier spends 1 action to drop a forward evac beacon on
+    // their tile; its walkable 3x3 (centre + ring) is UNIONed into EvacZone. These fields are per-mission
+    // transient (reset in SetupMission) — no persisted state, so no enum/ordinal churn.
+    public bool BeaconPlanted;                       // true once the single beacon has been dropped
+    public (int x, int y) BeaconTile;                // the beacon's centre tile (for the renderer marker)
+    public List<(int x, int y)> BeaconZone = new();  // the walkable 3x3 tiles the beacon added to EvacZone
+    // A soldier may DEPLOY a beacon only on the plain Evac objective (Escort/Rescue keep the fixed corner —
+    // the fragile asset defines the extraction point), the beacon hasn't been used yet, and it's a real
+    // player soldier standing on WALKABLE FLOOR (a non-floor planter refuses gracefully, never crashes).
+    public bool HasBeaconAction => Objective == Objective.Evac && Mode != GameMode.Endless;
+    public bool CanBeacon(Unit u)
+        => HasBeaconAction && !BeaconPlanted && u != null && u.Team == Team.Player && !u.IsVip
+           && u.CanAct && Grid.IsFloor(u.X, u.Y) && !EvacZone.Contains((u.X, u.Y));
 
     // DEFEND objective (3.8): survive this many player turns vs mid-mission waves
     public const int DefendTurns = 8;
@@ -569,6 +587,10 @@ public partial class Game
     bool  _autoCamManual;   // true = player manually moved camera; suppresses auto-follow until C-reset
     public float DeathFlash;                 // 0..1 red full-screen pulse on a soldier's death
     readonly List<string> _missionKia = new(); // soldiers KIA this mission (for the debrief)
+    // UNDERTOW W3 — pod MORALE: a pod that drops to <= half its original strength ROUTS its survivors.
+    // _podOrig snapshots each pod's spawn size at mission start; the break/threshold logic is BreakPodMorale.
+    readonly Dictionary<int, int> _podOrig = new();
+    public const int RoutDuration = 2;         // enemy turns a broken pod flees before it can rally (decrements in BeginTurn)
 
     // Death scorch decals: where a unit fell, a dark team-tinted burn mark lingers on the tile
     // and fades over ~ScorchLife seconds (decayed in Update, drawn under units in Renderer, cleared
@@ -794,6 +816,7 @@ public partial class Game
         // objective-gated setup block below (evac/terminal/sabotage/escort/rescue) is a no-op.
         if (Mode == GameMode.Endless) Objective = Objective.Eliminate;
         EvacZone.Clear();
+        BeaconPlanted = false; BeaconZone.Clear(); BeaconTile = default;   // forward evac beacon is fresh each mission
         HackProgress = 0;
         SabotageSites.Clear();
         SabotageBlown.Clear();
@@ -923,13 +946,16 @@ public partial class Game
         _missionKia.Clear();
         Scorches.Clear();            // death decals don't carry between missions
         _refundedThisTurn.Clear();   // flank-kill refund is per-turn; clear it for the mission's first turn too (review #2)
-        _vipWaitTurns = 0;           // SmartStep Escort: VIP-hold patience (anti-TIMEOUT)
         _smartConcealTurns = 0;      // SmartStep: concealed-turn counter (hard anti-TIMEOUT cap)
         DeathFlash = 0;
         // per-mission bonus goal is a CAMPAIGN feature only — no secondary in LAST STAND or SKIRMISH/DAILY.
         if (Mode == GameMode.Campaign) RollSecondary(n);
         else { Secondary = SecondaryKind.None; SecondaryFailed = false; }
-        foreach (var u in Enemies) { u.BeginTurn(); u.OnOverwatch = false; }
+        foreach (var u in Enemies) { u.BeginTurn(); u.OnOverwatch = false; u.Routed = 0; }
+        // UNDERTOW W3: snapshot each pod's spawn strength so BreakPodMorale can tell when a pod has
+        // been chewed down to <= half and should rout its survivors (wave hostiles are PodId<0, ungrouped).
+        _podOrig.Clear();
+        foreach (var e in Enemies) if (e.PodId >= 0) _podOrig[e.PodId] = _podOrig.GetValueOrDefault(e.PodId) + 1;
         Selected = Players.FirstOrDefault(p => p.CanAct);
         AimMode = false;
         SnapShot = false;
@@ -1431,9 +1457,14 @@ public partial class Game
             int reactMod = -10 + (w.HasPerk(Perk.Reflexes) ? 75 : 0) + (w.HasPerk(Perk.Guardian) ? Unit.GuardianAim : 0)
                               + (w.OwFocused ? Combat.FocusOwAim : 0);   // COUNTERPLAY: braced kill-lane aim
             var res = Combat.Resolve(Grid, w, mover, reactMod);
-            Fx.PopText(w.Pos + new Vector2(0, -30), "OVERWATCH", Pal.Accent, 18f);
+            // UNDERTOW W2 — BRACE: a disrupting reaction. It STAGGERS on a hit (ShotAnim.Apply zeroes the
+            // mover's remaining actions) but deals reduced damage + never crits, so it's a real trade vs a
+            // lethal overwatch (deny tempo instead of going for the kill), not a strict upgrade.
+            bool brace = w.OwBrace;
+            if (brace && res.Hit) { res.Damage = Math.Max(1, res.Damage / 2); res.Crit = false; }
+            Fx.PopText(w.Pos + new Vector2(0, -30), brace ? "BRACE" : "OVERWATCH", brace ? Pal.Good : Pal.Accent, 18f);
             Audio.Play("over");
-            var shot = new ShotAnim(w, mover, res, reaction: true);
+            var shot = new ShotAnim(w, mover, res, reaction: true) { Stagger = brace };
             // OnStart runs when this reaction becomes the active anim (Started is false),
             // by which point the mover has settled on the reacted-to tile.
             _anims.Insert(Math.Min(insertAt, _anims.Count), shot);
@@ -1481,6 +1512,13 @@ public partial class Game
 
     public void KillUnit(Unit d)
     {
+        // IDEMPOTENT: a death is processed exactly once. A surplus blow reaching an already-dead
+        // unit (e.g. a 3rd non-lethal overwatch reaction resolving on the corpse, or an AoE that
+        // overlaps a body) must NOT re-run the kill — doing so double-counted _run.Fallen/Memorial,
+        // Stats.RecordKill, CreditKill and replayed the death FX, corrupting the class-lethality
+        // telemetry the flywheel ranks (UNDERTOW W1). The queued-reaction purge below is the primary
+        // guard; this makes KillUnit robust to every double-call path.
+        if (!d.Alive) return;
         // SIEGE interrupt: killing a charging BOMBARD cancels its strike (the zone reads off live
         // enemies, so it clears automatically; this is a cosmetic confirmation of the interrupt).
         if (d.Cls == "BOMBARD" && d.ChargeTurns > 0)
@@ -1552,12 +1590,43 @@ public partial class Game
             Fx.AddShake(11f);
         }
 
-        // purge any queued movement for the dead unit
-        _anims.RemoveAll(a => a is MoveStepAnim m && m.Unit == d);
+        // purge any queued movement for the dead unit, AND any queued reaction shots aimed AT it:
+        // when several overwatchers react to one mover, the first lethal reaction kills it while the
+        // others are still queued — a surplus reaction must not resolve on the corpse (that path
+        // re-ran Stats.RecordShot + CreditKill + the death FX). The active anim (the blow that caused
+        // this death) is excluded so the current shot still finishes normally.
+        _anims.RemoveAll(a => (a is MoveStepAnim m && m.Unit == d)
+                           || (a is ShotAnim s && s.D == d && a != ActiveAnim));
         if (Selected == d) Selected = null;
         // DECAPITATE: a death may have removed the HVT's last in-range guard — re-evaluate now so the
         // HVT is immediately exposed (the telegraph + reduced-damage gate flip the same frame).
         UpdateHvtGuard();
+        // UNDERTOW W3: a hostile's death may break its pod's morale (rout the survivors).
+        if (d.Team == Team.Enemy && d.PodId >= 0) BreakPodMorale(d);
+    }
+
+    /// UNDERTOW W3 — pod ROUT: when a pod is chewed down to <= half its spawn strength (a lone survivor
+    /// of a 2-unit pod always qualifies), its remaining ACTIVE members break and ROUT for RoutDuration
+    /// turns — they flee toward their own edge, drop overwatch, and shoot wild (Unit.Routed drives
+    /// Ai.Plan + Combat). This makes the SECOND kill in a pod worth far more than the first: focus-firing
+    /// a pod down is a genuine, earnable comeback swing (a routed pod stops trading -> the player's
+    /// HP-sum stabilizes). Survivors RALLY when Routed counts back to 0 (BeginTurn), so it's never a stall.
+    void BreakPodMorale(Unit dead)
+    {
+        int pod = dead.PodId;
+        if (pod < 0) return;
+        var mates = Enemies.Where(e => e.Alive && e.PodId == pod).ToList();
+        if (mates.Count == 0) return;                       // whole pod gone — no one left to break
+        int orig = _podOrig.GetValueOrDefault(pod, mates.Count + 1);
+        if (mates.Count > Math.Max(1, orig / 2)) return;    // still at fighting strength — holds the line
+        bool broke = false;
+        foreach (var m in mates)
+            if (m.Active && m.Routed == 0) { m.Routed = RoutDuration; broke = true; }
+        if (!broke) return;                                 // survivors dormant or already routing
+        var ldr = mates.FirstOrDefault(m => m.Active) ?? mates[0];
+        Fx.PopText(ldr.Pos + new Vector2(0, -34), "BROKEN", Pal.Good, 20f);
+        Fx.Flash(ldr.Pos, Pal.Good, 26f, 0.2f, 0.5f);
+        ShowBanner("POD ROUTED", false);
     }
 
     /// True when killing `d` decides the mission (last hostile on an Eliminate, a squad
@@ -2217,7 +2286,6 @@ public partial class Game
     // player turns (e.g. only unreachable dormant pods remain), force a pod awake
     // so the match always resolves. Test-only; never runs in normal play.
     int _autoSig = -1, _autoStall;
-    int _vipWaitTurns;       // SmartStep Escort: consecutive turns the VIP held for safety (anti-stall)
     int _smartConcealTurns;  // SmartStep: player turns spent concealed (hard anti-TIMEOUT cap)
     const int AutoMaxTurns = 50;  // hard autopilot match cap: force-end a dragging match as a LOSS
 
@@ -2575,6 +2643,7 @@ public partial class Game
         if (Raylib.IsKeyPressed(KeyboardKey.One)) ToggleAim();
         if (Raylib.IsKeyPressed(KeyboardKey.Two)) DoOverwatch();
         if (Raylib.IsKeyPressed(KeyboardKey.F)) DoFocusOverwatch();   // COUNTERPLAY: braced cone watch
+        if (Raylib.IsKeyPressed(KeyboardKey.B)) DoBrace();            // UNDERTOW W2: disrupting interrupt watch
         if (Raylib.IsKeyPressed(KeyboardKey.Three)) DoHunker();
         if (Raylib.IsKeyPressed(KeyboardKey.Four)) ToggleGrenade();
         if (Raylib.IsKeyPressed(KeyboardKey.Five)) DoAbility();
@@ -2583,6 +2652,7 @@ public partial class Game
         if (Raylib.IsKeyPressed(KeyboardKey.Seven)) ToggleDrag();
         if (Raylib.IsKeyPressed(KeyboardKey.Nine)) ToggleVault();
         if (Raylib.IsKeyPressed(KeyboardKey.H)) DoHack();
+        if (Raylib.IsKeyPressed(KeyboardKey.G)) DoBeacon();          // UNDERTOW W6: deploy forward evac beacon (moved off B — collided with W2 BRACE)
         if (Raylib.IsKeyPressed(KeyboardKey.X)) DoExtract();
         if (Raylib.IsKeyPressed(KeyboardKey.R)) DoReload();
         if (Raylib.IsKeyPressed(KeyboardKey.T)) { OpenTagEditor(Selected); return; }
@@ -2795,8 +2865,10 @@ public partial class Game
             case "ability": DoAbility(); break;
             case "overwatch": DoOverwatch(); break;
             case "focusow": DoFocusOverwatch(); break;
+            case "brace": DoBrace(); break;
             case "hunker": DoHunker(); break;
             case "hack": DoHack(); break;
+            case "beacon": DoBeacon(); break;
             case "extract": DoExtract(); break;
             case "reload": DoReload(); break;
         }
@@ -3298,6 +3370,26 @@ public partial class Game
         _tutOver = true;
     }
 
+    /// UNDERTOW W2 — BRACE: the INTERRUPT half of the reaction economy. Instead of a lethal overwatch,
+    /// the soldier holds a DISRUPTING reaction: its reaction shot deals reduced damage but, on a hit,
+    /// STAGGERS the mover (zeroes its remaining actions this turn -> its post-move offense is denied).
+    /// A behind player trades a kill for tempo — the earnable comeback lever. Rides the OnOverwatch
+    /// plumbing (threat map, ReactedThisTurn one-reaction cap); the reaction site reads OwBrace.
+    void DoBrace()
+    {
+        if (Selected == null || !Selected.CanAct || Selected.Ammo <= 0) return;
+        if (Selected.HasStatus(StatusKind.Disoriented))
+        { Fx.PopText(Selected.Pos + new Vector2(0, -30), "DISORIENTED", Pal.Foe, 16f); return; }
+        Selected.OnOverwatch = true;
+        Selected.OwBrace = true;
+        Selected.OwFocused = false;   // brace is a wide disrupting watch, not a cone
+        Selected.ActionsLeft = 0;
+        Fx.PopText(Selected.Pos + new Vector2(0, -30), "BRACE", Pal.Good, 18f);
+        Audio.Play("over");
+        AimMode = false;
+        _tutOver = true;
+    }
+
     /// True when tile (tx,ty) lies inside watcher w's braced 90-degree overwatch cone (centre = OwDir).
     public bool InOwCone(Unit w, int tx, int ty)
     {
@@ -3349,6 +3441,38 @@ public partial class Game
         Fx.PopText(at + new Vector2(0, -30), HackProgress >= HackRequired ? "HACKED" : "HACK +1", Pal.Accent, 20f);
         Fx.Burst(at, Pal.Accent, 14, 160f, 0.5f, 3f);
         Audio.Play("reload");
+    }
+
+    /// DEPLOY BEACON (Evac only, one/mission): the selected soldier spends ONE action to drop a
+    /// forward extraction beacon on THEIR tile. Its walkable 3x3 (centre + ring, floor tiles only —
+    /// non-floor tiles are clipped) is UNIONed into EvacZone alongside the fixed far-corner fallback,
+    /// so the squad can extract HERE instead of marching to the corner. Modelled on DoHack (validate,
+    /// spend 1 action, no turn-end, FX). Refuses gracefully if CanBeacon is false (never crashes).
+    void DoBeacon()
+    {
+        if (!CanBeacon(Selected)) return;
+        var u = Selected;
+        u.ActionsLeft -= 1;
+        AimMode = false;
+        BeaconPlanted = true;
+        BeaconTile = (u.X, u.Y);
+        BeaconZone.Clear();
+        // stamp the 3x3, skipping non-floor / off-board tiles and any tile already in the fallback zone
+        for (int dx = -1; dx <= 1; dx++)
+            for (int dy = -1; dy <= 1; dy++)
+            {
+                int bx = u.X + dx, by = u.Y + dy;
+                if (!Grid.IsFloor(bx, by)) continue;          // clip walls / cover / off-board
+                if (EvacZone.Contains((bx, by))) continue;    // don't double-count the fallback corner
+                BeaconZone.Add((bx, by));
+                EvacZone.Add((bx, by));
+            }
+        var at = Util.TileCenter(u.X, u.Y);
+        Fx.PopText(at + new Vector2(0, -30), "BEACON SET", Pal.Good, 22f);
+        Fx.Burst(at, Pal.Good, 22, 240f, 0.6f, 4.5f, true);
+        Fx.AddShake(4f);
+        Audio.Play("reload");
+        CheckEnd();   // planting where the squad already stands can complete the extraction outright
     }
 
     /// The nearest free evac tile to (x,y) within Chebyshev `maxStep`, or null. "Free" = an evac
@@ -3777,6 +3901,11 @@ public partial class Game
         UpdateHvtGuard();                                        // DECAPITATE: refresh the HVT's guarded state at the boundary
         foreach (var e in Enemies) if (e.Alive) { e.BeginTurn(); TickStatuses(e); }
         _aiUnits = AliveEnemies().Where(e => e.Active).ToList();  // dormant/suspicious pods don't act
+        // UNDERTOW W4 — sequenced coordination: act SETUP verbs before FINISHERS. A SAPPER breach or a
+        // STRIKER/adjacent shove EXPOSES a soldier; ordering those units first lets the incremental focus
+        // recompute in PickNext collapse the pod onto the freshly-exposed target THIS SAME turn. Stable
+        // OrderBy — every unit still acts exactly once, so it's TIMEOUT-safe (only reorders a bounded list).
+        _aiUnits = _aiUnits.OrderBy(e => IsSetupUnit(e) ? 0 : 1).ToList();
         PlanEnemySquad();                                        // shared focus + overwatch map (advisory)
         _aiIdx = 0;
         _aiStage = AiStage.PickNext;
@@ -3790,6 +3919,7 @@ public partial class Game
     {
         _turnCount++;
         Phase = Phase.PlayerTurn;
+        LeashVip();                       // ESCORT: the asset tags along with the squad (no hand-walking)
         ClearIntent();                    // no enemy intent lingers into the player's turn
         Grid.TickSmoke();                 // smoke clouds decay one turn per round
         TickHazards();                    // fire cooks off barrels + reignites units, then decays
@@ -3810,6 +3940,84 @@ public partial class Game
         ShowBanner("PLAYER TURN", false);
     }
 
+    /// ESCORT VIP LEASH: at the start of each player turn the fragile asset TAGS ALONG with the squad
+    /// instead of being hand-walked (the old "drag" that made Escort a 10-turn micro-chore). If the VIP
+    /// is alive, mobile (not caged), and NOT already Chebyshev-adjacent to a living non-VIP soldier, it
+    /// auto-steps toward the NEAREST such soldier — up to its Mobility — preferring a SAFE tile (in cover
+    /// and out of an active enemy's line of fire when a safer option exists). The player still advances /
+    /// clears; the VIP follows. It stays fully player-selectable (manual override intact) and never
+    /// auto-charges toward evac or into danger alone. Deterministic + TIMEOUT-safe: it always moves toward
+    /// an EXISTING soldier, so it strictly converges (and short-circuits the instant it's adjacent).
+    void LeashVip()
+    {
+        if (Objective != Objective.Escort) return;
+        if (Vip == null || !Vip.Alive || CaptiveLocked || Vip.MoveBudget <= 0) return;
+        // the soldiers the asset follows: living, non-VIP squad members
+        var soldiers = Players.Where(p => p.Alive && !p.IsVip).ToList();
+        if (soldiers.Count == 0) return;                       // nobody to follow (a wipe handles the loss)
+        if (EvacZone.Contains((Vip.X, Vip.Y))) return;         // already extracted position — win check handles it
+        // The asset FOLLOWS the squad toward evac. The leash anchor is the nearest soldier that is CLOSER to
+        // evac than the VIP (the squad's forward element) — following the SPEARHEAD, not a straggler parked
+        // beside the VIP at spawn (that mutual "VIP holds beside laggard, laggard waits by VIP" deadlock froze
+        // the asset at spawn for a whole match). If NO soldier is ahead of the VIP (it's already the most
+        // forward), tag along toward the plain nearest soldier and hold once beside it (don't charge alone).
+        int vipEvac = DistToEvac(Vip.X, Vip.Y);
+        var ahead = soldiers.Where(s => DistToEvac(s.X, s.Y) < vipEvac).ToList();
+        var anchor = (ahead.Count > 0 ? ahead : soldiers)
+                     .OrderBy(s => Util.ChebyDist(Vip.X, Vip.Y, s.X, s.Y)).First();
+        // Hold when tucked beside the FORWARD element (the spearhead) — the VIP has kept pace and shouldn't
+        // charge on alone into the contested corner ahead of its escort. If it's already the most-forward
+        // unit (nothing `ahead`), hold beside the nearest soldier. Never hold merely beside a straggler
+        // BEHIND the VIP — that laggard/VIP mutual wait froze the asset at spawn for a whole match.
+        bool besideForward = ahead.Count > 0
+            ? ahead.Any(s => Util.ChebyDist(Vip.X, Vip.Y, s.X, s.Y) <= 1)
+            : soldiers.Any(s => Util.ChebyDist(Vip.X, Vip.Y, s.X, s.Y) <= 1);
+        // reachable tiles within ONE move (VIP.MoveBudget), never onto an occupied / off-board / non-floor
+        // tile (CostMap only relaxes walkable floor and honours the occupancy blocker).
+        var cost = Grid.CostMap(Vip.X, Vip.Y, (x, y) => IsOccupiedByOther(x, y, Vip), out var _cf, Vip.MoveBudget);
+        // If a FREE evac tile is reachable THIS move, step straight into the zone — that is the win, and it
+        // stops the "walled one lane short of the corner while soldiers crowd the doorway" stall outright.
+        (int x, int y)? reachEvac = null; int reachEvacCost = int.MaxValue;
+        foreach (var t in EvacZone)
+        {
+            if (IsOccupiedByOther(t.x, t.y, Vip)) continue;
+            int c = cost[t.x, t.y];
+            if (c > 0 && c < reachEvacCost) { reachEvacCost = c; reachEvac = t; }
+        }
+        if (reachEvac != null) { Vip.X = reachEvac.Value.x; Vip.Y = reachEvac.Value.y; Vip.SyncPos();
+                                 Fx.Burst(Vip.Pos, Pal.VipGold, 10, 140f, 0.4f, 3.5f); return; }
+        if (besideForward) return;                             // tucked beside the SPEARHEAD, zone not yet in reach
+        // Measure progress by the ACTUAL walkable path distance to the anchor (a Dijkstra field FROM it), not
+        // Chebyshev — so the VIP steps correctly AROUND walls/screens toward the squad instead of stalling when
+        // the straight line is blocked (the Chebyshev test let a walled-off VIP get stuck a lane short).
+        var goalField = Grid.CostMap(anchor.X, anchor.Y, (x, y) => IsOccupiedByOther(x, y, Vip), out _, 9999);
+        int hereDist = goalField[Vip.X, Vip.Y];
+        var foes = Enemies.Where(e => e.Alive && e.Active && e.Ammo > 0).ToList();   // active shooters (hoisted)
+        int bx = -1, by = -1; float bestScore = float.NegativeInfinity;
+        for (int x = 0; x < Grid.W; x++)
+            for (int y = 0; y < Grid.H; y++)
+            {
+                if (cost[x, y] < 0) continue;                  // unreachable this turn
+                if (x == Vip.X && y == Vip.Y) continue;        // must actually move
+                int d = goalField[x, y];
+                if (d < 0) continue;                           // can't reach the anchor from here at all
+                if (hereDist >= 0 && d >= hereDist) continue;  // only tiles that close the path gap
+                // safety: prefer cover from the nearest active shooter + tiles no active foe can see.
+                float safety = 0f;
+                var near = foes.OrderBy(e => Util.ChebyDist(x, y, e.X, e.Y)).FirstOrDefault();
+                if (near != null) safety += Grid.GetCover(x, y, near.X, near.Y).Level * 3f;
+                if (!foes.Any(e => Grid.HasLineOfSight(e.X, e.Y, x, y))) safety += 6f;   // fully unseen tile
+                // progress dominates (the leash must converge), then safety, then a mild cost tie-break.
+                float score = (hereDist - d) * 2f + safety - cost[x, y] * 0.1f;
+                if (score > bestScore) { bestScore = score; bx = x; by = y; }
+            }
+        if (bx < 0) return;                                    // no closing tile reachable — hold this turn
+        Vip.X = bx; Vip.Y = by; Vip.SyncPos();
+        Fx.Burst(Vip.Pos, Pal.VipGold, 8, 120f, 0.35f, 3f);   // a small tag-along puff (feel only)
+        // (win detection stays with the normal CheckEnd calls after the player's actions — calling it here,
+        //  mid-StartPlayerTurn before the turn is fully seated, would re-enter EnterBarracks on stale state.)
+    }
+
     // ---------------- squad coordination ----------------
     // Computed ONCE per enemy turn (right after _aiUnits is snapshotted in EndPlayerTurn).
     // Produces two shared, ADVISORY hints that Ai.Plan reads to act as a coordinated squad
@@ -3819,6 +4027,18 @@ public partial class Game
     //                            can route around the kill zone (overwatch-aware movement).
     // Both are biases only; per-unit scoring still lets the fundamentals dominate, so no enemy
     // is ever forced into a no-progress choice (stall/timeout invariants are preserved).
+    /// UNDERTOW W4: true when this unit can EXPOSE a soldier THIS turn (a setup verb) — a SAPPER (breach
+    /// cover), a STRIKER (leap-shove), or any enemy standing adjacent to an IN-COVER soldier it could shove
+    /// out. These are ordered to act BEFORE the finishers so the pod collapses on the opening they create.
+    bool IsSetupUnit(Unit e)
+    {
+        if (e.Cls == "SAPPER" || e.Cls == "STRIKER") return true;
+        foreach (var p in Players)
+            if (p.Alive && !p.IsVip && Util.ChebyDist(e.X, e.Y, p.X, p.Y) == 1
+                && Grid.GetCover(p.X, p.Y, e.X, e.Y).Level > 0) return true;
+        return false;
+    }
+
     void PlanEnemySquad()
     {
         // ---- 1. shared focus target ----------------------------------------------------
@@ -3919,6 +4139,12 @@ public partial class Game
                 Fx.AddShake(8f);
                 ShowBanner(e.Name + " ENRAGED", true);
             }
+            // UNDERTOW W4 — incremental coordination: recompute the shared focus against the CURRENT board
+            // right before this unit plans, so a shove/breach an EARLIER unit just landed (exposing a
+            // soldier) redirects the pod onto that fresh opening THIS turn — vs the once-per-turn snapshot
+            // that never saw the setup. Advisory only (Ai.Plan reads focus as a bias), so no unit is ever
+            // forced into a no-progress choice; the stall/TIMEOUT invariants hold.
+            PlanEnemySquad();
             _aiPlan = Ai.Plan(this, e);
 
             // TELEGRAPH (non-autoplay only): before the unit moves/acts, hold a brief beat and
@@ -4433,16 +4659,17 @@ public partial class Game
             // 1) heal a hurt/wounded soldier first (only ever needed once per pass — CanBuy(0)
             //    goes false once everyone is topped up).
             if (offer.Contains(0) && CanBuy(0)) pick = 0;
-            // 2) else top up armor while a soldier is under the cap and it's on this slate.
-            else if (offer.Contains(4) && CanBuy(4)) pick = 4;
             else
             {
-                // 3) else the cheapest other beneficial item in the slate (weapon mods / frag /
-                //    stims). Skip the perk pick (2) and PREP (situational player calls).
+                // 2) else the cheapest beneficial item in the slate. UNDERTOW W5: BALLISTIC PLATING (item 4)
+                //    is NO LONGER a dedicated 2nd priority — that "always top up armor" rule is exactly why
+                //    the flywheel bought it 369x (a dead economy the audit flagged). Armor now competes on
+                //    cost with stims/frag/mags like everything else, so purchases spread. Skip only the perk
+                //    pick (2, a real choice) and PREP (situational player calls).
                 int bestCost = int.MaxValue;
                 foreach (int i in offer)
                 {
-                    if (i == 0 || i == 2 || i == 4) continue;
+                    if (i == 2) continue;
                     if (IsPrepItem(i)) continue;
                     if (CanBuy(i) && ShopCostAt(i) < bestCost) { pick = i; bestCost = ShopCostAt(i); }
                 }

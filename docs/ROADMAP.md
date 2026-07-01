@@ -644,3 +644,29 @@ stand and are reinforced by DESIGN.md §3D/E/G.
 Open / next: watch the veteran-recall power floor via the flywheel (a persistent 2-of-6 veteran draft could
 ease low-Heat difficulty over many runs); on-device audio; endless difficulty curve; the design fan-out's other
 player-verb ideas (universal suppress, objective-interaction forks, a banked enemy-turn reaction).
+
+---
+
+## PROGRAM "UNDERTOW" — closed items (see docs/DEVLOG.md for the full write-up + measured numbers)
+
+Thesis: SIGHTLINE was one-directional attrition with no enemy will-state, so matches tipped once and never tipped
+back (lead-swings/match 0.48, policy gap +29.2). The fix: add the *missing half* of the action economy — mechanics
+that SUBTRACT enemy tempo/will, not add HP. Flywheel-validated: lead-swings 0.48→0.59, the punish-spiral gap
+collapsed, run-completion 60→73%, Evac drag 10.9→7.8t, dead economy/perks revived.
+
+- [x] **W2 — BRACE interrupt** (the keystone): a disrupting reaction stance that STAGGERS a mover (denies its action
+      this turn) for reduced damage — trade a kill for tempo, the earnable comeback lever. `SIGHTLINE_STAGGERTEST`.
+- [x] **W3 — enemy pod MORALE / ROUT**: a pod chewed to ≤ half spawn strength routs its survivors (flee, drop
+      overwatch, shoot wild, then rally). The second kill panics the pod. `SIGHTLINE_MORALETEST`.
+- [x] **W4 — sequenced coordination**: setup verbs act before finishers + a live per-unit focus recompute, so the
+      pod collapses on a freshly-exposed soldier the same turn (the counterweight that restores the skill premium).
+- [x] **W5 — balance roots**: LockOn de-superset (flank-only, not any-exposed); PLATING de-throned from the
+      autopilot's always-buy slot (369→203 buys, dead perks revived).
+- [x] **W6 — de-drag Evac/Escort**: a player-planted forward EVAC beacon (with a fallback corner so it can't
+      soft-lock) + a VIP leash. Evac 10.9→7.8t. `SIGHTLINE_BEACONTEST`.
+- [x] **W7 — board-space depth**: key light + cover legibility + AO (Renderer-only, deterministic, colorblind-safe).
+- [x] **W1 — double-kill correctness fix**: idempotent `KillUnit` + surplus-reaction purge; honest kill telemetry.
+
+Open / next: the ESCORT leash lifted win% but left escort turns UP (~14t, a corner fight not empty walking) — a
+forward beacon for Escort is the clean de-drag; the softened policy gap (~0-4) is forgiving-by-design with the new
+comeback levers, watch it doesn't slide negative; more setup-verb archetypes to exercise W4's coordination.

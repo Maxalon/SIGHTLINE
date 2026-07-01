@@ -155,8 +155,12 @@ public static class Ai
                        && e.Cls != "HOUND"      // a swarmer commits — it never breaks off (its identity is the rush)
                        && e.Cls != "STRIKER";   // a leaper commits to the flank too (fragile, but never disengages)
         bool lowHp = e.Hp <= Math.Max(1, e.MaxHp * 3 / 10);   // <= ~30% MaxHp
-        bool retreatMode = false;
-        if (canRetreat && lowHp)
+        // UNDERTOW W3 — a ROUTED unit (its pod's morale broke, Game.BreakPodMorale) flees the fall-back way
+        // REGARDLESS of archetype or HP: even a berserker breaks when its pod cascades. The archetype
+        // "never retreats" exemption is overridden by an actual rout — that's the whole point of morale.
+        bool routing = e.Routed > 0;
+        bool retreatMode = routing;
+        if (!retreatMode && canRetreat && lowHp)
         {
             float bestReachHit = -1f;
             foreach (var (tx, ty, c) in reach)
@@ -286,7 +290,10 @@ public static class Ai
             var cover = g.Grid.GetCover(tx, ty, nearest.X, nearest.Y);
             int distNearest = Util.ChebyDist(tx, ty, nearest.X, nearest.Y);
             float score = 0;
-            if (shoot != null) score += 100 + bestHit;          // having a shot is king
+            // UNDERTOW W3: a ROUTING unit is panicking — a shot is a minor opportunistic bonus, NOT "king",
+            // so the flee/distance terms below dominate and it actually breaks contact (it may still take a
+            // wild potshot if one lines up). A steady unit values having a shot above all else.
+            if (shoot != null) score += routing ? bestHit * 0.25f : 100 + bestHit;
             score += cover.Level * 18;                           // value cover
             score += g.Grid.HeightAt(tx, ty) * 14;               // seize the high ground
             if (cover.Flanked) score -= 25;
@@ -327,7 +334,12 @@ public static class Ai
                 // COORDINATION 2 (apply): fall back — reward distance from the nearest soldier,
                 // strongly reward breaking line-of-sight to ALL players (true safety), and lean
                 // on cover. Caps the distance term so it doesn't sprint blindly into a corner.
-                score += Math.Min(distNearest, 10) * 2.6f;
+                // UNDERTOW W3: a ROUTING unit panics HARDER than a wounded-but-composed retreater — it
+                // really breaks contact (a much stronger distance pull that overrides the shot/move-cost
+                // terms, so the rout is a VISIBLE flight, the felt comeback beat), and ignores the move
+                // cost while running for its own edge.
+                score += Math.Min(distNearest, 10) * (routing ? 6f : 2.6f);
+                if (routing) score += actionsToReach * 6;        // cancel the move-cost penalty — commit to the run
                 bool seenHere = false;
                 foreach (var p in players)
                     if (g.Grid.HasLineOfSight(tx, ty, p.X, p.Y)) { seenHere = true; break; }
@@ -681,9 +693,10 @@ public static class Ai
             if (spent < 2)
             {
                 var coverHere = g.Grid.GetCover(bestTile.x, bestTile.y, nearest.X, nearest.Y);
-                // overwatch if we have a clear sightline toward enemy approach, else hunker
+                // overwatch if we have a clear sightline toward enemy approach, else hunker. A ROUTED unit
+                // (UNDERTOW W3) is too rattled to hold a steady watch — it just keeps its head down.
                 bool sees = g.Grid.HasLineOfSight(bestTile.x, bestTile.y, nearest.X, nearest.Y);
-                if (sees && e.Ammo > 0) plan.Overwatch = true;
+                if (sees && e.Ammo > 0 && !routing) plan.Overwatch = true;
                 else if (coverHere.Level > 0) plan.Hunker = true;
             }
         }

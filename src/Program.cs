@@ -54,6 +54,16 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        // SIGHTLINE_BEACONTEST=1 : UNDERTOW W6 — Evac forward-beacon (walkable 3x3 union + fallback corner
+        // + graceful non-floor/Escort refusal + all-on-beacon win + 1/mission) and the Escort VIP leash
+        // (converges toward the nearest soldier, never off-board/occupied/onto-soldier, holds when adjacent).
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_BEACONTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "beacontest");   // Game ctor / Fx use tile math
+            Console.WriteLine(new Game().BeaconSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         if (Environment.GetEnvironmentVariable("SIGHTLINE_COMBATTEST") == "1")
         {
             Console.WriteLine(Combat.SelfTest());
@@ -118,6 +128,31 @@ public static class Program
         if (Environment.GetEnvironmentVariable("SIGHTLINE_WOUNDTEST") == "1")
         {
             Console.WriteLine(WoundTest());
+            return;
+        }
+        // SIGHTLINE_DKTEST=1 : UNDERTOW W1 — a death is processed exactly once (KillUnit idempotent +
+        // surplus corpse-reaction purge). Needs a tiny window for tile math.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_DKTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "dktest");
+            Console.WriteLine(new Game().DoubleKillTest());
+            Raylib.CloseWindow();
+            return;
+        }
+        // SIGHTLINE_STAGGERTEST=1 : UNDERTOW W2 — BRACE interrupt (disrupting reaction staggers on hit).
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_STAGGERTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "staggertest");
+            Console.WriteLine(new Game().StaggerSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
+        // SIGHTLINE_MORALETEST=1 : UNDERTOW W3 — enemy pod morale / rout.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_MORALETEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "moraletest");
+            Console.WriteLine(new Game().MoraleSelfTest());
+            Raylib.CloseWindow();
             return;
         }
         // SIGHTLINE_TRAITTEST=1 : feats -> traits/nicknames + bonds round-trip (item 3.2). No window.
@@ -344,12 +379,17 @@ public static class Program
         // force an objective for verification (e.g. SIGHTLINE_OBJ=sabotage|rescue), shot or autoplay
         switch (Environment.GetEnvironmentVariable("SIGHTLINE_OBJ"))
         {
+            case "eliminate": case "elim": game.DebugForceObjective(Objective.Eliminate); break;
+            case "evac": case "extract": game.DebugForceObjective(Objective.Evac); break;
+            case "hack": game.DebugForceObjective(Objective.Hack); break;
+            case "escort": game.DebugForceObjective(Objective.Escort); break;
             case "sabotage": game.DebugForceObjective(Objective.Sabotage); break;
             case "rescue": game.DebugForceObjective(Objective.Rescue); break;
             case "defend": game.DebugForceObjective(Objective.Defend); break;
             case "decapitate": game.DebugForceObjective(Objective.Decapitate); break;
         }
         // screenshot-only hooks for verifying the camera + pause overlay
+        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_BEACON") == "1") game.DebugBeacon();
         if (shot && float.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_ZOOM"), out float z)) game.CamZoom = z;
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_PAUSE") == "1") game.Paused = true;
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_PERKSHOT") == "1") game.DebugBarracksPerk();

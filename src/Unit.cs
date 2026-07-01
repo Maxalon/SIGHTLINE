@@ -436,6 +436,13 @@ public class Unit
     // as OnOverwatch (armed on the player turn, reset in BeginTurn).
     public bool OwFocused;
     public int OwDirX, OwDirY;   // cone centre direction (raw dx,dy toward the aimed tile)
+    // UNDERTOW W2: BRACE — the INTERRUPT half of the reaction economy. A braced soldier holds a
+    // DISRUPTING reaction instead of a lethal one: its reaction shot deals reduced damage but, on a
+    // hit, STAGGERS the mover (zeroes its remaining actions this turn -> its post-move offense is
+    // denied). It's the inverse of overwatch (trade lethality for tempo denial) and a real comeback
+    // lever for a behind player. Rides the OnOverwatch plumbing (armed on the player turn, reset in
+    // BeginTurn; same ReactedThisTurn one-reaction cap). Transient, never persisted.
+    public bool OwBrace;
     public bool Hunkered;
     public bool ReactedThisTurn; // overwatch fired this round
     // SHOVE (forced-movement verb): a soldier may shove at most ONCE per turn. Combined with
@@ -455,6 +462,8 @@ public class Unit
     public AlertLevel Alert = AlertLevel.Alert;
     public bool Active => Alert == AlertLevel.Alert;
     public int PodId = -1;      // activation-pod grouping (enemies only)
+    public int Routed;          // UNDERTOW W3: turns of ROUT remaining (enemies only; counts down in BeginTurn,
+                                // rallies at 0). While >0 the unit flees + won't overwatch + shoots wild. Transient.
 
     public bool IsVip;          // escort objective: the asset to extract (mission-only, never persists)
     public bool FromReserve;    // COUNTERPLAY: a returning VETERAN recalled from the cross-run reserve
@@ -629,12 +638,19 @@ public class Unit
     public const int BleedDamage = 1;    // Bleed: HP lost per tile moved
     public const int DisorientAim = 15;  // Disoriented: aim penalty (+ no overwatch)
 
+    // UNDERTOW W3 — ROUT: a broken enemy fights wild. While Routed>0 (set when its pod's morale
+    // breaks — see Game.BreakPodMorale), it flees toward its own edge, won't hold overwatch, and
+    // shoots at a heavy aim penalty. It counts down one of the unit's turns at a time and RALLIES at 0.
+    public const int RoutAim = 18;       // aim penalty while routed (a panicked unit can't shoot straight)
+
     public void BeginTurn()
     {
         if (AbilityCd > 0) AbilityCd--;   // signature ability cools down one of THIS unit's turns
+        if (Routed > 0) Routed--;         // UNDERTOW W3: a routed pod rallies one turn at a time
         ActionsLeft = 2;
         OnOverwatch = false;
         OwFocused = false;         // focused-overwatch cone is per-arming (same lifecycle as OnOverwatch)
+        OwBrace = false;           // UNDERTOW W2: brace is per-arming, same lifecycle as OnOverwatch
         Hunkered = false;
         ReactedThisTurn = false;
         ShovedThisTurn = false;    // SHOVE: one per soldier per turn

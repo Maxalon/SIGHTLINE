@@ -503,8 +503,48 @@ public partial class Game
         int by = bplan.Path.Count > 0 ? bplan.Path[bplan.Path.Count - 1].y : bold.Y;
         if (Util.TileDist(bx, by, faraway.X, faraway.Y) >= startDist) fails.Add("fullHpDidNotAdvance");
 
+        // ---- UNDERTOW W4 — sequenced coordination: setup-first ordering + incremental focus recompute ----
+        {
+            Grid = new Grid();
+            Players = new System.Collections.Generic.List<Unit>();
+            Enemies = new System.Collections.Generic.List<Unit>();
+            Unit MkE2(string n, string cls, int x, int y) {
+                var u = new Unit { Name = n, Cls = cls, Team = Team.Enemy, X = x, Y = y, Hp = 6, MaxHp = 6,
+                                   Aim = 60, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+                u.Ammo = u.Weapon.Clip; u.Alert = AlertLevel.Alert; u.SyncPos(); return u;
+            }
+            Unit MkP2(string n, int x, int y, int hp) {
+                var u = new Unit { Name = n, Cls = "ASSAULT", Team = Team.Player, X = x, Y = y, Hp = hp, MaxHp = 8,
+                                   Aim = 65, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+                u.Ammo = u.Weapon.Clip; u.SyncPos(); return u;
+            }
+            // (a) IsSetupUnit: a SAPPER is a setup verb; a plain grunt far from any covered soldier is not.
+            var sapper = MkE2("SAP", "SAPPER", 8, 5);
+            var plain  = MkE2("GRT", "GRUNT",  9, 1);
+            var solF   = MkP2("SF", 4, 5, 8);
+            Players.Add(solF); Enemies.Add(plain); Enemies.Add(sapper);   // sapper added SECOND
+            if (!IsSetupUnit(sapper)) fails.Add("sapperNotSetup");
+            if (IsSetupUnit(plain))   fails.Add("gruntIsSetup");
+            // (b) the stable OrderBy puts the setup unit FIRST even though it was added last.
+            var ordered = AliveEnemies().Where(e => e.Active).ToList().OrderBy(e => IsSetupUnit(e) ? 0 : 1).ToList();
+            if (ordered.Count < 1 || ordered[0].Cls != "SAPPER") fails.Add("setupNotFirst");
+
+            // (c) incremental focus recompute responds to a LIVE board change: two exposed, shootable
+            //     soldiers -> focus picks the lower-HP one; drop the OTHER's HP and re-run -> focus flips.
+            Players.Clear();
+            var sHi = MkP2("HI", 6, 5, 8);
+            var sLo = MkP2("LO", 6, 6, 3);
+            Players.Add(sHi); Players.Add(sLo);
+            _aiUnits = AliveEnemies().Where(e => e.Active).ToList();
+            PlanEnemySquad();
+            if (EnemyFocus != sLo) fails.Add("focusNotLowHp=" + (EnemyFocus?.Name ?? "null"));
+            sHi.Hp = 1;                                   // a mid-turn hit/exposure drops the other soldier
+            PlanEnemySquad();                             // W4 recompute must see it and flip the focus
+            if (EnemyFocus != sHi) fails.Add("focusDidNotFlipLive=" + (EnemyFocus?.Name ?? "null"));
+        }
+
         return fails.Count == 0
-            ? "AITEST: PASS (focus picks killable+exposed; Ai.Plan biases to focus + flips; overwatch map mirrors reaction; retreat plan still acts)"
+            ? "AITEST: PASS (focus picks killable+exposed; Ai.Plan biases to focus + flips; overwatch map mirrors reaction; retreat plan still acts; W4 setup-first + live focus recompute)"
             : "AITEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
@@ -881,6 +921,178 @@ public partial class Game
         string verdict = (stillAlive == 0 && carried == 0) ? "PASS" : "FAIL";
         return $"DEATHTEST: {verdict} | soldiersAliveAfterKill={stillAlive} phase={Phase} " +
                $"fallen={_run.Fallen.Count} before=[{string.Join(",", before)}] after=[{string.Join(",", after)}]";
+    }
+
+    /// SIGHTLINE_DKTEST — UNDERTOW W1: a death is processed EXACTLY ONCE. Asserts (1) KillUnit is
+    /// idempotent (a 2nd call on a corpse does NOT re-add _run.Fallen/Memorial), and (2) a SURPLUS
+    /// queued reaction ShotAnim aimed at a unit that just died is PURGED — so it can't re-resolve on
+    /// the corpse and double-count Stats.RecordShot/CreditKill + replay the death FX — while the
+    /// active blow and shots at OTHER targets are kept. This corrects the class-lethality telemetry
+    /// the flywheel ranks. Needs a tiny window (Game uses tile math). Returns a one-line report.
+    public string DoubleKillTest()
+    {
+        NoPersist = true;
+        var fails = new System.Collections.Generic.List<string>();
+        _run = new Run(); _run.Start();
+        SetupMission(1);
+
+        // (1) idempotency: killing a soldier twice adds EXACTLY one Fallen + one Memorial entry.
+        var s = Players.First(u => u.Alive && !u.IsVip);
+        int fb = _run.Fallen.Count, mb = _run.Memorial.Count;
+        s.Hp = 0; KillUnit(s);
+        int fa1 = _run.Fallen.Count, ma1 = _run.Memorial.Count;
+        KillUnit(s);                                         // corpse — must be a no-op
+        int fa2 = _run.Fallen.Count, ma2 = _run.Memorial.Count;
+        if (fa1 - fb != 1) fails.Add($"fallenFirst={fa1 - fb}");
+        if (ma1 - mb != 1) fails.Add($"memorialFirst={ma1 - mb}");
+        if (fa2 != fa1)    fails.Add($"fallenReKill={fa2 - fa1}");
+        if (ma2 != ma1)    fails.Add($"memorialReKill={ma2 - ma1}");
+        if (s.Alive)       fails.Add("soldierStillAlive");
+
+        // (2) surplus-reaction purge: queue an ACTIVE reaction + a SURPLUS reaction both aimed at one
+        // enemy, plus a reaction at a DIFFERENT enemy + a queued move for the dying enemy. KillUnit
+        // keeps the active shot ([0]) + the other-target shot; drops the surplus corpse-shot + the
+        // dead unit's queued move.
+        var e  = Enemies.First(x => x.Alive);
+        var e2 = Enemies.First(x => x.Alive && x != e);
+        var a1 = Players.First(u => u.Alive && !u.IsVip);
+        _anims.Clear();
+        var res = Combat.Resolve(Grid, a1, e);
+        Enqueue(new ShotAnim(a1, e,  res, reaction: true), Team.Player);  // [0] = ACTIVE (the killing blow)
+        Enqueue(new ShotAnim(a1, e,  res, reaction: true), Team.Player);  // [1] = SURPLUS at the corpse
+        Enqueue(new ShotAnim(a1, e2, res, reaction: true), Team.Player);  // [2] = shot at ANOTHER foe (keep)
+        Enqueue(new MoveStepAnim(e, e.X, e.Y), Team.Player);             // dead unit's queued move (drop)
+        e.Hp = 0; KillUnit(e);
+        int shotsAtE  = _anims.Count(x => x is ShotAnim sh && sh.D == e);
+        int shotsAtE2 = _anims.Count(x => x is ShotAnim sh && sh.D == e2);
+        int movesForE = _anims.Count(x => x is MoveStepAnim mm && mm.Unit == e);
+        if (shotsAtE  != 1) fails.Add($"shotsAtCorpse={shotsAtE}");       // only the active one survives
+        if (shotsAtE2 != 1) fails.Add($"otherTargetShotDropped={shotsAtE2}");
+        if (movesForE != 0) fails.Add($"deadMoveKept={movesForE}");
+        _anims.Clear();
+
+        return fails.Count == 0
+            ? "DKTEST: PASS (KillUnit idempotent; surplus corpse-reaction purged; active + other-target kept)"
+            : "DKTEST: FAIL (" + string.Join(",", fails) + ")";
+    }
+
+    /// SIGHTLINE_STAGGERTEST — UNDERTOW W2: the BRACE interrupt. Asserts (1) a BRACED watcher enqueues a
+    /// STAGGER reaction while a plain watch does not, and (2) a braced reaction that HITS a surviving
+    /// target zeroes its remaining actions this turn (its post-move offense is denied) + drops any held
+    /// watch, non-lethally. Uses the anim-drain pump so ShotAnim.Apply actually runs. Tiny window for
+    /// tile math. Returns a one-line report.
+    public string StaggerSelfTest()
+    {
+        NoPersist = true;
+        var fails = new System.Collections.Generic.List<string>();
+        _run = new Run(); _run.Start();
+        SetupMission(1);
+
+        var w = Players.First(u => u.Alive && !u.IsVip);
+        var e = Enemies.First(x => x.Alive);
+        e.X = w.X + 1; e.Y = w.Y; e.SyncPos(); e.Alert = AlertLevel.Alert;   // adjacent, clear LoS
+
+        // (1) reaction-site branch: a BRACED watcher enqueues a Stagger-flagged reaction; a plain watch doesn't.
+        w.OnOverwatch = true; w.OwBrace = true; w.OwFocused = false; w.ReactedThisTurn = false; w.Ammo = 5;
+        _anims.Clear();
+        OnUnitEnteredTile(e);
+        var braceShot = _anims.OfType<ShotAnim>().FirstOrDefault(s => s.D == e);
+        if (braceShot == null) fails.Add("noBraceReaction");
+        else if (!braceShot.Stagger) fails.Add("braceReactionNotFlagged");
+
+        w.OnOverwatch = true; w.OwBrace = false; w.OwFocused = false; w.ReactedThisTurn = false; w.Ammo = 5;
+        _anims.Clear();
+        OnUnitEnteredTile(e);
+        var owShot = _anims.OfType<ShotAnim>().FirstOrDefault(s => s.D == e);
+        if (owShot != null && owShot.Stagger) fails.Add("plainOverwatchStaggered");
+        _anims.Clear();
+
+        // (2) Apply effect: a braced reaction that HITS zeroes the surviving target's remaining actions this
+        // turn + drops its watch (deterministic — forced-hit, small non-lethal damage).
+        e.Hp = e.MaxHp; e.ActionsLeft = 2; e.OnOverwatch = true;
+        var res = new ShotResult { Hit = true, Crit = false, Graze = false, Damage = 1 };
+        Enqueue(new ShotAnim(w, e, res, reaction: true) { Stagger = true }, Team.Player);
+        while (_anims.Count > 0)
+        {
+            var a = _anims[0]; a.OnStart(this);
+            for (int i = 0; i < 200 && !a.Update(this, 0.05f); i++) { }
+            if (_anims.Count > 0 && _anims[0] == a) _anims.RemoveAt(0);
+        }
+        if (e.ActionsLeft != 0) fails.Add($"notStaggered={e.ActionsLeft}");
+        if (!e.Alive)          fails.Add("staggerKilledSurvivor");
+        if (e.OnOverwatch)     fails.Add("staggerKeptWatch");
+
+        return fails.Count == 0
+            ? "STAGGERTEST: PASS (brace flags a disrupting reaction; plain watch doesn't; a hit zeroes the target's actions + drops its watch, non-lethally)"
+            : "STAGGERTEST: FAIL (" + string.Join(",", fails) + ")";
+    }
+
+    /// SIGHTLINE_MORALETEST — UNDERTOW W3: enemy pod MORALE / ROUT. On a controlled scene asserts:
+    /// (1) killing one of a 2-unit pod ROUTS the survivor (BreakPodMorale threshold), (2) a routed unit
+    /// shoots WILD (Combat aim penalty), (3) a routed unit FLEES (Ai.Plan moves it farther from the
+    /// squad) and does NOT hold overwatch, (4) the rout RALLIES (Routed decays in BeginTurn). Returns a
+    /// one-line report.
+    public string MoraleSelfTest()
+    {
+        NoPersist = true;
+        var fails = new System.Collections.Generic.List<string>();
+        _run = new Run(); _run.Start();          // KillUnit reads run state; enemy death doesn't touch Fallen but be safe
+
+        // ---- controlled scene: empty 18x11 floor, no cover (LoS always clear) ----
+        Grid = new Grid();
+        Players = new System.Collections.Generic.List<Unit>();
+        Enemies = new System.Collections.Generic.List<Unit>();
+        Vip = null; CaptiveLocked = false; Hvt = null;
+        Objective = Objective.Eliminate;
+        EvacZone.Clear();
+
+        Unit MkP(string name, int x, int y) {
+            var u = new Unit { Name = name, Cls = "ASSAULT", Team = Team.Player, X = x, Y = y,
+                               Hp = 8, MaxHp = 8, Aim = 65, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+            u.Ammo = u.Weapon.Clip; u.SyncPos(); u.BeginTurn(); return u;
+        }
+        Unit MkE(string name, int x, int y, int pod) {
+            var u = new Unit { Name = name, Cls = "GRUNT", Team = Team.Enemy, X = x, Y = y,
+                               Hp = 6, MaxHp = 6, Aim = 60, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle), PodId = pod };
+            u.Ammo = u.Weapon.Clip; u.Alert = AlertLevel.Alert; u.SyncPos(); u.BeginTurn(); return u;
+        }
+
+        var sol = MkP("SOL", 4, 5);
+        Players.Add(sol);
+        var e1 = MkE("E1", 8, 5, 0);
+        var e2 = MkE("E2", 9, 5, 0);             // same pod 0, spawn size 2
+        Enemies.Add(e1); Enemies.Add(e2);
+        _podOrig.Clear(); _podOrig[0] = 2;
+
+        // (1) killing one of the 2-unit pod routs the survivor
+        e1.Hp = 0; KillUnit(e1);
+        if (e2.Routed != RoutDuration) fails.Add($"survivorNotRouted={e2.Routed}");
+
+        // (2) a routed unit shoots WILD (Combat aim penalty vs the same unit calm)
+        int routedHit = Combat.ComputeOdds(Grid, e2, sol).HitChance;
+        e2.Routed = 0;
+        int calmHit = Combat.ComputeOdds(Grid, e2, sol).HitChance;
+        e2.Routed = RoutDuration;                // restore for the flee check
+        if (routedHit >= calmHit) fails.Add($"routNoAimPenalty r={routedHit} c={calmHit}");
+
+        // (3) a routed unit FLEES (Ai.Plan moves it FARTHER from the soldier) and won't overwatch
+        _aiUnits = AliveEnemies().Where(x => x.Active).ToList();
+        PlanEnemySquad();
+        var plan = Ai.Plan(this, e2);
+        var dest = plan.Path.Count > 0 ? plan.Path[^1] : (x: e2.X, y: e2.Y);
+        float distNow  = Util.TileDist(e2.X, e2.Y, sol.X, sol.Y);
+        float distDest = Util.TileDist(dest.x, dest.y, sol.X, sol.Y);
+        if (distDest <= distNow) fails.Add($"routedDidNotFlee now={distNow:0.0} dest={distDest:0.0}");
+        if (plan.Overwatch) fails.Add("routedHeldOverwatch");
+
+        // (4) rout RALLIES: BeginTurn counts Routed down
+        int before = e2.Routed;
+        e2.BeginTurn();
+        if (e2.Routed != before - 1) fails.Add($"routDidNotDecay {before}->{e2.Routed}");
+
+        return fails.Count == 0
+            ? "MORALETEST: PASS (pod break routs survivor; routed flees + drops watch + shoots wild; rallies over turns)"
+            : "MORALETEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
     /// Headless self-test (SIGHTLINE_STATUSTEST): status effects tick, decay, and read
@@ -1662,6 +1874,170 @@ public partial class Game
         DraftSelectedBoon = null;
         DraftSelectedContract = null;
         Phase = Phase.Draft;
+    }
+
+    // ── BEACONTEST (SIGHTLINE_BEACONTEST): UNDERTOW W6 — the Evac forward-beacon + the Escort VIP leash.
+    // Drives the REAL primitives (DoBeacon / the CheckEnd Evac predicate / LeashVip) on a controlled
+    // all-floor scene so it's deterministic + window-free. Asserts:
+    //   (Evac)  planting adds the walkable 3x3 to EvacZone; the fixed fallback corner STILL counts; a
+    //           non-floor / non-Evac plant refuses gracefully; standing all soldiers on beacon tiles wins;
+    //           the beacon is one-per-mission.
+    //   (Escort) the leash steps the VIP TOWARD the nearest soldier, never off-board / onto an occupied
+    //           tile, and short-circuits (holds) once it is already adjacent.
+    public string BeaconSelfTest()
+    {
+        NoPersist = true;
+        var fails = new List<string>();
+
+        Grid = new Grid();                       // all Floor, Height 0
+        Players = new List<Unit>();
+        Enemies = new List<Unit>();
+        Vip = null; CaptiveLocked = false;
+        Fx = new Fx();
+        Mode = GameMode.Campaign;
+
+        Unit MkP(int x, int y) {
+            var u = new Unit { Name = "S", Cls = "ASSAULT", Team = Team.Player, X = x, Y = y,
+                               Hp = 8, MaxHp = 8, Aim = 65, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+            u.Ammo = u.Weapon.Clip; u.SyncPos(); u.BeginTurn(); return u;
+        }
+
+        // ---------- (A) EVAC forward beacon ----------
+        Objective = Objective.Evac;
+        BeaconPlanted = false; BeaconZone.Clear(); BeaconTile = default;
+        EvacZone.Clear();
+        // a fixed 2x4 fallback corner (top-right), exactly like SetupMission's build
+        for (int ey = 0; ey < 4; ey++) { EvacZone.Add((Grid.W - 2, ey)); EvacZone.Add((Grid.W - 1, ey)); }
+        var corner = new List<(int x, int y)>(EvacZone);
+
+        // a planter mid-board (all floor, so its full 3x3 is walkable and NONE overlaps the corner). A
+        // second soldier sits OFF every evac tile so the plant doesn't complete the extraction (which
+        // would route CheckEnd -> EnterBarracks and need run state this window-free scene doesn't build).
+        var planter = MkP(Grid.W / 2, Grid.H / 2);
+        var lagger = MkP(1, 1);                             // far from the corner AND the beacon 3x3
+        Players.Add(planter); Players.Add(lagger);
+        Selected = planter;
+        if (!CanBeacon(planter)) fails.Add("cannotBeaconOnFloorEvac");
+        int act0 = planter.ActionsLeft;
+        DoBeacon();
+        if (!BeaconPlanted) fails.Add("beaconNotPlanted");
+        if (planter.ActionsLeft != act0 - 1) fails.Add("beaconDidNotSpendAction");
+        // the walkable 3x3 around the planter must ALL be evac tiles now
+        for (int dx = -1; dx <= 1; dx++)
+            for (int dy = -1; dy <= 1; dy++)
+            {
+                var t = (planter.X + dx, planter.Y + dy);
+                if (!EvacZone.Contains(t)) fails.Add($"beacon3x3Missing({t.Item1},{t.Item2})");
+            }
+        // the beacon centre is where the planter stood
+        if (BeaconTile != (planter.X, planter.Y)) fails.Add("beaconTileWrong");
+        // the FALLBACK corner must STILL count (union, not replace) — the load-bearing safety invariant
+        foreach (var t in corner) if (!EvacZone.Contains(t)) fails.Add($"fallbackCornerLost({t.x},{t.y})");
+        // one-per-mission: a second plant is refused
+        if (CanBeacon(planter)) fails.Add("canBeaconTwice");
+
+        // WIN: stand every living soldier on a beacon tile -> the Evac predicate passes.
+        Players.Clear();
+        var s1 = MkP(BeaconTile.x, BeaconTile.y);
+        var s2 = MkP(BeaconTile.x + 1, BeaconTile.y);       // a ring tile of the beacon
+        Players.Add(s1); Players.Add(s2);
+        bool evacWin = AlivePlayers().All(p => EvacZone.Contains((p.X, p.Y)));
+        if (!evacWin) fails.Add("beaconStandDoesNotWin");
+        // and the fallback corner still wins too (safety): move a soldier off the beacon into the corner
+        s2.X = corner[0].x; s2.Y = corner[0].y; s2.SyncPos();
+        if (!AlivePlayers().All(p => EvacZone.Contains((p.X, p.Y)))) fails.Add("mixedBeaconCornerNoWin");
+
+        // graceful refusal: a planter NOT on floor cannot beacon (and never crashes)
+        BeaconPlanted = false; BeaconZone.Clear();
+        var wallStander = MkP(3, 3);
+        Grid.Tiles[3, 3] = TileType.HighCover;              // now standing on non-floor
+        Players.Clear(); Players.Add(wallStander); Selected = wallStander;
+        if (CanBeacon(wallStander)) fails.Add("beaconOnNonFloorAllowed");
+        DoBeacon();                                         // must be a graceful no-op
+        if (BeaconPlanted) fails.Add("beaconPlantedOnNonFloor");
+        Grid.Tiles[3, 3] = TileType.Floor;
+        // Escort must NOT offer a beacon (asset defines the extraction point)
+        Objective = Objective.Escort;
+        if (HasBeaconAction) fails.Add("beaconOfferedOnEscort");
+        Objective = Objective.Evac;
+
+        // ---------- (B) ESCORT VIP leash ----------
+        Objective = Objective.Escort;
+        CaptiveLocked = false;
+        EvacZone.Clear();                                   // no zone: the leash follows the soldier (not evac)
+        Players = new List<Unit>();
+        Enemies = new List<Unit>();
+        // an anchor soldier far to the east; the VIP starts far to the west (not adjacent)
+        var anchor = MkP(14, 5);
+        Vip = Mission.MakeVip(1); Vip.X = 3; Vip.Y = 5; Vip.SyncPos(); Vip.BeginTurn();
+        Players.Add(anchor); Players.Add(Vip);
+        int vipStartDist = Util.ChebyDist(Vip.X, Vip.Y, anchor.X, anchor.Y);
+        int vx0 = Vip.X, vy0 = Vip.Y;
+        LeashVip();
+        int vipNewDist = Util.ChebyDist(Vip.X, Vip.Y, anchor.X, anchor.Y);
+        if (vipNewDist >= vipStartDist) fails.Add("leashDidNotCloseGap");                 // must step toward the soldier
+        if (!(Vip.X == vx0 && Vip.Y == vy0) && !Grid.InBounds(Vip.X, Vip.Y)) fails.Add("leashWentOffBoard");
+        if (IsOccupiedByOther(Vip.X, Vip.Y, Vip)) fails.Add("leashOntoOccupiedTile");
+        // step it repeatedly (a turn boundary each call): it must CONVERGE and never overshoot onto the soldier
+        for (int i = 0; i < 8; i++)
+        {
+            LeashVip();
+            if (Vip.X == anchor.X && Vip.Y == anchor.Y) { fails.Add("leashSteppedOntoSoldier"); break; }
+        }
+        if (Util.ChebyDist(Vip.X, Vip.Y, anchor.X, anchor.Y) > 1) fails.Add("leashDidNotReachAdjacency");
+        // once adjacent, the leash HOLDS (short-circuit) — no further movement
+        int hx = Vip.X, hy = Vip.Y;
+        LeashVip();
+        if (!(Vip.X == hx && Vip.Y == hy)) fails.Add("leashMovedWhileAdjacent");
+        // a caged (Rescue-style) or dead VIP never moves via the escort leash
+        Objective = Objective.Escort; CaptiveLocked = true;
+        int cx = Vip.X, cy = Vip.Y; Vip.X = 3; Vip.Y = 5; Vip.SyncPos();   // re-separate it
+        LeashVip();
+        if (!(Vip.X == 3 && Vip.Y == 5)) fails.Add("leashMovedCagedVip");
+        CaptiveLocked = false;
+
+        // SQUAD-AT-EVAC: once a soldier has reached the zone, the leash heads the VIP INTO the zone (the win
+        // is the VIP on an evac tile) rather than parking it adjacent forever. Build a small corner zone,
+        // seat the anchor IN it, put the VIP one step outside, and assert the leash closes onto an evac tile.
+        Players = new List<Unit>();
+        EvacZone.Clear();
+        for (int ey = 0; ey < 3; ey++) { EvacZone.Add((Grid.W - 1, ey)); EvacZone.Add((Grid.W - 2, ey)); }
+        var zoneSoldier = MkP(Grid.W - 1, 1);               // a soldier standing in the zone
+        Vip = Mission.MakeVip(1); Vip.X = Grid.W - 4; Vip.Y = 1; Vip.SyncPos(); Vip.BeginTurn();   // just outside
+        Players.Add(zoneSoldier); Players.Add(Vip);
+        int vipToZone0 = DistToEvac(Vip.X, Vip.Y);
+        for (int i = 0; i < 6 && !EvacZone.Contains((Vip.X, Vip.Y)); i++) LeashVip();
+        if (!EvacZone.Contains((Vip.X, Vip.Y))) fails.Add($"leashDidNotEnterZone({Vip.X},{Vip.Y})");
+        if (DistToEvac(Vip.X, Vip.Y) > vipToZone0) fails.Add("leashMovedAwayFromZone");
+
+        return fails.Count == 0
+            ? "BEACONTEST: PASS (Evac: plant adds walkable 3x3 to EvacZone + fallback corner still wins; non-floor/Escort refuse gracefully; all-on-beacon wins; 1/mission. Escort: leash steps VIP toward nearest soldier, converges to adjacency, never off-board/occupied/onto-soldier, holds when adjacent, inert while caged, and walks INTO the zone once the squad has arrived)"
+            : "BEACONTEST: FAIL (" + string.Join(",", fails) + ")";
+    }
+
+    /// Harness (screenshot): plant a forward EVAC beacon so the render shows the beacon 3x3 zone + the
+    /// mast/broadcast marker alongside the fixed far-corner fallback. Forces Evac, walks a soldier to a
+    /// clear forward floor tile past mid-field, then drops the beacon there via the real DoBeacon path.
+    public void DebugBeacon()
+    {
+        if (Objective != Objective.Evac) DebugForceObjective(Objective.Evac);
+        var u = Players.FirstOrDefault(p => p.Alive && !p.IsVip);
+        if (u == null) return;
+        // seat the soldier on a clear forward floor tile (past mid-field) so its full 3x3 is walkable.
+        for (int x = Grid.W - 4; x >= Grid.W / 2 && !BeaconPlanted; x--)
+            for (int y = 2; y < Grid.H - 2 && !BeaconPlanted; y++)
+            {
+                if (!Grid.IsFloor(x, y) || IsOccupiedByOther(x, y, u) || EvacZone.Contains((x, y))) continue;
+                // require the full ring to be floor so the demo beacon reads as a clean 3x3
+                bool ringOk = true;
+                for (int dx = -1; dx <= 1 && ringOk; dx++)
+                    for (int dy = -1; dy <= 1 && ringOk; dy++)
+                        if (!Grid.IsFloor(x + dx, y + dy)) ringOk = false;
+                if (!ringOk) continue;
+                u.X = x; u.Y = y; u.SyncPos();
+                Selected = u;
+                DoBeacon();
+            }
     }
 
     /// Harness (screenshot): show the event screen at a mid column.

@@ -660,9 +660,12 @@ public static class Hud
         Add("vault", "VAULT", "9", interactive && g.CanVault(u), g.VaultMode);
         Add("overwatch", "OVERWATCH", "2", interactive && u != null && u.CanAct && u.Ammo > 0, false);
         Add("focusow", "FOCUS", "F", interactive && u != null && u.CanAct && u.Ammo > 0, false);   // braced cone watch
+        Add("brace", "BRACE", "B", interactive && u != null && u.CanAct && u.Ammo > 0, false);      // UNDERTOW W2: disrupting interrupt watch
         Add("hunker", "HUNKER", "3", interactive && u != null && u.CanAct, u != null && u.Hunkered);
         if (g.HasHackAction)
             Add("hack", g.HasSabotage ? "PLANT" : "HACK", "H", interactive && g.CanHack(u), false);
+        if (g.HasBeaconAction && !g.BeaconPlanted)
+            Add("beacon", "BEACON", "G", interactive && g.CanBeacon(u), false);
         if (g.HasExtractAction)
             Add("extract", "EXTRACT", "X", interactive && g.CanExtract(u), false);
         Add("reload", "RELOAD", "R", interactive && u != null && u.CanAct && u.Ammo < u.Weapon.Clip, false);
@@ -830,6 +833,22 @@ public static class Hud
                 Raylib.DrawCircleV(new Vector2(cx, cy), r2, c);
                 break;
             }
+            case "brace":
+            {
+                // Interrupt glyph: two facing brackets clamping a centre bar (a "hold/stagger" cue).
+                float hw = 6f, hh = 6f;
+                // left bracket [
+                Raylib.DrawLineEx(new Vector2(cx - hw, cy - hh), new Vector2(cx - hw, cy + hh), 1.8f, c);
+                Raylib.DrawLineEx(new Vector2(cx - hw, cy - hh), new Vector2(cx - hw + 3f, cy - hh), 1.6f, c);
+                Raylib.DrawLineEx(new Vector2(cx - hw, cy + hh), new Vector2(cx - hw + 3f, cy + hh), 1.6f, c);
+                // right bracket ]
+                Raylib.DrawLineEx(new Vector2(cx + hw, cy - hh), new Vector2(cx + hw, cy + hh), 1.8f, c);
+                Raylib.DrawLineEx(new Vector2(cx + hw, cy - hh), new Vector2(cx + hw - 3f, cy - hh), 1.6f, c);
+                Raylib.DrawLineEx(new Vector2(cx + hw, cy + hh), new Vector2(cx + hw - 3f, cy + hh), 1.6f, c);
+                // centre bar being clamped
+                Raylib.DrawLineEx(new Vector2(cx - 2.5f, cy), new Vector2(cx + 2.5f, cy), 2.2f, c);
+                break;
+            }
             case "hunker":
             {
                 // Downward-pointing chevron (duck-down arrow)
@@ -892,6 +911,20 @@ public static class Hud
                 Raylib.DrawLineEx(new Vector2(cx, cy - 5f), new Vector2(cx + 3.5f, cy - 1f), 1.8f, c);
                 // LZ bracket under the arrow
                 Raylib.DrawLineEx(new Vector2(cx - 6f, cy + 6f), new Vector2(cx + 6f, cy + 6f), 1.6f, c);
+                break;
+            }
+            case "beacon":
+            {
+                // A beacon mast with two broadcast arcs (a forward extraction signal being raised).
+                Raylib.DrawLineEx(new Vector2(cx, cy + 6f), new Vector2(cx, cy - 3f), 1.8f, c);   // the mast
+                Raylib.DrawCircleV(new Vector2(cx, cy - 4f), 1.6f, c);                            // the emitter
+                Raylib.DrawLineEx(new Vector2(cx - 6f, cy + 6f), new Vector2(cx + 6f, cy + 6f), 1.6f, c); // base
+                // two rising signal arcs off the emitter (left + right)
+                foreach (int s in new[] { -1, 1 })
+                {
+                    Raylib.DrawLineEx(new Vector2(cx + s * 2f, cy - 6f), new Vector2(cx + s * 4f, cy - 8f), 1.3f, c);
+                    Raylib.DrawLineEx(new Vector2(cx + s * 4f, cy - 3f), new Vector2(cx + s * 6f, cy - 5f), 1.3f, c);
+                }
                 break;
             }
             case "ability":
@@ -1068,10 +1101,13 @@ public static class Hud
             case "drag": return "Pull an adjacent ally 1 tile toward you (saves wounded, speeds the march to evac). 1 action, won't end your turn, once/turn.";
             case "vault": return "Leap an adjacent cover tile to the open floor beyond it - cross an impassable screen to flank or escape. 1 action, won't end your turn, once/turn.";
             case "overwatch": return "Watch: fire a reaction shot at the first foe that moves in sight.";
+            case "focusow": return "Braced kill-lane: reaction fire only inside a 90-degree cone toward the aimed tile, but at +aim. Blind outside the cone.";
+            case "brace": return "Brace a DISRUPTING reaction: on a hit it STAGGERS the mover (denies its action this turn) for reduced damage. Deny the enemy's alpha instead of going for the kill.";
             case "hunker": return "Hunker down for extra cover defense; you can't be crit.";
             case "hack": return g.HasSabotage
                 ? $"Plant a demolition charge on an adjacent site ({g.SabotageBlown.Count}/{g.SabotageSites.Count} set). Costs 1 action."
                 : $"Work the terminal ({g.HackProgress}/{Game.HackRequired} done). Costs 1 action.";
+            case "beacon": return "Deploy a forward evac beacon on your tile: opens a 3x3 extraction zone right here (in addition to the far corner). One per mission. Costs 1 action, won't end your turn.";
             case "extract": return "Haul an adjacent ally / asset aboard - pulls them into the extraction zone. Costs 1 action.";
             case "reload": return "Reload your weapon to full.";
             case "ability":

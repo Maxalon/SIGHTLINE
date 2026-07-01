@@ -232,9 +232,14 @@ across seeds. Four game modes (DEPLOY campaign / LAST STAND endless / SKIRMISH /
 cross-run meta profile (WAR ROOM) that now carries a **persistent VETERAN reserve** (promoted
 survivors are recruitable in future runs), a deep per-run loop (perks, specs, traits, scars,
 boons, contracts, branching campaign map, field events), a broad enemy/objective/arena roster
-(35 authored arenas), reactive verbs incl. **focused (cone) overwatch**, distinct **per-biome
-visual identity**, and a full juice/audio/post-FX presentation layer. `Game.cs` is sliced into
-`Game.Autopilot.cs` + `Game.Harness.cs` (+ the older Endless/Meta/Modes/Codex slices).
+(35 authored arenas), reactive verbs incl. **focused (cone) overwatch** and the **BRACE interrupt**
+(a disrupting reaction that staggers a foe — denies its action for tempo, the comeback lever),
+**enemy pod morale/rout** (kill a pod down and the survivors break), distinct **per-biome
+visual identity** with a **lit board-space depth** pass, and a full juice/audio/post-FX presentation
+layer. `Game.cs` is sliced into `Game.Autopilot.cs` + `Game.Harness.cs` (+ the older Endless/Meta/
+Modes/Codex slices). PROGRAM UNDERTOW (7 waves) added the interrupt+morale comeback economy, sequenced
+enemy coordination, an Evac forward-beacon de-drag, and the board-depth pass — flywheel-validated
+(lead-swings 0.48→0.59, the +29 punish-gap collapsed, Evac drag 10.9→7.8t).
 
 **The exhaustive feature list is in [`docs/FEATURES.md`](docs/FEATURES.md).** The build
 history and open/next backlog are in [`docs/ROADMAP.md`](docs/ROADMAP.md) and the "OPEN/NEXT"

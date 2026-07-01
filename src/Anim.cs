@@ -140,6 +140,9 @@ public class ShotAnim : Anim
     public Unit A, D;
     public ShotResult Res;
     public bool Reaction;
+    // UNDERTOW W2: a BRACE reaction. On a hit this shot STAGGERS the target (zeroes its remaining
+    // actions this turn) instead of trying to kill it — set when the reacting soldier was braced.
+    public bool Stagger;
 
     // A shot reads as a 3-beat: a brief WIND-UP (anticipation — reticle snaps in, muzzle
     // charges) -> FIRE (muzzle/tracer/impact land) -> SETTLE. The wind-up is kept short so
@@ -308,6 +311,19 @@ public class ShotAnim : Anim
                 }
             }
             else g.MarkPlayerHurt(D);   // a survivor at death's door earns a feat if it lives
+
+            // UNDERTOW W2 — BRACE stagger: a disrupting reaction that connects INTERRUPTS a surviving
+            // target — it loses its remaining actions this turn (its post-move shot/grenade is denied,
+            // since ActAfterMove gates every action on ActionsLeft>0). The felt comeback lever: trade a
+            // kill for tempo. A dead target needs no stagger.
+            if (Stagger && D.Alive)
+            {
+                D.ActionsLeft = 0;
+                D.OnOverwatch = false;                       // a rattled unit drops any held reaction too
+                g.Fx.PopText(D.Pos + new Vector2(0, -30), "STAGGERED", Pal.Good, 20f);
+                g.Fx.Flash(D.Pos, Pal.Good, 22f, 0.14f, 0.5f);
+                g.Fx.AddShake(2.5f);
+            }
         }
         else
         {

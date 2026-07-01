@@ -367,3 +367,30 @@ seeds (mix of WIN/LOSE, no exceptions):
   (+aim vs hunkered) — situational, orthogonal to the HP/cover crit axes.
 - **Enemies (→19 archetypes):** STRIKER "WRAITH" (fast overwatch-discounting flanker; body-block or focus it)
   and SCREENER "HAZE" (back-line zoner smoking your firing lane; reposition or kill it first). Both in the Codex.
+
+## PROGRAM UNDERTOW additions (interrupt economy + morale + de-drag + board depth)
+- **BRACE — the interrupt half of the action economy (key B):** a reaction stance distinct from OVERWATCH/FOCUS.
+  Instead of a lethal watch, a braced soldier holds a DISRUPTING reaction: on a hit it STAGGERS the mover — zeroes
+  its remaining actions THIS turn (its post-move shot/grenade is denied) — for reduced, non-crit damage. Trade a
+  kill you won't land for tempo — an earnable comeback lever. One reaction/soldier/turn; green "BRC" badge + bracket
+  icon. (`Unit.OwBrace`, `ShotAnim.Stagger`, `Game.DoBrace`; `SIGHTLINE_STAGGERTEST`.)
+- **Enemy pod MORALE / ROUT:** pods carry shared morale; killed down to ≤ half their spawn strength, the survivors
+  BREAK and ROUT for ~2 turns — flee toward their own edge, drop overwatch, and shoot wild (−18 aim) — then rally.
+  Focus-firing a pod down is a genuine comeback: the second kill panics the pod. Green "ROUT" tag + "POD ROUTED"
+  banner. (`Unit.Routed`, `Game.BreakPodMorale`; `SIGHTLINE_MORALETEST`.)
+- **Sequenced enemy coordination:** setup verbs (SAPPER breach / STRIKER + adjacent shove) act BEFORE the finishers,
+  and the squad's shared focus is recomputed live per unit — so a shove/breach that exposes a soldier redirects the
+  pod onto that opening the same turn (setup-then-collapse). Advisory-only, TIMEOUT-safe. (`Game.IsSetupUnit` + a
+  per-unit `PlanEnemySquad` recompute; AITEST-covered.)
+- **Forward EVAC beacon + ESCORT leash (de-drag):** DEPLOY BEACON (key G) plants a forward extraction 3×3 that's
+  unioned with the fixed far-corner FALLBACK (always present → no soft-lock), so the squad fights to a defensible
+  mid-field spot and extracts there instead of a 14-tile stroll (Evac ~10.9t → ~7.8t). The ESCORT VIP now auto-follows
+  the squad's forward element (`LeashVip`) — no more hand-shuffling the asset. (`Game.DoBeacon`/`BeaconZone`;
+  `SIGHTLINE_BEACONTEST`.)
+- **Board-space depth (presentation):** a deterministic board key-light + restored cover legibility + contact-shadow
+  AO so the arena reads as a lit, dimensional space instead of a flat checkerboard, units still dominant
+  (colorblind-safe, byte-stable). (`Renderer` FloorLight/KeyLit/DrawCover/DrawEvac.)
+- **Balance roots:** LockOn narrowed to a FLANK reward (was any-exposed, a superset that killed the situational
+  perks); BALLISTIC PLATING de-throned from the autopilot's always-buy slot so requisition purchases spread (PLATING
+  369→203 buys; dead perks Hardened/Tank 2/4 → 11/11). Plus a double-kill correctness fix that makes the
+  class-lethality telemetry honest (`SIGHTLINE_DKTEST`).
