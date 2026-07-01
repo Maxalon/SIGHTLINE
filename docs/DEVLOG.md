@@ -1070,23 +1070,28 @@ Evac 10.9 / Escort 8.2 turns (drag), PLATING bought 369×, LockOn perk 34 (dead-
   colorblind-safe.
 
 ## Measured (flywheel, N=24/heat)
-| | baseline | W2-fix + W3 | + W5 | 6-wave (+W6) | 7-wave (+W4) |
+| | baseline | W2-fix + W3 | + W5 | 6-wave (+W6) | **7-wave (+W4)** |
 |---|---|---|---|---|---|
-| run-completion | 60.4% | 72.9% | 66.7% | 66.7% | _(pending)_ |
-| **lead-swings/match** | **0.48** | **0.59** | 0.58 | 0.53 | _(pending)_ |
-| policy gap | +29.2 | +4.2 | ~0 | ~0 | _(pending)_ |
-| choices/turn | 5.20 | 6.09 | 6.16 | 5.44 | _(pending)_ |
-| Evac turns | 10.9 | — | — | **7.8** | _(pending)_ |
+| run-completion | 60.4% | 72.9% | 66.7% | 66.7% | **75%** |
+| **lead-swings/match** | **0.48** | **0.59** | 0.58 | 0.53 | 0.48 |
+| policy gap | +29.2 | +4.2 | ~0 | ~0 | **+16.6** (g83/s67) |
+| choices/turn | 5.20 | 6.09 | 6.16 | 5.44 | 5.45 |
+| Evac turns | 10.9 | — | — | **7.8** | 7.8 |
 | PLATING buys | 369 | — | **203** | — | — |
 | dead perks (HRD/TNK) | 2 / 4 | — | **11 / 11** | — | — |
 
-**Headline:** the comeback thesis delivered — lead-swings 0.48→0.59, the +29 punish-spiral gap collapsed to a
-forgiving band, run-completion up, the dead economy/perk roots fixed, and the Evac march de-dragged (10.9→7.8t).
-A caught-and-corrected **inverted-gap artifact** (−25) taught the key lesson: an over-eager autopilot BRACE probe
-made the *greedy* policy self-sabotage; narrowing it to the genuinely-optimal use (protect a threatened wounded
-soldier) restored a positive gap — *measure the measurer* (per VANGUARD). (Open follow-up: the ESCORT leash lifted
-win% but the corner-fight residual left escort turns UP, ~14t — a fight, not empty walking, but not the intended
-de-drag; a forward beacon for Escort is the clean fix.)
+**Headline (the full arc).** W2/W3 delivered the comeback thesis — lead-swings 0.48→0.59 and the +29 punish-spiral
+gap collapsed to a forgiving band (comebacks became possible where they were structurally impossible). W5 fixed the
+dead economy/perk roots. W6 de-dragged the Evac march (10.9→7.8t). Then W4 (sequenced coordination) **restored the
+skill premium the comeback levers had softened**: the flat gap (~0, where sloppy play tied greedy) became a healthy
+**+16.6** (greedy 83% / sloppy 67%) and run-completion rose to **75%**, TIMEOUT-free — mistakes cost more, but the
+new comeback *levers* (BRACE, morale-exploitation) remain as player tools the greedy bot underuses (so the average
+lead-swings reads flat while a skilled player's comeback toolkit is genuinely richer). A caught-and-corrected
+**inverted-gap artifact** (−25 after W2) taught the key lesson: an over-eager autopilot BRACE probe made the *greedy*
+policy self-sabotage; narrowing it to the genuinely-optimal use restored a positive gap — *measure the measurer*
+(per VANGUARD). Open follow-up: the ESCORT leash lifted win% but left escort turns UP (~14t — a corner fight, not
+empty walking, but not the intended de-drag; a forward beacon for Escort is the clean fix); the +16.6 gap is a touch
+above the +7-12 ideal (skill well-rewarded, sloppy still viable) — watch it doesn't over-punish.
 
 ## Process learnings (UNDERTOW)
 1. **Adversarially verify the RESEARCH, not just the code.** The verify pass rejected/sharpened 4 of 6 synthesized
