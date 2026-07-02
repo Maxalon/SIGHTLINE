@@ -44,8 +44,11 @@ public partial class Game
         if (NoPersist && int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_HEAT"), out int hEnv)) heat = hEnv;
         _run.HeatLevel = Sightline.Heat.Clamp(heat);
         _run.LossStreak = _metaLossStreak;
-        // balance telemetry tag (no-op unless Stats.Enabled)
-        Stats.BeginRun(_run.HeatLevel, "endless");
+        // balance telemetry tag (no-op unless Stats.Enabled). APEX W4: the MODE ("endless") lives
+        // in RunRec.Mode, not the policy slot — so endless stands split greedy/sloppy exactly like
+        // the campaign batch AND are excluded from campaign policy-gap/completion math by an
+        // explicit Mode filter in Stats, not by tag-string accident.
+        Stats.BeginRun(_run.HeatLevel, SmartPlay && SmartSloppy ? "sloppy" : "greedy", "endless");
         Players = _run.Squad;
         Wave = 0;
         // Build the arena + spawn wave 1. SetupMission branches on Mode==Endless: it forces

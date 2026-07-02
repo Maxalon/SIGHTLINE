@@ -1134,6 +1134,39 @@ public class Run
         return new PerkOffer { Unit = u, A = a, B = b };
     }
 
+    // ---- APEX W4 (c): synthetic-veteran flywheel probe (SIGHTLINE_VETSIM) ----
+    /// Promote the first `n` founding soldiers to deterministic SYNTHETIC veterans: Rank 3
+    /// (SERGEANT, with the matching minimum kill count so the promotion ladder stays coherent),
+    /// the first TWO still-unowned perks of their class line, and +1 armor. Lives inside Run
+    /// because ClassLine is private. In-memory only — the caller (Game.StartMission) gates it
+    /// behind NoPersist + the env hook, so it can never touch a real save/meta, and the
+    /// screenshot harness (which never sets SIGHTLINE_VETSIM) stays byte-identical.
+    ///
+    /// NOTE: this prices a NOMINAL Rank-3 veteran, not the exact recall payload — a real recall
+    /// (SaveGame.LoadVeterans) restores the soldier's full DTO (perks/kills/rank/armor/weapon
+    /// mod) and can be stronger or weaker than this stand-in. Calibrate against the enshrine
+    /// sort key before treating a VETSIM delta as the recall floor to the point.
+    public int ApplyVetSim(int n)
+    {
+        int made = 0;
+        foreach (var u in Squad)
+        {
+            if (made >= n) break;
+            if (u.IsVip) continue;
+            u.Rank = Math.Max(u.Rank, 3);
+            u.Kills = Math.Max(u.Kills, KillReq[3]);
+            int granted = 0;
+            foreach (var p in ClassLine(u.Cls))   // deterministic: the line's first two perks
+            {
+                if (granted >= 2) break;
+                if (!u.HasPerk(p)) { ApplyPerk(u, p); granted++; }
+            }
+            u.Armor += 1;
+            made++;
+        }
+        return made;
+    }
+
     /// Grant a chosen perk, applying any immediate stat effect.
     public static void ApplyPerk(Unit u, Perk p)
     {

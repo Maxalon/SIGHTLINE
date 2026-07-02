@@ -71,6 +71,12 @@ public static class Stats
         // "greedy" (optimal smart policy) or "sloppy" (smart policy + human-like error).
         // Lets the report split win-rate by policy and surface the optimal-vs-sloppy GAP.
         public string Policy = "greedy";
+        // APEX W4: the GAME MODE this run was played under — "campaign" (default), "endless"
+        // (LAST STAND), "skirmish", or "daily". Previously the mode was smuggled through the
+        // Policy slot (BeginEndless tagged Policy="endless"), which blocked a greedy/sloppy
+        // split for endless stands and kept them out of campaign gap math only by tag-string
+        // accident. Now the exclusion is EXPLICIT: gap/completion tables filter Mode=="campaign".
+        public string Mode = "campaign";
         public readonly List<string> PerksPicked = new();
         public readonly List<string> SpecsPicked = new();  // W2: class-specialization fork picks
         public readonly List<string> Purchases = new();   // shop items bought (incl. weapon mods)
@@ -92,10 +98,15 @@ public static class Stats
 
     public static void Reset() { Runs.Clear(); _run = null; _mission = null; }
 
-    public static void BeginRun(int heat, string policy = "greedy")
+    public static void BeginRun(int heat, string policy = "greedy", string mode = "campaign")
     {
         if (!Enabled) return;
-        _run = new RunRec { Heat = heat, Policy = string.IsNullOrEmpty(policy) ? "greedy" : policy };
+        _run = new RunRec
+        {
+            Heat = heat,
+            Policy = string.IsNullOrEmpty(policy) ? "greedy" : policy,
+            Mode = string.IsNullOrEmpty(mode) ? "campaign" : mode
+        };
         Runs.Add(_run);
     }
 
@@ -226,30 +237,60 @@ public static class Stats
     // ── aggregate report ─────────────────────────────────────────────────────
     static string Pct(int num, int den) => den == 0 ? "  -  " : $"{100.0 * num / den,4:0}%";
 
+    // APEX W4: small order stats for the endless wave-depth distribution. Nearest-rank
+    // percentile over a pre-sorted list; median = P50 averaged across the middle pair.
+    static double MedianOf(List<int> sorted)
+    {
+        if (sorted.Count == 0) return 0;
+        int mid = sorted.Count / 2;
+        return sorted.Count % 2 == 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2.0;
+    }
+    static double PercentileOf(List<int> sorted, double pct)
+    {
+        if (sorted.Count == 0) return 0;
+        int rank = (int)Math.Ceiling(pct / 100.0 * sorted.Count);   // nearest-rank method
+        return sorted[Math.Min(sorted.Count - 1, Math.Max(0, rank - 1))];
+    }
+
     public static string Report()
     {
         var sb = new StringBuilder();
-        var missions = Runs.SelectMany(r => r.Missions).ToList();
+        // APEX W4: split by MODE. Campaign-shaped tables (run completion, policy gap, per-mission
+        // win-rates) aggregate CAMPAIGN runs only — an endless stand always "loses" and logs waves
+        // in MissionsCleared, so mixing modes would corrupt every one of them. Combat-kernel tables
+        // (class performance / threat ranking) keep ALL missions: a shot is a shot in any mode.
+        var campRuns = Runs.Where(r => r.Mode == "campaign").ToList();
+        var endlessRuns = Runs.Where(r => r.Mode == "endless").ToList();
+        var allMissions = Runs.SelectMany(r => r.Missions).ToList();
+        var missions = campRuns.SelectMany(r => r.Missions).ToList();
         sb.AppendLine("══════════════════════ SIGHTLINE BALANCE REPORT ══════════════════════");
-        sb.AppendLine($"runs={Runs.Count}  missions={missions.Count}");
+        sb.AppendLine(Runs.Count == campRuns.Count
+            ? $"runs={Runs.Count}  missions={allMissions.Count}"
+            : $"runs={Runs.Count} (campaign {campRuns.Count} / endless {endlessRuns.Count} / other {Runs.Count - campRuns.Count - endlessRuns.Count})  missions={allMissions.Count}");
         if (Runs.Count == 0) { sb.AppendLine("(no data)"); return sb.ToString(); }
 
-        // Run-level
-        int runWins = Runs.Count(r => r.Win);
-        double avgCleared = Runs.Average(r => (double)r.MissionsCleared);
-        sb.AppendLine($"\nRUN OUTCOMES:  win-rate {Pct(runWins, Runs.Count)}   avg missions cleared {avgCleared:0.0}");
+        // Run-level (campaign only — endless "waves survived" is not "missions cleared")
+        if (campRuns.Count > 0)
+        {
+            int runWins = campRuns.Count(r => r.Win);
+            double avgCleared = campRuns.Average(r => (double)r.MissionsCleared);
+            sb.AppendLine($"\nRUN OUTCOMES (campaign):  win-rate {Pct(runWins, campRuns.Count)}   avg missions cleared {avgCleared:0.0}");
+        }
 
         // ── OPTIMAL vs SLOPPY GAP ────────────────────────────────────────────────────
         // If the batch ran both policies, the gap between a near-optimal "greedy" bot and a
         // human-error "sloppy" bot is a DIFFICULTY-SLACK signal: a large gap = swingy/unfair
         // (small mistakes lose runs); both-high-and-close = healthy slack for human error.
-        var greedy = Runs.Where(r => r.Policy == "greedy").ToList();
-        var sloppy = Runs.Where(r => r.Policy == "sloppy").ToList();
+        // CAMPAIGN RUNS ONLY (explicit Mode filter): endless stands have no "win" to gap.
+        var greedy = campRuns.Where(r => r.Policy == "greedy").ToList();
+        var sloppy = campRuns.Where(r => r.Policy == "sloppy").ToList();
+        if ((greedy.Count == 0 || sloppy.Count == 0) && Runs.Count > campRuns.Count)
+            sb.AppendLine($"\nPOLICY GAP (campaign runs only): n={campRuns.Count} — endless/skirmish runs are excluded from gap math");
         if (greedy.Count > 0 && sloppy.Count > 0)
         {
             double gW = 100.0 * greedy.Count(r => r.Win) / greedy.Count;
             double sW = 100.0 * sloppy.Count(r => r.Win) / sloppy.Count;
-            sb.AppendLine($"\nPOLICY GAP (optimal vs human-error):");
+            sb.AppendLine($"\nPOLICY GAP (optimal vs human-error; campaign runs only):");
             sb.AppendLine($"  greedy win-rate {gW,4:0}%  (n={greedy.Count})");
             sb.AppendLine($"  sloppy win-rate {sW,4:0}%  (n={sloppy.Count})");
             // A small |gap| (either sign) = the game tolerates human error (healthy slack); a
@@ -259,7 +300,7 @@ public static class Stats
             sb.AppendLine($"  GAP {gW - sW,4:0} pts  ({verdict})");
             // per-objective gap so a single brittle objective can't hide in the overall number
             sb.AppendLine("  by objective (greedy / sloppy / gap):");
-            var objs = Runs.SelectMany(r => r.Missions.Select(m => m.Objective)).Distinct().OrderBy(o => o);
+            var objs = campRuns.SelectMany(r => r.Missions.Select(m => m.Objective)).Distinct().OrderBy(o => o);
             foreach (var o in objs)
             {
                 var gm = greedy.SelectMany(r => r.Missions).Where(m => m.Objective == o).ToList();
@@ -275,7 +316,7 @@ public static class Stats
         // avg meaningful-choices/turn = how often the bot faced a real decision (a runner-up
         // within ~12% of the best action). avg lead-swings/match = how often the HP-lead flipped
         // (tension). High-and-textured > grindy-deterministic even at the same win-rate.
-        var tMissions = missions.Where(m => m.PlayerTurns > 0).ToList();
+        var tMissions = allMissions.Where(m => m.PlayerTurns > 0).ToList();
         if (tMissions.Count > 0)
         {
             double choicesPerTurn = tMissions.Sum(m => (double)m.MeaningfulChoiceSum) / tMissions.Sum(m => (double)m.PlayerTurns);
@@ -288,37 +329,70 @@ public static class Stats
         // Run-completion by heat — the metric the Heat ladder is supposed to bend. The
         // per-MISSION win-rate below conflates "harder rung" with "how far the run got"
         // (survivorship bias), so it can't show the ladder's shape; this one can.
-        sb.AppendLine("\nRUN COMPLETION BY HEAT (full-campaign clears):");
-        foreach (var g in Runs.GroupBy(r => r.Heat).OrderBy(g => g.Key))
-            sb.AppendLine($"  heat {g.Key}: {Pct(g.Count(r => r.Win), g.Count())}  (n={g.Count()} runs, avg {g.Average(r => (double)r.MissionsCleared):0.0} missions)");
+        if (campRuns.Count > 0)
+        {
+            sb.AppendLine("\nRUN COMPLETION BY HEAT (full-campaign clears):");
+            foreach (var g in campRuns.GroupBy(r => r.Heat).OrderBy(g => g.Key))
+                sb.AppendLine($"  heat {g.Key}: {Pct(g.Count(r => r.Win), g.Count())}  (n={g.Count()} runs, avg {g.Average(r => (double)r.MissionsCleared):0.0} missions)");
+        }
 
-        // Win-rate by heat
-        sb.AppendLine("\nMISSION WIN-RATE BY HEAT:");
-        foreach (var g in missions.GroupBy(m => m.Heat).OrderBy(g => g.Key))
-            sb.AppendLine($"  heat {g.Key}: {Pct(g.Count(m => m.Win), g.Count())}  (n={g.Count()}, avg {g.Average(m => (double)m.Turns):0.0} turns)");
+        // ── APEX W4: ENDLESS WAVE DEPTH (LAST STAND) ─────────────────────────────────
+        // The mode's tuning metric: how deep a stand gets before the wipe. Depth for these runs
+        // is stored in MissionsCleared (= waves survived — logged from game.Wave at every exit:
+        // wipe, wave-cap, frame-cap, abort). Cap hits are logged explicitly so a right-censored
+        // p90 is always visible, never silent.
+        if (endlessRuns.Count > 0)
+        {
+            sb.AppendLine("\nENDLESS WAVE DEPTH (LAST STAND, waves survived):");
+            void DepthLine(string label, List<RunRec> rs)
+            {
+                if (rs.Count == 0) return;
+                var d = rs.Select(r => r.MissionsCleared).OrderBy(x => x).ToList();
+                sb.AppendLine($"  {label,-8}: n={d.Count,-3} mean {d.Average():0.0}   median {MedianOf(d):0.#}   p90 {PercentileOf(d, 90):0.#}");
+            }
+            DepthLine("all", endlessRuns);
+            DepthLine("greedy", endlessRuns.Where(r => r.Policy == "greedy").ToList());
+            DepthLine("sloppy", endlessRuns.Where(r => r.Policy == "sloppy").ToList());
+            foreach (var g in endlessRuns.GroupBy(r => r.Heat).OrderBy(g => g.Key))
+                DepthLine($"heat {g.Key}", g.ToList());
+            int waveCaps = endlessRuns.Count(r => r.LossCause == "wave-cap");
+            int frameCaps = endlessRuns.Count(r => r.LossCause == "frame-cap");
+            sb.AppendLine(waveCaps + frameCaps > 0
+                ? $"  CAP HITS: wave-cap {waveCaps}, frame-cap {frameCaps} — depth is right-censored for these stands"
+                : "  cap hits: none (distribution uncensored)");
+        }
 
-        // Win-rate by objective
-        sb.AppendLine("\nMISSION WIN-RATE BY OBJECTIVE:");
-        foreach (var g in missions.GroupBy(m => m.Objective).OrderByDescending(g => g.Count()))
-            sb.AppendLine($"  {g.Key,-11}: {Pct(g.Count(m => m.Win), g.Count())}  (n={g.Count()}, avg {g.Average(m => (double)m.Turns):0.0} turns)");
+        // Per-mission win-rate tables (campaign missions only — skipped in an endless-only batch)
+        if (missions.Count > 0)
+        {
+            // Win-rate by heat
+            sb.AppendLine("\nMISSION WIN-RATE BY HEAT:");
+            foreach (var g in missions.GroupBy(m => m.Heat).OrderBy(g => g.Key))
+                sb.AppendLine($"  heat {g.Key}: {Pct(g.Count(m => m.Win), g.Count())}  (n={g.Count()}, avg {g.Average(m => (double)m.Turns):0.0} turns)");
 
-        // Win-rate by mission number (difficulty curve)
-        sb.AppendLine("\nMISSION WIN-RATE BY MISSION #:");
-        foreach (var g in missions.GroupBy(m => m.Mission).OrderBy(g => g.Key))
-            sb.AppendLine($"  m{g.Key}: {Pct(g.Count(x => x.Win), g.Count())}  (n={g.Count()})");
+            // Win-rate by objective
+            sb.AppendLine("\nMISSION WIN-RATE BY OBJECTIVE:");
+            foreach (var g in missions.GroupBy(m => m.Objective).OrderByDescending(g => g.Count()))
+                sb.AppendLine($"  {g.Key,-11}: {Pct(g.Count(m => m.Win), g.Count())}  (n={g.Count()}, avg {g.Average(m => (double)m.Turns):0.0} turns)");
 
-        // Cause of loss
-        sb.AppendLine("\nLOSS CAUSES (missions):");
-        foreach (var g in missions.Where(m => !m.Win && !string.IsNullOrEmpty(m.LossCause))
-                                   .GroupBy(m => m.LossCause).OrderByDescending(g => g.Count()))
-            sb.AppendLine($"  {g.Key,-22}: {g.Count()}");
+            // Win-rate by mission number (difficulty curve)
+            sb.AppendLine("\nMISSION WIN-RATE BY MISSION #:");
+            foreach (var g in missions.GroupBy(m => m.Mission).OrderBy(g => g.Key))
+                sb.AppendLine($"  m{g.Key}: {Pct(g.Count(x => x.Win), g.Count())}  (n={g.Count()})");
 
-        // Damage / accuracy by player class
+            // Cause of loss
+            sb.AppendLine("\nLOSS CAUSES (missions):");
+            foreach (var g in missions.Where(m => !m.Win && !string.IsNullOrEmpty(m.LossCause))
+                                       .GroupBy(m => m.LossCause).OrderByDescending(g => g.Count()))
+                sb.AppendLine($"  {g.Key,-22}: {g.Count()}");
+        }
+
+        // Damage / accuracy by player class (ALL modes — combat-kernel data is mode-agnostic)
         var dmgByClass = new Dictionary<string, int>();
         var shotsByClass = new Dictionary<string, int>();
         var hitsByClass = new Dictionary<string, int>();
         var killsByClass = new Dictionary<string, int>();
-        foreach (var m in missions)
+        foreach (var m in allMissions)
         {
             foreach (var kv in m.DamageByClass) Bump(dmgByClass, kv.Key, kv.Value);
             foreach (var kv in m.ShotsByClass) Bump(shotsByClass, kv.Key, kv.Value);
@@ -336,9 +410,9 @@ public static class Stats
             sb.AppendLine($"  {c,-11} {s,6}  {Pct(h, s)}  {d,5}   {k,4}");
         }
 
-        // Threat ranking: which enemy classes kill soldiers
+        // Threat ranking: which enemy classes kill soldiers (ALL modes)
         var deaths = new Dictionary<string, int>();
-        foreach (var m in missions)
+        foreach (var m in allMissions)
             foreach (var kv in m.DeathsByEnemyClass) Bump(deaths, kv.Key, kv.Value);
         if (deaths.Count > 0)
         {
@@ -377,6 +451,29 @@ public static class Stats
                 sb.AppendLine($"  {kv.Key,-18}: {kv.Value}");
         }
 
+        // ── APEX W4: WIN-RATE BY PICK (value telemetry, not just frequency) ──────────
+        // Run-level association: for each code, the completion rate of the CAMPAIGN runs that
+        // held it (deduped per run). These were recorded all along — contracts were recorded
+        // and never reported at ALL — but only frequencies ever reached the report, so a pick's
+        // VALUE was invisible. Small-n rows are noisy; read them against the pick count.
+        void WinRateTable(string title, Func<RunRec, IEnumerable<string>> picks)
+        {
+            var agg = new Dictionary<string, (int n, int w)>();
+            foreach (var r in campRuns)
+                foreach (var code in picks(r).Distinct())
+                {
+                    agg.TryGetValue(code, out var t);
+                    agg[code] = (t.n + 1, t.w + (r.Win ? 1 : 0));
+                }
+            if (agg.Count == 0) return;
+            sb.AppendLine($"\n{title}:");
+            foreach (var kv in agg.OrderByDescending(kv => kv.Value.n).ThenBy(kv => kv.Key))
+                sb.AppendLine($"  {kv.Key,-18}: {Pct(kv.Value.w, kv.Value.n)}  (in {kv.Value.n} runs)");
+        }
+        WinRateTable("RUN WIN-RATE BY BOON (campaign runs holding it)", r => r.BoonsPicked);
+        WinRateTable("RUN WIN-RATE BY SPEC (campaign runs fielding it)", r => r.SpecsPicked);
+        WinRateTable("RUN WIN-RATE BY CONTRACT (campaign runs under it)", r => r.ContractsPicked);
+
         sb.AppendLine("═══════════════════════════════════════════════════════════════════════");
         return sb.ToString();
     }
@@ -398,16 +495,21 @@ public static class Stats
         catch { /* telemetry is best-effort; never throw out of a balance batch */ }
     }
 
-    // A plain-data view of the aggregate, for JSON. Built from the same Runs list as Report().
+    // A plain-data view of the aggregate, for JSON. Built from the same Runs list as Report(),
+    // with the same APEX W4 mode split: win-rate/gap tables are CAMPAIGN-only, combat-kernel
+    // tables (class/threat) span all modes, and endless stands get their own depth object.
     public static object BuildSummary()
     {
-        var missions = Runs.SelectMany(r => r.Missions).ToList();
+        var campRuns = Runs.Where(r => r.Mode == "campaign").ToList();
+        var endlessRuns = Runs.Where(r => r.Mode == "endless").ToList();
+        var allMissions = Runs.SelectMany(r => r.Missions).ToList();
+        var missions = campRuns.SelectMany(r => r.Missions).ToList();
 
         var dmgByClass = new Dictionary<string, int>();
         var shotsByClass = new Dictionary<string, int>();
         var hitsByClass = new Dictionary<string, int>();
         var killsByClass = new Dictionary<string, int>();
-        foreach (var m in missions)
+        foreach (var m in allMissions)
         {
             foreach (var kv in m.DamageByClass) Bump(dmgByClass, kv.Key, kv.Value);
             foreach (var kv in m.ShotsByClass) Bump(shotsByClass, kv.Key, kv.Value);
@@ -415,7 +517,7 @@ public static class Stats
             foreach (var kv in m.KillsByClass) Bump(killsByClass, kv.Key, kv.Value);
         }
         var deaths = new Dictionary<string, int>();
-        foreach (var m in missions)
+        foreach (var m in allMissions)
             foreach (var kv in m.DeathsByEnemyClass) Bump(deaths, kv.Key, kv.Value);
         var perks = new Dictionary<string, int>();
         foreach (var r in Runs) foreach (var p in r.PerksPicked) Bump(perks, p);
@@ -432,14 +534,43 @@ public static class Stats
             return l.Count == 0 ? 0.0 : Math.Round(100.0 * l.Count(m => m.Win) / l.Count, 1);
         }
 
-        // policy gap (greedy vs sloppy) for the machine-readable artifact
-        var greedy = Runs.Where(r => r.Policy == "greedy").ToList();
-        var sloppy = Runs.Where(r => r.Policy == "sloppy").ToList();
+        // policy gap (greedy vs sloppy) for the machine-readable artifact — CAMPAIGN runs only
+        // (APEX W4: endless/skirmish are excluded by the explicit Mode filter, not tag accident)
+        var greedy = campRuns.Where(r => r.Policy == "greedy").ToList();
+        var sloppy = campRuns.Where(r => r.Policy == "sloppy").ToList();
         double greedyWin = greedy.Count == 0 ? 0.0 : Math.Round(100.0 * greedy.Count(r => r.Win) / greedy.Count, 1);
         double sloppyWin = sloppy.Count == 0 ? 0.0 : Math.Round(100.0 * sloppy.Count(r => r.Win) / sloppy.Count, 1);
 
-        // decision-richness / swing aggregates
-        var tMissions = missions.Where(m => m.PlayerTurns > 0).ToList();
+        // APEX W4: endless wave-depth aggregates (depth = MissionsCleared = waves survived)
+        object DepthStats(List<RunRec> rs)
+        {
+            var d = rs.Select(r => r.MissionsCleared).OrderBy(x => x).ToList();
+            return new
+            {
+                n = d.Count,
+                mean = d.Count == 0 ? 0.0 : Math.Round(d.Average(), 2),
+                median = MedianOf(d),
+                p90 = PercentileOf(d, 90)
+            };
+        }
+
+        // APEX W4: run-level win-rate by pick code (campaign only, deduped per run)
+        Dictionary<string, object> WinRateBy(Func<RunRec, IEnumerable<string>> picks)
+        {
+            var agg = new Dictionary<string, (int n, int w)>();
+            foreach (var r in campRuns)
+                foreach (var code in picks(r).Distinct())
+                {
+                    agg.TryGetValue(code, out var t);
+                    agg[code] = (t.n + 1, t.w + (r.Win ? 1 : 0));
+                }
+            return agg.OrderByDescending(kv => kv.Value.n).ToDictionary(
+                kv => kv.Key,
+                kv => (object)new { runs = kv.Value.n, winRate = Math.Round(100.0 * kv.Value.w / kv.Value.n, 1) });
+        }
+
+        // decision-richness / swing aggregates (all modes — texture data is mode-agnostic)
+        var tMissions = allMissions.Where(m => m.PlayerTurns > 0).ToList();
         double choicesPerTurn = tMissions.Count == 0 ? 0.0
             : Math.Round(tMissions.Sum(m => (double)m.MeaningfulChoiceSum) / Math.Max(1, tMissions.Sum(m => m.PlayerTurns)), 3);
         double swingsPerMatch = tMissions.Count == 0 ? 0.0 : Math.Round(tMissions.Average(m => (double)m.LeadSwings), 2);
@@ -448,14 +579,29 @@ public static class Stats
         return new
         {
             runs = Runs.Count,
-            missions = missions.Count,
-            runWinRate = Runs.Count == 0 ? 0.0 : Math.Round(100.0 * Runs.Count(r => r.Win) / Runs.Count, 1),
-            avgMissionsCleared = Runs.Count == 0 ? 0.0 : Math.Round(Runs.Average(r => (double)r.MissionsCleared), 2),
+            // APEX W4: run counts by mode, so a consumer can see at a glance what the batch mixed.
+            runsByMode = Runs.GroupBy(r => r.Mode).OrderBy(g => g.Key).ToDictionary(g => g.Key, g => g.Count()),
+            missions = allMissions.Count,
+            // campaign-only (endless "missions cleared" are waves — a different unit entirely)
+            runWinRate = campRuns.Count == 0 ? 0.0 : Math.Round(100.0 * campRuns.Count(r => r.Win) / campRuns.Count, 1),
+            avgMissionsCleared = campRuns.Count == 0 ? 0.0 : Math.Round(campRuns.Average(r => (double)r.MissionsCleared), 2),
             policyGap = new
             {
                 greedyRuns = greedy.Count, greedyWinRate = greedyWin,
                 sloppyRuns = sloppy.Count, sloppyWinRate = sloppyWin,
                 gap = Math.Round(greedyWin - sloppyWin, 1)
+            },
+            // APEX W4: LAST STAND depth distribution (empty/zeroed when the batch had no endless runs).
+            endless = new
+            {
+                runs = endlessRuns.Count,
+                depth = DepthStats(endlessRuns),
+                depthGreedy = DepthStats(endlessRuns.Where(r => r.Policy == "greedy").ToList()),
+                depthSloppy = DepthStats(endlessRuns.Where(r => r.Policy == "sloppy").ToList()),
+                byHeat = endlessRuns.GroupBy(r => r.Heat).OrderBy(g => g.Key)
+                    .Select(g => new { heat = g.Key, depth = DepthStats(g.ToList()) }).ToList(),
+                waveCapHits = endlessRuns.Count(r => r.LossCause == "wave-cap"),
+                frameCapHits = endlessRuns.Count(r => r.LossCause == "frame-cap")
             },
             decisionRichness = new
             {
@@ -464,8 +610,8 @@ public static class Stats
                 avgMaxSwing = avgMaxSwing
             },
             // Run-completion grouped by heat (the ladder's true shape — distinct from the
-            // survivorship-skewed per-mission byHeat below).
-            byHeatRun = Runs.GroupBy(r => r.Heat).OrderBy(g => g.Key).Select(g => new
+            // survivorship-skewed per-mission byHeat below). Campaign runs only.
+            byHeatRun = campRuns.GroupBy(r => r.Heat).OrderBy(g => g.Key).Select(g => new
             {
                 heat = g.Key, runs = g.Count(),
                 runWinRate = Math.Round(100.0 * g.Count(r => r.Win) / g.Count(), 1),
@@ -502,6 +648,11 @@ public static class Stats
             specPicks = specs.OrderByDescending(kv => kv.Value).ToDictionary(kv => kv.Key, kv => kv.Value),
             shopPurchases = buys.OrderByDescending(kv => kv.Value).ToDictionary(kv => kv.Key, kv => kv.Value),
             boonPicks = boons.OrderByDescending(kv => kv.Value).ToDictionary(kv => kv.Key, kv => kv.Value),
+            // APEX W4: pick VALUE, not just frequency — run win-rate by held boon/spec/contract
+            // (campaign runs, deduped per run; contracts were recorded but never reported at all).
+            winRateByBoon = WinRateBy(r => r.BoonsPicked),
+            winRateBySpec = WinRateBy(r => r.SpecsPicked),
+            winRateByContract = WinRateBy(r => r.ContractsPicked),
         };
     }
 }

@@ -125,7 +125,8 @@ public partial class Game
         _run.CurrentCard = new MissionCard { Objective = obj, ModName = "SKIRMISH", Reward = RewardKind.None };
         // a random arena (leave ForcedLayout untouched under the harness so SIGHTLINE_MAP still works)
         if (!NoPersist) Mission.ForcedLayout = -1;
-        Stats.BeginRun(_run.HeatLevel, "skirmish");
+        // APEX W4: mode goes in RunRec.Mode (policy slot stays a real policy) — see BeginEndless.
+        Stats.BeginRun(_run.HeatLevel, SmartPlay && SmartSloppy ? "sloppy" : "greedy", "skirmish");
         Players = _run.Squad;
         Wave = 0;
         SetupMission(1);
@@ -162,7 +163,8 @@ public partial class Game
         // force the day's arena. Set ForcedLayout so SetupMission -> Mission.Build stamps it (both live
         // and harness — the daily's determinism is the point). It is cleared when leaving skirmish.
         Mission.ForcedLayout = arena;
-        Stats.BeginRun(_run.HeatLevel, "daily");
+        // APEX W4: mode goes in RunRec.Mode (policy slot stays a real policy) — see BeginEndless.
+        Stats.BeginRun(_run.HeatLevel, SmartPlay && SmartSloppy ? "sloppy" : "greedy", "daily");
         Players = _run.Squad;
         Wave = 0;
         // SEEDED DAILY: reseed the shared RNG from the day's seed so the WHOLE procedural board (arena
