@@ -911,6 +911,7 @@ public partial class Game
         Ai.Tier = Sightline.Heat.AiTier(heat);
         int heatEnemy = Sightline.Heat.EnemyDelta(heat);
         int heatStat  = Sightline.Heat.StatDelta(heat);
+        int heatDmg   = Sightline.Heat.DmgDelta(heat);   // W6c: rung-8 +1 enemy damage (0 below the apex)
         // EARLY-MISSION HEAT GRACE. The measured ~20% mission-1 loss (which hard-caps run
         // completion, a geometric product) was almost entirely a heat-3/4 alpha-strike on the
         // COLD OPENER: Heat adds +2 bodies / +2 stat to a force a green 4-rookie squad meets
@@ -918,8 +919,8 @@ public partial class Game
         // over the first missions so the ladder bites once the squad can answer it (m1 x0, m2
         // x1/2, m3+ full). Card deltas and the per-mission growth curve (Mission.cs) are
         // untouched — only Heat's extra bodies/stats ramp. Heat 0 stays a true no-op.
-        if (n <= 1)      { heatEnemy = 0; heatStat = 0; }
-        else if (n == 2) { heatEnemy /= 2; heatStat /= 2; }
+        if (n <= 1)      { heatEnemy = 0; heatStat = 0; heatDmg = 0; }
+        else if (n == 2) { heatEnemy /= 2; heatStat /= 2; heatDmg /= 2; }   // W6c: +1 dmg graces to 0 on m1-2 like the other deltas
         int enemyDelta = card.EnemyDelta + heatEnemy;
         // adaptive assist eases the force-wide enemy stat bump (base Heat only; 0 otherwise).
         int statDelta = card.StatDelta + heatStat - _run.AssistStatRelief;
@@ -933,7 +934,7 @@ public partial class Game
             : (Objective == Objective.Rescue ? (Grid.W / 2, Grid.H / 2) : ((int, int)?)null);
         Grid.ClearHazards();              // wipe last mission's fire/barrels before terrain is rebuilt
         Mission.Build(Grid, Players, Enemies, n, EvacZone, reserve,
-                      enemyDelta, statDelta, HasSabotage ? SabotageSites : null);
+                      enemyDelta, statDelta, HasSabotage ? SabotageSites : null, heatDmg);
         // PROGRAM HORIZON W2: Mission.Build laid out the arena + spawned a normal campaign force.
         // For LAST STAND we don't want that force — clear it and drop in the first horde wave (the
         // arena/terrain stays). SpawnEndlessWave uses the SpawnReinforcements machinery.

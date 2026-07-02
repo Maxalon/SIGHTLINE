@@ -208,6 +208,7 @@ public class HeatModifier
     public bool HarshAttrition;  // wounds last +1 mission and field-heal is halved
     public bool NoReinforcements; // the barracks stops backfilling fallen soldiers — losses shrink the squad
     public int AiTier;           // W6b: AI coordination tier this rung demands (0..2; MAX over active rungs -> Ai.Tier)
+    public int DmgDelta;         // W6c: extra enemy weapon damage this rung adds (per-unit DmgMin/DmgMax bump in SpawnEnemies)
 }
 
 /// The Heat ladder: a static data table + cumulative-effect accessors. The MAX selectable
@@ -258,7 +259,10 @@ public static class Heat
         // active, the top of the ladder is a genuine wall, beatable only by excellent play.
         // W6b: NO QUARTER is peak coordination (tier 2) — focus/crossfire convergence and
         // item reliability at their ceiling; see Ai.Tier for exactly which reads scale.
-        new HeatModifier { Name = "NO QUARTER",    Desc = "+1 enemy; the deadliest force (+1 stat)", EnemyDelta = 1, StatDelta = 1, AiTier = 2 },
+        // W6c: ...and the apex is the ONE rung where heat scales enemy DAMAGE (+1 per hit) —
+        // the counterweight to late-run plated squads, since StatDelta (HP/aim) saturates
+        // against Armor while the damage floor never did. Desc surfaces it to the player.
+        new HeatModifier { Name = "NO QUARTER",    Desc = "+1 enemy; deadliest force (+1 stat, +1 dmg)", EnemyDelta = 1, StatDelta = 1, AiTier = 2, DmgDelta = 1 },
     };
 
     public static int Clamp(int level) => Math.Clamp(level, Min, Max);
@@ -280,6 +284,9 @@ public static class Heat
     /// W6b: the AI coordination tier this heat level demands — the MAX over active rungs (a
     /// tier is a quality level, not a stackable quantity). 0 below EXPOSED (rung 6).
     public static int AiTier(int level) { int t = 0; foreach (var m in Active(level)) t = Math.Max(t, m.AiTier); return t; }
+    /// W6c: extra per-hit enemy weapon damage at this heat level (summed like StatDelta;
+    /// today only NO QUARTER carries it, so this is 0 below the rung-8 apex).
+    public static int DmgDelta(int level) { int s = 0; foreach (var m in Active(level)) s += m.DmgDelta; return s; }
 
     /// Bonus requisition intel per cleared mission at this heat level. ACCELERATING (not
     /// linear): a flat per-level base PLUS a quadratic kicker, so the now-genuinely-hard top

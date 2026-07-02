@@ -59,7 +59,8 @@ public static class Mission
     /// and spawn a hostile force scaled by missionNum.
     public static void Build(Grid grid, List<Unit> players, List<Unit> enemies, int missionNum,
                              List<(int x, int y)> evac = null, (int x, int y)? terminal = null,
-                             int enemyDelta = 0, int statDelta = 0, List<(int x, int y)> sabotage = null)
+                             int enemyDelta = 0, int statDelta = 0, List<(int x, int y)> sabotage = null,
+                             int dmgDelta = 0)
     {
         enemies.Clear();
         grid.ClearSmoke();
@@ -100,7 +101,7 @@ public static class Mission
         // a lighter hostile force (the loud-tempo IS the difficulty) + covered fighting positions
         // at each site (below) so the split squad can hold.
         bool sabotageObj = sabotage != null && sabotage.Count > 0;
-        SpawnEnemies(grid, enemies, missionNum, evacSet, enemyDelta, statDelta, sabotageObj);
+        SpawnEnemies(grid, enemies, missionNum, evacSet, enemyDelta, statDelta, sabotageObj, dmgDelta);
 
         var occupied = new HashSet<(int, int)>();
         foreach (var u in players) occupied.Add((u.X, u.Y));
@@ -349,7 +350,8 @@ public static class Mission
     }
 
     static void SpawnEnemies(Grid grid, List<Unit> enemies, int n, HashSet<(int, int)> evac,
-                             int enemyDelta = 0, int statDelta = 0, bool sabotage = false)
+                             int enemyDelta = 0, int statDelta = 0, bool sabotage = false,
+                             int dmgDelta = 0)
     {
         // Headcount cap raised 10 -> 12 so the top-Heat "+enemy" rungs aren't silently wasted
         // (the +1/+1 from RELENTLESS/OVERWHELMING used to clip at 10 on later missions). 12 still
@@ -446,6 +448,20 @@ public static class Mission
                 { e.EnemyItem = ItemKind.Flash; e.ItemCharge = 1; }
             else if (n >= 3 && e.Cls == "GRUNT" && Util.Roll(18))
                 { e.EnemyItem = ItemKind.Smoke; e.ItemCharge = 1; }
+            // W6c — NO QUARTER bites: the rung-8 Heat row's +1 enemy damage, applied to the
+            // per-unit Weapon instance (Weapon.Make returns a FRESH Weapon per unit, so this
+            // never mutates a shared template; default 0 == today's spawns byte-for-byte).
+            // Applied at this single chokepoint so EVERY spawned body — archetype, demoted
+            // BOMBARD, mid-boss, WARLORD — carries it. Two known side effects, both deliberate:
+            //  (1) +1 DmgMax WIDENS the AI finish band (Ai.Plan's `p.Hp <= e.Weapon.DmgMax`
+            //      reads), so apex enemies also press kills on soldiers one HP point earlier —
+            //      a coordination sharpening beyond the raw +1 per hit;
+            //  (2) it leans AGAINST the BRACE comeback lever (the stagger's reduced-damage
+            //      trade claws back relatively less at the apex) — watched via the heat-8
+            //      flywheel; the comeback economy is the first re-tune if lead-swings collapse.
+            // Scope: the INITIAL force only — pressure-clock/Defend reinforcement waves stay
+            // deliberately light bodies (see MakeWaveHostile's do-not-upgrade note).
+            if (dmgDelta != 0) { e.Weapon.DmgMin += dmgDelta; e.Weapon.DmgMax += dmgDelta; }
             e.Alert = AlertLevel.Unaware;  // dormant until sighted (escalates via 4.3 tiers)
             e.PodId = i / 2;               // pods of ~2
             // APEX W5: composition telemetry — count the FINAL pick (post demote/clamp) at spawn

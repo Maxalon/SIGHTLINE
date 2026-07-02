@@ -619,6 +619,11 @@ public partial class Game
             if (Sightline.Heat.AiTier(0) != 0 || Sightline.Heat.AiTier(5) != 0) fails.Add("aiTierLowHeatNot0");
             if (Sightline.Heat.AiTier(6) != 1 || Sightline.Heat.AiTier(7) != 1) fails.Add("aiTierExposedNot1");
             if (Sightline.Heat.AiTier(8) != 2) fails.Add("aiTierNoQuarterNot2");
+            // W6c data pin: +1 enemy damage is the rung-8 apex ONLY (0 through RELENTLESS, so
+            // heats 0-7 spawn today's weapons byte-for-byte; the default param keeps every
+            // harness Mission.Build call at 0).
+            if (Sightline.Heat.DmgDelta(7) != 0) fails.Add("dmgDeltaBelowApexNot0");
+            if (Sightline.Heat.DmgDelta(8) != 1) fails.Add("dmgDeltaNoQuarterNot1");
 
             // (b) the smoke/flash damp read: tier 0 == the shipped constants EXACTLY; tier 2
             //     rises but is CAPPED at 75 (never certainty) and never lifts a roll already
