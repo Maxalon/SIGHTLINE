@@ -148,6 +148,16 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        // SIGHTLINE_RESCUETEST=1 : APEX W2 — the caged Rescue captive is actionless until freed
+        // (freeing restores actions/movement), and the all-soldiers-dead-while-caged soft-lock
+        // resolves (checkpoint redeploy at m3+ / CAPTIVE ABANDONED loss / skirmish loss).
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_RESCUETEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "rescuetest");
+            Console.WriteLine(new Game().RescueSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         // SIGHTLINE_STAGGERTEST=1 : UNDERTOW W2 — BRACE interrupt (disrupting reaction staggers on hit).
         if (Environment.GetEnvironmentVariable("SIGHTLINE_STAGGERTEST") == "1")
         {
@@ -438,7 +448,11 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_KIA") == "1") game.DebugKia();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_SUMMARY") == "1") game.DebugSummary();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_SUMMARY") == "lose") game.DebugSummary(true);
-        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_TUTORIAL") == "1") game.TutStep = 0;
+        // SIGHTLINE_TUTORIAL=<n>: show tutorial step n-1 (=1 keeps the historical "step 0" shot;
+        // =3 frames the rewritten FIRE-rule copy). NoPersist is already set, so the completion-time
+        // MarkTutorialSeen can never fire from a shot run (CompleteTutorial is !NoPersist-gated).
+        if (shot && int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_TUTORIAL"), out int _tut) && _tut > 0)
+            game.TutStep = Math.Min(_tut, Game.TutPrompts.Length) - 1;
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CB") == "1") Pal.SetColorblind(true);
         if (shot && int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_BRIGHT"), out int _bi)) Display.BrightIdx = _bi;
         if (shot && int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_GAMMA"), out int _gi)) Display.GammaIdx = _gi;   // W9: gamma level 0-4 (pair with SIGHTLINE_POSTFX=1)

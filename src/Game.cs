@@ -463,7 +463,7 @@ public partial class Game
     {
         "WELCOME, COMMANDER. Click a glowing tile to MOVE the selected soldier. Cover (the raised blocks) shields you from fire - end your move beside one.",
         "Now set OVERWATCH: press [2] (or the button). That soldier will fire on the first enemy that moves into its line of sight.",
-        "Click a hostile to FIRE. A shot ends the soldier's turn. Attacking from a side a foe has no cover on FLANKS it - far deadlier.",
+        "Click a hostile to FIRE. A shot costs 1 action and does NOT end the turn - keep the other action to reposition (one shot per turn). Attacking from a side a foe has no cover on FLANKS it - far deadlier.",
         "That's the basics: move into cover, flank, overwatch, fire - then END TURN. Promotions, perks and a branching campaign await. Good hunting.",
     };
     public string TutorialText => (TutStep >= 0 && TutStep < TutPrompts.Length) ? TutPrompts[TutStep] : null;
@@ -473,7 +473,8 @@ public partial class Game
         if (NoPersist || _run.Mission != 1 || Display.TutorialSeen) return;
         TutStep = 0;
         _tutMoved = _tutOver = _tutShot = false;
-        Display.MarkTutorialSeen();           // only ever shows once
+        // APEX W2: "seen" is now marked at tutorial COMPLETION (CompleteTutorial), not here — a
+        // player who quit on step 0 used to have the whole onboarding burned without reading it.
     }
 
     void UpdateTutorial(float dt)
@@ -484,7 +485,7 @@ public partial class Game
             case 0: if (_tutMoved) AdvanceTutorial(); break;
             case 1: if (_tutOver) AdvanceTutorial(); break;
             case 2: if (_tutShot) AdvanceTutorial(); break;
-            case 3: _tutDoneTimer -= dt; if (_tutDoneTimer <= 0) TutStep = -1; break;
+            case 3: _tutDoneTimer -= dt; if (_tutDoneTimer <= 0) CompleteTutorial(); break;
         }
     }
 
@@ -492,7 +493,19 @@ public partial class Game
     {
         TutStep++;
         if (TutStep == 3) _tutDoneTimer = 7f;
-        if (TutStep >= TutPrompts.Length) TutStep = -1;
+        if (TutStep >= TutPrompts.Length) CompleteTutorial();
+    }
+
+    /// APEX W2: finish the onboarding and persist the one-time "seen" flag. The !NoPersist gate is
+    /// LOAD-BEARING: Display.MarkTutorialSeen -> Display.Save() writes settings.json unconditionally,
+    /// and the SIGHTLINE_TUTORIAL screenshot hook sets TutStep directly (bypassing StartTutorialMaybe's
+    /// gate) — an ungated call here would break the harness no-disk / byte-stability contract.
+    /// Also called as a mission-1-end fallback (EnterBarracks/LoseRun) so a player who never performs
+    /// a mid-tutorial step (e.g. skips overwatch) doesn't re-see the tutorial every run forever.
+    void CompleteTutorial()
+    {
+        TutStep = -1;
+        if (!NoPersist) Display.MarkTutorialSeen();
     }
 
     // optional secondary objective (3.9): a per-mission bonus goal worth extra intel
@@ -935,7 +948,10 @@ public partial class Game
                          && !Sightline.Heat.Exposed(_run.HeatLevel)
                          && _run.Contract != Contract.Spearhead;
         _spearheadSurgeUsed = false;          // the turn-1 action surge is fresh each mission
-        foreach (var u in Players) u.BeginTurn();
+        // APEX W2: the caged RESCUE captive takes NO actions until freed — without this it could
+        // walk itself (2 tiles/turn) toward the squad and self-trigger its own rescue while still
+        // invulnerable. TryFreeCaptive re-grants via Vip.BeginTurn() the moment the cage is sprung.
+        foreach (var u in Players) { u.BeginTurn(); if (u == Vip && CaptiveLocked) u.ActionsLeft = 0; }
         // CONTRACT "SPEARHEAD": a turn-1 alpha — every soldier gets +1 action on the mission's first
         // player turn (this is it: SetupMission runs once/mission and BeginTurn just seated 2 actions).
         // Gated by _spearheadSurgeUsed so it fires EXACTLY once per mission and never stacks. The VIP
@@ -1141,6 +1157,10 @@ public partial class Game
 
     void EnterBarracks()
     {
+        // APEX W2: tutorial completion fallback — the first mission ended with steps still pending
+        // (e.g. the player never set overwatch), so close it out and mark it seen (NoPersist-gated
+        // inside) rather than re-running the onboarding at the start of every future run.
+        if (TutStep >= 0) CompleteTutorial();
         // W5 SCARS: capture the just-played mission's faction BEFORE EndMission clears it, so
         // DebriefSurvivors can brand a VENDETTA grudge on a survived near-death (the faction that
         // nearly killed them). None on a mixed-force mission -> no grudge stamped (inert).
@@ -1267,6 +1287,9 @@ public partial class Game
     /// End the run as a loss and clear the checkpoint so the intro stops offering CONTINUE.
     void LoseRun(string title, string reason)
     {
+        // APEX W2: tutorial completion fallback (mirror of EnterBarracks) — a first-mission loss
+        // still counts as "the onboarding ran"; don't re-show it forever. NoPersist-gated inside.
+        if (TutStep >= 0) CompleteTutorial();
         Combat.EndRun();   // TEMPO wave 4: clear every mission-scoped combat static (+ run boons) on run end
         LoseTitle = title;
         LoseReason = reason;
@@ -1444,6 +1467,13 @@ public partial class Game
         if (Combat.IgnoresOverwatch(mover)) return;
         var watchers = mover.Team == Team.Player ? Enemies : Players;
         int insertAt = 1;
+        // APEX W2: predicted mover HP across the reactions queued by THIS tile entry. Each queued
+        // CONNECT (res.Hit covers full hits AND grazes; damage read AFTER the brace halving below)
+        // decrements it; once it reaches 0 the mover is corpse-bound, so the loop stops BEFORE a
+        // later watcher spends its OnOverwatch/ReactedThisTurn/Ammo on a shot KillUnit's purge would
+        // only throw away (the old per-shot check missed cumulative lethality, silently taxing the
+        // third-plus watcher). The KillUnit purge stays as the backstop for staleness between steps.
+        int predHp = mover.Hp;
         foreach (var w in watchers)
         {
             if (!w.Alive || !w.OnOverwatch || w.ReactedThisTurn || w.Ammo <= 0) continue;
@@ -1474,7 +1504,8 @@ public partial class Game
             // by which point the mover has settled on the reacted-to tile.
             _anims.Insert(Math.Min(insertAt, _anims.Count), shot);
             insertAt++;
-            if (res.Hit && mover.Hp - res.Damage <= 0) break; // will die; stop further reactions
+            if (res.Hit) predHp -= res.Damage;
+            if (predHp <= 0) break;   // predicted dead: stop before another watcher spends its reaction
         }
     }
 
@@ -2161,6 +2192,17 @@ public partial class Game
         // tests, but route to Phase.Win/Lose (no barracks / checkpoint valve / save.json).
         if (Mode == GameMode.Skirmish) { CheckSkirmish(); return; }
         var alivePlayers = AlivePlayers();
+        // APEX W2: RESCUE soft-lock. The caged captive is invulnerable AND actionless, so if every
+        // actual soldier dies while it is still locked, nothing on the board can ever free it (or
+        // kill it) — the mission would sit forever. That's a wipe in all but name: burn the one-time
+        // checkpoint if it's available, else the run is lost. A FREED captive is untouched by this —
+        // it can still walk itself out (the lone-captive win HEATLADDERTEST pins), mirroring Escort's
+        // intentional VIP-solo win (pinned by DEATHTEST).
+        if (Objective == Objective.Rescue && CaptiveLocked && !alivePlayers.Any(p => !p.IsVip))
+        {
+            if (TryReinforcements()) return;
+            LoseRun("CAPTIVE ABANDONED", $"Every soldier fell with the captive still caged on mission {_run.Mission}."); return;
+        }
         if (alivePlayers.Count == 0)
         {
             // ONE-TIME CHECKPOINT: a squad wipe at/after the threshold mission triggers an emergency
@@ -3935,7 +3977,8 @@ public partial class Game
         ClearPins();                      // a gunner's SUPPRESSING FIRE pin lasts through one enemy turn, then lifts
         UpdateHvtGuard();                 // DECAPITATE: refresh the HVT's guarded state at the boundary (a guard may have moved)
         if (AutoPlay) AutoStallCheck();
-        foreach (var p in Players) if (p.Alive) { p.BeginTurn(); TickStatuses(p); }
+        // APEX W2: deny the caged RESCUE captive its start-of-turn action re-grant (see SetupMission).
+        foreach (var p in Players) if (p.Alive) { p.BeginTurn(); TickStatuses(p); if (p == Vip && CaptiveLocked) p.ActionsLeft = 0; }
         foreach (var e in Enemies) if (e.Alive) { e.ReactedThisTurn = false; e.Suppress = 0; } // OW resets; suppression expires
         Selected = Players.FirstOrDefault(p => p.CanAct);
         AimMode = false;

@@ -1046,9 +1046,139 @@ public partial class Game
         if (movesForE != 0) fails.Add($"deadMoveKept={movesForE}");
         _anims.Clear();
 
+        // (3) APEX W2 — the overwatch RESOURCE LEAK: with 3 watchers covering one lane, the reaction
+        // loop must stop SPENDING (OnOverwatch/ReactedThisTurn/Ammo) the moment the already-queued
+        // hits cumulatively predict the mover's death — the old per-shot check only caught a single
+        // lethal blow, so watcher #3 burned its watch + a round on a shot KillUnit would purge.
+        // Controlled scene, fixed damage (DmgMin=DmgMax=3, crit 0) vs a 5 HP mover: two CONNECTS
+        // predict death at watcher #2, so watcher #3 must stay armed. Reaction rolls are RNG (effHit
+        // 99 via Reflexes; a clean miss survives the graze band), so re-stage a bounded number of
+        // times until the first two reactions both connect (P≈0.98/attempt), then assert watcher #3's
+        // state AT QUEUE TIME — right after OnUnitEnteredTile returns, before any ShotAnim applies.
+        Grid = new Grid();
+        Players = new System.Collections.Generic.List<Unit>();
+        Enemies = new System.Collections.Generic.List<Unit>();
+        Vip = null; CaptiveLocked = false; Hvt = null; SquadConcealed = false;
+        Objective = Objective.Eliminate;
+        Unit MkWatcher(string name, int x, int y)
+        {
+            var u = new Unit { Name = name, Cls = "ASSAULT", Team = Team.Player, X = x, Y = y,
+                               Hp = 8, MaxHp = 8, Aim = 65, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+            u.Weapon.DmgMin = 3; u.Weapon.DmgMax = 3; u.Weapon.CritBase = 0;   // fixed 3 dmg per connect
+            u.Perks.Add(Perk.Reflexes);                                        // near-certain reaction (effHit 99)
+            u.Ammo = u.Weapon.Clip; u.SyncPos(); u.BeginTurn(); return u;
+        }
+        var w1 = MkWatcher("W1", 4, 4);
+        var w2 = MkWatcher("W2", 4, 5);
+        var w3 = MkWatcher("W3", 4, 6);
+        Players.Add(w1); Players.Add(w2); Players.Add(w3);
+        var mv = new Unit { Name = "MV", Cls = "GRUNT", Team = Team.Enemy, X = 7, Y = 5,
+                            Hp = 5, MaxHp = 5, Aim = 60, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+        mv.Ammo = mv.Weapon.Clip; mv.Alert = AlertLevel.Alert; mv.SyncPos(); mv.BeginTurn();
+        Enemies.Add(mv);
+
+        bool leakChecked = false;
+        for (int attempt = 0; attempt < 60 && !leakChecked; attempt++)
+        {
+            foreach (var w in Players)
+            { w.OnOverwatch = true; w.OwBrace = false; w.OwFocused = false; w.ReactedThisTurn = false; w.Ammo = w.Weapon.Clip; }
+            mv.Hp = 5;
+            _anims.Clear();
+            OnUnitEnteredTile(mv);   // QUEUE TIME: no ShotAnim has applied yet (the mover is still at full HP)
+            var queued = _anims.OfType<ShotAnim>().Where(s => s.D == mv).ToList();
+            // judge only the case the spec pins: watchers #1 and #2 both CONNECT (3+3 >= 5 HP predicts
+            // the death at #2's queued hit). Any miss in the first two re-rolls the scene.
+            if (queued.Count >= 2 && queued[0].A == w1 && queued[1].A == w2 && queued[0].Res.Hit && queued[1].Res.Hit)
+            {
+                leakChecked = true;
+                if (queued.Count != 2)          fails.Add($"owLeakShots={queued.Count}");   // #3 must not have fired
+                if (!w3.OnOverwatch)            fails.Add("owLeakWatchSpent");
+                if (w3.ReactedThisTurn)         fails.Add("owLeakReacted");
+                if (w3.Ammo != w3.Weapon.Clip)  fails.Add($"owLeakAmmo={w3.Ammo}");
+            }
+        }
+        if (!leakChecked) fails.Add("owLeakNoLethalPair");   // P(fail all 60 attempts) ~ 0.02^60: a real defect
+        _anims.Clear();
+
         return fails.Count == 0
-            ? "DKTEST: PASS (KillUnit idempotent; surplus corpse-reaction purged; active + other-target kept)"
+            ? "DKTEST: PASS (KillUnit idempotent; surplus corpse-reaction purged; active + other-target kept; 3rd watcher unspent once queued hits predict the kill)"
             : "DKTEST: FAIL (" + string.Join(",", fails) + ")";
+    }
+
+    /// SIGHTLINE_RESCUETEST — APEX W2: the Rescue captive's cage is real. Asserts (1) the caged
+    /// captive is ACTIONLESS at mission setup AND at the start-of-turn re-grant (it used to be fully
+    /// player-controllable — an invulnerable unit that could walk itself to the squad and self-trigger
+    /// its rescue), (2) freeing it (TryFreeCaptive) restores actions + movement, (3) the abandoned-cage
+    /// soft-lock resolves: all soldiers dead while caged is an immediate CAPTIVE ABANDONED loss at
+    /// mission 1, a checkpoint reinforcement redeploy at mission 3+, and an EndSkirmish(false) loss in
+    /// SKIRMISH mode (which can roll Rescue). Tiny window (tile math). Returns a one-line report.
+    public string RescueSelfTest()
+    {
+        NoPersist = true;
+        var fails = new System.Collections.Generic.List<string>();
+
+        // (1) caged at setup: no actions (SetupMission BeginTurn loop zeroes the captive)
+        _run = new Run(); _run.Start();
+        _run.CurrentCard = new MissionCard { Objective = Objective.Rescue, ModName = "STANDARD", Reward = RewardKind.None };
+        SetupMission(1);
+        if (!CaptiveLocked) fails.Add("notLockedAtSetup");
+        if (Vip == null) return "RESCUETEST: FAIL (noCaptiveSpawned)";
+        if (Vip.CanAct) fails.Add("cagedCanActAtSetup");
+
+        // (1b) the start-of-turn re-grant is denied too (StartPlayerTurn BeginTurn loop)
+        StartPlayerTurn();
+        if (Vip.CanAct) fails.Add("cagedCanActAtTurnStart");
+
+        // (2) freeing restores actions + movement (TryFreeCaptive -> Mobility 6 + Vip.BeginTurn)
+        var sol = Players.First(p => p.Alive && !p.IsVip);
+        bool seated = false;
+        for (int dx = -1; dx <= 1 && !seated; dx++)
+            for (int dy = -1; dy <= 1 && !seated; dy++)
+            {
+                if (dx == 0 && dy == 0) continue;
+                int nx = Vip.X + dx, ny = Vip.Y + dy;
+                if (Grid.InBounds(nx, ny) && Grid.Tiles[nx, ny] == TileType.Floor && !IsOccupiedByOther(nx, ny, sol))
+                { sol.X = nx; sol.Y = ny; sol.SyncPos(); seated = true; }
+            }
+        if (!seated) fails.Add("noFreeSeatByCage");
+        TryFreeCaptive();
+        if (CaptiveLocked) fails.Add("adjacentDidNotFree");
+        if (!Vip.CanAct) fails.Add("freedStillActionless");
+        if (Vip.Mobility <= 0) fails.Add($"freedNoMobility={Vip.Mobility}");
+
+        // (3a) campaign, mission 1: all soldiers dead while STILL caged -> immediate loss (the
+        // checkpoint valve needs mission >= 3), with the distinct CAPTIVE ABANDONED cause.
+        _run = new Run(); _run.Start();
+        _run.CurrentCard = new MissionCard { Objective = Objective.Rescue, ModName = "STANDARD", Reward = RewardKind.None };
+        SetupMission(1);
+        foreach (var u in Players.Where(p => p.Alive && !p.IsVip).ToList()) { u.Hp = 0; KillUnit(u); }
+        CheckEnd();
+        if (Phase != Phase.Lose) fails.Add($"abandonNoLoss phase={Phase}");
+        else if (LoseTitle != "CAPTIVE ABANDONED") fails.Add($"abandonTitle={LoseTitle}");
+
+        // (3b) campaign, mission 3 (checkpoint fresh): the reinforcement redeploy fires instead —
+        // the mission restarts with an emergency cadre and the captive re-caged.
+        _run = new Run(); _run.Start();
+        _run.CurrentCard = new MissionCard { Objective = Objective.Rescue, ModName = "STANDARD", Reward = RewardKind.None };
+        SetupMission(3);
+        foreach (var u in Players.Where(p => p.Alive && !p.IsVip).ToList()) { u.Hp = 0; KillUnit(u); }
+        CheckEnd();
+        if (!_run.CheckpointUsed) fails.Add("redeployNotFired");
+        if (Phase != Phase.PlayerTurn) fails.Add($"redeployPhase={Phase}");
+        if (Players.Count(p => p.Alive && !p.IsVip) == 0) fails.Add("redeployEmptySquad");
+        if (!CaptiveLocked) fails.Add("redeployCageUnlatched");
+
+        // (3c) SKIRMISH can roll Rescue: the same abandoned cage must end the mission as a loss
+        // (single-mission modes have no checkpoint valve).
+        BeginSkirmish(Objective.Rescue, 0);
+        if (!CaptiveLocked) fails.Add("skirmishNotLocked");
+        foreach (var u in Players.Where(p => p.Alive && !p.IsVip).ToList()) { u.Hp = 0; KillUnit(u); }
+        CheckEnd();
+        if (Phase != Phase.Lose) fails.Add($"skirmishAbandonPhase={Phase}");
+
+        return fails.Count == 0
+            ? "RESCUETEST: PASS (caged captive actionless at setup + turn start; freeing restores actions/movement; abandoned cage = m1 loss, m3 checkpoint redeploy, skirmish loss)"
+            : "RESCUETEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
     /// SIGHTLINE_STAGGERTEST — UNDERTOW W2: the BRACE interrupt. Asserts (1) a BRACED watcher enqueues a

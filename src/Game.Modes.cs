@@ -214,6 +214,12 @@ public partial class Game
     {
         var alivePlayers = AlivePlayers();
         if (alivePlayers.Count == 0) { EndSkirmish(false); return; }
+        // APEX W2: RESCUE soft-lock (the same hole the campaign CheckEnd had): the invulnerable caged
+        // captive keeps AlivePlayers() non-empty after a real wipe, and with no soldier left it can
+        // never be freed — the fight would sit forever. Single-mission modes have no checkpoint
+        // valve, so an abandoned cage is simply a loss.
+        if (Objective == Objective.Rescue && CaptiveLocked && !alivePlayers.Any(p => !p.IsVip))
+        { EndSkirmish(false); return; }
 
         switch (Objective)
         {
