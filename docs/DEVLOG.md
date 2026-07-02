@@ -1107,3 +1107,165 @@ above the +7-12 ideal (skill well-rewarded, sloppy still viable) — watch it do
    pre-program `main`, so its single commit sat on top of `0eae874`, not the 6-wave tip — a naive file-copy would
    have REVERTED W1-W5/W7. Caught via `git merge-base`; integrated instead by `cherry-pick -n` + a hand-resolved
    key-collision (BEACON B→G). **Always check the merge-base of a delegated worktree before integrating.**
+
+---
+
+# PROGRAM "APEX" — the top end becomes real (fixes + instrument + apex play-quality + endless ladder)
+
+Fully-autonomous dev-team session: orchestrator + a 6-lens research `Workflow` (scout → synthesize →
+**adversarial verify**, the UNDERTOW pattern) → 10 dev waves with per-wave review and measured commits.
+Branch `claude/game-dev-orchestration-0f4jzd`. Mid-run, the owner reviewed screenshots and filed live UI
+feedback — folded in as its own wave (W10).
+
+## Research → thesis
+Six read-only lenses (balance / tactical / meta-replay / content / presentation / code-health) grounded in
+the live code + measured baseline; a per-wave adversarial verify pass then corrected the synthesis BEFORE
+any dev ran: 3 waves verified SOUND, 6 FLAWED with sharpened designs (0 rejected). The verifiers caught,
+among others: a boon-picker "fix" that would have destroyed its own telemetry (the shuffled pool already
+makes slot-0 a uniform census), a "first-ever heats 6-8 measurement" claim that was actually only a
+default-cycle gap, a W7 plumbing plan whose central "free ride" through Phase.Barracks didn't exist, and a
+"fully parallel" presentation wave with a hidden Game.cs merge point.
+
+**Thesis:** SIGHTLINE's top end was fictional. The difficulty ladder above heat 6 could HARD-CRASH
+(lone-VIP win under no-reinforcements → zero roster → `players[0]` throw); LAST STAND silently fought the
+campaign's anti-turtle pressure clock (hidden +12..+16 aim + phantom reinforcements by ~turn 10) with zero
+player progression (competent bot died at wave 3); the four setup-verb archetypes UNDERTOW's coordination
+pass was built to showcase (STRIKER/LANCER/HOUND/SCREENER) were excluded from every faction-stamped fight
+— the majority of the campaign — because `FactionRoster` omitted them; and the flywheel was structurally
+blind to all of it (heats 0-4 only, no endless mode, veterans invisible under NoPersist, "pick frequency"
+tables measuring slot position). The cure, in one arc: fix the correctness bugs that poison play and
+measurement → give the instrument eyes → ship the real top end (reachable archetypes, an AI that plays
+better rather than aims better, an endless mode that is a ladder) → close the two flagged baseline drags.
+
+## Waves (every commit build 0/0 + self-tested; every risky wave independently reviewed)
+- **W1 — the ladder's top exists** (`76010f7`). Emergency conscription at Squad.Count==0 even under
+  RELENTLESS/IronVeterans (anti-death-spiral contract honored; CONTRACTTEST's stays-below-floor preserved);
+  `players.Count==0` guard in TryApplyLayout; `Mode != Endless` in PressureClockObjective. New
+  SIGHTLINE_HEATLADDERTEST (incl. the Rescue lone-captive variant + deterministic pre-fix FAIL proof in a
+  scratch worktree). **First-ever heat-8 completion number: 25% (n=20) — a wall, not a flat.**
+- **W2 — interactive correctness** (`50224ac` + follow-up `96619c3`). The caged Rescue captive is truly
+  caged (ActionsLeft=0 both BeginTurn loops — it could previously walk itself to the squad and self-rescue);
+  CAPTIVE ABANDONED loss/redeploy branch in campaign CheckEnd + the same hole in CheckSkirmish; the
+  overwatch resource leak fixed (predicted-HP break so watcher #3 stops spending ammo/reaction on a
+  corpse-bound shot; decrements only on res.Hit, computed after BRACE halving; KillUnit purge kept as
+  backstop); tutorial no longer teaches the repealed "a shot ends the turn" rule and "seen" is marked at
+  completion (NoPersist-gated) with mission-end fallbacks. Review: SHIP-WITH-NOTES — traced the predHp fix
+  correct-by-construction (no heal can interleave: reactions insert behind the active MoveStepAnim and
+  Update returns while the queue is non-empty); 3 LOW findings fixed in `96619c3` + `bce2875`.
+- **W3 — persistence armor** (`e3532ec`, parallel worktree). Atomic .tmp+rename writes at both save
+  chokepoints; an unreadable meta.json/save.json is stashed to .bak instead of silently wiped by the next
+  read-modify-write (the veteran reserve / salvage / hall of fame sat one torn write from a silent reset).
+  SAVETEST now covers corruption round-trip.
+- **W4 — the flywheel gets eyes** (`6e0c818` + `38cb5e5`). Default heat cycle {0,2,4,6,8}; 
+  SIGHTLINE_BALANCE_ENDLESS=N (depth from game.Wave, RunRec.Mode keeps endless out of campaign gap math,
+  cap policy explicit + logged); SIGHTLINE_VETSIM=n prices a NOMINAL Rank-3 veteran recall; win-rate-by
+  {boon/spec/contract} tables (contracts were recorded but never reported); the greedy perk picker became
+  a value-BIASED random A/B (the ChooseSpec precedent) instead of always-slot-A — guarded re-baseline:
+  85% → 85% (delta 0), starved-perk exposure revived (HRD 4→11, PLT 3→8). Pre-W7 endless median: 3.
+- **W5 — content reachability** (`6995dd1` + follow-up `106dad9`). FactionRoster += the four archetypes
+  (stats verbatim, tier-gated; Legion += STRIKER/LANCER/HOUND, Syndicate/Wardens += SCREENER); Defend
+  waves route through MakeEndlessHostile (BOMBARD demoted, TURRET re-rolled bounded) scoped to Defend only
+  — pressure-clock waves stay cheap by design; callsigns 14→40 with a taken-names set at every recruit
+  site. Composition measured: the four went 0 → 2-4% each of faction spawns (n=551); h0 80%. Review:
+  SHIP-WITH-NOTES — two real gaps closed in `106dad9` (TakenCallsigns must also exclude FALLEN names and
+  the persistent veteran reserve, else bond/memorial/enshrine records still merge; Wardens' failed m2
+  gates fell through to a 36% medic glut — now route to the SCOUT filler).
+- **W6 — the enemy plays better** (`27d4a8a`/`9b132ba`/`8ffc178`, three measured commits). (a)
+  Planner-resolver truthfulness: Ai.Plan's three LoS filter sites honor the commanding (>=2-tier) overload
+  exactly like Game.CanTarget — snipers/elites genuinely seek the authored '=' plateaus; Ai.CrossfireWith
+  pinned term-by-term to Combat.InCrossfire (`dist <= CrossfireAllyRange` alone; dormant pod-mates counted
+  — resolver-first doctrine). (b) A data-driven `Ai.Tier` (0..2) on the heat rows (EXPOSED→1, NO
+  QUARTER→2) + endless wave depth, published unconditionally in SetupMission and cleared in
+  Combat.EndMission; Tier 0 == shipped constants exactly; smoke-damp capped at 75 (threat, not a tic).
+  (c) NO QUARTER adds +1 enemy weapon damage (graced m1-2, initial force only). **Measured:** h0 −2pts
+  (in budget) with the inverted policy gap healed −20 → +5; h2 63% (−12, EXCEEDS the ±5 budget — accepted
+  deliberately: truthfulness is a correctness fix, the gap tightened +10→+5, the per-mission dip is −3pts
+  compounding over ~5.5 missions, and heat is opt-in; 63% is the corrected h2 baseline). h8 matched-build
+  28% → 25% with choices/turn 1.56 → 1.79 — **the apex got harder through play quality, not stat
+  saturation.** Review: SHIP-WITH-NOTES (revert-probes proved every new AITEST leg genuinely bites);
+  follow-up `bce2875` added the spawn-level +1-dmg pin and routed pause-ABANDON through Combat.EndRun.
+- **W7 — LAST STAND becomes a ladder** (`6d228f4`). Opener grace (half-count waves 1-2); a progression
+  heartbeat — Run.PromoteEligible extracted from the debrief and run mid-stand every 3rd cleared wave
+  (+ boon offer every 5th) through an explicit Phase.Barracks detour with a top-of-case Endless guard so
+  autoplay can never node-pick into a campaign mission; an ending (heal decays past wave 20 + one REAPER
+  elite injected per deep wave). Tuned in 4 measured rounds (the ramp slope was the binding lever):
+  depth median 3 → 5 overall / **6 at heat 0 (in band)**, p90 finite, zero cap hits across 192 stands.
+- **W8 — close the baseline drags** (`17f88c9`). Escort leash converted from a teleport (which bypassed
+  overwatch/fire/pod-wake entirely) to real MoveStepAnims — the real-anims branch SHIPPED, no fallback
+  needed (Escort win% held at 96%). Measurement forced three refinements past the spec: two-pass fire
+  avoidance (a penalty alone still walked the VIP through a fire picket — pass 1 blocks fire outright,
+  hazard-blind pass 2 only if fire seals every lane), the stealth-grief penalty scoped to
+  unconcealed+LoS+VIP-wakes-first (the naive radius penalty made deep escorts crawl ~17t), and the leash
+  anchor switched to the most-forward ahead soldier (nearest-to-VIP zigzagged the asset backwards).
+  Escort-only forward beacon (far-third + cold-LZ gate — any LIVING non-Routed enemy within Chebyshev 3
+  blocks, dormant included, so concealment can't cheese it; the button sits greyed until the gate opens,
+  with its own tooltip). Depth-scaled recruits ((mission-1)/2 starting kills, promoted in the SAME
+  barracks visit via the W7-extracted PromoteEligible; the SHATTERED COMMAND conscripts scale too; a
+  DebriefSurvivors offer-Clear() that silently ate pending perk offers became a prune). **Measured:
+  Escort 12.9–15.8t → 5.8t at 96% win** (deep-escort probes: m5 13–17t → 4–5t); h0 completion 83% (within
+  batch noise of the 88–90% A/A refs); honest caveat — the aggregate +16.6→+7..12 gap target proved
+  unverifiable at h0/N=20 (both pristine-HEAD baselines measured NEGATIVE noisy gaps at this pin);
+  Escort's per-objective gap landed +7.
+- **W9 — presentation** (`2b608f0`, parallel worktree). Honest odds colors (HIT banded >=70 Good / 40-69
+  Accent / <40 Foe — an 8% desperation shot no longer reads reassuring green in a red frame); a TRUE
+  gamma/contrast post-pass (uBright/uGamma in-shader, uploaded every frame; the old brightness quad
+  WASHED the frame); campaign-map labels de-collided; roster chips fade when they'd hide a board unit.
+- **W10 — owner-feedback UI wave** (`2aceb40`, parallel worktree, same session). The owner flagged three
+  readability failures from screenshots: ellipsized action labels, unreadable odds modifiers, a cramped
+  top strip. Fixed structurally: buttons size to their rendered labels and WRAP into an upward tray
+  (ellipsis impossible by construction at any verb count); tooltip modifiers one-per-line at 13px, labels
+  in Txt with only the signed value colored, right-aligned, DMG/GRAZE unpacked; the top bar regrouped
+  into three aligned zones with labeled PRESSURE pips.
+
+## Measured (flywheel; sim RNG unseeded so single batches carry ±~7-10pt noise)
+**Final integrated-tree ladder (2 combined batches, n=20 runs/heat, greedy+sloppy):
+h0 70% / h2 75% / h4 70% / h6 50% / h8 10%** — a real descending ladder ending in a wall. Endless
+(n=32 stands): depth mean 5.16 / median 5 (h0 median 6, p90 7), zero cap hits. Escort all-heats:
+**8.4t at 80% win** (n=59; h0-pinned: 5.8t at 96%). Lead-swings 0.44-0.53 (≈ the 0.48 baseline).
+| metric | pre-APEX | post-APEX |
+|---|---|---|
+| heat 8 | process crash possible; 25% (W1, first number) | 10% (n=20) and harder via play quality (choices/turn 1.56→1.79) |
+| heat 0 | 85% (W4b fresh ref) | 70-80% across batches (W5 faction hardening intended; noisy band) |
+| heat 2 | 75% | 63% single-batch post-W6a (accepted corrected baseline) / 75% in the final combined ladder |
+| policy gap | +16.6 (UNDERTOW, over-punishing) | ~0 aggregate (greedy 54 / sloppy 56) — sloppy viable, flagged to trend |
+| endless depth (median) | 3 (bot dies at wave 3, fighting the pressure clock) | 5 overall / 6 at h0, p90 6-7 finite |
+| Escort turns | ~14 (the flagged drag) | 5.8t h0-pinned at 96% win / 8.4t all-heats at 80% |
+| perk exposure | class-line slot ~always; HRD 4 / PLT 3 picks | biased-random A/B; HRD 11 / PLT 8 |
+| archetype reachability (faction fights) | 0% | WRAITH 4% / HOPLITE 2% / FERAL 4% / HAZE 3% |
+
+## Process learnings (APEX)
+1. **Adversarial-verify the synthesis, then make SHARPENED the binding spec.** Six of nine waves shipped
+   against the corrected design, not the original. Every "the seam exists" claim a dev would have tripped
+   on was caught pre-dev for the second program running.
+2. **Give devs the reference numbers and a dip budget, and demand the breach be reported, not managed.**
+   W6's h2 breach (−12 vs ±5) surfaced with a tiebreaker analysis instead of a silent revert — and the
+   orchestrator could make the accept call explicitly. "Measure the measurer" now includes "budget the
+   measurement".
+3. **One owner per hot file, and the orchestrator is not exempt.** A quick orchestrator fix committed with
+   `git add <shared-file>` while a dev had in-flight edits swept ~80 lines of the dev's WIP into the wrong
+   commit (`96619c3` — tree stayed green, but the wave mixing is permanent). Rule: before any mainline
+   commit, `git status` + diff the exact files for foreign hunks; prefer a worktree even for small fixes.
+4. **Worktree agents still branch stale.** Both W3/W9 worktrees were cut at a VANGUARD-era HEAD; both devs
+   caught it via the documented STEP-0 protocol (check merge-base, reset to the program branch tip) —
+   the COUNTERPLAY lesson, now standard practice.
+5. **The owner is watching: send screenshots proactively.** The mid-run UI feedback (W10) arrived because
+   the W9 before/afters were shared in-thread. Visual milestones go to chat via SendUserFile, always.
+6. **Environment facts worth keeping:** background tasks die ~25 min (chunk balance batches; N=20 ≈ 11-12
+   min); the container's commit signer is sign-only (local %G? is a false negative — commits ARE signed);
+   Bash cwd persists across calls (always `git -C`).
+
+## Open / next
+- **The aggregate policy gap sits at ~0** (greedy 54 / sloppy 56 mixed-heat; single-heat pins ranged −20..+7
+  across the program) — the comeback levers + W8's recruit scaling have made sloppy play fully viable.
+  UNDERTOW's warning ("watch it doesn't slide negative") is now live: either accept forgiving-by-design or
+  sharpen the SLOPPY policy definition (the gap measures the measurer as much as the game) before tuning.
+- The h0-h4 rungs read flat (70-75% at n=20) — the early ladder is gentle; if a future program wants bite
+  below rung 6, the EnemyDelta/StatDelta rows are the knob (measure first, the band is noisy).
+- Endless overall greedy median is 5 vs the 6-8 target (h0 is in band at 6) — the next lever is the
+  toughness ramp (EndlessWaveScale), deliberately left untouched.
+- The W4 VETSIM=2-vs-0 pricing batch wasn't run this program (instrument shipped; the measurement is a
+  one-command follow-up when a session has spare sim budget).
+- NO QUARTER's "+1 dmg" Desc shows on the skirmish heat picker but m1-grace zeroes it there (pre-existing
+  grace pattern; cosmetic).
+- On-device audio tuning and endless difficulty FEEL (vs. the measured curve) still need the human's ears/
+  hands — unchanged from prior programs.

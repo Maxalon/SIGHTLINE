@@ -239,13 +239,21 @@ visual identity** with a **lit board-space depth** pass, and a full juice/audio/
 layer. `Game.cs` is sliced into `Game.Autopilot.cs` + `Game.Harness.cs` (+ the older Endless/Meta/
 Modes/Codex slices). PROGRAM UNDERTOW (7 waves) added the interrupt+morale comeback economy, sequenced
 enemy coordination, an Evac forward-beacon de-drag, and the board-depth pass — flywheel-validated
-(lead-swings 0.48→0.59, the +29 punish-gap collapsed, Evac drag 10.9→7.8t).
+(lead-swings 0.48→0.59, the +29 punish-gap collapsed, Evac drag 10.9→7.8t). PROGRAM APEX (10 waves)
+made the TOP END real: the heat 7-8 zero-roster crash fixed (first measured heat-8 completion ~25%),
+LAST STAND turned into a tuned ladder (opener grace, mid-stand promotions/boons, a real ending; depth
+median 3→5-6), the AI plays better at the apex instead of aiming better (commanding-LoS truthfulness,
+data-driven `Ai.Tier` at rungs 6+, NO QUARTER +1 dmg), the four setup-verb archetypes reachable in
+faction fights, Escort de-dragged 12.9-15.8t → 5.8t (real-anims leash + hard-gated forward beacon),
+atomic saves with corrupt-file recovery, a flywheel that spans heats {0,2,4,6,8} + endless + veteran
+pricing, and an owner-feedback UI readability pass (wrapping action bar — no ellipsis ever — banded
+odds colors, true gamma, three-zone top bar).
 
 **The exhaustive feature list is in [`docs/FEATURES.md`](docs/FEATURES.md).** The build
 history and open/next backlog are in [`docs/ROADMAP.md`](docs/ROADMAP.md) and the "OPEN/NEXT"
 sections of [`docs/DEVLOG.md`](docs/DEVLOG.md). Recurring open threads: on-device audio
-tuning, endless-mode difficulty curve, watch the veteran-recall power floor via the flywheel,
-and per-fork / per-heat balance tuning.
+tuning, the endless toughness ramp (overall median 5 vs the 6-8 target; h0 in band), the VETSIM
+veteran-pricing batch, and per-fork / per-heat balance tuning (heat-2's corrected baseline is 63%).
 
 ---
 

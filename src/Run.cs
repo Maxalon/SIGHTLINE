@@ -207,6 +207,8 @@ public class HeatModifier
     public bool Exposed;         // squad deploys NOT concealed (no free ambush opener)
     public bool HarshAttrition;  // wounds last +1 mission and field-heal is halved
     public bool NoReinforcements; // the barracks stops backfilling fallen soldiers — losses shrink the squad
+    public int AiTier;           // W6b: AI coordination tier this rung demands (0..2; MAX over active rungs -> Ai.Tier)
+    public int DmgDelta;         // W6c: extra enemy weapon damage this rung adds (per-unit DmgMin/DmgMax bump in SpawnEnemies)
 }
 
 /// The Heat ladder: a static data table + cumulative-effect accessors. The MAX selectable
@@ -246,14 +248,21 @@ public static class Heat
         new HeatModifier { Name = "LINGERING WOUNDS", Desc = "+1 enemy; wounds linger, less field healing", EnemyDelta = 1, HarshAttrition = true },
         // EXPOSED is the marquee mid-ladder MUTATOR: from heat 6 the squad loses its free
         // concealment ambush opener AND every hostile gets another stat point.
-        new HeatModifier { Name = "EXPOSED",       Desc = "No concealment opener; +1 stat",       Exposed = true, StatDelta = 1 },
+        // W6b: EXPOSED is also where the enemy starts PLAYING better (coordination tier 1) —
+        // the depth-preserving apex lever, instead of leaning only on the saturating StatDelta.
+        new HeatModifier { Name = "EXPOSED",       Desc = "No concealment opener; +1 stat",       Exposed = true, StatDelta = 1, AiTier = 1 },
         // RELENTLESS: the run-loop screw -- fallen soldiers are NOT replaced (the squad shrinks
         // for the rest of the run) and the survivors face yet tougher enemies.
         new HeatModifier { Name = "RELENTLESS",    Desc = "No replacement recruits; +1 stat",     NoReinforcements = true, StatDelta = 1 },
         // NO QUARTER (rung 8, the ceiling): the final escalation -- one more body and the force
         // hits its peak durability/accuracy (+5 stat cumulative). With every flag above also
         // active, the top of the ladder is a genuine wall, beatable only by excellent play.
-        new HeatModifier { Name = "NO QUARTER",    Desc = "+1 enemy; the deadliest force (+1 stat)", EnemyDelta = 1, StatDelta = 1 },
+        // W6b: NO QUARTER is peak coordination (tier 2) — focus/crossfire convergence and
+        // item reliability at their ceiling; see Ai.Tier for exactly which reads scale.
+        // W6c: ...and the apex is the ONE rung where heat scales enemy DAMAGE (+1 per hit) —
+        // the counterweight to late-run plated squads, since StatDelta (HP/aim) saturates
+        // against Armor while the damage floor never did. Desc surfaces it to the player.
+        new HeatModifier { Name = "NO QUARTER",    Desc = "+1 enemy; deadliest force (+1 stat, +1 dmg)", EnemyDelta = 1, StatDelta = 1, AiTier = 2, DmgDelta = 1 },
     };
 
     public static int Clamp(int level) => Math.Clamp(level, Min, Max);
@@ -272,6 +281,12 @@ public static class Heat
     public static bool Exposed(int level)        { foreach (var m in Active(level)) if (m.Exposed) return true; return false; }
     public static bool HarshAttrition(int level) { foreach (var m in Active(level)) if (m.HarshAttrition) return true; return false; }
     public static bool NoReinforcements(int level) { foreach (var m in Active(level)) if (m.NoReinforcements) return true; return false; }
+    /// W6b: the AI coordination tier this heat level demands — the MAX over active rungs (a
+    /// tier is a quality level, not a stackable quantity). 0 below EXPOSED (rung 6).
+    public static int AiTier(int level) { int t = 0; foreach (var m in Active(level)) t = Math.Max(t, m.AiTier); return t; }
+    /// W6c: extra per-hit enemy weapon damage at this heat level (summed like StatDelta;
+    /// today only NO QUARTER carries it, so this is 0 below the rung-8 apex).
+    public static int DmgDelta(int level) { int s = 0; foreach (var m in Active(level)) s += m.DmgDelta; return s; }
 
     /// Bonus requisition intel per cleared mission at this heat level. ACCELERATING (not
     /// linear): a flat per-level base PLUS a quadratic kicker, so the now-genuinely-hard top
@@ -786,10 +801,23 @@ public class Run
     /// Deterministic-friendly (Mission.MakeRecruit -> Util.RandInt). Pure construction — does NOT touch
     /// run state, so it's safe to call from the self-test. `veterans` null/empty == the all-fresh pool
     /// (the harness/self-test path, byte-stable).
+    /// Names of EVERY veteran in the persistent reserve (not just the <=2 recalled into the draft),
+    /// captured by GenerateDraftPool. Mid-run backfill re-rolls away from these too: a rookie who
+    /// shares a reserve legend's name would OVERWRITE that legend at EnshrineVeterans ("newest
+    /// record wins" dedup keys on Unit.Name). Static like the pool generator itself; repopulated
+    /// each draft (NoPersist drafts pass null -> empty set, so the harness never reads disk here).
+    public static HashSet<string> ReserveNames = new();
+
     public static List<Unit> GenerateDraftPool(List<Unit> veterans = null)
     {
         var pool = new List<Unit>();
         var classCount = new Dictionary<string, int>();
+        // APEX W5: callsigns already seated (veterans included) — every MakeRecruit below re-rolls
+        // away from them, so a draft can never offer two soldiers sharing a name (duplicate names
+        // silently merged bond/memorial/veteran records, which all key on Unit.Name).
+        var takenNames = new HashSet<string>();
+        ReserveNames = new HashSet<string>();
+        if (veterans != null) foreach (var v in veterans) ReserveNames.Add(v.Name);
         // Phase 0 — seat up to MaxDraftVeterans recalled veterans (already most-storied-first from the
         // reserve). They bypass the class-variety cap (a returning legend is a deliberate exception) but
         // still count toward the pool size, so the fresh phases fill the remainder.
@@ -798,6 +826,7 @@ public class Run
             {
                 if (pool.Count >= MaxDraftVeterans) break;
                 pool.Add(v);
+                takenNames.Add(v.Name);
                 classCount.TryGetValue(v.Cls, out int vc);
                 classCount[v.Cls] = vc + 1;
             }
@@ -807,26 +836,33 @@ public class Run
         int guard = 0;
         while (pool.Count < DraftPoolSize && guard++ < 400)
         {
-            var u = Sightline.Mission.MakeRecruit();
+            var u = Sightline.Mission.MakeRecruit(takenNames);
             classCount.TryGetValue(u.Cls, out int c);
             if (c >= 1) continue;                 // phase 1: at most one of each class
             classCount[u.Cls] = c + 1;
             pool.Add(u);
+            takenNames.Add(u.Name);
             if (classCount.Count >= 5) break;     // covered every class -> move to the fill phase
         }
         // Phase 2 — fill the remaining slots allowing a SECOND of any class (cap 2) for some duplication.
         guard = 0;
         while (pool.Count < DraftPoolSize && guard++ < 400)
         {
-            var u = Sightline.Mission.MakeRecruit();
+            var u = Sightline.Mission.MakeRecruit(takenNames);
             classCount.TryGetValue(u.Cls, out int c);
             if (c >= 2) continue;
             classCount[u.Cls] = c + 1;
             pool.Add(u);
+            takenNames.Add(u.Name);
         }
         // Safety: if the (bounded) re-rolls somehow under-filled, top up so the pool is always exactly
         // DraftPoolSize (never blocks the draft).
-        while (pool.Count < DraftPoolSize) pool.Add(Sightline.Mission.MakeRecruit());
+        while (pool.Count < DraftPoolSize)
+        {
+            var u = Sightline.Mission.MakeRecruit(takenNames);
+            pool.Add(u);
+            takenNames.Add(u.Name);
+        }
         return pool;
     }
 
@@ -841,6 +877,53 @@ public class Run
         return offer;
     }
 
+    /// APEX W7 — the promotion beat, shared by the barracks debrief and LAST STAND's mid-stand
+    /// FIELD PROMOTION heartbeat. Advances rank while banked kills clear the next threshold,
+    /// queueing a PendingPerks pick-1-of-2 (stat-bump fallback when a soldier already owns every
+    /// perk), then queues the one-time CLASS SPECIALIZATION fork the first time SpecRank
+    /// (Corporal) is reached — offered once (not yet specialized, no offer already queued, and
+    /// the class actually has a 2-fork table). Report lines land in Run.Report (the barracks
+    /// screen shows them; the endless heartbeat clears Report per beat).
+    public void PromoteEligible(Unit u)
+    {
+        // promotions: advance rank while kills clear the next threshold
+        while (u.Rank < Ranks.Length - 1 && u.Kills >= KillReq[u.Rank + 1])
+        {
+            u.Rank++;
+            var offer = MakePerkOffer(u);
+            if (offer != null)
+            {
+                PendingPerks.Add(offer);
+                Report.Add($"{u.Name} promoted to {Ranks[u.Rank]}  (choose a perk)");
+            }
+            else
+            {
+                string buff = ApplyStatBoost(u, u.Rank);
+                Report.Add($"{u.Name} promoted to {Ranks[u.Rank]}  ({buff})");
+            }
+        }
+
+        // W2 CLASS SPECIALIZATION: the first time a soldier reaches SpecRank (Corporal) it picks a
+        // one-time fork that changes HOW its class plays.
+        if (u.Rank >= Unit.SpecRank && u.Spec == Spec.None
+            && !PendingSpecs.Any(o => o.Unit == u)
+            && SpecDef.OptionsFor(u.Cls).Length == 2)
+        {
+            var opts = SpecDef.OptionsFor(u.Cls);
+            PendingSpecs.Add(new SpecOffer { Unit = u, A = opts[0], B = opts[1] });
+            Report.Add($"{u.Name} can SPECIALIZE  (choose a fork)");
+        }
+    }
+
+    /// Squad-wide promotion sweep — LAST STAND's heartbeat entry (every 3rd cleared wave).
+    /// Every living soldier's banked kills cash in mid-stand; VIPs never rank, the dead keep
+    /// their record. The campaign debrief calls the per-unit overload inside its own loop.
+    public void PromoteEligible()
+    {
+        foreach (var u in Squad)
+            if (u.Alive && !u.IsVip) PromoteEligible(u);
+    }
+
     /// Apply promotions (from accumulated kills) and field-heal to the survivors,
     /// then backfill empty squad slots with fresh rookie recruits.
     /// Each rank-up queues a perk choice (PendingPerks) the player resolves in the
@@ -849,8 +932,13 @@ public class Run
     public void DebriefSurvivors()
     {
         Report.Clear();
-        PendingPerks.Clear();
-        PendingSpecs.Clear();
+        // APEX W8: PRUNE stale offers rather than nuking the lists. An emergency-cadre draftee
+        // (Game.TryReinforcements) can arrive with its promote-at-draft perk/spec offer queued
+        // MID-MISSION; a blanket Clear() here would silently eat that earned pick. Offers whose
+        // unit died or left the squad still drop (the old Clear()'s actual job — every offer
+        // queued in a barracks is resolved in that same barracks, so this is normally a no-op).
+        PendingPerks.RemoveAll(o => o.Unit == null || !o.Unit.Alive || !Squad.Contains(o.Unit));
+        PendingSpecs.RemoveAll(o => o.Unit == null || !o.Unit.Alive || !Squad.Contains(o.Unit));
         // Heat "LINGERING WOUNDS": wounds bite a mission longer and field medicine is halved.
         bool harsh = Heat.HarshAttrition(HeatLevel);
         foreach (var u in Squad.ToList())
@@ -910,34 +998,9 @@ public class Run
             // under this contract), so a small squad ranks up quicker. Inert as None.
             if (Contract == Contract.IronVeterans) u.Kills += 1;
 
-            // promotions: advance rank while kills clear the next threshold
-            while (u.Rank < Ranks.Length - 1 && u.Kills >= KillReq[u.Rank + 1])
-            {
-                u.Rank++;
-                var offer = MakePerkOffer(u);
-                if (offer != null)
-                {
-                    PendingPerks.Add(offer);
-                    Report.Add($"{u.Name} promoted to {Ranks[u.Rank]}  (choose a perk)");
-                }
-                else
-                {
-                    string buff = ApplyStatBoost(u, u.Rank);
-                    Report.Add($"{u.Name} promoted to {Ranks[u.Rank]}  ({buff})");
-                }
-            }
-
-            // W2 CLASS SPECIALIZATION: the first time a soldier reaches SpecRank (Corporal) it picks a
-            // one-time fork that changes HOW its class plays. Offered once (not yet specialized, no
-            // pending offer already queued, and the class actually has a 2-fork table).
-            if (u.Rank >= Unit.SpecRank && u.Spec == Spec.None
-                && !PendingSpecs.Any(o => o.Unit == u)
-                && SpecDef.OptionsFor(u.Cls).Length == 2)
-            {
-                var opts = SpecDef.OptionsFor(u.Cls);
-                PendingSpecs.Add(new SpecOffer { Unit = u, A = opts[0], B = opts[1] });
-                Report.Add($"{u.Name} can SPECIALIZE  (choose a fork)");
-            }
+            // promotions + the one-time SPECIALIZE fork (extracted to PromoteEligible so
+            // LAST STAND's mid-stand FIELD PROMOTION heartbeat shares the exact same beat).
+            PromoteEligible(u);
 
             // field medicine: partial heal between missions (halved under Heat harsh attrition).
             // Raised 0.4 -> 0.55: balance data showed the squad limping into the mid-campaign
@@ -961,34 +1024,60 @@ public class Run
         // ATTRITION backfill (see RecruitsPerBarracks / AttritionFloor). Recruits TRICKLE in
         // rather than instantly refilling to RosterMax, so a wipe genuinely shrinks your strength
         // for a mission or two. A hard floor still guarantees a deployable squad (no death-spiral).
-        // Heat "RELENTLESS" (rung 8) turns OFF all reinforcements — casualties permanently shrink
+        // Heat "RELENTLESS" (rung 7) turns OFF all reinforcements — casualties permanently shrink
         // the roster for the run. CONTRACT "IRON VETERANS" does the same (no backfill at all): a wipe
         // genuinely shrinks the squad, the survivors are stronger (faster ranks above). Inert as None.
         bool noBackfill = Heat.NoReinforcements(HeatLevel) || Contract == Contract.IronVeterans;
         if (noBackfill)
         {
             string why = Contract == Contract.IronVeterans ? "CONTRACT" : "HEAT";
-            if (Squad.Count < NextDeployCap)
+            // SHATTERED COMMAND: no-reinforcements SHRINKS the roster, it must never ZERO it. A
+            // lone-VIP Escort/Rescue win can clear a mission with every soldier dead, and an empty
+            // squad has nothing to deploy next mission (Mission.Build flood-fills from players[0]).
+            // The anti-death-spiral floor is unconditional at Count == 0 ONLY — a surviving
+            // under-floor roster stays permanently short (CONTRACTTEST pins that it is NOT topped up).
+            if (Squad.Count == 0)
+            {
+                Report.Add($"SHATTERED COMMAND -- emergency conscripts fill the ranks ({why} still bars reinforcements)");
+                while (Squad.Count < AttritionFloor)
+                {
+                    // APEX W8: depth-scaled ((Mission-1)/2 seeded kills) + promoted AT THE DRAFT, so
+                    // the conscript ranks (and its perk offer lands) in THIS barracks visit — the
+                    // deepest failure path must not hand a late squad a 0-kill ROOKIE wall.
+                    var rec = Sightline.Mission.MakeRecruit(TakenCallsigns(), Mission);
+                    Squad.Add(rec);
+                    Report.Add($"{rec.Name} conscripted  (ROOKIE {rec.Cls})");
+                    PromoteEligible(rec);
+                }
+            }
+            else if (Squad.Count < NextDeployCap)
                 Report.Add($"No reinforcements ({why}) -- deploying {Squad.Count} strong");
         }
         else
         {
             // 1) emergency floor: if a bad mission dropped the roster below AttritionFloor, top it
             //    straight back up to the floor (anti-death-spiral — you always have a squad to field).
+            //    APEX W8 — DEPTH-SCALED (both backfill sites): the recruit arrives with (Mission-1)/2
+            //    seeded kills and is promoted AT THE DRAFT, so it ranks — with its perk offer — in
+            //    THIS barracks visit (~m3-4 a SQUADDIE, m7+ a CORPORAL with the spec fork; that
+            //    ceiling is intended). This fixes the flagged failure path only: a casualty-free run
+            //    never drafts, so the policy gap narrows from the sloppy side.
             while (Squad.Count < AttritionFloor)
             {
-                var rec = Sightline.Mission.MakeRecruit();
+                var rec = Sightline.Mission.MakeRecruit(TakenCallsigns(), Mission);
                 Squad.Add(rec);
                 Report.Add($"{rec.Name} drafted to fill the ranks  (ROOKIE {rec.Cls})");
+                PromoteEligible(rec);
             }
             // 2) normal trickle: above the floor, at most RecruitsPerBarracks rookie joins per
             //    barracks, so the roster rebuilds gradually toward RosterMax (losses still bite).
             int added = 0;
             while (Squad.Count < RosterMax && added < RecruitsPerBarracks)
             {
-                var rec = Sightline.Mission.MakeRecruit();
+                var rec = Sightline.Mission.MakeRecruit(TakenCallsigns(), Mission);
                 Squad.Add(rec);
                 Report.Add($"{rec.Name} joins the roster  (ROOKIE {rec.Cls})");
+                PromoteEligible(rec);
                 added++;
             }
             if (Squad.Count < RosterMax)
@@ -999,6 +1088,20 @@ public class Run
         AutoDeploy();
 
         if (Report.Count == 0) Report.Add("No changes this mission.");
+    }
+
+    /// APEX W5: the callsigns a fresh recruit must re-roll away from — the live roster, the run's
+    /// FALLEN (a recruit named like a dead bonded soldier would inherit the survivor's BOND aura
+    /// and double up the memorial record), and the persistent veteran reserve (a rookie sharing a
+    /// legend's name overwrites that legend at EnshrineVeterans). Rebuilt per recruit (all tiny).
+    /// Public: the Events recruit outcome joins the same squad and needs the same guard.
+    public HashSet<string> TakenCallsigns()
+    {
+        var names = new HashSet<string>();
+        foreach (var u in Squad) names.Add(u.Name);
+        foreach (var n in Fallen) names.Add(n);
+        foreach (var n in ReserveNames) names.Add(n);
+        return names;
     }
 
     /// Grant an earned trait, assign a nickname on the soldier's first feat, apply
@@ -1119,6 +1222,39 @@ public class Run
         return new PerkOffer { Unit = u, A = a, B = b };
     }
 
+    // ---- APEX W4 (c): synthetic-veteran flywheel probe (SIGHTLINE_VETSIM) ----
+    /// Promote the first `n` founding soldiers to deterministic SYNTHETIC veterans: Rank 3
+    /// (SERGEANT, with the matching minimum kill count so the promotion ladder stays coherent),
+    /// the first TWO still-unowned perks of their class line, and +1 armor. Lives inside Run
+    /// because ClassLine is private. In-memory only — the caller (Game.StartMission) gates it
+    /// behind NoPersist + the env hook, so it can never touch a real save/meta, and the
+    /// screenshot harness (which never sets SIGHTLINE_VETSIM) stays byte-identical.
+    ///
+    /// NOTE: this prices a NOMINAL Rank-3 veteran, not the exact recall payload — a real recall
+    /// (SaveGame.LoadVeterans) restores the soldier's full DTO (perks/kills/rank/armor/weapon
+    /// mod) and can be stronger or weaker than this stand-in. Calibrate against the enshrine
+    /// sort key before treating a VETSIM delta as the recall floor to the point.
+    public int ApplyVetSim(int n)
+    {
+        int made = 0;
+        foreach (var u in Squad)
+        {
+            if (made >= n) break;
+            if (u.IsVip) continue;
+            u.Rank = Math.Max(u.Rank, 3);
+            u.Kills = Math.Max(u.Kills, KillReq[3]);
+            int granted = 0;
+            foreach (var p in ClassLine(u.Cls))   // deterministic: the line's first two perks
+            {
+                if (granted >= 2) break;
+                if (!u.HasPerk(p)) { ApplyPerk(u, p); granted++; }
+            }
+            u.Armor += 1;
+            made++;
+        }
+        return made;
+    }
+
     /// Grant a chosen perk, applying any immediate stat effect.
     public static void ApplyPerk(Unit u, Perk p)
     {
@@ -1169,9 +1305,11 @@ public class Run
         if (node.Faction != Faction.None)
             return node.Faction switch
             {
-                Faction.Syndicate => "SYNDICATE: drones + shields",
-                Faction.Legion    => "LEGION: berserkers rush",
-                Faction.Wardens   => "WARDENS: snipers + artillery",
+                // APEX W5: name the setup-verb signatures now that the faction rosters field them
+                // (Legion += striker/lancer/hound, Syndicate/Wardens += screener).
+                Faction.Syndicate => "SYNDICATE: drones, shields + screeners",
+                Faction.Legion    => "LEGION: rushers, lancers + hounds",
+                Faction.Wardens   => "WARDENS: snipers, screeners + artillery",
                 _ => FactionName(node.Faction),
             };
         int m = node.Mission;   // 1-based column == mission number

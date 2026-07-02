@@ -28,6 +28,27 @@ public static class Ai
     public const int HealRange = 4;    // tiles a medic can mend across
     public const int HealAmount = 4;   // HP restored per heal
 
+    // W6b — COORDINATION TIER (0..2): the apex of the Heat ladder scales by PLAYING BETTER,
+    // not just by piling stats onto the saturating StatDelta/88-aim clamp. Published
+    // UNCONDITIONALLY by Game.SetupMission every mission (from the Heat rows' data-only
+    // AiTier field: 0 below EXPOSED, 1 at rungs 6-7, 2 at NO QUARTER) and raised by the
+    // LAST STAND wave path as a stand deepens; CLEARED by the Combat.EndMission mirror so a
+    // NO QUARTER run's tier can never leak into a subsequent heat-0 SKIRMISH/DAILY.
+    // SAFETY INVARIANT: Tier 0 == today's constants EXACTLY (every tiered read below
+    // collapses to its pre-W6b value), and no SIGHTLINE_*TEST path sets it, so the harness
+    // and default screenshots stay byte-stable by construction.
+    public static int Tier = 0;
+
+    // W6b — tiered item-roll damper: the small random damper on smoke/flash use shrinks as
+    // the tier rises (a coordinated force screens/blinds more RELIABLY), but the rise is
+    // CAPPED at 75 — never certainty — per the "fires often-but-not-always, so it stays a
+    // threat not a tic" rationale at the smoke reasons below. A base chance already at/above
+    // the cap does not rise at all: those (endsWatched 90, SCREENER 88, flash 80) are
+    // strong-reason/identity rolls, not difficulty knobs. Tier 0 returns the base unchanged.
+    // Internal so the AITEST harness can pin the tier-0 identity + tier-2 cap directly.
+    internal static int Damp(int baseChance)
+        => baseChance >= 75 ? baseChance : Math.Min(baseChance + 10 * Tier, 75);
+
     public static EnemyPlan Plan(Game g, Unit e)
     {
         var plan = new EnemyPlan();
@@ -169,13 +190,21 @@ public static class Ai
                 foreach (var p in players)
                 {
                     if (Util.TileDist(tx, ty, p.X, p.Y) > e.Weapon.MaxRange) continue;
-                    if (!g.Grid.HasLineOfSight(tx, ty, p.X, p.Y)) continue;
+                    // W6a truthfulness: mirror Game.CanTarget — a commanding (>=2-tier) height
+                    // advantage sees over high cover, so a reachable plateau's REAL shot counts
+                    // here and a unit that could climb-and-fire doesn't wrongly break off.
+                    bool cmdR = g.Grid.HeightAt(tx, ty) - g.Grid.HeightAt(p.X, p.Y) >= 2;
+                    if (!g.Grid.HasLineOfSight(tx, ty, p.X, p.Y, cmdR)) continue;
                     int h = OddsFrom(g, e, tx, ty, p).HitChance;
                     if (h > bestReachHit) bestReachHit = h;
                 }
             }
             // only break off when no reachable tile yields a meaningful shot (<55% best);
             // if it can still hit hard it stands and fights (a trade may be worth it).
+            // W6b deliberately does NOT tier this 55: W6a's commanding retreat scan above
+            // already trims false break-offs (plateau shots now count), and UNDERTOW W3 rout
+            // adds its own break-off pressure — raising the threshold with the tier would
+            // stack all three toward apex passivity. Revisit only on flywheel retreat data.
             retreatMode = bestReachHit < 55f;
         }
 
@@ -200,7 +229,13 @@ public static class Ai
                 foreach (var p in players)
                 {
                     if (Util.TileDist(tx, ty, p.X, p.Y) > e.Weapon.MaxRange) continue;
-                    if (!g.Grid.HasLineOfSight(tx, ty, p.X, p.Y)) continue;
+                    // W6a truthfulness: mirror Game.CanTarget — a commanding (>=2-tier) height
+                    // advantage sees over high cover. Without this the planner filtered out the
+                    // exact shots the resolver would allow from the authored '=' tier-2 plateaus,
+                    // so snipers/elites never sought them; ComputeOdds' seesOver already prices
+                    // the payoff (cover fully negated), the shot just has to survive this filter.
+                    bool cmd = g.Grid.HeightAt(tx, ty) - g.Grid.HeightAt(p.X, p.Y) >= 2;
+                    if (!g.Grid.HasLineOfSight(tx, ty, p.X, p.Y, cmd)) continue;
                     var odds = OddsFrom(g, e, tx, ty, p);
                     bool canFinish = p.Hp <= e.Weapon.DmgMax;
                     // The VIP gets a much smaller "finish it" frenzy than a soldier: balance data
@@ -228,7 +263,10 @@ public static class Ai
                     {
                         // SPOTTER amplifies the convergence: a painted target is worth collapsing
                         // on even harder, so the squad genuinely focuses while the BEACON lives.
-                        val += spotterActive ? 45 : 30;                  // concentrate fire here
+                        // W6b: the coordination tier sharpens the squad's convergence — the focus
+                        // bias climbs 30 -> 35 -> 40 across tiers (the SPOTTER's painted 45 is an
+                        // archetype force-multiplier, not a difficulty knob, so it stays fixed).
+                        val += spotterActive ? 45 : 30 + 5 * Tier;       // concentrate fire here
                         if (canFinish && odds.HitChance >= 50) val += 35; // press a likely kill
                         // COORDINATION 6 — CROSSFIRE (AI improvement): prefer hitting the focus
                         // from an angle its cover DOESN'T protect (a genuine flank) or where it's
@@ -247,8 +285,8 @@ public static class Ai
                     // to it from a meaningfully DIFFERENT angle. The new CROSSFIRE combat mechanic is
                     // symmetric (a target shot by 2+ same-team attackers from diverging vectors —
                     // > ~72deg — takes +aim/+crit), so the squad benefits from collapsing on a
-                    // soldier from converging lines instead of stacking one approach. Computed
-                    // locally (CrossfireWith), so Ai.cs compiles standalone — no Combat dependency.
+                    // soldier from converging lines instead of stacking one approach. CrossfireWith
+                    // is pinned term-by-term to Combat.InCrossfire (W6a) so the prediction is truthful.
                     // Advisory: it layers onto the existing hit/cover/finish/focus core, only when a
                     // shot already exists, so it biases POSITIONING and never forces a worse shot.
                     if (CrossfireWith(g, e, tx, ty, p))
@@ -257,8 +295,10 @@ public static class Ai
                         // amplified for the painted FOCUS so the squad genuinely pincers the BEACON's
                         // mark; a NON-focus crossfire is a smaller nudge so it never out-votes the
                         // squad's deliberate focus choice. Never large enough to override "can I
-                        // shoot at all / am I safe".
-                        val += isFocus ? (spotterActive ? 22f : 16f) : 8f;
+                        // shoot at all / am I safe". W6b: the focus-crossfire pull climbs
+                        // 16 -> 19 -> 22 with the coordination tier (a tier-2 force genuinely
+                        // pincers); the SPOTTER 22 and non-focus 8 stay fixed.
+                        val += isFocus ? (spotterActive ? 22f : 16f + 3f * Tier) : 8f;
                     }
 
                     // TARGET SHARPENING (AI improvement 3): among shootable soldiers prefer, in order,
@@ -610,7 +650,7 @@ public static class Ai
                 if (e.Cls == "SCREENER")
                 {
                     var (zx, zy, zGood) = BestScreen(g, e, bestTile.x, bestTile.y);
-                    if (zGood && Util.Roll(88))     // a zoner screens aggressively (small damper only)
+                    if (zGood && Util.Roll(Damp(88)))   // a zoner screens aggressively (small damper only; >= the W6b cap, so tier-fixed)
                     {
                         plan.UseItem = true; plan.ItemTx = zx; plan.ItemTy = zy;
                         if (plan.ShootTarget != null &&
@@ -623,7 +663,10 @@ public static class Ai
                     var (sx, sy, smokeGood) = BestSmoke(g, e, bestTile.x, bestTile.y);
                     // strong reasons (about to eat overwatch) fire almost always; a softer
                     // open-ground screen fires often-but-not-always, so it stays a threat not a tic.
-                    bool fire = endsWatched ? Util.Roll(90) : routeWatched ? Util.Roll(70) : Util.Roll(55);
+                    // W6b: Damp raises the two softer reasons with the coordination tier
+                    // (70/55 -> capped 75) — a tier-2 force screens its advances reliably —
+                    // while the strong 90 stays fixed and NOTHING ever reaches certainty.
+                    bool fire = endsWatched ? Util.Roll(Damp(90)) : routeWatched ? Util.Roll(Damp(70)) : Util.Roll(Damp(55));
                     if (smokeGood && fire)
                     {
                         plan.UseItem = true; plan.ItemTx = sx; plan.ItemTy = sy;
@@ -642,7 +685,7 @@ public static class Ai
                 // adjacent to e itself is vetoed). It fires reliably when the cluster exists — a
                 // pre-charge tool, not a coin flip — with a small damper so it isn't fully scripted.
                 var (fx, fy, flashHits, flashAllies) = BestFlash(g, e, bestTile.x, bestTile.y);
-                if (flashHits >= 2 && flashAllies == 0 && Util.Roll(80))
+                if (flashHits >= 2 && flashAllies == 0 && Util.Roll(Damp(80)))   // 80 >= the W6b cap: tier-fixed (a pre-charge tool, not a knob)
                 {
                     plan.UseItem = true; plan.ItemTx = fx; plan.ItemTy = fy;
                     plan.ShootTarget = null;   // flash takes the action (like grenade)
@@ -695,7 +738,12 @@ public static class Ai
                 var coverHere = g.Grid.GetCover(bestTile.x, bestTile.y, nearest.X, nearest.Y);
                 // overwatch if we have a clear sightline toward enemy approach, else hunker. A ROUTED unit
                 // (UNDERTOW W3) is too rattled to hold a steady watch — it just keeps its head down.
-                bool sees = g.Grid.HasLineOfSight(bestTile.x, bestTile.y, nearest.X, nearest.Y);
+                // W6a truthfulness: the sightline read mirrors Game.CanTarget's commanding overload —
+                // a unit holding a >=2-tier vantage watches over high cover (the reaction it would
+                // actually take, via CanTarget, sees over it too), so it no longer hunkers on a
+                // commanding perch it genuinely controls.
+                bool cmdOw = g.Grid.HeightAt(bestTile.x, bestTile.y) - g.Grid.HeightAt(nearest.X, nearest.Y) >= 2;
+                bool sees = g.Grid.HasLineOfSight(bestTile.x, bestTile.y, nearest.X, nearest.Y, cmdOw);
                 if (sees && e.Ammo > 0 && !routing) plan.Overwatch = true;
                 else if (coverHere.Level > 0) plan.Hunker = true;
             }
@@ -847,28 +895,40 @@ public static class Ai
 
     // CROSSFIRE test (AI improvement 1): true when firing on target `tgt` from candidate tile
     // (cx,cy) forms a crossfire with at least one OTHER living enemy that already has line-of-
-    // sight to `tgt` from a meaningfully DIFFERENT angle. "Different angle" mirrors the new
-    // (symmetric) CROSSFIRE combat bonus: the two firing vectors (tgt - candidate) and
-    // (tgt - e2) diverge by more than ~72deg, i.e. their normalised dot < 0.30. Computed locally
-    // (no Combat reference) so Ai.cs compiles standalone. Self is excluded; e2 must be active and
-    // in its own weapon range (a vector from an ally that can't actually shoot isn't a real pincer).
-    // Degenerate zero-length vectors (an ally or the candidate sharing the target's tile) are
-    // skipped — they have no defined angle.
-    static bool CrossfireWith(Game g, Unit self, int cx, int cy, Unit tgt)
+    // sight to `tgt` from a meaningfully DIFFERENT angle. W6a: this predicate is PINNED to
+    // Combat.InCrossfire — the resolver that actually pays the bonus — term by term:
+    //  * ally gate = dist <= Combat.CrossfireAllyRange ALONE. InCrossfire has NO ally-weapon-range
+    //    term (Combat.cs "credible threat" check), so the old min-with-e2.Weapon.MaxRange gate made
+    //    the planner stricter than the resolver for shotgun allies (MaxRange 8): a BERSERKER ally at
+    //    dist 9-10 grants the real +CrossfireAim but the planner predicted none.
+    //  * angle = Combat.CrossfireCosMax (same constant, not a local copy).
+    //  * LoS = the PLAIN (non-commanding) HasLineOfSight, exactly as InCrossfire's ally-credibility
+    //    read. Deliberately NOT the commanding overload even when the ally holds a tier-2 perch:
+    //    the resolver doesn't grant commanding sight to the converging ally, so adding it here
+    //    would predict crossfires the resolver never pays (the opposite untruthfulness).
+    //  * alertness: NO !e2.Active skip. InCrossfire counts every alive same-team non-VIP unit in
+    //    Combat.AllUnits INCLUDING a dormant pod-mate, so the old skip under-predicted the
+    //    shooter's own real odds near a sleeping pod. If dormant allies should ever stop granting
+    //    crossfire, fix the RESOLVER first and this predicate follows.
+    // (The old "computed locally / no Combat reference" note was stale — Ai already calls
+    // Combat.ComputeOdds and reads Combat.MissionFaction.) Degenerate zero-length vectors (an ally
+    // or the candidate sharing the target's tile) are skipped — they have no defined angle.
+    // Internal (not private) so the AITEST harness can pin planner==resolver agreement directly.
+    internal static bool CrossfireWith(Game g, Unit self, int cx, int cy, Unit tgt)
     {
         float v1x = tgt.X - cx, v1y = tgt.Y - cy;
         float m1 = MathF.Sqrt(v1x * v1x + v1y * v1y);
         if (m1 < 0.001f) return false;                       // candidate on the target: no angle
         foreach (var e2 in g.AliveEnemies())
         {
-            if (e2 == self || !e2.Active) continue;
-            if (Util.TileDist(e2.X, e2.Y, tgt.X, tgt.Y) > e2.Weapon.MaxRange) continue;
+            if (e2 == self) continue;
+            if (Util.TileDist(e2.X, e2.Y, tgt.X, tgt.Y) > Combat.CrossfireAllyRange) continue;
             if (!g.Grid.HasLineOfSight(e2.X, e2.Y, tgt.X, tgt.Y)) continue;
             float v2x = tgt.X - e2.X, v2y = tgt.Y - e2.Y;
             float m2 = MathF.Sqrt(v2x * v2x + v2y * v2y);
             if (m2 < 0.001f) continue;                       // ally on the target: no angle
             float cos = (v1x * v2x + v1y * v2y) / (m1 * m2);
-            if (cos < 0.30f) return true;                    // vectors diverge > ~72deg -> crossfire
+            if (cos < Combat.CrossfireCosMax) return true;   // vectors diverge > ~72deg -> crossfire
         }
         return false;
     }

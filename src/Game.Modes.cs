@@ -125,7 +125,8 @@ public partial class Game
         _run.CurrentCard = new MissionCard { Objective = obj, ModName = "SKIRMISH", Reward = RewardKind.None };
         // a random arena (leave ForcedLayout untouched under the harness so SIGHTLINE_MAP still works)
         if (!NoPersist) Mission.ForcedLayout = -1;
-        Stats.BeginRun(_run.HeatLevel, "skirmish");
+        // APEX W4: mode goes in RunRec.Mode (policy slot stays a real policy) — see BeginEndless.
+        Stats.BeginRun(_run.HeatLevel, SmartPlay && SmartSloppy ? "sloppy" : "greedy", "skirmish");
         Players = _run.Squad;
         Wave = 0;
         SetupMission(1);
@@ -162,7 +163,8 @@ public partial class Game
         // force the day's arena. Set ForcedLayout so SetupMission -> Mission.Build stamps it (both live
         // and harness — the daily's determinism is the point). It is cleared when leaving skirmish.
         Mission.ForcedLayout = arena;
-        Stats.BeginRun(_run.HeatLevel, "daily");
+        // APEX W4: mode goes in RunRec.Mode (policy slot stays a real policy) — see BeginEndless.
+        Stats.BeginRun(_run.HeatLevel, SmartPlay && SmartSloppy ? "sloppy" : "greedy", "daily");
         Players = _run.Squad;
         Wave = 0;
         // SEEDED DAILY: reseed the shared RNG from the day's seed so the WHOLE procedural board (arena
@@ -214,6 +216,12 @@ public partial class Game
     {
         var alivePlayers = AlivePlayers();
         if (alivePlayers.Count == 0) { EndSkirmish(false); return; }
+        // APEX W2: RESCUE soft-lock (the same hole the campaign CheckEnd had): the invulnerable caged
+        // captive keeps AlivePlayers() non-empty after a real wipe, and with no soldier left it can
+        // never be freed — the fight would sit forever. Single-mission modes have no checkpoint
+        // valve, so an abandoned cage is simply a loss.
+        if (Objective == Objective.Rescue && CaptiveLocked && !alivePlayers.Any(p => !p.IsVip))
+        { EndSkirmish(false); return; }
 
         switch (Objective)
         {

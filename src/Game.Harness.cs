@@ -543,8 +543,151 @@ public partial class Game
             if (EnemyFocus != sHi) fails.Add("focusDidNotFlipLive=" + (EnemyFocus?.Name ?? "null"));
         }
 
+        // ---- W6a (1) — COMMANDING LoS: the planner must SEE the climb+shot a tier-2 plateau
+        // unlocks. A full-height HIGH-COVER wall seals every ground-level sightline to the
+        // soldier; the ONLY shot on the board is the commanding one from the '='-style tier-2
+        // plateau beside the enemy (Game.CanTarget grants >=2-tier shooters sight over high
+        // cover, and ComputeOdds' seesOver prices it). Before W6a the planner's LoS filter never
+        // passed the commanding overload, so it filtered out the exact shot the resolver allows
+        // and the enemy never sought the perch.
+        {
+            Grid = new Grid();
+            Players = new System.Collections.Generic.List<Unit>();
+            Enemies = new System.Collections.Generic.List<Unit>();
+            for (int y = 0; y < Grid.H; y++) { Grid.Tiles[10, y] = TileType.HighCover; Grid.SetCoverHp(10, y); }
+            Grid.Height[8, 5] = 2;                          // the tier-2 vantage ('=' in Maps.cs)
+            var marks   = MkP("MARKS", 13, 5, 8, 8);        // soldier behind the wall
+            var climber = MkE("CLIMB", 7, 5);               // one step from the plateau
+            Players.Add(marks); Enemies.Add(climber);
+            _aiUnits = AliveEnemies().Where(e => e.Active).ToList();
+            PlanEnemySquad();
+            var cplan = Ai.Plan(this, climber);
+            if (cplan.ShootTarget != marks) fails.Add("commandingShotNotPlanned");
+            (int x, int y) cEnd = cplan.Path.Count > 0 ? cplan.Path[cplan.Path.Count - 1] : (climber.X, climber.Y);
+            if (Grid.HeightAt(cEnd.x, cEnd.y) - Grid.HeightAt(marks.X, marks.Y) < 2)
+                fails.Add("commandingNoClimb");             // the plan must actually take the perch
+        }
+
+        // ---- W6a (2) — CROSSFIRE PIN: Ai.CrossfireWith must return Combat.InCrossfire's verdict
+        // term-for-term (it is the planner's prediction of the resolver's +CrossfireAim). Three
+        // staged cases; (a) and (b) are DISAGREEMENTS that failed before the pin.
+        {
+            Grid = new Grid();                              // open floor: LoS clear everywhere
+            Players = new System.Collections.Generic.List<Unit>();
+            Enemies = new System.Collections.Generic.List<Unit>();
+            var xTgt = MkP("XTGT", 10, 0, 8, 8);            // target on the north edge
+            var xShot = MkE("XSHOT", 2, 0);                 // shooter due WEST (v1 = +x)
+            var xAlly = MkE("XALLY", 10, 10);               // ally due SOUTH at Euclid dist 10
+            xAlly.Weapon = Weapon.Make(WeaponKind.Shotgun); // MaxRange 8 — the old planner gate
+            xAlly.Ammo = xAlly.Weapon.Clip;
+            Players.Add(xTgt); Enemies.Add(xShot); Enemies.Add(xAlly);
+            var savedAll = Combat.AllUnits;
+            Combat.AllUnits = new System.Collections.Generic.List<Unit> { xTgt, xShot, xAlly };
+            // (a) 10-tile SHOTGUN ally: inside the resolver's CrossfireAllyRange (10), outside the
+            // ally's own weapon range (8). The resolver pays the bonus; the pre-pin planner
+            // (min-with-weapon-range) predicted none — the exact drift W6a closes.
+            bool res = Combat.InCrossfire(Grid, xShot, xTgt);
+            bool pln = Ai.CrossfireWith(this, xShot, xShot.X, xShot.Y, xTgt);
+            if (!res) fails.Add("xfPinResolverShouldPay");
+            if (pln != res) fails.Add("xfPinShotgunAllyDrift");
+            // (b) DORMANT pod-mate: InCrossfire counts every alive same-team gun regardless of
+            // alertness; the pre-pin planner skipped !Active allies. Agreement must hold.
+            xAlly.X = 10; xAlly.Y = 5; xAlly.SyncPos();     // dist 5 — well inside every gate
+            xAlly.Alert = AlertLevel.Unaware;               // dormant
+            res = Combat.InCrossfire(Grid, xShot, xTgt);
+            pln = Ai.CrossfireWith(this, xShot, xShot.X, xShot.Y, xTgt);
+            if (!res) fails.Add("xfPinResolverDormantShouldPay");
+            if (pln != res) fails.Add("xfPinDormantAllyDrift");
+            // (c) beyond CrossfireAllyRange: both sides must refuse (agreement on the negative).
+            // Geometry keeps the ANGLE valid (cos ~0.196 < 0.30) so range is the sole
+            // discriminator: target (3,0), shooter due EAST (16,0), ally (5,10) at ~10.2 tiles.
+            xAlly.Alert = AlertLevel.Alert;
+            xTgt.X = 3;  xTgt.Y = 0;  xTgt.SyncPos();
+            xShot.X = 16; xShot.Y = 0; xShot.SyncPos();
+            xAlly.X = 5; xAlly.Y = 10; xAlly.SyncPos();
+            res = Combat.InCrossfire(Grid, xShot, xTgt);
+            pln = Ai.CrossfireWith(this, xShot, xShot.X, xShot.Y, xTgt);
+            if (res) fails.Add("xfPinResolverOverRange");
+            if (pln != res) fails.Add("xfPinOverRangeDrift");
+            Combat.AllUnits = savedAll;                     // never leak the staged roster
+        }
+
+        // ---- W6b — COORDINATION TIER: data rows, damp identity/cap, tier-0 invariance,
+        // tier-2 divergence, and the stale-tier lifecycle. ----
+        {
+            // (a) data: the ladder's AiTier rungs (0 below EXPOSED; 1 at rungs 6-7; 2 at NO QUARTER).
+            if (Sightline.Heat.AiTier(0) != 0 || Sightline.Heat.AiTier(5) != 0) fails.Add("aiTierLowHeatNot0");
+            if (Sightline.Heat.AiTier(6) != 1 || Sightline.Heat.AiTier(7) != 1) fails.Add("aiTierExposedNot1");
+            if (Sightline.Heat.AiTier(8) != 2) fails.Add("aiTierNoQuarterNot2");
+            // W6c data pin: +1 enemy damage is the rung-8 apex ONLY (0 through RELENTLESS, so
+            // heats 0-7 spawn today's weapons byte-for-byte; the default param keeps every
+            // harness Mission.Build call at 0).
+            if (Sightline.Heat.DmgDelta(7) != 0) fails.Add("dmgDeltaBelowApexNot0");
+            if (Sightline.Heat.DmgDelta(8) != 1) fails.Add("dmgDeltaNoQuarterNot1");
+
+            // (b) the smoke/flash damp read: tier 0 == the shipped constants EXACTLY; tier 2
+            //     rises but is CAPPED at 75 (never certainty) and never lifts a roll already
+            //     at/above the cap (those are strong-reason/identity rolls, not knobs).
+            Ai.Tier = 0;
+            if (Ai.Damp(55) != 55 || Ai.Damp(70) != 70 || Ai.Damp(80) != 80 || Ai.Damp(90) != 90)
+                fails.Add("dampTier0NotIdentity");
+            Ai.Tier = 2;
+            if (Ai.Damp(55) != 75 || Ai.Damp(70) != 75) fails.Add("dampTier2NotCapped75");
+            if (Ai.Damp(80) != 80 || Ai.Damp(90) != 90) fails.Add("dampTier2LiftedStrongRoll");
+            Ai.Tier = 0;
+
+            // (c) one fixed scene, three plans. A PINNED enemy (ringed by dormant pod-mates ->
+            //     single-tile reach, jitter-proof) sees two exposed soldiers: the squad FOCUS at
+            //     full HP (dist 8) and a NON-focus in the finish band (dist 2, hp 2) whose
+            //     intrinsic value beats the tier-0 focus bias by ~5pts but LOSES to the tier-2
+            //     bias (30 -> 40). Tier 0 must take the opportunistic finish — today's shipped
+            //     behaviour, asserted TWICE around a tier flip so the tier reads are proven
+            //     pure/hysteresis-free — while Tier 2 must converge on the squad's focus (the
+            //     more coordinated play; the focus-bias read demonstrably changed).
+            Grid = new Grid();
+            Players = new System.Collections.Generic.List<Unit>();
+            Enemies = new System.Collections.Generic.List<Unit>();
+            var tFoc = MkP("TFOC", 13, 5, 8, 8);            // the squad focus: full HP, dist 8
+            var tFin = MkP("TFIN", 5, 3, 2, 8);             // finishable: hp 2 <= DmgMax 5, dist 2
+            Players.Add(tFoc); Players.Add(tFin);
+            var pinned = MkE("PIN", 5, 5);
+            Enemies.Add(pinned);
+            for (int bd = 0; bd < 8; bd++)                  // ring of DORMANT pod-mates pins it in place
+            {
+                int[] bdx = { -1, 0, 1, -1, 1, -1, 0, 1 }, bdy = { -1, -1, -1, 0, 0, 1, 1, 1 };
+                var blk = MkE("BLK" + bd, 5 + bdx[bd], 5 + bdy[bd]);
+                blk.Alert = AlertLevel.Unaware;             // dormant: pins movement, no active AI terms
+                Enemies.Add(blk);
+            }
+            _aiUnits = AliveEnemies().Where(e => e.Active).ToList();
+            PlanEnemySquad();
+            EnemyFocus = tFoc;                              // stage the coordination conflict
+            Ai.Tier = 0;
+            var t0a = Ai.Plan(this, pinned);
+            if (t0a.ShootTarget != tFin) fails.Add("tier0NotShippedPick=" + (t0a.ShootTarget?.Name ?? "null"));
+            Ai.Tier = 2;
+            EnemyFocus = tFoc;                              // (Plan never mutates it; explicit for clarity)
+            var t2 = Ai.Plan(this, pinned);
+            if (t2.ShootTarget != tFoc) fails.Add("tier2NoConvergence=" + (t2.ShootTarget?.Name ?? "null"));
+            Ai.Tier = 0;
+            var t0b = Ai.Plan(this, pinned);
+            if (t0b.ShootTarget != t0a.ShootTarget || t0b.Path.Count != t0a.Path.Count
+                || t0b.MoveActions != t0a.MoveActions || t0b.Overwatch != t0a.Overwatch
+                || t0b.Hunker != t0a.Hunker || t0b.Grenade != t0a.Grenade || t0b.UseItem != t0a.UseItem)
+                fails.Add("tier0NotInvariantAfterFlip");
+
+            // (d) lifecycle: a stale tier survives neither mission SETUP (SetupMission publishes
+            //     unconditionally — default heat 0 -> tier 0) nor the Combat.EndMission mirror.
+            Ai.Tier = 2;
+            StartMission(1);                                // NoPersist; no SIGHTLINE_HEAT -> heat 0
+            if (Ai.Tier != 0) fails.Add("staleTierSurvivedSetup=" + Ai.Tier);
+            Ai.Tier = 2;
+            Combat.EndMission(null);
+            if (Ai.Tier != 0) fails.Add("staleTierSurvivedEndMission=" + Ai.Tier);
+        }
+
         return fails.Count == 0
-            ? "AITEST: PASS (focus picks killable+exposed; Ai.Plan biases to focus + flips; overwatch map mirrors reaction; retreat plan still acts; W4 setup-first + live focus recompute)"
+            ? "AITEST: PASS (focus picks killable+exposed; Ai.Plan biases to focus + flips; overwatch map mirrors reaction; retreat plan still acts; W4 setup-first + live focus recompute; W6a commanding climb+shot + crossfire planner==resolver pin; W6b tier data/damp-cap/tier-0-invariance/tier-2-convergence/lifecycle)"
             : "AITEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
@@ -760,6 +903,21 @@ public partial class Game
         Phase = Phase.Barracks;
     }
 
+    /// Harness hook (screenshot only, APEX W7): stage LAST STAND's mid-stand FIELD PROMOTION
+    /// offer. Pair with SIGHTLINE_ENDLESS=1 + SIGHTLINE_SHOT — runs after BeginEndless: banks
+    /// promotion kills on the point soldier, clears the wave-3 board, and fires CheckEndless so
+    /// the heartbeat queues the offers and detours into Phase.Barracks. Shot mode never sets
+    /// AutoPlay, so the perk chooser stays on screen for the shot frame (exactly what a player
+    /// sees between waves 3 and 4).
+    public void DebugEndlessOffer()
+    {
+        if (Mode != GameMode.Endless) return;
+        foreach (var e in Enemies) { e.Hp = 0; e.Alive = false; }   // wave "cleared"
+        Wave = 3;
+        _run.Squad[0].Kills = 3;         // ROOKIE -> CORPORAL: perk picks + the spec fork queue
+        CheckEndless();                  // sustain + heartbeat -> Barracks detour w/ the offer up
+    }
+
     /// Harness hook (screenshot only): mark a couple of soldiers wounded.
     public void DebugWound()
     {
@@ -770,9 +928,11 @@ public partial class Game
 
     /// Harness hook (screenshot only): arm a shot tooltip on an enemy so the randomness-
     /// mitigation surfacing (DMG range + GRAZE floor + "+N STEADYING" streak badge) is visible.
-    /// Seats a live enemy in clean LoS of the first soldier, banks a miss streak on that soldier,
-    /// then enters aim mode locked on the enemy. The next Update's UpdateHoverAndAim recomputes
-    /// + shows the odds naturally (no special draw path), so the screenshot matches real play.
+    /// W9 re-stage: the target is HUNKERED behind HIGH cover (full -40 facing-side cover on a
+    /// dominant-axis shot, -25 hunker), so the shown HIT lands well under 40% — exercising the
+    /// tooltip's red low-confidence band (>=70 good / 40-69 caution / <40 threat) inside the
+    /// neutral PanelBd frame. The next Update's UpdateHoverAndAim recomputes + shows the odds
+    /// naturally (no special draw path), so the screenshot matches real play.
     public void DebugTooltip()
     {
         var c = Players.Where(p => !p.IsVip && p.Alive).ToList();
@@ -783,9 +943,26 @@ public partial class Game
         var foe = Enemies.FirstOrDefault(e => e.Alive);
         if (foe != null)
         {
-            // Re-seat the foe a few tiles directly east of the soldier on clear floor so LoS holds.
-            int fx = Math.Min(Grid.W - 1, s.X + 4), fy = s.Y;
-            if (Grid.InBounds(fx, fy)) { foe.X = fx; foe.Y = fy; foe.SyncPos(); }
+            // Seat the foe at (+4,+2) — a dominant-x shot whose Bresenham line skirts the
+            // facing cover tile — hunkered behind a HIGH-cover block on its west (facing) side.
+            int fy = s.Y + 2 < Grid.H ? s.Y + 2 : s.Y - 2;
+            int fx = Math.Min(Grid.W - 1, s.X + 4);
+            if (Grid.InBounds(fx, fy))
+            {
+                // Clear the fire lane (floor, ground level) so nothing else warps the odds,
+                // then stand the facing high-cover block back up beside the target.
+                for (int tx = s.X; tx <= fx; tx++)
+                    for (int ty = Math.Min(s.Y, fy); ty <= Math.Max(s.Y, fy); ty++)
+                    {
+                        var occ = UnitAt(tx, ty);
+                        if (occ != null && occ != s) continue;   // don't pull terrain from under another unit
+                        Grid.Tiles[tx, ty] = TileType.Floor;
+                        Grid.Height[tx, ty] = 0;
+                    }
+                Grid.Tiles[fx - 1, fy] = TileType.HighCover;
+                foe.X = fx; foe.Y = fy; foe.SyncPos();
+                foe.Hunkered = true;
+            }
             foe.Alert = AlertLevel.Alert;
             Selected = s; RecomputeMoveCost();
             AimMode = true; AimTarget = foe;
@@ -923,6 +1100,82 @@ public partial class Game
                $"fallen={_run.Fallen.Count} before=[{string.Join(",", before)}] after=[{string.Join(",", after)}]";
     }
 
+    /// Headless self-test (SIGHTLINE_HEATLADDERTEST) — APEX W1: the ladder's top exists. A lone-VIP
+    /// objective win (Escort VIP-to-evac, or Rescue freed-captive-to-evac) can clear a mission with
+    /// EVERY soldier dead. Under a no-reinforcements regime (Heat RELENTLESS, rung 7, so heat >= 7;
+    /// or CONTRACT IRON VETERANS) the debrief used to skip the AttritionFloor entirely, so the next
+    /// mission built with an empty deploy and Mission.TryApplyLayout crashed indexing players[0].
+    /// Asserts for all three seams that the debrief conscripts an emergency squad — at Count == 0
+    /// ONLY (a surviving under-floor roster stays short; CONTRACTTEST pins that) — with the distinct
+    /// report line, and that the next mission builds a non-empty deploy. Also pins the Mission.Build
+    /// empty-deploy guard (defense-in-depth: refuse the layout, never throw).
+    public string HeatLadderSelfTest()
+    {
+        NoPersist = true;
+        var fails = new List<string>();
+
+        // one seam: a lone-VIP win at mission 1, then build mission 2 and count the deploy
+        void LoneVipWin(string tag, int heat, Contract contract, Objective obj)
+        {
+            _run = new Run(); _run.Start();
+            _run.HeatLevel = heat;
+            _run.Contract = contract;
+            _run.CurrentCard = new MissionCard { Objective = obj, ModName = "STANDARD", Reward = RewardKind.None };
+            SetupMission(1);
+            if (obj == Objective.Rescue) CaptiveLocked = false;   // the captive was freed before the squad fell
+            foreach (var u in Players.Where(p => !p.IsVip).ToList()) { u.Hp = 0; KillUnit(u); }
+            Vip.X = EvacZone[0].x; Vip.Y = EvacZone[0].y;         // the asset walks out alone
+            CheckEnd();                                            // objective win -> EnterBarracks -> DebriefSurvivors
+            if (Phase != Phase.Barracks) { fails.Add($"{tag}:phase={Phase}"); return; }
+            if (_run.Squad.Count == 0) { fails.Add($"{tag}:squadEmpty"); return; }
+            if (_run.Squad.Count < Run.AttritionFloor) fails.Add($"{tag}:underFloor={_run.Squad.Count}");
+            if (!_run.Report.Any(r => r.Contains("SHATTERED COMMAND"))) fails.Add($"{tag}:noConscriptLine");
+            // the next mission must field a real squad (this build crashed before the fix)
+            _run.CurrentCard = new MissionCard { Objective = Objective.Eliminate, ModName = "STANDARD", Reward = RewardKind.None };
+            SetupMission(2);
+            if (Players.Count(p => p.Alive && !p.IsVip) == 0) fails.Add($"{tag}:emptyDeploy");
+        }
+
+        LoneVipWin("heat8", 8, Contract.None, Objective.Escort);          // RELENTLESS via the heat ladder
+        LoneVipWin("iron", 0, Contract.IronVeterans, Objective.Escort);   // same regime via the contract
+        LoneVipWin("rescue", 8, Contract.None, Objective.Rescue);         // the lone-captive variant
+
+        // defense-in-depth: Mission.Build with an EMPTY deploy must refuse the authored layout
+        // (players[0] flood) and fall through the guarded procedural path without throwing.
+        int savedLayout = Mission.ForcedLayout;
+        try
+        {
+            Mission.ForcedLayout = 0;   // force the TryApplyLayout path
+            Mission.Build(new Grid(), new List<Unit>(), new List<Unit>(), 2);
+        }
+        catch (Exception e) { fails.Add("emptyBuildThrew:" + e.GetType().Name); }
+        finally { Mission.ForcedLayout = savedLayout; }
+
+        // W6c behavior pin (review MED-2): the NO QUARTER +1 damage must survive the whole
+        // SetupMission -> Build -> SpawnEnemies thread, not just the Heat.DmgDelta data row —
+        // a Build/SpawnEnemies signature reshuffle that drops the mutation would stay green otherwise.
+        // Mission 3: past the m1-2 grace that zeroes heatDmg.
+        void DmgAtHeat(string tag, int heat, int expectDelta)
+        {
+            _run = new Run(); _run.Start();
+            _run.HeatLevel = heat;
+            _run.CurrentCard = new MissionCard { Objective = Objective.Eliminate, ModName = "STANDARD", Reward = RewardKind.None };
+            SetupMission(3);
+            foreach (var e in Enemies)
+            {
+                int baseMax = Weapon.Make(e.Weapon.Kind).DmgMax;
+                if (e.Weapon.DmgMax != baseMax + expectDelta)
+                { fails.Add($"{tag}:{e.Cls}dmg={e.Weapon.DmgMax}want={baseMax + expectDelta}"); return; }
+            }
+        }
+        DmgAtHeat("noQuarterDmg", 8, 1);   // apex: every spawned weapon carries the +1
+        DmgAtHeat("heat7Dmg", 7, 0);       // one rung below: untouched
+
+        return fails.Count == 0
+            ? "HEATLADDERTEST: PASS (lone-VIP wins at heat 8 / IRON VETERANS / Rescue conscript to the floor + next mission deploys; empty-deploy Build fails soft; NO QUARTER +1 dmg on every m3 weapon, none at heat 7)"
+            : "HEATLADDERTEST: FAIL (" + string.Join(",", fails) + ")";
+    }
+
     /// SIGHTLINE_DKTEST — UNDERTOW W1: a death is processed EXACTLY ONCE. Asserts (1) KillUnit is
     /// idempotent (a 2nd call on a corpse does NOT re-add _run.Fallen/Memorial), and (2) a SURPLUS
     /// queued reaction ShotAnim aimed at a unit that just died is PURGED — so it can't re-resolve on
@@ -971,9 +1224,139 @@ public partial class Game
         if (movesForE != 0) fails.Add($"deadMoveKept={movesForE}");
         _anims.Clear();
 
+        // (3) APEX W2 — the overwatch RESOURCE LEAK: with 3 watchers covering one lane, the reaction
+        // loop must stop SPENDING (OnOverwatch/ReactedThisTurn/Ammo) the moment the already-queued
+        // hits cumulatively predict the mover's death — the old per-shot check only caught a single
+        // lethal blow, so watcher #3 burned its watch + a round on a shot KillUnit would purge.
+        // Controlled scene, fixed damage (DmgMin=DmgMax=3, crit 0) vs a 5 HP mover: two CONNECTS
+        // predict death at watcher #2, so watcher #3 must stay armed. Reaction rolls are RNG (effHit
+        // 99 via Reflexes; a clean miss survives the graze band), so re-stage a bounded number of
+        // times until the first two reactions both connect (P≈0.98/attempt), then assert watcher #3's
+        // state AT QUEUE TIME — right after OnUnitEnteredTile returns, before any ShotAnim applies.
+        Grid = new Grid();
+        Players = new System.Collections.Generic.List<Unit>();
+        Enemies = new System.Collections.Generic.List<Unit>();
+        Vip = null; CaptiveLocked = false; Hvt = null; SquadConcealed = false;
+        Objective = Objective.Eliminate;
+        Unit MkWatcher(string name, int x, int y)
+        {
+            var u = new Unit { Name = name, Cls = "ASSAULT", Team = Team.Player, X = x, Y = y,
+                               Hp = 8, MaxHp = 8, Aim = 65, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+            u.Weapon.DmgMin = 3; u.Weapon.DmgMax = 3; u.Weapon.CritBase = 0;   // fixed 3 dmg per connect
+            u.Perks.Add(Perk.Reflexes);                                        // near-certain reaction (effHit 99)
+            u.Ammo = u.Weapon.Clip; u.SyncPos(); u.BeginTurn(); return u;
+        }
+        var w1 = MkWatcher("W1", 4, 4);
+        var w2 = MkWatcher("W2", 4, 5);
+        var w3 = MkWatcher("W3", 4, 6);
+        Players.Add(w1); Players.Add(w2); Players.Add(w3);
+        var mv = new Unit { Name = "MV", Cls = "GRUNT", Team = Team.Enemy, X = 7, Y = 5,
+                            Hp = 5, MaxHp = 5, Aim = 60, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+        mv.Ammo = mv.Weapon.Clip; mv.Alert = AlertLevel.Alert; mv.SyncPos(); mv.BeginTurn();
+        Enemies.Add(mv);
+
+        bool leakChecked = false;
+        for (int attempt = 0; attempt < 60 && !leakChecked; attempt++)
+        {
+            foreach (var w in Players)
+            { w.OnOverwatch = true; w.OwBrace = false; w.OwFocused = false; w.ReactedThisTurn = false; w.Ammo = w.Weapon.Clip; }
+            mv.Hp = 5;
+            _anims.Clear();
+            OnUnitEnteredTile(mv);   // QUEUE TIME: no ShotAnim has applied yet (the mover is still at full HP)
+            var queued = _anims.OfType<ShotAnim>().Where(s => s.D == mv).ToList();
+            // judge only the case the spec pins: watchers #1 and #2 both CONNECT (3+3 >= 5 HP predicts
+            // the death at #2's queued hit). Any miss in the first two re-rolls the scene.
+            if (queued.Count >= 2 && queued[0].A == w1 && queued[1].A == w2 && queued[0].Res.Hit && queued[1].Res.Hit)
+            {
+                leakChecked = true;
+                if (queued.Count != 2)          fails.Add($"owLeakShots={queued.Count}");   // #3 must not have fired
+                if (!w3.OnOverwatch)            fails.Add("owLeakWatchSpent");
+                if (w3.ReactedThisTurn)         fails.Add("owLeakReacted");
+                if (w3.Ammo != w3.Weapon.Clip)  fails.Add($"owLeakAmmo={w3.Ammo}");
+            }
+        }
+        if (!leakChecked) fails.Add("owLeakNoLethalPair");   // P(fail all 60 attempts) ~ 0.02^60: a real defect
+        _anims.Clear();
+
         return fails.Count == 0
-            ? "DKTEST: PASS (KillUnit idempotent; surplus corpse-reaction purged; active + other-target kept)"
+            ? "DKTEST: PASS (KillUnit idempotent; surplus corpse-reaction purged; active + other-target kept; 3rd watcher unspent once queued hits predict the kill)"
             : "DKTEST: FAIL (" + string.Join(",", fails) + ")";
+    }
+
+    /// SIGHTLINE_RESCUETEST — APEX W2: the Rescue captive's cage is real. Asserts (1) the caged
+    /// captive is ACTIONLESS at mission setup AND at the start-of-turn re-grant (it used to be fully
+    /// player-controllable — an invulnerable unit that could walk itself to the squad and self-trigger
+    /// its rescue), (2) freeing it (TryFreeCaptive) restores actions + movement, (3) the abandoned-cage
+    /// soft-lock resolves: all soldiers dead while caged is an immediate CAPTIVE ABANDONED loss at
+    /// mission 1, a checkpoint reinforcement redeploy at mission 3+, and an EndSkirmish(false) loss in
+    /// SKIRMISH mode (which can roll Rescue). Tiny window (tile math). Returns a one-line report.
+    public string RescueSelfTest()
+    {
+        NoPersist = true;
+        var fails = new System.Collections.Generic.List<string>();
+
+        // (1) caged at setup: no actions (SetupMission BeginTurn loop zeroes the captive)
+        _run = new Run(); _run.Start();
+        _run.CurrentCard = new MissionCard { Objective = Objective.Rescue, ModName = "STANDARD", Reward = RewardKind.None };
+        SetupMission(1);
+        if (!CaptiveLocked) fails.Add("notLockedAtSetup");
+        if (Vip == null) return "RESCUETEST: FAIL (noCaptiveSpawned)";
+        if (Vip.CanAct) fails.Add("cagedCanActAtSetup");
+
+        // (1b) the start-of-turn re-grant is denied too (StartPlayerTurn BeginTurn loop)
+        StartPlayerTurn();
+        if (Vip.CanAct) fails.Add("cagedCanActAtTurnStart");
+
+        // (2) freeing restores actions + movement (TryFreeCaptive -> Mobility 6 + Vip.BeginTurn)
+        var sol = Players.First(p => p.Alive && !p.IsVip);
+        bool seated = false;
+        for (int dx = -1; dx <= 1 && !seated; dx++)
+            for (int dy = -1; dy <= 1 && !seated; dy++)
+            {
+                if (dx == 0 && dy == 0) continue;
+                int nx = Vip.X + dx, ny = Vip.Y + dy;
+                if (Grid.InBounds(nx, ny) && Grid.Tiles[nx, ny] == TileType.Floor && !IsOccupiedByOther(nx, ny, sol))
+                { sol.X = nx; sol.Y = ny; sol.SyncPos(); seated = true; }
+            }
+        if (!seated) fails.Add("noFreeSeatByCage");
+        TryFreeCaptive();
+        if (CaptiveLocked) fails.Add("adjacentDidNotFree");
+        if (!Vip.CanAct) fails.Add("freedStillActionless");
+        if (Vip.Mobility <= 0) fails.Add($"freedNoMobility={Vip.Mobility}");
+
+        // (3a) campaign, mission 1: all soldiers dead while STILL caged -> immediate loss (the
+        // checkpoint valve needs mission >= 3), with the distinct CAPTIVE ABANDONED cause.
+        _run = new Run(); _run.Start();
+        _run.CurrentCard = new MissionCard { Objective = Objective.Rescue, ModName = "STANDARD", Reward = RewardKind.None };
+        SetupMission(1);
+        foreach (var u in Players.Where(p => p.Alive && !p.IsVip).ToList()) { u.Hp = 0; KillUnit(u); }
+        CheckEnd();
+        if (Phase != Phase.Lose) fails.Add($"abandonNoLoss phase={Phase}");
+        else if (LoseTitle != "CAPTIVE ABANDONED") fails.Add($"abandonTitle={LoseTitle}");
+
+        // (3b) campaign, mission 3 (checkpoint fresh): the reinforcement redeploy fires instead —
+        // the mission restarts with an emergency cadre and the captive re-caged.
+        _run = new Run(); _run.Start();
+        _run.CurrentCard = new MissionCard { Objective = Objective.Rescue, ModName = "STANDARD", Reward = RewardKind.None };
+        SetupMission(3);
+        foreach (var u in Players.Where(p => p.Alive && !p.IsVip).ToList()) { u.Hp = 0; KillUnit(u); }
+        CheckEnd();
+        if (!_run.CheckpointUsed) fails.Add("redeployNotFired");
+        if (Phase != Phase.PlayerTurn) fails.Add($"redeployPhase={Phase}");
+        if (Players.Count(p => p.Alive && !p.IsVip) == 0) fails.Add("redeployEmptySquad");
+        if (!CaptiveLocked) fails.Add("redeployCageUnlatched");
+
+        // (3c) SKIRMISH can roll Rescue: the same abandoned cage must end the mission as a loss
+        // (single-mission modes have no checkpoint valve).
+        BeginSkirmish(Objective.Rescue, 0);
+        if (!CaptiveLocked) fails.Add("skirmishNotLocked");
+        foreach (var u in Players.Where(p => p.Alive && !p.IsVip).ToList()) { u.Hp = 0; KillUnit(u); }
+        CheckEnd();
+        if (Phase != Phase.Lose) fails.Add($"skirmishAbandonPhase={Phase}");
+
+        return fails.Count == 0
+            ? "RESCUETEST: PASS (caged captive actionless at setup + turn start; freeing restores actions/movement; abandoned cage = m1 loss, m3 checkpoint redeploy, skirmish loss)"
+            : "RESCUETEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
     /// SIGHTLINE_STAGGERTEST — UNDERTOW W2: the BRACE interrupt. Asserts (1) a BRACED watcher enqueues a
@@ -1714,7 +2097,10 @@ public partial class Game
     /// (a) GenerateDraftPool returns DraftPoolSize recruits with class variety (<=2/class);
     /// (b) a drafted founding squad + a starting boon seats EXACTLY those Units + the boon
     /// active via Run.Start(picked)+ActiveBoons; (c) Run.Start(null) keeps the fixed default
-    /// NewRunSquad (the harness path is unchanged). Window-free (no Raylib, no disk).
+    /// NewRunSquad (the harness path is unchanged); (d) APEX W5 callsign dedup — no duplicate
+    /// names inside a generated pool, across the squad after a barracks backfill, or from
+    /// MakeRecruit under an explicit taken-names set (dup names silently merged bond/memorial
+    /// records before W5). Window-free (no Raylib, no disk).
     public static string DraftSelfTest()
     {
         var fails = new List<string>();
@@ -1747,8 +2133,34 @@ public partial class Game
             if (run2.Squad[i].Name != def[i].Name || run2.Squad[i].Cls != def[i].Cls) fails.Add($"defaultSquad[{i}]");
         if (run2.ActiveBoons.Count != 0) fails.Add($"defaultBoons={run2.ActiveBoons.Count}(want0)");
 
+        // (d) APEX W5 — callsign dedup across pool + squad + backfill.
+        // A fresh pool must carry DraftPoolSize DISTINCT names (GenerateDraftPool threads its
+        // taken-names set through every MakeRecruit).
+        var pool3 = Run.GenerateDraftPool();
+        var poolNames = new HashSet<string>();
+        foreach (var u in pool3) if (!poolNames.Add(u.Name)) fails.Add($"dupPoolName:{u.Name}");
+        // Draft a squad from it, wipe it down to one survivor, and run the barracks debrief:
+        // the emergency-floor + trickle backfill must never draft a name already on the squad.
+        var run3 = new Run();
+        var picked3 = new List<Unit>();
+        for (int i = 0; i < DraftCap && i < pool3.Count; i++) picked3.Add(pool3[i]);
+        run3.Start(picked3);
+        while (run3.Squad.Count > 1) run3.Squad.RemoveAt(run3.Squad.Count - 1);   // simulate casualties
+        run3.DebriefSurvivors();                                                  // backfills via TakenCallsigns()
+        if (run3.Squad.Count < 2) fails.Add($"backfillCount={run3.Squad.Count}(want>=2)");
+        var squadNames = new HashSet<string>();
+        foreach (var u in run3.Squad) if (!squadNames.Add(u.Name)) fails.Add($"dupSquadName:{u.Name}");
+        // Direct taken-set contract: 20 sequential recruits against a growing set stay distinct
+        // (40-callsign pool, so the bounded re-roll has plenty of headroom).
+        var taken = new HashSet<string>(squadNames);
+        for (int i = 0; i < 20; i++)
+        {
+            var rec = Mission.MakeRecruit(taken);
+            if (!taken.Add(rec.Name)) { fails.Add($"takenNameReused:{rec.Name}"); break; }
+        }
+
         return fails.Count == 0
-            ? $"DRAFTTEST: PASS (pool={pool.Count} variety={byCls.Count}cls, drafted {picked.Count}+boon seated, default squad intact)"
+            ? $"DRAFTTEST: PASS (pool={pool.Count} variety={byCls.Count}cls, drafted {picked.Count}+boon seated, default squad intact, callsigns distinct across pool+squad+backfill)"
             : "DRAFTTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
@@ -1876,18 +2288,38 @@ public partial class Game
         Phase = Phase.Draft;
     }
 
-    // ── BEACONTEST (SIGHTLINE_BEACONTEST): UNDERTOW W6 — the Evac forward-beacon + the Escort VIP leash.
-    // Drives the REAL primitives (DoBeacon / the CheckEnd Evac predicate / LeashVip) on a controlled
-    // all-floor scene so it's deterministic + window-free. Asserts:
-    //   (Evac)  planting adds the walkable 3x3 to EvacZone; the fixed fallback corner STILL counts; a
-    //           non-floor / non-Evac plant refuses gracefully; standing all soldiers on beacon tiles wins;
-    //           the beacon is one-per-mission.
-    //   (Escort) the leash steps the VIP TOWARD the nearest soldier, never off-board / onto an occupied
-    //           tile, and short-circuits (holds) once it is already adjacent.
+    // ── BEACONTEST (SIGHTLINE_BEACONTEST): UNDERTOW W6 + APEX W8 — the forward beacon (Evac AND the
+    // new gated Escort plant) + the Escort VIP leash. Drives the REAL primitives (DoBeacon / the
+    // CheckEnd Evac predicate / LeashVip) on a controlled all-floor scene so it's deterministic +
+    // window-free. Asserts:
+    //   (Evac)   planting adds the walkable 3x3 to EvacZone; the fixed fallback corner STILL counts; a
+    //            non-floor plant refuses gracefully; standing all soldiers on beacon tiles wins;
+    //            the beacon is one-per-mission.
+    //   (Escort beacon, W8 — FLIPS the deliberate W6 "Escort must not offer a beacon" decision) the
+    //            plant is OFFERED on Escort but refused mid-board (far-third gate) and refused on a
+    //            WARM LZ (a living DORMANT enemy within Chebyshev 3 vetoes; a ROUTED one doesn't);
+    //            accepted in the cold far third.
+    //   (Escort leash) the leash steps the VIP TOWARD the nearest soldier via REAL MoveStepAnims
+    //            (W8 — every position assert drains the anim queue), never off-board / onto an
+    //            occupied tile, short-circuits (holds) once adjacent, routes AROUND fire, and a step
+    //            through an enemy overwatch lane DRAWS the reaction (parity with an ordered move).
     public string BeaconSelfTest()
     {
         NoPersist = true;
         var fails = new List<string>();
+
+        // W8: the leash enqueues real MoveStepAnims now — drive the queue to completion before any
+        // position assertion (the in-file drain pattern used by the drag/vault/stagger tests).
+        void Pump()
+        {
+            while (_anims.Count > 0)
+            {
+                var a = _anims[0]; a.OnStart(this);
+                for (int i = 0; i < 200 && !a.Update(this, 0.05f); i++) { }
+                if (_anims.Count > 0 && _anims[0] == a) _anims.RemoveAt(0);
+            }
+        }
+        void Leash() { LeashVip(); Pump(); }
 
         Grid = new Grid();                       // all Floor, Height 0
         Players = new List<Unit>();
@@ -1956,9 +2388,44 @@ public partial class Game
         DoBeacon();                                         // must be a graceful no-op
         if (BeaconPlanted) fails.Add("beaconPlantedOnNonFloor");
         Grid.Tiles[3, 3] = TileType.Floor;
-        // Escort must NOT offer a beacon (asset defines the extraction point)
+
+        // ---------- (A2) ESCORT forward beacon (APEX W8 — flips the W6 refusal) ----------
+        // Escort now OFFERS the beacon behind a strict anti-trivialization gate: CheckEnd's Escort
+        // test is just "VIP in zone", so the gate (far third + cold LZ) is the load-bearing design.
         Objective = Objective.Escort;
-        if (HasBeaconAction) fails.Add("beaconOfferedOnEscort");
+        if (!HasBeaconAction) fails.Add("noBeaconOfferedOnEscort");
+        BeaconPlanted = false; BeaconZone.Clear();
+        EvacZone.Clear();
+        for (int ey = 0; ey < 4; ey++) { EvacZone.Add((Grid.W - 2, ey)); EvacZone.Add((Grid.W - 1, ey)); }
+        Players.Clear(); Enemies.Clear();
+        // mid-board planter (x < W*2/3): refused — a spawn-side plant + one leash step would be a
+        // free win (the VIP spawns in the squad wedge).
+        var escortPlanter = MkP(Grid.W / 2, Grid.H / 2);
+        Players.Add(escortPlanter); Selected = escortPlanter;
+        if (CanBeacon(escortPlanter)) fails.Add("escortBeaconMidBoardAllowed");
+        DoBeacon();                                          // graceful no-op
+        if (BeaconPlanted) fails.Add("escortBeaconPlantedMidBoard");
+        // far third — but a LIVING DORMANT enemy 2 tiles away: WARM LZ, refused. Dormant must veto:
+        // pods aren't Alert under concealment and DoBeacon doesn't break stealth, so an Alert-only
+        // test would let a concealed squad plant beside a sleeping pod and leash-win before it wakes.
+        escortPlanter.X = Grid.W * 2 / 3 + 1; escortPlanter.Y = Grid.H / 2; escortPlanter.SyncPos();
+        var sleeper = new Unit { Name = "POD", Cls = "GRUNT", Team = Team.Enemy,
+                                 X = escortPlanter.X + 2, Y = escortPlanter.Y,
+                                 Hp = 6, MaxHp = 6, Aim = 60, Mobility = 4,
+                                 Weapon = Weapon.Make(WeaponKind.Rifle), Alert = AlertLevel.Unaware };
+        sleeper.Ammo = sleeper.Weapon.Clip; sleeper.SyncPos();
+        Enemies.Add(sleeper);
+        if (CanBeacon(escortPlanter)) fails.Add("escortBeaconWarmLzAllowed");
+        // a ROUTED survivor is fleeing, not holding the LZ — it must NOT veto the plant
+        sleeper.Routed = 3;
+        if (!CanBeacon(escortPlanter)) fails.Add("escortBeaconRoutedVetoed");
+        sleeper.Routed = 0;
+        // push the sleeper beyond Chebyshev 3: COLD far third — accepted, zone unioned here
+        sleeper.X = escortPlanter.X + 4; sleeper.SyncPos();
+        if (!CanBeacon(escortPlanter)) fails.Add("escortBeaconColdRefused");
+        DoBeacon();
+        if (!BeaconPlanted) fails.Add("escortBeaconNotPlanted");
+        if (!EvacZone.Contains((escortPlanter.X, escortPlanter.Y))) fails.Add("escortBeaconZoneMissing");
         Objective = Objective.Evac;
 
         // ---------- (B) ESCORT VIP leash ----------
@@ -1973,7 +2440,7 @@ public partial class Game
         Players.Add(anchor); Players.Add(Vip);
         int vipStartDist = Util.ChebyDist(Vip.X, Vip.Y, anchor.X, anchor.Y);
         int vx0 = Vip.X, vy0 = Vip.Y;
-        LeashVip();
+        Leash();
         int vipNewDist = Util.ChebyDist(Vip.X, Vip.Y, anchor.X, anchor.Y);
         if (vipNewDist >= vipStartDist) fails.Add("leashDidNotCloseGap");                 // must step toward the soldier
         if (!(Vip.X == vx0 && Vip.Y == vy0) && !Grid.InBounds(Vip.X, Vip.Y)) fails.Add("leashWentOffBoard");
@@ -1981,20 +2448,62 @@ public partial class Game
         // step it repeatedly (a turn boundary each call): it must CONVERGE and never overshoot onto the soldier
         for (int i = 0; i < 8; i++)
         {
-            LeashVip();
+            Leash();
             if (Vip.X == anchor.X && Vip.Y == anchor.Y) { fails.Add("leashSteppedOntoSoldier"); break; }
         }
         if (Util.ChebyDist(Vip.X, Vip.Y, anchor.X, anchor.Y) > 1) fails.Add("leashDidNotReachAdjacency");
         // once adjacent, the leash HOLDS (short-circuit) — no further movement
         int hx = Vip.X, hy = Vip.Y;
-        LeashVip();
+        Leash();
         if (!(Vip.X == hx && Vip.Y == hy)) fails.Add("leashMovedWhileAdjacent");
         // a caged (Rescue-style) or dead VIP never moves via the escort leash
         Objective = Objective.Escort; CaptiveLocked = true;
         int cx = Vip.X, cy = Vip.Y; Vip.X = 3; Vip.Y = 5; Vip.SyncPos();   // re-separate it
-        LeashVip();
+        Leash();
         if (!(Vip.X == 3 && Vip.Y == 5)) fails.Add("leashMovedCagedVip");
         CaptiveLocked = false;
+
+        // LEASH HAZARD-AVOID (APEX W8): the leash walks REAL MoveStepAnims through OnUnitEnteredTile
+        // now, so it must ROUTE AROUND fire — never park on, or step through, a burning tile while a
+        // clean closing route exists (a burning picket across the direct lane, open rows above/below).
+        Players = new List<Unit>();
+        Enemies = new List<Unit>();
+        EvacZone.Clear();
+        var fireAnchor = MkP(14, 5);
+        Vip = Mission.MakeVip(1); Vip.X = 3; Vip.Y = 5; Vip.SyncPos(); Vip.BeginTurn();
+        Vip.MaxHp = 99; Vip.Hp = 99;                     // any burn tick at all must show as a delta
+        Players.Add(fireAnchor); Players.Add(Vip);
+        for (int fy = 3; fy <= 7; fy++) Grid.LightFire(6, fy, 99);
+        int hp0 = Vip.Hp;
+        for (int i = 0; i < 10 && Util.ChebyDist(Vip.X, Vip.Y, fireAnchor.X, fireAnchor.Y) > 1; i++) Leash();
+        if (Vip.Hp != hp0) fails.Add($"leashWalkedThroughFire(hp{hp0}->{Vip.Hp})");
+        if (Vip.HasStatus(StatusKind.Burning)) fails.Add("leashIgnitedVip");
+        if (Grid.IsFire(Vip.X, Vip.Y)) fails.Add("leashParkedInFire");
+        if (Util.ChebyDist(Vip.X, Vip.Y, fireAnchor.X, fireAnchor.Y) > 1) fails.Add("leashStalledAtFireWall");
+        for (int fy = 3; fy <= 7; fy++) Grid.Fire[6, fy] = 0;   // clear the picket
+
+        // LEASH-vs-OVERWATCH PARITY (APEX W8): a leash step through an enemy overwatch lane draws the
+        // reaction exactly like a player-ordered move (the old teleport skipped OnUnitEnteredTile — a
+        // free stealth-walk past a held lane on the most important unit of the mission).
+        Players = new List<Unit>();
+        Enemies = new List<Unit>();
+        EvacZone.Clear();
+        var owAnchor = MkP(14, 5);
+        Vip = Mission.MakeVip(1); Vip.X = 8; Vip.Y = 5; Vip.SyncPos(); Vip.BeginTurn();
+        Vip.MaxHp = 99; Vip.Hp = 99;                     // the reaction may connect: survival-proof the asset
+        Players.Add(owAnchor); Players.Add(Vip);
+        var watcher = new Unit { Name = "OW", Cls = "GRUNT", Team = Team.Enemy, X = 10, Y = 8,
+                                 Hp = 8, MaxHp = 8, Aim = 65, Mobility = 4,
+                                 Weapon = Weapon.Make(WeaponKind.Rifle) };
+        watcher.Ammo = watcher.Weapon.Clip; watcher.SyncPos(); watcher.BeginTurn();
+        watcher.OnOverwatch = true; watcher.ReactedThisTurn = false;
+        Enemies.Add(watcher);
+        int ammo0 = watcher.Ammo;
+        Leash();                                         // the auto-move crosses the watched lane
+        if (!watcher.ReactedThisTurn) fails.Add("leashDrewNoOverwatch");
+        if (watcher.Ammo != ammo0 - 1) fails.Add("owReactionSpentNoAmmo");
+        if (watcher.OnOverwatch) fails.Add("owStillHeldAfterReaction");
+        Enemies.Clear();
 
         // SQUAD-AT-EVAC: once a soldier has reached the zone, the leash heads the VIP INTO the zone (the win
         // is the VIP on an evac tile) rather than parking it adjacent forever. Build a small corner zone,
@@ -2006,12 +2515,12 @@ public partial class Game
         Vip = Mission.MakeVip(1); Vip.X = Grid.W - 4; Vip.Y = 1; Vip.SyncPos(); Vip.BeginTurn();   // just outside
         Players.Add(zoneSoldier); Players.Add(Vip);
         int vipToZone0 = DistToEvac(Vip.X, Vip.Y);
-        for (int i = 0; i < 6 && !EvacZone.Contains((Vip.X, Vip.Y)); i++) LeashVip();
+        for (int i = 0; i < 6 && !EvacZone.Contains((Vip.X, Vip.Y)); i++) Leash();
         if (!EvacZone.Contains((Vip.X, Vip.Y))) fails.Add($"leashDidNotEnterZone({Vip.X},{Vip.Y})");
         if (DistToEvac(Vip.X, Vip.Y) > vipToZone0) fails.Add("leashMovedAwayFromZone");
 
         return fails.Count == 0
-            ? "BEACONTEST: PASS (Evac: plant adds walkable 3x3 to EvacZone + fallback corner still wins; non-floor/Escort refuse gracefully; all-on-beacon wins; 1/mission. Escort: leash steps VIP toward nearest soldier, converges to adjacency, never off-board/occupied/onto-soldier, holds when adjacent, inert while caged, and walks INTO the zone once the squad has arrived)"
+            ? "BEACONTEST: PASS (Evac: plant adds walkable 3x3 to EvacZone + fallback corner still wins; non-floor refuses gracefully; all-on-beacon wins; 1/mission. Escort beacon (W8): offered, mid-board refused, warm LZ (dormant within 3) refused, routed doesn't veto, cold far third plants. Escort leash: real MoveStepAnims — steps VIP toward nearest soldier, converges to adjacency, never off-board/occupied/onto-soldier, holds when adjacent, inert while caged, routes around fire, draws overwatch parity, and walks INTO the zone once the squad has arrived)"
             : "BEACONTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 

@@ -31,7 +31,7 @@ public static class Display
     static bool   _fxReady;
 
     // Uniforms fed each frame from Game via Display.SetPostFxParams(...)
-    static int _locResolution, _locBloom, _locChroma, _locGrade, _locTime;
+    static int _locResolution, _locBloom, _locChroma, _locGrade, _locTime, _locBright, _locGamma;
 
     // Current values written by Game every Update (or in POSTFX demo mode).
     public static float BloomIntensity;          // 0 = none, 1 = strong
@@ -61,6 +61,8 @@ uniform float uBloom;        // 0..1 event-reactive bloom strength (spikes on hi
 uniform float uChroma;       // 0..1 chromatic aberration strength (impact-reactive)
 uniform vec3  uGrade;        // per-biome colour multiply (default 1,1,1)
 uniform float uTime;         // accumulated time (for very slow drift; optional)
+uniform float uBright;       // user brightness (0.7..1.3, 1.0 = neutral) — true in-shader scale
+uniform float uGamma;        // user gamma (0.8..1.3, 1.0 = neutral) — midtone lift/sink
 
 // Rec.709 luminance.
 float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
@@ -144,6 +146,15 @@ void main() {
     graded = mix(withBloom * tint, graded, 0.35);       // blend so it stays subtle
     graded = clamp(graded, 0.0, 2.0);
 
+    // --- user brightness / gamma (accessibility, W9) ---
+    // A TRUE post-grade correction, applied before the vignette so the frame border keeps
+    // its shape at every setting. Replaces the old translucent white/black overlay quad,
+    // which desaturated ('washed') the whole frame when brightening — turning brightness
+    // UP used to make the game LESS readable. uBright scales linearly; uGamma lifts or
+    // sinks the midtones without clipping blacks/whites. Neutral (1.0 / 1.0) is a no-op.
+    // Both uniforms are uploaded EVERY frame (an unset uniform reads 0 -> 1/0 -> black frame).
+    graded = pow(clamp(graded * uBright, 0.0, 1.0), vec3(1.0 / uGamma));
+
     // --- vignette: a clear frame around the busy board ---
     // Two-stage: a wide gentle darken across the outer frame + a sharper corner cinch.
     // Centre (edge<~0.45) is untouched; corners lose ~16-20% so the eye is drawn inward.
@@ -171,11 +182,26 @@ void main() {
     public static float Brightness => BrightLevels[Math.Clamp(BrightIdx, 0, BrightLevels.Length - 1)];
     public static string BrightLabel => $"{(int)(Brightness * 100)}%";
 
+    // accessibility (W9): a TRUE gamma correction, applied in-shader (uGamma). Neutral = 1.00.
+    // Gamma defaults to 1.0f by construction (GammaIdx 2) — the shader divides by uGamma, so a
+    // 0 value would black the frame; keep the default neutral and always upload it (see
+    // UploadFxUniforms). With PostFX off gamma has no effect (no quad can approximate it).
+    public static readonly float[] GammaLevels = { 0.80f, 0.90f, 1.00f, 1.15f, 1.30f };
+    public static int GammaIdx = 2;    // 1.00 = neutral
+    public static float Gamma => GammaLevels[Math.Clamp(GammaIdx, 0, GammaLevels.Length - 1)];
+    public static string GammaLabel => $"{Gamma:0.00}";
+
     public static string SizeLabel => Fullscreen ? "FULLSCREEN" : $"{Sizes[SizeIdx].w} x {Sizes[SizeIdx].h}";
 
     public static void CycleBrightness()
     {
         BrightIdx = (BrightIdx + 1) % BrightLevels.Length;
+        Save();
+    }
+
+    public static void CycleGamma()
+    {
+        GammaIdx = (GammaIdx + 1) % GammaLevels.Length;
         Save();
     }
 
@@ -217,6 +243,8 @@ void main() {
             _locChroma     = Raylib.GetShaderLocation(_fx, "uChroma");
             _locGrade      = Raylib.GetShaderLocation(_fx, "uGrade");
             _locTime       = Raylib.GetShaderLocation(_fx, "uTime");
+            _locBright     = Raylib.GetShaderLocation(_fx, "uBright");
+            _locGamma      = Raylib.GetShaderLocation(_fx, "uGamma");
         }
 
         Load();
@@ -296,7 +324,8 @@ void main() {
                 Raylib.DrawTexturePro(_target.Texture, src, dst, Vector2.Zero, 0f, Color.White);
             }
             Raylib.EndShaderMode();
-            DrawBrightness();
+            // W9: no brightness quad here — the shader's uBright/uGamma pass IS the
+            // brightness/gamma correction when PostFX is active (no more white wash).
             Raylib.EndDrawing();
             return;
         }
@@ -334,9 +363,16 @@ void main() {
         Raylib.SetShaderValue(_fx, _locChroma,     ChromaIntensity, ShaderUniformDataType.Float);
         Raylib.SetShaderValue(_fx, _locGrade,      GradeTint,  ShaderUniformDataType.Vec3);
         Raylib.SetShaderValue(_fx, _locTime,       FxTime,     ShaderUniformDataType.Float);
+        // W9: brightness/gamma ride the shader now (a real correction, not a washing quad).
+        // BOTH must be uploaded EVERY frame — an uninitialized uniform reads 0, and the
+        // shader computes 1/uGamma, so a skipped upload would render a black frame.
+        Raylib.SetShaderValue(_fx, _locBright,     Brightness, ShaderUniformDataType.Float);
+        Raylib.SetShaderValue(_fx, _locGamma,      Gamma,      ShaderUniformDataType.Float);
     }
 
-    // Brightness post-pass: a translucent darken/lighten quad over the final frame.
+    // Brightness FALLBACK (W9): survives only for the !PostFX paths — when the shader is
+    // active, brightness/gamma are applied in-shader (uBright/uGamma) instead, because this
+    // translucent lighten quad WASHES the frame (raising brightness lowered readability).
     // Neutral (100%) draws nothing, so the headless harness stays byte-identical.
     static void DrawBrightness()
     {
@@ -390,6 +426,7 @@ void main() {
         public bool Fullscreen { get; set; }
         public int SizeIdx { get; set; }
         public int BrightIdx { get; set; } = 2;
+        public int GammaIdx { get; set; } = 2;   // W9: JSON default keeps old display.json neutral (back-compat)
         public bool Colorblind { get; set; }
         public bool TutorialSeen { get; set; }
         public bool PostFX { get; set; } = true;
@@ -401,7 +438,7 @@ void main() {
 
     static void Save()
     {
-        try { Directory.CreateDirectory(Dir); File.WriteAllText(FilePath, JsonSerializer.Serialize(new Dto { Fullscreen = Fullscreen, SizeIdx = SizeIdx, BrightIdx = BrightIdx, Colorblind = Pal.Colorblind, TutorialSeen = TutorialSeen, PostFX = PostFX, AutoCam = AutoCam })); }
+        try { Directory.CreateDirectory(Dir); File.WriteAllText(FilePath, JsonSerializer.Serialize(new Dto { Fullscreen = Fullscreen, SizeIdx = SizeIdx, BrightIdx = BrightIdx, GammaIdx = GammaIdx, Colorblind = Pal.Colorblind, TutorialSeen = TutorialSeen, PostFX = PostFX, AutoCam = AutoCam })); }
         catch { }
     }
 
@@ -416,6 +453,7 @@ void main() {
                 Fullscreen = d.Fullscreen;
                 SizeIdx = Math.Clamp(d.SizeIdx, 0, Sizes.Length - 1);
                 BrightIdx = Math.Clamp(d.BrightIdx, 0, BrightLevels.Length - 1);
+                GammaIdx = Math.Clamp(d.GammaIdx, 0, GammaLevels.Length - 1);
                 Pal.SetColorblind(d.Colorblind);
                 TutorialSeen = d.TutorialSeen;
                 PostFX = d.PostFX;

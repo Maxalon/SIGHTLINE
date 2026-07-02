@@ -402,13 +402,34 @@ public partial class Game
     public bool BeaconPlanted;                       // true once the single beacon has been dropped
     public (int x, int y) BeaconTile;                // the beacon's centre tile (for the renderer marker)
     public List<(int x, int y)> BeaconZone = new();  // the walkable 3x3 tiles the beacon added to EvacZone
-    // A soldier may DEPLOY a beacon only on the plain Evac objective (Escort/Rescue keep the fixed corner —
-    // the fragile asset defines the extraction point), the beacon hasn't been used yet, and it's a real
-    // player soldier standing on WALKABLE FLOOR (a non-floor planter refuses gracefully, never crashes).
-    public bool HasBeaconAction => Objective == Objective.Evac && Mode != GameMode.Endless;
+    // A soldier may DEPLOY a beacon on the plain Evac objective (forward staging past the half-line — the
+    // shipped W6 de-drag) and — APEX W8 — on ESCORT, where marching the leashed VIP to the far corner was
+    // the flagged ~14-turn drag. Escort's gate is STRICTER (far third + cold LZ, see EscortBeaconOk):
+    // CheckEnd's Escort test is just "VIP in zone", so a permissive plant would be an instant win.
+    // Rescue keeps the fixed corner (the cage already sits mid-board); Endless has no extraction. As
+    // always the beacon is once-per-mission, planted by a real soldier standing on WALKABLE FLOOR
+    // (a non-floor planter refuses gracefully, never crashes).
+    public bool HasBeaconAction => (Objective == Objective.Evac || Objective == Objective.Escort)
+                                   && Mode != GameMode.Endless;
     public bool CanBeacon(Unit u)
         => HasBeaconAction && !BeaconPlanted && u != null && u.Team == Team.Player && !u.IsVip
-           && u.CanAct && Grid.IsFloor(u.X, u.Y) && !EvacZone.Contains((u.X, u.Y));
+           && u.CanAct && Grid.IsFloor(u.X, u.Y) && !EvacZone.Contains((u.X, u.Y))
+           && (Objective != Objective.Escort || EscortBeaconOk(u));
+
+    /// APEX W8 — the ESCORT anti-trivialization gate. The planter must have genuinely PUSHED the map:
+    ///   (1) FAR THIRD — u.X >= Grid.W*2/3. The VIP spawns in the squad wedge, so a spawn-side plant
+    ///       plus one leash step would win Escort without crossing the board (Evac's shipped HALF-LINE
+    ///       staging must NOT be shared here — its win needs the whole squad in the zone; Escort's
+    ///       needs only the VIP).
+    ///   (2) COLD LZ — no LIVING, non-routed enemy within Chebyshev 3 of the planter, at ANY alert
+    ///       tier. Dormant counts: pods stay non-Alert while the squad is concealed and DoBeacon
+    ///       deliberately doesn't break stealth, so an "Alert-only" test would let a concealed squad
+    ///       plant beside a sleeping pod and leash-win before it ever wakes. A ROUTED survivor is
+    ///       fleeing, not holding ground, so it doesn't veto the plant.
+    bool EscortBeaconOk(Unit u)
+        => u.X >= Grid.W * 2 / 3
+           && !Enemies.Any(e => e.Alive && e.Routed == 0
+                                && Util.ChebyDist(u.X, u.Y, e.X, e.Y) <= 3);
 
     // DEFEND objective (3.8): survive this many player turns vs mid-mission waves
     public const int DefendTurns = 8;
@@ -436,6 +457,11 @@ public partial class Game
         // PROGRAM HORIZON W4: no anti-turtle clock in SKIRMISH/DAILY — a single fight isn't a camp
         // exploit, and the reinforcement waves would muddy the seeded daily's determinism.
         Mode != GameMode.Skirmish &&
+        // APEX W1: no clock in LAST STAND either. Endless forces Eliminate and never resets
+        // _turnCount, so a deep stand inherited a permanent hidden +12..+16 enemy aim ramp plus
+        // phantom mission-1-scaled reinforcement waves on top of its own wave economy. Endless
+        // difficulty is owned by the wave escalation, not the campaign clock.
+        Mode != GameMode.Endless &&
         (Objective == Objective.Eliminate || Objective == Objective.Hack || Objective == Objective.Decapitate);
 
     // HUD reads this to decide whether to draw the PRESSURE meter (only on clock objectives,
@@ -458,7 +484,7 @@ public partial class Game
     {
         "WELCOME, COMMANDER. Click a glowing tile to MOVE the selected soldier. Cover (the raised blocks) shields you from fire - end your move beside one.",
         "Now set OVERWATCH: press [2] (or the button). That soldier will fire on the first enemy that moves into its line of sight.",
-        "Click a hostile to FIRE. A shot ends the soldier's turn. Attacking from a side a foe has no cover on FLANKS it - far deadlier.",
+        "Click a hostile to FIRE. A shot costs 1 action and does NOT end the turn - keep the other action to reposition (one shot per turn). Attacking from a side a foe has no cover on FLANKS it - far deadlier.",
         "That's the basics: move into cover, flank, overwatch, fire - then END TURN. Promotions, perks and a branching campaign await. Good hunting.",
     };
     public string TutorialText => (TutStep >= 0 && TutStep < TutPrompts.Length) ? TutPrompts[TutStep] : null;
@@ -468,7 +494,8 @@ public partial class Game
         if (NoPersist || _run.Mission != 1 || Display.TutorialSeen) return;
         TutStep = 0;
         _tutMoved = _tutOver = _tutShot = false;
-        Display.MarkTutorialSeen();           // only ever shows once
+        // APEX W2: "seen" is now marked at tutorial COMPLETION (CompleteTutorial), not here — a
+        // player who quit on step 0 used to have the whole onboarding burned without reading it.
     }
 
     void UpdateTutorial(float dt)
@@ -479,7 +506,7 @@ public partial class Game
             case 0: if (_tutMoved) AdvanceTutorial(); break;
             case 1: if (_tutOver) AdvanceTutorial(); break;
             case 2: if (_tutShot) AdvanceTutorial(); break;
-            case 3: _tutDoneTimer -= dt; if (_tutDoneTimer <= 0) TutStep = -1; break;
+            case 3: _tutDoneTimer -= dt; if (_tutDoneTimer <= 0) CompleteTutorial(); break;
         }
     }
 
@@ -487,7 +514,27 @@ public partial class Game
     {
         TutStep++;
         if (TutStep == 3) _tutDoneTimer = 7f;
-        if (TutStep >= TutPrompts.Length) TutStep = -1;
+        if (TutStep >= TutPrompts.Length) CompleteTutorial();
+    }
+
+    /// Harness seam (SIGHTLINE_TUTORIAL=<n>): show a step directly. Seeds the final step's dwell
+    /// timer — without it, step 3 completes on the first Update tick and the shot frames a bare board.
+    public void ShowTutorialStep(int step)
+    {
+        TutStep = Math.Clamp(step, 0, TutPrompts.Length - 1);
+        if (TutStep == 3) _tutDoneTimer = 7f;
+    }
+
+    /// APEX W2: finish the onboarding and persist the one-time "seen" flag. The !NoPersist gate is
+    /// LOAD-BEARING: Display.MarkTutorialSeen -> Display.Save() writes settings.json unconditionally,
+    /// and the SIGHTLINE_TUTORIAL screenshot hook sets TutStep directly (bypassing StartTutorialMaybe's
+    /// gate) — an ungated call here would break the harness no-disk / byte-stability contract.
+    /// Also called as a mission-1-end fallback (EnterBarracks/LoseRun) so a player who never performs
+    /// a mid-tutorial step (e.g. skips overwatch) doesn't re-see the tutorial every run forever.
+    void CompleteTutorial()
+    {
+        TutStep = -1;
+        if (!NoPersist) Display.MarkTutorialSeen();
     }
 
     // optional secondary objective (3.9): a per-mission bonus goal worth extra intel
@@ -731,6 +778,18 @@ public partial class Game
         // balance telemetry (no-op unless Stats.Enabled); tag the policy so the report can
         // split greedy vs sloppy win-rates and surface the optimal-vs-error GAP.
         Stats.BeginRun(_run.HeatLevel, SmartPlay && SmartSloppy ? "sloppy" : "greedy");
+        // APEX W4 (c): SIGHTLINE_VETSIM=<n> — honoured only under NoPersist, mirroring the
+        // SIGHTLINE_CONTRACT hook above. The flywheel calls StartMission directly (the Phase.Draft
+        // veteran recall never runs there), so recalled veterans were invisible to measurement;
+        // this swaps n founding rookies for deterministic synthetic Rank-3 veterans (two class-
+        // line perks, +1 armor — Run.ApplyVetSim) so paired VETSIM=n vs 0 batches can price the
+        // veteran power floor. In-memory only; inert when unset, so plain autoplay/screenshot
+        // runs are untouched. It prices a NOMINAL Rank-3 veteran, not the exact recall payload.
+        if (NoPersist && int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_VETSIM"), out int vetSimN) && vetSimN > 0)
+        {
+            int vetsMade = _run.ApplyVetSim(vetSimN);
+            if (vetsMade > 0) Console.WriteLine($"VETSIM: {vetsMade} founding rookie(s) -> synthetic Rank-3 veterans (nominal recall-floor probe)");
+        }
         // PROGRAM HORIZON W3 (WAR ROOM): apply purchased cross-run UNLOCKS to the founding run. ADDITIVE
         // only, campaign only, and STRICTLY gated behind !NoPersist — the flywheel/harness never read
         // meta, so a measured/screenshot run is byte-identical to today (a fresh profile owns none anyway).
@@ -863,8 +922,17 @@ public partial class Game
         // Heat folds into the SAME difficulty params the deployment cards use (no Mission.cs
         // signature change): extra bodies + an extra stat bump as the ladder climbs.
         int heat = _run.HeatLevel;
+        // W6b — publish the AI coordination tier UNCONDITIONALLY every mission (0 at heats 0-5,
+        // so DAILY/SKIRMISH/harness stay byte-stable by default AND a stale NO QUARTER tier can
+        // never leak into the next fight through this shared DEPLOY/SKIRMISH/DAILY setup path;
+        // Combat.EndMission mirrors it with a clear). Deliberately NOT ramped by the
+        // early-mission heat grace below: the tier is a qualitative mutator like EXPOSED (which
+        // also bites from mission 1), not a quantitative delta. The LAST STAND wave path
+        // (SpawnEndlessWave) raises it as a stand deepens.
+        Ai.Tier = Sightline.Heat.AiTier(heat);
         int heatEnemy = Sightline.Heat.EnemyDelta(heat);
         int heatStat  = Sightline.Heat.StatDelta(heat);
+        int heatDmg   = Sightline.Heat.DmgDelta(heat);   // W6c: rung-8 +1 enemy damage (0 below the apex)
         // EARLY-MISSION HEAT GRACE. The measured ~20% mission-1 loss (which hard-caps run
         // completion, a geometric product) was almost entirely a heat-3/4 alpha-strike on the
         // COLD OPENER: Heat adds +2 bodies / +2 stat to a force a green 4-rookie squad meets
@@ -872,8 +940,8 @@ public partial class Game
         // over the first missions so the ladder bites once the squad can answer it (m1 x0, m2
         // x1/2, m3+ full). Card deltas and the per-mission growth curve (Mission.cs) are
         // untouched — only Heat's extra bodies/stats ramp. Heat 0 stays a true no-op.
-        if (n <= 1)      { heatEnemy = 0; heatStat = 0; }
-        else if (n == 2) { heatEnemy /= 2; heatStat /= 2; }
+        if (n <= 1)      { heatEnemy = 0; heatStat = 0; heatDmg = 0; }
+        else if (n == 2) { heatEnemy /= 2; heatStat /= 2; heatDmg /= 2; }   // W6c: +1 dmg graces to 0 on m1-2 like the other deltas
         int enemyDelta = card.EnemyDelta + heatEnemy;
         // adaptive assist eases the force-wide enemy stat bump (base Heat only; 0 otherwise).
         int statDelta = card.StatDelta + heatStat - _run.AssistStatRelief;
@@ -887,7 +955,7 @@ public partial class Game
             : (Objective == Objective.Rescue ? (Grid.W / 2, Grid.H / 2) : ((int, int)?)null);
         Grid.ClearHazards();              // wipe last mission's fire/barrels before terrain is rebuilt
         Mission.Build(Grid, Players, Enemies, n, EvacZone, reserve,
-                      enemyDelta, statDelta, HasSabotage ? SabotageSites : null);
+                      enemyDelta, statDelta, HasSabotage ? SabotageSites : null, heatDmg);
         // PROGRAM HORIZON W2: Mission.Build laid out the arena + spawned a normal campaign force.
         // For LAST STAND we don't want that force — clear it and drop in the first horde wave (the
         // arena/terrain stays). SpawnEndlessWave uses the SpawnReinforcements machinery.
@@ -930,7 +998,10 @@ public partial class Game
                          && !Sightline.Heat.Exposed(_run.HeatLevel)
                          && _run.Contract != Contract.Spearhead;
         _spearheadSurgeUsed = false;          // the turn-1 action surge is fresh each mission
-        foreach (var u in Players) u.BeginTurn();
+        // APEX W2: the caged RESCUE captive takes NO actions until freed — without this it could
+        // walk itself (2 tiles/turn) toward the squad and self-trigger its own rescue while still
+        // invulnerable. TryFreeCaptive re-grants via Vip.BeginTurn() the moment the cage is sprung.
+        foreach (var u in Players) { u.BeginTurn(); if (u == Vip && CaptiveLocked) u.ActionsLeft = 0; }
         // CONTRACT "SPEARHEAD": a turn-1 alpha — every soldier gets +1 action on the mission's first
         // player turn (this is it: SetupMission runs once/mission and BeginTurn just seated 2 actions).
         // Gated by _spearheadSurgeUsed so it fires EXACTLY once per mission and never stacks. The VIP
@@ -1136,6 +1207,10 @@ public partial class Game
 
     void EnterBarracks()
     {
+        // APEX W2: tutorial completion fallback — the first mission ended with steps still pending
+        // (e.g. the player never set overwatch), so close it out and mark it seen (NoPersist-gated
+        // inside) rather than re-running the onboarding at the start of every future run.
+        if (TutStep >= 0) CompleteTutorial();
         // W5 SCARS: capture the just-played mission's faction BEFORE EndMission clears it, so
         // DebriefSurvivors can brand a VENDETTA grudge on a survived near-death (the faction that
         // nearly killed them). None on a mixed-force mission -> no grudge stamped (inert).
@@ -1262,6 +1337,9 @@ public partial class Game
     /// End the run as a loss and clear the checkpoint so the intro stops offering CONTINUE.
     void LoseRun(string title, string reason)
     {
+        // APEX W2: tutorial completion fallback (mirror of EnterBarracks) — a first-mission loss
+        // still counts as "the onboarding ran"; don't re-show it forever. NoPersist-gated inside.
+        if (TutStep >= 0) CompleteTutorial();
         Combat.EndRun();   // TEMPO wave 4: clear every mission-scoped combat static (+ run boons) on run end
         LoseTitle = title;
         LoseReason = reason;
@@ -1439,6 +1517,13 @@ public partial class Game
         if (Combat.IgnoresOverwatch(mover)) return;
         var watchers = mover.Team == Team.Player ? Enemies : Players;
         int insertAt = 1;
+        // APEX W2: predicted mover HP across the reactions queued by THIS tile entry. Each queued
+        // CONNECT (res.Hit covers full hits AND grazes; damage read AFTER the brace halving below)
+        // decrements it; once it reaches 0 the mover is corpse-bound, so the loop stops BEFORE a
+        // later watcher spends its OnOverwatch/ReactedThisTurn/Ammo on a shot KillUnit's purge would
+        // only throw away (the old per-shot check missed cumulative lethality, silently taxing the
+        // third-plus watcher). The KillUnit purge stays as the backstop for staleness between steps.
+        int predHp = mover.Hp;
         foreach (var w in watchers)
         {
             if (!w.Alive || !w.OnOverwatch || w.ReactedThisTurn || w.Ammo <= 0) continue;
@@ -1469,7 +1554,8 @@ public partial class Game
             // by which point the mover has settled on the reacted-to tile.
             _anims.Insert(Math.Min(insertAt, _anims.Count), shot);
             insertAt++;
-            if (res.Hit && mover.Hp - res.Damage <= 0) break; // will die; stop further reactions
+            if (res.Hit) predHp -= res.Damage;
+            if (predHp <= 0) break;   // predicted dead: stop before another watcher spends its reaction
         }
     }
 
@@ -2094,6 +2180,19 @@ public partial class Game
             case Phase.PlayerTurn: UpdatePlayer(); break;
             case Phase.EnemyTurn: UpdateEnemy(); break;
             case Phase.Barracks:
+                // APEX W7 — LAST STAND mid-stand progression detour. Endless enters Barracks ONLY
+                // to resolve queued perk/spec/boon offers (CheckEndless sets _shopDone before the
+                // detour). The moment every offer is resolved, return to the fight and spawn the
+                // next wave. This guard MUST sit above the shop/event/node branches: BeginEndless's
+                // Run.Start() built a real campaign map, so a fall-through would let autoplay
+                // ChooseNode into a campaign mission from inside a stand.
+                if (Mode == GameMode.Endless
+                    && _run.PendingPerks.Count == 0 && _run.PendingSpecs.Count == 0 && _run.BoonOffer.Count == 0)
+                {
+                    Phase = Phase.PlayerTurn;
+                    SpawnEndlessWave(Wave + 1);
+                    return;
+                }
                 if (!_shopDone)                          // spend intel first (requisition)
                 {
                     if (AutoPlay) AutoShop(); else HandleShopClick();
@@ -2156,6 +2255,17 @@ public partial class Game
         // tests, but route to Phase.Win/Lose (no barracks / checkpoint valve / save.json).
         if (Mode == GameMode.Skirmish) { CheckSkirmish(); return; }
         var alivePlayers = AlivePlayers();
+        // APEX W2: RESCUE soft-lock. The caged captive is invulnerable AND actionless, so if every
+        // actual soldier dies while it is still locked, nothing on the board can ever free it (or
+        // kill it) — the mission would sit forever. That's a wipe in all but name: burn the one-time
+        // checkpoint if it's available, else the run is lost. A FREED captive is untouched by this —
+        // it can still walk itself out (the lone-captive win HEATLADDERTEST pins), mirroring Escort's
+        // intentional VIP-solo win (pinned by DEATHTEST).
+        if (Objective == Objective.Rescue && CaptiveLocked && !alivePlayers.Any(p => !p.IsVip))
+        {
+            if (TryReinforcements()) return;
+            LoseRun("CAPTIVE ABANDONED", $"Every soldier fell with the captive still caged on mission {_run.Mission}."); return;
+        }
         if (alivePlayers.Count == 0)
         {
             // ONE-TIME CHECKPOINT: a squad wipe at/after the threshold mission triggers an emergency
@@ -2202,8 +2312,9 @@ public partial class Game
         }
     }
 
-    /// One-time mid-run recovery valve. Called only from the SQUAD-WIPE branch of CheckEnd (VIP/
-    /// captive-lost losses stay instant). Returns false — letting the wipe become a real loss — when
+    /// One-time mid-run recovery valve. Called from the SQUAD-WIPE branch of CheckEnd and from the
+    /// Rescue CAPTIVE-ABANDONED branch (all soldiers down, captive still caged — W2); other VIP/
+    /// captive-lost losses stay instant. Returns false — letting the wipe become a real loss — when
     /// the checkpoint is already spent OR the wipe came too early (mission < 3: early failure ends
     /// cleanly). Otherwise it burns the checkpoint, rebuilds the squad as a fresh emergency cadre of
     /// rookies (keeping Intel / heat / map position), and RESTARTS the current mission from its start
@@ -2215,10 +2326,23 @@ public partial class Game
         _run.CheckpointUsed = true;
 
         // fresh emergency squad: deploy as many rookies as this mission fields (fall back to the
-        // attrition floor of 3). Rookies carry no rank/perks/mods — that's the price of the wipe.
+        // attrition floor of 3). The cadre carries no bought mods/veteran history — that's the price
+        // of the wipe — but it is DEPTH-SCALED (APEX W8): each recruit arrives with (Mission-1)/2
+        // seeded kills and is promoted at the draft (rank + a queued perk offer for the next
+        // barracks; DebriefSurvivors prunes rather than clears, so the offer survives). A mission-5
+        // wipe redeploying literal 0-kill rookies against the mission-5 force was the flagged
+        // death-spiral. Distinct callsigns (APEX W5): the cadre is drawn with a taken-names set so
+        // two "ROOK"s can't share (and silently merge) bond/memorial records.
         int cap = Math.Max(Run.AttritionFloor, Run.DeployCapFor(_run.Mission));
         _run.Squad = new List<Unit>();
-        for (int i = 0; i < cap; i++) _run.Squad.Add(Mission.MakeRecruit());
+        var cadreNames = new HashSet<string>();
+        for (int i = 0; i < cap; i++)
+        {
+            var rec = Mission.MakeRecruit(cadreNames, _run.Mission);
+            cadreNames.Add(rec.Name);
+            _run.Squad.Add(rec);
+            _run.PromoteEligible(rec);
+        }
 
         // Intel, heat, and map position are untouched. Restart THIS mission from its start (the same
         // setup the normal flow uses; it re-checkpoints the save). SetupMission sets its own
@@ -2846,10 +2970,11 @@ public partial class Game
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseShake)) Fx.ShakeOn = !Fx.ShakeOn;
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseThreat)) ShowThreatPref = !ShowThreatPref;
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseBright)) Display.CycleBrightness();
+        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseGamma)) Display.CycleGamma();   // W9: true gamma (post-FX pass)
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseColorblind)) Display.ToggleColorblind();
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseAutoCam)) { Display.ToggleAutoCam(); if (!Display.AutoCam) { CamZoom = 1f; CamPan = Vector2.Zero; } }
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseCodex)) { BeginCodex(); }   // W6: open the field manual (remembers this phase for BACK)
-        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseAbandon)) { Paused = false; Phase = Phase.Lose; LoseTitle = "RUN ABANDONED"; LoseReason = "You called off the campaign."; Audio.Play("lose"); }
+        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseAbandon)) { Paused = false; if (TutStep >= 0) CompleteTutorial(); Combat.EndRun(); Phase = Phase.Lose; LoseTitle = "RUN ABANDONED"; LoseReason = "You called off the campaign."; Audio.Play("lose"); }   // EndRun mirrors LoseRun: clears mission statics incl. Ai.Tier (W6 review LOW-3)
     }
 
     void DoAction(string id)
@@ -3789,21 +3914,27 @@ public partial class Game
     }
 
     /// DEFEND: spawn a wave of reinforcements at the right edge on early enemy turns.
+    /// APEX W5: Defend waves are `rich` — the full endless roster (guarded: no TURRET/BOMBARD)
+    /// instead of the grunt/scout coin flip, so the one enemy-forced-tempo objective has variety.
+    /// This flag is the ONLY rich call site by design: pressure-clock waves must stay cheap bodies
+    /// (see MakeWaveHostile's doc — hardening turtle punishment would widen the policy gap).
     void SpawnDefendWave()
     {
         if (_turnCount % 2 == 0 || _turnCount >= DefendTurns) return;  // waves on odd turns, not the last
-        SpawnReinforcements(2 + _run.Mission / 2, 12, "WAVE");
+        SpawnReinforcements(2 + _run.Mission / 2, 12, "WAVE", rich: true);
     }
 
     /// Shared reinforcement spawner: drops up to `want` active wave-hostiles in from the right
     /// board edge (already engaged), honoring a live-enemy `cap`. Used by both the DEFEND objective
-    /// and the anti-turtle PRESSURE CLOCK. Returns how many it actually added.
-    int SpawnReinforcements(int want, int cap, string label)
+    /// (`rich` waves — full roster) and the anti-turtle PRESSURE CLOCK (default cheap grunt/scout
+    /// mix). Returns how many it actually added.
+    int SpawnReinforcements(int want, int cap, string label, bool rich = false)
     {
         if (AliveEnemies().Count >= cap) return 0;                     // clutter cap
         int n = _run.Mission;
         var rows = Enumerable.Range(0, Grid.H).OrderBy(_ => Util.RandF()).ToList();
         int added = 0;
+        var waveClasses = new List<string>();   // harness-only composition echo (AutoPlay)
         foreach (int y in rows)
         {
             if (added >= want || AliveEnemies().Count >= cap) break;
@@ -3813,14 +3944,20 @@ public partial class Game
                 x = Grid.W - 1;
                 if (!Grid.IsFloor(x, y) || IsOccupiedByOther(x, y, null)) continue;
             }
-            var e = Mission.MakeWaveHostile(n, x, y);
+            var e = Mission.MakeWaveHostile(n, x, y, rich);
             e.Alert = AlertLevel.Alert; e.PodId = -1;   // reinforcements arrive already engaged
             e.SyncPos();
+            Stats.RecordSpawn(e.Cls, Combat.MissionFaction != Faction.None);   // APEX W5 composition tally
             Enemies.Add(e);
+            waveClasses.Add(e.Cls);
             Fx.Burst(e.Pos, Pal.Foe, 14, 160f, 0.5f, 3f, true);
             added++;
         }
         if (added > 0) { Fx.PopText(Util.TileCenter(Grid.W - 2, 0) + new Vector2(0, -10), label, Pal.Foe, 20f); Audio.Play("turn"); RefreshCombatRoster(); }
+        // APEX W5: headless-harness echo so an autoplay log shows what the waves actually field
+        // (AutoPlay is the env-gated smoke/balance path only — never set in normal play).
+        if (AutoPlay && added > 0)
+            Console.WriteLine($"{label}: +{added} ({string.Join(",", waveClasses)}){(rich ? " [rich]" : "")}");
         return added;
     }
 
@@ -3929,7 +4066,8 @@ public partial class Game
         ClearPins();                      // a gunner's SUPPRESSING FIRE pin lasts through one enemy turn, then lifts
         UpdateHvtGuard();                 // DECAPITATE: refresh the HVT's guarded state at the boundary (a guard may have moved)
         if (AutoPlay) AutoStallCheck();
-        foreach (var p in Players) if (p.Alive) { p.BeginTurn(); TickStatuses(p); }
+        // APEX W2: deny the caged RESCUE captive its start-of-turn action re-grant (see SetupMission).
+        foreach (var p in Players) if (p.Alive) { p.BeginTurn(); TickStatuses(p); if (p == Vip && CaptiveLocked) p.ActionsLeft = 0; }
         foreach (var e in Enemies) if (e.Alive) { e.ReactedThisTurn = false; e.Suppress = 0; } // OW resets; suppression expires
         Selected = Players.FirstOrDefault(p => p.CanAct);
         AimMode = false;
@@ -3963,8 +4101,15 @@ public partial class Game
         // forward), tag along toward the plain nearest soldier and hold once beside it (don't charge alone).
         int vipEvac = DistToEvac(Vip.X, Vip.Y);
         var ahead = soldiers.Where(s => DistToEvac(s.X, s.Y) < vipEvac).ToList();
+        // APEX W8: the anchor is the MOST FORWARD ahead-soldier (min DistToEvac; nearest-to-VIP only
+        // as the tie-break). The old nearest-to-VIP pick zigzagged: with the squad spread out, a
+        // DIFFERENT barely-ahead soldier was "nearest" every turn and the VIP chased each in turn —
+        // a traced m5 escort walked the asset AWAY from evac for four straight turns. Following the
+        // true spearhead makes leash progress monotone; the besideForward hold below (adjacent to ANY
+        // ahead soldier) still keeps it from charging past its screen alone.
         var anchor = (ahead.Count > 0 ? ahead : soldiers)
-                     .OrderBy(s => Util.ChebyDist(Vip.X, Vip.Y, s.X, s.Y)).First();
+                     .OrderBy(s => DistToEvac(s.X, s.Y))
+                     .ThenBy(s => Util.ChebyDist(Vip.X, Vip.Y, s.X, s.Y)).First();
         // Hold when tucked beside the FORWARD element (the spearhead) — the VIP has kept pace and shouldn't
         // charge on alone into the contested corner ahead of its escort. If it's already the most-forward
         // unit (nothing `ahead`), hold beside the nearest soldier. Never hold merely beside a straggler
@@ -3972,50 +4117,122 @@ public partial class Game
         bool besideForward = ahead.Count > 0
             ? ahead.Any(s => Util.ChebyDist(Vip.X, Vip.Y, s.X, s.Y) <= 1)
             : soldiers.Any(s => Util.ChebyDist(Vip.X, Vip.Y, s.X, s.Y) <= 1);
-        // reachable tiles within ONE move (VIP.MoveBudget), never onto an occupied / off-board / non-floor
-        // tile (CostMap only relaxes walkable floor and honours the occupancy blocker).
-        var cost = Grid.CostMap(Vip.X, Vip.Y, (x, y) => IsOccupiedByOther(x, y, Vip), out var _cf, Vip.MoveBudget);
-        // If a FREE evac tile is reachable THIS move, step straight into the zone — that is the win, and it
-        // stops the "walled one lane short of the corner while soldiers crowd the doorway" stall outright.
-        (int x, int y)? reachEvac = null; int reachEvacCost = int.MaxValue;
-        foreach (var t in EvacZone)
-        {
-            if (IsOccupiedByOther(t.x, t.y, Vip)) continue;
-            int c = cost[t.x, t.y];
-            if (c > 0 && c < reachEvacCost) { reachEvacCost = c; reachEvac = t; }
-        }
-        if (reachEvac != null) { Vip.X = reachEvac.Value.x; Vip.Y = reachEvac.Value.y; Vip.SyncPos();
-                                 Fx.Burst(Vip.Pos, Pal.VipGold, 10, 140f, 0.4f, 3.5f); return; }
-        if (besideForward) return;                             // tucked beside the SPEARHEAD, zone not yet in reach
-        // Measure progress by the ACTUAL walkable path distance to the anchor (a Dijkstra field FROM it), not
-        // Chebyshev — so the VIP steps correctly AROUND walls/screens toward the squad instead of stalling when
-        // the straight line is blocked (the Chebyshev test let a walled-off VIP get stuck a lane short).
-        var goalField = Grid.CostMap(anchor.X, anchor.Y, (x, y) => IsOccupiedByOther(x, y, Vip), out _, 9999);
-        int hereDist = goalField[Vip.X, Vip.Y];
+        // APEX W8: the leash walks REAL steps through OnUnitEnteredTile now, so a burning route sears
+        // the win-condition asset. Hoisted "is any tile burning" gates the whole two-pass machinery —
+        // the common fire-free board runs exactly one pass on the plain occupancy map.
+        bool anyFire = false;
+        for (int x = 0; x < Grid.W && !anyFire; x++)
+            for (int y = 0; y < Grid.H && !anyFire; y++)
+                if (Grid.Fire[x, y] > 0) anyFire = true;
         var foes = Enemies.Where(e => e.Alive && e.Active && e.Ammo > 0).ToList();   // active shooters (hoisted)
-        int bx = -1, by = -1; float bestScore = float.NegativeInfinity;
-        for (int x = 0; x < Grid.W; x++)
-            for (int y = 0; y < Grid.H; y++)
+
+        // One leash pass over a given passability rule. `avoidFire` treats burning tiles as walls, so
+        // Dijkstra itself DETOURS around a fire field (a destination-score penalty alone can't do it:
+        // the hazard-blind came-from paths cross the fire even when a clean route exists). Returns true
+        // when the pass RESOLVED the turn (issued a move, or held for a legitimate reason).
+        bool LeashPass(bool avoidFire)
+        {
+            Func<int, int, bool> blocked = avoidFire
+                ? ((x, y) => IsOccupiedByOther(x, y, Vip) || Grid.IsFire(x, y))
+                : ((x, y) => IsOccupiedByOther(x, y, Vip));
+            // reachable tiles within ONE move (VIP.MoveBudget), never onto an occupied / off-board /
+            // non-floor tile (CostMap only relaxes walkable floor and honours the blocker).
+            var cost = Grid.CostMap(Vip.X, Vip.Y, blocked, out var cameFrom, Vip.MoveBudget);
+            // If a FREE evac tile is reachable THIS move, step straight into the zone — that is the win,
+            // and it stops the "walled one lane short of the corner while soldiers crowd the doorway"
+            // stall outright.
+            (int x, int y)? reachEvac = null; int reachEvacCost = int.MaxValue;
+            foreach (var t in EvacZone)
             {
-                if (cost[x, y] < 0) continue;                  // unreachable this turn
-                if (x == Vip.X && y == Vip.Y) continue;        // must actually move
-                int d = goalField[x, y];
-                if (d < 0) continue;                           // can't reach the anchor from here at all
-                if (hereDist >= 0 && d >= hereDist) continue;  // only tiles that close the path gap
-                // safety: prefer cover from the nearest active shooter + tiles no active foe can see.
-                float safety = 0f;
-                var near = foes.OrderBy(e => Util.ChebyDist(x, y, e.X, e.Y)).FirstOrDefault();
-                if (near != null) safety += Grid.GetCover(x, y, near.X, near.Y).Level * 3f;
-                if (!foes.Any(e => Grid.HasLineOfSight(e.X, e.Y, x, y))) safety += 6f;   // fully unseen tile
-                // progress dominates (the leash must converge), then safety, then a mild cost tie-break.
-                float score = (hereDist - d) * 2f + safety - cost[x, y] * 0.1f;
-                if (score > bestScore) { bestScore = score; bx = x; by = y; }
+                if (IsOccupiedByOther(t.x, t.y, Vip)) continue;
+                int c = cost[t.x, t.y];
+                if (c > 0 && c < reachEvacCost) { reachEvacCost = c; reachEvac = t; }
             }
-        if (bx < 0) return;                                    // no closing tile reachable — hold this turn
-        Vip.X = bx; Vip.Y = by; Vip.SyncPos();
-        Fx.Burst(Vip.Pos, Pal.VipGold, 8, 120f, 0.35f, 3f);   // a small tag-along puff (feel only)
-        // (win detection stays with the normal CheckEnd calls after the player's actions — calling it here,
-        //  mid-StartPlayerTurn before the turn is fully seated, would re-enter EnterBarracks on stale state.)
+            if (reachEvac != null) { EnqueueLeashMove(cameFrom, reachEvac.Value.x, reachEvac.Value.y); return true; }
+            if (besideForward) return true;                    // tucked beside the SPEARHEAD, zone not yet in reach
+            // Measure progress by the ACTUAL walkable path distance to the anchor (a Dijkstra field FROM
+            // it, under the SAME passability rule), not Chebyshev — so the VIP steps correctly AROUND
+            // walls/screens/fire toward the squad instead of stalling when the straight line is blocked.
+            var goalField = Grid.CostMap(anchor.X, anchor.Y, blocked, out _, 9999);
+            int hereDist = goalField[Vip.X, Vip.Y];
+            int bx = -1, by = -1; float bestScore = float.NegativeInfinity;
+            for (int x = 0; x < Grid.W; x++)
+                for (int y = 0; y < Grid.H; y++)
+                {
+                    if (cost[x, y] < 0) continue;                  // unreachable this turn
+                    if (x == Vip.X && y == Vip.Y) continue;        // must actually move
+                    int d = goalField[x, y];
+                    if (d < 0) continue;                           // can't reach the anchor from here at all
+                    if (hereDist >= 0 && d >= hereDist) continue;  // only tiles that close the path gap
+                    // safety: prefer cover from the nearest active shooter + tiles no active foe can see.
+                    float safety = 0f;
+                    var near = foes.OrderBy(e => Util.ChebyDist(x, y, e.X, e.Y)).FirstOrDefault();
+                    if (near != null) safety += Grid.GetCover(x, y, near.X, near.Y).Level * 3f;
+                    if (!foes.Any(e => Grid.HasLineOfSight(e.X, e.Y, x, y))) safety += 6f;   // fully unseen tile
+                    // APEX W8 hazards (fallback pass only — the avoid-fire pass can't touch fire at all):
+                    // when fire is UNAVOIDABLE, still steer to the route that burns least — penalize a
+                    // burning destination (the Ai.cs -60 pattern) and each burning tile the reconstructed
+                    // route enters (every tile ENTRY ticks the hazard).
+                    if (Grid.IsFire(x, y)) safety -= 60f;
+                    if (anyFire && !avoidFire)
+                        foreach (var (rx, ry) in Grid.ReconstructPath(cameFrom, Vip.X, Vip.Y, x, y))
+                            if ((rx != x || ry != y) && Grid.IsFire(rx, ry)) safety -= 60f;
+                    // APEX W8 stealth-grief guard: routing through OnUnitEnteredTile also runs the pod-wake
+                    // (CheckPodActivation) and concealment-break (RevealRange) checks the teleport skipped.
+                    // An auto-move the player never ordered must not wake a sleeping pod or blow stealth.
+                    // Penalize ONLY what actually bites (a penalty, not a veto — if every closing tile is
+                    // bad the leash still takes the least-bad one, so it can never stall):
+                    //   * dormant pod — sight-wake needs the squad REVEALED (CheckPodActivation no-ops
+                    //     under concealment: creeping past sleepers is the stealth race working as
+                    //     designed) plus proximity AND line of sight. A blanket radius penalty made the
+                    //     leash tiptoe around every sleeper it could safely pass, ballooning Escort turns.
+                    //   * active foe while CONCEALED — stepping into RevealRange blows squad stealth.
+                    foreach (var e in Enemies)
+                    {
+                        if (!e.Alive) continue;
+                        if (!e.Active)
+                        {
+                            // ... and only when the VIP would be the FIRST to wake it: a pod already
+                            // inside a SOLDIER's sight/wake bubble is waking on the squad's own advance
+                            // regardless, so the asset gains nothing by tiptoeing around it (that extra
+                            // caution was measured crawling deep escorts to ~17 turns).
+                            if (!SquadConcealed && Util.TileDist(x, y, e.X, e.Y) <= AlertRange + 1
+                                && Grid.HasLineOfSight(x, y, e.X, e.Y)
+                                && !soldiers.Any(s => Util.TileDist(s.X, s.Y, e.X, e.Y) <= AlertRange
+                                                      && Grid.HasLineOfSight(s.X, s.Y, e.X, e.Y)))
+                                safety -= 40f;
+                        }
+                        else if (SquadConcealed && Util.TileDist(x, y, e.X, e.Y) <= RevealRange + 1) safety -= 40f;
+                    }
+                    // progress dominates (the leash must converge), then safety, then a mild cost tie-break.
+                    float score = (hereDist - d) * 2f + safety - cost[x, y] * 0.1f;
+                    if (score > bestScore) { bestScore = score; bx = x; by = y; }
+                }
+            if (bx < 0) return false;                          // nothing closes under THIS passability rule
+            EnqueueLeashMove(cameFrom, bx, by);
+            return true;
+            // (win detection stays with the normal CheckEnd calls after the player's actions — CheckEnd is
+            //  gated on an empty anim queue, so it fires right after the leash steps finish playing.)
+        }
+
+        // Pass 1 detours around fire; pass 2 (only when fire exists AND pass 1 found no way to act) is
+        // the old hazard-blind map, so a fully fire-walled lane still moves — burning beats stalling,
+        // and the in-loop penalties pick the least-burning route. On a fire-free board this is exactly
+        // one pass. If neither pass acts, hold this turn (walls/crowding — same as the pre-W8 hold).
+        if (!LeashPass(anyFire) && anyFire) LeashPass(false);
+    }
+
+    /// APEX W8 — the leash walks REAL MoveStepAnims along the already-computed CostMap came-from path
+    /// (exactly as ActivatePod's reveal-scatter does for enemies) instead of teleporting via direct
+    /// X/Y writes. Enemy overwatch reactions, bleed/fire ticks, concealment breaks and pod wakes all
+    /// compose for free — OnUnitEnteredTile fires per tile, same as a player-ordered move. MoveStepAnim
+    /// spends no MoveBudget/actions, matching the old teleport's economy; a small tag-along puff marks
+    /// the auto-move (feel only).
+    void EnqueueLeashMove((int, int)[,] cameFrom, int tx, int ty)
+    {
+        Fx.Burst(Vip.Pos, Pal.VipGold, 8, 120f, 0.35f, 3f);
+        foreach (var (px, py) in Grid.ReconstructPath(cameFrom, Vip.X, Vip.Y, tx, ty))
+            Enqueue(new MoveStepAnim(Vip, px, py), Team.Player);
     }
 
     // ---------------- squad coordination ----------------
@@ -4383,6 +4600,20 @@ public partial class Game
     {
         if (_run.PendingPerks.Count == 0) return;
         var off = _run.PendingPerks[0];
+        // APEX W4 (d): under the balance flywheel the pick is value-BIASED but RANDOMIZED, following
+        // the ChooseSpec precedent (randomized "so win-rate-by-spec is measurable"). The old greedy
+        // ChoosePerk(0) always took slot A — but Run.MakePerkOffer RESERVES slot A for the class
+        // line, so "perk pick frequency" was a census of ClassLine, not a measurement of value.
+        // Now: 70% the higher-valued perk per the small class+kit prior (SmartPerkValue, in
+        // Game.Autopilot.cs), 30% the other — the better build is usually taken (competent-play
+        // proxy) while BOTH slots keep real exposure, so win-rate-by-perk stays interpretable.
+        // The dumb AutoPlay smoke test (SmartPlay off) keeps its deterministic slot-0 pick, and
+        // interactive play is untouched (a human click always passes an explicit slot).
+        if (SmartPlay && (which == 0 || which == 1))
+        {
+            int better = SmartPerkValue(off.Unit, off.A) >= SmartPerkValue(off.Unit, off.B) ? 0 : 1;
+            which = Util.Roll(70f) ? better : 1 - better;
+        }
         Perk p = which == 0 ? off.A : off.B;
         Run.ApplyPerk(off.Unit, p);
         Stats.RecordPerk(PerkDef.Code(p));   // balance telemetry (no-op unless Stats.Enabled)

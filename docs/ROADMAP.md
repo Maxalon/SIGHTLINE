@@ -670,3 +670,37 @@ collapsed, run-completion 60→73%, Evac drag 10.9→7.8t, dead economy/perks re
 Open / next: the ESCORT leash lifted win% but left escort turns UP (~14t, a corner fight not empty walking) — a
 forward beacon for Escort is the clean de-drag; the softened policy gap (~0-4) is forgiving-by-design with the new
 comeback levers, watch it doesn't slide negative; more setup-verb archetypes to exercise W4's coordination.
+
+---
+
+## PROGRAM "APEX" — closed items (see docs/DEVLOG.md for the full write-up + measured numbers)
+
+Thesis: the game's TOP END was fictional — heat 7-8 could hard-crash, LAST STAND fought the campaign's hidden
+pressure clock with no progression, the setup-verb archetypes were unreachable in faction fights, and the
+flywheel was blind to all of it. Fix correctness → give the instrument eyes → ship the real top end → close
+the flagged drags. Research: 6-lens fan-out, every wave adversarially verified against live code pre-dev
+(6 of 9 designs corrected). Owner feedback mid-run became its own UI wave.
+
+- [x] **W1 — heat>=7 zero-roster crash** fixed (emergency conscripts at Count==0) + endless freed from the
+      campaign pressure clock. First heat-8 number: 25%. `SIGHTLINE_HEATLADDERTEST`.
+- [x] **W2 — interactive correctness:** Rescue captive truly caged + CAPTIVE ABANDONED (campaign+skirmish);
+      overwatch resource leak (predicted-HP break); tutorial teaches the shipped fire rule. `SIGHTLINE_RESCUETEST`.
+- [x] **W3 — persistence armor:** atomic save/meta writes + corrupt-file .bak evidence (no silent meta wipe).
+- [x] **W4 — flywheel eyes:** heats {0,2,4,6,8}; BALANCE_ENDLESS depth stats; VETSIM; win-rate-by-boon/spec/
+      contract; value-biased perk picker (guarded: 85%→85%, starved perks revived).
+- [x] **W5 — content reachability:** 4 archetypes join faction rosters (0 → 2-4% of faction spawns); Defend
+      waves diversified fairly; 40 dedup'd callsigns (squad+fallen+reserve).
+- [x] **W6 — the enemy plays better:** commanding-LoS truthfulness + crossfire pin (h0 gap −20→+5); data-driven
+      Ai.Tier at rungs 6+; NO QUARTER +1 dmg. h8 harder via play quality (choices/turn 1.56→1.79).
+- [x] **W7 — LAST STAND ladder:** opener grace; mid-stand promotions/boons; heal decay + elite ending. Depth
+      median 3 → 5-6, p90 finite, zero caps in 192 stands.
+- [x] **W8 — Escort de-drag + gap lever:** leash through real anims (fire/overwatch apply); Escort-only
+      far-third cold-LZ beacon; depth-scaled recruits. Escort 12.9-15.8t → **5.8t** at 96% win.
+- [x] **W9/W10 — presentation + owner-feedback UI:** honest odds banding; true gamma; wrapping action bar
+      (no ellipsis, ever); 13px modifier rows; three-zone top bar; map-label + chip-occlusion fixes.
+
+Open / next: endless overall greedy median is 5 vs the 6-8 target (h0 in band at 6) — next lever is the
+EndlessWaveScale toughness ramp; run the VETSIM=2-vs-0 pricing batch (instrument shipped, measurement
+pending); the aggregate policy gap is noisy at N=20 pins — trend it across future full-ladder batches;
+on-device audio + endless FEEL still need the human. Heat-2's corrected baseline is 63% (accepted with the
+truthfulness fix).

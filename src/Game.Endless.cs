@@ -27,7 +27,18 @@ public partial class Game
 {
     // Tuning knobs for the horde escalation.
     const int EndlessAliveCap = 13;   // max live hostiles on the board at once (perf + fairness)
-    const int EndlessBaseCount = 2;   // wave 1 spawns ~ EndlessBaseCount + wave bodies (gentle opener)
+    const int EndlessBaseCount = 0;   // flat offset on the body ramp (2 -> 0 in W7 round 2: the flywheel
+                                      // put every pre-W7 stand's death at the wave-3/4 body cliff —
+                                      // 5-6 hostiles vs the 4-soldier squad before any progression
+                                      // beat landed)
+    const int EndlessSaturationWave = 20;   // past this: heal decays + one extra ELITE per wave (APEX W7 "an ending")
+
+    // APEX W7 — wave-clear latch. The between-wave sustain (heal/ammo/grenade resupply) and the
+    // progression heartbeat must fire exactly ONCE per cleared wave, but the mid-stand Barracks
+    // detour splits "wave cleared" from "next wave spawned" across frames. Set when the sustain
+    // fires; re-armed by SpawnEndlessWave when the next wave actually lands, so no path — detour
+    // or straight-through — can double-fire the heal/resupply.
+    bool _waveClearHandled;
 
     /// Begin LAST STAND from the intro. Builds the default squad on a fresh Run (no draft), adopts
     /// the dialled-in Heat, seats the arena, and starts the first wave. Mirrors StartMission's
@@ -44,8 +55,11 @@ public partial class Game
         if (NoPersist && int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_HEAT"), out int hEnv)) heat = hEnv;
         _run.HeatLevel = Sightline.Heat.Clamp(heat);
         _run.LossStreak = _metaLossStreak;
-        // balance telemetry tag (no-op unless Stats.Enabled)
-        Stats.BeginRun(_run.HeatLevel, "endless");
+        // balance telemetry tag (no-op unless Stats.Enabled). APEX W4: the MODE ("endless") lives
+        // in RunRec.Mode, not the policy slot — so endless stands split greedy/sloppy exactly like
+        // the campaign batch AND are excluded from campaign policy-gap/completion math by an
+        // explicit Mode filter in Stats, not by tag-string accident.
+        Stats.BeginRun(_run.HeatLevel, SmartPlay && SmartSloppy ? "sloppy" : "greedy", "endless");
         Players = _run.Squad;
         Wave = 0;
         // Build the arena + spawn wave 1. SetupMission branches on Mode==Endless: it forces
@@ -61,18 +75,45 @@ public partial class Game
     void SpawnEndlessWave(int w)
     {
         Wave = w;
+        _waveClearHandled = false;   // re-arm the wave-clear latch for THIS wave's clear (APEX W7)
+        // W6b — the endless path raises the AI coordination tier as the stand deepens (wave 8
+        // -> tier 1, wave 16 -> tier 2), never dropping below the run's Heat-derived tier
+        // (SetupMission published that at stand start). LAST STAND always ends via EndEndless
+        // -> Combat.EndRun -> EndMission, which clears the tier, so a deep stand can never
+        // leak Tier 2 into a later mode. Waves 1-7 at heat < 6 stay tier 0 (harness-stable).
+        Ai.Tier = Math.Max(Sightline.Heat.AiTier(_run?.HeatLevel ?? 0), w >= 16 ? 2 : w >= 8 ? 1 : 0);
         int want = EndlessWaveCount(w);
         // Escalate body toughness: MakeWaveHostile scales its stats off a "missionNum"-like arg
         // (bump = n-1). Ramp that with the wave AND with Heat so the horde gets meaner over time.
         int scaleN = EndlessWaveScale(w);
         SpawnEndlessBodies(want, scaleN);
+        // APEX W7 "an ending": every scaling lever saturates by ~wave 22 (bump cap 12, count cap,
+        // aim clamp 88, roster depth cap 6) while the between-wave heal keeps coming, so a stand
+        // past that point used to be a flat immortal equilibrium. One extra ELITE per wave past
+        // 20 (paired with the heal decay in CheckEndless) makes deep stands statistically
+        // terminate. Injected AFTER the rank-and-file fill and deliberately allowed to exceed
+        // the alive-cap by this one body — the cap is a perf/fairness valve for the horde, and
+        // the ending's escalation must never be silently swallowed by a full board.
+        if (w > EndlessSaturationWave) SpawnEndlessElite(scaleN);
         ShowBanner($"WAVE {w}", false);
         Audio.PlayStinger("kill");   // a short escalation cue as the next wave crashes in
     }
 
-    /// How many bodies wave `w` wants (before the alive-cap clamp). Rises linearly, then flattens
-    /// near the cap so late waves don't just pile bodies (they get tougher instead — EndlessWaveScale).
-    static int EndlessWaveCount(int w) => Math.Min(EndlessAliveCap, EndlessBaseCount + w);
+    /// The full (un-graced) body count for wave `w`. W7 flywheel retune (measured rounds at
+    /// slopes +1/wave, +2/3/wave): the old +1 body/wave slope put every measured stand's death
+    /// at the first waves the squad was outnumbered — squad power grows sublinearly, so a steep
+    /// linear body ramp always outran it by ~wave 5 no matter where the curve started. The ramp
+    /// now adds a body every 2 waves, reaching the alive-cap at wave ~24; escalation past that is
+    /// toughness (EndlessWaveScale), the deepening AI tier (W6b) and the post-saturation ELITE
+    /// injections, not body count.
+    static int EndlessWaveCountFull(int w) => Math.Min(EndlessAliveCap, EndlessBaseCount + 1 + w / 2);
+
+    /// How many bodies wave `w` wants (before the alive-cap clamp inside the spawner).
+    /// APEX W7 OPENER GRACE: waves 1-2 arrive at HALF strength (never zero) — pre-W7 the full
+    /// count landed the instant the board cleared; the opener now teaches the arena before the
+    /// horde arrives in force (full count from wave 3 on).
+    static int EndlessWaveCount(int w)
+        => w <= 2 ? Math.Max(1, EndlessWaveCountFull(w) / 2) : EndlessWaveCountFull(w);
 
     /// The mission-scale ("missionNum"-like) value fed to MakeWaveHostile for wave `w`. Ramps ~1
     /// per two waves plus a Heat bump, so bodies get tougher as the horde deepens.
@@ -103,6 +144,7 @@ public partial class Game
             e.Alert = AlertLevel.Alert; e.PodId = -1;   // horde arrives already engaged (no pods)
             e.SyncPos();
             e.BeginTurn(); e.OnOverwatch = false;
+            Stats.RecordSpawn(e.Cls, Combat.MissionFaction != Faction.None);   // APEX W5 composition tally
             Enemies.Add(e);
             Fx.Burst(e.Pos, Pal.Foe, 14, 160f, 0.5f, 3f, true);
             added++;
@@ -117,20 +159,75 @@ public partial class Game
     {
         if (AlivePlayers().Count == 0) { EndEndless(); return; }
         // wave cleared: all hostiles down and the board is idle (no anims mid-death).
-        if (AliveEnemies().Count == 0 && _anims.Count == 0)
+        if (AliveEnemies().Count == 0 && _anims.Count == 0 && !_waveClearHandled)
         {
-            // BETWEEN-WAVE SUSTAIN: refill ammo + grenades and heal each survivor a little (+2, cap
-            // MaxHp), so a long stand is about attrition/positioning, not a slow bleed to zero.
+            _waveClearHandled = true;   // exactly once per cleared wave (see the field's comment)
+            // BETWEEN-WAVE SUSTAIN: refill ammo + grenades and heal each survivor a chunk, so a
+            // long stand is about attrition/positioning, not a slow bleed to zero.
             foreach (var u in Players)
             {
                 if (!u.Alive) continue;
                 u.Ammo = u.Weapon.Clip;
                 // grenade resupply every 3rd wave (a breather between escalations)
                 if ((Wave + 1) % 3 == 0) u.Grenades = Math.Max(u.Grenades, 1 + u.BonusGrenades + (u.HasPerk(Perk.Bandolier) ? 1 : 0));
-                // clearing a wave mends a meaningful chunk (rewards the clear; escalation still wins eventually)
-                u.Hp = Math.Min(u.MaxHp, u.Hp + Math.Max(3, u.MaxHp / 4));
+                // clearing a wave mends a meaningful chunk (rewards the clear) — but past bump-
+                // saturation the mend decays toward zero (APEX W7 "an ending": see EndlessWaveHeal)
+                u.Hp = Math.Min(u.MaxHp, u.Hp + EndlessWaveHeal(u.MaxHp, Wave));
+            }
+            // APEX W7 PROGRESSION HEARTBEAT: every 3rd cleared wave, banked kills cash in as FIELD
+            // PROMOTIONS (the campaign's rank-up perk/spec offers, via the shared Run.PromoteEligible);
+            // every 5th, a run-scoped boon offer. If anything is pending, detour through
+            // Phase.Barracks — the existing chooser UI + AutoPlay resolution paths run unchanged,
+            // and the guard at the TOP of the Barracks case in Game.Update returns here and spawns
+            // the next wave the moment every offer is resolved (it can never fall through to the
+            // campaign shop/event/node branches).
+            bool beatPromote = Wave % 3 == 0;
+            bool beatBoon = Wave % 5 == 0;
+            if (beatPromote || beatBoon) _run.Report.Clear();   // fresh mid-stand report (no stale debrief)
+            if (beatPromote) _run.PromoteEligible();
+            if (beatBoon) _run.GenerateBoonOffer();
+            if (_run.PendingPerks.Count > 0 || _run.PendingSpecs.Count > 0 || _run.BoonOffer.Count > 0)
+            {
+                _shopDone = true;         // never the requisition shop mid-stand (offers only)
+                Phase = Phase.Barracks;
+                Audio.Play("turn");
+                return;                   // the Barracks guard spawns the next wave when done
             }
             SpawnEndlessWave(Wave + 1);
+        }
+    }
+
+    /// The between-wave mend for a survivor with `maxHp` after clearing wave `wave`. Full value
+    /// (Max(3, MaxHp/4) — the pre-W7 formula, unchanged through wave 20) until bump-saturation,
+    /// then a gradual decay (-1 per 3 waves) to zero, so a deep stand becomes a real attrition
+    /// race instead of an immortal equilibrium. Static + pure so HORDETEST can pin the curve.
+    static int EndlessWaveHeal(int maxHp, int wave) =>
+        Math.Max(0, Math.Max(3, maxHp / 4) - Math.Max(0, (wave - EndlessSaturationWave) / 3));
+
+    /// APEX W7 "an ending": drop ONE elite in from the right edge (same placement contract as
+    /// SpawnEndlessBodies). Called only for waves past EndlessSaturationWave; deliberately allowed
+    /// to exceed EndlessAliveCap by this one body (see SpawnEndlessWave). PodId=-1 keeps it
+    /// morale-exempt like the rest of the horde; grenade load is set explicitly by the maker
+    /// (the campaign's ELITE-grenade branch lives in SpawnEnemies, which this path never runs).
+    void SpawnEndlessElite(int scaleN)
+    {
+        int[] cols = { Grid.W - 2, Grid.W - 1 };
+        var rows = Enumerable.Range(0, Grid.H).OrderBy(_ => Util.RandF()).ToList();
+        foreach (int y in rows)
+        {
+            foreach (int cx in cols)
+            {
+                if (!Grid.IsFloor(cx, y) || IsOccupiedByOther(cx, y, null)) continue;
+                var e = Mission.MakeEndlessElite(scaleN, cx, y);
+                e.Alert = AlertLevel.Alert; e.PodId = -1;   // engaged, morale-exempt (no pod)
+                e.SyncPos();
+                e.BeginTurn(); e.OnOverwatch = false;
+                Stats.RecordSpawn(e.Cls, Combat.MissionFaction != Faction.None);
+                Enemies.Add(e);
+                Fx.Burst(e.Pos, Pal.Elite, 20, 180f, 0.6f, 3.5f, true);
+                RefreshCombatRoster();
+                return;
+            }
         }
     }
 
@@ -209,9 +306,10 @@ public partial class Game
         }
     }
 
-    // ── HORDETEST self-test (SIGHTLINE_HORDETEST): asserts the wave escalation is monotone + capped
-    // and that the meta BestWave round-trips. A tiny 64x64 window is created by the harness so the
-    // tile math in SpawnEndless* is valid. Returns a one-line report. ──────────────────────────
+    // ── HORDETEST self-test (SIGHTLINE_HORDETEST): asserts the wave escalation is monotone + capped,
+    // that a deep stand never inherits the campaign pressure clock (APEX W1), and that the meta
+    // BestWave round-trips. A tiny 64x64 window is created by the harness so the tile math in
+    // SpawnEndless* is valid. Returns a one-line report. ──────────────────────────
     public string HordeSelfTest()
     {
         var fails = new List<string>();
@@ -226,10 +324,18 @@ public partial class Game
                 if (c > EndlessAliveCap) fails.Add($"countOverCap@w{w}");
                 prev = c;
             }
-            if (EndlessWaveCount(1) < EndlessWaveCount(2)) { /* strictly rising early */ }
-            else fails.Add("countNotRisingEarly");
+            // early ramp: never shrinking through the opener grace, and strictly rising into the
+            // first full-count wave (w3). (Pre-W7 this asserted w1 < w2 strictly; the grace
+            // halves both opener waves, so at a low EndlessBaseCount they legitimately plateau.)
+            if (EndlessWaveCount(1) < 1) fails.Add("wave1WantsNothing");
+            if (EndlessWaveCount(1) > EndlessWaveCount(2)) fails.Add("countShrinksEarly");
+            if (EndlessWaveCount(2) >= EndlessWaveCount(3)) fails.Add("countNotRisingEarly");
             // late waves should be pinned at the cap (escalation moves to toughness).
             if (EndlessWaveCount(40) != EndlessAliveCap) fails.Add("lateNotCapped");
+            // (1b) APEX W7 OPENER GRACE: waves 1-2 arrive at half strength; full count from wave 3.
+            if (EndlessWaveCount(1) != Math.Max(1, EndlessWaveCountFull(1) / 2)) fails.Add("noOpenerGrace@w1");
+            if (EndlessWaveCount(2) != Math.Max(1, EndlessWaveCountFull(2) / 2)) fails.Add("noOpenerGrace@w2");
+            if (EndlessWaveCount(3) != EndlessWaveCountFull(3)) fails.Add("graceLeaks@w3");
 
             // (2) toughness scale escalates monotonically with the wave (Heat 0 baseline).
             NoPersist = true;   // never touch disk in the scale-read path
@@ -256,6 +362,81 @@ public partial class Game
             for (int i = 0; i < 30; i++) SpawnEndlessBodies(EndlessAliveCap, 5);
             if (AliveEnemies().Count > EndlessAliveCap) fails.Add("spawnBreaksCap");
 
+            // (3b) APEX W1: LAST STAND must never inherit the campaign anti-turtle pressure clock.
+            // Endless forces Eliminate (a clock objective) and never resets _turnCount, so a deep
+            // stand used to accrue a permanent +12..+16 hidden enemy aim ramp + phantom campaign
+            // reinforcement waves. Poison the statics, run the clock deep into a stand: the
+            // Mode != Endless gate in PressureClockObjective must zero both and spawn nothing.
+            _turnCount = 12;                       // well past grace (4) + enough steps for max rung
+            Pressure = 3; Combat.PressureAim = 9;
+            int foesBefore = AliveEnemies().Count;
+            UpdatePressure();
+            if (Pressure != 0) fails.Add($"endlessPressure={Pressure}");
+            if (Combat.PressureAim != 0) fails.Add($"endlessPressureAim={Combat.PressureAim}");
+            if (AliveEnemies().Count != foesBefore) fails.Add("endlessPhantomWave");
+
+            // (3c) APEX W7 PROGRESSION HEARTBEAT: banked kills field-promote at the wave-3
+            // boundary and the offer resolves HEADLESSLY through the Phase.Barracks detour —
+            // the top-of-case guard must return the game to PlayerTurn AND spawn the next wave,
+            // never falling through to the campaign node-pick (Run.Start built a real map, so a
+            // fall-through would ChooseNode into a campaign mission from inside the stand).
+            foreach (var e in Enemies) { e.Hp = 0; e.Alive = false; }   // wave "cleared"
+            var vet = _run.Squad[0];                    // VEGA (ASSAULT): 2-fork spec table
+            vet.Kills = 3;                              // banks ROOKIE -> CORPORAL (KillReq 1, 3)
+            vet.Hp = 1;
+            int rank0 = vet.Rank, mission0 = _run.Mission;
+            int expectHp = Math.Min(vet.MaxHp, 1 + Math.Max(3, vet.MaxHp / 4));   // one sustain, full pre-saturation heal
+            Wave = 3;                                   // the every-3rd-cleared-wave beat
+            _waveClearHandled = false;
+            AutoPlay = true;                            // offers must resolve via the EXISTING autoplay paths
+            CheckEndless();                             // sustain once + PromoteEligible -> detour
+            if (Phase != Phase.Barracks) fails.Add("noBarracksDetour");
+            if (vet.Rank < 2) fails.Add($"noFieldPromotion(rank={vet.Rank})");
+            if (_run.PendingPerks.Count == 0) fails.Add("noPerkOfferQueued");
+            if (_run.PendingSpecs.Count == 0) fails.Add("noSpecOfferQueued");
+            if (vet.Hp != expectHp) fails.Add($"sustainHeal={vet.Hp}(want{expectHp})");
+            CheckEndless();                             // stray second call mid-detour: latched -> full no-op
+            if (vet.Hp != expectHp) fails.Add("sustainDoubleFire");
+            if (AliveEnemies().Count != 0) fails.Add("strayMidDetourSpawn");
+            int pump = 0;
+            while (Phase == Phase.Barracks && pump++ < 600) Update(1f / 60f);
+            AutoPlay = false;
+            if (Phase != Phase.PlayerTurn) fails.Add($"detourStuck(phase={Phase})");
+            if (Wave != 4) fails.Add($"detourWave={Wave}(want4)");
+            if (AliveEnemies().Count == 0) fails.Add("detourNoNextWave");
+            if (_run.Mission != mission0) fails.Add("detourNodePickFired");
+            if (Mode != GameMode.Endless) fails.Add($"detourModeLeak={Mode}");
+            if (_run.PendingPerks.Count > 0 || _run.PendingSpecs.Count > 0 || _run.BoonOffer.Count > 0)
+                fails.Add("offersUnresolved");
+            if (vet.Rank <= rank0) fails.Add("rankLost");
+
+            // (3d) APEX W7 "an ending": waves past saturation inject one extra ELITE (morale-
+            // exempt PodId=-1, explicit grenade load) and the between-wave mend decays to zero.
+            foreach (var e in Enemies) { e.Hp = 0; e.Alive = false; }
+            SpawnEndlessWave(EndlessSaturationWave + 1);
+            var elite = AliveEnemies().FirstOrDefault(e => e.Cls == "ELITE");
+            if (elite == null) fails.Add("noEliteAt21");
+            else
+            {
+                if (elite.PodId != -1) fails.Add("elitePodJoined");
+                if (elite.Grenades != 1) fails.Add($"eliteGrenades={elite.Grenades}(want1)");
+            }
+            foreach (var e in Enemies) { e.Hp = 0; e.Alive = false; }
+            SpawnEndlessWave(5);                        // pre-saturation wave: NO elite injected
+            if (AliveEnemies().Any(e => e.Cls == "ELITE")) fails.Add("eliteBeforeSaturation");
+            foreach (int mhp in new[] { 8, 16 })        // rookie + veteran HP pools
+            {
+                if (EndlessWaveHeal(mhp, EndlessSaturationWave) != Math.Max(3, mhp / 4)) fails.Add($"healDecaysEarly@hp{mhp}");
+                int prevHeal = int.MaxValue;
+                for (int w = 1; w <= 40; w++)
+                {
+                    int h = EndlessWaveHeal(mhp, w);
+                    if (h > prevHeal) fails.Add($"healNonMonotone@w{w}");
+                    prevHeal = h;
+                }
+                if (EndlessWaveHeal(mhp, 40) != 0) fails.Add($"healNeverZero@hp{mhp}");
+            }
+
             // (4) meta BestWave round-trips (read-modify-write, append-only). Preserve any real meta.
             NoPersist = false;
             string metaSaved = System.IO.File.Exists(SaveGame.MetaPathPublic)
@@ -281,7 +462,7 @@ public partial class Game
         }
         catch (Exception e) { return "HORDETEST: FAIL (exception " + e.Message + ")"; }
         return fails.Count == 0
-            ? "HORDETEST: PASS (wave count/scale escalate + alive-cap holds; meta BestWave round-trips)"
+            ? "HORDETEST: PASS (wave count/scale escalate + alive-cap holds; opener grace; endless skips the pressure clock; mid-stand promotions resolve through the Barracks detour w/o double-sustain or node-picks; deep waves inject an ELITE + heal decays to zero; meta BestWave round-trips)"
             : "HORDETEST: FAIL (" + string.Join(",", fails) + ")";
     }
 }

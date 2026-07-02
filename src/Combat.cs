@@ -116,9 +116,12 @@ public static class Combat
     public const int CrossfireAim  = 10;   // converging fire: harder for the target to use cover/position
     public const int CrossfireCrit = 10;
     // Crossfire fires when the two firing vectors diverge by > ~72.5 degrees (cosine < this threshold)...
-    const float CrossfireCosMax = 0.30f;
+    // Public (W6a): Ai.CrossfireWith is PINNED to these exact constants so the planner's crossfire
+    // prediction and this resolver can never drift apart again (they had: the planner used a stale
+    // ally-weapon-range gate this resolver never had).
+    public const float CrossfireCosMax = 0.30f;
     // ...and the converging ally is a credible threat (has LoS and is within this range of the target).
-    const float CrossfireAllyRange = 10f;
+    public const float CrossfireAllyRange = 10f;
 
     // ---- enemy FACTIONS (Wave 4 foundation) ----
     // The active mission's enemy faction, set once per mission by Game.SetupMission (mirrors the
@@ -187,6 +190,10 @@ public static class Combat
         PressureAim = 0;
         AllUnits = System.Array.Empty<Unit>();
         RunBoons = runBoons == null ? new System.Collections.Generic.HashSet<Boon>() : new System.Collections.Generic.HashSet<Boon>(runBoons);
+        // W6b — the AI coordination tier is mission-scoped like the statics above: cleared here
+        // (SetupMission re-publishes it unconditionally) so a NO QUARTER run's Tier 2 can never
+        // bleed into a subsequent heat-0 SKIRMISH/DAILY or a harness scene.
+        Ai.Tier = 0;
     }
 
     /// Run over: clear everything, including the run-scoped boons (re-set next run's BeginMission).
