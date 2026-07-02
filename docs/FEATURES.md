@@ -394,3 +394,45 @@ seeds (mix of WIN/LOSE, no exceptions):
   perks); BALLISTIC PLATING de-throned from the autopilot's always-buy slot so requisition purchases spread (PLATING
   369→203 buys; dead perks Hardened/Tank 2/4 → 11/11). Plus a double-kill correctness fix that makes the
   class-lethality telemetry honest (`SIGHTLINE_DKTEST`).
+
+## PROGRAM APEX — the top end becomes real
+- **The ladder's top exists:** the heat 7-8 / IRON VETERANS zero-roster crash is fixed (a shattered command
+  drafts emergency conscripts to the AttritionFloor — the rung still shrinks a surviving roster, never zeroes
+  it), and heat 8 has its first measured completion (~25%, a wall not a flat). **NO QUARTER now adds +1 enemy
+  weapon damage** (m3+, initial force). Heat rungs 6+ raise a data-driven **`Ai.Tier`** — at the apex the AI
+  coordinates harder (tighter smoke discipline capped short of certainty, stronger focus/crossfire pull)
+  instead of just aiming better; Tier 0 is byte-identical to the shipped constants. (`SIGHTLINE_HEATLADDERTEST`.)
+- **Planner-resolver truthfulness:** the enemy planner now sees the commanding (2-tier) LoS the resolver
+  already paid for — snipers/elites genuinely seek the authored `=` plateaus — and its crossfire prediction is
+  pinned term-by-term to `Combat.InCrossfire`. Policy gap at h0 healed from an inverted −20 to +5. (AITEST
+  legs proven to fail on reverted code.)
+- **LAST STAND is a ladder:** waves 1-2 arrive at half count (opener grace); every 3rd cleared wave banks
+  promotions mid-stand (perk pick-1-of-2 + spec forks via the barracks chooser, autoplay-resolvable), every
+  5th offers a boon; past wave 20 the between-wave heal decays and a REAPER elite joins each wave, so deep
+  stands statistically terminate. Depth median 3 → 5-6, p90 finite. (`SIGHTLINE_ENDLESSOFFER` shot hook.)
+- **Escort de-dragged (12.9–15.8t → 5.8t at 96% win):** the VIP leash moves through real MoveStepAnims —
+  enemy overwatch, fire and pod-wakes apply (two-pass fire avoidance; anchor = the most-forward soldier) —
+  and Escort gains its own forward beacon behind a hard gate: planter in the far third AND a cold LZ (no
+  living enemy within Chebyshev 3, dormant included). Evac's shipped half-line beacon is untouched.
+- **Rescue is honest:** the caged captive is truly caged (no self-rescue walking), and an abandoned cage
+  (whole squad down) is a clean loss or checkpoint redeploy instead of a soft-lock — in campaign AND
+  skirmish/daily. (`SIGHTLINE_RESCUETEST`.) **Overwatch resource leak fixed:** stacked watchers no longer
+  spend ammo/reactions on a mover already predicted dead by earlier queued hits.
+- **Content reachability:** STRIKER/LANCER/HOUND/SCREENER joined the faction rosters (stats verbatim,
+  tier-gated) — they were previously unreachable in the majority of the campaign; Defend waves draw from the
+  full endless roster (BOMBARD demoted, TURRET re-rolled; pressure-clock waves stay cheap); 40 callsigns with
+  dedup across squad + fallen + the veteran reserve, so bond/memorial/legend records can't merge. Backfill
+  recruits arrive depth-scaled ((mission-1)/2 kills, promoted at draft) so casualty runs stop compounding.
+- **Persistence armor:** save/meta writes are atomic (.tmp + rename) and an unreadable file is stashed to
+  .bak instead of silently wiped by the next write — the veteran reserve/salvage/hall of fame no longer sit
+  one torn write from a reset. SAVETEST covers the corruption round-trip.
+- **The flywheel has eyes:** the default batch spans heats {0,2,4,6,8}; `SIGHTLINE_BALANCE_ENDLESS=N`
+  measures wave-depth (mean/median/p90, mode-tagged out of campaign gap math); `SIGHTLINE_VETSIM=n` prices
+  the veteran-recall floor; the report adds win-rate-by-boon/spec/contract and an ENEMY COMPOSITION table;
+  the greedy perk picker measures value (biased-random A/B), not slot position.
+- **Presentation honesty (W9/W10, owner-feedback-driven):** the HIT number is banded by confidence (red <40 /
+  amber 40-69 / green >=70) in a neutral frame; a TRUE in-shader brightness/gamma pass replaces the washing
+  white quad (pause GAMMA row, persisted); the action bar sizes buttons to their labels and wraps into an
+  upward tray (ellipsis structurally impossible); odds modifiers are 13px label/value rows with right-aligned
+  colored numbers; the top bar reads as three aligned zones with labeled PRESSURE pips; campaign-map labels
+  can't overprint; roster chips fade when they'd hide a unit.
