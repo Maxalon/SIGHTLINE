@@ -190,6 +190,10 @@ public static class Combat
         PressureAim = 0;
         AllUnits = System.Array.Empty<Unit>();
         RunBoons = runBoons == null ? new System.Collections.Generic.HashSet<Boon>() : new System.Collections.Generic.HashSet<Boon>(runBoons);
+        // W6b — the AI coordination tier is mission-scoped like the statics above: cleared here
+        // (SetupMission re-publishes it unconditionally) so a NO QUARTER run's Tier 2 can never
+        // bleed into a subsequent heat-0 SKIRMISH/DAILY or a harness scene.
+        Ai.Tier = 0;
     }
 
     /// Run over: clear everything, including the run-scoped boons (re-set next run's BeginMission).

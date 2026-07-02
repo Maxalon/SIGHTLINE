@@ -612,8 +612,77 @@ public partial class Game
             Combat.AllUnits = savedAll;                     // never leak the staged roster
         }
 
+        // ---- W6b — COORDINATION TIER: data rows, damp identity/cap, tier-0 invariance,
+        // tier-2 divergence, and the stale-tier lifecycle. ----
+        {
+            // (a) data: the ladder's AiTier rungs (0 below EXPOSED; 1 at rungs 6-7; 2 at NO QUARTER).
+            if (Sightline.Heat.AiTier(0) != 0 || Sightline.Heat.AiTier(5) != 0) fails.Add("aiTierLowHeatNot0");
+            if (Sightline.Heat.AiTier(6) != 1 || Sightline.Heat.AiTier(7) != 1) fails.Add("aiTierExposedNot1");
+            if (Sightline.Heat.AiTier(8) != 2) fails.Add("aiTierNoQuarterNot2");
+
+            // (b) the smoke/flash damp read: tier 0 == the shipped constants EXACTLY; tier 2
+            //     rises but is CAPPED at 75 (never certainty) and never lifts a roll already
+            //     at/above the cap (those are strong-reason/identity rolls, not knobs).
+            Ai.Tier = 0;
+            if (Ai.Damp(55) != 55 || Ai.Damp(70) != 70 || Ai.Damp(80) != 80 || Ai.Damp(90) != 90)
+                fails.Add("dampTier0NotIdentity");
+            Ai.Tier = 2;
+            if (Ai.Damp(55) != 75 || Ai.Damp(70) != 75) fails.Add("dampTier2NotCapped75");
+            if (Ai.Damp(80) != 80 || Ai.Damp(90) != 90) fails.Add("dampTier2LiftedStrongRoll");
+            Ai.Tier = 0;
+
+            // (c) one fixed scene, three plans. A PINNED enemy (ringed by dormant pod-mates ->
+            //     single-tile reach, jitter-proof) sees two exposed soldiers: the squad FOCUS at
+            //     full HP (dist 8) and a NON-focus in the finish band (dist 2, hp 2) whose
+            //     intrinsic value beats the tier-0 focus bias by ~5pts but LOSES to the tier-2
+            //     bias (30 -> 40). Tier 0 must take the opportunistic finish — today's shipped
+            //     behaviour, asserted TWICE around a tier flip so the tier reads are proven
+            //     pure/hysteresis-free — while Tier 2 must converge on the squad's focus (the
+            //     more coordinated play; the focus-bias read demonstrably changed).
+            Grid = new Grid();
+            Players = new System.Collections.Generic.List<Unit>();
+            Enemies = new System.Collections.Generic.List<Unit>();
+            var tFoc = MkP("TFOC", 13, 5, 8, 8);            // the squad focus: full HP, dist 8
+            var tFin = MkP("TFIN", 5, 3, 2, 8);             // finishable: hp 2 <= DmgMax 5, dist 2
+            Players.Add(tFoc); Players.Add(tFin);
+            var pinned = MkE("PIN", 5, 5);
+            Enemies.Add(pinned);
+            for (int bd = 0; bd < 8; bd++)                  // ring of DORMANT pod-mates pins it in place
+            {
+                int[] bdx = { -1, 0, 1, -1, 1, -1, 0, 1 }, bdy = { -1, -1, -1, 0, 0, 1, 1, 1 };
+                var blk = MkE("BLK" + bd, 5 + bdx[bd], 5 + bdy[bd]);
+                blk.Alert = AlertLevel.Unaware;             // dormant: pins movement, no active AI terms
+                Enemies.Add(blk);
+            }
+            _aiUnits = AliveEnemies().Where(e => e.Active).ToList();
+            PlanEnemySquad();
+            EnemyFocus = tFoc;                              // stage the coordination conflict
+            Ai.Tier = 0;
+            var t0a = Ai.Plan(this, pinned);
+            if (t0a.ShootTarget != tFin) fails.Add("tier0NotShippedPick=" + (t0a.ShootTarget?.Name ?? "null"));
+            Ai.Tier = 2;
+            EnemyFocus = tFoc;                              // (Plan never mutates it; explicit for clarity)
+            var t2 = Ai.Plan(this, pinned);
+            if (t2.ShootTarget != tFoc) fails.Add("tier2NoConvergence=" + (t2.ShootTarget?.Name ?? "null"));
+            Ai.Tier = 0;
+            var t0b = Ai.Plan(this, pinned);
+            if (t0b.ShootTarget != t0a.ShootTarget || t0b.Path.Count != t0a.Path.Count
+                || t0b.MoveActions != t0a.MoveActions || t0b.Overwatch != t0a.Overwatch
+                || t0b.Hunker != t0a.Hunker || t0b.Grenade != t0a.Grenade || t0b.UseItem != t0a.UseItem)
+                fails.Add("tier0NotInvariantAfterFlip");
+
+            // (d) lifecycle: a stale tier survives neither mission SETUP (SetupMission publishes
+            //     unconditionally — default heat 0 -> tier 0) nor the Combat.EndMission mirror.
+            Ai.Tier = 2;
+            StartMission(1);                                // NoPersist; no SIGHTLINE_HEAT -> heat 0
+            if (Ai.Tier != 0) fails.Add("staleTierSurvivedSetup=" + Ai.Tier);
+            Ai.Tier = 2;
+            Combat.EndMission(null);
+            if (Ai.Tier != 0) fails.Add("staleTierSurvivedEndMission=" + Ai.Tier);
+        }
+
         return fails.Count == 0
-            ? "AITEST: PASS (focus picks killable+exposed; Ai.Plan biases to focus + flips; overwatch map mirrors reaction; retreat plan still acts; W4 setup-first + live focus recompute; W6a commanding climb+shot + crossfire planner==resolver pin)"
+            ? "AITEST: PASS (focus picks killable+exposed; Ai.Plan biases to focus + flips; overwatch map mirrors reaction; retreat plan still acts; W4 setup-first + live focus recompute; W6a commanding climb+shot + crossfire planner==resolver pin; W6b tier data/damp-cap/tier-0-invariance/tier-2-convergence/lifecycle)"
             : "AITEST: FAIL (" + string.Join(",", fails) + ")";
     }
 

@@ -64,6 +64,12 @@ public partial class Game
     void SpawnEndlessWave(int w)
     {
         Wave = w;
+        // W6b — the endless path raises the AI coordination tier as the stand deepens (wave 8
+        // -> tier 1, wave 16 -> tier 2), never dropping below the run's Heat-derived tier
+        // (SetupMission published that at stand start). LAST STAND always ends via EndEndless
+        // -> Combat.EndRun -> EndMission, which clears the tier, so a deep stand can never
+        // leak Tier 2 into a later mode. Waves 1-7 at heat < 6 stay tier 0 (harness-stable).
+        Ai.Tier = Math.Max(Sightline.Heat.AiTier(_run?.HeatLevel ?? 0), w >= 16 ? 2 : w >= 8 ? 1 : 0);
         int want = EndlessWaveCount(w);
         // Escalate body toughness: MakeWaveHostile scales its stats off a "missionNum"-like arg
         // (bump = n-1). Ramp that with the wave AND with Heat so the horde gets meaner over time.

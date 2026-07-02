@@ -28,6 +28,27 @@ public static class Ai
     public const int HealRange = 4;    // tiles a medic can mend across
     public const int HealAmount = 4;   // HP restored per heal
 
+    // W6b — COORDINATION TIER (0..2): the apex of the Heat ladder scales by PLAYING BETTER,
+    // not just by piling stats onto the saturating StatDelta/88-aim clamp. Published
+    // UNCONDITIONALLY by Game.SetupMission every mission (from the Heat rows' data-only
+    // AiTier field: 0 below EXPOSED, 1 at rungs 6-7, 2 at NO QUARTER) and raised by the
+    // LAST STAND wave path as a stand deepens; CLEARED by the Combat.EndMission mirror so a
+    // NO QUARTER run's tier can never leak into a subsequent heat-0 SKIRMISH/DAILY.
+    // SAFETY INVARIANT: Tier 0 == today's constants EXACTLY (every tiered read below
+    // collapses to its pre-W6b value), and no SIGHTLINE_*TEST path sets it, so the harness
+    // and default screenshots stay byte-stable by construction.
+    public static int Tier = 0;
+
+    // W6b — tiered item-roll damper: the small random damper on smoke/flash use shrinks as
+    // the tier rises (a coordinated force screens/blinds more RELIABLY), but the rise is
+    // CAPPED at 75 — never certainty — per the "fires often-but-not-always, so it stays a
+    // threat not a tic" rationale at the smoke reasons below. A base chance already at/above
+    // the cap does not rise at all: those (endsWatched 90, SCREENER 88, flash 80) are
+    // strong-reason/identity rolls, not difficulty knobs. Tier 0 returns the base unchanged.
+    // Internal so the AITEST harness can pin the tier-0 identity + tier-2 cap directly.
+    internal static int Damp(int baseChance)
+        => baseChance >= 75 ? baseChance : Math.Min(baseChance + 10 * Tier, 75);
+
     public static EnemyPlan Plan(Game g, Unit e)
     {
         var plan = new EnemyPlan();
@@ -180,6 +201,10 @@ public static class Ai
             }
             // only break off when no reachable tile yields a meaningful shot (<55% best);
             // if it can still hit hard it stands and fights (a trade may be worth it).
+            // W6b deliberately does NOT tier this 55: W6a's commanding retreat scan above
+            // already trims false break-offs (plateau shots now count), and UNDERTOW W3 rout
+            // adds its own break-off pressure — raising the threshold with the tier would
+            // stack all three toward apex passivity. Revisit only on flywheel retreat data.
             retreatMode = bestReachHit < 55f;
         }
 
@@ -238,7 +263,10 @@ public static class Ai
                     {
                         // SPOTTER amplifies the convergence: a painted target is worth collapsing
                         // on even harder, so the squad genuinely focuses while the BEACON lives.
-                        val += spotterActive ? 45 : 30;                  // concentrate fire here
+                        // W6b: the coordination tier sharpens the squad's convergence — the focus
+                        // bias climbs 30 -> 35 -> 40 across tiers (the SPOTTER's painted 45 is an
+                        // archetype force-multiplier, not a difficulty knob, so it stays fixed).
+                        val += spotterActive ? 45 : 30 + 5 * Tier;       // concentrate fire here
                         if (canFinish && odds.HitChance >= 50) val += 35; // press a likely kill
                         // COORDINATION 6 — CROSSFIRE (AI improvement): prefer hitting the focus
                         // from an angle its cover DOESN'T protect (a genuine flank) or where it's
@@ -267,8 +295,10 @@ public static class Ai
                         // amplified for the painted FOCUS so the squad genuinely pincers the BEACON's
                         // mark; a NON-focus crossfire is a smaller nudge so it never out-votes the
                         // squad's deliberate focus choice. Never large enough to override "can I
-                        // shoot at all / am I safe".
-                        val += isFocus ? (spotterActive ? 22f : 16f) : 8f;
+                        // shoot at all / am I safe". W6b: the focus-crossfire pull climbs
+                        // 16 -> 19 -> 22 with the coordination tier (a tier-2 force genuinely
+                        // pincers); the SPOTTER 22 and non-focus 8 stay fixed.
+                        val += isFocus ? (spotterActive ? 22f : 16f + 3f * Tier) : 8f;
                     }
 
                     // TARGET SHARPENING (AI improvement 3): among shootable soldiers prefer, in order,
@@ -620,7 +650,7 @@ public static class Ai
                 if (e.Cls == "SCREENER")
                 {
                     var (zx, zy, zGood) = BestScreen(g, e, bestTile.x, bestTile.y);
-                    if (zGood && Util.Roll(88))     // a zoner screens aggressively (small damper only)
+                    if (zGood && Util.Roll(Damp(88)))   // a zoner screens aggressively (small damper only; >= the W6b cap, so tier-fixed)
                     {
                         plan.UseItem = true; plan.ItemTx = zx; plan.ItemTy = zy;
                         if (plan.ShootTarget != null &&
@@ -633,7 +663,10 @@ public static class Ai
                     var (sx, sy, smokeGood) = BestSmoke(g, e, bestTile.x, bestTile.y);
                     // strong reasons (about to eat overwatch) fire almost always; a softer
                     // open-ground screen fires often-but-not-always, so it stays a threat not a tic.
-                    bool fire = endsWatched ? Util.Roll(90) : routeWatched ? Util.Roll(70) : Util.Roll(55);
+                    // W6b: Damp raises the two softer reasons with the coordination tier
+                    // (70/55 -> capped 75) — a tier-2 force screens its advances reliably —
+                    // while the strong 90 stays fixed and NOTHING ever reaches certainty.
+                    bool fire = endsWatched ? Util.Roll(Damp(90)) : routeWatched ? Util.Roll(Damp(70)) : Util.Roll(Damp(55));
                     if (smokeGood && fire)
                     {
                         plan.UseItem = true; plan.ItemTx = sx; plan.ItemTy = sy;
@@ -652,7 +685,7 @@ public static class Ai
                 // adjacent to e itself is vetoed). It fires reliably when the cluster exists — a
                 // pre-charge tool, not a coin flip — with a small damper so it isn't fully scripted.
                 var (fx, fy, flashHits, flashAllies) = BestFlash(g, e, bestTile.x, bestTile.y);
-                if (flashHits >= 2 && flashAllies == 0 && Util.Roll(80))
+                if (flashHits >= 2 && flashAllies == 0 && Util.Roll(Damp(80)))   // 80 >= the W6b cap: tier-fixed (a pre-charge tool, not a knob)
                 {
                     plan.UseItem = true; plan.ItemTx = fx; plan.ItemTy = fy;
                     plan.ShootTarget = null;   // flash takes the action (like grenade)

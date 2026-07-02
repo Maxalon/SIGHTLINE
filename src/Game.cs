@@ -901,6 +901,14 @@ public partial class Game
         // Heat folds into the SAME difficulty params the deployment cards use (no Mission.cs
         // signature change): extra bodies + an extra stat bump as the ladder climbs.
         int heat = _run.HeatLevel;
+        // W6b — publish the AI coordination tier UNCONDITIONALLY every mission (0 at heats 0-5,
+        // so DAILY/SKIRMISH/harness stay byte-stable by default AND a stale NO QUARTER tier can
+        // never leak into the next fight through this shared DEPLOY/SKIRMISH/DAILY setup path;
+        // Combat.EndMission mirrors it with a clear). Deliberately NOT ramped by the
+        // early-mission heat grace below: the tier is a qualitative mutator like EXPOSED (which
+        // also bites from mission 1), not a quantitative delta. The LAST STAND wave path
+        // (SpawnEndlessWave) raises it as a stand deepens.
+        Ai.Tier = Sightline.Heat.AiTier(heat);
         int heatEnemy = Sightline.Heat.EnemyDelta(heat);
         int heatStat  = Sightline.Heat.StatDelta(heat);
         // EARLY-MISSION HEAT GRACE. The measured ~20% mission-1 loss (which hard-caps run
