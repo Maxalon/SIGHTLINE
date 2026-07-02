@@ -770,9 +770,11 @@ public partial class Game
 
     /// Harness hook (screenshot only): arm a shot tooltip on an enemy so the randomness-
     /// mitigation surfacing (DMG range + GRAZE floor + "+N STEADYING" streak badge) is visible.
-    /// Seats a live enemy in clean LoS of the first soldier, banks a miss streak on that soldier,
-    /// then enters aim mode locked on the enemy. The next Update's UpdateHoverAndAim recomputes
-    /// + shows the odds naturally (no special draw path), so the screenshot matches real play.
+    /// W9 re-stage: the target is HUNKERED behind HIGH cover (full -40 facing-side cover on a
+    /// dominant-axis shot, -25 hunker), so the shown HIT lands well under 40% — exercising the
+    /// tooltip's red low-confidence band (>=70 good / 40-69 caution / <40 threat) inside the
+    /// neutral PanelBd frame. The next Update's UpdateHoverAndAim recomputes + shows the odds
+    /// naturally (no special draw path), so the screenshot matches real play.
     public void DebugTooltip()
     {
         var c = Players.Where(p => !p.IsVip && p.Alive).ToList();
@@ -783,9 +785,26 @@ public partial class Game
         var foe = Enemies.FirstOrDefault(e => e.Alive);
         if (foe != null)
         {
-            // Re-seat the foe a few tiles directly east of the soldier on clear floor so LoS holds.
-            int fx = Math.Min(Grid.W - 1, s.X + 4), fy = s.Y;
-            if (Grid.InBounds(fx, fy)) { foe.X = fx; foe.Y = fy; foe.SyncPos(); }
+            // Seat the foe at (+4,+2) — a dominant-x shot whose Bresenham line skirts the
+            // facing cover tile — hunkered behind a HIGH-cover block on its west (facing) side.
+            int fy = s.Y + 2 < Grid.H ? s.Y + 2 : s.Y - 2;
+            int fx = Math.Min(Grid.W - 1, s.X + 4);
+            if (Grid.InBounds(fx, fy))
+            {
+                // Clear the fire lane (floor, ground level) so nothing else warps the odds,
+                // then stand the facing high-cover block back up beside the target.
+                for (int tx = s.X; tx <= fx; tx++)
+                    for (int ty = Math.Min(s.Y, fy); ty <= Math.Max(s.Y, fy); ty++)
+                    {
+                        var occ = UnitAt(tx, ty);
+                        if (occ != null && occ != s) continue;   // don't pull terrain from under another unit
+                        Grid.Tiles[tx, ty] = TileType.Floor;
+                        Grid.Height[tx, ty] = 0;
+                    }
+                Grid.Tiles[fx - 1, fy] = TileType.HighCover;
+                foe.X = fx; foe.Y = fy; foe.SyncPos();
+                foe.Hunkered = true;
+            }
             foe.Alert = AlertLevel.Alert;
             Selected = s; RecomputeMoveCost();
             AimMode = true; AimTarget = foe;

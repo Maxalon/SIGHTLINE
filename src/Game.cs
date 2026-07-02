@@ -2851,6 +2851,7 @@ public partial class Game
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseShake)) Fx.ShakeOn = !Fx.ShakeOn;
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseThreat)) ShowThreatPref = !ShowThreatPref;
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseBright)) Display.CycleBrightness();
+        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseGamma)) Display.CycleGamma();   // W9: true gamma (post-FX pass)
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseColorblind)) Display.ToggleColorblind();
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseAutoCam)) { Display.ToggleAutoCam(); if (!Display.AutoCam) { CamZoom = 1f; CamPan = Vector2.Zero; } }
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseCodex)) { BeginCodex(); }   // W6: open the field manual (remembers this phase for BACK)

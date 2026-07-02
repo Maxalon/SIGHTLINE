@@ -441,6 +441,7 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_TUTORIAL") == "1") game.TutStep = 0;
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CB") == "1") Pal.SetColorblind(true);
         if (shot && int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_BRIGHT"), out int _bi)) Display.BrightIdx = _bi;
+        if (shot && int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_GAMMA"), out int _gi)) Display.GammaIdx = _gi;   // W9: gamma level 0-4 (pair with SIGHTLINE_POSTFX=1)
         // SIGHTLINE_POSTFX=1: inject a strong demo bloom + chroma so the shader effect
         // is clearly visible in the screenshot without needing a live combat event.
         if (postFxShot)
