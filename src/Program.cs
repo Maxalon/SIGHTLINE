@@ -26,6 +26,16 @@ public static class Program
             return;
         }
 
+        // APEX W4: SIGHTLINE_BALANCE_ENDLESS=<N> : the SAME flywheel pointed at LAST STAND — N
+        // endless stands (greedy+sloppy paired, heats cycled/pinned exactly like SIGHTLINE_BALANCE)
+        // through the existing BeginEndless entry; the report adds wave-depth mean/median/p90.
+        // Checked after SIGHTLINE_BALANCE, so a plain campaign batch is unchanged.
+        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_BALANCE_ENDLESS"), out int endlessBatchN) && endlessBatchN > 0)
+        {
+            BalanceBatch(endlessBatchN, endless: true);
+            return;
+        }
+
         // SIGHTLINE_SAVETEST=1 : headless round-trip check for run persistence (item E). No window.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_SAVETEST") == "1")
         {
@@ -449,10 +459,10 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_SUMMARY") == "1") game.DebugSummary();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_SUMMARY") == "lose") game.DebugSummary(true);
         // SIGHTLINE_TUTORIAL=<n>: show tutorial step n-1 (=1 keeps the historical "step 0" shot;
-        // =3 frames the rewritten FIRE-rule copy). NoPersist is already set, so the completion-time
-        // MarkTutorialSeen can never fire from a shot run (CompleteTutorial is !NoPersist-gated).
+        // =3 frames the rewritten FIRE-rule copy, =4 the final step). NoPersist is already set, so
+        // the completion-time MarkTutorialSeen can never fire from a shot run (!NoPersist-gated).
         if (shot && int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_TUTORIAL"), out int _tut) && _tut > 0)
-            game.TutStep = Math.Min(_tut, Game.TutPrompts.Length) - 1;
+            game.ShowTutorialStep(_tut - 1);
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CB") == "1") Pal.SetColorblind(true);
         if (shot && int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_BRIGHT"), out int _bi)) Display.BrightIdx = _bi;
         if (shot && int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_GAMMA"), out int _gi)) Display.GammaIdx = _gi;   // W9: gamma level 0-4 (pair with SIGHTLINE_POSTFX=1)
@@ -513,19 +523,26 @@ public static class Program
 
     // SIGHTLINE_BALANCE=<N>: run N full headless campaigns through the competent autopilot
     // (SmartPlay), accumulate Stats telemetry across all of them, and print the aggregate
-    // balance report. Heat is cycled 0..4 across the batch (or pinned via SIGHTLINE_BALANCE_HEAT)
-    // so the report shows a difficulty curve. Fast + headless: one window, minimal per-frame
-    // draw (the autoplay path), uncapped FPS, hard per-match frame cap so it can never hang.
+    // balance report. Heat is cycled over the LADDER-SPANNING default set {0,2,4,6,8} across
+    // the batch (or pinned via SIGHTLINE_BALANCE_HEAT) so the report shows a difficulty curve.
+    // Fast + headless: one window, minimal per-frame draw (the autoplay path), uncapped FPS,
+    // hard per-match frame cap so it can never hang.
     //
     // Each campaign is now played under BOTH a near-optimal "greedy" policy and a human-error
     // "sloppy" policy (the report shows the optimal-vs-sloppy GAP = difficulty slack), plus the
     // bot now exercises utility items + every class verb-ability so item/ability balance is
     // measured, and per-turn decision-richness + lead-swing texture is instrumented. Knobs:
-    //   SIGHTLINE_BALANCE_HEAT=<h>  pin a heat rung (else cycle 0..4)
+    //   SIGHTLINE_BALANCE_HEAT=<h>  pin a heat rung (else cycle the default {0,2,4,6,8} set)
     //   SIGHTLINE_BALANCE_DUMB=1    use the dumb smoke-test autopilot (single policy, baseline)
     //   SIGHTLINE_BALANCE_SLOPPY=1  run ONLY the sloppy policy (else greedy+sloppy paired)
     //   SIGHTLINE_BALANCE_JSON=<p>  override the JSON artifact path (else <tmp>/balance.json)
-    static void BalanceBatch(int runs)
+    //
+    // APEX W4 — `endless: true` (SIGHTLINE_BALANCE_ENDLESS=<N>) points the same machinery at
+    // LAST STAND: each "campaign" slot becomes one endless stand via BeginEndless, and depth
+    // (waves survived) is logged from game.Wave at EVERY exit — wipe, wave-cap, frame-cap,
+    // abort — NEVER from RunState.Mission (endless keeps Mission==1, so the old campaign
+    // fallback would log every capped deep stand as depth 0 and corrupt the p90).
+    static void BalanceBatch(int runs, bool endless = false)
     {
         // Cumulative telemetry across the whole batch (NOT reset per match).
         Stats.Reset();
@@ -535,7 +552,11 @@ public static class Program
         Mission.ForcedLayout = -1;       // no forced arena
         Pal.SetColorblind(false);        // default palette (irrelevant headless, set defensively)
 
-        // Optional pinned heat; otherwise cycle 0..4 so the curve shows.
+        // Optional pinned heat; otherwise cycle the ladder-spanning default set so the curve shows.
+        // APEX W4: the default re-baseline now SPANS THE LADDER — {0,2,4,6,8} instead of i%5 —
+        // so routine batches measure the mutator rungs (EXPOSED@6 / NO QUARTER@8) instead of only
+        // heats 0-4 (6/8 were previously measured only in ad-hoc pinned runs).
+        int[] heatCycle = { 0, 2, 4, 6, 8 };
         bool pinHeat = int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_BALANCE_HEAT"), out int fixedHeat);
         // SIGHTLINE_BALANCE_DUMB=1 runs the smoke-test autopilot instead of the competent AI,
         // so the same batch can produce a baseline to compare the smart AI (and balance changes) against.
@@ -550,7 +571,16 @@ public static class Program
         Raylib.SetTargetFPS(0);               // uncapped — run as fast as the sim allows
 
         const int frameCap = 20000;           // per-match safety cap; a hit cap counts as a loss
-        int wins = 0, losses = 0, capped = 0;
+        // APEX W4 — explicit ENDLESS CAP POLICY (so the wave-depth p90 is never silently censored):
+        //   * wave cap 30 — mirrors the SIGHTLINE_ENDLESS autoplay cap in Main. A stand that deep is
+        //     a deliberate right-censor: it's logged as LossCause "wave-cap" and the report calls out
+        //     every hit next to the depth distribution.
+        //   * frame cap 60000 (3x the campaign cap) — a 30-wave stand plays FAR more turns than a
+        //     6-mission campaign, so the campaign cap would censor exactly the deep stands the p90
+        //     measures. Safety net only; logged as "frame-cap" and equally called out.
+        const int endlessWaveCap = 30;
+        const int endlessFrameCap = 60000;
+        int wins = 0, losses = 0, capped = 0, waveCapped = 0;
         bool aborted = false;
         var sw = System.Diagnostics.Stopwatch.StartNew();
 
@@ -563,15 +593,18 @@ public static class Program
                             : sloppyOnly ? new[] { true }
                             : new[] { false, true };   // greedy then sloppy
 
-        // Run a single campaign (heat `heat`, policy `sloppy`, deterministic sloppy seed `seed`)
-        // to a decision. Returns false if the window closed mid-match (abort the batch).
+        // Run a single campaign / endless stand (heat `heat`, policy `sloppy`, deterministic
+        // sloppy seed `seed`) to a decision. Returns false if the window closed mid-match
+        // (abort the batch). Depth for the defensive EndRun closes is MODE-AWARE: game.Wave
+        // for endless (Mission stays 1 there), missions-cleared for the campaign.
         bool RunOne(int heat, bool sloppy, int seed)
         {
-            // StartMission reads SIGHTLINE_HEAT when NoPersist is set — dial it in before starting.
+            // StartMission/BeginEndless read SIGHTLINE_HEAT when NoPersist is set — dial it in first.
             Environment.SetEnvironmentVariable("SIGHTLINE_HEAT", heat.ToString());
             var game = new Game { NoPersist = true, AutoPlay = true, SmartPlay = !dumb, SmartSloppy = !dumb && sloppy };
             game.SeedSloppy(seed);   // reproducible per-run perturbation (no-op unless sloppy)
-            game.StartMission(1);    // fires Stats.BeginRun internally (tags the policy)
+            // both entries fire Stats.BeginRun internally (tagging policy + mode)
+            if (endless) game.BeginEndless(); else game.StartMission(1);
 
             int frame = 0;
             while (!Raylib.WindowShouldClose())
@@ -579,6 +612,25 @@ public static class Program
                 game.Update(1f / 60f);
                 Display.RenderFrame(() => Raylib.ClearBackground(Pal.Bg));   // minimal draw
                 frame++;
+                if (endless)
+                {
+                    // A wipe routes through EndEndless -> Phase.Lose, which already closed the
+                    // Stats run with depth = waves survived. That's the normal, uncensored exit.
+                    if (game.Phase == Phase.Lose) { wins++; return true; }
+                    if (game.Wave >= endlessWaveCap)
+                    {
+                        waveCapped++;
+                        Stats.EndRun(false, game.Wave, "wave-cap");   // logged right-censor at 30
+                        return true;
+                    }
+                    if (frame >= endlessFrameCap)
+                    {
+                        capped++;
+                        Stats.EndRun(false, game.Wave, "frame-cap");  // safety net; logged
+                        return true;
+                    }
+                    continue;
+                }
                 if (game.Phase == Phase.Win) { wins++; return true; }
                 if (game.Phase == Phase.Lose) { losses++; return true; }
                 if (frame >= frameCap)
@@ -591,14 +643,14 @@ public static class Program
                 }
             }
             // window closed mid-match (Xvfb teardown / Ctrl-C): close the run record and stop.
-            Stats.EndRun(false, game.RunState != null ? game.RunState.Mission - 1 : 0, "aborted");
+            Stats.EndRun(false, endless ? game.Wave : (game.RunState != null ? game.RunState.Mission - 1 : 0), "aborted");
             return false;
         }
 
         int done = 0, totalMatches = runs * sloppyModes.Length;
         for (int i = 0; i < runs && !aborted && !Raylib.WindowShouldClose(); i++)
         {
-            int heat = pinHeat ? Sightline.Heat.Clamp(fixedHeat) : (i % 5);
+            int heat = pinHeat ? Sightline.Heat.Clamp(fixedHeat) : heatCycle[i % heatCycle.Length];
             foreach (bool sloppy in sloppyModes)
             {
                 if (aborted || Raylib.WindowShouldClose()) break;
@@ -606,14 +658,18 @@ public static class Program
                 if (!RunOne(heat, sloppy, 1000 + i)) { aborted = true; break; }
                 done++;
                 if (done % 5 == 0 || done == totalMatches)
-                    Console.WriteLine($"match {done}/{totalMatches}  (W:{wins} L:{losses} cap:{capped})  {sw.Elapsed.TotalSeconds:0.0}s");
+                    Console.WriteLine(endless
+                        ? $"stand {done}/{totalMatches}  (wiped:{wins} wave-cap:{waveCapped} frame-cap:{capped})  {sw.Elapsed.TotalSeconds:0.0}s"
+                        : $"match {done}/{totalMatches}  (W:{wins} L:{losses} cap:{capped})  {sw.Elapsed.TotalSeconds:0.0}s");
             }
         }
 
         sw.Stop();
         Console.WriteLine();
         Console.WriteLine(Stats.Report());
-        Console.WriteLine($"batch wall-time: {sw.Elapsed.TotalSeconds:0.0}s  ({totalMatches} matches across {runs} campaigns × {sloppyModes.Length} policy, frame-cap hits: {capped})");
+        Console.WriteLine(endless
+            ? $"batch wall-time: {sw.Elapsed.TotalSeconds:0.0}s  ({totalMatches} stands across {runs} slots × {sloppyModes.Length} policy, wave-cap hits: {waveCapped}, frame-cap hits: {capped})"
+            : $"batch wall-time: {sw.Elapsed.TotalSeconds:0.0}s  ({totalMatches} matches across {runs} campaigns × {sloppyModes.Length} policy, frame-cap hits: {capped})");
 
         // Optional machine-readable aggregate alongside the printed report. The path honours
         // SIGHTLINE_BALANCE_JSON if set, else lands in the system temp dir (a stable, always-

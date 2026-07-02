@@ -496,6 +496,14 @@ public partial class Game
         if (TutStep >= TutPrompts.Length) CompleteTutorial();
     }
 
+    /// Harness seam (SIGHTLINE_TUTORIAL=<n>): show a step directly. Seeds the final step's dwell
+    /// timer — without it, step 3 completes on the first Update tick and the shot frames a bare board.
+    public void ShowTutorialStep(int step)
+    {
+        TutStep = Math.Clamp(step, 0, TutPrompts.Length - 1);
+        if (TutStep == 3) _tutDoneTimer = 7f;
+    }
+
     /// APEX W2: finish the onboarding and persist the one-time "seen" flag. The !NoPersist gate is
     /// LOAD-BEARING: Display.MarkTutorialSeen -> Display.Save() writes settings.json unconditionally,
     /// and the SIGHTLINE_TUTORIAL screenshot hook sets TutStep directly (bypassing StartTutorialMaybe's
@@ -749,6 +757,18 @@ public partial class Game
         // balance telemetry (no-op unless Stats.Enabled); tag the policy so the report can
         // split greedy vs sloppy win-rates and surface the optimal-vs-error GAP.
         Stats.BeginRun(_run.HeatLevel, SmartPlay && SmartSloppy ? "sloppy" : "greedy");
+        // APEX W4 (c): SIGHTLINE_VETSIM=<n> — honoured only under NoPersist, mirroring the
+        // SIGHTLINE_CONTRACT hook above. The flywheel calls StartMission directly (the Phase.Draft
+        // veteran recall never runs there), so recalled veterans were invisible to measurement;
+        // this swaps n founding rookies for deterministic synthetic Rank-3 veterans (two class-
+        // line perks, +1 armor — Run.ApplyVetSim) so paired VETSIM=n vs 0 batches can price the
+        // veteran power floor. In-memory only; inert when unset, so plain autoplay/screenshot
+        // runs are untouched. It prices a NOMINAL Rank-3 veteran, not the exact recall payload.
+        if (NoPersist && int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_VETSIM"), out int vetSimN) && vetSimN > 0)
+        {
+            int vetsMade = _run.ApplyVetSim(vetSimN);
+            if (vetsMade > 0) Console.WriteLine($"VETSIM: {vetsMade} founding rookie(s) -> synthetic Rank-3 veterans (nominal recall-floor probe)");
+        }
         // PROGRAM HORIZON W3 (WAR ROOM): apply purchased cross-run UNLOCKS to the founding run. ADDITIVE
         // only, campaign only, and STRICTLY gated behind !NoPersist — the flywheel/harness never read
         // meta, so a measured/screenshot run is byte-identical to today (a fresh profile owns none anyway).
@@ -2249,8 +2269,9 @@ public partial class Game
         }
     }
 
-    /// One-time mid-run recovery valve. Called only from the SQUAD-WIPE branch of CheckEnd (VIP/
-    /// captive-lost losses stay instant). Returns false — letting the wipe become a real loss — when
+    /// One-time mid-run recovery valve. Called from the SQUAD-WIPE branch of CheckEnd and from the
+    /// Rescue CAPTIVE-ABANDONED branch (all soldiers down, captive still caged — W2); other VIP/
+    /// captive-lost losses stay instant. Returns false — letting the wipe become a real loss — when
     /// the checkpoint is already spent OR the wipe came too early (mission < 3: early failure ends
     /// cleanly). Otherwise it burns the checkpoint, rebuilds the squad as a fresh emergency cadre of
     /// rookies (keeping Intel / heat / map position), and RESTARTS the current mission from its start
@@ -2897,7 +2918,7 @@ public partial class Game
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseColorblind)) Display.ToggleColorblind();
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseAutoCam)) { Display.ToggleAutoCam(); if (!Display.AutoCam) { CamZoom = 1f; CamPan = Vector2.Zero; } }
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseCodex)) { BeginCodex(); }   // W6: open the field manual (remembers this phase for BACK)
-        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseAbandon)) { Paused = false; Phase = Phase.Lose; LoseTitle = "RUN ABANDONED"; LoseReason = "You called off the campaign."; Audio.Play("lose"); }
+        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseAbandon)) { Paused = false; if (TutStep >= 0) CompleteTutorial(); Phase = Phase.Lose; LoseTitle = "RUN ABANDONED"; LoseReason = "You called off the campaign."; Audio.Play("lose"); }
     }
 
     void DoAction(string id)
