@@ -789,6 +789,19 @@ public static class Mission
         return e;
     }
 
+    /// APEX W7 "an ending" (LAST STAND, waves past saturation): the extra ELITE injected each
+    /// deep wave so stands statistically terminate. Mirrors the campaign mid-boss stat line
+    /// (14 + 2*tier HP, tier-capped; fixed 68 aim — ELITEs are exempt from the rank-and-file
+    /// clamp and 68 sits below it anyway; LMG). Grenades set EXPLICITLY here: the campaign's
+    /// ELITE-grenade branch lives in SpawnEnemies, which the endless spawner never runs through,
+    /// so without this line a rolled elite would arrive frag-less by accident.
+    public static Unit MakeEndlessElite(int tier, int x, int y)
+    {
+        var e = MakeHostile("REAPER", "ELITE", WeaponKind.Lmg, 14 + 2 * Math.Min(tier, 10), 68, 6, x, y);
+        e.Grenades = 1;
+        return e;
+    }
+
     /// Procedural-path safety net: every hostile / objective tile must stay reachable
     /// from the squad over walkable terrain. If a generated structure walled one off,
     /// carve an L-shaped lane back toward the squad by clearing the blocking cover. Runs

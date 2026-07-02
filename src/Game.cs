@@ -2159,6 +2159,19 @@ public partial class Game
             case Phase.PlayerTurn: UpdatePlayer(); break;
             case Phase.EnemyTurn: UpdateEnemy(); break;
             case Phase.Barracks:
+                // APEX W7 — LAST STAND mid-stand progression detour. Endless enters Barracks ONLY
+                // to resolve queued perk/spec/boon offers (CheckEndless sets _shopDone before the
+                // detour). The moment every offer is resolved, return to the fight and spawn the
+                // next wave. This guard MUST sit above the shop/event/node branches: BeginEndless's
+                // Run.Start() built a real campaign map, so a fall-through would let autoplay
+                // ChooseNode into a campaign mission from inside a stand.
+                if (Mode == GameMode.Endless
+                    && _run.PendingPerks.Count == 0 && _run.PendingSpecs.Count == 0 && _run.BoonOffer.Count == 0)
+                {
+                    Phase = Phase.PlayerTurn;
+                    SpawnEndlessWave(Wave + 1);
+                    return;
+                }
                 if (!_shopDone)                          // spend intel first (requisition)
                 {
                     if (AutoPlay) AutoShop(); else HandleShopClick();

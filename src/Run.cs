@@ -877,6 +877,53 @@ public class Run
         return offer;
     }
 
+    /// APEX W7 — the promotion beat, shared by the barracks debrief and LAST STAND's mid-stand
+    /// FIELD PROMOTION heartbeat. Advances rank while banked kills clear the next threshold,
+    /// queueing a PendingPerks pick-1-of-2 (stat-bump fallback when a soldier already owns every
+    /// perk), then queues the one-time CLASS SPECIALIZATION fork the first time SpecRank
+    /// (Corporal) is reached — offered once (not yet specialized, no offer already queued, and
+    /// the class actually has a 2-fork table). Report lines land in Run.Report (the barracks
+    /// screen shows them; the endless heartbeat clears Report per beat).
+    public void PromoteEligible(Unit u)
+    {
+        // promotions: advance rank while kills clear the next threshold
+        while (u.Rank < Ranks.Length - 1 && u.Kills >= KillReq[u.Rank + 1])
+        {
+            u.Rank++;
+            var offer = MakePerkOffer(u);
+            if (offer != null)
+            {
+                PendingPerks.Add(offer);
+                Report.Add($"{u.Name} promoted to {Ranks[u.Rank]}  (choose a perk)");
+            }
+            else
+            {
+                string buff = ApplyStatBoost(u, u.Rank);
+                Report.Add($"{u.Name} promoted to {Ranks[u.Rank]}  ({buff})");
+            }
+        }
+
+        // W2 CLASS SPECIALIZATION: the first time a soldier reaches SpecRank (Corporal) it picks a
+        // one-time fork that changes HOW its class plays.
+        if (u.Rank >= Unit.SpecRank && u.Spec == Spec.None
+            && !PendingSpecs.Any(o => o.Unit == u)
+            && SpecDef.OptionsFor(u.Cls).Length == 2)
+        {
+            var opts = SpecDef.OptionsFor(u.Cls);
+            PendingSpecs.Add(new SpecOffer { Unit = u, A = opts[0], B = opts[1] });
+            Report.Add($"{u.Name} can SPECIALIZE  (choose a fork)");
+        }
+    }
+
+    /// Squad-wide promotion sweep — LAST STAND's heartbeat entry (every 3rd cleared wave).
+    /// Every living soldier's banked kills cash in mid-stand; VIPs never rank, the dead keep
+    /// their record. The campaign debrief calls the per-unit overload inside its own loop.
+    public void PromoteEligible()
+    {
+        foreach (var u in Squad)
+            if (u.Alive && !u.IsVip) PromoteEligible(u);
+    }
+
     /// Apply promotions (from accumulated kills) and field-heal to the survivors,
     /// then backfill empty squad slots with fresh rookie recruits.
     /// Each rank-up queues a perk choice (PendingPerks) the player resolves in the
@@ -946,34 +993,9 @@ public class Run
             // under this contract), so a small squad ranks up quicker. Inert as None.
             if (Contract == Contract.IronVeterans) u.Kills += 1;
 
-            // promotions: advance rank while kills clear the next threshold
-            while (u.Rank < Ranks.Length - 1 && u.Kills >= KillReq[u.Rank + 1])
-            {
-                u.Rank++;
-                var offer = MakePerkOffer(u);
-                if (offer != null)
-                {
-                    PendingPerks.Add(offer);
-                    Report.Add($"{u.Name} promoted to {Ranks[u.Rank]}  (choose a perk)");
-                }
-                else
-                {
-                    string buff = ApplyStatBoost(u, u.Rank);
-                    Report.Add($"{u.Name} promoted to {Ranks[u.Rank]}  ({buff})");
-                }
-            }
-
-            // W2 CLASS SPECIALIZATION: the first time a soldier reaches SpecRank (Corporal) it picks a
-            // one-time fork that changes HOW its class plays. Offered once (not yet specialized, no
-            // pending offer already queued, and the class actually has a 2-fork table).
-            if (u.Rank >= Unit.SpecRank && u.Spec == Spec.None
-                && !PendingSpecs.Any(o => o.Unit == u)
-                && SpecDef.OptionsFor(u.Cls).Length == 2)
-            {
-                var opts = SpecDef.OptionsFor(u.Cls);
-                PendingSpecs.Add(new SpecOffer { Unit = u, A = opts[0], B = opts[1] });
-                Report.Add($"{u.Name} can SPECIALIZE  (choose a fork)");
-            }
+            // promotions + the one-time SPECIALIZE fork (extracted to PromoteEligible so
+            // LAST STAND's mid-stand FIELD PROMOTION heartbeat shares the exact same beat).
+            PromoteEligible(u);
 
             // field medicine: partial heal between missions (halved under Heat harsh attrition).
             // Raised 0.4 -> 0.55: balance data showed the squad limping into the mid-campaign

@@ -903,6 +903,21 @@ public partial class Game
         Phase = Phase.Barracks;
     }
 
+    /// Harness hook (screenshot only, APEX W7): stage LAST STAND's mid-stand FIELD PROMOTION
+    /// offer. Pair with SIGHTLINE_ENDLESS=1 + SIGHTLINE_SHOT — runs after BeginEndless: banks
+    /// promotion kills on the point soldier, clears the wave-3 board, and fires CheckEndless so
+    /// the heartbeat queues the offers and detours into Phase.Barracks. Shot mode never sets
+    /// AutoPlay, so the perk chooser stays on screen for the shot frame (exactly what a player
+    /// sees between waves 3 and 4).
+    public void DebugEndlessOffer()
+    {
+        if (Mode != GameMode.Endless) return;
+        foreach (var e in Enemies) { e.Hp = 0; e.Alive = false; }   // wave "cleared"
+        Wave = 3;
+        _run.Squad[0].Kills = 3;         // ROOKIE -> CORPORAL: perk picks + the spec fork queue
+        CheckEndless();                  // sustain + heartbeat -> Barracks detour w/ the offer up
+    }
+
     /// Harness hook (screenshot only): mark a couple of soldiers wounded.
     public void DebugWound()
     {
