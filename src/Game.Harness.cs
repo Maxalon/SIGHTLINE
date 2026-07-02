@@ -543,8 +543,77 @@ public partial class Game
             if (EnemyFocus != sHi) fails.Add("focusDidNotFlipLive=" + (EnemyFocus?.Name ?? "null"));
         }
 
+        // ---- W6a (1) — COMMANDING LoS: the planner must SEE the climb+shot a tier-2 plateau
+        // unlocks. A full-height HIGH-COVER wall seals every ground-level sightline to the
+        // soldier; the ONLY shot on the board is the commanding one from the '='-style tier-2
+        // plateau beside the enemy (Game.CanTarget grants >=2-tier shooters sight over high
+        // cover, and ComputeOdds' seesOver prices it). Before W6a the planner's LoS filter never
+        // passed the commanding overload, so it filtered out the exact shot the resolver allows
+        // and the enemy never sought the perch.
+        {
+            Grid = new Grid();
+            Players = new System.Collections.Generic.List<Unit>();
+            Enemies = new System.Collections.Generic.List<Unit>();
+            for (int y = 0; y < Grid.H; y++) { Grid.Tiles[10, y] = TileType.HighCover; Grid.SetCoverHp(10, y); }
+            Grid.Height[8, 5] = 2;                          // the tier-2 vantage ('=' in Maps.cs)
+            var marks   = MkP("MARKS", 13, 5, 8, 8);        // soldier behind the wall
+            var climber = MkE("CLIMB", 7, 5);               // one step from the plateau
+            Players.Add(marks); Enemies.Add(climber);
+            _aiUnits = AliveEnemies().Where(e => e.Active).ToList();
+            PlanEnemySquad();
+            var cplan = Ai.Plan(this, climber);
+            if (cplan.ShootTarget != marks) fails.Add("commandingShotNotPlanned");
+            (int x, int y) cEnd = cplan.Path.Count > 0 ? cplan.Path[cplan.Path.Count - 1] : (climber.X, climber.Y);
+            if (Grid.HeightAt(cEnd.x, cEnd.y) - Grid.HeightAt(marks.X, marks.Y) < 2)
+                fails.Add("commandingNoClimb");             // the plan must actually take the perch
+        }
+
+        // ---- W6a (2) — CROSSFIRE PIN: Ai.CrossfireWith must return Combat.InCrossfire's verdict
+        // term-for-term (it is the planner's prediction of the resolver's +CrossfireAim). Three
+        // staged cases; (a) and (b) are DISAGREEMENTS that failed before the pin.
+        {
+            Grid = new Grid();                              // open floor: LoS clear everywhere
+            Players = new System.Collections.Generic.List<Unit>();
+            Enemies = new System.Collections.Generic.List<Unit>();
+            var xTgt = MkP("XTGT", 10, 0, 8, 8);            // target on the north edge
+            var xShot = MkE("XSHOT", 2, 0);                 // shooter due WEST (v1 = +x)
+            var xAlly = MkE("XALLY", 10, 10);               // ally due SOUTH at Euclid dist 10
+            xAlly.Weapon = Weapon.Make(WeaponKind.Shotgun); // MaxRange 8 — the old planner gate
+            xAlly.Ammo = xAlly.Weapon.Clip;
+            Players.Add(xTgt); Enemies.Add(xShot); Enemies.Add(xAlly);
+            var savedAll = Combat.AllUnits;
+            Combat.AllUnits = new System.Collections.Generic.List<Unit> { xTgt, xShot, xAlly };
+            // (a) 10-tile SHOTGUN ally: inside the resolver's CrossfireAllyRange (10), outside the
+            // ally's own weapon range (8). The resolver pays the bonus; the pre-pin planner
+            // (min-with-weapon-range) predicted none — the exact drift W6a closes.
+            bool res = Combat.InCrossfire(Grid, xShot, xTgt);
+            bool pln = Ai.CrossfireWith(this, xShot, xShot.X, xShot.Y, xTgt);
+            if (!res) fails.Add("xfPinResolverShouldPay");
+            if (pln != res) fails.Add("xfPinShotgunAllyDrift");
+            // (b) DORMANT pod-mate: InCrossfire counts every alive same-team gun regardless of
+            // alertness; the pre-pin planner skipped !Active allies. Agreement must hold.
+            xAlly.X = 10; xAlly.Y = 5; xAlly.SyncPos();     // dist 5 — well inside every gate
+            xAlly.Alert = AlertLevel.Unaware;               // dormant
+            res = Combat.InCrossfire(Grid, xShot, xTgt);
+            pln = Ai.CrossfireWith(this, xShot, xShot.X, xShot.Y, xTgt);
+            if (!res) fails.Add("xfPinResolverDormantShouldPay");
+            if (pln != res) fails.Add("xfPinDormantAllyDrift");
+            // (c) beyond CrossfireAllyRange: both sides must refuse (agreement on the negative).
+            // Geometry keeps the ANGLE valid (cos ~0.196 < 0.30) so range is the sole
+            // discriminator: target (3,0), shooter due EAST (16,0), ally (5,10) at ~10.2 tiles.
+            xAlly.Alert = AlertLevel.Alert;
+            xTgt.X = 3;  xTgt.Y = 0;  xTgt.SyncPos();
+            xShot.X = 16; xShot.Y = 0; xShot.SyncPos();
+            xAlly.X = 5; xAlly.Y = 10; xAlly.SyncPos();
+            res = Combat.InCrossfire(Grid, xShot, xTgt);
+            pln = Ai.CrossfireWith(this, xShot, xShot.X, xShot.Y, xTgt);
+            if (res) fails.Add("xfPinResolverOverRange");
+            if (pln != res) fails.Add("xfPinOverRangeDrift");
+            Combat.AllUnits = savedAll;                     // never leak the staged roster
+        }
+
         return fails.Count == 0
-            ? "AITEST: PASS (focus picks killable+exposed; Ai.Plan biases to focus + flips; overwatch map mirrors reaction; retreat plan still acts; W4 setup-first + live focus recompute)"
+            ? "AITEST: PASS (focus picks killable+exposed; Ai.Plan biases to focus + flips; overwatch map mirrors reaction; retreat plan still acts; W4 setup-first + live focus recompute; W6a commanding climb+shot + crossfire planner==resolver pin)"
             : "AITEST: FAIL (" + string.Join(",", fails) + ")";
     }
 

@@ -169,7 +169,11 @@ public static class Ai
                 foreach (var p in players)
                 {
                     if (Util.TileDist(tx, ty, p.X, p.Y) > e.Weapon.MaxRange) continue;
-                    if (!g.Grid.HasLineOfSight(tx, ty, p.X, p.Y)) continue;
+                    // W6a truthfulness: mirror Game.CanTarget — a commanding (>=2-tier) height
+                    // advantage sees over high cover, so a reachable plateau's REAL shot counts
+                    // here and a unit that could climb-and-fire doesn't wrongly break off.
+                    bool cmdR = g.Grid.HeightAt(tx, ty) - g.Grid.HeightAt(p.X, p.Y) >= 2;
+                    if (!g.Grid.HasLineOfSight(tx, ty, p.X, p.Y, cmdR)) continue;
                     int h = OddsFrom(g, e, tx, ty, p).HitChance;
                     if (h > bestReachHit) bestReachHit = h;
                 }
@@ -200,7 +204,13 @@ public static class Ai
                 foreach (var p in players)
                 {
                     if (Util.TileDist(tx, ty, p.X, p.Y) > e.Weapon.MaxRange) continue;
-                    if (!g.Grid.HasLineOfSight(tx, ty, p.X, p.Y)) continue;
+                    // W6a truthfulness: mirror Game.CanTarget — a commanding (>=2-tier) height
+                    // advantage sees over high cover. Without this the planner filtered out the
+                    // exact shots the resolver would allow from the authored '=' tier-2 plateaus,
+                    // so snipers/elites never sought them; ComputeOdds' seesOver already prices
+                    // the payoff (cover fully negated), the shot just has to survive this filter.
+                    bool cmd = g.Grid.HeightAt(tx, ty) - g.Grid.HeightAt(p.X, p.Y) >= 2;
+                    if (!g.Grid.HasLineOfSight(tx, ty, p.X, p.Y, cmd)) continue;
                     var odds = OddsFrom(g, e, tx, ty, p);
                     bool canFinish = p.Hp <= e.Weapon.DmgMax;
                     // The VIP gets a much smaller "finish it" frenzy than a soldier: balance data
@@ -247,8 +257,8 @@ public static class Ai
                     // to it from a meaningfully DIFFERENT angle. The new CROSSFIRE combat mechanic is
                     // symmetric (a target shot by 2+ same-team attackers from diverging vectors —
                     // > ~72deg — takes +aim/+crit), so the squad benefits from collapsing on a
-                    // soldier from converging lines instead of stacking one approach. Computed
-                    // locally (CrossfireWith), so Ai.cs compiles standalone — no Combat dependency.
+                    // soldier from converging lines instead of stacking one approach. CrossfireWith
+                    // is pinned term-by-term to Combat.InCrossfire (W6a) so the prediction is truthful.
                     // Advisory: it layers onto the existing hit/cover/finish/focus core, only when a
                     // shot already exists, so it biases POSITIONING and never forces a worse shot.
                     if (CrossfireWith(g, e, tx, ty, p))
@@ -695,7 +705,12 @@ public static class Ai
                 var coverHere = g.Grid.GetCover(bestTile.x, bestTile.y, nearest.X, nearest.Y);
                 // overwatch if we have a clear sightline toward enemy approach, else hunker. A ROUTED unit
                 // (UNDERTOW W3) is too rattled to hold a steady watch — it just keeps its head down.
-                bool sees = g.Grid.HasLineOfSight(bestTile.x, bestTile.y, nearest.X, nearest.Y);
+                // W6a truthfulness: the sightline read mirrors Game.CanTarget's commanding overload —
+                // a unit holding a >=2-tier vantage watches over high cover (the reaction it would
+                // actually take, via CanTarget, sees over it too), so it no longer hunkers on a
+                // commanding perch it genuinely controls.
+                bool cmdOw = g.Grid.HeightAt(bestTile.x, bestTile.y) - g.Grid.HeightAt(nearest.X, nearest.Y) >= 2;
+                bool sees = g.Grid.HasLineOfSight(bestTile.x, bestTile.y, nearest.X, nearest.Y, cmdOw);
                 if (sees && e.Ammo > 0 && !routing) plan.Overwatch = true;
                 else if (coverHere.Level > 0) plan.Hunker = true;
             }
@@ -847,28 +862,40 @@ public static class Ai
 
     // CROSSFIRE test (AI improvement 1): true when firing on target `tgt` from candidate tile
     // (cx,cy) forms a crossfire with at least one OTHER living enemy that already has line-of-
-    // sight to `tgt` from a meaningfully DIFFERENT angle. "Different angle" mirrors the new
-    // (symmetric) CROSSFIRE combat bonus: the two firing vectors (tgt - candidate) and
-    // (tgt - e2) diverge by more than ~72deg, i.e. their normalised dot < 0.30. Computed locally
-    // (no Combat reference) so Ai.cs compiles standalone. Self is excluded; e2 must be active and
-    // in its own weapon range (a vector from an ally that can't actually shoot isn't a real pincer).
-    // Degenerate zero-length vectors (an ally or the candidate sharing the target's tile) are
-    // skipped — they have no defined angle.
-    static bool CrossfireWith(Game g, Unit self, int cx, int cy, Unit tgt)
+    // sight to `tgt` from a meaningfully DIFFERENT angle. W6a: this predicate is PINNED to
+    // Combat.InCrossfire — the resolver that actually pays the bonus — term by term:
+    //  * ally gate = dist <= Combat.CrossfireAllyRange ALONE. InCrossfire has NO ally-weapon-range
+    //    term (Combat.cs "credible threat" check), so the old min-with-e2.Weapon.MaxRange gate made
+    //    the planner stricter than the resolver for shotgun allies (MaxRange 8): a BERSERKER ally at
+    //    dist 9-10 grants the real +CrossfireAim but the planner predicted none.
+    //  * angle = Combat.CrossfireCosMax (same constant, not a local copy).
+    //  * LoS = the PLAIN (non-commanding) HasLineOfSight, exactly as InCrossfire's ally-credibility
+    //    read. Deliberately NOT the commanding overload even when the ally holds a tier-2 perch:
+    //    the resolver doesn't grant commanding sight to the converging ally, so adding it here
+    //    would predict crossfires the resolver never pays (the opposite untruthfulness).
+    //  * alertness: NO !e2.Active skip. InCrossfire counts every alive same-team non-VIP unit in
+    //    Combat.AllUnits INCLUDING a dormant pod-mate, so the old skip under-predicted the
+    //    shooter's own real odds near a sleeping pod. If dormant allies should ever stop granting
+    //    crossfire, fix the RESOLVER first and this predicate follows.
+    // (The old "computed locally / no Combat reference" note was stale — Ai already calls
+    // Combat.ComputeOdds and reads Combat.MissionFaction.) Degenerate zero-length vectors (an ally
+    // or the candidate sharing the target's tile) are skipped — they have no defined angle.
+    // Internal (not private) so the AITEST harness can pin planner==resolver agreement directly.
+    internal static bool CrossfireWith(Game g, Unit self, int cx, int cy, Unit tgt)
     {
         float v1x = tgt.X - cx, v1y = tgt.Y - cy;
         float m1 = MathF.Sqrt(v1x * v1x + v1y * v1y);
         if (m1 < 0.001f) return false;                       // candidate on the target: no angle
         foreach (var e2 in g.AliveEnemies())
         {
-            if (e2 == self || !e2.Active) continue;
-            if (Util.TileDist(e2.X, e2.Y, tgt.X, tgt.Y) > e2.Weapon.MaxRange) continue;
+            if (e2 == self) continue;
+            if (Util.TileDist(e2.X, e2.Y, tgt.X, tgt.Y) > Combat.CrossfireAllyRange) continue;
             if (!g.Grid.HasLineOfSight(e2.X, e2.Y, tgt.X, tgt.Y)) continue;
             float v2x = tgt.X - e2.X, v2y = tgt.Y - e2.Y;
             float m2 = MathF.Sqrt(v2x * v2x + v2y * v2y);
             if (m2 < 0.001f) continue;                       // ally on the target: no angle
             float cos = (v1x * v2x + v1y * v2y) / (m1 * m2);
-            if (cos < 0.30f) return true;                    // vectors diverge > ~72deg -> crossfire
+            if (cos < Combat.CrossfireCosMax) return true;   // vectors diverge > ~72deg -> crossfire
         }
         return false;
     }
