@@ -20,6 +20,48 @@ namespace Sightline;
 // This is a pure mechanical slice of Game.cs — no behaviour change.
 public partial class Game
 {
+    // ── APEX W4 (d): the flywheel's perk VALUE prior (a small class+kit table) ──────────
+    // Consumed by ChoosePerk (Game.cs) under SmartPlay: the pick is biased 70/30 toward the
+    // higher-valued slot instead of always taking slot A (= MakePerkOffer's class-line slot).
+    // "Class" enters through the KIT — every class carries a fixed weapon kind (ASSAULT=Rifle,
+    // RANGER=Shotgun, SHARPSHOOTER=Sniper, CORPSMAN=Smg, GUNNER=Lmg) — plus one explicit
+    // class term (the CORPSMAN's value is staying upright to support, not DPS). This is a
+    // heuristic PRIOR (competent-play proxy), not ground truth: the telemetry it unlocks —
+    // real exposure of both offer slots — is the point. Balance-harness only; never drives
+    // interactive play.
+    static float SmartPerkValue(Unit u, Perk p)
+    {
+        WeaponKind k = u?.Weapon != null ? u.Weapon.Kind : WeaponKind.Rifle;
+        bool close = k == WeaponKind.Shotgun || k == WeaponKind.Smg;   // short-range kit
+        bool anchor = k == WeaponKind.Lmg;                             // overwatch/suppression kit
+        float v = p switch
+        {
+            Perk.Adrenal => 8f,                                          // action economy is king
+            Perk.LockOn => 7f,                                           // the bot hunts flanks
+            Perk.Gunslinger => k == WeaponKind.Sniper ? 5f : 7f,         // double-tap wants clip/ROF
+            Perk.Tank => 6f,
+            Perk.Sprinter => 6f,                                         // mobility + overwatch immunity
+            Perk.Executioner => 6f,                                      // finisher on focus-fire targets
+            Perk.CloseQuarters => close ? 8f : 4f,                       // aim where the kit fights
+            Perk.Marksman => k == WeaponKind.Sniper ? 8f : (close ? 2f : 5f),
+            Perk.GiantSlayer => 5f,                                      // alpha-strike opener
+            Perk.Skirmisher => close ? 6f : 5f,                          // shoot-then-slip suits closers
+            Perk.Hardened => 5f,
+            Perk.Bulwark => 5f,
+            Perk.Guardian => anchor ? 6f : 4f,                           // overwatch perks suit the anchor
+            Perk.Reflexes => anchor ? 6f : 4f,
+            Perk.CoolHeaded => 4f,
+            Perk.Bandolier => 4f,
+            Perk.Vantage => 3f,                                          // conditional-crit tail
+            Perk.Breaker => 3f,
+            Perk.Siegebreaker => 3f,
+            _ => 3f,                                                     // cut/unknown (never offered)
+        };
+        // support survivability: the medic-adjacent class buys durability over damage
+        if ((u?.Cls ?? "") == "CORPSMAN" && (p == Perk.Hardened || p == Perk.Tank || p == Perk.CoolHeaded)) v += 2f;
+        return v;
+    }
+
     void SmartStep()
     {
         if (_anims.Count > 0 || Phase != Phase.PlayerTurn) return;

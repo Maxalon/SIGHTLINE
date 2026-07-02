@@ -4453,6 +4453,20 @@ public partial class Game
     {
         if (_run.PendingPerks.Count == 0) return;
         var off = _run.PendingPerks[0];
+        // APEX W4 (d): under the balance flywheel the pick is value-BIASED but RANDOMIZED, following
+        // the ChooseSpec precedent (randomized "so win-rate-by-spec is measurable"). The old greedy
+        // ChoosePerk(0) always took slot A — but Run.MakePerkOffer RESERVES slot A for the class
+        // line, so "perk pick frequency" was a census of ClassLine, not a measurement of value.
+        // Now: 70% the higher-valued perk per the small class+kit prior (SmartPerkValue, in
+        // Game.Autopilot.cs), 30% the other — the better build is usually taken (competent-play
+        // proxy) while BOTH slots keep real exposure, so win-rate-by-perk stays interpretable.
+        // The dumb AutoPlay smoke test (SmartPlay off) keeps its deterministic slot-0 pick, and
+        // interactive play is untouched (a human click always passes an explicit slot).
+        if (SmartPlay && (which == 0 || which == 1))
+        {
+            int better = SmartPerkValue(off.Unit, off.A) >= SmartPerkValue(off.Unit, off.B) ? 0 : 1;
+            which = Util.Roll(70f) ? better : 1 - better;
+        }
         Perk p = which == 0 ? off.A : off.B;
         Run.ApplyPerk(off.Unit, p);
         Stats.RecordPerk(PerkDef.Code(p));   // balance telemetry (no-op unless Stats.Enabled)
