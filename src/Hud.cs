@@ -332,153 +332,205 @@ public static class Hud
     }
 
     // ---------------- top bar ----------------
+    // W10 (owner feedback — "looks terrible"): the bar is three DELIBERATE zones sharing one
+    // vertical center (cy 26): LEFT turn/phase + concealment, CENTER mission + objective (+
+    // secondary bonus below), RIGHT squad/hostile counts + labeled pressure meter + heat + mute
+    // + END TURN. The right zone lays out right-to-left from the screen edge and the center
+    // group clamps into the remaining span, so the zones can never collide. Subtle hairline
+    // separators mark the zone boundaries. Every pre-W10 readout survives — just regrouped.
     static void DrawTopBar(Game g)
     {
-        Raylib.DrawRectangleGradientV(0, 0, Cfg.ScreenW, 56, Pal.RGBA(8, 12, 17, 235), Pal.RGBA(8, 12, 17, 0));
+        Raylib.DrawRectangleGradientV(0, 0, Cfg.ScreenW, 64, Pal.RGBA(8, 12, 17, 235), Pal.RGBA(8, 12, 17, 0));
+        const int cy = 26;   // shared vertical center for the whole bar
 
-        // turn pill
+        // ---- LEFT ZONE: turn/phase + concealment ------------------------------------------
         bool playerTurn = g.Phase != Phase.EnemyTurn;
         string turnTxt = playerTurn ? "PLAYER TURN" : "ENEMY TURN";
         Color turnCol = playerTurn ? Pal.Friend : Pal.Foe;
-        var pill = new Rectangle(16, 11, 168, 30);
+        float lx = 16;
+        float pillW = Raylib.MeasureTextEx(Cfg.Font, turnTxt, 16, 1f).X + 30;
+        var pill = new Rectangle(lx, cy - 15, pillW, 30);
         Raylib.DrawRectangleRounded(pill, 0.4f, 8, Pal.Panel);
         Raylib.DrawRectangleLinesEx(pill, 1.5f, Raylib.Fade(turnCol, 0.6f));
         CenterText(turnTxt, pill, 16, turnCol);
+        lx += pillW + 10;
 
-        // 4.4 concealment pill: while the squad is hidden it takes the MISSION slot (a
-        // pulsing CONCEALED indicator); the mission counter returns the moment stealth breaks.
+        // 4.4 concealment pill: while the squad is hidden, a pulsing CONCEALED pill rides next
+        // to the turn pill (same stealth-state family); it vanishes the moment stealth breaks.
         bool showConcealed = g.SquadConcealed && (g.Phase == Phase.PlayerTurn || g.Phase == Phase.EnemyTurn);
         if (showConcealed)
         {
             float pulse = 0.55f + 0.45f * MathF.Sin((float)Raylib.GetTime() * 3.5f);
-            var cpill = new Rectangle(192, 11, 120, 30);
+            float cw = Raylib.MeasureTextEx(Cfg.Font, "CONCEALED", 14, 1f).X + 26;
+            var cpill = new Rectangle(lx, cy - 15, cw, 30);
             Raylib.DrawRectangleRounded(cpill, 0.4f, 8, Pal.Panel);
             Raylib.DrawRectangleLinesEx(cpill, 1.5f, Raylib.Fade(Pal.Friend, 0.5f * pulse));
             CenterText("CONCEALED", cpill, 14, Raylib.Fade(Pal.Friend, pulse));
+            lx += cw + 10;
         }
-        else if (g.Mode == GameMode.Endless)
-        {
-            Raylib.DrawTextEx(Cfg.Font, "LAST STAND", new Vector2(200, 19), 16, 1f, Raylib.Fade(Pal.Foe, 0.85f));
-        }
-        else if (g.Mode == GameMode.Skirmish)
-        {
-            Raylib.DrawTextEx(Cfg.Font, g.DailyMode ? "DAILY" : "SKIRMISH", new Vector2(200, 19), 16, 1f, Raylib.Fade(g.DailyMode ? Pal.Accent : Pal.Friend, 0.85f));
-        }
-        else
-        {
-            Raylib.DrawTextEx(Cfg.Font, $"MISSION {g.RunState.Mission}/{Run.MaxMissions}", new Vector2(200, 19), 16, 1f, Pal.TxtDim);
-        }
-        // Accent discipline (60-30-10): the objective readout uses ONE primary accent (amber, the
-        // "objective" role) so it doesn't compete with the genuine state colors (green/red) used for
-        // the secondary-bonus tracker + the pressure meter. The exception is a gold ASSET/HVT
-        // objective (escort/rescue/decapitate), where gold is the semantic role for the thing you
-        // protect or hunt — and the objective glyph carries the type by shape regardless of hue.
-        // PROGRAM HORIZON W2: LAST STAND replaces the objective readout with the WAVE/BEST counter.
-        if (g.Mode == GameMode.Endless)
-        {
-            Raylib.DrawTextEx(Cfg.Font, g.EndlessHud, new Vector2(360, 19), 16, 1f, Pal.Foe);
-        }
-        // PROGRAM HORIZON W4: SKIRMISH/DAILY show "SKIRMISH — <OBJ>" or "DAILY <stamp>  BEST n".
-        else if (g.Mode == GameMode.Skirmish)
-        {
-            Raylib.DrawTextEx(Cfg.Font, g.SkirmishHud, new Vector2(360, 19), 16, 1f, g.DailyMode ? Pal.Accent : Pal.Friend);
-        }
-        else
-        {
-        string objTxt; Color objCol;
-        switch (g.Objective)
-        {
-            case Objective.Evac: objTxt = "EXTRACT"; objCol = Pal.Accent; break;
-            case Objective.Hack: objTxt = $"HACK {g.HackProgress}/{Game.HackRequired}"; objCol = Pal.Accent; break;
-            case Objective.Sabotage: objTxt = $"SABOTAGE {g.SabotageBlown.Count}/{g.SabotageSites.Count}"; objCol = Pal.Accent; break;
-            case Objective.Escort: objTxt = "ESCORT VIP"; objCol = Pal.VipGold; break;
-            case Objective.Rescue: objTxt = g.CaptiveLocked ? "RESCUE CAPTIVE" : "EXTRACT CAPTIVE"; objCol = Pal.VipGold; break;
-            case Objective.Defend: objTxt = $"DEFEND {Math.Min(g.Turn, Game.DefendTurns)}/{Game.DefendTurns}"; objCol = Pal.Accent; break;
-            case Objective.Decapitate:
-                // W4 GUARDED HVT: read the guarded state at a glance — danger-red "HVT GUARDED" while
-                // a bodyguard shields it (peel the guards first), gold "HVT EXPOSED" once it's open to
-                // a kill. Falls back to the plain "KILL HVT" if the HVT is somehow null.
-                if (g.HasHvt && g.Hvt.HvtGuarded) { objTxt = "HVT GUARDED"; objCol = Pal.Foe; }
-                else if (g.HasHvt)                { objTxt = "HVT EXPOSED"; objCol = Pal.VipGold; }
-                else                              { objTxt = "KILL HVT"; objCol = Pal.VipGold; }
-                break;
-            default: objTxt = "ELIMINATE"; objCol = Pal.Accent; break;
-        }
-        Raylib.DrawTextEx(Cfg.Font, objTxt, new Vector2(360, 19), 16, 1f, objCol);
-        // 5.4/5.5: a semantic glyph left of the objective text (shape redundancy, not hue alone)
-        DrawObjectiveIcon(g.Objective, 344, 27, objCol);
+        float leftEnd = lx;
 
-        // anti-turtle PRESSURE meter (camp-friendly objectives only): rung pips that fill as the
-        // clock escalates, so the player can read the rising threat at a glance. Draws nothing on
-        // objectives without a clock, so other modes stay byte-identical. Placed just past the
-        // objective readout; the squad/hostiles counters are nudged right (below) so it never
-        // collides with the SQUAD tally.
-        if (g.PressureClockHud)
-            DrawPressureMeter(g, 460, 12);
-        }   // end non-endless objective readout (PROGRAM HORIZON W2)
-
-        // counts (the VIP isn't a combatant, so it's excluded from the squad tally). Centered, but
-        // shifted right of board-center so the left of the bar (objective + pressure meter) has room.
-        int friends = g.AlivePlayers().Count(p => !p.IsVip);
-        int foes = g.AliveEnemies().Count;
-        DrawCounter(Cfg.ScreenW / 2 - 78, 20, Pal.Friend, $"{friends}  SQUAD");
-        // Wave 4: a faction mission names its enemy by FACTION (a persistent reminder of who you're
-        // fighting + which positional rule is in effect); otherwise the generic HOSTILES tally.
-        string foeLabel = Combat.MissionFaction != Faction.None ? Run.FactionName(Combat.MissionFaction) : "HOSTILES";
-        DrawCounter(Cfg.ScreenW / 2 + 64, 20, Pal.Foe, $"{foes}  {foeLabel}");
-
-        // optional secondary objective (3.9): green while on track, red once blown
-        if (g.Secondary != SecondaryKind.None)
-            Raylib.DrawTextEx(Cfg.Font, g.SecondaryHud, new Vector2(812, 19), 14, 1f, g.SecondaryOnTrack ? Pal.Good : Pal.Foe);
-
-        // Heat/Ascension indicator (only at heat > 0, so heat 0 stays byte-identical)
-        if (g.HeatLevel > 0)
-        {
-            var hp = new Rectangle(Cfg.ScreenW - 400, 11, 92, 30);
-            Raylib.DrawRectangleRounded(hp, 0.4f, 8, Pal.Panel);
-            Raylib.DrawRectangleLinesEx(hp, 1.5f, Raylib.Fade(Pal.Foe, 0.6f));
-            CenterText($"HEAT {g.HeatLevel}", hp, 15, Pal.Foe);
-        }
-
-        // mute indicator
-        if (!Audio.Enabled)
-            Raylib.DrawTextEx(Cfg.Font, "MUTED (M)", new Vector2(Cfg.ScreenW - 290, 19), 15, 1f, Pal.TxtDim);
-
+        // ---- RIGHT ZONE (laid out right-to-left): END TURN, mute, heat, pressure, counts ----
+        float rx = Cfg.ScreenW - 20;
         // end turn (turns into a confirm prompt if soldiers still have actions)
-        EndTurnRect = new Rectangle(Cfg.ScreenW - 170, 11, 150, 30);
+        EndTurnRect = new Rectangle(Cfg.ScreenW - 170, cy - 15, 150, 30);
         bool canEnd = g.IsPlayerInteractive();
         if (g.EndTurnArmed)
             DrawButtonRect(EndTurnRect, "CONFIRM?", "ENT", canEnd, true, Pal.Accent);
         else
             DrawButtonRect(EndTurnRect, "END TURN", "ENT", canEnd, false, Pal.Accent);
+        rx = EndTurnRect.X - 16;
+
+        // mute indicator (small, dim — a persistent state, not a signal)
+        if (!Audio.Enabled)
+        {
+            float mw = Raylib.MeasureTextEx(Cfg.Font, "MUTED (M)", 12, 1f).X;
+            Raylib.DrawTextEx(Cfg.Font, "MUTED (M)", new Vector2(rx - mw, cy - 6), 12, 1f, Pal.TxtDim);
+            rx -= mw + 16;
+        }
+
+        // Heat/Ascension indicator (only at heat > 0, so heat 0 stays byte-identical)
+        if (g.HeatLevel > 0)
+        {
+            string ht = $"HEAT {g.HeatLevel}";
+            float hw = Raylib.MeasureTextEx(Cfg.Font, ht, 14, 1f).X + 22;
+            var hp = new Rectangle(rx - hw, cy - 13, hw, 26);
+            Raylib.DrawRectangleRounded(hp, 0.4f, 8, Pal.Panel);
+            Raylib.DrawRectangleLinesEx(hp, 1.5f, Raylib.Fade(Pal.Foe, 0.6f));
+            CenterText(ht, hp, 14, Pal.Foe);
+            rx -= hw + 16;
+        }
+
+        // anti-turtle PRESSURE meter (camp-friendly campaign objectives only): a LABELED stack —
+        // the word above, the rung pips below — so the pips are never a mystery row of boxes.
+        if (g.Mode != GameMode.Endless && g.Mode != GameMode.Skirmish && g.PressureClockHud)
+        {
+            float pw = PressureMeterWidth(g);
+            DrawPressureMeter(g, rx - pw, cy);
+            rx -= pw + 18;
+        }
+
+        // squad / hostile counts (the VIP isn't a combatant, so it's excluded from the tally).
+        // Wave 4: a faction mission names its enemy by FACTION (a persistent reminder of who
+        // you're fighting + which positional rule is in effect); otherwise the generic HOSTILES.
+        int friends = g.AlivePlayers().Count(p => !p.IsVip);
+        int foes = g.AliveEnemies().Count;
+        string foeLabel = Combat.MissionFaction != Faction.None ? Run.FactionName(Combat.MissionFaction) : "HOSTILES";
+        rx -= DrawCounterR(rx, cy, Pal.Foe, $"{foes}  {foeLabel}") + 18;
+        rx -= DrawCounterR(rx, cy, Pal.Friend, $"{friends}  SQUAD") + 18;
+        float rightStart = rx + 2;
+
+        // subtle zone separators (hairlines, not chrome)
+        Raylib.DrawRectangle((int)leftEnd + 2, cy - 12, 1, 24, Raylib.Fade(Pal.PanelBd, 0.9f));
+        Raylib.DrawRectangle((int)rightStart - 2, cy - 12, 1, 24, Raylib.Fade(Pal.PanelBd, 0.9f));
+
+        // ---- CENTER ZONE: mission + objective (+ secondary bonus on a second line) ----------
+        // Accent discipline (60-30-10): the objective readout uses ONE primary accent (amber, the
+        // "objective" role) so it doesn't compete with the genuine state colors (green/red) used
+        // for the secondary-bonus tracker + the pressure meter. The exception is a gold ASSET/HVT
+        // objective (escort/rescue/decapitate), where gold is the semantic role for the thing you
+        // protect or hunt — and the objective glyph carries the type by shape regardless of hue.
+        string preTxt; Color preCol; string objTxt; Color objCol; bool glyph = false;
+        if (g.Mode == GameMode.Endless)
+        {
+            // PROGRAM HORIZON W2: LAST STAND replaces the objective readout with the WAVE/BEST counter.
+            preTxt = "LAST STAND"; preCol = Raylib.Fade(Pal.Foe, 0.85f);
+            objTxt = g.EndlessHud; objCol = Pal.Foe;
+        }
+        else if (g.Mode == GameMode.Skirmish)
+        {
+            // PROGRAM HORIZON W4: SKIRMISH/DAILY show "SKIRMISH — <OBJ>" or "DAILY <stamp>  BEST n".
+            preTxt = ""; preCol = Pal.TxtDim;
+            objTxt = g.SkirmishHud; objCol = g.DailyMode ? Pal.Accent : Pal.Friend;
+        }
+        else
+        {
+            preTxt = $"MISSION {g.RunState.Mission}/{Run.MaxMissions}"; preCol = Pal.TxtDim;
+            glyph = true;
+            switch (g.Objective)
+            {
+                case Objective.Evac: objTxt = "EXTRACT"; objCol = Pal.Accent; break;
+                case Objective.Hack: objTxt = $"HACK {g.HackProgress}/{Game.HackRequired}"; objCol = Pal.Accent; break;
+                case Objective.Sabotage: objTxt = $"SABOTAGE {g.SabotageBlown.Count}/{g.SabotageSites.Count}"; objCol = Pal.Accent; break;
+                case Objective.Escort: objTxt = "ESCORT VIP"; objCol = Pal.VipGold; break;
+                case Objective.Rescue: objTxt = g.CaptiveLocked ? "RESCUE CAPTIVE" : "EXTRACT CAPTIVE"; objCol = Pal.VipGold; break;
+                case Objective.Defend: objTxt = $"DEFEND {Math.Min(g.Turn, Game.DefendTurns)}/{Game.DefendTurns}"; objCol = Pal.Accent; break;
+                case Objective.Decapitate:
+                    // W4 GUARDED HVT: read the guarded state at a glance — danger-red "HVT GUARDED"
+                    // while a bodyguard shields it (peel the guards first), gold "HVT EXPOSED" once
+                    // it's open to a kill. Falls back to plain "KILL HVT" if the HVT is somehow null.
+                    if (g.HasHvt && g.Hvt.HvtGuarded) { objTxt = "HVT GUARDED"; objCol = Pal.Foe; }
+                    else if (g.HasHvt)                { objTxt = "HVT EXPOSED"; objCol = Pal.VipGold; }
+                    else                              { objTxt = "KILL HVT"; objCol = Pal.VipGold; }
+                    break;
+                default: objTxt = "ELIMINATE"; objCol = Pal.Accent; break;
+            }
+        }
+        // measure the group: [prefix]  [glyph] OBJECTIVE — centered on the screen, clamped into
+        // the span the left/right zones leave free so it can never collide with either.
+        float preW = string.IsNullOrEmpty(preTxt) ? 0 : Raylib.MeasureTextEx(Cfg.Font, preTxt, 14, 1f).X + 14;
+        float glyphW = glyph ? 20 : 0;
+        float objW = Raylib.MeasureTextEx(Cfg.Font, objTxt, 16, 1f).X;
+        float total = preW + glyphW + objW;
+        float cx = Cfg.ScreenW / 2f - total / 2f;
+        cx = Util.Clamp(cx, leftEnd + 14, rightStart - total - 14);
+        if (!string.IsNullOrEmpty(preTxt))
+            Raylib.DrawTextEx(Cfg.Font, preTxt, new Vector2((int)cx, cy - 7), 14, 1f, preCol);
+        // 5.4/5.5: a semantic glyph left of the objective text (shape redundancy, not hue alone)
+        if (glyph) DrawObjectiveIcon(g.Objective, cx + preW + 8, cy, objCol);
+        Raylib.DrawTextEx(Cfg.Font, objTxt, new Vector2((int)(cx + preW + glyphW), cy - 8), 16, 1f, objCol);
+
+        // optional secondary objective (3.9): green while on track, red once blown — a smaller
+        // second line centered under the objective group so mission + bonus read as one block.
+        if (g.Secondary != SecondaryKind.None)
+        {
+            string sec = g.SecondaryHud;
+            float sw = Raylib.MeasureTextEx(Cfg.Font, sec, 12, 1f).X;
+            float sx = Util.Clamp(cx + preW + (glyphW + objW) / 2f - sw / 2f, leftEnd + 14, rightStart - sw - 14);
+            Raylib.DrawTextEx(Cfg.Font, sec, new Vector2((int)sx, 44), 12, 1f, g.SecondaryOnTrack ? Pal.Good : Pal.Foe);
+        }
     }
 
-    static void DrawCounter(int x, int y, Color dot, string text)
+    /// Right-zone counter: a team dot + count/label at 14px, vertically centered on `cy`,
+    /// RIGHT-aligned so callers can flow the top bar right-to-left. Returns the drawn width.
+    static float DrawCounterR(float rightX, int cy, Color dot, string text)
     {
-        Raylib.DrawCircle(x, y + 7, 6, dot);
-        Raylib.DrawTextEx(Cfg.Font, text, new Vector2(x + 14, y), 16, 1f, Pal.Txt);
+        float tw = Raylib.MeasureTextEx(Cfg.Font, text, 14, 1f).X;
+        float w = 16 + tw;
+        Raylib.DrawCircle((int)(rightX - w + 5), cy, 5.5f, dot);
+        Raylib.DrawTextEx(Cfg.Font, text, new Vector2((int)(rightX - tw), cy - 7), 14, 1f, Pal.Txt);
+        return w;
     }
 
-    // Anti-turtle PRESSURE meter: a tiny "PRES" label + N rung pips that fill (hollow -> solid
-    // red) as the clock escalates. The active rung pulses, and at max it shows a bright frame, so
-    // the rising threat reads at a glance without crowding the top bar. Shape-redundant (filled vs
-    // hollow), so it works in the colorblind palette too.
-    static void DrawPressureMeter(Game g, int x, int y)
+    /// Width of the labeled pressure stack (max of the word + the pip row) for right-to-left layout.
+    static float PressureMeterWidth(Game g)
+    {
+        string lbl = g.Pressure > 0 ? "ALERT" : "PRESSURE";
+        float lw = Raylib.MeasureTextEx(Cfg.Font, lbl, 10, 1f).X;
+        float pips = Game.PressureMax * 12 - 3;   // pipW 9 + gap 3
+        return MathF.Max(lw, pips);
+    }
+
+    // Anti-turtle PRESSURE meter: a labeled stack — the word ("PRESSURE" graced / "ALERT" once
+    // the clock escalates) above N rung pips that fill hollow -> solid red. The active rung
+    // pulses, and at max the frames flash, so the rising threat reads at a glance. Tinted red
+    // only when live (a genuine threat state). Shape-redundant (filled vs hollow), so it works
+    // in the colorblind palette too.
+    static void DrawPressureMeter(Game g, float x, int cy)
     {
         int rung = g.Pressure, max = Game.PressureMax;
         bool maxed = rung >= max;
         bool live = rung > 0;
-        // Label reads "PRES" while graced and "ALERT" once the clock is escalating, so the rising
-        // threat is legible as a word, not just inferred from a pip count. Tinted red only when live
-        // (a genuine threat state) — dim otherwise, so an idle clock doesn't add a red accent.
-        string lbl = live ? "ALERT" : "PRES";
-        Raylib.DrawTextEx(Cfg.Font, lbl, new Vector2(x, y + 2), 12, 1f, live ? Pal.Foe : Pal.TxtDim);
-        int px = x + 40;                                  // pips start after the (now wider) label
+        string lbl = live ? "ALERT" : "PRESSURE";
+        float w = PressureMeterWidth(g);
+        float lw = Raylib.MeasureTextEx(Cfg.Font, lbl, 10, 1f).X;
+        Raylib.DrawTextEx(Cfg.Font, lbl, new Vector2((int)(x + w / 2 - lw / 2), cy - 14), 10, 1f, live ? Pal.Foe : Pal.TxtDim);
         const int pipW = 9, pipH = 12, gap = 3;
+        float px = x + w / 2 - (max * (pipW + gap) - gap) / 2f;
         float pulse = 0.6f + 0.4f * (float)Math.Sin(Raylib.GetTime() * 5.0);
         for (int i = 0; i < max; i++)
         {
-            var r = new Rectangle(px + i * (pipW + gap), y, pipW, pipH);
+            var r = new Rectangle(px + i * (pipW + gap), cy + 1, pipW, pipH);
             bool filled = i < rung;
             if (filled)
             {
@@ -543,9 +595,10 @@ public static class Hud
         int shown = Math.Min(cap, log.Count);
         float bodyH = shown * lh;
         float h = headH + bodyH + padY;
-        // bottom edge sits just above the action-button row (y 720) and the unit card (x 20..270)
+        // bottom edge sits just above the action bar's TOP row (the W10 bar can wrap to extra
+        // rows that grow upward; _barTop tracks it) and clear of the unit card (x 20..270)
         float x = Cfg.ScreenW - w - 14f;
-        float y = 712f - h;
+        float y = MathF.Min(712f, _barTop - 8f) - h;
         var panel = new Rectangle(x, y, w, h);
 
         // low-alpha frame so the board reads through it
@@ -600,10 +653,11 @@ public static class Hud
 
         DrawActionButtons(g, barY);
 
-        // hint
+        // hint — pinned to the strip BELOW the bar's bottom row (the bar grows upward, so this
+        // baseline never collides with buttons at any row count)
         string hint = "MOVE / FIRE by click  -  [Tab] next  -  [5] ability  -  [T] tag  -  [Esc] menu";
         int hw = (int)Raylib.MeasureTextEx(Cfg.Font, hint, 13, 1f).X;
-        Raylib.DrawTextEx(Cfg.Font, hint, new Vector2(Cfg.ScreenW - hw - 24, Cfg.ScreenH - 30), 13, 1f, Pal.TxtDim);
+        Raylib.DrawTextEx(Cfg.Font, hint, new Vector2(Cfg.ScreenW - hw - 24, Cfg.ScreenH - 26), 13, 1f, Pal.TxtDim);
     }
 
     static void DrawUnitCard(Unit u, int x, int y)
@@ -696,23 +750,59 @@ public static class Hud
             Add("extract", "EXTRACT", "X", interactive && g.CanExtract(u), false);
         Add("reload", "RELOAD", "R", interactive && u != null && u.CanAct && u.Ammo < u.Weapon.Clip, false);
 
-        // Responsive width: fit `count` buttons (+gaps) into the bar span [bx0 .. right edge].
-        float bx0 = 300, bh = 40, gap = 6;
-        float right = Cfg.ScreenW - 26;                      // leave a small right margin
-        int count = specs.Count;
-        float bw = MathF.Min(104, (right - bx0 - gap * (count - 1)) / count);
+        // W10 (owner feedback): every button sizes to its RENDERED content (icon zone + measured
+        // label + hotkey tag), and the row WRAPS into extra rows that grow UPWARD when the sum
+        // overflows the bar span — an ellipsized verb is impossible by construction at any count.
+        const float bh = 40, gapX = 6, gapY = 6;
+        const int iconZone = ActionIconZone, rightPad = 10;
+        float bx0 = 300;
+        float right = Cfg.ScreenW - 20;                      // small right margin
+
+        var widths = new float[specs.Count];
+        for (int i = 0; i < specs.Count; i++)
+        {
+            float lw = Raylib.MeasureTextEx(Cfg.Font, specs[i].label, ActionLabelFs, 1f).X;
+            float kw = string.IsNullOrEmpty(specs[i].key)
+                ? 0
+                : Raylib.MeasureTextEx(Cfg.Font, specs[i].key, 12, 1f).X + 6 + 8;   // tag box + gap
+            widths[i] = iconZone + lw + kw + rightPad;
+        }
+
+        // Greedy wrap into rows. The FIRST row (fire/strike verbs) stays anchored at the classic
+        // bar y — so FIRE/GRENADE/OVERWATCH never jump vertically as the verb count changes
+        // between units — and each overflow row becomes a tray stacked ABOVE it (bar grows upward).
+        var rowOf = new int[specs.Count];
+        int rows = 0;
+        {
+            float bx = bx0;
+            for (int i = 0; i < specs.Count; i++)
+            {
+                if (bx > bx0 && bx + widths[i] > right) { rows++; bx = bx0; }
+                rowOf[i] = rows;
+                bx += widths[i] + gapX;
+            }
+            rows++;
+        }
+
+        float yBase = y + 26;                                // bottom row (same y the bar always had)
+        _barTop = yBase - (rows - 1) * (bh + gapY);          // combat log anchors above this
 
         var btns = new System.Collections.Generic.List<UiButton>();
-        float bx = bx0;
-        foreach (var s in specs)
         {
-            btns.Add(new UiButton
+            float bx = bx0; int row = 0;
+            for (int i = 0; i < specs.Count; i++)
             {
-                Rect = new Rectangle(bx, y + 26, bw, bh),
-                Id = s.id, Label = s.label, Key = s.key, Enabled = s.enabled, Selected = s.sel,
-                Accent = Pal.Friend,
-            });
-            bx += bw + gap;
+                if (rowOf[i] != row) { row = rowOf[i]; bx = bx0; }
+                float by = yBase - row * (bh + gapY);
+                btns.Add(new UiButton
+                {
+                    Rect = new Rectangle(bx, by, widths[i], bh),
+                    Id = specs[i].id, Label = specs[i].label, Key = specs[i].key,
+                    Enabled = specs[i].enabled, Selected = specs[i].sel,
+                    Accent = Pal.Friend,
+                });
+                bx += widths[i] + gapX;
+            }
         }
 
         ActionButtons = btns.ToArray();
@@ -721,6 +811,14 @@ public static class Hud
 
         DrawActionHelp(g);
     }
+
+    /// Action-bar metrics shared by the sizer and the renderer: the icon gutter width and the
+    /// one fixed label size (buttons are sized to fit it, so it never shrinks or ellipsizes).
+    const int ActionIconZone = 22;
+    const int ActionLabelFs = 15;
+    /// Top edge of the (possibly multi-row) action bar this frame — the combat log and any
+    /// panel that must stay clear of the bar anchors above it. Defaults to the one-row top.
+    static float _barTop = 720f;
 
     /// Draw one action button: background + border via DrawButtonRect, then overlay a
     /// small procedural icon in the left quarter of the button (14px zone) that uses the
@@ -750,26 +848,17 @@ public static class Hud
         // Icon zone: left 22px of the button interior, vertically centred. The glyph itself sits
         // at ~x+9 (it's ~12px wide, so its right edge is ~x+15); reserving 22px leaves a clear
         // ~7px gutter before any label text so the glyph never kisses its word.
-        const int iconZone = 22;
+        const int iconZone = ActionIconZone;
         float ix = r.X + 9f;
         float iy = r.Y + r.Height / 2f;
 
         DrawActionIcon(b.Id, ix, iy, ic);
 
-        // Label + key: centred within the post-icon region, but never allowed to start before the
-        // icon zone (so a wide label on a narrow button keeps the gutter instead of crowding the glyph).
-        int fs = 16;
-        int kw = string.IsNullOrEmpty(key) ? 0 : (int)Raylib.MeasureTextEx(Cfg.Font, key, 12, 1f).X + 8;
-        // Available width after removing the icon zone and right padding (6px).
-        int avail  = (int)r.Width - iconZone - 6;
-        int labelBudget = Math.Max(8, avail - kw);
-        // Auto-shrink the label font so the FULL word fits on a crowded bar (up to ~10 buttons)
-        // before resorting to an ellipsis — "OVERWATCH" at 12px reads far better than "OVER…".
-        while (fs > 12 && (int)Raylib.MeasureTextEx(Cfg.Font, label, fs, 1f).X > labelBudget) fs--;
-        label = Clip(label, fs, labelBudget);
+        // Label + key: the button was SIZED to this content (DrawActionButtons W10), so the full
+        // word always fits — no shrink loop, no ellipsis, one consistent label size bar-wide.
+        int fs = ActionLabelFs;
         int lw = (int)Raylib.MeasureTextEx(Cfg.Font, label, fs, 1f).X;
-        int startX = (int)(r.X + iconZone + avail / 2 - (lw + kw) / 2);
-        if (startX < (int)r.X + iconZone) startX = (int)r.X + iconZone;
+        int startX = (int)r.X + iconZone;
         int ty     = (int)(r.Y + r.Height / 2 - fs / 2);
         Raylib.DrawTextEx(Cfg.Font, label, new Vector2(startX, ty), fs, 1f, Raylib.Fade(tc, a));
         if (!string.IsNullOrEmpty(key))
@@ -1170,33 +1259,36 @@ public static class Hud
 
         // Build the badge list. Order: target-cover/state, then attacker buffs, then
         // attacker penalties — so advantages and warnings stay visually grouped.
-        var flags = new System.Collections.Generic.List<(string text, Color col)>();
+        // W10 (owner feedback — "penalties and bonuses are basically unreadable"): each badge is
+        // a (label, value) PAIR. The label draws in plain Pal.Txt; only the signed value draws in
+        // its role color (Foe = penalty, Good = bonus), right-aligned in one consistent column.
+        var flags = new System.Collections.Generic.List<(string label, string val, Color col)>();
         // — already in the odds struct —
         // Every badge shows its SIGNED MAGNITUDE from the real Combat/Unit constants (now exact:
         // crit is summed flat, no damping), so the player can read WHY the odds are what they are.
         // Cover shows the HIT penalty it imposes (cover.Defense): LOW -20 / HIGH -40, halved when
         // PARTIAL. EXPOSED (no cover) shows the +18 situational crit it grants the attacker.
-        if (o.Flanked)   flags.Add(("! FLANKED", Pal.Accent));         // cover negated + EXPOSED crit (below)
-        if (o.Hunkered)  flags.Add(("HUNKERED  -25 aim, no crit", Pal.Foe));   // target dug in
-        if (o.CoverLevel == 2 && !o.Partial) flags.Add(("HIGH COVER  -40 aim", Pal.Foe));
-        else if (o.CoverLevel == 2 && o.Partial) flags.Add(("PARTIAL HIGH  -20 aim", Pal.TxtDim));
-        else if (o.CoverLevel == 1 && !o.Partial) flags.Add(("LOW COVER  -20 aim", Pal.Foe));
-        else if (o.CoverLevel == 1 && o.Partial)  flags.Add(("PARTIAL LOW  -10 aim", Pal.TxtDim));
-        if (o.CoverLevel == 0 && !o.Hunkered) flags.Add(("EXPOSED  +18 crit", Pal.Good));
-        if (o.HighGround) flags.Add(($"HIGH GROUND  +{Combat.HighGroundAim} aim / +{Combat.HighGroundCrit} crit", Pal.Good));
-        if (o.SeesOver)  flags.Add(("OVER LOW COVER", Pal.Good));
-        if (o.Steady)    flags.Add(($"STEADY  +{Combat.SteadyAim} aim / +{Combat.SteadyCrit} crit", Pal.Good));
-        if (o.Ambush)    flags.Add(($"AMBUSH  +{Combat.AmbushAim} aim / +{Combat.AmbushCrit} crit", Pal.Good));
-        if (o.ExposedFire) flags.Add(($"EXPOSED BY FIRE  +{Combat.ExposedFireAim} aim / +{Combat.ExposedFireCrit} crit", Pal.Good));   // HORIZON: target fired last turn + stayed put
+        if (o.Flanked)   flags.Add(("FLANKED", "no cover", Pal.Accent));       // cover negated + EXPOSED crit (below)
+        if (o.Hunkered)  flags.Add(("HUNKERED", "-25 aim, no crit", Pal.Foe)); // target dug in
+        if (o.CoverLevel == 2 && !o.Partial) flags.Add(("HIGH COVER", "-40 aim", Pal.Foe));
+        else if (o.CoverLevel == 2 && o.Partial) flags.Add(("PARTIAL HIGH COVER", "-20 aim", Pal.Foe));
+        else if (o.CoverLevel == 1 && !o.Partial) flags.Add(("LOW COVER", "-20 aim", Pal.Foe));
+        else if (o.CoverLevel == 1 && o.Partial)  flags.Add(("PARTIAL LOW COVER", "-10 aim", Pal.Foe));
+        if (o.CoverLevel == 0 && !o.Hunkered) flags.Add(("EXPOSED", "+18 crit", Pal.Good));
+        if (o.HighGround) flags.Add(("HIGH GROUND", $"+{Combat.HighGroundAim} aim, +{Combat.HighGroundCrit} crit", Pal.Good));
+        if (o.SeesOver)  flags.Add(("OVER LOW COVER", "ignores low", Pal.Good));
+        if (o.Steady)    flags.Add(("STEADY", $"+{Combat.SteadyAim} aim, +{Combat.SteadyCrit} crit", Pal.Good));
+        if (o.Ambush)    flags.Add(("AMBUSH", $"+{Combat.AmbushAim} aim, +{Combat.AmbushCrit} crit", Pal.Good));
+        if (o.ExposedFire) flags.Add(("EXPOSED BY FIRE", $"+{Combat.ExposedFireAim} aim, +{Combat.ExposedFireCrit} crit", Pal.Good));   // HORIZON: target fired last turn + stayed put
         // Surface the hidden streak-breaker: after consecutive misses this soldier's next
         // shot quietly aims truer (the bonus is in the roll, NOT in the HIT% shown). Naming it
         // "STEADYING" tells the player the safety net is working so a miss streak feels recoverable.
-        if (o.StreakBonus > 0) flags.Add(($"+{o.StreakBonus} STEADYING", Pal.Good));
+        if (o.StreakBonus > 0) flags.Add(("STEADYING", $"+{o.StreakBonus} aim", Pal.Good));
         // TEMPO: a SECOND shot in the same turn is a rushed follow-up at the SnapAim penalty (the
         // HitChance shown already reflects it). RUN&GUN's bonus shot + the GUNSLINGER perk are full
         // aim — GUNSLINGER instead gets a "DOUBLE-TAP" confirmation badge.
         if (g.AimMode && a != null && a.FiredThisTurn && !a.RunGun)
-            flags.Add(a.HasPerk(Perk.Gunslinger) ? ("DOUBLE-TAP", Pal.Good) : ($"RUSHED {Game.SnapAim}", Pal.Foe));
+            flags.Add(a.HasPerk(Perk.Gunslinger) ? ("DOUBLE-TAP", "full aim", Pal.Good) : ("RUSHED 2ND SHOT", $"{Game.SnapAim} aim", Pal.Foe));
 
         // — modifiers that read live attacker/target state (mirror Combat.ComputeOdds) —
         if (a != null && d != null)
@@ -1210,42 +1302,43 @@ public static class Hud
             // its real signed magnitude. NOTE: the redundant crit perks (Deadeye/Opportunist/Point
             // Blank/Vanguard) are no longer offered AND no longer read by ComputeOdds, so they're
             // intentionally absent here — only the kept Executioner / First Strike crit pair shows.
-            if (a.BondAura)                                   flags.Add(($"BOND  +{Unit.BondAim} aim", Pal.Good));
-            if (a.HasTrait(Trait.Killer) && tgtHurt)          flags.Add(($"KILLER  +{Unit.KillerAim} aim", Pal.Good));
-            if (a.HasTrait(Trait.Vengeful) && a.AllyDown)     flags.Add(($"VENGEFUL  +{Unit.VengefulAim} aim", Pal.Good));
-            if (a.HasTrait(Trait.ColdBlood) && selfHurt)      flags.Add(($"COLD BLOOD  +{Unit.ColdBloodCrit} crit", Pal.Good));
-            if (a.HasPerk(Perk.LockOn) && o.CoverLevel == 0)  flags.Add(($"LOCK-ON  +{Unit.PerkAim} aim", Pal.Good));
-            if (a.HasPerk(Perk.CloseQuarters) && dist <= Unit.CloseRange) flags.Add(($"CLOSE QTRS  +{Unit.PerkAim} aim", Pal.Good));
-            if (a.HasPerk(Perk.Marksman) && dist >= Unit.LongRange)       flags.Add(($"MARKSMAN  +{Unit.PerkAim} aim", Pal.Good));
-            if (a.HasPerk(Perk.Executioner) && tgtSubHalf)    flags.Add(($"EXECUTIONER  +{Unit.ExecutionerCrit} crit", Pal.Good));
-            if (a.HasPerk(Perk.GiantSlayer) && d.MaxHp > 0 && d.Hp >= d.MaxHp) flags.Add(($"FIRST STRIKE  +{Unit.FirstStrikeCrit} crit", Pal.Good));
-            if (o.Crossfire)                                  flags.Add(($"CROSSFIRE  +{Combat.CrossfireAim} aim / +{Combat.CrossfireCrit} crit", Pal.Good));   // a squadmate threatens this target from a converging angle
-            if (o.Marked)                                     flags.Add(($"MARKED  +{Combat.MarkAim} aim", Pal.Good));      // a sharpshooter has designated this foe (squad-wide focus-fire bonus)
-            if (d.Pinned > 0)                                 flags.Add(("+ SUPPRESSED", Pal.Good));  // a gunner has pinned this foe (it shoots wild + can't dash)
+            if (a.BondAura)                                   flags.Add(("BOND", $"+{Unit.BondAim} aim", Pal.Good));
+            if (a.HasTrait(Trait.Killer) && tgtHurt)          flags.Add(("KILLER", $"+{Unit.KillerAim} aim", Pal.Good));
+            if (a.HasTrait(Trait.Vengeful) && a.AllyDown)     flags.Add(("VENGEFUL", $"+{Unit.VengefulAim} aim", Pal.Good));
+            if (a.HasTrait(Trait.ColdBlood) && selfHurt)      flags.Add(("COLD BLOOD", $"+{Unit.ColdBloodCrit} crit", Pal.Good));
+            if (a.HasPerk(Perk.LockOn) && o.CoverLevel == 0)  flags.Add(("LOCK-ON", $"+{Unit.PerkAim} aim", Pal.Good));
+            if (a.HasPerk(Perk.CloseQuarters) && dist <= Unit.CloseRange) flags.Add(("CLOSE QUARTERS", $"+{Unit.PerkAim} aim", Pal.Good));
+            if (a.HasPerk(Perk.Marksman) && dist >= Unit.LongRange)       flags.Add(("MARKSMAN", $"+{Unit.PerkAim} aim", Pal.Good));
+            if (a.HasPerk(Perk.Executioner) && tgtSubHalf)    flags.Add(("EXECUTIONER", $"+{Unit.ExecutionerCrit} crit", Pal.Good));
+            if (a.HasPerk(Perk.GiantSlayer) && d.MaxHp > 0 && d.Hp >= d.MaxHp) flags.Add(("FIRST STRIKE", $"+{Unit.FirstStrikeCrit} crit", Pal.Good));
+            if (o.Crossfire)                                  flags.Add(("CROSSFIRE", $"+{Combat.CrossfireAim} aim, +{Combat.CrossfireCrit} crit", Pal.Good));   // a squadmate threatens this target from a converging angle
+            if (o.Marked)                                     flags.Add(("MARKED", $"+{Combat.MarkAim} aim", Pal.Good));      // a sharpshooter has designated this foe (squad-wide focus-fire bonus)
+            if (d.Pinned > 0)                                 flags.Add(("TARGET SUPPRESSED", "shoots wild", Pal.Good));  // a gunner has pinned this foe (it shoots wild + can't dash)
 
             // attacker penalties (red) — these quietly drag the hit% down (signed magnitudes)
-            if (a.Suppress > 0)                               flags.Add(($"SUPPRESSED  -{a.Suppress} aim", Pal.Foe));
-            if (a.Wound > 0)                                  flags.Add(($"WOUNDED  -{Unit.WoundAim} aim", Pal.Foe));
-            if (a.HasStatus(StatusKind.Disoriented))          flags.Add(($"DISORIENTED  -{Unit.DisorientAim} aim", Pal.Foe));
+            if (a.Suppress > 0)                               flags.Add(("SUPPRESSED", $"-{a.Suppress} aim", Pal.Foe));
+            if (a.Wound > 0)                                  flags.Add(("WOUNDED", $"-{Unit.WoundAim} aim", Pal.Foe));
+            if (a.HasStatus(StatusKind.Disoriented))          flags.Add(("DISORIENTED", $"-{Unit.DisorientAim} aim", Pal.Foe));
 
             // target obscured in smoke (it's shootable — LoS clears the endpoint tile —
             // but harder to make out). Neutral tag: smoke is not in the hit% math.
-            if (g.Grid.IsSmoke(d.X, d.Y))                     flags.Add(("~ SMOKED", Pal.TxtDim));
+            if (g.Grid.IsSmoke(d.X, d.Y))                     flags.Add(("SMOKED", "sight only", Pal.TxtDim));
         }
 
-        // Layout: one column when short, two when the badge list gets long, so a heavily
-        // perked veteran's tooltip stays compact instead of running tall. Badges now carry signed
-        // magnitudes (e.g. "AMBUSH  +20 aim / +25 crit"), so the column is sized to the WIDEST badge
-        // at 12px (measured, capped) and the box widens to fit — legibility over compactness.
-        const int hdr = 72, lineH = 17, fontFlag = 12, pad = 12;
-        bool twoCol = flags.Count > 6;
-        int rows = twoCol ? (flags.Count + 1) / 2 : flags.Count;
-        int maxBadge = 150;
+        // Layout (W10, owner feedback): ONE modifier per line at a legible 13px with real line
+        // spacing; labels left in plain text, signed values right-aligned in one consistent
+        // column. The panel grows to honestly fit its content (placement logic unchanged).
+        const int lineH = 19, fontFlag = 13, pad = 12, colGap = 22;
+        bool graze = o.GrazeFloor > 0;
+        int hdr = graze ? 100 : 80;                        // HIT / CRIT / DMG (+ GRAZE) header rows
+        int maxLab = 0, maxVal = 0;
         foreach (var f in flags)
-            maxBadge = Math.Max(maxBadge, (int)Raylib.MeasureTextEx(Cfg.Font, f.text, fontFlag, 1f).X);
-        int colW = maxBadge + 12;                          // measured width of the widest badge + gap
-        int w = twoCol ? colW * 2 - 8 : Math.Max(150, colW);
-        int h = hdr + rows * lineH + (flags.Count > 0 ? 6 : 2);
+        {
+            maxLab = Math.Max(maxLab, (int)Raylib.MeasureTextEx(Cfg.Font, f.label, fontFlag, 1f).X);
+            maxVal = Math.Max(maxVal, (int)Raylib.MeasureTextEx(Cfg.Font, f.val, fontFlag, 1f).X);
+        }
+        int w = Math.Max(190, maxLab + colGap + maxVal) + pad * 2;
+        int h = hdr + flags.Count * lineH + (flags.Count > 0 ? 10 : 4);
 
         var m = Raylib.GetMousePosition();
         int x = (int)m.X - w / 2;
@@ -1254,7 +1347,7 @@ public static class Hud
         y = Util.Clamp(y, 64, Cfg.ScreenH - h - 8);
 
         var box = new Rectangle(x, y, w, h);
-        Raylib.DrawRectangleRounded(box, 0.12f, 8, Pal.RGBA(10, 14, 19, 245));
+        Raylib.DrawRectangleRounded(box, 0.12f, 8, Pal.RGBA(10, 14, 19, 251));
         // W9 color roles (DESIGN.md §3.H — one job per accent): the frame is a neutral panel
         // border, so RED returns to threat-only duty and an 8% desperation shot no longer sits
         // inside a decorative red box that means nothing.
@@ -1264,28 +1357,29 @@ public static class Hud
         // >=70 good / 40-69 caution / <40 threat — so a desperation shot reads red, not
         // reassuring green. The % text itself is the redundant channel (5.1 rule), so the
         // meaning survives the colorblind palette.
-        Raylib.DrawTextEx(Cfg.Font, "HIT", new Vector2(x + pad, y + 10), 12, 1f, Pal.TxtDim);
+        Raylib.DrawTextEx(Cfg.Font, "HIT", new Vector2(x + pad, y + 12), 13, 1f, Pal.TxtDim);
         string hit = $"{o.HitChance}%";
         Color hitCol = o.HitChance >= 70 ? Pal.Good : (o.HitChance >= 40 ? Pal.Accent : Pal.Foe);
-        Raylib.DrawTextEx(Cfg.Font, hit, new Vector2(x + w - (int)Raylib.MeasureTextEx(Cfg.Font, hit, 22, 1f).X - pad, y + 7), 22, 1f, hitCol);
+        Raylib.DrawTextEx(Cfg.Font, hit, new Vector2(x + w - (int)Raylib.MeasureTextEx(Cfg.Font, hit, 24, 1f).X - pad, y + 8), 24, 1f, hitCol);
 
-        Raylib.DrawTextEx(Cfg.Font, "CRIT", new Vector2(x + pad, y + 34), 12, 1f, Pal.TxtDim);
+        Raylib.DrawTextEx(Cfg.Font, "CRIT", new Vector2(x + pad, y + 38), 13, 1f, Pal.TxtDim);
         string crit = $"{o.CritChance}%";
-        Raylib.DrawTextEx(Cfg.Font, crit, new Vector2(x + w - (int)Raylib.MeasureTextEx(Cfg.Font, crit, 16, 1f).X - pad, y + 32), 16, 1f, Pal.Accent);
+        Raylib.DrawTextEx(Cfg.Font, crit, new Vector2(x + w - (int)Raylib.MeasureTextEx(Cfg.Font, crit, 16, 1f).X - pad, y + 36), 16, 1f, Pal.Accent);
 
-        // DMG is a neutral fact, not a threat — plain text hue.
-        Raylib.DrawTextEx(Cfg.Font, "DMG", new Vector2(x + pad, y + 54), 12, 1f, Pal.TxtDim);
+        // DMG is a neutral fact, not a threat — plain text hue. The damage range and the graze
+        // band are SEPARATE fields (W10): "DMG 3-5" then "GRAZE 3" on its own line, so the
+        // consolation floor never reads as part of the full-hit range.
+        Raylib.DrawTextEx(Cfg.Font, "DMG", new Vector2(x + pad, y + 58), 13, 1f, Pal.TxtDim);
         string dmg = $"{o.DmgMin}-{o.DmgMax}";
-        Raylib.DrawTextEx(Cfg.Font, dmg, new Vector2(x + w - (int)Raylib.MeasureTextEx(Cfg.Font, dmg, 16, 1f).X - pad, y + 52), 16, 1f, Pal.Txt);
+        Raylib.DrawTextEx(Cfg.Font, dmg, new Vector2(x + w - (int)Raylib.MeasureTextEx(Cfg.Font, dmg, 16, 1f).X - pad, y + 56), 16, 1f, Pal.Txt);
         // Graze safety net: a near-miss still hits for this guaranteed floor instead of whiffing
-        // (so missing is never *nothing*). Shown small + dim between the label and the range, in the
-        // Accent hue used for graze FX so it reads as "the consolation hit", not the full damage.
-        if (o.GrazeFloor > 0)
+        // (so missing is never *nothing*). Its own row, in the Accent hue used for graze FX so it
+        // reads as "the consolation hit", not the full damage.
+        if (graze)
         {
-            string gz = $"GRAZE {o.GrazeFloor}";
-            int gzw = (int)Raylib.MeasureTextEx(Cfg.Font, gz, 11, 1f).X;
-            int dmgw = (int)Raylib.MeasureTextEx(Cfg.Font, dmg, 16, 1f).X;
-            Raylib.DrawTextEx(Cfg.Font, gz, new Vector2(x + w - dmgw - gzw - pad - 8, y + 56), 11, 1f, Pal.Accent);
+            Raylib.DrawTextEx(Cfg.Font, "GRAZE", new Vector2(x + pad, y + 78), 13, 1f, Pal.TxtDim);
+            string gz = $"{o.GrazeFloor} on near miss";
+            Raylib.DrawTextEx(Cfg.Font, gz, new Vector2(x + w - (int)Raylib.MeasureTextEx(Cfg.Font, gz, 13, 1f).X - pad, y + 77), 13, 1f, Pal.Accent);
         }
 
         // a hairline above the badges separates them from the headline numbers
@@ -1294,11 +1388,13 @@ public static class Hud
 
         for (int i = 0; i < flags.Count; i++)
         {
-            int col = twoCol ? i % 2 : 0;
-            int row = twoCol ? i / 2 : i;
-            int fx = x + pad + col * (colW - 4);
-            int fyy = y + hdr + row * lineH;
-            Raylib.DrawTextEx(Cfg.Font, flags[i].text, new Vector2(fx, fyy), fontFlag, 1f, flags[i].col);
+            int fyy = y + hdr + i * lineH;
+            // label: plain readable text (FLANKED keeps its warning accent — it's a keyword, not a number)
+            Color labCol = flags[i].label == "FLANKED" ? Pal.Accent : Pal.Txt;
+            Raylib.DrawTextEx(Cfg.Font, flags[i].label, new Vector2(x + pad, fyy), fontFlag, 1f, labCol);
+            // value: right-aligned signed magnitude in its role color (Foe penalty / Good bonus)
+            int vw = (int)Raylib.MeasureTextEx(Cfg.Font, flags[i].val, fontFlag, 1f).X;
+            Raylib.DrawTextEx(Cfg.Font, flags[i].val, new Vector2(x + w - pad - vw, fyy), fontFlag, 1f, flags[i].col);
         }
     }
 
