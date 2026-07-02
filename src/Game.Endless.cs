@@ -209,9 +209,10 @@ public partial class Game
         }
     }
 
-    // ── HORDETEST self-test (SIGHTLINE_HORDETEST): asserts the wave escalation is monotone + capped
-    // and that the meta BestWave round-trips. A tiny 64x64 window is created by the harness so the
-    // tile math in SpawnEndless* is valid. Returns a one-line report. ──────────────────────────
+    // ── HORDETEST self-test (SIGHTLINE_HORDETEST): asserts the wave escalation is monotone + capped,
+    // that a deep stand never inherits the campaign pressure clock (APEX W1), and that the meta
+    // BestWave round-trips. A tiny 64x64 window is created by the harness so the tile math in
+    // SpawnEndless* is valid. Returns a one-line report. ──────────────────────────
     public string HordeSelfTest()
     {
         var fails = new List<string>();
@@ -256,6 +257,19 @@ public partial class Game
             for (int i = 0; i < 30; i++) SpawnEndlessBodies(EndlessAliveCap, 5);
             if (AliveEnemies().Count > EndlessAliveCap) fails.Add("spawnBreaksCap");
 
+            // (3b) APEX W1: LAST STAND must never inherit the campaign anti-turtle pressure clock.
+            // Endless forces Eliminate (a clock objective) and never resets _turnCount, so a deep
+            // stand used to accrue a permanent +12..+16 hidden enemy aim ramp + phantom campaign
+            // reinforcement waves. Poison the statics, run the clock deep into a stand: the
+            // Mode != Endless gate in PressureClockObjective must zero both and spawn nothing.
+            _turnCount = 12;                       // well past grace (4) + enough steps for max rung
+            Pressure = 3; Combat.PressureAim = 9;
+            int foesBefore = AliveEnemies().Count;
+            UpdatePressure();
+            if (Pressure != 0) fails.Add($"endlessPressure={Pressure}");
+            if (Combat.PressureAim != 0) fails.Add($"endlessPressureAim={Combat.PressureAim}");
+            if (AliveEnemies().Count != foesBefore) fails.Add("endlessPhantomWave");
+
             // (4) meta BestWave round-trips (read-modify-write, append-only). Preserve any real meta.
             NoPersist = false;
             string metaSaved = System.IO.File.Exists(SaveGame.MetaPathPublic)
@@ -281,7 +295,7 @@ public partial class Game
         }
         catch (Exception e) { return "HORDETEST: FAIL (exception " + e.Message + ")"; }
         return fails.Count == 0
-            ? "HORDETEST: PASS (wave count/scale escalate + alive-cap holds; meta BestWave round-trips)"
+            ? "HORDETEST: PASS (wave count/scale escalate + alive-cap holds; endless skips the pressure clock; meta BestWave round-trips)"
             : "HORDETEST: FAIL (" + string.Join(",", fails) + ")";
     }
 }

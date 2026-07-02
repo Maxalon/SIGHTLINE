@@ -125,6 +125,15 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        // SIGHTLINE_HEATLADDERTEST=1 : APEX W1 — the heat>=7 / IRON VETERANS zero-roster seam: a lone-VIP
+        // Escort/Rescue win under a no-reinforcements regime must still field a squad next mission.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_HEATLADDERTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "heatladdertest");   // SetupMission/EnterBarracks use tile math
+            Console.WriteLine(new Game().HeatLadderSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         if (Environment.GetEnvironmentVariable("SIGHTLINE_WOUNDTEST") == "1")
         {
             Console.WriteLine(WoundTest());

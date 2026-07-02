@@ -307,6 +307,10 @@ public static class Mission
     {
         if (tpl.Length != g.H) return false;
         for (int y = 0; y < g.H; y++) if (tpl[y].Length != g.W) return false;
+        // defense-in-depth (matches EnsureConnectivity/PlaceBarrels): the connectivity flood
+        // starts from players[0], so an empty deploy must refuse the layout, not crash. The
+        // real guarantee is upstream — DebriefSurvivors never leaves the squad at zero.
+        if (players.Count == 0) return false;
 
         for (int y = 0; y < g.H; y++)
             for (int x = 0; x < g.W; x++)

@@ -961,14 +961,29 @@ public class Run
         // ATTRITION backfill (see RecruitsPerBarracks / AttritionFloor). Recruits TRICKLE in
         // rather than instantly refilling to RosterMax, so a wipe genuinely shrinks your strength
         // for a mission or two. A hard floor still guarantees a deployable squad (no death-spiral).
-        // Heat "RELENTLESS" (rung 8) turns OFF all reinforcements — casualties permanently shrink
+        // Heat "RELENTLESS" (rung 7) turns OFF all reinforcements — casualties permanently shrink
         // the roster for the run. CONTRACT "IRON VETERANS" does the same (no backfill at all): a wipe
         // genuinely shrinks the squad, the survivors are stronger (faster ranks above). Inert as None.
         bool noBackfill = Heat.NoReinforcements(HeatLevel) || Contract == Contract.IronVeterans;
         if (noBackfill)
         {
             string why = Contract == Contract.IronVeterans ? "CONTRACT" : "HEAT";
-            if (Squad.Count < NextDeployCap)
+            // SHATTERED COMMAND: no-reinforcements SHRINKS the roster, it must never ZERO it. A
+            // lone-VIP Escort/Rescue win can clear a mission with every soldier dead, and an empty
+            // squad has nothing to deploy next mission (Mission.Build flood-fills from players[0]).
+            // The anti-death-spiral floor is unconditional at Count == 0 ONLY — a surviving
+            // under-floor roster stays permanently short (CONTRACTTEST pins that it is NOT topped up).
+            if (Squad.Count == 0)
+            {
+                Report.Add($"SHATTERED COMMAND -- emergency conscripts fill the ranks ({why} still bars reinforcements)");
+                while (Squad.Count < AttritionFloor)
+                {
+                    var rec = Sightline.Mission.MakeRecruit();
+                    Squad.Add(rec);
+                    Report.Add($"{rec.Name} conscripted  (ROOKIE {rec.Cls})");
+                }
+            }
+            else if (Squad.Count < NextDeployCap)
                 Report.Add($"No reinforcements ({why}) -- deploying {Squad.Count} strong");
         }
         else

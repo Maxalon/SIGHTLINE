@@ -436,6 +436,11 @@ public partial class Game
         // PROGRAM HORIZON W4: no anti-turtle clock in SKIRMISH/DAILY — a single fight isn't a camp
         // exploit, and the reinforcement waves would muddy the seeded daily's determinism.
         Mode != GameMode.Skirmish &&
+        // APEX W1: no clock in LAST STAND either. Endless forces Eliminate and never resets
+        // _turnCount, so a deep stand inherited a permanent hidden +12..+16 enemy aim ramp plus
+        // phantom mission-1-scaled reinforcement waves on top of its own wave economy. Endless
+        // difficulty is owned by the wave escalation, not the campaign clock.
+        Mode != GameMode.Endless &&
         (Objective == Objective.Eliminate || Objective == Objective.Hack || Objective == Objective.Decapitate);
 
     // HUD reads this to decide whether to draw the PRESSURE meter (only on clock objectives,

@@ -923,6 +923,62 @@ public partial class Game
                $"fallen={_run.Fallen.Count} before=[{string.Join(",", before)}] after=[{string.Join(",", after)}]";
     }
 
+    /// Headless self-test (SIGHTLINE_HEATLADDERTEST) — APEX W1: the ladder's top exists. A lone-VIP
+    /// objective win (Escort VIP-to-evac, or Rescue freed-captive-to-evac) can clear a mission with
+    /// EVERY soldier dead. Under a no-reinforcements regime (Heat RELENTLESS, rung 7, so heat >= 7;
+    /// or CONTRACT IRON VETERANS) the debrief used to skip the AttritionFloor entirely, so the next
+    /// mission built with an empty deploy and Mission.TryApplyLayout crashed indexing players[0].
+    /// Asserts for all three seams that the debrief conscripts an emergency squad — at Count == 0
+    /// ONLY (a surviving under-floor roster stays short; CONTRACTTEST pins that) — with the distinct
+    /// report line, and that the next mission builds a non-empty deploy. Also pins the Mission.Build
+    /// empty-deploy guard (defense-in-depth: refuse the layout, never throw).
+    public string HeatLadderSelfTest()
+    {
+        NoPersist = true;
+        var fails = new List<string>();
+
+        // one seam: a lone-VIP win at mission 1, then build mission 2 and count the deploy
+        void LoneVipWin(string tag, int heat, Contract contract, Objective obj)
+        {
+            _run = new Run(); _run.Start();
+            _run.HeatLevel = heat;
+            _run.Contract = contract;
+            _run.CurrentCard = new MissionCard { Objective = obj, ModName = "STANDARD", Reward = RewardKind.None };
+            SetupMission(1);
+            if (obj == Objective.Rescue) CaptiveLocked = false;   // the captive was freed before the squad fell
+            foreach (var u in Players.Where(p => !p.IsVip).ToList()) { u.Hp = 0; KillUnit(u); }
+            Vip.X = EvacZone[0].x; Vip.Y = EvacZone[0].y;         // the asset walks out alone
+            CheckEnd();                                            // objective win -> EnterBarracks -> DebriefSurvivors
+            if (Phase != Phase.Barracks) { fails.Add($"{tag}:phase={Phase}"); return; }
+            if (_run.Squad.Count == 0) { fails.Add($"{tag}:squadEmpty"); return; }
+            if (_run.Squad.Count < Run.AttritionFloor) fails.Add($"{tag}:underFloor={_run.Squad.Count}");
+            if (!_run.Report.Any(r => r.Contains("SHATTERED COMMAND"))) fails.Add($"{tag}:noConscriptLine");
+            // the next mission must field a real squad (this build crashed before the fix)
+            _run.CurrentCard = new MissionCard { Objective = Objective.Eliminate, ModName = "STANDARD", Reward = RewardKind.None };
+            SetupMission(2);
+            if (Players.Count(p => p.Alive && !p.IsVip) == 0) fails.Add($"{tag}:emptyDeploy");
+        }
+
+        LoneVipWin("heat8", 8, Contract.None, Objective.Escort);          // RELENTLESS via the heat ladder
+        LoneVipWin("iron", 0, Contract.IronVeterans, Objective.Escort);   // same regime via the contract
+        LoneVipWin("rescue", 8, Contract.None, Objective.Rescue);         // the lone-captive variant
+
+        // defense-in-depth: Mission.Build with an EMPTY deploy must refuse the authored layout
+        // (players[0] flood) and fall through the guarded procedural path without throwing.
+        int savedLayout = Mission.ForcedLayout;
+        try
+        {
+            Mission.ForcedLayout = 0;   // force the TryApplyLayout path
+            Mission.Build(new Grid(), new List<Unit>(), new List<Unit>(), 2);
+        }
+        catch (Exception e) { fails.Add("emptyBuildThrew:" + e.GetType().Name); }
+        finally { Mission.ForcedLayout = savedLayout; }
+
+        return fails.Count == 0
+            ? "HEATLADDERTEST: PASS (lone-VIP wins at heat 8 / IRON VETERANS / Rescue conscript to the floor + next mission deploys; empty-deploy Build fails soft)"
+            : "HEATLADDERTEST: FAIL (" + string.Join(",", fails) + ")";
+    }
+
     /// SIGHTLINE_DKTEST — UNDERTOW W1: a death is processed EXACTLY ONCE. Asserts (1) KillUnit is
     /// idempotent (a 2nd call on a corpse does NOT re-add _run.Fallen/Memorial), and (2) a SURPLUS
     /// queued reaction ShotAnim aimed at a unit that just died is PURGED — so it can't re-resolve on
