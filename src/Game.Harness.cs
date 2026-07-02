@@ -1151,8 +1151,28 @@ public partial class Game
         catch (Exception e) { fails.Add("emptyBuildThrew:" + e.GetType().Name); }
         finally { Mission.ForcedLayout = savedLayout; }
 
+        // W6c behavior pin (review MED-2): the NO QUARTER +1 damage must survive the whole
+        // SetupMission -> Build -> SpawnEnemies thread, not just the Heat.DmgDelta data row —
+        // a Build/SpawnEnemies signature reshuffle that drops the mutation would stay green otherwise.
+        // Mission 3: past the m1-2 grace that zeroes heatDmg.
+        void DmgAtHeat(string tag, int heat, int expectDelta)
+        {
+            _run = new Run(); _run.Start();
+            _run.HeatLevel = heat;
+            _run.CurrentCard = new MissionCard { Objective = Objective.Eliminate, ModName = "STANDARD", Reward = RewardKind.None };
+            SetupMission(3);
+            foreach (var e in Enemies)
+            {
+                int baseMax = Weapon.Make(e.Weapon.Kind).DmgMax;
+                if (e.Weapon.DmgMax != baseMax + expectDelta)
+                { fails.Add($"{tag}:{e.Cls}dmg={e.Weapon.DmgMax}want={baseMax + expectDelta}"); return; }
+            }
+        }
+        DmgAtHeat("noQuarterDmg", 8, 1);   // apex: every spawned weapon carries the +1
+        DmgAtHeat("heat7Dmg", 7, 0);       // one rung below: untouched
+
         return fails.Count == 0
-            ? "HEATLADDERTEST: PASS (lone-VIP wins at heat 8 / IRON VETERANS / Rescue conscript to the floor + next mission deploys; empty-deploy Build fails soft)"
+            ? "HEATLADDERTEST: PASS (lone-VIP wins at heat 8 / IRON VETERANS / Rescue conscript to the floor + next mission deploys; empty-deploy Build fails soft; NO QUARTER +1 dmg on every m3 weapon, none at heat 7)"
             : "HEATLADDERTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 

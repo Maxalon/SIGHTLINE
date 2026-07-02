@@ -2948,7 +2948,7 @@ public partial class Game
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseColorblind)) Display.ToggleColorblind();
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseAutoCam)) { Display.ToggleAutoCam(); if (!Display.AutoCam) { CamZoom = 1f; CamPan = Vector2.Zero; } }
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseCodex)) { BeginCodex(); }   // W6: open the field manual (remembers this phase for BACK)
-        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseAbandon)) { Paused = false; if (TutStep >= 0) CompleteTutorial(); Phase = Phase.Lose; LoseTitle = "RUN ABANDONED"; LoseReason = "You called off the campaign."; Audio.Play("lose"); }
+        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseAbandon)) { Paused = false; if (TutStep >= 0) CompleteTutorial(); Combat.EndRun(); Phase = Phase.Lose; LoseTitle = "RUN ABANDONED"; LoseReason = "You called off the campaign."; Audio.Play("lose"); }   // EndRun mirrors LoseRun: clears mission statics incl. Ai.Tier (W6 review LOW-3)
     }
 
     void DoAction(string id)
