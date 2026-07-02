@@ -40,14 +40,20 @@ public static class SaveGame
         if (run == null) return;
         try
         {
+            // Atomic write: serialize to a sibling .tmp then rename over the target
+            // (File.Move w/ overwrite is rename(2) on the same volume), so a crash or
+            // torn write mid-save can never leave a half-written save.json behind.
             Directory.CreateDirectory(Dir);
-            File.WriteAllText(FilePath, JsonSerializer.Serialize(ToDto(run), Opts));
+            string tmp = FilePath + ".tmp";
+            File.WriteAllText(tmp, JsonSerializer.Serialize(ToDto(run), Opts));
+            File.Move(tmp, FilePath, overwrite: true);
         }
         catch { /* a failed save must never crash the game */ }
     }
 
-    /// Load the saved run, or null if there is none / it is unreadable (and then
-    /// a corrupt file is removed so the intro stops offering a broken CONTINUE).
+    /// Load the saved run, or null if there is none / it is unreadable (an unreadable
+    /// file is moved aside to save.json.bak — evidence preserved, and the intro stops
+    /// offering a broken CONTINUE because save.json itself is gone).
     public static Run Load()
     {
         try
@@ -56,7 +62,14 @@ public static class SaveGame
             var dto = JsonSerializer.Deserialize<RunDto>(File.ReadAllText(FilePath), Opts);
             return dto == null ? null : FromDto(dto);
         }
-        catch { Delete(); return null; }
+        catch
+        {
+            // Never destroy evidence: stash the unreadable save instead of deleting it.
+            // Recovery I/O must never crash (we're already inside the failure path).
+            try { if (File.Exists(FilePath)) File.Move(FilePath, FilePath + ".bak", overwrite: true); }
+            catch { }
+            return null;
+        }
     }
 
     // ---- meta persistence (Heat/Ascension unlock) ----
@@ -66,16 +79,45 @@ public static class SaveGame
     // meta.json carries several independent fields (MaxHeat, LossStreak). Always read-modify-write
     // the whole DTO so saving one field never clobbers another. Missing fields default to 0, so an
     // old meta.json (heat-only) still loads — append-only and forward-compatible.
+    // Set once a corrupt meta.json has been stashed to meta.json.bak this session, so a
+    // later corrupt read can never overwrite that evidence with a fresher corpse.
+    static bool _metaEvidenceStashed;
+
     static MetaDto LoadMetaDto()
     {
         try { if (File.Exists(MetaPath)) return JsonSerializer.Deserialize<MetaDto>(File.ReadAllText(MetaPath), Opts) ?? new MetaDto(); }
-        catch { }
+        catch
+        {
+            // Never destroy evidence: an unreadable meta.json used to yield a fresh
+            // MetaDto whose next read-modify-write silently overwrote the whole profile
+            // (veterans, salvage, achievements, hall of fame). Stash the corrupt bytes as
+            // meta.json.bak first (overwriting a stale .bak from an older session, but
+            // never one stashed earlier THIS session). Recovery I/O must never crash —
+            // swallow its own failures too.
+            try
+            {
+                if (!_metaEvidenceStashed && File.Exists(MetaPath))
+                {
+                    File.Copy(MetaPath, MetaPath + ".bak", true);
+                    _metaEvidenceStashed = true;
+                }
+            }
+            catch { }
+        }
         return new MetaDto();
     }
 
     static void WriteMetaDto(MetaDto dto)
     {
-        try { Directory.CreateDirectory(Dir); File.WriteAllText(MetaPath, JsonSerializer.Serialize(dto, Opts)); }
+        try
+        {
+            // Atomic write (same pattern as Save): .tmp then rename, so the game's only
+            // permanent state can't be torn by a crash mid-write.
+            Directory.CreateDirectory(Dir);
+            string tmp = MetaPath + ".tmp";
+            File.WriteAllText(tmp, JsonSerializer.Serialize(dto, Opts));
+            File.Move(tmp, MetaPath, overwrite: true);
+        }
         catch { /* a failed meta save must never crash the game */ }
     }
 
@@ -621,8 +663,12 @@ public static class SaveGame
                 else { try { if (File.Exists(MetaPath)) File.Delete(MetaPath); } catch { } }
             }
 
+            // corrupt-file armor: garbage meta.json must never be silently wiped
+            string corrupt = CorruptionSelfTest();
+            if (corrupt != null) fails.Add(corrupt);
+
             return fails.Count == 0
-                ? "SAVETEST: PASS (run round-trips squad/perks/weapon-mods/card/heat; meta heat round-trips)"
+                ? "SAVETEST: PASS (run round-trips squad/perks/weapon-mods/card/heat; meta heat round-trips; corrupt meta stashed to .bak, rewrite clean)"
                 : "SAVETEST: FAIL (" + string.Join(",", fails) + ")";
         }
         catch (Exception e) { return "SAVETEST: FAIL (exception " + e.Message + ")"; }
@@ -630,6 +676,44 @@ public static class SaveGame
         {
             if (saved != null) { try { Directory.CreateDirectory(Dir); File.WriteAllText(FilePath, saved); } catch { } }
             else Delete();
+        }
+    }
+
+    /// Corrupt-meta recovery check (dispatched from inside SelfTest, so SAVETEST covers it).
+    /// A garbage meta.json must (a) read as a fresh profile (heat 0), (b) be stashed to
+    /// meta.json.bak instead of destroyed, and (c) the next read-modify-write must land a
+    /// clean reparsable meta.json (the atomic path) while the .bak still holds the garbage.
+    /// Returns null on success, else a short failure tag for the SAVETEST fails list.
+    /// Snapshots BOTH meta.json and any pre-existing meta.json.bak (a user's real crash
+    /// evidence) and restores/deletes everything test-created in the finally.
+    static string CorruptionSelfTest()
+    {
+        const string garbage = "{ this is *not* json ]]] ";
+        string bakPath = MetaPath + ".bak";
+        string metaSaved = File.Exists(MetaPath) ? File.ReadAllText(MetaPath) : null;
+        string bakSaved = File.Exists(bakPath) ? File.ReadAllText(bakPath) : null;
+        bool stashSaved = _metaEvidenceStashed;
+        try
+        {
+            Directory.CreateDirectory(Dir);
+            _metaEvidenceStashed = false;   // exercise the stash path regardless of session history
+            File.WriteAllText(MetaPath, garbage);
+            if (LoadMetaHeat() != 0) return "corruptMetaNotFresh";              // garbage reads as a fresh profile
+            SaveMetaHeat(2);                                                    // the read-modify-write that used to wipe silently
+            if (LoadMetaHeat() != 2) return "corruptMetaRewriteUnreadable";     // rewrite reparses clean
+            if (!File.Exists(bakPath) || File.ReadAllText(bakPath) != garbage)
+                return "corruptMetaEvidenceLost";                               // .bak holds the exact corrupt bytes
+            return null;
+        }
+        catch (Exception e) { return "corruptMetaException:" + e.GetType().Name; }
+        finally
+        {
+            _metaEvidenceStashed = stashSaved;
+            if (metaSaved != null) { try { File.WriteAllText(MetaPath, metaSaved); } catch { } }
+            else { try { if (File.Exists(MetaPath)) File.Delete(MetaPath); } catch { } }
+            if (bakSaved != null) { try { File.WriteAllText(bakPath, bakSaved); } catch { } }
+            else { try { if (File.Exists(bakPath)) File.Delete(bakPath); } catch { } }
+            try { if (File.Exists(MetaPath + ".tmp")) File.Delete(MetaPath + ".tmp"); } catch { }
         }
     }
 }
