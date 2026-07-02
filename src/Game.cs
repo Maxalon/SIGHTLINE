@@ -2284,9 +2284,17 @@ public partial class Game
 
         // fresh emergency squad: deploy as many rookies as this mission fields (fall back to the
         // attrition floor of 3). Rookies carry no rank/perks/mods — that's the price of the wipe.
+        // Distinct callsigns (APEX W5): the cadre is drawn with a taken-names set so two "ROOK"s
+        // can't share (and silently merge) bond/memorial records.
         int cap = Math.Max(Run.AttritionFloor, Run.DeployCapFor(_run.Mission));
         _run.Squad = new List<Unit>();
-        for (int i = 0; i < cap; i++) _run.Squad.Add(Mission.MakeRecruit());
+        var cadreNames = new HashSet<string>();
+        for (int i = 0; i < cap; i++)
+        {
+            var rec = Mission.MakeRecruit(cadreNames);
+            cadreNames.Add(rec.Name);
+            _run.Squad.Add(rec);
+        }
 
         // Intel, heat, and map position are untouched. Restart THIS mission from its start (the same
         // setup the normal flow uses; it re-checkpoints the save). SetupMission sets its own
@@ -3858,21 +3866,27 @@ public partial class Game
     }
 
     /// DEFEND: spawn a wave of reinforcements at the right edge on early enemy turns.
+    /// APEX W5: Defend waves are `rich` — the full endless roster (guarded: no TURRET/BOMBARD)
+    /// instead of the grunt/scout coin flip, so the one enemy-forced-tempo objective has variety.
+    /// This flag is the ONLY rich call site by design: pressure-clock waves must stay cheap bodies
+    /// (see MakeWaveHostile's doc — hardening turtle punishment would widen the policy gap).
     void SpawnDefendWave()
     {
         if (_turnCount % 2 == 0 || _turnCount >= DefendTurns) return;  // waves on odd turns, not the last
-        SpawnReinforcements(2 + _run.Mission / 2, 12, "WAVE");
+        SpawnReinforcements(2 + _run.Mission / 2, 12, "WAVE", rich: true);
     }
 
     /// Shared reinforcement spawner: drops up to `want` active wave-hostiles in from the right
     /// board edge (already engaged), honoring a live-enemy `cap`. Used by both the DEFEND objective
-    /// and the anti-turtle PRESSURE CLOCK. Returns how many it actually added.
-    int SpawnReinforcements(int want, int cap, string label)
+    /// (`rich` waves — full roster) and the anti-turtle PRESSURE CLOCK (default cheap grunt/scout
+    /// mix). Returns how many it actually added.
+    int SpawnReinforcements(int want, int cap, string label, bool rich = false)
     {
         if (AliveEnemies().Count >= cap) return 0;                     // clutter cap
         int n = _run.Mission;
         var rows = Enumerable.Range(0, Grid.H).OrderBy(_ => Util.RandF()).ToList();
         int added = 0;
+        var waveClasses = new List<string>();   // harness-only composition echo (AutoPlay)
         foreach (int y in rows)
         {
             if (added >= want || AliveEnemies().Count >= cap) break;
@@ -3882,14 +3896,20 @@ public partial class Game
                 x = Grid.W - 1;
                 if (!Grid.IsFloor(x, y) || IsOccupiedByOther(x, y, null)) continue;
             }
-            var e = Mission.MakeWaveHostile(n, x, y);
+            var e = Mission.MakeWaveHostile(n, x, y, rich);
             e.Alert = AlertLevel.Alert; e.PodId = -1;   // reinforcements arrive already engaged
             e.SyncPos();
+            Stats.RecordSpawn(e.Cls, Combat.MissionFaction != Faction.None);   // APEX W5 composition tally
             Enemies.Add(e);
+            waveClasses.Add(e.Cls);
             Fx.Burst(e.Pos, Pal.Foe, 14, 160f, 0.5f, 3f, true);
             added++;
         }
         if (added > 0) { Fx.PopText(Util.TileCenter(Grid.W - 2, 0) + new Vector2(0, -10), label, Pal.Foe, 20f); Audio.Play("turn"); RefreshCombatRoster(); }
+        // APEX W5: headless-harness echo so an autoplay log shows what the waves actually field
+        // (AutoPlay is the env-gated smoke/balance path only — never set in normal play).
+        if (AutoPlay && added > 0)
+            Console.WriteLine($"{label}: +{added} ({string.Join(",", waveClasses)}){(rich ? " [rich]" : "")}");
         return added;
     }
 

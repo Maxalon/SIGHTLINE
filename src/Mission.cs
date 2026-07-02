@@ -448,6 +448,9 @@ public static class Mission
                 { e.EnemyItem = ItemKind.Smoke; e.ItemCharge = 1; }
             e.Alert = AlertLevel.Unaware;  // dormant until sighted (escalates via 4.3 tiers)
             e.PodId = i / 2;               // pods of ~2
+            // APEX W5: composition telemetry — count the FINAL pick (post demote/clamp) at spawn
+            // time, tagged faction-roster vs default-cascade (no-op unless the balance harness runs).
+            Stats.RecordSpawn(e.Cls, Combat.MissionFaction != Faction.None);
             enemies.Add(e);
         }
     }
@@ -469,9 +472,11 @@ public static class Mission
         // ENEMY FACTIONS (Phase 4 foundation): when a faction is active, a mission's rank-and-file
         // is drawn from THAT faction's roster instead of the default tier cascade, so the force reads
         // as one named opponent. Boss / mid-boss slots are handled by the caller (SpawnEnemies), not
-        // here, so the campaign's named elites are untouched. With None (the default, since Game isn't
-        // wired to set Combat.MissionFaction yet) this falls through to the unchanged cascade below —
-        // the SAFETY INVARIANT: byte-identical spawns to today until a faction is actually set.
+        // here, so the campaign's named elites are untouched. Game.SetupMission wires the campaign
+        // node's stamp into Combat.BeginMission (Run.GenerateMap stamps EVERY Combat/Elite node), so
+        // this branch runs on the majority of campaign fights; None (Start/Supply/Boss nodes,
+        // skirmish/endless, and the harness default) falls through to the unchanged cascade below —
+        // the SAFETY INVARIANT: spawns are byte-identical to the unstamped build while no faction is set.
         if (Combat.MissionFaction != Faction.None)
             return FactionRoster(Combat.MissionFaction, n, r, bump, x, y);
 
@@ -560,63 +565,108 @@ public static class Mission
 
     /// FACTION-GATED rank-and-file pick (Phase 4 foundation). Returns one archetype drawn from the
     /// given faction's roster by the uniform roll `r` in [0,1). STATS are copied VERBATIM from the
-    /// default cascade in SelectArchetype (same name/cls/weapon/hp/aim/mob lines, incl. SHIELD facing
-    /// and MORTAR's frag pouch) — only the gating moved, so a faction force is the SAME units, just
-    /// grouped. Each roster ends with a GRUNT (Wardens: SCOUT) filler so any roll resolves. Only ever
-    /// called when Combat.MissionFaction != None (the None default uses the unchanged cascade).
+    /// default cascade in SelectArchetype (same name/cls/weapon/hp/aim/mob lines, incl. SHIELD facing,
+    /// MORTAR's frag pouch and SCREENER's smoke pouch) — only the gating moved, so a faction force is
+    /// the SAME units, just grouped. Each roster ends with a GRUNT (Wardens: SCOUT) filler so any roll
+    /// resolves. APEX W5: the four setup-verb archetypes (STRIKER/LANCER/HOUND/SCREENER) were authored
+    /// into the default cascade but unreachable on faction-stamped nodes (the majority of the campaign);
+    /// they're folded in here — Legion += STRIKER/LANCER/HOUND, Syndicate/Wardens += SCREENER — each
+    /// tier-gated at its cascade first-appearance mission (r-window && n>=N, exactly like Wardens'
+    /// existing BOMBARD gate; a failed gate falls through to the next window, so any roll resolves).
+    /// Only ever called when Combat.MissionFaction != None (the None default uses the unchanged cascade).
     static Unit FactionRoster(Faction f, int n, float r, int bump, int x, int y)
     {
         switch (f)
         {
-            // SYNDICATE (tech/mechanized) — DRONE, SHIELD, TURRET, SAPPER, SPOTTER (+ GRUNT filler).
+            // SYNDICATE (tech/mechanized) — DRONE, SHIELD, TURRET, SAPPER, SPOTTER, SCREENER m3+
+            // (+ GRUNT filler). The SCREENER's proactive lane-smoke pairs with the SPOTTER's
+            // focus-paint: the tech faction fights your INFORMATION, not just your HP bar.
             case Faction.Syndicate:
-                if (r < 0.24f) return MakeHostile("WASP", "DRONE", WeaponKind.Smg, 3 + bump, 60 + bump, 7, x, y);
-                if (r < 0.44f)
+                if (r < 0.22f) return MakeHostile("WASP", "DRONE", WeaponKind.Smg, 3 + bump, 60 + bump, 7, x, y);
+                if (r < 0.40f)
                 {
                     var s = MakeHostile("AEGIS", "SHIELD", WeaponKind.Rifle, 10 + bump * 2, 56 + bump, 4, x, y);
                     s.ShieldDx = -1; s.ShieldDy = 0;            // shield faces the squad (west)
                     return s;
                 }
-                if (r < 0.62f) return MakeHostile("SENTRY", "TURRET", WeaponKind.Lmg, 6 + bump, 66 + bump, 0, x, y);
-                if (r < 0.80f) return MakeHostile("BREACH", "SAPPER", WeaponKind.Shotgun, 7 + bump, 56 + bump, 6, x, y);
-                if (r < 0.92f) return MakeHostile("BEACON", "SPOTTER", WeaponKind.Smg, 5 + bump, 48 + bump, 6, x, y);
+                if (r < 0.56f) return MakeHostile("SENTRY", "TURRET", WeaponKind.Lmg, 6 + bump, 66 + bump, 0, x, y);
+                if (r < 0.72f) return MakeHostile("BREACH", "SAPPER", WeaponKind.Shotgun, 7 + bump, 56 + bump, 6, x, y);
+                if (r < 0.82f) return MakeHostile("BEACON", "SPOTTER", WeaponKind.Smg, 5 + bump, 48 + bump, 6, x, y);
+                if (r < 0.92f && n >= 3)                        // 10% zoner (m3+ — cascade first appearance)
+                {
+                    var z = MakeHostile("HAZE", "SCREENER", WeaponKind.Smg, 5 + bump, 46 + bump, 6, x, y);
+                    z.EnemyItem = ItemKind.Smoke; z.ItemCharge = 2;   // a deep smoke pouch — the EXISTING smoke AI uses it
+                    return z;
+                }
                 return MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 60 + bump, 6, x, y);              // filler
 
-            // LEGION (shock assault) — BERSERKER, BRUISER, HUNTER, SCOUT (+ GRUNT filler).
+            // LEGION (shock assault) — BERSERKER, BRUISER, HUNTER + the m2+ skirmish tier:
+            // STRIKER (overwatch-defying leaper), LANCER (formation line), HOUND (isolation
+            // swarmer) — the coordination showcase, at home in the rush faction (+ SCOUT, GRUNT filler).
             case Faction.Legion:
-                if (r < 0.26f) return MakeHostile("REAVER", "BERSERKER", WeaponKind.Shotgun, 12 + bump, 58 + bump, 8, x, y);
-                if (r < 0.50f) return MakeHostile("OGRE", "BRUISER", WeaponKind.Lmg, 9 + bump, 56 + bump, 5, x, y);
-                if (r < 0.74f) return MakeHostile("JACKAL", "HUNTER", WeaponKind.Smg, 5 + bump, 60 + bump, 9, x, y);
-                if (r < 0.90f) return MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 58 + bump, 8, x, y);
+                if (r < 0.22f) return MakeHostile("REAVER", "BERSERKER", WeaponKind.Shotgun, 12 + bump, 58 + bump, 8, x, y);
+                if (r < 0.42f) return MakeHostile("OGRE", "BRUISER", WeaponKind.Lmg, 9 + bump, 56 + bump, 5, x, y);
+                if (r < 0.60f) return MakeHostile("JACKAL", "HUNTER", WeaponKind.Smg, 5 + bump, 60 + bump, 9, x, y);
+                if (r < 0.68f && n >= 2) return MakeHostile("WRAITH", "STRIKER", WeaponKind.Smg, 4 + bump, 60 + bump, 9, x, y);   // 8% leaper (m2+)
+                if (r < 0.76f && n >= 2) return MakeHostile("HOPLITE", "LANCER", WeaponKind.Rifle, (n >= 3 ? 7 : 6) + bump, 58 + bump, 5, x, y); // 8% formation trooper (m2+; HP 6->7 at m3, like the cascade)
+                if (r < 0.84f && n >= 2) return MakeHostile("FERAL", "HOUND", WeaponKind.Smg, 3 + bump, 56 + bump, 9, x, y);      // 8% swarmer (m2+)
+                if (r < 0.93f) return MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 58 + bump, 8, x, y);
                 return MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 60 + bump, 6, x, y);              // filler
 
-            // WARDENS (precision/control / area-denial) — SNIPER, MORTAR, SIEGE artillery, MEDIC,
-            // GRUNT (+ SCOUT filler). The standoff faction: thematically perfect for the telegraphed
-            // artillery (capped at 1/mission by the SpawnEnemies post-pick guard).
+            // WARDENS (precision/control / area-denial) — SNIPER, MORTAR, SIEGE artillery, SCREENER
+            // m3+, MEDIC, GRUNT (+ SCOUT filler). The standoff faction: thematically perfect for the
+            // telegraphed artillery (capped at 1/mission by the SpawnEnemies post-pick guard) and the
+            // lane-blinding smoke zoner (area denial in both directions).
             case Faction.Wardens:
             default:
-                if (r < 0.26f) return MakeHostile("VIPER", "SNIPER", WeaponKind.Sniper, 4 + bump, 62 + bump, 5, x, y);
-                if (r < 0.46f)
+                if (r < 0.24f) return MakeHostile("VIPER", "SNIPER", WeaponKind.Sniper, 4 + bump, 62 + bump, 5, x, y);
+                if (r < 0.42f)
                 {
                     var m = MakeHostile("MORTAR", "MORTAR", WeaponKind.Smg, 6 + bump, 50 + bump, 5, x, y);
                     m.Grenades = n >= 5 ? 3 : 2;                // a deep frag pouch — the EXISTING grenade AI uses it
                     return m;
                 }
-                if (r < 0.58f && n >= 3) return MakeHostile("SIEGE", "BOMBARD", WeaponKind.Smg, 7 + bump, 48 + bump, 4, x, y);   // 12% artillery (m3+ only — fairness tier)
-                if (r < 0.74f) return MakeHostile("ORDERLY", "MEDIC", WeaponKind.Smg, 6 + bump, 52 + bump, 6, x, y);
-                if (r < 0.90f) return MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 60 + bump, 6, x, y);
+                if (r < 0.54f && n >= 3) return MakeHostile("SIEGE", "BOMBARD", WeaponKind.Smg, 7 + bump, 48 + bump, 4, x, y);   // 12% artillery (m3+ only — fairness tier)
+                if (r < 0.64f && n >= 3)                        // 10% zoner (m3+ — cascade first appearance)
+                {
+                    var z = MakeHostile("HAZE", "SCREENER", WeaponKind.Smg, 5 + bump, 46 + bump, 6, x, y);
+                    z.EnemyItem = ItemKind.Smoke; z.ItemCharge = 2;   // a deep smoke pouch — the EXISTING smoke AI uses it
+                    return z;
+                }
+                if (r < 0.78f) return MakeHostile("ORDERLY", "MEDIC", WeaponKind.Smg, 6 + bump, 52 + bump, 6, x, y);
+                if (r < 0.92f) return MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 60 + bump, 6, x, y);
                 return MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 58 + bump, 8, x, y);              // filler
         }
     }
 
+    // APEX W5: 14 -> 40 callsigns. Rosters plus a draft pool can hold ~14 soldiers across a run,
+    // so the old pool made duplicate names routine — and bond/memorial/veteran records key on the
+    // name, silently merging two soldiers' histories. Kept terse/ASCII in the game's codename
+    // voice; deliberately avoids every enemy archetype name, the fixed NewRunSquad names and the
+    // Nicknames.Pool entries so "KRESS 'VIPER'" style overlaps can't read as two different units.
     static readonly string[] Callsigns =
-        { "HAWK", "ECHO", "RAVEN", "SLATE", "ONYX", "FOX", "WREN", "ASH", "CIPHER", "JINX", "ROOK", "DELTA", "MOTH", "QUILL" };
+    {
+        "HAWK", "ECHO", "RAVEN", "SLATE", "ONYX", "FOX", "WREN", "ASH", "CIPHER", "JINX",
+        "ROOK", "DELTA", "MOTH", "QUILL", "TALON", "FLINT", "GALE", "SABLE", "PIKE", "VESPER",
+        "COBALT", "DUSK", "EMBER", "GARNET", "HALO", "IBIS", "KESTREL", "LYNX", "MICA", "NOVA",
+        "PRISM", "RUNE", "SPARK", "VECTOR", "WOLF", "ZEPHYR", "LARK", "FROST", "BRIAR", "CREED",
+    };
 
     /// A fresh rookie of a random class, for backfilling the squad between missions.
     /// Includes the CORPSMAN (5th class) so casualties can pull in in-combat sustain.
-    public static Unit MakeRecruit()
+    /// `taken` (optional, APEX W5): callsigns already in use (current squad / draft pool) — the
+    /// name re-rolls away from them with the same bounded-guard pattern GenerateDraftPool uses
+    /// for class variety, so duplicate soldier names stop silently merging bond/memorial records.
+    /// With 40 callsigns and rosters <= ~14 names the re-roll never realistically exhausts; if it
+    /// somehow does, the duplicate is accepted (a recruit must always be produced — never blocks).
+    public static Unit MakeRecruit(HashSet<string> taken = null)
     {
         string name = Util.Choice(Callsigns);
+        if (taken != null)
+        {
+            int guard = 0;
+            while (taken.Contains(name) && guard++ < 400) name = Util.Choice(Callsigns);
+        }
         switch (Util.RandInt(0, 4))
         {
             case 0: return MakeSoldier(name, "ASSAULT", WeaponKind.Rifle, 8, 66, 7);
@@ -672,11 +722,31 @@ public static class Mission
         return u;
     }
 
-    /// A reinforcement for the DEFEND objective: a basic grunt/scout, scaled by mission.
-    public static Unit MakeWaveHostile(int n, int x, int y)
+    /// A reinforcement wave hostile, scaled by mission. Two tiers (APEX W5):
+    ///   rich == false (the default; anti-turtle PRESSURE CLOCK waves): the original cheap
+    ///     GRUNT/SCOUT coin flip. DELIBERATE — the clock's punishment must stay light bodies,
+    ///     not roster threats, or sloppy/slow play eats BRUISER-class waves and the already-
+    ///     over-band policy gap widens further. Do not upgrade this path.
+    ///   rich == true (DEFEND objective waves only — flagged by Game.SpawnDefendWave): draws
+    ///     from the battle-tested endless roster (MakeEndlessHostile at tier = mission) so the
+    ///     one enemy-forced-tempo objective fields real variety instead of a conveyor of grunts.
+    ///     Two fairness guards: a bounded re-roll away from TURRET (Mobility 0 at the spawn edge
+    ///     is a dead body; bounded like GenerateDraftPool's guard<400 re-rolls — a bare skip
+    ///     would under-fill waves ~1-in-5 rolls on Syndicate Defend nodes) and a demote of any
+    ///     rolled BOMBARD to a plain wave grunt (waves arrive already Alert — an off-screen
+    ///     artillery telegraph the player never saw spawn is unfair).
+    public static Unit MakeWaveHostile(int n, int x, int y, bool rich = false)
     {
         int bump = Math.Max(0, n - 1);
-        var e = Util.Roll(50)
+        if (rich)
+        {
+            var h = MakeEndlessHostile(n, x, y);
+            int guard = 0;
+            while (h.Cls == "TURRET" && guard++ < 400) h = MakeEndlessHostile(n, x, y);
+            if (h.Cls != "TURRET" && h.Cls != "BOMBARD") return h;   // MakeEndlessHostile already clamps aim
+            // fall through: demote BOMBARD (or a pathological all-TURRET streak) to a plain wave grunt
+        }
+        var e = rich || Util.Roll(50)
             ? MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 58 + bump, 6, x, y)
             : MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 56 + bump, 8, x, y);
         e.Aim = Math.Min(82, e.Aim);

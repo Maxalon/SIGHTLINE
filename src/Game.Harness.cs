@@ -1919,7 +1919,10 @@ public partial class Game
     /// (a) GenerateDraftPool returns DraftPoolSize recruits with class variety (<=2/class);
     /// (b) a drafted founding squad + a starting boon seats EXACTLY those Units + the boon
     /// active via Run.Start(picked)+ActiveBoons; (c) Run.Start(null) keeps the fixed default
-    /// NewRunSquad (the harness path is unchanged). Window-free (no Raylib, no disk).
+    /// NewRunSquad (the harness path is unchanged); (d) APEX W5 callsign dedup — no duplicate
+    /// names inside a generated pool, across the squad after a barracks backfill, or from
+    /// MakeRecruit under an explicit taken-names set (dup names silently merged bond/memorial
+    /// records before W5). Window-free (no Raylib, no disk).
     public static string DraftSelfTest()
     {
         var fails = new List<string>();
@@ -1952,8 +1955,34 @@ public partial class Game
             if (run2.Squad[i].Name != def[i].Name || run2.Squad[i].Cls != def[i].Cls) fails.Add($"defaultSquad[{i}]");
         if (run2.ActiveBoons.Count != 0) fails.Add($"defaultBoons={run2.ActiveBoons.Count}(want0)");
 
+        // (d) APEX W5 — callsign dedup across pool + squad + backfill.
+        // A fresh pool must carry DraftPoolSize DISTINCT names (GenerateDraftPool threads its
+        // taken-names set through every MakeRecruit).
+        var pool3 = Run.GenerateDraftPool();
+        var poolNames = new HashSet<string>();
+        foreach (var u in pool3) if (!poolNames.Add(u.Name)) fails.Add($"dupPoolName:{u.Name}");
+        // Draft a squad from it, wipe it down to one survivor, and run the barracks debrief:
+        // the emergency-floor + trickle backfill must never draft a name already on the squad.
+        var run3 = new Run();
+        var picked3 = new List<Unit>();
+        for (int i = 0; i < DraftCap && i < pool3.Count; i++) picked3.Add(pool3[i]);
+        run3.Start(picked3);
+        while (run3.Squad.Count > 1) run3.Squad.RemoveAt(run3.Squad.Count - 1);   // simulate casualties
+        run3.DebriefSurvivors();                                                  // backfills via TakenCallsigns()
+        if (run3.Squad.Count < 2) fails.Add($"backfillCount={run3.Squad.Count}(want>=2)");
+        var squadNames = new HashSet<string>();
+        foreach (var u in run3.Squad) if (!squadNames.Add(u.Name)) fails.Add($"dupSquadName:{u.Name}");
+        // Direct taken-set contract: 20 sequential recruits against a growing set stay distinct
+        // (40-callsign pool, so the bounded re-roll has plenty of headroom).
+        var taken = new HashSet<string>(squadNames);
+        for (int i = 0; i < 20; i++)
+        {
+            var rec = Mission.MakeRecruit(taken);
+            if (!taken.Add(rec.Name)) { fails.Add($"takenNameReused:{rec.Name}"); break; }
+        }
+
         return fails.Count == 0
-            ? $"DRAFTTEST: PASS (pool={pool.Count} variety={byCls.Count}cls, drafted {picked.Count}+boon seated, default squad intact)"
+            ? $"DRAFTTEST: PASS (pool={pool.Count} variety={byCls.Count}cls, drafted {picked.Count}+boon seated, default squad intact, callsigns distinct across pool+squad+backfill)"
             : "DRAFTTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 

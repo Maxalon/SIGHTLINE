@@ -790,6 +790,10 @@ public class Run
     {
         var pool = new List<Unit>();
         var classCount = new Dictionary<string, int>();
+        // APEX W5: callsigns already seated (veterans included) — every MakeRecruit below re-rolls
+        // away from them, so a draft can never offer two soldiers sharing a name (duplicate names
+        // silently merged bond/memorial/veteran records, which all key on Unit.Name).
+        var takenNames = new HashSet<string>();
         // Phase 0 — seat up to MaxDraftVeterans recalled veterans (already most-storied-first from the
         // reserve). They bypass the class-variety cap (a returning legend is a deliberate exception) but
         // still count toward the pool size, so the fresh phases fill the remainder.
@@ -798,6 +802,7 @@ public class Run
             {
                 if (pool.Count >= MaxDraftVeterans) break;
                 pool.Add(v);
+                takenNames.Add(v.Name);
                 classCount.TryGetValue(v.Cls, out int vc);
                 classCount[v.Cls] = vc + 1;
             }
@@ -807,26 +812,33 @@ public class Run
         int guard = 0;
         while (pool.Count < DraftPoolSize && guard++ < 400)
         {
-            var u = Sightline.Mission.MakeRecruit();
+            var u = Sightline.Mission.MakeRecruit(takenNames);
             classCount.TryGetValue(u.Cls, out int c);
             if (c >= 1) continue;                 // phase 1: at most one of each class
             classCount[u.Cls] = c + 1;
             pool.Add(u);
+            takenNames.Add(u.Name);
             if (classCount.Count >= 5) break;     // covered every class -> move to the fill phase
         }
         // Phase 2 — fill the remaining slots allowing a SECOND of any class (cap 2) for some duplication.
         guard = 0;
         while (pool.Count < DraftPoolSize && guard++ < 400)
         {
-            var u = Sightline.Mission.MakeRecruit();
+            var u = Sightline.Mission.MakeRecruit(takenNames);
             classCount.TryGetValue(u.Cls, out int c);
             if (c >= 2) continue;
             classCount[u.Cls] = c + 1;
             pool.Add(u);
+            takenNames.Add(u.Name);
         }
         // Safety: if the (bounded) re-rolls somehow under-filled, top up so the pool is always exactly
         // DraftPoolSize (never blocks the draft).
-        while (pool.Count < DraftPoolSize) pool.Add(Sightline.Mission.MakeRecruit());
+        while (pool.Count < DraftPoolSize)
+        {
+            var u = Sightline.Mission.MakeRecruit(takenNames);
+            pool.Add(u);
+            takenNames.Add(u.Name);
+        }
         return pool;
     }
 
@@ -978,7 +990,7 @@ public class Run
                 Report.Add($"SHATTERED COMMAND -- emergency conscripts fill the ranks ({why} still bars reinforcements)");
                 while (Squad.Count < AttritionFloor)
                 {
-                    var rec = Sightline.Mission.MakeRecruit();
+                    var rec = Sightline.Mission.MakeRecruit(TakenCallsigns());
                     Squad.Add(rec);
                     Report.Add($"{rec.Name} conscripted  (ROOKIE {rec.Cls})");
                 }
@@ -992,7 +1004,7 @@ public class Run
             //    straight back up to the floor (anti-death-spiral — you always have a squad to field).
             while (Squad.Count < AttritionFloor)
             {
-                var rec = Sightline.Mission.MakeRecruit();
+                var rec = Sightline.Mission.MakeRecruit(TakenCallsigns());
                 Squad.Add(rec);
                 Report.Add($"{rec.Name} drafted to fill the ranks  (ROOKIE {rec.Cls})");
             }
@@ -1001,7 +1013,7 @@ public class Run
             int added = 0;
             while (Squad.Count < RosterMax && added < RecruitsPerBarracks)
             {
-                var rec = Sightline.Mission.MakeRecruit();
+                var rec = Sightline.Mission.MakeRecruit(TakenCallsigns());
                 Squad.Add(rec);
                 Report.Add($"{rec.Name} joins the roster  (ROOKIE {rec.Cls})");
                 added++;
@@ -1014,6 +1026,17 @@ public class Run
         AutoDeploy();
 
         if (Report.Count == 0) Report.Add("No changes this mission.");
+    }
+
+    /// APEX W5: the callsigns currently on the roster, as a taken-names set for MakeRecruit —
+    /// backfill recruits re-roll away from them so a new "ROOK" can't silently share (and merge)
+    /// an existing ROOK's bond/memorial records. Rebuilt per recruit (the roster is tiny).
+    /// Public: the Events recruit outcome joins the same squad and needs the same guard.
+    public HashSet<string> TakenCallsigns()
+    {
+        var names = new HashSet<string>();
+        foreach (var u in Squad) names.Add(u.Name);
+        return names;
     }
 
     /// Grant an earned trait, assign a nickname on the soldier's first feat, apply
@@ -1217,9 +1240,11 @@ public class Run
         if (node.Faction != Faction.None)
             return node.Faction switch
             {
-                Faction.Syndicate => "SYNDICATE: drones + shields",
-                Faction.Legion    => "LEGION: berserkers rush",
-                Faction.Wardens   => "WARDENS: snipers + artillery",
+                // APEX W5: name the setup-verb signatures now that the faction rosters field them
+                // (Legion += striker/lancer/hound, Syndicate/Wardens += screener).
+                Faction.Syndicate => "SYNDICATE: drones, shields + screeners",
+                Faction.Legion    => "LEGION: rushers, lancers + hounds",
+                Faction.Wardens   => "WARDENS: snipers, screeners + artillery",
                 _ => FactionName(node.Faction),
             };
         int m = node.Mission;   // 1-based column == mission number

@@ -106,6 +106,7 @@ public partial class Game
             e.Alert = AlertLevel.Alert; e.PodId = -1;   // horde arrives already engaged (no pods)
             e.SyncPos();
             e.BeginTurn(); e.OnOverwatch = false;
+            Stats.RecordSpawn(e.Cls, Combat.MissionFaction != Faction.None);   // APEX W5 composition tally
             Enemies.Add(e);
             Fx.Burst(e.Pos, Pal.Foe, 14, 160f, 0.5f, 3f, true);
             added++;

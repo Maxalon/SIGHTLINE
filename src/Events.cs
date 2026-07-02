@@ -304,7 +304,8 @@ public static class EventCatalog
             case EventOutcomeKind.Recruit:
             {
                 if (run.Squad.Count >= Run.RosterMax) return "roster full - recruit turned away";
-                var rec = Sightline.Mission.MakeRecruit();
+                // APEX W5: distinct callsign vs the current squad (dup names merge bond/memorial records)
+                var rec = Sightline.Mission.MakeRecruit(run.TakenCallsigns());
                 if (o.Veteran)
                 {
                     rec.Rank = 2;

@@ -96,7 +96,27 @@ public static class Stats
         d[k] = v + n;
     }
 
-    public static void Reset() { Runs.Clear(); _run = null; _mission = null; }
+    // ── APEX W5: enemy-composition tally ─────────────────────────────────────────
+    // Per-archetype spawn counts, tagged by roster source: FACTION (spawned while a
+    // Combat.MissionFaction was active, i.e. a faction-stamped Combat/Elite node) vs DEFAULT
+    // (the unstamped cascade: Start/Supply/Boss nodes, skirmish, endless). Counted at SPAWN
+    // time (mission build + Defend/pressure waves + endless bodies) — the only signal Stats
+    // had before was DeathsByEnemyClass, which rare/passive archetypes (SCREENER/SPOTTER)
+    // essentially never register in. Batch-global (not per-mission): spawns during Mission.Build
+    // land before Stats.BeginMission, and the reachability question is aggregate anyway.
+    static readonly Dictionary<string, int> _spawnsFactionByClass = new();
+    static readonly Dictionary<string, int> _spawnsDefaultByClass = new();
+    public static void RecordSpawn(string cls, bool factionRoster)
+    {
+        if (!Enabled) return;
+        Bump(factionRoster ? _spawnsFactionByClass : _spawnsDefaultByClass, cls);
+    }
+
+    public static void Reset()
+    {
+        Runs.Clear(); _run = null; _mission = null;
+        _spawnsFactionByClass.Clear(); _spawnsDefaultByClass.Clear();
+    }
 
     public static void BeginRun(int heat, string policy = "greedy", string mode = "campaign")
     {
@@ -421,6 +441,25 @@ public static class Stats
                 sb.AppendLine($"  {kv.Key,-11}: {kv.Value}");
         }
 
+        // ── APEX W5: ENEMY COMPOSITION (spawn tally, faction-stamped vs default cascade) ──────
+        // The content-reachability metric: which archetypes the campaign actually FIELDS, split by
+        // roster source. The interesting column is `faction` — a class at 0% there is authored
+        // content the majority of the map never shows (the W5 bug this table exists to catch).
+        if (_spawnsFactionByClass.Count > 0 || _spawnsDefaultByClass.Count > 0)
+        {
+            int fTot = _spawnsFactionByClass.Values.Sum();
+            int dTot = _spawnsDefaultByClass.Values.Sum();
+            sb.AppendLine($"\nENEMY COMPOSITION (spawns; faction-stamped fights n={fTot} / default-cascade fights n={dTot}):");
+            sb.AppendLine("  class        faction         default");
+            foreach (var c in _spawnsFactionByClass.Keys.Concat(_spawnsDefaultByClass.Keys).Distinct()
+                         .OrderByDescending(c => _spawnsFactionByClass.GetValueOrDefault(c) + _spawnsDefaultByClass.GetValueOrDefault(c)))
+            {
+                int f = _spawnsFactionByClass.GetValueOrDefault(c);
+                int d = _spawnsDefaultByClass.GetValueOrDefault(c);
+                sb.AppendLine($"  {c,-11} {f,6} {Pct(f, fTot)}   {d,6} {Pct(d, dTot)}");
+            }
+        }
+
         // Perk pick frequency
         var perks = new Dictionary<string, int>();
         foreach (var r in Runs) foreach (var p in r.PerksPicked) Bump(perks, p);
@@ -644,6 +683,13 @@ public static class Stats
                 kills = killsByClass.GetValueOrDefault(c)
             }).ToList(),
             soldierDeathsByEnemy = deaths.OrderByDescending(kv => kv.Value).ToDictionary(kv => kv.Key, kv => kv.Value),
+            // APEX W5: per-archetype spawn tally, split by roster source (faction-stamped node vs
+            // default cascade) — the machine-readable form of the ENEMY COMPOSITION table.
+            enemyComposition = new
+            {
+                factionSpawns = _spawnsFactionByClass.OrderByDescending(kv => kv.Value).ToDictionary(kv => kv.Key, kv => kv.Value),
+                defaultSpawns = _spawnsDefaultByClass.OrderByDescending(kv => kv.Value).ToDictionary(kv => kv.Key, kv => kv.Value),
+            },
             perkPicks = perks.OrderByDescending(kv => kv.Value).ToDictionary(kv => kv.Key, kv => kv.Value),
             specPicks = specs.OrderByDescending(kv => kv.Value).ToDictionary(kv => kv.Key, kv => kv.Value),
             shopPurchases = buys.OrderByDescending(kv => kv.Value).ToDictionary(kv => kv.Key, kv => kv.Value),
