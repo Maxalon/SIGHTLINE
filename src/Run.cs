@@ -801,6 +801,13 @@ public class Run
     /// Deterministic-friendly (Mission.MakeRecruit -> Util.RandInt). Pure construction — does NOT touch
     /// run state, so it's safe to call from the self-test. `veterans` null/empty == the all-fresh pool
     /// (the harness/self-test path, byte-stable).
+    /// Names of EVERY veteran in the persistent reserve (not just the <=2 recalled into the draft),
+    /// captured by GenerateDraftPool. Mid-run backfill re-rolls away from these too: a rookie who
+    /// shares a reserve legend's name would OVERWRITE that legend at EnshrineVeterans ("newest
+    /// record wins" dedup keys on Unit.Name). Static like the pool generator itself; repopulated
+    /// each draft (NoPersist drafts pass null -> empty set, so the harness never reads disk here).
+    public static HashSet<string> ReserveNames = new();
+
     public static List<Unit> GenerateDraftPool(List<Unit> veterans = null)
     {
         var pool = new List<Unit>();
@@ -809,6 +816,8 @@ public class Run
         // away from them, so a draft can never offer two soldiers sharing a name (duplicate names
         // silently merged bond/memorial/veteran records, which all key on Unit.Name).
         var takenNames = new HashSet<string>();
+        ReserveNames = new HashSet<string>();
+        if (veterans != null) foreach (var v in veterans) ReserveNames.Add(v.Name);
         // Phase 0 — seat up to MaxDraftVeterans recalled veterans (already most-storied-first from the
         // reserve). They bypass the class-variety cap (a returning legend is a deliberate exception) but
         // still count toward the pool size, so the fresh phases fill the remainder.
@@ -1043,14 +1052,17 @@ public class Run
         if (Report.Count == 0) Report.Add("No changes this mission.");
     }
 
-    /// APEX W5: the callsigns currently on the roster, as a taken-names set for MakeRecruit —
-    /// backfill recruits re-roll away from them so a new "ROOK" can't silently share (and merge)
-    /// an existing ROOK's bond/memorial records. Rebuilt per recruit (the roster is tiny).
+    /// APEX W5: the callsigns a fresh recruit must re-roll away from — the live roster, the run's
+    /// FALLEN (a recruit named like a dead bonded soldier would inherit the survivor's BOND aura
+    /// and double up the memorial record), and the persistent veteran reserve (a rookie sharing a
+    /// legend's name overwrites that legend at EnshrineVeterans). Rebuilt per recruit (all tiny).
     /// Public: the Events recruit outcome joins the same squad and needs the same guard.
     public HashSet<string> TakenCallsigns()
     {
         var names = new HashSet<string>();
         foreach (var u in Squad) names.Add(u.Name);
+        foreach (var n in Fallen) names.Add(n);
+        foreach (var n in ReserveNames) names.Add(n);
         return names;
     }
 

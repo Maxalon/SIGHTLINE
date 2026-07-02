@@ -642,9 +642,15 @@ public static class Mission
                     m.Grenades = n >= 5 ? 3 : 2;                // a deep frag pouch — the EXISTING grenade AI uses it
                     return m;
                 }
-                if (r < 0.54f && n >= 3) return MakeHostile("SIEGE", "BOMBARD", WeaponKind.Smg, 7 + bump, 48 + bump, 4, x, y);   // 12% artillery (m3+ only — fairness tier)
-                if (r < 0.64f && n >= 3)                        // 10% zoner (m3+ — cascade first appearance)
+                // The two m3+ gates route their FAILED (m2) rolls to the SCOUT filler, not the next
+                // window — falling through would hand MEDIC their combined 22% and make mission-2
+                // Wardens pods a 36%-medic heal-loop slog (W5 review LOW-3).
+                if (r < 0.54f) return n >= 3
+                    ? MakeHostile("SIEGE", "BOMBARD", WeaponKind.Smg, 7 + bump, 48 + bump, 4, x, y)   // 12% artillery (m3+ only — fairness tier)
+                    : MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 58 + bump, 8, x, y);
+                if (r < 0.64f)                                  // 10% zoner (m3+ — cascade first appearance)
                 {
+                    if (n < 3) return MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 58 + bump, 8, x, y);
                     var z = MakeHostile("HAZE", "SCREENER", WeaponKind.Smg, 5 + bump, 46 + bump, 6, x, y);
                     z.EnemyItem = ItemKind.Smoke; z.ItemCharge = 2;   // a deep smoke pouch — the EXISTING smoke AI uses it
                     return z;
