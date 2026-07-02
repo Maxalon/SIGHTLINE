@@ -932,8 +932,13 @@ public class Run
     public void DebriefSurvivors()
     {
         Report.Clear();
-        PendingPerks.Clear();
-        PendingSpecs.Clear();
+        // APEX W8: PRUNE stale offers rather than nuking the lists. An emergency-cadre draftee
+        // (Game.TryReinforcements) can arrive with its promote-at-draft perk/spec offer queued
+        // MID-MISSION; a blanket Clear() here would silently eat that earned pick. Offers whose
+        // unit died or left the squad still drop (the old Clear()'s actual job — every offer
+        // queued in a barracks is resolved in that same barracks, so this is normally a no-op).
+        PendingPerks.RemoveAll(o => o.Unit == null || !o.Unit.Alive || !Squad.Contains(o.Unit));
+        PendingSpecs.RemoveAll(o => o.Unit == null || !o.Unit.Alive || !Squad.Contains(o.Unit));
         // Heat "LINGERING WOUNDS": wounds bite a mission longer and field medicine is halved.
         bool harsh = Heat.HarshAttrition(HeatLevel);
         foreach (var u in Squad.ToList())
@@ -1036,9 +1041,13 @@ public class Run
                 Report.Add($"SHATTERED COMMAND -- emergency conscripts fill the ranks ({why} still bars reinforcements)");
                 while (Squad.Count < AttritionFloor)
                 {
-                    var rec = Sightline.Mission.MakeRecruit(TakenCallsigns());
+                    // APEX W8: depth-scaled ((Mission-1)/2 seeded kills) + promoted AT THE DRAFT, so
+                    // the conscript ranks (and its perk offer lands) in THIS barracks visit — the
+                    // deepest failure path must not hand a late squad a 0-kill ROOKIE wall.
+                    var rec = Sightline.Mission.MakeRecruit(TakenCallsigns(), Mission);
                     Squad.Add(rec);
                     Report.Add($"{rec.Name} conscripted  (ROOKIE {rec.Cls})");
+                    PromoteEligible(rec);
                 }
             }
             else if (Squad.Count < NextDeployCap)
@@ -1048,20 +1057,27 @@ public class Run
         {
             // 1) emergency floor: if a bad mission dropped the roster below AttritionFloor, top it
             //    straight back up to the floor (anti-death-spiral — you always have a squad to field).
+            //    APEX W8 — DEPTH-SCALED (both backfill sites): the recruit arrives with (Mission-1)/2
+            //    seeded kills and is promoted AT THE DRAFT, so it ranks — with its perk offer — in
+            //    THIS barracks visit (~m3-4 a SQUADDIE, m7+ a CORPORAL with the spec fork; that
+            //    ceiling is intended). This fixes the flagged failure path only: a casualty-free run
+            //    never drafts, so the policy gap narrows from the sloppy side.
             while (Squad.Count < AttritionFloor)
             {
-                var rec = Sightline.Mission.MakeRecruit(TakenCallsigns());
+                var rec = Sightline.Mission.MakeRecruit(TakenCallsigns(), Mission);
                 Squad.Add(rec);
                 Report.Add($"{rec.Name} drafted to fill the ranks  (ROOKIE {rec.Cls})");
+                PromoteEligible(rec);
             }
             // 2) normal trickle: above the floor, at most RecruitsPerBarracks rookie joins per
             //    barracks, so the roster rebuilds gradually toward RosterMax (losses still bite).
             int added = 0;
             while (Squad.Count < RosterMax && added < RecruitsPerBarracks)
             {
-                var rec = Sightline.Mission.MakeRecruit(TakenCallsigns());
+                var rec = Sightline.Mission.MakeRecruit(TakenCallsigns(), Mission);
                 Squad.Add(rec);
                 Report.Add($"{rec.Name} joins the roster  (ROOKIE {rec.Cls})");
+                PromoteEligible(rec);
                 added++;
             }
             if (Squad.Count < RosterMax)

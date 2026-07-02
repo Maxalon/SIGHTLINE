@@ -2288,18 +2288,38 @@ public partial class Game
         Phase = Phase.Draft;
     }
 
-    // ── BEACONTEST (SIGHTLINE_BEACONTEST): UNDERTOW W6 — the Evac forward-beacon + the Escort VIP leash.
-    // Drives the REAL primitives (DoBeacon / the CheckEnd Evac predicate / LeashVip) on a controlled
-    // all-floor scene so it's deterministic + window-free. Asserts:
-    //   (Evac)  planting adds the walkable 3x3 to EvacZone; the fixed fallback corner STILL counts; a
-    //           non-floor / non-Evac plant refuses gracefully; standing all soldiers on beacon tiles wins;
-    //           the beacon is one-per-mission.
-    //   (Escort) the leash steps the VIP TOWARD the nearest soldier, never off-board / onto an occupied
-    //           tile, and short-circuits (holds) once it is already adjacent.
+    // ── BEACONTEST (SIGHTLINE_BEACONTEST): UNDERTOW W6 + APEX W8 — the forward beacon (Evac AND the
+    // new gated Escort plant) + the Escort VIP leash. Drives the REAL primitives (DoBeacon / the
+    // CheckEnd Evac predicate / LeashVip) on a controlled all-floor scene so it's deterministic +
+    // window-free. Asserts:
+    //   (Evac)   planting adds the walkable 3x3 to EvacZone; the fixed fallback corner STILL counts; a
+    //            non-floor plant refuses gracefully; standing all soldiers on beacon tiles wins;
+    //            the beacon is one-per-mission.
+    //   (Escort beacon, W8 — FLIPS the deliberate W6 "Escort must not offer a beacon" decision) the
+    //            plant is OFFERED on Escort but refused mid-board (far-third gate) and refused on a
+    //            WARM LZ (a living DORMANT enemy within Chebyshev 3 vetoes; a ROUTED one doesn't);
+    //            accepted in the cold far third.
+    //   (Escort leash) the leash steps the VIP TOWARD the nearest soldier via REAL MoveStepAnims
+    //            (W8 — every position assert drains the anim queue), never off-board / onto an
+    //            occupied tile, short-circuits (holds) once adjacent, routes AROUND fire, and a step
+    //            through an enemy overwatch lane DRAWS the reaction (parity with an ordered move).
     public string BeaconSelfTest()
     {
         NoPersist = true;
         var fails = new List<string>();
+
+        // W8: the leash enqueues real MoveStepAnims now — drive the queue to completion before any
+        // position assertion (the in-file drain pattern used by the drag/vault/stagger tests).
+        void Pump()
+        {
+            while (_anims.Count > 0)
+            {
+                var a = _anims[0]; a.OnStart(this);
+                for (int i = 0; i < 200 && !a.Update(this, 0.05f); i++) { }
+                if (_anims.Count > 0 && _anims[0] == a) _anims.RemoveAt(0);
+            }
+        }
+        void Leash() { LeashVip(); Pump(); }
 
         Grid = new Grid();                       // all Floor, Height 0
         Players = new List<Unit>();
@@ -2368,9 +2388,44 @@ public partial class Game
         DoBeacon();                                         // must be a graceful no-op
         if (BeaconPlanted) fails.Add("beaconPlantedOnNonFloor");
         Grid.Tiles[3, 3] = TileType.Floor;
-        // Escort must NOT offer a beacon (asset defines the extraction point)
+
+        // ---------- (A2) ESCORT forward beacon (APEX W8 — flips the W6 refusal) ----------
+        // Escort now OFFERS the beacon behind a strict anti-trivialization gate: CheckEnd's Escort
+        // test is just "VIP in zone", so the gate (far third + cold LZ) is the load-bearing design.
         Objective = Objective.Escort;
-        if (HasBeaconAction) fails.Add("beaconOfferedOnEscort");
+        if (!HasBeaconAction) fails.Add("noBeaconOfferedOnEscort");
+        BeaconPlanted = false; BeaconZone.Clear();
+        EvacZone.Clear();
+        for (int ey = 0; ey < 4; ey++) { EvacZone.Add((Grid.W - 2, ey)); EvacZone.Add((Grid.W - 1, ey)); }
+        Players.Clear(); Enemies.Clear();
+        // mid-board planter (x < W*2/3): refused — a spawn-side plant + one leash step would be a
+        // free win (the VIP spawns in the squad wedge).
+        var escortPlanter = MkP(Grid.W / 2, Grid.H / 2);
+        Players.Add(escortPlanter); Selected = escortPlanter;
+        if (CanBeacon(escortPlanter)) fails.Add("escortBeaconMidBoardAllowed");
+        DoBeacon();                                          // graceful no-op
+        if (BeaconPlanted) fails.Add("escortBeaconPlantedMidBoard");
+        // far third — but a LIVING DORMANT enemy 2 tiles away: WARM LZ, refused. Dormant must veto:
+        // pods aren't Alert under concealment and DoBeacon doesn't break stealth, so an Alert-only
+        // test would let a concealed squad plant beside a sleeping pod and leash-win before it wakes.
+        escortPlanter.X = Grid.W * 2 / 3 + 1; escortPlanter.Y = Grid.H / 2; escortPlanter.SyncPos();
+        var sleeper = new Unit { Name = "POD", Cls = "GRUNT", Team = Team.Enemy,
+                                 X = escortPlanter.X + 2, Y = escortPlanter.Y,
+                                 Hp = 6, MaxHp = 6, Aim = 60, Mobility = 4,
+                                 Weapon = Weapon.Make(WeaponKind.Rifle), Alert = AlertLevel.Unaware };
+        sleeper.Ammo = sleeper.Weapon.Clip; sleeper.SyncPos();
+        Enemies.Add(sleeper);
+        if (CanBeacon(escortPlanter)) fails.Add("escortBeaconWarmLzAllowed");
+        // a ROUTED survivor is fleeing, not holding the LZ — it must NOT veto the plant
+        sleeper.Routed = 3;
+        if (!CanBeacon(escortPlanter)) fails.Add("escortBeaconRoutedVetoed");
+        sleeper.Routed = 0;
+        // push the sleeper beyond Chebyshev 3: COLD far third — accepted, zone unioned here
+        sleeper.X = escortPlanter.X + 4; sleeper.SyncPos();
+        if (!CanBeacon(escortPlanter)) fails.Add("escortBeaconColdRefused");
+        DoBeacon();
+        if (!BeaconPlanted) fails.Add("escortBeaconNotPlanted");
+        if (!EvacZone.Contains((escortPlanter.X, escortPlanter.Y))) fails.Add("escortBeaconZoneMissing");
         Objective = Objective.Evac;
 
         // ---------- (B) ESCORT VIP leash ----------
@@ -2385,7 +2440,7 @@ public partial class Game
         Players.Add(anchor); Players.Add(Vip);
         int vipStartDist = Util.ChebyDist(Vip.X, Vip.Y, anchor.X, anchor.Y);
         int vx0 = Vip.X, vy0 = Vip.Y;
-        LeashVip();
+        Leash();
         int vipNewDist = Util.ChebyDist(Vip.X, Vip.Y, anchor.X, anchor.Y);
         if (vipNewDist >= vipStartDist) fails.Add("leashDidNotCloseGap");                 // must step toward the soldier
         if (!(Vip.X == vx0 && Vip.Y == vy0) && !Grid.InBounds(Vip.X, Vip.Y)) fails.Add("leashWentOffBoard");
@@ -2393,20 +2448,62 @@ public partial class Game
         // step it repeatedly (a turn boundary each call): it must CONVERGE and never overshoot onto the soldier
         for (int i = 0; i < 8; i++)
         {
-            LeashVip();
+            Leash();
             if (Vip.X == anchor.X && Vip.Y == anchor.Y) { fails.Add("leashSteppedOntoSoldier"); break; }
         }
         if (Util.ChebyDist(Vip.X, Vip.Y, anchor.X, anchor.Y) > 1) fails.Add("leashDidNotReachAdjacency");
         // once adjacent, the leash HOLDS (short-circuit) — no further movement
         int hx = Vip.X, hy = Vip.Y;
-        LeashVip();
+        Leash();
         if (!(Vip.X == hx && Vip.Y == hy)) fails.Add("leashMovedWhileAdjacent");
         // a caged (Rescue-style) or dead VIP never moves via the escort leash
         Objective = Objective.Escort; CaptiveLocked = true;
         int cx = Vip.X, cy = Vip.Y; Vip.X = 3; Vip.Y = 5; Vip.SyncPos();   // re-separate it
-        LeashVip();
+        Leash();
         if (!(Vip.X == 3 && Vip.Y == 5)) fails.Add("leashMovedCagedVip");
         CaptiveLocked = false;
+
+        // LEASH HAZARD-AVOID (APEX W8): the leash walks REAL MoveStepAnims through OnUnitEnteredTile
+        // now, so it must ROUTE AROUND fire — never park on, or step through, a burning tile while a
+        // clean closing route exists (a burning picket across the direct lane, open rows above/below).
+        Players = new List<Unit>();
+        Enemies = new List<Unit>();
+        EvacZone.Clear();
+        var fireAnchor = MkP(14, 5);
+        Vip = Mission.MakeVip(1); Vip.X = 3; Vip.Y = 5; Vip.SyncPos(); Vip.BeginTurn();
+        Vip.MaxHp = 99; Vip.Hp = 99;                     // any burn tick at all must show as a delta
+        Players.Add(fireAnchor); Players.Add(Vip);
+        for (int fy = 3; fy <= 7; fy++) Grid.LightFire(6, fy, 99);
+        int hp0 = Vip.Hp;
+        for (int i = 0; i < 10 && Util.ChebyDist(Vip.X, Vip.Y, fireAnchor.X, fireAnchor.Y) > 1; i++) Leash();
+        if (Vip.Hp != hp0) fails.Add($"leashWalkedThroughFire(hp{hp0}->{Vip.Hp})");
+        if (Vip.HasStatus(StatusKind.Burning)) fails.Add("leashIgnitedVip");
+        if (Grid.IsFire(Vip.X, Vip.Y)) fails.Add("leashParkedInFire");
+        if (Util.ChebyDist(Vip.X, Vip.Y, fireAnchor.X, fireAnchor.Y) > 1) fails.Add("leashStalledAtFireWall");
+        for (int fy = 3; fy <= 7; fy++) Grid.Fire[6, fy] = 0;   // clear the picket
+
+        // LEASH-vs-OVERWATCH PARITY (APEX W8): a leash step through an enemy overwatch lane draws the
+        // reaction exactly like a player-ordered move (the old teleport skipped OnUnitEnteredTile — a
+        // free stealth-walk past a held lane on the most important unit of the mission).
+        Players = new List<Unit>();
+        Enemies = new List<Unit>();
+        EvacZone.Clear();
+        var owAnchor = MkP(14, 5);
+        Vip = Mission.MakeVip(1); Vip.X = 8; Vip.Y = 5; Vip.SyncPos(); Vip.BeginTurn();
+        Vip.MaxHp = 99; Vip.Hp = 99;                     // the reaction may connect: survival-proof the asset
+        Players.Add(owAnchor); Players.Add(Vip);
+        var watcher = new Unit { Name = "OW", Cls = "GRUNT", Team = Team.Enemy, X = 10, Y = 8,
+                                 Hp = 8, MaxHp = 8, Aim = 65, Mobility = 4,
+                                 Weapon = Weapon.Make(WeaponKind.Rifle) };
+        watcher.Ammo = watcher.Weapon.Clip; watcher.SyncPos(); watcher.BeginTurn();
+        watcher.OnOverwatch = true; watcher.ReactedThisTurn = false;
+        Enemies.Add(watcher);
+        int ammo0 = watcher.Ammo;
+        Leash();                                         // the auto-move crosses the watched lane
+        if (!watcher.ReactedThisTurn) fails.Add("leashDrewNoOverwatch");
+        if (watcher.Ammo != ammo0 - 1) fails.Add("owReactionSpentNoAmmo");
+        if (watcher.OnOverwatch) fails.Add("owStillHeldAfterReaction");
+        Enemies.Clear();
 
         // SQUAD-AT-EVAC: once a soldier has reached the zone, the leash heads the VIP INTO the zone (the win
         // is the VIP on an evac tile) rather than parking it adjacent forever. Build a small corner zone,
@@ -2418,12 +2515,12 @@ public partial class Game
         Vip = Mission.MakeVip(1); Vip.X = Grid.W - 4; Vip.Y = 1; Vip.SyncPos(); Vip.BeginTurn();   // just outside
         Players.Add(zoneSoldier); Players.Add(Vip);
         int vipToZone0 = DistToEvac(Vip.X, Vip.Y);
-        for (int i = 0; i < 6 && !EvacZone.Contains((Vip.X, Vip.Y)); i++) LeashVip();
+        for (int i = 0; i < 6 && !EvacZone.Contains((Vip.X, Vip.Y)); i++) Leash();
         if (!EvacZone.Contains((Vip.X, Vip.Y))) fails.Add($"leashDidNotEnterZone({Vip.X},{Vip.Y})");
         if (DistToEvac(Vip.X, Vip.Y) > vipToZone0) fails.Add("leashMovedAwayFromZone");
 
         return fails.Count == 0
-            ? "BEACONTEST: PASS (Evac: plant adds walkable 3x3 to EvacZone + fallback corner still wins; non-floor/Escort refuse gracefully; all-on-beacon wins; 1/mission. Escort: leash steps VIP toward nearest soldier, converges to adjacency, never off-board/occupied/onto-soldier, holds when adjacent, inert while caged, and walks INTO the zone once the squad has arrived)"
+            ? "BEACONTEST: PASS (Evac: plant adds walkable 3x3 to EvacZone + fallback corner still wins; non-floor refuses gracefully; all-on-beacon wins; 1/mission. Escort beacon (W8): offered, mid-board refused, warm LZ (dormant within 3) refused, routed doesn't veto, cold far third plants. Escort leash: real MoveStepAnims — steps VIP toward nearest soldier, converges to adjacency, never off-board/occupied/onto-soldier, holds when adjacent, inert while caged, routes around fire, draws overwatch parity, and walks INTO the zone once the squad has arrived)"
             : "BEACONTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 

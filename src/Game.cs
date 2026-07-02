@@ -402,13 +402,34 @@ public partial class Game
     public bool BeaconPlanted;                       // true once the single beacon has been dropped
     public (int x, int y) BeaconTile;                // the beacon's centre tile (for the renderer marker)
     public List<(int x, int y)> BeaconZone = new();  // the walkable 3x3 tiles the beacon added to EvacZone
-    // A soldier may DEPLOY a beacon only on the plain Evac objective (Escort/Rescue keep the fixed corner —
-    // the fragile asset defines the extraction point), the beacon hasn't been used yet, and it's a real
-    // player soldier standing on WALKABLE FLOOR (a non-floor planter refuses gracefully, never crashes).
-    public bool HasBeaconAction => Objective == Objective.Evac && Mode != GameMode.Endless;
+    // A soldier may DEPLOY a beacon on the plain Evac objective (forward staging past the half-line — the
+    // shipped W6 de-drag) and — APEX W8 — on ESCORT, where marching the leashed VIP to the far corner was
+    // the flagged ~14-turn drag. Escort's gate is STRICTER (far third + cold LZ, see EscortBeaconOk):
+    // CheckEnd's Escort test is just "VIP in zone", so a permissive plant would be an instant win.
+    // Rescue keeps the fixed corner (the cage already sits mid-board); Endless has no extraction. As
+    // always the beacon is once-per-mission, planted by a real soldier standing on WALKABLE FLOOR
+    // (a non-floor planter refuses gracefully, never crashes).
+    public bool HasBeaconAction => (Objective == Objective.Evac || Objective == Objective.Escort)
+                                   && Mode != GameMode.Endless;
     public bool CanBeacon(Unit u)
         => HasBeaconAction && !BeaconPlanted && u != null && u.Team == Team.Player && !u.IsVip
-           && u.CanAct && Grid.IsFloor(u.X, u.Y) && !EvacZone.Contains((u.X, u.Y));
+           && u.CanAct && Grid.IsFloor(u.X, u.Y) && !EvacZone.Contains((u.X, u.Y))
+           && (Objective != Objective.Escort || EscortBeaconOk(u));
+
+    /// APEX W8 — the ESCORT anti-trivialization gate. The planter must have genuinely PUSHED the map:
+    ///   (1) FAR THIRD — u.X >= Grid.W*2/3. The VIP spawns in the squad wedge, so a spawn-side plant
+    ///       plus one leash step would win Escort without crossing the board (Evac's shipped HALF-LINE
+    ///       staging must NOT be shared here — its win needs the whole squad in the zone; Escort's
+    ///       needs only the VIP).
+    ///   (2) COLD LZ — no LIVING, non-routed enemy within Chebyshev 3 of the planter, at ANY alert
+    ///       tier. Dormant counts: pods stay non-Alert while the squad is concealed and DoBeacon
+    ///       deliberately doesn't break stealth, so an "Alert-only" test would let a concealed squad
+    ///       plant beside a sleeping pod and leash-win before it ever wakes. A ROUTED survivor is
+    ///       fleeing, not holding ground, so it doesn't veto the plant.
+    bool EscortBeaconOk(Unit u)
+        => u.X >= Grid.W * 2 / 3
+           && !Enemies.Any(e => e.Alive && e.Routed == 0
+                                && Util.ChebyDist(u.X, u.Y, e.X, e.Y) <= 3);
 
     // DEFEND objective (3.8): survive this many player turns vs mid-mission waves
     public const int DefendTurns = 8;
@@ -2305,17 +2326,22 @@ public partial class Game
         _run.CheckpointUsed = true;
 
         // fresh emergency squad: deploy as many rookies as this mission fields (fall back to the
-        // attrition floor of 3). Rookies carry no rank/perks/mods — that's the price of the wipe.
-        // Distinct callsigns (APEX W5): the cadre is drawn with a taken-names set so two "ROOK"s
-        // can't share (and silently merge) bond/memorial records.
+        // attrition floor of 3). The cadre carries no bought mods/veteran history — that's the price
+        // of the wipe — but it is DEPTH-SCALED (APEX W8): each recruit arrives with (Mission-1)/2
+        // seeded kills and is promoted at the draft (rank + a queued perk offer for the next
+        // barracks; DebriefSurvivors prunes rather than clears, so the offer survives). A mission-5
+        // wipe redeploying literal 0-kill rookies against the mission-5 force was the flagged
+        // death-spiral. Distinct callsigns (APEX W5): the cadre is drawn with a taken-names set so
+        // two "ROOK"s can't share (and silently merge) bond/memorial records.
         int cap = Math.Max(Run.AttritionFloor, Run.DeployCapFor(_run.Mission));
         _run.Squad = new List<Unit>();
         var cadreNames = new HashSet<string>();
         for (int i = 0; i < cap; i++)
         {
-            var rec = Mission.MakeRecruit(cadreNames);
+            var rec = Mission.MakeRecruit(cadreNames, _run.Mission);
             cadreNames.Add(rec.Name);
             _run.Squad.Add(rec);
+            _run.PromoteEligible(rec);
         }
 
         // Intel, heat, and map position are untouched. Restart THIS mission from its start (the same
@@ -4075,8 +4101,15 @@ public partial class Game
         // forward), tag along toward the plain nearest soldier and hold once beside it (don't charge alone).
         int vipEvac = DistToEvac(Vip.X, Vip.Y);
         var ahead = soldiers.Where(s => DistToEvac(s.X, s.Y) < vipEvac).ToList();
+        // APEX W8: the anchor is the MOST FORWARD ahead-soldier (min DistToEvac; nearest-to-VIP only
+        // as the tie-break). The old nearest-to-VIP pick zigzagged: with the squad spread out, a
+        // DIFFERENT barely-ahead soldier was "nearest" every turn and the VIP chased each in turn —
+        // a traced m5 escort walked the asset AWAY from evac for four straight turns. Following the
+        // true spearhead makes leash progress monotone; the besideForward hold below (adjacent to ANY
+        // ahead soldier) still keeps it from charging past its screen alone.
         var anchor = (ahead.Count > 0 ? ahead : soldiers)
-                     .OrderBy(s => Util.ChebyDist(Vip.X, Vip.Y, s.X, s.Y)).First();
+                     .OrderBy(s => DistToEvac(s.X, s.Y))
+                     .ThenBy(s => Util.ChebyDist(Vip.X, Vip.Y, s.X, s.Y)).First();
         // Hold when tucked beside the FORWARD element (the spearhead) — the VIP has kept pace and shouldn't
         // charge on alone into the contested corner ahead of its escort. If it's already the most-forward
         // unit (nothing `ahead`), hold beside the nearest soldier. Never hold merely beside a straggler
@@ -4084,50 +4117,122 @@ public partial class Game
         bool besideForward = ahead.Count > 0
             ? ahead.Any(s => Util.ChebyDist(Vip.X, Vip.Y, s.X, s.Y) <= 1)
             : soldiers.Any(s => Util.ChebyDist(Vip.X, Vip.Y, s.X, s.Y) <= 1);
-        // reachable tiles within ONE move (VIP.MoveBudget), never onto an occupied / off-board / non-floor
-        // tile (CostMap only relaxes walkable floor and honours the occupancy blocker).
-        var cost = Grid.CostMap(Vip.X, Vip.Y, (x, y) => IsOccupiedByOther(x, y, Vip), out var _cf, Vip.MoveBudget);
-        // If a FREE evac tile is reachable THIS move, step straight into the zone — that is the win, and it
-        // stops the "walled one lane short of the corner while soldiers crowd the doorway" stall outright.
-        (int x, int y)? reachEvac = null; int reachEvacCost = int.MaxValue;
-        foreach (var t in EvacZone)
-        {
-            if (IsOccupiedByOther(t.x, t.y, Vip)) continue;
-            int c = cost[t.x, t.y];
-            if (c > 0 && c < reachEvacCost) { reachEvacCost = c; reachEvac = t; }
-        }
-        if (reachEvac != null) { Vip.X = reachEvac.Value.x; Vip.Y = reachEvac.Value.y; Vip.SyncPos();
-                                 Fx.Burst(Vip.Pos, Pal.VipGold, 10, 140f, 0.4f, 3.5f); return; }
-        if (besideForward) return;                             // tucked beside the SPEARHEAD, zone not yet in reach
-        // Measure progress by the ACTUAL walkable path distance to the anchor (a Dijkstra field FROM it), not
-        // Chebyshev — so the VIP steps correctly AROUND walls/screens toward the squad instead of stalling when
-        // the straight line is blocked (the Chebyshev test let a walled-off VIP get stuck a lane short).
-        var goalField = Grid.CostMap(anchor.X, anchor.Y, (x, y) => IsOccupiedByOther(x, y, Vip), out _, 9999);
-        int hereDist = goalField[Vip.X, Vip.Y];
+        // APEX W8: the leash walks REAL steps through OnUnitEnteredTile now, so a burning route sears
+        // the win-condition asset. Hoisted "is any tile burning" gates the whole two-pass machinery —
+        // the common fire-free board runs exactly one pass on the plain occupancy map.
+        bool anyFire = false;
+        for (int x = 0; x < Grid.W && !anyFire; x++)
+            for (int y = 0; y < Grid.H && !anyFire; y++)
+                if (Grid.Fire[x, y] > 0) anyFire = true;
         var foes = Enemies.Where(e => e.Alive && e.Active && e.Ammo > 0).ToList();   // active shooters (hoisted)
-        int bx = -1, by = -1; float bestScore = float.NegativeInfinity;
-        for (int x = 0; x < Grid.W; x++)
-            for (int y = 0; y < Grid.H; y++)
+
+        // One leash pass over a given passability rule. `avoidFire` treats burning tiles as walls, so
+        // Dijkstra itself DETOURS around a fire field (a destination-score penalty alone can't do it:
+        // the hazard-blind came-from paths cross the fire even when a clean route exists). Returns true
+        // when the pass RESOLVED the turn (issued a move, or held for a legitimate reason).
+        bool LeashPass(bool avoidFire)
+        {
+            Func<int, int, bool> blocked = avoidFire
+                ? ((x, y) => IsOccupiedByOther(x, y, Vip) || Grid.IsFire(x, y))
+                : ((x, y) => IsOccupiedByOther(x, y, Vip));
+            // reachable tiles within ONE move (VIP.MoveBudget), never onto an occupied / off-board /
+            // non-floor tile (CostMap only relaxes walkable floor and honours the blocker).
+            var cost = Grid.CostMap(Vip.X, Vip.Y, blocked, out var cameFrom, Vip.MoveBudget);
+            // If a FREE evac tile is reachable THIS move, step straight into the zone — that is the win,
+            // and it stops the "walled one lane short of the corner while soldiers crowd the doorway"
+            // stall outright.
+            (int x, int y)? reachEvac = null; int reachEvacCost = int.MaxValue;
+            foreach (var t in EvacZone)
             {
-                if (cost[x, y] < 0) continue;                  // unreachable this turn
-                if (x == Vip.X && y == Vip.Y) continue;        // must actually move
-                int d = goalField[x, y];
-                if (d < 0) continue;                           // can't reach the anchor from here at all
-                if (hereDist >= 0 && d >= hereDist) continue;  // only tiles that close the path gap
-                // safety: prefer cover from the nearest active shooter + tiles no active foe can see.
-                float safety = 0f;
-                var near = foes.OrderBy(e => Util.ChebyDist(x, y, e.X, e.Y)).FirstOrDefault();
-                if (near != null) safety += Grid.GetCover(x, y, near.X, near.Y).Level * 3f;
-                if (!foes.Any(e => Grid.HasLineOfSight(e.X, e.Y, x, y))) safety += 6f;   // fully unseen tile
-                // progress dominates (the leash must converge), then safety, then a mild cost tie-break.
-                float score = (hereDist - d) * 2f + safety - cost[x, y] * 0.1f;
-                if (score > bestScore) { bestScore = score; bx = x; by = y; }
+                if (IsOccupiedByOther(t.x, t.y, Vip)) continue;
+                int c = cost[t.x, t.y];
+                if (c > 0 && c < reachEvacCost) { reachEvacCost = c; reachEvac = t; }
             }
-        if (bx < 0) return;                                    // no closing tile reachable — hold this turn
-        Vip.X = bx; Vip.Y = by; Vip.SyncPos();
-        Fx.Burst(Vip.Pos, Pal.VipGold, 8, 120f, 0.35f, 3f);   // a small tag-along puff (feel only)
-        // (win detection stays with the normal CheckEnd calls after the player's actions — calling it here,
-        //  mid-StartPlayerTurn before the turn is fully seated, would re-enter EnterBarracks on stale state.)
+            if (reachEvac != null) { EnqueueLeashMove(cameFrom, reachEvac.Value.x, reachEvac.Value.y); return true; }
+            if (besideForward) return true;                    // tucked beside the SPEARHEAD, zone not yet in reach
+            // Measure progress by the ACTUAL walkable path distance to the anchor (a Dijkstra field FROM
+            // it, under the SAME passability rule), not Chebyshev — so the VIP steps correctly AROUND
+            // walls/screens/fire toward the squad instead of stalling when the straight line is blocked.
+            var goalField = Grid.CostMap(anchor.X, anchor.Y, blocked, out _, 9999);
+            int hereDist = goalField[Vip.X, Vip.Y];
+            int bx = -1, by = -1; float bestScore = float.NegativeInfinity;
+            for (int x = 0; x < Grid.W; x++)
+                for (int y = 0; y < Grid.H; y++)
+                {
+                    if (cost[x, y] < 0) continue;                  // unreachable this turn
+                    if (x == Vip.X && y == Vip.Y) continue;        // must actually move
+                    int d = goalField[x, y];
+                    if (d < 0) continue;                           // can't reach the anchor from here at all
+                    if (hereDist >= 0 && d >= hereDist) continue;  // only tiles that close the path gap
+                    // safety: prefer cover from the nearest active shooter + tiles no active foe can see.
+                    float safety = 0f;
+                    var near = foes.OrderBy(e => Util.ChebyDist(x, y, e.X, e.Y)).FirstOrDefault();
+                    if (near != null) safety += Grid.GetCover(x, y, near.X, near.Y).Level * 3f;
+                    if (!foes.Any(e => Grid.HasLineOfSight(e.X, e.Y, x, y))) safety += 6f;   // fully unseen tile
+                    // APEX W8 hazards (fallback pass only — the avoid-fire pass can't touch fire at all):
+                    // when fire is UNAVOIDABLE, still steer to the route that burns least — penalize a
+                    // burning destination (the Ai.cs -60 pattern) and each burning tile the reconstructed
+                    // route enters (every tile ENTRY ticks the hazard).
+                    if (Grid.IsFire(x, y)) safety -= 60f;
+                    if (anyFire && !avoidFire)
+                        foreach (var (rx, ry) in Grid.ReconstructPath(cameFrom, Vip.X, Vip.Y, x, y))
+                            if ((rx != x || ry != y) && Grid.IsFire(rx, ry)) safety -= 60f;
+                    // APEX W8 stealth-grief guard: routing through OnUnitEnteredTile also runs the pod-wake
+                    // (CheckPodActivation) and concealment-break (RevealRange) checks the teleport skipped.
+                    // An auto-move the player never ordered must not wake a sleeping pod or blow stealth.
+                    // Penalize ONLY what actually bites (a penalty, not a veto — if every closing tile is
+                    // bad the leash still takes the least-bad one, so it can never stall):
+                    //   * dormant pod — sight-wake needs the squad REVEALED (CheckPodActivation no-ops
+                    //     under concealment: creeping past sleepers is the stealth race working as
+                    //     designed) plus proximity AND line of sight. A blanket radius penalty made the
+                    //     leash tiptoe around every sleeper it could safely pass, ballooning Escort turns.
+                    //   * active foe while CONCEALED — stepping into RevealRange blows squad stealth.
+                    foreach (var e in Enemies)
+                    {
+                        if (!e.Alive) continue;
+                        if (!e.Active)
+                        {
+                            // ... and only when the VIP would be the FIRST to wake it: a pod already
+                            // inside a SOLDIER's sight/wake bubble is waking on the squad's own advance
+                            // regardless, so the asset gains nothing by tiptoeing around it (that extra
+                            // caution was measured crawling deep escorts to ~17 turns).
+                            if (!SquadConcealed && Util.TileDist(x, y, e.X, e.Y) <= AlertRange + 1
+                                && Grid.HasLineOfSight(x, y, e.X, e.Y)
+                                && !soldiers.Any(s => Util.TileDist(s.X, s.Y, e.X, e.Y) <= AlertRange
+                                                      && Grid.HasLineOfSight(s.X, s.Y, e.X, e.Y)))
+                                safety -= 40f;
+                        }
+                        else if (SquadConcealed && Util.TileDist(x, y, e.X, e.Y) <= RevealRange + 1) safety -= 40f;
+                    }
+                    // progress dominates (the leash must converge), then safety, then a mild cost tie-break.
+                    float score = (hereDist - d) * 2f + safety - cost[x, y] * 0.1f;
+                    if (score > bestScore) { bestScore = score; bx = x; by = y; }
+                }
+            if (bx < 0) return false;                          // nothing closes under THIS passability rule
+            EnqueueLeashMove(cameFrom, bx, by);
+            return true;
+            // (win detection stays with the normal CheckEnd calls after the player's actions — CheckEnd is
+            //  gated on an empty anim queue, so it fires right after the leash steps finish playing.)
+        }
+
+        // Pass 1 detours around fire; pass 2 (only when fire exists AND pass 1 found no way to act) is
+        // the old hazard-blind map, so a fully fire-walled lane still moves — burning beats stalling,
+        // and the in-loop penalties pick the least-burning route. On a fire-free board this is exactly
+        // one pass. If neither pass acts, hold this turn (walls/crowding — same as the pre-W8 hold).
+        if (!LeashPass(anyFire) && anyFire) LeashPass(false);
+    }
+
+    /// APEX W8 — the leash walks REAL MoveStepAnims along the already-computed CostMap came-from path
+    /// (exactly as ActivatePod's reveal-scatter does for enemies) instead of teleporting via direct
+    /// X/Y writes. Enemy overwatch reactions, bleed/fire ticks, concealment breaks and pod wakes all
+    /// compose for free — OnUnitEnteredTile fires per tile, same as a player-ordered move. MoveStepAnim
+    /// spends no MoveBudget/actions, matching the old teleport's economy; a small tag-along puff marks
+    /// the auto-move (feel only).
+    void EnqueueLeashMove((int, int)[,] cameFrom, int tx, int ty)
+    {
+        Fx.Burst(Vip.Pos, Pal.VipGold, 8, 120f, 0.35f, 3f);
+        foreach (var (px, py) in Grid.ReconstructPath(cameFrom, Vip.X, Vip.Y, tx, ty))
+            Enqueue(new MoveStepAnim(Vip, px, py), Team.Player);
     }
 
     // ---------------- squad coordination ----------------

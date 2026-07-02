@@ -681,7 +681,14 @@ public static class Mission
     /// for class variety, so duplicate soldier names stop silently merging bond/memorial records.
     /// With 40 callsigns and rosters <= ~14 names the re-roll never realistically exhausts; if it
     /// somehow does, the duplicate is accepted (a recruit must always be produced — never blocks).
-    public static Unit MakeRecruit(HashSet<string> taken = null)
+    /// `mission` (optional, APEX W8): DEPTH-SCALED backfill — a recruit drafted mid-run arrives
+    /// with (mission-1)/2 banked kills, so the casualty valve stops handing a mission-7 squad a
+    /// 0-kill ROOKIE that drags the whole roster's power (the flagged sloppy-policy failure path;
+    /// by construction only casualty-taking runs change). The caller runs Run.PromoteEligible on
+    /// the recruit so the seeded kills rank it (SQUADDIE ~m3-4, CORPORAL + spec offer m7+ — the
+    /// intended ceiling) in the SAME barracks visit. Default 1 == 0 kills: the run-opening draft
+    /// pool, StartRun and Events.cs recruit grants deliberately stay unscaled.
+    public static Unit MakeRecruit(HashSet<string> taken = null, int mission = 1)
     {
         string name = Util.Choice(Callsigns);
         if (taken != null)
@@ -689,14 +696,16 @@ public static class Mission
             int guard = 0;
             while (taken.Contains(name) && guard++ < 400) name = Util.Choice(Callsigns);
         }
-        switch (Util.RandInt(0, 4))
+        Unit u = Util.RandInt(0, 4) switch
         {
-            case 0: return MakeSoldier(name, "ASSAULT", WeaponKind.Rifle, 8, 66, 7);
-            case 1: return MakeSoldier(name, "RANGER", WeaponKind.Shotgun, 7, 66, 8);
-            case 2: return MakeSoldier(name, "SHARPSHOOTER", WeaponKind.Sniper, 6, 68, 6);
-            case 3: return MakeSoldier(name, "CORPSMAN", WeaponKind.Smg, 7, 62, 8);
-            default: return MakeSoldier(name, "GUNNER", WeaponKind.Lmg, 10, 58, 6);
-        }
+            0 => MakeSoldier(name, "ASSAULT", WeaponKind.Rifle, 8, 66, 7),
+            1 => MakeSoldier(name, "RANGER", WeaponKind.Shotgun, 7, 66, 8),
+            2 => MakeSoldier(name, "SHARPSHOOTER", WeaponKind.Sniper, 6, 68, 6),
+            3 => MakeSoldier(name, "CORPSMAN", WeaponKind.Smg, 7, 62, 8),
+            _ => MakeSoldier(name, "GUNNER", WeaponKind.Lmg, 10, 58, 6),
+        };
+        u.Kills = Math.Max(0, (mission - 1) / 2);
+        return u;
     }
 
     /// The escort asset: fragile, poor aim, carries only a panicky sidearm.

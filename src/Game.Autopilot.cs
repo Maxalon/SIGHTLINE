@@ -203,8 +203,25 @@ public partial class Game
         // cuts the empty-walk turns (the open-with-a-covert-approach path is the common one). Fallback corner
         // stays, so it never soft-locks. After it's planted, everyone beelines to the nearest evac tile (the
         // beacon), so the concealed staging point is already the win position when stealth breaks.
-        if (Objective == Objective.Evac && CanBeacon(u) && u.X >= Grid.W / 2 && DistToEvac(u.X, u.Y) > 2)
+        // APEX W8 — ESCORT gets the same covert plant on its STRICTER far-third staging line (CanBeacon
+        // additionally enforces the cold-LZ gate, which counts DORMANT pods — a concealed squad can't
+        // stage a leash-win beside a sleeping pod).
+        if (CanBeacon(u) && DistToEvac(u.X, u.Y) > 2
+            && u.X >= (Objective == Objective.Escort ? Grid.W * 2 / 3 : Grid.W / 2))
         { DoBeacon(); return true; }
+        // APEX W8 (Escort, still hidden): the strict cold-LZ gate means a plant beside the pod-dense
+        // lanes never opens — so CREEP TO A COLD POCKET of the far third and plant there, instead of
+        // marching the whole board to the corner. Falls through to the corner race when fully warm.
+        if (Objective == Objective.Escort && HasBeaconAction && !BeaconPlanted && !u.IsVip)
+        {
+            var spot = EscortBeaconSpot(u);
+            if (spot != null && TryMoveTowardTile(u, spot.Value.x, spot.Value.y)) return true;
+        }
+        // APEX W8: the haul-aboard pull is SILENT (no shot — concealment holds), so an in-zone soldier
+        // extracts the leashed VIP / a straggler even mid-stealth. Without this the concealed race had
+        // no extract verb at all: a traced m5 escort parked the VIP BESIDE a soldier-walled zone for
+        // three turns because every zone-front tile was occupied and nobody could pull it through.
+        if (EvacZone.Contains((u.X, u.Y)) && CanExtract(u)) { DoExtract(); return true; }
         // Evac/Escort soldiers: move toward the NEAREST extraction tile (beacon once planted, else corner).
         var ahead = EvacZone.Where(t => !IsOccupiedByOther(t.x, t.y, u))
                             .OrderBy(t => Util.TileDist(u.X, u.Y, t.x, t.y)).FirstOrDefault();
@@ -433,6 +450,27 @@ public partial class Game
         return best;
     }
 
+    /// APEX W8 — nearest COLD far-third staging tile for the Escort forward beacon: walkable floor at
+    /// x >= W*2/3, not already an evac tile (or beside one — don't waste the one-per-mission plant),
+    /// unoccupied, and no LIVING non-routed enemy within Chebyshev 3 (exactly CanBeacon's cold-LZ
+    /// gate). The escort bot ROUTES its point man here instead of beelining the far corner — the
+    /// strict gate means a plant near the pod-dense lanes never opens, so the outplay is finding the
+    /// quiet pocket. Null when the whole far third is warm (caller falls back to the corner march).
+    (int x, int y)? EscortBeaconSpot(Unit u)
+    {
+        (int x, int y)? best = null; int bestD = int.MaxValue;
+        for (int x = Grid.W * 2 / 3; x < Grid.W; x++)
+            for (int y = 0; y < Grid.H; y++)
+            {
+                if (!Grid.IsFloor(x, y) || EvacZone.Contains((x, y)) || DistToEvac(x, y) <= 2) continue;
+                if (IsOccupiedByOther(x, y, u)) continue;
+                if (Enemies.Any(e => e.Alive && e.Routed == 0 && Util.ChebyDist(x, y, e.X, e.Y) <= 3)) continue;
+                int d = Util.ChebyDist(u.X, u.Y, x, y);
+                if (d < bestD) { bestD = d; best = (x, y); }
+            }
+        return best;
+    }
+
     /// FIELD CRAFT autopilot (W1, bounded): on the march-to-the-corner objectives, if `u` is within
     /// drag reach of a friendly that lags BEHIND it (farther from evac) and DRAGging that ally pulls it
     /// one step CLOSER to evac, do it. The once-per-turn DraggedThisTurn flag bounds it to a single pull,
@@ -523,11 +561,39 @@ public partial class Game
         // escorts: a soldier who has reached the zone hauls the asset (VIP) aboard the instant
         // it's adjacent — the lift-out that ends the escort the moment the VIP is beside the zone.
         if (EvacZone.Contains((u.X, u.Y)) && CanExtract(u)) { DoExtract(); return true; }
+        // APEX W8 — FORWARD BEACON (Escort): once the point man has pushed into the far third with a
+        // cold LZ (CanBeacon's Escort gate does the real vetting), open the extraction zone HERE — the
+        // leashed VIP then converges on the beacon instead of dragging the squad across the whole board
+        // to the far corner (the flagged ~14-turn Escort drag). Mirrors SmartEvac's plant verb;
+        // DistToEvac > 2 keeps the one-per-mission plant from being wasted beside the existing zone.
+        if (CanBeacon(u) && u.X >= Grid.W * 2 / 3 && DistToEvac(u.X, u.Y) > 2
+            && Vip != null && Vip.Alive) { DoBeacon(); return true; }
         bool inZone = EvacZone.Contains((u.X, u.Y));
         // Take a FREE finisher on a threat first (a strong shot doesn't cost the advance materially).
         if (HasStrongShot(u) && TakeBestShot(u)) return true;
+        // APEX W8 (Escort, engaged): route the advance to a COLD far-third pocket and plant there —
+        // the strict cold-LZ gate never opens beside the pod lanes, so the point man aims for the
+        // quiet flank instead of the far corner. Cover-aware move; falls through to the corner march
+        // (below) when the whole far third is warm, so this can never stall the advance.
+        if (HasBeaconAction && !BeaconPlanted && Vip != null && Vip.Alive && !inZone)
+        {
+            var spot = EscortBeaconSpot(u);
+            if (spot != null && SmartMoveToward(u, spot.Value.x, spot.Value.y)) return true;
+        }
         if (!inZone)
         {
+            // APEX W8 anti-livelock (paired with the vacate valve below): while the leashed VIP is
+            // parked BESIDE a nearly-full zone, don't grab the last free evac tile out from under it
+            // (a squadmate may have just vacated it) — hold and fight instead, so the leash can walk
+            // the asset in at the next turn boundary (the VIP always moves first).
+            if (Vip != null && Vip.Alive && !EvacZone.Contains((Vip.X, Vip.Y))
+                && DistToEvac(Vip.X, Vip.Y) <= 2
+                && EvacZone.Count(t => !IsOccupiedByOther(t.x, t.y, u)) <= 1)
+            {
+                if (TakeBestShot(u)) return true;
+                if (u.Ammo == 0 && u.ActionsLeft > 0) { DoReload(); return true; }
+                DoHunker(); return true;
+            }
             // ADVANCE to the zone the SAFE (cover-aware) way, not a naked beeline — SmartMoveToward hugs
             // cover / avoids exposure while still closing on the nearest evac tile (and falls back to a plain
             // step so progress is guaranteed). Racing the squad naked into the far corner (which sits in the
@@ -541,6 +607,25 @@ public partial class Game
             if (TakeBestShot(u)) return true;
             if (u.Ammo == 0) { DoReload(); return true; }
             DoHunker(); return true;
+        }
+        // APEX W8 anti-livelock: a small (wall-clipped) forward-beacon zone can be FULLY occupied by
+        // the squad, leaving the leashed VIP parked adjacent with no free evac tile to step into —
+        // soldiers held the zone, the VIP held beside them, and the match stalled to the turn cap.
+        // If the VIP is close but has NO free evac tile within reach, VACATE this tile (one step to
+        // an adjacent non-zone floor) so the leash walks the asset in next turn — the win follows
+        // immediately, so this can never loop.
+        if (Vip != null && Vip.Alive && !EvacZone.Contains((Vip.X, Vip.Y))
+            && Util.ChebyDist(u.X, u.Y, Vip.X, Vip.Y) <= 2
+            && NearestFreeEvac(Vip.X, Vip.Y, Vip, 2) == null && u.ActionsLeft > 0)
+        {
+            for (int dx = -1; dx <= 1; dx++)
+                for (int dy = -1; dy <= 1; dy++)
+                {
+                    int nx = u.X + dx, ny = u.Y + dy;
+                    if ((dx == 0 && dy == 0) || !Grid.IsFloor(nx, ny) || EvacZone.Contains((nx, ny))) continue;
+                    if (IsOccupiedByOther(nx, ny, u)) continue;
+                    if (TryMoveTowardTile(u, nx, ny)) return true;   // step aside; the leash takes the tile
+                }
         }
         // IN the zone, VIP not yet extractable: HOLD the zone (shoot what's in reach, watch, hunker) so the
         // squad stays CONSOLIDATED for the leashed VIP to arrive — do NOT wander off hunting the last foes.
@@ -1346,6 +1431,9 @@ public partial class Game
                 // VIP no longer self-walks to the corner (which would fight the leash). Just tuck in.
                 DoHunker(); return;
             }
+            // APEX W8: drop the forward beacon once a screener has pushed into the far third with a
+            // cold LZ (CanBeacon's Escort gate) — the leashed VIP then extracts here, not the far corner.
+            if (CanBeacon(u) && u.X >= Grid.W * 2 / 3 && DistToEvac(u.X, u.Y) > 2) { DoBeacon(); return; }
             var st = FirstTargetFor(u);
             if (st != null && u.Ammo > 0) { IssueShoot(st); return; }
             if (u.Ammo == 0) { DoReload(); return; }
