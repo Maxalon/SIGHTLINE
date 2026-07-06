@@ -51,7 +51,7 @@ public static class Renderer
     // this keeps the hue deltas between biomes intact, so a lifted floor colour still reads
     // as that biome. Used to raise plateau tops above their own floor.
     static Color Lift(Color c, int d) =>
-        Pal.RGBA(Math.Min(255, c.R + d), Math.Min(255, c.G + d), Math.Min(255, c.B + d));
+        Pal.RGBA(Math.Clamp(c.R + d, 0, 255), Math.Clamp(c.G + d, 0, 255), Math.Clamp(c.B + d, 0, 255), c.A);
 
     // --- 5.4 Procedural noise overlay -----------------------------------------
     // A 128x128 tiling Perlin-noise texture generated once after the GL context is
@@ -490,7 +490,7 @@ public static class Renderer
         // (minx,miny) bounding-box corner may not be a zone tile on L-shaped beacon-extended zones.
         int minY = int.MaxValue;
         foreach (var (_, y) in g.EvacZone) if (y < minY) minY = y;
-        float lxMin = float.MaxValue, lxMax = float.MinValue;
+        float lxSum = 0f; int lxCnt = 0;
         foreach (var (x, y) in g.EvacZone)
         {
             var r = Util.TileRect(x, y);
@@ -510,15 +510,23 @@ public static class Renderer
                                         2.5f, Raylib.Fade(Pal.Good, 0.6f + 0.4f * pulse));
             if (y == minY)
             {
-                float cx0 = r.X + r.Width * 0.5f;
-                lxMin = Math.Min(lxMin, cx0); lxMax = Math.Max(lxMax, cx0);
+                lxSum += r.X + r.Width * 0.5f; lxCnt++;
             }
         }
         // SIGNAL W3: the label sits VERTICALLY CENTRED in the topmost zone row on a dark pill —
         // the old placement (4px below the tile top) was occluded by the translucent top-bar HUD,
         // which fades out over the board's first ~24px (Cfg.OriginY=40 < the bar's 64px fade).
+        // The x-anchor is the MEMBER tile nearest the row's mean x (a min/max midpoint can land
+        // over non-zone tiles when a forward beacon splits the top row into two clusters).
         {
-            float lax = (lxMin + lxMax) * 0.5f;
+            float lxMean = lxSum / Math.Max(1, lxCnt), lax = lxMean, best = float.MaxValue;
+            foreach (var (x, y) in g.EvacZone)
+            {
+                if (y != minY) continue;
+                float cx0 = Cfg.OriginX + x * Cfg.Tile + Cfg.Tile * 0.5f;
+                float d = Math.Abs(cx0 - lxMean);
+                if (d < best) { best = d; lax = cx0; }
+            }
             float lay = Cfg.OriginY + minY * Cfg.Tile + Cfg.Tile * 0.5f;
             float tw = Raylib.MeasureTextEx(Cfg.Font, "EVAC", 14, 1f).X;
             Raylib.DrawRectangleRounded(new Rectangle(lax - tw / 2f - 8f, lay - 11f, tw + 16f, 22f),
@@ -723,8 +731,9 @@ public static class Renderer
 
         float pulse = 0.5f + 0.5f * MathF.Sin((float)Raylib.GetTime() * 3.0f);
         // SIGNAL W3: wash lifted 0.06-0.11 -> 0.14-0.21 — the old floor was below llvmpipe/monitor
-        // perceptibility over a dark biome floor; this matches DrawOverwatchThreat's "reliably
-        // perceptible" contract while staying under the objective/selection signal tier.
+        // perceptibility over a dark biome floor. Deliberately a tier ABOVE the enemy threat wash
+        // (DrawOverwatchThreat runs 0.07-0.12): a friendly braced lane is a plan the player made
+        // and must read at a glance, while staying under the objective/selection signal tier.
         Color wash = Raylib.Fade(Pal.VipGold, 0.14f + 0.07f * pulse);
         for (int x = 0; x < g.Grid.W; x++)
             for (int y = 0; y < g.Grid.H; y++)
@@ -1216,6 +1225,11 @@ public static class Renderer
     {
         foreach (var u in g.Enemies) DrawUnit(g, u);
         foreach (var u in g.Players) DrawUnit(g, u);
+        // SIGNAL W3 (review): status chips draw AFTER every figure — an opaque chip pill on a
+        // bottom unit must never be buried under a vertically-adjacent body drawn later in list
+        // order; decision-critical state outranks silhouettes.
+        foreach (var u in g.Enemies) DrawUnitStatusChips(g, u);
+        foreach (var u in g.Players) DrawUnitStatusChips(g, u);
     }
 
     // ---- Environmental hazards (Wave 2) -----------------------------------------------------
@@ -1590,6 +1604,53 @@ public static class Renderer
         float area = (b.X - a.X) * (cc.Y - a.Y) - (cc.X - a.X) * (b.Y - a.Y);
         if (area < 0f) Raylib.DrawTriangle(a, b, cc, col);
         else           Raylib.DrawTriangle(a, cc, b, col);
+    }
+
+    // combat status effects (3.5): stacked chips below the figure — W5: dropped to clear the
+    // bigger body. SIGNAL W3: decision-critical codes grew 10 -> 13px and sit on a dark pill
+    // backing (with a faint status-coloured rim) so BRN/BLD/STN/DAZ read at play distance over
+    // any biome floor or overlay wash; the chip row centres under the figure. Runs as a LATE
+    // pass from DrawUnits, recomputing DrawUnit's base anchor (the per-frame GetTime() drift
+    // between the two computations is sub-pixel).
+    static void DrawUnitStatusChips(Game g, Unit u)
+    {
+        if (!u.Alive || u.Statuses.Count == 0) return;
+        float hlift = g.Grid.IsHigh(u.X, u.Y) ? ElevLift : 0f;
+        bool drone = u.Team == Team.Enemy && u.Cls == "DRONE";
+        float hover = drone ? 11f + MathF.Sin((float)Raylib.GetTime() * 3f + u.Bob) * 2f : 0f;
+        float bob = MathF.Sin((float)Raylib.GetTime() * 2.2f + u.Bob) * 1.6f;
+        Vector2 p = u.Pos - new Vector2(0, hlift) + new Vector2(0, bob - hover) + u.Recoil;
+        const float chipH = 18f;
+        float rowW = 0f;
+        foreach (var s in u.Statuses)
+            if (s.Turns > 0)
+                rowW += 17f + Raylib.MeasureTextEx(Cfg.Font, StatusDef.Code(s.Kind), 13, 1f).X + 8f + 3f;
+        if (rowW <= 0f) return;
+        float cxs = p.X - (rowW - 3f) / 2f;
+        float cys = p.Y + 24f;
+        foreach (var s in u.Statuses)
+        {
+            if (s.Turns <= 0) continue;
+            Color sc = s.Kind switch
+            {
+                StatusKind.Burning => Pal.RGBA(255, 140, 40),
+                StatusKind.Bleed => Pal.RGBA(210, 50, 50),
+                StatusKind.Stun => Pal.RGBA(225, 205, 95),
+                _ => Pal.RGBA(150, 120, 220),       // Disoriented
+            };
+            string code = StatusDef.Code(s.Kind);
+            float tw = Raylib.MeasureTextEx(Cfg.Font, code, 13, 1f).X;
+            float w = 17f + tw + 8f;
+            // faint coloured rim = a slightly larger rounded rect UNDER the dark pill
+            // (DrawRectangleRoundedLines is version-volatile — never use it)
+            Raylib.DrawRectangleRounded(new Rectangle(cxs - 1f, cys - 1f, w + 2f, chipH + 2f),
+                                        0.5f, 6, Raylib.Fade(sc, 0.40f));
+            Raylib.DrawRectangleRounded(new Rectangle(cxs, cys, w, chipH), 0.5f, 6, Pal.RGBA(9, 13, 18, 216));
+            // 5.5: the shape glyph so the effect reads without relying on hue or the code text
+            DrawStatusGlyph(s.Kind, cxs + 9f, cys + chipH * 0.5f, sc);
+            Raylib.DrawTextEx(Cfg.Font, code, new Vector2((int)(cxs + 17f), (int)(cys + 2f)), 13, 1f, sc);
+            cxs += w + 3f;
+        }
     }
 
     static void DrawUnit(Game g, Unit u)
@@ -2046,46 +2107,8 @@ public static class Renderer
         if (u.Team == Team.Enemy && u.Routed > 0)
             Raylib.DrawTextEx(Cfg.Font, "ROUT", new Vector2((int)(p.X + 17), (int)(p.Y - 34)), 11, 1f, Pal.Good);
 
-        // combat status effects (3.5): stacked chips below the figure — W5: dropped to clear the
-        // bigger body. SIGNAL W3: decision-critical codes grew 10 -> 13px and sit on a dark pill
-        // backing (with a faint status-coloured rim) so BRN/BLD/STN/DAZ read at play distance over
-        // any biome floor or overlay wash; the chip row centres under the figure.
-        if (u.Statuses.Count > 0)
-        {
-            const float chipH = 18f;
-            float rowW = 0f;
-            foreach (var s in u.Statuses)
-                if (s.Turns > 0)
-                    rowW += 17f + Raylib.MeasureTextEx(Cfg.Font, StatusDef.Code(s.Kind), 13, 1f).X + 8f + 3f;
-            if (rowW > 0f)
-            {
-                float cxs = p.X - (rowW - 3f) / 2f;
-                float cys = p.Y + 24f;
-                foreach (var s in u.Statuses)
-                {
-                    if (s.Turns <= 0) continue;
-                    Color sc = s.Kind switch
-                    {
-                        StatusKind.Burning => Pal.RGBA(255, 140, 40),
-                        StatusKind.Bleed => Pal.RGBA(210, 50, 50),
-                        StatusKind.Stun => Pal.RGBA(225, 205, 95),
-                        _ => Pal.RGBA(150, 120, 220),       // Disoriented
-                    };
-                    string code = StatusDef.Code(s.Kind);
-                    float tw = Raylib.MeasureTextEx(Cfg.Font, code, 13, 1f).X;
-                    float w = 17f + tw + 8f;
-                    // faint coloured rim = a slightly larger rounded rect UNDER the dark pill
-                    // (DrawRectangleRoundedLines is version-volatile — never use it)
-                    Raylib.DrawRectangleRounded(new Rectangle(cxs - 1f, cys - 1f, w + 2f, chipH + 2f),
-                                                0.5f, 6, Raylib.Fade(sc, 0.40f));
-                    Raylib.DrawRectangleRounded(new Rectangle(cxs, cys, w, chipH), 0.5f, 6, Pal.RGBA(9, 13, 18, 216));
-                    // 5.5: the shape glyph so the effect reads without relying on hue or the code text
-                    DrawStatusGlyph(s.Kind, cxs + 9f, cys + chipH * 0.5f, sc);
-                    Raylib.DrawTextEx(Cfg.Font, code, new Vector2((int)(cxs + 17f), (int)(cys + 2f)), 13, 1f, sc);
-                    cxs += w + 3f;
-                }
-            }
-        }
+        // combat status effects: drawn in DrawUnitStatusChips as a LATE pass over all figures
+        // (SIGNAL W3 review) — an opaque chip pill must never be buried under an adjacent body.
 
         // elite boss name / rage tag (uses the unit's actual name so mid-bosses read right)
         if (elite)
