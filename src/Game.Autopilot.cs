@@ -736,7 +736,9 @@ public partial class Game
 
         // 1b — TEMPO (HORIZON W1): if we already fired and haven't moved, weigh ducking to safety
         //      vs a rushed 2nd shot. Ducks to cover ONLY when clearly better (never skips a finisher).
-        if (u.FiredThisTurn && !u.MovedAfterFire && u.ActionsLeft > 0 && SmartRetreatAfterShot(u)) return;
+        //      SLOPPY (W2): ~10% forget to duck after firing — the soldier stays EXPOSED BY FIRE
+        //      through the enemy turn (the classic post-shot positional error).
+        if (u.FiredThisTurn && !u.MovedAfterFire && u.ActionsLeft > 0 && !Slip(10) && SmartRetreatAfterShot(u)) return;
 
         // 2 — best shot by expected value (only when it's actually worth firing). SLOPPY: ~15%
         //     of the time mis-judge and skip an otherwise-good shot (a human hesitation) — falls
@@ -908,6 +910,7 @@ public partial class Game
         u.Steady = false; u.FiredFromConcealment = false;
         SetBarrelCredit(u);
         Enqueue(new BarrelShotAnim(u, bx, by), Team.Player);
+        Stats.RecordAction("BARREL");   // W2 verb telemetry (this issuer bypasses IssueShootBarrel)
         return true;
     }
 
@@ -1233,12 +1236,16 @@ public partial class Game
     /// is the reference foe for cover/flank scoring; `advance`, if set, pulls toward a goal.
     /// Falls back to the distance-only TryMoveTowardTile if scoring finds nothing better, so
     /// progress toward the goal is still guaranteed. Returns true if it issued a move.
+    /// W2: under the SLOPPY policy the full scored candidate list is kept so SloppyDest can
+    /// substitute a bounded positional mistake for the optimum — positioning is the dominant
+    /// human skill axis, and until now the sloppy bot only mis-picked TARGETS, never TILES.
     bool MoveToBestTile(Unit u, Unit nearest, (int x, int y)? advance)
     {
         if (MoveCost == null) return false;
         // score of staying at the current tile (it's always "reachable" at cost 0).
         float stayScore = ScoreDestTile(u, u.X, u.Y, 0, nearest, advance);
         int bx = -1, by = -1; float bestScore = stayScore;
+        var cands = SmartSloppy ? new List<(int x, int y, float s)>() : null;
         for (int x = 0; x < Grid.W; x++)
             for (int y = 0; y < Grid.H; y++)
             {
@@ -1248,13 +1255,62 @@ public partial class Game
                 int cost = u.Blitz ? Math.Max(0, need - 1) : need;
                 if (cost > u.ActionsLeft) continue;                // can't afford it
                 float s = ScoreDestTile(u, x, y, need, nearest, advance);
+                cands?.Add((x, y, s));
                 if (s > bestScore) { bestScore = s; bx = x; by = y; }
             }
-        if (bx >= 0) { IssueMove(bx, by); return true; }
+        if (bx >= 0)
+        {
+            (bx, by) = SloppyDest(nearest, bx, by, stayScore, bestScore, cands);
+            IssueMove(bx, by);
+            return true;
+        }
         // nothing scored better than standing still: if we have a goal, still close on it so
         // the match never stalls (guaranteed progress). Otherwise stay put (caller hunkers).
         if (advance != null) return TryMoveTowardTile(u, advance.Value.x, advance.Value.y);
         return false;
+    }
+
+    /// W2 — POSITIONAL SLOPPINESS (the sloppy policy's tile-level error model). Given the best
+    /// destination MoveToBestTile found, sometimes swap in a human-shaped mistake:
+    ///   (a) ~15%: settle for a MEDIOCRE tile — drawn from the bottom half of the candidates
+    ///       that still score >= the stay-score (and within a fixed margin of the best), so a
+    ///       slip reads as lazy positioning, never a drunk teleport into the open;
+    ///   (b) else ~10%: OVEREXTEND — take a tile one step past the best pick toward the nearest
+    ///       enemy (the "greedy push" error that walks into pod-wake / flank angles).
+    /// Every substituted tile comes from the affordability-filtered candidate list, so the move
+    /// is always legal and the progress invariant holds. No-op (returns the best tile) for the
+    /// greedy policy — Slip() is hard-gated on SmartSloppy and cands is null there.
+    (int x, int y) SloppyDest(Unit nearest, int bx, int by, float stayScore, float bestScore,
+                              List<(int x, int y, float s)> cands)
+    {
+        if (cands == null || cands.Count < 2) return (bx, by);
+        if (Slip(15))
+        {
+            float floor = Math.Max(stayScore, bestScore - 40f);   // still-reasonable band
+            var ok = cands.Where(c => c.s >= floor && !(c.x == bx && c.y == by))
+                          .OrderByDescending(c => c.s).ToList();
+            if (ok.Count > 0)
+            {
+                var bottom = ok.Skip(ok.Count / 2).ToList();      // the mediocre half
+                if (bottom.Count == 0) bottom = ok;               // (ok.Count==1 -> Skip(0) keeps it; defensive)
+                var pick = bottom[SlipPick(bottom.Count)];
+                return (pick.x, pick.y);
+            }
+            return (bx, by);
+        }
+        if (nearest != null && Slip(10))
+        {
+            int curDist = Util.ChebyDist(bx, by, nearest.X, nearest.Y);
+            int ox = -1, oy = -1; float overBest = float.NegativeInfinity;
+            foreach (var c in cands)
+            {
+                if (Util.ChebyDist(c.x, c.y, bx, by) != 1) continue;                    // one tile past the pick
+                if (Util.ChebyDist(c.x, c.y, nearest.X, nearest.Y) >= curDist) continue; // must close on the foe
+                if (c.s > overBest) { overBest = c.s; ox = c.x; oy = c.y; }
+            }
+            if (ox >= 0) return (ox, oy);
+        }
+        return (bx, by);
     }
 
     /// SIEGE flee: move `u` to the best reachable tile NOT inside any live strike zone (cover-aware
@@ -1320,7 +1376,17 @@ public partial class Game
         bool cantKillOnReaction = pusher.Hp > u.Weapon.DmgMax;
         bool woundedUnderThreat = Players.Any(p => p.Alive && !p.IsVip && p.MaxHp > 0 && p.Hp * 2 <= p.MaxHp
             && pushers.Any(e => Util.TileDist(p.X, p.Y, e.X, e.Y) <= e.Weapon.MaxRange + e.Mobility));
-        if (cantKillOnReaction && woundedUnderThreat) DoBrace(); else DoOverwatch();
+        if (cantKillOnReaction && woundedUnderThreat) { DoBrace(); return true; }
+        // W2 FOCUS probe (mirrors the BRACE probe's shape): when EVERY credible pusher approaches
+        // down ONE lane — all inside a single 90-degree cone centred on the nearest pusher — the
+        // focused watch strictly dominates the wide one (+Combat.FocusOwAim on the reaction, and
+        // no other lane exists to leave blind). Multi-lane threats keep the wide watch: a cone
+        // there would trade a flank's coverage for aim. This finally exercises the COUNTERPLAY
+        // cone verb in the flywheel (FOCUS was invisible to measurement before this wave).
+        int coneDx = pusher.X - u.X, coneDy = pusher.Y - u.Y;
+        bool oneLane = (coneDx != 0 || coneDy != 0)
+            && pushers.All(e => InConeDir(u.X, u.Y, coneDx, coneDy, e.X, e.Y));
+        if (oneLane) IssueFocusWatch(u, coneDx, coneDy); else DoOverwatch();
         return true;
     }
 

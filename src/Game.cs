@@ -251,6 +251,7 @@ public partial class Game
         u.Ammo = u.Weapon.Clip;
         _run.Report.Add($"{u.Name} re-armed with {u.Weapon.Name}");
         Stats.RecordPurchase("ARMORY");
+        Stats.RecordAction("REARM");   // W2 verb telemetry
         Audio.Play("select");
     }
 
@@ -691,6 +692,12 @@ public partial class Game
     // test can verify each for no-crash/no-TIMEOUT. Program.cs sets this (a public field) BEFORE
     // StartMission; default None keeps plain autoplay byte-stable. Only honoured under NoPersist.
     public Contract ForcedContract = Contract.None;
+    // W2 harness hook: WHOLE-RUN objective pin (SIGHTLINE_OBJ under the balance batch / autoplay).
+    // DebugForceObjective rewrites only the CURRENT card — missions 2+ come from the campaign map,
+    // so an objective sweep with the old pin measured 1 forced mission + ~5 normal ones. This pin
+    // is honoured inside SetupMission for EVERY mission of the run, gated on NoPersist so normal
+    // play can never see it. Null = no pin (byte-stable default).
+    public Objective? ForcedObjective;
 
     /// Set up + enter the run-opening DRAFT (interactive new-run path only). Builds the candidate
     /// pool + the starting-boon offer and switches to Phase.Draft. NEVER called by the harness
@@ -941,6 +948,10 @@ public partial class Game
         // objective + difficulty come from the chosen deployment card (Run.ObjectiveFor baseline)
         var card = _run.CurrentCard ?? Run.StandardCard(n);
         Objective = card.Objective;
+        // W2: whole-run objective pin (harness only). Overrides the card's objective on EVERY
+        // mission so SIGHTLINE_OBJ sweeps measure N missions of the pinned type, not 1 + noise.
+        // Applied BEFORE the endless force below so LAST STAND's Eliminate invariant still wins.
+        if (NoPersist && ForcedObjective.HasValue) Objective = ForcedObjective.Value;
         // PROGRAM HORIZON W2: LAST STAND is a pure kill-the-horde arena — force Eliminate so every
         // objective-gated setup block below (evac/terminal/sabotage/escort/rescue) is a no-op.
         if (Mode == GameMode.Endless) Objective = Objective.Eliminate;
@@ -1082,8 +1093,10 @@ public partial class Game
             foreach (var u in Players) if (u.Alive && !u.IsVip) u.ActionsLeft += 1;
         }
         // per-mission feat tracking + status effects start clean each mission
+        // (LastDotSource too — review fix: a BURN label from mission N must not mis-bucket an
+        // anim-less death in mission N+2; enemies/VIP are constructed fresh each mission anyway)
         foreach (var u in Players)
-        { u.FeatMultiKill = u.FeatClutch = u.FeatVengeful = u.WasNearDeath = u.FeatBurned = u.AllyDown = false; u.BondAura = false; u.ConsecutiveMisses = 0; u.Statuses.Clear(); }
+        { u.FeatMultiKill = u.FeatClutch = u.FeatVengeful = u.WasNearDeath = u.FeatBurned = u.AllyDown = false; u.BondAura = false; u.ConsecutiveMisses = 0; u.Statuses.Clear(); u.LastDotSource = null; }
         _missionKia.Clear();
         Scorches.Clear();            // death decals don't carry between missions
         _refundedThisTurn.Clear();   // flank-kill refund is per-turn; clear it for the mission's first turn too (review #2)
@@ -1119,8 +1132,10 @@ public partial class Game
         if (!NoPersist && Mode == GameMode.Campaign) SaveGame.Save(_run);
 
         // balance telemetry (no-op unless Stats.Enabled): record the encounter we just built.
+        // W2: Mission.AppliedLayout = the authored arena the guard actually ACCEPTED (-1 procedural).
         Stats.BeginMission(n, Objective.ToString(), _run.HeatLevel,
-                           Players.Count(p => p.Alive && !p.IsVip), Enemies.Count(e => e.Alive));
+                           Players.Count(p => p.Alive && !p.IsVip), Enemies.Count(e => e.Alive),
+                           Mission.AppliedLayout);
     }
 
     void NextMission() => SetupMission(_run.Mission + 1);
@@ -1726,10 +1741,15 @@ public partial class Game
         // still buckets sensibly and an enemy killed by DoT is simply not credited to a
         // player class (a minor per-class undercount; the EnemiesKilled total is reconciled
         // by Stats.EndMission's dead-enemy count, so aggregate kill counts stay accurate).
+        // W2: the anim-less fallback now reads Unit.LastDotSource (set by EnvDamage / the
+        // barrel blast) so the threat ranking shows BURN/BLEED/STRIKE/BARREL instead of "?".
         Unit killer = ActiveAnim switch { ShotAnim sa => sa.A, GrenadeAnim ga => ga.Thrower, _ => null };
-        Stats.RecordKill(killer?.Cls ?? "?", killer != null ? (int)killer.Team : 1, d.Cls, (int)d.Team);
+        Stats.RecordKill(killer?.Cls ?? (string.IsNullOrEmpty(d.LastDotSource) ? "?" : d.LastDotSource),
+                         killer != null ? (int)killer.Team : 1, d.Cls, (int)d.Team);
         // W11 HONEST LOSSES: tally which enemy archetype killed this soldier (always-on; the lose
-        // card's CAUSE OF DEATH line reads it). Source-less / friendly-fire deaths bucket under "?".
+        // card's CAUSE OF DEATH line reads it). Source-less / friendly-fire deaths bucket under "?"
+        // (DoT labels like BURN stay out of this dict — the lose card resolves causes through the
+        // codex bestiary, which only knows archetypes).
         if (d.Team == Team.Player && !d.IsVip)
         {
             string cause = killer != null && killer.Team == Team.Enemy ? killer.Cls : "?";
@@ -1962,6 +1982,7 @@ public partial class Game
     public void EnvDamage(Unit u, int dmg, string label, Color col)
     {
         if (!u.Alive) return;
+        u.LastDotSource = label;   // W2: KillUnit's attribution fallback (a DoT death buckets under its cause, not "?")
         u.Hp -= dmg;
         u.Flash = 1f;
         Fx.Burst(u.Pos, col, 8, 130f, 0.4f, 3f, true);
@@ -2104,6 +2125,7 @@ public partial class Game
             int dmg = BarrelDmg + Util.RandInt(0, 2);
             dmg = Combat.HardenedReduce(u, dmg, crit: false);
             if (u.Team == Team.Player && u.MaxHp >= 2 && u.Hp >= u.MaxHp) dmg = Math.Min(dmg, u.MaxHp - 1);  // fragile floor
+            u.LastDotSource = "BARREL";   // W2: attribution fallback (BarrelShotAnim isn't a Shot/GrenadeAnim, so killer is anim-less)
             u.Hp -= dmg; u.Flash = 1f; u.FlinchAnim = 1f;
             var kick = u.Pos - center;
             if (kick.LengthSquared() > 0.01f) u.Recoil = Vector2.Normalize(kick) * 8f;
@@ -2502,6 +2524,14 @@ public partial class Game
         if (!SmartSloppy) return false;
         _sloppyRng ??= new System.Random(12345);
         return _sloppyRng.Next(100) < pct;
+    }
+    /// W2: a sloppy-only index draw (0..n-1) off the SAME deterministic perturbation stream as
+    /// Slip(), for picking WHICH mediocre tile a positional slip settles on. Only ever called
+    /// after a Slip() returned true, so the greedy policy never touches the stream.
+    int SlipPick(int n)
+    {
+        _sloppyRng ??= new System.Random(12345);
+        return n <= 1 ? 0 : _sloppyRng.Next(n);
     }
 
     // ════════════════════════════════════════════════════════════════════════════════
@@ -3193,6 +3223,7 @@ public partial class Game
         Selected.Grenades--;
         Selected.ActionsLeft = 0;
         Enqueue(new GrenadeAnim(Selected, tx, ty), Team.Player);
+        Stats.RecordAction("GRENADE");   // W2 verb telemetry
         GrenadeMode = false;
     }
 
@@ -3221,6 +3252,7 @@ public partial class Game
         if (Util.TileDist(u.X, u.Y, tx, ty) > ItemRange || !ItemTargetOk(u, tx, ty)) return;
         u.ItemCharge--;
         u.ActionsLeft = 0;            // a thrown item ends the turn, like a grenade
+        Stats.RecordAction("ITEM:" + u.Item.ToString().ToUpperInvariant());   // W2 verb telemetry
         ItemMode = false;
         switch (u.Item)
         {
@@ -3303,6 +3335,7 @@ public partial class Game
         target.MarkedByHeadhunter = u.HasSpec(Spec.Headhunter);
         _markedBy = u;                              // remember who marked, to clear it on their next turn
         u.AbilityCd = Unit.AbilityCooldownFor(u.Ability); u.ActionsLeft = Math.Max(0, u.ActionsLeft - 1);
+        Stats.RecordAction("MARK");   // W2 verb telemetry
         if (!target.Active) ActivatePod(target.PodId);
         Fx.PopText(target.Pos + new Vector2(0, -34), "MARKED", Pal.Foe, 18f);
         Fx.PopText(u.Pos + new Vector2(0, -34), "MARK", Pal.Good, 16f);
@@ -3352,6 +3385,7 @@ public partial class Game
         // direction the target MOVES = toward the assault (one tile closer)
         int dx = Math.Sign(u.X - target.X), dy = Math.Sign(u.Y - target.Y);
         u.AbilityCd = Unit.AbilityCooldownFor(u.Ability); u.ShovedThisTurn = true; u.ActionsLeft = Math.Max(0, u.ActionsLeft - 1);
+        Stats.RecordAction("GRAPPLE");   // W2 verb telemetry
         if (SquadConcealed) BreakConcealment(u);   // a grapple is aggression
         if (!target.Active) ActivatePod(target.PodId);
         Fx.PopText(target.Pos + new Vector2(0, -34), "GRAPPLED", Pal.Friend, 18f);
@@ -3378,6 +3412,7 @@ public partial class Game
         int dx = Math.Sign(target.X - u.X), dy = Math.Sign(target.Y - u.Y);
         u.ActionsLeft = Math.Max(0, u.ActionsLeft - 1);   // 1 action; never ends the turn
         u.ShovedThisTurn = true;                          // one shove per soldier per turn (anti-loop)
+        Stats.RecordAction("SHOVE");                      // W2 verb telemetry (review fix: no invisible verbs)
         // shoving a dormant pod is aggression -> it wakes (mirrors a shot revealing a pod).
         if (!target.Active) ActivatePod(target.PodId);
         Enqueue(new ShoveAnim(u, target, dx, dy), Team.Player);
@@ -3432,6 +3467,7 @@ public partial class Game
         int dx = Math.Sign(u.X - ally.X), dy = Math.Sign(u.Y - ally.Y);   // direction the ally MOVES (toward us)
         u.ActionsLeft = Math.Max(0, u.ActionsLeft - 1);   // 1 action; never ends the turn
         u.DraggedThisTurn = true;                         // one drag per soldier per turn (anti-loop)
+        Stats.RecordAction("DRAG");                       // W2 verb telemetry
         Fx.PopText(ally.Pos + new Vector2(0, -32), "DRAG", Pal.Friend, 17f);
         Fx.Burst(ally.Pos, Pal.Friend, 8, 100f, 0.35f, 2.5f);
         Audio.Play("move");
@@ -3486,6 +3522,7 @@ public partial class Game
         var u = Selected;
         u.ActionsLeft = Math.Max(0, u.ActionsLeft - 1);   // 1 action; never ends the turn
         u.VaultedThisTurn = true;                         // one vault per soldier per turn (anti-loop)
+        Stats.RecordAction("VAULT");                      // W2 verb telemetry (review fix: no invisible verbs)
         Fx.PopText(u.Pos + new Vector2(0, -32), "VAULT", Pal.Good, 17f);
         Fx.Burst(u.Pos, Pal.Good, 8, 110f, 0.35f, 2.5f);
         Audio.Play("move");
@@ -3513,6 +3550,7 @@ public partial class Game
         if (blitz) Selected.Blitz = false;
         if (slip) _slipDest = (tx, ty);                     // mark the silent move's destination (cleared on arrival)
         foreach (var (px, py) in path) Enqueue(new MoveStepAnim(Selected, px, py), Team.Player);
+        Stats.RecordAction("MOVE");   // W2 verb telemetry (no-op unless the balance harness)
         AimMode = false;
         PathPreview.Clear();
         Audio.Play("move");
@@ -3545,6 +3583,7 @@ public partial class Game
         Selected.Steady = false;                         // braced shot consumed
         Selected.FiredFromConcealment = false;           // ambush bonus is for this one shot only
         Enqueue(new ShotAnim(Selected, target, res), Team.Player);
+        Stats.RecordAction("SHOOT");   // W2 verb telemetry
         if (!target.Active) ActivatePod(target.PodId);   // gunfire reveals the pod
         AimMode = false;
         SnapShot = false;
@@ -3577,6 +3616,7 @@ public partial class Game
         Selected.Steady = false;
         Selected.FiredFromConcealment = false;
         Enqueue(new BarrelShotAnim(Selected, bx, by), Team.Player);
+        Stats.RecordAction("BARREL");   // W2 verb telemetry
         AimMode = false; SnapShot = false; _tutShot = true;
     }
 
@@ -3587,6 +3627,7 @@ public partial class Game
         { Fx.PopText(Selected.Pos + new Vector2(0, -30), "DISORIENTED", Pal.Foe, 16f); return; }
         Selected.OnOverwatch = true;
         Selected.ActionsLeft = 0;
+        Stats.RecordAction("OVERWATCH");   // W2 verb telemetry
         Fx.PopText(Selected.Pos + new Vector2(0, -30), "OVERWATCH", Pal.Accent, 18f);
         Audio.Play("over");
         AimMode = false;
@@ -3625,12 +3666,14 @@ public partial class Game
         {
             // truly no direction -> a plain wide watch (never waste the action)
             Selected.OwFocused = false;
+            Stats.RecordAction("OVERWATCH");   // W2 verb telemetry (the fallback IS a wide watch)
             Fx.PopText(Selected.Pos + new Vector2(0, -30), "OVERWATCH", Pal.Accent, 18f);
         }
         else
         {
             Selected.OwFocused = true;
             Selected.OwDirX = dx; Selected.OwDirY = dy;
+            Stats.RecordAction("FOCUS");       // W2 verb telemetry
             Fx.PopText(Selected.Pos + new Vector2(0, -30), "FOCUS", Pal.VipGold, 18f);
         }
         Audio.Play("over");
@@ -3652,6 +3695,7 @@ public partial class Game
         Selected.OwBrace = true;
         Selected.OwFocused = false;   // brace is a wide disrupting watch, not a cone
         Selected.ActionsLeft = 0;
+        Stats.RecordAction("BRACE");   // W2 verb telemetry
         Fx.PopText(Selected.Pos + new Vector2(0, -30), "BRACE", Pal.Good, 18f);
         Audio.Play("over");
         AimMode = false;
@@ -3659,15 +3703,40 @@ public partial class Game
     }
 
     /// True when tile (tx,ty) lies inside watcher w's braced 90-degree overwatch cone (centre = OwDir).
-    public bool InOwCone(Unit w, int tx, int ty)
+    public bool InOwCone(Unit w, int tx, int ty) => InConeDir(w.X, w.Y, w.OwDirX, w.OwDirY, tx, ty);
+
+    /// The cone test with an EXPLICIT origin + direction (W2: shared by InOwCone and the
+    /// autopilot's FOCUS probe, which must test a candidate cone BEFORE committing OwDir).
+    public static bool InConeDir(int ox, int oy, int dirX, int dirY, int tx, int ty)
     {
-        int tox = tx - w.X, toy = ty - w.Y;
+        int tox = tx - ox, toy = ty - oy;
         if (tox == 0 && toy == 0) return true;
-        float dl = MathF.Sqrt(w.OwDirX * (float)w.OwDirX + w.OwDirY * (float)w.OwDirY);
+        float dl = MathF.Sqrt(dirX * (float)dirX + dirY * (float)dirY);
         if (dl < 0.01f) return true;   // no direction (defensive) -> behave as a wide watch
         float tl = MathF.Sqrt(tox * (float)tox + toy * (float)toy);
-        float dot = (w.OwDirX * tox + w.OwDirY * toy) / (dl * tl);
+        float dot = (dirX * tox + dirY * toy) / (dl * tl);
         return dot >= 0.70710678f;     // within +-45 degrees of the cone centre (90-degree arc)
+    }
+
+    /// W2 — autopilot FOCUS issuer: a focused overwatch with an EXPLICIT lane direction. The
+    /// interactive DoFocusOverwatch derives its cone from the hover tile, which doesn't exist
+    /// headless; the smart bot computes the approach lane itself (HoldOverwatch's FOCUS probe)
+    /// and commits it here. Falls back to a plain wide watch on a degenerate direction so the
+    /// action is never wasted (progress invariant).
+    void IssueFocusWatch(Unit u, int dx, int dy)
+    {
+        if (u == null || !u.CanAct || u.Ammo <= 0) return;
+        if (u.HasStatus(StatusKind.Disoriented)) return;   // caller (HoldOverwatch) pre-gates this
+        if (dx == 0 && dy == 0) { Selected = u; DoOverwatch(); return; }
+        u.OnOverwatch = true;
+        u.OwFocused = true;
+        u.OwDirX = dx; u.OwDirY = dy;
+        u.ActionsLeft = 0;
+        Stats.RecordAction("FOCUS");   // W2 verb telemetry
+        Fx.PopText(u.Pos + new Vector2(0, -30), "FOCUS", Pal.VipGold, 18f);
+        Audio.Play("over");
+        AimMode = false;
+        _tutOver = true;
     }
 
     void DoHunker()
@@ -3675,6 +3744,7 @@ public partial class Game
         if (Selected == null || !Selected.CanAct) return;
         Selected.Hunkered = true;
         Selected.ActionsLeft = 0;
+        Stats.RecordAction("HUNKER");   // W2 verb telemetry
         Fx.PopText(Selected.Pos + new Vector2(0, -30), "HUNKERED", Pal.Good, 18f);
         Audio.Play("hunker");
         AimMode = false;
@@ -3685,6 +3755,7 @@ public partial class Game
         if (!CanHack(Selected)) return;
         Selected.ActionsLeft -= 1;
         AimMode = false;
+        Stats.RecordAction(HasSabotage ? "PLANT" : "HACK");   // W2 verb telemetry
         if (HasSabotage)
         {
             int i = NearestSabotageSite(Selected);
@@ -3735,6 +3806,7 @@ public partial class Game
                 BeaconZone.Add((bx, by));
                 EvacZone.Add((bx, by));
             }
+        Stats.RecordAction("BEACON");   // W2 verb telemetry
         var at = Util.TileCenter(u.X, u.Y);
         Fx.PopText(at + new Vector2(0, -30), "BEACON SET", Pal.Good, 22f);
         Fx.Burst(at, Pal.Good, 22, 240f, 0.6f, 4.5f, true);
@@ -3788,6 +3860,7 @@ public partial class Game
         var dest = NearestFreeEvac(cand.X, cand.Y, cand, 2);
         if (dest == null) return;
         Selected.ActionsLeft -= 1;                  // a support action — does NOT end the turn
+        Stats.RecordAction("EXTRACT");              // W2 verb telemetry
         cand.X = dest.Value.x; cand.Y = dest.Value.y; cand.SyncPos();
         // feel: a quick haul-aboard flash on both soldier + asset
         Fx.Burst(cand.Pos, cand.IsVip ? Pal.VipGold : Pal.Friend, 16, 220f, 0.5f, 4f, true);
@@ -3802,6 +3875,7 @@ public partial class Game
         if (Selected == null || !Selected.CanAct || Selected.Ammo >= Selected.Weapon.Clip) return;
         Selected.Ammo = Selected.Weapon.Clip;
         Selected.ActionsLeft -= 1;
+        Stats.RecordAction("RELOAD");   // W2 verb telemetry
         Fx.PopText(Selected.Pos + new Vector2(0, -30), "RELOAD", Pal.TxtDim, 18f);
         Audio.Play("reload");
         AimMode = false;
@@ -3939,6 +4013,7 @@ public partial class Game
         if (!PinTargetOk(u, target)) { PinMode = false; return; }
         if (SquadConcealed) BreakConcealment();   // a suppressing burst gives the squad away (no actor -> no ambush flag)
         u.AbilityCd = Unit.AbilityCooldownFor(u.Ability); u.Ammo--; u.ActionsLeft = 0; u.OnOverwatch = true;
+        Stats.RecordAction("PIN");   // W2 verb telemetry
         // SPEC FORK footprint: AREA DENIAL widens the pin to a 5x5 (Cheby<=2); ANCHOR (Spec.Bulwark)
         // shrinks it to the single target only (radius 0 — paired with its +2 armor); default 3x3 (1).
         int pinRadius = u.HasSpec(Spec.AreaDenial) ? 2 : (u.HasSpec(Spec.Bulwark) ? 0 : 1);
@@ -3977,6 +4052,7 @@ public partial class Game
         {
             case AbilityKind.RunGun:
                 u.RunGun = true; u.AbilityCd = Unit.AbilityCooldownFor(u.Ability);
+                Stats.RecordAction("RUNGUN");   // W2 verb telemetry
                 Fx.PopText(at, "RUN & GUN", Pal.Accent, 18f);
                 Fx.Burst(u.Pos, Pal.Accent, 10, 120f, 0.4f, 3f);
                 Audio.Play("reload");
@@ -3991,18 +4067,21 @@ public partial class Game
                 // PHANTOM fork: the next shot strikes from ambush (reuses the built concealment-ambush
                 // path; cleared in BeginTurn, consumed by the next shot).
                 if (u.HasSpec(Spec.Phantom)) u.FiredFromConcealment = true;
+                Stats.RecordAction("SLIPSTREAM");   // W2 verb telemetry
                 Fx.PopText(at, "SLIPSTREAM", Pal.Accent, 18f);
                 Fx.Burst(u.Pos, Pal.Accent, 12, 150f, 0.4f, 3f);
                 Audio.Play("reload");
                 break;
             case AbilityKind.Blitz:
                 u.Blitz = true; u.AbilityCd = Unit.AbilityCooldownFor(u.Ability);
+                Stats.RecordAction("BLITZ");   // W2 verb telemetry
                 Fx.PopText(at, "BLITZ", Pal.Accent, 18f);
                 Fx.Burst(u.Pos, Pal.Accent, 10, 120f, 0.4f, 3f);
                 Audio.Play("reload");
                 break;
             case AbilityKind.Steady:
                 u.Steady = true; u.AbilityCd = Unit.AbilityCooldownFor(u.Ability); u.ActionsLeft -= 1;
+                Stats.RecordAction("STEADY");   // W2 verb telemetry
                 Fx.PopText(at, "STEADY", Pal.Good, 18f);
                 Fx.Burst(u.Pos, Pal.Good, 10, 120f, 0.4f, 3f);
                 Audio.Play("reload");
@@ -4015,6 +4094,7 @@ public partial class Game
                 if (SquadConcealed) BreakConcealment();
                 u.AbilityCd = Unit.AbilityCooldownFor(u.Ability); u.Ammo--; u.ActionsLeft = 0; u.OnOverwatch = true;
                 t.Suppress = Combat.SuppressAim;
+                Stats.RecordAction("SUPPRESS");   // W2 verb telemetry
                 Fx.PopText(t.Pos + new Vector2(0, -34), "SUPPRESSED", Pal.Foe, 18f);
                 Fx.PopText(at, "SUPPRESS", Pal.Accent, 16f);
                 Audio.Play("over");
@@ -4029,6 +4109,7 @@ public partial class Game
                 if (healed <= 0) return;
                 ally.Hp += healed;
                 u.AbilityCd = Unit.AbilityCooldownFor(u.Ability); u.ActionsLeft -= 1;     // patching costs one action (like STEADY)
+                Stats.RecordAction("PATCH");   // W2 verb telemetry
                 // FIELD SURGEON fork: PATCH also clears the patient's wound + all status effects (triage).
                 if (u.HasSpec(Spec.FieldSurgeon))
                 {
@@ -5015,45 +5096,81 @@ public partial class Game
     }
 
     // autopilot: spend Intel as a varied, realistic economy so the BALANCE analytics reflect a real
-    // player's spread rather than the old degenerate "buy armor to zero" loop. Each pass buys the
-    // SINGLE most useful affordable item it can and STOPS when nothing useful/affordable remains:
-    //   1) heal — if a soldier is hurt or wounded (cheap, high-value survivability),
-    //   2) armor (PLATING) — if a soldier is still under the armor cap (compounding survivability),
-    //   3) else the cheapest other beneficial item in the slate (weapon mod / frag / stims).
-    // Perk pick (2, needs the chooser flow) and COUNTER-PREP (a situational call) are left to the
-    // player. ALWAYS terminates: every DoPurchase that fires reduces Intel by a positive cost, and
-    // the iteration cap bounds the loop defensively against any future zero-cost item.
+    // player's spread rather than a degenerate single-item loop.
+    // W2: converted from CHEAPEST-FIRST to the W4b VALUE-BIASED RANDOM pattern (the ChoosePerk
+    // precedent): each pass buys 70% the highest-VALUE affordable slate item / 30% a uniformly
+    // random other affordable one. Cheapest-first structurally starved the expensive rows — the
+    // four weapon mods and ADV. TRAINING (16) almost never beat a 6-8 cost consumable, so the
+    // BY PURCHASE value table had no exposure to price them with. TRAINING (item 2) is now IN
+    // the pool: the autoplay barracks loop already resolves queued perk offers via ChoosePerk.
+    // COUNTER-PREP stays a situational player call. ALWAYS terminates: every DoPurchase that
+    // fires reduces Intel by a positive cost, and the iteration cap bounds the loop defensively.
     void AutoShop()
     {
         var offer = ShopOffer();        // buy only from this barracks' rotating slate
 
+        // W2: ARMORY exposure — the re-arm sink was 0 buys in 140 measured runs because only the
+        // interactive armory screen ever reached DoRearm. Give it the same "real exposure" the
+        // mods/perks got: once per barracks, a 20% roll re-arms a random soldier to a random
+        // legal kit option (ArmoryOptions is class-curated, so it's a sideways bet, not a grief),
+        // making REARM visible in the verb mix and ARMORY priceable in the BY PURCHASE table.
+        // Rolled BEFORE the spend loop so it competes for the budget — after the loop the intel
+        // is already drained below ArmoryCost and the leg never fires (measured: 1 buy/20 runs).
+        if (Util.Roll(20f) && _run.Intel >= ArmoryCost)
+        {
+            var soldiers = _run.Squad.Where(s => !s.IsVip && s.Weapon != null).ToList();
+            if (soldiers.Count > 0)
+            {
+                var s = soldiers[Util.RandInt(0, soldiers.Count - 1)];
+                var opts = Weapon.ArmoryOptions(s.Cls).Where(k => CanRearm(s, k)).ToList();
+                if (opts.Count > 0) DoRearm(s, opts[Util.RandInt(0, opts.Count - 1)]);
+            }
+        }
+
         for (int guard = 0; guard < 40; guard++)
         {
-            int pick = -1;
-            // 1) heal a hurt/wounded soldier first (only ever needed once per pass — CanBuy(0)
-            //    goes false once everyone is topped up).
-            if (offer.Contains(0) && CanBuy(0)) pick = 0;
-            else
+            var buyable = new List<int>();
+            foreach (int i in offer)
+                if (!IsPrepItem(i) && CanBuy(i)) buyable.Add(i);
+            if (buyable.Count == 0) break;      // nothing useful/affordable left
+
+            // value prior (competent-play proxy, mirrors SmartPerkValue's role): healing a hurt
+            // soldier first, then permanent firepower (mods), then the permanent stat/kit rows.
+            int best = buyable[0]; float bestV = float.NegativeInfinity;
+            foreach (int i in buyable)
             {
-                // 2) else the cheapest beneficial item in the slate. UNDERTOW W5: BALLISTIC PLATING (item 4)
-                //    is NO LONGER a dedicated 2nd priority — that "always top up armor" rule is exactly why
-                //    the flywheel bought it 369x (a dead economy the audit flagged). Armor now competes on
-                //    cost with stims/frag/mags like everything else, so purchases spread. Skip only the perk
-                //    pick (2, a real choice) and PREP (situational player calls).
-                int bestCost = int.MaxValue;
-                foreach (int i in offer)
-                {
-                    if (i == 2) continue;
-                    if (IsPrepItem(i)) continue;
-                    if (CanBuy(i) && ShopCostAt(i) < bestCost) { pick = i; bestCost = ShopCostAt(i); }
-                }
+                float v = ShopValue(i);
+                if (v > bestV) { bestV = v; best = i; }
             }
-            if (pick < 0) break;        // nothing useful/affordable left
+            int pick = best;
+            if (buyable.Count > 1 && !Util.Roll(70f))
+            {
+                var rest = buyable.Where(i => i != best).ToList();
+                pick = rest[Util.RandInt(0, rest.Count - 1)];
+            }
+
             int before = _run.Intel;
             DoPurchase(pick);
             if (_run.Intel >= before) break;   // safety: never spin on a no-op purchase
         }
         _shopDone = true;
+    }
+
+    /// W2: the shop VALUE prior for AutoShop's biased pick. A heuristic (like SmartPerkValue),
+    /// not ground truth — the point is which item a competent player would USUALLY take, while
+    /// the 30% off-pick keeps every row exposed for the BY PURCHASE win-rate table.
+    float ShopValue(int item)
+    {
+        if (IsModItem(item)) return 6f;        // permanent firepower — the run's real reward sink
+        return item switch
+        {
+            0 => 9f,                            // FIELD MEDKIT (CanBuy gates on someone actually hurt)
+            1 => 5f,                            // COMBAT STIMS (+3 max HP, permanent)
+            2 => 5f,                            // ADV. TRAINING (a bonus perk pick)
+            3 => 4f,                            // FRAG CACHE (+1 grenade/mission)
+            4 => 5f,                            // BALLISTIC PLATING (+1 armor)
+            _ => 3f,
+        };
     }
 
 

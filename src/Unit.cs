@@ -337,6 +337,11 @@ public class Unit
     public int KillsThisTurn;   // reset each BeginTurn (multi-kill detection)
     public bool BondAura;       // a bonded squadmate is adjacent (refreshed each frame by Game)
     public bool FiredFromConcealment; // true for ONE shot after breaking concealment (4.4)
+    // W2 telemetry: the LAST source-less damage label this unit took ("BURN"/"BLEED"/"STRIKE"/
+    // "BARREL"/"SLAM"/...), set by Game.EnvDamage + the barrel blast. KillUnit's attribution
+    // fallback reads it so a DoT/hazard death buckets under its real cause instead of "?".
+    // Transient (never persisted, never gameplay-read).
+    public string LastDotSource;
 
     // Streak-breaker (S4-C): counts consecutive CLEAN misses by this unit. After each
     // miss the next shot gets a small hidden aim bonus (see Combat.Resolve). Resets to
