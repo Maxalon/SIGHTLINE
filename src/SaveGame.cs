@@ -559,6 +559,7 @@ public static class SaveGame
             a.Weapon = Weapon.Make(WeaponKind.Shotgun);
             a.Perks.Add(Perk.Deadeye); a.Perks.Add(Perk.Tank); a.Perks.Add(Perk.Vantage);   // incl. a HORIZON-w6 perk -> round-trips by ordinal
             a.InstallMod(WeaponMod.Scope); a.InstallMod(WeaponMod.ExtendedMag);   // persistent weapon upgrades
+            a.InstallMod(WeaponMod.Suppressor);   // W10: a NEW-TAIL mod must round-trip by ordinal (stat-silent)
             a.Nickname = "REAPER";
             a.Traits.Add(Trait.Killer); a.Traits.Add(Trait.IronWill);
             a.Bonds.Add("NOX");
@@ -598,7 +599,8 @@ public static class SaveGame
             if (!g0.Benched) fails.Add("benched");
             if (!g0.HasPerk(Perk.Deadeye) || !g0.HasPerk(Perk.Tank) || !g0.HasPerk(Perk.Vantage) || g0.Perks.Count != 3) fails.Add("perks");
             // weapon mods round-trip AND re-bake onto the rebuilt weapon's effective stats
-            if (!g0.HasMod(WeaponMod.Scope) || !g0.HasMod(WeaponMod.ExtendedMag) || g0.WeaponMods.Count != 2) fails.Add("weaponMods");
+            if (!g0.HasMod(WeaponMod.Scope) || !g0.HasMod(WeaponMod.ExtendedMag)
+                || !g0.HasMod(WeaponMod.Suppressor) || g0.WeaponMods.Count != 3) fails.Add("weaponMods");
             if (g0.Weapon.AimBonus != WeaponModDef.ScopeAim) fails.Add("weaponModScopeApplied");      // Shotgun base aimBonus 0 + scope
             if (g0.Weapon.Clip != 2 + WeaponModDef.MagClip) fails.Add("weaponModMagApplied");         // Shotgun base clip 2 + extended mag
             if (g0.Nickname != "REAPER") fails.Add("nickname");
@@ -639,15 +641,27 @@ public static class SaveGame
             var perkVals = (Perk[])Enum.GetValues(typeof(Perk));
             if (perkVals.Length < 20 || perkVals[0] != Perk.LockOn || perkVals[perkVals.Length - 1] != Perk.Siegebreaker)
                 fails.Add("perkOrdinals");
+            // W10: the tail advanced Stabilizer -> Suppressor (Bipod, Suppressor appended).
             var modVals = (WeaponMod[])Enum.GetValues(typeof(WeaponMod));
-            if (modVals.Length < 4 || modVals[0] != WeaponMod.Scope || modVals[modVals.Length - 1] != WeaponMod.Stabilizer)
+            if (modVals.Length < 6 || modVals[0] != WeaponMod.Scope || modVals[4] != WeaponMod.Bipod
+                || modVals[modVals.Length - 1] != WeaponMod.Suppressor)
                 fails.Add("weaponModOrdinals");
             var traitVals = (Trait[])Enum.GetValues(typeof(Trait));
             if (traitVals.Length < 4 || traitVals[0] != Trait.Killer || traitVals[traitVals.Length - 1] != Trait.Vengeful)
                 fails.Add("traitOrdinals");
+            // W10: the tail advanced RapidDeploy -> Reclaimer (6 verb boons appended). Pin the old
+            // tail's ORDINAL POSITION too (RapidDeploy must still be [9]) so an insertion anywhere
+            // before the new block also fails loudly.
             var boonVals = (Boon[])Enum.GetValues(typeof(Boon));
-            if (boonVals.Length < 10 || boonVals[0] != Boon.Marksmen || boonVals[boonVals.Length - 1] != Boon.RapidDeploy)
+            if (boonVals.Length < 16 || boonVals[0] != Boon.Marksmen || boonVals[9] != Boon.RapidDeploy
+                || boonVals[10] != Boon.ShockDoctrine || boonVals[boonVals.Length - 1] != Boon.Reclaimer)
                 fails.Add("boonOrdinals");
+            // W10: SecondaryKind joins the guarded set (treated as persisted/append-only; Ghost/
+            // Demolition/Bounty appended at the END after CleanSweep).
+            var secVals = (SecondaryKind[])Enum.GetValues(typeof(SecondaryKind));
+            if (secVals.Length < 7 || secVals[0] != SecondaryKind.None || secVals[3] != SecondaryKind.CleanSweep
+                || secVals[secVals.Length - 1] != SecondaryKind.Bounty)
+                fails.Add("secondaryKindOrdinals");
             var factionVals = (Faction[])Enum.GetValues(typeof(Faction));
             if (factionVals.Length < 4 || factionVals[0] != Faction.None || factionVals[factionVals.Length - 1] != Faction.Wardens)
                 fails.Add("factionOrdinals");
