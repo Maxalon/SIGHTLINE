@@ -702,6 +702,13 @@ public partial class Game
     /// Draft input: toggle a candidate (cap DraftCap), single-select a boon, CONFIRM when valid.
     void HandleDraftClick()
     {
+        // W1 mode-seam: BACK/Esc returns to the intro without founding a run (mirrors
+        // HandleSkirmishSetup) — a mis-click into NEW RUN is no longer a one-way door.
+        bool back = Raylib.IsKeyPressed(KeyboardKey.Escape)
+                    || (Raylib.IsMouseButtonPressed(MouseButton.Left) &&
+                        Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.DraftBack));
+        if (back) { Phase = Phase.Intro; Audio.Play("select"); return; }
+
         var m = Raylib.GetMousePosition();
         if (Raylib.IsMouseButtonPressed(MouseButton.Left))
         {
@@ -752,10 +759,27 @@ public partial class Game
     }
 
     // ---------------- lifecycle ----------------
+    /// W1 mode-seam: zero every cross-mode field before ANY mode entry (StartMission / BeginEndless /
+    /// BeginSkirmish / BeginDaily / ContinueRun) so no mode can inherit another's state — mode flags,
+    /// the daily stamp + cached best, the endless wave counter, a daily-forced arena, or the daily's
+    /// deterministic RNG seed. Each Begin* re-applies its own needs right after. The forced-layout
+    /// clear + reseed are INTERACTIVE-ONLY (!NoPersist): the harness pins arenas via SIGHTLINE_MAP
+    /// and needs the RNG stream untouched for byte-stable shots/measurement.
+    void ResetModeState()
+    {
+        Mode = GameMode.Campaign;
+        DailyMode = false;
+        DailyStamp = 0;
+        _dailyBest = -1;
+        Wave = 0;
+        if (!NoPersist) { Mission.ForcedLayout = -1; Util.Reseed(0); }
+    }
+
     /// Start a brand-new campaign run (called from intro / after a run ends).
     /// startAt lets the headless harness jump straight to a given mission.
     public void StartMission(int startAt = 1)
     {
+        ResetModeState();
         EnsureMetaLoaded();
         _run = new Run();
         _run.Start(DraftedSquad);           // builds the campaign map, seats at the START node (drafted squad if any)
@@ -1116,6 +1140,7 @@ public partial class Game
     {
         var run = SaveGame.Load();
         if (run == null || run.Squad == null || run.Squad.Count == 0) return false;
+        ResetModeState();     // W1 mode-seam: a resumed campaign inherits nothing from a prior mode
         EnsureMetaLoaded();   // so a resumed run that gets WON can still unlock the next Heat
         _run = run;
         _run.LossStreak = _metaLossStreak;   // adaptive assist carries across a resumed run
@@ -2189,6 +2214,10 @@ public partial class Game
                 if (Mode == GameMode.Endless
                     && _run.PendingPerks.Count == 0 && _run.PendingSpecs.Count == 0 && _run.BoonOffer.Count == 0)
                 {
+                    // W1 mode-seam: a mid-stand boon pick (Run.ChooseBoon during this detour) must
+                    // reach the static combat reads NOW — endless never passes through EndMission/
+                    // BeginMission between waves, so without this republish the pick was cosmetic.
+                    Combat.RefreshRunBoons(_run.ActiveBoons);
                     Phase = Phase.PlayerTurn;
                     SpawnEndlessWave(Wave + 1);
                     return;
@@ -2974,7 +3003,30 @@ public partial class Game
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseColorblind)) Display.ToggleColorblind();
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseAutoCam)) { Display.ToggleAutoCam(); if (!Display.AutoCam) { CamZoom = 1f; CamPan = Vector2.Zero; } }
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseCodex)) { BeginCodex(); }   // W6: open the field manual (remembers this phase for BACK)
-        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseAbandon)) { Paused = false; if (TutStep >= 0) CompleteTutorial(); Combat.EndRun(); Phase = Phase.Lose; LoseTitle = "RUN ABANDONED"; LoseReason = "You called off the campaign."; Audio.Play("lose"); }   // EndRun mirrors LoseRun: clears mission statics incl. Ai.Tier (W6 review LOW-3)
+        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseAbandon)) AbandonRun();
+    }
+
+    /// PAUSE-menu ABANDON — mode-aware teardown (W1 mode-seam). LAST STAND and SKIRMISH/DAILY route
+    /// through their own enders (EndEndless / EndSkirmish), which record results, restore the clock
+    /// seed after a daily, and set a mode-true lose title. The campaign abandon is deliberately
+    /// CHECKPOINT-PRESERVING (unlike LoseRun): the run parks at its last checkpoint for CONTINUE —
+    /// explicitly NO SaveGame.Delete, NO LossStreak bump, NO consolation salvage. It does close what
+    /// the old inline handler leaked: the mission/run telemetry records (Combat.EndRun mirrors
+    /// LoseRun: clears mission statics incl. Ai.Tier — W6 review LOW-3).
+    void AbandonRun()
+    {
+        Paused = false;
+        if (TutStep >= 0) CompleteTutorial();   // mirrors LoseRun: the onboarding ran
+        if (Mode == GameMode.Skirmish) { EndSkirmish(false); return; }
+        if (Mode == GameMode.Endless) { EndEndless(); return; }
+        Combat.EndRun();
+        LoseTitle = "RUN ABANDONED";
+        LoseReason = "You called off the campaign. The checkpoint is kept - CONTINUE resumes it.";
+        Phase = Phase.Lose;
+        Audio.Play("lose");
+        Stats.EndMission(false, _turnCount, AlivePlayers().Count(p => !p.IsVip),
+                         Enemies.Count(e => !e.Alive), "abandoned");
+        Stats.EndRun(false, _run.Mission - 1, "abandoned");
     }
 
     void DoAction(string id)
@@ -5187,6 +5239,26 @@ public partial class Game
                           Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.OverlayBtn7))
                          || Raylib.IsKeyPressed(KeyboardKey.Y);
             if (daily) { BeginDaily(); return; }
+        }
+
+        // W1 mode-seam: end-card MAIN MENU (OverlayBtn2, button or Esc) — back to the intro without
+        // founding a new run and WITHOUT touching the campaign checkpoint. Same mode resets as NEW
+        // RUN below, so a LAST STAND / SKIRMISH / DAILY end card can never leak its mode (or a
+        // daily-forced arena) into whatever is picked next.
+        if (Phase == Phase.Win || Phase == Phase.Lose)
+        {
+            bool menu = (Raylib.IsMouseButtonPressed(MouseButton.Left) &&
+                         Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.OverlayBtn2))
+                        || Raylib.IsKeyPressed(KeyboardKey.Escape);
+            if (menu)
+            {
+                Mode = GameMode.Campaign;
+                DailyMode = false;
+                if (!NoPersist) Mission.ForcedLayout = -1;
+                Phase = Phase.Intro;
+                Audio.Play("select");
+                return;
+            }
         }
 
         bool click = Raylib.IsMouseButtonPressed(MouseButton.Left) &&

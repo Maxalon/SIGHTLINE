@@ -112,9 +112,8 @@ public partial class Game
     /// objective and leaves Mode == Skirmish so CheckEnd routes to CheckSkirmish (single-mission end).
     public void BeginSkirmish(Objective obj, int heat)
     {
+        ResetModeState();   // W1 mode-seam: inherit nothing (incl. a daily-forced arena / leaked seed)
         Mode = GameMode.Skirmish;
-        DailyMode = false;
-        DailyStamp = 0;
         EnsureMetaLoaded();
         _run = new Run();
         _run.Start();                     // default founding squad + a campaign map we ignore (single mission)
@@ -123,8 +122,6 @@ public partial class Game
         // force the chosen objective for mission 1 (DebugForceObjective-style, but WITHOUT re-running
         // SetupMission — we call it once below with everything staged).
         _run.CurrentCard = new MissionCard { Objective = obj, ModName = "SKIRMISH", Reward = RewardKind.None };
-        // a random arena (leave ForcedLayout untouched under the harness so SIGHTLINE_MAP still works)
-        if (!NoPersist) Mission.ForcedLayout = -1;
         // APEX W4: mode goes in RunRec.Mode (policy slot stays a real policy) — see BeginEndless.
         Stats.BeginRun(_run.HeatLevel, SmartPlay && SmartSloppy ? "sloppy" : "greedy", "skirmish");
         Players = _run.Squad;
@@ -139,6 +136,7 @@ public partial class Game
     /// plays the same board.
     public void BeginDaily()
     {
+        ResetModeState();   // W1 mode-seam: inherit nothing from a prior mode
         Mode = GameMode.Skirmish;
         DailyMode = true;
         EnsureMetaLoaded();
@@ -175,12 +173,17 @@ public partial class Game
     }
 
     /// Resolve the daily stamp (yyyymmdd). Under NoPersist (harness), honor SIGHTLINE_DAILY, else a
-    /// fixed constant (deterministic). Only LIVE play reads DateTime.Now.
+    /// fixed constant (deterministic). Only LIVE play reads DateTime.Now — and only live play reads
+    /// the CLOCK: the env read is NoPersist-gated (W1 mode-seam) so a stale SIGHTLINE_DAILY in a
+    /// live shell can never pin every "today" to one frozen stamp.
     int ResolveDailyStamp()
     {
-        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_DAILY"), out int envStamp) && envStamp > 0)
-            return envStamp;
-        if (NoPersist) return DefaultDailyStamp;   // deterministic headless fallback (NEVER DateTime.Now)
+        if (NoPersist)
+        {
+            if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_DAILY"), out int envStamp) && envStamp > 0)
+                return envStamp;
+            return DefaultDailyStamp;   // deterministic headless fallback (NEVER DateTime.Now)
+        }
         var d = DateTime.Now.Date;
         return d.Year * 10000 + d.Month * 100 + d.Day;
     }
@@ -370,7 +373,10 @@ public partial class Game
     // ── MODETEST self-test (SIGHTLINE_MODETEST) ──────────────────────────────────────────────────
     // Asserts: (1) the same daily seed reproduces identical objective+arena+heat (twice); (2) a
     // skirmish single-mission end sets Phase (Win/Lose), NOT Barracks; (3) the meta daily stamp/best
-    // round-trips (preserving/restoring any real meta.json, like HORDETEST/METATEST).
+    // round-trips (preserving/restoring any real meta.json, like HORDETEST/METATEST); (4) ABANDON is
+    // mode-aware (mode-true lose titles); (5) a campaign abandon NEVER deletes the checkpoint
+    // (preserving/restoring any real save.json); (6) prints a daily->abandon->draft-pool fingerprint
+    // for the cross-process daily-seed-leak check (fingerprints must differ between two processes).
     public string ModeSelfTest()
     {
         var fails = new List<string>();
@@ -446,10 +452,62 @@ public partial class Game
                 if (metaSaved != null) { try { System.IO.File.WriteAllText(SaveGame.MetaPathPublic, metaSaved); } catch { } }
                 else { try { if (System.IO.File.Exists(SaveGame.MetaPathPublic)) System.IO.File.Delete(SaveGame.MetaPathPublic); } catch { } }
             }
+
+            // (4) W1 mode-seam: ABANDON routes per mode — each single-run mode ends through its own
+            //     ender with a mode-true lose title (never the campaign's "RUN ABANDONED").
+            NoPersist = true;
+            BeginSkirmish(Objective.Eliminate, 0);
+            AbandonRun();
+            if (Phase != Phase.Lose) fails.Add("skirmishAbandonNoLose");
+            if (LoseTitle != "SKIRMISH LOST") fails.Add($"skirmishAbandonTitle({LoseTitle})");
+            BeginEndless();
+            AbandonRun();
+            if (Phase != Phase.Lose) fails.Add("endlessAbandonNoLose");
+            if (LoseTitle != "LAST STAND") fails.Add($"endlessAbandonTitle({LoseTitle})");
+            BeginDaily();
+            AbandonRun();
+            if (LoseTitle != "DAILY FAILED") fails.Add($"dailyAbandonTitle({LoseTitle})");
+
+            // (5) W1 mode-seam: a CAMPAIGN abandon is CHECKPOINT-PRESERVING. With a real checkpoint
+            //     on disk, abandoning must leave save.json in place (CONTINUE still offered) — only
+            //     LoseRun (a real defeat) deletes it. Preserves/restores any real save.json.
+            NoPersist = false;
+            string saveSaved = System.IO.File.Exists(SaveGame.SavePathPublic)
+                ? System.IO.File.ReadAllText(SaveGame.SavePathPublic) : null;
+            try
+            {
+                var keep = new Run(); keep.Start(); keep.Mission = 2;
+                SaveGame.Save(keep);
+                if (!SaveGame.Exists) fails.Add("checkpointNotWritten");
+                Mode = GameMode.Campaign; DailyMode = false;
+                _run = keep; TutStep = -1;
+                AbandonRun();
+                if (!SaveGame.Exists) fails.Add("abandonDeletedCheckpoint");
+                if (Phase != Phase.Lose) fails.Add("campaignAbandonNoLose");
+                if (LoseTitle != "RUN ABANDONED") fails.Add($"campaignAbandonTitle({LoseTitle})");
+            }
+            finally
+            {
+                if (saveSaved != null) { try { System.IO.File.WriteAllText(SaveGame.SavePathPublic, saveSaved); } catch { } }
+                else SaveGame.Delete();
+            }
+
+            // (6) W1 mode-seam: DAILY -> ABANDON must release the deterministic day seed (the abandon
+            //     routes through EndSkirmish -> Util.Reseed(0)). A same-process differ check cannot
+            //     see the leak (the RNG stream advances between runs regardless), so print a draft-
+            //     pool fingerprint for a CROSS-PROCESS check: two fresh processes must print
+            //     DIFFERENT fingerprints (with the leak both derive from the same daily stamp).
+            NoPersist = true;
+            BeginDaily();
+            AbandonRun();
+            uint pfp = 2166136261u;
+            foreach (var u in Run.GenerateDraftPool())
+                foreach (char c in u.Name + u.Cls) { unchecked { pfp ^= c; pfp *= 16777619u; } }
+            Console.WriteLine($"MODETEST daily-abandon draft-pool fingerprint: {pfp:x8}  (must differ across processes)");
         }
         catch (Exception e) { return "MODETEST: FAIL (exception " + e.Message + ")"; }
         return fails.Count == 0
-            ? "MODETEST: PASS (daily seed deterministic; skirmish ends single-mission (Win/Lose, not Barracks); daily best round-trips)"
+            ? "MODETEST: PASS (daily seed deterministic; skirmish ends single-mission (Win/Lose, not Barracks); daily best round-trips; abandon is mode-aware + campaign-checkpoint-preserving)"
             : "MODETEST: FAIL (" + string.Join(",", fails) + ")";
     }
 }

@@ -768,11 +768,19 @@ public class Run
     // ---- boon offers ----
     /// Build a fresh pick-1-of-3 boon offer from the boons not yet taken this run (fewer if the
     /// pool is nearly exhausted; empty if all are owned). Deterministic-friendly (Util.RandInt).
-    public void GenerateBoonOffer()
+    /// `endless` (W1 mode-seam) drops GHOST and RAPID DEPLOY from the pool — both are structurally
+    /// inert in LAST STAND (the stand is never concealed; NextDeployCap is never read mid-stand),
+    /// so a mid-stand offer must never present a dead pick.
+    public void GenerateBoonOffer(bool endless = false)
     {
         BoonOffer.Clear();
         var pool = new List<Boon>();
-        foreach (var b in BoonDef.All) if (!HasBoon(b)) pool.Add(b);
+        foreach (var b in BoonDef.All)
+        {
+            if (HasBoon(b)) continue;
+            if (endless && (b == Boon.Ghost || b == Boon.RapidDeploy)) continue;
+            pool.Add(b);
+        }
         for (int i = pool.Count - 1; i > 0; i--) { int j = Util.RandInt(0, i); (pool[i], pool[j]) = (pool[j], pool[i]); }
         for (int i = 0; i < pool.Count && i < 3; i++) BoonOffer.Add(pool[i]);
     }
