@@ -1044,13 +1044,17 @@ public partial class Game
         if (Vip != null) { Vip.Grenades = 0; Vip.AbilityCd = 99; }  // the asset has no kit (never ready)
         if (Objective == Objective.Rescue && Vip != null)
         {
-            // seat the caged captive mid-field and clear its tile + ring so soldiers can reach it
+            // seat the caged captive mid-field and clear its tile + ring so soldiers can reach it.
+            // W4 (SIGNAL): clear Grid.Barrel too — Tiles=Floor alone left Mission.Build's hazard
+            // barrels in the ring, blocking the freeing approach (IsFloor excludes barrels) and
+            // parking a chain-detonatable bomb beside the win-condition asset.
             Vip.X = Grid.W / 2; Vip.Y = Grid.H / 2;
             for (int dx = -1; dx <= 1; dx++)
                 for (int dy = -1; dy <= 1; dy++)
                 {
                     int nx = Vip.X + dx, ny = Vip.Y + dy;
-                    if (Grid.InBounds(nx, ny) && !IsOccupiedByOther(nx, ny, Vip)) Grid.Tiles[nx, ny] = TileType.Floor;
+                    if (Grid.InBounds(nx, ny) && !IsOccupiedByOther(nx, ny, Vip))
+                    { Grid.Tiles[nx, ny] = TileType.Floor; Grid.Barrel[nx, ny] = false; }
                 }
             Grid.ResetCoverHp();
             Vip.Mobility = 0;              // can't move while caged
@@ -1982,6 +1986,12 @@ public partial class Game
     public void EnvDamage(Unit u, int dmg, string label, Color col)
     {
         if (!u.Alive) return;
+        // W4 (SIGNAL): the caged RESCUE captive is invulnerable — full stop. Shots/blasts are
+        // guarded at their call sites (CanTarget / GrenadeAnim / DetonateBarrel / DetonateSiege),
+        // but the source-less paths (Burning DoT, shove SLAM/STAGGER collisions) funnel HERE and
+        // had no guard: fire or a shove could kill the caged captive, and CheckEnd's Rescue loss
+        // requires !CaptiveLocked — an unwinnable, unlosable soft-lock. Guard the funnel itself.
+        if (u == Vip && CaptiveLocked) return;
         u.LastDotSource = label;   // W2: KillUnit's attribution fallback (a DoT death buckets under its cause, not "?")
         u.Hp -= dmg;
         u.Flash = 1f;
@@ -2171,9 +2181,13 @@ public partial class Game
         _barrelCreditTeam = Team.Enemy; _barrelCreditUnit = null;   // fire-cooked barrels credit no one
         foreach (var (x, y) in cook) DetonateBarrel(x, y);
 
-        // units standing in fire keep burning (the Burning DoT does the damage in TickStatuses)
+        // units standing in fire keep burning (the Burning DoT does the damage in TickStatuses).
+        // W4 (SIGNAL): never ignite the caged RESCUE captive — it can't move off the tile
+        // (Mobility 0, actionless) and EnvDamage refuses to hurt it anyway, so the status
+        // would only spam BURN FX on an invulnerable unit every turn the fire lingers.
         foreach (var u in Players.Concat(Enemies))
-            if (u.Alive && Grid.IsFire(u.X, u.Y)) u.AddStatus(StatusKind.Burning, 2);
+            if (u.Alive && Grid.IsFire(u.X, u.Y) && !(u == Vip && CaptiveLocked))
+                u.AddStatus(StatusKind.Burning, 2);
 
         Grid.TickFire();
     }
@@ -2436,7 +2450,11 @@ public partial class Game
         }
         else if (Objective == Objective.Rescue) // free the captive, then walk it to extraction
         {
-            if (!CaptiveLocked && (Vip == null || !Vip.Alive))
+            // W4 (SIGNAL) belt-and-braces: a DEAD captive is CAPTIVE LOST whether or not the cage
+            // was sprung. The old !CaptiveLocked qualifier meant a captive killed while still caged
+            // (every damage path is guarded now, but guards can regress) left the mission with no
+            // reachable win OR loss — the soft-lock. Never let a dead asset stall the run.
+            if (Vip == null || !Vip.Alive)
             { LoseRun("CAPTIVE LOST", $"The captive died on mission {_run.Mission}."); return; }
             if (!CaptiveLocked && Vip != null && EvacZone.Contains((Vip.X, Vip.Y))) EnterBarracks();
         }
