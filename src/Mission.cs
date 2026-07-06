@@ -406,7 +406,16 @@ public static class Mission
             // With m1-m5 untouched, the dip budget pins m6 to the TOP of the 80-88 band by
             // construction (h0 completion >= 70% requires m6 >= ~85%). An UNSTAMPED finale (the
             // Faction.None safety fallback) keeps the old count-4 exactly.
-            count = Math.Max(5, count - (Combat.MissionFaction != Faction.None ? 3 : 4));
+            // W6 (SIGNAL) — HEAT-GATED finale body: the restored kit body (~15-20pts of m6
+            // conditional per body, W5-measured) now fields only for COORDINATED forces —
+            // Ai.Tier >= 1, which the heat ladder publishes from ELITE CADRE (rung 4) up
+            // (Game.SetupMission sets Ai.Tier from Heat.AiTier BEFORE Build, every mission;
+            // Combat.EndMission clears it, so a stale tier can never leak in here). Low heat
+            // (0-3) gets the softer count-4 finale: the fresh 06b65c2 baseline ran h0 62.5% /
+            // h2 55% completion (well under the ~75-80 ladder-top goal) with the W5 finale
+            // eating ~1/5 of otherwise-cleared runs; the ladder's top half keeps the
+            // full-bite finale it was tuned against. Faction.None still means count-4.
+            count = Math.Max(5, count - (Combat.MissionFaction != Faction.None && Ai.Tier >= 1 ? 3 : 4));
             bump = Math.Max(0, n - 1);                       // drop the boss-card/heat StatDelta for the screen
         }
         var rows = new List<int>();
