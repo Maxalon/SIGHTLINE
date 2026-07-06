@@ -50,6 +50,7 @@ public static class Hud
     public static System.Collections.Generic.List<(Boon boon, Rectangle rect)> DraftBoonBtns = new();
     public static System.Collections.Generic.List<(Contract contract, Rectangle rect)> DraftContractBtns = new();
     public static Rectangle DraftConfirm;
+    public static Rectangle DraftBack;   // W1 mode-seam: BACK to the intro without founding a run
 
     // ---------------- UI motion (panel pop-in juice) ----------------
     // Panels/cards animate in (slide + fade + scale) the first time they appear, instead
@@ -234,7 +235,11 @@ public static class Hud
         DrawButtonRect(PauseColorblind, Pal.Colorblind ? "COLORBLIND: ON" : "COLORBLIND: OFF", "", true, Pal.Colorblind, Pal.Accent);
         DrawButtonRect(PauseAutoCam, Display.AutoCam ? "AUTO-CAM: ON" : "AUTO-CAM: OFF", "", true, Display.AutoCam, Pal.Accent);
         DrawButtonRect(PauseCodex, "FIELD MANUAL", "K", true, false, Pal.Good);
-        DrawButtonRect(PauseAbandon, "ABANDON RUN", "", true, false, Pal.Foe);
+        // W1 mode-seam: the abandon verb is mode-true — a stand/fight is not a campaign "run".
+        string abandonLbl = g.Mode == GameMode.Endless ? "END STAND"
+                          : g.Mode == GameMode.Skirmish ? "ABANDON FIGHT"
+                          : "ABANDON RUN";
+        DrawButtonRect(PauseAbandon, abandonLbl, "", true, false, Pal.Foe);
 
         string ctl = "Wheel zoom  -  Middle-drag pan  -  [C] reset camera  -  Arrows/WASD + [Space]";
         Raylib.DrawTextEx(Cfg.Font, ctl, new Vector2(x + w / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, ctl, 11, 1f).X / 2, y + h - 24), 11, 1f, Pal.TxtDim);
@@ -1800,12 +1805,21 @@ public static class Hud
         DrawSurvivorPanel(g, run, mvp, lx, dy, colW, dh, rosterIn);
         DrawMemorialPanel(run, rx, dy, colW, dh, kiaIn);
 
-        // ---- NEW RUN button (single, centred) ----
+        // ---- NEW RUN / MAIN MENU buttons (the intro's two-button pattern) ----
+        // W1 mode-seam: the end card is no longer a one-way door — MAIN MENU returns to the intro
+        // without founding a run, so a finished LAST STAND / SKIRMISH / DAILY can't strong-arm the
+        // player into overwriting a live campaign. NEW RUN says so when it WILL overwrite one; the
+        // disk read is NoPersist-gated so headless shots stay byte-stable (harness never touches disk).
         float btnIn = PanelAnim("endBtn", 0.3f, 0.85f);
         int by = dy + dh + 16;
-        OverlayBtn = new Rectangle(W / 2 - 130, by, 260, 46);
-        OverlayBtn2 = new Rectangle(0, 0, 0, 0);
-        DrawOverlayButton(OverlayBtn, "NEW RUN", win ? Pal.Good : Pal.Friend, null, btnIn);
+        string newRun = !g.NoPersist && SaveGame.Exists ? "NEW RUN (overwrites save)" : "NEW RUN";
+        int bgap = 22;
+        int bw1 = Math.Max(200, (int)Raylib.MeasureTextEx(Cfg.Font, newRun, 18, 1f).X + 36);
+        int bw2 = 200;
+        OverlayBtn  = new Rectangle(W / 2 - (bw1 + bgap + bw2) / 2, by, bw1, 46);
+        OverlayBtn2 = new Rectangle(OverlayBtn.X + bw1 + bgap, by, bw2, 46);
+        DrawOverlayButton(OverlayBtn, newRun, win ? Pal.Good : Pal.Friend, null, btnIn);
+        DrawOverlayButton(OverlayBtn2, "MAIN MENU", Pal.TxtDim, "Esc", btnIn);
     }
 
     // ============================================================================
@@ -2610,6 +2624,11 @@ public static class Hud
         Raylib.DrawTextEx(Cfg.Font, dl, new Vector2((int)(DraftConfirm.X + dbw / 2 - dlm.X / 2), (int)(DraftConfirm.Y + dbh / 2 - 9)), 18, 1f, ready ? Pal.RGBA(3, 18, 26) : Pal.TxtDim);
         if (ready)
             Raylib.DrawTextEx(Cfg.Font, "[ENTER]", new Vector2((int)(DraftConfirm.X + dbw - 56), (int)(DraftConfirm.Y + dbh - 16)), 11, 1f, Pal.RGBA(3, 18, 26));
+
+        // ---- BACK to the intro (W1 mode-seam: the skirmish setup's escape hatch, mirrored) ----
+        int bkw = 120;
+        DraftBack = new Rectangle(DraftConfirm.X - bkw - 14, DraftConfirm.Y, bkw, dbh);
+        DrawOverlayButton(DraftBack, "BACK", Pal.TxtDim, "Esc", 1f);
     }
 
     /// A short prose role one-liner per class, for the draft candidate cards.
@@ -3402,7 +3421,13 @@ public static class Hud
         var lz = Raylib.MeasureTextEx(Cfg.Font, label, 18, 1f);
         Raylib.DrawTextEx(Cfg.Font, label, new Vector2((int)(rr.X + rr.Width / 2 - lz.X / 2), (int)(rr.Y + rr.Height / 2 - 9)), 18, 1f, Raylib.Fade(Pal.RGBA(3, 18, 26), a));
         if (keyHint != null)
-            Raylib.DrawTextEx(Cfg.Font, "[" + keyHint + "]", new Vector2((int)(rr.X + rr.Width - 30), (int)(rr.Y + rr.Height - 16)), 11, 1f, Raylib.Fade(Pal.RGBA(3, 18, 26), a));
+        {
+            // right-align the hint inside the button (measured, 6px inset) — the old fixed
+            // rr.Width - 30 offset bled multi-char hints ("[Esc]") past narrow buttons' edge.
+            string kh = "[" + keyHint + "]";
+            float khw = Raylib.MeasureTextEx(Cfg.Font, kh, 11, 1f).X;
+            Raylib.DrawTextEx(Cfg.Font, kh, new Vector2((int)(rr.X + rr.Width - khw - 6), (int)(rr.Y + rr.Height - 16)), 11, 1f, Raylib.Fade(Pal.RGBA(3, 18, 26), a));
+        }
     }
 
     // ---------------- helpers ----------------

@@ -30,6 +30,10 @@ public static class SaveGame
         get { try { return File.Exists(FilePath); } catch { return false; } }
     }
 
+    /// Test-only path exposure (MODETEST abandon leg preserves/restores any real save.json,
+    /// mirroring MetaPathPublic). Not used by gameplay code.
+    public static string SavePathPublic => FilePath;
+
     public static void Delete()
     {
         try { if (File.Exists(FilePath)) File.Delete(FilePath); } catch { /* best effort */ }
