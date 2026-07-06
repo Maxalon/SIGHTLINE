@@ -854,6 +854,10 @@ public partial class Game
         }
         _run.DebriefSurvivors();
         if (_run.Squad.Count > 0) _run.Squad[0].Wound = 2;   // show the WOUNDED dossier line
+        // W12: pin the offered pair (the roll is clock-seeded) so the shot is reproducible and
+        // exercises both delta-line shapes: LOCK-ON (conditional aim) + TANK (flat before>after).
+        if (_run.PendingPerks.Count > 0)
+        { _run.PendingPerks[0].A = Perk.LockOn; _run.PendingPerks[0].B = Perk.Tank; }
         Phase = Phase.Barracks;
     }
 

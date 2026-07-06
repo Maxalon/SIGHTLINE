@@ -2400,7 +2400,11 @@ public static class Hud
             Raylib.DrawTextEx(Cfg.Font, Clip(a.Desc, 11, w - 34 - 112), new Vector2(x + 34, rowY + 16), 11, 1f, Raylib.Fade(Pal.TxtDim, rowA));
             // W12: a per-achievement PROGRESS BAR (right lane) — earned = full gold; in-progress
             // = amber fill with the cur/max fraction, so "how close am I?" reads at a glance.
+            // Review fix: an UNEARNED achievement caps its shown progress at max-1 — a full bar
+            // beside an empty checkbox (possible when the profile stat outran a stale/demo award
+            // set) would read as a contradiction, and only the award itself may fill the bar.
             var (cur, max) = got ? (1, 1) : AchProgress(p, a.Id);
+            if (!got) cur = Math.Min(cur, max - 1);
             string fracTxt = got ? "DONE" : $"{cur}/{max}";
             float ftw = Raylib.MeasureTextEx(Cfg.Font, fracTxt, 11, 1f).X;
             Raylib.DrawTextEx(Cfg.Font, fracTxt, new Vector2((int)(x + w - 12 - ftw), rowY + 2), 11, 1f,
@@ -3513,8 +3517,9 @@ public static class Hud
         int titW = (int)Raylib.MeasureTextEx(Cfg.Font, title, 36, 1f).X;
         Raylib.DrawTextEx(Cfg.Font, title, new Vector2(x + w / 2 - titW / 2, y + 22), 36, 1f, Pal.Accent);
         // W12: the promoted soldier's class silhouette flanks the header (board-matching glyph),
-        // so WHO is ranking up reads before the text does.
-        Renderer.DrawCodexGlyph(off.Unit.Cls, new Vector2(x + w / 2f - titW / 2f - 36, y + 42), Pal.Friend, 1.5f);
+        // so WHO is ranking up reads before the text does. The left copy is mirrored (ang=PI) so
+        // the pair reads symmetric around the title.
+        Renderer.DrawCodexGlyph(off.Unit.Cls, new Vector2(x + w / 2f - titW / 2f - 36, y + 42), Pal.Friend, 1.5f, MathF.PI);
         Renderer.DrawCodexGlyph(off.Unit.Cls, new Vector2(x + w / 2f + titW / 2f + 36, y + 42), Pal.Friend, 1.5f);
         string sub = $"{off.Unit.FullName}  -  {off.Unit.RankName}  -  {off.Unit.Cls}  -  CHOOSE A PERK";
         Raylib.DrawTextEx(Cfg.Font, sub, new Vector2(x + w / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, sub, 14, 1f).X / 2, y + 64), 14, 1f, Pal.TxtDim);
@@ -3666,25 +3671,24 @@ public static class Hud
 
     /// W12: a soldier-specific before > after stat readout for a perk offer. Returns null for
     /// perks whose benefit has no clean numeric framing (pure-behaviour perks like SKIRMISHER).
+    /// Only OFFERED perks (PerkDef.All) get an arm — the retired crit cluster (Deadeye /
+    /// Opportunist / PointBlank / Vanguard) is no longer read by ComputeOdds, so it must never
+    /// show an authoritative-looking number if some future change re-offers it.
     static string PerkDeltaLine(Unit u, Perk p) => p switch
     {
         Perk.Tank => $"HP {u.MaxHp} > {u.MaxHp + 3}",
         Perk.Sprinter => $"MOB {u.Mobility} > {u.Mobility + 1}",
-        Perk.LockOn => $"AIM {u.Aim} > {u.Aim + 15} vs exposed",
+        Perk.LockOn => $"AIM {u.Aim} > {u.Aim + 15} vs flanked",   // review fix: fires on FLANKED, not merely exposed
         Perk.CloseQuarters => $"AIM {u.Aim} > {u.Aim + 15} inside 4 tiles",
-        Perk.Marksman => $"AIM {u.Aim} > {u.Aim + 15} beyond 7 tiles",
+        Perk.Marksman => $"AIM {u.Aim} > {u.Aim + 15} at 7+ tiles",
         Perk.Siegebreaker => $"AIM {u.Aim} > {u.Aim + 15} vs hunkered",
         Perk.Bandolier => $"GRENADES {1 + u.BonusGrenades} > {2 + u.BonusGrenades} / mission",
         Perk.Executioner => "CRIT +25 vs sub-half-HP",
         Perk.GiantSlayer => "CRIT +15 vs full-HP",
         Perk.Vantage => "CRIT +15 from high ground",
         Perk.Breaker => "CRIT +20 vs suppressed / pinned",
-        Perk.Deadeye => "CRIT +15",
-        Perk.Opportunist => "CRIT +18 vs flanked",
-        Perk.PointBlank => "CRIT +20 inside 2 tiles",
-        Perk.Vanguard => "CRIT +28 vs adjacent flanked",
         Perk.Hardened => "DMG TAKEN -1  (crits -4)",
-        Perk.Bulwark => "DMG TAKEN -2 above half HP",
+        Perk.Bulwark => "DMG TAKEN -2 at half HP or above",
         Perk.CoolHeaded => "ENEMY AIM -8 against you",
         _ => null,
     };
@@ -3704,8 +3708,8 @@ public static class Hud
         string title = "SPECIALIZE";
         int stw = (int)Raylib.MeasureTextEx(Cfg.Font, title, 36, 1f).X;
         Raylib.DrawTextEx(Cfg.Font, title, new Vector2(x + w / 2 - stw / 2, y + 22), 36, 1f, Pal.Accent);
-        // W12: class silhouette flanking the header — same treatment as PROMOTION.
-        Renderer.DrawCodexGlyph(off.Unit.Cls, new Vector2(x + w / 2f - stw / 2f - 36, y + 42), Pal.Friend, 1.5f);
+        // W12: class silhouette flanking the header — same treatment as PROMOTION (left mirrored).
+        Renderer.DrawCodexGlyph(off.Unit.Cls, new Vector2(x + w / 2f - stw / 2f - 36, y + 42), Pal.Friend, 1.5f, MathF.PI);
         Renderer.DrawCodexGlyph(off.Unit.Cls, new Vector2(x + w / 2f + stw / 2f + 36, y + 42), Pal.Friend, 1.5f);
         string sub = $"{off.Unit.FullName}  -  {off.Unit.Cls}  -  CHOOSE A PERMANENT FORK";
         Raylib.DrawTextEx(Cfg.Font, sub, new Vector2(x + w / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, sub, 14, 1f).X / 2, y + 64), 14, 1f, Pal.TxtDim);
