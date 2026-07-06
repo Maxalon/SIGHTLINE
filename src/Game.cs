@@ -410,15 +410,23 @@ public partial class Game
     // shipped W6 de-drag) and — APEX W8 — on ESCORT, where marching the leashed VIP to the far corner was
     // the flagged ~14-turn drag. Escort's gate is STRICTER (far third + cold LZ, see EscortBeaconOk):
     // CheckEnd's Escort test is just "VIP in zone", so a permissive plant would be an instant win.
-    // Rescue keeps the fixed corner (the cage already sits mid-board); Endless has no extraction. As
+    // W4 (SIGNAL): RESCUE gets the same treatment ONCE THE CAPTIVE IS FREED — the freed walk-out to
+    // the fixed corner was the same drag Escort had, and its win test is likewise just "freed VIP in
+    // zone", so the plant carries Escort's FULL strict gate (see CanBeacon). While the captive is
+    // still caged there is no asset to extract, so no beacon. Endless has no extraction. As
     // always the beacon is once-per-mission, planted by a real soldier standing on WALKABLE FLOOR
     // (a non-floor planter refuses gracefully, never crashes).
-    public bool HasBeaconAction => (Objective == Objective.Evac || Objective == Objective.Escort)
+    public bool HasBeaconAction => (Objective == Objective.Evac || Objective == Objective.Escort
+                                    || (Objective == Objective.Rescue && !CaptiveLocked))
                                    && Mode != GameMode.Endless;
     public bool CanBeacon(Unit u)
         => HasBeaconAction && !BeaconPlanted && u != null && u.Team == Team.Player && !u.IsVip
            && u.CanAct && Grid.IsFloor(u.X, u.Y) && !EvacZone.Contains((u.X, u.Y))
-           && (Objective != Objective.Escort || EscortBeaconOk(u));
+           // the strict far-third + cold-LZ gate applies to BOTH asset-walk objectives (Escort, and
+           // Rescue once freed — HasBeaconAction only admits Rescue in the freed state): their win
+           // is "VIP in zone", so a permissive plant would be a near-instant win. Evac stays on the
+           // shipped half-line discipline (its win needs the WHOLE squad in the zone).
+           && ((Objective != Objective.Escort && Objective != Objective.Rescue) || EscortBeaconOk(u));
 
     /// APEX W8 — the ESCORT anti-trivialization gate. The planter must have genuinely PUSHED the map:
     ///   (1) FAR THIRD — u.X >= Grid.W*2/3. The VIP spawns in the squad wedge, so a spawn-side plant
@@ -4298,7 +4306,7 @@ public partial class Game
     {
         _turnCount++;
         Phase = Phase.PlayerTurn;
-        LeashVip();                       // ESCORT: the asset tags along with the squad (no hand-walking)
+        LeashVip();                       // ESCORT / freed-RESCUE: the asset tags along with the squad (no hand-walking)
         ClearIntent();                    // no enemy intent lingers into the player's turn
         Grid.TickSmoke();                 // smoke clouds decay one turn per round
         TickHazards();                    // fire cooks off barrels + reignites units, then decays
@@ -4328,9 +4336,12 @@ public partial class Game
     /// clears; the VIP follows. It stays fully player-selectable (manual override intact) and never
     /// auto-charges toward evac or into danger alone. Deterministic + TIMEOUT-safe: it always moves toward
     /// an EXISTING soldier, so it strictly converges (and short-circuits the instant it's adjacent).
+    /// W4 (SIGNAL): the FREED RESCUE captive rides the same leash — post-free, Rescue IS an escort
+    /// (fragile asset to the zone), and hand-walking it was the same micro-chore. The caged state is
+    /// untouched (the CaptiveLocked check below holds it in the cage until a soldier springs it).
     void LeashVip()
     {
-        if (Objective != Objective.Escort) return;
+        if (Objective != Objective.Escort && Objective != Objective.Rescue) return;
         if (Vip == null || !Vip.Alive || CaptiveLocked || Vip.MoveBudget <= 0) return;
         // the soldiers the asset follows: living, non-VIP squad members
         var soldiers = Players.Where(p => p.Alive && !p.IsVip).ToList();
