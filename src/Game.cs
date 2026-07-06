@@ -4614,11 +4614,12 @@ public partial class Game
             }
             // SIGNAL W5 — the Legion BREAKER's SECOND rage tier: an already-enraged RagesTwice
             // elite FRENZIES once when first acting at <=25% HP (+aim/+mob again, and Ai.Plan
-            // flips it to the berserker rush). The gate on Enraged means a boss chipped straight
-            // past both thresholds fires ENRAGED this turn and FRENZY the next act — two readable
-            // beats, never a silent double-spike. Telegraphs the finish-it-NOW decision: leaving
-            // the breaker alive at a sliver is the one thing you must not do.
-            if (e.RagesTwice && e.Enraged && !e.Frenzied && e.Hp * 4 <= e.MaxHp)
+            // flips it to the berserker rush). The `else if` means a boss burst straight from
+            // >50% past both thresholds pops ENRAGED this act and FRENZY on its NEXT act — two
+            // readable beats, never both in one act / never a silent double-spike. Telegraphs
+            // the finish-it-NOW decision: leaving the breaker alive at a sliver is the one
+            // thing you must not do.
+            else if (e.RagesTwice && e.Enraged && !e.Frenzied && e.Hp * 4 <= e.MaxHp)
             {
                 e.Frenzied = true;
                 e.Aim += 10; e.Mobility += 2;

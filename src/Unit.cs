@@ -488,10 +488,13 @@ public class Unit
     bool _shieldArc, _hasSiege;
     public bool HasShieldArc { get => _shieldArc || Cls == "SHIELD";  set => _shieldArc = value; }  // frontal barrier arc (ShieldDx/Dy facing; re-faced by Game.FaceShields)
     public bool HasSiege     { get => _hasSiege  || Cls == "BOMBARD"; set => _hasSiege  = value; }  // telegraphed 3x3 siege strike (ChargeTurns/ChargeX/Y)
-    // SIGNAL W5 — the Legion BREAKER's second rage tier: at <=25% HP an already-Enraged elite
-    // FRENZIES (a further +aim/+mob spike, popped by Game.UpdateEnemy) and presses the rush in
-    // Ai.Plan (berserker temperament). Both transient; RagesTwice is the capability, Frenzied
-    // the one-shot state (mirrors the Enraged pair above).
+    // SIGNAL W5 — the Legion BREAKER's kit, two independent halves keyed on RagesTwice:
+    //  (1) the berserker RUSH temperament in Ai.Plan (advW/elevMult) applies from SPAWN — keyed
+    //      on the RagesTwice capability itself, NOT on the frenzy state;
+    //  (2) the SECOND rage tier: at <=25% HP an already-Enraged elite FRENZIES once (a further
+    //      +aim/+mob spike, popped by Game.UpdateEnemy on its acting beat).
+    // Both transient; RagesTwice is the capability, Frenzied the one-shot tier-2 state
+    // (mirrors the Enraged pair above).
     public bool RagesTwice;
     public bool Frenzied;
 
