@@ -793,9 +793,43 @@ public partial class Game
         return Run.GenerateDraftPool(SaveGame.LoadVeterans(), maxVets, crossTrain);
     }
 
+    // W12 first-run RECOMMENDED draft: the pre-selected fixed squad + safe doctrine, so a brand-new
+    // player's first decision screen is one DEPLOY click (everything stays re-pickable). Cards in
+    // DraftRecommended / the DraftRecommendedBoon get a badge in DrawDraft.
+    public HashSet<Unit> DraftRecommended = new();
+    public Boon? DraftRecommendedBoon;
+    public bool DraftHasRecommendation => DraftRecommended.Count > 0;
+
+    /// Seat the fixed NewRunSquad four over the pool's fresh recruits (never displacing a recalled
+    /// veteran card), pre-pick them, and pre-select the steadiest doctrine the offer rolled.
+    /// Pure state, no disk/RNG beyond NewRunSquad's fixed builds — callers gate WHEN it runs.
+    void ApplyRecommendedDraft()
+    {
+        var fixedSquad = Sightline.Mission.NewRunSquad();
+        int fi = 0;
+        for (int i = 0; i < DraftPool.Count && fi < fixedSquad.Count; i++)
+        {
+            if (DraftPool[i].FromReserve) continue;   // a returning legend outranks the training default
+            DraftPool[i] = fixedSquad[fi++];
+        }
+        DraftPicked.Clear();
+        for (int i = 0; i < fi; i++)
+        {
+            if (DraftPicked.Count < DraftCap) DraftPicked.Add(fixedSquad[i]);
+            DraftRecommended.Add(fixedSquad[i]);
+        }
+        // safest doctrine on offer: durability > sustain > flat aim, then whatever rolled first.
+        Boon[] pref = { Boon.Fortified, Boon.Scavenger, Boon.Marksmen, Boon.Executioners, Boon.Grenadier, Boon.Fervor };
+        foreach (var b in pref)
+            if (DraftBoonOffer.Contains(b)) { DraftRecommendedBoon = b; break; }
+        if (!DraftRecommendedBoon.HasValue && DraftBoonOffer.Count > 0) DraftRecommendedBoon = DraftBoonOffer[0];
+        DraftSelectedBoon = DraftRecommendedBoon;
+    }
+
     /// Set up + enter the run-opening DRAFT (interactive new-run path only). Builds the candidate
     /// pool + the starting-boon offer and switches to Phase.Draft. NEVER called by the harness
-    /// (the autoplay/balance/screenshot paths call StartMission directly).
+    /// (the autoplay/balance/screenshot paths call StartMission directly — except the SIGHTLINE_DRAFT
+    /// shot hook, which stays on the no-recommendation leg via NoPersist).
     public void BeginDraft()
     {
         // COUNTERPLAY: recall the cross-run VETERAN reserve into the draft (up to Run.MaxDraftVeterans,
@@ -806,6 +840,18 @@ public partial class Game
         DraftPicked = new HashSet<Unit>();
         DraftSelectedBoon = null;
         DraftSelectedContract = null;   // default STANDARD (Contract.None) until a contract card is clicked
+        DraftRecommended = new HashSet<Unit>();
+        DraftRecommendedBoon = null;
+        // W12: FIRST-EVER run (tutorial not yet seen AND no veteran reserve — a recalled legend in
+        // the pool means this account has finished runs, so the training default would be noise and
+        // METATEST's veteran-pricing legs must see an untouched draft) -> pre-select the recommended
+        // loadout. !NoPersist keeps every harness/self-test leg (incl. DRAFTTEST's byte-stable
+        // null-veterans path) untouched; SIGHTLINE_DRAFTREC=1 stages the state for a headless shot.
+        bool anyReserve = false;
+        foreach (var u in DraftPool) if (u.FromReserve) { anyReserve = true; break; }
+        if ((!NoPersist && !Display.TutorialSeen && !anyReserve) ||
+            (NoPersist && Environment.GetEnvironmentVariable("SIGHTLINE_DRAFTREC") == "1"))
+            ApplyRecommendedDraft();
         Phase = Phase.Draft;
         Audio.Play("select");
     }
