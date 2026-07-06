@@ -150,8 +150,47 @@ public partial class Game
             if (p2.FiredFromConcealment) fails.Add("proximityArmedAmbush");
         }
 
+        // ---- W10 SUPPRESSOR: a suppressed AMBUSH still breaks concealment, but the seen-pod wake
+        // loop narrows to the TARGET's own pod; an unsuppressed shot wakes every pod in sight.
+        // Both legs drive the REAL firing site (IssueShoot -> BreakConcealment threading), on a
+        // controlled two-pod scene: shooter at p, pod 90's body straight east (the shot target),
+        // pod 91's body also in clear sight. CheckPodActivation's sight rules are untouched.
+        void StageSuppressorScene(bool suppressed, out Unit shooter, out Unit tgtPod, out Unit bystanderPod)
+        {
+            StartMission(1);
+            shooter = Players.First(u => u.Alive && !u.IsVip);
+            var foes = Enemies.Where(x => x.Alive).Take(2).ToList();
+            tgtPod = foes[0]; bystanderPod = foes[1];
+            // clear a floor window around the firing lane so LoS/targeting is unconditional
+            for (int x = shooter.X; x <= shooter.X + 4 && x < Grid.W; x++)
+                for (int y = Math.Max(0, shooter.Y - 1); y <= Math.Min(Grid.H - 1, shooter.Y + 3); y++)
+                { Grid.Tiles[x, y] = TileType.Floor; Grid.Barrel[x, y] = false; }
+            tgtPod.PodId = 90; tgtPod.Alert = AlertLevel.Unaware;
+            tgtPod.X = Math.Min(Grid.W - 1, shooter.X + 3); tgtPod.Y = shooter.Y; tgtPod.SyncPos();
+            bystanderPod.PodId = 91; bystanderPod.Alert = AlertLevel.Unaware;
+            bystanderPod.X = Math.Min(Grid.W - 1, shooter.X + 3); bystanderPod.Y = Math.Min(Grid.H - 1, shooter.Y + 2); bystanderPod.SyncPos();
+            shooter.WeaponMods.Clear();
+            if (suppressed) shooter.InstallMod(WeaponMod.Suppressor);
+            shooter.Ammo = Math.Max(1, shooter.Ammo);
+            Selected = shooter;
+        }
+        // (a) SUPPRESSED: concealment breaks, the TARGET's pod wakes, the bystander pod stays dormant.
+        StageSuppressorScene(true, out var sup, out var supTgt, out var supBys);
+        if (!SquadConcealed) fails.Add("supSceneNotConcealed");
+        IssueShoot(supTgt);
+        if (SquadConcealed) fails.Add("suppressedShotDidNotBreak");     // still breaks NORMALLY
+        if (!supTgt.Active) fails.Add("suppressedTargetPodAsleep");     // the shot-at pod always wakes
+        if (supBys.Active) fails.Add("suppressedWokeBystanderPod");     // the narrow: no one else places it
+        sup.WeaponMods.Clear();                                          // leave no mod on the squad copy
+        // (b) UNSUPPRESSED control: the same shot wakes EVERY pod in sight (target + bystander).
+        StageSuppressorScene(false, out _, out var ctlTgt, out var ctlBys);
+        IssueShoot(ctlTgt);
+        if (SquadConcealed) fails.Add("controlShotDidNotBreak");
+        if (!ctlTgt.Active) fails.Add("controlTargetPodAsleep");
+        if (!ctlBys.Active) fails.Add("controlBystanderPodAsleep");     // full wake without the mod
+
         return fails.Count == 0
-            ? "CONCEALTEST: PASS (start concealed; pods gated; break arms+wakes; RevealRange breaks w/o bonus)"
+            ? "CONCEALTEST: PASS (start concealed; pods gated; break arms+wakes; RevealRange breaks w/o bonus; suppressor narrows the wake to the target pod, unsuppressed wakes all seen)"
             : "CONCEALTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
@@ -291,7 +330,7 @@ public partial class Game
         while (_anims.Count > 0) { var a = _anims[0]; a.OnStart(this); for (int i = 0; i < 200 && !a.Update(this, 0.05f); i++) { } if (_anims.Count > 0 && _anims[0] == a) _anims.RemoveAt(0); }
         // ally moved one tile WEST (toward the dragger): 7 -> 6
         if (!(ally.X == ax0 - 1 && ally.Y == 5)) fails.Add($"dragDidNotPullCloser({ally.X},{ally.Y})");
-        if (!dragger.DraggedThisTurn) fails.Add("dragDidNotSetFlag");
+        if (dragger.DragsThisTurn < 1) fails.Add("dragDidNotSetFlag");   // W10: bool -> per-turn counter
         // once-per-turn cap (the flag is now set by IssueDrag) — re-seat a fresh reach-2 ally
         ally.X = 7; ally.Y = 5; ally.SyncPos();
         if (CanDrag(dragger)) fails.Add("canDragTwiceInOneTurn");
@@ -322,7 +361,7 @@ public partial class Game
         if (!(v.X == 7 && v.Y == 5)) fails.Add($"vaultDidNotLand({v.X},{v.Y})");
         if (v.X == vx0) fails.Add("vaultDidNotMove");
         if (v.ActionsLeft != vact0 - 1) fails.Add("vaultDidNotSpendAction");
-        if (!v.VaultedThisTurn) fails.Add("vaultDidNotSetFlag");
+        if (v.VaultsThisTurn < 1) fails.Add("vaultDidNotSetFlag");   // W10: bool -> per-turn counter
         // once-per-turn cap (the flag is now set by IssueVault)
         if (CanVault(v)) fails.Add("canVaultTwiceInOneTurn");
 
@@ -1078,6 +1117,14 @@ public partial class Game
         _run.Report.Insert(0, $"Recovered 17 intel  (total {_run.Intel})");
         _shopDone = false;
         RefreshShopOffer();
+        // W10 (screenshot pin): guarantee the two NEW rule mods (BIPOD / SUPPRESSOR) are on the
+        // demo slate regardless of the seed-rotated pick, so the dossier shot can be verified.
+        // Demo-screen only (this hook fabricates intel/report already); live slates are untouched.
+        var offer = ShopOffer();
+        int bipodItem = ModBase + System.Array.IndexOf(WeaponModDef.All, WeaponMod.Bipod);
+        int supItem   = ModBase + System.Array.IndexOf(WeaponModDef.All, WeaponMod.Suppressor);
+        if (!offer.Contains(bipodItem)) offer.Add(bipodItem);
+        if (!offer.Contains(supItem))   offer.Add(supItem);
         Phase = Phase.Barracks;
     }
 
@@ -1638,10 +1685,34 @@ public partial class Game
         if (rplan.RelockTile != null) fails.Add("routedCustodianStillWorks");
         cu.Routed = 0;
 
+        // (10) W10 TERROR boon (redesigned per review): broken enemies stay broken LONGER — the
+        // boon extends the rout DURATION assigned at the break (+Game.TerrorRoutBonus via
+        // RoutDurationFor), never the threshold (real pods spawn size 2, where a threshold change
+        // is arithmetic dead weight). W8's banner semantics must stay intact on top: out of aura
+        // the extended rout still rallies one per own turn; inside the aura it still rallies at
+        // DOUBLE pace — TERROR raises the base the banner recovers from, never the counter itself.
+        var t1 = MkE("T1", 2, 4, 7); var t2 = MkE("T2", 3, 4, 7);   // far from the WARBRINGER at (11,8)
+        Enemies.Add(t1); Enemies.Add(t2); _podOrig[7] = 2;
+        _run.ActiveBoons.Add(Boon.Terror);
+        t1.Hp = 0; KillUnit(t1);
+        if (t2.Routed != RoutDuration + TerrorRoutBonus) fails.Add($"terrorRoutNotExtended={t2.Routed}");
+        BeginEnemyUnitTurn(t2);                                     // out of aura: normal rally pace
+        if (t2.Routed != RoutDuration + TerrorRoutBonus - 1) fails.Add($"terrorPlainRallyPace={t2.Routed}");
+        t2.X = 10; t2.Y = 8; t2.SyncPos();                          // step inside the banner's aura
+        BeginEnemyUnitTurn(t2);                                     // banner: double pace, on the RAISED base
+        if (t2.Routed != RoutDuration + TerrorRoutBonus - 3) fails.Add($"terrorBannerRallyPace={t2.Routed}");
+        // control: without the boon the same 2-pod break assigns exactly the BASE duration
+        _run.ActiveBoons.Remove(Boon.Terror);
+        var t3 = MkE("T3", 2, 6, 8); var t4 = MkE("T4", 3, 6, 8);
+        Enemies.Add(t3); Enemies.Add(t4); _podOrig[8] = 2;
+        t3.Hp = 0; KillUnit(t3);
+        if (t4.Routed != RoutDuration) fails.Add($"terrorControlBase={t4.Routed}");
+
         return fails.Count == 0
             ? "MORALETEST: PASS (pod break routs survivor; routed flees + drops watch + shoots wild; rallies over turns; "
               + "W8: banner holds in-aura pods + doubles rally pace, WAVERING flags the one-kill-from-rout pod truthfully, "
-              + "custodian plans + executes the re-lock/re-arm and stops when routed)"
+              + "custodian plans + executes the re-lock/re-arm and stops when routed; "
+              + "W10: TERROR extends the rout duration (+2), plain/banner rally pace intact)"
             : "MORALETEST: FAIL (" + string.Join(",", fails) + ")";
     }
 

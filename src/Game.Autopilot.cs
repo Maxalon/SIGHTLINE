@@ -117,8 +117,11 @@ public partial class Game
             if (!stealthRace)
             {
                 // COMBAT objective: a worthwhile ambush shot from where this soldier stands?
+                // W10 SUPPRESSOR: thread the intended ambush target through so a suppressed
+                // shooter's break narrows the pod wake exactly like the interactive path.
                 var (ambTgt, ambVal) = BestShotFrom(u, u.X, u.Y);
-                if (ambTgt != null && ambVal >= 8f) { BreakConcealment(u); return; }
+                if (ambTgt != null && ambVal >= 8f)
+                { BreakConcealment(u, ambTgt, u.HasMod(WeaponMod.Suppressor)); return; }
                 if (forced) { BreakConcealment(); return; }
                 // creep into a better firing position before tipping our hand; hold if none.
                 if (SmartApproach(u)) return;
@@ -139,6 +142,19 @@ public partial class Game
             }
             if (SmartConcealedRace(u)) return;     // move the VIP/squad toward the goal, hidden
             DoHunker(); return;
+        }
+
+        // W10 INTEL CACHE: an opportunistic, bounded detour — the CLOSEST soldier peels off for
+        // the cache when it's live and near. Dead code without a cache (CachePresent is campaign-
+        // only), one soldier at a time, and hard-bounded by the cache's own expiry clock, so it
+        // can never stall a match. This is how the flywheel models the pickup at all (ACTION MIX
+        // "INTEL"); without it the smoke AI would only ever collect by accident.
+        if (CachePresent && u.ActionsLeft > 0 && !u.IsVip)
+        {
+            float dCache = Util.TileDist(u.X, u.Y, CacheX, CacheY);
+            bool nearest = !Players.Any(p => p.Alive && !p.IsVip && p != u
+                                && Util.TileDist(p.X, p.Y, CacheX, CacheY) < dCache);
+            if (nearest && dCache <= 8f && TryMoveTowardTile(u, CacheX, CacheY)) return;
         }
 
         // ── OBJECTIVE ROUTING (preserved from AutoStep, with smart combat layered in) ──
@@ -1426,7 +1442,10 @@ public partial class Game
         // advancing concealed. Returns so any reveal-scatter plays before the shot.
         if (SquadConcealed)
         {
-            if (u.Ammo > 0 && FirstTargetFor(u) != null) { BreakConcealment(u); return; }
+            // W10 SUPPRESSOR: thread the ambush target through (like SmartStep's site) so the
+            // suppressed-wake narrowing is uniform across BOTH harness policies.
+            var ambush = u.Ammo > 0 ? FirstTargetFor(u) : null;
+            if (ambush != null) { BreakConcealment(u, ambush, u.HasMod(WeaponMod.Suppressor)); return; }
             if (Players.Any(p => p.Alive && Enemies.Any(e => e.Alive
                     && Util.TileDist(p.X, p.Y, e.X, e.Y) <= AlertRange + 1))) { BreakConcealment(); return; }
         }

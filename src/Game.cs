@@ -11,7 +11,11 @@ public enum Phase { Intro, PlayerTurn, EnemyTurn, Barracks, Win, Lose, Draft, Wa
 // remove a member — a saved run stores the ordinal, so a reorder silently corrupts the loaded
 // objective. Add new objectives at the END only. (SaveGame.SelfTest asserts the tail ordinal.)
 public enum Objective { Eliminate, Evac, Hack, Escort, Sabotage, Rescue, Defend, Decapitate }
-public enum SecondaryKind { None, NoLosses, Swift, CleanSweep }  // optional per-mission bonus goal (3.9)
+// APPEND-ONLY: treat like the persisted enums above (new members at the END only; never reorder or
+// remove — SaveGame.SelfTest guards the tail ordinal). W10 appends three PLAYSTYLE bonuses: Ghost
+// (stay concealed through turn 2), Demolition (destroy 3 cover/barrels), Bounty (kill the mission's
+// named specialist, picked in RollSecondary).
+public enum SecondaryKind { None, NoLosses, Swift, CleanSweep, Ghost, Demolition, Bounty }  // optional per-mission bonus goal (3.9)
 // PROGRAM HORIZON W2/W4: game modes. Campaign = the 6-mission run (all prior behaviour); Endless =
 // LAST STAND horde survival on one arena; Skirmish = a SINGLE-MISSION mode (both free SKIRMISH and the
 // seeded DAILY, differentiated by Game.DailyMode). APPEND-ONLY (Mode isn't persisted, but keep it stable).
@@ -455,6 +459,23 @@ public partial class Game
            && !Enemies.Any(e => e.Alive && e.Routed == 0
                                 && Util.ChebyDist(u.X, u.Y, e.X, e.Y) <= 3);
 
+    // ---- W10 INTEL CACHE: an optional gold-diamond pickup tile spawned mid/far-field every
+    // campaign mission (Mission.PlaceIntelCache, PlaceBarrels-style reachability guard). A soldier
+    // ENDING a tile-entry on it banks CacheIntelMin..Max intel (OnUnitEnteredTile); it expires after
+    // CacheTurns player turns (StartPlayerTurn), so the detour is a real risk/reward routing bet,
+    // not free money. Per-mission transient — reset in SetupMission, never persisted.
+    public bool CachePresent;
+    public int CacheX, CacheY;
+    public int CacheTurnsLeft;
+    public const int CacheTurns = 6;       // player turns before the cache goes dark
+    public const int CacheIntelMin = 8, CacheIntelMax = 10;
+
+    // ---- W10 secondary-objective state (per-mission transient, reset in SetupMission) ----
+    public int DemoProgress;               // DEMOLITION: player-destroyed cover tiles + barrels this mission
+    public const int DemoRequired = 3;
+    public Unit BountyTarget;              // BOUNTY: the named specialist picked by RollSecondary (null otherwise)
+    public const int GhostTurns = 2;       // GHOST: concealment must survive through this player turn
+
     // DEFEND objective (3.8): survive this many player turns vs mid-mission waves
     public const int DefendTurns = 8;
     public int Turn => _turnCount;
@@ -694,15 +715,31 @@ public partial class Game
         return (alive, _podOrig.GetValueOrDefault(podId, alive));
     }
 
+    /// The ONE shared rout threshold (BreakPodMorale + the WAVERING telegraph both read it, so the
+    /// telegraph can never lie): a pod holds while its live head-count EXCEEDS half its spawn
+    /// strength (floored at 1 — a lone survivor of a 2-pod always qualifies). W10 note: TERROR was
+    /// originally a 2/3 threshold here, but real pods spawn size 2 (Mission.SpawnEnemies pairs
+    /// them), where half-strength already routs the survivor on the first kill — a threshold change
+    /// was arithmetic dead weight. TERROR now extends the rout DURATION instead (RoutDurationFor).
+    public int RoutThreshold(int orig) => Math.Max(1, orig / 2);
+
+    /// W10 TERROR boon (redesigned per review): broken enemies stay broken LONGER — the duration
+    /// assigned when a pod breaks (BreakPodMorale, the only assignment site; a rallied pod that
+    /// re-breaks passes through it again) is extended by TerrorRoutBonus. W8's banner semantics
+    /// are untouched: an in-aura survivor still rallies at DOUBLE pace (BeginEnemyUnitTurn's extra
+    /// decrement) — TERROR raises the base the banner recovers from, it never disables the counter.
+    public const int TerrorRoutBonus = 2;
+    public int RoutDurationFor() => RoutDuration + (HasBoon(Boon.Terror) ? TerrorRoutBonus : 0);
+
     /// SIGNAL W8 — this pod member is ONE KILL from the rout threshold: the NEXT pod death breaks
-    /// the survivors (mirrors BreakPodMorale's `mates.Count > Math.Max(1, orig / 2)` exactly, one
+    /// the survivors (mirrors BreakPodMorale's `mates.Count > RoutThreshold(orig)` exactly, one
     /// kill ahead). Covers the rallied-below-threshold pod too (any kill re-breaks it) — the
     /// telegraph must never lie. Active + unbroken members only; needs a survivor left to rout.
     public bool PodAtWaverPoint(Unit e)
     {
         if (e == null || e.Team != Team.Enemy || e.PodId < 0 || !e.Alive || !e.Active || e.Routed > 0) return false;
         var (alive, orig) = PodStrength(e.PodId);
-        return alive >= 2 && alive - 1 <= Math.Max(1, orig / 2);
+        return alive >= 2 && alive - 1 <= RoutThreshold(orig);
     }
 
     /// SIGNAL W8 — the WAVERING tag: at the waver point AND not held by a banner (a banner-anchored
@@ -1295,8 +1332,26 @@ public partial class Game
         _smartConcealTurns = 0;      // SmartStep: concealed-turn counter (hard anti-TIMEOUT cap)
         DeathFlash = 0;
         // per-mission bonus goal is a CAMPAIGN feature only — no secondary in LAST STAND or SKIRMISH/DAILY.
+        DemoProgress = 0;              // W10: per-mission demolition tally (counted even off-secondary; cheap)
+        BountyTarget = null;
         if (Mode == GameMode.Campaign) RollSecondary(n);
         else { Secondary = SecondaryKind.None; SecondaryFailed = false; }
+        // W10 INTEL CACHE: an optional mid/far-field pickup, CAMPAIGN only (intel is the campaign
+        // economy; LAST STAND/SKIRMISH have no requisition to spend it in). PlaceIntelCache carries
+        // the PlaceBarrels-style reachability guard; a pathological board just spawns no cache.
+        CachePresent = false;
+        if (Mode == GameMode.Campaign)
+        {
+            var cache = Mission.PlaceIntelCache(Grid, Players, Enemies, EvacZone,
+                                                HasTerminal ? Terminal : ((int, int)?)null,
+                                                HasSabotage ? SabotageSites : null);
+            if (cache != null)
+            {
+                CachePresent = true;
+                CacheX = cache.Value.x; CacheY = cache.Value.y;
+                CacheTurnsLeft = CacheTurns;
+            }
+        }
         foreach (var u in Enemies) { u.BeginTurn(); u.OnOverwatch = false; u.Routed = 0; }
         // UNDERTOW W3: snapshot each pod's spawn strength so BreakPodMorale can tell when a pod has
         // been chewed down to <= half and should rout its survivors (wave hostiles are PodId<0, ungrouped).
@@ -1438,6 +1493,7 @@ public partial class Game
     void RollSecondary(int n)
     {
         SecondaryFailed = false;
+        BountyTarget = null;
         if (n <= 1) { Secondary = SecondaryKind.None; return; }
         var pool = new List<SecondaryKind> { SecondaryKind.NoLosses };
         if (Objective != Objective.Defend) pool.Add(SecondaryKind.Swift);   // can't finish a hold-out early
@@ -1447,14 +1503,35 @@ public partial class Game
         //  - Defend     (waves spawn until the timer, so the board never fully clears)
         if (Objective != Objective.Eliminate && Objective != Objective.Decapitate
             && Objective != Objective.Defend) pool.Add(SecondaryKind.CleanSweep);
+        // ---- W10 playstyle bonuses (gated like the exclusions above — never offer a dead bonus) ----
+        // GHOST: only meaningful when the mission actually STARTS concealed (SetupMission set
+        // SquadConcealed before calling us; heat's EXPOSED / SPEARHEAD strip it -> no offer).
+        if (SquadConcealed) pool.Add(SecondaryKind.Ghost);
+        // DEMOLITION: cover + barrels exist on every arena; player-credited destruction counts.
+        pool.Add(SecondaryKind.Demolition);
+        // BOUNTY: kill the mission's named SPECIALIST — pick it here at setup (prefer a non-GRUNT,
+        // non-boss specialist body; never the Decapitate HVT, which is already the primary). No
+        // eligible body (a tiny GRUNT-only force) -> the bonus simply isn't offered.
+        var bounty = Enemies.Where(e => e.Alive && e != Hvt && e.Cls != "GRUNT" && e.Cls != "ELITE")
+                            .OrderByDescending(e => e.MaxHp).ThenBy(e => e.PodId).FirstOrDefault()
+                  ?? Enemies.Where(e => e.Alive && e != Hvt && e.Cls != "ELITE")
+                            .OrderByDescending(e => e.MaxHp).ThenBy(e => e.PodId).FirstOrDefault();
+        if (bounty != null) pool.Add(SecondaryKind.Bounty);
         Secondary = pool[Util.RandInt(0, pool.Count - 1)];
+        if (Secondary == SecondaryKind.Bounty) BountyTarget = bounty;
     }
+
+    /// BOUNTY display name: the specialist's callsign (falls back if the target evaporates).
+    public string BountyName => BountyTarget != null ? BountyTarget.Name : "?";
 
     public string SecondaryName => Secondary switch
     {
         SecondaryKind.NoLosses  => "NO LOSSES",
         SecondaryKind.Swift     => $"SWIFT (<={SwiftTurns} turns)",
         SecondaryKind.CleanSweep => "CLEAN SWEEP",
+        SecondaryKind.Ghost      => $"GHOST (hidden thru turn {GhostTurns})",
+        SecondaryKind.Demolition => $"DEMOLITION (destroy {DemoRequired})",
+        SecondaryKind.Bounty     => $"BOUNTY: {BountyName}",
         _ => "",
     };
 
@@ -1464,6 +1541,9 @@ public partial class Game
         SecondaryKind.NoLosses  => "BONUS  NO LOSSES",
         SecondaryKind.Swift     => $"BONUS  SWIFT {_turnCount}/{SwiftTurns}",
         SecondaryKind.CleanSweep => "BONUS  CLEAN SWEEP",
+        SecondaryKind.Ghost      => $"BONUS  GHOST {Math.Min(_turnCount, GhostTurns)}/{GhostTurns}",
+        SecondaryKind.Demolition => $"BONUS  DEMO {Math.Min(DemoProgress, DemoRequired)}/{DemoRequired}",
+        SecondaryKind.Bounty     => $"BONUS  BOUNTY {BountyName}",
         _ => "",
     };
 
@@ -1473,6 +1553,9 @@ public partial class Game
         SecondaryKind.NoLosses  => !SecondaryFailed,
         SecondaryKind.Swift     => _turnCount <= SwiftTurns,
         SecondaryKind.CleanSweep => true,
+        SecondaryKind.Ghost      => !SecondaryFailed,           // a pre-turn-3 break flips SecondaryFailed
+        SecondaryKind.Demolition => true,                       // always attainable while the mission runs
+        SecondaryKind.Bounty     => BountyTarget != null,       // dead target == achieved (still green)
         _ => false,
     };
 
@@ -1482,6 +1565,9 @@ public partial class Game
         SecondaryKind.NoLosses  => _missionKia.Count == 0,
         SecondaryKind.Swift     => _turnCount <= SwiftTurns,
         SecondaryKind.CleanSweep => AliveEnemies().Count == 0,
+        SecondaryKind.Ghost      => !SecondaryFailed,
+        SecondaryKind.Demolition => DemoProgress >= DemoRequired,
+        SecondaryKind.Bounty     => BountyTarget != null && !BountyTarget.Alive,
         _ => false,
     };
 
@@ -1805,6 +1891,7 @@ public partial class Game
     public void OnUnitEnteredTile(Unit mover)
     {
         if (mover.FiredThisTurn) mover.MovedAfterFire = true;   // HORIZON: any tile entry after firing clears exposed-by-fire
+        mover.MovedThisTurn = true;   // W10 BIPOD: ANY tile entry (walk/vault/drag/shove/grapple) disarms the planted bonus
         if (!mover.Alive) return;
         if (mover.HasStatus(StatusKind.Bleed))   // bleeding worsens with every step
         {
@@ -1828,6 +1915,10 @@ public partial class Game
                     && Util.TileDist(mover.X, mover.Y, e.X, e.Y) <= RevealRange))
                 BreakConcealment();
             CheckPodActivation();  // reveal pods while advancing (no-op while still concealed)
+            // W10 INTEL CACHE: a soldier stepping onto the cache tile banks it (any tile entry —
+            // walking through collects too; the detour is the cost, not pixel-perfect stopping).
+            if (CachePresent && !mover.IsVip && mover.X == CacheX && mover.Y == CacheY)
+                CollectIntelCache(mover);
         }
         // RANGER SLIPSTREAM: a free, overwatch-immune reposition. While slipstreaming the mover draws no
         // reaction fire; the flag is consumed when its destination tile is reached so the move ends silent.
@@ -1859,7 +1950,10 @@ public partial class Game
             if (w.OwFocused && !InOwCone(w, mover.X, mover.Y)) continue;
             // 4.4 (review M1): a player's overwatch shot is still a shot — it reveals the
             // squad. No actor -> no ambush bonus on a reaction (it already has its own mod).
-            if (w.Team == Team.Player && SquadConcealed) BreakConcealment();
+            // W10 SUPPRESSOR: the reaction is a firing site too — thread the mover through as the
+            // shot's target so a suppressed watcher's break wakes only the mover's own pod.
+            if (w.Team == Team.Player && SquadConcealed)
+                BreakConcealment(target: mover, suppressed: w.HasMod(WeaponMod.Suppressor));
             w.OnOverwatch = false;
             w.ReactedThisTurn = true;
             w.Ammo--;
@@ -1872,8 +1966,10 @@ public partial class Game
             // UNDERTOW W2 — BRACE: a disrupting reaction. It STAGGERS on a hit (ShotAnim.Apply zeroes the
             // mover's remaining actions) but deals reduced damage + never crits, so it's a real trade vs a
             // lethal overwatch (deny tempo instead of going for the kill), not a strict upgrade.
+            // W10 SHOCK DOCTRINE boon: the halving/no-crit trade is waived — a braced reaction deals
+            // FULL damage AND staggers (Combat.BraceFullDamage; the stagger flag below is unchanged).
             bool brace = w.OwBrace;
-            if (brace && res.Hit) { res.Damage = Math.Max(1, res.Damage / 2); res.Crit = false; }
+            if (brace && res.Hit && !Combat.BraceFullDamage(w)) { res.Damage = Math.Max(1, res.Damage / 2); res.Crit = false; }
             Fx.PopText(w.Pos + new Vector2(0, -30), brace ? "BRACE" : "OVERWATCH", brace ? Pal.Good : Pal.Accent, 18f);
             Audio.Play("over");
             var shot = new ShotAnim(w, mover, res, reaction: true) { Stagger = brace };
@@ -1899,6 +1995,8 @@ public partial class Game
         if (tile == null) return;
         var hit = Grid.DamageCover(tile.Value.x, tile.Value.y, 1);
         if (hit != Grid.CoverHit.None) CoverHitFx(tile.Value.x, tile.Value.y, hit);
+        // W10 DEMOLITION secondary: a player's heavy fire finishing a cover tile counts.
+        if (hit == Grid.CoverHit.Destroyed && shooter.Team == Team.Player) DemoProgress++;
     }
 
     /// Feedback for a cover tile taking damage / degrading.
@@ -1953,6 +2051,21 @@ public partial class Game
         Unit killer = ActiveAnim switch { ShotAnim sa => sa.A, GrenadeAnim ga => ga.Thrower, _ => null };
         Stats.RecordKill(killer?.Cls ?? (string.IsNullOrEmpty(d.LastDotSource) ? "?" : d.LastDotSource),
                          killer != null ? (int)killer.Team : 1, d.Cls, (int)d.Team);
+        // W10 RECLAIMER boon: a kill INSIDE a focused-overwatch cone re-arms the watcher's reaction
+        // (OnOverwatch + ReactedThisTurn reset; the spent bullet stays spent). The kill context is
+        // the active REACTION ShotAnim — the watcher's OwFocused/OwDir survive the arming (only
+        // OnOverwatch was dropped when the reaction queued in OnUnitEnteredTile), so InOwCone still
+        // describes the braced lane. Makes a focused kill-lane a genuine mow-them-down build.
+        if (ActiveAnim is ShotAnim rsa && rsa.Reaction && rsa.A != null && rsa.A.Alive
+            && rsa.A.Team == Team.Player && d.Team == Team.Enemy
+            && rsa.A.OwFocused && InOwCone(rsa.A, d.X, d.Y)
+            && HasBoon(Boon.Reclaimer) && !rsa.A.OnOverwatch && rsa.A.Ammo > 0)
+        {
+            rsa.A.OnOverwatch = true;
+            rsa.A.ReactedThisTurn = false;
+            Fx.PopText(rsa.A.Pos + new Vector2(0, -30), "RECLAIMED", Pal.Accent, 17f);
+            Fx.Flash(rsa.A.Pos, Pal.Accent, 18f, 0.14f, 0.45f);
+        }
         // W11 HONEST LOSSES: tally which enemy archetype killed this soldier (always-on; the lose
         // card's CAUSE OF DEATH line reads it). Source-less / friendly-fire deaths bucket under "?"
         // (DoT labels like BURN stay out of this dict — the lose card resolves causes through the
@@ -2044,7 +2157,9 @@ public partial class Game
         var mates = Enemies.Where(e => e.Alive && e.PodId == pod).ToList();
         if (mates.Count == 0) return;                       // whole pod gone — no one left to break
         int orig = _podOrig.GetValueOrDefault(pod, mates.Count + 1);
-        if (mates.Count > Math.Max(1, orig / 2)) return;    // still at fighting strength — holds the line
+        // still at fighting strength — holds the line. RoutThreshold is the ONE shared threshold
+        // (PodAtWaverPoint mirrors it one kill ahead, so the WAVERING tag never lies).
+        if (mates.Count > RoutThreshold(orig)) return;
         bool broke = false, held = false;
         foreach (var m in mates)
             if (m.Active && m.Routed == 0)
@@ -2053,7 +2168,8 @@ public partial class Game
                 // break. The rout is CONTESTED, not free: kill the WARBRINGER (or catch the pod
                 // outside its reach) and the break lands. Per-member, so a split pod can half-rout.
                 if (BannerNear(m)) { held = true; continue; }
-                m.Routed = RoutDuration; broke = true;
+                // W10 TERROR boon: the break lasts TerrorRoutBonus turns longer (RoutDurationFor).
+                m.Routed = RoutDurationFor(); broke = true;
             }
         if (held && !broke)
         {
@@ -2321,6 +2437,10 @@ public partial class Game
     {
         if (!Grid.IsBarrel(bx, by)) return;
         Grid.Barrel[bx, by] = false;        // consumed before the blast so chains don't re-hit it
+        // W10 DEMOLITION secondary: a player-credited detonation (shot / grenade / incendiary —
+        // SetBarrelCredit at each trigger site) counts the barrel; chained barrels inherit the
+        // credit, so a chain reaction is a demolitionist's jackpot. Fire-cooked barrels credit no one.
+        if (_barrelCreditTeam == Team.Player) DemoProgress++;
         var center = Util.TileCenter(bx, by);
 
         Audio.Play("crit"); Audio.Play("death");
@@ -2340,8 +2460,12 @@ public partial class Game
                 if (!Grid.InBounds(x, y)) continue;
                 var ch = Grid.DamageCover(x, y, Grid.HighCoverHp);
                 if (ch != Grid.CoverHit.None) CoverHitFx(x, y, ch);
+                // W10 DEMOLITION secondary: cover levelled by a player-credited blast counts too.
+                if (ch == Grid.CoverHit.Destroyed && _barrelCreditTeam == Team.Player) DemoProgress++;
                 if ((x != bx || y != by) && Grid.IsBarrel(x, y)) chain.Add((x, y));   // catch neighbours
-                Grid.LightFire(x, y, Grid.FireTurns);                                 // residue fire
+                // residue fire. W10 PYROMANIACS boon: fire the SQUAD starts burns +2 turns (denial).
+                Grid.LightFire(x, y, Grid.FireTurns
+                    + (_barrelCreditTeam == Team.Player && HasBoon(Boon.Pyromaniacs) ? 2 : 0));
             }
 
         // damage every unit in radius (friendly fire included), cover ignored (it's an explosion)
@@ -2943,19 +3067,53 @@ public partial class Game
     /// and any pod already in sight wakes with the usual capped scatter. After this, the
     /// normal 4.3 alert-tier rules resume for the rest of the mission. Call BEFORE the
     /// action mutates state so the bonus is in place when Combat.Resolve reads it.
-    public void BreakConcealment(Unit actor = null)
+    /// W10 SUPPRESSOR: `target` + `suppressed` thread the SHOT's context through from the firing
+    /// sites (IssueShoot and the overwatch reaction) — a suppressed shot still breaks squad
+    /// concealment normally (the flag drops, the banner fires, the ambush bonus arms), but the
+    /// seen-pod wake loop below NARROWS to the target's own pod: everyone else heard nothing they
+    /// can place. Non-shot breaks (proximity, grenades, hacks, barrels) pass neither and keep the
+    /// full wake. CheckPodActivation's post-concealment sight rules are untouched.
+    public void BreakConcealment(Unit actor = null, Unit target = null, bool suppressed = false)
     {
         if (!SquadConcealed) return;
         SquadConcealed = false;
         if (actor != null) actor.FiredFromConcealment = true;   // only a deliberate first shot earns the bonus
+        // W10 GHOST secondary: the bonus asks the squad to stay hidden through turn GhostTurns —
+        // any break on an earlier turn (shot, proximity, hack: every path funnels here) blows it.
+        if (Secondary == SecondaryKind.Ghost && _turnCount <= GhostTurns) SecondaryFailed = true;
         ShowBanner("AMBUSH!", false);
         Fx.AddShake(4f);
         Audio.Play("turn");
-        // wake every pod a soldier can currently see (each pod activates once)
+        // wake every pod a soldier can currently see (each pod activates once). A SUPPRESSED shot
+        // narrows the wake to the TARGET's own pod (pod-less targets fall back to the full wake —
+        // ungrouped hostiles are spawned already alert, so there is nothing to narrow to).
+        bool narrow = suppressed && target != null && target.PodId >= 0;
         var seen = new HashSet<int>();
         foreach (var e in Enemies)
-            if (e.Alive && !e.Active && e.PodId >= 0 && ClosestSightedDist(e) >= 0) seen.Add(e.PodId);
+        {
+            if (!e.Alive || e.Active || e.PodId < 0 || ClosestSightedDist(e) < 0) continue;
+            if (narrow && e.PodId != target.PodId) continue;   // SUPPRESSOR: only the target's pod places the shot
+            seen.Add(e.PodId);
+        }
+        if (narrow && actor != null)
+            Fx.PopText(actor.Pos + new Vector2(0, -44), "SUPPRESSED SHOT", Pal.TxtDim, 15f);
         foreach (int pid in seen) ActivatePod(pid);
+    }
+
+    /// W10 INTEL CACHE pickup: bank the intel, clear the tile, and record the verb (ACTION MIX).
+    void CollectIntelCache(Unit finder)
+    {
+        if (!CachePresent) return;
+        CachePresent = false;
+        int gain = Util.RandInt(CacheIntelMin, CacheIntelMax);
+        if (_run != null) _run.Intel += gain;
+        Stats.RecordAction("INTEL");   // W2 verb telemetry: cache pickups visible in the flywheel
+        var c = Util.TileCenter(CacheX, CacheY);
+        Fx.PopText(c + new Vector2(0, -26), $"+{gain} INTEL", Pal.VipGold, 22f);
+        Fx.Burst(c, Pal.VipGold, 18, 200f, 0.55f, 4f, true);
+        Fx.Flash(c, Pal.VipGold, 24f, 0.16f, 0.5f);
+        ShowBanner("INTEL CACHE SECURED", false);
+        Audio.Play("select");
     }
 
     /// Balance fix: a hack/plant GOES LOUD. First it breaks concealment — which springs the
@@ -3661,7 +3819,9 @@ public partial class Game
     /// least one adjacent (Chebyshev==1) alive friendly with a legal landing tile (one step toward us).
     public bool CanDrag(Unit u)
     {
-        if (u == null || u.Team != Team.Player || !u.CanAct || u.ActionsLeft < 1 || u.DraggedThisTurn) return false;
+        // W10: per-turn COUNTER vs Combat.FieldCraftLimit (1; FIELD DRILLS boon 2) instead of a bool
+        if (u == null || u.Team != Team.Player || !u.CanAct || u.ActionsLeft < 1
+            || u.DragsThisTurn >= Combat.FieldCraftLimit(u)) return false;
         foreach (var a in Players)
             if (DragTargetOk(u, a)) return true;
         return false;
@@ -3674,7 +3834,8 @@ public partial class Game
     /// someone already beside you; a Chebyshev-2 ally is pulled to the tile 1 away (legal + useful).
     bool DragTargetOk(Unit u, Unit ally)
     {
-        if (u == null || ally == null || !u.CanAct || u.ActionsLeft < 1 || u.DraggedThisTurn) return false;
+        if (u == null || ally == null || !u.CanAct || u.ActionsLeft < 1
+            || u.DragsThisTurn >= Combat.FieldCraftLimit(u)) return false;
         if (ally == u || !ally.Alive || ally.Team != Team.Player) return false;
         if (ally.IsVip && CaptiveLocked) return false;          // caged captive is immovable until freed (mirrors Mark/Grapple/Pin/Extract)
         int dx = ally.X - u.X, dy = ally.Y - u.Y;
@@ -3703,7 +3864,7 @@ public partial class Game
         var u = Selected;
         int dx = Math.Sign(u.X - ally.X), dy = Math.Sign(u.Y - ally.Y);   // direction the ally MOVES (toward us)
         u.ActionsLeft = Math.Max(0, u.ActionsLeft - 1);   // 1 action; never ends the turn
-        u.DraggedThisTurn = true;                         // one drag per soldier per turn (anti-loop)
+        u.DragsThisTurn++;                                // counted vs Combat.FieldCraftLimit (anti-loop)
         Stats.RecordAction("DRAG");                       // W2 verb telemetry
         Fx.PopText(ally.Pos + new Vector2(0, -32), "DRAG", Pal.Friend, 17f);
         Fx.Burst(ally.Pos, Pal.Friend, 8, 100f, 0.35f, 2.5f);
@@ -3717,7 +3878,9 @@ public partial class Game
     /// one legal vault landing tile (a 2-step straight hop over a cover tile to empty floor).
     public bool CanVault(Unit u)
     {
-        if (u == null || u.Team != Team.Player || !u.CanAct || u.ActionsLeft < 1 || u.VaultedThisTurn) return false;
+        // W10: per-turn COUNTER vs Combat.FieldCraftLimit (1; FIELD DRILLS boon 2) instead of a bool
+        if (u == null || u.Team != Team.Player || !u.CanAct || u.ActionsLeft < 1
+            || u.VaultsThisTurn >= Combat.FieldCraftLimit(u)) return false;
         for (int sx = -1; sx <= 1; sx++)
             for (int sy = -1; sy <= 1; sy++)
             {
@@ -3732,7 +3895,8 @@ public partial class Game
     /// is in-bounds, floor, and unoccupied.
     bool VaultTargetOk(Unit u, int tx, int ty)
     {
-        if (u == null || !u.CanAct || u.ActionsLeft < 1 || u.VaultedThisTurn) return false;
+        if (u == null || !u.CanAct || u.ActionsLeft < 1
+            || u.VaultsThisTurn >= Combat.FieldCraftLimit(u)) return false;
         int dx = tx - u.X, dy = ty - u.Y;
         // must be a straight 2-tile hop (ortho: (±2,0)/(0,±2); diag: (±2,±2))
         bool straight = (Math.Abs(dx) == 2 && dy == 0) || (dx == 0 && Math.Abs(dy) == 2) || (Math.Abs(dx) == 2 && Math.Abs(dy) == 2);
@@ -3758,7 +3922,7 @@ public partial class Game
         if (!VaultTargetOk(Selected, tx, ty)) { VaultMode = false; return; }
         var u = Selected;
         u.ActionsLeft = Math.Max(0, u.ActionsLeft - 1);   // 1 action; never ends the turn
-        u.VaultedThisTurn = true;                         // one vault per soldier per turn (anti-loop)
+        u.VaultsThisTurn++;                               // counted vs Combat.FieldCraftLimit (anti-loop)
         Stats.RecordAction("VAULT");                      // W2 verb telemetry (review fix: no invisible verbs)
         Fx.PopText(u.Pos + new Vector2(0, -32), "VAULT", Pal.Good, 17f);
         Fx.Burst(u.Pos, Pal.Good, 8, 110f, 0.35f, 2.5f);
@@ -3798,7 +3962,9 @@ public partial class Game
     {
         if (Selected == null || !Selected.CanAct || Selected.Ammo <= 0) return;
         if (!CanTarget(Selected, target)) return;
-        if (SquadConcealed) BreakConcealment(Selected);  // 4.4: the ambush shot springs the trap
+        // 4.4: the ambush shot springs the trap. W10 SUPPRESSOR: thread the shot's target through —
+        // a suppressed ambush wakes only the target's own pod (BreakConcealment narrows the loop).
+        if (SquadConcealed) BreakConcealment(Selected, target, Selected.HasMod(WeaponMod.Suppressor));
         Selected.Ammo--;
         // TEMPO action cost: a shot costs 1 action and does NOT end the turn — the soldier keeps its
         // second action to REPOSITION (duck into cover / break LoS), take a rushed FOLLOW-UP shot, or
@@ -4578,6 +4744,14 @@ public partial class Game
     {
         _turnCount++;
         Phase = Phase.PlayerTurn;
+        // W10 INTEL CACHE: the pickup window closes after CacheTurns player turns — the routing
+        // detour is a bet against this clock, not free money whenever the fight happens to drift by.
+        if (CachePresent && --CacheTurnsLeft <= 0)
+        {
+            CachePresent = false;
+            Fx.PopText(Util.TileCenter(CacheX, CacheY) + new Vector2(0, -20), "CACHE LOST", Pal.TxtDim, 18f);
+            ShowBanner("INTEL CACHE WENT DARK", true);
+        }
         LeashVip();                       // ESCORT / freed-RESCUE: the asset tags along with the squad (no hand-walking)
         ClearIntent();                    // no enemy intent lingers into the player's turn
         Grid.TickSmoke();                 // smoke clouds decay one turn per round

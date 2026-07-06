@@ -527,12 +527,24 @@ public static class Hud
 
         // optional secondary objective (3.9): green while on track, red once blown — a smaller
         // second line centered under the objective group so mission + bonus read as one block.
-        if (g.Secondary != SecondaryKind.None)
+        // W10: the INTEL CACHE clock rides the SAME line, right of the bonus (gold — it matches the
+        // board diamond), so the whole "extra value on this map" story reads in one glance.
         {
-            string sec = g.SecondaryHud;
-            float sw = Raylib.MeasureTextEx(Cfg.Font, sec, 12, 1f).X;
-            float sx = Util.Clamp(cx + preW + (glyphW + objW) / 2f - sw / 2f, leftEnd + 14, rightStart - sw - 14);
-            Raylib.DrawTextEx(Cfg.Font, sec, new Vector2((int)sx, 44), 12, 1f, g.SecondaryOnTrack ? Pal.Good : Pal.Foe);
+            string sec = g.Secondary != SecondaryKind.None ? g.SecondaryHud : "";
+            string cache = g.CachePresent ? $"CACHE {g.CacheTurnsLeft}T" : "";
+            float sw = string.IsNullOrEmpty(sec) ? 0 : Raylib.MeasureTextEx(Cfg.Font, sec, 12, 1f).X;
+            float cw = string.IsNullOrEmpty(cache) ? 0 : Raylib.MeasureTextEx(Cfg.Font, cache, 12, 1f).X;
+            float gap = (sw > 0 && cw > 0) ? 14f : 0f;
+            float total2 = sw + gap + cw;
+            if (total2 > 0)
+            {
+                float sx = Util.Clamp(cx + preW + (glyphW + objW) / 2f - total2 / 2f, leftEnd + 14, rightStart - total2 - 14);
+                if (sw > 0)
+                    Raylib.DrawTextEx(Cfg.Font, sec, new Vector2((int)sx, 44), 12, 1f, g.SecondaryOnTrack ? Pal.Good : Pal.Foe);
+                if (cw > 0)
+                    Raylib.DrawTextEx(Cfg.Font, cache, new Vector2((int)(sx + sw + gap), 44), 12, 1f,
+                                      g.CacheTurnsLeft <= 2 ? Pal.Foe : Pal.VipGold);
+            }
         }
     }
 

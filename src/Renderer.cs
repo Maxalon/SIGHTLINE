@@ -381,6 +381,7 @@ public static class Renderer
         DrawEvac(g);
         DrawTerminal(g);
         DrawSabotage(g);
+        DrawIntelCache(g);        // W10: the optional gold-diamond intel pickup (objective-level object)
         DrawGridLines(g);
         DrawPathPreview(g);
         DrawCover(g);
@@ -398,6 +399,7 @@ public static class Renderer
         DrawGrenade(g);
         DrawItem(g);
         DrawShove(g);
+        DrawBountyMark(g);        // W10: gold chevron over the BOUNTY secondary's specialist
         DrawMarkIndicators(g);
         DrawMark(g);
         DrawGrapple(g);
@@ -626,6 +628,54 @@ public static class Renderer
 
             Raylib.DrawTextEx(Cfg.Font, blown ? "ARMED" : "CHARGE", new Vector2((int)c.X - 18, (int)r.Y - 13), 10, 1f, col);
         }
+    }
+
+    // W10 INTEL CACHE: a pulsing VipGold DIAMOND on the pickup tile (the asset colour — gold ==
+    // "worth walking to", matching the VIP/HVT-exposed read). Blinks urgently once the expiry
+    // clock is nearly out, so the routing bet stays honest at a glance.
+    static void DrawIntelCache(Game g)
+    {
+        if (!g.CachePresent) return;
+        var r = ElevRect(g, g.CacheX, g.CacheY);
+        var c = ElevCenter(g, g.CacheX, g.CacheY);
+        float t = (float)Raylib.GetTime();
+        bool expiring = g.CacheTurnsLeft <= 2;
+        // expiring: a harder, faster blink; fresh: a soft pulse
+        float pulse = expiring ? (MathF.Sin(t * 8f) > 0f ? 1f : 0.25f) : 0.5f + 0.5f * MathF.Sin(t * 3f);
+        Color col = Pal.VipGold;
+
+        // tile wash + soft radial bloom (2nd-salience, like the terminal/charge sites)
+        Raylib.DrawRectangleRec(r, Raylib.Fade(col, 0.10f + 0.10f * pulse));
+        Raylib.DrawCircleV(c, 20f, Raylib.Fade(col, 0.05f + 0.06f * pulse));
+
+        // the gold diamond: a filled 4-gon (45-degree square) + a bright core + a thin outline ring
+        float rad = 9f + 1.5f * pulse;
+        Raylib.DrawPoly(c, 4, rad, 45f, Raylib.Fade(col, 0.85f));
+        Raylib.DrawPoly(c, 4, rad * 0.45f, 45f, Pal.RGBA(255, 250, 230));
+        Raylib.DrawPolyLinesEx(c, 4, rad + 3f, 45f, 1.6f, Raylib.Fade(col, 0.45f + 0.4f * pulse));
+
+        // label + the remaining-turns clock (the expiry is a promise, so print it)
+        Raylib.DrawTextEx(Cfg.Font, "INTEL", new Vector2((int)c.X - 15, (int)r.Y - 13), 11, 1f, col);
+        string tt = $"{g.CacheTurnsLeft}T";
+        float tw = Raylib.MeasureTextEx(Cfg.Font, tt, 10, 1f).X;
+        Raylib.DrawTextEx(Cfg.Font, tt, new Vector2((int)(c.X - tw / 2), (int)(r.Y + r.Height + 1)), 10, 1f,
+                          expiring ? Pal.Foe : Raylib.Fade(col, 0.8f));
+    }
+
+    // W10 BOUNTY secondary: a small gold chevron + tag over the marked specialist so the bonus
+    // target reads on the board, not just in the top bar. Gold (asset/objective), never red.
+    static void DrawBountyMark(Game g)
+    {
+        if (g.Secondary != SecondaryKind.Bounty || g.BountyTarget == null || !g.BountyTarget.Alive) return;
+        var u = g.BountyTarget;
+        float t = (float)Raylib.GetTime();
+        float bob = 2f * MathF.Sin(t * 4f);
+        var p = u.Pos + new Vector2(0, -34 + bob);
+        Color col = Pal.VipGold;
+        // downward chevron (two strokes) + a tiny diamond above it
+        Raylib.DrawLineEx(p + new Vector2(-6, -5), p + new Vector2(0, 1), 2.4f, col);
+        Raylib.DrawLineEx(p + new Vector2(6, -5), p + new Vector2(0, 1), 2.4f, col);
+        Raylib.DrawPoly(p + new Vector2(0, -10), 4, 3.5f, 45f, Raylib.Fade(col, 0.9f));
     }
 
     static void DrawGridLines(Game g)
