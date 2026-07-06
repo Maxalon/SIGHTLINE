@@ -849,23 +849,29 @@ public class Run
     /// each draft (NoPersist drafts pass null -> empty set, so the harness never reads disk here).
     public static HashSet<string> ReserveNames = new();
 
-    public static List<Unit> GenerateDraftPool(List<Unit> veterans = null)
+    // W9 (SIGNAL): `maxVeterans` widens the recall window (the STANDING RESERVE unlock recalls a
+    // third veteran); `crossTrain` (the CROSS-TRAINING unlock) lets a fresh recruit roll an alternate
+    // class-legal weapon. Both DEFAULT to today's behavior — the harness/self-test call sites pass
+    // nothing, so the veterans=null path stays byte-identical (no extra RNG draws when crossTrain=false).
+    public static List<Unit> GenerateDraftPool(List<Unit> veterans = null,
+                                               int maxVeterans = MaxDraftVeterans, bool crossTrain = false)
     {
         var pool = new List<Unit>();
         var classCount = new Dictionary<string, int>();
+        int vetCap = Math.Clamp(maxVeterans, 0, DraftPoolSize);
         // APEX W5: callsigns already seated (veterans included) — every MakeRecruit below re-rolls
         // away from them, so a draft can never offer two soldiers sharing a name (duplicate names
         // silently merged bond/memorial/veteran records, which all key on Unit.Name).
         var takenNames = new HashSet<string>();
         ReserveNames = new HashSet<string>();
         if (veterans != null) foreach (var v in veterans) ReserveNames.Add(v.Name);
-        // Phase 0 — seat up to MaxDraftVeterans recalled veterans (already most-storied-first from the
+        // Phase 0 — seat up to vetCap recalled veterans (already most-storied-first from the
         // reserve). They bypass the class-variety cap (a returning legend is a deliberate exception) but
         // still count toward the pool size, so the fresh phases fill the remainder.
         if (veterans != null)
             foreach (var v in veterans)
             {
-                if (pool.Count >= MaxDraftVeterans) break;
+                if (pool.Count >= vetCap) break;
                 pool.Add(v);
                 takenNames.Add(v.Name);
                 classCount.TryGetValue(v.Cls, out int vc);
@@ -904,6 +910,21 @@ public class Run
             pool.Add(u);
             takenNames.Add(u.Name);
         }
+        // W9 CROSS-TRAINING (unlock-gated by the caller): a fresh recruit may arrive carrying an
+        // alternate class-legal weapon — a SIDEGRADE from Weapon.ArmoryOptions (the role's curated
+        // option set, never a strict upgrade), so the draft offers builds you'd otherwise pay ARMORY
+        // intel for. One pass over the finished pool; ZERO extra RNG draws when off (byte-stable).
+        if (crossTrain)
+            foreach (var u in pool)
+            {
+                if (u.FromReserve || !Util.Roll(35f)) continue;
+                var opts = Weapon.ArmoryOptions(u.Cls);
+                var others = new List<WeaponKind>();
+                foreach (var k in opts) if (u.Weapon == null || k != u.Weapon.Kind) others.Add(k);
+                if (others.Count == 0) continue;
+                u.Weapon = Weapon.Make(others[Util.RandInt(0, others.Count - 1)]);
+                u.Ammo = u.Weapon.Clip;
+            }
         return pool;
     }
 

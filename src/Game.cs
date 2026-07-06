@@ -283,6 +283,12 @@ public partial class Game
     // order (Hud) and the click/buy index space (HandleShopClick / AutoShop map slot -> item id).
     public const int ShopOfferSize = 5;          // target rotating-slate size (excl. the conditional PREP slot)
     List<int> _shopOfferCache;                   // recomputed each EnterBarracks (derived, not persisted)
+    // W9 (SIGNAL): paid slate re-rolls THIS barracks — perturbs the slate seed so a re-roll actually
+    // rotates the offer. Reset to 0 at EnterBarracks, so a re-load/round-trip reproduces the base
+    // slate (the nonce is deliberately NOT persisted: a re-roll is a spent consumable, and on load
+    // the worst case is the player seeing the base slate again having already paid — acceptable and
+    // rare — versus threading a new field through the save format).
+    int _shopReroll;
 
     /// The rotating requisition slate (a list of underlying item ids) for THIS barracks. Cached so
     /// it's stable across frames within a barracks; rebuilt by RefreshShopOffer at EnterBarracks /
@@ -312,12 +318,18 @@ public partial class Game
         for (int i = 0; i < WeaponModDef.All.Length; i++) pool.Add(ModBase + i);  // weapon mods
 
         // deterministic shuffle off MapSeed+Mission so the slate is fixed per barracks + round-trips.
-        int seed = (_run != null ? _run.MapSeed : 0) * 131 + (_run != null ? _run.Mission : 0) * 7 + 17;
+        // W9: a paid RE-ROLL bumps _shopReroll, perturbing the seed — still deterministic per
+        // (barracks, reroll-count) so the slate is stable across frames within a barracks.
+        int seed = (_run != null ? _run.MapSeed : 0) * 131 + (_run != null ? _run.Mission : 0) * 7 + 17
+                   + _shopReroll * 7919;
         var rng = new Random(seed);
         for (int i = pool.Count - 1; i > 0; i--) { int j = rng.Next(i + 1); (pool[i], pool[j]) = (pool[j], pool[i]); }
 
-        int want = ShopOfferSize - offer.Count;               // fill the rest of the slate
-        for (int i = 0; i < pool.Count && offer.Count < ShopOfferSize; i++) offer.Add(pool[i]);
+        // W9 QUARTERMASTER (WAR ROOM unlock): +1 slate slot — more OPTIONS per barracks, still paid
+        // for in Intel. Read once per (re)build, never per frame; NoPersist-gated so the flywheel/
+        // autoplay slate is byte-identical to today.
+        int slate = ShopOfferSize + (!NoPersist && SaveGame.HasUnlock((int)MetaUnlock.Quartermaster) ? 1 : 0);
+        for (int i = 0; i < pool.Count && offer.Count < slate; i++) offer.Add(pool[i]);
 
         // (3) COUNTER-PREP: a situational extra slot, only when a faction is actually telegraphed
         // next (otherwise it's a dead, greyed row). It's an ADD-ON, not a slate slot it could crowd out.
@@ -751,14 +763,45 @@ public partial class Game
     // play can never see it. Null = no pin (byte-stable default).
     public Objective? ForcedObjective;
 
+    // W9 (SIGNAL) priced recall: the salvage bank CACHED for the draft UI (loaded once at BeginDraft
+    // and after a paid re-roll — the draw path must never touch disk). 0 under NoPersist (no read);
+    // DebugVetDraft seeds a demo value so the priced/greyed card states can be screenshot headless.
+    public int DraftSalvage;
+
+    /// The summed recall fee for the CURRENTLY PICKED veterans (10 + 8xRank each; fresh recruits free).
+    public int DraftRecallCost
+    {
+        get
+        {
+            int c = 0;
+            foreach (var u in DraftPicked) if (u.FromReserve) c += MetaProg.RecallCost(u.Rank);
+            return c;
+        }
+    }
+
+    /// Can the bank cover the picked veterans? (Always true under NoPersist — the harness never pays.)
+    public bool DraftRecallAffordable => NoPersist || DraftRecallCost <= DraftSalvage;
+
+    /// Build the draft candidate pool honouring the WAR ROOM unlocks (veteran recall window +
+    /// cross-training). Shared by BeginDraft and the paid pool re-roll so both agree. Under
+    /// NoPersist no disk is read -> an all-fresh default pool (byte-stable + no TIMEOUT).
+    List<Unit> BuildDraftPool()
+    {
+        if (NoPersist) return Run.GenerateDraftPool();
+        int maxVets = Run.MaxDraftVeterans + (SaveGame.HasUnlock((int)MetaUnlock.StandingReserve) ? 1 : 0);
+        bool crossTrain = SaveGame.HasUnlock((int)MetaUnlock.CrossTraining);
+        return Run.GenerateDraftPool(SaveGame.LoadVeterans(), maxVets, crossTrain);
+    }
+
     /// Set up + enter the run-opening DRAFT (interactive new-run path only). Builds the candidate
     /// pool + the starting-boon offer and switches to Phase.Draft. NEVER called by the harness
     /// (the autoplay/balance/screenshot paths call StartMission directly).
     public void BeginDraft()
     {
-        // COUNTERPLAY: recall the cross-run VETERAN reserve into the draft (up to Run.MaxDraftVeterans of
-        // them). Under NoPersist (harness) no disk is read -> an all-fresh pool -> byte-stable + no TIMEOUT.
-        DraftPool = Run.GenerateDraftPool(NoPersist ? null : SaveGame.LoadVeterans());
+        // COUNTERPLAY: recall the cross-run VETERAN reserve into the draft (up to Run.MaxDraftVeterans,
+        // +1 with STANDING RESERVE). Under NoPersist (harness) no disk is read -> an all-fresh pool.
+        DraftPool = BuildDraftPool();
+        DraftSalvage = NoPersist ? 0 : SaveGame.LoadSalvage();
         DraftBoonOffer = Run.GenerateDraftBoonOffer();
         DraftPicked = new HashSet<Unit>();
         DraftSelectedBoon = null;
@@ -780,6 +823,8 @@ public partial class Game
         var m = Raylib.GetMousePosition();
         if (Raylib.IsMouseButtonPressed(MouseButton.Left))
         {
+            // W9: paid pool RE-ROLL (a repeatable salvage sink; TryRerollDraftPool refuses when broke)
+            if (Raylib.CheckCollisionPointRec(m, Hud.DraftReroll)) { TryRerollDraftPool(); return; }
             // candidate cards
             foreach (var (unit, rect) in Hud.DraftCardBtns)
             {
@@ -817,8 +862,21 @@ public partial class Game
     public bool DraftReady => DraftPicked.Count == DraftCap && DraftSelectedBoon.HasValue;
 
     /// Finalize the draft: stage the picks, then run the SAME new-run start the intro would have.
+    /// W9 priced recall: the summed veteran fee (10+8xRank each) is charged ONCE here — never at
+    /// pick time (picks toggle freely, and the BACK button must always leave the bank untouched).
+    /// An unaffordable CONFIRM refuses outright: nothing is charged, nothing is seated, and the
+    /// picks stay intact so the player can rearrange toward what they CAN afford.
     void ConfirmDraft()
     {
+        if (!NoPersist)
+        {
+            int cost = DraftRecallCost;
+            if (cost > 0)
+            {
+                if (!SaveGame.SpendSalvage(cost)) { Audio.Play("miss"); return; }   // refuse; picks intact
+                DraftSalvage = SaveGame.LoadSalvage();
+            }
+        }
         DraftedSquad = new List<Unit>(DraftPicked);
         DraftBoon = DraftSelectedBoon;
         DraftContract = DraftSelectedContract ?? Contract.None;   // null == STANDARD
@@ -840,6 +898,9 @@ public partial class Game
         DailyStamp = 0;
         _dailyBest = -1;
         Wave = 0;
+        // W9 review fix: an abandoned barracks' uncommitted pending spend dies with its run — a new
+        // mode entry must never inherit (and later commit) a charge for goods that no longer exist.
+        _pendingSalvage = 0;
         if (!NoPersist) { Mission.ForcedLayout = -1; Util.Reseed(0); }
         // W11: per-RUN teaching state — the honest-loss tally and the NEW CONTACT memory reset at
         // every mode entry (this is the one choke-point all of StartMission / BeginEndless /
@@ -1214,7 +1275,14 @@ public partial class Game
 
         // checkpoint the run at the start of each mission (CAMPAIGN only). LAST STAND, SKIRMISH, and
         // the DAILY are all transient single-mode fights — never resumable, so they never write save.json.
-        if (!NoPersist && Mode == GameMode.Campaign) SaveGame.Save(_run);
+        // W9 review fix: commit the barracks' PENDING salvage spends (scar rehab / slate re-roll)
+        // immediately BEFORE the checkpoint — the sink's goods (the removed scar) become durable in
+        // the very save that follows, so the charge and the goods persist together or not at all.
+        if (!NoPersist && Mode == GameMode.Campaign)
+        {
+            CommitPendingSalvage();
+            SaveGame.Save(_run);
+        }
 
         // balance telemetry (no-op unless Stats.Enabled): record the encounter we just built.
         // W2: Mission.AppliedLayout = the authored arena the guard actually ACCEPTED (-1 procedural).
@@ -1480,6 +1548,10 @@ public partial class Game
             heatNote += stakesNote;
             _run.Report.Insert(0, $"Recovered {gained} intel{heatNote}  (total {_run.Intel})");
             _shopDone = false;
+            _shopReroll = 0;                            // W9: paid slate re-rolls are per-barracks
+            // W9: cached bank for the sink UI — the AVAILABLE bank (disk minus any uncommitted
+            // pending, which is normally 0 here: the previous SetupMission committed it).
+            BarracksSalvage = NoPersist ? 0 : Math.Max(0, SaveGame.LoadSalvage() - PendingSalvage);
             RefreshShopOffer();                         // roll this barracks' rotating requisition slate
             ArmoryMode = false; ArmorySoldier = null;   // open requisition in the shop view, not armory
             _run.GenerateOffers(_run.Mission + 1);
@@ -1554,8 +1626,11 @@ public partial class Game
         int heat = _run.HeatLevel;
         int missions = win ? _run.Mission : Math.Max(0, _run.Mission - 1);
 
-        // 1) SALVAGE bounty
-        int salvage = win ? (25 + 6 * _run.Mission + 5 * heat) : (4 * Math.Max(0, _run.Mission - 1) + 2 * heat);
+        // 1) SALVAGE bounty. W9: heat MULTIPLIES the win bounty (+10% per heat rung) instead of the
+        // old flat +5h — a heat-8 clear now pays 1.8x the h0 income, so pushing the ladder is what
+        // funds the standing economy. h0 is UNCHANGED at 25+6m (~61 for a full clear). The loss
+        // consolation stays additive.
+        int salvage = win ? (25 + 6 * _run.Mission) * (10 + heat) / 10 : (4 * Math.Max(0, _run.Mission - 1) + 2 * heat);
         if (salvage > 0) { SaveGame.AddSalvage(salvage); _run.Report.Insert(0, $"SALVAGE +{salvage}"); }
 
         // 2) HALL OF FAME — surviving squad (won runs) as legends, plus this run's fallen (KIA).
@@ -5292,6 +5367,9 @@ public partial class Game
             return;   // armory swallows other clicks while open
         }
 
+        // W9: paid slate RE-ROLL (salvage sink; TryRerollShopSlate refuses when broke)
+        if (Raylib.CheckCollisionPointRec(m, Hud.ShopReroll)) { TryRerollShopSlate(); return; }
+
         // ShopBtns are laid out by the Hud over the ROTATING OFFER (display order); map the clicked
         // slot back to its underlying item id before purchasing.
         var offer = ShopOffer();
@@ -5563,6 +5641,9 @@ public partial class Game
         var m = Raylib.GetMousePosition();
         foreach (var (unit, rect) in Hud.BenchBtns)
             if (Raylib.CheckCollisionPointRec(m, rect)) { ToggleBench(unit); return; }
+        // W9: REHAB — buy one scar off a soldier (salvage sink; chips published by Hud.DrawSquadRow)
+        foreach (var (unit, rect) in Hud.RehabBtns)
+            if (Raylib.CheckCollisionPointRec(m, rect)) { TryBuyScarRemoval(unit); return; }
     }
 
     /// Barracks: click one of the offered run-scoped boons to adopt it for the rest of the run.

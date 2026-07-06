@@ -2300,6 +2300,19 @@ public partial class Game
             if (!taken.Add(rec.Name)) { fails.Add($"takenNameReused:{rec.Name}"); break; }
         }
 
+        // (e) W9 — the null-veterans path stays BYTE-STABLE under the pricing/unlock work: the same
+        // RNG seed must yield the identical pool twice (names/classes/weapons), with no reserve unit
+        // and no disk read (this whole test runs without meta.json). The default GenerateDraftPool()
+        // signature (maxVeterans/crossTrain defaulted) must consume ZERO extra RNG draws.
+        Util.Reseed(424242);
+        var sigA = new System.Text.StringBuilder();
+        foreach (var u in Run.GenerateDraftPool()) sigA.Append(u.Name).Append('/').Append(u.Cls).Append('/').Append(u.Weapon.Kind).Append(';');
+        Util.Reseed(424242);
+        var sigB = new System.Text.StringBuilder();
+        foreach (var u in Run.GenerateDraftPool()) { sigB.Append(u.Name).Append('/').Append(u.Cls).Append('/').Append(u.Weapon.Kind).Append(';'); if (u.FromReserve) fails.Add("nullPathHasVet"); }
+        if (sigA.ToString() != sigB.ToString()) fails.Add("nullPathNotByteStable");
+        Util.Reseed(0);   // release back to a clock seed (mirrors the daily's release)
+
         return fails.Count == 0
             ? $"DRAFTTEST: PASS (pool={pool.Count} variety={byCls.Count}cls, drafted {picked.Count}+boon seated, default squad intact, callsigns distinct across pool+squad+backfill)"
             : "DRAFTTEST: FAIL (" + string.Join(",", fails) + ")";
@@ -2365,6 +2378,16 @@ public partial class Game
             if (vetInPool == 0 || vetInPool > Run.MaxDraftVeterans) fails.Add($"vetInPool={vetInPool}(want1..{Run.MaxDraftVeterans})");
             int freshInPool = pool.FindAll(u => !u.FromReserve).Count;
             if (freshInPool != Run.DraftPoolSize - vetInPool) fails.Add("poolFreshFill");
+
+            // (6) W9 — the recall PRICE TABLE (10 + 8xRank) and "the pool is a shop window, not a
+            //     till": building a draft pool with veterans charges NOTHING (only ConfirmDraft pays;
+            //     the charge semantics themselves are covered in METATEST).
+            if (MetaProg.RecallCost(1) != 18 || MetaProg.RecallCost(2) != 26 ||
+                MetaProg.RecallCost(3) != 34 || MetaProg.RecallCost(4) != 42) fails.Add("recallPriceTable");
+            if (MetaProg.RecallCost(-3) != MetaProg.RecallBase) fails.Add("recallPriceNegRank");
+            SaveGame.AddSalvage(50);
+            Run.GenerateDraftPool(SaveGame.LoadVeterans());
+            if (SaveGame.LoadSalvage() != 50) fails.Add("poolBuildCharged");
         }
         catch (Exception e) { return "VETTEST: FAIL (exception " + e.Message + ")"; }
         finally
@@ -2426,6 +2449,9 @@ public partial class Game
         DraftPicked = new HashSet<Unit>();
         DraftSelectedBoon = null;
         DraftSelectedContract = null;
+        // W9: a demo bank that AFFORDS NOX (Rank 3 -> 34) but NOT VEGA (Rank 4 -> 42), so the shot
+        // shows both the priced gold card and the greyed unaffordable one. Touches NO disk.
+        DraftSalvage = 40;
         Phase = Phase.Draft;
     }
 

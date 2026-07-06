@@ -51,6 +51,10 @@ public static class Hud
     public static System.Collections.Generic.List<(Contract contract, Rectangle rect)> DraftContractBtns = new();
     public static Rectangle DraftConfirm;
     public static Rectangle DraftBack;   // W1 mode-seam: BACK to the intro without founding a run
+    public static Rectangle DraftReroll; // W9: paid draft-pool re-roll (salvage sink)
+    public static Rectangle ShopReroll;  // W9: paid requisition-slate re-roll (salvage sink)
+    // W9: per-soldier REHAB chips (buy off a scar), published by DrawSquadRow for hit-testing.
+    public static System.Collections.Generic.List<(Unit unit, Rectangle rect)> RehabBtns = new();
 
     // ---------------- UI motion (panel pop-in juice) ----------------
     // Panels/cards animate in (slide + fade + scale) the first time they appear, instead
@@ -2126,9 +2130,17 @@ public static class Hud
         string salv = $"SALVAGE  {p.Salvage}";
         Vector2 svm = Raylib.MeasureTextEx(Cfg.Font, salv, 26, 1f);
         Raylib.DrawTextEx(Cfg.Font, salv, new Vector2(W / 2f - svm.X / 2f, ty + tfs + 6), 26, 1f, Raylib.Fade(Pal.VipGold, titleIn));
-        string life = $"RUNS {p.Runs}   ·   WINS {p.Wins}   ·   BEST MISSION {p.BestMissions}   ·   BEST WAVE {p.BestWave}   ·   VETERANS {p.Veterans}/{SaveGame.MaxVeterans}";
+        // W9: the DAILY STREAK joins the lifetime strip (gold while alive so the habit loop reads)
+        string life = $"RUNS {p.Runs}   ·   WINS {p.Wins}   ·   BEST MISSION {p.BestMissions}   ·   BEST WAVE {p.BestWave}   ·   VETERANS {p.Veterans}/{SaveGame.MaxVeterans}   ·   DAILY STREAK {p.DailyStreak}";
         Vector2 lfm = Raylib.MeasureTextEx(Cfg.Font, life, 13, 1f);
         Raylib.DrawTextEx(Cfg.Font, life, new Vector2(W / 2f - lfm.X / 2f, ty + tfs + 40), 13, 1f, Raylib.Fade(Pal.TxtDim, titleIn));
+        if (p.DailyStreak > 0)
+        {
+            // re-draw just the streak segment in gold over the dim strip (right-aligned tail)
+            string tail = $"DAILY STREAK {p.DailyStreak}";
+            Vector2 tlm = Raylib.MeasureTextEx(Cfg.Font, tail, 13, 1f);
+            Raylib.DrawTextEx(Cfg.Font, tail, new Vector2(W / 2f - lfm.X / 2f + lfm.X - tlm.X, ty + tfs + 40), 13, 1f, Raylib.Fade(Pal.VipGold, titleIn));
+        }
 
         // ---- three-column layout: ACHIEVEMENTS | HALL OF FAME | UNLOCKS ----
         int top = (int)(ty + tfs + 66);
@@ -2669,6 +2681,19 @@ public static class Hud
         var cm = Raylib.MeasureTextEx(Cfg.Font, cnt, 18, 1f);
         Raylib.DrawTextEx(Cfg.Font, cnt, new Vector2(W / 2f - cm.X / 2f, 98), 18, 1f, cntCol);
 
+        // W9: the SALVAGE bank + the live recall bill, whenever the pool carries a priced veteran.
+        // Reads only the cached g.DraftSalvage (loaded at BeginDraft) — never disk, never per frame.
+        bool anyVet = false;
+        foreach (var u0 in g.DraftPool) if (u0.FromReserve) { anyVet = true; break; }
+        if (anyVet)
+        {
+            int bill = g.DraftRecallCost;
+            string bank = bill > 0 ? $"SALVAGE  {g.DraftSalvage}   ·   RECALL BILL  {bill}" : $"SALVAGE  {g.DraftSalvage}";
+            var bkm = Raylib.MeasureTextEx(Cfg.Font, bank, 14, 1f);
+            Color bankCol = bill > 0 && !g.DraftRecallAffordable ? Pal.Foe : Pal.VipGold;
+            Raylib.DrawTextEx(Cfg.Font, bank, new Vector2(W - bkm.X - 40, 100), 14, 1f, bankCol);
+        }
+
         // ---- candidate cards: 6 in two rows of 3 ----
         int cols = 3, cw = 300, chH = 150, gx = 24, gy = 18;
         int gridW = cols * cw + (cols - 1) * gx;
@@ -2696,6 +2721,11 @@ public static class Hud
             int px = (int)r.X + 16, py = (int)r.Y + 12;
             // VETERAN ribbon (top-right corner). A small gold diamond marker (drawn, not a font glyph —
             // the baked atlas has no star) + the word, so it reads in any palette.
+            // W9: an individually unaffordable veteran greys like a full-team card (still clickable —
+            // only CONFIRM refuses, so picks stay rearrangeable toward what the bank can cover).
+            int recall = vet ? MetaProg.RecallCost(u.Rank) : 0;
+            bool broke = vet && recall > g.DraftSalvage;
+            if (broke && !sel) a = Math.Min(a, 0.55f);
             if (vet)
             {
                 string vtag = "VETERAN";
@@ -2704,6 +2734,12 @@ public static class Hud
                 Raylib.DrawTextEx(Cfg.Font, vtag, new Vector2(vx, py + 2), 12, 1f, Raylib.Fade(Pal.VipGold, a));
                 float dcy = py + 8;
                 Raylib.DrawPoly(new Vector2(vx - 8, dcy), 4, 4f, 45f, Raylib.Fade(Pal.VipGold, a));
+                // W9 priced recall: the fee (10+8xRank), right-aligned under the ribbon. Red when the
+                // bank can't cover this card alone; charged only at CONFIRM (never at pick time).
+                string fee = $"RECALL {recall}";
+                var fm = Raylib.MeasureTextEx(Cfg.Font, fee, 12, 1f);
+                Raylib.DrawTextEx(Cfg.Font, fee, new Vector2(r.X + cw - fm.X - 12, py + 18), 12, 1f,
+                    Raylib.Fade(broke ? Pal.Foe : Pal.VipGold, a));
             }
             // name — nickname shown for veterans who earned one; class label drawn inline ONLY for fresh
             // recruits (a veteran's longer FullName + the corner ribbon would collide; its class goes in
@@ -2805,25 +2841,44 @@ public static class Hud
         Raylib.DrawTextEx(Cfg.Font, m1, new Vector2(W / 2f - m1m.X / 2f, infoY), 14, 1f, Pal.TxtDim);
 
         // ---- DEPLOY button (greyed until exactly DraftCap soldiers + a boon are chosen) ----
+        // W9: a complete draft whose recall bill exceeds the bank shows the SHORTFALL instead —
+        // ConfirmDraft refuses it, so the button is honest about why nothing will happen.
         bool ready = g.DraftReady;
+        bool payable = g.DraftRecallAffordable;
+        int recallBill = g.DraftRecallCost;
         int dbw = 280, dbh = 46;
         DraftConfirm = new Rectangle(W / 2 - dbw / 2, infoY + 22, dbw, dbh);
-        bool dhover = ready && Raylib.CheckCollisionPointRec(mouse, DraftConfirm);
-        Color deployCol = ready ? (dhover ? Pal.RGBA(92, 200, 251) : Pal.Good) : Pal.RGBA(40, 50, 63);
+        bool dhover = ready && payable && Raylib.CheckCollisionPointRec(mouse, DraftConfirm);
+        Color deployCol = ready && payable ? (dhover ? Pal.RGBA(92, 200, 251) : Pal.Good)
+                        : (ready ? Pal.RGBA(64, 34, 34) : Pal.RGBA(40, 50, 63));
         if (dhover) Raylib.DrawRectangleRounded(new Rectangle(DraftConfirm.X - 3, DraftConfirm.Y - 3, dbw + 6, dbh + 6), 0.3f, 8, Raylib.Fade(deployCol, 0.25f));
-        Raylib.DrawRectangleRounded(DraftConfirm, 0.3f, 8, Raylib.Fade(deployCol, ready ? 1f : 0.5f));
-        string dl = ready ? "DEPLOY" : $"SELECT {Game.DraftCap - picked} MORE";
+        Raylib.DrawRectangleRounded(DraftConfirm, 0.3f, 8, Raylib.Fade(deployCol, ready && payable ? 1f : 0.5f));
+        string dl = ready ? (recallBill > 0 ? $"DEPLOY  (PAY {recallBill} SALVAGE)" : "DEPLOY") : $"SELECT {Game.DraftCap - picked} MORE";
+        if (ready && !payable) dl = $"NEED {recallBill - g.DraftSalvage} MORE SALVAGE";
         // when all 4 are picked but no doctrine chosen, the "SELECT 0 MORE" default is wrong -> prompt the doctrine
         if (!ready && picked == Game.DraftCap && !g.DraftSelectedBoon.HasValue) dl = "PICK A DOCTRINE";
         var dlm = Raylib.MeasureTextEx(Cfg.Font, dl, 18, 1f);
-        Raylib.DrawTextEx(Cfg.Font, dl, new Vector2((int)(DraftConfirm.X + dbw / 2 - dlm.X / 2), (int)(DraftConfirm.Y + dbh / 2 - 9)), 18, 1f, ready ? Pal.RGBA(3, 18, 26) : Pal.TxtDim);
-        if (ready)
+        Raylib.DrawTextEx(Cfg.Font, dl, new Vector2((int)(DraftConfirm.X + dbw / 2 - dlm.X / 2), (int)(DraftConfirm.Y + dbh / 2 - 9)), 18, 1f,
+            ready && payable ? Pal.RGBA(3, 18, 26) : (ready ? Pal.Foe : Pal.TxtDim));
+        if (ready && payable)
             Raylib.DrawTextEx(Cfg.Font, "[ENTER]", new Vector2((int)(DraftConfirm.X + dbw - 56), (int)(DraftConfirm.Y + dbh - 16)), 11, 1f, Pal.RGBA(3, 18, 26));
 
         // ---- BACK to the intro (W1 mode-seam: the skirmish setup's escape hatch, mirrored) ----
         int bkw = 120;
         DraftBack = new Rectangle(DraftConfirm.X - bkw - 14, DraftConfirm.Y, bkw, dbh);
         DrawOverlayButton(DraftBack, "BACK", Pal.TxtDim, "Esc", 1f);
+
+        // ---- W9: paid pool RE-ROLL (repeatable salvage sink; Game refuses the click when broke) ----
+        int rrw = 190;
+        DraftReroll = new Rectangle(DraftConfirm.X + dbw + 14, DraftConfirm.Y, rrw, dbh);
+        bool rrCan = g.DraftSalvage >= MetaProg.DraftRerollCost;
+        bool rrHov = rrCan && Raylib.CheckCollisionPointRec(mouse, DraftReroll);
+        Raylib.DrawRectangleRounded(DraftReroll, 0.3f, 8, rrHov ? Pal.RGBA(30, 44, 34) : Pal.RGBA(14, 20, 28));
+        Raylib.DrawRectangleLinesEx(DraftReroll, 1.4f, rrCan ? (rrHov ? Pal.VipGold : Pal.PanelBd) : Pal.RGBA(40, 46, 54));
+        string rrl = $"RE-ROLL POOL  ({MetaProg.DraftRerollCost} SALV)";
+        var rrm = Raylib.MeasureTextEx(Cfg.Font, rrl, 13, 1f);
+        Raylib.DrawTextEx(Cfg.Font, rrl, new Vector2((int)(DraftReroll.X + rrw / 2 - rrm.X / 2), (int)(DraftReroll.Y + dbh / 2 - 7)), 13, 1f,
+            rrCan ? (rrHov ? Pal.VipGold : Pal.Txt) : Pal.TxtDim);
     }
 
     /// A short prose role one-liner per class, for the draft candidate cards.
@@ -2855,6 +2910,7 @@ public static class Hud
         var run = g.RunState;
         BenchBtns.Clear();   // clear before the shop/perk early-returns so no stale rects linger
         BoonBtns.Clear();
+        RehabBtns.Clear();   // W9: scar buy-off chips are re-published per frame by DrawSquadRow
         if (!g.ShopDone) { DrawRequisition(g); return; }
         if (run.PendingPerks.Count > 0) { DrawPerkChooser(g, run.PendingPerks[0]); return; }
         if (run.PendingSpecs.Count > 0) { DrawSpecChooser(g, run.PendingSpecs[0]); return; }   // W2: fork pick
@@ -3091,7 +3147,8 @@ public static class Hud
 
         string title = "REQUISITION";
         Raylib.DrawTextEx(Cfg.Font, title, new Vector2(x + w / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, title, 36, 1f).X / 2, y + 24), 36, 1f, Pal.Accent);
-        string intel = $"INTEL AVAILABLE: {run.Intel}";
+        // W9: the salvage bank shares the header — the slate re-roll below spends it (not Intel)
+        string intel = $"INTEL AVAILABLE: {run.Intel}   |   SALVAGE: {g.BarracksSalvage}";
         Raylib.DrawTextEx(Cfg.Font, intel, new Vector2(x + w / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, intel, 16, 1f).X / 2, y + 66), 16, 1f, Pal.Good);
 
         // ARMORY toggle (top-right of the card): swap to the re-arm sub-screen and back.
@@ -3147,6 +3204,14 @@ public static class Hud
         bool ph = Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), ShopProceed);
         Raylib.DrawRectangleRounded(ShopProceed, 0.3f, 8, ph ? Pal.RGBA(92, 200, 251) : Pal.Friend);
         CenterText("PROCEED TO DEPLOYMENT", ShopProceed, 15, Pal.RGBA(3, 18, 26));
+
+        // ---- W9: paid slate RE-ROLL (salvage sink; Game refuses the click when broke) ----
+        ShopReroll = new Rectangle(x + w - 30 - 178, y + h - 56, 178, 36);
+        bool srCan = g.BarracksSalvage >= MetaProg.ShopRerollCost;
+        bool srHov = srCan && Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), ShopReroll);
+        Raylib.DrawRectangleRounded(ShopReroll, 0.3f, 8, srHov ? Pal.RGBA(30, 44, 34) : Pal.RGBA(14, 20, 28));
+        Raylib.DrawRectangleLinesEx(ShopReroll, 1.4f, srCan ? (srHov ? Pal.VipGold : Pal.PanelBd) : Pal.RGBA(40, 46, 54));
+        CenterText($"RE-ROLL SLATE ({MetaProg.ShopRerollCost} SALV)", ShopReroll, 12, srCan ? (srHov ? Pal.VipGold : Pal.Txt) : Pal.TxtDim);
     }
 
     /// The ARMORY sub-screen of REQUISITION: re-arm a soldier with a different weapon their class
@@ -3515,9 +3580,26 @@ public static class Hud
         Raylib.DrawTextEx(Cfg.Font, prog, new Vector2(killsX, y + 23), 11, 1f, Pal.TxtDim);
 
         // STATUS lane: DEPLOYED green / BENCHED grey, vertically centered next to the pill.
-        string stTag = benched ? "BENCHED" : "DEPLOYED";
-        Color stCol  = benched ? Pal.TxtDim : Pal.Good;
-        Raylib.DrawTextEx(Cfg.Font, stTag, new Vector2(statusX, y + 14), 11, 1f, stCol);
+        // W9: a SCARRED soldier's lane shows the REHAB chip instead (buy one scar off for salvage) —
+        // the deploy/bench pill on the right already carries the deploy state as its action verb.
+        if (u.Scars.Count > 0)
+        {
+            var rr = new Rectangle(statusX - 4, y + 9, statusW + 6, 22);
+            bool rCan = g.BarracksSalvage >= MetaProg.ScarRehabCost;
+            Raylib.DrawRectangleRounded(rr, 0.3f, 6, rCan ? Raylib.Fade(Pal.VipGold, 0.16f) : Pal.RGBA(20, 18, 16));
+            Raylib.DrawRectangleLinesEx(rr, 1f, rCan ? Pal.VipGold : Pal.RGBA(60, 54, 40));
+            string rTag = $"REHAB {MetaProg.ScarRehabCost}";
+            Raylib.DrawTextEx(Cfg.Font, rTag,
+                new Vector2(rr.X + rr.Width / 2 - Raylib.MeasureTextEx(Cfg.Font, rTag, 11, 1f).X / 2, rr.Y + 5),
+                11, 1f, rCan ? Pal.VipGold : Pal.TxtDim);
+            RehabBtns.Add((u, rr));
+        }
+        else
+        {
+            string stTag = benched ? "BENCHED" : "DEPLOYED";
+            Color stCol  = benched ? Pal.TxtDim : Pal.Good;
+            Raylib.DrawTextEx(Cfg.Font, stTag, new Vector2(statusX, y + 14), 11, 1f, stCol);
+        }
 
         // DEPLOY/BENCH toggle — now on EVERY soldier (Game.ToggleBench enforces >=1 deployed and
         // the deploy cap). The verb is the ACTION the click performs: a deployed soldier shows

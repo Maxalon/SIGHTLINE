@@ -166,6 +166,44 @@ public static class SaveGame
         d.DailyStamp = stamp; d.DailyBest = Math.Max(0, best); WriteMetaDto(d);
     }
 
+    // ---- W9 (SIGNAL): daily WIN payout + streak ----
+    // A daily win pays a salvage bounty ONCE per stamp (keyed on DailyWinStamp, so replaying the
+    // same day's challenge can never farm it), and drives a consecutive-day WIN streak counter.
+    // Whole-DTO read-modify-write like every other meta field; NoPersist-gated at the call site.
+
+    /// The current consecutive-day daily-win streak (0 on a fresh profile).
+    public static int LoadDailyStreak() => Math.Max(0, LoadMetaDto().DailyStreak);
+
+    /// Record a daily WIN for `stamp` and bank its `bounty` in the SAME atomic meta write. Pays out
+    /// at most once per stamp: returns (paid=false, nothing written) if this stamp already paid. The
+    /// streak increments when `stamp` is the calendar day AFTER the last paid win; any gap (or a
+    /// fresh profile) resets it to 1. The pay and the paid-mark land in ONE WriteMetaDto, so a crash
+    /// can never mark the stamp paid without the salvage — nor pay without marking (a double-pay).
+    public static (bool paid, int streak) RecordDailyWin(int stamp, int bounty)
+    {
+        var d = LoadMetaDto();
+        if (d.DailyWinStamp == stamp) return (false, Math.Max(0, d.DailyStreak));   // already paid today
+        d.DailyStreak = IsNextDay(d.DailyWinStamp, stamp) ? Math.Max(0, d.DailyStreak) + 1 : 1;
+        d.DailyWinStamp = stamp;
+        d.Salvage = Math.Max(0, d.Salvage) + Math.Max(0, bounty);   // pay + mark, one write
+        WriteMetaDto(d);
+        return (true, d.DailyStreak);
+    }
+
+    /// True when yyyymmdd stamp `cur` is exactly the calendar day after `prev` (false on any parse
+    /// failure or a fresh profile's 0 — recovery must never crash the payout path).
+    static bool IsNextDay(int prev, int cur)
+    {
+        if (prev <= 0) return false;
+        try
+        {
+            var p = new DateTime(prev / 10000, prev / 100 % 100, prev % 100);
+            var c = new DateTime(cur / 10000, cur / 100 % 100, cur % 100);
+            return (c - p).Days == 1;
+        }
+        catch { return false; }
+    }
+
     // ---- PROGRAM HORIZON W3 (WAR ROOM): cross-run meta-progression ----
     // A persistent SALVAGE currency + ACHIEVEMENTS + additive UNLOCKS + a HALL OF FAME (Legends) +
     // lifetime run totals, all in the shared meta.json (append-only, whole-DTO read-modify-write so a
@@ -275,6 +313,9 @@ public static class SaveGame
         // COUNTERPLAY (append-only): the cross-run VETERAN reserve — promoted survivors of finished runs,
         // recallable in a future run's draft. Old profiles have no list -> null -> empty (inert).
         public List<UnitDto> Veterans;
+        // W9 SIGNAL (append-only): the last daily stamp that PAID its win bounty (unfarmable key) +
+        // the consecutive-day daily-win streak. Old profiles default 0/0 (no streak, nothing paid).
+        public int DailyWinStamp, DailyStreak;
     }
 
     /// A HALL OF FAME entry (WAR ROOM): a soldier snapshot at run end — a fallen KIA (Won=false) or a
@@ -619,6 +660,11 @@ public static class SaveGame
             var contractVals = (Contract[])Enum.GetValues(typeof(Contract));
             if (contractVals.Length < 4 || contractVals[0] != Contract.None || contractVals[^1] != Contract.Spearhead)
                 fails.Add("contractOrdinals");
+            // W9: MetaUnlock is persisted by ordinal in meta.json's Unlocks list — same append-only
+            // guard (first + last member) so a reorder/removal fails SAVETEST loudly.
+            var unlockVals = (MetaUnlock[])Enum.GetValues(typeof(MetaUnlock));
+            if (unlockVals.Length < 6 || unlockVals[0] != MetaUnlock.StartIntel || unlockVals[^1] != MetaUnlock.StandingReserve)
+                fails.Add("metaUnlockOrdinals");
 
             // meta (unlocked-max heat) round-trips through its own meta.json
             string metaSaved = File.Exists(MetaPath) ? File.ReadAllText(MetaPath) : null;
