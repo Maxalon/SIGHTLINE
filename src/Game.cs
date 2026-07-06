@@ -825,6 +825,12 @@ public partial class Game
         int heat = PendingHeat;
         if (NoPersist && int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_HEAT"), out int hEnv)) heat = hEnv;
         _run.HeatLevel = Sightline.Heat.Clamp(heat);
+        // W11 harness affordance (screenshot only, same family as SIGHTLINE_HEAT/VETSIM above):
+        // SIGHTLINE_BOONS=<k> grants the first k boons so the in-mission boon-chip strip and its
+        // hover card can be framed headless. Deterministic; inert when unset -> byte-stable.
+        if (NoPersist && int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_BOONS"), out int boonsN) && boonsN > 0)
+            for (int bi = 0; bi < BoonDef.All.Length && bi < boonsN; bi++)
+                if (!_run.ActiveBoons.Contains(BoonDef.All[bi])) _run.ActiveBoons.Add(BoonDef.All[bi]);
         _run.LossStreak = _metaLossStreak;  // adaptive assist: carry the loss history into this run
         // balance telemetry (no-op unless Stats.Enabled); tag the policy so the report can
         // split greedy vs sloppy win-rates and surface the optimal-vs-error GAP.

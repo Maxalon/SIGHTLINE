@@ -628,7 +628,8 @@ public static class Hud
         if (g.Phase != Phase.PlayerTurn && g.Phase != Phase.EnemyTurn) return;
         var m = Raylib.GetMousePosition();
 
-        if (g.Mode != GameMode.Endless && Raylib.CheckCollisionPointRec(m, _objectiveRect))
+        if (g.Mode != GameMode.Endless
+            && (Raylib.CheckCollisionPointRec(m, _objectiveRect) || _forcedHover == "obj"))
         {
             DrawHoverCard(Codex.ObjectiveName(g.Objective), Codex.ObjectiveDesc(g.Objective),
                           _objectiveRect.X, _objectiveRect.Y + _objectiveRect.Height + 6, Pal.Accent);
@@ -636,12 +637,16 @@ public static class Hud
         }
         foreach (var (boon, chip) in _boonChips)
         {
-            if (!Raylib.CheckCollisionPointRec(m, chip)) continue;
+            if (!Raylib.CheckCollisionPointRec(m, chip) && _forcedHover != "boon") continue;
             DrawHoverCard(BoonDef.Name(boon), BoonDef.Desc(boon),
                           chip.X, chip.Y + chip.Height + 6, Pal.VipGold);
             return;
         }
     }
+
+    // W11 harness seam for DrawHudHovers (screenshot only): SIGHTLINE_HOVERHUD=obj|boon frames the
+    // objective / first-boon-chip hover card headless. Read once; null in every normal run.
+    static readonly string _forcedHover = Environment.GetEnvironmentVariable("SIGHTLINE_HOVERHUD");
 
     /// A small anchored hover card: accent title + wrapped body (~300px column), clamped on-screen.
     static void DrawHoverCard(string title, string body, float ax, float ay, Color accent)
@@ -890,12 +895,17 @@ public static class Hud
         }
 
         ActionButtons = btns.ToArray();
-        // W11 de-occlusion: when a living unit stands under the bar's rows (incl. the unit an
-        // active anim is walking/shooting through that strip), the whole row fades to ~0.3 so the
+        // W11 de-occlusion: when a living unit stands under an actual BUTTON (incl. the unit an
+        // active anim is walking/shooting through that strip), the whole bar fades to ~0.3 so the
         // fight stays visible through it. Mousing over the bar restores it instantly — it never
         // stops being interactive; it just yields visually while the board needs the pixels.
+        // Per-BUTTON rects (not the row's bounding band): a unit in the empty span beside a short
+        // top row shouldn't fade anything.
         var barRect = new Rectangle(bx0, _barTop, right - bx0, (yBase + bh) - _barTop);
-        float dim = ChipOccluded(g, barRect)
+        bool covered = false;
+        foreach (var b in ActionButtons)
+            if (ChipOccluded(g, b.Rect)) { covered = true; break; }
+        float dim = covered
                     && !Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), barRect) ? 0.3f : 1f;
         foreach (var b in ActionButtons)
             DrawActionButton(b, dim);
