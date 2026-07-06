@@ -416,6 +416,8 @@ public static class Mission
 
         var used = new HashSet<(int, int)>();
         bool siegeSpawned = false;    // hard cap: at most ONE SIEGE/BOMBARD artillery per mission (fairness)
+        bool bannerSpawned = false;   // W8 review: at most ONE WARBRINGER banner per mission — overlapping
+                                      // auras could blanket an arena and switch the rout lever off entirely
         for (int i = 0; i < count; i++)
         {
             int y = rows[i % rows.Count];
@@ -451,6 +453,13 @@ public static class Mission
             {
                 if (siegeSpawned) e = MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 60 + bump, 6, x, y);
                 else siegeSpawned = true;
+            }
+            // W8 review — same BOMBARD-style cap for the WARBRINGER: one banner per mission. Keys
+            // on Cls like the siege cap, so a hypothetical banner-flagged boss would stay exempt.
+            if (e.Cls == "WARBRINGER")
+            {
+                if (bannerSpawned) e = MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 60 + bump, 6, x, y);
+                else bannerSpawned = true;
             }
             // Aim clamp raised 82 -> 88: the old 82 cap silently ATE the top-rung Heat StatDelta (+aim)
             // for any archetype whose base + bump + Heat exceeded 82, flattening the ladder's apex. 88
@@ -592,7 +601,7 @@ public static class Mission
         // sightlines and FORCING you to reposition to re-acquire targets. Reuses the enemy smoke exec.
         // Counter: push through / around the cloud, or kill it before it screens. Carries the smoke
         // charge (set in SpawnEnemies). ~6% slot.
-        if (r < 0.90f)                                                                                              //  6% zoner
+        if (r < 0.88f)                                                                                              //  4% zoner
         {
             var z = MakeHostile("HAZE", "SCREENER", WeaponKind.Smg, 5 + bump, 46 + bump, 6, x, y);
             z.EnemyItem = ItemKind.Smoke; z.ItemCharge = 2;   // a deep smoke pouch — the EXISTING smoke AI uses it
@@ -601,9 +610,18 @@ public static class Mission
         // SIEGE (BOMBARD): a fragile back-line artillery piece. It does NOT fire — it CHARGES a
         // telegraphed 3x3 strike (shown for a full player turn) that lands cover-ignoring next enemy
         // turn (see Ai.Plan/Game.TickSiegeStrikes). Forces RELOCATION (a non-shoot tactical axis).
-        // Rare (~5%); capped at 1 per mission by the post-pick guard in SpawnEnemies.
-        if (r < 0.95f) return MakeHostile("SIEGE", "BOMBARD", WeaponKind.Smg, 7 + bump, 48 + bump, 4, x, y);       //  5% artillery
-        if (r < 0.98f) return MakeHostile("OGRE", "BRUISER", WeaponKind.Lmg, 9 + bump, 56 + bump, 5, x, y);    //  3% bruiser
+        // Rare (~4%); capped at 1 per mission by the post-pick guard in SpawnEnemies.
+        if (r < 0.92f) return MakeHostile("SIEGE", "BOMBARD", WeaponKind.Smg, 7 + bump, 48 + bump, 4, x, y);       //  4% artillery
+        // WARBRINGER (SIGNIFER, W8): the Legion standard-bearer — a mid-HP banner anchor: pods with
+        // a living banner within Chebyshev Game.BannerRange cannot rout and rally a turn faster
+        // (Game.BreakPodMorale / BeginEnemyUnitTurn). A priority-target decision: the comeback
+        // lever (focus a pod down to break it) is CONTESTED until the banner falls. ~3% slot.
+        if (r < 0.95f) return MakeHostile("SIGNIFER", "WARBRINGER", WeaponKind.Rifle, 8 + bump, 56 + bump, 5, x, y); // 3% banner anchor
+        // CUSTODIAN (SEXTON, W8): the objective KEEPER — a low-threat unit that walks to the
+        // terminal / a blown sabotage charge and undoes ONE step of progress per adjacent turn
+        // (Ai.Plan -> Game.DoRelock, banner-telegraphed). Screen it out or shoot it first. ~2% slot.
+        if (r < 0.97f) return MakeHostile("SEXTON", "CUSTODIAN", WeaponKind.Smg, 5 + bump, 48 + bump, 6, x, y);     // 2% keeper
+        if (r < 0.98f) return MakeHostile("OGRE", "BRUISER", WeaponKind.Lmg, 9 + bump, 56 + bump, 5, x, y);    //  1% bruiser
         if (r < 0.99f) return MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 58 + bump, 8, x, y);       //  1% scout
         return MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 60 + bump, 6, x, y);                     //  1% grunt
     }
@@ -643,6 +661,10 @@ public static class Mission
                     z.EnemyItem = ItemKind.Smoke; z.ItemCharge = 2;   // a deep smoke pouch — the EXISTING smoke AI uses it
                     return z;
                 }
+                // W8: the CUSTODIAN keeper suits the tech faction — it contests your PROGRESS
+                // (re-locks the terminal / re-arms blown charges), like the SPOTTER/SCREENER
+                // contest your information. m3+, matching the SCREENER's full-roster tier.
+                if (r < 0.97f && n >= 3) return MakeHostile("SEXTON", "CUSTODIAN", WeaponKind.Smg, 5 + bump, 48 + bump, 6, x, y); // 5% keeper (m3+)
                 return MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 60 + bump, 6, x, y);              // filler
 
             // LEGION (shock assault) — BERSERKER, BRUISER, HUNTER + the m2+ skirmish tier:
@@ -655,6 +677,9 @@ public static class Mission
                 if (r < 0.68f && n >= 2) return MakeHostile("WRAITH", "STRIKER", WeaponKind.Smg, 4 + bump, 60 + bump, 9, x, y);   // 8% leaper (m2+)
                 if (r < 0.76f && n >= 2) return MakeHostile("HOPLITE", "LANCER", WeaponKind.Rifle, (n >= 3 ? 7 : 6) + bump, 58 + bump, 5, x, y); // 8% formation trooper (m2+; HP 6->7 at m3, like the cascade)
                 if (r < 0.84f && n >= 2) return MakeHostile("FERAL", "HOUND", WeaponKind.Smg, 3 + bump, 56 + bump, 9, x, y);      // 8% swarmer (m2+)
+                // W8: the WARBRINGER banner anchor is Legion-native — the shock faction's pods hold
+                // the line under its standard (no rout + faster rally within Chebyshev BannerRange).
+                if (r < 0.90f && n >= 3) return MakeHostile("SIGNIFER", "WARBRINGER", WeaponKind.Rifle, 8 + bump, 56 + bump, 5, x, y); // 6% banner anchor (m3+)
                 if (r < 0.93f) return MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 58 + bump, 8, x, y);
                 return MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 60 + bump, 6, x, y);              // filler
 
@@ -685,6 +710,11 @@ public static class Mission
                     return z;
                 }
                 if (r < 0.78f) return MakeHostile("ORDERLY", "MEDIC", WeaponKind.Smg, 6 + bump, 52 + bump, 6, x, y);
+                // W8: the CUSTODIAN keeper is Wardens-native — the control faction contests your
+                // objective PROGRESS itself (re-locks the terminal / re-arms blown charges). m3+
+                // like SIEGE/SCREENER; the failed (m2) gate routes to the GRUNT window's pick, so
+                // any roll still resolves and mission-2 Wardens pods are unchanged.
+                if (r < 0.86f && n >= 3) return MakeHostile("SEXTON", "CUSTODIAN", WeaponKind.Smg, 5 + bump, 48 + bump, 6, x, y); // 8% keeper (m3+)
                 if (r < 0.92f) return MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 60 + bump, 6, x, y);
                 return MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 58 + bump, 8, x, y);              // filler
         }
@@ -1092,5 +1122,25 @@ public static class Mission
         // HOUND pack (the swarmers) lower mid-field
         Add("FERAL", "HOUND", WeaponKind.Smg, 3, 56, 9, 10, 7);
         Add("FERAL", "HOUND", WeaponKind.Smg, 3, 56, 9, 11, 8);
+
+        // W8 — WARBRINGER banner anchor (diamond ring + pennant + aura outline) with a held pod
+        // beside it: pod 5 is staged at its waver point (3 alive of an original 4) but sits inside
+        // the banner's aura, so it draws NO WAVERING tag (the banner holds it — the honest read).
+        Add("SIGNIFER", "WARBRINGER", WeaponKind.Rifle, 8, 56, 5, 15, 3);
+        Add("RAIDER", "GRUNT", WeaponKind.Rifle, 5, 60, 6, 14, 2); g.Enemies[^1].PodId = 5;
+        Add("RAIDER", "GRUNT", WeaponKind.Rifle, 5, 60, 6, 16, 2); g.Enemies[^1].PodId = 5;
+        Add("RAIDER", "GRUNT", WeaponKind.Rifle, 5, 60, 6, 14, 4); g.Enemies[^1].PodId = 5;
+        g.DebugPodOrig(5, 4);
+
+        // W8 — a WAVERING pod far from any banner (Chebyshev > BannerRange from the SIGNIFER):
+        // pod 6, 3 alive of an original 4 — exactly one kill from the rout threshold, so all three
+        // draw the amber WVR crack tag (the telegraph screenshot's subject).
+        Add("STALKER", "SCOUT", WeaponKind.Smg, 4, 58, 8, 3, 7); g.Enemies[^1].PodId = 6;
+        Add("STALKER", "SCOUT", WeaponKind.Smg, 4, 58, 8, 4, 8); g.Enemies[^1].PodId = 6;
+        Add("STALKER", "SCOUT", WeaponKind.Smg, 4, 58, 8, 3, 9); g.Enemies[^1].PodId = 6;
+        g.DebugPodOrig(6, 4);
+
+        // W8 — CUSTODIAN objective keeper (padlock silhouette), lower right, clear of both pods
+        Add("SEXTON", "CUSTODIAN", WeaponKind.Smg, 5, 48, 6, 15, 8);
     }
 }

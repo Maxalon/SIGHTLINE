@@ -656,6 +656,50 @@ public partial class Game
     // _podOrig snapshots each pod's spawn size at mission start; the break/threshold logic is BreakPodMorale.
     readonly Dictionary<int, int> _podOrig = new();
     public const int RoutDuration = 2;         // enemy turns a broken pod flees before it can rally (decrements in BeginTurn)
+    // SIGNAL W8 — the WARBRINGER's banner aura reach (Chebyshev tiles). Pods with a living, active
+    // banner inside this range cannot rout (BreakPodMorale) and rally one turn faster
+    // (BeginEnemyUnitTurn). The player's counter is spatial: kill the banner or bait the pod out.
+    public const int BannerRange = 4;
+
+    /// SIGNAL W8 — true when a living, ACTIVE banner-bearer (Unit.HasBanner, default the
+    /// WARBRINGER) stands within Chebyshev BannerRange of `u`. A banner anchors ITSELF too
+    /// (distance 0), so a live WARBRINGER never routs. Dormant banners project nothing.
+    public bool BannerNear(Unit u)
+    {
+        foreach (var b in Enemies)
+            if (b.Alive && b.Active && b.HasBanner && Util.ChebyDist(b.X, b.Y, u.X, u.Y) <= BannerRange)
+                return true;
+        return false;
+    }
+
+    /// SIGNAL W8 — a pod's live head-count vs its spawn strength, for the WAVERING telegraph +
+    /// the "POD 2/4" tooltip line. `orig` falls back to the current count for un-snapshotted pods
+    /// (e.g. DEFEND reinforcement waves), mirroring BreakPodMorale's mates.Count+1 post-kill view.
+    public (int alive, int orig) PodStrength(int podId)
+    {
+        int alive = 0;
+        foreach (var e in Enemies) if (e.Alive && e.PodId == podId) alive++;
+        return (alive, _podOrig.GetValueOrDefault(podId, alive));
+    }
+
+    /// SIGNAL W8 — this pod member is ONE KILL from the rout threshold: the NEXT pod death breaks
+    /// the survivors (mirrors BreakPodMorale's `mates.Count > Math.Max(1, orig / 2)` exactly, one
+    /// kill ahead). Covers the rallied-below-threshold pod too (any kill re-breaks it) — the
+    /// telegraph must never lie. Active + unbroken members only; needs a survivor left to rout.
+    public bool PodAtWaverPoint(Unit e)
+    {
+        if (e == null || e.Team != Team.Enemy || e.PodId < 0 || !e.Alive || !e.Active || e.Routed > 0) return false;
+        var (alive, orig) = PodStrength(e.PodId);
+        return alive >= 2 && alive - 1 <= Math.Max(1, orig / 2);
+    }
+
+    /// SIGNAL W8 — the WAVERING tag: at the waver point AND not held by a banner (a banner-anchored
+    /// member will NOT rout on the next kill, so tagging it would lie — the tooltip explains why).
+    public bool PodWavering(Unit e) => PodAtWaverPoint(e) && !BannerNear(e);
+
+    /// SIGNAL W8 (harness/showcase only): seed a pod's spawn-strength snapshot so controlled scenes
+    /// (SIGHTLINE_CONTENT / MORALETEST) can stage WAVERING states without running SetupMission.
+    public void DebugPodOrig(int pod, int orig) => _podOrig[pod] = orig;
 
     // Death scorch decals: where a unit fell, a dark team-tinted burn mark lingers on the tile
     // and fades over ~ScorchLife seconds (decayed in Update, drawn under units in Renderer, cleared
@@ -1880,9 +1924,24 @@ public partial class Game
         if (mates.Count == 0) return;                       // whole pod gone — no one left to break
         int orig = _podOrig.GetValueOrDefault(pod, mates.Count + 1);
         if (mates.Count > Math.Max(1, orig / 2)) return;    // still at fighting strength — holds the line
-        bool broke = false;
+        bool broke = false, held = false;
         foreach (var m in mates)
-            if (m.Active && m.Routed == 0) { m.Routed = RoutDuration; broke = true; }
+            if (m.Active && m.Routed == 0)
+            {
+                // SIGNAL W8 — the BANNER anchor: a mate within a living banner's aura does not
+                // break. The rout is CONTESTED, not free: kill the WARBRINGER (or catch the pod
+                // outside its reach) and the break lands. Per-member, so a split pod can half-rout.
+                if (BannerNear(m)) { held = true; continue; }
+                m.Routed = RoutDuration; broke = true;
+            }
+        if (held && !broke)
+        {
+            // the banner held the whole pod — say so loudly (the player's cue: banner first)
+            var anchor = mates.FirstOrDefault(m => m.Active) ?? mates[0];
+            Fx.PopText(anchor.Pos + new Vector2(0, -34), "HELD BY BANNER", Pal.Suspect, 18f);
+            ShowBanner("THE BANNER HOLDS THE LINE", true);
+            return;
+        }
         if (!broke) return;                                 // survivors dormant or already routing
         var ldr = mates.FirstOrDefault(m => m.Active) ?? mates[0];
         Fx.PopText(ldr.Pos + new Vector2(0, -34), "BROKEN", Pal.Good, 20f);
@@ -3839,6 +3898,56 @@ public partial class Game
         Audio.Play("reload");
     }
 
+    // ---- SIGNAL W8 — CUSTODIAN re-lock/re-arm (the enemy contests objective PROGRESS) ----------
+
+    /// The index of a BLOWN sabotage charge at exactly `site`, or -1. (A blown entry is the only
+    /// re-armable one; an intact charge needs no keeper.)
+    int BlownSiteAt((int x, int y) site)
+    {
+        for (int i = 0; i < SabotageSites.Count; i++)
+            if (SabotageBlown.Contains(i) && SabotageSites[i] == site) return i;
+        return -1;
+    }
+
+    /// True when enemy `e`, standing adjacent to `site`, has objective progress there to undo:
+    /// a partially-hacked terminal (HackProgress in 1..HackRequired-1 — at HackRequired the
+    /// mission already ended) or a blown sabotage charge. Mirrors the player's CanHack gating.
+    bool CanRelock(Unit e, (int x, int y) site)
+    {
+        if (e == null || !e.Alive || Util.ChebyDist(e.X, e.Y, site.x, site.y) > 1) return false;
+        if (HasTerminal && site == Terminal) return HackProgress > 0 && HackProgress < HackRequired;
+        // W8 review: mirror the hack arm's completed-objective guard — all charges blown means the
+        // mission is already won (the plant path ends it same-tick today, but a future deferred-end
+        // path must never let a keeper re-arm a won mission).
+        if (HasSabotage) return SabotageBlown.Count < SabotageSites.Count && BlownSiteAt(site) >= 0;
+        return false;
+    }
+
+    /// Undo ONE step of objective progress at `site` (validated by CanRelock): -1 HackProgress on
+    /// the terminal, or re-arm one blown sabotage charge. Telegraphed with a banner line + site FX
+    /// so the swing is never silent — the counter is the same as ever: kill the keeper.
+    void DoRelock(Unit e, (int x, int y) site)
+    {
+        var at = Util.TileCenter(site.x, site.y);
+        if (HasTerminal && site == Terminal && HackProgress > 0)
+        {
+            HackProgress--;
+            Fx.PopText(at + new Vector2(0, -30), "RE-LOCKED", Pal.Foe, 20f);
+            ShowBanner("CUSTODIAN RE-LOCKS THE TERMINAL", true);
+        }
+        else if (HasSabotage)
+        {
+            int i = BlownSiteAt(site);
+            if (i < 0) return;
+            SabotageBlown.Remove(i);
+            Fx.PopText(at + new Vector2(0, -30), "RE-ARMED", Pal.Foe, 20f);
+            ShowBanner("CUSTODIAN RE-ARMS THE CHARGE", true);
+        }
+        else return;
+        Fx.Burst(at, Pal.Foe, 14, 160f, 0.5f, 3f);
+        Audio.Play("reload");
+    }
+
     /// DEPLOY BEACON (Evac only, one/mission): the selected soldier spends ONE action to drop a
     /// forward extraction beacon on THEIR tile. Its walkable 3x3 (centre + ring, floor tiles only —
     /// non-floor tiles are clipped) is UNIONed into EvacZone alongside the fixed far-corner fallback,
@@ -4318,7 +4427,7 @@ public partial class Game
         ResolveSuspicion();                                      // 4.3: suspicious pods confirm or lose contact
         FaceShields();                                           // AEGIS turns its barrier toward the squad
         UpdateHvtGuard();                                        // DECAPITATE: refresh the HVT's guarded state at the boundary
-        foreach (var e in Enemies) if (e.Alive) { e.BeginTurn(); TickStatuses(e); }
+        foreach (var e in Enemies) if (e.Alive) { BeginEnemyUnitTurn(e); TickStatuses(e); }
         _aiUnits = AliveEnemies().Where(e => e.Active).ToList();  // dormant/suspicious pods don't act
         // UNDERTOW W4 — sequenced coordination: act SETUP verbs before FINISHERS. A SAPPER breach or a
         // STRIKER/adjacent shove EXPOSES a soldier; ordering those units first lets the incremental focus
@@ -4332,6 +4441,16 @@ public partial class Game
         ClearIntent();
         ShowBanner("ENEMY TURN", true);
         Enqueue(new WaitAnim(0.5f), Team.Enemy);
+    }
+
+    /// SIGNAL W8 — the per-enemy turn-boundary step, factored out of EndPlayerTurn so MORALETEST
+    /// can drive it directly. BeginTurn ticks Routed down one; a living banner in aura range ticks
+    /// it down ONCE more — a bannered pod rallies one turn faster (RoutDuration 2 -> back in 1).
+    /// Lives in GAME (not Unit.BeginTurn) because the aura needs the Enemies list.
+    void BeginEnemyUnitTurn(Unit e)
+    {
+        e.BeginTurn();
+        if (e.Routed > 0 && BannerNear(e)) e.Routed--;
     }
 
     void StartPlayerTurn()
@@ -4723,6 +4842,16 @@ public partial class Game
                     var hit = Grid.DamageCover(sx, sy, Grid.HighCoverHp);  // demolish a full level
                     if (hit != Grid.CoverHit.None) CoverHitFx(sx, sy, hit);
                     Fx.AddShake(5f);
+                    Enqueue(new WaitAnim(0.25f), Team.Enemy);
+                }
+                else if (_aiPlan.RelockTile != null && e.ActionsLeft > 0 &&
+                    CanRelock(e, _aiPlan.RelockTile.Value))
+                {
+                    // SIGNAL W8 — CUSTODIAN: standing at the objective, spend the action undoing
+                    // one step of the player's progress (validated NOW, post-move — a re-blown
+                    // charge or a dead keeper mid-path falls through to the generic branches).
+                    e.ActionsLeft = 0;
+                    DoRelock(e, _aiPlan.RelockTile.Value);
                     Enqueue(new WaitAnim(0.25f), Team.Enemy);
                 }
                 else if (_aiPlan.HealTarget != null && _aiPlan.HealTarget.Alive && e.ActionsLeft > 0 &&

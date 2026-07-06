@@ -286,6 +286,16 @@ public static class Renderer
         }
     }
 
+    // W8: the WAVERING mark's shape — a jagged vertical CRACK (lightning zigzag), the "about to
+    // break" cue beside the WVR code. Same doctrine as DrawStatusGlyph: meaning rides on the
+    // SHAPE, the amber hue is reinforcement only, so the tag reads in the colorblind palette.
+    static void DrawCrackGlyph(Vector2 c, Color col)
+    {
+        Raylib.DrawLineEx(new Vector2(c.X + 2.5f, c.Y - 6f), new Vector2(c.X - 2f, c.Y - 1f), 1.6f, col);
+        Raylib.DrawLineEx(new Vector2(c.X - 2f, c.Y - 1f), new Vector2(c.X + 2f, c.Y + 1f), 1.6f, col);
+        Raylib.DrawLineEx(new Vector2(c.X + 2f, c.Y + 1f), new Vector2(c.X - 2.5f, c.Y + 6f), 1.6f, col);
+    }
+
     // tile draw rect/centre offset up onto the plateau top when elevated (per height tier)
     static Rectangle ElevRect(Game g, int x, int y)
     {
@@ -367,6 +377,7 @@ public static class Renderer
         DrawFocusCones(g);        // COUNTERPLAY: the player's braced FOCUSED-overwatch kill-lanes (gold)
         DrawThreat(g);
         DrawSiegeZones(g);        // persistent pulsing 3x3 danger zone of any charging SIEGE artillery
+        DrawBannerAuras(g);       // W8: each live WARBRINGER's no-rout aura boundary (subtle outline)
         DrawEvac(g);
         DrawTerminal(g);
         DrawSabotage(g);
@@ -702,6 +713,32 @@ public static class Renderer
             var cc = ElevCenter(g, e.ChargeX, e.ChargeY);
             Raylib.DrawPoly(cc, 3, 9f, -90f + t * 40f, Raylib.Fade(Pal.Foe, 0.7f));
             DashedLine(e.Pos, cc, 2.4f, Raylib.Fade(Pal.Foe, 0.8f), (t * 30f) % 14f, 8f, 6f);
+        }
+    }
+
+    // W8 — WARBRINGER banner aura: the Chebyshev BannerRange square around each LIVE, ACTIVE
+    // banner-bearer, inside which pods cannot rout and rally faster. Drawn as a SUBTLE amber
+    // outline (clamped to the board) + small diamond ticks at the corners — the shape echo of the
+    // bearer's diamond ring, so the zone reads back to its source without hue (DESIGN.md 3.H).
+    // Deliberately far quieter than the siege zone: it is standing terrain-of-the-fight info, not
+    // an "it WILL hit here" warning. Reads live state, so a killed banner's aura clears next frame.
+    static void DrawBannerAuras(Game g)
+    {
+        float t = (float)Raylib.GetTime();
+        float pulse = 0.75f + 0.25f * MathF.Sin(t * 2.2f);
+        foreach (var e in g.Enemies)
+        {
+            if (!e.Alive || !e.Active || !e.HasBanner) continue;
+            int x0 = Math.Max(0, e.X - Game.BannerRange), x1 = Math.Min(g.Grid.W - 1, e.X + Game.BannerRange);
+            int y0 = Math.Max(0, e.Y - Game.BannerRange), y1 = Math.Min(g.Grid.H - 1, e.Y + Game.BannerRange);
+            var tl = Util.TileRect(x0, y0);
+            var br = Util.TileRect(x1, y1);
+            var rect = new Rectangle(tl.X + 2, tl.Y + 2, br.X + br.Width - tl.X - 4, br.Y + br.Height - tl.Y - 4);
+            Raylib.DrawRectangleLinesEx(rect, 2.2f, Raylib.Fade(Pal.Suspect, 0.34f * pulse));
+            // corner diamonds (the ring-shape echo; rotation 0 = diamond, see the diaRing note)
+            foreach (var c in new[] { new Vector2(rect.X, rect.Y), new Vector2(rect.X + rect.Width, rect.Y),
+                                      new Vector2(rect.X, rect.Y + rect.Height), new Vector2(rect.X + rect.Width, rect.Y + rect.Height) })
+                Raylib.DrawPoly(c, 4, 5.5f, 0f, Raylib.Fade(Pal.Suspect, 0.60f * pulse));
         }
     }
 
@@ -1580,6 +1617,30 @@ public static class Renderer
                 Raylib.DrawCircleV(muzTip, 2.2f * s, col);                                      // muzzle mouth
                 break;
             }
+            case "WARBRINGER":         // a STANDARD-BEARER (SIGNIFER, W8): a compact body gripping a
+                                       // tall banner pole flying a triangular pennant — reads as
+                                       // "carries the standard", nothing like the SPOTTER's dish mast.
+            {
+                Raylib.DrawCircleV(At(-2f, 0), 4.5f * s, col);                    // bearer body
+                var pole = At(-2f, 0);
+                var poleTop = pole + new Vector2(0, -13f * s);
+                Raylib.DrawLineEx(pole, poleTop, 2f * s, col);                    // the standard pole
+                FillTri(poleTop, poleTop + new Vector2(9f * s, 2.5f * s),
+                        poleTop + new Vector2(0, 5f * s), col);                   // the pennant
+                Raylib.DrawCircleV(poleTop, 1.7f * s, col);                       // finial
+                break;
+            }
+            case "CUSTODIAN":          // an OBJECTIVE KEEPER (SEXTON, W8): a PADLOCK — squat lock
+                                       // body under a shackle arc, keyhole punched out — reads as
+                                       // "re-locks your progress" at a glance (shape-only meaning).
+            {
+                Raylib.DrawRectanglePro(new Rectangle(p.X, p.Y + 2.5f * s, 11f * s, 8f * s),
+                                        new Vector2(5.5f * s, 4f * s), 0f, col);  // lock body
+                Raylib.DrawRing(p + new Vector2(0, -1.5f * s), 3f * s, 5f * s, 180f, 360f, 12, col); // shackle
+                Raylib.DrawCircleV(p + new Vector2(0, 2.5f * s), 1.6f * s,
+                                   Raylib.Fade(Pal.RGBA(8, 10, 14), a));          // keyhole
+                break;
+            }
             default:                   // fallback: a neutral pentagon
                 Raylib.DrawPoly(p, 5, 7.5f * s, 0f, col);
                 break;
@@ -1835,6 +1896,10 @@ public static class Renderer
         bool sqRing   = u.Team == Team.Enemy && u.Cls == "TURRET";
         bool hexRing  = u.Team == Team.Enemy && u.Cls == "BRUISER";
         bool dashRing = u.Team == Team.Enemy && u.Cls == "SCOUT";
+        // W8: banner-bearer (WARBRINGER, or a bannered boss) = a DIAMOND ring — the anchor that
+        // holds pods steady. Keyed on the capability flag like the W5 mechanics; echoed by the
+        // aura outline's corner diamonds so ring and zone read as one system without hue.
+        bool diaRing  = u.Team == Team.Enemy && u.HasBanner;
         if (sqRing)
         {
             float hs = bodyR - 2f;                          // half-side: matches the disc footprint
@@ -1856,6 +1921,15 @@ public static class Renderer
             for (int k = 0; k < 8; k++)                     // dashed ring: 8 arcs with clear gaps
                 Raylib.DrawRing(p, dr - 3.4f, dr + 1f, k * 45f + 5f, k * 45f + 33f, 10, Raylib.Fade(main, figAlpha));
             Raylib.DrawCircleV(p, dr - 3.4f, Raylib.Fade(main, 0.22f * figAlpha));
+        }
+        else if (diaRing)
+        {
+            // diamond ring: DrawPoly's 4-gon puts its FIRST vertex at rotation° along +X, so
+            // rotation 0 IS the diamond (45 would render the TURRET's axis-aligned square —
+            // learned from the screenshot). The "anchor" frame around the standard-bearer.
+            Raylib.DrawPoly(p, 4, bodyR + 4f, 0f, Raylib.Fade(dark, figAlpha));
+            Raylib.DrawPolyLinesEx(p, 4, bodyR + 4f, 0f, 4.4f, Raylib.Fade(main, figAlpha));
+            Raylib.DrawPoly(p, 4, bodyR - 2f, 0f, Raylib.Fade(main, 0.22f * figAlpha));
         }
         else
         {
@@ -2108,6 +2182,16 @@ public static class Renderer
         // player knows this threat is temporarily neutralized (the earned comeback beat).
         if (u.Team == Team.Enemy && u.Routed > 0)
             Raylib.DrawTextEx(Cfg.Font, "ROUT", new Vector2((int)(p.X + 17), (int)(p.Y - 34)), 11, 1f, Pal.Good);
+        // SIGNAL W8 — WAVERING: this pod is ONE KILL from breaking (Game.PodWavering — banner-held
+        // members are excluded so the mark never lies). Amber "WVR" + a jagged CRACK glyph on the
+        // figure's left (mutually exclusive with ROUT by definition; shape carries the meaning
+        // without hue per DESIGN.md 3.H, same doctrine as DrawStatusGlyph). The comeback lever,
+        // telegraphed: the player can PLAN the breaking kill instead of being surprised by it.
+        else if (u.Team == Team.Enemy && g.PodWavering(u))
+        {
+            Raylib.DrawTextEx(Cfg.Font, "WVR", new Vector2((int)(p.X - 39), (int)(p.Y - 39)), 11, 1f, Pal.Suspect);
+            DrawCrackGlyph(new Vector2(p.X - 46f, p.Y - 33f), Pal.Suspect);
+        }
 
         // combat status effects: drawn in DrawUnitStatusChips as a LATE pass over all figures
         // (SIGNAL W3 review) — an opaque chip pill must never be buried under an adjacent body.
