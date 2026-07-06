@@ -242,7 +242,11 @@ public static class Heat
         new HeatModifier { Name = "HARDENED",      Desc = "Enemies hit harder & tougher (+1 stat)", StatDelta = 1 },
         // SHORT FUSE now also brings a body -- the qualitative "spotted sooner" twist plus volume.
         new HeatModifier { Name = "SHORT FUSE",    Desc = "+1 enemy; enemies spot you sooner",    EnemyDelta = 1, TighterContact = true },
-        new HeatModifier { Name = "ELITE CADRE",   Desc = "Enemies even deadlier (+1 stat)",      StatDelta = 1 },
+        // W6 (SIGNAL): ELITE CADRE is the mid-ladder QUALITATIVE tooth — from heat 4 the enemy
+        // starts PLAYING better (coordination tier 1: focus-fire convergence, steadier smoke/
+        // flash reads) two rungs before EXPOSED, instead of the mid-ladder leaning on stat rows
+        // alone. Aggregation is Math.Max, so rungs 6-7 stay tier 1 and NO QUARTER stays tier 2.
+        new HeatModifier { Name = "ELITE CADRE",   Desc = "Enemies coordinate their fire (+1 stat)", StatDelta = 1, AiTier = 1 },
         // LINGERING WOUNDS arrives earlier (rung 5) and carries a body -- run-loop attrition
         // pressure starts compounding in the mid-ladder instead of only near the top.
         new HeatModifier { Name = "LINGERING WOUNDS", Desc = "+1 enemy; wounds linger, less field healing", EnemyDelta = 1, HarshAttrition = true },
@@ -282,7 +286,7 @@ public static class Heat
     public static bool HarshAttrition(int level) { foreach (var m in Active(level)) if (m.HarshAttrition) return true; return false; }
     public static bool NoReinforcements(int level) { foreach (var m in Active(level)) if (m.NoReinforcements) return true; return false; }
     /// W6b: the AI coordination tier this heat level demands — the MAX over active rungs (a
-    /// tier is a quality level, not a stackable quantity). 0 below EXPOSED (rung 6).
+    /// tier is a quality level, not a stackable quantity). 0 below ELITE CADRE (rung 4).
     public static int AiTier(int level) { int t = 0; foreach (var m in Active(level)) t = Math.Max(t, m.AiTier); return t; }
     /// W6c: extra per-hit enemy weapon damage at this heat level (summed like StatDelta;
     /// today only NO QUARTER carries it, so this is 0 below the rung-8 apex).

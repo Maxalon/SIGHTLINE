@@ -615,8 +615,11 @@ public partial class Game
         // ---- W6b — COORDINATION TIER: data rows, damp identity/cap, tier-0 invariance,
         // tier-2 divergence, and the stale-tier lifecycle. ----
         {
-            // (a) data: the ladder's AiTier rungs (0 below EXPOSED; 1 at rungs 6-7; 2 at NO QUARTER).
-            if (Sightline.Heat.AiTier(0) != 0 || Sightline.Heat.AiTier(5) != 0) fails.Add("aiTierLowHeatNot0");
+            // (a) data: the ladder's AiTier rungs. W6 (SIGNAL) re-pin: tier 1 now arrives at
+            // ELITE CADRE (rung 4) — the mid-ladder qualitative tooth — not first at EXPOSED;
+            // rungs 4-7 hold tier 1 (Math.Max aggregation) and NO QUARTER stays the tier-2 apex.
+            if (Sightline.Heat.AiTier(0) != 0 || Sightline.Heat.AiTier(3) != 0) fails.Add("aiTierLowHeatNot0");
+            if (Sightline.Heat.AiTier(4) != 1 || Sightline.Heat.AiTier(5) != 1) fails.Add("aiTierEliteCadreNot1");
             if (Sightline.Heat.AiTier(6) != 1 || Sightline.Heat.AiTier(7) != 1) fails.Add("aiTierExposedNot1");
             if (Sightline.Heat.AiTier(8) != 2) fails.Add("aiTierNoQuarterNot2");
             // W6c data pin: +1 enemy damage is the rung-8 apex ONLY (0 through RELENTLESS, so
