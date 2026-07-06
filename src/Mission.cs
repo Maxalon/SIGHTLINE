@@ -23,6 +23,13 @@ public static class Mission
     // test hook (SIGHTLINE_MAP): force a specific authored layout index; -1 = normal roll
     public static int ForcedLayout = -1;
 
+    // W2 arena telemetry: the authored layout index the LAST Build actually applied, or -1 for
+    // the procedural fallback. Recorded only AFTER TryApplyLayout's connectivity guard accepted
+    // the template (PickLayout merely PROPOSES one — a rejected proposal falls back procedural,
+    // and logging the proposal would misattribute those missions). Read by Game.SetupMission
+    // when it stamps Stats.BeginMission. Static like ForcedLayout (one Build at a time).
+    public static int AppliedLayout = -1;
+
     // Soft biome->layout affinity: each biome index (matching Biome.All order —
     // STEEL=0 ARID=1 TUNDRA=2 VERDANT=3 ASH=4 VOID=5 NEON=6 MAGMA=7) hints at a preferred
     // arena index. When an authored map is rolled, there is a 50% chance to pick the hinted
@@ -119,12 +126,22 @@ public static class Mission
 
         // Either lay down a hand-authored arena (with a connectivity guard) or fall
         // back to the procedural generator. Both keep reserved tiles open.
-        bool authored;
+        // W2 telemetry: AppliedLayout records the template index only once TryApplyLayout has
+        // ACCEPTED it (the connectivity guard can reject a proposal); -1 = procedural fallback.
+        // The Roll(55)-before-PickLayout order is preserved exactly (same Util.Rng draw order).
+        bool authored = false;
+        AppliedLayout = -1;
         if (ForcedLayout >= 0 && ForcedLayout < Maps.Layouts.Length)
+        {
             authored = TryApplyLayout(grid, occupied, players, enemies, evacSet, terminal, Maps.Layouts[ForcedLayout], sabotage);
-        else
-            authored = Util.Roll(55) &&
-                TryApplyLayout(grid, occupied, players, enemies, evacSet, terminal, PickLayout(missionNum), sabotage);
+            if (authored) AppliedLayout = ForcedLayout;
+        }
+        else if (Util.Roll(55))
+        {
+            int pick = PickLayout(missionNum);
+            authored = TryApplyLayout(grid, occupied, players, enemies, evacSet, terminal, Maps.Layouts[pick], sabotage);
+            if (authored) AppliedLayout = pick;
+        }
         if (!authored)
             BuildProcedural(grid, occupied, evacSet, missionNum);
 
@@ -938,16 +955,18 @@ public static class Mission
             }
     }
 
-    /// Pick an authored layout to try, applying a soft biome affinity: 50% of the time
+    /// Pick an authored layout INDEX to try, applying a soft biome affinity: 50% of the time
     /// choose the biome's hinted layout (if one is set), else pick uniformly at random.
     /// The connectivity guard in TryApplyLayout still validates the result regardless.
-    static string[] PickLayout(int missionNum)
+    /// (W2: returns the index — not the template — so the caller can record WHICH arena
+    /// was applied; Rng draw order matches the old template-returning version exactly.)
+    static int PickLayout(int missionNum)
     {
         int biomeIdx = (missionNum - 1 + Biome.All.Length) % Biome.All.Length;
         int hint = (biomeIdx < BiomeLayoutHint.Length) ? BiomeLayoutHint[biomeIdx] : -1;
         if (hint >= 0 && hint < Maps.Layouts.Length && Util.Roll(50))
-            return Maps.Layouts[hint];
-        return Util.Choice(Maps.Layouts);
+            return hint;
+        return Util.Rng.Next(Maps.Layouts.Length);   // == Util.Choice's draw (same Next(count) call)
     }
 
     static void TryCover(Grid g, HashSet<(int, int)> occ, int x, int y, TileType t)

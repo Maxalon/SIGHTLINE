@@ -41,6 +41,10 @@ public static class Stats
     {
         public int Mission, Heat, Turns;
         public string Objective = "";
+        // W2 arena telemetry: the AUTHORED layout index actually applied by Mission.Build
+        // (recorded only after TryApplyLayout's connectivity guard accepted it), or -1 for
+        // the procedural fallback. Lets the report rank arenas and expose the fallback rate.
+        public int Layout = -1;
         public int SquadStart, SquadSurvived, EnemiesStart, EnemiesKilled;
         public int DamageDealt, DamageTaken;
         public bool Win;
@@ -77,6 +81,10 @@ public static class Stats
         // split for endless stands and kept them out of campaign gap math only by tag-string
         // accident. Now the exclusion is EXPLICIT: gap/completion tables filter Mode=="campaign".
         public string Mode = "campaign";
+        // W2 CRN pairing: the batch SLOT this run replayed (both policy legs of slot i share
+        // Util.Reseed(50000+i), so their worlds are identical until the policies diverge).
+        // -1 = unpaired (interactive/harness paths that don't set Stats.Slot).
+        public int Slot = -1;
         public readonly List<string> PerksPicked = new();
         public readonly List<string> SpecsPicked = new();  // W2: class-specialization fork picks
         public readonly List<string> Purchases = new();   // shop items bought (incl. weapon mods)
@@ -88,6 +96,24 @@ public static class Stats
     static RunRec _run;
     static MissionRec _mission;
     public static readonly List<RunRec> Runs = new();
+
+    // W2 CRN pairing: the batch runner stamps the current slot here before constructing each
+    // Game; BeginRun copies it onto the RunRec. -1 outside a paired batch (the default).
+    public static int Slot = -1;
+
+    // ── W2: ACTION MIX (verb telemetry, split by policy) ─────────────────────────
+    // Every committed player VERB (move/shoot/overwatch/focus/brace/hunker/item/patch/drag/...)
+    // bumps its counter under the active run's policy, so the report can show what each policy
+    // actually DOES — previously reactive verbs (FOCUS, BRACE) and support verbs (PATCH, DRAG,
+    // REARM) were invisible to measurement. Batch-global (verbs are aggregate texture).
+    static readonly Dictionary<string, Dictionary<string, int>> _actionsByPolicy = new();
+    public static void RecordAction(string verb)
+    {
+        if (!Enabled || string.IsNullOrEmpty(verb)) return;
+        string policy = _run != null ? _run.Policy : "greedy";
+        if (!_actionsByPolicy.TryGetValue(policy, out var d)) _actionsByPolicy[policy] = d = new();
+        Bump(d, verb);
+    }
 
     static void Bump(Dictionary<string, int> d, string k, int n = 1)
     {
@@ -116,6 +142,8 @@ public static class Stats
     {
         Runs.Clear(); _run = null; _mission = null;
         _spawnsFactionByClass.Clear(); _spawnsDefaultByClass.Clear();
+        _actionsByPolicy.Clear();
+        Slot = -1;
     }
 
     public static void BeginRun(int heat, string policy = "greedy", string mode = "campaign")
@@ -125,19 +153,20 @@ public static class Stats
         {
             Heat = heat,
             Policy = string.IsNullOrEmpty(policy) ? "greedy" : policy,
-            Mode = string.IsNullOrEmpty(mode) ? "campaign" : mode
+            Mode = string.IsNullOrEmpty(mode) ? "campaign" : mode,
+            Slot = Slot
         };
         Runs.Add(_run);
     }
 
-    public static void BeginMission(int mission, string objective, int heat, int squad, int enemies)
+    public static void BeginMission(int mission, string objective, int heat, int squad, int enemies, int layout = -1)
     {
         if (!Enabled) return;
         if (_run == null) BeginRun(heat);
         _mission = new MissionRec
         {
             Mission = mission, Objective = objective, Heat = heat,
-            SquadStart = squad, EnemiesStart = enemies
+            SquadStart = squad, EnemiesStart = enemies, Layout = layout
         };
         ResetLeadTracker();   // swings/lead are scoped to one match
     }
@@ -257,6 +286,25 @@ public static class Stats
     // ── aggregate report ─────────────────────────────────────────────────────
     static string Pct(int num, int den) => den == 0 ? "  -  " : $"{100.0 * num / den,4:0}%";
 
+    // W2: paired per-slot outcomes over CAMPAIGN runs — a slot pairs when it has exactly one
+    // greedy and one sloppy leg (the batch's normal shape). Shared by Report + BuildSummary.
+    // Review fix: keyed by (Slot, Heat), not Slot alone — chunks sharing a BALANCE_BASE across
+    // different heat pins would otherwise collide slot ids and dissolve into 4-run non-pairs.
+    static (int pairs, int concordant, int greedyOnlyWon, int sloppyOnlyWon) PairedOutcomes(List<RunRec> campRuns)
+    {
+        var pairs = campRuns.Where(r => r.Slot >= 0)
+            .GroupBy(r => (r.Slot, r.Heat))
+            .Select(g => (g: g.Where(r => r.Policy == "greedy").ToList(),
+                          s: g.Where(r => r.Policy == "sloppy").ToList()))
+            .Where(p => p.g.Count == 1 && p.s.Count == 1)
+            .Select(p => (gWin: p.g[0].Win, sWin: p.s[0].Win))
+            .ToList();
+        return (pairs.Count,
+                pairs.Count(p => p.gWin == p.sWin),
+                pairs.Count(p => p.gWin && !p.sWin),
+                pairs.Count(p => !p.gWin && p.sWin));
+    }
+
     // APEX W4: small order stats for the endless wave-depth distribution. Nearest-rank
     // percentile over a pre-sorted list; median = P50 averaged across the middle pair.
     static double MedianOf(List<int> sorted)
@@ -318,6 +366,17 @@ public static class Stats
             // negative gap is just small-sample noise (sloppy got lucky) — gather more runs.
             string verdict = gW - sW > 15 ? "swingy/unforgiving" : (Math.Abs(gW - sW) <= 15 ? "healthy slack" : "noisy (need more runs)");
             sb.AppendLine($"  GAP {gW - sW,4:0} pts  ({verdict})");
+            // ── W2 CRN pairing: report the gap as PAIRED per-slot outcomes ─────────────
+            // Both policy legs of a slot replayed the SAME world (Util.Reseed(50000+slot)), so
+            // the slot-level comparison cancels the world-to-world variance that made unpaired
+            // gap readings swing ±27-38 pts. Concordant = both legs same outcome; discordant
+            // pairs are the signal (greedy-only wins − sloppy-only wins) / pairs.
+            var (nPairs, conc, dPlus, dMinus) = PairedOutcomes(campRuns);
+            if (nPairs > 0)
+            {
+                double pairedGap = 100.0 * (dPlus - dMinus) / nPairs;
+                sb.AppendLine($"  PAIRED (same-seed slots): pairs={nPairs}  concordant={conc}  discordant greedy-only-won={dPlus} / sloppy-only-won={dMinus}  paired gap {pairedGap,4:0} pts");
+            }
             // per-objective gap so a single brittle objective can't hide in the overall number
             sb.AppendLine("  by objective (greedy / sloppy / gap):");
             var objs = campRuns.SelectMany(r => r.Missions.Select(m => m.Objective)).Distinct().OrderBy(o => o);
@@ -405,6 +464,44 @@ public static class Stats
             foreach (var g in missions.Where(m => !m.Win && !string.IsNullOrEmpty(m.LossCause))
                                        .GroupBy(m => m.LossCause).OrderByDescending(g => g.Count()))
                 sb.AppendLine($"  {g.Key,-22}: {g.Count()}");
+
+            // ── W2: WIN/TURNS BY ARENA (authored-layout telemetry) ────────────────────
+            // Layout is the authored template index Mission.Build actually APPLIED (recorded
+            // only after the connectivity guard accepted it; -1 = procedural fallback). Rows
+            // filtered to n>=3 so single-sight arenas don't read as 0%/100% outliers.
+            int procN = missions.Count(m => m.Layout < 0);
+            sb.AppendLine($"\nMISSION WIN-RATE BY ARENA (authored layouts, n>=3; procedural fallback {Pct(procN, missions.Count)} of {missions.Count} missions):");
+            foreach (var g in missions.Where(m => m.Layout >= 0).GroupBy(m => m.Layout)
+                                       .Where(g => g.Count() >= 3).OrderBy(g => g.Key))
+                sb.AppendLine($"  arena {g.Key,2}: {Pct(g.Count(m => m.Win), g.Count())}  (n={g.Count()}, avg {g.Average(m => (double)m.Turns):0.0} turns)");
+            if (procN >= 3)
+                sb.AppendLine($"  procedural: {Pct(missions.Count(m => m.Layout < 0 && m.Win), procN)}  (n={procN}, avg {missions.Where(m => m.Layout < 0).Average(m => (double)m.Turns):0.0} turns)");
+        }
+
+        // ── W2: ACTION MIX (verbs issued, split by policy) ───────────────────────────
+        // What each policy actually DOES — makes the reactive verbs (FOCUS/BRACE) and the
+        // support verbs (PATCH/DRAG/REARM/items) visible to measurement, and shows how the
+        // sloppy policy's slips shift the mix. Percentages are within each policy's total.
+        if (_actionsByPolicy.Count > 0)
+        {
+            var policies = _actionsByPolicy.Keys.OrderBy(p => p).ToList();
+            var verbs = _actionsByPolicy.Values.SelectMany(d => d.Keys).Distinct()
+                .OrderByDescending(v => _actionsByPolicy.Values.Sum(d => d.GetValueOrDefault(v))).ToList();
+            sb.AppendLine("\nACTION MIX (verbs issued, by policy):");
+            sb.Append("  verb          ");
+            foreach (var p in policies) sb.Append($"{p,14}");
+            sb.AppendLine();
+            var totals = policies.ToDictionary(p => p, p => _actionsByPolicy[p].Values.Sum());
+            foreach (var v in verbs)
+            {
+                sb.Append($"  {v,-14}");
+                foreach (var p in policies)
+                {
+                    int n = _actionsByPolicy[p].GetValueOrDefault(v);
+                    sb.Append($"{n,8} {Pct(n, Math.Max(1, totals[p]))}");
+                }
+                sb.AppendLine();
+            }
         }
 
         // Damage / accuracy by player class (ALL modes — combat-kernel data is mode-agnostic)
@@ -512,6 +609,10 @@ public static class Stats
         WinRateTable("RUN WIN-RATE BY BOON (campaign runs holding it)", r => r.BoonsPicked);
         WinRateTable("RUN WIN-RATE BY SPEC (campaign runs fielding it)", r => r.SpecsPicked);
         WinRateTable("RUN WIN-RATE BY CONTRACT (campaign runs under it)", r => r.ContractsPicked);
+        // W2: perk + purchase VALUE tables (frequency alone hid whether a pick actually helps —
+        // the perk offer and the shop slate both got randomized exposure for exactly this table).
+        WinRateTable("RUN WIN-RATE BY PERK (campaign runs holding it)", r => r.PerksPicked);
+        WinRateTable("RUN WIN-RATE BY PURCHASE (campaign runs buying it)", r => r.Purchases);
 
         sb.AppendLine("═══════════════════════════════════════════════════════════════════════");
         return sb.ToString();
@@ -630,6 +731,9 @@ public static class Stats
                 sloppyRuns = sloppy.Count, sloppyWinRate = sloppyWin,
                 gap = Math.Round(greedyWin - sloppyWin, 1)
             },
+            // W2 CRN pairing: same-seed slot outcomes (variance-cancelled gap). pairedGap =
+            // (greedyOnlyWon − sloppyOnlyWon) / pairs — the number the flywheel should trend.
+            pairedPolicy = BuildPaired(campRuns),
             // APEX W4: LAST STAND depth distribution (empty/zeroed when the batch had no endless runs).
             endless = new
             {
@@ -668,6 +772,21 @@ public static class Stats
             {
                 mission = g.Key, n = g.Count(), winRate = WinRate(g)
             }).ToList(),
+            // W2 arena telemetry: authored layout index (-1 rows are folded into proceduralRate)
+            byArena = missions.Where(m => m.Layout >= 0).GroupBy(m => m.Layout).OrderBy(g => g.Key).Select(g => new
+            {
+                arena = g.Key, n = g.Count(), winRate = WinRate(g), avgTurns = Math.Round(g.Average(m => (double)m.Turns), 1)
+            }).ToList(),
+            proceduralFallback = new
+            {
+                n = missions.Count(m => m.Layout < 0),
+                rate = missions.Count == 0 ? 0.0 : Math.Round(100.0 * missions.Count(m => m.Layout < 0) / missions.Count, 1),
+                winRate = WinRate(missions.Where(m => m.Layout < 0))
+            },
+            // W2 ACTION MIX: verb counts by policy (what each policy actually does)
+            actionMix = _actionsByPolicy.OrderBy(kv => kv.Key).ToDictionary(
+                kv => kv.Key,
+                kv => kv.Value.OrderByDescending(v => v.Value).ToDictionary(v => v.Key, v => v.Value)),
             lossCauses = missions.Where(m => !m.Win && !string.IsNullOrEmpty(m.LossCause))
                                  .GroupBy(m => m.LossCause).OrderByDescending(g => g.Count())
                                  .ToDictionary(g => g.Key, g => g.Count()),
@@ -699,6 +818,21 @@ public static class Stats
             winRateByBoon = WinRateBy(r => r.BoonsPicked),
             winRateBySpec = WinRateBy(r => r.SpecsPicked),
             winRateByContract = WinRateBy(r => r.ContractsPicked),
+            // W2: pick VALUE for perks + shop purchases too (both got randomized exposure)
+            winRateByPerk = WinRateBy(r => r.PerksPicked),
+            winRateByPurchase = WinRateBy(r => r.Purchases),
+        };
+    }
+
+    // W2: the paired-outcome object for the JSON artifact (mirrors the PAIRED report line).
+    static object BuildPaired(List<RunRec> campRuns)
+    {
+        var (pairs, concordant, dPlus, dMinus) = PairedOutcomes(campRuns);
+        return new
+        {
+            pairs, concordant,
+            greedyOnlyWon = dPlus, sloppyOnlyWon = dMinus,
+            pairedGap = pairs == 0 ? 0.0 : Math.Round(100.0 * (dPlus - dMinus) / pairs, 1)
         };
     }
 }

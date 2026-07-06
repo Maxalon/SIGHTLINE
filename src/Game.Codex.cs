@@ -80,7 +80,12 @@ public partial class Game
     public void DebugCodex()
     {
         BeginCodex();
-        CodexTab = 0;      // ENEMIES (has glyph previews)
+        // W11: select ENEMIES by NAME — tab 0 is now FIELD CRAFT, so a fixed index would frame
+        // the rules tab instead of the bestiary silhouettes this hook exists to verify.
+        // SIGHTLINE_CODEXTAB=<i> overrides (e.g. 0 frames FIELD CRAFT); shot-mode only like the hook.
+        CodexTab = Math.Max(0, CodexCats.FindIndex(c => c.Name == "ENEMIES"));
+        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_CODEXTAB"), out int tabEnv))
+            CodexTab = Math.Clamp(tabEnv, 0, CodexCats.Count - 1);
         _codexPrior = Phase.Intro;
     }
 

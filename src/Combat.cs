@@ -189,7 +189,7 @@ public static class Combat
         PrepFaction = Faction.None;
         PressureAim = 0;
         AllUnits = System.Array.Empty<Unit>();
-        RunBoons = runBoons == null ? new System.Collections.Generic.HashSet<Boon>() : new System.Collections.Generic.HashSet<Boon>(runBoons);
+        RefreshRunBoons(runBoons);
         // W6b — the AI coordination tier is mission-scoped like the statics above: cleared here
         // (SetupMission re-publishes it unconditionally) so a NO QUARTER run's Tier 2 can never
         // bleed into a subsequent heat-0 SKIRMISH/DAILY or a harness scene.
@@ -200,6 +200,15 @@ public static class Combat
     public static void EndRun()
     {
         EndMission(null);
+    }
+
+    /// Republish the RUN-scoped boons to the static combat reads MID-mission (W1 mode-seam). LAST
+    /// STAND's mid-stand boon pick resolves inside the wave loop — the stand never passes through
+    /// EndMission/BeginMission between waves, so a ChooseBoon there was invisible to ComputeOdds
+    /// until this refresh. Mirrors EndMission's republish exactly.
+    public static void RefreshRunBoons(System.Collections.Generic.IEnumerable<Boon> runBoons)
+    {
+        RunBoons = runBoons == null ? new System.Collections.Generic.HashSet<Boon>() : new System.Collections.Generic.HashSet<Boon>(runBoons);
     }
 
     // Legion (shock assault): a closing enemy within close range hits harder. Modest — these stack

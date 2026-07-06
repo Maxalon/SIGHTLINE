@@ -45,6 +45,7 @@ public partial class Game
     /// setup contract (EnsureMetaLoaded, heat from PendingHeat / SIGHTLINE_HEAT under NoPersist).
     public void BeginEndless()
     {
+        ResetModeState();   // W1 mode-seam: inherit nothing from a prior mode (daily seed/arena, flags)
         Mode = GameMode.Endless;
         EnsureMetaLoaded();
         _run = new Run();
@@ -199,7 +200,7 @@ public partial class Game
             bool beatBoon = Wave % 5 == 0;
             if (beatPromote || beatBoon) _run.Report.Clear();   // fresh mid-stand report (no stale debrief)
             if (beatPromote) _run.PromoteEligible();
-            if (beatBoon) _run.GenerateBoonOffer();
+            if (beatBoon) _run.GenerateBoonOffer(endless: true);   // W1: no structurally-inert picks mid-stand
             if (_run.PendingPerks.Count > 0 || _run.PendingSpecs.Count > 0 || _run.BoonOffer.Count > 0)
             {
                 _shopDone = true;         // never the requisition shop mid-stand (offers only)
@@ -424,6 +425,35 @@ public partial class Game
                 fails.Add("offersUnresolved");
             if (vet.Rank <= rank0) fails.Add("rankLost");
 
+            // (3c2) W1 mode-seam: a MID-STAND BOON PICK must reach the static combat reads. Stage the
+            // wave-5 boon beat with a pinned FORTIFIED offer, resolve it through the detour, and
+            // assert Combat.RunBoons carries it the moment the next wave spawns (pre-W1 nothing
+            // republished between waves, so the pick was cosmetic until the stand ended). Also pin
+            // the endless offer filter: GHOST / RAPID DEPLOY are structurally inert mid-stand.
+            foreach (var e in Enemies) { e.Hp = 0; e.Alive = false; }
+            Wave = 5;                                   // the every-5th-cleared-wave boon beat
+            _waveClearHandled = false;
+            AutoPlay = true;
+            CheckEndless();                             // queues a boon offer -> Barracks detour
+            if (Phase != Phase.Barracks) fails.Add("noBoonDetour");
+            if (_run.BoonOffer.Count == 0) fails.Add("noBoonOffered");
+            if (_run.BoonOffer.Contains(Boon.Ghost) || _run.BoonOffer.Contains(Boon.RapidDeploy))
+                fails.Add("inertBoonOffered");
+            _run.BoonOffer.Clear(); _run.BoonOffer.Add(Boon.Fortified);   // pin the autoplay pick
+            pump = 0;
+            while (Phase == Phase.Barracks && pump++ < 600) Update(1f / 60f);
+            AutoPlay = false;
+            if (Phase != Phase.PlayerTurn) fails.Add($"boonDetourStuck(phase={Phase})");
+            if (!_run.HasBoon(Boon.Fortified)) fails.Add("fortifiedNotAdopted");
+            if (!Combat.RunBoons.Contains(Boon.Fortified)) fails.Add("fortifiedNotPublished");
+            for (int i = 0; i < 20; i++)                // the filter holds across many rolls
+            {
+                _run.GenerateBoonOffer(endless: true);
+                if (_run.BoonOffer.Contains(Boon.Ghost) || _run.BoonOffer.Contains(Boon.RapidDeploy))
+                { fails.Add("inertBoonRolled"); break; }
+            }
+            _run.BoonOffer.Clear();                     // leave no live offer for the later legs
+
             // (3d) APEX W7 "an ending": waves past saturation inject one extra ELITE (morale-
             // exempt PodId=-1, explicit grenade load) and the between-wave mend decays to zero.
             foreach (var e in Enemies) { e.Hp = 0; e.Alive = false; }
@@ -476,7 +506,7 @@ public partial class Game
         }
         catch (Exception e) { return "HORDETEST: FAIL (exception " + e.Message + ")"; }
         return fails.Count == 0
-            ? "HORDETEST: PASS (wave count/scale escalate + alive-cap holds; opener grace; endless skips the pressure clock; mid-stand promotions resolve through the Barracks detour w/o double-sustain or node-picks; deep waves inject an ELITE + heal decays to zero; meta BestWave round-trips)"
+            ? "HORDETEST: PASS (wave count/scale escalate + alive-cap holds; opener grace; endless skips the pressure clock; mid-stand promotions resolve through the Barracks detour w/o double-sustain or node-picks; mid-stand boon picks republish to Combat.RunBoons + inert boons filtered; deep waves inject an ELITE + heal decays to zero; meta BestWave round-trips)"
             : "HORDETEST: FAIL (" + string.Join(",", fails) + ")";
     }
 }
