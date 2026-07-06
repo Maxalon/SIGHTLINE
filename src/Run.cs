@@ -530,11 +530,15 @@ public class Run
         // SIGNAL W5 — FINALE KIT: stamp the Boss node's faction (overriding the deliberate None
         // above) so the capstone is one of three DISTINCT kits — the stamp activates the faction's
         // combat warp AND routes the m6 rank-and-file through FactionRoster, and Mission.SpawnEnemies
-        // keys the named boss + explicit retinue off it. Chosen deterministically from the SEEDED rng
-        // (kit == f(MapSeed): round-trips on load), and drawn LAST — appended AFTER the edge wiring so
-        // every prior draw (kinds, events, mid-node factions, edges) is stream-identical to the
-        // pre-W5 generator and an old mid-run save regenerates its exact map, plus a kit.
-        StampFinaleKit(facPool[rng.Next(facPool.Length)]);
+        // keys the named boss + explicit retinue off it. Chosen from an AVALANCHE HASH of the seed,
+        // NOT an rng.Next draw: .NET Random streams with nearby seeds stay correlated for many
+        // draws, and the balance flywheel's paired slots (Util.Reseed(50000+i) -> MapSeed -> this
+        // rng) measurably collapsed the kit onto one faction (16/4/0 over 20 seeds). The mix is a
+        // pure function of MapSeed (round-trips on load) and takes ZERO draws from `rng`, so the
+        // whole generator stream stays byte-identical to the pre-W5 version.
+        uint kh = (uint)seed;
+        kh ^= kh >> 16; kh *= 0x45d9f3bu; kh ^= kh >> 16; kh *= 0x45d9f3bu; kh ^= kh >> 16;
+        StampFinaleKit(facPool[kh % (uint)facPool.Length]);
     }
 
     /// SIGNAL W5 — stamp the campaign FINALE KIT: the single Boss node (always the map's last node,

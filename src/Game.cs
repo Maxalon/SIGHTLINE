@@ -879,6 +879,10 @@ public partial class Game
                 else Console.WriteLine($"HARNESS: unknown SIGHTLINE_FINALE '{fin}' — kit unpinned");
             }
         }
+        // SIGNAL W5 measurement: surface this run's (seed-chosen or pinned) FINALE KIT to the
+        // balance-batch log so per-seed kit reachability is countable. No-op outside the flywheel.
+        if (Stats.Enabled && _run.Map.Count > 0)
+            Console.WriteLine($"FINALE-KIT: {_run.Map[_run.Map.Count - 1].Faction}");
         Players = _run.Squad;
         int n = Util.Clamp(startAt, 1, Run.MaxMissions);
         if (n > 1) _run.JumpTo(n);           // harness: advance along the map to the requested op
@@ -1029,11 +1033,13 @@ public partial class Game
         // also bites from mission 1), not a quantitative delta. The LAST STAND wave path
         // (SpawnEndlessWave) raises it as a stand deepens.
         Ai.Tier = Sightline.Heat.AiTier(heat);
-        // SIGNAL W5 — m6 bite: the campaign FINALE plays SMARTER, not just statier — raise the
-        // coordination-tier floor to 1 for the boss mission (heats 6+ keep their higher tier).
-        // Campaign-only: SKIRMISH/DAILY/LAST STAND never reach a finale through this path, and
-        // no SIGHTLINE_*TEST sets it (they run mission 1), so the harness stays byte-stable.
-        if (Mode == GameMode.Campaign && n >= Run.MaxMissions) Ai.Tier = Math.Max(Ai.Tier, 1);
+        // SIGNAL W5 — the spec's finale Ai.Tier raise (floor the coordination tier at 1 for the
+        // boss mission) was implemented and then MEASURED OUT: with it, the finale INVERTED the
+        // policy ordering at heat 0 (greedy paired completion 80% -> 45% while sloppy held 70% ->
+        // 75%) — the tier-1 focus-fire collapse punishes exactly the aggressive optimal policy,
+        // recreating the punish-gap failure UNDERTOW closed. The m6 bite ships as the kit
+        // signatures + the count restore instead; heats 6+ still bring their own tier via the
+        // Heat row above. (Revisit only with flywheel evidence that the inversion is gone.)
         int heatEnemy = Sightline.Heat.EnemyDelta(heat);
         int heatStat  = Sightline.Heat.StatDelta(heat);
         int heatDmg   = Sightline.Heat.DmgDelta(heat);   // W6c: rung-8 +1 enemy damage (0 below the apex)

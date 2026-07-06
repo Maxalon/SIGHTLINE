@@ -157,12 +157,20 @@ public static class Ai
         if (e.HasSiege && e.ChargeTurns == 0)
         {
             var (bx, by, hits) = BestSiege(g, e);
-            if (hits >= 1)
+            // A siege-armed BOSS (an ELITE carrying the flag) only shells a genuine CLUSTER (2+
+            // soldiers): unlike the 7-HP rank-and-file BOMBARD — whose fairness is that it dies to
+            // one focused turn — a 20-HP guarded boss raining a no-LoS shell EVERY turn taxed
+            // position relentlessly (measured: the first-cut Legion finale sank to a 37%
+            // conditional). The cluster gate makes SPREAD OUT the counter-verb, and on non-shelling
+            // turns the boss fights its real ELITE turn (move/Lmg/frag) instead of standing
+            // statically at the board edge. Rank-and-file keeps its hits>=1 gate exactly.
+            int need = e.Cls == "BOMBARD" ? 1 : 2;
+            if (hits >= need)
             {
                 var sp = new EnemyPlan { SiegeCharge = (bx, by) };   // no move, no shot — the charge is the action
                 return sp;
             }
-            // else: fall through to the generic combat loop (advance / fallback SMG shot / hunker).
+            // else: fall through to the generic combat loop (advance / fallback shot / hunker).
         }
 
         // COORDINATION 2 — SELF-PRESERVATION / FIGHTING RETREAT (decision):

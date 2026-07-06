@@ -397,13 +397,16 @@ public static class Mission
         // below). Net at heat 0: 8 hostiles incl. the boss (was 12), supporters at +5 not +6.
         if (n >= Run.MaxMissions)
         {
-            // SIGNAL W5 — m6 bite: with a FINALE KIT active (the Boss node is faction-stamped by
-            // Run.GenerateMap, so the faction roster + combat warp + kit boss/retinue are all live)
-            // restore 2 of the 4 de-stacked bodies. The de-stack fixed a ~90%-loss wall, but it
-            // overshot: the finale measured 96% conditional (the easiest fight after m3) — a
-            // formality, not a climax. An UNSTAMPED finale (the Faction.None safety fallback:
-            // harness paths that never walk the map) keeps the old count-4 exactly.
-            count = Math.Max(5, count - (Combat.MissionFaction != Faction.None ? 2 : 4));
+            // SIGNAL W5 — m6 bite, MEASURED SIZE (paired flywheel, h0 slots 0-19): the finale is
+            // startlingly body-count sensitive. With the kits live: restore +2 bodies (count-2) ->
+            // m6 70-76% conditional and h0 run completion 75% -> 60% (3x the -5pt dip budget);
+            // restore 0 (count-4) -> m6 100% (a formality again — the kit retinues are support
+            // pieces and the faction rosters run softer than the mixed m6 cascade). Restore +1
+            // (count-3) is the measured middle: m6 ~85-88%, completion ~70% (dip ~-5, on budget).
+            // With m1-m5 untouched, the dip budget pins m6 to the TOP of the 80-88 band by
+            // construction (h0 completion >= 70% requires m6 >= ~85%). An UNSTAMPED finale (the
+            // Faction.None safety fallback) keeps the old count-4 exactly.
+            count = Math.Max(5, count - (Combat.MissionFaction != Faction.None ? 3 : 4));
             bump = Math.Max(0, n - 1);                       // drop the boss-card/heat StatDelta for the screen
         }
         var rows = new List<int>();
@@ -813,33 +816,42 @@ public static class Mission
 
     /// The capstone named boss (m6), keyed by the Boss node's stamped faction (the FINALE KIT).
     /// Wardens keeps today's WARLORD fight (the reference kit: the enrage brick — burst/focus);
-    /// Legion fields a heavier siege-armed SIEGELORD (mid-boss statline 14+2n) whose strikes force
-    /// RELOCATION while the rush faction closes; Syndicate a shield-arced SPYMASTER that must be
-    /// FLANKED behind its screen cell. Faction.None == today's WARLORD exactly.
+    /// Legion fields a siege-armed SIEGELORD whose strikes force RELOCATION while the rush faction
+    /// closes; Syndicate a shield-arced SPYMASTER that must be FLANKED behind its screen cell.
+    /// Faction.None == today's WARLORD exactly.
+    ///
+    /// MEASURED TUNE (flywheel, h0+h2 paired slots 0-9, vs the 80-88%-conditional target):
+    ///  * the spec's first-cut Legion kit (WARDEN-stat 14+2n boss + LANCER/BOMBARD retinue)
+    ///    measured 37% — the every-turn boss strike, a SECOND real artillery and the Legion
+    ///    close-range warp taxed the same resource (position) three times over. The shipped kit
+    ///    keeps the identity (one telegraphed strike per turn to dodge) on the standard boss
+    ///    statline, escorted by a LANCER pair instead of the BOMBARD.
+    ///  * the SPYMASTER runs one HP step lighter (12+n): behind a re-facing shield arc + the HVT
+    ///    guards + a screen cell it measured 73% at 14+n — and a spymaster is a skulker, not a brick.
     static Unit MakeFinaleBoss(int n, int x, int y)
     {
         // (On the WARLORD statline history: HP 20+2n -> 14+n, aim 72 -> 68 — mission-6 was a
         // ~90%-loss wall; every kit boss keeps 68 aim and a 1-frag pouch via the ELITE branches.)
         return Combat.MissionFaction switch
         {
-            Faction.Legion    => ArmSiege(MakeHostile("SIEGELORD", "ELITE", WeaponKind.Lmg, 14 + n * 2, 68, 6, x, y)),
-            Faction.Syndicate => ArmShield(MakeHostile("SPYMASTER", "ELITE", WeaponKind.Lmg, 14 + n, 68, 6, x, y)),
+            Faction.Legion    => ArmSiege(MakeHostile("SIEGELORD", "ELITE", WeaponKind.Lmg, 14 + n, 68, 6, x, y)),
+            Faction.Syndicate => ArmShield(MakeHostile("SPYMASTER", "ELITE", WeaponKind.Lmg, 12 + n, 68, 6, x, y)),
             _                 => MakeHostile("WARLORD", "ELITE", WeaponKind.Lmg, 14 + n, 68, 6, x, y),
         };
     }
 
     /// The finale kit's EXPLICIT retinue (slots i==1/2, right behind the boss). Legion escorts its
-    /// siege-lord with a phalanx anchor + the force's one REAL artillery piece; Syndicate screens
-    /// its spymaster with a lane-blinding zoner + a leaper. Wardens (today's fight) and None return
-    /// null — the roster/cascade fills every slot, exactly as before.
+    /// siege-lord with a LANCER phalanx pair (measured tune — see MakeFinaleBoss: pairing the boss's
+    /// strikes with a second real artillery piece sank the kit to a 37% conditional; the boss IS the
+    /// kit's artillery); Syndicate screens its spymaster with a lane-blinding zoner + a leaper.
+    /// Wardens (today's fight) and None return null — the roster/cascade fills every slot as before.
     static Unit MakeFinaleRetinue(int i, int n, int bump, int x, int y)
     {
         if (i > 2) return null;
         switch (Combat.MissionFaction)
         {
-            case Faction.Legion:
-                if (i == 1) return MakeHostile("HOPLITE", "LANCER", WeaponKind.Rifle, 7 + bump, 58 + bump, 5, x, y);
-                return MakeHostile("SIEGE", "BOMBARD", WeaponKind.Smg, 7 + bump, 48 + bump, 4, x, y);   // sets siegeSpawned via the cap below
+            case Faction.Legion:                       // a phalanx pair (both retinue slots)
+                return MakeHostile("HOPLITE", "LANCER", WeaponKind.Rifle, 7 + bump, 58 + bump, 5, x, y);
             case Faction.Syndicate:
                 if (i == 1)
                 {
