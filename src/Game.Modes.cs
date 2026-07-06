@@ -242,8 +242,10 @@ public partial class Game
                 if (EvacZone.Contains((Vip.X, Vip.Y))) EndSkirmish(true);
                 break;
             case Objective.Rescue:
-                if (!CaptiveLocked && (Vip == null || !Vip.Alive)) { EndSkirmish(false); return; }
-                if (!CaptiveLocked && Vip != null && EvacZone.Contains((Vip.X, Vip.Y))) EndSkirmish(true);
+                // W4 (SIGNAL) belt-and-braces (mirrors the campaign CheckEnd): a dead captive is a
+                // loss even while still caged — a caged death must never soft-lock the skirmish.
+                if (Vip == null || !Vip.Alive) { EndSkirmish(false); return; }
+                if (!CaptiveLocked && EvacZone.Contains((Vip.X, Vip.Y))) EndSkirmish(true);
                 break;
             case Objective.Defend:
                 if (_turnCount > DefendTurns) EndSkirmish(true);

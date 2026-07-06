@@ -1286,10 +1286,14 @@ public partial class Game
     /// SIGHTLINE_RESCUETEST — APEX W2: the Rescue captive's cage is real. Asserts (1) the caged
     /// captive is ACTIONLESS at mission setup AND at the start-of-turn re-grant (it used to be fully
     /// player-controllable — an invulnerable unit that could walk itself to the squad and self-trigger
-    /// its rescue), (2) freeing it (TryFreeCaptive) restores actions + movement, (3) the abandoned-cage
-    /// soft-lock resolves: all soldiers dead while caged is an immediate CAPTIVE ABANDONED loss at
-    /// mission 1, a checkpoint reinforcement redeploy at mission 3+, and an EndSkirmish(false) loss in
-    /// SKIRMISH mode (which can roll Rescue). Tiny window (tile math). Returns a one-line report.
+    /// its rescue), (1c — SIGNAL W4) the caged captive is truly INVULNERABLE to the source-less paths:
+    /// TickHazards never ignites it and EnvDamage bounces (fire/shove could kill it into an
+    /// unwinnable-unlosable soft-lock), (2) freeing it (TryFreeCaptive) restores actions + movement,
+    /// (2b — SIGNAL W4) the freed captive is leash-owned (LeashVip's Rescue arm walks it; the caged
+    /// state never moves), (3) the abandoned-cage soft-lock resolves: all soldiers dead while caged is
+    /// an immediate CAPTIVE ABANDONED loss at mission 1, a checkpoint reinforcement redeploy at
+    /// mission 3+, and an EndSkirmish(false) loss in SKIRMISH mode (which can roll Rescue). Tiny
+    /// window (tile math). Returns a one-line report.
     public string RescueSelfTest()
     {
         NoPersist = true;
@@ -1307,6 +1311,22 @@ public partial class Game
         StartPlayerTurn();
         if (Vip.CanAct) fails.Add("cagedCanActAtTurnStart");
 
+        // (1c) W4 (SIGNAL) soft-lock: fire can NEVER cook the caged captive. TickHazards must not
+        // ignite it (Burning skip), and the source-less damage funnel (EnvDamage) must refuse to
+        // scratch it — a caged death has no reachable loss (CheckEnd's Rescue-loss test only sees a
+        // freed asset... belt-and-braces aside) and used to soft-lock the mission.
+        int cagedHp = Vip.Hp;
+        Grid.LightFire(Vip.X, Vip.Y, Grid.FireTurns);
+        TickHazards();
+        if (Vip.HasStatus(StatusKind.Burning)) fails.Add("cagedIgnitedByHazard");
+        Vip.AddStatus(StatusKind.Burning, 2);                  // force the status anyway: the DoT must still bounce
+        TickStatuses(Vip);
+        EnvDamage(Vip, 99, "BURN", Pal.RGBA(255, 140, 40));    // and the funnel itself refuses
+        if (Vip.Hp != cagedHp) fails.Add($"cagedBurnedHp={Vip.Hp}vs{cagedHp}");
+        if (!Vip.Alive) fails.Add("cagedCaptiveDied");
+        Vip.Statuses.Clear();
+        Grid.ClearHazards();
+
         // (2) freeing restores actions + movement (TryFreeCaptive -> Mobility 6 + Vip.BeginTurn)
         var sol = Players.First(p => p.Alive && !p.IsVip);
         bool seated = false;
@@ -1323,6 +1343,40 @@ public partial class Game
         if (CaptiveLocked) fails.Add("adjacentDidNotFree");
         if (!Vip.CanAct) fails.Add("freedStillActionless");
         if (Vip.Mobility <= 0) fails.Add($"freedNoMobility={Vip.Mobility}");
+
+        // (2b) W4 (SIGNAL) — the FREED captive is LEASH-OWNED: LeashVip's new Rescue arm walks it
+        // toward the squad via real MoveStepAnims (the Escort de-drag treatment), and the CAGED
+        // state NEVER moves (the cage holds until a soldier springs it — the leash must not drag
+        // the asset out of its own cage). Controlled all-floor scene (BEACONTEST's drain pattern);
+        // stage (3a) below rebuilds a real mission, so trashing the scene here is safe.
+        void Pump()
+        {
+            while (_anims.Count > 0)
+            {
+                var a = _anims[0]; a.OnStart(this);
+                for (int i = 0; i < 200 && !a.Update(this, 0.05f); i++) { }
+                if (_anims.Count > 0 && _anims[0] == a) _anims.RemoveAt(0);
+            }
+        }
+        Grid = new Grid();
+        Players = new System.Collections.Generic.List<Unit>();
+        Enemies = new System.Collections.Generic.List<Unit>();
+        Objective = Objective.Rescue;
+        Mode = GameMode.Campaign;
+        EvacZone.Clear();                               // no zone: the leash tags along to the soldier
+        var walker = new Unit { Name = "S", Cls = "ASSAULT", Team = Team.Player, X = 14, Y = 5,
+                                Hp = 8, MaxHp = 8, Aim = 65, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+        walker.Ammo = walker.Weapon.Clip; walker.SyncPos(); walker.BeginTurn();
+        Vip = Mission.MakeVip(1); Vip.Name = "CAPTIVE"; Vip.X = 3; Vip.Y = 5; Vip.SyncPos(); Vip.BeginTurn();
+        Players.Add(walker); Players.Add(Vip);
+        _anims.Clear();
+        CaptiveLocked = true;                           // still caged: the leash must HOLD it
+        LeashVip(); Pump();
+        if (!(Vip.X == 3 && Vip.Y == 5)) fails.Add("leashMovedCagedCaptive");
+        CaptiveLocked = false;                          // freed: the leash walks it toward the squad
+        int leash0 = Util.ChebyDist(Vip.X, Vip.Y, walker.X, walker.Y);
+        LeashVip(); Pump();
+        if (Util.ChebyDist(Vip.X, Vip.Y, walker.X, walker.Y) >= leash0) fails.Add("freedCaptiveNotLeashed");
 
         // (3a) campaign, mission 1: all soldiers dead while STILL caged -> immediate loss (the
         // checkpoint valve needs mission >= 3), with the distinct CAPTIVE ABANDONED cause.
@@ -1355,7 +1409,7 @@ public partial class Game
         if (Phase != Phase.Lose) fails.Add($"skirmishAbandonPhase={Phase}");
 
         return fails.Count == 0
-            ? "RESCUETEST: PASS (caged captive actionless at setup + turn start; freeing restores actions/movement; abandoned cage = m1 loss, m3 checkpoint redeploy, skirmish loss)"
+            ? "RESCUETEST: PASS (caged captive actionless at setup + turn start; fire/EnvDamage can't touch the cage; freeing restores actions/movement; freed captive leash-walks, caged never; abandoned cage = m1 loss, m3 checkpoint redeploy, skirmish loss)"
             : "RESCUETEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
