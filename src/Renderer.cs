@@ -1651,10 +1651,14 @@ public static class Renderer
     /// cards) — presentation only, reuses the exact same DrawSilhouette shapes the board uses so the
     /// codex art can never drift from the in-game art. `cls` is the archetype string (e.g. "SNIPER"),
     /// `ang` the facing in radians (default east). No Unit/board state is touched.
+    // W12 review: one cached stub instead of a fresh Unit (+6 backing Lists) per call — the glyph
+    // now runs per-frame in the roster chips (x6), so the allocation was hot-path. DrawSilhouette
+    // reads ONLY u.Cls, and rendering is single-threaded, so per-call reassignment is safe.
+    static readonly Unit _codexGlyphStub = new Unit();
     public static void DrawCodexGlyph(string cls, Vector2 p, Color c, float scale, float ang = 0f)
     {
-        var stub = new Unit { Cls = cls };
-        DrawSilhouette(stub, p, c, 1f, scale, ang);
+        _codexGlyphStub.Cls = cls;
+        DrawSilhouette(_codexGlyphStub, p, c, 1f, scale, ang);
     }
 
     // A filled triangle that is robust to vertex winding: Raylib's DrawTriangle backface-culls by

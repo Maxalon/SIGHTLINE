@@ -854,6 +854,10 @@ public partial class Game
         }
         _run.DebriefSurvivors();
         if (_run.Squad.Count > 0) _run.Squad[0].Wound = 2;   // show the WOUNDED dossier line
+        // W12: pin the offered pair (the roll is clock-seeded) so the shot is reproducible and
+        // exercises both delta-line shapes: LOCK-ON (conditional aim) + TANK (flat before>after).
+        if (_run.PendingPerks.Count > 0)
+        { _run.PendingPerks[0].A = Perk.LockOn; _run.PendingPerks[0].B = Perk.Tank; }
         Phase = Phase.Barracks;
     }
 
@@ -881,10 +885,29 @@ public partial class Game
 
     /// Harness hook (screenshot only): show the branching campaign map mid-run with a
     /// couple of columns already cleared, the shop/perks skipped.
+    /// W12 extremes staging (pair with SIGHTLINE_CAMPAIGN=1):
+    ///   SIGHTLINE_ROSTER=<n>  grows the squad to n soldiers (recruits, name-deduped) so the
+    ///                         barracks panel's WORST-CASE height (6 rows) can be screenshot;
+    ///   SIGHTLINE_REPORT=<n>  pads the debrief to n report lines (the 5-line display cap).
     public void DebugCampaignMap()
     {
         _run.JumpTo(3);                  // visit cols 0-2; current sits at mission 3
         _run.DebriefSurvivors();
+        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_ROSTER"), out int nRoster))
+        {
+            var taken = new HashSet<string>();
+            foreach (var u in _run.Squad) taken.Add(u.Name);
+            while (_run.Squad.Count < Math.Min(nRoster, 6))
+            {
+                var rec = Mission.MakeRecruit(taken);
+                taken.Add(rec.Name);
+                rec.Benched = _run.Deployed.Count >= _run.NextDeployCap;   // stay inside the deploy cap
+                _run.Squad.Add(rec);
+            }
+        }
+        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_REPORT"), out int nReport))
+            while (_run.Report.Count < nReport)
+                _run.Report.Add($"Field exercise {_run.Report.Count + 1} logged  (harness filler line)");
         _run.PendingPerks.Clear();       // skip promotions for the screenshot
         _run.PendingSpecs.Clear();
         _shopDone = true;                // skip requisition for the screenshot
