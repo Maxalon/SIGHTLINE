@@ -1442,7 +1442,10 @@ public partial class Game
         // advancing concealed. Returns so any reveal-scatter plays before the shot.
         if (SquadConcealed)
         {
-            if (u.Ammo > 0 && FirstTargetFor(u) != null) { BreakConcealment(u); return; }
+            // W10 SUPPRESSOR: thread the ambush target through (like SmartStep's site) so the
+            // suppressed-wake narrowing is uniform across BOTH harness policies.
+            var ambush = u.Ammo > 0 ? FirstTargetFor(u) : null;
+            if (ambush != null) { BreakConcealment(u, ambush, u.HasMod(WeaponMod.Suppressor)); return; }
             if (Players.Any(p => p.Alive && Enemies.Any(e => e.Alive
                     && Util.TileDist(p.X, p.Y, e.X, e.Y) <= AlertRange + 1))) { BreakConcealment(); return; }
         }

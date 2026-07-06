@@ -40,7 +40,9 @@ public enum Boon
     RapidDeploy,   // +1 deploy slot this run
     // ---- W10 pool expansion: six VERB boons, one read each at a named chokepoint ----
     ShockDoctrine, // BRACE reactions deal FULL damage (Game.OnUnitEnteredTile brace halving skipped)
-    Terror,        // pods rout at 2/3 spawn strength (Game.RoutThreshold; the WAVERING telegraph tracks it)
+    Terror,        // broken enemies stay broken +2 turns (Game.RoutDurationFor at the pod-break site;
+                   // redesigned per review — real pods spawn size 2, where the original 2/3 rout
+                   // THRESHOLD was a functional no-op. Enum member name stays: persisted ordinal)
     FieldDrills,   // DRAG + VAULT twice per soldier per turn (Combat.FieldCraftLimit)
     Pyromaniacs,   // squad fire fields burn +2 turns; the squad never catches Burning (Unit.AddStatus)
     FieldStores,   // utility items carry 2 charges/mission (Mission.Build). NOTE: designed as
@@ -148,7 +150,7 @@ public static class BoonDef
         Boon.Ghost => "Moving near foes never breaks concealment",
         Boon.RapidDeploy => "Deploy one extra soldier all run",
         Boon.ShockDoctrine => "BRACE reactions deal full damage",
-        Boon.Terror => "Enemy pods break at two-thirds strength",
+        Boon.Terror => "Broken enemies stay broken 2 turns longer",
         Boon.FieldDrills => "DRAG and VAULT twice per soldier per turn",
         Boon.Pyromaniacs => "Your fire burns 2 turns longer; the squad never catches fire",
         Boon.FieldStores => "Utility items carry 2 charges per mission",
@@ -837,8 +839,9 @@ public class Run
         {
             if (HasBoon(b)) continue;
             // W10: TERROR joins the endless exclusions (LAST STAND wave hostiles spawn PodId<0 —
-            // ungrouped, so pod morale never fires) and so does FIELD STORES (utility items are
-            // granted once by Mission.Build at stand setup; a mid-stand pick would refill nothing).
+            // ungrouped, so pods never break and there is no rout duration to extend) and so does
+            // FIELD STORES (utility items are granted once by Mission.Build at stand setup; a
+            // mid-stand pick would refill nothing).
             if (endless && (b == Boon.Ghost || b == Boon.RapidDeploy
                             || b == Boon.Terror || b == Boon.FieldStores)) continue;
             pool.Add(b);

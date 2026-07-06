@@ -1063,7 +1063,7 @@ public static class Mission
     /// INVERTED — the cache is walkable (it blocks nothing), so the check is that the tile itself
     /// is REACHABLE from the squad spawn (CostMap >= 0), never on a unit/objective/evac tile.
     /// Returns null when no legal tile is found (a pathological board just has no cache).
-    public static (int x, int y)? PlaceIntelCache(Grid g, List<Unit> players,
+    public static (int x, int y)? PlaceIntelCache(Grid g, List<Unit> players, List<Unit> enemies,
                                                   List<(int x, int y)> evac,
                                                   (int x, int y)? terminal,
                                                   List<(int x, int y)> sabotage)
@@ -1074,6 +1074,9 @@ public static class Mission
         if (from == null) return null;
         var reserved = new HashSet<(int, int)>();
         foreach (var u in players) reserved.Add((u.X, u.Y));
+        // W10 review: enemy tiles are reserved too — the gold diamond must never spawn UNDER a
+        // (possibly dormant) hostile, where it would read as unreachable loot / a misleading lure.
+        if (enemies != null) foreach (var u in enemies) if (u.Alive) reserved.Add((u.X, u.Y));
         if (evac != null) foreach (var t in evac) reserved.Add(t);
         if (terminal.HasValue) reserved.Add(terminal.Value);
         if (sabotage != null) foreach (var s in sabotage) reserved.Add(s);

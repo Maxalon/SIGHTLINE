@@ -1682,10 +1682,34 @@ public partial class Game
         if (rplan.RelockTile != null) fails.Add("routedCustodianStillWorks");
         cu.Routed = 0;
 
+        // (10) W10 TERROR boon (redesigned per review): broken enemies stay broken LONGER — the
+        // boon extends the rout DURATION assigned at the break (+Game.TerrorRoutBonus via
+        // RoutDurationFor), never the threshold (real pods spawn size 2, where a threshold change
+        // is arithmetic dead weight). W8's banner semantics must stay intact on top: out of aura
+        // the extended rout still rallies one per own turn; inside the aura it still rallies at
+        // DOUBLE pace — TERROR raises the base the banner recovers from, never the counter itself.
+        var t1 = MkE("T1", 2, 4, 7); var t2 = MkE("T2", 3, 4, 7);   // far from the WARBRINGER at (11,8)
+        Enemies.Add(t1); Enemies.Add(t2); _podOrig[7] = 2;
+        _run.ActiveBoons.Add(Boon.Terror);
+        t1.Hp = 0; KillUnit(t1);
+        if (t2.Routed != RoutDuration + TerrorRoutBonus) fails.Add($"terrorRoutNotExtended={t2.Routed}");
+        BeginEnemyUnitTurn(t2);                                     // out of aura: normal rally pace
+        if (t2.Routed != RoutDuration + TerrorRoutBonus - 1) fails.Add($"terrorPlainRallyPace={t2.Routed}");
+        t2.X = 10; t2.Y = 8; t2.SyncPos();                          // step inside the banner's aura
+        BeginEnemyUnitTurn(t2);                                     // banner: double pace, on the RAISED base
+        if (t2.Routed != RoutDuration + TerrorRoutBonus - 3) fails.Add($"terrorBannerRallyPace={t2.Routed}");
+        // control: without the boon the same 2-pod break assigns exactly the BASE duration
+        _run.ActiveBoons.Remove(Boon.Terror);
+        var t3 = MkE("T3", 2, 6, 8); var t4 = MkE("T4", 3, 6, 8);
+        Enemies.Add(t3); Enemies.Add(t4); _podOrig[8] = 2;
+        t3.Hp = 0; KillUnit(t3);
+        if (t4.Routed != RoutDuration) fails.Add($"terrorControlBase={t4.Routed}");
+
         return fails.Count == 0
             ? "MORALETEST: PASS (pod break routs survivor; routed flees + drops watch + shoots wild; rallies over turns; "
               + "W8: banner holds in-aura pods + doubles rally pace, WAVERING flags the one-kill-from-rout pod truthfully, "
-              + "custodian plans + executes the re-lock/re-arm and stops when routed)"
+              + "custodian plans + executes the re-lock/re-arm and stops when routed; "
+              + "W10: TERROR extends the rout duration (+2), plain/banner rally pace intact)"
             : "MORALETEST: FAIL (" + string.Join(",", fails) + ")";
     }
 

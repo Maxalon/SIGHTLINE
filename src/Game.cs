@@ -715,20 +715,26 @@ public partial class Game
         return (alive, _podOrig.GetValueOrDefault(podId, alive));
     }
 
-    /// W10 TERROR boon — the ONE shared rout threshold (BreakPodMorale + the WAVERING telegraph
-    /// both read it, so the telegraph can never lie under the boon): a pod holds while its live
-    /// head-count EXCEEDS this. Base = half spawn strength (floor); TERROR raises it to two-thirds
-    /// (floor — a pod above 2/3, e.g. 3 of 4, is still "at strength" and holds), so pods break
-    /// EARLIER. Both variants floor at 1 (a lone survivor of a 2-pod always qualifies).
-    public int RoutThreshold(int orig)
-        => Math.Max(1, _run != null && _run.HasBoon(Boon.Terror) ? orig * 2 / 3 : orig / 2);
+    /// The ONE shared rout threshold (BreakPodMorale + the WAVERING telegraph both read it, so the
+    /// telegraph can never lie): a pod holds while its live head-count EXCEEDS half its spawn
+    /// strength (floored at 1 — a lone survivor of a 2-pod always qualifies). W10 note: TERROR was
+    /// originally a 2/3 threshold here, but real pods spawn size 2 (Mission.SpawnEnemies pairs
+    /// them), where half-strength already routs the survivor on the first kill — a threshold change
+    /// was arithmetic dead weight. TERROR now extends the rout DURATION instead (RoutDurationFor).
+    public int RoutThreshold(int orig) => Math.Max(1, orig / 2);
+
+    /// W10 TERROR boon (redesigned per review): broken enemies stay broken LONGER — the duration
+    /// assigned when a pod breaks (BreakPodMorale, the only assignment site; a rallied pod that
+    /// re-breaks passes through it again) is extended by TerrorRoutBonus. W8's banner semantics
+    /// are untouched: an in-aura survivor still rallies at DOUBLE pace (BeginEnemyUnitTurn's extra
+    /// decrement) — TERROR raises the base the banner recovers from, it never disables the counter.
+    public const int TerrorRoutBonus = 2;
+    public int RoutDurationFor() => RoutDuration + (HasBoon(Boon.Terror) ? TerrorRoutBonus : 0);
 
     /// SIGNAL W8 — this pod member is ONE KILL from the rout threshold: the NEXT pod death breaks
     /// the survivors (mirrors BreakPodMorale's `mates.Count > RoutThreshold(orig)` exactly, one
-    /// kill ahead — W10: the shared helper folds in the TERROR boon's 2/3 threshold, keeping the
-    /// telegraph truthful when the boon moves the break point). Covers the rallied-below-threshold
-    /// pod too (any kill re-breaks it) — the telegraph must never lie. Active + unbroken members
-    /// only; needs a survivor left to rout.
+    /// kill ahead). Covers the rallied-below-threshold pod too (any kill re-breaks it) — the
+    /// telegraph must never lie. Active + unbroken members only; needs a survivor left to rout.
     public bool PodAtWaverPoint(Unit e)
     {
         if (e == null || e.Team != Team.Enemy || e.PodId < 0 || !e.Alive || !e.Active || e.Routed > 0) return false;
@@ -1336,7 +1342,7 @@ public partial class Game
         CachePresent = false;
         if (Mode == GameMode.Campaign)
         {
-            var cache = Mission.PlaceIntelCache(Grid, Players, EvacZone,
+            var cache = Mission.PlaceIntelCache(Grid, Players, Enemies, EvacZone,
                                                 HasTerminal ? Terminal : ((int, int)?)null,
                                                 HasSabotage ? SabotageSites : null);
             if (cache != null)
@@ -2151,8 +2157,8 @@ public partial class Game
         var mates = Enemies.Where(e => e.Alive && e.PodId == pod).ToList();
         if (mates.Count == 0) return;                       // whole pod gone — no one left to break
         int orig = _podOrig.GetValueOrDefault(pod, mates.Count + 1);
-        // still at fighting strength — holds the line. W10: RoutThreshold is the ONE shared
-        // threshold (TERROR boon raises it to 2/3); PodAtWaverPoint mirrors it one kill ahead.
+        // still at fighting strength — holds the line. RoutThreshold is the ONE shared threshold
+        // (PodAtWaverPoint mirrors it one kill ahead, so the WAVERING tag never lies).
         if (mates.Count > RoutThreshold(orig)) return;
         bool broke = false, held = false;
         foreach (var m in mates)
@@ -2162,7 +2168,8 @@ public partial class Game
                 // break. The rout is CONTESTED, not free: kill the WARBRINGER (or catch the pod
                 // outside its reach) and the break lands. Per-member, so a split pod can half-rout.
                 if (BannerNear(m)) { held = true; continue; }
-                m.Routed = RoutDuration; broke = true;
+                // W10 TERROR boon: the break lasts TerrorRoutBonus turns longer (RoutDurationFor).
+                m.Routed = RoutDurationFor(); broke = true;
             }
         if (held && !broke)
         {
