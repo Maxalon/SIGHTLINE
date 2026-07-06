@@ -38,6 +38,16 @@ public enum Boon
     Venom,         // a player hit applies Bleed to the target
     Ghost,         // moving near a foe does not break concealment
     RapidDeploy,   // +1 deploy slot this run
+    // ---- W10 pool expansion: six VERB boons, one read each at a named chokepoint ----
+    ShockDoctrine, // BRACE reactions deal FULL damage (Game.OnUnitEnteredTile brace halving skipped)
+    Terror,        // pods rout at 2/3 spawn strength (Game.RoutThreshold; the WAVERING telegraph tracks it)
+    FieldDrills,   // DRAG + VAULT twice per soldier per turn (Combat.FieldCraftLimit)
+    Pyromaniacs,   // squad fire fields burn +2 turns; the squad never catches Burning (Unit.AddStatus)
+    FieldStores,   // utility items carry 2 charges/mission (Mission.Build). NOTE: designed as
+                   // "QUARTERMASTER" but renamed — W9 shipped a MetaUnlock named Quartermaster
+                   // (+1 shop slate slot) and two same-named rewards would be indistinguishable in
+                   // the Codex/report vocabulary.
+    Reclaimer,     // a kill inside a FOCUSED-overwatch cone re-arms the watcher's reaction (Game.KillUnit)
 }
 
 /// RUN CONTRACTS (W6): an opt-in, run-long RULESET trade-off chosen at the run-opening draft.
@@ -109,6 +119,8 @@ public static class BoonDef
     {
         Boon.Marksmen, Boon.Fervor, Boon.Executioners, Boon.Fortified, Boon.Grenadier,
         Boon.Scavenger, Boon.Adrenaline, Boon.Venom, Boon.Ghost, Boon.RapidDeploy,
+        Boon.ShockDoctrine, Boon.Terror, Boon.FieldDrills, Boon.Pyromaniacs,
+        Boon.FieldStores, Boon.Reclaimer,   // W10: the verb-boon expansion
     };
 
     public static string Name(Boon b) => b switch
@@ -116,7 +128,11 @@ public static class BoonDef
         Boon.Marksmen => "MARKSMEN", Boon.Fervor => "FERVOR", Boon.Executioners => "EXECUTIONERS",
         Boon.Fortified => "FORTIFIED", Boon.Grenadier => "GRENADIER", Boon.Scavenger => "SCAVENGER",
         Boon.Adrenaline => "ADRENALINE", Boon.Venom => "VENOM", Boon.Ghost => "GHOST",
-        Boon.RapidDeploy => "RAPID DEPLOY", _ => "BOON",
+        Boon.RapidDeploy => "RAPID DEPLOY",
+        Boon.ShockDoctrine => "SHOCK DOCTRINE", Boon.Terror => "TERROR",
+        Boon.FieldDrills => "FIELD DRILLS", Boon.Pyromaniacs => "PYROMANIACS",
+        Boon.FieldStores => "FIELD STORES", Boon.Reclaimer => "RECLAIMER",
+        _ => "BOON",
     };
 
     public static string Desc(Boon b) => b switch
@@ -131,6 +147,12 @@ public static class BoonDef
         Boon.Venom => "Your hits make the target bleed",
         Boon.Ghost => "Moving near foes never breaks concealment",
         Boon.RapidDeploy => "Deploy one extra soldier all run",
+        Boon.ShockDoctrine => "BRACE reactions deal full damage",
+        Boon.Terror => "Enemy pods break at two-thirds strength",
+        Boon.FieldDrills => "DRAG and VAULT twice per soldier per turn",
+        Boon.Pyromaniacs => "Your fire burns 2 turns longer; the squad never catches fire",
+        Boon.FieldStores => "Utility items carry 2 charges per mission",
+        Boon.Reclaimer => "A kill inside a focused-overwatch cone re-arms the watch",
         _ => "",
     };
 
@@ -139,7 +161,10 @@ public static class BoonDef
     {
         Boon.Marksmen => "MRK", Boon.Fervor => "FVR", Boon.Executioners => "EXE", Boon.Fortified => "FRT",
         Boon.Grenadier => "GRN", Boon.Scavenger => "SCV", Boon.Adrenaline => "ADR", Boon.Venom => "VNM",
-        Boon.Ghost => "GHO", Boon.RapidDeploy => "RPD", _ => "?",
+        Boon.Ghost => "GHO", Boon.RapidDeploy => "RPD",
+        Boon.ShockDoctrine => "SHK", Boon.Terror => "TRR", Boon.FieldDrills => "FDR",
+        Boon.Pyromaniacs => "PYR", Boon.FieldStores => "FST", Boon.Reclaimer => "RCL",
+        _ => "?",
     };
 }
 
@@ -811,7 +836,11 @@ public class Run
         foreach (var b in BoonDef.All)
         {
             if (HasBoon(b)) continue;
-            if (endless && (b == Boon.Ghost || b == Boon.RapidDeploy)) continue;
+            // W10: TERROR joins the endless exclusions (LAST STAND wave hostiles spawn PodId<0 —
+            // ungrouped, so pod morale never fires) and so does FIELD STORES (utility items are
+            // granted once by Mission.Build at stand setup; a mid-stand pick would refill nothing).
+            if (endless && (b == Boon.Ghost || b == Boon.RapidDeploy
+                            || b == Boon.Terror || b == Boon.FieldStores)) continue;
             pool.Add(b);
         }
         for (int i = pool.Count - 1; i > 0; i--) { int j = Util.RandInt(0, i); (pool[i], pool[j]) = (pool[j], pool[i]); }

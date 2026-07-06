@@ -92,7 +92,11 @@ public static class Mission
             u.Ammo = u.Weapon.Clip;
             u.Grenades = 1 + u.BonusGrenades + (u.HasPerk(Perk.Bandolier) ? 1 : 0);  // refill (+cache +Bandolier)
             u.AbilityCd = 0;                                       // signature ability ready (off cooldown)
-            u.ItemCharge = u.Item != ItemKind.None ? 1 : 0;        // utility item: 1 charge/mission
+            // utility item: 1 charge/mission — 2 under the FIELD STORES boon (W10; read via the
+            // per-mission Combat.RunBoons static, published by Game.SetupMission BEFORE Build runs.
+            // This loop seats PLAYERS only, so enemy items are never doubled).
+            u.ItemCharge = u.Item != ItemKind.None
+                ? (Combat.RunBoons.Contains(Boon.FieldStores) ? 2 : 1) : 0;
             u.Suppress = 0;
             u.OnOverwatch = false;
             u.Hunkered = false;
@@ -1052,6 +1056,40 @@ public static class Mission
             occupied.Add((x, y));                                 // commit (keeps later passes off it)
             placed++;
         }
+    }
+
+    /// W10 INTEL CACHE placement: pick a mid/far-field FLOOR tile for the optional intel pickup
+    /// (Game owns the pickup state; this is pure board geometry). PlaceBarrels-style guard, but
+    /// INVERTED — the cache is walkable (it blocks nothing), so the check is that the tile itself
+    /// is REACHABLE from the squad spawn (CostMap >= 0), never on a unit/objective/evac tile.
+    /// Returns null when no legal tile is found (a pathological board just has no cache).
+    public static (int x, int y)? PlaceIntelCache(Grid g, List<Unit> players,
+                                                  List<(int x, int y)> evac,
+                                                  (int x, int y)? terminal,
+                                                  List<(int x, int y)> sabotage)
+    {
+        Unit from = null;
+        foreach (var p in players) if (p.Alive && !p.IsVip) { from = p; break; }
+        if (from == null && players.Count > 0) from = players[0];
+        if (from == null) return null;
+        var reserved = new HashSet<(int, int)>();
+        foreach (var u in players) reserved.Add((u.X, u.Y));
+        if (evac != null) foreach (var t in evac) reserved.Add(t);
+        if (terminal.HasValue) reserved.Add(terminal.Value);
+        if (sabotage != null) foreach (var s in sabotage) reserved.Add(s);
+        // one reachability map answers every probe (the cache blocks nothing, so it can't change it)
+        var cost = g.CostMap(from.X, from.Y, (x, y) => false, out _, 9999);
+        for (int guard = 0; guard < 400; guard++)
+        {
+            // mid/far-field bias (cols 6-15, like the barrels): the detour must cost real steps.
+            int x = Util.RandInt(6, 15);
+            int y = Util.RandInt(0, g.H - 1);
+            if (reserved.Contains((x, y))) continue;
+            if (!g.IsFloor(x, y)) continue;          // cover / barrel / OOB can't host a pickup
+            if (cost[x, y] < 0) continue;            // walled off — a cache no one can reach is a lie
+            return (x, y);
+        }
+        return null;
     }
 
     static void PlaceBlock(Grid g, HashSet<(int, int)> occ, int x, int y, TileType t, int w, int h)

@@ -751,7 +751,10 @@ public class IncendiaryAnim : LobAnim
         Audio.Play("crit");
         g.Fx.AddShake(6f);
         g.Fx.Burst(Util.TileCenter(Tx, Ty), Pal.RGBA(255, 160, 70), 30, 300f, 0.5f, 5f, true);
-        g.Grid.AddFire(Tx, Ty, Radius, Grid.FireTurns);   // lay the fire field
+        // lay the fire field. W10 PYROMANIACS boon: a SQUAD-thrown incendiary burns +2 turns
+        // (team-gated so a hostile fire-starter never inherits the player's boon).
+        g.Grid.AddFire(Tx, Ty, Radius, Grid.FireTurns
+            + (Thrower != null && Thrower.Team == Team.Player && g.HasBoon(Sightline.Boon.Pyromaniacs) ? 2 : 0));
 
         // ignite + sear any unit caught in the initial burst (both teams); the lingering Fire
         // field then handles step-in / standing damage via the normal hazard tick.
