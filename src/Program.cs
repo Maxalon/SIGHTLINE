@@ -36,6 +36,16 @@ public static class Program
             return;
         }
 
+        // W2: SIGHTLINE_PAIRTEST=1 : the CRN-pairing IDENTITY check. Two GREEDY legs on the same
+        // slot seed must produce byte-identical outcomes (result + missions cleared + turns) —
+        // this proves Util.Reseed pairing AND doubles as the no-cross-leg-state-bleed check the
+        // whole paired-gap methodology rests on. Needs the window/update loop (full campaigns).
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_PAIRTEST") == "1")
+        {
+            PairTest();
+            return;
+        }
+
         // SIGHTLINE_SAVETEST=1 : headless round-trip check for run persistence (item E). No window.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_SAVETEST") == "1")
         {
@@ -405,17 +415,26 @@ public static class Program
         }
         // SIGHTLINE_SKIRMISHSETUP=1 (shot only): screenshot the skirmish objective/heat picker screen.
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_SKIRMISHSETUP") == "1") game.DebugSkirmishSetup();
-        // force an objective for verification (e.g. SIGHTLINE_OBJ=sabotage|rescue), shot or autoplay
-        switch (Environment.GetEnvironmentVariable("SIGHTLINE_OBJ"))
+        // force an objective for verification (e.g. SIGHTLINE_OBJ=sabotage|rescue), shot or autoplay.
+        // W2: the pin is now WHOLE-RUN — ForcedObjective re-applies inside SetupMission for every
+        // subsequent mission (NoPersist-gated), while DebugForceObjective still rebuilds mission 1
+        // immediately so a SHOT frame shows the pinned objective. Unknown/empty values stay unpinned.
+        Objective? objPin = Environment.GetEnvironmentVariable("SIGHTLINE_OBJ") switch
         {
-            case "eliminate": case "elim": game.DebugForceObjective(Objective.Eliminate); break;
-            case "evac": case "extract": game.DebugForceObjective(Objective.Evac); break;
-            case "hack": game.DebugForceObjective(Objective.Hack); break;
-            case "escort": game.DebugForceObjective(Objective.Escort); break;
-            case "sabotage": game.DebugForceObjective(Objective.Sabotage); break;
-            case "rescue": game.DebugForceObjective(Objective.Rescue); break;
-            case "defend": game.DebugForceObjective(Objective.Defend); break;
-            case "decapitate": game.DebugForceObjective(Objective.Decapitate); break;
+            "eliminate" or "elim" => Objective.Eliminate,
+            "evac" or "extract" => Objective.Evac,
+            "hack" => Objective.Hack,
+            "escort" => Objective.Escort,
+            "sabotage" => Objective.Sabotage,
+            "rescue" => Objective.Rescue,
+            "defend" => Objective.Defend,
+            "decapitate" or "decap" => Objective.Decapitate,
+            _ => null,
+        };
+        if (objPin.HasValue)
+        {
+            game.ForcedObjective = objPin;
+            game.DebugForceObjective(objPin.Value);
         }
         // screenshot-only hooks for verifying the camera + pause overlay
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_BEACON") == "1") game.DebugBeacon();
@@ -560,6 +579,14 @@ public static class Program
         // heats 0-4 (6/8 were previously measured only in ad-hoc pinned runs).
         int[] heatCycle = { 0, 2, 4, 6, 8 };
         bool pinHeat = int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_BALANCE_HEAT"), out int fixedHeat);
+        // W2: SIGHTLINE_BALANCE_BASE=<n> offsets the slot index, so CHUNKED batches (the 10-min
+        // shell ceiling forces N<=10 per invocation) can cover DISJOINT paired worlds — without
+        // it, two combined N=10 chunks replay the SAME 10 seeds and halve the effective sample.
+        int slotBase = int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_BALANCE_BASE"), out int sb) ? sb : 0;
+        // W2: whole-run objective pin — SIGHTLINE_OBJ under the batch pins EVERY mission of every
+        // run (Game.ForcedObjective, honoured in SetupMission under NoPersist). Null = no pin.
+        string objEnv = Environment.GetEnvironmentVariable("SIGHTLINE_OBJ");
+        Objective? forcedObj = string.IsNullOrEmpty(objEnv) ? (Objective?)null : ParseObjective(objEnv);
         // SIGHTLINE_BALANCE_DUMB=1 runs the smoke-test autopilot instead of the competent AI,
         // so the same batch can produce a baseline to compare the smart AI (and balance changes) against.
         bool dumb = Environment.GetEnvironmentVariable("SIGHTLINE_BALANCE_DUMB") == "1";
@@ -595,16 +622,27 @@ public static class Program
                             : sloppyOnly ? new[] { true }
                             : new[] { false, true };   // greedy then sloppy
 
-        // Run a single campaign / endless stand (heat `heat`, policy `sloppy`, deterministic
-        // sloppy seed `seed`) to a decision. Returns false if the window closed mid-match
-        // (abort the batch). Depth for the defensive EndRun closes is MODE-AWARE: game.Wave
-        // for endless (Mission stays 1 there), missions-cleared for the campaign.
-        bool RunOne(int heat, bool sloppy, int seed)
+        // Run a single campaign / endless stand (heat `heat`, policy `sloppy`, batch slot `slot`)
+        // to a decision. Returns false if the window closed mid-match (abort the batch). Depth
+        // for the defensive EndRun closes is MODE-AWARE: game.Wave for endless (Mission stays 1
+        // there), missions-cleared for the campaign.
+        bool RunOne(int heat, bool sloppy, int slot)
         {
             // StartMission/BeginEndless read SIGHTLINE_HEAT when NoPersist is set — dial it in first.
             Environment.SetEnvironmentVariable("SIGHTLINE_HEAT", heat.ToString());
-            var game = new Game { NoPersist = true, AutoPlay = true, SmartPlay = !dumb, SmartSloppy = !dumb && sloppy };
-            game.SeedSloppy(seed);   // reproducible per-run perturbation (no-op unless sloppy)
+            // ── W2 CRN PAIRING (the compass fix) ──────────────────────────────────────────
+            // Reseed the SHARED RNG deterministically per slot BEFORE the Game is constructed,
+            // so both policy legs of slot i replay the IDENTICAL world (map, spawns, combat
+            // rolls) until the policies themselves diverge — the slot-level comparison cancels
+            // the world-to-world variance that made unpaired gap readings swing ±27-38 pts.
+            // Base 50000+slot, deliberately NOT 1000+slot: SeedSloppy(1000+slot) below seeds the
+            // sloppy perturbation stream, and giving Util.Rng the SAME System.Random sequence
+            // would correlate the slip pattern with the game's dice.
+            Util.Reseed(50000 + slot);
+            Stats.Slot = slot;       // stamp the pair id onto the RunRec (BeginRun reads it)
+            var game = new Game { NoPersist = true, AutoPlay = true, SmartPlay = !dumb, SmartSloppy = !dumb && sloppy,
+                                  ForcedObjective = forcedObj };
+            game.SeedSloppy(1000 + slot);   // reproducible per-run perturbation (no-op unless sloppy)
             // both entries fire Stats.BeginRun internally (tagging policy + mode)
             if (endless) game.BeginEndless(); else game.StartMission(1);
 
@@ -656,8 +694,9 @@ public static class Program
             foreach (bool sloppy in sloppyModes)
             {
                 if (aborted || Raylib.WindowShouldClose()) break;
-                // Seed the sloppy RNG from the campaign index so the perturbation is reproducible.
-                if (!RunOne(heat, sloppy, 1000 + i)) { aborted = true; break; }
+                // W2: the slot index seeds BOTH streams inside RunOne (Util.Reseed pairs the
+                // world across the policy legs; SeedSloppy makes the perturbation reproducible).
+                if (!RunOne(heat, sloppy, slotBase + i)) { aborted = true; break; }
                 done++;
                 if (done % 5 == 0 || done == totalMatches)
                     Console.WriteLine(endless
@@ -667,6 +706,10 @@ public static class Program
         }
 
         sw.Stop();
+        // W2: return the shared RNG to a clock seed + clear the pair stamp — the batch must not
+        // leave a deterministic stream behind for any later interactive/harness code in-process.
+        Util.Reseed(0);
+        Stats.Slot = -1;
         Console.WriteLine();
         Console.WriteLine(Stats.Report());
         Console.WriteLine(endless
@@ -682,6 +725,72 @@ public static class Program
         Stats.WriteJson(jsonPath);
         Console.WriteLine($"aggregate JSON -> {jsonPath}");
 
+        Display.Shutdown();
+        Renderer.UnloadNoise();
+        Raylib.CloseWindow();
+    }
+
+    // ── W2: the A/A CRN-pairing identity test (SIGHTLINE_PAIRTEST=1) ────────────────────
+    // Replays the SAME slot seed twice under the GREEDY policy (one pair at heat 0, one at
+    // heat 4) and demands IDENTICAL outcomes — result, missions cleared, mission count, and
+    // total turns. If this fails, un-paired randomness is leaking into the legs (a clock-
+    // seeded draw before Reseed, sloppy-RNG bleed into greedy paths, cross-run static state)
+    // and no paired-gap number from the flywheel can be trusted. Deliberately NOT a screenshot
+    // byte-diff: Util.Rng is clock-seeded at startup and the shot harness never reseeds it, so
+    // two shot invocations differ even on unchanged code. Prints "PAIRTEST: PASS|FAIL".
+    static void PairTest()
+    {
+        Stats.Reset();
+        Stats.Enabled = true;
+        Mission.ForcedLayout = -1;
+        Pal.SetColorblind(false);
+
+        Raylib.SetConfigFlags(ConfigFlags.Msaa4xHint);
+        Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "SIGHTLINE — pair test");
+        Raylib.SetExitKey(KeyboardKey.Null);
+        Cfg.Font = Raylib.GetFontDefault();
+        Display.Init(false);
+        Raylib.SetTargetFPS(0);
+
+        const int frameCap = 20000;
+        // one greedy leg on (heat, slot): the EXACT seeding sequence BalanceBatch.RunOne uses.
+        (string result, int cleared, int missions, int turns) Leg(int heat, int slot)
+        {
+            Environment.SetEnvironmentVariable("SIGHTLINE_HEAT", heat.ToString());
+            Util.Reseed(50000 + slot);
+            Stats.Slot = slot;
+            var game = new Game { NoPersist = true, AutoPlay = true, SmartPlay = true };
+            game.SeedSloppy(1000 + slot);   // greedy never draws from it; seeded for parity anyway
+            game.StartMission(1);
+            int frame = 0;
+            while (!Raylib.WindowShouldClose())
+            {
+                game.Update(1f / 60f);
+                Display.RenderFrame(() => Raylib.ClearBackground(Pal.Bg));
+                if (game.Phase == Phase.Win || game.Phase == Phase.Lose || ++frame >= frameCap) break;
+            }
+            // natural exits already finalised the run record; the frame-cap close is defensive.
+            Stats.EndRun(false, game.RunState != null ? game.RunState.Mission - 1 : 0, "frame-cap");
+            var run = Stats.Runs[Stats.Runs.Count - 1];
+            string result = game.Phase == Phase.Win ? "WIN" : game.Phase == Phase.Lose ? "LOSE" : "CAP";
+            return (result, run.MissionsCleared, run.Missions.Count, run.Missions.Sum(m => m.Turns));
+        }
+
+        bool pass = true;
+        foreach (var (heat, slot) in new[] { (0, 0), (4, 1) })
+        {
+            var a = Leg(heat, slot);
+            var b = Leg(heat, slot);
+            bool match = a == b;
+            pass &= match;
+            Console.WriteLine($"PAIRTEST: h{heat} slot{slot}  legA {a.result} cleared={a.cleared} missions={a.missions} turns={a.turns}  " +
+                              $"legB {b.result} cleared={b.cleared} missions={b.missions} turns={b.turns}  -> {(match ? "MATCH" : "MISMATCH")}");
+        }
+        Console.WriteLine(pass ? "PAIRTEST: PASS" : "PAIRTEST: FAIL");
+
+        Util.Reseed(0);
+        Stats.Slot = -1;
+        Stats.Enabled = false;
         Display.Shutdown();
         Renderer.UnloadNoise();
         Raylib.CloseWindow();
