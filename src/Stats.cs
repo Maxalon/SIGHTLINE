@@ -288,10 +288,12 @@ public static class Stats
 
     // W2: paired per-slot outcomes over CAMPAIGN runs — a slot pairs when it has exactly one
     // greedy and one sloppy leg (the batch's normal shape). Shared by Report + BuildSummary.
+    // Review fix: keyed by (Slot, Heat), not Slot alone — chunks sharing a BALANCE_BASE across
+    // different heat pins would otherwise collide slot ids and dissolve into 4-run non-pairs.
     static (int pairs, int concordant, int greedyOnlyWon, int sloppyOnlyWon) PairedOutcomes(List<RunRec> campRuns)
     {
         var pairs = campRuns.Where(r => r.Slot >= 0)
-            .GroupBy(r => r.Slot)
+            .GroupBy(r => (r.Slot, r.Heat))
             .Select(g => (g: g.Where(r => r.Policy == "greedy").ToList(),
                           s: g.Where(r => r.Policy == "sloppy").ToList()))
             .Where(p => p.g.Count == 1 && p.s.Count == 1)

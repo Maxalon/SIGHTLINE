@@ -1047,8 +1047,10 @@ public partial class Game
             foreach (var u in Players) if (u.Alive && !u.IsVip) u.ActionsLeft += 1;
         }
         // per-mission feat tracking + status effects start clean each mission
+        // (LastDotSource too — review fix: a BURN label from mission N must not mis-bucket an
+        // anim-less death in mission N+2; enemies/VIP are constructed fresh each mission anyway)
         foreach (var u in Players)
-        { u.FeatMultiKill = u.FeatClutch = u.FeatVengeful = u.WasNearDeath = u.FeatBurned = u.AllyDown = false; u.BondAura = false; u.ConsecutiveMisses = 0; u.Statuses.Clear(); }
+        { u.FeatMultiKill = u.FeatClutch = u.FeatVengeful = u.WasNearDeath = u.FeatBurned = u.AllyDown = false; u.BondAura = false; u.ConsecutiveMisses = 0; u.Statuses.Clear(); u.LastDotSource = null; }
         _missionKia.Clear();
         Scorches.Clear();            // death decals don't carry between missions
         _refundedThisTurn.Clear();   // flank-kill refund is per-turn; clear it for the mission's first turn too (review #2)
@@ -3317,6 +3319,7 @@ public partial class Game
         int dx = Math.Sign(target.X - u.X), dy = Math.Sign(target.Y - u.Y);
         u.ActionsLeft = Math.Max(0, u.ActionsLeft - 1);   // 1 action; never ends the turn
         u.ShovedThisTurn = true;                          // one shove per soldier per turn (anti-loop)
+        Stats.RecordAction("SHOVE");                      // W2 verb telemetry (review fix: no invisible verbs)
         // shoving a dormant pod is aggression -> it wakes (mirrors a shot revealing a pod).
         if (!target.Active) ActivatePod(target.PodId);
         Enqueue(new ShoveAnim(u, target, dx, dy), Team.Player);
@@ -3426,6 +3429,7 @@ public partial class Game
         var u = Selected;
         u.ActionsLeft = Math.Max(0, u.ActionsLeft - 1);   // 1 action; never ends the turn
         u.VaultedThisTurn = true;                         // one vault per soldier per turn (anti-loop)
+        Stats.RecordAction("VAULT");                      // W2 verb telemetry (review fix: no invisible verbs)
         Fx.PopText(u.Pos + new Vector2(0, -32), "VAULT", Pal.Good, 17f);
         Fx.Burst(u.Pos, Pal.Good, 8, 110f, 0.35f, 2.5f);
         Audio.Play("move");

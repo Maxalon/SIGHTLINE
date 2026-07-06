@@ -418,24 +418,17 @@ public static class Program
         // force an objective for verification (e.g. SIGHTLINE_OBJ=sabotage|rescue), shot or autoplay.
         // W2: the pin is now WHOLE-RUN — ForcedObjective re-applies inside SetupMission for every
         // subsequent mission (NoPersist-gated), while DebugForceObjective still rebuilds mission 1
-        // immediately so a SHOT frame shows the pinned objective. Unknown/empty values stay unpinned.
-        Objective? objPin = Environment.GetEnvironmentVariable("SIGHTLINE_OBJ") switch
-        {
-            "eliminate" or "elim" => Objective.Eliminate,
-            "evac" or "extract" => Objective.Evac,
-            "hack" => Objective.Hack,
-            "escort" => Objective.Escort,
-            "sabotage" => Objective.Sabotage,
-            "rescue" => Objective.Rescue,
-            "defend" => Objective.Defend,
-            "decapitate" or "decap" => Objective.Decapitate,
-            _ => null,
-        };
+        // immediately so a SHOT frame shows the pinned objective. Unknown/empty values stay unpinned
+        // (strict TryParseObjective — a typo must never silently pin the wrong objective).
+        string objEnvMain = Environment.GetEnvironmentVariable("SIGHTLINE_OBJ");
+        Objective? objPin = TryParseObjective(objEnvMain);
         if (objPin.HasValue)
         {
             game.ForcedObjective = objPin;
             game.DebugForceObjective(objPin.Value);
         }
+        else if (!string.IsNullOrEmpty(objEnvMain))
+            Console.WriteLine($"HARNESS: unknown SIGHTLINE_OBJ '{objEnvMain}' — running unpinned");
         // screenshot-only hooks for verifying the camera + pause overlay
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_BEACON") == "1") game.DebugBeacon();
         if (shot && float.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_ZOOM"), out float z)) game.CamZoom = z;
@@ -585,8 +578,12 @@ public static class Program
         int slotBase = int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_BALANCE_BASE"), out int sb) ? sb : 0;
         // W2: whole-run objective pin — SIGHTLINE_OBJ under the batch pins EVERY mission of every
         // run (Game.ForcedObjective, honoured in SetupMission under NoPersist). Null = no pin.
+        // Review fix: STRICT parse — a typo'd value must run UNPINNED with a loud warning, never
+        // silently pin the sweep to Eliminate and enter the DEVLOG as a false baseline.
         string objEnv = Environment.GetEnvironmentVariable("SIGHTLINE_OBJ");
-        Objective? forcedObj = string.IsNullOrEmpty(objEnv) ? (Objective?)null : ParseObjective(objEnv);
+        Objective? forcedObj = TryParseObjective(objEnv);
+        if (forcedObj == null && !string.IsNullOrEmpty(objEnv))
+            Console.WriteLine($"BALANCE: unknown SIGHTLINE_OBJ '{objEnv}' — running unpinned");
         // SIGHTLINE_BALANCE_DUMB=1 runs the smoke-test autopilot instead of the competent AI,
         // so the same batch can produce a baseline to compare the smart AI (and balance changes) against.
         bool dumb = Environment.GetEnvironmentVariable("SIGHTLINE_BALANCE_DUMB") == "1";
@@ -795,6 +792,24 @@ public static class Program
         Renderer.UnloadNoise();
         Raylib.CloseWindow();
     }
+
+    // W2 (review fix): STRICT objective parse — null on empty/unknown instead of a silent
+    // Eliminate default. Used by both SIGHTLINE_OBJ pin paths (balance batch + main dispatch),
+    // where a typo silently pinning a whole sweep to the wrong objective would enter the
+    // program record as a false baseline. ParseObjective below keeps its Eliminate default
+    // for the SKIRMISH entry, where "some objective" is the right degradation for a smoke run.
+    static Objective? TryParseObjective(string s) => (s ?? "").Trim().ToLowerInvariant() switch
+    {
+        "eliminate" or "elim" => Objective.Eliminate,
+        "evac" or "extract" => Objective.Evac,
+        "hack" => Objective.Hack,
+        "escort" => Objective.Escort,
+        "sabotage" => Objective.Sabotage,
+        "rescue" => Objective.Rescue,
+        "defend" => Objective.Defend,
+        "decapitate" or "decap" => Objective.Decapitate,
+        _ => null,
+    };
 
     // PROGRAM HORIZON W4: parse a SIGHTLINE_SKIRMISH=<objective> string into an Objective (case-
     // insensitive; a few aliases). Defaults to Eliminate on an empty/unknown value.
