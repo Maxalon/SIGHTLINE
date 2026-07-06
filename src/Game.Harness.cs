@@ -1527,8 +1527,86 @@ public partial class Game
         e2.BeginTurn();
         if (e2.Routed != before - 1) fails.Add($"routDidNotDecay {before}->{e2.Routed}");
 
+        // ---- SIGNAL W8: BANNER anchor / accelerated rally / WAVERING telegraph / CUSTODIAN ----
+
+        // (5) a pod with a living WARBRINGER banner within Chebyshev BannerRange does NOT rout at
+        // half strength (Game.BreakPodMorale skips held members)...
+        var b1 = MkE("B1", 8, 8, 1); var b2 = MkE("B2", 9, 8, 1);
+        Enemies.Add(b1); Enemies.Add(b2); _podOrig[1] = 2;
+        var wb = new Unit { Name = "SIGNIFER", Cls = "WARBRINGER", Team = Team.Enemy, X = 11, Y = 8,
+                            Hp = 8, MaxHp = 8, Aim = 56, Mobility = 5, Weapon = Weapon.Make(WeaponKind.Rifle) };
+        wb.Ammo = wb.Weapon.Clip; wb.Alert = AlertLevel.Alert; wb.SyncPos(); wb.BeginTurn();
+        Enemies.Add(wb);
+        if (!wb.HasBanner) fails.Add("clsBannerFlagOff");           // capability defaults from Cls (W5 pattern)
+        b1.Hp = 0; KillUnit(b1);
+        if (b2.Routed != 0) fails.Add($"bannerDidNotHold={b2.Routed}");
+
+        // (5b) ...and the SAME break OUT of aura range still routs (the anchor is spatial, not global)
+        var c1 = MkE("C1", 2, 2, 2); var c2 = MkE("C2", 3, 2, 2);   // Cheby 8 from the banner
+        Enemies.Add(c1); Enemies.Add(c2); _podOrig[2] = 2;
+        c1.Hp = 0; KillUnit(c1);
+        if (c2.Routed != RoutDuration) fails.Add($"outOfAuraNotRouted={c2.Routed}");
+
+        // (6) a bannered rout rallies ONE TURN FASTER: the turn-boundary step (BeginEnemyUnitTurn)
+        // decrements once normally, twice inside the aura.
+        c2.Routed = RoutDuration;
+        BeginEnemyUnitTurn(c2);                                     // out of aura: normal pace
+        if (c2.Routed != RoutDuration - 1) fails.Add($"plainRallyPace={c2.Routed}");
+        c2.Routed = RoutDuration; c2.X = 10; c2.Y = 8; c2.SyncPos();  // step inside the aura
+        BeginEnemyUnitTurn(c2);
+        if (c2.Routed != RoutDuration - 2) fails.Add($"bannerRallyNotFaster={c2.Routed}");
+
+        // (7) WAVERING telegraph: pod 3 (orig 4, far from the banner) — not wavering at full
+        // strength; EXACTLY one kill from the threshold flips PodWavering on; the breaking kill
+        // routs the survivors and the tag drops (Routed>0 is excluded).
+        var w1 = MkE("W1", 2, 9, 3); var w2 = MkE("W2", 3, 9, 3);
+        var w3 = MkE("W3", 2, 10, 3); var w4 = MkE("W4", 3, 10, 3);
+        Enemies.Add(w1); Enemies.Add(w2); Enemies.Add(w3); Enemies.Add(w4); _podOrig[3] = 4;
+        if (PodWavering(w1)) fails.Add("waverAtFullStrength");
+        w4.Hp = 0; KillUnit(w4);                                    // 3/4 alive -> next kill breaks
+        if (!PodWavering(w1)) fails.Add("noWaverOneFromThreshold");
+        w3.Hp = 0; KillUnit(w3);                                    // 2 <= 4/2 -> the pod breaks
+        if (w1.Routed != RoutDuration) fails.Add($"waverPodDidNotBreak={w1.Routed}");
+        if (PodWavering(w1)) fails.Add("waverTagOnRoutedPod");
+
+        // (8) a banner-HELD pod at the waver point reads HELD, not WAVERING (the tag never lies:
+        // PodAtWaverPoint stays true for the tooltip's POD n/m line, PodWavering false for the tag)
+        var h1 = MkE("H1", 12, 8, 5); var h2 = MkE("H2", 12, 9, 5);
+        Enemies.Add(h1); Enemies.Add(h2); _podOrig[5] = 2;
+        if (!PodAtWaverPoint(h1)) fails.Add("heldPodNotAtWaverPoint");
+        if (PodWavering(h1)) fails.Add("heldPodShowsWavering");
+
+        // (9) CUSTODIAN: with a partially-hacked terminal, Ai.Plan returns a RelockTile plan for
+        // an adjacent keeper, and executing it decrements HackProgress; a blown sabotage charge
+        // re-arms the same way. Nothing left to undo -> CanRelock refuses (no below-zero lock).
+        Objective = Objective.Hack;
+        Terminal = (6, 5); HackProgress = 1;
+        var cu = new Unit { Name = "SEXTON", Cls = "CUSTODIAN", Team = Team.Enemy, X = 7, Y = 5,
+                            Hp = 5, MaxHp = 5, Aim = 48, Mobility = 6, Weapon = Weapon.Make(WeaponKind.Smg) };
+        cu.Ammo = cu.Weapon.Clip; cu.Alert = AlertLevel.Alert; cu.SyncPos(); cu.BeginTurn();
+        Enemies.Add(cu);
+        _aiUnits = AliveEnemies().Where(x => x.Active).ToList();
+        PlanEnemySquad();
+        var cplan = Ai.Plan(this, cu);
+        if (cplan.RelockTile == null) fails.Add("custodianNoRelockPlan");
+        if (!CanRelock(cu, Terminal)) fails.Add("custodianCannotRelock");
+        DoRelock(cu, Terminal);
+        if (HackProgress != 0) fails.Add($"relockNoDecrement={HackProgress}");
+        if (CanRelock(cu, Terminal)) fails.Add("relockBelowZero");
+
+        Objective = Objective.Sabotage;
+        SabotageSites = new System.Collections.Generic.List<(int x, int y)> { (7, 6), (12, 2) };
+        SabotageBlown.Clear(); SabotageBlown.Add(0);
+        var splan = Ai.Plan(this, cu);
+        if (splan.RelockTile == null || splan.RelockTile.Value != (7, 6)) fails.Add("custodianNoRearmPlan");
+        if (!CanRelock(cu, (7, 6))) fails.Add("custodianCannotRearm");
+        DoRelock(cu, (7, 6));
+        if (SabotageBlown.Count != 0) fails.Add("rearmDidNotClear");
+
         return fails.Count == 0
-            ? "MORALETEST: PASS (pod break routs survivor; routed flees + drops watch + shoots wild; rallies over turns)"
+            ? "MORALETEST: PASS (pod break routs survivor; routed flees + drops watch + shoots wild; rallies over turns; "
+              + "W8: banner holds in-aura pods + doubles rally pace, WAVERING flags the one-kill-from-rout pod truthfully, "
+              + "custodian plans + executes the re-lock/re-arm)"
             : "MORALETEST: FAIL (" + string.Join(",", fails) + ")";
     }
 

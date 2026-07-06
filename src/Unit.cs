@@ -485,9 +485,14 @@ public class Unit
     // by construction), and can be GRANTED to any other unit. A named boss keeps Cls=="ELITE"
     // (nameplate / enrage / aim-clamp exemption / AI temperament all key on ELITE identity)
     // while carrying a signature mechanic on top. Set true only — a SHIELD can't opt out.
-    bool _shieldArc, _hasSiege;
+    bool _shieldArc, _hasSiege, _hasBanner;
     public bool HasShieldArc { get => _shieldArc || Cls == "SHIELD";  set => _shieldArc = value; }  // frontal barrier arc (ShieldDx/Dy facing; re-faced by Game.FaceShields)
     public bool HasSiege     { get => _hasSiege  || Cls == "BOMBARD"; set => _hasSiege  = value; }  // telegraphed 3x3 siege strike (ChargeTurns/ChargeX/Y)
+    // SIGNAL W8 — the WARBRINGER's banner aura (same flag pattern): pods with a living banner
+    // within Chebyshev Game.BannerRange cannot rout (Game.BreakPodMorale skips them) and rally one
+    // turn faster (Game.BeginEnemyUnitTurn). BOTH reads live in GAME — BeginTurn here is
+    // parameterless and world-blind, so the aura never touches Unit logic. Grantable to a boss.
+    public bool HasBanner    { get => _hasBanner || Cls == "WARBRINGER"; set => _hasBanner = value; }
     // SIGNAL W5 — the Legion BREAKER's kit, two independent halves keyed on RagesTwice:
     //  (1) the berserker RUSH temperament in Ai.Plan (advW/elevMult) applies from SPAWN — keyed
     //      on the RagesTwice capability itself, NOT on the frenzy state;
