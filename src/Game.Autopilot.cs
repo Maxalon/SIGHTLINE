@@ -188,6 +188,9 @@ public partial class Game
         {
             if (Objective == Objective.Escort) return false;   // leash-owned; hold (caller hunkers)
             if (CaptiveLocked) return false;   // caged: can't move (hunker)
+            // W4 (SIGNAL): the FREED captive is leash-owned too (LeashVip's Rescue arm) — a
+            // concealed self-race to the corner would fight the leash every turn boundary.
+            if (Objective == Objective.Rescue) return false;
             if (EvacZone.Contains((u.X, u.Y))) return false;
             var g = EvacZone.Where(t => !IsOccupiedByOther(t.x, t.y, u))
                             .OrderBy(t => Util.TileDist(u.X, u.Y, t.x, t.y)).FirstOrDefault();
@@ -207,12 +210,15 @@ public partial class Game
         // additionally enforces the cold-LZ gate, which counts DORMANT pods — a concealed squad can't
         // stage a leash-win beside a sleeping pod).
         if (CanBeacon(u) && DistToEvac(u.X, u.Y) > 2
-            && u.X >= (Objective == Objective.Escort ? Grid.W * 2 / 3 : Grid.W / 2))
+            && u.X >= (Objective == Objective.Evac ? Grid.W / 2 : Grid.W * 2 / 3))
         { DoBeacon(); return true; }
         // APEX W8 (Escort, still hidden): the strict cold-LZ gate means a plant beside the pod-dense
         // lanes never opens — so CREEP TO A COLD POCKET of the far third and plant there, instead of
         // marching the whole board to the corner. Falls through to the corner race when fully warm.
-        if (Objective == Objective.Escort && HasBeaconAction && !BeaconPlanted && !u.IsVip)
+        // W4 (SIGNAL): freed-state RESCUE creeps the same way (HasBeaconAction only admits Rescue
+        // once the captive is freed, so the caged phase still rushes the cage above).
+        if ((Objective == Objective.Escort || Objective == Objective.Rescue)
+            && HasBeaconAction && !BeaconPlanted && !u.IsVip)
         {
             var spot = EscortBeaconSpot(u);
             if (spot != null && TryMoveTowardTile(u, spot.Value.x, spot.Value.y)) return true;
@@ -637,35 +643,24 @@ public partial class Game
 
     bool SmartRescue(Unit u)
     {
-        if (u.IsVip)
-        {
-            if (CaptiveLocked) { DoHunker(); return true; }     // caged: can't move
-            // freed: race to extraction (beeline — speed beats cover for the fragile asset).
-            if (!EvacZone.Contains((u.X, u.Y)))
-            {
-                var cand = EvacZone.Where(t => !IsOccupiedByOther(t.x, t.y, u))
-                                   .OrderBy(t => Util.TileDist(u.X, u.Y, t.x, t.y)).ToList();
-                if (cand.Count > 0 && TryMoveTowardTile(u, cand[0].x, cand[0].y)) return true;
-            }
-            DoHunker(); return true;
-        }
+        // PHASE 2 (freed) — W4 (SIGNAL): the mission IS an escort now, so run the Escort brain
+        // wholesale. The leash (LeashVip) walks the freed captive with the squad, the point man
+        // opens the strict-gated forward beacon, soldiers advance/extract/hold the zone, and the
+        // captive's old self-race to evac is GONE (it fought the leash — the two tugged the asset
+        // in opposite directions every turn). SmartEscort's VIP arm keeps the no-soldiers-left
+        // fallback (the lone freed-captive walk-out win HEATLADDERTEST pins), so a shattered
+        // squad still resolves. Delegation = de-drag parity with Escort by construction.
+        if (!CaptiveLocked) return SmartEscort(u);
+        if (u.IsVip) { DoHunker(); return true; }     // caged: can't move
         // PHASE 1 — spring the captive ASAP: the WHOLE squad converges on the cage (the
         // dumb baseline does this and it's right — the captive sits mid-board, so dawdling
         // in cover just lets the enemies mass). Take a free finisher en route, else beeline.
-        if (CaptiveLocked && Vip != null)
+        if (Vip != null && Util.ChebyDist(u.X, u.Y, Vip.X, Vip.Y) > 1)
         {
-            if (Util.ChebyDist(u.X, u.Y, Vip.X, Vip.Y) > 1)
-            {
-                if (HasStrongShot(u) && TakeBestShot(u)) return true;     // a sure kill on the way is fine
-                if (TryMoveTowardTile(u, Vip.X, Vip.Y)) return true;     // otherwise rush the cage
-            }
-            // adjacent already (TryFreeCaptive will spring it next tick): fight from here.
+            if (HasStrongShot(u) && TakeBestShot(u)) return true;     // a sure kill on the way is fine
+            if (TryMoveTowardTile(u, Vip.X, Vip.Y)) return true;      // otherwise rush the cage
         }
-        // PHASE 2 (freed) — screen the captive's extraction: a soldier in the zone hauls the
-        // freed captive aboard the instant it's adjacent (lift-out), else kill threats.
-        if (EvacZone.Contains((u.X, u.Y)) && CanExtract(u)) { DoExtract(); return true; }
-        // FIELD CRAFT: pull the freed captive (or a lagging ally) one step toward evac if adjacent.
-        if (!CaptiveLocked && TrySmartDrag(u)) return true;
+        // adjacent already (TryFreeCaptive will spring it next tick): fight from here.
         if (TakeBestShot(u)) return true;
         if (u.Ammo == 0) { DoReload(); return true; }
         return false;
@@ -1488,8 +1483,12 @@ public partial class Game
             return;
         }
 
-        // ESCORT objective: walk the VIP to extraction; soldiers screen for it
-        if (Objective == Objective.Escort)
+        // ESCORT objective: walk the VIP to extraction; soldiers screen for it.
+        // W4 (SIGNAL): freed-state RESCUE is the same mission shape (leashed asset to the zone),
+        // so it shares this block — the old freed-captive self-race fought the new leash (tug-of-
+        // war every turn boundary), and rescue soldiers never marched to evac at all (a cleared
+        // board would stall to the turn cap with the leash-held captive parked beside them).
+        if (Objective == Objective.Escort || (Objective == Objective.Rescue && !CaptiveLocked))
         {
             if (u.IsVip)
             {
@@ -1514,21 +1513,12 @@ public partial class Game
             DoHunker(); return;
         }
 
-        // RESCUE objective: reach the caged captive to free it, then walk it to extraction
+        // RESCUE objective, CAGED phase only (the freed phase shares the Escort block above):
+        // converge on the cage to spring the captive, fighting through what's in the way.
         if (Objective == Objective.Rescue)
         {
-            if (u.IsVip)
-            {
-                if (CaptiveLocked) { DoHunker(); return; }     // can't move while caged
-                if (!EvacZone.Contains((u.X, u.Y)))
-                {
-                    var cand = EvacZone.Where(t => !IsOccupiedByOther(t.x, t.y, u))
-                                       .OrderBy(t => Util.TileDist(u.X, u.Y, t.x, t.y)).ToList();
-                    if (cand.Count > 0 && TryMoveTowardTile(u, cand[0].x, cand[0].y)) return;
-                }
-                DoHunker(); return;
-            }
-            if (CaptiveLocked && Vip != null && Util.ChebyDist(u.X, u.Y, Vip.X, Vip.Y) > 1
+            if (u.IsVip) { DoHunker(); return; }               // can't move while caged
+            if (Vip != null && Util.ChebyDist(u.X, u.Y, Vip.X, Vip.Y) > 1
                 && TryMoveTowardTile(u, Vip.X, Vip.Y)) return;   // go spring the captive
             var rt = FirstTargetFor(u);
             if (rt != null && u.Ammo > 0) { IssueShoot(rt); return; }
