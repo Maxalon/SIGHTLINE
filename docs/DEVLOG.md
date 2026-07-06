@@ -1269,3 +1269,23 @@ h0 70% / h2 75% / h4 70% / h6 50% / h8 10%** — a real descending ladder ending
   grace pattern; cosmetic).
 - On-device audio tuning and endless difficulty FEEL (vs. the measured curve) still need the human's ears/
   hands — unchanged from prior programs.
+
+### APEX follow-up — the two named open threads, closed (same session, post-merge)
+
+- **VETSIM veteran pricing (the watch item open since COUNTERPLAY):** paired h0 batches (N=20 campaigns /
+  40 runs each): no veterans 77.5% completion vs a nominal 2-veteran draft 87.5% — **a +10-point floor**,
+  landing exactly at the threshold W4's spec set for recommending a cost on the recall. Disposition: the
+  salvage-priced recall (via the existing SaveGame.SpendSalvage seam) is the ready lever for a future
+  program; not shipped now — the signal sits AT the boundary, not past it, and pricing a free feature is
+  a design change that deserves its own measured wave.
+- **Endless toughness ramp (`d20f8f5`):** overall depth median 5 → **6** (greedy 6, p90 7-8, h0 median 6,
+  zero cap hits — confirmed across three independent 32-stand batches). The finding worth keeping: the
+  binding term was the HEAT bump, not the wave slope — a plain slope cut was a measured NULL because a
+  −1 tier never crosses a hits-to-kill threshold in the death window; halving the heat term (rounded up)
+  moved the blend while Ai.Tier/TighterContact/NO QUARTER keep the rungs distinct. Endless-only by
+  construction; the W7 ending remains the terminator.
+- **Process note:** the tuning dev agent died silently mid-round (its worktree edits and round JSONs were
+  4 days stale when caught) — the orchestrator recovered its measured rounds from the JSON artifacts,
+  re-measured the exact working tree as the deciding batch, ran the verify suite, and shipped. Lesson:
+  a delegated agent's liveness is checked by ARTIFACT MTIMES + process table, not by the absence of a
+  completion notification.
