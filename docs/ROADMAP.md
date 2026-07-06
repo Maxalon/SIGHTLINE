@@ -704,3 +704,43 @@ EndlessWaveScale toughness ramp; run the VETSIM=2-vs-0 pricing batch (instrument
 pending); the aggregate policy gap is noisy at N=20 pins — trend it across future full-ladder batches;
 on-device audio + endless FEEL still need the human. Heat-2's corrected baseline is 63% (accepted with the
 truthfulness fix).
+
+## PROGRAM "SIGNAL" — closed items (see docs/DEVLOG.md for the full write-up + measured numbers)
+
+Research: six parallel lenses (visual/UX, design gaps, code health, balance, content, onboarding) →
+PM synthesis → two-verifier adversarial sharpening → a 12-wave plan; every wave dev'd in an isolated
+worktree, adversarially reviewed, and merge-gated on self-tests + autoplay + Release 0/0.
+
+- [x] **W1 Mode-seam integrity.** End-card MAIN MENU (+ overwrite warning), draft BACK, mode-aware
+      checkpoint-preserving abandon, ResetModeState() at all five mode entries, NoPersist-gated daily
+      env seed (cross-process leak proof), endless mid-stand boons actually republish (were dead).
+- [x] **W2 Compass rebuild.** CRN-paired policy legs (PAIRTEST pins A/A identity), positional
+      sloppiness on an isolated RNG stream, ACTION MIX across ~26 verbs, win-rate BY PERK/PURCHASE/
+      ARENA + fallback rate, whole-run objective pinning, DoT attribution ('?' deaths 11%→0%).
+- [x] **W3 Board reads.** Biome-true plateaus (0/8 → 5-6/8 separated), visible focus cone, 13px
+      late-pass status pills, role-shaped rings (square/hex/dashed), member-tile EVAC label.
+- [x] **W4 Rescue repair.** Caged-captive soft-lock closed at every damage entry point; freed Rescue
+      gets the Escort beacon+leash. 9.0t/67% → 6.07t/98.3% per-mission at h0.
+- [x] **W5 Boss identity.** Capability flags (HasShieldArc/HasSiege), faction mid-boss signatures,
+      three finale kits (SIEGELORD/SPYMASTER/WARLORD) hashed from MapSeed; m6 96% → 82% conditional.
+- [x] **W6 Heat ladder tooth.** Fresh paired baseline retired the stale table; rung-4 coordination
+      tooth (AiTier=1) at zero completion cost; finale body heat-gated to h4+. Final ladder
+      80/70/50/32.5/17.5 (goal 80/70/60/40/20 ±8), h8 ≥10% floor restored, no policy inversion.
+- [x] **W7 Exposure plumbing.** Column-constrained objective assignment (every path: ≥1 Eliminate,
+      ≥1 Defend-or-Rescue, ≤1 Escort), per-run no-repeat arena deck, biome-true arena hints,
+      SIGHTLINE_EXPOSURETEST 200-seed histogram.
+- [x] **W8 Morale visible & contested.** WAVERING telegraph (truthful, banner-aware), WARBRINGER
+      banner anchor (Cheb-4 aura, 1/mission), CUSTODIAN objective re-locker; routed specialists
+      (medic/bombard/custodian) now actually flee.
+- [x] **W9 Salvage economy.** Priced veteran recall (10+8×rank, atomic in ConfirmDraft), pending-
+      ledger barracks sinks (REHAB, re-rolls — quit-safe), three horizontal unlocks, heat-multiplied
+      bounty, once-per-stamp daily payouts + streak; METATEST save.json clobber fixed.
+- [x] **W10 Pool expansion.** Six verb boons (SHOCK DOCTRINE, TERROR (duration redesign), FIELD
+      DRILLS, PYROMANIACS, FIELD STORES, RECLAIMER), BIPOD + SUPPRESSOR (target-pod-only wake),
+      GHOST/DEMOLITION/BOUNTY secondaries, the INTEL CACHE. All enum tails append-only, pinned.
+- [x] **W11 Teach it where it's played.** Wrapped help, enemy ID tooltips, FIELD CRAFT rules codex
+      (every number code-verified), honest loss cards, NEW CONTACT banners, HUD de-occlusion,
+      tutorial re-offer loop closed.
+- [x] **W12 Strategic facelift.** Sized-to-fit campaign map (labels + legend), class glyphs across
+      the meta screens, coherent intro hierarchy, WAR ROOM progress bars + NEXT UNLOCK card,
+      promotion delta lines, first-run RECOMMENDED draft.
