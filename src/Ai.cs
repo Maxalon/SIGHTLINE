@@ -110,7 +110,12 @@ public static class Ai
         // MEDIC: prefer patching up the most-wounded active ally (incl. itself) over
         // fighting. Move to a covered tile within heal range + LoS of the patient. If
         // no patient or no reachable heal spot, fall through to normal combat AI.
-        if (e.Cls == "MEDIC")
+        // W8 review: gated on Routed == 0 — the specialist branches precede the routed-flee
+        // logic below, so without the gate a BROKEN medic kept calmly working its job,
+        // contradicting the "routed units flee regardless of archetype" morale invariant.
+        // (Same gate on the CUSTODIAN and BOMBARD branches.) A routed specialist falls
+        // through to the generic loop, where retreatMode makes it flee like everyone else.
+        if (e.Cls == "MEDIC" && e.Routed == 0)
         {
             Unit patient = null; int worst = 0;
             foreach (var a in g.AliveEnemies())
@@ -152,7 +157,10 @@ public static class Ai
         //   (3) too far -> dash toward the site;
         //   (4) nothing to undo (or boxed out) -> fall through to the normal combat loop, so the
         //       turn always spends an action (same no-dead-turn/no-TIMEOUT safety as MEDIC/MORTAR).
-        if (e.Cls == "CUSTODIAN")
+        // W8 review: Routed == 0 gate — a BROKEN keeper flees like everyone else instead of
+        // working the objective (see the MEDIC branch note; the comeback beat must hold here most
+        // of all, since this unit contests the objective itself).
+        if (e.Cls == "CUSTODIAN" && e.Routed == 0)
         {
             (int x, int y)? site = null;
             if (g.HasTerminal && g.HackProgress > 0 && g.HackProgress < Game.HackRequired)
@@ -220,7 +228,9 @@ public static class Ai
         // (SIGNAL W5: keyed on the HasSiege capability flag — defaults to Cls=="BOMBARD", so
         // rank-and-file artillery is unchanged; a siege-armed BOSS elite runs this path too and
         // falls through to the full ELITE combat loop when nothing is worth shelling.)
-        if (e.HasSiege && e.ChargeTurns == 0)
+        // W8 review: Routed == 0 gate — a BROKEN artillery piece does not calmly charge a strike;
+        // it falls through and flees with the rest of its pod (see the MEDIC branch note).
+        if (e.HasSiege && e.ChargeTurns == 0 && e.Routed == 0)
         {
             var (bx, by, hits) = BestSiege(g, e);
             // A siege-armed BOSS (an ELITE carrying the flag) only shells a genuine CLUSTER (2+

@@ -1603,10 +1603,19 @@ public partial class Game
         DoRelock(cu, (7, 6));
         if (SabotageBlown.Count != 0) fails.Add("rearmDidNotClear");
 
+        // (9b) W8 review — a ROUTED custodian does NOT work the objective: morale overrides the
+        // specialist branch (it falls through to the generic loop and flees like everyone else,
+        // so breaking the keeper's pod is a real answer to the objective pressure).
+        SabotageBlown.Add(0);                                       // a re-armable site is available again
+        cu.Routed = RoutDuration;
+        var rplan = Ai.Plan(this, cu);
+        if (rplan.RelockTile != null) fails.Add("routedCustodianStillWorks");
+        cu.Routed = 0;
+
         return fails.Count == 0
             ? "MORALETEST: PASS (pod break routs survivor; routed flees + drops watch + shoots wild; rallies over turns; "
               + "W8: banner holds in-aura pods + doubles rally pace, WAVERING flags the one-kill-from-rout pod truthfully, "
-              + "custodian plans + executes the re-lock/re-arm)"
+              + "custodian plans + executes the re-lock/re-arm and stops when routed)"
             : "MORALETEST: FAIL (" + string.Join(",", fails) + ")";
     }
 

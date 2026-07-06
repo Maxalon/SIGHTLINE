@@ -416,6 +416,8 @@ public static class Mission
 
         var used = new HashSet<(int, int)>();
         bool siegeSpawned = false;    // hard cap: at most ONE SIEGE/BOMBARD artillery per mission (fairness)
+        bool bannerSpawned = false;   // W8 review: at most ONE WARBRINGER banner per mission — overlapping
+                                      // auras could blanket an arena and switch the rout lever off entirely
         for (int i = 0; i < count; i++)
         {
             int y = rows[i % rows.Count];
@@ -451,6 +453,13 @@ public static class Mission
             {
                 if (siegeSpawned) e = MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 60 + bump, 6, x, y);
                 else siegeSpawned = true;
+            }
+            // W8 review — same BOMBARD-style cap for the WARBRINGER: one banner per mission. Keys
+            // on Cls like the siege cap, so a hypothetical banner-flagged boss would stay exempt.
+            if (e.Cls == "WARBRINGER")
+            {
+                if (bannerSpawned) e = MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 60 + bump, 6, x, y);
+                else bannerSpawned = true;
             }
             // Aim clamp raised 82 -> 88: the old 82 cap silently ATE the top-rung Heat StatDelta (+aim)
             // for any archetype whose base + bump + Heat exceeded 82, flattening the ladder's apex. 88

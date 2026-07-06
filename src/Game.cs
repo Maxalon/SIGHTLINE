@@ -3916,7 +3916,10 @@ public partial class Game
     {
         if (e == null || !e.Alive || Util.ChebyDist(e.X, e.Y, site.x, site.y) > 1) return false;
         if (HasTerminal && site == Terminal) return HackProgress > 0 && HackProgress < HackRequired;
-        if (HasSabotage) return BlownSiteAt(site) >= 0;
+        // W8 review: mirror the hack arm's completed-objective guard — all charges blown means the
+        // mission is already won (the plant path ends it same-tick today, but a future deferred-end
+        // path must never let a keeper re-arm a won mission).
+        if (HasSabotage) return SabotageBlown.Count < SabotageSites.Count && BlownSiteAt(site) >= 0;
         return false;
     }
 
