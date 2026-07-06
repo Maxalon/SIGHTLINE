@@ -5012,6 +5012,24 @@ public partial class Game
     {
         var offer = ShopOffer();        // buy only from this barracks' rotating slate
 
+        // W2: ARMORY exposure — the re-arm sink was 0 buys in 140 measured runs because only the
+        // interactive armory screen ever reached DoRearm. Give it the same "real exposure" the
+        // mods/perks got: once per barracks, a 20% roll re-arms a random soldier to a random
+        // legal kit option (ArmoryOptions is class-curated, so it's a sideways bet, not a grief),
+        // making REARM visible in the verb mix and ARMORY priceable in the BY PURCHASE table.
+        // Rolled BEFORE the spend loop so it competes for the budget — after the loop the intel
+        // is already drained below ArmoryCost and the leg never fires (measured: 1 buy/20 runs).
+        if (Util.Roll(20f) && _run.Intel >= ArmoryCost)
+        {
+            var soldiers = _run.Squad.Where(s => !s.IsVip && s.Weapon != null).ToList();
+            if (soldiers.Count > 0)
+            {
+                var s = soldiers[Util.RandInt(0, soldiers.Count - 1)];
+                var opts = Weapon.ArmoryOptions(s.Cls).Where(k => CanRearm(s, k)).ToList();
+                if (opts.Count > 0) DoRearm(s, opts[Util.RandInt(0, opts.Count - 1)]);
+            }
+        }
+
         for (int guard = 0; guard < 40; guard++)
         {
             var buyable = new List<int>();
@@ -5037,22 +5055,6 @@ public partial class Game
             int before = _run.Intel;
             DoPurchase(pick);
             if (_run.Intel >= before) break;   // safety: never spin on a no-op purchase
-        }
-
-        // W2: ARMORY exposure — the re-arm sink was 0 buys in 140 measured runs because only the
-        // interactive armory screen ever reached DoRearm. Give it the same "real exposure" the
-        // mods/perks got: once per barracks, a 20% roll re-arms a random soldier to a random
-        // legal kit option (ArmoryOptions is class-curated, so it's a sideways bet, not a grief),
-        // making REARM visible in the verb mix and ARMORY priceable in the BY PURCHASE table.
-        if (Util.Roll(20f) && _run.Intel >= ArmoryCost)
-        {
-            var soldiers = _run.Squad.Where(s => !s.IsVip && s.Weapon != null).ToList();
-            if (soldiers.Count > 0)
-            {
-                var s = soldiers[Util.RandInt(0, soldiers.Count - 1)];
-                var opts = Weapon.ArmoryOptions(s.Cls).Where(k => CanRearm(s, k)).ToList();
-                if (opts.Count > 0) DoRearm(s, opts[Util.RandInt(0, opts.Count - 1)]);
-            }
         }
         _shopDone = true;
     }
