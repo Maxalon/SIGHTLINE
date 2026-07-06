@@ -734,11 +734,11 @@ public static class Renderer
             var tl = Util.TileRect(x0, y0);
             var br = Util.TileRect(x1, y1);
             var rect = new Rectangle(tl.X + 2, tl.Y + 2, br.X + br.Width - tl.X - 4, br.Y + br.Height - tl.Y - 4);
-            Raylib.DrawRectangleLinesEx(rect, 1.6f, Raylib.Fade(Pal.Suspect, 0.22f * pulse));
-            // corner diamonds (the ring-shape echo)
+            Raylib.DrawRectangleLinesEx(rect, 2.2f, Raylib.Fade(Pal.Suspect, 0.34f * pulse));
+            // corner diamonds (the ring-shape echo; rotation 0 = diamond, see the diaRing note)
             foreach (var c in new[] { new Vector2(rect.X, rect.Y), new Vector2(rect.X + rect.Width, rect.Y),
                                       new Vector2(rect.X, rect.Y + rect.Height), new Vector2(rect.X + rect.Width, rect.Y + rect.Height) })
-                Raylib.DrawPoly(c, 4, 4.5f, 45f, Raylib.Fade(Pal.Suspect, 0.40f * pulse));
+                Raylib.DrawPoly(c, 4, 5.5f, 0f, Raylib.Fade(Pal.Suspect, 0.60f * pulse));
         }
     }
 
@@ -1924,11 +1924,12 @@ public static class Renderer
         }
         else if (diaRing)
         {
-            // diamond ring (a 4-gon rotated 45°): heavier than the circle, unmistakably not the
-            // TURRET's axis-aligned square — the "anchor" frame around the standard-bearer.
-            Raylib.DrawPoly(p, 4, bodyR + 4f, 45f, Raylib.Fade(dark, figAlpha));
-            Raylib.DrawPolyLinesEx(p, 4, bodyR + 4f, 45f, 4.4f, Raylib.Fade(main, figAlpha));
-            Raylib.DrawPoly(p, 4, bodyR - 2f, 45f, Raylib.Fade(main, 0.22f * figAlpha));
+            // diamond ring: DrawPoly's 4-gon puts its FIRST vertex at rotation° along +X, so
+            // rotation 0 IS the diamond (45 would render the TURRET's axis-aligned square —
+            // learned from the screenshot). The "anchor" frame around the standard-bearer.
+            Raylib.DrawPoly(p, 4, bodyR + 4f, 0f, Raylib.Fade(dark, figAlpha));
+            Raylib.DrawPolyLinesEx(p, 4, bodyR + 4f, 0f, 4.4f, Raylib.Fade(main, figAlpha));
+            Raylib.DrawPoly(p, 4, bodyR - 2f, 0f, Raylib.Fade(main, 0.22f * figAlpha));
         }
         else
         {
