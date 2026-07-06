@@ -20,7 +20,8 @@ public partial class Game
     {
         public int Salvage;
         public int Runs, Wins, BestMissions, BestWave;
-        public int Veterans;   // COUNTERPLAY: size of the cross-run veteran reserve
+        public int Veterans;      // COUNTERPLAY: size of the cross-run veteran reserve
+        public int DailyStreak;   // W9 SIGNAL: consecutive-day daily-win streak
         public HashSet<string> Achievements = new();
         public HashSet<int> Unlocks = new();
         public List<SaveGame.LegendDto> Legends = new();
@@ -46,6 +47,7 @@ public partial class Game
         p.Runs = runs; p.Wins = wins; p.BestMissions = best;
         p.BestWave = SaveGame.LoadMetaBestWave();
         p.Veterans = SaveGame.VeteranCount();
+        p.DailyStreak = SaveGame.LoadDailyStreak();
         foreach (var a in SaveGame.LoadAchievements()) p.Achievements.Add(a);
         foreach (var u in SaveGame.LoadUnlocks()) p.Unlocks.Add(u);
         p.Legends = SaveGame.LoadLegends();
@@ -88,6 +90,54 @@ public partial class Game
         }
     }
 
+    // ---- W9 (SIGNAL): repeatable salvage SINKS (the TryBuyUnlock pattern: the UI reads a cached
+    // bank, SpendSalvage refuses-and-spends-nothing when short, a success refreshes the cache).
+    // All NoPersist-gated — the harness/flywheel can never reach disk through these. ----
+
+    /// The salvage bank cached for the BARRACKS sink UI (loaded at EnterBarracks + after each spend;
+    /// the draw path never touches disk). 0 under NoPersist.
+    public int BarracksSalvage;
+
+    /// W9 sink: re-roll the run-opening draft candidate pool. Clears the current picks (those cards
+    /// are gone) and re-recalls veterans from the reserve — nothing is charged for the picks
+    /// themselves; only CONFIRM pays the recall fee.
+    public void TryRerollDraftPool()
+    {
+        if (NoPersist || Phase != Phase.Draft) return;
+        if (!SaveGame.SpendSalvage(MetaProg.DraftRerollCost)) { Audio.Play("miss"); return; }
+        DraftPool = BuildDraftPool();
+        DraftPicked.Clear();
+        DraftSalvage = SaveGame.LoadSalvage();
+        Audio.Play("hit");
+    }
+
+    /// W9 sink: buy ONE scar off a soldier (their oldest first). A true undo of Run.GrantScar:
+    /// BURN-SCARRED's granted max-HP is reverted and a VENDETTA's faction brand is cleared.
+    public void TryBuyScarRemoval(Unit u)
+    {
+        if (NoPersist || _run == null || u == null || u.Scars.Count == 0) return;
+        if (!SaveGame.SpendSalvage(MetaProg.ScarRehabCost)) { Audio.Play("miss"); return; }
+        var s = u.Scars[0];
+        u.Scars.RemoveAt(0);
+        if (s == Scar.BurnScarred) { u.MaxHp = Math.Max(1, u.MaxHp - Unit.BurnScarHp); u.Hp = Math.Min(u.Hp, u.MaxHp); }
+        if (s == Scar.Vendetta) u.VendettaFaction = Faction.None;
+        BarracksSalvage = SaveGame.LoadSalvage();
+        _run.Report.Insert(0, $"{u.Name} rehabilitated - {ScarDef.Name(s)} bought off  (-{MetaProg.ScarRehabCost} salvage)");
+        Audio.Play("hit");
+    }
+
+    /// W9 sink: re-roll this barracks' requisition slate (cheap + repeatable; each re-roll perturbs
+    /// the deterministic slate seed via _shopReroll).
+    public void TryRerollShopSlate()
+    {
+        if (NoPersist || _run == null) return;
+        if (!SaveGame.SpendSalvage(MetaProg.ShopRerollCost)) { Audio.Play("miss"); return; }
+        _shopReroll++;
+        RefreshShopOffer();
+        BarracksSalvage = SaveGame.LoadSalvage();
+        Audio.Play("hit");
+    }
+
     // ---- harness: seed a demo WAR ROOM profile for the SIGHTLINE_WARROOM screenshot ----
     /// Populate the cached profile with representative demo data (salvage / stats / achievements /
     /// legends / a couple owned unlocks) and switch to the WAR ROOM. Screenshot-only; touches NO disk.
@@ -97,12 +147,15 @@ public partial class Game
         {
             Salvage = 155,
             Runs = 12, Wins = 3, BestMissions = 6, BestWave = 14, Veterans = 5,
+            DailyStreak = 3,   // W9: the streak row reads live
         };
         WarRoom.Achievements.Add("FIRST_WIN");
         WarRoom.Achievements.Add("HEAT3");
         WarRoom.Achievements.Add("DEEP");
         WarRoom.Achievements.Add("STAND5");
+        WarRoom.Achievements.Add("DAILY_WIN");             // W9: one of the new daily achievements lit
         WarRoom.Unlocks.Add((int)MetaUnlock.StartIntel);   // one owned, the rest buyable
+        WarRoom.Unlocks.Add((int)MetaUnlock.Quartermaster);   // W9: a new horizontal unlock owned
         WarRoom.Legends.Add(new SaveGame.LegendDto { Name = "VEGA \"REAPER\"", Cls = "ASSAULT", Rank = "CAPTAIN", Kills = 21, Heat = 3, Won = true });
         WarRoom.Legends.Add(new SaveGame.LegendDto { Name = "NOX", Cls = "SHARPSHOOTER", Rank = "SERGEANT", Kills = 17, Heat = 3, Won = true });
         WarRoom.Legends.Add(new SaveGame.LegendDto { Name = "KRESS", Cls = "RANGER", Rank = "CORPORAL", Kills = 9, Heat = 2, Won = false });
@@ -121,6 +174,11 @@ public partial class Game
         // pass here too so METATEST stands alone. Preserve any real meta.json first.
         string metaSaved = System.IO.File.Exists(SaveGame.MetaPathPublic)
             ? System.IO.File.ReadAllText(SaveGame.MetaPathPublic) : null;
+        // W9 fix (routed from W1's discovery): legs (6)+(7) run StartMission with NoPersist=false,
+        // which reaches SaveGame.Save(_run) inside SetupMission — WITHOUT this stash METATEST silently
+        // OVERWRITES a real player's save.json. Preserve/restore it exactly like meta.json above.
+        string saveSaved = System.IO.File.Exists(SaveGame.SavePathPublic)
+            ? System.IO.File.ReadAllText(SaveGame.SavePathPublic) : null;
         try
         {
             // start from a clean meta so the assertions are deterministic
@@ -170,15 +228,168 @@ public partial class Game
                 if (gp.RunState.Intel != gh.RunState.Intel + 15) fails.Add("unlockAppliedPersist");
                 if (gh.RunState.Intel != 0) fails.Add("unlockLeakedHarness");
             }
+
+            // ── W9 (SIGNAL): the standing economy ─────────────────────────────────────────────
+            // Start from a wiped meta again so the pricing/bounty numbers are deterministic.
+            try { if (System.IO.File.Exists(SaveGame.MetaPathPublic)) System.IO.File.Delete(SaveGame.MetaPathPublic); } catch { }
+
+            // (7) PRICED RECALL: ConfirmDraft charges the summed 10+8xRank fee exactly ONCE; picks
+            //     pre-confirm never touch the bank (the W1 BACK path is charge-free by construction);
+            //     an unaffordable CONFIRM refuses — nothing charged, nothing seated, picks intact.
+            {
+                SaveGame.AddSalvage(60);
+                var vr3 = new Unit { Name = "VEGA", Cls = "ASSAULT", Team = Team.Player, MaxHp = 12, Hp = 12, Aim = 80, Mobility = 8, Kills = 9, Rank = 3, Alive = true, Weapon = Weapon.Make(WeaponKind.Rifle) };
+                var vr1 = new Unit { Name = "NOX", Cls = "SHARPSHOOTER", Team = Team.Player, MaxHp = 8, Hp = 8, Aim = 82, Mobility = 6, Kills = 4, Rank = 1, Alive = true, Weapon = Weapon.Make(WeaponKind.Sniper) };
+                SaveGame.EnshrineVeterans(new[] { vr3, vr1 });
+
+                var gd = new Game { NoPersist = false };
+                gd.BeginDraft();
+                var vets = gd.DraftPool.FindAll(u => u.FromReserve);
+                if (vets.Count != 2) fails.Add($"draftVets={vets.Count}");
+                foreach (var v in vets) gd.DraftPicked.Add(v);
+                foreach (var u in gd.DraftPool)
+                { if (gd.DraftPicked.Count >= DraftCap) break; if (!u.FromReserve) gd.DraftPicked.Add(u); }
+                gd.DraftSelectedBoon = gd.DraftBoonOffer.Count > 0 ? gd.DraftBoonOffer[0] : Boon.Marksmen;
+                int expect = MetaProg.RecallCost(3) + MetaProg.RecallCost(1);   // 34 + 18 = 52
+                if (expect != 52) fails.Add($"recallTable={expect}");
+                if (gd.DraftRecallCost != expect) fails.Add($"recallCost={gd.DraftRecallCost}");
+                // picks selected but NOT confirmed -> the bank is untouched (BACK charges nothing)
+                if (SaveGame.LoadSalvage() != 60) fails.Add("chargedPreConfirm");
+                gd.ConfirmDraft();   // affordable (60 >= 52): charges once, seats the squad
+                if (SaveGame.LoadSalvage() != 60 - expect) fails.Add($"confirmCharge={SaveGame.LoadSalvage()}");
+                if (gd.Phase == Phase.Draft) fails.Add("confirmDidNotProceed");
+                int seatedVets = 0;
+                foreach (var u in gd.RunState.Squad) if (u.FromReserve) seatedVets++;
+                if (seatedVets != 2) fails.Add($"seatedVets={seatedVets}");
+
+                // unaffordable CONFIRM (bank now 8 < 18): refuse, keep picks, charge nothing, seat nothing
+                var g2 = new Game { NoPersist = false };
+                g2.BeginDraft();
+                var vets2 = g2.DraftPool.FindAll(u => u.FromReserve);
+                if (vets2.Count != 2) fails.Add($"draftVets2={vets2.Count}");
+                foreach (var v in vets2) g2.DraftPicked.Add(v);
+                foreach (var u in g2.DraftPool)
+                { if (g2.DraftPicked.Count >= DraftCap) break; if (!u.FromReserve) g2.DraftPicked.Add(u); }
+                g2.DraftSelectedBoon = g2.DraftBoonOffer.Count > 0 ? g2.DraftBoonOffer[0] : Boon.Marksmen;
+                int bank = SaveGame.LoadSalvage();
+                g2.ConfirmDraft();
+                if (g2.Phase != Phase.Draft) fails.Add("brokeConfirmProceeded");
+                if (SaveGame.LoadSalvage() != bank) fails.Add("brokeConfirmCharged");
+                if (g2.DraftPicked.Count != DraftCap) fails.Add("brokeConfirmLostPicks");
+                // a fresh Game holds a default empty Run (never null) — "seats no veteran" means the
+                // refused confirm never ran StartMission, so nothing was drafted into the squad.
+                int seated2 = 0;
+                if (g2.RunState?.Squad != null) foreach (var u in g2.RunState.Squad) if (u.FromReserve) seated2++;
+                if (seated2 != 0) fails.Add("brokeConfirmSeated");
+
+                // (8) SINKS (TryBuy* refuse-when-short pattern):
+                // shop-slate re-roll: -5 and the slate actually rotates (nonce perturbs the seed)
+                SaveGame.AddSalvage(100);
+                gd.BarracksSalvage = SaveGame.LoadSalvage();
+                string slate0 = string.Join(",", gd.ShopOffer());
+                int bank0 = SaveGame.LoadSalvage();
+                gd.TryRerollShopSlate();
+                if (SaveGame.LoadSalvage() != bank0 - MetaProg.ShopRerollCost) fails.Add("shopRerollCharge");
+                bool rotated = string.Join(",", gd.ShopOffer()) != slate0;
+                for (int i = 0; i < 2 && !rotated; i++)   // a coincidental identical shuffle is possible; 3 tries isn't
+                { gd.TryRerollShopSlate(); rotated = string.Join(",", gd.ShopOffer()) != slate0; }
+                if (!rotated) fails.Add("shopRerollStatic");
+
+                // scar REHAB: -30, scar removed, BURN-SCARRED max-HP grant reverted; refuses when broke
+                var scarred = gd.RunState.Squad[0];
+                int hp0 = scarred.MaxHp;
+                scarred.Scars.Add(Scar.BurnScarred);
+                scarred.MaxHp += Unit.BurnScarHp; scarred.Hp = scarred.MaxHp;   // mimic Run.GrantScar
+                int bank1 = SaveGame.LoadSalvage();
+                gd.TryBuyScarRemoval(scarred);
+                if (scarred.Scars.Count != 0) fails.Add("rehabScarStuck");
+                if (scarred.MaxHp != hp0) fails.Add("rehabBurnHpNotReverted");
+                if (SaveGame.LoadSalvage() != bank1 - MetaProg.ScarRehabCost) fails.Add("rehabCharge");
+                scarred.Scars.Add(Scar.ShellShocked);
+                SaveGame.SpendSalvage(SaveGame.LoadSalvage());   // drain the bank
+                gd.TryBuyScarRemoval(scarred);
+                if (scarred.Scars.Count != 1) fails.Add("rehabBrokeRemoved");
+                if (SaveGame.LoadSalvage() != 0) fails.Add("rehabBrokeCharged");
+
+                // draft-pool re-roll: -10, picks cleared, pool refilled, cache refreshed
+                SaveGame.AddSalvage(30);
+                var g3 = new Game { NoPersist = false };
+                g3.BeginDraft();
+                g3.DraftPicked.Add(g3.DraftPool[0]);
+                int bank2 = SaveGame.LoadSalvage();
+                g3.TryRerollDraftPool();
+                if (SaveGame.LoadSalvage() != bank2 - MetaProg.DraftRerollCost) fails.Add("draftRerollCharge");
+                if (g3.DraftPicked.Count != 0) fails.Add("draftRerollKeptPicks");
+                if (g3.DraftPool.Count != Run.DraftPoolSize) fails.Add("draftRerollPoolSize");
+                if (g3.DraftSalvage != SaveGame.LoadSalvage()) fails.Add("draftRerollCacheStale");
+
+                // (9) HORIZONTAL UNLOCKS: QUARTERMASTER widens the slate by exactly one;
+                //     STANDING RESERVE recalls a third veteran; CROSS-TRAINING only ever deals
+                //     class-legal weapons (ArmoryOptions — a sidegrade, never off-role).
+                int slotsBefore = gd.ShopOffer().Count;
+                SaveGame.AddUnlock((int)MetaUnlock.Quartermaster);
+                gd.RefreshShopOffer();
+                if (gd.ShopOffer().Count != slotsBefore + 1) fails.Add("quartermasterSlate");
+                var vr2 = new Unit { Name = "KRESS", Cls = "RANGER", Team = Team.Player, MaxHp = 9, Hp = 9, Aim = 70, Mobility = 7, Kills = 6, Rank = 2, Alive = true, Weapon = Weapon.Make(WeaponKind.Shotgun) };
+                SaveGame.EnshrineVeterans(new[] { vr2 });
+                SaveGame.AddUnlock((int)MetaUnlock.StandingReserve);
+                SaveGame.AddSalvage(100);
+                var g4 = new Game { NoPersist = false };
+                g4.BeginDraft();
+                int vets3 = 0;
+                foreach (var u in g4.DraftPool) if (u.FromReserve) vets3++;
+                if (vets3 != 3) fails.Add($"standingReserve={vets3}");
+                var poolCT = Run.GenerateDraftPool(null, Run.MaxDraftVeterans, true);
+                foreach (var u in poolCT)
+                    if (Array.IndexOf(Weapon.ArmoryOptions(u.Cls), u.Weapon.Kind) < 0) fails.Add("crossTrainIllegal");
+            }
+
+            // (10) DAILY PAYOUT: a daily win pays 10+heat salvage ONCE per stamp (+ the DAY SHIFT
+            //      achievement bounty); a same-stamp re-win pays nothing; five consecutive-day wins
+            //      drive the streak to 5 and unlock DAWN PATROL; a gap resets the streak to 1.
+            {
+                try { if (System.IO.File.Exists(SaveGame.MetaPathPublic)) System.IO.File.Delete(SaveGame.MetaPathPublic); } catch { }
+                var gdaily = new Game { NoPersist = true };
+                gdaily.BeginDaily();               // deterministic stamp under NoPersist
+                gdaily.NoPersist = false;          // flip so EndSkirmish's payout path runs (meta is stashed)
+                int stamp0 = gdaily.DailyStamp;
+                int s0 = SaveGame.LoadSalvage();
+                gdaily.EndSkirmish(true);
+                int paid = SaveGame.LoadSalvage() - s0;
+                int want = 10 + gdaily.RunState.HeatLevel + MetaProg.AchievementSalvage;
+                if (paid != want) fails.Add($"dailyBounty={paid}(want{want})");
+                if (!SaveGame.LoadAchievements().Contains("DAILY_WIN")) fails.Add("dailyAch");
+                if (SaveGame.LoadDailyStreak() != 1) fails.Add($"dailyStreak={SaveGame.LoadDailyStreak()}");
+                int s1 = SaveGame.LoadSalvage();
+                gdaily.EndSkirmish(true);          // SAME stamp again -> must pay nothing more
+                if (SaveGame.LoadSalvage() != s1) fails.Add("dailyDoublePaid");
+                // climb 4 more consecutive calendar days through the real wiring -> streak 5 + DAWN PATROL
+                var d0 = new DateTime(stamp0 / 10000, stamp0 / 100 % 100, stamp0 % 100);
+                for (int i = 1; i <= 4; i++)
+                {
+                    var di = d0.AddDays(i);
+                    gdaily.DailyStamp = di.Year * 10000 + di.Month * 100 + di.Day;
+                    gdaily.EndSkirmish(true);
+                }
+                if (SaveGame.LoadDailyStreak() != 5) fails.Add($"streakClimb={SaveGame.LoadDailyStreak()}");
+                if (!SaveGame.LoadAchievements().Contains("STREAK5")) fails.Add("streak5Ach");
+                // a gap (non-consecutive day) resets the streak to 1 — primitive-level
+                var (gp2, gs2) = SaveGame.RecordDailyWin(stamp0 + 8000);   // ~ +does-not-matter: not next-day
+                if (!gp2 || gs2 != 1) fails.Add("streakGapReset");
+            }
         }
         catch (Exception e) { return "METATEST: FAIL (exception " + e.Message + ")"; }
         finally
         {
             if (metaSaved != null) { try { System.IO.File.WriteAllText(SaveGame.MetaPathPublic, metaSaved); } catch { } }
             else { try { if (System.IO.File.Exists(SaveGame.MetaPathPublic)) System.IO.File.Delete(SaveGame.MetaPathPublic); } catch { } }
+            // W9 fix: restore (or remove) save.json exactly as it was before the test ran.
+            if (saveSaved != null) { try { System.IO.File.WriteAllText(SaveGame.SavePathPublic, saveSaved); } catch { } }
+            else { try { if (System.IO.File.Exists(SaveGame.SavePathPublic)) System.IO.File.Delete(SaveGame.SavePathPublic); } catch { } }
         }
         return fails.Count == 0
-            ? "METATEST: PASS (salvage/achievements/unlocks/legends/totals round-trip; unlock gated by NoPersist)"
+            ? "METATEST: PASS (salvage/achievements/unlocks/legends/totals round-trip; unlock gated by NoPersist; "
+              + "recall charged once in ConfirmDraft + broke-confirm refuses; sinks charge/refuse; daily bounty once-per-stamp + streak; save.json preserved)"
             : "METATEST: FAIL (" + string.Join(",", fails) + ")";
     }
 }
