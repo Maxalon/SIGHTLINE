@@ -1443,6 +1443,17 @@ public static class Hud
             // target obscured in smoke (it's shootable — LoS clears the endpoint tile —
             // but harder to make out). Neutral tag: smoke is not in the hit% math.
             if (g.Grid.IsSmoke(d.X, d.Y))                     flags.Add(("SMOKED", "sight only", Pal.TxtDim));
+
+            // SIGNAL W8 — pod-morale telegraph: the hovered foe's pod is ONE KILL from the rout
+            // threshold. "POD alive/orig | NEXT KILL ROUTS" makes the breaking kill a PLAN; if a
+            // WARBRINGER's banner holds this member, say THAT instead (the mark must never lie —
+            // and the line points the player at the counter: the banner).
+            if (d.Team == Team.Enemy && g.PodAtWaverPoint(d))
+            {
+                var (alive, orig) = g.PodStrength(d.PodId);
+                if (g.BannerNear(d)) flags.Add(($"POD {alive}/{orig}", "HELD BY BANNER", Pal.Foe));
+                else                 flags.Add(($"POD {alive}/{orig}", "NEXT KILL ROUTS", Pal.Suspect));
+            }
         }
 
         // Layout (W10, owner feedback): ONE modifier per line at a legible 13px with real line
