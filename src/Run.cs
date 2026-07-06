@@ -227,11 +227,12 @@ public static class Heat
     // that does NOT saturate -- StatDelta, a force-wide +1 HP & +1 Aim to EVERY hostile --
     // and folds the already-wired qualitative knobs (tighter contact, harsh attrition,
     // EXPOSED no-concealment opener, no reinforcements) in EARLIER so each rung adds real
-    // texture, not just a number. Cumulative at the milestones the balance pass targets:
-    //   heat 4 -> +2 enemy, +2 stat, tighter contact
-    //   heat 6 -> +3 enemy, +3 stat, +harsh attrition, +EXPOSED (no free ambush opener)
-    //   heat 8 -> +4 enemy, +5 stat, +no reinforcements (every prior flag too) = a real wall.
-    // A force-wide +5 HP/+5 Aim at the top is the bulk of the difficulty (it scales with the
+    // texture, not just a number. Cumulative at the milestones the balance pass targets
+    // (W6 SIGNAL re-tune — rung 4's stat moved out, its bite is now AI coordination tier 1):
+    //   heat 4 -> +2 enemy, +1 stat, tighter contact, AI coordination tier 1
+    //   heat 6 -> +3 enemy, +2 stat, +harsh attrition, +EXPOSED (no free ambush opener)
+    //   heat 8 -> +4 enemy, +4 stat, +no reinforcements (every prior flag too) = a real wall.
+    // A force-wide +4 HP/+4 Aim at the top is the bulk of the difficulty (it scales with the
     // whole enemy count); the mutator flags supply the qualitative "no mercy" feel. Heat 0
     // stays a true no-op. Re-tuning the deltas/flags is SAVE-SAFE -- only the chosen LEVEL is
     // persisted, and "apply rungs 1..level cumulatively" (the meaning of a saved level) is
@@ -246,7 +247,12 @@ public static class Heat
         // starts PLAYING better (coordination tier 1: focus-fire convergence, steadier smoke/
         // flash reads) two rungs before EXPOSED, instead of the mid-ladder leaning on stat rows
         // alone. Aggregation is Math.Max, so rungs 6-7 stay tier 1 and NO QUARTER stays tier 2.
-        new HeatModifier { Name = "ELITE CADRE",   Desc = "Enemies coordinate their fire (+1 stat)", StatDelta = 1, AiTier = 1 },
+        // MEASURED (paired flywheel, slots 0-19): tier-1-at-4 alone was completion-neutral at h4
+        // (35% -> 37.5%), so the rung's old +1 stat moved OUT — the fresh 06b65c2 baseline ran
+        // 62.5/55/35/22.5/7.5 (h8 under the >=10% floor), i.e. the whole top half sat too deep;
+        // shedding this one cumulative stat point lifts h4/h6/h8 together (stat 2/3/5 -> 1/2/4)
+        // while the rung KEEPS a real identity as the coordination tooth.
+        new HeatModifier { Name = "ELITE CADRE",   Desc = "Enemies coordinate their fire",        AiTier = 1 },
         // LINGERING WOUNDS arrives earlier (rung 5) and carries a body -- run-loop attrition
         // pressure starts compounding in the mid-ladder instead of only near the top.
         new HeatModifier { Name = "LINGERING WOUNDS", Desc = "+1 enemy; wounds linger, less field healing", EnemyDelta = 1, HarshAttrition = true },
