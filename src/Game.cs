@@ -164,6 +164,9 @@ public partial class Game
     public string BannerText = "";
     public float BannerTimer, BannerMax;
     public bool BannerEnemy;
+    // W11: optional smaller second line under the banner (the NEW CONTACT ID line). Cleared by
+    // ShowBanner so an ordinary banner never inherits a stale sub-line.
+    public string BannerSub;
 
     // ai staging
     AiStage _aiStage;
@@ -503,8 +506,14 @@ public partial class Game
         if (TutStep < 0) return;
         switch (TutStep)
         {
-            case 0: if (_tutMoved) AdvanceTutorial(); break;
-            case 1: if (_tutOver) AdvanceTutorial(); break;
+            // W11: turn-count fallback on step 1 — a player who's already ending turns without a
+            // "move" click (e.g. opened on overwatch/fire) clearly knows how to act; don't hold the
+            // MOVE card up forever, advance to the next lesson after a couple of full turns.
+            case 0: if (_tutMoved || _turnCount >= 3) AdvanceTutorial(); break;
+            // W11 review: same fallback on the OVERWATCH lesson — a reaction-averse player who
+            // never arms a watch would otherwise park here below the TutStep>=2 "seen" gate and
+            // get the whole onboarding re-offered every future run.
+            case 1: if (_tutOver || _turnCount >= 6) AdvanceTutorial(); break;
             case 2: if (_tutShot) AdvanceTutorial(); break;
             case 3: _tutDoneTimer -= dt; if (_tutDoneTimer <= 0) CompleteTutorial(); break;
         }
@@ -773,6 +782,27 @@ public partial class Game
         _dailyBest = -1;
         Wave = 0;
         if (!NoPersist) { Mission.ForcedLayout = -1; Util.Reseed(0); }
+        // W11: per-RUN teaching state — the honest-loss tally and the NEW CONTACT memory reset at
+        // every mode entry (this is the one choke-point all of StartMission / BeginEndless /
+        // BeginSkirmish / BeginDaily / ContinueRun pass through). Note a CONTINUEd run restarts
+        // both: the save doesn't carry them (Run.cs / the save format are outside this seam), so
+        // a resumed run re-IDs contacts and tallies causes from the resume point onward.
+        DeathsByClass.Clear();
+        _seenArchetypes.Clear();
+        // Harness affordance (screenshot only, mirrors the SIGHTLINE_HEAT pattern): pre-seed the
+        // cause-of-death tally, e.g. SIGHTLINE_DEATHS=SNIPER:2,GRUNT:1 — so the lose-card line can
+        // be framed without playing a full losing run. Inert when unset -> plain shots byte-stable.
+        if (NoPersist)
+        {
+            var seed = Environment.GetEnvironmentVariable("SIGHTLINE_DEATHS");
+            if (!string.IsNullOrEmpty(seed))
+                foreach (var part in seed.Split(','))
+                {
+                    var kv = part.Split(':');
+                    if (kv.Length == 2 && int.TryParse(kv[1], out int n) && n > 0)
+                        DeathsByClass[kv[0].Trim().ToUpperInvariant()] = n;
+                }
+        }
     }
 
     /// Start a brand-new campaign run (called from intro / after a run ends).
@@ -798,6 +828,12 @@ public partial class Game
         int heat = PendingHeat;
         if (NoPersist && int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_HEAT"), out int hEnv)) heat = hEnv;
         _run.HeatLevel = Sightline.Heat.Clamp(heat);
+        // W11 harness affordance (screenshot only, same family as SIGHTLINE_HEAT/VETSIM above):
+        // SIGHTLINE_BOONS=<k> grants the first k boons so the in-mission boon-chip strip and its
+        // hover card can be framed headless. Deterministic; inert when unset -> byte-stable.
+        if (NoPersist && int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_BOONS"), out int boonsN) && boonsN > 0)
+            for (int bi = 0; bi < BoonDef.All.Length && bi < boonsN; bi++)
+                if (!_run.ActiveBoons.Contains(BoonDef.All[bi])) _run.ActiveBoons.Add(BoonDef.All[bi]);
         _run.LossStreak = _metaLossStreak;  // adaptive assist: carry the loss history into this run
         // balance telemetry (no-op unless Stats.Enabled); tag the policy so the report can
         // split greedy vs sloppy win-rates and surface the optimal-vs-error GAP.
@@ -851,6 +887,12 @@ public partial class Game
     // so the headless harness never reads disk and stays at the default unlock of 0).
     bool _metaLoaded;
     int _metaLossStreak;          // adaptive-assist loss streak loaded from meta.json (0 headless)
+
+    /// W11 HONEST LOSSES: the assist tier the NEXT run would start with at the currently dialled
+    /// heat (Run.AssistLevel's exact formula, previewed from the meta loss streak before a Run
+    /// exists). The intro heat panel shows it as a FIELD SUPPORT chip — the easing was invisible.
+    /// 0 headless (streak never loads under NoPersist), so plain intro shots stay byte-stable.
+    public int AssistPreview => PendingHeat > 0 ? 0 : Math.Min(Run.AssistMax, _metaLossStreak);
     void EnsureMetaLoaded()
     {
         if (_metaLoaded) return;
@@ -865,6 +907,10 @@ public partial class Game
                 UnlockedHeat = Sightline.Heat.Clamp(hEnv);
                 PendingHeat = UnlockedHeat;
             }
+            // W11 (same affordance family): SIGHTLINE_LOSSTREAK=<n> seeds the assist streak so the
+            // intro FIELD SUPPORT chip can be screenshot headless. No disk; default 0 = byte-stable.
+            if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_LOSSTREAK"), out int lsEnv) && lsEnv > 0)
+                _metaLossStreak = lsEnv;
             return;
         }
         UnlockedHeat = SaveGame.LoadMetaHeat();
@@ -1235,7 +1281,9 @@ public partial class Game
         // APEX W2: tutorial completion fallback — the first mission ended with steps still pending
         // (e.g. the player never set overwatch), so close it out and mark it seen (NoPersist-gated
         // inside) rather than re-running the onboarding at the start of every future run.
-        if (TutStep >= 0) CompleteTutorial();
+        // W11: mark "seen" only if the player actually reached the FIRE lesson (TutStep >= 2) —
+        // someone who never got past MOVE hasn't been onboarded; let the tutorial re-offer next run.
+        if (TutStep >= 2) CompleteTutorial(); else TutStep = -1;
         // W5 SCARS: capture the just-played mission's faction BEFORE EndMission clears it, so
         // DebriefSurvivors can brand a VENDETTA grudge on a survived near-death (the faction that
         // nearly killed them). None on a mixed-force mission -> no grudge stamped (inert).
@@ -1359,12 +1407,23 @@ public partial class Game
     public string LoseTitle = "RUN OVER";
     public string LoseReason = "";
 
+    // W11 HONEST LOSSES — which enemy archetype is killing this run's soldiers. Always-on (a
+    // Dictionary bump costs nothing), bumped in KillUnit, read by the lose card's CAUSE OF DEATH
+    // line. Lives on GAME, not Run: it must survive the per-mission Run.Squad rebuilds but reset
+    // per run, and ResetModeState is the one choke-point every mode entry passes through. Keyed
+    // by archetype string (Unit.Cls); "?" buckets source-less deaths (DoT / environment / friendly).
+    public readonly Dictionary<string, int> DeathsByClass = new();
+
+    // W11 NEW CONTACT — archetypes already ID'd this run (banner fires once per archetype per run).
+    readonly HashSet<string> _seenArchetypes = new();
+
     /// End the run as a loss and clear the checkpoint so the intro stops offering CONTINUE.
     void LoseRun(string title, string reason)
     {
         // APEX W2: tutorial completion fallback (mirror of EnterBarracks) — a first-mission loss
         // still counts as "the onboarding ran"; don't re-show it forever. NoPersist-gated inside.
-        if (TutStep >= 0) CompleteTutorial();
+        // W11: same reached-the-FIRE-lesson gate as EnterBarracks — a step-0/1 washout re-offers.
+        if (TutStep >= 2) CompleteTutorial(); else TutStep = -1;
         Combat.EndRun();   // TEMPO wave 4: clear every mission-scoped combat static (+ run boons) on run end
         LoseTitle = title;
         LoseReason = reason;
@@ -1443,9 +1502,31 @@ public partial class Game
 
     void ShowBanner(string text, bool enemy)
     {
-        BannerText = text; BannerEnemy = enemy;
+        BannerText = text; BannerEnemy = enemy; BannerSub = null;
         BannerMax = BannerTimer = 1.2f;
         Audio.Play("turn");
+    }
+
+    // ---------------- W11 NEW CONTACT (teach the roster where it's played) ----------------
+    /// First sighting of an enemy archetype this run: banner its callsign + the bestiary ID clause.
+    /// "Sighting" = the unit is alive AND alert (Active) — dormant pods aren't a contact yet, so the
+    /// banner lands exactly when the threat becomes real. One archetype per banner window (the next
+    /// unseen one fires after this banner fades), so a multi-archetype wake never strobes the screen.
+    /// Interactive-only (!NoPersist), mirroring the tutorial, so autoplay/shots stay byte-stable;
+    /// SIGHTLINE_NEWCONTACT=1 forces it under NoPersist for the screenshot harness.
+    void CheckNewContact()
+    {
+        if (NoPersist && Environment.GetEnvironmentVariable("SIGHTLINE_NEWCONTACT") != "1") return;
+        foreach (var e in Enemies)
+        {
+            if (!e.Alive || !e.Active || _seenArchetypes.Contains(e.Cls)) continue;
+            _seenArchetypes.Add(e.Cls);
+            string blurb = Codex.BlurbClause(e.Cls);
+            if (string.IsNullOrEmpty(blurb)) continue;   // unknown archetype: no half-empty banner
+            ShowBanner($"NEW CONTACT: {Codex.NameFor(e.Cls)}", true);
+            BannerSub = $"{e.Cls} — {blurb}";
+            return;
+        }
     }
 
     // ---------------- queries ----------------
@@ -1647,6 +1728,13 @@ public partial class Game
         // by Stats.EndMission's dead-enemy count, so aggregate kill counts stay accurate).
         Unit killer = ActiveAnim switch { ShotAnim sa => sa.A, GrenadeAnim ga => ga.Thrower, _ => null };
         Stats.RecordKill(killer?.Cls ?? "?", killer != null ? (int)killer.Team : 1, d.Cls, (int)d.Team);
+        // W11 HONEST LOSSES: tally which enemy archetype killed this soldier (always-on; the lose
+        // card's CAUSE OF DEATH line reads it). Source-less / friendly-fire deaths bucket under "?".
+        if (d.Team == Team.Player && !d.IsVip)
+        {
+            string cause = killer != null && killer.Team == Team.Enemy ? killer.Cls : "?";
+            DeathsByClass[cause] = DeathsByClass.GetValueOrDefault(cause) + 1;
+        }
         if (d.Team == Team.Player)
         {
             // _run is null only in controlled test scenes (normal play always has a Run) — guard
@@ -2182,6 +2270,9 @@ public partial class Game
         }
         UpdateBondAuras();   // bonded squadmates buff each other while adjacent
         if (BannerTimer > 0) BannerTimer -= t;
+        // W11 NEW CONTACT: with the banner lane free, ID the next unseen alert archetype (one per
+        // banner window). Live phases only; internally !NoPersist-gated like the tutorial.
+        else if (Phase == Phase.PlayerTurn || Phase == Phase.EnemyTurn) CheckNewContact();
 
         // advance animation queue
         if (_anims.Count > 0)
