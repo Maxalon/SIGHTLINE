@@ -5255,6 +5255,10 @@ public partial class Game
                 Mode = GameMode.Campaign;
                 DailyMode = false;
                 if (!NoPersist) Mission.ForcedLayout = -1;
+                // zero the rect BEFORE entering the intro: the intro's CONTINUE branch reads the
+                // same OverlayBtn2, so a stale end-card rect could otherwise turn a second click
+                // at this position into an accidental CONTINUE before the next Draw republishes it.
+                Hud.OverlayBtn2 = new Rectangle(0, 0, 0, 0);
                 Phase = Phase.Intro;
                 Audio.Play("select");
                 return;

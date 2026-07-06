@@ -235,7 +235,11 @@ public static class Hud
         DrawButtonRect(PauseColorblind, Pal.Colorblind ? "COLORBLIND: ON" : "COLORBLIND: OFF", "", true, Pal.Colorblind, Pal.Accent);
         DrawButtonRect(PauseAutoCam, Display.AutoCam ? "AUTO-CAM: ON" : "AUTO-CAM: OFF", "", true, Display.AutoCam, Pal.Accent);
         DrawButtonRect(PauseCodex, "FIELD MANUAL", "K", true, false, Pal.Good);
-        DrawButtonRect(PauseAbandon, "ABANDON RUN", "", true, false, Pal.Foe);
+        // W1 mode-seam: the abandon verb is mode-true — a stand/fight is not a campaign "run".
+        string abandonLbl = g.Mode == GameMode.Endless ? "END STAND"
+                          : g.Mode == GameMode.Skirmish ? "ABANDON FIGHT"
+                          : "ABANDON RUN";
+        DrawButtonRect(PauseAbandon, abandonLbl, "", true, false, Pal.Foe);
 
         string ctl = "Wheel zoom  -  Middle-drag pan  -  [C] reset camera  -  Arrows/WASD + [Space]";
         Raylib.DrawTextEx(Cfg.Font, ctl, new Vector2(x + w / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, ctl, 11, 1f).X / 2, y + h - 24), 11, 1f, Pal.TxtDim);
@@ -3417,7 +3421,13 @@ public static class Hud
         var lz = Raylib.MeasureTextEx(Cfg.Font, label, 18, 1f);
         Raylib.DrawTextEx(Cfg.Font, label, new Vector2((int)(rr.X + rr.Width / 2 - lz.X / 2), (int)(rr.Y + rr.Height / 2 - 9)), 18, 1f, Raylib.Fade(Pal.RGBA(3, 18, 26), a));
         if (keyHint != null)
-            Raylib.DrawTextEx(Cfg.Font, "[" + keyHint + "]", new Vector2((int)(rr.X + rr.Width - 30), (int)(rr.Y + rr.Height - 16)), 11, 1f, Raylib.Fade(Pal.RGBA(3, 18, 26), a));
+        {
+            // right-align the hint inside the button (measured, 6px inset) — the old fixed
+            // rr.Width - 30 offset bled multi-char hints ("[Esc]") past narrow buttons' edge.
+            string kh = "[" + keyHint + "]";
+            float khw = Raylib.MeasureTextEx(Cfg.Font, kh, 11, 1f).X;
+            Raylib.DrawTextEx(Cfg.Font, kh, new Vector2((int)(rr.X + rr.Width - khw - 6), (int)(rr.Y + rr.Height - 16)), 11, 1f, Raylib.Fade(Pal.RGBA(3, 18, 26), a));
+        }
     }
 
     // ---------------- helpers ----------------
