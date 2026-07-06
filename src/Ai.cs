@@ -151,15 +151,26 @@ public static class Ai
         //       MOVEMENT, not just an LoS-break). Charge from the CURRENT tile (v1: stand and shell).
         //   (3) If nothing's worth shelling, fall through to the normal loop (move/shoot SMG/hunker) so
         //       the turn always spends an action -> NO dead turn / NO TIMEOUT (same safety as MORTAR).
-        if (e.Cls == "BOMBARD" && e.ChargeTurns == 0)
+        // (SIGNAL W5: keyed on the HasSiege capability flag — defaults to Cls=="BOMBARD", so
+        // rank-and-file artillery is unchanged; a siege-armed BOSS elite runs this path too and
+        // falls through to the full ELITE combat loop when nothing is worth shelling.)
+        if (e.HasSiege && e.ChargeTurns == 0)
         {
             var (bx, by, hits) = BestSiege(g, e);
-            if (hits >= 1)
+            // A siege-armed BOSS (an ELITE carrying the flag) only shells a genuine CLUSTER (2+
+            // soldiers): unlike the 7-HP rank-and-file BOMBARD — whose fairness is that it dies to
+            // one focused turn — a 20-HP guarded boss raining a no-LoS shell EVERY turn taxed
+            // position relentlessly (measured: the first-cut Legion finale sank to a 37%
+            // conditional). The cluster gate makes SPREAD OUT the counter-verb, and on non-shelling
+            // turns the boss fights its real ELITE turn (move/Lmg/frag) instead of standing
+            // statically at the board edge. Rank-and-file keeps its hits>=1 gate exactly.
+            int need = e.Cls == "BOMBARD" ? 1 : 2;
+            if (hits >= need)
             {
                 var sp = new EnemyPlan { SiegeCharge = (bx, by) };   // no move, no shot — the charge is the action
                 return sp;
             }
-            // else: fall through to the generic combat loop (advance / fallback SMG shot / hunker).
+            // else: fall through to the generic combat loop (advance / fallback shot / hunker).
         }
 
         // COORDINATION 2 — SELF-PRESERVATION / FIGHTING RETREAT (decision):
@@ -361,7 +372,10 @@ public static class Ai
                 // Combined shot-quality delta: hit improvement weighted more than crit.
                 float qdelta = hitDelta * 0.5f + critDelta * 0.25f;
                 // Per-archetype multiplier: snipers/elites care most, berserkers/sappers least.
-                float elevMult = (e.Cls == "SNIPER" || e.Cls == "ELITE") ? 1.4f
+                // W5: a RagesTwice breaker charges like a berserker — it doesn't perch (checked
+                // first: it IS an ELITE, but the rush identity wins over the elite's vantage-seeking).
+                float elevMult = (e.RagesTwice)                          ? 0.3f
+                               : (e.Cls == "SNIPER" || e.Cls == "ELITE") ? 1.4f
                                : (e.Cls == "BERSERKER")                  ? 0.3f
                                : (e.Cls == "SAPPER")                     ? 0.2f
                                :                                            0.8f;   // grunt/scout/medic/shield
@@ -440,7 +454,8 @@ public static class Ai
             }
             else
             {
-                float advW = (e.Cls == "BERSERKER" || e.Cls == "ELITE") ? 3.4f
+                float advW = (e.RagesTwice) ? 3.6f                      // W5 BREAKER: the berserker rush temperament — presses like a hound
+                           : (e.Cls == "BERSERKER" || e.Cls == "ELITE") ? 3.4f
                            : (e.Cls == "HOUND") ? 3.6f                  // swarmer: hardest charger in the game (low HP, fast)
                            : (e.Cls == "STRIKER") ? 3.5f                // leaper: rushes hard THROUGH overwatch to end flanking
                            : (e.Cls == "DRONE") ? 3.0f                  // drone beelines (ignores cover anyway)

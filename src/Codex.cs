@@ -80,7 +80,10 @@ public static class Codex
         ("SIEGE",   "BOMBARD",   "Artillery — telegraphs a cover-ignoring 3x3 strike a turn ahead. Relocate or kill it."),
         ("WRAITH",  "STRIKER",   "Fast flanker that slips past overwatch and strikes your soldiers' exposed side. Body-block it or focus it — it's glass."),
         ("HAZE",    "SCREENER",  "Back-line zoner — drops smoke on your firing lane to blind your shots. Reposition through the cloud, or kill it before it screens."),
-        ("WARLORD", "ELITE",     "Named boss / mid-boss — tough, carries grenades, and rages at low HP."),
+        // SIGNAL W5: every named boss (BREAKER/BULWARK/WARDEN mid-bosses; WARLORD/SIEGELORD/
+        // SPYMASTER finales) shares Cls "ELITE" — one bestiary row covers the family, and the
+        // blurb now names the faction signatures so the manual matches the new climax kits.
+        ("WARLORD", "ELITE",     "Named boss / mid-boss — tough, carries grenades, and rages at low HP. Faction champions add a signature: a killing frenzy, a frontal shield arc, or telegraphed siege strikes."),
     };
 
     static CodexCategory Enemies()

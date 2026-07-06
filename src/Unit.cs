@@ -476,6 +476,28 @@ public class Unit
     public bool Enraged;        // elite boss: one-time low-HP rage trigger
     public int ShieldDx, ShieldDy;  // SHIELD archetype: facing dir its frontal shield blocks (3.7)
 
+    // SIGNAL W5 — BOSS CAPABILITY FLAGS. Transient per-mission state, never persisted (enemies
+    // aren't saved). Every signature mechanic used to be Cls-string-keyed (Cls=="SHIELD" /
+    // "BOMBARD" scattered across Combat/Game/Ai/Renderer), which made a mechanic inseparable
+    // from its rank-and-file archetype. These flags decouple them: each DEFAULTS to mirroring
+    // its archetype Cls (a rank-and-file SHIELD/BOMBARD — including every inline harness-built
+    // test unit — carries its signature with zero spawn-site changes, so behavior is identical
+    // by construction), and can be GRANTED to any other unit. A named boss keeps Cls=="ELITE"
+    // (nameplate / enrage / aim-clamp exemption / AI temperament all key on ELITE identity)
+    // while carrying a signature mechanic on top. Set true only — a SHIELD can't opt out.
+    bool _shieldArc, _hasSiege;
+    public bool HasShieldArc { get => _shieldArc || Cls == "SHIELD";  set => _shieldArc = value; }  // frontal barrier arc (ShieldDx/Dy facing; re-faced by Game.FaceShields)
+    public bool HasSiege     { get => _hasSiege  || Cls == "BOMBARD"; set => _hasSiege  = value; }  // telegraphed 3x3 siege strike (ChargeTurns/ChargeX/Y)
+    // SIGNAL W5 — the Legion BREAKER's kit, two independent halves keyed on RagesTwice:
+    //  (1) the berserker RUSH temperament in Ai.Plan (advW/elevMult) applies from SPAWN — keyed
+    //      on the RagesTwice capability itself, NOT on the frenzy state;
+    //  (2) the SECOND rage tier: at <=25% HP an already-Enraged elite FRENZIES once (a further
+    //      +aim/+mob spike, popped by Game.UpdateEnemy on its acting beat).
+    // Both transient; RagesTwice is the capability, Frenzied the one-shot tier-2 state
+    // (mirrors the Enraged pair above).
+    public bool RagesTwice;
+    public bool Frenzied;
+
     // DECAPITATE GUARDED HVT (W4). Transient per-mission, never persisted (enemies aren't saved).
     // IsHvtGuard: this enemy is one of the (<=2) bodyguards the Game picked near the HVT.
     // HvtGuarded: set ONLY on the HVT, recomputed at every turn boundary + after any death by

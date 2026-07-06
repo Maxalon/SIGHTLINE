@@ -526,7 +526,40 @@ public class Run
                     AddEdge(best, b);
                 }
         }
+
+        // SIGNAL W5 — FINALE KIT: stamp the Boss node's faction (overriding the deliberate None
+        // above) so the capstone is one of three DISTINCT kits — the stamp activates the faction's
+        // combat warp AND routes the m6 rank-and-file through FactionRoster, and Mission.SpawnEnemies
+        // keys the named boss + explicit retinue off it. Chosen from an AVALANCHE HASH of the seed,
+        // NOT an rng.Next draw: .NET Random streams with nearby seeds stay correlated for many
+        // draws, and the balance flywheel's paired slots (Util.Reseed(50000+i) -> MapSeed -> this
+        // rng) measurably collapsed the kit onto one faction (16/4/0 over 20 seeds). The mix is a
+        // pure function of MapSeed (round-trips on load) and takes ZERO draws from `rng`, so the
+        // whole generator stream stays byte-identical to the pre-W5 version.
+        uint kh = (uint)seed;
+        kh ^= kh >> 16; kh *= 0x45d9f3bu; kh ^= kh >> 16; kh *= 0x45d9f3bu; kh ^= kh >> 16;
+        StampFinaleKit(facPool[kh % (uint)facPool.Length]);
     }
+
+    /// SIGNAL W5 — stamp the campaign FINALE KIT: the single Boss node (always the map's last node,
+    /// see GenerateMap) gets a faction, and its card's RewardText is re-keyed so the campaign map /
+    /// barracks surface the ACTUAL named boss. Public so the SIGHTLINE_FINALE harness pin
+    /// (Game.StartMission, NoPersist-only) can re-stamp it for reproducible per-kit shots/batches.
+    public void StampFinaleKit(Faction f)
+    {
+        if (Map.Count == 0) return;
+        var boss = Map[Map.Count - 1];
+        boss.Faction = f;
+        if (boss.Card != null) boss.Card.RewardText = FinaleBossName(f);
+    }
+
+    /// Display name of the finale kit's named boss (the campaign-map hint + boss card read it).
+    public static string FinaleBossName(Faction f) => f switch
+    {
+        Faction.Legion    => "Siegelord",
+        Faction.Syndicate => "Spymaster",
+        _                 => "Warlord",
+    };
 
     static void AddEdge(MissionNode a, MissionNode b) { if (!a.Next.Contains(b.Id)) a.Next.Add(b.Id); }
 
@@ -1308,6 +1341,16 @@ public class Run
 
     public static string EnemyHint(MissionNode node)
     {
+        // SIGNAL W5: the Boss node is faction-stamped now (the FINALE KIT), and the KIT is the hint —
+        // checked BEFORE the generic faction branch so the finale telegraphs its named boss, not a
+        // generic roster line. (GenerateMap only ever places ONE Boss node, at the final column.)
+        if (node.Kind == NodeKind.Boss)
+            return node.Faction switch
+            {
+                Faction.Legion    => "BOSS: SIEGELORD",   // siege-lord: strikes force relocation
+                Faction.Syndicate => "BOSS: SPYMASTER",   // shield-arc: flank it behind its screen
+                _                 => "BOSS: WARLORD",     // the enrage brick (+ the None fallback)
+            };
         // Faction nodes read by their faction + signature units (the roster is faction-gated), so the
         // branch pick telegraphs the encounter's personality (counter-build before you commit).
         if (node.Faction != Faction.None)
@@ -1325,11 +1368,8 @@ public class Run
         {
             case NodeKind.Event:
                 return "UNKNOWN SIGNAL";   // a "?" beat: a situation + choices, not a fight
-            case NodeKind.Boss:
-                // GenerateMap only ever places ONE Boss node, at the final column, so the
-                // capstone WARLORD is the boss. (BREAKER m3 / WARDEN m5 appear as mid-bosses
-                // on Combat/Elite nodes, not as Boss-kind nodes — see Mission.midBoss.)
-                return "BOSS: WARLORD";
+            // (NodeKind.Boss is handled by the kit branch above — a Boss node never reaches here.
+            //  The m3/m5 mid-bosses appear on Combat/Elite nodes, not Boss-kind — see Mission.midBoss.)
             case NodeKind.Supply:
                 // Supply only thins the force (fewer enemies / lower stats); the archetype
                 // pool is unchanged, so don't overclaim composition (review Sprint 5 F1).

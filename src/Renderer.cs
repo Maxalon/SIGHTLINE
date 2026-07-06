@@ -688,7 +688,7 @@ public static class Renderer
         float pulse = 0.55f + 0.45f * MathF.Sin(t * 5f);
         foreach (var e in g.Enemies)
         {
-            if (!e.Alive || e.Cls != "BOMBARD" || e.ChargeTurns <= 0) continue;   // live charge only
+            if (!e.Alive || !e.HasSiege || e.ChargeTurns <= 0) continue;   // live charge only (W5: HasSiege flag — covers a siege-armed boss too)
             for (int dx = -Game.SiegeRadius; dx <= Game.SiegeRadius; dx++)
                 for (int dy = -Game.SiegeRadius; dy <= Game.SiegeRadius; dy++)
                 {
@@ -2012,7 +2012,8 @@ public static class Renderer
         }
 
         // shield: a thick barrier arc on the barred (facing) side (W5: on the enlarged body edge)
-        if (u.Team == Team.Enemy && u.Cls == "SHIELD" && (u.ShieldDx != 0 || u.ShieldDy != 0))
+        // SIGNAL W5: HasShieldArc flag (mirrors Cls=="SHIELD") — a shield-arc boss draws its arc too.
+        if (u.Team == Team.Enemy && u.HasShieldArc && (u.ShieldDx != 0 || u.ShieldDy != 0))
         {
             float ang = MathF.Atan2(u.ShieldDy, u.ShieldDx) * 180f / MathF.PI;
             Raylib.DrawRing(p, 24f, 28f, ang - 55, ang + 55, 28, Raylib.Fade(Pal.RGBA(150, 200, 240), figAlpha));
@@ -2048,7 +2049,8 @@ public static class Renderer
 
         // bombard: a pulsing CHARGING CORE while a strike is winding up (ChargeTurns>0) so the
         // "it's about to fire" reads on the unit itself. Signal-level (full alpha) — a danger cue.
-        if (u.Team == Team.Enemy && u.Cls == "BOMBARD" && u.ChargeTurns > 0)
+        // SIGNAL W5: HasSiege flag (mirrors Cls=="BOMBARD") — a siege-armed boss pulses too.
+        if (u.Team == Team.Enemy && u.HasSiege && u.ChargeTurns > 0)
         {
             float ct = (float)Raylib.GetTime();
             float cp = 0.5f + 0.5f * MathF.Sin(ct * 7f);
@@ -2110,10 +2112,11 @@ public static class Renderer
         // combat status effects: drawn in DrawUnitStatusChips as a LATE pass over all figures
         // (SIGNAL W3 review) — an opaque chip pill must never be buried under an adjacent body.
 
-        // elite boss name / rage tag (uses the unit's actual name so mid-bosses read right)
+        // elite boss name / rage tag (uses the unit's actual name so mid-bosses read right).
+        // W5: a FRENZIED (second rage tier) breaker outranks the plain ENRAGED tag.
         if (elite)
         {
-            string tag = u.Enraged ? u.Name + " ENRAGED" : u.Name;
+            string tag = u.Frenzied ? u.Name + " FRENZIED" : (u.Enraged ? u.Name + " ENRAGED" : u.Name);
             Raylib.DrawTextEx(Cfg.Font, tag, new Vector2((int)(p.X - (int)Raylib.MeasureTextEx(Cfg.Font, tag, 11, 1f).X / 2), (int)(p.Y - 42)), 11, 1f, Pal.Elite);
         }
 

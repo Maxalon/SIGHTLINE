@@ -254,7 +254,9 @@ public static class Combat
 
         // a SHIELD's frontal barrier gives full cover from its facing side regardless of
         // terrain — flank it (or hit it from above / commanding height) to bypass (3.7).
-        if (d.Cls == "SHIELD" && !seesOver && ShieldedFrom(d, a.X, a.Y) && coverLevel < 2)
+        // SIGNAL W5: keyed on the HasShieldArc capability flag (defaults to Cls=="SHIELD",
+        // so rank-and-file behavior is unchanged; a boss elite can carry the arc too).
+        if (d.HasShieldArc && !seesOver && ShieldedFrom(d, a.X, a.Y) && coverLevel < 2)
         {
             coverLevel = 2; coverDef = 40; flanked = false; partial = false;
         }
@@ -720,6 +722,16 @@ public static class Combat
         var atkE = new Unit { Aim = 65, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 8, Y = 5 };  // from behind the shield (east)
         if (ComputeOdds(gShield, atkW, sh).CoverLevel != 2) fails.Add("shieldFront");
         if (ComputeOdds(gShield, atkE, sh).CoverLevel != 0) fails.Add("shieldFlank");
+
+        // SIGNAL W5 — flagged BOSS shield arc: an ELITE granted HasShieldArc must get ShieldedFrom
+        // applied EXACTLY like a Cls=="SHIELD" unit (the flag-on-boss path the mirror default does
+        // not exercise: sh above never sets the backing field). Control: a plain ELITE with the
+        // same facing but NO flag gets no barrier — the arc must come from the flag, not the Cls.
+        var bossArc = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Lmg), Team = Team.Enemy, X = 5, Y = 5, Hp = 20, MaxHp = 20, Cls = "ELITE", HasShieldArc = true, ShieldDx = -1, ShieldDy = 0 };
+        if (ComputeOdds(gShield, atkW, bossArc).CoverLevel != 2) fails.Add("bossArcFront");
+        if (ComputeOdds(gShield, atkE, bossArc).CoverLevel != 0) fails.Add("bossArcFlank");
+        var bossPlain = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Lmg), Team = Team.Enemy, X = 5, Y = 5, Hp = 20, MaxHp = 20, Cls = "ELITE", ShieldDx = -1, ShieldDy = 0 };
+        if (ComputeOdds(gShield, atkW, bossPlain).CoverLevel != 0) fails.Add("bossNoFlagNoArc");
 
         // AMBUSH: FiredFromConcealment grants +AmbushAim hit and +AmbushCrit crit (4.4)
         var gAmb = new Grid();
@@ -1491,7 +1503,7 @@ public static class Combat
         }
 
         return fails.Count == 0
-            ? "COMBATTEST: PASS (cover A-E + high-ground + tier-2 + drone/shield + ambush + graze + streak + perk-balance + build-perks + vantage/breaker/siegebreaker + fragile-floor + armor + bulwark-plating + momentum + outrunner + vanguard + crossfire + factions + faction-prep + spec-forks all hold)"
+            ? "COMBATTEST: PASS (cover A-E + high-ground + tier-2 + drone/shield + boss-arc-flag + ambush + graze + streak + perk-balance + build-perks + vantage/breaker/siegebreaker + fragile-floor + armor + bulwark-plating + momentum + outrunner + vanguard + crossfire + factions + faction-prep + spec-forks all hold)"
             : "COMBATTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 }
