@@ -788,7 +788,9 @@ public static class Mission
     /// tiers are light skirmishers; tier >= 3 unlocks the FULL archetype roster (snipers/shields/
     /// drones/berserkers/siege/etc.), and HP/aim rise with the tier (bump capped + aim clamped so
     /// bodies stay killable). Reuses the campaign archetype cascade so the horde has real variety,
-    /// not just grunts. `tier` is Game.EndlessWaveScale(wave) (= 1 + wave/2 + Heat).
+    /// not just grunts. `tier` is Game.EndlessWaveScale(wave) (= 1 + wave/4 + softened Heat —
+    /// see that method's tuning note) for LAST STAND waves, or the raw mission number for
+    /// DEFEND's rich campaign waves (MakeWaveHostile), which never see the endless curve.
     public static Unit MakeEndlessHostile(int tier, int x, int y)
     {
         int n = Math.Clamp(tier, 1, 6);           // roster depth: n>=3 opens the full cascade in SelectArchetype

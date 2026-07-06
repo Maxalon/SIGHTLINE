@@ -87,11 +87,13 @@ public partial class Game
         // (bump = n-1). Ramp that with the wave AND with Heat so the horde gets meaner over time.
         int scaleN = EndlessWaveScale(w);
         SpawnEndlessBodies(want, scaleN);
-        // APEX W7 "an ending": every scaling lever saturates by ~wave 22 (bump cap 12, count cap,
-        // aim clamp 88, roster depth cap 6) while the between-wave heal keeps coming, so a stand
-        // past that point used to be a flat immortal equilibrium. One extra ELITE per wave past
-        // 20 (paired with the heal decay in CheckEndless) makes deep stands statistically
-        // terminate. Injected AFTER the rank-and-file fill and deliberately allowed to exceed
+        // APEX W7 "an ending": under the W7-era ramp every scaling lever saturated by ~wave 22
+        // (bump cap 12, count cap, aim clamp 88, roster depth cap 6) while the between-wave heal
+        // kept coming, so a stand past that point used to be a flat immortal equilibrium. The
+        // post-APEX toughness retune (see EndlessWaveScale) pushes bump-cap saturation past the
+        // measurement wave-cap, which makes this ending MORE binding, not less: one extra ELITE
+        // per wave past 20 (paired with the heal decay in CheckEndless) makes deep stands
+        // statistically terminate regardless of where the stat ramp tops out. Injected AFTER the rank-and-file fill and deliberately allowed to exceed
         // the alive-cap by this one body — the cap is a perf/fairness valve for the horde, and
         // the ending's escalation must never be silently swallowed by a full board.
         if (w > EndlessSaturationWave) SpawnEndlessElite(scaleN);
@@ -116,8 +118,20 @@ public partial class Game
         => w <= 2 ? Math.Max(1, EndlessWaveCountFull(w) / 2) : EndlessWaveCountFull(w);
 
     /// The mission-scale ("missionNum"-like) value fed to MakeWaveHostile for wave `w`. Ramps ~1
-    /// per two waves plus a Heat bump, so bodies get tougher as the horde deepens.
-    int EndlessWaveScale(int w) => 1 + w / 2 + Sightline.Heat.StatDelta(_run?.HeatLevel ?? 0);
+    /// per FOUR waves plus a softened Heat bump, so bodies get tougher as the horde deepens.
+    /// Post-APEX followup: W7 tuned the BODY ramp and left this toughness ramp at the original
+    /// 1 + w/2 + StatDelta; the overall greedy depth median landed at 5 vs the 6-8 target.
+    /// Measured tuning (32-stand batches): a plain slope cut (w/3) was a NULL result — at the
+    /// heat-0 death window (waves 4-7) a −1 tier never crosses a hits-to-kill threshold (a
+    /// 4-avg rifle 2-shots a 6 or 7 HP scout alike). The binding term was HEAT: StatDelta 2-4
+    /// pushed common bodies past 8 HP into 3-shot territory from wave 1, dragging the h2-h8
+    /// stands (3/4 of the blend) down. So: slope w/4 AND the heat term halved ROUNDED UP —
+    /// {0,1,2,3,4} -> {0,1,1,2,2} keeps every rung's toughness ordered while heat keeps its
+    /// distinct teeth via Ai.Tier 1/2 at rungs 6/8 (W6b), TighterContact, and NO QUARTER's
+    /// +1 dmg. Endless-only by construction: the sole callers are SpawnEndlessWave/
+    /// SpawnEndlessElite — Defend's rich waves feed _run.Mission into MakeWaveHostile and
+    /// never see this curve.
+    int EndlessWaveScale(int w) => 1 + w / 4 + (Sightline.Heat.StatDelta(_run?.HeatLevel ?? 0) + 1) / 2;
 
     /// Drop up to `want` active wave-hostiles in from the board edges (already engaged), honoring
     /// the alive-cap. Modeled on SpawnReinforcements, but (a) spawns from BOTH the left and right
