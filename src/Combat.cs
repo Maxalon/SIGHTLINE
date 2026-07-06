@@ -254,7 +254,9 @@ public static class Combat
 
         // a SHIELD's frontal barrier gives full cover from its facing side regardless of
         // terrain — flank it (or hit it from above / commanding height) to bypass (3.7).
-        if (d.Cls == "SHIELD" && !seesOver && ShieldedFrom(d, a.X, a.Y) && coverLevel < 2)
+        // SIGNAL W5: keyed on the HasShieldArc capability flag (defaults to Cls=="SHIELD",
+        // so rank-and-file behavior is unchanged; a boss elite can carry the arc too).
+        if (d.HasShieldArc && !seesOver && ShieldedFrom(d, a.X, a.Y) && coverLevel < 2)
         {
             coverLevel = 2; coverDef = 40; flanked = false; partial = false;
         }

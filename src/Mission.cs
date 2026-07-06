@@ -397,7 +397,13 @@ public static class Mission
         // below). Net at heat 0: 8 hostiles incl. the boss (was 12), supporters at +5 not +6.
         if (n >= Run.MaxMissions)
         {
-            count = Math.Max(5, count - 4);
+            // SIGNAL W5 — m6 bite: with a FINALE KIT active (the Boss node is faction-stamped by
+            // Run.GenerateMap, so the faction roster + combat warp + kit boss/retinue are all live)
+            // restore 2 of the 4 de-stacked bodies. The de-stack fixed a ~90%-loss wall, but it
+            // overshot: the finale measured 96% conditional (the easiest fight after m3) — a
+            // formality, not a climax. An UNSTAMPED finale (the Faction.None safety fallback:
+            // harness paths that never walk the map) keeps the old count-4 exactly.
+            count = Math.Max(5, count - (Combat.MissionFaction != Faction.None ? 2 : 4));
             bump = Math.Max(0, n - 1);                       // drop the boss-card/heat StatDelta for the screen
         }
         var rows = new List<int>();
@@ -421,20 +427,23 @@ public static class Mission
             bool finalMission = n >= Run.MaxMissions;
             bool midBoss = !finalMission && i == 0 && (n == 3 || n == 5);   // recurring named elite
             float r = Util.RandF();
-            Unit e;
-            if (finalMission && i == 0)         // capstone elite (named boss)
-                // HP 20+2n -> 14+n, aim 72 -> 68: mission-6 was a ~90%-loss wall for a competent
-                // squad (it cleared m1-5 then died on the boss). At n=6 this is 20 HP (was 32) and
-                // 68 aim -- still the toughest single unit in the game (a mid-boss is 24 HP) but no
-                // longer an unkillable, never-misses brick. Grenade count is also trimmed 2 -> 1
-                // below, and the supporting force is lighter (see the count adjustment above).
-                e = MakeHostile("WARLORD", "ELITE", WeaponKind.Lmg, 14 + n, 68, 6, x, y);
-            else if (midBoss)                   // mid-campaign elite (lighter than the WARLORD)
-                e = MakeHostile(n == 3 ? "BREAKER" : "WARDEN", "ELITE", WeaponKind.Lmg, 14 + n * 2, 68, 6, x, y);
-            else                                // a tier-appropriate rank-and-file archetype
-                e = SelectArchetype(n, r, bump, x, y);
+            // SIGNAL W5 — BOSS IDENTITY: the finale boss (i==0) + its explicit kit retinue
+            // (i==1/2 on Legion/Syndicate finales) and the m3/m5 mid-boss are all keyed off
+            // Combat.MissionFaction (see MakeFinaleBoss/MakeFinaleRetinue/MakeMidBoss below),
+            // so each faction's climax forces a DIFFERENT verb. Faction.None falls back to
+            // today's plain WARLORD / mission-keyed mid-boss (the safety invariant). The RandF
+            // draw above stays unconditional so the RNG stream is unchanged for every slot.
+            Unit e = null;
+            if (finalMission)
+                e = i == 0 ? MakeFinaleBoss(n, x, y) : MakeFinaleRetinue(i, n, bump, x, y);
+            if (e == null)
+                e = midBoss ? MakeMidBoss(n, x, y)
+                            : SelectArchetype(n, r, bump, x, y);   // tier-appropriate rank-and-file
             // FAIRNESS CAP: at most one SIEGE/BOMBARD per mission. SelectArchetype is stateless, so a
             // second roll could yield another -> demote any extra BOMBARD to a plain GRUNT here.
+            // SIGNAL W5: this cap DELIBERATELY keys on Cls (not HasSiege) — a siege-armed BOSS elite
+            // (WARDEN mid-boss / SIEGELORD finale) is EXEMPT: it never sets siegeSpawned and never
+            // demotes the force's one real BOMBARD (the Legion finale retinue fields both by design).
             if (e.Cls == "BOMBARD")
             {
                 if (siegeSpawned) e = MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 60 + bump, 6, x, y);
@@ -768,6 +777,80 @@ public static class Mission
         var u = new Unit { Name = name, Cls = cls, Team = Team.Enemy, X = x, Y = y, Hp = hp, MaxHp = hp, Aim = aim, Mobility = mob, Weapon = Weapon.Make(w) };
         u.Ammo = u.Weapon.Clip;
         return u;
+    }
+
+    // ─── SIGNAL W5 — BOSS IDENTITY (mid-boss signatures + finale kits) ─────────────────────
+    // All three named bosses used to be the IDENTICAL unit (ELITE + Lmg); runs climaxed in the
+    // same fight every time. Now each faction's named elite carries a SIGNATURE mechanic via
+    // the Unit capability flags (HasShieldArc / HasSiege / RagesTwice) — mechanics the engine
+    // already ships for rank-and-file SHIELD/BOMBARD/the enrage — so each climax forces a
+    // DIFFERENT verb (DESIGN.md §A: no two kits may play the same):
+    //   LEGION   — rage/rush:   kill it FAST or its low-HP tiers snowball (burst-down verb).
+    //   SYNDICATE— shield arc:  its front is a wall; FLANK or take commanding height.
+    //   WARDENS  — siege clock: telegraphed 3x3 strikes force RELOCATION every turn.
+    // Every boss keeps Cls=="ELITE": the nameplate, enrage trigger, aim-clamp exemption, elite
+    // grenade pouch and AI temperament are ELITE identity and stay Cls-keyed. Faction.None
+    // (an unstamped fight: SKIRMISH/DAILY-style paths) falls back to today's plain bosses.
+
+    // The three SIGNATURE arms (capability flags; Cls stays "ELITE" on every armed boss):
+    static Unit ArmRage(Unit b)   { b.RagesTwice = true; return b; }                       // second rage tier at <=25% + the Ai rush temperament
+    static Unit ArmShield(Unit b) { b.HasShieldArc = true; b.ShieldDx = -1; b.ShieldDy = 0; return b; }  // frontal barrier arc, opens facing the squad; FaceShields re-faces it each enemy turn
+    static Unit ArmSiege(Unit b)  { b.HasSiege = true; return b; }                         // telegraphed 3x3 strikes; EXEMPT from the siegeSpawned cap by construction (the cap keys on Cls=="BOMBARD"); the Ai falls through to the ELITE gun when nothing is worth shelling
+
+    /// The m3/m5 recurring named elite, keyed by the node's faction (a faction-signature fight).
+    /// Unstamped (SKIRMISH/DAILY-style paths): today's plain mission-keyed BREAKER/WARDEN exactly.
+    static Unit MakeMidBoss(int n, int x, int y)
+    {
+        Unit Mk(string name) => MakeHostile(name, "ELITE", WeaponKind.Lmg, 14 + n * 2, 68, 6, x, y);
+        return Combat.MissionFaction switch
+        {
+            Faction.Legion    => ArmRage(Mk("BREAKER")),    // the rush: burst it down before the frenzy
+            Faction.Syndicate => ArmShield(Mk("BULWARK")),  // the wall: flank-or-elevate puzzle
+            Faction.Wardens   => ArmSiege(Mk("WARDEN")),    // the clock: relocate under telegraphed fire
+            _                 => Mk(n == 3 ? "BREAKER" : "WARDEN"),
+        };
+    }
+
+    /// The capstone named boss (m6), keyed by the Boss node's stamped faction (the FINALE KIT).
+    /// Wardens keeps today's WARLORD fight (the reference kit: the enrage brick — burst/focus);
+    /// Legion fields a heavier siege-armed SIEGELORD (mid-boss statline 14+2n) whose strikes force
+    /// RELOCATION while the rush faction closes; Syndicate a shield-arced SPYMASTER that must be
+    /// FLANKED behind its screen cell. Faction.None == today's WARLORD exactly.
+    static Unit MakeFinaleBoss(int n, int x, int y)
+    {
+        // (On the WARLORD statline history: HP 20+2n -> 14+n, aim 72 -> 68 — mission-6 was a
+        // ~90%-loss wall; every kit boss keeps 68 aim and a 1-frag pouch via the ELITE branches.)
+        return Combat.MissionFaction switch
+        {
+            Faction.Legion    => ArmSiege(MakeHostile("SIEGELORD", "ELITE", WeaponKind.Lmg, 14 + n * 2, 68, 6, x, y)),
+            Faction.Syndicate => ArmShield(MakeHostile("SPYMASTER", "ELITE", WeaponKind.Lmg, 14 + n, 68, 6, x, y)),
+            _                 => MakeHostile("WARLORD", "ELITE", WeaponKind.Lmg, 14 + n, 68, 6, x, y),
+        };
+    }
+
+    /// The finale kit's EXPLICIT retinue (slots i==1/2, right behind the boss). Legion escorts its
+    /// siege-lord with a phalanx anchor + the force's one REAL artillery piece; Syndicate screens
+    /// its spymaster with a lane-blinding zoner + a leaper. Wardens (today's fight) and None return
+    /// null — the roster/cascade fills every slot, exactly as before.
+    static Unit MakeFinaleRetinue(int i, int n, int bump, int x, int y)
+    {
+        if (i > 2) return null;
+        switch (Combat.MissionFaction)
+        {
+            case Faction.Legion:
+                if (i == 1) return MakeHostile("HOPLITE", "LANCER", WeaponKind.Rifle, 7 + bump, 58 + bump, 5, x, y);
+                return MakeHostile("SIEGE", "BOMBARD", WeaponKind.Smg, 7 + bump, 48 + bump, 4, x, y);   // sets siegeSpawned via the cap below
+            case Faction.Syndicate:
+                if (i == 1)
+                {
+                    var z = MakeHostile("HAZE", "SCREENER", WeaponKind.Smg, 5 + bump, 46 + bump, 6, x, y);
+                    z.EnemyItem = ItemKind.Smoke; z.ItemCharge = 2;   // a deep smoke pouch — the EXISTING smoke AI uses it
+                    return z;
+                }
+                return MakeHostile("WRAITH", "STRIKER", WeaponKind.Smg, 4 + bump, 60 + bump, 9, x, y);
+            default:
+                return null;
+        }
     }
 
     /// A reinforcement wave hostile, scaled by mission. Two tiers (APEX W5):

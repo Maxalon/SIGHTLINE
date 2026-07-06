@@ -151,7 +151,10 @@ public static class Ai
         //       MOVEMENT, not just an LoS-break). Charge from the CURRENT tile (v1: stand and shell).
         //   (3) If nothing's worth shelling, fall through to the normal loop (move/shoot SMG/hunker) so
         //       the turn always spends an action -> NO dead turn / NO TIMEOUT (same safety as MORTAR).
-        if (e.Cls == "BOMBARD" && e.ChargeTurns == 0)
+        // (SIGNAL W5: keyed on the HasSiege capability flag — defaults to Cls=="BOMBARD", so
+        // rank-and-file artillery is unchanged; a siege-armed BOSS elite runs this path too and
+        // falls through to the full ELITE combat loop when nothing is worth shelling.)
+        if (e.HasSiege && e.ChargeTurns == 0)
         {
             var (bx, by, hits) = BestSiege(g, e);
             if (hits >= 1)
@@ -361,7 +364,10 @@ public static class Ai
                 // Combined shot-quality delta: hit improvement weighted more than crit.
                 float qdelta = hitDelta * 0.5f + critDelta * 0.25f;
                 // Per-archetype multiplier: snipers/elites care most, berserkers/sappers least.
-                float elevMult = (e.Cls == "SNIPER" || e.Cls == "ELITE") ? 1.4f
+                // W5: a RagesTwice breaker charges like a berserker — it doesn't perch (checked
+                // first: it IS an ELITE, but the rush identity wins over the elite's vantage-seeking).
+                float elevMult = (e.RagesTwice)                          ? 0.3f
+                               : (e.Cls == "SNIPER" || e.Cls == "ELITE") ? 1.4f
                                : (e.Cls == "BERSERKER")                  ? 0.3f
                                : (e.Cls == "SAPPER")                     ? 0.2f
                                :                                            0.8f;   // grunt/scout/medic/shield
@@ -440,7 +446,8 @@ public static class Ai
             }
             else
             {
-                float advW = (e.Cls == "BERSERKER" || e.Cls == "ELITE") ? 3.4f
+                float advW = (e.RagesTwice) ? 3.6f                      // W5 BREAKER: the berserker rush temperament — presses like a hound
+                           : (e.Cls == "BERSERKER" || e.Cls == "ELITE") ? 3.4f
                            : (e.Cls == "HOUND") ? 3.6f                  // swarmer: hardest charger in the game (low HP, fast)
                            : (e.Cls == "STRIKER") ? 3.5f                // leaper: rushes hard THROUGH overwatch to end flanking
                            : (e.Cls == "DRONE") ? 3.0f                  // drone beelines (ignores cover anyway)

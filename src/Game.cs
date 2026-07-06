@@ -861,6 +861,24 @@ public partial class Game
         // only, campaign only, and STRICTLY gated behind !NoPersist — the flywheel/harness never read
         // meta, so a measured/screenshot run is byte-identical to today (a fresh profile owns none anyway).
         ApplyMetaUnlocks();
+        // SIGNAL W5 harness affordance (SIGHTLINE_HEAT family; NoPersist only): pin the FINALE KIT.
+        // SIGHTLINE_FINALE=legion|syndicate|wardens re-stamps the Boss node's faction (normally
+        // drawn deterministically from MapSeed in Run.GenerateMap) so per-kit screenshots and
+        // per-kit balance batches are reproducible. Inert when unset -> plain runs untouched.
+        if (NoPersist)
+        {
+            var fin = Environment.GetEnvironmentVariable("SIGHTLINE_FINALE");
+            if (!string.IsNullOrEmpty(fin))
+            {
+                Faction? f = fin.Trim().ToLowerInvariant() switch
+                {
+                    "legion" => Faction.Legion, "syndicate" => Faction.Syndicate,
+                    "wardens" => Faction.Wardens, _ => (Faction?)null,
+                };
+                if (f.HasValue) _run.StampFinaleKit(f.Value);
+                else Console.WriteLine($"HARNESS: unknown SIGHTLINE_FINALE '{fin}' — kit unpinned");
+            }
+        }
         Players = _run.Squad;
         int n = Util.Clamp(startAt, 1, Run.MaxMissions);
         if (n > 1) _run.JumpTo(n);           // harness: advance along the map to the requested op
@@ -1011,6 +1029,11 @@ public partial class Game
         // also bites from mission 1), not a quantitative delta. The LAST STAND wave path
         // (SpawnEndlessWave) raises it as a stand deepens.
         Ai.Tier = Sightline.Heat.AiTier(heat);
+        // SIGNAL W5 — m6 bite: the campaign FINALE plays SMARTER, not just statier — raise the
+        // coordination-tier floor to 1 for the boss mission (heats 6+ keep their higher tier).
+        // Campaign-only: SKIRMISH/DAILY/LAST STAND never reach a finale through this path, and
+        // no SIGHTLINE_*TEST sets it (they run mission 1), so the harness stays byte-stable.
+        if (Mode == GameMode.Campaign && n >= Run.MaxMissions) Ai.Tier = Math.Max(Ai.Tier, 1);
         int heatEnemy = Sightline.Heat.EnemyDelta(heat);
         int heatStat  = Sightline.Heat.StatDelta(heat);
         int heatDmg   = Sightline.Heat.DmgDelta(heat);   // W6c: rung-8 +1 enemy damage (0 below the apex)
@@ -1726,9 +1749,10 @@ public partial class Game
         // telemetry the flywheel ranks (UNDERTOW W1). The queued-reaction purge below is the primary
         // guard; this makes KillUnit robust to every double-call path.
         if (!d.Alive) return;
-        // SIEGE interrupt: killing a charging BOMBARD cancels its strike (the zone reads off live
-        // enemies, so it clears automatically; this is a cosmetic confirmation of the interrupt).
-        if (d.Cls == "BOMBARD" && d.ChargeTurns > 0)
+        // SIEGE interrupt: killing a charging artillery piece cancels its strike (the zone reads
+        // off live enemies, so it clears automatically; this is a cosmetic confirmation of the
+        // interrupt). W5: HasSiege flag (mirrors Cls=="BOMBARD"; also covers a siege-armed boss).
+        if (d.HasSiege && d.ChargeTurns > 0)
             Fx.PopText(d.Pos + new Vector2(0, -34), "STRIKE ABORTED", Pal.Good, 16f);
         d.Alive = false;
         d.Hp = 0;
@@ -2014,10 +2038,11 @@ public partial class Game
     public const int SiegeRadius = 1;        // Chebyshev radius -> a 3x3 zone
     public const int SiegeDmg    = 7;        // cover-ignoring base AoE (a touch above BarrelDmg=6)
 
-    /// True when any live BOMBARD has a strike charged (drives the HUD/banner "strike inbound" cue).
+    /// True when any live siege-armed enemy has a strike charged (drives the HUD/banner "strike
+    /// inbound" cue). W5: HasSiege flag (mirrors Cls=="BOMBARD"; also covers a siege-armed boss).
     public bool SiegeActive
     {
-        get { foreach (var e in Enemies) if (e.Alive && e.Cls == "BOMBARD" && e.ChargeTurns > 0) return true; return false; }
+        get { foreach (var e in Enemies) if (e.Alive && e.HasSiege && e.ChargeTurns > 0) return true; return false; }
     }
 
     /// True if (x,y) is inside a live BOMBARD strike zone. Cover-ignoring, so cover doesn't save you —
@@ -2026,7 +2051,7 @@ public partial class Game
     public bool InSiegeZone(int x, int y)
     {
         foreach (var e in Enemies)
-            if (e.Alive && e.Cls == "BOMBARD" && e.ChargeTurns > 0
+            if (e.Alive && e.HasSiege && e.ChargeTurns > 0
                 && Util.ChebyDist(x, y, e.ChargeX, e.ChargeY) <= SiegeRadius) return true;
         return false;
     }
@@ -2040,7 +2065,7 @@ public partial class Game
     {
         foreach (var e in Enemies.ToList())   // ToList: a strike can kill units; don't mutate mid-scan
         {
-            if (!e.Alive || e.Cls != "BOMBARD" || e.ChargeTurns <= 0) continue;
+            if (!e.Alive || !e.HasSiege || e.ChargeTurns <= 0) continue;
             e.ChargeTurns = 0;                // consume the charge (fired)
             DetonateSiege(e, e.ChargeX, e.ChargeY);
         }
@@ -4224,11 +4249,12 @@ public partial class Game
 
     /// AEGIS shields re-face toward the nearest soldier each enemy turn, so the squad
     /// must keep moving to flank the barrier rather than parking on one open side.
+    /// W5: HasShieldArc flag (mirrors Cls=="SHIELD"; a shield-arc boss re-faces too).
     void FaceShields()
     {
         foreach (var e in Enemies)
         {
-            if (!e.Alive || e.Cls != "SHIELD") continue;
+            if (!e.Alive || !e.HasShieldArc) continue;
             var p = AlivePlayers().OrderBy(q => Util.ChebyDist(e.X, e.Y, q.X, q.Y)).FirstOrDefault();
             if (p == null) continue;
             int dx = p.X - e.X, dy = p.Y - e.Y;
@@ -4580,6 +4606,20 @@ public partial class Game
                 Fx.AddShake(8f);
                 ShowBanner(e.Name + " ENRAGED", true);
             }
+            // SIGNAL W5 — the Legion BREAKER's SECOND rage tier: an already-enraged RagesTwice
+            // elite FRENZIES once when first acting at <=25% HP (+aim/+mob again, and Ai.Plan
+            // flips it to the berserker rush). The gate on Enraged means a boss chipped straight
+            // past both thresholds fires ENRAGED this turn and FRENZY the next act — two readable
+            // beats, never a silent double-spike. Telegraphs the finish-it-NOW decision: leaving
+            // the breaker alive at a sliver is the one thing you must not do.
+            if (e.RagesTwice && e.Enraged && !e.Frenzied && e.Hp * 4 <= e.MaxHp)
+            {
+                e.Frenzied = true;
+                e.Aim += 10; e.Mobility += 2;
+                Fx.PopText(e.Pos + new Vector2(0, -34), "FRENZY", Pal.Foe, 22f);
+                Fx.AddShake(11f);
+                ShowBanner(e.Name + " FRENZIES", true);
+            }
             // UNDERTOW W4 — incremental coordination: recompute the shared focus against the CURRENT board
             // right before this unit plans, so a shove/breach an EARLIER unit just landed (exposing a
             // soldier) redirects the pod onto that fresh opening THIS turn — vs the once-per-turn snapshot
@@ -4623,7 +4663,7 @@ public partial class Game
             var e = _aiUnits[_aiIdx];
             if (e.Alive)
             {
-                if (_aiPlan.SiegeCharge != null && e.Cls == "BOMBARD" && e.ChargeTurns == 0 && e.ActionsLeft > 0)
+                if (_aiPlan.SiegeCharge != null && e.HasSiege && e.ChargeTurns == 0 && e.ActionsLeft > 0)
                 {
                     // SIEGE charges a telegraphed strike: NO damage now — the 3x3 danger zone IS the
                     // telegraph (drawn for the whole next player turn); it lands at the top of the
