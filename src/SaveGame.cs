@@ -174,15 +174,18 @@ public static class SaveGame
     /// The current consecutive-day daily-win streak (0 on a fresh profile).
     public static int LoadDailyStreak() => Math.Max(0, LoadMetaDto().DailyStreak);
 
-    /// Record a daily WIN for `stamp`. Pays out at most once per stamp: returns (paid=false) if this
-    /// stamp already paid. The streak increments when `stamp` is the calendar day AFTER the last paid
-    /// win; any gap (or a fresh profile) resets it to 1. Returns the updated streak either way.
-    public static (bool paid, int streak) RecordDailyWin(int stamp)
+    /// Record a daily WIN for `stamp` and bank its `bounty` in the SAME atomic meta write. Pays out
+    /// at most once per stamp: returns (paid=false, nothing written) if this stamp already paid. The
+    /// streak increments when `stamp` is the calendar day AFTER the last paid win; any gap (or a
+    /// fresh profile) resets it to 1. The pay and the paid-mark land in ONE WriteMetaDto, so a crash
+    /// can never mark the stamp paid without the salvage — nor pay without marking (a double-pay).
+    public static (bool paid, int streak) RecordDailyWin(int stamp, int bounty)
     {
         var d = LoadMetaDto();
         if (d.DailyWinStamp == stamp) return (false, Math.Max(0, d.DailyStreak));   // already paid today
         d.DailyStreak = IsNextDay(d.DailyWinStamp, stamp) ? Math.Max(0, d.DailyStreak) + 1 : 1;
         d.DailyWinStamp = stamp;
+        d.Salvage = Math.Max(0, d.Salvage) + Math.Max(0, bounty);   // pay + mark, one write
         WriteMetaDto(d);
         return (true, d.DailyStreak);
     }

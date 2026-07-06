@@ -277,13 +277,14 @@ public partial class Game
             // bounty of 10+heat, at most ONCE per stamp (keyed on the paid stamp in meta.json, so
             // replaying today's challenge can never farm it), and drives the consecutive-day streak
             // (+ the DAY SHIFT / DAWN PATROL achievements). All behind the same !NoPersist gate.
+            // Review fix: the pay and the paid-mark are ONE atomic meta write inside RecordDailyWin —
+            // a crash here can neither burn the bounty (marked-but-unpaid) nor double-pay it.
             if (win)
             {
-                var (paidOut, streak) = SaveGame.RecordDailyWin(DailyStamp);
+                int bounty = 10 + (_run?.HeatLevel ?? 0);
+                var (paidOut, streak) = SaveGame.RecordDailyWin(DailyStamp, bounty);
                 if (paidOut)
                 {
-                    int bounty = 10 + (_run?.HeatLevel ?? 0);
-                    SaveGame.AddSalvage(bounty);
                     _run?.Report.Insert(0, streak > 1
                         ? $"DAILY BOUNTY +{bounty} SALVAGE   ({streak}-DAY STREAK)"
                         : $"DAILY BOUNTY +{bounty} SALVAGE");

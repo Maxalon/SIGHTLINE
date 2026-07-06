@@ -95,12 +95,40 @@ public partial class Game
     // All NoPersist-gated — the harness/flywheel can never reach disk through these. ----
 
     /// The salvage bank cached for the BARRACKS sink UI (loaded at EnterBarracks + after each spend;
-    /// the draw path never touches disk). 0 under NoPersist.
+    /// the draw path never touches disk). 0 under NoPersist. Always shows the AVAILABLE bank
+    /// (disk minus the pending ledger below).
     public int BarracksSalvage;
+
+    // ── W9 review fix: the barracks PENDING LEDGER ────────────────────────────────────────────
+    // The scar REHAB and slate re-roll buy RUN-STATE goods, but the campaign only checkpoints at
+    // MISSION START — a quit at the barracks reloads the mission with the scar back / the slate
+    // re-derived, so an immediate meta write would burn durable money for rolled-back goods.
+    // Barracks-phase sinks therefore accumulate HERE (in memory, never persisted) and the total
+    // is committed via SpendSalvage inside SetupMission immediately BEFORE the checkpoint save —
+    // the charge and the goods enter permanence in the same breath. Quit at the barracks -> the
+    // pending total vanishes with the in-memory run: goods roll back AND the money never left.
+    // NOT pending: ConfirmDraft's recall fee (immediately followed by the mission-start save) and
+    // the draft pool re-roll (its good — seeing a fresh pool — is consumed on sight).
+    int _pendingSalvage;
+    /// The uncommitted barracks spend (test/UI visibility).
+    public int PendingSalvage => _pendingSalvage;
+    /// The bank a barracks sink may still spend against: disk MINUS the uncommitted pending total.
+    int AvailableSalvage => NoPersist ? 0 : Math.Max(0, SaveGame.LoadSalvage() - _pendingSalvage);
+
+    /// Commit the pending barracks spends to the durable meta. Called by SetupMission immediately
+    /// BEFORE the mission-start checkpoint save (and only there), so the paid-for goods and the
+    /// charge persist together or not at all.
+    void CommitPendingSalvage()
+    {
+        if (NoPersist || _pendingSalvage <= 0) return;
+        SaveGame.SpendSalvage(_pendingSalvage);   // affordability was enforced against disk-minus-pending
+        _pendingSalvage = 0;
+    }
 
     /// W9 sink: re-roll the run-opening draft candidate pool. Clears the current picks (those cards
     /// are gone) and re-recalls veterans from the reserve — nothing is charged for the picks
-    /// themselves; only CONFIRM pays the recall fee.
+    /// themselves; only CONFIRM pays the recall fee. Charged IMMEDIATELY (not pending): the good —
+    /// seeing a fresh pool — is consumed the moment it appears, so there is nothing to roll back.
     public void TryRerollDraftPool()
     {
         if (NoPersist || Phase != Phase.Draft) return;
@@ -113,28 +141,31 @@ public partial class Game
 
     /// W9 sink: buy ONE scar off a soldier (their oldest first). A true undo of Run.GrantScar:
     /// BURN-SCARRED's granted max-HP is reverted and a VENDETTA's faction brand is cleared.
+    /// PENDING-charged: committed at the next mission-start checkpoint (see the ledger above).
     public void TryBuyScarRemoval(Unit u)
     {
         if (NoPersist || _run == null || u == null || u.Scars.Count == 0) return;
-        if (!SaveGame.SpendSalvage(MetaProg.ScarRehabCost)) { Audio.Play("miss"); return; }
+        if (AvailableSalvage < MetaProg.ScarRehabCost) { Audio.Play("miss"); return; }
+        _pendingSalvage += MetaProg.ScarRehabCost;
         var s = u.Scars[0];
         u.Scars.RemoveAt(0);
         if (s == Scar.BurnScarred) { u.MaxHp = Math.Max(1, u.MaxHp - Unit.BurnScarHp); u.Hp = Math.Min(u.Hp, u.MaxHp); }
         if (s == Scar.Vendetta) u.VendettaFaction = Faction.None;
-        BarracksSalvage = SaveGame.LoadSalvage();
+        BarracksSalvage = AvailableSalvage;
         _run.Report.Insert(0, $"{u.Name} rehabilitated - {ScarDef.Name(s)} bought off  (-{MetaProg.ScarRehabCost} salvage)");
         Audio.Play("hit");
     }
 
     /// W9 sink: re-roll this barracks' requisition slate (cheap + repeatable; each re-roll perturbs
-    /// the deterministic slate seed via _shopReroll).
+    /// the deterministic slate seed via _shopReroll). PENDING-charged like the rehab.
     public void TryRerollShopSlate()
     {
         if (NoPersist || _run == null) return;
-        if (!SaveGame.SpendSalvage(MetaProg.ShopRerollCost)) { Audio.Play("miss"); return; }
+        if (AvailableSalvage < MetaProg.ShopRerollCost) { Audio.Play("miss"); return; }
+        _pendingSalvage += MetaProg.ShopRerollCost;
         _shopReroll++;
         RefreshShopOffer();
-        BarracksSalvage = SaveGame.LoadSalvage();
+        BarracksSalvage = AvailableSalvage;
         Audio.Play("hit");
     }
 
@@ -282,36 +313,59 @@ public partial class Game
                 if (g2.RunState?.Squad != null) foreach (var u in g2.RunState.Squad) if (u.FromReserve) seated2++;
                 if (seated2 != 0) fails.Add("brokeConfirmSeated");
 
-                // (8) SINKS (TryBuy* refuse-when-short pattern):
-                // shop-slate re-roll: -5 and the slate actually rotates (nonce perturbs the seed)
+                // (8) SINKS — the PENDING LEDGER (review fix): barracks sinks (slate re-roll, scar
+                //     rehab) charge NOTHING to the durable meta until the next mission-start
+                //     checkpoint, so a quit at the barracks rolls back the goods AND keeps the
+                //     money. The draft pool re-roll stays an immediate charge (consumed on sight).
                 SaveGame.AddSalvage(100);
                 gd.BarracksSalvage = SaveGame.LoadSalvage();
                 string slate0 = string.Join(",", gd.ShopOffer());
-                int bank0 = SaveGame.LoadSalvage();
+                int disk0 = SaveGame.LoadSalvage();
                 gd.TryRerollShopSlate();
-                if (SaveGame.LoadSalvage() != bank0 - MetaProg.ShopRerollCost) fails.Add("shopRerollCharge");
+                if (SaveGame.LoadSalvage() != disk0) fails.Add("slatePendingWroteMeta");   // a quit HERE keeps the money
+                if (gd.PendingSalvage != MetaProg.ShopRerollCost) fails.Add("slatePendingLedger");
                 bool rotated = string.Join(",", gd.ShopOffer()) != slate0;
                 for (int i = 0; i < 2 && !rotated; i++)   // a coincidental identical shuffle is possible; 3 tries isn't
                 { gd.TryRerollShopSlate(); rotated = string.Join(",", gd.ShopOffer()) != slate0; }
                 if (!rotated) fails.Add("shopRerollStatic");
 
-                // scar REHAB: -30, scar removed, BURN-SCARRED max-HP grant reverted; refuses when broke
+                // scar REHAB: pending +30, scar removed, BURN-SCARRED max-HP grant reverted — disk untouched
                 var scarred = gd.RunState.Squad[0];
                 int hp0 = scarred.MaxHp;
                 scarred.Scars.Add(Scar.BurnScarred);
                 scarred.MaxHp += Unit.BurnScarHp; scarred.Hp = scarred.MaxHp;   // mimic Run.GrantScar
-                int bank1 = SaveGame.LoadSalvage();
+                int pend0 = gd.PendingSalvage;
                 gd.TryBuyScarRemoval(scarred);
                 if (scarred.Scars.Count != 0) fails.Add("rehabScarStuck");
                 if (scarred.MaxHp != hp0) fails.Add("rehabBurnHpNotReverted");
-                if (SaveGame.LoadSalvage() != bank1 - MetaProg.ScarRehabCost) fails.Add("rehabCharge");
-                scarred.Scars.Add(Scar.ShellShocked);
+                if (SaveGame.LoadSalvage() != disk0) fails.Add("rehabPendingWroteMeta");
+                if (gd.PendingSalvage != pend0 + MetaProg.ScarRehabCost) fails.Add("rehabPendingLedger");
+                // The two disk asserts above ARE the simulated quit/reload guarantee: meta.json still
+                // holds disk0 and the scar removal lives only in this in-memory run — a reload from
+                // the checkpoint restores the scar while the bank never moved.
+
+                // ... and the next mission-start checkpoint commits EXACTLY the pending total, once.
+                int owed = gd.PendingSalvage;
+                gd.SetupMission(2);
+                if (SaveGame.LoadSalvage() != disk0 - owed) fails.Add($"pendingCommit={SaveGame.LoadSalvage()}(want{disk0 - owed})");
+                if (gd.PendingSalvage != 0) fails.Add("pendingNotCleared");
+
+                // affordability reads disk MINUS pending: with bank 34, one rehab (30) fits; a second
+                // rehab (avail 4 < 30) and a slate re-roll (avail 4 < 5) must both refuse untouched.
                 SaveGame.SpendSalvage(SaveGame.LoadSalvage());   // drain the bank
+                SaveGame.AddSalvage(34);
+                gd.BarracksSalvage = 34;
+                scarred.Scars.Add(Scar.ShellShocked); scarred.Scars.Add(Scar.HardBitten);
+                gd.TryBuyScarRemoval(scarred);
+                if (scarred.Scars.Count != 1 || gd.PendingSalvage != MetaProg.ScarRehabCost) fails.Add("pendingAffordFirst");
                 gd.TryBuyScarRemoval(scarred);
                 if (scarred.Scars.Count != 1) fails.Add("rehabBrokeRemoved");
-                if (SaveGame.LoadSalvage() != 0) fails.Add("rehabBrokeCharged");
+                gd.TryRerollShopSlate();
+                if (gd.PendingSalvage != MetaProg.ScarRehabCost) fails.Add("brokeSinkPended");
+                gd.SetupMission(3);
+                if (SaveGame.LoadSalvage() != 4) fails.Add($"pendingCommit2={SaveGame.LoadSalvage()}");
 
-                // draft-pool re-roll: -10, picks cleared, pool refilled, cache refreshed
+                // draft-pool re-roll: IMMEDIATE -10 (not pending), picks cleared, pool refilled, cache refreshed
                 SaveGame.AddSalvage(30);
                 var g3 = new Game { NoPersist = false };
                 g3.BeginDraft();
@@ -326,6 +380,7 @@ public partial class Game
                 // (9) HORIZONTAL UNLOCKS: QUARTERMASTER widens the slate by exactly one;
                 //     STANDING RESERVE recalls a third veteran; CROSS-TRAINING only ever deals
                 //     class-legal weapons (ArmoryOptions — a sidegrade, never off-role).
+                gd.RefreshShopOffer();   // rebase the cache on the CURRENT mission before comparing
                 int slotsBefore = gd.ShopOffer().Count;
                 SaveGame.AddUnlock((int)MetaUnlock.Quartermaster);
                 gd.RefreshShopOffer();
@@ -373,9 +428,13 @@ public partial class Game
                 }
                 if (SaveGame.LoadDailyStreak() != 5) fails.Add($"streakClimb={SaveGame.LoadDailyStreak()}");
                 if (!SaveGame.LoadAchievements().Contains("STREAK5")) fails.Add("streak5Ach");
-                // a gap (non-consecutive day) resets the streak to 1 — primitive-level
-                var (gp2, gs2) = SaveGame.RecordDailyWin(stamp0 + 8000);   // ~ +does-not-matter: not next-day
+                // a gap (non-consecutive day) resets the streak to 1 — primitive-level. Also the
+                // review-fix contract: pay + mark are ONE write — the returned paid=true must come
+                // with the bounty already banked (bounty 7 here, asserted via the salvage delta).
+                int sGap = SaveGame.LoadSalvage();
+                var (gp2, gs2) = SaveGame.RecordDailyWin(stamp0 + 8000, 7);   // not next-day
                 if (!gp2 || gs2 != 1) fails.Add("streakGapReset");
+                if (SaveGame.LoadSalvage() != sGap + 7) fails.Add("dailyPayMarkNotAtomic");
             }
         }
         catch (Exception e) { return "METATEST: FAIL (exception " + e.Message + ")"; }
@@ -389,7 +448,8 @@ public partial class Game
         }
         return fails.Count == 0
             ? "METATEST: PASS (salvage/achievements/unlocks/legends/totals round-trip; unlock gated by NoPersist; "
-              + "recall charged once in ConfirmDraft + broke-confirm refuses; sinks charge/refuse; daily bounty once-per-stamp + streak; save.json preserved)"
+              + "recall charged once in ConfirmDraft + broke-confirm refuses; barracks sinks pend until the checkpoint commit "
+              + "(quit-at-barracks keeps the money); daily bounty once-per-stamp, pay+mark atomic; save.json preserved)"
             : "METATEST: FAIL (" + string.Join(",", fails) + ")";
     }
 }

@@ -898,6 +898,9 @@ public partial class Game
         DailyStamp = 0;
         _dailyBest = -1;
         Wave = 0;
+        // W9 review fix: an abandoned barracks' uncommitted pending spend dies with its run — a new
+        // mode entry must never inherit (and later commit) a charge for goods that no longer exist.
+        _pendingSalvage = 0;
         if (!NoPersist) { Mission.ForcedLayout = -1; Util.Reseed(0); }
         // W11: per-RUN teaching state — the honest-loss tally and the NEW CONTACT memory reset at
         // every mode entry (this is the one choke-point all of StartMission / BeginEndless /
@@ -1272,7 +1275,14 @@ public partial class Game
 
         // checkpoint the run at the start of each mission (CAMPAIGN only). LAST STAND, SKIRMISH, and
         // the DAILY are all transient single-mode fights — never resumable, so they never write save.json.
-        if (!NoPersist && Mode == GameMode.Campaign) SaveGame.Save(_run);
+        // W9 review fix: commit the barracks' PENDING salvage spends (scar rehab / slate re-roll)
+        // immediately BEFORE the checkpoint — the sink's goods (the removed scar) become durable in
+        // the very save that follows, so the charge and the goods persist together or not at all.
+        if (!NoPersist && Mode == GameMode.Campaign)
+        {
+            CommitPendingSalvage();
+            SaveGame.Save(_run);
+        }
 
         // balance telemetry (no-op unless Stats.Enabled): record the encounter we just built.
         // W2: Mission.AppliedLayout = the authored arena the guard actually ACCEPTED (-1 procedural).
@@ -1539,7 +1549,9 @@ public partial class Game
             _run.Report.Insert(0, $"Recovered {gained} intel{heatNote}  (total {_run.Intel})");
             _shopDone = false;
             _shopReroll = 0;                            // W9: paid slate re-rolls are per-barracks
-            BarracksSalvage = NoPersist ? 0 : SaveGame.LoadSalvage();   // W9: cached bank for the sink UI
+            // W9: cached bank for the sink UI — the AVAILABLE bank (disk minus any uncommitted
+            // pending, which is normally 0 here: the previous SetupMission committed it).
+            BarracksSalvage = NoPersist ? 0 : Math.Max(0, SaveGame.LoadSalvage() - PendingSalvage);
             RefreshShopOffer();                         // roll this barracks' rotating requisition slate
             ArmoryMode = false; ArmorySoldier = null;   // open requisition in the shop view, not armory
             _run.GenerateOffers(_run.Mission + 1);
