@@ -629,7 +629,7 @@ public static class Hud
         var m = Raylib.GetMousePosition();
 
         if (g.Mode != GameMode.Endless
-            && (Raylib.CheckCollisionPointRec(m, _objectiveRect) || _forcedHover == "obj"))
+            && (Raylib.CheckCollisionPointRec(m, _objectiveRect) || (g.NoPersist && _forcedHover == "obj")))
         {
             DrawHoverCard(Codex.ObjectiveName(g.Objective), Codex.ObjectiveDesc(g.Objective),
                           _objectiveRect.X, _objectiveRect.Y + _objectiveRect.Height + 6, Pal.Accent);
@@ -637,7 +637,7 @@ public static class Hud
         }
         foreach (var (boon, chip) in _boonChips)
         {
-            if (!Raylib.CheckCollisionPointRec(m, chip) && _forcedHover != "boon") continue;
+            if (!Raylib.CheckCollisionPointRec(m, chip) && !(g.NoPersist && _forcedHover == "boon")) continue;
             DrawHoverCard(BoonDef.Name(boon), BoonDef.Desc(boon),
                           chip.X, chip.Y + chip.Height + 6, Pal.VipGold);
             return;
@@ -645,7 +645,8 @@ public static class Hud
     }
 
     // W11 harness seam for DrawHudHovers (screenshot only): SIGHTLINE_HOVERHUD=obj|boon frames the
-    // objective / first-boon-chip hover card headless. Read once; null in every normal run.
+    // objective / first-boon-chip hover card headless. Read once; null in every normal run, and
+    // the use sites gate on g.NoPersist so a stray env var can never force a card in live play.
     static readonly string _forcedHover = Environment.GetEnvironmentVariable("SIGHTLINE_HOVERHUD");
 
     /// A small anchored hover card: accent title + wrapped body (~300px column), clamped on-screen.
@@ -1296,7 +1297,7 @@ public static class Hud
             // Harness seam (screenshot only): SIGHTLINE_HELPBTN=<id> treats that button as hovered,
             // so a SPECIFIC verb's help card can be framed headless (Program.cs's cursor park can
             // only hit whichever button happens to sit at its fixed point). Inert when unset.
-            bool hover = Raylib.CheckCollisionPointRec(m, b.Rect) || (_forcedHelpId != null && b.Id == _forcedHelpId);
+            bool hover = Raylib.CheckCollisionPointRec(m, b.Rect) || (g.NoPersist && _forcedHelpId != null && b.Id == _forcedHelpId);
             if (!hover) continue;
             string desc = ActionDesc(g, b.Id);
             if (string.IsNullOrEmpty(desc)) return;
@@ -1319,7 +1320,8 @@ public static class Hud
         }
     }
 
-    // W11 harness seam for DrawActionHelp (read once; null in every normal run).
+    // W11 harness seam for DrawActionHelp (read once; null in every normal run, and the use site
+    // gates on g.NoPersist so a stray env var can never pin a help card open in live play).
     static readonly string _forcedHelpId = Environment.GetEnvironmentVariable("SIGHTLINE_HELPBTN");
 
     static string ActionDesc(Game g, string id)
@@ -3548,11 +3550,9 @@ public static class Hud
 
         int w = 320, x = Cfg.ScreenW - w - 40, y = 150;
         // height grows with the active-modifier list (always tall enough for the ceiling's worth)
-        // — and by one row for the W11 FIELD SUPPORT chip when the adaptive assist is live.
         int rows = Math.Max(1, level);
         int assist = g.AssistPreview;
-        int assistH = assist > 0 ? 26 : 0;
-        int h = 132 + assistH + rows * 26 + 30;
+        int h = 132 + rows * 26 + 30;
         var card = new Rectangle(x, y, w, h);
         PanelShadow(card, 1f, 0.06f);
         Raylib.DrawRectangleRounded(card, 0.06f, 8, Pal.Panel);
@@ -3572,25 +3572,30 @@ public static class Hud
         DrawStepper(HeatPlus, "+", level < unlocked);
 
         Raylib.DrawTextEx(Cfg.Font, $"MAX UNLOCKED: {unlocked}", new Vector2(x + 18, y + 92), 12, 1f, Pal.TxtDim);
-        string hint = level > 0 ? $"+{Sightline.Heat.IntelBonus(level)} intel / mission" : "standard difficulty";
-        Raylib.DrawTextEx(Cfg.Font, hint, new Vector2(x + 18, y + 110), 12, 1f, level > 0 ? Pal.Good : Pal.TxtDim);
-
         // W11 HONEST LOSSES: the adaptive assist (repeated losses ease hostile stats at heat 0)
         // was invisible — surface it as a FIELD SUPPORT chip so the player knows help is active
-        // and that a win (or dialling heat up) stands it down.
+        // and that a win (or dialling heat up) stands it down. Review fix: the chip REPLACES the
+        // hint row — assist only exists at heat 0, where the hint is the static "standard
+        // difficulty" — so the card's footprint is unchanged and it can't creep over the intro
+        // briefing bullets to its left (the +26px growth used to clip the second rule's tail).
         if (assist > 0)
         {
             string fsLbl = $"FIELD SUPPORT ACTIVE ({assist})";
             float fw = Raylib.MeasureTextEx(Cfg.Font, fsLbl, 12, 1f).X + 18;
-            var chip = new Rectangle(x + 18, y + 130, fw, 20);
+            var chip = new Rectangle(x + 18, y + 106, fw, 20);
             Raylib.DrawRectangleRounded(chip, 0.4f, 6, Raylib.Fade(Pal.Good, 0.15f));
             Raylib.DrawRectangleLinesEx(chip, 1f, Raylib.Fade(Pal.Good, 0.6f));
             CenterText(fsLbl, chip, 12, Pal.Good);
-            Raylib.DrawTextEx(Cfg.Font, "wins clear it", new Vector2(x + 18 + fw + 8, y + 134), 11, 1f, Pal.TxtDim);
+            Raylib.DrawTextEx(Cfg.Font, "wins clear it", new Vector2(x + 18 + fw + 8, y + 110), 11, 1f, Pal.TxtDim);
+        }
+        else
+        {
+            string hint = level > 0 ? $"+{Sightline.Heat.IntelBonus(level)} intel / mission" : "standard difficulty";
+            Raylib.DrawTextEx(Cfg.Font, hint, new Vector2(x + 18, y + 110), 12, 1f, level > 0 ? Pal.Good : Pal.TxtDim);
         }
 
         // active modifiers (cumulative rungs 1..level)
-        int my = y + 132 + assistH;
+        int my = y + 132;
         if (level == 0)
             Raylib.DrawTextEx(Cfg.Font, "No modifiers active.", new Vector2(x + 18, my), 12, 1f, Pal.TxtDim);
         else

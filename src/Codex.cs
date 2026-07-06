@@ -147,7 +147,7 @@ public static class Codex
             "In the open you read EXPOSED: +18 crit against you.");
         Add("HUNKER", "DIG IN",
             "Spend the rest of a turn digging in: a further -25 aim against you, and you cannot be crit. " +
-            "Only meaningful behind cover — hunkering in the open shields nothing.");
+            "Strongest layered onto cover, but even in the open it blunts aim and voids the crit.");
         Add("FLANKING", "NO COVER",
             "Cover only faces the shot. Fire from a side the block does not face and the target is FLANKED: " +
             "its cover is void and the EXPOSED +18 crit applies. Your own sides obey the same rule.");
@@ -159,7 +159,7 @@ public static class Codex
             "the target's LOW cover. A commanding two-tier drop sees over HIGH cover too.");
         Add("CONCEALMENT", "AMBUSH",
             $"The squad starts hidden; pods hold and cannot escalate by sight. Spotted at range a pod turns SUSPICIOUS (!), then ALERT. " +
-            $"Stepping within {Game.BaseRevealRange} tiles of an alert foe — or any loud act — breaks stealth. " +
+            $"Stepping within {Game.BaseRevealRange} tiles of an alert foe (heat's SHORT FUSE tightens this by one) — or any loud act — breaks stealth. " +
             $"The first shot from hiding is an AMBUSH: +{Combat.AmbushAim} aim, +{Combat.AmbushCrit} crit.");
         Add("REACTIONS", "OW/FOCUS/BRACE",
             $"Three ways to hold a lane. OVERWATCH fires on the first mover in sight at -10 aim. FOCUS narrows to a " +
@@ -170,8 +170,8 @@ public static class Codex
             "drop overwatch and shoot wild, then rally. Finishing one pod beats winging two.");
         Add("PRESSURE", "CLOCK",
             $"On camp-friendly objectives (Eliminate / Hack / Decapitate) turtling is taxed: {Game.PressureGrace} grace turns, " +
-            $"then enemy aim climbs +{Game.PressureAimPerRung} per rung every {Game.PressureStep} turns (max {Game.PressureMax} rungs), " +
-            "with reinforcements from rung 2. Advance.");
+            $"then enemy aim climbs +{Game.PressureAimPerRung} per rung (+{Game.PressureAimPerRung + 1} at heat 4+) every {Game.PressureStep} turns " +
+            $"(max {Game.PressureMax} rungs), with reinforcements from rung 2. Advance.");
         Add("GRAZE", "SAFETY NET",
             $"A shot that misses by {Combat.GrazeBand} or less GRAZES: minimum damage, no crit — never nothing. " +
             $"A {Combat.GrazeMinMiss}% true-miss window always remains. Each clean miss also banks a hidden " +
@@ -310,7 +310,7 @@ public static class Codex
         e.Add(new CodexEntry { Title = "MARKED", Code = $"+{Combat.MarkAim} AIM",
             Desc = $"Painted by a sharpshooter: every squad member gains +{Combat.MarkAim} aim against this foe until the marker's next turn (a HEADHUNTER's mark adds +{Combat.HeadhunterMarkCrit} crit)." });
         e.Add(new CodexEntry { Title = "CONCEALED", Code = "HIDDEN",
-            Desc = $"The squad is unseen; pods cannot escalate by sight. Broken by any loud act or stepping within {Game.BaseRevealRange} tiles of an alert foe — the breaking shot is an AMBUSH (+{Combat.AmbushAim} aim, +{Combat.AmbushCrit} crit)." });
+            Desc = $"The squad is unseen; pods cannot escalate by sight. Broken by any loud act or stepping within {Game.BaseRevealRange} tiles (one less under heat's SHORT FUSE) of an alert foe — the breaking shot is an AMBUSH (+{Combat.AmbushAim} aim, +{Combat.AmbushCrit} crit)." });
         return e;
     }
 

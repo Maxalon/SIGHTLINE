@@ -510,7 +510,10 @@ public partial class Game
             // "move" click (e.g. opened on overwatch/fire) clearly knows how to act; don't hold the
             // MOVE card up forever, advance to the next lesson after a couple of full turns.
             case 0: if (_tutMoved || _turnCount >= 3) AdvanceTutorial(); break;
-            case 1: if (_tutOver) AdvanceTutorial(); break;
+            // W11 review: same fallback on the OVERWATCH lesson — a reaction-averse player who
+            // never arms a watch would otherwise park here below the TutStep>=2 "seen" gate and
+            // get the whole onboarding re-offered every future run.
+            case 1: if (_tutOver || _turnCount >= 6) AdvanceTutorial(); break;
             case 2: if (_tutShot) AdvanceTutorial(); break;
             case 3: _tutDoneTimer -= dt; if (_tutDoneTimer <= 0) CompleteTutorial(); break;
         }
