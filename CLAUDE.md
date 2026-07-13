@@ -247,13 +247,25 @@ data-driven `Ai.Tier` at rungs 6+, NO QUARTER +1 dmg), the four setup-verb arche
 faction fights, Escort de-dragged 12.9-15.8t → 5.8t (real-anims leash + hard-gated forward beacon),
 atomic saves with corrupt-file recovery, a flywheel that spans heats {0,2,4,6,8} + endless + veteran
 pricing, and an owner-feedback UI readability pass (wrapping action bar — no ellipsis ever — banded
-odds colors, true gamma, three-zone top bar).
+odds colors, true gamma, three-zone top bar). PROGRAM SIGNAL (12 waves planned, 11 shipped across
+two milestones) hardened the seams and made the strategic layer earn its place: mode-seam integrity
+(ResetModeState at all five entries, mode-aware abandon), a rebuilt measurement compass (CRN-paired
+policy legs, per-perk/purchase/arena telemetry, DoT attribution), board reads (biome-true plateaus,
+visible focus cone, status pills, role rings), Rescue repaired (soft-lock closed; 9.0t/67% →
+6.07t/98.3% h0), faction boss identity + three finale kits (m6 96% → 82%), a fresh-baselined heat
+ladder with a rung-4 coordination tooth (80/70/50/32.5/17.5 vs goal 80/70/60/40/20 ±8), morale made
+visible and contested (WAVERING telegraph, WARBRINGER anchor, CUSTODIAN re-locker), a standing
+salvage economy (priced veteran recall 10+8×rank, quit-safe barracks sinks, daily payouts), a verb
+pool expansion (6 boons, BIPOD/SUPPRESSOR, 3 secondaries, INTEL CACHE), in-mission teaching (FIELD
+CRAFT codex, enemy-ID tooltips, honest loss cards), and a strategic-layer facelift (sized-to-fit
+campaign map, class glyphs, coherent intro, first-run RECOMMENDED draft). W7 exposure plumbing was
+caught as a docs over-claim at landing and carried forward as an open, ready-to-dev spec.
 
 **The exhaustive feature list is in [`docs/FEATURES.md`](docs/FEATURES.md).** The build
 history and open/next backlog are in [`docs/ROADMAP.md`](docs/ROADMAP.md) and the "OPEN/NEXT"
-sections of [`docs/DEVLOG.md`](docs/DEVLOG.md). Recurring open threads: on-device audio
-tuning, the endless toughness ramp (overall median 5 vs the 6-8 target; h0 in band), the VETSIM
-veteran-pricing batch, and per-fork / per-heat balance tuning (heat-2's corrected baseline is 63%).
+sections of [`docs/DEVLOG.md`](docs/DEVLOG.md). Recurring open threads: W7 exposure plumbing
+(specced, not built), the policy-gap accept-vs-sharpen decision (aggregate ~0 — sloppy play fully
+viable), the NO QUARTER heat-picker Desc cosmetic, and on-device audio tuning (needs the human).
 
 ---
 

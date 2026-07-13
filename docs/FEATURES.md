@@ -465,9 +465,6 @@ seeds (mix of WIN/LOSE, no exceptions):
   refund the reaction); weapon mods BIPOD (+10 aim if unmoved) and SUPPRESSOR (a suppressed shot
   wakes only the target's pod); secondaries GHOST / DEMOLITION / BOUNTY; the INTEL CACHE (an
   expiring gold diamond worth 8-10 intel, mid/far-field).
-- **Exposure plumbing:** every campaign path guarantees ≥1 Eliminate and ≥1 Defend-or-Rescue with
-  ≤1 Escort (column-granular deterministic assignment, still a pure function of MapSeed);
-  authored arenas deal from a per-run no-repeat deck; the arena hint matches the rendered biome.
 - **Teaching layer:** FIELD CRAFT codex tab (12 code-verified rule entries + 6 status rows);
   enemy ID + behavior blurb in the aim tooltip; NEW CONTACT banners on first sightings; honest
   loss cards (CAUSE OF DEATH + counterplay tip; FIELD SUPPORT disclosure); objective/boon hover
@@ -483,4 +480,4 @@ seeds (mix of WIN/LOSE, no exceptions):
   TURRET/BRUISER/SCOUT read by ring shape; the EVAC label anchors to a real zone tile.
 - **The compass (dev-facing):** CRN-paired greedy/sloppy legs over identical worlds, positional
   error injection, ACTION MIX + BY PERK/PURCHASE/ARENA tables, whole-run objective pins,
-  SIGHTLINE_EXPOSURETEST, SIGHTLINE_PAIRTEST.
+  SIGHTLINE_PAIRTEST.

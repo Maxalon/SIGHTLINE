@@ -726,9 +726,12 @@ worktree, adversarially reviewed, and merge-gated on self-tests + autoplay + Rel
 - [x] **W6 Heat ladder tooth.** Fresh paired baseline retired the stale table; rung-4 coordination
       tooth (AiTier=1) at zero completion cost; finale body heat-gated to h4+. Final ladder
       80/70/50/32.5/17.5 (goal 80/70/60/40/20 ±8), h8 ≥10% floor restored, no policy inversion.
-- [x] **W7 Exposure plumbing.** Column-constrained objective assignment (every path: ≥1 Eliminate,
-      ≥1 Defend-or-Rescue, ≤1 Escort), per-run no-repeat arena deck, biome-true arena hints,
-      SIGHTLINE_EXPOSURETEST 200-seed histogram.
+- [ ] **W7 Exposure plumbing — NOT SHIPPED (docs over-claim caught at landing verification).**
+      The program's docs commit claimed this wave, but no W7 commit, no SIGHTLINE_EXPOSURETEST
+      hook, and no column-constraint/arena-deck code exist in the tree (Run.cs CardForNode is
+      plain ObjectiveFor(n + node.Row)). Spec carried forward as ready-to-dev: column-constrained
+      objective assignment (every path: ≥1 Eliminate, ≥1 Defend-or-Rescue, ≤1 Escort), per-run
+      no-repeat arena deck, biome-true arena hints, SIGHTLINE_EXPOSURETEST 200-seed histogram.
 - [x] **W8 Morale visible & contested.** WAVERING telegraph (truthful, banner-aware), WARBRINGER
       banner anchor (Cheb-4 aura, 1/mission), CUSTODIAN objective re-locker; routed specialists
       (medic/bombard/custodian) now actually flee.
