@@ -242,8 +242,10 @@ public partial class Game
                 if (EvacZone.Contains((Vip.X, Vip.Y))) EndSkirmish(true);
                 break;
             case Objective.Rescue:
-                if (!CaptiveLocked && (Vip == null || !Vip.Alive)) { EndSkirmish(false); return; }
-                if (!CaptiveLocked && Vip != null && EvacZone.Contains((Vip.X, Vip.Y))) EndSkirmish(true);
+                // W4 (SIGNAL) belt-and-braces (mirrors the campaign CheckEnd): a dead captive is a
+                // loss even while still caged — a caged death must never soft-lock the skirmish.
+                if (Vip == null || !Vip.Alive) { EndSkirmish(false); return; }
+                if (!CaptiveLocked && EvacZone.Contains((Vip.X, Vip.Y))) EndSkirmish(true);
                 break;
             case Objective.Defend:
                 if (_turnCount > DefendTurns) EndSkirmish(true);
@@ -270,6 +272,26 @@ public partial class Game
         {
             RecordDailyResult(win, _turnCount);
             _dailyBest = -1;   // force a fresh read for the end card
+
+            // W9 (SIGNAL): the retention mode finally FEEDS the meta — a daily WIN pays a salvage
+            // bounty of 10+heat, at most ONCE per stamp (keyed on the paid stamp in meta.json, so
+            // replaying today's challenge can never farm it), and drives the consecutive-day streak
+            // (+ the DAY SHIFT / DAWN PATROL achievements). All behind the same !NoPersist gate.
+            // Review fix: the pay and the paid-mark are ONE atomic meta write inside RecordDailyWin —
+            // a crash here can neither burn the bounty (marked-but-unpaid) nor double-pay it.
+            if (win)
+            {
+                int bounty = 10 + (_run?.HeatLevel ?? 0);
+                var (paidOut, streak) = SaveGame.RecordDailyWin(DailyStamp, bounty);
+                if (paidOut)
+                {
+                    _run?.Report.Insert(0, streak > 1
+                        ? $"DAILY BOUNTY +{bounty} SALVAGE   ({streak}-DAY STREAK)"
+                        : $"DAILY BOUNTY +{bounty} SALVAGE");
+                    TryAchievement("DAILY_WIN");
+                    if (streak >= 5) TryAchievement("STREAK5");
+                }
+            }
         }
 
         if (win)

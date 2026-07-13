@@ -24,7 +24,12 @@ public enum ItemKind { None, Smoke, Flash, Barricade, Incendiary }
 /// combat read (incl. the HUD %-to-hit / crit tooltip) with no special-casing.
 /// APPEND-ONLY: SaveGame persists installed mods by (int)WeaponMod, so new members go at
 /// the END — never reorder or remove the existing ones.
-public enum WeaponMod { Scope, ExtendedMag, HollowPoint, Stabilizer }
+/// W10 (SIGNAL): BIPOD and SUPPRESSOR are RULE mods, not stat mods — BIPOD is a conditional
+/// ComputeOdds read (+aim while the shooter hasn't moved this turn; deliberate anti-synergy with
+/// EXPOSED BY FIRE, which punishes firing-and-standing-still) and SUPPRESSOR narrows the
+/// concealment-break pod wake (Game.BreakConcealment) to the shot target's own pod. Neither
+/// touches Weapon.ApplyMods (no baked stat change).
+public enum WeaponMod { Scope, ExtendedMag, HollowPoint, Stabilizer, Bipod, Suppressor }
 
 /// Promotion perks: a soldier picks one each rank-up (see Run / barracks).
 /// APPEND-ONLY: enum ordinals are the save keys (SaveGame stores perks by (int)Perk),
@@ -323,6 +328,12 @@ public class Unit
         // SHELL-SHOCKED (W5): unshakeable nerves — Disoriented and Stun just don't take hold (inert
         // without the scar). The flip side of the lasting -mobility caution; the soldier has seen worse.
         if ((k == StatusKind.Disoriented || k == StatusKind.Stun) && HasScar(Scar.ShellShocked)) return;
+        // PYROMANIACS boon (W10): the squad works IN its own fire — no soldier ever catches Burning
+        // (the status; the one-time step-in sear in Game.EnvDamage still applies). Read via the
+        // per-mission Combat.RunBoons static (this is the ONE chokepoint every ignition path routes
+        // through: fire step-in, TickHazards re-ignition, incendiary splash, grenade/barrel burns).
+        // Team-gated so a burning ENEMY is never spared.
+        if (k == StatusKind.Burning && Team == Team.Player && Combat.RunBoons.Contains(Boon.Pyromaniacs)) return;
         foreach (var s in Statuses) if (s.Kind == k) { s.Turns = Math.Max(s.Turns, turns); return; }
         Statuses.Add(new Status { Kind = k, Turns = turns });
     }
@@ -454,11 +465,17 @@ public class Unit
     // "shove always costs 1 action" this double-bounds it (no infinite reposition loop). Reset
     // every BeginTurn; never persisted (per-turn combat state only).
     public bool ShovedThisTurn;
-    // FIELD CRAFT (W1): two universal positioning verbs, each once per soldier per turn (reset in
-    // BeginTurn). DRAG pulls an adjacent ally one tile toward the dragger; VAULT leaps the soldier
-    // over an adjacent cover tile to the floor on its far side. Per-turn combat state, never persisted.
-    public bool DraggedThisTurn;
-    public bool VaultedThisTurn;
+    // FIELD CRAFT (W1): two universal positioning verbs, each Combat.FieldCraftLimit(u) times per
+    // soldier per turn (reset in BeginTurn; base limit 1, the FIELD DRILLS boon raises it to 2 —
+    // W10 converted these from once-per-turn bools to per-turn COUNTERS because a flag skip cannot
+    // express "twice"). DRAG pulls an adjacent ally one tile toward the dragger; VAULT leaps the
+    // soldier over an adjacent cover tile to the floor on its far side. Per-turn state, never persisted.
+    public int DragsThisTurn;
+    public int VaultsThisTurn;
+    // W10 BIPOD: has this unit entered ANY tile this turn (walk/dash/vault/drag/shove/grapple all
+    // route through Game.OnUnitEnteredTile, the single set-site)? BIPOD's +aim only holds while the
+    // shooter is planted (false). Per-turn combat state, reset in BeginTurn, never persisted.
+    public bool MovedThisTurn;
     public bool Alive = true;
 
     // Awareness tier (4.3): enemies escalate Unaware -> Suspicious -> Alert instead of
@@ -475,6 +492,33 @@ public class Unit
                                 // (draft-screen display flag; transient, never persisted)
     public bool Enraged;        // elite boss: one-time low-HP rage trigger
     public int ShieldDx, ShieldDy;  // SHIELD archetype: facing dir its frontal shield blocks (3.7)
+
+    // SIGNAL W5 — BOSS CAPABILITY FLAGS. Transient per-mission state, never persisted (enemies
+    // aren't saved). Every signature mechanic used to be Cls-string-keyed (Cls=="SHIELD" /
+    // "BOMBARD" scattered across Combat/Game/Ai/Renderer), which made a mechanic inseparable
+    // from its rank-and-file archetype. These flags decouple them: each DEFAULTS to mirroring
+    // its archetype Cls (a rank-and-file SHIELD/BOMBARD — including every inline harness-built
+    // test unit — carries its signature with zero spawn-site changes, so behavior is identical
+    // by construction), and can be GRANTED to any other unit. A named boss keeps Cls=="ELITE"
+    // (nameplate / enrage / aim-clamp exemption / AI temperament all key on ELITE identity)
+    // while carrying a signature mechanic on top. Set true only — a SHIELD can't opt out.
+    bool _shieldArc, _hasSiege, _hasBanner;
+    public bool HasShieldArc { get => _shieldArc || Cls == "SHIELD";  set => _shieldArc = value; }  // frontal barrier arc (ShieldDx/Dy facing; re-faced by Game.FaceShields)
+    public bool HasSiege     { get => _hasSiege  || Cls == "BOMBARD"; set => _hasSiege  = value; }  // telegraphed 3x3 siege strike (ChargeTurns/ChargeX/Y)
+    // SIGNAL W8 — the WARBRINGER's banner aura (same flag pattern): pods with a living banner
+    // within Chebyshev Game.BannerRange cannot rout (Game.BreakPodMorale skips them) and rally one
+    // turn faster (Game.BeginEnemyUnitTurn). BOTH reads live in GAME — BeginTurn here is
+    // parameterless and world-blind, so the aura never touches Unit logic. Grantable to a boss.
+    public bool HasBanner    { get => _hasBanner || Cls == "WARBRINGER"; set => _hasBanner = value; }
+    // SIGNAL W5 — the Legion BREAKER's kit, two independent halves keyed on RagesTwice:
+    //  (1) the berserker RUSH temperament in Ai.Plan (advW/elevMult) applies from SPAWN — keyed
+    //      on the RagesTwice capability itself, NOT on the frenzy state;
+    //  (2) the SECOND rage tier: at <=25% HP an already-Enraged elite FRENZIES once (a further
+    //      +aim/+mob spike, popped by Game.UpdateEnemy on its acting beat).
+    // Both transient; RagesTwice is the capability, Frenzied the one-shot tier-2 state
+    // (mirrors the Enraged pair above).
+    public bool RagesTwice;
+    public bool Frenzied;
 
     // DECAPITATE GUARDED HVT (W4). Transient per-mission, never persisted (enemies aren't saved).
     // IsHvtGuard: this enemy is one of the (<=2) bodyguards the Game picked near the HVT.
@@ -659,8 +703,9 @@ public class Unit
         Hunkered = false;
         ReactedThisTurn = false;
         ShovedThisTurn = false;    // SHOVE: one per soldier per turn
-        DraggedThisTurn = false;   // FIELD CRAFT: DRAG once per soldier per turn
-        VaultedThisTurn = false;   // FIELD CRAFT: VAULT once per soldier per turn
+        DragsThisTurn = 0;         // FIELD CRAFT: DRAG Combat.FieldCraftLimit(u)/turn (1; FIELD DRILLS 2)
+        VaultsThisTurn = 0;        // FIELD CRAFT: VAULT Combat.FieldCraftLimit(u)/turn (1; FIELD DRILLS 2)
+        MovedThisTurn = false;     // W10 BIPOD: the planted-shooter aim bonus re-arms each turn
         FiredThisTurn = false;     // TEMPO: one offensive shot per turn (reset each turn)
         MovedAfterFire = false;    // HORIZON: exposed-by-fire flag is per-turn
         RunGun = false;            // ability stances don't carry between turns
@@ -863,7 +908,8 @@ public static class SpecDef
 public static class WeaponModDef
 {
     public static readonly WeaponMod[] All =
-        { WeaponMod.Scope, WeaponMod.ExtendedMag, WeaponMod.HollowPoint, WeaponMod.Stabilizer };
+        { WeaponMod.Scope, WeaponMod.ExtendedMag, WeaponMod.HollowPoint, WeaponMod.Stabilizer,
+          WeaponMod.Bipod, WeaponMod.Suppressor };   // W10: positional + stealth builds (rule mods)
 
     // effect magnitudes (kept here so Weapon.ApplyMods + the shop description read one source)
     public const int ScopeAim = 12;         // SCOPE: +aim, and flattens long-range falloff (Weapon.Scoped)
@@ -872,11 +918,17 @@ public static class WeaponModDef
     public const int HollowDmg = 1;         // ...and +1 to min & max damage
     public const int StabilizerAim = 6;     // STABILIZER: +aim...
     public const int StabilizerRange = 2;   // ...and +2 tiles of effective range
+    // W10 BIPOD: +aim while the shooter hasn't moved this turn (one Combat.ComputeOdds read off
+    // Unit.MovedThisTurn). Deliberate anti-synergy with EXPOSED BY FIRE: planting to shoot leaves
+    // you easier to hit until you move — the bipod pays you to accept that exposure.
+    public const int BipodAim = 10;
 
     public const int ScopeCost = 14;
     public const int MagCost = 10;
     public const int HollowCost = 14;
     public const int StabilizerCost = 12;
+    public const int BipodCost = 10;
+    public const int SuppressorCost = 12;
 
     public static int Cost(WeaponMod m) => m switch
     {
@@ -884,6 +936,8 @@ public static class WeaponModDef
         WeaponMod.ExtendedMag => MagCost,
         WeaponMod.HollowPoint => HollowCost,
         WeaponMod.Stabilizer => StabilizerCost,
+        WeaponMod.Bipod => BipodCost,
+        WeaponMod.Suppressor => SuppressorCost,
         _ => 99,
     };
 
@@ -893,6 +947,8 @@ public static class WeaponModDef
         WeaponMod.ExtendedMag => "EXTENDED MAG",
         WeaponMod.HollowPoint => "HOLLOW POINT",
         WeaponMod.Stabilizer => "STABILIZER",
+        WeaponMod.Bipod => "BIPOD",
+        WeaponMod.Suppressor => "SUPPRESSOR",
         _ => "MOD",
     };
 
@@ -903,6 +959,8 @@ public static class WeaponModDef
         WeaponMod.ExtendedMag => "MAG",
         WeaponMod.HollowPoint => "HP",
         WeaponMod.Stabilizer => "STB",
+        WeaponMod.Bipod => "BPD",
+        WeaponMod.Suppressor => "SUP",
         _ => "?",
     };
 
@@ -912,6 +970,8 @@ public static class WeaponModDef
         WeaponMod.ExtendedMag => $"+{MagClip} clip (fewer reloads)",
         WeaponMod.HollowPoint => $"+{HollowCrit} crit, +{HollowDmg} damage",
         WeaponMod.Stabilizer => $"+{StabilizerAim} aim, +{StabilizerRange} range",
+        WeaponMod.Bipod => $"+{BipodAim} aim while this soldier hasn't moved this turn",
+        WeaponMod.Suppressor => "Ambush shots wake only the target's pod, not every pod in sight",
         _ => "",
     };
 }

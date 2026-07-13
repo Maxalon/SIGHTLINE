@@ -1289,3 +1289,216 @@ h0 70% / h2 75% / h4 70% / h6 50% / h8 10%** — a real descending ladder ending
   re-measured the exact working tree as the deciding batch, ran the verify suite, and shipped. Lesson:
   a delegated agent's liveness is checked by ARTIFACT MTIMES + process table, not by the absence of a
   completion notification.
+
+## PROGRAM SIGNAL — the game learns to talk: seams, reads, teaching, a climax with a face, and a compass that can prove it (2026-07)
+
+Fully-autonomous dev-team session: orchestrator + a six-lens research fan-out (visual-UX / design gaps /
+code health / balance / content / onboarding) → PM synthesis → **two-verifier adversarial sharpening** →
+a 12-wave plan; every wave dev'd in an isolated worktree, adversarially reviewed, and merge-gated on
+self-tests + autoplay + Release 0/0. Branch `claude/game-dev-orchestration-1629th`, baseline `c624010`
+(the APEX follow-up, PR #73). Landed in **two milestones**: m1 = W1/W2/W3/W11 (PR #74, merge `8c7368f`);
+m2 = W4/W5/W6/W8/W9/W10/W12 + the docs commit (`3478589`) — **this merge**. The authoring session died
+between its docs commit and this write-up; the entry was reconstructed at landing from ROADMAP + the
+commit bodies, and the reconstruction caught a docs over-claim (W7 — see below and process learnings).
+
+## Waves (every commit build 0/0 + self-tested; every wave independently reviewed)
+- **W1 — mode-seam integrity** (`5458b45`, core `bd374a0`; review follow-up `791dc5c`). No mode can
+  destroy another mode's state: the end card gains MAIN MENU (Esc or click, with a save-overwrite
+  warning on NEW RUN when a campaign checkpoint exists), the run-opening draft gains BACK, abandon
+  routes per mode (campaign stays checkpoint-preserving with no LossStreak/salvage; skirmish/daily/
+  endless end true — and the pause button is mode-true: END STAND / ABANDON FIGHT / ABANDON RUN),
+  `ResetModeState()` guards all five mode entries, the daily env seed is NoPersist-gated (cross-process
+  seed-leak fingerprints proven to diverge), and mid-stand LAST STAND boon picks actually republish to
+  combat (they were dead; structurally-inert GHOST/RAPID DEPLOY filtered from endless offers).
+  MODETEST/SAVETEST/HORDETEST new legs, revert-probes bite.
+- **W2 — compass rebuild** (`b25a8a2`, core `ef32c46` + `c03fe67`; review fixes `e4c5c51`). The
+  flywheel can finally resolve its own target band: greedy and sloppy legs play the same CRN-paired
+  worlds (per-slot reseed; `SIGHTLINE_PAIRTEST` is a permanent A/A identity leg), the sloppy policy
+  makes bounded POSITIONAL mistakes on an isolated RNG stream (~15% mediocre tile, ~10% one-tile
+  overextend, ~10% skip the retreat) — the dominant human skill axis, not just worse aim; objective
+  pins hold for every mission of a run; the report gains ACTION MIX across ~26 verbs, win-rate BY
+  PERK / BY PURCHASE / BY ARENA + the procedural-fallback rate, and DoT attribution drops unattributed
+  '?' deaths 11% → 0%. AutoShop went value-biased with the ARMORY leg rolled BEFORE the spend loop
+  (post-loop it fired once in 20 runs — the budget was always gone). **New standing baselines: h0
+  80/70 paired gap +10.0, h4 50/45 +5.0, pooled +7.5 (target +7..+15).** First leads: EXC perk 20%
+  at h4, arena 23 weakest. Review SHIP-WITH-NOTES, all fixed (strict OBJ pin parse, SHOVE/VAULT
+  counted, per-mission DoT-label reset, (Slot,Heat) pair key).
+- **W3 — board reads** (`c36b5d9`, core `6b2a493`; review follow-up `906e22e`). Renderer-only:
+  plateau tops derive from the biome's floor base lifted in VALUE only — high ground inherits its
+  biome's hue instead of the universal khaki (**0/8 → 5-6/8 biomes >30 apart in a channel**, pinned
+  PLAZA probe); the focused-overwatch cone reads at a glance (wash 0.06-0.11 → 0.14-0.21, 2px rays,
+  direction chevron at the figure); on-unit status codes grew to 13px pills drawn in a LATE pass so a
+  body can never hide them; TURRET/BRUISER/SCOUT get shape-coded rings (square/hex/dashed — color
+  stays team-only, CB-safe); the EVAC label anchors to a real member tile of the zone's top row,
+  clear of the translucent top bar.
+- **W4 — Rescue repair** (`eef25b4`, components `b51d608`/`5eb9eb3`/`29891a0`/`87e09da`). The caged
+  captive can no longer die into an unwinnable-unlosable state: EnvDamage/TickHazards carry cage
+  guards (closing the DoT/shove funnel the four shot/blast guards missed), CheckEnd/CheckSkirmish
+  convert any regression into an honest CAPTIVE LOST, and the cage-ring clear scrubs Grid.Barrel.
+  Freed-state Rescue then inherits Escort's whole de-drag kit — the forward beacon behind the FULL
+  far-third + cold-LZ gate and the real-anims leash; SmartRescue's freed phase delegates wholesale to
+  SmartEscort (the old captive self-race fought the leash in a per-turn tug-of-war). **Measured
+  (whole-run pin, paired): 9.0t/67% → 6.07t/98.3% per-mission at h0; dip check 77.5% in band.**
+  RESCUETEST +2 revert-probed asserts; review verdict SHIP.
+- **W5 — boss identity & climax bite** (`06b65c2`, core `76bcccd`, measured tune `a0de10b`; review
+  fixes `123f765`). Runs stop climaxing in the identical fight: capability flags (HasShieldArc/
+  HasSiege/RagesTwice, defaulting to mirror Cls so rank-and-file are byte-identical) let bosses carry
+  signature mechanics; faction mid-bosses (Legion BREAKER two-beat rage, Syndicate BULWARK arc,
+  Wardens WARDEN siege); three finale kits — Legion SIEGELORD + LANCER escort, Syndicate SPYMASTER +
+  SCREENER/STRIKER cell, Wardens WARLORD — chosen by an **avalanche hash of MapSeed** after a raw
+  rng draw collapsed to 16/4/0 kits over 20 seeds under CRN pairing. Tuned by dose-response: +2
+  bodies inverted the policy ordering (greedy 45 vs sloppy 75-80), +0 restored the formality (m6
+  100%); +1 shipped. The first-cut Legion kit measured 37% m6-conditional → reshipped with a
+  boss-only cluster gate (SPREAD OUT is the counter-verb); SPYMASTER 14+n → 12+n (73% → 82%).
+  **Measured: m6 conditional 96% → 82% pooled (kits 89/82/85, weakest cell 73%, n=144).** The h0
+  completion dip −10 vs the −5 budget was REPORTED and ADJUDICATED-ACCEPTED (dose-response proved
+  budget and band jointly unsatisfiable; W6 inherits the heat-gating lever). Review SHIP-WITH-NOTES,
+  all fixed (frenzy two-beat else-if, boss-arc COMBATTEST pin, screenshots untracked).
+- **W6 — heat ladder tooth** (`5243d54`, components `a099edd` + `d711780`). The stale reference
+  table (and the phantom h2=63% baseline) retired: a **fresh paired baseline on the post-W5 tree
+  read 62.5/55/35/22.5/7.5** across h0-h8 — the finale was eating ~1/5 of low-heat runs and h8
+  breached its ≥10% hard floor. Three measured moves: rung-4 ELITE CADRE trades its stat row for
+  AiTier=1 (the mid-ladder coordination tooth at zero completion cost; AiSquadSelfTest re-pinned
+  same-commit); TighterContact measured for the first time (+7.5pts at h4 — experiment reverted,
+  lever documented); the W5 finale body heat-gated to Ai.Tier>=1 (heat 4+) at the one sanctioned m6
+  site. **Final ladder 80/70/50/32.5/17.5 vs goal 80/70/60/40/20 (±8): every rung in band except h4
+  at 2pts under (inside noise), no policy inversion, paired gaps increasingly punish sloppy play up
+  the ladder.** Reviewer static pass clean + orchestrator direction-check 75% at h0.
+- **W7 — exposure plumbing: NOT SHIPPED.** The docs commit (`3478589`) claimed it closed in
+  ROADMAP/FEATURES (column-constrained objective assignment, per-run no-repeat arena deck,
+  biome-true arena hints, SIGHTLINE_EXPOSURETEST), but landing verification found no W7 commit in
+  the program range, no EXPOSURETEST hook in src/, and Run.CardForNode still on the plain
+  `ObjectiveFor(n + node.Row)` rotation. A docs over-claim, caught at landing; the spec is carried
+  forward ready-to-dev (see Open / next).
+- **W8 — morale visible & contested** (`537fcef`, core `d6b7a97`, board reads `311664f` + `611561a`;
+  review fixes `eb500c0`). The flagship comeback lever becomes a plan instead of a surprise: pods one
+  kill from breaking wear an amber WVR crack tag (a truthful superset incl. rallied-below-threshold
+  pods; HELD BY BANNER when anchored, with the tooltip pointing at the counter), and the enemy
+  finally contests both the rout and your objective progress — WARBRINGER (Legion 6% m3+, diamond
+  role ring extending W3's shape set, Chebyshev-4 aura: in-aura pods cannot rout and rally twice as
+  fast; capped 1/mission via the BOMBARD-style demote) and CUSTODIAN (Wardens 8% / Syndicate 5% m3+,
+  padlock; re-locks a hack / re-arms a blown charge one step per adjacent turn, banner-telegraphed).
+  `611561a` fixed DrawPoly 4-gon rotation (0° IS the diamond — 45° rendered the TURRET square).
+  Review fixes closed the routed-specialist holes for CUSTODIAN **and** the pre-existing MEDIC/
+  BOMBARD variants — broken specialists now flee like everyone. **Measured: h0 paired delta +5.0
+  (in the ±5 budget), Hack 3.0→3.0t, Sabotage 3.03→3.0t (no objective drag), both archetypes
+  spawn.** MORALETEST +5 revert-probed assert families; review SHIP-WITH-NOTES, all fixed.
+- **W9 — salvage becomes a standing economy** (`5e98863`, core `5e18d4c`; review follow-up
+  `9122f2f`). The meta stops dead-ending after ~3 wins — and the APEX veteran-pricing thread closes:
+  **recalling veterans costs 10+8×Rank salvage**, charged once, atomically, inside ConfirmDraft
+  (picks/BACK/re-roll charge-free by construction; unaffordable DEPLOY refuses without seating).
+  Repeatable sinks — draft-pool re-roll (10), scar REHAB with a true undo (30), shop-slate re-roll
+  (5) — settle through a **pending ledger** committed beside the mission-start checkpoint, so
+  quit-at-barracks rolls back the goods AND the money (the review's cross-store atomicity find: the
+  old immediate write burned salvage for goods the reload restored). Three horizontal MetaUnlocks
+  appended enum-END (CROSS-TRAINING / QUARTERMASTER / STANDING RESERVE); heat multiplies the win
+  bounty ((25+6m)·(10+h)/10 — h0 exactly unchanged); daily wins pay 10+heat once per stamp with
+  pay+mark in ONE atomic meta write, a streak counter, and two achievements. Also fixed (routed from
+  W1): METATEST silently overwriting a real player save.json (sentinel-proven). Review
+  SHIP-WITH-NOTES; both notes fixed with revert-probed asserts.
+- **W10 — pool expansion** (`1545241`, core `15e4aef`, verification `cd5ec03`; review follow-up
+  `f8c884c`). Run N+3 stops feeling like run N: six verb boons appended enum-END, each hooking a
+  real verb — SHOCK DOCTRINE (braced interrupts deal full damage), **TERROR (redesigned in review:
+  the specced 2/3 rout threshold was a functional no-op at the game's size-2 pods, where
+  half-strength already routs the survivor on the first kill; now routed enemies stay broken +2
+  turns, ordinal unchanged, MORALETEST pins base 2 / TERROR 4)**, FIELD DRILLS (DRAG+VAULT
+  twice/turn), PYROMANIACS (own fire +2 turns, squad burn-immune), FIELD STORES (2× utility charges;
+  renamed from the spec's QUARTERMASTER to dodge W9's unlock), RECLAIMER (focused-cone overwatch
+  kills refund the reaction — ammo still spent, hard-bounded). Two mods: BIPOD (+10 aim unmoved;
+  deliberate anti-synergy with EXPOSED BY FIRE) and SUPPRESSOR (a suppressed shot wakes only the
+  target's pod — all 16 BreakConcealment sites audited, the stealth-sniping loop provably closed,
+  CONCEALTEST legs). Three secondaries: GHOST / DEMOLITION / BOUNTY. The INTEL CACHE plants a gold
+  expiring diamond mid-field (+8-10 intel, expires after 6 player turns; follow-up: never spawns
+  under a possibly-dormant hostile). All three enum tails pure appends with old-tail ordinal pins
+  (revert-probed). **Flywheel: all 6 boons reach n≥8 exposures at/above baseline, both mods bought,
+  204 cache pickups.** Review SHIP-WITH-NOTES; all notes fixed.
+- **W11 — teach it where it's played** (`d3cb953`, components `9d731b8`/`11a0163`/`f798d22`,
+  refinements `848d7a3`; review fixes `67a9c9c`). A new player can learn every rule without leaving
+  the mission: action-bar help wraps into a ~400px card (the ~270-char BEACON line measured ~1600px
+  on a 1280px screen — mostly off-screen); hovering an enemy NAMES it with its bestiary clause; the
+  codex opens on a 12-entry FIELD CRAFT rules tab whose **every number is verified against the
+  combat code** — the review caught a HIGH false claim (hunkering in the open "shields nothing";
+  Combat.cs's −25 aim and crit=0 are unconditional) and fixed it to the honest rule; losses name the
+  killer class with a counterplay tip; first sightings banner NEW CONTACT; objective/boon chips grew
+  hover cards; occluded roster chips collapse to a 20px edge rail; the action bar fades per-BUTTON
+  occlusion; and the tutorial can no longer re-offer itself forever to reaction-averse players
+  (turn-count fallbacks on the MOVE and OVERWATCH lessons). CODEXTEST extended.
+- **W12 — strategic-layer facelift** (`334ed6e`, staging `0a2b70d`, core `15ab81b`; review follow-up
+  `0c72c1f`). The meta screens stop reading as a spreadsheet next to the board's art: the campaign
+  map SIZES TO FIT the panel's real leftover space (150-250px region, node radius scaling 10→12px
+  base +3 boss, objective labels on reachable nodes, a shape+color legend — proven to fit 800px at
+  the 6-roster/5-report/KIA worst case); Renderer.DrawCodexGlyph stamps class silhouettes into draft
+  cards / barracks rows / roster chips / promotion headers (via a cached stub — no per-frame
+  allocation); the intro gets a real hierarchy (two filled Friend primaries, Foe-red reserved for
+  LAST STAND, an equal-width ghost grid with hover captions); the WAR ROOM gains per-achievement
+  progress bars + a NEXT UNLOCK preview card wired to W9's economy; promotion cards show
+  soldier-specific before→after deltas — the review caught LOCK-ON teaching "vs exposed" when the
+  effect is flanked-only (fixed, plus four dead-perk phantom arms deleted, so a re-offer can't
+  inherit phantom numbers); a TRUE first run pre-selects a RECOMMENDED squad+boon (gated on an empty
+  veteran reserve too). Review SHIP-WITH-NOTES; all notes fixed.
+
+## Measured (flywheel; CRN-paired policy legs from W2 onward)
+Final ladder (post-W6, paired): **h0 80 / h2 70 / h4 50 / h6 32.5 / h8 17.5 vs goal 80/70/60/40/20
+(±8)** — every rung in band except h4 at 2pts under (inside noise), h8's ≥10% hard floor restored,
+no policy inversion, paired gaps widening up the ladder.
+| metric | pre-SIGNAL | post-SIGNAL |
+|---|---|---|
+| heat ladder h0-h8 | fresh post-W5 paired baseline 62.5/55/35/22.5/7.5 (stale APEX table + phantom h2=63% retired) | 80/70/50/32.5/17.5 vs goal 80/70/60/40/20 ±8 |
+| Rescue (h0, whole-run pin) | 9.0t at 67% | 6.07t at 98.3% per-mission; dip check 77.5% in band |
+| m6 finale (conditional) | 96% — a formality | 82% pooled (kits 89/82/85, weakest cell 73%, n=144) |
+| policy gap | ~0 aggregate, noisy at N=20 pins (APEX flag) | paired: h0 +10.0 / h4 +5.0 / pooled +7.5 — in the +7..+15 target, sloppy punished up the ladder |
+| unattributed deaths | ~11% ('?' bucket) | 0% (BURN/BLEED/STRIKE/BARREL attributed) |
+| plateau biome separation | 0/8 biomes distinct | 5-6/8 biomes >30 apart in a channel |
+| W8 morale wave cost | — | h0 delta +5.0 (in ±5); Hack 3.0→3.0t, Sabotage 3.03→3.0t |
+| veteran recall | free (APEX: measured +10pt floor, unpriced) | 10+8×Rank salvage, atomic in ConfirmDraft |
+| new-content exposure | — | 6/6 boons n≥8 at/above baseline; both mods bought; 204 cache pickups |
+
+## Process learnings (SIGNAL)
+1. **A milestone is not done until merged — and mid-flight state belongs in DEVLOG notes BEFORE the
+   final docs commit.** The session died between the docs commit (`3478589`) and the DEVLOG write-up
+   + m2 merge; main sat at m1 for a week while the finished m2 waves lived only on the branch. The
+   next orchestrator recovered the landing from ROADMAP + the commit bodies — which worked ONLY
+   because every wave commit carried its measured numbers and review verdicts in the body. Write the
+   DEVLOG (or at least the mid-flight notes) first, docs-commit second, merge third.
+2. **Closed-item claims must be verified against the tree before the docs commit.** The program's
+   final docs commit claimed W7 (exposure plumbing) closed in ROADMAP and FEATURES, but the wave was
+   never dev'd — no commit, no `SIGHTLINE_EXPOSURETEST` hook, no code. The landing orchestrator
+   caught it by grepping for the claimed test hook; "hook exists + commits exist" is now the
+   checklist for every closed checkbox.
+3. **Verify a spec against the game's real distributions, not its abstractions.** W10's TERROR as
+   specced (rout at 2/3 strength) was a functional no-op: every real pod spawns size 2, where the
+   existing half-strength rule already routs the survivor on the first kill. The review caught it;
+   the orchestrator adjudicated a redesign (rout-duration +2, persisted ordinal unchanged) instead
+   of shipping a dead boon (`f8c884c`).
+4. **A fresh paired baseline retires the stale table before any tuning.** W6 re-measured the
+   post-W5 tree (62.5/55/35/22.5/7.5) rather than tuning against APEX-era numbers — and the
+   "corrected h2=63% baseline" APEX had accepted turned out phantom on the current tree. Never tune
+   against another program's table (`5243d54`).
+5. **CRN pairing is invasive: derived choices must hash, not draw.** W5's finale-kit pick via a raw
+   `rng.Next` collapsed to 16/4/0 kits over 20 seeds under the flywheel's correlated seed pairs —
+   replaced with an avalanche hash of MapSeed, zero generator draws taken (`a0de10b`). W2's
+   PAIRTEST A/A identity leg is the standing guard.
+6. **Report the breach with a dose-response, then adjudicate — and hand the lever forward.** W5's
+   h0 dip (−10 vs the −5 budget) shipped ACCEPTED because dose-response proved budget and band
+   jointly unsatisfiable at that wave — and the heat-gating lever was explicitly bequeathed to W6,
+   which used it to put the finale body behind heat 4+ at zero low-heat cost (`06b65c2`, `5243d54`).
+
+## Open / next
+- **W7 exposure plumbing — ready-to-dev** (the docs over-claim, spec intact): column-constrained
+  objective assignment (every path: ≥1 Eliminate, ≥1 Defend-or-Rescue, ≤1 Escort), a per-run
+  no-repeat arena deck, biome-true arena hints, and a `SIGHTLINE_EXPOSURETEST` 200-seed histogram.
+  The ROADMAP/FEATURES over-claims were corrected at landing (`417e9d3`).
+- **Chase W2's first leads:** EXC perk at 20% win-rate at h4 and arena 23 weakest are now measurable
+  (BY PERK / BY ARENA tables + procedural-fallback rate) but untuned.
+- **h4 sits 2pts under its goal band** (50 vs 60±8 — inside noise); TighterContact is the
+  documented, measured (+7.5pts at h4) and deliberately reverted lever if a future program wants
+  the rung lifted. Weakest finale cell is 73% — watch per-kit drift in full-ladder batches.
+- **Two cosmetic Desc strings:** LOCK-ON's PerkDef.Desc in Unit.cs still says "vs exposed targets"
+  (the HUD/delta line already say flanked — flagged out-of-scope in `0c72c1f`), and NO QUARTER's
+  "+1 dmg" on the skirmish heat picker where m1-grace zeroes it (carried from APEX).
+- **On-device audio tuning and difficulty FEEL** (endless + the new heat ladder, vs the measured
+  curves) still need the human's ears/hands — unchanged from prior programs.
+- Closed this program from APEX's list: veteran pricing (W9's priced recall), the policy-gap
+  measurement noise (W2's CRN pairing + positional sloppiness — pooled +7.5, in target), and the
+  h0-h4 flatness (W6's re-ladder: 80/70/50). Endless depth median was already in band (6) via the
+  pre-SIGNAL APEX follow-up.

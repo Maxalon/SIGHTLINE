@@ -19,6 +19,7 @@ public class EnemyPlan
     public Unit ShoveTarget;      // rusher/Legion: shove this soldier OUT of cover to expose it (Wave 5)
     public int ItemTx, ItemTy;    // item aim tile
     public (int x, int y)? SiegeCharge; // BOMBARD: charge a telegraphed strike centered here (else null)
+    public (int x, int y)? RelockTile;  // CUSTODIAN (W8): re-lock/re-arm the objective at this site (else null)
 }
 
 /// Tactical decision-making for a single enemy. Greedy, but reads as competent:
@@ -109,7 +110,12 @@ public static class Ai
         // MEDIC: prefer patching up the most-wounded active ally (incl. itself) over
         // fighting. Move to a covered tile within heal range + LoS of the patient. If
         // no patient or no reachable heal spot, fall through to normal combat AI.
-        if (e.Cls == "MEDIC")
+        // W8 review: gated on Routed == 0 — the specialist branches precede the routed-flee
+        // logic below, so without the gate a BROKEN medic kept calmly working its job,
+        // contradicting the "routed units flee regardless of archetype" morale invariant.
+        // (Same gate on the CUSTODIAN and BOMBARD branches.) A routed specialist falls
+        // through to the generic loop, where retreatMode makes it flee like everyone else.
+        if (e.Cls == "MEDIC" && e.Routed == 0)
         {
             Unit patient = null; int worst = 0;
             foreach (var a in g.AliveEnemies())
@@ -142,6 +148,74 @@ public static class Ai
             }
         }
 
+        // CUSTODIAN (W8): the objective KEEPER — a dedicated archetype path on the MEDIC pattern.
+        // When the player has objective progress to undo (a partially-hacked terminal / a blown
+        // sabotage charge), it walks to the site and re-locks/re-arms ONE step per adjacent turn
+        // (executed by Game.DoRelock, telegraphed with a banner line). Priorities:
+        //   (1) already adjacent -> spend the turn working the site;
+        //   (2) a reachable site-adjacent tile with an action to spare -> move there + work it;
+        //   (3) too far -> dash toward the site;
+        //   (4) nothing to undo (or boxed out) -> fall through to the normal combat loop, so the
+        //       turn always spends an action (same no-dead-turn/no-TIMEOUT safety as MEDIC/MORTAR).
+        // W8 review: Routed == 0 gate — a BROKEN keeper flees like everyone else instead of
+        // working the objective (see the MEDIC branch note; the comeback beat must hold here most
+        // of all, since this unit contests the objective itself).
+        if (e.Cls == "CUSTODIAN" && e.Routed == 0)
+        {
+            (int x, int y)? site = null;
+            if (g.HasTerminal && g.HackProgress > 0 && g.HackProgress < Game.HackRequired)
+                site = g.Terminal;
+            else if (g.HasSabotage)
+            {
+                float bd = float.MaxValue;                        // nearest BLOWN charge (re-armable)
+                for (int i = 0; i < g.SabotageSites.Count; i++)
+                    if (g.SabotageBlown.Contains(i))
+                    {
+                        float dd = Util.ChebyDist(e.X, e.Y, g.SabotageSites[i].x, g.SabotageSites[i].y);
+                        if (dd < bd) { bd = dd; site = g.SabotageSites[i]; }
+                    }
+            }
+            if (site != null)
+            {
+                var (sx, sy) = site.Value;
+                if (Util.ChebyDist(e.X, e.Y, sx, sy) <= 1)
+                    return new EnemyPlan { RelockTile = site };   // at the site — work it
+                // best reachable tile ADJACENT to the site, keeping an action to work it
+                (int x, int y) rt = (-1, -1); int rtCost = 0; float rtScore = float.NegativeInfinity;
+                foreach (var (tx, ty, c) in reach)
+                {
+                    int acts = c <= e.MoveBudget ? (c == 0 ? 0 : 1) : 2;
+                    if (acts >= 2) continue;                      // keep an action to re-lock
+                    if (Util.ChebyDist(tx, ty, sx, sy) > 1) continue;
+                    var cov = g.Grid.GetCover(tx, ty, nearest.X, nearest.Y);
+                    float s = cov.Level * 12 - acts * 4 + Util.RandRange(0f, 2f);
+                    if (s > rtScore) { rtScore = s; rt = (tx, ty); rtCost = c; }
+                }
+                if (rt.x >= 0)
+                {
+                    var rp = new EnemyPlan { RelockTile = site };
+                    rp.Path = g.Grid.ReconstructPath(cameFrom, e.X, e.Y, rt.x, rt.y);
+                    rp.MoveActions = rtCost <= e.MoveBudget ? 1 : 2;
+                    return rp;
+                }
+                // adjacency out of reach this turn — DASH toward the site (closest reachable tile)
+                (int x, int y) dt = (-1, -1); int dtCost = 0; float dtScore = float.NegativeInfinity;
+                foreach (var (tx, ty, c) in reach)
+                {
+                    float s = -Util.ChebyDist(tx, ty, sx, sy) * 3f + Util.RandRange(0f, 1.5f);
+                    if (s > dtScore) { dtScore = s; dt = (tx, ty); dtCost = c; }
+                }
+                if (dt.x >= 0 && dt != (e.X, e.Y))
+                {
+                    var rp = new EnemyPlan();
+                    rp.Path = g.Grid.ReconstructPath(cameFrom, e.X, e.Y, dt.x, dt.y);
+                    rp.MoveActions = dtCost <= e.MoveBudget ? 1 : 2;
+                    return rp;
+                }
+                // else: boxed in — fall through to the generic loop (shoot/hunker; never a dead turn)
+            }
+        }
+
         // BOMBARD (SIEGE artillery): a dedicated archetype path, like MEDIC. It does NOT fire — on its
         // turn it CHARGES a telegraphed 3x3 strike (resolved next enemy turn by Game.TickSiegeStrikes).
         //   (1) If it's ALREADY charging (ChargeTurns>0): a shell is in flight; don't stack a second
@@ -151,15 +225,28 @@ public static class Ai
         //       MOVEMENT, not just an LoS-break). Charge from the CURRENT tile (v1: stand and shell).
         //   (3) If nothing's worth shelling, fall through to the normal loop (move/shoot SMG/hunker) so
         //       the turn always spends an action -> NO dead turn / NO TIMEOUT (same safety as MORTAR).
-        if (e.Cls == "BOMBARD" && e.ChargeTurns == 0)
+        // (SIGNAL W5: keyed on the HasSiege capability flag — defaults to Cls=="BOMBARD", so
+        // rank-and-file artillery is unchanged; a siege-armed BOSS elite runs this path too and
+        // falls through to the full ELITE combat loop when nothing is worth shelling.)
+        // W8 review: Routed == 0 gate — a BROKEN artillery piece does not calmly charge a strike;
+        // it falls through and flees with the rest of its pod (see the MEDIC branch note).
+        if (e.HasSiege && e.ChargeTurns == 0 && e.Routed == 0)
         {
             var (bx, by, hits) = BestSiege(g, e);
-            if (hits >= 1)
+            // A siege-armed BOSS (an ELITE carrying the flag) only shells a genuine CLUSTER (2+
+            // soldiers): unlike the 7-HP rank-and-file BOMBARD — whose fairness is that it dies to
+            // one focused turn — a 20-HP guarded boss raining a no-LoS shell EVERY turn taxed
+            // position relentlessly (measured: the first-cut Legion finale sank to a 37%
+            // conditional). The cluster gate makes SPREAD OUT the counter-verb, and on non-shelling
+            // turns the boss fights its real ELITE turn (move/Lmg/frag) instead of standing
+            // statically at the board edge. Rank-and-file keeps its hits>=1 gate exactly.
+            int need = e.Cls == "BOMBARD" ? 1 : 2;
+            if (hits >= need)
             {
                 var sp = new EnemyPlan { SiegeCharge = (bx, by) };   // no move, no shot — the charge is the action
                 return sp;
             }
-            // else: fall through to the generic combat loop (advance / fallback SMG shot / hunker).
+            // else: fall through to the generic combat loop (advance / fallback shot / hunker).
         }
 
         // COORDINATION 2 — SELF-PRESERVATION / FIGHTING RETREAT (decision):
@@ -361,7 +448,10 @@ public static class Ai
                 // Combined shot-quality delta: hit improvement weighted more than crit.
                 float qdelta = hitDelta * 0.5f + critDelta * 0.25f;
                 // Per-archetype multiplier: snipers/elites care most, berserkers/sappers least.
-                float elevMult = (e.Cls == "SNIPER" || e.Cls == "ELITE") ? 1.4f
+                // W5: a RagesTwice breaker charges like a berserker — it doesn't perch (checked
+                // first: it IS an ELITE, but the rush identity wins over the elite's vantage-seeking).
+                float elevMult = (e.RagesTwice)                          ? 0.3f
+                               : (e.Cls == "SNIPER" || e.Cls == "ELITE") ? 1.4f
                                : (e.Cls == "BERSERKER")                  ? 0.3f
                                : (e.Cls == "SAPPER")                     ? 0.2f
                                :                                            0.8f;   // grunt/scout/medic/shield
@@ -440,7 +530,8 @@ public static class Ai
             }
             else
             {
-                float advW = (e.Cls == "BERSERKER" || e.Cls == "ELITE") ? 3.4f
+                float advW = (e.RagesTwice) ? 3.6f                      // W5 BREAKER: the berserker rush temperament — presses like a hound
+                           : (e.Cls == "BERSERKER" || e.Cls == "ELITE") ? 3.4f
                            : (e.Cls == "HOUND") ? 3.6f                  // swarmer: hardest charger in the game (low HP, fast)
                            : (e.Cls == "STRIKER") ? 3.5f                // leaper: rushes hard THROUGH overwatch to end flanking
                            : (e.Cls == "DRONE") ? 3.0f                  // drone beelines (ignores cover anyway)

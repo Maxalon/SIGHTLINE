@@ -150,8 +150,47 @@ public partial class Game
             if (p2.FiredFromConcealment) fails.Add("proximityArmedAmbush");
         }
 
+        // ---- W10 SUPPRESSOR: a suppressed AMBUSH still breaks concealment, but the seen-pod wake
+        // loop narrows to the TARGET's own pod; an unsuppressed shot wakes every pod in sight.
+        // Both legs drive the REAL firing site (IssueShoot -> BreakConcealment threading), on a
+        // controlled two-pod scene: shooter at p, pod 90's body straight east (the shot target),
+        // pod 91's body also in clear sight. CheckPodActivation's sight rules are untouched.
+        void StageSuppressorScene(bool suppressed, out Unit shooter, out Unit tgtPod, out Unit bystanderPod)
+        {
+            StartMission(1);
+            shooter = Players.First(u => u.Alive && !u.IsVip);
+            var foes = Enemies.Where(x => x.Alive).Take(2).ToList();
+            tgtPod = foes[0]; bystanderPod = foes[1];
+            // clear a floor window around the firing lane so LoS/targeting is unconditional
+            for (int x = shooter.X; x <= shooter.X + 4 && x < Grid.W; x++)
+                for (int y = Math.Max(0, shooter.Y - 1); y <= Math.Min(Grid.H - 1, shooter.Y + 3); y++)
+                { Grid.Tiles[x, y] = TileType.Floor; Grid.Barrel[x, y] = false; }
+            tgtPod.PodId = 90; tgtPod.Alert = AlertLevel.Unaware;
+            tgtPod.X = Math.Min(Grid.W - 1, shooter.X + 3); tgtPod.Y = shooter.Y; tgtPod.SyncPos();
+            bystanderPod.PodId = 91; bystanderPod.Alert = AlertLevel.Unaware;
+            bystanderPod.X = Math.Min(Grid.W - 1, shooter.X + 3); bystanderPod.Y = Math.Min(Grid.H - 1, shooter.Y + 2); bystanderPod.SyncPos();
+            shooter.WeaponMods.Clear();
+            if (suppressed) shooter.InstallMod(WeaponMod.Suppressor);
+            shooter.Ammo = Math.Max(1, shooter.Ammo);
+            Selected = shooter;
+        }
+        // (a) SUPPRESSED: concealment breaks, the TARGET's pod wakes, the bystander pod stays dormant.
+        StageSuppressorScene(true, out var sup, out var supTgt, out var supBys);
+        if (!SquadConcealed) fails.Add("supSceneNotConcealed");
+        IssueShoot(supTgt);
+        if (SquadConcealed) fails.Add("suppressedShotDidNotBreak");     // still breaks NORMALLY
+        if (!supTgt.Active) fails.Add("suppressedTargetPodAsleep");     // the shot-at pod always wakes
+        if (supBys.Active) fails.Add("suppressedWokeBystanderPod");     // the narrow: no one else places it
+        sup.WeaponMods.Clear();                                          // leave no mod on the squad copy
+        // (b) UNSUPPRESSED control: the same shot wakes EVERY pod in sight (target + bystander).
+        StageSuppressorScene(false, out _, out var ctlTgt, out var ctlBys);
+        IssueShoot(ctlTgt);
+        if (SquadConcealed) fails.Add("controlShotDidNotBreak");
+        if (!ctlTgt.Active) fails.Add("controlTargetPodAsleep");
+        if (!ctlBys.Active) fails.Add("controlBystanderPodAsleep");     // full wake without the mod
+
         return fails.Count == 0
-            ? "CONCEALTEST: PASS (start concealed; pods gated; break arms+wakes; RevealRange breaks w/o bonus)"
+            ? "CONCEALTEST: PASS (start concealed; pods gated; break arms+wakes; RevealRange breaks w/o bonus; suppressor narrows the wake to the target pod, unsuppressed wakes all seen)"
             : "CONCEALTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
@@ -291,7 +330,7 @@ public partial class Game
         while (_anims.Count > 0) { var a = _anims[0]; a.OnStart(this); for (int i = 0; i < 200 && !a.Update(this, 0.05f); i++) { } if (_anims.Count > 0 && _anims[0] == a) _anims.RemoveAt(0); }
         // ally moved one tile WEST (toward the dragger): 7 -> 6
         if (!(ally.X == ax0 - 1 && ally.Y == 5)) fails.Add($"dragDidNotPullCloser({ally.X},{ally.Y})");
-        if (!dragger.DraggedThisTurn) fails.Add("dragDidNotSetFlag");
+        if (dragger.DragsThisTurn < 1) fails.Add("dragDidNotSetFlag");   // W10: bool -> per-turn counter
         // once-per-turn cap (the flag is now set by IssueDrag) — re-seat a fresh reach-2 ally
         ally.X = 7; ally.Y = 5; ally.SyncPos();
         if (CanDrag(dragger)) fails.Add("canDragTwiceInOneTurn");
@@ -322,7 +361,7 @@ public partial class Game
         if (!(v.X == 7 && v.Y == 5)) fails.Add($"vaultDidNotLand({v.X},{v.Y})");
         if (v.X == vx0) fails.Add("vaultDidNotMove");
         if (v.ActionsLeft != vact0 - 1) fails.Add("vaultDidNotSpendAction");
-        if (!v.VaultedThisTurn) fails.Add("vaultDidNotSetFlag");
+        if (v.VaultsThisTurn < 1) fails.Add("vaultDidNotSetFlag");   // W10: bool -> per-turn counter
         // once-per-turn cap (the flag is now set by IssueVault)
         if (CanVault(v)) fails.Add("canVaultTwiceInOneTurn");
 
@@ -615,8 +654,11 @@ public partial class Game
         // ---- W6b — COORDINATION TIER: data rows, damp identity/cap, tier-0 invariance,
         // tier-2 divergence, and the stale-tier lifecycle. ----
         {
-            // (a) data: the ladder's AiTier rungs (0 below EXPOSED; 1 at rungs 6-7; 2 at NO QUARTER).
-            if (Sightline.Heat.AiTier(0) != 0 || Sightline.Heat.AiTier(5) != 0) fails.Add("aiTierLowHeatNot0");
+            // (a) data: the ladder's AiTier rungs. W6 (SIGNAL) re-pin: tier 1 now arrives at
+            // ELITE CADRE (rung 4) — the mid-ladder qualitative tooth — not first at EXPOSED;
+            // rungs 4-7 hold tier 1 (Math.Max aggregation) and NO QUARTER stays the tier-2 apex.
+            if (Sightline.Heat.AiTier(0) != 0 || Sightline.Heat.AiTier(3) != 0) fails.Add("aiTierLowHeatNot0");
+            if (Sightline.Heat.AiTier(4) != 1 || Sightline.Heat.AiTier(5) != 1) fails.Add("aiTierEliteCadreNot1");
             if (Sightline.Heat.AiTier(6) != 1 || Sightline.Heat.AiTier(7) != 1) fails.Add("aiTierExposedNot1");
             if (Sightline.Heat.AiTier(8) != 2) fails.Add("aiTierNoQuarterNot2");
             // W6c data pin: +1 enemy damage is the rung-8 apex ONLY (0 through RELENTLESS, so
@@ -854,6 +896,10 @@ public partial class Game
         }
         _run.DebriefSurvivors();
         if (_run.Squad.Count > 0) _run.Squad[0].Wound = 2;   // show the WOUNDED dossier line
+        // W12: pin the offered pair (the roll is clock-seeded) so the shot is reproducible and
+        // exercises both delta-line shapes: LOCK-ON (conditional aim) + TANK (flat before>after).
+        if (_run.PendingPerks.Count > 0)
+        { _run.PendingPerks[0].A = Perk.LockOn; _run.PendingPerks[0].B = Perk.Tank; }
         Phase = Phase.Barracks;
     }
 
@@ -881,10 +927,29 @@ public partial class Game
 
     /// Harness hook (screenshot only): show the branching campaign map mid-run with a
     /// couple of columns already cleared, the shop/perks skipped.
+    /// W12 extremes staging (pair with SIGHTLINE_CAMPAIGN=1):
+    ///   SIGHTLINE_ROSTER=<n>  grows the squad to n soldiers (recruits, name-deduped) so the
+    ///                         barracks panel's WORST-CASE height (6 rows) can be screenshot;
+    ///   SIGHTLINE_REPORT=<n>  pads the debrief to n report lines (the 5-line display cap).
     public void DebugCampaignMap()
     {
         _run.JumpTo(3);                  // visit cols 0-2; current sits at mission 3
         _run.DebriefSurvivors();
+        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_ROSTER"), out int nRoster))
+        {
+            var taken = new HashSet<string>();
+            foreach (var u in _run.Squad) taken.Add(u.Name);
+            while (_run.Squad.Count < Math.Min(nRoster, 6))
+            {
+                var rec = Mission.MakeRecruit(taken);
+                taken.Add(rec.Name);
+                rec.Benched = _run.Deployed.Count >= _run.NextDeployCap;   // stay inside the deploy cap
+                _run.Squad.Add(rec);
+            }
+        }
+        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_REPORT"), out int nReport))
+            while (_run.Report.Count < nReport)
+                _run.Report.Add($"Field exercise {_run.Report.Count + 1} logged  (harness filler line)");
         _run.PendingPerks.Clear();       // skip promotions for the screenshot
         _run.PendingSpecs.Clear();
         _shopDone = true;                // skip requisition for the screenshot
@@ -1052,6 +1117,14 @@ public partial class Game
         _run.Report.Insert(0, $"Recovered 17 intel  (total {_run.Intel})");
         _shopDone = false;
         RefreshShopOffer();
+        // W10 (screenshot pin): guarantee the two NEW rule mods (BIPOD / SUPPRESSOR) are on the
+        // demo slate regardless of the seed-rotated pick, so the dossier shot can be verified.
+        // Demo-screen only (this hook fabricates intel/report already); live slates are untouched.
+        var offer = ShopOffer();
+        int bipodItem = ModBase + System.Array.IndexOf(WeaponModDef.All, WeaponMod.Bipod);
+        int supItem   = ModBase + System.Array.IndexOf(WeaponModDef.All, WeaponMod.Suppressor);
+        if (!offer.Contains(bipodItem)) offer.Add(bipodItem);
+        if (!offer.Contains(supItem))   offer.Add(supItem);
         Phase = Phase.Barracks;
     }
 
@@ -1286,10 +1359,14 @@ public partial class Game
     /// SIGHTLINE_RESCUETEST — APEX W2: the Rescue captive's cage is real. Asserts (1) the caged
     /// captive is ACTIONLESS at mission setup AND at the start-of-turn re-grant (it used to be fully
     /// player-controllable — an invulnerable unit that could walk itself to the squad and self-trigger
-    /// its rescue), (2) freeing it (TryFreeCaptive) restores actions + movement, (3) the abandoned-cage
-    /// soft-lock resolves: all soldiers dead while caged is an immediate CAPTIVE ABANDONED loss at
-    /// mission 1, a checkpoint reinforcement redeploy at mission 3+, and an EndSkirmish(false) loss in
-    /// SKIRMISH mode (which can roll Rescue). Tiny window (tile math). Returns a one-line report.
+    /// its rescue), (1c — SIGNAL W4) the caged captive is truly INVULNERABLE to the source-less paths:
+    /// TickHazards never ignites it and EnvDamage bounces (fire/shove could kill it into an
+    /// unwinnable-unlosable soft-lock), (2) freeing it (TryFreeCaptive) restores actions + movement,
+    /// (2b — SIGNAL W4) the freed captive is leash-owned (LeashVip's Rescue arm walks it; the caged
+    /// state never moves), (3) the abandoned-cage soft-lock resolves: all soldiers dead while caged is
+    /// an immediate CAPTIVE ABANDONED loss at mission 1, a checkpoint reinforcement redeploy at
+    /// mission 3+, and an EndSkirmish(false) loss in SKIRMISH mode (which can roll Rescue). Tiny
+    /// window (tile math). Returns a one-line report.
     public string RescueSelfTest()
     {
         NoPersist = true;
@@ -1307,6 +1384,22 @@ public partial class Game
         StartPlayerTurn();
         if (Vip.CanAct) fails.Add("cagedCanActAtTurnStart");
 
+        // (1c) W4 (SIGNAL) soft-lock: fire can NEVER cook the caged captive. TickHazards must not
+        // ignite it (Burning skip), and the source-less damage funnel (EnvDamage) must refuse to
+        // scratch it — a caged death has no reachable loss (CheckEnd's Rescue-loss test only sees a
+        // freed asset... belt-and-braces aside) and used to soft-lock the mission.
+        int cagedHp = Vip.Hp;
+        Grid.LightFire(Vip.X, Vip.Y, Grid.FireTurns);
+        TickHazards();
+        if (Vip.HasStatus(StatusKind.Burning)) fails.Add("cagedIgnitedByHazard");
+        Vip.AddStatus(StatusKind.Burning, 2);                  // force the status anyway: the DoT must still bounce
+        TickStatuses(Vip);
+        EnvDamage(Vip, 99, "BURN", Pal.RGBA(255, 140, 40));    // and the funnel itself refuses
+        if (Vip.Hp != cagedHp) fails.Add($"cagedBurnedHp={Vip.Hp}vs{cagedHp}");
+        if (!Vip.Alive) fails.Add("cagedCaptiveDied");
+        Vip.Statuses.Clear();
+        Grid.ClearHazards();
+
         // (2) freeing restores actions + movement (TryFreeCaptive -> Mobility 6 + Vip.BeginTurn)
         var sol = Players.First(p => p.Alive && !p.IsVip);
         bool seated = false;
@@ -1323,6 +1416,40 @@ public partial class Game
         if (CaptiveLocked) fails.Add("adjacentDidNotFree");
         if (!Vip.CanAct) fails.Add("freedStillActionless");
         if (Vip.Mobility <= 0) fails.Add($"freedNoMobility={Vip.Mobility}");
+
+        // (2b) W4 (SIGNAL) — the FREED captive is LEASH-OWNED: LeashVip's new Rescue arm walks it
+        // toward the squad via real MoveStepAnims (the Escort de-drag treatment), and the CAGED
+        // state NEVER moves (the cage holds until a soldier springs it — the leash must not drag
+        // the asset out of its own cage). Controlled all-floor scene (BEACONTEST's drain pattern);
+        // stage (3a) below rebuilds a real mission, so trashing the scene here is safe.
+        void Pump()
+        {
+            while (_anims.Count > 0)
+            {
+                var a = _anims[0]; a.OnStart(this);
+                for (int i = 0; i < 200 && !a.Update(this, 0.05f); i++) { }
+                if (_anims.Count > 0 && _anims[0] == a) _anims.RemoveAt(0);
+            }
+        }
+        Grid = new Grid();
+        Players = new System.Collections.Generic.List<Unit>();
+        Enemies = new System.Collections.Generic.List<Unit>();
+        Objective = Objective.Rescue;
+        Mode = GameMode.Campaign;
+        EvacZone.Clear();                               // no zone: the leash tags along to the soldier
+        var walker = new Unit { Name = "S", Cls = "ASSAULT", Team = Team.Player, X = 14, Y = 5,
+                                Hp = 8, MaxHp = 8, Aim = 65, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+        walker.Ammo = walker.Weapon.Clip; walker.SyncPos(); walker.BeginTurn();
+        Vip = Mission.MakeVip(1); Vip.Name = "CAPTIVE"; Vip.X = 3; Vip.Y = 5; Vip.SyncPos(); Vip.BeginTurn();
+        Players.Add(walker); Players.Add(Vip);
+        _anims.Clear();
+        CaptiveLocked = true;                           // still caged: the leash must HOLD it
+        LeashVip(); Pump();
+        if (!(Vip.X == 3 && Vip.Y == 5)) fails.Add("leashMovedCagedCaptive");
+        CaptiveLocked = false;                          // freed: the leash walks it toward the squad
+        int leash0 = Util.ChebyDist(Vip.X, Vip.Y, walker.X, walker.Y);
+        LeashVip(); Pump();
+        if (Util.ChebyDist(Vip.X, Vip.Y, walker.X, walker.Y) >= leash0) fails.Add("freedCaptiveNotLeashed");
 
         // (3a) campaign, mission 1: all soldiers dead while STILL caged -> immediate loss (the
         // checkpoint valve needs mission >= 3), with the distinct CAPTIVE ABANDONED cause.
@@ -1355,7 +1482,7 @@ public partial class Game
         if (Phase != Phase.Lose) fails.Add($"skirmishAbandonPhase={Phase}");
 
         return fails.Count == 0
-            ? "RESCUETEST: PASS (caged captive actionless at setup + turn start; freeing restores actions/movement; abandoned cage = m1 loss, m3 checkpoint redeploy, skirmish loss)"
+            ? "RESCUETEST: PASS (caged captive actionless at setup + turn start; fire/EnvDamage can't touch the cage; freeing restores actions/movement; freed captive leash-walks, caged never; abandoned cage = m1 loss, m3 checkpoint redeploy, skirmish loss)"
             : "RESCUETEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
@@ -1473,8 +1600,119 @@ public partial class Game
         e2.BeginTurn();
         if (e2.Routed != before - 1) fails.Add($"routDidNotDecay {before}->{e2.Routed}");
 
+        // ---- SIGNAL W8: BANNER anchor / accelerated rally / WAVERING telegraph / CUSTODIAN ----
+
+        // (5) a pod with a living WARBRINGER banner within Chebyshev BannerRange does NOT rout at
+        // half strength (Game.BreakPodMorale skips held members)...
+        var b1 = MkE("B1", 8, 8, 1); var b2 = MkE("B2", 9, 8, 1);
+        Enemies.Add(b1); Enemies.Add(b2); _podOrig[1] = 2;
+        var wb = new Unit { Name = "SIGNIFER", Cls = "WARBRINGER", Team = Team.Enemy, X = 11, Y = 8,
+                            Hp = 8, MaxHp = 8, Aim = 56, Mobility = 5, Weapon = Weapon.Make(WeaponKind.Rifle) };
+        wb.Ammo = wb.Weapon.Clip; wb.Alert = AlertLevel.Alert; wb.SyncPos(); wb.BeginTurn();
+        Enemies.Add(wb);
+        if (!wb.HasBanner) fails.Add("clsBannerFlagOff");           // capability defaults from Cls (W5 pattern)
+        b1.Hp = 0; KillUnit(b1);
+        if (b2.Routed != 0) fails.Add($"bannerDidNotHold={b2.Routed}");
+
+        // (5b) ...and the SAME break OUT of aura range still routs (the anchor is spatial, not global)
+        var c1 = MkE("C1", 2, 2, 2); var c2 = MkE("C2", 3, 2, 2);   // Cheby 8 from the banner
+        Enemies.Add(c1); Enemies.Add(c2); _podOrig[2] = 2;
+        c1.Hp = 0; KillUnit(c1);
+        if (c2.Routed != RoutDuration) fails.Add($"outOfAuraNotRouted={c2.Routed}");
+
+        // (6) a bannered rout rallies ONE TURN FASTER: the turn-boundary step (BeginEnemyUnitTurn)
+        // decrements once normally, twice inside the aura.
+        c2.Routed = RoutDuration;
+        BeginEnemyUnitTurn(c2);                                     // out of aura: normal pace
+        if (c2.Routed != RoutDuration - 1) fails.Add($"plainRallyPace={c2.Routed}");
+        c2.Routed = RoutDuration; c2.X = 10; c2.Y = 8; c2.SyncPos();  // step inside the aura
+        BeginEnemyUnitTurn(c2);
+        if (c2.Routed != RoutDuration - 2) fails.Add($"bannerRallyNotFaster={c2.Routed}");
+
+        // (7) WAVERING telegraph: pod 3 (orig 4, far from the banner) — not wavering at full
+        // strength; EXACTLY one kill from the threshold flips PodWavering on; the breaking kill
+        // routs the survivors and the tag drops (Routed>0 is excluded).
+        var w1 = MkE("W1", 2, 9, 3); var w2 = MkE("W2", 3, 9, 3);
+        var w3 = MkE("W3", 2, 10, 3); var w4 = MkE("W4", 3, 10, 3);
+        Enemies.Add(w1); Enemies.Add(w2); Enemies.Add(w3); Enemies.Add(w4); _podOrig[3] = 4;
+        if (PodWavering(w1)) fails.Add("waverAtFullStrength");
+        w4.Hp = 0; KillUnit(w4);                                    // 3/4 alive -> next kill breaks
+        if (!PodWavering(w1)) fails.Add("noWaverOneFromThreshold");
+        w3.Hp = 0; KillUnit(w3);                                    // 2 <= 4/2 -> the pod breaks
+        if (w1.Routed != RoutDuration) fails.Add($"waverPodDidNotBreak={w1.Routed}");
+        if (PodWavering(w1)) fails.Add("waverTagOnRoutedPod");
+
+        // (8) a banner-HELD pod at the waver point reads HELD, not WAVERING (the tag never lies:
+        // PodAtWaverPoint stays true for the tooltip's POD n/m line, PodWavering false for the tag)
+        var h1 = MkE("H1", 12, 8, 5); var h2 = MkE("H2", 12, 9, 5);
+        Enemies.Add(h1); Enemies.Add(h2); _podOrig[5] = 2;
+        if (!PodAtWaverPoint(h1)) fails.Add("heldPodNotAtWaverPoint");
+        if (PodWavering(h1)) fails.Add("heldPodShowsWavering");
+
+        // (9) CUSTODIAN: with a partially-hacked terminal, Ai.Plan returns a RelockTile plan for
+        // an adjacent keeper, and executing it decrements HackProgress; a blown sabotage charge
+        // re-arms the same way. Nothing left to undo -> CanRelock refuses (no below-zero lock).
+        Objective = Objective.Hack;
+        Terminal = (6, 5); HackProgress = 1;
+        var cu = new Unit { Name = "SEXTON", Cls = "CUSTODIAN", Team = Team.Enemy, X = 7, Y = 5,
+                            Hp = 5, MaxHp = 5, Aim = 48, Mobility = 6, Weapon = Weapon.Make(WeaponKind.Smg) };
+        cu.Ammo = cu.Weapon.Clip; cu.Alert = AlertLevel.Alert; cu.SyncPos(); cu.BeginTurn();
+        Enemies.Add(cu);
+        _aiUnits = AliveEnemies().Where(x => x.Active).ToList();
+        PlanEnemySquad();
+        var cplan = Ai.Plan(this, cu);
+        if (cplan.RelockTile == null) fails.Add("custodianNoRelockPlan");
+        if (!CanRelock(cu, Terminal)) fails.Add("custodianCannotRelock");
+        DoRelock(cu, Terminal);
+        if (HackProgress != 0) fails.Add($"relockNoDecrement={HackProgress}");
+        if (CanRelock(cu, Terminal)) fails.Add("relockBelowZero");
+
+        Objective = Objective.Sabotage;
+        SabotageSites = new System.Collections.Generic.List<(int x, int y)> { (7, 6), (12, 2) };
+        SabotageBlown.Clear(); SabotageBlown.Add(0);
+        var splan = Ai.Plan(this, cu);
+        if (splan.RelockTile == null || splan.RelockTile.Value != (7, 6)) fails.Add("custodianNoRearmPlan");
+        if (!CanRelock(cu, (7, 6))) fails.Add("custodianCannotRearm");
+        DoRelock(cu, (7, 6));
+        if (SabotageBlown.Count != 0) fails.Add("rearmDidNotClear");
+
+        // (9b) W8 review — a ROUTED custodian does NOT work the objective: morale overrides the
+        // specialist branch (it falls through to the generic loop and flees like everyone else,
+        // so breaking the keeper's pod is a real answer to the objective pressure).
+        SabotageBlown.Add(0);                                       // a re-armable site is available again
+        cu.Routed = RoutDuration;
+        var rplan = Ai.Plan(this, cu);
+        if (rplan.RelockTile != null) fails.Add("routedCustodianStillWorks");
+        cu.Routed = 0;
+
+        // (10) W10 TERROR boon (redesigned per review): broken enemies stay broken LONGER — the
+        // boon extends the rout DURATION assigned at the break (+Game.TerrorRoutBonus via
+        // RoutDurationFor), never the threshold (real pods spawn size 2, where a threshold change
+        // is arithmetic dead weight). W8's banner semantics must stay intact on top: out of aura
+        // the extended rout still rallies one per own turn; inside the aura it still rallies at
+        // DOUBLE pace — TERROR raises the base the banner recovers from, never the counter itself.
+        var t1 = MkE("T1", 2, 4, 7); var t2 = MkE("T2", 3, 4, 7);   // far from the WARBRINGER at (11,8)
+        Enemies.Add(t1); Enemies.Add(t2); _podOrig[7] = 2;
+        _run.ActiveBoons.Add(Boon.Terror);
+        t1.Hp = 0; KillUnit(t1);
+        if (t2.Routed != RoutDuration + TerrorRoutBonus) fails.Add($"terrorRoutNotExtended={t2.Routed}");
+        BeginEnemyUnitTurn(t2);                                     // out of aura: normal rally pace
+        if (t2.Routed != RoutDuration + TerrorRoutBonus - 1) fails.Add($"terrorPlainRallyPace={t2.Routed}");
+        t2.X = 10; t2.Y = 8; t2.SyncPos();                          // step inside the banner's aura
+        BeginEnemyUnitTurn(t2);                                     // banner: double pace, on the RAISED base
+        if (t2.Routed != RoutDuration + TerrorRoutBonus - 3) fails.Add($"terrorBannerRallyPace={t2.Routed}");
+        // control: without the boon the same 2-pod break assigns exactly the BASE duration
+        _run.ActiveBoons.Remove(Boon.Terror);
+        var t3 = MkE("T3", 2, 6, 8); var t4 = MkE("T4", 3, 6, 8);
+        Enemies.Add(t3); Enemies.Add(t4); _podOrig[8] = 2;
+        t3.Hp = 0; KillUnit(t3);
+        if (t4.Routed != RoutDuration) fails.Add($"terrorControlBase={t4.Routed}");
+
         return fails.Count == 0
-            ? "MORALETEST: PASS (pod break routs survivor; routed flees + drops watch + shoots wild; rallies over turns)"
+            ? "MORALETEST: PASS (pod break routs survivor; routed flees + drops watch + shoots wild; rallies over turns; "
+              + "W8: banner holds in-aura pods + doubles rally pace, WAVERING flags the one-kill-from-rout pod truthfully, "
+              + "custodian plans + executes the re-lock/re-arm and stops when routed; "
+              + "W10: TERROR extends the rout duration (+2), plain/banner rally pace intact)"
             : "MORALETEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
@@ -2159,6 +2397,19 @@ public partial class Game
             if (!taken.Add(rec.Name)) { fails.Add($"takenNameReused:{rec.Name}"); break; }
         }
 
+        // (e) W9 — the null-veterans path stays BYTE-STABLE under the pricing/unlock work: the same
+        // RNG seed must yield the identical pool twice (names/classes/weapons), with no reserve unit
+        // and no disk read (this whole test runs without meta.json). The default GenerateDraftPool()
+        // signature (maxVeterans/crossTrain defaulted) must consume ZERO extra RNG draws.
+        Util.Reseed(424242);
+        var sigA = new System.Text.StringBuilder();
+        foreach (var u in Run.GenerateDraftPool()) sigA.Append(u.Name).Append('/').Append(u.Cls).Append('/').Append(u.Weapon.Kind).Append(';');
+        Util.Reseed(424242);
+        var sigB = new System.Text.StringBuilder();
+        foreach (var u in Run.GenerateDraftPool()) { sigB.Append(u.Name).Append('/').Append(u.Cls).Append('/').Append(u.Weapon.Kind).Append(';'); if (u.FromReserve) fails.Add("nullPathHasVet"); }
+        if (sigA.ToString() != sigB.ToString()) fails.Add("nullPathNotByteStable");
+        Util.Reseed(0);   // release back to a clock seed (mirrors the daily's release)
+
         return fails.Count == 0
             ? $"DRAFTTEST: PASS (pool={pool.Count} variety={byCls.Count}cls, drafted {picked.Count}+boon seated, default squad intact, callsigns distinct across pool+squad+backfill)"
             : "DRAFTTEST: FAIL (" + string.Join(",", fails) + ")";
@@ -2224,6 +2475,16 @@ public partial class Game
             if (vetInPool == 0 || vetInPool > Run.MaxDraftVeterans) fails.Add($"vetInPool={vetInPool}(want1..{Run.MaxDraftVeterans})");
             int freshInPool = pool.FindAll(u => !u.FromReserve).Count;
             if (freshInPool != Run.DraftPoolSize - vetInPool) fails.Add("poolFreshFill");
+
+            // (6) W9 — the recall PRICE TABLE (10 + 8xRank) and "the pool is a shop window, not a
+            //     till": building a draft pool with veterans charges NOTHING (only ConfirmDraft pays;
+            //     the charge semantics themselves are covered in METATEST).
+            if (MetaProg.RecallCost(1) != 18 || MetaProg.RecallCost(2) != 26 ||
+                MetaProg.RecallCost(3) != 34 || MetaProg.RecallCost(4) != 42) fails.Add("recallPriceTable");
+            if (MetaProg.RecallCost(-3) != MetaProg.RecallBase) fails.Add("recallPriceNegRank");
+            SaveGame.AddSalvage(50);
+            Run.GenerateDraftPool(SaveGame.LoadVeterans());
+            if (SaveGame.LoadSalvage() != 50) fails.Add("poolBuildCharged");
         }
         catch (Exception e) { return "VETTEST: FAIL (exception " + e.Message + ")"; }
         finally
@@ -2285,6 +2546,9 @@ public partial class Game
         DraftPicked = new HashSet<Unit>();
         DraftSelectedBoon = null;
         DraftSelectedContract = null;
+        // W9: a demo bank that AFFORDS NOX (Rank 3 -> 34) but NOT VEGA (Rank 4 -> 42), so the shot
+        // shows both the priced gold card and the greyed unaffordable one. Touches NO disk.
+        DraftSalvage = 40;
         Phase = Phase.Draft;
     }
 

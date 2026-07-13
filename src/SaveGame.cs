@@ -166,6 +166,44 @@ public static class SaveGame
         d.DailyStamp = stamp; d.DailyBest = Math.Max(0, best); WriteMetaDto(d);
     }
 
+    // ---- W9 (SIGNAL): daily WIN payout + streak ----
+    // A daily win pays a salvage bounty ONCE per stamp (keyed on DailyWinStamp, so replaying the
+    // same day's challenge can never farm it), and drives a consecutive-day WIN streak counter.
+    // Whole-DTO read-modify-write like every other meta field; NoPersist-gated at the call site.
+
+    /// The current consecutive-day daily-win streak (0 on a fresh profile).
+    public static int LoadDailyStreak() => Math.Max(0, LoadMetaDto().DailyStreak);
+
+    /// Record a daily WIN for `stamp` and bank its `bounty` in the SAME atomic meta write. Pays out
+    /// at most once per stamp: returns (paid=false, nothing written) if this stamp already paid. The
+    /// streak increments when `stamp` is the calendar day AFTER the last paid win; any gap (or a
+    /// fresh profile) resets it to 1. The pay and the paid-mark land in ONE WriteMetaDto, so a crash
+    /// can never mark the stamp paid without the salvage — nor pay without marking (a double-pay).
+    public static (bool paid, int streak) RecordDailyWin(int stamp, int bounty)
+    {
+        var d = LoadMetaDto();
+        if (d.DailyWinStamp == stamp) return (false, Math.Max(0, d.DailyStreak));   // already paid today
+        d.DailyStreak = IsNextDay(d.DailyWinStamp, stamp) ? Math.Max(0, d.DailyStreak) + 1 : 1;
+        d.DailyWinStamp = stamp;
+        d.Salvage = Math.Max(0, d.Salvage) + Math.Max(0, bounty);   // pay + mark, one write
+        WriteMetaDto(d);
+        return (true, d.DailyStreak);
+    }
+
+    /// True when yyyymmdd stamp `cur` is exactly the calendar day after `prev` (false on any parse
+    /// failure or a fresh profile's 0 — recovery must never crash the payout path).
+    static bool IsNextDay(int prev, int cur)
+    {
+        if (prev <= 0) return false;
+        try
+        {
+            var p = new DateTime(prev / 10000, prev / 100 % 100, prev % 100);
+            var c = new DateTime(cur / 10000, cur / 100 % 100, cur % 100);
+            return (c - p).Days == 1;
+        }
+        catch { return false; }
+    }
+
     // ---- PROGRAM HORIZON W3 (WAR ROOM): cross-run meta-progression ----
     // A persistent SALVAGE currency + ACHIEVEMENTS + additive UNLOCKS + a HALL OF FAME (Legends) +
     // lifetime run totals, all in the shared meta.json (append-only, whole-DTO read-modify-write so a
@@ -275,6 +313,9 @@ public static class SaveGame
         // COUNTERPLAY (append-only): the cross-run VETERAN reserve — promoted survivors of finished runs,
         // recallable in a future run's draft. Old profiles have no list -> null -> empty (inert).
         public List<UnitDto> Veterans;
+        // W9 SIGNAL (append-only): the last daily stamp that PAID its win bounty (unfarmable key) +
+        // the consecutive-day daily-win streak. Old profiles default 0/0 (no streak, nothing paid).
+        public int DailyWinStamp, DailyStreak;
     }
 
     /// A HALL OF FAME entry (WAR ROOM): a soldier snapshot at run end — a fallen KIA (Won=false) or a
@@ -518,6 +559,7 @@ public static class SaveGame
             a.Weapon = Weapon.Make(WeaponKind.Shotgun);
             a.Perks.Add(Perk.Deadeye); a.Perks.Add(Perk.Tank); a.Perks.Add(Perk.Vantage);   // incl. a HORIZON-w6 perk -> round-trips by ordinal
             a.InstallMod(WeaponMod.Scope); a.InstallMod(WeaponMod.ExtendedMag);   // persistent weapon upgrades
+            a.InstallMod(WeaponMod.Suppressor);   // W10: a NEW-TAIL mod must round-trip by ordinal (stat-silent)
             a.Nickname = "REAPER";
             a.Traits.Add(Trait.Killer); a.Traits.Add(Trait.IronWill);
             a.Bonds.Add("NOX");
@@ -557,7 +599,8 @@ public static class SaveGame
             if (!g0.Benched) fails.Add("benched");
             if (!g0.HasPerk(Perk.Deadeye) || !g0.HasPerk(Perk.Tank) || !g0.HasPerk(Perk.Vantage) || g0.Perks.Count != 3) fails.Add("perks");
             // weapon mods round-trip AND re-bake onto the rebuilt weapon's effective stats
-            if (!g0.HasMod(WeaponMod.Scope) || !g0.HasMod(WeaponMod.ExtendedMag) || g0.WeaponMods.Count != 2) fails.Add("weaponMods");
+            if (!g0.HasMod(WeaponMod.Scope) || !g0.HasMod(WeaponMod.ExtendedMag)
+                || !g0.HasMod(WeaponMod.Suppressor) || g0.WeaponMods.Count != 3) fails.Add("weaponMods");
             if (g0.Weapon.AimBonus != WeaponModDef.ScopeAim) fails.Add("weaponModScopeApplied");      // Shotgun base aimBonus 0 + scope
             if (g0.Weapon.Clip != 2 + WeaponModDef.MagClip) fails.Add("weaponModMagApplied");         // Shotgun base clip 2 + extended mag
             if (g0.Nickname != "REAPER") fails.Add("nickname");
@@ -598,15 +641,27 @@ public static class SaveGame
             var perkVals = (Perk[])Enum.GetValues(typeof(Perk));
             if (perkVals.Length < 20 || perkVals[0] != Perk.LockOn || perkVals[perkVals.Length - 1] != Perk.Siegebreaker)
                 fails.Add("perkOrdinals");
+            // W10: the tail advanced Stabilizer -> Suppressor (Bipod, Suppressor appended).
             var modVals = (WeaponMod[])Enum.GetValues(typeof(WeaponMod));
-            if (modVals.Length < 4 || modVals[0] != WeaponMod.Scope || modVals[modVals.Length - 1] != WeaponMod.Stabilizer)
+            if (modVals.Length < 6 || modVals[0] != WeaponMod.Scope || modVals[4] != WeaponMod.Bipod
+                || modVals[modVals.Length - 1] != WeaponMod.Suppressor)
                 fails.Add("weaponModOrdinals");
             var traitVals = (Trait[])Enum.GetValues(typeof(Trait));
             if (traitVals.Length < 4 || traitVals[0] != Trait.Killer || traitVals[traitVals.Length - 1] != Trait.Vengeful)
                 fails.Add("traitOrdinals");
+            // W10: the tail advanced RapidDeploy -> Reclaimer (6 verb boons appended). Pin the old
+            // tail's ORDINAL POSITION too (RapidDeploy must still be [9]) so an insertion anywhere
+            // before the new block also fails loudly.
             var boonVals = (Boon[])Enum.GetValues(typeof(Boon));
-            if (boonVals.Length < 10 || boonVals[0] != Boon.Marksmen || boonVals[boonVals.Length - 1] != Boon.RapidDeploy)
+            if (boonVals.Length < 16 || boonVals[0] != Boon.Marksmen || boonVals[9] != Boon.RapidDeploy
+                || boonVals[10] != Boon.ShockDoctrine || boonVals[boonVals.Length - 1] != Boon.Reclaimer)
                 fails.Add("boonOrdinals");
+            // W10: SecondaryKind joins the guarded set (treated as persisted/append-only; Ghost/
+            // Demolition/Bounty appended at the END after CleanSweep).
+            var secVals = (SecondaryKind[])Enum.GetValues(typeof(SecondaryKind));
+            if (secVals.Length < 7 || secVals[0] != SecondaryKind.None || secVals[3] != SecondaryKind.CleanSweep
+                || secVals[secVals.Length - 1] != SecondaryKind.Bounty)
+                fails.Add("secondaryKindOrdinals");
             var factionVals = (Faction[])Enum.GetValues(typeof(Faction));
             if (factionVals.Length < 4 || factionVals[0] != Faction.None || factionVals[factionVals.Length - 1] != Faction.Wardens)
                 fails.Add("factionOrdinals");
@@ -619,6 +674,11 @@ public static class SaveGame
             var contractVals = (Contract[])Enum.GetValues(typeof(Contract));
             if (contractVals.Length < 4 || contractVals[0] != Contract.None || contractVals[^1] != Contract.Spearhead)
                 fails.Add("contractOrdinals");
+            // W9: MetaUnlock is persisted by ordinal in meta.json's Unlocks list — same append-only
+            // guard (first + last member) so a reorder/removal fails SAVETEST loudly.
+            var unlockVals = (MetaUnlock[])Enum.GetValues(typeof(MetaUnlock));
+            if (unlockVals.Length < 6 || unlockVals[0] != MetaUnlock.StartIntel || unlockVals[^1] != MetaUnlock.StandingReserve)
+                fails.Add("metaUnlockOrdinals");
 
             // meta (unlocked-max heat) round-trips through its own meta.json
             string metaSaved = File.Exists(MetaPath) ? File.ReadAllText(MetaPath) : null;

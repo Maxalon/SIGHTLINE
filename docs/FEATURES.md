@@ -436,3 +436,48 @@ seeds (mix of WIN/LOSE, no exceptions):
   upward tray (ellipsis structurally impossible); odds modifiers are 13px label/value rows with right-aligned
   colored numbers; the top bar reads as three aligned zones with labeled PRESSURE pips; campaign-map labels
   can't overprint; roster chips fade when they'd hide a unit.
+
+## PROGRAM SIGNAL additions (seams, signal, stakes, economy)
+
+- **Mode-seam integrity:** end card offers MAIN MENU beside NEW RUN (`(overwrites save)` warning
+  when a checkpoint exists); draft BACK; abandon is mode-aware (campaign keeps its checkpoint —
+  no LossStreak, no salvage; skirmish/daily/endless end true); LAST STAND mid-stand boon picks
+  republish to combat; the daily's env seed can't leak into campaign drafts.
+- **Boss identity:** capability flags (`HasShieldArc`/`HasSiege`/`HasBanner` — getters mirror Cls)
+  let bosses carry signature mechanics while staying ELITE. Faction mid-bosses: Legion BREAKER
+  (two-beat ENRAGED→FRENZY + rush), Syndicate BULWARK (re-facing shield arc), Wardens WARDEN
+  (siege telegraph, demote-cap-exempt). Three finale kits — Legion SIEGELORD, Syndicate SPYMASTER,
+  Wardens WARLORD — chosen per run by an avalanche hash of MapSeed and surfaced via EnemyHint;
+  the finale's extra body is heat-gated to heat 4+.
+- **Morale, visible & contested:** amber WVR crack tag on pods one kill from routing (HELD BY
+  BANNER when anchored); WARBRINGER banner (diamond ring, Chebyshev-4 aura: in-aura pods can't
+  rout and rally twice as fast; 1/mission); CUSTODIAN walks to the terminal/blown charge and
+  re-locks/re-arms one step per adjacent turn, telegraphed. Routed specialists all flee.
+- **Salvage economy:** veteran recall costs 10+8×rank salvage, charged once and atomically at
+  draft confirm; repeatable sinks (draft-pool re-roll 10, scar REHAB 30 with a true undo, shop
+  slate re-roll 5) settle via a pending ledger beside the mission-start checkpoint (quit-safe);
+  MetaUnlocks: CROSS-TRAINING (sidegrade recruit weapons), QUARTERMASTER (+1 requisition slot),
+  STANDING RESERVE (3rd recall slot); heat multiplies the win bounty; daily wins pay 10+heat
+  once per calendar stamp with a streak counter and two achievements.
+- **Pools:** boons SHOCK DOCTRINE (braced interrupts deal full damage), TERROR (routs last +2
+  turns), FIELD DRILLS (DRAG/VAULT ×2 per turn), PYROMANIACS (own fire +2 turns, squad
+  burn-immune), FIELD STORES (utility items ×2 charges), RECLAIMER (focused-cone overwatch kills
+  refund the reaction); weapon mods BIPOD (+10 aim if unmoved) and SUPPRESSOR (a suppressed shot
+  wakes only the target's pod); secondaries GHOST / DEMOLITION / BOUNTY; the INTEL CACHE (an
+  expiring gold diamond worth 8-10 intel, mid/far-field).
+- **Teaching layer:** FIELD CRAFT codex tab (12 code-verified rule entries + 6 status rows);
+  enemy ID + behavior blurb in the aim tooltip; NEW CONTACT banners on first sightings; honest
+  loss cards (CAUSE OF DEATH + counterplay tip; FIELD SUPPORT disclosure); objective/boon hover
+  cards; wrapped action-bar help; roster chips collapse to an edge rail instead of garbling;
+  the action bar fades when it hides a unit.
+- **Strategic-layer look:** the campaign map sizes to its panel (labeled reachable nodes +
+  legend), class silhouettes stamp the draft/barracks/roster/promotion screens, the intro has a
+  real button hierarchy with mode captions, WAR ROOM shows per-achievement progress bars and a
+  NEXT UNLOCK preview, promotion cards show soldier-specific before→after deltas, and a first
+  run pre-selects a RECOMMENDED squad+boon.
+- **Board reads:** high ground inherits its biome's hue; the focused-overwatch cone is clearly
+  visible (wash + rays + chevron); status codes are 13px pills drawn above all bodies;
+  TURRET/BRUISER/SCOUT read by ring shape; the EVAC label anchors to a real zone tile.
+- **The compass (dev-facing):** CRN-paired greedy/sloppy legs over identical worlds, positional
+  error injection, ACTION MIX + BY PERK/PURCHASE/ARENA tables, whole-run objective pins,
+  SIGHTLINE_PAIRTEST.

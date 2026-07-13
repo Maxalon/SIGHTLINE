@@ -92,7 +92,11 @@ public static class Mission
             u.Ammo = u.Weapon.Clip;
             u.Grenades = 1 + u.BonusGrenades + (u.HasPerk(Perk.Bandolier) ? 1 : 0);  // refill (+cache +Bandolier)
             u.AbilityCd = 0;                                       // signature ability ready (off cooldown)
-            u.ItemCharge = u.Item != ItemKind.None ? 1 : 0;        // utility item: 1 charge/mission
+            // utility item: 1 charge/mission — 2 under the FIELD STORES boon (W10; read via the
+            // per-mission Combat.RunBoons static, published by Game.SetupMission BEFORE Build runs.
+            // This loop seats PLAYERS only, so enemy items are never doubled).
+            u.ItemCharge = u.Item != ItemKind.None
+                ? (Combat.RunBoons.Contains(Boon.FieldStores) ? 2 : 1) : 0;
             u.Suppress = 0;
             u.OnOverwatch = false;
             u.Hunkered = false;
@@ -397,7 +401,25 @@ public static class Mission
         // below). Net at heat 0: 8 hostiles incl. the boss (was 12), supporters at +5 not +6.
         if (n >= Run.MaxMissions)
         {
-            count = Math.Max(5, count - 4);
+            // SIGNAL W5 — m6 bite, MEASURED SIZE (paired flywheel, h0 slots 0-19): the finale is
+            // startlingly body-count sensitive. With the kits live: restore +2 bodies (count-2) ->
+            // m6 70-76% conditional and h0 run completion 75% -> 60% (3x the -5pt dip budget);
+            // restore 0 (count-4) -> m6 100% (a formality again — the kit retinues are support
+            // pieces and the faction rosters run softer than the mixed m6 cascade). Restore +1
+            // (count-3) is the measured middle: m6 ~85-88%, completion ~70% (dip ~-5, on budget).
+            // With m1-m5 untouched, the dip budget pins m6 to the TOP of the 80-88 band by
+            // construction (h0 completion >= 70% requires m6 >= ~85%). An UNSTAMPED finale (the
+            // Faction.None safety fallback) keeps the old count-4 exactly.
+            // W6 (SIGNAL) — HEAT-GATED finale body: the restored kit body (~15-20pts of m6
+            // conditional per body, W5-measured) now fields only for COORDINATED forces —
+            // Ai.Tier >= 1, which the heat ladder publishes from ELITE CADRE (rung 4) up
+            // (Game.SetupMission sets Ai.Tier from Heat.AiTier BEFORE Build, every mission;
+            // Combat.EndMission clears it, so a stale tier can never leak in here). Low heat
+            // (0-3) gets the softer count-4 finale: the fresh 06b65c2 baseline ran h0 62.5% /
+            // h2 55% completion (well under the ~75-80 ladder-top goal) with the W5 finale
+            // eating ~1/5 of otherwise-cleared runs; the ladder's top half keeps the
+            // full-bite finale it was tuned against. Faction.None still means count-4.
+            count = Math.Max(5, count - (Combat.MissionFaction != Faction.None && Ai.Tier >= 1 ? 3 : 4));
             bump = Math.Max(0, n - 1);                       // drop the boss-card/heat StatDelta for the screen
         }
         var rows = new List<int>();
@@ -407,6 +429,8 @@ public static class Mission
 
         var used = new HashSet<(int, int)>();
         bool siegeSpawned = false;    // hard cap: at most ONE SIEGE/BOMBARD artillery per mission (fairness)
+        bool bannerSpawned = false;   // W8 review: at most ONE WARBRINGER banner per mission — overlapping
+                                      // auras could blanket an arena and switch the rout lever off entirely
         for (int i = 0; i < count; i++)
         {
             int y = rows[i % rows.Count];
@@ -421,24 +445,34 @@ public static class Mission
             bool finalMission = n >= Run.MaxMissions;
             bool midBoss = !finalMission && i == 0 && (n == 3 || n == 5);   // recurring named elite
             float r = Util.RandF();
-            Unit e;
-            if (finalMission && i == 0)         // capstone elite (named boss)
-                // HP 20+2n -> 14+n, aim 72 -> 68: mission-6 was a ~90%-loss wall for a competent
-                // squad (it cleared m1-5 then died on the boss). At n=6 this is 20 HP (was 32) and
-                // 68 aim -- still the toughest single unit in the game (a mid-boss is 24 HP) but no
-                // longer an unkillable, never-misses brick. Grenade count is also trimmed 2 -> 1
-                // below, and the supporting force is lighter (see the count adjustment above).
-                e = MakeHostile("WARLORD", "ELITE", WeaponKind.Lmg, 14 + n, 68, 6, x, y);
-            else if (midBoss)                   // mid-campaign elite (lighter than the WARLORD)
-                e = MakeHostile(n == 3 ? "BREAKER" : "WARDEN", "ELITE", WeaponKind.Lmg, 14 + n * 2, 68, 6, x, y);
-            else                                // a tier-appropriate rank-and-file archetype
-                e = SelectArchetype(n, r, bump, x, y);
+            // SIGNAL W5 — BOSS IDENTITY: the finale boss (i==0) + its explicit kit retinue
+            // (i==1/2 on Legion/Syndicate finales) and the m3/m5 mid-boss are all keyed off
+            // Combat.MissionFaction (see MakeFinaleBoss/MakeFinaleRetinue/MakeMidBoss below),
+            // so each faction's climax forces a DIFFERENT verb. Faction.None falls back to
+            // today's plain WARLORD / mission-keyed mid-boss (the safety invariant). The RandF
+            // draw above stays unconditional so the RNG stream is unchanged for every slot.
+            Unit e = null;
+            if (finalMission)
+                e = i == 0 ? MakeFinaleBoss(n, x, y) : MakeFinaleRetinue(i, n, bump, x, y);
+            if (e == null)
+                e = midBoss ? MakeMidBoss(n, x, y)
+                            : SelectArchetype(n, r, bump, x, y);   // tier-appropriate rank-and-file
             // FAIRNESS CAP: at most one SIEGE/BOMBARD per mission. SelectArchetype is stateless, so a
             // second roll could yield another -> demote any extra BOMBARD to a plain GRUNT here.
+            // SIGNAL W5: this cap DELIBERATELY keys on Cls (not HasSiege) — a siege-armed BOSS elite
+            // (WARDEN mid-boss / SIEGELORD finale) is EXEMPT: it never sets siegeSpawned and never
+            // demotes the force's one real BOMBARD (the Legion finale retinue fields both by design).
             if (e.Cls == "BOMBARD")
             {
                 if (siegeSpawned) e = MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 60 + bump, 6, x, y);
                 else siegeSpawned = true;
+            }
+            // W8 review — same BOMBARD-style cap for the WARBRINGER: one banner per mission. Keys
+            // on Cls like the siege cap, so a hypothetical banner-flagged boss would stay exempt.
+            if (e.Cls == "WARBRINGER")
+            {
+                if (bannerSpawned) e = MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 60 + bump, 6, x, y);
+                else bannerSpawned = true;
             }
             // Aim clamp raised 82 -> 88: the old 82 cap silently ATE the top-rung Heat StatDelta (+aim)
             // for any archetype whose base + bump + Heat exceeded 82, flattening the ladder's apex. 88
@@ -580,7 +614,7 @@ public static class Mission
         // sightlines and FORCING you to reposition to re-acquire targets. Reuses the enemy smoke exec.
         // Counter: push through / around the cloud, or kill it before it screens. Carries the smoke
         // charge (set in SpawnEnemies). ~6% slot.
-        if (r < 0.90f)                                                                                              //  6% zoner
+        if (r < 0.88f)                                                                                              //  4% zoner
         {
             var z = MakeHostile("HAZE", "SCREENER", WeaponKind.Smg, 5 + bump, 46 + bump, 6, x, y);
             z.EnemyItem = ItemKind.Smoke; z.ItemCharge = 2;   // a deep smoke pouch — the EXISTING smoke AI uses it
@@ -589,9 +623,18 @@ public static class Mission
         // SIEGE (BOMBARD): a fragile back-line artillery piece. It does NOT fire — it CHARGES a
         // telegraphed 3x3 strike (shown for a full player turn) that lands cover-ignoring next enemy
         // turn (see Ai.Plan/Game.TickSiegeStrikes). Forces RELOCATION (a non-shoot tactical axis).
-        // Rare (~5%); capped at 1 per mission by the post-pick guard in SpawnEnemies.
-        if (r < 0.95f) return MakeHostile("SIEGE", "BOMBARD", WeaponKind.Smg, 7 + bump, 48 + bump, 4, x, y);       //  5% artillery
-        if (r < 0.98f) return MakeHostile("OGRE", "BRUISER", WeaponKind.Lmg, 9 + bump, 56 + bump, 5, x, y);    //  3% bruiser
+        // Rare (~4%); capped at 1 per mission by the post-pick guard in SpawnEnemies.
+        if (r < 0.92f) return MakeHostile("SIEGE", "BOMBARD", WeaponKind.Smg, 7 + bump, 48 + bump, 4, x, y);       //  4% artillery
+        // WARBRINGER (SIGNIFER, W8): the Legion standard-bearer — a mid-HP banner anchor: pods with
+        // a living banner within Chebyshev Game.BannerRange cannot rout and rally a turn faster
+        // (Game.BreakPodMorale / BeginEnemyUnitTurn). A priority-target decision: the comeback
+        // lever (focus a pod down to break it) is CONTESTED until the banner falls. ~3% slot.
+        if (r < 0.95f) return MakeHostile("SIGNIFER", "WARBRINGER", WeaponKind.Rifle, 8 + bump, 56 + bump, 5, x, y); // 3% banner anchor
+        // CUSTODIAN (SEXTON, W8): the objective KEEPER — a low-threat unit that walks to the
+        // terminal / a blown sabotage charge and undoes ONE step of progress per adjacent turn
+        // (Ai.Plan -> Game.DoRelock, banner-telegraphed). Screen it out or shoot it first. ~2% slot.
+        if (r < 0.97f) return MakeHostile("SEXTON", "CUSTODIAN", WeaponKind.Smg, 5 + bump, 48 + bump, 6, x, y);     // 2% keeper
+        if (r < 0.98f) return MakeHostile("OGRE", "BRUISER", WeaponKind.Lmg, 9 + bump, 56 + bump, 5, x, y);    //  1% bruiser
         if (r < 0.99f) return MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 58 + bump, 8, x, y);       //  1% scout
         return MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 60 + bump, 6, x, y);                     //  1% grunt
     }
@@ -631,6 +674,10 @@ public static class Mission
                     z.EnemyItem = ItemKind.Smoke; z.ItemCharge = 2;   // a deep smoke pouch — the EXISTING smoke AI uses it
                     return z;
                 }
+                // W8: the CUSTODIAN keeper suits the tech faction — it contests your PROGRESS
+                // (re-locks the terminal / re-arms blown charges), like the SPOTTER/SCREENER
+                // contest your information. m3+, matching the SCREENER's full-roster tier.
+                if (r < 0.97f && n >= 3) return MakeHostile("SEXTON", "CUSTODIAN", WeaponKind.Smg, 5 + bump, 48 + bump, 6, x, y); // 5% keeper (m3+)
                 return MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 60 + bump, 6, x, y);              // filler
 
             // LEGION (shock assault) — BERSERKER, BRUISER, HUNTER + the m2+ skirmish tier:
@@ -643,6 +690,9 @@ public static class Mission
                 if (r < 0.68f && n >= 2) return MakeHostile("WRAITH", "STRIKER", WeaponKind.Smg, 4 + bump, 60 + bump, 9, x, y);   // 8% leaper (m2+)
                 if (r < 0.76f && n >= 2) return MakeHostile("HOPLITE", "LANCER", WeaponKind.Rifle, (n >= 3 ? 7 : 6) + bump, 58 + bump, 5, x, y); // 8% formation trooper (m2+; HP 6->7 at m3, like the cascade)
                 if (r < 0.84f && n >= 2) return MakeHostile("FERAL", "HOUND", WeaponKind.Smg, 3 + bump, 56 + bump, 9, x, y);      // 8% swarmer (m2+)
+                // W8: the WARBRINGER banner anchor is Legion-native — the shock faction's pods hold
+                // the line under its standard (no rout + faster rally within Chebyshev BannerRange).
+                if (r < 0.90f && n >= 3) return MakeHostile("SIGNIFER", "WARBRINGER", WeaponKind.Rifle, 8 + bump, 56 + bump, 5, x, y); // 6% banner anchor (m3+)
                 if (r < 0.93f) return MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 58 + bump, 8, x, y);
                 return MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 60 + bump, 6, x, y);              // filler
 
@@ -673,6 +723,11 @@ public static class Mission
                     return z;
                 }
                 if (r < 0.78f) return MakeHostile("ORDERLY", "MEDIC", WeaponKind.Smg, 6 + bump, 52 + bump, 6, x, y);
+                // W8: the CUSTODIAN keeper is Wardens-native — the control faction contests your
+                // objective PROGRESS itself (re-locks the terminal / re-arms blown charges). m3+
+                // like SIEGE/SCREENER; the failed (m2) gate routes to the GRUNT window's pick, so
+                // any roll still resolves and mission-2 Wardens pods are unchanged.
+                if (r < 0.86f && n >= 3) return MakeHostile("SEXTON", "CUSTODIAN", WeaponKind.Smg, 5 + bump, 48 + bump, 6, x, y); // 8% keeper (m3+)
                 if (r < 0.92f) return MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 60 + bump, 6, x, y);
                 return MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 58 + bump, 8, x, y);              // filler
         }
@@ -768,6 +823,89 @@ public static class Mission
         var u = new Unit { Name = name, Cls = cls, Team = Team.Enemy, X = x, Y = y, Hp = hp, MaxHp = hp, Aim = aim, Mobility = mob, Weapon = Weapon.Make(w) };
         u.Ammo = u.Weapon.Clip;
         return u;
+    }
+
+    // ─── SIGNAL W5 — BOSS IDENTITY (mid-boss signatures + finale kits) ─────────────────────
+    // All three named bosses used to be the IDENTICAL unit (ELITE + Lmg); runs climaxed in the
+    // same fight every time. Now each faction's named elite carries a SIGNATURE mechanic via
+    // the Unit capability flags (HasShieldArc / HasSiege / RagesTwice) — mechanics the engine
+    // already ships for rank-and-file SHIELD/BOMBARD/the enrage — so each climax forces a
+    // DIFFERENT verb (DESIGN.md §A: no two kits may play the same):
+    //   LEGION   — rage/rush:   kill it FAST or its low-HP tiers snowball (burst-down verb).
+    //   SYNDICATE— shield arc:  its front is a wall; FLANK or take commanding height.
+    //   WARDENS  — siege clock: telegraphed 3x3 strikes force RELOCATION every turn.
+    // Every boss keeps Cls=="ELITE": the nameplate, enrage trigger, aim-clamp exemption, elite
+    // grenade pouch and AI temperament are ELITE identity and stay Cls-keyed. Faction.None
+    // (an unstamped fight: SKIRMISH/DAILY-style paths) falls back to today's plain bosses.
+
+    // The three SIGNATURE arms (capability flags; Cls stays "ELITE" on every armed boss):
+    static Unit ArmRage(Unit b)   { b.RagesTwice = true; return b; }                       // second rage tier at <=25% + the Ai rush temperament
+    static Unit ArmShield(Unit b) { b.HasShieldArc = true; b.ShieldDx = -1; b.ShieldDy = 0; return b; }  // frontal barrier arc, opens facing the squad; FaceShields re-faces it each enemy turn
+    static Unit ArmSiege(Unit b)  { b.HasSiege = true; return b; }                         // telegraphed 3x3 strikes; EXEMPT from the siegeSpawned cap by construction (the cap keys on Cls=="BOMBARD"); the Ai falls through to the ELITE gun when nothing is worth shelling
+
+    /// The m3/m5 recurring named elite, keyed by the node's faction (a faction-signature fight).
+    /// Unstamped (SKIRMISH/DAILY-style paths): today's plain mission-keyed BREAKER/WARDEN exactly.
+    static Unit MakeMidBoss(int n, int x, int y)
+    {
+        Unit Mk(string name) => MakeHostile(name, "ELITE", WeaponKind.Lmg, 14 + n * 2, 68, 6, x, y);
+        return Combat.MissionFaction switch
+        {
+            Faction.Legion    => ArmRage(Mk("BREAKER")),    // the rush: burst it down before the frenzy
+            Faction.Syndicate => ArmShield(Mk("BULWARK")),  // the wall: flank-or-elevate puzzle
+            Faction.Wardens   => ArmSiege(Mk("WARDEN")),    // the clock: relocate under telegraphed fire
+            _                 => Mk(n == 3 ? "BREAKER" : "WARDEN"),
+        };
+    }
+
+    /// The capstone named boss (m6), keyed by the Boss node's stamped faction (the FINALE KIT).
+    /// Wardens keeps today's WARLORD fight (the reference kit: the enrage brick — burst/focus);
+    /// Legion fields a siege-armed SIEGELORD whose strikes force RELOCATION while the rush faction
+    /// closes; Syndicate a shield-arced SPYMASTER that must be FLANKED behind its screen cell.
+    /// Faction.None == today's WARLORD exactly.
+    ///
+    /// MEASURED TUNE (flywheel, h0+h2 paired slots 0-9, vs the 80-88%-conditional target):
+    ///  * the spec's first-cut Legion kit (WARDEN-stat 14+2n boss + LANCER/BOMBARD retinue)
+    ///    measured 37% — the every-turn boss strike, a SECOND real artillery and the Legion
+    ///    close-range warp taxed the same resource (position) three times over. The shipped kit
+    ///    keeps the identity (one telegraphed strike per turn to dodge) on the standard boss
+    ///    statline, escorted by a LANCER pair instead of the BOMBARD.
+    ///  * the SPYMASTER runs one HP step lighter (12+n): behind a re-facing shield arc + the HVT
+    ///    guards + a screen cell it measured 73% at 14+n — and a spymaster is a skulker, not a brick.
+    static Unit MakeFinaleBoss(int n, int x, int y)
+    {
+        // (On the WARLORD statline history: HP 20+2n -> 14+n, aim 72 -> 68 — mission-6 was a
+        // ~90%-loss wall; every kit boss keeps 68 aim and a 1-frag pouch via the ELITE branches.)
+        return Combat.MissionFaction switch
+        {
+            Faction.Legion    => ArmSiege(MakeHostile("SIEGELORD", "ELITE", WeaponKind.Lmg, 14 + n, 68, 6, x, y)),
+            Faction.Syndicate => ArmShield(MakeHostile("SPYMASTER", "ELITE", WeaponKind.Lmg, 12 + n, 68, 6, x, y)),
+            _                 => MakeHostile("WARLORD", "ELITE", WeaponKind.Lmg, 14 + n, 68, 6, x, y),
+        };
+    }
+
+    /// The finale kit's EXPLICIT retinue (slots i==1/2, right behind the boss). Legion escorts its
+    /// siege-lord with a LANCER phalanx pair (measured tune — see MakeFinaleBoss: pairing the boss's
+    /// strikes with a second real artillery piece sank the kit to a 37% conditional; the boss IS the
+    /// kit's artillery); Syndicate screens its spymaster with a lane-blinding zoner + a leaper.
+    /// Wardens (today's fight) and None return null — the roster/cascade fills every slot as before.
+    static Unit MakeFinaleRetinue(int i, int n, int bump, int x, int y)
+    {
+        if (i > 2) return null;
+        switch (Combat.MissionFaction)
+        {
+            case Faction.Legion:                       // a phalanx pair (both retinue slots)
+                return MakeHostile("HOPLITE", "LANCER", WeaponKind.Rifle, 7 + bump, 58 + bump, 5, x, y);
+            case Faction.Syndicate:
+                if (i == 1)
+                {
+                    var z = MakeHostile("HAZE", "SCREENER", WeaponKind.Smg, 5 + bump, 46 + bump, 6, x, y);
+                    z.EnemyItem = ItemKind.Smoke; z.ItemCharge = 2;   // a deep smoke pouch — the EXISTING smoke AI uses it
+                    return z;
+                }
+                return MakeHostile("WRAITH", "STRIKER", WeaponKind.Smg, 4 + bump, 60 + bump, 9, x, y);
+            default:
+                return null;
+        }
     }
 
     /// A reinforcement wave hostile, scaled by mission. Two tiers (APEX W5):
@@ -929,6 +1067,43 @@ public static class Mission
         }
     }
 
+    /// W10 INTEL CACHE placement: pick a mid/far-field FLOOR tile for the optional intel pickup
+    /// (Game owns the pickup state; this is pure board geometry). PlaceBarrels-style guard, but
+    /// INVERTED — the cache is walkable (it blocks nothing), so the check is that the tile itself
+    /// is REACHABLE from the squad spawn (CostMap >= 0), never on a unit/objective/evac tile.
+    /// Returns null when no legal tile is found (a pathological board just has no cache).
+    public static (int x, int y)? PlaceIntelCache(Grid g, List<Unit> players, List<Unit> enemies,
+                                                  List<(int x, int y)> evac,
+                                                  (int x, int y)? terminal,
+                                                  List<(int x, int y)> sabotage)
+    {
+        Unit from = null;
+        foreach (var p in players) if (p.Alive && !p.IsVip) { from = p; break; }
+        if (from == null && players.Count > 0) from = players[0];
+        if (from == null) return null;
+        var reserved = new HashSet<(int, int)>();
+        foreach (var u in players) reserved.Add((u.X, u.Y));
+        // W10 review: enemy tiles are reserved too — the gold diamond must never spawn UNDER a
+        // (possibly dormant) hostile, where it would read as unreachable loot / a misleading lure.
+        if (enemies != null) foreach (var u in enemies) if (u.Alive) reserved.Add((u.X, u.Y));
+        if (evac != null) foreach (var t in evac) reserved.Add(t);
+        if (terminal.HasValue) reserved.Add(terminal.Value);
+        if (sabotage != null) foreach (var s in sabotage) reserved.Add(s);
+        // one reachability map answers every probe (the cache blocks nothing, so it can't change it)
+        var cost = g.CostMap(from.X, from.Y, (x, y) => false, out _, 9999);
+        for (int guard = 0; guard < 400; guard++)
+        {
+            // mid/far-field bias (cols 6-15, like the barrels): the detour must cost real steps.
+            int x = Util.RandInt(6, 15);
+            int y = Util.RandInt(0, g.H - 1);
+            if (reserved.Contains((x, y))) continue;
+            if (!g.IsFloor(x, y)) continue;          // cover / barrel / OOB can't host a pickup
+            if (cost[x, y] < 0) continue;            // walled off — a cache no one can reach is a lie
+            return (x, y);
+        }
+        return null;
+    }
+
     static void PlaceBlock(Grid g, HashSet<(int, int)> occ, int x, int y, TileType t, int w, int h)
     {
         for (int dx = 0; dx < w; dx++)
@@ -997,5 +1172,25 @@ public static class Mission
         // HOUND pack (the swarmers) lower mid-field
         Add("FERAL", "HOUND", WeaponKind.Smg, 3, 56, 9, 10, 7);
         Add("FERAL", "HOUND", WeaponKind.Smg, 3, 56, 9, 11, 8);
+
+        // W8 — WARBRINGER banner anchor (diamond ring + pennant + aura outline) with a held pod
+        // beside it: pod 5 is staged at its waver point (3 alive of an original 4) but sits inside
+        // the banner's aura, so it draws NO WAVERING tag (the banner holds it — the honest read).
+        Add("SIGNIFER", "WARBRINGER", WeaponKind.Rifle, 8, 56, 5, 15, 3);
+        Add("RAIDER", "GRUNT", WeaponKind.Rifle, 5, 60, 6, 14, 2); g.Enemies[^1].PodId = 5;
+        Add("RAIDER", "GRUNT", WeaponKind.Rifle, 5, 60, 6, 16, 2); g.Enemies[^1].PodId = 5;
+        Add("RAIDER", "GRUNT", WeaponKind.Rifle, 5, 60, 6, 14, 4); g.Enemies[^1].PodId = 5;
+        g.DebugPodOrig(5, 4);
+
+        // W8 — a WAVERING pod far from any banner (Chebyshev > BannerRange from the SIGNIFER):
+        // pod 6, 3 alive of an original 4 — exactly one kill from the rout threshold, so all three
+        // draw the amber WVR crack tag (the telegraph screenshot's subject).
+        Add("STALKER", "SCOUT", WeaponKind.Smg, 4, 58, 8, 3, 7); g.Enemies[^1].PodId = 6;
+        Add("STALKER", "SCOUT", WeaponKind.Smg, 4, 58, 8, 4, 8); g.Enemies[^1].PodId = 6;
+        Add("STALKER", "SCOUT", WeaponKind.Smg, 4, 58, 8, 3, 9); g.Enemies[^1].PodId = 6;
+        g.DebugPodOrig(6, 4);
+
+        // W8 — CUSTODIAN objective keeper (padlock silhouette), lower right, clear of both pods
+        Add("SEXTON", "CUSTODIAN", WeaponKind.Smg, 5, 48, 6, 15, 8);
     }
 }

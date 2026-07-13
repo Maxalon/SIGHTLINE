@@ -51,6 +51,10 @@ public static class Hud
     public static System.Collections.Generic.List<(Contract contract, Rectangle rect)> DraftContractBtns = new();
     public static Rectangle DraftConfirm;
     public static Rectangle DraftBack;   // W1 mode-seam: BACK to the intro without founding a run
+    public static Rectangle DraftReroll; // W9: paid draft-pool re-roll (salvage sink)
+    public static Rectangle ShopReroll;  // W9: paid requisition-slate re-roll (salvage sink)
+    // W9: per-soldier REHAB chips (buy off a scar), published by DrawSquadRow for hit-testing.
+    public static System.Collections.Generic.List<(Unit unit, Rectangle rect)> RehabBtns = new();
 
     // ---------------- UI motion (panel pop-in juice) ----------------
     // Panels/cards animate in (slide + fade + scale) the first time they appear, instead
@@ -346,6 +350,10 @@ public static class Hud
                 Raylib.DrawRectangleRounded(pip, 0.5f, 4, Raylib.Fade(on ? Pal.Accent : Pal.RGBA(28, 39, 51), txtA));
             }
             Raylib.DrawTextEx(Cfg.Font, u.IsVip ? "ASSET" : u.RankName, new Vector2((int)r.X + 58, (int)r.Y + 33), 11, 1f, Raylib.Fade(u.IsVip ? Pal.VipGold : Pal.TxtDim, txtA));
+            // W12: the class silhouette in the chip's lower-right corner — the same shape the board
+            // draws, so chip -> soldier matching is instant even before names are learned.
+            Renderer.DrawCodexGlyph(u.Cls, new Vector2(r.X + 118, r.Y + 39),
+                Raylib.Fade(u.IsVip ? Pal.VipGold : Pal.Friend, (sel ? 1f : 0.75f) * txtA), 0.8f);
 
             // role tag: WOUNDED (red) takes priority, else custom tag (cyan) / auto strengths (amber)
             if (!u.IsVip)
@@ -519,12 +527,24 @@ public static class Hud
 
         // optional secondary objective (3.9): green while on track, red once blown — a smaller
         // second line centered under the objective group so mission + bonus read as one block.
-        if (g.Secondary != SecondaryKind.None)
+        // W10: the INTEL CACHE clock rides the SAME line, right of the bonus (gold — it matches the
+        // board diamond), so the whole "extra value on this map" story reads in one glance.
         {
-            string sec = g.SecondaryHud;
-            float sw = Raylib.MeasureTextEx(Cfg.Font, sec, 12, 1f).X;
-            float sx = Util.Clamp(cx + preW + (glyphW + objW) / 2f - sw / 2f, leftEnd + 14, rightStart - sw - 14);
-            Raylib.DrawTextEx(Cfg.Font, sec, new Vector2((int)sx, 44), 12, 1f, g.SecondaryOnTrack ? Pal.Good : Pal.Foe);
+            string sec = g.Secondary != SecondaryKind.None ? g.SecondaryHud : "";
+            string cache = g.CachePresent ? $"CACHE {g.CacheTurnsLeft}T" : "";
+            float sw = string.IsNullOrEmpty(sec) ? 0 : Raylib.MeasureTextEx(Cfg.Font, sec, 12, 1f).X;
+            float cw = string.IsNullOrEmpty(cache) ? 0 : Raylib.MeasureTextEx(Cfg.Font, cache, 12, 1f).X;
+            float gap = (sw > 0 && cw > 0) ? 14f : 0f;
+            float total2 = sw + gap + cw;
+            if (total2 > 0)
+            {
+                float sx = Util.Clamp(cx + preW + (glyphW + objW) / 2f - total2 / 2f, leftEnd + 14, rightStart - total2 - 14);
+                if (sw > 0)
+                    Raylib.DrawTextEx(Cfg.Font, sec, new Vector2((int)sx, 44), 12, 1f, g.SecondaryOnTrack ? Pal.Good : Pal.Foe);
+                if (cw > 0)
+                    Raylib.DrawTextEx(Cfg.Font, cache, new Vector2((int)(sx + sw + gap), 44), 12, 1f,
+                                      g.CacheTurnsLeft <= 2 ? Pal.Foe : Pal.VipGold);
+            }
         }
     }
 
@@ -1443,6 +1463,17 @@ public static class Hud
             // target obscured in smoke (it's shootable — LoS clears the endpoint tile —
             // but harder to make out). Neutral tag: smoke is not in the hit% math.
             if (g.Grid.IsSmoke(d.X, d.Y))                     flags.Add(("SMOKED", "sight only", Pal.TxtDim));
+
+            // SIGNAL W8 — pod-morale telegraph: the hovered foe's pod is ONE KILL from the rout
+            // threshold. "POD alive/orig | NEXT KILL ROUTS" makes the breaking kill a PLAN; if a
+            // WARBRINGER's banner holds this member, say THAT instead (the mark must never lie —
+            // and the line points the player at the counter: the banner).
+            if (d.Team == Team.Enemy && g.PodAtWaverPoint(d))
+            {
+                var (alive, orig) = g.PodStrength(d.PodId);
+                if (g.BannerNear(d)) flags.Add(($"POD {alive}/{orig}", "HELD BY BANNER", Pal.Foe));
+                else                 flags.Add(($"POD {alive}/{orig}", "NEXT KILL ROUTS", Pal.Suspect));
+            }
         }
 
         // Layout (W10, owner feedback): ONE modifier per line at a legible 13px with real line
@@ -1681,7 +1712,12 @@ public static class Hud
             Raylib.DrawTextEx(Cfg.Font, rules[i], new Vector2(rx, yy), 15, 1f, Raylib.Fade(Pal.Txt, 0.92f * a));
         }
 
-        // ---- buttons (START / CONTINUE) ----
+        // ---- buttons ----
+        // W12 coherent hierarchy: the CAMPAIGN verbs (CONTINUE/DEPLOY) are the only filled
+        // Pal.Friend primaries; LAST STAND keeps the sole Foe-red plate (danger mode); the four
+        // utility modes sit in a neutral-outline 2x2 grid of EQUAL width. One shared CAPTION SLOT
+        // (the old LAST STAND blurb line) explains whichever button the mouse is over.
+        var introMouse = Raylib.GetMousePosition();
         float btnIn = PanelAnim("introBtns", 0.3f, 0.55f);
         int by = ry0 + rules.Length * rowH + 28;
         by += (int)((1f - Util.EaseOutQuad(btnIn)) * 14f);
@@ -1692,7 +1728,7 @@ public static class Hud
             int bw = 220, gap = 22;
             OverlayBtn2 = new Rectangle(W / 2 - bw - gap / 2, by, bw, 50);
             OverlayBtn  = new Rectangle(W / 2 + gap / 2, by, bw, 50);
-            DrawOverlayButton(OverlayBtn2, secondBtn, Pal.Good, "C", btnIn);
+            DrawOverlayButton(OverlayBtn2, secondBtn, Pal.Friend, "C", btnIn);
             DrawOverlayButton(OverlayBtn, btn, Pal.Friend, null, btnIn);
         }
         else
@@ -1702,39 +1738,57 @@ public static class Hud
             DrawOverlayButton(OverlayBtn, btn, Pal.Friend, null, btnIn);
         }
 
-        // PROGRAM HORIZON W2: LAST STAND (endless horde survival) — a secondary mode button below
-        // DEPLOY/CONTINUE, with a persisted BEST WAVE label so the run has a target to beat.
+        // PROGRAM HORIZON W2: LAST STAND (endless horde survival) — the danger mode keeps the
+        // screen's ONLY red plate, with a persisted BEST WAVE label so the run has a target to beat.
         float lsIn = PanelAnim("introLastStand", 0.3f, 0.62f);
         int lsBy = by + 62;
         OverlayBtn3 = new Rectangle(W / 2 - 130, lsBy, 260, 44);
         DrawOverlayButton(OverlayBtn3, "LAST STAND", Pal.Foe, "L", lsIn);
-        int bestWave = g.EndlessBestWave;
-        string bestTxt = bestWave > 0 ? $"BEST: {bestWave} WAVE{(bestWave == 1 ? "" : "S")}" : "ENDLESS HORDE SURVIVAL";
-        Vector2 bwm = Raylib.MeasureTextEx(Cfg.Font, bestTxt, 12, 1f);
-        Raylib.DrawTextEx(Cfg.Font, bestTxt, new Vector2(W / 2f - bwm.X / 2f, lsBy + 50), 12, 1f,
-            Raylib.Fade(bestWave > 0 ? Pal.Foe : Pal.TxtDim, 0.8f * Util.EaseOutQuad(Util.Clamp(lsIn, 0f, 1f))));
 
-        // PROGRAM HORIZON W3: WAR ROOM (cross-run meta-progression) — a tertiary button below LAST STAND.
-        // Sits alongside the CODEX (W6) as a two-up row so neither crowds the footer.
+        // 2x2 utility grid: WAR ROOM / FIELD MANUAL / SKIRMISH / DAILY — same width, same
+        // neutral outline (no semantic fill: none of these is a danger or a primary verb).
         float wrIn = PanelAnim("introWarRoom", 0.3f, 0.68f);
-        int wrBy = lsBy + 74;
-        int miniW = 126, miniGap = 8;
-        OverlayBtn4 = new Rectangle(W / 2 - miniW - miniGap / 2, wrBy, miniW, 40);
-        DrawOverlayButton(OverlayBtn4, "WAR ROOM", Pal.Accent, "W", wrIn);
-
-        // PROGRAM HORIZON W6: CODEX / FIELD MANUAL — the in-game reference (button or key K).
         float cxIn = PanelAnim("introCodex", 0.3f, 0.72f);
-        OverlayBtn5 = new Rectangle(W / 2 + miniGap / 2, wrBy, miniW, 40);
-        DrawOverlayButton(OverlayBtn5, "FIELD MANUAL", Pal.Good, "K", cxIn);
-
-        // PROGRAM HORIZON W4: SKIRMISH (one custom fight) + DAILY (seeded challenge) — a two-up row
-        // completing the modes offering (DEPLOY / LAST STAND / SKIRMISH / DAILY). Sits below WAR ROOM/CODEX.
         float smIn = PanelAnim("introSkirmish", 0.3f, 0.76f);
+        int miniW = 172, miniGap = 12;
+        int wrBy = lsBy + 74;
+        OverlayBtn4 = new Rectangle(W / 2 - miniW - miniGap / 2, wrBy, miniW, 40);
+        DrawGhostButton(OverlayBtn4, "WAR ROOM", "W", wrIn);
+        OverlayBtn5 = new Rectangle(W / 2 + miniGap / 2, wrBy, miniW, 40);
+        DrawGhostButton(OverlayBtn5, "FIELD MANUAL", "K", cxIn);
         int smBy = wrBy + 48;
         OverlayBtn6 = new Rectangle(W / 2 - miniW - miniGap / 2, smBy, miniW, 40);
-        DrawOverlayButton(OverlayBtn6, "SKIRMISH", Pal.Friend, "S", smIn);
+        DrawGhostButton(OverlayBtn6, "SKIRMISH", "S", smIn);
         OverlayBtn7 = new Rectangle(W / 2 + miniGap / 2, smBy, miniW, 40);
-        DrawOverlayButton(OverlayBtn7, "DAILY", Pal.Accent, "Y", smIn);
+        DrawGhostButton(OverlayBtn7, "DAILY", "Y", smIn);
+
+        // ---- shared caption slot (between LAST STAND and the grid) ----
+        // Hovering ANY mode button explains it here; at rest it carries LAST STAND's best-wave
+        // target (the line's historical job), so the slot is never empty chrome.
+        int bestWave = g.EndlessBestWave;
+        string caption; Color capCol = Pal.TxtDim;
+        if (Raylib.CheckCollisionPointRec(introMouse, OverlayBtn))
+            caption = "NEW CAMPAIGN - draft a squad, pick a doctrine, survive 6 operations";
+        else if (secondBtn != null && Raylib.CheckCollisionPointRec(introMouse, OverlayBtn2))
+            caption = "CONTINUE - resume your saved campaign run";
+        else if (Raylib.CheckCollisionPointRec(introMouse, OverlayBtn3))
+        { caption = "LAST STAND - endless horde survival; how many waves can you hold?"; capCol = Pal.Foe; }
+        else if (Raylib.CheckCollisionPointRec(introMouse, OverlayBtn4))
+            caption = "WAR ROOM - spend salvage on unlocks; achievements + hall of fame";
+        else if (Raylib.CheckCollisionPointRec(introMouse, OverlayBtn5))
+            caption = "FIELD MANUAL - every enemy, class and rule in one reference";
+        else if (Raylib.CheckCollisionPointRec(introMouse, OverlayBtn6))
+            caption = "SKIRMISH - one custom fight; pick the objective and the heat";
+        else if (Raylib.CheckCollisionPointRec(introMouse, OverlayBtn7))
+            caption = "DAILY - today's seeded run, one attempt, ranked by turns";
+        else
+        {
+            caption = bestWave > 0 ? $"LAST STAND BEST: {bestWave} WAVE{(bestWave == 1 ? "" : "S")}" : "ENDLESS HORDE SURVIVAL";
+            if (bestWave > 0) capCol = Pal.Foe;
+        }
+        Vector2 bwm = Raylib.MeasureTextEx(Cfg.Font, caption, 12, 1f);
+        Raylib.DrawTextEx(Cfg.Font, caption, new Vector2((int)(W / 2f - bwm.X / 2f), lsBy + 50), 12, 1f,
+            Raylib.Fade(capCol, 0.9f * Util.EaseOutQuad(Util.Clamp(lsIn, 0f, 1f))));
 
         // a faint version/footer stamp
         Raylib.DrawTextEx(Cfg.Font, "GEOMETRY · PARTICLES · NO QUARTER", new Vector2(W / 2f - 150, H - 30), 11, 1f, Raylib.Fade(Pal.TxtDim, 0.6f));
@@ -2002,8 +2056,10 @@ public static class Hud
         int bw2 = 200;
         OverlayBtn  = new Rectangle(W / 2 - (bw1 + bgap + bw2) / 2, by, bw1, 46);
         OverlayBtn2 = new Rectangle(OverlayBtn.X + bw1 + bgap, by, bw2, 46);
-        DrawOverlayButton(OverlayBtn, newRun, win ? Pal.Good : Pal.Friend, null, btnIn);
-        DrawOverlayButton(OverlayBtn2, "MAIN MENU", Pal.TxtDim, "Esc", btnIn);
+        // W12 hierarchy: the forward verb keeps the filled Pal.Friend primary plate (matching the
+        // intro's CONTINUE/DEPLOY); MAIN MENU drops to the neutral-outline ghost.
+        DrawOverlayButton(OverlayBtn, newRun, Pal.Friend, null, btnIn);
+        DrawGhostButton(OverlayBtn2, "MAIN MENU", "Esc", btnIn);
     }
 
     // ============================================================================
@@ -2045,10 +2101,11 @@ public static class Hud
         int rowY = py + 34;
         Raylib.DrawTextEx(Cfg.Font, "OBJECTIVE", new Vector2(px + 28, rowY), 13, 1f, Raylib.Fade(Pal.TxtDim, pIn));
         int cyc = rowY + 26, cycH = 44;
+        // W12: steppers are utilities, not verbs — neutral ghosts (red stays LAST STAND's).
         SkirmObjPrev = new Rectangle(px + 28, cyc, 44, cycH);
         SkirmObjNext = new Rectangle(px + pw - 28 - 44, cyc, 44, cycH);
-        DrawOverlayButton(SkirmObjPrev, "<", Pal.Friend, null, pIn);
-        DrawOverlayButton(SkirmObjNext, ">", Pal.Friend, null, pIn);
+        DrawGhostButton(SkirmObjPrev, "<", null, pIn);
+        DrawGhostButton(SkirmObjNext, ">", null, pIn);
         var objBox = new Rectangle(px + 84, cyc, pw - 84 * 2, cycH);
         Raylib.DrawRectangleRounded(objBox, 0.16f, 8, Raylib.Fade(Pal.Bg, 0.6f * pIn));
         Raylib.DrawRectangleLinesEx(objBox, 1.2f, Raylib.Fade(Pal.Accent, 0.4f * pIn));
@@ -2063,23 +2120,27 @@ public static class Hud
         int hy = hRowY + 26, hH = 40;
         SkirmHeatMinus = new Rectangle(px + 28, hy, 44, hH);
         SkirmHeatPlus  = new Rectangle(px + 28 + 44 + 8 + 120, hy, 44, hH);
-        DrawOverlayButton(SkirmHeatMinus, "-", Pal.Foe, null, pIn);
-        DrawOverlayButton(SkirmHeatPlus, "+", Pal.Foe, null, pIn);
+        DrawGhostButton(SkirmHeatMinus, "-", null, pIn);
+        DrawGhostButton(SkirmHeatPlus, "+", null, pIn);
         var heatBox = new Rectangle(px + 28 + 44 + 8, hy, 120, hH);
         Raylib.DrawRectangleRounded(heatBox, 0.2f, 8, Raylib.Fade(Pal.Bg, 0.6f * pIn));
         string heatTxt = g.SkirmishHeat > 0 ? $"HEAT {g.SkirmishHeat}" : "STANDARD";
         Color heatCol = g.SkirmishHeat > 0 ? Pal.Foe : Pal.TxtDim;
         CenterText(heatTxt, heatBox, 18, Raylib.Fade(heatCol, pIn));
+        // W12: the unlock hint brightened a step — it is the ladder's call to action, not chrome.
         string cap = g.UnlockedHeat > 0 ? $"unlocked to {g.UnlockedHeat}" : "win at heat to unlock more";
-        Raylib.DrawTextEx(Cfg.Font, cap, new Vector2(px + 28 + 44 + 8 + 120 + 44 + 14, hy + 12), 12, 1f, Raylib.Fade(Pal.TxtDim, 0.8f * pIn));
+        Raylib.DrawTextEx(Cfg.Font, cap, new Vector2(px + 28 + 44 + 8 + 120 + 44 + 14, hy + 12), 12, 1f,
+            Raylib.Fade(g.UnlockedHeat > 0 ? Pal.RGBA(164, 178, 198) : Pal.Accent, pIn));
 
         // --- START / BACK ---
+        // W12 one-button baseline: DEPLOY is the screen's single filled primary (Pal.Friend, the
+        // same verb-plate the intro uses); BACK drops to the neutral-outline ghost.
         float btnIn = PanelAnim("skBtns", 0.3f, 0.35f);
         int bY = py + ph - 56;
         SkirmStart = new Rectangle(px + pw / 2 - 8 - 150, bY, 150, 44);
         SkirmBack  = new Rectangle(px + pw / 2 + 8, bY, 130, 44);
-        DrawOverlayButton(SkirmStart, "DEPLOY", Pal.Good, null, btnIn);
-        DrawOverlayButton(SkirmBack, "BACK", Pal.TxtDim, "Esc", btnIn);
+        DrawOverlayButton(SkirmStart, "DEPLOY", Pal.Friend, null, btnIn);
+        DrawGhostButton(SkirmBack, "BACK", "Esc", btnIn);
 
         Raylib.DrawTextEx(Cfg.Font, "< > objective   ·   +/- heat   ·   ENTER deploy",
             new Vector2(W / 2f - 170, py + ph + 18), 12, 1f, Raylib.Fade(Pal.TxtDim, 0.6f));
@@ -2115,9 +2176,17 @@ public static class Hud
         string salv = $"SALVAGE  {p.Salvage}";
         Vector2 svm = Raylib.MeasureTextEx(Cfg.Font, salv, 26, 1f);
         Raylib.DrawTextEx(Cfg.Font, salv, new Vector2(W / 2f - svm.X / 2f, ty + tfs + 6), 26, 1f, Raylib.Fade(Pal.VipGold, titleIn));
-        string life = $"RUNS {p.Runs}   ·   WINS {p.Wins}   ·   BEST MISSION {p.BestMissions}   ·   BEST WAVE {p.BestWave}   ·   VETERANS {p.Veterans}/{SaveGame.MaxVeterans}";
+        // W9: the DAILY STREAK joins the lifetime strip (gold while alive so the habit loop reads)
+        string life = $"RUNS {p.Runs}   ·   WINS {p.Wins}   ·   BEST MISSION {p.BestMissions}   ·   BEST WAVE {p.BestWave}   ·   VETERANS {p.Veterans}/{SaveGame.MaxVeterans}   ·   DAILY STREAK {p.DailyStreak}";
         Vector2 lfm = Raylib.MeasureTextEx(Cfg.Font, life, 13, 1f);
         Raylib.DrawTextEx(Cfg.Font, life, new Vector2(W / 2f - lfm.X / 2f, ty + tfs + 40), 13, 1f, Raylib.Fade(Pal.TxtDim, titleIn));
+        if (p.DailyStreak > 0)
+        {
+            // re-draw just the streak segment in gold over the dim strip (right-aligned tail)
+            string tail = $"DAILY STREAK {p.DailyStreak}";
+            Vector2 tlm = Raylib.MeasureTextEx(Cfg.Font, tail, 13, 1f);
+            Raylib.DrawTextEx(Cfg.Font, tail, new Vector2(W / 2f - lfm.X / 2f + lfm.X - tlm.X, ty + tfs + 40), 13, 1f, Raylib.Fade(Pal.VipGold, titleIn));
+        }
 
         // ---- three-column layout: ACHIEVEMENTS | HALL OF FAME | UNLOCKS ----
         int top = (int)(ty + tfs + 66);
@@ -2300,6 +2369,30 @@ public static class Hud
         Raylib.DrawTextEx(Cfg.Font, header, new Vector2(panel.X + 14, panel.Y + 12), 15, 1f, Raylib.Fade(accent, anim));
     }
 
+    /// W12: measurable progress toward an achievement, read purely from the profile snapshot.
+    /// Binary feats (FLAWLESS, DAILY_WIN) read 0-or-done; heat feats read the best WON heat that
+    /// the (capped) legends list still remembers — a preview, not a ledger.
+    static (int cur, int max) AchProgress(Game.WarRoomProfile p, string id)
+    {
+        int wonHeat = 0;
+        if (p.Legends != null)
+            foreach (var l in p.Legends)
+                if (l.Won && l.Heat > wonHeat) wonHeat = l.Heat;
+        return id switch
+        {
+            "FIRST_WIN" => (Math.Min(p.Wins, 1), 1),
+            "HEAT3" => (Math.Min(wonHeat, 3), 3),
+            "HEAT6" => (Math.Min(wonHeat, 6), 6),
+            "FLAWLESS" => (0, 1),
+            "DEEP" => (Math.Min(p.BestMissions, 6), 6),
+            "STAND5" => (Math.Min(p.BestWave, 5), 5),
+            "STAND10" => (Math.Min(p.BestWave, 10), 10),
+            "DAILY_WIN" => (p.DailyStreak > 0 ? 1 : 0, 1),
+            "STREAK5" => (Math.Min(p.DailyStreak, 5), 5),
+            _ => (0, 1),
+        };
+    }
+
     static void DrawWarAchievements(Game.WarRoomProfile p, int x, int y, int w, int h, float anim)
     {
         if (anim <= 0f) return;
@@ -2307,17 +2400,34 @@ public static class Hud
         int rowY = y + 44;
         foreach (var a in MetaProg.All)
         {
-            if (rowY > y + h - 30) break;
+            if (rowY > y + h - 40) break;
             bool got = p.Achievements.Contains(a.Id);
-            Color nameCol = got ? Pal.VipGold : Pal.TxtDim;
-            float rowA = anim * (got ? 1f : 0.55f);
+            Color nameCol = got ? Pal.VipGold : Pal.Txt;
+            float rowA = anim * (got ? 1f : 0.7f);
             // a small filled/empty marker
             var mk = new Rectangle(x + 14, rowY + 2, 12, 12);
             if (got) Raylib.DrawRectangleRounded(mk, 0.3f, 4, Raylib.Fade(Pal.VipGold, rowA));
             else Raylib.DrawRectangleLinesEx(mk, 1.2f, Raylib.Fade(Pal.TxtDim, rowA));
             Raylib.DrawTextEx(Cfg.Font, a.Name, new Vector2(x + 34, rowY), 14, 1f, Raylib.Fade(nameCol, rowA));
-            Raylib.DrawTextEx(Cfg.Font, a.Desc, new Vector2(x + 34, rowY + 16), 11, 1f, Raylib.Fade(Pal.TxtDim, rowA));
-            rowY += 38;
+            Raylib.DrawTextEx(Cfg.Font, Clip(a.Desc, 11, w - 34 - 112), new Vector2(x + 34, rowY + 16), 11, 1f, Raylib.Fade(Pal.TxtDim, rowA));
+            // W12: a per-achievement PROGRESS BAR (right lane) — earned = full gold; in-progress
+            // = amber fill with the cur/max fraction, so "how close am I?" reads at a glance.
+            // Review fix: an UNEARNED achievement caps its shown progress at max-1 — a full bar
+            // beside an empty checkbox (possible when the profile stat outran a stale/demo award
+            // set) would read as a contradiction, and only the award itself may fill the bar.
+            var (cur, max) = got ? (1, 1) : AchProgress(p, a.Id);
+            if (!got) cur = Math.Min(cur, max - 1);
+            string fracTxt = got ? "DONE" : $"{cur}/{max}";
+            float ftw = Raylib.MeasureTextEx(Cfg.Font, fracTxt, 11, 1f).X;
+            Raylib.DrawTextEx(Cfg.Font, fracTxt, new Vector2((int)(x + w - 12 - ftw), rowY + 2), 11, 1f,
+                Raylib.Fade(got ? Pal.VipGold : Pal.TxtDim, rowA));
+            var bar = new Rectangle(x + w - 12 - 88, rowY + 18, 88, 7);
+            Raylib.DrawRectangleRounded(bar, 0.5f, 4, Raylib.Fade(Pal.RGBA(10, 15, 21), rowA));
+            float frac = max > 0 ? cur / (float)max : 0f;
+            if (frac > 0f)
+                Raylib.DrawRectangleRounded(new Rectangle(bar.X, bar.Y, bar.Width * frac, bar.Height), 0.5f, 4,
+                    Raylib.Fade(got ? Pal.VipGold : Pal.Accent, rowA));
+            rowY += 42;
         }
     }
 
@@ -2351,40 +2461,83 @@ public static class Hud
         if (anim <= 0f) return;
         DrawWarPanel(new Rectangle(x, y, w, h), "UNLOCKS", Pal.Good, anim);
         int rowY = y + 44;
+
+        // W12: the column leads with a NEXT UNLOCK preview — the cheapest unowned unlock, with a
+        // live salvage-progress bar toward its price. The rest of the catalogue (incl. W9's
+        // CROSS-TRAINING / QUARTERMASTER / STANDING RESERVE) lists below; OWNED entries collapse
+        // to one-line receipts so the column stays a shop, not a ledger.
+        MetaUnlock? next = null;
+        int nextCost = int.MaxValue;
         foreach (var u in MetaProg.AllUnlocks)
+            if (!p.Unlocks.Contains((int)u) && MetaProg.UnlockCost(u) < nextCost)
+            { next = u; nextCost = MetaProg.UnlockCost(u); }
+
+        if (next.HasValue)
         {
-            if (rowY > y + h - 74) break;
-            bool owned = p.Unlocks.Contains((int)u);
-            int cost = MetaProg.UnlockCost(u);
-            bool afford = p.Salvage >= cost;
-
-            var card = new Rectangle(x + 12, rowY, w - 24, 72);
-            Raylib.DrawRectangleRounded(card, 0.08f, 6, Raylib.Fade(Pal.RGBA(14, 20, 28), 0.9f * anim));
-            Raylib.DrawRectangleLinesEx(card, 1f, Raylib.Fade(owned ? Pal.Good : Pal.PanelBd, 0.6f * anim));
-
-            Raylib.DrawTextEx(Cfg.Font, MetaProg.UnlockName(u), new Vector2(card.X + 12, card.Y + 8), 14, 1f, Raylib.Fade(Pal.Txt, anim));
-            // word-wrapped description, up to 2 lines
+            var u = next.Value;
+            bool afford = p.Salvage >= nextCost;
+            var card = new Rectangle(x + 12, rowY, w - 24, 96);
+            Raylib.DrawRectangleRounded(card, 0.08f, 6, Raylib.Fade(Pal.RGBA(24, 22, 12), 0.92f * anim));
+            Raylib.DrawRectangleLinesEx(card, 1.4f, Raylib.Fade(Pal.VipGold, 0.75f * anim));
+            Raylib.DrawTextEx(Cfg.Font, "NEXT UNLOCK", new Vector2(card.X + 12, card.Y + 7), 11, 1f, Raylib.Fade(Pal.VipGold, anim));
+            Raylib.DrawTextEx(Cfg.Font, MetaProg.UnlockName(u), new Vector2(card.X + 12, card.Y + 22), 16, 1f, Raylib.Fade(Pal.Txt, anim));
             var descLines = WrapText(MetaProg.UnlockDesc(u), 11, (int)card.Width - 24);
             for (int li = 0; li < descLines.Count && li < 2; li++)
-                Raylib.DrawTextEx(Cfg.Font, descLines[li], new Vector2(card.X + 12, card.Y + 26 + li * 13), 11, 1f, Raylib.Fade(Pal.TxtDim, anim));
+                Raylib.DrawTextEx(Cfg.Font, descLines[li], new Vector2(card.X + 12, card.Y + 44 + li * 13), 11, 1f, Raylib.Fade(Pal.TxtDim, anim));
+            // salvage progress toward the price + the BUY chip
+            var bar = new Rectangle(card.X + 12, card.Y + 76, card.Width - 116, 8);
+            Raylib.DrawRectangleRounded(bar, 0.5f, 4, Raylib.Fade(Pal.RGBA(10, 15, 21), anim));
+            float bfrac = Util.Clamp(p.Salvage / (float)Math.Max(1, nextCost), 0f, 1f);
+            if (bfrac > 0f)
+                Raylib.DrawRectangleRounded(new Rectangle(bar.X, bar.Y, bar.Width * bfrac, bar.Height), 0.5f, 4,
+                    Raylib.Fade(afford ? Pal.Good : Pal.VipGold, anim));
+            string bank = afford ? "READY" : $"{p.Salvage}/{nextCost}";
+            var chip = new Rectangle(card.X + card.Width - 92, card.Y + card.Height - 28, 80, 20);
+            bool hover = afford && Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), chip);
+            Color chipCol = afford ? (hover ? Pal.Good : Pal.RGBA(30, 44, 34)) : Pal.RGBA(26, 22, 16);
+            Raylib.DrawRectangleRounded(chip, 0.3f, 6, Raylib.Fade(chipCol, anim));
+            Raylib.DrawRectangleLinesEx(chip, 1f, Raylib.Fade(afford ? Pal.Good : Pal.VipGold, 0.6f * anim));
+            CenterText(afford ? $"BUY {nextCost}" : bank, chip, 12, Raylib.Fade(afford ? Pal.Txt : Pal.VipGold, anim));
+            WarRoomBuyBtns.Add((u, chip));
+            rowY += 106;
+        }
 
-            // BUY / OWNED chip, right side
-            var chip = new Rectangle(card.X + card.Width - 92, card.Y + card.Height - 26, 80, 20);
-            if (owned)
-            {
-                Raylib.DrawRectangleRounded(chip, 0.3f, 6, Raylib.Fade(Pal.Good, 0.22f * anim));
-                CenterText("OWNED", chip, 12, Raylib.Fade(Pal.Good, anim));
-            }
-            else
-            {
-                bool hover = afford && Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), chip);
-                Color chipCol = afford ? (hover ? Pal.Good : Pal.RGBA(30, 44, 34)) : Pal.RGBA(30, 24, 24);
-                Raylib.DrawRectangleRounded(chip, 0.3f, 6, Raylib.Fade(chipCol, anim));
-                Raylib.DrawRectangleLinesEx(chip, 1f, Raylib.Fade(afford ? Pal.Good : Pal.Foe, 0.6f * anim));
-                CenterText($"BUY {cost}", chip, 12, Raylib.Fade(afford ? Pal.Txt : Pal.TxtDim, anim));
-                WarRoomBuyBtns.Add((u, chip));   // hit-testable regardless of affordability (Game refuses)
-            }
-            rowY += 82;
+        // remaining unowned unlocks: compact cards
+        foreach (var u in MetaProg.AllUnlocks)
+        {
+            if (p.Unlocks.Contains((int)u) || (next.HasValue && u == next.Value)) continue;
+            if (rowY > y + h - 58) break;
+            int cost = MetaProg.UnlockCost(u);
+            bool afford = p.Salvage >= cost;
+            var card = new Rectangle(x + 12, rowY, w - 24, 62);
+            Raylib.DrawRectangleRounded(card, 0.10f, 6, Raylib.Fade(Pal.RGBA(14, 20, 28), 0.9f * anim));
+            Raylib.DrawRectangleLinesEx(card, 1f, Raylib.Fade(Pal.PanelBd, 0.6f * anim));
+            Raylib.DrawTextEx(Cfg.Font, MetaProg.UnlockName(u), new Vector2(card.X + 12, card.Y + 7), 14, 1f, Raylib.Fade(Pal.Txt, anim));
+            var dl = WrapText(MetaProg.UnlockDesc(u), 11, (int)card.Width - 24);
+            for (int li = 0; li < dl.Count && li < 2; li++)
+                Raylib.DrawTextEx(Cfg.Font, dl[li], new Vector2(card.X + 12, card.Y + 27 + li * 13), 11, 1f, Raylib.Fade(Pal.TxtDim, anim));
+            var chip = new Rectangle(card.X + card.Width - 82, card.Y + 5, 70, 18);
+            bool hover = afford && Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), chip);
+            Color chipCol = afford ? (hover ? Pal.Good : Pal.RGBA(30, 44, 34)) : Pal.RGBA(30, 24, 24);
+            Raylib.DrawRectangleRounded(chip, 0.3f, 6, Raylib.Fade(chipCol, anim));
+            Raylib.DrawRectangleLinesEx(chip, 1f, Raylib.Fade(afford ? Pal.Good : Pal.Foe, 0.6f * anim));
+            CenterText($"BUY {cost}", chip, 11, Raylib.Fade(afford ? Pal.Txt : Pal.TxtDim, anim));
+            WarRoomBuyBtns.Add((u, chip));   // hit-testable regardless of affordability (Game refuses)
+            rowY += 70;
+        }
+
+        // owned unlocks: one-line receipts
+        foreach (var u in MetaProg.AllUnlocks)
+        {
+            if (!p.Unlocks.Contains((int)u)) continue;
+            if (rowY > y + h - 26) break;
+            var mk = new Rectangle(x + 16, rowY + 3, 10, 10);
+            Raylib.DrawRectangleRounded(mk, 0.3f, 4, Raylib.Fade(Pal.Good, 0.9f * anim));
+            Raylib.DrawTextEx(Cfg.Font, MetaProg.UnlockName(u), new Vector2(x + 34, rowY), 13, 1f, Raylib.Fade(Pal.Txt, 0.8f * anim));
+            string own = "OWNED";
+            float ow = Raylib.MeasureTextEx(Cfg.Font, own, 11, 1f).X;
+            Raylib.DrawTextEx(Cfg.Font, own, new Vector2((int)(x + w - 16 - ow), rowY + 2), 11, 1f, Raylib.Fade(Pal.Good, 0.75f * anim));
+            rowY += 24;
         }
     }
 
@@ -2647,9 +2800,15 @@ public static class Hud
         string title = "ASSEMBLE STRIKE TEAM";
         var tm = Raylib.MeasureTextEx(Cfg.Font, title, 40, 2f);
         Raylib.DrawTextEx(Cfg.Font, title, new Vector2(W / 2f - tm.X / 2f, 26), 40, 2f, Pal.Txt);
-        string sub = $"Pick {Game.DraftCap} operators + a starting doctrine — this is your run's thesis.";
+        // W12 first-run onboarding: when a RECOMMENDED loadout is pre-selected, the subtitle says
+        // so — a brand-new player can press DEPLOY immediately, or re-pick anything. Reverts to the
+        // standard line once nothing is picked any more (e.g. after a paid pool re-roll).
+        bool recActive = g.DraftHasRecommendation && g.DraftPicked.Count > 0;
+        string sub = recActive
+            ? "A recommended first squad is pre-selected - press DEPLOY, or re-pick anything."
+            : $"Pick {Game.DraftCap} operators + a starting doctrine — this is your run's thesis.";
         var sm = Raylib.MeasureTextEx(Cfg.Font, sub, 15, 1f);
-        Raylib.DrawTextEx(Cfg.Font, sub, new Vector2(W / 2f - sm.X / 2f, 74), 15, 1f, Pal.TxtDim);
+        Raylib.DrawTextEx(Cfg.Font, sub, new Vector2(W / 2f - sm.X / 2f, 74), 15, 1f, recActive ? Pal.Good : Pal.TxtDim);
 
         // selection counter
         int picked = g.DraftPicked.Count;
@@ -2657,6 +2816,19 @@ public static class Hud
         Color cntCol = picked == Game.DraftCap ? Pal.Good : Pal.Accent;
         var cm = Raylib.MeasureTextEx(Cfg.Font, cnt, 18, 1f);
         Raylib.DrawTextEx(Cfg.Font, cnt, new Vector2(W / 2f - cm.X / 2f, 98), 18, 1f, cntCol);
+
+        // W9: the SALVAGE bank + the live recall bill, whenever the pool carries a priced veteran.
+        // Reads only the cached g.DraftSalvage (loaded at BeginDraft) — never disk, never per frame.
+        bool anyVet = false;
+        foreach (var u0 in g.DraftPool) if (u0.FromReserve) { anyVet = true; break; }
+        if (anyVet)
+        {
+            int bill = g.DraftRecallCost;
+            string bank = bill > 0 ? $"SALVAGE  {g.DraftSalvage}   ·   RECALL BILL  {bill}" : $"SALVAGE  {g.DraftSalvage}";
+            var bkm = Raylib.MeasureTextEx(Cfg.Font, bank, 14, 1f);
+            Color bankCol = bill > 0 && !g.DraftRecallAffordable ? Pal.Foe : Pal.VipGold;
+            Raylib.DrawTextEx(Cfg.Font, bank, new Vector2(W - bkm.X - 40, 100), 14, 1f, bankCol);
+        }
 
         // ---- candidate cards: 6 in two rows of 3 ----
         int cols = 3, cw = 300, chH = 150, gx = 24, gy = 18;
@@ -2685,6 +2857,11 @@ public static class Hud
             int px = (int)r.X + 16, py = (int)r.Y + 12;
             // VETERAN ribbon (top-right corner). A small gold diamond marker (drawn, not a font glyph —
             // the baked atlas has no star) + the word, so it reads in any palette.
+            // W9: an individually unaffordable veteran greys like a full-team card (still clickable —
+            // only CONFIRM refuses, so picks stay rearrangeable toward what the bank can cover).
+            int recall = vet ? MetaProg.RecallCost(u.Rank) : 0;
+            bool broke = vet && recall > g.DraftSalvage;
+            if (broke && !sel) a = Math.Min(a, 0.55f);
             if (vet)
             {
                 string vtag = "VETERAN";
@@ -2693,6 +2870,12 @@ public static class Hud
                 Raylib.DrawTextEx(Cfg.Font, vtag, new Vector2(vx, py + 2), 12, 1f, Raylib.Fade(Pal.VipGold, a));
                 float dcy = py + 8;
                 Raylib.DrawPoly(new Vector2(vx - 8, dcy), 4, 4f, 45f, Raylib.Fade(Pal.VipGold, a));
+                // W9 priced recall: the fee (10+8xRank), right-aligned under the ribbon. Red when the
+                // bank can't cover this card alone; charged only at CONFIRM (never at pick time).
+                string fee = $"RECALL {recall}";
+                var fm = Raylib.MeasureTextEx(Cfg.Font, fee, 12, 1f);
+                Raylib.DrawTextEx(Cfg.Font, fee, new Vector2(r.X + cw - fm.X - 12, py + 18), 12, 1f,
+                    Raylib.Fade(broke ? Pal.Foe : Pal.VipGold, a));
             }
             // name — nickname shown for veterans who earned one; class label drawn inline ONLY for fresh
             // recruits (a veteran's longer FullName + the corner ribbon would collide; its class goes in
@@ -2725,6 +2908,25 @@ public static class Hud
             Color tagCol = sel ? Pal.Good : (full ? Pal.TxtDim : (hover ? Pal.Friend : Pal.Accent));
             Raylib.DrawTextEx(Cfg.Font, tag, new Vector2(px, (int)r.Y + chH - 22), 13, 1f, Raylib.Fade(tagCol, a));
 
+            // W12: the board's class silhouette anchors the card's bottom-right corner — the same
+            // shape the battlefield (and now the barracks/roster) draws, on a faint backing disc.
+            var glyP = new Vector2(r.X + cw - 34, r.Y + chH - 36);
+            Color glyC = vet ? Pal.VipGold : Pal.Friend;
+            Raylib.DrawCircleV(glyP, 22f, Raylib.Fade(glyC, 0.08f * a));
+            Renderer.DrawCodexGlyph(u.Cls, glyP, Raylib.Fade(glyC, 0.9f * a), 1.35f);
+
+            // W12 first-run RECOMMENDED badge (fresh recruits only, so it never fights the
+            // VETERAN ribbon that owns the same corner on recalled cards).
+            if (!vet && g.DraftRecommended.Contains(u))
+            {
+                string rec = "RECOMMENDED";
+                var rm = Raylib.MeasureTextEx(Cfg.Font, rec, 11, 1f);
+                var chipR = new Rectangle(r.X + cw - rm.X - 24, py + 2, rm.X + 14, 17);
+                Raylib.DrawRectangleRounded(chipR, 0.4f, 6, Raylib.Fade(Pal.Good, 0.16f * a));
+                Raylib.DrawRectangleLinesEx(chipR, 1f, Raylib.Fade(Pal.Good, 0.7f * a));
+                CenterText(rec, chipR, 11, Raylib.Fade(Pal.Good, a));
+            }
+
             DraftCardBtns.Add((u, r));
         }
 
@@ -2750,6 +2952,16 @@ public static class Hud
             Raylib.DrawTextEx(Cfg.Font, BoonDef.Name(boon), new Vector2((int)r.X + 14, (int)r.Y + 10), 18, 1f, sel ? Pal.VipGold : Pal.Txt);
             foreach (var (line, dy) in WrapLines(BoonDef.Desc(boon), bcw - 28, 13, 0))
                 Raylib.DrawTextEx(Cfg.Font, line, new Vector2((int)r.X + 14, (int)r.Y + 38 + dy), 13, 1f, Pal.TxtDim);
+            // W12 first-run RECOMMENDED badge on the pre-selected safe doctrine (top-right corner).
+            if (g.DraftRecommendedBoon.HasValue && g.DraftRecommendedBoon.Value == boon)
+            {
+                string rec = "RECOMMENDED";
+                var rm = Raylib.MeasureTextEx(Cfg.Font, rec, 11, 1f);
+                var chipR = new Rectangle(r.X + bcw - rm.X - 24, r.Y + 8, rm.X + 14, 17);
+                Raylib.DrawRectangleRounded(chipR, 0.4f, 6, Raylib.Fade(Pal.Good, 0.16f));
+                Raylib.DrawRectangleLinesEx(chipR, 1f, Raylib.Fade(Pal.Good, 0.7f));
+                CenterText(rec, chipR, 11, Pal.Good);
+            }
             DraftBoonBtns.Add((boon, r));
         }
 
@@ -2794,25 +3006,45 @@ public static class Hud
         Raylib.DrawTextEx(Cfg.Font, m1, new Vector2(W / 2f - m1m.X / 2f, infoY), 14, 1f, Pal.TxtDim);
 
         // ---- DEPLOY button (greyed until exactly DraftCap soldiers + a boon are chosen) ----
+        // W9: a complete draft whose recall bill exceeds the bank shows the SHORTFALL instead —
+        // ConfirmDraft refuses it, so the button is honest about why nothing will happen.
         bool ready = g.DraftReady;
+        bool payable = g.DraftRecallAffordable;
+        int recallBill = g.DraftRecallCost;
         int dbw = 280, dbh = 46;
         DraftConfirm = new Rectangle(W / 2 - dbw / 2, infoY + 22, dbw, dbh);
-        bool dhover = ready && Raylib.CheckCollisionPointRec(mouse, DraftConfirm);
-        Color deployCol = ready ? (dhover ? Pal.RGBA(92, 200, 251) : Pal.Good) : Pal.RGBA(40, 50, 63);
+        bool dhover = ready && payable && Raylib.CheckCollisionPointRec(mouse, DraftConfirm);
+        Color deployCol = ready && payable ? (dhover ? Pal.RGBA(92, 200, 251) : Pal.Good)
+                        : (ready ? Pal.RGBA(64, 34, 34) : Pal.RGBA(40, 50, 63));
         if (dhover) Raylib.DrawRectangleRounded(new Rectangle(DraftConfirm.X - 3, DraftConfirm.Y - 3, dbw + 6, dbh + 6), 0.3f, 8, Raylib.Fade(deployCol, 0.25f));
-        Raylib.DrawRectangleRounded(DraftConfirm, 0.3f, 8, Raylib.Fade(deployCol, ready ? 1f : 0.5f));
-        string dl = ready ? "DEPLOY" : $"SELECT {Game.DraftCap - picked} MORE";
+        Raylib.DrawRectangleRounded(DraftConfirm, 0.3f, 8, Raylib.Fade(deployCol, ready && payable ? 1f : 0.5f));
+        string dl = ready ? (recallBill > 0 ? $"DEPLOY  (PAY {recallBill} SALVAGE)" : "DEPLOY") : $"SELECT {Game.DraftCap - picked} MORE";
+        if (ready && !payable) dl = $"NEED {recallBill - g.DraftSalvage} MORE SALVAGE";
         // when all 4 are picked but no doctrine chosen, the "SELECT 0 MORE" default is wrong -> prompt the doctrine
         if (!ready && picked == Game.DraftCap && !g.DraftSelectedBoon.HasValue) dl = "PICK A DOCTRINE";
         var dlm = Raylib.MeasureTextEx(Cfg.Font, dl, 18, 1f);
-        Raylib.DrawTextEx(Cfg.Font, dl, new Vector2((int)(DraftConfirm.X + dbw / 2 - dlm.X / 2), (int)(DraftConfirm.Y + dbh / 2 - 9)), 18, 1f, ready ? Pal.RGBA(3, 18, 26) : Pal.TxtDim);
-        if (ready)
+        Raylib.DrawTextEx(Cfg.Font, dl, new Vector2((int)(DraftConfirm.X + dbw / 2 - dlm.X / 2), (int)(DraftConfirm.Y + dbh / 2 - 9)), 18, 1f,
+            ready && payable ? Pal.RGBA(3, 18, 26) : (ready ? Pal.Foe : Pal.TxtDim));
+        if (ready && payable)
             Raylib.DrawTextEx(Cfg.Font, "[ENTER]", new Vector2((int)(DraftConfirm.X + dbw - 56), (int)(DraftConfirm.Y + dbh - 16)), 11, 1f, Pal.RGBA(3, 18, 26));
 
         // ---- BACK to the intro (W1 mode-seam: the skirmish setup's escape hatch, mirrored) ----
+        // W12: neutral-outline ghost — BACK is never a primary verb, so it never gets a filled plate.
         int bkw = 120;
         DraftBack = new Rectangle(DraftConfirm.X - bkw - 14, DraftConfirm.Y, bkw, dbh);
-        DrawOverlayButton(DraftBack, "BACK", Pal.TxtDim, "Esc", 1f);
+        DrawGhostButton(DraftBack, "BACK", "Esc", 1f);
+
+        // ---- W9: paid pool RE-ROLL (repeatable salvage sink; Game refuses the click when broke) ----
+        int rrw = 190;
+        DraftReroll = new Rectangle(DraftConfirm.X + dbw + 14, DraftConfirm.Y, rrw, dbh);
+        bool rrCan = g.DraftSalvage >= MetaProg.DraftRerollCost;
+        bool rrHov = rrCan && Raylib.CheckCollisionPointRec(mouse, DraftReroll);
+        Raylib.DrawRectangleRounded(DraftReroll, 0.3f, 8, rrHov ? Pal.RGBA(30, 44, 34) : Pal.RGBA(14, 20, 28));
+        Raylib.DrawRectangleLinesEx(DraftReroll, 1.4f, rrCan ? (rrHov ? Pal.VipGold : Pal.PanelBd) : Pal.RGBA(40, 46, 54));
+        string rrl = $"RE-ROLL POOL  ({MetaProg.DraftRerollCost} SALV)";
+        var rrm = Raylib.MeasureTextEx(Cfg.Font, rrl, 13, 1f);
+        Raylib.DrawTextEx(Cfg.Font, rrl, new Vector2((int)(DraftReroll.X + rrw / 2 - rrm.X / 2), (int)(DraftReroll.Y + dbh / 2 - 7)), 13, 1f,
+            rrCan ? (rrHov ? Pal.VipGold : Pal.Txt) : Pal.TxtDim);
     }
 
     /// A short prose role one-liner per class, for the draft candidate cards.
@@ -2844,6 +3076,7 @@ public static class Hud
         var run = g.RunState;
         BenchBtns.Clear();   // clear before the shop/perk early-returns so no stale rects linger
         BoonBtns.Clear();
+        RehabBtns.Clear();   // W9: scar buy-off chips are re-published per frame by DrawSquadRow
         if (!g.ShopDone) { DrawRequisition(g); return; }
         if (run.PendingPerks.Count > 0) { DrawPerkChooser(g, run.PendingPerks[0]); return; }
         if (run.PendingSpecs.Count > 0) { DrawSpecChooser(g, run.PendingSpecs[0]); return; }   // W2: fork pick
@@ -2855,7 +3088,20 @@ public static class Hud
         int w = 700;
         int rows = squad.Count;
         const int rowPitch = 44;   // tightened so a full 6-soldier roster + debrief + map fits 800px tall
-        int h = 150 + 22 /*deploy header*/ + rows * rowPitch + Math.Min(run.Report.Count, 5) * 22 + 220;
+        // W12 — the campaign map is SIZED TO FIT: the fixed content above it is measured, and the
+        // map region gets ALL the panel height left inside the screen (clamped 150..250). A short
+        // roster/debrief earns a ~250px strategic map; the full 6-soldier + 5-report + KIA worst
+        // case still gets ~170px (>=14px nodes + labels + legend) inside a <=776px panel. The KIA
+        // line now RESERVES height too (it used to draw into the map header's slot when present).
+        int reportRows = Math.Min(run.Report.Count, 5);
+        int kiaRow = run.Fallen.Count > 0 ? 22 : 0;
+        bool hasMap = run.Map.Count > 0 && run.NextNodes().Count > 0;
+        int contentH = 100 /*title+sub*/ + 22 /*deploy header*/ + rows * rowPitch
+                     + 28 /*debrief header*/ + reportRows * 22 + kiaRow;
+        const int mapChrome = 24 /*section header*/ + 20 /*legend*/ + 14 /*bottom pad*/;
+        int mapH = hasMap ? Math.Clamp(Cfg.ScreenH - 24 - contentH - mapChrome, 150, 250)
+                          : 128;   // legacy deploy-card fallback keeps its fixed footprint
+        int h = contentH + mapChrome + mapH;
         int x = Cfg.ScreenW / 2 - w / 2;
         int y = Cfg.ScreenH / 2 - h / 2;
         // quick slide-down entrance (≈0.15s, settles well before any click on the map/bench)
@@ -2913,17 +3159,36 @@ public static class Hud
         }
 
         // next operation: pick a node on the branching campaign map (3.3).
-        if (run.Map.Count > 0 && run.NextNodes().Count > 0)
+        int mapTop = y + contentH;
+        if (hasMap)
         {
             string pick = "CAMPAIGN MAP  >  SELECT NEXT OPERATION";
-            Raylib.DrawTextEx(Cfg.Font, pick, new Vector2(x + w / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, pick, 15, 1f).X / 2, y + h - 162), 15, 1f, Pal.Accent);
-            DrawCampaignMap(run, new Rectangle(x + 24, y + h - 140, w - 48, 124));
+            Raylib.DrawTextEx(Cfg.Font, pick, new Vector2(x + w / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, pick, 15, 1f).X / 2, mapTop + 4), 15, 1f, Pal.Accent);
+            DrawCampaignMap(run, new Rectangle(x + 24, mapTop + 26, w - 48, mapH));
+            // W12: node-kind legend, one quiet centred row under the map (shape + colour redundant,
+            // so the map's coding reads without hovering every node — and survives SIGHTLINE_CB=1).
+            (string gly, string lbl, Color col)[] legend =
+            {
+                ("+", "SUPPLY", Pal.Good), ("!", "ELITE", Pal.Elite), ("?", "EVENT", Pal.Suspect), ("X", "BOSS", Pal.Foe),
+            };
+            float lw = 0f;
+            foreach (var it in legend)
+                lw += Raylib.MeasureTextEx(Cfg.Font, it.gly, 12, 1f).X + 5 + Raylib.MeasureTextEx(Cfg.Font, it.lbl, 11, 1f).X + 22;
+            float lx = x + w / 2f - (lw - 22) / 2f;
+            int ly = mapTop + 26 + mapH + 5;
+            foreach (var it in legend)
+            {
+                Raylib.DrawTextEx(Cfg.Font, it.gly, new Vector2((int)lx, ly), 12, 1f, it.col);
+                lx += Raylib.MeasureTextEx(Cfg.Font, it.gly, 12, 1f).X + 5;
+                Raylib.DrawTextEx(Cfg.Font, it.lbl, new Vector2((int)lx, ly + 1), 11, 1f, Pal.TxtDim);
+                lx += Raylib.MeasureTextEx(Cfg.Font, it.lbl, 11, 1f).X + 22;
+            }
         }
         else  // fallback: legacy deployment cards (only if the map is unavailable)
         {
             string pick = $"SELECT DEPLOYMENT  >  MISSION {run.Mission + 1}";
-            Raylib.DrawTextEx(Cfg.Font, pick, new Vector2(x + w / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, pick, 15, 1f).X / 2, y + h - 158), 15, 1f, Pal.Accent);
-            int cw = (w - 60 - 32) / 3, ch = 118, cy = y + h - 134, gap = 16;
+            Raylib.DrawTextEx(Cfg.Font, pick, new Vector2(x + w / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, pick, 15, 1f).X / 2, mapTop + 4), 15, 1f, Pal.Accent);
+            int cw = (w - 60 - 32) / 3, ch = 118, cy = mapTop + 28, gap = 16;
             for (int i = 0; i < run.Offers.Count && i < 3; i++)
             {
                 MissionCards[i] = new Rectangle(x + 30 + i * (cw + gap), cy, cw, ch);
@@ -2978,6 +3243,11 @@ public static class Hud
 
         var mouse = Raylib.GetMousePosition();
         MissionNode hovered = null;
+        // W12: node size follows the region — the sized-to-fit map (150..250px tall) affords
+        // bigger markers than the old fixed 124px strip did (base 10px radius grows to 12px
+        // once the region clears 200px; BOSS keeps its +3 emphasis).
+        float baseRad = region.Height >= 200 ? 12f : 10f;
+        int glyFs = region.Height >= 200 ? 16 : 14;
         // W9: labels only exist on the 1-2 reachable nodes, so remembering ONE previously
         // drawn label rect is enough to dodge every possible overprint at RowCount <= 3.
         Rectangle prevLabel = default;
@@ -2987,7 +3257,7 @@ public static class Hud
             Vector2 p = Center(n);
             bool isCur = cur != null && n.Id == cur.Id;
             bool canPick = reachable.Contains(n.Id);
-            float rad = n.Kind == NodeKind.Boss ? 13f : 10f;
+            float rad = n.Kind == NodeKind.Boss ? baseRad + 3f : baseRad;
             Color col = NodeColor(n.Kind);
 
             // dim nodes that are neither visited, current, nor a current choice
@@ -3004,7 +3274,7 @@ public static class Hud
             if (isCur) Raylib.DrawCircleLinesV(p, rad + 4, Pal.Accent);  // "you are here"
 
             string gly = NodeGlyph(n.Kind);
-            Raylib.DrawTextEx(Cfg.Font, gly, new Vector2((int)(p.X - (int)Raylib.MeasureTextEx(Cfg.Font, gly, 14, 1f).X / 2), (int)(p.Y - 7)), 14, 1f, Pal.RGBA(8, 12, 18));
+            Raylib.DrawTextEx(Cfg.Font, gly, new Vector2((int)(p.X - (int)Raylib.MeasureTextEx(Cfg.Font, gly, glyFs, 1f).X / 2), (int)(p.Y - glyFs / 2)), glyFs, 1f, Pal.RGBA(8, 12, 18));
 
             if (canPick)  // label the choices with their objective (one clean line, readable size)
             {
@@ -3080,7 +3350,8 @@ public static class Hud
 
         string title = "REQUISITION";
         Raylib.DrawTextEx(Cfg.Font, title, new Vector2(x + w / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, title, 36, 1f).X / 2, y + 24), 36, 1f, Pal.Accent);
-        string intel = $"INTEL AVAILABLE: {run.Intel}";
+        // W9: the salvage bank shares the header — the slate re-roll below spends it (not Intel)
+        string intel = $"INTEL AVAILABLE: {run.Intel}   |   SALVAGE: {g.BarracksSalvage}";
         Raylib.DrawTextEx(Cfg.Font, intel, new Vector2(x + w / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, intel, 16, 1f).X / 2, y + 66), 16, 1f, Pal.Good);
 
         // ARMORY toggle (top-right of the card): swap to the re-arm sub-screen and back.
@@ -3136,6 +3407,14 @@ public static class Hud
         bool ph = Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), ShopProceed);
         Raylib.DrawRectangleRounded(ShopProceed, 0.3f, 8, ph ? Pal.RGBA(92, 200, 251) : Pal.Friend);
         CenterText("PROCEED TO DEPLOYMENT", ShopProceed, 15, Pal.RGBA(3, 18, 26));
+
+        // ---- W9: paid slate RE-ROLL (salvage sink; Game refuses the click when broke) ----
+        ShopReroll = new Rectangle(x + w - 30 - 178, y + h - 56, 178, 36);
+        bool srCan = g.BarracksSalvage >= MetaProg.ShopRerollCost;
+        bool srHov = srCan && Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), ShopReroll);
+        Raylib.DrawRectangleRounded(ShopReroll, 0.3f, 8, srHov ? Pal.RGBA(30, 44, 34) : Pal.RGBA(14, 20, 28));
+        Raylib.DrawRectangleLinesEx(ShopReroll, 1.4f, srCan ? (srHov ? Pal.VipGold : Pal.PanelBd) : Pal.RGBA(40, 46, 54));
+        CenterText($"RE-ROLL SLATE ({MetaProg.ShopRerollCost} SALV)", ShopReroll, 12, srCan ? (srHov ? Pal.VipGold : Pal.Txt) : Pal.TxtDim);
     }
 
     /// The ARMORY sub-screen of REQUISITION: re-arm a soldier with a different weapon their class
@@ -3247,7 +3526,13 @@ public static class Hud
         Raylib.DrawRectangleLinesEx(card, 1.5f, Pal.PanelBd);
 
         string title = "PROMOTION";
-        Raylib.DrawTextEx(Cfg.Font, title, new Vector2(x + w / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, title, 36, 1f).X / 2, y + 22), 36, 1f, Pal.Accent);
+        int titW = (int)Raylib.MeasureTextEx(Cfg.Font, title, 36, 1f).X;
+        Raylib.DrawTextEx(Cfg.Font, title, new Vector2(x + w / 2 - titW / 2, y + 22), 36, 1f, Pal.Accent);
+        // W12: the promoted soldier's class silhouette flanks the header (board-matching glyph),
+        // so WHO is ranking up reads before the text does. The left copy is mirrored (ang=PI) so
+        // the pair reads symmetric around the title.
+        Renderer.DrawCodexGlyph(off.Unit.Cls, new Vector2(x + w / 2f - titW / 2f - 36, y + 42), Pal.Friend, 1.5f, MathF.PI);
+        Renderer.DrawCodexGlyph(off.Unit.Cls, new Vector2(x + w / 2f + titW / 2f + 36, y + 42), Pal.Friend, 1.5f);
         string sub = $"{off.Unit.FullName}  -  {off.Unit.RankName}  -  {off.Unit.Cls}  -  CHOOSE A PERK";
         Raylib.DrawTextEx(Cfg.Font, sub, new Vector2(x + w / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, sub, 14, 1f).X / 2, y + 64), 14, 1f, Pal.TxtDim);
 
@@ -3267,8 +3552,8 @@ public static class Hud
         int cw = (w - 60) / 2, ch = 154, cy = y + 196, gap = 20;
         PerkBtnA = new Rectangle(x + 20, cy, cw, ch);
         PerkBtnB = new Rectangle(x + 20 + cw + gap, cy, cw, ch);
-        DrawPerkCard(PerkBtnA, off.A);
-        DrawPerkCard(PerkBtnB, off.B);
+        DrawPerkCard(PerkBtnA, off.A, off.Unit);
+        DrawPerkCard(PerkBtnB, off.B, off.Unit);
 
         int left = g.RunState.PendingPerks.Count - 1;
         string foot = left > 0 ? $"{left} more promotion(s) to assign" : "Click a perk to continue";
@@ -3369,7 +3654,7 @@ public static class Hud
         }
     }
 
-    static void DrawPerkCard(Rectangle r, Perk p)
+    static void DrawPerkCard(Rectangle r, Perk p, Unit u = null)
     {
         bool hover = Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), r);
         Raylib.DrawRectangleRounded(r, 0.08f, 8, hover ? Pal.RGBA(24, 34, 46) : Pal.RGBA(14, 20, 28));
@@ -3377,7 +3662,13 @@ public static class Hud
         Raylib.DrawRectangle((int)r.X, (int)r.Y, 4, (int)r.Height, hover ? Pal.Accent : Pal.Friend);
 
         string name = PerkDef.Name(p);
-        Raylib.DrawTextEx(Cfg.Font, name, new Vector2((int)(r.X + r.Width / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, name, 22, 1f).X / 2), (int)r.Y + 28), 22, 1f, hover ? Pal.Accent : Pal.Txt);
+        Raylib.DrawTextEx(Cfg.Font, name, new Vector2((int)(r.X + r.Width / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, name, 22, 1f).X / 2), (int)r.Y + 24), 22, 1f, hover ? Pal.Accent : Pal.Txt);
+        // W12: the concrete BEFORE > AFTER stat line for THIS soldier (null when a perk has no
+        // clean numeric read — the prose below still carries it), so a pick is a visible delta.
+        string delta = u != null ? PerkDeltaLine(u, p) : null;
+        if (delta != null)
+            Raylib.DrawTextEx(Cfg.Font, delta,
+                new Vector2((int)(r.X + r.Width / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, delta, 13, 1f).X / 2), (int)r.Y + 50), 13, 1f, Pal.Good);
         // description, word-wrapped to the card width so a long perk text never spills into the
         // neighbouring card (each line centred, stacked under the name).
         string desc = PerkDef.Desc(p);
@@ -3389,6 +3680,30 @@ public static class Hud
 
         Raylib.DrawTextEx(Cfg.Font, "SELECT", new Vector2((int)(r.X + r.Width / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, "SELECT", 13, 1f).X / 2), (int)(r.Y + r.Height - 32)), 13, 1f, hover ? Pal.Accent : Pal.TxtDim);
     }
+
+    /// W12: a soldier-specific before > after stat readout for a perk offer. Returns null for
+    /// perks whose benefit has no clean numeric framing (pure-behaviour perks like SKIRMISHER).
+    /// Only OFFERED perks (PerkDef.All) get an arm — the retired crit cluster (Deadeye /
+    /// Opportunist / PointBlank / Vanguard) is no longer read by ComputeOdds, so it must never
+    /// show an authoritative-looking number if some future change re-offers it.
+    static string PerkDeltaLine(Unit u, Perk p) => p switch
+    {
+        Perk.Tank => $"HP {u.MaxHp} > {u.MaxHp + 3}",
+        Perk.Sprinter => $"MOB {u.Mobility} > {u.Mobility + 1}",
+        Perk.LockOn => $"AIM {u.Aim} > {u.Aim + 15} vs flanked",   // review fix: fires on FLANKED, not merely exposed
+        Perk.CloseQuarters => $"AIM {u.Aim} > {u.Aim + 15} inside 4 tiles",
+        Perk.Marksman => $"AIM {u.Aim} > {u.Aim + 15} at 7+ tiles",
+        Perk.Siegebreaker => $"AIM {u.Aim} > {u.Aim + 15} vs hunkered",
+        Perk.Bandolier => $"GRENADES {1 + u.BonusGrenades} > {2 + u.BonusGrenades} / mission",
+        Perk.Executioner => "CRIT +25 vs sub-half-HP",
+        Perk.GiantSlayer => "CRIT +15 vs full-HP",
+        Perk.Vantage => "CRIT +15 from high ground",
+        Perk.Breaker => "CRIT +20 vs suppressed / pinned",
+        Perk.Hardened => "DMG TAKEN -1  (crits -4)",
+        Perk.Bulwark => "DMG TAKEN -2 at half HP or above",
+        Perk.CoolHeaded => "ENEMY AIM -8 against you",
+        _ => null,
+    };
 
     /// W2 CLASS SPECIALIZATION FORK chooser (a one-time pick at Corporal). Near-copy of DrawPerkChooser:
     /// a framed card, the soldier dossier, and two fork cards (Name + flavour + word-wrapped mechanics).
@@ -3403,7 +3718,11 @@ public static class Hud
         Raylib.DrawRectangleLinesEx(card, 1.5f, Pal.Accent);
 
         string title = "SPECIALIZE";
-        Raylib.DrawTextEx(Cfg.Font, title, new Vector2(x + w / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, title, 36, 1f).X / 2, y + 22), 36, 1f, Pal.Accent);
+        int stw = (int)Raylib.MeasureTextEx(Cfg.Font, title, 36, 1f).X;
+        Raylib.DrawTextEx(Cfg.Font, title, new Vector2(x + w / 2 - stw / 2, y + 22), 36, 1f, Pal.Accent);
+        // W12: class silhouette flanking the header — same treatment as PROMOTION (left mirrored).
+        Renderer.DrawCodexGlyph(off.Unit.Cls, new Vector2(x + w / 2f - stw / 2f - 36, y + 42), Pal.Friend, 1.5f, MathF.PI);
+        Renderer.DrawCodexGlyph(off.Unit.Cls, new Vector2(x + w / 2f + stw / 2f + 36, y + 42), Pal.Friend, 1.5f);
         string sub = $"{off.Unit.FullName}  -  {off.Unit.Cls}  -  CHOOSE A PERMANENT FORK";
         Raylib.DrawTextEx(Cfg.Font, sub, new Vector2(x + w / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, sub, 14, 1f).X / 2, y + 64), 14, 1f, Pal.TxtDim);
 
@@ -3459,22 +3778,25 @@ public static class Hud
         Raylib.DrawRectangleRounded(new Rectangle(x, y, w, 40), 0.2f, 6, benched ? Pal.RGBA(11, 15, 20) : Pal.RGBA(13, 19, 27));
         Raylib.DrawRectangle(x, y, 3, 40, benched ? Pal.TxtDim : Pal.Friend);
 
-        // ---- left block: name + rank/class (+wound) ----
-        Raylib.DrawTextEx(Cfg.Font, u.Name, new Vector2(x + 14, y + 5), 18, 1f, benched ? Pal.TxtDim : Pal.Txt);
+        // ---- left block: class silhouette + name + rank/class (+wound) ----
+        // W12: the board's class glyph (Renderer.DrawCodexGlyph) leads every row, so a soldier
+        // reads by SHAPE before text — same silhouette the battlefield draws, never a new icon.
+        Renderer.DrawCodexGlyph(u.Cls, new Vector2(x + 21, y + 20), benched ? Raylib.Fade(Pal.Friend, 0.45f) : Pal.Friend, 0.95f);
+        Raylib.DrawTextEx(Cfg.Font, u.Name, new Vector2(x + 40, y + 5), 18, 1f, benched ? Pal.TxtDim : Pal.Txt);
         // class is always on the row so benching is an informed choice; WOUND is flagged in red.
         string rankLine = $"{u.RankName}  -  {u.Cls}";
         if (u.Wound > 0) rankLine += $"  WOUNDED({u.Wound})";
-        Raylib.DrawTextEx(Cfg.Font, rankLine, new Vector2(x + 14, y + 23), 11, 1f, u.Wound > 0 ? Pal.Foe : (benched ? Pal.TxtDim : Pal.Accent));
+        Raylib.DrawTextEx(Cfg.Font, rankLine, new Vector2(x + 40, y + 23), 11, 1f, u.Wound > 0 ? Pal.Foe : (benched ? Pal.TxtDim : Pal.Accent));
         // earned perks (compact 3-letter codes) trail the rank line on the same baseline so they
         // never collide with the stat columns to the right.
         if (u.Perks.Count > 0)
         {
             int rlw = (int)Raylib.MeasureTextEx(Cfg.Font, rankLine, 11, 1f).X;
             string codes = string.Join(" ", u.Perks.ConvertAll(PerkDef.Code));
-            // W9: 9px -> 11px floor. Budget re-fit: the left block runs from x+14 to the HP
-            // lane at x+w-400 (w=640 rows), so the codes get everything up to it minus a margin.
-            codes = Clip(codes, 11, Math.Max(0, 208 - rlw));
-            Raylib.DrawTextEx(Cfg.Font, codes, new Vector2(x + 14 + rlw + 8, y + 24), 11, 1f, benched ? Pal.RGBA(60, 92, 70) : Pal.Good);
+            // W9: 9px -> 11px floor. Budget re-fit: the left block runs from x+40 (past the W12
+            // glyph) to the HP lane at x+w-400 (w=640 rows), so the codes get what remains.
+            codes = Clip(codes, 11, Math.Max(0, 182 - rlw));
+            Raylib.DrawTextEx(Cfg.Font, codes, new Vector2(x + 40 + rlw + 8, y + 24), 11, 1f, benched ? Pal.RGBA(60, 92, 70) : Pal.Good);
         }
 
         // ---- three clean stat lanes on the right (HP | KILLS | STATUS+PILL) ----
@@ -3504,9 +3826,26 @@ public static class Hud
         Raylib.DrawTextEx(Cfg.Font, prog, new Vector2(killsX, y + 23), 11, 1f, Pal.TxtDim);
 
         // STATUS lane: DEPLOYED green / BENCHED grey, vertically centered next to the pill.
-        string stTag = benched ? "BENCHED" : "DEPLOYED";
-        Color stCol  = benched ? Pal.TxtDim : Pal.Good;
-        Raylib.DrawTextEx(Cfg.Font, stTag, new Vector2(statusX, y + 14), 11, 1f, stCol);
+        // W9: a SCARRED soldier's lane shows the REHAB chip instead (buy one scar off for salvage) —
+        // the deploy/bench pill on the right already carries the deploy state as its action verb.
+        if (u.Scars.Count > 0)
+        {
+            var rr = new Rectangle(statusX - 4, y + 9, statusW + 6, 22);
+            bool rCan = g.BarracksSalvage >= MetaProg.ScarRehabCost;
+            Raylib.DrawRectangleRounded(rr, 0.3f, 6, rCan ? Raylib.Fade(Pal.VipGold, 0.16f) : Pal.RGBA(20, 18, 16));
+            Raylib.DrawRectangleLinesEx(rr, 1f, rCan ? Pal.VipGold : Pal.RGBA(60, 54, 40));
+            string rTag = $"REHAB {MetaProg.ScarRehabCost}";
+            Raylib.DrawTextEx(Cfg.Font, rTag,
+                new Vector2(rr.X + rr.Width / 2 - Raylib.MeasureTextEx(Cfg.Font, rTag, 11, 1f).X / 2, rr.Y + 5),
+                11, 1f, rCan ? Pal.VipGold : Pal.TxtDim);
+            RehabBtns.Add((u, rr));
+        }
+        else
+        {
+            string stTag = benched ? "BENCHED" : "DEPLOYED";
+            Color stCol  = benched ? Pal.TxtDim : Pal.Good;
+            Raylib.DrawTextEx(Cfg.Font, stTag, new Vector2(statusX, y + 14), 11, 1f, stCol);
+        }
 
         // DEPLOY/BENCH toggle — now on EVERY soldier (Game.ToggleBench enforces >=1 deployed and
         // the deploy cap). The verb is the ACTION the click performs: a deployed soldier shows
@@ -3558,12 +3897,15 @@ public static class Hud
         Raylib.DrawRectangleRounded(card, 0.06f, 8, Pal.Panel);
         Raylib.DrawRectangleLinesEx(card, 1.5f, level > 0 ? Raylib.Fade(Pal.Foe, 0.7f) : Pal.PanelBd);
 
-        Color heatCol = level > 0 ? Pal.Foe : Pal.TxtDim;
+        // W12 (owner-legibility): the panel's informational text sits ONE CONTRAST STEP above
+        // TxtDim — this card is a decision surface on a dark backdrop, not passive chrome.
+        Color heatTxt2 = Pal.RGBA(164, 178, 198);
+        Color heatCol = level > 0 ? Pal.Foe : heatTxt2;
         Raylib.DrawTextEx(Cfg.Font, "HEAT / ASCENSION", new Vector2(x + 18, y + 14), 14, 1f, Pal.Accent);
 
         // big level readout + the -/+ stepper
         string val = level.ToString();
-        Raylib.DrawTextEx(Cfg.Font, "HEAT", new Vector2(x + 18, y + 48), 16, 1f, Pal.TxtDim);
+        Raylib.DrawTextEx(Cfg.Font, "HEAT", new Vector2(x + 18, y + 48), 16, 1f, heatTxt2);
         Raylib.DrawTextEx(Cfg.Font, val, new Vector2(x + w / 2 - (int)Raylib.MeasureTextEx(Cfg.Font, val, 40, 1f).X / 2, y + 40), 40, 1f, heatCol);
 
         HeatMinus = new Rectangle(x + 18, y + 50, 34, 34);
@@ -3571,7 +3913,7 @@ public static class Hud
         DrawStepper(HeatMinus, "-", level > 0);
         DrawStepper(HeatPlus, "+", level < unlocked);
 
-        Raylib.DrawTextEx(Cfg.Font, $"MAX UNLOCKED: {unlocked}", new Vector2(x + 18, y + 92), 12, 1f, Pal.TxtDim);
+        Raylib.DrawTextEx(Cfg.Font, $"MAX UNLOCKED: {unlocked}", new Vector2(x + 18, y + 92), 12, 1f, heatTxt2);
         // W11 HONEST LOSSES: the adaptive assist (repeated losses ease hostile stats at heat 0)
         // was invisible — surface it as a FIELD SUPPORT chip so the player knows help is active
         // and that a win (or dialling heat up) stands it down. Review fix: the chip REPLACES the
@@ -3586,18 +3928,18 @@ public static class Hud
             Raylib.DrawRectangleRounded(chip, 0.4f, 6, Raylib.Fade(Pal.Good, 0.15f));
             Raylib.DrawRectangleLinesEx(chip, 1f, Raylib.Fade(Pal.Good, 0.6f));
             CenterText(fsLbl, chip, 12, Pal.Good);
-            Raylib.DrawTextEx(Cfg.Font, "wins clear it", new Vector2(x + 18 + fw + 8, y + 110), 11, 1f, Pal.TxtDim);
+            Raylib.DrawTextEx(Cfg.Font, "wins clear it", new Vector2(x + 18 + fw + 8, y + 110), 11, 1f, heatTxt2);
         }
         else
         {
             string hint = level > 0 ? $"+{Sightline.Heat.IntelBonus(level)} intel / mission" : "standard difficulty";
-            Raylib.DrawTextEx(Cfg.Font, hint, new Vector2(x + 18, y + 110), 12, 1f, level > 0 ? Pal.Good : Pal.TxtDim);
+            Raylib.DrawTextEx(Cfg.Font, hint, new Vector2(x + 18, y + 110), 12, 1f, level > 0 ? Pal.Good : heatTxt2);
         }
 
         // active modifiers (cumulative rungs 1..level)
         int my = y + 132;
         if (level == 0)
-            Raylib.DrawTextEx(Cfg.Font, "No modifiers active.", new Vector2(x + 18, my), 12, 1f, Pal.TxtDim);
+            Raylib.DrawTextEx(Cfg.Font, "No modifiers active.", new Vector2(x + 18, my), 12, 1f, heatTxt2);
         else
         {
             int i = 1;
@@ -3605,12 +3947,12 @@ public static class Hud
             {
                 Raylib.DrawTextEx(Cfg.Font, $"{i}.", new Vector2(x + 18, my), 12, 1f, Pal.Foe);
                 Raylib.DrawTextEx(Cfg.Font, mod.Name, new Vector2(x + 40, my), 12, 1f, Pal.Txt);
-                Raylib.DrawTextEx(Cfg.Font, mod.Desc, new Vector2(x + 40, my + 13), 11, 1f, Pal.TxtDim);
+                Raylib.DrawTextEx(Cfg.Font, mod.Desc, new Vector2(x + 40, my + 13), 11, 1f, heatTxt2);
                 my += 26; i++;
             }
         }
 
-        Raylib.DrawTextEx(Cfg.Font, "[<] [>] to adjust", new Vector2(x + 18, y + h - 20), 11, 1f, Pal.TxtDim);
+        Raylib.DrawTextEx(Cfg.Font, "[<] [>] to adjust", new Vector2(x + 18, y + h - 20), 11, 1f, heatTxt2);
     }
 
     static void DrawStepper(Rectangle r, string sym, bool enabled)
@@ -3641,6 +3983,30 @@ public static class Hud
             string kh = "[" + keyHint + "]";
             float khw = Raylib.MeasureTextEx(Cfg.Font, kh, 11, 1f).X;
             Raylib.DrawTextEx(Cfg.Font, kh, new Vector2((int)(rr.X + rr.Width - khw - 6), (int)(rr.Y + rr.Height - 16)), 11, 1f, Raylib.Fade(Pal.RGBA(3, 18, 26), a));
+        }
+    }
+
+    /// W12: the NEUTRAL-OUTLINE sibling of DrawOverlayButton — a dark plate + hairline border +
+    /// plain-text label, for secondary/utility actions (the intro's 2x2 mode grid, BACK buttons).
+    /// Same entrance behaviour + resting-rect hit-test as DrawOverlayButton; hover brightens the
+    /// border/label to Friend instead of swapping the fill, so filled = primary stays unambiguous.
+    static void DrawGhostButton(Rectangle r, string label, string keyHint, float anim = 1f)
+    {
+        float a = Util.EaseOutQuad(Util.Clamp(anim, 0f, 1f));
+        float dy = (1f - a) * 12f;
+        var rr = new Rectangle(r.X, r.Y + dy, r.Width, r.Height);
+        bool hover = a > 0.7f && Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), r);
+        Raylib.DrawRectangleRounded(rr, 0.3f, 8, Raylib.Fade(Pal.RGBA(13, 19, 27), 0.88f * a));
+        Raylib.DrawRectangleLinesEx(rr, 1.4f, Raylib.Fade(hover ? Pal.Friend : Pal.PanelBd, a));
+        var lz = Raylib.MeasureTextEx(Cfg.Font, label, 16, 1f);
+        Raylib.DrawTextEx(Cfg.Font, label, new Vector2((int)(rr.X + rr.Width / 2 - lz.X / 2), (int)(rr.Y + rr.Height / 2 - 8)), 16, 1f,
+            Raylib.Fade(hover ? Pal.Friend : Pal.Txt, a));
+        if (keyHint != null)
+        {
+            string kh = "[" + keyHint + "]";
+            float khw = Raylib.MeasureTextEx(Cfg.Font, kh, 11, 1f).X;
+            Raylib.DrawTextEx(Cfg.Font, kh, new Vector2((int)(rr.X + rr.Width - khw - 6), (int)(rr.Y + rr.Height - 16)), 11, 1f,
+                Raylib.Fade(Pal.TxtDim, 0.8f * a));
         }
     }
 

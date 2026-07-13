@@ -11,7 +11,11 @@ public enum Phase { Intro, PlayerTurn, EnemyTurn, Barracks, Win, Lose, Draft, Wa
 // remove a member — a saved run stores the ordinal, so a reorder silently corrupts the loaded
 // objective. Add new objectives at the END only. (SaveGame.SelfTest asserts the tail ordinal.)
 public enum Objective { Eliminate, Evac, Hack, Escort, Sabotage, Rescue, Defend, Decapitate }
-public enum SecondaryKind { None, NoLosses, Swift, CleanSweep }  // optional per-mission bonus goal (3.9)
+// APPEND-ONLY: treat like the persisted enums above (new members at the END only; never reorder or
+// remove — SaveGame.SelfTest guards the tail ordinal). W10 appends three PLAYSTYLE bonuses: Ghost
+// (stay concealed through turn 2), Demolition (destroy 3 cover/barrels), Bounty (kill the mission's
+// named specialist, picked in RollSecondary).
+public enum SecondaryKind { None, NoLosses, Swift, CleanSweep, Ghost, Demolition, Bounty }  // optional per-mission bonus goal (3.9)
 // PROGRAM HORIZON W2/W4: game modes. Campaign = the 6-mission run (all prior behaviour); Endless =
 // LAST STAND horde survival on one arena; Skirmish = a SINGLE-MISSION mode (both free SKIRMISH and the
 // seeded DAILY, differentiated by Game.DailyMode). APPEND-ONLY (Mode isn't persisted, but keep it stable).
@@ -283,6 +287,12 @@ public partial class Game
     // order (Hud) and the click/buy index space (HandleShopClick / AutoShop map slot -> item id).
     public const int ShopOfferSize = 5;          // target rotating-slate size (excl. the conditional PREP slot)
     List<int> _shopOfferCache;                   // recomputed each EnterBarracks (derived, not persisted)
+    // W9 (SIGNAL): paid slate re-rolls THIS barracks — perturbs the slate seed so a re-roll actually
+    // rotates the offer. Reset to 0 at EnterBarracks, so a re-load/round-trip reproduces the base
+    // slate (the nonce is deliberately NOT persisted: a re-roll is a spent consumable, and on load
+    // the worst case is the player seeing the base slate again having already paid — acceptable and
+    // rare — versus threading a new field through the save format).
+    int _shopReroll;
 
     /// The rotating requisition slate (a list of underlying item ids) for THIS barracks. Cached so
     /// it's stable across frames within a barracks; rebuilt by RefreshShopOffer at EnterBarracks /
@@ -312,12 +322,18 @@ public partial class Game
         for (int i = 0; i < WeaponModDef.All.Length; i++) pool.Add(ModBase + i);  // weapon mods
 
         // deterministic shuffle off MapSeed+Mission so the slate is fixed per barracks + round-trips.
-        int seed = (_run != null ? _run.MapSeed : 0) * 131 + (_run != null ? _run.Mission : 0) * 7 + 17;
+        // W9: a paid RE-ROLL bumps _shopReroll, perturbing the seed — still deterministic per
+        // (barracks, reroll-count) so the slate is stable across frames within a barracks.
+        int seed = (_run != null ? _run.MapSeed : 0) * 131 + (_run != null ? _run.Mission : 0) * 7 + 17
+                   + _shopReroll * 7919;
         var rng = new Random(seed);
         for (int i = pool.Count - 1; i > 0; i--) { int j = rng.Next(i + 1); (pool[i], pool[j]) = (pool[j], pool[i]); }
 
-        int want = ShopOfferSize - offer.Count;               // fill the rest of the slate
-        for (int i = 0; i < pool.Count && offer.Count < ShopOfferSize; i++) offer.Add(pool[i]);
+        // W9 QUARTERMASTER (WAR ROOM unlock): +1 slate slot — more OPTIONS per barracks, still paid
+        // for in Intel. Read once per (re)build, never per frame; NoPersist-gated so the flywheel/
+        // autoplay slate is byte-identical to today.
+        int slate = ShopOfferSize + (!NoPersist && SaveGame.HasUnlock((int)MetaUnlock.Quartermaster) ? 1 : 0);
+        for (int i = 0; i < pool.Count && offer.Count < slate; i++) offer.Add(pool[i]);
 
         // (3) COUNTER-PREP: a situational extra slot, only when a faction is actually telegraphed
         // next (otherwise it's a dead, greyed row). It's an ADD-ON, not a slate slot it could crowd out.
@@ -410,15 +426,23 @@ public partial class Game
     // shipped W6 de-drag) and — APEX W8 — on ESCORT, where marching the leashed VIP to the far corner was
     // the flagged ~14-turn drag. Escort's gate is STRICTER (far third + cold LZ, see EscortBeaconOk):
     // CheckEnd's Escort test is just "VIP in zone", so a permissive plant would be an instant win.
-    // Rescue keeps the fixed corner (the cage already sits mid-board); Endless has no extraction. As
+    // W4 (SIGNAL): RESCUE gets the same treatment ONCE THE CAPTIVE IS FREED — the freed walk-out to
+    // the fixed corner was the same drag Escort had, and its win test is likewise just "freed VIP in
+    // zone", so the plant carries Escort's FULL strict gate (see CanBeacon). While the captive is
+    // still caged there is no asset to extract, so no beacon. Endless has no extraction. As
     // always the beacon is once-per-mission, planted by a real soldier standing on WALKABLE FLOOR
     // (a non-floor planter refuses gracefully, never crashes).
-    public bool HasBeaconAction => (Objective == Objective.Evac || Objective == Objective.Escort)
+    public bool HasBeaconAction => (Objective == Objective.Evac || Objective == Objective.Escort
+                                    || (Objective == Objective.Rescue && !CaptiveLocked))
                                    && Mode != GameMode.Endless;
     public bool CanBeacon(Unit u)
         => HasBeaconAction && !BeaconPlanted && u != null && u.Team == Team.Player && !u.IsVip
            && u.CanAct && Grid.IsFloor(u.X, u.Y) && !EvacZone.Contains((u.X, u.Y))
-           && (Objective != Objective.Escort || EscortBeaconOk(u));
+           // the strict far-third + cold-LZ gate applies to BOTH asset-walk objectives (Escort, and
+           // Rescue once freed — HasBeaconAction only admits Rescue in the freed state): their win
+           // is "VIP in zone", so a permissive plant would be a near-instant win. Evac stays on the
+           // shipped half-line discipline (its win needs the WHOLE squad in the zone).
+           && ((Objective != Objective.Escort && Objective != Objective.Rescue) || EscortBeaconOk(u));
 
     /// APEX W8 — the ESCORT anti-trivialization gate. The planter must have genuinely PUSHED the map:
     ///   (1) FAR THIRD — u.X >= Grid.W*2/3. The VIP spawns in the squad wedge, so a spawn-side plant
@@ -434,6 +458,23 @@ public partial class Game
         => u.X >= Grid.W * 2 / 3
            && !Enemies.Any(e => e.Alive && e.Routed == 0
                                 && Util.ChebyDist(u.X, u.Y, e.X, e.Y) <= 3);
+
+    // ---- W10 INTEL CACHE: an optional gold-diamond pickup tile spawned mid/far-field every
+    // campaign mission (Mission.PlaceIntelCache, PlaceBarrels-style reachability guard). A soldier
+    // ENDING a tile-entry on it banks CacheIntelMin..Max intel (OnUnitEnteredTile); it expires after
+    // CacheTurns player turns (StartPlayerTurn), so the detour is a real risk/reward routing bet,
+    // not free money. Per-mission transient — reset in SetupMission, never persisted.
+    public bool CachePresent;
+    public int CacheX, CacheY;
+    public int CacheTurnsLeft;
+    public const int CacheTurns = 6;       // player turns before the cache goes dark
+    public const int CacheIntelMin = 8, CacheIntelMax = 10;
+
+    // ---- W10 secondary-objective state (per-mission transient, reset in SetupMission) ----
+    public int DemoProgress;               // DEMOLITION: player-destroyed cover tiles + barrels this mission
+    public const int DemoRequired = 3;
+    public Unit BountyTarget;              // BOUNTY: the named specialist picked by RollSecondary (null otherwise)
+    public const int GhostTurns = 2;       // GHOST: concealment must survive through this player turn
 
     // DEFEND objective (3.8): survive this many player turns vs mid-mission waves
     public const int DefendTurns = 8;
@@ -648,6 +689,66 @@ public partial class Game
     // _podOrig snapshots each pod's spawn size at mission start; the break/threshold logic is BreakPodMorale.
     readonly Dictionary<int, int> _podOrig = new();
     public const int RoutDuration = 2;         // enemy turns a broken pod flees before it can rally (decrements in BeginTurn)
+    // SIGNAL W8 — the WARBRINGER's banner aura reach (Chebyshev tiles). Pods with a living, active
+    // banner inside this range cannot rout (BreakPodMorale) and rally one turn faster
+    // (BeginEnemyUnitTurn). The player's counter is spatial: kill the banner or bait the pod out.
+    public const int BannerRange = 4;
+
+    /// SIGNAL W8 — true when a living, ACTIVE banner-bearer (Unit.HasBanner, default the
+    /// WARBRINGER) stands within Chebyshev BannerRange of `u`. A banner anchors ITSELF too
+    /// (distance 0), so a live WARBRINGER never routs. Dormant banners project nothing.
+    public bool BannerNear(Unit u)
+    {
+        foreach (var b in Enemies)
+            if (b.Alive && b.Active && b.HasBanner && Util.ChebyDist(b.X, b.Y, u.X, u.Y) <= BannerRange)
+                return true;
+        return false;
+    }
+
+    /// SIGNAL W8 — a pod's live head-count vs its spawn strength, for the WAVERING telegraph +
+    /// the "POD 2/4" tooltip line. `orig` falls back to the current count for un-snapshotted pods
+    /// (e.g. DEFEND reinforcement waves), mirroring BreakPodMorale's mates.Count+1 post-kill view.
+    public (int alive, int orig) PodStrength(int podId)
+    {
+        int alive = 0;
+        foreach (var e in Enemies) if (e.Alive && e.PodId == podId) alive++;
+        return (alive, _podOrig.GetValueOrDefault(podId, alive));
+    }
+
+    /// The ONE shared rout threshold (BreakPodMorale + the WAVERING telegraph both read it, so the
+    /// telegraph can never lie): a pod holds while its live head-count EXCEEDS half its spawn
+    /// strength (floored at 1 — a lone survivor of a 2-pod always qualifies). W10 note: TERROR was
+    /// originally a 2/3 threshold here, but real pods spawn size 2 (Mission.SpawnEnemies pairs
+    /// them), where half-strength already routs the survivor on the first kill — a threshold change
+    /// was arithmetic dead weight. TERROR now extends the rout DURATION instead (RoutDurationFor).
+    public int RoutThreshold(int orig) => Math.Max(1, orig / 2);
+
+    /// W10 TERROR boon (redesigned per review): broken enemies stay broken LONGER — the duration
+    /// assigned when a pod breaks (BreakPodMorale, the only assignment site; a rallied pod that
+    /// re-breaks passes through it again) is extended by TerrorRoutBonus. W8's banner semantics
+    /// are untouched: an in-aura survivor still rallies at DOUBLE pace (BeginEnemyUnitTurn's extra
+    /// decrement) — TERROR raises the base the banner recovers from, it never disables the counter.
+    public const int TerrorRoutBonus = 2;
+    public int RoutDurationFor() => RoutDuration + (HasBoon(Boon.Terror) ? TerrorRoutBonus : 0);
+
+    /// SIGNAL W8 — this pod member is ONE KILL from the rout threshold: the NEXT pod death breaks
+    /// the survivors (mirrors BreakPodMorale's `mates.Count > RoutThreshold(orig)` exactly, one
+    /// kill ahead). Covers the rallied-below-threshold pod too (any kill re-breaks it) — the
+    /// telegraph must never lie. Active + unbroken members only; needs a survivor left to rout.
+    public bool PodAtWaverPoint(Unit e)
+    {
+        if (e == null || e.Team != Team.Enemy || e.PodId < 0 || !e.Alive || !e.Active || e.Routed > 0) return false;
+        var (alive, orig) = PodStrength(e.PodId);
+        return alive >= 2 && alive - 1 <= RoutThreshold(orig);
+    }
+
+    /// SIGNAL W8 — the WAVERING tag: at the waver point AND not held by a banner (a banner-anchored
+    /// member will NOT rout on the next kill, so tagging it would lie — the tooltip explains why).
+    public bool PodWavering(Unit e) => PodAtWaverPoint(e) && !BannerNear(e);
+
+    /// SIGNAL W8 (harness/showcase only): seed a pod's spawn-strength snapshot so controlled scenes
+    /// (SIGHTLINE_CONTENT / MORALETEST) can stage WAVERING states without running SetupMission.
+    public void DebugPodOrig(int pod, int orig) => _podOrig[pod] = orig;
 
     // Death scorch decals: where a unit fell, a dark team-tinted burn mark lingers on the tile
     // and fades over ~ScorchLife seconds (decayed in Update, drawn under units in Renderer, cleared
@@ -699,18 +800,95 @@ public partial class Game
     // play can never see it. Null = no pin (byte-stable default).
     public Objective? ForcedObjective;
 
+    // W9 (SIGNAL) priced recall: the salvage bank CACHED for the draft UI (loaded once at BeginDraft
+    // and after a paid re-roll — the draw path must never touch disk). 0 under NoPersist (no read);
+    // DebugVetDraft seeds a demo value so the priced/greyed card states can be screenshot headless.
+    public int DraftSalvage;
+
+    /// The summed recall fee for the CURRENTLY PICKED veterans (10 + 8xRank each; fresh recruits free).
+    public int DraftRecallCost
+    {
+        get
+        {
+            int c = 0;
+            foreach (var u in DraftPicked) if (u.FromReserve) c += MetaProg.RecallCost(u.Rank);
+            return c;
+        }
+    }
+
+    /// Can the bank cover the picked veterans? (Always true under NoPersist — the harness never pays.)
+    public bool DraftRecallAffordable => NoPersist || DraftRecallCost <= DraftSalvage;
+
+    /// Build the draft candidate pool honouring the WAR ROOM unlocks (veteran recall window +
+    /// cross-training). Shared by BeginDraft and the paid pool re-roll so both agree. Under
+    /// NoPersist no disk is read -> an all-fresh default pool (byte-stable + no TIMEOUT).
+    List<Unit> BuildDraftPool()
+    {
+        if (NoPersist) return Run.GenerateDraftPool();
+        int maxVets = Run.MaxDraftVeterans + (SaveGame.HasUnlock((int)MetaUnlock.StandingReserve) ? 1 : 0);
+        bool crossTrain = SaveGame.HasUnlock((int)MetaUnlock.CrossTraining);
+        return Run.GenerateDraftPool(SaveGame.LoadVeterans(), maxVets, crossTrain);
+    }
+
+    // W12 first-run RECOMMENDED draft: the pre-selected fixed squad + safe doctrine, so a brand-new
+    // player's first decision screen is one DEPLOY click (everything stays re-pickable). Cards in
+    // DraftRecommended / the DraftRecommendedBoon get a badge in DrawDraft.
+    public HashSet<Unit> DraftRecommended = new();
+    public Boon? DraftRecommendedBoon;
+    public bool DraftHasRecommendation => DraftRecommended.Count > 0;
+
+    /// Seat the fixed NewRunSquad four over the pool's fresh recruits (never displacing a recalled
+    /// veteran card), pre-pick them, and pre-select the steadiest doctrine the offer rolled.
+    /// Pure state, no disk/RNG beyond NewRunSquad's fixed builds — callers gate WHEN it runs.
+    void ApplyRecommendedDraft()
+    {
+        var fixedSquad = Sightline.Mission.NewRunSquad();
+        int fi = 0;
+        for (int i = 0; i < DraftPool.Count && fi < fixedSquad.Count; i++)
+        {
+            if (DraftPool[i].FromReserve) continue;   // a returning legend outranks the training default
+            DraftPool[i] = fixedSquad[fi++];
+        }
+        DraftPicked.Clear();
+        for (int i = 0; i < fi; i++)
+        {
+            if (DraftPicked.Count < DraftCap) DraftPicked.Add(fixedSquad[i]);
+            DraftRecommended.Add(fixedSquad[i]);
+        }
+        // safest doctrine on offer: durability > sustain > flat aim, then whatever rolled first.
+        Boon[] pref = { Boon.Fortified, Boon.Scavenger, Boon.Marksmen, Boon.Executioners, Boon.Grenadier, Boon.Fervor };
+        foreach (var b in pref)
+            if (DraftBoonOffer.Contains(b)) { DraftRecommendedBoon = b; break; }
+        if (!DraftRecommendedBoon.HasValue && DraftBoonOffer.Count > 0) DraftRecommendedBoon = DraftBoonOffer[0];
+        DraftSelectedBoon = DraftRecommendedBoon;
+    }
+
     /// Set up + enter the run-opening DRAFT (interactive new-run path only). Builds the candidate
     /// pool + the starting-boon offer and switches to Phase.Draft. NEVER called by the harness
-    /// (the autoplay/balance/screenshot paths call StartMission directly).
+    /// (the autoplay/balance/screenshot paths call StartMission directly — except the SIGHTLINE_DRAFT
+    /// shot hook, which stays on the no-recommendation leg via NoPersist).
     public void BeginDraft()
     {
-        // COUNTERPLAY: recall the cross-run VETERAN reserve into the draft (up to Run.MaxDraftVeterans of
-        // them). Under NoPersist (harness) no disk is read -> an all-fresh pool -> byte-stable + no TIMEOUT.
-        DraftPool = Run.GenerateDraftPool(NoPersist ? null : SaveGame.LoadVeterans());
+        // COUNTERPLAY: recall the cross-run VETERAN reserve into the draft (up to Run.MaxDraftVeterans,
+        // +1 with STANDING RESERVE). Under NoPersist (harness) no disk is read -> an all-fresh pool.
+        DraftPool = BuildDraftPool();
+        DraftSalvage = NoPersist ? 0 : SaveGame.LoadSalvage();
         DraftBoonOffer = Run.GenerateDraftBoonOffer();
         DraftPicked = new HashSet<Unit>();
         DraftSelectedBoon = null;
         DraftSelectedContract = null;   // default STANDARD (Contract.None) until a contract card is clicked
+        DraftRecommended = new HashSet<Unit>();
+        DraftRecommendedBoon = null;
+        // W12: FIRST-EVER run (tutorial not yet seen AND no veteran reserve — a recalled legend in
+        // the pool means this account has finished runs, so the training default would be noise and
+        // METATEST's veteran-pricing legs must see an untouched draft) -> pre-select the recommended
+        // loadout. !NoPersist keeps every harness/self-test leg (incl. DRAFTTEST's byte-stable
+        // null-veterans path) untouched; SIGHTLINE_DRAFTREC=1 stages the state for a headless shot.
+        bool anyReserve = false;
+        foreach (var u in DraftPool) if (u.FromReserve) { anyReserve = true; break; }
+        if ((!NoPersist && !Display.TutorialSeen && !anyReserve) ||
+            (NoPersist && Environment.GetEnvironmentVariable("SIGHTLINE_DRAFTREC") == "1"))
+            ApplyRecommendedDraft();
         Phase = Phase.Draft;
         Audio.Play("select");
     }
@@ -728,6 +906,8 @@ public partial class Game
         var m = Raylib.GetMousePosition();
         if (Raylib.IsMouseButtonPressed(MouseButton.Left))
         {
+            // W9: paid pool RE-ROLL (a repeatable salvage sink; TryRerollDraftPool refuses when broke)
+            if (Raylib.CheckCollisionPointRec(m, Hud.DraftReroll)) { TryRerollDraftPool(); return; }
             // candidate cards
             foreach (var (unit, rect) in Hud.DraftCardBtns)
             {
@@ -765,8 +945,21 @@ public partial class Game
     public bool DraftReady => DraftPicked.Count == DraftCap && DraftSelectedBoon.HasValue;
 
     /// Finalize the draft: stage the picks, then run the SAME new-run start the intro would have.
+    /// W9 priced recall: the summed veteran fee (10+8xRank each) is charged ONCE here — never at
+    /// pick time (picks toggle freely, and the BACK button must always leave the bank untouched).
+    /// An unaffordable CONFIRM refuses outright: nothing is charged, nothing is seated, and the
+    /// picks stay intact so the player can rearrange toward what they CAN afford.
     void ConfirmDraft()
     {
+        if (!NoPersist)
+        {
+            int cost = DraftRecallCost;
+            if (cost > 0)
+            {
+                if (!SaveGame.SpendSalvage(cost)) { Audio.Play("miss"); return; }   // refuse; picks intact
+                DraftSalvage = SaveGame.LoadSalvage();
+            }
+        }
         DraftedSquad = new List<Unit>(DraftPicked);
         DraftBoon = DraftSelectedBoon;
         DraftContract = DraftSelectedContract ?? Contract.None;   // null == STANDARD
@@ -788,6 +981,9 @@ public partial class Game
         DailyStamp = 0;
         _dailyBest = -1;
         Wave = 0;
+        // W9 review fix: an abandoned barracks' uncommitted pending spend dies with its run — a new
+        // mode entry must never inherit (and later commit) a charge for goods that no longer exist.
+        _pendingSalvage = 0;
         if (!NoPersist) { Mission.ForcedLayout = -1; Util.Reseed(0); }
         // W11: per-RUN teaching state — the honest-loss tally and the NEW CONTACT memory reset at
         // every mode entry (this is the one choke-point all of StartMission / BeginEndless /
@@ -861,6 +1057,28 @@ public partial class Game
         // only, campaign only, and STRICTLY gated behind !NoPersist — the flywheel/harness never read
         // meta, so a measured/screenshot run is byte-identical to today (a fresh profile owns none anyway).
         ApplyMetaUnlocks();
+        // SIGNAL W5 harness affordance (SIGHTLINE_HEAT family; NoPersist only): pin the FINALE KIT.
+        // SIGHTLINE_FINALE=legion|syndicate|wardens re-stamps the Boss node's faction (normally
+        // drawn deterministically from MapSeed in Run.GenerateMap) so per-kit screenshots and
+        // per-kit balance batches are reproducible. Inert when unset -> plain runs untouched.
+        if (NoPersist)
+        {
+            var fin = Environment.GetEnvironmentVariable("SIGHTLINE_FINALE");
+            if (!string.IsNullOrEmpty(fin))
+            {
+                Faction? f = fin.Trim().ToLowerInvariant() switch
+                {
+                    "legion" => Faction.Legion, "syndicate" => Faction.Syndicate,
+                    "wardens" => Faction.Wardens, _ => (Faction?)null,
+                };
+                if (f.HasValue) _run.StampFinaleKit(f.Value);
+                else Console.WriteLine($"HARNESS: unknown SIGHTLINE_FINALE '{fin}' — kit unpinned");
+            }
+        }
+        // SIGNAL W5 measurement: surface this run's (seed-chosen or pinned) FINALE KIT to the
+        // balance-batch log so per-seed kit reachability is countable. No-op outside the flywheel.
+        if (Stats.Enabled && _run.Map.Count > 0)
+            Console.WriteLine($"FINALE-KIT: {_run.Map[_run.Map.Count - 1].Faction}");
         Players = _run.Squad;
         int n = Util.Clamp(startAt, 1, Run.MaxMissions);
         if (n > 1) _run.JumpTo(n);           // harness: advance along the map to the requested op
@@ -1011,6 +1229,13 @@ public partial class Game
         // also bites from mission 1), not a quantitative delta. The LAST STAND wave path
         // (SpawnEndlessWave) raises it as a stand deepens.
         Ai.Tier = Sightline.Heat.AiTier(heat);
+        // SIGNAL W5 — the spec's finale Ai.Tier raise (floor the coordination tier at 1 for the
+        // boss mission) was implemented and then MEASURED OUT: with it, the finale INVERTED the
+        // policy ordering at heat 0 (greedy paired completion 80% -> 45% while sloppy held 70% ->
+        // 75%) — the tier-1 focus-fire collapse punishes exactly the aggressive optimal policy,
+        // recreating the punish-gap failure UNDERTOW closed. The m6 bite ships as the kit
+        // signatures + the count restore instead; heats 6+ still bring their own tier via the
+        // Heat row above. (Revisit only with flywheel evidence that the inversion is gone.)
         int heatEnemy = Sightline.Heat.EnemyDelta(heat);
         int heatStat  = Sightline.Heat.StatDelta(heat);
         int heatDmg   = Sightline.Heat.DmgDelta(heat);   // W6c: rung-8 +1 enemy damage (0 below the apex)
@@ -1044,13 +1269,17 @@ public partial class Game
         if (Vip != null) { Vip.Grenades = 0; Vip.AbilityCd = 99; }  // the asset has no kit (never ready)
         if (Objective == Objective.Rescue && Vip != null)
         {
-            // seat the caged captive mid-field and clear its tile + ring so soldiers can reach it
+            // seat the caged captive mid-field and clear its tile + ring so soldiers can reach it.
+            // W4 (SIGNAL): clear Grid.Barrel too — Tiles=Floor alone left Mission.Build's hazard
+            // barrels in the ring, blocking the freeing approach (IsFloor excludes barrels) and
+            // parking a chain-detonatable bomb beside the win-condition asset.
             Vip.X = Grid.W / 2; Vip.Y = Grid.H / 2;
             for (int dx = -1; dx <= 1; dx++)
                 for (int dy = -1; dy <= 1; dy++)
                 {
                     int nx = Vip.X + dx, ny = Vip.Y + dy;
-                    if (Grid.InBounds(nx, ny) && !IsOccupiedByOther(nx, ny, Vip)) Grid.Tiles[nx, ny] = TileType.Floor;
+                    if (Grid.InBounds(nx, ny) && !IsOccupiedByOther(nx, ny, Vip))
+                    { Grid.Tiles[nx, ny] = TileType.Floor; Grid.Barrel[nx, ny] = false; }
                 }
             Grid.ResetCoverHp();
             Vip.Mobility = 0;              // can't move while caged
@@ -1103,8 +1332,26 @@ public partial class Game
         _smartConcealTurns = 0;      // SmartStep: concealed-turn counter (hard anti-TIMEOUT cap)
         DeathFlash = 0;
         // per-mission bonus goal is a CAMPAIGN feature only — no secondary in LAST STAND or SKIRMISH/DAILY.
+        DemoProgress = 0;              // W10: per-mission demolition tally (counted even off-secondary; cheap)
+        BountyTarget = null;
         if (Mode == GameMode.Campaign) RollSecondary(n);
         else { Secondary = SecondaryKind.None; SecondaryFailed = false; }
+        // W10 INTEL CACHE: an optional mid/far-field pickup, CAMPAIGN only (intel is the campaign
+        // economy; LAST STAND/SKIRMISH have no requisition to spend it in). PlaceIntelCache carries
+        // the PlaceBarrels-style reachability guard; a pathological board just spawns no cache.
+        CachePresent = false;
+        if (Mode == GameMode.Campaign)
+        {
+            var cache = Mission.PlaceIntelCache(Grid, Players, Enemies, EvacZone,
+                                                HasTerminal ? Terminal : ((int, int)?)null,
+                                                HasSabotage ? SabotageSites : null);
+            if (cache != null)
+            {
+                CachePresent = true;
+                CacheX = cache.Value.x; CacheY = cache.Value.y;
+                CacheTurnsLeft = CacheTurns;
+            }
+        }
         foreach (var u in Enemies) { u.BeginTurn(); u.OnOverwatch = false; u.Routed = 0; }
         // UNDERTOW W3: snapshot each pod's spawn strength so BreakPodMorale can tell when a pod has
         // been chewed down to <= half and should rout its survivors (wave hostiles are PodId<0, ungrouped).
@@ -1129,7 +1376,14 @@ public partial class Game
 
         // checkpoint the run at the start of each mission (CAMPAIGN only). LAST STAND, SKIRMISH, and
         // the DAILY are all transient single-mode fights — never resumable, so they never write save.json.
-        if (!NoPersist && Mode == GameMode.Campaign) SaveGame.Save(_run);
+        // W9 review fix: commit the barracks' PENDING salvage spends (scar rehab / slate re-roll)
+        // immediately BEFORE the checkpoint — the sink's goods (the removed scar) become durable in
+        // the very save that follows, so the charge and the goods persist together or not at all.
+        if (!NoPersist && Mode == GameMode.Campaign)
+        {
+            CommitPendingSalvage();
+            SaveGame.Save(_run);
+        }
 
         // balance telemetry (no-op unless Stats.Enabled): record the encounter we just built.
         // W2: Mission.AppliedLayout = the authored arena the guard actually ACCEPTED (-1 procedural).
@@ -1239,6 +1493,7 @@ public partial class Game
     void RollSecondary(int n)
     {
         SecondaryFailed = false;
+        BountyTarget = null;
         if (n <= 1) { Secondary = SecondaryKind.None; return; }
         var pool = new List<SecondaryKind> { SecondaryKind.NoLosses };
         if (Objective != Objective.Defend) pool.Add(SecondaryKind.Swift);   // can't finish a hold-out early
@@ -1248,14 +1503,35 @@ public partial class Game
         //  - Defend     (waves spawn until the timer, so the board never fully clears)
         if (Objective != Objective.Eliminate && Objective != Objective.Decapitate
             && Objective != Objective.Defend) pool.Add(SecondaryKind.CleanSweep);
+        // ---- W10 playstyle bonuses (gated like the exclusions above — never offer a dead bonus) ----
+        // GHOST: only meaningful when the mission actually STARTS concealed (SetupMission set
+        // SquadConcealed before calling us; heat's EXPOSED / SPEARHEAD strip it -> no offer).
+        if (SquadConcealed) pool.Add(SecondaryKind.Ghost);
+        // DEMOLITION: cover + barrels exist on every arena; player-credited destruction counts.
+        pool.Add(SecondaryKind.Demolition);
+        // BOUNTY: kill the mission's named SPECIALIST — pick it here at setup (prefer a non-GRUNT,
+        // non-boss specialist body; never the Decapitate HVT, which is already the primary). No
+        // eligible body (a tiny GRUNT-only force) -> the bonus simply isn't offered.
+        var bounty = Enemies.Where(e => e.Alive && e != Hvt && e.Cls != "GRUNT" && e.Cls != "ELITE")
+                            .OrderByDescending(e => e.MaxHp).ThenBy(e => e.PodId).FirstOrDefault()
+                  ?? Enemies.Where(e => e.Alive && e != Hvt && e.Cls != "ELITE")
+                            .OrderByDescending(e => e.MaxHp).ThenBy(e => e.PodId).FirstOrDefault();
+        if (bounty != null) pool.Add(SecondaryKind.Bounty);
         Secondary = pool[Util.RandInt(0, pool.Count - 1)];
+        if (Secondary == SecondaryKind.Bounty) BountyTarget = bounty;
     }
+
+    /// BOUNTY display name: the specialist's callsign (falls back if the target evaporates).
+    public string BountyName => BountyTarget != null ? BountyTarget.Name : "?";
 
     public string SecondaryName => Secondary switch
     {
         SecondaryKind.NoLosses  => "NO LOSSES",
         SecondaryKind.Swift     => $"SWIFT (<={SwiftTurns} turns)",
         SecondaryKind.CleanSweep => "CLEAN SWEEP",
+        SecondaryKind.Ghost      => $"GHOST (hidden thru turn {GhostTurns})",
+        SecondaryKind.Demolition => $"DEMOLITION (destroy {DemoRequired})",
+        SecondaryKind.Bounty     => $"BOUNTY: {BountyName}",
         _ => "",
     };
 
@@ -1265,6 +1541,9 @@ public partial class Game
         SecondaryKind.NoLosses  => "BONUS  NO LOSSES",
         SecondaryKind.Swift     => $"BONUS  SWIFT {_turnCount}/{SwiftTurns}",
         SecondaryKind.CleanSweep => "BONUS  CLEAN SWEEP",
+        SecondaryKind.Ghost      => $"BONUS  GHOST {Math.Min(_turnCount, GhostTurns)}/{GhostTurns}",
+        SecondaryKind.Demolition => $"BONUS  DEMO {Math.Min(DemoProgress, DemoRequired)}/{DemoRequired}",
+        SecondaryKind.Bounty     => $"BONUS  BOUNTY {BountyName}",
         _ => "",
     };
 
@@ -1274,6 +1553,9 @@ public partial class Game
         SecondaryKind.NoLosses  => !SecondaryFailed,
         SecondaryKind.Swift     => _turnCount <= SwiftTurns,
         SecondaryKind.CleanSweep => true,
+        SecondaryKind.Ghost      => !SecondaryFailed,           // a pre-turn-3 break flips SecondaryFailed
+        SecondaryKind.Demolition => true,                       // always attainable while the mission runs
+        SecondaryKind.Bounty     => BountyTarget != null,       // dead target == achieved (still green)
         _ => false,
     };
 
@@ -1283,6 +1565,9 @@ public partial class Game
         SecondaryKind.NoLosses  => _missionKia.Count == 0,
         SecondaryKind.Swift     => _turnCount <= SwiftTurns,
         SecondaryKind.CleanSweep => AliveEnemies().Count == 0,
+        SecondaryKind.Ghost      => !SecondaryFailed,
+        SecondaryKind.Demolition => DemoProgress >= DemoRequired,
+        SecondaryKind.Bounty     => BountyTarget != null && !BountyTarget.Alive,
         _ => false,
     };
 
@@ -1395,6 +1680,10 @@ public partial class Game
             heatNote += stakesNote;
             _run.Report.Insert(0, $"Recovered {gained} intel{heatNote}  (total {_run.Intel})");
             _shopDone = false;
+            _shopReroll = 0;                            // W9: paid slate re-rolls are per-barracks
+            // W9: cached bank for the sink UI — the AVAILABLE bank (disk minus any uncommitted
+            // pending, which is normally 0 here: the previous SetupMission committed it).
+            BarracksSalvage = NoPersist ? 0 : Math.Max(0, SaveGame.LoadSalvage() - PendingSalvage);
             RefreshShopOffer();                         // roll this barracks' rotating requisition slate
             ArmoryMode = false; ArmorySoldier = null;   // open requisition in the shop view, not armory
             _run.GenerateOffers(_run.Mission + 1);
@@ -1469,8 +1758,11 @@ public partial class Game
         int heat = _run.HeatLevel;
         int missions = win ? _run.Mission : Math.Max(0, _run.Mission - 1);
 
-        // 1) SALVAGE bounty
-        int salvage = win ? (25 + 6 * _run.Mission + 5 * heat) : (4 * Math.Max(0, _run.Mission - 1) + 2 * heat);
+        // 1) SALVAGE bounty. W9: heat MULTIPLIES the win bounty (+10% per heat rung) instead of the
+        // old flat +5h — a heat-8 clear now pays 1.8x the h0 income, so pushing the ladder is what
+        // funds the standing economy. h0 is UNCHANGED at 25+6m (~61 for a full clear). The loss
+        // consolation stays additive.
+        int salvage = win ? (25 + 6 * _run.Mission) * (10 + heat) / 10 : (4 * Math.Max(0, _run.Mission - 1) + 2 * heat);
         if (salvage > 0) { SaveGame.AddSalvage(salvage); _run.Report.Insert(0, $"SALVAGE +{salvage}"); }
 
         // 2) HALL OF FAME — surviving squad (won runs) as legends, plus this run's fallen (KIA).
@@ -1599,6 +1891,7 @@ public partial class Game
     public void OnUnitEnteredTile(Unit mover)
     {
         if (mover.FiredThisTurn) mover.MovedAfterFire = true;   // HORIZON: any tile entry after firing clears exposed-by-fire
+        mover.MovedThisTurn = true;   // W10 BIPOD: ANY tile entry (walk/vault/drag/shove/grapple) disarms the planted bonus
         if (!mover.Alive) return;
         if (mover.HasStatus(StatusKind.Bleed))   // bleeding worsens with every step
         {
@@ -1622,6 +1915,10 @@ public partial class Game
                     && Util.TileDist(mover.X, mover.Y, e.X, e.Y) <= RevealRange))
                 BreakConcealment();
             CheckPodActivation();  // reveal pods while advancing (no-op while still concealed)
+            // W10 INTEL CACHE: a soldier stepping onto the cache tile banks it (any tile entry —
+            // walking through collects too; the detour is the cost, not pixel-perfect stopping).
+            if (CachePresent && !mover.IsVip && mover.X == CacheX && mover.Y == CacheY)
+                CollectIntelCache(mover);
         }
         // RANGER SLIPSTREAM: a free, overwatch-immune reposition. While slipstreaming the mover draws no
         // reaction fire; the flag is consumed when its destination tile is reached so the move ends silent.
@@ -1653,7 +1950,10 @@ public partial class Game
             if (w.OwFocused && !InOwCone(w, mover.X, mover.Y)) continue;
             // 4.4 (review M1): a player's overwatch shot is still a shot — it reveals the
             // squad. No actor -> no ambush bonus on a reaction (it already has its own mod).
-            if (w.Team == Team.Player && SquadConcealed) BreakConcealment();
+            // W10 SUPPRESSOR: the reaction is a firing site too — thread the mover through as the
+            // shot's target so a suppressed watcher's break wakes only the mover's own pod.
+            if (w.Team == Team.Player && SquadConcealed)
+                BreakConcealment(target: mover, suppressed: w.HasMod(WeaponMod.Suppressor));
             w.OnOverwatch = false;
             w.ReactedThisTurn = true;
             w.Ammo--;
@@ -1666,8 +1966,10 @@ public partial class Game
             // UNDERTOW W2 — BRACE: a disrupting reaction. It STAGGERS on a hit (ShotAnim.Apply zeroes the
             // mover's remaining actions) but deals reduced damage + never crits, so it's a real trade vs a
             // lethal overwatch (deny tempo instead of going for the kill), not a strict upgrade.
+            // W10 SHOCK DOCTRINE boon: the halving/no-crit trade is waived — a braced reaction deals
+            // FULL damage AND staggers (Combat.BraceFullDamage; the stagger flag below is unchanged).
             bool brace = w.OwBrace;
-            if (brace && res.Hit) { res.Damage = Math.Max(1, res.Damage / 2); res.Crit = false; }
+            if (brace && res.Hit && !Combat.BraceFullDamage(w)) { res.Damage = Math.Max(1, res.Damage / 2); res.Crit = false; }
             Fx.PopText(w.Pos + new Vector2(0, -30), brace ? "BRACE" : "OVERWATCH", brace ? Pal.Good : Pal.Accent, 18f);
             Audio.Play("over");
             var shot = new ShotAnim(w, mover, res, reaction: true) { Stagger = brace };
@@ -1693,6 +1995,8 @@ public partial class Game
         if (tile == null) return;
         var hit = Grid.DamageCover(tile.Value.x, tile.Value.y, 1);
         if (hit != Grid.CoverHit.None) CoverHitFx(tile.Value.x, tile.Value.y, hit);
+        // W10 DEMOLITION secondary: a player's heavy fire finishing a cover tile counts.
+        if (hit == Grid.CoverHit.Destroyed && shooter.Team == Team.Player) DemoProgress++;
     }
 
     /// Feedback for a cover tile taking damage / degrading.
@@ -1726,9 +2030,10 @@ public partial class Game
         // telemetry the flywheel ranks (UNDERTOW W1). The queued-reaction purge below is the primary
         // guard; this makes KillUnit robust to every double-call path.
         if (!d.Alive) return;
-        // SIEGE interrupt: killing a charging BOMBARD cancels its strike (the zone reads off live
-        // enemies, so it clears automatically; this is a cosmetic confirmation of the interrupt).
-        if (d.Cls == "BOMBARD" && d.ChargeTurns > 0)
+        // SIEGE interrupt: killing a charging artillery piece cancels its strike (the zone reads
+        // off live enemies, so it clears automatically; this is a cosmetic confirmation of the
+        // interrupt). W5: HasSiege flag (mirrors Cls=="BOMBARD"; also covers a siege-armed boss).
+        if (d.HasSiege && d.ChargeTurns > 0)
             Fx.PopText(d.Pos + new Vector2(0, -34), "STRIKE ABORTED", Pal.Good, 16f);
         d.Alive = false;
         d.Hp = 0;
@@ -1746,6 +2051,21 @@ public partial class Game
         Unit killer = ActiveAnim switch { ShotAnim sa => sa.A, GrenadeAnim ga => ga.Thrower, _ => null };
         Stats.RecordKill(killer?.Cls ?? (string.IsNullOrEmpty(d.LastDotSource) ? "?" : d.LastDotSource),
                          killer != null ? (int)killer.Team : 1, d.Cls, (int)d.Team);
+        // W10 RECLAIMER boon: a kill INSIDE a focused-overwatch cone re-arms the watcher's reaction
+        // (OnOverwatch + ReactedThisTurn reset; the spent bullet stays spent). The kill context is
+        // the active REACTION ShotAnim — the watcher's OwFocused/OwDir survive the arming (only
+        // OnOverwatch was dropped when the reaction queued in OnUnitEnteredTile), so InOwCone still
+        // describes the braced lane. Makes a focused kill-lane a genuine mow-them-down build.
+        if (ActiveAnim is ShotAnim rsa && rsa.Reaction && rsa.A != null && rsa.A.Alive
+            && rsa.A.Team == Team.Player && d.Team == Team.Enemy
+            && rsa.A.OwFocused && InOwCone(rsa.A, d.X, d.Y)
+            && HasBoon(Boon.Reclaimer) && !rsa.A.OnOverwatch && rsa.A.Ammo > 0)
+        {
+            rsa.A.OnOverwatch = true;
+            rsa.A.ReactedThisTurn = false;
+            Fx.PopText(rsa.A.Pos + new Vector2(0, -30), "RECLAIMED", Pal.Accent, 17f);
+            Fx.Flash(rsa.A.Pos, Pal.Accent, 18f, 0.14f, 0.45f);
+        }
         // W11 HONEST LOSSES: tally which enemy archetype killed this soldier (always-on; the lose
         // card's CAUSE OF DEATH line reads it). Source-less / friendly-fire deaths bucket under "?"
         // (DoT labels like BURN stay out of this dict — the lose card resolves causes through the
@@ -1837,10 +2157,28 @@ public partial class Game
         var mates = Enemies.Where(e => e.Alive && e.PodId == pod).ToList();
         if (mates.Count == 0) return;                       // whole pod gone — no one left to break
         int orig = _podOrig.GetValueOrDefault(pod, mates.Count + 1);
-        if (mates.Count > Math.Max(1, orig / 2)) return;    // still at fighting strength — holds the line
-        bool broke = false;
+        // still at fighting strength — holds the line. RoutThreshold is the ONE shared threshold
+        // (PodAtWaverPoint mirrors it one kill ahead, so the WAVERING tag never lies).
+        if (mates.Count > RoutThreshold(orig)) return;
+        bool broke = false, held = false;
         foreach (var m in mates)
-            if (m.Active && m.Routed == 0) { m.Routed = RoutDuration; broke = true; }
+            if (m.Active && m.Routed == 0)
+            {
+                // SIGNAL W8 — the BANNER anchor: a mate within a living banner's aura does not
+                // break. The rout is CONTESTED, not free: kill the WARBRINGER (or catch the pod
+                // outside its reach) and the break lands. Per-member, so a split pod can half-rout.
+                if (BannerNear(m)) { held = true; continue; }
+                // W10 TERROR boon: the break lasts TerrorRoutBonus turns longer (RoutDurationFor).
+                m.Routed = RoutDurationFor(); broke = true;
+            }
+        if (held && !broke)
+        {
+            // the banner held the whole pod — say so loudly (the player's cue: banner first)
+            var anchor = mates.FirstOrDefault(m => m.Active) ?? mates[0];
+            Fx.PopText(anchor.Pos + new Vector2(0, -34), "HELD BY BANNER", Pal.Suspect, 18f);
+            ShowBanner("THE BANNER HOLDS THE LINE", true);
+            return;
+        }
         if (!broke) return;                                 // survivors dormant or already routing
         var ldr = mates.FirstOrDefault(m => m.Active) ?? mates[0];
         Fx.PopText(ldr.Pos + new Vector2(0, -34), "BROKEN", Pal.Good, 20f);
@@ -1982,6 +2320,12 @@ public partial class Game
     public void EnvDamage(Unit u, int dmg, string label, Color col)
     {
         if (!u.Alive) return;
+        // W4 (SIGNAL): the caged RESCUE captive is invulnerable — full stop. Shots/blasts are
+        // guarded at their call sites (CanTarget / GrenadeAnim / DetonateBarrel / DetonateSiege),
+        // but the source-less paths (Burning DoT, shove SLAM/STAGGER collisions) funnel HERE and
+        // had no guard: fire or a shove could kill the caged captive, and CheckEnd's Rescue loss
+        // requires !CaptiveLocked — an unwinnable, unlosable soft-lock. Guard the funnel itself.
+        if (u == Vip && CaptiveLocked) return;
         u.LastDotSource = label;   // W2: KillUnit's attribution fallback (a DoT death buckets under its cause, not "?")
         u.Hp -= dmg;
         u.Flash = 1f;
@@ -2014,10 +2358,11 @@ public partial class Game
     public const int SiegeRadius = 1;        // Chebyshev radius -> a 3x3 zone
     public const int SiegeDmg    = 7;        // cover-ignoring base AoE (a touch above BarrelDmg=6)
 
-    /// True when any live BOMBARD has a strike charged (drives the HUD/banner "strike inbound" cue).
+    /// True when any live siege-armed enemy has a strike charged (drives the HUD/banner "strike
+    /// inbound" cue). W5: HasSiege flag (mirrors Cls=="BOMBARD"; also covers a siege-armed boss).
     public bool SiegeActive
     {
-        get { foreach (var e in Enemies) if (e.Alive && e.Cls == "BOMBARD" && e.ChargeTurns > 0) return true; return false; }
+        get { foreach (var e in Enemies) if (e.Alive && e.HasSiege && e.ChargeTurns > 0) return true; return false; }
     }
 
     /// True if (x,y) is inside a live BOMBARD strike zone. Cover-ignoring, so cover doesn't save you —
@@ -2026,7 +2371,7 @@ public partial class Game
     public bool InSiegeZone(int x, int y)
     {
         foreach (var e in Enemies)
-            if (e.Alive && e.Cls == "BOMBARD" && e.ChargeTurns > 0
+            if (e.Alive && e.HasSiege && e.ChargeTurns > 0
                 && Util.ChebyDist(x, y, e.ChargeX, e.ChargeY) <= SiegeRadius) return true;
         return false;
     }
@@ -2040,7 +2385,7 @@ public partial class Game
     {
         foreach (var e in Enemies.ToList())   // ToList: a strike can kill units; don't mutate mid-scan
         {
-            if (!e.Alive || e.Cls != "BOMBARD" || e.ChargeTurns <= 0) continue;
+            if (!e.Alive || !e.HasSiege || e.ChargeTurns <= 0) continue;
             e.ChargeTurns = 0;                // consume the charge (fired)
             DetonateSiege(e, e.ChargeX, e.ChargeY);
         }
@@ -2092,6 +2437,10 @@ public partial class Game
     {
         if (!Grid.IsBarrel(bx, by)) return;
         Grid.Barrel[bx, by] = false;        // consumed before the blast so chains don't re-hit it
+        // W10 DEMOLITION secondary: a player-credited detonation (shot / grenade / incendiary —
+        // SetBarrelCredit at each trigger site) counts the barrel; chained barrels inherit the
+        // credit, so a chain reaction is a demolitionist's jackpot. Fire-cooked barrels credit no one.
+        if (_barrelCreditTeam == Team.Player) DemoProgress++;
         var center = Util.TileCenter(bx, by);
 
         Audio.Play("crit"); Audio.Play("death");
@@ -2111,8 +2460,12 @@ public partial class Game
                 if (!Grid.InBounds(x, y)) continue;
                 var ch = Grid.DamageCover(x, y, Grid.HighCoverHp);
                 if (ch != Grid.CoverHit.None) CoverHitFx(x, y, ch);
+                // W10 DEMOLITION secondary: cover levelled by a player-credited blast counts too.
+                if (ch == Grid.CoverHit.Destroyed && _barrelCreditTeam == Team.Player) DemoProgress++;
                 if ((x != bx || y != by) && Grid.IsBarrel(x, y)) chain.Add((x, y));   // catch neighbours
-                Grid.LightFire(x, y, Grid.FireTurns);                                 // residue fire
+                // residue fire. W10 PYROMANIACS boon: fire the SQUAD starts burns +2 turns (denial).
+                Grid.LightFire(x, y, Grid.FireTurns
+                    + (_barrelCreditTeam == Team.Player && HasBoon(Boon.Pyromaniacs) ? 2 : 0));
             }
 
         // damage every unit in radius (friendly fire included), cover ignored (it's an explosion)
@@ -2171,9 +2524,13 @@ public partial class Game
         _barrelCreditTeam = Team.Enemy; _barrelCreditUnit = null;   // fire-cooked barrels credit no one
         foreach (var (x, y) in cook) DetonateBarrel(x, y);
 
-        // units standing in fire keep burning (the Burning DoT does the damage in TickStatuses)
+        // units standing in fire keep burning (the Burning DoT does the damage in TickStatuses).
+        // W4 (SIGNAL): never ignite the caged RESCUE captive — it can't move off the tile
+        // (Mobility 0, actionless) and EnvDamage refuses to hurt it anyway, so the status
+        // would only spam BURN FX on an invulnerable unit every turn the fire lingers.
         foreach (var u in Players.Concat(Enemies))
-            if (u.Alive && Grid.IsFire(u.X, u.Y)) u.AddStatus(StatusKind.Burning, 2);
+            if (u.Alive && Grid.IsFire(u.X, u.Y) && !(u == Vip && CaptiveLocked))
+                u.AddStatus(StatusKind.Burning, 2);
 
         Grid.TickFire();
     }
@@ -2436,7 +2793,11 @@ public partial class Game
         }
         else if (Objective == Objective.Rescue) // free the captive, then walk it to extraction
         {
-            if (!CaptiveLocked && (Vip == null || !Vip.Alive))
+            // W4 (SIGNAL) belt-and-braces: a DEAD captive is CAPTIVE LOST whether or not the cage
+            // was sprung. The old !CaptiveLocked qualifier meant a captive killed while still caged
+            // (every damage path is guarded now, but guards can regress) left the mission with no
+            // reachable win OR loss — the soft-lock. Never let a dead asset stall the run.
+            if (Vip == null || !Vip.Alive)
             { LoseRun("CAPTIVE LOST", $"The captive died on mission {_run.Mission}."); return; }
             if (!CaptiveLocked && Vip != null && EvacZone.Contains((Vip.X, Vip.Y))) EnterBarracks();
         }
@@ -2706,19 +3067,53 @@ public partial class Game
     /// and any pod already in sight wakes with the usual capped scatter. After this, the
     /// normal 4.3 alert-tier rules resume for the rest of the mission. Call BEFORE the
     /// action mutates state so the bonus is in place when Combat.Resolve reads it.
-    public void BreakConcealment(Unit actor = null)
+    /// W10 SUPPRESSOR: `target` + `suppressed` thread the SHOT's context through from the firing
+    /// sites (IssueShoot and the overwatch reaction) — a suppressed shot still breaks squad
+    /// concealment normally (the flag drops, the banner fires, the ambush bonus arms), but the
+    /// seen-pod wake loop below NARROWS to the target's own pod: everyone else heard nothing they
+    /// can place. Non-shot breaks (proximity, grenades, hacks, barrels) pass neither and keep the
+    /// full wake. CheckPodActivation's post-concealment sight rules are untouched.
+    public void BreakConcealment(Unit actor = null, Unit target = null, bool suppressed = false)
     {
         if (!SquadConcealed) return;
         SquadConcealed = false;
         if (actor != null) actor.FiredFromConcealment = true;   // only a deliberate first shot earns the bonus
+        // W10 GHOST secondary: the bonus asks the squad to stay hidden through turn GhostTurns —
+        // any break on an earlier turn (shot, proximity, hack: every path funnels here) blows it.
+        if (Secondary == SecondaryKind.Ghost && _turnCount <= GhostTurns) SecondaryFailed = true;
         ShowBanner("AMBUSH!", false);
         Fx.AddShake(4f);
         Audio.Play("turn");
-        // wake every pod a soldier can currently see (each pod activates once)
+        // wake every pod a soldier can currently see (each pod activates once). A SUPPRESSED shot
+        // narrows the wake to the TARGET's own pod (pod-less targets fall back to the full wake —
+        // ungrouped hostiles are spawned already alert, so there is nothing to narrow to).
+        bool narrow = suppressed && target != null && target.PodId >= 0;
         var seen = new HashSet<int>();
         foreach (var e in Enemies)
-            if (e.Alive && !e.Active && e.PodId >= 0 && ClosestSightedDist(e) >= 0) seen.Add(e.PodId);
+        {
+            if (!e.Alive || e.Active || e.PodId < 0 || ClosestSightedDist(e) < 0) continue;
+            if (narrow && e.PodId != target.PodId) continue;   // SUPPRESSOR: only the target's pod places the shot
+            seen.Add(e.PodId);
+        }
+        if (narrow && actor != null)
+            Fx.PopText(actor.Pos + new Vector2(0, -44), "SUPPRESSED SHOT", Pal.TxtDim, 15f);
         foreach (int pid in seen) ActivatePod(pid);
+    }
+
+    /// W10 INTEL CACHE pickup: bank the intel, clear the tile, and record the verb (ACTION MIX).
+    void CollectIntelCache(Unit finder)
+    {
+        if (!CachePresent) return;
+        CachePresent = false;
+        int gain = Util.RandInt(CacheIntelMin, CacheIntelMax);
+        if (_run != null) _run.Intel += gain;
+        Stats.RecordAction("INTEL");   // W2 verb telemetry: cache pickups visible in the flywheel
+        var c = Util.TileCenter(CacheX, CacheY);
+        Fx.PopText(c + new Vector2(0, -26), $"+{gain} INTEL", Pal.VipGold, 22f);
+        Fx.Burst(c, Pal.VipGold, 18, 200f, 0.55f, 4f, true);
+        Fx.Flash(c, Pal.VipGold, 24f, 0.16f, 0.5f);
+        ShowBanner("INTEL CACHE SECURED", false);
+        Audio.Play("select");
     }
 
     /// Balance fix: a hack/plant GOES LOUD. First it breaks concealment — which springs the
@@ -3424,7 +3819,9 @@ public partial class Game
     /// least one adjacent (Chebyshev==1) alive friendly with a legal landing tile (one step toward us).
     public bool CanDrag(Unit u)
     {
-        if (u == null || u.Team != Team.Player || !u.CanAct || u.ActionsLeft < 1 || u.DraggedThisTurn) return false;
+        // W10: per-turn COUNTER vs Combat.FieldCraftLimit (1; FIELD DRILLS boon 2) instead of a bool
+        if (u == null || u.Team != Team.Player || !u.CanAct || u.ActionsLeft < 1
+            || u.DragsThisTurn >= Combat.FieldCraftLimit(u)) return false;
         foreach (var a in Players)
             if (DragTargetOk(u, a)) return true;
         return false;
@@ -3437,7 +3834,8 @@ public partial class Game
     /// someone already beside you; a Chebyshev-2 ally is pulled to the tile 1 away (legal + useful).
     bool DragTargetOk(Unit u, Unit ally)
     {
-        if (u == null || ally == null || !u.CanAct || u.ActionsLeft < 1 || u.DraggedThisTurn) return false;
+        if (u == null || ally == null || !u.CanAct || u.ActionsLeft < 1
+            || u.DragsThisTurn >= Combat.FieldCraftLimit(u)) return false;
         if (ally == u || !ally.Alive || ally.Team != Team.Player) return false;
         if (ally.IsVip && CaptiveLocked) return false;          // caged captive is immovable until freed (mirrors Mark/Grapple/Pin/Extract)
         int dx = ally.X - u.X, dy = ally.Y - u.Y;
@@ -3466,7 +3864,7 @@ public partial class Game
         var u = Selected;
         int dx = Math.Sign(u.X - ally.X), dy = Math.Sign(u.Y - ally.Y);   // direction the ally MOVES (toward us)
         u.ActionsLeft = Math.Max(0, u.ActionsLeft - 1);   // 1 action; never ends the turn
-        u.DraggedThisTurn = true;                         // one drag per soldier per turn (anti-loop)
+        u.DragsThisTurn++;                                // counted vs Combat.FieldCraftLimit (anti-loop)
         Stats.RecordAction("DRAG");                       // W2 verb telemetry
         Fx.PopText(ally.Pos + new Vector2(0, -32), "DRAG", Pal.Friend, 17f);
         Fx.Burst(ally.Pos, Pal.Friend, 8, 100f, 0.35f, 2.5f);
@@ -3480,7 +3878,9 @@ public partial class Game
     /// one legal vault landing tile (a 2-step straight hop over a cover tile to empty floor).
     public bool CanVault(Unit u)
     {
-        if (u == null || u.Team != Team.Player || !u.CanAct || u.ActionsLeft < 1 || u.VaultedThisTurn) return false;
+        // W10: per-turn COUNTER vs Combat.FieldCraftLimit (1; FIELD DRILLS boon 2) instead of a bool
+        if (u == null || u.Team != Team.Player || !u.CanAct || u.ActionsLeft < 1
+            || u.VaultsThisTurn >= Combat.FieldCraftLimit(u)) return false;
         for (int sx = -1; sx <= 1; sx++)
             for (int sy = -1; sy <= 1; sy++)
             {
@@ -3495,7 +3895,8 @@ public partial class Game
     /// is in-bounds, floor, and unoccupied.
     bool VaultTargetOk(Unit u, int tx, int ty)
     {
-        if (u == null || !u.CanAct || u.ActionsLeft < 1 || u.VaultedThisTurn) return false;
+        if (u == null || !u.CanAct || u.ActionsLeft < 1
+            || u.VaultsThisTurn >= Combat.FieldCraftLimit(u)) return false;
         int dx = tx - u.X, dy = ty - u.Y;
         // must be a straight 2-tile hop (ortho: (±2,0)/(0,±2); diag: (±2,±2))
         bool straight = (Math.Abs(dx) == 2 && dy == 0) || (dx == 0 && Math.Abs(dy) == 2) || (Math.Abs(dx) == 2 && Math.Abs(dy) == 2);
@@ -3521,7 +3922,7 @@ public partial class Game
         if (!VaultTargetOk(Selected, tx, ty)) { VaultMode = false; return; }
         var u = Selected;
         u.ActionsLeft = Math.Max(0, u.ActionsLeft - 1);   // 1 action; never ends the turn
-        u.VaultedThisTurn = true;                         // one vault per soldier per turn (anti-loop)
+        u.VaultsThisTurn++;                               // counted vs Combat.FieldCraftLimit (anti-loop)
         Stats.RecordAction("VAULT");                      // W2 verb telemetry (review fix: no invisible verbs)
         Fx.PopText(u.Pos + new Vector2(0, -32), "VAULT", Pal.Good, 17f);
         Fx.Burst(u.Pos, Pal.Good, 8, 110f, 0.35f, 2.5f);
@@ -3561,7 +3962,9 @@ public partial class Game
     {
         if (Selected == null || !Selected.CanAct || Selected.Ammo <= 0) return;
         if (!CanTarget(Selected, target)) return;
-        if (SquadConcealed) BreakConcealment(Selected);  // 4.4: the ambush shot springs the trap
+        // 4.4: the ambush shot springs the trap. W10 SUPPRESSOR: thread the shot's target through —
+        // a suppressed ambush wakes only the target's own pod (BreakConcealment narrows the loop).
+        if (SquadConcealed) BreakConcealment(Selected, target, Selected.HasMod(WeaponMod.Suppressor));
         Selected.Ammo--;
         // TEMPO action cost: a shot costs 1 action and does NOT end the turn — the soldier keeps its
         // second action to REPOSITION (duck into cover / break LoS), take a rushed FOLLOW-UP shot, or
@@ -3779,6 +4182,56 @@ public partial class Game
         var at = Util.TileCenter(Terminal.x, Terminal.y);
         Fx.PopText(at + new Vector2(0, -30), HackProgress >= HackRequired ? "HACKED" : "HACK +1", Pal.Accent, 20f);
         Fx.Burst(at, Pal.Accent, 14, 160f, 0.5f, 3f);
+        Audio.Play("reload");
+    }
+
+    // ---- SIGNAL W8 — CUSTODIAN re-lock/re-arm (the enemy contests objective PROGRESS) ----------
+
+    /// The index of a BLOWN sabotage charge at exactly `site`, or -1. (A blown entry is the only
+    /// re-armable one; an intact charge needs no keeper.)
+    int BlownSiteAt((int x, int y) site)
+    {
+        for (int i = 0; i < SabotageSites.Count; i++)
+            if (SabotageBlown.Contains(i) && SabotageSites[i] == site) return i;
+        return -1;
+    }
+
+    /// True when enemy `e`, standing adjacent to `site`, has objective progress there to undo:
+    /// a partially-hacked terminal (HackProgress in 1..HackRequired-1 — at HackRequired the
+    /// mission already ended) or a blown sabotage charge. Mirrors the player's CanHack gating.
+    bool CanRelock(Unit e, (int x, int y) site)
+    {
+        if (e == null || !e.Alive || Util.ChebyDist(e.X, e.Y, site.x, site.y) > 1) return false;
+        if (HasTerminal && site == Terminal) return HackProgress > 0 && HackProgress < HackRequired;
+        // W8 review: mirror the hack arm's completed-objective guard — all charges blown means the
+        // mission is already won (the plant path ends it same-tick today, but a future deferred-end
+        // path must never let a keeper re-arm a won mission).
+        if (HasSabotage) return SabotageBlown.Count < SabotageSites.Count && BlownSiteAt(site) >= 0;
+        return false;
+    }
+
+    /// Undo ONE step of objective progress at `site` (validated by CanRelock): -1 HackProgress on
+    /// the terminal, or re-arm one blown sabotage charge. Telegraphed with a banner line + site FX
+    /// so the swing is never silent — the counter is the same as ever: kill the keeper.
+    void DoRelock(Unit e, (int x, int y) site)
+    {
+        var at = Util.TileCenter(site.x, site.y);
+        if (HasTerminal && site == Terminal && HackProgress > 0)
+        {
+            HackProgress--;
+            Fx.PopText(at + new Vector2(0, -30), "RE-LOCKED", Pal.Foe, 20f);
+            ShowBanner("CUSTODIAN RE-LOCKS THE TERMINAL", true);
+        }
+        else if (HasSabotage)
+        {
+            int i = BlownSiteAt(site);
+            if (i < 0) return;
+            SabotageBlown.Remove(i);
+            Fx.PopText(at + new Vector2(0, -30), "RE-ARMED", Pal.Foe, 20f);
+            ShowBanner("CUSTODIAN RE-ARMS THE CHARGE", true);
+        }
+        else return;
+        Fx.Burst(at, Pal.Foe, 14, 160f, 0.5f, 3f);
         Audio.Play("reload");
     }
 
@@ -4224,11 +4677,12 @@ public partial class Game
 
     /// AEGIS shields re-face toward the nearest soldier each enemy turn, so the squad
     /// must keep moving to flank the barrier rather than parking on one open side.
+    /// W5: HasShieldArc flag (mirrors Cls=="SHIELD"; a shield-arc boss re-faces too).
     void FaceShields()
     {
         foreach (var e in Enemies)
         {
-            if (!e.Alive || e.Cls != "SHIELD") continue;
+            if (!e.Alive || !e.HasShieldArc) continue;
             var p = AlivePlayers().OrderBy(q => Util.ChebyDist(e.X, e.Y, q.X, q.Y)).FirstOrDefault();
             if (p == null) continue;
             int dx = p.X - e.X, dy = p.Y - e.Y;
@@ -4260,7 +4714,7 @@ public partial class Game
         ResolveSuspicion();                                      // 4.3: suspicious pods confirm or lose contact
         FaceShields();                                           // AEGIS turns its barrier toward the squad
         UpdateHvtGuard();                                        // DECAPITATE: refresh the HVT's guarded state at the boundary
-        foreach (var e in Enemies) if (e.Alive) { e.BeginTurn(); TickStatuses(e); }
+        foreach (var e in Enemies) if (e.Alive) { BeginEnemyUnitTurn(e); TickStatuses(e); }
         _aiUnits = AliveEnemies().Where(e => e.Active).ToList();  // dormant/suspicious pods don't act
         // UNDERTOW W4 — sequenced coordination: act SETUP verbs before FINISHERS. A SAPPER breach or a
         // STRIKER/adjacent shove EXPOSES a soldier; ordering those units first lets the incremental focus
@@ -4276,11 +4730,29 @@ public partial class Game
         Enqueue(new WaitAnim(0.5f), Team.Enemy);
     }
 
+    /// SIGNAL W8 — the per-enemy turn-boundary step, factored out of EndPlayerTurn so MORALETEST
+    /// can drive it directly. BeginTurn ticks Routed down one; a living banner in aura range ticks
+    /// it down ONCE more — a bannered pod rallies one turn faster (RoutDuration 2 -> back in 1).
+    /// Lives in GAME (not Unit.BeginTurn) because the aura needs the Enemies list.
+    void BeginEnemyUnitTurn(Unit e)
+    {
+        e.BeginTurn();
+        if (e.Routed > 0 && BannerNear(e)) e.Routed--;
+    }
+
     void StartPlayerTurn()
     {
         _turnCount++;
         Phase = Phase.PlayerTurn;
-        LeashVip();                       // ESCORT: the asset tags along with the squad (no hand-walking)
+        // W10 INTEL CACHE: the pickup window closes after CacheTurns player turns — the routing
+        // detour is a bet against this clock, not free money whenever the fight happens to drift by.
+        if (CachePresent && --CacheTurnsLeft <= 0)
+        {
+            CachePresent = false;
+            Fx.PopText(Util.TileCenter(CacheX, CacheY) + new Vector2(0, -20), "CACHE LOST", Pal.TxtDim, 18f);
+            ShowBanner("INTEL CACHE WENT DARK", true);
+        }
+        LeashVip();                       // ESCORT / freed-RESCUE: the asset tags along with the squad (no hand-walking)
         ClearIntent();                    // no enemy intent lingers into the player's turn
         Grid.TickSmoke();                 // smoke clouds decay one turn per round
         TickHazards();                    // fire cooks off barrels + reignites units, then decays
@@ -4310,9 +4782,12 @@ public partial class Game
     /// clears; the VIP follows. It stays fully player-selectable (manual override intact) and never
     /// auto-charges toward evac or into danger alone. Deterministic + TIMEOUT-safe: it always moves toward
     /// an EXISTING soldier, so it strictly converges (and short-circuits the instant it's adjacent).
+    /// W4 (SIGNAL): the FREED RESCUE captive rides the same leash — post-free, Rescue IS an escort
+    /// (fragile asset to the zone), and hand-walking it was the same micro-chore. The caged state is
+    /// untouched (the CaptiveLocked check below holds it in the cage until a soldier springs it).
     void LeashVip()
     {
-        if (Objective != Objective.Escort) return;
+        if (Objective != Objective.Escort && Objective != Objective.Rescue) return;
         if (Vip == null || !Vip.Alive || CaptiveLocked || Vip.MoveBudget <= 0) return;
         // the soldiers the asset follows: living, non-VIP squad members
         var soldiers = Players.Where(p => p.Alive && !p.IsVip).ToList();
@@ -4580,6 +5055,21 @@ public partial class Game
                 Fx.AddShake(8f);
                 ShowBanner(e.Name + " ENRAGED", true);
             }
+            // SIGNAL W5 — the Legion BREAKER's SECOND rage tier: an already-enraged RagesTwice
+            // elite FRENZIES once when first acting at <=25% HP (+aim/+mob again, and Ai.Plan
+            // flips it to the berserker rush). The `else if` means a boss burst straight from
+            // >50% past both thresholds pops ENRAGED this act and FRENZY on its NEXT act — two
+            // readable beats, never both in one act / never a silent double-spike. Telegraphs
+            // the finish-it-NOW decision: leaving the breaker alive at a sliver is the one
+            // thing you must not do.
+            else if (e.RagesTwice && e.Enraged && !e.Frenzied && e.Hp * 4 <= e.MaxHp)
+            {
+                e.Frenzied = true;
+                e.Aim += 10; e.Mobility += 2;
+                Fx.PopText(e.Pos + new Vector2(0, -34), "FRENZY", Pal.Foe, 22f);
+                Fx.AddShake(11f);
+                ShowBanner(e.Name + " FRENZIES", true);
+            }
             // UNDERTOW W4 — incremental coordination: recompute the shared focus against the CURRENT board
             // right before this unit plans, so a shove/breach an EARLIER unit just landed (exposing a
             // soldier) redirects the pod onto that fresh opening THIS turn — vs the once-per-turn snapshot
@@ -4623,7 +5113,7 @@ public partial class Game
             var e = _aiUnits[_aiIdx];
             if (e.Alive)
             {
-                if (_aiPlan.SiegeCharge != null && e.Cls == "BOMBARD" && e.ChargeTurns == 0 && e.ActionsLeft > 0)
+                if (_aiPlan.SiegeCharge != null && e.HasSiege && e.ChargeTurns == 0 && e.ActionsLeft > 0)
                 {
                     // SIEGE charges a telegraphed strike: NO damage now — the 3x3 danger zone IS the
                     // telegraph (drawn for the whole next player turn); it lands at the top of the
@@ -4647,6 +5137,16 @@ public partial class Game
                     var hit = Grid.DamageCover(sx, sy, Grid.HighCoverHp);  // demolish a full level
                     if (hit != Grid.CoverHit.None) CoverHitFx(sx, sy, hit);
                     Fx.AddShake(5f);
+                    Enqueue(new WaitAnim(0.25f), Team.Enemy);
+                }
+                else if (_aiPlan.RelockTile != null && e.ActionsLeft > 0 &&
+                    CanRelock(e, _aiPlan.RelockTile.Value))
+                {
+                    // SIGNAL W8 — CUSTODIAN: standing at the objective, spend the action undoing
+                    // one step of the player's progress (validated NOW, post-move — a re-blown
+                    // charge or a dead keeper mid-path falls through to the generic branches).
+                    e.ActionsLeft = 0;
+                    DoRelock(e, _aiPlan.RelockTile.Value);
                     Enqueue(new WaitAnim(0.25f), Team.Enemy);
                 }
                 else if (_aiPlan.HealTarget != null && _aiPlan.HealTarget.Alive && e.ActionsLeft > 0 &&
@@ -5087,6 +5587,9 @@ public partial class Game
             return;   // armory swallows other clicks while open
         }
 
+        // W9: paid slate RE-ROLL (salvage sink; TryRerollShopSlate refuses when broke)
+        if (Raylib.CheckCollisionPointRec(m, Hud.ShopReroll)) { TryRerollShopSlate(); return; }
+
         // ShopBtns are laid out by the Hud over the ROTATING OFFER (display order); map the clicked
         // slot back to its underlying item id before purchasing.
         var offer = ShopOffer();
@@ -5358,6 +5861,9 @@ public partial class Game
         var m = Raylib.GetMousePosition();
         foreach (var (unit, rect) in Hud.BenchBtns)
             if (Raylib.CheckCollisionPointRec(m, rect)) { ToggleBench(unit); return; }
+        // W9: REHAB — buy one scar off a soldier (salvage sink; chips published by Hud.DrawSquadRow)
+        foreach (var (unit, rect) in Hud.RehabBtns)
+            if (Raylib.CheckCollisionPointRec(m, rect)) { TryBuyScarRemoval(unit); return; }
     }
 
     /// Barracks: click one of the offered run-scoped boons to adopt it for the rest of the run.

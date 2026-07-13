@@ -254,7 +254,9 @@ public static class Combat
 
         // a SHIELD's frontal barrier gives full cover from its facing side regardless of
         // terrain — flank it (or hit it from above / commanding height) to bypass (3.7).
-        if (d.Cls == "SHIELD" && !seesOver && ShieldedFrom(d, a.X, a.Y) && coverLevel < 2)
+        // SIGNAL W5: keyed on the HasShieldArc capability flag (defaults to Cls=="SHIELD",
+        // so rank-and-file behavior is unchanged; a boss elite can carry the arc too).
+        if (d.HasShieldArc && !seesOver && ShieldedFrom(d, a.X, a.Y) && coverLevel < 2)
         {
             coverLevel = 2; coverDef = 40; flanked = false; partial = false;
         }
@@ -281,6 +283,12 @@ public static class Combat
         // penalty applied above, so a camped/hunkered foe can still be dug out. Inert vs any active
         // (non-hunkered) enemy, so it's a situational pick, not a flat aim upgrade like LockOn.
         if (a.HasPerk(Perk.Siegebreaker) && d.Hunkered) hit += Unit.SiegebreakerAim;
+        // W10 BIPOD (weapon mod): +aim while the shooter is PLANTED (hasn't entered a tile this turn —
+        // Unit.MovedThisTurn, set by Game.OnUnitEnteredTile on every kind of movement). Deliberate
+        // anti-synergy with EXPOSED BY FIRE below: the same stand-still that arms the bipod leaves the
+        // shooter exposed after firing. Mods live on players only (HasMod reads the persisted
+        // WeaponMods list, always empty on enemies), so no team gate is needed.
+        if (a.HasMod(WeaponMod.Bipod) && !a.MovedThisTurn) hit += WeaponModDef.BipodAim;
         // CoolHeaded (composure) is a DEFENDER perk now: a CoolHeaded TARGET is hard to rattle, so any
         // attacker firing at it loses CoolHeadedEvade aim (its daze-immunity half lives in Unit.AddStatus).
         // A survivability pick, distinct from the attacker-side aim line (LockOn/CloseQuarters/Marksman).
@@ -557,6 +565,20 @@ public static class Combat
         => mover != null && (mover.HasPerk(Perk.Sprinter)
             || (mover.HasPerk(Perk.Skirmisher) && mover.FiredThisTurn));
 
+    /// W10 FIELD DRILLS boon: how many DRAGs (and, separately, VAULTs) this soldier may take per
+    /// turn. Base 1 (the shipped once-per-turn FIELD CRAFT rule); the boon doubles it for the
+    /// player's squad. Game's CanDrag/CanVault gates compare the per-turn counters (Unit.DragsThisTurn
+    /// / VaultsThisTurn) against this — the single source of truth, so COMBATTEST can pin the rule
+    /// without duplicating the Game-side gate logic (the MOMENTUM/IgnoresOverwatch pattern).
+    public static int FieldCraftLimit(Unit u)
+        => u != null && u.Team == Team.Player && RunBoons.Contains(Sightline.Boon.FieldDrills) ? 2 : 1;
+
+    /// W10 SHOCK DOCTRINE boon: a player's BRACE reaction deals FULL damage — Game.OnUnitEnteredTile
+    /// skips its halving/no-crit block when this is true; the stagger identity is unchanged.
+    /// Predicate only (the damage math stays at the one Game call site); player-gated like every boon.
+    public static bool BraceFullDamage(Unit watcher)
+        => watcher != null && watcher.Team == Team.Player && RunBoons.Contains(Sightline.Boon.ShockDoctrine);
+
     // Streak-breaker constants (S4-C): per clean-miss aim bonus, capped at MaxStreakBonus.
     // Applied INSIDE Resolve only (hidden from the ComputeOdds display — DESIGN.md 3B).
     public const int StreakBonusPerMiss = 6;   // +6 effHit per consecutive miss
@@ -720,6 +742,16 @@ public static class Combat
         var atkE = new Unit { Aim = 65, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 8, Y = 5 };  // from behind the shield (east)
         if (ComputeOdds(gShield, atkW, sh).CoverLevel != 2) fails.Add("shieldFront");
         if (ComputeOdds(gShield, atkE, sh).CoverLevel != 0) fails.Add("shieldFlank");
+
+        // SIGNAL W5 — flagged BOSS shield arc: an ELITE granted HasShieldArc must get ShieldedFrom
+        // applied EXACTLY like a Cls=="SHIELD" unit (the flag-on-boss path the mirror default does
+        // not exercise: sh above never sets the backing field). Control: a plain ELITE with the
+        // same facing but NO flag gets no barrier — the arc must come from the flag, not the Cls.
+        var bossArc = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Lmg), Team = Team.Enemy, X = 5, Y = 5, Hp = 20, MaxHp = 20, Cls = "ELITE", HasShieldArc = true, ShieldDx = -1, ShieldDy = 0 };
+        if (ComputeOdds(gShield, atkW, bossArc).CoverLevel != 2) fails.Add("bossArcFront");
+        if (ComputeOdds(gShield, atkE, bossArc).CoverLevel != 0) fails.Add("bossArcFlank");
+        var bossPlain = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Lmg), Team = Team.Enemy, X = 5, Y = 5, Hp = 20, MaxHp = 20, Cls = "ELITE", ShieldDx = -1, ShieldDy = 0 };
+        if (ComputeOdds(gShield, atkW, bossPlain).CoverLevel != 0) fails.Add("bossNoFlagNoArc");
 
         // AMBUSH: FiredFromConcealment grants +AmbushAim hit and +AmbushCrit crit (4.4)
         var gAmb = new Grid();
@@ -1490,8 +1522,71 @@ public static class Combat
             if (hhMarkCrit != Util.Clamp(plainMarkCrit + HeadhunterMarkCrit, 0, 100)) fails.Add("headhunterMarkCrit");
         }
 
+        // W10 — BIPOD (weapon mod): +BipodAim aim ONLY while the shooter hasn't moved this turn
+        // (Unit.MovedThisTurn false); moving disarms it exactly; a mod-less shooter is unaffected
+        // either way. Also the deliberate EXPOSED-BY-FIRE anti-synergy is real: the planted bipod
+        // shooter that fired reads as ExposedFire to the enemy.
+        {
+            var gBp = new Grid();
+            var bpTgt = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 7, Y = 5, Hp = 9, MaxHp = 10 };
+            var bpPlain = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 3, Y = 5 };
+            var bpMod   = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 3, Y = 5 };
+            bpMod.InstallMod(WeaponMod.Bipod);
+            int bpBase = ComputeOdds(gBp, bpPlain, bpTgt).HitChance;
+            // planted (hasn't moved): exactly +BipodAim over the plain shooter.
+            if (ComputeOdds(gBp, bpMod, bpTgt).HitChance != Util.Clamp(bpBase + WeaponModDef.BipodAim, 3, 95)) fails.Add("bipodPlantedFires");
+            // moved this turn: the bipod is disarmed (back to the plain baseline).
+            bpMod.MovedThisTurn = true;
+            if (ComputeOdds(gBp, bpMod, bpTgt).HitChance != bpBase) fails.Add("bipodMovedNoOp");
+            bpMod.MovedThisTurn = false;
+            // a mod-less shooter never reads MovedThisTurn (no hidden aim swing).
+            bpPlain.MovedThisTurn = true;
+            if (ComputeOdds(gBp, bpPlain, bpTgt).HitChance != bpBase) fails.Add("bipodPlainUnaffected");
+            bpPlain.MovedThisTurn = false;
+            // anti-synergy: the planted shooter that FIRED reads ExposedFire to the enemy (the trade).
+            bpMod.FiredThisTurn = true; bpMod.MovedAfterFire = false;
+            var bpFoeView = ComputeOdds(gBp, bpTgt, bpMod);
+            if (!bpFoeView.ExposedFire) fails.Add("bipodExposedTrade");
+            bpMod.FiredThisTurn = false;
+            // SUPPRESSOR installs cleanly and changes NO odds (it's a Game-side concealment rule,
+            // exercised by CONCEALTEST) — a stat-silent mod must not warp ComputeOdds.
+            var supU = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 3, Y = 5 };
+            supU.InstallMod(WeaponMod.Suppressor);
+            var supOdds = ComputeOdds(gBp, supU, bpTgt);
+            if (supOdds.HitChance != bpBase) fails.Add("suppressorStatSilentHit");
+            if (supOdds.CritChance != ComputeOdds(gBp, bpPlain, bpTgt).CritChance) fails.Add("suppressorStatSilentCrit");
+        }
+
+        // W10 — boon RULE PREDICATES (single source of truth for the Game-side gates; the
+        // RunBoons static is saved/restored so no boon leaks into other tests/runtime):
+        //   FIELD DRILLS: FieldCraftLimit 1 -> 2 for a player with the boon; enemies never.
+        //   SHOCK DOCTRINE: BraceFullDamage flips for a player watcher, and the Game arithmetic
+        //   (halve unless the predicate) yields full damage exactly when it holds.
+        {
+            var savedBoons = RunBoons;
+            RunBoons = new System.Collections.Generic.HashSet<Boon>();
+            var fdP = new Unit { Team = Team.Player };
+            var fdE = new Unit { Team = Team.Enemy };
+            if (FieldCraftLimit(fdP) != 1) fails.Add("fieldDrillsBaseLimit");
+            if (BraceFullDamage(fdP)) fails.Add("shockDoctrineBaseOff");
+            RunBoons = new System.Collections.Generic.HashSet<Boon> { Boon.FieldDrills, Boon.ShockDoctrine };
+            if (FieldCraftLimit(fdP) != 2) fails.Add("fieldDrillsBoonLimit");
+            if (FieldCraftLimit(fdE) != 1) fails.Add("fieldDrillsEnemyExcluded");
+            if (FieldCraftLimit(null) != 1) fails.Add("fieldDrillsNullSafe");
+            if (!BraceFullDamage(fdP)) fails.Add("shockDoctrineBoonOn");
+            if (BraceFullDamage(fdE)) fails.Add("shockDoctrineEnemyExcluded");
+            if (BraceFullDamage(null)) fails.Add("shockDoctrineNullSafe");
+            // the Game-site arithmetic: dmg 7 halves to 3 without the boon, stays 7 with it.
+            int dmg = 7;
+            int halved = BraceFullDamage(fdE) ? dmg : Math.Max(1, dmg / 2);   // no boon path (enemy)
+            int full   = BraceFullDamage(fdP) ? dmg : Math.Max(1, dmg / 2);   // boon path (player)
+            if (halved != 3) fails.Add("shockDoctrineHalvingMath");
+            if (full != 7) fails.Add("shockDoctrineFullMath");
+            RunBoons = savedBoons;
+        }
+
         return fails.Count == 0
-            ? "COMBATTEST: PASS (cover A-E + high-ground + tier-2 + drone/shield + ambush + graze + streak + perk-balance + build-perks + vantage/breaker/siegebreaker + fragile-floor + armor + bulwark-plating + momentum + outrunner + vanguard + crossfire + factions + faction-prep + spec-forks all hold)"
+            ? "COMBATTEST: PASS (cover A-E + high-ground + tier-2 + drone/shield + boss-arc-flag + ambush + graze + streak + perk-balance + build-perks + vantage/breaker/siegebreaker + fragile-floor + armor + bulwark-plating + momentum + outrunner + vanguard + crossfire + factions + faction-prep + spec-forks + bipod/suppressor + field-drills/shock-doctrine gates all hold)"
             : "COMBATTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 }

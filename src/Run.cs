@@ -38,6 +38,18 @@ public enum Boon
     Venom,         // a player hit applies Bleed to the target
     Ghost,         // moving near a foe does not break concealment
     RapidDeploy,   // +1 deploy slot this run
+    // ---- W10 pool expansion: six VERB boons, one read each at a named chokepoint ----
+    ShockDoctrine, // BRACE reactions deal FULL damage (Game.OnUnitEnteredTile brace halving skipped)
+    Terror,        // broken enemies stay broken +2 turns (Game.RoutDurationFor at the pod-break site;
+                   // redesigned per review — real pods spawn size 2, where the original 2/3 rout
+                   // THRESHOLD was a functional no-op. Enum member name stays: persisted ordinal)
+    FieldDrills,   // DRAG + VAULT twice per soldier per turn (Combat.FieldCraftLimit)
+    Pyromaniacs,   // squad fire fields burn +2 turns; the squad never catches Burning (Unit.AddStatus)
+    FieldStores,   // utility items carry 2 charges/mission (Mission.Build). NOTE: designed as
+                   // "QUARTERMASTER" but renamed — W9 shipped a MetaUnlock named Quartermaster
+                   // (+1 shop slate slot) and two same-named rewards would be indistinguishable in
+                   // the Codex/report vocabulary.
+    Reclaimer,     // a kill inside a FOCUSED-overwatch cone re-arms the watcher's reaction (Game.KillUnit)
 }
 
 /// RUN CONTRACTS (W6): an opt-in, run-long RULESET trade-off chosen at the run-opening draft.
@@ -109,6 +121,8 @@ public static class BoonDef
     {
         Boon.Marksmen, Boon.Fervor, Boon.Executioners, Boon.Fortified, Boon.Grenadier,
         Boon.Scavenger, Boon.Adrenaline, Boon.Venom, Boon.Ghost, Boon.RapidDeploy,
+        Boon.ShockDoctrine, Boon.Terror, Boon.FieldDrills, Boon.Pyromaniacs,
+        Boon.FieldStores, Boon.Reclaimer,   // W10: the verb-boon expansion
     };
 
     public static string Name(Boon b) => b switch
@@ -116,7 +130,11 @@ public static class BoonDef
         Boon.Marksmen => "MARKSMEN", Boon.Fervor => "FERVOR", Boon.Executioners => "EXECUTIONERS",
         Boon.Fortified => "FORTIFIED", Boon.Grenadier => "GRENADIER", Boon.Scavenger => "SCAVENGER",
         Boon.Adrenaline => "ADRENALINE", Boon.Venom => "VENOM", Boon.Ghost => "GHOST",
-        Boon.RapidDeploy => "RAPID DEPLOY", _ => "BOON",
+        Boon.RapidDeploy => "RAPID DEPLOY",
+        Boon.ShockDoctrine => "SHOCK DOCTRINE", Boon.Terror => "TERROR",
+        Boon.FieldDrills => "FIELD DRILLS", Boon.Pyromaniacs => "PYROMANIACS",
+        Boon.FieldStores => "FIELD STORES", Boon.Reclaimer => "RECLAIMER",
+        _ => "BOON",
     };
 
     public static string Desc(Boon b) => b switch
@@ -131,6 +149,12 @@ public static class BoonDef
         Boon.Venom => "Your hits make the target bleed",
         Boon.Ghost => "Moving near foes never breaks concealment",
         Boon.RapidDeploy => "Deploy one extra soldier all run",
+        Boon.ShockDoctrine => "BRACE reactions deal full damage",
+        Boon.Terror => "Broken enemies stay broken 2 turns longer",
+        Boon.FieldDrills => "DRAG and VAULT twice per soldier per turn",
+        Boon.Pyromaniacs => "Your fire burns 2 turns longer; the squad never catches fire",
+        Boon.FieldStores => "Utility items carry 2 charges per mission",
+        Boon.Reclaimer => "A kill inside a focused-overwatch cone re-arms the watch",
         _ => "",
     };
 
@@ -139,7 +163,10 @@ public static class BoonDef
     {
         Boon.Marksmen => "MRK", Boon.Fervor => "FVR", Boon.Executioners => "EXE", Boon.Fortified => "FRT",
         Boon.Grenadier => "GRN", Boon.Scavenger => "SCV", Boon.Adrenaline => "ADR", Boon.Venom => "VNM",
-        Boon.Ghost => "GHO", Boon.RapidDeploy => "RPD", _ => "?",
+        Boon.Ghost => "GHO", Boon.RapidDeploy => "RPD",
+        Boon.ShockDoctrine => "SHK", Boon.Terror => "TRR", Boon.FieldDrills => "FDR",
+        Boon.Pyromaniacs => "PYR", Boon.FieldStores => "FST", Boon.Reclaimer => "RCL",
+        _ => "?",
     };
 }
 
@@ -227,11 +254,12 @@ public static class Heat
     // that does NOT saturate -- StatDelta, a force-wide +1 HP & +1 Aim to EVERY hostile --
     // and folds the already-wired qualitative knobs (tighter contact, harsh attrition,
     // EXPOSED no-concealment opener, no reinforcements) in EARLIER so each rung adds real
-    // texture, not just a number. Cumulative at the milestones the balance pass targets:
-    //   heat 4 -> +2 enemy, +2 stat, tighter contact
-    //   heat 6 -> +3 enemy, +3 stat, +harsh attrition, +EXPOSED (no free ambush opener)
-    //   heat 8 -> +4 enemy, +5 stat, +no reinforcements (every prior flag too) = a real wall.
-    // A force-wide +5 HP/+5 Aim at the top is the bulk of the difficulty (it scales with the
+    // texture, not just a number. Cumulative at the milestones the balance pass targets
+    // (W6 SIGNAL re-tune — rung 4's stat moved out, its bite is now AI coordination tier 1):
+    //   heat 4 -> +2 enemy, +1 stat, tighter contact, AI coordination tier 1
+    //   heat 6 -> +3 enemy, +2 stat, +harsh attrition, +EXPOSED (no free ambush opener)
+    //   heat 8 -> +4 enemy, +4 stat, +no reinforcements (every prior flag too) = a real wall.
+    // A force-wide +4 HP/+4 Aim at the top is the bulk of the difficulty (it scales with the
     // whole enemy count); the mutator flags supply the qualitative "no mercy" feel. Heat 0
     // stays a true no-op. Re-tuning the deltas/flags is SAVE-SAFE -- only the chosen LEVEL is
     // persisted, and "apply rungs 1..level cumulatively" (the meaning of a saved level) is
@@ -242,7 +270,16 @@ public static class Heat
         new HeatModifier { Name = "HARDENED",      Desc = "Enemies hit harder & tougher (+1 stat)", StatDelta = 1 },
         // SHORT FUSE now also brings a body -- the qualitative "spotted sooner" twist plus volume.
         new HeatModifier { Name = "SHORT FUSE",    Desc = "+1 enemy; enemies spot you sooner",    EnemyDelta = 1, TighterContact = true },
-        new HeatModifier { Name = "ELITE CADRE",   Desc = "Enemies even deadlier (+1 stat)",      StatDelta = 1 },
+        // W6 (SIGNAL): ELITE CADRE is the mid-ladder QUALITATIVE tooth — from heat 4 the enemy
+        // starts PLAYING better (coordination tier 1: focus-fire convergence, steadier smoke/
+        // flash reads) two rungs before EXPOSED, instead of the mid-ladder leaning on stat rows
+        // alone. Aggregation is Math.Max, so rungs 6-7 stay tier 1 and NO QUARTER stays tier 2.
+        // MEASURED (paired flywheel, slots 0-19): tier-1-at-4 alone was completion-neutral at h4
+        // (35% -> 37.5%), so the rung's old +1 stat moved OUT — the fresh 06b65c2 baseline ran
+        // 62.5/55/35/22.5/7.5 (h8 under the >=10% floor), i.e. the whole top half sat too deep;
+        // shedding this one cumulative stat point lifts h4/h6/h8 together (stat 2/3/5 -> 1/2/4)
+        // while the rung KEEPS a real identity as the coordination tooth.
+        new HeatModifier { Name = "ELITE CADRE",   Desc = "Enemies coordinate their fire",        AiTier = 1 },
         // LINGERING WOUNDS arrives earlier (rung 5) and carries a body -- run-loop attrition
         // pressure starts compounding in the mid-ladder instead of only near the top.
         new HeatModifier { Name = "LINGERING WOUNDS", Desc = "+1 enemy; wounds linger, less field healing", EnemyDelta = 1, HarshAttrition = true },
@@ -282,7 +319,7 @@ public static class Heat
     public static bool HarshAttrition(int level) { foreach (var m in Active(level)) if (m.HarshAttrition) return true; return false; }
     public static bool NoReinforcements(int level) { foreach (var m in Active(level)) if (m.NoReinforcements) return true; return false; }
     /// W6b: the AI coordination tier this heat level demands — the MAX over active rungs (a
-    /// tier is a quality level, not a stackable quantity). 0 below EXPOSED (rung 6).
+    /// tier is a quality level, not a stackable quantity). 0 below ELITE CADRE (rung 4).
     public static int AiTier(int level) { int t = 0; foreach (var m in Active(level)) t = Math.Max(t, m.AiTier); return t; }
     /// W6c: extra per-hit enemy weapon damage at this heat level (summed like StatDelta;
     /// today only NO QUARTER carries it, so this is 0 below the rung-8 apex).
@@ -526,7 +563,40 @@ public class Run
                     AddEdge(best, b);
                 }
         }
+
+        // SIGNAL W5 — FINALE KIT: stamp the Boss node's faction (overriding the deliberate None
+        // above) so the capstone is one of three DISTINCT kits — the stamp activates the faction's
+        // combat warp AND routes the m6 rank-and-file through FactionRoster, and Mission.SpawnEnemies
+        // keys the named boss + explicit retinue off it. Chosen from an AVALANCHE HASH of the seed,
+        // NOT an rng.Next draw: .NET Random streams with nearby seeds stay correlated for many
+        // draws, and the balance flywheel's paired slots (Util.Reseed(50000+i) -> MapSeed -> this
+        // rng) measurably collapsed the kit onto one faction (16/4/0 over 20 seeds). The mix is a
+        // pure function of MapSeed (round-trips on load) and takes ZERO draws from `rng`, so the
+        // whole generator stream stays byte-identical to the pre-W5 version.
+        uint kh = (uint)seed;
+        kh ^= kh >> 16; kh *= 0x45d9f3bu; kh ^= kh >> 16; kh *= 0x45d9f3bu; kh ^= kh >> 16;
+        StampFinaleKit(facPool[kh % (uint)facPool.Length]);
     }
+
+    /// SIGNAL W5 — stamp the campaign FINALE KIT: the single Boss node (always the map's last node,
+    /// see GenerateMap) gets a faction, and its card's RewardText is re-keyed so the campaign map /
+    /// barracks surface the ACTUAL named boss. Public so the SIGHTLINE_FINALE harness pin
+    /// (Game.StartMission, NoPersist-only) can re-stamp it for reproducible per-kit shots/batches.
+    public void StampFinaleKit(Faction f)
+    {
+        if (Map.Count == 0) return;
+        var boss = Map[Map.Count - 1];
+        boss.Faction = f;
+        if (boss.Card != null) boss.Card.RewardText = FinaleBossName(f);
+    }
+
+    /// Display name of the finale kit's named boss (the campaign-map hint + boss card read it).
+    public static string FinaleBossName(Faction f) => f switch
+    {
+        Faction.Legion    => "Siegelord",
+        Faction.Syndicate => "Spymaster",
+        _                 => "Warlord",
+    };
 
     static void AddEdge(MissionNode a, MissionNode b) { if (!a.Next.Contains(b.Id)) a.Next.Add(b.Id); }
 
@@ -778,7 +848,12 @@ public class Run
         foreach (var b in BoonDef.All)
         {
             if (HasBoon(b)) continue;
-            if (endless && (b == Boon.Ghost || b == Boon.RapidDeploy)) continue;
+            // W10: TERROR joins the endless exclusions (LAST STAND wave hostiles spawn PodId<0 —
+            // ungrouped, so pods never break and there is no rout duration to extend) and so does
+            // FIELD STORES (utility items are granted once by Mission.Build at stand setup; a
+            // mid-stand pick would refill nothing).
+            if (endless && (b == Boon.Ghost || b == Boon.RapidDeploy
+                            || b == Boon.Terror || b == Boon.FieldStores)) continue;
             pool.Add(b);
         }
         for (int i = pool.Count - 1; i > 0; i--) { int j = Util.RandInt(0, i); (pool[i], pool[j]) = (pool[j], pool[i]); }
@@ -816,23 +891,29 @@ public class Run
     /// each draft (NoPersist drafts pass null -> empty set, so the harness never reads disk here).
     public static HashSet<string> ReserveNames = new();
 
-    public static List<Unit> GenerateDraftPool(List<Unit> veterans = null)
+    // W9 (SIGNAL): `maxVeterans` widens the recall window (the STANDING RESERVE unlock recalls a
+    // third veteran); `crossTrain` (the CROSS-TRAINING unlock) lets a fresh recruit roll an alternate
+    // class-legal weapon. Both DEFAULT to today's behavior — the harness/self-test call sites pass
+    // nothing, so the veterans=null path stays byte-identical (no extra RNG draws when crossTrain=false).
+    public static List<Unit> GenerateDraftPool(List<Unit> veterans = null,
+                                               int maxVeterans = MaxDraftVeterans, bool crossTrain = false)
     {
         var pool = new List<Unit>();
         var classCount = new Dictionary<string, int>();
+        int vetCap = Math.Clamp(maxVeterans, 0, DraftPoolSize);
         // APEX W5: callsigns already seated (veterans included) — every MakeRecruit below re-rolls
         // away from them, so a draft can never offer two soldiers sharing a name (duplicate names
         // silently merged bond/memorial/veteran records, which all key on Unit.Name).
         var takenNames = new HashSet<string>();
         ReserveNames = new HashSet<string>();
         if (veterans != null) foreach (var v in veterans) ReserveNames.Add(v.Name);
-        // Phase 0 — seat up to MaxDraftVeterans recalled veterans (already most-storied-first from the
+        // Phase 0 — seat up to vetCap recalled veterans (already most-storied-first from the
         // reserve). They bypass the class-variety cap (a returning legend is a deliberate exception) but
         // still count toward the pool size, so the fresh phases fill the remainder.
         if (veterans != null)
             foreach (var v in veterans)
             {
-                if (pool.Count >= MaxDraftVeterans) break;
+                if (pool.Count >= vetCap) break;
                 pool.Add(v);
                 takenNames.Add(v.Name);
                 classCount.TryGetValue(v.Cls, out int vc);
@@ -871,6 +952,21 @@ public class Run
             pool.Add(u);
             takenNames.Add(u.Name);
         }
+        // W9 CROSS-TRAINING (unlock-gated by the caller): a fresh recruit may arrive carrying an
+        // alternate class-legal weapon — a SIDEGRADE from Weapon.ArmoryOptions (the role's curated
+        // option set, never a strict upgrade), so the draft offers builds you'd otherwise pay ARMORY
+        // intel for. One pass over the finished pool; ZERO extra RNG draws when off (byte-stable).
+        if (crossTrain)
+            foreach (var u in pool)
+            {
+                if (u.FromReserve || !Util.Roll(35f)) continue;
+                var opts = Weapon.ArmoryOptions(u.Cls);
+                var others = new List<WeaponKind>();
+                foreach (var k in opts) if (u.Weapon == null || k != u.Weapon.Kind) others.Add(k);
+                if (others.Count == 0) continue;
+                u.Weapon = Weapon.Make(others[Util.RandInt(0, others.Count - 1)]);
+                u.Ammo = u.Weapon.Clip;
+            }
         return pool;
     }
 
@@ -1308,6 +1404,16 @@ public class Run
 
     public static string EnemyHint(MissionNode node)
     {
+        // SIGNAL W5: the Boss node is faction-stamped now (the FINALE KIT), and the KIT is the hint —
+        // checked BEFORE the generic faction branch so the finale telegraphs its named boss, not a
+        // generic roster line. (GenerateMap only ever places ONE Boss node, at the final column.)
+        if (node.Kind == NodeKind.Boss)
+            return node.Faction switch
+            {
+                Faction.Legion    => "BOSS: SIEGELORD",   // siege-lord: strikes force relocation
+                Faction.Syndicate => "BOSS: SPYMASTER",   // shield-arc: flank it behind its screen
+                _                 => "BOSS: WARLORD",     // the enrage brick (+ the None fallback)
+            };
         // Faction nodes read by their faction + signature units (the roster is faction-gated), so the
         // branch pick telegraphs the encounter's personality (counter-build before you commit).
         if (node.Faction != Faction.None)
@@ -1325,11 +1431,8 @@ public class Run
         {
             case NodeKind.Event:
                 return "UNKNOWN SIGNAL";   // a "?" beat: a situation + choices, not a fight
-            case NodeKind.Boss:
-                // GenerateMap only ever places ONE Boss node, at the final column, so the
-                // capstone WARLORD is the boss. (BREAKER m3 / WARDEN m5 appear as mid-bosses
-                // on Combat/Elite nodes, not as Boss-kind nodes — see Mission.midBoss.)
-                return "BOSS: WARLORD";
+            // (NodeKind.Boss is handled by the kit branch above — a Boss node never reaches here.
+            //  The m3/m5 mid-bosses appear on Combat/Elite nodes, not Boss-kind — see Mission.midBoss.)
             case NodeKind.Supply:
                 // Supply only thins the force (fewer enemies / lower stats); the archetype
                 // pool is unchanged, so don't overclaim composition (review Sprint 5 F1).
