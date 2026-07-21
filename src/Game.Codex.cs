@@ -19,11 +19,13 @@ public partial class Game
     public int CodexTab;        // selected category index
     public float CodexScroll;   // vertical scroll offset (px) into the current category's list
     Phase _codexPrior;          // phase to return to on BACK (Intro, or PlayerTurn/EnemyTurn if paused)
+    bool _codexFromPause;       // FUL-2: the codex was opened over the pause menu — restore the pause on exit
 
     /// Enter the CODEX: assemble entries + remember where we came from, then switch phase.
     public void BeginCodex()
     {
         _codexPrior = Phase;
+        _codexFromPause = Paused;
         CodexCats = Codex.Build();
         CodexTab = 0;
         CodexScroll = 0f;
@@ -36,6 +38,11 @@ public partial class Game
     void ExitCodex()
     {
         Phase = (_codexPrior == Phase.PlayerTurn || _codexPrior == Phase.EnemyTurn) ? _codexPrior : Phase.Intro;
+        // FUL-2: reading the manual mid-fight must not un-pause the fight. Without this, opening
+        // the codex from pause during the ENEMY turn resumed the queued shots the moment the
+        // codex closed the pause overlay — soldiers died while the player read the rules.
+        if (_codexFromPause && (Phase == Phase.PlayerTurn || Phase == Phase.EnemyTurn)) Paused = true;
+        _codexFromPause = false;
         Audio.Play("select");
     }
 

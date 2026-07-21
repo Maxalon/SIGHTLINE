@@ -389,7 +389,17 @@ public static class Program
         if ((shot || autoplay) && int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_MAP"), out int forcedMap))
             Mission.ForcedLayout = forcedMap;
         bool introShot = shot && Environment.GetEnvironmentVariable("SIGHTLINE_INTRO") == "1";
-        if (introShot) { var r = new Run(); r.Start(); r.Mission = 3; SaveGame.Save(r); }
+        // FUL-2: the staged CONTINUE save silently CLOBBERED a real campaign save when the intro
+        // shot ran on a machine with one. Stash the player's save.json bytes and restore-or-delete
+        // after the shot loop (the METATEST preserve/restore pattern).
+        string introStash = null; bool introStaged = false;
+        if (introShot)
+        {
+            introStash = System.IO.File.Exists(SaveGame.SavePathPublic)
+                ? System.IO.File.ReadAllText(SaveGame.SavePathPublic) : null;
+            introStaged = true;
+            var r = new Run(); r.Start(); r.Mission = 3; SaveGame.Save(r);
+        }
         // PROGRAM HORIZON W2: LAST STAND harness entry. SIGHTLINE_ENDLESS=1 boots straight into the
         // endless horde mode (BeginEndless) instead of a campaign mission. AutoPlay/SmartPlay/NoPersist
         // must be set BEFORE BeginEndless (it reads NoPersist for the heat dial-in).
@@ -527,6 +537,15 @@ public static class Program
             }
         }
 
+        if (introStaged)   // FUL-2: hand the player back exactly the save they had (or none)
+        {
+            try
+            {
+                if (introStash != null) System.IO.File.WriteAllText(SaveGame.SavePathPublic, introStash);
+                else SaveGame.Delete();
+            }
+            catch { /* best effort — never let restore kill the shutdown path */ }
+        }
         Display.Shutdown();
         Audio.Shutdown();
         Renderer.UnloadNoise();   // 5.4: free the procedural noise texture

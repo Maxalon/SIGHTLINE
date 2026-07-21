@@ -260,6 +260,19 @@ public partial class Game
                 if (gh.RunState.Intel != 0) fails.Add("unlockLeakedHarness");
             }
 
+            // (6b) FUL-2: a run END refreshes the IN-SESSION assist cache. _metaLossStreak was only
+            //      ever assigned in EnsureMetaLoaded, so a second run started in the same sitting
+            //      inherited the pre-loss streak (and AssistPreview lied on the intro).
+            {
+                var gl = new Game { NoPersist = false };
+                gl.StartMission(1);
+                gl._metaLossStreak = 7;                     // simulate a stale sitting cache
+                int before = gl.RunState.LossStreak;
+                gl.LoseRun("METATEST", "assist-cache leg");
+                if (gl.RunState.LossStreak != before + 1) fails.Add("lossStreakNotGrown");
+                if (gl._metaLossStreak != gl.RunState.LossStreak) fails.Add("lossStreakCacheStale");
+            }
+
             // ── W9 (SIGNAL): the standing economy ─────────────────────────────────────────────
             // Start from a wiped meta again so the pricing/bounty numbers are deterministic.
             try { if (System.IO.File.Exists(SaveGame.MetaPathPublic)) System.IO.File.Delete(SaveGame.MetaPathPublic); } catch { }

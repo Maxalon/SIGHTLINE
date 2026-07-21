@@ -254,7 +254,7 @@ public class Unit
                                 // (per-mission, set on an enemy by DoAbility(Mark), cleared at the marker's next turn)
     public bool Slipstreaming;  // ranger SLIPSTREAM: this soldier's current free move is silent (no overwatch
                                 // provoked) — set by DoAbility(Slipstream), consumed/cleared by the move it covers
-    public int  Pinned;         // gunner SUPPRESSING FIRE: this FOE is pinned (turns remaining). While > 0 it
+    public int  Pinned;         // gunner SUPPRESSING FIRE: this FOE is pinned (>0 = pinned; lifted wholesale by Game.ClearPins at next StartPlayerTurn — never decremented). While > 0 it
                                 // takes the Suppress aim debuff AND cannot use a 2-action DASH (area denial).
                                 // Decays one turn at the pinned unit's BeginTurn; never persisted (per-mission).
 
