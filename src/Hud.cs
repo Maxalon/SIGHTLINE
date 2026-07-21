@@ -257,7 +257,7 @@ public static class Hud
     /// covers board column 0 (and grazes col 1), so a soldier standing there used to vanish
     /// under the HUD. The camera transform (pan/zoom, no shake — same as mouse picking) maps
     /// the unit's tweened world pos to screen space; the half-extent approximates the figure.
-    static bool ChipOccluded(Game g, Rectangle chip)
+    static bool ChipOccluded(Game g, Rectangle chip, bool ignoreDormant = false)
     {
         var cam = g.ViewCamera(false);
         float half = 26f * cam.Zoom;
@@ -268,33 +268,56 @@ public static class Hud
             return Raylib.CheckCollisionRecs(chip, new Rectangle(sp.X - half, sp.Y - half, half * 2, half * 2));
         }
         foreach (var v in g.Players) if (Hits(v)) return true;
-        foreach (var v in g.Enemies) if (Hits(v)) return true;
+        foreach (var v in g.Enemies)
+        {
+            if (ignoreDormant && !v.Active) continue;   // a quiet slate marker isn't worth hiding a verb for
+            if (Hits(v)) return true;
+        }
         return false;
     }
 
     static void DrawRoster(Game g)
     {
         RosterChips.Clear();
-        int y = 70;
-        int idx = 0;
-        foreach (var u in g.AlivePlayers())
+        // FUL-3: chips span x 8..140 and the board starts at Cfg.OriginX=64, so board column 0
+        // lives UNDER the strip — and squads spawn in the left columns, which made the W11
+        // in-place collapse fire on the squad's own formation from turn 1 in most missions.
+        // An occluded chip now REFLOWS full-size into the unused strip below the roster (the
+        // 12px gap marks it displaced); the 20px rail collapse survives only as the last resort
+        // when every overflow slot is blocked too.
+        var alive = new List<Unit>(g.AlivePlayers());
+        int n = alive.Count;
+        var slot = new Rectangle[n];
+        var collapsed = new bool[n];
+        float overflowY = 70 + n * 64 + 12;
+        float bottom = Cfg.OriginY + Cfg.BoardH;
+        for (int i = 0; i < n; i++)
         {
-            // resting rect (used for click hit-testing) + a one-time staggered slide-in
-            // from the left edge so the strip assembles itself when combat opens.
-            var rest = new Rectangle(8, y, 132, 58);
+            var rest = new Rectangle(8, 70 + i * 64, 132, 58);
+            slot[i] = rest;
+            if (!ChipOccluded(g, rest)) continue;
+            collapsed[i] = true;
+            for (float oy = overflowY; oy + 58 <= bottom; oy += 64)
+            {
+                var cand = new Rectangle(8, oy, 132, 58);
+                if (ChipOccluded(g, cand)) continue;
+                slot[i] = cand; collapsed[i] = false; overflowY = oy + 64; break;
+            }
+        }
+        for (int idx = 0; idx < n; idx++)
+        {
+            var u = alive[idx];
+            // assigned rect (natural or overflow slot; used for click hit-testing) + a one-time
+            // staggered slide-in from the left edge so the strip assembles itself when combat opens.
+            var rest = slot[idx];
             float slideIn = PanelAnim("roster:" + u.Name, 0.28f, idx * 0.05f);
-            var r = new Rectangle(8 - (1f - Util.EaseOutQuad(slideIn)) * 26f, y, 132, 58);
-            idx++;
+            var r = new Rectangle(rest.X - (1f - Util.EaseOutQuad(slideIn)) * 26f, rest.Y, rest.Width, rest.Height);
             bool sel = g.Selected == u;
             bool spent = g.Phase == Phase.PlayerTurn && !u.CanAct;
             float a = spent ? 0.5f : 1f;
-            // W11 (was W9 alpha-fade): when a unit on the board sits under this chip, the chip
-            // COLLAPSES to a 20px edge rail — initial + a vertical HP sliver — so the soldier
-            // behind it is genuinely visible (a 35%-alpha 132px plate still buried it). The rail
-            // is the click target while collapsed; full detail returns when the tile clears.
-            bool occluded = ChipOccluded(g, rest);
-            if (occluded)
+            if (collapsed[idx])
             {
+                int y = (int)rest.Y;
                 var rail = new Rectangle(0, y, 20, 58);
                 Raylib.DrawRectangleRounded(rail, 0.25f, 4, Raylib.Fade(sel ? Pal.RGBA(26, 36, 48) : Pal.Panel, 0.9f * a));
                 Raylib.DrawRectangleLinesEx(rail, 1f, Raylib.Fade(sel ? Pal.Accent : Pal.PanelBd, a));
@@ -313,7 +336,6 @@ public static class Hud
                     Raylib.DrawRectangleRounded(new Rectangle(vbar.X, vbar.Y + vbar.Height - fh, vbar.Width, fh), 0.5f, 4, Raylib.Fade(vc, a));
                 }
                 RosterChips.Add((rail, u));   // hit-test the rail, not the vacated chip footprint
-                y += 64;
                 continue;
             }
             float fillA = a;
@@ -369,7 +391,6 @@ public static class Hud
             }
 
             RosterChips.Add((rest, u));   // hit-test the resting position, not the mid-slide rect
-            y += 64;
         }
     }
 
@@ -916,20 +937,20 @@ public static class Hud
         }
 
         ActionButtons = btns.ToArray();
-        // W11 de-occlusion: when a living unit stands under an actual BUTTON (incl. the unit an
-        // active anim is walking/shooting through that strip), the whole bar fades to ~0.3 so the
-        // fight stays visible through it. Mousing over the bar restores it instantly — it never
+        // W11 de-occlusion, FUL-3-corrected: when a living unit stands under an actual BUTTON
+        // (incl. the unit an active anim is walking/shooting through that strip), THAT button —
+        // not the whole bar — fades so the fight stays visible through it. One scalar used to
+        // ghost every verb to 0.3 because a single dormant pod idled under one corner; now the
+        // dim is truly per-button, the floor is 0.45 (labels stay legible), and dormant pods
+        // don't count as cover-worthy. Mousing over the bar restores it instantly — it never
         // stops being interactive; it just yields visually while the board needs the pixels.
-        // Per-BUTTON rects (not the row's bounding band): a unit in the empty span beside a short
-        // top row shouldn't fade anything.
         var barRect = new Rectangle(bx0, _barTop, right - bx0, (yBase + bh) - _barTop);
-        bool covered = false;
+        bool mouseOnBar = Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), barRect);
         foreach (var b in ActionButtons)
-            if (ChipOccluded(g, b.Rect)) { covered = true; break; }
-        float dim = covered
-                    && !Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), barRect) ? 0.3f : 1f;
-        foreach (var b in ActionButtons)
+        {
+            float dim = !mouseOnBar && ChipOccluded(g, b.Rect, true) ? 0.45f : 1f;
             DrawActionButton(b, dim);
+        }
 
         DrawActionHelp(g);
     }

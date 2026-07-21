@@ -1095,7 +1095,10 @@ public static class Mission
         {
             // mid/far-field bias (cols 6-15, like the barrels): the detour must cost real steps.
             int x = Util.RandInt(6, 15);
-            int y = Util.RandInt(0, g.H - 1);
+            // FUL-3: rows 0 and H-1 sit in HUD shadow (top-bar clip / action-bar cover), so the
+            // gold diamond was born half-hidden there. Clamp the draw — never re-roll — so the
+            // RNG draw count stays identical and paired seeds keep building identical worlds.
+            int y = Math.Clamp(Util.RandInt(0, g.H - 1), 1, g.H - 2);
             if (reserved.Contains((x, y))) continue;
             if (!g.IsFloor(x, y)) continue;          // cover / barrel / OOB can't host a pickup
             if (cost[x, y] < 0) continue;            // walled off — a cache no one can reach is a lie

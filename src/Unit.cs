@@ -797,7 +797,7 @@ public static class PerkDef
 
     public static string Desc(Perk p) => p switch
     {
-        Perk.LockOn => "+15 aim vs exposed targets",
+        Perk.LockOn => "+15 aim vs flanked targets",   // FUL-3: was "exposed" — stale since the UNDERTOW W5 de-superset (Combat gates on flanked)
         Perk.Hardened => "-1 damage taken, and -3 more from crits (tank)",
         Perk.Reflexes => "overwatch shots rarely miss",
         Perk.Bandolier => "+1 grenade each mission",

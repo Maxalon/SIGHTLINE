@@ -597,7 +597,9 @@ public static class Renderer
         Raylib.DrawRectangleLinesEx(new Rectangle(c.X - 9, c.Y - 11, 18, 22), 1.5f, col);
         Raylib.DrawRectangleRec(new Rectangle(c.X - 5, c.Y - 7, 10, 6), Raylib.Fade(col, 0.6f + 0.4f * pulse));
 
-        Raylib.DrawTextEx(Cfg.Font, "TERMINAL", new Vector2((int)c.X - 26, (int)r.Y - 13), 11, 1f, col);
+        // FUL-3: a row-0 marker label would sit under the top bar — flip it below the tile.
+        float tly = r.Y - 13 < 30 ? r.Y + r.Height + 2 : r.Y - 13;
+        Raylib.DrawTextEx(Cfg.Font, "TERMINAL", new Vector2((int)c.X - 26, (int)tly), 11, 1f, col);
     }
 
     // SABOTAGE charge sites: a blinking demolition console per site; armed once planted.
@@ -626,7 +628,9 @@ public static class Renderer
             Raylib.DrawRectangleLinesEx(new Rectangle(c.X - 8, c.Y - 9, 16, 18), 1.5f, col);
             Raylib.DrawCircleV(new Vector2(c.X, c.Y), 3.8f, Raylib.Fade(col, blown ? 0.9f : 0.55f + 0.45f * pulse));
 
-            Raylib.DrawTextEx(Cfg.Font, blown ? "ARMED" : "CHARGE", new Vector2((int)c.X - 18, (int)r.Y - 13), 10, 1f, col);
+            // FUL-3: a row-0 marker label would sit under the top bar — flip it below the tile.
+            float cly = r.Y - 13 < 30 ? r.Y + r.Height + 2 : r.Y - 13;
+            Raylib.DrawTextEx(Cfg.Font, blown ? "ARMED" : "CHARGE", new Vector2((int)c.X - 18, (int)cly), 10, 1f, col);
         }
     }
 
@@ -655,10 +659,13 @@ public static class Renderer
         Raylib.DrawPolyLinesEx(c, 4, rad + 3f, 45f, 1.6f, Raylib.Fade(col, 0.45f + 0.4f * pulse));
 
         // label + the remaining-turns clock (the expiry is a promise, so print it)
-        Raylib.DrawTextEx(Cfg.Font, "INTEL", new Vector2((int)c.X - 15, (int)r.Y - 13), 11, 1f, col);
+        // FUL-3: a row-0 label would sit under the top bar — flip it below the tile (the turns
+        // clock steps down with it). Placement now avoids row 0, but stay robust to old saves.
+        bool flip = r.Y - 13 < 30;
+        Raylib.DrawTextEx(Cfg.Font, "INTEL", new Vector2((int)c.X - 15, (int)(flip ? r.Y + r.Height + 2 : r.Y - 13)), 11, 1f, col);
         string tt = $"{g.CacheTurnsLeft}T";
         float tw = Raylib.MeasureTextEx(Cfg.Font, tt, 10, 1f).X;
-        Raylib.DrawTextEx(Cfg.Font, tt, new Vector2((int)(c.X - tw / 2), (int)(r.Y + r.Height + 1)), 10, 1f,
+        Raylib.DrawTextEx(Cfg.Font, tt, new Vector2((int)(c.X - tw / 2), (int)(r.Y + r.Height + (flip ? 15 : 1))), 10, 1f,
                           expiring ? Pal.Foe : Raylib.Fade(col, 0.8f));
     }
 
@@ -1822,6 +1829,10 @@ public static class Renderer
         p += pose;
         // a brief size pop on flinch (recoil compresses a touch) so a hit reads as a jolt
         float bodyScale = Util.Clamp(1f + u.FlinchAnim * 0.12f - u.RecoilAnim * 0.05f, 0.85f, 1.18f);
+        // FUL-3: dormant contacts kept full body mass and read as equal-weight tokens next to
+        // live combatants — shrink them (unaware 0.75x, suspicious 0.85x); information kept,
+        // emphasis cut. Alert state, not scale, carries the threat signal.
+        if (unaware) bodyScale *= 0.75f; else if (suspicious) bodyScale *= 0.85f;
 
         // ground contact shadow (sits on the platform top when elevated). A two-layer ellipse —
         // a wider soft penumbra + a tighter darker core, nudged toward bottom-right (consistent
@@ -1863,7 +1874,7 @@ public static class Renderer
             // clearly subordinate: much lower alpha/reach than a live foe's burn. Suspicious pods get
             // a faint warm bias (their amber ring/ ! carries the tier); Unaware stays cold slate.
             Color podGlow = suspicious ? Pal.RGBA(150, 120, 92) : Pal.RGBA(96, 108, 124);
-            float pR = 27f;
+            float pR = suspicious ? 26f : 22f;   // FUL-3: dormant ring tightens with the smaller body
             Raylib.DrawCircleV(p, pR,        Raylib.Fade(podGlow, 0.16f));   // soft seat so it doesn't vanish
             Raylib.DrawCircleV(p, pR * 0.66f, Raylib.Fade(podGlow, 0.24f));
         }

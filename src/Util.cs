@@ -15,7 +15,7 @@ public static class Cfg
 
     public static int BoardW => GridW * Tile;       // 1152
     public static int BoardH => GridH * Tile;       // 704
-    public static int OriginX => (ScreenW - BoardW) / 2; // 64 (clears the left roster strip)
+    public static int OriginX => (ScreenW - BoardW) / 2; // 64 — NOTE: the roster strip (x 8..140) still overlaps board column 0 (x 64..128); Hud.DrawRoster reflows occluded chips
     public const int OriginY = 40;                  // board floats near the top; translucent HUD overlays its edges
 
     // Real bitmap font (Phase 5.3) — loaded in Program.cs after InitWindow.
