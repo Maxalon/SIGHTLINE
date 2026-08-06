@@ -1263,7 +1263,8 @@ public partial class Game
             : (Objective == Objective.Rescue ? (Grid.W / 2, Grid.H / 2) : ((int, int)?)null);
         Grid.ClearHazards();              // wipe last mission's fire/barrels before terrain is rebuilt
         Mission.Build(Grid, Players, Enemies, n, EvacZone, reserve,
-                      enemyDelta, statDelta, HasSabotage ? SabotageSites : null, heatDmg);
+                      enemyDelta, statDelta, HasSabotage ? SabotageSites : null, heatDmg,
+                      Objective == Objective.Defend);   // FUL-4: trim the opener — waves are the force
         // PROGRAM HORIZON W2: Mission.Build laid out the arena + spawned a normal campaign force.
         // For LAST STAND we don't want that force — clear it and drop in the first horde wave (the
         // arena/terrain stays). SpawnEndlessWave uses the SpawnReinforcements machinery.
