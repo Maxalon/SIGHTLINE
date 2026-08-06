@@ -4620,7 +4620,9 @@ public partial class Game
         // player turns to set a line (the opener already spawns engaged screens). Waves then
         // keep the odd-turn cadence (t3, t5, t7).
         if (_turnCount < 3 || _turnCount % 2 == 0 || _turnCount >= DefendTurns) return;
-        SpawnReinforcements(2 + _run.Mission / 2, 12, "WAVE", rich: true);
+        // FUL-4: wave size 1+m/2 (was 2+m/2) — with three waves landing per mission the old +1
+        // body per wave compounded to +3 per mission over the whole timer.
+        SpawnReinforcements(1 + _run.Mission / 2, 12, "WAVE", rich: true);
     }
 
     /// Shared reinforcement spawner: drops up to `want` active wave-hostiles in from the right
