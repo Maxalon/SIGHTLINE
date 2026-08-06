@@ -747,3 +747,106 @@ worktree, adversarially reviewed, and merge-gated on self-tests + autoplay + Rel
 - [x] **W12 Strategic facelift.** Sized-to-fit campaign map (labels + legend), class glyphs across
       the meta screens, coherent intro hierarchy, WAR ROOM progress bars + NEXT UNLOCK card,
       promotion delta lines, first-run RECOMMENDED draft.
+
+## PROGRAM "FULCRUM" — in flight (see docs/DEVLOG.md for milestone write-ups)
+
+Research: six fresh lenses on the post-SIGNAL tree → PM synthesis → orchestrator code-sharpening.
+Through-line: **systems that exist but never reach play** — the comeback economy (BRACE/morale/verb
+boons) plays out over 2-enemy pods and 3-4-turn missions where it can never fire; the balance bot
+has used BRACE zero times in ~500 measured missions, so a whole verb layer is balance-blind; 52%
+of missions skip the 35 authored arenas; Defend is a hidden 23%-win cell; the run's biggest
+rewards are invisible or don't exist (no downed-soldier drama). This section is the durable plan
+of record (container suspensions have wiped every scratchpad copy — docs are the only safe store).
+
+- [x] **FUL-3 CHROME** (16e24e9). Roster chips reflow full-size below the strip instead of
+      collapsing to a one-letter rail from turn 1 (incl. VIP/captive chips); action-bar dim made
+      truly per-button (floor 0.45, dormant pods exempt); INTEL cache row-clamped out of HUD
+      shadow (clamp-not-reroll, draw-count stable); row-0 marker labels flip below tile; dormant
+      bodies 0.75x/0.85x + tighter ring; LOCK-ON/NO QUARTER desc truth ride-alongs.
+- [x] **FUL-2 SEAM INTEGRITY** (4690748). In-session assist cache refreshed at run end (was
+      EnsureMetaLoaded-only — same-sitting runs read a stale streak); SIGHTLINE_INTRO shot
+      stash/restores a real save.json (was a silent clobber); codex-from-pause no longer resumes
+      queued enemy shots (anim queue freezes in Phase.Codex, pause restored on exit); EXTRACT
+      routes its pull through OnUnitEnteredTile (BIPOD disarm/bleed/burn/cache/overwatch apply;
+      CheckEnd deferred while reactions queue); supercover LOS made real — a sealed diagonal
+      corner blocks sight at range both directions (point-blank keeps the true-corner=cover
+      exception; +6 COMBATTEST legs); Pinned comment truth. LOS budget A/B (CRN slots, h0,
+      N=10/leg): completion 65%→60% (at the ±5 boundary, in budget); leg swings (greedy 70→50,
+      sloppy 60→70) are ~1.3 SD at n=10 — carried as a FUL-13 watch item, fix retained per the
+      W6a truthfulness precedent.
+- [ ] **FUL-1 COMPASS TRUTH** (P1, M). Stats.cs/Program.cs/Game.Harness.cs (+DESIGN.md re-grade):
+      per-slot records + pairedMarginMissions (all-pairs margin, ~halves CI) in BuildSummary;
+      (code,heat)-keyed WinRateBy when a batch spans heats; binomial ±SE on n<30 rows; boon PROC
+      counters at effect sites (SHOCK DOCTRINE Game.cs:1980 full-dmg branch, RECLAIMER :2070,
+      PYROMANIACS :2476, TERROR rout-start, FIELD DRILLS 2nd drag/vault, FIELD STORES grant) as a
+      PROCS column; arena funnel split authored-attempt/connectivity-reject/procedural
+      (Mission.cs:143) + BY ARENA stratified by mission; RecordEvent(id,arm) + BY EVENT-CHOICE;
+      SIGHTLINE_PERK=<code> probe mirroring SIGHTLINE_CONTRACT; DESIGN.md §4 re-graded (name
+      engagement mass + death stakes as the thin pillars). Zero game-logic change; NoPersist-safe;
+      verify BALANCE=10 h0+h4 shows the new columns, SHOT=90 byte-identical.
+- [ ] **FUL-4 HOLDFAST** (P4, M). Defend 23.1% h0 (n=26) / gap 100 → 60-80% h0, 55-70% h4,
+      gap <50. Mission.SpawnEnemies defend flag (count-3, mirror sabotage trim at Mission.cs:392);
+      SpawnDefendWave dose-response levers ONE at a time (first wave graced to t3; size 1+m/2;
+      rich-tier cap min(mission,4) in MakeWaveHostile; waves stop t5); wave pods get real PodIds +
+      _podOrig so morale/rout plays; SmartDefend co-fix (fall back to better cover / refuse a
+      flank); wave-edge telegraph one turn ahead via the W8 banner lane. Budget: other objectives
+      ±3 on an unpinned h0 batch.
+- [ ] **FUL-11 CEREMONY** (P11, M). m6 finale presentation kit (HVT-named intro card, red top-bar
+      plate, boss ring/aura in DrawUnit, first-sighting banner via NEW CONTACT lane); Wardens
+      finale kit — MakeFinaleRetinue (Mission.cs:891-909) returns null for Wardens: WARBRINGER +
+      CUSTODIAN/MEDIC retinue (cost-neutral, replaces cascade fill; W6 heat-gate for any EXTRA
+      body). Per-kit reference 89/82/85, weakest (Wardens) 73 → all kits 78-88, pooled ±4 of 82.
+      Lands before FUL-13's baseline.
+- [ ] **FUL-12 SIGNPOSTS** (P12, L). Run-end card SALVAGE/HEAT-UNLOCKED/ACHIEVEMENT slabs (new
+      Game fields from AwardMetaRunEnd/UnlockHeatOnWin — no Report parsing, NoPersist-gated);
+      tutorial concealment/AMBUSH step + FIELD MANUAL pointer + one-shot BRACE callout (careful
+      around TutStep>=2 gates at Game.cs:1586/:1730); dormant-enemy ID tooltip (DrawTooltip bails
+      at Hud.cs:1391 on !ShowOdds — draw ID-only card + alert-state line); top-bar pill hovers
+      (CONCEALED/PRESSURE/HEAT/CACHE rects → DrawHudHovers); tutorial bar hierarchy (lesson verb
+      bright, rest ~45%, composes with FUL-3's per-button dim); RECOMMENDED draft full 16-boon
+      ranked order (21.4% arbitrary-fallback measured); campaign legend + ('*','BATTLE')
+      ('S','START'); DrawCodexGlyph into Hall of Fame + end-card squad/KIA rows; WAR ROOM panels
+      sized to content. (LOCK-ON/NO QUARTER copy already done in FUL-3.)
+- [ ] **FUL-5 HANDS** (P5, M — after FUL-1 merges). The EV bot learns the verbs: widen DoBrace
+      (~Game.Autopilot.cs:1380) / PATCH (~:1037) gates (brace vs inbound rusher pods when no
+      >=60% kill shot; PATCH range<=2 missing>=3; grenade 2-clusters in cover; smoke/medkit on
+      exposed sub-half retreat; DRAG toward SmartEscort anchor); AutoEventChoice 70/30
+      value-biased HASHED off (seed,node) — never draws (CRN); COUNTER-PREP into AutoShop's set;
+      de-flatten mod priors (SUPPRESSOR 111/380 buys → <=40%). Reference: BRACE 0, PATCH 1,
+      ITEM 0, GRENADE<=7 per ~500 missions → BRACE>=5, PATCH>=10, GRENADE>=10, ITEM>=5 per
+      20-campaign batch; PROCS nonzero for SHK/FDR/FST or a design VERDICT in the DEVLOG (no
+      tuning boons on no-ops).
+- [ ] **FUL-9 THE DECK** (P9, L — after FUL-4 merges). The carried W7 spec on the repaired
+      roster: column-constrained objective assignment in CardForNode HASHED off
+      (MapSeed,column,row) (>=1 Eliminate, >=1 Defend-or-Rescue, <=1 Escort per path; boss stays
+      Decapitate); per-run no-repeat arena deck derived from MapSeed (prefer derivation over a
+      persisted list; if persisted: append-only RunDto field + SAVETEST leg); authored roll 55→80
+      keeping EXACTLY one Util.Roll (draw-order comment at Mission.cs:135 is load-bearing); biome
+      hints as reduced weight within the deck; SIGHTLINE_EXPOSURETEST 200-seed histogram (objective
+      invariant, zero in-run arena repeats, all 8 objectives reachable, all 35 arenas exposed).
+      Reference: 52% procedural, 6/35 arenas unseen in 251 missions, Defend absent from whole
+      batches → procedural 20-25%, distinct arenas/run >=4.5, Defend in >=80% of runs.
+- [ ] **FUL-6 CRITICAL MASS** (P6, L). Pods of 3 + linked activation in mid/late missions — one
+      real multi-pod battle per mission instead of six 2-enemy executions, so BRACE/morale/verb
+      boons get a stage; morale/rout reaches LAST STAND's horde. Files: Mission.cs, Game.cs,
+      Game.Endless.cs, Run.cs, Game.Harness.cs. (Detailed spec lost to a container wipe —
+      re-derive from the research finding + this goal before dev.)
+- [ ] **FUL-7 LAST LIGHT** (P7, L). Downed soldiers: 2-3 turn bleed-out with stabilize/carry
+      counterplay instead of instant death — the genre's best decision, currently absent. Files:
+      Unit.cs, Game.cs, Ai.cs, Game.Autopilot.cs, Hud.cs, Renderer.cs, Codex.cs, Game.Harness.cs.
+      Save-compat: any new persisted enum values append-only. (Spec to re-derive; depends on
+      FUL-1 telemetry + FUL-5 bot hands to measure honestly.)
+- [ ] **FUL-8 PIKEMAN** (P8, M). A Wardens lane-holder specialist that visibly braces a movement
+      lane and staggers the first soldier through — the movement-economy contest the 21-archetype
+      roster lacks; teaches BRACE by mirroring it. Files: Mission.cs, Ai.cs, Unit.cs, Game.cs,
+      Renderer.cs, Codex.cs. (Spec to re-derive.)
+- [ ] **FUL-10 FORKS** (P10, M). 6-8 new trade-off field events wired to salvage/scar/veteran/
+      faction systems; two draft contracts engaging the W9 veteran economy; COUNTERPLAY's orphaned
+      perks reachable. Files: Events.cs, Run.cs, Game.cs, Hud.cs, Codex.cs. (Spec to re-derive;
+      consumes FUL-1's BY EVENT-CHOICE table.)
+- [ ] **FUL-13 TRUE NORTH** (P13, L — LAST). Re-baseline the ladder on the finished tree (stale
+      published numbers: h0 read 60 vs 80 published in research); lift h4 toward its 60±8 band;
+      drain the intel flood (heat refunding itself through the shop); resolve the LOS-fix policy-
+      gap watch item (accept-vs-sharpen on the corrected tree); final DEVLOG measured tables.
+      Also owns: whether skirmish/daily should keep the m1 opener grace zeroing numeric heat
+      deltas (FUL-3 landing note — the picker desc is honest now, the design question isn't).
