@@ -384,6 +384,9 @@ public static class Program
         // SIGHTLINE_CONTRACT=ironveterans|highstakes|spearhead : force a run contract on the
         // headless run (honored only under NoPersist, since the draft never runs there); None otherwise.
         game.ForcedContract = ContractDef.Parse(Environment.GetEnvironmentVariable("SIGHTLINE_CONTRACT"));
+        // FUL-1: SIGHTLINE_PERK=<code> (e.g. RFX) : the bot takes this perk whenever a rank-up
+        // offers it (ChoosePerk override; NoPersist-only, draw-count neutral). Null otherwise.
+        game.ForcedPerk = PerkDef.Parse(Environment.GetEnvironmentVariable("SIGHTLINE_PERK"));
         // SIGHTLINE_INTRO=1 (shot only): stay on the intro with a save present, to
         // screenshot the CONTINUE-run button.
         if ((shot || autoplay) && int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_MAP"), out int forcedMap))
@@ -606,6 +609,14 @@ public static class Program
         // SIGHTLINE_BALANCE_DUMB=1 runs the smoke-test autopilot instead of the competent AI,
         // so the same batch can produce a baseline to compare the smart AI (and balance changes) against.
         bool dumb = Environment.GetEnvironmentVariable("SIGHTLINE_BALANCE_DUMB") == "1";
+        // FUL-1: SIGHTLINE_PERK=<code> — the perk-probe leg of a paired A/B batch: the bot takes
+        // this perk whenever a rank-up offers it (ChoosePerk override, draw-count neutral, so the
+        // probe leg replays the baseline leg's exact worlds). Strict parse (SIGHTLINE_OBJ
+        // precedent): a typo runs UNPROBED with a loud warning, never a silently wrong A/B.
+        string perkEnv = Environment.GetEnvironmentVariable("SIGHTLINE_PERK");
+        Perk? forcedPerk = PerkDef.Parse(perkEnv);
+        if (forcedPerk == null && !string.IsNullOrEmpty(perkEnv))
+            Console.WriteLine($"BALANCE: unknown SIGHTLINE_PERK '{perkEnv}' — running unprobed");
 
         // One window for the whole batch (the autoplay smoke path uses Display.RenderFrame).
         Raylib.SetConfigFlags(ConfigFlags.Msaa4xHint);
@@ -657,7 +668,7 @@ public static class Program
             Util.Reseed(50000 + slot);
             Stats.Slot = slot;       // stamp the pair id onto the RunRec (BeginRun reads it)
             var game = new Game { NoPersist = true, AutoPlay = true, SmartPlay = !dumb, SmartSloppy = !dumb && sloppy,
-                                  ForcedObjective = forcedObj };
+                                  ForcedObjective = forcedObj, ForcedPerk = forcedPerk };
             game.SeedSloppy(1000 + slot);   // reproducible per-run perturbation (no-op unless sloppy)
             // both entries fire Stats.BeginRun internally (tagging policy + mode)
             if (endless) game.BeginEndless(); else game.StartMission(1);

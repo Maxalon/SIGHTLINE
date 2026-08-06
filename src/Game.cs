@@ -795,6 +795,11 @@ public partial class Game
     // test can verify each for no-crash/no-TIMEOUT. Program.cs sets this (a public field) BEFORE
     // StartMission; default None keeps plain autoplay byte-stable. Only honoured under NoPersist.
     public Contract ForcedContract = Contract.None;
+    // FUL-1 probe hook: SIGHTLINE_PERK forces the bot to TAKE this perk whenever a rank-up offer
+    // contains it (ChoosePerk), so a paired probe batch can price ONE perk against its absence.
+    // Honoured only under NoPersist; the override lands AFTER the value roll has drawn, so the
+    // probe leg and its paired baseline consume identical Util.Rng draws (CRN-safe).
+    public Perk? ForcedPerk = null;
     // W2 harness hook: WHOLE-RUN objective pin (SIGHTLINE_OBJ under the balance batch / autoplay).
     // DebugForceObjective rewrites only the CURRENT card — missions 2+ come from the campaign map,
     // so an objective sweep with the old pin measured 1 forced mission + ~5 normal ones. This pin
@@ -1978,6 +1983,8 @@ public partial class Game
             // FULL damage AND staggers (Combat.BraceFullDamage; the stagger flag below is unchanged).
             bool brace = w.OwBrace;
             if (brace && res.Hit && !Combat.BraceFullDamage(w)) { res.Damage = Math.Max(1, res.Damage / 2); res.Crit = false; }
+            // FUL-1 PROC: the boon actually waived the halving on a landed brace (no-op unless Stats.Enabled)
+            if (brace && res.Hit && Combat.BraceFullDamage(w)) Stats.RecordProc("SHK");
             Fx.PopText(w.Pos + new Vector2(0, -30), brace ? "BRACE" : "OVERWATCH", brace ? Pal.Good : Pal.Accent, 18f);
             Audio.Play("over");
             var shot = new ShotAnim(w, mover, res, reaction: true) { Stagger = brace };
@@ -2071,6 +2078,7 @@ public partial class Game
         {
             rsa.A.OnOverwatch = true;
             rsa.A.ReactedThisTurn = false;
+            Stats.RecordProc("RCL");   // FUL-1 PROC: a cone kill actually re-armed the watch
             Fx.PopText(rsa.A.Pos + new Vector2(0, -30), "RECLAIMED", Pal.Accent, 17f);
             Fx.Flash(rsa.A.Pos, Pal.Accent, 18f, 0.14f, 0.45f);
         }
@@ -2188,6 +2196,8 @@ public partial class Game
             return;
         }
         if (!broke) return;                                 // survivors dormant or already routing
+        // FUL-1 PROC: a rout started with the extended TERROR duration applied (RoutDurationFor)
+        if (HasBoon(Boon.Terror)) Stats.RecordProc("TRR");
         var ldr = mates.FirstOrDefault(m => m.Active) ?? mates[0];
         Fx.PopText(ldr.Pos + new Vector2(0, -34), "BROKEN", Pal.Good, 20f);
         Fx.Flash(ldr.Pos, Pal.Good, 26f, 0.2f, 0.5f);
@@ -2462,6 +2472,9 @@ public partial class Game
         // cover demolition + lay fire on the floor tiles in the blast
         var chain = new List<(int x, int y)>();
         var wokePods = new HashSet<int>();
+        // FUL-1 PROC: once per player-credited blast under PYROMANIACS (the per-tile ternary
+        // below extends every tile's burn — counting per tile would inflate the column)
+        if (_barrelCreditTeam == Team.Player && HasBoon(Boon.Pyromaniacs)) Stats.RecordProc("PYR");
         for (int x = bx - BarrelRadius; x <= bx + BarrelRadius; x++)
             for (int y = by - BarrelRadius; y <= by + BarrelRadius; y++)
             {
@@ -3875,6 +3888,8 @@ public partial class Game
         int dx = Math.Sign(u.X - ally.X), dy = Math.Sign(u.Y - ally.Y);   // direction the ally MOVES (toward us)
         u.ActionsLeft = Math.Max(0, u.ActionsLeft - 1);   // 1 action; never ends the turn
         u.DragsThisTurn++;                                // counted vs Combat.FieldCraftLimit (anti-loop)
+        // FUL-1 PROC: a SECOND drag this turn is only reachable through the boon's raised limit
+        if (u.DragsThisTurn >= 2) Stats.RecordProc("FDR");
         Stats.RecordAction("DRAG");                       // W2 verb telemetry
         Fx.PopText(ally.Pos + new Vector2(0, -32), "DRAG", Pal.Friend, 17f);
         Fx.Burst(ally.Pos, Pal.Friend, 8, 100f, 0.35f, 2.5f);
@@ -3933,6 +3948,8 @@ public partial class Game
         var u = Selected;
         u.ActionsLeft = Math.Max(0, u.ActionsLeft - 1);   // 1 action; never ends the turn
         u.VaultsThisTurn++;                               // counted vs Combat.FieldCraftLimit (anti-loop)
+        // FUL-1 PROC: a SECOND vault this turn is only reachable through the boon's raised limit
+        if (u.VaultsThisTurn >= 2) Stats.RecordProc("FDR");
         Stats.RecordAction("VAULT");                      // W2 verb telemetry (review fix: no invisible verbs)
         Fx.PopText(u.Pos + new Vector2(0, -32), "VAULT", Pal.Good, 17f);
         Fx.Burst(u.Pos, Pal.Good, 8, 110f, 0.35f, 2.5f);
@@ -5356,6 +5373,13 @@ public partial class Game
             int better = SmartPerkValue(off.Unit, off.A) >= SmartPerkValue(off.Unit, off.B) ? 0 : 1;
             which = Util.Roll(70f) ? better : 1 - better;
         }
+        // FUL-1: SIGHTLINE_PERK probe — override AFTER the value roll above (its Util.Rng draw
+        // must land in both probe legs, keeping the worlds CRN-paired). NoPersist only.
+        if (NoPersist && ForcedPerk.HasValue)
+        {
+            if (off.A == ForcedPerk.Value) which = 0;
+            else if (off.B == ForcedPerk.Value) which = 1;
+        }
         Perk p = which == 0 ? off.A : off.B;
         Run.ApplyPerk(off.Unit, p);
         Stats.RecordPerk(PerkDef.Code(p));   // balance telemetry (no-op unless Stats.Enabled)
@@ -5816,6 +5840,7 @@ public partial class Game
         if (choiceIdx < 0 || choiceIdx >= _activeEvent.Choices.Length) choiceIdx = AutoEventChoice();
         var ch = _activeEvent.Choices[choiceIdx];
         if (!ChoiceLegal(ch)) return;   // ignore clicks on illegal choices
+        Stats.RecordEvent(_activeEvent.Id, choiceIdx);   // FUL-1: BY EVENT-CHOICE telemetry (no-op unless Enabled)
         string line = EventCatalog.Apply(_run, ch.Outcome, _eventNode);
         if (ch.HasSecond)
         {

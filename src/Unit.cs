@@ -795,6 +795,19 @@ public static class PerkDef
         _ => "?",
     };
 
+    /// FUL-1: parse a SIGHTLINE_PERK env value (case-insensitive telemetry CODE, e.g. "RFX")
+    /// to a Perk; unknown/null => null. Mirrors ContractDef.Parse so the Program.cs probe
+    /// hook is a one-liner. Matches OFFERED perks only (All) — a cut perk can't be probed
+    /// because the offer pool never presents it.
+    public static Perk? Parse(string s)
+    {
+        if (string.IsNullOrWhiteSpace(s)) return null;
+        s = s.Trim();
+        foreach (var p in All)
+            if (string.Equals(Code(p), s, StringComparison.OrdinalIgnoreCase)) return p;
+        return null;
+    }
+
     public static string Desc(Perk p) => p switch
     {
         Perk.LockOn => "+15 aim vs flanked targets",   // FUL-3: was "exposed" — stale since the UNDERTOW W5 de-superset (Combat gates on flanked)

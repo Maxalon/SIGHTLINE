@@ -97,6 +97,9 @@ public static class Mission
             // This loop seats PLAYERS only, so enemy items are never doubled).
             u.ItemCharge = u.Item != ItemKind.None
                 ? (Combat.RunBoons.Contains(Boon.FieldStores) ? 2 : 1) : 0;
+            // FUL-1 PROC: FIELD STORES actually granted a double charge (per soldier-item, the
+            // grant IS the effect — the boon has no in-mission fire site of its own)
+            if (u.ItemCharge == 2) Stats.RecordProc("FST");
             u.Suppress = 0;
             u.OnOverwatch = false;
             u.Hunkered = false;
@@ -134,20 +137,27 @@ public static class Mission
         // ACCEPTED it (the connectivity guard can reject a proposal); -1 = procedural fallback.
         // The Roll(55)-before-PickLayout order is preserved exactly (same Util.Rng draw order).
         bool authored = false;
+        bool attempted = false;   // FUL-1 funnel: a template reached the connectivity guard
         AppliedLayout = -1;
         if (ForcedLayout >= 0 && ForcedLayout < Maps.Layouts.Length)
         {
+            attempted = true;
             authored = TryApplyLayout(grid, occupied, players, enemies, evacSet, terminal, Maps.Layouts[ForcedLayout], sabotage);
             if (authored) AppliedLayout = ForcedLayout;
         }
         else if (Util.Roll(55))
         {
+            attempted = true;
             int pick = PickLayout(missionNum);
             authored = TryApplyLayout(grid, occupied, players, enemies, evacSet, terminal, Maps.Layouts[pick], sabotage);
             if (authored) AppliedLayout = pick;
         }
         if (!authored)
             BuildProcedural(grid, occupied, evacSet, missionNum);
+        // FUL-1 ARENA FUNNEL (telemetry only, no-op unless Stats.Enabled): the three exits sum
+        // to 100% of builds — a guard REJECT was previously indistinguishable from a lost roll.
+        Stats.RecordArenaFunnel(authored ? Stats.ArenaAuthored
+                                : attempted ? Stats.ArenaReject : Stats.ArenaProcRoll);
 
         // protective cover beside each soldier and hostile (both layout paths)
         foreach (var u in players) TryCover(grid, occupied, u.X + 1, u.Y, TileType.LowCover);

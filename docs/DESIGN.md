@@ -290,24 +290,30 @@ palettes (`SIGHTLINE_CB=1`).
 ## 4. SIGHTLINE — honest scorecard
 
 Graded against the pillars/principles above. "Strong" = a genuine strength to protect;
-"Watch" = a hypothesis worth auditing in code/playtest; "Gap" = a known hole.
+"Watch" = a hypothesis worth auditing in code/playtest; "Gap" = a known hole; "Thin"
+(FUL-1) = a pillar that exists in code but carries less *play-weight* than the design
+assumes — the system is built, measured, and largely fails to reach play.
 
 | Area | Grade | Notes |
 |------|-------|-------|
 | Feels good (juice) | **Strong** | Hit-stop, recoil, tracers, shake, zoom-punch, floating text, procedural SFX. Protect it. |
-| Reads clearly (full-info board) | **Strong** | %-to-hit, threat pips, cover shields, FLANKED tooltip. This is the identity — don't erode it lightly. |
-| Content breadth | **Strong** | 6 objectives, biomes, ~10 enemy archetypes, perks/traits/bonds, branching map. Lots of *combinations*. |
-| **First contact / encounter geometry** | **Improving (4.2)** | Was the headline issue: 18-wide map, ~7-tile moves, sight range 12 → turn-1 forced activation. Phase 4.2 cut sight range to 9, added a staggered mid-field high-cover screen that breaks cross-board sightlines (one open "risky" lane), and capped the reveal-scatter to a single move — first contact is now a deliberate approach on most maps. Alert tiers (4.3) + concealment (4.4) complete the fix. See §5. |
-| Decision quality per turn | **Watch** | Are both actions meaningful most turns, or is it often a rote "move then shoot"? Is **overwatch-camping** a quiet dominant strategy? Audit for false choices among perks/classes (different *numbers* vs different *decisions*). |
-| Output-randomness feel | **Watch** | %-to-hit is genre-true but is our biggest rage/save-scum surface. No graze/partial-hit or guaranteed-damage floor yet. Consider mitigation (§3B). |
-| Meta stakes vs. death-spiral | **Watch/Gap** | Wounds (3.1) add bite, but auto-backfill-to-4 keeps a wipe from shrinking strength — *stakes are softened*. The bench/short-handed half is unbuilt. |
-| Screen usage / UI framing | **Addressed (4.1)** | Was a cropped island; opaque-ish bars ate ~40%. Phase 4.1 shipped a full-bleed board (~79% of the window) with translucent, drop-shadowed floating panels. Progressive disclosure of the HUD is the remaining polish. |
-| Onboarding | **Gap** | None yet (3.12). New players must infer cover/flank/overwatch. |
-| Accessibility | **Gap** | No colorblind palette / text scale / contrast pass yet (3.13). |
+| Reads clearly (full-info board) | **Strong** | %-to-hit, threat pips, cover shields, FLANKED tooltip — and since SIGNAL: status pills, role rings, visible focus cone, enemy-ID tooltips. This is the identity — don't erode it lightly. |
+| Content breadth | **Strong** | 8 objectives, biomes, a 21-archetype enemy roster, 35 authored arenas, perks/specs/traits/boons/contracts, branching map, 4 modes. Lots of *combinations* — whether they all **reach play** is the engagement-mass question below. |
+| **First contact / encounter geometry** | **Strong (was the headline issue)** | 4.2 cut sight range + built the mid-field screen; alert tiers (4.3) + concealment (4.4) completed the fix; SIGNAL made the boards biome-true. First contact is a deliberate, rewarded choice now. See §5. |
+| Decision quality per turn | **Measured (W2+)** | No longer a hypothesis: the flywheel instruments meaningful-choices/turn and lead-swings/match, and UNDERTOW/APEX moved both. The live question is the **~0 policy gap** (sloppy play is fully viable) — accept-vs-sharpen is parked at FUL-13. |
+| Output-randomness feel | **Addressed** | Graze band, streak-breaker (S4-C), always-on combat log ("did the dice cheat me?"), banded odds colors. The rage surface is mitigated, not gone — %-to-hit stays genre-true. |
+| **Death stakes** | **Thin** | Wounds/scars/memorial/veterans give the run *memory*, but the moment of death is an instant, decision-free cut — the genre's best drama (a 2-3-turn bleed-out with stabilize/carry counterplay) is absent (FUL-7). The stakes are ledger entries, not table stakes. |
+| **Engagement mass** | **Thin** | The comeback economy (BRACE, morale/rout, the verb boons) is tuned for battles that mostly don't happen: 2-enemy pods executed serially in 3-4-turn missions. The balance bot has used BRACE **zero** times in ~500 measured missions, and the FUL-1 PROCS column now shows which held boons never fire. One real multi-pod battle per mission is the fix (FUL-6). |
+| Screen usage / UI framing | **Addressed (4.1)** | Full-bleed board with translucent floating panels; W11 de-occluded the HUD and FUL-3 fixed the chip reflow. |
+| Onboarding | **Addressed (W11)** | Tutorial, FIELD MANUAL rules codex (every number code-verified), enemy-ID tooltips, NEW CONTACT banners, honest loss cards, first-run RECOMMENDED draft. |
+| Accessibility | **Improving** | Colorblind palette + brightness/gamma shipped (Display settings). No text-scale pass yet (3.13). |
 
-**Reading of the board:** SIGHTLINE is **wide and juicy** but its **core encounter
-opening is the weakest link** — which is exactly where the human's nudge pointed. The
-highest-leverage work right now is **encounter design + information feel**, not another
+**Reading of the board:** SIGHTLINE is **wide, juicy, and — since the flywheel — 
+measurable**. The encounter opening that was the weakest link is fixed and protected.
+The thin pillars now are **engagement mass** and **death stakes**: whole layers of
+built, tuned systems (the comeback economy; the drama of a soldier going down) that
+the moment-to-moment game rarely or never stages. The highest-leverage work is giving
+those systems a **stage** — bigger linked battles, a bleed-out window — not another
 content system.
 
 ---
