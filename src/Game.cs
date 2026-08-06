@@ -610,9 +610,9 @@ public partial class Game
         if (!force && (NoPersist || Display.BraceTipSeen)) return;
         if (Phase != Phase.PlayerTurn || TutorialText != null) return;   // never overlap a lesson card
         if (!force && !Enemies.Any(e => e.Alive && e.Active)) return;    // fire when the threat is real
-        CalloutText = "FIELD TIP - BRACE [B]: a disrupting reaction. On a hit it STAGGERS the mover - "
-                    + "the foe loses its action this turn (for reduced damage). Deny a rushing enemy's "
-                    + "alpha instead of racing it for the kill.";
+        CalloutText = "BRACE [B]: a disrupting reaction. On a hit it STAGGERS the mover - the foe "
+                    + "loses its action this turn (for reduced damage). Deny a rushing enemy's alpha "
+                    + "instead of racing it for the kill.";
         CalloutTimer = 9f;
         if (!NoPersist) Display.MarkBraceTipSeen();   // one-shot: burned the moment it shows
     }
