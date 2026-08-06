@@ -2380,9 +2380,20 @@ public static class Hud
         int colH = Cfg.ScreenH - top - 92;
         int c0 = marginX, c1 = marginX + colW + colGap, c2 = marginX + (colW + colGap) * 2;
 
-        DrawWarAchievements(p, c0, top, colW, colH, PanelAnim("warAch", 0.4f, 0.15f));
-        DrawWarHallOfFame(p, c1, top, colW, colH, PanelAnim("warHof", 0.4f, 0.25f));
-        DrawWarUnlocks(g, p, c2, top, colW, colH, PanelAnim("warUnl", 0.4f, 0.35f));
+        // FUL-12: each panel is sized to its CONTENT (capped at the column height) — three equal
+        // full-height slabs left short columns mostly empty chrome. The formulas mirror each
+        // panel's real row math (header 44 + row pitch + the row's visual depth), so the border
+        // hugs the last row; the in-panel break conditions still govern overflow at the cap.
+        int achH = Math.Min(colH, 44 + MetaProg.All.Length * 42 + 6);
+        int hofRows = p.Legends?.Count ?? 0;
+        int hofH = hofRows == 0 ? 86 : Math.Min(colH, 44 + hofRows * 34 + 8);
+        int ownedN = 0, unownedN = 0;
+        foreach (var u in MetaProg.AllUnlocks) if (p.Unlocks.Contains((int)u)) ownedN++; else unownedN++;
+        int unlH = Math.Min(colH, 44 + (unownedN > 0 ? 106 + (unownedN - 1) * 70 : 0) + ownedN * 24 + 8);
+
+        DrawWarAchievements(p, c0, top, colW, achH, PanelAnim("warAch", 0.4f, 0.15f));
+        DrawWarHallOfFame(p, c1, top, colW, hofH, PanelAnim("warHof", 0.4f, 0.25f));
+        DrawWarUnlocks(g, p, c2, top, colW, unlH, PanelAnim("warUnl", 0.4f, 0.35f));
 
         // ---- BACK button (centred, bottom) ----
         float backIn = PanelAnim("warBack", 0.3f, 0.5f);
@@ -2632,9 +2643,12 @@ public static class Hud
             Color tag = l.Won ? Pal.VipGold : Pal.TxtDim;
             string status = l.Won ? "WON" : "KIA";
             Raylib.DrawTextEx(Cfg.Font, status, new Vector2(x + 14, rowY + 2), 11, 1f, Raylib.Fade(tag, anim));
-            Raylib.DrawTextEx(Cfg.Font, l.Name ?? "", new Vector2(x + 48, rowY), 14, 1f, Raylib.Fade(l.Won ? Pal.Txt : Pal.TxtDim, anim));
+            // FUL-12: the class glyph leads each legend (gold for a run-winner, dim for the
+            // fallen) — the same silhouette language as the board/roster/end card.
+            Renderer.DrawCodexGlyph(l.Cls, new Vector2(x + 52, rowY + 13), Raylib.Fade(l.Won ? Pal.VipGold : Pal.TxtDim, 0.9f * anim), 0.8f);
+            Raylib.DrawTextEx(Cfg.Font, l.Name ?? "", new Vector2(x + 66, rowY), 14, 1f, Raylib.Fade(l.Won ? Pal.Txt : Pal.TxtDim, anim));
             string sub = $"{l.Rank} {l.Cls}  ·  {l.Kills} K  ·  H{l.Heat}";
-            Raylib.DrawTextEx(Cfg.Font, sub, new Vector2(x + 48, rowY + 16), 11, 1f, Raylib.Fade(Pal.TxtDim, anim));
+            Raylib.DrawTextEx(Cfg.Font, sub, new Vector2(x + 66, rowY + 16), 11, 1f, Raylib.Fade(Pal.TxtDim, anim));
             rowY += 34;
         }
     }
@@ -3356,8 +3370,11 @@ public static class Hud
             DrawCampaignMap(run, new Rectangle(x + 24, mapTop + 26, w - 48, mapH));
             // W12: node-kind legend, one quiet centred row under the map (shape + colour redundant,
             // so the map's coding reads without hovering every node — and survives SIGHTLINE_CB=1).
+            // FUL-12: S/START and */BATTLE join it — they were the only two glyphs on the map the
+            // legend refused to name (the commonest node reading as "unexplained asterisk").
             (string gly, string lbl, Color col)[] legend =
             {
+                ("S", "START", Pal.TxtDim), ("*", "BATTLE", Pal.Friend),
                 ("+", "SUPPLY", Pal.Good), ("!", "ELITE", Pal.Elite), ("?", "EVENT", Pal.Suspect), ("X", "BOSS", Pal.Foe),
             };
             float lw = 0f;

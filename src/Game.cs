@@ -896,10 +896,28 @@ public partial class Game
             if (DraftPicked.Count < DraftCap) DraftPicked.Add(fixedSquad[i]);
             DraftRecommended.Add(fixedSquad[i]);
         }
-        // safest doctrine on offer: durability > sustain > flat aim, then whatever rolled first.
-        Boon[] pref = { Boon.Fortified, Boon.Scavenger, Boon.Marksmen, Boon.Executioners, Boon.Grenadier, Boon.Fervor };
+        // FUL-12: the safety ranking now covers the FULL 16-boon pool (a 6-entry list left 21.4%
+        // of first-run offers falling through to "whatever rolled first" — an arbitrary pick
+        // wearing the RECOMMENDED badge). The first six keep their measured order; the tail ranks
+        // by new-player value: passive/always-on before conditional, simple verbs before stealth
+        // micro (Ghost last — expert play wearing a beginner badge was the worst failure mode).
+        Boon[] pref =
+        {
+            Boon.Fortified, Boon.Scavenger, Boon.Marksmen, Boon.Executioners, Boon.Grenadier, Boon.Fervor,
+            Boon.RapidDeploy,    // +1 body all run: the most forgiving thing a new squad can have
+            Boon.FieldStores,    // doubled item charges: passive, no decision cost
+            Boon.Adrenaline,     // kill -> +1 action: triggers on the thing beginners already do
+            Boon.ShockDoctrine,  // BRACE at full damage: pairs with the FUL-12 brace field tip
+            Boon.Pyromaniacs,    // fire immunity half is pure safety even if the burn half idles
+            Boon.Venom,          // free chip damage on every hit; zero micro
+            Boon.FieldDrills,    // doubled DRAG/VAULT: useful but assumes the verbs are known
+            Boon.Reclaimer,      // focused-cone re-arm: needs the FOCUS verb in the vocabulary
+            Boon.Terror,         // longer routs: strong, but morale play is a mid-game concept
+            Boon.Ghost,          // concealment micro is expert tempo — never a first-run default
+        };
         foreach (var b in pref)
             if (DraftBoonOffer.Contains(b)) { DraftRecommendedBoon = b; break; }
+        // unreachable while pref spans the whole enum — kept as a guard for a future pool grow
         if (!DraftRecommendedBoon.HasValue && DraftBoonOffer.Count > 0) DraftRecommendedBoon = DraftBoonOffer[0];
         DraftSelectedBoon = DraftRecommendedBoon;
     }
