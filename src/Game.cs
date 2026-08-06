@@ -994,6 +994,9 @@ public partial class Game
         // a resumed run re-IDs contacts and tallies causes from the resume point onward.
         DeathsByClass.Clear();
         _seenArchetypes.Clear();
+        // FUL-12: the end-card meta payoff is per-RUN — a new mode entry must not inherit the
+        // previous run's SALVAGE slab / HEAT UNLOCKED line / achievement roll.
+        EndSalvage = 0; EndHeatUnlocked = 0; EndAchievements.Clear();
         // Harness affordance (screenshot only, mirrors the SIGHTLINE_HEAT pattern): pre-seed the
         // cause-of-death tally, e.g. SIGHTLINE_DEATHS=SNIPER:2,GRUNT:1 — so the lose-card line can
         // be framed without playing a full losing run. Inert when unset -> plain shots byte-stable.
@@ -1710,12 +1713,21 @@ public partial class Game
             UnlockedHeat++;
             SaveGame.SaveMetaHeat(UnlockedHeat);
             _run.Report.Insert(0, $"HEAT {UnlockedHeat} UNLOCKED");
+            EndHeatUnlocked = UnlockedHeat;   // FUL-12: the end card reads the field, not the report
         }
     }
 
     // run-over screen text (set by LoseRun so the cause reads accurately)
     public string LoseTitle = "RUN OVER";
     public string LoseReason = "";
+
+    // FUL-12 SIGNPOSTS — end-card meta payoff, piped through FIELDS (never parsed back out of the
+    // Report strings). Set only inside the !NoPersist meta award path (AwardMetaRunEnd /
+    // UnlockHeatOnWin / TryAchievement / AwardMetaEndless), so every harness end card stays
+    // byte-stable (fields sit at defaults there); reset per mode entry in ResetModeState.
+    public int EndSalvage;                                  // salvage banked at run end (0 = no slab)
+    public int EndHeatUnlocked;                             // freshly-opened heat rung (0 = no line)
+    public readonly List<string> EndAchievements = new();   // display names of NEW unlocks this run-end
 
     // W11 HONEST LOSSES — which enemy archetype is killing this run's soldiers. Always-on (a
     // Dictionary bump costs nothing), bumped in KillUnit, read by the lose card's CAUSE OF DEATH
@@ -1771,7 +1783,7 @@ public partial class Game
         // funds the standing economy. h0 is UNCHANGED at 25+6m (~61 for a full clear). The loss
         // consolation stays additive.
         int salvage = win ? (25 + 6 * _run.Mission) * (10 + heat) / 10 : (4 * Math.Max(0, _run.Mission - 1) + 2 * heat);
-        if (salvage > 0) { SaveGame.AddSalvage(salvage); _run.Report.Insert(0, $"SALVAGE +{salvage}"); }
+        if (salvage > 0) { SaveGame.AddSalvage(salvage); _run.Report.Insert(0, $"SALVAGE +{salvage}"); EndSalvage = salvage; }   // FUL-12: field feeds the end-card slab
 
         // 2) HALL OF FAME — surviving squad (won runs) as legends, plus this run's fallen (KIA).
         var legends = new List<SaveGame.LegendDto>();
@@ -1812,6 +1824,7 @@ public partial class Game
         {
             SaveGame.AddSalvage(MetaProg.AchievementSalvage);
             _run.Report.Insert(0, $"ACHIEVEMENT: {MetaProg.AchievementName(id)}  (+{MetaProg.AchievementSalvage} salvage)");
+            EndAchievements.Add(MetaProg.AchievementName(id));   // FUL-12: end-card line (display name)
         }
     }
 

@@ -1067,6 +1067,13 @@ public partial class Game
         _run.Memorial.Add(new FallenRec { Name = "VEGA \"ASH\"",    Cls = "ASSAULT", Rank = "ROOKIE",   Kills = 1, Mission = 5 });
         _run.Mission = lose ? 5 : Run.MaxMissions;
         if (lose) { LoseTitle = "RUN OVER"; LoseReason = "The squad fell on mission 5."; }
+        // FUL-12: stage the meta-payoff FIELDS deterministically (AwardMetaRunEnd never runs under
+        // NoPersist), so the SALVAGE slab / HEAT UNLOCKED line / achievement roll can be framed.
+        // Fixed values -> the SUMMARY shot stays byte-stable; a lose card shows the consolation only.
+        EndSalvage = lose ? 18 : 79;
+        EndHeatUnlocked = lose ? 0 : 4;
+        EndAchievements.Clear();
+        if (!lose) { EndAchievements.Add("TURNING UP"); EndAchievements.Add("THE LONG WAR"); }   // HEAT3 + DEEP: both true of this staged run (3 KIA -> never FLAWLESS)
         Phase = lose ? Phase.Lose : Phase.Win;
     }
 

@@ -2007,6 +2007,30 @@ public static class Hud
             }
         }
 
+        // FUL-12 SIGNPOSTS — the meta payoff, read from FIELDS (AwardMetaRunEnd/UnlockHeatOnWin),
+        // never re-parsed out of Report strings. All-zero under the harness/autoplay (NoPersist
+        // keeps the award path dark), so plain end-card shots are unchanged. HEAT UNLOCKED leads
+        // (the ladder opening is the headline), then one gold line per fresh achievement.
+        {
+            float metaY = ty + tfs + 24 + causeShift;
+            if (g.EndHeatUnlocked > 0)
+            {
+                string hl = $"HEAT {g.EndHeatUnlocked} UNLOCKED — a harder ladder rung is open";
+                float hw3 = Raylib.MeasureTextEx(Cfg.Font, hl, 15, 1f).X;
+                Raylib.DrawTextEx(Cfg.Font, hl, new Vector2((int)(W / 2f - hw3 / 2f), (int)metaY), 15, 1f, Raylib.Fade(Pal.Foe, subIn));
+                metaY += 21; causeShift += 21;
+            }
+            int shownAch = 0;
+            foreach (var name in g.EndAchievements)
+            {
+                if (shownAch++ >= 3) break;   // cap: a monster run-end can't push the dossier off-screen
+                string al = $"ACHIEVEMENT — {name}  (+{MetaProg.AchievementSalvage} SALVAGE)";
+                float aw2 = Raylib.MeasureTextEx(Cfg.Font, al, 13, 1f).X;
+                Raylib.DrawTextEx(Cfg.Font, al, new Vector2((int)(W / 2f - aw2 / 2f), (int)metaY), 13, 1f, Raylib.Fade(Pal.VipGold, subIn));
+                metaY += 19; causeShift += 19;
+            }
+        }
+
         // ---- counting-up stat slabs (missions / intel / kills / heat) ----
         int totalKills = 0;
         if (run?.Squad != null) foreach (var u in run.Squad) totalKills += u.Kills;
@@ -2020,6 +2044,9 @@ public static class Hud
             ("CONFIRMED KILLS",  totalKills, Pal.Friend),
         };
         stats.Add(("HEAT / ASCENSION", run?.HeatLevel ?? 0, (run?.HeatLevel ?? 0) > 0 ? Pal.Foe : Pal.TxtDim));
+        // FUL-12: the SALVAGE bounty gets a real slab (gold — it's the persistent currency). Only
+        // when the meta path actually banked some, so harness/autoplay cards keep their 4-slab row.
+        if (g.EndSalvage > 0) stats.Add(("SALVAGE BANKED", g.EndSalvage, Pal.VipGold));
 
         float statsIn = PanelAnim("endStats", 0.3f, 0.45f);
         int n = stats.Count;
@@ -2583,16 +2610,19 @@ public static class Hud
                 if (rowY > y + h - 26) break;
                 bool isMvp = u == mvp && u.Kills > 0;
                 float a = anim;
+                // FUL-12: the board's class glyph leads the row (same silhouette language as the
+                // roster/draft), so WHO came home reads by shape before the name is even parsed.
+                Renderer.DrawCodexGlyph(u.Cls, new Vector2(x + 26, rowY + 13), Raylib.Fade(isMvp ? Pal.VipGold : Pal.Friend, a), 0.9f);
                 // name + nickname
                 string nm = u.FullName;
-                Raylib.DrawTextEx(Cfg.Font, nm, new Vector2(x + 14, rowY), 15, 1f, Raylib.Fade(isMvp ? Pal.VipGold : Pal.Txt, a));
+                Raylib.DrawTextEx(Cfg.Font, nm, new Vector2(x + 44, rowY), 15, 1f, Raylib.Fade(isMvp ? Pal.VipGold : Pal.Txt, a));
                 float nmw = Raylib.MeasureTextEx(Cfg.Font, nm, 15, 1f).X;
                 if (isMvp)
-                    Raylib.DrawTextEx(Cfg.Font, "MVP", new Vector2(x + 14 + nmw + 8, rowY + 2), 12, 1f, Raylib.Fade(Pal.VipGold, a));
+                    Raylib.DrawTextEx(Cfg.Font, "MVP", new Vector2(x + 44 + nmw + 8, rowY + 2), 12, 1f, Raylib.Fade(Pal.VipGold, a));
                 // rank + a trait code on a dim sub-line
                 string sub = $"{u.RankName} {u.Cls}";
                 if (u.Traits != null && u.Traits.Count > 0) sub += "  " + TraitDef.Name(u.Traits[0]);
-                Raylib.DrawTextEx(Cfg.Font, sub, new Vector2(x + 14, rowY + 17), 11, 1f, Raylib.Fade(Pal.TxtDim, a));
+                Raylib.DrawTextEx(Cfg.Font, sub, new Vector2(x + 44, rowY + 17), 11, 1f, Raylib.Fade(Pal.TxtDim, a));
                 // kills, right-aligned
                 string ks = $"{u.Kills} K";
                 float kw = Raylib.MeasureTextEx(Cfg.Font, ks, 14, 1f).X;
@@ -2630,9 +2660,11 @@ public static class Hud
         for (int i = count - 1; i >= start; i--)
         {
             var f = mem[i];
-            Raylib.DrawTextEx(Cfg.Font, f.Name, new Vector2(x + 14, rowY), 15, 1f, Raylib.Fade(Pal.Txt, 0.92f * anim));
+            // FUL-12: class glyph in memorial red — the fallen keep their silhouette identity.
+            Renderer.DrawCodexGlyph(f.Cls, new Vector2(x + 26, rowY + 13), Raylib.Fade(Pal.Foe, 0.75f * anim), 0.9f);
+            Raylib.DrawTextEx(Cfg.Font, f.Name, new Vector2(x + 44, rowY), 15, 1f, Raylib.Fade(Pal.Txt, 0.92f * anim));
             string sub = $"{f.Rank} {f.Cls}  -  fell on mission {f.Mission}";
-            Raylib.DrawTextEx(Cfg.Font, sub, new Vector2(x + 14, rowY + 17), 11, 1f, Raylib.Fade(Pal.TxtDim, anim));
+            Raylib.DrawTextEx(Cfg.Font, sub, new Vector2(x + 44, rowY + 17), 11, 1f, Raylib.Fade(Pal.TxtDim, anim));
             rowY += 34;
         }
         if (start > 0)
