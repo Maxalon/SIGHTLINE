@@ -165,13 +165,28 @@ public class Grid
         int err = dx - dy;
         int cx = x0, cy = y0;
         int guard = 0;
+        // FUL-2: the docstring always promised supercover, but the walk never checked the corner
+        // pair on a diagonal step — sight (both teams', plus overwatch and focus cones) slipped
+        // between two diagonally-touching blockers that seal the corridor, exactly the cut
+        // CostMap forbids for movement. A diagonal step is blocked only when BOTH facing tiles
+        // block (one corner stays sighted — that's the diagonal half-cover read; two is a wall).
+        // Point-blank (Chebyshev 1) keeps its exception: an adjacent diagonal shot slips past a
+        // TRUE corner and resolves as full cover, not as no-LOS (Grid.GetCover's contract).
+        bool pointBlank = Math.Max(dx, dy) <= 1;
         while (true)
         {
             if (guard++ > 1000) return false;  // fail closed: deny sight rather than grant a free sightline on runaway
             if (cx == x1 && cy == y1) return true;
             int e2 = 2 * err;
-            if (e2 > -dy) { err -= dy; cx += sx; }
-            if (e2 < dx)  { err += dx; cy += sy; }
+            bool stepX = e2 > -dy, stepY = e2 < dx;
+            if (stepX && stepY && !pointBlank)
+            {
+                bool cornerA = overHighCover ? IsSmoke(cx + sx, cy) : BlocksSight(cx + sx, cy);
+                bool cornerB = overHighCover ? IsSmoke(cx, cy + sy) : BlocksSight(cx, cy + sy);
+                if (cornerA && cornerB) return false;
+            }
+            if (stepX) { err -= dy; cx += sx; }
+            if (stepY) { err += dx; cy += sy; }
             // endpoint reached after step?
             if (cx == x1 && cy == y1) return true;
             bool blocked = overHighCover ? IsSmoke(cx, cy) : BlocksSight(cx, cy);

@@ -135,7 +135,9 @@ public partial class Game
     public bool PinMode;
     public Unit PinTarget;                 // hovered enemy under the cursor while in PinMode (null = none)
     public bool PinValid;                  // gates the click (target is a legal SUPPRESS target)
-    public const int PinTurns = 2;         // turns the pin lasts (survives one enemy BeginTurn -> bites that turn)
+    public const int PinTurns = 2;         // FUL-2 comment truth: nothing decrements Pinned — any value >0 pins
+                                           // through the enemy turn and ClearPins() lifts ALL pins at the next
+                                           // StartPlayerTurn. The const is a flag, not a duration.
 
     // DRAG targeting (FIELD CRAFT W1, universal): pull a LAGGING ally (Chebyshev 1..DragReach) one
     // tile TOWARD the dragger. Reach-2 is the useful version: a Chebyshev-2 ally is pulled to the
@@ -1638,7 +1640,11 @@ public partial class Game
             UnlockHeatOnWin();
             // adaptive assist: a win clears the loss streak (the next run starts un-assisted).
             _run.RecordRunResult(true);
-            if (!NoPersist) SaveGame.SaveMetaLossStreak(_run.LossStreak);
+            // FUL-2: refresh the in-session cache too — _metaLossStreak was only ever assigned in
+            // EnsureMetaLoaded, so a second run STARTED IN THE SAME SITTING inherited the stale
+            // pre-win streak (and AssistPreview lied on the intro). NoPersist-gated like the save
+            // so harness batches keep their zero-assist invariant.
+            if (!NoPersist) { _metaLossStreak = _run.LossStreak; SaveGame.SaveMetaLossStreak(_run.LossStreak); }
             // W3 WAR ROOM: bank salvage, enshrine the victorious squad + fallen, and check achievements.
             AwardMetaRunEnd(true);
             Phase = Phase.Win; Audio.Play("win"); Audio.PlayStinger("victory"); if (!NoPersist) SaveGame.Delete();
@@ -1743,7 +1749,9 @@ public partial class Game
         // adaptive assist: a lost run grows the streak, so a persistently-stuck player gets a
         // small, capped, reversible easing on their NEXT base-Heat run (Hades God-Mode).
         _run.RecordRunResult(false);
-        if (!NoPersist) { SaveGame.SaveMetaLossStreak(_run.LossStreak); SaveGame.Delete(); }
+        // FUL-2: refresh the in-session cache (see the win path) — without it a same-sitting next
+        // run read the PRE-loss streak and under-assisted exactly the player the assist targets.
+        if (!NoPersist) { _metaLossStreak = _run.LossStreak; SaveGame.SaveMetaLossStreak(_run.LossStreak); SaveGame.Delete(); }
         // W3 WAR ROOM: bank consolation salvage, enshrine the fallen, and check the DEEP achievement.
         AwardMetaRunEnd(false);
     }
@@ -2653,8 +2661,10 @@ public partial class Game
         // banner window). Live phases only; internally !NoPersist-gated like the tutorial.
         else if (Phase == Phase.PlayerTurn || Phase == Phase.EnemyTurn) CheckNewContact();
 
-        // advance animation queue
-        if (_anims.Count > 0)
+        // advance animation queue — but NEVER while the codex is open (FUL-2: BeginCodex clears
+        // Paused for the overlay, which let queued enemy ShotAnims resolve while the player read
+        // the field manual; the queue freezes with the fight and resumes on ExitCodex).
+        if (Phase != Phase.Codex && _anims.Count > 0)
         {
             var a = _anims[0];
             if (!a.Started) { a.Started = true; a.OnStart(this); }
@@ -4315,12 +4325,20 @@ public partial class Game
         Selected.ActionsLeft -= 1;                  // a support action — does NOT end the turn
         Stats.RecordAction("EXTRACT");              // W2 verb telemetry
         cand.X = dest.Value.x; cand.Y = dest.Value.y; cand.SyncPos();
+        // FUL-2: the pull is a tile entry like any other — without this, an EXTRACTed unit kept a
+        // planted BIPOD, skipped bleed/burn ticks, never picked up a cache on the zone tile, and
+        // drew no overwatch (the one teleport left in a game whose verbs all route arrivals
+        // through OnUnitEnteredTile — the ShoveAnim/DRAG landing does exactly this call).
+        OnUnitEnteredTile(cand);
+        if (!cand.Alive) return;                    // the arrival itself can kill (bleed/burn/reaction)
         // feel: a quick haul-aboard flash on both soldier + asset
         Fx.Burst(cand.Pos, cand.IsVip ? Pal.VipGold : Pal.Friend, 16, 220f, 0.5f, 4f, true);
         Fx.PopText(cand.Pos + new Vector2(0, -28), "EXTRACTED", cand.IsVip ? Pal.VipGold : Pal.Friend, 22f);
         Fx.AddShake(3f);
         Audio.Play("select");
-        CheckEnd();                                 // pulling the last unit in can win outright
+        // pulling the last unit in can win outright — but if the arrival queued reaction fire,
+        // let the frame loop call CheckEnd after the queue drains (a queued shot may still kill).
+        if (_anims.Count == 0) CheckEnd();
     }
 
     void DoReload()

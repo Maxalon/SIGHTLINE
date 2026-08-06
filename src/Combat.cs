@@ -1585,8 +1585,30 @@ public static class Combat
             RunBoons = savedBoons;
         }
 
+        // --- FUL-2: supercover LOS — a sealed diagonal corner is a wall at range, a slip point-blank ---
+        {
+            var gS = new Grid();
+            gS.Tiles[5, 4] = TileType.HighCover;
+            gS.Tiles[4, 5] = TileType.HighCover;
+            // range-2 diagonal through the sealed corner: blocked BOTH directions
+            if (gS.HasLineOfSight(4, 4, 6, 6)) fails.Add("supercoverSealedFwd");
+            if (gS.HasLineOfSight(6, 6, 4, 4)) fails.Add("supercoverSealedRev");
+            // adjacent diagonal keeps the point-blank exception (resolves as TRUE-corner cover, not no-LOS)
+            if (!gS.HasLineOfSight(4, 4, 5, 5)) fails.Add("supercoverPointBlank");
+            // a SINGLE corner never seals — the diagonal half-cover read stays a sightline
+            var gS1 = new Grid();
+            gS1.Tiles[5, 4] = TileType.HighCover;
+            if (!gS1.HasLineOfSight(4, 4, 6, 6)) fails.Add("supercoverSingleOpen");
+            // commanding (overHighCover) sight ignores the cover corner ...
+            if (!gS.HasLineOfSight(4, 4, 6, 6, true)) fails.Add("supercoverCommandingOver");
+            // ... but a sealed SMOKE corner blocks even commanding sight
+            var gSm = new Grid();
+            gSm.AddSmoke(5, 4, 0, 2); gSm.AddSmoke(4, 5, 0, 2);   // radius 0 = the corner tiles only
+            if (gSm.HasLineOfSight(4, 4, 6, 6, true)) fails.Add("supercoverSmokeSealed");
+        }
+
         return fails.Count == 0
-            ? "COMBATTEST: PASS (cover A-E + high-ground + tier-2 + drone/shield + boss-arc-flag + ambush + graze + streak + perk-balance + build-perks + vantage/breaker/siegebreaker + fragile-floor + armor + bulwark-plating + momentum + outrunner + vanguard + crossfire + factions + faction-prep + spec-forks + bipod/suppressor + field-drills/shock-doctrine gates all hold)"
+            ? "COMBATTEST: PASS (cover A-E + high-ground + tier-2 + drone/shield + boss-arc-flag + ambush + graze + streak + perk-balance + build-perks + vantage/breaker/siegebreaker + fragile-floor + armor + bulwark-plating + momentum + outrunner + vanguard + crossfire + factions + faction-prep + spec-forks + bipod/suppressor + field-drills/shock-doctrine + supercover-corner gates all hold)"
             : "COMBATTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 }

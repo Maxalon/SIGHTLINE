@@ -299,7 +299,7 @@ public static class Heat
         // W6c: ...and the apex is the ONE rung where heat scales enemy DAMAGE (+1 per hit) —
         // the counterweight to late-run plated squads, since StatDelta (HP/aim) saturates
         // against Armor while the damage floor never did. Desc surfaces it to the player.
-        new HeatModifier { Name = "NO QUARTER",    Desc = "+1 enemy; deadliest force (+1 stat, +1 dmg)", EnemyDelta = 1, StatDelta = 1, AiTier = 2, DmgDelta = 1 },
+        new HeatModifier { Name = "NO QUARTER",    Desc = "+1 enemy; deadliest force (+1 stat; +1 dmg from mission 3)", EnemyDelta = 1, StatDelta = 1, AiTier = 2, DmgDelta = 1 },   // FUL-3: desc admits the m1-2 opener grace (it zeroed the +1 dmg on the skirmish picker's own mission)
     };
 
     public static int Clamp(int level) => Math.Clamp(level, Min, Max);
