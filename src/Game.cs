@@ -690,6 +690,10 @@ public partial class Game
     // UNDERTOW W3 — pod MORALE: a pod that drops to <= half its original strength ROUTS its survivors.
     // _podOrig snapshots each pod's spawn size at mission start; the break/threshold logic is BreakPodMorale.
     readonly Dictionary<int, int> _podOrig = new();
+    // FUL-4 — DEFEND waves are real pods too (morale/rout must play on the one objective built
+    // from waves). Ids allocated from 100 up: initial pods are i/2 (<=5), harness scenes use 90/91,
+    // so wave pods can never collide with either. Reset per mission beside _podOrig.
+    int _nextWavePod = 100;
     public const int RoutDuration = 2;         // enemy turns a broken pod flees before it can rally (decrements in BeginTurn)
     // SIGNAL W8 — the WARBRINGER's banner aura reach (Chebyshev tiles). Pods with a living, active
     // banner inside this range cannot rout (BreakPodMorale) and rally one turn faster
@@ -708,8 +712,9 @@ public partial class Game
     }
 
     /// SIGNAL W8 — a pod's live head-count vs its spawn strength, for the WAVERING telegraph +
-    /// the "POD 2/4" tooltip line. `orig` falls back to the current count for un-snapshotted pods
-    /// (e.g. DEFEND reinforcement waves), mirroring BreakPodMorale's mates.Count+1 post-kill view.
+    /// the "POD 2/4" tooltip line. `orig` falls back to the current count for un-snapshotted pods,
+    /// mirroring BreakPodMorale's mates.Count+1 post-kill view. (FUL-4: DEFEND waves are now
+    /// snapshotted at spawn; the fallback still guards hypothetical future un-snapshotted pods.)
     public (int alive, int orig) PodStrength(int podId)
     {
         int alive = 0;
@@ -1357,8 +1362,10 @@ public partial class Game
         }
         foreach (var u in Enemies) { u.BeginTurn(); u.OnOverwatch = false; u.Routed = 0; }
         // UNDERTOW W3: snapshot each pod's spawn strength so BreakPodMorale can tell when a pod has
-        // been chewed down to <= half and should rout its survivors (wave hostiles are PodId<0, ungrouped).
+        // been chewed down to <= half and should rout its survivors (FUL-4: DEFEND waves join the
+        // snapshot as pods 100+ at spawn time; pressure-clock/endless hostiles stay PodId<0, ungrouped).
         _podOrig.Clear();
+        _nextWavePod = 100;
         foreach (var e in Enemies) if (e.PodId >= 0) _podOrig[e.PodId] = _podOrig.GetValueOrDefault(e.PodId) + 1;
         Selected = Players.FirstOrDefault(p => p.CanAct);
         AimMode = false;
@@ -4621,15 +4628,18 @@ public partial class Game
         // keep the odd-turn cadence (t3, t5, t7).
         if (_turnCount < 3 || _turnCount % 2 == 0 || _turnCount >= DefendTurns) return;
         // FUL-4: wave size 1+m/2 (was 2+m/2) — with three waves landing per mission the old +1
-        // body per wave compounded to +3 per mission over the whole timer.
-        SpawnReinforcements(1 + _run.Mission / 2, 12, "WAVE", rich: true);
+        // body per wave compounded to +3 per mission over the whole timer. podded: each wave is
+        // a real morale pod (focus-firing a wave down routs its survivors, like any pod).
+        SpawnReinforcements(1 + _run.Mission / 2, 12, "WAVE", rich: true, podded: true);
     }
 
     /// Shared reinforcement spawner: drops up to `want` active wave-hostiles in from the right
     /// board edge (already engaged), honoring a live-enemy `cap`. Used by both the DEFEND objective
     /// (`rich` waves — full roster) and the anti-turtle PRESSURE CLOCK (default cheap grunt/scout
-    /// mix). Returns how many it actually added.
-    int SpawnReinforcements(int want, int cap, string label, bool rich = false)
+    /// mix). Returns how many it actually added. FUL-4 `podded`: the wave lands as ONE fresh
+    /// morale pod (id 100+, _podOrig-snapshotted) so rout plays; default keeps PodId=-1 —
+    /// pressure-clock punishment waves stay morale-exempt (a routable punishment isn't one).
+    int SpawnReinforcements(int want, int cap, string label, bool rich = false, bool podded = false)
     {
         if (AliveEnemies().Count >= cap) return 0;                     // clutter cap
         int n = _run.Mission;
@@ -4646,7 +4656,8 @@ public partial class Game
                 if (!Grid.IsFloor(x, y) || IsOccupiedByOther(x, y, null)) continue;
             }
             var e = Mission.MakeWaveHostile(n, x, y, rich);
-            e.Alert = AlertLevel.Alert; e.PodId = -1;   // reinforcements arrive already engaged
+            e.Alert = AlertLevel.Alert;                          // reinforcements arrive already engaged
+            e.PodId = podded ? _nextWavePod : -1;                // FUL-4: defend waves are morale pods
             e.SyncPos();
             Stats.RecordSpawn(e.Cls, Combat.MissionFaction != Faction.None);   // APEX W5 composition tally
             Enemies.Add(e);
@@ -4654,6 +4665,9 @@ public partial class Game
             Fx.Burst(e.Pos, Pal.Foe, 14, 160f, 0.5f, 3f, true);
             added++;
         }
+        // FUL-4: seal the wave's morale snapshot (the _podOrig pattern SetupMission uses for the
+        // initial force) — one pod per wave, sized to what ACTUALLY landed under the cap.
+        if (podded && added > 0) { _podOrig[_nextWavePod] = added; _nextWavePod++; }
         if (added > 0) { Fx.PopText(Util.TileCenter(Grid.W - 2, 0) + new Vector2(0, -10), label, Pal.Foe, 20f); Audio.Play("turn"); RefreshCombatRoster(); }
         // APEX W5: headless-harness echo so an autoplay log shows what the waves actually field
         // (AutoPlay is the env-gated smoke/balance path only — never set in normal play).
