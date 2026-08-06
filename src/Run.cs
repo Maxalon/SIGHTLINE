@@ -598,6 +598,19 @@ public class Run
         _                 => "Warlord",
     };
 
+    /// FUL-11 CEREMONY — the finale kit's one-line verb clause. ONE source of truth for the m6
+    /// intro card's sub-line AND the HVT SIGHTED banner, so the ceremony text can never drift
+    /// from the kit mechanics (each clause names the signature + its counter-verb, mirroring
+    /// Mission.MakeFinaleBoss/MakeFinaleRetinue). None = the unstamped plain-WARLORD fallback.
+    public static string FinaleKitClause(Faction f) => f switch
+    {
+        // (No boss name here — both call sites already headline it.)
+        Faction.Legion    => "telegraphed strikes force relocation — keep moving, kill it fast",
+        Faction.Syndicate => "a shield arc behind a screen cell — flank it or take height",
+        Faction.Wardens   => "anchored by banner and medic — break the retinue, then burst the brick",
+        _                 => "rages at low HP — burst it down before the frenzy",
+    };
+
     static void AddEdge(MissionNode a, MissionNode b) { if (!a.Next.Contains(b.Id)) a.Next.Add(b.Id); }
 
     /// Derive a deployment card from a node's kind: STANDARD combat, a tougher ELITE

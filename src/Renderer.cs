@@ -1909,6 +1909,20 @@ public static class Renderer
                             Raylib.Fade(Pal.Friend, pulse));
         }
 
+        // FUL-11 CEREMONY — the FINALE BOSS reads as the apex of the force from the ground up:
+        // a broad slow-pulsing champion aura + a heavy double ring in the ELITE role colour (the
+        // W3 role-ring vocabulary scaled to "champion" — same hue as the elite body ring, so no
+        // new colour job). Drawn BEFORE the gold HVT mark so goal-gold still sits on top, and in
+        // every alert state (the capstone must read even while the pod sleeps). Presentation only.
+        if (u.Team == Team.Enemy && u.IsBoss)
+        {
+            float bp = 0.5f + 0.5f * MathF.Sin((float)Raylib.GetTime() * 2.2f + u.Bob);
+            var bc = foot + new Vector2(0, 17);
+            Raylib.DrawRing(bc, 30f, 41f, 0, 360, 56, Raylib.Fade(Pal.Elite, 0.09f + 0.07f * bp));   // soft aura wash
+            Raylib.DrawRing(bc, 33f, 36.5f, 0, 360, 56, Raylib.Fade(Pal.Elite, 0.40f + 0.25f * bp)); // heavy outer ring
+            Raylib.DrawRing(bc, 29.5f, 31f, 0, 360, 56, Raylib.Fade(Pal.Elite, 0.28f + 0.14f * bp)); // inner hairline
+        }
+
         // DECAPITATE marker: a bold gold double HVT ring on the ground so the target reads out of
         // the pack at a glance (full-alpha signal, drawn regardless of alert state / dimming).
         if (hvt)

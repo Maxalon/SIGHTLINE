@@ -1329,6 +1329,7 @@ public partial class Game
         foreach (var u in Players)
         { u.FeatMultiKill = u.FeatClutch = u.FeatVengeful = u.WasNearDeath = u.FeatBurned = u.AllyDown = false; u.BondAura = false; u.ConsecutiveMisses = 0; u.Statuses.Clear(); u.LastDotSource = null; }
         _missionKia.Clear();
+        _bossSighted = false;        // FUL-11: the HVT SIGHTED ceremony banner re-arms per mission
         Scorches.Clear();            // death decals don't carry between missions
         _refundedThisTurn.Clear();   // flank-kill refund is per-turn; clear it for the mission's first turn too (review #2)
         _smartConcealTurns = 0;      // SmartStep: concealed-turn counter (hard anti-TIMEOUT cap)
@@ -1369,7 +1370,17 @@ public partial class Game
         if (Mode == GameMode.Campaign)
         {
             string facTag = Combat.MissionFaction != Faction.None ? $" - {Run.FactionName(Combat.MissionFaction)}" : "";
-            ShowBanner($"MISSION {n} - {Biome.Name}{facTag}", false);
+            // FUL-11 CEREMONY: the finale opens on a card that names the HUNT, not a mission
+            // number — the named boss in the headline, its kit's verb clause on the W11 sub-line,
+            // in the danger colour (a threat announcement, not a turn cue). Gated on the boss
+            // node's Decapitate so SKIRMISH/forced-objective m6 builds keep the plain banner.
+            if (n >= Run.MaxMissions && Objective == Objective.Decapitate)
+            {
+                var kf = Combat.MissionFaction;
+                ShowBanner($"FINALE - KILL THE {Run.FinaleBossName(kf).ToUpperInvariant()}", true);
+                BannerSub = Run.FinaleKitClause(kf);
+            }
+            else ShowBanner($"MISSION {n} - {Biome.Name}{facTag}", false);
             StartTutorialMaybe();   // first-run onboarding is a campaign-only feature
         }
         else if (Mode == GameMode.Skirmish)
@@ -1726,6 +1737,8 @@ public partial class Game
 
     // W11 NEW CONTACT — archetypes already ID'd this run (banner fires once per archetype per run).
     readonly HashSet<string> _seenArchetypes = new();
+    // FUL-11 — the finale boss's first-sighting ceremony banner already fired this mission.
+    bool _bossSighted;
 
     /// End the run as a loss and clear the checkpoint so the intro stops offering CONTINUE.
     void LoseRun(string title, string reason)
@@ -1832,6 +1845,20 @@ public partial class Game
     void CheckNewContact()
     {
         if (NoPersist && Environment.GetEnvironmentVariable("SIGHTLINE_NEWCONTACT") != "1") return;
+        // FUL-11 CEREMONY — the finale boss's first sighting outranks the generic bestiary ID:
+        // a one-shot HVT SIGHTED card on the same lane/window, naming the target + its kit's
+        // verb clause. Consumes the archetype's NEW CONTACT slot too, so the SAME unit can't
+        // double-banner as a generic contact one window later.
+        if (!_bossSighted)
+            foreach (var e in Enemies)
+            {
+                if (!e.Alive || !e.Active || !e.IsBoss) continue;
+                _bossSighted = true;
+                _seenArchetypes.Add(e.Cls);
+                ShowBanner($"HVT SIGHTED: {e.Name}", true);
+                BannerSub = Run.FinaleKitClause(Combat.MissionFaction);
+                return;
+            }
         foreach (var e in Enemies)
         {
             if (!e.Alive || !e.Active || _seenArchetypes.Contains(e.Cls)) continue;

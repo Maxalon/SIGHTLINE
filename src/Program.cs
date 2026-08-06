@@ -194,6 +194,15 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        // SIGHTLINE_FUL11PROBE=<N> : FUL-11 — finale-kit spawn distribution probe (per-kit retinue
+        // slots, Wardens banner aura coverage as spawned, banner cap) across N flywheel seeds.
+        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_FUL11PROBE"), out int ful11N) && ful11N > 0)
+        {
+            Raylib.InitWindow(64, 64, "ful11probe");   // StartMission -> Unit.SyncPos uses tile->px math
+            Console.WriteLine(Game.Ful11ProbeTest(ful11N));
+            Raylib.CloseWindow();
+            return;
+        }
         // SIGHTLINE_TRAITTEST=1 : feats -> traits/nicknames + bonds round-trip (item 3.2). No window.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_TRAITTEST") == "1")
         {

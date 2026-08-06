@@ -519,6 +519,11 @@ public class Unit
     // (mirrors the Enraged pair above).
     public bool RagesTwice;
     public bool Frenzied;
+    // FUL-11 CEREMONY — the m6 FINALE boss (set only by Mission.MakeFinaleBoss). Presentation
+    // key ONLY: the champion ground ring/aura (Renderer.DrawUnit) + the one-shot HVT SIGHTED
+    // banner (Game.CheckNewContact) hang off it — no combat/AI read, so stats stay kit-tuned.
+    // Transient like the capability flags above (enemies aren't saved).
+    public bool IsBoss;
 
     // DECAPITATE GUARDED HVT (W4). Transient per-mission, never persisted (enemies aren't saved).
     // IsHvtGuard: this enemy is one of the (<=2) bodyguards the Game picked near the HVT.

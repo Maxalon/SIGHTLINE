@@ -403,7 +403,16 @@ public static class Hud
     // separators mark the zone boundaries. Every pre-W10 readout survives — just regrouped.
     static void DrawTopBar(Game g)
     {
-        Raylib.DrawRectangleGradientV(0, 0, Cfg.ScreenW, 64, Pal.RGBA(8, 12, 17, 235), Pal.RGBA(8, 12, 17, 0));
+        // FUL-11 CEREMONY — the m6 finale rides a red-tinged top plate (+ a hairline red top
+        // edge) so the capstone fight is marked from the first frame to the last. Value/alpha
+        // match the normal plate exactly — only the hue shifts toward the danger role, so no
+        // readout loses contrast (squint test) and heat-0 non-finale missions stay byte-stable.
+        bool finale = g.Mode == GameMode.Campaign && g.RunState != null
+                   && g.RunState.Mission >= Run.MaxMissions;
+        Color plateTop = finale ? Pal.RGBA(30, 9, 13, 235) : Pal.RGBA(8, 12, 17, 235);
+        Color plateBot = finale ? Pal.RGBA(30, 9, 13, 0)   : Pal.RGBA(8, 12, 17, 0);
+        Raylib.DrawRectangleGradientV(0, 0, Cfg.ScreenW, 64, plateTop, plateBot);
+        if (finale) Raylib.DrawRectangle(0, 0, Cfg.ScreenW, 2, Raylib.Fade(Pal.Foe, 0.45f));
         const int cy = 26;   // shared vertical center for the whole bar
 
         // ---- LEFT ZONE: turn/phase + concealment ------------------------------------------
@@ -508,7 +517,10 @@ public static class Hud
         }
         else
         {
-            preTxt = $"MISSION {g.RunState.Mission}/{Run.MaxMissions}"; preCol = Pal.TxtDim;
+            // FUL-11: the finale's prefix names the moment in the danger hue (the LAST STAND
+            // precedent for a red pre-label); every other mission keeps the dim counter.
+            preTxt = finale ? "FINALE" : $"MISSION {g.RunState.Mission}/{Run.MaxMissions}";
+            preCol = finale ? Raylib.Fade(Pal.Foe, 0.85f) : Pal.TxtDim;
             glyph = true;
             switch (g.Objective)
             {
