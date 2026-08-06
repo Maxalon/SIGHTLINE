@@ -405,6 +405,9 @@ public static class Hud
     {
         Raylib.DrawRectangleGradientV(0, 0, Cfg.ScreenW, 64, Pal.RGBA(8, 12, 17, 235), Pal.RGBA(8, 12, 17, 0));
         const int cy = 26;   // shared vertical center for the whole bar
+        // FUL-12: pill hover anchors are re-published per frame; a pill not drawn this frame must
+        // not keep a stale rect alive (an empty rect can never be hovered).
+        _turnPillRect = _concealedRect = _heatRect = _pressureRect = _cacheRect = default;
 
         // ---- LEFT ZONE: turn/phase + concealment ------------------------------------------
         bool playerTurn = g.Phase != Phase.EnemyTurn;
@@ -416,6 +419,7 @@ public static class Hud
         Raylib.DrawRectangleRounded(pill, 0.4f, 8, Pal.Panel);
         Raylib.DrawRectangleLinesEx(pill, 1.5f, Raylib.Fade(turnCol, 0.6f));
         CenterText(turnTxt, pill, 16, turnCol);
+        _turnPillRect = pill;
         lx += pillW + 10;
 
         // 4.4 concealment pill: while the squad is hidden, a pulsing CONCEALED pill rides next
@@ -429,6 +433,7 @@ public static class Hud
             Raylib.DrawRectangleRounded(cpill, 0.4f, 8, Pal.Panel);
             Raylib.DrawRectangleLinesEx(cpill, 1.5f, Raylib.Fade(Pal.Friend, 0.5f * pulse));
             CenterText("CONCEALED", cpill, 14, Raylib.Fade(Pal.Friend, pulse));
+            _concealedRect = cpill;
             lx += cw + 10;
         }
         float leftEnd = lx;
@@ -461,6 +466,7 @@ public static class Hud
             Raylib.DrawRectangleRounded(hp, 0.4f, 8, Pal.Panel);
             Raylib.DrawRectangleLinesEx(hp, 1.5f, Raylib.Fade(Pal.Foe, 0.6f));
             CenterText(ht, hp, 14, Pal.Foe);
+            _heatRect = hp;
             rx -= hw + 16;
         }
 
@@ -470,6 +476,7 @@ public static class Hud
         {
             float pw = PressureMeterWidth(g);
             DrawPressureMeter(g, rx - pw, cy);
+            _pressureRect = new Rectangle(rx - pw - 3, cy - 16, pw + 6, 32);   // label + pip stack
             rx -= pw + 18;
         }
 
@@ -563,8 +570,11 @@ public static class Hud
                 if (sw > 0)
                     Raylib.DrawTextEx(Cfg.Font, sec, new Vector2((int)sx, 44), 12, 1f, g.SecondaryOnTrack ? Pal.Good : Pal.Foe);
                 if (cw > 0)
+                {
                     Raylib.DrawTextEx(Cfg.Font, cache, new Vector2((int)(sx + sw + gap), 44), 12, 1f,
                                       g.CacheTurnsLeft <= 2 ? Pal.Foe : Pal.VipGold);
+                    _cacheRect = new Rectangle(sx + sw + gap - 2, 42, cw + 4, 16);
+                }
             }
         }
     }
@@ -658,12 +668,22 @@ public static class Hud
     }
 
     // W11: hover-tooltip anchors for the passive readouts (objective line + boon chips).
+    // FUL-12: joined by the top-bar pill anchors (turn / concealed / heat / pressure / cache),
+    // so EVERY top-bar pill hover produces a card.
     static Rectangle _objectiveRect;
+    static Rectangle _turnPillRect, _concealedRect, _heatRect, _pressureRect, _cacheRect;
     static readonly System.Collections.Generic.List<(Boon boon, Rectangle rect)> _boonChips = new();
+
+    /// FUL-12 helper: is this pill hovered (or force-framed for a headless shot)? A pill absent
+    /// this frame has an EMPTY rect, so neither path can conjure a card for chrome that isn't there.
+    static bool PillHover(Game g, Vector2 m, Rectangle r, string forceId)
+        => r.Width > 0 && (Raylib.CheckCollisionPointRec(m, r) || (g.NoPersist && _forcedHover == forceId));
 
     /// W11: lightweight hover tooltips for the passive readouts — the objective line ("what am I
     /// actually doing?") and the gold boon codes ("what does STK mean?"). Live phases only; the
     /// LAST STAND wave counter is self-describing, so Endless skips the objective card.
+    /// FUL-12: every top-bar pill now answers a hover — the card text states the RULE each pill
+    /// tracks, pulling its numbers from the live constants so the explanation can never drift.
     static void DrawHudHovers(Game g)
     {
         if (g.Phase != Phase.PlayerTurn && g.Phase != Phase.EnemyTurn) return;
@@ -676,6 +696,45 @@ public static class Hud
                           _objectiveRect.X, _objectiveRect.Y + _objectiveRect.Height + 6, Pal.Accent);
             return;
         }
+        if (PillHover(g, m, _turnPillRect, "turn"))
+        {
+            bool pt = g.Phase != Phase.EnemyTurn;
+            DrawHoverCard(pt ? "PLAYER TURN" : "ENEMY TURN",
+                pt ? "Each soldier has 2 actions: move, then fire / overwatch / support. FIRE costs 1 action and never ends the turn. END TURN [Enter] hands the board to the enemy."
+                   : "Hostiles are acting. Your overwatch, focus cones and braces fire as they move.",
+                _turnPillRect.X, _turnPillRect.Y + _turnPillRect.Height + 6, pt ? Pal.Friend : Pal.Foe);
+            return;
+        }
+        if (PillHover(g, m, _concealedRect, "concealed"))
+        {
+            DrawHoverCard("CONCEALED",
+                $"The enemy hasn't seen the squad. Your first attack from hiding is an AMBUSH (+{Combat.AmbushAim} aim, +{Combat.AmbushCrit} crit). Attacking, or moving right beside a foe, breaks concealment.",
+                _concealedRect.X, _concealedRect.Y + _concealedRect.Height + 6, Pal.Friend);
+            return;
+        }
+        if (PillHover(g, m, _heatRect, "heat"))
+        {
+            var mods = new System.Collections.Generic.List<string>();
+            foreach (var hm in Sightline.Heat.Active(g.HeatLevel)) mods.Add($"{hm.Name}: {hm.Desc}");
+            DrawHoverCard($"HEAT {g.HeatLevel}",
+                $"Self-chosen difficulty — {string.Join(".  ", mods)}.  Pays +{Sightline.Heat.IntelBonus(g.HeatLevel)} intel per mission.",
+                _heatRect.X, _heatRect.Y + _heatRect.Height + 6, Pal.Foe);
+            return;
+        }
+        if (PillHover(g, m, _pressureRect, "pressure"))
+        {
+            DrawHoverCard(g.Pressure > 0 ? "ALERT" : "PRESSURE",
+                $"The anti-camp clock. After turn {Game.PressureGrace} it rises one rung every {Game.PressureStep} turns: enemies gain +{Game.PressureAimPerRung} aim per rung, and reinforcements arrive from rung 2. Advancing beats turtling.",
+                _pressureRect.X, _pressureRect.Y + _pressureRect.Height + 6, g.Pressure > 0 ? Pal.Foe : Pal.TxtDim);
+            return;
+        }
+        if (PillHover(g, m, _cacheRect, "cache"))
+        {
+            DrawHoverCard("INTEL CACHE",
+                $"A gold cache is on the field: the first soldier to step onto it banks +{Game.CacheIntelMin}-{Game.CacheIntelMax} intel. It goes dark in {g.CacheTurnsLeft} player turn{(g.CacheTurnsLeft == 1 ? "" : "s")} — a risk/reward detour.",
+                _cacheRect.X, _cacheRect.Y + _cacheRect.Height + 6, Pal.VipGold);
+            return;
+        }
         foreach (var (boon, chip) in _boonChips)
         {
             if (!Raylib.CheckCollisionPointRec(m, chip) && !(g.NoPersist && _forcedHover == "boon")) continue;
@@ -686,8 +745,10 @@ public static class Hud
     }
 
     // W11 harness seam for DrawHudHovers (screenshot only): SIGHTLINE_HOVERHUD=obj|boon frames the
-    // objective / first-boon-chip hover card headless. Read once; null in every normal run, and
-    // the use sites gate on g.NoPersist so a stray env var can never force a card in live play.
+    // objective / first-boon-chip hover card headless. FUL-12 adds turn|concealed|heat|pressure|cache
+    // for the pill cards (each only fires when its pill actually drew this frame). Read once; null in
+    // every normal run, and the use sites gate on g.NoPersist so a stray env var can never force a
+    // card in live play.
     static readonly string _forcedHover = Environment.GetEnvironmentVariable("SIGHTLINE_HOVERHUD");
 
     /// A small anchored hover card: accent title + wrapped body (~300px column), clamped on-screen.
@@ -1409,7 +1470,7 @@ public static class Hud
     // EXACTLY so the explanation always matches the math. Display-only; no rule changes.
     static void DrawTooltip(Game g)
     {
-        if (!g.ShowOdds) return;
+        if (!g.ShowOdds) { DrawHoverIdCard(g); return; }
         var o = g.HoverOdds;
 
         // Recover the same attacker/target pair ComputeOdds was called with (see
@@ -1602,6 +1663,64 @@ public static class Hud
             int vw = (int)Raylib.MeasureTextEx(Cfg.Font, flags[i].val, fontFlag, 1f).X;
             Raylib.DrawTextEx(Cfg.Font, flags[i].val, new Vector2(x + w - pad - vw, fyy), fontFlag, 1f, flags[i].col);
         }
+    }
+
+    // FUL-12 harness seam (screenshot only): SIGHTLINE_IDHOVER=1 frames the ID card on the first
+    // dormant enemy headless. Read once; null in normal runs; the use site gates on g.NoPersist.
+    static readonly string _forcedIdHover = Environment.GetEnvironmentVariable("SIGHTLINE_IDHOVER");
+
+    /// FUL-12: the un-shootable hover still teaches. DrawTooltip bails without odds (concealed
+    /// squad, dormant pod, no LoS / out of range), which left dormant enemies un-identifiable by
+    /// hover — exactly the bodies a concealed opening is planned around. This card is the odds
+    /// tooltip's ID header alone (same Codex source — the text can never drift) plus an honest
+    /// ALERT-STATE line, so the player can read WHO is sleeping before deciding whom to wake.
+    static void DrawHoverIdCard(Game g)
+    {
+        if (g.Phase != Phase.PlayerTurn && g.Phase != Phase.EnemyTurn) return;
+        if (g.Paused || g.EditingTag) return;
+        Unit d = null;
+        bool forced = g.NoPersist && _forcedIdHover == "1";
+        if (forced)
+        {
+            foreach (var e in g.Enemies) if (e.Alive && !e.Active) { d = e; break; }
+        }
+        else if (g.HoverValid)
+        {
+            var u = g.UnitAt(g.HoverX, g.HoverY);
+            if (u != null && u.Team == Team.Enemy) d = u;
+        }
+        if (d == null) return;
+        string clause = Codex.BlurbClause(d.Cls);
+        if (string.IsNullOrEmpty(clause)) return;   // unknown archetype: no half-empty card
+
+        string title = $"{Codex.NameFor(d.Cls)} — {d.Cls}";
+        var lines = WrapText(clause, 11, 300);
+        // the alert-state line mirrors the real awareness tiers (4.3) + rout, worst-first
+        (string txt, Color col) state =
+              d.Routed > 0                        ? ("BROKEN — routed and fleeing", Pal.Suspect)
+            : d.Alert == AlertLevel.Alert         ? ("ALERT — knows the squad is here", Pal.Foe)
+            : d.Alert == AlertLevel.Suspicious    ? ("SUSPICIOUS — moving to investigate", Pal.Suspect)
+            :                                       ("DORMANT — hasn't noticed the squad", Pal.TxtDim);
+
+        const int pad = 12;
+        int w = (int)Raylib.MeasureTextEx(Cfg.Font, title, 14, 1f).X;
+        foreach (var ln in lines) w = Math.Max(w, (int)Raylib.MeasureTextEx(Cfg.Font, ln, 11, 1f).X);
+        w = Math.Max(w, (int)Raylib.MeasureTextEx(Cfg.Font, state.txt, 12, 1f).X) + pad * 2;
+        int h = 27 + lines.Count * 14 + 6 + 18 + 8;
+
+        // anchor: above the cursor in live play; above the unit itself for the forced headless shot
+        Vector2 a = forced ? Raylib.GetWorldToScreen2D(d.Pos, g.ViewCamera(false)) : Raylib.GetMousePosition();
+        int x = Util.Clamp((int)a.X - w / 2, 8, Cfg.ScreenW - w - 8);
+        int y = Util.Clamp((int)a.Y - h - (forced ? 42 : 18), 64, Cfg.ScreenH - h - 8);
+
+        var box = new Rectangle(x, y, w, h);
+        Raylib.DrawRectangleRounded(box, 0.12f, 8, Pal.RGBA(10, 14, 19, 251));
+        Raylib.DrawRectangleLinesEx(box, 1.5f, Pal.PanelBd);
+        Raylib.DrawTextEx(Cfg.Font, title, new Vector2(x + pad, y + 9), 14, 1f, Pal.Foe);
+        int iy = y + 27;
+        foreach (var ln in lines) { Raylib.DrawTextEx(Cfg.Font, ln, new Vector2(x + pad, iy), 11, 1f, Pal.TxtDim); iy += 14; }
+        Raylib.DrawRectangle(x + pad, iy + 2, w - pad * 2, 1, Pal.RGBA(38, 49, 63, 200));
+        Raylib.DrawTextEx(Cfg.Font, state.txt, new Vector2(x + pad, iy + 7), 12, 1f, state.col);
     }
 
     // ---------------- turn banner sweep ----------------
