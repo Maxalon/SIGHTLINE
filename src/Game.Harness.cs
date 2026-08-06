@@ -1060,13 +1060,20 @@ public partial class Game
             u.Rank = Math.Min(Run.Ranks.Length - 1, 1 + i);
         }
         if (squad.Count > 0) { squad[0].Nickname = "REAPER"; squad[0].Kills = 11; squad[0].Traits.Add(Trait.Killer); }
-        if (squad.Count > 1) squad[1].Nickname = " HALO";
+        if (squad.Count > 1) squad[1].Nickname = "HALO";   // FUL-12 review: staging data had a stray leading space (rendered KRESS " HALO"); FullName's formatter is fine
         // a couple of fallen, recorded across the run for the memorial roll.
         _run.Memorial.Add(new FallenRec { Name = "DALES \"BISHOP\"", Cls = "RANGER",  Rank = "SERGEANT", Kills = 7, Mission = 2 });
         _run.Memorial.Add(new FallenRec { Name = "OKONKWO",        Cls = "GUNNER",  Rank = "CORPORAL", Kills = 4, Mission = 4 });
         _run.Memorial.Add(new FallenRec { Name = "VEGA \"ASH\"",    Cls = "ASSAULT", Rank = "ROOKIE",   Kills = 1, Mission = 5 });
         _run.Mission = lose ? 5 : Run.MaxMissions;
         if (lose) { LoseTitle = "RUN OVER"; LoseReason = "The squad fell on mission 5."; }
+        // FUL-12: stage the meta-payoff FIELDS deterministically (AwardMetaRunEnd never runs under
+        // NoPersist), so the SALVAGE slab / HEAT UNLOCKED line / achievement roll can be framed.
+        // Fixed values -> the SUMMARY shot stays byte-stable; a lose card shows the consolation only.
+        EndSalvage = lose ? 18 : 79;
+        EndHeatUnlocked = lose ? 0 : 4;
+        EndAchievements.Clear();
+        if (!lose) { EndAchievements.Add("TURNING UP"); EndAchievements.Add("THE LONG WAR"); }   // HEAT3 + DEEP: both true of this staged run (3 KIA -> never FLAWLESS)
         Phase = lose ? Phase.Lose : Phase.Win;
     }
 

@@ -482,9 +482,9 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_KIA") == "1") game.DebugKia();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_SUMMARY") == "1") game.DebugSummary();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_SUMMARY") == "lose") game.DebugSummary(true);
-        // SIGHTLINE_TUTORIAL=<n>: show tutorial step n-1 (=1 keeps the historical "step 0" shot;
-        // =3 frames the rewritten FIRE-rule copy, =4 the final step). NoPersist is already set, so
-        // the completion-time MarkTutorialSeen can never fire from a shot run (!NoPersist-gated).
+        // SIGHTLINE_TUTORIAL=<n>: show tutorial step n-1 (FUL-12 numbering: =1 the NEW concealment/
+        // AMBUSH lesson, =2 MOVE, =3 OVERWATCH, =4 the FIRE-rule copy, =5 the FIELD MANUAL wrap-up).
+        // NoPersist is already set, so MarkTutorialSeen can never fire from a shot run.
         if (shot && int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_TUTORIAL"), out int _tut) && _tut > 0)
             game.ShowTutorialStep(_tut - 1);
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CB") == "1") Pal.SetColorblind(true);
