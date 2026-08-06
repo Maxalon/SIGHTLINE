@@ -1502,3 +1502,57 @@ no policy inversion, paired gaps widening up the ladder.
   measurement noise (W2's CRN pairing + positional sloppiness — pooled +7.5, in target), and the
   h0-h4 flatness (W6's re-ladder: 80/70/50). Endless depth median was already in band (6) via the
   pre-SIGNAL APEX follow-up.
+
+# PROGRAM FULCRUM — milestone 1: the orchestrator's solo window (2026-07/08)
+
+Six fresh research lenses on the post-SIGNAL tree → PM synthesis into a 13-wave plan ("systems
+that exist but never reach play") → the adversarial-sharpening stage was lost to a session-limit
+window, so the orchestrator sharpened the first waves against the code by hand (every checked
+seam claim held) and dev'd the first two waves solo while the subagent pool was limit-blocked.
+The full plan of record lives in docs/ROADMAP.md §PROGRAM "FULCRUM" — deliberately in-repo:
+container suspensions (Jul 6→13→21→22→Aug 6) wiped every scratchpad copy of it, twice.
+
+## Shipped
+- **FUL-3 CHROME** (16e24e9): roster-chip reflow (no more one-letter rail from turn 1, incl. the
+  VIP/captive chip), per-button action-bar dim (floor 0.45, dormant-exempt), INTEL cache
+  row-clamp (draw-count stable), row-0 label flips, dormant de-emphasis (0.75x/0.85x + tighter
+  ring), LOCK-ON/NO QUARTER desc truth. Verified: Release 0/0, 4 suites, autoplay x3, shot sweep
+  m1/m3/m5/escort/rescue; before/afters shared with the owner.
+- **FUL-2 SEAM INTEGRITY** (4690748): same-sitting assist-cache staleness closed (win/lose paths
+  refresh _metaLossStreak); SIGHTLINE_INTRO save-clobber closed (stash/restore, byte-identical
+  verified); codex-from-pause no longer plays queued enemy shots (anim queue freezes in
+  Phase.Codex, pause restored on exit); EXTRACT arrivals route through OnUnitEnteredTile (BIPOD/
+  bleed/burn/cache/overwatch; CheckEnd deferred while reactions queue); supercover LOS made real
+  (sealed diagonal corners block at range, both directions; point-blank keeps true-corner=cover;
+  +6 COMBATTEST legs); Pinned comment truth. Verified: Release 0/0, 5 suites incl. new legs,
+  INTRO-STASH, autoplay x5.
+
+## Measured (FUL-2 LOS budget A/B — CRN slots, h0, N=10/leg, pre=16e24e9 vs post)
+| metric | pre | post | verdict |
+|---|---|---|---|
+| run completion | 65% | 60% | at the ±5 budget boundary — in budget |
+| greedy / sloppy | 70 / 60 (gap +10) | 50 / 70 (gap −20) | ~1.3 SD at n=10 — under-powered; FUL-13 watch item |
+| avg missions cleared | 5.35 | 5.35 | unchanged |
+
+Fix retained per the W6a truthfulness precedent (planner and resolver must agree on sightlines);
+if FUL-13's proper-N baseline pins a genuinely negative gap on the corrected tree, the sloppy-
+policy definition gets the accept-vs-sharpen decision then, with data.
+
+## Process learnings (FULCRUM m1)
+1. **The environment is the adversary now.** Four container suspensions and three session-limit
+   windows killed more agent work than any bug. Countermeasures now standard: the plan of record
+   lives in docs/ROADMAP.md (not scratchpads); dev agents PUSH their wave branches to origin
+   after committing (uncommitted worktree work from four agents was wiped by one rebuild);
+   liveness is judged by artifact mtimes + process table, never notifications or wall-clock.
+2. **SendMessage-resume recovers limit-killed agents with full context** — but not across
+   container rebuilds (transcripts live in the container). Push early, report often.
+3. **A workflow's journal + resumeFromRunId recovered 2 finished researchers at zero cost** after
+   a mid-run limit kill; agent() results need null-guards (a spread of a null result made a
+   truthy-but-empty object that crashed the reduce).
+4. **The orchestrator dev'ing solo during limit windows works** — but only with the same review
+   gate as everyone else: the FUL-2/3 diffs got an adversarial reviewer whose last probe
+   ("Bresenham skew asymmetry: pre-existing or added?") was exactly the right question; its kill
+   left "all pins pass" + one comment-truth lead, which the landing sweep confirmed fixed.
+5. **Docs over-claims survive until someone greps for the test hook.** SIGNAL's W7 claimed
+   SIGHTLINE_EXPOSURETEST; the hook didn't exist. Closed-item claims are now verified against
+   the tree (hook exists, commits exist) before any docs commit — and W7's spec became FUL-9.
