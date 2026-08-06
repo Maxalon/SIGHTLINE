@@ -1701,10 +1701,18 @@ public static class Hud
         {
             foreach (var e in g.Enemies) if (e.Alive && !e.Active) { d = e; break; }
         }
-        else if (g.HoverValid)
+        else
         {
-            var u = g.UnitAt(g.HoverX, g.HoverY);
-            if (u != null && u.Team == Team.Enemy) d = u;
+            // FUL-12 review fix: derive the tile from the LIVE mouse (same transform
+            // UpdateHoverAndAim uses) — g.HoverX/Y only refresh in UpdatePlayer, so during the
+            // enemy turn / anim playback the card would follow the cursor while identifying the
+            // STALE tile's unit (and mis-label an enemy that walked onto it). Display-only.
+            var world = Raylib.GetScreenToWorld2D(Raylib.GetMousePosition(), g.ViewCamera(false));
+            if (Util.ScreenToTile(world, out int hx, out int hy))
+            {
+                var u = g.UnitAt(hx, hy);
+                if (u != null && u.Team == Team.Enemy) d = u;
+            }
         }
         if (d == null) return;
         string clause = Codex.BlurbClause(d.Cls);
@@ -2176,7 +2184,7 @@ public static class Hud
         var stats = new System.Collections.Generic.List<(string label, int value, Color col)>
         {
             ("MISSIONS CLEARED", missionsShown, accent),
-            ("INTEL BANKED",     run?.Intel ?? 0, Pal.Accent),
+            ("INTEL EARNED",     run?.Intel ?? 0, Pal.Accent),   // FUL-12 review: spec wording
             ("CONFIRMED KILLS",  totalKills, Pal.Friend),
         };
         stats.Add(("HEAT / ASCENSION", run?.HeatLevel ?? 0, (run?.HeatLevel ?? 0) > 0 ? Pal.Foe : Pal.TxtDim));

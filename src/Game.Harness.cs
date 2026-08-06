@@ -1060,7 +1060,7 @@ public partial class Game
             u.Rank = Math.Min(Run.Ranks.Length - 1, 1 + i);
         }
         if (squad.Count > 0) { squad[0].Nickname = "REAPER"; squad[0].Kills = 11; squad[0].Traits.Add(Trait.Killer); }
-        if (squad.Count > 1) squad[1].Nickname = " HALO";
+        if (squad.Count > 1) squad[1].Nickname = "HALO";   // FUL-12 review: staging data had a stray leading space (rendered KRESS " HALO"); FullName's formatter is fine
         // a couple of fallen, recorded across the run for the memorial roll.
         _run.Memorial.Add(new FallenRec { Name = "DALES \"BISHOP\"", Cls = "RANGER",  Rank = "SERGEANT", Kills = 7, Mission = 2 });
         _run.Memorial.Add(new FallenRec { Name = "OKONKWO",        Cls = "GUNNER",  Rank = "CORPORAL", Kills = 4, Mission = 4 });
