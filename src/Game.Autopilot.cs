@@ -687,13 +687,34 @@ public partial class Game
         // HOLD THE LINE: win = survive N turns, so DON'T wander (every step out of cover is
         // risk and there's nowhere to "go"). Prep a steady shot, fire the best target, then
         // overwatch the approach unconditionally (waves keep coming — a held lane is never
-        // wasted), and hunker as the floor. No repositioning: a defending squad stays put.
+        // wasted), and hunker as the floor.
         if (PrepAbility(u)) return true;
         if (TakeBestShot(u)) return true;
         if (u.Ammo == 0) { DoReload(); return true; }
+        // FUL-4 co-fix: "stay put" must not mean "die in place" — a defender whose tile is
+        // flanked by (or naked to) a live attacker falls BACK to better cover before watching.
+        // SmartReposition has no advance pull, so this never wanders off the holdout; without
+        // it the measured Defend number was partly the bot refusing to leave a burning tile.
+        if (DefendPostureBad(u) && SmartReposition(u)) return true;
         if (u.Ammo > 0 && u.ActionsLeft > 0 && !u.HasStatus(StatusKind.Disoriented))
         { DoOverwatch(); return true; }     // always worth watching on a defend
         DoHunker(); return true;
+    }
+
+    /// FUL-4: the defender's CURRENT tile is a liability — at least one armed, active foe has an
+    /// in-range, in-LoS shot against which the tile gives no working cover (open or flanked).
+    /// Cheap gate so SmartDefend only repositions when standing still is actively losing HP.
+    bool DefendPostureBad(Unit u)
+    {
+        foreach (var e in Enemies)
+        {
+            if (!e.Alive || !e.Active || e.Ammo <= 0) continue;
+            if (Util.TileDist(u.X, u.Y, e.X, e.Y) > e.Weapon.MaxRange) continue;
+            if (!Grid.HasLineOfSight(e.X, e.Y, u.X, u.Y)) continue;
+            var cov = Grid.GetCover(u.X, u.Y, e.X, e.Y);
+            if (cov.Level == 0 || cov.Flanked) return true;
+        }
+        return false;
     }
 
     bool SmartDecapitate(Unit u)
