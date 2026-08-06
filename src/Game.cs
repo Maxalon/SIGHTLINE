@@ -527,12 +527,19 @@ public partial class Game
     public int TutStep = -1;                 // -1 = inactive
     bool _tutMoved, _tutOver, _tutShot;
     float _tutDoneTimer;
+    // FUL-12: named step indices — every gate below compares against the SEMANTIC step, so a
+    // future insert/renumber can't silently re-point the "reached the FIRE lesson" completion
+    // gates (EnterBarracks/LoseRun) or the bar-hierarchy map (Hud.DrawActionButtons).
+    public const int TutStepConceal = 0, TutStepMove = 1, TutStepOverwatch = 2, TutStepFire = 3, TutStepDone = 4;
     public static readonly string[] TutPrompts =
     {
-        "WELCOME, COMMANDER. Click a glowing tile to MOVE the selected soldier. Cover (the raised blocks) shields you from fire - end your move beside one.",
+        // FUL-12: the opening CONCEALED state was the one core rule the onboarding never named —
+        // a new player read the quiet board as "no threat" and walked into the first pod blind.
+        "WELCOME, COMMANDER. The squad opens CONCEALED - the enemy pods ahead are dormant and blind to you. Position freely: your first attack from hiding is an AMBUSH (bonus aim + crit), so you choose where the fight starts.",
+        "Click a glowing tile to MOVE the selected soldier. Cover (the raised blocks) shields you from fire - end your move beside one.",
         "Now set OVERWATCH: press [2] (or the button). That soldier will fire on the first enemy that moves into its line of sight.",
         "Click a hostile to FIRE. A shot costs 1 action and does NOT end the turn - keep the other action to reposition (one shot per turn). Attacking from a side a foe has no cover on FLANKS it - far deadlier.",
-        "That's the basics: move into cover, flank, overwatch, fire - then END TURN. Promotions, perks and a branching campaign await. Good hunting.",
+        "That's the basics: move into cover, flank, overwatch, fire - then END TURN. Press [K] anytime for the FIELD MANUAL - every enemy, verb and rule lives there. Good hunting.",
     };
     public string TutorialText => (TutStep >= 0 && TutStep < TutPrompts.Length) ? TutPrompts[TutStep] : null;
 
@@ -550,32 +557,64 @@ public partial class Game
         if (TutStep < 0) return;
         switch (TutStep)
         {
-            // W11: turn-count fallback on step 1 — a player who's already ending turns without a
-            // "move" click (e.g. opened on overwatch/fire) clearly knows how to act; don't hold the
-            // MOVE card up forever, advance to the next lesson after a couple of full turns.
-            case 0: if (_tutMoved || _turnCount >= 3) AdvanceTutorial(); break;
+            // FUL-12: the concealment lesson lives while the opening is actually concealed — it
+            // yields the moment stealth breaks (lesson demonstrated) or turn 2 starts (the squad
+            // has seen the opening; on a no-conceal run — SPEARHEAD/EXPOSED — it yields at once).
+            case TutStepConceal: if (!SquadConcealed || _turnCount >= 2) AdvanceTutorial(); break;
+            // W11: turn-count fallback on the MOVE step — a player who's already ending turns
+            // without a "move" click (e.g. opened on overwatch/fire) clearly knows how to act;
+            // don't hold the MOVE card up forever, advance after a couple of full turns.
+            case TutStepMove: if (_tutMoved || _turnCount >= 3) AdvanceTutorial(); break;
             // W11 review: same fallback on the OVERWATCH lesson — a reaction-averse player who
-            // never arms a watch would otherwise park here below the TutStep>=2 "seen" gate and
+            // never arms a watch would otherwise park here below the reached-FIRE "seen" gate and
             // get the whole onboarding re-offered every future run.
-            case 1: if (_tutOver || _turnCount >= 6) AdvanceTutorial(); break;
-            case 2: if (_tutShot) AdvanceTutorial(); break;
-            case 3: _tutDoneTimer -= dt; if (_tutDoneTimer <= 0) CompleteTutorial(); break;
+            case TutStepOverwatch: if (_tutOver || _turnCount >= 6) AdvanceTutorial(); break;
+            case TutStepFire: if (_tutShot) AdvanceTutorial(); break;
+            case TutStepDone: _tutDoneTimer -= dt; if (_tutDoneTimer <= 0) CompleteTutorial(); break;
         }
     }
 
     void AdvanceTutorial()
     {
         TutStep++;
-        if (TutStep == 3) _tutDoneTimer = 7f;
+        if (TutStep == TutStepDone) _tutDoneTimer = 7f;
         if (TutStep >= TutPrompts.Length) CompleteTutorial();
     }
 
     /// Harness seam (SIGHTLINE_TUTORIAL=<n>): show a step directly. Seeds the final step's dwell
-    /// timer — without it, step 3 completes on the first Update tick and the shot frames a bare board.
+    /// timer — without it, the done step completes on the first Update tick and the shot frames a
+    /// bare board.
     public void ShowTutorialStep(int step)
     {
         TutStep = Math.Clamp(step, 0, TutPrompts.Length - 1);
-        if (TutStep == 3) _tutDoneTimer = 7f;
+        if (TutStep == TutStepDone) _tutDoneTimer = 7f;
+    }
+
+    // ---------------- FUL-12: one-shot BRACE field tip ----------------
+    // The BRACE interrupt is the comeback lever, but nothing in the game ever POINTS at it — the
+    // verb sat unused by exactly the players it rescues. One card, once per profile, the first
+    // time a live (Active) hostile makes the reaction real. Interactive-only: NoPersist runs
+    // (autoplay/shots) never see it unless SIGHTLINE_BRACETIP=1 stages it for the harness.
+    public string CalloutText;      // non-null => Hud draws the FIELD TIP card
+    public float CalloutTimer;      // seconds left on screen
+
+    void UpdateBraceCallout(float dt)
+    {
+        if (CalloutText != null)
+        {
+            CalloutTimer -= dt;
+            if (CalloutTimer <= 0) CalloutText = null;
+            return;
+        }
+        bool force = NoPersist && Environment.GetEnvironmentVariable("SIGHTLINE_BRACETIP") == "1";
+        if (!force && (NoPersist || Display.BraceTipSeen)) return;
+        if (Phase != Phase.PlayerTurn || TutorialText != null) return;   // never overlap a lesson card
+        if (!force && !Enemies.Any(e => e.Alive && e.Active)) return;    // fire when the threat is real
+        CalloutText = "FIELD TIP - BRACE [B]: a disrupting reaction. On a hit it STAGGERS the mover - "
+                    + "the foe loses its action this turn (for reduced damage). Deny a rushing enemy's "
+                    + "alpha instead of racing it for the kill.";
+        CalloutTimer = 9f;
+        if (!NoPersist) Display.MarkBraceTipSeen();   // one-shot: burned the moment it shows
     }
 
     /// APEX W2: finish the onboarding and persist the one-time "seen" flag. The !NoPersist gate is
@@ -1586,9 +1625,10 @@ public partial class Game
         // APEX W2: tutorial completion fallback — the first mission ended with steps still pending
         // (e.g. the player never set overwatch), so close it out and mark it seen (NoPersist-gated
         // inside) rather than re-running the onboarding at the start of every future run.
-        // W11: mark "seen" only if the player actually reached the FIRE lesson (TutStep >= 2) —
-        // someone who never got past MOVE hasn't been onboarded; let the tutorial re-offer next run.
-        if (TutStep >= 2) CompleteTutorial(); else TutStep = -1;
+        // W11: mark "seen" only if the player actually reached the FIRE lesson — someone who never
+        // got past MOVE hasn't been onboarded; let the tutorial re-offer next run. (FUL-12: the
+        // named TutStepFire constant keeps this gate on the same SEMANTIC step across renumbers.)
+        if (TutStep >= TutStepFire) CompleteTutorial(); else TutStep = -1;
         // W5 SCARS: capture the just-played mission's faction BEFORE EndMission clears it, so
         // DebriefSurvivors can brand a VENDETTA grudge on a survived near-death (the faction that
         // nearly killed them). None on a mixed-force mission -> no grudge stamped (inert).
@@ -1744,8 +1784,8 @@ public partial class Game
     {
         // APEX W2: tutorial completion fallback (mirror of EnterBarracks) — a first-mission loss
         // still counts as "the onboarding ran"; don't re-show it forever. NoPersist-gated inside.
-        // W11: same reached-the-FIRE-lesson gate as EnterBarracks — a step-0/1 washout re-offers.
-        if (TutStep >= 2) CompleteTutorial(); else TutStep = -1;
+        // W11: same reached-the-FIRE-lesson gate as EnterBarracks — an early washout re-offers.
+        if (TutStep >= TutStepFire) CompleteTutorial(); else TutStep = -1;
         Combat.EndRun();   // TEMPO wave 4: clear every mission-scoped combat static (+ run boons) on run end
         LoseTitle = title;
         LoseReason = reason;
@@ -2615,6 +2655,7 @@ public partial class Game
         if (!AutoPlay && Raylib.IsKeyPressed(KeyboardKey.F2)) CycleAnimSpeed();   // fast-forward anim pacing (1x/2x/3x)
         Audio.SetMusicIntensity(MusicIntensity());
         UpdateTutorial(dt);
+        UpdateBraceCallout(dt);        // FUL-12: one-shot BRACE field tip (never overlaps a lesson)
         Fx.UpdateAmbient(Biome, dt);   // per-biome ambient atmosphere (Wave B)
 
         // camera zoom-punch always relaxes; hit-stop freezes the rest of the sim
@@ -4729,7 +4770,7 @@ public partial class Game
         // stealth-race plan — see the concealment block in SmartStep). Harmless otherwise.
         if (SquadConcealed) _smartConcealTurns++;
         // keep the tutorial progressing even if the player skipped a prompted action
-        if (TutStep >= 0 && TutStep < 3) AdvanceTutorial();
+        if (TutStep >= 0 && TutStep < TutStepDone) AdvanceTutorial();
         EndTurnArmed = false;
         AimMode = false;
         SnapShot = false;

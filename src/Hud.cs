@@ -121,8 +121,13 @@ public static class Hud
         DrawBottomBar(g);
         DrawTooltip(g);
         DrawHudHovers(g);   // W11: objective-readout + boon-chip hover tooltips
-        if ((g.Phase == Phase.PlayerTurn || g.Phase == Phase.EnemyTurn) && g.TutorialText != null)
-            DrawTutorial(g);
+        if (g.Phase == Phase.PlayerTurn || g.Phase == Phase.EnemyTurn)
+        {
+            if (g.TutorialText != null) DrawTutorial(g);
+            // FUL-12: the one-shot BRACE field tip rides the same card chrome (green accent — a
+            // tip, not a lesson); the mutual-exclusion lives in Game.UpdateBraceCallout.
+            else if (g.CalloutText != null) DrawTipCard("FIELD TIP", g.CalloutText, Pal.Good);
+        }
         DrawBanner(g);
         DrawOverlays(g);
         if (g.Paused) DrawPause(g);
@@ -132,9 +137,12 @@ public static class Hud
 
     // Onboarding tutorial callout (3.12): a non-blocking tip card above the action bar.
     static void DrawTutorial(Game g)
+        => DrawTipCard($"TRAINING  {g.TutStep + 1}/{Game.TutPrompts.Length}", g.TutorialText, Pal.Accent);
+
+    /// The shared tip-card chrome (FUL-12: factored out so the BRACE field tip and the tutorial
+    /// lessons are the same visual object — one accent color apart).
+    static void DrawTipCard(string head, string body, Color accent)
     {
-        string body = g.TutorialText;
-        int step = g.TutStep + 1, total = Game.TutPrompts.Length;
         int w = 760, x = Cfg.ScreenW / 2 - w / 2, pad = 16;
         // word-wrap the body at ~size 15
         var lines = WrapText(body, 15, w - pad * 2);
@@ -144,11 +152,10 @@ public static class Hud
         int y = Math.Min(600, (int)_barTop - h - 8);
         var card = new Rectangle(x, y, w, h);
         Raylib.DrawRectangleRounded(card, 0.08f, 8, Raylib.Fade(Pal.RGBA(10, 16, 24), 0.96f));
-        Raylib.DrawRectangleLinesEx(card, 1.8f, Pal.Accent);
-        Raylib.DrawRectangle(x, y, 5, h, Pal.Accent);
+        Raylib.DrawRectangleLinesEx(card, 1.8f, accent);
+        Raylib.DrawRectangle(x, y, 5, h, accent);
 
-        string head = $"TRAINING  {step}/{total}";
-        Raylib.DrawTextEx(Cfg.Font, head, new Vector2(x + pad, y + 10), 14, 1f, Pal.Accent);
+        Raylib.DrawTextEx(Cfg.Font, head, new Vector2(x + pad, y + 10), 14, 1f, accent);
         int ty = y + 36;
         foreach (var ln in lines) { Raylib.DrawTextEx(Cfg.Font, ln, new Vector2(x + pad, ty), 15, 1f, Pal.Txt); ty += 20; }
     }
@@ -1007,9 +1014,19 @@ public static class Hud
         // stops being interactive; it just yields visually while the board needs the pixels.
         var barRect = new Rectangle(bx0, _barTop, right - bx0, (yBase + bh) - _barTop);
         bool mouseOnBar = Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), barRect);
+        // FUL-12: tutorial focus hierarchy — during a lesson the bar points at the lesson: the
+        // taught verb stays bright and every other button drops to the same 0.45 floor FUL-3's
+        // occlusion dim uses (min-composed with it, so an occluded lesson verb still yields to
+        // the board). Board lessons (concealment / move) dim the WHOLE bar toward the board; the
+        // wrap-up step restores it. Mouse-over always restores — the bar never stops being usable.
+        int tut = g.TutStep;
+        string lessonVerb = tut == Game.TutStepOverwatch ? "overwatch" : tut == Game.TutStepFire ? "shoot" : null;
+        bool tutDimAll = tut == Game.TutStepConceal || tut == Game.TutStepMove;
         foreach (var b in ActionButtons)
         {
             float dim = !mouseOnBar && ChipOccluded(g, b.Rect, true) ? 0.45f : 1f;
+            if (!mouseOnBar && (tutDimAll || (lessonVerb != null && b.Id != lessonVerb)))
+                dim = Math.Min(dim, 0.45f);
             DrawActionButton(b, dim);
         }
 

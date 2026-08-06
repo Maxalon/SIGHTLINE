@@ -225,6 +225,11 @@ void main() {
     public static bool TutorialSeen;
     public static void MarkTutorialSeen() { if (!TutorialSeen) { TutorialSeen = true; Save(); } }
 
+    // FUL-12: one-shot BRACE field-tip flag (same lifecycle as TutorialSeen — the callout fires
+    // once per profile, the first time a live fight makes the reaction verb relevant).
+    public static bool BraceTipSeen;
+    public static void MarkBraceTipSeen() { if (!BraceTipSeen) { BraceTipSeen = true; Save(); } }
+
     public static void Init(bool enabled)
     {
         Enabled = enabled;
@@ -431,6 +436,7 @@ void main() {
         public bool TutorialSeen { get; set; }
         public bool PostFX { get; set; } = true;
         public bool AutoCam { get; set; }
+        public bool BraceTipSeen { get; set; }   // FUL-12 (JSON field: absent in old files = false, back-compat)
     }
     static string Dir => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Sightline");
@@ -438,7 +444,7 @@ void main() {
 
     static void Save()
     {
-        try { Directory.CreateDirectory(Dir); File.WriteAllText(FilePath, JsonSerializer.Serialize(new Dto { Fullscreen = Fullscreen, SizeIdx = SizeIdx, BrightIdx = BrightIdx, GammaIdx = GammaIdx, Colorblind = Pal.Colorblind, TutorialSeen = TutorialSeen, PostFX = PostFX, AutoCam = AutoCam })); }
+        try { Directory.CreateDirectory(Dir); File.WriteAllText(FilePath, JsonSerializer.Serialize(new Dto { Fullscreen = Fullscreen, SizeIdx = SizeIdx, BrightIdx = BrightIdx, GammaIdx = GammaIdx, Colorblind = Pal.Colorblind, TutorialSeen = TutorialSeen, PostFX = PostFX, AutoCam = AutoCam, BraceTipSeen = BraceTipSeen })); }
         catch { }
     }
 
@@ -458,6 +464,7 @@ void main() {
                 TutorialSeen = d.TutorialSeen;
                 PostFX = d.PostFX;
                 AutoCam = d.AutoCam;
+                BraceTipSeen = d.BraceTipSeen;
             }
         }
         catch { }
