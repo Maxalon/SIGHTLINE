@@ -4623,15 +4623,19 @@ public partial class Game
     /// (see MakeWaveHostile's doc — hardening turtle punishment would widen the policy gap).
     void SpawnDefendWave()
     {
-        // FUL-4: first wave graced to t3 — t1 dropped a rich wave on a squad that had ZERO
-        // player turns to set a line (the opener already spawns engaged screens). Waves then
-        // keep the odd-turn cadence (t3, t5, t7).
-        if (_turnCount < 3 || _turnCount % 2 == 0 || _turnCount >= DefendTurns) return;
+        if (!DefendWaveTurn(_turnCount)) return;
         // FUL-4: wave size 1+m/2 (was 2+m/2) — with three waves landing per mission the old +1
         // body per wave compounded to +3 per mission over the whole timer. podded: each wave is
         // a real morale pod (focus-firing a wave down routs its survivors, like any pod).
         SpawnReinforcements(1 + _run.Mission / 2, 12, "WAVE", rich: true, podded: true);
     }
+
+    /// FUL-4: the DEFEND wave schedule — ONE shared read for the spawner and the start-of-turn
+    /// telegraph (the W8 never-lies pattern). Waves land at the END of odd player turns from t3
+    /// (first wave graced past t1 — a rich wave on a squad with ZERO player turns to set a line
+    /// was a coin-flip opener), never on the timer's final turn.
+    bool DefendWaveTurn(int turn) =>
+        Objective == Objective.Defend && turn >= 3 && turn % 2 == 1 && turn < DefendTurns;
 
     /// Shared reinforcement spawner: drops up to `want` active wave-hostiles in from the right
     /// board edge (already engaged), honoring a live-enemy `cap`. Used by both the DEFEND objective
@@ -4810,6 +4814,19 @@ public partial class Game
         ItemMode = false;
         ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false; DragMode = false; VaultMode = false;
         ShowBanner("PLAYER TURN", false);
+        MaybeWaveTelegraph();
+    }
+
+    /// FUL-4: DEFEND wave-edge telegraph, ONE PLAYER TURN ahead of the wave acting — this turn
+    /// ENDS with reinforcements at the east edge (DefendWaveTurn is the spawner's own schedule
+    /// read, so the warning can never lie about timing). Deliberately overrides the PLAYER TURN
+    /// banner in the W8 lane: the higher-stakes information wins the single banner slot.
+    /// Shared by BeginPlayerTurn and the SIGHTLINE_WAVEBANNER shot hook (same real path).
+    void MaybeWaveTelegraph()
+    {
+        if (!DefendWaveTurn(_turnCount)) return;
+        ShowBanner("WAVE INBOUND - EAST EDGE", true);
+        BannerSub = "reinforcements land when this turn ends";
     }
 
     /// ESCORT VIP LEASH: at the start of each player turn the fragile asset TAGS ALONG with the squad

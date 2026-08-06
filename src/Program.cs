@@ -448,6 +448,7 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CONTENT") == "1") Mission.DebugContentShowcase(game);
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_ALERT") == "1") game.DebugAlertTiers();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_PRESSURE") == "1") game.DebugPressure();
+        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_WAVEBANNER") == "1") game.DebugWaveTelegraph();   // FUL-4: pair with SIGHTLINE_OBJ=defend
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CONCEAL") == "1") game.DebugConcealment();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_INTENT") == "1") game.DebugIntent();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_SIEGE") == "1") game.DebugSiege();
