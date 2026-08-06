@@ -4616,7 +4616,10 @@ public partial class Game
     /// (see MakeWaveHostile's doc — hardening turtle punishment would widen the policy gap).
     void SpawnDefendWave()
     {
-        if (_turnCount % 2 == 0 || _turnCount >= DefendTurns) return;  // waves on odd turns, not the last
+        // FUL-4: first wave graced to t3 — t1 dropped a rich wave on a squad that had ZERO
+        // player turns to set a line (the opener already spawns engaged screens). Waves then
+        // keep the odd-turn cadence (t3, t5, t7).
+        if (_turnCount < 3 || _turnCount % 2 == 0 || _turnCount >= DefendTurns) return;
         SpawnReinforcements(2 + _run.Mission / 2, 12, "WAVE", rich: true);
     }
 
