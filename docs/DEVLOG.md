@@ -1526,6 +1526,20 @@ container suspensions (Jul 6→13→21→22→Aug 6) wiped every scratchpad copy
   (sealed diagonal corners block at range, both directions; point-blank keeps true-corner=cover;
   +6 COMBATTEST legs); Pinned comment truth. Verified: Release 0/0, 5 suites incl. new legs,
   INTRO-STASH, autoplay x5.
+- **FUL-12 SIGNPOSTS** (wt-ful12): the game now points at its own systems. End card gained the
+  meta payoff (SALVAGE slab, HEAT UNLOCKED line, achievement roll) via new Game fields set in the
+  award path — no Report parsing, all-dark under NoPersist so harness cards are unchanged;
+  tutorial gained a concealment/AMBUSH step 0 and a FIELD MANUAL pointer (TutStep* constants keep
+  the reached-FIRE gates semantic), plus a once-per-profile BRACE field tip; hovers now answer
+  everywhere they didn't — every top-bar pill (turn/concealed/heat/pressure/cache) cards, and a
+  dormant/no-odds enemy hover draws an ID card with an honest alert-state line; the tutorial bar
+  dims to the lesson verb (min-composed with FUL-3's occlusion dim); RECOMMENDED draft ranks all
+  16 boons (was 6 + arbitrary fallback at 21.4%); campaign legend names S/START + */BATTLE; class
+  glyphs lead Hall of Fame + end-card squad/KIA rows; WAR ROOM panels size to content. New
+  harness seams: SIGHTLINE_IDHOVER, SIGHTLINE_BRACETIP, SIGHTLINE_HOVERHUD +5 ids, SUMMARY
+  stages the meta fields. Verified: Release 0/0, DRAFTTEST/SAVETEST/CODEXTEST/MODETEST, autoplay
+  x2, 12-shot staged sweep (win/lose cards, tutorial step 0, ID card, war room, campaign legend,
+  5 pill hovers, brace tip).
 
 ## Measured (FUL-2 LOS budget A/B — CRN slots, h0, N=10/leg, pre=16e24e9 vs post)
 | metric | pre | post | verdict |

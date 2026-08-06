@@ -797,16 +797,20 @@ of record (container suspensions have wiped every scratchpad copy — docs are t
       CUSTODIAN/MEDIC retinue (cost-neutral, replaces cascade fill; W6 heat-gate for any EXTRA
       body). Per-kit reference 89/82/85, weakest (Wardens) 73 → all kits 78-88, pooled ±4 of 82.
       Lands before FUL-13's baseline.
-- [ ] **FUL-12 SIGNPOSTS** (P12, L). Run-end card SALVAGE/HEAT-UNLOCKED/ACHIEVEMENT slabs (new
-      Game fields from AwardMetaRunEnd/UnlockHeatOnWin — no Report parsing, NoPersist-gated);
-      tutorial concealment/AMBUSH step + FIELD MANUAL pointer + one-shot BRACE callout (careful
-      around TutStep>=2 gates at Game.cs:1586/:1730); dormant-enemy ID tooltip (DrawTooltip bails
-      at Hud.cs:1391 on !ShowOdds — draw ID-only card + alert-state line); top-bar pill hovers
-      (CONCEALED/PRESSURE/HEAT/CACHE rects → DrawHudHovers); tutorial bar hierarchy (lesson verb
-      bright, rest ~45%, composes with FUL-3's per-button dim); RECOMMENDED draft full 16-boon
-      ranked order (21.4% arbitrary-fallback measured); campaign legend + ('*','BATTLE')
-      ('S','START'); DrawCodexGlyph into Hall of Fame + end-card squad/KIA rows; WAR ROOM panels
-      sized to content. (LOCK-ON/NO QUARTER copy already done in FUL-3.)
+- [x] **FUL-12 SIGNPOSTS** (wt-ful12). All nine sub-items shipped: run-end card SALVAGE slab +
+      HEAT-UNLOCKED line + achievement roll via new Game fields (EndSalvage/EndHeatUnlocked/
+      EndAchievements set in AwardMetaRunEnd/UnlockHeatOnWin/TryAchievement — no Report parsing,
+      dark under NoPersist; SIGHTLINE_SUMMARY stages them); tutorial gained a concealment/AMBUSH
+      step 0 + FIELD MANUAL pointer in the wrap-up (named TutStep* constants keep the FIRE-lesson
+      completion gates semantic across the renumber); one-shot BRACE field tip (Display.
+      BraceTipSeen, never overlaps a lesson card, SIGHTLINE_BRACETIP stages); dormant-enemy hover
+      ID card + alert-state line (DrawTooltip no-odds path, SIGHTLINE_IDHOVER); top-bar pill
+      hovers — turn/CONCEALED/HEAT/PRESSURE/CACHE all card on hover (SIGHTLINE_HOVERHUD grew the
+      ids); tutorial bar hierarchy (lesson verb bright, rest 0.45, min-composed with FUL-3's
+      per-button dim); RECOMMENDED draft ranks the full 16-boon pool (arbitrary fallback now an
+      unreachable guard); campaign legend names S/START + */BATTLE; DrawCodexGlyph into Hall of
+      Fame + end-card squad/KIA rows; WAR ROOM panels sized to content. (LOCK-ON/NO QUARTER copy
+      was already done in FUL-3.)
 - [ ] **FUL-5 HANDS** (P5, M — after FUL-1 merges). The EV bot learns the verbs: widen DoBrace
       (~Game.Autopilot.cs:1380) / PATCH (~:1037) gates (brace vs inbound rusher pods when no
       >=60% kill shot; PATCH range<=2 missing>=3; grenade 2-clusters in cover; smoke/medkit on
