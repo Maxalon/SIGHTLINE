@@ -157,6 +157,19 @@ public partial class Game
             if (nearest && dCache <= 8f && TryMoveTowardTile(u, CacheX, CacheY)) return;
         }
 
+        // ── FUL-5: the corpsman's PATCH is OBJECTIVE-AGNOSTIC ──────────────────────────
+        // Every objective routine returns before SmartCombatStep for most soldiers, so the heal
+        // (step 1 there) was structurally dead on 5 of 8 objectives — PATCH measured ~1 use per
+        // ~500 missions with corpsmen demonstrably fielded. A 1-action patch of a genuinely-hurt
+        // squadmate en route is good play on ANY objective (they're about to eat the pods the
+        // march wakes), and the ≤2-tile approach detour is bounded + Cd-gated. Corpsman-only,
+        // fast exit for everyone else.
+        if (u.Ability == AbilityKind.Heal)
+        {
+            if (PrepAbility(u)) return;        // adjacent ally missing >=3 -> heal it now
+            if (TryMoveToPatch(u)) return;     // hurt ally at Cheby 2 -> step adjacent for next pass
+        }
+
         // ── OBJECTIVE ROUTING (preserved from AutoStep, with smart combat layered in) ──
         switch (Objective)
         {
@@ -749,7 +762,19 @@ public partial class Game
         //      vs a rushed 2nd shot. Ducks to cover ONLY when clearly better (never skips a finisher).
         //      SLOPPY (W2): ~10% forget to duck after firing — the soldier stays EXPOSED BY FIRE
         //      through the enemy turn (the classic post-shot positional error).
-        if (u.FiredThisTurn && !u.MovedAfterFire && u.ActionsLeft > 0 && !Slip(10) && SmartRetreatAfterShot(u)) return;
+        //      FUL-5: NOT when a brace-worthy charger is inbound — cover doesn't stop a committed
+        //      charger (it closes to point-blank and flanks past it), the stagger does. Skipping
+        //      the duck lets the cascade fall through: 2nd shot if decent (step 2), else BRACE
+        //      (5a) — the shoot-then-brace turn the R2 reading showed greedy could never reach.
+        if (u.FiredThisTurn && !u.MovedAfterFire && u.ActionsLeft > 0 && !Slip(10)
+            && !RusherBraceWorthy(u) && SmartRetreatAfterShot(u)) return;
+
+        // 2a — FUL-5 grenade-first: a 2+ CLUSTER of covered foes beats the gun — the frag deals
+        //      ~2x its damage, ignores the cover that is blunting our shots, AND strips it for
+        //      the squad's follow-up. Only pre-empts the gun when no likely kill is on the table
+        //      (HasStrongShot) and only for covered clusters (SmartGrenade's preShot gate) — an
+        //      exposed cluster still gets shot at first (bullets are free, grenades aren't).
+        if (u.Grenades > 0 && !HasStrongShot(u) && SmartGrenade(u, preShot: true)) return;
 
         // 2 — best shot by expected value (only when it's actually worth firing). SLOPPY: ~15%
         //     of the time mis-judge and skip an otherwise-good shot (a human hesitation) — falls
@@ -773,6 +798,22 @@ public partial class Game
         //      under the greedy bot's spacing — soldiers cluster at Chebyshev-1, which is non-draggable —
         //      so DRAG is primarily a player tool; this keeps the autopilot path covered when it does align.)
         if (TryRescueDrag(u)) return;
+
+        // 4c — FUL-5 move-to-PATCH: PrepAbility only heals ADJACENT allies, and the greedy bot's
+        //      spread means the corpsman almost never happens to stand beside the hurt soldier —
+        //      PATCH measured ~1 use per ~500 missions. Close the last step deliberately: with the
+        //      kit off cooldown and a genuinely-hurt ally within Cheby 2, step adjacent NOW so the
+        //      next pass (or next turn's step 1) lands the heal. A real move — never a stall.
+        if (TryMoveToPatch(u)) return;
+
+        // 5a — FUL-5: BRACE vs an inbound charger, decided BEFORE the approach. Reaching this
+        //      step means no worthwhile shot exists from this tile (TakeBestShot declined), and
+        //      the R1 reading proved HoldOverwatch below is unreachable in open combat —
+        //      SmartApproach almost always issues a move first. Advancing INTO a committed
+        //      charger wastes that move (it is coming to us either way): hold the disrupting
+        //      reaction instead — a landed stagger denies the charger's post-move swing, and
+        //      next turn we shoot it point-blank. Sloppy mirrors the forgotten-reaction slip.
+        if (!Slip(15) && TryBraceRushers(u)) return;
 
         // 5 — no shot available this turn: maneuver toward a covered firing position on the
         //     nearest foe (cover + flank − exposure). If we're already well-placed and a foe
@@ -1036,10 +1077,11 @@ public partial class Game
         {
             case AbilityKind.Heal:
             {
-                // only patch when an adjacent ally is genuinely hurt (>=4 missing HP, so the
-                // +PatchHeal isn't wasted) — MostWoundedAdjacentAlly already gates on Hp<MaxHp.
+                // FUL-5: patch when an adjacent ally is genuinely hurt (missing >=3 — was >=4,
+                // which wasted the corpsman's whole kit on the 4-6 maxHP roster where "missing 4"
+                // is often one hit from dead) — MostWoundedAdjacentAlly already gates on Hp<MaxHp.
                 var ally = MostWoundedAdjacentAlly(u);
-                if (ally != null && ally.MaxHp - ally.Hp >= 4) { DoAbility(); return true; }
+                if (ally != null && ally.MaxHp - ally.Hp >= 3) { DoAbility(); return true; }
                 return false;
             }
             case AbilityKind.Steady:
@@ -1131,11 +1173,49 @@ public partial class Game
         return false;
     }
 
+    /// FUL-5 — the PATCH approach step: if this soldier is a corpsman with the kit ready and a
+    /// non-VIP ally missing >=3 HP sits within Chebyshev 2 (but NOT already adjacent — that case
+    /// is PrepAbility's), move onto the cheapest reachable tile adjacent to that ally. The heal
+    /// itself fires on a later pass via PrepAbility (adjacency then holds). Cd-gated so the
+    /// corpsman never shadows a soldier it can't actually treat yet. Returns true iff it moved.
+    bool TryMoveToPatch(Unit u)
+    {
+        if (u.Ability != AbilityKind.Heal || u.AbilityCd > 0 || u.ActionsLeft <= 0 || MoveCost == null)
+            return false;
+        Unit tgt = null; float worst = 1f;
+        foreach (var a in AlivePlayers())
+        {
+            if (a == u || a.IsVip || a.MaxHp <= 0 || a.MaxHp - a.Hp < 3) continue;
+            int d = Util.ChebyDist(u.X, u.Y, a.X, a.Y);
+            if (d != 2) continue;                       // adjacent = heal now (PrepAbility); farther = not our call
+            float frac = (float)a.Hp / a.MaxHp;
+            if (tgt == null || frac < worst) { tgt = a; worst = frac; }
+        }
+        if (tgt == null) return false;
+        int bx = -1, by = -1, bestC = int.MaxValue;
+        for (int dx = -1; dx <= 1; dx++)
+            for (int dy = -1; dy <= 1; dy++)
+            {
+                if (dx == 0 && dy == 0) continue;
+                int nx = tgt.X + dx, ny = tgt.Y + dy;
+                if (!Grid.InBounds(nx, ny) || !Grid.IsFloor(nx, ny) || IsOccupiedByOther(nx, ny, u)) continue;
+                int c = MoveCost[nx, ny];
+                if (c <= 0 || c > u.MoveBudget * u.ActionsLeft) continue;   // must be affordable this turn
+                if (c < bestC) { bestC = c; bx = nx; by = ny; }
+            }
+        if (bx < 0) return false;
+        IssueMove(bx, by);
+        return true;
+    }
+
     /// Grenade decision: lob at the cluster of enemies that catches the most foes (≥2),
     /// or flush a single well-covered/high-priority target our gun can't crack.
     /// Never catches an ally. Mirrors the enemy grenade AI's fairness (LoS-gated by CanGrenade
     /// through IssueGrenade's range check + our own LoS test). Returns true if it threw.
-    bool SmartGrenade(Unit u)
+    /// FUL-5 `preShot`: the step-2a call, BEFORE the gun — accepts ONLY a covered 2+ cluster
+    /// (the case where the frag strictly beats shooting); the post-shot call keeps the wider
+    /// single-target acceptances.
+    bool SmartGrenade(Unit u, bool preShot = false)
     {
         if (u.Grenades <= 0) return false;
         int bx = -1, by = -1, bestHits = 0; bool bestCovered = false; float bestPrio = 0f;
@@ -1149,10 +1229,12 @@ public partial class Game
             var odds = SmartOdds(u, u.X, u.Y, e);
             bool covered = odds.CoverLevel >= 1 || odds.HitChance < 45;
             float prio = PriorityWeight(e);
+            if (preShot && (hits < 2 || !covered)) continue;        // FUL-5: pre-shot wants covered clusters only
             if (hits > bestHits || (hits == bestHits && prio > bestPrio))
             { bestHits = hits; bx = e.X; by = e.Y; bestCovered = covered; bestPrio = prio; }
         }
         if (bx < 0) return false;
+        if (preShot) { IssueGrenade(bx, by); return true; }         // candidates were pre-filtered above
         // throw when it catches 2+, OR a single target that's well-covered or high-priority
         // (a frag ignores cover) — i.e. when the grenade beats what our gun would do.
         if (bestHits >= 2 || (bestHits == 1 && (bestCovered || bestPrio >= 20f)))
@@ -1374,6 +1456,31 @@ public partial class Game
     /// is FOR: they close to point-blank and swing, so a stagger denies a whole attack.
     static bool IsRusherCls(string c)
         => c == "BERSERKER" || c == "HOUND" || c == "STRIKER" || c == "BRUISER";
+
+    /// FUL-5 — the combat-brain brace probe (step 5a). True iff an ACTIVE committed charger is
+    /// close enough to reach this soldier on the coming enemy turn (Mobility + 2: one move plus
+    /// the point-blank swing) AND a lethal reaction couldn't remove it (too durable for one
+    /// reaction shot — BERSERKER 12 / BRUISER 9 vs player DmgMax 4-7 — or a 2+ pack where one
+    /// kill doesn't stop the charge). Then the stagger's action-denial beats both the approach
+    /// (walking into the charge) and the lethal watch (a chip that doesn't stop the swing).
+    /// FUL-5 — the condition HALF of the brace probe, callable as a pure test (the step-1b duck
+    /// veto needs it without issuing). See TryBraceRushers for the rationale.
+    bool RusherBraceWorthy(Unit u)
+    {
+        if (u.Ammo <= 0 || u.ActionsLeft <= 0 || u.HasStatus(StatusKind.Disoriented)) return false;
+        var inbound = Enemies.Where(e => e.Alive && e.Active && IsRusherCls(e.Cls)
+            && Util.TileDist(u.X, u.Y, e.X, e.Y) <= e.Mobility + 2).ToList();
+        if (inbound.Count == 0) return false;
+        return inbound.Count >= 2 || inbound.Any(e => e.Hp > u.Weapon.DmgMax);
+    }
+
+    bool TryBraceRushers(Unit u)
+    {
+        if (!RusherBraceWorthy(u)) return false;
+        Selected = u;   // DoBrace acts on Selected (set defensively, TrySmartItem precedent)
+        DoBrace();
+        return true;
+    }
 
     bool HoldOverwatch(Unit u)
     {
