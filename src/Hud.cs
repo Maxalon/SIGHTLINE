@@ -3203,14 +3203,11 @@ public static class Hud
                                         Contract.Spearhead, Contract.MercenaryClause, Contract.LivingLegends };
         int cn = conCards.Length, cgap = 12;
         int ccw = Math.Min(222, (W - 48 - (cn - 1) * cgap) / cn);
-        int descLines = 1;
+        int descBottom = 47;   // one-line floor (desc top 30 + line height 17)
         foreach (var c0 in conCards)
-        {
-            int lc = 0;
-            foreach (var _ in WrapLines(ContractDef.Desc(c0), ccw - 22, 11, 0)) lc++;
-            descLines = Math.Max(descLines, lc);
-        }
-        int cch = 34 + descLines * 13;
+            foreach (var (_, dy0) in WrapLines(ContractDef.Desc(c0), ccw - 22, 11, 0))
+                descBottom = Math.Max(descBottom, 30 + dy0 + 17);   // WrapLines' lh = size + 6
+        int cch = descBottom + 4;
         int ctotal = cn * ccw + (cn - 1) * cgap;
         int cx0 = W / 2 - ctotal / 2;
         int cy = conY + 22;
