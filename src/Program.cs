@@ -20,6 +20,45 @@ public static class Program
             Util.Reseed(seedPin);
         // SIGHTLINE_SMARTPLAY=1 : like AUTOPLAY, but routes the autopilot through the
         // competent SmartStep() so a single headless game is played to win (balance gauge).
+        // W4 THE SECOND AXIS — deployment-geometry measurement pins (no effect unset).
+        //   SIGHTLINE_DEPLOY=frontal|pincer|crossfire|envelop|<0-3> : pin ONE opening shape.
+        //   SIGHTLINE_DEPLOYMIX=a,b,c,d                             : set the shipped weight mix.
+        // Both are pure statics on Mission read at Build time; the shape itself is derived from
+        // (MapSeed, mission) with zero RNG draws, so CRN pairing survives either pin.
+        {
+            string dep = Environment.GetEnvironmentVariable("SIGHTLINE_DEPLOY");
+            if (!string.IsNullOrEmpty(dep))
+                Mission.ForcedDeploy = dep.Trim().ToLowerInvariant() switch
+                {
+                    "frontal" => Mission.DeployFrontal,
+                    "pincer" => Mission.DeployPincer,
+                    "crossfire" => Mission.DeployCrossfire,
+                    "envelop" => Mission.DeployEnvelop,
+                    _ => int.TryParse(dep, out int dv) && dv >= 0 ? dv : -1,
+                };
+            string mix = Environment.GetEnvironmentVariable("SIGHTLINE_DEPLOYMIX");
+            if (!string.IsNullOrEmpty(mix))
+            {
+                var parts = mix.Split(',');
+                var w = new int[Mission.DeployShapes];
+                for (int i = 0; i < w.Length && i < parts.Length; i++) int.TryParse(parts[i].Trim(), out w[i]);
+                Mission.DeployMix = w;
+            }
+        }
+
+        // W4 — SIGHTLINE_PODMASS=<n>: enemy formation mass (3 = the FUL-6 pods-of-3 plan).
+        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_PODMASS"), out int pm) && pm >= 2)
+            Mission.PodMass = pm;
+        // W4 — SIGHTLINE_PODUNIFORM=1: a pod fields one kind of body (comparable targets).
+        string uni = Environment.GetEnvironmentVariable("SIGHTLINE_PODUNIFORM");
+        if (uni == "1") Mission.PodUniform = true; else if (uni == "0") Mission.PodUniform = false;
+        // W4 — SIGHTLINE_RIMWAVES=1: under an ENVELOP opening, rotate the rim reinforcement
+        // waves arrive from (a surrounded hold that keeps being surrounded).
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_RIMWAVES") == "1") Mission.EnvelopRimWaves = true;
+        // W4 — SIGHTLINE_ESCORTFIX=0 restores the pre-fix SmartEscort lone-VIP test (a DOWNED
+        // soldier counted as still standing) so the instrument fix has a paired measurement.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_ESCORTFIX") == "0") Game.EscortDownedFix = false;
+
         bool smartplay = Environment.GetEnvironmentVariable("SIGHTLINE_SMARTPLAY") == "1";
         bool autoplay = Environment.GetEnvironmentVariable("SIGHTLINE_AUTOPLAY") == "1" || smartplay;
 

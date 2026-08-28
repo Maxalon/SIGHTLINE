@@ -340,6 +340,25 @@ funnel, so a trade takes roughly two hits instead of one. Its raw chunk logs liv
 > re-measured 65% vs heat 0 45% here, same +20), but **no post-merge ladder re-baseline exists
 > yet.** Treat every rung number above as unverified-on-this-tree until one is run. This note
 > exists because the paragraph below is otherwise exactly the over-claim it warns about.
+>
+> **UPDATE — W4 MEASURED IT, and it is worse than the caveat implied.** W4's fresh baseline on
+> the composed tip, before any of its own levers, reads **h0 32.5% / h4 12.5%** against the
+> documented band of 55±8 / 30±8. **The merged tree had already drifted 20+ points below the
+> published band** purely from stacking waves that were each measured in isolation and each
+> held their own base's ladder. W4's shipped levers moved it back toward the band (35.0 / 20.0)
+> but did not close it. **A post-merge ladder re-baseline and a correction pass is the single
+> biggest open item in the project.** Do not quote 52.5/35/30/22.5/10 as this tree's ladder.
+
+RESONANCE **W4 "THE SECOND AXIS"** then made the OPENING GEOMETRY a variable: four deployment
+shapes (FRONTAL / PINCER / CROSSFIRE / **ENVELOP**, a centre-deploy surrounded opening gated to
+Eliminate/Decapitate/Defend) dealt per mission from `(MapSeed, mission)` with **zero extra RNG
+draws**, plus uniform pods. It **missed** its decision-density gates and says why with new
+instrumentation: `choices/ARMED-soldier-turn` is a **near-invariant at ~1.6** across five
+structurally different levers, because `CountMeaningfulChoices`' two halves ("which target?" and
+"where do I stand after?") respond to threat with **opposite signs** — chase it with a
+positioning lever at constant threat, never another threat lever (DEVLOG §W4). It also
+re-measured the ladder and found it **20+ points BELOW the FUL-13 band at h0 and h4 before any
+lever** (32.5% / 12.5% vs 55±8 / 30±8) — the biggest open number in the project.
 
 **Three doc over-claims were found and corrected** — they are the reason this project needs the
 "no over-claims" rule enforced hard: juice was graded "Strong" partly on audio nobody had heard;

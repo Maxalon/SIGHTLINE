@@ -621,3 +621,28 @@ seeds (mix of WIN/LOSE, no exceptions):
   (`src/Voice.cs`; `SIGHTLINE_VOICETEST` / `SIGHTLINE_VOICEDUMP` (read the copy as prose) /
   `SIGHTLINE_SHOTONBARK` / `SIGHTLINE_CODEXTAB=2`;
   `docs/DESIGN.md` §1.1 records the pillar amendment that authorises any of it.)
+
+## PROGRAM RESONANCE — WAVE W4 "THE SECOND AXIS" (the opening geometry becomes a variable)
+
+- **Four deployment SHAPES**, dealt per mission from `(MapSeed, mission)` with zero extra RNG
+  draws (`Mission.DeployFor`; `Mission.AppliedDeploy` is the telemetry stamp):
+  - **FRONTAL** — the historical opening: squad cols 0-3, the whole force on the east edge.
+  - **PINCER** — a front pair plus two flank pairs in the open rim lanes (cols 12-13,
+    rows 0-1 / 9-10). Contact comes from three bearings; the fastest of the four openings.
+  - **CROSSFIRE** — two dense masses on the NE and SE bearings with the middle rows empty.
+  - **ENVELOP** — the **surrounded opening**: the squad deploys at board CENTRE (cols 7-10)
+    and pods hold all four rims. Legal only on Eliminate, Decapitate and **Defend** (an
+    objective-gate that keeps every extraction / hack / sabotage route untouched).
+  Shipped mix 3/3/1/3; `SIGHTLINE_DEPLOYMIX=1,0,0,0` restores the pre-W4 all-FRONTAL board.
+- **Pods field one kind of body** (`Mission.PodUniform`) — members past the pod lead reuse the
+  lead's archetype roll. Three RAIDERS, not a trio of strangers; measured ladder-neutral.
+- **Protective cover faces the nearest threat** on the dominant axis, whatever bearing the
+  mission deployed on (reproduces the historical +1 / −1 column for a frontal opening), and
+  **barrels never spawn within two tiles of a soldier's deployment tile**.
+- **Decision-density instrumentation** — the `[choice-split]` report line and four JSON fields
+  break `meaningful-choices` into `los-targets` / `target-choices` / `position-choices` per
+  ARMED soldier-turn, and a `DEPLOYMENT GEOMETRY` block reports win / turns / density per
+  opening shape. `SIGHTLINE_EXPOSURETEST` now enumerates shape x arena x objective.
+- **Harness pins**: `SIGHTLINE_DEPLOY` (`frontal|pincer|crossfire|envelop`),
+  `SIGHTLINE_DEPLOYMIX`, `SIGHTLINE_PODUNIFORM`, `SIGHTLINE_PODMASS`, `SIGHTLINE_RIMWAVES`,
+  `SIGHTLINE_ESCORTFIX`.
