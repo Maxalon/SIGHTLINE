@@ -2627,7 +2627,12 @@ public partial class Game
     public void TickStatuses(Unit u)
     {
         if (!u.Alive || u.Statuses.Count == 0) return;
-        foreach (var s in u.Statuses)
+        // FUL-7: iterate a SNAPSHOT — a lethal DoT tick now routes into EnterDowned, which
+        // CLEARS the live Statuses list mid-enumeration (the old foreach threw). And a unit
+        // that just went DOWN stops ticking (its timers were cleared; the bleed-out clock owns
+        // it now) — without the break, a second status in the same pass would tick a fresh DoT
+        // into the downed body and kill it outright.
+        foreach (var s in u.Statuses.ToList())
         {
             if (s.Turns <= 0) continue;
             switch (s.Kind)
@@ -2641,7 +2646,7 @@ public partial class Game
                     break;
             }
             s.Turns--;
-            if (!u.Alive) break;          // a DoT can drop the unit mid-tick
+            if (!u.Alive || u.Downed) break;   // a DoT can drop the unit mid-tick (death or down)
         }
         u.Statuses.RemoveAll(s => s.Turns <= 0);
     }
