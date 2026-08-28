@@ -730,8 +730,10 @@ public static class Renderer
     // Everything numeric (best hit%, expected damage, which gun) lives in the HOVER CARD, not on
     // the board: 3.C/3.H forbid a field of numbers over the play surface. Detail on demand.
     //
-    // SIMPLE mode reproduces the pre-T2 read exactly (one tick on any tile where some gun sees
-    // you with no cover) for players who want the quiet board back.
+    // SIMPLE mode restores the pre-T2 minimal read (one tick on any tile where a gun has a clean
+    // shot) for players who want the quiet board back. Same glyph/alpha/pulse; the trigger now
+    // comes from ComputeOdds's CoverLevel, so unlike the old raw GetCover test it also respects
+    // high-ground see-over, the DRONE's cover-ignoring attack and SHIELD arcs.
     static void DrawThreat(Game g)
     {
         if (g.Selected == null || !g.IsPlayerInteractive() || g.AimMode || g.GrenadeMode) return;

@@ -1840,9 +1840,14 @@ public static class Hud
             if (c.Flanked)      lines.Add(("FLANKED — cover won't protect you here", Pal.Foe));
             else if (c.Exposed) lines.Add(("EXPOSED — at least one gun has a clean shot", Pal.Suspect));
             if (!string.IsNullOrEmpty(c.WorstCls))
-                lines.Add(($"worst gun: {Codex.NameFor(c.WorstCls)} — {c.WorstCls}", Pal.TxtDim));
+            {
+                string nm = Codex.NameFor(c.WorstCls);
+                lines.Add((nm == c.WorstCls ? $"worst gun: {c.WorstCls}" : $"worst gun: {nm} — {c.WorstCls}", Pal.TxtDim));
+            }
         }
-        if (c.Watched) lines.Add(("OVERWATCH LANE — entering draws a reaction", Pal.Suspect));
+        if (c.Watched)
+            lines.Add((here ? "OVERWATCH LANE — you are standing in a reaction lane"
+                            : "OVERWATCH LANE — entering draws a reaction", Pal.Suspect));
 
         const int pad = 11, lh = 16;
         int w = (int)Raylib.MeasureTextEx(Cfg.Font, title, 14, 1f).X;

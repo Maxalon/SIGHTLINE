@@ -35,7 +35,7 @@ public struct ThreatCell
     public sbyte BestHit;    // the best (highest) enemy hit% among those guns, 0 when none
     public float ExpDmg;     // expected incoming damage if every bearing gun fires once (post-armor)
     public bool Flanked;     // at least one bearing gun would have the mover FLANKED (cover negated)
-    public bool Exposed;     // at least one bearing gun sees the mover with NO cover at all (the old bool)
+    public bool Exposed;     // at least one bearing gun sees the mover with NO cover at all (the pre-T2 bool, now via ComputeOdds so see-over/DRONE/SHIELD count)
     public bool Watched;     // the tile sits inside a live enemy OVERWATCH / braced (PIKEMAN) reaction lane
     public string WorstCls;  // archetype of the gun with the best hit% (named on the hover card)
     /// Danger grade 0..3 — the pip count. 0 = clean, 3 = three or more guns bear.

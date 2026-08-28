@@ -2645,8 +2645,11 @@ telegraphed only ~0.5 s before the unit acted, during the enemy turn — drama, 
 * **Danger-tinted path preview.** The connecting line takes the WORST tier along the route (a safe
   destination reached through a crossfire is no longer free); each step node is drawn in ITS OWN
   tier and hot steps become the meter's triangle glyph, so the exact hot stretch reads without hue.
-* **Three-state pref.** The pause toggle now cycles OFF / SIMPLE / FULL. SIMPLE reproduces the
-  pre-T2 read exactly (one tick, pulse and all) for players who want the quiet board back.
+* **Three-state pref.** The pause toggle now cycles OFF / SIMPLE / FULL. SIMPLE restores the
+  pre-T2 minimal read for players who want the quiet board back: one small pulsing tick on any
+  tile where a gun has a clean shot, same glyph, same alpha, same pulse. Not bit-for-bit identical
+  to pre-T2 — the trigger is now `ComputeOdds`'s `CoverLevel == 0`, so it also respects high-ground
+  see-over, DRONE cover-ignoring and SHIELD arcs, which the old raw `GetCover` test missed.
 
 **Verification.** `dotnet build -c Release` 0/0. New `SIGHTLINE_THREATTEST=1` (10 assertion
 groups: gun count; BestHit/WorstCls/ExpDmg pinned against a hand-recomputed `ComputeOdds` pass;
