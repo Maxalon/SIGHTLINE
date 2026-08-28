@@ -14,7 +14,26 @@
     <PackageReference Include="Raylib-cs" Version="8.0.0" />
   </ItemGroup>
 
+  <!-- Trimmed publish (see scripts/publish.sh + docs/DISTRIBUTION.md). Persistence itself is
+       trim-proof by construction (source-generated JSON contexts in SaveGame/Display), but the
+       SIGHTLINE_BALANCE telemetry export serialises anonymous types reflectively, which full trim
+       would strip. Rooting our own assembly keeps that working; measured cost vs an unrooted trim
+       is ~0 MB because the framework, not the game, is what trimming actually removes. -->
+  <ItemGroup Condition="'$(PublishTrimmed)' == 'true'">
+    <TrimmerRootAssembly Include="Sightline" />
+  </ItemGroup>
+  <PropertyGroup Condition="'$(PublishTrimmed)' == 'true'">
+    <!-- Trimming turns System.Text.Json's reflection fallback OFF by default; the telemetry
+         export above needs it (it serialises anonymous types, which no source generator can see).
+         Re-enabling it is only safe BECAUSE TrimmerRootAssembly keeps our metadata. -->
+    <JsonSerializerIsReflectionEnabledByDefault>true</JsonSerializerIsReflectionEnabledByDefault>
+  </PropertyGroup>
+
   <ItemGroup>
+    <!-- Licence compliance: raylib + Raylib-cs (Zlib) and the .NET runtime (MIT) all require
+         their notice be retained in distributions. Copied to the build/publish output so it
+         travels with the binary. -->
+    <None Include="THIRD-PARTY-NOTICES.txt" CopyToOutputDirectory="PreserveNewest" />
     <None Include="assets/NotoMono-Regular.ttf" CopyToOutputDirectory="PreserveNewest" />
     <None Include="assets/NotoMono-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" />
     <!-- HORIZON W7 — ship any dropped-in CC0 audio so the file-first/synth-fallback loader can

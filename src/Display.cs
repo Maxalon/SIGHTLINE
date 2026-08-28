@@ -17,7 +17,7 @@ namespace Sightline;
 /// (headless harness), so plain SIGHTLINE_SHOT screenshots remain byte-identical.
 /// Enable for verification with SIGHTLINE_POSTFX=1 (forces Display.Init(true) even
 /// during shot mode and sets a strong demo bloom so the effect is clearly visible).
-public static class Display
+public static partial class Display
 {
     public static bool Enabled;
     static RenderTexture2D _target;
@@ -426,7 +426,7 @@ void main() {
     }
 
     // ---- persistence (alongside the save file, not in the repo) ----
-    class Dto
+    internal class Dto
     {
         public bool Fullscreen { get; set; }
         public int SizeIdx { get; set; }
@@ -438,13 +438,19 @@ void main() {
         public bool AutoCam { get; set; }
         public bool BraceTipSeen { get; set; }   // FUL-12 (JSON field: absent in old files = false, back-compat)
     }
+    // Source-generated serializer (see SaveGame.SaveJson for the why): reflection-based
+    // System.Text.Json loses its type metadata under `-p:PublishTrimmed=true`, which silently
+    // breaks settings persistence in a trimmed distributable.
+    [System.Text.Json.Serialization.JsonSerializable(typeof(Dto))]
+    internal partial class DisplayJson : System.Text.Json.Serialization.JsonSerializerContext { }
+
     static string Dir => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Sightline");
     static string FilePath => Path.Combine(Dir, "display.json");
 
     static void Save()
     {
-        try { Directory.CreateDirectory(Dir); File.WriteAllText(FilePath, JsonSerializer.Serialize(new Dto { Fullscreen = Fullscreen, SizeIdx = SizeIdx, BrightIdx = BrightIdx, GammaIdx = GammaIdx, Colorblind = Pal.Colorblind, TutorialSeen = TutorialSeen, PostFX = PostFX, AutoCam = AutoCam, BraceTipSeen = BraceTipSeen })); }
+        try { Directory.CreateDirectory(Dir); File.WriteAllText(FilePath, JsonSerializer.Serialize(new Dto { Fullscreen = Fullscreen, SizeIdx = SizeIdx, BrightIdx = BrightIdx, GammaIdx = GammaIdx, Colorblind = Pal.Colorblind, TutorialSeen = TutorialSeen, PostFX = PostFX, AutoCam = AutoCam, BraceTipSeen = BraceTipSeen }, DisplayJson.Default.Dto)); }
         catch { }
     }
 
@@ -453,7 +459,7 @@ void main() {
         try
         {
             if (!File.Exists(FilePath)) return;
-            var d = JsonSerializer.Deserialize<Dto>(File.ReadAllText(FilePath));
+            var d = JsonSerializer.Deserialize(File.ReadAllText(FilePath), DisplayJson.Default.Dto);
             if (d != null)
             {
                 Fullscreen = d.Fullscreen;

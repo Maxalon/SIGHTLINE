@@ -406,7 +406,7 @@ public static class Program
                 0x00D7, // multiply sign
                 0x00B7, // middle dot
             };
-            Font loaded = Raylib.LoadFontEx("assets/NotoMono-Regular.ttf", 64, codepoints, codepoints.Length);
+            Font loaded = Raylib.LoadFontEx(Util.Asset("assets/NotoMono-Regular.ttf"), 64, codepoints, codepoints.Length);
             if (loaded.Texture.Id != 0)
             {
                 Raylib.SetTextureFilter(loaded.Texture, TextureFilter.Bilinear);

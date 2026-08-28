@@ -11,7 +11,7 @@ namespace Sightline;
 /// reloads it and resumes that mission from its start. The save is deleted when a
 /// run ends (win or wipe). Compact DTOs keep only persistent fields; transient
 /// per-mission state (ammo/grenades/ability/position) is rebuilt by Mission.Build.
-public static class SaveGame
+public static partial class SaveGame
 {
     // SpecialFolder.ApplicationData resolves to $XDG_CONFIG_HOME (when set AND the directory
     // already exists) else $HOME/.config on Linux -- so the real save dir is
@@ -45,11 +45,17 @@ public static class SaveGame
     /// still need no bump: they default inert on their own.
     public const int CurrentSchema = 1;
 
-    static readonly JsonSerializerOptions Opts = new()
-    {
-        IncludeFields = true,
-        WriteIndented = true,
-    };
+    // Serialization goes through a SOURCE-GENERATED context, not reflection. Reflection-based
+    // System.Text.Json needs type metadata that `dotnet publish -p:PublishTrimmed=true` strips:
+    // the game booted, played and finished a whole campaign on a trimmed build while silently
+    // losing every save and the entire cross-run meta profile (measured -- SAVETEST and METATEST
+    // both failed against the trimmed binary). The generator emits the (de)serializers at compile
+    // time, so the trimmer can see them and a trimmed build persists correctly. Keep every new DTO
+    // reachable from one of the [JsonSerializable] roots below.
+    [System.Text.Json.Serialization.JsonSourceGenerationOptions(IncludeFields = true, WriteIndented = true)]
+    [System.Text.Json.Serialization.JsonSerializable(typeof(RunDto))]
+    [System.Text.Json.Serialization.JsonSerializable(typeof(MetaDto))]
+    internal partial class SaveJson : System.Text.Json.Serialization.JsonSerializerContext { }
 
     // D2: the intro polls Exists EVERY FRAME (Hud draws CONTINUE off it), so it cannot re-parse
     // save.json each time -- memoise the verdict against the file's (write-time, length) so an
@@ -103,7 +109,7 @@ public static class SaveGame
             // torn write mid-save can never leave a half-written save.json behind.
             Directory.CreateDirectory(Dir);
             string tmp = FilePath + ".tmp";
-            File.WriteAllText(tmp, JsonSerializer.Serialize(ToDto(run), Opts));
+            File.WriteAllText(tmp, JsonSerializer.Serialize(ToDto(run), SaveJson.Default.RunDto));
             File.Move(tmp, FilePath, overwrite: true);
             InvalidateExistsCache();
         }
@@ -118,7 +124,7 @@ public static class SaveGame
         try
         {
             if (!File.Exists(FilePath)) return null;
-            var dto = JsonSerializer.Deserialize<RunDto>(File.ReadAllText(FilePath), Opts);
+            var dto = JsonSerializer.Deserialize(File.ReadAllText(FilePath), SaveJson.Default.RunDto);
             // D2: "parses fine but is unusable" is corruption too. `null`, `{}`, or a save whose
             // Squad key was renamed/emptied deserializes WITHOUT throwing, so this used to return
             // null and leave the file in place -- Game.ContinueRun refused it (empty squad) while
@@ -158,7 +164,7 @@ public static class SaveGame
 
     static MetaDto LoadMetaDto()
     {
-        try { if (File.Exists(MetaPath)) return JsonSerializer.Deserialize<MetaDto>(File.ReadAllText(MetaPath), Opts) ?? new MetaDto(); }
+        try { if (File.Exists(MetaPath)) return JsonSerializer.Deserialize(File.ReadAllText(MetaPath), SaveJson.Default.MetaDto) ?? new MetaDto(); }
         catch
         {
             // Never destroy evidence: an unreadable meta.json used to yield a fresh
@@ -189,7 +195,7 @@ public static class SaveGame
             Directory.CreateDirectory(Dir);
             dto.SchemaVersion = CurrentSchema;
             string tmp = MetaPath + ".tmp";
-            File.WriteAllText(tmp, JsonSerializer.Serialize(dto, Opts));
+            File.WriteAllText(tmp, JsonSerializer.Serialize(dto, SaveJson.Default.MetaDto));
             File.Move(tmp, MetaPath, overwrite: true);
         }
         catch { /* a failed meta save must never crash the game */ }
@@ -369,7 +375,7 @@ public static class SaveGame
 
     // append-only: new fields default to 0 / null, so an old meta.json (heat/streak/bestwave only)
     // still loads. Lists default null -> the accessors coalesce to empty (never NRE).
-    class MetaDto
+    internal class MetaDto
     {
         /// Migration hook -- see RunDto.SchemaVersion. 0 on every profile written before it existed.
         public int SchemaVersion;
@@ -603,7 +609,7 @@ public static class SaveGame
     }
 
     // ---- DTOs (public fields, IncludeFields = true) ----
-    class RunDto
+    internal class RunDto
     {
         /// Migration hook. Additive fields default safely on their own, so this is 0 on every save
         /// written before it existed and stays 0 until a change actually needs a migration (a field
@@ -626,7 +632,7 @@ public static class SaveGame
         public int PendingSalvageReward;   // append-only: FUL-10 event salvage awaiting the run-end commit (old saves default 0)
     }
 
-    class UnitDto
+    internal class UnitDto
     {
         public string Name, Cls, CustomTag, Nickname;
         public int Hp, MaxHp, Aim, Mobility, Weapon, Kills, Rank, BonusGrenades, Wound, Armor;
@@ -641,7 +647,7 @@ public static class SaveGame
         public int NearDeathCount;        // append-only: survived near-deaths (old saves default 0)
     }
 
-    class CardDto
+    internal class CardDto
     {
         public int Objective;
         public string ModName;
@@ -703,7 +709,7 @@ public static class SaveGame
 
             Save(src);
             // the migration hook must actually be stamped on disk, not just declared
-            int diskSchema = JsonSerializer.Deserialize<RunDto>(File.ReadAllText(FilePath), Opts).SchemaVersion;
+            int diskSchema = JsonSerializer.Deserialize(File.ReadAllText(FilePath), SaveJson.Default.RunDto).SchemaVersion;
             var got = Load();
             if (got == null) return "SAVETEST: FAIL (load returned null)";
 
@@ -932,7 +938,7 @@ public static class SaveGame
             probe.CurrentCard = new MissionCard { Objective = Objective.Hack, Reward = RewardKind.None };
             Save(probe);
             string text = File.ReadAllText(FilePath);
-            var doc = JsonSerializer.Deserialize<RunDto>(text, Opts);
+            var doc = JsonSerializer.Deserialize(text, SaveJson.Default.RunDto);
             doc.Card.Objective = 99;                 // no such objective in ANY build
             doc.Card.Reward = -5;
             doc.Squad[0].Weapon = 999;
@@ -942,7 +948,7 @@ public static class SaveGame
             doc.Squad[0].Scars = new List<int> { -2 };
             doc.PrepFaction = 77; doc.Contract = 77;
             doc.ActiveBoons = new List<int> { 0, 4242 };
-            File.WriteAllText(FilePath, JsonSerializer.Serialize(doc, Opts));
+            File.WriteAllText(FilePath, JsonSerializer.Serialize(doc, SaveJson.Default.RunDto));
             InvalidateExistsCache();
             var back = Load();
             if (back == null) return "junkOrdinalsRejectedWholeSave";      // must degrade, not discard

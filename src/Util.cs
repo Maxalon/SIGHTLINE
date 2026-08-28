@@ -244,4 +244,22 @@ public static class Util
         h ^= h >> 16; h *= 0x45d9f3bu; h ^= h >> 16; h *= 0x45d9f3bu; h ^= h >> 16;
         return h;
     }
+
+    /// Resolve a repo-relative asset path ("assets/NotoMono-Regular.ttf") against the directory
+    /// the EXECUTABLE lives in, not the process working directory. Measured: the published binary
+    /// launched from anywhere but its own folder (`cd /tmp && /path/to/Sightline`, a desktop
+    /// shortcut, a launcher) printed "FILEIO: [assets/NotoMono-Regular.ttf] Failed to open file"
+    /// and silently fell back to raylib's default font -- and would likewise never find dropped-in
+    /// audio. Falls back to the bare relative path when nothing is next to the binary, so
+    /// `dotnet run` from the repo root behaves exactly as before.
+    public static string Asset(string rel)
+    {
+        try
+        {
+            string p = System.IO.Path.Combine(AppContext.BaseDirectory, rel);
+            if (System.IO.File.Exists(p)) return p;
+        }
+        catch { /* fall through to the relative path */ }
+        return rel;
+    }
 }

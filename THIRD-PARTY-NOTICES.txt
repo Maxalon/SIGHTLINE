@@ -1,0 +1,120 @@
+================================================================================
+SIGHTLINE — THIRD-PARTY NOTICES
+================================================================================
+
+SIGHTLINE redistributes the third-party components listed below. Each licence
+requires its notice be retained in distributions, so this file ships alongside
+the game binary (scripts/publish.sh copies it into the publish output).
+
+Licence texts below were taken from the packages/repositories actually consumed
+by this build, not transcribed from memory:
+  * raylib      — https://raw.githubusercontent.com/raysan5/raylib/refs/tags/6.0/LICENSE
+  * Raylib-cs   — https://raw.githubusercontent.com/raylib-cs/raylib-cs/1f07b4b4a4b7e2e76775240eedfd511e8bb89ae5/LICENSE
+                  (the commit recorded in raylib-cs.nuspec for version 8.0.0)
+  * .NET        — LICENSE.TXT inside microsoft.netcore.app.runtime.linux-x64 8.0.30
+  * Noto Mono   — assets/NotoMono-LICENSE.txt (committed in this repo)
+
+Nothing else in the shipped build is third-party: all art, audio, shaders and
+map content are generated in-engine (see CLAUDE.md, "Art policy").
+
+--------------------------------------------------------------------------------
+1. raylib 6.0 — zlib/libpng licence
+   https://www.raylib.com/  •  https://github.com/raysan5/raylib
+   Redistributed as the native library libraylib.so / raylib.dll / libraylib.dylib,
+   bundled inside the Raylib-cs 8.0.0 NuGet package.
+--------------------------------------------------------------------------------
+
+Copyright (c) 2013-2026 Ramon Santamaria (@raysan5)
+
+This software is provided "as-is", without any express or implied warranty. In no event 
+will the authors be held liable for any damages arising from the use of this software.
+
+Permission is granted to anyone to use this software for any purpose, including commercial 
+applications, and to alter it and redistribute it freely, subject to the following restrictions:
+
+  1. The origin of this software must not be misrepresented; you must not claim that you 
+  wrote the original software. If you use this software in a product, an acknowledgment 
+  in the product documentation would be appreciated but is not required.
+
+  2. Altered source versions must be plainly marked as such, and must not be misrepresented
+  as being the original software.
+
+  3. This notice may not be removed or altered from any source distribution.
+
+
+--------------------------------------------------------------------------------
+2. Raylib-cs 8.0.0 — zlib/libpng licence
+   https://github.com/raylib-cs/raylib-cs
+   Redistributed as the managed assembly Raylib-cs.dll (linked into the
+   single-file binary).
+--------------------------------------------------------------------------------
+
+Copyright (C) 2018-2025 raylib-cs
+
+This software is provided 'as-is', without any express or implied
+warranty.  In no event will the authors be held liable for any damages
+arising from the use of this software.
+
+Permission is granted to anyone to use this software for any purpose,
+including commercial applications, and to alter it and redistribute it
+freely, subject to the following restrictions:
+
+1. The origin of this software must not be misrepresented; you must not
+   claim that you wrote the original software. If you use this software
+   in a product, an acknowledgment in the product documentation would be
+   appreciated but is not required.
+2. Altered source versions must be plainly marked as such, and must not be
+   misrepresented as being the original software.
+3. This notice may not be removed or altered from any source distribution.
+
+
+--------------------------------------------------------------------------------
+3. .NET 8 runtime — MIT licence
+   https://github.com/dotnet/runtime
+   A self-contained publish redistributes the whole runtime (the framework
+   assemblies and the native host are linked into the single-file binary).
+--------------------------------------------------------------------------------
+
+The MIT License (MIT)
+
+Copyright (c) .NET Foundation and Contributors
+
+All rights reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+================================================================================
+FONTS
+================================================================================
+Each font below is licensed under the SIL Open Font License, Version 1.1.
+The full OFL text ships next to the font it covers, in the publish output's
+assets/ directory. Adding another OFL font means adding an entry here and
+committing its <Name>-LICENSE.txt alongside it in assets/.
+
+--------------------------------------------------------------------------------
+F1. Noto Mono — SIL Open Font License 1.1
+    https://fonts.google.com/noto/specimen/Noto+Sans+Mono
+    Shipped as assets/NotoMono-Regular.ttf.
+    Full licence text: assets/NotoMono-LICENSE.txt
+--------------------------------------------------------------------------------
+
+================================================================================
+END OF THIRD-PARTY NOTICES
+================================================================================
