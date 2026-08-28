@@ -3433,6 +3433,25 @@ public partial class Game
     public void ActivatePod(int podId)
     {
         bool any = false;
+        // Q1 "NO TWO IN ONE PLACE" — the running CLAIM SET for this scatter batch.
+        // Unit.X/Y only commits when a MoveStepAnim FINISHES, but this loop plans EVERY dormant
+        // member against one board snapshot and enqueues all their steps before any of them run.
+        // Ai.Plan's blocked predicate reads live X/Y, so without a claim set member 2 planned
+        // blind to member 1's destination — and the whole pod planned blind to the PLAYER's
+        // destination, because the steps that carry the player there are still queued AHEAD of
+        // this scatter and land first. Result: two living bodies on one tile, sometimes for
+        // several turns. That is not cosmetic — UnitAt returns the FIRST match (Players before
+        // Enemies) and both hover and click route through it, so the buried unit cannot be
+        // hovered, cannot show odds, and cannot be clicked to target.
+        // Seed with the FINAL destination of every already-queued move (any unit, any team;
+        // last step per unit wins), then add each scatter's own landing tile as it is decided.
+        // Current tiles need no entry — Ai.Plan's IsOccupiedByOther already blocks those.
+        // Guarded by SIGHTLINE_STACKTEST.
+        var claimed = new HashSet<(int x, int y)>();
+        var lastDest = new Dictionary<Unit, (int x, int y)>();
+        foreach (var a in _anims)
+            if (a is MoveStepAnim ms && ms.Unit != null && ms.Unit.Alive) lastDest[ms.Unit] = (ms.Tx, ms.Ty);
+        foreach (var kv in lastDest) claimed.Add(kv.Value);
         foreach (var e in Enemies)
         {
             if (!e.Alive || e.Active || e.PodId != podId) continue;
@@ -3440,7 +3459,7 @@ public partial class Game
             any = true;
             // free scatter toward cover/line of fire (move only, no shot); 4.2 caps it to a
             // SINGLE move — no free dash on reveal (an immobile turret gets none).
-            var plan = Ai.Plan(this, e);
+            var plan = Ai.Plan(this, e, claimed);
             int cap = Math.Max(0, e.Mobility) * 2, spent = 0, lx = e.X, ly = e.Y;
             foreach (var (px, py) in plan.Path)
             {
@@ -3449,6 +3468,10 @@ public partial class Game
                 spent += step; lx = px; ly = py;
                 Enqueue(new MoveStepAnim(e, px, py), Team.Enemy);
             }
+            // claim where this member actually LANDS — after the move cap truncates the plan,
+            // which can be short of plan.Path's end (or nowhere at all, in which case its
+            // current tile is already covered by IsOccupiedByOther).
+            if (lx != e.X || ly != e.Y) claimed.Add((lx, ly));
         }
         if (any)
         {
