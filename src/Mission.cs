@@ -672,22 +672,28 @@ public static class Mission
         // sightlines and FORCING you to reposition to re-acquire targets. Reuses the enemy smoke exec.
         // Counter: push through / around the cloud, or kill it before it screens. Carries the smoke
         // charge (set in SpawnEnemies). ~6% slot.
-        if (r < 0.88f)                                                                                              //  4% zoner
+        if (r < 0.87f)                                                                                              //  3% zoner (FUL-8: was 4 — carved for PIKEMAN)
         {
             var z = MakeHostile("HAZE", "SCREENER", WeaponKind.Smg, 5 + bump, 46 + bump, 6, x, y);
             z.EnemyItem = ItemKind.Smoke; z.ItemCharge = 2;   // a deep smoke pouch — the EXISTING smoke AI uses it
             return z;
         }
+        // PIKEMAN (SARISSA, FUL-8): the lane-holder — plants a braced stagger cone over a movement
+        // lane (the enemy-side mirror of the player's own BRACE; see Ai.Plan). Wardens-native at 10%;
+        // this is its ~3% cascade tail so the mixed default force can field one too. Carved from the
+        // SCREENER/BOMBARD/WARBRINGER mid-tail — the 1% GRUNT/SCOUT/BRUISER tails and every other
+        // archetype's first-appearance tier are unchanged.
+        if (r < 0.90f) return MakeHostile("SARISSA", "PIKEMAN", WeaponKind.Smg, 7 + bump, 58 + bump, 5, x, y);      //  3% lane-holder
         // SIEGE (BOMBARD): a fragile back-line artillery piece. It does NOT fire — it CHARGES a
         // telegraphed 3x3 strike (shown for a full player turn) that lands cover-ignoring next enemy
         // turn (see Ai.Plan/Game.TickSiegeStrikes). Forces RELOCATION (a non-shoot tactical axis).
-        // Rare (~4%); capped at 1 per mission by the post-pick guard in SpawnEnemies.
-        if (r < 0.92f) return MakeHostile("SIEGE", "BOMBARD", WeaponKind.Smg, 7 + bump, 48 + bump, 4, x, y);       //  4% artillery
+        // Rare (~3%); capped at 1 per mission by the post-pick guard in SpawnEnemies.
+        if (r < 0.93f) return MakeHostile("SIEGE", "BOMBARD", WeaponKind.Smg, 7 + bump, 48 + bump, 4, x, y);       //  3% artillery (FUL-8: was 4)
         // WARBRINGER (SIGNIFER, W8): the Legion standard-bearer — a mid-HP banner anchor: pods with
         // a living banner within Chebyshev Game.BannerRange cannot rout and rally a turn faster
         // (Game.BreakPodMorale / BeginEnemyUnitTurn). A priority-target decision: the comeback
-        // lever (focus a pod down to break it) is CONTESTED until the banner falls. ~3% slot.
-        if (r < 0.95f) return MakeHostile("SIGNIFER", "WARBRINGER", WeaponKind.Rifle, 8 + bump, 56 + bump, 5, x, y); // 3% banner anchor
+        // lever (focus a pod down to break it) is CONTESTED until the banner falls. ~2% slot.
+        if (r < 0.95f) return MakeHostile("SIGNIFER", "WARBRINGER", WeaponKind.Rifle, 8 + bump, 56 + bump, 5, x, y); // 2% banner anchor (FUL-8: was 3)
         // CUSTODIAN (SEXTON, W8): the objective KEEPER — a low-threat unit that walks to the
         // terminal / a blown sabotage charge and undoes ONE step of progress per adjacent turn
         // (Ai.Plan -> Game.DoRelock, banner-telegraphed). Screen it out or shoot it first. ~2% slot.
@@ -760,8 +766,8 @@ public static class Mission
             // lane-blinding smoke zoner (area denial in both directions).
             case Faction.Wardens:
             default:
-                if (r < 0.24f) return MakeHostile("VIPER", "SNIPER", WeaponKind.Sniper, 4 + bump, 62 + bump, 5, x, y);
-                if (r < 0.42f)
+                if (r < 0.20f) return MakeHostile("VIPER", "SNIPER", WeaponKind.Sniper, 4 + bump, 62 + bump, 5, x, y); // 20% marksman (FUL-8: was 24 — re-sliced for the PIKEMAN window)
+                if (r < 0.38f)
                 {
                     var m = MakeHostile("MORTAR", "MORTAR", WeaponKind.Smg, 6 + bump, 50 + bump, 5, x, y);
                     m.Grenades = n >= 5 ? 3 : 2;                // a deep frag pouch — the EXISTING grenade AI uses it
@@ -770,23 +776,33 @@ public static class Mission
                 // The two m3+ gates route their FAILED (m2) rolls to the SCOUT filler, not the next
                 // window — falling through would hand MEDIC their combined 22% and make mission-2
                 // Wardens pods a 36%-medic heal-loop slog (W5 review LOW-3).
-                if (r < 0.54f) return n >= 3
+                if (r < 0.50f) return n >= 3
                     ? MakeHostile("SIEGE", "BOMBARD", WeaponKind.Smg, 7 + bump, 48 + bump, 4, x, y)   // 12% artillery (m3+ only — fairness tier)
                     : MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 58 + bump, 8, x, y);
-                if (r < 0.64f)                                  // 10% zoner (m3+ — cascade first appearance)
+                if (r < 0.60f)                                  // 10% zoner (m3+ — cascade first appearance)
                 {
                     if (n < 3) return MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 58 + bump, 8, x, y);
                     var z = MakeHostile("HAZE", "SCREENER", WeaponKind.Smg, 5 + bump, 46 + bump, 6, x, y);
                     z.EnemyItem = ItemKind.Smoke; z.ItemCharge = 2;   // a deep smoke pouch — the EXISTING smoke AI uses it
                     return z;
                 }
-                if (r < 0.78f) return MakeHostile("ORDERLY", "MEDIC", WeaponKind.Smg, 6 + bump, 52 + bump, 6, x, y);
+                // FUL-8: the PIKEMAN lane-holder is Wardens-native — the control faction now contests
+                // MOVEMENT itself (a braced stagger cone over the squad's lane), completing the set:
+                // information (SCREENER), position (SIEGE), progress (CUSTODIAN), movement (PIKEMAN).
+                // 10% at m2+ — the teaching piece arrives early, like Legion's m2 STRIKER/LANCER; the
+                // failed (m1) gate routes to the SCOUT filler so any roll resolves. Stats sit in the
+                // W8 Wardens-support band: HP 7 survives one focused soldier-turn, dies to two; SMG
+                // (MaxRange 10) keeps the cone LOCAL; Mob 5 — a holder, not a rusher.
+                if (r < 0.70f) return n >= 2
+                    ? MakeHostile("SARISSA", "PIKEMAN", WeaponKind.Smg, 7 + bump, 58 + bump, 5, x, y)  // 10% lane-holder (m2+)
+                    : MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 58 + bump, 8, x, y);
+                if (r < 0.82f) return MakeHostile("ORDERLY", "MEDIC", WeaponKind.Smg, 6 + bump, 52 + bump, 6, x, y); // 12% medic (FUL-8: was 14)
                 // W8: the CUSTODIAN keeper is Wardens-native — the control faction contests your
                 // objective PROGRESS itself (re-locks the terminal / re-arms blown charges). m3+
                 // like SIEGE/SCREENER; the failed (m2) gate routes to the GRUNT window's pick, so
                 // any roll still resolves and mission-2 Wardens pods are unchanged.
-                if (r < 0.86f && n >= 3) return MakeHostile("SEXTON", "CUSTODIAN", WeaponKind.Smg, 5 + bump, 48 + bump, 6, x, y); // 8% keeper (m3+)
-                if (r < 0.92f) return MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 60 + bump, 6, x, y);
+                if (r < 0.88f && n >= 3) return MakeHostile("SEXTON", "CUSTODIAN", WeaponKind.Smg, 5 + bump, 48 + bump, 6, x, y); // 6% keeper (m3+; FUL-8: was 8)
+                if (r < 0.94f) return MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 60 + bump, 6, x, y);
                 return MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 58 + bump, 8, x, y);              // filler
         }
     }

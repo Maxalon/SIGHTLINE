@@ -845,28 +845,34 @@ public static class Renderer
             }
         // cone-edge rays + a braced direction chevron at the soldier
         foreach (var w in watchers)
+            DrawConeRays(g, w, Pal.VipGold, pulse);
+    }
+
+    /// FUL-8: the cone-edge rays + direction chevron for a FOCUSED watcher — factored out of
+    /// DrawFocusCones so the enemy PIKEMAN's foe-red lane draws the SAME vocabulary as the player's
+    /// gold brace (it IS the same verb) and the two reads can never drift.
+    static void DrawConeRays(Game g, Unit w, Color baseCol, float pulse)
+    {
+        float hlift = g.Grid.IsHigh(w.X, w.Y) ? ElevLift : 0f;
+        var c = w.Pos - new Vector2(0, hlift);
+        float ang = MathF.Atan2(w.OwDirY, w.OwDirX);
+        float len = w.Weapon.MaxRange * Cfg.Tile;
+        Color edge = Raylib.Fade(baseCol, 0.30f + 0.15f * pulse);
+        for (int s = -1; s <= 1; s += 2)
         {
-            float hlift = g.Grid.IsHigh(w.X, w.Y) ? ElevLift : 0f;
-            var c = w.Pos - new Vector2(0, hlift);
-            float ang = MathF.Atan2(w.OwDirY, w.OwDirX);
-            float len = w.Weapon.MaxRange * Cfg.Tile;
-            Color edge = Raylib.Fade(Pal.VipGold, 0.30f + 0.15f * pulse);
-            for (int s = -1; s <= 1; s += 2)
-            {
-                float a = ang + s * 0.7853982f;   // +-45 degrees
-                Raylib.DrawLineEx(c, c + new Vector2(MathF.Cos(a) * len, MathF.Sin(a) * len), 2f, edge);
-            }
-            // SIGNAL W3: a short double chevron just past the figure, pointing down the cone axis,
-            // so "braced THIS way" reads at the soldier even when the edge rays run off-board.
-            var dir = new Vector2(MathF.Cos(ang), MathF.Sin(ang));
-            var cperp = new Vector2(-dir.Y, dir.X);
-            Color chev = Raylib.Fade(Pal.VipGold, 0.65f + 0.25f * pulse);
-            for (int i = 0; i < 2; i++)
-            {
-                var tip = c + dir * (38f + i * 9f);
-                Raylib.DrawLineEx(tip - dir * 8f + cperp * 7f, tip, 2.4f, chev);
-                Raylib.DrawLineEx(tip, tip - dir * 8f - cperp * 7f, 2.4f, chev);
-            }
+            float a = ang + s * 0.7853982f;   // +-45 degrees
+            Raylib.DrawLineEx(c, c + new Vector2(MathF.Cos(a) * len, MathF.Sin(a) * len), 2f, edge);
+        }
+        // SIGNAL W3: a short double chevron just past the figure, pointing down the cone axis,
+        // so "braced THIS way" reads at the soldier even when the edge rays run off-board.
+        var dir = new Vector2(MathF.Cos(ang), MathF.Sin(ang));
+        var cperp = new Vector2(-dir.Y, dir.X);
+        Color chev = Raylib.Fade(baseCol, 0.65f + 0.25f * pulse);
+        for (int i = 0; i < 2; i++)
+        {
+            var tip = c + dir * (38f + i * 9f);
+            Raylib.DrawLineEx(tip - dir * 8f + cperp * 7f, tip, 2.4f, chev);
+            Raylib.DrawLineEx(tip, tip - dir * 8f - cperp * 7f, 2.4f, chev);
         }
     }
 
@@ -899,11 +905,21 @@ public static class Renderer
                     if (Util.TileDist(w.X, w.Y, x, y) > w.Weapon.MaxRange) continue;
                     bool commanding = g.Grid.HeightAt(w.X, w.Y) - g.Grid.HeightAt(x, y) >= 2;
                     if (!g.Grid.HasLineOfSight(w.X, w.Y, x, y, commanding)) continue;
+                    // FUL-8 truth gate: a FOCUSED enemy watcher (the PIKEMAN's plant) only reacts
+                    // inside its cone — the red wash must mirror the OnUnitEnteredTile gate exactly,
+                    // or the board lies about where walking is safe.
+                    if (w.OwFocused && !g.InOwCone(w, x, y)) continue;
                     var r = ElevRect(g, x, y);
                     Raylib.DrawRectangleRec(r, wash);
                     break;   // one wash per tile is enough; overlap is conveyed by adjacency
                 }
             }
+
+        // FUL-8 PIKEMAN: a braced+focused enemy watcher shows its cone edges + chevron in foe-red
+        // over the wash — the same lane vocabulary as the player's own BRACE, because it IS the
+        // player's own BRACE pointed back at the squad.
+        foreach (var w in watchers)
+            if (w.OwBrace && w.OwFocused) DrawConeRays(g, w, Pal.Foe, pulse);
 
         // mark each overwatcher with a danger reticle so the SOURCE of the kill-zone reads, plus a
         // slow expanding "watching" pulse ring that draws the eye to the threat without occluding it.
@@ -1696,6 +1712,23 @@ public static class Renderer
                 Raylib.DrawRing(p + new Vector2(0, -1.5f * s), 3f * s, 5f * s, 180f, 360f, 12, col); // shackle
                 Raylib.DrawCircleV(p + new Vector2(0, 2.5f * s), 1.6f * s,
                                    Raylib.Fade(Pal.RGBA(8, 10, 14), a));          // keyhole
+                break;
+            }
+            case "PIKEMAN":            // a LANE-HOLDER (SARISSA, FUL-8): a squat braced body under a LONG
+                                       // pike set diagonally up the lane, with a crossbar (lugs) near the
+                                       // base — at squint: "a line pointing down a lane". Distinct from
+                                       // the LANCER's level spear + shoulder bar (its pike is RAISED).
+            {
+                Raylib.DrawRectanglePro(new Rectangle(p.X, p.Y, 10f * s, 7f * s), new Vector2(5f * s, 3.5f * s),
+                                        MathF.Atan2(fdir.Y, fdir.X) * 180f / MathF.PI, col);   // squat planted body
+                var butt = At(-4f, 0);
+                var tip  = At(13f, 0) + new Vector2(0, -8f * s);   // the pike, angled up-forward
+                Raylib.DrawLineEx(butt, tip, 2.2f * s, col);
+                Raylib.DrawCircleV(tip, 1.8f * s, col);            // pike head
+                var pdir  = Vector2.Normalize(tip - butt);
+                var pperp = new Vector2(-pdir.Y, pdir.X);
+                var lug   = butt + pdir * (9f * s);                // crossbar lugs across the shaft
+                Raylib.DrawLineEx(lug + pperp * (3.5f * s), lug - pperp * (3.5f * s), 2f * s, col);
                 break;
             }
             default:                   // fallback: a neutral pentagon

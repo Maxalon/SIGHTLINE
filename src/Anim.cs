@@ -320,8 +320,12 @@ public class ShotAnim : Anim
             {
                 D.ActionsLeft = 0;
                 D.OnOverwatch = false;                       // a rattled unit drops any held reaction too
-                g.Fx.PopText(D.Pos + new Vector2(0, -30), "STAGGERED", Pal.Good, 20f);
-                g.Fx.Flash(D.Pos, Pal.Good, 22f, 0.14f, 0.5f);
+                // FUL-8 honesty: color the pop by VICTIM team — green was correct for the player's
+                // comeback beat, but with the PIKEMAN an enemy brace staggers YOUR soldier; a green
+                // pop on your own denied turn is a lie. Foe-red when the victim is yours.
+                Color stagCol = D.Team == Team.Player ? Pal.Foe : Pal.Good;
+                g.Fx.PopText(D.Pos + new Vector2(0, -30), "STAGGERED", stagCol, 20f);
+                g.Fx.Flash(D.Pos, stagCol, 22f, 0.14f, 0.5f);
                 g.Fx.AddShake(2.5f);
             }
         }

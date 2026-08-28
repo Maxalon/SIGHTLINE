@@ -83,6 +83,8 @@ public static class Codex
         // SIGNAL W8 — morale contested: the banner anchor + the objective keeper.
         ("SIGNIFER", "WARBRINGER", "Standard-bearer — pods near its banner cannot rout and rally faster. Kill the banner to break their nerve."),
         ("SEXTON",  "CUSTODIAN",  "Objective keeper — walks to the terminal or a blown charge and undoes one step of your progress each turn. Screen it out or shoot it first."),
+        // FUL-8 — movement contested: the Wardens lane-holder (the enemy-side mirror of BRACE [B]).
+        ("SARISSA", "PIKEMAN",   "Lane-holder — plants a braced cone over a movement lane and STAGGERS the first soldier through: reduced damage, but your action is denied. It is exactly your own BRACE. Break its watch, go around the cone, or feed it a cheap step first."),
         // SIGNAL W5: every named boss (BREAKER/BULWARK/WARDEN mid-bosses; WARLORD/SIEGELORD/
         // SPYMASTER finales) shares Cls "ELITE" — one bestiary row covers the family, and the
         // blurb now names the faction signatures so the manual matches the new climax kits.
@@ -398,6 +400,7 @@ public static class Codex
             "GRUNT","SCOUT","SNIPER","TURRET","BERSERKER","DRONE","SHIELD","SAPPER","MEDIC",
             "BRUISER","HUNTER","LANCER","HOUND","MORTAR","SPOTTER","BOMBARD","STRIKER","SCREENER","ELITE",
             "WARBRINGER","CUSTODIAN",   // W8: banner anchor + objective keeper
+            "PIKEMAN",                  // FUL-8: the lane-holder (enemy-side BRACE mirror)
         };
         var covered = new HashSet<string>();
         foreach (var b in Bestiary) covered.Add(b.Cls);

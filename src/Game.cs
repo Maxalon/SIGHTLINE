@@ -2546,6 +2546,25 @@ public partial class Game
         return false;
     }
 
+    /// FUL-8 PIKEMAN: true if entering (x,y) would draw a live enemy BRACE reaction — any alive+active
+    /// enemy holding a braced watch with ammo, an unspent reaction, range + LoS, and (if focused) the
+    /// tile inside its cone. Mirrors the exact OnUnitEnteredTile gate (the InSiegeZone pattern) so the
+    /// bot's danger read is truthful; read by TileExposure to route SmartApproach/SmartStep AROUND the
+    /// lane instead of feeding it a soldier-turn.
+    public bool InEnemyBraceLane(int x, int y)
+    {
+        foreach (var e in Enemies)
+        {
+            if (!e.Alive || !e.Active || !e.OnOverwatch || !e.OwBrace || e.ReactedThisTurn || e.Ammo <= 0) continue;
+            if (Util.TileDist(x, y, e.X, e.Y) > e.Weapon.MaxRange) continue;
+            bool commanding = Grid.HeightAt(e.X, e.Y) - Grid.HeightAt(x, y) >= 2;
+            if (!Grid.HasLineOfSight(e.X, e.Y, x, y, commanding)) continue;
+            if (e.OwFocused && !InOwCone(e, x, y)) continue;
+            return true;
+        }
+        return false;
+    }
+
     /// Resolve every charged BOMBARD strike at the START of the enemy turn (before any hostile acts
     /// and before reinforcements/pressure add bodies — see EndPlayerTurn). Cover-ignoring 3x3 AoE on
     /// the charged center; both teams in the zone are hit (friendly fire, consistent with every other
@@ -5417,6 +5436,22 @@ public partial class Game
                     Fx.PopText(e.Pos + new Vector2(0, -30), "SHOVE", Pal.Foe, 16f);
                     Enqueue(new WaitAnim(0.15f), Team.Enemy);
                     Enqueue(new ShoveAnim(e, t, sdx, sdy), Team.Enemy);
+                }
+                else if (_aiPlan.Brace && e.ActionsLeft > 0 && e.Ammo > 0 && !e.HasStatus(StatusKind.Disoriented))
+                {
+                    // FUL-8 PIKEMAN: plant the braced lane — the exact flag set the player's own BRACE+FOCUS
+                    // arms, so OnUnitEnteredTile reacts through the identical (COMBATTEST-pinned) path: the
+                    // first soldier through the cone eats a halved, no-crit, STAGGERING reaction. The plant
+                    // lives one round (the enemy BeginTurn wipes OnOverwatch/OwBrace/OwFocused), so holding
+                    // the lane costs the PIKEMAN its action EVERY turn — symmetric movement-economy trade.
+                    e.OnOverwatch = true; e.OwBrace = true; e.OwFocused = true;
+                    e.OwDirX = _aiPlan.BraceDirX; e.OwDirY = _aiPlan.BraceDirY;
+                    // face down the lane: the silhouette's pike IS the direction read — without this
+                    // the figure keeps its walk-in facing and points away from its own cone.
+                    e.Facing = MathF.Atan2(e.OwDirY, e.OwDirX);
+                    e.ActionsLeft = 0;
+                    Fx.PopText(e.Pos + new Vector2(0, -30), "BRACED", Pal.Foe, 16f);
+                    Audio.Play("over");
                 }
                 else if (_aiPlan.ShootTarget != null && _aiPlan.ShootTarget.Alive &&
                     e.ActionsLeft > 0 && e.Ammo > 0 && CanTarget(e, _aiPlan.ShootTarget))

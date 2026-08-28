@@ -894,13 +894,34 @@ of record (container suspensions have wiped every scratchpad copy — docs are t
       the full death path (Fallen/Memorial/honest loss card — LGD's RemoveVeterans needs no special
       case). Zero persistence (single checkpoint site verified; DTO whitelist). SIGHTLINE_DOWNTEST +
       DOWNSHOT. Full spec: docs/plans/FUL-6-critical-mass-FUL-7-last-light.md.
-- [ ] **FUL-8 PIKEMAN** (P8, M). The SARISSA — a Wardens lane-holder that plants a braced foe-red
-      cone over a movement lane and STAGGERS the first soldier through; teaches the player's BRACE
-      by mirroring it. Keystone: the BRACE reaction plumbing is already team-symmetric
-      (OnUnitEnteredTile watcher pick, OwBrace halving, ShotAnim stagger, cone gate, one-reaction
-      cap) — the wave is an Ai plant branch + renderer cone + bot danger-tiles + codex + PIKETEST.
-      Full dev-executable spec (verified seams, spawn re-slices, harness legs):
-      docs/plans/FUL-8-pikeman-FUL-10-forks.md. Launches after FUL-5 merges (shared autopilot).
+- [x] **FUL-8 PIKEMAN** (wt-ful8). The SARISSA — a Wardens lane-holder that plants a braced
+      foe-red cone over a movement lane and STAGGERS the first soldier through; the roster's first
+      piece that contests WHERE YOU MAY WALK, and it teaches the player's BRACE by being the
+      identical verb pointed back (zero new combat machinery — the OnUnitEnteredTile reaction path
+      was already team-symmetric). Shipped: Ai.Plan plant branch (opportunism-first, routed/
+      Disoriented/dry-gated, SPOTTER-style plant scoring, MORTAR fall-through safety); ActAfterMove
+      exec arms the exact player flag set + faces down the lane; renderer truth gate on
+      DrawOverwatchThreat (a focused enemy's wash now mirrors the cone reaction gate exactly) +
+      shared DrawConeRays (player gold / enemy foe-red can't drift) + PIKEMAN silhouette (squat
+      body, raised pike, crossbar) + STAGGERED pop colored by victim team (the green-on-your-own-
+      denial lie fixed); codex row SARISSA + CODEXTEST required; Wardens 10% m2+ re-slice + ~3%
+      default m3+ cascade tail (CRN draw-count neutral — windows only); bot: InEnemyBraceLane
+      mirrors the reaction gate, +18 TileExposure. Verified: PIKETEST (plant / the ==2 halving pin
+      on the enemy-side reaction / cone blindness / stagger-back break / no Disoriented-or-Routed
+      re-plant) + full battery PASS, Release 0/0, autoplay clean. Measured (CRN-paired slots):
+      h0 30→27.5%, h4 35→40% (both inside the ±5 gate); composition PIKEMAN 3-4% of faction-
+      stamped spawns (~10% of Wardens fights), 1-3% default; objective-pinned n~90 legs — Escort
+      5.9→5.6t (99→100%), Evac 5.5→5.8t (97→98%): the lane taxes routes, it does not stall them.
+      Details: docs/DEVLOG.md §FUL-8.
+- [ ] **FUL-10 FORKS** (P10, M). Seven trade-off field events crossing salvage/scar/veteran/
+      faction/heat (ids+arm order frozen for the compass; PendingSalvageReward run-committed via
+      AwardMetaRunEnd — events must never touch meta directly); two veteran-economy contracts
+      (MERCENARY CLAUSE: half-price recalls but no enshrinement; LIVING LEGENDS: pensions + double
+      rank-kills but KIA erases the reserve record); the orphaned perk trio Vantage/Breaker/
+      Siegebreaker joins real class lines. Contract enum append moves TWO tail pins
+      (SaveGame.cs:675 + CONTRACTTEST). Full spec: docs/plans/FUL-8-pikemen-FUL-10-forks.md
+      (file name: FUL-8-pikeman-FUL-10-forks.md). Bot arm-uptake measurement lands with FUL-5's
+      hashed chooser (FUL-10 makes the forks exist; FUL-5 makes the bot walk them).
 - [x] **FUL-10 FORKS** (P10, M — landed on wt-ful10). Seven trade-off field events crossing
       salvage/scar/veteran/faction/heat (ids+arm order frozen for the compass; PendingSalvageReward
       run-committed via AwardMetaRunEnd — events never touch meta directly); two veteran-economy
