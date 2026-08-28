@@ -4140,3 +4140,59 @@ movable. The baseline fields **1.39** armed soldiers per player turn out of 3.53
 surrounded opening fields **1.71** (+23%). That is the real, shippable density result: not a
 richer decision per soldier, but **more of the squad in contact every turn** — ch/turn
 2.19 → 2.71 at ENVELOP, +24%.
+
+## WHAT SHIPPED
+
+**1. Deployment SHAPE as a per-mission variable** (`src/Mission.cs`, the
+`W4 THE SECOND AXIS — DEPLOYMENT GEOMETRY` block). Four openings:
+
+| shape | squad | force | notes |
+|---|---|---|---|
+| `DeployFrontal` | cols 0-3 | east edge, cols 14-17 | today's opening, byte-for-byte |
+| `DeployPincer` | cols 0-3 | one front pair + two flank pairs in the rim lanes (cols 12-13, rows 0-1 / 9-10) | the de-drag shape |
+| `DeployCrossfire` | cols 0-3 | two dense masses on the NE and SE bearings, middle rows empty | the only shape that moved the target axis |
+| `DeployEnvelop` | **board centre**, cols 7-10 | all four rims | the surrounded opening |
+
+**The hard contract**: the shape derives PURELY from `(DeckSeed, missionNum)` through an
+FNV-1a mix with an avalanche — **zero `Util.Rng` draws**, exactly like the FUL-9 arena deck,
+so every CRN pairing in the project survives. `SIGHTLINE_PAIRTEST=1` PASSES with the whole
+W4 surface enabled (h0 slot0 and h4 slot1 both byte-MATCH). Pods keep the historical COHESION
+stack for the three directional shapes (identical placement code for FRONTAL); ENVELOP's rim
+pods stack ALONG their own edge so a north-rim pod does not march into the squad's lap.
+
+**ENVELOP is objective-gated, which is what kept the wave cheap.** A centre deployment would
+trivialise any objective with placed geography, so it is legal only where there is none:
+Eliminate, Decapitate and Defend. Evac / Escort / Rescue (evac zone), Hack (centre terminal)
+and Sabotage (mid-field sites) always get a directional opening — so **no extraction, hack,
+beacon or sabotage routing changed at all**, and `Game.EscortBeaconOk`'s far-third test
+(`u.X >= Grid.W * 2 / 3`, a left-to-right assumption) is never reached by a centre deploy.
+
+Two supporting changes, both no-ops for a frontal opening by construction:
+* protective cover now faces each body's NEAREST opponent on the dominant axis. For a frontal
+  opening |dx| >= 11 always beats |dy| <= 10, so it reproduces the historical `+1` (soldiers)
+  / `−1` (hostiles) column exactly.
+* barrels never land within Chebyshev 2 of a soldier's deployment tile — a centre-deployed
+  squad would otherwise open the mission sitting next to a live barrel. The barrel bias is
+  cols 6-15 and the squad is in cols 0-3 on every directional opening, so nothing else moves.
+
+**2. Pod UNIFORMITY** — members past the pod lead field the LEAD's archetype. The per-body
+`Util.RandF()` still happens (the shared stream keeps its draw count); the member just reuses
+the lead's value. Applies m1-m5; the finale is excluded (explicit kit slots, FUL11PROBE
+geometry). Measured **exactly ladder-neutral** (32.5% = 32.5%, n=40) for +0.06 on the target
+axis, +0.19 on `choices/turn`, and Escort 12.57t -> 8.75t. It also simply reads better:
+"three RAIDERS", not a trio of strangers.
+
+**3. The `SmartEscort` instrument fix** (the brief's secondary task) — see its own round below.
+
+## WHAT WAS BUILT AND NOT SHIPPED (measured out, or gated pending measurement)
+* **`PodMass` 4** (`SIGHTLINE_PODMASS`) — bigger, fewer pods. It did exactly what it was
+  supposed to do to raw presentation (`los-targets/ARMED` 2.41 -> 2.61, the largest move of
+  the wave) and the target axis went **DOWN** (0.27 -> 0.22): a bigger mixed pod presents more
+  bodies that are *less* alike, not more comparable shots. Paired completion 45.0 -> 35.0
+  (n=20). **NOT shipped**; the code stays behind `PodMass = 3` (the FUL-6 plan, reproduced
+  exactly — PODTEST pins its splits).
+* **ENVELOP rim waves** (`SIGHTLINE_RIMWAVES`) — under a surrounded opening, rotate the rim
+  that `SpawnReinforcements` waves arrive from, so a Defend hold-out stays surrounded instead
+  of quietly reverting to an east-facing fight after the opening pods die. Deterministic (a
+  per-mission wave counter, no RNG draw) and it survives PAIRTEST, but it went in after the
+  round budget was spent. **Shipped OFF**, ready-to-dev with a one-flag round.
