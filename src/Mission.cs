@@ -489,6 +489,14 @@ public static class Mission
         // the POD x/y read all depend on this. ZERO extra RNG draws: rows[] reads are not draws,
         // and the collision-relocate loop stays the only conditional draw source, exactly as today.
         bool podsOf3 = n >= 3 && n < Run.MaxMissions;
+        // FUL-6 ESCALATION LEVER 1 (measured breach): the full pod stack ran the h0 paired
+        // flywheel at -12.5 pts completion vs the fresh same-slot R0 (chunk a -5, chunk b -20;
+        // budget <= 8). The spec's first lever: trim the initial force by 1 on 3-pod missions
+        // (the FUL-4 defend-trim precedent) — each contact is bigger now (3 guns wake at once,
+        // a link can make it 6), so the unchanged body count priced a harder mission than the
+        // budget allows. m1-2 and the finale are untouched (no pod stack there); floored at 3
+        // like the sabotage/defend trims above.
+        if (podsOf3) count = Math.Max(3, count - 1);
         int[] podOf = null, memberOf = null;
         int[] podAnchor = null;
         if (podsOf3)
