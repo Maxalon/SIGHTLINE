@@ -3055,3 +3055,214 @@ the right ~28% of that row. The rail motif survives as two diamond end-caps.
 - **The `TutStep >= TutStepFire` completion gates** (`EnterBarracks` / `LoseRun`) were **not
   touched** — the mission-1 track kept its exact semantics and constants, and TUTTEST now pins
   them so a future renumber trips a test instead of silently re-offering onboarding forever.
+
+## PROGRAM RESONANCE — WAVE V2 "LIGHT ON THE BOARD" (the overlay stops repainting the room; the re-grade)
+
+**Goal.** Two measured problems, one of them tactical. (A) The move-range overlay was a flat
+per-tile fill and it was repainting a third of the board in the friendly accent for the whole
+player turn. (B) The board had no highlight tier and no deep shadow — 95% of pixels sat in the
+bottom 40% of the range. (C) High ground, one of the three or four load-bearing tactical facts
+in this game, was among the least legible things on screen.
+
+### The measurement tool
+
+`scripts/board-metrics.py` (manual, not wired to anything — **NO CI**). Two modes over the
+board rect **minus the three HUD panels drawn on top of it** (x 145..1216, y 62..660 — the
+roster strip, the action bar and the top bar all overlap `Cfg`'s board rect, and measuring
+them reports chrome instead of board):
+
+- `hue` — **hueL / hueR**: chroma-weighted circular mean hue of the board's LEFT third (where
+  the overlay lives; the squad deploys left) vs its RIGHT third (clean board). **dHue** is the
+  circular distance. **dMed** is the same distance on the *circular median* hue, which is
+  unweighted and cannot be swung by a handful of saturated strokes on a near-grey floor — the
+  ASH case, where the mean misreports. **cyan%** = share of board pixels at hue 175-215 with
+  S>0.25.
+- `luma` — Rec.601 percentiles over the same rect.
+
+Captures are pinned with `SIGHTLINE_SEED=4242 SIGHTLINE_FORCEBIOME=0..7 SIGHTLINE_SHOT=90`
+(`shots/sweep.sh`). New QA hook **`SIGHTLINE_NOMOVE=1`** suppresses the move overlay entirely
+so a capture pair can be measured against the *bare room* — the ground truth a convergence
+claim needs. Read once at static init (no per-frame env read, no clock read).
+
+### A — the move range is a BOUNDARY, not a wash
+
+`Renderer.DrawMoveOverlay` was one line: fill every reachable tile with `Pal.MoveBlue` (a=60)
+and every dash tile with `Pal.MoveYellow` (a=55). On an 18x11 board with a 6-10 tile budget
+that is 60-120 tiles of flat colour, on screen for the entire player turn. Three costs, all
+measured or provable:
+
+1. it collapsed the biomes (see the table);
+2. it smeared the **friendly-reserved** cool accent over half the room — `DESIGN.md` 3.H:
+   one job per accent colour;
+3. **dash-gold sat at almost exactly the hue AND value of a warm-biome plateau top**, so in
+   ASH and ARID you could not tell dash range from high ground. That is a tactical read.
+
+What shipped:
+- a whisper-level **inner lift** (a=15 walk / a=6 dash, was 60/55) that is **WHITE, not cyan**.
+  Mixing white into a colour preserves its HUE exactly and only drops saturation, so the mark
+  costs zero degrees of biome. This was not a style choice — an alpha-**22 cyan** tint was
+  measured first and it still flipped ASH (a near-neutral grey biome, S~0.1) a full **170
+  degrees** to cyan, because on an almost-colourless floor a whisper of blue decides the hue.
+- a **marching-squares outline** around each region: **solid** on the walk boundary, **dashed**
+  on the dash ring. The two regions are separated by stroke STYLE, so the ASH/ARID
+  dash-vs-plateau ambiguity closes on *shape* and survives `SIGHTLINE_CB=1` and a greyscale
+  squint. Edges are drawn on each tile's own `ElevRect`, so a boundary climbing a plateau steps
+  up with it instead of cutting through the wall.
+- an edge **weighting**: an edge against a cover block is drawn thin and at ~a third alpha,
+  full weight is reserved for edges against open-but-unreachable floor. Dropping the
+  cover-adjacent edges *entirely* was tried first and it shatters the silhouette on a
+  cover-dense arena — the region stops reading as a region. Kept, quiet.
+- a **corner-tick lattice** (four 3px nubs per walk tile, ~0.6% of the tile) so per-tile
+  granularity — "how far is four tiles?" — survives the loss of the fill.
+
+No wall-clock reads; the class buffer is reused frame to frame (no per-frame allocation).
+
+**Hue convergence, 8 biomes, seed 4242** (`python3 scripts/board-metrics.py hue`):
+
+```
+              BEFORE (a=60/55 fill)        AFTER (V2 boundary)      GROUND TRUTH (NOMOVE=1)
+biome      hueL hueR dHue dMed cyan%    hueL hueR dHue dMed cyan%   hueL hueR dHue dMed
+STEEL       199  212   13   10  75.5     208  212    4    0  80.4    209  213    3    0
+ARID        104   36   68  135   3.2      41   36    5    0   1.6     40   36    4    0
+TUNDRA      197  206    9    5  78.2     203  206    3    0  74.4    203  206    3    5
+VERDANT     162  135   26   45  28.3     139  136    3    0   4.5    137  137    0    5
+ASH         188  359  172  170  20.7      27  356   31   10   1.9     12  354   18    5
+VOID        222  256   35   40   4.6     251  257    6    5   1.8    253  256    3    0
+NEON        190  191    2    0  79.0     189  191    2    0  96.3    190  192    1    0
+MAGMA        44   16   29  180   1.0      19   15    4    0   1.6     18   15    2    0
+MEAN                44.3 73.1            ---       7.3  1.9         ---       4.3  1.9
+```
+
+The overlaid third now reads as the **same room** as the clean third, to within the arena's own
+left/right asymmetry: mean dHue 44.3 -> 7.3 against a no-overlay floor of 4.3, and mean dMed
+73.1 -> 1.9 against a floor of **1.9** (i.e. on the median statistic the overlay is now
+indistinguishable from not drawing it at all). Warm-biome cyan coverage: ASH 20.7% -> 1.9%,
+VERDANT 28.3% -> 4.5%. STEEL/TUNDRA/NEON cyan% is high in every column — those biomes *are*
+cyan; their ground truth is 93/96/97%, and the old fill actually *lowered* it by painting
+gold over blue floor.
+
+### B — the re-grade (done after A, so the grade was tuned against the fixed overlay)
+
+The muddiness was cumulative, not one bad constant: the floor mean was deliberately darkened,
+cover was deliberately receded, plateau lift was +30, and the key light's positive throw was
+capped at x0.16 against x0.34 shadow. Four separate "tune it down to protect unit readability"
+decisions whose SUM is a flat dark plate with a few bright dots. One coordinated pass:
+
+| lever | before | after |
+|---|---|---|
+| floor mean pull toward near-black | 0.16 | 0.06 |
+| floor biome-tint pull / flat lift | 0.40 / — | 0.50 / +7 |
+| key light throw (lit / shadow) | x0.16 / x0.34 | x0.32 / x0.45 |
+| plateau top lift | +30 | +64 |
+| plateau key throw | x0.14 / x0.14 | x0.22 / x0.26 |
+| plateau front wall | — | -12, key x0.10 -> x0.16 |
+| plateau lit lip | a0.50, 2.0px | a0.72, 2.4px |
+| cover top / wall | — | +16 / -8 |
+| cover key throw (wall/top) | x0.13 / x0.16 | x0.20 / x0.24 |
+| cover rim alpha (high/low) | 0.13 / 0.10 | 0.22 / 0.17 |
+| board AO vignette | none | 88px cubic ramp, a<=0.22, biome-tinted, **under terrain** |
+
+The floor lift is deliberately **split** between a stronger tint pull and a small flat lift:
+`Lift()` adds the same amount to R/G/B, which raises value but DESATURATES, and the floor's
+biome hue is a marquee lever V1/W6 paid for. All-flat measured a 12% saturation loss; the split
+brings it back to within ~10% (0.348 vs 0.385) while keeping the value.
+
+The vignette is drawn **under terrain and units** on purpose: it darkens the floor (the
+majority of board pixels, which is what the median measures) and can never dim a soldier
+standing at the board edge.
+
+**Luma, 8 biomes, seed 4242** (`python3 scripts/board-metrics.py luma`):
+
+```
+          BEFORE (base)              AFTER (V2)
+biome     p5  med  p75  p90  p95     p5  med  p75  p90  p95
+STEEL     38   71   79   85   90     41   60   85   98  108
+ARID      46   77   86   92   97     48   70   92  106  115
+TUNDRA    53   84   93  100  106     55   80  100  115  125
+VERDANT   43   75   83   89   95     46   66   90  103  113
+ASH       41   73   82   88   93     43   64   88  102  111
+VOID      41   73   81   87   92     44   63   88  101  112
+NEON      42   75   83   89   94     46   66   90  104  114
+MAGMA     40   73   81   88   96     44   64   89  103  115
+MEAN    42.9 75.2 83.7 89.9 95.3   45.9 66.6 90.2 104.2 114.1
+```
+
+The BEFORE median is itself inflated by the flood: with `SIGHTLINE_NOMOVE=1` the same base
+build measures **p5 42.3 / med 54.9 / p75 67.0 / p90 82.2 / p95 89.8**. Either way the shape
+of the result is the same — the **p50->p95 span goes from 20 (or 35 clean) to 47.5**, and the
+histogram stops being two spikes at 40-50 and 70-80 and becomes a continuous ramp out to 130.
+Pixels above luma 180 are unchanged at **0.11%** — the reserved band still belongs to units,
+objectives and FX.
+
+**The p95 target was 150 and this pass landed 114. That is a real miss and here is the
+measured reason.** Sampled on the STEEL capture: friendly unit bodies top out at **p90 146 /
+max 155**; enemy discs at max 183. At an intermediate setting (cover tops +32) the board hit
+p95 116 — and cover top faces measured **mean 117 / p90 127**, i.e. *brighter than the mean
+of a friendly soldier*. That is the hierarchy inversion `DESIGN.md` 3.H forbids, and it is
+exactly the failure mode this wave was warned about, so the cover lift was pulled back to +16
+(tops land ~108-116, p90 ~115). **Getting p95 to 150 requires 5% of board pixels above 150,
+and with the unit tier peaking at ~150 there is nowhere to put them that is not a soldier.**
+The prerequisite for the 150 target is therefore raising the UNIT tier into the >180 band the
+grade already reserves for it — a change to `DrawUnit`, deliberately NOT made here: it is
+outside this wave's surface, and it would be the third consecutive program to move this axis
+without measuring the other side of it first. **Recorded as the target for whoever does it:
+median ~65 (hit: 66.6), p95 ~150 (at 114, ceilinged by units at ~150).**
+
+### C — elevation legibility
+
+Under the old overlay a raised plateau was a ~10-luma bump *under a gold wash of the same
+value*, which is why it was unreadable rather than merely subtle. A and B both help; C adds
+the top lift (+64), the darker front wall (-12) and the stronger lit lip (a0.72 / 2.4px) so
+the step reads as wall-dark / top-light. Verified against a stashed base build on the same
+seed with `SIGHTLINE_ELEV=1`: in the BEFORE crop the plateau is invisible inside the dash
+wash; in the AFTER crop it is an unmistakable raised slab. Sampled on the STEEL capture, a
+plateau top now measures **mean 101** against **47 (far-corner floor) / 84 (lit floor)** in the
+same room — a 17-to-54 luma step where it used to be ~10. It sits just under cover tops
+(107-110: a block standing on the ground is a lit object, bare raised ground is a surface) and
+well under units (146).
+
+### Verification
+
+- `dotnet build -c Release` — **0 warnings / 0 errors**.
+- **Self-test battery 41/41 PASS** (every `SIGHTLINE_*TEST` in `Program.cs` except PAIRTEST,
+  which is run separately), each under `xvfb-run` with an isolated `XDG_CONFIG_HOME`.
+- **`SIGHTLINE_PAIRTEST=1` -> PASS** (byte-identical CRN legs).
+- **Autoplay x5** clean — LOSE/LOSE/LOSE/WIN/WIN, no exceptions, no TIMEOUT.
+- **`SIGHTLINE_BALANCE=10` byte-identical to base** (`runs=20` asserted on both). Expected:
+  `BalanceBatch` returns before the window is ever created, so the renderer is not on that
+  path at all — the batch is the proof that nothing gameplay-shaped moved.
+- Captures **read and judged**: all 8 biomes before/after, before/after pair sheets for
+  ARID / ASH / MAGMA / VOID, an `SIGHTLINE_ELEV` plateau close-up against a stashed base
+  build, a `SIGHTLINE_CB=1` pass on STEEL and ASH, and a 4-biome downscaled+blurred
+  squint sheet.
+
+**Squint verdict (honest).** Before: the eye lands on the overlay. The teal slab and the gold
+slab are the largest, most saturated shapes on the board, and the soldiers are small cyan discs
+sitting *inside a field of their own hue* — they do not win the squint. After: the four cyan
+discs are the only saturated cyan left and they win it outright, and each biome reads as its
+own room at squint distance. The one thing I watched closely is that plateau tops are now large
+light shapes; they attract at squint distance on the dark biomes (VOID especially). They lose to
+the units on saturation and on value (107 vs 146), and high ground *should* be noticeable, but
+that is the constant I would look at first if the owner thinks terrain is shouting — it was
+trimmed once already (+72 -> +64) for exactly this reason.
+
+**Was the fill load-bearing?** Partly, and the honest answer is that the *outline alone* is
+NOT a sufficient replacement. The first cut suppressed every cover-adjacent edge for a clean
+look and the region stopped reading on a cover-dense arena. What carries "where can I go" now
+is the **corner-tick lattice** more than the outline — the outline gives the silhouette, the
+lattice gives the fill's per-tile texture at 0.6% of its ink. The inner lift is the weakest of
+the three and could go to zero if the owner wants an even quieter board.
+
+### Notes for the next wave
+
+- **`SIGHTLINE_NOMOVE=1`** now exists. Any future overlay claim should be measured against it
+  rather than against a neighbouring region of the same shot.
+- **`Lift()` desaturates.** It is a clamped additive on R/G/B, so it preserves hue and kills
+  chroma. Anywhere it is used to brighten a *biome-carrying* surface, pair it with a tint pull
+  (the floor mean does this now) or the biome quietly leaves.
+- **Do not raise cover tops past ~120 luma** while units peak at ~150. Measured, +32 put cover
+  above the mean of a friendly soldier.
+- **Left undone, deliberately:** the p95->150 target (needs the unit tier raised first, see
+  above); `DrawThreat` / `DrawPathPreview` untouched (T2 owns them); `Display` post-FX
+  untouched, so the bloom knee was NOT re-tuned against the new grade — the rim/lip alphas were
+  raised on the assumption the knee is still ~0.36 luma and that is worth a look on hardware.
