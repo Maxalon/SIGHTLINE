@@ -67,7 +67,7 @@ public static class Mission
     public static void Build(Grid grid, List<Unit> players, List<Unit> enemies, int missionNum,
                              List<(int x, int y)> evac = null, (int x, int y)? terminal = null,
                              int enemyDelta = 0, int statDelta = 0, List<(int x, int y)> sabotage = null,
-                             int dmgDelta = 0)
+                             int dmgDelta = 0, bool defend = false)
     {
         enemies.Clear();
         grid.ClearSmoke();
@@ -115,7 +115,7 @@ public static class Mission
         // a lighter hostile force (the loud-tempo IS the difficulty) + covered fighting positions
         // at each site (below) so the split squad can hold.
         bool sabotageObj = sabotage != null && sabotage.Count > 0;
-        SpawnEnemies(grid, enemies, missionNum, evacSet, enemyDelta, statDelta, sabotageObj, dmgDelta);
+        SpawnEnemies(grid, enemies, missionNum, evacSet, enemyDelta, statDelta, sabotageObj, dmgDelta, defend);
 
         var occupied = new HashSet<(int, int)>();
         foreach (var u in players) occupied.Add((u.X, u.Y));
@@ -382,7 +382,7 @@ public static class Mission
 
     static void SpawnEnemies(Grid grid, List<Unit> enemies, int n, HashSet<(int, int)> evac,
                              int enemyDelta = 0, int statDelta = 0, bool sabotage = false,
-                             int dmgDelta = 0)
+                             int dmgDelta = 0, bool defend = false)
     {
         // Headcount cap raised 10 -> 12 so the top-Heat "+enemy" rungs aren't silently wasted
         // (the +1/+1 from RELENTLESS/OVERWHELMING used to clip at 10 on later missions). 12 still
@@ -400,6 +400,11 @@ public static class Mission
         // (floored at 3) so a divided squad isn't also out-gunned. Stat bump is untouched and the
         // Heat ladder still applies on top, so the mastery curve is preserved.
         if (sabotage) count = Math.Max(3, count - 2);
+        // FUL-4 HOLDFAST (Defend 38% h0 measured pre-fix, target 60-80): DEFEND's real force is
+        // the INITIAL screen PLUS every SpawnDefendWave reinforcement, so an untrimmed opener
+        // double-counts the objective's difficulty — the timer IS the pressure. Mirror the
+        // sabotage trim, one step deeper (waves keep arriving all mission; sabotage gets none).
+        if (defend) count = Math.Max(3, count - 3);
         // Final mission (the WARLORD boss): de-stack the force. This was the core of the ~90% m6
         // loss wall -- the squad cleared m1-5 (m5 often wins ~100%, partly because it isn't always
         // forced Eliminate) then got alpha-struck on m6's forced full-clear. The compounding cause:

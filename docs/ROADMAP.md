@@ -790,13 +790,18 @@ of record (container suspensions have wiped every scratchpad copy — docs are t
       + BALANCE=2 same-slot JSON field-identity (29/29 base-schema fields) — SHOT byte-equality
       is environmentally impossible for any change (clock-seeded RNG + wall-clock pulses; see
       the FUL-1 DEVLOG gotcha).
-- [ ] **FUL-4 HOLDFAST** (P4, M). Defend 23.1% h0 (n=26) / gap 100 → 60-80% h0, 55-70% h4,
-      gap <50. Mission.SpawnEnemies defend flag (count-3, mirror sabotage trim at Mission.cs:392);
-      SpawnDefendWave dose-response levers ONE at a time (first wave graced to t3; size 1+m/2;
-      rich-tier cap min(mission,4) in MakeWaveHostile; waves stop t5); wave pods get real PodIds +
-      _podOrig so morale/rout plays; SmartDefend co-fix (fall back to better cover / refuse a
-      flank); wave-edge telegraph one turn ahead via the W8 banner lane. Budget: other objectives
-      ±3 on an unpinned h0 batch.
+- [x] **FUL-4 HOLDFAST** (wt-ful4 through 021a84b). Defend 38% h0 (fresh n=32 reference; the
+      23.1% audit number was an older tree) / gap ~0 → **66-73% h0** (two disjoint CRN batches,
+      n=59/n=70), **69% h4**, |gap| <= 8 every round — all three bands HIT. Levers landed, one
+      measured round each: SmartDefend co-fix FIRST (fall back to better cover / refuse a flank),
+      defend flag in SpawnEnemies (opener count-3, mirrors the sabotage trim), first wave graced
+      to t3, wave size 1+m/2, waves as real morale pods (ids 100+, _podOrig-snapshotted;
+      pressure-clock waves stay morale-exempt), wave-edge telegraph one player turn ahead (shared
+      DefendWaveTurn read; SIGHTLINE_WAVEBANNER shot hook). The rich-tier cap + stop-t5 levers
+      were NOT needed — the band was reached without them (still in the toolbox for FUL-13).
+      Budget: unpinned h0 completion 60% (unchanged; FUL-13 input); nominal ±3 breaches on
+      Sabotage/Decapitate shown to be reference noise by a zero-Defend null batch (full rounds
+      table + analysis in docs/DEVLOG.md).
 - [ ] **FUL-11 CEREMONY** (P11, M). m6 finale presentation kit (HVT-named intro card, red top-bar
       plate, boss ring/aura in DrawUnit, first-sighting banner via NEW CONTACT lane); Wardens
       finale kit — MakeFinaleRetinue (Mission.cs:891-909) returns null for Wardens: WARBRINGER +

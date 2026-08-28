@@ -37,6 +37,16 @@ public partial class Game
         ShowBanner("ENEMY REINFORCEMENTS - MAX PRESSURE", false);
     }
 
+    /// FUL-4 harness hook (screenshot only; pair with SIGHTLINE_OBJ=defend): stage the wave-edge
+    /// telegraph by jumping the turn counter to the first wave turn and running the REAL
+    /// BeginPlayerTurn path (MaybeWaveTelegraph reads the spawner's own DefendWaveTurn schedule),
+    /// so the frame shows exactly what a live t3 shows — banner, sub-line, DEFEND 3/8 pill.
+    public void DebugWaveTelegraph()
+    {
+        _turnCount = 3;
+        MaybeWaveTelegraph();
+    }
+
     /// Harness hook (screenshot only): spread the three awareness tiers (4.3) across the
     /// enemies so one frame shows Unaware ("?") / Suspicious ("!") / Alert glyph states.
     public void DebugAlertTiers()

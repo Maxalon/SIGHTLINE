@@ -1609,3 +1609,62 @@ logic-identity proof, now precedent for telemetry-only waves:
   (b) SIGHTLINE_BALANCE=2, same slot base, both trees — all 29 base-schema JSON fields identical
       (per-shot class tallies and action mix included);
   (c) PAIRTEST + SAVETEST PASS.
+
+# PROGRAM FULCRUM — FUL-4 HOLDFAST (2026-08, wave dev on wt-ful4)
+
+Defend was the hidden low cell: the initial force was sized like an Eliminate screen AND rich
+waves landed from t1 at 2+m/2 — the one enemy-forced-tempo objective double-counted its own
+difficulty — and the measuring bot refused to leave a flanked tile (so part of the number was
+the bot, not the mission). Measured-wave rounds, ONE lever each (SIGHTLINE_OBJ=defend, N=10 CRN
+slots, h0 unless noted; a706152 base):
+
+| round | lever | Defend win% | greedy/sloppy | gap |
+|---|---|---|---|---|
+| R0 | reference | 38% (n=32) | 38/38 | 0 |
+| R1 | SmartDefend co-fix: fall back to better cover / refuse a flank (lands FIRST) | 38% (n=32) | 33/41 | -8 |
+| R2 | defend flag: opener count-3 (mirror the sabotage trim) | 41% (n=34) | 41/41 | 0 |
+| R3 | first wave graced to t3 | 57% (n=46) | 60/52 | 8 |
+| R4 | wave size 1+m/2 | 66% (n=58) | 67/64 | 2 |
+| R5 | waves = real morale pods (ids 100+, _podOrig) | 66% (n=59) | 67/66 | 1 |
+| — | h4 leg, final tree | 69% (n=59) | 69/70 | -1 |
+| — | h0 disjoint slots (BALANCE_BASE=10), final tree | 73% (n=70) | 73/73 | -0 |
+
+Bands: h0 60-80 HIT (66/73 across disjoint slot sets, pooled ~70); h4 55-70 HIT (69); Defend
+gap <50 HIT (|gap| <= 8 every round). The R0 reference read 38%, not the audit's 23.1% — older
+tree, and n=26 vs n=32 batch noise; the target band is what binds, not the entry number. The
+spec's remaining dose-response levers (rich-tier cap min(mission,4) in MakeWaveHostile; waves
+stop t5) were deliberately NOT applied — the method stops inside the band; they stay in the
+toolbox if FUL-13's re-baseline wants Defend softer at the top rungs.
+
+Telegraph: "WAVE INBOUND - EAST EDGE" one PLAYER TURN ahead of the wave acting, shown from
+BeginPlayerTurn and sharing the spawner's own DefendWaveTurn schedule read (the W8 never-lies
+pattern), with a sub-line in the W11 lane. SIGHTLINE_WAVEBANNER=1 + SIGHTLINE_OBJ=defend +
+SIGHTLINE_SHOT stages it for a screenshot (autoplay skips game.Draw entirely, so SHOT+AUTOPLAY
+can never photograph a live board — stage presentation via a Debug* hook).
+
+Spill budget (unpinned h0 N=10, base 0 — CRN-comparable to the m1 A/B reference): Eliminate 100
+(ref 100), Hack 100 (~100), Evac 100 (~100), Escort 100 (~96, +4), Rescue 100 (~98), Sabotage
+86 (~100, -14), Decapitate 75 (~81, -6); run completion 60% (unchanged — recorded as FUL-13
+input; Defend fielded only n=4 unpinned missions, the FUL-9 exposure problem). The Sabotage /
+Decapitate / Escort deviations exceed the ±3 window NOMINALLY; a disjoint-slot control batch
+(BALANCE_BASE=10) that happened to field ZERO Defend missions — i.e. code-path-identical to the
+pre-FUL-4 tree — read Eliminate 90 / Sabotage 80 / Decapitate 86 / completion 60% against the
+same references. The ±3 window is tighter than the metric's own batch noise at n~15; breach
+reported per protocol, nothing reverted. FUL-1's per-slot records are the real fix for this
+class of question.
+
+Review notes (SHIP verdict, note-level): (1) the telegraph can promise a wave the 12-alive
+clutter-cap then swallows (16/18 landed in a pinned autoplay) — the lie is only ever
+conservative (spawner+banner share one DefendWaveTurn read; an unannounced wave is impossible);
+(2) the banner lives ~72 frames, so SIGHTLINE_SHOT=90 photographs an empty telegraph — use
+SHOT=30 for the wave-banner shot.
+
+
+Verified: Release 0/0; COMBATTEST/AITEST/MORALETEST/SIEGETEST PASS; autoplay x3 clean + one
+defend-pinned autoplay (waves land on schedule, WIN m6, no exceptions/TIMEOUT); telegraph
+screenshot inspected (banner + sub-line + DEFEND 3/8 pill on a live board).
+
+Gotchas for future waves: SpawnReinforcements' `podded` flag is DEFEND-only by design (a
+routable pressure-clock punishment isn't a punishment); wave pod ids start at 100 (initial pods
+are i/2 <= 5, harness scenes use 90/91); the wave schedule is DefendWaveTurn — spawner and
+telegraph must keep sharing that one read.
