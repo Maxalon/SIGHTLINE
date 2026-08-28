@@ -27,9 +27,11 @@ seeds (mix of WIN/LOSE, no exceptions):
   lasting marks (append-only `Scar` enum, persisted): SHELL-SHOCKED (-1 mob, immune to Disorient/Stun),
   BURN-SCARRED (+3 HP, -aim while burning), HARD-BITTEN (+crit bloodied, -aim at full HP), VENDETTA (+aim/+crit
   vs the faction that nearly killed you). Earned in `Run.DebriefSurvivors` from trauma flags; `SIGHTLINE_SCARTEST`.
-- **RUN CONTRACTS (PROGRAM VANTAGE II / W6):** opt-in run-modifier rulesets chosen at the draft (default None =
-  zero base-balance change) — IRON VETERANS (no recruit backfill, faster veterancy), HIGH STAKES (+50% Intel, no
-  field-heal), SPEARHEAD (open unconcealed, turn-1 +1-action alpha). `Run.Contract` persisted; `SIGHTLINE_CONTRACT`.
+- **RUN CONTRACTS (PROGRAM VANTAGE II / W6; +2 FULCRUM FUL-10):** opt-in run-modifier rulesets chosen at the draft
+  (default None = zero base-balance change) — IRON VETERANS (no recruit backfill, faster veterancy), HIGH STAKES
+  (+50% Intel, no field-heal), SPEARHEAD (open unconcealed, turn-1 +1-action alpha), MERCENARY CLAUSE (veteran
+  recalls half price, survivors never enshrine), LIVING LEGENDS (double kill credit + Rank>=2 run-end pensions,
+  but a KIA erases their reserve record). `Run.Contract` persisted (append-only, dual tail pins); `SIGHTLINE_CONTRACT`.
 - **FIELD CRAFT positioning verbs (PROGRAM VANTAGE W1):** two UNIVERSAL "play the geometry" verbs — **DRAG**
   (key 7, reach-2: pull a lagging ally one tile toward you — rescue/accelerate the corner-march) + **VAULT**
   (key 9: leap an adjacent cover tile to the far floor in one action — cross an otherwise-impassable cover
@@ -52,9 +54,13 @@ seeds (mix of WIN/LOSE, no exceptions):
   it charges a 3×3 strike, shows the danger zone for your whole next turn, then detonates cover-ignoring AoE unless
   you relocate / break LoS / kill it. m3+, 1/mission cap. (`Unit.ChargeTurns`, `Ai.BestSiege`, `Game.TickSiegeStrikes/
   DetonateSiege`, `Renderer.DrawSiegeZones`; `SIGHTLINE_SIEGETEST`/`SIGHTLINE_SIEGE`.)
-- **FIELD EVENTS (VANGUARD W4):** roguelike "?" nodes on the campaign map — a situation + 2-3 trade-off choices that
-  mutate persistent run state (10 events, every choice a trade-off/gamble), so runs branch and feel different.
-  `NodeKind.Event` (append-only), `src/Events.cs`, `Hud.DrawEventScreen`; deterministic+save-safe; `SIGHTLINE_EVENTTEST`.
+- **FIELD EVENTS (VANGUARD W4; +7 FULCRUM FUL-10):** roguelike "?" nodes on the campaign map — a situation +
+  2-3 trade-off choices that mutate persistent run state (17 events, every choice a trade-off/gamble), so runs
+  branch and feel different. The FUL-10 seven cross salvage/scar/veteran/faction/heat via six new outcome kinds
+  (GrantScar/CureScar/Salvage/GrantPrep/RankKills/ReleaseSoldier; seeded ChancePct arms ride GambleSucceeds —
+  reload-stable); event salvage pends in `Run.PendingSalvageReward` and pays at run end (win or loss).
+  `NodeKind.Event` (append-only), `src/Events.cs`, `Hud.DrawEventScreen`; deterministic+save-safe;
+  `SIGHTLINE_EVENTTEST`; `SIGHTLINE_EVENTID=<id>` pins the staged screenshot event.
 - **32 authored arenas (VANGUARD W5):** +CRUCIBLE/STEPWELL/COLONNADE/ENTRENCHED (indices 28-31), biome-themed,
   connectivity-guarded. `SIGHTLINE_MAP=<idx>` forces one.
 - **BALANCE root-fixes (VANGUARD W1):** Sharpshooter aim de-domination, boss de-inversion (BERSERKER/BRUISER HP),
@@ -260,12 +266,17 @@ seeds (mix of WIN/LOSE, no exceptions):
 - **Mission objectives:** Eliminate, Hack (reach the TERMINAL and hack it down,
   HACK action / key H), Evac (get the whole squad to the extraction zone), and
   **Escort** (walk a fragile gold VIP to the extraction zone alive — losing the
-  VIP is a loss; the enemy AI prioritises it). Rotation is Elim / Hack / Evac /
-  Escort per 4-mission cycle; shown in the HUD.
+  VIP is a loss; the enemy AI prioritises it). Campaign objectives are dealt by a
+  **hashed column plan** (FUL-9: every route gets >=1 Eliminate, >=1 Defend-or-
+  Rescue, <=1 Escort; boss always Decapitate); the 8-objective rotation remains
+  the SKIRMISH/offer fallback. Shown in the HUD.
 - **Map variety:** procedural scatter OR a hand-authored arena (`src/Maps.cs`,
-  ~55% of missions) chosen with a connectivity guard so spawns/evac/terminal are
-  always reachable. Plus **per-mission biomes** (`Biome`: STEEL/ARID/TUNDRA/VERDANT/
-  ASH/VOID) that retint the floor/grid so each mission reads as a distinct place.
+  ~80% of missions) dealt from a **per-run no-repeat deck** derived purely from
+  the run's MapSeed (FUL-9: an arena never repeats within a run; the displayed
+  biome's themed arena is pulled forward at reduced weight), with a connectivity
+  guard so spawns/evac/terminal are always reachable. Plus **per-mission biomes**
+  (`Biome`: STEEL/ARID/TUNDRA/VERDANT/ASH/VOID) that retint the floor/grid so
+  each mission reads as a distinct place.
 - **Elevation / high ground:** raised plateaus (`Grid.Height`) grant +15 aim /
   +10 crit firing down on lower targets AND **see over LOW cover** (negate the
   target's low cover; high cover still blocks); faux-3D platforms, height-aware

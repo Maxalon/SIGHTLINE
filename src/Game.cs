@@ -862,9 +862,20 @@ public partial class Game
         get
         {
             int c = 0;
-            foreach (var u in DraftPicked) if (u.FromReserve) c += MetaProg.RecallCost(u.Rank);
+            foreach (var u in DraftPicked) if (u.FromReserve) c += DraftRecallFee(u);
             return c;
         }
+    }
+
+    /// FUL-10 MRC: ONE veteran's recall fee under the draft-screen selection — half, rounded up,
+    /// when MERCENARY CLAUSE is picked. Reads DraftSelectedContract (both live on the same screen),
+    /// so the per-card fee, the bill row and ConfirmDraft's charge all discount together — honest
+    /// by construction, and the halving happens in exactly one place.
+    public int DraftRecallFee(Unit u)
+    {
+        int c = MetaProg.RecallCost(u.Rank);
+        if ((DraftSelectedContract ?? Contract.None) == Contract.MercenaryClause) c = (c + 1) / 2;
+        return c;
     }
 
     /// Can the bank cover the picked veterans? (Always true under NoPersist — the harness never pays.)
@@ -1336,6 +1347,9 @@ public partial class Game
         (int x, int y)? reserve = HasTerminal ? Terminal
             : (Objective == Objective.Rescue ? (Grid.W / 2, Grid.H / 2) : ((int, int)?)null);
         Grid.ClearHazards();              // wipe last mission's fire/barrels before terrain is rebuilt
+        // FUL-9: publish the run seed for the arena deck (pure derivation — Mission.PickLayout
+        // deals draw n of a MapSeed-keyed no-repeat deck; all five mode entries route through here)
+        Mission.DeckSeed = _run != null ? _run.MapSeed : 0;
         Mission.Build(Grid, Players, Enemies, n, EvacZone, reserve,
                       enemyDelta, statDelta, HasSabotage ? SabotageSites : null, heatDmg,
                       Objective == Objective.Defend);   // FUL-4: trim the opener — waves are the force
@@ -1871,6 +1885,22 @@ public partial class Game
         // funds the standing economy. h0 is UNCHANGED at 25+6m (~61 for a full clear). The loss
         // consolation stays additive.
         int salvage = win ? (25 + 6 * _run.Mission) * (10 + heat) / 10 : (4 * Math.Max(0, _run.Mission - 1) + 2 * heat);
+        // FUL-10: field-event salvage claims were EARNED mid-run (events never touch meta directly —
+        // they pend on the run); pay them win OR loss, folded into the same bounty + end-card slab.
+        if (_run.PendingSalvageReward > 0)
+        {
+            salvage += _run.PendingSalvageReward;
+            _run.Report.Insert(0, $"EVENT SALVAGE CLAIMS +{_run.PendingSalvageReward}");
+            _run.PendingSalvageReward = 0;   // committed — never bankable twice
+        }
+        // FUL-10 LGD: surviving Rank>=2 soldiers pension out at +6/rank each — the reserve pays income
+        // to balance the mortality below. Inert at Contract.None.
+        if (_run.Contract == Contract.LivingLegends)
+        {
+            int pension = 0;
+            foreach (var u in _run.Squad) if (u.Alive && !u.IsVip && u.Rank >= 2) pension += MetaProg.LegendPension * u.Rank;
+            if (pension > 0) { salvage += pension; _run.Report.Insert(0, $"LIVING LEGENDS pensions +{pension}"); }
+        }
         if (salvage > 0) { SaveGame.AddSalvage(salvage); _run.Report.Insert(0, $"SALVAGE +{salvage}"); EndSalvage = salvage; }   // FUL-12: field feeds the end-card slab
 
         // 2) HALL OF FAME — surviving squad (won runs) as legends, plus this run's fallen (KIA).
@@ -1891,7 +1921,15 @@ public partial class Game
         // on a WIN or a survivable loss (a squad wipe leaves no survivors -> enshrines nobody). A Rank>=1
         // (promoted-at-least-once) gate keeps green rookies out so the reserve stays a roster of legends.
         var vets = _run.Squad.Where(u => u.Alive && !u.IsVip && u.Rank >= 1).ToList();
-        if (vets.Count > 0) SaveGame.EnshrineVeterans(vets);
+        // FUL-10 MRC: cheap recalls now, no pipeline later — this run's survivors never enshrine.
+        if (vets.Count > 0 && _run.Contract != Contract.MercenaryClause) SaveGame.EnshrineVeterans(vets);
+        // FUL-10 LGD: a KIA whose name matches a reserve record ERASES it — veterans are mortal
+        // across runs, not just priced. Name-keyed exactly like EnshrineVeterans' dedupe.
+        if (_run.Contract == Contract.LivingLegends && _run.Fallen.Count > 0)
+        {
+            int gone = SaveGame.RemoveVeterans(_run.Fallen);
+            if (gone > 0) _run.Report.Insert(0, $"LIVING LEGENDS: {gone} reserve record{(gone > 1 ? "s" : "")} died with the fallen");
+        }
 
         // 4) ACHIEVEMENTS (each a one-time salvage bounty on first unlock)
         if (win)
@@ -2333,6 +2371,10 @@ public partial class Game
     {
         killer.Kills++;
         if (killer.Team != Team.Player || killer.IsVip) return;
+        // FUL-10 LGD: kills count DOUBLE toward rank — a second credit, the same contract-gated
+        // kill-credit family as IronVeterans' debrief bonus. Feats stay single (KillsThisTurn
+        // below is untouched). Inert at Contract.None.
+        if (_run != null && _run.Contract == Contract.LivingLegends) killer.Kills++;
         killer.KillsThisTurn++;
         if (killer.KillsThisTurn >= 2 && !killer.FeatMultiKill)
         { killer.FeatMultiKill = true; FeatBanner(killer, "MULTI-KILL"); }
@@ -5817,7 +5859,7 @@ public partial class Game
         {
             var buyable = new List<int>();
             foreach (int i in offer)
-                if (!IsPrepItem(i) && CanBuy(i)) buyable.Add(i);
+                if (CanBuy(i)) buyable.Add(i);   // FUL-5: PREP now competes (was excluded — 0 buys ever)
             if (buyable.Count == 0) break;      // nothing useful/affordable left
 
             // value prior (competent-play proxy, mirrors SmartPerkValue's role): healing a hurt
@@ -5847,7 +5889,28 @@ public partial class Game
     /// the 30% off-pick keeps every row exposed for the BY PURCHASE win-rate table.
     float ShopValue(int item)
     {
-        if (IsModItem(item)) return 6f;        // permanent firepower — the run's real reward sink
+        // FUL-5 R6: DE-FLATTENED mod priors — the flat 6f let AFFORDABILITY order the mod
+        // economy (SUPPRESSOR 45 of 165 mod buys in the R0 reference, ~2x its slate share:
+        // the cheap rows stay buyable after the good rows drain the intel). Rank by what a
+        // competent player installs first: the universal always-on rows (damage, aim) over
+        // the conditional/situational ones. The 30% off-pick keeps every row exposed anyway.
+        if (IsModItem(item))
+            return ModForItem(item) switch
+            {
+                WeaponMod.HollowPoint => 7f,    // +crit +dmg — universal damage, every kit
+                WeaponMod.Scope       => 7f,    // +12 aim + long-range hold — universal accuracy
+                WeaponMod.Stabilizer  => 6f,    // +6 aim +2 range — universal, smaller
+                WeaponMod.ExtendedMag => 5f,    // tempo (fewer reloads); shines on 2-clip kits
+                WeaponMod.Bipod       => 5f,    // +10 aim but only while unmoved — positional bet
+                WeaponMod.Suppressor  => 3f,    // one ambush-wake read per MISSION — situational tech
+                _ => 6f,                        // future mods: the old flat prior
+            };
+        // FUL-5: COUNTER-PREP — a MODEST prior. The slot only exists when a faction IS
+        // telegraphed (RefreshShopOffer) and CanBuy re-gates it, so this is the honest
+        // "one-mission edge vs the fight we KNOW is coming" bet: below the permanent rows
+        // (a mod outlives the mission), above the generic floor. Was excluded outright — the
+        // prep's Combat reads were 0-exposure in every measured batch.
+        if (IsPrepItem(item)) return 4f;
         return item switch
         {
             0 => 9f,                            // FIELD MEDKIT (CanBuy gates on someone actually hurt)
@@ -5943,37 +6006,102 @@ public partial class Game
         int cost = 0;
         if (ch.Outcome.Kind == EventOutcomeKind.Intel && ch.Outcome.Amount < 0) cost += -ch.Outcome.Amount;
         if (ch.HasSecond && ch.Outcome2.Kind == EventOutcomeKind.Intel && ch.Outcome2.Amount < 0) cost += -ch.Outcome2.Amount;
+        if (ch.HasThird && ch.Outcome3.Kind == EventOutcomeKind.Intel && ch.Outcome3.Amount < 0) cost += -ch.Outcome3.Amount;   // FUL-10
         if (cost > 0 && _run.Intel < cost) return false;
         // roster: a recruit requires a free roster slot
         if (ch.Outcome.Kind == EventOutcomeKind.Recruit && _run.Squad.Count >= Run.RosterMax) return false;
+        // FUL-10: a scar cure needs a scarred soldier; a release must leave a roster behind
+        if (ChoiceHas(ch, EventOutcomeKind.CureScar) && !_run.Squad.Exists(u => u.Scars.Count > 0)) return false;
+        if (ChoiceHas(ch, EventOutcomeKind.ReleaseSoldier) && _run.Squad.Count <= 1) return false;
         return true;
     }
 
-    /// Autopilot/balance default: prefer a SAFE, beneficial legal choice (no intel cost, no gamble,
-    /// no self-wound, no heat) so the balance harness models SENSIBLE play — a human wouldn't gamble
-    /// half their intel or wound a soldier on every event. Falls back to the first legal choice, then
-    /// the last (always a no-op/safe option). Always returns a legal index -> one-tick resolve, no stall.
+    /// FUL-10: does any of the (up to three) outcomes on this arm carry the given kind?
+    static bool ChoiceHas(EventChoice ch, EventOutcomeKind k)
+        => ch.Outcome.Kind == k || (ch.HasSecond && ch.Outcome2.Kind == k) || (ch.HasThird && ch.Outcome3.Kind == k);
+
+    /// FUL-5: 70/30 VALUE-BIASED event choice (the ChoosePerk/AutoShop pattern), randomness
+    /// HASHED off (MapSeed, node id) — NEVER an Rng draw: a Util.Rng draw here would shift the
+    /// shared stream the paired legs replay (CRN) and desync every world after the first event;
+    /// the hash is fixed per (run, node), identical across legs and reloads (the Events.cs
+    /// GambleSucceeds precedent). The old "always the safe arm" rule left every costed/gamble/
+    /// trade-off arm at 0 exposure in ~500 measured missions — BY EVENT-CHOICE had nothing to
+    /// price (it replaced the IsSafeChoice/HasDownside pair, removed with it). 70%: the highest-
+    /// VALUE legal arm (EventChoiceValue, a competent-play prior); 30%: a hash-picked OTHER
+    /// legal arm, so every arm accrues honest exposure over a batch. Always returns a legal
+    /// index -> one-tick resolve, no stall.
     int AutoEventChoice()
     {
         if (_activeEvent == null) return 0;
-        int firstLegal = -1;
+        var legal = new List<int>();
         for (int i = 0; i < _activeEvent.Choices.Length; i++)
+            if (ChoiceLegal(_activeEvent.Choices[i])) legal.Add(i);
+        if (legal.Count == 0) return _activeEvent.Choices.Length - 1;   // defensive; the last arm is the no-op
+        int best = legal[0]; float bestV = float.NegativeInfinity;
+        foreach (int i in legal)
         {
-            if (!ChoiceLegal(_activeEvent.Choices[i])) continue;
-            if (firstLegal < 0) firstLegal = i;
-            if (IsSafeChoice(_activeEvent.Choices[i])) return i;   // prefer a downside-free benefit
+            float v = EventChoiceValue(_activeEvent.Choices[i]);
+            if (v > bestV) { bestV = v; best = i; }
         }
-        return firstLegal >= 0 ? firstLegal : _activeEvent.Choices.Length - 1;
+        if (legal.Count == 1) return best;
+        int h = unchecked((_run != null ? _run.MapSeed : 0) * 92821 ^ ((_eventNode != null ? _eventNode.Id : 0) + 3) * 68917);
+        if (((h % 100) + 100) % 100 < 70) return best;
+        var rest = legal.Where(i => i != best).ToList();
+        return rest[(((h >> 7) % rest.Count) + rest.Count) % rest.Count];
     }
 
-    /// A choice with no downside in either outcome (no intel spend, gamble, self-wound, or heat gain).
-    static bool IsSafeChoice(EventChoice ch)
-        => !HasDownside(ch.Outcome) && (!ch.HasSecond || !HasDownside(ch.Outcome2));
-    static bool HasDownside(EventOutcome o)
-        => (o.Kind == EventOutcomeKind.Intel && o.Amount < 0)
-           || o.Kind == EventOutcomeKind.GambleIntel
-           || o.Kind == EventOutcomeKind.WoundSoldier
-           || o.Kind == EventOutcomeKind.AddHeat;
+    /// FUL-5: the event-arm VALUE prior (competent-play proxy — the SmartPerkValue/ShopValue
+    /// family: a heuristic to bias exposure, not ground truth). Roughly on the ShopValue scale;
+    /// intel converts at ~0.3/pt so a 15-intel arm (4.5) competes with a free mod grant (5).
+    float EventChoiceValue(EventChoice ch)
+        => EventOutcomeValue(ch.Outcome) + (ch.HasSecond ? EventOutcomeValue(ch.Outcome2) : 0f)
+           + (ch.HasThird ? EventOutcomeValue(ch.Outcome3) : 0f);   // FUL-10: triple arms
+
+    float EventOutcomeValue(EventOutcome o)
+    {
+        switch (o.Kind)
+        {
+            case EventOutcomeKind.Intel: return o.Amount * 0.3f;             // signed: costs subtract
+            case EventOutcomeKind.HealSoldier:
+            {
+                // worth what it actually restores: the most-wounded soldier's deficit (full heal)
+                // or the capped amount. Zero when nobody is hurt — never overvalue a no-op arm.
+                var w = _run != null ? _run.Squad.Where(s => s.Alive && s.MaxHp > 0)
+                            .OrderBy(s => (float)s.Hp / s.MaxHp).FirstOrDefault() : null;
+                if (w == null) return 0f;
+                int deficit = w.MaxHp - w.Hp;
+                float v = (o.Amount < 0 ? deficit : Math.Min(o.Amount, deficit)) * 0.8f;
+                if (o.Amount < 0 && w.Wound > 0) v += 2f;                    // the cure rides along
+                return v;
+            }
+            case EventOutcomeKind.WoundSoldier: return -3f;                  // a fatigued next fight
+            case EventOutcomeKind.GambleIntel:
+                // EV = stake * (2*chance - 1); stake = half our intel. Slightly positive at 55%,
+                // but variance on the run economy keeps a competent prior lukewarm.
+                return (_run != null ? Math.Max(5, _run.Intel / 2) : 5) * (2f * o.ChancePct / 100f - 1f) * 0.3f;
+            case EventOutcomeKind.GrantWeaponMod: return 5f;                 // a 10-14 intel row, free
+            case EventOutcomeKind.GrantBonusPerk: return 5f;                 // ADV. TRAINING's effect
+            case EventOutcomeKind.GrantGrenades: return 2f;
+            case EventOutcomeKind.GrantArmor: return o.SquadWide ? 6f : 3f;
+            case EventOutcomeKind.Recruit:
+                return _run != null && _run.Squad.Count < Run.RosterMax ? (o.Veteran ? 7f : 5f) : 0f;
+            case EventOutcomeKind.GrantTrait: return o.Tr == Trait.IronWill ? 4f : 3f;
+            case EventOutcomeKind.AddHeat: return -4f * Math.Max(1, o.Amount);
+            case EventOutcomeKind.GrantBoon: return 6f;
+            // FUL-10 kinds (integration): the old safe-first bot called scars/releases "downsides";
+            // here that judgment becomes a signed value so the 70/30 chooser prices the trade.
+            case EventOutcomeKind.GrantScar:
+                return -3f * (o.ChancePct > 0 ? o.ChancePct / 100f : 1f);
+            case EventOutcomeKind.CureScar:
+                return _run != null && _run.Squad.Any(u => u.Alive && u.Scars.Count > 0) ? 4f : 0f;
+            case EventOutcomeKind.Salvage: return o.Amount * 0.15f;          // meta-bank, not this run
+            case EventOutcomeKind.GrantPrep:
+                return _run != null && _run.UpcomingFaction() != Faction.None ? 4f : 0f;
+            case EventOutcomeKind.RankKills: return 2f;
+            case EventOutcomeKind.ReleaseSoldier: return -6f;                // a roster slot is a life
+            default: return 0f;                                              // Nothing / unknown
+        }
+    }
 
     void ResolveEvent(int choiceIdx)
     {
@@ -5988,6 +6116,7 @@ public partial class Game
             string line2 = EventCatalog.Apply(_run, ch.Outcome2, _eventNode);
             line = line + "; " + line2;
         }
+        if (ch.HasThird) line = line + "; " + EventCatalog.Apply(_run, ch.Outcome3, _eventNode);   // FUL-10
         _run.Report.Insert(0, $"EVENT: {_activeEvent.Title} -- {line}");
         Audio.Play("turn");
         _activeEvent = null; _eventNode = null;

@@ -30,6 +30,13 @@ public enum EventOutcomeKind
     AddHeat,          // +Amount HeatLevel (a curse/gamble cost), clamped
     GrantBoon,        // add a random un-owned Boon
     Nothing,          // decline / walk away (flavour only)
+    // ---- FUL-10 FORKS (append at the END by house style; the kind is never persisted) ----
+    GrantScar,        // add Scar Sc to the greenest soldier (ChancePct>0 = seeded risk); Vendetta brands the upcoming faction
+    CureScar,         // remove the most-scarred soldier's NEWEST scar (BurnScarred's +MaxHp reverts)
+    Salvage,          // +Amount META salvage, pended in Run.PendingSalvageReward and paid at run end
+    GrantPrep,        // stage counter-prep vs the telegraphed upcoming faction (None -> report line only)
+    RankKills,        // +Amount promotion-kill credit on the greenest soldier (barracks ranks it)
+    ReleaseSoldier,   // remove the highest-rank soldier (a roster SLOT traded to the economy)
 }
 
 public struct EventOutcome
@@ -37,11 +44,14 @@ public struct EventOutcome
     public EventOutcomeKind Kind;
     public int Amount;        // delta / heal amount / chance payout
     public int Cost;          // intel paid up-front (GambleIntel) or cost for a costed reward
-    public int ChancePct;     // 0..100 success chance (GambleIntel)
+    public int ChancePct;     // 0..100 success chance (GambleIntel / FUL-10 seeded arms)
     public WeaponMod Mod;
     public Trait Tr;
     public bool SquadWide;
     public bool Veteran;
+    public Scar Sc;           // FUL-10: scar granted by GrantScar (the Tr slot pattern)
+    public bool OnFail;       // FUL-10: fire this outcome when the node's seeded roll FAILS (pairs
+                              // with a ChancePct partner so exactly one of the two fires)
 }
 
 public struct EventChoice
@@ -51,6 +61,8 @@ public struct EventChoice
     public EventOutcome Outcome;
     public EventOutcome Outcome2;   // optional SECOND mutation applied with Outcome (trade-offs)
     public bool HasSecond;
+    public EventOutcome Outcome3;   // FUL-10: optional THIRD mutation (triple-resource arms)
+    public bool HasThird;
 }
 
 public class GameEvent
@@ -66,14 +78,19 @@ public static class EventCatalog
     // ---- builders ----
     static EventOutcome O(EventOutcomeKind k, int amount = 0, int cost = 0, int chance = 0,
                           WeaponMod mod = WeaponMod.Scope, Trait tr = Trait.Killer,
-                          bool squadWide = false, bool veteran = false)
-        => new EventOutcome { Kind = k, Amount = amount, Cost = cost, ChancePct = chance, Mod = mod, Tr = tr, SquadWide = squadWide, Veteran = veteran };
+                          bool squadWide = false, bool veteran = false,
+                          Scar sc = Scar.ShellShocked, bool onFail = false)
+        => new EventOutcome { Kind = k, Amount = amount, Cost = cost, ChancePct = chance, Mod = mod, Tr = tr, SquadWide = squadWide, Veteran = veteran, Sc = sc, OnFail = onFail };
 
     static EventChoice C(string label, string preview, EventOutcome outcome)
         => new EventChoice { Label = label, Preview = preview, Outcome = outcome, HasSecond = false };
 
     static EventChoice C2(string label, string preview, EventOutcome outcome, EventOutcome second)
         => new EventChoice { Label = label, Preview = preview, Outcome = outcome, Outcome2 = second, HasSecond = true };
+
+    // FUL-10: a triple-mutation arm (e.g. release a soldier + a salvage claim + intel).
+    static EventChoice C3(string label, string preview, EventOutcome outcome, EventOutcome second, EventOutcome third)
+        => new EventChoice { Label = label, Preview = preview, Outcome = outcome, Outcome2 = second, HasSecond = true, Outcome3 = third, HasThird = true };
 
     public static readonly GameEvent[] All =
     {
@@ -180,6 +197,90 @@ public static class EventCatalog
                 C("Pawn the gear", "+18 intel", O(EventOutcomeKind.Intel, 18)),
             },
         },
+        // ---- FUL-10 FORKS: seven trade-off events wired into salvage/scar/veteran/faction ----
+        // Ids and arm ORDER are FROZEN forever (Stats keys "id:arm"); append new arms at the end only.
+        new GameEvent
+        {
+            Id = "warpension", Title = "OLD DEBTS",
+            Flavor = "A discharged reserve veteran calls in a debt the outfit still owes. They will take payment - or a posting.",
+            Choices = new[]
+            {
+                C2("Pay it", "-15 intel; +25 salvage at run end", O(EventOutcomeKind.Intel, -15), O(EventOutcomeKind.Salvage, 25)),
+                C2("Press them back into service", "Greenest soldier +2 kill credit, but SHELL-SHOCKED",
+                   O(EventOutcomeKind.RankKills, 2), O(EventOutcomeKind.GrantScar, sc: Scar.ShellShocked)),
+                C("Refuse", "Walk away - nothing", O(EventOutcomeKind.Nothing)),
+            },
+        },
+        new GameEvent
+        {
+            Id = "fieldhospital", Title = "FIELD HOSPITAL",
+            Flavor = "A grey-market surgeon offers real work on old wounds - for intel, or for a body on the trial slab.",
+            Choices = new[]
+            {
+                C2("Buy the surgery (20 intel)", "-20 intel, cure a soldier's newest scar", O(EventOutcomeKind.Intel, -20), O(EventOutcomeKind.CureScar)),
+                C2("Volunteer for trials", "Fully heal your worst-hurt soldier; 40% a soldier is HARD-BITTEN",
+                   O(EventOutcomeKind.HealSoldier, -1), O(EventOutcomeKind.GrantScar, chance: 40, sc: Scar.HardBitten)),
+                C("Walk away", "Walk away - nothing", O(EventOutcomeKind.Nothing)),
+            },
+        },
+        new GameEvent
+        {
+            Id = "informant", Title = "FACTION INFORMANT",
+            Flavor = "A deserter sells the next force's doctrine. Buy it, sell THEM out, or let them vanish.",
+            Choices = new[]
+            {
+                C2("Buy the dossier (12 intel)", "-12 intel, counter-prep the next known force", O(EventOutcomeKind.Intel, -12), O(EventOutcomeKind.GrantPrep)),
+                C2("Turn them in", "+20 intel, but +1 Heat (the faction tightens up)", O(EventOutcomeKind.Intel, 20), O(EventOutcomeKind.AddHeat, 1)),
+                C("Let them go", "Walk away - nothing", O(EventOutcomeKind.Nothing)),
+            },
+        },
+        new GameEvent
+        {
+            Id = "quartermaster", Title = "CROOKED QUARTERMASTER",
+            Flavor = "The requisition ledgers can be cooked, once. Somebody signs, and somebody carries the crates.",
+            Choices = new[]
+            {
+                C2("Cook them", "+20 salvage at run end, but a soldier takes the fall (WOUNDED)",
+                   O(EventOutcomeKind.Salvage, 20), O(EventOutcomeKind.WoundSoldier, 1)),
+                C("Report the racket", "+14 intel", O(EventOutcomeKind.Intel, 14)),
+                C("Skim the crates", "+1 grenade capacity on two soldiers", O(EventOutcomeKind.GrantGrenades, 2)),
+            },
+        },
+        new GameEvent
+        {
+            Id = "bloodfeud", Title = "BLOOD FEUD",
+            Flavor = "A soldier recognizes the outfit that nearly took them. The grudge wants a name on it.",
+            Choices = new[]
+            {
+                C("Swear the feud", "A soldier takes a VENDETTA scar vs the force ahead", O(EventOutcomeKind.GrantScar, sc: Scar.Vendetta)),
+                C("Counsel restraint", "Heal your worst-hurt soldier +3", O(EventOutcomeKind.HealSoldier, 3)),
+                C2("Channel it", "A bonus perk, but a soldier is WOUNDED next mission",
+                   O(EventOutcomeKind.GrantBonusPerk), O(EventOutcomeKind.WoundSoldier, 1)),
+            },
+        },
+        new GameEvent
+        {
+            Id = "reservecall", Title = "THE RESERVE CALLS",
+            Flavor = "HQ asks you to release a proven soldier to another cell. Refusal is noted; compliance is paid.",
+            Choices = new[]
+            {
+                C3("Release them", "Your highest-rank soldier leaves; +30 salvage at run end, +10 intel",
+                   O(EventOutcomeKind.ReleaseSoldier), O(EventOutcomeKind.Salvage, 30), O(EventOutcomeKind.Intel, 10)),
+                C("Keep the roster", "+1 Heat - HQ notes the refusal", O(EventOutcomeKind.AddHeat, 1)),
+            },
+        },
+        new GameEvent
+        {
+            Id = "warchest", Title = "SEALED WAR CHEST",
+            Flavor = "A faction pay-chest, booby-trapped and singing. Force it, sell its location, or leave it humming.",
+            Choices = new[]
+            {
+                C2("Force it", "55%: +35 salvage at run end; else a soldier is WOUNDED",
+                   O(EventOutcomeKind.Salvage, 35, chance: 55), O(EventOutcomeKind.WoundSoldier, 1, chance: 55, onFail: true)),
+                C("Sell the location", "+18 intel", O(EventOutcomeKind.Intel, 18)),
+                C("Leave it", "Walk away - nothing", O(EventOutcomeKind.Nothing)),
+            },
+        },
     };
 
     // ---------------- deterministic, non-repeating selection (§3) ----------------
@@ -246,6 +347,9 @@ public static class EventCatalog
             }
             case EventOutcomeKind.WoundSoldier:
             {
+                // FUL-10: a ChancePct arm only wounds on the node's seeded roll (OnFail inverts, so
+                // it can be the miss-half of a paired gamble). Existing arms pass 0 -> unchanged.
+                if (!SeededFires(run, o, node)) return "everyone walks away unhurt";
                 var u = LeastWounded(run);
                 if (u == null) return "no one to wound";
                 u.Wound = Math.Max(u.Wound, Math.Max(1, o.Amount));
@@ -339,10 +443,74 @@ public static class EventCatalog
                 run.ActiveBoons.Add(pick);
                 return $"claimed the {BoonDef.Name(pick)} boon";
             }
+            // ---- FUL-10 FORKS ----
+            case EventOutcomeKind.GrantScar:
+            {
+                if (!SeededFires(run, o, node)) return "no lasting mark taken";
+                var u = Greenest(run);
+                if (u == null) return "no soldier to mark";
+                // idempotent like Run.GrantScar: re-applies never double-add or double the HP grant
+                if (u.HasScar(o.Sc)) return $"{u.Name} already bears {ScarDef.Name(o.Sc)}";
+                u.Scars.Add(o.Sc);
+                if (o.Sc == Scar.BurnScarred) { u.MaxHp += Unit.BurnScarHp; u.Hp += Unit.BurnScarHp; }
+                if (o.Sc == Scar.Vendetta && u.VendettaFaction == Faction.None)
+                {
+                    var f = run.UpcomingFaction();
+                    u.VendettaFaction = f != Faction.None ? f : Faction.Legion;   // fallback: the default force
+                }
+                return $"{u.Name} bears a scar: {ScarDef.Name(o.Sc)}";
+            }
+            case EventOutcomeKind.CureScar:
+            {
+                var u = MostScarred(run);
+                if (u == null) return "no scars to treat";
+                var s = u.Scars[u.Scars.Count - 1];   // NEWEST scar (the barracks REHAB takes the oldest)
+                u.Scars.RemoveAt(u.Scars.Count - 1);
+                // mirror the REHAB revert: BurnScarred's +MaxHp grant comes back off, Vendetta unbrands
+                if (s == Scar.BurnScarred) { u.MaxHp = Math.Max(1, u.MaxHp - Unit.BurnScarHp); u.Hp = Math.Min(u.Hp, u.MaxHp); }
+                if (s == Scar.Vendetta) u.VendettaFaction = Faction.None;
+                return $"{u.Name} cured of {ScarDef.Name(s)}";
+            }
+            case EventOutcomeKind.Salvage:
+            {
+                // meta income NEVER writes meta/disk here (Apply stays pure) — it pends on the run
+                // and Game.AwardMetaRunEnd commits it at run end, win or loss.
+                if (!SeededFires(run, o, node)) return "the cache was a decoy - nothing gained";
+                run.PendingSalvageReward += Math.Max(0, o.Amount);
+                return $"+{Math.Max(0, o.Amount)} salvage claimed (paid at run end)";
+            }
+            case EventOutcomeKind.GrantPrep:
+            {
+                var f = run.UpcomingFaction();
+                if (f == Faction.None) return "no faction telegraphed - the dossier is useless";
+                run.PrepFaction = f;
+                return $"counter-prep staged vs {Run.FactionName(f)}";
+            }
+            case EventOutcomeKind.RankKills:
+            {
+                var u = Greenest(run);
+                if (u == null) return "no soldier to press";
+                int amt = Math.Max(1, o.Amount);
+                u.Kills += amt;
+                return $"{u.Name} banks +{amt} kill credit";
+            }
+            case EventOutcomeKind.ReleaseSoldier:
+            {
+                if (run.Squad.Count <= 1) return "no one can be spared";   // ChoiceLegal gates too
+                var u = HighestRank(run);
+                run.Squad.Remove(u);
+                return $"{u.Name} transferred to another cell ({u.RankName})";
+            }
             default:
                 return "walked away";
         }
     }
+
+    // FUL-10 seeded-arm gate: ChancePct>0 outcomes fire only on the node's seeded roll (reload-
+    // stable — the same GambleSucceeds hash GambleIntel uses, NO Util.Rng draw). OnFail inverts,
+    // so a ChancePct pair on one arm fires exactly one of its two outcomes off the SAME roll.
+    static bool SeededFires(Run run, EventOutcome o, MissionNode node)
+        => o.ChancePct <= 0 || GambleSucceeds(run, node, o.ChancePct) != o.OnFail;
 
     // ---------------- target pickers ----------------
     static Unit MostWounded(Run run)
@@ -375,6 +543,32 @@ public static class EventCatalog
         foreach (var u in run.Squad) if (!u.HasTrait(t)) return u;
         return run.Squad.Count > 0 ? run.Squad[0] : null;
     }
+    // FUL-10: the greenest soldier — lowest Rank, squad-order tie-break. Rank never moves inside
+    // an event resolution, so paired arms (RankKills + GrantScar) deterministically hit the SAME
+    // soldier ("pressed back into service, marked by it").
+    static Unit Greenest(Run run)
+    {
+        Unit best = null;
+        foreach (var u in run.Squad) if (best == null || u.Rank < best.Rank) best = u;
+        return best;
+    }
+    // FUL-10: the soldier carrying the most scars (squad-order tie-break); null when nobody is scarred.
+    static Unit MostScarred(Run run)
+    {
+        Unit best = null;
+        foreach (var u in run.Squad)
+            if (u.Scars.Count > 0 && (best == null || u.Scars.Count > best.Scars.Count)) best = u;
+        return best;
+    }
+    // FUL-10: the most-proven soldier — highest Rank, then kills, then squad order (deterministic).
+    static Unit HighestRank(Run run)
+    {
+        Unit best = null;
+        foreach (var u in run.Squad)
+            if (best == null || u.Rank > best.Rank || (u.Rank == best.Rank && u.Kills > best.Kills)) best = u;
+        return best;
+    }
+
     static Unit SoldierLowestGrenades(Run run, List<string> exclude)
     {
         Unit best = null; int bestG = int.MaxValue;
@@ -492,6 +686,77 @@ public static class EventCatalog
         // 40 -> win +20 (60) or lose -20 (20)
         if (gr.Intel != 60 && gr.Intel != 20) fails.Add("gambleOutcome");
 
+        // ---- 3b. FUL-10 outcome mutations (one leg per new kind) ----
+        var fr = MakeTestRun();
+        fr.Squad[0].Rank = 0; fr.Squad[1].Rank = 1; fr.Squad[2].Rank = 2; fr.Squad[3].Rank = 3;
+
+        // RankKills + GrantScar land on the SAME greenest soldier (the warpension coupling)
+        var green = fr.Squad[0];
+        Apply(fr, new EventOutcome { Kind = EventOutcomeKind.RankKills, Amount = 2 });
+        if (green.Kills != 2) fails.Add("rankKills");
+        Apply(fr, new EventOutcome { Kind = EventOutcomeKind.GrantScar, Sc = Scar.ShellShocked });
+        if (!green.HasScar(Scar.ShellShocked)) fails.Add("grantScar");
+        Apply(fr, new EventOutcome { Kind = EventOutcomeKind.GrantScar, Sc = Scar.ShellShocked });
+        if (green.Scars.Count != 1) fails.Add("grantScarDoubled");   // idempotent re-apply
+
+        // GrantScar BurnScarred applies the +MaxHp grant exactly once; CureScar reverts it (newest-first)
+        int hp0 = green.MaxHp;
+        Apply(fr, new EventOutcome { Kind = EventOutcomeKind.GrantScar, Sc = Scar.BurnScarred });
+        if (green.MaxHp != hp0 + Unit.BurnScarHp) fails.Add("scarBurnHp");
+        Apply(fr, new EventOutcome { Kind = EventOutcomeKind.GrantScar, Sc = Scar.BurnScarred });
+        if (green.MaxHp != hp0 + Unit.BurnScarHp) fails.Add("scarBurnHpDoubled");
+        Apply(fr, new EventOutcome { Kind = EventOutcomeKind.CureScar });
+        if (green.HasScar(Scar.BurnScarred)) fails.Add("cureScarNewest");   // BurnScarred was newest
+        if (!green.HasScar(Scar.ShellShocked)) fails.Add("cureScarTookOldest");
+        if (green.MaxHp != hp0) fails.Add("cureScarHpRevert");
+        if (MostScarred(fr) != green) fails.Add("mostScarredPick");
+
+        // GrantScar Vendetta brands the upcoming faction (no map here -> the Legion fallback)
+        Apply(fr, new EventOutcome { Kind = EventOutcomeKind.GrantScar, Sc = Scar.Vendetta });
+        if (!green.HasScar(Scar.Vendetta) || green.VendettaFaction != Faction.Legion) fails.Add("scarVendetta");
+
+        // Salvage pends on the run (meta is NEVER touched here); GrantPrep degrades gracefully mapless
+        int psr0 = fr.PendingSalvageReward;
+        Apply(fr, new EventOutcome { Kind = EventOutcomeKind.Salvage, Amount = 25 });
+        if (fr.PendingSalvageReward != psr0 + 25) fails.Add("salvagePend");
+        Apply(fr, new EventOutcome { Kind = EventOutcomeKind.GrantPrep });
+        if (fr.PrepFaction != Faction.None) fails.Add("prepMapless");
+
+        // GrantPrep sets PrepFaction when a next node telegraphs a faction
+        var pr = MakeTestRun(); pr.GenerateMap(31337); pr.MapSeed = 31337; pr.MapPos = 0;
+        foreach (var nn in pr.NextNodes()) nn.Faction = Faction.Wardens;
+        Apply(pr, new EventOutcome { Kind = EventOutcomeKind.GrantPrep });
+        if (pr.PrepFaction != Faction.Wardens) fails.Add("prepSet");
+
+        // ReleaseSoldier removes exactly the highest-rank soldier; a lone soldier is never released
+        int sqN = fr.Squad.Count;
+        var top = fr.Squad[3];   // Rank 3
+        Apply(fr, new EventOutcome { Kind = EventOutcomeKind.ReleaseSoldier });
+        if (fr.Squad.Count != sqN - 1 || fr.Squad.Contains(top)) fails.Add("release");
+        var lone = new Run { Intel = 0 };
+        lone.Squad.Add(Sightline.Mission.MakeRecruit());
+        Apply(lone, new EventOutcome { Kind = EventOutcomeKind.ReleaseSoldier });
+        if (lone.Squad.Count != 1) fails.Add("releaseLone");
+
+        // seeded arms are reload-stable: double-apply of a ChancePct GrantScar mutates identically,
+        // and a Salvage/WoundSoldier OnFail pair fires EXACTLY one of its outcomes off the one roll
+        var sg = MakeTestRun(); sg.GenerateMap(77); sg.MapSeed = 77;
+        StampEventsForTest(sg);
+        var snode = sg.Map.Find(n => n.Kind == NodeKind.Event);
+        string s1 = Apply(sg, new EventOutcome { Kind = EventOutcomeKind.GrantScar, Sc = Scar.HardBitten, ChancePct = 40 }, snode);
+        string s2 = Apply(sg, new EventOutcome { Kind = EventOutcomeKind.GrantScar, Sc = Scar.HardBitten, ChancePct = 40 }, snode);
+        bool landed = false; foreach (var u in sg.Squad) if (u.HasScar(Scar.HardBitten)) landed = true;
+        if (landed != GambleSucceeds(sg, snode, 40)) fails.Add("seededScarRoll");
+        if (landed && !s1.Contains("bears a scar")) fails.Add("seededScarFirstApply");
+        if (landed && !s2.Contains("already bears")) fails.Add("seededScarDoubleApply");   // 2nd apply must be the idempotent path
+        int wound0 = 0; foreach (var u in sg.Squad) wound0 += u.Wound;
+        int pend0 = sg.PendingSalvageReward;
+        Apply(sg, new EventOutcome { Kind = EventOutcomeKind.Salvage, Amount = 35, ChancePct = 55 }, snode);
+        Apply(sg, new EventOutcome { Kind = EventOutcomeKind.WoundSoldier, Amount = 1, ChancePct = 55, OnFail = true }, snode);
+        int wound1 = 0; foreach (var u in sg.Squad) wound1 += u.Wound;
+        bool pairPaid = sg.PendingSalvageReward == pend0 + 35, pairHurt = wound1 > wound0;
+        if (pairPaid == pairHurt) fails.Add("gamblePairExclusive");   // exactly one side of the pair fires
+
         // ---- 4. save round-trip after an event ----
         var sr = MakeTestRun();
         sr.GenerateMap(555); sr.MapSeed = 555;
@@ -501,6 +766,7 @@ public static class EventCatalog
         Apply(sr, new EventOutcome { Kind = EventOutcomeKind.Intel, Amount = 30 });
         Apply(sr, new EventOutcome { Kind = EventOutcomeKind.GrantWeaponMod, Mod = WeaponMod.HollowPoint });
         Apply(sr, new EventOutcome { Kind = EventOutcomeKind.Recruit, Veteran = true });
+        Apply(sr, new EventOutcome { Kind = EventOutcomeKind.Salvage, Amount = 25 });   // FUL-10: the pending claim must survive the trip
         int postIntel = sr.Intel, postSquad = sr.Squad.Count;
         bool hadMod = false; foreach (var u in sr.Squad) if (u.HasMod(WeaponMod.HollowPoint)) hadMod = true;
 
@@ -514,6 +780,7 @@ public static class EventCatalog
             {
                 if (got.Intel != postIntel) fails.Add("postIntel");
                 if (got.Squad.Count != postSquad) fails.Add("postSquad");
+                if (got.PendingSalvageReward != 25) fails.Add("postSalvagePend");   // FUL-10 round-trip
                 bool gotMod = false; foreach (var u in got.Squad) if (u.HasMod(WeaponMod.HollowPoint)) gotMod = true;
                 if (hadMod && !gotMod) fails.Add("postMod");
                 // MapPos must point AT the event node (visited) so reload never re-offers it

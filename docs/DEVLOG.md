@@ -1712,3 +1712,264 @@ Gotchas for future waves: SpawnReinforcements' `podded` flag is DEFEND-only by d
 routable pressure-clock punishment isn't a punishment); wave pod ids start at 100 (initial pods
 are i/2 <= 5, harness scenes use 90/91); the wave schedule is DefendWaveTurn — spawner and
 telegraph must keep sharing that one read.
+
+
+# PROGRAM FULCRUM — FUL-9 THE DECK (2026-08, wave dev on wt-ful9)
+
+The carried W7 spec (the docs over-claim), finally built on the repaired roster. Two systems,
+both PURE derivations off MapSeed (zero Util.Rng draws, zero persisted state — CRN pairing and
+save round-trips hold by construction):
+
+**Objective plan** (Run.GenerateMap/CardForNode): hashed off (MapSeed, column, row) via the new
+`Util.Hash3` avalanche (the W5 finale-kit mixer, parameterised — .NET Random correlates nearby
+seeds). Column-scoped guarantees hold on EVERY route regardless of edge wiring (a route visits
+one node per column): an event-free ANCHOR mid column deals Defend(80%)-or-Rescue on all its
+nodes; Escort exists on EXACTLY one hashed node per map, <=1 per route (zero-Escort maps no
+longer occur; never in the anchor column); START
+stays Eliminate; boss stays Decapitate; everything else deals from an Escort-free 7-pool with a
+per-column offset + row (siblings in a column stay distinct ops). The GenerateMap rng stream is
+byte-identical to pre-FUL-9 (the plan takes no draws), so existing saves regenerate the same map
+shape/kinds/edges/factions — only card objectives change. `ObjectiveFor` survives untouched as
+the SKIRMISH/offer fallback rotation.
+
+**Arena deck** (Mission.PickLayout/DeckPick): a Hash3-keyed Fisher-Yates permutation of all 35
+layouts per run; mission n takes draw n (recomputed 1..n per Build — n<=6, cheap — so nothing
+persists). The biome hint became a 25% pull-forward WITHIN the deck of the DISPLAYED biome's
+arena (`Biome.IndexFor` — the old hint keyed off mission number, which both mismatched the
+rendered room and re-coupled arena to mission, the FUL-1 confound). Authored gate Roll 55→80 —
+FUL-1 measured the reject lane EMPTY (52.6/0.0/47.4 at n~190), so the lost roll was the only
+road to procedural. DRAW-ORDER CONTRACT (comment at the gate, load-bearing): exactly ONE
+Util.Roll in the gate, ZERO draws in the pick. The Mission.Build draw-stream change (Roll 55→80
++ PickLayout's draw removal) is accepted, consequence-free version skew for in-flight saves:
+mission terrain was never save-deterministic — normal play clock-seeds Util.Rng, and DAILY pins
+ForcedLayout and bypasses the deck entirely.
+
+**SIGHTLINE_EXPOSURETEST** (windowless, 200 seeds): enumerates all 1098 routes (mid columns
+hold 2-3 rows — sampling could miss a branch) and asserts the invariant on each; asserts zero
+in-run deck repeats (1200 draws); all 8 objectives dealt (Defend 528 / Rescue 200 / Escort
+exactly 200 = 1/map); all 35 arenas dealt (min 17 / mean 34.3 / max 69 — the 8 hint arenas sit
+at 46-69, reduced weight but still themed). PASS.
+
+Measured (h0, N=10 CRN slots; R0 = base 1e504f9 on slots 0-9):
+
+| batch | funnel auth/rej/proc | completion | Defend fielded | Defend on route | distinct arenas |
+|---|---|---|---|---|---|
+| R0 base, slots 0-9 | 56.3 / 0.0 / 43.8 | 60% (g50/s70) | n=4 @ 50% | (n/a, base) | 19 distinct/batch |
+| R1 deck, lean 75 | 77.4 / 0.0 / 22.6 | 50% (g50/s50) | n=15 @ 53% | 75% of runs | 2.75 all-runs mean |
+| R2 deck, lean 80 | 76.2 / 0.0 / 23.8 | 50% (g50/s50) | n=17 @ 59% | 85% of runs | 2.70 / 3.40 full-depth |
+| R2b disjoint slots 10-19 | 76.7 / 0.0 / 23.3 | 45% (g40/s50) | n=19 @ 74% | 80% of runs | 2.85 / 3.44 full-depth |
+
+Targets: procedural 20-25% HIT (23.3-23.8). Defend on >=80% of runs met on 2 of 3 slot sets
+(80/85/65 — the reviewer's unseen BASE=30 set read 65%): the structural guarantee holds (the
+anchor is on every route), but PLAYED reach is early-death-sensitive — a run that dies before
+the anchor column never fields its Defend. The 75→80 anchor lean lifted the floor (R1 read 75%
+at lean 75); the residual sensitivity is FUL-13 input. Defend win pooled 67% (24/36) — inside
+FUL-4's 60-80
+band; the exposure did not break the repair. Distinct-authored-arenas/run >=4.5 MISSED as
+specified but structurally unreachable: the target arithmetic assumed 6 authored fights/run,
+and real full-depth routes play 4.5-5.0 fights (an EVENT node replaces a fight; the boss is 1)
+× 77% authored = a 3.5-3.9 ceiling, of which 3.40-3.44 (~90%) is delivered — with repeats now
+IMPOSSIBLE (the old with-replacement sampling put 57% of authored missions on 8 hint arenas).
+The honest variety win is the deck guarantee + all-35 exposure, not the 4.5 number.
+
+BUDGET BREACH (reported, not hidden): h0 completion 60 → 50 (same slots) / 45 (disjoint),
+−10/−15 vs the ±7 window. Attribution is unambiguous in the per-objective tables: every other
+objective holds 90-100%, while Defend goes from n=4 fielded per 20-run batch to n=17-19 at
+59-74% and mid-run Decapitate (never dealt to mids by the old rotation) fields n=13-15 at
+67-85%. The drop is the PRICE OF EXPOSURE — routes now actually contain the roster's contested
+cells — exactly the FUL-13 TRUE NORTH re-baseline input the roadmap anticipates. Nothing was
+reverted; tuning Defend down would re-hide what FUL-4 repaired.
+
+Verified: Release 0/0; EXPOSURETEST / SAVETEST / EVENTTEST / COMBATTEST / MODETEST / PAIRTEST
+PASS; autoplay x3 clean (no exceptions/TIMEOUT); campaign-map screenshot inspected (an anchor
+column showing its RESCUE/DEFEND split renders + labels correctly).
+
+Gotchas for future waves: Mission.DeckSeed is PUBLISHED BY Game.SetupMission (all five mode
+entries route through it) — a bare harness Mission.Build sees whatever was last published (0 if
+none), fine for the empty-deploy guard but pin it if a new hook needs a specific deck. DAILY
+still bypasses the deck via ForcedLayout (its determinism contract predates FUL-9). The
+objective plan runs AFTER event stamping in GenerateMap and must stay there (the anchor column
+must be provably event-free). Keep the gate's draw-order comment intact: exactly one Util.Roll,
+zero draws in PickLayout/DeckPick — a second draw anywhere in that path breaks CRN pairing.
+
+# PROGRAM FULCRUM — FUL-5 HANDS landing (2026-08, wave dev)
+
+- **FUL-5 HANDS** (wt-ful5, base 5b7ac98): the EV bot learned the verbs, so FUL-1's compass
+  prices real play instead of no-ops. Measured one lever per round (paired h0 N=10 = 20
+  campaigns, CRN slots 0-9; R0 = own base reference on the same slots). Every probe stays an
+  honest EV argument — no scripted quotas; two rounds (R1, R2-greedy) came back byte-identical
+  to base and were treated as the finding ("the gate is unreachable"), not padded.
+  - **BRACE** 1 → **82**/batch (+ FOCUS 5 → 24): three iterations — a rusher arm in
+    HoldOverwatch (R1: never fired — unreachable), a step-5a combat-brain probe + a duck veto
+    for the shoot-then-brace turn (R3: sloppy-only ~5), and the real stage (R7): Defend/Escort
+    zone-holds route their watch through HoldOverwatch, whose rusher arm (committed charger
+    inbound — BERSERKER/HOUND/STRIKER/BRUISER — that a lethal reaction can't remove) now fires
+    where waves actually charge. SHOCK DOCTRINE procs 0 → **6** (5 picks) — the headline dead
+    verb-boon now reaches play.
+  - **ITEM** 0 → **19**/batch: TrySmokeCover — smoke the most-exposed sub-half-HP squadmate
+    (self incl.), probed objective-agnostically from SmartStep (the old ">=2 guns AND no shot
+    AND it's me" conjunction, buried where objective routines never reach, measured 0/500
+    missions). Self-bounded by the 1-charge/mission budget.
+  - **PATCH** ~1/500-missions → 4-6/batch: heal gate missing>=4 → >=3, an objective-agnostic
+    corpsman block in SmartStep (the objective routines bypassed SmartCombatStep — PATCH was
+    structurally dead on 5 of 8 objectives), and a bounded move-to-patch (hurt ally at Cheby
+    2-3 → step adjacent, Cd-gated).
+  - **DRAG** 0 → 5-7/batch: the Escort march + zone-hold gained SmartEvac's straggler pull
+    (incl. reeling the leashed VIP from Cheby 2 into extract range).
+  - **GRENADE** 8 → 6-8/batch (plateau): grenade-first on covered 2+ clusters (step 2a +
+    SmartDefend) is honest but thin — see the verdict below.
+  - **AutoEventChoice** rebuilt: 70/30 value-biased (EventChoiceValue competent-play prior),
+    randomness HASHED off (MapSeed, node id) — never an Rng draw (CRN; Events.cs GambleSucceeds
+    precedent; replaced the always-safe rule + its IsSafeChoice/HasDownside pair). BY
+    EVENT-CHOICE went from safe-arms-only to 9 populated arms (defector all three, medic:1,
+    drill:1 ...), value-driven (medic:1 taken when nobody is hurt).
+  - **COUNTER-PREP** 0 → 10-12 buys/batch (AutoShop buyable set + a modest prior 4f — the slot
+    only exists when a faction is telegraphed, CanBuy re-gates).
+  - **Mod priors de-flattened**: SUPPRESSOR 45/165 = 27% of mod buys (~2x slate share, an
+    affordability artifact of the flat 6f prior) → **13/142 = 9%**; SCOPE/HOLLOW POINT lead as
+    a competent player installs.
+
+## Measured (rounds; paired h0 N=10 = 20 campaigns each, slots 0-9; R0 = base 5b7ac98)
+| round | lever | completion (greedy/sloppy) | key counters |
+|---|---|---|---|
+| R0 | base reference | 60% ±11 (50/70) | BRACE 1, PATCH 1, GREN 8, ITEM 0, DRAG 0; SUP 27% of mods; safe event arms only |
+| R1 | HoldOverwatch rusher arm | 60% — byte-identical batch | the arm never fired: HoldOverwatch unreachable in open combat |
+| R2 | + PATCH >=3 + move-to-patch | 60% (50/70) | greedy leg still byte-identical; sloppy BRACE 5; PATCH 0 (objective routes bypass the brain) |
+| R3 | + grenade-first, duck veto, PATCH pre-routing | 55% (40/70) | BRACE 6, PATCH 4, GREN 7 |
+| R4 | + smoke-on-wounded, Escort DRAG, patch r2-3 | 55% (50/60) | DRAG 7, ITEM 1 (2b unreachable too), BRACE 6 |
+| R5 | + hashed event choice, COUNTER-PREP, smoke pre-routing | 65% (80/50) | ITEM 14, PREP 12, 9 event arms |
+| R6 | + mod prior de-flatten | 65% (70/60) | SUP 9.6% of mod buys |
+| R7 | + Defend frag + holds route through HoldOverwatch | **75% ±10 (80/70)** | BRACE 82, FOCUS 24, ITEM 19, SHK procs 6, PATCH 5, GREN 8 |
+| R7b | same tree, FRESH slots 100-109 (robustness) | 50% (40/60) — different worlds, not budget-comparable | BRACE 31, ITEM 15, **PATCH 10**, PREP 11, SUP 5.6%, SHK 1 proc, FDR 0; event arms incl. the profiteer:0 gamble + cache/distress |
+
+Budget: R7 = R0 +15 on the same slots — the bot got BETTER (allowed; recorded as FUL-13 input:
+the h0 baseline for the finished tree is now ~75 under this bot ON THESE SLOTS; the fresh-slot
+50% shows world-to-world variance still dominates absolute levels — only paired same-slot
+readings are level-comparable). PAIRED MARGIN drifted -0.30 ±0.26 → 0.00 ±0.39 (n=10 — noise).
+
+Verified at landing: Release 0/0; COMBATTEST / AITEST / SNAPTEST / SAVETEST / **PAIRTEST** all
+PASS (PAIRTEST is the load-bearing one — the event-choice 70/30 and every new probe had to keep
+A/A CRN identity, hence hash-not-draw everywhere); autoplay x3 clean (no exception, no TIMEOUT).
+
+## Design verdicts (per the FUL-5 decision rule — recorded, not tuned around)
+1. **BRACE in clean greedy play is structurally rare; its home is holds and the behind-game.**
+   Shoot-twice beats shoot-brace whenever the charger is exposed (hit >= 45), so the combat
+   brain braces ~1-2/batch and the sloppy leg 4-5 (via its shot-skip slips) — coherent with
+   UNDERTOW's "losing-position tool" intent. The volume lives where the design said it should:
+   zone/line holds (R7). **Watch item (FUL-13):** on holds the rusher arm now largely REPLACES
+   the wide watch (OVERWATCH 54 → 8/batch) and completion rose — if brace-over-watch is strictly
+   dominant there, the reaction economy's lethality-vs-denial pricing deserves a check.
+2. **FIELD DRILLS (FDR) procs are structurally ~unreachable: VERDICT, do not price the boon on
+   this counter.** The proc = a SECOND drag/vault by one soldier in one turn. A first drag
+   consumes the geometry the second needs (the pulled ally lands adjacent = no longer a legal
+   target), so it needs TWO separate Cheby-2 stragglers in one turn — the greedy bot's spacing
+   produces whole batches with drag totals of 2-7 spread across turns; vaults are 0. **FUL-6
+   rework brief:** count a drag + a vault as the drill (sum, not per-verb), or replace the
+   second-use effect with "+1 MoveBudget on any turn the soldier dragged/vaulted" — both make
+   the boon's effect fire on play that actually occurs.
+3. **RECLAIMER (RCL) procs still 0** at FOCUS 24/batch — a cone-kill while the boon is held
+   remains a thin coincidence; same family as FDR (effect site narrower than real play).
+   Candidate for the same FUL-6 pass; not a named FUL-5 target, so recorded only.
+4. **GRENADE's honest ceiling under this bot is ~6-8/batch (target 10).** The pre-shot window
+   (covered 2+ cluster, no ally in blast, in range+LoS, no likely kill available) anti-correlates
+   with the gun: shot declines happen at range, grenade range is short, and active enemies
+   de-cluster under the pod AI. The remaining volume would have to come from pre-fragging
+   dormant pods (a real player line, but a perfect-info-flavored one for the bot) — declined
+   as quota-chasing. FUL-6's pods-of-3 + linked activation is exactly the stage this verb waits
+   for; re-measure there.
+5. **PATCH's ceiling is roster presence, not gates (target 10, measured 4-6).** The founding
+   squad has NO corpsman (Mission.NewRunSquad = ASSAULT/RANGER/SHARPSHOOTER/GUNNER); the class
+   enters via casualty backfill only (~2-3 campaigns of 20, ~15-20% of soldier-missions), so
+   even honest per-presence rates (~2/corpsman-campaign) cannot reach 10/batch. FUL-7 (downed
+   soldiers) and any founding-roster change re-open this; the gates are ready.
+
+## Gotchas (process)
+- **The heat pin is SIGHTLINE_BALANCE_HEAT, not SIGHTLINE_HEAT** — the first reference batch
+  silently cycled {0,2,4,6,8} (SIGHTLINE_HEAT is read per-run by StartMission, but the BATCH
+  schedule variable is separate). Re-ran; kept only as texture.
+- **A byte-identical paired batch is a legitimate probe result** — it proves the gate never
+  fired (R1, R2-greedy) and locates WHERE the cascade eats the decision. Cheaper than tracing.
+- **The paired slots fix the event-node sample**: slots 0-9 reuse the same 10 MapSeeds every
+  round, so BY EVENT-CHOICE arms are world-locked across rounds — cross-check arm exposure on a
+  fresh slot base (SIGHTLINE_BALANCE_BASE) before reading it as policy.
+- Never rebuild while a batch runs — dotnet's in-place DLL overwrite races the mapped image of
+  the running process (observed surviving, not guaranteed).
+
+# PROGRAM FULCRUM — FUL-10 FORKS (2026-08, wave dev on wt-ful10)
+
+The strategic layer got its forks: **seven trade-off field events** (catalog 10 → 17) crossing
+salvage / scars / veteran-rank+slots / faction prep+vendetta+heat / wounds+intel — ids
+`warpension fieldhospital informant quartermaster bloodfeud reservecall warchest`, ids + arm
+ORDER frozen forever (the FUL-1 compass keys `id:arm`). Six new `EventOutcomeKind`s (appended;
+the kind is never persisted): GrantScar / CureScar / Salvage / GrantPrep / RankKills /
+ReleaseSoldier, plus a seeded-arm gate (`ChancePct` + `OnFail` riding the existing
+`GambleSucceeds` node hash — reload-stable, zero Util.Rng draws; an OnFail pair fires exactly
+one side of a gamble off the one roll). `EventChoice` gained a third outcome slot (C3) for the
+reservecall triple. Event salvage NEVER touches meta/disk (EventCatalog.Apply stays pure):
+it pends in the new persisted `Run.PendingSalvageReward` (append-only DTO tail + SAVETEST leg)
+and `AwardMetaRunEnd` commits it win OR loss, folded into the FUL-12 `EndSalvage` slab.
+`HasDownside` learned GrantScar + ReleaseSoldier so the safe-first bot never reads a scarring
+arm as "safe" (honest arm-uptake waits on FUL-5's chooser, per plan). [Integration note: FUL-5
+landed first and REPLACED IsSafeChoice/HasDownside with the hashed 70/30 value chooser; the
+downside judgments above live on as signed EventOutcomeValue cases (GrantScar -3*chance,
+ReleaseSoldier -6, etc.) composed at the FUL-10 merge.]
+
+**Two veteran-economy contracts** (Contract append — BOTH tail pins moved, SaveGame SelfTest +
+CONTRACTTEST, each now also pinning Spearhead's ordinal POSITION [3]): **MERCENARY CLAUSE**
+(MRC) — recalls half price, round up, halved in exactly one seam (`Game.DraftRecallFee`, which
+the per-card fee, the bill row and ConfirmDraft's charge all read → the discount is honest by
+construction) but survivors never enshrine; **LIVING LEGENDS** (LGD) — kills credit DOUBLE at
+CreditKill (feats stay single), Rank>=2 survivors pension +6xRank at run end, and a KIA whose
+name matches a reserve record ERASES it (`SaveGame.RemoveVeterans`, name-keyed like
+EnshrineVeterans' dedupe). Both `Contract == X`-gated, inert at None.
+
+**Orphaned-perk fix:** the HORIZON-W6 trio joined real class lines (Vantage → SHARPSHOOTER +
+GUNNER; Breaker → ASSAULT + SHARPSHOOTER; Siegebreaker → RANGER + ASSAULT) — the ClassLine
+table's own "every perk appears in >=1 line" doc rule is TRUE again and now ENFORCED by
+enumeration (`Run.PerksInNoClassLine()`, asserted empty in CONTRACTTEST).
+
+**Hud:** the draft contract row re-fits SIX cards (width shrinks to the row, height grows to
+the tallest WrapLines-wrapped desc — wrap, never truncate; first cut used a wrong 13px line
+height and LGD's 4th desc line spilled the border — WrapLines' lh is size+6). DebugVetDraft now
+demos the MRC bill (NOX picked at RECALL 17, VEGA greyed at 21, bank 20). New
+`SIGHTLINE_EVENTID=<id>` stager pins DebugEvent's staged event (default unchanged).
+
+## Verified
+Release 0/0. EVENTTEST (a mutation leg per new kind; CureScar newest-first + BurnScarred MaxHp
+revert; Vendetta fallback-Legion brand; RankKills+GrantScar same-soldier coupling; seeded scar
+double-apply idempotent; Salvage/Wound OnFail pair exclusive; PendingSalvageReward §4 save
+round-trip) / SAVETEST / CONTRACTTEST (All==5, new tail pin, LGD double-credit + None single,
+MRC fee halved exactly once + restored on deselect, perk-line coverage) / METATEST (leg 11:
+MRC bill 26 = 17+9 charged once at ConfirmDraft, enshrine skipped; LGD pensions 30 paid once
+with the 25 event claim in one commit, RemoveVeterans erased exactly NOX and nobody else) /
+CODEXTEST / DRAFTTEST — all PASS. `SIGHTLINE_CONTRACT=mrc|lgd` autoplay x3 each: clean RESULT
+lines, no exceptions, no TIMEOUT. Shots: 4 staged events (fieldhospital shows the greyed
+illegal arm), the six-card draft row, the MRC-discounted vet-draft bill.
+
+## Measured (SIGHTLINE_BALANCE=20 ladder {0,2,4,6,8}, CRN slots shared with a base-bce2cbd
+scratch-clone control — a paired A/B, the FUL-2 method)
+| metric | base | FUL-10 | verdict |
+|---|---|---|---|
+| pooled run completion (40 runs) | 40% | 45% | +5 — at the ±5 budget boundary, in budget |
+| mission win-rate by heat | 92/84/95/79/64 | 97/87/92/78/69 | deltas +5/+3/−3/−1/+5 — stable, no cliff |
+| h0 run-completion cell (n=8) | 63% | 88% | +25 nominal, 2 runs of 8 — small-n noise (FUL-11's chunks swung 45-85 at n=10); the mission-level row is the reliable read |
+| policy gap (greedy−sloppy) | −10 | 0 | both "healthy slack"; FUL-2/13 watch item unchanged |
+| VNT/BRK/SGE picks | 9/6/4 (slot-B only) | 13/15/9 | slot-A reachability lifted trio exposure ~2x; per-heat BY PERK rows now exist for all three |
+| BY EVENT-CHOICE new ids | — | warpension:2, fieldhospital:2, quartermaster:1, bloodfeud:1, warchest:1 | 5 of 7 fielded in 20 worlds (~1-in-9 exposure each; informant/reservecall await bigger batches) |
+| contract telemetry | none | none | Contract==None inertness held — zero contract records in both reports |
+
+## Accepted version skew (note, not corruption)
+Growing `EventCatalog.All` 10 → 17 shifts `IndexForNode`'s hash-and-probe assignment, so an
+IN-FLIGHT save's **unvisited** "?" node shows a different event after upgrading. Resolved
+events are already baked into Run state and MapPos/Visited semantics hold, so nothing corrupts
+— EVENTTEST's determinism legs compare two regenerations under the SAME catalog and still pass.
+Same class of skew is why the "?"-node stamp clamp was deliberately NOT widened this wave
+(GenerateMap re-runs from MapSeed on load); the `Clamp(mids/4, 1, 3)` exposure lever is parked
+in ROADMAP's FUL-13 entry with that caveat attached.
+
+Gotchas for future waves: the BALANCE flywheel ignores SIGHTLINE_HEAT and always spans the
+ladder itself on deterministic CRN slots — two same-N batches on one tree are IDENTICAL, which
+is exactly what makes a scratch-clone base control an honest paired A/B; `WrapLines`' line
+height is `size + 6`, not the font size — size any wrap-fitted panel from its dy values;
+`GambleSucceeds`' roll is pct-independent per node, so a ChancePct pair (success arm +
+OnFail arm) resolves exclusively off one roll by construction.

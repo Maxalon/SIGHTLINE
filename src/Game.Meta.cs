@@ -449,6 +449,61 @@ public partial class Game
                 if (!gp2 || gs2 != 1) fails.Add("streakGapReset");
                 if (SaveGame.LoadSalvage() != sGap + 7) fails.Add("dailyPayMarkNotAtomic");
             }
+
+            // ── (11) FUL-10 CONTRACT FORKS: MRC + LGD engage the veteran economy end-to-end ──
+            {
+                try { if (System.IO.File.Exists(SaveGame.MetaPathPublic)) System.IO.File.Delete(SaveGame.MetaPathPublic); } catch { }
+
+                // (11a) MRC: the bill halves per veteran (round up, EXACTLY once — pinned against
+                // the un-discounted table), ConfirmDraft charges the discounted total, and run end
+                // enshrines NOBODY.
+                SaveGame.AddSalvage(60);
+                var m3 = new Unit { Name = "VEGA", Cls = "ASSAULT", Team = Team.Player, MaxHp = 12, Hp = 12, Aim = 80, Mobility = 8, Kills = 9, Rank = 3, Alive = true, Weapon = Weapon.Make(WeaponKind.Rifle) };
+                var m1 = new Unit { Name = "NOX", Cls = "SHARPSHOOTER", Team = Team.Player, MaxHp = 8, Hp = 8, Aim = 82, Mobility = 6, Kills = 4, Rank = 1, Alive = true, Weapon = Weapon.Make(WeaponKind.Sniper) };
+                SaveGame.EnshrineVeterans(new[] { m3, m1 });
+                var gm = new Game { NoPersist = false };
+                gm.BeginDraft();
+                foreach (var v in gm.DraftPool.FindAll(u => u.FromReserve)) gm.DraftPicked.Add(v);
+                foreach (var u in gm.DraftPool)
+                { if (gm.DraftPicked.Count >= DraftCap) break; if (!u.FromReserve) gm.DraftPicked.Add(u); }
+                gm.DraftSelectedBoon = gm.DraftBoonOffer.Count > 0 ? gm.DraftBoonOffer[0] : Boon.Marksmen;
+                gm.DraftSelectedContract = Contract.MercenaryClause;
+                int half = (MetaProg.RecallCost(3) + 1) / 2 + (MetaProg.RecallCost(1) + 1) / 2;   // 17 + 9 = 26
+                if (gm.DraftRecallCost != half) fails.Add($"mrcBill={gm.DraftRecallCost}(want{half})");
+                gm.ConfirmDraft();
+                if (SaveGame.LoadSalvage() != 60 - half) fails.Add($"mrcCharge={SaveGame.LoadSalvage()}");
+                if (gm.RunState.Contract != Contract.MercenaryClause) fails.Add("mrcNotThreaded");
+                // wipe the reserve, then end the run: the ranked recalled survivors must NOT re-enshrine
+                if (SaveGame.RemoveVeterans(new[] { "VEGA", "NOX" }) != 2 || SaveGame.VeteranCount() != 0)
+                    fails.Add("removeVeterans");
+                gm.LoseRun("METATEST", "mrc leg");
+                if (SaveGame.VeteranCount() != 0) fails.Add("mrcEnshrined");
+
+                // (11b) LGD: pensions pay ONCE at run end (folded into the bounty with the pending
+                // event claims), survivors STILL enshrine, and the fallen erase EXACTLY their own
+                // reserve records — nobody else's.
+                var m2 = new Unit { Name = "KRESS", Cls = "RANGER", Team = Team.Player, MaxHp = 9, Hp = 9, Aim = 70, Mobility = 7, Kills = 6, Rank = 2, Alive = true, Weapon = Weapon.Make(WeaponKind.Shotgun) };
+                SaveGame.EnshrineVeterans(new[] { m3, m1, m2 });   // reserve: VEGA / NOX / KRESS
+                var gl2 = new Game { NoPersist = false };
+                gl2.StartMission(1);
+                gl2.RunState.Contract = Contract.LivingLegends;
+                var sq = gl2.RunState.Squad;
+                sq[0].Rank = 2; sq[0].Name = "ALPHA";     // pensionable
+                sq[1].Rank = 3; sq[1].Name = "BRAVO";     // pensionable
+                sq[2].Rank = 1; sq[2].Name = "CHARLIE";   // below the Rank>=2 bar -> no pension
+                gl2.RunState.Fallen.Add("NOX");           // matches a reserve record -> erased
+                gl2.RunState.Fallen.Add("NOBODY");        // matches nothing -> no-op
+                gl2.RunState.PendingSalvageReward = 25;   // an event claim rides the same commit
+                int bank0 = SaveGame.LoadSalvage();
+                gl2.LoseRun("METATEST", "lgd leg");
+                int wantPay = 25 + MetaProg.LegendPension * (2 + 3);   // consolation at m1/h0 is 0
+                if (SaveGame.LoadSalvage() != bank0 + wantPay) fails.Add($"lgdPension={SaveGame.LoadSalvage() - bank0}(want{wantPay})");
+                if (gl2.RunState.PendingSalvageReward != 0) fails.Add("claimNotCleared");
+                var reserve = SaveGame.LoadVeterans();
+                if (reserve.Exists(v => v.Name == "NOX")) fails.Add("lgdKiaKept");
+                if (!reserve.Exists(v => v.Name == "VEGA") || !reserve.Exists(v => v.Name == "KRESS")) fails.Add("lgdOvercull");
+                if (!reserve.Exists(v => v.Name == "BRAVO")) fails.Add("lgdEnshrineSkipped");   // LGD never blocks enshrine
+            }
         }
         catch (Exception e) { return "METATEST: FAIL (exception " + e.Message + ")"; }
         finally

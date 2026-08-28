@@ -1894,13 +1894,19 @@ public partial class Game
         NoPersist = true;
         var fails = new List<string>();
 
-        // (a) ContractDef wiring + append-only ordinals
-        if (ContractDef.All.Length != 3) fails.Add("allCount");
+        // (a) ContractDef wiring + append-only ordinals. FUL-10: the tail advanced Spearhead ->
+        // LivingLegends; Spearhead's ordinal POSITION [3] is pinned so a mid-enum insertion fails too.
+        if (ContractDef.All.Length != 5) fails.Add("allCount");
         if (System.Array.IndexOf(ContractDef.All, Contract.None) >= 0) fails.Add("allHasNone");
         var cv = (Contract[])Enum.GetValues(typeof(Contract));
-        if (cv.Length < 4 || cv[0] != Contract.None || cv[^1] != Contract.Spearhead) fails.Add("ordinals");
+        if (cv.Length < 6 || cv[0] != Contract.None || cv[3] != Contract.Spearhead
+            || cv[^1] != Contract.LivingLegends) fails.Add("ordinals");
         if (ContractDef.Name(Contract.IronVeterans) != "IRON VETERANS") fails.Add("name");
         if (ContractDef.Code(Contract.HighStakes) != "HST") fails.Add("code");
+        if (ContractDef.Name(Contract.MercenaryClause) != "MERCENARY CLAUSE"
+            || ContractDef.Code(Contract.LivingLegends) != "LGD") fails.Add("ful10Names");
+        if (ContractDef.Parse("mrc") != Contract.MercenaryClause
+            || ContractDef.Parse("lgd") != Contract.LivingLegends) fails.Add("ful10Parse");
 
         // Build a tiny run with two healthy-but-chipped survivors below the recruit floor, so a
         // backfill WOULD normally fire and a field-heal WOULD normally raise HP.
@@ -1938,8 +1944,40 @@ public partial class Game
         if (rStakes.Squad[0].Hp != 5) fails.Add("stakes:healed(" + rStakes.Squad[0].Hp + ")");
         if (rStakes.Squad.Count < Run.AttritionFloor) fails.Add("stakes:noBackfill");
 
+        // (e) FUL-10 LGD: CreditKill credits DOUBLE toward rank; None stays single (inertness).
+        {
+            var gN = new Game { NoPersist = true }; gN.StartMission(1);
+            var uN = gN.Players.Find(p => p.Alive && !p.IsVip);
+            int k0 = uN.Kills; gN.CreditKill(uN);
+            if (uN.Kills != k0 + 1) fails.Add("lgd:noneKills=" + (uN.Kills - k0));
+            var gL = new Game { NoPersist = true }; gL.StartMission(1);
+            gL.RunState.Contract = Contract.LivingLegends;
+            var uL = gL.Players.Find(p => p.Alive && !p.IsVip);
+            int k1 = uL.Kills; gL.CreditKill(uL);
+            if (uL.Kills != k1 + 2) fails.Add("lgd:doubleKills=" + (uL.Kills - k1));
+            if (uL.KillsThisTurn != 1) fails.Add("lgd:featDoubled");   // feats stay single-credit
+
+            // (f) FUL-10 MRC: the per-veteran recall fee halves (round up) EXACTLY once, only while
+            // MERCENARY CLAUSE is the draft selection; deselecting restores full price. Pure — no disk.
+            var vet = new Unit { Name = "VR", Cls = "ASSAULT", Team = Team.Player, Rank = 3, Alive = true,
+                                 Weapon = Weapon.Make(WeaponKind.Rifle), FromReserve = true };
+            gL.DraftPicked = new HashSet<Unit> { vet };
+            gL.DraftSelectedContract = null;
+            if (gL.DraftRecallFee(vet) != 34 || gL.DraftRecallCost != 34) fails.Add("mrc:fullPrice=" + gL.DraftRecallCost);
+            gL.DraftSelectedContract = Contract.MercenaryClause;
+            if (gL.DraftRecallFee(vet) != 17 || gL.DraftRecallCost != 17) fails.Add("mrc:half=" + gL.DraftRecallCost);
+            gL.DraftSelectedContract = Contract.IronVeterans;   // any other contract: full price
+            if (gL.DraftRecallCost != 34) fails.Add("mrc:leaked=" + gL.DraftRecallCost);
+        }
+
+        // (g) FUL-10 orphaned-perk fix: the ClassLine table's own doc rule ("every perk appears in
+        // >=1 line") must be TRUE — enumerated, not asserted by comment.
+        var orphans = Run.PerksInNoClassLine();
+        if (orphans.Count != 0) fails.Add("perkOrphans:" + string.Join("/", orphans));
+
         return fails.Count == 0
-            ? "CONTRACTTEST: PASS (None inert; IronVeterans no-backfill+fast-rank; HighStakes no-heal)"
+            ? "CONTRACTTEST: PASS (None inert; IronVeterans no-backfill+fast-rank; HighStakes no-heal; "
+              + "LGD double kill credit; MRC half-price recall; class lines cover every perk)"
             : "CONTRACTTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
@@ -2560,12 +2598,14 @@ public partial class Game
         demo.Add(a); demo.Add(b);
         DraftPool = Run.GenerateDraftPool(demo);
         DraftBoonOffer = Run.GenerateDraftBoonOffer();
-        DraftPicked = new HashSet<Unit>();
+        // FUL-10: pre-pick NOX + pre-select MERCENARY CLAUSE so the shot also demos the live
+        // recall discount (VEGA 42->21, NOX 34->17) and the discounted RECALL BILL row.
+        DraftPicked = new HashSet<Unit> { b };
         DraftSelectedBoon = null;
-        DraftSelectedContract = null;
-        // W9: a demo bank that AFFORDS NOX (Rank 3 -> 34) but NOT VEGA (Rank 4 -> 42), so the shot
-        // shows both the priced gold card and the greyed unaffordable one. Touches NO disk.
-        DraftSalvage = 40;
+        DraftSelectedContract = Contract.MercenaryClause;
+        // A demo bank that AFFORDS discounted NOX (17) but NOT discounted VEGA (21), so the shot
+        // keeps both the priced gold card and the greyed unaffordable one. Touches NO disk.
+        DraftSalvage = 20;
         Phase = Phase.Draft;
     }
 
@@ -2911,8 +2951,107 @@ public partial class Game
         // synthesize an event node so the screen shows even if this seed placed none on the route
         var node = _run.CurrentNode ?? (_run.Map.Count > 0 ? _run.Map[0] : null);
         _eventNode = node;
-        _activeEvent = EventCatalog.All.Length > 0 ? EventCatalog.All[0] : null;
+        // FUL-10: SIGHTLINE_EVENTID=<id> pins WHICH catalog event is staged (default: first, the
+        // pre-FUL-10 behaviour, so plain SIGHTLINE_EVENT shots are unchanged). Unknown ids fall
+        // back rather than crash a shot batch.
+        var wantId = Environment.GetEnvironmentVariable("SIGHTLINE_EVENTID");
+        GameEvent pinned = string.IsNullOrEmpty(wantId) ? null : System.Array.Find(EventCatalog.All, e => e.Id == wantId);
+        _activeEvent = pinned ?? (EventCatalog.All.Length > 0 ? EventCatalog.All[0] : null);
         Phase = Phase.Barracks;
+    }
+
+    // ── FUL-9: SIGHTLINE_EXPOSURETEST — content-exposure histogram ────────────────
+    /// 200-seed check of THE DECK's two contracts. Per generated campaign map:
+    ///   (a) the objective invariant on EVERY route — routes are ENUMERATED (mid columns hold
+    ///       2-3 rows, so sampling could miss a branch): >=1 Eliminate fight, >=1 Defend-or-
+    ///       Rescue fight, <=1 Escort fight, boss card Decapitate, every route ends at BOSS;
+    ///   (b) the arena deck deals zero repeats within a run (draws 1..MaxMissions).
+    /// Across all seeds: every one of the 8 objectives is dealt somewhere, and every authored
+    /// arena is dealt somewhere. Prints both histograms + PASS/FAIL. Windowless + persistence-
+    /// free: Run.GenerateMap and Mission.DeckPick are pure derivations off the seed.
+    public static string ExposureSelfTest()
+    {
+        var fails = new List<string>();
+        const int Seeds = 200;
+        int nLay = Maps.Layouts.Length;
+        var arenaHist = new int[nLay];
+        var objHist = new Dictionary<Objective, int>();
+        int routesTotal = 0, escortNodes = 0;
+
+        for (int i = 0; i < Seeds; i++)
+        {
+            int seed = 1000 + i * 7919;   // spread the seed space; Hash3 decorrelates regardless
+            var run = new Run { MapSeed = seed };
+            run.GenerateMap(seed);
+
+            // (a) enumerate every route: edges only go col -> col+1, so DFS terminates
+            var routes = new List<List<MissionNode>>();
+            void Walk(MissionNode node, List<MissionNode> path)
+            {
+                path.Add(node);
+                if (node.Next.Count == 0) routes.Add(new List<MissionNode>(path));
+                else foreach (int id in node.Next) Walk(run.Map[id], path);
+                path.RemoveAt(path.Count - 1);
+            }
+            Walk(run.Map[0], new List<MissionNode>());
+            if (routes.Count == 0) fails.Add($"seed{seed}:noRoutes");
+            foreach (var route in routes)
+            {
+                routesTotal++;
+                if (route[^1].Kind != NodeKind.Boss) fails.Add($"seed{seed}:routeEndsOffBoss");
+                int elim = 0, dr = 0, esc = 0;
+                foreach (var node in route)
+                {
+                    if (node.Kind == NodeKind.Event) continue;   // not a fight — the sentinel card must not count
+                    var o = node.Card.Objective;
+                    if (o == Objective.Eliminate) elim++;
+                    if (o == Objective.Defend || o == Objective.Rescue) dr++;
+                    if (o == Objective.Escort) esc++;
+                }
+                if (elim < 1) fails.Add($"seed{seed}:noEliminate");
+                if (dr < 1) fails.Add($"seed{seed}:noDefendOrRescue");
+                if (esc > 1) fails.Add($"seed{seed}:escortX{esc}");
+            }
+            if (run.Map[^1].Card.Objective != Objective.Decapitate) fails.Add($"seed{seed}:bossNotDecapitate");
+            foreach (var node in run.Map)
+                if (node.Kind != NodeKind.Event)
+                {
+                    objHist[node.Card.Objective] = objHist.GetValueOrDefault(node.Card.Objective) + 1;
+                    if (node.Card.Objective == Objective.Escort) escortNodes++;
+                }
+
+            // (b) the deck: draws 1..MaxMissions repeat-free + in range
+            var seen = new HashSet<int>();
+            for (int m = 1; m <= Run.MaxMissions; m++)
+            {
+                int a = Mission.DeckPick(seed, m);
+                if (a < 0 || a >= nLay) { fails.Add($"seed{seed}:deckOutOfRange:{a}"); continue; }
+                if (!seen.Add(a)) fails.Add($"seed{seed}:arenaRepeat:{a}");
+                arenaHist[a]++;
+            }
+        }
+
+        foreach (Objective o in Enum.GetValues<Objective>())
+            if (objHist.GetValueOrDefault(o) == 0) fails.Add($"objectiveNeverDealt:{o}");
+        for (int a = 0; a < nLay; a++)
+            if (arenaHist[a] == 0) fails.Add($"arenaNeverDealt:{a}");
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"EXPOSURETEST: {Seeds} seeds | {routesTotal} routes enumerated | {Seeds * Run.MaxMissions} deck draws over {nLay} arenas");
+        sb.AppendLine("ARENA DECK HISTOGRAM (arena:draws):");
+        for (int a = 0; a < nLay; a++)
+        {
+            sb.Append($"  {a,2}:{arenaHist[a],-4}");
+            if (a % 7 == 6 || a == nLay - 1) sb.AppendLine();
+        }
+        sb.AppendLine($"  min {arenaHist.Min()} / mean {arenaHist.Average():0.0} / max {arenaHist.Max()} draws per arena");
+        sb.AppendLine("OBJECTIVES DEALT (fight nodes, all seeds):");
+        foreach (Objective o in Enum.GetValues<Objective>())
+            sb.AppendLine($"  {o,-10}: {objHist.GetValueOrDefault(o)}");
+        sb.AppendLine($"  (Escort nodes total {escortNodes} — exactly one per map by construction, <=1 per route)");
+        sb.Append(fails.Count == 0 ? "EXPOSURETEST PASS"
+            : $"EXPOSURETEST FAIL: {string.Join(", ", fails.Take(12))}{(fails.Count > 12 ? $" (+{fails.Count - 12} more)" : "")}");
+        return sb.ToString();
     }
 
 }

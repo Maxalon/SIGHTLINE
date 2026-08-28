@@ -836,25 +836,46 @@ of record (container suspensions have wiped every scratchpad copy — docs are t
       unreachable guard); campaign legend names S/START + */BATTLE; DrawCodexGlyph into Hall of
       Fame + end-card squad/KIA rows; WAR ROOM panels sized to content. (LOCK-ON/NO QUARTER copy
       was already done in FUL-3.)
-- [ ] **FUL-5 HANDS** (P5, M — after FUL-1 merges). The EV bot learns the verbs: widen DoBrace
-      (~Game.Autopilot.cs:1380) / PATCH (~:1037) gates (brace vs inbound rusher pods when no
-      >=60% kill shot; PATCH range<=2 missing>=3; grenade 2-clusters in cover; smoke/medkit on
-      exposed sub-half retreat; DRAG toward SmartEscort anchor); AutoEventChoice 70/30
-      value-biased HASHED off (seed,node) — never draws (CRN); COUNTER-PREP into AutoShop's set;
-      de-flatten mod priors (SUPPRESSOR 111/380 buys → <=40%). Reference: BRACE 0, PATCH 1,
-      ITEM 0, GRENADE<=7 per ~500 missions → BRACE>=5, PATCH>=10, GRENADE>=10, ITEM>=5 per
-      20-campaign batch; PROCS nonzero for SHK/FDR/FST or a design VERDICT in the DEVLOG (no
-      tuning boons on no-ops).
-- [ ] **FUL-9 THE DECK** (P9, L — after FUL-4 merges). The carried W7 spec on the repaired
-      roster: column-constrained objective assignment in CardForNode HASHED off
-      (MapSeed,column,row) (>=1 Eliminate, >=1 Defend-or-Rescue, <=1 Escort per path; boss stays
-      Decapitate); per-run no-repeat arena deck derived from MapSeed (prefer derivation over a
-      persisted list; if persisted: append-only RunDto field + SAVETEST leg); authored roll 55→80
-      keeping EXACTLY one Util.Roll (draw-order comment at Mission.cs:135 is load-bearing); biome
-      hints as reduced weight within the deck; SIGHTLINE_EXPOSURETEST 200-seed histogram (objective
-      invariant, zero in-run arena repeats, all 8 objectives reachable, all 35 arenas exposed).
-      Reference: 52% procedural, 6/35 arenas unseen in 251 missions, Defend absent from whole
-      batches → procedural 20-25%, distinct arenas/run >=4.5, Defend in >=80% of runs.
+- [x] **FUL-5 HANDS** (wt-ful5). The EV bot learned the verbs; per-20-campaign h0 batch vs the
+      spec targets: BRACE 1 → **82** (>=5; the real stage was routing Defend/Escort zone-holds
+      through HoldOverwatch's rusher arm — the open-combat gates were provably unreachable, two
+      byte-identical probe batches), ITEM 0 → **19** (>=5; TrySmokeCover on the exposed sub-half
+      retreat, objective-agnostic), DRAG 0 → 5-7 (Escort march/hold straggler pull), PATCH 1 →
+      4-6 (target 10: **verdict** — capped by corpsman presence, founding squad has none;
+      gates ready for FUL-7/roster work), GRENADE 8 → 6-8 (target 10: **verdict** — the
+      covered-cluster window anti-correlates with shot declines; FUL-6's pods-of-3 is its
+      stage). PROCS: SHK 0 → **6**, FST fires, FDR 0 → 0 (**verdict** + FUL-6 rework brief:
+      the second-use geometry is self-consuming). AutoEventChoice 70/30 value-biased hashed
+      off (MapSeed,node) — zero draws, PAIRTEST-clean; BY EVENT-CHOICE safe-arms-only → 9 arms.
+      COUNTER-PREP 0 → 10-12 buys. Mod priors de-flattened: SUPPRESSOR 27% → **9%** of mod
+      buys. h0 completion 60 → 75 ±10 on the same CRN slots (bot got better — FUL-13 input:
+      the finished-tree h0 baseline under this bot is ~75). Full rounds table + verdicts in
+      docs/DEVLOG.md §FUL-5.
+- [x] **FUL-9 THE DECK** (wt-ful9). The carried W7 spec, finally BUILT (not just claimed):
+      column-constrained objective assignment in CardForNode hashed off (MapSeed,column,row)
+      via Util.Hash3 — an event-free ANCHOR mid column deals Defend(80%)-or-Rescue on every
+      node, Escort on EXACTLY one hashed node per map (<=1 per route; zero-Escort maps no
+      longer occur), START stays Eliminate, boss stays
+      Decapitate, the rest deal from an Escort-free 7-pool (per-column offset + row keeps
+      siblings distinct) — so >=1 Eliminate / >=1 Defend-or-Rescue / <=1 Escort holds on EVERY
+      route by construction (zero rng draws: map shape/kinds/edges/factions byte-identical, so
+      saves round-trip; ObjectiveFor stays the skirmish/offer fallback). Per-run no-repeat
+      arena deck derived PURELY from MapSeed (Hash3 Fisher-Yates over all 35, recomputed per
+      draw — nothing persisted), biome hint reduced to a 25% pull-forward of the DISPLAYED
+      biome's arena (Biome.IndexFor; was mission-number-keyed 50%, the FUL-1 confound);
+      authored roll 55→80 keeping EXACTLY one Util.Roll (the draw-order contract at the gate:
+      PickLayout now takes ZERO draws). SIGHTLINE_EXPOSURETEST (200 seeds, 1098 routes
+      ENUMERATED): invariant on all routes, zero in-run deck repeats, all 8 objectives + all
+      35 arenas dealt (min 17 draws) — PASS. Measured (paired h0 N=10 x2 slot sets): funnel
+      52.6/0.0/47.4 → 76-77/0.0/23-24 (procedural 20-25 HIT); Defend >=80% of runs met on 2 of
+      3 slot sets (80/85/65 — the floor is early-death-sensitive; FUL-13 input), fielding
+      n=17-19/batch at 59/74% (pooled 67, FUL-4's band; base fielded n=4);
+      distinct authored arenas 3.4/full-depth run over 4.5-5.0 fights (the 4.5 target assumed
+      6 authored fights/run — events + the 23% procedural floor cap the ceiling at ~3.5-3.9,
+      ~90% delivered; repeats are now impossible vs the old with-replacement sampling).
+      Budget: h0 completion 60 → 50/45 (−10 to −15, OUTSIDE ±7, reported not hidden): the drag
+      is the newly-EXPOSED Defend/mid-Decapitate cells on ~every route, not the arenas —
+      FUL-13's re-baseline input (full table in docs/DEVLOG.md).
 - [ ] **FUL-6 CRITICAL MASS** (P6, L). Pods of 3 + linked activation in mid/late missions — one
       real multi-pod battle per mission instead of six 2-enemy executions, so BRACE/morale/verb
       boons get a stage; morale/rout reaches LAST STAND's horde. Files: Mission.cs, Game.cs,
@@ -865,17 +886,30 @@ of record (container suspensions have wiped every scratchpad copy — docs are t
       Unit.cs, Game.cs, Ai.cs, Game.Autopilot.cs, Hud.cs, Renderer.cs, Codex.cs, Game.Harness.cs.
       Save-compat: any new persisted enum values append-only. (Spec to re-derive; depends on
       FUL-1 telemetry + FUL-5 bot hands to measure honestly.)
-- [ ] **FUL-8 PIKEMAN** (P8, M). A Wardens lane-holder specialist that visibly braces a movement
-      lane and staggers the first soldier through — the movement-economy contest the 21-archetype
-      roster lacks; teaches BRACE by mirroring it. Files: Mission.cs, Ai.cs, Unit.cs, Game.cs,
-      Renderer.cs, Codex.cs. (Spec to re-derive.)
-- [ ] **FUL-10 FORKS** (P10, M). 6-8 new trade-off field events wired to salvage/scar/veteran/
-      faction systems; two draft contracts engaging the W9 veteran economy; COUNTERPLAY's orphaned
-      perks reachable. Files: Events.cs, Run.cs, Game.cs, Hud.cs, Codex.cs. (Spec to re-derive;
-      consumes FUL-1's BY EVENT-CHOICE table.)
+- [ ] **FUL-8 PIKEMAN** (P8, M). The SARISSA — a Wardens lane-holder that plants a braced foe-red
+      cone over a movement lane and STAGGERS the first soldier through; teaches the player's BRACE
+      by mirroring it. Keystone: the BRACE reaction plumbing is already team-symmetric
+      (OnUnitEnteredTile watcher pick, OwBrace halving, ShotAnim stagger, cone gate, one-reaction
+      cap) — the wave is an Ai plant branch + renderer cone + bot danger-tiles + codex + PIKETEST.
+      Full dev-executable spec (verified seams, spawn re-slices, harness legs):
+      docs/plans/FUL-8-pikeman-FUL-10-forks.md. Launches after FUL-5 merges (shared autopilot).
+- [x] **FUL-10 FORKS** (P10, M — landed on wt-ful10). Seven trade-off field events crossing
+      salvage/scar/veteran/faction/heat (ids+arm order frozen for the compass; PendingSalvageReward
+      run-committed via AwardMetaRunEnd — events never touch meta directly); two veteran-economy
+      contracts (MERCENARY CLAUSE: half-price recalls but no enshrinement; LIVING LEGENDS:
+      pensions + double kill credit but a KIA erases the reserve record); the orphaned perk trio
+      Vantage/Breaker/Siegebreaker joined real class lines (CONTRACTTEST enumerates the coverage
+      rule). Contract enum append moved BOTH tail pins (SaveGame SelfTest + CONTRACTTEST, each
+      with a Spearhead-position pin). Bot arm-uptake measurement lands with FUL-5's hashed chooser
+      (FUL-10 makes the forks exist; FUL-5 makes the bot walk them). DEVLOG carries the measured
+      landing + the accepted IndexForNode version-skew note.
 - [ ] **FUL-13 TRUE NORTH** (P13, L — LAST). Re-baseline the ladder on the finished tree (stale
       published numbers: h0 read 60 vs 80 published in research); lift h4 toward its 60±8 band;
       drain the intel flood (heat refunding itself through the shop); resolve the LOS-fix policy-
       gap watch item (accept-vs-sharpen on the corrected tree); final DEVLOG measured tables.
       Also owns: whether skirmish/daily should keep the m1 opener grace zeroing numeric heat
       deltas (FUL-3 landing note — the picker desc is honest now, the design question isn't).
+      Parked from FUL-10: an event-exposure lever — widening GenerateMap's "?"-node stamp clamp
+      to `Clamp(mids/4, 1, 3)` (17 events now share 1-2 nodes/run ≈ each ~1-in-9 runs). CAVEAT:
+      GenerateMap re-runs from MapSeed on load, so changing the clamp silently reshapes IN-FLIGHT
+      saves' unvisited nodes — ship it only with that skew adjudicated.

@@ -64,19 +64,25 @@ public enum Contract
     IronVeterans,  // no recruit backfill, but survivors gain rank faster (fewer bodies ↔ stronger vets)
     HighStakes,    // +50% mission Intel, but no between-mission field-heal (richer ↔ riskier)
     Spearhead,     // open unconcealed (no ambush), but every soldier gets +1 action on mission turn 1
+    // ---- FUL-10: two contracts that engage the W9 veteran economy ----
+    MercenaryClause, // veteran recalls half price (round up), but survivors are never enshrined
+    LivingLegends,   // kills count double + Rank>=2 survivors pension out, but a KIA erases their reserve record
 }
 
 /// Names / codes / descriptions for the run contracts (mirrors BoonDef). `All` excludes None
 /// (None is the implicit "STANDARD" opt-out shown in the draft).
 public static class ContractDef
 {
-    public static readonly Contract[] All = { Contract.IronVeterans, Contract.HighStakes, Contract.Spearhead };
+    public static readonly Contract[] All = { Contract.IronVeterans, Contract.HighStakes, Contract.Spearhead,
+                                              Contract.MercenaryClause, Contract.LivingLegends };   // FUL-10
 
     public static string Name(Contract c) => c switch
     {
         Contract.IronVeterans => "IRON VETERANS",
         Contract.HighStakes   => "HIGH STAKES",
         Contract.Spearhead    => "SPEARHEAD",
+        Contract.MercenaryClause => "MERCENARY CLAUSE",
+        Contract.LivingLegends   => "LIVING LEGENDS",
         _ => "STANDARD",
     };
 
@@ -85,6 +91,8 @@ public static class ContractDef
         Contract.IronVeterans => "IRV",
         Contract.HighStakes   => "HST",
         Contract.Spearhead    => "SPR",
+        Contract.MercenaryClause => "MRC",
+        Contract.LivingLegends   => "LGD",
         _ => "STD",
     };
 
@@ -93,6 +101,8 @@ public static class ContractDef
         Contract.IronVeterans => "No replacement recruits, but survivors rank up faster",
         Contract.HighStakes   => "+50% mission Intel, but no field-heal between missions",
         Contract.Spearhead    => "Open unconcealed (no ambush), but +1 action on turn 1",
+        Contract.MercenaryClause => "Veteran recalls cost half, but survivors never join the reserve",
+        Contract.LivingLegends   => "Kills count double and veterans pay pensions, but a KIA erases their reserve record",
         _ => "No ruleset change",
     };
 
@@ -101,16 +111,21 @@ public static class ContractDef
         Contract.IronVeterans => "The few. The proven.",
         Contract.HighStakes   => "Everything to gain. Everything to lose.",
         Contract.Spearhead    => "Hit first. Hit hard.",
+        Contract.MercenaryClause => "Paid up front. Owed nothing after.",
+        Contract.LivingLegends   => "Legends are written in ink. And blood.",
         _ => "Standard rules of engagement.",
     };
 
-    /// Parse a SIGHTLINE_CONTRACT env value (case-insensitive: ironveterans|highstakes|spearhead)
-    /// to a Contract; unknown/null => None. Lets the Program.cs harness hook be a one-liner.
+    /// Parse a SIGHTLINE_CONTRACT env value (case-insensitive: ironveterans|highstakes|spearhead|
+    /// mercenaryclause|livinglegends) to a Contract; unknown/null => None. Lets the Program.cs
+    /// harness hook be a one-liner.
     public static Contract Parse(string s) => (s ?? "").Trim().ToLowerInvariant() switch
     {
         "ironveterans" or "iron" or "irv" => Contract.IronVeterans,
         "highstakes"   or "stakes" or "hst" => Contract.HighStakes,
         "spearhead"    or "spr" => Contract.Spearhead,
+        "mercenaryclause" or "mercenary" or "mrc" => Contract.MercenaryClause,   // FUL-10
+        "livinglegends"   or "legends"   or "lgd" => Contract.LivingLegends,     // FUL-10
         _ => Contract.None,
     };
 }
@@ -419,6 +434,12 @@ public class Run
     // at the next Game.SetupMission (which copies it into Combat.PrepFaction). None = no prep bought.
     public Faction PrepFaction = Faction.None;
 
+    // FUL-10: META salvage EARNED by field events, committed at run END by Game.AwardMetaRunEnd
+    // (win OR loss — it was earned). Events must never touch meta/disk directly (EventCatalog.Apply
+    // stays pure + headless), so the income pends HERE. Persisted (append-only DTO field) and
+    // quit-safe by construction: abandoning the run forfeits the claim with the run.
+    public int PendingSalvageReward;
+
     // The faction of the mission just played, captured by Game.EnterBarracks BEFORE Combat.EndMission
     // clears Combat.MissionFaction. DebriefSurvivors reads it to stamp a soldier's VENDETTA grudge on
     // a survived near-death (no per-hit faction tracking — the mission's faction is who nearly killed
@@ -520,7 +541,38 @@ public class Run
             placed++;
         }
 
-        foreach (var node in Map) node.Card = CardForNode(node);
+        // FUL-9 THE DECK — column-constrained objective plan, hashed off (seed, column, row).
+        // Zero rng draws (the generator stream above/below stays byte-identical, so map shape/
+        // kinds/edges/factions round-trip against pre-FUL-9 saves), and the guarantees are
+        // COLUMN-scoped so they hold on EVERY route regardless of edge wiring (a route visits
+        // exactly one node per column):
+        //   * ANCHOR column — a hashed EVENT-FREE mid column; every node there deals Defend
+        //     (leaned 80%) or Rescue, so every route fights >=1 hold/extract op (Defend was
+        //     absent from whole 20-run batches under the old n+row rotation).
+        //   * ESCORT node — Escort exists on EXACTLY one hashed node per map (zero-Escort maps
+        //     no longer occur), never in the anchor column, so a route sees <=1 VIP drag.
+        //   * START stays Eliminate (>=1 Eliminate on every route + the honest FIRST OP label)
+        //     and BOSS stays Decapitate; everything else deals from an Escort-free pool with a
+        //     hashed per-column offset + row, keeping a column's branch choices distinct ops.
+        int anchorCol, escortCol, escortRow;
+        {
+            var evFree = new List<int>();   // event-free mid columns (anchor candidates)
+            var allMid = new List<int>();   // every mid column (escort candidates)
+            for (int c = 1; c < cols - 1; c++)
+            {
+                allMid.Add(c);
+                if (!Map.Exists(x => x.Col == c && x.Kind == NodeKind.Event)) evFree.Add(c);
+            }
+            // evFree can't be empty (<=2 event nodes touch <=2 of the >=4 mid columns); the
+            // fallback is defensive only — it would weaken the anchor guarantee, never crash.
+            if (evFree.Count == 0) evFree.AddRange(allMid);
+            anchorCol = evFree[(int)(Util.Hash3(seed, 3, 1) % (uint)evFree.Count)];
+            allMid.Remove(anchorCol);
+            escortCol = allMid[(int)(Util.Hash3(seed, 3, 2) % (uint)allMid.Count)];
+            var frows = Map.FindAll(x => x.Col == escortCol && x.Kind != NodeKind.Event);
+            escortRow = frows[(int)(Util.Hash3(seed, 3, 3) % (uint)frows.Count)].Row;
+        }
+        foreach (var node in Map) node.Card = CardForNode(node, seed, anchorCol, escortCol, escortRow);
 
         // ROUTING ECONOMY: per-node Intel reward. Base scales with depth (the rising difficulty),
         // then SUPPLY and ELITE pay premiums so the route is a real trade-off -- a SUPPLY node is the
@@ -615,12 +667,13 @@ public class Run
 
     /// Derive a deployment card from a node's kind: STANDARD combat, a tougher ELITE
     /// (+force, bonus perk), a lighter SUPPLY (-force, full heal), or the capstone
-    /// BOSS (always Eliminate so the WARLORD must actually fall). Objective varies
-    /// per row so branching nodes in a column offer different ops.
-    MissionCard CardForNode(MissionNode node)
+    /// BOSS (always Decapitate so the WARLORD must actually fall). FUL-9: fight objectives
+    /// come from the hashed column-constrained plan (see GenerateMap) instead of the old
+    /// ObjectiveFor(n+row) rotation — that rotation stays the SKIRMISH/offer fallback path.
+    MissionCard CardForNode(MissionNode node, int seed, int anchorCol, int escortCol, int escortRow)
     {
         int n = node.Mission;
-        Objective obj = ObjectiveFor(n + node.Row);
+        Objective obj = DeckObjective(seed, node.Col, node.Row, anchorCol, escortCol, escortRow);
         switch (node.Kind)
         {
             case NodeKind.Start:
@@ -644,6 +697,30 @@ public class Run
                 return new MissionCard { Objective = obj, ModName = "STANDARD", Reward = RewardKind.None, RewardText = "-" };
         }
     }
+
+    /// FUL-9: the hashed column-constrained objective for a fight node (plan in GenerateMap).
+    /// Pure in (seed, col, row) + the plan columns — no draws, so it round-trips on load.
+    static Objective DeckObjective(int seed, int col, int row, int anchorCol, int escortCol, int escortRow)
+    {
+        // anchor column: Defend leaned 80/20 over Rescue — the lean (not 50/50) is what lifts
+        // Defend onto >=80% of PLAYED routes: early deaths truncate routes before the anchor,
+        // so the paired batch read 75% at a 75 lean; 80 + the free pool's 1-in-7 shots clears it.
+        if (col == anchorCol)
+            return Util.Hash3(seed, 7, col * 8 + row) % 100 < 80 ? Objective.Defend : Objective.Rescue;
+        if (col == escortCol && row == escortRow) return Objective.Escort;
+        int off = (int)(Util.Hash3(seed, 11, col) % (uint)FreePool.Length);
+        return FreePool[(off + row) % FreePool.Length];   // rows<=3 < pool length -> siblings distinct
+    }
+
+    // Deliberately Escort-free (the <=1-per-route cap lives in the single escort node) and
+    // Defend/Rescue-inclusive (the anchor guarantees one per route; the pool keeps both in
+    // general rotation). Eliminate + Decapitate join the mid-run mix for the first time —
+    // the old n+row rotation could only ever deal indices 1..6 to a mid node.
+    static readonly Objective[] FreePool =
+    {
+        Objective.Eliminate, Objective.Hack, Objective.Evac, Objective.Sabotage,
+        Objective.Rescue, Objective.Defend, Objective.Decapitate,
+    };
 
     /// Intel paid for clearing a node (the routing economy). Base tracks the old flat grant's
     /// depth term (10 + 4*mission) so the overall economy is unchanged on a STANDARD route; SUPPLY
@@ -1287,25 +1364,46 @@ public class Run
     // ranger -> mobile/flanker, assault -> close-range bruiser, corpsman -> durable support).
     // Every perk appears in >=1 line; many appear in several (build flavour overlaps, not silos).
     // Used only to BIAS the offer (see MakePerkOffer) -- it never restricts what can be granted.
+    // FUL-10: the HORIZON-W6 trio (Vantage/Breaker/Siegebreaker) was in NO line for three programs —
+    // rollable only from the random slot B, never the class-biased slot A. Homes per identity:
+    // Vantage -> SHARPSHOOTER (the perch class) + GUNNER (BIPOD/planted overlap); Breaker -> ASSAULT
+    // (closes to punish the pin — the gunner's own turn ends on the pin, the follow-up owns the
+    // payoff) + SHARPSHOOTER; Siegebreaker -> RANGER (the flanker digs campers out) + ASSAULT.
     static Perk[] ClassLine(string cls) => (cls ?? "").ToUpperInvariant() switch
     {
         // Precision marksmen: long-range aim + crit + a defensive overwatch lean + double-tap.
         "SHARPSHOOTER" => new[] { Perk.Marksman, Perk.LockOn, Perk.Executioner,
-                                  Perk.Guardian, Perk.Reflexes, Perk.Gunslinger },
+                                  Perk.Guardian, Perk.Reflexes, Perk.Gunslinger,
+                                  Perk.Vantage, Perk.Breaker },
         // Close-range bruisers: alpha-strike finisher + mobility to close + shoot-then-slip.
         "ASSAULT"      => new[] { Perk.CloseQuarters, Perk.GiantSlayer, Perk.Sprinter,
-                                  Perk.Bandolier, Perk.Adrenal, Perk.Skirmisher },
+                                  Perk.Bandolier, Perk.Adrenal, Perk.Skirmisher,
+                                  Perk.Breaker, Perk.Siegebreaker },
         // Heavy weapons: durability + reaction-fire control to anchor the line + double-tap.
         "GUNNER"       => new[] { Perk.Tank, Perk.Bulwark, Perk.Hardened, Perk.Reflexes,
-                                  Perk.Guardian, Perk.LockOn, Perk.CoolHeaded, Perk.Gunslinger },
+                                  Perk.Guardian, Perk.LockOn, Perk.CoolHeaded, Perk.Gunslinger,
+                                  Perk.Vantage },
         // Skirmishers: speed + first-contact alpha + closing aim + shoot-then-slip.
         "RANGER"       => new[] { Perk.Sprinter, Perk.GiantSlayer, Perk.CloseQuarters,
-                                  Perk.LockOn, Perk.Adrenal, Perk.Skirmisher },
+                                  Perk.LockOn, Perk.Adrenal, Perk.Skirmisher,
+                                  Perk.Siegebreaker },
         // Field medics: stay alive + keep the kit topped up to support the squad.
         "CORPSMAN"     => new[] { Perk.Hardened, Perk.Tank, Perk.CoolHeaded, Perk.Bandolier,
                                   Perk.Adrenal },
         _              => System.Array.Empty<Perk>(),
     };
+
+    /// FUL-10 guard for the table's own doc rule ("every perk appears in >=1 line") — the perks in
+    /// NO class line, i.e. unreachable from the class-biased slot A. CONTRACTTEST asserts empty.
+    public static List<Perk> PerksInNoClassLine()
+    {
+        var covered = new HashSet<Perk>();
+        foreach (var cls in new[] { "SHARPSHOOTER", "ASSAULT", "GUNNER", "RANGER", "CORPSMAN" })
+            foreach (var p in ClassLine(cls)) covered.Add(p);
+        var missing = new List<Perk>();
+        foreach (var p in PerkDef.All) if (!covered.Contains(p)) missing.Add(p);
+        return missing;
+    }
 
     /// Offer two distinct perks the soldier doesn't already own (null if <2 left). The pick-1-of-2
     /// is BIASED toward the soldier's class line so it develops a coherent archetype over a run:

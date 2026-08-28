@@ -559,9 +559,10 @@ public static class Stats
             // only after the connectivity guard accepted it; -1 = procedural fallback). Rows
             // filtered to n>=3 so single-sight arenas don't read as 0%/100% outliers.
             int procN = missions.Count(m => m.Layout < 0);
-            // FUL-1: each row is STRATIFIED BY MISSION # — PickLayout gates templates by
-            // mission, so an arena's aggregate win-rate silently mixes difficulty rungs;
-            // the per-mission cells expose the mix (cell = m<N>:win%(n)). n<30 rows carry ±SE.
+            // FUL-1: each row is STRATIFIED BY MISSION # — an arena's aggregate win-rate
+            // silently mixes difficulty rungs (pre-FUL-9 the hint even COUPLED arena to
+            // mission number); the per-mission cells expose the mix (cell = m<N>:win%(n)).
+            // n<30 rows carry ±SE.
             string ByMissionCells(IEnumerable<MissionRec> ms) => string.Join(" ",
                 ms.GroupBy(m => m.Mission).OrderBy(g => g.Key)
                   .Select(g => $"m{g.Key}:{(int)Math.Round(100.0 * g.Count(m => m.Win) / g.Count())}%({g.Count()})"));
@@ -584,6 +585,28 @@ public static class Stats
             sb.AppendLine($"  authored-applied    : {100.0 * _arenaFunnel[0] / funTot,5:0.0}%  (n={_arenaFunnel[0]})");
             sb.AppendLine($"  connectivity-reject : {100.0 * _arenaFunnel[1] / funTot,5:0.0}%  (n={_arenaFunnel[1]})");
             sb.AppendLine($"  procedural-roll     : {100.0 * _arenaFunnel[2] / funTot,5:0.0}%  (n={_arenaFunnel[2]})");
+        }
+
+        // ── FUL-9: DECK EXPOSURE (the deck's two run-level promises, on PLAYED runs) ──
+        // Authored-arena variety within a run (the no-repeat deck) and Defend actually
+        // reaching routes (the old rotation left it absent from whole batches). Campaign
+        // runs only — endless holds one arena for the whole stand.
+        var deckRuns = Runs.Where(r => r.Mode == "campaign" && r.Missions.Count > 0).ToList();
+        if (deckRuns.Count > 0)
+        {
+            double Distinct(RunRec r) => r.Missions.Where(m => m.Layout >= 0).Select(m => m.Layout).Distinct().Count();
+            double meanDistinct = deckRuns.Average(Distinct);
+            int defendRuns = deckRuns.Count(r => r.Missions.Any(m => m.Objective == "Defend"));
+            // full-depth = the run reached the boss column: early deaths truncate routes (2-3
+            // fights), and an EVENT node on the route replaces a fight entirely — so the all-runs
+            // mean under-reads deck variety. The full-depth line is the apples-to-apples read
+            // (its own ceiling is fights/run x authored share, both printed for the arithmetic).
+            var full = deckRuns.Where(r => r.Win).ToList();
+            sb.AppendLine($"\nDECK EXPOSURE (campaign runs n={deckRuns.Count}):");
+            sb.AppendLine($"  distinct authored arenas/run : {meanDistinct:0.00} mean (all runs)");
+            if (full.Count > 0)
+                sb.AppendLine($"  ... full-depth runs only     : {full.Average(Distinct):0.00} mean over {full.Average(r => (double)r.Missions.Count):0.0} fights/run (n={full.Count})");
+            sb.AppendLine($"  Defend dealt on the route    : {Pct(defendRuns, deckRuns.Count)} of runs (n={defendRuns})");
         }
 
         // ── W2: ACTION MIX (verbs issued, split by policy) ───────────────────────────
@@ -913,8 +936,8 @@ public static class Stats
                 mission = g.Key, n = g.Count(), winRate = WinRate(g), se = SeVal(g.Count(m => m.Win), g.Count())
             }).ToList(),
             // W2 arena telemetry: authored layout index (-1 rows are folded into proceduralRate).
-            // FUL-1: + per-mission stratification (PickLayout gates templates by mission, so an
-            // arena's aggregate mixes difficulty rungs — the cells expose the mix).
+            // FUL-1: + per-mission stratification (an arena's aggregate mixes difficulty
+            // rungs — the cells expose the mix; pre-FUL-9 the hint even coupled arena to mission).
             byArena = missions.Where(m => m.Layout >= 0).GroupBy(m => m.Layout).OrderBy(g => g.Key).Select(g => new
             {
                 arena = g.Key, n = g.Count(), winRate = WinRate(g), se = SeVal(g.Count(m => m.Win), g.Count()), avgTurns = Math.Round(g.Average(m => (double)m.Turns), 1),

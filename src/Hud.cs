@@ -2993,7 +2993,9 @@ public static class Hud
             Raylib.DrawRectangleLinesEx(r, hover ? 2.2f : 1.4f, bd);
             Color lblCol = !legal ? Pal.TxtDim : (hover ? Pal.Suspect : Pal.Txt);
             Raylib.DrawTextEx(Cfg.Font, ch.Label, new Vector2((int)r.X + 16, (int)r.Y + 12), 18, 1f, lblCol);
-            string prev = legal ? ch.Preview : ch.Preview + "   (need more intel / roster full)";
+            // FUL-10 review: the old fixed reason "(need more intel / roster full)" LIED for the
+            // new gates (no scarred soldier / lone roster) — keep it honest and generic.
+            string prev = legal ? ch.Preview : ch.Preview + "   (requirements not met)";
             Raylib.DrawTextEx(Cfg.Font, prev, new Vector2((int)r.X + 16, (int)r.Y + 38), 13, 1f, legal ? Pal.TxtDim : Pal.Foe);
             by += btnH + btnGap;
         }
@@ -3082,7 +3084,7 @@ public static class Hud
             // the baked atlas has no star) + the word, so it reads in any palette.
             // W9: an individually unaffordable veteran greys like a full-team card (still clickable —
             // only CONFIRM refuses, so picks stay rearrangeable toward what the bank can cover).
-            int recall = vet ? MetaProg.RecallCost(u.Rank) : 0;
+            int recall = vet ? g.DraftRecallFee(u) : 0;   // FUL-10: MRC's half-price shows live on the card
             bool broke = vet && recall > g.DraftSalvage;
             if (broke && !sel) a = Math.Min(a, 0.55f);
             if (vet)
@@ -3196,9 +3198,18 @@ public static class Hud
         var chm = Raylib.MeasureTextEx(Cfg.Font, ch, 16, 1f);
         Raylib.DrawTextEx(Cfg.Font, ch, new Vector2(W / 2f - chm.X / 2f, conY - 2), 16, 1f, Pal.Accent);
 
-        // cards: STANDARD then the 3 contracts (None == STANDARD opt-out)
-        var conCards = new Contract[] { Contract.None, Contract.IronVeterans, Contract.HighStakes, Contract.Spearhead };
-        int cn = conCards.Length, ccw = 222, cgap = 16, cch = 64;
+        // cards: STANDARD then the contracts (None == STANDARD opt-out).
+        // FUL-10 re-fit: six cards now — width shrinks to fit the row on screen, and the card
+        // height grows to the TALLEST wrapped desc (wrap, never truncate: the no-ellipsis rule).
+        var conCards = new Contract[] { Contract.None, Contract.IronVeterans, Contract.HighStakes,
+                                        Contract.Spearhead, Contract.MercenaryClause, Contract.LivingLegends };
+        int cn = conCards.Length, cgap = 12;
+        int ccw = Math.Min(222, (W - 48 - (cn - 1) * cgap) / cn);
+        int descBottom = 47;   // one-line floor (desc top 30 + line height 17)
+        foreach (var c0 in conCards)
+            foreach (var (_, dy0) in WrapLines(ContractDef.Desc(c0), ccw - 22, 11, 0))
+                descBottom = Math.Max(descBottom, 30 + dy0 + 17);   // WrapLines' lh = size + 6
+        int cch = descBottom + 4;
         int ctotal = cn * ccw + (cn - 1) * cgap;
         int cx0 = W / 2 - ctotal / 2;
         int cy = conY + 22;
@@ -3217,7 +3228,7 @@ public static class Hud
             foreach (var (line, dy) in WrapLines(ContractDef.Desc(c), ccw - 22, 11, 0))
                 Raylib.DrawTextEx(Cfg.Font, line, new Vector2((int)r.X + 12, (int)r.Y + 30 + dy), 11, 1f, Pal.TxtDim);
             // STANDARD card is the implicit opt-out: still clickable (deselects back to None), but
-            // the input handler only registers the 3 real contracts -> clicking STANDARD is a no-op
+            // the input handler only registers the real contracts (5 as of FUL-10) -> clicking STANDARD is a no-op
             // selection-wise; we add it to the rects anyway so a future tweak can wire it.
             if (c != Contract.None) DraftContractBtns.Add((c, r));
         }
