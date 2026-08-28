@@ -23,8 +23,17 @@ public class MoveStepAnim : Anim
 
     public MoveStepAnim(Unit u, int tx, int ty) { Unit = u; Tx = tx; Ty = ty; }
 
+    /// Q1 STACKTEST probe (harness-only; ALWAYS null in normal play, so this costs one null
+    /// check per step). Fires the instant a step becomes the ACTIVE anim — i.e. the moment the
+    /// destination is committed to — which is exactly where a stale-plan collision is provable:
+    /// Unit.X/Y is still the ORIGIN here, so `g.UnitAt(Tx,Ty)` non-null-and-not-self means this
+    /// step is about to bury a living unit. Only one anim is ever active, so the occupant is
+    /// stationary and the read is exact (no mid-move false positives).
+    public static Action<Game, MoveStepAnim> StackProbe;
+
     public override void OnStart(Game g)
     {
+        StackProbe?.Invoke(g, this);
         _from = Unit.Pos;
         _to = Util.TileCenter(Tx, Ty);
         bool diag = Tx != Unit.X && Ty != Unit.Y;

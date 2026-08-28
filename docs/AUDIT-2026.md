@@ -83,7 +83,8 @@ The prerequisite. You cannot tune texture you cannot see.
   **delete `DampedCritStack`** (no longer needed with fewer crit sources).
 - **Honest tooltip:** show signed per-badge magnitudes; surface or cut the hidden
   streak-breaker (a hidden dice-loader contradicting the shown % is the worst legibility
-  offender).
+  offender). *(CLOSED — RESONANCE Q1/D3: the streak bonus is folded into `Combat.ComputeOdds`,
+  so the displayed HIT% is the rolled probability; the STEADYING badge remains as the reason.)*
 
 ### Wave 2 — Run container + economy (root fixes)
 - Defuse the geometric collapse: a **mid-run checkpoint** (survive one wipe) or a shorter

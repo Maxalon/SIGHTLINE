@@ -341,6 +341,19 @@ public static class Combat
             if (MissionFaction == Faction.Wardens && dist >= Unit.LongRange && PrepFaction != Faction.Wardens) hit += WardenLongAim;
             hit += PressureAim;   // anti-turtle pressure clock: escalating enemy accuracy on camp-friendly objectives
         }
+        // Q1 D3 — STEADYING (the streak-breaker) is part of the DISPLAYED number.
+        // It used to be added only inside Resolve, so a soldier on a 2-miss streak rolled at up
+        // to +12 over the HIT% the tooltip printed (measured: displayed 69, real 81). SIGHTLINE's
+        // stated identity is perfect-information tactics (DESIGN.md 7) — a headline % that isn't
+        // the real probability is the worst legibility bug this game can have, and "derivable
+        // from a separate badge" is not the same as true. Folded in here, so ComputeOdds is the
+        // single source of truth and Resolve just rolls against it; the STEADYING badge stays as
+        // the EXPLANATION of why the number is higher. Player-only, for the same reason as
+        // before: the net exists to curb the player's miss-streak frustration.
+        // Consequence, deliberately kept: the bonus now respects the 3..95 clamp like every other
+        // aim source, instead of riding Resolve's wider 1..99 clamp past the "never certain" cap.
+        int steadying = a.Team == Team.Player ? Math.Min(StreakBonusPerMiss * a.ConsecutiveMisses, MaxStreakBonus) : 0;
+        hit += steadying;
         hit = Util.Clamp(hit, 3, 95);
 
         // BASE crit: the weapon's intrinsic crit + the exposed situational bonus. Every OPTIONAL crit
@@ -427,13 +440,14 @@ public static class Combat
             ExposedFire = exposedByFire,
             Crossfire = crossfire,
             Marked = marked,
-            // Surface the hidden safety nets for the tooltip (no math change — purely informational):
-            //  - StreakBonus mirrors the player-only streak-breaker that Resolve folds into effHit.
+            // Surface the safety nets for the tooltip:
+            //  - StreakBonus is the STEADYING aim ALREADY INCLUDED in HitChance above (Q1 D3) —
+            //    the badge explains the number, it no longer discloses a hidden one.
             //  - GrazeFloor is the guaranteed damage a near-miss (graze) would still deal to THIS
             //    defender = min weapon damage after the defender's flat reduction, floored at 1
             //    (exactly Resolve's graze branch). FragileFloor only ever CAPS damage, so it can't
             //    lower this guaranteed minimum.
-            StreakBonus = a.Team == Team.Player ? Math.Min(StreakBonusPerMiss * a.ConsecutiveMisses, MaxStreakBonus) : 0,
+            StreakBonus = steadying,
             GrazeFloor = Math.Max(1, HardenedReduce(d, a.Weapon.DmgMin, crit: false)),
         };
     }
@@ -580,7 +594,9 @@ public static class Combat
         => watcher != null && watcher.Team == Team.Player && RunBoons.Contains(Sightline.Boon.ShockDoctrine);
 
     // Streak-breaker constants (S4-C): per clean-miss aim bonus, capped at MaxStreakBonus.
-    // Applied INSIDE Resolve only (hidden from the ComputeOdds display — DESIGN.md 3B).
+    // Q1 D3: applied inside ComputeOdds (so the DISPLAYED HitChance is the real probability) and
+    // surfaced by the STEADYING tooltip badge. It is no longer hidden, and Resolve must NOT add
+    // it a second time.
     public const int StreakBonusPerMiss = 6;   // +6 effHit per consecutive miss
     public const int MaxStreakBonus     = 12;  // capped at +12 (after 2+ misses)
 
@@ -588,19 +604,19 @@ public static class Combat
     public static ShotResult Resolve(Grid grid, Unit a, Unit d, int aimMod = 0)
     {
         var odds = ComputeOdds(grid, a, d);
-        // Streak-breaker (S4-C): apply a small hidden bonus after consecutive clean misses.
-        // Keeps it subtle (max +12); resets on any connect (hit or graze). HIDDEN from
-        // the ComputeOdds tooltip so players don't know the dice are loaded (DESIGN.md 3B).
-        // player-only: the streak-breaker exists to curb the PLAYER's miss-streak frustration;
-        // enemies don't rage, and a hidden enemy aim nudge would only quietly raise difficulty
-        // (review Minor — matches the "a soldier's shot" intent).
-        int streakBonus = a.Team == Team.Player ? Math.Min(StreakBonusPerMiss * a.ConsecutiveMisses, MaxStreakBonus) : 0;
+        // Streak-breaker (S4-C): a small aim bonus after consecutive clean misses, max +12,
+        // reset on any connect (hit or graze). Q1 D3 — it is now folded into ComputeOdds and
+        // shown in HitChance, so it MUST NOT be added again here: odds.HitChance already carries
+        // it. The player-only gate lives in ComputeOdds for the same reason it always did (the
+        // net curbs the PLAYER's miss-streak frustration; a quiet enemy aim nudge would only
+        // raise difficulty invisibly).
         // Guardian: cancel the standard -10 overwatch reaction penalty (which Game folds into aimMod,
         // invisible to ComputeOdds) so its reactions fire at full accuracy. Applied here, not in
-        // ComputeOdds, because the penalty it offsets isn't part of the displayed HitChance either.
+        // ComputeOdds, because the penalty it offsets isn't part of the displayed HitChance either
+        // (an overwatch reaction never shows a tooltip, so there is no number to contradict).
         // SENTINEL (spec fork) grants the same penalty-cancel as Guardian. || => once only (R2 no double).
         int guardianBonus = ((a.HasPerk(Perk.Guardian) || a.HasSpec(Spec.Sentinel)) && IsOverwatchReaction(a)) ? Unit.GuardianReactAim : 0;
-        int effHit = Util.Clamp(odds.HitChance + aimMod + streakBonus + guardianBonus, 1, 99);
+        int effHit = Util.Clamp(odds.HitChance + aimMod + guardianBonus, 1, 99);
 
         var res = new ShotResult { Odds = odds };
 
@@ -891,6 +907,43 @@ public static class Combat
             int bonusFive = Math.Min(StreakBonusPerMiss * sAtk.ConsecutiveMisses, MaxStreakBonus);
             if (bonusFive != MaxStreakBonus) fails.Add($"streakBonusCap={bonusFive}");
 
+            // ── Q1 D3: the DISPLAYED HIT% IS the real probability while STEADYING is active ──
+            // (1) ComputeOdds must MOVE with the streak (it used to be flat, with the bonus added
+            //     only inside Resolve), and by exactly the streak amount while off the 95 clamp.
+            sAtk.ConsecutiveMisses = 0;
+            var oddsNo = ComputeOdds(gS, sAtk, sDef);
+            sAtk.ConsecutiveMisses = 2;
+            var oddsMax = ComputeOdds(gS, sAtk, sDef);
+            if (oddsNo.StreakBonus != 0) fails.Add($"steadyBadge0={oddsNo.StreakBonus}");
+            if (oddsMax.StreakBonus != MaxStreakBonus) fails.Add($"steadyBadgeMax={oddsMax.StreakBonus}");
+            int expectMax = Math.Min(95, oddsNo.HitChance + MaxStreakBonus);
+            if (oddsMax.HitChance != expectMax) fails.Add($"steadyNotInHit({oddsNo.HitChance}->{oddsMax.HitChance}, want {expectMax})");
+            // (2) an ENEMY attacker never banks it (the tooltip's enemy-side read stays honest too)
+            var eAtk = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 3, Y = 5, ConsecutiveMisses = 2 };
+            var pDef = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 7, Y = 5, Hp = 20, MaxHp = 20 };
+            eAtk.ConsecutiveMisses = 0; int eNo = ComputeOdds(gS, eAtk, pDef).HitChance;
+            eAtk.ConsecutiveMisses = 3; var eOdds = ComputeOdds(gS, eAtk, pDef);
+            if (eOdds.HitChance != eNo || eOdds.StreakBonus != 0) fails.Add("steadyLeakedToEnemy");
+            // (3) Resolve must ROLL AGAINST the displayed number, not the displayed number PLUS
+            //     the streak again. Measured, not asserted from the source: 40k seeded rolls at a
+            //     pinned 2-miss streak; the observed full-hit rate must land on oddsMax.HitChance.
+            //     (P(full hit) = effHit/100 exactly, so 40k rolls has sigma ~0.24pt — 2pt is slack.)
+            {
+                var keep = Util.Rng;
+                Util.Reseed(424242);
+                int hits = 0; const int N = 40000;
+                for (int i = 0; i < N; i++)
+                {
+                    sAtk.ConsecutiveMisses = 2; sDef.Hp = 20;
+                    var r = Resolve(gS, sAtk, sDef);
+                    if (r.Hit && !r.Graze) hits++;
+                }
+                double rate = 100.0 * hits / N;
+                if (Math.Abs(rate - oddsMax.HitChance) > 2.0)
+                    fails.Add($"steadyRollNotDisplayed(shown={oddsMax.HitChance} rolled={rate:0.00})");
+                Util.Rng = keep;
+            }
+
             // A HIT must reset ConsecutiveMisses to 0 (use a very high aimMod so we always hit).
             sAtk.ConsecutiveMisses = 3;
             sDef.Hp = 20;
@@ -928,12 +981,16 @@ public static class Combat
             }
             if (!foundMiss) fails.Add("streakNoMissFound");
 
-            // ComputeOdds must NOT reflect the streak bonus (hidden from the display).
+            // Q1 D3 INVERTED: ComputeOdds MUST reflect the streak bonus — the displayed number is
+            // the real probability. (This assert used to demand the opposite; the pre-Q1 rule made
+            // the headline HIT% under-report by up to 12 points, which the perfect-information
+            // contract in DESIGN.md 7 forbids.) Capped at the 3..95 clamp like every other source.
             sAtk.ConsecutiveMisses = 5;
-            var oddsNoStreak = ComputeOdds(gS, sAtk, sDef);
+            var oddsStreaked = ComputeOdds(gS, sAtk, sDef);
             sAtk.ConsecutiveMisses = 0;
             var oddsZeroMisses = ComputeOdds(gS, sAtk, sDef);
-            if (oddsNoStreak.HitChance != oddsZeroMisses.HitChance) fails.Add("streakVisibleInOdds");
+            if (oddsStreaked.HitChance != Math.Min(95, oddsZeroMisses.HitChance + MaxStreakBonus))
+                fails.Add("streakNotVisibleInOdds");
         }
 
         // PERK BALANCE: the kept, mutually-exclusive crit PAIR is Executioner (finisher: +crit vs

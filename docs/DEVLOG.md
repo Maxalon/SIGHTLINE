@@ -3055,3 +3055,100 @@ the right ~28% of that row. The rail motif survives as two diamond end-caps.
 - **The `TutStep >= TutStepFire` completion gates** (`EnterBarracks` / `LoseRun`) were **not
   touched** — the mission-1 track kept its exact semantics and constants, and TUTTEST now pins
   them so a future renumber trips a test instead of silently re-offering onboarding forever.
+# PROGRAM "RESONANCE" — Wave Q1 "NO TWO IN ONE PLACE" (defect wave, adversarial-QA driven)
+
+Branch `wt-q1`. Three reproduced QA findings, all fixed with a guard that was watched to fail
+first. No feature work.
+
+## D1 (HIGH) — two living units on one tile
+
+**Mechanism.** `Game.ActivatePod` (the surprise reveal-scatter) planned EVERY dormant pod
+member against one board snapshot and enqueued all their move steps before any executed.
+`Ai.Plan`'s blocked predicate reads live `Unit.X/Y`, but `MoveStepAnim` only commits `Unit.X/Y`
+when the step FINISHES — so member 2 planned blind to member 1's destination. The same
+append-at-the-end enqueue also landed enemies on PLAYER tiles, because the player's remaining
+path steps sit AHEAD of the scatter in the queue and therefore land first.
+
+**Why HIGH, not cosmetic.** `Game.UnitAt` returns the FIRST match (Players before Enemies) and
+both hover and click route through it, so the buried unit could not be hovered, could not show
+odds, and could not be clicked to target — with no target-cycle key. Both units also read
+cover=0 / flanked at range 0. Directly against the "reads clearly" pillar.
+
+**Fix.** `Ai.Plan` gains an optional reserved-tile set (`null` = the exact pre-Q1 predicate, so
+every one-unit-at-a-time caller is untouched). `ActivatePod` seeds a claim set from the final
+destination of every already-queued move (any unit, any team) and adds each member's post-cap
+landing tile as it is decided. Current tiles need no entry — `IsOccupiedByOther` covers those.
+
+**Guard — `SIGHTLINE_STACKTEST=1`** (new, permanent; `=2` widens it to full campaigns under both
+bots). Two detectors run at once: a `MoveStepAnim.StackProbe` hook firing at ACTIVATION (X/Y is
+still the origin and only one anim is ever active, so a non-self `UnitAt(Tx,Ty)` is a proven
+imminent collision) and a per-frame shared-tile sweep collapsed into episodes.
+
+| sweep | before | after |
+|---|---|---|
+| narrow (16 missions, all 8 objectives x h0/h2, dumb bot) | 20/1688 steps = **1.185%**, 21 episodes, longest **598 frames** | 0/1602 = **0.000%**, **0** episodes |
+| wide (134-135 missions, full campaigns, dumb + competent) | 105/16037 = **0.655%**, 108 episodes, longest **1799 frames** (~30 s) | 0/17136 = **0.000%**, **0** episodes |
+
+Every logged collision was `phase=PlayerTurn`, exactly as QA measured, and the wide sweep caught
+the enemy-onto-player case (`HUNTER -> (17,9) already held by Player/CORPSMAN`).
+
+**Other batch-plan sites audited.** The enemy turn is the only other `Ai.Plan` production
+caller and it is strictly one unit at a time (`PickNext` -> `_aiPlan` -> `ActAfterMove`, with the
+queue draining between), which the 100%-PlayerTurn distribution corroborates. `ShoveAnim` (the
+other relocating anim) resolves occupancy in its own `OnStart`, and the endless wave spawner
+checks `IsOccupiedByOther` at placement. The wide sweep spans Escort's VIP leash and Defend's
+reinforcements and found zero. **Only `ActivatePod` was changed.**
+
+## D3 (LOW, legibility) — the headline HIT% was not the real probability
+
+`Combat.Resolve` folded the player-only STEADYING streak bonus into `effHit`; `ComputeOdds` did
+not, so the tooltip's number under-reported by up to 12 points and disclosed the delta only as a
+separate badge. Folded into `ComputeOdds` instead (player-only as before, now under the same
+3..95 clamp as every other aim source rather than riding Resolve's 1..99); `Resolve` no longer
+adds it a second time. Measured, rifle vs an open target, 40k seeded rolls: **before displayed 66
+/ rolled 77.89%; after displayed 78 / rolled 77.89%**. The STEADYING badge stays as the
+explanation. Doc drift fixed in the same pass: the `Combat.cs` "HIDDEN from the ComputeOdds
+tooltip" comments, `Codex.cs`'s "banks a hidden +6 aim", `docs/FEATURES.md`, and the
+`docs/AUDIT-2026.md` honest-tooltip item (now closed).
+
+New `SIGHTLINE_COMBATTEST` asserts — `steadyNotInHit`, `steadyBadge0/Max`, `steadyLeakedToEnemy`,
+`steadyRollNotDisplayed` (the roll-vs-display one is measured, not read from source) — plus the
+old `streakVisibleInOdds` assert inverted. All four verified FAILING on the pre-fix code.
+
+## D4 (LOW) — `RUSHED 2ND SHOT` badge missing on the plain-hover odds path
+
+Both odds paths apply the -15 `SnapAim` penalty to the displayed hit% and the tooltip renders on
+both, but the badge was gated on `g.AimMode`. Ungated. `SIGHTLINE_TOOLTIP=hover` (new) stages
+that path for a shot; before/after screenshots show the same HIT 7% with and without the
+explaining line.
+
+## Harness additions
+- `SIGHTLINE_STACKTEST=1|2` (above).
+- `SIGHTLINE_TOOLTIP=hover` — the plain-hover odds tooltip (keyboard board cursor, no live mouse).
+- `SIGHTLINE_SHOTSEQ=<n>` — dump n consecutive frames; a shot frame requested alongside
+  `SIGHTLINE_AUTOPLAY` now draws for real, so the pair films live play. Used for the jitter
+  check the D1 fix sits next to: a SCOUT crossing three tiles advanced 992.0 -> 1056.0 -> 1120.0 px
+  strictly monotonically, with no snap-back at either commit frame (`q1-move-nojitter.png`).
+
+## Verified at the close
+Release **0 warn / 0 err**; the full self-test battery PASS (the 35 in `scripts/qa-sweep.sh` plus
+`EXPOSURETEST`, `DOWNTEST`, `PIKETEST`, `PODTEST`, `FUL11PROBE`, and the new `STACKTEST`);
+`PAIRTEST` PASS (both slots MATCH — the D1 fix changes planning order but not CRN identity);
+autoplay x5 clean (WIN/WIN/WIN, LOSE m5, LOSE m4 — no exceptions, no TIMEOUT).
+
+**Balance delta, `SIGHTLINE_BALANCE=10` (20 matches), base 2dec210 vs the Q1 tree** — both legs
+run under xvfb with `runs=20` confirmed:
+
+| | before | after |
+|---|---|---|
+| campaign win-rate | 50% | 45% |
+| greedy / sloppy | 70% / 30% | 60% / 30% |
+| paired gap | 40 pts | 30 pts |
+| paired margin (missions) | +1.00 ±0.42 | +0.90 ±0.81 |
+| completion h0/h2/h4/h6/h8 | 50/100/75/25/0 | 50/75/50/25/25 |
+
+One run of 20 separates the headline rates, against a per-policy SE of roughly ±15 pts and
+per-rung n=4 (±25) — i.e. inside noise, with h8 moving the other way (0 -> 25). Two mechanisms
+legitimately perturb the world stream: enemy scatter destinations differ (D1) and the greedy bot
+now sees the true, higher hit% while on a miss streak (D3). Nothing here justifies a tuning
+change; a real re-baseline wants the N=50 flywheel.

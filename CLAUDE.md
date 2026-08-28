@@ -133,7 +133,7 @@ is "no exceptions, no TIMEOUT", not a win. `sightline_shot.png` is gitignored;
 `docs/screenshot.png` (README image) is committed.
 
 **Self-tests & measurement:** many features ship a window-free `SIGHTLINE_*TEST` hook
-(e.g. `COMBATTEST`, `SAVETEST`, `AITEST`, `ITEMTEST`) that prints `PASS/FAIL`, and there
+(e.g. `COMBATTEST`, `SAVETEST`, `AITEST`, `ITEMTEST`, `STACKTEST`) that prints `PASS/FAIL`, and there
 are `SIGHTLINE_*` screenshot hooks per feature. The `SIGHTLINE_BALANCE=<N>` flywheel runs
 N headless campaigns and reports win-rate/decision-richness/policy-gap. A fuller (but
 non-exhaustive) list of hooks is scattered through `docs/DEVLOG.md`; grep `Program.cs`

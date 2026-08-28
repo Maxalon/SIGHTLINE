@@ -52,6 +52,19 @@ public static class Program
             return;
         }
 
+        // Q1: SIGHTLINE_STACKTEST=1 : the NO-TWO-IN-ONE-PLACE invariant. Drives real missions across
+        // all 8 objectives at heat 0/2 with two detectors running at once — (a) a hook on every
+        // MoveStepAnim ACTIVATION asserting the destination tile is empty-or-self, and (b) a
+        // per-frame sweep for two living units sharing a tile (episode-counted, with the longest
+        // episode's duration). PASS requires BOTH at zero over a non-vacuous sample.
+        // SIGHTLINE_STACKTEST=2 widens the same sweep to FULL campaigns under BOTH the dumb
+        // smoke bot and the competent one (the QA-scale measurement; several minutes).
+        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_STACKTEST"), out int stackMode) && stackMode > 0)
+        {
+            StackTest(stackMode >= 2);
+            return;
+        }
+
         // SIGHTLINE_SAVETEST=1 : headless round-trip check for run persistence (item E). No window.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_SAVETEST") == "1")
         {
@@ -630,7 +643,10 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_HAZARD") == "1") game.DebugHazards();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_TAGEDIT") == "1") game.DebugTagEditor();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_WOUND") == "1") game.DebugWound();
-        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_TOOLTIP") == "1") game.DebugTooltip();
+        // Q1: =1 stages the AIM-mode tooltip, =hover the plain hover-an-enemy tooltip (D4).
+        bool tooltipHover = shot && Environment.GetEnvironmentVariable("SIGHTLINE_TOOLTIP") == "hover";
+        if (shot && (Environment.GetEnvironmentVariable("SIGHTLINE_TOOLTIP") == "1" || tooltipHover))
+            game.DebugTooltip(tooltipHover);
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_BENCH") == "1") game.DebugBench();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_TRAITS") == "1") game.DebugTraits();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_STATUS") == "1") game.DebugStatus();
@@ -653,6 +669,7 @@ public static class Program
             Display.ChromaIntensity = 0.6f;
         }
         bool helpShot = shot && Environment.GetEnvironmentVariable("SIGHTLINE_HELP") == "1";  // hover the ability button
+        int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_SHOTSEQ"), out int seqCount);   // Q1: consecutive-frame dump
         int frame = 0;
         const int autoCap = 20000;
 
@@ -665,12 +682,17 @@ public static class Program
             // hover-driven, so the harness has to hold the cursor on the tile every frame.
             if (shot && game.DebugMousePark.HasValue)
                 Raylib.SetMousePosition((int)game.DebugMousePark.Value.X, (int)game.DebugMousePark.Value.Y);
+            if (tooltipHover) game.KbCursor = true;            // Q1: hold the board cursor on the foe (a mouse
+                                                               // delta from the Xvfb pointer clears it otherwise)
             game.Update(dt);
             Audio.UpdateMusic(dt);
 
             Display.RenderFrame(() =>
             {
-                if (autoplay) Raylib.ClearBackground(Pal.Bg);  // skip heavy draw during smoke test
+                // Q1: autoplay normally skips the heavy draw (it's a smoke test), but a shot frame
+                // requested ON TOP of autoplay is asking for a picture of live play — the only way
+                // to photograph a unit MID-MOVE — so draw for real in that combination.
+                if (autoplay && !shot) Raylib.ClearBackground(Pal.Bg);
                 else game.Draw();
             });
 
@@ -678,7 +700,15 @@ public static class Program
             if (shot)
             {
                 if (frame == shotFrame) Raylib.TakeScreenshot("sightline_shot.png");
-                if (!autoplay && frame >= shotFrame + 2) break;
+                // Q1 SIGHTLINE_SHOTSEQ=<n>: also dump the n consecutive frames from shotFrame as
+                // sightline_seq_NN.png. Pair with SIGHTLINE_AUTOPLAY=1 to film a multi-tile move —
+                // the eyes-only check for the MoveStepAnim OnStart-at-enqueue jitter landmine
+                // (CLAUDE.md: a step that captures _from at the ORIGINAL tile snaps back every
+                // tile, and no test catches it).
+                if (seqCount > 0 && frame >= shotFrame && frame < shotFrame + seqCount)
+                    Raylib.TakeScreenshot($"sightline_seq_{frame - shotFrame:00}.png");
+                if (!autoplay && frame >= shotFrame + Math.Max(2, seqCount)) break;
+                if (autoplay && seqCount > 0 && frame >= shotFrame + seqCount) break;
             }
             if (autoplay)
             {
@@ -1017,6 +1047,137 @@ public static class Program
             case "decapitate": case "decap": return Objective.Decapitate;
             default: return Objective.Eliminate;
         }
+    }
+
+    // ── Q1 "NO TWO IN ONE PLACE" — SIGHTLINE_STACKTEST ────────────────────────────────────
+    // Two living units must never occupy the same tile. They used to: Game.ActivatePod planned
+    // EVERY dormant pod member against the live board and enqueued all their reveal-scatter
+    // steps before any of them ran, so member 2 planned blind to where member 1 was going (and
+    // blind to the player's own still-queued path steps, which sit AHEAD of the scatter in the
+    // queue). Two bodies on one tile is not cosmetic: Game.UnitAt returns the FIRST match
+    // (Players before Enemies), and both hover and click route through it, so the buried unit
+    // cannot be hovered, cannot show odds, and cannot be clicked to target — a direct hit on the
+    // "reads clearly" pillar — while both read cover=0/flanked at range 0.
+    //
+    // Two independent detectors, both live for the whole sweep:
+    //   (a) STEP detector — MoveStepAnim.StackProbe fires when a step becomes the ACTIVE anim.
+    //       Unit.X/Y is still the origin there and only one anim is ever active, so a non-null
+    //       UnitAt(Tx,Ty) that isn't the mover is a proven imminent collision, not an artifact.
+    //   (b) FRAME detector — a per-frame sweep over the living roster for a shared tile,
+    //       collapsed into EPISODES (a tile+pair overlap that persists across frames counts
+    //       once) so the report shows how long a stack actually lingers.
+    // Non-vacuity guard (the PAIRTEST precedent): a run with no display returns before frame one
+    // and would "pass" on zero gameplay, so PASS also requires a real sample of move steps.
+    static void StackTest(bool wide = false)
+    {
+        Stats.Reset();
+        Stats.Enabled = false;         // pure invariant sweep; no telemetry needed
+        Mission.ForcedLayout = -1;
+        Pal.SetColorblind(false);
+
+        Raylib.SetConfigFlags(ConfigFlags.Msaa4xHint);
+        Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "SIGHTLINE — stack test");
+        Raylib.SetExitKey(KeyboardKey.Null);
+        Cfg.Font = Raylib.GetFontDefault();
+        Display.Init(false);
+        Raylib.SetTargetFPS(0);
+
+        long steps = 0, stepHits = 0;
+        int episodes = 0, longestFrames = 0, framesWithOverlap = 0;
+        var openEpisodes = new System.Collections.Generic.Dictionary<string, int>();
+        var seenThisFrame = new System.Collections.Generic.HashSet<string>();
+        var examples = new System.Collections.Generic.List<string>();
+        int missionsSeen = 0;
+
+        MoveStepAnim.StackProbe = (g, m) =>
+        {
+            steps++;
+            var occ = g.UnitAt(m.Tx, m.Ty);
+            if (occ == null || occ == m.Unit) return;
+            stepHits++;
+            if (examples.Count < 6)
+                examples.Add($"{m.Unit.Team}/{m.Unit.Cls} -> ({m.Tx},{m.Ty}) already held by {occ.Team}/{occ.Cls} [phase={g.Phase}]");
+        };
+
+        // one leg = the first mission of a campaign pinned to (objective, heat), dumb autopilot
+        // (the reveal-scatter path is policy-independent, and the dumb bot blunders into pods
+        // more often, which is exactly the trigger we want to sample).
+        void Leg(Objective obj, int heat, int slot, bool smart)
+        {
+            Environment.SetEnvironmentVariable("SIGHTLINE_HEAT", heat.ToString());
+            Util.Reseed(70000 + slot);
+            var game = new Game { NoPersist = true, AutoPlay = true, SmartPlay = smart, ForcedObjective = obj };
+            game.StartMission(1);
+            int frame = 0;
+            int legCap = wide ? 20000 : 6000;
+            int missionsThisLeg = 0;
+            while (!Raylib.WindowShouldClose())
+            {
+                game.Update(1f / 60f);
+                Display.RenderFrame(() => Raylib.ClearBackground(Pal.Bg));
+
+                // ---- (b) per-frame shared-tile sweep ----
+                seenThisFrame.Clear();
+                var all = new System.Collections.Generic.List<Unit>();
+                foreach (var u in game.Players) if (u.Alive) all.Add(u);
+                foreach (var u in game.Enemies) if (u.Alive) all.Add(u);
+                for (int i = 0; i < all.Count; i++)
+                    for (int j = i + 1; j < all.Count; j++)
+                        if (all[i].X == all[j].X && all[i].Y == all[j].Y)
+                            seenThisFrame.Add($"{obj}h{heat}:{all[i].X},{all[i].Y}:{all[i].Cls}|{all[j].Cls}");
+                if (seenThisFrame.Count > 0) framesWithOverlap++;
+                foreach (var k in seenThisFrame)
+                {
+                    if (openEpisodes.TryGetValue(k, out int n)) openEpisodes[k] = n + 1;
+                    else { openEpisodes[k] = 1; episodes++; }
+                }
+                var stale = new System.Collections.Generic.List<string>();
+                foreach (var kv in openEpisodes)
+                    if (!seenThisFrame.Contains(kv.Key)) { if (kv.Value > longestFrames) longestFrames = kv.Value; stale.Add(kv.Key); }
+                foreach (var k in stale) openEpisodes.Remove(k);
+
+                frame++;
+                if (game.Phase == Phase.Lose || game.Phase == Phase.Win) break;
+                // narrow sweep: stop the moment the FIRST mission resolves (a win advances
+                // RunState.Mission). Wide sweep: play the whole campaign out.
+                int cleared = game.RunState != null ? game.RunState.Mission - 1 : 0;
+                if (cleared > missionsThisLeg) missionsThisLeg = cleared;
+                if (!wide && missionsThisLeg >= 1) break;
+                if (frame >= legCap) break;
+            }
+            foreach (var kv in openEpisodes) if (kv.Value > longestFrames) longestFrames = kv.Value;
+            openEpisodes.Clear();
+            missionsSeen += Math.Max(1, missionsThisLeg + (game.Phase == Phase.Lose ? 1 : 0));
+        }
+
+        var objs = new[] { Objective.Eliminate, Objective.Hack, Objective.Evac, Objective.Escort,
+                           Objective.Sabotage, Objective.Rescue, Objective.Defend, Objective.Decapitate };
+        int s2 = 0;
+        foreach (bool smart in wide ? new[] { false, true } : new[] { false })
+            foreach (int heat in new[] { 0, 2 })
+                foreach (var o in objs)
+                {
+                    if (Raylib.WindowShouldClose()) break;
+                    Leg(o, heat, s2++, smart);
+                }
+
+        MoveStepAnim.StackProbe = null;
+        Util.Reseed(0);
+        Display.Shutdown();
+        Renderer.UnloadNoise();
+        Raylib.CloseWindow();
+
+        Console.WriteLine($"STACKTEST: mode={(wide ? "wide" : "narrow")} missions={missionsSeen} moveSteps={steps} " +
+                          $"stepCollisions={stepHits} ({(steps > 0 ? 100.0 * stepHits / steps : 0):0.000}%) " +
+                          $"overlapEpisodes={episodes} overlapFrames={framesWithOverlap} longestEpisodeFrames={longestFrames}");
+        foreach (var e in examples) Console.WriteLine("STACKTEST:   e.g. " + e);
+        var fails = new System.Collections.Generic.List<string>();
+        if (stepHits > 0) fails.Add($"stepCollisions={stepHits}");
+        if (episodes > 0) fails.Add($"overlapEpisodes={episodes}");
+        if (steps < 500) fails.Add($"vacuous(moveSteps={steps})");   // no display / no gameplay
+        Console.WriteLine(fails.Count == 0
+            ? "STACKTEST: PASS (no move step ever entered an occupied tile; no two living units ever shared one)"
+            : "STACKTEST: FAIL (" + string.Join(",", fails) + ")");
     }
 
     // SIGHTLINE_WOUNDTEST: a survivor that ends a mission badly hurt carries a Wound

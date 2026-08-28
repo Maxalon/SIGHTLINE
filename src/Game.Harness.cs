@@ -1008,12 +1008,18 @@ public partial class Game
     /// tooltip's red low-confidence band (>=70 good / 40-69 caution / <40 threat) inside the
     /// neutral PanelBd frame. The next Update's UpdateHoverAndAim recomputes + shows the odds
     /// naturally (no special draw path), so the screenshot matches real play.
-    public void DebugTooltip()
+    /// Q1: `hover` stages the OTHER odds path — no aim mode, the board cursor parked on the foe
+    /// (the keyboard-cursor route, so a headless shot needs no live mouse) with the soldier having
+    /// already fired this turn. That is the D4 case: the plain-hover tooltip applies the -15 SNAP
+    /// penalty to the displayed hit%, and (pre-Q1) explained none of it.
+    public void DebugTooltip(bool hover = false)
     {
         var c = Players.Where(p => !p.IsVip && p.Alive).ToList();
         if (c.Count == 0) return;
         var s = c[0];
         s.ConsecutiveMisses = 2;                       // bank +12 STEADYING (the streak cap)
+        s.FiredThisTurn = true;                        // Q1: stage the RUSHED 2ND SHOT badge too
+        s.RunGun = false;
         SquadConcealed = false;                        // CanTarget refuses while concealed
         var foe = Enemies.FirstOrDefault(e => e.Alive);
         if (foe != null)
@@ -1040,7 +1046,8 @@ public partial class Game
             }
             foe.Alert = AlertLevel.Alert;
             Selected = s; RecomputeMoveCost();
-            AimMode = true; AimTarget = foe;
+            if (hover) { AimMode = false; KbCursor = true; CurX = foe.X; CurY = foe.Y; }
+            else { AimMode = true; AimTarget = foe; }
         }
     }
 
