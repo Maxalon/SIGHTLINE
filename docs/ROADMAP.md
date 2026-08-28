@@ -748,7 +748,7 @@ worktree, adversarially reviewed, and merge-gated on self-tests + autoplay + Rel
       the meta screens, coherent intro hierarchy, WAR ROOM progress bars + NEXT UNLOCK card,
       promotion delta lines, first-run RECOMMENDED draft.
 
-## PROGRAM "FULCRUM" — in flight (see docs/DEVLOG.md for milestone write-ups)
+## PROGRAM "FULCRUM" — CLOSED 2026-08-28 (13/13 waves landed; the measured close is docs/DEVLOG.md §FUL-13)
 
 Research: six fresh lenses on the post-SIGNAL tree → PM synthesis → orchestrator code-sharpening.
 Through-line: **systems that exist but never reach play** — the comeback economy (BRACE/morale/verb
@@ -950,13 +950,61 @@ of record (container suspensions have wiped every scratchpad copy — docs are t
       with a Spearhead-position pin). Bot arm-uptake measurement lands with FUL-5's hashed chooser
       (FUL-10 makes the forks exist; FUL-5 makes the bot walk them). DEVLOG carries the measured
       landing + the accepted IndexForNode version-skew note.
-- [ ] **FUL-13 TRUE NORTH** (P13, L — LAST). Re-baseline the ladder on the finished tree (stale
-      published numbers: h0 read 60 vs 80 published in research); lift h4 toward its 60±8 band;
-      drain the intel flood (heat refunding itself through the shop); resolve the LOS-fix policy-
-      gap watch item (accept-vs-sharpen on the corrected tree); final DEVLOG measured tables.
-      Also owns: whether skirmish/daily should keep the m1 opener grace zeroing numeric heat
-      deltas (FUL-3 landing note — the picker desc is honest now, the design question isn't).
-      Parked from FUL-10: an event-exposure lever — widening GenerateMap's "?"-node stamp clamp
-      to `Clamp(mids/4, 1, 3)` (17 events now share 1-2 nodes/run ≈ each ~1-in-9 runs). CAVEAT:
-      GenerateMap re-runs from MapSeed on load, so changing the clamp silently reshapes IN-FLIGHT
-      saves' unvisited nodes — ship it only with that skew adjudicated.
+- [x] **FUL-13 TRUE NORTH** (P13, L — LAST; wt-ful13, base c4ef42e). The program close: the
+      published numbers made TRUE for the finished game. Intel cash-flow telemetry (61fbccd,
+      logic-identity verified — 33/33 base-schema JSON fields); the definitive ladder at proper N
+      (200 campaigns, 2 disjoint CRN slot sets/heat): **52.5/35/30/22.5/10** — goal band RE-SET
+      to **55/40/30/20/10 ±8** (h8 ±5, floor >=5) with the owner-facing reasoning in DEVLOG (the
+      80/70/60/40/20 band predates the exposure repair; un-repairing exposure was out of
+      authority). h4 measured ON its re-set band (30.0 vs 30±8) — no rung-average lever; the
+      wave's levers went to the measured SHAPE defect: **Defend inverted at the top** (82% h0 →
+      97% h6 / 91% h8; defend-pinned h8 96%, n=89, all-Defend completion 80% at a 10% rung).
+      R1 waves inherit Heat.StatDelta (7139a2f, truthful-not-binding); R2 defendKeep = graced
+      heatEnemy/2 (03f02dc) → pinned h8 Defend **87** = parity with pinned h0's 83, h4 Defend 61
+      (FUL-4's band), rung dips in budget (h8 10→5 at the band floor, reported); R3 ceil probe
+      REVERTED (no h6 movement, real h4 cost — the h6 residual recorded with mechanism). LOS
+      policy-gap thread CLOSED at N=100 pairs: binary −2.0, margin −0.06±0.21, sign-test p=0.87
+      — zero, not negative; forgiving-by-design ACCEPTED, sloppy definition unchanged. Intel
+      flood RESOLVED no-drain (kicker = 57% of h8 income, ALL converts to shop spend, unspent
+      flat 14-19, slope survives). Event EV-weighting (FireWeight) + informant PrepDead gate
+      (+8 EVENTTEST legs; h0 A/B byte-identical — binds on future catalogs + human legality).
+      Endless depth 32 stands median 6 (APEX band top edge, = FUL-6). m5 all-Defend cell
+      resolved 89% (n=9 — the 12.5%/n=8 was noise); per-kit finale drift closed world-driven
+      (paired slots: W81/L69/S94, an ordering flip vs FUL-11 = worlds, not kits). "?"-node
+      Clamp(1,3) lever measured NEARLY INERT (18/20 slot-pairs byte-identical, zero added event
+      volume) — recommendation recorded, NOT applied. RCL kept-as-is (4 procs/200 — bot floor
+      understates the human combo line); FDR closed alive (11 procs — FUL-7's drag stage priced
+      it). README screenshot retaken (the FULCRUM board). Full tables + the program-close
+      write-up: docs/DEVLOG.md §FUL-13.
+
+## OPEN / NEXT (post-FULCRUM backlog — seeded at the FUL-13 close)
+
+Reference for any future wave: the FUL-13 ladder + re-set goal band (docs/DEVLOG.md §FUL-13)
+is the number of record; method per FUL-2/FUL-5 — CRN chunks via SIGHTLINE_BALANCE_BASE slot
+sets, one lever per measured round, fresh same-slot R0 first, dip budgets, breaches reported.
+
+- [ ] **Owner decisions pending** (decision paragraphs with recommendations in DEVLOG §FUL-13
+      "DESIGN-QUESTION DOCKET"): skirmish numeric heat (recommend: exempt SKIRMISH from the m1
+      grace, keep DAILY); founding-squad corpsman (recommend: first-backfill guarantee or
+      keep-as-is — a founding-four identity choice, not a tune); grenade pre-frag bot arm
+      (recommend: accept the human-vs-bot read gap as designed skill expression).
+- [ ] **The h6 Defend residual** (the one recorded bump after the FUL-13 rounds: pinned h6
+      Defend 97% n=89 while pinned h8 sits at 87 parity). Mechanism named in Game.cs at the
+      defendKeep line: at +2 stats extra bodies feed the rout economy instead of pressuring
+      the hold. Any future lever should be stat- or cadence-flavoured, not bodies.
+- [ ] **Escort at the apex** (h8 29%, n=17 — the wall's killer cell; h6 67%). Allowed today as
+      apex texture; if the owner wants the h8 objective spread tightened, start from the FUL-13
+      per-objective table and the VIP-durability lever, not blanket rung stats.
+- [ ] **Event exposure** (informant/reservecall fielded ZERO times in 200 campaigns; each event
+      ~1-in-9 runs at 17 entries). The parked Clamp(1,3) lever is measured nearly inert (FUL-13)
+      — the honest levers are floor-2 stamping (Clamp(mids/4,2,3); reshapes in-flight saves'
+      unvisited "?" nodes — adjudicate the skew) or a cross-run catalog dedupe (profile-side,
+      no skew). The reservecall value prior is rank-blind (noted in DEVLOG) — revisit only with
+      real exposure.
+- [ ] **RCL sweeten option** (only if the owner wants the boon mainstream): "any overwatch kill
+      re-arms, once/turn" — the cone-kill proc is an honest but thin combo line (4 procs/200
+      campaigns at FOCUS 843); measure against the FUL-13 procs table.
+- [ ] **h8 corpsman blackout** (RELENTLESS kills backfill → corpsman fielded 13% of h8 missions,
+      PATCH 5/batch): intended apex cruelty or a hole in the revive economy — pairs with the
+      founding-corpsman decision.
+- [ ] **On-device audio tuning** (carried; needs the human).
