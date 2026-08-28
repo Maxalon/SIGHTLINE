@@ -1609,3 +1609,106 @@ logic-identity proof, now precedent for telemetry-only waves:
   (b) SIGHTLINE_BALANCE=2, same slot base, both trees — all 29 base-schema JSON fields identical
       (per-shot class tallies and action mix included);
   (c) PAIRTEST + SAVETEST PASS.
+
+# PROGRAM FULCRUM — FUL-5 HANDS landing (2026-08, wave dev)
+
+- **FUL-5 HANDS** (wt-ful5, base 5b7ac98): the EV bot learned the verbs, so FUL-1's compass
+  prices real play instead of no-ops. Measured one lever per round (paired h0 N=10 = 20
+  campaigns, CRN slots 0-9; R0 = own base reference on the same slots). Every probe stays an
+  honest EV argument — no scripted quotas; two rounds (R1, R2-greedy) came back byte-identical
+  to base and were treated as the finding ("the gate is unreachable"), not padded.
+  - **BRACE** 1 → **82**/batch (+ FOCUS 5 → 24): three iterations — a rusher arm in
+    HoldOverwatch (R1: never fired — unreachable), a step-5a combat-brain probe + a duck veto
+    for the shoot-then-brace turn (R3: sloppy-only ~5), and the real stage (R7): Defend/Escort
+    zone-holds route their watch through HoldOverwatch, whose rusher arm (committed charger
+    inbound — BERSERKER/HOUND/STRIKER/BRUISER — that a lethal reaction can't remove) now fires
+    where waves actually charge. SHOCK DOCTRINE procs 0 → **6** (5 picks) — the headline dead
+    verb-boon now reaches play.
+  - **ITEM** 0 → **19**/batch: TrySmokeCover — smoke the most-exposed sub-half-HP squadmate
+    (self incl.), probed objective-agnostically from SmartStep (the old ">=2 guns AND no shot
+    AND it's me" conjunction, buried where objective routines never reach, measured 0/500
+    missions). Self-bounded by the 1-charge/mission budget.
+  - **PATCH** ~1/500-missions → 4-6/batch: heal gate missing>=4 → >=3, an objective-agnostic
+    corpsman block in SmartStep (the objective routines bypassed SmartCombatStep — PATCH was
+    structurally dead on 5 of 8 objectives), and a bounded move-to-patch (hurt ally at Cheby
+    2-3 → step adjacent, Cd-gated).
+  - **DRAG** 0 → 5-7/batch: the Escort march + zone-hold gained SmartEvac's straggler pull
+    (incl. reeling the leashed VIP from Cheby 2 into extract range).
+  - **GRENADE** 8 → 6-8/batch (plateau): grenade-first on covered 2+ clusters (step 2a +
+    SmartDefend) is honest but thin — see the verdict below.
+  - **AutoEventChoice** rebuilt: 70/30 value-biased (EventChoiceValue competent-play prior),
+    randomness HASHED off (MapSeed, node id) — never an Rng draw (CRN; Events.cs GambleSucceeds
+    precedent; replaced the always-safe rule + its IsSafeChoice/HasDownside pair). BY
+    EVENT-CHOICE went from safe-arms-only to 9 populated arms (defector all three, medic:1,
+    drill:1 ...), value-driven (medic:1 taken when nobody is hurt).
+  - **COUNTER-PREP** 0 → 10-12 buys/batch (AutoShop buyable set + a modest prior 4f — the slot
+    only exists when a faction is telegraphed, CanBuy re-gates).
+  - **Mod priors de-flattened**: SUPPRESSOR 45/165 = 27% of mod buys (~2x slate share, an
+    affordability artifact of the flat 6f prior) → **13/142 = 9%**; SCOPE/HOLLOW POINT lead as
+    a competent player installs.
+
+## Measured (rounds; paired h0 N=10 = 20 campaigns each, slots 0-9; R0 = base 5b7ac98)
+| round | lever | completion (greedy/sloppy) | key counters |
+|---|---|---|---|
+| R0 | base reference | 60% ±11 (50/70) | BRACE 1, PATCH 1, GREN 8, ITEM 0, DRAG 0; SUP 27% of mods; safe event arms only |
+| R1 | HoldOverwatch rusher arm | 60% — byte-identical batch | the arm never fired: HoldOverwatch unreachable in open combat |
+| R2 | + PATCH >=3 + move-to-patch | 60% (50/70) | greedy leg still byte-identical; sloppy BRACE 5; PATCH 0 (objective routes bypass the brain) |
+| R3 | + grenade-first, duck veto, PATCH pre-routing | 55% (40/70) | BRACE 6, PATCH 4, GREN 7 |
+| R4 | + smoke-on-wounded, Escort DRAG, patch r2-3 | 55% (50/60) | DRAG 7, ITEM 1 (2b unreachable too), BRACE 6 |
+| R5 | + hashed event choice, COUNTER-PREP, smoke pre-routing | 65% (80/50) | ITEM 14, PREP 12, 9 event arms |
+| R6 | + mod prior de-flatten | 65% (70/60) | SUP 9.6% of mod buys |
+| R7 | + Defend frag + holds route through HoldOverwatch | **75% ±10 (80/70)** | BRACE 82, FOCUS 24, ITEM 19, SHK procs 6, PATCH 5, GREN 8 |
+| R7b | same tree, FRESH slots 100-109 (robustness) | 50% (40/60) — different worlds, not budget-comparable | BRACE 31, ITEM 15, **PATCH 10**, PREP 11, SUP 5.6%, SHK 1 proc, FDR 0; event arms incl. the profiteer:0 gamble + cache/distress |
+
+Budget: R7 = R0 +15 on the same slots — the bot got BETTER (allowed; recorded as FUL-13 input:
+the h0 baseline for the finished tree is now ~75 under this bot ON THESE SLOTS; the fresh-slot
+50% shows world-to-world variance still dominates absolute levels — only paired same-slot
+readings are level-comparable). PAIRED MARGIN drifted -0.30 ±0.26 → 0.00 ±0.39 (n=10 — noise).
+
+Verified at landing: Release 0/0; COMBATTEST / AITEST / SNAPTEST / SAVETEST / **PAIRTEST** all
+PASS (PAIRTEST is the load-bearing one — the event-choice 70/30 and every new probe had to keep
+A/A CRN identity, hence hash-not-draw everywhere); autoplay x3 clean (no exception, no TIMEOUT).
+
+## Design verdicts (per the FUL-5 decision rule — recorded, not tuned around)
+1. **BRACE in clean greedy play is structurally rare; its home is holds and the behind-game.**
+   Shoot-twice beats shoot-brace whenever the charger is exposed (hit >= 45), so the combat
+   brain braces ~1-2/batch and the sloppy leg 4-5 (via its shot-skip slips) — coherent with
+   UNDERTOW's "losing-position tool" intent. The volume lives where the design said it should:
+   zone/line holds (R7). **Watch item (FUL-13):** on holds the rusher arm now largely REPLACES
+   the wide watch (OVERWATCH 54 → 8/batch) and completion rose — if brace-over-watch is strictly
+   dominant there, the reaction economy's lethality-vs-denial pricing deserves a check.
+2. **FIELD DRILLS (FDR) procs are structurally ~unreachable: VERDICT, do not price the boon on
+   this counter.** The proc = a SECOND drag/vault by one soldier in one turn. A first drag
+   consumes the geometry the second needs (the pulled ally lands adjacent = no longer a legal
+   target), so it needs TWO separate Cheby-2 stragglers in one turn — the greedy bot's spacing
+   produces whole batches with drag totals of 2-7 spread across turns; vaults are 0. **FUL-6
+   rework brief:** count a drag + a vault as the drill (sum, not per-verb), or replace the
+   second-use effect with "+1 MoveBudget on any turn the soldier dragged/vaulted" — both make
+   the boon's effect fire on play that actually occurs.
+3. **RECLAIMER (RCL) procs still 0** at FOCUS 24/batch — a cone-kill while the boon is held
+   remains a thin coincidence; same family as FDR (effect site narrower than real play).
+   Candidate for the same FUL-6 pass; not a named FUL-5 target, so recorded only.
+4. **GRENADE's honest ceiling under this bot is ~6-8/batch (target 10).** The pre-shot window
+   (covered 2+ cluster, no ally in blast, in range+LoS, no likely kill available) anti-correlates
+   with the gun: shot declines happen at range, grenade range is short, and active enemies
+   de-cluster under the pod AI. The remaining volume would have to come from pre-fragging
+   dormant pods (a real player line, but a perfect-info-flavored one for the bot) — declined
+   as quota-chasing. FUL-6's pods-of-3 + linked activation is exactly the stage this verb waits
+   for; re-measure there.
+5. **PATCH's ceiling is roster presence, not gates (target 10, measured 4-6).** The founding
+   squad has NO corpsman (Mission.NewRunSquad = ASSAULT/RANGER/SHARPSHOOTER/GUNNER); the class
+   enters via casualty backfill only (~2-3 campaigns of 20, ~15-20% of soldier-missions), so
+   even honest per-presence rates (~2/corpsman-campaign) cannot reach 10/batch. FUL-7 (downed
+   soldiers) and any founding-roster change re-open this; the gates are ready.
+
+## Gotchas (process)
+- **The heat pin is SIGHTLINE_BALANCE_HEAT, not SIGHTLINE_HEAT** — the first reference batch
+  silently cycled {0,2,4,6,8} (SIGHTLINE_HEAT is read per-run by StartMission, but the BATCH
+  schedule variable is separate). Re-ran; kept only as texture.
+- **A byte-identical paired batch is a legitimate probe result** — it proves the gate never
+  fired (R1, R2-greedy) and locates WHERE the cascade eats the decision. Cheaper than tracing.
+- **The paired slots fix the event-node sample**: slots 0-9 reuse the same 10 MapSeeds every
+  round, so BY EVENT-CHOICE arms are world-locked across rounds — cross-check arm exposure on a
+  fresh slot base (SIGHTLINE_BALANCE_BASE) before reading it as policy.
+- Never rebuild while a batch runs — dotnet's in-place DLL overwrite races the mapped image of
+  the running process (observed surviving, not guaranteed).
