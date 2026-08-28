@@ -66,6 +66,12 @@ public static class Program
             Mission.HostileToughness = xtough;
         if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_TRIM"), out int xtrim) && xtrim >= 0)
             Mission.HostileDamageTrim = xtrim;
+        //   SIGHTLINE_AIMTRIM=<n>    : Mission.HostileAimTrim (flat points off every hostile's aim)
+        //   SIGHTLINE_ENEMYBASE=<n>  : Mission.EnemyBaseCount (the `count = base + mission` constant)
+        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_AIMTRIM"), out int xaim) && xaim >= 0)
+            Mission.HostileAimTrim = xaim;
+        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_ENEMYBASE"), out int xbase) && xbase >= 0)
+            Mission.EnemyBaseCount = xbase;
 
         bool smartplay = Environment.GetEnvironmentVariable("SIGHTLINE_SMARTPLAY") == "1";
         bool autoplay = Environment.GetEnvironmentVariable("SIGHTLINE_AUTOPLAY") == "1" || smartplay;
