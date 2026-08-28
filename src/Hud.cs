@@ -359,7 +359,7 @@ public static class Hud
         PauseUiScale    = new Rectangle(cx1, by, bw, bh);                   // W5 comfort
 
         DrawButtonRect(PauseResume, "RESUME", "ESC", true, false, Pal.Friend);
-        DrawButtonRect(PauseFullscreen, Display.Fullscreen ? "FULLSCREEN: ON" : "FULLSCREEN: OFF", "F", true, !Display.Fullscreen, Pal.Accent);
+        DrawButtonRect(PauseFullscreen, Display.Fullscreen ? "FULLSCREEN: ON" : "FULLSCREEN: OFF", "F11", true, !Display.Fullscreen, Pal.Accent);   // R1: was "F" — F is FOCUS
         DrawButtonRect(PauseWindow, "WINDOW: " + Display.SizeLabel, "", true, false, Pal.Accent);
         DrawButtonRect(PauseShake, g.Fx.ShakeOn ? "SCREEN SHAKE: ON" : "SCREEN SHAKE: OFF", "", true, !g.Fx.ShakeOn, Pal.Accent);
         // RESONANCE T2: three-state — OFF / SIMPLE (the pre-T2 single exposure tick) / FULL (graded

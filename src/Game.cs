@@ -3538,8 +3538,31 @@ public partial class Game
         // custom-tag editor is modal: it swallows all other input while open
         if (EditingTag) { UpdateTagEditor(); return; }
 
+        // ── GLOBAL keys (read every phase, before any per-phase handler) ────────────────────
+        // These fire ON TOP of whatever the current phase binds, so anything claimed here is
+        // claimed EVERYWHERE. Keep the set tiny, and never give a global a letter that an
+        // in-mission verb wants.
+        //
+        // R1 REVIEW FIX — fullscreen was on `F`, which UpdatePlayer also binds to FOCUS (cone
+        // overwatch, advertised as "FOCUS F" on the action bar). IsKeyPressed is true for BOTH
+        // reads in the same frame, so pressing F during the player turn spent the soldier's
+        // action AND toggled fullscreen. The HUD advertises the verb, so the verb wins: fullscreen
+        // moves to F11, the platform convention for it, and the only function key besides F2 that
+        // this game binds. (The pause menu's FULLSCREEN button is unchanged and still the
+        // discoverable path; its key hint now reads F11.)
+        //
+        // Audited with it: the full in-mission player-turn keymap is
+        //   global   M mute · F11 fullscreen · F2 anim speed · Esc cancel-target/pause · C cam reset
+        //   verbs    1 aim · 2 overwatch · F focus · B brace · 3 hunker · 4 grenade · 5 ability
+        //            6 item · 7 drag · 8 shove · 9 vault · E stabilize · G beacon · H hack
+        //            X extract · R reload · T tag · V show-all-verbs · P restart drill
+        //            Tab cycle · Enter end turn · Space act · WASD/arrows cursor
+        // — no other key appears twice in one context. The other contexts (Intro, skirmish setup,
+        // codex, barracks/shop, tag editor) are each internally unique and are reached only when
+        // UpdatePlayer is not, so a letter may safely mean different things across them. Free
+        // letters remaining, for whoever binds next: I J O Q U Z.
         if (Raylib.IsKeyPressed(KeyboardKey.M)) Audio.ToggleMute();
-        if (!AutoPlay && Raylib.IsKeyPressed(KeyboardKey.F)) Display.ToggleFullscreen();
+        if (!AutoPlay && Raylib.IsKeyPressed(KeyboardKey.F11)) Display.ToggleFullscreen();
         if (!AutoPlay && Raylib.IsKeyPressed(KeyboardKey.F2)) CycleAnimSpeed();   // fast-forward anim pacing (persisted; also in the pause menu)
         Audio.SetMusicIntensity(MusicIntensity());
         UpdateTutorial(dt);

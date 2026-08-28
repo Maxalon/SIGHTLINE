@@ -329,7 +329,8 @@ seeds (mix of WIN/LOSE, no exceptions):
   orange / Good→teal), both in the pause menu + persisted. (Phase 3 item 3.13.)
 - **Display settings** (`src/Display.cs`): the fixed 1280x800 game is rendered to a
   letterboxed render-target scaled to the window, so it stays readable on big/4K
-  screens. Pause menu offers **FULLSCREEN** (key **F**) + a **WINDOW** size cycle
+  screens. Pause menu offers **FULLSCREEN** (key **F11** — it was `F`, which the player
+  turn also binds to FOCUS; see the keymap note in `Game.Update`) + a **WINDOW** size cycle
   (1280x800 → 3200x2000); the window is also free-resizable. Mouse is mapped back to
   virtual space via `SetMouseOffset/Scale`. At native 1280x800 windowed it draws
   directly (keeps MSAA). Settings persist to `display.json` in the user-data dir.
