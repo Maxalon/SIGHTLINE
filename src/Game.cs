@@ -67,8 +67,20 @@ public partial class Game
     // hit-stop decay — NOT the whole game tick, so the autopilot/timers/sim are unaffected.
     // Default 1f, and nothing reads it unless the key is pressed, so the headless screenshot
     // path stays byte-stable and the autoplay smoke test is unchanged.
-    public float AnimSpeed = 1f;
-    public void CycleAnimSpeed() { AnimSpeed = AnimSpeed >= 3f ? 1f : AnimSpeed + 1f; }
+    /// W5 COMFORT: the animation-playback multiplier. The VALUE lives in Display (persisted in
+    /// display.json, cycled from the pause menu or [F2]); this property is the single read point
+    /// and it HARD-PINS 1x for the headless harness and the autopilot. That gate is load-bearing:
+    /// SIGHTLINE_BALANCE / autoplay / screenshot runs must step the queue at exactly the pace they
+    /// always did, or every measured number in docs/ shifts. Display.Init(false) also never Loads,
+    /// so a headless process cannot pick a speed up off disk either — belt and braces.
+    /// Harness-only escape hatch for the animation-speed FILMSTRIP (SIGHTLINE_ANIMSPEED, shot mode
+    /// only). The pin below is what keeps the flywheel honest, so the filmstrip cannot simply turn
+    /// it off — instead it names an explicit speed here. Default 0 = inert, so autoplay, the balance
+    /// batch and every other headless path are untouched (ONRAMPTEST asserts the pin with it unset).
+    public float AnimSpeedOverride;
+    public float AnimSpeed => AnimSpeedOverride > 0f ? AnimSpeedOverride
+                            : (AutoPlay || NoPersist) ? 1f : Display.AnimSpeed;
+    public void CycleAnimSpeed() { if (!AutoPlay && !NoPersist) Display.CycleAnimSpeed(); }
 
     // selection / hover
     public Unit Selected;
@@ -1703,10 +1715,13 @@ public partial class Game
             // Harness/screenshot affordance only: SIGHTLINE_HEAT lets the headless intro shot
             // preview the dialled-in level + its unlocked ceiling. No disk I/O; default 0 keeps
             // a plain shot byte-stable.
-            if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_HEAT"), out int hEnv) && hEnv > 0)
+            // W5: the hook now also accepts the sub-standard rung (-1 = RECRUIT) so the intro
+            // DIFFICULTY card can be photographed at it. Unset / 0 still changes nothing, so a
+            // plain intro shot stays exactly as before.
+            if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_HEAT"), out int hEnv) && hEnv != 0)
             {
-                UnlockedHeat = Sightline.Heat.Clamp(hEnv);
-                PendingHeat = UnlockedHeat;
+                UnlockedHeat = Sightline.Heat.Clamp(Math.Max(0, hEnv));
+                PendingHeat = Sightline.Heat.Clamp(hEnv);
             }
             // W11 (same affordance family): SIGHTLINE_LOSSTREAK=<n> seeds the assist streak so the
             // intro FIELD SUPPORT chip can be screenshot headless. No disk; default 0 = byte-stable.
@@ -1825,8 +1840,14 @@ public partial class Game
         // over the first missions so the ladder bites once the squad can answer it (m1 x0, m2
         // x1/2, m3+ full). Card deltas and the per-mission growth curve (Mission.cs) are
         // untouched — only Heat's extra bodies/stats ramp. Heat 0 stays a true no-op.
-        if (n <= 1)      { heatEnemy = 0; heatStat = 0; heatDmg = 0; }
-        else if (n == 2) { heatEnemy /= 2; heatStat /= 2; heatDmg /= 2; }   // W6c: +1 dmg graces to 0 on m1-2 like the other deltas
+        // W5: the grace ramps HEAT's escalation in — it must not also ramp the RECRUIT rung's
+        // RELIEF out. Rung -1's whole point is that mission 1 is survivable, which is exactly the
+        // mission the grace would zero. Gated on heat > 0 so heats 1-8 are bit-for-bit unchanged.
+        if (heat > 0)
+        {
+            if (n <= 1)      { heatEnemy = 0; heatStat = 0; heatDmg = 0; }
+            else if (n == 2) { heatEnemy /= 2; heatStat /= 2; heatDmg /= 2; }   // W6c: +1 dmg graces to 0 on m1-2 like the other deltas
+        }
         int enemyDelta = card.EnemyDelta + heatEnemy;
         // adaptive assist eases the force-wide enemy stat bump (base Heat only; 0 otherwise).
         int statDelta = card.StatDelta + heatStat - _run.AssistStatRelief;
@@ -2947,6 +2968,14 @@ public partial class Game
     // ──────────────────────────────────────────────────────────────────────────
     public const int DownedTimerTurns = 3;   // player-turn countdown (ticks in StartPlayerTurn)
 
+    /// W5 ON-RAMP: the bleed-out clock the CURRENT run actually plays with. Standard and every
+    /// Heat rung keep the designed 3 turns; the sub-standard RECRUIT rung holds for 5, which is
+    /// the difference between "you must already know STABILIZE exists" and "you have time to find
+    /// it in the action bar". Read at EnterDowned (and by the banner copy) — the const stays the
+    /// baseline so Codex/harness references and every non-recruit run are unchanged.
+    public int DownedTimerTurnsNow
+        => DownedTimerTurns + (Sightline.Heat.IsRecruit(HeatLevel) ? 2 : 0);
+
     /// The single purge shared by KillUnit and EnterDowned: drop the unit's queued moves AND any
     /// queued surplus reaction ShotAnims aimed at it (the active blow — the one that caused this —
     /// is excluded so the current shot still finishes normally).
@@ -2970,7 +2999,7 @@ public partial class Game
         d.Downed = true;
         d.WasDownedThisMission = true;
         d.Stabilized = false;
-        d.DownedTurns = DownedTimerTurns;
+        d.DownedTurns = DownedTimerTurnsNow;
         d.Hp = 0;
         // attribution snapshot — the same switch KillUnit computes, taken NOW so a later bleed-out
         // names the archetype that actually downed them (or the DoT label, which buckets "?").
@@ -3000,7 +3029,7 @@ public partial class Game
         Audio.Play("death");
         // review F3 (honesty): the pill counts 3->2->1 and death lands when it would hit 0, so
         // the player ACTS on pills 2 and 1 — say the truthful count instead of promising three.
-        ShowBanner($"SOLDIER DOWN - THEY HOLD FOR {DownedTimerTurns}, TWO TURNS TO ACT", true);
+        ShowBanner($"SOLDIER DOWN - THEY HOLD FOR {DownedTimerTurnsNow}, {DownedTimerTurnsNow - 1} TURNS TO ACT", true);
         BannerSub = "stabilize to stop the bleeding - a corpsman's PATCH gets them up";
         // C1 VOICE: the squad has bonds and the game has never once acknowledged one. BondPartnerOf
         // returns null unless a REAL bonded squadmate is on their feet, so a bondless soldier can
@@ -3506,7 +3535,7 @@ public partial class Game
 
         if (Raylib.IsKeyPressed(KeyboardKey.M)) Audio.ToggleMute();
         if (!AutoPlay && Raylib.IsKeyPressed(KeyboardKey.F)) Display.ToggleFullscreen();
-        if (!AutoPlay && Raylib.IsKeyPressed(KeyboardKey.F2)) CycleAnimSpeed();   // fast-forward anim pacing (1x/2x/3x)
+        if (!AutoPlay && Raylib.IsKeyPressed(KeyboardKey.F2)) CycleAnimSpeed();   // fast-forward anim pacing (persisted; also in the pause menu)
         Audio.SetMusicIntensity(MusicIntensity());
         UpdateTutorial(dt);
         UpdateTraining(dt);            // T1: the TRAINING OP lesson track (drill mode only)
@@ -3747,7 +3776,12 @@ public partial class Game
     /// survivable but costly, not run-ending. Can fire at most once per run, so there's no loop risk.
     bool TryReinforcements()
     {
-        if (_run == null || _run.CheckpointUsed || _run.Mission < 3) return false;
+        // W5 ON-RAMP: the valve opens at mission 1 on the RECRUIT rung. On the standard ladder an
+        // m1-2 wipe still ends cleanly (a 4-rookie opener loss is a fast restart, not a tragedy);
+        // for a first-time player it is the single most run-ending moment in the game, so RECRUIT
+        // spends the one-time checkpoint there instead.
+        int ckMin = _run != null && Sightline.Heat.IsRecruit(_run.HeatLevel) ? 1 : 3;
+        if (_run == null || _run.CheckpointUsed || _run.Mission < ckMin) return false;
         _run.CheckpointUsed = true;
 
         // fresh emergency squad: deploy as many rookies as this mission fields (fall back to the
@@ -4631,6 +4665,8 @@ public partial class Game
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseGamma)) Display.CycleGamma();   // W9: true gamma (post-FX pass)
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseColorblind)) Display.ToggleColorblind();
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseAutoCam)) { Display.ToggleAutoCam(); if (!Display.AutoCam) { CamZoom = 1f; CamPan = Vector2.Zero; } }
+        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseAnimSpeed)) CycleAnimSpeed();   // W5 comfort: playback pacing
+        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseUiScale)) Display.CycleUiScale();  // W5 comfort: UI text size
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseCodex)) { BeginCodex(); }   // W6: open the field manual (remembers this phase for BACK)
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseAbandon)) AbandonRun();
     }
@@ -7251,7 +7287,9 @@ public partial class Game
             }
             if (delta != 0)
             {
-                PendingHeat = Sightline.Heat.Clamp(Math.Clamp(PendingHeat + delta, 0, UnlockedHeat));
+                // W5: the floor is Heat.Min (-1 = RECRUIT), not 0 — the on-ramp is always
+                // selectable; only the ceiling above standard is gated by the earned unlock.
+                PendingHeat = Sightline.Heat.Clamp(Math.Clamp(PendingHeat + delta, Sightline.Heat.Min, UnlockedHeat));
                 Audio.Play("select");
             }
         }

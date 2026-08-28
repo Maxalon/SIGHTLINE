@@ -240,6 +240,18 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        // SIGHTLINE_ONRAMPTEST=1 : RESONANCE W5 — the RECRUIT rung (a real difficulty below standard)
+        // and the comfort settings (anim speed / UI text scale) incl. the harness-pinning guard.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_ONRAMPTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "onramptest");   // SetupMission / Cfg.Measure need a GL context
+            // The text-scale assertions MEASURE, so Cfg needs a real atlas; the bundled TTFs are
+            // irrelevant to what is being asserted (a ratio), so the built-in font is enough.
+            Cfg.Font = Cfg.FontUi = Cfg.FontTitle = Raylib.GetFontDefault();
+            Console.WriteLine(new Game().OnRampSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         // SIGHTLINE_HEATLADDERTEST=1 : APEX W1 — the heat>=7 / IRON VETERANS zero-roster seam: a lone-VIP
         // Escort/Rescue win under a no-reinforcements regime must still field a squad next mission.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_HEATLADDERTEST") == "1")
@@ -543,6 +555,26 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_BEACON") == "1") game.DebugBeacon();
         if (shot && float.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_ZOOM"), out float z)) game.CamZoom = z;
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_PAUSE") == "1") game.Paused = true;
+        // W5 ON-RAMP (shot + the hand-run autoplay smoke test): SIGHTLINE_ANIMSPEED=<x> names the
+        // playback multiplier and SIGHTLINE_LONGMOVE=1 stages a multi-tile walk to film. Autoplay is
+        // included so the smoke test can be re-run AT the fastest setting (the pace change alters
+        // the frame budget a match takes, and that is exactly what needs proving safe). Both are
+        // inert when unset — and BalanceBatch has its own Main branch that never reaches here — so
+        // the flywheel and every default autoplay/screenshot run are unchanged.
+        if ((shot || autoplay) && float.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_ANIMSPEED"),
+                                   System.Globalization.NumberStyles.Float,
+                                   System.Globalization.CultureInfo.InvariantCulture, out float aspd) && aspd > 0f)
+            game.AnimSpeedOverride = aspd;
+        // W5 (shot only): SIGHTLINE_UISCALE=<idx into Display.UiScaleLevels> photographs the UI at a
+        // text size other than 100%. Set on Cfg directly — Display never Loads headless — and inert
+        // when unset, so every other screenshot keeps measuring the authored layout.
+        if (shot && int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_UISCALE"), out int uiIdx))
+        {
+            Display.UiScaleIdx = Math.Clamp(uiIdx, 0, Display.UiScaleLevels.Length - 1);
+            Display.ApplyUiScale();
+        }
+        bool longMove = shot && Environment.GetEnvironmentVariable("SIGHTLINE_LONGMOVE") == "1";
+        if (longMove) Console.WriteLine($"LONGMOVE: staged {game.DebugLongMove()} steps at {game.AnimSpeed:0.##}x");
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_PERKSHOT") == "1") game.DebugBarracksPerk();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_WAKE") == "1") game.DebugWakeAll();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CONTENT") == "1") Mission.DebugContentShowcase(game);
@@ -655,6 +687,10 @@ public static class Program
             });
 
             if (shot || autoplay) frame++;
+            // W5: dump the filmed unit's tweened board position every frame, so "positions advance
+            // monotonically, no backwards step" is a MEASURED claim rather than an eyeball on PNGs.
+            if (longMove && game.DebugFilmUnit != null)
+                Console.WriteLine($"FILM {frame} {game.DebugFilmUnit.Pos.X:0.000} {game.DebugFilmUnit.Pos.Y:0.000}");
             if (shot)
             {
                 if (shotOnBark && shotFrame == int.MaxValue && frame > 60

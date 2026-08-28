@@ -222,6 +222,45 @@ void main() {
         Save();
     }
 
+    // ---- W5 ON-RAMP: comfort controls (animation pacing + UI text size) ------------------
+    // ANIMATION SPEED. A roguelike campaign replays the same ~0.5 s telegraph beat hundreds of
+    // times; a playback multiplier is the single most-asked-for comfort control in the genre.
+    // The value is a pure dt MULTIPLIER applied at exactly ONE place (Game.Update's
+    // `a.Update(this, t * AnimSpeed)`): the queue's state machine is untouched, no activation is
+    // skipped, and OnStart still fires only when an anim becomes ACTIVE. Anything that drained
+    // the queue faster by other means would resurrect the movement-jitter bug.
+    // Game.AnimSpeed pins 1x under AutoPlay/NoPersist, so the harness and the flywheel never see it.
+    public static readonly float[] AnimSpeedLevels = { 1.00f, 1.50f, 2.00f, 3.00f };
+    public static int AnimSpeedIdx;   // 0 = 1x (the shipped pacing)
+    public static float AnimSpeed => AnimSpeedLevels[Math.Clamp(AnimSpeedIdx, 0, AnimSpeedLevels.Length - 1)];
+    public static string AnimSpeedLabel => AnimSpeed == 1f ? "1x" : $"{AnimSpeed:0.##}x";
+    public static void CycleAnimSpeed()
+    {
+        AnimSpeedIdx = (AnimSpeedIdx + 1) % AnimSpeedLevels.Length;
+        Save();
+    }
+
+    // UI TEXT SIZE. Applied inside Cfg.Text/Cfg.Measure (and the title pair), which every draw
+    // site in the game already routes through — so a label's MEASURE and its DRAW scale together
+    // by construction. That symmetry is the whole safety argument: several call sites measure via
+    // a wrap/clip/centre helper and paint separately, and a scale applied to only one of the two
+    // wraps at one size and paints at another. The atlas choice still routes on the UNSCALED size
+    // so body text keeps coming off the crisp 20px UI bake.
+    // Never applied headless: Display.Init(false) skips Load(), so Cfg.UiScale stays 1.0 and every
+    // screenshot / self-test / balance run measures the shipped layout.
+    public static readonly float[] UiScaleLevels = { 0.90f, 1.00f, 1.10f, 1.20f };
+    public static int UiScaleIdx = 1;   // 1.00 = the authored layout
+    public static float UiScale => UiScaleLevels[Math.Clamp(UiScaleIdx, 0, UiScaleLevels.Length - 1)];
+    public static string UiScaleLabel => $"{(int)MathF.Round(UiScale * 100f)}%";
+    public static void CycleUiScale()
+    {
+        UiScaleIdx = (UiScaleIdx + 1) % UiScaleLevels.Length;
+        ApplyUiScale();
+        Save();
+    }
+    /// Push the chosen scale into Cfg (the one place text size is resolved).
+    public static void ApplyUiScale() => Cfg.UiScale = UiScale;
+
     // auto-cam: optional character-focus camera that follows the selected/acting unit
     public static bool AutoCam;
     public static void ToggleAutoCam() { AutoCam = !AutoCam; Save(); }
@@ -507,6 +546,10 @@ void main() {
         public float VolSfx { get; set; } = 1.00f;
         public float VolMusic { get; set; } = 1.00f;
         public float VolUi { get; set; } = 1.00f;
+        // W5 ON-RAMP — additive again; absent in an older display.json, so these defaults are
+        // exactly the pre-W5 behaviour (1x playback, 100% text).
+        public int AnimSpeedIdx { get; set; }        // absent = 0 = 1x
+        public int UiScaleIdx { get; set; } = 1;     // absent = 1 = 100%
     }
     // Source-generated serializer (see SaveGame.SaveJson for the why): reflection-based
     // System.Text.Json loses its type metadata under `-p:PublishTrimmed=true`, which silently
@@ -520,7 +563,7 @@ void main() {
 
     static void Save()
     {
-        try { Directory.CreateDirectory(Dir); File.WriteAllText(FilePath, JsonSerializer.Serialize(new Dto { Fullscreen = Fullscreen, SizeIdx = SizeIdx, BrightIdx = BrightIdx, GammaIdx = GammaIdx, Colorblind = Pal.Colorblind, TutorialSeen = TutorialSeen, PostFX = PostFX, AutoCam = AutoCam, BraceTipSeen = (TipsSeen & 1) != 0, TipsSeen = TipsSeen, TrainingSeen = TrainingSeen, ShowAllVerbs = ShowAllVerbs, VolMaster = VolMaster, VolSfx = VolSfx, VolMusic = VolMusic, VolUi = VolUi }, DisplayJson.Default.Dto)); }
+        try { Directory.CreateDirectory(Dir); File.WriteAllText(FilePath, JsonSerializer.Serialize(new Dto { Fullscreen = Fullscreen, SizeIdx = SizeIdx, BrightIdx = BrightIdx, GammaIdx = GammaIdx, Colorblind = Pal.Colorblind, TutorialSeen = TutorialSeen, PostFX = PostFX, AutoCam = AutoCam, BraceTipSeen = (TipsSeen & 1) != 0, TipsSeen = TipsSeen, TrainingSeen = TrainingSeen, ShowAllVerbs = ShowAllVerbs, VolMaster = VolMaster, VolSfx = VolSfx, VolMusic = VolMusic, VolUi = VolUi, AnimSpeedIdx = AnimSpeedIdx, UiScaleIdx = UiScaleIdx }, DisplayJson.Default.Dto)); }
         catch { }
     }
 
@@ -558,6 +601,9 @@ void main() {
                 VolSfx    = Math.Clamp(d.VolSfx, 0f, 1f);
                 VolMusic  = Math.Clamp(d.VolMusic, 0f, 1f);
                 VolUi     = Math.Clamp(d.VolUi, 0f, 1f);
+                AnimSpeedIdx = Math.Clamp(d.AnimSpeedIdx, 0, AnimSpeedLevels.Length - 1);
+                UiScaleIdx   = Math.Clamp(d.UiScaleIdx, 0, UiScaleLevels.Length - 1);
+                ApplyUiScale();
             }
         }
         catch { }
