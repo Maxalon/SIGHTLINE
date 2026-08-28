@@ -720,27 +720,94 @@ public static class Renderer
             }
     }
 
-    // Red warning pips on reachable tiles that a live enemy could fire on with no
-    // cover — a quick read on which destinations leave the soldier exposed.
+    // RESONANCE T2 — the INCOMING-FIRE FORECAST overlay. The board used to answer "is this tile
+    // exposed?" with one identical tick; it now answers "how much fire am I standing in?" with a
+    // GRADED PIP STACK in the tile's top-right corner: one small triangle per bearing gun, capped
+    // at three (3+). The COUNT is the signal, so the read survives Pal.SetColorblind and a
+    // greyscale squint (DESIGN.md 3.H: shape-redundancy, never hue alone) — alpha only reinforces
+    // it. A FLANK adds one short underline bar beneath the stack ("your cover does nothing here").
+    //
+    // Everything numeric (best hit%, expected damage, which gun) lives in the HOVER CARD, not on
+    // the board: 3.C/3.H forbid a field of numbers over the play surface. Detail on demand.
+    //
+    // SIMPLE mode restores the pre-T2 minimal read (one tick on any tile where a gun has a clean
+    // shot) for players who want the quiet board back. Same glyph/alpha/pulse; the trigger now
+    // comes from ComputeOdds's CoverLevel, so unlike the old raw GetCover test it also respects
+    // high-ground see-over, the DRONE's cover-ignoring attack and SHIELD arcs.
     static void DrawThreat(Game g)
     {
         if (g.Selected == null || !g.IsPlayerInteractive() || g.AimMode || g.GrenadeMode) return;
         if (g.Selected.Team != Team.Player || !g.Selected.CanAct) return;
         if (g.Threat == null || g.MoveCost == null) return;
 
+        bool full = g.ThreatPref >= Game.ThreatFull;
         float pulse = 0.6f + 0.4f * MathF.Sin((float)Raylib.GetTime() * 4f);
         for (int x = 0; x < g.Grid.W; x++)
             for (int y = 0; y < g.Grid.H; y++)
             {
-                if (!g.Threat[x, y]) continue;
+                var c = g.Threat[x, y];
                 bool here = x == g.Selected.X && y == g.Selected.Y;
                 if (!here && g.MoveCost[x, y] <= 0) continue;
                 var r = ElevRect(g, x, y);
-                var pos = new Vector2(r.X + r.Width - 9, r.Y + 9);
-                // a single small subtle danger tick (was a loud filled triangle + bright outline)
-                // — informs "this tile is exposed" without a field of red pips drowning the units.
-                Raylib.DrawPoly(pos, 3, 4.5f, -90f, Raylib.Fade(Pal.Foe, 0.32f + 0.18f * pulse));
-                Raylib.DrawPolyLinesEx(pos, 3, 4.5f, -90f, 1.2f, Raylib.Fade(Pal.Foe, 0.45f));
+
+                if (!full)
+                {
+                    // SIMPLE: the pre-T2 tick, on the pre-T2 condition (seen with NO cover).
+                    if (!c.Exposed) continue;
+                    var p0 = new Vector2(r.X + r.Width - 9, r.Y + 9);
+                    Raylib.DrawPoly(p0, 3, 4.5f, -90f, Raylib.Fade(Pal.Foe, 0.32f + 0.18f * pulse));
+                    Raylib.DrawPolyLinesEx(p0, 3, 4.5f, -90f, 1.2f, Raylib.Fade(Pal.Foe, 0.45f));
+                    continue;
+                }
+
+                int tier = c.Tier;
+                if (tier <= 0) continue;
+                // NOISE FLOOR. On an open arena with six alerted hostiles, SOME gun bears on nearly
+                // every reachable tile, so marking all of them spends the board's signal budget on
+                // the ambient condition. Draw only what changes a decision: a gun with a clean shot
+                // (exactly the pre-T2 trigger, preserved), TWO OR MORE guns (the blind spot this
+                // wave exists to fix), or one covered gun that still shoots well. The suppressed
+                // case — a single covered gun at poor odds — is still fully reported by the hover
+                // card, so nothing is hidden from a player who asks; it is only kept off the board.
+                if (!c.Exposed && c.Guns < 2 && c.BestHit < 50) continue;
+                // A DANGER METER, not a scatter of ticks: 1-3 bottom-aligned bars of rising height
+                // in the tile's top-right corner, read exactly like signal strength. The first
+                // draft stacked 1-3 separate triangles down the tile edge and, across 80+ reachable
+                // tiles, that read as speckled TEXTURE rather than as a number (own squint test).
+                // One compact glyph per tile whose SILHOUETTE grows with the count keeps the count
+                // legible at a squint, survives greyscale/SIGHTLINE_CB, and leaves the board calm.
+                // TWO CHANNELS, because count alone is not danger. The BAR COUNT is the honest
+                // number of guns (that is the blind spot T2 exists to fix); the INTENSITY is how
+                // hard the best of them actually shoots, straight off the forecast's BestHit. So a
+                // tile in cover from two distant rifles sits at the bottom of the range and a tile
+                // three flankers can hit at 90% burns — which is what the eye needs at a squint.
+                // A first draft keyed intensity to the count and the whole reachable set read as
+                // one uniform red speckle (own squint test on the mission-2 capture).
+                //
+                // STATIC alpha (no Raylib.GetTime pulse): standing information about the ground,
+                // not an alarm — ~50 breathing glyphs is exactly the motion noise 3.C warns about,
+                // and it keeps one more clock read out of the renderer. SIMPLE keeps its pulse.
+                float heat = Util.Clamp((c.BestHit - 15) / 65f, 0f, 1f);   // ~15% -> floor, ~80%+ -> full
+                float a = 0.16f + 0.60f * heat;
+                Color fill = Raylib.Fade(Pal.Foe, a);
+                Color line = Raylib.Fade(Pal.FoeDk, Math.Min(0.9f, a + 0.20f));
+                const float bw = 3.5f, gap = 1.5f;
+                float baseY = r.Y + 18f, rx = r.X + r.Width - 6f;
+                for (int i = 0; i < tier; i++)
+                {
+                    float hgt = 4f + i * 4f;                                // 4 / 8 / 12 px
+                    var bar = new Rectangle(rx - (tier - i) * (bw + gap) + gap, baseY - hgt, bw, hgt);
+                    Raylib.DrawRectangleRec(bar, fill);
+                    Raylib.DrawRectangleLinesEx(bar, 0.8f, line);
+                }
+                // FLANK: a foot-rule the bars stand on — "your cover does nothing on this tile".
+                // A second, non-hue channel welded to the same glyph, so it can't read as a 4th bar.
+                if (c.Flanked)
+                {
+                    float wdt = tier * (bw + gap) + 1f;
+                    Raylib.DrawRectangleRec(new Rectangle(rx - wdt, baseY + 1.2f, wdt, 1.8f),
+                                            Raylib.Fade(Pal.Foe, Math.Min(0.95f, a + 0.25f)));
+                }
             }
     }
 
@@ -942,20 +1009,42 @@ public static class Renderer
         }
     }
 
+    /// RESONANCE T2: the route is priced, not just the destination. The connecting line takes the
+    /// colour of the WORST danger tier anywhere along the path (a safe-looking destination reached
+    /// by walking through a crossfire is no longer free), and each step node is drawn in ITS OWN
+    /// tier — clean steps stay round dots, threatened steps become triangles (the same pip glyph
+    /// the forecast overlay uses), so the exact stretch that is hot reads without a legend and
+    /// without hue (DESIGN.md 3.H shape-redundancy).
+    static Color PathTierColor(int tier) =>
+        tier <= 0 ? Pal.Accent : tier == 1 ? Pal.Suspect : Pal.Foe;
+
     static void DrawPathPreview(Game g)
     {
         if (g.PathPreview == null || g.PathPreview.Count == 0 || g.Selected == null) return;
+        var th = g.ThreatPref >= Game.ThreatFull ? g.Threat : null;
+
+        int worst = 0;
+        if (th != null)
+            foreach (var (x, y) in g.PathPreview)
+                if (g.Grid.InBounds(x, y)) worst = Math.Max(worst, th[x, y].Tier);
+        Color lineCol = PathTierColor(worst);
+        float lineA = worst <= 0 ? 0.55f : worst == 1 ? 0.62f : 0.72f;
+
         Vector2 prev = ElevCenter(g, g.Selected.X, g.Selected.Y);
         foreach (var (x, y) in g.PathPreview)
         {
             var c = ElevCenter(g, x, y);
-            Raylib.DrawLineEx(prev, c, 2.5f, Raylib.Fade(Pal.Accent, 0.55f));
+            Raylib.DrawLineEx(prev, c, worst >= 2 ? 3.0f : 2.5f, Raylib.Fade(lineCol, lineA));
             prev = c;
         }
         foreach (var (x, y) in g.PathPreview)
         {
             var c = ElevCenter(g, x, y);
-            Raylib.DrawCircleV(c, 3.5f, Raylib.Fade(Pal.Accent, 0.8f));
+            int t = (th != null && g.Grid.InBounds(x, y)) ? th[x, y].Tier : 0;
+            if (t <= 0) { Raylib.DrawCircleV(c, 3.5f, Raylib.Fade(Pal.Accent, 0.8f)); continue; }
+            var col = Raylib.Fade(PathTierColor(t), 0.88f);
+            Raylib.DrawPoly(c, 3, 4.6f + t * 0.5f, -90f, col);            // hot step: the pip glyph
+            Raylib.DrawPolyLinesEx(c, 3, 4.6f + t * 0.5f, -90f, 1.2f, Raylib.Fade(PathTierColor(t), 1f));
         }
     }
 

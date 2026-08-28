@@ -1007,4 +1007,15 @@ sets, one lever per measured round, fresh same-slot R0 first, dip budgets, breac
 - [ ] **h8 corpsman blackout** (RELENTLESS kills backfill → corpsman fielded 13% of h8 missions,
       PATCH 5/batch): intended apex cruelty or a hole in the revive economy — pairs with the
       founding-corpsman decision.
+- [x] **RESONANCE T2 — "READ THE DANGER" (incoming-fire forecast).** The defensive read was a
+      single bool (`ComputeThreat`: some enemy has LoS AND cover==0) drawn as one identical tick,
+      so a tile enfiladed by four guns but covered from one read completely clean. Now a per-tile
+      `ThreatCell` grid (gun count / best enemy hit% / expected post-armor damage / flanked /
+      overwatch-lane), derived from `Combat.ComputeOdds` with the mover placed on the candidate
+      tile so it can never disagree with the shot that fires. Surfaced as a graded danger meter
+      (bar COUNT = guns, shape-redundant + CB-safe; intensity = heat), an INCOMING FIRE hover card,
+      and a worst-tier-tinted move-path preview. Pause toggle is now OFF/SIMPLE/FULL (SIMPLE = the
+      pre-T2 read). Signature-cached — rebuilds on change, not per frame. Read-side only: the
+      flywheel cannot see it and no win-rate claim is made. Details + perf + squint verdict in
+      DEVLOG §RESONANCE T2.
 - [ ] **On-device audio tuning** (carried; needs the human).

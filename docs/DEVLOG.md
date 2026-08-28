@@ -2673,3 +2673,106 @@ own tone" shape as `st_lose` did (tail -148.9 dBFS, well inside budget) and was 
 left alone rather than re-voiced blind. No perceptual weighting (LUFS/ITU-R BS.1770) — the
 budget is in dBFS RMS, which under-weights the low-heavy cues; a real loudness model is the
 obvious next instrument.
+## PROGRAM RESONANCE — WAVE T2: "READ THE DANGER" (incoming-fire forecast)
+
+**The finding.** SIGHTLINE's information model was excellent on offence and absent on defence.
+Everything about *the shot you take* was surfaced (banded odds, graze floor, streak-breaker,
+FLANKED badges, combat log, status pills, role rings, enemy-ID hovers). Everything about *the
+fire you stand in* was a single boolean: `Game.ComputeThreat` marked a reachable tile only when
+some active enemy had LoS **and** the tile's cover level was exactly 0, and `Renderer.DrawThreat`
+drew one small identical red tick. So a tile covered from one gun but enfiladed by four others
+read **completely clean**, and the player could not see how many guns bore on a tile, how hard
+they hit, whether they would be flanked there, or which archetype would do it. Enemy intent was
+telegraphed only ~0.5 s before the unit acted, during the enemy turn — drama, zero planning value.
+
+**What shipped.**
+
+* **`ThreatCell` (src/Game.cs)** — the `bool[,]` became a per-tile struct grid: `Guns` (how many
+  live/active/armed hostiles can actually shoot you there), `BestHit`, `ExpDmg` (post-armor
+  expected damage if every bearing gun fires once), `Flanked`, `Exposed` (the pre-T2 bool, kept),
+  `Watched` (a live overwatch / braced PIKEMAN reaction lane), `WorstCls`, and a `Tier` 0-3.
+* **Truthfulness by construction.** Every number comes from `Combat.ComputeOdds` with the mover
+  TEMPORARILY placed on the candidate tile — the exact call `Resolve` would make — gated by the
+  same range + commanding-LoS test as `Game.CanTarget`. The forecast also models the two defensive
+  states that *moving* clears (`Hunkered` drops, `MovedAfterFire` sets), so a tile you must walk to
+  is not priced as if you were still dug in. The mover's real X/Y/Hunkered/MovedAfterFire are
+  restored in a `finally` and asserted untouched by the self-test.
+* **A signature cache.** `ComputeThreat` runs off `RecomputeMoveCost`, which fires EVERY frame of
+  the player turn. A 64-bit signature over selection, both rosters' positions/state, the mutable
+  terrain layers and the pref means a real change always misses and nothing else ever does.
+* **Graded danger meter (src/Renderer.cs `DrawThreat`).** 1-3 bottom-aligned bars of rising height
+  in the tile's top-right corner, read like signal strength. **Count** = guns (shape-redundant, so
+  it survives greyscale and `SIGHTLINE_CB=1`); **intensity** = `BestHit` heat, so a tile in cover
+  from two distant rifles sits at the floor and a tile three flankers can hit at 90% burns. A FLANK
+  adds a foot-rule the bars stand on. Static alpha — no `Raylib.GetTime` pulse (standing terrain
+  information, not an alarm; also one fewer clock read in the renderer).
+* **Noise floor.** The overlay skips the ambient case (one covered gun, `BestHit < 50`). It still
+  draws on exactly the pre-T2 trigger (a gun with a clean shot), plus 2+ guns and good covered
+  shots. The hover card reports the suppressed case in full, so nothing is hidden from a player
+  who asks — it is only kept off the board.
+* **Hover card (src/Hud.cs `DrawThreatCard`).** "INCOMING FIRE · 4 hostiles bear · best 95% ·
+  ~12 dmg", plus `worst gun: REAVER — BERSERKER`, a FLANKED line when the tile is a flank, and an
+  OVERWATCH LANE line. It says NOTHING on a clean tile (the absent meter already says that) and
+  does not print the modal EXPOSED state — a panel that pops on all ~130 reachable tiles with a
+  line every player reads on every tile is chrome, not information.
+  Echoes the board's meter glyph on its title row (vocabulary learned without a legend). Yields to
+  the two cards that already own the hover (shot tooltip, enemy-ID card) and only ever speaks about
+  an empty reachable tile.
+* **Danger-tinted path preview.** The connecting line takes the WORST tier along the route (a safe
+  destination reached through a crossfire is no longer free); each step node is drawn in ITS OWN
+  tier and hot steps become the meter's triangle glyph, so the exact hot stretch reads without hue.
+* **Three-state pref.** The pause toggle now cycles OFF / SIMPLE / FULL. SIMPLE restores the
+  pre-T2 minimal read for players who want the quiet board back: one small pulsing tick on any
+  tile where a gun has a clean shot, same glyph, same alpha, same pulse. Not bit-for-bit identical
+  to pre-T2 — the trigger is now `ComputeOdds`'s `CoverLevel == 0`, so it also respects high-ground
+  see-over, DRONE cover-ignoring and SHIELD arcs, which the old raw `GetCover` test missed.
+
+**Verification.** `dotnet build -c Release` 0/0. New `SIGHTLINE_THREATTEST=1` (10 assertion
+groups: gun count; BestHit/WorstCls/ExpDmg pinned against a hand-recomputed `ComputeOdds` pass;
+the pre-T2 blind spot — a tile in cover from EVERY bearing gun still reports `Guns==2`; cover
+level + flank ANGLE; out-of-range / no-LoS / dormant / dry / dead exclusion, each proven to bite;
+overwatch + focused-cone lanes; unreachable-tile skip; caged captive; mover non-mutation; the
+post-move HUNKER model; cache hit/miss) → **PASS**. `COMBATTEST / SAVETEST / AITEST / OWTEST /
+ITEMTEST` PASS. `PAIRTEST` **PASS** (both legs MATCH). Autoplay x5 clean, no exceptions, no
+TIMEOUT. `SIGHTLINE_BALANCE=10` on branch vs merge-base 2dec210 — `runs=20 missions=81` on both (asserted,
+not a zero-data batch), and a full diff of the two reports shows **only wall-clock timings and the
+output path** differing. Every measured statistic — per-heat win rates, per-objective tables, perk/
+purchase/proc/event telemetry, decision richness, policy gap — is byte-identical.
+
+**Perf.** Measured, not estimated. Real board (mission 2, 135 reachable tiles, 6 armed hostiles):
+**1.06 ms per rebuild**, and rebuilds now happen only on a real change instead of 60x/s. Smaller
+real selections measure 0.28-0.53 ms (52-86 reachable tiles, 3-6 guns). Synthetic worst case
+(all 198 tiles reachable x 8 guns): **2.0 ms**. Against the tech-lead's baseline (total game logic
+0.007 ms median / 0.34 ms p99 per frame, `RecomputeMoveCost` 0.106-0.242 ms EVERY frame), the
+cached forecast costs less per second than the uncached pre-T2 bool grid did.
+
+**Honesty about measurement.** This is a **read-side-only** change: no combat constant, no AI
+weight, no spawn table moved. It should make the game easier for a *human*, but the balance bot's
+policy does not consult the forecast, so **the flywheel cannot see the improvement** — and a
+byte-identical `SIGHTLINE_BALANCE` batch versus base is the correct expected result and the proof
+that gameplay was not disturbed. No win-rate claim is made or implied for this wave.
+
+**New harness hooks.** `SIGHTLINE_THREATTEST=1` (assertions + perf), `SIGHTLINE_THREATSHOT=1`
+(stages a fight, parks the cursor on the hottest reachable tile, prints `HARNESS THREATPERF`),
+`SIGHTLINE_THREATPREF=0|1|2` (pin off/simple/full for A/B captures), and `SIGHTLINE_SEED=<n>`
+(pin `Util.Rng` so two harness runs stage the same arena — note that frames are still NOT
+byte-identical: the renderer reads the wall clock in ~50 places; CLAUDE.md's byte-identical
+screenshot claim is false and was verified false on this tree).
+
+**Own squint verdict (both palettes inspected).** The card and the tinted path are unambiguous
+wins — the pre-T2 capture shows a benign gold path running straight through four fields of fire.
+The meter field is roughly as DENSE as the pre-T2 tick field (on an open arena with six alerted
+hostiles nearly every reachable tile already carried a tick), but each mark now carries a count
+and a heat instead of being identical, and the calm corners of the board are visibly calm. So:
+not busier than before, materially more informative. The first draft (1-3 stacked triangles,
+count-driven alpha) DID read as uniform speckle and was rejected on my own capture — the meter
+glyph and the heat channel are the fix.
+
+**Deliberately left for a later wave.** (a) No aggregated "danger heat-map" wash — the per-tile
+meter is the read; a full-board gradient is a bigger information-design decision. (b) Enemy INTENT
+is still telegraphed only during the enemy beat; a player-turn "who is likely to shoot whom"
+forecast is a separate wave. (c) The forecast covers direct fire only — grenades, SIEGE zones and
+board fire keep their existing dedicated overlays and are not folded into `ExpDmg`. (d) Crits and
+the graze floor are not modelled in `ExpDmg` (first-order hit% x post-armor average, labelled
+"expected"). (e) The bot still uses its own `TileExposure` weighting; unifying it with `ThreatCell`
+would change bot policy and therefore the ladder, so it was left out of a read-side wave.

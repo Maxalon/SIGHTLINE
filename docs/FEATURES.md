@@ -288,11 +288,22 @@ seeds (mix of WIN/LOSE, no exceptions):
   target's low cover; high cover still blocks); faux-3D platforms, height-aware
   overlays, AI seizes the high ground. Tooltip shows "+ HIGH GROUND" / "+ OVER LOW
   COVER".
-- **UX:** squad roster strip, end-turn confirmation, mute indicator, threat
-  preview (red pips on exposed reachable tiles while positioning), **camera
-  zoom/pan** (wheel + middle-drag, C to reset), a **keyboard tile cursor**
-  (arrows/WASD + Space), and a **pause/settings menu** (Esc: display, audio, screen
-  shake, threat-preview toggles, abandon run).
+- **Incoming-fire forecast** (RESONANCE T2; `Game.ComputeThreat` -> `ThreatCell[,]`,
+  `Renderer.DrawThreat`, `Hud.DrawThreatCard`): for every reachable tile, how many live
+  hostiles can shoot you there, the best enemy hit%, the expected post-armor damage,
+  whether you would be **flanked**, and whether the tile is in a live **overwatch / BRACE**
+  reaction lane. Derived from `Combat.ComputeOdds` with the mover placed on the candidate
+  tile (so the read can never disagree with the shot that fires) and modelling the states
+  moving clears (hunker drops, exposed-by-fire ends). Shown as a **danger meter** (1-3 bars
+  = gun count, shape-redundant and colorblind-safe; intensity = best hit%; a foot-rule marks
+  a flank), an **INCOMING FIRE hover card** with the detail, and a **move-path preview tinted
+  by the worst danger the route crosses**. Signature-cached (rebuilds on change, ~0.3-1.1 ms,
+  not per frame). Pause toggle is three-state: OFF / SIMPLE (the pre-T2 minimal tick) / FULL.
+  Self-test: `SIGHTLINE_THREATTEST`; screenshots: `SIGHTLINE_THREATSHOT` (+ `SIGHTLINE_THREATPREF`).
+- **UX:** squad roster strip, end-turn confirmation, mute indicator, the incoming-fire
+  forecast above, **camera zoom/pan** (wheel + middle-drag, C to reset), a **keyboard tile
+  cursor** (arrows/WASD + Space), and a **pause/settings menu** (Esc: display, audio, screen
+  shake, threat-preview OFF/SIMPLE/FULL, abandon run).
 - **Accessibility** (`src/Display.cs` + `Pal`): a **brightness** post-pass (70–130%,
   `Display.DrawBrightness`) + a **colorblind palette** toggle (`Pal.SetColorblind`, Foe→
   orange / Good→teal), both in the pause menu + persisted. (Phase 3 item 3.13.)

@@ -22,6 +22,27 @@ public enum SecondaryKind { None, NoLosses, Swift, CleanSweep, Ghost, Demolition
 public enum GameMode { Campaign, Endless, Skirmish }
 enum AiStage { PickNext, Telegraph, ActAfterMove }
 
+/// RESONANCE T2 — the INCOMING-FIRE FORECAST for one board tile: everything the player needs to
+/// answer "what happens to me if I stand HERE?", derived from the SAME Combat.ComputeOdds the
+/// shot tooltip uses (so the read side can never drift from the resolver).
+///
+/// The old model was a single bool ("some enemy sees this tile and it has no cover"), which made a
+/// tile covered from one gun but enfiladed by four others read completely clean. This carries the
+/// count, the worst hit%, the expected damage and the flank/reaction state instead.
+public struct ThreatCell
+{
+    public byte Guns;        // how many live, ACTIVE, armed hostiles can actually shoot a soldier standing here
+    public sbyte BestHit;    // the best (highest) enemy hit% among those guns, 0 when none
+    public float ExpDmg;     // expected incoming damage if every bearing gun fires once (post-armor)
+    public bool Flanked;     // at least one bearing gun would have the mover FLANKED (cover negated)
+    public bool Exposed;     // at least one bearing gun sees the mover with NO cover at all (the pre-T2 bool, now via ComputeOdds so see-over/DRONE/SHIELD count)
+    public bool Watched;     // the tile sits inside a live enemy OVERWATCH / braced (PIKEMAN) reaction lane
+    public string WorstCls;  // archetype of the gun with the best hit% (named on the hover card)
+    /// Danger grade 0..3 — the pip count. 0 = clean, 3 = three or more guns bear.
+    public int Tier => Guns >= 3 ? 3 : Guns;
+    public bool Any => Guns > 0 || Watched;
+}
+
 public partial class Game
 {
     // PROGRAM HORIZON W2: which mode this game instance is running. Default Campaign keeps every
@@ -52,7 +73,12 @@ public partial class Game
     public int HoverX, HoverY;
     public bool HoverValid;
     public int[,] MoveCost;
-    public bool[,] Threat;          // reachable tiles exposed to active-enemy fire (no cover)
+    // RESONANCE T2: the per-tile INCOMING-FIRE FORECAST over reachable tiles (null when the
+    // preview is off / nothing is selected). Recomputed only when the board actually changes
+    // (see ComputeThreat's signature cache) — NOT every frame.
+    public ThreatCell[,] Threat;
+    public double ThreatMs;         // wall-clock cost of the last real forecast rebuild (perf probe)
+    public int ThreatRebuilds;      // how many rebuilds happened (cache-miss counter, for the perf probe)
     (int, int)[,] _cameFrom;
     public List<(int x, int y)> PathPreview = new();
 
@@ -714,7 +740,13 @@ public partial class Game
 
     // pause / settings overlay
     public bool Paused;
-    public bool ShowThreatPref = true;
+    // THREAT PREVIEW preference — three-state (RESONANCE T2): 0 OFF / 1 SIMPLE (the pre-T2 minimal
+    // "this tile is exposed" tick) / 2 FULL (graded pips + hover card + danger-tinted path). Not
+    // persisted (a per-session view pref, like the camera).
+    public const int ThreatOff = 0, ThreatSimple = 1, ThreatFull = 2;
+    public int ThreatPref = ThreatFull;
+    public bool ShowThreatPref => ThreatPref > ThreatOff;
+    public void CycleThreatPref() { ThreatPref = ThreatPref >= ThreatFull ? ThreatOff : ThreatPref + 1; }
 
     // custom-tag text editor (modal): key T in a mission, or from the perk chooser
     public bool EditingTag;
@@ -3597,29 +3629,131 @@ public partial class Game
             MoveCost = Grid.CostMap(Selected.X, Selected.Y, blocked, out _cameFrom, Selected.MoveBudget * 2);
             ComputeThreat();
         }
-        else { MoveCost = null; _cameFrom = null; Threat = null; }
+        else { MoveCost = null; _cameFrom = null; Threat = null; _threatSig = 0; }
     }
 
-    // Mark each reachable tile (and the current one) that a live, active enemy could
-    // fire on with no cover for the mover — i.e. tiles you'd be exposed standing on.
+    // ---------------- RESONANCE T2: the incoming-fire forecast ----------------
+    // Cache key for the forecast. ComputeThreat runs off RecomputeMoveCost, which fires EVERY
+    // frame of the player turn, and the forecast is ~(reachable tiles x hostiles) ComputeOdds
+    // calls — far too much to redo 60x a second for a board that hasn't changed. The signature
+    // folds in everything the forecast reads (selection, both rosters' positions/state, the
+    // mutable terrain layers, the pref) so a real change always misses the cache and nothing
+    // else ever does. 0 = "no valid cache".
+    long _threatSig;
+    readonly System.Diagnostics.Stopwatch _threatClock = new();
+
+    long ThreatSignature()
+    {
+        unchecked
+        {
+            long h = 1469598103934665603L;
+            void Mix(long v) { h = (h ^ v) * 1099511628211L; }
+            Mix(ThreatPref);
+            Mix(Selected == null ? 0 : System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(Selected));
+            if (Selected != null) { Mix(Selected.X * 31 + Selected.Y); Mix(Selected.ActionsLeft); Mix(Selected.MoveBudget);
+                                    Mix((Selected.Hunkered ? 1 : 0) | (Selected.FiredThisTurn ? 2 : 0) | (Selected.MovedAfterFire ? 4 : 0) | (Selected.Hp << 4)); }
+            Mix(Turn); Mix(SquadConcealed ? 1 : 0); Mix(Pressure);   // coarse catch-alls for turn-scoped combat state
+            foreach (var e in Enemies)
+            {
+                if (!e.Alive) continue;
+                Mix(e.X * 31 + e.Y);
+                Mix((e.Active ? 1 : 0) | (e.Ammo > 0 ? 2 : 0) | (e.OnOverwatch ? 4 : 0) | (e.OwFocused ? 8 : 0)
+                    | (e.Hp << 8) | (e.Routed << 16) | (e.Pinned << 20) | (e.Suppress << 24));
+                Mix(e.OwDirX * 7 + e.OwDirY);
+            }
+            foreach (var p in Players) { if (!p.Alive) continue; Mix(p.X * 31 + p.Y); Mix(p.Hp); }   // crossfire reads squadmates
+            // mutable terrain layers (cover can be chipped, smoke/fire tick, barrels blow up)
+            for (int x = 0; x < Grid.W; x++)
+                for (int y = 0; y < Grid.H; y++)
+                    Mix((long)Grid.Tiles[x, y] | ((long)Grid.Height[x, y] << 3) | ((long)(Grid.Smoke[x, y] > 0 ? 1 : 0) << 6)
+                        | ((long)(Grid.Fire[x, y] > 0 ? 1 : 0) << 7) | ((long)(Grid.Barrel[x, y] ? 1 : 0) << 8));
+            return h == 0 ? 1 : h;
+        }
+    }
+
+    /// The INCOMING-FIRE FORECAST (RESONANCE T2). For every tile the selected soldier can reach
+    /// (plus the tile it stands on), answer the defensive question the board never answered:
+    /// how many hostiles bear on it, how well the best of them shoots, how much damage that adds
+    /// up to, whether standing there is a FLANK, and whether it sits in a reaction lane.
+    ///
+    /// TRUTHFULNESS: the numbers come from Combat.ComputeOdds with the mover TEMPORARILY placed on
+    /// the candidate tile (the exact call Resolve would make if the enemy fired at it), gated by the
+    /// same range + commanding-LoS test as Game.CanTarget. So the forecast can never disagree with
+    /// the shot that actually happens. The mover's X/Y is restored in a finally.
     void ComputeThreat()
     {
-        if (!ShowThreatPref) { Threat = null; return; }   // disabled in settings
-        Threat = new bool[Grid.W, Grid.H];
-        var foes = Enemies.Where(e => e.Alive && e.Active && e.Ammo > 0).ToList();
-        if (foes.Count == 0) return;
-        for (int x = 0; x < Grid.W; x++)
-            for (int y = 0; y < Grid.H; y++)
-            {
-                bool here = x == Selected.X && y == Selected.Y;
-                if (!here && MoveCost[x, y] <= 0) continue;
-                foreach (var e in foes)
+        if (!ShowThreatPref || Selected == null || MoveCost == null) { Threat = null; _threatSig = 0; return; }
+
+        long sig = ThreatSignature();
+        if (sig == _threatSig && Threat != null) return;   // nothing the forecast reads has changed
+        _threatSig = sig;
+        _threatClock.Restart();
+
+        var cells = new ThreatCell[Grid.W, Grid.H];
+        Threat = cells;
+        ThreatRebuilds++;
+
+        // the caged Rescue captive is invulnerable until freed — nothing bears on it anywhere
+        bool untouchable = Selected == Vip && CaptiveLocked;
+        List<Unit> foes = null;
+        if (!untouchable)
+            foreach (var e in Enemies)
+                if (e.Alive && e.Active && e.Ammo > 0 && e.Weapon != null)
+                    (foes ??= new List<Unit>()).Add(e);
+        if (foes == null) { _threatClock.Stop(); ThreatMs = _threatClock.Elapsed.TotalMilliseconds; return; }
+
+        int ox = Selected.X, oy = Selected.Y;
+        // Moving CLEARS two defensive states (MoveStepAnim.OnStart drops Hunkered;
+        // OnUnitEnteredTile sets MovedAfterFire, ending EXPOSED BY FIRE), so a forecast for any
+        // tile the soldier has to WALK to must model the post-move soldier or it lies about both.
+        bool oHunk = Selected.Hunkered, oMaf = Selected.MovedAfterFire;
+        try
+        {
+            for (int x = 0; x < Grid.W; x++)
+                for (int y = 0; y < Grid.H; y++)
                 {
-                    if (Util.TileDist(x, y, e.X, e.Y) > e.Weapon.MaxRange) continue;
-                    if (!Grid.HasLineOfSight(e.X, e.Y, x, y)) continue;
-                    if (Grid.GetCover(x, y, e.X, e.Y).Level == 0) { Threat[x, y] = true; break; }
+                    bool here = x == ox && y == oy;
+                    if (!here && MoveCost[x, y] <= 0) continue;
+
+                    // place the mover on the candidate tile so ComputeOdds sees the real geometry
+                    Selected.X = x; Selected.Y = y;
+                    Selected.Hunkered = here && oHunk;
+                    Selected.MovedAfterFire = here ? oMaf : true;
+                    ref var c = ref cells[x, y];
+                    int bestHit = 0; float bestScore = -1f;
+
+                    for (int i = 0; i < foes.Count; i++)
+                    {
+                        var e = foes[i];
+                        if (Util.TileDist(x, y, e.X, e.Y) > e.Weapon.MaxRange) continue;
+                        bool commanding = Grid.HeightAt(e.X, e.Y) - Grid.HeightAt(x, y) >= 2;   // CanTarget's rule
+                        if (!Grid.HasLineOfSight(e.X, e.Y, x, y, commanding)) continue;
+
+                        var o = Combat.ComputeOdds(Grid, e, Selected);
+                        if (c.Guns < 255) c.Guns++;
+                        if (o.Flanked) c.Flanked = true;
+                        if (o.CoverLevel == 0) c.Exposed = true;
+                        // expected damage = hit% x post-armor average. Crits (up) and the graze floor
+                        // (down) are deliberately NOT modelled: this is the honest first-order read the
+                        // card labels "expected", not a simulation of the damage roll.
+                        int lo = Combat.HardenedReduce(Selected, o.DmgMin, crit: false);
+                        int hi = Combat.HardenedReduce(Selected, o.DmgMax, crit: false);
+                        c.ExpDmg += o.HitChance * 0.01f * ((lo + hi) * 0.5f);
+                        // "worst" gun = highest hit%, tie-broken by the bigger average bite
+                        float score = o.HitChance * 1000f + (o.DmgMin + o.DmgMax);
+                        if (score > bestScore) { bestScore = score; bestHit = o.HitChance; c.WorstCls = e.Cls; }
+
+                        // a live reaction lane: mirrors Game.OnUnitEnteredTile's overwatch gate exactly
+                        // (range + commanding LoS already checked above, plus the FOCUSED cone).
+                        if (e.OnOverwatch && (!e.OwFocused || InOwCone(e, x, y))) c.Watched = true;
+                    }
+                    c.BestHit = (sbyte)Math.Min(bestHit, (int)sbyte.MaxValue);
                 }
-            }
+        }
+        finally { Selected.X = ox; Selected.Y = oy; Selected.Hunkered = oHunk; Selected.MovedAfterFire = oMaf; }
+
+        _threatClock.Stop();
+        ThreatMs = _threatClock.Elapsed.TotalMilliseconds;
     }
 
     void UpdateHoverAndAim()
@@ -3946,7 +4080,7 @@ public partial class Game
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseWindow)) Display.CycleSize();
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseMute)) Audio.ToggleMute();
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseShake)) Fx.ShakeOn = !Fx.ShakeOn;
-        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseThreat)) ShowThreatPref = !ShowThreatPref;
+        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseThreat)) CycleThreatPref();
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseBright)) Display.CycleBrightness();
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseGamma)) Display.CycleGamma();   // W9: true gamma (post-FX pass)
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseColorblind)) Display.ToggleColorblind();
