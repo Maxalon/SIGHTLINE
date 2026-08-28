@@ -535,4 +535,6 @@ seeds (mix of WIN/LOSE, no exceptions):
   (`Game.EnterDowned/ExpireDowned/DoStabilize`; autopilot revive/stabilize arm + generalized
   `TryMoveToPatch` + the Evac no-corpsman freeze guard; `SIGHTLINE_DOWNTEST` (legs a-h) /
   `SIGHTLINE_DOWNSHOT` (=2 mid-rescue); codex row DOWN (BLEEDING OUT); down telemetry in the balance
-  report: downs -> revived/recovered/bled-out + save-rate + corpsman-fielded missions.)
+  report: downs -> revived/recovered/bled-out/finished + honest save-rate + corpsman-fielded
+  missions. Review round F1-F6: downed bodies exit EVERY enemy-attention seam — the squad focus
+  pick, shield facing, reposition exposure — plus the honest ledger/banner/pill wording.)

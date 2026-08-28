@@ -2294,6 +2294,17 @@ public partial class Game
                 cause = d.DownedByCls;
             DeathsByClass[cause] = DeathsByClass.GetValueOrDefault(cause) + 1;
         }
+        // FUL-7 (review F2): a body killed while DOWN is a DEATH, not a save — close the down
+        // state on the corpse HERE (after the cause read above). Without this, a blast/fire
+        // FINISH left Downed true on a corpse: the save-rate ledger counted it as saved, and a
+        // same-turn DoT tick could reach the countdown on a body that was already dead and pop
+        // "BLED OUT" over a burned corpse. A bleed-out expiry is counted at ExpireDowned's own
+        // site (_expiringDown distinguishes it from a finish).
+        if (d.Team == Team.Player && d.Downed)
+        {
+            if (!_expiringDown) Stats.RecordDownFinished();
+            d.Downed = false; d.Stabilized = false; d.DownedTurns = 0;
+        }
         if (d.Team == Team.Player)
         {
             // _run is null only in controlled test scenes (normal play always has a Run) — guard
@@ -2448,6 +2459,9 @@ public partial class Game
         d.DownedByCls = downer != null ? downer.Cls
                       : (string.IsNullOrEmpty(d.LastDotSource) ? "?" : d.LastDotSource);
         d.Statuses.Clear();                      // no double timers (ground fire still kills via the AoE rule)
+        d.WasNearDeath = true;                   // review F6: going down IS a near-death — a PATCH-revived
+                                                 // survivor earns the scar track too (recovery forced it,
+                                                 // the revive path didn't)
         d.OnOverwatch = false; d.OwFocused = false; d.OwBrace = false; d.Hunkered = false;
         d.RunGun = false; d.Blitz = false; d.Steady = false; d.Slipstreaming = false;
         d.ActionsLeft = 0;
@@ -2465,7 +2479,9 @@ public partial class Game
         Fx.AddShake(5f);                         // softer than the kill's 7+9
         AddHitStop(0.08f);
         Audio.Play("death");
-        ShowBanner($"SOLDIER DOWN - {DownedTimerTurns} TURNS TO REACH THEM", true);
+        // review F3 (honesty): the pill counts 3->2->1 and death lands when it would hit 0, so
+        // the player ACTS on pills 2 and 1 — say the truthful count instead of promising three.
+        ShowBanner($"SOLDIER DOWN - THEY HOLD FOR {DownedTimerTurns}, TWO TURNS TO ACT", true);
         BannerSub = "stabilize to stop the bleeding - a corpsman's PATCH gets them up";
     }
 
@@ -2474,14 +2490,17 @@ public partial class Game
     /// bleed-out KIA reaches Run.Fallen identically to an instant KIA (FUL-10's RemoveVeterans
     /// needs no special case, by construction). Downed stays true through the KillUnit call so
     /// CanGoDown refuses a re-down; cleared after so a corpse never renders/reads as "down".
+    bool _expiringDown;   // review F2: lets KillUnit tell a bleed-out expiry from an AoE/fire FINISH
+
     void ExpireDowned(Unit d)
     {
         d.LastDotSource = d.DownedByCls;         // flywheel threat ranking: the downing cause owns the KIA
         d.Hp = 0;
         Fx.PopText(d.Pos + new Vector2(0, -26), "BLED OUT", Pal.Foe, 20f);
         Stats.RecordDownExpired();
-        KillUnit(d);
-        d.Downed = false; d.Stabilized = false; d.DownedTurns = 0;
+        _expiringDown = true;
+        KillUnit(d);                             // KillUnit closes the down state on the corpse (review F2)
+        _expiringDown = false;
     }
 
     /// STABILIZE (universal verb): any soldier with an action, Chebyshev-adjacent to a downed,
@@ -5155,7 +5174,9 @@ public partial class Game
         foreach (var e in Enemies)
         {
             if (!e.Alive || !e.HasShieldArc) continue;
-            var p = AlivePlayers().OrderBy(q => Util.ChebyDist(e.X, e.Y, q.X, q.Y)).FirstOrDefault();
+            // FUL-7 (review F5): never face the shield toward a DOWNED body — it is not a threat,
+            // and facing it hands the standing squad a free flank.
+            var p = AlivePlayers().Where(q => !q.Downed).OrderBy(q => Util.ChebyDist(e.X, e.Y, q.X, q.Y)).FirstOrDefault();
             if (p == null) continue;
             int dx = p.X - e.X, dy = p.Y - e.Y;
             if (Math.Abs(dx) >= Math.Abs(dy)) { e.ShieldDx = Math.Sign(dx); e.ShieldDy = 0; }
@@ -5478,6 +5499,12 @@ public partial class Game
             // shot on it, so it can never be collapsed; skip it so the focus lands on a
             // shootable soldier instead of an inert target (review #6).
             if (p.IsVip && CaptiveLocked) continue;
+            // FUL-7 (review F1): a DOWNED body scores the 60-pt near-dead base + exposure and
+            // would usually WIN the focus pick — but Ai.Plan excludes downed from its targets,
+            // so every focus bonus (kill-press, crossfire pulls) would then apply to NOBODY:
+            // the coordination layer silently switched off while a body was down. The downed
+            // exit every enemy-attention seam.
+            if (p.Downed) continue;
             // how many active enemies can hit p right now (mirrors CanTarget exactly)
             int shootersOnTarget = 0;
             float bestHitOnTarget = 0f;
@@ -5795,7 +5822,7 @@ public partial class Game
             float ex = 0f;
             foreach (var p in players)
             {
-                if (!p.Alive || p.Ammo <= 0) continue;
+                if (!p.Alive || p.Downed || p.Ammo <= 0) continue;   // FUL-7 (review F5): a downed body holds no fire lane
                 if (Util.TileDist(tx, ty, p.X, p.Y) > p.Weapon.MaxRange) continue;
                 if (!Grid.HasLineOfSight(p.X, p.Y, tx, ty)) continue;
                 int cov = Grid.GetCover(tx, ty, p.X, p.Y).Level;   // cover of (tx,ty) vs attacker p

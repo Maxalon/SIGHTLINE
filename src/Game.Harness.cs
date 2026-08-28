@@ -2278,6 +2278,7 @@ public partial class Game
         Enqueue(new GrenadeAnim(lobber, body.X, body.Y), Team.Enemy);   // AoE stays blind — and lethal
         Pump();
         if (body.Alive) fails.Add("e:grenadeSparedBody");
+        if (body.Downed) fails.Add("e:corpseStillDowned");   // review F2: a FINISH closes the down state (honest ledger; no BLED OUT pops on a corpse)
 
         // ---- (f) AI IGNORES the downed; all-downed squad = bounded, exception-free ----
         Scene();

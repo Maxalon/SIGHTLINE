@@ -902,11 +902,14 @@ of record (container suspensions have wiped every scratchpad copy — docs are t
       Wound 3 + the near-death scar track; a bleed-out runs the full death path (Fallen/Memorial/
       honest loss card names the DOWNING archetype — LGD's veteran-erase needed no special case);
       endless wave-clear revives at the mend value. Zero persistence (DTO whitelist + SAVETEST
-      leg); no enum touched. **Measured (paired h0, fresh same-slot R0):** soldier true-KIA 251 →
-      151 (**-40%**, target band 30-50%); 336 downs staged, save-rate **43%**; STABILIZE 107 uses;
-      PATCH 8 → 16 (>= 10 met; 0.27/corpsman-fielded-mission — corpsman present in only 38% of
-      missions: the roster-presence verdict recorded for FUL-13); completion 40% → 47.5% (+7.5,
-      in the +10/-5 budget — saved bodies play better). h4 close leg in docs/DEVLOG.md §FUL-7.
+      leg); no enum touched. **Measured (paired h0, fresh same-slot R0; review-fixed build):**
+      soldier true-KIA **-40%** (125→75 on the re-measured chunk; target band 30-50%); save-rate
+      **33%** on the honest ledger (review F2 — a body finished while down is a death, not a
+      save); STABILIZE ~50-60 uses/chunk; PATCH >= 10 met in aggregate at 0.27/corpsman-fielded-
+      mission — corpsman present in only ~38-41% of missions: the roster-presence verdict
+      recorded for FUL-13; completion 50% → 60% re-measured (+10, at the budget boundary — saved
+      bodies play better, and review F1 restored the enemy focus layer while a body is down).
+      h4 close leg + the SHIP-WITH-FIXES review round (F1-F6) in docs/DEVLOG.md §FUL-7.
       SIGHTLINE_DOWNTEST (legs a-h) + DOWNSHOT (both palettes + mid-rescue). Full spec:
       docs/plans/FUL-6-critical-mass-FUL-7-last-light.md; details docs/DEVLOG.md §FUL-7.
 - [x] **FUL-8 PIKEMAN** (wt-ful8). The SARISSA — a Wardens lane-holder that plants a braced

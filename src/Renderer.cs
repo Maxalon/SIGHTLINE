@@ -1778,8 +1778,13 @@ public static class Renderer
         const float chipH = 18f;
         // FUL-7: the DOWN countdown pill leads the row — red "DOWN 3/2/1" while the timer runs,
         // amber "STABLE" once frozen (Pal.Foe/Pal.Suspect: both palette-safe; the glyph carries
-        // the state without hue per DESIGN 3.H — a falling chevron vs a level bar).
-        string downCode = u.Downed ? (u.Stabilized ? "STABLE" : $"DOWN {u.DownedTurns}") : null;
+        // the state without hue per DESIGN 3.H — a falling chevron vs a level bar). Review F4:
+        // with NO soldier left standing the freeze fails (the orphan tick runs even stabilized)
+        // — the pill shows that countdown too, never a lying steady "STABLE".
+        bool downAnyUp = u.Downed && g.Players.Any(q => q.Alive && !q.Downed && !q.IsVip);
+        string downCode = u.Downed
+            ? (u.Stabilized ? (downAnyUp ? "STABLE" : $"STABLE {u.DownedTurns}") : $"DOWN {u.DownedTurns}")
+            : null;
         Color downCol = u.Stabilized ? Pal.Suspect : Pal.Foe;
         float rowW = 0f;
         if (downCode != null)

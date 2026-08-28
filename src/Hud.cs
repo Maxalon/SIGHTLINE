@@ -392,8 +392,15 @@ public static class Hud
             if (!u.IsVip)
             {
                 if (down)
-                    Raylib.DrawTextEx(Cfg.Font, u.Stabilized ? "STABILIZED - HOLDING ON" : $"BLEEDING OUT ({u.DownedTurns})",
+                {
+                    // review F4: the freeze needs a standing squad — during the orphan tick the
+                    // chip shows the countdown too, never a lying steady "HOLDING ON".
+                    bool holdUp = g.Players.Any(q => q.Alive && !q.Downed && !q.IsVip);
+                    string dtag = u.Stabilized ? (holdUp ? "STABILIZED - HOLDING ON" : $"STABILIZED - FADING ({u.DownedTurns})")
+                                               : $"BLEEDING OUT ({u.DownedTurns})";
+                    Raylib.DrawTextEx(Cfg.Font, dtag,
                         new Vector2((int)r.X + 9, (int)r.Y + 45), 11, 1f, Raylib.Fade(u.Stabilized ? Pal.Suspect : Pal.Foe, txtA));
+                }
                 else if (u.Wound > 0)
                     Raylib.DrawTextEx(Cfg.Font, $"WOUNDED ({u.Wound})", new Vector2((int)r.X + 9, (int)r.Y + 45), 11, 1f, Raylib.Fade(Pal.Foe, txtA));
                 else

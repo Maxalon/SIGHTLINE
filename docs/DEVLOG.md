@@ -2246,6 +2246,35 @@ PATCH 10 at h4 (0.42/corpsman-fielded-mission — the revive stage strengthens w
 5. **DRAG stayed ~1-2/batch** — the drag-chain carry is real for humans but the bot doesn't probe
    DRAG-toward-zone (v1 accepted gap). FDR consequently unmoved (0 procs); still FUL-13's row.
 
+## Review fixes (adversarial integration review: SHIP-WITH-FIXES — all applied)
+- **F1 (the one that mattered): a downed body won the ENEMY FOCUS pick.** PlanEnemySquad scored
+  Hp 0 as the 60-pt near-dead base + exposure, so a visible downed body usually became
+  EnemyFocus — and since Ai.Plan excludes the downed from candidates, every focus bonus
+  (kill-press, crossfire pulls) then applied to NOBODY: the coordination layer silently
+  switched off while a body was down. Fixed (downed skip beside the caged-captive skip) and
+  **re-measured** (paired h0 N=10, slots 0-9, CRN worlds identical): completion 50% → **60%**
+  (g70/s50 — +10 vs R0a, at the budget boundary; the pre-fix 45% was NOT propped up by the
+  dumb enemy — with coordination restored the squad does BETTER, because enemy attention also
+  stops leaking onto bodies), true-KIA 75 (**-40% vs R0a's 125** — the band holds), STABILIZE
+  60, PATCH 5 (corpsman in 35/85 missions), mission win-rate 91%.
+- **F2 (ledger honesty): a body killed WHILE down counted as "saved."** KillUnit now closes the
+  down state on the corpse (after the cause read; ExpireDowned flags itself so a bleed-out
+  isn't double-counted) and a new `finished` counter joins the report; save-rate =
+  1 - (bled-out + finished)/downs. **Restatement: the published pooled 43% save-rate was
+  generous** — AoE/fire finishes (uninstrumented then) counted as saves; the honest re-measured
+  chunk reads **33%** (186 downs → 59 recovered + 2 revived, 101 bled out, 24 finished).
+  Also kills the BLED-OUT-pops-on-a-burned-corpse corner (a dead body can't reach the tick).
+- **F5:** two lesser enemy-attention seams stopped treating a body as a threat — FaceShields no
+  longer turns an AEGIS shield toward a downed body (free flanks denied), and
+  TryEnemyReposition's ExposureAt no longer counts a downed body's fire lanes.
+- **F6:** EnterDowned sets WasNearDeath — a PATCH-revived soldier now earns the near-death scar
+  track too (barracks recovery already forced it; the revive path didn't).
+- **F3 (banner honesty):** "3 TURNS TO REACH THEM" promised three but the player acts on pills
+  2 and 1 — reworded to "THEY HOLD FOR 3, TWO TURNS TO ACT" (tick unchanged).
+- **F4 (pill honesty):** during the orphan tick (no soldier standing, stabilized timers run)
+  the pill/chip now show the countdown — "STABLE 2" / "STABILIZED - FADING (2)" — never a
+  lying steady STABLE. DOWNTEST leg e gained the F2 corpse-state pin.
+
 ## Gotchas (process)
 - **EnterDowned clears Statuses INSIDE TickStatuses' enumeration** — a lethal burn tick threw
   Collection-was-modified (caught by escort autoplay). Fix: snapshot the list + stop ticking a
