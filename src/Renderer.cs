@@ -91,6 +91,18 @@ public static class Renderer
     static Color Lift(Color c, int d) =>
         Pal.RGBA(Math.Clamp(c.R + d, 0, 255), Math.Clamp(c.G + d, 0, 255), Math.Clamp(c.B + d, 0, 255), c.A);
 
+    /// RESONANCE V3 — lift a colour in VALUE ONLY until it reaches `target` Rec.601 luma
+    /// (never darkens; never lifts by more than `maxUp`). A flat +N add cannot serve eight
+    /// biomes at once: measured, the same +40 that STEEL's cover needed put TUNDRA's cover
+    /// top 25 luma higher than STEEL's for no reason other than TUNDRA's tint being a bright
+    /// colour, and that is what pushes one biome's terrain into the band the units own. This
+    /// puts every biome's cover top on the SAME rung, which is what the hierarchy is about.
+    static Color LiftTo(Color c, int target, int maxUp)
+    {
+        int l = (int)(0.299f * c.R + 0.587f * c.G + 0.114f * c.B);
+        return Lift(c, Math.Clamp(target - l, 0, maxUp));
+    }
+
     // --- 5.4 Procedural noise overlay -----------------------------------------
     // A 128x128 tiling Perlin-noise texture generated once after the GL context is
     // ready (lazy-init on the first DrawBoard call).  Drawn at low alpha over floor
@@ -1865,10 +1877,17 @@ public static class Renderer
         // costs (the biome Tints are darker than the slate base) with a Lift, so the measured
         // top-face luma is held where V2 left it — the point is HUE, not salience.
         Color shade = Pal.RGBA(8, 11, 15);
+        // The top faces are VALUE-TARGETED, not flat-lifted (see LiftTo). The targets are set
+        // by a hard ceiling: the brightest pixel a cover top can produce — high cover, a cell
+        // interior with no grout, standing directly under the key light, plus the Perlin grain
+        // — must stay BELOW a soldier's body fill (Pal.Friend luma 156 / Pal.Foe 153). With the
+        // key light's 0.24 gain that works out to flat <= ~114, so HIGH tops sit at 112 and LOW
+        // tops at 100, holding the high/low tier the shape cue also carries. Measured worst
+        // case after this: 149 vs a 179-181 unit ring and a 215 specular catch.
         Color cHi = Lift(Pal.Mix(Pal.Mix(Pal.CoverHi, tint, 0.55f),    shade, 0.10f), -4);
-        Color cHiTop = Lift(Pal.Mix(Pal.Mix(Pal.CoverHiTop, tint, 0.55f), shade, 0.14f), 20);
+        Color cHiTop = LiftTo(Pal.Mix(Pal.Mix(Pal.CoverHiTop, tint, 0.55f), shade, 0.14f), 112, 52);
         Color cLo = Lift(Pal.Mix(Pal.Mix(Pal.CoverLo, tint, 0.55f),    shade, 0.10f), -4);
-        Color cLoTop = Lift(Pal.Mix(Pal.Mix(Pal.CoverLoTop, tint, 0.55f), shade, 0.14f), 20);
+        Color cLoTop = LiftTo(Pal.Mix(Pal.Mix(Pal.CoverLoTop, tint, 0.55f), shade, 0.14f), 100, 52);
         int bi = BiomeIndex(g.Biome);
         // the grout colour the cellular field is drawn through: the room's own deep shadow.
         Color grout = Pal.Mix(Pal.RGBA(0, 0, 0), tint, 0.22f);
@@ -1934,7 +1953,7 @@ public static class Renderer
                 Raylib.DrawRectangleRounded(baseRect, jRad, 5, wallCol);
                 // V3: the biome's cellular field on the WALL face too, so the whole block is one
                 // material rather than a textured lid on a flat box.
-                DrawCellRect(bi, baseRect, grout, 0.16f);
+                DrawCellRect(bi, baseRect, grout, 0.13f);
                 // front-face shade gradient: a soft darkening toward the bottom of the wall so the
                 // block reads as a lit 3D volume (consistent top-light), and a thin lighter catch on
                 // the upper-left of the face. Cheap (a handful of thin bands), subtle (squint holds).
@@ -1963,7 +1982,7 @@ public static class Renderer
                 // along the boundaries, so drawing it through a dark biome colour turns the
                 // boundaries into GROUT — concrete slabs / cracked basalt / ice plates / gravel,
                 // set by the per-biome cell size. This is the pass that makes cover a MATERIAL.
-                DrawCellRect(bi, topRect, grout, 0.22f);
+                DrawCellRect(bi, topRect, grout, 0.16f);
                 // V3: a hash-picked CHIP knocked out of one corner of ~35% of top faces — a
                 // broken edge with its own light catch. Cheap (2 tris + a line), deterministic,
                 // and it is what stops a row of blocks reading as one widget stamped five times.
@@ -2791,8 +2810,8 @@ public static class Renderer
             // live foe's burn, but now unmistakably "something is standing there".
             Color podGlow = suspicious ? Pal.RGBA(168, 136, 100) : Pal.RGBA(122, 136, 154);
             float pR = suspicious ? 27f : 24f;   // FUL-3: dormant ring tightens with the smaller body
-            Raylib.DrawCircleV(p, pR,        Raylib.Fade(podGlow, 0.30f));   // soft seat so it doesn't vanish
-            Raylib.DrawCircleV(p, pR * 0.66f, Raylib.Fade(podGlow, 0.44f));
+            Raylib.DrawCircleV(p, pR,        Raylib.Fade(podGlow, 0.26f));   // soft seat so it doesn't vanish
+            Raylib.DrawCircleV(p, pR * 0.66f, Raylib.Fade(podGlow, 0.38f));
         }
 
         // selection ring — full strength (signal), plus a layered glow so the eye snaps to who's
@@ -2981,7 +3000,7 @@ public static class Renderer
             {
                 // CLOSED, DOUBLED — the friendly chassis.
                 Raylib.DrawRing(p, bodyR - 3.4f, bodyR + 1f, 0, 360, 48, Raylib.Fade(ringCol, figAlpha));
-                Raylib.DrawRing(p, bodyR + 4.4f, bodyR + 6.2f, 0, 360, 48, Raylib.Fade(ringCol, 0.52f * figAlpha));
+                Raylib.DrawRing(p, bodyR + 4.4f, bodyR + 6.2f, 0, 360, 48, Raylib.Fade(ringCol, 0.62f * figAlpha));
             }
             else
             {
@@ -2994,8 +3013,8 @@ public static class Renderer
         // a small specular catch on the upper-left of the body, matching the board's key light.
         // This is the pixel tier the grade reserves above 180 and previously nobody occupied.
         if (!inactive)
-            Raylib.DrawRing(p, bodyR * 0.58f, bodyR * 0.80f, 196f, 268f, 14,
-                            Raylib.Fade(Pal.RGBA(255, 255, 255), 0.34f * figAlpha));
+            Raylib.DrawRing(p, bodyR * 0.62f, bodyR * 0.79f, 200f, 272f, 14,
+                            Raylib.Fade(Pal.RGBA(255, 255, 255), 0.48f * figAlpha));
 
         // class silhouette — a recognizable primitive cue per class (shape-redundant, colorblind-
         // safe: meaning rides on the SHAPE, inheriting the team colour + focal figAlpha).
@@ -3040,7 +3059,7 @@ public static class Renderer
                 // so the DORMANT tier reads at a glance against any biome floor — still cold/quiet,
                 // still clearly subordinate to the amber SUSPICIOUS ring and the hot-red LIVE halo.
                 float t = (float)Raylib.GetTime();
-                Color dim = Pal.RGBA(214, 226, 238);   // V3: cold slate, lifted for contrast
+                Color dim = Pal.RGBA(202, 214, 228);   // V3: cold slate, lifted for contrast
                 for (int k = 0; k < 8; k++)
                 {
                     float a0 = k * 45f + t * 14f;          // slow rotation so it reads as "scanning"
@@ -3048,7 +3067,7 @@ public static class Renderer
                     // contrast on a pale TUNDRA drift as well as on a dark VOID floor — the
                     // read stops depending on which biome the pod happens to be standing in.
                     Raylib.DrawRing(p, 21.6f, 27.4f, a0 - 1.5f, a0 + 27.5f, 6, Raylib.Fade(Pal.RGBA(4, 7, 11), 0.55f));
-                    Raylib.DrawRing(p, 23f, 26f, a0, a0 + 26f, 6, Raylib.Fade(dim, 0.95f));
+                    Raylib.DrawRing(p, 23f, 26f, a0, a0 + 26f, 6, Raylib.Fade(dim, 0.86f));
                 }
                 float qw = Cfg.Measure("?", 23, 1f).X;
                 var qp = new Vector2((int)(p.X - qw / 2), (int)(p.Y - 13));
