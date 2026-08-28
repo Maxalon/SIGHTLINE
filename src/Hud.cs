@@ -2993,7 +2993,9 @@ public static class Hud
             Raylib.DrawRectangleLinesEx(r, hover ? 2.2f : 1.4f, bd);
             Color lblCol = !legal ? Pal.TxtDim : (hover ? Pal.Suspect : Pal.Txt);
             Raylib.DrawTextEx(Cfg.Font, ch.Label, new Vector2((int)r.X + 16, (int)r.Y + 12), 18, 1f, lblCol);
-            string prev = legal ? ch.Preview : ch.Preview + "   (need more intel / roster full)";
+            // FUL-10 review: the old fixed reason "(need more intel / roster full)" LIED for the
+            // new gates (no scarred soldier / lone roster) — keep it honest and generic.
+            string prev = legal ? ch.Preview : ch.Preview + "   (requirements not met)";
             Raylib.DrawTextEx(Cfg.Font, prev, new Vector2((int)r.X + 16, (int)r.Y + 38), 13, 1f, legal ? Pal.TxtDim : Pal.Foe);
             by += btnH + btnGap;
         }
@@ -3226,7 +3228,7 @@ public static class Hud
             foreach (var (line, dy) in WrapLines(ContractDef.Desc(c), ccw - 22, 11, 0))
                 Raylib.DrawTextEx(Cfg.Font, line, new Vector2((int)r.X + 12, (int)r.Y + 30 + dy), 11, 1f, Pal.TxtDim);
             // STANDARD card is the implicit opt-out: still clickable (deselects back to None), but
-            // the input handler only registers the 3 real contracts -> clicking STANDARD is a no-op
+            // the input handler only registers the real contracts (5 as of FUL-10) -> clicking STANDARD is a no-op
             // selection-wise; we add it to the rects anyway so a future tweak can wire it.
             if (c != Contract.None) DraftContractBtns.Add((c, r));
         }

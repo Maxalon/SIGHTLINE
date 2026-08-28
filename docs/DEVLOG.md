@@ -1909,7 +1909,10 @@ reservecall triple. Event salvage NEVER touches meta/disk (EventCatalog.Apply st
 it pends in the new persisted `Run.PendingSalvageReward` (append-only DTO tail + SAVETEST leg)
 and `AwardMetaRunEnd` commits it win OR loss, folded into the FUL-12 `EndSalvage` slab.
 `HasDownside` learned GrantScar + ReleaseSoldier so the safe-first bot never reads a scarring
-arm as "safe" (honest arm-uptake waits on FUL-5's chooser, per plan).
+arm as "safe" (honest arm-uptake waits on FUL-5's chooser, per plan). [Integration note: FUL-5
+landed first and REPLACED IsSafeChoice/HasDownside with the hashed 70/30 value chooser; the
+downside judgments above live on as signed EventOutcomeValue cases (GrantScar -3*chance,
+ReleaseSoldier -6, etc.) composed at the FUL-10 merge.]
 
 **Two veteran-economy contracts** (Contract append — BOTH tail pins moved, SaveGame SelfTest +
 CONTRACTTEST, each now also pinning Spearhead's ordinal POSITION [3]): **MERCENARY CLAUSE**
