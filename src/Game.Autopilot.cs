@@ -377,12 +377,27 @@ public partial class Game
         {
             case ItemKind.Smoke:
             {
-                // worth it only if this soldier is genuinely exposed (≥2 guns can hit it with no
-                // cover) AND has no good shot of its own — smoke its own tile to break the lanes.
+                // FUL-5: cover a wounded soldier's retreat — smoke the most-EXPOSED sub-half-HP
+                // squadmate in throw range (self included). One exposed gun on a sub-half body
+                // is already a lethal-risk turn, so the bar is far lower than the self-pin case
+                // below; the old ">=2 guns AND no shot AND it's me" conjunction measured ITEM
+                // at 0 uses per ~500 missions. No shot-preference veto here: this runs after
+                // TakeBestShot declined, and the lane-break outvalues a sub-45% poke anyway.
+                Unit coverAlly = null; float worstExp = 6.9f;   // ~one exposed gun (6 + prio*0.5)
+                foreach (var p in AlivePlayers())
+                {
+                    if (p.IsVip || p.MaxHp <= 0 || p.Hp * 2 > p.MaxHp) continue;
+                    if (Util.TileDist(u.X, u.Y, p.X, p.Y) > ItemRange) continue;
+                    float pexp = TileExposure(p, p.X, p.Y);
+                    if (pexp > worstExp) { worstExp = pexp; coverAlly = p; }
+                }
+                if (coverAlly != null && ItemTargetOk(u, coverAlly.X, coverAlly.Y))
+                { IssueItem(coverAlly.X, coverAlly.Y); return true; }
+                // original self-pin case: this soldier badly exposed (≥2 guns) with no shot —
+                // smoke its own tile to break the lanes.
                 if (TileExposure(u, u.X, u.Y) < 12f) return false;
                 var (tgt, _) = BestShotFrom(u, u.X, u.Y);
                 if (tgt != null) return false;                       // prefer shooting if we can
-                if (Util.TileDist(u.X, u.Y, u.X, u.Y) > ItemRange) return false;
                 if (!ItemTargetOk(u, u.X, u.Y)) return false;
                 IssueItem(u.X, u.Y); return true;
             }
@@ -629,6 +644,11 @@ public partial class Game
                 if (u.Ammo == 0 && u.ActionsLeft > 0) { DoReload(); return true; }
                 DoHunker(); return true;
             }
+            // FUL-5: pull a straggler along the route (DRAG toward the evac anchor) — SmartEvac
+            // has had this pull since W1; the escort march never did, so its slow tail (the LMG,
+            // the wounded, the leashed VIP itself at Cheby 2) dragged the leash pace. 1 action,
+            // capped per turn by DragsThisTurn, never ends the turn — the advance continues.
+            if (TrySmartDrag(u)) return true;
             // ADVANCE to the zone the SAFE (cover-aware) way, not a naked beeline — SmartMoveToward hugs
             // cover / avoids exposure while still closing on the nearest evac tile (and falls back to a plain
             // step so progress is guaranteed). Racing the squad naked into the far corner (which sits in the
@@ -664,6 +684,9 @@ public partial class Game
         }
         // IN the zone, VIP not yet extractable: HOLD the zone (shoot what's in reach, watch, hunker) so the
         // squad stays CONSOLIDATED for the leashed VIP to arrive — do NOT wander off hunting the last foes.
+        // FUL-5: first, reel in a Cheby-2 straggler/VIP (drag lands it adjacent -> the extract
+        // pull or the leash finishes the job next pass) — the zone-hold turn was otherwise idle.
+        if (TrySmartDrag(u)) return true;
         if (TakeBestShot(u)) return true;
         if (u.Ammo == 0) { DoReload(); return true; }
         if (u.ActionsLeft > 0 && u.Ammo > 0 && !u.HasStatus(StatusKind.Disoriented)) { DoOverwatch(); return true; }
@@ -1174,10 +1197,12 @@ public partial class Game
     }
 
     /// FUL-5 — the PATCH approach step: if this soldier is a corpsman with the kit ready and a
-    /// non-VIP ally missing >=3 HP sits within Chebyshev 2 (but NOT already adjacent — that case
-    /// is PrepAbility's), move onto the cheapest reachable tile adjacent to that ally. The heal
-    /// itself fires on a later pass via PrepAbility (adjacency then holds). Cd-gated so the
+    /// non-VIP ally missing >=3 HP sits within Chebyshev 2-3 (but NOT already adjacent — that
+    /// case is PrepAbility's), move onto the cheapest reachable tile adjacent to that ally. The
+    /// heal itself fires on a later pass via PrepAbility (adjacency then holds). Cd-gated so the
     /// corpsman never shadows a soldier it can't actually treat yet. Returns true iff it moved.
+    /// (R4: radius 2 -> 2-3 — the R3 reading showed the greedy spread holds soldiers 3+ apart,
+    /// so the exact-2 window fired only ~4/20 campaigns; 4+ stays out of the medic's remit.)
     bool TryMoveToPatch(Unit u)
     {
         if (u.Ability != AbilityKind.Heal || u.AbilityCd > 0 || u.ActionsLeft <= 0 || MoveCost == null)
@@ -1187,7 +1212,7 @@ public partial class Game
         {
             if (a == u || a.IsVip || a.MaxHp <= 0 || a.MaxHp - a.Hp < 3) continue;
             int d = Util.ChebyDist(u.X, u.Y, a.X, a.Y);
-            if (d != 2) continue;                       // adjacent = heal now (PrepAbility); farther = not our call
+            if (d < 2 || d > 3) continue;               // adjacent = heal now (PrepAbility); 4+ = not our call
             float frac = (float)a.Hp / a.MaxHp;
             if (tgt == null || frac < worst) { tgt = a; worst = frac; }
         }
