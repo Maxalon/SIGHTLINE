@@ -1284,7 +1284,7 @@ public static class Mission
     static Unit MakeHostile(string name, string cls, WeaponKind w, int hp, int aim, int mob, int x, int y)
     {
         int thp = hp + HostileToughness;
-        aim = Math.Max(20, aim - HostileAimTrim);
+        if (HostileAimTrim > 0) aim = Math.Max(20, aim - HostileAimTrim);   // no-op (identity) at the default 0
         var u = new Unit { Name = name, Cls = cls, Team = Team.Enemy, X = x, Y = y, Hp = thp, MaxHp = thp, Aim = aim, Mobility = mob, Weapon = Weapon.Make(w) };
         u.Weapon.TrimBaseDamage(HostileDamageTrim);
         u.Ammo = u.Weapon.Clip;
