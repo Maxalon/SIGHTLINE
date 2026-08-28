@@ -581,3 +581,43 @@ seeds (mix of WIN/LOSE, no exceptions):
   report: downs -> revived/recovered/bled-out/finished + honest save-rate + corpsman-fielded
   missions. Review round F1-F6: downed bodies exit EVERY enemy-attention seam — the squad focus
   pick, shield facing, reposition exposure — plus the honest ledger/banner/pill wording.)
+
+## PROGRAM RESONANCE — WAVE C1 "VOICE" (the game's words)
+- **Mission briefings:** a 3-line card at the start of every CAMPAIGN node, composed from data the
+  game already had — the named **region** × the authored **arena's** terrain clause × the enemy
+  **faction** and its real combat rule × the **objective** said in a commander's voice. Rides the
+  shared FIELD TIP card chrome (Friend-blue accent) and yields the slot ABSOLUTELY to wave T1's
+  lesson cards and field tips. Never hit-tested (cannot swallow a click); dismissed by any key or
+  click, auto-fades after 11s, HOLDS its clock while a teaching card owns the slot (giving up after
+  45s), and **clears itself the moment the combat log has an entry** — it is a pre-fight object and
+  the ledger is load-bearing. Deterministic: a reloaded save briefs identically.
+- **Faction dossiers + region names:** a **FACTIONS** codex tab (3rd, after ENEMIES) with a
+  three-paragraph dossier per faction — who they are / **FIELD RULE** / **COUNTER** — each rule line
+  interpolating the REAL `Combat` constant (`LegionCloseAim/Crit`, `WardenLongAim`, the Syndicate
+  see-over-low rule) and each counter naming the real counter-prep item and capstone boss.
+  `Faction.None` ("LOCAL FORCES", UNALIGNED) is documented too. The campaign map's six columns are
+  now labelled with **named regions** — 64 curated, biome-true place names (8 per biome) derived
+  from `MapSeed`; a run's six missions always land on six distinct biomes, so a region name can
+  never repeat inside a run. Cleared/current columns read brighter than the ones ahead.
+- **Soldier barks:** six beats only — first blood, a bonded squadmate going down, a pod routing, a
+  clutch STABILIZE, a vendetta kill, last-soldier-standing — written into the combat log with the
+  outcome tag `VOICE` (a cooler, quieter tint than every mechanical line). **Four hard rate limits:**
+  never while a lesson/tip card is up, at most one per game turn, never the same speaker twice in a
+  row, each beat kind at most once per mission. Ceiling six lines a mission. A beat needing a second
+  name that is handed none never fires, so a bondless soldier can never draw a bond line.
+- **Run epilogue:** exactly five lines under the dossier panels on the CAMPAIGN end card, generated
+  from the numbers the card already computes — where the file closed and what fell there, the count
+  of the dead, ONE death told properly (the costliest loss, named, with its region and kill count),
+  what the run turned on (the archetype that did most of the killing, or the MVP), and where it
+  leaves the survivors. Every slot has a non-empty fallback and every count is grammatical and true
+  at every N. The dossier panels yield height to it, so a loss card with a cause line, a heat unlock
+  and three achievements still lands its buttons on screen.
+- **The determinism contract:** all of the above lives in `src/Voice.cs` and takes **ZERO draws from
+  the shared `Util.Rng`** — regions/briefings/epilogue are pure `Util.Hash3` derivations of
+  `MapSeed`; only bark variety uses a dedicated `Random` re-seeded per mission. `SIGHTLINE_VOICETEST`
+  proves the separation (with a sensitivity probe so it cannot pass vacuously), asserts every
+  template slot resolves, walks all four bark gates, and measures every generated string against the
+  real pixel width of the chrome that draws it. `SIGHTLINE_BALANCE=10` is byte-identical to base.
+  (`src/Voice.cs`; `SIGHTLINE_VOICETEST` / `SIGHTLINE_VOICEDUMP` (read the copy as prose) /
+  `SIGHTLINE_SHOTONBARK` / `SIGHTLINE_CODEXTAB=2`;
+  `docs/DESIGN.md` §1.1 records the pillar amendment that authorises any of it.)

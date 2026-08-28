@@ -3911,3 +3911,122 @@ as "the wave made the game flatter" would be reading it wrong; `choices/ARMED-so
 (1.71 -> 1.46 at h0, 1.62 -> 1.59 at h4, 1.46 -> 1.42 at h8) is the honest per-decision read,
 and the armed FRACTION went up at every rung. The fight is longer, tips more, and stopped
 resolving on the alpha strike — but it is not yet *denser*, and density is a different wave.
+## PROGRAM RESONANCE — WAVE C1 "VOICE" (the game finally says something)
+
+**The finding.** SIGHTLINE ships more player-attachment machinery than most indie tactics
+games: callsigns, ranks, player-editable tags, earned traits and nicknames, scars, faction
+vendettas, bonds with specific squadmates, persistent wounds, a 3-turn bleed-out with
+STABILIZE/revive, a memorial, a cross-run veteran reserve and a hall of fame. **And the game
+never said a word about any of it.** Measured over 16 campaigns: **146 soldiers went down, 74
+bled out, 22 were finished while down, 1 was revived.** ~96 dying people with names, traits and
+scars, and the whole telling was a floating damage number and a name on an end-card list. Three
+factions, eight biomes and a branching campaign map shipped with **zero words of world**. The
+stakes were *implemented and unnarrated* — which is exactly why they read thinner in play than
+in the changelog.
+
+**The scope decision, recorded.** `docs/DESIGN.md` §1 listed *Narrative* as something the
+project deliberately does not pursue. This wave amends it — see the new **§1.1 AMENDMENT — the
+light frame**, which states what changed, why, and (the load-bearing half) the limits: not a
+sixth pillar; no story/arcs/dialogue/cutscene; nothing the player must read to play well;
+readability wins automatically; barks rate-limited by design; determinism a hard constraint.
+
+### What shipped
+
+| Piece | Where | Shape |
+|---|---|---|
+| **Briefings** | `Hud.DrawBriefCard` + `Game.BeginBriefing/UpdateBriefing` | 3 lines per campaign node: region × arena terrain, faction × its real combat rule, objective in the commander's voice. |
+| **Faction dossiers** | `Codex` FACTIONS tab (3rd, after ENEMIES) | 3 paragraphs each — who they are / FIELD RULE / COUNTER — with the real `Combat` constant interpolated. `Faction.None` documented too. |
+| **Region names** | `Voice.RegionName`, drawn as campaign-map column headers | 64 curated biome-true names, 8 per biome. A run's six missions always land on six distinct biomes, so a run can never repeat a region name. |
+| **Barks** | `Game.Bark` at six existing event sites | first blood, a bond partner going down, a pod routing, a clutch STABILIZE, a vendetta kill, last-soldier-standing. Logged with outcome tag `VOICE`. |
+| **Run epilogue** | `Hud.BuildEpilogue` → `Voice.Epilogue` | exactly 5 lines on the campaign end card, generated from the numbers the card already computes. |
+
+### The hard constraint, and how it was met
+
+Every measurement in this project rests on CRN pairing: two runs on the same slot seed must be
+byte-identical. An earlier wave (audio) shipped synthesis that drew from `Util.Rng` and
+perturbed gameplay. So:
+
+- Region names, briefings and the epilogue are **pure `Util.Hash3` derivations of `MapSeed`** —
+  zero draws by construction, and they round-trip on load with the map.
+- Bark variety uses a **dedicated `Random`**, re-seeded per mission from the same hash
+  (`Voice.BeginMission`). Nothing it produces is read by combat, AI, mission gen or the save.
+- **`SIGHTLINE_VOICETEST=1`** proves it: it snapshots the shared stream, runs every generator,
+  and requires the next 24 shared draws to be unchanged — **plus a sensitivity probe** that runs
+  the same body with one deliberate `Util.Rng.Next()` and requires the check to FAIL, so the
+  assertion cannot pass vacuously.
+- **Mutation-verified by hand:** injecting a `Util.Rng.Next(1)` into `Voice.Roll` and lengthening
+  one bark produced `RNG SEPARATION: generating voice content consumed draws from Util.Rng` and
+  `BARK overflows the log (517px > 322px)`. Both restored.
+
+### Rate limits (the barks are the risky part)
+
+Four gates, all asserted: **(1)** never while a T1 lesson card or field tip is on screen — the
+teaching layers win absolutely; **(2)** at most one bark per game turn; **(3)** never the same
+speaker twice in a row; **(4)** each beat kind at most once per mission. Ceiling six lines a
+mission; typical is two or three. A beat that needs a second name (BondDown) and is handed none
+simply does not fire — `Game.BondPartnerOf` returns null unless a *real* bonded squadmate is on
+their feet, so a bondless soldier can never draw a bond line.
+
+### Two things the screenshots caught that the tests could not
+
+1. **The briefing card sat on the combat log.** The card slot is the centred 760px tip/lesson
+   chrome (x 260..1020); the log panel starts at x 970. In a live-fire shot the briefing was
+   drawing over the ledger. Fix: **the briefing clears itself the instant `Stats.CombatLog` has
+   an entry** — it is a pre-fight object, and the ledger is load-bearing.
+2. **The log widening was the wrong trade.** C1 briefly widened the log 296→340 to fit barks.
+   That pushes the panel *further* under the same centred card. Reverted; the barks were written
+   to the historic 296 instead, and VOICETEST measures every composed line against
+   `Hud.LogTextWidth` with the widest callsign (`KESTREL`) in both name slots.
+
+### Verification (all run by hand, no CI)
+
+- `dotnet build -c Release` → **0 warnings / 0 errors**.
+- `bash scripts/qa-sweep.sh --full` → **43/43 PASS** (42 pre-existing + VOICETEST), autoplay
+  ×5 clean across two sweeps + two extra runs (LOSE m3, WIN m6, WIN m6, LOSE m1, LOSE m1 — no
+  exceptions, no TIMEOUT). **Count correction:** the sweep's own footer claimed "41 self-tests"
+  while actually running 42 — an off-by-one that predates this wave. Counted by hand off the
+  `echo -n` lines and corrected in the script rather than carried forward.
+- `SIGHTLINE_PAIRTEST=1` → **PASS**.
+- `SIGHTLINE_BALANCE=10` → `runs=20  missions=76`, and a `diff` of the full report against the
+  pre-change baseline is **empty once the four wall-clock progress lines and the wall-time footer
+  are stripped** — every table, every rate, `W:9 L:11` identical. That is the expected result for
+  this wave, and it is the proof the RNG separation actually holds end to end.
+- Screenshots read and judged in **both palettes**: briefing card, campaign map with region
+  names, codex FACTIONS dossiers, a bark in the log mid-fight (new `SIGHTLINE_SHOTONBARK=1`
+  hook — shoots 40 frames after a bark actually lands in live play), win and loss end cards.
+
+### Hooks added
+
+- `SIGHTLINE_VOICETEST=1` — the content + RNG-separation contract (in `scripts/qa-sweep.sh`).
+- `SIGHTLINE_VOICEDUMP=1` — print every text type Voice generates (regions, briefings, dossiers,
+  all bark variants, four epilogue shapes) so the COPY can be read and judged as prose without
+  walking six missions. Window-free, device-free, changes nothing.
+- `SIGHTLINE_SHOTONBARK=1` — pair with `SIGHTLINE_AUTOPLAY=1`; screenshots live play once a bark
+  is in the ledger, instead of guessing a frame number.
+- `SIGHTLINE_CODEXTAB=2` now frames the new FACTIONS tab.
+- `Program.LoadGameFonts()` extracted from `Main`'s inline block so a self-test hook can bake the
+  real atlases and measure real glyph widths. Behaviour on the normal launch path is unchanged.
+
+### Keyboard keys
+
+**None claimed.** The briefing is dismissed by *any* key or click (a passive read — the click
+still does its normal job), so the wave needs no binding of its own.
+
+### Honest verdict on the writing
+
+Good, not great, and deliberately small. The strongest lines are the epilogue's third slot (the
+named death with its region and kill count — the sentence this whole wave exists for) and the
+faction FIELD RULE lines, which are load-bearing information wearing a voice. The briefing's
+opposition line is the weakest: it does real work but three of them are structurally identical
+("X ground: a, b, c. <rule>."), which will read as a template by the fourth run. The barks are
+short enough to survive repetition but there are only three variants per beat; a second pass
+should widen the pools before it widens the beat list. Full sample in the wave report.
+
+### Left undone
+
+- **Skirmish / Daily / Last Stand get no briefing.** Regions and operation numbers are campaign
+  vocabulary and those modes carry no `MapSeed` route. A one-line variant is cheap if wanted.
+- **Bark pools are 3 deep.** Widening them is pure content work with a test already in place.
+- **Region names are decoration, not information.** They label the map but nothing keys off them
+  (no per-region modifier, no returning to a region). That is the honest scope of a *frame*.
+- **No epilogue for a run abandoned mid-campaign** — only the Win/Lose end cards narrate.

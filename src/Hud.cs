@@ -20,6 +20,29 @@ public struct UiButton
 /// Button rects are stored after Draw so Game can hit-test clicks.
 public static class Hud
 {
+    // ── RESONANCE C1 (VOICE) — text-fitting contract, shared with src/Voice.cs ──────────────
+    // Every string Voice generates has to physically fit the chrome that draws it, so the widths
+    // and sizes live HERE (next to the draw code that uses them) and SIGHTLINE_VOICETEST measures
+    // against them. Change a width below and the self-test re-checks every generated line for
+    // free; write a line too long and the test fails instead of the game shipping an ellipsis.
+    /// Combat-log panel width. C1 deliberately LEFT THIS ALONE at its historic 296: widening it
+    /// would have pushed the panel further under the centred 760px tip/lesson card that already
+    /// clips its right edge, and the ledger losing pixels to flavour is exactly backwards. The
+    /// barks were written to the width instead, and VOICETEST measures every one of them.
+    public const float LogPanelW = 296f;
+    public const float LogPadX = 9f;
+    /// Usable text column inside the combat log.
+    public const float LogTextWidth = LogPanelW - LogPadX * 2f;
+    /// Briefing card: same 760px chrome as the FIELD TIP / lesson cards, same 16px padding.
+    public const int BriefCardW = 760, BriefPad = 16, BriefFontSize = 15;
+    public const int BriefBodyWidth = BriefCardW - BriefPad * 2;
+    /// Run epilogue on the end card: a centred column no wider than the stat-slab row.
+    public const int EpilogueWidth = 704, EpilogueFontSize = 14;
+
+    /// How many rows `s` occupies once wrapped to `maxW` at `size`. Voice's self-test uses it to
+    /// guarantee a briefing line never silently becomes a paragraph.
+    public static int WrapCount(string s, int size, int maxW) => WrapText(s, size, maxW).Count;
+
     public static Rectangle EndTurnRect;
     public static UiButton[] ActionButtons = Array.Empty<UiButton>();
     public static System.Collections.Generic.List<(Rectangle rect, Unit unit)> RosterChips = new();
@@ -135,6 +158,11 @@ public static class Hud
             // FUL-12 -> T1: the just-in-time field tips ride the same card chrome (green accent —
             // a tip, not a lesson); the mutual-exclusion lives in Game.UpdateFieldTips.
             else if (g.CalloutText != null) DrawTipCard(g.CalloutHead, g.CalloutText, Pal.Good);
+            // RESONANCE C1 — the mission BRIEFING. Last in this chain on purpose: it is flavour,
+            // and both teaching layers above it outrank it absolutely (a lesson card and a
+            // briefing must never share the slot). Draw-only — it is never hit-tested, so it
+            // cannot swallow a click; Game.UpdateBriefing owns the timer and the dismissal.
+            else if (g.BriefLines != null) DrawBriefCard(g);
         }
         DrawBanner(g);
         DrawOverlays(g);
@@ -166,6 +194,35 @@ public static class Hud
         Cfg.Text(head, new Vector2(x + pad, y + 10), 14, 1f, accent);
         int ty = y + 36;
         foreach (var ln in lines) { Cfg.Text(ln, new Vector2(x + pad, ty), 15, 1f, Pal.Txt); ty += 20; }
+    }
+
+    /// RESONANCE C1 — the mission BRIEFING card. Deliberately the FIELD TIP chrome, one accent
+    /// apart (Friend blue = "this is context", Accent = "this is a lesson", Good = "this is a
+    /// tip"), so the game has ONE card slot and the player never has to learn a second place to
+    /// look. Three lines, each pre-measured by VOICETEST to fit without wrapping past two rows.
+    /// Fades out over its last half-second so it leaves quietly instead of blinking away.
+    static void DrawBriefCard(Game g)
+    {
+        var lines = g.BriefLines;
+        if (lines == null || lines.Length == 0) return;
+        float a = Util.Clamp(g.BriefTimer / 0.6f, 0f, 1f);        // fade the final 0.6s
+        int w = BriefCardW, x = Cfg.ScreenW / 2 - w / 2, pad = BriefPad;
+        var rows = new System.Collections.Generic.List<string>();
+        foreach (var ln in lines) rows.AddRange(WrapText(ln, BriefFontSize, w - pad * 2));
+        int h = 40 + rows.Count * 20 + 10;
+        int y = Math.Min(600, (int)_barTop - h - 8);
+        var card = new Rectangle(x, y, w, h);
+        Raylib.DrawRectangleRounded(card, 0.08f, 8, Raylib.Fade(Pal.RGBA(10, 16, 24), 0.94f * a));
+        Raylib.DrawRectangleLinesEx(card, 1.8f, Raylib.Fade(Pal.Friend, a));
+        Raylib.DrawRectangle(x, y, 5, h, Raylib.Fade(Pal.Friend, a));
+
+        Cfg.Text(g.BriefHead ?? "BRIEFING", new Vector2(x + pad, y + 10), 14, 1f, Raylib.Fade(Pal.Friend, a));
+        // a quiet right-aligned hint that this goes away on its own (and on any input)
+        string skip = "any key / click to dismiss";
+        float sw = Cfg.Measure(skip, 11, 1f).X;
+        Cfg.Text(skip, new Vector2(x + w - pad - sw, y + 12), 11, 1f, Raylib.Fade(Pal.TxtDim, 0.75f * a));
+        int ty = y + 36;
+        foreach (var ln in rows) { Cfg.Text(ln, new Vector2(x + pad, ty), BriefFontSize, 1f, Raylib.Fade(Pal.Txt, a)); ty += 20; }
     }
 
     // Greedy word-wrap to a pixel width.
@@ -887,7 +944,7 @@ public static class Hud
         // tall dark box with one line at the top.
         if (log.Count == 0) return;
         const int cap = 6;
-        const float w = 296f, lh = 14f, padX = 9f, headH = 18f, padY = 6f;
+        const float w = LogPanelW, lh = 14f, padX = LogPadX, headH = 18f, padY = 6f;
         int shown = Math.Min(cap, log.Count);
         float bodyH = shown * lh;
         float h = headH + bodyH + padY;
@@ -916,6 +973,10 @@ public static class Hud
                 case "CRIT":  c = Pal.Accent;  break;            // crit pop
                 case "GRAZE":
                 case "MISS":  c = Pal.TxtDim;  break;            // dim: low-consequence
+                // C1 VOICE: a soldier bark. Deliberately a QUIETER, cooler tone than every
+                // mechanical line — the ledger's job is still "why did that happen", and the
+                // words must never out-shout the numbers they sit between.
+                case Voice.LogTag: c = Pal.Mix(Pal.TxtDim, Pal.Friend, 0.45f); break;
             }
             string line = e.Text ?? "";
             // clip to the panel width so long lines never spill
@@ -2471,7 +2532,6 @@ public static class Hud
         int colGap = 28;
         int colW = (totalW - colGap) / 2;
         int lx = sx0, rx = sx0 + colW + colGap;
-        int dh = 254;
         float rosterIn = PanelAnim("endRoster", 0.45f, 0.55f);
         float kiaIn = PanelAnim("endKia", 0.45f, 0.7f);
 
@@ -2480,8 +2540,34 @@ public static class Hud
         if (run?.Squad != null)
             foreach (var u in run.Squad) if (u != null && !u.IsVip && (mvp == null || u.Kills > mvp.Kills)) mvp = u;
 
+        // ---- RESONANCE C1: the RUN EPILOGUE ---------------------------------------------
+        // Five lines under the dossier, generated by Voice from the numbers this card already
+        // computed. Campaign only: regions and operation counts are campaign vocabulary, and the
+        // other three modes already say their own thing in the subtitle. The dossier panels YIELD
+        // height to it (dh is now derived, not fixed) so a loss card carrying a cause line, a heat
+        // unlock and three achievements still lands the buttons on screen.
+        var epilogue = BuildEpilogue(g, run, win, mission, mvp, totalKills);
+        int epiH = epilogue == null ? 0 : epilogue.Count * 18 + 18;
+        const int endBtnH = 46, endBtnGap = 16, endBottomPad = 26;
+        int dh = Math.Clamp(Cfg.ScreenH - endBottomPad - endBtnH - endBtnGap - epiH - dy, 150, 254);
+
         DrawSurvivorPanel(g, run, mvp, lx, dy, colW, dh, rosterIn);
         DrawMemorialPanel(run, rx, dy, colW, dh, kiaIn);
+
+        if (epilogue != null)
+        {
+            float epiIn = Util.EaseOutQuad(PanelAnim("endEpilogue", 0.5f, 0.82f));
+            int ey = dy + dh + 14;
+            // a hairline rule + a quiet label, then the lines centred in the slab-row column
+            Raylib.DrawRectangle(sx0, ey - 6, (int)(totalW * epiIn), 1, Raylib.Fade(accent, 0.30f * epiIn));
+            foreach (var ln in epilogue)
+            {
+                float lw = Cfg.Measure(ln, EpilogueFontSize, 1f).X;
+                Cfg.Text(ln, new Vector2((int)(W / 2f - lw / 2f), ey), EpilogueFontSize, 1f,
+                         Raylib.Fade(Pal.Txt, 0.82f * epiIn));
+                ey += 18;
+            }
+        }
 
         // ---- NEW RUN / MAIN MENU buttons (the intro's two-button pattern) ----
         // W1 mode-seam: the end card is no longer a one-way door — MAIN MENU returns to the intro
@@ -2489,7 +2575,7 @@ public static class Hud
         // player into overwriting a live campaign. NEW RUN says so when it WILL overwrite one; the
         // disk read is NoPersist-gated so headless shots stay byte-stable (harness never touches disk).
         float btnIn = PanelAnim("endBtn", 0.3f, 0.85f);
-        int by = dy + dh + 16;
+        int by = dy + dh + epiH + endBtnGap;
         string newRun = !g.NoPersist && SaveGame.Exists ? "NEW RUN (overwrites save)" : "NEW RUN";
         int bgap = 22;
         int bw1 = Math.Max(200, (int)Cfg.Measure(newRun, 18, 1f).X + 36);
@@ -2997,6 +3083,48 @@ public static class Hud
 
     /// Left dossier column: the SURVIVING SQUAD roster (name/nickname, rank, kills, a trait),
     /// with the top-kills soldier flagged MVP. Part of the run-summary payoff card.
+    /// RESONANCE C1 — gather the end card's own numbers into Voice.RunFacts and ask for the
+    /// epilogue. Pure read: every field below is already on screen somewhere on this card, which
+    /// is the point — the epilogue NARRATES the telemetry, it never invents any. Returns null for
+    /// the three non-campaign modes and for a card with no run behind it.
+    static System.Collections.Generic.List<string> BuildEpilogue(Game g, Run run, bool win, int mission, Unit mvp, int totalKills)
+    {
+        if (run == null || g.Mode != GameMode.Campaign) return null;
+
+        // the archetype that killed the most soldiers this run (same source as the CAUSE OF DEATH
+        // line above; "?" buckets DoT/environment/friendly fire and is not a name worth telling).
+        string topCls = null; int topN = 0;
+        foreach (var kv in g.DeathsByClass)
+            if (kv.Key != "?" && (kv.Value > topN ||
+                (kv.Value == topN && topCls != null && string.CompareOrdinal(kv.Key, topCls) < 0)))
+            { topCls = kv.Key; topN = kv.Value; }
+
+        int survivors = 0;
+        if (run.Squad != null) foreach (var u in run.Squad) if (u != null && u.Alive && !u.IsVip) survivors++;
+
+        // the finale kit's named boss — only spoken on a win, where it is the thing that fell last.
+        string boss = null;
+        if (win && run.Map != null && run.Map.Count > 0)
+            boss = Run.FinaleBossName(run.Map[run.Map.Count - 1].Faction);
+
+        return Voice.Epilogue(new Voice.RunFacts
+        {
+            Win = win,
+            Missions = win ? Run.MaxMissions : Math.Max(0, mission - 1),
+            MapSeed = run.MapSeed,
+            Heat = run.HeatLevel,
+            Kills = totalKills,
+            Survivors = survivors,
+            MvpName = mvp != null && mvp.Kills > 0 ? mvp.Name : null,
+            MvpKills = mvp?.Kills ?? 0,
+            TopEnemyName = topCls != null && topN > 0 ? Codex.NameFor(topCls) : null,
+            TopEnemyCls = topCls,
+            TopEnemyKills = topN,
+            BossName = boss,
+            Memorial = run.Memorial,
+        });
+    }
+
     static void DrawSurvivorPanel(Game g, Run run, Unit mvp, int x, int y, int w, int h, float anim)
     {
         if (anim <= 0f) return;
@@ -3697,10 +3825,29 @@ public static class Hud
         var reachable = new System.Collections.Generic.HashSet<int>();
         if (cur != null) foreach (var idn in cur.Next) reachable.Add(idn);
 
+        // RESONANCE C1 — REGION NAMES. The strategic layer used to read as a debug graph: six
+        // unlabelled columns of one-letter glyphs. Each column is one operation, and each
+        // operation now has a named, biome-true place derived from MapSeed (Voice.RegionName —
+        // a pure hash, zero RNG draws, so it round-trips on load with the rest of the map).
+        // The names take a 14px strip off the TOP of the region; the node field keeps the rest.
+        const float hdrH = 14f;
+        var field = new Rectangle(region.X, region.Y + hdrH, region.Width, region.Height - hdrH);
+        float colW = region.Width / cols;
+        for (int c = 0; c < cols; c++)
+        {
+            string rn = Voice.RegionName(c + 1, run.MapSeed);
+            int rfs = FitSize(rn, 11, 8, (int)colW - 6);
+            float rw = Cfg.Measure(rn, rfs, 1f).X;
+            // the column you are standing in (and the ones you have cleared) read brighter
+            bool past = cur != null && c <= cur.Col;
+            Cfg.Text(rn, new Vector2((int)(region.X + (c + 0.5f) * colW - rw / 2f), (int)region.Y),
+                     rfs, 1f, past ? Pal.TxtDim : Pal.Mix(Pal.TxtDim, Pal.Panel, 0.45f));
+        }
+
         Vector2 Center(MissionNode n)
         {
-            float cx = region.X + (n.Col + 0.5f) * (region.Width / cols);
-            float cy = region.Y + (n.Row + 0.5f) * (region.Height / Math.Max(1, n.RowCount));
+            float cx = field.X + (n.Col + 0.5f) * (field.Width / cols);
+            float cy = field.Y + (n.Row + 0.5f) * (field.Height / Math.Max(1, n.RowCount));
             return new Vector2(cx, cy);
         }
 
@@ -3781,7 +3928,7 @@ public static class Hud
                               (int)Cfg.Measure(l4, 12, 1f).X))) + 20;
             int th = (l3 != null ? 76 : 60);   // extra row for the hint
             float tx = Math.Min(mouse.X + 14, region.X + region.Width - tw);
-            float ty = Math.Max(mouse.Y - th - 6, region.Y);
+            float ty = Math.Max(mouse.Y - th - 6, field.Y);   // C1: never ride up over the region labels
             var tip = new Rectangle(tx, ty, tw, th);
             Raylib.DrawRectangleRounded(tip, 0.12f, 6, Pal.RGBA(12, 18, 26));
             Raylib.DrawRectangleLinesEx(tip, 1.2f, NodeColor(hovered.Kind));

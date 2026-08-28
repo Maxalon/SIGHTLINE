@@ -965,6 +965,139 @@ public partial class Game
         if (!NoPersist) Display.MarkTipSeen(pick.Bit);   // one-shot: burned the moment it shows
     }
 
+    // ═══════════════════════════════════════════════════════════════════════════════════════
+    //  RESONANCE C1 (VOICE) — the mission BRIEFING and the squad's BARKS.
+    //
+    //  Both are pure presentation: the text comes from src/Voice.cs, which takes ZERO draws from
+    //  Util.Rng (see that file's header — the whole CRN balance methodology depends on it), and
+    //  nothing here is read by combat, AI, mission generation or the save file.
+    // ═══════════════════════════════════════════════════════════════════════════════════════
+
+    /// The three composed briefing lines for this mission, or null when there is nothing to say
+    /// (non-campaign modes) or the card is done. Hud.DrawBriefCard renders it; it is never
+    /// hit-tested, so it cannot swallow a click.
+    public string[] BriefLines;
+    public string BriefHead;
+    public float BriefTimer;          // seconds of card left
+    float _briefHold;                 // seconds spent WAITING for the teaching layers to finish
+    public const float BriefShowSeconds = 11f;
+    const float BriefHoldMax = 45f;   // give up waiting rather than ambush the player mid-fight
+
+    /// True when the briefing may draw at all: an interactive phase with NO teaching card up.
+    /// Wave T1's lesson strip and just-in-time field tips outrank the briefing absolutely — a
+    /// player learning to move must never have flavour competing for the same card slot.
+    bool BriefAllowed => (Phase == Phase.PlayerTurn || Phase == Phase.EnemyTurn)
+                         && TutorialText == null && TrainingText == null && CalloutText == null;
+
+    /// Compose the briefing for the mission that just built. CAMPAIGN only: regions, factions and
+    /// operation numbers are campaign vocabulary, and TRAINING/SKIRMISH/DAILY/LAST STAND already
+    /// say their own thing on the banner. Deterministic — a reloaded save briefs identically.
+    void BeginBriefing(int n)
+    {
+        BriefLines = null; BriefHead = null; BriefTimer = 0f; _briefHold = 0f;
+        if (Mode != GameMode.Campaign || _run == null) return;
+        bool finale = n >= Run.MaxMissions && Objective == Objective.Decapitate;
+        var kf = Combat.MissionFaction;
+        BriefLines = Voice.Brief(n, _run.MapSeed, Mission.AppliedLayout, Objective, kf, finale,
+                                 finale ? Run.FinaleBossName(kf) : null,
+                                 finale ? Run.FinaleKitClause(kf) : null);
+        BriefHead = Voice.BriefHead(Objective);
+        BriefTimer = BriefShowSeconds;
+    }
+
+    /// Tick the card. It HOLDS (does not burn its clock) while a lesson/tip owns the slot, and
+    /// gives up entirely after BriefHoldMax so a long tutorial can never make a briefing surface
+    /// three turns into a firefight. Any key or click dismisses it — that is the whole "skippable"
+    /// contract, and because the dismissal is a passive read the click still does its normal job.
+    void UpdateBriefing(float dt)
+    {
+        if (BriefLines == null) return;
+        // The briefing is a PRE-FIGHT object. The moment real events start hitting the combat log
+        // the card's job is over — and the log panel is the one piece of chrome the centred card
+        // would sit on top of. The ledger is load-bearing ("why did that happen?"); flavour yields.
+        if (Stats.CombatLog.Count > 0) { BriefLines = null; return; }
+        if (!BriefAllowed)
+        {
+            _briefHold += dt;
+            if (_briefHold > BriefHoldMax) BriefLines = null;
+            return;
+        }
+        if (!AutoPlay && (Raylib.GetKeyPressed() != 0
+                          || Raylib.IsMouseButtonPressed(MouseButton.Left)
+                          || Raylib.IsMouseButtonPressed(MouseButton.Right)))
+        { BriefLines = null; return; }
+        BriefTimer -= dt;
+        if (BriefTimer <= 0) BriefLines = null;
+    }
+
+    /// True when the squad may speak: the same absolute deference to the teaching layers the
+    /// briefing shows. Barks ride the ENEMY turn too (a bond partner falls on their turn, not
+    /// yours), so this is deliberately not gated on PlayerTurn.
+    bool BarksAllowed => TutorialText == null && TrainingText == null && CalloutText == null;
+
+    /// Speak one line into the combat log, if every gate lets it through (Voice.TryBark owns the
+    /// per-turn / per-speaker / per-beat budget; this owns the teaching-layer veto and the
+    /// speaker's own eligibility). Silent by construction when `speaker` is dead, a VIP or null.
+    bool Bark(Voice.Beat beat, Unit speaker, Unit other = null)
+    {
+        if (speaker == null || speaker.Team != Team.Player || speaker.IsVip || !speaker.Alive) return false;
+        if (!BarksAllowed) return false;
+        string line = Voice.TryBark(beat, speaker.Name, other?.Name, _turnCount);
+        if (line == null) return false;
+        Stats.Log(_turnCount, (int)Team.Player, line, Voice.LogTag);
+        return true;
+    }
+
+    /// The living soldier standing closest to `at` — the one who would plausibly call a beat that
+    /// happened over there (a pod breaking, for instance). Null when nobody is on their feet.
+    Unit NearestSoldierTo(Unit at)
+    {
+        if (at == null) return null;
+        Unit best = null; int bd = int.MaxValue;
+        foreach (var p in Players)
+        {
+            if (!p.Alive || p.IsVip || p.Downed) continue;
+            int d = Util.ChebyDist(p.X, p.Y, at.X, at.Y);
+            if (d < bd) { bd = d; best = p; }
+        }
+        return best;
+    }
+
+    /// First player kill of the mission — so "first blood" can never be said over the fifth body.
+    bool _firstBloodSeen;
+
+    /// The bonded squadmate best placed to react to `d` going down: alive, on their feet, and
+    /// actually bonded to them. Null when the soldier has no bond on the field — which is exactly
+    /// why a bondless soldier can never draw a bond line.
+    Unit BondPartnerOf(Unit d)
+    {
+        if (d == null || d.Bonds == null || d.Bonds.Count == 0) return null;
+        foreach (var p in Players)
+            if (p != d && p.Alive && !p.Downed && !p.IsVip && d.Bonds.Contains(p.Name)) return p;
+        return null;
+    }
+
+    /// The last soldier on their feet, or null while two or more are still up.
+    Unit LoneSurvivor()
+    {
+        Unit only = null;
+        foreach (var p in Players)
+        {
+            if (!p.Alive || p.IsVip || p.Downed) continue;
+            if (only != null) return null;
+            only = p;
+        }
+        return only;
+    }
+
+    /// Fired after any soldier falls or goes down: if that left exactly one on their feet with
+    /// hostiles still active, they say so. Once per mission (Voice's per-beat gate).
+    void CheckLastStanding()
+    {
+        if (!Enemies.Any(e => e.Alive && e.Active)) return;
+        Bark(Voice.Beat.LastStanding, LoneSurvivor());
+    }
+
     // optional secondary objective (3.9): a per-mission bonus goal worth extra intel
     public const int SwiftTurns = 7;
     public const int SecondaryIntel = 12;
@@ -1862,6 +1995,12 @@ public partial class Game
         }
         else ShowBanner($"LAST STAND - {Biome.Name}", false);   // SpawnEndlessWave already banner'd WAVE 1
 
+        // RESONANCE C1 (VOICE): re-seed the DEDICATED bark stream and clear the per-mission bark
+        // budget, then compose the briefing. Voice never touches Util.Rng — see src/Voice.cs.
+        Voice.BeginMission(_run?.MapSeed ?? 0, n);
+        _firstBloodSeen = false;
+        BeginBriefing(n);
+
         // checkpoint the run at the start of each mission (CAMPAIGN only). LAST STAND, SKIRMISH, and
         // the DAILY are all transient single-mode fights — never resumable, so they never write save.json.
         // W9 review fix: commit the barracks' PENDING salvage spends (scar rehab / slate re-roll)
@@ -2723,6 +2862,11 @@ public partial class Game
             _missionKia.Add(d.FullName);
             DeathFlash = 1f;
             Fx.AddShake(9f);
+            // C1 VOICE: the same two beats as the DOWN path — a bonded mate reacting, and the
+            // moment the squad is down to one. Both are once-per-mission inside Voice, so a death
+            // that follows a down never repeats what was already said.
+            Bark(Voice.Beat.BondDown, BondPartnerOf(d), d);
+            CheckLastStanding();
         }
 
         // final-blow kill-cam (3.11): the mission-deciding death lingers in slow-mo
@@ -2790,6 +2934,8 @@ public partial class Game
         Fx.PopText(ldr.Pos + new Vector2(0, -34), "BROKEN", Pal.Good, 20f);
         Fx.Flash(ldr.Pos, Pal.Good, 26f, 0.2f, 0.5f);
         ShowBanner("POD ROUTED", false);
+        // C1 VOICE: whoever is standing closest to the break calls it. Once per mission.
+        Bark(Voice.Beat.PodRout, NearestSoldierTo(ldr));
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -2856,6 +3002,11 @@ public partial class Game
         // the player ACTS on pills 2 and 1 — say the truthful count instead of promising three.
         ShowBanner($"SOLDIER DOWN - THEY HOLD FOR {DownedTimerTurns}, TWO TURNS TO ACT", true);
         BannerSub = "stabilize to stop the bleeding - a corpsman's PATCH gets them up";
+        // C1 VOICE: the squad has bonds and the game has never once acknowledged one. BondPartnerOf
+        // returns null unless a REAL bonded squadmate is on their feet, so a bondless soldier can
+        // never draw this line. If nobody is bonded to them, the last one up may speak instead.
+        Bark(Voice.Beat.BondDown, BondPartnerOf(d), d);
+        CheckLastStanding();
     }
 
     /// The timer ran out: the FULL death flow runs — Fallen + Memorial append, KIA stamp,
@@ -2902,6 +3053,9 @@ public partial class Game
         Fx.Burst(t.Pos, Pal.Good, 12, 120f, 0.45f, 3f);
         Fx.PopText(Selected.Pos + new Vector2(0, -30), "STABILIZE", Pal.Good, 15f);
         Audio.Play("reload");
+        // C1 VOICE: the clutch save. This is the beat the game most needed words for — 146 soldiers
+        // went down across 16 measured campaigns and exactly ONE was revived, in total silence.
+        Bark(Voice.Beat.Stabilize, Selected, t);
     }
 
     /// True when killing `d` decides the mission (last hostile on an Eliminate, a squad
@@ -2934,6 +3088,18 @@ public partial class Game
         { killer.FeatClutch = true; FeatBanner(killer, "CLUTCH KILL"); }
         if (killer.AllyDown && !killer.FeatVengeful)
         { killer.FeatVengeful = true; FeatBanner(killer, "AVENGED"); }
+
+        // C1 VOICE — two beats ride the kill. The VENDETTA line is the rarer and more specific of
+        // the two (this soldier has a standing grudge against the outfit they just shot), so it is
+        // offered first; FIRST BLOOD only ever gets the chance on the mission's actual first kill.
+        bool spoke = false;
+        if (killer.VendettaFaction != Faction.None && Combat.MissionFaction == killer.VendettaFaction)
+            spoke = Bark(Voice.Beat.Vendetta, killer);
+        if (!_firstBloodSeen)
+        {
+            _firstBloodSeen = true;
+            if (!spoke) Bark(Voice.Beat.FirstBlood, killer);
+        }
 
         // run boons (on a player kill): reward aggression / sustain.
         if (_run != null && _run.ActiveBoons.Count > 0)
@@ -3345,6 +3511,7 @@ public partial class Game
         UpdateTutorial(dt);
         UpdateTraining(dt);            // T1: the TRAINING OP lesson track (drill mode only)
         UpdateFieldTips(dt);           // FUL-12 -> T1: once-per-profile JIT tips (never overlap a lesson)
+        UpdateBriefing(dt);            // RESONANCE C1: the mission briefing card's own clock
         Fx.UpdateAmbient(Biome, dt);   // per-biome ambient atmosphere (Wave B)
 
         // camera zoom-punch always relaxes; hit-stop freezes the rest of the sim

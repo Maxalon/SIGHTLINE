@@ -40,6 +40,7 @@ public static class Codex
         {
             Category("FIELD CRAFT", FieldCraftEntries()),   // W11: the RULES tab, first — read this, win fights
             Enemies(),
+            Category("FACTIONS",    FactionEntries()),      // C1 (VOICE): who you are actually fighting
             Classes(),
             Category("PERKS",       PerkEntries()),
             Category("BOONS",       BoonEntries()),
@@ -198,6 +199,28 @@ public static class Codex
             "toward you (haul a wounded mate out of a lane); VAULT leaps an adjacent cover block to the floor beyond. " +
             "Neither ends the turn. The FIELD DRILLS boon makes either DRILL the soldier: +1 tile of movement that turn.");
 
+        return e;
+    }
+
+    // ---------------- FACTIONS (3 + the unaligned force) ----------------
+    // RESONANCE C1 (VOICE): the three factions had mechanics (a combat warp, a gated roster, a
+    // named capstone boss and a counter-prep item) and no identity anywhere in the game. The
+    // dossier text lives in src/Voice.cs so the briefing card and this tab read ONE source, and
+    // each dossier's FIELD RULE line interpolates the real Combat constant — the fiction cannot
+    // drift from the rule. Faction.None is documented too: "no colours" is a real encounter type.
+    static List<CodexEntry> FactionEntries()
+    {
+        var e = new List<CodexEntry>();
+        // READING ORDER, not enum order: the three real opponents lead, and the unaligned
+        // "no colours" force closes the tab. Faction.None is ordinal 0, so iterating the enum
+        // would open the dossier tab on the faction that is defined by not being one.
+        foreach (Faction f in new[] { Faction.Syndicate, Faction.Legion, Faction.Wardens, Faction.None })
+            e.Add(new CodexEntry
+            {
+                Title = Voice.FactionEpithet(f),
+                Code = f == Faction.None ? "UNALIGNED" : Run.FinaleBossName(f).ToUpperInvariant(),
+                Desc = Voice.FactionDossier(f),
+            });
         return e;
     }
 
@@ -441,6 +464,16 @@ public static class Codex
         foreach (var en in fc) Chk("FIELDCRAFT", en.Title ?? "?", en.Title, en.Desc);
         var cats0 = Build();
         if (cats0.Count == 0 || cats0[0].Name != "FIELD CRAFT") fails.Add("FIELD CRAFT is not the first codex category");
+
+        // C1: the FACTIONS tab exists, is complete, and covers every Faction member (incl. None).
+        var facCat = Build().Find(c => c.Name == "FACTIONS");
+        if (facCat == null) fails.Add("FACTIONS category missing from the codex");
+        else
+        {
+            if (facCat.Entries.Count != Enum.GetValues(typeof(Faction)).Length)
+                fails.Add($"FACTIONS has {facCat.Entries.Count} entries, Faction has {Enum.GetValues(typeof(Faction)).Length} members");
+            foreach (var en in facCat.Entries) Chk("FACTION", en.Title ?? "?", en.Title, en.Desc);
+        }
 
         // W11: the STATUS tab documents the out-of-enum battlefield states too.
         var statusRows = StatusEntries();
