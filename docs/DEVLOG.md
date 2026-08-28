@@ -4229,3 +4229,132 @@ treats it as absent), and the behaviour it produced was an unbounded hunker — 
 stall, which is what the frame cap exists to catch. If the negative trend is real it is an
 argument about the *policy* (a lone VIP should race only when it can actually reach the zone),
 not about the predicate; that is recorded as a follow-up, not guessed at here.
+
+## THE SHIPPED STATE — round S1, `DEPLOYMIX=3,3,1,3` + `PODUNIFORM=1`, n=40 per rung
+
+| rung | metric | R0 baseline | **S1 shipped** | delta |
+|---|---|---|---|---|
+| h0 | run completion | 32.5% | **35.0%** | +2.5 |
+| h0 | mission win | 78.4% | 81.2% | +2.8 |
+| h0 | mean turns | 6.79 | **5.69** | **−1.10** |
+| h0 | meaningful-choices/turn | 2.19 | **2.36** | +0.17 |
+| h0 | **choices/ARMED** | 1.55 | **1.53** | −0.02 |
+| h0 | armed-soldiers/turn | 1.39 | **1.55** | +0.16 |
+| h0 | lead-swings/match | 0.72 | **0.79** | +0.07 |
+| h0 | worst objective | **15.33t** (Rescue) | **8.90t** (Defend) | **−6.43** |
+| h4 | run completion | 12.5% | **20.0%** | +7.5 |
+| h4 | mission win | 70.1% | 75.0% | +4.9 |
+| h4 | mean turns | 6.52 | 6.31 | −0.21 |
+| h4 | meaningful-choices/turn | 2.46 | **2.61** | +0.15 |
+| h4 | **choices/ARMED** | 1.71 | **1.67** | −0.04 |
+| h4 | armed-soldiers/turn | 1.44 | **1.57** | +0.13 |
+| h4 | lead-swings/match | 0.64 | **0.68** | +0.04 |
+| h4 | worst objective | 11.34t (Escort) | 11.85t (Escort) | +0.51 |
+
+### Per-objective turn budget, h0 (n=40 campaigns per state)
+
+| objective | R0 turns / win | S1 turns / win |
+|---|---|---|
+| Eliminate | 4.96 / 81% | 5.10 / 75% |
+| Defend | 8.80 / 72% | **8.90 / 82%** |
+| Decapitate | 5.18 / 64% | 4.68 / 60% |
+| **Escort** | **12.57** / 92% | **8.19 / 100%** |
+| Hack | 3.71 / 86% | 3.00 / 100% |
+| Sabotage | 3.15 / 88% | 2.80 / 100% |
+| **Rescue** | **15.33** / 83% | **3.40 / 100%** |
+| Evac | 4.30 / 100% | 2.50 / 100% |
+
+### The mix that was measured and NOT shipped
+`S2 = DEPLOYMIX 1,4,1,4` (a much heavier PINCER/ENVELOP deal, since pinned they ran 47.5% and
+60.0% completion against a 32.5% baseline). At h0, n=40: run completion **40.0%** (+7.5 over
+baseline, +5.0 over the shipped mix — the best ladder number of the wave) but
+`meaningful-choices/turn` **2.03**, *below the baseline's 2.19*, `armed-soldiers/turn` 1.34, and
+Eliminate stretched to 7.37t with ENVELOP missions averaging 8.83t. **Rejected**: it buys the
+ladder by making fights longer and thinner, which is the opposite of the wave's charter, and
+this wave has already spent two programs' worth of effort on drag. It is recorded in ROADMAP as
+the obvious lever for whoever picks the LADDER up — the two goals genuinely pull apart here.
+
+## THE GATES — every one, with its number
+
+| gate | target | baseline (this tip) | shipped | verdict |
+|---|---|---|---|---|
+| `choices/ARMED-soldier-turn` | >= 2.00 | 1.55 (h0) / 1.71 (h4) | **1.53 / 1.67** | **MISSED — and shown to be near-invariant at ~1.6 under every lever tested** |
+| `meaningful-choices/turn` | >= 3.00 | 2.19 (h0) / 2.46 (h4) | **2.36 / 2.61** | **MISSED** (+8% / +6%) |
+| completion rungs in FUL-13 band ±8 | h0 47-63, h4 22-38 | **32.5 / 12.5 — already outside, low** | **35.0 / 20.0** | **MISSED at both rungs, but the wave moved BOTH toward the band (+2.5 / +7.5) and neither moved more than the ±8 dip budget** |
+| no objective mean past ~10 turns | <= ~10 | **BREACHED at baseline**: Escort 12.57, Rescue 15.33 (h0); Escort 11.34 (h4) | h0 max **8.90** (Defend); h4 Escort **11.85** | **MET at h0** (a 6.4-turn repair), **BREACHED at h4** (Escort, +0.5 on a cell that was already breaching) |
+| lead-swings/match not below 0.84 | >= 0.84 | 0.72 (h0) / 0.64 (h4) | **0.79 / 0.68** | **MISSED vs X1's published 0.84** — which this tip had already lost before W4 touched it; the wave improved both rungs (+0.07 / +0.04) |
+| `SIGHTLINE_PAIRTEST` | PASS | PASS | **PASS** | **MET** — the wave's critical gate |
+| autoplay x10 | no exception, no TIMEOUT | — | **4 WIN / 6 LOSE, max 13216 frames vs the 20000 cap** | **MET** |
+
+## VERIFICATION
+- `dotnet build -c Release` — **0 warnings / 0 errors**.
+- `bash scripts/qa-sweep.sh --full` — **44/44 PASS** at the shipped defaults (see the ONRAMPTEST
+  note below), autoplay x3 clean.
+- **`SIGHTLINE_PAIRTEST=1` under `xvfb-run` — PASS** with the whole W4 surface enabled
+  (`DEPLOYMIX=3,3,1,3 PODUNIFORM=1 RIMWAVES=1`): h0 slot0 and h4 slot1 both byte-MATCH. This is
+  the gate the wave lived or died on — a shape derived with one extra RNG draw would have broken
+  every paired measurement in the project.
+- **`SIGHTLINE_EXPOSURETEST` extended to a third exposure axis** and passing at the shipped mix:
+  shape x arena over 4000 seeds (35/35 arenas for every weighted shape), shape x objective over
+  the 200 map-generating seeds (8/8 for the three directional shapes, 3/8 for ENVELOP by design),
+  plus explicit assertions that `DeployFor` consumes **zero `Util.Rng` draws**, is deterministic,
+  and never deals ENVELOP to an objective that forbids it.
+- **Autoplay x10** with the full surface on — 4 WIN / 6 LOSE, no exceptions, **no TIMEOUT**, max
+  13216 frames against the 20000 cap. New geometry was the wave's biggest pathfinder risk; it
+  stranded nothing.
+- **Screenshots** (archived downscaled in `docs/measurements/w4/shots/`): all four openings on
+  one seed/mission/arena, plus DEFEND under ENVELOP. Read and judged — the board reads correctly
+  in every shape, and the difference is legible at a glance: FRONTAL opens concealed with no
+  shot, PINCER opens with a flank pod already in the squad's line, ENVELOP puts the squad in the
+  middle with hostiles on three rims.
+
+### A defect the sweep caught: `ONRAMPTEST` was passing on composition luck
+Turning the shipped defaults on made W5's `ONRAMPTEST` fail. It was not a W4 regression. Its A2
+probe compared the two heat legs' **force-wide per-enemy averages** to prove RECRUIT fields
+"one fewer body, every survivor a point weaker" — but the legs field different body COUNTS, so
+they sit at different positions in the shared RNG stream and roll different archetypes, whose
+base HP/aim differ by far more than the one point RECRUIT removes. It passed at the old spawn
+geometry and failed at the new one for the same reason: luck. Repaired to a
+composition-CONTROLLED comparison (each archetype CLASS against itself across the legs, which is
+exactly what `bump` moves); verified PASS both at the W4 defaults and at
+`SIGHTLINE_PODUNIFORM=0 SIGHTLINE_DEPLOYMIX=1,0,0,0` (the pre-W4 board).
+
+**It also exposed a real W5 fact the old form hid:** `Mission.SpawnEnemies` computes
+`bump = Math.Max(0, (n - 1) + statDelta)`, so on **mission 1** the standard bump is already 0 and
+RECRUIT's −1 stat has nothing to take off — **the RECRUIT stat relief is a no-op on the very
+mission a first-timer meets first**; the body relief is the whole of it there. The test now
+asserts what is actually true (stat relief checked from m2) and its PASS banner no longer
+over-claims. Whether m1 should carry a −1 floor is an owner call, not a W4 change.
+
+## HONEST ASSESSMENT — does an armed soldier now face a choice of targets, or a queue?
+
+**No — and the wave can now say why, which is worth more than the gate would have been.**
+
+The premise handed down was that an armed soldier sees exactly one target. It does not: the
+baseline instrument reads **2.42 foes in range and line of sight per armed soldier-turn**. What
+it lacks is two targets worth *choosing* between, and W4 measured, across five structurally
+different levers, that the score cannot be moved that way: `choices/ARMED-soldier-turn` sat in
+**1.55-1.64** at every single state, because `CountMeaningfulChoices`' two halves are coupled
+through threat with opposite signs. Push more comparable guns into a soldier's arc and the
+"which target?" axis rises exactly as far as the "where do I stand after?" axis falls. Pod
+uniformity — the one lever aimed squarely at comparability — bought +0.06 on the target axis for
+free, and that is the largest honest move available on that axis.
+
+What DID change is real and shows up in every other number. **More of the squad fights every
+turn**: armed soldiers per player turn 1.39 → 1.55 at h0 and 1.44 → 1.57 at h4, carrying
+`meaningful-choices/turn` up 8% and 6%. The lead flips more often at both rungs. And the opening
+is no longer one thing: a pinned PINCER runs 47.5% completion in 5.30 turns and a pinned ENVELOP
+60.0% — against a 32.5% baseline — so **the shape of the opening is now one of the strongest
+difficulty levers in the game**, which is exactly the kind of knob a tuning wave wants and did
+not have. Escort and Rescue, the two objectives this tip was dragging worst, came back from
+12.57t and 15.33t to 8.19t and 3.40t.
+
+The two things I would tell the next wave, in order:
+1. **The ladder, not the density metric, is the emergency.** h0 32.5% and h4 12.5% before any
+   lever, against a 55±8 / 30±8 band. `DEPLOYMIX=1,4,1,4` is a measured +7.5 at h0 sitting on
+   the shelf; it costs turn count, which is a trade someone should make deliberately.
+2. **Do not point another threat-side lever at `choices/ARMED`.** Two waves have now been spent
+   discovering the same conservation law from opposite directions. Either add positioning
+   options at constant threat (a terrain-grammar pass — more LOW cover, which raises the
+   position axis without blocking the sightlines the target axis needs), or re-specify axis (b)
+   with an additive band so it stops reading "the fight got safer" as "the decision got richer".
