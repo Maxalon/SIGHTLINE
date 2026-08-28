@@ -2933,7 +2933,7 @@ public partial class Game
         sb.AppendLine("OBJECTIVES DEALT (fight nodes, all seeds):");
         foreach (Objective o in Enum.GetValues<Objective>())
             sb.AppendLine($"  {o,-10}: {objHist.GetValueOrDefault(o)}");
-        sb.AppendLine($"  (Escort nodes total {escortNodes} — at most one per map by construction)");
+        sb.AppendLine($"  (Escort nodes total {escortNodes} — exactly one per map by construction, <=1 per route)");
         sb.Append(fails.Count == 0 ? "EXPOSURETEST PASS"
             : $"EXPOSURETEST FAIL: {string.Join(", ", fails.Take(12))}{(fails.Count > 12 ? $" (+{fails.Count - 12} more)" : "")}");
         return sb.ToString();

@@ -526,10 +526,10 @@ public class Run
         // COLUMN-scoped so they hold on EVERY route regardless of edge wiring (a route visits
         // exactly one node per column):
         //   * ANCHOR column — a hashed EVENT-FREE mid column; every node there deals Defend
-        //     (leaned 75%) or Rescue, so every route fights >=1 hold/extract op (Defend was
+        //     (leaned 80%) or Rescue, so every route fights >=1 hold/extract op (Defend was
         //     absent from whole 20-run batches under the old n+row rotation).
-        //   * ESCORT node — Escort exists on AT MOST one hashed node per map, never in the
-        //     anchor column, so no route can be dealt two VIP drags.
+        //   * ESCORT node — Escort exists on EXACTLY one hashed node per map (zero-Escort maps
+        //     no longer occur), never in the anchor column, so a route sees <=1 VIP drag.
         //   * START stays Eliminate (>=1 Eliminate on every route + the honest FIRST OP label)
         //     and BOSS stays Decapitate; everything else deals from an Escort-free pool with a
         //     hashed per-column offset + row, keeping a column's branch choices distinct ops.

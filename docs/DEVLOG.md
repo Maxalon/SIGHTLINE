@@ -1680,7 +1680,8 @@ save round-trips hold by construction):
 `Util.Hash3` avalanche (the W5 finale-kit mixer, parameterised — .NET Random correlates nearby
 seeds). Column-scoped guarantees hold on EVERY route regardless of edge wiring (a route visits
 one node per column): an event-free ANCHOR mid column deals Defend(80%)-or-Rescue on all its
-nodes; Escort exists on at most ONE hashed node per map (never in the anchor column); START
+nodes; Escort exists on EXACTLY one hashed node per map, <=1 per route (zero-Escort maps no
+longer occur; never in the anchor column); START
 stays Eliminate; boss stays Decapitate; everything else deals from an Escort-free 7-pool with a
 per-column offset + row (siblings in a column stay distinct ops). The GenerateMap rng stream is
 byte-identical to pre-FUL-9 (the plan takes no draws), so existing saves regenerate the same map
@@ -1694,7 +1695,10 @@ arena (`Biome.IndexFor` — the old hint keyed off mission number, which both mi
 rendered room and re-coupled arena to mission, the FUL-1 confound). Authored gate Roll 55→80 —
 FUL-1 measured the reject lane EMPTY (52.6/0.0/47.4 at n~190), so the lost roll was the only
 road to procedural. DRAW-ORDER CONTRACT (comment at the gate, load-bearing): exactly ONE
-Util.Roll in the gate, ZERO draws in the pick.
+Util.Roll in the gate, ZERO draws in the pick. The Mission.Build draw-stream change (Roll 55→80
++ PickLayout's draw removal) is accepted, consequence-free version skew for in-flight saves:
+mission terrain was never save-deterministic — normal play clock-seeds Util.Rng, and DAILY pins
+ForcedLayout and bypasses the deck entirely.
 
 **SIGHTLINE_EXPOSURETEST** (windowless, 200 seeds): enumerates all 1098 routes (mid columns
 hold 2-3 rows — sampling could miss a branch) and asserts the invariant on each; asserts zero
@@ -1711,9 +1715,12 @@ Measured (h0, N=10 CRN slots; R0 = base 1e504f9 on slots 0-9):
 | R2 deck, lean 80 | 76.2 / 0.0 / 23.8 | 50% (g50/s50) | n=17 @ 59% | 85% of runs | 2.70 / 3.40 full-depth |
 | R2b disjoint slots 10-19 | 76.7 / 0.0 / 23.3 | 45% (g40/s50) | n=19 @ 74% | 80% of runs | 2.85 / 3.44 full-depth |
 
-Targets: procedural 20-25% HIT (23.3-23.8). Defend on >=80% of runs HIT (80/85 across disjoint
-slot sets; the 75→80 anchor lean was the fix — early deaths truncate routes before the anchor,
-so the lean is the route-level floor). Defend win pooled 67% (24/36) — inside FUL-4's 60-80
+Targets: procedural 20-25% HIT (23.3-23.8). Defend on >=80% of runs met on 2 of 3 slot sets
+(80/85/65 — the reviewer's unseen BASE=30 set read 65%): the structural guarantee holds (the
+anchor is on every route), but PLAYED reach is early-death-sensitive — a run that dies before
+the anchor column never fields its Defend. The 75→80 anchor lean lifted the floor (R1 read 75%
+at lean 75); the residual sensitivity is FUL-13 input. Defend win pooled 67% (24/36) — inside
+FUL-4's 60-80
 band; the exposure did not break the repair. Distinct-authored-arenas/run >=4.5 MISSED as
 specified but structurally unreachable: the target arithmetic assumed 6 authored fights/run,
 and real full-depth routes play 4.5-5.0 fights (an EVENT node replaces a fight; the boss is 1)

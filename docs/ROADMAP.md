@@ -834,7 +834,8 @@ of record (container suspensions have wiped every scratchpad copy — docs are t
 - [x] **FUL-9 THE DECK** (wt-ful9). The carried W7 spec, finally BUILT (not just claimed):
       column-constrained objective assignment in CardForNode hashed off (MapSeed,column,row)
       via Util.Hash3 — an event-free ANCHOR mid column deals Defend(80%)-or-Rescue on every
-      node, Escort capped at ONE hashed node per map, START stays Eliminate, boss stays
+      node, Escort on EXACTLY one hashed node per map (<=1 per route; zero-Escort maps no
+      longer occur), START stays Eliminate, boss stays
       Decapitate, the rest deal from an Escort-free 7-pool (per-column offset + row keeps
       siblings distinct) — so >=1 Eliminate / >=1 Defend-or-Rescue / <=1 Escort holds on EVERY
       route by construction (zero rng draws: map shape/kinds/edges/factions byte-identical, so
@@ -846,8 +847,9 @@ of record (container suspensions have wiped every scratchpad copy — docs are t
       PickLayout now takes ZERO draws). SIGHTLINE_EXPOSURETEST (200 seeds, 1098 routes
       ENUMERATED): invariant on all routes, zero in-run deck repeats, all 8 objectives + all
       35 arenas dealt (min 17 draws) — PASS. Measured (paired h0 N=10 x2 slot sets): funnel
-      52.6/0.0/47.4 → 76-77/0.0/23-24 (procedural 20-25 HIT); Defend dealt on 80-85% of runs
-      (>=80 HIT) fielding n=17-19/batch at 59/74% (pooled 67, FUL-4's band; base fielded n=4);
+      52.6/0.0/47.4 → 76-77/0.0/23-24 (procedural 20-25 HIT); Defend >=80% of runs met on 2 of
+      3 slot sets (80/85/65 — the floor is early-death-sensitive; FUL-13 input), fielding
+      n=17-19/batch at 59/74% (pooled 67, FUL-4's band; base fielded n=4);
       distinct authored arenas 3.4/full-depth run over 4.5-5.0 fights (the 4.5 target assumed
       6 authored fights/run — events + the 23% procedural floor cap the ceiling at ~3.5-3.9,
       ~90% delivered; repeats are now impossible vs the old with-replacement sampling).
