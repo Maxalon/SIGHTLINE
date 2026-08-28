@@ -760,24 +760,51 @@ public static class Renderer
 
                 int tier = c.Tier;
                 if (tier <= 0) continue;
-                // alpha ramps with the tier so a hot corner of the board reads at a squint, but the
-                // PIP COUNT is what actually carries the number.
-                float a = tier == 1 ? 0.26f : tier == 2 ? 0.40f : 0.58f;
-                Color fill = Raylib.Fade(Pal.Foe, a + 0.14f * pulse);
-                Color line = Raylib.Fade(Pal.Foe, Math.Min(0.95f, a + 0.28f));
-                float px = r.X + r.Width - 9f, py = r.Y + 8f;
+                // NOISE FLOOR. On an open arena with six alerted hostiles, SOME gun bears on nearly
+                // every reachable tile, so marking all of them spends the board's signal budget on
+                // the ambient condition. Draw only what changes a decision: a gun with a clean shot
+                // (exactly the pre-T2 trigger, preserved), TWO OR MORE guns (the blind spot this
+                // wave exists to fix), or one covered gun that still shoots well. The suppressed
+                // case — a single covered gun at poor odds — is still fully reported by the hover
+                // card, so nothing is hidden from a player who asks; it is only kept off the board.
+                if (!c.Exposed && c.Guns < 2 && c.BestHit < 50) continue;
+                // A DANGER METER, not a scatter of ticks: 1-3 bottom-aligned bars of rising height
+                // in the tile's top-right corner, read exactly like signal strength. The first
+                // draft stacked 1-3 separate triangles down the tile edge and, across 80+ reachable
+                // tiles, that read as speckled TEXTURE rather than as a number (own squint test).
+                // One compact glyph per tile whose SILHOUETTE grows with the count keeps the count
+                // legible at a squint, survives greyscale/SIGHTLINE_CB, and leaves the board calm.
+                // TWO CHANNELS, because count alone is not danger. The BAR COUNT is the honest
+                // number of guns (that is the blind spot T2 exists to fix); the INTENSITY is how
+                // hard the best of them actually shoots, straight off the forecast's BestHit. So a
+                // tile in cover from two distant rifles sits at the bottom of the range and a tile
+                // three flankers can hit at 90% burns — which is what the eye needs at a squint.
+                // A first draft keyed intensity to the count and the whole reachable set read as
+                // one uniform red speckle (own squint test on the mission-2 capture).
+                //
+                // STATIC alpha (no Raylib.GetTime pulse): standing information about the ground,
+                // not an alarm — ~50 breathing glyphs is exactly the motion noise 3.C warns about,
+                // and it keeps one more clock read out of the renderer. SIMPLE keeps its pulse.
+                float heat = Util.Clamp((c.BestHit - 15) / 65f, 0f, 1f);   // ~15% -> floor, ~80%+ -> full
+                float a = 0.16f + 0.60f * heat;
+                Color fill = Raylib.Fade(Pal.Foe, a);
+                Color line = Raylib.Fade(Pal.FoeDk, Math.Min(0.9f, a + 0.20f));
+                const float bw = 3.5f, gap = 1.5f;
+                float baseY = r.Y + 18f, rx = r.X + r.Width - 6f;
                 for (int i = 0; i < tier; i++)
                 {
-                    var pos = new Vector2(px, py + i * 10f);
-                    Raylib.DrawPoly(pos, 3, 4.3f, -90f, fill);
-                    Raylib.DrawPolyLinesEx(pos, 3, 4.3f, -90f, 1.1f, line);
+                    float hgt = 4f + i * 4f;                                // 4 / 8 / 12 px
+                    var bar = new Rectangle(rx - (tier - i) * (bw + gap) + gap, baseY - hgt, bw, hgt);
+                    Raylib.DrawRectangleRec(bar, fill);
+                    Raylib.DrawRectangleLinesEx(bar, 0.8f, line);
                 }
-                // FLANK bar: a stubby underline under the stack. A second, non-hue channel for the
-                // single worst thing a tile can be — your cover won't protect you standing here.
+                // FLANK: a foot-rule the bars stand on — "your cover does nothing on this tile".
+                // A second, non-hue channel welded to the same glyph, so it can't read as a 4th bar.
                 if (c.Flanked)
                 {
-                    float by = py + tier * 10f - 1f;
-                    Raylib.DrawRectangleRec(new Rectangle(px - 5.5f, by, 11f, 2f), line);
+                    float wdt = tier * (bw + gap) + 1f;
+                    Raylib.DrawRectangleRec(new Rectangle(rx - wdt, baseY + 1.2f, wdt, 1.8f),
+                                            Raylib.Fade(Pal.Foe, Math.Min(0.95f, a + 0.25f)));
                 }
             }
     }

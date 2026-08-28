@@ -12,6 +12,12 @@ public static class Program
         // SIGHTLINE_AUTOPLAY=1    : skip intro, let an autopilot play full matches to a result.
         // Used to smoke-test the whole loop under Xvfb + software GL. See CLAUDE.md.
         bool shot = int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_SHOT"), out int shotFrame);
+        // SIGHTLINE_SEED=<n> : pin Util.Rng so two harness runs stage the SAME arena/roster. The
+        // renderer still reads the wall clock in ~50 places, so frames are not byte-identical — but
+        // this makes a before/after screenshot pair show the same BOARD, which is what a visual
+        // A/B actually needs. 0 / unset = today's clock seed (every existing path unchanged).
+        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_SEED"), out int seedPin) && seedPin != 0)
+            Util.Reseed(seedPin);
         // SIGHTLINE_SMARTPLAY=1 : like AUTOPLAY, but routes the autopilot through the
         // competent SmartStep() so a single headless game is played to win (balance gauge).
         bool smartplay = Environment.GetEnvironmentVariable("SIGHTLINE_SMARTPLAY") == "1";

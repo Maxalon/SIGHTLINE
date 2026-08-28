@@ -1861,10 +1861,13 @@ public static class Hud
         int ly = y + 26;
         foreach (var (t, col) in lines) { Raylib.DrawTextEx(Cfg.Font, t, new Vector2(x + pad, ly), 12, 1f, col); ly += lh; }
 
-        // tier pips echoed on the title row — the SAME triangle glyph the board draws, so the player
-        // learns the board vocabulary straight off the card, with no legend screen.
+        // the SAME danger-meter glyph the board draws, echoed on the title row — the player learns
+        // the board's vocabulary straight off the card, with no legend screen.
         for (int i = 0; i < c.Tier; i++)
-            Raylib.DrawPoly(new Vector2(x + w - pad - 5 - i * 11f, y + 15), 3, 4.3f, -90f, accent);
+        {
+            float hgt = 4f + i * 3.2f;
+            Raylib.DrawRectangleRec(new Rectangle(x + w - pad - (c.Tier - i) * 4.6f, y + 20 - hgt, 3f, hgt), accent);
+        }
     }
 
     // ---------------- turn banner sweep ----------------
