@@ -851,16 +851,6 @@ of record (container suspensions have wiped every scratchpad copy — docs are t
       buys. h0 completion 60 → 75 ±10 on the same CRN slots (bot got better — FUL-13 input:
       the finished-tree h0 baseline under this bot is ~75). Full rounds table + verdicts in
       docs/DEVLOG.md §FUL-5.
-- [ ] **FUL-9 THE DECK** (P9, L — after FUL-4 merges). The carried W7 spec on the repaired
-      roster: column-constrained objective assignment in CardForNode HASHED off
-      (MapSeed,column,row) (>=1 Eliminate, >=1 Defend-or-Rescue, <=1 Escort per path; boss stays
-      Decapitate); per-run no-repeat arena deck derived from MapSeed (prefer derivation over a
-      persisted list; if persisted: append-only RunDto field + SAVETEST leg); authored roll 55→80
-      keeping EXACTLY one Util.Roll (draw-order comment at Mission.cs:135 is load-bearing); biome
-      hints as reduced weight within the deck; SIGHTLINE_EXPOSURETEST 200-seed histogram (objective
-      invariant, zero in-run arena repeats, all 8 objectives reachable, all 35 arenas exposed).
-      Reference: 52% procedural, 6/35 arenas unseen in 251 missions, Defend absent from whole
-      batches → procedural 20-25%, distinct arenas/run >=4.5, Defend in >=80% of runs.
 - [x] **FUL-9 THE DECK** (wt-ful9). The carried W7 spec, finally BUILT (not just claimed):
       column-constrained objective assignment in CardForNode hashed off (MapSeed,column,row)
       via Util.Hash3 — an event-free ANCHOR mid column deals Defend(80%)-or-Rescue on every

@@ -829,6 +829,10 @@ public static class Program
             var b = Leg(heat, slot);
             bool match = a == b;
             pass &= match;
+            // FUL-5 review hardening: with no display WindowShouldClose() is true before frame
+            // one, both legs return CAP 0/0/0, and identical-zeros "matched" — a vacuous PASS
+            // on zero gameplay. Identity must be proven on real missions.
+            pass &= a.missions > 0;
             Console.WriteLine($"PAIRTEST: h{heat} slot{slot}  legA {a.result} cleared={a.cleared} missions={a.missions} turns={a.turns}  " +
                               $"legB {b.result} cleared={b.cleared} missions={b.missions} turns={b.turns}  -> {(match ? "MATCH" : "MISMATCH")}");
         }
