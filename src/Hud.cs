@@ -356,6 +356,21 @@ public static class Hud
         return false;
     }
 
+    // W5 ON-RAMP: the roster chip's height (and the strip's row pitch) follow the user text scale.
+    // The chip is a FIXED 58px box with the role tag drawn on its LAST row at y+45, so at 110/120%
+    // that tag's baseline crosses the border. Growing the box by a few px is much cheaper — and far
+    // less fragile — than re-flowing the five stacked rows inside it. Exactly 58/64 at 100%, so the
+    // authored layout (and every headless screenshot) is unchanged.
+    /// W5: an authored row pitch converted to the user's text scale. Used where several text rows
+    /// are stacked at hand-tuned offsets inside a fixed box; a pitch that stays put while the glyphs
+    /// grow is how a scaled layout starts overprinting itself. Identity at 100% and below (the
+    /// authored layout already fits smaller type), so no headless screenshot moves by a pixel.
+    static int TextRow(int authored) => (int)MathF.Round(authored * MathF.Max(1f, Cfg.UiScale));
+
+    static int ChipGrow => (int)MathF.Round(MathF.Max(0f, Cfg.UiScale - 1f) * 30f);
+    static int ChipH => 58 + ChipGrow;
+    static int ChipPitch => ChipH + 6;
+
     static void DrawRoster(Game g)
     {
         RosterChips.Clear();
@@ -369,19 +384,19 @@ public static class Hud
         int n = alive.Count;
         var slot = new Rectangle[n];
         var collapsed = new bool[n];
-        float overflowY = 70 + n * 64 + 12;
+        float overflowY = 70 + n * ChipPitch + 12;
         float bottom = Cfg.OriginY + Cfg.BoardH;
         for (int i = 0; i < n; i++)
         {
-            var rest = new Rectangle(8, 70 + i * 64, 132, 58);
+            var rest = new Rectangle(8, 70 + i * ChipPitch, 132, ChipH);
             slot[i] = rest;
             if (!ChipOccluded(g, rest)) continue;
             collapsed[i] = true;
-            for (float oy = overflowY; oy + 58 <= bottom; oy += 64)
+            for (float oy = overflowY; oy + ChipH <= bottom; oy += ChipPitch)
             {
-                var cand = new Rectangle(8, oy, 132, 58);
+                var cand = new Rectangle(8, oy, 132, ChipH);
                 if (ChipOccluded(g, cand)) continue;
-                slot[i] = cand; collapsed[i] = false; overflowY = oy + 64; break;
+                slot[i] = cand; collapsed[i] = false; overflowY = oy + ChipPitch; break;
             }
         }
         for (int idx = 0; idx < n; idx++)
@@ -398,7 +413,7 @@ public static class Hud
             if (collapsed[idx])
             {
                 int y = (int)rest.Y;
-                var rail = new Rectangle(0, y, 20, 58);
+                var rail = new Rectangle(0, y, 20, ChipH);
                 Raylib.DrawRectangleRounded(rail, 0.25f, 4, Raylib.Fade(sel ? Pal.RGBA(26, 36, 48) : Pal.Panel, 0.9f * a));
                 Raylib.DrawRectangleLinesEx(rail, 1f, Raylib.Fade(sel ? Pal.Accent : Pal.PanelBd, a));
                 Raylib.DrawRectangle(0, y, 2, 58, Raylib.Fade(sel ? Pal.Accent : Pal.Friend, a));
@@ -406,7 +421,7 @@ public static class Hud
                 int iw = (int)Cfg.Measure(ini, 13, 1f).X;
                 Cfg.Text(ini, new Vector2(10 - iw / 2, y + 5), 13, 1f, Raylib.Fade(Pal.Txt, a));
                 // vertical HP sliver, filling bottom-up, same banding as the full bar
-                var vbar = new Rectangle(7, y + 24, 6, 28);
+                var vbar = new Rectangle(7, y + 24, 6, 28 + ChipGrow);
                 Raylib.DrawRectangleRounded(vbar, 0.5f, 4, Raylib.Fade(Pal.RGBA(10, 15, 21), a));
                 float vfrac = u.MaxHp > 0 ? u.Hp / (float)u.MaxHp : 0;
                 if (vfrac > 0)
@@ -3833,7 +3848,11 @@ public static class Hud
         // ShopBtns are indexed by SLOT; the underlying item id is offer[slot].
         var offer = g.ShopOffer();
         int items = offer.Count;
-        int ih = 78, gap = 10;
+        // W5: the row grows with the user text scale — the card packs FIVE stacked rows (title,
+        // two wrapped desc lines, the effect line, the BUY column) into 78px, which is already the
+        // tightest surface in the game at 100%. TextRow() converts an authored row pitch into a
+        // scaled one so those five rows keep their spacing instead of overprinting each other.
+        int ih = 78 + TextRow(20) - 20, gap = 10;
         int squadH = 40;
         // Lay the slate out as a 2-COLUMN grid so every row keeps a comfortable, legible height and
         // the whole card still clears ScreenH (the slate is ~5-6 items).
@@ -3904,14 +3923,21 @@ public static class Hud
                 descLines.RemoveRange(2, descLines.Count - 2);
             }
             for (int li = 0; li < descLines.Count; li++)
-                Cfg.Text(descLines[li], new Vector2((int)r.X + 14, (int)r.Y + 32 + li * 13), 12, 1f, Pal.TxtDim);
-            Cfg.Text(g.ShopEffect(i), new Vector2((int)r.X + 14, (int)r.Y + 59), 12, 1f, can ? Pal.Accent : Pal.TxtDim);  // concrete effect
+                Cfg.Text(descLines[li], new Vector2((int)r.X + 14, (int)r.Y + 32 + li * TextRow(13)), 12, 1f, Pal.TxtDim);
+            // W5: the effect line and the BUY / "- unavailable -" column share the card's last row,
+            // and the effect line was drawn with NO width limit — at 100% "counters SYNDICATE for
+            // one mission" already stopped a couple of px short of "[ BUY ]", and any text scale
+            // pushed it straight through. Reserve the measured right column and clip to what's left.
+            string rightLbl = can ? "[ BUY ]" : "- unavailable -";
+            int rightW = (int)Cfg.Measure(rightLbl, 12, 1f).X + 22;
+            int effMaxW = (int)r.Width - 28 - rightW;
+            int effY = (int)r.Y + 32 + 2 * TextRow(13) + 1;
+            Cfg.Text(Clip(g.ShopEffect(i), 12, effMaxW), new Vector2((int)r.X + 14, effY), 12, 1f, can ? Pal.Accent : Pal.TxtDim);  // concrete effect
             Color cc = run.Intel >= icost ? Pal.Good : Pal.Foe;
             Cfg.Text(cost, new Vector2((int)(r.X + r.Width - costW - 14), (int)r.Y + 12), 16, 1f, cc);
-            if (!can)
-                Cfg.Text("- unavailable -", new Vector2((int)(r.X + r.Width - (int)Cfg.Measure("- unavailable -", 12, 1f).X - 14), (int)r.Y + 52), 12, 1f, Pal.TxtDim);
-            else
-                Cfg.Text("[ BUY ]", new Vector2((int)(r.X + r.Width - (int)Cfg.Measure("[ BUY ]", 12, 1f).X - 14), (int)r.Y + 54), 12, 1f, Pal.Accent);
+            // -5 puts the label back on its authored r.Y+54 baseline at 100% (effY is r.Y+59 there),
+            // so the shipped card is pixel-for-pixel what it was.
+            Cfg.Text(rightLbl, new Vector2((int)(r.X + r.Width - (int)Cfg.Measure(rightLbl, 12, 1f).X - 14), effY - 5), 12, 1f, can ? Pal.Accent : Pal.TxtDim);
         }
 
         ShopProceed = new Rectangle(x + w / 2 - 130, y + h - 60, 260, 44);
@@ -4422,7 +4448,9 @@ public static class Hud
 
         // big level readout + the -/+ stepper. RECRUIT reads as a WORD, never as "-1": a negative
         // number would read as a penalty, and the rung is a named setting, not a deficit.
-        Cfg.Text(recruit ? "RUNG" : "HEAT", new Vector2(x + 18, y + 48), 16, 1f, heatTxt2);
+        // (The old "HEAT" caption that used to sit at x+18,y+48 is gone: the minus stepper is drawn
+        //  over that exact rect, so it was never visible — it only surfaced at RECRUIT, where the
+        //  stepper is disabled and 40% opaque, as a word bleeding through a button.)
         if (recruit)
             Cfg.Text("RECRUIT", new Vector2(x + w / 2 - (int)Cfg.Measure("RECRUIT", 26, 1f).X / 2, y + 48), 26, 1f, heatCol);
         else
@@ -4496,11 +4524,13 @@ public static class Hud
     /// the copy must be honest about what it does rather than apologetic about who it is for. Every
     /// line names a real, verifiable mechanic (Heat.RecruitMod, Game.DownedTimerTurnsNow,
     /// Game.TryReinforcements) — no vague "easier".
+    // Body lines are held to ~37 characters: the card is 320px wide and the body column starts at
+    // x+40, so anything longer paints past the panel border (measured — the first draft clipped).
     static readonly (string head, string body)[] RecruitLines =
     {
-        ("LIGHTER OPPOSITION", "One fewer hostile; enemies -1 HP and -1 aim"),
+        ("LIGHTER OPPOSITION", "One fewer hostile; each -1 HP and aim"),
         ("LONGER LAST LIGHT",  "A downed soldier holds 5 turns, not 3"),
-        ("EARLY CHECKPOINT",   "Reinforcements can save a wipe from mission 1"),
+        ("EARLY CHECKPOINT",   "The checkpoint is open from mission 1"),
     };
 
     static void DrawStepper(Rectangle r, string sym, bool enabled)

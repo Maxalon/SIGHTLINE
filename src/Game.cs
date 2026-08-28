@@ -73,7 +73,13 @@ public partial class Game
     /// SIGHTLINE_BALANCE / autoplay / screenshot runs must step the queue at exactly the pace they
     /// always did, or every measured number in docs/ shifts. Display.Init(false) also never Loads,
     /// so a headless process cannot pick a speed up off disk either — belt and braces.
-    public float AnimSpeed => (AutoPlay || NoPersist) ? 1f : Display.AnimSpeed;
+    /// Harness-only escape hatch for the animation-speed FILMSTRIP (SIGHTLINE_ANIMSPEED, shot mode
+    /// only). The pin below is what keeps the flywheel honest, so the filmstrip cannot simply turn
+    /// it off — instead it names an explicit speed here. Default 0 = inert, so autoplay, the balance
+    /// batch and every other headless path are untouched (ONRAMPTEST asserts the pin with it unset).
+    public float AnimSpeedOverride;
+    public float AnimSpeed => AnimSpeedOverride > 0f ? AnimSpeedOverride
+                            : (AutoPlay || NoPersist) ? 1f : Display.AnimSpeed;
     public void CycleAnimSpeed() { if (!AutoPlay && !NoPersist) Display.CycleAnimSpeed(); }
 
     // selection / hover
@@ -1576,10 +1582,13 @@ public partial class Game
             // Harness/screenshot affordance only: SIGHTLINE_HEAT lets the headless intro shot
             // preview the dialled-in level + its unlocked ceiling. No disk I/O; default 0 keeps
             // a plain shot byte-stable.
-            if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_HEAT"), out int hEnv) && hEnv > 0)
+            // W5: the hook now also accepts the sub-standard rung (-1 = RECRUIT) so the intro
+            // DIFFICULTY card can be photographed at it. Unset / 0 still changes nothing, so a
+            // plain intro shot stays exactly as before.
+            if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_HEAT"), out int hEnv) && hEnv != 0)
             {
-                UnlockedHeat = Sightline.Heat.Clamp(hEnv);
-                PendingHeat = UnlockedHeat;
+                UnlockedHeat = Sightline.Heat.Clamp(Math.Max(0, hEnv));
+                PendingHeat = Sightline.Heat.Clamp(hEnv);
             }
             // W11 (same affordance family): SIGHTLINE_LOSSTREAK=<n> seeds the assist streak so the
             // intro FIELD SUPPORT chip can be screenshot headless. No disk; default 0 = byte-stable.

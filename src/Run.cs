@@ -301,7 +301,7 @@ public static class Heat
     public static readonly HeatModifier RecruitMod = new HeatModifier
     {
         Name = "RECRUIT",
-        Desc = "One fewer hostile; enemies -1 HP & aim; longer bleed-out; checkpoint from m1",
+        Desc = "One fewer hostile; enemies -1 HP & aim; 5-turn bleed-out; checkpoint from mission 1",
         EnemyDelta = -1,
         StatDelta = -1,
     };

@@ -4527,4 +4527,41 @@ public partial class Game
             : "ONRAMPTEST: FAIL (" + string.Join(",", fails.Distinct()) + ")";
     }
 
+    /// W5 (screenshot/eyes-only harness): stage a MULTI-TILE MOVE for the animation-speed filmstrip.
+    /// The whole point of the animation-speed setting's DANGER note in CLAUDE.md is that the
+    /// movement-jitter bug (MoveStepAnim capturing `_from` at enqueue instead of at activation)
+    /// is invisible to every self-test — only a filmstrip of a multi-tile path shows the snap-back.
+    /// Autoplay rarely orders a long, clean, straight walk on demand, so this hook does: it selects
+    /// the first soldier, finds the longest clear straight run from its tile, and enqueues one
+    /// MoveStepAnim per tile through the SAME Enqueue the player's own move uses (no OnStart here —
+    /// activation is still the queue's job, which is exactly the property the filmstrip verifies).
+    /// Returns the number of steps queued (0 if no clear run was found).
+    public int DebugLongMove(int want = 6)
+    {
+        var u = Players.FirstOrDefault(p => p.Alive && !p.IsVip);
+        if (u == null) return 0;
+        Selected = u;
+        (int dx, int dy)[] dirs = { (1, 0), (-1, 0), (0, 1), (0, -1) };
+        int bestLen = 0; (int dx, int dy) bestDir = (1, 0);
+        foreach (var (dx, dy) in dirs)
+        {
+            int len = 0;
+            for (int i = 1; i <= want; i++)
+            {
+                int nx = u.X + dx * i, ny = u.Y + dy * i;
+                if (!Grid.IsFloor(nx, ny) || UnitAt(nx, ny) != null) break;
+                len = i;
+            }
+            if (len > bestLen) { bestLen = len; bestDir = (dx, dy); }
+        }
+        if (bestLen == 0) return 0;
+        for (int i = 1; i <= bestLen; i++)
+            Enqueue(new MoveStepAnim(u, u.X + bestDir.dx * i, u.Y + bestDir.dy * i), Team.Player);
+        return bestLen;
+    }
+
+    /// The unit the filmstrip is following (the one DebugLongMove staged), for the per-frame
+    /// position dump in Program.cs. Null before the hook runs.
+    public Unit DebugFilmUnit => Selected;
+
 }

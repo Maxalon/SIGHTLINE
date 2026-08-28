@@ -604,6 +604,23 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_BEACON") == "1") game.DebugBeacon();
         if (shot && float.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_ZOOM"), out float z)) game.CamZoom = z;
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_PAUSE") == "1") game.Paused = true;
+        // W5 ON-RAMP filmstrip (shot only): SIGHTLINE_ANIMSPEED=<x> names the playback multiplier
+        // and SIGHTLINE_LONGMOVE=1 stages a multi-tile walk to film. Both inert when unset, so no
+        // other headless path (autoplay, balance, the other shots) changes by one frame.
+        if (shot && float.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_ANIMSPEED"),
+                                   System.Globalization.NumberStyles.Float,
+                                   System.Globalization.CultureInfo.InvariantCulture, out float aspd) && aspd > 0f)
+            game.AnimSpeedOverride = aspd;
+        // W5 (shot only): SIGHTLINE_UISCALE=<idx into Display.UiScaleLevels> photographs the UI at a
+        // text size other than 100%. Set on Cfg directly — Display never Loads headless — and inert
+        // when unset, so every other screenshot keeps measuring the authored layout.
+        if (shot && int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_UISCALE"), out int uiIdx))
+        {
+            Display.UiScaleIdx = Math.Clamp(uiIdx, 0, Display.UiScaleLevels.Length - 1);
+            Display.ApplyUiScale();
+        }
+        bool longMove = shot && Environment.GetEnvironmentVariable("SIGHTLINE_LONGMOVE") == "1";
+        if (longMove) Console.WriteLine($"LONGMOVE: staged {game.DebugLongMove()} steps at {game.AnimSpeed:0.##}x");
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_PERKSHOT") == "1") game.DebugBarracksPerk();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_WAKE") == "1") game.DebugWakeAll();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CONTENT") == "1") Mission.DebugContentShowcase(game);
@@ -709,6 +726,10 @@ public static class Program
             });
 
             if (shot || autoplay) frame++;
+            // W5: dump the filmed unit's tweened board position every frame, so "positions advance
+            // monotonically, no backwards step" is a MEASURED claim rather than an eyeball on PNGs.
+            if (longMove && game.DebugFilmUnit != null)
+                Console.WriteLine($"FILM {frame} {game.DebugFilmUnit.Pos.X:0.000} {game.DebugFilmUnit.Pos.Y:0.000}");
             if (shot)
             {
                 if (frame == shotFrame) Raylib.TakeScreenshot("sightline_shot.png");
