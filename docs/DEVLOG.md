@@ -4030,3 +4030,113 @@ should widen the pools before it widens the beat list. Full sample in the wave r
 - **Region names are decoration, not information.** They label the map but nothing keys off them
   (no per-region modifier, no returning to a region). That is the honest scope of a *frame*.
 - **No epilogue for a run abandoned mid-campaign** — only the Win/Lose end cards narrate.
+
+# PROGRAM RESONANCE — WAVE W4 "THE SECOND AXIS" (2026-08-28, senior dev on wt-w4)
+
+**The charter.** X1 proved the binding decision-density constraint is
+`choices/ARMED-soldier-turn` — the typical armed soldier sees exactly ONE worthwhile
+target — and named the cause as map and pod GEOMETRY, not lethality. Underneath it sat a
+structural fact nobody had touched: `Mission.PlayerSpawns` puts the squad in cols 0-3,
+`EnemyPodColOffset` puts every pod in cols 14-17, and the evac zone is always the right
+edge. **35 arenas x 8 objectives x 4 modes, and every single fight opened as a
+left-to-right push.** W4's job was to make the opening geometry a variable and see whether
+simultaneous target presentation follows.
+
+## Fresh baseline on THIS tree tip (measure first, never inherit a number)
+Method per FUL-13/X1: `SIGHTLINE_BALANCE=10` per chunk under `xvfb-run` on a **snapshot of
+the Release binary** (so the tree can keep building while a round is in flight), two disjoint
+CRN slot sets (`SIGHTLINE_BALANCE_BASE` 0 / 10) x greedy+sloppy = **40 campaigns per rung**,
+`runs=20` asserted per chunk. Every chunk's JSON + report extract is archived under
+`docs/measurements/w4/`.
+
+| rung | run completion | mission win | mean turns | ch/turn | **ch/ARMED** | lead-swings |
+|---|---|---|---|---|---|---|
+| h0 | **32.5%** (n=40) | 78.4% (n=125) | 6.79 | 2.19 | **1.55** | 0.72 |
+| h4 | **12.5%** (n=40) | 70.1% (n=117) | 6.52 | 2.46 | **1.71** | 0.64 |
+
+**Three of the brief's numbers were already wrong on this tip, and all three matter:**
+1. **The ladder has drifted BELOW its band.** X1 shipped h0 52.5 / h4 27.5; eleven waves
+   later the same measurement reads **32.5 / 12.5** against the FUL-13 band 55±8 / 30±8.
+   Both rungs start OUTSIDE the band, low. So "stay inside the band" was not a gate W4
+   could pass or fail on its own — what it could do is not make it worse, and it in fact
+   made it much better (below).
+2. `choices/ARMED` is **1.55**, not X1's 1.46; `choices/turn` is 2.19, not 2.09.
+3. **Two objectives already breach the ~10-turn budget at h0**: Escort **12.57t** and
+   Rescue **15.33t** (X1 had left h0 Escort at 6.00). Whatever else W4 did, this was the
+   drag that needed removing.
+
+## The new instrument, and how it reframed the wave
+X1 could measure that `choices/ARMED` was ~1.5 but not WHICH of `CountMeaningfulChoices`'
+two axes was starved. W4 added a read-only split (`Stats.MissionRec.LosTargetSum /
+TargetChoiceSum / PosChoiceSum`, a `[choice-split]` report line and three JSON fields):
+
+* `los-targets/ARMED` — foes in range+LoS per armed soldier-turn (raw simultaneous presentation)
+* `target-choices/ARMED` — axis (a): rival shots within 12% of the best
+* `position-choices/ARMED` — axis (b): near-best places to stand after firing (capped 2)
+
+Identity verified the X1 way: `R0diag-h0-b0` re-ran the *instrumented, lever-off* tree on
+the pinned slot set and reproduced `R0-h0-b0` to every decimal (45.0% completion, 73
+missions, ch/turn 2.61, ch/ARMED 1.76, los 2.41, tgt 0.27, pos 1.49).
+
+**Baseline h0: los-targets/ARMED 2.42, target-choices/ARMED 0.28, position-choices/ARMED 1.27.**
+
+That kills the wave's premise as written. An armed soldier does **not** see one target — it
+sees ~2.4. What it almost never has is two targets *worth choosing between*: the metric only
+counts a rival whose `ShotValue` is within 12% of the best, and three independently-rolled
+archetypes differ so much in HP, gun and `PriorityWeight` that their shots are never
+comparable. **The starved axis is comparability, not count** — and 82% of the score is
+actually coming from the positioning axis.
+
+## THE ROUND TABLE — one lever per measured round, h0, `runs=20` asserted per chunk
+
+| round | lever | n | compl | mean t | ch/turn | **ch/ARMED** | los/ARM | tgt/ARM | pos/ARM | armed/turn | swings | Escort t |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| R0 | baseline | 40 | 32.5% | 6.79 | 2.19 | **1.55** | 2.42 | 0.28 | 1.27 | 1.39 | 0.72 | 12.57 |
+| P1 | `DEPLOY=pincer` | 40 | **47.5%** | **5.30** | 2.49 | **1.62** | 2.50 | 0.27 | 1.35 | 1.54 | 0.72 | **5.65** |
+| C1 | `DEPLOY=crossfire` | 40 | 35.0% | 6.56 | 2.09 | **1.57** | 2.44 | **0.34** | 1.23 | 1.32 | 0.74 | 13.40 |
+| E1 | `DEPLOY=envelop` | 40 | **60.0%** | 5.82 | **2.71** | **1.59** | 2.45 | 0.27 | 1.32 | **1.71** | **0.78** | 9.66 |
+| M1 | `PODMASS=4` | 20 | 35.0% (vs 45.0 same-slot) | — | 2.31 | **1.64** | **2.61** | 0.22 | 1.42 | 1.41 | 0.64 | — |
+| U1 | `PODUNIFORM=1` | 40 | **32.5%** (= baseline exactly) | 5.85 | 2.38 | **1.62** | 2.43 | **0.34** | 1.29 | 1.47 | 0.70 | **8.75** |
+
+(M1 is the one single-chunk round — paired against the *same* slot set's baseline chunk
+(45.0% -> 35.0%), so the comparison is exact but the sample is half. Everything else is n=40.)
+
+## THE FINDING — `choices/ARMED` is a near-invariant of this game at ~1.6
+
+Line the two axes up against each other across all six states:
+
+| state | target-choices/ARMED | position-choices/ARMED | **sum = ch/ARMED** |
+|---|---|---|---|
+| M1 pod-mass 4 (n=20) | 0.22 | 1.42 | **1.64** |
+| P1 pincer | 0.27 | 1.35 | **1.62** |
+| E1 envelop | 0.27 | 1.32 | **1.59** |
+| R0 baseline | 0.28 | 1.27 | **1.55** |
+| C1 crossfire | 0.34 | 1.23 | **1.57** |
+| U1 uniform pods | 0.34 | 1.29 | **1.62** |
+
+Sorted by the target axis, the position axis falls monotonically (U1, the one lever that
+moved both, aside), and **the sum never leaves 1.55-1.64 across five structurally different
+levers** — a 6% spread against a gate that asked for +29%. The mechanism is in the
+instrument: axis (b) counts destinations scoring within **15% of the BEST** safety score, and
+safety is `24 − TileExposure + cover*8 + height*5`. Raise the threat — which every lever that
+puts more comparable guns in view necessarily does — and the best score falls, the *absolute*
+window `0.15 x best` narrows with it, and fewer tiles qualify. The two halves of
+`meaningful-choices` are coupled through threat with opposite signs, so the total is close to
+conserved.
+
+This also retro-explains X1: its durability lever raised threat, lost position choices, and
+`choices/turn` regressed 2.33 → 2.09 while every intuition said it should rise.
+
+**So `choices/ARMED >= 2.0` is not reachable by a geometry or formation lever, and probably
+not by any threat-side lever at all.** Two honest routes remain, and they belong to a
+different wave: (1) add POSITIONING OPTIONS AT CONSTANT THREAT — a terrain-grammar pass that
+puts more equally-good destinations near contact (more LOW cover, which also does not block
+the sightlines axis (a) needs), or (2) re-specify axis (b) with an ADDITIVE band so it stops
+reading "the fight got safer" as "the decision got richer".
+
+## What DID move: contact breadth
+`meaningful-choices/turn = ch/ARMED x armed-soldiers/turn`, and the second factor is very
+movable. The baseline fields **1.39** armed soldiers per player turn out of 3.53 acting; a
+surrounded opening fields **1.71** (+23%). That is the real, shippable density result: not a
+richer decision per soldier, but **more of the squad in contact every turn** — ch/turn
+2.19 → 2.71 at ENVELOP, +24%.
