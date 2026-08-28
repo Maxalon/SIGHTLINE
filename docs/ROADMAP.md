@@ -884,9 +884,10 @@ of record (container suspensions have wiped every scratchpad copy — docs are t
       elite exempt; TERROR un-excluded from endless boons) + the FIELD DRILLS rework (+1 move
       after a drag/vault, grant-site proc). Measured wave (fresh same-slot R0 first, one lever
       per round): the full stack breached the dip budget (-12.5 vs <=8), so **escalation lever 1
-      landed** (count-1 on 3-pod missions) -> combined h0 completion 40% == R0's 40% (dip 0, in
-      budget). GRENADE >=10 prediction did NOT materialize (verdict recorded: woken pods scatter
-      out of the bot's covered-cluster frag window; pre-fragging dormant clumps stays declined);
+      landed** (count-1 on all m3+ non-finale missions) -> combined h0 completion 40% == R0's 40% (dip 0, in
+      budget). GRENADE >=10 prediction did NOT materialize (verdict recorded: woken pods scatter out of the
+      bot's frag window — review note: SmartGrenade has NO Active filter, so the low count is
+      emergent geometry, not a coded decline of dormant clumps);
       BRACE held >=30; TRR procs 18-31 (rout economy livelier at 3-pods); RCL now procs 1-3/batch
       (no longer structurally dead); FDR 0 procs in wave batches (0 boon-held drags in those
       worlds — mechanism PODTEST-pinned; FUL-7's drag stage prices it). Endless depth median

@@ -2099,7 +2099,7 @@ docs/plans/FUL-8-pikeman-FUL-10-forks.md §FUL-8 (every seam pre-verified agains
 | R2 | + linked activation | 40/50 | 10/10 | BRACE 32/55; 117/152 · GREN 3/5; 1/1 · FDR 0; 0 · RCL 3 (2); 1 (2) · TRR 29 (5); 6 (1) |
 | R3 | + endless wave pods | 40/50 | 10/10 | campaign chunks BYTE-IDENTICAL to R2 — the lever is endless-only by construction (CRN discipline visible); endless leg below |
 | R4 | + FDR rework | 40/50 | 10/10 | BYTE-IDENTICAL to R3: zero boon-held drags occurred in these 40 worlds -> zero grants (the mechanism procs deterministically — PODTEST leg f) |
-| R5 | escalation lever 1 (count-1 on 3-pod missions) | 50/80 | 10/20 | BRACE 62/28; 63/51 · GREN 1/8; 1/4 · PATCH 1/2; 4/3 · FDR 0 (4); 0 (1) · RCL 2 (4); 0 (2) · TRR 20 (4); 18 (2) |
+| R5 | escalation lever 1 (count-1 on all m3+ non-finale missions) | 50/80 | 10/20 | BRACE 62/28; 63/51 · GREN 1/8; 1/4 · PATCH 1/2; 4/3 · FDR 0 (4); 0 (1) · RCL 2 (4); 0 (2) · TRR 20 (4); 18 (2) |
 | h4 | close leg, final stack (slots 0-9) | 20/20 | — | BRACE 55/22 · GREN 3/4 · PATCH 4/2 · FDR 0 (5) · RCL 0 (2) · TRR 11 (3) · h4 mission win-rate 76%, paired margin +0.10 ±0.64 |
 
 Combined h0 (40 matches): R0 40% -> R1 30% (-10) -> R2/R3/R4 27.5% (-12.5, BREACH of the <=8
@@ -2118,7 +2118,7 @@ morale-exempt).
    verdict predicted pods-of-3 as the frag stage; measured, the bot's window (covered 2+ ACTIVE
    cluster, pre-shot) still anti-correlates: dormant pods now CLUMP (the stage exists on the
    board) but woken pods scatter-to-cover and de-cluster before the bot's frag gate re-fires,
-   and pre-fragging dormant clumps remains declined as perfect-info bot play. The stage is real
+   and the low count is emergent geometry (approach crosses SightRange first; woken pods scatter), not a coded decline as perfect-info bot play. The stage is real
    for HUMANS (the clump is visible pre-fight); the bot cannot price it honestly. FUL-13 input.
 2. **FDR: 0 procs in the wave batches — an honest zero, not a dead mechanism.** The rework's
    proc surface now equals drag/vault-under-boon frequency; in these 100 campaigns drag volume
