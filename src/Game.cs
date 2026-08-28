@@ -1223,6 +1223,10 @@ public partial class Game
     // from waves). Ids allocated from 100 up: initial pods are i/2 (<=5), harness scenes use 90/91,
     // so wave pods can never collide with either. Reset per mission beside _podOrig.
     int _nextWavePod = 100;
+    // W4 THE SECOND AXIS: how many reinforcement waves this mission has already landed. Only
+    // read by the ENVELOP rim rotation below (a surrounded hold must keep being surrounded);
+    // every other opening ignores it, so the east-edge arrival is unchanged.
+    int _waveIndex;
     // FUL-6 CRITICAL MASS — LINKED ACTIVATION ("they heard the guns"): pods flagged here were put
     // Suspicious by a nearby pod's wake (ActivatePod's link rider) and CONFIRM to Alert at the next
     // ResolveSuspicion pass even when unseen (the sound was enough). Cleared per mission in
@@ -1978,6 +1982,7 @@ public partial class Game
         _podOrig.Clear();
         _linkedPods.Clear();   // FUL-6: no linked-alert carryover across missions
         _nextWavePod = 100;
+        _waveIndex = 0;
         foreach (var e in Enemies) if (e.PodId >= 0) _podOrig[e.PodId] = _podOrig.GetValueOrDefault(e.PodId) + 1;
         Selected = Players.FirstOrDefault(p => p.CanAct);
         AimMode = false;
@@ -5839,13 +5844,34 @@ public partial class Game
         var rows = Enumerable.Range(0, Grid.H).OrderBy(_ => Util.RandF()).ToList();
         int added = 0;
         var waveClasses = new List<string>();   // harness-only composition echo (AutoPlay)
-        foreach (int y in rows)
+        // W4 — a SURROUNDED hold has to keep being surrounded: under an ENVELOP opening the
+        // squad sits at board centre, so waves that all walk in from the east edge would quietly
+        // turn the second half of every Defend back into a one-bearing fight. Rotate the arrival
+        // rim deterministically (no RNG draw — a plain per-mission wave counter). Every other
+        // opening keeps the historical east edge byte-for-byte.
+        bool rimRotate = Mission.EnvelopRimWaves && Mission.AppliedDeploy == Mission.DeployEnvelop;
+        int rim = rimRotate ? _waveIndex % 4 : 0;
+        _waveIndex++;
+        // Along-rim scan order: reuse the shuffled row list on the E/W rims, and a shuffled
+        // COLUMN list on the N/S rims (same draw kind, so nothing else about the wave changes).
+        var lane = rim == 2 || rim == 3
+            ? Enumerable.Range(0, Grid.W).OrderBy(_ => Util.RandF()).ToList()
+            : rows;
+        foreach (int t in lane)
         {
             if (added >= want || AliveEnemies().Count >= cap) break;
-            int x = Grid.W - 2;
+            // (outer tile, fallback one step further out) for the chosen rim
+            int x, y, x2, y2;
+            switch (rim)
+            {
+                case 1:  x = 1; y = t; x2 = 0; y2 = t; break;                          // west
+                case 2:  x = t; y = 1; x2 = t; y2 = 0; break;                          // north
+                case 3:  x = t; y = Grid.H - 2; x2 = t; y2 = Grid.H - 1; break;        // south
+                default: x = Grid.W - 2; y = t; x2 = Grid.W - 1; y2 = t; break;        // east (today)
+            }
             if (!Grid.IsFloor(x, y) || IsOccupiedByOther(x, y, null))
             {
-                x = Grid.W - 1;
+                x = x2; y = y2;
                 if (!Grid.IsFloor(x, y) || IsOccupiedByOther(x, y, null)) continue;
             }
             var e = Mission.MakeWaveHostile(n, x, y, rich, heatStat);   // FUL-13: DEFEND waves inherit heat

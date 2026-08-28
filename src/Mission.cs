@@ -50,6 +50,11 @@ public static class Mission
     /// Telemetry: the shape the LAST Build actually used (read by Game.SetupMission for Stats).
     public static int AppliedDeploy = DeployFrontal;
 
+    /// Under an ENVELOP opening, rotate the rim reinforcement waves arrive from (Game.
+    /// SpawnReinforcements) so a surrounded hold stays surrounded. Measured as its own round —
+    /// OFF by default until it is; SIGHTLINE_RIMWAVES=1 turns it on.
+    public static bool EnvelopRimWaves = false;
+
     /// ENVELOP seats the squad in the MIDDLE of the board, which would trivialise any objective
     /// whose key tile sits at board centre or whose extraction is a far corner. It is therefore
     /// only legal on the objectives that have no placed geography of their own: Eliminate,
@@ -574,14 +579,34 @@ public static class Mission
     /// Public + static so the endless wave splitter (Game.Endless) and PODTEST share it.
     /// (count == 1 can only reach here from an endless top-up trickle; it keeps a 1-pod,
     /// which is morale-inert by construction — PodAtWaverPoint needs alive >= 2.)
-    public static int[] PodPlan(int count)
+    public static int[] PodPlan(int count) => PodPlan(count, PodMass);
+
+    /// W4 THE SECOND AXIS — FORMATION MASS. `mass` 3 is the FUL-6 plan above, reproduced
+    /// exactly (PODTEST pins its splits). A larger mass trades the number of SERIAL contacts for
+    /// the number of bodies each contact presents at once, which is the raw
+    /// `los-targets/ARMED-soldier-turn` number X1's decomposition named as the thing decision
+    /// density is actually made of. Bodies are split as evenly as possible over
+    /// round(count/mass) pods, so no pod is ever a lone body (the waver telegraph needs a
+    /// survivor) and none is a shapeless blob. Pure — no RNG draw.
+    public static int PodMass = 3;
+
+    public static int[] PodPlan(int count, int mass)
     {
         var sizes = new List<int>();
-        int rem = count;
-        while (rem >= 5) { sizes.Add(3); rem -= 3; }
-        if (rem == 4) { sizes.Add(2); sizes.Add(2); }
-        else if (rem == 3) sizes.Add(3);
-        else if (rem > 0) sizes.Add(rem);
+        if (mass <= 3)
+        {
+            int rem = count;
+            while (rem >= 5) { sizes.Add(3); rem -= 3; }
+            if (rem == 4) { sizes.Add(2); sizes.Add(2); }
+            else if (rem == 3) sizes.Add(3);
+            else if (rem > 0) sizes.Add(rem);
+            return sizes.ToArray();
+        }
+        if (count <= 0) return sizes.ToArray();
+        int pods = Math.Max(1, (int)Math.Round(count / (double)mass, MidpointRounding.AwayFromZero));
+        while (pods > 1 && count / pods < 2) pods--;      // never a pod of 1 while a merge is possible
+        int baseSize = count / pods, extra = count % pods;
+        for (int p = 0; p < pods; p++) sizes.Add(baseSize + (p < extra ? 1 : 0));
         return sizes.ToArray();
     }
 
