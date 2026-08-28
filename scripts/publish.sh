@@ -12,7 +12,8 @@
 # Output is ONE self-contained executable plus libraylib.so (a native library the runtime
 # dlopen()s — it cannot be linked into the single file), the assets/ directory, and
 # THIRD-PARTY-NOTICES.txt. SHIP THE WHOLE OUTPUT DIRECTORY: the notice file and
-# assets/NotoMono-LICENSE.txt are licence obligations, not optional extras.
+# assets/NotoMono-LICENSE.txt and assets/ChakraPetch-LICENSE.txt are licence obligations,
+# not optional extras.
 #
 # Measured on this project (linux-x64, self-contained, .NET SDK 8.0.130, this container).
 # "start" = wall time for one window-free SIGHTLINE_SAVETEST launch, median of 10 after a

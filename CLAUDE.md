@@ -325,9 +325,21 @@ clicked, and a published build launched from the wrong directory silently lost i
 in `docs/DEVLOG.md` §RESONANCE; open work in `docs/ROADMAP.md`. Wave **X1 THE EXCHANGE** then changed the
 combat model's headline ratio: `Mission.HostileToughness` (+3 HP) and
 `Mission.HostileDamageTrim` (−1 per weapon band end) in the single `Mission.MakeHostile`
-funnel, so a trade takes ~2 hits instead of 1 (Eliminate 3.60 → 5.30t, lead-swings
-0.60 → 0.84) with every measured rung still in band. Its raw chunk logs live in
+funnel, so a trade takes roughly two hits instead of one. Its raw chunk logs live in
 `docs/measurements/x1/`.
+
+> **NUMBERS AND THEIR BASE COMMIT — read before quoting any balance figure.** Every measured
+> claim in this program was produced on the tree its wave branched from, **not** on the merged
+> tree. X1's ladder (h0 52.5 / h4 27.5 / h8 15.0) was measured at base `2100858`, without Q1,
+> A2, F1 or V2 — and Q1 both folded the streak bonus into `ComputeOdds` (changing the EV bot's
+> target scoring) and changed pod-scatter RNG draws. W5's on-ramp gate (heat 0 55% vs RECRUIT
+> 75%) was measured at base `b68f38a`, without X1. The integration review re-ran X1's exact h0
+> chunk on the composed tree and got **45%** where the archived same-slot chunk reads 65%; the
+> objective mix differs on identical slot seeds, which proves the RNG streams diverged, so the
+> archived chunks **cannot be transported to this tree**. The *directions* reproduce (RECRUIT
+> re-measured 65% vs heat 0 45% here, same +20), but **no post-merge ladder re-baseline exists
+> yet.** Treat every rung number above as unverified-on-this-tree until one is run. This note
+> exists because the paragraph below is otherwise exactly the over-claim it warns about.
 
 **Three doc over-claims were found and corrected** — they are the reason this project needs the
 "no over-claims" rule enforced hard: juice was graded "Strong" partly on audio nobody had heard;
