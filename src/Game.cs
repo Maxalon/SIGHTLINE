@@ -1427,7 +1427,8 @@ public partial class Game
         // (LastDotSource too — review fix: a BURN label from mission N must not mis-bucket an
         // anim-less death in mission N+2; enemies/VIP are constructed fresh each mission anyway)
         foreach (var u in Players)
-        { u.FeatMultiKill = u.FeatClutch = u.FeatVengeful = u.WasNearDeath = u.FeatBurned = u.AllyDown = false; u.BondAura = false; u.ConsecutiveMisses = 0; u.Statuses.Clear(); u.LastDotSource = null; }
+        { u.FeatMultiKill = u.FeatClutch = u.FeatVengeful = u.WasNearDeath = u.FeatBurned = u.AllyDown = false; u.BondAura = false; u.ConsecutiveMisses = 0; u.Statuses.Clear(); u.LastDotSource = null;
+          u.Downed = u.Stabilized = u.WasDownedThisMission = false; u.DownedTurns = 0; u.DownedByCls = null; }   // FUL-7: fresh mission, fresh down budget (mode-seam belt-and-braces)
         _missionKia.Clear();
         _bossSighted = false;        // FUL-11: the HVT SIGHTED ceremony banner re-arms per mission
         Scorches.Clear();            // death decals don't carry between missions
@@ -1506,6 +1507,9 @@ public partial class Game
         Stats.BeginMission(n, Objective.ToString(), _run.HeatLevel,
                            Players.Count(p => p.Alive && !p.IsVip), Enemies.Count(e => e.Alive),
                            Mission.AppliedLayout);
+        // FUL-7: the PATCH per-presence denominator (corpsman enters via backfill only)
+        if (Players.Any(p => p.Alive && !p.IsVip && p.Ability == AbilityKind.Heal))
+            Stats.RecordCorpsmanFielded();
     }
 
     void NextMission() => SetupMission(_run.Mission + 1);
@@ -1709,6 +1713,23 @@ public partial class Game
         // barracks-phase odds read; RunBoons is refreshed to the run's current boons (a FIELD DOCTRINE
         // pick may have just changed them).
         Combat.EndMission(_run.ActiveBoons);
+        // FUL-7: a WON field never abandons a breathing soldier — every downed survivor
+        // (stabilized OR still ticking: the field is won) is RECOVERED before the squad rebuild:
+        // back on the roster at Hp 1, Wound 3 (max — DebriefSurvivors' attrition machinery owns
+        // it from here), and the near-death scar track runs (bleeding out on the field IS a
+        // near-death, even off a full-HP one-shot). The triage decision stayed fully live DURING
+        // the mission — the timer can beat you; Wound-3 + the scar cost keep this a real price.
+        var recovered = new List<Unit>();
+        foreach (var p in Players)
+        {
+            if (!p.Alive || !p.Downed || p.IsVip) continue;
+            p.Downed = false; p.Stabilized = false; p.DownedTurns = 0;
+            p.Hp = 1;
+            p.Wound = 3;
+            p.WasNearDeath = true;
+            Stats.RecordDownRecovered();
+            recovered.Add(p);
+        }
         // a benched soldier sat this mission out: it's still in _run.Squad (flagged) but was
         // never in Players, so it's absent from AlivePlayers(). Preserve it across the rebuild,
         // or benching would silently destroy the veteran (review Blocker 1).
@@ -1742,6 +1763,10 @@ public partial class Game
             }
             else _run.Report.Insert(0, $"Bonus missed: {SecondaryName}");
         }
+
+        // FUL-7: name the recovered (after DebriefSurvivors — it clears Report first)
+        foreach (var p in recovered)
+            _run.Report.Insert(0, $"{p.Name} recovered from the field - gravely wounded");
 
         // surface this mission's fallen at the top of the debrief (3.11)
         foreach (var name in _missionKia) _run.Report.Insert(0, $"KIA  {name}");
@@ -2093,6 +2118,10 @@ public partial class Game
             if (CachePresent && !mover.IsVip && mover.X == CacheX && mover.Y == CacheY)
                 CollectIntelCache(mover);
         }
+        // FUL-7: a DOWNED body being DRAGGED/EXTRACTed is a tile entry, but never a reaction
+        // target — enemies do not direct-fire the downed (the same rule as Ai.Plan's filter; the
+        // hazard checks above still ran, so hauling a body THROUGH fire still kills it — honest).
+        if (mover.Downed) return;
         // RANGER SLIPSTREAM: a free, overwatch-immune reposition. While slipstreaming the mover draws no
         // reaction fire; the flag is consumed when its destination tile is reached so the move ends silent.
         if (mover.Slipstreaming)
@@ -2205,6 +2234,14 @@ public partial class Game
         // telemetry the flywheel ranks (UNDERTOW W1). The queued-reaction purge below is the primary
         // guard; this makes KillUnit robust to every double-call path.
         if (!d.Alive) return;
+        // FUL-7 LAST LIGHT: the whole bleed-out state machine enters HERE — the single lethal
+        // seam (ShotAnim/GrenadeAnim/EnvDamage/siege/barrel all funnel through KillUnit). A
+        // soldier's FIRST lethal event becomes a 3-turn DOWN instead of a death; the VIP/captive
+        // keeps instant death (Escort's VIP-loss + the DEATHTEST-pinned solo-win semantics),
+        // enemies never go down (morale/rout is their drama), and the second lethal event on a
+        // soldier this mission — including ANY damage reaching a body already down (AoE/fire:
+        // the telegraphed-weapons honesty valve) — falls through and kills outright.
+        if (CanGoDown(d)) { EnterDowned(d); return; }
         // SIEGE interrupt: killing a charging artillery piece cancels its strike (the zone reads
         // off live enemies, so it clears automatically; this is a cosmetic confirmation of the
         // interrupt). W5: HasSiege flag (mirrors Cls=="BOMBARD"; also covers a siege-armed boss).
@@ -2249,6 +2286,12 @@ public partial class Game
         if (d.Team == Team.Player && !d.IsVip)
         {
             string cause = killer != null && killer.Team == Team.Enemy ? killer.Cls : "?";
+            // FUL-7: a bleed-out KIA names the DOWNING archetype (the honest loss card resolves
+            // causes through the bestiary). A DoT-caused down carries a BURN/BLEED label, not an
+            // archetype — that buckets "?" exactly as DoT deaths do today (BlurbFor gates it).
+            if (cause == "?" && d.Downed && !string.IsNullOrEmpty(d.DownedByCls)
+                && !string.IsNullOrEmpty(Codex.BlurbFor(d.DownedByCls)))
+                cause = d.DownedByCls;
             DeathsByClass[cause] = DeathsByClass.GetValueOrDefault(cause) + 1;
         }
         if (d.Team == Team.Player)
@@ -2278,7 +2321,9 @@ public partial class Game
         Fx.Burst(d.Pos, Pal.RGBA(20, 25, 33), 16, 150f, 0.8f, 5f);
         // lingering scorch decal on the tile (drawn under units, fades over ScorchLife)
         AddScorch(d.Pos, c);
-        Fx.PopText(d.Pos + new Vector2(0, -10), d.IsVip ? "VIP DOWN" : "DOWN", c, 22f);
+        // FUL-7 vocabulary honesty: a soldier's true death pops "KIA" (DOWN now means the
+        // bleeding-out state); enemies keep the generic "DOWN" (they have no bleed-out).
+        Fx.PopText(d.Pos + new Vector2(0, -10), d.IsVip ? "VIP DOWN" : (d.Team == Team.Player ? "KIA" : "DOWN"), c, 22f);
         if (d.IsVip) { ShowBanner("VIP DOWN", true); Fx.AddShake(13f); }
         Fx.AddShake(7f);
         AddHitStop(0.1f);
@@ -2310,8 +2355,7 @@ public partial class Game
         // others are still queued — a surplus reaction must not resolve on the corpse (that path
         // re-ran Stats.RecordShot + CreditKill + the death FX). The active anim (the blow that caused
         // this death) is excluded so the current shot still finishes normally.
-        _anims.RemoveAll(a => (a is MoveStepAnim m && m.Unit == d)
-                           || (a is ShotAnim s && s.D == d && a != ActiveAnim));
+        PurgeAnimsFor(d);   // FUL-7: factored — EnterDowned needs the same purge (shared helper)
         if (Selected == d) Selected = null;
         // DECAPITATE: a death may have removed the HVT's last in-range guard — re-evaluate now so the
         // HVT is immediately exposed (the telegraph + reduced-damage gate flip the same frame).
@@ -2362,6 +2406,110 @@ public partial class Game
         Fx.PopText(ldr.Pos + new Vector2(0, -34), "BROKEN", Pal.Good, 20f);
         Fx.Flash(ldr.Pos, Pal.Good, 26f, 0.2f, 0.5f);
         ShowBanner("POD ROUTED", false);
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    //  FUL-7 LAST LIGHT — the DOWN / bleed-out window (death stakes get counterplay)
+    //  Lethal damage on a soldier opens a 3-turn window instead of an instant cut:
+    //  STABILIZE (any adjacent soldier, 1 action) freezes the timer; the corpsman's
+    //  PATCH revives; DRAG/EXTRACT carry the body; blasts and fire finish the job.
+    //  ONE down per soldier per mission (WasDownedThisMission) — no revive-tanking.
+    // ──────────────────────────────────────────────────────────────────────────
+    public const int DownedTimerTurns = 3;   // player-turn countdown (ticks in StartPlayerTurn)
+
+    /// The single purge shared by KillUnit and EnterDowned: drop the unit's queued moves AND any
+    /// queued surplus reaction ShotAnims aimed at it (the active blow — the one that caused this —
+    /// is excluded so the current shot still finishes normally).
+    void PurgeAnimsFor(Unit d)
+    {
+        _anims.RemoveAll(a => (a is MoveStepAnim m && m.Unit == d)
+                           || (a is ShotAnim s && s.D == d && a != ActiveAnim));
+    }
+
+    /// FUL-7: does this lethal event open a bleed-out window instead of killing? Soldiers only
+    /// (the VIP/captive dies instantly — mission-shape semantics; enemies rout, not bleed), and
+    /// only ONCE per soldier per mission — the anti-revive-tank rule.
+    bool CanGoDown(Unit d)
+        => d.Team == Team.Player && !d.IsVip && !d.Downed && !d.WasDownedThisMission;
+
+    /// A soldier drops: Hp 0 but ALIVE, 3 turns on the squad's clock. Deliberately NOT fired here:
+    /// Fallen/Memorial, _missionKia/KIA stamp/DeathFlash, SecondaryFailed (NoLosses), Stats.RecordKill,
+    /// DeathsByClass — death bookkeeping is death's (ExpireDowned runs the full flow via KillUnit).
+    void EnterDowned(Unit d)
+    {
+        d.Downed = true;
+        d.WasDownedThisMission = true;
+        d.Stabilized = false;
+        d.DownedTurns = DownedTimerTurns;
+        d.Hp = 0;
+        // attribution snapshot — the same switch KillUnit computes, taken NOW so a later bleed-out
+        // names the archetype that actually downed them (or the DoT label, which buckets "?").
+        Unit downer = ActiveAnim switch { ShotAnim sa => sa.A, GrenadeAnim ga => ga.Thrower, _ => null };
+        d.DownedByCls = downer != null ? downer.Cls
+                      : (string.IsNullOrEmpty(d.LastDotSource) ? "?" : d.LastDotSource);
+        d.Statuses.Clear();                      // no double timers (ground fire still kills via the AoE rule)
+        d.OnOverwatch = false; d.OwFocused = false; d.OwBrace = false; d.Hunkered = false;
+        d.RunGun = false; d.Blitz = false; d.Steady = false; d.Slipstreaming = false;
+        d.ActionsLeft = 0;
+        PurgeAnimsFor(d);                        // queued moves + surplus reactions at the falling body
+        if (Selected == d) Selected = null;
+        // the Vengeful stage fires at the FALL — an "avenged" revenge shot over a still-breathing
+        // squadmate is the drama working (true death re-sets the same flag; idempotent).
+        foreach (var p in Players) if (p.Alive && p != d && !p.IsVip && !p.Downed) p.AllyDown = true;
+        Stats.RecordDown();                      // FUL-7 telemetry: downs staged (save-rate denominator)
+        // feel: decisive but NOT death — the KIA stamp/flash stay reserved for the real thing.
+        Color c = Pal.Foe;
+        Fx.Stamp(d.Pos + new Vector2(0, -34), "DOWN  " + d.FullName, c, 28f, 2.0f);
+        Fx.Shockwave(d.Pos, c, 8f, 30f, 3f, 0.7f, 0.3f);
+        Fx.Burst(d.Pos, c, 18, 200f, 0.6f, 3.5f, true);
+        Fx.AddShake(5f);                         // softer than the kill's 7+9
+        AddHitStop(0.08f);
+        Audio.Play("death");
+        ShowBanner($"SOLDIER DOWN - {DownedTimerTurns} TURNS TO REACH THEM", true);
+        BannerSub = "stabilize to stop the bleeding - a corpsman's PATCH gets them up";
+    }
+
+    /// The timer ran out: the FULL death flow runs — Fallen + Memorial append, KIA stamp,
+    /// DeathsByClass keyed on the DOWNING archetype (via Downed still true + DownedByCls), and a
+    /// bleed-out KIA reaches Run.Fallen identically to an instant KIA (FUL-10's RemoveVeterans
+    /// needs no special case, by construction). Downed stays true through the KillUnit call so
+    /// CanGoDown refuses a re-down; cleared after so a corpse never renders/reads as "down".
+    void ExpireDowned(Unit d)
+    {
+        d.LastDotSource = d.DownedByCls;         // flywheel threat ranking: the downing cause owns the KIA
+        d.Hp = 0;
+        Fx.PopText(d.Pos + new Vector2(0, -26), "BLED OUT", Pal.Foe, 20f);
+        Stats.RecordDownExpired();
+        KillUnit(d);
+        d.Downed = false; d.Stabilized = false; d.DownedTurns = 0;
+    }
+
+    /// STABILIZE (universal verb): any soldier with an action, Chebyshev-adjacent to a downed,
+    /// un-stabilized ally. 1 action, does NOT end the turn (the DRAG/EXTRACT support convention).
+    public Unit StabilizeTarget(Unit u)
+    {
+        if (u == null || u.Team != Team.Player || u.IsVip || !u.CanAct || u.ActionsLeft < 1) return null;
+        foreach (var p in Players)
+        {
+            if (p == u || !p.Alive || !p.Downed || p.Stabilized) continue;
+            if (Util.ChebyDist(u.X, u.Y, p.X, p.Y) <= 1) return p;
+        }
+        return null;
+    }
+
+    public bool CanStabilize(Unit u) => StabilizeTarget(u) != null;
+
+    void DoStabilize()
+    {
+        var t = StabilizeTarget(Selected);
+        if (t == null) return;
+        Selected.ActionsLeft -= 1;               // a support action — never ends the turn
+        t.Stabilized = true;
+        Stats.RecordAction("STABILIZE");         // W2 verb telemetry chokepoint
+        Fx.PopText(t.Pos + new Vector2(0, -30), "STABILIZED", Pal.Good, 20f);
+        Fx.Burst(t.Pos, Pal.Good, 12, 120f, 0.45f, 3f);
+        Fx.PopText(Selected.Pos + new Vector2(0, -30), "STABILIZE", Pal.Good, 15f);
+        Audio.Play("reload");
     }
 
     /// True when killing `d` decides the mission (last hostile on an Eliminate, a squad
@@ -3569,6 +3717,7 @@ public partial class Game
         if (Raylib.IsKeyPressed(KeyboardKey.Seven)) ToggleDrag();
         if (Raylib.IsKeyPressed(KeyboardKey.Nine)) ToggleVault();
         if (Raylib.IsKeyPressed(KeyboardKey.H)) DoHack();
+        if (Raylib.IsKeyPressed(KeyboardKey.T)) DoStabilize();   // FUL-7: stabilize an adjacent downed ally
         if (Raylib.IsKeyPressed(KeyboardKey.G)) DoBeacon();          // UNDERTOW W6: deploy forward evac beacon (moved off B — collided with W2 BRACE)
         if (Raylib.IsKeyPressed(KeyboardKey.X)) DoExtract();
         if (Raylib.IsKeyPressed(KeyboardKey.R)) DoReload();
@@ -3811,11 +3960,12 @@ public partial class Game
             case "hack": DoHack(); break;
             case "beacon": DoBeacon(); break;
             case "extract": DoExtract(); break;
+            case "stabilize": DoStabilize(); break;   // FUL-7: freeze an adjacent downed ally's timer
             case "reload": DoReload(); break;
         }
     }
 
-    void SelectUnit(Unit u) { Selected = u; AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false; DragMode = false; VaultMode = false; Audio.Play("select"); }
+    void SelectUnit(Unit u) { if (u != null && u.Downed) return; /* FUL-7: a downed body is never selectable */ Selected = u; AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false; DragMode = false; VaultMode = false; Audio.Play("select"); }
 
     void CycleSelection()
     {
@@ -4834,6 +4984,31 @@ public partial class Game
                 if (ally == null) return;
                 // COMBAT MEDIC fork heals 1 less (PatchHeal-1) — the trade for self-target + reach 2.
                 int baseHeal = u.HasSpec(Spec.CombatMedic) ? Unit.PatchHeal - 1 : Unit.PatchHeal;
+                // FUL-7 REVIVE — the corpsman's stage: a DOWNED squadmate (Hp 0 is always the
+                // most-wounded eligible target) gets back UP at the heal value instead. They act
+                // on their NEXT turn (ActionsLeft 0 now); FieldSurgeon's triage rides along;
+                // Cd 3 unchanged; the same PATCH telemetry measures the new stage for free.
+                if (ally.Downed)
+                {
+                    ally.Downed = false; ally.Stabilized = false; ally.DownedTurns = 0;
+                    ally.Hp = Math.Min(ally.MaxHp, Math.Max(1, baseHeal));
+                    ally.ActionsLeft = 0;                       // up, but they act next turn
+                    u.AbilityCd = Unit.AbilityCooldownFor(u.Ability); u.ActionsLeft -= 1;
+                    Stats.RecordAction("PATCH");                // the FUL-5 PATCH counter
+                    Stats.RecordDownRevived();                  // FUL-7 telemetry: a save, not a KIA
+                    if (u.HasSpec(Spec.FieldSurgeon))
+                    {
+                        ally.Wound = 0; ally.Statuses.Clear();
+                        Fx.PopText(ally.Pos + new Vector2(0, -50), "TRIAGE", Pal.Good, 16f);
+                    }
+                    Fx.PopText(ally.Pos + new Vector2(0, -34), "REVIVED", Pal.Good, 22f);
+                    Fx.Burst(ally.Pos, Pal.Good, 16, 160f, 0.5f, 3.5f, true);
+                    Fx.Flash(ally.Pos, Pal.Good, 22f, 0.16f, 0.5f);
+                    Fx.PopText(at, "PATCH", Pal.Good, 16f);
+                    ally.Flash = 0.6f;
+                    Audio.Play("reload");
+                    break;
+                }
                 int healed = Math.Min(baseHeal, ally.MaxHp - ally.Hp);
                 if (healed <= 0) return;
                 ally.Hp += healed;
@@ -5055,7 +5230,24 @@ public partial class Game
         UpdateHvtGuard();                 // DECAPITATE: refresh the HVT's guarded state at the boundary (a guard may have moved)
         if (AutoPlay) AutoStallCheck();
         // APEX W2: deny the caged RESCUE captive its start-of-turn action re-grant (see SetupMission).
-        foreach (var p in Players) if (p.Alive) { p.BeginTurn(); TickStatuses(p); if (p == Vip && CaptiveLocked) p.ActionsLeft = 0; }
+        // FUL-7: the bleed-out countdown ticks HERE — on the squad's clock, where the player
+        // decides. STABILIZE freezes it — but only while a soldier is still standing: with the
+        // whole squad down (or dead) there is nobody left to hold the dressing, so stabilized
+        // timers run too — the degenerate all-downed board resolves in <= 3 bounded turns
+        // (expire -> KillUnit -> the real wipe), never an infinite stall. Pinned in DOWNTEST.
+        bool anySoldierUp = Players.Any(q => q.Alive && !q.Downed && !q.IsVip);
+        foreach (var p in Players) if (p.Alive)
+        {
+            p.BeginTurn(); TickStatuses(p);
+            if (p == Vip && CaptiveLocked) p.ActionsLeft = 0;
+            if (p.Downed)
+            {
+                p.ActionsLeft = 0;               // never acts, never selectable (CanAct false)
+                if ((!p.Stabilized || !anySoldierUp) && --p.DownedTurns <= 0) ExpireDowned(p);
+                else if (p.Alive && !p.Stabilized)
+                    Fx.PopText(p.Pos + new Vector2(0, -30), $"DOWN {p.DownedTurns}", Pal.Foe, 16f);
+            }
+        }
         foreach (var e in Enemies) if (e.Alive) { e.ReactedThisTurn = false; e.Suppress = 0; } // OW resets; suppression expires
         Selected = Players.FirstOrDefault(p => p.CanAct);
         AimMode = false;
@@ -5094,8 +5286,9 @@ public partial class Game
     {
         if (Objective != Objective.Escort && Objective != Objective.Rescue) return;
         if (Vip == null || !Vip.Alive || CaptiveLocked || Vip.MoveBudget <= 0) return;
-        // the soldiers the asset follows: living, non-VIP squad members
-        var soldiers = Players.Where(p => p.Alive && !p.IsVip).ToList();
+        // the soldiers the asset follows: living, non-VIP squad members (FUL-7: not a downed
+        // body — the asset must never park itself beside a bleeding-out soldier in a fire lane)
+        var soldiers = Players.Where(p => p.Alive && !p.IsVip && !p.Downed).ToList();
         if (soldiers.Count == 0) return;                       // nobody to follow (a wipe handles the loss)
         if (EvacZone.Contains((Vip.X, Vip.Y))) return;         // already extracted position — win check handles it
         // The asset FOLLOWS the squad toward evac. The leash anchor is the nearest soldier that is CLOSER to

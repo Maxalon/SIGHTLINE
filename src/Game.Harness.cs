@@ -1049,7 +1049,7 @@ public partial class Game
     public void DebugKia()
     {
         var c = Players.Where(p => !p.IsVip).ToList();
-        if (c.Count > 1) { var v = c[1]; v.Nickname = "GHOST"; v.Hp = 0; KillUnit(v); }
+        if (c.Count > 1) { var v = c[1]; v.Nickname = "GHOST"; v.WasDownedThisMission = true; /* FUL-7: stage the TRUE death (skip the bleed-out) */ v.Hp = 0; KillUnit(v); }
     }
 
     /// Harness hook (screenshot only, SIGHTLINE_SUMMARY): stage a finished run and jump to the
@@ -1179,7 +1179,9 @@ public partial class Game
         var before = _run.Squad.Select(u => u.Name).ToList();
         _run.CurrentCard = new MissionCard { Objective = Objective.Escort, ModName = "STANDARD", Reward = RewardKind.None };
         SetupMission(1);
-        foreach (var u in Players.Where(p => !p.IsVip).ToList()) { u.Hp = 0; KillUnit(u); }
+        // FUL-7: stage TRUE deaths via the real anti-revive rule (a second lethal event kills
+        // outright) — this test pins death CONSEQUENCE, not the bleed-out window (DOWNTEST's job).
+        foreach (var u in Players.Where(p => !p.IsVip).ToList()) { u.WasDownedThisMission = true; u.Hp = 0; KillUnit(u); }
         int stillAlive = AlivePlayers().Count(p => !p.IsVip);
         Vip.X = EvacZone[0].x; Vip.Y = EvacZone[0].y;     // VIP reaches extraction -> escort win
         CheckEnd();                                        // -> EnterBarracks
@@ -1213,7 +1215,7 @@ public partial class Game
             _run.CurrentCard = new MissionCard { Objective = obj, ModName = "STANDARD", Reward = RewardKind.None };
             SetupMission(1);
             if (obj == Objective.Rescue) CaptiveLocked = false;   // the captive was freed before the squad fell
-            foreach (var u in Players.Where(p => !p.IsVip).ToList()) { u.Hp = 0; KillUnit(u); }
+            foreach (var u in Players.Where(p => !p.IsVip).ToList()) { u.WasDownedThisMission = true; /* FUL-7: true deaths */ u.Hp = 0; KillUnit(u); }
             Vip.X = EvacZone[0].x; Vip.Y = EvacZone[0].y;         // the asset walks out alone
             CheckEnd();                                            // objective win -> EnterBarracks -> DebriefSurvivors
             if (Phase != Phase.Barracks) { fails.Add($"{tag}:phase={Phase}"); return; }
@@ -1282,6 +1284,7 @@ public partial class Game
         // (1) idempotency: killing a soldier twice adds EXACTLY one Fallen + one Memorial entry.
         var s = Players.First(u => u.Alive && !u.IsVip);
         int fb = _run.Fallen.Count, mb = _run.Memorial.Count;
+        s.WasDownedThisMission = true;   // FUL-7: this test pins DEATH idempotency — skip the bleed-out
         s.Hp = 0; KillUnit(s);
         int fa1 = _run.Fallen.Count, ma1 = _run.Memorial.Count;
         KillUnit(s);                                         // corpse — must be a no-op
@@ -1473,7 +1476,7 @@ public partial class Game
         _run = new Run(); _run.Start();
         _run.CurrentCard = new MissionCard { Objective = Objective.Rescue, ModName = "STANDARD", Reward = RewardKind.None };
         SetupMission(1);
-        foreach (var u in Players.Where(p => p.Alive && !p.IsVip).ToList()) { u.Hp = 0; KillUnit(u); }
+        foreach (var u in Players.Where(p => p.Alive && !p.IsVip).ToList()) { u.WasDownedThisMission = true; /* FUL-7: true deaths */ u.Hp = 0; KillUnit(u); }
         CheckEnd();
         if (Phase != Phase.Lose) fails.Add($"abandonNoLoss phase={Phase}");
         else if (LoseTitle != "CAPTIVE ABANDONED") fails.Add($"abandonTitle={LoseTitle}");
@@ -1483,7 +1486,7 @@ public partial class Game
         _run = new Run(); _run.Start();
         _run.CurrentCard = new MissionCard { Objective = Objective.Rescue, ModName = "STANDARD", Reward = RewardKind.None };
         SetupMission(3);
-        foreach (var u in Players.Where(p => p.Alive && !p.IsVip).ToList()) { u.Hp = 0; KillUnit(u); }
+        foreach (var u in Players.Where(p => p.Alive && !p.IsVip).ToList()) { u.WasDownedThisMission = true; /* FUL-7: true deaths */ u.Hp = 0; KillUnit(u); }
         CheckEnd();
         if (!_run.CheckpointUsed) fails.Add("redeployNotFired");
         if (Phase != Phase.PlayerTurn) fails.Add($"redeployPhase={Phase}");
@@ -1494,7 +1497,7 @@ public partial class Game
         // (single-mission modes have no checkpoint valve).
         BeginSkirmish(Objective.Rescue, 0);
         if (!CaptiveLocked) fails.Add("skirmishNotLocked");
-        foreach (var u in Players.Where(p => p.Alive && !p.IsVip).ToList()) { u.Hp = 0; KillUnit(u); }
+        foreach (var u in Players.Where(p => p.Alive && !p.IsVip).ToList()) { u.WasDownedThisMission = true; /* FUL-7: true deaths */ u.Hp = 0; KillUnit(u); }
         CheckEnd();
         if (Phase != Phase.Lose) fails.Add($"skirmishAbandonPhase={Phase}");
 
@@ -2114,6 +2117,254 @@ public partial class Game
         }
         if (bestPod >= 0) ActivatePod(bestPod);
         else if (Enemies.Count > 0) ActivatePod(Enemies[0].PodId);   // no linkable pair on this seed
+    }
+
+    /// SIGHTLINE_DOWNTEST — FUL-7 LAST LIGHT: the DOWN / bleed-out state machine. Controlled
+    /// scenes (the DKTEST/MORALETEST staging patterns) assert the eight spec legs:
+    /// (a) DOWN entry (alive, Hp 0, timer 3, no death bookkeeping, reactions purged, AllyDown),
+    /// (b) EXPIRE (dead exactly once via the FULL death flow; cause = the downing archetype;
+    ///     NoLosses failed), (c) STABILIZE + barracks recovery (timer frozen; won field recovers
+    ///     the body wounded + the near-death scar track fires), (d) corpsman REVIVE (PatchHeal
+    ///     Hp; CombatMedic 3 at reach 2; Cd 3; up-but-actionless), (e) NO SECOND DOWN (a revived
+    ///     soldier's next lethal kills outright; AoE on a downed body kills outright), (f) the
+    ///     AI ignores the downed (never a ShootTarget; all-downed squad -> empty plans, no
+    ///     exception; stabilized timers UNFREEZE with no soldier up, so the board stays bounded),
+    /// (g) the VIP still dies instantly, (h) the carry kit is pinned (DRAG at Cheby-2 +
+    ///     EXTRACT from zone-adjacent move a downed body). Returns a one-line report.
+    public string DownSelfTest()
+    {
+        NoPersist = true;
+        var fails = new System.Collections.Generic.List<string>();
+        _run = new Run(); _run.Start();
+
+        void Pump()
+        {
+            while (_anims.Count > 0)
+            {
+                var a = _anims[0]; a.OnStart(this);
+                for (int i = 0; i < 200 && !a.Update(this, 0.05f); i++) { }
+                if (_anims.Count > 0 && _anims[0] == a) _anims.RemoveAt(0);
+            }
+        }
+        Unit MkP(string name, int x, int y, string cls = "ASSAULT")
+        {
+            var u = new Unit { Name = name, Cls = cls, Team = Team.Player, X = x, Y = y,
+                               Hp = 8, MaxHp = 8, Aim = 65, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+            u.Ammo = u.Weapon.Clip; u.SyncPos(); u.BeginTurn(); return u;
+        }
+        Unit MkE(string name, int x, int y, string cls = "GRUNT")
+        {
+            var u = new Unit { Name = name, Cls = cls, Team = Team.Enemy, X = x, Y = y,
+                               Hp = 6, MaxHp = 6, Aim = 60, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+            u.Ammo = u.Weapon.Clip; u.Alert = AlertLevel.Alert; u.SyncPos(); u.BeginTurn(); return u;
+        }
+        void Scene()
+        {
+            Grid = new Grid();
+            Players = new System.Collections.Generic.List<Unit>();
+            Enemies = new System.Collections.Generic.List<Unit>();
+            Vip = null; CaptiveLocked = false; Hvt = null; SquadConcealed = false;
+            Objective = Objective.Eliminate; EvacZone.Clear(); _anims.Clear();
+            Phase = Phase.PlayerTurn;
+        }
+
+        // ---- (a) DOWN entry: a lethal shot opens the window, without death bookkeeping ----
+        Scene();
+        var sol = MkP("SOL", 4, 5); var mate = MkP("MATE", 4, 7);
+        Players.Add(sol); Players.Add(mate);
+        var foe = MkE("E1", 9, 5);
+        Enemies.Add(foe);
+        int f0 = _run.Fallen.Count, m0 = _run.Memorial.Count, k0 = _missionKia.Count;
+        SecondaryFailed = false;
+        var res = Combat.Resolve(Grid, foe, sol);
+        Enqueue(new ShotAnim(foe, sol, res, reaction: true), Team.Enemy);   // [0] = the ACTIVE blow (attribution source)
+        Enqueue(new ShotAnim(foe, sol, res, reaction: true), Team.Enemy);   // [1] = surplus reaction at the body (must purge)
+        sol.Hp = 0; KillUnit(sol);                                          // the single lethal seam
+        if (!sol.Alive)                 fails.Add("a:died");
+        if (!sol.Downed)                fails.Add("a:notDowned");
+        if (sol.Hp != 0)                fails.Add($"a:hp={sol.Hp}");
+        if (sol.DownedTurns != DownedTimerTurns) fails.Add($"a:timer={sol.DownedTurns}");
+        if (sol.ActionsLeft != 0)       fails.Add("a:actions");
+        if (sol.DownedByCls != "GRUNT") fails.Add($"a:cause={sol.DownedByCls}");
+        if (_run.Fallen.Count != f0)    fails.Add("a:fallenBumped");
+        if (_run.Memorial.Count != m0)  fails.Add("a:memorialBumped");
+        if (_missionKia.Count != k0)    fails.Add("a:kiaBumped");
+        if (SecondaryFailed)            fails.Add("a:noLossesFailedEarly");
+        if (_anims.Count(x => x is ShotAnim sh && sh.D == sol) != 1) fails.Add("a:surplusKept");
+        if (!mate.AllyDown)             fails.Add("a:vengefulNotStaged");
+        if (StabilizeTarget(mate) != null) fails.Add("a:stabilizeFromRange");   // mate at Cheby 2: not adjacent
+        _anims.Clear();
+
+        // ---- (b) EXPIRE: three player-turn ticks run the FULL death flow exactly once ----
+        StartPlayerTurn();                                   // 3 -> 2
+        if (!sol.Alive || sol.DownedTurns != 2) fails.Add($"b:tick1 alive={sol.Alive} t={sol.DownedTurns}");
+        StartPlayerTurn();                                   // 2 -> 1
+        if (!sol.Alive || sol.DownedTurns != 1) fails.Add($"b:tick2 alive={sol.Alive} t={sol.DownedTurns}");
+        StartPlayerTurn();                                   // 1 -> 0: bleed out
+        if (sol.Alive)                    fails.Add("b:survivedExpiry");
+        if (sol.Downed)                   fails.Add("b:corpseStillDowned");
+        if (_run.Fallen.Count != f0 + 1)  fails.Add($"b:fallen={_run.Fallen.Count - f0}");
+        if (_run.Memorial.Count != m0 + 1) fails.Add($"b:memorial={_run.Memorial.Count - m0}");
+        if (_missionKia.Count != k0 + 1)  fails.Add("b:kiaStamp");
+        if (!SecondaryFailed)             fails.Add("b:noLossesNotFailed");
+        if (DeathsByClass.GetValueOrDefault("GRUNT") < 1) fails.Add("b:causeNotArchetype");
+        StartPlayerTurn();                                   // a 4th tick must not double-count
+        if (_run.Fallen.Count != f0 + 1)  fails.Add("b:doubleFallen");
+
+        // ---- (c) STABILIZE freezes the timer; a WON field recovers the body ----
+        _run = new Run(); _run.Start();
+        _run.CurrentCard = new MissionCard { Objective = Objective.Eliminate, ModName = "STANDARD", Reward = RewardKind.None };
+        SetupMission(1);
+        var down3 = Players.First(p => p.Alive && !p.IsVip);
+        var saver = Players.First(p => p.Alive && !p.IsVip && p != down3);
+        string downName = down3.Name;
+        down3.Hp = 0; KillUnit(down3);                       // downs (no anim: cause is "?")
+        if (!down3.Downed) fails.Add("c:notDowned");
+        saver.X = down3.X + 1; saver.Y = down3.Y; saver.SyncPos();   // adjacent
+        Selected = saver; saver.ActionsLeft = 2;
+        int act0 = saver.ActionsLeft;
+        DoStabilize();
+        if (!down3.Stabilized)              fails.Add("c:notStabilized");
+        if (saver.ActionsLeft != act0 - 1)  fails.Add("c:actionCost");
+        int tFrozen = down3.DownedTurns;
+        StartPlayerTurn(); StartPlayerTurn();
+        if (!down3.Alive || down3.DownedTurns != tFrozen) fails.Add($"c:timerNotFrozen t={down3.DownedTurns}");
+        foreach (var e in Enemies.ToList()) if (e.Alive) { e.Hp = 0; KillUnit(e); }   // win the field
+        CheckEnd();                                          // Eliminate cleared -> EnterBarracks
+        if (Phase != Phase.Barracks) fails.Add($"c:phase={Phase}");
+        var rec = _run.Squad.FirstOrDefault(u => u.Name == downName);
+        if (rec == null)                     fails.Add("c:notRecovered");
+        else
+        {
+            if (rec.Downed)                  fails.Add("c:stillDowned");
+            if (rec.Wound < 2)               fails.Add($"c:wound={rec.Wound}");   // set 3; the debrief machinery decays it once
+            if (rec.NearDeathCount != 1)     fails.Add($"c:nearDeath={rec.NearDeathCount}");
+            if (!_run.Report.Any(r => r.Contains("recovered from the field"))) fails.Add("c:noReportLine");
+        }
+
+        // ---- (d) REVIVE: the corpsman PATCH gets a downed soldier back up ----
+        Scene();
+        var med = MkP("MED", 5, 5, "CORPSMAN");
+        var pat = MkP("PAT", 6, 5);
+        Players.Add(med); Players.Add(pat);
+        pat.Hp = 0; KillUnit(pat);
+        if (!pat.Downed) fails.Add("d:notDowned");
+        Selected = med; med.ActionsLeft = 2; med.AbilityCd = 0;
+        DoAbility();
+        if (pat.Downed)                       fails.Add("d:stillDowned");
+        if (pat.Hp != Unit.PatchHeal)         fails.Add($"d:hp={pat.Hp}");
+        if (pat.ActionsLeft != 0)             fails.Add("d:actedSameTurn");
+        if (med.AbilityCd != Unit.AbilityCooldownFor(AbilityKind.Heal)) fails.Add($"d:cd={med.AbilityCd}");
+        // CombatMedic fork: reach 2, revive at PatchHeal-1
+        var pat2 = MkP("PAT2", 7, 5);
+        Players.Add(pat2);
+        pat2.Hp = 0; KillUnit(pat2);
+        med.Spec = Spec.CombatMedic; med.AbilityCd = 0; med.ActionsLeft = 2;
+        Selected = med;                                       // pat2 at Cheby 2 from med
+        DoAbility();
+        if (pat2.Downed)                      fails.Add("d:medicReachFailed");
+        if (pat2.Hp != Unit.PatchHeal - 1)    fails.Add($"d:medicHp={pat2.Hp}");
+
+        // ---- (e) NO SECOND DOWN: revived -> next lethal kills; AoE on a downed body kills ----
+        EnvDamage(pat, 99, "BLEED", Pal.Foe);                 // pat was downed this mission
+        if (pat.Alive) fails.Add("e:reviveTanked");
+        var body = MkP("BODY", 4, 8);
+        Players.Add(body);
+        body.Hp = 0; KillUnit(body);
+        if (!body.Downed) fails.Add("e:notDowned");
+        var lobber = MkE("LOB", 8, 8);
+        Enemies.Add(lobber);
+        _anims.Clear();
+        Enqueue(new GrenadeAnim(lobber, body.X, body.Y), Team.Enemy);   // AoE stays blind — and lethal
+        Pump();
+        if (body.Alive) fails.Add("e:grenadeSparedBody");
+
+        // ---- (f) AI IGNORES the downed; all-downed squad = bounded, exception-free ----
+        Scene();
+        var up1 = MkP("UP", 4, 5); var dn1 = MkP("DN", 5, 5);
+        Players.Add(up1); Players.Add(dn1);
+        var hunter = MkE("HNT", 9, 5, "HOUND");               // prey logic must skip the downed too
+        Enemies.Add(hunter);
+        dn1.Hp = 0; KillUnit(dn1);
+        _aiUnits = AliveEnemies().Where(x => x.Active).ToList();
+        PlanEnemySquad();
+        var plan1 = Ai.Plan(this, hunter);
+        if (plan1.ShootTarget == dn1) fails.Add("f:shotTheDowned");
+        up1.Hp = 0; up1.WasDownedThisMission = false; KillUnit(up1);   // now ALL soldiers are down
+        if (!up1.Downed) fails.Add("f:secondDownBlocked");
+        try
+        {
+            PlanEnemySquad();
+            var plan2 = Ai.Plan(this, hunter);
+            if (plan2.ShootTarget != null) fails.Add("f:allDownedTargeted");
+        }
+        catch (Exception ex) { fails.Add("f:planThrew:" + ex.GetType().Name); }
+        // stabilized-but-nobody-up: the freeze needs a standing squad — timers run, board bounded
+        dn1.Stabilized = true;
+        StartPlayerTurn(); StartPlayerTurn(); StartPlayerTurn();
+        if (dn1.Alive || up1.Alive) fails.Add("f:allDownedStalled");
+
+        // ---- (g) the VIP/captive keeps instant death ----
+        Scene();
+        Players.Add(MkP("S", 3, 3));
+        Vip = Mission.MakeVip(1); Vip.X = 5; Vip.Y = 3; Vip.SyncPos(); Vip.BeginTurn();
+        Players.Add(Vip);
+        Vip.Hp = 0; KillUnit(Vip);
+        if (Vip.Alive || Vip.Downed) fails.Add("g:vipWentDown");
+
+        // ---- (h) the carry kit: DRAG at Cheby-2, EXTRACT from zone-adjacent ----
+        Scene();
+        Objective = Objective.Evac;
+        EvacZone.Add((16, 5)); EvacZone.Add((16, 6));
+        var puller = MkP("PULL", 16, 5);                      // in the zone
+        var hauler = MkP("HAUL", 4, 5);
+        var load = MkP("LOAD", 6, 5);
+        Players.Add(puller); Players.Add(hauler); Players.Add(load);
+        load.Hp = 0; KillUnit(load);
+        if (!load.Downed) fails.Add("h:notDowned");
+        Selected = hauler; hauler.ActionsLeft = 2;
+        if (!DragTargetOk(hauler, load)) fails.Add("h:dragRefused");
+        else
+        {
+            IssueDrag(load); Pump();
+            if (load.X != 5 || load.Y != 5) fails.Add($"h:dragLanded={load.X},{load.Y}");
+        }
+        load.X = 15; load.Y = 5; load.SyncPos();              // zone-adjacent
+        Selected = puller; puller.ActionsLeft = 2;
+        if (ExtractCandidate(puller) != load) fails.Add("h:extractRefused");
+        else
+        {
+            DoExtract();
+            if (!EvacZone.Contains((load.X, load.Y))) fails.Add("h:extractDidNotLand");
+        }
+
+        return fails.Count == 0
+            ? "DOWNTEST: PASS (down entry clean of death bookkeeping; expiry runs the full death flow once, cause = downing archetype; stabilize freezes + won field recovers wounded/scarred; corpsman revive incl. CombatMedic reach; no second down + AoE finishes; AI ignores downed + all-downed bounded; VIP instant; drag/extract carry pinned)"
+            : "DOWNTEST: FAIL (" + string.Join(",", fails) + ")";
+    }
+
+    /// FUL-7 harness hook (screenshot only): stage the DOWN reads on the live board — a downed
+    /// soldier (prone body + pulsing red ring + the DOWN 3 pill + red roster chip), a squadmate
+    /// standing adjacent with the STABILIZE button lit, and the SOLDIER DOWN banner naming the
+    /// timer. Pair with SIGHTLINE_CB=1 for the colorblind pass (DESIGN 3.H coded-state rule).
+    public void DebugDownShot()
+    {
+        var sold = Players.Where(p => p.Alive && !p.IsVip).ToList();
+        if (sold.Count < 2) return;
+        var body = sold[1];
+        body.Hp = 0; KillUnit(body);                          // -> EnterDowned via the real seam
+        // park a rescuer adjacent so STABILIZE lights up, and select it
+        var rescuer = sold.FirstOrDefault(p => p != body && p.Ability == AbilityKind.Heal) ?? sold[0];
+        for (int dx = -1; dx <= 1 && !(Util.ChebyDist(rescuer.X, rescuer.Y, body.X, body.Y) == 1); dx++)
+            for (int dy = -1; dy <= 1; dy++)
+            {
+                if (dx == 0 && dy == 0) continue;
+                int nx = body.X + dx, ny = body.Y + dy;
+                if (Grid.InBounds(nx, ny) && Grid.IsFloor(nx, ny) && !IsOccupiedByOther(nx, ny, rescuer))
+                { rescuer.X = nx; rescuer.Y = ny; rescuer.SyncPos(); break; }
+            }
+        rescuer.ActionsLeft = 2;
+        Selected = rescuer;
     }
 
     /// Headless self-test (SIGHTLINE_STATUSTEST): status effects tick, decay, and read

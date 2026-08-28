@@ -587,6 +587,12 @@ public static class SaveGame
             a.Scars.Add(Scar.ShellShocked); a.Scars.Add(Scar.Vendetta);
             a.VendettaFaction = Faction.Wardens;
             a.NearDeathCount = 2;
+            // FUL-7 belt-and-suspenders: gameplay guarantees Downed can never exist at the
+            // mission-START checkpoint (EnterBarracks resolves every Downed first) — but even a
+            // hand-built downed-and-recovered soldier must persist ONLY Hp/Wound/scars: the DOWN
+            // transients are save-inert by the ToUnitDto whitelist, by construction.
+            a.Downed = true; a.Stabilized = true; a.DownedTurns = 2;
+            a.WasDownedThisMission = true; a.DownedByCls = "GRUNT";
             src.Squad.Add(a);
             var n = new Unit { Name = "NOX", Cls = "SHARPSHOOTER", Team = Team.Player, Hp = 6, MaxHp = 6, Aim = 76, Mobility = 6, Weapon = Weapon.Make(WeaponKind.Sniper), Kills = 2, Rank = 1 };
             n.Bonds.Add("VEGA");
@@ -630,6 +636,9 @@ public static class SaveGame
             if (!g0.HasScar(Scar.ShellShocked) || !g0.HasScar(Scar.Vendetta) || g0.Scars.Count != 2) fails.Add("scars");
             if (g0.VendettaFaction != Faction.Wardens) fails.Add("vendettaFaction");
             if (g0.NearDeathCount != 2) fails.Add("nearDeathCount");
+            // FUL-7: the DOWN state machine is transient — none of it round-trips (whitelist)
+            if (g0.Downed || g0.Stabilized || g0.DownedTurns != 0
+                || g0.WasDownedThisMission || g0.DownedByCls != null) fails.Add("downStatePersisted");
             if (!got.BondTally.TryGetValue(Run.BondKey("VEGA", "NOX"), out var bt) || bt != 3) fails.Add("bondTally");
             if (got.CurrentCard == null || got.CurrentCard.Objective != Objective.Hack ||
                 got.CurrentCard.EnemyDelta != 2 || got.CurrentCard.Reward != RewardKind.BonusPerk)

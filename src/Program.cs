@@ -177,6 +177,16 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        // SIGHTLINE_DOWNTEST=1 : FUL-7 LAST LIGHT — the DOWN/bleed-out state machine (entry clean
+        // of death bookkeeping, expiry = the full death flow once, stabilize/revive/recovery, no
+        // second down + AoE finishes, AI ignores the downed, VIP instant, drag/extract carry).
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_DOWNTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "downtest");
+            Console.WriteLine(new Game().DownSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         // SIGHTLINE_RESCUETEST=1 : APEX W2 — the caged Rescue captive is actionless until freed
         // (freeing restores actions/movement), and the all-soldiers-dead-while-caged soft-lock
         // resolves (checkpoint redeploy at m3+ / CAPTIVE ABANDONED loss / skirmish loss).
@@ -491,6 +501,7 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_PODSHOT") == "1") game.DebugPodShot();   // FUL-6: pair with SIGHTLINE_MISSION=3
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_WAVEBANNER") == "1") game.DebugWaveTelegraph();   // FUL-4: pair with SIGHTLINE_OBJ=defend
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_PIKESHOT") == "1") game.DebugPikemanLane();       // FUL-8: planted PIKEMAN lane (pair with SIGHTLINE_CB=1 for the second pass)
+        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_DOWNSHOT") == "1") game.DebugDownShot();          // FUL-7: downed soldier + rescuer (pair with SIGHTLINE_CB=1 for the second pass)
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CONCEAL") == "1") game.DebugConcealment();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_INTENT") == "1") game.DebugIntent();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_SIEGE") == "1") game.DebugSiege();

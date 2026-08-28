@@ -348,17 +348,21 @@ public static class Hud
             float fillA = a;
             float txtA  = a;
 
+            // FUL-7: a DOWNED soldier's chip goes to the red DOWN state — danger border + rail so
+            // the roster strip mirrors the board's read (the tag line below names the countdown).
+            bool down = u.Downed;
             PanelShadow(r, fillA);
-            Raylib.DrawRectangleRounded(r, 0.16f, 6, Raylib.Fade(sel ? Pal.RGBA(26, 36, 48) : Pal.Panel, fillA));
-            Raylib.DrawRectangleLinesEx(r, 1.5f, Raylib.Fade(sel ? Pal.Accent : Pal.PanelBd, fillA));
-            Raylib.DrawRectangle((int)r.X, (int)r.Y, 3, (int)r.Height, Raylib.Fade(sel ? Pal.Accent : Pal.Friend, fillA));
+            Raylib.DrawRectangleRounded(r, 0.16f, 6, Raylib.Fade(down ? Pal.RGBA(38, 20, 22) : (sel ? Pal.RGBA(26, 36, 48) : Pal.Panel), fillA));
+            Raylib.DrawRectangleLinesEx(r, 1.5f, Raylib.Fade(down ? Pal.Foe : (sel ? Pal.Accent : Pal.PanelBd), fillA));
+            Raylib.DrawRectangle((int)r.X, (int)r.Y, 3, (int)r.Height, Raylib.Fade(down ? Pal.Foe : (sel ? Pal.Accent : Pal.Friend), fillA));
 
             Raylib.DrawTextEx(Cfg.Font, u.Name, new Vector2((int)r.X + 9, (int)r.Y + 5), 13, 1f, Raylib.Fade(Pal.Txt, txtA));
             int nameW = (int)Raylib.MeasureTextEx(Cfg.Font, u.Name, 13, 1f).X;
             if (!string.IsNullOrEmpty(u.Nickname))   // earned callsign, in quotes
                 Raylib.DrawTextEx(Cfg.Font, $"\"{u.Nickname}\"", new Vector2((int)r.X + 9 + nameW + 5, (int)r.Y + 6), 11, 1f, Raylib.Fade(Pal.VipGold, txtA));
-            // status marks (right): OW/HK, else a live BOND aura when a partner is adjacent
-            if (u.OnOverwatch) Raylib.DrawTextEx(Cfg.Font, "OW", new Vector2((int)r.X + 96, (int)r.Y + 5), 11, 1f, Raylib.Fade(Pal.Accent, txtA));
+            // status marks (right): DOWN outranks all (FUL-7), then OW/HK, else a live BOND aura
+            if (down) Raylib.DrawTextEx(Cfg.Font, u.Stabilized ? "STABLE" : "DOWN", new Vector2((int)r.X + (u.Stabilized ? 78 : 84), (int)r.Y + 5), 11, 1f, Raylib.Fade(u.Stabilized ? Pal.Suspect : Pal.Foe, txtA));
+            else if (u.OnOverwatch) Raylib.DrawTextEx(Cfg.Font, "OW", new Vector2((int)r.X + 96, (int)r.Y + 5), 11, 1f, Raylib.Fade(Pal.Accent, txtA));
             else if (u.Hunkered) Raylib.DrawTextEx(Cfg.Font, "HK", new Vector2((int)r.X + 96, (int)r.Y + 5), 11, 1f, Raylib.Fade(Pal.Good, txtA));
             else if (u.BondAura) Raylib.DrawTextEx(Cfg.Font, "BOND", new Vector2((int)r.X + 88, (int)r.Y + 5), 11, 1f, Raylib.Fade(Pal.VipGold, txtA));
 
@@ -384,10 +388,13 @@ public static class Hud
             Renderer.DrawCodexGlyph(u.Cls, new Vector2(r.X + 118, r.Y + 39),
                 Raylib.Fade(u.IsVip ? Pal.VipGold : Pal.Friend, (sel ? 1f : 0.75f) * txtA), 0.8f);
 
-            // role tag: WOUNDED (red) takes priority, else custom tag (cyan) / auto strengths (amber)
+            // role tag: DOWN countdown (FUL-7) outranks WOUNDED (red), else custom tag / strengths
             if (!u.IsVip)
             {
-                if (u.Wound > 0)
+                if (down)
+                    Raylib.DrawTextEx(Cfg.Font, u.Stabilized ? "STABILIZED - HOLDING ON" : $"BLEEDING OUT ({u.DownedTurns})",
+                        new Vector2((int)r.X + 9, (int)r.Y + 45), 11, 1f, Raylib.Fade(u.Stabilized ? Pal.Suspect : Pal.Foe, txtA));
+                else if (u.Wound > 0)
                     Raylib.DrawTextEx(Cfg.Font, $"WOUNDED ({u.Wound})", new Vector2((int)r.X + 9, (int)r.Y + 45), 11, 1f, Raylib.Fade(Pal.Foe, txtA));
                 else
                 {
@@ -949,6 +956,10 @@ public static class Hud
         // VAULT leaps an adjacent cover tile. Both surface only when usable (CanDrag/CanVault).
         Add("drag", "DRAG", "7", interactive && g.CanDrag(u), g.DragMode);
         Add("vault", "VAULT", "9", interactive && g.CanVault(u), g.VaultMode);
+        // FUL-7: STABILIZE — the universal rescue verb. Surfaces only while a squadmate is DOWN
+        // (exactly the moment it matters); enabled when one lies adjacent and un-stabilized.
+        if (g.Players.Any(p => p.Alive && p.Downed))
+            Add("stabilize", "STABILIZE", "T", interactive && g.CanStabilize(u), false);
         Add("overwatch", "OVERWATCH", "2", interactive && u != null && u.CanAct && u.Ammo > 0, false);
         Add("focusow", "FOCUS", "F", interactive && u != null && u.CanAct && u.Ammo > 0, false);   // braced cone watch
         Add("brace", "BRACE", "B", interactive && u != null && u.CanAct && u.Ammo > 0, false);      // UNDERTOW W2: disrupting interrupt watch
@@ -1326,6 +1337,14 @@ public static class Hud
                 Raylib.DrawLineEx(new Vector2(cx - 8f, cy), new Vector2(cx - 5f, cy + 3f), 1.7f, c);
                 break;
             }
+            case "stabilize":
+            {
+                // FUL-7: a medical cross over a steadying baseline (the bleed stopped).
+                Raylib.DrawLineEx(new Vector2(cx, cy - 7f), new Vector2(cx, cy + 1f), 2.4f, c);   // cross vertical
+                Raylib.DrawLineEx(new Vector2(cx - 4f, cy - 3f), new Vector2(cx + 4f, cy - 3f), 2.4f, c);  // cross bar
+                Raylib.DrawLineEx(new Vector2(cx - 8f, cy + 5f), new Vector2(cx + 8f, cy + 5f), 1.6f, c);  // level baseline
+                break;
+            }
             case "vault":
             {
                 // An up-arc leaping over a low bar (the cover tile being vaulted).
@@ -1462,7 +1481,8 @@ public static class Hud
             case "shoot": return "Aimed shot at a target in range + line of sight. Full aim, costs 1 action and does NOT end the turn — keep your other action to reposition (one shot/turn).";
             case "grenade": return "Lob a grenade: AoE that ignores cover, hits both teams, clears low cover.";
             case "shove": return "Shove an adjacent enemy 1 tile back (breaks its overwatch + exposes it). Blocked = collision damage. 1 action, won't end your turn, once/turn.";
-            case "drag": return "Pull an adjacent ally 1 tile toward you (saves wounded, speeds the march to evac). 1 action, won't end your turn, once/turn.";
+            case "stabilize": return "Stop an adjacent DOWNED soldier's bleed-out - the timer freezes and they hold on (still down: drag them, or win the field and they recover). A corpsman's PATCH gets them back up. 1 action, won't end your turn.";
+            case "drag": return "Pull an adjacent ally 1 tile toward you (saves wounded, carries the downed, speeds the march to evac). 1 action, won't end your turn, once/turn.";
             case "vault": return "Leap an adjacent cover tile to the open floor beyond it - cross an impassable screen to flank or escape. 1 action, won't end your turn, once/turn.";
             case "overwatch": return "Watch: fire a reaction shot at the first foe that moves in sight.";
             case "focusow": return "Braced kill-lane: reaction fire only inside a 90-degree cone toward the aimed tile, but at +aim. Blind outside the cone.";

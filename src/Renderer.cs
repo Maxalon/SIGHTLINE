@@ -1769,20 +1769,48 @@ public static class Renderer
     // between the two computations is sub-pixel).
     static void DrawUnitStatusChips(Game g, Unit u)
     {
-        if (!u.Alive || u.Statuses.Count == 0) return;
+        if (!u.Alive || (u.Statuses.Count == 0 && !u.Downed)) return;
         float hlift = g.Grid.IsHigh(u.X, u.Y) ? ElevLift : 0f;
         bool drone = u.Team == Team.Enemy && u.Cls == "DRONE";
         float hover = drone ? 11f + MathF.Sin((float)Raylib.GetTime() * 3f + u.Bob) * 2f : 0f;
         float bob = MathF.Sin((float)Raylib.GetTime() * 2.2f + u.Bob) * 1.6f;
         Vector2 p = u.Pos - new Vector2(0, hlift) + new Vector2(0, bob - hover) + u.Recoil;
         const float chipH = 18f;
+        // FUL-7: the DOWN countdown pill leads the row — red "DOWN 3/2/1" while the timer runs,
+        // amber "STABLE" once frozen (Pal.Foe/Pal.Suspect: both palette-safe; the glyph carries
+        // the state without hue per DESIGN 3.H — a falling chevron vs a level bar).
+        string downCode = u.Downed ? (u.Stabilized ? "STABLE" : $"DOWN {u.DownedTurns}") : null;
+        Color downCol = u.Stabilized ? Pal.Suspect : Pal.Foe;
         float rowW = 0f;
+        if (downCode != null)
+            rowW += 17f + Raylib.MeasureTextEx(Cfg.Font, downCode, 13, 1f).X + 8f + 3f;
         foreach (var s in u.Statuses)
             if (s.Turns > 0)
                 rowW += 17f + Raylib.MeasureTextEx(Cfg.Font, StatusDef.Code(s.Kind), 13, 1f).X + 8f + 3f;
         if (rowW <= 0f) return;
         float cxs = p.X - (rowW - 3f) / 2f;
         float cys = p.Y + 24f;
+        if (downCode != null)
+        {
+            float tw0 = Raylib.MeasureTextEx(Cfg.Font, downCode, 13, 1f).X;
+            float w0 = 17f + tw0 + 8f;
+            Raylib.DrawRectangleRounded(new Rectangle(cxs - 1f, cys - 1f, w0 + 2f, chipH + 2f),
+                                        0.5f, 6, Raylib.Fade(downCol, 0.55f));
+            Raylib.DrawRectangleRounded(new Rectangle(cxs, cys, w0, chipH), 0.5f, 6, Pal.RGBA(9, 13, 18, 216));
+            float gx = cxs + 9f, gy = cys + chipH * 0.5f;
+            if (u.Stabilized)
+            {   // level bar = the bleeding stopped, state held
+                Raylib.DrawLineEx(new Vector2(gx - 4f, gy), new Vector2(gx + 4f, gy), 2f, downCol);
+                Raylib.DrawLineEx(new Vector2(gx - 1f, gy - 3f), new Vector2(gx + 1f, gy - 3f), 2f, downCol);
+            }
+            else
+            {   // falling chevron = going down, clock running
+                Raylib.DrawLineEx(new Vector2(gx - 4f, gy - 3f), new Vector2(gx, gy + 3f), 2f, downCol);
+                Raylib.DrawLineEx(new Vector2(gx + 4f, gy - 3f), new Vector2(gx, gy + 3f), 2f, downCol);
+            }
+            Raylib.DrawTextEx(Cfg.Font, downCode, new Vector2((int)(cxs + 17f), (int)(cys + 2f)), 13, 1f, downCol);
+            cxs += w0 + 3f;
+        }
         foreach (var s in u.Statuses)
         {
             if (s.Turns <= 0) continue;
@@ -1866,6 +1894,11 @@ public static class Renderer
         // live combatants — shrink them (unaware 0.75x, suspicious 0.85x); information kept,
         // emphasis cut. Alert state, not scale, carries the threat signal.
         if (unaware) bodyScale *= 0.75f; else if (suspicious) bodyScale *= 0.85f;
+        // FUL-7: a DOWNED soldier reads PRONE at a squint — the FUL-3 dormant-scale vocabulary
+        // pushed further (0.6x) with the figure sunk to the ground (no upright silhouette);
+        // the pulsing red ground ring below carries the danger signal in both palettes.
+        bool downed = friend && u.Downed;
+        if (downed) { bodyScale *= 0.6f; p.Y += 9f; }
 
         // ground contact shadow (sits on the platform top when elevated). A two-layer ellipse —
         // a wider soft penumbra + a tighter darker core, nudged toward bottom-right (consistent
@@ -1940,6 +1973,17 @@ public static class Renderer
             float pulse = 0.3f + 0.3f * MathF.Sin((float)Raylib.GetTime() * 2.8f + u.Bob);
             Raylib.DrawRing(foot + new Vector2(0, 17), 20f, 23f, 0, 360, 40,
                             Raylib.Fade(Pal.Friend, pulse));
+        }
+
+        // FUL-7: a DOWNED soldier's pulsing red ground ring (the role-ring vocabulary in the
+        // danger colour — Pal.Foe survives the colorblind palette) so the prone body reads at
+        // a squint: "a soldier is on the ground HERE, and the clock is running."
+        if (downed)
+        {
+            float dpls = 0.5f + 0.5f * MathF.Sin((float)Raylib.GetTime() * 3.4f);
+            var dcr = foot + new Vector2(0, 17);
+            Raylib.DrawRing(dcr, 21f, 25f, 0, 360, 48, Raylib.Fade(Pal.Foe, 0.30f + 0.35f * dpls));
+            Raylib.DrawRing(dcr, 16.5f, 18.5f, 0, 360, 48, Raylib.Fade(Pal.Foe, 0.16f + 0.16f * dpls));
         }
 
         // FUL-11 CEREMONY — the FINALE BOSS reads as the apex of the force from the ground up:
@@ -2269,7 +2313,9 @@ public static class Renderer
         }
 
         // hp pips
-        DrawHpPips(u, p);
+        // FUL-7: the HP bar hides while DOWNED — a 0-HP bar under a countdown pill would lie
+        // twice (the pill row below owns the read: DOWN n / STABLE).
+        if (!u.Downed) DrawHpPips(u, p);
 
         // status icons — W5: lifted to clear the enlarged (24px) body + the raised HP pips.
         float ix = p.X - 10, iy = p.Y - 35;

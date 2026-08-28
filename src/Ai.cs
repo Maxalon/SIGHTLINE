@@ -55,7 +55,16 @@ public static class Ai
     public static EnemyPlan Plan(Game g, Unit e)
     {
         var plan = new EnemyPlan();
+        // FUL-7 LAST LIGHT — the single AI seam: enemies do NOT target downed (bleeding-out)
+        // soldiers with direct fire. Filtering here means the shoot-target loop, the finish
+        // band, HOUND prey, advance/nearest and the shove pick all inherit it. Rationale: a
+        // down already costs the squad a body plus the rescue actions; an executing AI would
+        // convert the drama into a guaranteed double-loss and make STABILIZE a trap verb. The
+        // honesty valve that keeps stakes: AoE stays blind — a shell/frag/barrel/fire field
+        // that catches the body kills it, and all of those are telegraphed (XCOM's rule).
+        // All-downed squad -> empty players -> empty plans; the bleed-out timers bound it.
         var players = g.AlivePlayers();
+        players.RemoveAll(p => p.Downed);
         if (players.Count == 0) return plan;
 
         // movement reachability (other units block)
@@ -872,7 +881,7 @@ public static class Ai
                           || Combat.MissionFaction == Faction.Legion;
             if (rusher)
             {
-                foreach (var p in g.AlivePlayers())
+                foreach (var p in players)   // FUL-7: the filtered list — never shove a downed body
                 {
                     if (p.Cls == "VIP") continue;                                  // never shove the asset
                     if (Util.ChebyDist(bestTile.x, bestTile.y, p.X, p.Y) != 1) continue;   // adjacent only
@@ -964,7 +973,7 @@ public static class Ai
         int bx = -1, by = -1, best = 0;
         foreach (var p in g.AlivePlayers())
         {
-            if (p.IsVip) continue;
+            if (p.IsVip || p.Downed) continue;   // FUL-7: a downed body holds no lane to screen
             if (Util.TileDist(fx, fy, p.X, p.Y) > Game.ItemRange) continue;
             if (!g.Grid.HasLineOfSight(fx, fy, p.X, p.Y)) continue;         // must see the lane it screens
             // don't drop the cloud on/next to a fellow enemy (it would blind our own team's sightlines)
@@ -984,7 +993,7 @@ public static class Ai
             // score: how many soldiers this radius-1 cloud would blind (a lane through a cluster is best)
             int hits = 0;
             foreach (var q in g.AlivePlayers())
-                if (!q.IsVip && Util.ChebyDist(p.X, p.Y, q.X, q.Y) <= SmokeAnim.Radius) hits++;
+                if (!q.IsVip && !q.Downed && Util.ChebyDist(p.X, p.Y, q.X, q.Y) <= SmokeAnim.Radius) hits++;
             if (hits > best) { best = hits; bx = p.X; by = p.Y; }
         }
         return best > 0 ? (bx, by, true) : (0, 0, false);
@@ -997,9 +1006,10 @@ public static class Ai
         int bx = -1, by = -1, bestHits = 0, bestAllies = 99;
         foreach (var p in g.AlivePlayers())
         {
+            if (p.Downed) continue;   // FUL-7: never AIM at a downed body (AoE stays blind, not deliberate)
             if (Util.TileDist(fx, fy, p.X, p.Y) > Game.ItemRange) continue;
             int hits = 0, allies = 0;
-            foreach (var q in g.AlivePlayers()) if (Util.ChebyDist(p.X, p.Y, q.X, q.Y) <= FlashAnim.Radius) hits++;
+            foreach (var q in g.AlivePlayers()) if (!q.Downed && Util.ChebyDist(p.X, p.Y, q.X, q.Y) <= FlashAnim.Radius) hits++;
             // count the THROWER too (review Mi4): a flash that lands adjacent to e would
             // disorient e itself - that's self-harm, so it must veto the throw.
             foreach (var a in g.AliveEnemies()) if (Util.ChebyDist(p.X, p.Y, a.X, a.Y) <= FlashAnim.Radius) allies++;
@@ -1020,10 +1030,10 @@ public static class Ai
         int bx = -1, by = -1, best = 0;
         foreach (var p in g.AlivePlayers())
         {
-            if (p.IsVip) continue;                               // don't waste the shell on the fragile asset
+            if (p.IsVip || p.Downed) continue;                   // don't waste the shell on the asset / a downed body (FUL-7)
             int hits = 0, allies = 0;
             foreach (var q in g.AlivePlayers())
-                if (Util.ChebyDist(p.X, p.Y, q.X, q.Y) <= Game.SiegeRadius) hits++;
+                if (!q.Downed && Util.ChebyDist(p.X, p.Y, q.X, q.Y) <= Game.SiegeRadius) hits++;
             foreach (var a in g.AliveEnemies())
                 if (a != e && a.Active && Util.ChebyDist(p.X, p.Y, a.X, a.Y) <= Game.SiegeRadius) allies++;
             if (allies > 0) continue;                            // never shell our own
@@ -1046,11 +1056,12 @@ public static class Ai
         int bx = -1, by = -1, bestHits = 0, bestAllies = 99;
         foreach (var p in g.AlivePlayers())
         {
+            if (p.Downed) continue;   // FUL-7: never AIM at a downed body (a blast aimed at standing soldiers still catches it — AoE stays blind)
             if (Util.TileDist(fx, fy, p.X, p.Y) > Game.GrenadeRange) continue;
             if (!g.Grid.HasLineOfSight(fx, fy, p.X, p.Y)) continue;   // can't blind-lob over walls / through smoke
             if (Util.ChebyDist(fx, fy, p.X, p.Y) <= GrenadeAnim.Radius) continue;  // don't catch the thrower in its own blast
             int hits = 0, allies = 0;
-            foreach (var q in g.AlivePlayers()) if (Util.ChebyDist(p.X, p.Y, q.X, q.Y) <= GrenadeAnim.Radius) hits++;
+            foreach (var q in g.AlivePlayers()) if (!q.Downed && Util.ChebyDist(p.X, p.Y, q.X, q.Y) <= GrenadeAnim.Radius) hits++;
             foreach (var a in g.AliveEnemies()) if (a != e && Util.ChebyDist(p.X, p.Y, a.X, a.Y) <= GrenadeAnim.Radius) allies++;
             if (hits > bestHits || (hits == bestHits && allies < bestAllies))
             { bestHits = hits; bestAllies = allies; bx = p.X; by = p.Y; }

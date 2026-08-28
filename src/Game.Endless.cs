@@ -204,9 +204,22 @@ public partial class Game
                 u.Ammo = u.Weapon.Clip;
                 // grenade resupply every 3rd wave (a breather between escalations)
                 if ((Wave + 1) % 3 == 0) u.Grenades = Math.Max(u.Grenades, 1 + u.BonusGrenades + (u.HasPerk(Perk.Bandolier) ? 1 : 0));
-                // clearing a wave mends a meaningful chunk (rewards the clear) — but past bump-
-                // saturation the mend decays toward zero (APEX W7 "an ending": see EndlessWaveHeal)
-                u.Hp = Math.Min(u.MaxHp, u.Hp + EndlessWaveHeal(u.MaxHp, Wave));
+                // FUL-7: the breather gets DOWNED survivors back up at the mend value (floored at
+                // 1 — deep-stand mend decay must never revive at 0), and the once-per-battle down
+                // budget resets with the wave (each wave is a fresh battle; the in-wave anti-
+                // revive-tank rule is untouched).
+                if (u.Downed)
+                {
+                    u.Downed = false; u.Stabilized = false; u.DownedTurns = 0;
+                    u.Hp = Math.Min(u.MaxHp, Math.Max(1, EndlessWaveHeal(u.MaxHp, Wave)));
+                    Stats.RecordDownRecovered();
+                    Fx.PopText(u.Pos + new Vector2(0, -30), "BACK UP", Pal.Good, 18f);
+                }
+                else
+                    // clearing a wave mends a meaningful chunk (rewards the clear) — but past bump-
+                    // saturation the mend decays toward zero (APEX W7 "an ending": see EndlessWaveHeal)
+                    u.Hp = Math.Min(u.MaxHp, u.Hp + EndlessWaveHeal(u.MaxHp, Wave));
+                u.WasDownedThisMission = false;
             }
             // APEX W7 PROGRESSION HEARTBEAT: every 3rd cleared wave, banked kills cash in as FIELD
             // PROMOTIONS (the campaign's rank-up perk/spec offers, via the shared Run.PromoteEligible);

@@ -318,6 +318,10 @@ public static class Codex
         // FUL-6: linked activation is a coded battlefield state the player must be able to look up.
         e.Add(new CodexEntry { Title = "LINKED ALERTS", Code = "HEARD THE GUNS",
             Desc = $"Gunfire carries: waking a pod alerts the nearest dormant pod within earshot ({Game.LinkRange} tiles, missions 3+); it arrives one turn later, without the ambush scatter. You always get the warning. Counters: kill the woken pod inside the warning turn and set a line (BRACE/overwatch/frag) for the second; pre-frag the telegraphed pod (it lands clumped); or open the fight from a lane where no second pod sits within earshot." });
+        // FUL-7: the bleed-out window is a coded battlefield state — the player must be able to
+        // look up the whole rescue kit. Magnitudes are the real constants.
+        e.Add(new CodexEntry { Title = "DOWN (BLEEDING OUT)", Code = "DOWN",
+            Desc = $"Lethal damage drops a soldier for {Game.DownedTimerTurns} turns instead of killing them. STABILIZE (any adjacent soldier, 1 action) freezes the timer; a CORPSMAN's PATCH gets them back up; DRAG or haul them to extraction. Blasts and fire finish the job - and nobody survives going down twice in one mission." });
         e.Add(new CodexEntry { Title = "STAGGERED", Code = "BRACE",
             Desc = "Interrupted by a BRACE reaction: remaining actions this turn are denied and any held overwatch drops." });
         e.Add(new CodexEntry { Title = "SUPPRESSED", Code = $"-{Combat.SuppressAim} AIM",
@@ -440,7 +444,8 @@ public static class Codex
         // W11: the STATUS tab documents the out-of-enum battlefield states too.
         var statusRows = StatusEntries();
         foreach (var want in new[] { "ROUTED", "STAGGERED", "SUPPRESSED", "PINNED", "MARKED", "CONCEALED",
-                                     "LINKED ALERTS" })   // FUL-6: the heard-the-guns telegraph row
+                                     "LINKED ALERTS",     // FUL-6: the heard-the-guns telegraph row
+                                     "DOWN (BLEEDING OUT)" })   // FUL-7: the bleed-out window + rescue kit
             if (!statusRows.Exists(r => r.Title == want && !string.IsNullOrWhiteSpace(r.Desc)))
                 fails.Add($"STATUS missing W11 row {want}");
 

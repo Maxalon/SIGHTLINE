@@ -157,18 +157,43 @@ public partial class Game
             if (nearest && dCache <= 8f && TryMoveTowardTile(u, CacheX, CacheY)) return;
         }
 
+        // ── FUL-7 LAST LIGHT: the rescue outranks every other verb (objective-agnostic) ──
+        // A soldier standing beside a downed squadmate acts on it NOW: a corpsman with the kit
+        // ready REVIVES (the Heal executor's Downed arm — a downed Hp-0 ally is always the
+        // most-wounded eligible target); anyone else STABILIZEs once (Stabilized gates repeats).
+        // EVAC guard (AutoShouldStabilize): with no live corpsman in the squad, freezing the
+        // timer of a body far from the zone would freeze Evac's all-in-zone win too — the bot
+        // has no drag-chain carry in v1 (accepted, recorded bot-vs-player gap) — so it lets the
+        // timer run instead: cold, but bounded and honest.
+        if (u.ActionsLeft > 0 && !u.IsVip)
+        {
+            var downAdj = Players.FirstOrDefault(p => p.Alive && p.Downed && p != u
+                                && Util.ChebyDist(u.X, u.Y, p.X, p.Y) <= 1);
+            if (downAdj != null)
+            {
+                if (u.Ability == AbilityKind.Heal && CanAbility(u)
+                    && MostWoundedAdjacentAlly(u) is Unit mw && mw.Downed)
+                { DoAbility(); return; }                                   // REVIVE (PATCH)
+                if (!downAdj.Stabilized && AutoShouldStabilize(downAdj))
+                { DoStabilize(); return; }                                 // freeze the timer
+            }
+        }
+
         // ── FUL-5: the corpsman's PATCH is OBJECTIVE-AGNOSTIC ──────────────────────────
         // Every objective routine returns before SmartCombatStep for most soldiers, so the heal
         // (step 1 there) was structurally dead on 5 of 8 objectives — PATCH measured ~1 use per
         // ~500 missions with corpsmen demonstrably fielded. A 1-action patch of a genuinely-hurt
         // squadmate en route is good play on ANY objective (they're about to eat the pods the
-        // march wakes), and the ≤2-tile approach detour is bounded + Cd-gated. Corpsman-only,
-        // fast exit for everyone else.
+        // march wakes), and the ≤2-tile approach detour is bounded + Cd-gated. FUL-7: the
+        // approach step (TryMoveToPatch) now also closes on DOWNED allies — for EVERY soldier,
+        // not just the corpsman (the founding squad has no corpsman and would otherwise have no
+        // bot response to a down at all).
         if (u.Ability == AbilityKind.Heal)
         {
             if (PrepAbility(u)) return;        // adjacent ally missing >=3 -> heal it now
-            if (TryMoveToPatch(u)) return;     // hurt ally at Cheby 2-3 -> step adjacent for next pass
+            if (TryMoveToPatch(u)) return;     // hurt/downed ally at Cheby 2-3 -> step adjacent for next pass
         }
+        else if (Players.Any(p => p.Alive && p.Downed && !p.Stabilized) && TryMoveToPatch(u)) return;
 
         // ── FUL-5 R5: SMOKE cover is objective-agnostic too — the retreat it protects mostly
         // happens on the march/hold routes the combat brain never sees (R4: ITEM ~1/20
@@ -1254,15 +1279,23 @@ public partial class Game
     /// so the exact-2 window fired only ~4/20 campaigns; 4+ stays out of the medic's remit.)
     bool TryMoveToPatch(Unit u)
     {
-        if (u.Ability != AbilityKind.Heal || u.AbilityCd > 0 || u.ActionsLeft <= 0 || MoveCost == null)
-            return false;
+        // FUL-7 generalization: a Cd-ready CORPSMAN closes on hurt-or-downed allies (heal or
+        // revive next pass); EVERY OTHER soldier — including a Cd'd corpsman — closes on a
+        // downed, un-stabilized ally to STABILIZE (their only rescue verb). Same Cheby-2-3
+        // window, same bounded approach, so a founding squad with no corpsman still answers.
+        if (u.ActionsLeft <= 0 || u.IsVip || MoveCost == null) return false;
+        bool corpsman = u.Ability == AbilityKind.Heal && u.AbilityCd == 0;
         Unit tgt = null; float worst = 1f;
         foreach (var a in AlivePlayers())
         {
-            if (a == u || a.IsVip || a.MaxHp <= 0 || a.MaxHp - a.Hp < 3) continue;
+            if (a == u || a.IsVip || a.MaxHp <= 0) continue;
+            bool eligible = a.Downed
+                ? (corpsman || (!a.Stabilized && AutoShouldStabilize(a)))
+                : (corpsman && a.MaxHp - a.Hp >= 3);
+            if (!eligible) continue;
             int d = Util.ChebyDist(u.X, u.Y, a.X, a.Y);
-            if (d < 2 || d > 3) continue;               // adjacent = heal now (PrepAbility); 4+ = not our call
-            float frac = (float)a.Hp / a.MaxHp;
+            if (d < 2 || d > 3) continue;               // adjacent = act now (SmartStep's rescue block / PrepAbility); 4+ = not our call
+            float frac = (float)a.Hp / a.MaxHp;         // downed = 0 -> outranks the merely hurt
             if (tgt == null || frac < worst) { tgt = a; worst = frac; }
         }
         if (tgt == null) return false;
@@ -1280,6 +1313,18 @@ public partial class Game
         if (bx < 0) return false;
         IssueMove(bx, by);
         return true;
+    }
+
+    /// FUL-7 — the bot's stabilize policy. Always yes EXCEPT the one freeze that can never
+    /// resolve: on EVAC, with no live corpsman in the squad (no revive possible) and the body
+    /// outside/away from the zone, a frozen timer blocks the all-in-zone win forever — the bot
+    /// has no drag-chain carry in v1. Let the timer run there (bounded; the honest bot gap).
+    /// Zone-adjacent bodies stay stabilizable: the in-zone EXTRACT pull can haul them aboard.
+    bool AutoShouldStabilize(Unit body)
+    {
+        if (Objective != Objective.Evac) return true;
+        if (Players.Any(p => p.Alive && !p.Downed && !p.IsVip && p.Ability == AbilityKind.Heal)) return true;
+        return DistToEvac(body.X, body.Y) <= 1;
     }
 
     /// Grenade decision: lob at the cluster of enemies that catches the most foes (≥2),
