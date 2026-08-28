@@ -4395,33 +4395,62 @@ public partial class Game
             fails.Add("heat0NotNoOp");
         if (Sightline.Heat.EnemyDelta(1) != 1 || Sightline.Heat.IntelBonus(1) != 3) fails.Add("heat1Moved");
 
-        // ---- (A2) the BUILT mission: same seed, one fewer + weaker hostile ------------------
+        // ---- (A2) the BUILT mission: a SEED SWEEP, one fewer + weaker hostile ----------------
         // Both legs replay the identical world (Util.Reseed before each), so the ONLY difference
-        // is the rung. This is the assertion that would catch the early-mission "heat grace"
-        // silently zeroing RECRUIT's relief on mission 1 — the mission a first-timer meets first.
-        (int count, int hp, int aim) BuildAt(int heat, int mission)
+        // is the rung. This is the assertion that catches the early-mission "heat grace" (W5) and
+        // the SpawnEnemies bump FLOOR (R1) silently zeroing RECRUIT's relief on mission 1 — the
+        // mission a first-timer meets first.
+        //
+        // R1 REVIEW FIX — this used to assert on ONE hard-coded seed (4242) and compare PER-ENEMY
+        // AVERAGES. That is not a stat-delta measurement, it is composition noise: RECRUIT drops a
+        // body, so the average moves with WHICH archetype fell off the end. Measured over 12 seeds
+        // at m1 the old assertion passed 5 times and FAILED 7 — it was green by seed luck. The
+        // sweep below fixes both halves:
+        //   * 12 seeds, not 1 — a rung-wide claim needs a rung-wide sample.
+        //   * PAIRWISE, not averaged. RECRUIT's -1 body is the LAST spawn slot (count-1), and the
+        //     spawn loop's RNG stream is count-independent for the slots that remain, so slot i of
+        //     the RECRUIT leg is the SAME archetype as slot i of the standard leg. Comparing slot
+        //     to slot measures the stat delta and nothing else. (The archetype match is asserted,
+        //     not assumed — a divergence is a real failure, not a licence to skip the row.)
+        (int count, List<(string cls, int hp, int aim)> units) BuildAt(int heat, int mission, int seed)
         {
-            Util.Reseed(4242);
+            Util.Reseed(seed);
             _run = new Run(); _run.Start();
             _run.HeatLevel = heat;
             _run.CurrentCard = new MissionCard { Objective = Objective.Eliminate, ModName = "STANDARD", Reward = RewardKind.None };
             SetupMission(mission);
-            int hpSum = 0, aimSum = 0;
-            foreach (var e in Enemies) { hpSum += e.MaxHp; aimSum += e.Aim; }
-            return (Enemies.Count, hpSum, aimSum);
+            var list = new List<(string, int, int)>();
+            foreach (var e in Enemies) list.Add((e.Cls, e.MaxHp, e.Aim));
+            return (Enemies.Count, list);
         }
+        int[] sweepSeeds = { 1, 7, 42, 99, 123, 777, 1234, 2026, 4242, 8675, 31337, 65535 };
         foreach (int m in new[] { 1, 3 })
         {
-            var std = BuildAt(0, m);
-            var rec = BuildAt(-1, m);
-            if (rec.count != std.count - 1) fails.Add($"m{m}:count {rec.count} vs {std.count}");
-            // one fewer body of ~std HP, and every survivor is a point weaker: per-enemy HP and
-            // aim must BOTH be strictly below the standard leg's per-enemy average.
-            if (rec.count <= 0 || std.count <= 0) { fails.Add($"m{m}:emptyBuild"); continue; }
-            float stdHp = std.hp / (float)std.count, recHp = rec.hp / (float)rec.count;
-            float stdAim = std.aim / (float)std.count, recAim = rec.aim / (float)rec.count;
-            if (!(recHp < stdHp)) fails.Add($"m{m}:hp {recHp:0.##} vs {stdHp:0.##}");
-            if (!(recAim < stdAim)) fails.Add($"m{m}:aim {recAim:0.##} vs {stdAim:0.##}");
+            int seedsChecked = 0;
+            foreach (int seed in sweepSeeds)
+            {
+                var std = BuildAt(0, m, seed);
+                var rec = BuildAt(-1, m, seed);
+                if (rec.count != std.count - 1) { fails.Add($"m{m}s{seed}:count {rec.count} vs {std.count}"); continue; }
+                if (rec.count <= 0 || std.count <= 0) { fails.Add($"m{m}s{seed}:emptyBuild"); continue; }
+                int ranked = 0;
+                for (int i = 0; i < rec.count; i++)
+                {
+                    var a = rec.units[i]; var b = std.units[i];
+                    if (a.cls != b.cls) { fails.Add($"m{m}s{seed}i{i}:cls {a.cls} vs {b.cls}"); continue; }
+                    // NAMED ELITES (the m3/m5 mid-boss, the finale boss) are spawned with EXPLICIT
+                    // stats and never read `bump`, so the rung cannot move them by construction —
+                    // they are the force's fixed tooth. Assert the archetype still matches (above)
+                    // and price the rung on the rank and file only.
+                    if (a.cls == "ELITE") continue;
+                    ranked++;
+                    if (!(a.hp < b.hp))  fails.Add($"m{m}s{seed}i{i}:hp {a.hp} vs {b.hp}");
+                    if (!(a.aim < b.aim)) fails.Add($"m{m}s{seed}i{i}:aim {a.aim} vs {b.aim}");
+                }
+                if (ranked == 0) fails.Add($"m{m}s{seed}:noRankAndFile");
+                seedsChecked++;
+            }
+            if (seedsChecked != sweepSeeds.Length) fails.Add($"m{m}:sweepShort {seedsChecked}/{sweepSeeds.Length}");
         }
 
         // ---- (A3) the bleed-out clock ------------------------------------------------------
@@ -4530,7 +4559,7 @@ public partial class Game
         }
 
         return fails.Count == 0
-            ? "ONRAMPTEST: PASS (RECRUIT rung -1: data row + built mission -1 body/-1 stat at m1 AND m3, 5-turn bleed-out, checkpoint from m1 and once only, no mutator leak, no negative intel; heat 0 untouched; anim speed pinned 1x under AutoPlay/NoPersist; text scale symmetric + tapered; both settings round-trip, clamp, and default on a pre-W5 profile)"
+            ? "ONRAMPTEST: PASS (RECRUIT rung -1: data row + built mission -1 body/-1 stat PAIRWISE over a 12-seed sweep at m1 AND m3, 5-turn bleed-out, checkpoint from m1 and once only, no mutator leak, no negative intel; heat 0 untouched; anim speed pinned 1x under AutoPlay/NoPersist; text scale symmetric + tapered; both settings round-trip, clamp, and default on a pre-W5 profile)"
             : "ONRAMPTEST: FAIL (" + string.Join(",", fails.Distinct()) + ")";
     }
 
