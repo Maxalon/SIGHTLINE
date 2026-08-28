@@ -150,6 +150,23 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        // SIGHTLINE_VOICETEST=1 : RESONANCE C1 (VOICE) — the game's WORDS as a contract. Asserts
+        // (a) generating every region / briefing / dossier / bark / epilogue consumes ZERO draws
+        // from the shared Util.Rng — the CRN-pairing guarantee every measurement in this project
+        // rests on — with a sensitivity probe so the check cannot pass vacuously; (b) every
+        // template slot resolves non-empty and no beat can produce a nonsensical combination
+        // (a bondless soldier can never draw a bond line); (c) every bark trigger is reachable
+        // through TryBark and all four rate-limit gates actually bite; (d) no generated line
+        // overflows the chrome that draws it. Needs a window + the real atlases: the width
+        // assertions measure actual glyphs through Cfg.Measure.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_VOICETEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "voicetest");
+            LoadGameFonts();
+            Console.WriteLine(Voice.SelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         // SIGHTLINE_EVENTTEST=1 : between-mission FIELD EVENT selection/placement/outcomes + save round-trip (W4). No window.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_EVENTTEST") == "1")
         {
@@ -443,81 +460,7 @@ public static class Program
         // Phase 5.3 — real bitmap font (NotoMono-Regular, OFL-1.1).
         // Bake ASCII 32-126 plus a selection of useful non-ASCII codepoints so the
         // font supports them once we start using them.
-        {
-            int[] codepoints = new int[]
-            {
-                // ASCII printable range 32..126
-                32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,
-                48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,
-                65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,
-                81,82,83,84,85,86,87,88,89,90,
-                91,92,93,94,95,96,
-                97,98,99,100,101,102,103,104,105,106,107,108,109,110,
-                111,112,113,114,115,116,117,118,119,120,121,122,
-                123,124,125,126,
-                // useful non-ASCII
-                0x2013, // en-dash
-                0x2014, // em-dash
-                0x2018, // left single quote
-                0x2019, // right single quote
-                0x201C, // left double quote
-                0x201D, // right double quote
-                0x2022, // bullet
-                0x2026, // ellipsis
-                0x00D7, // multiply sign
-                0x00B7, // middle dot
-            };
-            // RESONANCE V1 — TWO ATLASES, and asset paths resolved next to the BINARY.
-            //
-            // (1) A single 64px atlas served everything from 11px to 92px. The 11-14px body text
-            //     is most of the words in the game, and minifying 64px glyphs ~5x with bilinear
-            //     filtering and no mip chain is exactly what turns small type into grey mush.
-            //     Bake a second atlas at 20px for text <= Cfg.UiFontMax and keep the 64px atlas
-            //     for the big sizes; Cfg.FontFor(size) routes every call site.
-            // (2) Ship-blocker: the path was relative to the CURRENT WORKING DIRECTORY. A player
-            //     launching the built binary from anywhere but the project root silently got
-            //     Raylib's built-in bitmap font and every em-dash rendered as '?'. Cfg.AssetPath
-            //     resolves against AppContext.BaseDirectory (with a cwd fallback for dev).
-            // Mipmaps + trilinear on both atlases so any residual off-size draw filters cleanly.
-            string notoPath = Cfg.AssetPath("assets/NotoMono-Regular.ttf");
-            Font loaded = Raylib.LoadFontEx(notoPath, 64, codepoints, codepoints.Length);
-            if (loaded.Texture.Id != 0)
-            {
-                Raylib.GenTextureMipmaps(ref loaded.Texture);
-                Raylib.SetTextureFilter(loaded.Texture, TextureFilter.Trilinear);
-                Cfg.Font = loaded;
-                Console.WriteLine($"FONT: NotoMono-Regular 64px atlas loaded ({notoPath})");
-
-                Font ui = Raylib.LoadFontEx(notoPath, 20, codepoints, codepoints.Length);
-                if (ui.Texture.Id != 0)
-                {
-                    Raylib.GenTextureMipmaps(ref ui.Texture);
-                    Raylib.SetTextureFilter(ui.Texture, TextureFilter.Trilinear);
-                    Cfg.FontUi = ui;
-                    Console.WriteLine("FONT: NotoMono-Regular 20px UI atlas loaded");
-                }
-            }
-            else
-            {
-                Cfg.Font = Raylib.GetFontDefault();
-                Console.WriteLine($"FONT: NotoMono-Regular NOT FOUND at {notoPath} — falling back to default");
-            }
-
-            // Display face (Chakra Petch Bold, OFL-1.1) — titles only; NotoMono keeps the data.
-            string dispPath = Cfg.AssetPath("assets/ChakraPetch-Bold.ttf");
-            Font disp = Raylib.LoadFontEx(dispPath, 96, codepoints, codepoints.Length);
-            if (disp.Texture.Id != 0)
-            {
-                Raylib.GenTextureMipmaps(ref disp.Texture);
-                Raylib.SetTextureFilter(disp.Texture, TextureFilter.Trilinear);
-                Cfg.FontTitle = disp;
-                Console.WriteLine("FONT: ChakraPetch-Bold display atlas loaded");
-            }
-            else
-            {
-                Console.WriteLine($"FONT: ChakraPetch-Bold NOT FOUND at {dispPath} — titles stay on NotoMono");
-            }
-        }
+        LoadGameFonts();
 
         // Display is normally OFF in the headless harness (byte-identical screenshots).
         // SIGHTLINE_POSTFX=1 forces it ON (+ the post-FX demo bloom) for verification.
@@ -1215,5 +1158,86 @@ public static class Program
         return fails.Count == 0
             ? "WOUNDTEST: PASS (wound assigned, penalises aim+mobility, decays, clears)"
             : "WOUNDTEST: FAIL (" + string.Join(",", fails) + ")";
+    }
+
+    /// RESONANCE C1 — extracted verbatim from the inline block that used to live in Main, so a
+    /// window-free-ish self-test hook (SIGHTLINE_VOICETEST measures real glyph widths) can bake
+    /// the same atlases the game uses. Idempotent enough for the harness: call it once, after
+    /// InitWindow. Behaviour is unchanged for the normal launch path.
+    static void LoadGameFonts()
+    {
+            int[] codepoints = new int[]
+            {
+                // ASCII printable range 32..126
+                32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,
+                48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,
+                65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,
+                81,82,83,84,85,86,87,88,89,90,
+                91,92,93,94,95,96,
+                97,98,99,100,101,102,103,104,105,106,107,108,109,110,
+                111,112,113,114,115,116,117,118,119,120,121,122,
+                123,124,125,126,
+                // useful non-ASCII
+                0x2013, // en-dash
+                0x2014, // em-dash
+                0x2018, // left single quote
+                0x2019, // right single quote
+                0x201C, // left double quote
+                0x201D, // right double quote
+                0x2022, // bullet
+                0x2026, // ellipsis
+                0x00D7, // multiply sign
+                0x00B7, // middle dot
+            };
+            // RESONANCE V1 — TWO ATLASES, and asset paths resolved next to the BINARY.
+            //
+            // (1) A single 64px atlas served everything from 11px to 92px. The 11-14px body text
+            //     is most of the words in the game, and minifying 64px glyphs ~5x with bilinear
+            //     filtering and no mip chain is exactly what turns small type into grey mush.
+            //     Bake a second atlas at 20px for text <= Cfg.UiFontMax and keep the 64px atlas
+            //     for the big sizes; Cfg.FontFor(size) routes every call site.
+            // (2) Ship-blocker: the path was relative to the CURRENT WORKING DIRECTORY. A player
+            //     launching the built binary from anywhere but the project root silently got
+            //     Raylib's built-in bitmap font and every em-dash rendered as '?'. Cfg.AssetPath
+            //     resolves against AppContext.BaseDirectory (with a cwd fallback for dev).
+            // Mipmaps + trilinear on both atlases so any residual off-size draw filters cleanly.
+            string notoPath = Cfg.AssetPath("assets/NotoMono-Regular.ttf");
+            Font loaded = Raylib.LoadFontEx(notoPath, 64, codepoints, codepoints.Length);
+            if (loaded.Texture.Id != 0)
+            {
+                Raylib.GenTextureMipmaps(ref loaded.Texture);
+                Raylib.SetTextureFilter(loaded.Texture, TextureFilter.Trilinear);
+                Cfg.Font = loaded;
+                Console.WriteLine($"FONT: NotoMono-Regular 64px atlas loaded ({notoPath})");
+
+                Font ui = Raylib.LoadFontEx(notoPath, 20, codepoints, codepoints.Length);
+                if (ui.Texture.Id != 0)
+                {
+                    Raylib.GenTextureMipmaps(ref ui.Texture);
+                    Raylib.SetTextureFilter(ui.Texture, TextureFilter.Trilinear);
+                    Cfg.FontUi = ui;
+                    Console.WriteLine("FONT: NotoMono-Regular 20px UI atlas loaded");
+                }
+            }
+            else
+            {
+                Cfg.Font = Raylib.GetFontDefault();
+                Console.WriteLine($"FONT: NotoMono-Regular NOT FOUND at {notoPath} — falling back to default");
+            }
+
+            // Display face (Chakra Petch Bold, OFL-1.1) — titles only; NotoMono keeps the data.
+            string dispPath = Cfg.AssetPath("assets/ChakraPetch-Bold.ttf");
+            Font disp = Raylib.LoadFontEx(dispPath, 96, codepoints, codepoints.Length);
+            if (disp.Texture.Id != 0)
+            {
+                Raylib.GenTextureMipmaps(ref disp.Texture);
+                Raylib.SetTextureFilter(disp.Texture, TextureFilter.Trilinear);
+                Cfg.FontTitle = disp;
+                Console.WriteLine("FONT: ChakraPetch-Bold display atlas loaded");
+            }
+            else
+            {
+                Console.WriteLine($"FONT: ChakraPetch-Bold NOT FOUND at {dispPath} — titles stay on NotoMono");
+            }
     }
 }
