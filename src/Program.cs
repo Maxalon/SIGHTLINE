@@ -50,7 +50,8 @@ public static class Program
         if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_PODMASS"), out int pm) && pm >= 2)
             Mission.PodMass = pm;
         // W4 — SIGHTLINE_PODUNIFORM=1: a pod fields one kind of body (comparable targets).
-        if (Environment.GetEnvironmentVariable("SIGHTLINE_PODUNIFORM") == "1") Mission.PodUniform = true;
+        string uni = Environment.GetEnvironmentVariable("SIGHTLINE_PODUNIFORM");
+        if (uni == "1") Mission.PodUniform = true; else if (uni == "0") Mission.PodUniform = false;
         // W4 — SIGHTLINE_RIMWAVES=1: under an ENVELOP opening, rotate the rim reinforcement
         // waves arrive from (a surrounded hold that keeps being surrounded).
         if (Environment.GetEnvironmentVariable("SIGHTLINE_RIMWAVES") == "1") Mission.EnvelopRimWaves = true;

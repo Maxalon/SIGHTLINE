@@ -45,7 +45,14 @@ public static class Mission
     /// The shipped MIX — relative weights per shape, indexed by the Deploy* constants. Weights
     /// (not a shape list) so a measured round can re-balance the deal without touching the
     /// derivation. All-zero or a bad table degrades to FRONTAL.
-    public static int[] DeployMix = { 1, 0, 0, 0 };
+    /// SHIPPED 3/3/1/3, measured end-to-end at h0 and h4 (DEVLOG §W4 round S1). ENVELOP is
+    /// legal on ~60% of objectives and falls back to FRONTAL elsewhere, so the EFFECTIVE deal
+    /// is roughly FRONTAL 42% / PINCER 35% / CROSSFIRE 13% / ENVELOP 11%. CROSSFIRE is the low
+    /// weight deliberately: pinned, it was the only shape to move the "which target?" axis
+    /// (+0.06) but also the only one that DRAGS Escort (13.40t vs PINCER's 5.65t), because its
+    /// NE mass lands on the cols 16-17 extraction corner. `SIGHTLINE_DEPLOYMIX=1,0,0,0`
+    /// restores the pre-W4 all-FRONTAL board exactly.
+    public static int[] DeployMix = { 3, 3, 1, 3 };
 
     /// Telemetry: the shape the LAST Build actually used (read by Game.SetupMission for Stats).
     public static int AppliedDeploy = DeployFrontal;
@@ -590,9 +597,11 @@ public static class Mission
     /// survivor) and none is a shapeless blob. Pure — no RNG draw.
     public static int PodMass = 3;
 
-    /// W4 — every body in a pod fields the pod LEAD's archetype (see the spawn loop). Measured as
-    /// its own round; OFF by default until it is. SIGHTLINE_PODUNIFORM=1.
-    public static bool PodUniform = false;
+    /// W4 — every body in a pod fields the pod LEAD's archetype (see the spawn loop). SHIPPED
+    /// ON: measured exactly ladder-neutral (32.5% = 32.5% run completion, n=40) for the wave's
+    /// biggest single gain on the "which target?" axis (+0.06 target-choices/ARMED) and
+    /// Escort 12.57t -> 8.75t. `SIGHTLINE_PODUNIFORM=0` restores mixed pods.
+    public static bool PodUniform = true;
 
     public static int[] PodPlan(int count, int mass)
     {
