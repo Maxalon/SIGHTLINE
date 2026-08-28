@@ -1,0 +1,492 @@
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
+using System.Text;
+
+namespace Sightline;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PROGRAM RESONANCE — WAVE A1 "THE EAR"
+//
+// Nobody has ever HEARD this game. There is no audio device in the sandbox and the
+// owner has never tuned the mix, so every audio decision so far has been made blind.
+// This file is the ear: a device-free measurement rig over the exact float samples the
+// synth hands to Raylib, plus a committed budget the mix has to keep passing.
+//
+//   SIGHTLINE_AUDIODUMP=1   render every cue + both music beds to audio_dump/*.wav and
+//                           print a full measurement table (level / spectrum / tails /
+//                           loop seams / concurrent-stack headroom).
+//   SIGHTLINE_AUDIOGATE=1   turn those measurements into per-check PASS/FAIL lines and a
+//                           final "AUDIOGATE: PASS|FAIL".
+//
+// Both are windowless and device-free. Neither is wired to anything automatic — house
+// style is env-gated hooks run by hand (NO CI, ever).
+// ─────────────────────────────────────────────────────────────────────────────
+public static partial class Audio
+{
+    // ── measurement primitives ────────────────────────────────────────────────
+
+    const float Eps = 1e-9f;
+    static float Db(float amp) => amp <= Eps ? -200f : 20f * MathF.Log10(amp);
+
+    /// Everything the gate and the dump table need to know about one buffer.
+    internal struct CueStats
+    {
+        public string Id;
+        public float DurMs;
+        public int N;            // real sample count (excludes the 8-sample BuildBuffer pad)
+        public float PeakDb, RmsDb, CrestDb, Dc, TailDb, Zcr, CentroidHz;
+        public int Clipped;
+        public float BLo, BMid, BHi, BAir;   // energy fractions: <200 / 200-1k / 1k-5k / >5k
+    }
+
+    /// Measure the FIRST `n` samples of `buf` (n = the real, un-padded length).
+    /// BuildBuffer allocates (int)(dur*SR) + 8 samples, so the last 8 are ALWAYS zero:
+    /// any "does the tail reach silence" test that reads buf[^1] passes vacuously. The
+    /// tail here is deliberately sampled at index n-1 — the last sample that is real.
+    internal static CueStats Measure(string id, float[] buf, int n, float durMs)
+    {
+        n = Math.Min(n, buf.Length);
+        var st = new CueStats { Id = id, DurMs = durMs, N = n };
+        double sum = 0, sq = 0;
+        float peak = 0;
+        int clip = 0, zc = 0;
+        for (int i = 0; i < n; i++)
+        {
+            float v = buf[i];
+            float a = MathF.Abs(v);
+            if (a > peak) peak = a;
+            if (a >= 0.99997f) clip++;                    // 32767/32768 rounds to full-scale
+            sum += v; sq += (double)v * v;
+            if (i > 0 && ((buf[i - 1] < 0f && v >= 0f) || (buf[i - 1] >= 0f && v < 0f))) zc++;
+        }
+        float rms = (float)Math.Sqrt(sq / Math.Max(1, n));
+        st.PeakDb = Db(peak);
+        st.RmsDb = Db(rms);
+        st.CrestDb = st.PeakDb - st.RmsDb;
+        st.Dc = (float)(sum / Math.Max(1, n));
+        st.Clipped = clip;
+        st.Zcr = zc / (float)Math.Max(1, n);
+        st.TailDb = Db(MathF.Abs(buf[Math.Max(0, n - 1)]));
+        Spectrum(buf, n, out st.CentroidHz, out st.BLo, out st.BMid, out st.BHi, out st.BAir);
+        return st;
+    }
+
+    // Welch-style averaged power spectrum (Hann, 4096-pt, 50% overlap; short cues are
+    // zero-padded into one window). 10.8 Hz bins — plenty for the 200 Hz / 1k / 5k splits.
+    const int FftN = 4096;
+
+    static void Spectrum(float[] buf, int n, out float centroid,
+                         out float bLo, out float bMid, out float bHi, out float bAir)
+    {
+        var acc = new double[FftN / 2 + 1];
+        var re = new double[FftN];
+        var im = new double[FftN];
+        int hop = FftN / 2, windows = 0;
+        for (int off = 0; off == 0 || off + FftN <= n; off += hop)
+        {
+            for (int i = 0; i < FftN; i++)
+            {
+                int idx = off + i;
+                double x = idx < n ? buf[idx] : 0.0;
+                double w = 0.5 - 0.5 * Math.Cos(2.0 * Math.PI * i / (FftN - 1));   // Hann
+                re[i] = x * w; im[i] = 0.0;
+            }
+            Fft(re, im);
+            for (int k = 0; k <= FftN / 2; k++) acc[k] += re[k] * re[k] + im[k] * im[k];
+            windows++;
+            if (off + FftN > n) break;
+        }
+        double tot = 0, wsum = 0, lo = 0, mid = 0, hi = 0, air = 0;
+        for (int k = 1; k <= FftN / 2; k++)          // skip DC bin (handled by the DC check)
+        {
+            double f = k * (double)SR / FftN, p = acc[k];
+            tot += p; wsum += f * p;
+            if (f < 200) lo += p;
+            else if (f < 1000) mid += p;
+            else if (f < 5000) hi += p;
+            else air += p;
+        }
+        if (tot <= 0) { centroid = 0; bLo = bMid = bHi = bAir = 0; return; }
+        centroid = (float)(wsum / tot);
+        bLo = (float)(lo / tot); bMid = (float)(mid / tot);
+        bHi = (float)(hi / tot); bAir = (float)(air / tot);
+    }
+
+    // in-place iterative radix-2 Cooley-Tukey
+    static void Fft(double[] re, double[] im)
+    {
+        int n = re.Length;
+        for (int i = 1, j = 0; i < n; i++)
+        {
+            int bit = n >> 1;
+            for (; (j & bit) != 0; bit >>= 1) j ^= bit;
+            j ^= bit;
+            if (i < j) { (re[i], re[j]) = (re[j], re[i]); (im[i], im[j]) = (im[j], im[i]); }
+        }
+        for (int len = 2; len <= n; len <<= 1)
+        {
+            double ang = -2.0 * Math.PI / len;
+            double wr = Math.Cos(ang), wi = Math.Sin(ang);
+            for (int i = 0; i < n; i += len)
+            {
+                double cr = 1.0, ci = 0.0;
+                for (int k = 0; k < len / 2; k++)
+                {
+                    int a = i + k, b = i + k + len / 2;
+                    double xr = re[b] * cr - im[b] * ci;
+                    double xi = re[b] * ci + im[b] * cr;
+                    re[b] = re[a] - xr; im[b] = im[a] - xi;
+                    re[a] += xr; im[a] += xi;
+                    double nr = cr * wr - ci * wi;
+                    ci = cr * wi + ci * wr; cr = nr;
+                }
+            }
+        }
+    }
+
+    // ── the cue table (ordered; the dump/gate iterate this, not dictionary order) ──
+
+    /// Ordered list of every SFX cue id (matches SfxCueIds / BuildRecipes).
+    internal static string[] OrderedCues => SfxCueIds;
+
+    /// Render one cue exactly as the device would get it, plus its real sample count.
+    internal static float[] RenderCueById(string id, out int realN, out float durMs)
+    {
+        BuildRecipes();
+        var (dur, fill) = _recipes[id];
+        realN = (int)(dur * SR);
+        durMs = dur * 1000f;
+        return RenderCue(id, dur, fill);
+    }
+
+    // ── loop-seam analysis ────────────────────────────────────────────────────
+
+    internal struct SeamStats
+    {
+        public string Id;
+        public float First, Last;
+        public float ValueDelta;    // |b[0] - b[n-1]| : the STEP across the wrap
+        public float SlopeDelta;    // |(b[0]-b[n-1]) - (b[n-1]-b[n-2])| : the DISCONTINUITY
+    }
+
+    /// A perfectly seamless loop still has a non-zero |b[0]-b[n-1]| — that is simply one
+    /// sample-step of the waveform, and it grows with the highest frequency present. The
+    /// audible click is a break in the FIRST DIFFERENCE (the slope), so the gate keys on
+    /// SlopeDelta and reports ValueDelta alongside it. See GateReport()'s rationale block.
+    internal static SeamStats Seam(string id, float[] b)
+    {
+        int n = b.Length;
+        float dSeam = b[0] - b[n - 1];
+        float dInt = b[n - 1] - b[n - 2];
+        return new SeamStats
+        {
+            Id = id, First = b[0], Last = b[n - 1],
+            ValueDelta = MathF.Abs(dSeam), SlopeDelta = MathF.Abs(dSeam - dInt),
+        };
+    }
+
+    // ── concurrent-stack analysis ─────────────────────────────────────────────
+
+    // The realistic worst cases the engine actually fires together. Offsets in seconds.
+    // The two kill stacks are pinned at coincident onsets on purpose: that IS the worst
+    // alignment the mixer can hand a speaker, and headroom has to survive it.
+    internal static readonly (string name, (string cue, float at)[] parts)[] Stacks =
+    {
+        ("w_lmg+crit",                 new[] { ("w_lmg", 0f), ("crit", 0f) }),
+        ("w_lmg+crit+death+st_kill",   new[] { ("w_lmg", 0f), ("crit", 0f), ("death", 0f), ("st_kill", 0f) }),
+        ("3x(w_rifle+hit) overwatch",  new[] { ("w_rifle", 0f), ("hit", 0f),
+                                               ("w_rifle", 0.12f), ("hit", 0.12f),
+                                               ("w_rifle", 0.24f), ("hit", 0.24f) }),
+        ("w_shotgun+crit+st_lastkill", new[] { ("w_shotgun", 0f), ("crit", 0f), ("st_lastkill", 0f) }),
+    };
+
+    /// Mix a stack at the REAL master volume and report its peak + clipped-sample count.
+    internal static (float peakDb, int clipped) MixStack((string cue, float at)[] parts)
+    {
+        int len = 0;
+        var bufs = new List<(float[] b, int at)>();
+        foreach (var (cue, at) in parts)
+        {
+            var b = RenderCueById(cue, out int rn, out _);
+            int off = (int)(at * SR);
+            bufs.Add((b, off));
+            len = Math.Max(len, off + rn);
+        }
+        var mix = new float[len];
+        foreach (var (b, off) in bufs)
+            for (int i = 0; i < b.Length && off + i < len; i++) mix[off + i] += b[i];
+        float peak = 0; int clip = 0;
+        for (int i = 0; i < len; i++)
+        {
+            float v = mix[i] * MasterVol;
+            float a = MathF.Abs(v);
+            if (a > peak) peak = a;
+            if (a >= 0.99997f) clip++;
+        }
+        return (Db(peak), clip);
+    }
+
+    // ── SIGHTLINE_AUDIODUMP ───────────────────────────────────────────────────
+
+    static string F(float v, string fmt) => v.ToString(fmt, CultureInfo.InvariantCulture);
+
+    /// Render every cue + both beds to `dir`/*.wav and print the full measurement table.
+    /// Device-free; safe with no audio hardware.
+    public static string DumpReport(string dir)
+    {
+        var sb = new StringBuilder();
+        Directory.CreateDirectory(dir);
+        sb.AppendLine($"AUDIODUMP -> {dir}/  (SR={SR}, MasterVol={F(MasterVol, "0.00")})");
+        sb.AppendLine();
+        sb.AppendLine("cue             dur_ms   peak    rms  crest       dc  clip  centroid   <200  200-1k  1k-5k    >5k     tail    zcr");
+        sb.AppendLine("──────────────────────────────────────────────────────────────────────────────────────────────────────────────────");
+
+        void Row(CueStats s)
+        {
+            sb.AppendLine($"{s.Id,-14} {F(s.DurMs, "0"),6} {F(s.PeakDb, "0.0"),6} {F(s.RmsDb, "0.0"),6} " +
+                          $"{F(s.CrestDb, "0.0"),6} {F(s.Dc, "+0.00000;-0.00000"),8} {s.Clipped,5} " +
+                          $"{F(s.CentroidHz, "0"),9} {F(s.BLo * 100, "0.0"),6} {F(s.BMid * 100, "0.0"),7} " +
+                          $"{F(s.BHi * 100, "0.0"),6} {F(s.BAir * 100, "0.0"),6} {F(s.TailDb, "0.0"),8} {F(s.Zcr, "0.000"),6}");
+        }
+
+        var all = new List<CueStats>();
+        foreach (var id in OrderedCues)
+        {
+            var buf = RenderCueById(id, out int n, out float ms);
+            File.WriteAllBytes(Path.Combine(dir, id + ".wav"), EncodeWav(buf, 1f));
+            var s = Measure(id, buf, n, ms);
+            all.Add(s); Row(s);
+        }
+        sb.AppendLine();
+        foreach (var m in new[] { "ambient", "combat" })
+        {
+            var buf = RenderMusic(m);
+            File.WriteAllBytes(Path.Combine(dir, "music_" + m + ".wav"), EncodeWav(buf, 1f));
+            Row(Measure("music:" + m, buf, buf.Length, MusicSecs * 1000f));
+        }
+
+        // level spread across the SFX set — the "nobody designed this" number
+        float lo = 999, hi = -999; string loId = "", hiId = "";
+        foreach (var s in all) { if (s.RmsDb < lo) { lo = s.RmsDb; loId = s.Id; } if (s.RmsDb > hi) { hi = s.RmsDb; hiId = s.Id; } }
+        sb.AppendLine();
+        sb.AppendLine($"RMS SPREAD: {F(hi - lo, "0.0")} dB   (quietest {loId} {F(lo, "0.0")} dBFS -> loudest {hiId} {F(hi, "0.0")} dBFS)");
+        var hitS = all.Find(x => x.Id == "hit"); var critS = all.Find(x => x.Id == "crit");
+        sb.AppendLine($"CRIT vs HIT: {F(critS.RmsDb - hitS.RmsDb, "0.0")} dB RMS separation " +
+                      $"(crit {F(critS.RmsDb, "0.0")} / hit {F(hitS.RmsDb, "0.0")})");
+
+        sb.AppendLine();
+        sb.AppendLine("LOOP SEAMS (a seamless loop still steps one sample; the CLICK is a slope break)");
+        foreach (var m in new[] { "ambient", "combat" })
+        {
+            var sm = Seam(m, RenderMusic(m));
+            sb.AppendLine($"  music:{m,-8} first={F(sm.First, "+0.00000;-0.00000")} last={F(sm.Last, "+0.00000;-0.00000")}" +
+                          $"  |value delta|={F(sm.ValueDelta, "0.00000")}  |1st-diff delta|={F(sm.SlopeDelta, "0.00000")}");
+        }
+
+        sb.AppendLine();
+        sb.AppendLine($"SUM-STACK HEADROOM (mixed at MasterVol={F(MasterVol, "0.00")})");
+        foreach (var (name, parts) in Stacks)
+        {
+            var (pk, cl) = MixStack(parts);
+            sb.AppendLine($"  {name,-30} peak {F(pk, "+0.0;-0.0"),6} dBFS   clipped {cl}");
+        }
+        return sb.ToString();
+    }
+
+    // ── SIGHTLINE_AUDIOGATE ───────────────────────────────────────────────────
+
+    // ── THE BUDGET ────────────────────────────────────────────────────────────
+    // RATIONALE (why these numbers and not others):
+    //  • peak <= -1.0 dBFS   True-peak headroom. A cue normalised to exactly 0 dBFS has no
+    //    room for the resampler Raylib runs when SetSoundPitch() detunes it (every weapon
+    //    call site passes pitchVar), and inter-sample peaks in a reconstructed waveform
+    //    routinely exceed the sample peak. 1 dB is the cheapest insurance there is.
+    //  • RMS bands (per category, not per cue) encode the MIX DESIGN, i.e. what should sit
+    //    on top of what. They are bands, not points, so a cue can have character inside its
+    //    role. The categories are ordered: crit > weapons ~ stingers > impacts > UI > move.
+    //  • spread <= 12 dB   The pre-mastering layer spanned 16.6 dB by accident. 12 dB is a
+    //    deliberate dynamic range: the footfall you hear a hundred times a mission genuinely
+    //    should be far under the run-ending gut punch, but not 17 dB under.
+    //  • crit - hit >= 4 dB RMS   The heaviest hit in the game must READ as heaviest. 1.9 dB
+    //    (the pre-mastering value) is inside the just-noticeable range for a transient.
+    //  • |DC| <= 0.002   DC offset steals headroom and thumps on cue start/stop. Saw-heavy
+    //    cues were +0.0037 biased; a 20 Hz one-pole DC blocker takes them to ~0.
+    //  • zero clipped samples, cues AND stacks   The synth path clamps in EncodeWav, so
+    //    clipping here is silent distortion nobody would ever be told about.
+    //  • tail <= -60 dBFS at index (int)(dur*SR)-1   Measured BEFORE the 8 zero pad samples
+    //    BuildBuffer always appends — reading buf[^1] is the vacuous-test trap. -60 dBFS is
+    //    ~1 LSB at 16-bit; anything above it is an audible truncation click.
+    //  • music >= 5% of energy above 1 kHz   Both beds measured 0.000% above 1 kHz. A laptop
+    //    speaker rolls off hard below ~300 Hz, so a bed with no top loses -11.6 dB and simply
+    //    vanishes on the hardware most people will play this on. 5% is a floor, not a target.
+    //  • loop |1st-diff delta| <= 0.005   See Seam(): the value delta across a wrap is one
+    //    legitimate sample-step of the waveform (it grows with the top frequency present, so
+    //    it cannot be driven to zero while also satisfying the brightness floor). The audible
+    //    click is a break in the slope, and THAT is what is pinned.
+
+    const float PeakCeilDb = -1.0f;
+    const float MaxSpreadDb = 12.0f;
+    const float MinCritOverHitDb = 4.0f;
+    const float MaxDc = 0.002f;
+    const float TailCeilDb = -60.0f;
+    const float MinMusicHiFrac = 0.05f;
+    const float MaxSeamSlope = 0.005f;
+
+    // category -> (rms floor dBFS, rms ceiling dBFS)
+    static readonly (string cat, float lo, float hi)[] RmsBands =
+    {
+        ("crit",    -14f,  -7f),
+        ("weapon",  -18f,  -9f),
+        ("stinger", -19f, -10f),
+        ("impact",  -20f, -10f),
+        ("ui",      -28f, -17f),
+        ("move",    -34f, -22f),
+    };
+
+    static string CatOf(string id) => id switch
+    {
+        "crit" => "crit",
+        "move" => "move",
+        "shoot" or "w_rifle" or "w_shotgun" or "w_sniper" or "w_smg" or "w_lmg" => "weapon",
+        "hit" or "miss" or "death" => "impact",
+        "st_kill" or "st_lastkill" or "st_victory" or "st_lose" or "st_squadwipe"
+            or "win" or "lose" => "stinger",
+        _ => "ui",                                  // select/reload/hunker/over/turn
+    };
+
+    /// The committed audio budget as a PASS/FAIL contract. Prints one line per check group
+    /// and a final "AUDIOGATE: PASS" / "AUDIOGATE: FAIL (...)". Device-free, no window.
+    public static string GateReport()
+    {
+        var sb = new StringBuilder();
+        var fails = new List<string>();
+        void Chk(bool ok, string name, string detail)
+        {
+            sb.AppendLine($"  [{(ok ? "ok  " : "FAIL")}] {name,-26} {detail}");
+            if (!ok) fails.Add(name);
+        }
+
+        sb.AppendLine($"AUDIOGATE — budget contract over {OrderedCues.Length} SFX cues + 2 music beds " +
+                      $"(MasterVol={F(MasterVol, "0.00")})");
+
+        var stats = new Dictionary<string, CueStats>();
+        foreach (var id in OrderedCues)
+        {
+            var buf = RenderCueById(id, out int n, out float ms);
+            stats[id] = Measure(id, buf, n, ms);
+        }
+
+        // 1. peak ceiling
+        {
+            var bad = new List<string>();
+            float worst = -200f; string worstId = "";
+            foreach (var s in stats.Values)
+            {
+                if (s.PeakDb > worst) { worst = s.PeakDb; worstId = s.Id; }
+                if (s.PeakDb > PeakCeilDb) bad.Add($"{s.Id} {F(s.PeakDb, "0.0")}");
+            }
+            Chk(bad.Count == 0, "peak <= -1.0 dBFS",
+                bad.Count == 0 ? $"hottest {worstId} {F(worst, "0.0")} dBFS"
+                               : $"{bad.Count} over: {string.Join(", ", bad)}");
+        }
+
+        // 2. per-category RMS bands
+        {
+            var bad = new List<string>();
+            foreach (var s in stats.Values)
+            {
+                string c = CatOf(s.Id);
+                var band = Array.Find(RmsBands, b => b.cat == c);
+                if (s.RmsDb < band.lo || s.RmsDb > band.hi)
+                    bad.Add($"{s.Id}({c}) {F(s.RmsDb, "0.0")} not in [{F(band.lo, "0")},{F(band.hi, "0")}]");
+            }
+            Chk(bad.Count == 0, "rms in category band",
+                bad.Count == 0 ? "all 23 cues inside their role band"
+                               : $"{bad.Count} outside: {string.Join("; ", bad)}");
+        }
+
+        // 3. overall RMS spread
+        {
+            float lo = 999, hi = -999; string loId = "", hiId = "";
+            foreach (var s in stats.Values)
+            { if (s.RmsDb < lo) { lo = s.RmsDb; loId = s.Id; } if (s.RmsDb > hi) { hi = s.RmsDb; hiId = s.Id; } }
+            Chk(hi - lo <= MaxSpreadDb, "rms spread <= 12 dB",
+                $"{F(hi - lo, "0.0")} dB ({loId} {F(lo, "0.0")} -> {hiId} {F(hi, "0.0")})");
+        }
+
+        // 4. crit reads heavier than hit
+        {
+            float d = stats["crit"].RmsDb - stats["hit"].RmsDb;
+            Chk(d >= MinCritOverHitDb, "crit - hit >= 4 dB rms", $"{F(d, "0.0")} dB");
+        }
+
+        // 5. DC offset
+        {
+            var bad = new List<string>();
+            float worst = 0; string worstId = "";
+            foreach (var s in stats.Values)
+            {
+                if (MathF.Abs(s.Dc) > MathF.Abs(worst)) { worst = s.Dc; worstId = s.Id; }
+                if (MathF.Abs(s.Dc) > MaxDc) bad.Add($"{s.Id} {F(s.Dc, "+0.00000;-0.00000")}");
+            }
+            Chk(bad.Count == 0, "|dc| <= 0.002",
+                bad.Count == 0 ? $"worst {worstId} {F(worst, "+0.00000;-0.00000")}"
+                               : $"{bad.Count} biased: {string.Join(", ", bad)}");
+        }
+
+        // 6. no clipped samples in any single cue
+        {
+            var bad = new List<string>();
+            foreach (var s in stats.Values) if (s.Clipped > 0) bad.Add($"{s.Id} x{s.Clipped}");
+            Chk(bad.Count == 0, "cue clipping == 0",
+                bad.Count == 0 ? "no cue reaches full scale" : string.Join(", ", bad));
+        }
+
+        // 7. no clipped samples in any realistic concurrent stack
+        {
+            var bad = new List<string>(); var seen = new List<string>();
+            foreach (var (name, parts) in Stacks)
+            {
+                var (pk, cl) = MixStack(parts);
+                seen.Add($"{name} {F(pk, "+0.0;-0.0")}dBFS/{cl}");
+                if (cl > 0 || pk > 0f) bad.Add($"{name} {F(pk, "+0.0;-0.0")} dBFS x{cl}");
+            }
+            Chk(bad.Count == 0, "stack clipping == 0",
+                bad.Count == 0 ? string.Join(" | ", seen) : string.Join("; ", bad));
+        }
+
+        // 8. tails reach silence BEFORE the 8-sample pad
+        {
+            var bad = new List<string>();
+            float worst = -200f; string worstId = "";
+            foreach (var s in stats.Values)
+            {
+                if (s.TailDb > worst) { worst = s.TailDb; worstId = s.Id; }
+                if (s.TailDb > TailCeilDb) bad.Add($"{s.Id} {F(s.TailDb, "0.0")} dBFS @ {s.N - 1}");
+            }
+            Chk(bad.Count == 0, "tail <= -60 dBFS",
+                bad.Count == 0 ? $"loudest last real sample {worstId} {F(worst, "0.0")} dBFS"
+                               : $"{bad.Count} truncated: {string.Join(", ", bad)}");
+        }
+
+        // 9-10. music beds: brightness + loop seam
+        foreach (var m in new[] { "ambient", "combat" })
+        {
+            var buf = RenderMusic(m);
+            var s = Measure("music:" + m, buf, buf.Length, MusicSecs * 1000f);
+            float above1k = s.BHi + s.BAir;
+            Chk(above1k >= MinMusicHiFrac, $"music:{m} >1kHz >= 5%",
+                $"{F(above1k * 100, "0.000")}% of energy above 1 kHz (centroid {F(s.CentroidHz, "0")} Hz)");
+            var sm = Seam(m, buf);
+            Chk(sm.SlopeDelta <= MaxSeamSlope, $"music:{m} loop seam",
+                $"|1st-diff delta|={F(sm.SlopeDelta, "0.00000")} (value delta {F(sm.ValueDelta, "0.00000")})");
+        }
+
+        sb.Append(fails.Count == 0
+            ? "AUDIOGATE: PASS"
+            : $"AUDIOGATE: FAIL ({string.Join(", ", fails)})");
+        return sb.ToString();
+    }
+}

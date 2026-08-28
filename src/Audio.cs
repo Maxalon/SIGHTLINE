@@ -25,9 +25,28 @@ enum Wv { Sine, Square, Saw, Tri }
 ///   divisor of MusicSecs, or you reintroduce a loop click.
 /// • The ambient↔combat crossfade levels are `AmbBaseVol`/`CombMaxVol` in
 ///   UpdateMusic().
-public static class Audio
+public static partial class Audio
 {
-    const int SR = 44100;
+    internal const int SR = 44100;
+
+    // ── RESONANCE A1: the synth gets its OWN rng ──────────────────────────────
+    // Noise()/Click() used to draw from the SHARED Util.Rng. Audio.Init() runs BEFORE
+    // `new Game()` (Program.cs), so on a machine WITH an audio device every synthesised
+    // cue silently advanced the gameplay RNG stream — and the draw count CHANGED when a
+    // drop-in asset file was present (the file-first path skips the synth). Two machines
+    // could therefore diverge on identical seeds. A private, fixed-seed stream that is
+    // RESET per cue makes synthesis reproducible AND removes it from gameplay entirely.
+    static Random _arng = new Random(AudSeedBase);
+    const int AudSeedBase = 0x5A17;
+    static float AudRandF() => (float)_arng.NextDouble();
+    /// Reseed the synth rng from a cue id (FNV-1a — String.GetHashCode is per-process
+    /// randomised in .NET Core and would break byte-reproducible dumps).
+    static void SeedFor(string id)
+    {
+        uint h = 2166136261u;
+        foreach (char c in id) { h ^= c; h *= 16777619u; }
+        _arng = new Random(unchecked((int)(h ^ AudSeedBase)));
+    }
 
     // ── headline tuning constants ──
     const float MasterVol  = 0.6f;   // global master (Raylib.SetMasterVolume)
@@ -96,7 +115,7 @@ public static class Audio
     /// Register every SFX recipe into _recipes WITHOUT touching the audio device. Called by
     /// Init (which then loads each into a Sound) and by the device-free self-test. Adding a
     /// new effect = one Reg(...) line here.
-    static void BuildRecipes()
+    internal static void BuildRecipes()
     {
         if (_recipes.Count > 0) return;   // idempotent (Init or SelfTest, whichever runs first)
 
@@ -335,11 +354,12 @@ public static class Audio
     }
 
     // ───── looping music beds (integer freqs over an integer-second buffer => seamless) ─────
-    const int MusicSecs = 8;
+    internal const int MusicSecs = 8;
 
     // AMBIENT: a fuller A-minor add9 pad (A C E B) with slow, gently-detuned tremolo movement
     // and a soft beating shimmer up top — atmospheric, never fatiguing under the whole game.
-    static byte[] BuildAmbient()
+    internal static byte[] BuildAmbient() => MusicBytes(AmbientFloats());
+    static float[] AmbientFloats()
     {
         var b = new float[MusicSecs * SR];
         PadTone(b, 110, 0.17f, 1);    // A2 root
@@ -349,12 +369,13 @@ public static class Audio
         PadTone(b, 330, 0.045f, 2);   // E4 octave fifth (air)
         PadTone(b, 494, 0.030f, 4);   // B4 add9 (sparkle, faster tremolo)
         Shimmer(b, 880, 0.022f, 1);   // very soft high beating layer (movement)
-        return MusicBytes(b);
+        return b;
     }
 
     // COMBAT: a darker, tenser bed (A C Eb — minor with a flat-five bite) over a DRIVING
     // sub-bass pulse + a faster mid pulse, so it reads as urgent without being loud.
-    static byte[] BuildCombat()
+    internal static byte[] BuildCombat() => MusicBytes(CombatFloats());
+    static float[] CombatFloats()
     {
         var b = new float[MusicSecs * SR];
         PadTone(b, 110, 0.15f, 1);    // root
@@ -364,7 +385,7 @@ public static class Audio
         Pulse(b, 55, 2f, 0.24f);      // driving sub-bass pulse (16 hits / loop)
         Pulse(b, 110, 2f, 0.11f);     // octave reinforcement
         Pulse(b, 220, 4f, 0.06f);     // faster mid tick (32/loop) — adds urgency
-        return MusicBytes(b);
+        return b;
     }
 
     // a sustained sine with a seamless LFO tremolo (lfoK whole cycles per loop)
@@ -404,12 +425,22 @@ public static class Audio
         }
     }
 
-    static byte[] MusicBytes(float[] b)
+    static byte[] MusicBytes(float[] b) => EncodeWav(RenderMusicGain(b), 1f);
+
+    // Apply the music bed's mastering gain IN PLACE and return the buffer (so the measurement
+    // harness sees exactly the samples the stream plays).
+    static float[] RenderMusicGain(float[] b)
     {
         float peak = 0.0001f;
         for (int i = 0; i < b.Length; i++) peak = MathF.Max(peak, MathF.Abs(b[i]));
-        return EncodeWav(b, 0.8f / peak);
+        float g = 0.8f / peak;
+        for (int i = 0; i < b.Length; i++) b[i] *= g;
+        return b;
     }
+
+    /// Device-free: the rendered float samples of a music bed ("ambient" | "combat").
+    internal static float[] RenderMusic(string which)
+        => RenderMusicGain(which == "combat" ? CombatFloats() : AmbientFloats());
 
     // a cheap rolling counter so successive shots get a deterministic, non-repeating pitch
     // jitter (NOT Random — keeps the headless harness reproducible + avoids a machine-gun
@@ -467,15 +498,26 @@ public static class Audio
         return buf;
     }
 
-    // Load a single recipe into a device Sound (device path only).
-    static void LoadRecipe(string id, float dur, Action<float[]> fill)
+    /// RENDER = the single source of truth for what a cue actually sounds like: synthesise
+    /// the recipe, then apply the mastering stage. Both the device path (LoadRecipe) and the
+    /// device-free measurement harness (AUDIODUMP/AUDIOGATE) go through here, so what the
+    /// gate measures is byte-for-byte what the speaker gets.
+    internal static float[] RenderCue(string id, float dur, Action<float[]> fill)
     {
+        SeedFor(id);                       // reproducible noise/click for this cue
         var buf = BuildBuffer(dur, fill);
         // normalise to avoid clipping
         float peak = 0.0001f;
         for (int i = 0; i < buf.Length; i++) peak = MathF.Max(peak, MathF.Abs(buf[i]));
         float g = peak > 1f ? 1f / peak : 1f;
-        byte[] wav = EncodeWav(buf, g);
+        if (g != 1f) for (int i = 0; i < buf.Length; i++) buf[i] *= g;
+        return buf;
+    }
+
+    // Load a single recipe into a device Sound (device path only).
+    static void LoadRecipe(string id, float dur, Action<float[]> fill)
+    {
+        byte[] wav = EncodeWav(RenderCue(id, dur, fill), 1f);
         Wave w = Raylib.LoadWaveFromMemory(".wav", wav);
         _snd[id] = Raylib.LoadSoundFromWave(w);
         Raylib.UnloadWave(w);
@@ -630,12 +672,22 @@ public static class Audio
         return null;
     }
 
+    // The pre-gain synth buffer is allowed to exceed +-1 (the render stage normalises it),
+    // but a runaway layer sum is a real bug — anything past this is not "hot", it is broken.
+    const float MaxRawAmp = 8f;
+
+    /// Validate a synth buffer: non-empty, all finite, and IN RANGE (|x| <= MaxRawAmp).
+    /// The caller's "in-range" claim used to be an over-claim — this now implements it.
     static string ValidateBuffer(string id, float[] buf)
     {
         if (buf == null || buf.Length == 0) return $"'{id}' produced an empty buffer";
         for (int i = 0; i < buf.Length; i++)
+        {
             if (float.IsNaN(buf[i]) || float.IsInfinity(buf[i]))
                 return $"'{id}' produced a non-finite sample at {i}";
+            if (MathF.Abs(buf[i]) > MaxRawAmp)
+                return $"'{id}' produced an out-of-range sample {buf[i]:0.###} at {i} (|x| > {MaxRawAmp})";
+        }
         return null;
     }
 
@@ -688,7 +740,7 @@ public static class Audio
             int idx = n0 + i;
             if (idx >= b.Length) break;
             float t = i / (float)len;
-            float raw = Util.RandF() * 2f - 1f;
+            float raw = AudRandF() * 2f - 1f;
             prev += alpha * (raw - prev);                 // low-pass toward `prev`
             float a = MathF.Min(1f, i / (float)atk);      // attack
             float env = a * MathF.Exp(-4.5f * t);
@@ -709,7 +761,7 @@ public static class Audio
             if (idx >= b.Length) break;
             float t = i / (float)len;
             float env = MathF.Exp(-22f * t) * (1f - t);   // fast decay + linear release
-            b[idx] += (Util.RandF() * 2f - 1f) * vol * env;
+            b[idx] += (AudRandF() * 2f - 1f) * vol * env;
         }
     }
 
@@ -733,7 +785,7 @@ public static class Audio
         }
     }
 
-    static byte[] EncodeWav(float[] samples, float gain)
+    internal static byte[] EncodeWav(float[] samples, float gain)
     {
         int n = samples.Length;
         int dataLen = n * 2;
