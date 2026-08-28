@@ -1072,7 +1072,7 @@ public static class Mission
     ///     would under-fill waves ~1-in-5 rolls on Syndicate Defend nodes) and a demote of any
     ///     rolled BOMBARD to a plain wave grunt (waves arrive already Alert — an off-screen
     ///     artillery telegraph the player never saw spawn is unfair).
-    public static Unit MakeWaveHostile(int n, int x, int y, bool rich = false)
+    public static Unit MakeWaveHostile(int n, int x, int y, bool rich = false, int heatStat = 0)
     {
         int bump = Math.Max(0, n - 1);
         if (rich)
@@ -1080,13 +1080,30 @@ public static class Mission
             var h = MakeEndlessHostile(n, x, y);
             int guard = 0;
             while (h.Cls == "TURRET" && guard++ < 400) h = MakeEndlessHostile(n, x, y);
-            if (h.Cls != "TURRET" && h.Cls != "BOMBARD") return h;   // MakeEndlessHostile already clamps aim
+            if (h.Cls != "TURRET" && h.Cls != "BOMBARD") return HeatWave(h, heatStat, 88);   // MakeEndlessHostile already clamps aim (88)
             // fall through: demote BOMBARD (or a pathological all-TURRET streak) to a plain wave grunt
         }
         var e = rich || Util.Roll(50)
             ? MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 58 + bump, 6, x, y)
             : MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 56 + bump, 8, x, y);
         e.Aim = Math.Min(82, e.Aim);
+        return HeatWave(e, heatStat, 82);
+    }
+
+    /// FUL-13 TRUE NORTH: DEFEND waves inherit the heat ladder's force-wide stat bump (+HP/+Aim,
+    /// aim re-clamped at the path's own rank-and-file cap). The initial force always took
+    /// Heat.StatDelta via SpawnEnemies' statDelta; waves were heat-BLIND (bump = mission only),
+    /// so the one enemy-forced-tempo objective got RELATIVELY EASIER as heat rose — measured at
+    /// the FUL-13 baseline: Defend 82% h0 -> 97% h6 / 91% h8 (defend-pinned h8: 96%, n=89) while
+    /// every other objective fell with heat. Deliberately card/assist-blind (waves always were);
+    /// the pressure clock keeps heatStat 0 — cheap punishment bodies by design (see
+    /// SpawnReinforcements' doc). Zero extra draws: CRN pairing and h0 batches are untouched
+    /// (Heat.StatDelta(0) == 0 -> byte-identical at heat 0 by construction).
+    static Unit HeatWave(Unit e, int heatStat, int aimCap)
+    {
+        if (heatStat <= 0) return e;
+        e.MaxHp += heatStat; e.Hp += heatStat;
+        e.Aim = Math.Min(aimCap, e.Aim + heatStat);
         return e;
     }
 

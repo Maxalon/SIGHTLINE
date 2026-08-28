@@ -5079,7 +5079,8 @@ public partial class Game
         // FUL-4: wave size 1+m/2 (was 2+m/2) — with three waves landing per mission the old +1
         // body per wave compounded to +3 per mission over the whole timer. podded: each wave is
         // a real morale pod (focus-firing a wave down routs its survivors, like any pod).
-        SpawnReinforcements(1 + _run.Mission / 2, 12, "WAVE", rich: true, podded: true);
+        SpawnReinforcements(1 + _run.Mission / 2, 12, "WAVE", rich: true, podded: true,
+                            heatStat: Sightline.Heat.StatDelta(_run.HeatLevel));   // FUL-13: waves were heat-blind
     }
 
     /// FUL-4: the DEFEND wave schedule — ONE shared read for the spawner and the start-of-turn
@@ -5095,7 +5096,7 @@ public partial class Game
     /// mix). Returns how many it actually added. FUL-4 `podded`: the wave lands as ONE fresh
     /// morale pod (id 100+, _podOrig-snapshotted) so rout plays; default keeps PodId=-1 —
     /// pressure-clock punishment waves stay morale-exempt (a routable punishment isn't one).
-    int SpawnReinforcements(int want, int cap, string label, bool rich = false, bool podded = false)
+    int SpawnReinforcements(int want, int cap, string label, bool rich = false, bool podded = false, int heatStat = 0)
     {
         if (AliveEnemies().Count >= cap) return 0;                     // clutter cap
         int n = _run.Mission;
@@ -5111,7 +5112,7 @@ public partial class Game
                 x = Grid.W - 1;
                 if (!Grid.IsFloor(x, y) || IsOccupiedByOther(x, y, null)) continue;
             }
-            var e = Mission.MakeWaveHostile(n, x, y, rich);
+            var e = Mission.MakeWaveHostile(n, x, y, rich, heatStat);   // FUL-13: DEFEND waves inherit heat
             e.Alert = AlertLevel.Alert;                          // reinforcements arrive already engaged
             e.PodId = podded ? _nextWavePod : -1;                // FUL-4: defend waves are morale pods
             e.SyncPos();
