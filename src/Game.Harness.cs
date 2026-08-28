@@ -4639,6 +4639,17 @@ public partial class Game
 
         // ---- (B3) both settings survive a REAL JSON round trip -------------------------------
         string dispPath = Display.SettingsPathPublic;
+        // R1 REVIEW FIX — and they must survive it in the SAME PLACE every launch. SaveGame.Dir
+        // guards a real hazard that Display.Dir did not: GetFolderPath(ApplicationData) returns
+        // "" when the resolved directory does not exist yet, so Path.Combine("", "Sightline") is
+        // a RELATIVE dir next to the process CWD. Saves and meta fell back to $HOME/.config;
+        // display.json did not, so settings scattered per launch directory and read back as a
+        // reset to the player — tutorial-tip flags, the four volume faders, animation speed and
+        // text scale all inherit it. Reproduce with XDG_CONFIG_HOME pointed at a directory that
+        // does not exist: before the fix this asserts `Sightline/display.json`, relative.
+        if (!System.IO.Path.IsPathRooted(dispPath)) fails.Add("displayPathRelative:" + dispPath);
+        if (System.IO.Path.GetDirectoryName(dispPath) != SaveGame.ConfigDir)
+            fails.Add($"displayDirSplit:{System.IO.Path.GetDirectoryName(dispPath)} vs {SaveGame.ConfigDir}");
         string dispStash = null; bool hadDisp = false;
         try { hadDisp = System.IO.File.Exists(dispPath); if (hadDisp) dispStash = System.IO.File.ReadAllText(dispPath); } catch { }
         try

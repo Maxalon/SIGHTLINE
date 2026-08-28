@@ -557,8 +557,13 @@ void main() {
     [System.Text.Json.Serialization.JsonSerializable(typeof(Dto))]
     internal partial class DisplayJson : System.Text.Json.Serialization.JsonSerializerContext { }
 
-    static string Dir => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Sightline");
+    /// R1 REVIEW FIX — share SaveGame's guarded config root rather than re-deriving it. The old
+    /// body was `Path.Combine(GetFolderPath(ApplicationData), "Sightline")`, which misses the
+    /// hazard SaveGame.Dir documents: GetFolderPath uses SpecialFolderOption.None and returns ""
+    /// when the resolved directory does not exist yet, so Path.Combine("", "Sightline") yields a
+    /// RELATIVE path. Settings then scattered per launch directory (and looked to the player like
+    /// a reset) while saves and meta went to the right place. One derivation, one guard.
+    static string Dir => SaveGame.ConfigDir;
     static string FilePath => Path.Combine(Dir, "display.json");
 
     static void Save()
