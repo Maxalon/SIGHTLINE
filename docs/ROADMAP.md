@@ -1103,6 +1103,52 @@ sets, one lever per measured round, fresh same-slot R0 first, dip budgets, breac
 
 ## PROGRAM "RESONANCE" — landed waves (see docs/DEVLOG.md for the write-ups)
 
+- [x] **V3 — SURFACES.** DONE. Cover became a material, biomes became places, and the
+      unit tier finally moved into the band the V2 grade reserves for it.
+      - **Cover joins its biome.** The tint pull on cover was 0.28 over a strongly slate
+        base, so measured (analytic, exact from the colour math) six of eight biomes' cover
+        tops sat at hue 190-235 — blue — regardless of the room: ARID cover was hue **204
+        at saturation 0.03** (a grey block in a sand room) and MAGMA's was hue 320 at 0.05.
+        Pull to **0.55**: ARID cover moves **179 degrees** off slate, MAGMA **158**,
+        VERDANT to 156 (green), VOID to 248 (violet). Cover-top hue spread across the eight
+        biomes **130 -> 178 degrees**.
+      - **Cover became a material.** A per-biome `GenImageCellular` field (256², biome-sized
+        cells, CPU-baked, **zero committed bytes**) is inverted at bake and drawn through a
+        light biome stone, so the cell faces lift and the seams stay — concrete slabs, ice
+        plates, cracked basalt, gravel. Plus purely-visual footprint jitter (+/-3px), a
+        hash-picked corner radius (0.12-0.32) and a chipped corner on ~35% of tops. Cover-top
+        interior luma std **3.5 -> 5.1-5.5** on the small-cell biomes. `Util.TileRect` and
+        every tile-centre consumer are untouched — the jitter is a local copy of the rect.
+      - **Biomes became places.** `DrawBiomeFeatures`: 6-12 **board-scale** features per
+        mission (fissure + pool, frost drift, soot fan, dune ridge, lattice trunk, moss
+        patch, plate seam) drawn *across* tiles under the terrain, all derived from
+        `Run.MapSeed` via `Util.Hash3` — no `Random`, **zero draws from `Util.Rng`**, built
+        once per (seed, biome, grid) into fixed static buffers (no per-frame allocation).
+        MAGMA's per-tile squiggle drops 40% -> 16% of tiles now that structure carries it.
+      - **The colorblind collision.** V2 caught MAGMA's per-tile veins landing on the CB foe
+        orange. In `SIGHTLINE_CB` the fissure now gives up saturated warmth and works in
+        value (dark crevasse, pale hot core). Terrain wearing the CB-foe hue band on MAGMA:
+        **0.83% -> 0.61%** of board pixels.
+      - **Silhouettes.** A **team chassis carried by topology, not hue**: player = a closed,
+        doubled ring; enemy = a broken ring notched in three places (survives greyscale and
+        `SIGHTLINE_CB`). GRUNT / SCOUT / HUNTER re-cut as **solid wedge / hollow wedge /
+        twin chevrons** — they were the same wedge 2px apart. A dark keyline contour on every
+        unit and a white specular catch. Dormant contacts lifted (pale slate body, dark
+        backing arc under each dash) — they were near-invisible on several biomes.
+      - **The grade: only the unit tier moved.** Board **median and p95 held at base**
+        (medians identical; p95 within +/-2 across all eight biomes) while pixels above
+        luma 180 went **0.06-0.15% -> 0.49-0.66%**. The V2 blocker is cleared and measured:
+        unit ring stroke **179-182**, specular **215**, against a cover top face whose
+        worst possible pixel (high cover, cell face, directly under the key light, plus
+        grain) is **~149** — below a soldier's body fill (153). Cover tops are now
+        **value-targeted** (`Renderer.LiftTo`) so all eight biomes sit on the same rung;
+        their luma spread went **12 -> 0**. The p95=150 target is still unmet and was NOT
+        chased — see DEVLOG §RESONANCE V3.
+      - Verified: Release **0 warn / 0 err**, **41/41** self-tests incl. PAIRTEST, autoplay
+        x5 clean, `SIGHTLINE_BALANCE=10` **byte-identical to base** (runs=20, missions=76,
+        0 diff lines). V2's hue-convergence table re-run: no regression (ASH dHue 30 -> 24,
+        cyan% within 1.5pp everywhere). Write-up: DEVLOG §RESONANCE V3.
+
 - [x] **V2 — LIGHT ON THE BOARD.** DONE. Two measured problems, one of them tactical.
       - **The move overlay stopped repainting the room.** `Renderer.DrawMoveOverlay` filled
         every reachable tile at a=60 and every dash tile at a=55 — 60-120 tiles of flat
