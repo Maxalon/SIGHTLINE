@@ -48,3 +48,18 @@ as ratios rather than raw sums.
 
 Every lever round except the escort pair carries `EFIX=0` (`SIGHTLINE_ESCORTFIX=0`) so it is
 compared against `R0` on the SAME instrument; the escort fix is isolated in its own pair.
+
+## `shots/` — the openings, as they render
+
+Downscaled (640x400, 128 colours; ~60 KB each) captures of every opening shape, all on the
+same seed / mission / arena so the geometry is the only difference. Taken with
+`SIGHTLINE_SEED=777 SIGHTLINE_MISSION=4 SIGHTLINE_DEPLOY=<shape> SIGHTLINE_SHOT=80`, plus a
+`SIGHTLINE_OBJ=defend SIGHTLINE_DEPLOY=envelop` capture on seed 31337 for the surrounded hold.
+
+| file | what it shows |
+|---|---|
+| `open-frontal.png` | the historical opening — squad cols 0-3, the whole force east. FIRE greyed: no contact on turn 1. |
+| `open-pincer.png` | the same board with the force split front + NE flank + SE flank. The squad is NOT concealed at turn 1 and VEGA already has a shot. |
+| `open-crossfire.png` | a five-body mass in the NE and a pair in the SE, middle rows empty. |
+| `open-envelop.png` | the squad in the centre (cols 7-10) with pods on the west, north and east rims. |
+| `defend-surrounded.png` | DEFEND under ENVELOP — the surrounded hold-out, hostiles on the west and east rims of a centre-deployed squad. |
