@@ -390,6 +390,24 @@ public static class Mission
         return true;
     }
 
+    /// FUL-6 CRITICAL MASS: pure greedy pod-size split for an initial force of `count` —
+    /// no RNG draw, and no pod of 1 from any count >= 2 (the waver telegraph needs a
+    /// survivor): while remaining >= 5 take 3; then remainder 4 -> {2,2}, 3 -> {3},
+    /// 2 -> {2}. So 7 -> {3,2,2}, 8 -> {3,3,2}, 9 -> {3,3,3}, 12 -> {3,3,3,3}.
+    /// Public + static so the endless wave splitter (Game.Endless) and PODTEST share it.
+    /// (count == 1 can only reach here from an endless top-up trickle; it keeps a 1-pod,
+    /// which is morale-inert by construction — PodAtWaverPoint needs alive >= 2.)
+    public static int[] PodPlan(int count)
+    {
+        var sizes = new List<int>();
+        int rem = count;
+        while (rem >= 5) { sizes.Add(3); rem -= 3; }
+        if (rem == 4) { sizes.Add(2); sizes.Add(2); }
+        else if (rem == 3) sizes.Add(3);
+        else if (rem > 0) sizes.Add(rem);
+        return sizes.ToArray();
+    }
+
     static void SpawnEnemies(Grid grid, List<Unit> enemies, int n, HashSet<(int, int)> evac,
                              int enemyDelta = 0, int statDelta = 0, bool sabotage = false,
                              int dmgDelta = 0, bool defend = false)
@@ -456,16 +474,48 @@ public static class Mission
         bool siegeSpawned = false;    // hard cap: at most ONE SIEGE/BOMBARD artillery per mission (fairness)
         bool bannerSpawned = false;   // W8 review: at most ONE WARBRINGER banner per mission — overlapping
                                       // auras could blanket an arena and switch the rout lever off entirely
+        // FUL-6 CRITICAL MASS — pods of 3 for the mid/late campaign (missions 3+), via the pure
+        // PodPlan split, so morale gets its full waver->rout arc (kill 1 of 3 -> WAVERING; kill
+        // 2 -> the survivor routs) and one real multi-pod battle replaces six 2-enemy executions.
+        // m1-2 keep i/2 pairs (the teaching tier's gentle first contact) and the FINALE keeps
+        // i/2 EXACTLY — FUL-11's kit geometry (SIGNIFER at i==1 -> the boss's pod 0) is verified
+        // against it, so FUL11PROBE stays green by construction. The m3/m5 mid-boss (i==0) joins
+        // a pod of 3: its 2-body screen can rout out from under it — accepted (mid-bosses already
+        // win at high rates), named a watch item. The plan feeds BOTH the PodId stamp and the
+        // column-offset read below so a pod shares a column band. COHESION ride-along: members
+        // 2-3 anchor to their pod's first member's POST-relocate row (anchor+1/anchor+2, flipped
+        // downward at the board edge so rows stay distinct) instead of independent shuffled rows,
+        // so pods land as visible clumps — the linked-activation geometry, the grenade stage, and
+        // the POD x/y read all depend on this. ZERO extra RNG draws: rows[] reads are not draws,
+        // and the collision-relocate loop stays the only conditional draw source, exactly as today.
+        bool podsOf3 = n >= 3 && n < Run.MaxMissions;
+        int[] podOf = null, memberOf = null;
+        int[] podAnchor = null;
+        if (podsOf3)
+        {
+            int[] plan = PodPlan(count);
+            podOf = new int[count]; memberOf = new int[count]; podAnchor = new int[plan.Length];
+            for (int p = 0, idx = 0; p < plan.Length; p++)
+                for (int m = 0; m < plan[p] && idx < count; m++, idx++) { podOf[idx] = p; memberOf[idx] = m; }
+        }
         for (int i = 0; i < count; i++)
         {
-            int y = rows[i % rows.Count];
-            int podId = i / 2;
+            int podId = podsOf3 ? podOf[i] : i / 2;
+            int member = podsOf3 ? memberOf[i] : 0;
+            int y;
+            if (podsOf3 && member > 0)
+            {
+                int a = podAnchor[podId];               // first member's final row (set below)
+                y = a + member < grid.H ? a + member : a - member;   // stack down; flip up at the edge
+            }
+            else y = rows[i % rows.Count];
             int colOff = EnemyPodColOffset[podId % EnemyPodColOffset.Length];
             int x = grid.W - 1 - colOff;              // stagger across cols 14-17
             int guard = 0;
             while ((used.Contains((x, y)) || evac.Contains((x, y))) && guard++ < 30)
             { y = Util.RandInt(0, grid.H - 1); x = grid.W - 2 - Util.RandInt(0, 2); }
             used.Add((x, y));
+            if (podsOf3 && member == 0) podAnchor[podId] = y;   // anchor = the pod lead's final row
 
             bool finalMission = n >= Run.MaxMissions;
             bool midBoss = !finalMission && i == 0 && (n == 3 || n == 5);   // recurring named elite
@@ -539,7 +589,7 @@ public static class Mission
             // deliberately light bodies (see MakeWaveHostile's do-not-upgrade note).
             if (dmgDelta != 0) { e.Weapon.DmgMin += dmgDelta; e.Weapon.DmgMax += dmgDelta; }
             e.Alert = AlertLevel.Unaware;  // dormant until sighted (escalates via 4.3 tiers)
-            e.PodId = i / 2;               // pods of ~2
+            e.PodId = podId;               // FUL-6: PodPlan pods (m3+); i/2 pairs on m1-2 + the finale
             // APEX W5: composition telemetry — count the FINAL pick (post demote/clamp) at spawn
             // time, tagged faction-roster vs default-cascade (no-op unless the balance harness runs).
             Stats.RecordSpawn(e.Cls, Combat.MissionFaction != Faction.None);
