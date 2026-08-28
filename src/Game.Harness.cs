@@ -3692,4 +3692,300 @@ public partial class Game
         return sb.ToString();
     }
 
+    // ================= RESONANCE T2 — the incoming-fire forecast =================
+
+    /// SIGHTLINE_THREATTEST — pins Game.ComputeThreat's per-tile forecast against the SAME
+    /// Combat.ComputeOdds the resolver uses, on a controlled synthetic board. It asserts the
+    /// FINDING the wave fixes as well as the mechanics:
+    ///   (1) gun COUNT is real (only live+active+armed+in-range+in-LoS hostiles count),
+    ///   (2) BestHit / WorstCls / ExpDmg equal a hand-recomputed ComputeOdds pass,
+    ///   (3) the pre-T2 blind spot: a tile in cover from EVERY bearing gun still reports Guns>0
+    ///       (the old bool[,] called it completely clean),
+    ///   (4) cover levels + flank ANGLE are read from the mover's would-be position,
+    ///   (5) out-of-range / no-LoS / dormant / dry / dead hostiles are excluded,
+    ///   (6) overwatch + FOCUSED (braced-cone) reaction lanes are flagged only where a reaction
+    ///       would genuinely fire,
+    ///   (7) unreachable tiles are never computed, and the caged captive forecasts empty,
+    ///   (8) the mover's real X/Y/Hunkered/MovedAfterFire survive the probe untouched,
+    ///   (9) the post-move state model (moving drops HUNKER) is applied per tile, and
+    ///  (10) the signature cache actually suppresses redundant rebuilds.
+    /// Finishes with a measured worst-case rebuild cost (198 tiles x 8 guns). One-line report.
+    public string ThreatSelfTest()
+    {
+        NoPersist = true;
+        var fails = new System.Collections.Generic.List<string>();
+
+        // ---- deterministic combat statics (a prior test in the same process must not bleed in) ----
+        Combat.AllUnits = System.Array.Empty<Unit>();
+        Combat.MissionFaction = Faction.None;
+        Combat.PrepFaction = Faction.None;
+        Combat.RunBoons.Clear();
+        Combat.PressureAim = 0;
+
+        _run = new Run(); _run.Start();
+        Objective = Objective.Eliminate;
+        Vip = null; CaptiveLocked = false; Hvt = null; EvacZone.Clear();
+        Phase = Phase.PlayerTurn;
+        ThreatPref = ThreatFull;
+
+        Unit MkP(int x, int y) {
+            var u = new Unit { Name = "SOL", Cls = "ASSAULT", Team = Team.Player, X = x, Y = y,
+                               Hp = 8, MaxHp = 8, Aim = 65, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+            u.Ammo = u.Weapon.Clip; u.SyncPos(); u.BeginTurn(); return u;
+        }
+        Unit MkE(string name, int x, int y) {
+            var u = new Unit { Name = name, Cls = "GRUNT", Team = Team.Enemy, X = x, Y = y,
+                               Hp = 6, MaxHp = 6, Aim = 60, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle), PodId = 0 };
+            u.Ammo = u.Weapon.Clip; u.Alert = AlertLevel.Alert; u.SyncPos(); u.BeginTurn(); return u;
+        }
+
+        // Fresh scene: empty floor, one soldier, an all-reachable MoveCost so every tile is probed.
+        Unit sol = null;
+        void Scene(int sx, int sy)
+        {
+            Grid = new Grid();
+            Players = new System.Collections.Generic.List<Unit>();
+            Enemies = new System.Collections.Generic.List<Unit>();
+            sol = MkP(sx, sy);
+            Players.Add(sol);
+            Selected = sol;
+        }
+        void AllReachable()
+        {
+            MoveCost = new int[Grid.W, Grid.H];
+            for (int x = 0; x < Grid.W; x++)
+                for (int y = 0; y < Grid.H; y++)
+                    MoveCost[x, y] = (x == sol.X && y == sol.Y) ? 0 : 1;
+        }
+        void Rebuild() { _threatSig = 0; ComputeThreat(); }
+
+        // ---------- (1)(2)(5) count / best / expected damage / exclusions ----------
+        Scene(5, 5); AllReachable();
+        var a1 = MkE("A", 9, 5);                 // 4 east  — clear LoS, in range
+        var a2 = MkE("B", 5, 9);                 // 4 south — clear LoS, in range
+        var a3 = MkE("C", 2, 2);                 // NW diagonal — clear LoS, in range
+        var far = MkE("FAR", 14, 5);             // SHOTGUN (MaxRange 8) at dist 9 -> out of range
+        far.Weapon = Weapon.Make(WeaponKind.Shotgun); far.Ammo = far.Weapon.Clip;
+        var dormant = MkE("SLEEP", 7, 5);        // in range but NOT active
+        var dry = MkE("DRY", 3, 5);              // in range but out of ammo
+        var dead = MkE("DEAD", 6, 6);            // in range but dead
+        foreach (var e in new[] { a1, a2, a3, far, dormant, dry, dead }) Enemies.Add(e);   // MkE already sets Alert = Alert (=> Active)
+        dormant.Alert = AlertLevel.Unaware; dry.Ammo = 0; dead.Hp = 0; dead.Alive = false;
+        if (Util.TileDist(5, 5, far.X, far.Y) <= far.Weapon.MaxRange) fails.Add("scene_farInRange");
+        Rebuild();
+        if (Threat == null) { return "THREATTEST FAIL: nullForecast"; }
+        var c0 = Threat[5, 5];
+        if (c0.Guns != 3) fails.Add($"gunCount={c0.Guns} want 3");
+
+        // hand-recompute the same three shots and pin best / worst / expected damage
+        int wantBest = 0; string wantCls = null; float wantExp = 0f; float wantScore = -1f;
+        foreach (var e in new[] { a1, a2, a3 })
+        {
+            var o = Combat.ComputeOdds(Grid, e, sol);
+            wantExp += o.HitChance * 0.01f * ((Combat.HardenedReduce(sol, o.DmgMin, false) + Combat.HardenedReduce(sol, o.DmgMax, false)) * 0.5f);
+            float sc = o.HitChance * 1000f + (o.DmgMin + o.DmgMax);
+            if (sc > wantScore) { wantScore = sc; wantBest = o.HitChance; wantCls = e.Cls; }
+        }
+        if (c0.BestHit != wantBest) fails.Add($"bestHit={c0.BestHit} want {wantBest}");
+        if (c0.WorstCls != wantCls) fails.Add($"worstCls={c0.WorstCls} want {wantCls}");
+        if (MathF.Abs(c0.ExpDmg - wantExp) > 0.01f) fails.Add($"expDmg={c0.ExpDmg:0.###} want {wantExp:0.###}");
+        if (wantBest <= 0) fails.Add("vacuousBestHit");         // guard: the scene must actually produce shots
+        if (wantExp <= 0f) fails.Add("vacuousExpDmg");
+        if (!c0.Exposed) fails.Add("openGroundNotExposed");     // no cover anywhere on this board
+        if (c0.Tier != 3) fails.Add($"tier={c0.Tier} want 3");
+        // exclusions must genuinely bite: waking the dormant gun changes the count
+        dormant.Alert = AlertLevel.Alert; Rebuild();
+        if (Threat[5, 5].Guns != 4) fails.Add($"dormantExclusionInert={Threat[5, 5].Guns}");
+        dormant.Alert = AlertLevel.Unaware;
+        // a wall between (5,5) and the east gun drops it (LoS gate)
+        Grid.Tiles[7, 5] = TileType.HighCover; Rebuild();
+        if (Threat[5, 5].Guns != 2) fails.Add($"losExclusion={Threat[5, 5].Guns} want 2");
+        Grid.Tiles[7, 5] = TileType.Floor;
+
+        // ---------- (7) unreachable tiles are never computed ----------
+        Rebuild();
+        int probeX = 5, probeY = 3;                              // open, in every gun's reach
+        if (Threat[probeX, probeY].Guns == 0) fails.Add("probeTileHadNoGuns");   // guard: the tile IS hot
+        MoveCost[probeX, probeY] = 0; Rebuild();
+        if (Threat[probeX, probeY].Guns != 0) fails.Add("unreachableTileComputed");
+        MoveCost[probeX, probeY] = 1;
+
+        // ---------- (8) the probe leaves the mover untouched ----------
+        sol.Hunkered = true; sol.FiredThisTurn = true; sol.MovedAfterFire = false;
+        int sx0 = sol.X, sy0 = sol.Y;
+        Rebuild();
+        if (sol.X != sx0 || sol.Y != sy0) fails.Add("moverPositionClobbered");
+        if (!sol.Hunkered || sol.MovedAfterFire) fails.Add("moverStateClobbered");
+
+        // ---------- (9) post-move state model: HUNKER only holds on the tile you stand on ----------
+        var hereCell = Threat[sol.X, sol.Y];
+        var stepCell = Threat[sol.X, sol.Y - 1];
+        if (hereCell.BestHit >= stepCell.BestHit) fails.Add($"hunkerNotModelled here={hereCell.BestHit} step={stepCell.BestHit}");
+        sol.Hunkered = false; sol.FiredThisTurn = false; sol.MovedAfterFire = false;
+
+        // ---------- (3)(4) cover levels + flank ANGLE, read from the would-be position ----------
+        // Scene: soldier at (5,5). Candidate tile (8,5) has HIGH cover on its EAST side (9,5).
+        // ONE gun due east (covered) and, later, a second gun due north (flanking).
+        Scene(5, 5); AllReachable();
+        // LOW cover, not HIGH: high cover BLOCKS the cardinal sightline outright (Grid.BlocksSight),
+        // so there'd be no shot at all to forecast. Low cover shades the shot without severing it.
+        Grid.Tiles[9, 5] = TileType.LowCover;
+        var east = MkE("EAST", 12, 5); Enemies.Add(east);
+        Rebuild();
+        var covered = Threat[8, 5];
+        if (covered.Guns != 1) fails.Add($"coveredGuns={covered.Guns} want 1");
+        if (covered.Exposed) fails.Add("coveredTileReadsExposed");
+        if (covered.Flanked) fails.Add("coveredTileReadsFlanked");
+        var oCov = Combat.ComputeOdds(Grid, east, new Unit { Team = Team.Player, X = 8, Y = 5, Hp = 8, MaxHp = 8,
+                                                             Aim = 65, Weapon = Weapon.Make(WeaponKind.Rifle) });
+        if (oCov.CoverLevel != 1) fails.Add($"sceneCoverLevel={oCov.CoverLevel} want 1");
+        if (covered.BestHit != oCov.HitChance) fails.Add($"coveredBestHit={covered.BestHit} want {oCov.HitChance}");
+        // THE FINDING: a second gun on a DIFFERENT angle. The tile is still in cover from nobody's
+        // point of view but the north gun's — pre-T2 the tile was flagged only via the raw bool, and
+        // a tile covered from EVERY gun read completely clean. Now the COUNT is always honest.
+        var north = MkE("NORTH", 8, 1); Enemies.Add(north);
+        Rebuild();
+        var enfiladed = Threat[8, 5];
+        if (enfiladed.Guns != 2) fails.Add($"enfiladedGuns={enfiladed.Guns} want 2");
+        if (!enfiladed.Flanked) fails.Add("northGunNotFlanking");
+        if (enfiladed.BestHit <= covered.BestHit) fails.Add("flankNotHarderHit");
+        // and the pre-T2 blind spot itself: box the tile so BOTH guns are covered -> Guns still 2,
+        // Exposed false. The old bool[,] drew nothing at all here.
+        Grid.Tiles[8, 4] = TileType.LowCover; Rebuild();
+        var boxed = Threat[8, 5];
+        if (boxed.Guns != 2) fails.Add($"boxedGuns={boxed.Guns} want 2");
+        if (boxed.Exposed) fails.Add("boxedTileExposed");
+        if (boxed.Flanked) fails.Add("boxedTileFlanked");
+        if (boxed.Tier != 2) fails.Add($"boxedTier={boxed.Tier} want 2");
+
+        // ---------- (6) overwatch / focused-cone reaction lanes ----------
+        Scene(5, 5); AllReachable();
+        var watcher = MkE("WATCH", 11, 5); watcher.OnOverwatch = true; Enemies.Add(watcher);
+        Rebuild();
+        if (!Threat[8, 5].Watched) fails.Add("wideOverwatchNotWatched");
+        watcher.OwFocused = true; watcher.OwDirX = -1; watcher.OwDirY = 0;   // braced WEST, down the row
+        Rebuild();
+        if (!Threat[8, 5].Watched) fails.Add("inConeNotWatched");
+        if (!InOwCone(watcher, 8, 5)) fails.Add("sceneConeSanity");
+        // a tile the cone does NOT cover must not claim a reaction (perpendicular, still in LoS+range)
+        if (InOwCone(watcher, 11, 2)) fails.Add("scenePerpConeSanity");
+        if (Threat[11, 2].Watched) fails.Add("outOfConeWatched");
+        if (Threat[11, 2].Guns == 0) fails.Add("outOfConeTileHadNoGuns");   // guard: it IS shootable, just not watched
+        watcher.OnOverwatch = false; Rebuild();
+        if (Threat[8, 5].Watched) fails.Add("overwatchClearedButStillWatched");
+
+        // ---------- (7b) the caged Rescue captive forecasts empty ----------
+        Scene(5, 5); AllReachable();
+        var gun = MkE("G", 9, 5); Enemies.Add(gun);
+        Rebuild();
+        if (Threat[5, 5].Guns == 0) fails.Add("captiveSceneNoGuns");
+        Vip = sol; CaptiveLocked = true; Rebuild();
+        if (Threat[5, 5].Guns != 0) fails.Add("cagedCaptiveForecastsFire");
+        Vip = null; CaptiveLocked = false;
+
+        // ---------- (10) the signature cache suppresses redundant rebuilds ----------
+        Rebuild();
+        int r0 = ThreatRebuilds;
+        ComputeThreat(); ComputeThreat(); ComputeThreat();
+        if (ThreatRebuilds != r0) fails.Add($"cacheMissedOnNoChange (+{ThreatRebuilds - r0})");
+        gun.X = 8; gun.SyncPos(); ComputeThreat();
+        if (ThreatRebuilds != r0 + 1) fails.Add("cacheDidNotInvalidateOnEnemyMove");
+        Grid.Tiles[3, 3] = TileType.LowCover; ComputeThreat();
+        if (ThreatRebuilds != r0 + 2) fails.Add("cacheDidNotInvalidateOnTerrainChange");
+
+        // ---------- perf: worst case — every tile reachable, 8 armed guns ----------
+        Scene(9, 5);
+        for (int i = 0; i < 8; i++)
+        {
+            var e = MkE($"P{i}", 1 + (i % 4) * 4, i < 4 ? 1 : 9);
+            Enemies.Add(e);
+        }
+        AllReachable();
+        Rebuild();                                   // warm the JIT
+        const int reps = 40;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        for (int i = 0; i < reps; i++) Rebuild();
+        sw.Stop();
+        double ms = sw.Elapsed.TotalMilliseconds / reps;
+        int guns = Threat[9, 5].Guns;
+
+        Combat.AllUnits = System.Array.Empty<Unit>();
+        return fails.Count == 0
+            ? $"THREATTEST PASS (worst-case rebuild {ms:0.000} ms over {Cfg.GridW * Cfg.GridH} tiles x 8 guns; centre sees {guns})"
+            : $"THREATTEST FAIL: {string.Join(", ", fails)}";
+    }
+
+    /// Harness (screenshot): SIGHTLINE_THREATSHOT — stage a real fight where the selected soldier
+    /// can walk into 1-, 2- and 3-gun tiles, then park the cursor on a hot destination so the pips,
+    /// the danger-tinted path and the INCOMING FIRE card all land in one frame. Pair with
+    /// SIGHTLINE_CB=1 for the colorblind pass (coded-state rule, DESIGN.md 3.H).
+    public void DebugThreatShot()
+    {
+        DebugWakeAll();
+        var sol = AlivePlayers().FirstOrDefault(p => !p.IsVip && p.CanAct) ?? AlivePlayers().FirstOrDefault();
+        if (sol == null) return;
+        Selected = sol;
+        ThreatPref = ThreatFull;
+
+        // Fan the live hostiles onto clear firing angles around the soldier so several guns bear on
+        // the tiles it can reach (staging only — the same free-staging precedent as DebugPikemanLane).
+        var foes = AliveEnemies().Take(4).ToList();
+        var rings = new (int dx, int dy)[] { (6, -2), (5, 4), (-5, 3), (-4, -4) };
+        for (int i = 0; i < foes.Count && i < rings.Length; i++)
+        {
+            var f = foes[i];
+            int tx = Util.Clamp(sol.X + rings[i].dx, 0, Grid.W - 1);
+            int ty = Util.Clamp(sol.Y + rings[i].dy, 0, Grid.H - 1);
+            for (int r = 0; r <= 3 && !PlaceFoe(f, tx, ty, r); r++) { }
+            f.Alert = AlertLevel.Alert; f.Ammo = f.Weapon.Clip;
+        }
+        if (foes.Count > 0) { foes[0].OnOverwatch = true; }   // one live reaction lane in the frame
+
+        RecomputeMoveCost();
+        // Measured per-selection cost on a REAL board (real reachable set, real roster), warm —
+        // the number the wave report quotes. Console-only; NoPersist keeps it out of live play.
+        {
+            int reach = 0;
+            if (MoveCost != null)
+                for (int x = 0; x < Grid.W; x++) for (int y = 0; y < Grid.H; y++) if (MoveCost[x, y] > 0) reach++;
+            for (int i = 0; i < 5; i++) { _threatSig = 0; ComputeThreat(); }        // warm
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            for (int i = 0; i < 50; i++) { _threatSig = 0; ComputeThreat(); }
+            sw.Stop();
+            int foeN = AliveEnemies().Count(e => e.Active && e.Ammo > 0);
+            Console.WriteLine($"HARNESS THREATPERF: reachable={reach} guns={foeN} rebuild={sw.Elapsed.TotalMilliseconds / 50.0:0.000} ms");
+        }
+        // park the cursor on the hottest tile the soldier can actually reach (most guns, then
+        // furthest from the soldier so the tinted path has some length to show).
+        int bx = sol.X, by = sol.Y, best = -1;
+        if (Threat != null && MoveCost != null)
+            for (int x = 0; x < Grid.W; x++)
+                for (int y = 0; y < Grid.H; y++)
+                {
+                    if (MoveCost[x, y] <= 0 || MoveCost[x, y] > sol.MoveBudget) continue;
+                    if (UnitAt(x, y) != null) continue;
+                    int score = Threat[x, y].Guns * 100 + (int)Util.TileDist(sol.X, sol.Y, x, y);
+                    if (score > best) { best = score; bx = x; by = y; }
+                }
+        DebugMousePark = Util.TileCenter(bx, by);
+    }
+
+    /// Set by DebugThreatShot: Program parks the headless cursor here every frame so hover-driven
+    /// chrome (path preview + the incoming-fire card) is present in the captured frame.
+    public System.Numerics.Vector2? DebugMousePark;
+
+    /// Move `f` to (tx,ty) or the first free floor tile within `r` of it. True on success.
+    bool PlaceFoe(Unit f, int tx, int ty, int r)
+    {
+        for (int dx = -r; dx <= r; dx++)
+            for (int dy = -r; dy <= r; dy++)
+            {
+                int x = tx + dx, y = ty + dy;
+                if (!Grid.InBounds(x, y) || !Grid.IsFloor(x, y)) continue;
+                if (IsOccupiedByOther(x, y, f)) continue;
+                f.X = x; f.Y = y; f.SyncPos(); return true;
+            }
+        return false;
+    }
+
 }

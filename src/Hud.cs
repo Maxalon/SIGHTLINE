@@ -120,6 +120,7 @@ public static class Hud
         }
         DrawBottomBar(g);
         DrawTooltip(g);
+        DrawThreatCard(g);  // RESONANCE T2: incoming-fire forecast for the hovered destination tile
         DrawHudHovers(g);   // W11: objective-readout + boon-chip hover tooltips
         if (g.Phase == Phase.PlayerTurn || g.Phase == Phase.EnemyTurn)
         {
@@ -244,7 +245,12 @@ public static class Hud
         DrawButtonRect(PauseWindow, "WINDOW: " + Display.SizeLabel, "", true, false, Pal.Accent);
         DrawButtonRect(PauseMute, Audio.Enabled ? "AUDIO: ON" : "AUDIO: OFF", "M", true, !Audio.Enabled, Pal.Accent);
         DrawButtonRect(PauseShake, g.Fx.ShakeOn ? "SCREEN SHAKE: ON" : "SCREEN SHAKE: OFF", "", true, !g.Fx.ShakeOn, Pal.Accent);
-        DrawButtonRect(PauseThreat, g.ShowThreatPref ? "THREAT PREVIEW: ON" : "THREAT PREVIEW: OFF", "", true, !g.ShowThreatPref, Pal.Accent);
+        // RESONANCE T2: three-state — OFF / SIMPLE (the pre-T2 single exposure tick) / FULL (graded
+        // incoming-fire pips + hover card + danger-tinted path). Cycles on click.
+        string tpLabel = g.ThreatPref == Game.ThreatOff ? "THREAT PREVIEW: OFF"
+                       : g.ThreatPref == Game.ThreatSimple ? "THREAT PREVIEW: SIMPLE"
+                       : "THREAT PREVIEW: FULL";
+        DrawButtonRect(PauseThreat, tpLabel, "", true, g.ThreatPref == Game.ThreatOff, Pal.Accent);
         DrawButtonRect(PauseBright, "BRIGHTNESS: " + Display.BrightLabel, "", true, false, Pal.Accent);
         DrawButtonRect(PauseGamma, "GAMMA: " + Display.GammaLabel, "", true, false, Pal.Accent);
         DrawButtonRect(PauseColorblind, Pal.Colorblind ? "COLORBLIND: ON" : "COLORBLIND: OFF", "", true, Pal.Colorblind, Pal.Accent);
@@ -1785,6 +1791,80 @@ public static class Hud
         foreach (var ln in lines) { Raylib.DrawTextEx(Cfg.Font, ln, new Vector2(x + pad, iy), 11, 1f, Pal.TxtDim); iy += 14; }
         Raylib.DrawRectangle(x + pad, iy + 2, w - pad * 2, 1, Pal.RGBA(38, 49, 63, 200));
         Raylib.DrawTextEx(Cfg.Font, state.txt, new Vector2(x + pad, iy + 7), 12, 1f, state.col);
+    }
+
+    // ---------------- RESONANCE T2: the incoming-fire hover card ----------------
+    // The board carries the COUNT (graded pips); this carries the DETAIL, on demand only. It answers
+    // the defensive question the game never answered before T2: if I stand there, how many guns bear
+    // on me, how well does the best of them shoot, how much damage is that, am I flanked, and am I
+    // walking into a reaction lane. Every number is the forecast Game.ComputeThreat derived straight
+    // from Combat.ComputeOdds, so it cannot disagree with the shot that actually gets fired.
+    //
+    // Deliberately yields to the two cards that already own the hover: the shot tooltip (aiming) and
+    // the enemy-ID card (cursor on a hostile). It only ever speaks about an EMPTY REACHABLE tile.
+    static void DrawThreatCard(Game g)
+    {
+        if (g.Phase != Phase.PlayerTurn || !g.IsPlayerInteractive()) return;
+        if (g.Paused || g.EditingTag || g.ShowOdds) return;
+        if (g.AimMode || g.GrenadeMode || g.ItemMode || g.ShoveMode || g.DragMode ||
+            g.VaultMode || g.MarkMode || g.GrappleMode || g.PinMode) return;
+        if (g.ThreatPref < Game.ThreatFull || g.Threat == null || g.MoveCost == null) return;
+        var sel = g.Selected;
+        if (sel == null || sel.Team != Team.Player || !sel.CanAct) return;
+
+        var world = Raylib.GetScreenToWorld2D(Raylib.GetMousePosition(), g.ViewCamera(false));
+        if (!Util.ScreenToTile(world, out int tx, out int ty)) return;
+        if (g.UnitAt(tx, ty) != null && !(tx == sel.X && ty == sel.Y)) return;   // a body owns its own hover
+        bool here = tx == sel.X && ty == sel.Y;
+        if (!here && g.MoveCost[tx, ty] <= 0) return;                            // unreachable: nothing to forecast
+
+        var c = g.Threat[tx, ty];
+        bool anyFoe = false;
+        foreach (var e in g.Enemies) if (e.Alive && e.Active && e.Ammo > 0) { anyFoe = true; break; }
+        if (!anyFoe) return;   // nothing is shooting at anyone — a "you are safe" card would be noise
+
+        var lines = new System.Collections.Generic.List<(string txt, Color col)>();
+        string title; Color accent;
+        if (c.Guns == 0)
+        {
+            title = here ? "NO INCOMING FIRE" : "CLEAR TILE";
+            accent = Pal.Good;
+            lines.Add(("no active hostile bears on this tile", Pal.TxtDim));
+        }
+        else
+        {
+            title = "INCOMING FIRE";
+            accent = Pal.Foe;
+            string guns = c.Guns == 1 ? "1 hostile bears" : $"{c.Guns} hostiles bear";
+            lines.Add(($"{guns}  ·  best {c.BestHit}%  ·  ~{Math.Max(1, (int)MathF.Round(c.ExpDmg))} dmg", Pal.Txt));
+            if (c.Flanked)      lines.Add(("FLANKED — cover won't protect you here", Pal.Foe));
+            else if (c.Exposed) lines.Add(("EXPOSED — at least one gun has a clean shot", Pal.Suspect));
+            if (!string.IsNullOrEmpty(c.WorstCls))
+                lines.Add(($"worst gun: {Codex.NameFor(c.WorstCls)} — {c.WorstCls}", Pal.TxtDim));
+        }
+        if (c.Watched) lines.Add(("OVERWATCH LANE — entering draws a reaction", Pal.Suspect));
+
+        const int pad = 11, lh = 16;
+        int w = (int)Raylib.MeasureTextEx(Cfg.Font, title, 14, 1f).X;
+        foreach (var (t, _) in lines) w = Math.Max(w, (int)Raylib.MeasureTextEx(Cfg.Font, t, 12, 1f).X);
+        w += pad * 2;
+        int h = 26 + lines.Count * lh + 7;
+
+        // anchored BELOW-right of the cursor so it never fights the enemy-ID card (which sits above)
+        var m = Raylib.GetMousePosition();
+        int x = Util.Clamp((int)m.X + 16, 8, Cfg.ScreenW - w - 8);
+        int y = Util.Clamp((int)m.Y + 18, 64, Cfg.ScreenH - h - 8);
+        var box = new Rectangle(x, y, w, h);
+        Raylib.DrawRectangleRounded(box, 0.12f, 8, Pal.RGBA(10, 14, 19, 248));
+        Raylib.DrawRectangleLinesEx(box, 1.4f, Raylib.Fade(accent, 0.85f));
+        Raylib.DrawTextEx(Cfg.Font, title, new Vector2(x + pad, y + 8), 14, 1f, accent);
+        int ly = y + 26;
+        foreach (var (t, col) in lines) { Raylib.DrawTextEx(Cfg.Font, t, new Vector2(x + pad, ly), 12, 1f, col); ly += lh; }
+
+        // tier pips echoed on the title row — the SAME triangle glyph the board draws, so the player
+        // learns the board vocabulary straight off the card, with no legend screen.
+        for (int i = 0; i < c.Tier; i++)
+            Raylib.DrawPoly(new Vector2(x + w - pad - 5 - i * 11f, y + 15), 3, 4.3f, -90f, accent);
     }
 
     // ---------------- turn banner sweep ----------------

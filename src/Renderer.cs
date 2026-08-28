@@ -720,27 +720,65 @@ public static class Renderer
             }
     }
 
-    // Red warning pips on reachable tiles that a live enemy could fire on with no
-    // cover — a quick read on which destinations leave the soldier exposed.
+    // RESONANCE T2 — the INCOMING-FIRE FORECAST overlay. The board used to answer "is this tile
+    // exposed?" with one identical tick; it now answers "how much fire am I standing in?" with a
+    // GRADED PIP STACK in the tile's top-right corner: one small triangle per bearing gun, capped
+    // at three (3+). The COUNT is the signal, so the read survives Pal.SetColorblind and a
+    // greyscale squint (DESIGN.md 3.H: shape-redundancy, never hue alone) — alpha only reinforces
+    // it. A FLANK adds one short underline bar beneath the stack ("your cover does nothing here").
+    //
+    // Everything numeric (best hit%, expected damage, which gun) lives in the HOVER CARD, not on
+    // the board: 3.C/3.H forbid a field of numbers over the play surface. Detail on demand.
+    //
+    // SIMPLE mode reproduces the pre-T2 read exactly (one tick on any tile where some gun sees
+    // you with no cover) for players who want the quiet board back.
     static void DrawThreat(Game g)
     {
         if (g.Selected == null || !g.IsPlayerInteractive() || g.AimMode || g.GrenadeMode) return;
         if (g.Selected.Team != Team.Player || !g.Selected.CanAct) return;
         if (g.Threat == null || g.MoveCost == null) return;
 
+        bool full = g.ThreatPref >= Game.ThreatFull;
         float pulse = 0.6f + 0.4f * MathF.Sin((float)Raylib.GetTime() * 4f);
         for (int x = 0; x < g.Grid.W; x++)
             for (int y = 0; y < g.Grid.H; y++)
             {
-                if (!g.Threat[x, y]) continue;
+                var c = g.Threat[x, y];
                 bool here = x == g.Selected.X && y == g.Selected.Y;
                 if (!here && g.MoveCost[x, y] <= 0) continue;
                 var r = ElevRect(g, x, y);
-                var pos = new Vector2(r.X + r.Width - 9, r.Y + 9);
-                // a single small subtle danger tick (was a loud filled triangle + bright outline)
-                // — informs "this tile is exposed" without a field of red pips drowning the units.
-                Raylib.DrawPoly(pos, 3, 4.5f, -90f, Raylib.Fade(Pal.Foe, 0.32f + 0.18f * pulse));
-                Raylib.DrawPolyLinesEx(pos, 3, 4.5f, -90f, 1.2f, Raylib.Fade(Pal.Foe, 0.45f));
+
+                if (!full)
+                {
+                    // SIMPLE: the pre-T2 tick, on the pre-T2 condition (seen with NO cover).
+                    if (!c.Exposed) continue;
+                    var p0 = new Vector2(r.X + r.Width - 9, r.Y + 9);
+                    Raylib.DrawPoly(p0, 3, 4.5f, -90f, Raylib.Fade(Pal.Foe, 0.32f + 0.18f * pulse));
+                    Raylib.DrawPolyLinesEx(p0, 3, 4.5f, -90f, 1.2f, Raylib.Fade(Pal.Foe, 0.45f));
+                    continue;
+                }
+
+                int tier = c.Tier;
+                if (tier <= 0) continue;
+                // alpha ramps with the tier so a hot corner of the board reads at a squint, but the
+                // PIP COUNT is what actually carries the number.
+                float a = tier == 1 ? 0.26f : tier == 2 ? 0.40f : 0.58f;
+                Color fill = Raylib.Fade(Pal.Foe, a + 0.14f * pulse);
+                Color line = Raylib.Fade(Pal.Foe, Math.Min(0.95f, a + 0.28f));
+                float px = r.X + r.Width - 9f, py = r.Y + 8f;
+                for (int i = 0; i < tier; i++)
+                {
+                    var pos = new Vector2(px, py + i * 10f);
+                    Raylib.DrawPoly(pos, 3, 4.3f, -90f, fill);
+                    Raylib.DrawPolyLinesEx(pos, 3, 4.3f, -90f, 1.1f, line);
+                }
+                // FLANK bar: a stubby underline under the stack. A second, non-hue channel for the
+                // single worst thing a tile can be — your cover won't protect you standing here.
+                if (c.Flanked)
+                {
+                    float by = py + tier * 10f - 1f;
+                    Raylib.DrawRectangleRec(new Rectangle(px - 5.5f, by, 11f, 2f), line);
+                }
             }
     }
 
@@ -942,20 +980,42 @@ public static class Renderer
         }
     }
 
+    /// RESONANCE T2: the route is priced, not just the destination. The connecting line takes the
+    /// colour of the WORST danger tier anywhere along the path (a safe-looking destination reached
+    /// by walking through a crossfire is no longer free), and each step node is drawn in ITS OWN
+    /// tier — clean steps stay round dots, threatened steps become triangles (the same pip glyph
+    /// the forecast overlay uses), so the exact stretch that is hot reads without a legend and
+    /// without hue (DESIGN.md 3.H shape-redundancy).
+    static Color PathTierColor(int tier) =>
+        tier <= 0 ? Pal.Accent : tier == 1 ? Pal.Suspect : Pal.Foe;
+
     static void DrawPathPreview(Game g)
     {
         if (g.PathPreview == null || g.PathPreview.Count == 0 || g.Selected == null) return;
+        var th = g.ThreatPref >= Game.ThreatFull ? g.Threat : null;
+
+        int worst = 0;
+        if (th != null)
+            foreach (var (x, y) in g.PathPreview)
+                if (g.Grid.InBounds(x, y)) worst = Math.Max(worst, th[x, y].Tier);
+        Color lineCol = PathTierColor(worst);
+        float lineA = worst <= 0 ? 0.55f : worst == 1 ? 0.62f : 0.72f;
+
         Vector2 prev = ElevCenter(g, g.Selected.X, g.Selected.Y);
         foreach (var (x, y) in g.PathPreview)
         {
             var c = ElevCenter(g, x, y);
-            Raylib.DrawLineEx(prev, c, 2.5f, Raylib.Fade(Pal.Accent, 0.55f));
+            Raylib.DrawLineEx(prev, c, worst >= 2 ? 3.0f : 2.5f, Raylib.Fade(lineCol, lineA));
             prev = c;
         }
         foreach (var (x, y) in g.PathPreview)
         {
             var c = ElevCenter(g, x, y);
-            Raylib.DrawCircleV(c, 3.5f, Raylib.Fade(Pal.Accent, 0.8f));
+            int t = (th != null && g.Grid.InBounds(x, y)) ? th[x, y].Tier : 0;
+            if (t <= 0) { Raylib.DrawCircleV(c, 3.5f, Raylib.Fade(Pal.Accent, 0.8f)); continue; }
+            var col = Raylib.Fade(PathTierColor(t), 0.88f);
+            Raylib.DrawPoly(c, 3, 4.6f + t * 0.5f, -90f, col);            // hot step: the pip glyph
+            Raylib.DrawPolyLinesEx(c, 3, 4.6f + t * 0.5f, -90f, 1.2f, Raylib.Fade(PathTierColor(t), 1f));
         }
     }
 

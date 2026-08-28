@@ -98,6 +98,19 @@ public static class Program
             Console.WriteLine(Combat.SelfTest());
             return;
         }
+        // SIGHTLINE_THREATTEST=1 : RESONANCE T2 — the incoming-fire FORECAST pinned against
+        // Combat.ComputeOdds on a synthetic board (gun count, best hit%, expected damage, cover /
+        // flank angle, out-of-range / dormant / dry / no-LoS exclusion, overwatch + focused cones,
+        // unreachable-tile skip, caged captive, non-mutation of the mover, signature cache) plus a
+        // measured worst-case rebuild cost. Tiny window (Game/Unit ctors).
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_THREATTEST") == "1")
+        {
+            Raylib.SetTraceLogLevel(TraceLogLevel.Error);
+            Raylib.InitWindow(64, 64, "sightline-threattest");
+            Console.WriteLine(new Game().ThreatSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         // SIGHTLINE_CODEXTEST=1 : CODEX / FIELD MANUAL content-completeness (W6) — every documented enum
         // has a non-empty Name+Desc and the bestiary covers every archetype. Tiny window (Game/Unit ctors).
         if (Environment.GetEnvironmentVariable("SIGHTLINE_CODEXTEST") == "1")
@@ -501,6 +514,8 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_PODSHOT") == "1") game.DebugPodShot();   // FUL-6: pair with SIGHTLINE_MISSION=3
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_WAVEBANNER") == "1") game.DebugWaveTelegraph();   // FUL-4: pair with SIGHTLINE_OBJ=defend
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_PIKESHOT") == "1") game.DebugPikemanLane();       // FUL-8: planted PIKEMAN lane (pair with SIGHTLINE_CB=1 for the second pass)
+        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_THREATSHOT") == "1") game.DebugThreatShot();      // RESONANCE T2: incoming-fire pips + tinted path + card (pair with SIGHTLINE_CB=1)
+        if (shot && int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_THREATPREF"), out int _tp)) game.ThreatPref = Util.Clamp(_tp, Game.ThreatOff, Game.ThreatFull);   // 0 off / 1 simple (pre-T2 read) / 2 full
         string downShot = Environment.GetEnvironmentVariable("SIGHTLINE_DOWNSHOT");
         if (shot && (downShot == "1" || downShot == "2")) game.DebugDownShot(downShot == "2");   // FUL-7: downed soldier + rescuer (=2 mid-rescue STABLE; pair with SIGHTLINE_CB=1 for the second pass)
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CONCEAL") == "1") game.DebugConcealment();
@@ -561,6 +576,10 @@ public static class Program
             float dt = (shot || autoplay) ? 1f / 60f : Raylib.GetFrameTime();
             Display.UpdateMouse();
             if (helpShot) Raylib.SetMousePosition(592, 740);   // park cursor on the ability button
+            // RESONANCE T2: a staged hover for the forecast screenshot — the card + path preview are
+            // hover-driven, so the harness has to hold the cursor on the tile every frame.
+            if (shot && game.DebugMousePark.HasValue)
+                Raylib.SetMousePosition((int)game.DebugMousePark.Value.X, (int)game.DebugMousePark.Value.Y);
             game.Update(dt);
             Audio.UpdateMusic(dt);
 
