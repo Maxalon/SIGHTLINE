@@ -128,26 +128,26 @@ public static partial class Audio
         // ───────── baseline action cues ─────────
         // SELECT: a crisp two-tone blip (clicky UI confirm).
         Reg("select", 0.09f, -14f, b => {
-            Click(b, 0, 0.22f);
-            Tone(b, 540, 0, 0.05f, Wv.Square, 0.26f, atk: 0.002f, dec: 5f);
+            Click(b, 0, 0.22f, tone: 5200, bright: 9000, len: 0.0016f, ring: 0.7f);  // glassy UI tick
+            Tone(b, 540, 0, 0.05f, Wv.Square, 0.26f, atk: 0.002f, dec: 5f, tilt: 2200f);
             Tone(b, 810, 0.012f, 0.04f, Wv.Sine, 0.18f, atk: 0.002f, dec: 6f);
         });
         // MOVE: a soft, short footfall thud (low, rounded — fires a lot, stays gentle).
         Reg("move", 0.08f, -14.5f, b => {
-            Tone(b, 220, 0, 0.06f, Wv.Tri, 0.22f, slideTo: 150, atk: 0.003f, dec: 5f);
-            Noise(b, 0, 0.03f, 0.10f, lp: 0.5f);
+            Tone(b, 220, 0, 0.06f, Wv.Tri, 0.22f, slideTo: 150, atk: 0.003f, dec: 5f, tilt: 2600f);
+            Noise(b, 0, 0.03f, 0.11f, fc: 900, poles: 3, bodyHz: 190, bodyQ: 1.4f, bodyMix: 0.9f);
         });
         // RELOAD: a mechanical two-click "cha-chk" (mag out, mag in + bolt).
         Reg("reload", 0.18f, -11f, b => {
-            Click(b, 0, 0.30f);
-            Tone(b, 520, 0.005f, 0.04f, Wv.Square, 0.22f, atk: 0.001f, dec: 7f);
-            Click(b, 0.085f, 0.34f);
-            Tone(b, 360, 0.090f, 0.05f, Wv.Square, 0.20f, atk: 0.001f, dec: 6f);
+            Click(b, 0, 0.32f, tone: 1900, bright: 6000, len: 0.0040f);              // mag out (dull clack)
+            Tone(b, 520, 0.005f, 0.055f, Wv.Square, 0.30f, atk: 0.001f, dec: 5.5f, tilt: 2600f);
+            Click(b, 0.085f, 0.36f, tone: 2600, bright: 8000, len: 0.0035f);         // mag in + bolt (brighter)
+            Tone(b, 360, 0.090f, 0.065f, Wv.Square, 0.28f, atk: 0.001f, dec: 5f, tilt: 2400f);
         });
         // HUNKER: a low settling thunk (dig in).
         Reg("hunker", 0.18f, -12.5f, b => {
-            Tone(b, 230, 0, 0.15f, Wv.Tri, 0.30f, slideTo: 170, atk: 0.006f, dec: 3.2f);
-            Noise(b, 0, 0.05f, 0.12f, lp: 0.4f);
+            Tone(b, 230, 0, 0.15f, Wv.Tri, 0.30f, slideTo: 170, atk: 0.006f, dec: 3.2f, tilt: 2200f);
+            Noise(b, 0, 0.05f, 0.13f, fc: 700, poles: 3, bodyHz: 240, bodyQ: 1.2f, bodyMix: 0.8f);
         });
 
         // ───────── per-weapon firing voices (each short — these fire a LOT) ─────────
@@ -158,69 +158,82 @@ public static partial class Audio
         Reg("w_rifle", 0.16f, -6f, FillRifle);
         // SHOTGUN: a fat low boom + a wide, long noise wash (heavy, blunt).
         Reg("w_shotgun", 0.24f, -5f, b => {
-            Click(b, 0, 0.30f);
-            Noise(b, 0, 0.20f, 0.62f, lp: 0.65f);                 // broad blast wash
-            Tone(b, 110, 0, 0.18f, Wv.Saw, 0.46f, slideTo: 55, atk: 0.001f, dec: 3.0f);
-            Tone(b, 150, 0, 0.06f, Wv.Square, 0.28f, slideTo: 70, atk: 0.001f, dec: 7f);
+            Click(b, 0, 0.34f, tone: 1150, bright: 4200, len: 0.0045f);   // heavy pump action
+            // the blast: a LOW wash (fc 1.3 kHz) around a wide 300 Hz chamber resonance
+            Noise(b, 0, 0.20f, 0.66f, fc: 1300, poles: 3, bodyHz: 300, bodyQ: 1.5f, bodyMix: 1.5f);
+            Tone(b, 110, 0, 0.18f, Wv.Saw, 0.46f, slideTo: 55, atk: 0.001f, dec: 3.0f, tilt: 1600f);
+            Tone(b, 150, 0, 0.06f, Wv.Square, 0.28f, slideTo: 70, atk: 0.001f, dec: 7f, tilt: 1800f);
         });
         // SNIPER: a hard transient + a bright high crack + a long ringing metallic tail.
         Reg("w_sniper", 0.30f, -5.5f, b => {
-            Click(b, 0, 0.40f);
-            Noise(b, 0, 0.045f, 0.52f, lp: 1f);                   // tight bright crack
-            Tone(b, 1020, 0, 0.05f, Wv.Square, 0.40f, slideTo: 520, atk: 0.0006f, dec: 8f);
-            Tone(b, 300, 0.02f, 0.26f, Wv.Saw, 0.26f, slideTo: 150, atk: 0.002f, dec: 1.8f); // ringing tail
+            Click(b, 0, 0.46f, tone: 3300, bright: 12000, len: 0.0022f);  // hard, bright bolt
+            // the crack: still the BRIGHTEST weapon in the game (highest centroid of the five)
+            // but a BAND at 3.8 kHz, not raw white noise to 22 kHz — with a tight 1.4 kHz
+            // resonance for the whip-snap. The long saw tail below is deliberately held back:
+            // at its old level it dragged the sniper's centroid UNDER the shotgun's.
+            Noise(b, 0, 0.055f, 0.72f, fc: 3800, poles: 2, bodyHz: 1450, bodyQ: 3.0f, bodyMix: 1.2f, dec: 5f);
+            Tone(b, 1020, 0, 0.06f, Wv.Square, 0.44f, slideTo: 620, atk: 0.0006f, dec: 7f, tilt: 5200f);
+            // the TAIL is what makes a sniper a sniper: a long, BRIGHT ringing wash (a tight
+            // 1.1 kHz resonance) over a metallic ring and a modest low report — not the dull
+            // 300->150 Hz saw that used to drag its centroid below the shotgun's.
+            Noise(b, 0.03f, 0.24f, 0.34f, fc: 2800, poles: 2, bodyHz: 1150, bodyQ: 4.5f, bodyMix: 2.4f, dec: 2.6f);
+            Tone(b, 880, 0.02f, 0.26f, Wv.Sine, 0.15f, slideTo: 760, atk: 0.004f, dec: 2.4f);
+            Tone(b, 220, 0.01f, 0.22f, Wv.Saw, 0.16f, slideTo: 130, atk: 0.002f, dec: 2.4f, tilt: 2200f);
         });
         // SMG: a quick, bright, snappy crack (tight + punchy).
         Reg("w_smg", 0.11f, -6.5f, b => {
-            Click(b, 0, 0.26f);
-            Noise(b, 0, 0.06f, 0.42f, lp: 0.9f);
-            Tone(b, 360, 0, 0.06f, Wv.Square, 0.30f, slideTo: 200, atk: 0.0008f, dec: 8f);
+            Click(b, 0, 0.28f, tone: 2900, bright: 8500, len: 0.0020f);   // light, fast bolt
+            Noise(b, 0, 0.06f, 0.44f, fc: 2400, poles: 3, bodyHz: 700, bodyQ: 2.8f, bodyMix: 1.3f, dec: 6f);
+            Tone(b, 360, 0, 0.06f, Wv.Square, 0.30f, slideTo: 200, atk: 0.0008f, dec: 8f, tilt: 2800f);
         });
         // LMG: a heavy chug — thick low body + a long rolling noise (big bore).
         Reg("w_lmg", 0.22f, -5.4f, b => {
-            Click(b, 0, 0.32f);
-            Noise(b, 0, 0.18f, 0.54f, lp: 0.55f);
-            Tone(b, 135, 0, 0.16f, Wv.Saw, 0.44f, slideTo: 60, atk: 0.001f, dec: 3.2f);
-            Tone(b, 90, 0, 0.12f, Wv.Square, 0.32f, slideTo: 48, atk: 0.001f, dec: 4.5f);
+            Click(b, 0, 0.36f, tone: 880, bright: 3400, len: 0.0055f);    // big, dull receiver
+            Noise(b, 0, 0.18f, 0.58f, fc: 1050, poles: 3, bodyHz: 240, bodyQ: 1.3f, bodyMix: 1.6f);
+            Tone(b, 135, 0, 0.16f, Wv.Saw, 0.44f, slideTo: 60, atk: 0.001f, dec: 3.2f, tilt: 1500f);
+            Tone(b, 90, 0, 0.12f, Wv.Square, 0.32f, slideTo: 48, atk: 0.001f, dec: 4.5f, tilt: 1400f);
         });
 
         // ───────── impact cues (crit layered heavier than a normal hit) ─────────
         // HIT: a meaty thump — a noise smack + a short low body.
         Reg("hit", 0.18f, -9f, b => {
-            Noise(b, 0, 0.10f, 0.50f, lp: 0.55f);
-            Tone(b, 150, 0, 0.12f, Wv.Square, 0.42f, slideTo: 90, atk: 0.001f, dec: 4.5f);
+            Noise(b, 0, 0.10f, 0.52f, fc: 1400, poles: 3, bodyHz: 330, bodyQ: 1.8f, bodyMix: 1.2f);
+            Tone(b, 150, 0, 0.12f, Wv.Square, 0.42f, slideTo: 90, atk: 0.001f, dec: 4.5f, tilt: 1700f);
         });
         // CRIT: the HIT smack PLUS a deeper sub-bass thud + a metallic ping (lands heavier).
         Reg("crit", 0.30f, -4f, b => {
-            Noise(b, 0, 0.14f, 0.55f, lp: 0.7f);
-            Tone(b, 240, 0, 0.16f, Wv.Saw, 0.40f, slideTo: 110, atk: 0.001f, dec: 3.2f);
+            Noise(b, 0, 0.14f, 0.58f, fc: 1800, poles: 3, bodyHz: 420, bodyQ: 2.0f, bodyMix: 1.3f);
+            Tone(b, 240, 0, 0.16f, Wv.Saw, 0.40f, slideTo: 110, atk: 0.001f, dec: 3.2f, tilt: 2200f);
             Tone(b, 70, 0, 0.26f, Wv.Sine, 0.46f, slideTo: 46, atk: 0.002f, dec: 2.0f);   // sub-bass thud
             Tone(b, 1200, 0.005f, 0.06f, Wv.Sine, 0.16f, atk: 0.0006f, dec: 9f);          // bright ping
         });
         // MISS: a quick zip past the ear (high, descending, airy).
         Reg("miss", 0.14f, -12f, b => {
-            Tone(b, 1400, 0, 0.11f, Wv.Sine, 0.22f, slideTo: 520, atk: 0.003f, dec: 3.5f);
-            Noise(b, 0, 0.05f, 0.07f, lp: 1f);
+            // A2: this was 94.6% of its energy above 1 kHz — a raw-white-noise hiss with a
+            // whistle over it. A round going past the ear is a SHORT band-limited zip, so the
+            // noise is now a sweeping band and the whistle starts lower.
+            Tone(b, 1150, 0, 0.11f, Wv.Sine, 0.22f, slideTo: 430, atk: 0.003f, dec: 3.5f);
+            Noise(b, 0, 0.05f, 0.11f, fc: 4200, poles: 2, bodyHz: 1600, bodyQ: 2.6f, bodyMix: 1.5f, dec: 7f);
         });
         // OVERWATCH set: a tense rising two-note "ready" tone.
         Reg("over", 0.20f, -15.5f, b => {
-            Tone(b, 440, 0, 0.08f, Wv.Square, 0.28f, atk: 0.004f, dec: 4f);
-            Tone(b, 660, 0.075f, 0.10f, Wv.Square, 0.24f, atk: 0.004f, dec: 3.5f);
+            Tone(b, 440, 0, 0.08f, Wv.Square, 0.28f, atk: 0.004f, dec: 4f, tilt: 2000f);
+            Tone(b, 660, 0.075f, 0.10f, Wv.Square, 0.24f, atk: 0.004f, dec: 3.5f, tilt: 2400f);
         });
         // DEATH: a downward collapse — a saw fall + a noise crumple, now with a REAL TAIL.
         // (A1) every layer used to end by 320ms inside a 360ms buffer: the collapse just
         // stopped dead and 40ms of digital silence followed. The sub now rings on and a
         // soft body resonance decays under it, finishing ~60ms before the buffer ends.
         Reg("death", 0.52f, -7f, b => {
-            Tone(b, 260, 0, 0.32f, Wv.Saw, 0.38f, slideTo: 60, atk: 0.004f, dec: 2.2f);
-            Noise(b, 0, 0.26f, 0.30f, lp: 0.5f);
+            Tone(b, 260, 0, 0.32f, Wv.Saw, 0.38f, slideTo: 60, atk: 0.004f, dec: 2.2f, tilt: 1600f);
+            Noise(b, 0, 0.26f, 0.32f, fc: 850, poles: 3, bodyHz: 210, bodyQ: 1.3f, bodyMix: 1.1f);
             Tone(b, 80, 0.02f, 0.42f, Wv.Sine, 0.30f, slideTo: 40, atk: 0.004f, dec: 2.1f);  // sub rings on
             Tone(b, 150, 0.05f, 0.40f, Wv.Tri, 0.11f, slideTo: 68, atk: 0.020f, dec: 2.6f);  // body resonance
         });
         // TURN: a clear rising two-note announce (the round changes hands).
         Reg("turn", 0.30f, -14f, b => {
-            Tone(b, 330, 0, 0.13f, Wv.Tri, 0.30f, atk: 0.006f, dec: 3.2f);
-            Tone(b, 494, 0.11f, 0.16f, Wv.Tri, 0.27f, atk: 0.006f, dec: 2.8f);
+            Tone(b, 330, 0, 0.13f, Wv.Tri, 0.30f, atk: 0.006f, dec: 3.2f, tilt: 3200f);
+            Tone(b, 494, 0.11f, 0.16f, Wv.Tri, 0.27f, atk: 0.006f, dec: 2.8f, tilt: 3600f);
         });
         // WIN: a bright ascending major arpeggio (legacy cue alongside the victory stinger).
         Reg("win", 0.72f, -10f, b => Arp(b, new[] { 523, 659, 784, 1046 }, 0.11f, 0.20f, Wv.Tri, 0.30f));
@@ -232,7 +245,7 @@ public static partial class Audio
         Reg("st_kill", 0.30f, -6f, b => {
             Tone(b, 587, 0, 0.07f, Wv.Square, 0.30f, atk: 0.002f, dec: 5f);
             Tone(b, 392, 0.06f, 0.13f, Wv.Saw, 0.30f, slideTo: 320, atk: 0.002f, dec: 3f);
-            Noise(b, 0, 0.05f, 0.22f, lp: 0.7f);
+            Noise(b, 0, 0.05f, 0.24f, fc: 1800, poles: 3, bodyHz: 420, bodyQ: 2f, bodyMix: 1.2f);
             Tone(b, 80, 0, 0.16f, Wv.Sine, 0.26f, atk: 0.003f, dec: 3f);   // small thud
         });
         // LASTKILL: the blow that clears the field — a brighter rising flourish that resolves
@@ -240,7 +253,7 @@ public static partial class Audio
         Reg("st_lastkill", 0.58f, -7.5f, b => {
             Arp(b, new[] { 523, 659, 880 }, 0.10f, 0.18f, Wv.Tri, 0.32f);
             Tone(b, 70, 0, 0.34f, Wv.Sine, 0.40f, slideTo: 52, atk: 0.004f, dec: 1.6f);  // sub thud
-            Noise(b, 0, 0.05f, 0.20f, lp: 0.8f);
+            Noise(b, 0, 0.05f, 0.22f, fc: 2200, poles: 3, bodyHz: 620, bodyQ: 2.2f, bodyMix: 1.2f);
         });
         // VICTORY: a fuller, longer major-add9 resolve (mission won) — arpeggio that lands on
         // a sustained tonic chord so it RESOLVES rather than just trailing off.
@@ -268,7 +281,7 @@ public static partial class Audio
             Tone(b, 196, 0, 0.55f, Wv.Saw, 0.40f, slideTo: 70, atk: 0.01f, dec: 1.3f);
             Tone(b, 98, 0, 0.75f, Wv.Sine, 0.42f, slideTo: 49, atk: 0.01f, dec: 1.0f);
             Tone(b, 138, 0.18f, 0.55f, Wv.Saw, 0.20f, atk: 0.02f, dec: 1.3f);   // tritone-ish dissonance
-            Noise(b, 0.05f, 0.50f, 0.30f, lp: 0.45f);
+            Noise(b, 0.05f, 0.50f, 0.32f, fc: 800, poles: 3, bodyHz: 180, bodyQ: 1.2f, bodyMix: 1.1f);
         });
     }
 
@@ -277,10 +290,12 @@ public static partial class Audio
     // second transient click (the action cycling) + a faint low thump for more "weight".
     static void FillRifle(float[] b)
     {
-        Click(b, 0, 0.34f);                                       // sharper attack transient
-        Click(b, 0.012f, 0.16f);                                  // a faint 2nd click (action cycle)
-        Noise(b, 0, 0.09f, 0.46f, lp: 0.8f);
-        Tone(b, 200, 0, 0.10f, Wv.Saw, 0.34f, slideTo: 95, atk: 0.0008f, dec: 4.5f);
+        Click(b, 0, 0.36f, tone: 2400, bright: 7000, len: 0.0028f);   // the bolt face
+        Click(b, 0.012f, 0.17f, tone: 1700, bright: 5000, len: 0.0030f); // the action cycling
+        // the report: fc 1.9 kHz over a 520 Hz barrel resonance — the "crack" a rifle has and
+        // an SMG does not, because the resonance sits an octave lower and is broader.
+        Noise(b, 0, 0.09f, 0.48f, fc: 1900, poles: 3, bodyHz: 520, bodyQ: 2.2f, bodyMix: 1.4f);
+        Tone(b, 200, 0, 0.10f, Wv.Saw, 0.34f, slideTo: 95, atk: 0.0008f, dec: 4.5f, tilt: 2000f);
         Tone(b, 95, 0, 0.06f, Wv.Sine, 0.20f, slideTo: 60, atk: 0.0008f, dec: 5f);   // low body thump
     }
 
@@ -758,15 +773,80 @@ public static partial class Audio
         return a * d * MathF.Max(0f, r);
     }
 
+    // ── RESONANCE A2 "THE VOICE" — the filter bench ───────────────────────────
+    // A1 fixed LEVELS. This fixes VOICING. The old Noise() took an `lp` parameter that it
+    // used DIRECTLY as a one-pole coefficient (alpha = clamp(lp, 0.02, 1)), so the implied
+    // cutoffs were absurd: lp 0.8 -> 11.3 kHz, lp 1.0 -> no filtering at all. Every weapon
+    // was therefore a flat broadband rectangle running to 22 kHz (w_smg measured 69.5% of
+    // its energy above 1 kHz) — hiss, not gunfire. Real firearm energy concentrates roughly
+    // 100 Hz - 2 kHz behind a sub-millisecond transient.
+    //
+    // So: `fc` is now a CUTOFF IN HZ with the correct one-pole coefficient, cascaded for a
+    // real 12-18 dB/oct slope, plus a resonant band-pass "body" so a shotgun, a rifle and an
+    // SMG are different OBJECTS rather than the same noise at different lengths.
+
+    /// One-pole low-pass coefficient for a cutoff in Hz (the formula the old code was missing).
+    static float PoleA(float fc) => 1f - MathF.Exp(-2f * MathF.PI * Util.Clamp(fc, 20f, SR * 0.49f) / SR);
+
+    // Filtering a white-noise source costs level, and how much depends on the cutoff — which
+    // would silently rescale every layer's `vol` against every other. These makeups restore
+    // unit output RMS for a unit-variance white input (Parseval over the impulse response), so
+    // a recipe's `vol` numbers keep meaning "how loud is this layer" after a re-voicing.
+    static readonly Dictionary<long, float> _mkCache = new();
+    static float LpMakeup(float a, int poles)
+    {
+        long key = ((long)BitConverter.SingleToInt32Bits(a) << 8) | (uint)poles;
+        if (_mkCache.TryGetValue(key, out var c)) return c;
+        double e = 0; var z = new double[poles];
+        for (int i = 0; i < 8192; i++)
+        {
+            double v = i == 0 ? 1.0 : 0.0;
+            for (int p = 0; p < poles; p++) { z[p] += a * (v - z[p]); v = z[p]; }
+            e += v * v;
+        }
+        float g = e > 1e-12 ? (float)(1.0 / Math.Sqrt(e)) : 1f;
+        _mkCache[key] = g;
+        return g;
+    }
+
+    /// RBJ band-pass (constant 0 dB peak gain) coefficients + the same unit-RMS makeup.
+    static (float b0, float b2, float a1, float a2, float mk) Bp(float f0, float q)
+    {
+        float w0 = 2f * MathF.PI * Util.Clamp(f0, 20f, SR * 0.45f) / SR;
+        float alpha = MathF.Sin(w0) / (2f * MathF.Max(0.2f, q));
+        float a0 = 1f + alpha;
+        float b0 = alpha / a0, b2 = -alpha / a0;
+        float a1 = -2f * MathF.Cos(w0) / a0, a2 = (1f - alpha) / a0;
+        // impulse-response energy -> unit-RMS makeup
+        double e = 0, x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+        for (int i = 0; i < 8192; i++)
+        {
+            double x = i == 0 ? 1.0 : 0.0;
+            double y = b0 * x + b2 * x2 - a1 * y1 - a2 * y2;
+            x2 = x1; x1 = x; y2 = y1; y1 = y;
+            e += y * y;
+        }
+        float mk = e > 1e-12 ? (float)(1.0 / Math.Sqrt(e)) : 1f;
+        return (b0, b2, a1, a2, mk);
+    }
+
     // A pitched tone. `slideTo>0` glides freq->slideTo across the tone (pitch envelope).
-    // `atk` = attack time in SECONDS; `dec` = exponential decay rate. Defaults give the old
-    // ~0.004s attack / -3.5 decay behaviour so legacy callers are essentially unchanged.
+    // `atk` = attack time in SECONDS; `dec` = exponential decay rate.
+    //
+    // A2: `tilt` is a one-pole-pair low-pass in Hz over the OSCILLATOR OUTPUT. Shape()'s naive
+    // Square/Saw carry an unrolled 1/n harmonic series all the way to Nyquist — that hard comb
+    // to 22 kHz IS the cheap-chiptune buzz on select/move/turn. -1 = pick a sensible default
+    // per waveform (square is the buzziest, sine needs nothing); 0 = bypass.
     static void Tone(float[] b, float freq, float start, float dur, Wv type, float vol,
-                     float slideTo = 0, float atk = 0.004f, float dec = 3.5f)
+                     float slideTo = 0, float atk = 0.004f, float dec = 3.5f, float tilt = -1f)
     {
         int n0 = (int)(start * SR);
         int len = (int)(dur * SR);
         if (len < 1) return;
+        if (tilt < 0f) tilt = type switch { Wv.Square => 3000f, Wv.Saw => 4200f, Wv.Tri => 11000f, _ => 0f };
+        bool filt = tilt > 0f;
+        float a = filt ? PoleA(tilt) : 0f;
+        float z0 = 0f, z1 = 0f;
         float atkFrac = (atk * SR) / len;                 // attack as a fraction of the tone
         float ph = 0f;
         for (int i = 0; i < len; i++)
@@ -776,47 +856,87 @@ public static partial class Audio
             float t = i / (float)len;
             float f = slideTo > 0 ? Util.Lerp(freq, slideTo, t) : freq;
             ph += 2f * MathF.PI * f / SR;
-            b[idx] += Shape(type, ph) * vol * Env(t, atkFrac, dec);
+            float s = Shape(type, ph);
+            if (filt) { z0 += a * (s - z0); z1 += a * (z0 - z1); s = z1; }
+            b[idx] += s * vol * Env(t, atkFrac, dec);
         }
     }
 
-    // A noise burst with an attack ramp + exponential decay. `lp` (0..1) is a simple one-pole
-    // low-pass mix (lower = darker/duller noise; 1 = raw white) so weapons can have body.
-    static void Noise(float[] b, float start, float dur, float vol, float lp = 1f)
+    /// A noise burst — the powder crack of a weapon, the smack of an impact, the scuff of a
+    /// footfall. `fc` = low-pass cutoff IN HZ over `poles` cascaded one-poles (6 dB/oct each);
+    /// `bodyHz`/`bodyQ` add a resonant band-pass layer mixed in at `bodyMix` (a ratio of RMS,
+    /// because both paths are makeup-normalised) — that resonance is what gives a burst a
+    /// SIZE, i.e. what makes a 12-gauge and a 9mm different objects instead of two hisses.
+    static void Noise(float[] b, float start, float dur, float vol,
+                      float fc = 16000f, int poles = 3,
+                      float bodyHz = 0f, float bodyQ = 2f, float bodyMix = 0f,
+                      float dec = 4.5f)
     {
         int n0 = (int)(start * SR);
         int len = (int)(dur * SR);
         if (len < 1) return;
+        poles = Math.Clamp(poles, 1, 4);
         int atk = Math.Max(1, (int)(0.0015f * SR));
-        float prev = 0f;
-        float alpha = Util.Clamp(lp, 0.02f, 1f);          // one-pole coefficient
+        float a = PoleA(fc);
+        float mk = LpMakeup(a, poles);
+        var z = new float[4];
+        bool body = bodyMix > 0f && bodyHz > 0f;
+        var (pb0, pb2, pa1, pa2, pmk) = body ? Bp(bodyHz, bodyQ) : (0f, 0f, 0f, 0f, 0f);
+        float x1 = 0f, x2 = 0f, y1 = 0f, y2 = 0f;
+        // both paths are unit-RMS, so keep the SUM unit-RMS too (incoherent sum)
+        float norm = body ? 1f / MathF.Sqrt(1f + bodyMix * bodyMix) : 1f;
         for (int i = 0; i < len; i++)
         {
             int idx = n0 + i;
             if (idx >= b.Length) break;
             float t = i / (float)len;
             float raw = AudRandF() * 2f - 1f;
-            prev += alpha * (raw - prev);                 // low-pass toward `prev`
-            float a = MathF.Min(1f, i / (float)atk);      // attack
-            float env = a * MathF.Exp(-4.5f * t);
+            float v = raw;
+            for (int p = 0; p < poles; p++) { z[p] += a * (v - z[p]); v = z[p]; }
+            float s = v * mk;
+            if (body)
+            {
+                float y = pb0 * raw + pb2 * x2 - pa1 * y1 - pa2 * y2;
+                x2 = x1; x1 = raw; y2 = y1; y1 = y;
+                s += y * pmk * bodyMix;
+            }
+            float ae = MathF.Min(1f, i / (float)atk);     // attack
+            float env = ae * MathF.Exp(-dec * t);
             float rel = t > 0.9f ? (1f - t) / 0.1f : 1f;  // release fade
-            b[idx] += prev * vol * env * MathF.Max(0f, rel);
+            b[idx] += s * norm * vol * env * MathF.Max(0f, rel);
         }
     }
 
-    // A very short noise transient — the mechanical "click"/attack of a gun or UI cue.
-    // Adds bite at the onset; ~2.5ms, hard decay, so it never muddies the body.
-    static void Click(float[] b, float start, float vol)
+    /// The mechanical transient at the head of a cue — a gun's action, a UI tick.
+    ///
+    /// A2: this used to be 2.5 ms of UNFILTERED white noise, byte-identical at the head of
+    /// every weapon AND every UI cue. One shared transient across fourteen cues is a big part
+    /// of why nothing sounded like a distinct object. It is now voiced: `bright` low-passes the
+    /// noise (a UI tick is glassy, an LMG's action is dull), and `tone` adds the mechanism's
+    /// own damped resonance — a rifle bolt rings around 2.4 kHz, a shotgun pump around 1.1 kHz.
+    static void Click(float[] b, float start, float vol,
+                      float tone = 0f, float bright = 14000f, float len = 0.0025f, float ring = 0.9f)
     {
         int n0 = (int)(start * SR);
-        int len = Math.Max(2, (int)(0.0025f * SR));
-        for (int i = 0; i < len; i++)
+        int n = Math.Max(2, (int)(len * SR));
+        float a = PoleA(bright);
+        float mk = LpMakeup(a, 2);
+        float z0 = 0f, z1 = 0f, ph = 0f;
+        for (int i = 0; i < n; i++)
         {
             int idx = n0 + i;
             if (idx >= b.Length) break;
-            float t = i / (float)len;
+            float t = i / (float)n;
             float env = MathF.Exp(-22f * t) * (1f - t);   // fast decay + linear release
-            b[idx] += (AudRandF() * 2f - 1f) * vol * env;
+            float raw = AudRandF() * 2f - 1f;
+            z0 += a * (raw - z0); z1 += a * (z0 - z1);
+            float s = z1 * mk;
+            if (tone > 0f)
+            {
+                ph += 2f * MathF.PI * tone / SR;
+                s += MathF.Sin(ph) * ring * MathF.Exp(-5f * t);
+            }
+            b[idx] += s * vol * env;
         }
     }
 
