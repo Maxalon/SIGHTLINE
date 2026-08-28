@@ -2347,7 +2347,9 @@ public partial class Game
     /// soldier (prone body + pulsing red ring + the DOWN 3 pill + red roster chip), a squadmate
     /// standing adjacent with the STABILIZE button lit, and the SOLDIER DOWN banner naming the
     /// timer. Pair with SIGHTLINE_CB=1 for the colorblind pass (DESIGN 3.H coded-state rule).
-    public void DebugDownShot()
+    /// SIGHTLINE_DOWNSHOT=2: mid-rescue — the rescuer EXECUTES the real STABILIZE, so the frame
+    /// shows the amber STABLE pill + the STABILIZED roster tag (the rescue half-done).
+    public void DebugDownShot(bool stabilized = false)
     {
         var sold = Players.Where(p => p.Alive && !p.IsVip).ToList();
         if (sold.Count < 2) return;
@@ -2365,6 +2367,7 @@ public partial class Game
             }
         rescuer.ActionsLeft = 2;
         Selected = rescuer;
+        if (stabilized) DoStabilize();   // the real verb — timer frozen, STABLE reads
     }
 
     /// Headless self-test (SIGHTLINE_STATUSTEST): status effects tick, decay, and read

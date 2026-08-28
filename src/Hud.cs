@@ -959,7 +959,7 @@ public static class Hud
         // FUL-7: STABILIZE — the universal rescue verb. Surfaces only while a squadmate is DOWN
         // (exactly the moment it matters); enabled when one lies adjacent and un-stabilized.
         if (g.Players.Any(p => p.Alive && p.Downed))
-            Add("stabilize", "STABILIZE", "T", interactive && g.CanStabilize(u), false);
+            Add("stabilize", "STABILIZE", "E", interactive && g.CanStabilize(u), false);
         Add("overwatch", "OVERWATCH", "2", interactive && u != null && u.CanAct && u.Ammo > 0, false);
         Add("focusow", "FOCUS", "F", interactive && u != null && u.CanAct && u.Ammo > 0, false);   // braced cone watch
         Add("brace", "BRACE", "B", interactive && u != null && u.CanAct && u.Ammo > 0, false);      // UNDERTOW W2: disrupting interrupt watch

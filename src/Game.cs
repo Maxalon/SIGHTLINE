@@ -3722,7 +3722,7 @@ public partial class Game
         if (Raylib.IsKeyPressed(KeyboardKey.Seven)) ToggleDrag();
         if (Raylib.IsKeyPressed(KeyboardKey.Nine)) ToggleVault();
         if (Raylib.IsKeyPressed(KeyboardKey.H)) DoHack();
-        if (Raylib.IsKeyPressed(KeyboardKey.T)) DoStabilize();   // FUL-7: stabilize an adjacent downed ally
+        if (Raylib.IsKeyPressed(KeyboardKey.E)) DoStabilize();   // FUL-7: stabilize an adjacent downed ally (T is the tag editor)
         if (Raylib.IsKeyPressed(KeyboardKey.G)) DoBeacon();          // UNDERTOW W6: deploy forward evac beacon (moved off B — collided with W2 BRACE)
         if (Raylib.IsKeyPressed(KeyboardKey.X)) DoExtract();
         if (Raylib.IsKeyPressed(KeyboardKey.R)) DoReload();
