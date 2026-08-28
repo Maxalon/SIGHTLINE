@@ -2037,7 +2037,7 @@ public partial class Game
         // W2: Mission.AppliedLayout = the authored arena the guard actually ACCEPTED (-1 procedural).
         Stats.BeginMission(n, Objective.ToString(), _run.HeatLevel,
                            Players.Count(p => p.Alive && !p.IsVip), Enemies.Count(e => e.Alive),
-                           Mission.AppliedLayout);
+                           Mission.AppliedLayout, Mission.AppliedDeploy);
         // FUL-7: the PATCH per-presence denominator (corpsman enters via backfill only)
         if (Players.Any(p => p.Alive && !p.IsVip && p.Ability == AbilityKind.Heal))
             Stats.RecordCorpsmanFielded();

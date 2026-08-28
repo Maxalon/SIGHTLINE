@@ -3633,6 +3633,7 @@ public partial class Game
     public static string ExposureSelfTest()
     {
         var fails = new List<string>();
+        System.Text.StringBuilder sb0Deploy = null;   // W4 deployment-shape histogram (filled below)
         const int Seeds = 200;
         int nLay = Maps.Layouts.Length;
         var arenaHist = new int[nLay];
@@ -3697,6 +3698,99 @@ public partial class Game
         for (int a = 0; a < nLay; a++)
             if (arenaHist[a] == 0) fails.Add($"arenaNeverDealt:{a}");
 
+        // ── W4 THE SECOND AXIS: the DEPLOYMENT SHAPE is now a third exposure axis ─────
+        // Enumerate shape x arena and shape x objective over the same seed space, and pin the
+        // three contracts the geometry has to keep:
+        //   (1) PURE — DeployFor consumes ZERO Util.Rng draws (every CRN pairing depends on it);
+        //   (2) DETERMINISTIC — the same (seed, mission) always yields the same shape;
+        //   (3) LEGAL — ENVELOP (a centre deployment) is never dealt to an objective whose
+        //       geography it would trivialise; every legal shape reaches every objective/arena.
+        {
+            int nShapes = Mission.DeployShapes;
+            var shapeHist = new int[nShapes];
+            var shapeArena = new bool[nShapes, nLay];
+            var shapeObj = new Dictionary<(int, Objective), int>();
+            // (1) purity: interleaving DeployFor calls must not perturb the shared stream.
+            Util.Reseed(4242);
+            int refDraw = Util.RandInt(0, 1000000);
+            Util.Reseed(4242);
+            for (int k = 0; k < 500; k++) Mission.DeployFor(k * 31 + 7, (k % Run.MaxMissions) + 1, k % 2 == 0);
+            if (Util.RandInt(0, 1000000) != refDraw) fails.Add("deployConsumesRng");
+
+            bool EnvOk(Objective o) => o == Objective.Eliminate || o == Objective.Decapitate || o == Objective.Defend;
+
+            for (int i = 0; i < Seeds; i++)
+            {
+                int seed = 1000 + i * 7919;
+                var run = new Run { MapSeed = seed };
+                run.GenerateMap(seed);
+                // shape x arena over the run's own deck draws (both legality states)
+                for (int m = 1; m <= Run.MaxMissions; m++)
+                {
+                    int a = Mission.DeckPick(seed, m);
+                    if (a < 0 || a >= nLay) continue;
+                    for (int leg = 0; leg < 2; leg++)
+                    {
+                        int sh = Mission.DeployFor(seed, m, leg == 1);
+                        if (sh != Mission.DeployFor(seed, m, leg == 1)) fails.Add($"seed{seed}:deployNotDeterministic");
+                        if (sh < 0 || sh >= nShapes) { fails.Add($"seed{seed}:deployOutOfRange:{sh}"); continue; }
+                        if (sh == Mission.DeployEnvelop && leg == 0) fails.Add($"seed{seed}:envelopOnIllegalObjective");
+                        shapeHist[sh]++; shapeArena[sh, a] = true;
+                    }
+                }
+                // shape x objective over every enumerated route (mission # = the fight's depth)
+                var routes2 = new List<List<MissionNode>>();
+                void Walk2(MissionNode node, List<MissionNode> path)
+                {
+                    path.Add(node);
+                    if (node.Next.Count == 0) routes2.Add(new List<MissionNode>(path));
+                    else foreach (int id in node.Next) Walk2(run.Map[id], path);
+                    path.RemoveAt(path.Count - 1);
+                }
+                Walk2(run.Map[0], new List<MissionNode>());
+                foreach (var route in routes2)
+                {
+                    int m = 0;
+                    foreach (var node in route)
+                    {
+                        if (node.Kind == NodeKind.Event) continue;
+                        m++;
+                        var o = node.Card.Objective;
+                        int sh = Mission.DeployFor(seed, m, EnvOk(o));
+                        if (sh == Mission.DeployEnvelop && !EnvOk(o)) fails.Add($"seed{seed}:envelopDealtTo{o}");
+                        shapeObj[(sh, o)] = shapeObj.GetValueOrDefault((sh, o)) + 1;
+                    }
+                }
+            }
+
+            string ShapeName(int d) => d switch
+            {
+                Mission.DeployPincer => "PINCER", Mission.DeployCrossfire => "CROSSFIRE",
+                Mission.DeployEnvelop => "ENVELOP", _ => "FRONTAL",
+            };
+            // every shape the SHIPPED mix can deal must reach every arena, and every legal
+            // objective. A zero-weight shape is inert by design and is not required to appear.
+            for (int sh = 0; sh < nShapes; sh++)
+            {
+                bool weighted = sh < Mission.DeployMix.Length && Mission.DeployMix[sh] > 0;
+                if (!weighted) continue;
+                if (shapeHist[sh] == 0) { fails.Add($"shapeNeverDealt:{ShapeName(sh)}"); continue; }
+                for (int a = 0; a < nLay; a++)
+                    if (!shapeArena[sh, a]) fails.Add($"shape{ShapeName(sh)}NeverOnArena{a}");
+                foreach (Objective o in Enum.GetValues<Objective>())
+                {
+                    if (sh == Mission.DeployEnvelop && !EnvOk(o)) continue;   // illegal by design
+                    if (shapeObj.GetValueOrDefault((sh, o)) == 0) fails.Add($"shape{ShapeName(sh)}Never{o}");
+                }
+            }
+            sb0Deploy = new System.Text.StringBuilder();
+            sb0Deploy.AppendLine("DEPLOYMENT SHAPE HISTOGRAM (shape:deals over the same seed space, both legality states):");
+            for (int sh = 0; sh < nShapes; sh++)
+                sb0Deploy.AppendLine($"  {ShapeName(sh),-10}: {shapeHist[sh]}"
+                    + $"   arenas covered {Enumerable.Range(0, nLay).Count(a => shapeArena[sh, a])}/{nLay}"
+                    + $"   objectives covered {Enum.GetValues<Objective>().Count(o => shapeObj.GetValueOrDefault((sh, o)) > 0)}/{Enum.GetValues<Objective>().Length}");
+        }
+
         var sb = new System.Text.StringBuilder();
         sb.AppendLine($"EXPOSURETEST: {Seeds} seeds | {routesTotal} routes enumerated | {Seeds * Run.MaxMissions} deck draws over {nLay} arenas");
         sb.AppendLine("ARENA DECK HISTOGRAM (arena:draws):");
@@ -3710,6 +3804,7 @@ public partial class Game
         foreach (Objective o in Enum.GetValues<Objective>())
             sb.AppendLine($"  {o,-10}: {objHist.GetValueOrDefault(o)}");
         sb.AppendLine($"  (Escort nodes total {escortNodes} — exactly one per map by construction, <=1 per route)");
+        if (sb0Deploy != null) sb.Append(sb0Deploy);
         sb.Append(fails.Count == 0 ? "EXPOSURETEST PASS"
             : $"EXPOSURETEST FAIL: {string.Join(", ", fails.Take(12))}{(fails.Count > 12 ? $" (+{fails.Count - 12} more)" : "")}");
         return sb.ToString();
