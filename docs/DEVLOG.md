@@ -2144,3 +2144,114 @@ morale-exempt).
   batches. Cheap self-verification, same family as FUL-5's "byte-identical is a finding".
 - The balance harness's Combat.RunBoons is the FieldCraftLimit read, not Run.ActiveBoons — a
   harness scene granting a boon must publish to both (PODTEST leg f does).
+
+# PROGRAM FULCRUM — FUL-7 LAST LIGHT (2026-08-28, wave dev on wt-ful7)
+
+**Goal.** Lethal damage on a soldier becomes a 3-turn BLEED-OUT with stabilize/carry/revive
+counterplay instead of an instant, decision-free cut — the DESIGN §4 "death stakes: Thin" fix, and
+the stage FUL-5's verdict reserved for PATCH. Binding spec:
+docs/plans/FUL-6-critical-mass-FUL-7-last-light.md §FUL-7 (seams re-verified against c74378e —
+the post-FUL-6/8/10 program tip).
+
+## What shipped (base c74378e)
+- **The single lethal seam, as specced.** `CanGoDown` guards the TOP of KillUnit: soldiers
+  (never VIP/captive — DEATHTEST semantics; never enemies — rout is their drama) enter a 3-turn
+  DOWN instead of dying, ONCE per soldier per mission (`WasDownedThisMission` — the second lethal
+  event, incl. ANY damage on a body already down, kills outright: the AoE/fire honesty valve).
+  `EnterDowned` stays clean of death bookkeeping (no Fallen/Memorial/KIA-stamp/NoLosses/
+  RecordKill; Vengeful DOES stage at the fall); `ExpireDowned` runs the FULL death flow through
+  KillUnit with cause = the DOWNING archetype (`DownedByCls` — snapshot of the same ActiveAnim
+  attribution; DoT-downs bucket "?" like DoT deaths, BlurbFor-gated), so a bleed-out KIA reaches
+  Run.Fallen identically to an instant KIA (FUL-10 LGD's veteran-erase needs no special case).
+- **The clock:** timers tick in StartPlayerTurn on the squad's clock; STABILIZE (universal verb,
+  key E — T was the tag editor; adjacent, 1 action, never ends the turn) freezes it; the freeze
+  needs a STANDING squad — with every soldier down or dead, stabilized timers run too, so the
+  all-downed board resolves in <= 3 bounded turns (DOWNTEST-pinned; closes the stabilized-orphan
+  infinite stall the spec's bound argument assumed away).
+- **REVIVE:** the PATCH executor's Downed arm — up at the heal value (PatchHeal 4 / CombatMedic 3
+  at reach 2), actionless that turn, FieldSurgeon triage rides, Cd 3 unchanged; same RecordAction
+  chokepoint so the FUL-5 PATCH counter measures the stage for free.
+- **Recovery:** EnterBarracks (before the squad rebuild) recovers every downed survivor — Hp 1,
+  Wound 3 (the debrief attrition machinery owns it from there), WasNearDeath forced true (a
+  full-HP one-shot down never reached MarkPlayerHurt — without this the near-death scar track
+  skipped exactly the survivors it's for), report line. Endless: the wave-clear breather revives
+  the downed at the mend value (floored 1) and resets the per-wave down budget.
+- **The AI rule:** enemies never DIRECT-target the downed — the one `Ai.Plan` players filter, plus
+  the same skip in the aim helpers (BestScreen/BestFlash/BestSiege/BestGrenade — a downed body
+  neither attracts nor counts in aim decisions; a blast aimed at standing soldiers still kills it)
+  and the shove pick, plus `mover.Downed` returns before the overwatch watcher loop (a DRAGGED
+  body is a tile entry the spec's "downed never move" claim missed — hazards still apply, so
+  hauling a body through fire still kills it, honestly).
+- **UI:** prone 0.6x sunk body + pulsing red ground ring; leading DOWN 3/2/1 chip pill (red,
+  falling-chevron glyph) flipping to amber STABLE (level-bar glyph); HP pips hidden while down;
+  red roster-chip state ("BLEEDING OUT (n)" / "STABILIZED - HOLDING ON"); STABILIZE button +
+  tooltip + icon; SOLDIER DOWN banner names the timer; never selectable. Vocabulary honesty:
+  soldier true-death pop renamed KIA; the combat log logs DOWN (not KILL) for a survivable
+  lethal; the enemy brace stagger skips a body already down. Codex row DOWN (BLEEDING OUT) +
+  CODEXTEST required entry.
+- **Autopilot:** objective-agnostic rescue block ABOVE the corpsman PATCH slot (corpsman-ready →
+  revive, else STABILIZE once); TryMoveToPatch generalized — Cd-ready corpsman closes on
+  hurt-or-downed, EVERY other soldier closes on downed-to-stabilize (the founding squad has no
+  corpsman); `AutoShouldStabilize` guards the ONE unresolvable freeze: Evac + no live corpsman +
+  body away from the zone → let the timer run (the bot has no drag-chain carry in v1 — the
+  accepted, recorded bot-vs-player gap; zone-adjacent bodies stay stabilizable via the EXTRACT
+  pull; a corpsman dying after a far-body freeze still bounds at AutoMaxTurns → STALEMATE loss).
+- **Persistence: NONE** — all five Unit fields transient (ToUnitDto whitelist), single
+  mission-START checkpoint verified again on this tree, EnterBarracks resolves every Downed
+  before it; SAVETEST gained the belt-and-suspenders leg (a hand-built downed-and-recovered
+  soldier round-trips ONLY Hp/Wound/scars). No enum touched anywhere.
+- **Harness:** SIGHTLINE_DOWNTEST legs a-h (entry clean of bookkeeping + surplus-reaction purge;
+  expiry = the full death flow exactly once, cause = downing archetype, NoLosses failed;
+  stabilize-freeze + won-field recovery incl. the near-death track; revive incl. CombatMedic
+  reach-2; no-second-down + grenade-finishes-the-body; AI ignores + all-downed bounded even
+  stabilized; VIP instant; DRAG@Cheby-2 + EXTRACT-from-zone-adjacent pinned) +
+  SIGHTLINE_DOWNSHOT (=1 down + rescuer + lit STABILIZE; =2 executes the real STABILIZE for the
+  mid-rescue STABLE frame); existing tests that stage true squad deaths (DEATHTEST/HEATLADDER/
+  RESCUETEST/DKTEST/DebugKia) set WasDownedThisMission first — the real second-lethal rule, not
+  a bypass. New telemetry: SOLDIER DOWNS report line (downs → revived/recovered/bled-out +
+  save-rate) + corpsman-fielded missions (the PATCH per-presence denominator).
+
+## Measured (paired h0; chunks = slots 0-9 "a" + 10-19 "b" via SIGHTLINE_BALANCE_BASE, N=10 each;
+## R0 = FRESH base-c74378e reference in a git-archive scratch tree, same slots, run FIRST; h4 leg
+## last, both trees, slots 0-9)
+| leg | completion g/s | true KIA | downs -> saved (rate) | STABILIZE | PATCH | key notes |
+|---|---|---|---|---|---|---|
+| R0a | 40/60 | 125 | — | — | 1/0 | BRACE 60/27 · GREN 6 · DRAG 2 · margin -0.70±0.67 |
+| R0b | 30/30 | 126 | — | — | 4/3 | BRACE 53/77 · GREN 6 · margin -0.90±0.90 |
+| R1a | 50/40 | **81 (-35%)** | 179 -> 84 (47%) | 37/21 | 5/4 | corpsman in 37/82 missions · revived 5 · BRACE 69/66 · margin +0.40±0.64 |
+| R1b | 50/50 | **70 (-44%)** | 157 -> 60 (38%) | 22/27 | 1/6 | corpsman in 22/74 missions · revived 2 · BRACE 68/78 · margin -0.90±0.87 |
+| R0h4 | 20/30 | 150 | — | — | — | margin +0.20±0.59 |
+| R1h4 | 30/30 | **110 (-27%)** | 219 -> 81 (37%) | 23/35 | 6/4 | corpsman in 24 missions · revived 8 · BRACE 102/69 · margin -0.20±0.25 |
+
+**h4 close leg:** completion 25% → 30% (+5); true-KIA -27% — just under the h0 band, exactly the
+"downs concentrate where deaths do" prediction: h4 stages MORE downs (219 vs ~168/chunk at h0)
+and bleeds more of them out under pressure (63% vs ~57%), so the save-rate compresses to 37%.
+PATCH 10 at h4 (0.42/corpsman-fielded-mission — the revive stage strengthens where wounds do).
+
+**Verdicts (pooled h0, 40 matches/side):**
+1. **Soldier true-KIA 251 → 151 (-40%) — inside the 30-50% intent band.** The death ledger moved
+   to the attrition ledger: 336 downs staged, 144 saved (43% save-rate: 7 revived, 89 recovered
+   on won fields, the rest = downs still open when a loss ended the run), 192 bled out.
+2. **Completion 40% → 47.5% (+7.5, inside the +10/-5 budget)** — a body saved IS the bot playing
+   better, as the spec predicted (chunk split -5/+20; pooled is the binding read, the FUL-6
+   variance lesson). Mission win-rate 88/80 → 88/86; paired margins statistically unchanged.
+3. **STABILIZE 107 uses across the two chunks vs the spec's 3-8 guess** — the guess undercounted
+   downs (~8 per campaign: every old KIA is now a down, plus the saved fight on). The verb is a
+   live, first-class part of play, not quota-chased — the bot stabilizes exactly when adjacent.
+4. **PATCH 8 → 16 (the >= 10 target met in aggregate), 0.27 uses per corpsman-fielded mission —
+   and the corpsman was fielded in only 59/156 (38%) of missions.** The FUL-5 cap has flipped
+   from "no stage" to "no presence": the stage now exists (7 revives measured); what caps PATCH
+   is that the corpsman only enters via backfill. **Roster-presence verdict recorded for FUL-13's
+   founding-squad question — do not quota-chase.**
+5. **DRAG stayed ~1-2/batch** — the drag-chain carry is real for humans but the bot doesn't probe
+   DRAG-toward-zone (v1 accepted gap). FDR consequently unmoved (0 procs); still FUL-13's row.
+
+## Gotchas (process)
+- **EnterDowned clears Statuses INSIDE TickStatuses' enumeration** — a lethal burn tick threw
+  Collection-was-modified (caught by escort autoplay). Fix: snapshot the list + stop ticking a
+  unit that just went down (a second DoT in the same pass would kill the fresh body outright).
+- **The scratchpad is shared across sessions** — a prior wave's `r1b.log` shadowed this wave's
+  chunk file and nearly got read as data. Fresh, wave-unique log names + provenance checks
+  (slot ranges + the SOLDIER DOWNS line only the new build prints) before trusting any log.
+- **Key T was taken** (tag editor) — STABILIZE ships on E; both firing on IsKeyPressed(T) would
+  have stabilized AND opened the editor in one press.
