@@ -295,62 +295,32 @@ docs/screenshot.png    README image
 
 ## Current state (short)
 
-Playable, feature-complete vertical slice; builds clean (0 warn / 0 err), autoplay-verified
-across seeds. Four game modes (DEPLOY campaign / LAST STAND endless / SKIRMISH / DAILY), a
-cross-run meta profile (WAR ROOM) that now carries a **persistent VETERAN reserve** (promoted
-survivors are recruitable in future runs), a deep per-run loop (perks, specs, traits, scars,
-boons, contracts, branching campaign map, field events), a broad enemy/objective/arena roster
-(35 authored arenas), reactive verbs incl. **focused (cone) overwatch** and the **BRACE interrupt**
-(a disrupting reaction that staggers a foe — denies its action for tempo, the comeback lever),
-**enemy pod morale/rout** (kill a pod down and the survivors break), distinct **per-biome
-visual identity** with a **lit board-space depth** pass, and a full juice/audio/post-FX presentation
-layer. `Game.cs` is sliced into `Game.Autopilot.cs` + `Game.Harness.cs` (+ the older Endless/Meta/
-Modes/Codex slices). PROGRAM UNDERTOW (7 waves) added the interrupt+morale comeback economy, sequenced
-enemy coordination, an Evac forward-beacon de-drag, and the board-depth pass — flywheel-validated
-(lead-swings 0.48→0.59, the +29 punish-gap collapsed, Evac drag 10.9→7.8t). PROGRAM APEX (10 waves)
-made the TOP END real: the heat 7-8 zero-roster crash fixed (first measured heat-8 completion ~25%),
-LAST STAND turned into a tuned ladder (opener grace, mid-stand promotions/boons, a real ending; depth
-median 3→5-6), the AI plays better at the apex instead of aiming better (commanding-LoS truthfulness,
-data-driven `Ai.Tier` at rungs 6+, NO QUARTER +1 dmg), the four setup-verb archetypes reachable in
-faction fights, Escort de-dragged 12.9-15.8t → 5.8t (real-anims leash + hard-gated forward beacon),
-atomic saves with corrupt-file recovery, a flywheel that spans heats {0,2,4,6,8} + endless + veteran
-pricing, and an owner-feedback UI readability pass (wrapping action bar — no ellipsis ever — banded
-odds colors, true gamma, three-zone top bar). PROGRAM SIGNAL (12 waves planned, 11 shipped across
-two milestones) hardened the seams and made the strategic layer earn its place: mode-seam integrity
-(ResetModeState at all five entries, mode-aware abandon), a rebuilt measurement compass (CRN-paired
-policy legs, per-perk/purchase/arena telemetry, DoT attribution), board reads (biome-true plateaus,
-visible focus cone, status pills, role rings), Rescue repaired (soft-lock closed; 9.0t/67% →
-6.07t/98.3% h0), faction boss identity + three finale kits (m6 96% → 82%), a fresh-baselined heat
-ladder with a rung-4 coordination tooth (80/70/50/32.5/17.5 vs goal 80/70/60/40/20 ±8), morale made
-visible and contested (WAVERING telegraph, WARBRINGER anchor, CUSTODIAN re-locker), a standing
-salvage economy (priced veteran recall 10+8×rank, quit-safe barracks sinks, daily payouts), a verb
-pool expansion (6 boons, BIPOD/SUPPRESSOR, 3 secondaries, INTEL CACHE), in-mission teaching (FIELD
-CRAFT codex, enemy-ID tooltips, honest loss cards), and a strategic-layer facelift (sized-to-fit
-campaign map, class glyphs, coherent intro, first-run RECOMMENDED draft). W7 exposure plumbing was
-caught as a docs over-claim at landing and carried forward as an open, ready-to-dev spec — which
-PROGRAM FULCRUM then built as FUL-9. FULCRUM (13 waves, CLOSED 2026-08-28) made the systems that
-existed actually REACH play, then made the published numbers true: seam/chrome integrity, a compass
-that prices verbs/procs/events with per-slot CRN pair records, Defend repaired + telegraphed, the
-EV bot learned BRACE/ITEM/PATCH/DRAG (the verb layer stopped being balance-blind), pods of 3 +
-linked activation, lethal damage became a 3-turn bleed-out with STABILIZE/revive (true-KIA −40%),
-the SARISSA/PIKEMAN contests movement, every route now deals Defend-or-Rescue + <=1 Escort off a
-no-repeat arena deck, seven trade-off events + two veteran contracts, a finale ceremony + Wardens
-retinue, and in-game signposting. FUL-13 TRUE NORTH closed it: definitive proper-N ladder
-**52.5/35/30/22.5/10** vs a RE-SET goal band **55/40/30/20/10 ±8** (h8 ±5; the old 80/70/60/40/20
-predates the exposure repair — reasoning in DEVLOG §FUL-13), Defend's top-rung inversion fixed
-(heat-blind waves + the flat trim eating heat's bodies; pinned h8 96→87 = h0 parity, h6 residual
-recorded), the LOS policy-gap thread closed at N=100 pairs (gap zero — forgiving-by-design
-accepted), intel flood resolved no-drain (the kicker converts to shop spend, the slope survives),
-event EV pricing + the informant dead-buy gate, endless median 6 (band top edge).
+> **Keep this section SHORT.** It is a pointer for a fresh session, not a changelog.
+> Per-program detail belongs in `docs/DEVLOG.md`; what exists belongs in `docs/FEATURES.md`.
+> (It had grown to ~40 lines of accreted program summaries again; RESONANCE cut it back.)
 
-**The exhaustive feature list is in [`docs/FEATURES.md`](docs/FEATURES.md).** The build
-history and open/next backlog are in [`docs/ROADMAP.md`](docs/ROADMAP.md) (§OPEN/NEXT
-post-FULCRUM) and docs/DEVLOG.md §FUL-13. Recurring open threads: the owner-decision docket
-(skirmish numeric heat / founding corpsman / grenade pre-frag — recommendations written in
-DEVLOG §FUL-13), the h6 Defend residual, Escort at the apex, event-exposure levers, and
-on-device audio tuning (needs the human).
+Playable and feature-complete: four modes (campaign / endless / skirmish / daily), a cross-run
+meta profile, a deep per-run loop, 8 objectives, ~21 enemy archetypes, 35 arenas, and a full
+juice/audio/post-FX layer. Builds 0 warn / 0 err; `bash scripts/qa-sweep.sh --full` runs all
+self-tests and must be green; autoplay must never TIMEOUT or throw.
 
----
+Nine autonomous programs (through **FULCRUM**, closed 2026-08-28) built and balance-tuned the
+game. The reference heat ladder and goal band of record are in `docs/DEVLOG.md` §FUL-13.
+
+**PROGRAM RESONANCE** (current) is the tenth. Its thesis: the game had been tuned far past the
+point where anyone verified how it actually *lands*. It found and fixed several things nine
+win-rate-driven programs could not see — the audio had never been heard by anyone (a one-line
+filter bug meant every weapon was raw white noise), the board's biome identity was erased by a
+move overlay that flooded it, only 3 of ~14 verbs were ever taught, the displayed hit% was not
+the hit probability, a pod scatter bug stacked units on one tile so the buried one could not be
+clicked, and a published build launched from the wrong directory silently lost its font. Detail
+in `docs/DEVLOG.md` §RESONANCE; open work in `docs/ROADMAP.md`.
+
+**Three doc over-claims were found and corrected** — they are the reason this project needs the
+"no over-claims" rule enforced hard: juice was graded "Strong" partly on audio nobody had heard;
+onboarding was graded "Addressed" when 12 of 14 verbs were untaught; and a published
+`meaningful-choices/turn = 6.15` measured **2.25** on a fresh batch. **Do not cite a number you
+have not just re-measured.**
 
 ## Handoff protocol (when context gets heavy)
 You judge when context rot risks quality (don't wait for the 1M hard limit). Before stopping:
