@@ -1074,6 +1074,36 @@ sets, one lever per measured round, fresh same-slot R0 first, dip budgets, breac
 
 ## PROGRAM "RESONANCE" — landed waves (see docs/DEVLOG.md for the write-ups)
 
+- [x] **V2 — LIGHT ON THE BOARD.** DONE. Two measured problems, one of them tactical.
+      - **The move overlay stopped repainting the room.** `Renderer.DrawMoveOverlay` filled
+        every reachable tile at a=60 and every dash tile at a=55 — 60-120 tiles of flat
+        cyan/gold for the whole player turn. Measured (chroma-weighted circular mean board
+        hue, overlaid third vs clean third, 8 biomes, seed 4242) it dragged ASH **172
+        degrees**, ARID 68 and MAGMA 29 off their own hue and put the cool biomes at 75-79%
+        cyan; and **dash-gold sat at the hue and value of a warm-biome plateau top**, so
+        ASH/ARID could not distinguish dash range from high ground. Replaced with a boundary
+        treatment: a marching-squares outline (**solid** walk / **dashed** dash — shape, so
+        it survives `SIGHTLINE_CB`), a corner-tick lattice for per-tile granularity, and a
+        whisper-level **white** inner lift (white preserves hue exactly; an a=22 *cyan* tint
+        still flipped near-neutral ASH by 170 degrees). Mean dHue **44.3 -> 7.3** against a
+        no-overlay floor of 4.3; mean median-hue delta **73.1 -> 1.9** against a floor of 1.9.
+      - **The re-grade.** 95% of board pixels sat in the bottom 40% of the range. One
+        coordinated pass: floor mean un-darkened (0.16 -> 0.06 + a split tint/value lift),
+        key light widened x0.16/x0.34 -> **x0.32/x0.45**, cover tops +16 / walls -8, cover
+        rim raised, and a new per-biome AO vignette on the board rect (drawn *under* terrain
+        so it never dims a soldier). Board mean **median 75.2 -> 66.6, p95 95.3 -> 114.1**,
+        p50->p95 span 20 -> 47.5, >180 unchanged at 0.11%. The p95 **target of 150 was
+        missed** — measured, friendly unit bodies peak at ~150, so 5% of pixels above 150
+        has nowhere to live that is not a soldier. Reaching it needs the UNIT tier raised
+        into the >180 band first; deliberately not done here (see DEVLOG §RESONANCE V2).
+      - **Elevation.** Plateau top +30 -> **+64**, front wall -12, lit lip a0.50 -> a0.72.
+        High ground was a ~10-luma bump under a gold wash; verified against a stashed base
+        build (`SIGHTLINE_ELEV`) it is now an unmistakable raised slab.
+      - Tooling: **`scripts/board-metrics.py`** (manual hue/luma measurement over the board
+        rect minus HUD overlap) and the **`SIGHTLINE_NOMOVE=1`** ground-truth capture hook.
+      - Verified: Release 0/0, **41/41 self-tests**, PAIRTEST PASS, autoplay x5 clean,
+        `SIGHTLINE_BALANCE=10` byte-identical to base. Write-up: DEVLOG §RESONANCE V2.
+
 - [x] **T1 — BASIC TRAINING.** DONE. Onboarding stopped being a doc claim.
       `docs/DESIGN.md` §4 graded onboarding "Addressed (W11)"; what shipped was a
       5-card mission-1 callout strip teaching **3 of ~14 verbs** while the action bar

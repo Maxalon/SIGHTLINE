@@ -143,8 +143,29 @@ public static class Pal
     public static readonly Color Panel     = RGBA(16, 22, 30, 235);
     public static readonly Color PanelBd   = RGBA(38, 49, 63);
 
-    public static readonly Color MoveBlue  = RGBA(56, 189, 248, 60);
-    public static readonly Color MoveYellow= RGBA(251, 191, 36, 55);
+    // RESONANCE V2 — the MOVE RANGE is a BOUNDARY, not a wash.
+    // These used to be per-tile FILLS at alpha 60/55, painted over every reachable tile: on an
+    // 18x11 board with a 6-10 tile budget that is 60-120 tiles of flat colour, on screen for the
+    // whole player turn. Measured, it collapsed all eight biomes into one cyan family, smeared
+    // the friendly-reserved hue across half the room (DESIGN 3.H: one job per accent), and made
+    // dash-yellow indistinguishable from a warm-biome plateau top. Now the region is drawn as an
+    // OUTLINE + corner lattice + a whisper of inner tint, so the same information costs a
+    // fraction of the pixels and the room keeps its own colour.
+    //   MoveBlue / MoveYellow  — the region STROKE (walk solid, dash dashed)
+    //   MoveWalkTint / MoveDashTint — the whisper-level inner lift (see DrawMoveOverlay)
+    //   MoveTick               — the per-tile corner lattice (walk only)
+    // The inner lift is WHITE, not cyan, and that is deliberate. Mixing white into a colour
+    // preserves its HUE exactly and only drops saturation, so the region can be marked without
+    // moving one degree of the biome's hue — measured, an alpha-22 CYAN tint still flipped ASH
+    // (a near-neutral grey biome, saturation ~0.1) a full 170 degrees to cyan, because on an
+    // almost-colourless floor even a whisper of blue decides the hue. A value lift is also the
+    // channel DESIGN 3.H asks for: value carries, hue does not. The friendly-cyan identity of
+    // the affordance rides on the stroke and the tick lattice, which are lines and points.
+    public static readonly Color MoveBlue     = RGBA(56, 189, 248, 205);
+    public static readonly Color MoveYellow   = RGBA(251, 191, 36, 190);
+    public static readonly Color MoveWalkTint = RGBA(255, 255, 255, 15);
+    public static readonly Color MoveDashTint = RGBA(255, 255, 255, 6);
+    public static readonly Color MoveTick     = RGBA(120, 210, 250, 150);
 }
 
 /// The kind of ambient atmosphere a biome breathes — a small library of motions the

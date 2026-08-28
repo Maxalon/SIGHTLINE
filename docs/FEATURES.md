@@ -450,6 +450,18 @@ seeds (mix of WIN/LOSE, no exceptions):
 - **Board-space depth (presentation):** a deterministic board key-light + restored cover legibility + contact-shadow
   AO so the arena reads as a lit, dimensional space instead of a flat checkerboard, units still dominant
   (colorblind-safe, byte-stable). (`Renderer` FloorLight/KeyLit/DrawCover/DrawEvac.)
+- **Move range as a BOUNDARY (RESONANCE V2):** the reachable/dash regions are drawn as a marching-squares
+  outline (**solid** walk / **dashed** dash — stroke style, so the two never read as one another or as a
+  plateau, in either palette), a per-tile corner-tick lattice, and a whisper of **white** inner lift (hue-
+  preserving). It replaced a flat per-tile alpha-60/55 cyan+gold fill that covered 60-120 tiles for the whole
+  player turn and collapsed all eight biomes into one cyan family. (`Renderer.DrawMoveOverlay`; QA hook
+  `SIGHTLINE_NOMOVE=1`; measurement `scripts/board-metrics.py`.)
+- **The board grade (RESONANCE V2):** one coordinated value pass — floor mean un-darkened and pulled harder
+  toward the biome tint, key-light throw widened to x0.32 lit / x0.45 shadow, cover tops +16 / walls -8 with a
+  raised rim, plateau tops +64 with a darker front wall and a stronger lit lip, and a per-biome AO vignette on
+  the board rect (under terrain, so it never dims a unit). Board median luma 75 -> 67 with the p50->p95 span
+  more than doubled; luma >180 stays reserved for units/objectives/FX. (`Renderer.DrawBoard`/`DrawElevation`/
+  `DrawCover`/`DrawBoardVignette`.)
 - **Balance roots:** LockOn narrowed to a FLANK reward (was any-exposed, a superset that killed the situational
   perks); BALLISTIC PLATING de-throned from the autopilot's always-buy slot so requisition purchases spread (PLATING
   369→203 buys; dead perks Hardened/Tank 2/4 → 11/11). Plus a double-kill correctness fix that makes the
