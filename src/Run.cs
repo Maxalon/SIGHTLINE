@@ -938,12 +938,15 @@ public class Run
         foreach (var b in BoonDef.All)
         {
             if (HasBoon(b)) continue;
-            // W10: TERROR joins the endless exclusions (LAST STAND wave hostiles spawn PodId<0 —
-            // ungrouped, so pods never break and there is no rout duration to extend) and so does
-            // FIELD STORES (utility items are granted once by Mission.Build at stand setup; a
-            // mid-stand pick would refill nothing).
+            // W10: FIELD STORES stays excluded mid-stand (utility items are granted once by
+            // Mission.Build at stand setup; a mid-stand pick would refill nothing). FUL-6: TERROR
+            // LEAVES the exclusion list — wave hostiles now land in real morale sub-pods
+            // (SpawnEndlessBodies splits each wave via Mission.PodPlan, ids 100+), so rout
+            // durations exist mid-stand and the boon is live again (W1's no-inert-picks invariant
+            // cuts the other way now). Endless-only boon-pool composition change, accepted —
+            // campaign CRN pairing is untouched (this branch only runs with endless: true).
             if (endless && (b == Boon.Ghost || b == Boon.RapidDeploy
-                            || b == Boon.Terror || b == Boon.FieldStores)) continue;
+                            || b == Boon.FieldStores)) continue;
             pool.Add(b);
         }
         for (int i = pool.Count - 1; i > 0; i--) { int j = Util.RandInt(0, i); (pool[i], pool[j]) = (pool[j], pool[i]); }
