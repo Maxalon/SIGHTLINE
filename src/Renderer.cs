@@ -37,6 +37,44 @@ public static class Renderer
         return Math.Clamp(lit, -0.55f, 1f);
     }
 
+    // RESONANCE V1 — CAST SHADOWS FROM THE KEY LIGHT.
+    // FloorLight above declares a key light at board-fraction LightOrigin, but until now nothing
+    // actually cast from it: cover used a fixed (+3,+4) offset "drop shadow" in every direction,
+    // which is an emboss, not a shadow — blocks on the far side of the light threw their shadow
+    // back TOWARD it. This returns the on-screen direction a shadow should fall for the tile at
+    // (x,y): away from LightOrigin, with a downward bias so a block standing at the light's own
+    // foot still drops a short shadow underneath itself (the key is elevated, not on the deck).
+    // Pure function of tile coords + frozen constants -> byte-stable under SIGHTLINE_SHOT.
+    static Vector2 ShadowVec(Game g, int x, int y, float len)
+    {
+        float fx = g.Grid.W > 1 ? x / (float)(g.Grid.W - 1) : 0.5f;
+        float fy = g.Grid.H > 1 ? y / (float)(g.Grid.H - 1) : 0.5f;
+        float dx = fx - LightOrigin.X, dy = fy - LightOrigin.Y;
+        float dist = MathF.Sqrt(dx * dx + dy * dy);            // 0 at the light .. ~1.15 far corner
+        dy += 0.34f;                                            // elevated key: always some drop
+        float m = MathF.Sqrt(dx * dx + dy * dy);
+        if (m < 1e-4f) { dx = 0f; dy = 1f; m = 1f; }
+        // shadows lengthen with distance from the light (grazing angle), clamped so the far
+        // corner never smears into a slick.
+        float scale = Util.Clamp(0.42f + dist * 0.85f, 0.42f, 1.30f);
+        return new Vector2(dx / m * len * scale, dy / m * len * scale);
+    }
+
+    // Soft cast shadow: sweep `rect` from its own position out along `off` in a few overlapping
+    // steps, so the pool is darkest at the contact point and feathers to nothing at the tip.
+    // Cheap (steps+1 rounded rects), deterministic, and it reads as ONE shadow rather than a
+    // duplicate silhouette.
+    static void CastShadow(Rectangle rect, Vector2 off, float strength, int steps = 5)
+    {
+        float per = strength / steps;
+        for (int i = steps; i >= 1; i--)
+        {
+            float t = i / (float)steps;
+            var r = new Rectangle(rect.X + off.X * t, rect.Y + off.Y * t, rect.Width, rect.Height);
+            Raylib.DrawRectangleRounded(r, 0.55f, 5, Raylib.Fade(Pal.RGBA(0, 0, 0), per));
+        }
+    }
+
     // Apply a key-light factor (from FloorLight) to a surface colour: lift toward white on the
     // lit side, sink toward near-black in shadow. Moves VALUE only (colorblind-safe). `amt` caps
     // how far the light can push so terrain stays QUIET relative to units.
@@ -338,10 +376,15 @@ public static class Renderer
         // (STEEL cool / ARID warm / …) intact — the light only reshapes VALUE across the board.
         Color litCol = Pal.Mix(Pal.RGBA(255, 250, 236), bm.Tint, 0.30f); // warm key, tinted toward biome
         Color shadeCol = Pal.Mix(Pal.RGBA(4, 6, 10), bm.Tint, 0.18f);    // cool deep, tinted toward biome
+        // RESONANCE V1 — the floor is a CONTINUOUS ground plane. This loop used to skip every
+        // non-floor tile, so under each of the ~45 cover blocks sat bare board backing
+        // (RGBA 7,10,14); with the block inset 5px that left a hard-black gutter ringing every
+        // block on every map. That single `continue` is why the board read as stickers punched
+        // into a grid rather than objects standing in a room. Paint the ground everywhere;
+        // cover and plateaus then sit ON it.
         for (int x = 0; x < g.Grid.W; x++)
             for (int y = 0; y < g.Grid.H; y++)
             {
-                if (g.Grid.Tiles[x, y] != TileType.Floor) continue;
                 var r = Util.TileRect(x, y);
                 Color baseCol = ((x + y) & 1) == 0 ? fa : fb;
                 float lit = FloorLight(g, x, y);
@@ -358,10 +401,9 @@ public static class Renderer
         if (_noiseReady)
             for (int x = 0; x < g.Grid.W; x++)
                 for (int y = 0; y < g.Grid.H; y++)
-                {
-                    if (g.Grid.Tiles[x, y] != TileType.Floor) continue;
+                    // V1: grain the WHOLE plane (see the floor loop above) so the ring of ground
+                    // visible around each cover block is the same material as the open floor.
                     DrawNoiseRect(Util.TileRect(x, y), bm.Tint, 0.13f);
-                }
 
         // HORIZON W5: one BOLD structural signature per biome so a mission reads as a distinct
         // *place*, not just a colour tint (magma fissures / frost sheen / void-neon grid glow /
@@ -446,9 +488,18 @@ public static class Renderer
                 // exposed front wall down to whatever the tile below sits at (taller for tier 2)
                 int belowH = g.Grid.HeightAt(x, y + 1);
                 if (belowH < h)
+                {
+                    // V1: the exposed wall used to be flat Pal.HighSide (14,19,26) — effectively
+                    // black. That was invisible while the board was full of black gutters, but on a
+                    // continuous lit floor it read as a hole punched in the ground. Give it the
+                    // biome hue and the key light, kept clearly darker than the top face so the
+                    // step still reads as a step.
+                    Color sideCol = KeyLit(Pal.Mix(Pal.HighSide, Pal.Mix(fmean, tint, 0.35f), 0.42f),
+                                           FloorLight(g, x, y), 0.10f);
                     Raylib.DrawRectangleRec(
                         new Rectangle(r.X, r.Y + r.Height - lift, r.Width, (h - belowH) * ElevLift + 3),
-                        Pal.HighSide);
+                        sideCol);
+                }
                 // raised top face — tier 2 reads a touch brighter so the height tier is legible
                 var top = new Rectangle(r.X, r.Y - lift, r.Width, r.Height);
                 Color ca = h >= 2 ? Pal.Mix(hiA, Pal.RGBA(255, 255, 255), 0.12f) : hiA;
@@ -461,11 +512,18 @@ public static class Renderer
                 Raylib.DrawRectangleRec(top, plit >= 0f
                     ? Pal.Mix(topBase, litCol, plit * 0.14f)
                     : Pal.Mix(topBase, Pal.RGBA(3, 5, 9), -plit * 0.14f));
-                // contact shadow at the base of the front wall — grounds the plateau
+                // contact shadow at the base of the front wall — grounds the plateau. V1: the
+                // tight AO band stays (occlusion), and a real cast shadow now falls away from the
+                // board key light, scaled by how much wall is exposed.
                 if (belowH < h)
+                {
+                    float wallBase = r.Y + r.Height - lift + (h - belowH) * ElevLift;
+                    CastShadow(new Rectangle(r.X + 2, wallBase - 4, r.Width - 4, 10),
+                               ShadowVec(g, x, y, 6f + (h - belowH) * 7f), 0.26f, 4);
                     Raylib.DrawRectangleRec(
-                        new Rectangle(r.X + 2, r.Y + r.Height - lift + (h - belowH) * ElevLift + 2, r.Width - 4, 5),
+                        new Rectangle(r.X + 2, wallBase + 2, r.Width - 4, 5),
                         Raylib.Fade(Pal.RGBA(0, 0, 0), 0.28f));
+                }
                 // 5.4: noise grain on the plateau top so it reads as raised stone/metal
                 DrawNoiseRect(top, tint, 0.11f);
                 // lit front edge of the top face (base glow at alpha 0.50)
@@ -1151,9 +1209,17 @@ public static class Renderer
                 {
                     var foot = Util.TileRect(x, y);
                     foot.Y -= g.Grid.HeightAt(x, y) * ElevLift;
+                    // V1: the block's real ground footprint, swept AWAY from the key light
+                    // (ShadowVec) instead of the old fixed +3/+4 emboss. Length scales with the
+                    // block's height, so high cover throws twice the shadow low cover does.
+                    bool tall = t == TileType.HighCover;
+                    var fp = new Rectangle(foot.X + 4, foot.Y + foot.Height - 17, foot.Width - 8, 15);
+                    CastShadow(fp, ShadowVec(g, x, y, tall ? 16f : 8f), 0.34f);
+                    // tight contact AO right under the block — omnidirectional on purpose: this is
+                    // occlusion, not a shadow, and it is what actually welds the block to the floor.
                     Raylib.DrawRectangleRounded(
-                        new Rectangle(foot.X + 3, foot.Y + foot.Height - 12, foot.Width - 6, 14),
-                        0.6f, 6, Raylib.Fade(Pal.RGBA(0, 0, 0), 0.20f));
+                        new Rectangle(foot.X + 6, foot.Y + foot.Height - 13, foot.Width - 12, 11),
+                        0.7f, 6, Raylib.Fade(Pal.RGBA(0, 0, 0), 0.24f));
                 }
                 r.Y -= g.Grid.HeightAt(x, y) * ElevLift;   // sit cover on the plateau top (per tier)
                 bool high = t == TileType.HighCover;
@@ -1169,10 +1235,13 @@ public static class Renderer
                 // apply the key light to the wall + top faces (VALUE only — survives colorblind).
                 Color wallCol = KeyLit(high ? cHi : cLo, klit, 0.13f);
                 Color topCol  = KeyLit(high ? cHiTop : cLoTop, klit, 0.16f);
-                // drop shadow
+                // V1: the old fixed (+3,+4) "drop shadow" here was an emboss — same offset for
+                // every block regardless of where the key light is. The real cast shadow is now
+                // laid on the FLOOR above (CastShadow/ShadowVec); all this needs is a hairline
+                // dark edge so the wall silhouette stays crisp against a lit ground plane.
                 Raylib.DrawRectangleRounded(
-                    new Rectangle(baseRect.X + 3, baseRect.Y + 4, baseRect.Width, baseRect.Height),
-                    0.18f, 5, Raylib.Fade(Pal.RGBA(0, 0, 0), 0.35f));
+                    new Rectangle(baseRect.X - 1, baseRect.Y - 1, baseRect.Width + 2, baseRect.Height + 2),
+                    0.18f, 5, Raylib.Fade(Pal.RGBA(0, 0, 0), 0.30f));
                 Raylib.DrawRectangleRounded(baseRect, 0.18f, 5, wallCol);
                 // front-face shade gradient: a soft darkening toward the bottom of the wall so the
                 // block reads as a lit 3D volume (consistent top-light), and a thin lighter catch on
