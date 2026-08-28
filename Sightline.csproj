@@ -17,6 +17,12 @@
   <ItemGroup>
     <None Include="assets/NotoMono-Regular.ttf" CopyToOutputDirectory="PreserveNewest" />
     <None Include="assets/NotoMono-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" />
+    <!-- RESONANCE V1 — display face for titles (Chakra Petch Bold, SIL OFL 1.1, 78 KB).
+         OFL is zero-cost and zero-royalty, but it is NOT public domain: the licence text must
+         ship alongside the font, and the font itself may not be sold on its own. Same footing
+         the repo is already on with NotoMono. -->
+    <None Include="assets/ChakraPetch-Bold.ttf" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="assets/ChakraPetch-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" />
     <!-- HORIZON W7 — ship any dropped-in CC0 audio so the file-first/synth-fallback loader can
          actually find it at runtime (working dir = output dir; previously these were NOT copied,
          so a dropped-in file could never load). Globs match nothing until files are added, so this

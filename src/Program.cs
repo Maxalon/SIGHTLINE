@@ -406,17 +406,55 @@ public static class Program
                 0x00D7, // multiply sign
                 0x00B7, // middle dot
             };
-            Font loaded = Raylib.LoadFontEx("assets/NotoMono-Regular.ttf", 64, codepoints, codepoints.Length);
+            // RESONANCE V1 — TWO ATLASES, and asset paths resolved next to the BINARY.
+            //
+            // (1) A single 64px atlas served everything from 11px to 92px. The 11-14px body text
+            //     is most of the words in the game, and minifying 64px glyphs ~5x with bilinear
+            //     filtering and no mip chain is exactly what turns small type into grey mush.
+            //     Bake a second atlas at 20px for text <= Cfg.UiFontMax and keep the 64px atlas
+            //     for the big sizes; Cfg.FontFor(size) routes every call site.
+            // (2) Ship-blocker: the path was relative to the CURRENT WORKING DIRECTORY. A player
+            //     launching the built binary from anywhere but the project root silently got
+            //     Raylib's built-in bitmap font and every em-dash rendered as '?'. Cfg.AssetPath
+            //     resolves against AppContext.BaseDirectory (with a cwd fallback for dev).
+            // Mipmaps + trilinear on both atlases so any residual off-size draw filters cleanly.
+            string notoPath = Cfg.AssetPath("assets/NotoMono-Regular.ttf");
+            Font loaded = Raylib.LoadFontEx(notoPath, 64, codepoints, codepoints.Length);
             if (loaded.Texture.Id != 0)
             {
-                Raylib.SetTextureFilter(loaded.Texture, TextureFilter.Bilinear);
+                Raylib.GenTextureMipmaps(ref loaded.Texture);
+                Raylib.SetTextureFilter(loaded.Texture, TextureFilter.Trilinear);
                 Cfg.Font = loaded;
-                Console.WriteLine("FONT: NotoMono-Regular loaded (glyph atlas ok)");
+                Console.WriteLine($"FONT: NotoMono-Regular 64px atlas loaded ({notoPath})");
+
+                Font ui = Raylib.LoadFontEx(notoPath, 20, codepoints, codepoints.Length);
+                if (ui.Texture.Id != 0)
+                {
+                    Raylib.GenTextureMipmaps(ref ui.Texture);
+                    Raylib.SetTextureFilter(ui.Texture, TextureFilter.Trilinear);
+                    Cfg.FontUi = ui;
+                    Console.WriteLine("FONT: NotoMono-Regular 20px UI atlas loaded");
+                }
             }
             else
             {
                 Cfg.Font = Raylib.GetFontDefault();
-                Console.WriteLine("FONT: NotoMono-Regular not found, falling back to default");
+                Console.WriteLine($"FONT: NotoMono-Regular NOT FOUND at {notoPath} — falling back to default");
+            }
+
+            // Display face (Chakra Petch Bold, OFL-1.1) — titles only; NotoMono keeps the data.
+            string dispPath = Cfg.AssetPath("assets/ChakraPetch-Bold.ttf");
+            Font disp = Raylib.LoadFontEx(dispPath, 96, codepoints, codepoints.Length);
+            if (disp.Texture.Id != 0)
+            {
+                Raylib.GenTextureMipmaps(ref disp.Texture);
+                Raylib.SetTextureFilter(disp.Texture, TextureFilter.Trilinear);
+                Cfg.FontTitle = disp;
+                Console.WriteLine("FONT: ChakraPetch-Bold display atlas loaded");
+            }
+            else
+            {
+                Console.WriteLine($"FONT: ChakraPetch-Bold NOT FOUND at {dispPath} — titles stay on NotoMono");
             }
         }
 
@@ -516,7 +554,7 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_UNITFX") == "1") game.DebugUnitFx();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_ELEV") == "1") game.DebugElevation();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_SHOP") == "1") game.DebugShop();
-        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_PREP") == "1") game.DebugPrep();
+        if (shot && !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("SIGHTLINE_PREP"))) game.DebugPrep();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_ARMORY") == "1") game.DebugArmory();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_BOON") == "1") game.DebugBoon();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_ENDLESSOFFER") == "1") game.DebugEndlessOffer();   // W7: pair with SIGHTLINE_ENDLESS=1

@@ -18,9 +18,53 @@ public static class Cfg
     public static int OriginX => (ScreenW - BoardW) / 2; // 64 — NOTE: the roster strip (x 8..140) still overlaps board column 0 (x 64..128); Hud.DrawRoster reflows occluded chips
     public const int OriginY = 40;                  // board floats near the top; translucent HUD overlays its edges
 
-    // Real bitmap font (Phase 5.3) — loaded in Program.cs after InitWindow.
-    // Falls back to Raylib's default if the TTF is missing (graceful degradation).
-    public static Font Font;
+    // ---- Type (Phase 5.3 font; RESONANCE V1 two-atlas + display face) --------------------
+    // Loaded in Program.cs after InitWindow; each falls back gracefully if its TTF is missing.
+    //
+    // V1: ONE 64px atlas used to serve every size from 11px to 92px. Most of the words in the
+    // game are 11-14px labels, and minifying a 64px atlas by 5x with bilinear filtering and no
+    // mip chain is exactly the case that turns type into grey mush. Bake a second atlas at the
+    // size the body text is actually drawn at, and pick per call site by size.
+    public static Font Font;        // 64px NotoMono — data/large text (> UiFontMax)
+    public static Font FontUi;      // 20px NotoMono — body/label text (<= UiFontMax)
+    public static Font FontTitle;   // 96px display face (Chakra Petch) — titles only
+
+    /// Largest point size still served by the small UI atlas.
+    public const float UiFontMax = 18f;
+
+    static bool Has(Font f) => f.Texture.Id != 0;
+
+    /// The NotoMono atlas whose bake size is closest to `size` (see the two-atlas note above).
+    public static Font FontFor(float size) => size <= UiFontMax && Has(FontUi) ? FontUi : Font;
+
+    /// The display face, for titles only. Falls back to NotoMono when the TTF is absent.
+    public static Font TitleFontFor(float size) => Has(FontTitle) ? FontTitle : FontFor(size);
+
+    // Size-routed text helpers. Every DrawTextEx/MeasureTextEx call site in the game goes
+    // through these so the atlas choice is made in exactly one place.
+    public static void Text(string t, Vector2 pos, float size, float spacing, Color tint) =>
+        Raylib.DrawTextEx(FontFor(size), t, pos, size, spacing, tint);
+    public static Vector2 Measure(string t, float size, float spacing) =>
+        Raylib.MeasureTextEx(FontFor(size), t, size, spacing);
+
+    /// Title text — routed to the display face. Use for headline/card titles only; numerals and
+    /// data stay on NotoMono (a good data face) via Text/Measure.
+    public static void TitleText(string t, Vector2 pos, float size, float spacing, Color tint) =>
+        Raylib.DrawTextEx(TitleFontFor(size), t, pos, size, spacing, tint);
+    public static Vector2 TitleMeasure(string t, float size, float spacing) =>
+        Raylib.MeasureTextEx(TitleFontFor(size), t, size, spacing);
+
+    /// Resolve a bundled asset next to the BINARY, not the current working directory.
+    /// V1 ship-blocker: every asset path was relative to the cwd, so launching the built
+    /// binary from anywhere but the project root silently fell back to Raylib's built-in
+    /// bitmap font (and every em-dash rendered as `?`). Keeps a cwd fallback so a loose
+    /// asset dropped next to a `dotnet run` still resolves.
+    public static string AssetPath(string rel)
+    {
+        string baked = System.IO.Path.Combine(AppContext.BaseDirectory, rel);
+        if (System.IO.File.Exists(baked)) return baked;
+        return rel;   // fall back to cwd-relative (dev convenience / dropped-in files)
+    }
 }
 
 /// Colour palette + helpers.

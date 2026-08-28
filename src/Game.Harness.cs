@@ -1151,9 +1151,18 @@ public partial class Game
     {
         DebugShop();
         _run.Intel = 40;
-        // force a faction onto a reachable next node so UpcomingFaction() returns it
+        // force a faction onto a reachable next node so UpcomingFaction() returns it.
+        // V1: honour SIGHTLINE_PREP=syndicate|legion|wardens so the LONGEST prep title
+        // ("COUNTER-PREP: SYNDICATE") can be shot on demand — it is the card-title/price
+        // collision case. Defaults to Wardens, so existing captures are unchanged.
+        Faction pf = (Environment.GetEnvironmentVariable("SIGHTLINE_PREP") ?? "").ToLowerInvariant() switch
+        {
+            "syndicate" => Faction.Syndicate,
+            "legion"    => Faction.Legion,
+            _           => Faction.Wardens,
+        };
         var next = _run.NextNodes();
-        if (next.Count > 0) next[0].Faction = Faction.Wardens;
+        if (next.Count > 0) next[0].Faction = pf;
         RefreshShopOffer();   // re-roll now that a faction is telegraphed, so the PREP slot shows
     }
 

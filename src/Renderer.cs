@@ -599,10 +599,10 @@ public static class Renderer
                 if (d < best) { best = d; lax = cx0; }
             }
             float lay = Cfg.OriginY + minY * Cfg.Tile + Cfg.Tile * 0.5f;
-            float tw = Raylib.MeasureTextEx(Cfg.Font, "EVAC", 14, 1f).X;
+            float tw = Cfg.Measure("EVAC", 14, 1f).X;
             Raylib.DrawRectangleRounded(new Rectangle(lax - tw / 2f - 8f, lay - 11f, tw + 16f, 22f),
                                         0.5f, 8, Pal.RGBA(9, 13, 18, 210));
-            Raylib.DrawTextEx(Cfg.Font, "EVAC", new Vector2((int)(lax - tw / 2f), (int)(lay - 7f)), 14, 1f, Pal.Good);
+            Cfg.Text("EVAC", new Vector2((int)(lax - tw / 2f), (int)(lay - 7f)), 14, 1f, Pal.Good);
         }
 
         // Forward BEACON marker: a raised mast + pulsing broadcast rings on its centre tile, so the
@@ -620,7 +620,7 @@ public static class Renderer
             // the mast + emitter
             Raylib.DrawLineEx(new Vector2(bc.X, bc.Y + 8f), new Vector2(bc.X, bc.Y - 10f), 2.4f, Pal.Good);
             Raylib.DrawCircleV(new Vector2(bc.X, bc.Y - 11f), 3f + 1.5f * bp, Raylib.Fade(Pal.Good, 0.6f + 0.4f * bp));
-            Raylib.DrawTextEx(Cfg.Font, "BEACON", new Vector2((int)bc.X - 20, (int)(bc.Y + Cfg.Tile / 2 - 6)), 12, 1f, Pal.Good);
+            Cfg.Text("BEACON", new Vector2((int)bc.X - 20, (int)(bc.Y + Cfg.Tile / 2 - 6)), 12, 1f, Pal.Good);
         }
     }
 
@@ -657,7 +657,7 @@ public static class Renderer
 
         // FUL-3: a row-0 marker label would sit under the top bar — flip it below the tile.
         float tly = r.Y - 13 < 30 ? r.Y + r.Height + 2 : r.Y - 13;
-        Raylib.DrawTextEx(Cfg.Font, "TERMINAL", new Vector2((int)c.X - 26, (int)tly), 11, 1f, col);
+        Cfg.Text("TERMINAL", new Vector2((int)c.X - 26, (int)tly), 11, 1f, col);
     }
 
     // SABOTAGE charge sites: a blinking demolition console per site; armed once planted.
@@ -688,7 +688,7 @@ public static class Renderer
 
             // FUL-3: a row-0 marker label would sit under the top bar — flip it below the tile.
             float cly = r.Y - 13 < 30 ? r.Y + r.Height + 2 : r.Y - 13;
-            Raylib.DrawTextEx(Cfg.Font, blown ? "ARMED" : "CHARGE", new Vector2((int)c.X - 18, (int)cly), 10, 1f, col);
+            Cfg.Text(blown ? "ARMED" : "CHARGE", new Vector2((int)c.X - 18, (int)cly), 10, 1f, col);
         }
     }
 
@@ -720,10 +720,10 @@ public static class Renderer
         // FUL-3: a row-0 label would sit under the top bar — flip it below the tile (the turns
         // clock steps down with it). Placement now avoids row 0, but stay robust to old saves.
         bool flip = r.Y - 13 < 30;
-        Raylib.DrawTextEx(Cfg.Font, "INTEL", new Vector2((int)c.X - 15, (int)(flip ? r.Y + r.Height + 2 : r.Y - 13)), 11, 1f, col);
+        Cfg.Text("INTEL", new Vector2((int)c.X - 15, (int)(flip ? r.Y + r.Height + 2 : r.Y - 13)), 11, 1f, col);
         string tt = $"{g.CacheTurnsLeft}T";
-        float tw = Raylib.MeasureTextEx(Cfg.Font, tt, 10, 1f).X;
-        Raylib.DrawTextEx(Cfg.Font, tt, new Vector2((int)(c.X - tw / 2), (int)(r.Y + r.Height + (flip ? 15 : 1))), 10, 1f,
+        float tw = Cfg.Measure(tt, 10, 1f).X;
+        Cfg.Text(tt, new Vector2((int)(c.X - tw / 2), (int)(r.Y + r.Height + (flip ? 15 : 1))), 10, 1f,
                           expiring ? Pal.Foe : Raylib.Fade(col, 0.8f));
     }
 
@@ -1150,13 +1150,13 @@ public static class Renderer
                     : plan.Path.Count > 0 ? "MOVING"
                     : plan.Hunker ? "HUNKER" : "HOLD";
         Vector2 cap = e.Pos - new Vector2(0, (g.Grid.IsHigh(e.X, e.Y) ? ElevLift : 0f) + 44f);
-        var sz = Raylib.MeasureTextEx(Cfg.Font, verb, 14f, 1f);
+        var sz = Cfg.Measure(verb, 14f, 1f);
         // a definitive bordered pill (opaque dark fill + thin danger outline) so the verb reads as a
         // hard label, not a wash — the player can name the threat at a glance.
         var pill = new Rectangle(cap.X - sz.X / 2f - 5, cap.Y - 2, sz.X + 10, sz.Y + 4);
         Raylib.DrawRectangleRounded(pill, 0.5f, 6, Raylib.Fade(Pal.RGBA(24, 6, 6), 0.92f));
         Raylib.DrawRectangleLinesEx(pill, 1f, Raylib.Fade(danger, 0.7f + 0.25f * pulse));   // square outline (RoundedLines is version-volatile)
-        Raylib.DrawTextEx(Cfg.Font, verb, new Vector2(cap.X - sz.X / 2f, cap.Y), 14f, 1f,
+        Cfg.Text(verb, new Vector2(cap.X - sz.X / 2f, cap.Y), 14f, 1f,
                           Raylib.Fade(Pal.RGBA(255, 215, 215), 1f));
     }
 
@@ -1857,16 +1857,16 @@ public static class Renderer
         Color downCol = u.Stabilized ? Pal.Suspect : Pal.Foe;
         float rowW = 0f;
         if (downCode != null)
-            rowW += 17f + Raylib.MeasureTextEx(Cfg.Font, downCode, 13, 1f).X + 8f + 3f;
+            rowW += 17f + Cfg.Measure(downCode, 13, 1f).X + 8f + 3f;
         foreach (var s in u.Statuses)
             if (s.Turns > 0)
-                rowW += 17f + Raylib.MeasureTextEx(Cfg.Font, StatusDef.Code(s.Kind), 13, 1f).X + 8f + 3f;
+                rowW += 17f + Cfg.Measure(StatusDef.Code(s.Kind), 13, 1f).X + 8f + 3f;
         if (rowW <= 0f) return;
         float cxs = p.X - (rowW - 3f) / 2f;
         float cys = p.Y + 24f;
         if (downCode != null)
         {
-            float tw0 = Raylib.MeasureTextEx(Cfg.Font, downCode, 13, 1f).X;
+            float tw0 = Cfg.Measure(downCode, 13, 1f).X;
             float w0 = 17f + tw0 + 8f;
             Raylib.DrawRectangleRounded(new Rectangle(cxs - 1f, cys - 1f, w0 + 2f, chipH + 2f),
                                         0.5f, 6, Raylib.Fade(downCol, 0.55f));
@@ -1882,7 +1882,7 @@ public static class Renderer
                 Raylib.DrawLineEx(new Vector2(gx - 4f, gy - 3f), new Vector2(gx, gy + 3f), 2f, downCol);
                 Raylib.DrawLineEx(new Vector2(gx + 4f, gy - 3f), new Vector2(gx, gy + 3f), 2f, downCol);
             }
-            Raylib.DrawTextEx(Cfg.Font, downCode, new Vector2((int)(cxs + 17f), (int)(cys + 2f)), 13, 1f, downCol);
+            Cfg.Text(downCode, new Vector2((int)(cxs + 17f), (int)(cys + 2f)), 13, 1f, downCol);
             cxs += w0 + 3f;
         }
         foreach (var s in u.Statuses)
@@ -1896,7 +1896,7 @@ public static class Renderer
                 _ => Pal.RGBA(150, 120, 220),       // Disoriented
             };
             string code = StatusDef.Code(s.Kind);
-            float tw = Raylib.MeasureTextEx(Cfg.Font, code, 13, 1f).X;
+            float tw = Cfg.Measure(code, 13, 1f).X;
             float w = 17f + tw + 8f;
             // faint coloured rim = a slightly larger rounded rect UNDER the dark pill
             // (DrawRectangleRoundedLines is version-volatile — never use it)
@@ -1905,7 +1905,7 @@ public static class Renderer
             Raylib.DrawRectangleRounded(new Rectangle(cxs, cys, w, chipH), 0.5f, 6, Pal.RGBA(9, 13, 18, 216));
             // 5.5: the shape glyph so the effect reads without relying on hue or the code text
             DrawStatusGlyph(s.Kind, cxs + 9f, cys + chipH * 0.5f, sc);
-            Raylib.DrawTextEx(Cfg.Font, code, new Vector2((int)(cxs + 17f), (int)(cys + 2f)), 13, 1f, sc);
+            Cfg.Text(code, new Vector2((int)(cxs + 17f), (int)(cys + 2f)), 13, 1f, sc);
             cxs += w + 3f;
         }
     }
@@ -2184,8 +2184,8 @@ public static class Renderer
             Raylib.DrawLineEx(new Vector2(p.X - 3.5f, cyT - 3f), new Vector2(p.X, cyT + 2f), 2f, hc);
             Raylib.DrawLineEx(new Vector2(p.X, cyT + 2f), new Vector2(p.X + 3.5f, cyT - 3f), 2f, hc);
             Raylib.DrawLineEx(new Vector2(p.X + 3.5f, cyT - 3f), new Vector2(p.X + 7f, cyT + 4f), 2f, hc);
-            float tw = Raylib.MeasureTextEx(Cfg.Font, "HVT", 11, 1f).X;
-            Raylib.DrawTextEx(Cfg.Font, "HVT", new Vector2((int)(p.X - tw / 2), (int)(cyT - 18f)), 11, 1f, hc);
+            float tw = Cfg.Measure("HVT", 11, 1f).X;
+            Cfg.Text("HVT", new Vector2((int)(p.X - tw / 2), (int)(cyT - 18f)), 11, 1f, hc);
         }
 
         // not-yet-engaged enemies: an awareness marker, no facing/pips/status
@@ -2200,8 +2200,8 @@ public static class Renderer
                 Raylib.DrawRing(p, 24f, 28f, 0, 360, 44, Raylib.Fade(Pal.Suspect, 0.42f + 0.48f * pulse));
                 Raylib.DrawRing(p, 28f, 29.5f, 0, 360, 44, Raylib.Fade(Pal.Suspect, 0.18f + 0.20f * pulse));
                 var qp = new Vector2((int)(p.X - 2), (int)(p.Y - 42));
-                Raylib.DrawTextEx(Cfg.Font, "!", qp + new Vector2(1.2f, 1.2f), 22, 1f, Raylib.Fade(Pal.RGBA(8, 6, 2), 0.85f)); // drop shadow for contrast
-                Raylib.DrawTextEx(Cfg.Font, "!", qp, 22, 1f, Pal.Suspect);
+                Cfg.Text("!", qp + new Vector2(1.2f, 1.2f), 22, 1f, Raylib.Fade(Pal.RGBA(8, 6, 2), 0.85f)); // drop shadow for contrast
+                Cfg.Text("!", qp, 22, 1f, Pal.Suspect);
             }
             else
             {
@@ -2217,10 +2217,10 @@ public static class Renderer
                     float a0 = k * 45f + t * 14f;          // slow rotation so it reads as "scanning"
                     Raylib.DrawRing(p, 23f, 26f, a0, a0 + 26f, 6, Raylib.Fade(dim, 0.68f));
                 }
-                float qw = Raylib.MeasureTextEx(Cfg.Font, "?", 23, 1f).X;
+                float qw = Cfg.Measure("?", 23, 1f).X;
                 var qp = new Vector2((int)(p.X - qw / 2), (int)(p.Y - 13));
-                Raylib.DrawTextEx(Cfg.Font, "?", qp + new Vector2(1.2f, 1.2f), 23, 1f, Raylib.Fade(Pal.RGBA(6, 8, 12), 0.85f)); // drop shadow
-                Raylib.DrawTextEx(Cfg.Font, "?", qp, 23, 1f, Raylib.Fade(dim, 1.0f));
+                Cfg.Text("?", qp + new Vector2(1.2f, 1.2f), 23, 1f, Raylib.Fade(Pal.RGBA(6, 8, 12), 0.85f)); // drop shadow
+                Cfg.Text("?", qp, 23, 1f, Raylib.Fade(dim, 1.0f));
             }
             return;
         }
@@ -2399,21 +2399,21 @@ public static class Renderer
             // it disrupts rather than kills, so its badge shouldn't imply a kill-lane.
             Color owc = u.OwBrace ? Pal.Good : Pal.Accent;
             Raylib.DrawCircle((int)p.X, (int)(p.Y - 34), 6f, Raylib.Fade(owc, 0.25f));
-            Raylib.DrawTextEx(Cfg.Font, u.OwBrace ? "BRC" : "OW", new Vector2((int)(p.X - (u.OwBrace ? 11 : 9)), (int)(p.Y - 39)), 10, 1f, owc);
+            Cfg.Text(u.OwBrace ? "BRC" : "OW", new Vector2((int)(p.X - (u.OwBrace ? 11 : 9)), (int)(p.Y - 39)), 10, 1f, owc);
         }
         if (u.Hunkered)
             Raylib.DrawPoly(new Vector2(p.X, p.Y - 35), 4, 6f, 45f, Pal.Good);
 
         // active ability stance tag (friendly) / suppression tag (enemy) — pushed out past the wider body
-        if (u.RunGun) Raylib.DrawTextEx(Cfg.Font, "R&G", new Vector2((int)(p.X + 18), (int)(p.Y - 34)), 11, 1f, Pal.Accent);
-        else if (u.Blitz) Raylib.DrawTextEx(Cfg.Font, "BLZ", new Vector2((int)(p.X + 18), (int)(p.Y - 34)), 11, 1f, Pal.Accent);
-        else if (u.Steady) Raylib.DrawTextEx(Cfg.Font, "AIM", new Vector2((int)(p.X + 18), (int)(p.Y - 34)), 11, 1f, Pal.Good);
+        if (u.RunGun) Cfg.Text("R&G", new Vector2((int)(p.X + 18), (int)(p.Y - 34)), 11, 1f, Pal.Accent);
+        else if (u.Blitz) Cfg.Text("BLZ", new Vector2((int)(p.X + 18), (int)(p.Y - 34)), 11, 1f, Pal.Accent);
+        else if (u.Steady) Cfg.Text("AIM", new Vector2((int)(p.X + 18), (int)(p.Y - 34)), 11, 1f, Pal.Good);
         if (u.Team == Team.Enemy && u.Suppress > 0)
-            Raylib.DrawTextEx(Cfg.Font, "SUPP", new Vector2((int)(p.X + 17), (int)(p.Y - 34)), 11, 1f, Pal.Foe);
+            Cfg.Text("SUPP", new Vector2((int)(p.X + 17), (int)(p.Y - 34)), 11, 1f, Pal.Foe);
         // UNDERTOW W3 — a ROUTED (broken) enemy reads clearly: it's fleeing + shooting wild, so the
         // player knows this threat is temporarily neutralized (the earned comeback beat).
         if (u.Team == Team.Enemy && u.Routed > 0)
-            Raylib.DrawTextEx(Cfg.Font, "ROUT", new Vector2((int)(p.X + 17), (int)(p.Y - 34)), 11, 1f, Pal.Good);
+            Cfg.Text("ROUT", new Vector2((int)(p.X + 17), (int)(p.Y - 34)), 11, 1f, Pal.Good);
         // SIGNAL W8 — WAVERING: this pod is ONE KILL from breaking (Game.PodWavering — banner-held
         // members are excluded so the mark never lies). Amber "WVR" + a jagged CRACK glyph on the
         // figure's left (mutually exclusive with ROUT by definition; shape carries the meaning
@@ -2421,7 +2421,7 @@ public static class Renderer
         // telegraphed: the player can PLAN the breaking kill instead of being surprised by it.
         else if (u.Team == Team.Enemy && g.PodWavering(u))
         {
-            Raylib.DrawTextEx(Cfg.Font, "WVR", new Vector2((int)(p.X - 39), (int)(p.Y - 39)), 11, 1f, Pal.Suspect);
+            Cfg.Text("WVR", new Vector2((int)(p.X - 39), (int)(p.Y - 39)), 11, 1f, Pal.Suspect);
             DrawCrackGlyph(new Vector2(p.X - 46f, p.Y - 33f), Pal.Suspect);
         }
 
@@ -2433,7 +2433,7 @@ public static class Renderer
         if (elite)
         {
             string tag = u.Frenzied ? u.Name + " FRENZIED" : (u.Enraged ? u.Name + " ENRAGED" : u.Name);
-            Raylib.DrawTextEx(Cfg.Font, tag, new Vector2((int)(p.X - (int)Raylib.MeasureTextEx(Cfg.Font, tag, 11, 1f).X / 2), (int)(p.Y - 42)), 11, 1f, Pal.Elite);
+            Cfg.Text(tag, new Vector2((int)(p.X - (int)Cfg.Measure(tag, 11, 1f).X / 2), (int)(p.Y - 42)), 11, 1f, Pal.Elite);
         }
 
         // VIP / captive marker: diamond + tag above the asset
@@ -2444,7 +2444,7 @@ public static class Renderer
             Raylib.DrawPoly(new Vector2(p.X, p.Y - 39), 4, 5.5f, 45f, vc);
             Raylib.DrawPolyLinesEx(new Vector2(p.X, p.Y - 39), 4, 5.5f, 45f, 1.5f, Pal.Txt);
             string vtag = caged ? "CAPTIVE" : (u.Name == "CAPTIVE" ? "FREED" : "VIP");
-            Raylib.DrawTextEx(Cfg.Font, vtag, new Vector2((int)(p.X - (int)Raylib.MeasureTextEx(Cfg.Font, vtag, 12, 1f).X / 2), (int)(p.Y - 53)), 12, 1f, vc);
+            Cfg.Text(vtag, new Vector2((int)(p.X - (int)Cfg.Measure(vtag, 12, 1f).X / 2), (int)(p.Y - 53)), 12, 1f, vc);
             if (caged)   // cage bars over the figure
                 for (int i = -1; i <= 1; i++)
                     Raylib.DrawLineEx(new Vector2(p.X + i * 6, p.Y - 12), new Vector2(p.X + i * 6, p.Y + 12),
@@ -2634,7 +2634,7 @@ public static class Renderer
                 var pb = c + AngVec(a0) * (r + 5f);
                 Raylib.DrawLineEx(pa, pb, 2f, Raylib.Fade(Pal.Foe, 0.85f));
             }
-            Raylib.DrawTextEx(Cfg.Font, "MARKED", new Vector2(c.X - 22, c.Y - r - 16), 12, 1f, Pal.Foe);
+            Cfg.Text("MARKED", new Vector2(c.X - 22, c.Y - r - 16), 12, 1f, Pal.Foe);
         }
     }
 
@@ -2716,7 +2716,7 @@ public static class Renderer
                 Raylib.DrawLineEx(corner, corner - new Vector2(sx * 8f, 0), 2.2f, col);
                 Raylib.DrawLineEx(corner, corner - new Vector2(0, sy * 8f), 2.2f, col);
             }
-            Raylib.DrawTextEx(Cfg.Font, "PINNED", new Vector2(c.X - 22, c.Y - r - 16), 11, 1f, Pal.Foe);
+            Cfg.Text("PINNED", new Vector2(c.X - 22, c.Y - r - 16), 11, 1f, Pal.Foe);
         }
     }
 
@@ -2843,7 +2843,7 @@ public static class Renderer
         Raylib.DrawLineEx(new Vector2(d.X + 16, d.Y - 6), new Vector2(d.X + 9, d.Y), 1.8f, lab);
         Raylib.DrawLineEx(new Vector2(d.X + 16, d.Y + 6), new Vector2(d.X + 9, d.Y), 1.8f, lab);
         var lp = new Vector2((int)d.X - 30, (int)(d.Y + 22));
-        Raylib.DrawTextEx(Cfg.Font, "CROSSFIRE", lp, 11, 1f, lab);
+        Cfg.Text("CROSSFIRE", lp, 11, 1f, lab);
     }
 
     // One converging-fire prong: a thin low-alpha line from a squadmate to the target, with a short
