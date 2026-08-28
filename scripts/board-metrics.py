@@ -18,6 +18,19 @@ minus the three HUD panels drawn over it) so chrome never pollutes the numbers:
 
 usage:  python3 scripts/board-metrics.py hue  shots/*.png
         python3 scripts/board-metrics.py luma shots/*.png
+
+capturing the 8-biome sweep the tables are built from (shots/ is gitignored):
+
+  export PATH="$PATH:/usr/lib/dotnet" LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe
+  names=(0STEEL 1ARID 2TUNDRA 3VERDANT 4ASH 5VOID 6NEON 7MAGMA)
+  for i in 0 1 2 3 4 5 6 7; do
+    SIGHTLINE_SEED=4242 SIGHTLINE_FORCEBIOME=$i SIGHTLINE_SHOT=90 \
+      xvfb-run -a -s "-screen 0 1280x800x24" dotnet run -c Debug >/dev/null 2>&1
+    cp sightline_shot.png "shots/${TAG}_${names[$i]}.png"
+  done
+
+Add SIGHTLINE_NOMOVE=1 to the same loop for the no-overlay ground-truth column, and
+SIGHTLINE_CB=1 for the colorblind pass.
 """
 import sys, os
 import numpy as np

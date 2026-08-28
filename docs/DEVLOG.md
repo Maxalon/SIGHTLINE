@@ -3080,7 +3080,7 @@ them reports chrome instead of board):
 - `luma` — Rec.601 percentiles over the same rect.
 
 Captures are pinned with `SIGHTLINE_SEED=4242 SIGHTLINE_FORCEBIOME=0..7 SIGHTLINE_SHOT=90`
-(`shots/sweep.sh`). New QA hook **`SIGHTLINE_NOMOVE=1`** suppresses the move overlay entirely
+(the exact loop is in the tool's docstring). New QA hook **`SIGHTLINE_NOMOVE=1`** suppresses the move overlay entirely
 so a capture pair can be measured against the *bare room* — the ground truth a convergence
 claim needs. Read once at static init (no per-frame env read, no clock read).
 
