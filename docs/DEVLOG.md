@@ -2597,3 +2597,135 @@ predated pods/morale/downs).
 **Open/next**: seeded in ROADMAP §OPEN/NEXT (post-FULCRUM) — the owner-decision docket
 (skirmish heat / founding corpsman / grenade pre-frag), Escort-at-apex, the h6 Defend
 residual, event-exposure levers, RCL sweeten option, h8 corpsman blackout, on-device audio.
+
+---
+
+## PROGRAM RESONANCE — WAVE V1 "GROUND AND TYPE" (visual foundation)
+
+**Goal.** The two cheapest, highest-finish visual defects in the tree: the board didn't have a
+floor, and the type didn't have an atlas. Nothing gameplay-coupled — the whole wave is
+presentation plus one genuine ship-blocker.
+
+### A — "give the board a floor"
+
+`Renderer.DrawBoard` painted the biome floor and its noise grain only on `TileType.Floor` tiles.
+Under every cover block sat bare board backing (`Pal.RGBA(7,10,14)`), and since the block is
+drawn with `inset = 5f`, that left a **5px hard-black gutter around all ~45 cover blocks on
+every map**. Squint at a pre-fix frame and the loudest thing on the board is a grid of black
+holes, not the squad. Both `continue`s are gone; the ground plane is continuous and cover sits
+on it.
+
+The "drop shadow" under cover was a fixed `+3,+4` offset — the same in every direction, i.e. an
+emboss. `Renderer.LightOrigin` (board-fraction `0.28, 0.10`) and `FloorLight` had declared a key
+light since UNDERTOW W7 that **nothing cast from**. New `ShadowVec(g,x,y,len)` returns the
+on-screen fall direction for a tile — away from the light, with a `+0.34` downward bias so a
+block at the light's own foot still drops a short shadow (the key is elevated, not on the deck)
+— scaled `Clamp(0.42 + dist*0.85, 0.42, 1.30)` so grazing corners throw longer. `CastShadow`
+sweeps the footprint along that vector in 5 overlapping steps, so the pool is darkest at contact
+and feathers to the tip. Length `high ? 16 : 8`. Same treatment on the plateau front-wall
+contact shadow (`DrawElevation`). Both are pure functions of tile coords + frozen constants — no
+new `Raylib.GetTime()` reads.
+
+One follow-on the research pass didn't call: the plateau **side wall** was flat `Pal.HighSide`
+(14,19,26), effectively black. That was invisible while the board was full of black gutters; on
+a continuous lit floor it read as a hole punched in the ground. It now takes the biome hue plus
+the key light, kept clearly darker than the top face so the step still reads as a step.
+
+### B — "type that reads" (and a live distribution bug)
+
+**Two atlases.** One 64px NotoMono atlas served every size from 11px to 92px. 11–14px body text
+is most of the words in the game, and minifying a 64px atlas ~5× with bilinear filtering and no
+mip chain is exactly the case that turns type into grey mush. The proof is not subjective: in
+the WAR ROOM hall of fame, the 11px result column rendered **"WON" as "NON"**. Now `Cfg.FontUi`
+bakes at 20px and serves text ≤ `Cfg.UiFontMax` (18px), `Cfg.Font` keeps 64px above that, both
+get `GenTextureMipmaps` + `TextureFilter.Trilinear`, and all 280 `DrawTextEx` + every
+`MeasureTextEx` call site route through `Cfg.Text` / `Cfg.Measure` so the atlas choice is made
+in exactly one place (`Cfg.FontFor`).
+
+Hud.cs's 10/11px sizes were raised to a 12px floor. **Gotcha worth carrying:** several call
+sites *measure* through a helper and *draw* separately — `Clip(desc, 11, w)` then
+`Cfg.Text(line, …, 12, …)`. Bumping only the draw size silently wraps at 11 and paints at 12,
+which overflowed the shop descriptions. Every `Clip` / `WrapText` / `WrapLines` / `CenterText`
+size argument was bumped in the same pass; a scan for measure/draw mismatches on the same
+statement now returns nothing.
+
+**The ship-blocker.** Asset paths resolved against the **current working directory**. Evidence,
+from a real `dotnet publish -c Release -r linux-x64 --self-contained -p:PublishSingleFile=true
+-p:DebugType=none`:
+
+```
+# base commit, run from /tmp/foreign_base
+FONT: NotoMono-Regular not found, falling back to default
+# base commit, run from inside the publish dir
+FONT: NotoMono-Regular loaded (glyph atlas ok)
+# this wave, run from /tmp/foreign_cwd
+FONT: NotoMono-Regular 64px atlas loaded (/tmp/pub_v1/assets/NotoMono-Regular.ttf)
+FONT: NotoMono-Regular 20px UI atlas loaded
+FONT: ChakraPetch-Bold display atlas loaded
+```
+
+In the fallback the intro rule "2 actions per soldier — firing is 1 action" renders the em-dash
+as `?`, in Raylib's built-in bitmap face. New `Cfg.AssetPath(rel)` resolves against
+`AppContext.BaseDirectory` and falls back to cwd for dev; the font and the (latent, identical)
+audio drop-in paths in `Audio.cs` both use it. Note for whoever publishes: **never**
+`-p:PublishTrimmed=true` — it silently destroys save/load.
+
+### C — a display voice
+
+`assets/ChakraPetch-Bold.ttf`, 78,384 bytes, committed with its licence text alongside, mirroring
+how `assets/NotoMono-Regular.ttf` + `NotoMono-LICENSE.txt` are already handled (both added to
+`Sightline.csproj` with `CopyToOutputDirectory="PreserveNewest"`).
+
+**Licensing, stated accurately: this is SIL Open Font License 1.1, which is *not* CC0.** It is
+zero-cost, zero-royalty and zero-legal-risk for a bundled game font, but it requires shipping the
+licence text and forbids selling the font on its own. That is the same footing the repo is
+already on with NotoMono. Provenance verified three independent ways before committing: fetched
+from `google/fonts` `ofl/chakrapetch/ChakraPetch-Bold.ttf` (HTTP 200, 78,384 bytes,
+sha256 `65fbf76d…78a0`); the directory's `METADATA.pb` reads `license: "OFL"`; and the font's own
+name table IDs 13/14 read "SIL Open Font License, Version 1.1" / `http://scripts.sil.org/OFL`.
+Every codepoint the game bakes (em-dash, en-dash, bullet, ellipsis, ×, ·, the quote pairs) was
+confirmed present in the cmap.
+
+Baked at 96px and routed to titles ≥ 24px **only**, via `Cfg.TitleText` / `Cfg.TitleMeasure`:
+the SIGHTLINE wordmark, VICTORY / RUN OVER, WAR ROOM, FIELD MANUAL, SKIRMISH, ASSEMBLE STRIKE
+TEAM, MISSION n COMPLETE, REQUISITION, PROMOTION, SPECIALIZE, FIELD DOCTRINE, event titles,
+PAUSED. Numerals and data stay on NotoMono — it is a good data face and mixing them is the
+point. The corner-bracket rects at the wordmark and the end card derive from the *measured*
+title width, so they re-fit the proportional face with no hand-tuning (confirmed in captures).
+
+### D — one live defect
+
+The requisition card drew its title with no width limit against a right-aligned price:
+"COUNTER-PREP: SYNDICATE" + "12 INTEL" rendered as `SYNDICATE2 INTEL`. The card now measures the
+price first, reserves that column, and picks the largest title size in 18→14 that fits (new
+`Hud.FitSize`); `Clip` remains only as the backstop, so in practice the whole name survives
+rather than being ellipsised. `SIGHTLINE_PREP` now accepts a faction name
+(`SIGHTLINE_PREP=syndicate|legion|wardens`, default Wardens as before) so the longest title is
+shootable on demand: `SIGHTLINE_SHOT=60 SIGHTLINE_PREP=syndicate`.
+
+### Verified at the close (wt-v1)
+
+- `dotnet build -c Release` → **0 warnings / 0 errors**.
+- **Full self-test battery, 39 hooks** (every `SIGHTLINE_*TEST` in `src/Program.cs`) → all PASS,
+  rc=0, no exceptions.
+- `SIGHTLINE_PAIRTEST=1` → **PASS** (legA/legB MATCH).
+- `SIGHTLINE_BALANCE=10` under xvfb on this branch vs. a baseline worktree at `2dec210`:
+  `runs=20 missions=81` on both, and the two `balance.json` aggregates are **identical** field
+  for field (wall-time excluded). Balance is untouched, as a visual wave should be.
+- Autoplay ×5: LOSE m1 / WIN m6 / LOSE m3 / WIN m6 / WIN m6 — **zero exceptions, zero TIMEOUT**.
+- Captures inspected by eye: 8 biomes before/after (fixed `SIGHTLINE_MAP` per biome so terrain is
+  comparable), WAR ROOM, FIELD MANUAL, VICTORY, intro, shop, prep/SYNDICATE, barracks, draft,
+  event, tooltip, skirmish, plus `SIGHTLINE_CB=1` on both a board and the WAR ROOM.
+
+**Measurement-flag note carried forward:** `SIGHTLINE_BALANCE` needs `xvfb-run`; without a
+display it prints `runs=0 / (no data)`, still claims "N matches" and exits 139. Always assert the
+`runs=` line. And run every harness shell with `XDG_CONFIG_HOME` and `SIGHTLINE_BALANCE_JSON`
+pointed inside your own worktree — several self-tests stash and restore the real
+`~/.config/Sightline`, and concurrent agents will corrupt each other's restore.
+
+**Left for a later wave, deliberately:** `Renderer.cs` still draws board labels at 10/11px (the
+two-atlas fix already sharpens them a great deal; raising tile-constrained text needs its own
+layout pass, and other waves own parts of that file). `DrawBiomeSignature` stays floor-tile-only
+so its emissive cues don't creep around cover bases. The plain-`SIGHTLINE_SHOT` non-determinism
+(45 `Raylib.GetTime()` reads in Renderer.cs, 11 in Hud.cs, a clock-seeded `Util.Rng`) is
+chartered elsewhere and was not touched; this wave added no new `GetTime()` reads.
