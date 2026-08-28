@@ -125,9 +125,13 @@ public static class Hud
         if (g.Phase == Phase.PlayerTurn || g.Phase == Phase.EnemyTurn)
         {
             if (g.TutorialText != null) DrawTutorial(g);
-            // FUL-12: the one-shot BRACE field tip rides the same card chrome (green accent — a
-            // tip, not a lesson); the mutual-exclusion lives in Game.UpdateBraceCallout.
-            else if (g.CalloutText != null) DrawTipCard("FIELD TIP", g.CalloutText, Pal.Good);
+            // T1: the TRAINING OP's lesson card — same chrome, its own counter.
+            else if (g.TrainingText != null)
+                DrawTipCard($"TRAINING OP  {g.TrainStep + 1}/{Game.TrainLessons.Length}  ·  {Game.TrainLessons[g.TrainStep].Code}",
+                            g.TrainingText, Pal.Accent);
+            // FUL-12 -> T1: the just-in-time field tips ride the same card chrome (green accent —
+            // a tip, not a lesson); the mutual-exclusion lives in Game.UpdateFieldTips.
+            else if (g.CalloutText != null) DrawTipCard(g.CalloutHead, g.CalloutText, Pal.Good);
         }
         DrawBanner(g);
         DrawOverlays(g);
@@ -259,6 +263,7 @@ public static class Hud
         // W1 mode-seam: the abandon verb is mode-true — a stand/fight is not a campaign "run".
         string abandonLbl = g.Mode == GameMode.Endless ? "END STAND"
                           : g.Mode == GameMode.Skirmish ? "ABANDON FIGHT"
+                          : g.Mode == GameMode.Training ? "END DRILL"          // T1: nothing to abandon
                           : "ABANDON RUN";
         DrawButtonRect(PauseAbandon, abandonLbl, "", true, false, Pal.Foe);
 
@@ -548,6 +553,16 @@ public static class Hud
             // PROGRAM HORIZON W4: SKIRMISH/DAILY show "SKIRMISH — <OBJ>" or "DAILY <stamp>  BEST n".
             preTxt = ""; preCol = Pal.TxtDim;
             objTxt = g.SkirmishHud; objCol = g.DailyMode ? Pal.Accent : Pal.Friend;
+        }
+        else if (g.Mode == GameMode.Training)
+        {
+            // T1: the drill is not "MISSION 1/6" — saying so would be the first thing the onboarding
+            // lies about. It reports the lesson it is on, or CLEAR THE FIELD once teaching is done.
+            preTxt = "TRAINING OP"; preCol = Raylib.Fade(Pal.Good, 0.85f);
+            objTxt = g.TrainStep >= 0
+                ? $"{Game.TrainLessons[g.TrainStep].Code}   {g.TrainStep + 1}/{Game.TrainLessons.Length}"
+                : "CLEAR THE FIELD";
+            objCol = Pal.Good;
         }
         else
         {
@@ -995,6 +1010,25 @@ public static class Hud
             Add("extract", "EXTRACT", "X", interactive && g.CanExtract(u), false);
         Add("reload", "RELOAD", "R", interactive && u != null && u.CanAct && u.Ammo < u.Weapon.Clip, false);
 
+        // ── RESONANCE T1 (Part B) — VERB STAGING ──────────────────────────────────────────────
+        // Before T1 the bar showed TWELVE verbs during tutorial card 1 of 5 and FUL-12 dimmed the
+        // eleven that weren't the lesson. Dimming is not staging: every verb was still introduced,
+        // all at once, by being present. Now, during the TRAINING OP and campaign mission 1, the
+        // bar carries only what has actually been taught, and grows as each lesson lands.
+        //
+        // Three guarantees, in this order:
+        //   * the SHOW ALL escape ([V]) is ALWAYS on the bar while onboarding runs, so a returning
+        //     player is one click from the whole verb set and can never be locked out;
+        //   * staging is CAPPED to the drill + mission 1 (Game.OnboardingActive) — from mission 2
+        //     the bar is always whole;
+        //   * emergency verbs are exempt (Game.VerbRevealed): STABILIZE only exists while someone
+        //     is bleeding out, and hiding the answer to that would be the failure this guards against.
+        if (g.OnboardingActive)
+        {
+            if (g.VerbStagingActive) specs.RemoveAll(sp => !g.VerbRevealed(sp.id));
+            Add("showall", g.ShowAllVerbs ? "ALL VERBS" : "SHOW ALL", "V", true, g.ShowAllVerbs);
+        }
+
         // W10 (owner feedback): every button sizes to its RENDERED content (icon zone + measured
         // label + hotkey tag), and the row WRAPS into extra rows that grow UPWARD when the sum
         // overflows the bar span — an ellipsized verb is impossible by construction at any count.
@@ -1241,6 +1275,16 @@ public static class Hud
                 Raylib.DrawLineEx(new Vector2(cx + hw, top), new Vector2(cx, tip), 1.8f, c);
                 // Short shield-cap line across the top
                 Raylib.DrawLineEx(new Vector2(cx - hw, top), new Vector2(cx + hw, top), 1.5f, c);
+                break;
+            }
+            case "showall":
+            {
+                // T1: a 2x2 grid of small squares — "the whole set", distinct from every verb glyph
+                // in the bar (none of which is a repeated block motif) and legible at 12px.
+                for (int gx = 0; gx < 2; gx++)
+                    for (int gy = 0; gy < 2; gy++)
+                        Raylib.DrawRectangleLinesEx(
+                            new Rectangle(cx - 6f + gx * 7f, cy - 6f + gy * 7f, 5f, 5f), 1.4f, c);
                 break;
             }
             case "reload":
@@ -1519,6 +1563,7 @@ public static class Hud
                 : "Deploy a forward evac beacon on your tile: opens a 3x3 extraction zone right here (in addition to the far corner). One per mission. Costs 1 action, won't end your turn.";
             case "extract": return "Haul an adjacent ally / asset aboard - pulls them into the extraction zone. Costs 1 action.";
             case "reload": return "Reload your weapon to full.";
+            case "showall": return "The action bar is STAGED while you are learning - it shows only the verbs the lessons have covered. Turn this on to see every verb now; the choice is remembered.";
             case "ability":
                 return g.Selected != null && g.Selected.Ability != AbilityKind.None
                     ? g.Selected.AbilityDesc + (g.Selected.AbilityCd > 0
@@ -1984,31 +2029,29 @@ public static class Hud
         float divW = (sm.X + 80) * Util.EaseOutQuad(subIn);
         Raylib.DrawRectangle((int)(W / 2f - divW / 2f), (int)(wy + tfs + 36), (int)divW, 1, Raylib.Fade(Pal.Friend, 0.4f * subIn));
 
-        // ---- briefing rules (elegant left-railed list, progressively revealed) ----
-        string[] rules =
-        {
-            $"Lead one squad through {Run.MaxMissions} escalating missions.",
-            "2 actions per soldier — firing is 1 action (one shot/turn), so move AND shoot, in either order.",
-            "Hug cover to cut enemy aim; get flanked and you're exposed.",
-            "Seize the high ground for an aim and crit edge.",
-            "Each class wields a signature ability (key 5) on a short cooldown.",   // W11: abilities are cooldown-based, not 1/mission
-            "Kills earn promotions; survivors carry wounds and rank onward.",
-        };
+        // ---- the pitch, in ONE line ----
+        // RESONANCE T1: this was a SIX-bullet rules wall (actions, cover, flanking, high ground,
+        // abilities, promotions) — the exact artefact DESIGN.md 3.G says not to ship: a manual in
+        // front of a player who has not taken a turn yet. The rules are now TAUGHT (TRAINING OP,
+        // the mission-1 lesson strip, the just-in-time field tips) and REFERENCED (FIELD MANUAL);
+        // the intro's job is to say what the game is and get out of the way.
+        // Kept SHORT on purpose: the HEAT/ASCENSION panel occupies the right ~28% of this row, so a
+        // long centred line runs under it.
+        string pitch = $"One squad. {Run.MaxMissions} escalating missions. They carry it all.";
         int ry0 = (int)(wy + tfs + 70);
-        int rx = W / 2 - 320;
-        int rowH = 30;
-        // a faint vertical rail the bullets hang off
         float railIn = PanelAnim("introRail", 0.5f, 0.25f);
-        Raylib.DrawRectangle(rx - 16, ry0 + 2, 2, (int)(rules.Length * rowH * Util.EaseOutQuad(railIn)), Raylib.Fade(Pal.Friend, 0.45f));
-        for (int i = 0; i < rules.Length; i++)
         {
-            float in_ = PanelAnim($"introRule{i}", 0.32f, 0.30f + i * 0.07f);
-            if (in_ <= 0f) continue;
-            float a = Util.EaseOutQuad(in_);
-            int yy = ry0 + i * rowH + (int)((1f - a) * 8f);
-            // a small diamond node on the rail
-            Raylib.DrawRectanglePro(new Rectangle(rx - 16, yy + 9, 6, 6), new Vector2(3, 3), 45f, Raylib.Fade(Pal.Friend, a));
-            Cfg.Text(rules[i], new Vector2(rx, yy), 15, 1f, Raylib.Fade(Pal.Txt, 0.92f * a));
+            // T1's single pitch line, routed through V1's UI atlas helpers (Cfg.Text/Cfg.Measure)
+            // so 15px copy is baked from the 20px atlas, not downscaled from the 64px display one.
+            float a = Util.EaseOutQuad(railIn);
+            int pfs = 15;
+            Vector2 pm = Cfg.Measure(pitch, pfs, 1f);
+            int px = (int)(W / 2f - pm.X / 2f);
+            int py = ry0 + (int)((1f - a) * 8f);
+            // the rail motif survives as two small diamond end-caps bracketing the line
+            Raylib.DrawRectanglePro(new Rectangle(px - 18, py + 8, 6, 6), new Vector2(3, 3), 45f, Raylib.Fade(Pal.Friend, a));
+            Raylib.DrawRectanglePro(new Rectangle(px + (int)pm.X + 18, py + 8, 6, 6), new Vector2(3, 3), 45f, Raylib.Fade(Pal.Friend, a));
+            Cfg.Text(pitch, new Vector2(px, py), pfs, 1f, Raylib.Fade(Pal.Txt, 0.92f * a));
         }
 
         // ---- buttons ----
@@ -2018,7 +2061,7 @@ public static class Hud
         // (the old LAST STAND blurb line) explains whichever button the mouse is over.
         var introMouse = Raylib.GetMousePosition();
         float btnIn = PanelAnim("introBtns", 0.3f, 0.55f);
-        int by = ry0 + rules.Length * rowH + 28;
+        int by = ry0 + 46;
         by += (int)((1f - Util.EaseOutQuad(btnIn)) * 14f);
         string btn = "DEPLOY SQUAD";
         string secondBtn = SaveGame.Exists ? "CONTINUE RUN" : null;
@@ -2039,8 +2082,18 @@ public static class Hud
 
         // PROGRAM HORIZON W2: LAST STAND (endless horde survival) — the danger mode keeps the
         // screen's ONLY red plate, with a persisted BEST WAVE label so the run has a target to beat.
+        // RESONANCE T1: TRAINING OP — the scripted drill. It sits directly under the campaign
+        // verbs (it is the on-ramp TO them, not a side mode) and is ALWAYS here, so a returning
+        // player can re-run the drill forever. On a profile that has never finished it, it takes
+        // the Good/green plate as a first-run invitation; afterwards it recedes to a ghost outline.
+        float trIn = PanelAnim("introTraining", 0.3f, 0.58f);
+        int trBy = by + 62;
+        OverlayBtn8 = new Rectangle(W / 2 - 130, trBy, 260, 44);
+        if (!Display.TrainingSeen) DrawOverlayButton(OverlayBtn8, "TRAINING OP", Pal.Good, "N", trIn);
+        else                       DrawGhostButton(OverlayBtn8, "TRAINING OP", "N", trIn);
+
         float lsIn = PanelAnim("introLastStand", 0.3f, 0.62f);
-        int lsBy = by + 62;
+        int lsBy = trBy + 56;
         OverlayBtn3 = new Rectangle(W / 2 - 130, lsBy, 260, 44);
         DrawOverlayButton(OverlayBtn3, "LAST STAND", Pal.Foe, "L", lsIn);
 
@@ -2080,6 +2133,8 @@ public static class Hud
             caption = "SKIRMISH - one custom fight; pick the objective and the heat";
         else if (Raylib.CheckCollisionPointRec(introMouse, OverlayBtn7))
             caption = "DAILY - today's seeded run, one attempt, ranked by turns";
+        else if (Raylib.CheckCollisionPointRec(introMouse, OverlayBtn8))
+        { caption = "TRAINING OP - a short live-fire drill; nothing is saved, restart it any time"; capCol = Pal.Good; }
         else
         {
             caption = bestWave > 0 ? $"LAST STAND BEST: {bestWave} WAVE{(bestWave == 1 ? "" : "S")}" : "ENDLESS HORDE SURVIVAL";
@@ -2251,6 +2306,11 @@ public static class Hud
             }
             else sub = string.IsNullOrEmpty(g.LoseReason) ? $"{label} failed." : $"{label} — {g.LoseReason}";
         }
+        else if (g.Mode == GameMode.Training)
+            // T1: the drill's end card never talks about a campaign it did not touch.
+            sub = win
+                ? $"Drill complete in {g.Turn} turn{(g.Turn == 1 ? "" : "s")}. Nothing was saved - now deploy for real."
+                : (string.IsNullOrEmpty(g.LoseReason) ? "Drill ended." : g.LoseReason);
         else sub = win
             ? $"All {Run.MaxMissions} missions cleared. The squad stands victorious."
             : (string.IsNullOrEmpty(g.LoseReason) ? $"The squad fell on mission {mission}." : g.LoseReason);
@@ -4237,6 +4297,7 @@ public static class Hud
     public static Rectangle OverlayBtn5;   // intro CODEX (field manual) button (PROGRAM HORIZON W6)
     public static Rectangle OverlayBtn6;   // intro SKIRMISH (one custom fight) button (PROGRAM HORIZON W4)
     public static Rectangle OverlayBtn7;   // intro DAILY (seeded challenge) button (PROGRAM HORIZON W4)
+    public static Rectangle OverlayBtn8;   // intro TRAINING OP (scripted drill) button (RESONANCE T1)
 
     // SKIRMISH setup (W4): objective cycler + heat dial + START/BACK, published by DrawSkirmishSetup.
     public static Rectangle SkirmObjPrev, SkirmObjNext, SkirmHeatMinus, SkirmHeatPlus, SkirmStart, SkirmBack;

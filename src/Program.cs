@@ -99,6 +99,17 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        // SIGHTLINE_TUTTEST=1 : RESONANCE T1 onboarding — the training-op arena/script, every lesson
+        // trigger predicate (reachable + fires exactly once), the verb-staging cap + SHOW ALL escape,
+        // the field-tip table's bit/prio integrity, and the Display seen-flag round-trip. Tiny window
+        // (Game/Unit ctors + tile math). Preserves and restores the real display.json.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_TUTTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "tuttest");
+            Console.WriteLine(new Game().TutorialSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         if (Environment.GetEnvironmentVariable("SIGHTLINE_COMBATTEST") == "1")
         {
             Console.WriteLine(Combat.SelfTest());
@@ -599,6 +610,18 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_ENDLESSOFFER") == "1") game.DebugEndlessOffer();   // W7: pair with SIGHTLINE_ENDLESS=1
 
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_EVENT") == "1") game.DebugEvent();   // + SIGHTLINE_EVENTID=<id> pins the staged event (FUL-10)
+        // RESONANCE T1 harness entries:
+        //   SIGHTLINE_TRAINING=1        -> boot straight into the TRAINING OP (scripted drill)
+        //   SIGHTLINE_TRAINLESSON=<n>   -> park it on lesson n (1-based) for a staged-bar screenshot
+        //   SIGHTLINE_SHOWALL=1         -> flip the SHOW ALL escape on (staging bypass, before/after shot)
+        // All shot/autoplay-only and NoPersist, so nothing here can write a profile.
+        if ((shot || autoplay) && Environment.GetEnvironmentVariable("SIGHTLINE_TRAINING") == "1")
+        {
+            game.BeginTraining();
+            if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_TRAINLESSON"), out int _tl) && _tl > 0)
+                game.ShowTrainingLesson(_tl - 1);
+            if (Environment.GetEnvironmentVariable("SIGHTLINE_SHOWALL") == "1") game.ToggleShowAllVerbs();
+        }
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_DRAFT") == "1") game.BeginDraft();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_VETDRAFT") == "1") game.DebugVetDraft();   // draft w/ recalled veterans
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_FOCUSOW") == "1") game.DebugFocusOw();      // focused-overwatch cone

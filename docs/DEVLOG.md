@@ -2905,3 +2905,153 @@ layout pass, and other waves own parts of that file). `DrawBiomeSignature` stays
 so its emissive cues don't creep around cover bases. The plain-`SIGHTLINE_SHOT` non-determinism
 (45 `Raylib.GetTime()` reads in Renderer.cs, 11 in Hud.cs, a clock-seeded `Util.Rng`) is
 chartered elsewhere and was not touched; this wave added no new `GetTime()` reads.
+# PROGRAM "RESONANCE" — WAVE T1 · BASIC TRAINING
+
+**Goal.** Close the onboarding over-claim. `docs/DESIGN.md` §4 graded Onboarding
+**"Addressed (W11)"**. A research pass on this tree found that grade to be false, and the
+finding re-confirmed at the start of this wave:
+
+- `Game.TutPrompts` was a **5-card callout strip**, mission 1 only, once per profile
+  (`Display.TutorialSeen`): CONCEAL → MOVE → OVERWATCH → FIRE → wrap-up. **Three of ~14
+  verbs taught.**
+- During tutorial card **1 of 5** the action bar already showed **twelve** verbs (BRACE,
+  HUNKER, RELOAD, FIRE, GRENADE, GRAPPLE, FLASH, SHOVE, DRAG, VAULT, OVERWATCH, FOCUS) plus
+  contextual STABILIZE/HACK/PLANT/BEACON/EXTRACT. FUL-12 **dimmed** the eleven non-lesson
+  buttons to 45%. Dimming is not staging — every verb was still introduced, all at once, by
+  being present.
+- `Hud.DrawIntro` opened with a **six-bullet rules wall** — the exact artefact §3.G says not
+  to ship — in front of a player who has not taken a turn.
+- The one good counter-example, the one-shot BRACE field tip (FUL-12), was exactly the right
+  pattern used exactly once.
+
+## What shipped
+
+**A. TRAINING OP** — `GameMode.Training` (appended; GameMode is not persisted anywhere,
+verified against SaveGame/Run/Stats). `BeginTraining()` in `src/Game.Modes.cs`; entered from
+the intro (button / key **N**, always present, green-plated until the profile has finished it
+once), restarted in-drill with **[P]** or from the drill's end card.
+
+- Board: `Maps.TrainingArena` + `Mission.BuildTraining`. **The arena is deliberately NOT
+  appended to `Maps.Layouts`** — that array's length feeds `DailyArena(seed) % Layouts.Length`
+  and the FUL-9 no-repeat deck, so appending would have silently moved the whole measured
+  campaign. `SIGHTLINE_EXPOSURETEST` still reports **35 arenas** after this wave.
+- Script: two 12-HP recruits (ASSAULT + SHARPSHOOTER, so GRAPPLE and MARK are both on the
+  board) vs **four dormant aim-45 targets** in two pods. Low-cost failure by construction, and
+  restartable in one keystroke.
+- Lessons (`Game.TrainLessons`, 8 well-ordered problems, each a thing to DO):
+  MOVE → COVER → FLANK → FIRE → OVERWATCH → GRENADE → ABILITY → CLEAR. The arena was authored
+  *around* the lessons: low cover two steps from the deploy tiles (COVER is solvable on move
+  one), the front pair at (12,4)/(12,6) behind high cover on their **west** side only — so the
+  FLANK lesson has one clean answer, walking the open column x=12 to (12,1)/(12,9), which are
+  themselves beside high cover. Every lesson carries a **turn-budget patience fallback** so a
+  player who solves it another way is never stranded.
+- Non-persistence: every persistence seam in the codebase is already keyed on
+  `Mode == GameMode.Campaign` or `DailyMode`, so Training writes nothing **by construction**.
+  TUTTEST asserts that rather than trusting it: it snapshots save.json + meta.json, plays a
+  live (non-NoPersist) drill to a win, and compares. The only profile flag the drill may touch
+  is `Display.TrainingSeen`, on completion.
+- The drill's biome is pinned (`TrainingMapSeed = 8` → STEEL) so the teaching frame is fixed
+  and cool-neutral — nothing in the terrain competes with the amber objective accent or the
+  red threat accent the lessons point at (DESIGN §3.H).
+- Implementation seam: `SetupMission` gains **one** `if (Mode == GameMode.Training)` after
+  `Mission.Build`, exactly mirroring how LAST STAND swaps its force in. Everything downstream
+  (anim queue reset, BeginTurn, combat roster, concealment, FX) is reused unchanged.
+
+**B. STAGED VERBS** — `Game.OnboardingActive` / `VerbStagingActive` / `VerbRevealed`, applied
+as one contiguous block at the **end** of the spec-collection sequence in
+`Hud.DrawActionButtons` (that method is the repo's hottest merge-conflict range; the diff is
+one `RemoveAll` + one `Add`).
+
+- During the drill and campaign **mission 1** the bar carries only what has been taught, and
+  grows as each lesson opens (`TrainLessons[].Reveal` / `TutReveal[]`, index-aligned with
+  `TutPrompts` through the named `TutStep*` constants).
+- RELOAD is revealed **with** FIRE: a staged-away RELOAD could strand a dry soldier.
+- **SHOW ALL** ([**V**], persisted in `Display.ShowAllVerbs`) is always on the bar while
+  onboarding runs and bypasses staging in both directions — a returning player is never locked
+  out of a verb they know.
+- STABILIZE is **exempt**: it only surfaces at all while a squadmate is bleeding out, and
+  hiding the answer to that is the failure the escape exists to prevent.
+- Staging is **capped**: from mission 2, and in every other mode, the bar is always whole.
+- The FUL-12 lesson-focus dim is left exactly as it was — with staging on it now dims a
+  one-or-two-button bar toward the lesson verb, which is the behaviour it always wanted.
+
+**C. JUST-IN-TIME FIELD TIPS** — `Game.FieldTips`, 10 cards, replacing `UpdateBraceCallout`
+with `UpdateFieldTips`. Each fires **once per profile**, the first time its precondition is
+actually true in play:
+
+| bit | prio | tip | precondition |
+|-----|------|-----|--------------|
+| 0 | 2 | BRACE | a live (Active) hostile — FUL-12's original |
+| 1 | 0 | STABILIZE | an ally is DOWN |
+| 2 | 1 | RELOAD | a soldier is dry with a live threat |
+| 3 | 3 | GRENADE | a soldier with a grenade sees an Active foe **in cover** |
+| 4 | 4 | HUNKER | a soldier with actions left stands in the open, seen by an Active foe |
+| 5 | 5 | SHOVE | `CanShove` — an enemy is adjacent |
+| 6 | 6 | VAULT | `CanVault` with a live threat |
+| 7 | 7 | DRAG | `CanDrag` with a live threat |
+| 8 | 8 | FOCUS | the player has armed a plain overwatch and 2+ Active foes are alive |
+| 9 | 9 | ITEM | a soldier holds a charged utility item with a live threat |
+
+`Prio` (not table order) resolves simultaneous candidates, so a bleeding-out ally outranks a
+nicety. Seen-flags are a **bitmask** (`Display.TipsSeen`) — one new DTO field for the whole
+table — and FUL-12's `BraceTipSeen` bool migrates into **bit 0** on load and is still written
+from bit 0 on save, so the bridge holds in both directions. Interactive-only: under `NoPersist`
+the whole scan returns before touching anything unless `SIGHTLINE_TIP=<bit>` (or the legacy
+`SIGHTLINE_BRACETIP=1`) stages one. Tips never fire *during* a drill lesson or a mission-1
+lesson card — the card owns the slot.
+
+**D. The intro** — the six-bullet rules wall is one line ("One squad. 6 escalating missions.
+They carry it all."), kept short on purpose so it clears the HEAT/ASCENSION panel that occupies
+the right ~28% of that row. The rail motif survives as two diamond end-caps.
+
+## Verification
+
+- `dotnet build -c Release` → **0 warnings / 0 errors**.
+- **`SIGHTLINE_TUTTEST=1` → PASS.** New hook. Five parts: (1) arena rows/cols, deploy+foe seats
+  are floor and collision-free, every foe walk-reachable, the lesson-critical tiles exist;
+  (2) the drill is driven lesson by lesson — each predicate asserted **false → true**, then
+  `UpdateTraining` ticked twice to prove it advances **exactly one** step (reachable AND fires
+  once), plus the terminal lesson never self-advances and the patience fallback works;
+  (3) staging — monotonic reveals, the FIRE lesson reveals shoot+reload and does NOT leak
+  grenade, the terminal lesson turns staging off, the SHOW ALL escape round-trips,
+  **mission 2 is never staged**, and the load-bearing `TutStep*` constants + `TutPrompts`
+  length + `TutReveal` alignment are pinned (through an array, so the check isn't const-folded);
+  (4) tip bits/prios/codes unique and in range, bit 0 is BRACE, and every predicate is driven
+  to true on a real board (GRENADE by sweeping every floor tile — a stronger claim than one
+  hand-picked stance, and it survives an arena edit); (5) seen-flags round-trip through real
+  JSON, the mask is precise (an unseen bit stays unseen), a legacy `{"BraceTipSeen":true}` file
+  folds into bit 0, an empty file defaults everything to unseen, and a **live** drill played to
+  a win leaves save.json and meta.json byte-identical. The real display.json is stashed and
+  restored. (The test earned its keep immediately: its first run found four genuine bugs.)
+- **Full battery PASS** (Release binary, isolated `XDG_CONFIG_HOME`): TUTTEST, DKTEST,
+  RESCUETEST, STAGGERTEST, MORALETEST, BEACONTEST, COMBATTEST, SAVETEST, AITEST, ITEMTEST,
+  STATUSTEST, COVERTEST, TRAITTEST, WOUNDTEST, CDTEST, FIELDTEST, SIEGETEST, EVENTTEST,
+  VETTEST, OWTEST, SCARTEST, CONTRACTTEST, SHOVETEST, CONCEALTEST, HAZARDTEST, BENCHTEST,
+  DRAFTTEST, METATEST, CODEXTEST, MODETEST, HORDETEST, DEATHTEST, HEATLADDERTEST, SNAPTEST,
+  AUDIOTEST, AMBIENTTEST, EXPOSURETEST, DOWNTEST, PIKETEST, PODTEST — 40/40.
+  (`scripts/qa-sweep.sh` misses six of these; they were run separately.)
+- **`SIGHTLINE_PAIRTEST=1` → PASS** (byte-identical CRN legs).
+- **Autoplay ×5** clean: LOSE/WIN/WIN/WIN/WIN, mission 6, no exceptions, no TIMEOUT.
+  **Drill autoplay ×3**: WIN in 619-1011 frames — the drill is completable by the weak
+  smoke-test AI, so it cannot be a wall.
+- **`SIGHTLINE_BALANCE=10` byte-identical to base** (asserted `runs=20`), which is the proof
+  this is an interactive-only change: every new code path is `!NoPersist`-gated or
+  `Mode == Training`-gated, and `Maps.Layouts.Length` is untouched.
+- Screenshots inspected in **both** palettes (`SIGHTLINE_CB=1`): the drill at lessons 1/3/7/8,
+  the staged bar at the FIRE lesson (FIRE + RELOAD + SHOW ALL, where twelve buttons used to
+  sit), the SHOW ALL bypass (twelve buttons return, toggle reads ALL VERBS), the mission-1
+  OVERWATCH lesson (OVERWATCH + SHOW ALL only), a field-tip card, and the trimmed intro.
+
+## Notes for the next wave
+
+- **The top bar was lying.** In the drill it read `MISSION 1/6 · ELIMINATE`; it now reads
+  `TRAINING OP · <LESSON> n/8`. Worth remembering that mode-shaped HUD text defaults to the
+  campaign branch — a new mode has to claim its own readout or it inherits a false one.
+- **Deliberately left undone.** The drill teaches **tactics only** — nothing about the
+  barracks, perks, the campaign map or requisition. There is no per-lesson replay beyond the
+  whole-drill restart. And because a lesson card owns the tip slot, the tips never fire inside
+  the drill: a player who only ever runs the drill meets 8 verbs, and meets the other ten on
+  their first real deployment. All three are scope choices, not oversights.
+- **The `TutStep >= TutStepFire` completion gates** (`EnterBarracks` / `LoseRun`) were **not
+  touched** — the mission-1 track kept its exact semantics and constants, and TUTTEST now pins
+  them so a future renumber trips a test instead of silently re-offering onboarding forever.
