@@ -141,6 +141,24 @@ public static class Program
             Console.Write(Audio.AudioAssetsReport());
             return;
         }
+        // RESONANCE A1: SIGHTLINE_AUDIODUMP=1 : render every SFX cue + both music beds to
+        // audio_dump/*.wav and print the full measurement table (level / spectrum / tails /
+        // loop seams / concurrent-stack headroom). Device-free, no window. Feed the WAVs to
+        // scripts/audio-report.py for a spectrogram contact sheet.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_AUDIODUMP") == "1")
+        {
+            Console.Write(Audio.DumpReport(Environment.GetEnvironmentVariable("SIGHTLINE_AUDIODIR") ?? "audio_dump"));
+            return;
+        }
+        // RESONANCE A1: SIGHTLINE_AUDIOGATE=1 : the committed audio budget as a PASS/FAIL
+        // contract (peak ceiling, per-role RMS bands, spread, crit/hit separation, DC,
+        // clipping incl. concurrent stacks, real tails, music brightness, loop seams).
+        // Device-free, no window.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_AUDIOGATE") == "1")
+        {
+            Console.WriteLine(Audio.GateReport());
+            return;
+        }
         // SIGHTLINE_AMBIENTTEST=1 : per-biome ambient field stays bounded/finite/on-board (Phase 5). No window.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_AMBIENTTEST") == "1")
         {

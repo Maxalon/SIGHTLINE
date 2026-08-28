@@ -2597,3 +2597,79 @@ predated pods/morale/downs).
 **Open/next**: seeded in ROADMAP §OPEN/NEXT (post-FULCRUM) — the owner-decision docket
 (skirmish heat / founding corpsman / grenade pre-frag), Escort-at-apex, the h6 Defend
 residual, event-exposure levers, RCL sweeten option, h8 corpsman blackout, on-device audio.
+
+---
+
+## PROGRAM RESONANCE — WAVE A1 "THE EAR" (audio measurement + the mastering pass)
+
+**Premise**: nobody has ever *heard* SIGHTLINE. The sandbox has no audio device, the owner
+has never tuned the layer, and every audio decision since Phase 3 was made blind. A1 builds
+the instrument first, proves it detects the known defects, and only then touches the mix.
+
+**Two new device-free, windowless hooks** (`src/Audio.Analysis.cs`, `Audio` is now `partial`):
+
+| Hook | What it does |
+|---|---|
+| `SIGHTLINE_AUDIODUMP=1` | renders 23 SFX cues + both music beds to `audio_dump/*.wav` and prints per-cue dur/peak/rms/crest/dc/clip/spectral-centroid/4-band split/tail/zcr, a loop-seam block, and a SUM-STACK block that mixes the realistic concurrent combinations at the real `MasterVol` |
+| `SIGHTLINE_AUDIOGATE=1` | the same measurements as a committed budget: per-check lines + `AUDIOGATE: PASS\|FAIL` |
+
+`scripts/audio-report.py` (sandbox-only; **the game has no Python dependency**) turns the dump
+into a spectrogram contact sheet. `scripts/dev-setup.sh` installs numpy/matplotlib/soundfile
+best-effort and never fails setup if it can't.
+
+**The gate was red on arrival — 9 of 12 checks.** That was the point: a gate that passes on
+day one measures nothing. Measured before → after:
+
+| | before | after |
+|---|---|---|
+| RMS spread across 23 cues | **16.2 dB** (`move` -30.3 → `st_squadwipe` -14.0) | **10.8 dB** (`move` -30.8 → `crit` -20.0) |
+| crit vs hit separation | **2.0 dB** | **5.1 dB** |
+| worst cue peak | `crit` **-0.0 dBFS**, 1 clipped sample | `crit` -4.0, zero clipped |
+| worst |DC| | `hit` **+0.00303** | ~0 (every cue) |
+| kill-shot stack `w_lmg+crit+death+st_kill` | **+1.8 dBFS, 8 clipped** | **-1.1 dBFS, 0 clipped** |
+| music energy above 1 kHz | **0.000% / 0.000%** | **6.00% / 6.46%** |
+
+**What changed in the mix.** `Reg(id, dur, targetDb, fill)` now carries a per-cue **peak
+target in dBFS**, and the old `g = peak > 1 ? 1/peak : 1` line — a clip guard that fired for
+exactly one cue — is an **unconditional normalise-to-target**. The target column IS the mix
+(crit -4, weapons -5..-6.5, stingers -6..-10, UI -11..-15.5, `move` -14.5). A 20 Hz one-pole
+DC blocker runs before normalisation. `death` got a real 200 ms decaying tail instead of a
+hard cut at 320 ms into 40 ms of dead air; `st_lose`'s chord no longer ends on the last
+sample of its own buffer.
+
+**Two defects fixed in passing.** (1) `Audio.Init()` runs *before* `new Game()` and `Noise()`/
+`Click()` drew from the shared `Util.Rng` — on a real device every synthesised cue perturbed
+the gameplay stream, and the draw count *changed* when a drop-in asset file was present. Audio
+now owns a private stream reseeded per cue (FNV-1a of the id, since `String.GetHashCode` is
+per-process randomised), which also makes the WAV dumps byte-reproducible. (2) `ValidateBuffer`
+now implements the in-range check its caller's doc comment already claimed.
+
+**Gotcha worth keeping.** `BuildBuffer` allocates `(int)(dur*SR) + 8` samples, so the last 8
+are *always* zero — any "does the tail reach silence" test that reads `buf[^1]` passes
+vacuously. The gate samples the tail at index `(int)(dur*SR)-1`.
+
+**Metric correction (documented in the gate's rationale block).** A literal
+`|b[0]-b[n-1]| <= 0.005` loop-seam test is wrong: a provably seamless bed (integer Hz over an
+integer-second buffer — the design already in use) still steps one sample across the wrap, and
+that step scales with the top frequency present, so it is in direct tension with the brightness
+floor. The pre-A1 beds measured 0.023 / 0.009 on it while being click-free. The gate's primary
+seam check is scale-free — the wrap step against the **largest step the waveform takes anywhere
+inside the loop** (+5%) — with `|1st-diff delta| <= 0.005` kept as a secondary absolute bound.
+
+**Could not reproduce**: the reported `st_lose` tail of -46.1 dBFS. Measured -91.6 dBFS
+(the loudest last-real-sample in the game, but 30 dB under the gate ceiling). It was still
+fixed on structural grounds — a cue whose sound ends on the final sample of its own buffer has
+zero decay margin.
+
+**Verified**: Release 0/0; AUDIOTEST / AUDIOGATE / SAVETEST / COMBATTEST PASS; PAIRTEST PASS
+(the CRN identity gate — the valid byte-identity check); autoplay ×2 clean; WAV dumps
+byte-identical across runs. Tests run under `XDG_CONFIG_HOME=$PWD/.xdg` +
+`SIGHTLINE_BALANCE_JSON=$PWD/balance.json` (parallel-agent isolation).
+
+**Left for a later wave**: nothing here has been heard on hardware — the budget is a
+*measurement* contract, not a taste judgement, and the owner still needs to audition it and
+move the target column. `st_victory` has the same "chord release lands in the last 8% of its
+own tone" shape as `st_lose` did (tail -148.9 dBFS, well inside budget) and was deliberately
+left alone rather than re-voiced blind. No perceptual weighting (LUFS/ITU-R BS.1770) — the
+budget is in dBFS RMS, which under-weights the low-heavy cues; a real loudness model is the
+obvious next instrument.
