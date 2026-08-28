@@ -40,3 +40,11 @@ as ratios rather than raw sums.
 | `P1-h0-b*` | `SIGHTLINE_DEPLOY=pincer` pinned | h0 |
 | `C1-h0-b*` | `SIGHTLINE_DEPLOY=crossfire` pinned | h0 |
 | `E1-h0-b*` | `SIGHTLINE_DEPLOY=envelop` pinned (falls back to FRONTAL where the objective forbids a centre deployment) | h0 |
+| `M1-h0-b0` | `SIGHTLINE_PODMASS=4` — bigger, fewer pods (**reverted**) | h0 |
+| `U1-h0-b*` | `SIGHTLINE_PODUNIFORM=1` — a pod fields one kind of body (**shipped**) | h0 |
+| `S1-h{0,4}-b*` | **the shipped state**: `SIGHTLINE_DEPLOYMIX=3,3,1,3` + `PODUNIFORM=1` | h0 / h4 |
+| `S2-h{0,4}-b*` | the heavier deal `SIGHTLINE_DEPLOYMIX=1,4,1,4` + `PODUNIFORM=1` | h0 / h4 |
+| `ESC-{off,fix}-h8-b0` | the `SmartEscort` downed-soldier instrument fix, `SIGHTLINE_OBJ=escort` pinned, `SIGHTLINE_ESCORTFIX=0` vs default | h8 |
+
+Every lever round except the escort pair carries `EFIX=0` (`SIGHTLINE_ESCORTFIX=0`) so it is
+compared against `R0` on the SAME instrument; the escort fix is isolated in its own pair.
