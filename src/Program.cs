@@ -46,6 +46,10 @@ public static class Program
             }
         }
 
+        // W4 — SIGHTLINE_ESCORTFIX=0 restores the pre-fix SmartEscort lone-VIP test (a DOWNED
+        // soldier counted as still standing) so the instrument fix has a paired measurement.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_ESCORTFIX") == "0") Game.EscortDownedFix = false;
+
         bool smartplay = Environment.GetEnvironmentVariable("SIGHTLINE_SMARTPLAY") == "1";
         bool autoplay = Environment.GetEnvironmentVariable("SIGHTLINE_AUTOPLAY") == "1" || smartplay;
 

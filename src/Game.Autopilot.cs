@@ -658,6 +658,11 @@ public partial class Game
         return false;
     }
 
+    /// W4 — the SmartEscort lone-VIP self-race counts a DOWNED soldier as fallen (it cannot act,
+    /// and the leash skips it as an anchor). Ships ON; SIGHTLINE_ESCORTFIX=0 restores the old,
+    /// broken test so the fix can be measured as its own CRN-paired round.
+    public static bool EscortDownedFix = true;
+
     bool SmartEscort(Unit u)
     {
         if (u.IsVip)
@@ -668,7 +673,15 @@ public partial class Game
             // LAST-SURVIVOR FALLBACK: if the whole squad has fallen, there's nobody to follow — the leash
             // holds it in place, which would livelock to the turn cap. So the lone VIP self-races to evac
             // (win if it makes it, else it dies to the foes en route) — either way the match RESOLVES.
-            if (!Players.Any(p => p.Alive && !p.IsVip) && !EvacZone.Contains((u.X, u.Y)))
+            // W4 INSTRUMENT FIX: `Alive` is TRUE for a soldier who is DOWNED and bleeding out, so
+            // the old test read "the squad still stands" while every escort lay on the floor — the
+            // leash then skipped its downed anchors, the self-race never fired, and the asset just
+            // hunkered until the timers expired. Pure drag, and it fires exactly in the apex state
+            // where X1 measured Escort at 15.61 turns. This is a MEASUREMENT-INSTRUMENT defect (it
+            // makes the bot worse at Escort than a human would be), so it ships ON and the harness
+            // pin SIGHTLINE_ESCORTFIX=0 reproduces the old behaviour for the paired round.
+            if (!Players.Any(p => p.Alive && (!EscortDownedFix || !p.Downed) && !p.IsVip)
+                && !EvacZone.Contains((u.X, u.Y)))
             {
                 var g = EvacZone.Where(t => !IsOccupiedByOther(t.x, t.y, u))
                                 .OrderBy(t => Util.TileDist(u.X, u.Y, t.x, t.y)).FirstOrDefault();

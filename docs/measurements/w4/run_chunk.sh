@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # W4 measurement chunk runner. Usage: run_chunk.sh <tag> <heat> <base> [N] 
-# Env: BIN=<dir containing Sightline> (default bin/Release/net8.0), DEPLOY=<SIGHTLINE_DEPLOY value>
+# Env: BIN=<dir with Sightline> (default bin/Release/net8.0), DEPLOY=<shape>, MIX=<a,b,c,d>,
+#      OBJ=<objective pin>, EFIX=0 (restore the pre-fix SmartEscort instrument)
 set -u
 cd "$(dirname "$0")/../../.." || exit 1
 export PATH="$PATH:/usr/lib/dotnet" LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe
@@ -9,7 +10,7 @@ BIN=${BIN:-bin/Release/net8.0}
 mkdir -p "$PWD/.xdg/$TAG"; export XDG_CONFIG_HOME="$PWD/.xdg/$TAG"
 OUT=docs/measurements/w4
 mkdir -p "$OUT"
-env ${DEPLOY:+SIGHTLINE_DEPLOY=$DEPLOY} \
+env ${DEPLOY:+SIGHTLINE_DEPLOY=$DEPLOY} ${MIX:+SIGHTLINE_DEPLOYMIX=$MIX} ${OBJ:+SIGHTLINE_OBJ=$OBJ} ${EFIX:+SIGHTLINE_ESCORTFIX=$EFIX} \
   SIGHTLINE_BALANCE=$N SIGHTLINE_BALANCE_HEAT=$H SIGHTLINE_BALANCE_BASE=$B \
   SIGHTLINE_BALANCE_JSON="$PWD/$OUT/$TAG.json" \
   xvfb-run -a -s "-screen 0 1280x800x24" "$BIN/Sightline" > "$OUT/$TAG.log" 2>&1
