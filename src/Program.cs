@@ -203,6 +203,16 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        // SIGHTLINE_PODTEST=1 : FUL-6 CRITICAL MASS — PodPlan sizes + spawn cohesion, linked
+        // activation (nearest-only / confirm-unseen / no chain), the 3-pod waver->rout arc,
+        // endless wave sub-pods (elite exempt), and the FIELD DRILLS drill grant.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_PODTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "podtest");
+            Console.WriteLine(new Game().PodSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         // SIGHTLINE_FUL11PROBE=<N> : FUL-11 — finale-kit spawn distribution probe (per-kit retinue
         // slots, Wardens banner aura coverage as spawned, banner cap) across N flywheel seeds.
         if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_FUL11PROBE"), out int ful11N) && ful11N > 0)
@@ -469,6 +479,7 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CONTENT") == "1") Mission.DebugContentShowcase(game);
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_ALERT") == "1") game.DebugAlertTiers();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_PRESSURE") == "1") game.DebugPressure();
+        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_PODSHOT") == "1") game.DebugPodShot();   // FUL-6: pair with SIGHTLINE_MISSION=3
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_WAVEBANNER") == "1") game.DebugWaveTelegraph();   // FUL-4: pair with SIGHTLINE_OBJ=defend
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CONCEAL") == "1") game.DebugConcealment();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_INTENT") == "1") game.DebugIntent();
