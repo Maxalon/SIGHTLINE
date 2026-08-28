@@ -3812,22 +3812,26 @@ public static class Hud
             // so the map's coding reads without hovering every node — and survives SIGHTLINE_CB=1).
             // FUL-12: S/START and */BATTLE join it — they were the only two glyphs on the map the
             // legend refused to name (the commonest node reading as "unexplained asterisk").
-            (string gly, string lbl, Color col)[] legend =
+            // P1: the legend draws the map's REAL markers (a filled disc carrying the same
+            // DrawNodeIcon geometry), not stand-in letters — so the key and the territory match.
+            (NodeKind k, string lbl)[] legend =
             {
-                ("S", "START", Pal.TxtDim), ("*", "BATTLE", Pal.Friend),
-                ("+", "SUPPLY", Pal.Good), ("!", "ELITE", Pal.Elite), ("?", "EVENT", Pal.Suspect), ("X", "BOSS", Pal.Foe),
+                (NodeKind.Start, "START"), (NodeKind.Combat, "BATTLE"), (NodeKind.Supply, "SUPPLY"),
+                (NodeKind.Elite, "ELITE"), (NodeKind.Event, "EVENT"), (NodeKind.Boss, "BOSS"),
             };
+            const float legR = 7f;
             float lw = 0f;
-            foreach (var it in legend)
-                lw += Cfg.Measure(it.gly, 12, 1f).X + 5 + Cfg.Measure(it.lbl, 12, 1f).X + 22;
-            float lx = x + w / 2f - (lw - 22) / 2f;
+            foreach (var it in legend) lw += legR * 2 + 6 + Cfg.Measure(it.lbl, 12, 1f).X + 20;
+            float lx = x + w / 2f - (lw - 20) / 2f;
             int ly = mapTop + 26 + mapH + 5;
             foreach (var it in legend)
             {
-                Cfg.Text(it.gly, new Vector2((int)lx, ly), 12, 1f, it.col);
-                lx += Cfg.Measure(it.gly, 12, 1f).X + 5;
+                var lc = new Vector2(lx + legR, ly + 7);
+                Raylib.DrawCircleV(lc, legR, NodeColor(it.k));
+                DrawNodeIcon(it.k, lc.X, lc.Y, legR, Pal.RGBA(8, 12, 18));
+                lx += legR * 2 + 6;
                 Cfg.Text(it.lbl, new Vector2((int)lx, ly + 1), 12, 1f, Pal.TxtDim);
-                lx += Cfg.Measure(it.lbl, 12, 1f).X + 22;
+                lx += Cfg.Measure(it.lbl, 12, 1f).X + 20;
             }
         }
         else  // fallback: legacy deployment cards (only if the map is unavailable)
@@ -3853,15 +3857,101 @@ public static class Hud
         _ => Pal.Friend,
     };
 
-    static string NodeGlyph(NodeKind k) => k switch
-    {
-        NodeKind.Start => "S", NodeKind.Elite => "!", NodeKind.Supply => "+", NodeKind.Boss => "X",
-        NodeKind.Event => "?", _ => "*",
-    };
 
     /// Draw the branching campaign DAG inside `region`: columns left-to-right (one per
     /// mission), edges as lines, the current position ringed, the reachable next nodes
     /// glowing + clickable (rects cached in NodeBtns), everything else dimmed.
+    // ── PROGRAM RESONANCE P1 — a THEATRE OF OPERATIONS, not a debug graph ────────────────
+    // Three complaints, three fixes, all in Raylib primitives (zero committed bytes):
+    //   1. flat circles with single letters -> ring markers carrying DRAWN geometry, in the
+    //      same vocabulary as the codex's enemy glyphs (a ring plus one interior primitive).
+    //      Shape alone identifies the kind, so the map still reads under SIGHTLINE_CB=1.
+    //   2. 1px grey lines -> a dark casing + a coloured core, and a direction chevron on the
+    //      routes you can actually take.
+    //   3. an empty white field -> faint contour bands + per-region column tinting, so C1's
+    //      region names sit on ground that looks like ground.
+
+    /// A stable 0..1 hash. The terrain must be identical every frame and must round-trip with
+    /// the map, so it is derived from MapSeed by pure arithmetic — no Random allocation, no RNG
+    /// draws (which would desync the seeded campaign), and nothing time-varying.
+    static float MapHash(int a, int b)
+    {
+        int h = a * 374761393 + b * 668265263;
+        h = (h ^ (h >> 13)) * 1274126177;
+        return ((h ^ (h >> 16)) & 0x7fffffff) / 2147483647f;
+    }
+
+    /// Ground under the route graph: alternating region bands, hairline column dividers and a
+    /// few seeded contour lines. Everything here is <= alpha 22, so it never competes with the
+    /// nodes; it exists so the six named regions read as six PLACES.
+    static void DrawMapTerrain(Rectangle f, int seed, int cols)
+    {
+        float colW = f.Width / cols;
+        for (int c = 0; c < cols; c += 2)
+            Raylib.DrawRectangle((int)(f.X + c * colW), (int)f.Y,
+                                 (int)MathF.Ceiling(colW), (int)f.Height, Pal.RGBA(150, 175, 200, 9));
+        for (int c = 1; c < cols; c++)
+            Raylib.DrawRectangle((int)(f.X + c * colW), (int)f.Y, 1, (int)f.Height, Pal.RGBA(150, 175, 200, 12));
+
+        const int segs = 30;
+        for (int b = 0; b < 4; b++)
+        {
+            float ph   = MapHash(seed, b) * MathF.Tau;
+            float amp  = (3f + MapHash(seed, b + 40) * 6f) * (f.Height / 200f);
+            float freq = 1.2f + MapHash(seed, b + 80) * 1.5f;
+            float baseY = f.Y + f.Height * (0.13f + 0.25f * b);
+            var prev = new Vector2(f.X, baseY + MathF.Sin(ph) * amp);
+            for (int i = 1; i <= segs; i++)
+            {
+                float u = i / (float)segs;
+                var pt = new Vector2(f.X + u * f.Width,
+                                     baseY + MathF.Sin(ph + u * freq * MathF.Tau) * amp);
+                Raylib.DrawLineEx(prev, pt, 1f, Pal.RGBA(120, 152, 180, 26));
+                prev = pt;
+            }
+        }
+    }
+
+    /// The interior mark of a campaign-map node. Drawn dark on the node's bright fill, sized
+    /// off the node radius so it tracks the sized-to-fit map.
+    static void DrawNodeIcon(NodeKind k, float cx, float cy, float rad, Color c)
+    {
+        float u = rad * 0.58f;                 // half-extent of the mark
+        float t = MathF.Max(1.5f, rad * 0.17f);  // stroke weight
+        var C = new Vector2(cx, cy);
+        switch (k)
+        {
+            case NodeKind.Start:   // a launch chevron — "the file opens here"
+                Raylib.DrawLineEx(new Vector2(cx - u * 0.55f, cy - u), new Vector2(cx + u * 0.65f, cy), t, c);
+                Raylib.DrawLineEx(new Vector2(cx - u * 0.55f, cy + u), new Vector2(cx + u * 0.65f, cy), t, c);
+                break;
+            case NodeKind.Supply:  // a depot cross
+                Raylib.DrawLineEx(new Vector2(cx - u, cy), new Vector2(cx + u, cy), t, c);
+                Raylib.DrawLineEx(new Vector2(cx, cy - u), new Vector2(cx, cy + u), t, c);
+                break;
+            case NodeKind.Elite:   // a warning delta with a centre pip
+                Raylib.DrawPolyLinesEx(new Vector2(cx, cy + u * 0.18f), 3, u * 1.15f, -90f, t, c);
+                Raylib.DrawCircleV(new Vector2(cx, cy + u * 0.34f), MathF.Max(1f, t * 0.6f), c);
+                break;
+            case NodeKind.Event:   // a fork — the stem of a route splitting into a choice
+                Raylib.DrawLineEx(new Vector2(cx, cy + u), new Vector2(cx, cy), t, c);
+                Raylib.DrawLineEx(new Vector2(cx, cy), new Vector2(cx - u, cy - u), t, c);
+                Raylib.DrawLineEx(new Vector2(cx, cy), new Vector2(cx + u, cy - u), t, c);
+                break;
+            case NodeKind.Boss:    // a solid diamond inside a ring tick — the heaviest mark on the map
+                Raylib.DrawPoly(C, 4, u * 0.88f, 0f, c);
+                Raylib.DrawPolyLinesEx(C, 4, u * 1.38f, 0f, MathF.Max(1f, t * 0.7f), c);
+                break;
+            default:               // BATTLE: a crosshair (one circle, four ticks)
+                Raylib.DrawCircleLinesV(C, u * 0.52f, c);
+                Raylib.DrawLineEx(new Vector2(cx - u, cy), new Vector2(cx - u * 0.66f, cy), t, c);
+                Raylib.DrawLineEx(new Vector2(cx + u * 0.66f, cy), new Vector2(cx + u, cy), t, c);
+                Raylib.DrawLineEx(new Vector2(cx, cy - u), new Vector2(cx, cy - u * 0.66f), t, c);
+                Raylib.DrawLineEx(new Vector2(cx, cy + u * 0.66f), new Vector2(cx, cy + u), t, c);
+                break;
+        }
+    }
+
     static void DrawCampaignMap(Run run, Rectangle region)
     {
         NodeBtns.Clear();
@@ -3896,14 +3986,28 @@ public static class Hud
             return new Vector2(cx, cy);
         }
 
-        // edges first, so nodes sit on top
+        // P1: ground first — region bands + seeded contours, all at <= alpha 22.
+        DrawMapTerrain(field, run.MapSeed, cols);
+
+        // P1: routes are a DARK CASING plus a coloured core, so a stroke reads as a road cut
+        // through the terrain rather than a 1px hairline lost in it. The route you can take
+        // also gets a direction chevron at its midpoint.
         foreach (var a in run.Map)
             foreach (var nid in a.Next)
             {
                 var b = run.Map[nid];
                 bool live = cur != null && a.Id == cur.Id;        // outgoing from the current node
-                Color ec = live ? Pal.Accent : Pal.RGBA(48, 56, 66);
-                Raylib.DrawLineEx(Center(a), Center(b), live ? 2.2f : 1.3f, ec);
+                Vector2 pa = Center(a), pb = Center(b);
+                Raylib.DrawLineEx(pa, pb, live ? 5.4f : 3.6f, Pal.RGBA(9, 13, 19));
+                Raylib.DrawLineEx(pa, pb, live ? 2.6f : 1.5f, live ? Pal.Accent : Pal.RGBA(66, 78, 92));
+                if (live)
+                {
+                    Vector2 d = Vector2.Normalize(pb - pa);
+                    Vector2 m = (pa + pb) * 0.5f;
+                    var perp = new Vector2(-d.Y, d.X);
+                    Raylib.DrawLineEx(m + d * 3.5f, m - d * 2.5f + perp * 4f, 1.8f, Pal.Accent);
+                    Raylib.DrawLineEx(m + d * 3.5f, m - d * 2.5f - perp * 4f, 1.8f, Pal.Accent);
+                }
             }
 
         var mouse = Raylib.GetMousePosition();
@@ -3912,7 +4016,6 @@ public static class Hud
         // bigger markers than the old fixed 124px strip did (base 10px radius grows to 12px
         // once the region clears 200px; BOSS keeps its +3 emphasis).
         float baseRad = region.Height >= 200 ? 12f : 10f;
-        int glyFs = region.Height >= 200 ? 16 : 14;
         // W9: labels only exist on the 1-2 reachable nodes, so remembering ONE previously
         // drawn label rect is enough to dodge every possible overprint at RowCount <= 3.
         Rectangle prevLabel = default;
@@ -3934,12 +4037,18 @@ public static class Hud
                 Raylib.DrawCircleV(p, rad + (hov ? 6f : 4f), Raylib.Fade(Pal.Accent, hov ? 0.45f : 0.25f));  // glow
                 NodeBtns.Add((n.Id, new Rectangle(p.X - rad - 4, p.Y - rad - 4, rad * 2 + 8, rad * 2 + 8)));
             }
-            Raylib.DrawCircleV(p, rad, fill);
+            Raylib.DrawCircleV(p, rad + 1.6f, Pal.RGBA(9, 13, 19));     // P1: a dark seat, so the
+            Raylib.DrawCircleV(p, rad, fill);                            // marker sits ON the terrain
             Raylib.DrawCircleLinesV(p, rad, isCur ? Pal.Txt : Pal.RGBA(10, 14, 20));
-            if (isCur) Raylib.DrawCircleLinesV(p, rad + 4, Pal.Accent);  // "you are here"
+            if (isCur)                                                   // "you are here": ring + brackets
+            {
+                Raylib.DrawCircleLinesV(p, rad + 4, Pal.Accent);
+                DrawCornerBrackets(new Rectangle(p.X - rad - 7, p.Y - rad - 7, rad * 2 + 14, rad * 2 + 14),
+                                   Raylib.Fade(Pal.Accent, 0.85f), 5f);
+            }
 
-            string gly = NodeGlyph(n.Kind);
-            Cfg.Text(gly, new Vector2((int)(p.X - (int)Cfg.Measure(gly, glyFs, 1f).X / 2), (int)(p.Y - glyFs / 2)), glyFs, 1f, Pal.RGBA(8, 12, 18));
+            // P1: drawn geometry replaces the single letter (see DrawNodeIcon).
+            DrawNodeIcon(n.Kind, p.X, p.Y, rad, Pal.RGBA(8, 12, 18));
 
             if (canPick)  // label the choices with their objective (one clean line, readable size)
             {
