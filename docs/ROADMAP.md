@@ -977,6 +977,56 @@ of record (container suspensions have wiped every scratchpad copy — docs are t
       it). README screenshot retaken (the FULCRUM board). Full tables + the program-close
       write-up: docs/DEVLOG.md §FUL-13.
 
+## PROGRAM "RESONANCE" — WAVE V1 "GROUND AND TYPE" (visual foundation)
+
+- [x] **V1-A — the board got a floor.** `Renderer.DrawBoard`'s floor loop and its grain pass
+      both skipped every non-`TileType.Floor` tile, so bare board backing (`Pal.RGBA(7,10,14)`)
+      showed under each cover block; with the block inset at 5px that was a hard-black gutter
+      ringing all ~45 blocks on every map. Both `continue`s dropped — the ground plane is now
+      continuous and cover sits ON it. Verify: `SIGHTLINE_SHOT=90 SIGHTLINE_FORCEBIOME=0..7`.
+- [x] **V1-A — real cast shadows.** `Renderer.LightOrigin` / `FloorLight` declared a board key
+      light that nothing cast from; cover used a fixed `+3,+4` offset (an emboss — identical in
+      every direction). New `Renderer.ShadowVec` returns the per-tile fall direction away from
+      the light, and `Renderer.CastShadow` sweeps the block footprint along it (dark at contact,
+      feathering to the tip). Length scales high 16 / low 8. Same treatment on the plateau
+      front-wall contact shadow. The plateau side wall (flat `Pal.HighSide` = near-black, which
+      read as a hole once the floor was continuous) now takes the biome hue + key light.
+- [x] **V1-B — two font atlases.** One 64px NotoMono atlas served 11px→92px; the 11–14px body
+      text (most of the words in the game) was minified ~5× with bilinear filtering and no mip
+      chain. Measured symptom: "WON" in the WAR ROOM hall of fame rendered as "NON". Now a 20px
+      UI atlas serves text ≤ `Cfg.UiFontMax` (18px) and 64px serves above it, both with
+      `GenTextureMipmaps` + `TextureFilter.Trilinear`; every call site routes through
+      `Cfg.Text`/`Cfg.Measure` (`Cfg.FontFor`). Hud.cs 10/11px raised to a 12px floor —
+      including the `Clip`/`WrapText`/`WrapLines`/`CenterText` measurement sizes, which would
+      otherwise wrap at 11 and draw at 12.
+- [x] **V1-B — SHIP BLOCKER: asset paths were cwd-relative.** A published binary launched from
+      any directory but its own silently fell back to Raylib's built-in bitmap font and rendered
+      every em-dash as `?`. New `Cfg.AssetPath` resolves against `AppContext.BaseDirectory`
+      (cwd fallback kept for dev); the font and the latent same-bug audio drop-in paths use it.
+      Verified against a real `dotnet publish -r linux-x64 --self-contained -p:PublishSingleFile=true`
+      run from a foreign cwd — before: "NotoMono-Regular not found, falling back to default";
+      after: all three atlases load by absolute path.
+- [x] **V1-C — a display voice.** `assets/ChakraPetch-Bold.ttf` (78,384 bytes) + its licence
+      text, handled exactly like NotoMono (csproj `CopyToOutputDirectory`). **SIL Open Font
+      License 1.1 — NOT CC0**: zero-cost and zero-royalty, but the licence text must ship with
+      the font and the font itself may not be sold. Provenance verified three ways: fetched from
+      `google/fonts` `ofl/chakrapetch`, its `METADATA.pb` reads `license: "OFL"`, and the font's
+      own name-table IDs 13/14 name the OFL 1.1. Baked at 96px, routed to titles ≥ 24px only via
+      `Cfg.TitleText`/`Cfg.TitleMeasure` (wordmark, VICTORY/RUN OVER, WAR ROOM, FIELD MANUAL,
+      SKIRMISH, ASSEMBLE STRIKE TEAM, MISSION n COMPLETE, REQUISITION, PROMOTION, SPECIALIZE,
+      FIELD DOCTRINE, event titles, PAUSED). Numerals and data stay on NotoMono. Corner brackets
+      derive from the measured width, so they re-fit the proportional face automatically.
+- [x] **V1-D — shop card title/price collision.** A long title ran straight into its right-
+      aligned price ("COUNTER-PREP: SYNDICATE" + "12 INTEL" → `SYNDICATE2 INTEL`). The card now
+      reserves the measured price column and shrinks the title 18→14 (new `Hud.FitSize`; `Clip`
+      only as the backstop) so the whole name survives. `SIGHTLINE_PREP` now takes a faction
+      name (`syndicate`/`legion`/`wardens`) so the longest title can be shot on demand.
+
+**Left for a later wave (deliberately):** board text in `Renderer.cs` still has 10/11px sizes
+(the two-atlas fix already sharpens them; bumping tile-constrained labels needs its own layout
+pass, and other waves own parts of that file). The biome signature pass stays floor-tile-only,
+so its emissive cues do not creep around cover bases.
+
 ## OPEN / NEXT (post-FULCRUM backlog — seeded at the FUL-13 close)
 
 Reference for any future wave: the FUL-13 ladder + re-set goal band (docs/DEVLOG.md §FUL-13)

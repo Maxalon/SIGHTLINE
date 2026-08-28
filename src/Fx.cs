@@ -583,10 +583,10 @@ public class Fx
             float pop = t.Life > t.MaxLife - popDur ? Util.EaseOutBack((t.MaxLife - t.Life) / popDur) : 1f;
             float minScale = 0.6f - 0.25f * t.Pop;      // bigger hits start tinier -> harder punch
             int fs = (int)(t.Size * (minScale + (1f - minScale) * pop));
-            int w = (int)Raylib.MeasureTextEx(Cfg.Font, t.Text, fs, 1f).X;
+            int w = (int)Cfg.Measure(t.Text, fs, 1f).X;
             int x = (int)(t.Pos.X - w / 2f);
             int y = (int)t.Pos.Y;
-            Raylib.DrawTextEx(Cfg.Font, t.Text, new Vector2(x + 2, y + 2), fs, 1f, Raylib.Fade(Pal.RGBA(0, 0, 0), k * 0.6f));
+            Cfg.Text(t.Text, new Vector2(x + 2, y + 2), fs, 1f, Raylib.Fade(Pal.RGBA(0, 0, 0), k * 0.6f));
             // 1-frame spawn brightness flash on big numbers: blow the colour toward white for the
             // first couple frames of life (front-loaded, decays instantly) so the hit "flashes".
             Color c = t.Color;
@@ -595,7 +595,7 @@ public class Fx
                 float fl = Util.Clamp((t.MaxLife - t.Life) / 0.05f, 0f, 1f);   // 0 at spawn -> 1 after ~3 frames
                 c = Pal.Mix(Pal.RGBA(255, 255, 255), t.Color, fl);
             }
-            Raylib.DrawTextEx(Cfg.Font, t.Text, new Vector2(x, y), fs, 1f, Raylib.Fade(c, k));
+            Cfg.Text(t.Text, new Vector2(x, y), fs, 1f, Raylib.Fade(c, k));
         }
     }
 

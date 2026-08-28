@@ -218,6 +218,16 @@ docs/screenshot.png    README image
   drawn outside the camera.
 - `DrawPoly`/`DrawPolyLinesEx` are safe for glyphs (winding handled internally); be careful
   with raw `DrawTriangle` winding.
+- **Text goes through `Cfg.Text` / `Cfg.Measure`, never `Raylib.DrawTextEx` directly.** Two
+  NotoMono atlases are baked (20px for sizes ≤ `Cfg.UiFontMax` = 18, 64px above); `Cfg.FontFor`
+  picks. Titles ≥24px use the Chakra Petch display face via `Cfg.TitleText`/`Cfg.TitleMeasure`;
+  numerals/data stay on NotoMono. **12px is the small-text floor.** When a call site *measures*
+  through `Clip`/`WrapText`/`WrapLines`/`CenterText` and *draws* separately, the two sizes must
+  match or the text wraps at one size and paints at another.
+- **Bundled assets resolve via `Cfg.AssetPath(rel)`** (`AppContext.BaseDirectory`, cwd fallback),
+  never a bare relative path — a binary launched from another directory otherwise silently loses
+  the font. Never publish with `-p:PublishTrimmed=true`: it destroys save/load while the game
+  still boots.
 - **Headless byte-stability:** the screenshot harness keeps `Display` (post-FX) OFF and
   never touches disk/meta (gated by `NoPersist`), so shots stay byte-identical and the
   balance flywheel is reproducible. Keep new persistent/random/post-FX work behind those
