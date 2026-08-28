@@ -161,15 +161,14 @@ public static class Mission
     /// Which way pod members stack off their lead. FRONTAL/PINCER/CROSSFIRE keep the historical
     /// downward row stack; ENVELOP's rim pods stack ALONG their own edge so a pod on the north
     /// rim doesn't march into the squad's lap. Returns (dx, dy) for member 1; member 2 doubles it.
-    static (int dx, int dy) PodStack(int shape, int podId, int gw, int gh)
+    static (int dx, int dy) PodStack(int shape, int podId)
     {
         if (shape != DeployEnvelop) return (0, 1);
         switch (podId % 6)
         {
-            case 0: case 1: return (0, 1);     // east / west rims stack down the column
-            case 4: return (0, 1);
-            case 5: return (0, -1);
-            default: return (1, 0);            // north / south rims stack along the row
+            case 0: case 1: case 4: return (0, 1);   // E / W rim pods stack DOWN their column
+            case 5: return (0, -1);                  // the SW pod is already low: stack UP
+            default: return (1, 0);                  // N / S rim pods stack ALONG their row
         }
     }
 
@@ -753,7 +752,7 @@ public static class Mission
                 // ENVELOP's rim pods stack ALONG their own edge (a north-rim pod marching straight
                 // down into the squad's lap would un-surround the opening), off the lead's FINAL
                 // tile so a relocated lead keeps its formation.
-                var (sdx, sdy) = PodStack(shape, podId, grid.W, grid.H);
+                var (sdx, sdy) = PodStack(shape, podId);
                 int ax = podAnchorX[podId], ay = podAnchor[podId];
                 x = ax + sdx * member; y = ay + sdy * member;
                 if (!grid.InBounds(x, y)) { x = ax - sdx * member; y = ay - sdy * member; }
