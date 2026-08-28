@@ -862,9 +862,20 @@ public partial class Game
         get
         {
             int c = 0;
-            foreach (var u in DraftPicked) if (u.FromReserve) c += MetaProg.RecallCost(u.Rank);
+            foreach (var u in DraftPicked) if (u.FromReserve) c += DraftRecallFee(u);
             return c;
         }
+    }
+
+    /// FUL-10 MRC: ONE veteran's recall fee under the draft-screen selection — half, rounded up,
+    /// when MERCENARY CLAUSE is picked. Reads DraftSelectedContract (both live on the same screen),
+    /// so the per-card fee, the bill row and ConfirmDraft's charge all discount together — honest
+    /// by construction, and the halving happens in exactly one place.
+    public int DraftRecallFee(Unit u)
+    {
+        int c = MetaProg.RecallCost(u.Rank);
+        if ((DraftSelectedContract ?? Contract.None) == Contract.MercenaryClause) c = (c + 1) / 2;
+        return c;
     }
 
     /// Can the bank cover the picked veterans? (Always true under NoPersist — the harness never pays.)
@@ -1871,6 +1882,22 @@ public partial class Game
         // funds the standing economy. h0 is UNCHANGED at 25+6m (~61 for a full clear). The loss
         // consolation stays additive.
         int salvage = win ? (25 + 6 * _run.Mission) * (10 + heat) / 10 : (4 * Math.Max(0, _run.Mission - 1) + 2 * heat);
+        // FUL-10: field-event salvage claims were EARNED mid-run (events never touch meta directly —
+        // they pend on the run); pay them win OR loss, folded into the same bounty + end-card slab.
+        if (_run.PendingSalvageReward > 0)
+        {
+            salvage += _run.PendingSalvageReward;
+            _run.Report.Insert(0, $"EVENT SALVAGE CLAIMS +{_run.PendingSalvageReward}");
+            _run.PendingSalvageReward = 0;   // committed — never bankable twice
+        }
+        // FUL-10 LGD: surviving Rank>=2 soldiers pension out at +6/rank each — the reserve pays income
+        // to balance the mortality below. Inert at Contract.None.
+        if (_run.Contract == Contract.LivingLegends)
+        {
+            int pension = 0;
+            foreach (var u in _run.Squad) if (u.Alive && !u.IsVip && u.Rank >= 2) pension += MetaProg.LegendPension * u.Rank;
+            if (pension > 0) { salvage += pension; _run.Report.Insert(0, $"LIVING LEGENDS pensions +{pension}"); }
+        }
         if (salvage > 0) { SaveGame.AddSalvage(salvage); _run.Report.Insert(0, $"SALVAGE +{salvage}"); EndSalvage = salvage; }   // FUL-12: field feeds the end-card slab
 
         // 2) HALL OF FAME — surviving squad (won runs) as legends, plus this run's fallen (KIA).
@@ -1891,7 +1918,15 @@ public partial class Game
         // on a WIN or a survivable loss (a squad wipe leaves no survivors -> enshrines nobody). A Rank>=1
         // (promoted-at-least-once) gate keeps green rookies out so the reserve stays a roster of legends.
         var vets = _run.Squad.Where(u => u.Alive && !u.IsVip && u.Rank >= 1).ToList();
-        if (vets.Count > 0) SaveGame.EnshrineVeterans(vets);
+        // FUL-10 MRC: cheap recalls now, no pipeline later — this run's survivors never enshrine.
+        if (vets.Count > 0 && _run.Contract != Contract.MercenaryClause) SaveGame.EnshrineVeterans(vets);
+        // FUL-10 LGD: a KIA whose name matches a reserve record ERASES it — veterans are mortal
+        // across runs, not just priced. Name-keyed exactly like EnshrineVeterans' dedupe.
+        if (_run.Contract == Contract.LivingLegends && _run.Fallen.Count > 0)
+        {
+            int gone = SaveGame.RemoveVeterans(_run.Fallen);
+            if (gone > 0) _run.Report.Insert(0, $"LIVING LEGENDS: {gone} reserve record{(gone > 1 ? "s" : "")} died with the fallen");
+        }
 
         // 4) ACHIEVEMENTS (each a one-time salvage bounty on first unlock)
         if (win)
@@ -2333,6 +2368,10 @@ public partial class Game
     {
         killer.Kills++;
         if (killer.Team != Team.Player || killer.IsVip) return;
+        // FUL-10 LGD: kills count DOUBLE toward rank — a second credit, the same contract-gated
+        // kill-credit family as IronVeterans' debrief bonus. Feats stay single (KillsThisTurn
+        // below is untouched). Inert at Contract.None.
+        if (_run != null && _run.Contract == Contract.LivingLegends) killer.Kills++;
         killer.KillsThisTurn++;
         if (killer.KillsThisTurn >= 2 && !killer.FeatMultiKill)
         { killer.FeatMultiKill = true; FeatBanner(killer, "MULTI-KILL"); }
@@ -5943,11 +5982,19 @@ public partial class Game
         int cost = 0;
         if (ch.Outcome.Kind == EventOutcomeKind.Intel && ch.Outcome.Amount < 0) cost += -ch.Outcome.Amount;
         if (ch.HasSecond && ch.Outcome2.Kind == EventOutcomeKind.Intel && ch.Outcome2.Amount < 0) cost += -ch.Outcome2.Amount;
+        if (ch.HasThird && ch.Outcome3.Kind == EventOutcomeKind.Intel && ch.Outcome3.Amount < 0) cost += -ch.Outcome3.Amount;   // FUL-10
         if (cost > 0 && _run.Intel < cost) return false;
         // roster: a recruit requires a free roster slot
         if (ch.Outcome.Kind == EventOutcomeKind.Recruit && _run.Squad.Count >= Run.RosterMax) return false;
+        // FUL-10: a scar cure needs a scarred soldier; a release must leave a roster behind
+        if (ChoiceHas(ch, EventOutcomeKind.CureScar) && !_run.Squad.Exists(u => u.Scars.Count > 0)) return false;
+        if (ChoiceHas(ch, EventOutcomeKind.ReleaseSoldier) && _run.Squad.Count <= 1) return false;
         return true;
     }
+
+    /// FUL-10: does any of the (up to three) outcomes on this arm carry the given kind?
+    static bool ChoiceHas(EventChoice ch, EventOutcomeKind k)
+        => ch.Outcome.Kind == k || (ch.HasSecond && ch.Outcome2.Kind == k) || (ch.HasThird && ch.Outcome3.Kind == k);
 
     /// Autopilot/balance default: prefer a SAFE, beneficial legal choice (no intel cost, no gamble,
     /// no self-wound, no heat) so the balance harness models SENSIBLE play — a human wouldn't gamble
@@ -5966,14 +6013,19 @@ public partial class Game
         return firstLegal >= 0 ? firstLegal : _activeEvent.Choices.Length - 1;
     }
 
-    /// A choice with no downside in either outcome (no intel spend, gamble, self-wound, or heat gain).
+    /// A choice with no downside in any outcome (no intel spend, gamble, self-wound, or heat gain).
     static bool IsSafeChoice(EventChoice ch)
-        => !HasDownside(ch.Outcome) && (!ch.HasSecond || !HasDownside(ch.Outcome2));
+        => !HasDownside(ch.Outcome) && (!ch.HasSecond || !HasDownside(ch.Outcome2))
+           && (!ch.HasThird || !HasDownside(ch.Outcome3));   // FUL-10: triple arms
     static bool HasDownside(EventOutcome o)
         => (o.Kind == EventOutcomeKind.Intel && o.Amount < 0)
            || o.Kind == EventOutcomeKind.GambleIntel
            || o.Kind == EventOutcomeKind.WoundSoldier
-           || o.Kind == EventOutcomeKind.AddHeat;
+           || o.Kind == EventOutcomeKind.AddHeat
+           // FUL-10: the safe-first bot must never read a scarring arm or a roster release as
+           // "safe" (honest value-biased uptake is FUL-5's hashed chooser, by design).
+           || o.Kind == EventOutcomeKind.GrantScar
+           || o.Kind == EventOutcomeKind.ReleaseSoldier;
 
     void ResolveEvent(int choiceIdx)
     {
@@ -5988,6 +6040,7 @@ public partial class Game
             string line2 = EventCatalog.Apply(_run, ch.Outcome2, _eventNode);
             line = line + "; " + line2;
         }
+        if (ch.HasThird) line = line + "; " + EventCatalog.Apply(_run, ch.Outcome3, _eventNode);   // FUL-10
         _run.Report.Insert(0, $"EVENT: {_activeEvent.Title} -- {line}");
         Audio.Play("turn");
         _activeEvent = null; _eventNode = null;

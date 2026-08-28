@@ -3082,7 +3082,7 @@ public static class Hud
             // the baked atlas has no star) + the word, so it reads in any palette.
             // W9: an individually unaffordable veteran greys like a full-team card (still clickable —
             // only CONFIRM refuses, so picks stay rearrangeable toward what the bank can cover).
-            int recall = vet ? MetaProg.RecallCost(u.Rank) : 0;
+            int recall = vet ? g.DraftRecallFee(u) : 0;   // FUL-10: MRC's half-price shows live on the card
             bool broke = vet && recall > g.DraftSalvage;
             if (broke && !sel) a = Math.Min(a, 0.55f);
             if (vet)
@@ -3196,9 +3196,21 @@ public static class Hud
         var chm = Raylib.MeasureTextEx(Cfg.Font, ch, 16, 1f);
         Raylib.DrawTextEx(Cfg.Font, ch, new Vector2(W / 2f - chm.X / 2f, conY - 2), 16, 1f, Pal.Accent);
 
-        // cards: STANDARD then the 3 contracts (None == STANDARD opt-out)
-        var conCards = new Contract[] { Contract.None, Contract.IronVeterans, Contract.HighStakes, Contract.Spearhead };
-        int cn = conCards.Length, ccw = 222, cgap = 16, cch = 64;
+        // cards: STANDARD then the contracts (None == STANDARD opt-out).
+        // FUL-10 re-fit: six cards now — width shrinks to fit the row on screen, and the card
+        // height grows to the TALLEST wrapped desc (wrap, never truncate: the no-ellipsis rule).
+        var conCards = new Contract[] { Contract.None, Contract.IronVeterans, Contract.HighStakes,
+                                        Contract.Spearhead, Contract.MercenaryClause, Contract.LivingLegends };
+        int cn = conCards.Length, cgap = 12;
+        int ccw = Math.Min(222, (W - 48 - (cn - 1) * cgap) / cn);
+        int descLines = 1;
+        foreach (var c0 in conCards)
+        {
+            int lc = 0;
+            foreach (var _ in WrapLines(ContractDef.Desc(c0), ccw - 22, 11, 0)) lc++;
+            descLines = Math.Max(descLines, lc);
+        }
+        int cch = 34 + descLines * 13;
         int ctotal = cn * ccw + (cn - 1) * cgap;
         int cx0 = W / 2 - ctotal / 2;
         int cy = conY + 22;

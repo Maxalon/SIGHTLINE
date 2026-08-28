@@ -75,6 +75,8 @@ public static class MetaProg
     // freely; the draft BACK button must always leave the bank untouched).
     public const int RecallBase = 10, RecallPerRank = 8;
     public static int RecallCost(int rank) => RecallBase + RecallPerRank * Math.Max(0, rank);
+    // FUL-10 LGD: run-end pension per rank for surviving Rank>=2 soldiers (LIVING LEGENDS only).
+    public const int LegendPension = 6;
     // Repeatable sinks (Game.Meta.cs TryBuy* pattern): all opt-in, all NoPersist-gated.
     public const int DraftRerollCost = 10;   // re-roll the run-opening draft candidate pool
     public const int ScarRehabCost   = 30;   // buy one scar off a soldier in the barracks

@@ -64,19 +64,25 @@ public enum Contract
     IronVeterans,  // no recruit backfill, but survivors gain rank faster (fewer bodies ↔ stronger vets)
     HighStakes,    // +50% mission Intel, but no between-mission field-heal (richer ↔ riskier)
     Spearhead,     // open unconcealed (no ambush), but every soldier gets +1 action on mission turn 1
+    // ---- FUL-10: two contracts that engage the W9 veteran economy ----
+    MercenaryClause, // veteran recalls half price (round up), but survivors are never enshrined
+    LivingLegends,   // kills count double + Rank>=2 survivors pension out, but a KIA erases their reserve record
 }
 
 /// Names / codes / descriptions for the run contracts (mirrors BoonDef). `All` excludes None
 /// (None is the implicit "STANDARD" opt-out shown in the draft).
 public static class ContractDef
 {
-    public static readonly Contract[] All = { Contract.IronVeterans, Contract.HighStakes, Contract.Spearhead };
+    public static readonly Contract[] All = { Contract.IronVeterans, Contract.HighStakes, Contract.Spearhead,
+                                              Contract.MercenaryClause, Contract.LivingLegends };   // FUL-10
 
     public static string Name(Contract c) => c switch
     {
         Contract.IronVeterans => "IRON VETERANS",
         Contract.HighStakes   => "HIGH STAKES",
         Contract.Spearhead    => "SPEARHEAD",
+        Contract.MercenaryClause => "MERCENARY CLAUSE",
+        Contract.LivingLegends   => "LIVING LEGENDS",
         _ => "STANDARD",
     };
 
@@ -85,6 +91,8 @@ public static class ContractDef
         Contract.IronVeterans => "IRV",
         Contract.HighStakes   => "HST",
         Contract.Spearhead    => "SPR",
+        Contract.MercenaryClause => "MRC",
+        Contract.LivingLegends   => "LGD",
         _ => "STD",
     };
 
@@ -93,6 +101,8 @@ public static class ContractDef
         Contract.IronVeterans => "No replacement recruits, but survivors rank up faster",
         Contract.HighStakes   => "+50% mission Intel, but no field-heal between missions",
         Contract.Spearhead    => "Open unconcealed (no ambush), but +1 action on turn 1",
+        Contract.MercenaryClause => "Veteran recalls cost half, but survivors never join the reserve",
+        Contract.LivingLegends   => "Kills count double and veterans pay pensions, but a KIA erases their reserve record",
         _ => "No ruleset change",
     };
 
@@ -101,16 +111,21 @@ public static class ContractDef
         Contract.IronVeterans => "The few. The proven.",
         Contract.HighStakes   => "Everything to gain. Everything to lose.",
         Contract.Spearhead    => "Hit first. Hit hard.",
+        Contract.MercenaryClause => "Paid up front. Owed nothing after.",
+        Contract.LivingLegends   => "Legends are written in ink. And blood.",
         _ => "Standard rules of engagement.",
     };
 
-    /// Parse a SIGHTLINE_CONTRACT env value (case-insensitive: ironveterans|highstakes|spearhead)
-    /// to a Contract; unknown/null => None. Lets the Program.cs harness hook be a one-liner.
+    /// Parse a SIGHTLINE_CONTRACT env value (case-insensitive: ironveterans|highstakes|spearhead|
+    /// mercenaryclause|livinglegends) to a Contract; unknown/null => None. Lets the Program.cs
+    /// harness hook be a one-liner.
     public static Contract Parse(string s) => (s ?? "").Trim().ToLowerInvariant() switch
     {
         "ironveterans" or "iron" or "irv" => Contract.IronVeterans,
         "highstakes"   or "stakes" or "hst" => Contract.HighStakes,
         "spearhead"    or "spr" => Contract.Spearhead,
+        "mercenaryclause" or "mercenary" or "mrc" => Contract.MercenaryClause,   // FUL-10
+        "livinglegends"   or "legends"   or "lgd" => Contract.LivingLegends,     // FUL-10
         _ => Contract.None,
     };
 }
@@ -418,6 +433,12 @@ public class Run
     // face (telegraphed on the campaign map). Stored here, PERSISTED in the save, APPLIED + CLEARED
     // at the next Game.SetupMission (which copies it into Combat.PrepFaction). None = no prep bought.
     public Faction PrepFaction = Faction.None;
+
+    // FUL-10: META salvage EARNED by field events, committed at run END by Game.AwardMetaRunEnd
+    // (win OR loss — it was earned). Events must never touch meta/disk directly (EventCatalog.Apply
+    // stays pure + headless), so the income pends HERE. Persisted (append-only DTO field) and
+    // quit-safe by construction: abandoning the run forfeits the claim with the run.
+    public int PendingSalvageReward;
 
     // The faction of the mission just played, captured by Game.EnterBarracks BEFORE Combat.EndMission
     // clears Combat.MissionFaction. DebriefSurvivors reads it to stamp a soldier's VENDETTA grudge on
@@ -1287,25 +1308,46 @@ public class Run
     // ranger -> mobile/flanker, assault -> close-range bruiser, corpsman -> durable support).
     // Every perk appears in >=1 line; many appear in several (build flavour overlaps, not silos).
     // Used only to BIAS the offer (see MakePerkOffer) -- it never restricts what can be granted.
+    // FUL-10: the HORIZON-W6 trio (Vantage/Breaker/Siegebreaker) was in NO line for three programs —
+    // rollable only from the random slot B, never the class-biased slot A. Homes per identity:
+    // Vantage -> SHARPSHOOTER (the perch class) + GUNNER (BIPOD/planted overlap); Breaker -> ASSAULT
+    // (closes to punish the pin — the gunner's own turn ends on the pin, the follow-up owns the
+    // payoff) + SHARPSHOOTER; Siegebreaker -> RANGER (the flanker digs campers out) + ASSAULT.
     static Perk[] ClassLine(string cls) => (cls ?? "").ToUpperInvariant() switch
     {
         // Precision marksmen: long-range aim + crit + a defensive overwatch lean + double-tap.
         "SHARPSHOOTER" => new[] { Perk.Marksman, Perk.LockOn, Perk.Executioner,
-                                  Perk.Guardian, Perk.Reflexes, Perk.Gunslinger },
+                                  Perk.Guardian, Perk.Reflexes, Perk.Gunslinger,
+                                  Perk.Vantage, Perk.Breaker },
         // Close-range bruisers: alpha-strike finisher + mobility to close + shoot-then-slip.
         "ASSAULT"      => new[] { Perk.CloseQuarters, Perk.GiantSlayer, Perk.Sprinter,
-                                  Perk.Bandolier, Perk.Adrenal, Perk.Skirmisher },
+                                  Perk.Bandolier, Perk.Adrenal, Perk.Skirmisher,
+                                  Perk.Breaker, Perk.Siegebreaker },
         // Heavy weapons: durability + reaction-fire control to anchor the line + double-tap.
         "GUNNER"       => new[] { Perk.Tank, Perk.Bulwark, Perk.Hardened, Perk.Reflexes,
-                                  Perk.Guardian, Perk.LockOn, Perk.CoolHeaded, Perk.Gunslinger },
+                                  Perk.Guardian, Perk.LockOn, Perk.CoolHeaded, Perk.Gunslinger,
+                                  Perk.Vantage },
         // Skirmishers: speed + first-contact alpha + closing aim + shoot-then-slip.
         "RANGER"       => new[] { Perk.Sprinter, Perk.GiantSlayer, Perk.CloseQuarters,
-                                  Perk.LockOn, Perk.Adrenal, Perk.Skirmisher },
+                                  Perk.LockOn, Perk.Adrenal, Perk.Skirmisher,
+                                  Perk.Siegebreaker },
         // Field medics: stay alive + keep the kit topped up to support the squad.
         "CORPSMAN"     => new[] { Perk.Hardened, Perk.Tank, Perk.CoolHeaded, Perk.Bandolier,
                                   Perk.Adrenal },
         _              => System.Array.Empty<Perk>(),
     };
+
+    /// FUL-10 guard for the table's own doc rule ("every perk appears in >=1 line") — the perks in
+    /// NO class line, i.e. unreachable from the class-biased slot A. CONTRACTTEST asserts empty.
+    public static List<Perk> PerksInNoClassLine()
+    {
+        var covered = new HashSet<Perk>();
+        foreach (var cls in new[] { "SHARPSHOOTER", "ASSAULT", "GUNNER", "RANGER", "CORPSMAN" })
+            foreach (var p in ClassLine(cls)) covered.Add(p);
+        var missing = new List<Perk>();
+        foreach (var p in PerkDef.All) if (!covered.Contains(p)) missing.Add(p);
+        return missing;
+    }
 
     /// Offer two distinct perks the soldier doesn't already own (null if <2 left). The pick-1-of-2
     /// is BIASED toward the soldier's class line so it develops a coherent archetype over a run:
