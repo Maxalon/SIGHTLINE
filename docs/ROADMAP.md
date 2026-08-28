@@ -1008,3 +1008,12 @@ sets, one lever per measured round, fresh same-slot R0 first, dip budgets, breac
       PATCH 5/batch): intended apex cruelty or a hole in the revive economy — pairs with the
       founding-corpsman decision.
 - [ ] **On-device audio tuning** (carried; needs the human).
+- [x] **Q1 "NO TWO IN ONE PLACE"** (RESONANCE defect wave, `wt-q1`). Two living units could
+      share a tile (the buried one unhoverable/untargetable, since `UnitAt` returns the first
+      match): `Game.ActivatePod` planned every dormant pod member against one board snapshot
+      before any executed. Fixed with a claim set threaded into `Ai.Plan`; measured 0.655% of
+      move steps -> 0.000% over 135 missions, 108 overlap episodes -> 0. New permanent guard
+      `SIGHTLINE_STACKTEST=1` (`=2` wide). Also: the STEADYING streak bonus folded into
+      `Combat.ComputeOdds` so the displayed HIT% is the rolled probability (was under-reporting
+      by up to 12 pts), and the `RUSHED 2ND SHOT` badge ungated from aim mode. Details in
+      DEVLOG §RESONANCE Q1.
