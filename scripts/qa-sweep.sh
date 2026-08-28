@@ -4,7 +4,7 @@
 # quirk: piping an xvfb-run child through $(...) / a for-loop silently drops its
 # stdout, so every test is a direct `CMD | grep` statement below.
 #
-#   bash scripts/qa-sweep.sh          # 40 self-tests + autoplay x3   (~2 min)
+#   bash scripts/qa-sweep.sh          # 41 self-tests + autoplay x3   (~2 min)
 #   bash scripts/qa-sweep.sh --full   # + PAIRTEST                    (~2 min 40 s)
 #
 # RUN --full BEFORE MERGING. PAIRTEST (38 s measured) is the CRN-pairing identity check
@@ -76,6 +76,8 @@ echo -n "PIKETEST   : "; SIGHTLINE_PIKETEST=1  run | grep -oE "PIKETEST: (PASS|F
 echo -n "PODTEST    : "; SIGHTLINE_PODTEST=1   run | grep -oE "PODTEST: (PASS|FAIL)" | head -1
 echo -n "EXPOSURETEST: "; SIGHTLINE_EXPOSURETEST=1 run | grep -oE "EXPOSURETEST (PASS|FAIL)" | head -1
 echo -n "FUL11PROBE : "; SIGHTLINE_FUL11PROBE=40 run | grep -oE "FUL11PROBE (PASS|FAIL)" | head -1
+# RESONANCE W5: the RECRUIT rung + the comfort settings (anim speed / UI text scale).
+echo -n "ONRAMPTEST : "; SIGHTLINE_ONRAMPTEST=1 run | grep -oE "ONRAMPTEST: (PASS|FAIL)" | head -1
 
 if [ "$FULL" = 1 ]; then
   # ~38 s: the CRN identity check. Skipped by default so the sweep stays a quick loop;
@@ -90,5 +92,5 @@ echo -n "run1: "; SIGHTLINE_AUTOPLAY=1 run | grep -oE "RESULT: (WIN|LOSE|TIMEOUT
 echo -n "run2: "; SIGHTLINE_AUTOPLAY=1 run | grep -oE "RESULT: (WIN|LOSE|TIMEOUT) mission=[0-9]+" | head -1
 echo -n "run3: "; SIGHTLINE_AUTOPLAY=1 run | grep -oE "RESULT: (WIN|LOSE|TIMEOUT) mission=[0-9]+" | head -1
 echo "=== DONE ==="
-echo "(41 self-tests exist; this sweep ran $([ "$FULL" = 1 ] && echo 41 || echo 40). Every line above"
+echo "(42 self-tests exist; this sweep ran $([ "$FULL" = 1 ] && echo 42 || echo 41). Every line above"
 echo " must read PASS, and every autoplay must read WIN or LOSE — never TIMEOUT, never blank.)"

@@ -4345,4 +4345,186 @@ public partial class Game
     public void DebugSetTurn(int t) => _turnCount = t;
     public void DebugCheckEnd() => CheckEnd();
 
+    /// SIGHTLINE_ONRAMPTEST — PROGRAM RESONANCE W5 "ON-RAMP". Two features, one test:
+    ///
+    ///  (A) the RECRUIT rung (Heat.Min == -1) is a REAL, measurable difficulty below standard —
+    ///      the data row, the built mission, the bleed-out clock and the checkpoint valve all move,
+    ///      and heat 0 does NOT. The last clause matters most: RECRUIT ships by widening the heat
+    ///      RANGE, so every assertion below is paired with the same read at heat 0 to prove the
+    ///      designed difficulty (and with it every measured number in docs/) is untouched.
+    ///  (B) the comfort settings (animation speed, UI text scale) survive a real JSON round trip,
+    ///      the text scale reaches Cfg symmetrically (measure and draw share one multiplier), and
+    ///      the animation multiplier is HARD-PINNED to 1x under AutoPlay/NoPersist — the guard that
+    ///      keeps the autopilot smoke test and the SIGHTLINE_BALANCE flywheel bit-for-bit as before.
+    public string OnRampSelfTest()
+    {
+        NoPersist = true;
+        var fails = new List<string>();
+
+        // ---- (A1) the ladder data row -----------------------------------------------------
+        // (through locals: Min/Recruit are compile-time consts, so a direct literal compare folds
+        // away and the compiler flags the failure branch as unreachable)
+        int minRung = Sightline.Heat.Min, recruitRung = Sightline.Heat.Recruit;
+        if (minRung != -1) fails.Add("min=" + minRung);
+        if (recruitRung != -1) fails.Add("recruitConst=" + recruitRung);
+        if (!Sightline.Heat.IsRecruit(-1)) fails.Add("isRecruit(-1)");
+        if (Sightline.Heat.IsRecruit(0)) fails.Add("isRecruit(0)");
+        if (Sightline.Heat.Clamp(-9) != -1) fails.Add("clampFloor");
+        if (Sightline.Heat.Label(-1) != "RECRUIT") fails.Add("label(-1)=" + Sightline.Heat.Label(-1));
+        if (Sightline.Heat.Label(3) != "HEAT 3") fails.Add("label(3)");
+        if (Sightline.Heat.Active(-1).Count() != 1) fails.Add("activeCount(-1)");
+        if (Sightline.Heat.EnemyDelta(-1) != -1) fails.Add("enemyDelta(-1)=" + Sightline.Heat.EnemyDelta(-1));
+        if (Sightline.Heat.StatDelta(-1) != -1) fails.Add("statDelta(-1)=" + Sightline.Heat.StatDelta(-1));
+        // the relief must be BODIES AND STATS ONLY — RECRUIT never flips a qualitative mutator on
+        if (Sightline.Heat.DmgDelta(-1) != 0 || Sightline.Heat.AiTier(-1) != 0
+            || Sightline.Heat.Exposed(-1) || Sightline.Heat.HarshAttrition(-1)
+            || Sightline.Heat.NoReinforcements(-1) || Sightline.Heat.TighterContact(-1))
+            fails.Add("recruitMutatorLeak");
+        // ...and it must never pay a NEGATIVE requisition bonus
+        if (Sightline.Heat.IntelBonus(-1) != 0) fails.Add("intelBonus(-1)=" + Sightline.Heat.IntelBonus(-1));
+        // heat 0 is still a true no-op, and rung 1 still bites
+        if (Sightline.Heat.EnemyDelta(0) != 0 || Sightline.Heat.StatDelta(0) != 0
+            || Sightline.Heat.IntelBonus(0) != 0 || Sightline.Heat.Active(0).Any())
+            fails.Add("heat0NotNoOp");
+        if (Sightline.Heat.EnemyDelta(1) != 1 || Sightline.Heat.IntelBonus(1) != 3) fails.Add("heat1Moved");
+
+        // ---- (A2) the BUILT mission: same seed, one fewer + weaker hostile ------------------
+        // Both legs replay the identical world (Util.Reseed before each), so the ONLY difference
+        // is the rung. This is the assertion that would catch the early-mission "heat grace"
+        // silently zeroing RECRUIT's relief on mission 1 — the mission a first-timer meets first.
+        (int count, int hp, int aim) BuildAt(int heat, int mission)
+        {
+            Util.Reseed(4242);
+            _run = new Run(); _run.Start();
+            _run.HeatLevel = heat;
+            _run.CurrentCard = new MissionCard { Objective = Objective.Eliminate, ModName = "STANDARD", Reward = RewardKind.None };
+            SetupMission(mission);
+            int hpSum = 0, aimSum = 0;
+            foreach (var e in Enemies) { hpSum += e.MaxHp; aimSum += e.Aim; }
+            return (Enemies.Count, hpSum, aimSum);
+        }
+        foreach (int m in new[] { 1, 3 })
+        {
+            var std = BuildAt(0, m);
+            var rec = BuildAt(-1, m);
+            if (rec.count != std.count - 1) fails.Add($"m{m}:count {rec.count} vs {std.count}");
+            // one fewer body of ~std HP, and every survivor is a point weaker: per-enemy HP and
+            // aim must BOTH be strictly below the standard leg's per-enemy average.
+            if (rec.count <= 0 || std.count <= 0) { fails.Add($"m{m}:emptyBuild"); continue; }
+            float stdHp = std.hp / (float)std.count, recHp = rec.hp / (float)rec.count;
+            float stdAim = std.aim / (float)std.count, recAim = rec.aim / (float)rec.count;
+            if (!(recHp < stdHp)) fails.Add($"m{m}:hp {recHp:0.##} vs {stdHp:0.##}");
+            if (!(recAim < stdAim)) fails.Add($"m{m}:aim {recAim:0.##} vs {stdAim:0.##}");
+        }
+
+        // ---- (A3) the bleed-out clock ------------------------------------------------------
+        int DownTurnsAt(int heat)
+        {
+            Util.Reseed(77);
+            _run = new Run(); _run.Start();
+            _run.HeatLevel = heat;
+            _run.CurrentCard = new MissionCard { Objective = Objective.Eliminate, ModName = "STANDARD", Reward = RewardKind.None };
+            SetupMission(2);
+            var sol = Players.FirstOrDefault(p => p.Alive && !p.IsVip);
+            if (sol == null) return -1;
+            EnterDowned(sol);
+            return sol.DownedTurns;
+        }
+        if (DownTurnsAt(0) != DownedTimerTurns) fails.Add("downTurnsHeat0");
+        if (DownTurnsAt(-1) != DownedTimerTurns + 2) fails.Add("downTurnsRecruit=" + DownTurnsAt(-1));
+
+        // ---- (A4) the checkpoint valve opens at mission 1 (and ONLY at RECRUIT) --------------
+        bool CheckpointAt(int heat, int mission)
+        {
+            Util.Reseed(99);
+            _run = new Run(); _run.Start();
+            _run.HeatLevel = heat;
+            _run.Mission = mission;
+            _run.CheckpointUsed = false;
+            _run.CurrentCard = new MissionCard { Objective = Objective.Eliminate, ModName = "STANDARD", Reward = RewardKind.None };
+            return TryReinforcements();
+        }
+        if (!CheckpointAt(-1, 1)) fails.Add("recruitNoM1Checkpoint");
+        if (CheckpointAt(0, 1)) fails.Add("heat0GainedM1Checkpoint");
+        if (CheckpointAt(0, 2)) fails.Add("heat0GainedM2Checkpoint");
+        if (!CheckpointAt(0, 3)) fails.Add("heat0LostM3Checkpoint");
+        // still ONE checkpoint per run at RECRUIT — the valve is earlier, not repeatable
+        Util.Reseed(99);
+        _run = new Run(); _run.Start();
+        _run.HeatLevel = -1; _run.Mission = 1;
+        _run.CurrentCard = new MissionCard { Objective = Objective.Eliminate, ModName = "STANDARD", Reward = RewardKind.None };
+        if (!TryReinforcements()) fails.Add("recruitFirstCheckpoint");
+        if (TryReinforcements()) fails.Add("recruitCheckpointRepeats");
+
+        // ---- (B1) the dt multiplier can NEVER reach the harness or the flywheel --------------
+        int savedAnim = Display.AnimSpeedIdx, savedScale = Display.UiScaleIdx;
+        float savedCfg = Cfg.UiScale;
+        Display.AnimSpeedIdx = Display.AnimSpeedLevels.Length - 1;   // fastest setting
+        if (Display.AnimSpeed <= 1f) fails.Add("animSpeedTopIsNotFaster");
+        var harnessGame = new Game { NoPersist = true };
+        if (harnessGame.AnimSpeed != 1f) fails.Add("noPersistNotPinned=" + harnessGame.AnimSpeed);
+        var botGame = new Game { AutoPlay = true };
+        if (botGame.AnimSpeed != 1f) fails.Add("autoPlayNotPinned=" + botGame.AnimSpeed);
+        var liveGame = new Game();
+        if (liveGame.AnimSpeed != Display.AnimSpeed) fails.Add("liveGameNotWired");
+        // ...and the cycle wraps back to 1x rather than running away
+        Display.AnimSpeedIdx = 0;
+        for (int i = 0; i < Display.AnimSpeedLevels.Length; i++) Display.CycleAnimSpeed();
+        if (Display.AnimSpeedIdx != 0 || Display.AnimSpeed != 1f) fails.Add("animCycleWrap");
+
+        // ---- (B2) the text scale is symmetric, tapered, and inert at 100% --------------------
+        Cfg.UiScale = 1f;
+        float base12 = Cfg.Measure("STABILIZE", 12, 1f).X;
+        float base44 = Cfg.Measure("STABILIZE", 44, 1f).X;
+        Cfg.UiScale = 1.2f;
+        float big12 = Cfg.Measure("STABILIZE", 12, 1f).X;
+        float big44 = Cfg.Measure("STABILIZE", 44, 1f).X;
+        if (!(big12 > base12 * 1.1f)) fails.Add($"bodyTextDidNotScale {base12:0.#}->{big12:0.#}");
+        if (MathF.Abs(big44 - base44) > 0.01f) fails.Add("titleTextScaledPastTaper");
+        Cfg.UiScale = 1f;
+        if (MathF.Abs(Cfg.Measure("STABILIZE", 12, 1f).X - base12) > 0.01f) fails.Add("scale1NotInert");
+
+        // ---- (B3) both settings survive a REAL JSON round trip -------------------------------
+        string dispPath = Display.SettingsPathPublic;
+        string dispStash = null; bool hadDisp = false;
+        try { hadDisp = System.IO.File.Exists(dispPath); if (hadDisp) dispStash = System.IO.File.ReadAllText(dispPath); } catch { }
+        try
+        {
+            Display.AnimSpeedIdx = 2; Display.UiScaleIdx = 3; Display.ApplyUiScale();
+            float wroteScale = Cfg.UiScale;
+            Display.SaveForTest();
+            Display.AnimSpeedIdx = 0; Display.UiScaleIdx = 1; Display.ApplyUiScale();
+            Display.LoadForTest();
+            if (Display.AnimSpeedIdx != 2) fails.Add("animIdxRoundTrip=" + Display.AnimSpeedIdx);
+            if (Display.UiScaleIdx != 3) fails.Add("uiIdxRoundTrip=" + Display.UiScaleIdx);
+            if (MathF.Abs(Cfg.UiScale - wroteScale) > 0.001f) fails.Add("loadDidNotApplyScaleToCfg");
+            // an out-of-range file must clamp, not crash or index out of bounds
+            System.IO.File.WriteAllText(dispPath, "{\"AnimSpeedIdx\":99,\"UiScaleIdx\":-7}");
+            Display.LoadForTest();
+            if (Display.AnimSpeedIdx != Display.AnimSpeedLevels.Length - 1) fails.Add("animIdxClamp");
+            if (Display.UiScaleIdx != 0) fails.Add("uiIdxClamp");
+            // a pre-W5 profile (neither field) must read as the shipped defaults: 1x, 100%
+            System.IO.File.WriteAllText(dispPath, "{\"BrightIdx\":2}");
+            Display.AnimSpeedIdx = 3; Display.UiScaleIdx = 0;
+            Display.LoadForTest();
+            if (Display.AnimSpeedIdx != 0 || Display.AnimSpeed != 1f) fails.Add("legacyProfileAnimDefault");
+            if (Display.UiScaleIdx != 1 || Cfg.UiScale != 1f) fails.Add("legacyProfileScaleDefault");
+        }
+        catch (Exception ex) { fails.Add("settingsThrew:" + ex.GetType().Name); }
+        finally
+        {
+            try
+            {
+                if (hadDisp) System.IO.File.WriteAllText(dispPath, dispStash);
+                else if (System.IO.File.Exists(dispPath)) System.IO.File.Delete(dispPath);
+            }
+            catch { }
+            Display.AnimSpeedIdx = savedAnim; Display.UiScaleIdx = savedScale; Cfg.UiScale = savedCfg;
+        }
+
+        return fails.Count == 0
+            ? "ONRAMPTEST: PASS (RECRUIT rung -1: data row + built mission -1 body/-1 stat at m1 AND m3, 5-turn bleed-out, checkpoint from m1 and once only, no mutator leak, no negative intel; heat 0 untouched; anim speed pinned 1x under AutoPlay/NoPersist; text scale symmetric + tapered; both settings round-trip, clamp, and default on a pre-W5 profile)"
+            : "ONRAMPTEST: FAIL (" + string.Join(",", fails.Distinct()) + ")";
+    }
+
 }

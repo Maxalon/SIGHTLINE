@@ -25,6 +25,7 @@ public static class Hud
     public static System.Collections.Generic.List<(Rectangle rect, Unit unit)> RosterChips = new();
     public static Rectangle PauseResume, PauseMute, PauseShake, PauseThreat, PauseFullscreen, PauseWindow, PauseAbandon;
     public static Rectangle PauseBright, PauseGamma, PauseColorblind, PauseAutoCam, PauseCodex;
+    public static Rectangle PauseAnimSpeed, PauseUiScale;   // W5 ON-RAMP comfort controls
     /// RESONANCE A2 — the four mix faders (MASTER / SFX / MUSIC / UI), indexed to match
     /// Display.VolNames. Click or drag anywhere in the track to set the level.
     public static readonly Rectangle[] PauseVol = new Rectangle[4];
@@ -227,7 +228,12 @@ public static class Hud
         // A2: TWO COLUMNS. The single stack was already 771px tall inside an 800px window —
         // there was physically nowhere to put the four mix faders. Splitting display settings
         // (left) from audio + exits (right) buys the room and reads better at twelve rows.
-        int w = 760, h = 588;
+        // W5 ON-RAMP: two more left-column rows (ANIM SPEED, TEXT SIZE). The card height is now
+        // DERIVED from the row count instead of hand-tuned, so the next row can't silently push
+        // the controls hint off the bottom edge.
+        const int leftRows = 11;
+        int bw0 = 320, bh0 = 42, gap0 = 11;
+        int w = 760, h = 84 + leftRows * bh0 + (leftRows - 1) * gap0 + 38;
         int x = Cfg.ScreenW / 2 - w / 2, y = Cfg.ScreenH / 2 - h / 2;
         y -= (int)((1f - Util.EaseOutQuad(in_)) * 14f);
         var card = new Rectangle(x, y, w, h);
@@ -236,7 +242,7 @@ public static class Hud
 
         Cfg.TitleText("PAUSED", new Vector2(x + w / 2 - (int)Cfg.TitleMeasure("PAUSED", 40, 1f).X / 2, y + 22), 40, 1f, Pal.Friend);
 
-        int bw = 320, bh = 42, gap = 11;
+        int bw = bw0, bh = bh0, gap = gap0;
         int cx1 = x + 40, cx2 = x + 400, top = y + 84;
 
         // ---- left column: display / view settings ----
@@ -249,7 +255,9 @@ public static class Hud
         PauseBright     = new Rectangle(cx1, by, bw, bh); by += bh + gap;
         PauseGamma      = new Rectangle(cx1, by, bw, bh); by += bh + gap;   // W9: true gamma (post-FX)
         PauseColorblind = new Rectangle(cx1, by, bw, bh); by += bh + gap;
-        PauseAutoCam    = new Rectangle(cx1, by, bw, bh);
+        PauseAutoCam    = new Rectangle(cx1, by, bw, bh); by += bh + gap;
+        PauseAnimSpeed  = new Rectangle(cx1, by, bw, bh); by += bh + gap;   // W5 comfort
+        PauseUiScale    = new Rectangle(cx1, by, bw, bh);                   // W5 comfort
 
         DrawButtonRect(PauseResume, "RESUME", "ESC", true, false, Pal.Friend);
         DrawButtonRect(PauseFullscreen, Display.Fullscreen ? "FULLSCREEN: ON" : "FULLSCREEN: OFF", "F", true, !Display.Fullscreen, Pal.Accent);
@@ -265,6 +273,10 @@ public static class Hud
         DrawButtonRect(PauseGamma, "GAMMA: " + Display.GammaLabel, "", true, false, Pal.Accent);
         DrawButtonRect(PauseColorblind, Pal.Colorblind ? "COLORBLIND: ON" : "COLORBLIND: OFF", "", true, Pal.Colorblind, Pal.Accent);
         DrawButtonRect(PauseAutoCam, Display.AutoCam ? "AUTO-CAM: ON" : "AUTO-CAM: OFF", "", true, Display.AutoCam, Pal.Accent);
+        // W5 ON-RAMP — the two comfort controls. ANIM SPEED multiplies the animation-queue dt only
+        // (the queue's state machine is untouched); TEXT SIZE scales the body-text layer.
+        DrawButtonRect(PauseAnimSpeed, "ANIM SPEED: " + Display.AnimSpeedLabel, "F2", true, Display.AnimSpeedIdx != 0, Pal.Accent);
+        DrawButtonRect(PauseUiScale, "TEXT SIZE: " + Display.UiScaleLabel, "", true, Display.UiScaleIdx != 1, Pal.Accent);
 
         // ---- right column: the audio mix, then the exits ----
         by = top;
@@ -281,7 +293,7 @@ public static class Hud
 
         // bottom-align the two exits with the left column's last row, so the card reads as
         // two balanced columns rather than one long one next to a short one
-        by = top + 9 * bh + 8 * gap - (bh + gap + bh);
+        by = top + leftRows * bh + (leftRows - 1) * gap - (bh + gap + bh);
         PauseCodex   = new Rectangle(cx2, by, bw, bh); by += bh + gap;
         PauseAbandon = new Rectangle(cx2, by, bw, bh);
         DrawButtonRect(PauseCodex, "FIELD MANUAL", "K", true, false, Pal.Good);
@@ -548,15 +560,19 @@ public static class Hud
             rx -= mw + 16;
         }
 
-        // Heat/Ascension indicator (only at heat > 0, so heat 0 stays byte-identical)
-        if (g.HeatLevel > 0)
+        // Difficulty indicator. Off at heat 0 (so the standard fight stays byte-identical); RED
+        // above it, and W5 adds a GREEN chip at the RECRUIT rung — the player should never be in
+        // doubt which difficulty their run is being played at, in either direction.
+        bool hRecruit = Sightline.Heat.IsRecruit(g.HeatLevel);
+        if (g.HeatLevel > 0 || hRecruit)
         {
-            string ht = $"HEAT {g.HeatLevel}";
+            string ht = Sightline.Heat.Label(g.HeatLevel);
+            Color hc = hRecruit ? Pal.Good : Pal.Foe;
             float hw = Cfg.Measure(ht, 14, 1f).X + 22;
             var hp = new Rectangle(rx - hw, cy - 13, hw, 26);
             Raylib.DrawRectangleRounded(hp, 0.4f, 8, Pal.Panel);
-            Raylib.DrawRectangleLinesEx(hp, 1.5f, Raylib.Fade(Pal.Foe, 0.6f));
-            CenterText(ht, hp, 14, Pal.Foe);
+            Raylib.DrawRectangleLinesEx(hp, 1.5f, Raylib.Fade(hc, 0.6f));
+            CenterText(ht, hp, 14, hc);
             _heatRect = hp;
             rx -= hw + 16;
         }
@@ -820,9 +836,12 @@ public static class Hud
         {
             var mods = new System.Collections.Generic.List<string>();
             foreach (var hm in Sightline.Heat.Active(g.HeatLevel)) mods.Add($"{hm.Name}: {hm.Desc}");
-            DrawHoverCard($"HEAT {g.HeatLevel}",
-                $"Self-chosen difficulty — {string.Join(".  ", mods)}.  Pays +{Sightline.Heat.IntelBonus(g.HeatLevel)} intel per mission.",
-                _heatRect.X, _heatRect.Y + _heatRect.Height + 6, Pal.Foe);
+            bool cardRecruit = Sightline.Heat.IsRecruit(g.HeatLevel);
+            DrawHoverCard(Sightline.Heat.Label(g.HeatLevel),
+                cardRecruit
+                    ? $"The on-ramp rung, below standard — {string.Join(".  ", mods)}.  Same objectives and roster; no intel bonus, and a win here does not raise the heat ceiling."
+                    : $"Self-chosen difficulty — {string.Join(".  ", mods)}.  Pays +{Sightline.Heat.IntelBonus(g.HeatLevel)} intel per mission.",
+                _heatRect.X, _heatRect.Y + _heatRect.Height + 6, cardRecruit ? Pal.Good : Pal.Foe);
             return;
         }
         if (PillHover(g, m, _pressureRect, "pressure"))
@@ -2429,16 +2448,23 @@ public static class Hud
         if (run?.Memorial != null) foreach (var f in run.Memorial) totalKills += f.Kills;   // count the fallen's lifetime kills too
         int missionsShown = win ? Run.MaxMissions : Math.Max(0, mission - 1);
 
-        var stats = new System.Collections.Generic.List<(string label, int value, Color col)>
+        // `over` (W5): an optional literal to print INSTEAD of the counted number — the difficulty
+        // slab needs a word at the RECRUIT rung, because counting up to "-1" would read as a
+        // penalty rather than as the name of the setting the run was played on.
+        var stats = new System.Collections.Generic.List<(string label, int value, Color col, string over)>
         {
-            ("MISSIONS CLEARED", missionsShown, accent),
-            ("INTEL EARNED",     run?.Intel ?? 0, Pal.Accent),   // FUL-12 review: spec wording
-            ("CONFIRMED KILLS",  totalKills, Pal.Friend),
+            ("MISSIONS CLEARED", missionsShown, accent, null),
+            ("INTEL EARNED",     run?.Intel ?? 0, Pal.Accent, null),   // FUL-12 review: spec wording
+            ("CONFIRMED KILLS",  totalKills, Pal.Friend, null),
         };
-        stats.Add(("HEAT / ASCENSION", run?.HeatLevel ?? 0, (run?.HeatLevel ?? 0) > 0 ? Pal.Foe : Pal.TxtDim));
+        int endHeat = run?.HeatLevel ?? 0;
+        bool endRecruit = Sightline.Heat.IsRecruit(endHeat);
+        stats.Add(("DIFFICULTY", endRecruit ? 0 : endHeat,
+                   endHeat > 0 ? Pal.Foe : endRecruit ? Pal.Good : Pal.TxtDim,
+                   endRecruit ? "RECRUIT" : null));
         // FUL-12: the SALVAGE bounty gets a real slab (gold — it's the persistent currency). Only
         // when the meta path actually banked some, so harness/autoplay cards keep their 4-slab row.
-        if (g.EndSalvage > 0) stats.Add(("SALVAGE BANKED", g.EndSalvage, Pal.VipGold));
+        if (g.EndSalvage > 0) stats.Add(("SALVAGE BANKED", g.EndSalvage, Pal.VipGold, null));
 
         float statsIn = PanelAnim("endStats", 0.3f, 0.45f);
         int n = stats.Count;
@@ -2459,9 +2485,10 @@ public static class Hud
             Raylib.DrawRectangle((int)slab.X, (int)slab.Y, 3, (int)slab.Height, Raylib.Fade(stats[i].col, a));
             // big counted number
             int shownVal = (int)MathF.Round(stats[i].value * countF);
-            string num = shownVal.ToString();
-            Vector2 nmz = Cfg.Measure(num, 42, 1f);
-            Cfg.Text(num, new Vector2(slab.X + slab.Width / 2 - nmz.X / 2, slab.Y + 14), 42, 1f, Raylib.Fade(stats[i].col, a));
+            string num = stats[i].over ?? shownVal.ToString();
+            float numSz = stats[i].over != null ? 26f : 42f;   // a word needs to fit the slab a numeral was sized for
+            Vector2 nmz = Cfg.Measure(num, numSz, 1f);
+            Cfg.Text(num, new Vector2(slab.X + slab.Width / 2 - nmz.X / 2, slab.Y + (numSz < 42f ? 24 : 14)), numSz, 1f, Raylib.Fade(stats[i].col, a));
             Vector2 lz = Cfg.Measure(stats[i].label, 12, 1f);
             Cfg.Text(stats[i].label, new Vector2(slab.X + slab.Width / 2 - lz.X / 2, slab.Y + 62), 12, 1f, Raylib.Fade(Pal.TxtDim, a));
         }
@@ -2564,8 +2591,9 @@ public static class Hud
         DrawGhostButton(SkirmHeatPlus, "+", null, pIn);
         var heatBox = new Rectangle(px + 28 + 44 + 8, hy, 120, hH);
         Raylib.DrawRectangleRounded(heatBox, 0.2f, 8, Raylib.Fade(Pal.Bg, 0.6f * pIn));
-        string heatTxt = g.SkirmishHeat > 0 ? $"HEAT {g.SkirmishHeat}" : "STANDARD";
-        Color heatCol = g.SkirmishHeat > 0 ? Pal.Foe : Pal.TxtDim;
+        bool sRecruit = Sightline.Heat.IsRecruit(g.SkirmishHeat);
+        string heatTxt = g.SkirmishHeat > 0 ? $"HEAT {g.SkirmishHeat}" : sRecruit ? "RECRUIT" : "STANDARD";
+        Color heatCol = g.SkirmishHeat > 0 ? Pal.Foe : sRecruit ? Pal.Good : Pal.TxtDim;
         CenterText(heatTxt, heatBox, 18, Raylib.Fade(heatCol, pIn));
         // W12: the unlock hint brightened a step — it is the ladder's call to action, not chrome.
         string cap = g.UnlockedHeat > 0 ? $"unlocked to {g.UnlockedHeat}" : "win at heat to unlock more";
@@ -3470,7 +3498,7 @@ public static class Hud
         }
 
         // ---- mission-1 + heat preview ----
-        string m1 = $"FIRST OP: {ObjectiveLabel(Run.ObjectiveFor(1))}   ·   HEAT {g.PendingHeat}";
+        string m1 = $"FIRST OP: {ObjectiveLabel(Run.ObjectiveFor(1))}   ·   {Sightline.Heat.Label(g.PendingHeat)}";
         var m1m = Cfg.Measure(m1, 14, 1f);
         int infoY = cy + cch + 10;
         Cfg.Text(m1, new Vector2(W / 2f - m1m.X / 2f, infoY), 14, 1f, Pal.TxtDim);
@@ -3582,10 +3610,12 @@ public static class Hud
 
         string title = $"MISSION {run.Mission} COMPLETE";
         Cfg.TitleText(title, new Vector2(x + w / 2 - (int)Cfg.TitleMeasure(title, 38, 1f).X / 2, y + 26), 38, 1f, Pal.Good);
-        string sub = run.HeatLevel > 0
-            ? $"BARRACKS - SQUAD DEBRIEF   |   INTEL {run.Intel}   |   HEAT {run.HeatLevel}"
+        bool bRecruit = Sightline.Heat.IsRecruit(run.HeatLevel);
+        string sub = run.HeatLevel > 0 || bRecruit
+            ? $"BARRACKS - SQUAD DEBRIEF   |   INTEL {run.Intel}   |   {Sightline.Heat.Label(run.HeatLevel)}"
             : $"BARRACKS - SQUAD DEBRIEF   |   INTEL {run.Intel}";
-        Cfg.Text(sub, new Vector2(x + w / 2 - (int)Cfg.Measure(sub, 13, 1f).X / 2, y + 70), 13, 1f, run.HeatLevel > 0 ? Pal.Foe : Pal.TxtDim);
+        Cfg.Text(sub, new Vector2(x + w / 2 - (int)Cfg.Measure(sub, 13, 1f).X / 2, y + 70), 13, 1f,
+                 run.HeatLevel > 0 ? Pal.Foe : bRecruit ? Pal.Good : Pal.TxtDim);
         if (run.HeatLevel > 0)
         {
             var names = new System.Collections.Generic.List<string>();
@@ -4369,30 +4399,41 @@ public static class Hud
         int level = Sightline.Heat.Clamp(g.PendingHeat);
         int unlocked = Sightline.Heat.Clamp(g.UnlockedHeat);
 
+        // W5 ON-RAMP: the dial now runs RECRUIT - 0 - 8, so this card is the DIFFICULTY picker,
+        // not just a heat dial. RECRUIT (rung -1) is always selectable (it is an on-ramp, not a
+        // reward); the ceiling above 0 is still the earned unlock.
+        bool recruit = Sightline.Heat.IsRecruit(level);
         int w = 320, x = Cfg.ScreenW - w - 40, y = 150;
         // height grows with the active-modifier list (always tall enough for the ceiling's worth)
-        int rows = Math.Max(1, level);
+        int rows = recruit ? RecruitLines.Length : Math.Max(1, level);
         int assist = g.AssistPreview;
         int h = 132 + rows * 26 + 30;
         var card = new Rectangle(x, y, w, h);
         PanelShadow(card, 1f, 0.06f);
         Raylib.DrawRectangleRounded(card, 0.06f, 8, Pal.Panel);
-        Raylib.DrawRectangleLinesEx(card, 1.5f, level > 0 ? Raylib.Fade(Pal.Foe, 0.7f) : Pal.PanelBd);
+        Raylib.DrawRectangleLinesEx(card, 1.5f,
+            level > 0 ? Raylib.Fade(Pal.Foe, 0.7f) : recruit ? Raylib.Fade(Pal.Good, 0.7f) : Pal.PanelBd);
 
         // W12 (owner-legibility): the panel's informational text sits ONE CONTRAST STEP above
         // TxtDim — this card is a decision surface on a dark backdrop, not passive chrome.
         Color heatTxt2 = Pal.RGBA(164, 178, 198);
-        Color heatCol = level > 0 ? Pal.Foe : heatTxt2;
-        Cfg.Text("HEAT / ASCENSION", new Vector2(x + 18, y + 14), 14, 1f, Pal.Accent);
+        Color heatCol = level > 0 ? Pal.Foe : recruit ? Pal.Good : heatTxt2;
+        Cfg.Text("DIFFICULTY", new Vector2(x + 18, y + 14), 14, 1f, Pal.Accent);
 
-        // big level readout + the -/+ stepper
-        string val = level.ToString();
-        Cfg.Text("HEAT", new Vector2(x + 18, y + 48), 16, 1f, heatTxt2);
-        Cfg.Text(val, new Vector2(x + w / 2 - (int)Cfg.Measure(val, 40, 1f).X / 2, y + 40), 40, 1f, heatCol);
+        // big level readout + the -/+ stepper. RECRUIT reads as a WORD, never as "-1": a negative
+        // number would read as a penalty, and the rung is a named setting, not a deficit.
+        Cfg.Text(recruit ? "RUNG" : "HEAT", new Vector2(x + 18, y + 48), 16, 1f, heatTxt2);
+        if (recruit)
+            Cfg.Text("RECRUIT", new Vector2(x + w / 2 - (int)Cfg.Measure("RECRUIT", 26, 1f).X / 2, y + 48), 26, 1f, heatCol);
+        else
+        {
+            string val = level.ToString();
+            Cfg.Text(val, new Vector2(x + w / 2 - (int)Cfg.Measure(val, 40, 1f).X / 2, y + 40), 40, 1f, heatCol);
+        }
 
         HeatMinus = new Rectangle(x + 18, y + 50, 34, 34);
         HeatPlus = new Rectangle(x + w - 52, y + 50, 34, 34);
-        DrawStepper(HeatMinus, "-", level > 0);
+        DrawStepper(HeatMinus, "-", level > Sightline.Heat.Min);
         DrawStepper(HeatPlus, "+", level < unlocked);
 
         Cfg.Text($"MAX UNLOCKED: {unlocked}", new Vector2(x + 18, y + 92), 12, 1f, heatTxt2);
@@ -4414,13 +4455,25 @@ public static class Hud
         }
         else
         {
-            string hint = level > 0 ? $"+{Sightline.Heat.IntelBonus(level)} intel / mission" : "standard difficulty";
+            string hint = level > 0 ? $"+{Sightline.Heat.IntelBonus(level)} intel / mission"
+                        : recruit ? "same campaign, wider margin"
+                        : "standard difficulty - the designed fight";
             Cfg.Text(hint, new Vector2(x + 18, y + 110), 12, 1f, level > 0 ? Pal.Good : heatTxt2);
         }
 
         // active modifiers (cumulative rungs 1..level)
         int my = y + 132;
-        if (level == 0)
+        if (recruit)
+        {
+            for (int ri = 0; ri < RecruitLines.Length; ri++)
+            {
+                Cfg.Text("+", new Vector2(x + 18, my), 12, 1f, Pal.Good);
+                Cfg.Text(RecruitLines[ri].head, new Vector2(x + 40, my), 12, 1f, Pal.Txt);
+                Cfg.Text(RecruitLines[ri].body, new Vector2(x + 40, my + 13), 12, 1f, heatTxt2);
+                my += 26;
+            }
+        }
+        else if (level == 0)
             Cfg.Text("No modifiers active.", new Vector2(x + 18, my), 12, 1f, heatTxt2);
         else
         {
@@ -4434,8 +4487,21 @@ public static class Hud
             }
         }
 
-        Cfg.Text("[<] [>] to adjust", new Vector2(x + 18, y + h - 20), 12, 1f, heatTxt2);
+        Cfg.Text(recruit ? "[>] for HEAT 0 - the standard fight" : "[<] [>] to adjust",
+                 new Vector2(x + 18, y + h - 20), 12, 1f, heatTxt2);
     }
+
+    /// W5 ON-RAMP — the RECRUIT rung's player-facing breakdown. Written to be read next to HEAT 0's
+    /// "standard difficulty - the designed fight": the two must be tellable apart at a glance, and
+    /// the copy must be honest about what it does rather than apologetic about who it is for. Every
+    /// line names a real, verifiable mechanic (Heat.RecruitMod, Game.DownedTimerTurnsNow,
+    /// Game.TryReinforcements) — no vague "easier".
+    static readonly (string head, string body)[] RecruitLines =
+    {
+        ("LIGHTER OPPOSITION", "One fewer hostile; enemies -1 HP and -1 aim"),
+        ("LONGER LAST LIGHT",  "A downed soldier holds 5 turns, not 3"),
+        ("EARLY CHECKPOINT",   "Reinforcements can save a wipe from mission 1"),
+    };
 
     static void DrawStepper(Rectangle r, string sym, bool enabled)
     {

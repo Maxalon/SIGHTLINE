@@ -258,7 +258,12 @@ public class HeatModifier
 /// from the deletable run save).
 public static class Heat
 {
-    public const int Min = 0;
+    // W5 ON-RAMP: the ladder now extends BELOW standard. Rung -1 is RECRUIT — a real, honest
+    // difficulty setting for a first campaign (see Recruit below), not a hidden cheat. Only the
+    // chosen LEVEL is persisted (an int on Run/save DTO), and Mods is untouched, so extending the
+    // range is save-safe by construction: no enum was reordered, nothing was inserted into Mods.
+    public const int Recruit = -1;            // the single sub-standard rung
+    public const int Min = Recruit;
     public const int Max = 8;                 // ladder ceiling
     public const int IntelPerLevel = 3;       // extra requisition intel per cleared mission, per heat level
 
@@ -279,6 +284,28 @@ public static class Heat
     // stays a true no-op. Re-tuning the deltas/flags is SAVE-SAFE -- only the chosen LEVEL is
     // persisted, and "apply rungs 1..level cumulatively" (the meaning of a saved level) is
     // unchanged; rung indices keep their escalating-difficulty concept (no reorder/removal).
+    // ---- RECRUIT (rung -1): the on-ramp ------------------------------------------------
+    // Heat 0 is the DESIGNED difficulty and stays exactly that. RECRUIT is the rung below it, for
+    // a player learning the verbs — and it is deliberately built out of the SAME knobs the ladder
+    // uses, just pointed the other way: one fewer hostile per mission and a force-wide -1 HP/-1
+    // aim. On top of the data row, two Game-side valves open (see Game.DownedTimerTurnsNow and
+    // Game.TryReinforcements): a downed soldier holds for 5 turns instead of 3, and the one-time
+    // REINFORCEMENTS checkpoint is available from mission 1 instead of mission 3 — so an early
+    // wipe costs the veterans, not the whole run.
+    //
+    // It is NOT a "baby mode" and the copy must never call it one: the objectives, the arenas, the
+    // enemy roster, the bleed-out economy and the six-mission arc are identical. What changes is
+    // the margin for a mistake. Winning at RECRUIT deliberately does NOT advance the Heat ceiling
+    // (Game's unlock check is `>= UnlockedHeat`, and -1 never clears 0) and pays no intel bonus —
+    // the ladder above still has to be earned on its own terms.
+    public static readonly HeatModifier RecruitMod = new HeatModifier
+    {
+        Name = "RECRUIT",
+        Desc = "One fewer hostile; enemies -1 HP & aim; longer bleed-out; checkpoint from m1",
+        EnemyDelta = -1,
+        StatDelta = -1,
+    };
+
     public static readonly HeatModifier[] Mods =
     {
         new HeatModifier { Name = "REINFORCED",   Desc = "+1 enemy per mission",                 EnemyDelta = 1 },
@@ -323,8 +350,20 @@ public static class Heat
     public static IEnumerable<HeatModifier> Active(int level)
     {
         int n = Clamp(level);
+        // W5: the sub-standard rung is a SINGLE modifier, not a cumulative stack (there is only
+        // one). Every accessor below iterates Active, so they all pick up its negative deltas
+        // without a second code path.
+        if (n < 0) { yield return RecruitMod; yield break; }
         for (int i = 0; i < n && i < Mods.Length; i++) yield return Mods[i];
     }
+
+    /// True at the sub-standard RECRUIT rung (level -1). The Game-side comfort valves (longer
+    /// bleed-out clock, checkpoint from mission 1) read this; the stat/body relief rides the
+    /// normal EnemyDelta/StatDelta accessors.
+    public static bool IsRecruit(int level) => Clamp(level) < 0;
+
+    /// The player-facing name of a rung: "RECRUIT" below standard, "HEAT n" at or above it.
+    public static string Label(int level) => IsRecruit(level) ? "RECRUIT" : "HEAT " + Clamp(level);
 
     // ---- cumulative effect accessors (sum/any over the active rungs) ----
     public static int EnemyDelta(int level) { int s = 0; foreach (var m in Active(level)) s += m.EnemyDelta; return s; }
@@ -348,6 +387,7 @@ public static class Heat
     public static int IntelBonus(int level)
     {
         int n = Clamp(level);
+        if (n <= 0) return 0;   // W5: RECRUIT pays the standard rate, never a NEGATIVE payout
         return n * IntelPerLevel + n * n / 2;
     }
 }
@@ -412,7 +452,7 @@ public class Run
     // moment the checkpoint fires, so a SECOND wipe is a real loss. Persisted (append-only DTO field;
     // old saves default false). Reset in Start().
     public bool CheckpointUsed;
-    public int HeatLevel;                     // chosen Heat/Ascension difficulty (0..Heat.Max); persisted in the run save
+    public int HeatLevel;                     // chosen difficulty (Heat.Min..Heat.Max; -1 = RECRUIT); persisted in the run save
     public List<string> Fallen = new();       // names of KIA soldiers
     // Run-end MEMORIAL (presentation only): a richer KIA record (full identity + rank/class/
     // kills + the mission they fell on) accumulated across the WHOLE run, so the run-summary

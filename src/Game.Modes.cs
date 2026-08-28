@@ -96,7 +96,10 @@ public partial class Game
         }
         if (heatDelta != 0)
         {
-            SkirmishHeat = Math.Clamp(SkirmishHeat + heatDelta, 0, UnlockedHeat);
+            // W5: the dial's floor is Heat.Min, so a skirmish can be set to RECRUIT too — the
+            // intro seeds SkirmishHeat from PendingHeat, and a dial that snapped back to 0 on the
+            // first press would silently discard the difficulty the player had already chosen.
+            SkirmishHeat = Math.Clamp(SkirmishHeat + heatDelta, Sightline.Heat.Min, UnlockedHeat);
             Audio.Play("select");
         }
 

@@ -215,6 +215,18 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        // SIGHTLINE_ONRAMPTEST=1 : RESONANCE W5 — the RECRUIT rung (a real difficulty below standard)
+        // and the comfort settings (anim speed / UI text scale) incl. the harness-pinning guard.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_ONRAMPTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "onramptest");   // SetupMission / Cfg.Measure need a GL context
+            // The text-scale assertions MEASURE, so Cfg needs a real atlas; the bundled TTFs are
+            // irrelevant to what is being asserted (a ratio), so the built-in font is enough.
+            Cfg.Font = Cfg.FontUi = Cfg.FontTitle = Raylib.GetFontDefault();
+            Console.WriteLine(new Game().OnRampSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         // SIGHTLINE_HEATLADDERTEST=1 : APEX W1 — the heat>=7 / IRON VETERANS zero-roster seam: a lone-VIP
         // Escort/Rescue win under a no-reinforcements regime must still field a squad next mission.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_HEATLADDERTEST") == "1")
