@@ -2638,7 +2638,10 @@ telegraphed only ~0.5 s before the unit acted, during the enemy turn — drama, 
   shots. The hover card reports the suppressed case in full, so nothing is hidden from a player
   who asks — it is only kept off the board.
 * **Hover card (src/Hud.cs `DrawThreatCard`).** "INCOMING FIRE · 4 hostiles bear · best 95% ·
-  ~12 dmg", plus FLANKED / EXPOSED, `worst gun: REAVER — BERSERKER`, and an OVERWATCH LANE line.
+  ~12 dmg", plus `worst gun: REAVER — BERSERKER`, a FLANKED line when the tile is a flank, and an
+  OVERWATCH LANE line. It says NOTHING on a clean tile (the absent meter already says that) and
+  does not print the modal EXPOSED state — a panel that pops on all ~130 reachable tiles with a
+  line every player reads on every tile is chrome, not information.
   Echoes the board's meter glyph on its title row (vocabulary learned without a legend). Yields to
   the two cards that already own the hover (shot tooltip, enemy-ID card) and only ever speaks about
   an empty reachable tile.
@@ -2658,7 +2661,10 @@ level + flank ANGLE; out-of-range / no-LoS / dormant / dry / dead exclusion, eac
 overwatch + focused-cone lanes; unreachable-tile skip; caged captive; mover non-mutation; the
 post-move HUNKER model; cache hit/miss) → **PASS**. `COMBATTEST / SAVETEST / AITEST / OWTEST /
 ITEMTEST` PASS. `PAIRTEST` **PASS** (both legs MATCH). Autoplay x5 clean, no exceptions, no
-TIMEOUT. `SIGHTLINE_BALANCE=10` on branch vs merge-base 2dec210 — identical (see below).
+TIMEOUT. `SIGHTLINE_BALANCE=10` on branch vs merge-base 2dec210 — `runs=20 missions=81` on both (asserted,
+not a zero-data batch), and a full diff of the two reports shows **only wall-clock timings and the
+output path** differing. Every measured statistic — per-heat win rates, per-objective tables, perk/
+purchase/proc/event telemetry, decision richness, policy gap — is byte-identical.
 
 **Perf.** Measured, not estimated. Real board (mission 2, 135 reachable tiles, 6 armed hostiles):
 **1.06 ms per rebuild**, and rebuilds now happen only on a real change instead of 60x/s. Smaller

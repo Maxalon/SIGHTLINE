@@ -1823,27 +1823,24 @@ public static class Hud
         foreach (var e in g.Enemies) if (e.Alive && e.Active && e.Ammo > 0) { anyFoe = true; break; }
         if (!anyFoe) return;   // nothing is shooting at anyone — a "you are safe" card would be noise
 
+        // NO CARD ON A CLEAN TILE. The absence of a danger meter on the board already says "nothing
+        // bears on this"; popping an affirmation panel under the cursor on every one of ~130
+        // reachable tiles would put permanent chrome over the play surface for zero new information.
+        // The card speaks only when there IS fire to report.
+        if (c.Guns == 0) return;
+
         var lines = new System.Collections.Generic.List<(string txt, Color col)>();
-        string title; Color accent;
-        if (c.Guns == 0)
+        const string title = "INCOMING FIRE";
+        Color accent = Pal.Foe;
+        string guns = c.Guns == 1 ? "1 hostile bears" : $"{c.Guns} hostiles bear";
+        lines.Add(($"{guns}  ·  best {c.BestHit}%  ·  ~{Math.Max(1, (int)MathF.Round(c.ExpDmg))} dmg", Pal.Txt));
+        // Only the EXCEPTIONAL cover state earns a line. "EXPOSED" is the modal condition on most
+        // boards, and a line every player reads on every tile is a line nobody reads.
+        if (c.Flanked) lines.Add(("FLANKED — cover won't protect you here", Pal.Foe));
+        if (!string.IsNullOrEmpty(c.WorstCls))
         {
-            title = here ? "NO INCOMING FIRE" : "CLEAR TILE";
-            accent = Pal.Good;
-            lines.Add(("no active hostile bears on this tile", Pal.TxtDim));
-        }
-        else
-        {
-            title = "INCOMING FIRE";
-            accent = Pal.Foe;
-            string guns = c.Guns == 1 ? "1 hostile bears" : $"{c.Guns} hostiles bear";
-            lines.Add(($"{guns}  ·  best {c.BestHit}%  ·  ~{Math.Max(1, (int)MathF.Round(c.ExpDmg))} dmg", Pal.Txt));
-            if (c.Flanked)      lines.Add(("FLANKED — cover won't protect you here", Pal.Foe));
-            else if (c.Exposed) lines.Add(("EXPOSED — at least one gun has a clean shot", Pal.Suspect));
-            if (!string.IsNullOrEmpty(c.WorstCls))
-            {
-                string nm = Codex.NameFor(c.WorstCls);
-                lines.Add((nm == c.WorstCls ? $"worst gun: {c.WorstCls}" : $"worst gun: {nm} — {c.WorstCls}", Pal.TxtDim));
-            }
+            string nm = Codex.NameFor(c.WorstCls);
+            lines.Add((nm == c.WorstCls ? $"worst gun: {c.WorstCls}" : $"worst gun: {nm} — {c.WorstCls}", Pal.TxtDim));
         }
         if (c.Watched)
             lines.Add((here ? "OVERWATCH LANE — you are standing in a reaction lane"
