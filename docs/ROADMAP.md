@@ -802,12 +802,26 @@ of record (container suspensions have wiped every scratchpad copy — docs are t
       Budget: unpinned h0 completion 60% (unchanged; FUL-13 input); nominal ±3 breaches on
       Sabotage/Decapitate shown to be reference noise by a zero-Defend null batch (full rounds
       table + analysis in docs/DEVLOG.md).
-- [ ] **FUL-11 CEREMONY** (P11, M). m6 finale presentation kit (HVT-named intro card, red top-bar
-      plate, boss ring/aura in DrawUnit, first-sighting banner via NEW CONTACT lane); Wardens
-      finale kit — MakeFinaleRetinue (Mission.cs:891-909) returns null for Wardens: WARBRINGER +
-      CUSTODIAN/MEDIC retinue (cost-neutral, replaces cascade fill; W6 heat-gate for any EXTRA
-      body). Per-kit reference 89/82/85, weakest (Wardens) 73 → all kits 78-88, pooled ±4 of 82.
-      Lands before FUL-13's baseline.
+- [x] **FUL-11 CEREMONY** (P11, M — wt-ful11). m6 finale presentation kit (HVT-named intro card, red
+      top-bar plate, boss ring/aura in DrawUnit, first-sighting banner via NEW CONTACT lane); Wardens
+      finale kit — MakeFinaleRetinue Wardens: SIGNIFER banner (pod 0) + ORDERLY medic (MEDIC over
+      CUSTODIAN — the boss node is always Decapitate, a keeper has nothing to re-lock; the TERROR
+      lesson), cost-neutral cascade-fill replacement (zero extra RNG draws); deterministic no-RNG
+      post-pass guarantees the banner aura covers the boss as spawned (FUL11PROBE: bannerDistMax 4,
+      retinue slots present at h0's 6-body and h4's 9-body finales, 20 seeds x 3 kits x 2 heats).
+      **Measured (h0, 30 campaigns/kit, CRN slots 0-29 shared across kits): Wardens 73 → 83.7,
+      Legion 87.5, Syndicate 81.6 — all in the 78-88 band; pooled 84.2 (n=146) vs the 82±4 goal.
+      No tuning needed; no breaches.** Landed before FUL-13's baseline as sequenced.
+- [ ] **FUL-12 SIGNPOSTS** (P12, L). Run-end card SALVAGE/HEAT-UNLOCKED/ACHIEVEMENT slabs (new
+      Game fields from AwardMetaRunEnd/UnlockHeatOnWin — no Report parsing, NoPersist-gated);
+      tutorial concealment/AMBUSH step + FIELD MANUAL pointer + one-shot BRACE callout (careful
+      around TutStep>=2 gates at Game.cs:1586/:1730); dormant-enemy ID tooltip (DrawTooltip bails
+      at Hud.cs:1391 on !ShowOdds — draw ID-only card + alert-state line); top-bar pill hovers
+      (CONCEALED/PRESSURE/HEAT/CACHE rects → DrawHudHovers); tutorial bar hierarchy (lesson verb
+      bright, rest ~45%, composes with FUL-3's per-button dim); RECOMMENDED draft full 16-boon
+      ranked order (21.4% arbitrary-fallback measured); campaign legend + ('*','BATTLE')
+      ('S','START'); DrawCodexGlyph into Hall of Fame + end-card squad/KIA rows; WAR ROOM panels
+      sized to content. (LOCK-ON/NO QUARTER copy already done in FUL-3.)
 - [x] **FUL-12 SIGNPOSTS** (wt-ful12). All nine sub-items shipped: run-end card SALVAGE slab +
       HEAT-UNLOCKED line + achievement roll via new Game fields (EndSalvage/EndHeatUnlocked/
       EndAchievements set in AwardMetaRunEnd/UnlockHeatOnWin/TryAchievement — no Report parsing,

@@ -535,6 +535,39 @@ public static class Mission
             Stats.RecordSpawn(e.Cls, Combat.MissionFaction != Faction.None);
             enemies.Add(e);
         }
+
+        // FUL-11 — a retinue BANNER must actually ANCHOR the formation it ships with: rows are
+        // shuffled, so slot-1's SIGNIFER could land Chebyshev 5-10 from its own pod-0 boss and the
+        // kit's no-rout aura (Game.BannerRange = 4) covered nothing at spawn. Deterministic
+        // relocation — PURE repositioning after every stream draw above has already happened, zero
+        // RNG consumed, so the world-build draw count is byte-identical: walk Cheb rings 1..range
+        // out from the boss in a fixed scan order and take the first tile that passes the spawn
+        // loop's own invariants (in-bounds / unoccupied / off the evac zone; the grid is still bare
+        // floor here — arenas/barrels stamp AFTER SpawnEnemies and keep unit tiles open). Scoped to
+        // the EXPLICIT retinue slots (i<=2): Legion/Syndicate geometry is W5-measured and
+        // banner-free, and a cascade-rolled WARBRINGER in a later pod is its own formation.
+        if (n >= Run.MaxMissions && enemies.Count > 1)
+        {
+            var boss = enemies[0];
+            for (int i = 1; i < enemies.Count && i <= 2; i++)
+            {
+                var ban = enemies[i];
+                if (!ban.HasBanner || Util.ChebyDist(ban.X, ban.Y, boss.X, boss.Y) <= Game.BannerRange) continue;
+                bool moved = false;
+                for (int d = 1; d <= Game.BannerRange && !moved; d++)
+                    for (int dy = -d; dy <= d && !moved; dy++)
+                        for (int dx = -d; dx <= d && !moved; dx++)
+                        {
+                            if (Math.Max(Math.Abs(dx), Math.Abs(dy)) != d) continue;   // ring cells only
+                            int tx = boss.X + dx, ty = boss.Y + dy;
+                            if (!grid.InBounds(tx, ty) || used.Contains((tx, ty)) || evac.Contains((tx, ty))) continue;
+                            used.Remove((ban.X, ban.Y));
+                            ban.X = tx; ban.Y = ty;
+                            used.Add((tx, ty));
+                            moved = true;
+                        }
+            }
+        }
     }
 
     /// Pick a rank-and-file hostile archetype for mission tier `n` from a uniform roll `r` in
@@ -890,19 +923,22 @@ public static class Mission
     {
         // (On the WARLORD statline history: HP 20+2n -> 14+n, aim 72 -> 68 — mission-6 was a
         // ~90%-loss wall; every kit boss keeps 68 aim and a 1-frag pouch via the ELITE branches.)
-        return Combat.MissionFaction switch
+        Unit b = Combat.MissionFaction switch
         {
             Faction.Legion    => ArmSiege(MakeHostile("SIEGELORD", "ELITE", WeaponKind.Lmg, 14 + n, 68, 6, x, y)),
             Faction.Syndicate => ArmShield(MakeHostile("SPYMASTER", "ELITE", WeaponKind.Lmg, 12 + n, 68, 6, x, y)),
             _                 => MakeHostile("WARLORD", "ELITE", WeaponKind.Lmg, 14 + n, 68, 6, x, y),
         };
+        b.IsBoss = true;   // FUL-11: presentation-only key (champion ring + HVT SIGHTED banner)
+        return b;
     }
 
     /// The finale kit's EXPLICIT retinue (slots i==1/2, right behind the boss). Legion escorts its
     /// siege-lord with a LANCER phalanx pair (measured tune — see MakeFinaleBoss: pairing the boss's
     /// strikes with a second real artillery piece sank the kit to a 37% conditional; the boss IS the
-    /// kit's artillery); Syndicate screens its spymaster with a lane-blinding zoner + a leaper.
-    /// Wardens (today's fight) and None return null — the roster/cascade fills every slot as before.
+    /// kit's artillery); Syndicate screens its spymaster with a lane-blinding zoner + a leaper;
+    /// Wardens (FUL-11) anchors its warlord with a SIGNIFER banner + an ORDERLY medic.
+    /// None returns null — the cascade fills every slot as before (the safety invariant).
     static Unit MakeFinaleRetinue(int i, int n, int bump, int x, int y)
     {
         if (i > 2) return null;
@@ -918,6 +954,20 @@ public static class Mission
                     return z;
                 }
                 return MakeHostile("WRAITH", "STRIKER", WeaponKind.Smg, 4 + bump, 60 + bump, 9, x, y);
+            case Faction.Wardens:
+                // FUL-11 — the WARDENS kit stops being "today's fight": the enrage brick arrives
+                // ANCHORED. The SIGNIFER lands in the boss's own pod (i==1 -> PodId 0), so the whole
+                // formation is held against rout until the banner falls, and the ORDERLY contests the
+                // burst-down verb with heals — target priority (banner -> medic -> boss) instead of a
+                // plain HP race. MEDIC over the spec's CUSTODIAN option: the boss node is always
+                // Decapitate, so a keeper has no terminal/charge to re-lock — a dead mechanic on the
+                // one map it would ship on (the TERROR lesson: verify the mechanic can actually fire).
+                // Stats verbatim from the Wardens FactionRoster/W8 lines. COST-NEUTRAL: replaces the
+                // two cascade-fill slots, and MakeHostile draws zero RNG — exactly like the
+                // FactionRoster fill it replaces, so the world-build stream is unchanged.
+                return i == 1
+                    ? MakeHostile("SIGNIFER", "WARBRINGER", WeaponKind.Rifle, 8 + bump, 56 + bump, 5, x, y)
+                    : MakeHostile("ORDERLY", "MEDIC", WeaponKind.Smg, 6 + bump, 52 + bump, 6, x, y);
             default:
                 return null;
         }

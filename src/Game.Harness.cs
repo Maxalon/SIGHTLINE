@@ -2830,6 +2830,76 @@ public partial class Game
             }
     }
 
+    /// FUL-11 — finale-kit spawn DISTRIBUTION probe (the TERROR lesson: verify the mechanic can
+    /// actually fire in the real distribution BEFORE measuring win-rates). For each kit x heat
+    /// {0 = Ai.Tier 0, 4 = Ai.Tier 1 via the ladder} x `seeds` flywheel-identical worlds
+    /// (Util.Reseed(50000+slot), the RunOne pairing seed), rebuild the m6 force and assert:
+    ///   * enemies[0] is the kit's named boss and carries IsBoss;
+    ///   * the EXPLICIT retinue occupies slots 1-2 at LOW heat too (the cost-neutral guarantee —
+    ///     the W6 heat gate trims CASCADE bodies, never the retinue);
+    ///   * Wardens: the SIGNIFER sits in pod 0 with its aura covering the boss AS SPAWNED
+    ///     (Cheb <= Game.BannerRange, the relocation post-pass contract), the ORDERLY is present,
+    ///     and the banner cap holds (exactly one WARBRINGER in the force).
+    /// Prints per-kit composition tallies + the banner-distance max, then PASS/FAIL.
+    public static string Ful11ProbeTest(int seeds)
+    {
+        var fails = new System.Collections.Generic.List<string>();
+        string oldHeat = Environment.GetEnvironmentVariable("SIGHTLINE_HEAT");
+        string oldFin = Environment.GetEnvironmentVariable("SIGHTLINE_FINALE");
+        var sb = new System.Text.StringBuilder();
+        foreach (string kit in new[] { "wardens", "legion", "syndicate" })
+            foreach (int heat in new[] { 0, 4 })
+            {
+                Environment.SetEnvironmentVariable("SIGHTLINE_FINALE", kit);
+                Environment.SetEnvironmentVariable("SIGHTLINE_HEAT", heat.ToString());
+                var comp = new System.Collections.Generic.Dictionary<string, int>();
+                int maxBanDist = -1, minCount = int.MaxValue, maxCount = 0;
+                for (int slot = 0; slot < seeds; slot++)
+                {
+                    Util.Reseed(50000 + slot);                      // the flywheel's pairing seed
+                    var g = new Game { NoPersist = true };
+                    g.StartMission(6);
+                    string tag = $"{kit}/h{heat}/s{slot}";
+                    var es = g.Enemies;
+                    minCount = Math.Min(minCount, es.Count); maxCount = Math.Max(maxCount, es.Count);
+                    foreach (var e in es) comp[e.Cls] = comp.GetValueOrDefault(e.Cls) + 1;
+                    if (es.Count < 3) { fails.Add($"{tag}:tooFewBodies={es.Count}"); continue; }
+                    var boss = es[0];
+                    if (!boss.IsBoss || boss.Cls != "ELITE") fails.Add($"{tag}:slot0NotBoss={boss.Name}");
+                    string wantBoss = kit == "legion" ? "SIEGELORD" : kit == "syndicate" ? "SPYMASTER" : "WARLORD";
+                    if (boss.Name != wantBoss) fails.Add($"{tag}:bossName={boss.Name}");
+                    switch (kit)
+                    {
+                        case "wardens":
+                            if (es[1].Cls != "WARBRINGER") fails.Add($"{tag}:slot1={es[1].Cls}");
+                            if (es[2].Cls != "MEDIC") fails.Add($"{tag}:slot2={es[2].Cls}");
+                            if (es[1].PodId != 0) fails.Add($"{tag}:bannerPod={es[1].PodId}");
+                            int bd = Util.ChebyDist(es[1].X, es[1].Y, boss.X, boss.Y);
+                            maxBanDist = Math.Max(maxBanDist, bd);
+                            if (bd > Game.BannerRange) fails.Add($"{tag}:auraMiss={bd}");
+                            if (es.Count(e => e.Cls == "WARBRINGER") != 1) fails.Add($"{tag}:bannerCap");
+                            break;
+                        case "legion":
+                            if (es[1].Cls != "LANCER" || es[2].Cls != "LANCER") fails.Add($"{tag}:legionRetinue={es[1].Cls}/{es[2].Cls}");
+                            break;
+                        default:
+                            if (es[1].Cls != "SCREENER" || es[2].Cls != "STRIKER") fails.Add($"{tag}:syndRetinue={es[1].Cls}/{es[2].Cls}");
+                            break;
+                    }
+                }
+                sb.Append($"  {kit,-9} h{heat}: bodies {minCount}-{maxCount}");
+                if (kit == "wardens") sb.Append($"  bannerDistMax {maxBanDist}");
+                sb.Append("  comp[");
+                sb.Append(string.Join(" ", comp.OrderByDescending(kv => kv.Value).Select(kv => $"{kv.Key}:{kv.Value}")));
+                sb.AppendLine("]");
+            }
+        Environment.SetEnvironmentVariable("SIGHTLINE_HEAT", oldHeat);
+        Environment.SetEnvironmentVariable("SIGHTLINE_FINALE", oldFin);
+        Console.Write(sb.ToString());
+        return fails.Count == 0 ? $"FUL11PROBE PASS ({seeds} seeds x 3 kits x 2 heats)"
+                                : "FUL11PROBE FAIL: " + string.Join(", ", fails.Take(12));
+    }
+
     /// Harness (screenshot): show the event screen at a mid column.
     public void DebugEvent()
     {
