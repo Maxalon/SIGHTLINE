@@ -2673,3 +2673,134 @@ own tone" shape as `st_lose` did (tail -148.9 dBFS, well inside budget) and was 
 left alone rather than re-voiced blind. No perceptual weighting (LUFS/ITU-R BS.1770) — the
 budget is in dBFS RMS, which under-weights the low-heavy cues; a real loudness model is the
 obvious next instrument.
+
+---
+
+## PROGRAM RESONANCE — WAVE A2 "THE VOICE" (audio voicing, music, mix layer)
+
+A1 built the ear and fixed *levels*. A2 fixed *voicing*, rebuilt the music, and gave the
+owner a mix they can actually turn. Every number below came from a command run at landing
+(`SIGHTLINE_AUDIOGATE=1`, `SIGHTLINE_AUDIODUMP=1`, `scripts/audio-report.py`).
+
+### 1. The weapons were hiss, not gunfire — a one-line unit bug
+
+`Noise()`'s `lp` parameter was used **directly as the one-pole filter coefficient**
+(`alpha = Clamp(lp, 0.02, 1)`). The implied cutoffs: `lp 0.55` = 5.6 kHz, `lp 0.8` = 11.3 kHz,
+`lp 1.0` = **no filtering at all**. Every weapon was a flat broadband rectangle to 22 kHz.
+
+`fc` is now a cutoff **in Hz** (`alpha = 1 - exp(-2*pi*fc/SR)`) over 2-3 cascaded poles, plus
+an RBJ resonant band-pass "body" layer. Both paths are makeup-normalised from their
+impulse-response energy, so a recipe's `vol` numbers still mean "how loud is this layer".
+`Click()` (2.5 ms of unfiltered white noise, byte-identical at the head of fourteen cues) took
+`tone`/`bright`/`len`/`ring`. `Tone()` took a `tilt` one-pole-pair over the oscillator output,
+because `Shape()`'s naive Square/Saw ran an unrolled harmonic comb to Nyquist.
+
+Measured band split, before -> after (AUDIODUMP, % of energy):
+
+| cue | 200 Hz-1 kHz | 1k-5k | >5k |
+|---|---|---|---|
+| w_rifle   | 16.5 -> **58.7** | 17.2 -> 17.2 | 34.1 -> **0.8** |
+| w_shotgun | 17.7 -> **65.5** | 13.6 -> 8.8  | 19.8 -> **0.5** |
+| w_sniper  | 80.3 -> 26.9     | 13.0 -> **67.9** | 3.4 -> 2.7 |
+| w_lmg     | 19.3 -> **54.9** | 12.0 -> 6.0  | 12.3 -> **0.4** |
+| w_smg     | 18.1 -> **67.5** | 18.9 -> 28.2 | 61.7 -> **1.2** |
+| miss      | 16.9 -> **84.2** | 82.9 -> 15.8 | 0.2 -> 0.0 |
+
+Spectral centroid now orders the five weapons the way the fiction does:
+**sniper 1439 > smg 993 > rifle 739 > shotgun 519 > lmg 445 Hz** (it used to be sniper 933 and
+lmg 1873 — the sniper was the *dullest* weapon in the game). Getting there needed the sniper's
+long 300->150 Hz saw tail replaced with a bright ringing wash; at its old level it dragged the
+centroid below the shotgun's.
+
+### 2. Music: rebuilt, and the gate raised to 15%
+
+`PadTone` was a single bare sine with one tremolo, so both beds were a chord of pure tones with
+literal silence between them — black spectrograms. They cleared A1's ">=5% above 1 kHz" check at
+5.5 / 6.4%, a threshold set by the same wave that had to pass it. Rebuilt: harmonic pad stacks
+with per-partial LFO rates and phases; a **loop-seamless band-limited air bed** (a bank of
+integer-Hz sines with fixed-seed phases — real noise cannot loop) split into two coherent
+anti-phase bands so the air's centre of gravity sweeps once per loop; `Pulse` given a real onset
+transient (it was `sin()*exp(-8*phase)`, a sine swelling from zero with no attack); loop 8 s ->
+**16 s**. Most of the new top is *tonal* (chord tones an octave or two up), with the noise bed
+held as a floor — a bed that clears a brightness gate on broadband noise alone is just hiss.
+
+Floor raised to **>=15%**; measured **23.1% (ambient) / 25.2% (combat)**.
+
+### 3. The loop-seam gate was measuring the wrong thing (twice)
+
+Raising brightness immediately tripped A1's secondary `|1st-diff delta| <= 0.005` bound (measured
+0.016 / 0.035). That constant was calibrated against beds whose worst interior sample step was
+0.076; the A2 beds' is 0.20, and a wider-band waveform bends harder *everywhere*. Made it
+scale-free (`CurvRatio`, against the largest interior second difference), the same argument A1
+used for the value delta.
+
+**Then a negative test showed both ratios are too coarse to be a guarantee.** Adding a
+deliberately de-tuned 333.37 Hz partial (does not divide the loop) at amplitude 0.05 left
+ratio 0.03 / curv ratio 0.38 — the gate said PASS on a bed that genuinely clicks. Broadband
+content hides a small discontinuity inside its own worst case.
+
+So the guarantee is now a **proof**: every music generator is a pure function of the sample
+index, so rendering `N + 2048` samples yields the loop plus its own true continuation, and a
+seamless loop repeats itself there exactly. That check flags the same de-tuned partial at
+**0.0250** against a 1e-4 tolerance — and on its first run caught a real **1.4e-4** break in
+`Pulse`'s phase (`(t*rate) % 1f` loses five digits at t~16 s), now exact integer-index
+arithmetic. `ValidateMusic`'s "both endpoints near zero" test was retired for the same reason:
+it is the naive-absolute trap, and the A2 beds legitimately wrap at a non-zero value.
+
+### 4. The mix layer (what makes this tunable by ear)
+
+- **Four persisted faders** — MASTER / SFX / MUSIC / UI in `display.json` (additive fields;
+  their JSON defaults reproduce the old hard-coded 0.60 master + unity), exposed as
+  click-and-drag sliders in the pause menu. The card went **two-column**: the old single stack
+  was already 771 px inside an 800 px window with nowhere to put them. A cue's bus reuses the
+  audio budget's own `CatOf` map, so "what counts as UI" is one decision in one place.
+- **Master limiter** on the mixed bus via `AttachAudioMixedProcessor` (peak follower, ~1 ms
+  attack / ~150 ms release, cubic soft-clip behind it). A1 bought stack headroom out of the cue
+  targets; that is a budget, and it stops being true the moment the owner raises the master.
+- **Voice pool** — 6 `LoadSoundAlias` voices per cue, round-robin with oldest-steal. `Play` used
+  a single shared `Sound`, so two enemies firing the same weapon truncated each other *and*
+  `SetSoundPitch`/`SetSoundPan` mutated an already-playing shot mid-flight.
+- **Real variation** — the old `_pitchSeq & 7` produced 0.940, 0.957 ... 1.060 and wrapped: a
+  monotone rising glissando, perceptually a siren. Now hash-scrambled off a counter (still
+  deterministic — the harness needs it), with a sensible per-category default pushed into `Play`
+  so all ~134 call sites get variation for free, and ceremonial stingers opted out. Gain jitter
+  is **one-sided downward** (2.4 dB): symmetric jitter would let a cue land hotter than the level
+  the peak targets were budgeted against.
+- **Stinger ducking** — `PlayStinger` ducks the bed (fast in, slow out) instead of playing over it.
+- **Per-tile footfalls** — `Audio.Play("move")` fired once per move *command*, so a six-tile
+  sprint got one 80 ms thud. Moved into `MoveStepAnim.OnStart`, panned to the step's position.
+  That is the only legal site: `OnStart` runs when an anim becomes ACTIVE, never at `Enqueue`.
+  Verified with a temporary per-frame position trace over a full autoplay — **113/113** genuine
+  in-path step transitions chain exactly (each step's `_from` == the previous step's `_to`), no
+  snap-back. (Three apparent outliers were two *different* enemies sharing an archetype name.)
+
+### Honest verdict on the contact sheet, and what is still wrong
+
+Weapons stopped being flat rectangles: each is now a bright transient collapsing into a
+low-frequency body, and the five are visibly different objects. The beds stopped being black.
+But:
+
+- The weapons still differ mostly by **duration and centroid, not by shape** — rifle / shoot /
+  hit / crit all read as "bright wedge decaying to low". Real object-level identity would want
+  convolved impulse-response bodies, which this synth has no notion of.
+- A faint broadband haze remains to 20 kHz on the weapons. It is 50-70 dB down (the `>5k` column
+  is 0.4-2.7%) and it comes from the sub-millisecond transient, which is physically correct — but
+  it is visible on the sheet and worth knowing about.
+- `select` / `over` still show a traceable harmonic ladder. Energetically the comb collapsed
+  (select 12.5% -> 4.0% above 1 kHz, over 18.9% -> 5.7%); the lines survive on a panel normalised
+  to its own peak with an 80 dB floor.
+- `miss` disagrees between the two instruments — the C# gate reads 15.8% in 1k-5k, the Python
+  contact sheet 70.2% above 1 kHz. The C# spectrum zero-pads a 140 ms cue into one 4096-pt Hann
+  window and so weights its middle; Python uses 1024/256 across the whole cue. Neither is wrong;
+  the sheet is the better read for short cues.
+- **The beds still lean "room tone with a chord in it" rather than "music."** There is real
+  breathing across the 16 s loop, but at contact-sheet scale (first 2 s) they read as a static
+  striped rectangle. Whether the air/tonal balance is right is an ear call nobody in this
+  sandbox can make.
+- Nothing here has been *heard*. Every judgement above is spectral.
+
+### Not reached
+
+Nothing on the brief was dropped; items 1-10 all landed. Left open: perceptual (LUFS) weighting
+of the budget, which A1 also flagged; reverb/impulse-response bodies for real weapon identity;
+and on-device audition of the new mix and the four fader defaults — which needs the human.

@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Raylib_cs;
 
 namespace Sightline;
@@ -58,6 +60,32 @@ public static partial class Audio
     public static bool Enabled = true;
     static readonly Dictionary<string, Sound> _snd = new();
 
+    // ── RESONANCE A2: THE MIX LAYER ───────────────────────────────────────────
+    // Until now the only audio controls in the entire game were one hard-coded
+    // SetMasterVolume(0.6f) and a binary mute. The owner — the only person with an actual
+    // audio device — could not rebalance music against SFX without editing code and
+    // rebuilding, which is precisely the thing that has kept this layer untunable.
+    // Four busses, persisted in Display's settings file, exposed as sliders in the pause menu.
+
+    /// A cue's mix bus. Reuses the SAME category map the audio budget uses (Audio.Analysis
+    /// CatOf), so "what counts as UI" is one decision in one place: select / reload / hunker /
+    /// over / turn ride the UI fader, everything in-world rides SFX.
+    static bool IsUiCue(string id) => CatOf(id) == "ui";
+    static float BusVol(string id) => Util.Clamp(IsUiCue(id) ? Display.VolUi : Display.VolSfx, 0f, 1f);
+
+    /// VOICE POOL. `Play` used to call PlaySound on a SINGLE shared Sound per cue, so two
+    /// enemies firing the same weapon truncated each other — and worse, SetSoundPitch/
+    /// SetSoundPan mutate that shared buffer, so an ALREADY-PLAYING shot's pitch and pan
+    /// jumped the instant the next one started. LoadSoundAlias gives each voice its own
+    /// stream state over shared sample data; a round-robin ring with oldest-steal fixes both.
+    sealed class Voices { public Sound[] Ring; public int Next; }
+    static readonly Dictionary<string, Voices> _voices = new();
+    const int RingSize = 6;
+
+    // Deterministic per-call variation (see Play). A counter, NOT a Random — the headless
+    // harness has to stay reproducible — but hash-scrambled, unlike the old rolling counter.
+    static uint _varSeq;
+
     // Recipe registry: id -> (duration, fill). Populated by BuildRecipes() and shared by both
     // the device-load path (Init) and the device-free self-test (BuildBuffer/SelfTest), so
     // the buffer-generation path is validated even where there is no audio device.
@@ -79,7 +107,7 @@ public static partial class Audio
         }
         catch { _ready = false; }
         if (!_ready) return;
-        Raylib.SetMasterVolume(MasterVol);
+        ApplyMasterVolume();
 
         BuildRecipes();
         // FILE-FIRST, SYNTH-FALLBACK: for each cue, try a dropped-in CC0 sample
@@ -93,8 +121,35 @@ public static partial class Audio
                 continue;
             LoadRecipe(kv.Key, kv.Value.dur, kv.Value.target, kv.Value.fill);
         }
+        BuildVoicePools();
+        AttachLimiter();
 
         InitMusic();
+    }
+
+    /// Push Display's master fader at the device. Called from Init and whenever the owner
+    /// moves the slider. No-op with no device.
+    public static void ApplyMasterVolume()
+    {
+        if (!_ready) return;
+        try { Raylib.SetMasterVolume(Util.Clamp(Display.VolMaster, 0f, 1f)); } catch { }
+    }
+
+    /// One alias ring per loaded cue. Aliases share sample data (cheap) but have their own
+    /// stream state, which is what lets overlapping copies keep independent pitch/pan/volume.
+    static void BuildVoicePools()
+    {
+        foreach (var kv in _snd)
+        {
+            var ring = new Sound[RingSize];
+            ring[0] = kv.Value;
+            for (int i = 1; i < RingSize; i++)
+            {
+                try { ring[i] = Raylib.LoadSoundAlias(kv.Value); }
+                catch { ring[i] = kv.Value; }        // alias unavailable: degrade to the base voice
+            }
+            _voices[kv.Key] = new Voices { Ring = ring, Next = 0 };
+        }
     }
 
     /// Try to load a real sound FILE into the cue table. Returns true only if the file exists
@@ -316,15 +371,23 @@ public static partial class Audio
 
     /// Play an event stinger by name: "kill" / "lastkill" / "victory" / "lose" / "squadwipe".
     /// Unknown names are a safe no-op. (No-op headless / muted.)
+    // stinger duck envelope (see UpdateMusic): how deep, and for how long
+    static float _duck, _duckDepth, _duckHold;
+    static void Duck(float depth, float hold)
+    {
+        if (depth > _duckDepth || _duckHold <= 0f) _duckDepth = depth;
+        _duckHold = MathF.Max(_duckHold, hold);
+    }
+
     public static void PlayStinger(string which)
     {
         switch (which)
         {
-            case "kill":      Play("st_kill"); break;
-            case "lastkill":  Play("st_lastkill"); break;
-            case "victory":   Play("st_victory"); break;
-            case "lose":      Play("st_lose"); break;
-            case "squadwipe": Play("st_squadwipe"); break;
+            case "kill":      Play("st_kill"); Duck(0.30f, 0.18f); break;
+            case "lastkill":  Play("st_lastkill"); Duck(0.55f, 0.45f); break;
+            case "victory":   Play("st_victory"); Duck(0.80f, 0.95f); break;
+            case "lose":      Play("st_lose"); Duck(0.80f, 1.20f); break;
+            case "squadwipe": Play("st_squadwipe"); Duck(0.85f, 1.00f); break;
         }
     }
 
@@ -369,7 +432,13 @@ public static partial class Audio
         if (!_music) return;
         Raylib.UpdateMusicStream(_ambient);
         Raylib.UpdateMusicStream(_combat);
-        float master = Enabled ? 1f : 0f;
+        // STINGER DUCK (A2). st_victory and st_squadwipe used to land on top of a full-volume
+        // bed and fight it. The bed now steps out of the way: fast in, slow back out, so the
+        // ceremony reads as the loudest thing in the room without anyone touching a fader.
+        _duckHold = MathF.Max(0f, _duckHold - dt);
+        float want = _duckHold > 0f ? _duckDepth : 0f;
+        _duck = Util.Lerp(_duck, want, Util.Clamp(dt * (want > _duck ? 12f : 1.8f), 0f, 1f));
+        float master = (Enabled ? 1f : 0f) * Util.Clamp(Display.VolMusic, 0f, 1f) * (1f - _duck);
         float ambT = master * (AmbBaseVol - AmbDuck * _intensity);   // bed quiets a touch under combat
         float combT = master * (CombMaxVol * _intensity);
         float k = Util.Clamp(dt * 2.2f, 0f, 1f);
@@ -630,33 +699,138 @@ public static partial class Audio
     internal static float[] BedRaw(string which, int n)
         => which == "combat" ? CombatFloats(n) : AmbientFloats(n);
 
-    // a cheap rolling counter so successive shots get a deterministic, non-repeating pitch
-    // jitter (NOT Random — keeps the headless harness reproducible + avoids a machine-gun
-    // "exactly the same sample" feel). Bounded; wraps harmlessly.
-    static int _pitchSeq;
+    // ── PLAY ──────────────────────────────────────────────────────────────────
 
-    /// Play a sound. Optional `pitchVar` (±semitone-ish randomisation amount, 0=off) detunes
-    /// the sample each call via a rolling counter; `panX` (0..1 = screen-x; <0 = centred/off)
-    /// pans it in stereo. Defaults keep every existing call site unchanged + crash-safe headless.
-    public static void Play(string id, float pitchVar = 0f, float panX = -1f)
+    /// FNV-1a over a cue id. String.GetHashCode is per-process randomised in .NET Core, so it
+    /// cannot seed anything that has to be reproducible across runs.
+    static uint IdHash(string id)
+    {
+        uint h = 2166136261u;
+        foreach (char c in id) { h ^= c; h *= 16777619u; }
+        return h;
+    }
+
+    /// A 32-bit integer hash (lowbias32). Deterministic, but SCRAMBLED — see Play.
+    static float Hash01(uint x)
+    {
+        x ^= x >> 16; x *= 0x7feb352du;
+        x ^= x >> 15; x *= 0x846ca68bu;
+        x ^= x >> 16;
+        return (x & 0xFFFFFFu) / (float)0x1000000;
+    }
+
+    /// The per-cue DEFAULT variation depth. Only 4 of ~134 call sites ever passed `pitchVar`,
+    /// so every UI cue in the game was byte-identical forever; pushing a sensible default in
+    /// here means every call site gets variation for free. Ceremonial cues (the stingers, the
+    /// win/lose jingles) deliberately get none — a victory fanfare that detunes is a bug.
+    static float DefaultPitchVar(string id) => CatOf(id) switch
+    {
+        "weapon" => 0.055f,
+        "impact" => 0.050f,
+        "crit"   => 0.035f,
+        "move"   => 0.070f,
+        "ui"     => 0.022f,
+        _        => 0f,          // stinger / win / lose: no detune, ever
+    };
+    /// Per-call gain jitter DEPTH in dB — and it is deliberately ONE-SIDED DOWNWARD.
+    /// A symmetric +-1.5 dB would let a cue land 1.5 dB HOTTER than the level A1's per-cue
+    /// peak targets were budgeted against, which is exactly the headroom the concurrent-stack
+    /// check spends (the worst stack already measures -1.4 dBFS). Jittering only downward
+    /// gives the same "these two shots have different weight" effect and cannot cost a decibel
+    /// of headroom, so the audio budget stays true whether or not the limiter is engaged.
+    static float DefaultGainVarDb(string id) => CatOf(id) == "stinger" ? 0f : 2.4f;
+
+    /// Play a sound.
+    ///
+    /// `pitchVar` = detune depth; -1 (the default) means "use this cue's DefaultPitchVar",
+    /// and an explicit 0 opts out. `panX` (0..1 = screen-x; <0 = centred) pans in stereo.
+    ///
+    /// A2 fixed the "randomisation". It used to be `_pitchSeq & 7` mapped linearly to
+    /// [-1,1], i.e. the multipliers 0.940, 0.957, 0.974, 0.991, 1.009, 1.026, 1.043, 1.060
+    /// and then a wrap — a MONOTONE RISING GLISSANDO. Perceptually that is a siren, not
+    /// randomisation, and it is at its most obvious exactly where it matters most (automatic
+    /// fire). The offset is now hash-scrambled off a counter, still fully deterministic (the
+    /// headless harness needs reproducibility) but with no audible order, and gain gets its
+    /// own independent jitter so repeated shots differ in weight as well as pitch.
+    public static void Play(string id, float pitchVar = -1f, float panX = -1f)
     {
         if (!_ready || !Enabled) return;
-        if (!_snd.TryGetValue(id, out var s)) return;
-        if (pitchVar > 0f)
+        if (!_voices.TryGetValue(id, out var v) || v.Ring == null) return;
+
+        // round-robin to a FREE voice; if every voice is busy, steal the oldest in the ring
+        Sound s = v.Ring[v.Next];
+        for (int i = 0; i < v.Ring.Length; i++)
         {
-            // map the rolling counter to a triangular-ish offset in [-1,1], scale to pitchVar.
-            int q = _pitchSeq++ & 7;
-            float u = (q / 7f) * 2f - 1f;                 // -1..1 deterministic sweep
-            Raylib.SetSoundPitch(s, 1f + pitchVar * u);
+            int k = (v.Next + i) % v.Ring.Length;
+            if (!Raylib.IsSoundPlaying(v.Ring[k])) { s = v.Ring[k]; v.Next = (k + 1) % v.Ring.Length; goto picked; }
         }
-        else Raylib.SetSoundPitch(s, 1f);
-        if (panX >= 0f)
-            // Raylib pan: 0.5 = centre, 0 = right, 1 = left. Map screen-x so left of screen
-            // pans left: panLeftFraction = 1 - screenXFraction.
-            Raylib.SetSoundPan(s, Util.Clamp(1f - panX, 0f, 1f));
-        else
-            Raylib.SetSoundPan(s, 0.5f);
+        Raylib.StopSound(s);
+        v.Next = (v.Next + 1) % v.Ring.Length;
+    picked:
+        uint h = IdHash(id) ^ (_varSeq++ * 2654435761u);
+        float pv = pitchVar < 0f ? DefaultPitchVar(id) : pitchVar;
+        Raylib.SetSoundPitch(s, pv > 0f ? 1f + pv * (Hash01(h) * 2f - 1f) : 1f);
+
+        float gdb = DefaultGainVarDb(id);
+        float gain = BusVol(id);
+        if (gdb > 0f) gain *= MathF.Pow(10f, -gdb * Hash01(h * 2246822519u + 1u) / 20f);   // [-gdb, 0] dB
+        Raylib.SetSoundVolume(s, Util.Clamp(gain, 0f, 1f));
+
+        // Raylib pan: 0.5 = centre, 0 = right, 1 = left. Map screen-x so left of screen
+        // pans left: panLeftFraction = 1 - screenXFraction.
+        Raylib.SetSoundPan(s, panX >= 0f ? Util.Clamp(1f - panX, 0f, 1f) : 0.5f);
         Raylib.PlaySound(s);
+    }
+
+    // ── MASTER LIMITER ────────────────────────────────────────────────────────
+    // A1 bought stack headroom by trimming the per-cue peak targets; that is a budget, not a
+    // guarantee, and it stops being true the moment the owner pushes the new master fader up.
+    // A limiter on the mixed bus makes the ceiling STRUCTURAL: whatever the game throws at the
+    // mixer, and wherever the faders sit, nothing leaves the pipeline over -1 dBFS.
+    //
+    // Peak follower with a ~1 ms attack and a ~150 ms release, then a cubic soft-clip as the
+    // last line (a fast limiter without lookahead always lets a little transient through, and
+    // a rounded knee is far less audible than a hard digital clip).
+
+    const float LimCeil = 0.891f;         // -1.0 dBFS
+    static float _limEnv;                 // audio-thread only
+    static bool _limOn;
+
+    static float SoftClip(float x)
+        => x <= -1.5f ? -1f : x >= 1.5f ? 1f : x - x * x * x * (1f / 6.75f);
+
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
+    static unsafe void MixProcessor(void* buffer, uint frames)
+    {
+        // raylib hands the whole mixed bus over as interleaved stereo float32
+        const float Atk = 0.022f;         // ~1 ms  at 44.1 kHz
+        const float Rel = 0.00015f;       // ~150 ms
+        float* f = (float*)buffer;
+        float env = _limEnv;
+        for (uint i = 0; i < frames; i++)
+        {
+            float l = f[i * 2], r = f[i * 2 + 1];
+            float pk = MathF.Max(MathF.Abs(l), MathF.Abs(r));
+            env += (pk - env) * (pk > env ? Atk : Rel);
+            float g = env > LimCeil ? LimCeil / env : 1f;
+            f[i * 2] = SoftClip(l * g);
+            f[i * 2 + 1] = SoftClip(r * g);
+        }
+        _limEnv = float.IsNaN(env) || float.IsInfinity(env) ? 0f : env;
+    }
+
+    static unsafe void AttachLimiter()
+    {
+        if (!_ready || _limOn) return;
+        try { Raylib.AttachAudioMixedProcessor(&MixProcessor); _limOn = true; }
+        catch { _limOn = false; }        // binding/backend refused it: the budget still holds
+    }
+
+    static unsafe void DetachLimiter()
+    {
+        if (!_limOn) return;
+        try { Raylib.DetachAudioMixedProcessor(&MixProcessor); } catch { }
+        _limOn = false;
     }
 
     public static void ToggleMute() { Enabled = !Enabled; }
@@ -670,6 +844,13 @@ public static partial class Audio
             Raylib.UnloadMusicStream(_combat);
             _music = false;
         }
+        DetachLimiter();
+        // aliases first — they share the base sound's sample data, so unloading the base out
+        // from under a live alias is a use-after-free.
+        foreach (var v in _voices.Values)
+            for (int i = 1; i < v.Ring.Length; i++)
+                if (!v.Ring[i].Equals(v.Ring[0])) { try { Raylib.UnloadSoundAlias(v.Ring[i]); } catch { } }
+        _voices.Clear();
         foreach (var s in _snd.Values) Raylib.UnloadSound(s);
         _snd.Clear();
         Raylib.CloseAudioDevice();

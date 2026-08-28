@@ -230,6 +230,34 @@ void main() {
     public static bool BraceTipSeen;
     public static void MarkBraceTipSeen() { if (!BraceTipSeen) { BraceTipSeen = true; Save(); } }
 
+    // ---- RESONANCE A2: per-category audio mix (persisted here alongside the other settings) ----
+    // The whole game shipped with exactly one hard-coded SetMasterVolume(0.6f) and a binary
+    // mute, so the owner could not rebalance music against SFX without a rebuild. These four
+    // faders are read by Audio (master at the device, the rest per-cue / per-stream).
+    // Defaults reproduce the old behaviour exactly: master 0.60, everything else unity.
+    public static float VolMaster = 0.60f;
+    public static float VolSfx    = 1.00f;
+    public static float VolMusic  = 1.00f;
+    public static float VolUi     = 1.00f;
+    public static readonly string[] VolNames = { "MASTER", "SFX", "MUSIC", "UI" };
+
+    public static float Vol(int bus) => bus switch { 0 => VolMaster, 1 => VolSfx, 2 => VolMusic, _ => VolUi };
+
+    /// Live-set one fader (no disk write — a slider drag calls this every frame).
+    public static void SetVol(int bus, float v)
+    {
+        v = Math.Clamp(v, 0f, 1f);
+        switch (bus)
+        {
+            case 0: VolMaster = v; Audio.ApplyMasterVolume(); break;
+            case 1: VolSfx = v; break;
+            case 2: VolMusic = v; break;
+            default: VolUi = v; break;
+        }
+    }
+    /// Persist the faders — call once when the drag ends, not per frame.
+    public static void CommitVol() => Save();
+
     public static void Init(bool enabled)
     {
         Enabled = enabled;
@@ -437,6 +465,12 @@ void main() {
         public bool PostFX { get; set; } = true;
         public bool AutoCam { get; set; }
         public bool BraceTipSeen { get; set; }   // FUL-12 (JSON field: absent in old files = false, back-compat)
+        // RESONANCE A2 — additive fields; a display.json written before A2 has none of them,
+        // so these JSON defaults are what an existing install keeps (== the old behaviour).
+        public float VolMaster { get; set; } = 0.60f;
+        public float VolSfx { get; set; } = 1.00f;
+        public float VolMusic { get; set; } = 1.00f;
+        public float VolUi { get; set; } = 1.00f;
     }
     static string Dir => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Sightline");
@@ -444,7 +478,7 @@ void main() {
 
     static void Save()
     {
-        try { Directory.CreateDirectory(Dir); File.WriteAllText(FilePath, JsonSerializer.Serialize(new Dto { Fullscreen = Fullscreen, SizeIdx = SizeIdx, BrightIdx = BrightIdx, GammaIdx = GammaIdx, Colorblind = Pal.Colorblind, TutorialSeen = TutorialSeen, PostFX = PostFX, AutoCam = AutoCam, BraceTipSeen = BraceTipSeen })); }
+        try { Directory.CreateDirectory(Dir); File.WriteAllText(FilePath, JsonSerializer.Serialize(new Dto { Fullscreen = Fullscreen, SizeIdx = SizeIdx, BrightIdx = BrightIdx, GammaIdx = GammaIdx, Colorblind = Pal.Colorblind, TutorialSeen = TutorialSeen, PostFX = PostFX, AutoCam = AutoCam, BraceTipSeen = BraceTipSeen, VolMaster = VolMaster, VolSfx = VolSfx, VolMusic = VolMusic, VolUi = VolUi })); }
         catch { }
     }
 
@@ -465,6 +499,10 @@ void main() {
                 PostFX = d.PostFX;
                 AutoCam = d.AutoCam;
                 BraceTipSeen = d.BraceTipSeen;
+                VolMaster = Math.Clamp(d.VolMaster, 0f, 1f);
+                VolSfx    = Math.Clamp(d.VolSfx, 0f, 1f);
+                VolMusic  = Math.Clamp(d.VolMusic, 0f, 1f);
+                VolUi     = Math.Clamp(d.VolUi, 0f, 1f);
             }
         }
         catch { }

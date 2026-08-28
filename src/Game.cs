@@ -714,6 +714,9 @@ public partial class Game
 
     // pause / settings overlay
     public bool Paused;
+    // RESONANCE A2: which mix fader (0..3) the mouse is currently dragging in the pause menu,
+    // or -1. Held across frames so a drag keeps tracking once it leaves the row's rect.
+    int _volDrag = -1;
     public bool ShowThreatPref = true;
 
     // custom-tag text editor (modal): key T in a mission, or from the perk chooser
@@ -3937,10 +3940,30 @@ public partial class Game
         CamPan.Y = CamPan.Y + (targetPan.Y - CamPan.Y) * alpha;
     }
 
+    /// Where along a fader's track a mouse-x lands, 0..1 (the track is inset 8px each side —
+    /// keep in sync with Hud.DrawVolSlider).
+    static float VolFrac(Rectangle r, float mx) => Util.Clamp((mx - (r.X + 8f)) / MathF.Max(1f, r.Width - 16f), 0f, 1f);
+
     void HandlePauseMenu()
     {
-        if (!Raylib.IsMouseButtonPressed(MouseButton.Left)) return;
         var m = Raylib.GetMousePosition();
+        // A2 mix faders: a drag in progress owns the mouse until it is released, and only THEN
+        // does the setting hit disk (Display.SetVol is live, CommitVol writes display.json).
+        if (_volDrag >= 0)
+        {
+            if (Raylib.IsMouseButtonDown(MouseButton.Left)) { Display.SetVol(_volDrag, VolFrac(Hud.PauseVol[_volDrag], m.X)); return; }
+            Display.CommitVol();
+            _volDrag = -1;
+            return;
+        }
+        if (!Raylib.IsMouseButtonPressed(MouseButton.Left)) return;
+        for (int i = 0; i < Hud.PauseVol.Length; i++)
+            if (Raylib.CheckCollisionPointRec(m, Hud.PauseVol[i]))
+            {
+                _volDrag = i;
+                Display.SetVol(i, VolFrac(Hud.PauseVol[i], m.X));
+                return;
+            }
         if (Raylib.CheckCollisionPointRec(m, Hud.PauseResume)) Paused = false;
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseFullscreen)) Display.ToggleFullscreen();
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseWindow)) Display.CycleSize();
@@ -4380,8 +4403,7 @@ public partial class Game
         Stats.RecordAction("VAULT");                      // W2 verb telemetry (review fix: no invisible verbs)
         Fx.PopText(u.Pos + new Vector2(0, -32), "VAULT", Pal.Good, 17f);
         Fx.Burst(u.Pos, Pal.Good, 8, 110f, 0.35f, 2.5f);
-        Audio.Play("move");
-        Enqueue(new MoveStepAnim(u, tx, ty), Team.Player);
+        Enqueue(new MoveStepAnim(u, tx, ty), Team.Player);   // A2: the footfall is per-tile now (MoveStepAnim.OnStart)
         VaultMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false; DragMode = false;
     }
 
@@ -4408,8 +4430,7 @@ public partial class Game
         Stats.RecordAction("MOVE");   // W2 verb telemetry (no-op unless the balance harness)
         AimMode = false;
         PathPreview.Clear();
-        Audio.Play("move");
-        _tutMoved = true;
+        _tutMoved = true;   // A2: no cue here — MoveStepAnim.OnStart plays one footfall PER TILE
     }
 
     void IssueShoot(Unit target)
@@ -5818,8 +5839,7 @@ public partial class Game
             if (keep == 0) { Fx.PopText(e.Pos + new Vector2(0, -34), "PINNED", Pal.Foe, 16f); return; }
         }
         e.ActionsLeft -= moveActions;
-        foreach (var (px, py) in path) Enqueue(new MoveStepAnim(e, px, py), Team.Enemy);
-        Audio.Play("move");
+        foreach (var (px, py) in path) Enqueue(new MoveStepAnim(e, px, py), Team.Enemy);   // A2: per-tile footfalls
     }
 
     // TEMPO mirror: after an enemy fires (a 1-action, non-turn-ending shot) it spends any remaining
@@ -5877,8 +5897,7 @@ public partial class Game
         var path = Grid.ReconstructPath(cameFrom, e.X, e.Y, best.x, best.y);
         if (path.Count == 0) return;
         e.ActionsLeft = Math.Max(0, e.ActionsLeft - 1);
-        foreach (var (px, py) in path) Enqueue(new MoveStepAnim(e, px, py), Team.Enemy);
-        Audio.Play("move");
+        foreach (var (px, py) in path) Enqueue(new MoveStepAnim(e, px, py), Team.Enemy);   // A2: per-tile footfalls
     }
 
     // Clear the enemy-intent telegraph (so it doesn't render past the unit's action or into the
