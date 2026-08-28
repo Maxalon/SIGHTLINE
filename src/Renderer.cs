@@ -91,6 +91,18 @@ public static class Renderer
     static Color Lift(Color c, int d) =>
         Pal.RGBA(Math.Clamp(c.R + d, 0, 255), Math.Clamp(c.G + d, 0, 255), Math.Clamp(c.B + d, 0, 255), c.A);
 
+    /// RESONANCE V3 — lift a colour in VALUE ONLY until it reaches `target` Rec.601 luma
+    /// (never darkens; never lifts by more than `maxUp`). A flat +N add cannot serve eight
+    /// biomes at once: measured, the same +40 that STEEL's cover needed put TUNDRA's cover
+    /// top 25 luma higher than STEEL's for no reason other than TUNDRA's tint being a bright
+    /// colour, and that is what pushes one biome's terrain into the band the units own. This
+    /// puts every biome's cover top on the SAME rung, which is what the hierarchy is about.
+    static Color LiftTo(Color c, int target, int maxUp)
+    {
+        int l = (int)(0.299f * c.R + 0.587f * c.G + 0.114f * c.B);
+        return Lift(c, Math.Clamp(target - l, 0, maxUp));
+    }
+
     // --- 5.4 Procedural noise overlay -----------------------------------------
     // A 128x128 tiling Perlin-noise texture generated once after the GL context is
     // ready (lazy-init on the first DrawBoard call).  Drawn at low alpha over floor
@@ -114,6 +126,8 @@ public static class Renderer
     public static void UnloadNoise()
     {
         if (_noiseReady) { Raylib.UnloadTexture(_noise); _noiseReady = false; }
+        for (int i = 0; i < _cellReady.Length; i++)          // V3 per-biome cellular surfaces
+            if (_cellReady[i]) { Raylib.UnloadTexture(_cell[i]); _cellReady[i] = false; }
     }
 
     static void EnsureNoise()
@@ -166,15 +180,401 @@ public static class Renderer
         return (x & 0xFFFFFFu) / 16777216f;
     }
 
+    // ================= RESONANCE V3 "SURFACES" ==========================================
+    // Three problems this block exists to solve, all visible in the V2 captures:
+    //   A. every cover block was the SAME widget (same inset, same radius, same glyph) and the
+    //      biome tint on it was so weak that magma cover and tundra cover were both slate;
+    //   B. the biome "signature" was drawn per TILE, so nothing spanned tiles and a biome read
+    //      as a field of identical doodles rather than terrain with structure;
+    //   C. team was carried by HUE alone and dormant contacts were near-invisible.
+    // A + B live here; C lives in DrawSilhouette/DrawUnit/DrawCodexGlyph.
+    //
+    // Everything below is CPU-generated (GenImageCellular) or derived from MapSeed via
+    // Util.Hash3 — zero committed bytes, zero draws from Util.Rng, no new Raylib.GetTime reads.
+
+    /// Index of a Biome inside Biome.All. Biome.For hands out the shared instances, so a
+    /// reference scan over 8 entries is exact; memoised on the last hit (called per frame).
+    static Biome _lastBiome; static int _lastBiomeIdx;
+    static int BiomeIndex(Biome bm)
+    {
+        if (ReferenceEquals(bm, _lastBiome)) return _lastBiomeIdx;
+        int idx = 0;
+        for (int i = 0; i < Biome.All.Length; i++)
+            if (ReferenceEquals(Biome.All[i], bm)) { idx = i; break; }
+        _lastBiome = bm; _lastBiomeIdx = idx;
+        return idx;
+    }
+
+    // --- V3 PART A: a per-biome CELLULAR surface -----------------------------------------
+    // Raylib bakes a Worley/cellular field on the CPU: dark at each cell seed, bright along the
+    // boundaries between cells. We INVERT it at bake time, so the baked texture is bright inside
+    // each cell and black along the seams; drawing a LIGHT biome colour through it lifts the
+    // cell faces and leaves the seams behind, which reads as grouted stone — concrete slabs
+    // (STEEL), cracked basalt (MAGMA), ice plates (TUNDRA), gravel (ASH).
+    // The inversion is not cosmetic. Measured first without it, drawing a DARK colour through
+    // the un-inverted field: the result varies by alpha x (the dark colour's own luma, ~16) x
+    // the field's contrast — about ONE luma of structure. Interior std on a cover top actually
+    // FELL 3.6 -> 1.5 against the old build. A texture scales the colour you draw WITH, never
+    // the surface underneath, so a dark colour can only ever lay down a flat wash.
+    // The existing Perlin stays as the fine grain; the two together are the material.
+    // Per-biome cell size = the material's grain. Order matches Biome.All.
+    static readonly int[] CellSize = { 22, 17, 38, 16, 15, 27, 31, 24 };
+    const float CellTexPx = 256f;
+    static readonly Texture2D[] _cell = new Texture2D[Biome.All.Length];
+    static readonly bool[] _cellReady = new bool[Biome.All.Length];
+
+    static void EnsureCell(int bi)
+    {
+        if (_cellReady[bi]) return;
+        try
+        {
+            // GenImageCellular scatters its seed points with raylib's GLOBAL rand(), which
+            // InitWindow seeds from the clock — that alone would make every screenshot differ.
+            // Pin it per biome so the harness stays byte-stable (nothing else in the game reads
+            // Raylib.GetRandomValue, so there is no stream to disturb).
+            Raylib.SetRandomSeed((uint)(0x5165 + bi * 7919));
+            var img = Raylib.GenImageCellular((int)CellTexPx, (int)CellTexPx, CellSize[bi]);
+            Raylib.ImageColorInvert(ref img);        // bright cell faces, black seams (see above)
+            _cell[bi] = Raylib.LoadTextureFromImage(img);
+            Raylib.UnloadImage(img);
+            Raylib.SetTextureWrap(_cell[bi], TextureWrap.Repeat);
+            _cellReady[bi] = _cell[bi].Id > 0;
+        }
+        catch { _cellReady[bi] = false; }
+    }
+
+    /// Sample the biome's cellular field over a screen rect, board-anchored (same trick as
+    /// DrawNoiseRect: llvmpipe ignores TextureWrap on a partial-rect sample, so keep the source
+    /// rect inside the texture). `col` is drawn THROUGH the field, so pass a LIGHT colour: the
+    /// texture scales what you draw with, so only a light colour lays down visible structure.
+    static void DrawCellRect(int bi, Rectangle dst, Color col, float alpha)
+    {
+        if (!_cellReady[bi]) return;
+        float sx = (((dst.X - Cfg.OriginX) % CellTexPx) + CellTexPx) % CellTexPx;
+        float sy = (((dst.Y - Cfg.OriginY) % CellTexPx) + CellTexPx) % CellTexPx;
+        float w = MathF.Min(dst.Width, CellTexPx - sx);
+        float h = MathF.Min(dst.Height, CellTexPx - sy);
+        if (w <= 1f || h <= 1f) return;
+        Raylib.DrawTextureRec(_cell[bi], new Rectangle(sx, sy, w, h),
+                              new Vector2(dst.X, dst.Y), Raylib.Fade(col, alpha));
+    }
+
+    // --- V3 PART B: BOARD-SCALE terrain features ------------------------------------------
+    // 6..12 features per mission that SPAN tiles: a fissure that snakes across six tiles and
+    // pools, a frost drift, a soot fan, a dune ridge, a lattice trunk, a moss patch, a floor
+    // plate seam. Everything derives from Run.MapSeed through Util.Hash3 — a pure function,
+    // ZERO draws from the shared Util.Rng (the balance flywheel's CRN pairing depends on that)
+    // and no `Random` anywhere. Built once per (seed, biome, grid) into fixed-size static
+    // buffers, so the per-frame cost is the draw only: no allocation, ever.
+    enum FeatKind { Fissure, Drift, Fan, Ridge, Trunk, Patch, Plate }
+    struct Feature { public FeatKind Kind; public int P0, PN; public float Sz, Ph; }
+    const int FeatPtCap = 512;
+    static readonly Vector2[] _featPt = new Vector2[FeatPtCap];
+    static readonly Feature[] _feat = new Feature[14];
+    static int _featN;
+    static long _featKey = long.MinValue;
+
+    /// deterministic [0,1) from (seed, feature index, salt) — Util.Hash3 is the project's
+    /// seed-keyed avalanche mixer (used for campaign structure for exactly this reason).
+    static float FH(int seed, int i, int salt) => (Util.Hash3(seed, i, salt) & 0xFFFFFFu) / 16777216f;
+
+    static void EnsureFeatures(Game g, Biome bm, int bi)
+    {
+        int seed = g.RunState != null ? g.RunState.MapSeed : 0;
+        long key = ((long)(uint)seed << 24) ^ ((long)bi << 16) ^ (g.Grid.W * 131 + g.Grid.H);
+        if (key == _featKey) return;
+        _featKey = key;
+
+        FeatKind kind = bm.Ambient switch
+        {
+            AmbientKind.Ember => FeatKind.Fissure,
+            AmbientKind.Snow  => FeatKind.Drift,
+            AmbientKind.Ash   => FeatKind.Fan,
+            AmbientKind.Gust  => FeatKind.Ridge,
+            AmbientKind.Mote  => FeatKind.Trunk,
+            AmbientKind.Scan  => FeatKind.Trunk,
+            AmbientKind.Spore => FeatKind.Patch,
+            _                 => FeatKind.Plate,
+        };
+
+        float bx = Cfg.OriginX, by = Cfg.OriginY, bw = Cfg.BoardW, bh = Cfg.BoardH;
+        int count = 6 + (int)(Util.Hash3(seed, 0, 9001) % 7u);        // 6..12
+        if (count > _feat.Length) count = _feat.Length;
+        int pn = 0; int fn = 0;
+
+        Vector2 Clamped(float px, float py) =>
+            new(Util.Clamp(px, bx + 4f, bx + bw - 4f), Util.Clamp(py, by + 4f, by + bh - 4f));
+
+        for (int i = 0; i < count; i++)
+        {
+            int p0 = pn;
+            float ox = bx + FH(seed, i, 1) * bw;
+            float oy = by + FH(seed, i, 2) * bh;
+            float ang = FH(seed, i, 3) * MathF.Tau;
+            float sz;
+            switch (kind)
+            {
+                case FeatKind.Fissure:
+                {
+                    // a snaking crack: 7..10 steps of 42..76px with a wandering heading.
+                    int n = 7 + (int)(Util.Hash3(seed, i, 4) % 4u);
+                    var p = new Vector2(ox, oy); float a = ang;
+                    for (int k = 0; k < n && pn < FeatPtCap; k++)
+                    {
+                        _featPt[pn++] = Clamped(p.X, p.Y);
+                        a += (FH(seed, i, 20 + k) - 0.5f) * 1.25f;
+                        float step = 42f + FH(seed, i, 40 + k) * 34f;
+                        p += new Vector2(MathF.Cos(a), MathF.Sin(a)) * step;
+                    }
+                    sz = 16f + FH(seed, i, 5) * 16f;                   // the pool at the far end
+                    break;
+                }
+                case FeatKind.Drift:
+                case FeatKind.Patch:
+                {
+                    // a lobed blob: 4..7 overlapping centres marching along one heading.
+                    int n = 4 + (int)(Util.Hash3(seed, i, 4) % 4u);
+                    var p = new Vector2(ox, oy); float a = ang;
+                    for (int k = 0; k < n && pn < FeatPtCap; k++)
+                    {
+                        _featPt[pn++] = Clamped(p.X, p.Y);
+                        a += (FH(seed, i, 20 + k) - 0.5f) * 0.9f;
+                        float step = 22f + FH(seed, i, 40 + k) * 24f;
+                        p += new Vector2(MathF.Cos(a), MathF.Sin(a)) * step;
+                    }
+                    sz = (kind == FeatKind.Drift ? 24f : 18f) + FH(seed, i, 5) * 22f;
+                    break;
+                }
+                case FeatKind.Fan:
+                {
+                    // a soot fan: 5..8 streak TIPS radiating from the origin inside a cone.
+                    int n = 5 + (int)(Util.Hash3(seed, i, 4) % 4u);
+                    if (pn < FeatPtCap) _featPt[pn++] = Clamped(ox, oy);   // [0] = the origin
+                    for (int k = 0; k < n && pn < FeatPtCap; k++)
+                    {
+                        float a = ang + (k / MathF.Max(1f, n - 1f) - 0.5f) * 1.5f;
+                        float len = 44f + FH(seed, i, 40 + k) * 92f;
+                        _featPt[pn++] = Clamped(ox + MathF.Cos(a) * len, oy + MathF.Sin(a) * len);
+                    }
+                    sz = 26f + FH(seed, i, 5) * 26f;
+                    break;
+                }
+                case FeatKind.Ridge:
+                {
+                    // a dune ridge: a long shallow arc walked across the board (9 samples).
+                    const int n = 9;
+                    float dir = FH(seed, i, 6) < 0.5f ? -1f : 1f;
+                    float span = bw * (0.42f + FH(seed, i, 7) * 0.5f);
+                    float bulge = (FH(seed, i, 8) - 0.5f) * 190f;
+                    float sa = MathF.Sin(ang) * 0.42f;                    // shallow tilt only
+                    for (int k = 0; k < n && pn < FeatPtCap; k++)
+                    {
+                        float u = k / (float)(n - 1);
+                        float px = ox + dir * span * (u - 0.5f);
+                        float py = oy + sa * span * (u - 0.5f) + MathF.Sin(u * MathF.PI) * bulge;
+                        _featPt[pn++] = Clamped(px, py);
+                    }
+                    sz = 3f + FH(seed, i, 5) * 2.4f;
+                    break;
+                }
+                case FeatKind.Trunk:
+                {
+                    // a lattice trunk: a Manhattan-routed circuit trace with nodes at the bends.
+                    int n = 4 + (int)(Util.Hash3(seed, i, 4) % 4u);
+                    var p = new Vector2(ox, oy);
+                    bool horiz = FH(seed, i, 6) < 0.5f;
+                    for (int k = 0; k < n && pn < FeatPtCap; k++)
+                    {
+                        _featPt[pn++] = Clamped(p.X, p.Y);
+                        float run = 64f + FH(seed, i, 40 + k) * 190f;
+                        float s = FH(seed, i, 60 + k) < 0.5f ? -1f : 1f;
+                        if (horiz) p.X += run * s; else p.Y += run * s;
+                        horiz = !horiz;
+                    }
+                    sz = 3.2f + FH(seed, i, 5) * 1.6f;
+                    break;
+                }
+                default:   // Plate — a full-span industrial floor seam
+                {
+                    bool horiz = FH(seed, i, 6) < 0.5f;
+                    if (pn + 2 <= FeatPtCap)
+                    {
+                        if (horiz) { _featPt[pn++] = Clamped(bx, oy); _featPt[pn++] = Clamped(bx + bw, oy); }
+                        else       { _featPt[pn++] = Clamped(ox, by); _featPt[pn++] = Clamped(ox, by + bh); }
+                    }
+                    sz = 56f + FH(seed, i, 5) * 60f;                      // bolt spacing
+                    break;
+                }
+            }
+            if (pn > p0)
+                _feat[fn++] = new Feature { Kind = kind, P0 = p0, PN = pn - p0, Sz = sz,
+                                            Ph = FH(seed, i, 9) * MathF.Tau };
+        }
+        _featN = fn;
+    }
+
+    /// Draw the board-scale features UNDER the per-tile signature and everything else. `t` is
+    /// the caller's already-read clock (DrawBiomeSignature owns the single GetTime read).
+    static void DrawBiomeFeatures(Game g, Biome bm, int bi, float t)
+    {
+        EnsureFeatures(g, bm, bi);
+        bool cb = Pal.Colorblind;
+        for (int f = 0; f < _featN; f++)
+        {
+            var ft = _feat[f];
+            int a0 = ft.P0, n = ft.PN;
+            switch (ft.Kind)
+            {
+                case FeatKind.Fissure:
+                {
+                    // V2's colorblind capture caught MAGMA's per-tile squiggles landing on the
+                    // same orange as the CB foe colour (238,138,40). A board-scale version would
+                    // be a far BIGGER field of that hue, so in CB the fissure gives up saturated
+                    // warmth entirely and works in VALUE: a dark crevasse with a pale hot core.
+                    Color crev = Pal.Mix(Pal.RGBA(0, 0, 0), bm.Tint, 0.18f);
+                    Color glow = cb ? Pal.RGBA(120, 74, 52) : Pal.RGBA(232, 96, 30);
+                    Color core = cb ? Pal.RGBA(255, 246, 232) : Pal.RGBA(255, 214, 140);
+                    float pulse = 0.62f + 0.38f * MathF.Sin(t * 1.15f + ft.Ph);
+                    // Drawn as SHOULDER -> SPLIT -> CORE, thin. The first cut of this used a 15px
+                    // trench with round welds at every joint and it read as brown PIPING laid on
+                    // the floor. A crack is a wide, soft DARKENING with a narrow black split down
+                    // the middle and a hairline of heat in it — width, not colour, was the bug.
+                    for (int k = 0; k + 1 < n; k++)
+                    {
+                        var pa = _featPt[a0 + k]; var pb = _featPt[a0 + k + 1];
+                        Raylib.DrawLineEx(pa, pb, 26f, Raylib.Fade(crev, 0.20f));       // soft shoulder
+                        Raylib.DrawLineEx(pa, pb, 12f, Raylib.Fade(crev, 0.30f));
+                        Raylib.DrawLineEx(pa, pb, 5.2f, Raylib.Fade(crev, 0.74f));      // the split
+                        Raylib.DrawLineEx(pa, pb, 3.4f, Raylib.Fade(glow, (cb ? 0.30f : 0.62f) * pulse));
+                        Raylib.DrawLineEx(pa, pb, 1.5f, Raylib.Fade(core, (cb ? 0.34f : 0.88f) * pulse));
+                        // a short barb off each joint: cracks branch, pipes do not
+                        if (k > 0)
+                        {
+                            var d = pb - pa; float dl = d.Length();
+                            if (dl > 1f)
+                            {
+                                var nn = new Vector2(-d.Y / dl, d.X / dl) * ((k & 1) == 0 ? 1f : -1f);
+                                var bt = pa + d * 0.35f + nn * (9f + (k % 3) * 6f);
+                                Raylib.DrawLineEx(pa + d * 0.1f, bt, 3.8f, Raylib.Fade(crev, 0.52f));
+                                Raylib.DrawLineEx(pa + d * 0.1f, bt, 1.4f,
+                                                  Raylib.Fade(glow, (cb ? 0.20f : 0.44f) * pulse));
+                            }
+                        }
+                    }
+                    // the pool at the far end: three offset lobes, not a concentric bullseye
+                    var end = _featPt[a0 + n - 1];
+                    for (int k = 0; k < 3; k++)
+                    {
+                        float aa = ft.Ph + k * 2.09f;
+                        var pc = end + new Vector2(MathF.Cos(aa), MathF.Sin(aa)) * (ft.Sz * 0.34f);
+                        Raylib.DrawCircleV(pc, ft.Sz * (0.62f - k * 0.09f), Raylib.Fade(crev, 0.34f));
+                        Raylib.DrawCircleV(pc, ft.Sz * (0.34f - k * 0.06f),
+                                           Raylib.Fade(glow, (cb ? 0.24f : 0.44f) * pulse));
+                    }
+                    Raylib.DrawCircleV(end, ft.Sz * 0.22f, Raylib.Fade(core, (cb ? 0.30f : 0.70f) * pulse));
+                    break;
+                }
+                case FeatKind.Drift:
+                {
+                    Color pale = Pal.RGBA(206, 230, 248);
+                    for (int k = 0; k < n; k++)
+                    {
+                        float rr = ft.Sz * (0.7f + 0.3f * ((k * 37 % 11) / 11f));
+                        Raylib.DrawCircleV(_featPt[a0 + k], rr, Raylib.Fade(pale, 0.055f));
+                        Raylib.DrawCircleV(_featPt[a0 + k] + new Vector2(0, -rr * 0.28f), rr * 0.62f,
+                                           Raylib.Fade(pale, 0.05f));
+                    }
+                    for (int k = 0; k + 1 < n; k++)   // wind-scoured crest along the drift
+                        Raylib.DrawLineEx(_featPt[a0 + k] + new Vector2(0, -ft.Sz * 0.34f),
+                                          _featPt[a0 + k + 1] + new Vector2(0, -ft.Sz * 0.34f),
+                                          2f, Raylib.Fade(pale, 0.16f));
+                    break;
+                }
+                case FeatKind.Patch:
+                {
+                    Color moss = Pal.RGBA(74, 128, 66), lip = Pal.RGBA(126, 178, 104);
+                    for (int k = 0; k < n; k++)
+                    {
+                        float rr = ft.Sz * (0.7f + 0.3f * ((k * 29 % 13) / 13f));
+                        Raylib.DrawCircleV(_featPt[a0 + k], rr, Raylib.Fade(moss, 0.15f));
+                        Raylib.DrawCircleV(_featPt[a0 + k], rr * 0.55f, Raylib.Fade(moss, 0.11f));
+                    }
+                    for (int k = 0; k + 1 < n; k++)   // a creeping runner joining the lobes
+                        Raylib.DrawLineEx(_featPt[a0 + k], _featPt[a0 + k + 1], 2.2f, Raylib.Fade(lip, 0.17f));
+                    break;
+                }
+                case FeatKind.Fan:
+                {
+                    var org = _featPt[a0];
+                    Color soot = Pal.RGBA(14, 10, 10);
+                    Raylib.DrawCircleV(org, ft.Sz, Raylib.Fade(soot, 0.26f));
+                    Raylib.DrawCircleV(org, ft.Sz * 0.55f, Raylib.Fade(soot, 0.22f));
+                    for (int k = 1; k < n; k++)
+                    {
+                        Raylib.DrawLineEx(org, _featPt[a0 + k], 7f, Raylib.Fade(soot, 0.16f));
+                        Raylib.DrawCircleV(_featPt[a0 + k], 5f, Raylib.Fade(soot, 0.12f));
+                    }
+                    break;
+                }
+                case FeatKind.Ridge:
+                {
+                    Color crest = Pal.RGBA(186, 152, 92), lee = Pal.RGBA(24, 18, 10);
+                    for (int k = 0; k + 1 < n; k++)
+                    {
+                        var pa = _featPt[a0 + k]; var pb = _featPt[a0 + k + 1];
+                        var down = new Vector2(0, ft.Sz * 2.6f);
+                        Raylib.DrawLineEx(pa + down, pb + down, ft.Sz * 2.4f, Raylib.Fade(lee, 0.17f));  // lee slope
+                        Raylib.DrawLineEx(pa, pb, ft.Sz, Raylib.Fade(crest, 0.16f));                     // the crest
+                        Raylib.DrawLineEx(pa + new Vector2(0, -ft.Sz * 0.8f), pb + new Vector2(0, -ft.Sz * 0.8f),
+                                          1.4f, Raylib.Fade(crest, 0.13f));                              // windward catch
+                    }
+                    break;
+                }
+                case FeatKind.Trunk:
+                {
+                    Color glow = bm.Ambient == AmbientKind.Scan ? Pal.RGBA(56, 190, 204) : Pal.RGBA(146, 116, 216);
+                    float pulse = 0.6f + 0.4f * MathF.Sin(t * 0.9f + ft.Ph);
+                    for (int k = 0; k + 1 < n; k++)
+                    {
+                        var pa = _featPt[a0 + k]; var pb = _featPt[a0 + k + 1];
+                        Raylib.DrawLineEx(pa, pb, ft.Sz * 2.1f, Raylib.Fade(glow, 0.07f));
+                        Raylib.DrawLineEx(pa, pb, ft.Sz, Raylib.Fade(glow, 0.16f * (0.7f + 0.3f * pulse)));
+                        Raylib.DrawCircleV(pb, ft.Sz * 1.5f, Raylib.Fade(glow, 0.22f * (0.6f + 0.4f * pulse)));
+                    }
+                    Raylib.DrawCircleV(_featPt[a0], ft.Sz * 1.5f, Raylib.Fade(glow, 0.20f));
+                    break;
+                }
+                default:   // Plate
+                {
+                    var pa = _featPt[a0]; var pb = _featPt[a0 + n - 1];
+                    var d = pb - pa; float len = d.Length();
+                    if (len < 1f) break;
+                    var u = d / len; var nrm = new Vector2(-u.Y, u.X);
+                    Raylib.DrawLineEx(pa, pb, 3.2f, Raylib.Fade(Pal.RGBA(6, 9, 13), 0.34f));   // the seam
+                    Raylib.DrawLineEx(pa - nrm * 2.4f, pb - nrm * 2.4f, 1.2f,
+                                      Raylib.Fade(Pal.RGBA(150, 172, 198), 0.10f));            // light catch
+                    for (float s = ft.Sz * 0.5f; s < len; s += ft.Sz)                          // bolts
+                        Raylib.DrawCircleV(pa + u * s, 2.2f, Raylib.Fade(Pal.RGBA(140, 160, 186), 0.16f));
+                    break;
+                }
+            }
+        }
+    }
+    // ====================================================================================
+
     // HORIZON W5 — one BOLD, cheap, DETERMINISTIC structural cue per biome, drawn over the
     // FLOOR tiles so each mission reads as a distinct *place*. All positions/alphas are pure
     // functions of tile coords + frozen constants (SHash) or a slow global time (for a gentle
     // shimmer that reproduces at the harness's fixed frame). Kept restrained so the squint test
     // holds (units still dominate); the emissive cues (magma/void-neon) are what the bloom
     // catches. Runs once per floor tile — a handful of primitives each, no allocation.
-    static void DrawBiomeSignature(Game g, Biome bm)
+    static void DrawBiomeSignature(Game g, Biome bm, int bi)
     {
         float t = (float)Raylib.GetTime();
+        // V3 PART B — the BOARD-SCALE features go down first, under the per-tile cues, so a
+        // biome reads as terrain with structure and the per-tile cue is the fine detail on top.
+        DrawBiomeFeatures(g, bm, bi, t);
+        bool cbSig = Pal.Colorblind;
         for (int gx = 0; gx < g.Grid.W; gx++)
             for (int gy = 0; gy < g.Grid.H; gy++)
             {
@@ -189,12 +589,17 @@ public static class Renderer
                     // as a secondary "this is a place" texture — still low-saturation, still below
                     // the unit/objective/cover hierarchy, and kept clear of the red/amber/cyan
                     // SIGNAL hues (the teal/violet lattice stays a dim structural grid, not a halo).
-                    case AmbientKind.Ember:   // MAGMA — glowing emissive fissures across ~40% of tiles
+                    case AmbientKind.Ember:   // MAGMA — glowing emissive hairline veins
                     {
-                        if (SHash(gx, gy, 11) > 0.40f) break;
+                        // V3: the board-scale FISSURE now carries magma's structure, so the
+                        // per-tile squiggle drops from ~40% of tiles to ~16% and becomes the
+                        // fine detail beside it — 45 identical orange scribbles was the thing
+                        // that read as a doodle field. In colorblind mode the vein gives up
+                        // saturated orange entirely (it is the CB foe hue) and works in value.
+                        if (SHash(gx, gy, 11) > 0.16f) break;
                         float ph = SHash(gx, gy, 13) * 6.28f;
                         float pulse = 0.55f + 0.45f * MathF.Sin(t * 2.2f + ph);   // veins breathe
-                        var lava = Pal.RGBA(255, 120, 40);
+                        var lava = cbSig ? Pal.RGBA(126, 84, 62) : Pal.RGBA(255, 120, 40);
                         // a jagged crack: 3 segments zig-zagging across the tile
                         float ax = r.X + 6 + SHash(gx, gy, 1) * (r.Width - 12);
                         Vector2 pa = new(ax, r.Y + 4);
@@ -203,7 +608,7 @@ public static class Renderer
                             float side = ((k & 1) == 0 ? -1f : 1f) * (5f + SHash(gx, gy, k * 7) * 9f);
                             Vector2 pb = new(cx + side, r.Y + 4 + k * (r.Height - 8) / 3f);
                             Raylib.DrawLineEx(pa, pb, 2.6f, Raylib.Fade(lava, 0.44f * pulse));   // hot glow
-                            Raylib.DrawLineEx(pa, pb, 1.2f, Raylib.Fade(Pal.RGBA(255, 220, 150), 0.72f * pulse)); // core
+                            Raylib.DrawLineEx(pa, pb, 1.2f, Raylib.Fade(cbSig ? Pal.RGBA(255, 244, 226) : Pal.RGBA(255, 220, 150), (cbSig ? 0.42f : 0.72f) * pulse)); // core
                             pa = pb;
                         }
                         break;
@@ -352,6 +757,8 @@ public static class Renderer
     {
         EnsureNoise();   // lazy-init the noise texture on first frame (no-op thereafter)
         var bm = g.Biome;
+        int bi = BiomeIndex(bm);
+        EnsureCell(bi);  // V3: lazy-init this biome's cellular surface (no-op thereafter)
         // board backing
         var edge = new Rectangle(Cfg.OriginX - 6, Cfg.OriginY - 6, Cfg.BoardW + 12, Cfg.BoardH + 12);
         Raylib.DrawRectangleRounded(edge, 0.02f, 6, Pal.RGBA(7, 10, 14));
@@ -425,7 +832,7 @@ public static class Renderer
         // *place*, not just a colour tint (magma fissures / frost sheen / void-neon grid glow /
         // ash soot / arid dune banding / verdant speckle / steel seams). Deterministic (a pure
         // function of tile coords + frozen constants — no RNG), on the floor under terrain/units.
-        DrawBiomeSignature(g, bm);
+        DrawBiomeSignature(g, bm, bi);
 
         // RESONANCE V2 — per-biome AMBIENT-OCCLUSION VIGNETTE on the board rect. The third leg of
         // the re-grade (with the widened key light and the raised plateau/cover tops): the room
@@ -1470,22 +1877,53 @@ public static class Renderer
         // than a lit volume. SEPARATE them (top +15, wall -10, VALUE only). The top face still
         // lands well under the >180 band reserved for units/objectives/FX, so the squint
         // hierarchy is unchanged — cover gets MODELLING, not salience.
+        // RESONANCE V3 — COVER JOINS ITS BIOME. The tint pull was 0.28 over a strongly slate
+        // base, which measured out as: magma cover is slate, tundra cover is slate, verdant
+        // cover is slate. Forty-five grey widgets in a coloured room read as a whitebox level.
+        // Pull to 0.55 so the block takes the room's hue, and compensate the VALUE the pull
+        // costs (the biome Tints are darker than the slate base) with a Lift, so the measured
+        // top-face luma is held where V2 left it — the point is HUE, not salience.
         Color shade = Pal.RGBA(8, 11, 15);
-        Color cHi = Lift(Pal.Mix(Pal.Mix(Pal.CoverHi, tint, 0.28f),    shade, 0.10f), -8);
-        Color cHiTop = Lift(Pal.Mix(Pal.Mix(Pal.CoverHiTop, tint, 0.28f), shade, 0.14f), 16);
-        Color cLo = Lift(Pal.Mix(Pal.Mix(Pal.CoverLo, tint, 0.28f),    shade, 0.10f), -8);
-        Color cLoTop = Lift(Pal.Mix(Pal.Mix(Pal.CoverLoTop, tint, 0.28f), shade, 0.14f), 16);
+        // The top faces are VALUE-TARGETED, not flat-lifted (see LiftTo). The targets are set
+        // by a hard ceiling: the brightest pixel a cover top can produce — high cover, a cell
+        // interior with no grout, standing directly under the key light, plus the Perlin grain
+        // — must stay BELOW a soldier's body fill (Pal.Friend luma 156 / Pal.Foe 153). With the
+        // key light's 0.24 gain that works out to flat <= ~114, so HIGH tops sit at 112 and LOW
+        // tops at 100, holding the high/low tier the shape cue also carries. Measured worst
+        // case after this: 149 vs a 179-181 unit ring and a 215 specular catch.
+        Color cHi = Lift(Pal.Mix(Pal.Mix(Pal.CoverHi, tint, 0.55f),    shade, 0.10f), -14);
+        Color cHiTop = LiftTo(Pal.Mix(Pal.Mix(Pal.CoverHiTop, tint, 0.55f), shade, 0.14f), 92, 52);
+        Color cLo = Lift(Pal.Mix(Pal.Mix(Pal.CoverLo, tint, 0.55f),    shade, 0.10f), -14);
+        Color cLoTop = LiftTo(Pal.Mix(Pal.Mix(Pal.CoverLoTop, tint, 0.55f), shade, 0.14f), 80, 52);
+        int bi = BiomeIndex(g.Biome);
+        // the colour the cellular field is drawn through: a light biome-tinted stone. The value
+        // targets above sit BELOW the finished face on purpose — this pass lifts the cell faces,
+        // and the ceiling that has to clear the units is the FINISHED pixel, not the base.
+        Color stone = Pal.Mix(Pal.RGBA(255, 255, 255), tint, 0.42f);
+        Color seam  = Pal.Mix(Pal.RGBA(0, 0, 0), tint, 0.22f);   // the chipped-corner shadow
         for (int x = 0; x < g.Grid.W; x++)
             for (int y = 0; y < g.Grid.H; y++)
             {
                 var t = g.Grid.Tiles[x, y];
                 if (t == TileType.Floor) continue;
                 var r = Util.TileRect(x, y);
+                // V3 — PURELY VISUAL footprint jitter. Every block used the same inset, the same
+                // corner radius and the same lift, so a map read as a grid of clones. Offset the
+                // DRAWN block by up to +/-3px, vary its inset by ~1px and hash-pick its corner
+                // radius. Nothing downstream reads these: `r` is a local copy, Util.TileRect is
+                // untouched, and every consumer of tile-centre maths (hit-testing, LoS, overlays,
+                // FX anchors) still sees the exact grid. Deterministic (SHash of tile coords).
+                float jx = (SHash(x, y, 101) - 0.5f) * 6f;
+                float jy = (SHash(x, y, 103) - 0.5f) * 6f;
+                float jRad = 0.12f + SHash(x, y, 107) * 0.20f;      // 0.12 .. 0.32 corner radius
+                float jIn  = SHash(x, y, 109) * 2.0f - 0.6f;        // -0.6 .. +1.4 px of inset
+                r.X += jx; r.Y += jy;
                 // UNDERTOW W7 — ground the block: a soft AO pool under the cover's footprint,
                 // drawn on the FLOOR (before the lift) so the block reads as sitting IN the room,
                 // not floating over a flat plane. Cheap (2 rounded rects), deterministic.
                 {
                     var foot = Util.TileRect(x, y);
+                    foot.X += jx; foot.Y += jy;                     // shadow follows the jittered block
                     foot.Y -= g.Grid.HeightAt(x, y) * ElevLift;
                     // V1: the block's real ground footprint, swept AWAY from the key light
                     // (ShadowVec) instead of the old fixed +3/+4 emboss. Length scales with the
@@ -1504,8 +1942,8 @@ public static class Renderer
                 // per-tile key light [-.55,1]: cover on the lit side reads a touch brighter, far
                 // corner blocks sink — so the 3D forms pop consistently with the floor gradient.
                 float klit = FloorLight(g, x, y);
-                float inset = 5f;
-                float lift = high ? 16f : 8f;
+                float inset = 5f + jIn;
+                float lift = (high ? 16f : 8f) + (SHash(x, y, 113) - 0.5f) * 2.4f;
                 var baseRect = new Rectangle(r.X + inset, r.Y + inset + lift,
                                              r.Width - inset * 2, r.Height - inset * 2 - lift);
                 var topRect = new Rectangle(r.X + inset, r.Y + inset,
@@ -1521,8 +1959,11 @@ public static class Renderer
                 // dark edge so the wall silhouette stays crisp against a lit ground plane.
                 Raylib.DrawRectangleRounded(
                     new Rectangle(baseRect.X - 1, baseRect.Y - 1, baseRect.Width + 2, baseRect.Height + 2),
-                    0.18f, 5, Raylib.Fade(Pal.RGBA(0, 0, 0), 0.30f));
-                Raylib.DrawRectangleRounded(baseRect, 0.18f, 5, wallCol);
+                    jRad, 5, Raylib.Fade(Pal.RGBA(0, 0, 0), 0.30f));
+                Raylib.DrawRectangleRounded(baseRect, jRad, 5, wallCol);
+                // V3: the biome's cellular field on the WALL face too, so the whole block is one
+                // material rather than a textured lid on a flat box.
+                DrawCellRect(bi, baseRect, stone, 0.10f);
                 // front-face shade gradient: a soft darkening toward the bottom of the wall so the
                 // block reads as a lit 3D volume (consistent top-light), and a thin lighter catch on
                 // the upper-left of the face. Cheap (a handful of thin bands), subtle (squint holds).
@@ -1544,9 +1985,30 @@ public static class Renderer
                 Raylib.DrawRectangleRec(
                     new Rectangle(baseRect.X + 4, baseRect.Y + baseRect.Height - 1, baseRect.Width - 8, 4),
                     Raylib.Fade(Pal.RGBA(0, 0, 0), 0.22f));
-                Raylib.DrawRectangleRounded(topRect, 0.22f, 5, topCol);
+                Raylib.DrawRectangleRounded(topRect, jRad + 0.04f, 5, topCol);
                 // 5.4: noise grain on the top face so cover reads as a physical object
                 DrawNoiseRect(topRect, tint, 0.10f);
+                // V3: the CELLULAR pass — the one that makes cover a MATERIAL. The baked field
+                // is inverted (bright cell faces, black seams), so a light biome stone drawn
+                // through it lifts each cell face and leaves the seams: concrete slabs /
+                // cracked basalt / ice plates / gravel, set by the per-biome cell size.
+                DrawCellRect(bi, topRect, stone, 0.13f);
+                // V3: a hash-picked CHIP knocked out of one corner of ~35% of top faces — a
+                // broken edge with its own light catch. Cheap (2 tris + a line), deterministic,
+                // and it is what stops a row of blocks reading as one widget stamped five times.
+                if (SHash(x, y, 117) < 0.35f)
+                {
+                    int corner = (int)(SHash(x, y, 119) * 4f) & 3;
+                    float cw2 = 7f + SHash(x, y, 121) * 7f;
+                    float ex = corner == 0 || corner == 3 ? topRect.X : topRect.X + topRect.Width;
+                    float ey = corner <= 1 ? topRect.Y : topRect.Y + topRect.Height;
+                    float sxg = corner == 0 || corner == 3 ? 1f : -1f;
+                    float syg = corner <= 1 ? 1f : -1f;
+                    var q0 = new Vector2(ex + sxg * cw2, ey);
+                    var q1 = new Vector2(ex, ey + syg * cw2);
+                    FillTri(new Vector2(ex, ey), q0, q1, Raylib.Fade(seam, 0.72f));
+                    Raylib.DrawLineEx(q0, q1, 1.2f, Raylib.Fade(Pal.RGBA(255, 255, 255), 0.09f));
+                }
                 // top edge highlight — a clear (but quiet) catch on the light-facing upper edge so
                 // the top face reads as a distinct lit plane. UNDERTOW W7: with cover no longer
                 // over-receded, this can lift back toward a legible whisper (0.035 -> 0.06).
@@ -1893,13 +2355,33 @@ public static class Renderer
             => Raylib.DrawLineEx(At(fwd, -halfLen), At(fwd, halfLen), thick * s, Raylib.Fade(c, a * alpha));
         void Barrel(float from, float to, float thick) // a line along the facing (a gun barrel)
             => Raylib.DrawLineEx(At(from, 0), At(to, 0), thick * s, col);
+        // RESONANCE V3 — TOPOLOGY, not width. GRUNT/SCOUT/HUNTER were the same wedge at 6.5 /
+        // 4.5 / 4.0 half-width: two pixels apart at play distance, which is no difference at
+        // all. They now differ in what the shape IS — filled / hollow / not-a-body-at-all.
+        void WedgeOutline(float nose, float backFwd, float halfW, float thick, float alpha)
+        {
+            var v0 = At(nose, 0); var v1 = At(backFwd, -halfW); var v2 = At(backFwd, halfW);
+            var cc = Raylib.Fade(c, a * alpha);
+            Raylib.DrawLineEx(v0, v1, thick * s, cc);
+            Raylib.DrawLineEx(v1, v2, thick * s, cc);
+            Raylib.DrawLineEx(v2, v0, thick * s, cc);
+        }
+        void Chevron(float apexFwd, float halfW, float depth, float thick, float alpha)
+        {
+            var cc = Raylib.Fade(c, a * alpha);
+            Raylib.DrawLineEx(At(apexFwd - depth, -halfW), At(apexFwd, 0), thick * s, cc);
+            Raylib.DrawLineEx(At(apexFwd - depth,  halfW), At(apexFwd, 0), thick * s, cc);
+        }
 
         switch (u.Cls)
         {
             // ---------------- players ----------------
-            case "ASSAULT":            // aggressive forward wedge (rifleman pushing up)
+            case "ASSAULT":            // aggressive forward wedge + a shouldered rifle. V3: the
+                                       // shoulder bar is what separates it from the enemy GRUNT
+                                       // wedge at a squint (the closed team ring does the rest).
                 Wedge(9f, -5f, 7f, 1f);
                 Barrel(2f, 12f, 2.2f);                       // a short rifle barrel out the nose
+                Bar(-3.5f, 6.5f, 2.2f, 0.95f);               // the stock across the shoulders
                 break;
             case "RANGER":             // a slim forward dart (fast flanker) + a blade tick
                 Wedge(9f, -3f, 4.5f, 1f);
@@ -1921,11 +2403,15 @@ public static class Renderer
                 break;
 
             // ---------------- enemies ----------------
-            case "GRUNT":              // basic forward triangle
-                Wedge(8f, -5f, 6.5f, 1f);
+            case "GRUNT":              // V3 topology: a SOLID filled wedge, nothing else. The
+                                       // plain slab of a shape is the baseline the other two
+                                       // enemy line troops are read against.
+                Wedge(8.5f, -5f, 7f, 1f);
                 break;
-            case "SCOUT":              // small fast dart
-                Wedge(8f, -3f, 4.5f, 1f);
+            case "SCOUT":              // V3 topology: a HOLLOW wedge — same outline, no mass.
+                                       // "light, sees you, isn't a wall" reads from the void.
+                WedgeOutline(9f, -4.5f, 6.5f, 1.9f, 1f);
+                Raylib.DrawCircleV(At(-1f, 0), 1.7f * s, col);   // a lone sensor pip inside
                 break;
             case "BRUISER":            // a bulky wide hexagon (tanky LMG)
                 Raylib.DrawPoly(p, 6, 8.5f * s, MathF.Atan2(fdir.Y, fdir.X) * 180f / MathF.PI, col);
@@ -1974,8 +2460,11 @@ public static class Renderer
                 Raylib.DrawRectanglePro(new Rectangle(p.X, p.Y, 11f * s, 11f * s), new Vector2(5.5f * s, 5.5f * s),
                                         MathF.Atan2(fdir.Y, fdir.X) * 180f / MathF.PI, col);
                 break;
-            case "HUNTER":             // a lean forward dart (the twin speed chevrons are drawn separately)
-                Wedge(9f, -4f, 4f, 1f);
+            case "HUNTER":             // V3 topology: TWIN CHEVRONS and no body at all — the
+                                       // flanker reads as pure direction, not as a unit standing
+                                       // there. Nothing else on the board is two nested V's.
+                Chevron(10f, 6f, 6f, 2.4f, 1f);
+                Chevron(4f, 6f, 6f, 2.2f, 0.8f);
                 break;
             case "MORTAR":             // a stout body + a back-tilted tube (the lob arc is drawn separately)
                 Raylib.DrawCircleV(At(-2f, 0), 5f * s, col);
@@ -2094,8 +2583,36 @@ public static class Renderer
     // now runs per-frame in the roster chips (x6), so the allocation was hot-path. DrawSilhouette
     // reads ONLY u.Cls, and rendering is single-threaded, so per-call reassignment is safe.
     static readonly Unit _codexGlyphStub = new Unit();
+    /// The five player archetypes. Used only to decide which CHASSIS a codex glyph wears —
+    /// board-side the same question is answered by Unit.Team.
+    static readonly string[] PlayerClasses = { "ASSAULT", "RANGER", "SHARPSHOOTER", "GUNNER", "CORPSMAN" };
+    static bool IsPlayerClass(string cls)
+    {
+        for (int i = 0; i < PlayerClasses.Length; i++) if (PlayerClasses[i] == cls) return true;
+        return false;
+    }
     public static void DrawCodexGlyph(string cls, Vector2 p, Color c, float scale, float ang = 0f)
     {
+        // V3: the board now says TEAM with a chassis ring (closed+doubled friendly / broken
+        // hostile), so the field manual has to wear the same ring or the two drift apart —
+        // which is the exact bug the HUNTER chevrons had. Only the LARGE presentation glyphs
+        // (bestiary cards, class cards, offer cards) get it: the tiny 0.8-0.95 row glyphs sit
+        // in 26px rows next to their own label and a ring there would just be clutter.
+        if (scale >= 1.2f)
+        {
+            float r = 13f * scale;
+            if (IsPlayerClass(cls))
+            {
+                Raylib.DrawRing(p, r - 1.8f, r + 0.6f, 0, 360, 48, Raylib.Fade(c, 0.85f));
+                Raylib.DrawRing(p, r + 2.8f, r + 3.9f, 0, 360, 48, Raylib.Fade(c, 0.45f));
+            }
+            else
+            {
+                for (int k = 0; k < 3; k++)
+                    Raylib.DrawRing(p, r - 1.8f, r + 0.6f, k * 120f + 16f, k * 120f + 104f, 18,
+                                    Raylib.Fade(c, 0.85f));
+            }
+        }
         _codexGlyphStub.Cls = cls;
         DrawSilhouette(_codexGlyphStub, p, c, 1f, scale, ang);
     }
@@ -2204,8 +2721,13 @@ public static class Renderer
         // W6 Task 2: Unaware pod body shifted from a muddy warm brown to a COLD DESATURATED SLATE
         // (matches the new slate under-ring + "?" glyph) so a dormant contact reads as a quiet,
         // neutral "sleeping threat" — distinct from the amber SUSPICIOUS body and the hot LIVE red.
-        Color main = vip ? Pal.VipGold : (friend ? Pal.Friend : (unaware ? Pal.RGBA(150, 164, 180) : (suspicious ? Pal.Suspect : (elite ? Pal.Elite : Pal.Foe))));
-        Color dark = vip ? Pal.VipDk  : (friend ? Pal.FriendDk : (unaware ? Pal.RGBA(44, 52, 62) : (suspicious ? Pal.SuspectDk : (elite ? Pal.EliteDk : Pal.FoeDk))));
+        // V3: the dormant slate was 150,164,180 on a body shrunk to 0.75x with a 0.16-alpha
+        // under-ring — a reviewer missed several dormant contacts on first read of the V2
+        // captures. A dim outline is the intent; near-invisible is a bug. Lifted to a pale
+        // slate; the ring/under-glow lift below finishes the job. Still cold, still quiet,
+        // still clearly subordinate to the amber SUSPICIOUS and the hot LIVE tiers.
+        Color main = vip ? Pal.VipGold : (friend ? Pal.Friend : (unaware ? Pal.RGBA(198, 210, 224) : (suspicious ? Pal.Suspect : (elite ? Pal.Elite : Pal.Foe))));
+        Color dark = vip ? Pal.VipDk  : (friend ? Pal.FriendDk : (unaware ? Pal.RGBA(50, 60, 72) : (suspicious ? Pal.SuspectDk : (elite ? Pal.EliteDk : Pal.FoeDk))));
 
         // 5.3-B focal-point alpha: selected unit = full; spent players dimmed; enemies visible.
         // HP bar, rings, status codes, alert markers, VIP markers stay full-alpha (they are signal).
@@ -2293,10 +2815,13 @@ public static class Renderer
             // deliberately DIM + de-saturated (a cold slate, NOT the hot-red live-foe halo) and
             // clearly subordinate: much lower alpha/reach than a live foe's burn. Suspicious pods get
             // a faint warm bias (their amber ring/ ! carries the tier); Unaware stays cold slate.
-            Color podGlow = suspicious ? Pal.RGBA(150, 120, 92) : Pal.RGBA(96, 108, 124);
-            float pR = suspicious ? 26f : 22f;   // FUL-3: dormant ring tightens with the smaller body
-            Raylib.DrawCircleV(p, pR,        Raylib.Fade(podGlow, 0.16f));   // soft seat so it doesn't vanish
-            Raylib.DrawCircleV(p, pR * 0.66f, Raylib.Fade(podGlow, 0.24f));
+            // V3: 0.16/0.24 was below the floor's own texture on several biomes. Raised to
+            // 0.30/0.44 with a touch more reach — still cold slate, still a fraction of the
+            // live foe's burn, but now unmistakably "something is standing there".
+            Color podGlow = suspicious ? Pal.RGBA(168, 136, 100) : Pal.RGBA(122, 136, 154);
+            float pR = suspicious ? 27f : 24f;   // FUL-3: dormant ring tightens with the smaller body
+            Raylib.DrawCircleV(p, pR,        Raylib.Fade(podGlow, 0.26f));   // soft seat so it doesn't vanish
+            Raylib.DrawCircleV(p, pR * 0.66f, Raylib.Fade(podGlow, 0.38f));
         }
 
         // selection ring — full strength (signal), plus a layered glow so the eye snaps to who's
@@ -2410,26 +2935,59 @@ public static class Renderer
         // holds pods steady. Keyed on the capability flag like the W5 mechanics; echoed by the
         // aura outline's corner diamonds so ring and zone read as one system without hue.
         bool diaRing  = u.Team == Team.Enemy && u.HasBanner;
+        // ---- RESONANCE V3 PART C: a TEAM CHASSIS carried by topology, not hue ----------------
+        // Player ASSAULT and enemy GRUNT were the same wedge 1px apart, and the only thing that
+        // said which side a figure was on was its colour — which is exactly what dies in
+        // colorblind mode on MAGMA, where the foe hue, the objective gold and the floor all
+        // converge. So the CHASSIS now carries team:
+        //     player  = a CLOSED ring, doubled by an outer hairline  ("sealed, ours")
+        //     enemy   = an OPEN / BROKEN ring, notched in three places ("breached, theirs")
+        // Both survive greyscale and both survive Pal.SetColorblind, because a gap is a gap.
+        Color keyLine = Pal.RGBA(3, 5, 9);                  // dark contour: value contrast, palette-free
+        // ring stroke lifted toward white. V2 measured cover top faces (mean 117 / p90 127)
+        // running level with soldier bodies (p90 146) and correctly refused to brighten cover
+        // any further until the UNIT tier moved. This is that move: Pal.Friend luma 156 and
+        // Pal.Foe 153 both sit just under the >180 band the grade reserves; a 0.26 lift toward
+        // white puts the ring stroke over it without spending the team hue.
+        Color ringCol = Pal.Mix(main, Pal.RGBA(255, 255, 255), 0.26f);
+        // three dark notches across a ring band — the enemy chassis break, drawn in the body's
+        // own dark so it reads as an absence of ring rather than an added mark.
+        void Notch(float r, float halfBand)
+        {
+            for (int k = 0; k < 3; k++)
+            {
+                float aa = (k * 120f + 60f) * MathF.PI / 180f;
+                var d = new Vector2(MathF.Cos(aa), MathF.Sin(aa));
+                Raylib.DrawLineEx(p + d * (r - halfBand - 1f), p + d * (r + halfBand + 1f),
+                                  7f, Raylib.Fade(dark, figAlpha));
+            }
+        }
         if (sqRing)
         {
             float hs = bodyR - 2f;                          // half-side: matches the disc footprint
+            Raylib.DrawRectangleLinesEx(new Rectangle(p.X - hs - 3f, p.Y - hs - 3f, hs * 2f + 6f, hs * 2f + 6f),
+                                        3f, Raylib.Fade(keyLine, 0.6f * figAlpha));
             Raylib.DrawRectangleRec(new Rectangle(p.X - hs, p.Y - hs, hs * 2f, hs * 2f), Raylib.Fade(dark, figAlpha));
-            Raylib.DrawRectangleLinesEx(new Rectangle(p.X - hs, p.Y - hs, hs * 2f, hs * 2f), 4f, Raylib.Fade(main, figAlpha));
+            Raylib.DrawRectangleLinesEx(new Rectangle(p.X - hs, p.Y - hs, hs * 2f, hs * 2f), 4f, Raylib.Fade(ringCol, figAlpha));
             Raylib.DrawRectangleRec(new Rectangle(p.X - hs + 4f, p.Y - hs + 4f, hs * 2f - 8f, hs * 2f - 8f),
                                     Raylib.Fade(main, 0.22f * figAlpha));
+            Notch(hs, 2f);
         }
         else if (hexRing)
         {
+            Raylib.DrawPolyLinesEx(p, 6, bodyR + 5.5f, 0f, 3f, Raylib.Fade(keyLine, 0.6f * figAlpha));
             Raylib.DrawPoly(p, 6, bodyR + 2.5f, 0f, Raylib.Fade(dark, figAlpha));
-            Raylib.DrawPolyLinesEx(p, 6, bodyR + 2.5f, 0f, 4.4f, Raylib.Fade(main, figAlpha));
+            Raylib.DrawPolyLinesEx(p, 6, bodyR + 2.5f, 0f, 4.4f, Raylib.Fade(ringCol, figAlpha));
             Raylib.DrawPoly(p, 6, bodyR - 2.5f, 0f, Raylib.Fade(main, 0.22f * figAlpha));
+            Notch(bodyR + 2.5f, 2.2f);
         }
         else if (dashRing)
         {
             float dr = bodyR * 0.86f;                       // smaller: a light, fast frame
+            Raylib.DrawRing(p, dr + 2f, dr + 4.6f, 0, 360, 40, Raylib.Fade(keyLine, 0.6f * figAlpha));
             Raylib.DrawCircleV(p, dr, Raylib.Fade(dark, figAlpha));
             for (int k = 0; k < 8; k++)                     // dashed ring: 8 arcs with clear gaps
-                Raylib.DrawRing(p, dr - 3.4f, dr + 1f, k * 45f + 5f, k * 45f + 33f, 10, Raylib.Fade(main, figAlpha));
+                Raylib.DrawRing(p, dr - 3.4f, dr + 1f, k * 45f + 5f, k * 45f + 33f, 10, Raylib.Fade(ringCol, figAlpha));
             Raylib.DrawCircleV(p, dr - 3.4f, Raylib.Fade(main, 0.22f * figAlpha));
         }
         else if (diaRing)
@@ -2437,16 +2995,36 @@ public static class Renderer
             // diamond ring: DrawPoly's 4-gon puts its FIRST vertex at rotation° along +X, so
             // rotation 0 IS the diamond (45 would render the TURRET's axis-aligned square —
             // learned from the screenshot). The "anchor" frame around the standard-bearer.
+            Raylib.DrawPolyLinesEx(p, 4, bodyR + 7f, 0f, 3f, Raylib.Fade(keyLine, 0.6f * figAlpha));
             Raylib.DrawPoly(p, 4, bodyR + 4f, 0f, Raylib.Fade(dark, figAlpha));
-            Raylib.DrawPolyLinesEx(p, 4, bodyR + 4f, 0f, 4.4f, Raylib.Fade(main, figAlpha));
+            Raylib.DrawPolyLinesEx(p, 4, bodyR + 4f, 0f, 4.4f, Raylib.Fade(ringCol, figAlpha));
             Raylib.DrawPoly(p, 4, bodyR - 2f, 0f, Raylib.Fade(main, 0.22f * figAlpha));
+            Notch(bodyR + 4f, 2.2f);
         }
         else
         {
+            Raylib.DrawRing(p, bodyR + 1f, bodyR + 3.6f, 0, 360, 48, Raylib.Fade(keyLine, 0.6f * figAlpha));
             Raylib.DrawCircleV(p, bodyR, Raylib.Fade(dark, figAlpha));
-            Raylib.DrawRing(p, bodyR - 3.4f, bodyR + 1f, 0, 360, 48, Raylib.Fade(main, figAlpha));
             Raylib.DrawCircleV(p, bodyR - 3.4f, Raylib.Fade(main, 0.22f * figAlpha));
+            if (friend)
+            {
+                // CLOSED, DOUBLED — the friendly chassis.
+                Raylib.DrawRing(p, bodyR - 3.4f, bodyR + 1f, 0, 360, 48, Raylib.Fade(ringCol, figAlpha));
+                Raylib.DrawRing(p, bodyR + 4.4f, bodyR + 6.2f, 0, 360, 48, Raylib.Fade(ringCol, 0.62f * figAlpha));
+            }
+            else
+            {
+                // BROKEN — three arcs with three clean notches. The hostile chassis.
+                for (int k = 0; k < 3; k++)
+                    Raylib.DrawRing(p, bodyR - 3.4f, bodyR + 1f, k * 120f + 16f, k * 120f + 104f, 18,
+                                    Raylib.Fade(ringCol, figAlpha));
+            }
         }
+        // a small specular catch on the upper-left of the body, matching the board's key light.
+        // This is the pixel tier the grade reserves above 180 and previously nobody occupied.
+        if (!inactive)
+            Raylib.DrawRing(p, bodyR * 0.62f, bodyR * 0.79f, 200f, 272f, 14,
+                            Raylib.Fade(Pal.RGBA(255, 255, 255), 0.48f * figAlpha));
 
         // class silhouette — a recognizable primitive cue per class (shape-redundant, colorblind-
         // safe: meaning rides on the SHAPE, inheriting the team colour + focal figAlpha).
@@ -2491,11 +3069,15 @@ public static class Renderer
                 // so the DORMANT tier reads at a glance against any biome floor — still cold/quiet,
                 // still clearly subordinate to the amber SUSPICIOUS ring and the hot-red LIVE halo.
                 float t = (float)Raylib.GetTime();
-                Color dim = Pal.RGBA(176, 190, 205);   // cold desaturated slate (was warm brown)
+                Color dim = Pal.RGBA(184, 198, 214);   // V3: cold slate, lifted for contrast
                 for (int k = 0; k < 8; k++)
                 {
                     float a0 = k * 45f + t * 14f;          // slow rotation so it reads as "scanning"
-                    Raylib.DrawRing(p, 23f, 26f, a0, a0 + 26f, 6, Raylib.Fade(dim, 0.68f));
+                    // V3: a dark backing arc under each dash, so the dormant ring holds its
+                    // contrast on a pale TUNDRA drift as well as on a dark VOID floor — the
+                    // read stops depending on which biome the pod happens to be standing in.
+                    Raylib.DrawRing(p, 19.6f, 24.4f, a0 - 1.5f, a0 + 27.5f, 6, Raylib.Fade(Pal.RGBA(4, 7, 11), 0.60f));
+                    Raylib.DrawRing(p, 21f, 23.6f, a0, a0 + 26f, 6, Raylib.Fade(dim, 0.80f));
                 }
                 float qw = Cfg.Measure("?", 23, 1f).X;
                 var qp = new Vector2((int)(p.X - qw / 2), (int)(p.Y - 13));
@@ -2562,20 +3144,10 @@ public static class Renderer
             Raylib.DrawCircleV(new Vector2(p.X + 4, p.Y - 4), 2f, Raylib.Fade(Pal.Foe, figAlpha));
         }
 
-        // hunter: twin forward "speed" chevrons along its facing so it reads as a fast flanker
-        // (distinct from the plain scout/grunt triangle). They point the way it's curling.
-        if (u.Team == Team.Enemy && u.Cls == "HUNTER")
-        {
-            var hdir = new Vector2(MathF.Cos(u.Facing), MathF.Sin(u.Facing));
-            var hperp = new Vector2(-hdir.Y, hdir.X);
-            for (int k = 0; k < 2; k++)
-            {
-                var bse = p + hdir * (4f + k * 5f);     // two stacked chevrons
-                var nose = bse + hdir * 4.5f;
-                Raylib.DrawLineEx(nose, bse + hperp * 4.5f, 2f, Raylib.Fade(main, figAlpha));
-                Raylib.DrawLineEx(nose, bse - hperp * 4.5f, 2f, Raylib.Fade(main, figAlpha));
-            }
-        }
+        // V3: the HUNTER's twin speed chevrons USED to be drawn here, at a fixed ~9px, on top of
+        // a plain dart silhouette — which meant the codex (which renders DrawSilhouette alone)
+        // showed a dart and the board showed a dart with chevrons. They are now the silhouette
+        // itself, at silhouette scale, so board and field manual cannot drift apart.
 
         // mortar: a lob-arc + shell marker above the figure so it reads as a back-line grenadier
         if (u.Team == Team.Enemy && u.Cls == "MORTAR")

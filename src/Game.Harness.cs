@@ -3633,6 +3633,7 @@ public partial class Game
     public static string ExposureSelfTest()
     {
         var fails = new List<string>();
+        System.Text.StringBuilder sb0Deploy = null;   // W4 deployment-shape histogram (filled below)
         const int Seeds = 200;
         int nLay = Maps.Layouts.Length;
         var arenaHist = new int[nLay];
@@ -3697,6 +3698,107 @@ public partial class Game
         for (int a = 0; a < nLay; a++)
             if (arenaHist[a] == 0) fails.Add($"arenaNeverDealt:{a}");
 
+        // ── W4 THE SECOND AXIS: the DEPLOYMENT SHAPE is now a third exposure axis ─────
+        // Enumerate shape x arena and shape x objective over the same seed space, and pin the
+        // three contracts the geometry has to keep:
+        //   (1) PURE — DeployFor consumes ZERO Util.Rng draws (every CRN pairing depends on it);
+        //   (2) DETERMINISTIC — the same (seed, mission) always yields the same shape;
+        //   (3) LEGAL — ENVELOP (a centre deployment) is never dealt to an objective whose
+        //       geography it would trivialise; every legal shape reaches every objective/arena.
+        {
+            int nShapes = Mission.DeployShapes;
+            var shapeHist = new int[nShapes];
+            var shapeArena = new bool[nShapes, nLay];
+            var shapeObj = new Dictionary<(int, Objective), int>();
+            // (1) purity: interleaving DeployFor calls must not perturb the shared stream.
+            Util.Reseed(4242);
+            int refDraw = Util.RandInt(0, 1000000);
+            Util.Reseed(4242);
+            for (int k = 0; k < 500; k++) Mission.DeployFor(k * 31 + 7, (k % Run.MaxMissions) + 1, k % 2 == 0);
+            if (Util.RandInt(0, 1000000) != refDraw) fails.Add("deployConsumesRng");
+
+            bool EnvOk(Objective o) => o == Objective.Eliminate || o == Objective.Decapitate || o == Objective.Defend;
+
+            // shape x ARENA is a pure (seed, mission) x (seed, mission) cross-product — no map
+            // generation needed — so it sweeps a MUCH wider seed space than the route walk below.
+            // A low-weight shape (CROSSFIRE at 1/10) simply does not reach all 35 arenas inside
+            // 200 seeds, and asserting on that sample would be asserting on sampling noise.
+            const int ArenaSeeds = 4000;
+            for (int i = 0; i < ArenaSeeds; i++)
+            {
+                int seed = 1000 + i * 7919;
+                for (int m = 1; m <= Run.MaxMissions; m++)
+                {
+                    int a = Mission.DeckPick(seed, m);
+                    if (a < 0 || a >= nLay) continue;
+                    for (int leg = 0; leg < 2; leg++)
+                    {
+                        int sh = Mission.DeployFor(seed, m, leg == 1);
+                        if (sh != Mission.DeployFor(seed, m, leg == 1)) fails.Add($"seed{seed}:deployNotDeterministic");
+                        if (sh < 0 || sh >= nShapes) { fails.Add($"seed{seed}:deployOutOfRange:{sh}"); continue; }
+                        if (sh == Mission.DeployEnvelop && leg == 0) fails.Add($"seed{seed}:envelopOnIllegalObjective");
+                        shapeHist[sh]++; shapeArena[sh, a] = true;
+                    }
+                }
+            }
+            for (int i = 0; i < Seeds; i++)
+            {
+                int seed = 1000 + i * 7919;
+                var run = new Run { MapSeed = seed };
+                run.GenerateMap(seed);
+                // shape x objective over every enumerated route (mission # = the fight's depth)
+                var routes2 = new List<List<MissionNode>>();
+                void Walk2(MissionNode node, List<MissionNode> path)
+                {
+                    path.Add(node);
+                    if (node.Next.Count == 0) routes2.Add(new List<MissionNode>(path));
+                    else foreach (int id in node.Next) Walk2(run.Map[id], path);
+                    path.RemoveAt(path.Count - 1);
+                }
+                Walk2(run.Map[0], new List<MissionNode>());
+                foreach (var route in routes2)
+                {
+                    int m = 0;
+                    foreach (var node in route)
+                    {
+                        if (node.Kind == NodeKind.Event) continue;
+                        m++;
+                        var o = node.Card.Objective;
+                        int sh = Mission.DeployFor(seed, m, EnvOk(o));
+                        if (sh == Mission.DeployEnvelop && !EnvOk(o)) fails.Add($"seed{seed}:envelopDealtTo{o}");
+                        shapeObj[(sh, o)] = shapeObj.GetValueOrDefault((sh, o)) + 1;
+                    }
+                }
+            }
+
+            string ShapeName(int d) => d switch
+            {
+                Mission.DeployPincer => "PINCER", Mission.DeployCrossfire => "CROSSFIRE",
+                Mission.DeployEnvelop => "ENVELOP", _ => "FRONTAL",
+            };
+            // every shape the SHIPPED mix can deal must reach every arena, and every legal
+            // objective. A zero-weight shape is inert by design and is not required to appear.
+            for (int sh = 0; sh < nShapes; sh++)
+            {
+                bool weighted = sh < Mission.DeployMix.Length && Mission.DeployMix[sh] > 0;
+                if (!weighted) continue;
+                if (shapeHist[sh] == 0) { fails.Add($"shapeNeverDealt:{ShapeName(sh)}"); continue; }
+                for (int a = 0; a < nLay; a++)
+                    if (!shapeArena[sh, a]) fails.Add($"shape{ShapeName(sh)}NeverOnArena{a}");
+                foreach (Objective o in Enum.GetValues<Objective>())
+                {
+                    if (sh == Mission.DeployEnvelop && !EnvOk(o)) continue;   // illegal by design
+                    if (shapeObj.GetValueOrDefault((sh, o)) == 0) fails.Add($"shape{ShapeName(sh)}Never{o}");
+                }
+            }
+            sb0Deploy = new System.Text.StringBuilder();
+            sb0Deploy.AppendLine($"DEPLOYMENT SHAPE HISTOGRAM ({ArenaSeeds} seeds x {Run.MaxMissions} missions x 2 legality states):");
+            for (int sh = 0; sh < nShapes; sh++)
+                sb0Deploy.AppendLine($"  {ShapeName(sh),-10}: {shapeHist[sh]}"
+                    + $"   arenas covered {Enumerable.Range(0, nLay).Count(a => shapeArena[sh, a])}/{nLay}"
+                    + $"   objectives covered {Enum.GetValues<Objective>().Count(o => shapeObj.GetValueOrDefault((sh, o)) > 0)}/{Enum.GetValues<Objective>().Length}");
+        }
+
         var sb = new System.Text.StringBuilder();
         sb.AppendLine($"EXPOSURETEST: {Seeds} seeds | {routesTotal} routes enumerated | {Seeds * Run.MaxMissions} deck draws over {nLay} arenas");
         sb.AppendLine("ARENA DECK HISTOGRAM (arena:draws):");
@@ -3710,6 +3812,7 @@ public partial class Game
         foreach (Objective o in Enum.GetValues<Objective>())
             sb.AppendLine($"  {o,-10}: {objHist.GetValueOrDefault(o)}");
         sb.AppendLine($"  (Escort nodes total {escortNodes} — exactly one per map by construction, <=1 per route)");
+        if (sb0Deploy != null) sb.Append(sb0Deploy);
         sb.Append(fails.Count == 0 ? "EXPOSURETEST PASS"
             : $"EXPOSURETEST FAIL: {string.Join(", ", fails.Take(12))}{(fails.Count > 12 ? $" (+{fails.Count - 12} more)" : "")}");
         return sb.ToString();
@@ -4401,27 +4504,42 @@ public partial class Game
         // the SpawnEnemies bump FLOOR (R1) silently zeroing RECRUIT's relief on mission 1 — the
         // mission a first-timer meets first.
         //
-        // R1 REVIEW FIX — this used to assert on ONE hard-coded seed (4242) and compare PER-ENEMY
-        // AVERAGES. That is not a stat-delta measurement, it is composition noise: RECRUIT drops a
-        // body, so the average moves with WHICH archetype fell off the end. Measured over 12 seeds
-        // at m1 the old assertion passed 5 times and FAILED 7 — it was green by seed luck. The
-        // sweep below fixes both halves:
-        //   * 12 seeds, not 1 — a rung-wide claim needs a rung-wide sample.
-        //   * PAIRWISE, not averaged. RECRUIT's -1 body is the LAST spawn slot (count-1), and the
-        //     spawn loop's RNG stream is count-independent for the slots that remain, so slot i of
-        //     the RECRUIT leg is the SAME archetype as slot i of the standard leg. Comparing slot
-        //     to slot measures the stat delta and nothing else. (The archetype match is asserted,
-        //     not assumed — a divergence is a real failure, not a licence to skip the row.)
-        (int count, List<(string cls, int hp, int aim)> units) BuildAt(int heat, int mission, int seed)
+        // W4 REPAIR — this probe used to compare the two legs' FORCE-WIDE per-enemy averages.
+        // That is not a measurement of the stat relief, it is a measurement of the archetype MIX:
+        // the two legs field different body counts, so they sit at different positions in the
+        // shared RNG stream and roll different archetypes, whose base HP/aim differ by far more
+        // than the one point RECRUIT takes off. It happened to pass at the old spawn geometry and
+        // started failing the moment W4 changed pod placement — on composition luck, both times.
+        // It is now composition-CONTROLLED: compare each archetype CLASS against itself across
+        // the legs, which is exactly what `bump` moves.
+        //
+        // R1 REVIEW FIX — W4's per-class control is kept and two things are added on top:
+        //   * A SEED SWEEP. The old form asserted on the single hard-coded seed 4242, and a
+        //     reviewer's 12-seed probe of it scored 5 pass / 7 fail — a rung-wide claim needs a
+        //     rung-wide sample, and a test that is green on 5 seeds of 12 is worse than no test.
+        //   * A STRICT per-class row. Within one mission every member of a class shares one base,
+        //     so a class's mean HP/aim is exactly `base + bump`: with composition controlled the
+        //     relief is not "at least one class moved", it is EVERY shared rank-and-file class
+        //     moved, on every seed. Named ELITEs (the m3/m5 mid-boss, the finale boss) are spawned
+        //     with explicit stats and never read `bump`, so they are exempt by construction.
+        //   * And it now bites at MISSION 1 as well: W4 recorded, correctly, that the m1 relief
+        //     was a no-op because `bump = Math.Max(0, (n - 1) + statDelta)` floored RECRUIT's −1
+        //     away on the one mission the on-ramp exists for. That floor is now −1
+        //     (Mission.SpawnEnemies), so m1 is asserted exactly like m3 rather than excused.
+        (int count, Dictionary<string, (int n, int hp, int aim)> byCls) BuildAt(int heat, int mission, int seed)
         {
             Util.Reseed(seed);
             _run = new Run(); _run.Start();
             _run.HeatLevel = heat;
             _run.CurrentCard = new MissionCard { Objective = Objective.Eliminate, ModName = "STANDARD", Reward = RewardKind.None };
             SetupMission(mission);
-            var list = new List<(string, int, int)>();
-            foreach (var e in Enemies) list.Add((e.Cls, e.MaxHp, e.Aim));
-            return (Enemies.Count, list);
+            var map = new Dictionary<string, (int n, int hp, int aim)>();
+            foreach (var e in Enemies)
+            {
+                var cur = map.TryGetValue(e.Cls, out var v) ? v : (0, 0, 0);
+                map[e.Cls] = (cur.Item1 + 1, cur.Item2 + e.MaxHp, cur.Item3 + e.Aim);
+            }
+            return (Enemies.Count, map);
         }
         int[] sweepSeeds = { 1, 7, 42, 99, 123, 777, 1234, 2026, 4242, 8675, 31337, 65535 };
         foreach (int m in new[] { 1, 3 })
@@ -4431,24 +4549,23 @@ public partial class Game
             {
                 var std = BuildAt(0, m, seed);
                 var rec = BuildAt(-1, m, seed);
+                seedsChecked++;
                 if (rec.count != std.count - 1) { fails.Add($"m{m}s{seed}:count {rec.count} vs {std.count}"); continue; }
                 if (rec.count <= 0 || std.count <= 0) { fails.Add($"m{m}s{seed}:emptyBuild"); continue; }
-                int ranked = 0;
-                for (int i = 0; i < rec.count; i++)
+                int shared = 0;
+                foreach (var kv in rec.byCls)
                 {
-                    var a = rec.units[i]; var b = std.units[i];
-                    if (a.cls != b.cls) { fails.Add($"m{m}s{seed}i{i}:cls {a.cls} vs {b.cls}"); continue; }
-                    // NAMED ELITES (the m3/m5 mid-boss, the finale boss) are spawned with EXPLICIT
-                    // stats and never read `bump`, so the rung cannot move them by construction —
-                    // they are the force's fixed tooth. Assert the archetype still matches (above)
-                    // and price the rung on the rank and file only.
-                    if (a.cls == "ELITE") continue;
-                    ranked++;
-                    if (!(a.hp < b.hp))  fails.Add($"m{m}s{seed}i{i}:hp {a.hp} vs {b.hp}");
-                    if (!(a.aim < b.aim)) fails.Add($"m{m}s{seed}i{i}:aim {a.aim} vs {b.aim}");
+                    if (!std.byCls.TryGetValue(kv.Key, out var sv)) continue;   // class only one leg fielded
+                    // named ELITEs carry explicit stats and never read `bump` — the force's fixed
+                    // tooth, which the rung cannot and should not move.
+                    if (kv.Key == "ELITE") continue;
+                    shared++;
+                    float rHp = kv.Value.hp / (float)kv.Value.n, sHp = sv.hp / (float)sv.n;
+                    float rAim = kv.Value.aim / (float)kv.Value.n, sAim = sv.aim / (float)sv.n;
+                    if (!(rHp < sHp))  fails.Add($"m{m}s{seed}:{kv.Key}:hp {rHp:0.##} vs {sHp:0.##}");
+                    if (!(rAim < sAim)) fails.Add($"m{m}s{seed}:{kv.Key}:aim {rAim:0.##} vs {sAim:0.##}");
                 }
-                if (ranked == 0) fails.Add($"m{m}s{seed}:noRankAndFile");
-                seedsChecked++;
+                if (shared == 0) fails.Add($"m{m}s{seed}:noSharedClass");
             }
             if (seedsChecked != sweepSeeds.Length) fails.Add($"m{m}:sweepShort {seedsChecked}/{sweepSeeds.Length}");
         }
@@ -4559,7 +4676,7 @@ public partial class Game
         }
 
         return fails.Count == 0
-            ? "ONRAMPTEST: PASS (RECRUIT rung -1: data row + built mission -1 body/-1 stat PAIRWISE over a 12-seed sweep at m1 AND m3, 5-turn bleed-out, checkpoint from m1 and once only, no mutator leak, no negative intel; heat 0 untouched; anim speed pinned 1x under AutoPlay/NoPersist; text scale symmetric + tapered; both settings round-trip, clamp, and default on a pre-W5 profile)"
+            ? "ONRAMPTEST: PASS (RECRUIT rung -1: data row + built mission -1 body and -1 stat on EVERY shared rank-and-file class, over a 12-seed sweep, at m1 AND m3; 5-turn bleed-out, checkpoint from m1 and once only, no mutator leak, no negative intel; heat 0 untouched; anim speed pinned 1x under AutoPlay/NoPersist; text scale symmetric + tapered; both settings round-trip, clamp, and default on a pre-W5 profile)"
             : "ONRAMPTEST: FAIL (" + string.Join(",", fails.Distinct()) + ")";
     }
 
