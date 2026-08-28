@@ -1370,6 +1370,11 @@ public partial class Game
     /// Hold overwatch when it's the right call: the soldier has ammo + an action, isn't
     /// disoriented, and a live enemy is near enough to plausibly walk into the lane this
     /// enemy turn (so we don't waste overwatch staring at an empty board). Returns true if set.
+    /// FUL-5: the committed-charger archetypes (Ai.cs never breaks these off) — the pods brace
+    /// is FOR: they close to point-blank and swing, so a stagger denies a whole attack.
+    static bool IsRusherCls(string c)
+        => c == "BERSERKER" || c == "HOUND" || c == "STRIKER" || c == "BRUISER";
+
     bool HoldOverwatch(Unit u)
     {
         if (u.Ammo <= 0 || u.ActionsLeft <= 0 || u.HasStatus(StatusKind.Disoriented)) return false;
@@ -1387,7 +1392,15 @@ public partial class Game
         bool cantKillOnReaction = pusher.Hp > u.Weapon.DmgMax;
         bool woundedUnderThreat = Players.Any(p => p.Alive && !p.IsVip && p.MaxHp > 0 && p.Hp * 2 <= p.MaxHp
             && pushers.Any(e => Util.TileDist(p.X, p.Y, e.X, e.Y) <= e.Weapon.MaxRange + e.Mobility));
-        if (cantKillOnReaction && woundedUnderThreat) { DoBrace(); return true; }
+        // FUL-5 HANDS: + the RUSHER arm. A committed charger closing on the squad is brace's
+        // textbook case even with everyone healthy: the charger WILL reach us, a lethal watch
+        // can't remove it on the reaction (too durable, or there are two-plus of them), and a
+        // landed stagger denies its post-move attack outright — denial > a half-damage chip.
+        // The cascade already re-tries TakeBestShot every step, so reaching here means no
+        // worthwhile shot exists from this tile (the spec's "no >=60% kill shot" is structural).
+        var rushers = pushers.Where(e => IsRusherCls(e.Cls)).ToList();
+        bool rusherInbound = rushers.Count >= 2 || rushers.Any(e => e.Hp > u.Weapon.DmgMax);
+        if ((cantKillOnReaction && woundedUnderThreat) || rusherInbound) { DoBrace(); return true; }
         // W2 FOCUS probe (mirrors the BRACE probe's shape): when EVERY credible pusher approaches
         // down ONE lane — all inside a single 90-degree cone centred on the nearest pusher — the
         // focused watch strictly dominates the wide one (+Combat.FocusOwAim on the reaction, and
