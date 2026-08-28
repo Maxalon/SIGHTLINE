@@ -58,6 +58,14 @@ public static class Program
         // W4 — SIGHTLINE_ESCORTFIX=0 restores the pre-fix SmartEscort lone-VIP test (a DOWNED
         // soldier counted as still standing) so the instrument fix has a paired measurement.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_ESCORTFIX") == "0") Game.EscortDownedFix = false;
+        // X2 TRUE NORTH II — the X1 durability pair, pinnable per measured round.
+        //   SIGHTLINE_TOUGH=<n> : Mission.HostileToughness (flat HP surcharge; X1 shipped 3)
+        //   SIGHTLINE_TRIM=<n>  : Mission.HostileDamageTrim (flat points off both ends; shipped 1)
+        // Unset = the shipped defaults, so an unpinned batch is unchanged.
+        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_TOUGH"), out int xtough) && xtough >= 0)
+            Mission.HostileToughness = xtough;
+        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_TRIM"), out int xtrim) && xtrim >= 0)
+            Mission.HostileDamageTrim = xtrim;
 
         bool smartplay = Environment.GetEnvironmentVariable("SIGHTLINE_SMARTPLAY") == "1";
         bool autoplay = Environment.GetEnvironmentVariable("SIGHTLINE_AUTOPLAY") == "1" || smartplay;

@@ -1240,7 +1240,10 @@ public static class Mission
     /// targets is (sum player HP - sum ACTIVE enemy HP), and scaling both pools leaves that ratio
     /// (and therefore lead-swings) exactly where it was. The squad's exposure cost of the longer
     /// fight is the measured trade; see the wave's round table in docs/DEVLOG.md.
-    public const int HostileToughness = 3;
+    /// X2 TRUE NORTH II: `const` -> static field so the post-merge correction wave can pin it
+    /// per measured round from `SIGHTLINE_TOUGH` (Program.cs). Default is X1's shipped 3 — a
+    /// batch with no override is byte-identical to the const form.
+    public static int HostileToughness = 3;
 
     /// X1 THE EXCHANGE, the SYMMETRY half. Points trimmed off BOTH ends of every hostile
     /// weapon's damage band (DmgMin floored at 1). MEASURED necessity, not a guess: shipping
@@ -1253,7 +1256,8 @@ public static class Mission
     /// hostile's per-shot lethality instead. Net design statement: a hostile is a BODY TO BE
     /// WORN DOWN, not a glass cannon trading one-shot kills — the same trade the player now
     /// faces going the other way.
-    public const int HostileDamageTrim = 1;
+    /// X2 TRUE NORTH II: `const` -> static field, pinnable from `SIGHTLINE_TRIM`. Default 1.
+    public static int HostileDamageTrim = 1;
 
     static Unit MakeHostile(string name, string cls, WeaponKind w, int hp, int aim, int mob, int x, int y)
     {
