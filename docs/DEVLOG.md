@@ -3793,8 +3793,10 @@ their feet, so a bondless soldier can never draw a bond line.
 - `bash scripts/qa-sweep.sh --full` → **42/42 PASS** (41 pre-existing + VOICETEST), autoplay ×3
   clean (LOSE m5, LOSE m5, WIN m6 — no exceptions, no TIMEOUT).
 - `SIGHTLINE_PAIRTEST=1` → **PASS**.
-- `SIGHTLINE_BALANCE=10` (runs=20) → **byte-identical to the pre-change baseline** (`diff` of the
-  full report, minus the wall-time line). See below.
+- `SIGHTLINE_BALANCE=10` → `runs=20  missions=76`, and a `diff` of the full report against the
+  pre-change baseline is **empty once the four wall-clock progress lines and the wall-time footer
+  are stripped** — every table, every rate, `W:9 L:11` identical. That is the expected result for
+  this wave, and it is the proof the RNG separation actually holds end to end.
 - Screenshots read and judged in **both palettes**: briefing card, campaign map with region
   names, codex FACTIONS dossiers, a bark in the log mid-fight (new `SIGHTLINE_SHOTONBARK=1`
   hook — shoots 40 frames after a bark actually lands in live play), win and loss end cards.
@@ -3802,6 +3804,9 @@ their feet, so a bondless soldier can never draw a bond line.
 ### Hooks added
 
 - `SIGHTLINE_VOICETEST=1` — the content + RNG-separation contract (in `scripts/qa-sweep.sh`).
+- `SIGHTLINE_VOICEDUMP=1` — print every text type Voice generates (regions, briefings, dossiers,
+  all bark variants, four epilogue shapes) so the COPY can be read and judged as prose without
+  walking six missions. Window-free, device-free, changes nothing.
 - `SIGHTLINE_SHOTONBARK=1` — pair with `SIGHTLINE_AUTOPLAY=1`; screenshots live play once a bark
   is in the ledger, instead of guessing a frame number.
 - `SIGHTLINE_CODEXTAB=2` now frames the new FACTIONS tab.

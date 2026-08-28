@@ -698,6 +698,108 @@ public static class Voice
         return "VOICETEST: FAIL\n  " + string.Join("\n  ", fails);
     }
 
+    // ─────────────────────────────────────────────────────────────────────────────────────
+    //  VOICEDUMP — SIGHTLINE_VOICEDUMP=1. Print a representative sample of EVERY text type to
+    //  stdout, so the copy can be read and judged as prose without launching the game and
+    //  walking six missions. Device-free, window-free, and it changes nothing: same pure
+    //  generators the game calls. Purely a writing-review tool.
+    // ─────────────────────────────────────────────────────────────────────────────────────
+    public static string SampleReport()
+    {
+        var sb = new System.Text.StringBuilder();
+        void H(string t) { sb.AppendLine(); sb.AppendLine("── " + t + " " + new string('─', Math.Max(0, 74 - t.Length))); }
+
+        H("REGIONS (one campaign route per seed; six missions, six biomes, six names)");
+        foreach (int seed in new[] { 4242, 99991, 7 })
+        {
+            var names = new List<string>();
+            for (int m = 1; m <= Run.MaxMissions; m++)
+                names.Add($"{Biome.All[Biome.IndexFor(m, seed)].Name}:{RegionName(m, seed)}");
+            sb.AppendLine($"  seed {seed,-6} {string.Join("  >  ", names)}");
+        }
+
+        H("BRIEFINGS (region x arena x faction x objective)");
+        var briefs = new (int m, int lay, Objective o, Faction f)[]
+        {
+            (1, 24, Objective.Eliminate,  Faction.None),
+            (2,  4, Objective.Hack,       Faction.Wardens),
+            (3,  1, Objective.Escort,     Faction.Syndicate),
+            (4, 32, Objective.Sabotage,   Faction.Legion),
+            (5,  8, Objective.Defend,     Faction.Wardens),
+        };
+        foreach (var b in briefs)
+        {
+            sb.AppendLine($"  [{BriefHead(b.o)}]   (arena {ArenaName(b.lay)})");
+            foreach (var ln in Brief(b.m, 4242, b.lay, b.o, b.f, false, null, null)) sb.AppendLine("    " + ln);
+            sb.AppendLine();
+        }
+        foreach (var f in new[] { Faction.Legion, Faction.Syndicate, Faction.Wardens })
+        {
+            sb.AppendLine($"  [FINALE / {FactionEpithet(f)}]");
+            foreach (var ln in Brief(Run.MaxMissions, 4242, 11, Objective.Decapitate, f, true,
+                                     Run.FinaleBossName(f), Run.FinaleKitClause(f))) sb.AppendLine("    " + ln);
+            sb.AppendLine();
+        }
+
+        H("FACTION DOSSIERS (codex FACTIONS tab)");
+        foreach (var f in new[] { Faction.Syndicate, Faction.Legion, Faction.Wardens, Faction.None })
+        {
+            sb.AppendLine($"  {FactionEpithet(f)}");
+            foreach (var para in FactionDossier(f).Split('\n')) sb.AppendLine("    " + para);
+            sb.AppendLine();
+        }
+
+        H("BARKS (every beat, every variant, as the combat log prints them)");
+        foreach (Beat bt in Enum.GetValues(typeof(Beat)))
+        {
+            sb.AppendLine($"  {bt}:");
+            foreach (var raw in Lines[bt])
+            {
+                string body = NeedsOther(bt) ? raw.Replace("{0}", "WREN") : raw;
+                sb.AppendLine("    " + Compose("KESTREL", body));
+            }
+        }
+
+        H("EPILOGUES");
+        var mem = new List<FallenRec>
+        {
+            new FallenRec { Name = "DALES \"BISHOP\"", Cls = "RANGER",  Rank = "SERGEANT", Kills = 7, Mission = 2 },
+            new FallenRec { Name = "OKONKWO",        Cls = "GUNNER",  Rank = "CORPORAL", Kills = 4, Mission = 4 },
+            new FallenRec { Name = "VEGA \"ASH\"",    Cls = "ASSAULT", Rank = "ROOKIE",   Kills = 1, Mission = 5 },
+        };
+        var cases = new (string label, RunFacts f)[]
+        {
+            ("WIN, three lost", new RunFacts { Win = true, Missions = Run.MaxMissions, MapSeed = 4242, Heat = 3,
+                Kills = 47, Survivors = 4, MvpName = "VEGA", MvpKills = 11, TopEnemyName = "REAVER",
+                TopEnemyCls = "BERSERKER", TopEnemyKills = 2, BossName = "Spymaster", Memorial = mem }),
+            ("WIN, flawless", new RunFacts { Win = true, Missions = Run.MaxMissions, MapSeed = 4242, Heat = 0,
+                Kills = 52, Survivors = 6, MvpName = "LARK", MvpKills = 14, BossName = "Siegelord",
+                Memorial = new List<FallenRec>() }),
+            ("LOSS on m5", new RunFacts { Win = false, Missions = 4, MapSeed = 4242, Heat = 3, Kills = 47,
+                Survivors = 4, MvpName = "VEGA", MvpKills = 11, TopEnemyName = "REAVER",
+                TopEnemyCls = "BERSERKER", TopEnemyKills = 2, Memorial = mem }),
+            ("WIPE on m2", new RunFacts { Win = false, Missions = 1, MapSeed = 99991, Heat = 6, Kills = 6,
+                Survivors = 0, TopEnemyName = "VIPER", TopEnemyCls = "SNIPER", TopEnemyKills = 4,
+                Memorial = new List<FallenRec>
+                {
+                    new FallenRec { Name = "MICA", Cls = "CORPSMAN", Rank = "ROOKIE", Kills = 0, Mission = 2 },
+                    new FallenRec { Name = "RUNE", Cls = "GUNNER",   Rank = "ROOKIE", Kills = 2, Mission = 2 },
+                    new FallenRec { Name = "TALON",Cls = "RANGER",   Rank = "ROOKIE", Kills = 1, Mission = 2 },
+                    new FallenRec { Name = "GALE", Cls = "ASSAULT",  Rank = "ROOKIE", Kills = 3, Mission = 2 },
+                } }),
+        };
+        foreach (var c in cases)
+        {
+            sb.AppendLine($"  [{c.label}]");
+            _epiKey = null;
+            foreach (var ln in Epilogue(c.f)) sb.AppendLine("    " + ln);
+            sb.AppendLine();
+        }
+        _epiKey = null;
+        BeginMission(0, 0);
+        return sb.ToString();
+    }
+
     static bool SeqEq(int[] a, int[] b)
     {
         if (a.Length != b.Length) return false;

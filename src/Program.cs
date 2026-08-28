@@ -167,6 +167,14 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        // SIGHTLINE_VOICEDUMP=1 : RESONANCE C1 — print every text type Voice generates (regions,
+        // briefings, faction dossiers, all bark variants, four epilogue shapes) so the COPY can be
+        // read and judged as prose without walking six missions. No window, changes nothing.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_VOICEDUMP") == "1")
+        {
+            Console.Write(Voice.SampleReport());
+            return;
+        }
         // SIGHTLINE_EVENTTEST=1 : between-mission FIELD EVENT selection/placement/outcomes + save round-trip (W4). No window.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_EVENTTEST") == "1")
         {

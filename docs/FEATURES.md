@@ -618,5 +618,6 @@ seeds (mix of WIN/LOSE, no exceptions):
   proves the separation (with a sensitivity probe so it cannot pass vacuously), asserts every
   template slot resolves, walks all four bark gates, and measures every generated string against the
   real pixel width of the chrome that draws it. `SIGHTLINE_BALANCE=10` is byte-identical to base.
-  (`src/Voice.cs`; `SIGHTLINE_VOICETEST` / `SIGHTLINE_SHOTONBARK` / `SIGHTLINE_CODEXTAB=2`;
+  (`src/Voice.cs`; `SIGHTLINE_VOICETEST` / `SIGHTLINE_VOICEDUMP` (read the copy as prose) /
+  `SIGHTLINE_SHOTONBARK` / `SIGHTLINE_CODEXTAB=2`;
   `docs/DESIGN.md` §1.1 records the pillar amendment that authorises any of it.)
