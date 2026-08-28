@@ -706,6 +706,9 @@ public partial class Game
         if (TrySmartDrag(u)) return true;
         if (TakeBestShot(u)) return true;
         if (u.Ammo == 0) { DoReload(); return true; }
+        // FUL-5 R7: probe the brace/focus reads first (HoldOverwatch) — a charger pushing the
+        // held zone is exactly the brace case; the plain wide watch stays as the floor.
+        if (HoldOverwatch(u)) return true;
         if (u.ActionsLeft > 0 && u.Ammo > 0 && !u.HasStatus(StatusKind.Disoriented)) { DoOverwatch(); return true; }
         DoHunker(); return true;
     }
@@ -742,8 +745,16 @@ public partial class Game
         // overwatch the approach unconditionally (waves keep coming — a held lane is never
         // wasted), and hunker as the floor. No repositioning: a defending squad stays put.
         if (PrepAbility(u)) return true;
+        // FUL-5 R7: waves ARRIVE clustered and dig into cover on approach — the covered-pair
+        // frag is textbook defend play, and this routine never reached SmartCombatStep's 2a.
+        if (u.Grenades > 0 && !HasStrongShot(u) && SmartGrenade(u, preShot: true)) return true;
         if (TakeBestShot(u)) return true;
         if (u.Ammo == 0) { DoReload(); return true; }
+        // FUL-5 R7: route the watch through HoldOverwatch FIRST — the defend is where its
+        // brace-vs-charger and one-lane FOCUS reads matter most, and the direct DoOverwatch
+        // here bypassed both probes. Its pushers-empty early-out falls to the unconditional
+        // wide watch below (a held lane is never wasted between waves).
+        if (HoldOverwatch(u)) return true;
         if (u.Ammo > 0 && u.ActionsLeft > 0 && !u.HasStatus(StatusKind.Disoriented))
         { DoOverwatch(); return true; }     // always worth watching on a defend
         DoHunker(); return true;
