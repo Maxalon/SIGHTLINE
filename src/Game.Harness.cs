@@ -1894,13 +1894,19 @@ public partial class Game
         NoPersist = true;
         var fails = new List<string>();
 
-        // (a) ContractDef wiring + append-only ordinals
-        if (ContractDef.All.Length != 3) fails.Add("allCount");
+        // (a) ContractDef wiring + append-only ordinals. FUL-10: the tail advanced Spearhead ->
+        // LivingLegends; Spearhead's ordinal POSITION [3] is pinned so a mid-enum insertion fails too.
+        if (ContractDef.All.Length != 5) fails.Add("allCount");
         if (System.Array.IndexOf(ContractDef.All, Contract.None) >= 0) fails.Add("allHasNone");
         var cv = (Contract[])Enum.GetValues(typeof(Contract));
-        if (cv.Length < 4 || cv[0] != Contract.None || cv[^1] != Contract.Spearhead) fails.Add("ordinals");
+        if (cv.Length < 6 || cv[0] != Contract.None || cv[3] != Contract.Spearhead
+            || cv[^1] != Contract.LivingLegends) fails.Add("ordinals");
         if (ContractDef.Name(Contract.IronVeterans) != "IRON VETERANS") fails.Add("name");
         if (ContractDef.Code(Contract.HighStakes) != "HST") fails.Add("code");
+        if (ContractDef.Name(Contract.MercenaryClause) != "MERCENARY CLAUSE"
+            || ContractDef.Code(Contract.LivingLegends) != "LGD") fails.Add("ful10Names");
+        if (ContractDef.Parse("mrc") != Contract.MercenaryClause
+            || ContractDef.Parse("lgd") != Contract.LivingLegends) fails.Add("ful10Parse");
 
         // Build a tiny run with two healthy-but-chipped survivors below the recruit floor, so a
         // backfill WOULD normally fire and a field-heal WOULD normally raise HP.
@@ -1938,8 +1944,40 @@ public partial class Game
         if (rStakes.Squad[0].Hp != 5) fails.Add("stakes:healed(" + rStakes.Squad[0].Hp + ")");
         if (rStakes.Squad.Count < Run.AttritionFloor) fails.Add("stakes:noBackfill");
 
+        // (e) FUL-10 LGD: CreditKill credits DOUBLE toward rank; None stays single (inertness).
+        {
+            var gN = new Game { NoPersist = true }; gN.StartMission(1);
+            var uN = gN.Players.Find(p => p.Alive && !p.IsVip);
+            int k0 = uN.Kills; gN.CreditKill(uN);
+            if (uN.Kills != k0 + 1) fails.Add("lgd:noneKills=" + (uN.Kills - k0));
+            var gL = new Game { NoPersist = true }; gL.StartMission(1);
+            gL.RunState.Contract = Contract.LivingLegends;
+            var uL = gL.Players.Find(p => p.Alive && !p.IsVip);
+            int k1 = uL.Kills; gL.CreditKill(uL);
+            if (uL.Kills != k1 + 2) fails.Add("lgd:doubleKills=" + (uL.Kills - k1));
+            if (uL.KillsThisTurn != 1) fails.Add("lgd:featDoubled");   // feats stay single-credit
+
+            // (f) FUL-10 MRC: the per-veteran recall fee halves (round up) EXACTLY once, only while
+            // MERCENARY CLAUSE is the draft selection; deselecting restores full price. Pure — no disk.
+            var vet = new Unit { Name = "VR", Cls = "ASSAULT", Team = Team.Player, Rank = 3, Alive = true,
+                                 Weapon = Weapon.Make(WeaponKind.Rifle), FromReserve = true };
+            gL.DraftPicked = new HashSet<Unit> { vet };
+            gL.DraftSelectedContract = null;
+            if (gL.DraftRecallFee(vet) != 34 || gL.DraftRecallCost != 34) fails.Add("mrc:fullPrice=" + gL.DraftRecallCost);
+            gL.DraftSelectedContract = Contract.MercenaryClause;
+            if (gL.DraftRecallFee(vet) != 17 || gL.DraftRecallCost != 17) fails.Add("mrc:half=" + gL.DraftRecallCost);
+            gL.DraftSelectedContract = Contract.IronVeterans;   // any other contract: full price
+            if (gL.DraftRecallCost != 34) fails.Add("mrc:leaked=" + gL.DraftRecallCost);
+        }
+
+        // (g) FUL-10 orphaned-perk fix: the ClassLine table's own doc rule ("every perk appears in
+        // >=1 line") must be TRUE — enumerated, not asserted by comment.
+        var orphans = Run.PerksInNoClassLine();
+        if (orphans.Count != 0) fails.Add("perkOrphans:" + string.Join("/", orphans));
+
         return fails.Count == 0
-            ? "CONTRACTTEST: PASS (None inert; IronVeterans no-backfill+fast-rank; HighStakes no-heal)"
+            ? "CONTRACTTEST: PASS (None inert; IronVeterans no-backfill+fast-rank; HighStakes no-heal; "
+              + "LGD double kill credit; MRC half-price recall; class lines cover every perk)"
             : "CONTRACTTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
@@ -2560,12 +2598,14 @@ public partial class Game
         demo.Add(a); demo.Add(b);
         DraftPool = Run.GenerateDraftPool(demo);
         DraftBoonOffer = Run.GenerateDraftBoonOffer();
-        DraftPicked = new HashSet<Unit>();
+        // FUL-10: pre-pick NOX + pre-select MERCENARY CLAUSE so the shot also demos the live
+        // recall discount (VEGA 42->21, NOX 34->17) and the discounted RECALL BILL row.
+        DraftPicked = new HashSet<Unit> { b };
         DraftSelectedBoon = null;
-        DraftSelectedContract = null;
-        // W9: a demo bank that AFFORDS NOX (Rank 3 -> 34) but NOT VEGA (Rank 4 -> 42), so the shot
-        // shows both the priced gold card and the greyed unaffordable one. Touches NO disk.
-        DraftSalvage = 40;
+        DraftSelectedContract = Contract.MercenaryClause;
+        // A demo bank that AFFORDS discounted NOX (17) but NOT discounted VEGA (21), so the shot
+        // keeps both the priced gold card and the greyed unaffordable one. Touches NO disk.
+        DraftSalvage = 20;
         Phase = Phase.Draft;
     }
 
@@ -2911,7 +2951,12 @@ public partial class Game
         // synthesize an event node so the screen shows even if this seed placed none on the route
         var node = _run.CurrentNode ?? (_run.Map.Count > 0 ? _run.Map[0] : null);
         _eventNode = node;
-        _activeEvent = EventCatalog.All.Length > 0 ? EventCatalog.All[0] : null;
+        // FUL-10: SIGHTLINE_EVENTID=<id> pins WHICH catalog event is staged (default: first, the
+        // pre-FUL-10 behaviour, so plain SIGHTLINE_EVENT shots are unchanged). Unknown ids fall
+        // back rather than crash a shot batch.
+        var wantId = Environment.GetEnvironmentVariable("SIGHTLINE_EVENTID");
+        GameEvent pinned = string.IsNullOrEmpty(wantId) ? null : System.Array.Find(EventCatalog.All, e => e.Id == wantId);
+        _activeEvent = pinned ?? (EventCatalog.All.Length > 0 ? EventCatalog.All[0] : null);
         Phase = Phase.Barracks;
     }
 

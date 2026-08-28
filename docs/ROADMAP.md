@@ -893,18 +893,23 @@ of record (container suspensions have wiped every scratchpad copy — docs are t
       cap) — the wave is an Ai plant branch + renderer cone + bot danger-tiles + codex + PIKETEST.
       Full dev-executable spec (verified seams, spawn re-slices, harness legs):
       docs/plans/FUL-8-pikeman-FUL-10-forks.md. Launches after FUL-5 merges (shared autopilot).
-- [ ] **FUL-10 FORKS** (P10, M). Seven trade-off field events crossing salvage/scar/veteran/
-      faction/heat (ids+arm order frozen for the compass; PendingSalvageReward run-committed via
-      AwardMetaRunEnd — events must never touch meta directly); two veteran-economy contracts
-      (MERCENARY CLAUSE: half-price recalls but no enshrinement; LIVING LEGENDS: pensions + double
-      rank-kills but KIA erases the reserve record); the orphaned perk trio Vantage/Breaker/
-      Siegebreaker joins real class lines. Contract enum append moves TWO tail pins
-      (SaveGame.cs:675 + CONTRACTTEST). Full spec: docs/plans/FUL-8-pikemen-FUL-10-forks.md
-      (file name: FUL-8-pikeman-FUL-10-forks.md). Bot arm-uptake measurement lands with FUL-5's
-      hashed chooser (FUL-10 makes the forks exist; FUL-5 makes the bot walk them).
+- [x] **FUL-10 FORKS** (P10, M — landed on wt-ful10). Seven trade-off field events crossing
+      salvage/scar/veteran/faction/heat (ids+arm order frozen for the compass; PendingSalvageReward
+      run-committed via AwardMetaRunEnd — events never touch meta directly); two veteran-economy
+      contracts (MERCENARY CLAUSE: half-price recalls but no enshrinement; LIVING LEGENDS:
+      pensions + double kill credit but a KIA erases the reserve record); the orphaned perk trio
+      Vantage/Breaker/Siegebreaker joined real class lines (CONTRACTTEST enumerates the coverage
+      rule). Contract enum append moved BOTH tail pins (SaveGame SelfTest + CONTRACTTEST, each
+      with a Spearhead-position pin). Bot arm-uptake measurement lands with FUL-5's hashed chooser
+      (FUL-10 makes the forks exist; FUL-5 makes the bot walk them). DEVLOG carries the measured
+      landing + the accepted IndexForNode version-skew note.
 - [ ] **FUL-13 TRUE NORTH** (P13, L — LAST). Re-baseline the ladder on the finished tree (stale
       published numbers: h0 read 60 vs 80 published in research); lift h4 toward its 60±8 band;
       drain the intel flood (heat refunding itself through the shop); resolve the LOS-fix policy-
       gap watch item (accept-vs-sharpen on the corrected tree); final DEVLOG measured tables.
       Also owns: whether skirmish/daily should keep the m1 opener grace zeroing numeric heat
       deltas (FUL-3 landing note — the picker desc is honest now, the design question isn't).
+      Parked from FUL-10: an event-exposure lever — widening GenerateMap's "?"-node stamp clamp
+      to `Clamp(mids/4, 1, 3)` (17 events now share 1-2 nodes/run ≈ each ~1-in-9 runs). CAVEAT:
+      GenerateMap re-runs from MapSeed on load, so changing the clamp silently reshapes IN-FLIGHT
+      saves' unvisited nodes — ship it only with that skew adjudicated.

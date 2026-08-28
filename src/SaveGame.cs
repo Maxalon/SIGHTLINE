@@ -434,6 +434,21 @@ public static class SaveGame
         WriteMetaDto(d);
     }
 
+    /// FUL-10 (LIVING LEGENDS): permanently ERASE reserve records by name — the same key
+    /// EnshrineVeterans dedupes on, so "the fallen ∩ the reserve" is exactly what dies.
+    /// Returns how many records were erased; unmatched names are a no-op (no write).
+    public static int RemoveVeterans(IEnumerable<string> names)
+    {
+        if (names == null) return 0;
+        var doomed = new HashSet<string>(names);
+        if (doomed.Count == 0) return 0;
+        var d = LoadMetaDto();
+        if (d.Veterans == null || d.Veterans.Count == 0) return 0;
+        int n = d.Veterans.RemoveAll(v => doomed.Contains(v.Name));
+        if (n > 0) WriteMetaDto(d);
+        return n;
+    }
+
     static RunDto ToDto(Run r)
     {
         var dto = new RunDto
@@ -446,6 +461,7 @@ public static class SaveGame
             PrepFaction = (int)r.PrepFaction,
             CheckpointUsed = r.CheckpointUsed,
             Contract = (int)r.Contract,
+            PendingSalvageReward = r.PendingSalvageReward,
         };
         foreach (var u in r.Squad)
             dto.Squad.Add(ToUnitDto(u));
@@ -469,6 +485,7 @@ public static class SaveGame
         r.PrepFaction = (Faction)dto.PrepFaction;   // append-only: old saves default 0 == Faction.None
         r.CheckpointUsed = dto.CheckpointUsed;      // append-only: old saves default false
         r.Contract = (Contract)dto.Contract;        // append-only: old saves default 0 == Contract.None
+        r.PendingSalvageReward = dto.PendingSalvageReward;   // append-only: FUL-10 event salvage claim (old saves default 0)
         // regenerate the branching campaign map from its seed and restore the position
         if (dto.MapSeed != 0)
         {
@@ -509,6 +526,7 @@ public static class SaveGame
         public int PrepFaction;   // append-only: faction COUNTER-PREP bought (old saves default 0 == None)
         public bool CheckpointUsed;   // append-only: the one-time REINFORCEMENTS redeploy spent (old saves default false)
         public int Contract;   // append-only: W6 run contract (old saves default 0 == Contract.None)
+        public int PendingSalvageReward;   // append-only: FUL-10 event salvage awaiting the run-end commit (old saves default 0)
     }
 
     class UnitDto
@@ -546,6 +564,7 @@ public static class SaveGame
             src.PrepFaction = Faction.Legion;   // a staged faction counter-prep must round-trip
             src.CheckpointUsed = true;          // the one-time REINFORCEMENTS flag must round-trip
             src.Contract = Contract.HighStakes; // a chosen run contract (W6) must round-trip
+            src.PendingSalvageReward = 25;      // FUL-10: an event's pending salvage claim must round-trip
             var a = new Unit
             {
                 Name = "VEGA", Cls = "ASSAULT", Team = Team.Player,
@@ -623,6 +642,7 @@ public static class SaveGame
             if (got.PrepFaction != Faction.Legion) fails.Add("prepFaction");
             if (!got.CheckpointUsed) fails.Add("checkpointUsed");
             if (got.Contract != Contract.HighStakes) fails.Add("contract");
+            if (got.PendingSalvageReward != 25) fails.Add("pendingSalvageReward");   // FUL-10
 
             // APPEND-ONLY GUARD: Objective is persisted as a raw ordinal (CardDto.Objective). If a
             // future edit reorders/removes a member, saved runs load the wrong objective. Check the
@@ -671,8 +691,12 @@ public static class SaveGame
             var scarVals = (Scar[])Enum.GetValues(typeof(Scar));
             if (scarVals.Length < 4 || scarVals[0] != Scar.ShellShocked || scarVals[^1] != Scar.Vendetta)
                 fails.Add("scarOrdinals");
+            // FUL-10: the tail advanced Spearhead -> LivingLegends (MercenaryClause, LivingLegends
+            // appended). Pin the old tail's ORDINAL POSITION too (Spearhead must still be [3]) so an
+            // insertion anywhere before the new block also fails loudly.
             var contractVals = (Contract[])Enum.GetValues(typeof(Contract));
-            if (contractVals.Length < 4 || contractVals[0] != Contract.None || contractVals[^1] != Contract.Spearhead)
+            if (contractVals.Length < 6 || contractVals[0] != Contract.None || contractVals[3] != Contract.Spearhead
+                || contractVals[^1] != Contract.LivingLegends)
                 fails.Add("contractOrdinals");
             // W9: MetaUnlock is persisted by ordinal in meta.json's Unlocks list — same append-only
             // guard (first + last member) so a reorder/removal fails SAVETEST loudly.

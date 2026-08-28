@@ -1894,3 +1894,79 @@ A/A CRN identity, hence hash-not-draw everywhere); autoplay x3 clean (no excepti
   fresh slot base (SIGHTLINE_BALANCE_BASE) before reading it as policy.
 - Never rebuild while a batch runs — dotnet's in-place DLL overwrite races the mapped image of
   the running process (observed surviving, not guaranteed).
+
+# PROGRAM FULCRUM — FUL-10 FORKS (2026-08, wave dev on wt-ful10)
+
+The strategic layer got its forks: **seven trade-off field events** (catalog 10 → 17) crossing
+salvage / scars / veteran-rank+slots / faction prep+vendetta+heat / wounds+intel — ids
+`warpension fieldhospital informant quartermaster bloodfeud reservecall warchest`, ids + arm
+ORDER frozen forever (the FUL-1 compass keys `id:arm`). Six new `EventOutcomeKind`s (appended;
+the kind is never persisted): GrantScar / CureScar / Salvage / GrantPrep / RankKills /
+ReleaseSoldier, plus a seeded-arm gate (`ChancePct` + `OnFail` riding the existing
+`GambleSucceeds` node hash — reload-stable, zero Util.Rng draws; an OnFail pair fires exactly
+one side of a gamble off the one roll). `EventChoice` gained a third outcome slot (C3) for the
+reservecall triple. Event salvage NEVER touches meta/disk (EventCatalog.Apply stays pure):
+it pends in the new persisted `Run.PendingSalvageReward` (append-only DTO tail + SAVETEST leg)
+and `AwardMetaRunEnd` commits it win OR loss, folded into the FUL-12 `EndSalvage` slab.
+`HasDownside` learned GrantScar + ReleaseSoldier so the safe-first bot never reads a scarring
+arm as "safe" (honest arm-uptake waits on FUL-5's chooser, per plan).
+
+**Two veteran-economy contracts** (Contract append — BOTH tail pins moved, SaveGame SelfTest +
+CONTRACTTEST, each now also pinning Spearhead's ordinal POSITION [3]): **MERCENARY CLAUSE**
+(MRC) — recalls half price, round up, halved in exactly one seam (`Game.DraftRecallFee`, which
+the per-card fee, the bill row and ConfirmDraft's charge all read → the discount is honest by
+construction) but survivors never enshrine; **LIVING LEGENDS** (LGD) — kills credit DOUBLE at
+CreditKill (feats stay single), Rank>=2 survivors pension +6xRank at run end, and a KIA whose
+name matches a reserve record ERASES it (`SaveGame.RemoveVeterans`, name-keyed like
+EnshrineVeterans' dedupe). Both `Contract == X`-gated, inert at None.
+
+**Orphaned-perk fix:** the HORIZON-W6 trio joined real class lines (Vantage → SHARPSHOOTER +
+GUNNER; Breaker → ASSAULT + SHARPSHOOTER; Siegebreaker → RANGER + ASSAULT) — the ClassLine
+table's own "every perk appears in >=1 line" doc rule is TRUE again and now ENFORCED by
+enumeration (`Run.PerksInNoClassLine()`, asserted empty in CONTRACTTEST).
+
+**Hud:** the draft contract row re-fits SIX cards (width shrinks to the row, height grows to
+the tallest WrapLines-wrapped desc — wrap, never truncate; first cut used a wrong 13px line
+height and LGD's 4th desc line spilled the border — WrapLines' lh is size+6). DebugVetDraft now
+demos the MRC bill (NOX picked at RECALL 17, VEGA greyed at 21, bank 20). New
+`SIGHTLINE_EVENTID=<id>` stager pins DebugEvent's staged event (default unchanged).
+
+## Verified
+Release 0/0. EVENTTEST (a mutation leg per new kind; CureScar newest-first + BurnScarred MaxHp
+revert; Vendetta fallback-Legion brand; RankKills+GrantScar same-soldier coupling; seeded scar
+double-apply idempotent; Salvage/Wound OnFail pair exclusive; PendingSalvageReward §4 save
+round-trip) / SAVETEST / CONTRACTTEST (All==5, new tail pin, LGD double-credit + None single,
+MRC fee halved exactly once + restored on deselect, perk-line coverage) / METATEST (leg 11:
+MRC bill 26 = 17+9 charged once at ConfirmDraft, enshrine skipped; LGD pensions 30 paid once
+with the 25 event claim in one commit, RemoveVeterans erased exactly NOX and nobody else) /
+CODEXTEST / DRAFTTEST — all PASS. `SIGHTLINE_CONTRACT=mrc|lgd` autoplay x3 each: clean RESULT
+lines, no exceptions, no TIMEOUT. Shots: 4 staged events (fieldhospital shows the greyed
+illegal arm), the six-card draft row, the MRC-discounted vet-draft bill.
+
+## Measured (SIGHTLINE_BALANCE=20 ladder {0,2,4,6,8}, CRN slots shared with a base-bce2cbd
+scratch-clone control — a paired A/B, the FUL-2 method)
+| metric | base | FUL-10 | verdict |
+|---|---|---|---|
+| pooled run completion (40 runs) | 40% | 45% | +5 — at the ±5 budget boundary, in budget |
+| mission win-rate by heat | 92/84/95/79/64 | 97/87/92/78/69 | deltas +5/+3/−3/−1/+5 — stable, no cliff |
+| h0 run-completion cell (n=8) | 63% | 88% | +25 nominal, 2 runs of 8 — small-n noise (FUL-11's chunks swung 45-85 at n=10); the mission-level row is the reliable read |
+| policy gap (greedy−sloppy) | −10 | 0 | both "healthy slack"; FUL-2/13 watch item unchanged |
+| VNT/BRK/SGE picks | 9/6/4 (slot-B only) | 13/15/9 | slot-A reachability lifted trio exposure ~2x; per-heat BY PERK rows now exist for all three |
+| BY EVENT-CHOICE new ids | — | warpension:2, fieldhospital:2, quartermaster:1, bloodfeud:1, warchest:1 | 5 of 7 fielded in 20 worlds (~1-in-9 exposure each; informant/reservecall await bigger batches) |
+| contract telemetry | none | none | Contract==None inertness held — zero contract records in both reports |
+
+## Accepted version skew (note, not corruption)
+Growing `EventCatalog.All` 10 → 17 shifts `IndexForNode`'s hash-and-probe assignment, so an
+IN-FLIGHT save's **unvisited** "?" node shows a different event after upgrading. Resolved
+events are already baked into Run state and MapPos/Visited semantics hold, so nothing corrupts
+— EVENTTEST's determinism legs compare two regenerations under the SAME catalog and still pass.
+Same class of skew is why the "?"-node stamp clamp was deliberately NOT widened this wave
+(GenerateMap re-runs from MapSeed on load); the `Clamp(mids/4, 1, 3)` exposure lever is parked
+in ROADMAP's FUL-13 entry with that caveat attached.
+
+Gotchas for future waves: the BALANCE flywheel ignores SIGHTLINE_HEAT and always spans the
+ladder itself on deterministic CRN slots — two same-N batches on one tree are IDENTICAL, which
+is exactly what makes a scratch-clone base control an honest paired A/B; `WrapLines`' line
+height is `size + 6`, not the font size — size any wrap-fitted panel from its dy values;
+`GambleSucceeds`' roll is pct-independent per node, so a ChancePct pair (success arm +
+OnFail arm) resolves exclusively off one roll by construction.

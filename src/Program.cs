@@ -399,8 +399,8 @@ public static class Program
 
         var game = new Game();
         game.NoPersist = shot || autoplay;   // the harness never reads/writes the save file
-        // SIGHTLINE_CONTRACT=ironveterans|highstakes|spearhead : force a run contract on the
-        // headless run (honored only under NoPersist, since the draft never runs there); None otherwise.
+        // SIGHTLINE_CONTRACT=ironveterans|highstakes|spearhead|mrc|lgd (FUL-10) : force a run contract
+        // on the headless run (honored only under NoPersist, since the draft never runs there); None otherwise.
         game.ForcedContract = ContractDef.Parse(Environment.GetEnvironmentVariable("SIGHTLINE_CONTRACT"));
         // FUL-1: SIGHTLINE_PERK=<code> (e.g. RFX) : the bot takes this perk whenever a rank-up
         // offers it (ChoosePerk override; NoPersist-only, draw-count neutral). Null otherwise.
@@ -488,7 +488,7 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_BOON") == "1") game.DebugBoon();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_ENDLESSOFFER") == "1") game.DebugEndlessOffer();   // W7: pair with SIGHTLINE_ENDLESS=1
 
-        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_EVENT") == "1") game.DebugEvent();
+        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_EVENT") == "1") game.DebugEvent();   // + SIGHTLINE_EVENTID=<id> pins the staged event (FUL-10)
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_DRAFT") == "1") game.BeginDraft();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_VETDRAFT") == "1") game.DebugVetDraft();   // draft w/ recalled veterans
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_FOCUSOW") == "1") game.DebugFocusOw();      // focused-overwatch cone
