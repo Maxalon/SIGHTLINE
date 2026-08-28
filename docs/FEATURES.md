@@ -260,12 +260,17 @@ seeds (mix of WIN/LOSE, no exceptions):
 - **Mission objectives:** Eliminate, Hack (reach the TERMINAL and hack it down,
   HACK action / key H), Evac (get the whole squad to the extraction zone), and
   **Escort** (walk a fragile gold VIP to the extraction zone alive — losing the
-  VIP is a loss; the enemy AI prioritises it). Rotation is Elim / Hack / Evac /
-  Escort per 4-mission cycle; shown in the HUD.
+  VIP is a loss; the enemy AI prioritises it). Campaign objectives are dealt by a
+  **hashed column plan** (FUL-9: every route gets >=1 Eliminate, >=1 Defend-or-
+  Rescue, <=1 Escort; boss always Decapitate); the 8-objective rotation remains
+  the SKIRMISH/offer fallback. Shown in the HUD.
 - **Map variety:** procedural scatter OR a hand-authored arena (`src/Maps.cs`,
-  ~55% of missions) chosen with a connectivity guard so spawns/evac/terminal are
-  always reachable. Plus **per-mission biomes** (`Biome`: STEEL/ARID/TUNDRA/VERDANT/
-  ASH/VOID) that retint the floor/grid so each mission reads as a distinct place.
+  ~80% of missions) dealt from a **per-run no-repeat deck** derived purely from
+  the run's MapSeed (FUL-9: an arena never repeats within a run; the displayed
+  biome's themed arena is pulled forward at reduced weight), with a connectivity
+  guard so spawns/evac/terminal are always reachable. Plus **per-mission biomes**
+  (`Biome`: STEEL/ARID/TUNDRA/VERDANT/ASH/VOID) that retint the floor/grid so
+  each mission reads as a distinct place.
 - **Elevation / high ground:** raised plateaus (`Grid.Height`) grant +15 aim /
   +10 crit firing down on lower targets AND **see over LOW cover** (negate the
   target's low cover; high cover still blocks); faux-3D platforms, height-aware

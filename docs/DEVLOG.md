@@ -1668,3 +1668,75 @@ Gotchas for future waves: SpawnReinforcements' `podded` flag is DEFEND-only by d
 routable pressure-clock punishment isn't a punishment); wave pod ids start at 100 (initial pods
 are i/2 <= 5, harness scenes use 90/91); the wave schedule is DefendWaveTurn — spawner and
 telegraph must keep sharing that one read.
+
+
+# PROGRAM FULCRUM — FUL-9 THE DECK (2026-08, wave dev on wt-ful9)
+
+The carried W7 spec (the docs over-claim), finally built on the repaired roster. Two systems,
+both PURE derivations off MapSeed (zero Util.Rng draws, zero persisted state — CRN pairing and
+save round-trips hold by construction):
+
+**Objective plan** (Run.GenerateMap/CardForNode): hashed off (MapSeed, column, row) via the new
+`Util.Hash3` avalanche (the W5 finale-kit mixer, parameterised — .NET Random correlates nearby
+seeds). Column-scoped guarantees hold on EVERY route regardless of edge wiring (a route visits
+one node per column): an event-free ANCHOR mid column deals Defend(80%)-or-Rescue on all its
+nodes; Escort exists on at most ONE hashed node per map (never in the anchor column); START
+stays Eliminate; boss stays Decapitate; everything else deals from an Escort-free 7-pool with a
+per-column offset + row (siblings in a column stay distinct ops). The GenerateMap rng stream is
+byte-identical to pre-FUL-9 (the plan takes no draws), so existing saves regenerate the same map
+shape/kinds/edges/factions — only card objectives change. `ObjectiveFor` survives untouched as
+the SKIRMISH/offer fallback rotation.
+
+**Arena deck** (Mission.PickLayout/DeckPick): a Hash3-keyed Fisher-Yates permutation of all 35
+layouts per run; mission n takes draw n (recomputed 1..n per Build — n<=6, cheap — so nothing
+persists). The biome hint became a 25% pull-forward WITHIN the deck of the DISPLAYED biome's
+arena (`Biome.IndexFor` — the old hint keyed off mission number, which both mismatched the
+rendered room and re-coupled arena to mission, the FUL-1 confound). Authored gate Roll 55→80 —
+FUL-1 measured the reject lane EMPTY (52.6/0.0/47.4 at n~190), so the lost roll was the only
+road to procedural. DRAW-ORDER CONTRACT (comment at the gate, load-bearing): exactly ONE
+Util.Roll in the gate, ZERO draws in the pick.
+
+**SIGHTLINE_EXPOSURETEST** (windowless, 200 seeds): enumerates all 1098 routes (mid columns
+hold 2-3 rows — sampling could miss a branch) and asserts the invariant on each; asserts zero
+in-run deck repeats (1200 draws); all 8 objectives dealt (Defend 528 / Rescue 200 / Escort
+exactly 200 = 1/map); all 35 arenas dealt (min 17 / mean 34.3 / max 69 — the 8 hint arenas sit
+at 46-69, reduced weight but still themed). PASS.
+
+Measured (h0, N=10 CRN slots; R0 = base 1e504f9 on slots 0-9):
+
+| batch | funnel auth/rej/proc | completion | Defend fielded | Defend on route | distinct arenas |
+|---|---|---|---|---|---|
+| R0 base, slots 0-9 | 56.3 / 0.0 / 43.8 | 60% (g50/s70) | n=4 @ 50% | (n/a, base) | 19 distinct/batch |
+| R1 deck, lean 75 | 77.4 / 0.0 / 22.6 | 50% (g50/s50) | n=15 @ 53% | 75% of runs | 2.75 all-runs mean |
+| R2 deck, lean 80 | 76.2 / 0.0 / 23.8 | 50% (g50/s50) | n=17 @ 59% | 85% of runs | 2.70 / 3.40 full-depth |
+| R2b disjoint slots 10-19 | 76.7 / 0.0 / 23.3 | 45% (g40/s50) | n=19 @ 74% | 80% of runs | 2.85 / 3.44 full-depth |
+
+Targets: procedural 20-25% HIT (23.3-23.8). Defend on >=80% of runs HIT (80/85 across disjoint
+slot sets; the 75→80 anchor lean was the fix — early deaths truncate routes before the anchor,
+so the lean is the route-level floor). Defend win pooled 67% (24/36) — inside FUL-4's 60-80
+band; the exposure did not break the repair. Distinct-authored-arenas/run >=4.5 MISSED as
+specified but structurally unreachable: the target arithmetic assumed 6 authored fights/run,
+and real full-depth routes play 4.5-5.0 fights (an EVENT node replaces a fight; the boss is 1)
+× 77% authored = a 3.5-3.9 ceiling, of which 3.40-3.44 (~90%) is delivered — with repeats now
+IMPOSSIBLE (the old with-replacement sampling put 57% of authored missions on 8 hint arenas).
+The honest variety win is the deck guarantee + all-35 exposure, not the 4.5 number.
+
+BUDGET BREACH (reported, not hidden): h0 completion 60 → 50 (same slots) / 45 (disjoint),
+−10/−15 vs the ±7 window. Attribution is unambiguous in the per-objective tables: every other
+objective holds 90-100%, while Defend goes from n=4 fielded per 20-run batch to n=17-19 at
+59-74% and mid-run Decapitate (never dealt to mids by the old rotation) fields n=13-15 at
+67-85%. The drop is the PRICE OF EXPOSURE — routes now actually contain the roster's contested
+cells — exactly the FUL-13 TRUE NORTH re-baseline input the roadmap anticipates. Nothing was
+reverted; tuning Defend down would re-hide what FUL-4 repaired.
+
+Verified: Release 0/0; EXPOSURETEST / SAVETEST / EVENTTEST / COMBATTEST / MODETEST / PAIRTEST
+PASS; autoplay x3 clean (no exceptions/TIMEOUT); campaign-map screenshot inspected (an anchor
+column showing its RESCUE/DEFEND split renders + labels correctly).
+
+Gotchas for future waves: Mission.DeckSeed is PUBLISHED BY Game.SetupMission (all five mode
+entries route through it) — a bare harness Mission.Build sees whatever was last published (0 if
+none), fine for the empty-deploy guard but pin it if a new hook needs a specific deck. DAILY
+still bypasses the deck via ForcedLayout (its determinism contract predates FUL-9). The
+objective plan runs AFTER event stamping in GenerateMap and must stay there (the anchor column
+must be provably event-free). Keep the gate's draw-order comment intact: exactly one Util.Roll,
+zero draws in PickLayout/DeckPick — a second draw anywhere in that path breaks CRN pairing.

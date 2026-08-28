@@ -831,16 +831,29 @@ of record (container suspensions have wiped every scratchpad copy — docs are t
       ITEM 0, GRENADE<=7 per ~500 missions → BRACE>=5, PATCH>=10, GRENADE>=10, ITEM>=5 per
       20-campaign batch; PROCS nonzero for SHK/FDR/FST or a design VERDICT in the DEVLOG (no
       tuning boons on no-ops).
-- [ ] **FUL-9 THE DECK** (P9, L — after FUL-4 merges). The carried W7 spec on the repaired
-      roster: column-constrained objective assignment in CardForNode HASHED off
-      (MapSeed,column,row) (>=1 Eliminate, >=1 Defend-or-Rescue, <=1 Escort per path; boss stays
-      Decapitate); per-run no-repeat arena deck derived from MapSeed (prefer derivation over a
-      persisted list; if persisted: append-only RunDto field + SAVETEST leg); authored roll 55→80
-      keeping EXACTLY one Util.Roll (draw-order comment at Mission.cs:135 is load-bearing); biome
-      hints as reduced weight within the deck; SIGHTLINE_EXPOSURETEST 200-seed histogram (objective
-      invariant, zero in-run arena repeats, all 8 objectives reachable, all 35 arenas exposed).
-      Reference: 52% procedural, 6/35 arenas unseen in 251 missions, Defend absent from whole
-      batches → procedural 20-25%, distinct arenas/run >=4.5, Defend in >=80% of runs.
+- [x] **FUL-9 THE DECK** (wt-ful9). The carried W7 spec, finally BUILT (not just claimed):
+      column-constrained objective assignment in CardForNode hashed off (MapSeed,column,row)
+      via Util.Hash3 — an event-free ANCHOR mid column deals Defend(80%)-or-Rescue on every
+      node, Escort capped at ONE hashed node per map, START stays Eliminate, boss stays
+      Decapitate, the rest deal from an Escort-free 7-pool (per-column offset + row keeps
+      siblings distinct) — so >=1 Eliminate / >=1 Defend-or-Rescue / <=1 Escort holds on EVERY
+      route by construction (zero rng draws: map shape/kinds/edges/factions byte-identical, so
+      saves round-trip; ObjectiveFor stays the skirmish/offer fallback). Per-run no-repeat
+      arena deck derived PURELY from MapSeed (Hash3 Fisher-Yates over all 35, recomputed per
+      draw — nothing persisted), biome hint reduced to a 25% pull-forward of the DISPLAYED
+      biome's arena (Biome.IndexFor; was mission-number-keyed 50%, the FUL-1 confound);
+      authored roll 55→80 keeping EXACTLY one Util.Roll (the draw-order contract at the gate:
+      PickLayout now takes ZERO draws). SIGHTLINE_EXPOSURETEST (200 seeds, 1098 routes
+      ENUMERATED): invariant on all routes, zero in-run deck repeats, all 8 objectives + all
+      35 arenas dealt (min 17 draws) — PASS. Measured (paired h0 N=10 x2 slot sets): funnel
+      52.6/0.0/47.4 → 76-77/0.0/23-24 (procedural 20-25 HIT); Defend dealt on 80-85% of runs
+      (>=80 HIT) fielding n=17-19/batch at 59/74% (pooled 67, FUL-4's band; base fielded n=4);
+      distinct authored arenas 3.4/full-depth run over 4.5-5.0 fights (the 4.5 target assumed
+      6 authored fights/run — events + the 23% procedural floor cap the ceiling at ~3.5-3.9,
+      ~90% delivered; repeats are now impossible vs the old with-replacement sampling).
+      Budget: h0 completion 60 → 50/45 (−10 to −15, OUTSIDE ±7, reported not hidden): the drag
+      is the newly-EXPOSED Defend/mid-Decapitate cells on ~every route, not the arenas —
+      FUL-13's re-baseline input (full table in docs/DEVLOG.md).
 - [ ] **FUL-6 CRITICAL MASS** (P6, L). Pods of 3 + linked activation in mid/late missions — one
       real multi-pod battle per mission instead of six 2-enemy executions, so BRACE/morale/verb
       boons get a stage; morale/rout reaches LAST STAND's horde. Files: Mission.cs, Game.cs,
