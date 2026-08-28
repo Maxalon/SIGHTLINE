@@ -24,8 +24,10 @@ game is distributed** — procedural / in-engine / shader-generated content is t
 and free assets are allowed *only* when the license clearly permits free use AND free
 redistribution (favor CC0 / public-domain; OFL is fine for fonts), they fit perfectly, and
 the file is small (no large binaries); drawn text ASCII-only until a real font ships; the
-headless screenshot harness stays byte-stable; always ship code that builds clean in Release
-and passes the autoplay smoke test (no exceptions / no TIMEOUT).
+headless harness stays deterministic **where it claims to be** — `SIGHTLINE_PAIRTEST`
+byte-identity, not screenshot hashes (see §F1: shots were never byte-stable); always ship
+code that builds clean in Release and passes the autoplay smoke test (no exceptions / no
+TIMEOUT).
 
 ---
 
@@ -2597,3 +2599,224 @@ predated pods/morale/downs).
 **Open/next**: seeded in ROADMAP §OPEN/NEXT (post-FULCRUM) — the owner-decision docket
 (skirmish heat / founding corpsman / grenade pre-frag), Escort-at-apex, the h6 Defend
 residual, event-exposure levers, RCL sweeten option, h8 corpsman blackout, on-device audio.
+
+---
+
+## PROGRAM RESONANCE — F1 "FOUNDATIONS" (2026-08-28)
+
+**Goal**: harden what a shipping game needs and close two real save-corruption holes.
+Mostly cold files. Everything below has a command behind it; numbers are ones this wave
+measured in this container, not inherited from the brief. Where a briefed number did not
+reproduce, the measured one is recorded instead and flagged.
+
+### 1. The append-only enum contract is now actually enforced
+
+`SaveGame.SelfTest` already pinned persisted enums by ordinal — better than CLAUDE.md
+claimed — but with two holes.
+
+* **Hole A**: `RewardKind` is persisted by ordinal (`CardDto.Reward`, a raw int) and was
+  completely unguarded. Latent today (3 members) but exactly the enum a "more mission
+  rewards" wave edits.
+* **Hole B**: 8 of the 12 guarded enums pinned only head and tail, so a **mid-enum
+  insertion passed silently**. `Perk` (23 members, the likeliest to grow) never got a
+  mid-pin at all.
+
+Replaced the positional pins with a **golden FNV-1a fingerprint** over each enum's full
+ordinal→name sequence (`SaveGame.EnumFingerprint` + `PersistedEnums`), covering all 12
+plus `RewardKind` = **13**. Any reorder, insertion, removal or rename now fails loudly with
+both hashes and a remediation note.
+
+**Proof the guard bites** (inserted `ProofOfGuard` at index 5 of `Perk`, shifting 18
+ordinals — a change the OLD guard passed, since `Length>=20`, `[0]==LockOn` and
+`[^1]==Siegebreaker` all still held):
+
+```
+SAVETEST: FAIL (enumShape:Perk (golden 0xEADD48BA, actual 0xB7206DFC))
+  >> A persisted enum changed shape. Ordinals ARE the save format: appending a member at
+  the END is safe (old saves keep their meaning); inserting, reordering, removing or
+  renaming one silently re-points every existing save and every meta.json profile. If you
+  appended, paste the actual hash above into SaveGame.PersistedEnums. If you did anything
+  else, undo it.
+```
+
+Reverted; SAVETEST PASS again.
+
+Also added `SchemaVersion` to `RunDto` and `MetaDto` (stamped `CurrentSchema = 1` on every
+write, asserted on disk by SAVETEST). Purely additive fields still need no bump; the hook
+exists for a change defaults cannot rescue.
+
+### 2. Two save-corruption defects (from the adversarial QA pass)
+
+* **D2 — a dead CONTINUE button, forever.** `save.json` containing `null`, `{}`, or an
+  object with a renamed/empty `Squad` **parses fine**, so `Load` returned null and left the
+  file in place. `ContinueRun` refused it (empty squad) while `Hud` kept drawing the button
+  off `SaveGame.Exists` — click, nothing, no banner, no stash, no delete. Fixed entirely
+  inside `SaveGame.cs` (no touch to the Game.cs/Hud.cs hot spots): "parsed but unusable" is
+  now routed through the same stash-and-remove path as unparseable, and `Exists` validates
+  by loading, memoised on the file's (write-time, length) so the per-frame intro poll costs
+  one `stat`.
+* **D5 — unvalidated enum ordinals from disk.** Casts of persisted ints are legal C#, so
+  nothing threw; `Objective: 99` loaded and ran, and `CheckEnd`'s final `else` treated it as
+  **Evac** — the mission ran with an unreachable win condition until the squad wiped. Reads
+  now go through `EnumOr` / `AddDefined`: a scalar falls back (unknown Objective → Eliminate,
+  the always-reachable goal), and unknown list members are **dropped** rather than defaulted
+  (a bogus perk silently becoming `Perk[0]` would be a stealth buff).
+
+Both are covered by a new `StructureSelfTest` inside SAVETEST. Verified it bites: with the
+fixes temporarily reverted, `SAVETEST: FAIL (deadSaveStillOffered:null)`.
+
+### 3. Save location — the comment was wrong
+
+Resolved empirically with a throwaway probe rather than trusting either source. The tech
+lead was right and QA's harness path was not:
+`SpecialFolder.ApplicationData` → `$XDG_CONFIG_HOME` (only if the directory **already
+exists**) else `$HOME/.config`. So it is **`~/.config/Sightline`**, never `~/.local/share`
+(that is `LocalApplicationData`, which this game does not use).
+
+Edge case found while probing: `GetFolderPath` uses `SpecialFolderOption.None`, which
+returns `""` when the directory does not exist — `Path.Combine("", "Sightline")` would then
+put saves in a **relative** dir next to the process CWD, scattering them per launch
+directory. `SaveGame.Dir` now falls back to `$HOME/.config/Sightline`. (This also explains
+the harness-isolation footgun: `XDG_CONFIG_HOME="$PWD/.xdg"` without `mkdir -p` isolates
+nothing.)
+
+### 4. PublishTrimmed silently destroyed all persistence
+
+Reproduced: the trimmed build compiled 0-error, booted, played and **finished a full
+autoplay campaign** while saving nothing — no `save.json`, no meta profile (salvage,
+veterans, achievements, hall of fame). SAVETEST and METATEST both FAILED against it. A
+publish wave grepping for "0 Errors" ships this.
+
+Cause: reflection-based `System.Text.Json` loses the metadata trimming strips, **and**
+trimming turns the reflection fallback off by default — `InvalidOperationException:
+Reflection-based serialization has been disabled for this application` — which
+`Stats.WriteJson`'s bare `catch {}` swallowed whole.
+
+Fix, three parts:
+1. `SaveGame` and `Display` serialise through **source-generated
+   `JsonSerializerContext`s** (`SaveJson`, `DisplayJson`) — no reflection, nothing to strip.
+   Removed 6 of the 7 IL2026 sites. Cost: both classes became `partial`, their DTOs
+   `internal`. No behaviour change.
+2. The 7th site (`Stats.WriteJson`) serialises **anonymous types**, which no generator can
+   see. Kept reflective but made safe: the csproj roots our own assembly
+   (`TrimmerRootAssembly`) and re-enables `JsonSerializerIsReflectionEnabledByDefault` **for
+   trimmed publishes only**. Verified: the trimmed binary writes a balance JSON identical to
+   the untrimmed one (1777 bytes; it previously wrote **nothing**). IL2026 suppressed at that
+   one site with the reasoning — trimmed publish is now 0 IL warnings.
+3. `Stats.WriteJson` prints its exception. A silent total failure is how a broken publish
+   config survives review.
+
+**Proof** (`scripts/publish.sh` runs this on every publish and fails the build if either
+line is not PASS):
+
+```
+>> output: 25M
+Sightline  THIRD-PARTY-NOTICES.txt  assets  libraylib.so
+>> verifying persistence against the published binary
+   SAVETEST: PASS (run round-trips squad/perks/weapon-mods/card/heat; schema stamped;
+     13 persisted-enum fingerprints match; ...; unusable saves stashed + un-offered;
+     junk ordinals clamped)
+   METATEST: PASS (salvage/achievements/unlocks/legends/totals round-trip; ...)
+```
+
+**Measured publish matrix** (linux-x64 self-contained, SDK 8.0.130; `start` = median of 10
+window-free SAVETEST launches after a warm run):
+
+| mode | flags | size | start | files |
+|---|---|---|---|---|
+| **release** (new default) | Trimmed + ReadyToRun + SingleFile | **25 MB** | **95 ms** | 6 |
+| small | Trimmed + SingleFile | 18 MB | 350 ms | 6 |
+| no-trim | ReadyToRun + SingleFile | 80 MB | 115 ms | 6 |
+| plain | SingleFile | 68 MB | 168 ms | 6 |
+| — | folder | 75 MB | — | 193 |
+
+The brief expected R2R-only as the recommendation. Measurement changed it: trimming strips
+the framework's precompiled R2R code, which is why plain-trimmed is the **slowest** config
+(350 ms); adding R2R back costs 7 MB and gives the **fastest** start of all four. Trimmed +
+R2R is strictly better than R2R alone on both axes, so it is the default.
+
+### 5. Assets were resolved against the CWD (found by the foreign-cwd check)
+
+The brief's "run the published binary from a foreign working directory" check caught a real
+distribution bug: launched from anywhere but its own folder, the game printed
+`WARNING: FILEIO: [assets/NotoMono-Regular.ttf] Failed to open file` and silently fell back
+to raylib's built-in font (dropped-in audio would likewise never load). `Util.Asset` now
+resolves against `AppContext.BaseDirectory`, falling back to the bare relative path so
+`dotnet run` from the repo root is unchanged. Verified: full autoplay from `/tmp` →
+`RESULT: WIN mission=6`, font loaded.
+
+### 6. Licence compliance
+
+`THIRD-PARTY-NOTICES.txt` at the repo root, copied into every build and publish output:
+raylib 6.0 (Zlib), Raylib-cs 8.0.0 (Zlib), .NET 8 runtime (MIT). Each text pulled from the
+package or tag this build actually consumes (`raylib-cs.nuspec`'s recorded commit, the
+runtime pack's `LICENSE.TXT`, the `raylib` `6.0` tag) — sources cited inside the file.
+Noto Mono (OFL-1.1) was already compliant. A FONTS section is structured so a second OFL
+font is one entry plus its committed `-LICENSE.txt`.
+
+**No root `LICENSE` was invented.** How the owner's own code is licensed is theirs to
+decide; an unlicensed private repo already defaults to all-rights-reserved, so the status
+quo is safe. `docs/DISTRIBUTION.md` records it as an **open owner decision** with a
+one-read comparison (all-rights-reserved / MIT / source-available) and the recommendation:
+leave it, and write an explicit proprietary LICENSE the moment a build goes to anyone
+outside the project — the decision is one-way in only one direction.
+
+### 7. The verification contract is now truthful
+
+`scripts/qa-sweep.sh` ran **35 of 41** self-tests. It missed the bleed-out state machine
+(`DOWNTEST`), the pikeman (`PIKETEST`), pods (`PODTEST`), the content-exposure invariant
+(`EXPOSURETEST`), the finale-kit probe (`FUL11PROBE`) and — worst — `PAIRTEST`, the CRN
+identity check every measurement in this project rests on. All six added. `PAIRTEST` (38 s
+measured) is gated behind `--full`, which the header and CLAUDE.md name as the pre-merge
+mode. Full sweep: **41/41 PASS**, autoplay ×3 clean.
+
+**CLAUDE.md corrections** (each replaced a wrong line; nothing appended as an essay):
+
+* **"shots stay byte-identical" — FALSE, and never was true.** Measured: two
+  `SIGHTLINE_SHOT=90` runs differ in **303,065 of 1,024,000 pixels (~30%)**. Cause
+  confirmed by count: **58** `Raylib.GetTime()` wall-clock reads drive animation (46 in
+  `Renderer.cs`, 12 in `Hud.cs`) and `Util.Rng` is clock-seeded by default
+  (`Util.cs:228`). Rewritten to state what IS true: post-FX off, `NoPersist` keeps the
+  harness off disk, the flywheel reseeds explicitly (`Util.Reseed(50000+slot)`), and
+  **`SIGHTLINE_PAIRTEST` byte-identity is the real determinism gate**. The same claim in
+  this file's ground-rules preamble was corrected too.
+* **"the autopilot LOSES most seeds" — the brief said this was stale ("reaches m6 on every
+  seed, wins roughly half; 3W/2L over 5"). It does not reproduce.** Measured over **15**
+  Debug autoplays: **3 WIN / 12 LOSE**, finale reached on 5 of 15, earliest death mission 1,
+  zero TIMEOUTs. The original line is substantially right; what it lacked is that a WIN is
+  *normal*. CLAUDE.md now carries the 15-run distribution and "a WIN is normal, not
+  suspicious" instead of either claim. **A 5-run sample was not enough to overturn it.**
+* Added the **harness-isolation** block (`XDG_CONFIG_HOME` — with `mkdir -p`, see §3 — and
+  `SIGHTLINE_BALANCE_JSON`) as house procedure.
+* Added the **free-key list**, verified by grepping every `KeyboardKey.*` in `src/`: bound
+  are `A B C D E F G H K L M R S T W X Y`, `1`–`9`, arrows,
+  Tab/Space/Enter/Escape/Backspace/F2/Kp±. **FREE: `I J N O P Q U V Z`.**
+* Added **reference timings** (all measured here): no-op Release build 1.5 s (~12 s after
+  touching one file), one self-test 0.1–0.4 s via the Release binary / 1–2 s via
+  `xvfb-run dotnet run -c Debug`, PAIRTEST 38 s, autoplay ~22 s, `SIGHTLINE_BALANCE=10`
+  **311 s** (~31 s/slot, Release binary under xvfb — the brief's 294 s, close).
+* Corrected "**Six** persisted-by-ordinal enums" → thirteen, named, with the
+  append-and-repaste-the-hash procedure.
+* Noted that **`SIGHTLINE_BALANCE` needs a display**: run without `xvfb-run` it silently
+  reports `runs=0` and writes an empty aggregate. (Cost this wave a wasted measurement.)
+
+### 8. Dead conditionals
+
+Only the two verified-genuine ones, kept surgical (`Game.cs` is a merge hot spot):
+`Game.cs:3193` `Vip != null` (always true after the guard directly above) and
+`Game.cs:~3584` `next ?? Selected` (unreachable inside `next != null`; the duplicated
+`Selected` re-test went with it). The four other CA1508 hits were confirmed false positives
+and left alone. `AnalysisMode=All` NOT enabled (~969 warnings, ~99% contradicting this
+codebase's deliberate design).
+
+### Verified at the close
+Release **0 warnings / 0 errors**; trimmed publish **0 IL warnings**; `qa-sweep.sh --full`
+**41/41 PASS**; autoplay ×3 clean; PAIRTEST PASS; enum guard watched to FAIL and revert;
+SAVETEST + METATEST PASS against the **trimmed** binary; published binary plays a full
+campaign from a foreign working directory.
+
+### Left deliberately
+The root `LICENSE` (owner's decision, §6). The `catch {}` swallow-everything pattern
+elsewhere in the codebase (deliberate house style; only the one that hid a total silent
+failure was changed). The other ~969 analyzer findings. `Nullable enable` (measured ~359
+warnings across 20 files, including both merge hot spots).
