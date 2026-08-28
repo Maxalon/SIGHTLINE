@@ -1236,3 +1236,42 @@ sets, one lever per measured round, fresh same-slot R0 first, dip budgets, breac
       A one-line mode-appropriate variant is cheap if the owner wants it.
 - [ ] **Region names are decoration.** Nothing keys off them — no per-region modifier, no return
       visits. Deliberate scope for a *frame*; a future wave could make them mechanical.
+
+### PROGRAM RESONANCE — W4 "THE SECOND AXIS" (done 2026-08-28, details in DEVLOG §W4)
+
+- [x] **The opening geometry is a variable.** `Mission` now deals one of four deployment
+      SHAPES per mission — FRONTAL (today's left-to-right push), PINCER (front + both flanks),
+      CROSSFIRE (two dense NE/SE masses) and ENVELOP (squad at board centre, pods on every
+      rim, the surrounded opening). Derived PURELY from `(MapSeed, mission)` by FNV-1a with
+      **zero `Util.Rng` draws**, so every CRN pairing in the project survives; PAIRTEST is green
+      with the whole surface on. ENVELOP is objective-gated to Eliminate / Decapitate / Defend,
+      so no extraction, hack, beacon or sabotage routing changed.
+- [x] **Pod uniformity** — a pod fields one kind of body. Measured exactly ladder-neutral
+      (32.5% = 32.5%, n=40) for the wave's biggest single gain on the "which target?" axis.
+- [x] **The `SmartEscort` downed-soldier instrument fix** (X1's hand-off), measured as its own
+      CRN-paired round with `SIGHTLINE_ESCORTFIX=0` reproducing the broken instrument.
+- [x] **New instrumentation** — the `[choice-split]` decomposition (`los-targets` /
+      `target-choices` / `position-choices` per ARMED soldier-turn) and a per-shape
+      `DEPLOYMENT GEOMETRY` report/JSON block. `SIGHTLINE_EXPOSURETEST` extended to a third
+      exposure axis (shape x arena x objective over 4000 seeds) with purity, determinism and
+      ENVELOP-legality assertions.
+
+- [ ] **THE LADDER HAS DRIFTED BELOW ITS BAND AND NEEDS A WAVE.** W4's fresh baseline on the
+      integration tip measured h0 **32.5%** and h4 **12.5%** run completion (n=40 each) against
+      the FUL-13 band 55±8 / 30±8. X1 shipped 52.5 / 27.5. Nothing in W4 caused it — it was
+      true before the first lever — but it is now the biggest open number in the project.
+- [ ] **`choices/ARMED-soldier-turn` needs a POSITIONING lever, not another threat lever.**
+      W4 measured it as a near-invariant at ~1.6 across five structurally different levers,
+      because `CountMeaningfulChoices`' two halves respond to threat with opposite signs
+      (DEVLOG §W4). The two honest routes: a terrain-grammar pass that adds equally-good
+      destinations at constant threat (more LOW cover, which also does not block sightlines),
+      or re-specifying axis (b) with an additive rather than multiplicative band.
+- [ ] **ENVELOP rim waves** (`SIGHTLINE_RIMWAVES=1`) — built, deterministic, PAIRTEST-clean,
+      shipped OFF because the round budget ran out. One flag, one paired round.
+- [ ] **A heavier PINCER / ENVELOP weighting.** Pinned at h0 (n=40 each) PINCER ran 47.5%
+      completion and ENVELOP 60.0% against a 32.5% baseline, and inside the shipped mix
+      PINCER missions score `choices/ARMED` 1.70 vs FRONTAL's 1.39. The shipped 3/3/1/3 is what
+      was measured end-to-end; a 1/4/1/4 deal is the obvious next round.
+- [ ] **CROSSFIRE drags Escort** (13.40t pinned vs PINCER's 5.65t) — its NE mass sits on the
+      cols 16-17 extraction corner and gets scattered by the spawn-collision loop. Gating it
+      off evac objectives the way ENVELOP is gated is the cheap fix, unmeasured.
