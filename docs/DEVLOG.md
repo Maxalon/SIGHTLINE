@@ -4269,10 +4269,13 @@ not about the predicate; that is recorded as a follow-up, not guessed at here.
 60.0% completion against a 32.5% baseline). At h0, n=40: run completion **40.0%** (+7.5 over
 baseline, +5.0 over the shipped mix — the best ladder number of the wave) but
 `meaningful-choices/turn` **2.03**, *below the baseline's 2.19*, `armed-soldiers/turn` 1.34, and
-Eliminate stretched to 7.37t with ENVELOP missions averaging 8.83t. **Rejected**: it buys the
+Eliminate stretched to 7.37t with ENVELOP missions averaging 8.83t. At h4, n=40, it gives the
+ladder back nothing at all — run completion **20.0%**, identical to the shipped mix — while mean
+turns run **7.20** against the shipped 6.31 and `choices/turn` **2.45** against 2.61.
+**Rejected**: it buys the
 ladder by making fights longer and thinner, which is the opposite of the wave's charter, and
-this wave has already spent two programs' worth of effort on drag. It is recorded in ROADMAP as
-the obvious lever for whoever picks the LADDER up — the two goals genuinely pull apart here.
+this wave has already spent two programs' worth of effort on drag — and its one real gain, +5.0
+completion, exists only at h0. It is recorded in ROADMAP for whoever picks the LADDER up.
 
 ## THE GATES — every one, with its number
 
