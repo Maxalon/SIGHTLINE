@@ -1,29 +1,35 @@
-
 # .NET build output
-# Rider / IDE
-# agent worktrees (created by the harness; never committed)
-# misc
-# orchestrator scratch/working files
-# verification screenshot artifacts (never commit)
-*.DotSettings.user
-*.log
-*.suo
-*.user
-*_shot.png
-.claude/
-.idea/
-.xdg/
-balance.json
-base_biome_*.png
 bin/
-biome_*.png
+obj/
+
+# Rider / IDE
+.idea/
+*.user
+*.suo
+*.DotSettings.user
+
+# misc
+sightline_shot.png
+*.log
+
+# agent worktrees (created by the harness; never committed)
+.claude/
+
+# orchestrator scratch/working files
+scratch_*.txt
+scratch_*.md
+
+# verification screenshot artifacts (never commit)
+shot_*.png
 fx_*.png
 hierarchy_*.png
 hudpolish_*.png
-obj/
-scratch_*.md
-scratch_*.txt
-scratchpad/
-shot_*.png
-sightline_shot.png
 w1*.png
+base_biome_*.png
+biome_*.png
+*_shot.png
+scratchpad/
+
+# agent test isolation (XDG_CONFIG_HOME / SIGHTLINE_BALANCE_JSON per worktree)
+.xdg/
+balance.json
