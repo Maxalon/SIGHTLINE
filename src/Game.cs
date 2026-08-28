@@ -5779,7 +5779,22 @@ public partial class Game
     /// the 30% off-pick keeps every row exposed for the BY PURCHASE win-rate table.
     float ShopValue(int item)
     {
-        if (IsModItem(item)) return 6f;        // permanent firepower — the run's real reward sink
+        // FUL-5 R6: DE-FLATTENED mod priors — the flat 6f let AFFORDABILITY order the mod
+        // economy (SUPPRESSOR 45 of 165 mod buys in the R0 reference, ~2x its slate share:
+        // the cheap rows stay buyable after the good rows drain the intel). Rank by what a
+        // competent player installs first: the universal always-on rows (damage, aim) over
+        // the conditional/situational ones. The 30% off-pick keeps every row exposed anyway.
+        if (IsModItem(item))
+            return ModForItem(item) switch
+            {
+                WeaponMod.HollowPoint => 7f,    // +crit +dmg — universal damage, every kit
+                WeaponMod.Scope       => 7f,    // +12 aim + long-range hold — universal accuracy
+                WeaponMod.Stabilizer  => 6f,    // +6 aim +2 range — universal, smaller
+                WeaponMod.ExtendedMag => 5f,    // tempo (fewer reloads); shines on 2-clip kits
+                WeaponMod.Bipod       => 5f,    // +10 aim but only while unmoved — positional bet
+                WeaponMod.Suppressor  => 3f,    // one ambush-wake read per MISSION — situational tech
+                _ => 6f,                        // future mods: the old flat prior
+            };
         // FUL-5: COUNTER-PREP — a MODEST prior. The slot only exists when a faction IS
         // telegraphed (RefreshShopOffer) and CanBuy re-gates it, so this is the honest
         // "one-mission edge vs the fight we KNOW is coming" bet: below the permanent rows
