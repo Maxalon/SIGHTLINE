@@ -3717,3 +3717,149 @@ the three and could go to zero if the owner wants an even quieter board.
   above); `DrawThreat` / `DrawPathPreview` untouched (T2 owns them); `Display` post-FX
   untouched, so the bloom knee was NOT re-tuned against the new grade — the rim/lip alphas were
   raised on the assumption the knee is still ~0.36 luma and that is worth a look on hardware.
+
+---
+
+## PROGRAM RESONANCE — W5 "ON-RAMP" (RECRUIT rung + comfort controls)
+
+**The finding.** The game had learned to teach (milestone 1's training op + JIT tips) but still
+had no difficulty below standard and no comfort controls. `Heat.Min` was 0, so the dial only went
+UP; the tuned bot cleared ~52-55% of heat-0 campaigns and a wipe before mission 3 ended the run
+outright. There was no animation-speed control and no UI text scale.
+
+### A — the RECRUIT rung (shipped)
+
+`Heat.Min` is now `-1`, and rung -1 is **RECRUIT**. It ships as a **range extension**, not a
+table change: `Heat.Mods` is untouched, no enum moved, and only the chosen LEVEL is persisted, so
+`SAVETEST`'s golden FNV enum fingerprints are unaffected (verified — SAVETEST PASS).
+
+What it does, all through the existing plumbing:
+
+| Lever | Where |
+|---|---|
+| -1 hostile per mission, -1 HP / -1 aim force-wide | `Heat.RecruitMod`, via the normal `EnemyDelta`/`StatDelta` accessors |
+| bleed-out clock 3 -> 5 turns | `Game.DownedTimerTurnsNow` (the `DownedTimerTurns` const stays the baseline) |
+| the one-time REINFORCEMENTS checkpoint opens at mission 1 | `Game.TryReinforcements` |
+| no intel bonus, no heat-ceiling unlock | `Heat.IntelBonus` returns 0 at n<=0; the unlock check is `>= UnlockedHeat`, which -1 never clears |
+
+One real bug was found on the way: the **early-mission heat grace** (`m1 x0, m2 x1/2`) would have
+zeroed RECRUIT's relief on exactly the mission a first-timer meets first. It is now gated on
+`heat > 0`, so heats 1-8 are bit-for-bit unchanged and the relief applies from m1. `ONRAMPTEST`
+asserts the built mission at BOTH m1 and m3, and the assertion bites (deliberately re-broken: it
+reported `m1:count 5 vs 5`).
+
+**MEASURED (the wave's real gate).** Paired flywheel, CRN slots 0-19, greedy+sloppy, two N=10
+chunks per leg (`SIGHTLINE_BALANCE=10` x `SIGHTLINE_BALANCE_BASE={0,10}`):
+
+| rung | completion | greedy | sloppy | avg missions cleared |
+|---|---|---|---|---|
+| heat 0 | **55.0%** (22/40) | 60% (12/20) | 50% (10/20) | 4.65 |
+| RECRUIT (-1) | **75.0%** (30/40) | 75% (15/20) | 75% (15/20) | 5.55 |
+
++20 points, and the **sloppy** (human-error) policy gains the most: 50% -> 75%. That is the
+on-ramp working as designed — it forgives mistakes rather than lowering the ceiling.
+
+**Copy.** The intro card is now a **DIFFICULTY** picker (RECRUIT - 0 - 8), green at RECRUIT and
+red above 0. RECRUIT prints as a WORD, never "-1" (a negative reads as a penalty, not a name), and
+its three relief lines name real mechanics. Heat 0's hint is now "standard difficulty - the
+designed fight" so the two are tellable apart at a glance. A green RECRUIT chip rides the top bar
+in-mission, the barracks subtitle, and the run-end DIFFICULTY slab.
+
+Also removed: a vestigial "HEAT" caption at `x+18,y+48` on that card — the minus stepper is drawn
+over that exact rect, so it had never been visible; it only surfaced at RECRUIT, where the
+disabled stepper is 40% opaque and the word bled through a button.
+
+### B — animation speed (shipped)
+
+`Game.AnimSpeed` already existed as an undocumented `[F2]` toggle with no persistence and no UI.
+It is now a real setting: `Display.AnimSpeedLevels = {1x, 1.5x, 2x, 3x}`, persisted in
+`display.json`, cycled from the pause menu (or `[F2]`).
+
+The landmine was respected exactly: **only `dt` is multiplied**, at the single existing site
+`a.Update(this, t * AnimSpeed)`. No activation is skipped, nothing bypasses the queue, and
+`Anim.OnStart` still fires only when an anim becomes ACTIVE.
+
+`Game.AnimSpeed` **hard-pins 1x under `AutoPlay || NoPersist`**, and `Display.Init(false)` never
+`Load()`s, so a headless process cannot pick a speed up off disk either.
+
+**Filmstrip evidence** (`SIGHTLINE_LONGMOVE=1` stages a straight multi-tile walk;
+`SIGHTLINE_ANIMSPEED=<x>` names the speed; the loop dumps the unit's tweened `Pos` every frame):
+
+| speed | frames | travelled | arrived at frame | backwards steps |
+|---|---|---|---|---|
+| 1x | 48 | 253.5px | 32 | **0** |
+| 1.5x | 48 | 250.4px | 20 | **0** |
+| 2x | 48 | 246.1px | 16 | **0** |
+| 3x | 48 | 233.8px | 12 | **0** |
+
+All four end at exactly the same board position (`y = 456.000`), so every step activated and no
+step snapped back. The visual filmstrip agrees.
+
+**Harness isolation, proved by construction.** `SIGHTLINE_BALANCE=10` was run on this branch and
+on the integration tip: the two reports differ only in the working-directory path, and
+`balance.json` is **byte-identical** (`md5 754432d8abca6db0ac82bf904b92eaf6`).
+
+### C — UI text scale (shipped)
+
+`Display.UiScaleLevels = {90%, 100%, 110%, 120%}`, persisted, in the pause menu, applied at ONE
+place: `Cfg.Text` / `Cfg.Measure` / `Cfg.TitleText` / `Cfg.TitleMeasure`. Measure and draw share
+the multiplier by construction — which is the whole answer to V1's "several sites measure via a
+wrap/clip/centre helper and draw separately" gotcha.
+
+Two deliberate design decisions:
+
+- **The scale TAPERS with size** (`Cfg.Scaled`): full multiplier at <=18px, eased to 1.0 by 40px,
+  identity above. The readability problem is the 11-14px label layer; the 40-92px headline layer
+  is already legible, lives in fixed-size cards, and is what overflows first.
+- **The atlas routes on the AUTHORED size**, not the scaled one, so body text keeps coming off
+  V1's crisp 20px UI bake instead of falling past the 18px cliff onto the 64px atlas.
+
+Reflow actually needed (found by screenshot, not by reasoning):
+
+- **Roster chips** — the role tag is drawn on the chip's last row at `y+45` in a fixed 58px box,
+  so at 110/120% its baseline crossed the border. `Hud.ChipH`/`ChipPitch` now grow with the scale
+  (exactly 58/64 at <=100%).
+- **Shop cards** — the effect line was drawn with NO width limit and at 100% already stopped a
+  couple of px short of `[ BUY ]`; any scale drove it straight through. It now reserves the
+  measured right column and clips. Row pitches inside the card go through `Hud.TextRow(...)`
+  (identity at <=100%), and the card grows a few px.
+
+Everything is identity at 100%, and `Display.Init(false)` means `Cfg.UiScale` is 1.0 in every
+headless path — screenshots, self-tests and the flywheel all measure the authored layout.
+
+Verified at 4 scales x 2 palettes (`SIGHTLINE_UISCALE=<idx>` + `SIGHTLINE_CB=1`), plus the
+barracks and requisition screens at 120%.
+
+### D — key rebinding: NOT DONE
+
+Deliberately dropped on scope. A remap layer means routing ~40 `Raylib.IsKeyPressed` sites in
+`Game.cs` through an indirection — the exact opposite of the surgical touch `Game.cs` needs while
+it is shared with two other live waves — plus a remap surface and a persisted map. It is the
+least valuable of the four and was traded for finishing A, B and C properly. **Open, ready to
+dev.** Free keys remain `I J O Q U Z`; this wave claimed **none** (`[F2]` was already bound to the
+animation-speed cycle and keeps that job).
+
+### New / changed harness hooks
+
+- `SIGHTLINE_ONRAMPTEST=1` — the wave's self-test (in `qa-sweep.sh`, which is now **42** tests).
+- `SIGHTLINE_LONGMOVE=1` (shot) — stage a straight multi-tile walk and dump `FILM <frame> <x> <y>`.
+- `SIGHTLINE_ANIMSPEED=<x>` (shot **or** autoplay) — name the playback multiplier. Autoplay is
+  included so the smoke test can be re-run at the fastest setting; `BalanceBatch` has its own
+  `Main` branch and never reaches it.
+- `SIGHTLINE_UISCALE=<idx>` (shot) — photograph the UI at a text size other than 100%.
+- `SIGHTLINE_HEAT` now accepts `-1` (it used to ignore anything `<= 0`), so the intro DIFFICULTY
+  card can be photographed at RECRUIT. Unset/0 is still a no-op.
+
+### Left undone / watch list
+
+- **Key rebinding (D)** — see above.
+- At **120%** the shop's one-line effect summary clips on the longest rows (e.g. "counters
+  SYNDICATE for one …"). The full sentence is still in the card's description above it, so no
+  information is lost, but a two-row card at large scales would be the proper fix.
+- The **Defend wave** heat ramp (`SpawnDefendWave`'s own `m1 x0 / m2 x1/2` grace) is NOT gated on
+  `heat > 0` the way `SetupMission`'s is, so RECRUIT's -1 stat does not reach Defend waves on
+  missions 1-2. Cosmetically inconsistent, measured as immaterial; left alone rather than widen
+  the diff in a file three waves are touching.
+- RECRUIT is selectable in SKIRMISH too (the dial floor moved with `Heat.Min`), because the intro
+  seeds `SkirmishHeat` from `PendingHeat` and a dial that snapped back to 0 would silently discard
+  the player's choice. The owner docket's "skirmish numeric heat" question is untouched.

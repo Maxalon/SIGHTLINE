@@ -469,8 +469,12 @@ ASCII-only **until a font ships** (Phase 5.3; see the clarified Art policy), ver
       **pause menu** (`Hud.PauseBright`/`PauseColorblind`, card grown to 9 buttons) and
       persist in `display.json` (`Display` Dto `BrightIdx`+`Colorblind`, applied in `Load`).
       Verify: `SIGHTLINE_CB=1` (orange foes) + `SIGHTLINE_PAUSE`+`SIGHTLINE_BRIGHT=1` (menu +
-      dim) screenshots. **TODO:** a true contrast/gamma post-pass (needs a shader) + an
-      independent UI text scale (invasive — all DrawText sizes are fixed).
+      dim) screenshots. ~~**TODO:** a true contrast/gamma post-pass (needs a shader) + an
+      independent UI text scale (invasive — all DrawText sizes are fixed).~~ **BOTH DONE** —
+      true gamma landed in APEX W9 (`uGamma` in the post-FX shader); the **UI text scale**
+      landed in RESONANCE W5 (`Display.UiScaleLevels` 90/100/110/120%, applied once in
+      `Cfg.Text`/`Cfg.Measure` with a size taper; see DEVLOG §W5 ON-RAMP). Still open from the
+      same family: **key rebinding**.
 
 **PHASE 3 IS COMPLETE — every item 3.1 through 3.13 is DONE and on `main`.** The game is
 feature-complete against the whole spec. Remaining work is now *open-ended polish*, not a
