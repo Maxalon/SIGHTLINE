@@ -1359,6 +1359,89 @@ public static class Mission
         occ.Add((x, y));
     }
 
+    // ─── PROGRAM RESONANCE T1 — the TRAINING OP ────────────────────────────────────────────
+    // A fixed, scripted drill: a 2-soldier squad, a hand-authored arena (Maps.TrainingArena) and
+    // four dormant hostiles on fixed seats. Nothing here draws from Util.Rng and nothing scales
+    // with mission depth, so the drill plays IDENTICALLY every time — which is the whole point:
+    // the lesson table (Game.TrainLessons) is authored against these exact tiles.
+
+    /// The two drill soldiers. Deliberately NOT Mission.NewRunSquad(): the drill must never touch
+    /// (or resemble) the campaign roster, and it needs exactly the two classes its lessons name —
+    /// an ASSAULT (GRAPPLE + SMOKE) and a SHARPSHOOTER (MARK + FLASH). Extra HP is the low-cost-
+    /// failure dial (DESIGN.md 3.G): a fumbled drill teaches, it doesn't punish.
+    public static List<Unit> TrainingSquad()
+    {
+        var squad = new List<Unit>();
+        squad.Add(MakeSoldier("RECRUIT-A", "ASSAULT",      WeaponKind.Rifle,  12, 72, 7));
+        squad.Add(MakeSoldier("RECRUIT-B", "SHARPSHOOTER", WeaponKind.Sniper, 12, 74, 6));
+        return squad;
+    }
+
+    /// Stamp the drill arena + seat the fixed force. Called from Game.SetupMission right after the
+    /// normal Mission.Build (same seam LAST STAND uses): Build's terrain/force is thrown away and
+    /// replaced wholesale, so the drill inherits none of the campaign's rolls.
+    public static void BuildTraining(Grid grid, List<Unit> players, List<Unit> enemies)
+    {
+        enemies.Clear();
+        grid.ClearSmoke();
+        grid.ClearHazards();
+        for (int x = 0; x < grid.W; x++)
+            for (int y = 0; y < grid.H; y++)
+            {
+                grid.Tiles[x, y] = TileType.Floor;
+                grid.Height[x, y] = 0;
+                grid.Barrel[x, y] = false;
+            }
+
+        // seat the squad FIRST so its tiles are reserved against the template stamp
+        var reserved = new HashSet<(int, int)>();
+        for (int i = 0; i < players.Count && i < Maps.TrainingDeploy.Length; i++)
+        {
+            var u = players[i];
+            var sp = Maps.TrainingDeploy[i];
+            u.X = sp.x; u.Y = sp.y;
+            u.Ammo = u.Weapon.Clip;
+            u.Grenades = 1;
+            u.AbilityCd = 0;
+            u.ItemCharge = u.Item != ItemKind.None ? 1 : 0;
+            u.Suppress = 0; u.OnOverwatch = false; u.Hunkered = false;
+            u.Recoil = System.Numerics.Vector2.Zero; u.Flash = 0;
+            u.SyncPos();
+            reserved.Add((u.X, u.Y));
+        }
+        foreach (var f in Maps.TrainingFoes) reserved.Add(f);
+
+        var tpl = Maps.TrainingArena;
+        for (int y = 0; y < grid.H && y < tpl.Length; y++)
+            for (int x = 0; x < grid.W && x < tpl[y].Length; x++)
+            {
+                if (reserved.Contains((x, y))) continue;   // deploy + hostile seats stay open floor
+                switch (tpl[y][x])
+                {
+                    case 'o': grid.Tiles[x, y] = TileType.LowCover; break;
+                    case '#': grid.Tiles[x, y] = TileType.HighCover; break;
+                    case '^': grid.Height[x, y] = 1; break;
+                    case '=': grid.Height[x, y] = 2; break;
+                    default: break;
+                }
+            }
+        grid.ResetCoverHp();
+
+        // Four hostiles on fixed seats, in two pods. Low aim + low HP is the low-cost-failure dial:
+        // the drill can be lost (it is a real fight, not a diorama) but rarely is, and a loss costs
+        // nothing but a restart. Pod 0 is the pair behind cover the FLANK lesson is built around;
+        // pod 1 waits in the open for the GRENADE / ABILITY lessons.
+        for (int i = 0; i < Maps.TrainingFoes.Length; i++)
+        {
+            var (fx, fy) = Maps.TrainingFoes[i];
+            var e = MakeHostile("DRONE-" + (char)('A' + i), "GRUNT", WeaponKind.Rifle, 4, 45, 5, fx, fy);
+            e.PodId = i / 2;
+            e.Alert = AlertLevel.Unaware;   // dormant: the recruit chooses when the fight starts
+            e.SyncPos();
+            enemies.Add(e);
+        }
+    }
+
     /// Screenshot-only debug (SIGHTLINE_CONTENT=1): replace the hostile force with one ALERT
     /// copy of each NEW content archetype (a LANCER phalanx + a HOUND pack) plus a reference
     /// pair, all in the mid-field, so the new silhouettes/AI read clearly in a single frame.

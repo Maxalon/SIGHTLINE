@@ -630,4 +630,38 @@ public static class Maps
             "..................",
         },
     };
+    // ── PROGRAM RESONANCE T1 — the TRAINING OP arena ────────────────────────────────────────
+    // DELIBERATELY NOT in `Layouts`: appending it there would change Layouts.Length, which feeds
+    // the daily's arena derivation and the per-run no-repeat deck — i.e. it would move the whole
+    // measured campaign. The drill arena is applied by its own path (Mission.BuildTraining), so
+    // the flywheel stays byte-stable.
+    //
+    // Read it as the lesson plan it is (x -> 0..17, y -> 0..10):
+    //   * the squad deploys at (2,4)/(2,6) with LOW cover at (4,4)/(4,6) two steps away
+    //     -> lesson 2 (take cover) is solvable on the first move.
+    //   * two hostiles sit at (12,4)/(12,6) behind HIGH cover at (11,4)/(11,6) — full cover from
+    //     due west, NO cover north/south, so lesson 3 (flank) is a real positioning problem with
+    //     one clean answer: walk the open column x=12 to (12,1)/(12,9), which are themselves
+    //     beside the HIGH cover at (13,1)/(13,9) — the flank tile is also a safe tile.
+    //   * the '^' plateau at (6..8,5) is the optional high-ground read down the centre lane.
+    //   * two more hostiles wait at (16,3)/(16,7) in the open for the grenade/ability lessons.
+    public static readonly string[] TrainingArena =
+    {
+        "..................",
+        "....#........#....",
+        ".......o..........",
+        "..........o.......",
+        "....o......#......",
+        "......^^^.........",
+        "....o......#......",
+        "..........o.......",
+        ".......o..........",
+        "....#........#....",
+        "..................",
+    };
+
+    /// Drill deploy tiles + the fixed hostile seats, kept next to the template they were
+    /// authored against so a future edit to one can't silently invalidate the other.
+    public static readonly (int x, int y)[] TrainingDeploy = { (2, 4), (2, 6) };
+    public static readonly (int x, int y)[] TrainingFoes   = { (12, 4), (12, 6), (16, 3), (16, 7) };
 }
