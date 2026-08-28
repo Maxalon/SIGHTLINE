@@ -188,6 +188,12 @@ public static class Codex
         Add("SUPPRESSION", $"-{Combat.SuppressAim} AIM",
             $"Weight of fire pins a target: -{Combat.SuppressAim} aim, and a PINNED foe cannot dash. " +
             $"A sharpshooter's MARK is the mirror: the whole squad gains +{Combat.MarkAim} aim against the painted foe.");
+        // FUL-6: the two universal positioning verbs get a rules row (they had none), incl. the
+        // reworked FIELD DRILLS drill effect so the boon's copy is anchored in the rules tab.
+        Add("DRAG & VAULT", "FIELD CRAFT",
+            "Two universal 1-action verbs, once per soldier per turn each: DRAG pulls an ally within reach one tile " +
+            "toward you (haul a wounded mate out of a lane); VAULT leaps an adjacent cover block to the floor beyond. " +
+            "Neither ends the turn. The FIELD DRILLS boon makes either DRILL the soldier: +1 tile of movement that turn.");
 
         return e;
     }

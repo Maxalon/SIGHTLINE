@@ -4043,6 +4043,24 @@ public partial class Game
         ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false; DragMode = false; VaultMode = false;
     }
 
+    /// FUL-6 FIELD DRILLS rework (the FUL-5 verdict consumed — REWORK, not retire): the old proc
+    /// (a SECOND drag/vault by one soldier in one turn) was self-consuming — a legal drag lands
+    /// its target at Cheby-1, which is un-draggable (DragTargetOk's toward-tile rule), so the
+    /// geometry the second use needs is destroyed by the first; measured 0 procs across every
+    /// batch, vaults 0. New effect: *a DRAG or VAULT drills the soldier forward — +1 tile of
+    /// movement for the rest of that turn* (MoveBudget +2 half-steps; Combat.FieldCraftLimit
+    /// stays 2/turn — COMBATTEST's fieldDrills pins untouched). PROC honesty: RecordProc fires
+    /// HERE at the grant site — the effect deterministically exists once granted (the TRR
+    /// rout-start precedent). Once per soldier per turn (DrilledThisTurn, reset in BeginTurn).
+    void GrantFieldDrill(Unit u)
+    {
+        if (!HasBoon(Boon.FieldDrills) || u.DrilledThisTurn) return;
+        u.DrilledThisTurn = true;
+        Stats.RecordProc("FDR");
+        Fx.PopText(u.Pos + new Vector2(0, -46), "DRILLED +1 MOVE", Pal.Good, 15f);
+        RecomputeMoveCost();   // the surplus tile must appear in the move overlay immediately
+    }
+
     // ---- DRAG (FIELD CRAFT W1, universal): pull an adjacent ALLY one tile toward you ----
     /// Can the selected soldier DRAG right now? Needs an action, no drag spent this turn, and at
     /// least one adjacent (Chebyshev==1) alive friendly with a legal landing tile (one step toward us).
@@ -4094,9 +4112,7 @@ public partial class Game
         int dx = Math.Sign(u.X - ally.X), dy = Math.Sign(u.Y - ally.Y);   // direction the ally MOVES (toward us)
         u.ActionsLeft = Math.Max(0, u.ActionsLeft - 1);   // 1 action; never ends the turn
         u.DragsThisTurn++;                                // counted vs Combat.FieldCraftLimit (anti-loop)
-        // FUL-1 PROC (review fix: explicit boon conjunct — the >=2 gate invariant holds today,
-        // but a future non-boon FieldCraftLimit>1 source must not silently corrupt the column)
-        if (u.DragsThisTurn >= 2 && HasBoon(Boon.FieldDrills)) Stats.RecordProc("FDR");
+        GrantFieldDrill(u);                               // FUL-6: FIELD DRILLS +1-move drill (proc at grant)
         Stats.RecordAction("DRAG");                       // W2 verb telemetry
         Fx.PopText(ally.Pos + new Vector2(0, -32), "DRAG", Pal.Friend, 17f);
         Fx.Burst(ally.Pos, Pal.Friend, 8, 100f, 0.35f, 2.5f);
@@ -4155,8 +4171,7 @@ public partial class Game
         var u = Selected;
         u.ActionsLeft = Math.Max(0, u.ActionsLeft - 1);   // 1 action; never ends the turn
         u.VaultsThisTurn++;                               // counted vs Combat.FieldCraftLimit (anti-loop)
-        // FUL-1 PROC (review fix: explicit boon conjunct — mirrors the drag site above)
-        if (u.VaultsThisTurn >= 2 && HasBoon(Boon.FieldDrills)) Stats.RecordProc("FDR");
+        GrantFieldDrill(u);                               // FUL-6: FIELD DRILLS +1-move drill (proc at grant)
         Stats.RecordAction("VAULT");                      // W2 verb telemetry (review fix: no invisible verbs)
         Fx.PopText(u.Pos + new Vector2(0, -32), "VAULT", Pal.Good, 17f);
         Fx.Burst(u.Pos, Pal.Good, 8, 110f, 0.35f, 2.5f);

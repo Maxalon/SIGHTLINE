@@ -472,6 +472,11 @@ public class Unit
     // soldier over an adjacent cover tile to the floor on its far side. Per-turn state, never persisted.
     public int DragsThisTurn;
     public int VaultsThisTurn;
+    // FUL-6 FIELD DRILLS rework: the boon's effect is now "a DRAG or VAULT drills the soldier
+    // forward — +1 tile of movement for the rest of that turn". Granted at the IssueDrag/
+    // IssueVault sites (once per soldier per turn), read in MoveBudget as +2 half-steps.
+    // Per-turn combat state, reset in BeginTurn, never persisted (ToUnitDto whitelist).
+    public bool DrilledThisTurn;
     // W10 BIPOD: has this unit entered ANY tile this turn (walk/dash/vault/drag/shove/grapple all
     // route through Game.OnUnitEnteredTile, the single set-site)? BIPOD's +aim only holds while the
     // shooter is planted (false). Per-turn combat state, reset in BeginTurn, never persisted.
@@ -587,7 +592,8 @@ public class Unit
 
     // half-tile budget. Wound (-mob while wounded) and the SHELL-SHOCKED scar (-mob lasting caution)
     // both subtract mobility, mirroring each other; floored at 1 tile so a unit can always move.
-    public int MoveBudget => Math.Max(1, Mobility - (Wound > 0 ? WoundMob : 0) - (HasScar(Scar.ShellShocked) ? ShellShockMob : 0)) * 2;
+    // FUL-6 FIELD DRILLS: +2 half-steps (one ortho tile) appended AFTER the *2 while drilled.
+    public int MoveBudget => Math.Max(1, Mobility - (Wound > 0 ? WoundMob : 0) - (HasScar(Scar.ShellShocked) ? ShellShockMob : 0)) * 2 + (DrilledThisTurn ? 2 : 0);
     public bool CanAct => Alive && ActionsLeft > 0;
 
     public Unit()
@@ -710,6 +716,7 @@ public class Unit
         ShovedThisTurn = false;    // SHOVE: one per soldier per turn
         DragsThisTurn = 0;         // FIELD CRAFT: DRAG Combat.FieldCraftLimit(u)/turn (1; FIELD DRILLS 2)
         VaultsThisTurn = 0;        // FIELD CRAFT: VAULT Combat.FieldCraftLimit(u)/turn (1; FIELD DRILLS 2)
+        DrilledThisTurn = false;   // FUL-6 FIELD DRILLS: the +1-move drill is per-turn
         MovedThisTurn = false;     // W10 BIPOD: the planted-shooter aim bonus re-arms each turn
         FiredThisTurn = false;     // TEMPO: one offensive shot per turn (reset each turn)
         MovedAfterFire = false;    // HORIZON: exposed-by-fire flag is per-turn

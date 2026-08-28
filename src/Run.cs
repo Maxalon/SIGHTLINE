@@ -166,7 +166,7 @@ public static class BoonDef
         Boon.RapidDeploy => "Deploy one extra soldier all run",
         Boon.ShockDoctrine => "BRACE reactions deal full damage",
         Boon.Terror => "Broken enemies stay broken 2 turns longer",
-        Boon.FieldDrills => "DRAG and VAULT twice per soldier per turn",
+        Boon.FieldDrills => "A DRAG or VAULT drills the soldier: +1 tile of movement that turn (and DRAG/VAULT twice per turn)",
         Boon.Pyromaniacs => "Your fire burns 2 turns longer; the squad never catches fire",
         Boon.FieldStores => "Utility items carry 2 charges per mission",
         Boon.Reclaimer => "A kill inside a focused-overwatch cone re-arms the watch",
