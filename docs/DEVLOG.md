@@ -1973,3 +1973,627 @@ is exactly what makes a scratch-clone base control an honest paired A/B; `WrapLi
 height is `size + 6`, not the font size — size any wrap-fitted panel from its dy values;
 `GambleSucceeds`' roll is pct-independent per node, so a ChancePct pair (success arm +
 OnFail arm) resolves exclusively off one roll by construction.
+
+# PROGRAM FULCRUM — FUL-8 PIKEMAN (2026-08-28, wave dev on wt-ful8)
+
+**Goal.** The SARISSA/"PIKEMAN" — a Wardens lane-holder that plants a braced foe-red focus cone
+over a movement lane and STAGGERS the first soldier through. The 21-archetype roster contested HP,
+information, morale and progress; nothing contested MOVEMENT. This piece does, and it teaches the
+player's own BRACE [B] by mirroring it exactly. Binding spec:
+docs/plans/FUL-8-pikeman-FUL-10-forks.md §FUL-8 (every seam pre-verified against the tree).
+
+## What shipped (base e3bcb3b, includes FUL-5)
+- **Zero new combat machinery, as specced.** The enemy plant arms the exact player flag set
+  (OnOverwatch+OwBrace+OwFocused+OwDir) and the existing OnUnitEnteredTile reaction path does the
+  rest — halved no-crit stagger (Combat.BraceFullDamage is Team.Player-gated, so an enemy brace
+  ALWAYS takes the halving), cone gate, one-reaction cap, BeginTurn one-round lifetime.
+- **Ai.cs** — dedicated PIKEMAN branch after CUSTODIAN: opportunism first (a >=65% shot on an
+  EXPOSED soldier beats planting — holder, not statue), lane anchor = nearest non-VIP soldier,
+  plant only within cone reach (MaxRange+2), plant tile from `reach` keeping the action, scored
+  SPOTTER-style (cover*16 + height*8 − |dn−4|*1.4 − 22 if dn<=2) with a hard LoS-to-anchor filter
+  (a blind plant holds nothing). Gated e.Routed==0 (W8 rule) + !Disoriented (FLASH counterplay)
+  + Ammo>0; every failure falls through to the generic loop — never a dead turn.
+- **Game.cs exec** (ActAfterMove, before ShootTarget, SiegeCharge template): arms the flags,
+  sets Facing down the lane (the silhouette's pike IS the direction read), "BRACED" pop.
+- **Renderer** — DrawOverwatchThreat gained the cone TRUTH GATE (`w.OwFocused && !InOwCone →
+  skip`): zero-regression today, and the red wash now mirrors the reaction gate exactly. The
+  focus-cone edge-rays + chevron factored into shared DrawConeRays — drawn gold for the player,
+  foe-red for a braced+focused enemy, one vocabulary that can't drift. New PIKEMAN silhouette
+  (squat planted body + raised diagonal pike + crossbar lugs; flows into DrawCodexGlyph). Honesty
+  ride-along: the STAGGERED pop was Pal.Good unconditionally — now colored by victim team.
+- **Codex** — SARISSA/PIKEMAN bestiary row (counterplay: break its watch, go around the cone, or
+  feed it a cheap step) + "PIKEMAN" in the CODEXTEST required array. NEW CONTACT banner + enemy-ID
+  hovers automatic off the row.
+- **Spawns** (CRN draw-count neutral — exactly one RandF per spawn, only windows moved):
+  Wardens re-slice SNIPER 24→20 / MEDIC 14→12 / CUSTODIAN 8→6, **PIKEMAN 10% m2+** (m1 routes
+  SCOUT); default cascade m3+ ~3% mid-tail carved from SCREENER/BOMBARD/WARBRINGER (4/4/3 →
+  3/3/2), the 1% GRUNT/SCOUT/BRUISER tails and all first-appearance tiers unchanged. Defend rich
+  waves + LAST STAND inherit via SelectArchetype (observed in wave logs); no demote — a wave
+  PIKEMAN plants in plain sight. Stats: HP 7 / Aim 58 / Mob 5 / SMG (the cone is the pike, the
+  gun is flavour; W8 Wardens-support band).
+- **Bot** — `InEnemyBraceLane(x,y)` mirrors the reaction gate exactly (alive+active, armed watch,
+  unspent reaction, ammo, range+LoS(commanding), cone); TileExposure +18 (between an exposed gun
+  and the siege 30 — a stagger costs a turn, not a life). SmartApproach/ScoreDestTile/SmartStep
+  route around lanes with no other bot change.
+- **Harness** — SIGHTLINE_PIKETEST (plant emits Brace toward the anchor + exec arms the flag set;
+  the ==2 halving pin — mover HUNKERS so crit is structurally 0, making Math.Max(1,4/2) exact and
+  the no-crit assert honest rather than re-staged-away; cone blindness; a player stagger-back
+  drops the plant; Disoriented/Routed never plant) + SIGHTLINE_PIKESHOT (stages a planted lane
+  over the squad's approach).
+
+## Measured (paired slots; R0 = base e3bcb3b in a scratch clone, same SIGHTLINE_BALANCE_BASE slots)
+- **Completion** (h0 pooled n=40 matches/side, slots 0-19): R0 30% → R1 27.5% (chunks 40%/15% —
+  high slot variance, pooled inside the ±5 gate). h4 (n=20, slots 0-9): 35% → 40%.
+- **Composition** (R1): PIKEMAN 3%/3%/4% of faction-stamped spawns (h0a/h0b/h4) ≈ **10% of
+  Wardens fights** (Wardens ≈ 1/3 of stamped spawns), 1-3% of the default cascade (m3+ window
+  dilluted by m1-2 fights). R0 logs contain ZERO PIKEMAN lines — the baseline is honest.
+- **Route-tax gate** (the FUL-5 worry: the bot now paths AROUND enemy lanes): unpinned legs
+  showed Escort +1.2t pooled on n=6-9 — re-measured with whole-run objective pins at n≈90
+  missions/side: **Escort 5.9t/99% → 5.6t/100%, Evac 5.5t/97% → 5.8t/98%** — both inside the
+  +1t budget. The lane taxes routes; it does not stall them. The unpinned spike was slot noise.
+- Gates: Release 0/0; PIKETEST+STAGGERTEST+COMBATTEST+AITEST+SAVETEST+CODEXTEST PASS; autoplay
+  x7 no-exception/no-TIMEOUT. Save-compat: NONE touched (enemies never serialized; Cls is a
+  string; no enum appended). Callsign SARISSA (soldier pool owns "PIKE" — verified collision).
+
+## Gotchas / notes
+- **The ==2 halving pin needs crit structurally impossible, not re-rolled away.** The brace
+  halving OVERWRITES res.Crit at queue time, so a test can't tell a halved crit (4*1.5/2 = 3)
+  from a bug by the flag — the mover HUNKERS (Combat zeroes crit vs hunkered) so any connect is
+  exactly 2 and the assert never selects its own evidence.
+- **Screenshot staging needs the lane ON the squad** — a live-position plant reads as a distant
+  red thread; DebugPikemanLane teleports the watcher ~6 tiles off a soldier (WAVEBANNER staging
+  precedent) so wash+rays+chevron+BRC all land in one frame.
+- **A live-board Wardens shot is findable without new code:** the top-bar hostiles label reads
+  the faction name (Hud.cs), so loop SIGHTLINE_MISSION=3 SIGHTLINE_WAKE=1 shots until "WARDENS"
+  + a pike silhouette shows (dormant pods draw as "?" — WAKE is required to see archetypes).
+- Optional spec ride-along NOT taken: force-showing the BRACE field tip on first PIKEMAN
+  sighting (UpdateBraceCallout force path) — left for a teaching pass; the codex row + NEW
+  CONTACT banner already carry the mirror lesson.
+
+# PROGRAM FULCRUM — FUL-6 CRITICAL MASS landing (2026-08-28, wave dev on wt-ful6)
+
+- **FUL-6 CRITICAL MASS** (wt-ful6, base 588d781 — the full program tip): pods of 3 + linked
+  activation in mid/late missions — one real multi-pod battle per mission instead of six 2-enemy
+  executions, so the comeback economy (BRACE/morale/verb boons/grenades) gets its stage;
+  morale/rout reaches LAST STAND's horde; the FUL-5 FIELD DRILLS verdict consumed (rework, not
+  retire).
+  - **PodPlan (Mission.cs):** pure greedy split, no RNG (7->{3,2,2}, 8->{3,3,2}, 9->{3,3,3},
+    12->{3,3,3,3}; never a pod of 1 from count>=2), missions 3+ only; m1-2 keep i/2 pairs and
+    the finale keeps i/2 EXACTLY (FUL-11 kit geometry — FUL11PROBE green by construction).
+    **Cohesion:** members 2-3 anchor to the pod lead's post-relocate row (+1/+2, flipped at the
+    board edge), sharing the pod's column band — pods land as visible clumps, ZERO extra draws
+    (the collision-relocate loop stays the only conditional draw source). The m3/m5 mid-boss
+    joins a pod of 3 (its screen can rout out from under it) — accepted, watch item.
+  - **Linked activation (Game.cs):** ActivatePod rider (m3+, real pods, inside the `any` gate):
+    the nearest OTHER pod with a dormant member within LinkRange=6 (closest member to closest
+    member, TileDist) goes Suspicious + `_linkedPods`; ResolveSuspicion gains one arm — a linked
+    pod confirms to Alert even UNSEEN (no scatter, the telegraphed 4.3 path) and the set clears
+    after the pass. One link per wake; never chains (ResolveSuspicion never calls ActivatePod);
+    zero RNG — position-derived (PAIRTEST green every round). Telegraph: HEARD THE GUNS pop +
+    CONTACT! BannerSub "a nearby pod is moving to the sound"; LINKED ALERTS codex row + CODEXTEST
+    entry (the counterplay list IS the row).
+  - **LAST STAND morale (Game.Endless.cs):** SpawnEndlessBodies splits each wave's LANDED bodies
+    into sub-pods via the shared PodPlan (ids _nextWavePod++ from 100, _podOrig sealed to what
+    landed — the FUL-4 seal pattern); elite stays PodId -1 (HORDETEST pin); pressure-clock waves
+    stay podded:false. TERROR un-excluded from endless boon offers (its exclusion comment went
+    false this wave) — endless-only pool composition change, campaign CRN untouched.
+  - **FIELD DRILLS rework:** the old proc (a second drag/vault by one soldier in one turn) was
+    self-consuming (0 procs, every batch ever). New: *a DRAG or VAULT drills the soldier forward
+    — +1 tile of movement for the rest of that turn* (transient Unit.DrilledThisTurn, reset in
+    BeginTurn, never persisted; MoveBudget +2 half-steps after the *2), granted once/soldier/turn
+    at IssueDrag/IssueVault via GrantFieldDrill — also the honest RecordProc("FDR") site (the TRR
+    grant-site precedent; BOTH old >=2 proc lines deleted). FieldCraftLimit stays 2 (COMBATTEST
+    pins untouched); Boon ordinal untouched (Desc + codex copy only; new DRAG & VAULT rules row).
+  - **Escalation lever 1 (R5, measured breach):** the full stack ran -12.5 pts h0 completion vs
+    the fresh same-slot R0 (budget <=8) -> the spec's first lever landed: initial force -1 on
+    3-pod missions (floor 3, the FUL-4 defend-trim precedent). Result: combined h0 == R0 (dip 0).
+    Levers 2 (LinkRange 6->4) and 3 (one-link-per-mission latch) were NOT needed.
+
+## Measured (paired h0; each round = two N=10 chunks, slots 0-9 "a" + slots 10-19 "b" via
+## SIGHTLINE_BALANCE_BASE; R0 = FRESH base-588d781 reference on the same slots, run first.
+## Completion = greedy/sloppy % per chunk; counters greedy/sloppy per chunk)
+| round | lever | a: g/s | b: g/s | key counters (a; b) |
+|---|---|---|---|---|
+| R0 | base 588d781 reference | 40/60 | 30/30 | BRACE 36/43; 79/36 · GREN 2/7; 0/5 · PATCH 3/6; 3/5 · DRAG 0/3; 0/0 · FDR 0 procs (4 picks); 0 (2) · RCL 2 (2); 1 (3) · TRR 13 (4); 9 (1) |
+| R1 | PodPlan + cohesion | 30/40 | 30/20 | BRACE 32/46; 127/165 · GREN 2/5; 0/2 · FDR 0 (1); 0 (3) · RCL 3 (4); 0 (2) · TRR 31 (6); 6 (1) · greedy-a OVERWATCH 38->343 (hold-heavy vs 3-gun contacts) |
+| R2 | + linked activation | 40/50 | 10/10 | BRACE 32/55; 117/152 · GREN 3/5; 1/1 · FDR 0; 0 · RCL 3 (2); 1 (2) · TRR 29 (5); 6 (1) |
+| R3 | + endless wave pods | 40/50 | 10/10 | campaign chunks BYTE-IDENTICAL to R2 — the lever is endless-only by construction (CRN discipline visible); endless leg below |
+| R4 | + FDR rework | 40/50 | 10/10 | BYTE-IDENTICAL to R3: zero boon-held drags occurred in these 40 worlds -> zero grants (the mechanism procs deterministically — PODTEST leg f) |
+| R5 | escalation lever 1 (count-1 on all m3+ non-finale missions) | 50/80 | 10/20 | BRACE 62/28; 63/51 · GREN 1/8; 1/4 · PATCH 1/2; 4/3 · FDR 0 (4); 0 (1) · RCL 2 (4); 0 (2) · TRR 20 (4); 18 (2) |
+| h4 | close leg, final stack (slots 0-9) | 20/20 | — | BRACE 55/22 · GREN 3/4 · PATCH 4/2 · FDR 0 (5) · RCL 0 (2) · TRR 11 (3) · h4 mission win-rate 76%, paired margin +0.10 ±0.64 |
+
+Combined h0 (40 matches): R0 40% -> R1 30% (-10) -> R2/R3/R4 27.5% (-12.5, BREACH of the <=8
+budget) -> R5 40% (dip 0, IN BUDGET; chunk split +15/-15 — world-to-world variance dominates
+absolute chunk levels, the FUL-5 R7b lesson; the paired greedy-sloppy margins stayed -0.6..-1.1
+throughout). PAIRTEST PASS on every round's tree.
+
+**Endless depth leg (R3 stack, 32 stands, default heat cycle {0,2,4,6,8}, chunks of
+SIGHTLINE_BALANCE_ENDLESS=8 at BASE 0/8):** slots 0-7 mean 6.0 / median 6 / p90 7 (h0 median
+6.5); slots 8-15 mean 5.4 / median 5.5 / p90 6 (h0 median 6). **IN the APEX 5-6 band**; zero
+wave-cap/frame-cap hits; wave sub-pods live (routs play mid-stand; the ending elite stays
+morale-exempt).
+
+## Design verdicts (recorded, not tuned around)
+1. **GRENADE >=10 did NOT materialize (measured 2-9/batch combined, R0-level).** The FUL-5
+   verdict predicted pods-of-3 as the frag stage; measured, the bot's window (covered 2+ ACTIVE
+   cluster, pre-shot) still anti-correlates: dormant pods now CLUMP (the stage exists on the
+   board) but woken pods scatter-to-cover and de-cluster before the bot's frag gate re-fires,
+   and the low count is emergent geometry (approach crosses SightRange first; woken pods scatter), not a coded decline as perfect-info bot play. The stage is real
+   for HUMANS (the clump is visible pre-fight); the bot cannot price it honestly. FUL-13 input.
+2. **FDR: 0 procs in the wave batches — an honest zero, not a dead mechanism.** The rework's
+   proc surface now equals drag/vault-under-boon frequency; in these 100 campaigns drag volume
+   was 0-3/batch (Escort straggler pulls) and never overlapped a FIELD DRILLS pick. PODTEST leg
+   f pins the grant (drill + exactly one proc + MoveBudget +2). FUL-7's recurring drag stage
+   (downed-soldier carry chains) is where this boon prices — as the FUL-5 brief expected.
+3. **RCL is no longer structurally dead: 0 -> 1-3 procs/batch** (R1a 3, R2a 3+1, R5a 2) — more
+   movers through focused cones at 3-pod contacts re-arm the watch occasionally. Volume still
+   thin; keep the FUL-13 retire-or-rework question open but with a live baseline now.
+4. **TRR procs 6-31/batch (was 9-13):** the rout economy is livelier — a 3-pod break routs more
+   survivors at once. BRACE budget held (>=30/batch every round; up to 165 on hold-heavy worlds).
+5. **The b-chunk (slots 10-19) is structurally harsher under the pod stack** (R0b 30% -> stack
+   10-15%) while the a-chunk recovered fully (50 -> 65 at R5). Same-slot pairing shows the dip
+   concentrates where R0 was already losing — bigger contacts punish already-marginal worlds.
+   FUL-13 re-baseline input.
+
+## Gotchas (process)
+- **A worktree COPY (`cp -r`) shares the original's .git worktree metadata** — `git checkout`
+  inside the copy detaches the REAL worktree's shared HEAD (files stay put; symbolic-ref +
+  reset recovers). Use `git archive <commit> | tar -x` for scratch measurement trees.
+- **R3/R4 coming back byte-identical to R2 is the CRN discipline working**, and it localizes
+  each lever's true surface: endless-only (R3) and grant-only (R4) levers cannot move campaign
+  batches. Cheap self-verification, same family as FUL-5's "byte-identical is a finding".
+- The balance harness's Combat.RunBoons is the FieldCraftLimit read, not Run.ActiveBoons — a
+  harness scene granting a boon must publish to both (PODTEST leg f does).
+
+# PROGRAM FULCRUM — FUL-7 LAST LIGHT (2026-08-28, wave dev on wt-ful7)
+
+**Goal.** Lethal damage on a soldier becomes a 3-turn BLEED-OUT with stabilize/carry/revive
+counterplay instead of an instant, decision-free cut — the DESIGN §4 "death stakes: Thin" fix, and
+the stage FUL-5's verdict reserved for PATCH. Binding spec:
+docs/plans/FUL-6-critical-mass-FUL-7-last-light.md §FUL-7 (seams re-verified against c74378e —
+the post-FUL-6/8/10 program tip).
+
+## What shipped (base c74378e)
+- **The single lethal seam, as specced.** `CanGoDown` guards the TOP of KillUnit: soldiers
+  (never VIP/captive — DEATHTEST semantics; never enemies — rout is their drama) enter a 3-turn
+  DOWN instead of dying, ONCE per soldier per mission (`WasDownedThisMission` — the second lethal
+  event, incl. ANY damage on a body already down, kills outright: the AoE/fire honesty valve).
+  `EnterDowned` stays clean of death bookkeeping (no Fallen/Memorial/KIA-stamp/NoLosses/
+  RecordKill; Vengeful DOES stage at the fall); `ExpireDowned` runs the FULL death flow through
+  KillUnit with cause = the DOWNING archetype (`DownedByCls` — snapshot of the same ActiveAnim
+  attribution; DoT-downs bucket "?" like DoT deaths, BlurbFor-gated), so a bleed-out KIA reaches
+  Run.Fallen identically to an instant KIA (FUL-10 LGD's veteran-erase needs no special case).
+- **The clock:** timers tick in StartPlayerTurn on the squad's clock; STABILIZE (universal verb,
+  key E — T was the tag editor; adjacent, 1 action, never ends the turn) freezes it; the freeze
+  needs a STANDING squad — with every soldier down or dead, stabilized timers run too, so the
+  all-downed board resolves in <= 3 bounded turns (DOWNTEST-pinned; closes the stabilized-orphan
+  infinite stall the spec's bound argument assumed away).
+- **REVIVE:** the PATCH executor's Downed arm — up at the heal value (PatchHeal 4 / CombatMedic 3
+  at reach 2), actionless that turn, FieldSurgeon triage rides, Cd 3 unchanged; same RecordAction
+  chokepoint so the FUL-5 PATCH counter measures the stage for free.
+- **Recovery:** EnterBarracks (before the squad rebuild) recovers every downed survivor — Hp 1,
+  Wound 3 (the debrief attrition machinery owns it from there), WasNearDeath forced true (a
+  full-HP one-shot down never reached MarkPlayerHurt — without this the near-death scar track
+  skipped exactly the survivors it's for), report line. Endless: the wave-clear breather revives
+  the downed at the mend value (floored 1) and resets the per-wave down budget.
+- **The AI rule:** enemies never DIRECT-target the downed — the one `Ai.Plan` players filter, plus
+  the same skip in the aim helpers (BestScreen/BestFlash/BestSiege/BestGrenade — a downed body
+  neither attracts nor counts in aim decisions; a blast aimed at standing soldiers still kills it)
+  and the shove pick, plus `mover.Downed` returns before the overwatch watcher loop (a DRAGGED
+  body is a tile entry the spec's "downed never move" claim missed — hazards still apply, so
+  hauling a body through fire still kills it, honestly).
+- **UI:** prone 0.6x sunk body + pulsing red ground ring; leading DOWN 3/2/1 chip pill (red,
+  falling-chevron glyph) flipping to amber STABLE (level-bar glyph); HP pips hidden while down;
+  red roster-chip state ("BLEEDING OUT (n)" / "STABILIZED - HOLDING ON"); STABILIZE button +
+  tooltip + icon; SOLDIER DOWN banner names the timer; never selectable. Vocabulary honesty:
+  soldier true-death pop renamed KIA; the combat log logs DOWN (not KILL) for a survivable
+  lethal; the enemy brace stagger skips a body already down. Codex row DOWN (BLEEDING OUT) +
+  CODEXTEST required entry.
+- **Autopilot:** objective-agnostic rescue block ABOVE the corpsman PATCH slot (corpsman-ready →
+  revive, else STABILIZE once); TryMoveToPatch generalized — Cd-ready corpsman closes on
+  hurt-or-downed, EVERY other soldier closes on downed-to-stabilize (the founding squad has no
+  corpsman); `AutoShouldStabilize` guards the ONE unresolvable freeze: Evac + no live corpsman +
+  body away from the zone → let the timer run (the bot has no drag-chain carry in v1 — the
+  accepted, recorded bot-vs-player gap; zone-adjacent bodies stay stabilizable via the EXTRACT
+  pull; a corpsman dying after a far-body freeze still bounds at AutoMaxTurns → STALEMATE loss).
+- **Persistence: NONE** — all five Unit fields transient (ToUnitDto whitelist), single
+  mission-START checkpoint verified again on this tree, EnterBarracks resolves every Downed
+  before it; SAVETEST gained the belt-and-suspenders leg (a hand-built downed-and-recovered
+  soldier round-trips ONLY Hp/Wound/scars). No enum touched anywhere.
+- **Harness:** SIGHTLINE_DOWNTEST legs a-h (entry clean of bookkeeping + surplus-reaction purge;
+  expiry = the full death flow exactly once, cause = downing archetype, NoLosses failed;
+  stabilize-freeze + won-field recovery incl. the near-death track; revive incl. CombatMedic
+  reach-2; no-second-down + grenade-finishes-the-body; AI ignores + all-downed bounded even
+  stabilized; VIP instant; DRAG@Cheby-2 + EXTRACT-from-zone-adjacent pinned) +
+  SIGHTLINE_DOWNSHOT (=1 down + rescuer + lit STABILIZE; =2 executes the real STABILIZE for the
+  mid-rescue STABLE frame); existing tests that stage true squad deaths (DEATHTEST/HEATLADDER/
+  RESCUETEST/DKTEST/DebugKia) set WasDownedThisMission first — the real second-lethal rule, not
+  a bypass. New telemetry: SOLDIER DOWNS report line (downs → revived/recovered/bled-out +
+  save-rate) + corpsman-fielded missions (the PATCH per-presence denominator).
+
+## Measured (paired h0; chunks = slots 0-9 "a" + 10-19 "b" via SIGHTLINE_BALANCE_BASE, N=10 each;
+## R0 = FRESH base-c74378e reference in a git-archive scratch tree, same slots, run FIRST; h4 leg
+## last, both trees, slots 0-9)
+| leg | completion g/s | true KIA | downs -> saved (rate) | STABILIZE | PATCH | key notes |
+|---|---|---|---|---|---|---|
+| R0a | 40/60 | 125 | — | — | 1/0 | BRACE 60/27 · GREN 6 · DRAG 2 · margin -0.70±0.67 |
+| R0b | 30/30 | 126 | — | — | 4/3 | BRACE 53/77 · GREN 6 · margin -0.90±0.90 |
+| R1a | 50/40 | **81 (-35%)** | 179 -> 84 (47%) | 37/21 | 5/4 | corpsman in 37/82 missions · revived 5 · BRACE 69/66 · margin +0.40±0.64 |
+| R1b | 50/50 | **70 (-44%)** | 157 -> 60 (38%) | 22/27 | 1/6 | corpsman in 22/74 missions · revived 2 · BRACE 68/78 · margin -0.90±0.87 |
+| R0h4 | 20/30 | 150 | — | — | — | margin +0.20±0.59 |
+| R1h4 | 30/30 | **110 (-27%)** | 219 -> 81 (37%) | 23/35 | 6/4 | corpsman in 24 missions · revived 8 · BRACE 102/69 · margin -0.20±0.25 |
+
+**h4 close leg:** completion 25% → 30% (+5); true-KIA -27% — just under the h0 band, exactly the
+"downs concentrate where deaths do" prediction: h4 stages MORE downs (219 vs ~168/chunk at h0)
+and bleeds more of them out under pressure (63% vs ~57%), so the save-rate compresses to 37%.
+PATCH 10 at h4 (0.42/corpsman-fielded-mission — the revive stage strengthens where wounds do).
+
+**Verdicts (pooled h0, 40 matches/side):**
+1. **Soldier true-KIA 251 → 151 (-40%) — inside the 30-50% intent band.** The death ledger moved
+   to the attrition ledger: 336 downs staged, 144 saved (43% save-rate: 7 revived, 89 recovered
+   on won fields, the rest = downs still open when a loss ended the run), 192 bled out.
+2. **Completion 40% → 47.5% (+7.5, inside the +10/-5 budget)** — a body saved IS the bot playing
+   better, as the spec predicted (chunk split -5/+20; pooled is the binding read, the FUL-6
+   variance lesson). Mission win-rate 88/80 → 88/86; paired margins statistically unchanged.
+3. **STABILIZE 107 uses across the two chunks vs the spec's 3-8 guess** — the guess undercounted
+   downs (~8 per campaign: every old KIA is now a down, plus the saved fight on). The verb is a
+   live, first-class part of play, not quota-chased — the bot stabilizes exactly when adjacent.
+4. **PATCH 8 → 16 (the >= 10 target met in aggregate), 0.27 uses per corpsman-fielded mission —
+   and the corpsman was fielded in only 59/156 (38%) of missions.** The FUL-5 cap has flipped
+   from "no stage" to "no presence": the stage now exists (7 revives measured); what caps PATCH
+   is that the corpsman only enters via backfill. **Roster-presence verdict recorded for FUL-13's
+   founding-squad question — do not quota-chase.**
+5. **DRAG stayed ~1-2/batch** — the drag-chain carry is real for humans but the bot doesn't probe
+   DRAG-toward-zone (v1 accepted gap). FDR consequently unmoved (0 procs); still FUL-13's row.
+
+## Review fixes (adversarial integration review: SHIP-WITH-FIXES — all applied)
+- **F1 (the one that mattered): a downed body won the ENEMY FOCUS pick.** PlanEnemySquad scored
+  Hp 0 as the 60-pt near-dead base + exposure, so a visible downed body usually became
+  EnemyFocus — and since Ai.Plan excludes the downed from candidates, every focus bonus
+  (kill-press, crossfire pulls) then applied to NOBODY: the coordination layer silently
+  switched off while a body was down. Fixed (downed skip beside the caged-captive skip) and
+  **re-measured** (paired h0 N=10, slots 0-9, CRN worlds identical): completion 50% → **60%**
+  (g70/s50 — +10 vs R0a, at the budget boundary; the pre-fix 45% was NOT propped up by the
+  dumb enemy — with coordination restored the squad does BETTER, because enemy attention also
+  stops leaking onto bodies), true-KIA 75 (**-40% vs R0a's 125** — the band holds), STABILIZE
+  60, PATCH 5 (corpsman in 35/85 missions), mission win-rate 91%.
+- **F2 (ledger honesty): a body killed WHILE down counted as "saved."** KillUnit now closes the
+  down state on the corpse (after the cause read; ExpireDowned flags itself so a bleed-out
+  isn't double-counted) and a new `finished` counter joins the report; save-rate =
+  1 - (bled-out + finished)/downs. **Restatement: the published pooled 43% save-rate was
+  generous** — AoE/fire finishes (uninstrumented then) counted as saves; the honest re-measured
+  chunk reads **33%** (186 downs → 59 recovered + 2 revived, 101 bled out, 24 finished).
+  Also kills the BLED-OUT-pops-on-a-burned-corpse corner (a dead body can't reach the tick).
+- **F5:** two lesser enemy-attention seams stopped treating a body as a threat — FaceShields no
+  longer turns an AEGIS shield toward a downed body (free flanks denied), and
+  TryEnemyReposition's ExposureAt no longer counts a downed body's fire lanes.
+- **F6:** EnterDowned sets WasNearDeath — a PATCH-revived soldier now earns the near-death scar
+  track too (barracks recovery already forced it; the revive path didn't).
+- **F3 (banner honesty):** "3 TURNS TO REACH THEM" promised three but the player acts on pills
+  2 and 1 — reworded to "THEY HOLD FOR 3, TWO TURNS TO ACT" (tick unchanged).
+- **F4 (pill honesty):** during the orphan tick (no soldier standing, stabilized timers run)
+  the pill/chip now show the countdown — "STABLE 2" / "STABILIZED - FADING (2)" — never a
+  lying steady STABLE. DOWNTEST leg e gained the F2 corpse-state pin.
+
+## Gotchas (process)
+- **EnterDowned clears Statuses INSIDE TickStatuses' enumeration** — a lethal burn tick threw
+  Collection-was-modified (caught by escort autoplay). Fix: snapshot the list + stop ticking a
+  unit that just went down (a second DoT in the same pass would kill the fresh body outright).
+- **The scratchpad is shared across sessions** — a prior wave's `r1b.log` shadowed this wave's
+  chunk file and nearly got read as data. Fresh, wave-unique log names + provenance checks
+  (slot ranges + the SOLDIER DOWNS line only the new build prints) before trusting any log.
+- **Key T was taken** (tag editor) — STABILIZE ships on E; both firing on IsKeyPressed(T) would
+  have stabilized AND opened the editor in one press.
+
+# PROGRAM FULCRUM — FUL-13 TRUE NORTH + the program close (2026-08-28, balance lead on wt-ful13)
+
+The program's last wave: make the published numbers TRUE for the finished game, resolve every
+carried watch item at proper N, and close the FULCRUM ledger. Binding input:
+docs/plans/FUL-13-true-north-docket.md, executed top to bottom on base c4ef42e (all twelve
+content waves). Method discipline: NOTHING was tuned until the reference existed; every lever
+got its own measured round with a dip budget; every docket item ends this entry
+resolved-with-data, tuned, or recorded-for-the-owner.
+
+## The fresh baseline (200 campaigns, one build)
+Intel cash-flow telemetry landed first (61fbccd — Stats.RecordIntel at every Run.Intel
+mutation site; INTEL ECONOMY BY HEAT report table + intelByHeat JSON). Logic-identity vs base
+per the FUL-1 precedent: BALANCE=2 same-slot JSON — all 33 base-schema fields identical (only
+intelByHeat added); PAIRTEST PASS. Then the ladder: per heat TWO pinned chunks
+(SIGHTLINE_BALANCE=10, SIGHTLINE_BALANCE_HEAT, BASE 0/10 = disjoint CRN slot sets 0-9/10-19),
+greedy+sloppy paired = 40 campaigns/heat, 200 total, zero frame-caps, every chunk's JSON+log
+archived.
+
+## THE REFERENCE LADDER (the pre-tuning BASELINE — retire every earlier number)
+
+> Review annotation: this table was measured BEFORE the R1/R2 Defend rounds below. On the
+> SHIPPED tree the tuned rungs last read: h8 **5%** (at the 10±5 band floor), h6 **27.5%**,
+> h4-b0 35% (single re-run chunk); h0/h2 are untouched by the rounds (byte-identical by
+> construction). Quote THOSE for the shipped top rungs — quoting this baseline's h8=10 for
+> the shipped game misstates it by 2x.
+| heat | run completion | greedy | sloppy | paired gap | margin (missions) | avg cleared | mission win |
+|---|---|---|---|---|---|---|---|
+| 0 | **52.5% ±7.9** | 45% | 60% | −15 | −0.75 ±0.57 | 4.58 | 88.0% |
+| 2 | **35.0% ±7.5** | 40% | 30% | +10 | −0.10 ±0.45 | 4.00 | 82.6% |
+| 4 | **30.0% ±7.2** | 20% | 40% | −20 | −0.30 ±0.45 | 4.15 | 83.4% |
+| 6 | **22.5% ±6.6** | 30% | 15% | +15 | +0.65 ±0.53 | 4.03 | 79.6% |
+| 8 | **10.0% ±4.7** | 10% | 10% | 0 | +0.20 ±0.34 | 3.05 | 70.0% |
+
+Chunk completions (g/s) — h0 70/50·20/70, h2 50/30·30/30, h4 30/50·10/30, h6 30/20·30/10,
+h8 20/10·0/10: world-set variance still dominates chunk levels (the FUL-5 R7b lesson); the
+pooled rows are the record. Funnel at scale: 79.2/0.0/20.8 (n=847 builds — FUL-9's 20-25
+procedural target, stable).
+
+## THE GOAL BAND — RE-SET (owner-facing)
+The research-era band (80/70/60/40/20 ±8) was written for a game whose routes DODGED their own
+hardest content: before FUL-9, Defend fielded n=4 missions per 20-run batch, mid-run Decapitate
+never reached mids, ~47% of missions skipped the authored arenas, and a lethal hit was a
+decision-free KIA. The finished game deals Defend-or-Rescue on an anchor column of EVERY route,
+mid Decapitate on ~every route, pods of 3 with linked activation from m3, and prices every
+death as a 3-turn rescue problem. FUL-9 measured the exposure alone at −10..−15 completion;
+FUL-6's pods cost the marginal worlds more; FUL-7 gave back +7..+10. The old band cannot be
+reached from here without un-repairing exposure (out of authority, and wrong) or inflating the
+squad. The re-set band fits the finished game's design story — "stakes that bite" wants an h0
+campaign where losses are common and deep (the tuned BOT clears 52.5% — human first attempts
+sit below the tuned bot; losses average 4.58/6 missions, m1 95%); each paid rung takes a real
+visible bite (−15/−10/−10/−10); the apex stays
+beatable-not-farmable. **Published band: h0 55 / h2 40 / h4 30 / h6 20 / h8 10, ±8 (h8 ±5,
+hard floor >=5).** Every fresh rung measures inside it. The docket's "h4 lift if low" resolves
+against the re-set band: 30.0 vs 30±8 is ON target — no rung-average lever was spent; the
+wave's levers went to the one measured SHAPE defect instead (below).
+
+## PER-OBJECTIVE x HEAT (baseline; win% (n))
+| objective | h0 | h2 | h4 | h6 | h8 |
+|---|---|---|---|---|---|
+| Eliminate | 95 (42) | 95 (42) | 95 (42) | 93 (42) | 90 (42) |
+| Defend | 82 (34) | 65 (31) | 72 (32) | **97 (30)** | **91 (23)** |
+| Decapitate | 70 (33) | 75 (24) | 61 (28) | 46 (24) | 36 (11) |
+| Escort | 100 (17) | 81 (16) | 100 (16) | 67 (21) | **29 (17)** |
+| Hack | 92 (12) | 83 (12) | 85 (13) | 90 (10) | 64 (11) |
+| Sabotage | 100 (10) | 90 (10) | 90 (10) | 80 (10) | 75 (8) |
+| Evac | 100 (4) | 100 (5) | 100 (4) | 40 (5) | 50 (4) |
+| Rescue | 100 (6) | 100 (4) | 100 (6) | 100 (5) | 25 (4) |
+
+Shape findings: (1) **Defend INVERTED at the top** — the tuning rounds below. (2) Escort 29%
+at h8 is the apex's killer cell (+4 stat/+1 dmg vs a fragile asset) — recorded, not tuned:
+a wall rung is allowed a hardest cell and it still fields winners; seeded to open/next for
+the owner.
+
+## TUNING ROUNDS — the Defend top-rung inversion (one lever per round)
+The mechanism, located by the pinned batches: Defend's difficulty comes from the opener + the
+waves; waves were heat-BLIND (MakeWaveHostile bump = mission only) AND FUL-4's flat opener
+trim (count−3) silently ATE the heat ladder's EnemyDelta (+2..+4 bodies) — with the timer
+bounding total exposure, Defend became the top rungs' free square: defend-pinned h8 read 96%
+(n=89) with 80% ALL-DEFEND run completion at a rung whose real completion is 10%.
+
+| round | lever | pinned h8 Defend | unpinned h8 rung | unpinned h6 rung | h4 spot (b0) | verdict |
+|---|---|---|---|---|---|---|
+| R0 | baseline | 96% (n=89) | 10.0% | 22.5% | 40% | the inversion, measured |
+| R1 | waves inherit Heat.StatDelta (7139a2f) | 95% (n=86) | 10% (b 10/10) | 25% (30/20) | 45% | truthful, not binding — a set line shreds 2-4 wave bodies regardless; KEPT (heat now reaches wave stats) |
+| R2 | defendKeep: opener keeps half the GRACED heat bodies (03f02dc) | **87% (n=76)** | 5% (5/5) | 27.5% (35/20) | 35% | the binding lever — h8 parity with h0 (87 vs 83 pinned); h6 cell still 97 (keep floored to 1) |
+| R3 | PROBE: keep rounded UP (h6 keep 1→2; h4/h8 m3+ keeps unchanged) | pinned h6 97% (n=89) — UNMOVED | (unchanged by construction) | 22.5% (35/10) | 25% (Defend 50, n=18) | **REVERTED** — zero movement at its target and a −15 h4 spot cost (the m2-ripple): at h6 extra bodies FEED the rout economy instead of pressuring the hold; it is h8's +4 stats that bite |
+
+Shipped state = R1+R2 (R3 reverted). Dip budgets (≤8/rung vs baseline; h8 floor ≥5):
+h8 10→5 (−5, in budget but AT the 10±5 band's floor — reported), h6 22.5→27.5 (+5),
+h4 b0 40→35 (−5 chunk-level). NO breaches. Defend cells shipped: pinned h0 83 (n=77,
+byte-identical through the rounds — StatDelta(0)=0 and keep=0 at h0 by construction),
+pinned h8 **87** (was 96 — parity with h0, the inversion closed), h4 **61** (n=18, FUL-4's
+60-80 band). RESIDUAL, recorded: the h6 Defend cell stays soft (97 pinned n=89 / 100-93
+unpinned n=30) — two structural levers plus the R3 probe did not move it; its mechanism
+(rout-economy body absorption at +2 stats) is named in the Game.cs comment and the cell is
+seeded to open/next rather than chased with blunter levers. Closing test MET at the apex:
+Defend no longer rises with heat (82 h0 / 87 h8 pinned-parity); h6 is the one recorded bump.
+
+## WATCH-ITEM DISPOSITIONS (docket §2 — one line each)
+- **LOS policy-gap flip**: RESOLVED-WITH-DATA — zero at N=100 pairs (binary −2.0; margin
+  −0.06 ±0.21; sign test p=0.87 on 36 discordant). ACCEPT forgiving-by-design; sloppy
+  definition unchanged. Why accept: the sloppy model's errors are bounded-rational by
+  construction (15% shot-skip, mediocre-tile within a −40 score band, 10% overextend) —
+  exactly the mistakes the comeback economy (bleed-out saves, BRACE denial, morale routs,
+  assist) was BUILT to absorb; a +15 gap would re-open the punish-gap failure UNDERTOW
+  closed, and sharpening the error model to manufacture one would measure a worse bot, not
+  a better game. Per-heat gap rows (±15-20 at n=20/leg) are retired as signals; the pooled
+  margin is the metric of record. The FUL-2 −20 was n=10 noise, as suspected.
+- **Defend m5 all-Defend 12.5% (n=8)**: RESOLVED — 89% (n=9) defend-pinned h0; noise.
+- **Per-kit finale drift**: CLOSED world-driven — paired slots 0-9: Wardens 81 / Legion 69 /
+  Syndicate 94 (n=16 each), an ordering FLIP vs FUL-11's pooled L>W>S on overlapping method —
+  worlds, not kits; unpinned ladder m6 h0 78% (n=27) corroborates band health. No kit tune.
+- **Defend softness at top rungs**: RESOLVED as the INVERSE — see the tuning rounds.
+- **Escort-reach floor early-death-sensitivity**: CONFIRMED at scale — Defend-on-route
+  degrades with heat exactly as run depth does (h0 90/70% → h8 50/50% per chunk; avg cleared
+  4.58→3.05). Structural guarantee intact; played reach tracks survival. Recorded.
+- **HoldOverwatch rusher arm vs wide watch**: RESOLVED no-dominance — at ladder scale
+  OVERWATCH 101-443 / FOCUS 145-196 / BRACE 171-303 per heat batch (totals 1360/843/1148);
+  the wide watch keeps real volume everywhere; the FUL-5 h0-hold collapse was one stage, not
+  the economy. Reaction pricing left alone.
+- **RCL retire-or-rework**: DECIDED keep-as-is — 4 procs / 27 picks / 200 campaigns; the
+  cone-kill proc is a deliberate combo line the bot rarely stages (FOCUS 843 shows the verb
+  is alive) — the bot floor understates the human line (the FUL-6 grenade lesson). Sweeten
+  path ("any overwatch kill re-arms, once/turn") seeded to open/next for an owner call.
+- **FDR honest zero**: CLOSED alive — 11 procs / 37 picks at ladder scale; FUL-7's
+  downed-drag stage priced it exactly as the FUL-5 brief predicted.
+- **PATCH roster-presence**: corpsman fielded 36-42% of missions h0-h6 but **13% at h8**
+  (RELENTLESS kills the backfill lane); PATCH 5-26/batch, revives 2-16/batch. Verdict to
+  the owner docket (§4 below) + the h8 blackout seeded to open/next.
+
+## INTEL ECONOMY (the flood question — RESOLVED, no drain)
+| heat | earned/run | heat-bonus | hb share | spent | unspent |
+|---|---|---|---|---|---|
+| 0 | 129.6 | 0.0 | 0% | 115.4 | 14.2 |
+| 2 | 140.1 | 21.0 | 15% | 126.3 | 13.8 |
+| 4 | 187.0 | 57.0 | 31% | 172.1 | 14.9 |
+| 6 | 217.2 | 97.2 | 45% | 201.6 | 15.6 |
+| 8 | 197.6 | 112.0 | 57% | 178.4 | 19.2 |
+Heat's accelerating kicker reaches 57% of income at the apex and ALL of it converts to shop
+spend: unspent holds flat (14-19) at every rung and the ladder keeps its full slope. The
+per-barracks slate is capacity-bounded, so heat pays POWER, not bank — the carrot works as
+Heat.IntelBonus intends and the difficulty survives it. No drain shipped.
+
+## ECONOMY FIXES (FUL-10 review leads; one measured round, 03f02dc)
+**EventCatalog.FireWeight** — a ChancePct outcome now prices at the probability it FIRES
+(success partner ×p, OnFail partner ×(1−p); GambleIntel's EV formula and GrantScar's
+self-scale exempt), so warchest arm0 values 1.54 (its true EV) instead of 2.25 ("both
+fire"). **EventCatalog.PrepDead** — a GrantPrep arm with no telegraphed faction is now
+ILLEGAL (Game.ChoiceLegal): the HUD greys informant's 12-intel dossier and the bot never
+spends into a report line; one rule shared by the gate and its test. EVENTTEST grew legs
+3c (5 FireWeight pins + 3 PrepDead legs) — PASS; PAIRTEST/SAVETEST PASS. Budget A/B
+(h0 BALANCE=10 slots 0-9 vs the baseline chunk — the lever stack is h0-inert by
+construction, so this isolates the events change): **BYTE-IDENTICAL** — outcomes AND arm
+picks unchanged in these 20 worlds (warchest's flat arm already out-priced the gamble, so
+no bot pick flips on the current catalog; the FUL-5 lesson — a byte-identical A/B is the
+finding). The fix binds on future arms where a gamble could out-price a flat arm, and
+PrepDead protects HUMAN players today.
+- **reservecall release-arm prior**: AUDITED, record-only — the arm never fired in 200
+  campaigns (BY EVENT-CHOICE has nothing to distort); the prior's arithmetic (−6 release +
+  4.5 salvage + 3 intel = +1.5 vs −4 keep) is coherent but rank-blind (a rank-4 release
+  prices like rank-1); with zero fielded exposure no change is warranted — noted for any
+  future event-exposure wave.
+
+## "?"-NODE EXPOSURE LEVER (docket §3 — measured, recorded, NOT applied)
+The parked Clamp(mids/4,1,3) was measured in a scratch tree (git-archive + patch, same
+build chain) against the ladder's h0 chunks on the same slots: **18 of 20 slot-pairs came
+back byte-identical** — only 2 maps in 20 have >=12 mid nodes, so the widened ceiling stamps
+a third "?" node on ~10% of maps — and fielded event volume did NOT rise (27/27 and 17/17
+resolutions, identical id sets). RECOMMENDATION: do not ship it — near-zero exposure
+benefit for a real cost (GenerateMap re-runs on load, so the clamp reshapes in-flight
+saves' unvisited nodes). The honest exposure levers, if the owner wants event variety, are
+floor-2 stamping (Clamp(mids/4,2,3) — same save skew, adjudicate it) or a cross-run catalog
+dedupe (profile-side, no skew). At 17 catalog entries over 1-2 nodes/run, each event is a
+~1-in-9-run sight: informant and reservecall fielded ZERO times in 200 campaigns.
+
+## DOWN LEDGER AT SCALE (FUL-7 under the ladder)
+| heat | downs | revived | recovered | bled out | finished | save |
+|---|---|---|---|---|---|---|
+| 0 | 363 | 4 | 104 | 212 | 43 | 30% |
+| 2 | 370 | 11 | 71 | 232 | 51 | 24% |
+| 4 | 413 | 12 | 85 | 239 | 65 | 26% |
+| 6 | 448 | 16 | 88 | 284 | 51 | 25% |
+| 8 | 289 | 2 | 42 | 199 | 23 | 23% |
+Save-rate compresses 30→23% up the ladder ("downs concentrate where deaths do" — FUL-7's h4
+prediction, measured to the apex).
+
+## ENDLESS DEPTH (final tree)
+32 stands (2x BALANCE_ENDLESS=8, BASE 0/8, default heat cycle): pooled median 6, means
+6.19/6.44, p90 8, ZERO cap hits — the APEX 5-6 band's top edge, unchanged from FUL-6's
+6/6.25. A stable identity; recorded, no tune.
+
+## BOON PROCS AT SCALE (200 campaigns)
+FST 384 · TRR 104 · SHK 44 · FDR 11 (37 picks) · PYR 11 (41) · RCL 4 (27). ITEM 303 uses
+(smoke 295), GRENADE 59, STABILIZE 552, PATCH 84, DRAG 63 — the verb layer FUL-5 opened is
+alive at every rung.
+
+## DESIGN-QUESTION DOCKET (§4 — recorded with recommendations, owner decides)
+**Skirmish/daily opener grace.** Skirmish and Daily are single missions, and every mission-1
+fight takes the early-mission heat grace (SetupMission zeroes heatEnemy/heatStat/heatDmg at
+n<=1), so a "heat 8" skirmish fields NO numeric heat delta — only the qualitative flags
+(TighterContact/EXPOSED/HarshAttrition) and the ungraced coordination tier bite. The picker
+desc has been honest since FUL-3; the open question is intent. RECOMMENDATION: exempt
+SKIRMISH from the numeric grace — the grace protects a green campaign opener that never
+chose its heat, while a skirmish player explicitly dialed the rung and is owed the wall
+(one single-mission flag at SetupMission's grace line). Keep DAILY as-is: the day's board
+is a shared dated comparison and mid-stream re-tuning breaks best-score comparability.
+Not applied — a difficulty promise in a mode picker is owner-visible.
+
+**Grenade pre-frag (human-vs-bot read gap).** FUL-6's verdict stands at ladder scale
+(GRENADE 59/200 campaigns, 7-14 per heat batch): the bot's frag window (covered 2+ ACTIVE
+cluster, pre-shot) anti-correlates with real geometry — dormant pods clump (the human stage
+is visible pre-fight) but woken pods scatter before the gate re-fires; SmartGrenade has no
+Active filter, so the low count is emergent, not a coded decline. RECOMMENDATION: accept
+the gap as designed skill expression — the measurement contract records the bot floor, and
+the human pre-frag line sits above it; teaching the bot a conservative pre-frag arm would
+price a perfect-info line the bot's honesty contract avoids.
+
+**Founding-squad corpsman (FUL-7's verdict consumed).** PATCH's cap is roster PRESENCE, not
+gates: corpsman fielded in 36-42% of missions (13% at h8 — RELENTLESS kills backfill);
+per-presence PATCH is healthy (revives 2-16/batch). OPTIONS: (a) swap the founding GUNNER
+or RANGER for a CORPSMAN — raises PATCH and the save-rate but deletes a damage seat from
+the teaching squad; (b) guarantee a corpsman in the first backfill offer — presence without
+touching the founding four; (c) keep as-is — the class stays a mid-run acquisition and the
+early game stays lethal-feeling. The bleed-out economy works without one (STABILIZE is
+universal, 552 uses at ladder scale); a founding corpsman mainly buys REVIVES.
+RECOMMENDATION: (b) or (c) — this is a founding-four identity choice, not a tune.
+
+**NO QUARTER heat-picker Desc** (FUL-3): verified unregressed on the close tree (Run.cs
+Mods[7] still admits the m1-2 grace: "+1 dmg from mission 3").
+
+═══════════════════════════════════════════════════════════════════════════════
+## PROGRAM FULCRUM — THE CLOSE (13 waves, all landed)
+═══════════════════════════════════════════════════════════════════════════════
+
+Through-line: **systems that existed but never reached play** — found by six research lenses,
+built across 13 waves on parallel worktrees, measured at every landing, closed with this
+wave's proper-N re-baseline.
+
+**Per-wave (hash · the measured headline):**
+- **FUL-1 COMPASS TRUTH** (a4ef1dd): per-slot CRN pair records + all-pairs PAIRED MARGIN,
+  PROCS at effect sites, arena funnel, BY EVENT-CHOICE — the compass that priced everything
+  after it. First readings: SHK/FDR/RCL procs 0/0/0 (the program's thesis, measured).
+- **FUL-2 SEAM INTEGRITY** (4690748): assist-cache staleness, INTRO save-clobber,
+  codex-from-pause shot leak, EXTRACT reactions, supercover LOS made real (+6 COMBATTEST
+  legs). LOS budget A/B: completion 65→60 (boundary, in budget); its −20 gap read at n=10
+  became this wave's N=100 zero.
+- **FUL-3 CHROME** (16e24e9): roster-chip reflow, per-button dim, INTEL row-clamp, dormant
+  de-emphasis, LOCK-ON/NO QUARTER desc truth.
+- **FUL-4 HOLDFAST** (wt-ful4 → 021a84b): Defend 38% h0 → 66-73% (bands HIT), SmartDefend
+  co-fix first, wave telegraph on the spawner's own read.
+- **FUL-5 HANDS** (wt-ful5, R2-R7 596c913..b8ceb1a; integrated
+  7d31c8c, review e3bcb3b): the EV bot learned the verbs — BRACE 1→82, ITEM 0→19, PATCH
+  gates opened, hashed 70/30 event chooser, mod priors de-flattened (SUP 27→9%). h0 60→75
+  same-slot; two byte-identical probe batches became the "gate unreachable" method.
+- **FUL-6 CRITICAL MASS** (wt-ful6 7a41332..1b2ff29; integrated 72d8657, review c74378e):
+  pods of 3 + cohesion + linked activation ("HEARD THE GUNS"), endless wave sub-pods, FDR
+  rework, escalation lever 1 (dip −12.5 breach → 0). TRR 18-31; RCL off zero.
+- **FUL-7 LAST LIGHT** (wt-ful7 1cc60bf..8cfad71, review 7c04213 → c4ef42e): the 3-turn
+  bleed-out at the KillUnit seam — true-KIA −40%, honest 33% save-rate (review F2 restated
+  it down from 43%), STABILIZE a first-class verb, review F1 restored enemy focus while a
+  body is down (completion 50→60 re-measured).
+- **FUL-8 PIKEMAN** (wt-ful8 d5c20f2+c866aef; integrated 3001197, review 52489e3): the
+  SARISSA lane-holder — the roster's first piece contesting MOVEMENT, the player's own
+  BRACE mirrored back (zero new combat machinery); route-tax gate: Escort 5.9→5.6t at n≈90.
+- **FUL-9 THE DECK** (wt-ful9 2650c5b + 72f9a62 + 1359309): the carried W7 spec BUILT —
+  column-constrained objective plan (Defend-or-Rescue anchor on EVERY route, <=1 Escort),
+  no-repeat arena deck, EXPOSURETEST enumerates all 1098 routes. The honest price: h0 60→
+  50/45 — this wave's re-baseline consumed it.
+- **FUL-10 FORKS** (wt-ful10 b71b821 + 78fa859; integrated af61314, review a26cfe4): seven
+  trade-off events, MRC/LGD veteran contracts, orphaned-perk trio into class lines; ladder
+  A/B +5 (boundary, in budget).
+- **FUL-11 CEREMONY** (959f5b2; survived a 3-week container suspension mid-measurement):
+  finale ceremony + Wardens SIGNIFER/ORDERLY retinue — Wardens 73→83.7, all kits in 78-88,
+  pooled 84.2 (n=146), zero count/stat tuning.
+- **FUL-12 SIGNPOSTS** (wt-ful12 through 677a6e7; merged 0605e6e): end-card SALVAGE/HEAT/achievement slabs, tutorial step 0
+  + BRACE tip, pill hovers, dormant ID cards, 16-boon RECOMMENDED draft, WAR ROOM sizing.
+- **FUL-13 TRUE NORTH** (this entry, wt-ful13): the reference ladder + re-set band, the
+  Defend inversion levers, the gap thread closed, the intel verdict, the economy fixes,
+  the owner docket.
+
+**Process learnings (the program's, for the next program):**
+1. **The environment is the adversary** — the arc held from m1 (four container suspensions,
+   three limit windows, two scratchpad wipes) to the close (this wave's only incident: a
+   monitor timeout). The countermeasures are now house style: the plan of record lives
+   in-repo; dev agents push per commit; scratch trees come from `git archive`, never cp -r;
+   liveness is judged by artifact mtimes; wave-unique log names + provenance checks before
+   trusting any batch file.
+2. **Integrate-then-review**: FUL-5/6/8/10 landed on parallel worktrees, were integrated
+   onto the moving tip as CANDIDATES, and the adversarial review ran AT the integration
+   (a26cfe4/52489e3/e3bcb3b/c74378e/7c04213) — review the composed tree, not the branch.
+   Every review found something (F1's enemy-focus leak was worth +10 completion).
+3. **Byte-identical batches are instrumentation**: FUL-5 R1/R2 located unreachable gates;
+   FUL-6 R3/R4 proved lever scope; FUL-13's qnode A/B (18/20 pairs identical) killed a
+   parked lever with two chunks. CRN discipline turns "nothing changed" into a finding.
+4. **One lever per measured round, fresh same-slot R0 first, dip budgets, breaches
+   reported** — the FUL-4/6/13 tuning pattern; and a lever that doesn't bind (FUL-13 R1)
+   stays if it's TRUE (heat now reaches wave stats) with the verdict written.
+5. **Pinned batches locate mechanisms; unpinned batches price them.** The Defend inversion
+   was invisible in rung averages, obvious in the per-objective table, and its mechanism
+   (the flat trim eating EnemyDelta) only fell out of the defend-PINNED 96%-at-h8 read.
+6. **Docs over-claims die at the tree** (hook-exists + commit-exists before docs commits) —
+   held from the W7/FUL-9 lesson through this close.
+
+**Verified at the close** (the wt-ful13 close tree): Release 0/0; the FULL suite battery — every
+SIGHTLINE_*TEST hook in src (40 hooks, the authoritative grep) — PASS; autoplay ×5 clean
+(no exceptions, no TIMEOUT); PAIRTEST green after every code round; README screenshot
+retaken (the FULCRUM board: pod clumps, WAVERING pills, full verb bar — the old frame
+predated pods/morale/downs).
+
+**Open/next**: seeded in ROADMAP §OPEN/NEXT (post-FULCRUM) — the owner-decision docket
+(skirmish heat / founding corpsman / grenade pre-frag), Escort-at-apex, the h6 Defend
+residual, event-exposure levers, RCL sweeten option, h8 corpsman blackout, on-device audio.

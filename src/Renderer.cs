@@ -845,28 +845,34 @@ public static class Renderer
             }
         // cone-edge rays + a braced direction chevron at the soldier
         foreach (var w in watchers)
+            DrawConeRays(g, w, Pal.VipGold, pulse);
+    }
+
+    /// FUL-8: the cone-edge rays + direction chevron for a FOCUSED watcher — factored out of
+    /// DrawFocusCones so the enemy PIKEMAN's foe-red lane draws the SAME vocabulary as the player's
+    /// gold brace (it IS the same verb) and the two reads can never drift.
+    static void DrawConeRays(Game g, Unit w, Color baseCol, float pulse)
+    {
+        float hlift = g.Grid.IsHigh(w.X, w.Y) ? ElevLift : 0f;
+        var c = w.Pos - new Vector2(0, hlift);
+        float ang = MathF.Atan2(w.OwDirY, w.OwDirX);
+        float len = w.Weapon.MaxRange * Cfg.Tile;
+        Color edge = Raylib.Fade(baseCol, 0.30f + 0.15f * pulse);
+        for (int s = -1; s <= 1; s += 2)
         {
-            float hlift = g.Grid.IsHigh(w.X, w.Y) ? ElevLift : 0f;
-            var c = w.Pos - new Vector2(0, hlift);
-            float ang = MathF.Atan2(w.OwDirY, w.OwDirX);
-            float len = w.Weapon.MaxRange * Cfg.Tile;
-            Color edge = Raylib.Fade(Pal.VipGold, 0.30f + 0.15f * pulse);
-            for (int s = -1; s <= 1; s += 2)
-            {
-                float a = ang + s * 0.7853982f;   // +-45 degrees
-                Raylib.DrawLineEx(c, c + new Vector2(MathF.Cos(a) * len, MathF.Sin(a) * len), 2f, edge);
-            }
-            // SIGNAL W3: a short double chevron just past the figure, pointing down the cone axis,
-            // so "braced THIS way" reads at the soldier even when the edge rays run off-board.
-            var dir = new Vector2(MathF.Cos(ang), MathF.Sin(ang));
-            var cperp = new Vector2(-dir.Y, dir.X);
-            Color chev = Raylib.Fade(Pal.VipGold, 0.65f + 0.25f * pulse);
-            for (int i = 0; i < 2; i++)
-            {
-                var tip = c + dir * (38f + i * 9f);
-                Raylib.DrawLineEx(tip - dir * 8f + cperp * 7f, tip, 2.4f, chev);
-                Raylib.DrawLineEx(tip, tip - dir * 8f - cperp * 7f, 2.4f, chev);
-            }
+            float a = ang + s * 0.7853982f;   // +-45 degrees
+            Raylib.DrawLineEx(c, c + new Vector2(MathF.Cos(a) * len, MathF.Sin(a) * len), 2f, edge);
+        }
+        // SIGNAL W3: a short double chevron just past the figure, pointing down the cone axis,
+        // so "braced THIS way" reads at the soldier even when the edge rays run off-board.
+        var dir = new Vector2(MathF.Cos(ang), MathF.Sin(ang));
+        var cperp = new Vector2(-dir.Y, dir.X);
+        Color chev = Raylib.Fade(baseCol, 0.65f + 0.25f * pulse);
+        for (int i = 0; i < 2; i++)
+        {
+            var tip = c + dir * (38f + i * 9f);
+            Raylib.DrawLineEx(tip - dir * 8f + cperp * 7f, tip, 2.4f, chev);
+            Raylib.DrawLineEx(tip, tip - dir * 8f - cperp * 7f, 2.4f, chev);
         }
     }
 
@@ -899,11 +905,21 @@ public static class Renderer
                     if (Util.TileDist(w.X, w.Y, x, y) > w.Weapon.MaxRange) continue;
                     bool commanding = g.Grid.HeightAt(w.X, w.Y) - g.Grid.HeightAt(x, y) >= 2;
                     if (!g.Grid.HasLineOfSight(w.X, w.Y, x, y, commanding)) continue;
+                    // FUL-8 truth gate: a FOCUSED enemy watcher (the PIKEMAN's plant) only reacts
+                    // inside its cone — the red wash must mirror the OnUnitEnteredTile gate exactly,
+                    // or the board lies about where walking is safe.
+                    if (w.OwFocused && !g.InOwCone(w, x, y)) continue;
                     var r = ElevRect(g, x, y);
                     Raylib.DrawRectangleRec(r, wash);
                     break;   // one wash per tile is enough; overlap is conveyed by adjacency
                 }
             }
+
+        // FUL-8 PIKEMAN: a braced+focused enemy watcher shows its cone edges + chevron in foe-red
+        // over the wash — the same lane vocabulary as the player's own BRACE, because it IS the
+        // player's own BRACE pointed back at the squad.
+        foreach (var w in watchers)
+            if (w.OwBrace && w.OwFocused) DrawConeRays(g, w, Pal.Foe, pulse);
 
         // mark each overwatcher with a danger reticle so the SOURCE of the kill-zone reads, plus a
         // slow expanding "watching" pulse ring that draws the eye to the threat without occluding it.
@@ -1698,6 +1714,23 @@ public static class Renderer
                                    Raylib.Fade(Pal.RGBA(8, 10, 14), a));          // keyhole
                 break;
             }
+            case "PIKEMAN":            // a LANE-HOLDER (SARISSA, FUL-8): a squat braced body under a LONG
+                                       // pike set diagonally up the lane, with a crossbar (lugs) near the
+                                       // base — at squint: "a line pointing down a lane". Distinct from
+                                       // the LANCER's level spear + shoulder bar (its pike is RAISED).
+            {
+                Raylib.DrawRectanglePro(new Rectangle(p.X, p.Y, 10f * s, 7f * s), new Vector2(5f * s, 3.5f * s),
+                                        MathF.Atan2(fdir.Y, fdir.X) * 180f / MathF.PI, col);   // squat planted body
+                var butt = At(-4f, 0);
+                var tip  = At(13f, 0) + new Vector2(0, -8f * s);   // the pike, angled up-forward
+                Raylib.DrawLineEx(butt, tip, 2.2f * s, col);
+                Raylib.DrawCircleV(tip, 1.8f * s, col);            // pike head
+                var pdir  = Vector2.Normalize(tip - butt);
+                var pperp = new Vector2(-pdir.Y, pdir.X);
+                var lug   = butt + pdir * (9f * s);                // crossbar lugs across the shaft
+                Raylib.DrawLineEx(lug + pperp * (3.5f * s), lug - pperp * (3.5f * s), 2f * s, col);
+                break;
+            }
             default:                   // fallback: a neutral pentagon
                 Raylib.DrawPoly(p, 5, 7.5f * s, 0f, col);
                 break;
@@ -1736,20 +1769,53 @@ public static class Renderer
     // between the two computations is sub-pixel).
     static void DrawUnitStatusChips(Game g, Unit u)
     {
-        if (!u.Alive || u.Statuses.Count == 0) return;
+        if (!u.Alive || (u.Statuses.Count == 0 && !u.Downed)) return;
         float hlift = g.Grid.IsHigh(u.X, u.Y) ? ElevLift : 0f;
         bool drone = u.Team == Team.Enemy && u.Cls == "DRONE";
         float hover = drone ? 11f + MathF.Sin((float)Raylib.GetTime() * 3f + u.Bob) * 2f : 0f;
         float bob = MathF.Sin((float)Raylib.GetTime() * 2.2f + u.Bob) * 1.6f;
         Vector2 p = u.Pos - new Vector2(0, hlift) + new Vector2(0, bob - hover) + u.Recoil;
         const float chipH = 18f;
+        // FUL-7: the DOWN countdown pill leads the row — red "DOWN 3/2/1" while the timer runs,
+        // amber "STABLE" once frozen (Pal.Foe/Pal.Suspect: both palette-safe; the glyph carries
+        // the state without hue per DESIGN 3.H — a falling chevron vs a level bar). Review F4:
+        // with NO soldier left standing the freeze fails (the orphan tick runs even stabilized)
+        // — the pill shows that countdown too, never a lying steady "STABLE".
+        bool downAnyUp = u.Downed && g.Players.Any(q => q.Alive && !q.Downed && !q.IsVip);
+        string downCode = u.Downed
+            ? (u.Stabilized ? (downAnyUp ? "STABLE" : $"STABLE {u.DownedTurns}") : $"DOWN {u.DownedTurns}")
+            : null;
+        Color downCol = u.Stabilized ? Pal.Suspect : Pal.Foe;
         float rowW = 0f;
+        if (downCode != null)
+            rowW += 17f + Raylib.MeasureTextEx(Cfg.Font, downCode, 13, 1f).X + 8f + 3f;
         foreach (var s in u.Statuses)
             if (s.Turns > 0)
                 rowW += 17f + Raylib.MeasureTextEx(Cfg.Font, StatusDef.Code(s.Kind), 13, 1f).X + 8f + 3f;
         if (rowW <= 0f) return;
         float cxs = p.X - (rowW - 3f) / 2f;
         float cys = p.Y + 24f;
+        if (downCode != null)
+        {
+            float tw0 = Raylib.MeasureTextEx(Cfg.Font, downCode, 13, 1f).X;
+            float w0 = 17f + tw0 + 8f;
+            Raylib.DrawRectangleRounded(new Rectangle(cxs - 1f, cys - 1f, w0 + 2f, chipH + 2f),
+                                        0.5f, 6, Raylib.Fade(downCol, 0.55f));
+            Raylib.DrawRectangleRounded(new Rectangle(cxs, cys, w0, chipH), 0.5f, 6, Pal.RGBA(9, 13, 18, 216));
+            float gx = cxs + 9f, gy = cys + chipH * 0.5f;
+            if (u.Stabilized)
+            {   // level bar = the bleeding stopped, state held
+                Raylib.DrawLineEx(new Vector2(gx - 4f, gy), new Vector2(gx + 4f, gy), 2f, downCol);
+                Raylib.DrawLineEx(new Vector2(gx - 1f, gy - 3f), new Vector2(gx + 1f, gy - 3f), 2f, downCol);
+            }
+            else
+            {   // falling chevron = going down, clock running
+                Raylib.DrawLineEx(new Vector2(gx - 4f, gy - 3f), new Vector2(gx, gy + 3f), 2f, downCol);
+                Raylib.DrawLineEx(new Vector2(gx + 4f, gy - 3f), new Vector2(gx, gy + 3f), 2f, downCol);
+            }
+            Raylib.DrawTextEx(Cfg.Font, downCode, new Vector2((int)(cxs + 17f), (int)(cys + 2f)), 13, 1f, downCol);
+            cxs += w0 + 3f;
+        }
         foreach (var s in u.Statuses)
         {
             if (s.Turns <= 0) continue;
@@ -1833,6 +1899,11 @@ public static class Renderer
         // live combatants — shrink them (unaware 0.75x, suspicious 0.85x); information kept,
         // emphasis cut. Alert state, not scale, carries the threat signal.
         if (unaware) bodyScale *= 0.75f; else if (suspicious) bodyScale *= 0.85f;
+        // FUL-7: a DOWNED soldier reads PRONE at a squint — the FUL-3 dormant-scale vocabulary
+        // pushed further (0.6x) with the figure sunk to the ground (no upright silhouette);
+        // the pulsing red ground ring below carries the danger signal in both palettes.
+        bool downed = friend && u.Downed;
+        if (downed) { bodyScale *= 0.6f; p.Y += 9f; }
 
         // ground contact shadow (sits on the platform top when elevated). A two-layer ellipse —
         // a wider soft penumbra + a tighter darker core, nudged toward bottom-right (consistent
@@ -1907,6 +1978,17 @@ public static class Renderer
             float pulse = 0.3f + 0.3f * MathF.Sin((float)Raylib.GetTime() * 2.8f + u.Bob);
             Raylib.DrawRing(foot + new Vector2(0, 17), 20f, 23f, 0, 360, 40,
                             Raylib.Fade(Pal.Friend, pulse));
+        }
+
+        // FUL-7: a DOWNED soldier's pulsing red ground ring (the role-ring vocabulary in the
+        // danger colour — Pal.Foe survives the colorblind palette) so the prone body reads at
+        // a squint: "a soldier is on the ground HERE, and the clock is running."
+        if (downed)
+        {
+            float dpls = 0.5f + 0.5f * MathF.Sin((float)Raylib.GetTime() * 3.4f);
+            var dcr = foot + new Vector2(0, 17);
+            Raylib.DrawRing(dcr, 21f, 25f, 0, 360, 48, Raylib.Fade(Pal.Foe, 0.30f + 0.35f * dpls));
+            Raylib.DrawRing(dcr, 16.5f, 18.5f, 0, 360, 48, Raylib.Fade(Pal.Foe, 0.16f + 0.16f * dpls));
         }
 
         // FUL-11 CEREMONY — the FINALE BOSS reads as the apex of the force from the ground up:
@@ -2236,7 +2318,9 @@ public static class Renderer
         }
 
         // hp pips
-        DrawHpPips(u, p);
+        // FUL-7: the HP bar hides while DOWNED — a 0-HP bar under a countdown pill would lie
+        // twice (the pill row below owns the read: DOWN n / STABLE).
+        if (!u.Downed) DrawHpPips(u, p);
 
         // status icons — W5: lifted to clear the enlarged (24px) body + the raised HP pips.
         float ix = p.X - 10, iy = p.Y - 35;

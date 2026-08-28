@@ -177,6 +177,16 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        // SIGHTLINE_DOWNTEST=1 : FUL-7 LAST LIGHT — the DOWN/bleed-out state machine (entry clean
+        // of death bookkeeping, expiry = the full death flow once, stabilize/revive/recovery, no
+        // second down + AoE finishes, AI ignores the downed, VIP instant, drag/extract carry).
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_DOWNTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "downtest");
+            Console.WriteLine(new Game().DownSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         // SIGHTLINE_RESCUETEST=1 : APEX W2 — the caged Rescue captive is actionless until freed
         // (freeing restores actions/movement), and the all-soldiers-dead-while-caged soft-lock
         // resolves (checkpoint redeploy at m3+ / CAPTIVE ABANDONED loss / skirmish loss).
@@ -195,11 +205,30 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        // SIGHTLINE_PIKETEST=1 : FUL-8 — the SARISSA/PIKEMAN lane-holder (plant / stagger-halving pin /
+        // cone blindness / break legs). Needs a tiny window for tile math.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_PIKETEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "piketest");
+            Console.WriteLine(new Game().PikemanSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         // SIGHTLINE_MORALETEST=1 : UNDERTOW W3 — enemy pod morale / rout.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_MORALETEST") == "1")
         {
             Raylib.InitWindow(64, 64, "moraletest");
             Console.WriteLine(new Game().MoraleSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
+        // SIGHTLINE_PODTEST=1 : FUL-6 CRITICAL MASS — PodPlan sizes + spawn cohesion, linked
+        // activation (nearest-only / confirm-unseen / no chain), the 3-pod waver->rout arc,
+        // endless wave sub-pods (elite exempt), and the FIELD DRILLS drill grant.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_PODTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "podtest");
+            Console.WriteLine(new Game().PodSelfTest());
             Raylib.CloseWindow();
             return;
         }
@@ -469,7 +498,11 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CONTENT") == "1") Mission.DebugContentShowcase(game);
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_ALERT") == "1") game.DebugAlertTiers();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_PRESSURE") == "1") game.DebugPressure();
+        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_PODSHOT") == "1") game.DebugPodShot();   // FUL-6: pair with SIGHTLINE_MISSION=3
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_WAVEBANNER") == "1") game.DebugWaveTelegraph();   // FUL-4: pair with SIGHTLINE_OBJ=defend
+        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_PIKESHOT") == "1") game.DebugPikemanLane();       // FUL-8: planted PIKEMAN lane (pair with SIGHTLINE_CB=1 for the second pass)
+        string downShot = Environment.GetEnvironmentVariable("SIGHTLINE_DOWNSHOT");
+        if (shot && (downShot == "1" || downShot == "2")) game.DebugDownShot(downShot == "2");   // FUL-7: downed soldier + rescuer (=2 mid-rescue STABLE; pair with SIGHTLINE_CB=1 for the second pass)
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CONCEAL") == "1") game.DebugConcealment();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_INTENT") == "1") game.DebugIntent();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_SIEGE") == "1") game.DebugSiege();

@@ -354,6 +354,21 @@ public class Unit
     // Transient (never persisted, never gameplay-read).
     public string LastDotSource;
 
+    // ---- FUL-7 LAST LIGHT: the DOWN (bleeding-out) state machine. ALL transient — never
+    // persisted (ToUnitDto whitelist; reset in Game.SetupMission; EnterBarracks resolves every
+    // Downed before the next checkpoint writes). Downed keeps Alive == true so the existing
+    // carry kit (DRAG/EXTRACT gate on Alive), the wipe test, and Evac's all-in-zone win all see
+    // a breathing body; CanAct stays false every turn (ActionsLeft zeroed in StartPlayerTurn),
+    // so a downed soldier never acts, reacts, or is selectable. WasDownedThisMission is the
+    // anti-revive-tank rule: ONE down per soldier per mission — the second lethal event kills
+    // outright (Game.CanGoDown), as does ANY damage reaching a body already down (AoE/fire:
+    // the telegraphed-weapons honesty valve).
+    public bool Downed;              // bleeding out (Hp 0, Alive true, out of the fight)
+    public bool Stabilized;          // timer frozen — stays down (drag-able); recovered on a won field
+    public int DownedTurns;          // player-turn countdown to bleed-out (Game.DownedTimerTurns)
+    public bool WasDownedThisMission;
+    public string DownedByCls;       // the DOWNING attribution (enemy archetype, or a DoT label) — the honest cause at expiry
+
     // Streak-breaker (S4-C): counts consecutive CLEAN misses by this unit. After each
     // miss the next shot gets a small hidden aim bonus (see Combat.Resolve). Resets to
     // 0 on any hit or graze. Intentionally NOT persisted — per-mission accumulation only;
@@ -472,6 +487,11 @@ public class Unit
     // soldier over an adjacent cover tile to the floor on its far side. Per-turn state, never persisted.
     public int DragsThisTurn;
     public int VaultsThisTurn;
+    // FUL-6 FIELD DRILLS rework: the boon's effect is now "a DRAG or VAULT drills the soldier
+    // forward — +1 tile of movement for the rest of that turn". Granted at the IssueDrag/
+    // IssueVault sites (once per soldier per turn), read in MoveBudget as +2 half-steps.
+    // Per-turn combat state, reset in BeginTurn, never persisted (ToUnitDto whitelist).
+    public bool DrilledThisTurn;
     // W10 BIPOD: has this unit entered ANY tile this turn (walk/dash/vault/drag/shove/grapple all
     // route through Game.OnUnitEnteredTile, the single set-site)? BIPOD's +aim only holds while the
     // shooter is planted (false). Per-turn combat state, reset in BeginTurn, never persisted.
@@ -587,7 +607,8 @@ public class Unit
 
     // half-tile budget. Wound (-mob while wounded) and the SHELL-SHOCKED scar (-mob lasting caution)
     // both subtract mobility, mirroring each other; floored at 1 tile so a unit can always move.
-    public int MoveBudget => Math.Max(1, Mobility - (Wound > 0 ? WoundMob : 0) - (HasScar(Scar.ShellShocked) ? ShellShockMob : 0)) * 2;
+    // FUL-6 FIELD DRILLS: +2 half-steps (one ortho tile) appended AFTER the *2 while drilled.
+    public int MoveBudget => Math.Max(1, Mobility - (Wound > 0 ? WoundMob : 0) - (HasScar(Scar.ShellShocked) ? ShellShockMob : 0)) * 2 + (DrilledThisTurn ? 2 : 0);
     public bool CanAct => Alive && ActionsLeft > 0;
 
     public Unit()
@@ -710,6 +731,7 @@ public class Unit
         ShovedThisTurn = false;    // SHOVE: one per soldier per turn
         DragsThisTurn = 0;         // FIELD CRAFT: DRAG Combat.FieldCraftLimit(u)/turn (1; FIELD DRILLS 2)
         VaultsThisTurn = 0;        // FIELD CRAFT: VAULT Combat.FieldCraftLimit(u)/turn (1; FIELD DRILLS 2)
+        DrilledThisTurn = false;   // FUL-6 FIELD DRILLS: the +1-move drill is per-turn
         MovedThisTurn = false;     // W10 BIPOD: the planted-shooter aim bonus re-arms each turn
         FiredThisTurn = false;     // TEMPO: one offensive shot per turn (reset each turn)
         MovedAfterFire = false;    // HORIZON: exposed-by-fire flag is per-turn

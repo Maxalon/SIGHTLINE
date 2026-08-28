@@ -259,13 +259,28 @@ salvage economy (priced veteran recall 10+8×rank, quit-safe barracks sinks, dai
 pool expansion (6 boons, BIPOD/SUPPRESSOR, 3 secondaries, INTEL CACHE), in-mission teaching (FIELD
 CRAFT codex, enemy-ID tooltips, honest loss cards), and a strategic-layer facelift (sized-to-fit
 campaign map, class glyphs, coherent intro, first-run RECOMMENDED draft). W7 exposure plumbing was
-caught as a docs over-claim at landing and carried forward as an open, ready-to-dev spec.
+caught as a docs over-claim at landing and carried forward as an open, ready-to-dev spec — which
+PROGRAM FULCRUM then built as FUL-9. FULCRUM (13 waves, CLOSED 2026-08-28) made the systems that
+existed actually REACH play, then made the published numbers true: seam/chrome integrity, a compass
+that prices verbs/procs/events with per-slot CRN pair records, Defend repaired + telegraphed, the
+EV bot learned BRACE/ITEM/PATCH/DRAG (the verb layer stopped being balance-blind), pods of 3 +
+linked activation, lethal damage became a 3-turn bleed-out with STABILIZE/revive (true-KIA −40%),
+the SARISSA/PIKEMAN contests movement, every route now deals Defend-or-Rescue + <=1 Escort off a
+no-repeat arena deck, seven trade-off events + two veteran contracts, a finale ceremony + Wardens
+retinue, and in-game signposting. FUL-13 TRUE NORTH closed it: definitive proper-N ladder
+**52.5/35/30/22.5/10** vs a RE-SET goal band **55/40/30/20/10 ±8** (h8 ±5; the old 80/70/60/40/20
+predates the exposure repair — reasoning in DEVLOG §FUL-13), Defend's top-rung inversion fixed
+(heat-blind waves + the flat trim eating heat's bodies; pinned h8 96→87 = h0 parity, h6 residual
+recorded), the LOS policy-gap thread closed at N=100 pairs (gap zero — forgiving-by-design
+accepted), intel flood resolved no-drain (the kicker converts to shop spend, the slope survives),
+event EV pricing + the informant dead-buy gate, endless median 6 (band top edge).
 
 **The exhaustive feature list is in [`docs/FEATURES.md`](docs/FEATURES.md).** The build
-history and open/next backlog are in [`docs/ROADMAP.md`](docs/ROADMAP.md) and the "OPEN/NEXT"
-sections of [`docs/DEVLOG.md`](docs/DEVLOG.md). Recurring open threads: W7 exposure plumbing
-(specced, not built), the policy-gap accept-vs-sharpen decision (aggregate ~0 — sloppy play fully
-viable), the NO QUARTER heat-picker Desc cosmetic, and on-device audio tuning (needs the human).
+history and open/next backlog are in [`docs/ROADMAP.md`](docs/ROADMAP.md) (§OPEN/NEXT
+post-FULCRUM) and docs/DEVLOG.md §FUL-13. Recurring open threads: the owner-decision docket
+(skirmish numeric heat / founding corpsman / grenade pre-frag — recommendations written in
+DEVLOG §FUL-13), the h6 Defend residual, Escort at the apex, event-exposure levers, and
+on-device audio tuning (needs the human).
 
 ---
 

@@ -20,6 +20,8 @@ public class EnemyPlan
     public int ItemTx, ItemTy;    // item aim tile
     public (int x, int y)? SiegeCharge; // BOMBARD: charge a telegraphed strike centered here (else null)
     public (int x, int y)? RelockTile;  // CUSTODIAN (W8): re-lock/re-arm the objective at this site (else null)
+    public bool Brace;                  // PIKEMAN (FUL-8): plant a braced focus cone over a movement lane
+    public int BraceDirX, BraceDirY;    // FUL-8: cone axis = anchor - plant tile (Math.Sign per component)
 }
 
 /// Tactical decision-making for a single enemy. Greedy, but reads as competent:
@@ -53,7 +55,16 @@ public static class Ai
     public static EnemyPlan Plan(Game g, Unit e)
     {
         var plan = new EnemyPlan();
+        // FUL-7 LAST LIGHT — the single AI seam: enemies do NOT target downed (bleeding-out)
+        // soldiers with direct fire. Filtering here means the shoot-target loop, the finish
+        // band, HOUND prey, advance/nearest and the shove pick all inherit it. Rationale: a
+        // down already costs the squad a body plus the rescue actions; an executing AI would
+        // convert the drama into a guaranteed double-loss and make STABILIZE a trap verb. The
+        // honesty valve that keeps stakes: AoE stays blind — a shell/frag/barrel/fire field
+        // that catches the body kills it, and all of those are telegraphed (XCOM's rule).
+        // All-downed squad -> empty players -> empty plans; the bleed-out timers bound it.
         var players = g.AlivePlayers();
+        players.RemoveAll(p => p.Downed);
         if (players.Count == 0) return plan;
 
         // movement reachability (other units block)
@@ -213,6 +224,78 @@ public static class Ai
                     return rp;
                 }
                 // else: boxed in — fall through to the generic loop (shoot/hunker; never a dead turn)
+            }
+        }
+
+        // PIKEMAN (SARISSA, FUL-8): the LANE-HOLDER — nothing else in the roster contests WHERE the
+        // squad may walk. It plants a braced focus cone (the exact enemy-side mirror of the player's
+        // own BRACE [B]: OnOverwatch+OwBrace+OwFocused, armed by Game's ActAfterMove exec) over a
+        // movement lane and STAGGERS the first soldier through. Zero new combat machinery — the
+        // OnUnitEnteredTile reaction path is already team-symmetric. Gates, per the W8 routed-
+        // specialist rule + the FLASH counterplay: a BROKEN pikeman flees like everyone else, a
+        // Disoriented one cannot re-plant (mirrors the enemy-overwatch exec gate), a dry one has
+        // nothing to threaten the lane with. All three fall through to the generic loop — never a
+        // dead turn / no TIMEOUT (the MORTAR safety).
+        if (e.Cls == "PIKEMAN" && e.Routed == 0 && !e.HasStatus(StatusKind.Disoriented) && e.Ammo > 0)
+        {
+            // Opportunism first (identity: a holder, not a statue — mirrors BOMBARD's fall-through
+            // when nothing is worth shelling): an exposed soldier it can already punish >= 65% is a
+            // better use of the action than a plant the squad will simply route around.
+            bool opp = false;
+            foreach (var p in players)
+            {
+                if (Util.TileDist(e.X, e.Y, p.X, p.Y) > e.Weapon.MaxRange) continue;
+                bool cmdP = g.Grid.HeightAt(e.X, e.Y) - g.Grid.HeightAt(p.X, p.Y) >= 2;
+                if (!g.Grid.HasLineOfSight(e.X, e.Y, p.X, p.Y, cmdP)) continue;
+                if (g.Grid.GetCover(p.X, p.Y, e.X, e.Y).Level > 0) continue;   // covered: hold the lane instead
+                if (OddsFrom(g, e, e.X, e.Y, p).HitChance >= 65) { opp = true; break; }
+            }
+            // Lane anchor = the nearest non-VIP soldier (the asset doesn't trip reactions worth a plant;
+            // denying the SQUAD's movement is the job). Only plant while the squad is within cone reach
+            // (MaxRange + 2) — beyond that the generic loop advances it like anyone else.
+            Unit anchor = null; int adist = int.MaxValue;
+            foreach (var p in players)
+            {
+                if (p.IsVip) continue;
+                int d = Util.ChebyDist(e.X, e.Y, p.X, p.Y);
+                if (d < adist) { adist = d; anchor = p; }
+            }
+            if (!opp && anchor != null && adist <= e.Weapon.MaxRange + 2)
+            {
+                // pick a plant tile from reach, keeping the action to plant, scored SPOTTER-style;
+                // a plant with no line of sight to the anchor holds nothing (the reaction runs
+                // through CanTarget), so blind tiles are filtered, not merely penalised.
+                (int x, int y) pt = (-1, -1); int ptCost = 0; float ptScore = float.NegativeInfinity;
+                foreach (var (tx, ty, c) in reach)
+                {
+                    int acts = c <= e.MoveBudget ? (c == 0 ? 0 : 1) : 2;
+                    if (acts >= 2) continue;                       // keep the action to plant
+                    bool cmdT = g.Grid.HeightAt(tx, ty) - g.Grid.HeightAt(anchor.X, anchor.Y) >= 2;
+                    if (!g.Grid.HasLineOfSight(tx, ty, anchor.X, anchor.Y, cmdT)) continue;
+                    var cov = g.Grid.GetCover(tx, ty, anchor.X, anchor.Y);
+                    int dn = Util.ChebyDist(tx, ty, anchor.X, anchor.Y);
+                    float s = cov.Level * 16 + g.Grid.HeightAt(tx, ty) * 8
+                              - Math.Abs(dn - 4) * 1.4f            // a lane is held at a short standoff
+                              + Util.RandRange(0f, 2f);
+                    if (dn <= 2) s -= 22;                          // never plant in shove/point-blank reach
+                    if (s > ptScore) { ptScore = s; pt = (tx, ty); ptCost = c; }
+                }
+                if (pt.x >= 0)
+                {
+                    var bp = new EnemyPlan
+                    {
+                        Brace = true,
+                        BraceDirX = Math.Sign(anchor.X - pt.x),
+                        BraceDirY = Math.Sign(anchor.Y - pt.y),
+                    };
+                    if (pt != (e.X, e.Y))
+                    {
+                        bp.Path = g.Grid.ReconstructPath(cameFrom, e.X, e.Y, pt.x, pt.y);
+                        bp.MoveActions = ptCost <= e.MoveBudget ? 1 : 2;
+                    }
+                    return bp;
+                }
+                // else: boxed out — fall through to the generic loop (never a dead turn)
             }
         }
 
@@ -798,7 +881,7 @@ public static class Ai
                           || Combat.MissionFaction == Faction.Legion;
             if (rusher)
             {
-                foreach (var p in g.AlivePlayers())
+                foreach (var p in players)   // FUL-7: the filtered list — never shove a downed body
                 {
                     if (p.Cls == "VIP") continue;                                  // never shove the asset
                     if (Util.ChebyDist(bestTile.x, bestTile.y, p.X, p.Y) != 1) continue;   // adjacent only
@@ -890,7 +973,7 @@ public static class Ai
         int bx = -1, by = -1, best = 0;
         foreach (var p in g.AlivePlayers())
         {
-            if (p.IsVip) continue;
+            if (p.IsVip || p.Downed) continue;   // FUL-7: a downed body holds no lane to screen
             if (Util.TileDist(fx, fy, p.X, p.Y) > Game.ItemRange) continue;
             if (!g.Grid.HasLineOfSight(fx, fy, p.X, p.Y)) continue;         // must see the lane it screens
             // don't drop the cloud on/next to a fellow enemy (it would blind our own team's sightlines)
@@ -910,7 +993,7 @@ public static class Ai
             // score: how many soldiers this radius-1 cloud would blind (a lane through a cluster is best)
             int hits = 0;
             foreach (var q in g.AlivePlayers())
-                if (!q.IsVip && Util.ChebyDist(p.X, p.Y, q.X, q.Y) <= SmokeAnim.Radius) hits++;
+                if (!q.IsVip && !q.Downed && Util.ChebyDist(p.X, p.Y, q.X, q.Y) <= SmokeAnim.Radius) hits++;
             if (hits > best) { best = hits; bx = p.X; by = p.Y; }
         }
         return best > 0 ? (bx, by, true) : (0, 0, false);
@@ -923,9 +1006,10 @@ public static class Ai
         int bx = -1, by = -1, bestHits = 0, bestAllies = 99;
         foreach (var p in g.AlivePlayers())
         {
+            if (p.Downed) continue;   // FUL-7: never AIM at a downed body (AoE stays blind, not deliberate)
             if (Util.TileDist(fx, fy, p.X, p.Y) > Game.ItemRange) continue;
             int hits = 0, allies = 0;
-            foreach (var q in g.AlivePlayers()) if (Util.ChebyDist(p.X, p.Y, q.X, q.Y) <= FlashAnim.Radius) hits++;
+            foreach (var q in g.AlivePlayers()) if (!q.Downed && Util.ChebyDist(p.X, p.Y, q.X, q.Y) <= FlashAnim.Radius) hits++;
             // count the THROWER too (review Mi4): a flash that lands adjacent to e would
             // disorient e itself - that's self-harm, so it must veto the throw.
             foreach (var a in g.AliveEnemies()) if (Util.ChebyDist(p.X, p.Y, a.X, a.Y) <= FlashAnim.Radius) allies++;
@@ -946,10 +1030,10 @@ public static class Ai
         int bx = -1, by = -1, best = 0;
         foreach (var p in g.AlivePlayers())
         {
-            if (p.IsVip) continue;                               // don't waste the shell on the fragile asset
+            if (p.IsVip || p.Downed) continue;                   // don't waste the shell on the asset / a downed body (FUL-7)
             int hits = 0, allies = 0;
             foreach (var q in g.AlivePlayers())
-                if (Util.ChebyDist(p.X, p.Y, q.X, q.Y) <= Game.SiegeRadius) hits++;
+                if (!q.Downed && Util.ChebyDist(p.X, p.Y, q.X, q.Y) <= Game.SiegeRadius) hits++;
             foreach (var a in g.AliveEnemies())
                 if (a != e && a.Active && Util.ChebyDist(p.X, p.Y, a.X, a.Y) <= Game.SiegeRadius) allies++;
             if (allies > 0) continue;                            // never shell our own
@@ -972,11 +1056,12 @@ public static class Ai
         int bx = -1, by = -1, bestHits = 0, bestAllies = 99;
         foreach (var p in g.AlivePlayers())
         {
+            if (p.Downed) continue;   // FUL-7: never AIM at a downed body (a blast aimed at standing soldiers still catches it — AoE stays blind)
             if (Util.TileDist(fx, fy, p.X, p.Y) > Game.GrenadeRange) continue;
             if (!g.Grid.HasLineOfSight(fx, fy, p.X, p.Y)) continue;   // can't blind-lob over walls / through smoke
             if (Util.ChebyDist(fx, fy, p.X, p.Y) <= GrenadeAnim.Radius) continue;  // don't catch the thrower in its own blast
             int hits = 0, allies = 0;
-            foreach (var q in g.AlivePlayers()) if (Util.ChebyDist(p.X, p.Y, q.X, q.Y) <= GrenadeAnim.Radius) hits++;
+            foreach (var q in g.AlivePlayers()) if (!q.Downed && Util.ChebyDist(p.X, p.Y, q.X, q.Y) <= GrenadeAnim.Radius) hits++;
             foreach (var a in g.AliveEnemies()) if (a != e && Util.ChebyDist(p.X, p.Y, a.X, a.Y) <= GrenadeAnim.Radius) allies++;
             if (hits > bestHits || (hits == bestHits && allies < bestAllies))
             { bestHits = hits; bestAllies = allies; bx = p.X; by = p.Y; }

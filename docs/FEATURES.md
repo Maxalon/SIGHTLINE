@@ -239,6 +239,12 @@ seeds (mix of WIN/LOSE, no exceptions):
   frags clustered/covered soldiers (from mission 2; never hits its own).
 - **Activation pods:** enemies dormant (dimmed, "?") until a soldier sights them,
   then the pod wakes + scatters to cover ("CONTACT!"). Scouting carries risk.
+  **FUL-6:** missions 3+ group the initial force into **pods of 3** (pure `Mission.PodPlan`
+  greedy split — 9 -> {3,3,3}; m1-2 and the finale keep the classic pairs) that spawn as
+  **visible clumps** (members anchor to the pod lead's row/column band), and **gunfire
+  carries**: waking a pod puts the nearest dormant pod within 6 tiles on the telegraphed
+  Suspicious track ("HEARD THE GUNS"), confirming to Alert one turn later even unseen —
+  one link per wake, never chains, zero RNG. Codex LINKED ALERTS row; `SIGHTLINE_PODTEST`.
 - **Run save/load:** the campaign is checkpointed to the OS user-data dir at each
   mission start (`src/SaveGame.cs`); the intro offers **CONTINUE RUN** (key C) to
   resume. The save is cleared when a run ends.
@@ -385,10 +391,22 @@ seeds (mix of WIN/LOSE, no exceptions):
   its remaining actions THIS turn (its post-move shot/grenade is denied) — for reduced, non-crit damage. Trade a
   kill you won't land for tempo — an earnable comeback lever. One reaction/soldier/turn; green "BRC" badge + bracket
   icon. (`Unit.OwBrace`, `ShotAnim.Stagger`, `Game.DoBrace`; `SIGHTLINE_STAGGERTEST`.)
+- **PIKEMAN "SARISSA" — the enemy-side BRACE (FUL-8):** a Wardens lane-holder (10% m2+ faction slot;
+  ~3% default-cascade m3+ tail) that plants a braced focus cone over a movement lane and STAGGERS the
+  first soldier through — halved, no-crit damage via the IDENTICAL team-symmetric reaction path, so it
+  teaches the player's own BRACE by mirroring it. Foe-red cone wash + edge rays + chevron reuse the
+  player's gold FOCUS vocabulary; the enemy threat wash is cone-truth-gated; the STAGGERED pop colors
+  by victim team. Counters: kill it, stagger it back, FLASH/SHOVE it, rout its pod, smoke/LoS-break
+  the lane, walk outside the 90° cone, or feed it ONE cheap step (one reaction/round). The autopilot
+  prices live lanes at +18 TileExposure and routes around them. (`Ai.Plan` PIKEMAN branch,
+  `Game.InEnemyBraceLane`; `SIGHTLINE_PIKETEST` / `SIGHTLINE_PIKESHOT`; codex row SARISSA.)
 - **Enemy pod MORALE / ROUT:** pods carry shared morale; killed down to ≤ half their spawn strength, the survivors
   BREAK and ROUT for ~2 turns — flee toward their own edge, drop overwatch, and shoot wild (−18 aim) — then rally.
   Focus-firing a pod down is a genuine comeback: the second kill panics the pod. Green "ROUT" tag + "POD ROUTED"
-  banner. (`Unit.Routed`, `Game.BreakPodMorale`; `SIGHTLINE_MORALETEST`.)
+  banner. (`Unit.Routed`, `Game.BreakPodMorale`; `SIGHTLINE_MORALETEST`.) **FUL-6:** pods of 3 (m3+) give the
+  arc its full staging — kill 1 of 3 flags WAVERING, kill 2 breaks the survivor — and **LAST STAND waves join
+  morale**: each wave's landed bodies split into sub-pods (ids 100+, `_podOrig`-sealed), so routs play mid-stand
+  (the injected deep-wave ELITE stays morale-exempt); TERROR is live in endless boon offers again.
 - **Sequenced enemy coordination:** setup verbs (SAPPER breach / STRIKER + adjacent shove) act BEFORE the finishers,
   and the squad's shared focus is recomputed live per unit — so a shove/breach that exposes a soldier redirects the
   pod onto that opening the same turn (setup-then-collapse). Advisory-only, TIMEOUT-safe. (`Game.IsSetupUnit` + a
@@ -471,7 +489,8 @@ seeds (mix of WIN/LOSE, no exceptions):
   STANDING RESERVE (3rd recall slot); heat multiplies the win bounty; daily wins pay 10+heat
   once per calendar stamp with a streak counter and two achievements.
 - **Pools:** boons SHOCK DOCTRINE (braced interrupts deal full damage), TERROR (routs last +2
-  turns), FIELD DRILLS (DRAG/VAULT ×2 per turn), PYROMANIACS (own fire +2 turns, squad
+  turns), FIELD DRILLS (FUL-6 rework: a DRAG or VAULT *drills* the soldier — +1 tile of movement
+  for the rest of that turn, and DRAG/VAULT ×2 per turn), PYROMANIACS (own fire +2 turns, squad
   burn-immune), FIELD STORES (utility items ×2 charges), RECLAIMER (focused-cone overwatch kills
   refund the reaction); weapon mods BIPOD (+10 aim if unmoved) and SUPPRESSOR (a suppressed shot
   wakes only the target's pod); secondaries GHOST / DEMOLITION / BOUNTY; the INTEL CACHE (an
@@ -492,3 +511,30 @@ seeds (mix of WIN/LOSE, no exceptions):
 - **The compass (dev-facing):** CRN-paired greedy/sloppy legs over identical worlds, positional
   error injection, ACTION MIX + BY PERK/PURCHASE/ARENA tables, whole-run objective pins,
   SIGHTLINE_PAIRTEST.
+
+## PROGRAM FULCRUM — death gets a window (FUL-7 LAST LIGHT)
+- **DOWN / bleed-out:** lethal damage on a non-VIP soldier opens a **3-turn DOWN window** instead of an
+  instant kill — the whole state machine enters as one guard at the top of `Game.KillUnit` (the single
+  lethal seam every damage path funnels through). While down: Hp 0 but ALIVE, prone 0.6x body + pulsing
+  red ground ring + a red `DOWN 3/2/1` pill (amber `STABLE` once stabilized), HP bar hidden, red roster-
+  chip state, never selectable, and never targeted by enemy **direct** fire (one filter at the top of
+  `Ai.Plan`, mirrored by the aim helpers + the dragged-body overwatch guard) — but **AoE stays blind**:
+  a shell/frag/barrel/fire field that catches the body kills it outright (the telegraphed-weapons
+  honesty valve), and **nobody goes down twice in one mission** (`WasDownedThisMission`).
+- **The rescue kit:** **STABILIZE** (universal verb, key E; adjacent, 1 action, doesn't end the turn)
+  freezes the timer — the soldier stays down but stops dying; the corpsman's **PATCH revives** (PatchHeal
+  HP, up-but-actionless that turn; CombatMedic reach-2 and FieldSurgeon triage ride along; same Cd 3);
+  **DRAG/EXTRACT carry the body** (pinned against regression); a **WON field recovers** every downed
+  survivor at Hp 1 / Wound 3 + the near-death scar track ("recovered from the field - gravely wounded");
+  LAST STAND's wave-clear breather revives the downed at the mend value. A bleed-out runs the FULL death
+  flow — Fallen + Memorial + KIA stamp, and the honest loss card names the DOWNING archetype.
+- **Honest bounds + vocabulary:** timers tick on the squad's clock (StartPlayerTurn) and UNFREEZE when no
+  soldier is left standing, so an all-downed board always resolves in <= 3 turns; the soldier true-death
+  pop is renamed **KIA** (DOWN now means the window) and the combat log logs `DOWN`, not `KILL`, for a
+  lethal blow the soldier survives. Transient end to end — nothing persists (DTO whitelist; SAVETEST leg).
+  (`Game.EnterDowned/ExpireDowned/DoStabilize`; autopilot revive/stabilize arm + generalized
+  `TryMoveToPatch` + the Evac no-corpsman freeze guard; `SIGHTLINE_DOWNTEST` (legs a-h) /
+  `SIGHTLINE_DOWNSHOT` (=2 mid-rescue); codex row DOWN (BLEEDING OUT); down telemetry in the balance
+  report: downs -> revived/recovered/bled-out/finished + honest save-rate + corpsman-fielded
+  missions. Review round F1-F6: downed bodies exit EVERY enemy-attention seam — the squad focus
+  pick, shield facing, reposition exposure — plus the honest ledger/banner/pill wording.)

@@ -83,6 +83,8 @@ public static class Codex
         // SIGNAL W8 — morale contested: the banner anchor + the objective keeper.
         ("SIGNIFER", "WARBRINGER", "Standard-bearer — pods near its banner cannot rout and rally faster. Kill the banner to break their nerve."),
         ("SEXTON",  "CUSTODIAN",  "Objective keeper — walks to the terminal or a blown charge and undoes one step of your progress each turn. Screen it out or shoot it first."),
+        // FUL-8 — movement contested: the Wardens lane-holder (the enemy-side mirror of BRACE [B]).
+        ("SARISSA", "PIKEMAN",   "Lane-holder — plants a braced cone over a movement lane and STAGGERS the first soldier through: reduced damage, but your action is denied. It is exactly your own BRACE. Break its watch, go around the cone, or feed it a cheap step first."),
         // SIGNAL W5: every named boss (BREAKER/BULWARK/WARDEN mid-bosses; WARLORD/SIEGELORD/
         // SPYMASTER finales) shares Cls "ELITE" — one bestiary row covers the family, and the
         // blurb now names the faction signatures so the manual matches the new climax kits.
@@ -188,6 +190,12 @@ public static class Codex
         Add("SUPPRESSION", $"-{Combat.SuppressAim} AIM",
             $"Weight of fire pins a target: -{Combat.SuppressAim} aim, and a PINNED foe cannot dash. " +
             $"A sharpshooter's MARK is the mirror: the whole squad gains +{Combat.MarkAim} aim against the painted foe.");
+        // FUL-6: the two universal positioning verbs get a rules row (they had none), incl. the
+        // reworked FIELD DRILLS drill effect so the boon's copy is anchored in the rules tab.
+        Add("DRAG & VAULT", "FIELD CRAFT",
+            "Two universal 1-action verbs, once per soldier per turn each: DRAG pulls an ally within reach one tile " +
+            "toward you (haul a wounded mate out of a lane); VAULT leaps an adjacent cover block to the floor beyond. " +
+            "Neither ends the turn. The FIELD DRILLS boon makes either DRILL the soldier: +1 tile of movement that turn.");
 
         return e;
     }
@@ -306,7 +314,14 @@ public static class Codex
         // ordinal and stays append-only). Every banner/pop-text word a fight can stamp on a unit
         // is now findable here. Magnitudes are the real constants.
         e.Add(new CodexEntry { Title = "ROUTED", Code = "MORALE",
-            Desc = $"Its pod broke at half strength: flees toward its own edge, drops overwatch and shoots wild for {Game.RoutDuration} turns, then rallies." });
+            Desc = $"Its pod broke at half strength — in a pod of 3 the first kill sets the survivors WAVERING and the second breaks them: flees toward its own edge, drops overwatch and shoots wild for {Game.RoutDuration} turns, then rallies." });
+        // FUL-6: linked activation is a coded battlefield state the player must be able to look up.
+        e.Add(new CodexEntry { Title = "LINKED ALERTS", Code = "HEARD THE GUNS",
+            Desc = $"Gunfire carries: waking a pod alerts the nearest dormant pod within earshot ({Game.LinkRange} tiles, missions 3+); it arrives one turn later, without the ambush scatter. You always get the warning. Counters: kill the woken pod inside the warning turn and set a line (BRACE/overwatch/frag) for the second; pre-frag the telegraphed pod (it lands clumped); or open the fight from a lane where no second pod sits within earshot." });
+        // FUL-7: the bleed-out window is a coded battlefield state — the player must be able to
+        // look up the whole rescue kit. Magnitudes are the real constants.
+        e.Add(new CodexEntry { Title = "DOWN (BLEEDING OUT)", Code = "DOWN",
+            Desc = $"Lethal damage drops a soldier for {Game.DownedTimerTurns} turns instead of killing them. STABILIZE (any adjacent soldier, 1 action) freezes the timer; a CORPSMAN's PATCH gets them back up; DRAG or haul them to extraction. Blasts and fire finish the job - and nobody survives going down twice in one mission." });
         e.Add(new CodexEntry { Title = "STAGGERED", Code = "BRACE",
             Desc = "Interrupted by a BRACE reaction: remaining actions this turn are denied and any held overwatch drops." });
         e.Add(new CodexEntry { Title = "SUPPRESSED", Code = $"-{Combat.SuppressAim} AIM",
@@ -398,6 +413,7 @@ public static class Codex
             "GRUNT","SCOUT","SNIPER","TURRET","BERSERKER","DRONE","SHIELD","SAPPER","MEDIC",
             "BRUISER","HUNTER","LANCER","HOUND","MORTAR","SPOTTER","BOMBARD","STRIKER","SCREENER","ELITE",
             "WARBRINGER","CUSTODIAN",   // W8: banner anchor + objective keeper
+            "PIKEMAN",                  // FUL-8: the lane-holder (enemy-side BRACE mirror)
         };
         var covered = new HashSet<string>();
         foreach (var b in Bestiary) covered.Add(b.Cls);
@@ -427,7 +443,9 @@ public static class Codex
 
         // W11: the STATUS tab documents the out-of-enum battlefield states too.
         var statusRows = StatusEntries();
-        foreach (var want in new[] { "ROUTED", "STAGGERED", "SUPPRESSED", "PINNED", "MARKED", "CONCEALED" })
+        foreach (var want in new[] { "ROUTED", "STAGGERED", "SUPPRESSED", "PINNED", "MARKED", "CONCEALED",
+                                     "LINKED ALERTS",     // FUL-6: the heard-the-guns telegraph row
+                                     "DOWN (BLEEDING OUT)" })   // FUL-7: the bleed-out window + rescue kit
             if (!statusRows.Exists(r => r.Title == want && !string.IsNullOrWhiteSpace(r.Desc)))
                 fails.Add($"STATUS missing W11 row {want}");
 

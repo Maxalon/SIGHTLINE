@@ -91,6 +91,10 @@ public static class Stats
         public readonly List<string> BoonsPicked = new();  // run-scoped doctrine/boon picks
         public readonly List<string> ContractsPicked = new();  // W6 run-contract picks (usually 0-1/run)
         public readonly List<string> EventChoices = new();     // FUL-1: field-event picks as "id:arm"
+        // FUL-13: intel cash-flow — signed deltas recorded at every Run.Intel mutation site.
+        // IntelHeatBonus is the Heat.IntelBonus component of mission-clear income (the
+        // "does heat refund its own difficulty through the shop?" read).
+        public int IntelEarned, IntelHeatBonus, IntelSpent;
         public readonly List<MissionRec> Missions = new();
     }
 
@@ -152,6 +156,9 @@ public static class Stats
         if (!Enabled || string.IsNullOrEmpty(code)) return;
         Bump(_boonProcs, code);
     }
+    /// FUL-6 PODTEST read hook: current proc tally for a code (0 if never fired). Test-only read;
+    /// the balance report keeps printing from the dictionary directly.
+    public static int ProcCount(string code) => _boonProcs.GetValueOrDefault(code, 0);
 
     // ── FUL-1: ARENA FUNNEL ──────────────────────────────────────────────────────
     // Mission.Build's layout decision, split into the three exits that sum to 100% of
@@ -176,6 +183,34 @@ public static class Stats
         _run.EventChoices.Add($"{id}:{arm}");
     }
 
+    // ── FUL-13: INTEL CASH-FLOW ──────────────────────────────────────────────────
+    // Signed deltas recorded at the Run.Intel mutation sites (mission-clear award incl. its
+    // heat-bonus component, secondaries, cache pickups, event arms/gambles, shop/armory
+    // spends) so the report can answer the FUL-13 economy question: does heat REFUND its
+    // own difficulty through the shop? Run-scoped (report keys by heat); telemetry-only,
+    // zero draws — CRN-safe by construction (the FUL-1 precedent).
+    public static void RecordIntel(int delta, int heatBonus = 0)
+    {
+        if (!Enabled || _run == null) return;
+        if (delta >= 0) _run.IntelEarned += delta; else _run.IntelSpent -= delta;
+        _run.IntelHeatBonus += heatBonus;
+    }
+
+    // ── FUL-7: DOWN / bleed-out telemetry ────────────────────────────────────────
+    // Downs staged and how each resolved: revived (a corpsman's PATCH), recovered (a won
+    // field / the endless breather), expired (bled out), or FINISHED (killed while down —
+    // AoE/fire/second-lethal, review F2). save-rate = 1 - (expired+finished)/downs — the
+    // measured number DESIGN §4's death-stakes re-grade reads. CorpsmanMissions counts
+    // missions with a corpsman fielded (the PATCH per-presence denominator). Batch-global.
+    static int _downs, _downExpired, _downFinished, _downRevived, _downRecovered, _corpsmanMissions;
+    public static void RecordDown()            { if (Enabled) _downs++; }
+    public static void RecordDownExpired()     { if (Enabled) _downExpired++; }
+    public static void RecordDownFinished()    { if (Enabled) _downFinished++; }
+    public static void RecordDownRevived()     { if (Enabled) _downRevived++; }
+    public static void RecordDownRecovered()   { if (Enabled) _downRecovered++; }
+    public static void RecordCorpsmanFielded() { if (Enabled) _corpsmanMissions++; }
+    public static int DownCount => _downs;     // DOWNTEST read hook
+
     public static void Reset()
     {
         Runs.Clear(); _run = null; _mission = null;
@@ -183,6 +218,7 @@ public static class Stats
         _actionsByPolicy.Clear();
         _boonProcs.Clear();
         _arenaFunnel[0] = _arenaFunnel[1] = _arenaFunnel[2] = 0;
+        _downs = _downExpired = _downFinished = _downRevived = _downRecovered = _corpsmanMissions = 0;   // FUL-7
         Slot = -1;
     }
 
@@ -504,6 +540,20 @@ public static class Stats
                 sb.AppendLine($"  heat {g.Key}: {Pct(g.Count(r => r.Win), g.Count())}{Se(g.Count(r => r.Win), g.Count())}  (n={g.Count()} runs, avg {g.Average(r => (double)r.MissionsCleared):0.0} missions)");
         }
 
+        // ── FUL-13: INTEL ECONOMY BY HEAT ────────────────────────────────────────────
+        // Cash-flow per run, keyed by heat. heat-bonus share of income is the flood signal:
+        // if the ladder's higher rungs bank MORE unspent intel than h0, heat is refunding
+        // its own difficulty through the shop and the economy needs a drain.
+        if (campRuns.Count > 0 && campRuns.Any(r => r.IntelEarned > 0 || r.IntelSpent > 0))
+        {
+            sb.AppendLine("\nINTEL ECONOMY BY HEAT (campaign runs; heat-bonus = the Heat.IntelBonus share of income):");
+            foreach (var g in campRuns.GroupBy(r => r.Heat).OrderBy(g => g.Key))
+                sb.AppendLine($"  heat {g.Key}: earned {g.Average(r => (double)r.IntelEarned),6:0.0}/run"
+                    + $"   heat-bonus {g.Average(r => (double)r.IntelHeatBonus),5:0.0} ({Pct(g.Sum(r => r.IntelHeatBonus), Math.Max(1, g.Sum(r => r.IntelEarned)))} of income)"
+                    + $"   spent {g.Average(r => (double)r.IntelSpent),6:0.0}"
+                    + $"   unspent {g.Average(r => (double)(r.IntelEarned - r.IntelSpent)),6:0.0}");
+        }
+
         // ── APEX W4: ENDLESS WAVE DEPTH (LAST STAND) ─────────────────────────────────
         // The mode's tuning metric: how deep a stand gets before the wipe. Depth for these runs
         // is stored in MissionsCleared (= waves survived — logged from game.Wave at every exit:
@@ -668,6 +718,19 @@ public static class Stats
             foreach (var kv in deaths.OrderByDescending(kv => kv.Value))
                 sb.AppendLine($"  {kv.Key,-11}: {kv.Value}");
         }
+
+        // ── FUL-7: the DOWN ledger — downs staged and how each resolved. save-rate =
+        // 1 - (bled-out + finished)/downs (review F2: a body killed while down is a death, not
+        // a save; a down still open at run end counts saved — the run decided first).
+        // The corpsman-fielded count is the PATCH per-presence denominator.
+        if (_downs > 0)
+        {
+            int saved = _downs - _downExpired - _downFinished;
+            sb.AppendLine($"\nSOLDIER DOWNS (FUL-7 bleed-out): {_downs} downs -> revived {_downRevived} / recovered {_downRecovered} / bled out {_downExpired} / finished {_downFinished}  (save-rate {Pct(saved, _downs)})");
+            sb.AppendLine($"  corpsman fielded in {_corpsmanMissions} missions");
+        }
+        else if (_corpsmanMissions > 0)
+            sb.AppendLine($"\nSOLDIER DOWNS (FUL-7 bleed-out): 0  (corpsman fielded in {_corpsmanMissions} missions)");
 
         // ── APEX W5: ENEMY COMPOSITION (spawn tally, faction-stamped vs default cascade) ──────
         // The content-reachability metric: which archetypes the campaign actually FIELDS, split by
@@ -922,6 +985,15 @@ public static class Stats
                 runWinRate = Math.Round(100.0 * g.Count(r => r.Win) / g.Count(), 1),
                 se = SeVal(g.Count(r => r.Win), g.Count()),
                 avgMissionsCleared = Math.Round(g.Average(r => (double)r.MissionsCleared), 2)
+            }).ToList(),
+            // FUL-13: intel cash-flow by heat (see RecordIntel — the heat-flood read).
+            intelByHeat = campRuns.GroupBy(r => r.Heat).OrderBy(g => g.Key).Select(g => new
+            {
+                heat = g.Key, runs = g.Count(),
+                earned = Math.Round(g.Average(r => (double)r.IntelEarned), 1),
+                heatBonus = Math.Round(g.Average(r => (double)r.IntelHeatBonus), 1),
+                spent = Math.Round(g.Average(r => (double)r.IntelSpent), 1),
+                unspent = Math.Round(g.Average(r => (double)(r.IntelEarned - r.IntelSpent)), 1)
             }).ToList(),
             byHeat = missions.GroupBy(m => m.Heat).OrderBy(g => g.Key).Select(g => new
             {

@@ -748,7 +748,7 @@ worktree, adversarially reviewed, and merge-gated on self-tests + autoplay + Rel
       the meta screens, coherent intro hierarchy, WAR ROOM progress bars + NEXT UNLOCK card,
       promotion delta lines, first-run RECOMMENDED draft.
 
-## PROGRAM "FULCRUM" — in flight (see docs/DEVLOG.md for milestone write-ups)
+## PROGRAM "FULCRUM" — CLOSED 2026-08-28 (13/13 waves landed; the measured close is docs/DEVLOG.md §FUL-13)
 
 Research: six fresh lenses on the post-SIGNAL tree → PM synthesis → orchestrator code-sharpening.
 Through-line: **systems that exist but never reach play** — the comeback economy (BRACE/morale/verb
@@ -876,23 +876,70 @@ of record (container suspensions have wiped every scratchpad copy — docs are t
       Budget: h0 completion 60 → 50/45 (−10 to −15, OUTSIDE ±7, reported not hidden): the drag
       is the newly-EXPOSED Defend/mid-Decapitate cells on ~every route, not the arenas —
       FUL-13's re-baseline input (full table in docs/DEVLOG.md).
-- [ ] **FUL-6 CRITICAL MASS** (P6, L). Pods of 3 + linked activation in mid/late missions — one
-      real multi-pod battle per mission instead of six 2-enemy executions, so BRACE/morale/verb
-      boons get a stage; morale/rout reaches LAST STAND's horde. Files: Mission.cs, Game.cs,
-      Game.Endless.cs, Run.cs, Game.Harness.cs. (Detailed spec lost to a container wipe —
-      re-derive from the research finding + this goal before dev.)
-- [ ] **FUL-7 LAST LIGHT** (P7, L). Downed soldiers: 2-3 turn bleed-out with stabilize/carry
-      counterplay instead of instant death — the genre's best decision, currently absent. Files:
-      Unit.cs, Game.cs, Ai.cs, Game.Autopilot.cs, Hud.cs, Renderer.cs, Codex.cs, Game.Harness.cs.
-      Save-compat: any new persisted enum values append-only. (Spec to re-derive; depends on
-      FUL-1 telemetry + FUL-5 bot hands to measure honestly.)
-- [ ] **FUL-8 PIKEMAN** (P8, M). The SARISSA — a Wardens lane-holder that plants a braced foe-red
-      cone over a movement lane and STAGGERS the first soldier through; teaches the player's BRACE
-      by mirroring it. Keystone: the BRACE reaction plumbing is already team-symmetric
-      (OnUnitEnteredTile watcher pick, OwBrace halving, ShotAnim stagger, cone gate, one-reaction
-      cap) — the wave is an Ai plant branch + renderer cone + bot danger-tiles + codex + PIKETEST.
-      Full dev-executable spec (verified seams, spawn re-slices, harness legs):
-      docs/plans/FUL-8-pikeman-FUL-10-forks.md. Launches after FUL-5 merges (shared autopilot).
+- [x] **FUL-6 CRITICAL MASS** (P6, L) — **landed** (wt-ful6, base 588d781). Pods of 3 (PodPlan
+      greedy split, m3+; m1-2 and the finale keep i/2 — FUL11PROBE green by construction) + pod
+      cohesion (anchor-row clumping, zero extra draws) + linked activation ("HEARD THE GUNS":
+      ActivatePod links the nearest dormant pod within 6 tiles to Suspicious, confirming unseen
+      next turn — one link per wake, no chains, zero RNG) + LAST STAND wave sub-pods (100+/sealed;
+      elite exempt; TERROR un-excluded from endless boons) + the FIELD DRILLS rework (+1 move
+      after a drag/vault, grant-site proc). Measured wave (fresh same-slot R0 first, one lever
+      per round): the full stack breached the dip budget (-12.5 vs <=8), so **escalation lever 1
+      landed** (count-1 on all m3+ non-finale missions) -> combined h0 completion 40% == R0's 40% (dip 0, in
+      budget). GRENADE >=10 prediction did NOT materialize (verdict recorded: woken pods scatter out of the
+      bot's frag window — review note: SmartGrenade has NO Active filter, so the low count is
+      emergent geometry, not a coded decline of dormant clumps);
+      BRACE held >=30; TRR procs 18-31 (rout economy livelier at 3-pods); RCL now procs 1-3/batch
+      (no longer structurally dead); FDR 0 procs in wave batches (0 boon-held drags in those
+      worlds — mechanism PODTEST-pinned; FUL-7's drag stage prices it). Endless depth median
+      5.5-6 (in the APEX 5-6 band), zero cap hits. SIGHTLINE_PODTEST + PODSHOT. Rounds table in
+      docs/DEVLOG.md. Full spec: docs/plans/FUL-6-critical-mass-FUL-7-last-light.md.
+- [x] **FUL-7 LAST LIGHT** — **landed** (wt-ful7, base c74378e). Lethal damage on a non-VIP
+      soldier becomes a 3-turn BLEED-OUT (once per soldier per mission; AoE/fire on a downed body
+      stays lethal; enemies never direct-target the downed — the telegraphed-AoE valve keeps
+      stakes): all through the single KillUnit seam. STABILIZE universal verb (key E) freezes the
+      timer (the freeze needs a standing squad — all-downed boards stay <= 3-turn bounded);
+      corpsman PATCH revives; DRAG/EXTRACT carry pinned; EnterBarracks recovers survivors at Hp 1 /
+      Wound 3 + the near-death scar track; a bleed-out runs the full death path (Fallen/Memorial/
+      honest loss card names the DOWNING archetype — LGD's veteran-erase needed no special case);
+      endless wave-clear revives at the mend value. Zero persistence (DTO whitelist + SAVETEST
+      leg); no enum touched. **Measured (paired h0, fresh same-slot R0; review-fixed build):**
+      soldier true-KIA **-40%** (125→75 on the re-measured chunk; target band 30-50%); save-rate
+      **33%** on the honest ledger (review F2 — a body finished while down is a death, not a
+      save); STABILIZE ~50-60 uses/chunk; PATCH >= 10 met in aggregate at 0.27/corpsman-fielded-
+      mission — corpsman present in only ~38-41% of missions: the roster-presence verdict
+      recorded for FUL-13; completion 50% → 60% re-measured (+10, at the budget boundary — saved
+      bodies play better, and review F1 restored the enemy focus layer while a body is down).
+      h4 close leg + the SHIP-WITH-FIXES review round (F1-F6) in docs/DEVLOG.md §FUL-7.
+      SIGHTLINE_DOWNTEST (legs a-h) + DOWNSHOT (both palettes + mid-rescue). Full spec:
+      docs/plans/FUL-6-critical-mass-FUL-7-last-light.md; details docs/DEVLOG.md §FUL-7.
+- [x] **FUL-8 PIKEMAN** (wt-ful8). The SARISSA — a Wardens lane-holder that plants a braced
+      foe-red cone over a movement lane and STAGGERS the first soldier through; the roster's first
+      piece that contests WHERE YOU MAY WALK, and it teaches the player's BRACE by being the
+      identical verb pointed back (zero new combat machinery — the OnUnitEnteredTile reaction path
+      was already team-symmetric). Shipped: Ai.Plan plant branch (opportunism-first, routed/
+      Disoriented/dry-gated, SPOTTER-style plant scoring, MORTAR fall-through safety); ActAfterMove
+      exec arms the exact player flag set + faces down the lane; renderer truth gate on
+      DrawOverwatchThreat (a focused enemy's wash now mirrors the cone reaction gate exactly) +
+      shared DrawConeRays (player gold / enemy foe-red can't drift) + PIKEMAN silhouette (squat
+      body, raised pike, crossbar) + STAGGERED pop colored by victim team (the green-on-your-own-
+      denial lie fixed); codex row SARISSA + CODEXTEST required; Wardens 10% m2+ re-slice + ~3%
+      default m3+ cascade tail (CRN draw-count neutral — windows only); bot: InEnemyBraceLane
+      mirrors the reaction gate, +18 TileExposure. Verified: PIKETEST (plant / the ==2 halving pin
+      on the enemy-side reaction / cone blindness / stagger-back break / no Disoriented-or-Routed
+      re-plant) + full battery PASS, Release 0/0, autoplay clean. Measured (CRN-paired slots):
+      h0 30→27.5%, h4 35→40% (both inside the ±5 gate); composition PIKEMAN 3-4% of faction-
+      stamped spawns (~10% of Wardens fights), 1-3% default; objective-pinned n~90 legs — Escort
+      5.9→5.6t (99→100%), Evac 5.5→5.8t (97→98%): the lane taxes routes, it does not stall them.
+      Details: docs/DEVLOG.md §FUL-8.
+- [ ] **FUL-10 FORKS** (P10, M). Seven trade-off field events crossing salvage/scar/veteran/
+      faction/heat (ids+arm order frozen for the compass; PendingSalvageReward run-committed via
+      AwardMetaRunEnd — events must never touch meta directly); two veteran-economy contracts
+      (MERCENARY CLAUSE: half-price recalls but no enshrinement; LIVING LEGENDS: pensions + double
+      rank-kills but KIA erases the reserve record); the orphaned perk trio Vantage/Breaker/
+      Siegebreaker joins real class lines. Contract enum append moves TWO tail pins
+      (SaveGame.cs:675 + CONTRACTTEST). Full spec: docs/plans/FUL-8-pikemen-FUL-10-forks.md
+      (file name: FUL-8-pikeman-FUL-10-forks.md). Bot arm-uptake measurement lands with FUL-5's
+      hashed chooser (FUL-10 makes the forks exist; FUL-5 makes the bot walk them).
 - [x] **FUL-10 FORKS** (P10, M — landed on wt-ful10). Seven trade-off field events crossing
       salvage/scar/veteran/faction/heat (ids+arm order frozen for the compass; PendingSalvageReward
       run-committed via AwardMetaRunEnd — events never touch meta directly); two veteran-economy
@@ -903,13 +950,61 @@ of record (container suspensions have wiped every scratchpad copy — docs are t
       with a Spearhead-position pin). Bot arm-uptake measurement lands with FUL-5's hashed chooser
       (FUL-10 makes the forks exist; FUL-5 makes the bot walk them). DEVLOG carries the measured
       landing + the accepted IndexForNode version-skew note.
-- [ ] **FUL-13 TRUE NORTH** (P13, L — LAST). Re-baseline the ladder on the finished tree (stale
-      published numbers: h0 read 60 vs 80 published in research); lift h4 toward its 60±8 band;
-      drain the intel flood (heat refunding itself through the shop); resolve the LOS-fix policy-
-      gap watch item (accept-vs-sharpen on the corrected tree); final DEVLOG measured tables.
-      Also owns: whether skirmish/daily should keep the m1 opener grace zeroing numeric heat
-      deltas (FUL-3 landing note — the picker desc is honest now, the design question isn't).
-      Parked from FUL-10: an event-exposure lever — widening GenerateMap's "?"-node stamp clamp
-      to `Clamp(mids/4, 1, 3)` (17 events now share 1-2 nodes/run ≈ each ~1-in-9 runs). CAVEAT:
-      GenerateMap re-runs from MapSeed on load, so changing the clamp silently reshapes IN-FLIGHT
-      saves' unvisited nodes — ship it only with that skew adjudicated.
+- [x] **FUL-13 TRUE NORTH** (P13, L — LAST; wt-ful13, base c4ef42e). The program close: the
+      published numbers made TRUE for the finished game. Intel cash-flow telemetry (61fbccd,
+      logic-identity verified — 33/33 base-schema JSON fields); the definitive ladder at proper N
+      (200 campaigns, 2 disjoint CRN slot sets/heat): **52.5/35/30/22.5/10** — goal band RE-SET
+      to **55/40/30/20/10 ±8** (h8 ±5, floor >=5) with the owner-facing reasoning in DEVLOG (the
+      80/70/60/40/20 band predates the exposure repair; un-repairing exposure was out of
+      authority). h4 measured ON its re-set band (30.0 vs 30±8) — no rung-average lever; the
+      wave's levers went to the measured SHAPE defect: **Defend inverted at the top** (82% h0 →
+      97% h6 / 91% h8; defend-pinned h8 96%, n=89, all-Defend completion 80% at a 10% rung).
+      R1 waves inherit Heat.StatDelta (7139a2f, truthful-not-binding); R2 defendKeep = graced
+      heatEnemy/2 (03f02dc) → pinned h8 Defend **87** = parity with pinned h0's 83, h4 Defend 61
+      (FUL-4's band), rung dips in budget (h8 10→5 at the band floor, reported); R3 ceil probe
+      REVERTED (no h6 movement, real h4 cost — the h6 residual recorded with mechanism). LOS
+      policy-gap thread CLOSED at N=100 pairs: binary −2.0, margin −0.06±0.21, sign-test p=0.87
+      — zero, not negative; forgiving-by-design ACCEPTED, sloppy definition unchanged. Intel
+      flood RESOLVED no-drain (kicker = 57% of h8 income, ALL converts to shop spend, unspent
+      flat 14-19, slope survives). Event EV-weighting (FireWeight) + informant PrepDead gate
+      (+8 EVENTTEST legs; h0 A/B byte-identical — binds on future catalogs + human legality).
+      Endless depth 32 stands median 6 (APEX band top edge, = FUL-6). m5 all-Defend cell
+      resolved 89% (n=9 — the 12.5%/n=8 was noise); per-kit finale drift closed world-driven
+      (paired slots: W81/L69/S94, an ordering flip vs FUL-11 = worlds, not kits). "?"-node
+      Clamp(1,3) lever measured NEARLY INERT (18/20 slot-pairs byte-identical, zero added event
+      volume) — recommendation recorded, NOT applied. RCL kept-as-is (4 procs/200 — bot floor
+      understates the human combo line); FDR closed alive (11 procs — FUL-7's drag stage priced
+      it). README screenshot retaken (the FULCRUM board). Full tables + the program-close
+      write-up: docs/DEVLOG.md §FUL-13.
+
+## OPEN / NEXT (post-FULCRUM backlog — seeded at the FUL-13 close)
+
+Reference for any future wave: the FUL-13 ladder + re-set goal band (docs/DEVLOG.md §FUL-13)
+is the number of record; method per FUL-2/FUL-5 — CRN chunks via SIGHTLINE_BALANCE_BASE slot
+sets, one lever per measured round, fresh same-slot R0 first, dip budgets, breaches reported.
+
+- [ ] **Owner decisions pending** (decision paragraphs with recommendations in DEVLOG §FUL-13
+      "DESIGN-QUESTION DOCKET"): skirmish numeric heat (recommend: exempt SKIRMISH from the m1
+      grace, keep DAILY); founding-squad corpsman (recommend: first-backfill guarantee or
+      keep-as-is — a founding-four identity choice, not a tune); grenade pre-frag bot arm
+      (recommend: accept the human-vs-bot read gap as designed skill expression).
+- [ ] **The h6 Defend residual** (the one recorded bump after the FUL-13 rounds: pinned h6
+      Defend 97% n=89 while pinned h8 sits at 87 parity). Mechanism named in Game.cs at the
+      defendKeep line: at +2 stats extra bodies feed the rout economy instead of pressuring
+      the hold. Any future lever should be stat- or cadence-flavoured, not bodies.
+- [ ] **Escort at the apex** (h8 29%, n=17 — the wall's killer cell; h6 67%). Allowed today as
+      apex texture; if the owner wants the h8 objective spread tightened, start from the FUL-13
+      per-objective table and the VIP-durability lever, not blanket rung stats.
+- [ ] **Event exposure** (informant/reservecall fielded ZERO times in 200 campaigns; each event
+      ~1-in-9 runs at 17 entries). The parked Clamp(1,3) lever is measured nearly inert (FUL-13)
+      — the honest levers are floor-2 stamping (Clamp(mids/4,2,3); reshapes in-flight saves'
+      unvisited "?" nodes — adjudicate the skew) or a cross-run catalog dedupe (profile-side,
+      no skew). The reservecall value prior is rank-blind (noted in DEVLOG) — revisit only with
+      real exposure.
+- [ ] **RCL sweeten option** (only if the owner wants the boon mainstream): "any overwatch kill
+      re-arms, once/turn" — the cone-kill proc is an honest but thin combo line (4 procs/200
+      campaigns at FOCUS 843); measure against the FUL-13 procs table.
+- [ ] **h8 corpsman blackout** (RELENTLESS kills backfill → corpsman fielded 13% of h8 missions,
+      PATCH 5/batch): intended apex cruelty or a hole in the revive economy — pairs with the
+      founding-corpsman decision.
+- [ ] **On-device audio tuning** (carried; needs the human).

@@ -325,6 +325,30 @@ public static class EventCatalog
         return roll < chancePct;
     }
 
+    // ---------------- FUL-13: arm-valuation helpers (pure; EVENTTEST-pinned) ----------------
+    /// The probability weight at which an outcome should be PRICED: a ChancePct outcome fires
+    /// only on its seeded roll — the success partner at p, an OnFail partner at (1−p) — so a
+    /// gamble pair values as an EV instead of "both fire" (the FUL-10 review's warchest-arm0
+    /// asymmetry: priced 2.25 while the true EV is ~1.5). Kinds that already price their own
+    /// chance are exempt: GambleIntel's value IS an EV formula, and GrantScar self-scales by
+    /// ChancePct in EventOutcomeValue. Consumed by Game.EventChoiceValue.
+    public static float FireWeight(EventOutcome o)
+    {
+        if (o.ChancePct <= 0) return 1f;
+        if (o.Kind == EventOutcomeKind.GambleIntel || o.Kind == EventOutcomeKind.GrantScar) return 1f;
+        return (o.OnFail ? 100 - o.ChancePct : o.ChancePct) / 100f;
+    }
+
+    /// FUL-13 (the FUL-10 review's informant lead): an arm whose GrantPrep has nothing to
+    /// counter — no faction telegraphed on any next node — is a dead 12-intel buy. One rule,
+    /// shared by Game.ChoiceLegal (the HUD greys the arm + the bot never picks it) and the
+    /// EVENTTEST leg, so the gate can't drift from its test.
+    public static bool PrepDead(Run run, EventChoice ch)
+        => run != null && run.UpcomingFaction() == Faction.None
+           && (ch.Outcome.Kind == EventOutcomeKind.GrantPrep
+               || (ch.HasSecond && ch.Outcome2.Kind == EventOutcomeKind.GrantPrep)
+               || (ch.HasThird && ch.Outcome3.Kind == EventOutcomeKind.GrantPrep));
+
     // ---------------- apply an outcome to persisted Run/Unit state (§4) ----------------
     // Pure mutation, no UI/anim/mission. `node` supplies the seeded gamble roll; may be null
     // (synthetic test path falls back to Util.RandInt). Returns a Report line.
@@ -334,7 +358,9 @@ public static class EventCatalog
         {
             case EventOutcomeKind.Intel:
             {
+                int before = run.Intel;
                 run.Intel = Math.Max(0, run.Intel + o.Amount);
+                Stats.RecordIntel(run.Intel - before);   // FUL-13 cash-flow (clamped delta)
                 return o.Amount >= 0 ? $"gained {o.Amount} intel" : $"spent {-o.Amount} intel";
             }
             case EventOutcomeKind.HealSoldier:
@@ -361,8 +387,9 @@ public static class EventCatalog
                 if (run.Intel < stake) stake = run.Intel;   // can't stake more than you have
                 if (stake <= 0) return "no intel to gamble";
                 bool win = GambleSucceeds(run, node, o.ChancePct);
-                if (win) { run.Intel += stake; return $"WON the gamble: +{stake} intel"; }
+                if (win) { run.Intel += stake; Stats.RecordIntel(stake); return $"WON the gamble: +{stake} intel"; }
                 run.Intel = Math.Max(0, run.Intel - stake);
+                Stats.RecordIntel(-stake);   // FUL-13 cash-flow (stake already capped at the bank)
                 return $"LOST the gamble: -{stake} intel";
             }
             case EventOutcomeKind.GrantWeaponMod:
@@ -756,6 +783,28 @@ public static class EventCatalog
         int wound1 = 0; foreach (var u in sg.Squad) wound1 += u.Wound;
         bool pairPaid = sg.PendingSalvageReward == pend0 + 35, pairHurt = wound1 > wound0;
         if (pairPaid == pairHurt) fails.Add("gamblePairExclusive");   // exactly one side of the pair fires
+
+        // ---- 3c. FUL-13 valuation/legality seams ----
+        // FireWeight: a ChancePct outcome prices at the probability it FIRES (OnFail at 1−p);
+        // self-priced kinds (GambleIntel's EV formula, GrantScar's self-scale) stay weight 1.
+        if (Math.Abs(FireWeight(O(EventOutcomeKind.Salvage, 35, chance: 55)) - 0.55f) > 0.001f) fails.Add("fwSuccess");
+        if (Math.Abs(FireWeight(O(EventOutcomeKind.WoundSoldier, 1, chance: 55, onFail: true)) - 0.45f) > 0.001f) fails.Add("fwOnFail");
+        if (Math.Abs(FireWeight(O(EventOutcomeKind.GambleIntel, chance: 55)) - 1f) > 0.001f) fails.Add("fwGambleExempt");
+        if (Math.Abs(FireWeight(O(EventOutcomeKind.GrantScar, chance: 40, sc: Scar.HardBitten)) - 1f) > 0.001f) fails.Add("fwScarExempt");
+        if (Math.Abs(FireWeight(O(EventOutcomeKind.Intel, 20)) - 1f) > 0.001f) fails.Add("fwPlain");
+        // PrepDead: informant arm 0 (the 12-intel dossier) is a dead buy with no telegraphed
+        // faction and live with one; its non-prep arms never gate. `pr` above already carries
+        // Wardens-stamped next nodes (telegraphed); a fresh unstamped map is the dead case.
+        var informant = Array.Find(All, ev => ev.Id == "informant");
+        if (informant == null) fails.Add("informantMissing");
+        else
+        {
+            var dead = MakeTestRun(); dead.GenerateMap(9001); dead.MapSeed = 9001; dead.MapPos = 0;
+            foreach (var nn in dead.Map) nn.Faction = Faction.None;
+            if (!PrepDead(dead, informant.Choices[0])) fails.Add("prepDeadUntelegraphed");
+            if (PrepDead(dead, informant.Choices[1])) fails.Add("prepDeadWrongArm");
+            if (PrepDead(pr, informant.Choices[0])) fails.Add("prepDeadTelegraphed");
+        }
 
         // ---- 4. save round-trip after an event ----
         var sr = MakeTestRun();

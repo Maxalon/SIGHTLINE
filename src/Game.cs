@@ -252,6 +252,7 @@ public partial class Game
     {
         if (!CanRearm(u, k)) { Audio.Play("miss"); return; }
         _run.Intel -= ArmoryCost;
+        Stats.RecordIntel(-ArmoryCost);   // FUL-13 intel cash-flow
         u.Weapon = Weapon.Make(k);
         u.RefreshWeaponMods();          // re-apply any installed mods onto the fresh weapon
         u.Ammo = u.Weapon.Clip;
@@ -733,6 +734,17 @@ public partial class Game
     // from waves). Ids allocated from 100 up: initial pods are i/2 (<=5), harness scenes use 90/91,
     // so wave pods can never collide with either. Reset per mission beside _podOrig.
     int _nextWavePod = 100;
+    // FUL-6 CRITICAL MASS — LINKED ACTIVATION ("they heard the guns"): pods flagged here were put
+    // Suspicious by a nearby pod's wake (ActivatePod's link rider) and CONFIRM to Alert at the next
+    // ResolveSuspicion pass even when unseen (the sound was enough). Cleared per mission in
+    // SetupMission beside _podOrig, and wholesale after each ResolveSuspicion pass. Transient,
+    // never persisted (enemies are never serialized).
+    readonly HashSet<int> _linkedPods = new();
+    // Sound radius (Util.TileDist — the HackNoiseRange metric) for the link: a waking pod alerts
+    // the nearest OTHER dormant pod whose closest member is within this range of the woken pod's
+    // closest member. Missions 3+ only; exactly ONE pod per activation call; never chains (a
+    // linked pod wakes via ResolveSuspicion, which never calls ActivatePod).
+    public const int LinkRange = 6;
     public const int RoutDuration = 2;         // enemy turns a broken pod flees before it can rally (decrements in BeginTurn)
     // SIGNAL W8 — the WARBRINGER's banner aura reach (Chebyshev tiles). Pods with a living, active
     // banner inside this range cannot rout (BreakPodMorale) and rally one turn faster
@@ -1352,7 +1364,16 @@ public partial class Game
         Mission.DeckSeed = _run != null ? _run.MapSeed : 0;
         Mission.Build(Grid, Players, Enemies, n, EvacZone, reserve,
                       enemyDelta, statDelta, HasSabotage ? SabotageSites : null, heatDmg,
-                      Objective == Objective.Defend);   // FUL-4: trim the opener — waves are the force
+                      Objective == Objective.Defend,    // FUL-4: trim the opener — waves are the force
+                      // FUL-13 R2: give the hold back HALF the GRACED heat bodies (heatEnemy is
+                      // already m1-2-graced above) so FUL-4's flat trim stops eating the heat
+                      // ladder's EnemyDelta. Floor division is DELIBERATE: the R3 probe (ceil —
+                      // h6 keep 1->2) measured NO movement at its target (pinned h6 Defend 97%,
+                      // n=89, unchanged) while costing the h4 spot chunk −15 (its m2 ripple), so
+                      // it was reverted — at h6 extra bodies feed the rout economy instead of
+                      // pressuring the hold; it's h8's +4 stats that bite. The residual h6 cell
+                      // is recorded in DEVLOG §FUL-13 with this mechanism.
+                      Objective == Objective.Defend ? heatEnemy / 2 : 0);
         // PROGRAM HORIZON W2: Mission.Build laid out the arena + spawned a normal campaign force.
         // For LAST STAND we don't want that force — clear it and drop in the first horde wave (the
         // arena/terrain stays). SpawnEndlessWave uses the SpawnReinforcements machinery.
@@ -1416,7 +1437,8 @@ public partial class Game
         // (LastDotSource too — review fix: a BURN label from mission N must not mis-bucket an
         // anim-less death in mission N+2; enemies/VIP are constructed fresh each mission anyway)
         foreach (var u in Players)
-        { u.FeatMultiKill = u.FeatClutch = u.FeatVengeful = u.WasNearDeath = u.FeatBurned = u.AllyDown = false; u.BondAura = false; u.ConsecutiveMisses = 0; u.Statuses.Clear(); u.LastDotSource = null; }
+        { u.FeatMultiKill = u.FeatClutch = u.FeatVengeful = u.WasNearDeath = u.FeatBurned = u.AllyDown = false; u.BondAura = false; u.ConsecutiveMisses = 0; u.Statuses.Clear(); u.LastDotSource = null;
+          u.Downed = u.Stabilized = u.WasDownedThisMission = false; u.DownedTurns = 0; u.DownedByCls = null; }   // FUL-7: fresh mission, fresh down budget (mode-seam belt-and-braces)
         _missionKia.Clear();
         _bossSighted = false;        // FUL-11: the HVT SIGHTED ceremony banner re-arms per mission
         Scorches.Clear();            // death decals don't carry between missions
@@ -1449,6 +1471,7 @@ public partial class Game
         // been chewed down to <= half and should rout its survivors (FUL-4: DEFEND waves join the
         // snapshot as pods 100+ at spawn time; pressure-clock/endless hostiles stay PodId<0, ungrouped).
         _podOrig.Clear();
+        _linkedPods.Clear();   // FUL-6: no linked-alert carryover across missions
         _nextWavePod = 100;
         foreach (var e in Enemies) if (e.PodId >= 0) _podOrig[e.PodId] = _podOrig.GetValueOrDefault(e.PodId) + 1;
         Selected = Players.FirstOrDefault(p => p.CanAct);
@@ -1494,6 +1517,9 @@ public partial class Game
         Stats.BeginMission(n, Objective.ToString(), _run.HeatLevel,
                            Players.Count(p => p.Alive && !p.IsVip), Enemies.Count(e => e.Alive),
                            Mission.AppliedLayout);
+        // FUL-7: the PATCH per-presence denominator (corpsman enters via backfill only)
+        if (Players.Any(p => p.Alive && !p.IsVip && p.Ability == AbilityKind.Heal))
+            Stats.RecordCorpsmanFielded();
     }
 
     void NextMission() => SetupMission(_run.Mission + 1);
@@ -1697,6 +1723,23 @@ public partial class Game
         // barracks-phase odds read; RunBoons is refreshed to the run's current boons (a FIELD DOCTRINE
         // pick may have just changed them).
         Combat.EndMission(_run.ActiveBoons);
+        // FUL-7: a WON field never abandons a breathing soldier — every downed survivor
+        // (stabilized OR still ticking: the field is won) is RECOVERED before the squad rebuild:
+        // back on the roster at Hp 1, Wound 3 (max — DebriefSurvivors' attrition machinery owns
+        // it from here), and the near-death scar track runs (bleeding out on the field IS a
+        // near-death, even off a full-HP one-shot). The triage decision stayed fully live DURING
+        // the mission — the timer can beat you; Wound-3 + the scar cost keep this a real price.
+        var recovered = new List<Unit>();
+        foreach (var p in Players)
+        {
+            if (!p.Alive || !p.Downed || p.IsVip) continue;
+            p.Downed = false; p.Stabilized = false; p.DownedTurns = 0;
+            p.Hp = 1;
+            p.Wound = 3;
+            p.WasNearDeath = true;
+            Stats.RecordDownRecovered();
+            recovered.Add(p);
+        }
         // a benched soldier sat this mission out: it's still in _run.Squad (flagged) but was
         // never in Players, so it's absent from AlivePlayers(). Preserve it across the rebuild,
         // or benching would silently destroy the veteran (review Blocker 1).
@@ -1726,10 +1769,15 @@ public partial class Game
             if (SecondaryAchieved())
             {
                 _run.Intel += SecondaryIntel;
+                Stats.RecordIntel(SecondaryIntel);   // FUL-13 intel cash-flow
                 _run.Report.Insert(0, $"BONUS: {SecondaryName} cleared  (+{SecondaryIntel} intel)");
             }
             else _run.Report.Insert(0, $"Bonus missed: {SecondaryName}");
         }
+
+        // FUL-7: name the recovered (after DebriefSurvivors — it clears Report first)
+        foreach (var p in recovered)
+            _run.Report.Insert(0, $"{p.Name} recovered from the field - gravely wounded");
 
         // surface this mission's fallen at the top of the debrief (3.11)
         foreach (var name in _missionKia) _run.Report.Insert(0, $"KIA  {name}");
@@ -1785,6 +1833,7 @@ public partial class Game
                 stakesNote = $"  (+{bonus} STAKES)";
             }
             _run.Intel += gained;
+            Stats.RecordIntel(gained, heatBonus);   // FUL-13 intel cash-flow (+ the heat-bonus share)
             string heatNote = heatBonus > 0 ? $"  (+{heatBonus} HEAT {_run.HeatLevel})" : "";
             heatNote += stakesNote;
             _run.Report.Insert(0, $"Recovered {gained} intel{heatNote}  (total {_run.Intel})");
@@ -2081,6 +2130,10 @@ public partial class Game
             if (CachePresent && !mover.IsVip && mover.X == CacheX && mover.Y == CacheY)
                 CollectIntelCache(mover);
         }
+        // FUL-7: a DOWNED body being DRAGGED/EXTRACTed is a tile entry, but never a reaction
+        // target — enemies do not direct-fire the downed (the same rule as Ai.Plan's filter; the
+        // hazard checks above still ran, so hauling a body THROUGH fire still kills it — honest).
+        if (mover.Downed) return;
         // RANGER SLIPSTREAM: a free, overwatch-immune reposition. While slipstreaming the mover draws no
         // reaction fire; the flag is consumed when its destination tile is reached so the move ends silent.
         if (mover.Slipstreaming)
@@ -2193,6 +2246,14 @@ public partial class Game
         // telemetry the flywheel ranks (UNDERTOW W1). The queued-reaction purge below is the primary
         // guard; this makes KillUnit robust to every double-call path.
         if (!d.Alive) return;
+        // FUL-7 LAST LIGHT: the whole bleed-out state machine enters HERE — the single lethal
+        // seam (ShotAnim/GrenadeAnim/EnvDamage/siege/barrel all funnel through KillUnit). A
+        // soldier's FIRST lethal event becomes a 3-turn DOWN instead of a death; the VIP/captive
+        // keeps instant death (Escort's VIP-loss + the DEATHTEST-pinned solo-win semantics),
+        // enemies never go down (morale/rout is their drama), and the second lethal event on a
+        // soldier this mission — including ANY damage reaching a body already down (AoE/fire:
+        // the telegraphed-weapons honesty valve) — falls through and kills outright.
+        if (CanGoDown(d)) { EnterDowned(d); return; }
         // SIEGE interrupt: killing a charging artillery piece cancels its strike (the zone reads
         // off live enemies, so it clears automatically; this is a cosmetic confirmation of the
         // interrupt). W5: HasSiege flag (mirrors Cls=="BOMBARD"; also covers a siege-armed boss).
@@ -2237,7 +2298,24 @@ public partial class Game
         if (d.Team == Team.Player && !d.IsVip)
         {
             string cause = killer != null && killer.Team == Team.Enemy ? killer.Cls : "?";
+            // FUL-7: a bleed-out KIA names the DOWNING archetype (the honest loss card resolves
+            // causes through the bestiary). A DoT-caused down carries a BURN/BLEED label, not an
+            // archetype — that buckets "?" exactly as DoT deaths do today (BlurbFor gates it).
+            if (cause == "?" && d.Downed && !string.IsNullOrEmpty(d.DownedByCls)
+                && !string.IsNullOrEmpty(Codex.BlurbFor(d.DownedByCls)))
+                cause = d.DownedByCls;
             DeathsByClass[cause] = DeathsByClass.GetValueOrDefault(cause) + 1;
+        }
+        // FUL-7 (review F2): a body killed while DOWN is a DEATH, not a save — close the down
+        // state on the corpse HERE (after the cause read above). Without this, a blast/fire
+        // FINISH left Downed true on a corpse: the save-rate ledger counted it as saved, and a
+        // same-turn DoT tick could reach the countdown on a body that was already dead and pop
+        // "BLED OUT" over a burned corpse. A bleed-out expiry is counted at ExpireDowned's own
+        // site (_expiringDown distinguishes it from a finish).
+        if (d.Team == Team.Player && d.Downed)
+        {
+            if (!_expiringDown) Stats.RecordDownFinished();
+            d.Downed = false; d.Stabilized = false; d.DownedTurns = 0;
         }
         if (d.Team == Team.Player)
         {
@@ -2266,7 +2344,9 @@ public partial class Game
         Fx.Burst(d.Pos, Pal.RGBA(20, 25, 33), 16, 150f, 0.8f, 5f);
         // lingering scorch decal on the tile (drawn under units, fades over ScorchLife)
         AddScorch(d.Pos, c);
-        Fx.PopText(d.Pos + new Vector2(0, -10), d.IsVip ? "VIP DOWN" : "DOWN", c, 22f);
+        // FUL-7 vocabulary honesty: a soldier's true death pops "KIA" (DOWN now means the
+        // bleeding-out state); enemies keep the generic "DOWN" (they have no bleed-out).
+        Fx.PopText(d.Pos + new Vector2(0, -10), d.IsVip ? "VIP DOWN" : (d.Team == Team.Player ? "KIA" : "DOWN"), c, 22f);
         if (d.IsVip) { ShowBanner("VIP DOWN", true); Fx.AddShake(13f); }
         Fx.AddShake(7f);
         AddHitStop(0.1f);
@@ -2298,8 +2378,7 @@ public partial class Game
         // others are still queued — a surplus reaction must not resolve on the corpse (that path
         // re-ran Stats.RecordShot + CreditKill + the death FX). The active anim (the blow that caused
         // this death) is excluded so the current shot still finishes normally.
-        _anims.RemoveAll(a => (a is MoveStepAnim m && m.Unit == d)
-                           || (a is ShotAnim s && s.D == d && a != ActiveAnim));
+        PurgeAnimsFor(d);   // FUL-7: factored — EnterDowned needs the same purge (shared helper)
         if (Selected == d) Selected = null;
         // DECAPITATE: a death may have removed the HVT's last in-range guard — re-evaluate now so the
         // HVT is immediately exposed (the telegraph + reduced-damage gate flip the same frame).
@@ -2350,6 +2429,118 @@ public partial class Game
         Fx.PopText(ldr.Pos + new Vector2(0, -34), "BROKEN", Pal.Good, 20f);
         Fx.Flash(ldr.Pos, Pal.Good, 26f, 0.2f, 0.5f);
         ShowBanner("POD ROUTED", false);
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    //  FUL-7 LAST LIGHT — the DOWN / bleed-out window (death stakes get counterplay)
+    //  Lethal damage on a soldier opens a 3-turn window instead of an instant cut:
+    //  STABILIZE (any adjacent soldier, 1 action) freezes the timer; the corpsman's
+    //  PATCH revives; DRAG/EXTRACT carry the body; blasts and fire finish the job.
+    //  ONE down per soldier per mission (WasDownedThisMission) — no revive-tanking.
+    // ──────────────────────────────────────────────────────────────────────────
+    public const int DownedTimerTurns = 3;   // player-turn countdown (ticks in StartPlayerTurn)
+
+    /// The single purge shared by KillUnit and EnterDowned: drop the unit's queued moves AND any
+    /// queued surplus reaction ShotAnims aimed at it (the active blow — the one that caused this —
+    /// is excluded so the current shot still finishes normally).
+    void PurgeAnimsFor(Unit d)
+    {
+        _anims.RemoveAll(a => (a is MoveStepAnim m && m.Unit == d)
+                           || (a is ShotAnim s && s.D == d && a != ActiveAnim));
+    }
+
+    /// FUL-7: does this lethal event open a bleed-out window instead of killing? Soldiers only
+    /// (the VIP/captive dies instantly — mission-shape semantics; enemies rout, not bleed), and
+    /// only ONCE per soldier per mission — the anti-revive-tank rule.
+    bool CanGoDown(Unit d)
+        => d.Team == Team.Player && !d.IsVip && !d.Downed && !d.WasDownedThisMission;
+
+    /// A soldier drops: Hp 0 but ALIVE, 3 turns on the squad's clock. Deliberately NOT fired here:
+    /// Fallen/Memorial, _missionKia/KIA stamp/DeathFlash, SecondaryFailed (NoLosses), Stats.RecordKill,
+    /// DeathsByClass — death bookkeeping is death's (ExpireDowned runs the full flow via KillUnit).
+    void EnterDowned(Unit d)
+    {
+        d.Downed = true;
+        d.WasDownedThisMission = true;
+        d.Stabilized = false;
+        d.DownedTurns = DownedTimerTurns;
+        d.Hp = 0;
+        // attribution snapshot — the same switch KillUnit computes, taken NOW so a later bleed-out
+        // names the archetype that actually downed them (or the DoT label, which buckets "?").
+        Unit downer = ActiveAnim switch { ShotAnim sa => sa.A, GrenadeAnim ga => ga.Thrower, _ => null };
+        d.DownedByCls = downer != null ? downer.Cls
+                      : (string.IsNullOrEmpty(d.LastDotSource) ? "?" : d.LastDotSource);
+        d.Statuses.Clear();                      // no double timers (ground fire still kills via the AoE rule)
+        d.WasNearDeath = true;                   // review F6: going down IS a near-death — a PATCH-revived
+                                                 // survivor earns the scar track too (recovery forced it,
+                                                 // the revive path didn't)
+        d.OnOverwatch = false; d.OwFocused = false; d.OwBrace = false; d.Hunkered = false;
+        d.RunGun = false; d.Blitz = false; d.Steady = false; d.Slipstreaming = false;
+        d.ActionsLeft = 0;
+        PurgeAnimsFor(d);                        // queued moves + surplus reactions at the falling body
+        if (Selected == d) Selected = null;
+        // the Vengeful stage fires at the FALL — an "avenged" revenge shot over a still-breathing
+        // squadmate is the drama working (true death re-sets the same flag; idempotent).
+        foreach (var p in Players) if (p.Alive && p != d && !p.IsVip && !p.Downed) p.AllyDown = true;
+        Stats.RecordDown();                      // FUL-7 telemetry: downs staged (save-rate denominator)
+        // feel: decisive but NOT death — the KIA stamp/flash stay reserved for the real thing.
+        Color c = Pal.Foe;
+        Fx.Stamp(d.Pos + new Vector2(0, -34), "DOWN  " + d.FullName, c, 28f, 2.0f);
+        Fx.Shockwave(d.Pos, c, 8f, 30f, 3f, 0.7f, 0.3f);
+        Fx.Burst(d.Pos, c, 18, 200f, 0.6f, 3.5f, true);
+        Fx.AddShake(5f);                         // softer than the kill's 7+9
+        AddHitStop(0.08f);
+        Audio.Play("death");
+        // review F3 (honesty): the pill counts 3->2->1 and death lands when it would hit 0, so
+        // the player ACTS on pills 2 and 1 — say the truthful count instead of promising three.
+        ShowBanner($"SOLDIER DOWN - THEY HOLD FOR {DownedTimerTurns}, TWO TURNS TO ACT", true);
+        BannerSub = "stabilize to stop the bleeding - a corpsman's PATCH gets them up";
+    }
+
+    /// The timer ran out: the FULL death flow runs — Fallen + Memorial append, KIA stamp,
+    /// DeathsByClass keyed on the DOWNING archetype (via Downed still true + DownedByCls), and a
+    /// bleed-out KIA reaches Run.Fallen identically to an instant KIA (FUL-10's RemoveVeterans
+    /// needs no special case, by construction). Downed stays true through the KillUnit call so
+    /// CanGoDown refuses a re-down; cleared after so a corpse never renders/reads as "down".
+    bool _expiringDown;   // review F2: lets KillUnit tell a bleed-out expiry from an AoE/fire FINISH
+
+    void ExpireDowned(Unit d)
+    {
+        d.LastDotSource = d.DownedByCls;         // flywheel threat ranking: the downing cause owns the KIA
+        d.Hp = 0;
+        Fx.PopText(d.Pos + new Vector2(0, -26), "BLED OUT", Pal.Foe, 20f);
+        Stats.RecordDownExpired();
+        _expiringDown = true;
+        KillUnit(d);                             // KillUnit closes the down state on the corpse (review F2)
+        _expiringDown = false;
+    }
+
+    /// STABILIZE (universal verb): any soldier with an action, Chebyshev-adjacent to a downed,
+    /// un-stabilized ally. 1 action, does NOT end the turn (the DRAG/EXTRACT support convention).
+    public Unit StabilizeTarget(Unit u)
+    {
+        if (u == null || u.Team != Team.Player || u.IsVip || !u.CanAct || u.ActionsLeft < 1) return null;
+        foreach (var p in Players)
+        {
+            if (p == u || !p.Alive || !p.Downed || p.Stabilized) continue;
+            if (Util.ChebyDist(u.X, u.Y, p.X, p.Y) <= 1) return p;
+        }
+        return null;
+    }
+
+    public bool CanStabilize(Unit u) => StabilizeTarget(u) != null;
+
+    void DoStabilize()
+    {
+        var t = StabilizeTarget(Selected);
+        if (t == null) return;
+        Selected.ActionsLeft -= 1;               // a support action — never ends the turn
+        t.Stabilized = true;
+        Stats.RecordAction("STABILIZE");         // W2 verb telemetry chokepoint
+        Fx.PopText(t.Pos + new Vector2(0, -30), "STABILIZED", Pal.Good, 20f);
+        Fx.Burst(t.Pos, Pal.Good, 12, 120f, 0.45f, 3f);
+        Fx.PopText(Selected.Pos + new Vector2(0, -30), "STABILIZE", Pal.Good, 15f);
+        Audio.Play("reload");
     }
 
     /// True when killing `d` decides the mission (last hostile on an Eliminate, a squad
@@ -2467,7 +2658,12 @@ public partial class Game
     public void TickStatuses(Unit u)
     {
         if (!u.Alive || u.Statuses.Count == 0) return;
-        foreach (var s in u.Statuses)
+        // FUL-7: iterate a SNAPSHOT — a lethal DoT tick now routes into EnterDowned, which
+        // CLEARS the live Statuses list mid-enumeration (the old foreach threw). And a unit
+        // that just went DOWN stops ticking (its timers were cleared; the bleed-out clock owns
+        // it now) — without the break, a second status in the same pass would tick a fresh DoT
+        // into the downed body and kill it outright.
+        foreach (var s in u.Statuses.ToList())
         {
             if (s.Turns <= 0) continue;
             switch (s.Kind)
@@ -2481,7 +2677,7 @@ public partial class Game
                     break;
             }
             s.Turns--;
-            if (!u.Alive) break;          // a DoT can drop the unit mid-tick
+            if (!u.Alive || u.Downed) break;   // a DoT can drop the unit mid-tick (death or down)
         }
         u.Statuses.RemoveAll(s => s.Turns <= 0);
     }
@@ -2543,6 +2739,25 @@ public partial class Game
         foreach (var e in Enemies)
             if (e.Alive && e.HasSiege && e.ChargeTurns > 0
                 && Util.ChebyDist(x, y, e.ChargeX, e.ChargeY) <= SiegeRadius) return true;
+        return false;
+    }
+
+    /// FUL-8 PIKEMAN: true if entering (x,y) would draw a live enemy BRACE reaction — any alive+active
+    /// enemy holding a braced watch with ammo, an unspent reaction, range + LoS, and (if focused) the
+    /// tile inside its cone. Mirrors the exact OnUnitEnteredTile gate (the InSiegeZone pattern) so the
+    /// bot's danger read is truthful; read by TileExposure to route SmartApproach/SmartStep AROUND the
+    /// lane instead of feeding it a soldier-turn.
+    public bool InEnemyBraceLane(int x, int y)
+    {
+        foreach (var e in Enemies)
+        {
+            if (!e.Alive || !e.Active || !e.OnOverwatch || !e.OwBrace || e.ReactedThisTurn || e.Ammo <= 0) continue;
+            if (Util.TileDist(x, y, e.X, e.Y) > e.Weapon.MaxRange) continue;
+            bool commanding = Grid.HeightAt(e.X, e.Y) - Grid.HeightAt(x, y) >= 2;
+            if (!Grid.HasLineOfSight(e.X, e.Y, x, y, commanding)) continue;
+            if (e.OwFocused && !InOwCone(e, x, y)) continue;
+            return true;
+        }
         return false;
     }
 
@@ -3179,13 +3394,18 @@ public partial class Game
         foreach (var e in Enemies)
         {
             if (!e.Alive || e.Alert != AlertLevel.Suspicious) continue;
-            if (ClosestSightedDist(e) >= 0)
+            // FUL-6 LINKED ACTIVATION arm: a Suspicious enemy whose pod was linked by a nearby
+            // wake (_linkedPods) confirms to Alert even when UNSEEN — the sound was enough.
+            // NO scatter either way (the telegraphed path, exactly like the sighted confirm),
+            // and never a chain: this pass never calls ActivatePod.
+            if (ClosestSightedDist(e) >= 0 || _linkedPods.Contains(e.PodId))
             {
                 e.Alert = AlertLevel.Alert;
                 Fx.PopText(e.Pos + new Vector2(0, -32), "ALERT", Pal.Foe, 18f);
             }
             else e.Alert = AlertLevel.Unaware;   // squad broke contact in time
         }
+        _linkedPods.Clear();   // every linked pod resolves in the pass above; entries never linger
     }
 
     /// RESCUE: free the caged captive once a soldier reaches it; it then becomes a
@@ -3235,6 +3455,42 @@ public partial class Game
             BannerText = "CONTACT!"; BannerEnemy = true; BannerMax = BannerTimer = 1.0f;
             Fx.AddShake(3f);
             Audio.Play("over");
+            // FUL-6 CRITICAL MASS — LINKED ACTIVATION rider ("they heard the guns"): from
+            // mission 3 on, waking a real pod puts the NEAREST other pod with a dormant member
+            // within LinkRange (closest member to closest member, Util.TileDist — a sound
+            // radius) on the telegraphed Suspicious track, flagged in _linkedPods so the next
+            // ResolveSuspicion pass confirms it to Alert EVEN UNSEEN. Exactly ONE pod per
+            // activation call (the nearest); a linked pod can never chain (ResolveSuspicion
+            // never calls ActivatePod) — but directly shooting/blundering into pod B still
+            // links pod C (that routes through ActivatePod), which is correct: new gunfire,
+            // new sound. Endless/Defend waves spawn already-Alert, so the rider is inert
+            // there by construction. Zero RNG — the link fires off positions alone (CRN-safe).
+            // The read never lies: a linked pod IS coming, with the existing 4.3 Suspicious
+            // warning (the remainder of this turn + the turn-end beat; no scatter either way).
+            if (podId >= 0 && _run != null && _run.Mission >= 3)
+            {
+                int bestPod = -1; float bestDist = float.MaxValue; Unit bestMember = null;
+                foreach (var s in Enemies)
+                {
+                    if (!s.Alive || s.PodId != podId) continue;
+                    foreach (var o in Enemies)
+                    {
+                        if (!o.Alive || o.PodId < 0 || o.PodId == podId || o.Alert != AlertLevel.Unaware) continue;
+                        float d = Util.TileDist(s.X, s.Y, o.X, o.Y);
+                        if (d <= LinkRange && d < bestDist) { bestDist = d; bestPod = o.PodId; bestMember = o; }
+                    }
+                }
+                if (bestPod >= 0)
+                {
+                    SetPodSuspicious(bestPod);
+                    _linkedPods.Add(bestPod);
+                    Fx.PopText(bestMember.Pos + new Vector2(0, -30), "HEARD THE GUNS", Pal.Suspect, 16f);
+                    // SetPodSuspicious's CONTACT? banner must not mask the wake itself — restore
+                    // the CONTACT! banner and hang the link telegraph under it as the sub-line.
+                    BannerText = "CONTACT!"; BannerEnemy = true; BannerMax = BannerTimer = 1.0f;
+                    BannerSub = "a nearby pod is moving to the sound";
+                }
+            }
         }
     }
 
@@ -3282,7 +3538,7 @@ public partial class Game
         if (!CachePresent) return;
         CachePresent = false;
         int gain = Util.RandInt(CacheIntelMin, CacheIntelMax);
-        if (_run != null) _run.Intel += gain;
+        if (_run != null) { _run.Intel += gain; Stats.RecordIntel(gain); }   // FUL-13 intel cash-flow
         Stats.RecordAction("INTEL");   // W2 verb telemetry: cache pickups visible in the flywheel
         var c = Util.TileCenter(CacheX, CacheY);
         Fx.PopText(c + new Vector2(0, -26), $"+{gain} INTEL", Pal.VipGold, 22f);
@@ -3497,6 +3753,7 @@ public partial class Game
         if (Raylib.IsKeyPressed(KeyboardKey.Seven)) ToggleDrag();
         if (Raylib.IsKeyPressed(KeyboardKey.Nine)) ToggleVault();
         if (Raylib.IsKeyPressed(KeyboardKey.H)) DoHack();
+        if (Raylib.IsKeyPressed(KeyboardKey.E)) DoStabilize();   // FUL-7: stabilize an adjacent downed ally (T is the tag editor)
         if (Raylib.IsKeyPressed(KeyboardKey.G)) DoBeacon();          // UNDERTOW W6: deploy forward evac beacon (moved off B — collided with W2 BRACE)
         if (Raylib.IsKeyPressed(KeyboardKey.X)) DoExtract();
         if (Raylib.IsKeyPressed(KeyboardKey.R)) DoReload();
@@ -3739,11 +3996,12 @@ public partial class Game
             case "hack": DoHack(); break;
             case "beacon": DoBeacon(); break;
             case "extract": DoExtract(); break;
+            case "stabilize": DoStabilize(); break;   // FUL-7: freeze an adjacent downed ally's timer
             case "reload": DoReload(); break;
         }
     }
 
-    void SelectUnit(Unit u) { Selected = u; AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false; DragMode = false; VaultMode = false; Audio.Play("select"); }
+    void SelectUnit(Unit u) { if (u != null && u.Downed) return; /* FUL-7: a downed body is never selectable */ Selected = u; AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false; DragMode = false; VaultMode = false; Audio.Play("select"); }
 
     void CycleSelection()
     {
@@ -3990,6 +4248,24 @@ public partial class Game
         ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false; DragMode = false; VaultMode = false;
     }
 
+    /// FUL-6 FIELD DRILLS rework (the FUL-5 verdict consumed — REWORK, not retire): the old proc
+    /// (a SECOND drag/vault by one soldier in one turn) was self-consuming — a legal drag lands
+    /// its target at Cheby-1, which is un-draggable (DragTargetOk's toward-tile rule), so the
+    /// geometry the second use needs is destroyed by the first; measured 0 procs across every
+    /// batch, vaults 0. New effect: *a DRAG or VAULT drills the soldier forward — +1 tile of
+    /// movement for the rest of that turn* (MoveBudget +2 half-steps; Combat.FieldCraftLimit
+    /// stays 2/turn — COMBATTEST's fieldDrills pins untouched). PROC honesty: RecordProc fires
+    /// HERE at the grant site — the effect deterministically exists once granted (the TRR
+    /// rout-start precedent). Once per soldier per turn (DrilledThisTurn, reset in BeginTurn).
+    void GrantFieldDrill(Unit u)
+    {
+        if (!HasBoon(Boon.FieldDrills) || u.DrilledThisTurn) return;
+        u.DrilledThisTurn = true;
+        Stats.RecordProc("FDR");
+        Fx.PopText(u.Pos + new Vector2(0, -46), "DRILLED +1 MOVE", Pal.Good, 15f);
+        RecomputeMoveCost();   // the surplus tile must appear in the move overlay immediately
+    }
+
     // ---- DRAG (FIELD CRAFT W1, universal): pull an adjacent ALLY one tile toward you ----
     /// Can the selected soldier DRAG right now? Needs an action, no drag spent this turn, and at
     /// least one adjacent (Chebyshev==1) alive friendly with a legal landing tile (one step toward us).
@@ -4041,9 +4317,7 @@ public partial class Game
         int dx = Math.Sign(u.X - ally.X), dy = Math.Sign(u.Y - ally.Y);   // direction the ally MOVES (toward us)
         u.ActionsLeft = Math.Max(0, u.ActionsLeft - 1);   // 1 action; never ends the turn
         u.DragsThisTurn++;                                // counted vs Combat.FieldCraftLimit (anti-loop)
-        // FUL-1 PROC (review fix: explicit boon conjunct — the >=2 gate invariant holds today,
-        // but a future non-boon FieldCraftLimit>1 source must not silently corrupt the column)
-        if (u.DragsThisTurn >= 2 && HasBoon(Boon.FieldDrills)) Stats.RecordProc("FDR");
+        GrantFieldDrill(u);                               // FUL-6: FIELD DRILLS +1-move drill (proc at grant)
         Stats.RecordAction("DRAG");                       // W2 verb telemetry
         Fx.PopText(ally.Pos + new Vector2(0, -32), "DRAG", Pal.Friend, 17f);
         Fx.Burst(ally.Pos, Pal.Friend, 8, 100f, 0.35f, 2.5f);
@@ -4102,8 +4376,7 @@ public partial class Game
         var u = Selected;
         u.ActionsLeft = Math.Max(0, u.ActionsLeft - 1);   // 1 action; never ends the turn
         u.VaultsThisTurn++;                               // counted vs Combat.FieldCraftLimit (anti-loop)
-        // FUL-1 PROC (review fix: explicit boon conjunct — mirrors the drag site above)
-        if (u.VaultsThisTurn >= 2 && HasBoon(Boon.FieldDrills)) Stats.RecordProc("FDR");
+        GrantFieldDrill(u);                               // FUL-6: FIELD DRILLS +1-move drill (proc at grant)
         Stats.RecordAction("VAULT");                      // W2 verb telemetry (review fix: no invisible verbs)
         Fx.PopText(u.Pos + new Vector2(0, -32), "VAULT", Pal.Good, 17f);
         Fx.Burst(u.Pos, Pal.Good, 8, 110f, 0.35f, 2.5f);
@@ -4747,6 +5020,31 @@ public partial class Game
                 if (ally == null) return;
                 // COMBAT MEDIC fork heals 1 less (PatchHeal-1) — the trade for self-target + reach 2.
                 int baseHeal = u.HasSpec(Spec.CombatMedic) ? Unit.PatchHeal - 1 : Unit.PatchHeal;
+                // FUL-7 REVIVE — the corpsman's stage: a DOWNED squadmate (Hp 0 is always the
+                // most-wounded eligible target) gets back UP at the heal value instead. They act
+                // on their NEXT turn (ActionsLeft 0 now); FieldSurgeon's triage rides along;
+                // Cd 3 unchanged; the same PATCH telemetry measures the new stage for free.
+                if (ally.Downed)
+                {
+                    ally.Downed = false; ally.Stabilized = false; ally.DownedTurns = 0;
+                    ally.Hp = Math.Min(ally.MaxHp, Math.Max(1, baseHeal));
+                    ally.ActionsLeft = 0;                       // up, but they act next turn
+                    u.AbilityCd = Unit.AbilityCooldownFor(u.Ability); u.ActionsLeft -= 1;
+                    Stats.RecordAction("PATCH");                // the FUL-5 PATCH counter
+                    Stats.RecordDownRevived();                  // FUL-7 telemetry: a save, not a KIA
+                    if (u.HasSpec(Spec.FieldSurgeon))
+                    {
+                        ally.Wound = 0; ally.Statuses.Clear();
+                        Fx.PopText(ally.Pos + new Vector2(0, -50), "TRIAGE", Pal.Good, 16f);
+                    }
+                    Fx.PopText(ally.Pos + new Vector2(0, -34), "REVIVED", Pal.Good, 22f);
+                    Fx.Burst(ally.Pos, Pal.Good, 16, 160f, 0.5f, 3.5f, true);
+                    Fx.Flash(ally.Pos, Pal.Good, 22f, 0.16f, 0.5f);
+                    Fx.PopText(at, "PATCH", Pal.Good, 16f);
+                    ally.Flash = 0.6f;
+                    Audio.Play("reload");
+                    break;
+                }
                 int healed = Math.Min(baseHeal, ally.MaxHp - ally.Hp);
                 if (healed <= 0) return;
                 ally.Hp += healed;
@@ -4790,7 +5088,15 @@ public partial class Game
         // FUL-4: wave size 1+m/2 (was 2+m/2) — with three waves landing per mission the old +1
         // body per wave compounded to +3 per mission over the whole timer. podded: each wave is
         // a real morale pod (focus-firing a wave down routs its survivors, like any pod).
-        SpawnReinforcements(1 + _run.Mission / 2, 12, "WAVE", rich: true, podded: true);
+        // FUL-13 review fix: the wave heatStat honors the m1-2 opener grace exactly like the
+        // initial force (Game.cs SetupMission ramp) — without it a heat-8 SKIRMISH Defend (n=1,
+        // grace zeroes every numeric delta) fielded +4-stat waves, contradicting the documented
+        // grace contract and pre-empting the skirmish-grace owner decision.
+        int waveHeatStat = Sightline.Heat.StatDelta(_run.HeatLevel);
+        if (_run.Mission <= 1) waveHeatStat = 0;
+        else if (_run.Mission == 2) waveHeatStat /= 2;
+        SpawnReinforcements(1 + _run.Mission / 2, 12, "WAVE", rich: true, podded: true,
+                            heatStat: waveHeatStat);   // FUL-13: waves were heat-blind
     }
 
     /// FUL-4: the DEFEND wave schedule — ONE shared read for the spawner and the start-of-turn
@@ -4806,7 +5112,7 @@ public partial class Game
     /// mix). Returns how many it actually added. FUL-4 `podded`: the wave lands as ONE fresh
     /// morale pod (id 100+, _podOrig-snapshotted) so rout plays; default keeps PodId=-1 —
     /// pressure-clock punishment waves stay morale-exempt (a routable punishment isn't one).
-    int SpawnReinforcements(int want, int cap, string label, bool rich = false, bool podded = false)
+    int SpawnReinforcements(int want, int cap, string label, bool rich = false, bool podded = false, int heatStat = 0)
     {
         if (AliveEnemies().Count >= cap) return 0;                     // clutter cap
         int n = _run.Mission;
@@ -4822,7 +5128,7 @@ public partial class Game
                 x = Grid.W - 1;
                 if (!Grid.IsFloor(x, y) || IsOccupiedByOther(x, y, null)) continue;
             }
-            var e = Mission.MakeWaveHostile(n, x, y, rich);
+            var e = Mission.MakeWaveHostile(n, x, y, rich, heatStat);   // FUL-13: DEFEND waves inherit heat
             e.Alert = AlertLevel.Alert;                          // reinforcements arrive already engaged
             e.PodId = podded ? _nextWavePod : -1;                // FUL-4: defend waves are morale pods
             e.SyncPos();
@@ -4888,7 +5194,9 @@ public partial class Game
         foreach (var e in Enemies)
         {
             if (!e.Alive || !e.HasShieldArc) continue;
-            var p = AlivePlayers().OrderBy(q => Util.ChebyDist(e.X, e.Y, q.X, q.Y)).FirstOrDefault();
+            // FUL-7 (review F5): never face the shield toward a DOWNED body — it is not a threat,
+            // and facing it hands the standing squad a free flank.
+            var p = AlivePlayers().Where(q => !q.Downed).OrderBy(q => Util.ChebyDist(e.X, e.Y, q.X, q.Y)).FirstOrDefault();
             if (p == null) continue;
             int dx = p.X - e.X, dy = p.Y - e.Y;
             if (Math.Abs(dx) >= Math.Abs(dy)) { e.ShieldDx = Math.Sign(dx); e.ShieldDy = 0; }
@@ -4968,7 +5276,24 @@ public partial class Game
         UpdateHvtGuard();                 // DECAPITATE: refresh the HVT's guarded state at the boundary (a guard may have moved)
         if (AutoPlay) AutoStallCheck();
         // APEX W2: deny the caged RESCUE captive its start-of-turn action re-grant (see SetupMission).
-        foreach (var p in Players) if (p.Alive) { p.BeginTurn(); TickStatuses(p); if (p == Vip && CaptiveLocked) p.ActionsLeft = 0; }
+        // FUL-7: the bleed-out countdown ticks HERE — on the squad's clock, where the player
+        // decides. STABILIZE freezes it — but only while a soldier is still standing: with the
+        // whole squad down (or dead) there is nobody left to hold the dressing, so stabilized
+        // timers run too — the degenerate all-downed board resolves in <= 3 bounded turns
+        // (expire -> KillUnit -> the real wipe), never an infinite stall. Pinned in DOWNTEST.
+        bool anySoldierUp = Players.Any(q => q.Alive && !q.Downed && !q.IsVip);
+        foreach (var p in Players) if (p.Alive)
+        {
+            p.BeginTurn(); TickStatuses(p);
+            if (p == Vip && CaptiveLocked) p.ActionsLeft = 0;
+            if (p.Downed)
+            {
+                p.ActionsLeft = 0;               // never acts, never selectable (CanAct false)
+                if ((!p.Stabilized || !anySoldierUp) && --p.DownedTurns <= 0) ExpireDowned(p);
+                else if (p.Alive && !p.Stabilized)
+                    Fx.PopText(p.Pos + new Vector2(0, -30), $"DOWN {p.DownedTurns}", Pal.Foe, 16f);
+            }
+        }
         foreach (var e in Enemies) if (e.Alive) { e.ReactedThisTurn = false; e.Suppress = 0; } // OW resets; suppression expires
         Selected = Players.FirstOrDefault(p => p.CanAct);
         AimMode = false;
@@ -5007,8 +5332,9 @@ public partial class Game
     {
         if (Objective != Objective.Escort && Objective != Objective.Rescue) return;
         if (Vip == null || !Vip.Alive || CaptiveLocked || Vip.MoveBudget <= 0) return;
-        // the soldiers the asset follows: living, non-VIP squad members
-        var soldiers = Players.Where(p => p.Alive && !p.IsVip).ToList();
+        // the soldiers the asset follows: living, non-VIP squad members (FUL-7: not a downed
+        // body — the asset must never park itself beside a bleeding-out soldier in a fire lane)
+        var soldiers = Players.Where(p => p.Alive && !p.IsVip && !p.Downed).ToList();
         if (soldiers.Count == 0) return;                       // nobody to follow (a wipe handles the loss)
         if (EvacZone.Contains((Vip.X, Vip.Y))) return;         // already extracted position — win check handles it
         // The asset FOLLOWS the squad toward evac. The leash anchor is the nearest soldier that is CLOSER to
@@ -5193,6 +5519,12 @@ public partial class Game
             // shot on it, so it can never be collapsed; skip it so the focus lands on a
             // shootable soldier instead of an inert target (review #6).
             if (p.IsVip && CaptiveLocked) continue;
+            // FUL-7 (review F1): a DOWNED body scores the 60-pt near-dead base + exposure and
+            // would usually WIN the focus pick — but Ai.Plan excludes downed from its targets,
+            // so every focus bonus (kill-press, crossfire pulls) would then apply to NOBODY:
+            // the coordination layer silently switched off while a body was down. The downed
+            // exit every enemy-attention seam.
+            if (p.Downed) continue;
             // how many active enemies can hit p right now (mirrors CanTarget exactly)
             int shootersOnTarget = 0;
             float bestHitOnTarget = 0f;
@@ -5418,6 +5750,22 @@ public partial class Game
                     Enqueue(new WaitAnim(0.15f), Team.Enemy);
                     Enqueue(new ShoveAnim(e, t, sdx, sdy), Team.Enemy);
                 }
+                else if (_aiPlan.Brace && e.ActionsLeft > 0 && e.Ammo > 0 && !e.HasStatus(StatusKind.Disoriented))
+                {
+                    // FUL-8 PIKEMAN: plant the braced lane — the exact flag set the player's own BRACE+FOCUS
+                    // arms, so OnUnitEnteredTile reacts through the identical (COMBATTEST-pinned) path: the
+                    // first soldier through the cone eats a halved, no-crit, STAGGERING reaction. The plant
+                    // lives one round (the enemy BeginTurn wipes OnOverwatch/OwBrace/OwFocused), so holding
+                    // the lane costs the PIKEMAN its action EVERY turn — symmetric movement-economy trade.
+                    e.OnOverwatch = true; e.OwBrace = true; e.OwFocused = true;
+                    e.OwDirX = _aiPlan.BraceDirX; e.OwDirY = _aiPlan.BraceDirY;
+                    // face down the lane: the silhouette's pike IS the direction read — without this
+                    // the figure keeps its walk-in facing and points away from its own cone.
+                    e.Facing = MathF.Atan2(e.OwDirY, e.OwDirX);
+                    e.ActionsLeft = 0;
+                    Fx.PopText(e.Pos + new Vector2(0, -30), "BRACED", Pal.Foe, 16f);
+                    Audio.Play("over");
+                }
                 else if (_aiPlan.ShootTarget != null && _aiPlan.ShootTarget.Alive &&
                     e.ActionsLeft > 0 && e.Ammo > 0 && CanTarget(e, _aiPlan.ShootTarget))
                 {
@@ -5494,7 +5842,7 @@ public partial class Game
             float ex = 0f;
             foreach (var p in players)
             {
-                if (!p.Alive || p.Ammo <= 0) continue;
+                if (!p.Alive || p.Downed || p.Ammo <= 0) continue;   // FUL-7 (review F5): a downed body holds no fire lane
                 if (Util.TileDist(tx, ty, p.X, p.Y) > p.Weapon.MaxRange) continue;
                 if (!Grid.HasLineOfSight(p.X, p.Y, tx, ty)) continue;
                 int cov = Grid.GetCover(tx, ty, p.X, p.Y).Level;   // cover of (tx,ty) vs attacker p
@@ -5728,6 +6076,7 @@ public partial class Game
             _run.PrepFaction = f;   // consumed at the next SetupMission (one mission only)
             _run.Report.Add($"COUNTER-PREP staged: {PrepDescFor(f)}");
             _run.Intel -= ShopCost[item];
+            Stats.RecordIntel(-ShopCost[item]);   // FUL-13 intel cash-flow
             Stats.RecordPurchase("COUNTER-PREP");
             Audio.Play("select");
             return;
@@ -5740,6 +6089,7 @@ public partial class Game
             t.InstallMod(mod);   // persistent: baked into the soldier's Weapon, carried across the run
             _run.Report.Add($"{t.Name} fitted {WeaponModDef.Name(mod)}  ({WeaponModDef.Desc(mod)})");
             _run.Intel -= ShopCost[item];
+            Stats.RecordIntel(-ShopCost[item]);   // FUL-13 intel cash-flow
             Stats.RecordPurchase(ShopName[item]);
             Audio.Play("select");
             return;
@@ -5773,6 +6123,7 @@ public partial class Game
                 break;
         }
         _run.Intel -= ShopCost[item];
+        Stats.RecordIntel(-ShopCost[item]);   // FUL-13 intel cash-flow
         Stats.RecordPurchase(ShopName[item]);
         Audio.Play("select");
     }
@@ -6013,6 +6364,10 @@ public partial class Game
         // FUL-10: a scar cure needs a scarred soldier; a release must leave a roster behind
         if (ChoiceHas(ch, EventOutcomeKind.CureScar) && !_run.Squad.Exists(u => u.Scars.Count > 0)) return false;
         if (ChoiceHas(ch, EventOutcomeKind.ReleaseSoldier) && _run.Squad.Count <= 1) return false;
+        // FUL-13: a GrantPrep arm with no telegraphed faction is a dead buy (informant's
+        // 12-intel dossier for a report line) — illegal, so the HUD greys it and the bot
+        // never spends into it. One rule, EventCatalog.PrepDead (EVENTTEST-pinned).
+        if (EventCatalog.PrepDead(_run, ch)) return false;
         return true;
     }
 
@@ -6053,9 +6408,14 @@ public partial class Game
     /// FUL-5: the event-arm VALUE prior (competent-play proxy — the SmartPerkValue/ShopValue
     /// family: a heuristic to bias exposure, not ground truth). Roughly on the ShopValue scale;
     /// intel converts at ~0.3/pt so a 15-intel arm (4.5) competes with a free mod grant (5).
+    // FUL-13: each outcome is weighted by the probability it actually FIRES (EventCatalog.
+    // FireWeight — success partner x p, OnFail partner x (1−p); GambleIntel/GrantScar
+    // self-price and stay x1), so a seeded gamble pair is priced as an EV instead of
+    // "both fire" (the FUL-10 review's warchest-arm0 asymmetry: 2.25 vs true ~1.5).
     float EventChoiceValue(EventChoice ch)
-        => EventOutcomeValue(ch.Outcome) + (ch.HasSecond ? EventOutcomeValue(ch.Outcome2) : 0f)
-           + (ch.HasThird ? EventOutcomeValue(ch.Outcome3) : 0f);   // FUL-10: triple arms
+        => EventOutcomeValue(ch.Outcome) * EventCatalog.FireWeight(ch.Outcome)
+           + (ch.HasSecond ? EventOutcomeValue(ch.Outcome2) * EventCatalog.FireWeight(ch.Outcome2) : 0f)
+           + (ch.HasThird ? EventOutcomeValue(ch.Outcome3) * EventCatalog.FireWeight(ch.Outcome3) : 0f);   // FUL-10: triple arms
 
     float EventOutcomeValue(EventOutcome o)
     {

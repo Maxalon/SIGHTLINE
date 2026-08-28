@@ -72,7 +72,7 @@ public static class Mission
     public static void Build(Grid grid, List<Unit> players, List<Unit> enemies, int missionNum,
                              List<(int x, int y)> evac = null, (int x, int y)? terminal = null,
                              int enemyDelta = 0, int statDelta = 0, List<(int x, int y)> sabotage = null,
-                             int dmgDelta = 0, bool defend = false)
+                             int dmgDelta = 0, bool defend = false, int defendKeep = 0)
     {
         enemies.Clear();
         grid.ClearSmoke();
@@ -120,7 +120,7 @@ public static class Mission
         // a lighter hostile force (the loud-tempo IS the difficulty) + covered fighting positions
         // at each site (below) so the split squad can hold.
         bool sabotageObj = sabotage != null && sabotage.Count > 0;
-        SpawnEnemies(grid, enemies, missionNum, evacSet, enemyDelta, statDelta, sabotageObj, dmgDelta, defend);
+        SpawnEnemies(grid, enemies, missionNum, evacSet, enemyDelta, statDelta, sabotageObj, dmgDelta, defend, defendKeep);
 
         var occupied = new HashSet<(int, int)>();
         foreach (var u in players) occupied.Add((u.X, u.Y));
@@ -390,9 +390,27 @@ public static class Mission
         return true;
     }
 
+    /// FUL-6 CRITICAL MASS: pure greedy pod-size split for an initial force of `count` —
+    /// no RNG draw, and no pod of 1 from any count >= 2 (the waver telegraph needs a
+    /// survivor): while remaining >= 5 take 3; then remainder 4 -> {2,2}, 3 -> {3},
+    /// 2 -> {2}. So 7 -> {3,2,2}, 8 -> {3,3,2}, 9 -> {3,3,3}, 12 -> {3,3,3,3}.
+    /// Public + static so the endless wave splitter (Game.Endless) and PODTEST share it.
+    /// (count == 1 can only reach here from an endless top-up trickle; it keeps a 1-pod,
+    /// which is morale-inert by construction — PodAtWaverPoint needs alive >= 2.)
+    public static int[] PodPlan(int count)
+    {
+        var sizes = new List<int>();
+        int rem = count;
+        while (rem >= 5) { sizes.Add(3); rem -= 3; }
+        if (rem == 4) { sizes.Add(2); sizes.Add(2); }
+        else if (rem == 3) sizes.Add(3);
+        else if (rem > 0) sizes.Add(rem);
+        return sizes.ToArray();
+    }
+
     static void SpawnEnemies(Grid grid, List<Unit> enemies, int n, HashSet<(int, int)> evac,
                              int enemyDelta = 0, int statDelta = 0, bool sabotage = false,
-                             int dmgDelta = 0, bool defend = false)
+                             int dmgDelta = 0, bool defend = false, int defendKeep = 0)
     {
         // Headcount cap raised 10 -> 12 so the top-Heat "+enemy" rungs aren't silently wasted
         // (the +1/+1 from RELENTLESS/OVERWHELMING used to clip at 10 on later missions). 12 still
@@ -414,7 +432,13 @@ public static class Mission
         // the INITIAL screen PLUS every SpawnDefendWave reinforcement, so an untrimmed opener
         // double-counts the objective's difficulty — the timer IS the pressure. Mirror the
         // sabotage trim, one step deeper (waves keep arriving all mission; sabotage gets none).
-        if (defend) count = Math.Max(3, count - 3);
+        // FUL-13 R2 (defendKeep): the FLAT −3 was silently EATING the heat ladder's EnemyDelta
+        // (+2..+4 bodies at rungs 4-8) — with the timer bounding total exposure, Defend became
+        // the top rungs' free square (measured: 82% h0 -> 97% h6 / 91% h8 unpinned; 96% n=89
+        // defend-pinned h8, still 95-100% after the R1 wave-stat lever alone). defendKeep gives
+        // back half the GRACED heat bodies (0 at h0-2, 1 at h4-6, 2 at h8; the m1-2 grace zeroes
+        // it with heatEnemy) so heat reaches the hold without re-breaking FUL-4's h0 repair.
+        if (defend) count = Math.Max(3, count - 3 + Math.Clamp(defendKeep, 0, 2));
         // Final mission (the WARLORD boss): de-stack the force. This was the core of the ~90% m6
         // loss wall -- the squad cleared m1-5 (m5 often wins ~100%, partly because it isn't always
         // forced Eliminate) then got alpha-struck on m6's forced full-clear. The compounding cause:
@@ -456,16 +480,56 @@ public static class Mission
         bool siegeSpawned = false;    // hard cap: at most ONE SIEGE/BOMBARD artillery per mission (fairness)
         bool bannerSpawned = false;   // W8 review: at most ONE WARBRINGER banner per mission — overlapping
                                       // auras could blanket an arena and switch the rout lever off entirely
+        // FUL-6 CRITICAL MASS — pods of 3 for the mid/late campaign (missions 3+), via the pure
+        // PodPlan split, so morale gets its full waver->rout arc (kill 1 of 3 -> WAVERING; kill
+        // 2 -> the survivor routs) and one real multi-pod battle replaces six 2-enemy executions.
+        // m1-2 keep i/2 pairs (the teaching tier's gentle first contact) and the FINALE keeps
+        // i/2 EXACTLY — FUL-11's kit geometry (SIGNIFER at i==1 -> the boss's pod 0) is verified
+        // against it, so FUL11PROBE stays green by construction. The m3/m5 mid-boss (i==0) joins
+        // a pod of 3: its 2-body screen can rout out from under it — accepted (mid-bosses already
+        // win at high rates), named a watch item. The plan feeds BOTH the PodId stamp and the
+        // column-offset read below so a pod shares a column band. COHESION ride-along: members
+        // 2-3 anchor to their pod's first member's POST-relocate row (anchor+1/anchor+2, flipped
+        // downward at the board edge so rows stay distinct) instead of independent shuffled rows,
+        // so pods land as visible clumps — the linked-activation geometry, the grenade stage, and
+        // the POD x/y read all depend on this. ZERO extra RNG draws: rows[] reads are not draws,
+        // and the collision-relocate loop stays the only conditional draw source, exactly as today.
+        bool podsOf3 = n >= 3 && n < Run.MaxMissions;
+        // FUL-6 ESCALATION LEVER 1 (measured breach): the full pod stack ran the h0 paired
+        // flywheel at -12.5 pts completion vs the fresh same-slot R0 (chunk a -5, chunk b -20;
+        // budget <= 8). The spec's first lever: trim the initial force by 1 on 3-pod missions
+        // (the FUL-4 defend-trim precedent) — each contact is bigger now (3 guns wake at once,
+        // a link can make it 6), so the unchanged body count priced a harder mission than the
+        // budget allows. m1-2 and the finale are untouched (no pod stack there); floored at 3
+        // like the sabotage/defend trims above.
+        if (podsOf3) count = Math.Max(3, count - 1);
+        int[] podOf = null, memberOf = null;
+        int[] podAnchor = null;
+        if (podsOf3)
+        {
+            int[] plan = PodPlan(count);
+            podOf = new int[count]; memberOf = new int[count]; podAnchor = new int[plan.Length];
+            for (int p = 0, idx = 0; p < plan.Length; p++)
+                for (int m = 0; m < plan[p] && idx < count; m++, idx++) { podOf[idx] = p; memberOf[idx] = m; }
+        }
         for (int i = 0; i < count; i++)
         {
-            int y = rows[i % rows.Count];
-            int podId = i / 2;
+            int podId = podsOf3 ? podOf[i] : i / 2;
+            int member = podsOf3 ? memberOf[i] : 0;
+            int y;
+            if (podsOf3 && member > 0)
+            {
+                int a = podAnchor[podId];               // first member's final row (set below)
+                y = a + member < grid.H ? a + member : a - member;   // stack down; flip up at the edge
+            }
+            else y = rows[i % rows.Count];
             int colOff = EnemyPodColOffset[podId % EnemyPodColOffset.Length];
             int x = grid.W - 1 - colOff;              // stagger across cols 14-17
             int guard = 0;
             while ((used.Contains((x, y)) || evac.Contains((x, y))) && guard++ < 30)
             { y = Util.RandInt(0, grid.H - 1); x = grid.W - 2 - Util.RandInt(0, 2); }
             used.Add((x, y));
+            if (podsOf3 && member == 0) podAnchor[podId] = y;   // anchor = the pod lead's final row
 
             bool finalMission = n >= Run.MaxMissions;
             bool midBoss = !finalMission && i == 0 && (n == 3 || n == 5);   // recurring named elite
@@ -539,7 +603,7 @@ public static class Mission
             // deliberately light bodies (see MakeWaveHostile's do-not-upgrade note).
             if (dmgDelta != 0) { e.Weapon.DmgMin += dmgDelta; e.Weapon.DmgMax += dmgDelta; }
             e.Alert = AlertLevel.Unaware;  // dormant until sighted (escalates via 4.3 tiers)
-            e.PodId = i / 2;               // pods of ~2
+            e.PodId = podId;               // FUL-6: PodPlan pods (m3+); i/2 pairs on m1-2 + the finale
             // APEX W5: composition telemetry — count the FINAL pick (post demote/clamp) at spawn
             // time, tagged faction-roster vs default-cascade (no-op unless the balance harness runs).
             Stats.RecordSpawn(e.Cls, Combat.MissionFaction != Faction.None);
@@ -672,22 +736,28 @@ public static class Mission
         // sightlines and FORCING you to reposition to re-acquire targets. Reuses the enemy smoke exec.
         // Counter: push through / around the cloud, or kill it before it screens. Carries the smoke
         // charge (set in SpawnEnemies). ~6% slot.
-        if (r < 0.88f)                                                                                              //  4% zoner
+        if (r < 0.87f)                                                                                              //  3% zoner (FUL-8: was 4 — carved for PIKEMAN)
         {
             var z = MakeHostile("HAZE", "SCREENER", WeaponKind.Smg, 5 + bump, 46 + bump, 6, x, y);
             z.EnemyItem = ItemKind.Smoke; z.ItemCharge = 2;   // a deep smoke pouch — the EXISTING smoke AI uses it
             return z;
         }
+        // PIKEMAN (SARISSA, FUL-8): the lane-holder — plants a braced stagger cone over a movement
+        // lane (the enemy-side mirror of the player's own BRACE; see Ai.Plan). Wardens-native at 10%;
+        // this is its ~3% cascade tail so the mixed default force can field one too. Carved from the
+        // SCREENER/BOMBARD/WARBRINGER mid-tail — the 1% GRUNT/SCOUT/BRUISER tails and every other
+        // archetype's first-appearance tier are unchanged.
+        if (r < 0.90f) return MakeHostile("SARISSA", "PIKEMAN", WeaponKind.Smg, 7 + bump, 58 + bump, 5, x, y);      //  3% lane-holder
         // SIEGE (BOMBARD): a fragile back-line artillery piece. It does NOT fire — it CHARGES a
         // telegraphed 3x3 strike (shown for a full player turn) that lands cover-ignoring next enemy
         // turn (see Ai.Plan/Game.TickSiegeStrikes). Forces RELOCATION (a non-shoot tactical axis).
-        // Rare (~4%); capped at 1 per mission by the post-pick guard in SpawnEnemies.
-        if (r < 0.92f) return MakeHostile("SIEGE", "BOMBARD", WeaponKind.Smg, 7 + bump, 48 + bump, 4, x, y);       //  4% artillery
+        // Rare (~3%); capped at 1 per mission by the post-pick guard in SpawnEnemies.
+        if (r < 0.93f) return MakeHostile("SIEGE", "BOMBARD", WeaponKind.Smg, 7 + bump, 48 + bump, 4, x, y);       //  3% artillery (FUL-8: was 4)
         // WARBRINGER (SIGNIFER, W8): the Legion standard-bearer — a mid-HP banner anchor: pods with
         // a living banner within Chebyshev Game.BannerRange cannot rout and rally a turn faster
         // (Game.BreakPodMorale / BeginEnemyUnitTurn). A priority-target decision: the comeback
-        // lever (focus a pod down to break it) is CONTESTED until the banner falls. ~3% slot.
-        if (r < 0.95f) return MakeHostile("SIGNIFER", "WARBRINGER", WeaponKind.Rifle, 8 + bump, 56 + bump, 5, x, y); // 3% banner anchor
+        // lever (focus a pod down to break it) is CONTESTED until the banner falls. ~2% slot.
+        if (r < 0.95f) return MakeHostile("SIGNIFER", "WARBRINGER", WeaponKind.Rifle, 8 + bump, 56 + bump, 5, x, y); // 2% banner anchor (FUL-8: was 3)
         // CUSTODIAN (SEXTON, W8): the objective KEEPER — a low-threat unit that walks to the
         // terminal / a blown sabotage charge and undoes ONE step of progress per adjacent turn
         // (Ai.Plan -> Game.DoRelock, banner-telegraphed). Screen it out or shoot it first. ~2% slot.
@@ -760,8 +830,8 @@ public static class Mission
             // lane-blinding smoke zoner (area denial in both directions).
             case Faction.Wardens:
             default:
-                if (r < 0.24f) return MakeHostile("VIPER", "SNIPER", WeaponKind.Sniper, 4 + bump, 62 + bump, 5, x, y);
-                if (r < 0.42f)
+                if (r < 0.20f) return MakeHostile("VIPER", "SNIPER", WeaponKind.Sniper, 4 + bump, 62 + bump, 5, x, y); // 20% marksman (FUL-8: was 24 — re-sliced for the PIKEMAN window)
+                if (r < 0.38f)
                 {
                     var m = MakeHostile("MORTAR", "MORTAR", WeaponKind.Smg, 6 + bump, 50 + bump, 5, x, y);
                     m.Grenades = n >= 5 ? 3 : 2;                // a deep frag pouch — the EXISTING grenade AI uses it
@@ -770,23 +840,33 @@ public static class Mission
                 // The two m3+ gates route their FAILED (m2) rolls to the SCOUT filler, not the next
                 // window — falling through would hand MEDIC their combined 22% and make mission-2
                 // Wardens pods a 36%-medic heal-loop slog (W5 review LOW-3).
-                if (r < 0.54f) return n >= 3
+                if (r < 0.50f) return n >= 3
                     ? MakeHostile("SIEGE", "BOMBARD", WeaponKind.Smg, 7 + bump, 48 + bump, 4, x, y)   // 12% artillery (m3+ only — fairness tier)
                     : MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 58 + bump, 8, x, y);
-                if (r < 0.64f)                                  // 10% zoner (m3+ — cascade first appearance)
+                if (r < 0.60f)                                  // 10% zoner (m3+ — cascade first appearance)
                 {
                     if (n < 3) return MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 58 + bump, 8, x, y);
                     var z = MakeHostile("HAZE", "SCREENER", WeaponKind.Smg, 5 + bump, 46 + bump, 6, x, y);
                     z.EnemyItem = ItemKind.Smoke; z.ItemCharge = 2;   // a deep smoke pouch — the EXISTING smoke AI uses it
                     return z;
                 }
-                if (r < 0.78f) return MakeHostile("ORDERLY", "MEDIC", WeaponKind.Smg, 6 + bump, 52 + bump, 6, x, y);
+                // FUL-8: the PIKEMAN lane-holder is Wardens-native — the control faction now contests
+                // MOVEMENT itself (a braced stagger cone over the squad's lane), completing the set:
+                // information (SCREENER), position (SIEGE), progress (CUSTODIAN), movement (PIKEMAN).
+                // 10% at m2+ — the teaching piece arrives early, like Legion's m2 STRIKER/LANCER; the
+                // failed (m1) gate routes to the SCOUT filler so any roll resolves. Stats sit in the
+                // W8 Wardens-support band: HP 7 survives one focused soldier-turn, dies to two; SMG
+                // (MaxRange 10) keeps the cone LOCAL; Mob 5 — a holder, not a rusher.
+                if (r < 0.70f) return n >= 2
+                    ? MakeHostile("SARISSA", "PIKEMAN", WeaponKind.Smg, 7 + bump, 58 + bump, 5, x, y)  // 10% lane-holder (m2+)
+                    : MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 58 + bump, 8, x, y);
+                if (r < 0.82f) return MakeHostile("ORDERLY", "MEDIC", WeaponKind.Smg, 6 + bump, 52 + bump, 6, x, y); // 12% medic (FUL-8: was 14)
                 // W8: the CUSTODIAN keeper is Wardens-native — the control faction contests your
                 // objective PROGRESS itself (re-locks the terminal / re-arms blown charges). m3+
                 // like SIEGE/SCREENER; the failed (m2) gate routes to the GRUNT window's pick, so
                 // any roll still resolves and mission-2 Wardens pods are unchanged.
-                if (r < 0.86f && n >= 3) return MakeHostile("SEXTON", "CUSTODIAN", WeaponKind.Smg, 5 + bump, 48 + bump, 6, x, y); // 8% keeper (m3+)
-                if (r < 0.92f) return MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 60 + bump, 6, x, y);
+                if (r < 0.88f && n >= 3) return MakeHostile("SEXTON", "CUSTODIAN", WeaponKind.Smg, 5 + bump, 48 + bump, 6, x, y); // 6% keeper (m3+; FUL-8: was 8)
+                if (r < 0.94f) return MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 60 + bump, 6, x, y);
                 return MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 58 + bump, 8, x, y);              // filler
         }
     }
@@ -998,7 +1078,7 @@ public static class Mission
     ///     would under-fill waves ~1-in-5 rolls on Syndicate Defend nodes) and a demote of any
     ///     rolled BOMBARD to a plain wave grunt (waves arrive already Alert — an off-screen
     ///     artillery telegraph the player never saw spawn is unfair).
-    public static Unit MakeWaveHostile(int n, int x, int y, bool rich = false)
+    public static Unit MakeWaveHostile(int n, int x, int y, bool rich = false, int heatStat = 0)
     {
         int bump = Math.Max(0, n - 1);
         if (rich)
@@ -1006,13 +1086,30 @@ public static class Mission
             var h = MakeEndlessHostile(n, x, y);
             int guard = 0;
             while (h.Cls == "TURRET" && guard++ < 400) h = MakeEndlessHostile(n, x, y);
-            if (h.Cls != "TURRET" && h.Cls != "BOMBARD") return h;   // MakeEndlessHostile already clamps aim
+            if (h.Cls != "TURRET" && h.Cls != "BOMBARD") return HeatWave(h, heatStat, 88);   // MakeEndlessHostile already clamps aim (88)
             // fall through: demote BOMBARD (or a pathological all-TURRET streak) to a plain wave grunt
         }
         var e = rich || Util.Roll(50)
             ? MakeHostile("RAIDER", "GRUNT", WeaponKind.Rifle, 5 + bump, 58 + bump, 6, x, y)
             : MakeHostile("STALKER", "SCOUT", WeaponKind.Smg, 4 + bump, 56 + bump, 8, x, y);
         e.Aim = Math.Min(82, e.Aim);
+        return HeatWave(e, heatStat, 82);
+    }
+
+    /// FUL-13 TRUE NORTH: DEFEND waves inherit the heat ladder's force-wide stat bump (+HP/+Aim,
+    /// aim re-clamped at the path's own rank-and-file cap). The initial force always took
+    /// Heat.StatDelta via SpawnEnemies' statDelta; waves were heat-BLIND (bump = mission only),
+    /// so the one enemy-forced-tempo objective got RELATIVELY EASIER as heat rose — measured at
+    /// the FUL-13 baseline: Defend 82% h0 -> 97% h6 / 91% h8 (defend-pinned h8: 96%, n=89) while
+    /// every other objective fell with heat. Deliberately card/assist-blind (waves always were);
+    /// the pressure clock keeps heatStat 0 — cheap punishment bodies by design (see
+    /// SpawnReinforcements' doc). Zero extra draws: CRN pairing and h0 batches are untouched
+    /// (Heat.StatDelta(0) == 0 -> byte-identical at heat 0 by construction).
+    static Unit HeatWave(Unit e, int heatStat, int aimCap)
+    {
+        if (heatStat <= 0) return e;
+        e.MaxHp += heatStat; e.Hp += heatStat;
+        e.Aim = Math.Min(aimCap, e.Aim + heatStat);
         return e;
     }
 
