@@ -4196,3 +4196,36 @@ axis, +0.19 on `choices/turn`, and Escort 12.57t -> 8.75t. It also simply reads 
   of quietly reverting to an east-facing fight after the opening pods die. Deterministic (a
   per-mission wave counter, no RNG draw) and it survives PAIRTEST, but it went in after the
   round budget was spent. **Shipped OFF**, ready-to-dev with a one-flag round.
+
+## THE SECONDARY TASK — the `SmartEscort` instrument fix, as its own paired round
+
+X1 handed this over: `SmartEscort`'s lone-VIP self-race tests
+`!Players.Any(p => p.Alive && !p.IsVip)`, but **a DOWNED soldier is still `Alive`**. So with
+the whole squad bleeding out the asset neither leashes (`LeashVip` skips downed anchors) nor
+races — it hunkers until the timers expire. Fixed to `p.Alive && !p.Downed && !p.IsVip`, and
+because it is a *measurement instrument* defect the old behaviour is reproducible on demand:
+**`SIGHTLINE_ESCORTFIX=0`** restores the broken test so the fix can be paired.
+
+Measured on its own, `SIGHTLINE_OBJ=escort` pinned so the sample is Escort missions rather
+than one-in-six of a mixed campaign, at **heat 8** (the rung X1 flagged), same CRN slot set,
+same shipped mix, 20 campaigns per leg:
+
+| leg | Escort missions | win | mean turns | loss causes |
+|---|---|---|---|---|
+| `ESCORTFIX=0` (X1's broken instrument) | 61 | 72.1% ±6.7 | **6.5** | VIP LOST 15, RUN OVER 2 |
+| fixed (shipped) | 52 | 61.5% ±6.7 | **6.8** | VIP LOST 18, STALEMATE 1, RUN OVER 1 |
+
+**Honest reading: the fix is neutral within noise, and it did not buy the de-drag it was
+predicted to.** The win-rate difference is 10.6pp against a ±9.5pp standard error on the
+difference — about 1.1 SE, not a result — and the turn count moved +0.3. What the round DOES
+establish is that **X1's 15.61-turn h8 Escort cell is not present on this tip**: both legs run
+~6.5 turns. The hunker-vs-race hole was never the mechanism behind that number.
+
+The trend, such as it is, points the other way: racing a lone VIP across an h8 board usually
+just gets it killed (VIP LOST 15 -> 18), so the broken predicate was accidentally playing the
+safer line. **Shipped anyway**, for two reasons that do not depend on the win-rate: the
+predicate is simply wrong as written (a downed soldier cannot act, and the leash already
+treats it as absent), and the behaviour it produced was an unbounded hunker — the shape of a
+stall, which is what the frame cap exists to catch. If the negative trend is real it is an
+argument about the *policy* (a lone VIP should race only when it can actually reach the zone),
+not about the predicate; that is recorded as a follow-up, not guessed at here.
