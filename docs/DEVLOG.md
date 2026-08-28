@@ -1570,3 +1570,42 @@ policy definition gets the accept-vs-sharpen decision then, with data.
 5. **Docs over-claims survive until someone greps for the test hook.** SIGNAL's W7 claimed
    SIGHTLINE_EXPOSURETEST; the hook didn't exist. Closed-item claims are now verified against
    the tree (hook exists, commits exist) before any docs commit — and W7's spec became FUL-9.
+
+# PROGRAM FULCRUM — FUL-1 COMPASS TRUTH landing (2026-08, wave dev)
+
+- **FUL-1 COMPASS TRUTH** (a4ef1dd): the measurement compass now reports what the FULCRUM waves
+  need to aim. Per-slot pair records + the all-pairs missions-cleared PAIRED MARGIN (continuous,
+  every pair contributes — CI roughly half the discordant-only binary gap's), binomial ±SE on
+  n<30 win-rate rows, (code,heat) "@h<N>" keys whenever a batch spans heats, a boon PROCS column
+  counted at the six effect sites, the arena funnel (authored-applied / connectivity-reject /
+  procedural-roll, sums to 100% of builds), BY ARENA stratified by mission #, BY EVENT-CHOICE
+  (id:arm, run-scoped like boons), and the SIGHTLINE_PERK=<code> paired probe. Telemetry-only:
+  every addition no-ops unless Stats.Enabled; the probe overrides AFTER ChoosePerk's value roll
+  draws, so probe legs replay their baseline worlds (CRN-safe). DESIGN.md §4 re-graded to tree
+  truth — **engagement mass** and **death stakes** are the named thin pillars.
+
+## Measured (FUL-1 first readings; BALANCE=10 per heat)
+| finding | number | consumer |
+|---|---|---|
+| SHOCK DOCTRINE procs (h4: 7 picks) | **0** | FUL-5/6 — the verb-boon layer never reaches play |
+| FIELD DRILLS / RECLAIMER procs (h4: 3+3 picks) | **0 / 0** | FUL-5/6 |
+| PYROMANIACS procs (h4: 4 picks) | 2 | FUL-5 |
+| FIELD STORES procs | 63-84/batch | grant site fires as designed |
+| TERROR procs (h0) | 6 | rout-start reachable |
+| arena funnel (h0) | 52.6% applied / 0.0% reject / 47.4% proc-roll | FUL-9 — the guard rejects ~nothing; the 55-roll IS the funnel |
+| paired margin, h0 / h4 | −0.30 ±0.26 / +0.10 ±0.57 SE | FUL-13 baseline |
+| PERK probe RFX (paired 2xN=5, h0) | 1 pick baseline → 10/10 probe leg | perk pricing works |
+
+## Gotcha for future waves: SHOT byte-identity is environmentally impossible
+The "byte-identical screenshot" verification bar cannot be met by ANY change, a no-op included:
+Util.Rng is clock-seeded at startup (the PairTest comment in Program.cs already says so) and the
+Renderer's pulses read Raylib.GetTime() (wall clock), so two SHOT invocations differ on unchanged
+code. Measured with a temporary (uncommitted, applied identically to both trees) env-gated
+Util.Reseed overlay: same-code noise floor 1.30-3.38% of pixels; base-vs-FUL-1 diffs 0.28-3.39% —
+inside the floor, scenes pixel-inspected identical (same world/units/HUD). The replacement
+logic-identity proof, now precedent for telemetry-only waves:
+  (a) seeded full-campaign AUTOPLAY + SMARTPLAY A/B vs base — frame-exact identical RESULT lines
+      across 5 seeds (any draw-count or logic drift diverges a 10k-frame trajectory);
+  (b) SIGHTLINE_BALANCE=2, same slot base, both trees — all 29 base-schema JSON fields identical
+      (per-shot class tallies and action mix included);
+  (c) PAIRTEST + SAVETEST PASS.

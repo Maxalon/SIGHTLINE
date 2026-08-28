@@ -90,6 +90,7 @@ public static class Stats
         public readonly List<string> Purchases = new();   // shop items bought (incl. weapon mods)
         public readonly List<string> BoonsPicked = new();  // run-scoped doctrine/boon picks
         public readonly List<string> ContractsPicked = new();  // W6 run-contract picks (usually 0-1/run)
+        public readonly List<string> EventChoices = new();     // FUL-1: field-event picks as "id:arm"
         public readonly List<MissionRec> Missions = new();
     }
 
@@ -138,11 +139,50 @@ public static class Stats
         Bump(factionRoster ? _spawnsFactionByClass : _spawnsDefaultByClass, cls);
     }
 
+    // ── FUL-1: BOON PROC counters ────────────────────────────────────────────────
+    // Fires-at-the-effect-site telemetry for the verb boons. Pick frequency alone can't
+    // say whether a boon ever DOES anything — the FUL research suspicion is that several
+    // (SHK/FDR/RCL) are picked and then never fire on the boards we generate. A 0 in this
+    // table for a picked code IS the finding FUL-5/FUL-6 consume. Batch-global (procs are
+    // aggregate texture, same rationale as the action mix); '-' rows = not instrumented.
+    static readonly Dictionary<string, int> _boonProcs = new();
+    public static readonly string[] ProcInstrumented = { "SHK", "TRR", "FDR", "PYR", "FST", "RCL" };
+    public static void RecordProc(string code)
+    {
+        if (!Enabled || string.IsNullOrEmpty(code)) return;
+        Bump(_boonProcs, code);
+    }
+
+    // ── FUL-1: ARENA FUNNEL ──────────────────────────────────────────────────────
+    // Mission.Build's layout decision, split into the three exits that sum to 100% of
+    // builds: the authored roll won AND the connectivity guard accepted (applied), the
+    // roll won but the guard REJECTED the template (falls to procedural — previously
+    // indistinguishable from a lost roll), or the roll itself chose procedural. Batch-
+    // global: Build runs before BeginMission (the RecordSpawn precedent).
+    public const int ArenaAuthored = 0, ArenaReject = 1, ArenaProcRoll = 2;
+    static readonly int[] _arenaFunnel = new int[3];
+    public static void RecordArenaFunnel(int stage)
+    {
+        if (!Enabled || stage < 0 || stage > 2) return;
+        _arenaFunnel[stage]++;
+    }
+
+    // ── FUL-1: FIELD-EVENT choice telemetry ──────────────────────────────────────
+    // A resolved event node — id + chosen arm index, run-scoped like boons so the report
+    // can associate run outcomes with arms (the table FUL-10's new forks will consume).
+    public static void RecordEvent(string id, int arm)
+    {
+        if (!Enabled || _run == null || string.IsNullOrEmpty(id)) return;
+        _run.EventChoices.Add($"{id}:{arm}");
+    }
+
     public static void Reset()
     {
         Runs.Clear(); _run = null; _mission = null;
         _spawnsFactionByClass.Clear(); _spawnsDefaultByClass.Clear();
         _actionsByPolicy.Clear();
+        _boonProcs.Clear();
+        _arenaFunnel[0] = _arenaFunnel[1] = _arenaFunnel[2] = 0;
         Slot = -1;
     }
 
@@ -286,23 +326,63 @@ public static class Stats
     // ── aggregate report ─────────────────────────────────────────────────────
     static string Pct(int num, int den) => den == 0 ? "  -  " : $"{100.0 * num / den,4:0}%";
 
+    // FUL-1: binomial ±SE in percentage points — appended to n<30 win-rate rows so a
+    // small-sample cell can't masquerade as signal (the Defend-23%-at-n=26 lesson).
+    // Plain binomial (100·√(p(1−p)/n)); note it degenerates to ±0 at p∈{0,1} — an n<30
+    // row printing ±0 means "all one outcome so far", not "certain".
+    static string Se(int wins, int n)
+    {
+        if (n <= 0 || n >= 30) return "";
+        double p = (double)wins / n;
+        return $" ±{100.0 * Math.Sqrt(p * (1 - p) / n):0}";
+    }
+    static double SeVal(int wins, int n)
+    {
+        if (n <= 0) return 0.0;
+        double p = (double)wins / n;
+        return Math.Round(100.0 * Math.Sqrt(p * (1 - p) / n), 1);
+    }
+
     // W2: paired per-slot outcomes over CAMPAIGN runs — a slot pairs when it has exactly one
     // greedy and one sloppy leg (the batch's normal shape). Shared by Report + BuildSummary.
     // Review fix: keyed by (Slot, Heat), not Slot alone — chunks sharing a BALANCE_BASE across
     // different heat pins would otherwise collide slot ids and dissolve into 4-run non-pairs.
+    // FUL-1: returns the full per-slot pair records (not just the tallies) so the report can
+    // print them and compute the all-pairs missions-cleared margin.
+    static List<(int slot, int heat, RunRec g, RunRec s)> PairList(List<RunRec> campRuns)
+        => campRuns.Where(r => r.Slot >= 0)
+            .GroupBy(r => (r.Slot, r.Heat))
+            .Select(gr => (slot: gr.Key.Slot, heat: gr.Key.Heat,
+                           g: gr.Where(r => r.Policy == "greedy").ToList(),
+                           s: gr.Where(r => r.Policy == "sloppy").ToList()))
+            .Where(p => p.g.Count == 1 && p.s.Count == 1)
+            .Select(p => (p.slot, p.heat, p.g[0], p.s[0]))
+            .OrderBy(p => p.heat).ThenBy(p => p.slot)
+            .ToList();
+
     static (int pairs, int concordant, int greedyOnlyWon, int sloppyOnlyWon) PairedOutcomes(List<RunRec> campRuns)
     {
-        var pairs = campRuns.Where(r => r.Slot >= 0)
-            .GroupBy(r => (r.Slot, r.Heat))
-            .Select(g => (g: g.Where(r => r.Policy == "greedy").ToList(),
-                          s: g.Where(r => r.Policy == "sloppy").ToList()))
-            .Where(p => p.g.Count == 1 && p.s.Count == 1)
-            .Select(p => (gWin: p.g[0].Win, sWin: p.s[0].Win))
-            .ToList();
+        var pairs = PairList(campRuns);
         return (pairs.Count,
-                pairs.Count(p => p.gWin == p.sWin),
-                pairs.Count(p => p.gWin && !p.sWin),
-                pairs.Count(p => !p.gWin && p.sWin));
+                pairs.Count(p => p.g.Win == p.s.Win),
+                pairs.Count(p => p.g.Win && !p.s.Win),
+                pairs.Count(p => !p.g.Win && p.s.Win));
+    }
+
+    // FUL-1: the all-pairs MISSIONS-CLEARED margin (greedy − sloppy per slot, averaged over
+    // EVERY pair — win/win and loss/loss pairs contribute too, unlike the discordant-only
+    // binary gap). A continuous paired outcome uses far more of each slot's information, so
+    // its CI is roughly half the binary gap's at the same n. SE = sd/√n over the margins.
+    // Review nano: at n=1 pair the sd (hence SE) degenerates to 0.00 — like the Se helper's
+    // p∈{0,1} rows, a printed ±0.00 there means "one sample", not "certain".
+    static (int n, double mean, double se) PairedMargin(List<(int slot, int heat, RunRec g, RunRec s)> pairs)
+    {
+        if (pairs.Count == 0) return (0, 0.0, 0.0);
+        var margins = pairs.Select(p => (double)(p.g.MissionsCleared - p.s.MissionsCleared)).ToList();
+        double mean = margins.Average();
+        double sd = margins.Count < 2 ? 0.0
+            : Math.Sqrt(margins.Sum(m => (m - mean) * (m - mean)) / (margins.Count - 1));
+        return (margins.Count, Math.Round(mean, 2), Math.Round(sd / Math.Sqrt(margins.Count), 2));
     }
 
     // APEX W4: small order stats for the endless wave-depth distribution. Nearest-rank
@@ -371,11 +451,20 @@ public static class Stats
             // the slot-level comparison cancels the world-to-world variance that made unpaired
             // gap readings swing ±27-38 pts. Concordant = both legs same outcome; discordant
             // pairs are the signal (greedy-only wins − sloppy-only wins) / pairs.
+            var slotPairs = PairList(campRuns);
             var (nPairs, conc, dPlus, dMinus) = PairedOutcomes(campRuns);
             if (nPairs > 0)
             {
                 double pairedGap = 100.0 * (dPlus - dMinus) / nPairs;
                 sb.AppendLine($"  PAIRED (same-seed slots): pairs={nPairs}  concordant={conc}  discordant greedy-only-won={dPlus} / sloppy-only-won={dMinus}  paired gap {pairedGap,4:0} pts");
+                // FUL-1: the raw per-slot records the paired tallies summarize — auditable at a
+                // glance (which world flipped which way), and the margin column feeds the
+                // all-pairs missions-cleared margin below (every pair contributes, ~halves CI).
+                sb.AppendLine("  PER-SLOT RECORDS (greedy | sloppy: outcome + missions cleared; margin = g−s):");
+                foreach (var p in slotPairs)
+                    sb.AppendLine($"    slot {p.slot,3} @h{p.heat}: {(p.g.Win ? "W" : "L")} {p.g.MissionsCleared} | {(p.s.Win ? "W" : "L")} {p.s.MissionsCleared}   margin {p.g.MissionsCleared - p.s.MissionsCleared:+0;-0;+0}");
+                var (mn, mMean, mSe) = PairedMargin(slotPairs);
+                sb.AppendLine($"  PAIRED MARGIN (missions cleared, all pairs): {mMean:+0.00;-0.00;+0.00} ±{mSe:0.00} SE  (n={mn} pairs)");
             }
             // per-objective gap so a single brittle objective can't hide in the overall number
             sb.AppendLine("  by objective (greedy / sloppy / gap):");
@@ -412,7 +501,7 @@ public static class Stats
         {
             sb.AppendLine("\nRUN COMPLETION BY HEAT (full-campaign clears):");
             foreach (var g in campRuns.GroupBy(r => r.Heat).OrderBy(g => g.Key))
-                sb.AppendLine($"  heat {g.Key}: {Pct(g.Count(r => r.Win), g.Count())}  (n={g.Count()} runs, avg {g.Average(r => (double)r.MissionsCleared):0.0} missions)");
+                sb.AppendLine($"  heat {g.Key}: {Pct(g.Count(r => r.Win), g.Count())}{Se(g.Count(r => r.Win), g.Count())}  (n={g.Count()} runs, avg {g.Average(r => (double)r.MissionsCleared):0.0} missions)");
         }
 
         // ── APEX W4: ENDLESS WAVE DEPTH (LAST STAND) ─────────────────────────────────
@@ -444,20 +533,20 @@ public static class Stats
         // Per-mission win-rate tables (campaign missions only — skipped in an endless-only batch)
         if (missions.Count > 0)
         {
-            // Win-rate by heat
+            // Win-rate by heat (FUL-1: n<30 rows carry a binomial ±SE — see Se)
             sb.AppendLine("\nMISSION WIN-RATE BY HEAT:");
             foreach (var g in missions.GroupBy(m => m.Heat).OrderBy(g => g.Key))
-                sb.AppendLine($"  heat {g.Key}: {Pct(g.Count(m => m.Win), g.Count())}  (n={g.Count()}, avg {g.Average(m => (double)m.Turns):0.0} turns)");
+                sb.AppendLine($"  heat {g.Key}: {Pct(g.Count(m => m.Win), g.Count())}{Se(g.Count(m => m.Win), g.Count())}  (n={g.Count()}, avg {g.Average(m => (double)m.Turns):0.0} turns)");
 
             // Win-rate by objective
             sb.AppendLine("\nMISSION WIN-RATE BY OBJECTIVE:");
             foreach (var g in missions.GroupBy(m => m.Objective).OrderByDescending(g => g.Count()))
-                sb.AppendLine($"  {g.Key,-11}: {Pct(g.Count(m => m.Win), g.Count())}  (n={g.Count()}, avg {g.Average(m => (double)m.Turns):0.0} turns)");
+                sb.AppendLine($"  {g.Key,-11}: {Pct(g.Count(m => m.Win), g.Count())}{Se(g.Count(m => m.Win), g.Count())}  (n={g.Count()}, avg {g.Average(m => (double)m.Turns):0.0} turns)");
 
             // Win-rate by mission number (difficulty curve)
             sb.AppendLine("\nMISSION WIN-RATE BY MISSION #:");
             foreach (var g in missions.GroupBy(m => m.Mission).OrderBy(g => g.Key))
-                sb.AppendLine($"  m{g.Key}: {Pct(g.Count(x => x.Win), g.Count())}  (n={g.Count()})");
+                sb.AppendLine($"  m{g.Key}: {Pct(g.Count(x => x.Win), g.Count())}{Se(g.Count(x => x.Win), g.Count())}  (n={g.Count()})");
 
             // Cause of loss
             sb.AppendLine("\nLOSS CAUSES (missions):");
@@ -470,12 +559,31 @@ public static class Stats
             // only after the connectivity guard accepted it; -1 = procedural fallback). Rows
             // filtered to n>=3 so single-sight arenas don't read as 0%/100% outliers.
             int procN = missions.Count(m => m.Layout < 0);
+            // FUL-1: each row is STRATIFIED BY MISSION # — PickLayout gates templates by
+            // mission, so an arena's aggregate win-rate silently mixes difficulty rungs;
+            // the per-mission cells expose the mix (cell = m<N>:win%(n)). n<30 rows carry ±SE.
+            string ByMissionCells(IEnumerable<MissionRec> ms) => string.Join(" ",
+                ms.GroupBy(m => m.Mission).OrderBy(g => g.Key)
+                  .Select(g => $"m{g.Key}:{(int)Math.Round(100.0 * g.Count(m => m.Win) / g.Count())}%({g.Count()})"));
             sb.AppendLine($"\nMISSION WIN-RATE BY ARENA (authored layouts, n>=3; procedural fallback {Pct(procN, missions.Count)} of {missions.Count} missions):");
             foreach (var g in missions.Where(m => m.Layout >= 0).GroupBy(m => m.Layout)
                                        .Where(g => g.Count() >= 3).OrderBy(g => g.Key))
-                sb.AppendLine($"  arena {g.Key,2}: {Pct(g.Count(m => m.Win), g.Count())}  (n={g.Count()}, avg {g.Average(m => (double)m.Turns):0.0} turns)");
+                sb.AppendLine($"  arena {g.Key,2}: {Pct(g.Count(m => m.Win), g.Count())}{Se(g.Count(m => m.Win), g.Count())}  (n={g.Count()}, avg {g.Average(m => (double)m.Turns):0.0} turns)  [{ByMissionCells(g)}]");
             if (procN >= 3)
-                sb.AppendLine($"  procedural: {Pct(missions.Count(m => m.Layout < 0 && m.Win), procN)}  (n={procN}, avg {missions.Where(m => m.Layout < 0).Average(m => (double)m.Turns):0.0} turns)");
+                sb.AppendLine($"  procedural: {Pct(missions.Count(m => m.Layout < 0 && m.Win), procN)}{Se(missions.Count(m => m.Layout < 0 && m.Win), procN)}  (n={procN}, avg {missions.Where(m => m.Layout < 0).Average(m => (double)m.Turns):0.0} turns)  [{ByMissionCells(missions.Where(m => m.Layout < 0))}]");
+        }
+
+        // ── FUL-1: ARENA FUNNEL (Mission.Build's three exits — the lines sum to 100%) ──
+        // The reject line is the new signal: an authored roll the connectivity guard threw
+        // away used to be indistinguishable from a lost roll, understating authored demand.
+        // All modes (the build path is mode-agnostic); counted per Build while enabled.
+        int funTot = _arenaFunnel[0] + _arenaFunnel[1] + _arenaFunnel[2];
+        if (funTot > 0)
+        {
+            sb.AppendLine($"\nARENA FUNNEL (Mission.Build exits, n={funTot} builds, all modes):");
+            sb.AppendLine($"  authored-applied    : {100.0 * _arenaFunnel[0] / funTot,5:0.0}%  (n={_arenaFunnel[0]})");
+            sb.AppendLine($"  connectivity-reject : {100.0 * _arenaFunnel[1] / funTot,5:0.0}%  (n={_arenaFunnel[1]})");
+            sb.AppendLine($"  procedural-roll     : {100.0 * _arenaFunnel[2] / funTot,5:0.0}%  (n={_arenaFunnel[2]})");
         }
 
         // ── W2: ACTION MIX (verbs issued, split by policy) ───────────────────────────
@@ -577,14 +685,28 @@ public static class Stats
                 sb.AppendLine($"  {kv.Key,-18}: {kv.Value}");
         }
 
-        // Boon / doctrine pick frequency
+        // Boon / doctrine pick frequency. FUL-1: + a PROCS column — effect fires counted at
+        // the instrumented sites (SHK brace-full-dmg, TRR rout-start, FDR 2nd drag/vault,
+        // PYR +2-turn burn, FST double-charge grant, RCL cone re-arm). picks>0 with procs=0
+        // means the boon was HELD but its effect never reached play — the FUL-5 finding.
+        // '-' = code not instrumented (frequency-only, as before).
+        // Review fix: PYR counts the +2-turn-burn half ONLY; its second effect (squad Burning
+        // immunity, the Unit.AddStatus chokepoint) is deliberately uninstrumented — it fires
+        // per BLOCKED application and would swamp the column. The caption says so.
         var boons = new Dictionary<string, int>();
         foreach (var r in Runs) foreach (var b in r.BoonsPicked) Bump(boons, b);
-        if (boons.Count > 0)
+        if (boons.Count > 0 || _boonProcs.Count > 0)
         {
-            sb.AppendLine("\nBOON PICK FREQUENCY:");
-            foreach (var kv in boons.OrderByDescending(kv => kv.Value))
-                sb.AppendLine($"  {kv.Key,-18}: {kv.Value}");
+            sb.AppendLine("\nBOON PICK FREQUENCY (PROCS = effect fires at instrumented sites; '-' = not instrumented;");
+            sb.AppendLine("                      PYR counts the +2-turn-burn half only — the Burning-immunity half is uninstrumented):");
+            sb.AppendLine("  code                 picks   PROCS");
+            foreach (var k in boons.Keys.Concat(_boonProcs.Keys).Distinct()
+                         .OrderByDescending(k => boons.GetValueOrDefault(k)).ThenBy(k => k))
+            {
+                string procs = ProcInstrumented.Contains(k) || _boonProcs.ContainsKey(k)
+                    ? _boonProcs.GetValueOrDefault(k).ToString() : "-";
+                sb.AppendLine($"  {k,-18}: {boons.GetValueOrDefault(k),5}   {procs,5}");
+            }
         }
 
         // ── APEX W4: WIN-RATE BY PICK (value telemetry, not just frequency) ──────────
@@ -592,19 +714,25 @@ public static class Stats
         // held it (deduped per run). These were recorded all along — contracts were recorded
         // and never reported at ALL — but only frequencies ever reached the report, so a pick's
         // VALUE was invisible. Small-n rows are noisy; read them against the pick count.
+        // FUL-1: when the batch SPANS heats (the {0,2,4,6,8} cycling default), rows are keyed
+        // (code, heat) — "CODE@h<N>" — so a pick's win-rate is never a disguised heat mix (a
+        // code over-drawn at heat 0 would otherwise read as strong). Pinned batches keep the
+        // plain code key. n<30 rows carry the binomial ±SE.
+        bool spansHeats = campRuns.Select(r => r.Heat).Distinct().Count() > 1;
         void WinRateTable(string title, Func<RunRec, IEnumerable<string>> picks)
         {
             var agg = new Dictionary<string, (int n, int w)>();
             foreach (var r in campRuns)
                 foreach (var code in picks(r).Distinct())
                 {
-                    agg.TryGetValue(code, out var t);
-                    agg[code] = (t.n + 1, t.w + (r.Win ? 1 : 0));
+                    string key = spansHeats ? $"{code}@h{r.Heat}" : code;
+                    agg.TryGetValue(key, out var t);
+                    agg[key] = (t.n + 1, t.w + (r.Win ? 1 : 0));
                 }
             if (agg.Count == 0) return;
             sb.AppendLine($"\n{title}:");
             foreach (var kv in agg.OrderByDescending(kv => kv.Value.n).ThenBy(kv => kv.Key))
-                sb.AppendLine($"  {kv.Key,-18}: {Pct(kv.Value.w, kv.Value.n)}  (in {kv.Value.n} runs)");
+                sb.AppendLine($"  {kv.Key,-18}: {Pct(kv.Value.w, kv.Value.n)}{Se(kv.Value.w, kv.Value.n)}  (in {kv.Value.n} runs)");
         }
         WinRateTable("RUN WIN-RATE BY BOON (campaign runs holding it)", r => r.BoonsPicked);
         WinRateTable("RUN WIN-RATE BY SPEC (campaign runs fielding it)", r => r.SpecsPicked);
@@ -613,6 +741,8 @@ public static class Stats
         // the perk offer and the shop slate both got randomized exposure for exactly this table).
         WinRateTable("RUN WIN-RATE BY PERK (campaign runs holding it)", r => r.PerksPicked);
         WinRateTable("RUN WIN-RATE BY PURCHASE (campaign runs buying it)", r => r.Purchases);
+        // FUL-1: field-event arms ("id:arm") — the trade-off table FUL-10's new forks consume.
+        WinRateTable("RUN WIN-RATE BY EVENT-CHOICE (campaign runs taking id:arm)", r => r.EventChoices);
 
         sb.AppendLine("═══════════════════════════════════════════════════════════════════════");
         return sb.ToString();
@@ -667,6 +797,8 @@ public static class Stats
         foreach (var r in Runs) foreach (var p in r.Purchases) Bump(buys, p);
         var boons = new Dictionary<string, int>();
         foreach (var r in Runs) foreach (var b in r.BoonsPicked) Bump(boons, b);
+        var evChoices = new Dictionary<string, int>();   // FUL-1: "id:arm" frequency
+        foreach (var r in Runs) foreach (var e in r.EventChoices) Bump(evChoices, e);
 
         double WinRate(IEnumerable<MissionRec> ms)
         {
@@ -694,19 +826,24 @@ public static class Stats
             };
         }
 
-        // APEX W4: run-level win-rate by pick code (campaign only, deduped per run)
+        // APEX W4: run-level win-rate by pick code (campaign only, deduped per run).
+        // FUL-1: keys become "CODE@h<N>" when the batch spans heats (mirrors the report
+        // table — a pick's win-rate must not be a disguised heat mix), and every row
+        // carries its binomial se (percentage points).
+        bool spansHeats = campRuns.Select(r => r.Heat).Distinct().Count() > 1;
         Dictionary<string, object> WinRateBy(Func<RunRec, IEnumerable<string>> picks)
         {
             var agg = new Dictionary<string, (int n, int w)>();
             foreach (var r in campRuns)
                 foreach (var code in picks(r).Distinct())
                 {
-                    agg.TryGetValue(code, out var t);
-                    agg[code] = (t.n + 1, t.w + (r.Win ? 1 : 0));
+                    string key = spansHeats ? $"{code}@h{r.Heat}" : code;
+                    agg.TryGetValue(key, out var t);
+                    agg[key] = (t.n + 1, t.w + (r.Win ? 1 : 0));
                 }
             return agg.OrderByDescending(kv => kv.Value.n).ToDictionary(
                 kv => kv.Key,
-                kv => (object)new { runs = kv.Value.n, winRate = Math.Round(100.0 * kv.Value.w / kv.Value.n, 1) });
+                kv => (object)new { runs = kv.Value.n, winRate = Math.Round(100.0 * kv.Value.w / kv.Value.n, 1), se = SeVal(kv.Value.w, kv.Value.n) });
         }
 
         // decision-richness / swing aggregates (all modes — texture data is mode-agnostic)
@@ -754,34 +891,50 @@ public static class Stats
             },
             // Run-completion grouped by heat (the ladder's true shape — distinct from the
             // survivorship-skewed per-mission byHeat below). Campaign runs only.
+            // FUL-1: win-rate rows carry their binomial se (percentage points) so a consumer
+            // never has to reconstruct the sample-size caveat from n by hand.
             byHeatRun = campRuns.GroupBy(r => r.Heat).OrderBy(g => g.Key).Select(g => new
             {
                 heat = g.Key, runs = g.Count(),
                 runWinRate = Math.Round(100.0 * g.Count(r => r.Win) / g.Count(), 1),
+                se = SeVal(g.Count(r => r.Win), g.Count()),
                 avgMissionsCleared = Math.Round(g.Average(r => (double)r.MissionsCleared), 2)
             }).ToList(),
             byHeat = missions.GroupBy(m => m.Heat).OrderBy(g => g.Key).Select(g => new
             {
-                heat = g.Key, n = g.Count(), winRate = WinRate(g), avgTurns = Math.Round(g.Average(m => (double)m.Turns), 1)
+                heat = g.Key, n = g.Count(), winRate = WinRate(g), se = SeVal(g.Count(m => m.Win), g.Count()), avgTurns = Math.Round(g.Average(m => (double)m.Turns), 1)
             }).ToList(),
             byObjective = missions.GroupBy(m => m.Objective).OrderBy(g => g.Key).Select(g => new
             {
-                objective = g.Key, n = g.Count(), winRate = WinRate(g), avgTurns = Math.Round(g.Average(m => (double)m.Turns), 1)
+                objective = g.Key, n = g.Count(), winRate = WinRate(g), se = SeVal(g.Count(m => m.Win), g.Count()), avgTurns = Math.Round(g.Average(m => (double)m.Turns), 1)
             }).ToList(),
             byMission = missions.GroupBy(m => m.Mission).OrderBy(g => g.Key).Select(g => new
             {
-                mission = g.Key, n = g.Count(), winRate = WinRate(g)
+                mission = g.Key, n = g.Count(), winRate = WinRate(g), se = SeVal(g.Count(m => m.Win), g.Count())
             }).ToList(),
-            // W2 arena telemetry: authored layout index (-1 rows are folded into proceduralRate)
+            // W2 arena telemetry: authored layout index (-1 rows are folded into proceduralRate).
+            // FUL-1: + per-mission stratification (PickLayout gates templates by mission, so an
+            // arena's aggregate mixes difficulty rungs — the cells expose the mix).
             byArena = missions.Where(m => m.Layout >= 0).GroupBy(m => m.Layout).OrderBy(g => g.Key).Select(g => new
             {
-                arena = g.Key, n = g.Count(), winRate = WinRate(g), avgTurns = Math.Round(g.Average(m => (double)m.Turns), 1)
+                arena = g.Key, n = g.Count(), winRate = WinRate(g), se = SeVal(g.Count(m => m.Win), g.Count()), avgTurns = Math.Round(g.Average(m => (double)m.Turns), 1),
+                byMission = g.GroupBy(m => m.Mission).OrderBy(x => x.Key)
+                    .Select(x => new { mission = x.Key, n = x.Count(), winRate = WinRate(x) }).ToList()
             }).ToList(),
             proceduralFallback = new
             {
                 n = missions.Count(m => m.Layout < 0),
                 rate = missions.Count == 0 ? 0.0 : Math.Round(100.0 * missions.Count(m => m.Layout < 0) / missions.Count, 1),
                 winRate = WinRate(missions.Where(m => m.Layout < 0))
+            },
+            // FUL-1 ARENA FUNNEL: Mission.Build's three exits (authored-applied / connectivity-
+            // reject / procedural-roll) — counts sum to `builds`. All modes; see RecordArenaFunnel.
+            arenaFunnel = new
+            {
+                builds = _arenaFunnel[0] + _arenaFunnel[1] + _arenaFunnel[2],
+                authoredApplied = _arenaFunnel[0],
+                connectivityReject = _arenaFunnel[1],
+                proceduralRoll = _arenaFunnel[2]
             },
             // W2 ACTION MIX: verb counts by policy (what each policy actually does)
             actionMix = _actionsByPolicy.OrderBy(kv => kv.Key).ToDictionary(
@@ -813,6 +966,13 @@ public static class Stats
             specPicks = specs.OrderByDescending(kv => kv.Value).ToDictionary(kv => kv.Key, kv => kv.Value),
             shopPurchases = buys.OrderByDescending(kv => kv.Value).ToDictionary(kv => kv.Key, kv => kv.Value),
             boonPicks = boons.OrderByDescending(kv => kv.Value).ToDictionary(kv => kv.Key, kv => kv.Value),
+            // FUL-1: effect fires at the instrumented boon sites (0 for a picked code = the
+            // boon never reached play; codes absent from ProcInstrumented are not counted).
+            // Review fix: PYR counts the +2-turn-burn half only — the Burning-immunity half
+            // (Unit.AddStatus) is uninstrumented (per-blocked-application, would swamp it).
+            boonProcs = ProcInstrumented.OrderBy(k => k).ToDictionary(k => k, k => _boonProcs.GetValueOrDefault(k)),
+            // FUL-1: field-event arm frequency ("id:arm"), all modes.
+            eventChoicePicks = evChoices.OrderByDescending(kv => kv.Value).ThenBy(kv => kv.Key).ToDictionary(kv => kv.Key, kv => kv.Value),
             // APEX W4: pick VALUE, not just frequency — run win-rate by held boon/spec/contract
             // (campaign runs, deduped per run; contracts were recorded but never reported at all).
             winRateByBoon = WinRateBy(r => r.BoonsPicked),
@@ -821,18 +981,33 @@ public static class Stats
             // W2: pick VALUE for perks + shop purchases too (both got randomized exposure)
             winRateByPerk = WinRateBy(r => r.PerksPicked),
             winRateByPurchase = WinRateBy(r => r.Purchases),
+            // FUL-1: event-arm VALUE ("id:arm") — the table FUL-10's new forks consume.
+            winRateByEventChoice = WinRateBy(r => r.EventChoices),
         };
     }
 
     // W2: the paired-outcome object for the JSON artifact (mirrors the PAIRED report line).
+    // FUL-1: + the raw per-slot records and the all-pairs missions-cleared margin — the
+    // continuous paired stat uses EVERY slot (concordant pairs included), so its CI is
+    // roughly half the discordant-only binary gap's at the same n.
     static object BuildPaired(List<RunRec> campRuns)
     {
         var (pairs, concordant, dPlus, dMinus) = PairedOutcomes(campRuns);
+        var slotPairs = PairList(campRuns);
+        var (mn, mMean, mSe) = PairedMargin(slotPairs);
         return new
         {
             pairs, concordant,
             greedyOnlyWon = dPlus, sloppyOnlyWon = dMinus,
-            pairedGap = pairs == 0 ? 0.0 : Math.Round(100.0 * (dPlus - dMinus) / pairs, 1)
+            pairedGap = pairs == 0 ? 0.0 : Math.Round(100.0 * (dPlus - dMinus) / pairs, 1),
+            slots = slotPairs.Select(p => new
+            {
+                slot = p.slot, heat = p.heat,
+                greedyWin = p.g.Win, greedyMissions = p.g.MissionsCleared,
+                sloppyWin = p.s.Win, sloppyMissions = p.s.MissionsCleared,
+                marginMissions = p.g.MissionsCleared - p.s.MissionsCleared
+            }).ToList(),
+            pairedMarginMissions = new { n = mn, mean = mMean, se = mSe }
         };
     }
 }
