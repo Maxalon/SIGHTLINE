@@ -3550,7 +3550,8 @@ public partial class Game
             // reachable win OR loss — the soft-lock. Never let a dead asset stall the run.
             if (Vip == null || !Vip.Alive)
             { LoseRun("CAPTIVE LOST", $"The captive died on mission {_run.Mission}."); return; }
-            if (!CaptiveLocked && Vip != null && EvacZone.Contains((Vip.X, Vip.Y))) EnterBarracks();
+            // (no Vip null-check: the guard above returns on a null/dead captive)
+            if (!CaptiveLocked && EvacZone.Contains((Vip.X, Vip.Y))) EnterBarracks();
         }
         else if (Objective == Objective.Defend) // hold out for DefendTurns player turns
         {
@@ -3964,7 +3965,7 @@ public partial class Game
         if (Selected == null || !Selected.CanAct)
         {
             var next = Players.FirstOrDefault(p => p.CanAct);
-            if (next != null && (Selected == null || !Selected.CanAct)) Selected = next ?? Selected;
+            if (next != null) Selected = next;   // (inside `next != null`, `next ?? Selected` was always `next`)
         }
 
         RecomputeMoveCost();

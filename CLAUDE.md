@@ -85,6 +85,7 @@ content to the right home:
 | **`docs/DEVLOG.md`** | Curated process log | Per-program/sprint goals, who did what, review/QA outcomes, measured balance, gotchas. **Session write-ups go here, not CLAUDE.md.** |
 | **`docs/DEVLOG-ARCHIVE.md`** | Raw migrated WIP notes | The old CLAUDE.md WIP-NOTES blob, kept verbatim for provenance. Append here only if a note doesn't fit the curated DEVLOG. |
 | **`docs/AUDIT-2026.md`** | Standing audit | The independent-auditor findings that drive balance priorities. |
+| **`docs/DISTRIBUTION.md`** | Shipping contract | How to publish, the measured publish matrix, the `PublishTrimmed` hazard, third-party licence status, the open root-LICENSE decision, and where player data lives. |
 
 **Rule of thumb:** if it's *what to do next* → ROADMAP; *why the game is this way* →
 DESIGN; *what happened in a session* → DEVLOG; *what exists* → FEATURES. CLAUDE.md
@@ -127,9 +128,20 @@ SIGHTLINE_AUTOPLAY=1 xvfb-run -a -s "-screen 0 1280x800x24" dotnet run -c Debug
 SIGHTLINE_MISSION=2 SIGHTLINE_SHOT=80 xvfb-run -a -s "-screen 0 1280x800x24" dotnet run -c Debug
 ```
 
+**Harness isolation (house procedure — export these in EVERY shell).** The persistence
+self-tests stash-and-restore the real user-data dir and `SIGHTLINE_BALANCE` writes a
+shared `/tmp/balance.json`, so parallel agents corrupt each other's runs without it:
+
+```bash
+mkdir -p "$PWD/.xdg"                       # must EXIST: an absent dir makes GetFolderPath
+export XDG_CONFIG_HOME="$PWD/.xdg"         # return "" and saves land in a relative ./Sightline
+export SIGHTLINE_BALANCE_JSON="$PWD/balance.json"
+```
+
 Run autoplay a few times (RNG varies); confirm **no exceptions and no TIMEOUT**. The
-autopilot is a weak smoke-test AI and LOSES most seeds — that's expected; the contract
-is "no exceptions, no TIMEOUT", not a win. `sightline_shot.png` is gitignored;
+contract is "no exceptions, no TIMEOUT" — *not* a win, and not a loss either. Measured over
+15 Debug autoplays (F1): 3 WIN / 12 LOSE, finale reached on 5, earliest death mission 1,
+zero TIMEOUTs. **A WIN is normal, not suspicious.** `sightline_shot.png` is gitignored;
 `docs/screenshot.png` (README image) is committed.
 
 **Self-tests & measurement:** many features ship a window-free `SIGHTLINE_*TEST` hook
@@ -138,6 +150,35 @@ are `SIGHTLINE_*` screenshot hooks per feature. The `SIGHTLINE_BALANCE=<N>` flyw
 N headless campaigns and reports win-rate/decision-richness/policy-gap. A fuller (but
 non-exhaustive) list of hooks is scattered through `docs/DEVLOG.md`; grep `Program.cs`
 for `SIGHTLINE_` for the authoritative set.
+**Reference timings** (this container; the whole suite is `bash scripts/qa-sweep.sh --full`,
+~2 min 40 s, which is the mode to run before merging):
+
+| | |
+|---|---|
+| `dotnet build -c Release`, no-op | 1.5 s (≈12 s after touching one source file) |
+| one self-test, Release binary directly | 0.1–0.4 s |
+| one self-test via `xvfb-run dotnet run -c Debug` | 1–2 s |
+| `SIGHTLINE_PAIRTEST=1` | 38 s |
+| `SIGHTLINE_AUTOPLAY=1` (Debug) | ~22 s |
+| `SIGHTLINE_BALANCE=10` (Release binary, **under xvfb**) | 311 s (~31 s/slot) |
+
+**Free keys** (nothing is bound to them — check here before adding a shortcut):
+**`I J N O P Q U V Z`**. Bound today: `A B C D E F G H K L M R S T W X Y`, `1`–`9`, the
+arrows, Tab/Space/Enter/Escape/Backspace/F2/Kp+/Kp−.
+
+**Distribution** (publishing a build, the licence position, where saves live, and the
+`PublishTrimmed` hazard): [`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md) +
+`bash scripts/publish.sh`.
+
+**Self-tests & measurement:** 41 features ship a window-free `SIGHTLINE_*TEST` hook
+(e.g. `COMBATTEST`, `SAVETEST`, `AITEST`, `ITEMTEST`) that prints `PASS/FAIL`, and there
+are `SIGHTLINE_*` screenshot hooks per feature. `bash scripts/qa-sweep.sh --full` runs all
+41 plus autoplay ×3 and is the pre-merge gate; without `--full` it skips the 38 s PAIRTEST.
+The `SIGHTLINE_BALANCE=<N>` flywheel runs N headless campaigns and reports
+win-rate/decision-richness/policy-gap — **it needs a display**, so run it under `xvfb-run`;
+without one it silently reports `runs=0`. A fuller (but non-exhaustive) list of hooks is
+scattered through `docs/DEVLOG.md`; grep `Program.cs` for `SIGHTLINE_` for the
+authoritative set.
 
 ---
 
@@ -171,6 +212,9 @@ src/
   Display.cs    render-target, post-FX shader, brightness/colorblind, settings
   Stats.cs      SIGHTLINE_BALANCE analytics harness
 scripts/dev-setup.sh   sandbox setup
+scripts/qa-sweep.sh    all 41 self-tests + autoplay x3 (--full adds PAIRTEST)
+scripts/publish.sh     hand-run distributable build + persistence re-proof
+THIRD-PARTY-NOTICES.txt  raylib/Raylib-cs (Zlib) + .NET (MIT); copied to build output
 docs/screenshot.png    README image
 ```
 
@@ -199,9 +243,13 @@ docs/screenshot.png    README image
   corner → flank). High ground negates the target's LOW cover. Verified by
   `SIGHTLINE_COMBATTEST`.
 - Each `WeaponKind` has its own `RangeMod` curve + `MaxRange` + clip + crit base.
-- **Six persisted-by-ordinal enums** (Objective/WeaponKind/Perk/WeaponMod/Trait/Boon/
-  Faction and friends) are **APPEND-ONLY** — a reorder/removal corrupts saves and fails
-  `SIGHTLINE_SAVETEST`. Add new values at the end only.
+- **Thirteen persisted-by-ordinal enums** (Objective, WeaponKind, Perk, WeaponMod, Trait,
+  Boon, SecondaryKind, Faction, Spec, Scar, Contract, MetaUnlock, RewardKind) are
+  **APPEND-ONLY** — the ordinal IS the save format. `SIGHTLINE_SAVETEST` pins each one with
+  a golden fingerprint over its full ordinal→name mapping (`SaveGame.PersistedEnums`), so a
+  reorder, removal, rename **or mid-enum insertion** fails loudly. **To add a member:**
+  append it at the END, run SAVETEST, paste the "actual" hash it prints into
+  `PersistedEnums`. Anything other than an append is a save-format break.
 
 ---
 
@@ -232,6 +280,16 @@ docs/screenshot.png    README image
   never touches disk/meta (gated by `NoPersist`), so shots stay byte-identical and the
   balance flywheel is reproducible. Keep new persistent/random/post-FX work behind those
   gates.
+- **Headless determinism — what is actually guaranteed.** The harness keeps `Display`
+  (post-FX) OFF and never touches disk/meta (gated by `NoPersist`), and the flywheel
+  reseeds explicitly (`Util.Reseed(50000+slot)`), so **paired measurement** is
+  reproducible. **Screenshots are NOT byte-identical** and never were: two
+  `SIGHTLINE_SHOT=90` runs measurably differ in ~30% of pixels (measured 303,065 of
+  1,024,000 px), because 58 `Raylib.GetTime()` wall-clock reads drive animation
+  (46 in `Renderer.cs`, 12 in `Hud.cs`) and `Util.Rng` is clock-seeded by default. Never
+  gate anything on a screenshot hash — **`SIGHTLINE_PAIRTEST` byte-identity is the real
+  determinism gate**. Keep new persistent/random/post-FX work behind the `NoPersist`/
+  Display gates so that stays true.
 
 ---
 

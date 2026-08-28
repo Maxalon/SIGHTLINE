@@ -840,6 +840,16 @@ public static class Stats
     // System.Text.Json pattern; failures are swallowed (telemetry must never crash a run).
     static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = true };
 
+    // IL2026 (trim analysis): BuildSummary returns a tree of ANONYMOUS types, which no source
+    // generator can be pointed at, so this one call site stays reflection-based. It is safe under
+    // `-p:PublishTrimmed=true` only because Sightline.csproj roots our own assembly
+    // (TrimmerRootAssembly) and re-enables the JSON reflection fallback for trimmed publishes --
+    // verified by publishing trimmed and diffing this file against the untrimmed build's (byte
+    // identical). If either csproj setting is removed, this silently stops writing; the catch below
+    // now prints the reason instead of swallowing it. Nothing in the shipped GAME reaches here --
+    // WriteJson is only called from the SIGHTLINE_BALANCE headless flywheel.
+    [System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage("Trimming", "IL2026",
+        Justification = "Anonymous-type telemetry; app assembly is rooted via TrimmerRootAssembly and JSON reflection is re-enabled for trimmed publishes. Dev-harness only (SIGHTLINE_BALANCE).")]
     public static void WriteJson(string path)
     {
         try
@@ -848,7 +858,13 @@ public static class Stats
             if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
             File.WriteAllText(path, JsonSerializer.Serialize(BuildSummary(), JsonOpts));
         }
-        catch { /* telemetry is best-effort; never throw out of a balance batch */ }
+        catch (Exception e)
+        {
+            // Best-effort (telemetry must never throw out of a balance batch) but NOT silent: a
+            // bare `catch {}` here meant a trimmed build wrote no file at all and said nothing,
+            // which is how a broken publish config survives a "0 Errors" review.
+            Console.WriteLine($"stats JSON export FAILED ({path}): {e.GetType().Name}: {e.Message}");
+        }
     }
 
     // A plain-data view of the aggregate, for JSON. Built from the same Runs list as Report(),

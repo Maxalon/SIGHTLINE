@@ -1116,3 +1116,21 @@ sets, one lever per measured round, fresh same-slot R0 first, dip budgets, breac
       `Combat.ComputeOdds` so the displayed HIT% is the rolled probability (was under-reporting
       by up to 12 pts), and the `RUSHED 2ND SHOT` badge ungated from aim mode. Details in
       DEVLOG §RESONANCE Q1.
+### PROGRAM RESONANCE — F1 "FOUNDATIONS" (done 2026-08-28, details in DEVLOG §F1)
+
+- [x] Golden-fingerprint append-only enum guard (13 enums incl. the previously unguarded
+      `RewardKind`); a mid-enum insertion now fails SAVETEST instead of passing silently.
+- [x] `SchemaVersion` migration hook on `RunDto` + `MetaDto`, stamped and asserted.
+- [x] D2 — a structurally-valid-but-unusable save no longer leaves a permanently dead
+      CONTINUE button; D5 — persisted enum ordinals are validated on read.
+- [x] `PublishTrimmed` no longer silently destroys all persistence (source-generated JSON
+      contexts); a 25 MB distributable that verifies itself (`scripts/publish.sh`).
+- [x] Assets resolve against the executable dir, so a published build works from any CWD.
+- [x] `THIRD-PARTY-NOTICES.txt` + `docs/DISTRIBUTION.md`.
+- [x] `qa-sweep.sh` runs all 41 self-tests (was 35); CLAUDE.md's false byte-stability and
+      stale autoplay claims corrected against measurement.
+
+- [ ] **Root `LICENSE` — OPEN OWNER DECISION.** Deliberately not invented by F1. Options,
+      trade-offs and a recommendation are in `docs/DISTRIBUTION.md` §4; the status quo
+      (unlicensed private repo = all rights reserved) is safe and blocks nothing until a
+      build goes to someone outside the project.

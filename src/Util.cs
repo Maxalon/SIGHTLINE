@@ -61,8 +61,14 @@ public static class Cfg
     /// asset dropped next to a `dotnet run` still resolves.
     public static string AssetPath(string rel)
     {
-        string baked = System.IO.Path.Combine(AppContext.BaseDirectory, rel);
-        if (System.IO.File.Exists(baked)) return baked;
+        // F1 hardening: BaseDirectory/File.Exists can throw on an odd host; never let an asset
+        // lookup take the process down - fall through to the cwd-relative path instead.
+        try
+        {
+            string baked = System.IO.Path.Combine(AppContext.BaseDirectory, rel);
+            if (System.IO.File.Exists(baked)) return baked;
+        }
+        catch { /* fall through */ }
         return rel;   // fall back to cwd-relative (dev convenience / dropped-in files)
     }
 }
@@ -288,4 +294,5 @@ public static class Util
         h ^= h >> 16; h *= 0x45d9f3bu; h ^= h >> 16; h *= 0x45d9f3bu; h ^= h >> 16;
         return h;
     }
+
 }

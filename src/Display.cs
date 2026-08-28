@@ -10,22 +10,27 @@ namespace Sightline;
 /// so it stays readable on big / high-DPI / 4K displays (window size + fullscreen).
 /// At exactly 1280x800 windowed it draws directly (keeping MSAA crispness); scaling
 /// only kicks in once the window is enlarged. Disabled in the headless harness so the
-/// smoke-test screenshots stay byte-identical.
+/// smoke-test path carries no render-target or shader state (NOT because shots are
+/// byte-identical - they are not; see the note on the Display class below).
 ///
 /// Phase 5.2 adds an optional post-FX shader pass (bloom + vignette + biome colour
 /// grading + chromatic aberration). The pass is always OFF when Display is disabled
-/// (headless harness), so plain SIGHTLINE_SHOT screenshots remain byte-identical.
+/// (headless harness), which keeps the shot path free of shader state. NOTE (RESONANCE):
+/// this comment used to claim plain SIGHTLINE_SHOT screenshots are byte-identical - they
+/// are NOT. Two identical shot runs differ in ~30% of pixels (58 Raylib.GetTime() reads in
+/// the renderer/HUD plus a clock-seeded Util.Rng). Never gate on a screenshot hash;
+/// SIGHTLINE_PAIRTEST byte-identity is the real determinism gate.
 /// Enable for verification with SIGHTLINE_POSTFX=1 (forces Display.Init(true) even
 /// during shot mode and sets a strong demo bloom so the effect is clearly visible).
-public static class Display
+public static partial class Display
 {
     public static bool Enabled;
     static RenderTexture2D _target;
 
     // ---- post-FX shader (Phase 5.2) ----
     // PostFX is enabled by default whenever Display is enabled (i.e. live game).
-    // It is always OFF when Display is disabled so the headless smoke-test screenshots
-    // are byte-identical. Toggle via the pause menu or set Display.PostFX = false.
+    // It is always OFF when Display is disabled, so the headless smoke-test path carries no
+    // shader state. Toggle via the pause menu or set Display.PostFX = false.
     public static bool PostFX = true;
     static Shader _fx;
     static bool   _fxReady;
@@ -406,7 +411,7 @@ void main() {
     // Brightness FALLBACK (W9): survives only for the !PostFX paths — when the shader is
     // active, brightness/gamma are applied in-shader (uBright/uGamma) instead, because this
     // translucent lighten quad WASHES the frame (raising brightness lowered readability).
-    // Neutral (100%) draws nothing, so the headless harness stays byte-identical.
+    // Neutral (100%) draws nothing, so the headless harness never takes this path.
     static void DrawBrightness()
     {
         float b = Brightness;
@@ -454,7 +459,7 @@ void main() {
     }
 
     // ---- persistence (alongside the save file, not in the repo) ----
-    class Dto
+    internal class Dto
     {
         public bool Fullscreen { get; set; }
         public int SizeIdx { get; set; }
@@ -469,13 +474,19 @@ void main() {
         public bool TrainingSeen { get; set; }   // T1 training op completed/declined once
         public bool ShowAllVerbs { get; set; }   // T1 permanent staging escape
     }
+    // Source-generated serializer (see SaveGame.SaveJson for the why): reflection-based
+    // System.Text.Json loses its type metadata under `-p:PublishTrimmed=true`, which silently
+    // breaks settings persistence in a trimmed distributable.
+    [System.Text.Json.Serialization.JsonSerializable(typeof(Dto))]
+    internal partial class DisplayJson : System.Text.Json.Serialization.JsonSerializerContext { }
+
     static string Dir => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Sightline");
     static string FilePath => Path.Combine(Dir, "display.json");
 
     static void Save()
     {
-        try { Directory.CreateDirectory(Dir); File.WriteAllText(FilePath, JsonSerializer.Serialize(new Dto { Fullscreen = Fullscreen, SizeIdx = SizeIdx, BrightIdx = BrightIdx, GammaIdx = GammaIdx, Colorblind = Pal.Colorblind, TutorialSeen = TutorialSeen, PostFX = PostFX, AutoCam = AutoCam, BraceTipSeen = (TipsSeen & 1) != 0, TipsSeen = TipsSeen, TrainingSeen = TrainingSeen, ShowAllVerbs = ShowAllVerbs })); }
+        try { Directory.CreateDirectory(Dir); File.WriteAllText(FilePath, JsonSerializer.Serialize(new Dto { Fullscreen = Fullscreen, SizeIdx = SizeIdx, BrightIdx = BrightIdx, GammaIdx = GammaIdx, Colorblind = Pal.Colorblind, TutorialSeen = TutorialSeen, PostFX = PostFX, AutoCam = AutoCam, BraceTipSeen = (TipsSeen & 1) != 0, TipsSeen = TipsSeen, TrainingSeen = TrainingSeen, ShowAllVerbs = ShowAllVerbs }, DisplayJson.Default.Dto)); }
         catch { }
     }
 
@@ -491,7 +502,7 @@ void main() {
         try
         {
             if (!File.Exists(FilePath)) return;
-            var d = JsonSerializer.Deserialize<Dto>(File.ReadAllText(FilePath));
+            var d = JsonSerializer.Deserialize(File.ReadAllText(FilePath), DisplayJson.Default.Dto);
             if (d != null)
             {
                 Fullscreen = d.Fullscreen;
