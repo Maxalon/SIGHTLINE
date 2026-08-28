@@ -379,94 +379,231 @@ public static partial class Audio
         Raylib.SetMusicVolume(_combat, _combVol);
     }
 
-    // ───── looping music beds (integer freqs over an integer-second buffer => seamless) ─────
-    internal const int MusicSecs = 8;
+    // ───── looping music beds ─────────────────────────────────────────────────
+    //
+    // LOOP-SEAM DISCIPLINE (A1's rule, kept): every partial is an INTEGER Hz and every LFO
+    // completes a WHOLE number of cycles per loop, so value AND derivative match exactly at
+    // the wrap. A2 adds one thing to that contract: phases are accumulated in DOUBLE and
+    // wrapped mod 2*pi. The old code evaluated MathF.Sin(2*pi*f*t) with a float `t`, and at
+    // 16 s / 9 kHz that argument is ~900,000 radians — float carries ~7 digits, so the phase
+    // error at the end of the loop would have been ~0.06 rad. In double it is ~1e-10.
+    //
+    // A2 also raises the loop from 8 s (audibly repetitive inside a minute) to 16 s.
+    internal const int MusicSecs = 16;
 
-    // AMBIENT: a fuller A-minor add9 pad (A C E B) with slow, gently-detuned tremolo movement
-    // and a soft beating shimmer up top — atmospheric, never fatiguing under the whole game.
-    internal static byte[] BuildAmbient() => MusicBytes(AmbientFloats());
-    static float[] AmbientFloats()
+    /// The shared oscillator for every music layer: an integer-Hz sine with a double phase
+    /// accumulator (exactly periodic over MusicSecs) and an optional tremolo LFO that itself
+    /// completes `lfoK` whole cycles per loop. `phase01` is a 0..1 starting phase offset —
+    /// legal because ANY phase is seamless when the frequency is an integer Hz.
+    /// `lfoPh01` is the TREMOLO's own starting phase (0..1). Passing the same value to a whole
+    /// bank makes it breathe COHERENTLY — which is how the air bed gets a slow spectral sweep
+    /// instead of 170 partials each wobbling on their own and averaging out to a flat texture.
+    static void Sine(float[] b, int freq, float vol, int lfoK, float depth, float phase01,
+                     float lfoPh01 = -1f)
     {
-        var b = new float[MusicSecs * SR];
-        PadTone(b, 110, 0.17f, 1);    // A2 root
-        PadTone(b, 165, 0.12f, 2);    // E3 fifth (slow tremolo)
-        PadTone(b, 220, 0.10f, 1);    // A3
-        PadTone(b, 262, 0.075f, 3);   // C4 minor third (shimmer)
-        PadTone(b, 330, 0.045f, 2);   // E4 octave fifth (air)
-        PadTone(b, 494, 0.030f, 4);   // B4 add9 (sparkle, faster tremolo)
-        Shimmer(b, 880, 0.022f, 1);   // very soft high beating layer (movement)
-        // (A1) AIR. The bed measured 0.000% of its energy above 1 kHz, so a laptop speaker
-        // (which rolls off hard under ~300 Hz) simply lost it: -11.6 dB through a 300 Hz
-        // highpass. These are chord tones an octave or two up — E6 / A6 / C7 / E7 — at very
-        // low amplitude, so the pad gains a top without gaining a whistle. Integer Hz and
-        // whole-cycle LFO periods, so the loop stays seamless.
-        PadTone(b, 1320, 0.041f, 2);  // E6  (fifth)
-        PadTone(b, 1760, 0.036f, 3);  // A6  (root)
-        PadTone(b, 2093, 0.027f, 5);  // C7  (minor third)
-        Shimmer(b, 2640, 0.025f, 2);  // E7  beating air
+        if (freq <= 0 || freq >= SR / 2 || vol <= 0f) return;
+        if (lfoPh01 < 0f) lfoPh01 = phase01 * 0.5f;
+        double ph = 2.0 * Math.PI * phase01, dph = 2.0 * Math.PI * freq / SR;
+        double lph = 2.0 * Math.PI * lfoPh01, dlph = 2.0 * Math.PI * (lfoK / (double)MusicSecs) / SR;
+        float baseAmp = 1f - depth;
+        for (int i = 0; i < b.Length; i++)
+        {
+            float lfo = lfoK <= 0 ? 1f : baseAmp + depth * (0.5f + 0.5f * MathF.Sin((float)lph));
+            b[i] += MathF.Sin((float)ph) * vol * lfo;
+            ph += dph; if (ph >= 2.0 * Math.PI) ph -= 2.0 * Math.PI;
+            lph += dlph; if (lph >= 2.0 * Math.PI) lph -= 2.0 * Math.PI;
+        }
+    }
+
+    /// A PAD VOICE — `parts` harmonic partials over `freq`, each with its OWN LFO rate and
+    /// starting phase.
+    ///
+    /// A2: PadTone used to be a single bare sine with one tremolo. Both beds therefore
+    /// measured as two or three thin lines on a black spectrogram: a chord of pure tones with
+    /// literal silence between them, which reads to the ear as "the audio is off" rather than
+    /// as an atmosphere. A harmonic stack with independent LFOs gives each note a timbre and
+    /// makes the stack breathe instead of sit still.
+    static void PadTone(float[] b, int freq, float vol, int lfoK, int parts = 4, float tilt = 0.85f)
+    {
+        for (int k = 1; k <= parts; k++)
+        {
+            int f = freq * k;
+            if (f >= SR / 2) break;
+            float a = vol * MathF.Pow(k, -tilt);
+            // each partial gets a DIFFERENT integer LFO rate -> the composite amplitude never
+            // repeats inside the loop, and higher partials breathe harder (they are the "air")
+            int kk = lfoK + (k - 1) * 2;
+            float depth = MathF.Min(0.62f, 0.24f + 0.09f * k);
+            Sine(b, f, a, kk, depth, ((k * 0.37f) + lfoK * 0.11f) % 1f);
+        }
+    }
+
+    // a soft high "shimmer" — two integer freqs a few Hz apart that beat slowly for movement.
+    static void Shimmer(float[] b, int freq, float vol, int lfoK)
+    {
+        Sine(b, freq, vol * 0.5f, 1, 0.4f, 0.13f);
+        Sine(b, freq + lfoK, vol * 0.5f, 1, 0.4f, 0.61f);
+    }
+
+    /// A LOOP-SEAMLESS BAND-LIMITED NOISE BED.
+    ///
+    /// Real white noise cannot loop — its last sample has no relationship to its first, so a
+    /// dropped-in noise layer would put a click at every wrap and blow the seam gate. This is
+    /// a bank of `count` sines at distinct INTEGER Hz spread log-uniformly over [loHz,hiHz]
+    /// with fixed-seed pseudo-random phases: mathematically periodic at MusicSecs to the
+    /// sample (value AND derivative match), while sounding like filtered noise because ~10
+    /// partials land in every critical band. Amplitudes follow a 1/sqrt(f) (pink-ish) tilt and
+    /// are scaled so the bank's total RMS is exactly `rms`.
+    ///
+    /// This is the layer that stops the beds being black rectangles: it is broadband, it is
+    /// ABOVE 1 kHz, and it fills the silence between the chord partials with air.
+    static void NoiseBed(float[] b, int loHz, int hiHz, float rms, int count, int seed, int lfoK,
+                         float lfoPh01 = -1f, float depth = 0.35f)
+    {
+        var rng = new Random(seed);
+        var used = new HashSet<int>();
+        var fs = new List<int>();
+        var amps = new List<float>();
+        double lnLo = Math.Log(loHz), lnHi = Math.Log(hiHz);
+        double sumSq = 0;
+        for (int i = 0; i < count; i++)
+        {
+            // log-uniform placement + a jitter cell so the bank has no audible comb
+            double u = (i + rng.NextDouble()) / count;
+            int f = (int)Math.Round(Math.Exp(lnLo + u * (lnHi - lnLo)));
+            while (!used.Add(f)) f++;
+            if (f >= SR / 2) break;
+            // 1/sqrt(f) pink tilt, then an extra 6 dB/oct roll above 5 kHz. Without that roll
+            // the bank ends in a BRICK WALL at hiHz — visible on the contact sheet as a hard
+            // horizontal edge and audible as a shelf of hiss rather than as air.
+            float a = 1f / MathF.Sqrt(f) / MathF.Sqrt(1f + (f / 5000f) * (f / 5000f));
+            fs.Add(f); amps.Add(a);
+            sumSq += 0.5 * a * a;                    // incoherent sine power
+        }
+        if (fs.Count == 0 || sumSq <= 0) return;
+        float g = (float)(rms / Math.Sqrt(sumSq));
+        for (int i = 0; i < fs.Count; i++)
+            Sine(b, fs[i], amps[i] * g, lfoK, depth, (float)rng.NextDouble(), lfoPh01);
+    }
+
+    /// A repeating plucked pulse at `rate` Hz (rate*MusicSecs must be a whole number of hits).
+    ///
+    /// A2: this used to be sin(2*pi*f*t) * exp(-8*phase) — a sine fading in from ZERO amplitude
+    /// with no attack at all, i.e. a "boop". A percussive hit needs a transient: a fast attack
+    /// ramp (so the onset is a step, not a swell) and high partials that decay far faster than
+    /// the body. `clickHz` is the mechanism's own tick over the top. Everything is an integer
+    /// Hz and the envelope is a function of the pulse phase only, so the loop stays seamless.
+    static void Pulse(float[] b, int freq, float rate, float vol, int clickHz = 0)
+    {
+        double ph = 0, dph = 2.0 * Math.PI * freq / SR;
+        double ph4 = 0, dph4 = 2.0 * Math.PI * (freq * 4) / SR;
+        double ph7 = 0, dph7 = 2.0 * Math.PI * (freq * 7) / SR;
+        double phc = 0, dphc = 2.0 * Math.PI * Math.Max(0, clickHz) / SR;
+        const float AtkSecs = 0.0018f;
+        // The hit phase is derived from the INTEGER sample index, not from `(t*rate) % 1f`.
+        // Near the end of a 16 s loop t*rate is ~32, and a float subtracting 32 from 32.0018
+        // has lost five digits — which is exactly the kind of sub-audible non-periodicity the
+        // AUDIOGATE periodicity probe caught (1.4e-4 at the first pulse onset after the wrap).
+        // `hits` divides the loop by contract, so `i % hitLen` is exact and repeats forever.
+        int hits = Math.Max(1, (int)MathF.Round(rate * MusicSecs));
+        int hitLen = Math.Max(1, MusicSecs * SR / hits);
+        for (int i = 0; i < b.Length; i++)
+        {
+            int hs = i % hitLen;                              // samples since this hit's onset
+            float pp = hs / (float)hitLen;                    // 0..1 within this hit
+            float atk = MathF.Min(1f, (hs / (float)SR) / AtkSecs); // fast, but not a discontinuity
+            float bodyE = atk * MathF.Exp(-8f * pp);
+            float transE = atk * MathF.Exp(-70f * pp);        // the ONSET — gone in ~5 ms
+            float s = MathF.Sin((float)ph) * bodyE;
+            s += (MathF.Sin((float)ph4) * 0.42f + MathF.Sin((float)ph7) * 0.26f) * transE;
+            if (clickHz > 0) s += MathF.Sin((float)phc) * 0.34f * transE;
+            b[i] += s * vol;
+            ph += dph; if (ph >= 2.0 * Math.PI) ph -= 2.0 * Math.PI;
+            ph4 += dph4; if (ph4 >= 2.0 * Math.PI) ph4 -= 2.0 * Math.PI;
+            ph7 += dph7; if (ph7 >= 2.0 * Math.PI) ph7 -= 2.0 * Math.PI;
+            phc += dphc; if (phc >= 2.0 * Math.PI) phc -= 2.0 * Math.PI;
+        }
+    }
+
+    // AMBIENT: an A-minor add9 pad (A C E B) voiced as HARMONIC STACKS rather than bare sines,
+    // over a wide air bed — atmospheric, never fatiguing under the whole game.
+    internal static byte[] BuildAmbient() => EncodeWav(Bed("ambient"), 1f);
+    static float[] AmbientFloats(int n = 0)
+    {
+        var b = new float[n > 0 ? n : MusicSecs * SR];
+        // low/mid chord — the fundamentals are deliberately restrained (a laptop speaker rolls
+        // off hard under ~300 Hz and simply loses them; the harmonics carry the note instead)
+        PadTone(b, 110, 0.095f, 1, parts: 6, tilt: 0.62f);   // A2 root
+        PadTone(b, 165, 0.074f, 2, parts: 6, tilt: 0.66f);   // E3 fifth
+        PadTone(b, 220, 0.066f, 3, parts: 5, tilt: 0.70f);   // A3
+        PadTone(b, 262, 0.051f, 5, parts: 5, tilt: 0.74f);   // C4 minor third
+        PadTone(b, 330, 0.039f, 4, parts: 4, tilt: 0.78f);   // E4
+        PadTone(b, 494, 0.031f, 7, parts: 4, tilt: 0.82f);   // B4 add9
+        // upper voicing — the chord an octave or two up, where a small speaker actually lives
+        PadTone(b, 880, 0.055f, 3, parts: 3, tilt: 0.90f);   // A5
+        PadTone(b, 1320, 0.058f, 6, parts: 2, tilt: 0.95f);  // E6
+        PadTone(b, 1760, 0.048f, 8, parts: 2, tilt: 1.00f);  // A6
+        Shimmer(b, 2093, 0.040f, 2);                         // C7 beating air
+        Shimmer(b, 2640, 0.032f, 3);                         // E7 beating air
+        Shimmer(b, 3520, 0.022f, 5);                         // A7 beating air
+        // The AIR BED — see NoiseBed. Silence between the partials is what read as "the audio
+        // is off". Deliberately kept as a FLOOR (~-30 dBFS inside the bed) rather than as the
+        // source of the brightness: most of the top above is TONAL (chord tones an octave or
+        // two up), because a bed that clears a brightness gate on broadband noise alone is
+        // just hiss with a chord under it.
+        // Split into two COHERENT, ANTI-PHASE bands: the air's centre of gravity sweeps up and
+        // down once per loop, which is the only large-scale movement a sustained bed can have.
+        // One incoherent bank of 170 partials averages out to a flat, dead texture.
+        NoiseBed(b, 900, 3400, 0.021f, 70, 0x5A17A1, 1, lfoPh01: 0.00f, depth: 0.55f);
+        NoiseBed(b, 3400, 14000, 0.021f, 100, 0x5A17A3, 1, lfoPh01: 0.50f, depth: 0.55f);
+        NoiseBed(b, 240, 900, 0.016f, 40, 0x5A17A2, 3);      // a low "room" floor under it
         return b;
     }
 
     // COMBAT: a darker, tenser bed (A C Eb — minor with a flat-five bite) over a DRIVING
     // sub-bass pulse + a faster mid pulse, so it reads as urgent without being loud.
-    internal static byte[] BuildCombat() => MusicBytes(CombatFloats());
-    static float[] CombatFloats()
+    internal static byte[] BuildCombat() => EncodeWav(Bed("combat"), 1f);
+    static float[] CombatFloats(int n = 0)
     {
-        var b = new float[MusicSecs * SR];
-        PadTone(b, 110, 0.15f, 1);    // root
-        PadTone(b, 156, 0.11f, 2);    // ~Eb3 (flat-five tension)
-        PadTone(b, 220, 0.085f, 1);   // A3
-        PadTone(b, 311, 0.045f, 3);   // ~Eb4 tension up top
-        Pulse(b, 55, 2f, 0.24f);      // driving sub-bass pulse (16 hits / loop)
-        Pulse(b, 110, 2f, 0.11f);     // octave reinforcement
-        Pulse(b, 220, 4f, 0.06f);     // faster mid tick (32/loop) — adds urgency
-        // (A1) AIR + BITE. Same 0.000%-above-1 kHz problem as the ambient bed. The combat
-        // bed gets its top from the tension interval (Eb6) plus a bright high tick, so the
-        // brightness reads as urgency rather than as sweetness.
-        PadTone(b, 1244, 0.052f, 2);  // ~Eb6 (the flat-five, up two octaves)
-        PadTone(b, 1760, 0.028f, 3);  // A6
-        Pulse(b, 1320, 4f, 0.072f);   // bright tick (32/loop) — the top-end pulse
+        var b = new float[n > 0 ? n : MusicSecs * SR];
+        PadTone(b, 110, 0.088f, 1, parts: 6, tilt: 0.60f);   // root
+        PadTone(b, 156, 0.069f, 2, parts: 6, tilt: 0.64f);   // ~Eb3 (flat-five tension)
+        PadTone(b, 220, 0.058f, 3, parts: 5, tilt: 0.70f);   // A3
+        PadTone(b, 311, 0.040f, 5, parts: 4, tilt: 0.76f);   // ~Eb4 tension up top
+        PadTone(b, 622, 0.035f, 4, parts: 3, tilt: 0.86f);   // ~Eb5
+        PadTone(b, 1244, 0.066f, 6, parts: 2, tilt: 0.95f);  // ~Eb6 — the flat-five, up two 8ves
+        PadTone(b, 1760, 0.042f, 8, parts: 2, tilt: 1.00f);  // A6
+        Shimmer(b, 3136, 0.030f, 4);                         // hard, bright air
+        Shimmer(b, 2488, 0.024f, 6);                         // ~Eb7 — the tension, up top
+        // the drive — raised so the hits still PUNCH through the air bed (at the first air
+        // level the pulses vanished into it; on the contact sheet the vertical strikes had
+        // gone from clearly visible to invisible)
+        Pulse(b, 55, 2f, 0.30f, clickHz: 1650);              // sub-bass pulse (32 hits / loop)
+        Pulse(b, 110, 2f, 0.14f);                            // octave reinforcement
+        Pulse(b, 220, 4f, 0.085f, clickHz: 2200);            // faster mid tick (64/loop)
+        Pulse(b, 1320, 4f, 0.072f);                          // bright top-end tick
+        // air — tighter and harsher than the ambient bed's, so it reads as urgency
+        // same anti-phase sweep, but twice as fast — restlessness rather than drift
+        NoiseBed(b, 1100, 3800, 0.020f, 70, 0x5A17C1, 2, lfoPh01: 0.00f, depth: 0.55f);
+        NoiseBed(b, 3800, 14000, 0.020f, 100, 0x5A17C3, 2, lfoPh01: 0.50f, depth: 0.55f);
+        NoiseBed(b, 260, 1100, 0.013f, 40, 0x5A17C2, 5);
         return b;
     }
 
-    // a sustained sine with a seamless LFO tremolo (lfoK whole cycles per loop)
-    static void PadTone(float[] b, int freq, float vol, int lfoK)
+    // A2: the beds are now ~190 oscillators over a 16 s buffer, so synthesising one is real
+    // work (~134M sine evaluations). Init, SelfTest, AUDIODUMP and AUDIOGATE all ask for the
+    // same bytes repeatedly — cache the mastered float buffer and hand out copies. Purely a
+    // speed cache: the synthesis is deterministic (fixed-seed phases), so the bytes are
+    // identical whether they come from the cache or a fresh render.
+    static readonly Dictionary<string, float[]> _bedCache = new();
+    static float[] Bed(string which)
     {
-        for (int i = 0; i < b.Length; i++)
-        {
-            float t = i / (float)SR;
-            float lfo = 0.7f + 0.3f * MathF.Sin(2f * MathF.PI * (lfoK / (float)MusicSecs) * t);
-            b[i] += MathF.Sin(2f * MathF.PI * freq * t) * vol * lfo;
-        }
+        if (_bedCache.TryGetValue(which, out var c)) return c;
+        var b = RenderMusicGain(which == "combat" ? CombatFloats() : AmbientFloats());
+        _bedCache[which] = b;
+        return b;
     }
 
-    // a soft high "shimmer" — two integer freqs a few Hz apart that beat slowly for movement.
-    // Both freqs stay integer so the loop is still seamless.
-    static void Shimmer(float[] b, int freq, float vol, int lfoK)
-    {
-        int freq2 = freq + lfoK;   // a few-Hz integer offset => slow beating
-        for (int i = 0; i < b.Length; i++)
-        {
-            float t = i / (float)SR;
-            float env = 0.6f + 0.4f * MathF.Sin(2f * MathF.PI * (1 / (float)MusicSecs) * t);
-            b[i] += (MathF.Sin(2f * MathF.PI * freq * t) + MathF.Sin(2f * MathF.PI * freq2 * t))
-                    * 0.5f * vol * env;
-        }
-    }
-
-    // a repeating plucked pulse at `rate` Hz (rate must divide evenly into the loop)
-    static void Pulse(float[] b, int freq, float rate, float vol)
-    {
-        for (int i = 0; i < b.Length; i++)
-        {
-            float t = i / (float)SR;
-            float ph = (t * rate) % 1f;
-            float env = MathF.Exp(-8f * ph);
-            b[i] += MathF.Sin(2f * MathF.PI * freq * t) * vol * env;
-        }
-    }
-
-    static byte[] MusicBytes(float[] b) => EncodeWav(RenderMusicGain(b), 1f);
 
     // Apply the music bed's mastering gain IN PLACE and return the buffer (so the measurement
     // harness sees exactly the samples the stream plays).
@@ -480,8 +617,18 @@ public static partial class Audio
     }
 
     /// Device-free: the rendered float samples of a music bed ("ambient" | "combat").
-    internal static float[] RenderMusic(string which)
-        => RenderMusicGain(which == "combat" ? CombatFloats() : AmbientFloats());
+    internal static float[] RenderMusic(string which) => (float[])Bed(which).Clone();
+
+    /// PRE-GAIN bed samples at an ARBITRARY length — the hook the periodicity proof needs.
+    ///
+    /// Every music generator is a pure function of the sample index (fixed start phases,
+    /// double accumulators, envelopes that depend only on the loop phase), so asking for
+    /// MusicSecs*SR + K samples returns the loop PLUS its own genuine continuation. If the
+    /// bed is truly periodic, those K extra samples must equal the first K, sample for
+    /// sample. That is a proof of seamlessness rather than a heuristic about step sizes —
+    /// see the AUDIOGATE "periodicity" check.
+    internal static float[] BedRaw(string which, int n)
+        => which == "combat" ? CombatFloats(n) : AmbientFloats(n);
 
     // a cheap rolling counter so successive shots get a deterministic, non-repeating pitch
     // jitter (NOT Random — keeps the headless harness reproducible + avoids a machine-gun
@@ -727,18 +874,39 @@ public static partial class Audio
         return sb.ToString();
     }
 
-    // Validate an encoded WAV is non-empty + the loop endpoints are continuous (no click).
+    /// Validate a music bed: the encoded WAV is real, and the loop is SEAMLESS.
+    ///
+    /// A2 REPLACED THE ENDPOINT TEST. This used to require |first| and |last| to both be near
+    /// zero in 16-bit units ("both endpoints should be near zero crossings for a clean loop").
+    /// That is the same naive-absolute trap A1 documented for the seam metric: a loop is
+    /// seamless when b[0] CONTINUES from b[n-1], not when both happen to sit at zero. The old
+    /// beds passed it only because every partial was a zero-phase sine over an integer-second
+    /// buffer, which forced the endpoints to zero as a side effect. The A2 beds use per-partial
+    /// phase offsets (legal — any phase is seamless at integer Hz) and so wrap at an arbitrary
+    /// value; the ambient bed's first sample is -0.161, and it is provably click-free.
+    ///
+    /// What is checked instead is periodicity itself: every generator is a pure function of
+    /// the sample index, so a bed rendered to N+probe samples must repeat its own first
+    /// `probe` samples exactly. This is strictly stronger — it caught a 1.4e-4 float-precision
+    /// break in Pulse()'s phase that the endpoint test sailed straight past.
     static string ValidateMusic(string id, byte[] wavBytes)
     {
         if (wavBytes == null || wavBytes.Length <= 44) return $"'{id}' empty/short WAV ({wavBytes?.Length ?? 0} bytes)";
-        // decode first + last 16-bit sample; a seamless loop needs them close.
         int n = (wavBytes.Length - 44) / 2;
         if (n < 2) return $"'{id}' too few samples";
-        short first = (short)(wavBytes[44] | (wavBytes[45] << 8));
-        short last  = (short)(wavBytes[44 + (n - 1) * 2] | (wavBytes[44 + (n - 1) * 2 + 1] << 8));
-        // both endpoints should be near zero crossings for a clean loop; allow a small margin.
-        if (Math.Abs(first) > 3000 || Math.Abs(last) > 3000)
-            return $"'{id}' loop endpoints not near zero (first={first}, last={last}) — would click";
+        if (n != MusicSecs * SR) return $"'{id}' wrong length ({n} samples, expected {MusicSecs * SR})";
+
+        int len = MusicSecs * SR;
+        var ext = BedRaw(id, len + SeamProbe);
+        float worst = 0f; int worstI = 0;
+        for (int i = 0; i < SeamProbe; i++)
+        {
+            float d = MathF.Abs(ext[len + i] - ext[i]);
+            if (d > worst) { worst = d; worstI = i; }
+        }
+        if (worst > MaxPeriodErr)
+            return $"'{id}' loop is not periodic: |bed[N+{worstI}]-bed[{worstI}]| = {worst:0.0000000} " +
+                   $"(> {MaxPeriodErr:0.0000}) — would click at the wrap";
         return null;
     }
 
