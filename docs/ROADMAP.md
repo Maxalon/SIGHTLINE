@@ -836,15 +836,31 @@ of record (container suspensions have wiped every scratchpad copy — docs are t
       unreachable guard); campaign legend names S/START + */BATTLE; DrawCodexGlyph into Hall of
       Fame + end-card squad/KIA rows; WAR ROOM panels sized to content. (LOCK-ON/NO QUARTER copy
       was already done in FUL-3.)
-- [ ] **FUL-5 HANDS** (P5, M — after FUL-1 merges). The EV bot learns the verbs: widen DoBrace
-      (~Game.Autopilot.cs:1380) / PATCH (~:1037) gates (brace vs inbound rusher pods when no
-      >=60% kill shot; PATCH range<=2 missing>=3; grenade 2-clusters in cover; smoke/medkit on
-      exposed sub-half retreat; DRAG toward SmartEscort anchor); AutoEventChoice 70/30
-      value-biased HASHED off (seed,node) — never draws (CRN); COUNTER-PREP into AutoShop's set;
-      de-flatten mod priors (SUPPRESSOR 111/380 buys → <=40%). Reference: BRACE 0, PATCH 1,
-      ITEM 0, GRENADE<=7 per ~500 missions → BRACE>=5, PATCH>=10, GRENADE>=10, ITEM>=5 per
-      20-campaign batch; PROCS nonzero for SHK/FDR/FST or a design VERDICT in the DEVLOG (no
-      tuning boons on no-ops).
+- [x] **FUL-5 HANDS** (wt-ful5). The EV bot learned the verbs; per-20-campaign h0 batch vs the
+      spec targets: BRACE 1 → **82** (>=5; the real stage was routing Defend/Escort zone-holds
+      through HoldOverwatch's rusher arm — the open-combat gates were provably unreachable, two
+      byte-identical probe batches), ITEM 0 → **19** (>=5; TrySmokeCover on the exposed sub-half
+      retreat, objective-agnostic), DRAG 0 → 5-7 (Escort march/hold straggler pull), PATCH 1 →
+      4-6 (target 10: **verdict** — capped by corpsman presence, founding squad has none;
+      gates ready for FUL-7/roster work), GRENADE 8 → 6-8 (target 10: **verdict** — the
+      covered-cluster window anti-correlates with shot declines; FUL-6's pods-of-3 is its
+      stage). PROCS: SHK 0 → **6**, FST fires, FDR 0 → 0 (**verdict** + FUL-6 rework brief:
+      the second-use geometry is self-consuming). AutoEventChoice 70/30 value-biased hashed
+      off (MapSeed,node) — zero draws, PAIRTEST-clean; BY EVENT-CHOICE safe-arms-only → 9 arms.
+      COUNTER-PREP 0 → 10-12 buys. Mod priors de-flattened: SUPPRESSOR 27% → **9%** of mod
+      buys. h0 completion 60 → 75 ±10 on the same CRN slots (bot got better — FUL-13 input:
+      the finished-tree h0 baseline under this bot is ~75). Full rounds table + verdicts in
+      docs/DEVLOG.md §FUL-5.
+- [ ] **FUL-9 THE DECK** (P9, L — after FUL-4 merges). The carried W7 spec on the repaired
+      roster: column-constrained objective assignment in CardForNode HASHED off
+      (MapSeed,column,row) (>=1 Eliminate, >=1 Defend-or-Rescue, <=1 Escort per path; boss stays
+      Decapitate); per-run no-repeat arena deck derived from MapSeed (prefer derivation over a
+      persisted list; if persisted: append-only RunDto field + SAVETEST leg); authored roll 55→80
+      keeping EXACTLY one Util.Roll (draw-order comment at Mission.cs:135 is load-bearing); biome
+      hints as reduced weight within the deck; SIGHTLINE_EXPOSURETEST 200-seed histogram (objective
+      invariant, zero in-run arena repeats, all 8 objectives reachable, all 35 arenas exposed).
+      Reference: 52% procedural, 6/35 arenas unseen in 251 missions, Defend absent from whole
+      batches → procedural 20-25%, distinct arenas/run >=4.5, Defend in >=80% of runs.
 - [x] **FUL-9 THE DECK** (wt-ful9). The carried W7 spec, finally BUILT (not just claimed):
       column-constrained objective assignment in CardForNode hashed off (MapSeed,column,row)
       via Util.Hash3 — an event-free ANCHOR mid column deals Defend(80%)-or-Rescue on every
