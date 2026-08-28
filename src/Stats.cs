@@ -91,6 +91,10 @@ public static class Stats
         public readonly List<string> BoonsPicked = new();  // run-scoped doctrine/boon picks
         public readonly List<string> ContractsPicked = new();  // W6 run-contract picks (usually 0-1/run)
         public readonly List<string> EventChoices = new();     // FUL-1: field-event picks as "id:arm"
+        // FUL-13: intel cash-flow — signed deltas recorded at every Run.Intel mutation site.
+        // IntelHeatBonus is the Heat.IntelBonus component of mission-clear income (the
+        // "does heat refund its own difficulty through the shop?" read).
+        public int IntelEarned, IntelHeatBonus, IntelSpent;
         public readonly List<MissionRec> Missions = new();
     }
 
@@ -177,6 +181,19 @@ public static class Stats
     {
         if (!Enabled || _run == null || string.IsNullOrEmpty(id)) return;
         _run.EventChoices.Add($"{id}:{arm}");
+    }
+
+    // ── FUL-13: INTEL CASH-FLOW ──────────────────────────────────────────────────
+    // Signed deltas recorded at the Run.Intel mutation sites (mission-clear award incl. its
+    // heat-bonus component, secondaries, cache pickups, event arms/gambles, shop/armory
+    // spends) so the report can answer the FUL-13 economy question: does heat REFUND its
+    // own difficulty through the shop? Run-scoped (report keys by heat); telemetry-only,
+    // zero draws — CRN-safe by construction (the FUL-1 precedent).
+    public static void RecordIntel(int delta, int heatBonus = 0)
+    {
+        if (!Enabled || _run == null) return;
+        if (delta >= 0) _run.IntelEarned += delta; else _run.IntelSpent -= delta;
+        _run.IntelHeatBonus += heatBonus;
     }
 
     // ── FUL-7: DOWN / bleed-out telemetry ────────────────────────────────────────
@@ -521,6 +538,20 @@ public static class Stats
             sb.AppendLine("\nRUN COMPLETION BY HEAT (full-campaign clears):");
             foreach (var g in campRuns.GroupBy(r => r.Heat).OrderBy(g => g.Key))
                 sb.AppendLine($"  heat {g.Key}: {Pct(g.Count(r => r.Win), g.Count())}{Se(g.Count(r => r.Win), g.Count())}  (n={g.Count()} runs, avg {g.Average(r => (double)r.MissionsCleared):0.0} missions)");
+        }
+
+        // ── FUL-13: INTEL ECONOMY BY HEAT ────────────────────────────────────────────
+        // Cash-flow per run, keyed by heat. heat-bonus share of income is the flood signal:
+        // if the ladder's higher rungs bank MORE unspent intel than h0, heat is refunding
+        // its own difficulty through the shop and the economy needs a drain.
+        if (campRuns.Count > 0 && campRuns.Any(r => r.IntelEarned > 0 || r.IntelSpent > 0))
+        {
+            sb.AppendLine("\nINTEL ECONOMY BY HEAT (campaign runs; heat-bonus = the Heat.IntelBonus share of income):");
+            foreach (var g in campRuns.GroupBy(r => r.Heat).OrderBy(g => g.Key))
+                sb.AppendLine($"  heat {g.Key}: earned {g.Average(r => (double)r.IntelEarned),6:0.0}/run"
+                    + $"   heat-bonus {g.Average(r => (double)r.IntelHeatBonus),5:0.0} ({Pct(g.Sum(r => r.IntelHeatBonus), Math.Max(1, g.Sum(r => r.IntelEarned)))} of income)"
+                    + $"   spent {g.Average(r => (double)r.IntelSpent),6:0.0}"
+                    + $"   unspent {g.Average(r => (double)(r.IntelEarned - r.IntelSpent)),6:0.0}");
         }
 
         // ── APEX W4: ENDLESS WAVE DEPTH (LAST STAND) ─────────────────────────────────
@@ -954,6 +985,15 @@ public static class Stats
                 runWinRate = Math.Round(100.0 * g.Count(r => r.Win) / g.Count(), 1),
                 se = SeVal(g.Count(r => r.Win), g.Count()),
                 avgMissionsCleared = Math.Round(g.Average(r => (double)r.MissionsCleared), 2)
+            }).ToList(),
+            // FUL-13: intel cash-flow by heat (see RecordIntel — the heat-flood read).
+            intelByHeat = campRuns.GroupBy(r => r.Heat).OrderBy(g => g.Key).Select(g => new
+            {
+                heat = g.Key, runs = g.Count(),
+                earned = Math.Round(g.Average(r => (double)r.IntelEarned), 1),
+                heatBonus = Math.Round(g.Average(r => (double)r.IntelHeatBonus), 1),
+                spent = Math.Round(g.Average(r => (double)r.IntelSpent), 1),
+                unspent = Math.Round(g.Average(r => (double)(r.IntelEarned - r.IntelSpent)), 1)
             }).ToList(),
             byHeat = missions.GroupBy(m => m.Heat).OrderBy(g => g.Key).Select(g => new
             {

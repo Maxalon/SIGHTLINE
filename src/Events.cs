@@ -334,7 +334,9 @@ public static class EventCatalog
         {
             case EventOutcomeKind.Intel:
             {
+                int before = run.Intel;
                 run.Intel = Math.Max(0, run.Intel + o.Amount);
+                Stats.RecordIntel(run.Intel - before);   // FUL-13 cash-flow (clamped delta)
                 return o.Amount >= 0 ? $"gained {o.Amount} intel" : $"spent {-o.Amount} intel";
             }
             case EventOutcomeKind.HealSoldier:
@@ -361,8 +363,9 @@ public static class EventCatalog
                 if (run.Intel < stake) stake = run.Intel;   // can't stake more than you have
                 if (stake <= 0) return "no intel to gamble";
                 bool win = GambleSucceeds(run, node, o.ChancePct);
-                if (win) { run.Intel += stake; return $"WON the gamble: +{stake} intel"; }
+                if (win) { run.Intel += stake; Stats.RecordIntel(stake); return $"WON the gamble: +{stake} intel"; }
                 run.Intel = Math.Max(0, run.Intel - stake);
+                Stats.RecordIntel(-stake);   // FUL-13 cash-flow (stake already capped at the bank)
                 return $"LOST the gamble: -{stake} intel";
             }
             case EventOutcomeKind.GrantWeaponMod:

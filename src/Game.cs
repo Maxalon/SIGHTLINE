@@ -252,6 +252,7 @@ public partial class Game
     {
         if (!CanRearm(u, k)) { Audio.Play("miss"); return; }
         _run.Intel -= ArmoryCost;
+        Stats.RecordIntel(-ArmoryCost);   // FUL-13 intel cash-flow
         u.Weapon = Weapon.Make(k);
         u.RefreshWeaponMods();          // re-apply any installed mods onto the fresh weapon
         u.Ammo = u.Weapon.Clip;
@@ -1759,6 +1760,7 @@ public partial class Game
             if (SecondaryAchieved())
             {
                 _run.Intel += SecondaryIntel;
+                Stats.RecordIntel(SecondaryIntel);   // FUL-13 intel cash-flow
                 _run.Report.Insert(0, $"BONUS: {SecondaryName} cleared  (+{SecondaryIntel} intel)");
             }
             else _run.Report.Insert(0, $"Bonus missed: {SecondaryName}");
@@ -1822,6 +1824,7 @@ public partial class Game
                 stakesNote = $"  (+{bonus} STAKES)";
             }
             _run.Intel += gained;
+            Stats.RecordIntel(gained, heatBonus);   // FUL-13 intel cash-flow (+ the heat-bonus share)
             string heatNote = heatBonus > 0 ? $"  (+{heatBonus} HEAT {_run.HeatLevel})" : "";
             heatNote += stakesNote;
             _run.Report.Insert(0, $"Recovered {gained} intel{heatNote}  (total {_run.Intel})");
@@ -3526,7 +3529,7 @@ public partial class Game
         if (!CachePresent) return;
         CachePresent = false;
         int gain = Util.RandInt(CacheIntelMin, CacheIntelMax);
-        if (_run != null) _run.Intel += gain;
+        if (_run != null) { _run.Intel += gain; Stats.RecordIntel(gain); }   // FUL-13 intel cash-flow
         Stats.RecordAction("INTEL");   // W2 verb telemetry: cache pickups visible in the flywheel
         var c = Util.TileCenter(CacheX, CacheY);
         Fx.PopText(c + new Vector2(0, -26), $"+{gain} INTEL", Pal.VipGold, 22f);
@@ -6056,6 +6059,7 @@ public partial class Game
             _run.PrepFaction = f;   // consumed at the next SetupMission (one mission only)
             _run.Report.Add($"COUNTER-PREP staged: {PrepDescFor(f)}");
             _run.Intel -= ShopCost[item];
+            Stats.RecordIntel(-ShopCost[item]);   // FUL-13 intel cash-flow
             Stats.RecordPurchase("COUNTER-PREP");
             Audio.Play("select");
             return;
@@ -6068,6 +6072,7 @@ public partial class Game
             t.InstallMod(mod);   // persistent: baked into the soldier's Weapon, carried across the run
             _run.Report.Add($"{t.Name} fitted {WeaponModDef.Name(mod)}  ({WeaponModDef.Desc(mod)})");
             _run.Intel -= ShopCost[item];
+            Stats.RecordIntel(-ShopCost[item]);   // FUL-13 intel cash-flow
             Stats.RecordPurchase(ShopName[item]);
             Audio.Play("select");
             return;
@@ -6101,6 +6106,7 @@ public partial class Game
                 break;
         }
         _run.Intel -= ShopCost[item];
+        Stats.RecordIntel(-ShopCost[item]);   // FUL-13 intel cash-flow
         Stats.RecordPurchase(ShopName[item]);
         Audio.Play("select");
     }
