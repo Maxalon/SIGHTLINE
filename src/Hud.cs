@@ -4225,6 +4225,115 @@ public static class Hud
         }
     }
 
+    // ── P1 — REQUISITION / ARMORY ICONS ──────────────────────────────────────────────────
+    // A weapon mod, a consumable and a counter-prep used to be visually identical cards. The
+    // fix is TRANSCRIBED GEOMETRY, not art: every mark below is circles and lines in the same
+    // vocabulary as DrawActionIcon and the codex glyphs, so nothing is committed to the repo
+    // and nothing fights the existing language. Shape is the whole signal — colour is only
+    // inherited from the card's enabled/disabled state, so SIGHTLINE_CB=1 is a no-op here.
+
+    /// Which mark a slate row wears. Item ids come from Game's shop table (0..4 fixed block,
+    /// then the weapon mods, then the dynamic COUNTER-PREP slot).
+    static string ShopIconId(int item)
+    {
+        if (Game.IsModItem(item)) return "mod";
+        if (item == Game.PrepItem) return "prep";
+        return item switch { 0 => "med", 1 => "stim", 2 => "train", 3 => "frag", 4 => "armor", _ => "mod" };
+    }
+
+    static void DrawShopIcon(string id, float cx, float cy, Color c)
+    {
+        switch (id)
+        {
+            case "med":     // aid cross in a ring
+                Raylib.DrawCircleLinesV(new Vector2(cx, cy), 9f, c);
+                Raylib.DrawLineEx(new Vector2(cx - 4.5f, cy), new Vector2(cx + 4.5f, cy), 2.2f, c);
+                Raylib.DrawLineEx(new Vector2(cx, cy - 4.5f), new Vector2(cx, cy + 4.5f), 2.2f, c);
+                break;
+            case "stim":    // an ampoule: a body with a plunger, and an up-tick (a boost)
+                Raylib.DrawRectangleLinesEx(new Rectangle(cx - 3.5f, cy - 4f, 7f, 11f), 1.6f, c);
+                Raylib.DrawLineEx(new Vector2(cx, cy - 9f), new Vector2(cx, cy - 4f), 2f, c);
+                Raylib.DrawLineEx(new Vector2(cx - 3.5f, cy - 6.5f), new Vector2(cx + 3.5f, cy - 6.5f), 1.6f, c);
+                break;
+            case "train":   // a rank chevron pair
+                Raylib.DrawLineEx(new Vector2(cx - 7f, cy + 1f), new Vector2(cx, cy - 5f), 2f, c);
+                Raylib.DrawLineEx(new Vector2(cx + 7f, cy + 1f), new Vector2(cx, cy - 5f), 2f, c);
+                Raylib.DrawLineEx(new Vector2(cx - 7f, cy + 7f), new Vector2(cx, cy + 1f), 2f, c);
+                Raylib.DrawLineEx(new Vector2(cx + 7f, cy + 7f), new Vector2(cx, cy + 1f), 2f, c);
+                break;
+            case "frag":    // the action bar's grenade, verbatim vocabulary: body + fuse + cap
+                Raylib.DrawCircleLines((int)cx, (int)(cy + 2f), 6f, c);
+                Raylib.DrawLineEx(new Vector2(cx, cy - 4f), new Vector2(cx, cy - 8f), 1.8f, c);
+                Raylib.DrawLineEx(new Vector2(cx - 2.5f, cy - 8f), new Vector2(cx + 2.5f, cy - 8f), 1.6f, c);
+                break;
+            case "armor":   // a plated shield
+                DrawShieldOutline(cx, cy, 8f, 2f, c);
+                Raylib.DrawLineEx(new Vector2(cx - 4f, cy - 1f), new Vector2(cx + 4f, cy - 1f), 1.4f, c);
+                break;
+            case "prep":    // a shield with a counter-slash: a prepared, situational block
+                DrawShieldOutline(cx, cy, 8f, 2f, c);
+                Raylib.DrawLineEx(new Vector2(cx - 5f, cy + 4f), new Vector2(cx + 5f, cy - 5f), 1.8f, c);
+                break;
+            default:        // "mod": a crosshair — the weapon-upgrade family
+                Raylib.DrawCircleLinesV(new Vector2(cx, cy), 5.5f, c);
+                Raylib.DrawLineEx(new Vector2(cx - 9f, cy), new Vector2(cx - 6.5f, cy), 2f, c);
+                Raylib.DrawLineEx(new Vector2(cx + 6.5f, cy), new Vector2(cx + 9f, cy), 2f, c);
+                Raylib.DrawLineEx(new Vector2(cx, cy - 9f), new Vector2(cx, cy - 6.5f), 2f, c);
+                Raylib.DrawLineEx(new Vector2(cx, cy + 6.5f), new Vector2(cx, cy + 9f), 2f, c);
+                break;
+        }
+    }
+
+    /// A five-sided shield outline (flat top, tapered point). Its own helper because both the
+    /// armor and counter-prep marks use it.
+    static void DrawShieldOutline(float cx, float cy, float r, float t, Color c)
+    {
+        var tl = new Vector2(cx - r * 0.78f, cy - r * 0.8f);
+        var tr = new Vector2(cx + r * 0.78f, cy - r * 0.8f);
+        var ml = new Vector2(cx - r * 0.78f, cy + r * 0.15f);
+        var mr = new Vector2(cx + r * 0.78f, cy + r * 0.15f);
+        var bt = new Vector2(cx, cy + r * 0.95f);
+        Raylib.DrawLineEx(tl, tr, t, c);
+        Raylib.DrawLineEx(tl, ml, t, c);
+        Raylib.DrawLineEx(tr, mr, t, c);
+        Raylib.DrawLineEx(ml, bt, t, c);
+        Raylib.DrawLineEx(mr, bt, t, c);
+    }
+
+    /// A weapon-kind silhouette for the ARMORY rows: a receiver bar plus the one feature that
+    /// tells the family apart (barrel length, scope, drum, wide muzzle, stubby body).
+    static void DrawWeaponIcon(WeaponKind k, float cx, float cy, Color c)
+    {
+        switch (k)
+        {
+            case WeaponKind.Shotgun:   // short body, wide muzzle
+                Raylib.DrawLineEx(new Vector2(cx - 8f, cy), new Vector2(cx + 5f, cy), 2.6f, c);
+                Raylib.DrawLineEx(new Vector2(cx + 5f, cy - 3.5f), new Vector2(cx + 5f, cy + 3.5f), 2f, c);
+                Raylib.DrawLineEx(new Vector2(cx - 8f, cy), new Vector2(cx - 10f, cy + 4f), 2f, c);
+                break;
+            case WeaponKind.Sniper:    // long barrel + a scope ring above the receiver
+                Raylib.DrawLineEx(new Vector2(cx - 10f, cy + 1f), new Vector2(cx + 10f, cy + 1f), 2.2f, c);
+                Raylib.DrawCircleLinesV(new Vector2(cx + 1f, cy - 4f), 3.2f, c);
+                Raylib.DrawLineEx(new Vector2(cx - 10f, cy + 1f), new Vector2(cx - 12f, cy + 5f), 2f, c);
+                break;
+            case WeaponKind.Lmg:       // receiver + a belt drum under it
+                Raylib.DrawLineEx(new Vector2(cx - 9f, cy - 2f), new Vector2(cx + 10f, cy - 2f), 2.6f, c);
+                Raylib.DrawCircleLinesV(new Vector2(cx - 1f, cy + 4f), 4.2f, c);
+                Raylib.DrawLineEx(new Vector2(cx + 6f, cy - 2f), new Vector2(cx + 6f, cy + 3f), 1.6f, c);
+                break;
+            case WeaponKind.Smg:       // stubby body + a short angled magazine
+                Raylib.DrawLineEx(new Vector2(cx - 6f, cy - 1f), new Vector2(cx + 7f, cy - 1f), 2.6f, c);
+                Raylib.DrawLineEx(new Vector2(cx - 1f, cy - 1f), new Vector2(cx - 3f, cy + 6f), 2.2f, c);
+                Raylib.DrawLineEx(new Vector2(cx - 6f, cy - 1f), new Vector2(cx - 8f, cy + 2f), 2f, c);
+                break;
+            default:                   // RIFLE: receiver + straight magazine + stock
+                Raylib.DrawLineEx(new Vector2(cx - 9f, cy - 1f), new Vector2(cx + 10f, cy - 1f), 2.4f, c);
+                Raylib.DrawLineEx(new Vector2(cx + 1f, cy - 1f), new Vector2(cx + 1f, cy + 6f), 2.2f, c);
+                Raylib.DrawLineEx(new Vector2(cx - 9f, cy - 1f), new Vector2(cx - 11f, cy + 3f), 2f, c);
+                break;
+        }
+    }
+
     static void DrawRequisition(Game g)
     {
         var run = g.RunState;
@@ -4250,7 +4359,10 @@ public static class Hud
         // The armory sub-screen is a single shorter column, so size the card to the active view —
         // otherwise the taller shop card clips off the top/bottom of the screen.
         int armoryH = 104 + 28 + Run.RosterMax * 52 + 64;
-        int w = g.ArmoryMode ? 560 : 760, h = g.ArmoryMode ? armoryH : shopH;
+        // P1: the slate card widens 760 -> 808 to pay for the 24px icon gutter added to every
+        // row, so the TEXT column keeps exactly the width it had (366 - 28 - 24 == 342 - 28).
+        // Verified against the pre-P1 shot: no desc/effect line reflows or clips.
+        int w = g.ArmoryMode ? 560 : 808, h = g.ArmoryMode ? armoryH : shopH;
         int x = Cfg.ScreenW / 2 - w / 2, y = Cfg.ScreenH / 2 - h / 2;
         y -= (int)((1f - Util.EaseOutQuad(PanelAnim("requisition", 0.15f))) * 16f);  // slide-down entrance
         var card = new Rectangle(x, y, w, h);
@@ -4293,33 +4405,39 @@ public static class Hud
             // straight into its right-aligned price — "COUNTER-PREP: SYNDICATE" + "12 INTEL"
             // rendered as "SYNDICATE2 INTEL". Reserve the measured price column, then shrink the
             // title (18 -> 14) to fit; Clip is only the last-resort backstop.
+            // P1: a 26px icon gutter on the left of every card. The text column shifts with it
+            // (the title/desc/effect all measure against the reduced width) so nothing reflows
+            // into the price column at any text scale.
+            const int icoGut = 24;
+            DrawShopIcon(ShopIconId(i), r.X + 14 + 10, r.Y + 22, can ? (hover ? Pal.Accent : Pal.Txt) : Pal.TxtDim);
+            int textX = (int)r.X + 14 + icoGut;
             int icost = g.ShopCostAt(i);
             string cost = $"{icost} INTEL";
             int costW = (int)Cfg.Measure(cost, 16, 1f).X;
-            int titleMaxW = (int)r.Width - 28 - costW - 12;
+            int titleMaxW = (int)r.Width - 28 - icoGut - costW - 12;
             string sname = g.ShopNameAt(i);
             int snameFs = FitSize(sname, 18, 14, titleMaxW);
-            Cfg.Text(Clip(sname, snameFs, titleMaxW), new Vector2((int)r.X + 14, (int)r.Y + 10 + (18 - snameFs) / 2), snameFs, 1f, txt);
+            Cfg.Text(Clip(sname, snameFs, titleMaxW), new Vector2(textX, (int)r.Y + 10 + (18 - snameFs) / 2), snameFs, 1f, txt);
             // W11: the desc WRAPS to (max) two 11px lines inside the card — several descs (FRAG
             // CACHE, BALLISTIC PLATING, the prep rows) measured wider than the card and ran under
             // the neighbouring column. Two lines cover every current desc; Clip is the backstop.
-            var descLines = WrapText(g.ShopDescAt(i), 12, (int)r.Width - 28);
+            var descLines = WrapText(g.ShopDescAt(i), 12, (int)r.Width - 28 - icoGut);
             if (descLines.Count > 2)
             {
-                descLines[1] = Clip(descLines[1] + " " + string.Join(" ", descLines.GetRange(2, descLines.Count - 2)), 12, (int)r.Width - 28);
+                descLines[1] = Clip(descLines[1] + " " + string.Join(" ", descLines.GetRange(2, descLines.Count - 2)), 12, (int)r.Width - 28 - icoGut);
                 descLines.RemoveRange(2, descLines.Count - 2);
             }
             for (int li = 0; li < descLines.Count; li++)
-                Cfg.Text(descLines[li], new Vector2((int)r.X + 14, (int)r.Y + 32 + li * TextRow(13)), 12, 1f, Pal.TxtDim);
+                Cfg.Text(descLines[li], new Vector2(textX, (int)r.Y + 32 + li * TextRow(13)), 12, 1f, Pal.TxtDim);
             // W5: the effect line and the BUY / "- unavailable -" column share the card's last row,
             // and the effect line was drawn with NO width limit — at 100% "counters SYNDICATE for
             // one mission" already stopped a couple of px short of "[ BUY ]", and any text scale
             // pushed it straight through. Reserve the measured right column and clip to what's left.
             string rightLbl = can ? "[ BUY ]" : "- unavailable -";
             int rightW = (int)Cfg.Measure(rightLbl, 12, 1f).X + 22;
-            int effMaxW = (int)r.Width - 28 - rightW;
+            int effMaxW = (int)r.Width - 28 - icoGut - rightW;
             int effY = (int)r.Y + 32 + 2 * TextRow(13) + 1;
-            Cfg.Text(Clip(g.ShopEffect(i), 12, effMaxW), new Vector2((int)r.X + 14, effY), 12, 1f, can ? Pal.Accent : Pal.TxtDim);  // concrete effect
+            Cfg.Text(Clip(g.ShopEffect(i), 12, effMaxW), new Vector2(textX, effY), 12, 1f, can ? Pal.Accent : Pal.TxtDim);  // concrete effect
             Color cc = run.Intel >= icost ? Pal.Good : Pal.Foe;
             Cfg.Text(cost, new Vector2((int)(r.X + r.Width - costW - 14), (int)r.Y + 12), 16, 1f, cc);
             // -5 puts the label back on its authored r.Y+54 baseline at 100% (effY is r.Y+59 there),
@@ -4368,9 +4486,11 @@ public static class Hud
                 bool hov = Raylib.CheckCollisionPointRec(mouse, r);
                 Raylib.DrawRectangleRounded(r, 0.12f, 6, hov ? Pal.RGBA(24, 34, 46) : Pal.RGBA(14, 20, 28));
                 Raylib.DrawRectangleLinesEx(r, 1.3f, hov ? Pal.Accent : Pal.PanelBd);
-                Cfg.Text($"{u.Name}  ({u.Cls})", new Vector2((int)r.X + 14, (int)r.Y + 8), 16, 1f, Pal.Txt);
+                // P1: the codex's own class silhouette leads the row (borrowed, not reinvented).
+                Renderer.DrawCodexGlyph(u.Cls, new Vector2(r.X + 26, r.Y + 22), hov ? Pal.Accent : Pal.Friend, 0.95f);
+                Cfg.Text($"{u.Name}  ({u.Cls})", new Vector2((int)r.X + 46, (int)r.Y + 8), 16, 1f, Pal.Txt);
                 string cur = $"carrying: {u.Weapon?.Name}";
-                Cfg.Text(cur, new Vector2((int)r.X + 14, (int)r.Y + 27), 12, 1f, Pal.TxtDim);
+                Cfg.Text(cur, new Vector2((int)r.X + 46, (int)r.Y + 27), 12, 1f, Pal.TxtDim);
                 int nopt = Weapon.ArmoryOptions(u.Cls).Length;
                 string opt = $"{nopt} option{(nopt > 1 ? "s" : "")} >";
                 Cfg.Text(opt, new Vector2((int)(r.X + r.Width - (int)Cfg.Measure(opt, 13, 1f).X - 14), (int)r.Y + 15), 13, 1f, hov ? Pal.Accent : Pal.TxtDim);
@@ -4395,8 +4515,10 @@ public static class Hud
                 Raylib.DrawRectangleRounded(r, 0.1f, 6, bg);
                 Raylib.DrawRectangleLinesEx(r, 1.4f, current ? Pal.Good : (can ? (hov ? Pal.Accent : Pal.PanelBd) : Pal.RGBA(40, 46, 54)));
                 var probe = Weapon.Make(k);
-                Cfg.Text(probe.Name, new Vector2((int)r.X + 14, (int)r.Y + 8), 17, 1f, current ? Pal.Good : (can ? Pal.Txt : Pal.TxtDim));
-                Cfg.Text(Weapon.KindBlurb(k), new Vector2((int)r.X + 14, (int)r.Y + 31), 12, 1f, Pal.TxtDim);
+                Color wic = current ? Pal.Good : (can ? (hov ? Pal.Accent : Pal.Txt) : Pal.TxtDim);
+                DrawWeaponIcon(k, r.X + 28, r.Y + 28, wic);   // P1: the family reads before the name
+                Cfg.Text(probe.Name, new Vector2((int)r.X + 48, (int)r.Y + 8), 17, 1f, current ? Pal.Good : (can ? Pal.Txt : Pal.TxtDim));
+                Cfg.Text(Weapon.KindBlurb(k), new Vector2((int)r.X + 48, (int)r.Y + 31), 12, 1f, Pal.TxtDim);
                 if (current)
                     Cfg.Text("EQUIPPED", new Vector2((int)(r.X + r.Width - (int)Cfg.Measure("EQUIPPED", 13, 1f).X - 14), (int)r.Y + 20), 13, 1f, Pal.Good);
                 else if (can)
