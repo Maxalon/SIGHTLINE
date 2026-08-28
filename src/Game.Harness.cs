@@ -3719,12 +3719,14 @@ public partial class Game
 
             bool EnvOk(Objective o) => o == Objective.Eliminate || o == Objective.Decapitate || o == Objective.Defend;
 
-            for (int i = 0; i < Seeds; i++)
+            // shape x ARENA is a pure (seed, mission) x (seed, mission) cross-product — no map
+            // generation needed — so it sweeps a MUCH wider seed space than the route walk below.
+            // A low-weight shape (CROSSFIRE at 1/10) simply does not reach all 35 arenas inside
+            // 200 seeds, and asserting on that sample would be asserting on sampling noise.
+            const int ArenaSeeds = 4000;
+            for (int i = 0; i < ArenaSeeds; i++)
             {
                 int seed = 1000 + i * 7919;
-                var run = new Run { MapSeed = seed };
-                run.GenerateMap(seed);
-                // shape x arena over the run's own deck draws (both legality states)
                 for (int m = 1; m <= Run.MaxMissions; m++)
                 {
                     int a = Mission.DeckPick(seed, m);
@@ -3738,6 +3740,12 @@ public partial class Game
                         shapeHist[sh]++; shapeArena[sh, a] = true;
                     }
                 }
+            }
+            for (int i = 0; i < Seeds; i++)
+            {
+                int seed = 1000 + i * 7919;
+                var run = new Run { MapSeed = seed };
+                run.GenerateMap(seed);
                 // shape x objective over every enumerated route (mission # = the fight's depth)
                 var routes2 = new List<List<MissionNode>>();
                 void Walk2(MissionNode node, List<MissionNode> path)
@@ -3784,7 +3792,7 @@ public partial class Game
                 }
             }
             sb0Deploy = new System.Text.StringBuilder();
-            sb0Deploy.AppendLine("DEPLOYMENT SHAPE HISTOGRAM (shape:deals over the same seed space, both legality states):");
+            sb0Deploy.AppendLine($"DEPLOYMENT SHAPE HISTOGRAM ({ArenaSeeds} seeds x {Run.MaxMissions} missions x 2 legality states):");
             for (int sh = 0; sh < nShapes; sh++)
                 sb0Deploy.AppendLine($"  {ShapeName(sh),-10}: {shapeHist[sh]}"
                     + $"   arenas covered {Enumerable.Range(0, nLay).Count(a => shapeArena[sh, a])}/{nLay}"
