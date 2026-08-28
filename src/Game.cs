@@ -5088,8 +5088,15 @@ public partial class Game
         // FUL-4: wave size 1+m/2 (was 2+m/2) — with three waves landing per mission the old +1
         // body per wave compounded to +3 per mission over the whole timer. podded: each wave is
         // a real morale pod (focus-firing a wave down routs its survivors, like any pod).
+        // FUL-13 review fix: the wave heatStat honors the m1-2 opener grace exactly like the
+        // initial force (Game.cs SetupMission ramp) — without it a heat-8 SKIRMISH Defend (n=1,
+        // grace zeroes every numeric delta) fielded +4-stat waves, contradicting the documented
+        // grace contract and pre-empting the skirmish-grace owner decision.
+        int waveHeatStat = Sightline.Heat.StatDelta(_run.HeatLevel);
+        if (_run.Mission <= 1) waveHeatStat = 0;
+        else if (_run.Mission == 2) waveHeatStat /= 2;
         SpawnReinforcements(1 + _run.Mission / 2, 12, "WAVE", rich: true, podded: true,
-                            heatStat: Sightline.Heat.StatDelta(_run.HeatLevel));   // FUL-13: waves were heat-blind
+                            heatStat: waveHeatStat);   // FUL-13: waves were heat-blind
     }
 
     /// FUL-4: the DEFEND wave schedule — ONE shared read for the spawner and the start-of-turn

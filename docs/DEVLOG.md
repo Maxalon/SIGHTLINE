@@ -2303,7 +2303,13 @@ intelByHeat added); PAIRTEST PASS. Then the ladder: per heat TWO pinned chunks
 greedy+sloppy paired = 40 campaigns/heat, 200 total, zero frame-caps, every chunk's JSON+log
 archived.
 
-## THE REFERENCE LADDER (definitive — retire every earlier number)
+## THE REFERENCE LADDER (the pre-tuning BASELINE — retire every earlier number)
+
+> Review annotation: this table was measured BEFORE the R1/R2 Defend rounds below. On the
+> SHIPPED tree the tuned rungs last read: h8 **5%** (at the 10±5 band floor), h6 **27.5%**,
+> h4-b0 35% (single re-run chunk); h0/h2 are untouched by the rounds (byte-identical by
+> construction). Quote THOSE for the shipped top rungs — quoting this baseline's h8=10 for
+> the shipped game misstates it by 2x.
 | heat | run completion | greedy | sloppy | paired gap | margin (missions) | avg cleared | mission win |
 |---|---|---|---|---|---|---|---|
 | 0 | **52.5% ±7.9** | 45% | 60% | −15 | −0.75 ±0.57 | 4.58 | 88.0% |
@@ -2320,15 +2326,16 @@ procedural target, stable).
 ## THE GOAL BAND — RE-SET (owner-facing)
 The research-era band (80/70/60/40/20 ±8) was written for a game whose routes DODGED their own
 hardest content: before FUL-9, Defend fielded n=4 missions per 20-run batch, mid-run Decapitate
-never reached mids, 52% of missions skipped the authored arenas, and a lethal hit was a
+never reached mids, ~47% of missions skipped the authored arenas, and a lethal hit was a
 decision-free KIA. The finished game deals Defend-or-Rescue on an anchor column of EVERY route,
 mid Decapitate on ~every route, pods of 3 with linked activation from m3, and prices every
 death as a 3-turn rescue problem. FUL-9 measured the exposure alone at −10..−15 completion;
 FUL-6's pods cost the marginal worlds more; FUL-7 gave back +7..+10. The old band cannot be
 reached from here without un-repairing exposure (out of authority, and wrong) or inflating the
 squad. The re-set band fits the finished game's design story — "stakes that bite" wants an h0
-campaign most first attempts LOSE narrowly (measured 52.5%, losses are deep: avg 4.58/6
-missions, m1 95%); each paid rung takes a real visible bite (−15/−10/−10/−10); the apex stays
+campaign where losses are common and deep (the tuned BOT clears 52.5% — human first attempts
+sit below the tuned bot; losses average 4.58/6 missions, m1 95%); each paid rung takes a real
+visible bite (−15/−10/−10/−10); the apex stays
 beatable-not-farmable. **Published band: h0 55 / h2 40 / h4 30 / h6 20 / h8 10, ±8 (h8 ±5,
 hard floor >=5).** Every fresh rung measures inside it. The docket's "h4 lift if low" resolves
 against the re-set band: 30.0 vs 30±8 is ON target — no rung-average lever was spent; the
@@ -2552,7 +2559,7 @@ wave's proper-N re-baseline.
 - **FUL-11 CEREMONY** (959f5b2; survived a 3-week container suspension mid-measurement):
   finale ceremony + Wardens SIGNIFER/ORDERLY retinue — Wardens 73→83.7, all kits in 78-88,
   pooled 84.2 (n=146), zero count/stat tuning.
-- **FUL-12 SIGNPOSTS** (wt-ful12): end-card SALVAGE/HEAT/achievement slabs, tutorial step 0
+- **FUL-12 SIGNPOSTS** (wt-ful12 through 677a6e7; merged 0605e6e): end-card SALVAGE/HEAT/achievement slabs, tutorial step 0
   + BRACE tip, pill hovers, dormant ID cards, 16-boon RECOMMENDED draft, WAR ROOM sizing.
 - **FUL-13 TRUE NORTH** (this entry, wt-ful13): the reference ladder + re-set band, the
   Defend inversion levers, the gap thread closed, the intel verdict, the economy fixes,
