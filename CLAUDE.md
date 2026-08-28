@@ -243,6 +243,14 @@ docs/screenshot.png    README image
   corner → flank). High ground negates the target's LOW cover. Verified by
   `SIGHTLINE_COMBATTEST`.
 - Each `WeaponKind` has its own `RangeMod` curve + `MaxRange` + clip + crit base.
+- **THE EXCHANGE (RESONANCE X1):** every hostile is built through `Mission.MakeHostile`,
+  which adds `Mission.HostileToughness` (+3 HP) and applies `Mission.HostileDamageTrim`
+  (−1 off both ends of its weapon band, via `Weapon.TrimBaseDamage`, which moves the
+  PRISTINE base so `ApplyMods` can't undo it). That pair sets time-to-kill (~2 hits both
+  ways). Change it only with a measured round per side — enemy-only durability was
+  measured at −30 run completion. `Ai.cs`/`Game.Autopilot.cs` compare `Hp` to
+  `Weapon.Dmg*`, so they re-price themselves; `HEATLADDERTEST` derives its damage pin
+  through the trim.
 - **Thirteen persisted-by-ordinal enums** (Objective, WeaponKind, Perk, WeaponMod, Trait,
   Boon, SecondaryKind, Faction, Spec, Scar, Contract, MetaUnlock, RewardKind) are
   **APPEND-ONLY** — the ordinal IS the save format. `SIGHTLINE_SAVETEST` pins each one with
@@ -314,7 +322,12 @@ filter bug meant every weapon was raw white noise), the board's biome identity w
 move overlay that flooded it, only 3 of ~14 verbs were ever taught, the displayed hit% was not
 the hit probability, a pod scatter bug stacked units on one tile so the buried one could not be
 clicked, and a published build launched from the wrong directory silently lost its font. Detail
-in `docs/DEVLOG.md` §RESONANCE; open work in `docs/ROADMAP.md`.
+in `docs/DEVLOG.md` §RESONANCE; open work in `docs/ROADMAP.md`. Wave **X1 THE EXCHANGE** then changed the
+combat model's headline ratio: `Mission.HostileToughness` (+3 HP) and
+`Mission.HostileDamageTrim` (−1 per weapon band end) in the single `Mission.MakeHostile`
+funnel, so a trade takes ~2 hits instead of 1 (Eliminate 3.60 → 5.30t, lead-swings
+0.60 → 0.84) with every measured rung still in band. Its raw chunk logs live in
+`docs/measurements/x1/`.
 
 **Three doc over-claims were found and corrected** — they are the reason this project needs the
 "no over-claims" rule enforced hard: juice was graded "Strong" partly on audio nobody had heard;

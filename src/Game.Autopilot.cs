@@ -70,7 +70,8 @@ public partial class Game
         if (Stats.Enabled && _turnCount != _lastTelemetryTurn)
         {
             _lastTelemetryTurn = _turnCount;
-            Stats.RecordPlayerTurn(CountMeaningfulChoices(), CurrentLead());
+            int choices = CountMeaningfulChoices(out int actingSoldiers, out int armedSoldiers);
+            Stats.RecordPlayerTurn(choices, CurrentLead(), actingSoldiers, armedSoldiers);
         }
         TryFreeCaptive();                       // free a captive a soldier already stands next to
         var u = Players.FirstOrDefault(p => p.CanAct);
@@ -335,12 +336,21 @@ public partial class Game
     ///       budget), so its contribution is new decision depth, not a re-weighting. Capped per
     ///       soldier so an open map can't trivially inflate it.
     /// Reuses ShotValue/ComputeOdds/TileExposure (read-only — never mutates state). Cheap + bounded.
-    int CountMeaningfulChoices()
+    int CountMeaningfulChoices() => CountMeaningfulChoices(out _, out _);
+
+    /// X1 — same count, plus the SHOT-GATE decomposition (Stats.MissionRec): `acting` is the
+    /// number of soldiers this turn that were alive, able to act and carrying ammo (i.e. eligible
+    /// to be scored at all), and `armed` is the subset that actually had a legal shot from where
+    /// they stood. Without these, meaningful-choices/turn cannot be read: a lever that lengthens
+    /// a fight adds low-contact mop-up turns and shrinks the roster, both of which push the
+    /// per-turn average DOWN without making any individual decision poorer. Pure bookkeeping.
+    int CountMeaningfulChoices(out int acting, out int armed)
     {
-        int total = 0;
+        int total = 0; acting = 0; armed = 0;
         foreach (var u in Players)
         {
             if (!u.Alive || !u.CanAct || u.IsVip || u.Ammo <= 0) continue;
+            acting++;
             // (a) which target — gather the value of every legal shot from where this soldier stands.
             float best = 0f; int comparable = 0;
             var vals = new List<float>();
@@ -355,6 +365,7 @@ public partial class Game
                 if (v > best) best = v;
             }
             if (best <= 0f) continue;                                      // no shot -> no shot/positioning decision
+            armed++;
             foreach (var v in vals) if (v >= best * 0.88f) comparable++;   // within ~12% of best
             if (comparable >= 2) total += comparable - 1;                  // count the real target alternatives
 

@@ -1033,6 +1033,31 @@ Reference for any future wave: the FUL-13 ladder + re-set goal band (docs/DEVLOG
 is the number of record; method per FUL-2/FUL-5 — CRN chunks via SIGHTLINE_BALANCE_BASE slot
 sets, one lever per measured round, fresh same-slot R0 first, dip budgets, breaches reported.
 
+> **Ladder update (RESONANCE X1 "THE EXCHANGE", docs/DEVLOG.md §X1).** The numbers of record
+> for h0/h4/h8 are now the X1 shipped rungs — **h0 52.5% / h4 27.5% / h8 15.0%** (n=40
+> campaigns each, CRN slot sets 0-19 x greedy+sloppy), all inside the FUL-13 band. X1's own
+> pre-lever baseline re-measured h0 at 52.5% (FUL-13's number to the decimal), h4 at 22.5%
+> and h8 at 10.0%. **h2 and h6 were not re-measured** — X1 moved the top rungs UP, so those
+> two are the first to check on any re-baseline.
+
+- [ ] **X1 residual — Escort at heat 8 runs 15.61 turns** (n=17; h0 6.00t and h4 6.01t both
+      IMPROVED vs baseline, so this is an apex-only drag). Two candidates in priority order,
+      with the measured caveats, in DEVLOG §X1 "THE ONE HONEST BREACH": (1) `SmartEscort`'s
+      downed-squad hole — the lone-VIP self-race tests `p.Alive` but a DOWNED soldier is still
+      Alive, so the asset hunkers while the squad bleeds out (an INSTRUMENT fix: needs its own
+      paired re-measure); (2) the cold-LZ beacon gate (`Game.EscortBeaconOk`, Chebyshev 3) —
+      but BEACON plant counts were UNCHANGED between X1's R0 and R2, so it was not the binding
+      constraint at h0. Evac's pooled 11.32t rests on n=9 and is not yet a finding.
+- [ ] **X1 residual — meaningful-choices/turn is a CONTACT-DENSITY metric, not a lethality
+      one.** X1 added the shot-gate decomposition (`[shot-gate]` report line +
+      `decisionRichness.{actingSoldiersPerTurn,armedSoldiersPerTurn,turnsWithAShotPct,
+      choicesPerArmedSoldierTurn}`) and it shows the binding constraint is
+      choices/ARMED-soldier-turn ~1.5: the typical armed soldier sees exactly ONE worthwhile
+      target. Compare rungs — h4 out-scores h0 (2.90 vs 2.33) purely because heat fields MORE
+      bodies. **Chase the 3-5 band with simultaneous-target geometry** (pod placement, arena
+      sightlines, activation overlap), and always quote choices/ARMED alongside the per-turn
+      average so a turn-count change is never mistaken for a decision-quality change.
+
 - [ ] **Owner decisions pending** (decision paragraphs with recommendations in DEVLOG §FUL-13
       "DESIGN-QUESTION DOCKET"): skirmish numeric heat (recommend: exempt SKIRMISH from the m1
       grace, keep DAILY); founding-squad corpsman (recommend: first-backfill guarantee or
@@ -1103,6 +1128,22 @@ sets, one lever per measured round, fresh same-slot R0 first, dip budgets, breac
         rect minus HUD overlap) and the **`SIGHTLINE_NOMOVE=1`** ground-truth capture hook.
       - Verified: Release 0/0, **41/41 self-tests**, PAIRTEST PASS, autoplay x5 clean,
         `SIGHTLINE_BALANCE=10` byte-identical to base. Write-up: DEVLOG §RESONANCE V2.
+- [x] **X1 — THE EXCHANGE.** DONE (partial, honestly reported). The fight was over before it
+      became tactical: a soldier's shot averaged 5.1 damage into an ~8 HP body, so time-to-kill
+      was one hit and a match tipped 0.60 times. Two constants in `Mission.MakeHostile` (the
+      single hostile funnel) now carry the trade: **`HostileToughness = 3`** (flat HP surcharge
+      on every hostile) and **`HostileDamageTrim = 1`** (flat points off both ends of every
+      hostile weapon's band, via the new `Weapon.TrimBaseDamage`, which moves the PRISTINE base
+      so `ApplyMods` can never resurrect it). Six measured rounds, one lever each, n=40
+      campaigns per row. **Landed:** Eliminate 3.60 -> 5.30 turns (into the 5-7 budget),
+      shots-per-kill 2.34 -> 3.17, lead-swings 0.59 -> 0.80, Eliminate stopped being a 95% free
+      square (-> 81%), Defend did not grow (8.70 -> 8.78), and all three measured rungs stayed
+      inside the FUL-13 band (h0 52.5 flat, h4 22.5 -> 27.5, h8 10.0 -> 15.0). **Missed:**
+      lead-swings < 1.00, and meaningful-choices/turn fell 2.33 -> 2.09 — the wave's own new
+      shot-gate decomposition shows why, and it is a metric finding, not a lever failure (see
+      the OPEN/NEXT residual above). **Reverted:** a −2 damage trim (bought ~nothing, worst
+      Escort drag of the wave) and toughness +4 (−30 completion; the symmetry warning, measured).
+      **Breach recorded:** Escort at heat 8 runs 15.61 turns.
 
 - [x] **T1 — BASIC TRAINING.** DONE. Onboarding stopped being a doc claim.
       `docs/DESIGN.md` §4 graded onboarding "Addressed (W11)"; what shipped was a

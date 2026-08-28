@@ -1271,7 +1271,14 @@ public partial class Game
             SetupMission(3);
             foreach (var e in Enemies)
             {
-                int baseMax = Weapon.Make(e.Weapon.Kind).DmgMax;
+                // X1 THE EXCHANGE: every hostile weapon is trimmed by Mission.HostileDamageTrim
+                // at MakeHostile, so the reference band must take the SAME trim — otherwise this
+                // pin reports the exchange's give-back as a heat-ladder regression (it is not:
+                // what the pin actually asserts is that heat's +1 reaches every spawned weapon).
+                // Derived, not re-hardcoded, so it stays true if the trim constant ever moves.
+                var refW = Weapon.Make(e.Weapon.Kind);
+                refW.TrimBaseDamage(Mission.HostileDamageTrim);
+                int baseMax = refW.DmgMax;
                 if (e.Weapon.DmgMax != baseMax + expectDelta)
                 { fails.Add($"{tag}:{e.Cls}dmg={e.Weapon.DmgMax}want={baseMax + expectDelta}"); return; }
             }
