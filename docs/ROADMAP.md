@@ -876,16 +876,24 @@ of record (container suspensions have wiped every scratchpad copy — docs are t
       Budget: h0 completion 60 → 50/45 (−10 to −15, OUTSIDE ±7, reported not hidden): the drag
       is the newly-EXPOSED Defend/mid-Decapitate cells on ~every route, not the arenas —
       FUL-13's re-baseline input (full table in docs/DEVLOG.md).
-- [ ] **FUL-6 CRITICAL MASS** (P6, L). Pods of 3 + linked activation in mid/late missions — one
-      real multi-pod battle per mission instead of six 2-enemy executions, so BRACE/morale/verb
-      boons get a stage; morale/rout reaches LAST STAND's horde. Files: Mission.cs, Game.cs,
-      Game.Endless.cs, Run.cs, Game.Harness.cs. (Detailed spec lost to a container wipe —
-      re-derive from the research finding + this goal before dev.)
-- [ ] **FUL-7 LAST LIGHT** (P7, L). Downed soldiers: 2-3 turn bleed-out with stabilize/carry
-      counterplay instead of instant death — the genre's best decision, currently absent. Files:
-      Unit.cs, Game.cs, Ai.cs, Game.Autopilot.cs, Hud.cs, Renderer.cs, Codex.cs, Game.Harness.cs.
-      Save-compat: any new persisted enum values append-only. (Spec to re-derive; depends on
-      FUL-1 telemetry + FUL-5 bot hands to measure honestly.)
+- [ ] **FUL-6 CRITICAL MASS** (P6, L). Pods of 3 (PodPlan greedy split, m3+; m1-2 and the finale
+      keep i/2 — FUL11PROBE stays green by construction) + pod cohesion (anchor-row clumping, zero
+      extra draws) + linked activation ("HEARD THE GUNS": ActivatePod links the nearest dormant pod
+      within 6 tiles to Suspicious, confirming unseen next turn — one link per wake, no chains) +
+      LAST STAND wave sub-pods (FUL-4's 100+/podded pattern; elite stays exempt; TERROR un-excluded
+      from endless boons) + the FIELD DRILLS rework (verdict consumed: +1 move after a drag/vault,
+      transient DrilledThisTurn, honest grant-site proc). RCL re-measured, not touched. Measured
+      wave: fresh same-slot R0 first, one lever per round, dip budget <=8, GRENADE >=10 predicted.
+      SIGHTLINE_PODTEST + PODSHOT. Full spec: docs/plans/FUL-6-critical-mass-FUL-7-last-light.md.
+- [ ] **FUL-7 LAST LIGHT** (P7, L — after FUL-6; fresh post-FUL-6 reference). Lethal damage on a
+      non-VIP soldier becomes a 3-turn BLEED-OUT (once per soldier per mission; AoE stays lethal;
+      enemies never direct-fire the downed — the telegraphed-AoE valve keeps stakes): all through
+      the single KillUnit seam; STABILIZE universal verb freezes the timer; corpsman PATCH revives
+      (MostWoundedAdjacentAlly already targets Hp 0); DRAG/EXTRACT already carry a downed body;
+      EnterBarracks recovers survivors at Wound 3 + the near-death scar track; bleed-out KIA flows
+      the full death path (Fallen/Memorial/honest loss card — LGD's RemoveVeterans needs no special
+      case). Zero persistence (single checkpoint site verified; DTO whitelist). SIGHTLINE_DOWNTEST +
+      DOWNSHOT. Full spec: docs/plans/FUL-6-critical-mass-FUL-7-last-light.md.
 - [ ] **FUL-8 PIKEMAN** (P8, M). The SARISSA — a Wardens lane-holder that plants a braced foe-red
       cone over a movement lane and STAGGERS the first soldier through; teaches the player's BRACE
       by mirroring it. Keystone: the BRACE reaction plumbing is already team-symmetric
