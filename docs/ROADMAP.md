@@ -1164,3 +1164,29 @@ sets, one lever per measured round, fresh same-slot R0 first, dip budgets, breac
       trade-offs and a recommendation are in `docs/DISTRIBUTION.md` §4; the status quo
       (unlicensed private repo = all rights reserved) is safe and blocks nothing until a
       build goes to someone outside the project.
+
+### PROGRAM RESONANCE — C1 "VOICE" (done 2026-08-28, details in DEVLOG §C1)
+
+- [x] **`docs/DESIGN.md` §1.1 AMENDMENT — the light frame.** Narrative was listed as a
+      deliberately-unpursued aesthetic; the project owner granted this program permission to
+      relax documented constraints, so the change is **recorded**, with its limits, rather than
+      allowed to drift. Read §1.1 before adding any word to the game.
+- [x] Mission **briefings** (3 lines/campaign node: region × arena × faction × objective),
+      skippable, never hit-tested, yielding absolutely to the T1 teaching cards, and clearing
+      itself the instant the combat log has an entry.
+- [x] **Faction dossiers** (codex FACTIONS tab, each FIELD RULE line interpolating the real
+      `Combat` constant) + **named regions** on the campaign map (64 biome-true names off `MapSeed`).
+- [x] **Soldier barks** at six beats with four hard rate limits, tagged `VOICE` in the combat log.
+- [x] **Run epilogue** — five lines on the campaign end card, off the card's own telemetry.
+- [x] `SIGHTLINE_VOICETEST=1` (42nd self-test, wired into `scripts/qa-sweep.sh`): RNG-separation
+      proof with a sensitivity probe, template-completeness, bark reachability + all four gates,
+      and a pixel-width fit check for every generated line. `SIGHTLINE_BALANCE=10` byte-identical.
+
+- [ ] **Widen the bark pools.** Three variants per beat is thin; the test that measures fit and
+      slot-safety already exists, so this is pure content work.
+- [ ] **Briefing opposition line reads as a template by the fourth run** — three of the four are
+      structurally identical ("X ground: a, b, c. <rule>."). Worth a rewrite pass, not a rewrite.
+- [ ] **No briefing in SKIRMISH / DAILY / LAST STAND** (no `MapSeed` route, no operation number).
+      A one-line mode-appropriate variant is cheap if the owner wants it.
+- [ ] **Region names are decoration.** Nothing keys off them — no per-region modifier, no return
+      visits. Deliberate scope for a *frame*; a future wave could make them mechanical.
