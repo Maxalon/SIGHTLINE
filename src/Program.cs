@@ -49,6 +49,8 @@ public static class Program
         // W4 — SIGHTLINE_PODMASS=<n>: enemy formation mass (3 = the FUL-6 pods-of-3 plan).
         if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_PODMASS"), out int pm) && pm >= 2)
             Mission.PodMass = pm;
+        // W4 — SIGHTLINE_PODUNIFORM=1: a pod fields one kind of body (comparable targets).
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_PODUNIFORM") == "1") Mission.PodUniform = true;
         // W4 — SIGHTLINE_RIMWAVES=1: under an ENVELOP opening, rotate the rim reinforcement
         // waves arrive from (a surrounded hold that keeps being surrounded).
         if (Environment.GetEnvironmentVariable("SIGHTLINE_RIMWAVES") == "1") Mission.EnvelopRimWaves = true;

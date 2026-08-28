@@ -590,6 +590,10 @@ public static class Mission
     /// survivor) and none is a shapeless blob. Pure — no RNG draw.
     public static int PodMass = 3;
 
+    /// W4 — every body in a pod fields the pod LEAD's archetype (see the spawn loop). Measured as
+    /// its own round; OFF by default until it is. SIGHTLINE_PODUNIFORM=1.
+    public static bool PodUniform = false;
+
     public static int[] PodPlan(int count, int mass)
     {
         var sizes = new List<int>();
@@ -708,6 +712,10 @@ public static class Mission
         if (podsOf3) count = Math.Max(3, count - 1);
         int[] podOf = null, memberOf = null;
         int[] podAnchor = null, podAnchorX = null;
+        // W4 POD UNIFORMITY: the pod lead's archetype roll, reused by its members. Sized for the
+        // i/2 pairing too (m1-2), so the teaching tier's pairs field one kind of body as well;
+        // the FINALE is excluded (its kit slots are explicit and FUL11PROBE pins their geometry).
+        float[] podRoll = new float[count / 2 + 2];
         if (podsOf3)
         {
             int[] plan = PodPlan(count);
@@ -720,6 +728,10 @@ public static class Mission
         {
             int podId = podsOf3 ? podOf[i] : i / 2;
             int member = podsOf3 ? memberOf[i] : 0;
+            // the member index WITHIN the pod for uniformity purposes: the FUL-6 plan on m3-5,
+            // and the i/2 pairing everywhere else (`member` itself must stay 0 off the plan —
+            // the COHESION row stack below is keyed on it).
+            int podMember = podsOf3 ? member : i % 2;
             // W4 — the pod's LEAD bearing comes from the deployment shape (FRONTAL reproduces the
             // historical `grid.W - 1 - colOff` column exactly); followers stack off the lead's
             // FINAL tile along the shape's own stacking axis. rows[] reads are not RNG draws, so
@@ -756,7 +768,23 @@ public static class Mission
 
             bool finalMission = n >= Run.MaxMissions;
             bool midBoss = !finalMission && i == 0 && (n == 3 || n == 5);   // recurring named elite
+            bool finalBody = n >= Run.MaxMissions;
             float r = Util.RandF();
+            // W4 THE SECOND AXIS — POD UNIFORMITY. The wave's instrumentation says an armed
+            // soldier already SEES ~2.4 foes but almost never has two shots worth choosing
+            // between: CountMeaningfulChoices only counts a rival target whose ShotValue is
+            // within 12% of the best, and three independently-rolled archetypes have wildly
+            // different HP, guns and PriorityWeight, so the shots are never comparable. A pod
+            // that fields ONE kind of body presents genuinely interchangeable targets — the
+            // "which one do I shoot?" call the metric is trying to detect — at no change in
+            // force strength or draw count (the per-body roll still happens; members past the
+            // lead just reuse the lead's). It also reads better: "three RAIDERS", not a trio of
+            // strangers. The one-BOMBARD / one-WARBRINGER caps below still demote any extra.
+            if (PodUniform && !finalBody && podId < podRoll.Length)
+            {
+                if (podMember == 0) podRoll[podId] = r;
+                else r = podRoll[podId];
+            }
             // SIGNAL W5 — BOSS IDENTITY: the finale boss (i==0) + its explicit kit retinue
             // (i==1/2 on Legion/Syndicate finales) and the m3/m5 mid-boss are all keyed off
             // Combat.MissionFaction (see MakeFinaleBoss/MakeFinaleRetinue/MakeMidBoss below),
