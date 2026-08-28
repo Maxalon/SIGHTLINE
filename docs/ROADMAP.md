@@ -865,14 +865,22 @@ of record (container suspensions have wiped every scratchpad copy — docs are t
       Unit.cs, Game.cs, Ai.cs, Game.Autopilot.cs, Hud.cs, Renderer.cs, Codex.cs, Game.Harness.cs.
       Save-compat: any new persisted enum values append-only. (Spec to re-derive; depends on
       FUL-1 telemetry + FUL-5 bot hands to measure honestly.)
-- [ ] **FUL-8 PIKEMAN** (P8, M). A Wardens lane-holder specialist that visibly braces a movement
-      lane and staggers the first soldier through — the movement-economy contest the 21-archetype
-      roster lacks; teaches BRACE by mirroring it. Files: Mission.cs, Ai.cs, Unit.cs, Game.cs,
-      Renderer.cs, Codex.cs. (Spec to re-derive.)
-- [ ] **FUL-10 FORKS** (P10, M). 6-8 new trade-off field events wired to salvage/scar/veteran/
-      faction systems; two draft contracts engaging the W9 veteran economy; COUNTERPLAY's orphaned
-      perks reachable. Files: Events.cs, Run.cs, Game.cs, Hud.cs, Codex.cs. (Spec to re-derive;
-      consumes FUL-1's BY EVENT-CHOICE table.)
+- [ ] **FUL-8 PIKEMAN** (P8, M). The SARISSA — a Wardens lane-holder that plants a braced foe-red
+      cone over a movement lane and STAGGERS the first soldier through; teaches the player's BRACE
+      by mirroring it. Keystone: the BRACE reaction plumbing is already team-symmetric
+      (OnUnitEnteredTile watcher pick, OwBrace halving, ShotAnim stagger, cone gate, one-reaction
+      cap) — the wave is an Ai plant branch + renderer cone + bot danger-tiles + codex + PIKETEST.
+      Full dev-executable spec (verified seams, spawn re-slices, harness legs):
+      docs/plans/FUL-8-pikeman-FUL-10-forks.md. Launches after FUL-5 merges (shared autopilot).
+- [ ] **FUL-10 FORKS** (P10, M). Seven trade-off field events crossing salvage/scar/veteran/
+      faction/heat (ids+arm order frozen for the compass; PendingSalvageReward run-committed via
+      AwardMetaRunEnd — events must never touch meta directly); two veteran-economy contracts
+      (MERCENARY CLAUSE: half-price recalls but no enshrinement; LIVING LEGENDS: pensions + double
+      rank-kills but KIA erases the reserve record); the orphaned perk trio Vantage/Breaker/
+      Siegebreaker joins real class lines. Contract enum append moves TWO tail pins
+      (SaveGame.cs:675 + CONTRACTTEST). Full spec: docs/plans/FUL-8-pikemen-FUL-10-forks.md
+      (file name: FUL-8-pikeman-FUL-10-forks.md). Bot arm-uptake measurement lands with FUL-5's
+      hashed chooser (FUL-10 makes the forks exist; FUL-5 makes the bot walk them).
 - [ ] **FUL-13 TRUE NORTH** (P13, L — LAST). Re-baseline the ladder on the finished tree (stale
       published numbers: h0 read 60 vs 80 published in research); lift h4 toward its 60±8 band;
       drain the intel flood (heat refunding itself through the shop); resolve the LOS-fix policy-
