@@ -4096,6 +4096,8 @@ actually coming from the positioning axis.
 | C1 | `DEPLOY=crossfire` | 40 | 35.0% | 6.56 | 2.09 | **1.57** | 2.44 | **0.34** | 1.23 | 1.32 | 0.74 | 13.40 |
 | E1 | `DEPLOY=envelop` | 40 | **60.0%** | 5.82 | **2.71** | **1.59** | 2.45 | 0.27 | 1.32 | **1.71** | **0.78** | 9.66 |
 | M1 | `PODMASS=4` | 20 | 35.0% (vs 45.0 same-slot) | — | 2.31 | **1.64** | **2.61** | 0.22 | 1.42 | 1.41 | 0.64 | — |
+| S1 | **the shipped combination** (mix 3/3/1/3 + uniform pods) | 40 | 35.0% | **5.69** | 2.36 | **1.53** | 2.34 | 0.28 | 1.24 | **1.55** | **0.79** | 8.19 |
+| S2 | the heavier deal (mix 1/4/1/4 + uniform pods) — **rejected** | 40 | **40.0%** | 6.56 | 2.03 | **1.53** | 2.22 | 0.26 | 1.27 | 1.34 | **0.80** | 8.30 |
 | U1 | `PODUNIFORM=1` | 40 | **32.5%** (= baseline exactly) | 5.85 | 2.38 | **1.62** | 2.43 | **0.34** | 1.29 | 1.47 | 0.70 | **8.75** |
 
 (M1 is the one single-chunk round — paired against the *same* slot set's baseline chunk
@@ -4231,6 +4233,13 @@ argument about the *policy* (a lone VIP should race only when it can actually re
 not about the predicate; that is recorded as a follow-up, not guessed at here.
 
 ## THE SHIPPED STATE — round S1, `DEPLOYMIX=3,3,1,3` + `PODUNIFORM=1`, n=40 per rung
+
+*(One lever per round applies to the LEVER rounds — every shape was pinned and measured alone
+(P1/C1/E1), and uniformity was measured alone (U1), each against R0 on the same CRN slot sets.
+S1 is the COMBINATION round: the state actually being shipped, measured end to end at two rungs,
+so nothing is published by extrapolating from the singles. Every round including S1 carries
+`SIGHTLINE_ESCORTFIX=0`, i.e. R0's instrument, so the Escort fix cannot contaminate the ladder
+numbers; it has its own pair above.)*
 
 | rung | metric | R0 baseline | **S1 shipped** | delta |
 |---|---|---|---|---|
