@@ -58,6 +58,17 @@ public static class Stats
         // sum-enemy-HP) lead changed sign during the match (a tension proxy); MaxSwing:
         // the largest single-turn change in that lead.
         public int PlayerTurns, MeaningfulChoiceSum, LeadSwings, MaxSwing;
+        // X1 THE EXCHANGE — the shot-gate decomposition. meaningful-choices/turn is an average
+        // over PLAYER TURNS, but CountMeaningfulChoices only scores a soldier that (a) is alive
+        // and able to act and (b) has at least one legal shot from where it stands. So the ratio
+        // conflates three different things: how many soldiers are still standing, how often they
+        // are in contact at all, and how rich the decision is when they ARE. These three counters
+        // split them so a lever that lengthens fights can be told apart from one that flattens
+        // decisions. Read-only bookkeeping — no RNG draws, no gameplay effect.
+        //   ActingSoldierTurns: soldier-turns where the soldier was alive + CanAct (roster size).
+        //   ArmedSoldierTurns : the subset of those that had >=1 legal shot (in contact).
+        //   ArmedTurns        : player turns where at least one soldier was armed.
+        public int ActingSoldierTurns, ArmedSoldierTurns, ArmedTurns;
         // attacker-class -> totals (player side only, for weapon/class balance)
         public readonly Dictionary<string, int> DamageByClass = new();
         public readonly Dictionary<string, int> ShotsByClass = new();
@@ -331,11 +342,16 @@ public static class Stats
     //   lead: (sum player HP) − (sum live enemy HP) right now. We track the lead's sign
     //   changes (swings) and the largest per-turn delta across the mission.
     static bool _haveLead; static int _lastLead;
-    public static void RecordPlayerTurn(int meaningfulChoices, int lead)
+    public static void RecordPlayerTurn(int meaningfulChoices, int lead,
+                                        int actingSoldiers = 0, int armedSoldiers = 0)
     {
         if (!Enabled || _mission == null) return;
         _mission.PlayerTurns++;
         _mission.MeaningfulChoiceSum += Math.Max(0, meaningfulChoices);
+        // X1 shot-gate decomposition (see MissionRec) — pure bookkeeping.
+        _mission.ActingSoldierTurns += Math.Max(0, actingSoldiers);
+        _mission.ArmedSoldierTurns  += Math.Max(0, armedSoldiers);
+        if (armedSoldiers > 0) _mission.ArmedTurns++;
         if (_haveLead)
         {
             int delta = Math.Abs(lead - _lastLead);
@@ -528,6 +544,17 @@ public static class Stats
             double maxSwing = tMissions.Average(m => (double)m.MaxSwing);
             sb.AppendLine($"\nDECISION RICHNESS / SWING:");
             sb.AppendLine($"  meaningful-choices/turn {choicesPerTurn:0.00}   lead-swings/match {swingsPerMatch:0.0}   avg max-swing {maxSwing:0.0}");
+            // X1 — the shot-gate decomposition of that first number (see MissionRec).
+            double actingT = tMissions.Sum(m => (double)m.ActingSoldierTurns);
+            double armedT  = tMissions.Sum(m => (double)m.ArmedSoldierTurns);
+            double turnsT  = tMissions.Sum(m => (double)m.PlayerTurns);
+            double armedTurns = tMissions.Sum(m => (double)m.ArmedTurns);
+            if (actingT > 0)
+                sb.AppendLine($"  [shot-gate] acting-soldiers/turn {actingT / turnsT:0.00}"
+                    + $"   armed-soldiers/turn {armedT / turnsT:0.00}"
+                    + $"   armed-fraction {100.0 * armedT / actingT:0}%"
+                    + $"   turns-with-a-shot {100.0 * armedTurns / turnsT:0}%"
+                    + $"   choices/ARMED-soldier-turn {(armedT > 0 ? choicesPerTurn * turnsT / armedT : 0):0.00}");
         }
 
         // Run-completion by heat — the metric the Heat ladder is supposed to bend. The
@@ -973,7 +1000,17 @@ public static class Stats
             {
                 meaningfulChoicesPerTurn = choicesPerTurn,
                 leadSwingsPerMatch = swingsPerMatch,
-                avgMaxSwing = avgMaxSwing
+                avgMaxSwing = avgMaxSwing,
+                // X1 shot-gate decomposition (see MissionRec) — lets a consumer tell a lever
+                // that shrinks the roster apart from one that flattens the decision itself.
+                actingSoldiersPerTurn = tMissions.Count == 0 ? 0.0 : Math.Round(
+                    tMissions.Sum(m => (double)m.ActingSoldierTurns) / Math.Max(1, tMissions.Sum(m => m.PlayerTurns)), 3),
+                armedSoldiersPerTurn = tMissions.Count == 0 ? 0.0 : Math.Round(
+                    tMissions.Sum(m => (double)m.ArmedSoldierTurns) / Math.Max(1, tMissions.Sum(m => m.PlayerTurns)), 3),
+                turnsWithAShotPct = tMissions.Count == 0 ? 0.0 : Math.Round(
+                    100.0 * tMissions.Sum(m => (double)m.ArmedTurns) / Math.Max(1, tMissions.Sum(m => m.PlayerTurns)), 1),
+                choicesPerArmedSoldierTurn = tMissions.Count == 0 || tMissions.Sum(m => m.ArmedSoldierTurns) == 0 ? 0.0 : Math.Round(
+                    tMissions.Sum(m => (double)m.MeaningfulChoiceSum) / tMissions.Sum(m => (double)m.ArmedSoldierTurns), 3)
             },
             // Run-completion grouped by heat (the ladder's true shape — distinct from the
             // survivorship-skewed per-mission byHeat below). Campaign runs only.

@@ -981,12 +981,26 @@ public static class Mission
     /// targets is (sum player HP - sum ACTIVE enemy HP), and scaling both pools leaves that ratio
     /// (and therefore lead-swings) exactly where it was. The squad's exposure cost of the longer
     /// fight is the measured trade; see the wave's round table in docs/DEVLOG.md.
-    public const int HostileToughness = 4;
+    public const int HostileToughness = 3;
+
+    /// X1 THE EXCHANGE, the SYMMETRY half. Points trimmed off BOTH ends of every hostile
+    /// weapon's damage band (DmgMin floored at 1). MEASURED necessity, not a guess: shipping
+    /// HostileToughness alone (round R1, h0 CRN slots 0-19, n=40) moved Eliminate to 5.75
+    /// turns and lead-swings to 0.79 but collapsed run completion 52.5% -> 22.5% — the longer
+    /// fight simply handed the enemy ~40% more shooting turns at an unchanged 6-10 HP squad.
+    /// Soldiers cannot absorb the extra exposure and the roster cannot be inflated to let them
+    /// (soldier HP is the OTHER side of the lead metric this wave targets — raising it would
+    /// restore the pool ratio and undo the swing gain), so the give-back is taken out of the
+    /// hostile's per-shot lethality instead. Net design statement: a hostile is a BODY TO BE
+    /// WORN DOWN, not a glass cannon trading one-shot kills — the same trade the player now
+    /// faces going the other way.
+    public const int HostileDamageTrim = 1;
 
     static Unit MakeHostile(string name, string cls, WeaponKind w, int hp, int aim, int mob, int x, int y)
     {
         int thp = hp + HostileToughness;
         var u = new Unit { Name = name, Cls = cls, Team = Team.Enemy, X = x, Y = y, Hp = thp, MaxHp = thp, Aim = aim, Mobility = mob, Weapon = Weapon.Make(w) };
+        u.Weapon.TrimBaseDamage(HostileDamageTrim);
         u.Ammo = u.Weapon.Clip;
         return u;
     }

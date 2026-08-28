@@ -3055,3 +3055,197 @@ the right ~28% of that row. The rail motif survives as two diamond end-caps.
 - **The `TutStep >= TutStepFire` completion gates** (`EnterBarracks` / `LoseRun`) were **not
   touched** — the mission-1 track kept its exact semantics and constants, and TUTTEST now pins
   them so a future renumber trips a test instead of silently re-offering onboarding forever.
+
+---
+
+# PROGRAM RESONANCE — WAVE X1 "THE EXCHANGE" (2026-08-28, senior dev on wt-x1)
+
+**The charter.** Make a trade take more than one shot, so cover, flanking, suppression,
+morale, BRACE, the bleed-out window and the held boons all have turns in which to matter —
+without turning fights into drags. Nine prior programs built a comeback economy and tuned it
+for battles that lasted three and a half turns and tipped exactly once.
+
+## The finding — re-measured on this tree tip before any lever
+Fresh baseline on `2100858` (RESONANCE T1), method per FUL-13: `SIGHTLINE_BALANCE=10` per
+chunk under `xvfb-run` on the **Release binary run directly**, two disjoint CRN slot sets per
+rung (`SIGHTLINE_BALANCE_BASE` 0 / 10) x greedy+sloppy = **40 campaigns per rung**;
+`runs=20` asserted in every chunk log before the chunk was used; `XDG_CONFIG_HOME` and
+`SIGHTLINE_BALANCE_JSON` pinned into the worktree (the container is shared with other waves).
+Every chunk's JSON + log is archived under `docs/measurements/x1/`.
+
+| rung | run completion | mission win | mean turns | choices/turn | lead-swings/match |
+|---|---|---|---|---|---|
+| h0 | **52.5%** (n=40) | 88.0% (n=158) | 5.38 | 2.33 | 0.60 |
+| h4 | **22.5%** (n=40) | 79.1% (n=144) | 5.59 | 2.90 | 0.57 |
+| h8 | **10.0%** (n=40) | 71.4% (n=126) | 5.45 | 1.20 | 0.59 |
+
+h0 reproduced FUL-13's 52.5% to the decimal, and the brief's texture numbers reproduced
+exactly: choices/turn 2.33, lead-swings 0.60, Eliminate 3.59 turns. Time-to-kill was ~1.4
+hits: 5.1 damage per SHOT (5.8 per hit) into an ~8 HP body.
+
+## The lever
+`Mission.HostileToughness` (flat HP surcharge) + `Mission.HostileDamageTrim` (flat points off
+both ends of the band, DmgMin floored at 1), both applied in **`Mission.MakeHostile`** — the
+single funnel for every hostile (rank-and-file cascade, faction rosters, Defend/LAST STAND
+waves, finale retinue, mid-boss, finale boss). `Weapon.TrimBaseDamage` moves the PRISTINE base
+so `ApplyMods` can never resurrect the untrimmed band. **Flat, not multiplicative**: the
+one-shot victims are the 3-5 HP light bodies, and player damage grows through mods/perks while
+enemy HP grows through `bump`, so a flat surcharge holds hits-to-kill near 2 at both ends of a
+campaign where a multiplier would leave m1 one-shot and turn the m6 boss into a drag.
+
+Nothing downstream went stale: `Ai.cs`'s finish bands and `Game.Autopilot`'s `ShotValue` /
+kill heuristics all compare `Hp` against `Weapon.DmgMax`/`DmgMin`, so they re-price themselves.
+`HEATLADDERTEST`'s NO QUARTER damage pin was the one assertion that had to move — it now
+derives its reference from a trimmed reference weapon instead of a hardcoded band.
+
+## THE ROUND TABLE — one lever per round, h0, n=40 each, `runs=20` asserted per chunk
+
+| round | lever | compl | mis-win | mean t | Elim t | Escort t | Defend t | ch/turn | swings | verdict |
+|---|---|---|---|---|---|---|---|---|---|---|
+| R0 | baseline | 52.5% | 88.0% | 5.38 | 3.59 | 6.89 | 8.90 | 2.33 | 0.60 | reference |
+| R1 | T **+4** / D 0 | **22.5%** | 74.1% | 6.46 | 5.75 | 10.23 | 8.50 | 2.13 | 0.79 | **BREACH −30.** The symmetry warning, confirmed by measurement |
+| R2 | T +4 / D **−1** | 37.5% | 83.0% | 6.63 | 5.64 | 13.21 | 8.70 | 2.10 | 0.83 | half the ladder back; still −15, Escort dragging |
+| R3 | T +4 / D **−2** | 42.5% | 84.7% | 6.89 | 5.18 | **16.00** | 8.90 | 2.29 | 0.88 | **REVERTED** — the trim's 2nd point bought ~5 pts (inside noise) and cost the worst Escort drag of the wave |
+| R4 | T **+2** / D −1 | **52.5%** | 88.2% | 5.94 | 4.92 | 7.55 | 8.90 | 2.75 | 0.75 | ladder-neutral, but Elim 4.92 misses the 5-7 band |
+| R5 | T **+3** / D −1 | **52.5%** | 87.2% | 5.85 | **5.59** | 6.00 | 8.90 | 2.09 | 0.84 | **SHIPPED** |
+
+R1's collapse is the wave's central measured fact: enemy-only durability hands the enemy ~40%
+more shooting turns at an unchanged 6-10 HP squad, and the squad cannot absorb it. The
+give-back had to come out of hostile per-shot lethality, NOT out of soldier HP — soldier HP is
+the other side of the lead metric this wave targets (lead = sum player HP − sum ACTIVE enemy
+HP), so raising it would restore the pool ratio and undo the swing gain by construction.
+
+R3 vs R2 also settled the give-back's shape: a second trim point mostly disarms the SMG
+hostiles (the most common gun: 2-4 -> 1-2) without touching the Shotgun/Sniper/LMG/ELITE bodies
+that actually kill soldiers, so it bought little and cost turns.
+
+## THE LADDER — shipped state (T+3 / D−1), n=40 per rung
+
+| rung | R0 | SHIPPED | delta | FUL-13 band | in band? |
+|---|---|---|---|---|---|
+| h0 | 52.5% | **52.5%** | 0.0 | 55 ±8 (47-63) | YES |
+| h4 | 22.5% | **27.5%** | +5.0 | 30 ±8 (22-38) | YES (better-centred than the baseline, which sat on the floor) |
+| h8 | 10.0% | **15.0%** | +5.0 | 10 ±5 (5-15) | YES, **at the ceiling** |
+
+No rung moved by more than the ±8 dip budget, and every measured rung is inside the band —
+including h4 and h8, which the baseline sat at the *edges* of. h2 and h6 were not measured
+(budget); the shipped state moves the apex UP, so the untested rungs are the ones to check
+first if anyone re-baselines.
+
+## THE GATES — every one, with its number
+
+| gate | target | baseline | shipped | verdict |
+|---|---|---|---|---|
+| lead-swings/match | >= 1.00 | 0.60 (h0) / 0.59 pooled | **0.84 (h0) / 0.80 pooled** | **MISSED** — +40%, 60% of the way |
+| meaningful-choices/turn | >= 3.50 | 2.33 (h0) / 2.19 pooled | **2.09 (h0) / 1.84 pooled** | **MISSED and REGRESSED** — see the decomposition below |
+| kill objectives 5-7 turns | 5-7 | Eliminate 3.60, Decapitate 5.05 | **Eliminate 5.30, Decapitate 5.24** | **MET** |
+| nothing above ~10 turns | <= ~10 | max 8.70 (Defend) | h0 max 9.00, h4 max 8.47 (ex a 3-sample Evac cell); **h8 Escort 15.61** | **BREACHED at h8 only** |
+| Defend must not grow | <= 8.9 | 8.70 | **8.78** | **MET** |
+| completion rungs in band ±8 | all | h0/h4/h8 in band | h0/h4/h8 **all in band** | **MET** |
+| fewer than 6 of 8 objectives at 100% (h0) | < 6 | 4 (Escort, Sabotage, Rescue, Evac) | **3** (Hack, Escort, Rescue) | **MET** (the baseline already read 4, not the briefed 6) |
+
+## WHY meaningful-choices/turn CANNOT BE REACHED BY THIS LEVER (new instrumentation)
+`meaningful-choices/turn` is an average over PLAYER TURNS, but `CountMeaningfulChoices` only
+scores a soldier that is alive, able to act, carrying ammo AND holding a legal shot. The ratio
+therefore conflates three different things. X1 added a read-only decomposition
+(`Stats.MissionRec.ActingSoldierTurns / ArmedSoldierTurns / ArmedTurns`, a `[shot-gate]`
+report line and four `decisionRichness` JSON fields; logic-identity vs the pre-instrumentation
+build verified by re-running pinned chunks to identical per-slot records, plus PAIRTEST):
+
+| state | acting/turn | armed/turn | armed-frac | turns-with-a-shot | choices/ARMED | ch/turn |
+|---|---|---|---|---|---|---|
+| R0 h0 | 3.85 | 1.41 | 37% | 62% | 1.71 | 2.40 |
+| SHIP h0 | 3.49 | 1.42 | 41% | 64% | 1.46 | 2.09 |
+| R0 h4 | 3.85 | 1.69 | 44% | 63% | 1.62 | 2.75 |
+| SHIP h4 | 3.31 | 1.41 | 43% | 59% | 1.59 | 2.25 |
+| R0 h8 | 2.88 | 0.82 | 29% | 44% | 1.46 | 1.20 |
+| SHIP h8 | 2.42 | 0.79 | 32% | 43% | 1.42 | 1.12 |
+
+Three things fall out:
+1. **The melt hypothesis is wrong.** Roster size barely moves (3.85 -> 3.49 at h0).
+2. **The lever does what it was supposed to do to CONTACT**: the armed FRACTION rises
+   (37% -> 41% at h0) — more soldiers hold a live target because targets live longer.
+3. **The binding constraint is `choices/ARMED-soldier-turn`, and it is ~1.5**, i.e. the
+   typical armed soldier sees exactly ONE worthwhile target and banks 1-2 points from the
+   post-shot positioning axis. Part (a) of the count (rival TARGETS within 12% of the best
+   shot) contributes almost nothing, because *how many enemies a soldier can see at once* is
+   a **map / pod-geometry** property, not a lethality property. To reach 3.5 from 2.3 the
+   game needs ~2.4 armed soldiers per turn at today's per-soldier richness, or ~1.7 choices
+   per armed soldier at today's contact. **Durability moves neither.** Comparing rungs makes
+   the point cleanly: h4 out-scores h0 (2.90 vs 2.33) purely because heat fields MORE bodies,
+   not tougher ones.
+4. A second-order effect explains the small regression: with kills off the table, `ShotValue`'s
+   stepped finisher bonuses (+14 / +9 / +4) stop firing and target values are separated by the
+   `PriorityWeight` term instead, so rival targets cluster LESS. The instrument is not stale —
+   a kill genuinely is worth more — but the metric is non-monotonic in the HP/damage ratio
+   (h0 ch/turn read 2.33 at T0, 2.75 at T+2, 2.09 at T+3, 2.10 at T+4).
+
+**Recommendation for the next wave:** meaningful-choices/turn is a *contact-density* metric.
+Chase it with simultaneous-target geometry (pod placement / arena sightlines / activation
+overlap), not with lethality, and quote `choices/ARMED-soldier-turn` alongside it so a
+turn-count change can never be mistaken for a decision-quality change.
+
+## PER-OBJECTIVE TURN BUDGET (pooled h0+h4+h8, n=40 campaigns per rung)
+
+| objective | R0 turns | R0 win | SHIP turns | SHIP win | n |
+|---|---|---|---|---|---|
+| Eliminate | 3.60 | 93.7% | **5.30** | 81.0% | 126 |
+| Defend | 8.70 | 78.6% | **8.78** | 85.7% | 77 |
+| Decapitate | 5.05 | 53.3% | **5.24** | 66.7% | 66 |
+| Escort | 8.06 | 80.0% | **10.42** | 70.3% | 37 |
+| Hack | 3.80 | 79.4% | **3.52** | 93.5% | 31 |
+| Sabotage | 3.12 | 92.9% | **3.64** | 76.9% | 26 |
+| Rescue | 4.57 | 78.6% | **3.08** | 76.9% | 13 |
+| Evac | 4.60 | 91.7% | **11.32** | 88.9% | 9 |
+
+Escort's pooled 10.42 is **entirely the apex**: h0 6.89 -> **6.00** and h4 10.30 -> **6.01**
+(both BETTER than baseline — the wave de-dragged Escort at the two rungs players actually
+live at), against h8 7.12 -> **15.61** (n=17). Evac's 11.32 rests on n=9 and is dominated by a
+3-sample h4 cell at 18.30t; h0 Evac reads 9.00 (n=4). Both are recorded, neither is tuned.
+
+## THE ONE HONEST BREACH — Escort at heat 8
+Mechanism: NO QUARTER already adds +1 body, +1 stat and +1 damage from m3 and lifts the AI
+tier; add +3 HP per body and the escort march stops being able to clear its route. The squad
+holds the zone and grinds (acting soldiers/turn falls to 2.42 at h8), the leashed asset waits,
+and the mission runs long. It is the same cell FUL-13 already recorded as "the apex's killer"
+(Escort 29% at h8) — the wave roughly held its win-rate there (41.2% -> 35.3%, n=17 each) but
+doubled its length. NOT tuned, because tuning it would have meant landing an unmeasured change
+after the last measured round. Two concrete candidates for whoever picks it up, in order:
+1. **`SmartEscort`'s downed-squad hole** (`src/Game.Autopilot.cs`): the lone-VIP self-race
+   fallback tests `!Players.Any(p => p.Alive && !p.IsVip)`, but a DOWNED soldier is still
+   `Alive` — so with the whole squad bleeding out the asset neither leashes (LeashVip skips
+   downed anchors) nor races; it hunkers until the timers expire. Bounded (<=3 turns) but pure
+   drag, and it fires exactly in the h8 state. Add `&& !p.Downed`. This is an INSTRUMENT fix,
+   so it invalidates the CRN comparison and needs its own paired re-measure.
+2. **The cold-LZ gate** (`Game.EscortBeaconOk`, Chebyshev 3): the forward beacon is the
+   shipped de-drag and it needs a pocket with no living non-routed hostile within 3 tiles —
+   a condition that got materially rarer when bodies stopped dying to one shot. Note the
+   measured caveat before spending a round on it: BEACON plant counts were **unchanged**
+   between R0 and R2 (7/8 per chunk), so the gate was not the binding constraint at h0.
+
+## VERIFICATION
+- `dotnet build -c Release` — **0 warnings / 0 errors**.
+- Self-test battery, 42 hooks — **all PASS** (`HEATLADDERTEST` needed its NO QUARTER damage
+  pin re-derived through the trim; every other hook was green untouched, including
+  COMBATTEST / AITEST / SNAPTEST / DOWNTEST / MORALETEST / PODTEST / SAVETEST).
+- `SIGHTLINE_PAIRTEST=1` under `xvfb-run` — **PASS** (h0 slot0 and h4 slot1 both byte-MATCH).
+- **Autoplay x10** — no exceptions, no TIMEOUT (4 WIN / 6 LOSE, max 14579 frames vs the
+  20000 cap). Frame-cap hits across all measured chunks: 2 in 240 shipped-state campaigns vs
+  1 in 240 baseline campaigns — same order, no new failure mode.
+- Screenshots taken at m1 and m5: board, HP pips and action bar read normally. `DrawHpPips`
+  already groups at MaxHp > 10, so the wider bodies stay legible with no renderer change.
+
+## HONEST ASSESSMENT — is the fight more tactical?
+Partly, and measurably so. A trade now takes about two hits instead of one and a bit
+(Eliminate 3.60 -> 5.30 turns, +47%, inside the 5-7 budget; shots-per-kill 2.34 -> 3.17);
+the lead flips 36% more often (0.59 -> 0.80/match); Eliminate stopped being a 95% free square
+(-> 81%); and none of it cost the ladder — all three measured rungs sit inside the FUL-13 band,
+with h4 and h8 better-centred than the baseline was. Defend did not grow.
+
+What did NOT happen: the decision COUNT per turn did not rise, and the wave's own new
+instrumentation says why — the number of enemies a soldier can shoot at once is set by map and
+pod geometry, and lethality cannot touch it. Anyone reading `meaningful-choices/turn = 2.09`
+as "the wave made the game flatter" would be reading it wrong; `choices/ARMED-soldier-turn`
+(1.71 -> 1.46 at h0, 1.62 -> 1.59 at h4, 1.46 -> 1.42 at h8) is the honest per-decision read,
+and the armed FRACTION went up at every rung. The fight is longer, tips more, and stopped
+resolving on the alpha strike — but it is not yet *denser*, and density is a different wave.

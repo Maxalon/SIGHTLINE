@@ -199,6 +199,14 @@ docs/screenshot.png    README image
   corner → flank). High ground negates the target's LOW cover. Verified by
   `SIGHTLINE_COMBATTEST`.
 - Each `WeaponKind` has its own `RangeMod` curve + `MaxRange` + clip + crit base.
+- **THE EXCHANGE (RESONANCE X1):** every hostile is built through `Mission.MakeHostile`,
+  which adds `Mission.HostileToughness` (+3 HP) and applies `Mission.HostileDamageTrim`
+  (−1 off both ends of its weapon band, via `Weapon.TrimBaseDamage`, which moves the
+  PRISTINE base so `ApplyMods` can't undo it). That pair sets time-to-kill (~2 hits both
+  ways). Change it only with a measured round per side — enemy-only durability was
+  measured at −30 run completion. `Ai.cs`/`Game.Autopilot.cs` compare `Hp` to
+  `Weapon.Dmg*`, so they re-price themselves; `HEATLADDERTEST` derives its damage pin
+  through the trim.
 - **Six persisted-by-ordinal enums** (Objective/WeaponKind/Perk/WeaponMod/Trait/Boon/
   Faction and friends) are **APPEND-ONLY** — a reorder/removal corrupts saves and fails
   `SIGHTLINE_SAVETEST`. Add new values at the end only.
@@ -284,6 +292,15 @@ predates the exposure repair — reasoning in DEVLOG §FUL-13), Defend's top-run
 recorded), the LOS policy-gap thread closed at N=100 pairs (gap zero — forgiving-by-design
 accepted), intel flood resolved no-drain (the kicker converts to shop spend, the slope survives),
 event EV pricing + the informant dead-buy gate, endless median 6 (band top edge).
+
+PROGRAM RESONANCE is in flight; **WAVE X1 "THE EXCHANGE"** changed the combat model's
+headline ratio: every hostile now carries `Mission.HostileToughness` (+3 HP) and
+`Mission.HostileDamageTrim` (−1 off both ends of its weapon band), both applied in the single
+`Mission.MakeHostile` funnel, so **a trade takes about two hits instead of one** (Eliminate
+3.60 → 5.30 turns, shots-per-kill 2.34 → 3.17, lead-swings 0.59 → 0.80) with every measured
+rung still inside the FUL-13 band (h0 52.5 / h4 27.5 / h8 15.0, n=40 each). The balance report
+gained a `[shot-gate]` decomposition of meaningful-choices/turn — read `choices/ARMED-soldier-turn`
+beside it, never the per-turn average alone. Open residual: Escort drags at heat 8 (15.6t).
 
 **The exhaustive feature list is in [`docs/FEATURES.md`](docs/FEATURES.md).** The build
 history and open/next backlog are in [`docs/ROADMAP.md`](docs/ROADMAP.md) (§OPEN/NEXT

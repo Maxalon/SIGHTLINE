@@ -143,6 +143,20 @@ public class Weapon
     // SCOPE: halve a NEGATIVE range term (long-range penalty); leave the close-range bonus alone.
     float Soften(float v) => (Scoped && v < 0) ? v * 0.5f : v;
 
+    /// PROGRAM RESONANCE X1 "THE EXCHANGE" — trim this weapon's damage band at the BASE, by
+    /// `trim` points off both ends (DmgMin floored at 1, DmgMax never below DmgMin). Used by
+    /// Mission.MakeHostile for the hostile half of the exchange. It moves the PRISTINE base
+    /// values, not just the effective ones, so a later ApplyMods/RefreshWeaponMods pass can
+    /// never resurrect the untrimmed band (enemies carry no mods today; this keeps it true
+    /// if one ever gets one).
+    public void TrimBaseDamage(int trim)
+    {
+        if (trim <= 0) return;
+        _baseDmgMin = System.Math.Max(1, _baseDmgMin - trim);
+        _baseDmgMax = System.Math.Max(_baseDmgMin, _baseDmgMax - trim);
+        DmgMin = _baseDmgMin; DmgMax = _baseDmgMax;
+    }
+
     /// Re-derive the effective stats from base + the installed mods. Idempotent: it always
     /// starts from the captured base values, so calling it repeatedly (or after adding a mod)
     /// is safe. Magnitudes live in WeaponModDef (one source of truth, shared with the shop UI).
