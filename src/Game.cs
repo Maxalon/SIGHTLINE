@@ -5407,6 +5407,9 @@ public partial class Game
                     // the lane costs the PIKEMAN its action EVERY turn — symmetric movement-economy trade.
                     e.OnOverwatch = true; e.OwBrace = true; e.OwFocused = true;
                     e.OwDirX = _aiPlan.BraceDirX; e.OwDirY = _aiPlan.BraceDirY;
+                    // face down the lane: the silhouette's pike IS the direction read — without this
+                    // the figure keeps its walk-in facing and points away from its own cone.
+                    e.Facing = MathF.Atan2(e.OwDirY, e.OwDirX);
                     e.ActionsLeft = 0;
                     Fx.PopText(e.Pos + new Vector2(0, -30), "BRACED", Pal.Foe, 16f);
                     Audio.Play("over");

@@ -1685,16 +1685,22 @@ public partial class Game
     {
         DebugWakeAll();
         var foe = Enemies.FirstOrDefault(e => e.Alive);
-        if (foe == null) return;
+        var near = AlivePlayers().FirstOrDefault(p => !p.IsVip);
+        if (foe == null || near == null) return;
         foe.Cls = "PIKEMAN"; foe.Name = "SARISSA";
         foe.Weapon = Weapon.Make(WeaponKind.Smg); foe.Ammo = foe.Weapon.Clip;   // the cone IS the pike (MaxRange 10)
-        Unit near = null; int nd = int.MaxValue;
-        foreach (var p in AlivePlayers())
-        { int d = Util.ChebyDist(foe.X, foe.Y, p.X, p.Y); if (d < nd) { nd = d; near = p; } }
+        // stage the plant ~6 tiles from a soldier so the cone visibly covers the squad's lane
+        // (the WAVEBANNER/BRACETIP free-staging precedent — screenshot readability, not gameplay)
+        for (int dx = 6; dx >= 3; dx--)
+        {
+            int tx = near.X + dx, ty = near.Y;
+            if (Grid.InBounds(tx, ty) && Grid.IsFloor(tx, ty) && !IsOccupiedByOther(tx, ty, foe))
+            { foe.X = tx; foe.Y = ty; foe.SyncPos(); break; }
+        }
         foe.OnOverwatch = true; foe.OwBrace = true; foe.OwFocused = true;
-        foe.OwDirX = near != null ? Math.Sign(near.X - foe.X) : -1;
-        foe.OwDirY = near != null ? Math.Sign(near.Y - foe.Y) : 0;
+        foe.OwDirX = Math.Sign(near.X - foe.X); foe.OwDirY = Math.Sign(near.Y - foe.Y);
         if (foe.OwDirX == 0 && foe.OwDirY == 0) foe.OwDirX = -1;               // degenerate: face the squad side
+        foe.Facing = MathF.Atan2(foe.OwDirY, foe.OwDirX);                      // pike points down the lane (mirrors the exec)
     }
 
     /// SIGHTLINE_MORALETEST — UNDERTOW W3: enemy pod MORALE / ROUT. On a controlled scene asserts:
