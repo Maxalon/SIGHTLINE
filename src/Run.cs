@@ -520,7 +520,38 @@ public class Run
             placed++;
         }
 
-        foreach (var node in Map) node.Card = CardForNode(node);
+        // FUL-9 THE DECK — column-constrained objective plan, hashed off (seed, column, row).
+        // Zero rng draws (the generator stream above/below stays byte-identical, so map shape/
+        // kinds/edges/factions round-trip against pre-FUL-9 saves), and the guarantees are
+        // COLUMN-scoped so they hold on EVERY route regardless of edge wiring (a route visits
+        // exactly one node per column):
+        //   * ANCHOR column — a hashed EVENT-FREE mid column; every node there deals Defend
+        //     (leaned 80%) or Rescue, so every route fights >=1 hold/extract op (Defend was
+        //     absent from whole 20-run batches under the old n+row rotation).
+        //   * ESCORT node — Escort exists on EXACTLY one hashed node per map (zero-Escort maps
+        //     no longer occur), never in the anchor column, so a route sees <=1 VIP drag.
+        //   * START stays Eliminate (>=1 Eliminate on every route + the honest FIRST OP label)
+        //     and BOSS stays Decapitate; everything else deals from an Escort-free pool with a
+        //     hashed per-column offset + row, keeping a column's branch choices distinct ops.
+        int anchorCol, escortCol, escortRow;
+        {
+            var evFree = new List<int>();   // event-free mid columns (anchor candidates)
+            var allMid = new List<int>();   // every mid column (escort candidates)
+            for (int c = 1; c < cols - 1; c++)
+            {
+                allMid.Add(c);
+                if (!Map.Exists(x => x.Col == c && x.Kind == NodeKind.Event)) evFree.Add(c);
+            }
+            // evFree can't be empty (<=2 event nodes touch <=2 of the >=4 mid columns); the
+            // fallback is defensive only — it would weaken the anchor guarantee, never crash.
+            if (evFree.Count == 0) evFree.AddRange(allMid);
+            anchorCol = evFree[(int)(Util.Hash3(seed, 3, 1) % (uint)evFree.Count)];
+            allMid.Remove(anchorCol);
+            escortCol = allMid[(int)(Util.Hash3(seed, 3, 2) % (uint)allMid.Count)];
+            var frows = Map.FindAll(x => x.Col == escortCol && x.Kind != NodeKind.Event);
+            escortRow = frows[(int)(Util.Hash3(seed, 3, 3) % (uint)frows.Count)].Row;
+        }
+        foreach (var node in Map) node.Card = CardForNode(node, seed, anchorCol, escortCol, escortRow);
 
         // ROUTING ECONOMY: per-node Intel reward. Base scales with depth (the rising difficulty),
         // then SUPPLY and ELITE pay premiums so the route is a real trade-off -- a SUPPLY node is the
@@ -615,12 +646,13 @@ public class Run
 
     /// Derive a deployment card from a node's kind: STANDARD combat, a tougher ELITE
     /// (+force, bonus perk), a lighter SUPPLY (-force, full heal), or the capstone
-    /// BOSS (always Eliminate so the WARLORD must actually fall). Objective varies
-    /// per row so branching nodes in a column offer different ops.
-    MissionCard CardForNode(MissionNode node)
+    /// BOSS (always Decapitate so the WARLORD must actually fall). FUL-9: fight objectives
+    /// come from the hashed column-constrained plan (see GenerateMap) instead of the old
+    /// ObjectiveFor(n+row) rotation — that rotation stays the SKIRMISH/offer fallback path.
+    MissionCard CardForNode(MissionNode node, int seed, int anchorCol, int escortCol, int escortRow)
     {
         int n = node.Mission;
-        Objective obj = ObjectiveFor(n + node.Row);
+        Objective obj = DeckObjective(seed, node.Col, node.Row, anchorCol, escortCol, escortRow);
         switch (node.Kind)
         {
             case NodeKind.Start:
@@ -644,6 +676,30 @@ public class Run
                 return new MissionCard { Objective = obj, ModName = "STANDARD", Reward = RewardKind.None, RewardText = "-" };
         }
     }
+
+    /// FUL-9: the hashed column-constrained objective for a fight node (plan in GenerateMap).
+    /// Pure in (seed, col, row) + the plan columns — no draws, so it round-trips on load.
+    static Objective DeckObjective(int seed, int col, int row, int anchorCol, int escortCol, int escortRow)
+    {
+        // anchor column: Defend leaned 80/20 over Rescue — the lean (not 50/50) is what lifts
+        // Defend onto >=80% of PLAYED routes: early deaths truncate routes before the anchor,
+        // so the paired batch read 75% at a 75 lean; 80 + the free pool's 1-in-7 shots clears it.
+        if (col == anchorCol)
+            return Util.Hash3(seed, 7, col * 8 + row) % 100 < 80 ? Objective.Defend : Objective.Rescue;
+        if (col == escortCol && row == escortRow) return Objective.Escort;
+        int off = (int)(Util.Hash3(seed, 11, col) % (uint)FreePool.Length);
+        return FreePool[(off + row) % FreePool.Length];   // rows<=3 < pool length -> siblings distinct
+    }
+
+    // Deliberately Escort-free (the <=1-per-route cap lives in the single escort node) and
+    // Defend/Rescue-inclusive (the anchor guarantees one per route; the pool keeps both in
+    // general rotation). Eliminate + Decapitate join the mid-run mix for the first time —
+    // the old n+row rotation could only ever deal indices 1..6 to a mid node.
+    static readonly Objective[] FreePool =
+    {
+        Objective.Eliminate, Objective.Hack, Objective.Evac, Objective.Sabotage,
+        Objective.Rescue, Objective.Defend, Objective.Decapitate,
+    };
 
     /// Intel paid for clearing a node (the routing economy). Base tracks the old flat grant's
     /// depth term (10 + 4*mission) so the overall economy is unchanged on a STANDARD route; SUPPLY

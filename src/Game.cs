@@ -1336,6 +1336,9 @@ public partial class Game
         (int x, int y)? reserve = HasTerminal ? Terminal
             : (Objective == Objective.Rescue ? (Grid.W / 2, Grid.H / 2) : ((int, int)?)null);
         Grid.ClearHazards();              // wipe last mission's fire/barrels before terrain is rebuilt
+        // FUL-9: publish the run seed for the arena deck (pure derivation — Mission.PickLayout
+        // deals draw n of a MapSeed-keyed no-repeat deck; all five mode entries route through here)
+        Mission.DeckSeed = _run != null ? _run.MapSeed : 0;
         Mission.Build(Grid, Players, Enemies, n, EvacZone, reserve,
                       enemyDelta, statDelta, HasSabotage ? SabotageSites : null, heatDmg,
                       Objective == Objective.Defend);   // FUL-4: trim the opener — waves are the force

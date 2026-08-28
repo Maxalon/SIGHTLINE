@@ -53,6 +53,15 @@ public static class Program
             return;
         }
 
+        // FUL-9: SIGHTLINE_EXPOSURETEST=1 : 200-seed content-exposure histogram — the per-route
+        // objective invariant (routes ENUMERATED, not sampled), the no-repeat arena deck, and
+        // all-8-objectives + all-35-arenas reachability across seeds. Pure derivation. No window.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_EXPOSURETEST") == "1")
+        {
+            Console.WriteLine(Game.ExposureSelfTest());
+            return;
+        }
+
         // SIGHTLINE_DRAFTTEST=1 : run-opening squad-draft pool/seat/harness-bypass check (Wave 3). No window.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_DRAFTTEST") == "1")
         {
