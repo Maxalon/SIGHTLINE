@@ -2673,6 +2673,388 @@ own tone" shape as `st_lose` did (tail -148.9 dBFS, well inside budget) and was 
 left alone rather than re-voiced blind. No perceptual weighting (LUFS/ITU-R BS.1770) — the
 budget is in dBFS RMS, which under-weights the low-heavy cues; a real loudness model is the
 obvious next instrument.
+## PROGRAM RESONANCE — WAVE T2: "READ THE DANGER" (incoming-fire forecast)
+
+**The finding.** SIGHTLINE's information model was excellent on offence and absent on defence.
+Everything about *the shot you take* was surfaced (banded odds, graze floor, streak-breaker,
+FLANKED badges, combat log, status pills, role rings, enemy-ID hovers). Everything about *the
+fire you stand in* was a single boolean: `Game.ComputeThreat` marked a reachable tile only when
+some active enemy had LoS **and** the tile's cover level was exactly 0, and `Renderer.DrawThreat`
+drew one small identical red tick. So a tile covered from one gun but enfiladed by four others
+read **completely clean**, and the player could not see how many guns bore on a tile, how hard
+they hit, whether they would be flanked there, or which archetype would do it. Enemy intent was
+telegraphed only ~0.5 s before the unit acted, during the enemy turn — drama, zero planning value.
+
+**What shipped.**
+
+* **`ThreatCell` (src/Game.cs)** — the `bool[,]` became a per-tile struct grid: `Guns` (how many
+  live/active/armed hostiles can actually shoot you there), `BestHit`, `ExpDmg` (post-armor
+  expected damage if every bearing gun fires once), `Flanked`, `Exposed` (the pre-T2 bool, kept),
+  `Watched` (a live overwatch / braced PIKEMAN reaction lane), `WorstCls`, and a `Tier` 0-3.
+* **Truthfulness by construction.** Every number comes from `Combat.ComputeOdds` with the mover
+  TEMPORARILY placed on the candidate tile — the exact call `Resolve` would make — gated by the
+  same range + commanding-LoS test as `Game.CanTarget`. The forecast also models the two defensive
+  states that *moving* clears (`Hunkered` drops, `MovedAfterFire` sets), so a tile you must walk to
+  is not priced as if you were still dug in. The mover's real X/Y/Hunkered/MovedAfterFire are
+  restored in a `finally` and asserted untouched by the self-test.
+* **A signature cache.** `ComputeThreat` runs off `RecomputeMoveCost`, which fires EVERY frame of
+  the player turn. A 64-bit signature over selection, both rosters' positions/state, the mutable
+  terrain layers and the pref means a real change always misses and nothing else ever does.
+* **Graded danger meter (src/Renderer.cs `DrawThreat`).** 1-3 bottom-aligned bars of rising height
+  in the tile's top-right corner, read like signal strength. **Count** = guns (shape-redundant, so
+  it survives greyscale and `SIGHTLINE_CB=1`); **intensity** = `BestHit` heat, so a tile in cover
+  from two distant rifles sits at the floor and a tile three flankers can hit at 90% burns. A FLANK
+  adds a foot-rule the bars stand on. Static alpha — no `Raylib.GetTime` pulse (standing terrain
+  information, not an alarm; also one fewer clock read in the renderer).
+* **Noise floor.** The overlay skips the ambient case (one covered gun, `BestHit < 50`). It still
+  draws on exactly the pre-T2 trigger (a gun with a clean shot), plus 2+ guns and good covered
+  shots. The hover card reports the suppressed case in full, so nothing is hidden from a player
+  who asks — it is only kept off the board.
+* **Hover card (src/Hud.cs `DrawThreatCard`).** "INCOMING FIRE · 4 hostiles bear · best 95% ·
+  ~12 dmg", plus `worst gun: REAVER — BERSERKER`, a FLANKED line when the tile is a flank, and an
+  OVERWATCH LANE line. It says NOTHING on a clean tile (the absent meter already says that) and
+  does not print the modal EXPOSED state — a panel that pops on all ~130 reachable tiles with a
+  line every player reads on every tile is chrome, not information.
+  Echoes the board's meter glyph on its title row (vocabulary learned without a legend). Yields to
+  the two cards that already own the hover (shot tooltip, enemy-ID card) and only ever speaks about
+  an empty reachable tile.
+* **Danger-tinted path preview.** The connecting line takes the WORST tier along the route (a safe
+  destination reached through a crossfire is no longer free); each step node is drawn in ITS OWN
+  tier and hot steps become the meter's triangle glyph, so the exact hot stretch reads without hue.
+* **Three-state pref.** The pause toggle now cycles OFF / SIMPLE / FULL. SIMPLE restores the
+  pre-T2 minimal read for players who want the quiet board back: one small pulsing tick on any
+  tile where a gun has a clean shot, same glyph, same alpha, same pulse. Not bit-for-bit identical
+  to pre-T2 — the trigger is now `ComputeOdds`'s `CoverLevel == 0`, so it also respects high-ground
+  see-over, DRONE cover-ignoring and SHIELD arcs, which the old raw `GetCover` test missed.
+
+**Verification.** `dotnet build -c Release` 0/0. New `SIGHTLINE_THREATTEST=1` (10 assertion
+groups: gun count; BestHit/WorstCls/ExpDmg pinned against a hand-recomputed `ComputeOdds` pass;
+the pre-T2 blind spot — a tile in cover from EVERY bearing gun still reports `Guns==2`; cover
+level + flank ANGLE; out-of-range / no-LoS / dormant / dry / dead exclusion, each proven to bite;
+overwatch + focused-cone lanes; unreachable-tile skip; caged captive; mover non-mutation; the
+post-move HUNKER model; cache hit/miss) → **PASS**. `COMBATTEST / SAVETEST / AITEST / OWTEST /
+ITEMTEST` PASS. `PAIRTEST` **PASS** (both legs MATCH). Autoplay x5 clean, no exceptions, no
+TIMEOUT. `SIGHTLINE_BALANCE=10` on branch vs merge-base 2dec210 — `runs=20 missions=81` on both (asserted,
+not a zero-data batch), and a full diff of the two reports shows **only wall-clock timings and the
+output path** differing. Every measured statistic — per-heat win rates, per-objective tables, perk/
+purchase/proc/event telemetry, decision richness, policy gap — is byte-identical.
+
+**Perf.** Measured, not estimated. Real board (mission 2, 135 reachable tiles, 6 armed hostiles):
+**1.06 ms per rebuild**, and rebuilds now happen only on a real change instead of 60x/s. Smaller
+real selections measure 0.28-0.53 ms (52-86 reachable tiles, 3-6 guns). Synthetic worst case
+(all 198 tiles reachable x 8 guns): **2.0 ms**. Against the tech-lead's baseline (total game logic
+0.007 ms median / 0.34 ms p99 per frame, `RecomputeMoveCost` 0.106-0.242 ms EVERY frame), the
+cached forecast costs less per second than the uncached pre-T2 bool grid did.
+
+**Honesty about measurement.** This is a **read-side-only** change: no combat constant, no AI
+weight, no spawn table moved. It should make the game easier for a *human*, but the balance bot's
+policy does not consult the forecast, so **the flywheel cannot see the improvement** — and a
+byte-identical `SIGHTLINE_BALANCE` batch versus base is the correct expected result and the proof
+that gameplay was not disturbed. No win-rate claim is made or implied for this wave.
+
+**New harness hooks.** `SIGHTLINE_THREATTEST=1` (assertions + perf), `SIGHTLINE_THREATSHOT=1`
+(stages a fight, parks the cursor on the hottest reachable tile, prints `HARNESS THREATPERF`),
+`SIGHTLINE_THREATPREF=0|1|2` (pin off/simple/full for A/B captures), and `SIGHTLINE_SEED=<n>`
+(pin `Util.Rng` so two harness runs stage the same arena — note that frames are still NOT
+byte-identical: the renderer reads the wall clock in ~50 places; CLAUDE.md's byte-identical
+screenshot claim is false and was verified false on this tree).
+
+**Own squint verdict (both palettes inspected).** The card and the tinted path are unambiguous
+wins — the pre-T2 capture shows a benign gold path running straight through four fields of fire.
+The meter field is roughly as DENSE as the pre-T2 tick field (on an open arena with six alerted
+hostiles nearly every reachable tile already carried a tick), but each mark now carries a count
+and a heat instead of being identical, and the calm corners of the board are visibly calm. So:
+not busier than before, materially more informative. The first draft (1-3 stacked triangles,
+count-driven alpha) DID read as uniform speckle and was rejected on my own capture — the meter
+glyph and the heat channel are the fix.
+
+**Deliberately left for a later wave.** (a) No aggregated "danger heat-map" wash — the per-tile
+meter is the read; a full-board gradient is a bigger information-design decision. (b) Enemy INTENT
+is still telegraphed only during the enemy beat; a player-turn "who is likely to shoot whom"
+forecast is a separate wave. (c) The forecast covers direct fire only — grenades, SIEGE zones and
+board fire keep their existing dedicated overlays and are not folded into `ExpDmg`. (d) Crits and
+the graze floor are not modelled in `ExpDmg` (first-order hit% x post-armor average, labelled
+"expected"). (e) The bot still uses its own `TileExposure` weighting; unifying it with `ThreatCell`
+would change bot policy and therefore the ladder, so it was left out of a read-side wave.
+## PROGRAM RESONANCE — WAVE V1 "GROUND AND TYPE" (visual foundation)
+
+**Goal.** The two cheapest, highest-finish visual defects in the tree: the board didn't have a
+floor, and the type didn't have an atlas. Nothing gameplay-coupled — the whole wave is
+presentation plus one genuine ship-blocker.
+
+### A — "give the board a floor"
+
+`Renderer.DrawBoard` painted the biome floor and its noise grain only on `TileType.Floor` tiles.
+Under every cover block sat bare board backing (`Pal.RGBA(7,10,14)`), and since the block is
+drawn with `inset = 5f`, that left a **5px hard-black gutter around all ~45 cover blocks on
+every map**. Squint at a pre-fix frame and the loudest thing on the board is a grid of black
+holes, not the squad. Both `continue`s are gone; the ground plane is continuous and cover sits
+on it.
+
+The "drop shadow" under cover was a fixed `+3,+4` offset — the same in every direction, i.e. an
+emboss. `Renderer.LightOrigin` (board-fraction `0.28, 0.10`) and `FloorLight` had declared a key
+light since UNDERTOW W7 that **nothing cast from**. New `ShadowVec(g,x,y,len)` returns the
+on-screen fall direction for a tile — away from the light, with a `+0.34` downward bias so a
+block at the light's own foot still drops a short shadow (the key is elevated, not on the deck)
+— scaled `Clamp(0.42 + dist*0.85, 0.42, 1.30)` so grazing corners throw longer. `CastShadow`
+sweeps the footprint along that vector in 5 overlapping steps, so the pool is darkest at contact
+and feathers to the tip. Length `high ? 16 : 8`. Same treatment on the plateau front-wall
+contact shadow (`DrawElevation`). Both are pure functions of tile coords + frozen constants — no
+new `Raylib.GetTime()` reads.
+
+One follow-on the research pass didn't call: the plateau **side wall** was flat `Pal.HighSide`
+(14,19,26), effectively black. That was invisible while the board was full of black gutters; on
+a continuous lit floor it read as a hole punched in the ground. It now takes the biome hue plus
+the key light, kept clearly darker than the top face so the step still reads as a step.
+
+### B — "type that reads" (and a live distribution bug)
+
+**Two atlases.** One 64px NotoMono atlas served every size from 11px to 92px. 11–14px body text
+is most of the words in the game, and minifying a 64px atlas ~5× with bilinear filtering and no
+mip chain is exactly the case that turns type into grey mush. The proof is not subjective: in
+the WAR ROOM hall of fame, the 11px result column rendered **"WON" as "NON"**. Now `Cfg.FontUi`
+bakes at 20px and serves text ≤ `Cfg.UiFontMax` (18px), `Cfg.Font` keeps 64px above that, both
+get `GenTextureMipmaps` + `TextureFilter.Trilinear`, and all 280 `DrawTextEx` + every
+`MeasureTextEx` call site route through `Cfg.Text` / `Cfg.Measure` so the atlas choice is made
+in exactly one place (`Cfg.FontFor`).
+
+Hud.cs's 10/11px sizes were raised to a 12px floor. **Gotcha worth carrying:** several call
+sites *measure* through a helper and *draw* separately — `Clip(desc, 11, w)` then
+`Cfg.Text(line, …, 12, …)`. Bumping only the draw size silently wraps at 11 and paints at 12,
+which overflowed the shop descriptions. Every `Clip` / `WrapText` / `WrapLines` / `CenterText`
+size argument was bumped in the same pass; a scan for measure/draw mismatches on the same
+statement now returns nothing.
+
+**The ship-blocker.** Asset paths resolved against the **current working directory**. Evidence,
+from a real `dotnet publish -c Release -r linux-x64 --self-contained -p:PublishSingleFile=true
+-p:DebugType=none`:
+
+```
+# base commit, run from /tmp/foreign_base
+FONT: NotoMono-Regular not found, falling back to default
+# base commit, run from inside the publish dir
+FONT: NotoMono-Regular loaded (glyph atlas ok)
+# this wave, run from /tmp/foreign_cwd
+FONT: NotoMono-Regular 64px atlas loaded (/tmp/pub_v1/assets/NotoMono-Regular.ttf)
+FONT: NotoMono-Regular 20px UI atlas loaded
+FONT: ChakraPetch-Bold display atlas loaded
+```
+
+In the fallback the intro rule "2 actions per soldier — firing is 1 action" renders the em-dash
+as `?`, in Raylib's built-in bitmap face. New `Cfg.AssetPath(rel)` resolves against
+`AppContext.BaseDirectory` and falls back to cwd for dev; the font and the (latent, identical)
+audio drop-in paths in `Audio.cs` both use it. Note for whoever publishes: **never**
+`-p:PublishTrimmed=true` — it silently destroys save/load.
+
+### C — a display voice
+
+`assets/ChakraPetch-Bold.ttf`, 78,384 bytes, committed with its licence text alongside, mirroring
+how `assets/NotoMono-Regular.ttf` + `NotoMono-LICENSE.txt` are already handled (both added to
+`Sightline.csproj` with `CopyToOutputDirectory="PreserveNewest"`).
+
+**Licensing, stated accurately: this is SIL Open Font License 1.1, which is *not* CC0.** It is
+zero-cost, zero-royalty and zero-legal-risk for a bundled game font, but it requires shipping the
+licence text and forbids selling the font on its own. That is the same footing the repo is
+already on with NotoMono. Provenance verified three independent ways before committing: fetched
+from `google/fonts` `ofl/chakrapetch/ChakraPetch-Bold.ttf` (HTTP 200, 78,384 bytes,
+sha256 `65fbf76d…78a0`); the directory's `METADATA.pb` reads `license: "OFL"`; and the font's own
+name table IDs 13/14 read "SIL Open Font License, Version 1.1" / `http://scripts.sil.org/OFL`.
+Every codepoint the game bakes (em-dash, en-dash, bullet, ellipsis, ×, ·, the quote pairs) was
+confirmed present in the cmap.
+
+Baked at 96px and routed to titles ≥ 24px **only**, via `Cfg.TitleText` / `Cfg.TitleMeasure`:
+the SIGHTLINE wordmark, VICTORY / RUN OVER, WAR ROOM, FIELD MANUAL, SKIRMISH, ASSEMBLE STRIKE
+TEAM, MISSION n COMPLETE, REQUISITION, PROMOTION, SPECIALIZE, FIELD DOCTRINE, event titles,
+PAUSED. Numerals and data stay on NotoMono — it is a good data face and mixing them is the
+point. The corner-bracket rects at the wordmark and the end card derive from the *measured*
+title width, so they re-fit the proportional face with no hand-tuning (confirmed in captures).
+
+### D — one live defect
+
+The requisition card drew its title with no width limit against a right-aligned price:
+"COUNTER-PREP: SYNDICATE" + "12 INTEL" rendered as `SYNDICATE2 INTEL`. The card now measures the
+price first, reserves that column, and picks the largest title size in 18→14 that fits (new
+`Hud.FitSize`); `Clip` remains only as the backstop, so in practice the whole name survives
+rather than being ellipsised. `SIGHTLINE_PREP` now accepts a faction name
+(`SIGHTLINE_PREP=syndicate|legion|wardens`, default Wardens as before) so the longest title is
+shootable on demand: `SIGHTLINE_SHOT=60 SIGHTLINE_PREP=syndicate`.
+
+### Verified at the close (wt-v1)
+
+- `dotnet build -c Release` → **0 warnings / 0 errors**.
+- **Full self-test battery, 39 hooks** (every `SIGHTLINE_*TEST` in `src/Program.cs`) → all PASS,
+  rc=0, no exceptions.
+- `SIGHTLINE_PAIRTEST=1` → **PASS** (legA/legB MATCH).
+- `SIGHTLINE_BALANCE=10` under xvfb on this branch vs. a baseline worktree at `2dec210`:
+  `runs=20 missions=81` on both, and the two `balance.json` aggregates are **identical** field
+  for field (wall-time excluded). Balance is untouched, as a visual wave should be.
+- Autoplay ×5: LOSE m1 / WIN m6 / LOSE m3 / WIN m6 / WIN m6 — **zero exceptions, zero TIMEOUT**.
+- Captures inspected by eye: 8 biomes before/after (fixed `SIGHTLINE_MAP` per biome so terrain is
+  comparable), WAR ROOM, FIELD MANUAL, VICTORY, intro, shop, prep/SYNDICATE, barracks, draft,
+  event, tooltip, skirmish, plus `SIGHTLINE_CB=1` on both a board and the WAR ROOM.
+
+**Measurement-flag note carried forward:** `SIGHTLINE_BALANCE` needs `xvfb-run`; without a
+display it prints `runs=0 / (no data)`, still claims "N matches" and exits 139. Always assert the
+`runs=` line. And run every harness shell with `XDG_CONFIG_HOME` and `SIGHTLINE_BALANCE_JSON`
+pointed inside your own worktree — several self-tests stash and restore the real
+`~/.config/Sightline`, and concurrent agents will corrupt each other's restore.
+
+**Left for a later wave, deliberately:** `Renderer.cs` still draws board labels at 10/11px (the
+two-atlas fix already sharpens them a great deal; raising tile-constrained text needs its own
+layout pass, and other waves own parts of that file). `DrawBiomeSignature` stays floor-tile-only
+so its emissive cues don't creep around cover bases. The plain-`SIGHTLINE_SHOT` non-determinism
+(45 `Raylib.GetTime()` reads in Renderer.cs, 11 in Hud.cs, a clock-seeded `Util.Rng`) is
+chartered elsewhere and was not touched; this wave added no new `GetTime()` reads.
+# PROGRAM "RESONANCE" — WAVE T1 · BASIC TRAINING
+
+**Goal.** Close the onboarding over-claim. `docs/DESIGN.md` §4 graded Onboarding
+**"Addressed (W11)"**. A research pass on this tree found that grade to be false, and the
+finding re-confirmed at the start of this wave:
+
+- `Game.TutPrompts` was a **5-card callout strip**, mission 1 only, once per profile
+  (`Display.TutorialSeen`): CONCEAL → MOVE → OVERWATCH → FIRE → wrap-up. **Three of ~14
+  verbs taught.**
+- During tutorial card **1 of 5** the action bar already showed **twelve** verbs (BRACE,
+  HUNKER, RELOAD, FIRE, GRENADE, GRAPPLE, FLASH, SHOVE, DRAG, VAULT, OVERWATCH, FOCUS) plus
+  contextual STABILIZE/HACK/PLANT/BEACON/EXTRACT. FUL-12 **dimmed** the eleven non-lesson
+  buttons to 45%. Dimming is not staging — every verb was still introduced, all at once, by
+  being present.
+- `Hud.DrawIntro` opened with a **six-bullet rules wall** — the exact artefact §3.G says not
+  to ship — in front of a player who has not taken a turn.
+- The one good counter-example, the one-shot BRACE field tip (FUL-12), was exactly the right
+  pattern used exactly once.
+
+## What shipped
+
+**A. TRAINING OP** — `GameMode.Training` (appended; GameMode is not persisted anywhere,
+verified against SaveGame/Run/Stats). `BeginTraining()` in `src/Game.Modes.cs`; entered from
+the intro (button / key **N**, always present, green-plated until the profile has finished it
+once), restarted in-drill with **[P]** or from the drill's end card.
+
+- Board: `Maps.TrainingArena` + `Mission.BuildTraining`. **The arena is deliberately NOT
+  appended to `Maps.Layouts`** — that array's length feeds `DailyArena(seed) % Layouts.Length`
+  and the FUL-9 no-repeat deck, so appending would have silently moved the whole measured
+  campaign. `SIGHTLINE_EXPOSURETEST` still reports **35 arenas** after this wave.
+- Script: two 12-HP recruits (ASSAULT + SHARPSHOOTER, so GRAPPLE and MARK are both on the
+  board) vs **four dormant aim-45 targets** in two pods. Low-cost failure by construction, and
+  restartable in one keystroke.
+- Lessons (`Game.TrainLessons`, 8 well-ordered problems, each a thing to DO):
+  MOVE → COVER → FLANK → FIRE → OVERWATCH → GRENADE → ABILITY → CLEAR. The arena was authored
+  *around* the lessons: low cover two steps from the deploy tiles (COVER is solvable on move
+  one), the front pair at (12,4)/(12,6) behind high cover on their **west** side only — so the
+  FLANK lesson has one clean answer, walking the open column x=12 to (12,1)/(12,9), which are
+  themselves beside high cover. Every lesson carries a **turn-budget patience fallback** so a
+  player who solves it another way is never stranded.
+- Non-persistence: every persistence seam in the codebase is already keyed on
+  `Mode == GameMode.Campaign` or `DailyMode`, so Training writes nothing **by construction**.
+  TUTTEST asserts that rather than trusting it: it snapshots save.json + meta.json, plays a
+  live (non-NoPersist) drill to a win, and compares. The only profile flag the drill may touch
+  is `Display.TrainingSeen`, on completion.
+- The drill's biome is pinned (`TrainingMapSeed = 8` → STEEL) so the teaching frame is fixed
+  and cool-neutral — nothing in the terrain competes with the amber objective accent or the
+  red threat accent the lessons point at (DESIGN §3.H).
+- Implementation seam: `SetupMission` gains **one** `if (Mode == GameMode.Training)` after
+  `Mission.Build`, exactly mirroring how LAST STAND swaps its force in. Everything downstream
+  (anim queue reset, BeginTurn, combat roster, concealment, FX) is reused unchanged.
+
+**B. STAGED VERBS** — `Game.OnboardingActive` / `VerbStagingActive` / `VerbRevealed`, applied
+as one contiguous block at the **end** of the spec-collection sequence in
+`Hud.DrawActionButtons` (that method is the repo's hottest merge-conflict range; the diff is
+one `RemoveAll` + one `Add`).
+
+- During the drill and campaign **mission 1** the bar carries only what has been taught, and
+  grows as each lesson opens (`TrainLessons[].Reveal` / `TutReveal[]`, index-aligned with
+  `TutPrompts` through the named `TutStep*` constants).
+- RELOAD is revealed **with** FIRE: a staged-away RELOAD could strand a dry soldier.
+- **SHOW ALL** ([**V**], persisted in `Display.ShowAllVerbs`) is always on the bar while
+  onboarding runs and bypasses staging in both directions — a returning player is never locked
+  out of a verb they know.
+- STABILIZE is **exempt**: it only surfaces at all while a squadmate is bleeding out, and
+  hiding the answer to that is the failure the escape exists to prevent.
+- Staging is **capped**: from mission 2, and in every other mode, the bar is always whole.
+- The FUL-12 lesson-focus dim is left exactly as it was — with staging on it now dims a
+  one-or-two-button bar toward the lesson verb, which is the behaviour it always wanted.
+
+**C. JUST-IN-TIME FIELD TIPS** — `Game.FieldTips`, 10 cards, replacing `UpdateBraceCallout`
+with `UpdateFieldTips`. Each fires **once per profile**, the first time its precondition is
+actually true in play:
+
+| bit | prio | tip | precondition |
+|-----|------|-----|--------------|
+| 0 | 2 | BRACE | a live (Active) hostile — FUL-12's original |
+| 1 | 0 | STABILIZE | an ally is DOWN |
+| 2 | 1 | RELOAD | a soldier is dry with a live threat |
+| 3 | 3 | GRENADE | a soldier with a grenade sees an Active foe **in cover** |
+| 4 | 4 | HUNKER | a soldier with actions left stands in the open, seen by an Active foe |
+| 5 | 5 | SHOVE | `CanShove` — an enemy is adjacent |
+| 6 | 6 | VAULT | `CanVault` with a live threat |
+| 7 | 7 | DRAG | `CanDrag` with a live threat |
+| 8 | 8 | FOCUS | the player has armed a plain overwatch and 2+ Active foes are alive |
+| 9 | 9 | ITEM | a soldier holds a charged utility item with a live threat |
+
+`Prio` (not table order) resolves simultaneous candidates, so a bleeding-out ally outranks a
+nicety. Seen-flags are a **bitmask** (`Display.TipsSeen`) — one new DTO field for the whole
+table — and FUL-12's `BraceTipSeen` bool migrates into **bit 0** on load and is still written
+from bit 0 on save, so the bridge holds in both directions. Interactive-only: under `NoPersist`
+the whole scan returns before touching anything unless `SIGHTLINE_TIP=<bit>` (or the legacy
+`SIGHTLINE_BRACETIP=1`) stages one. Tips never fire *during* a drill lesson or a mission-1
+lesson card — the card owns the slot.
+
+**D. The intro** — the six-bullet rules wall is one line ("One squad. 6 escalating missions.
+They carry it all."), kept short on purpose so it clears the HEAT/ASCENSION panel that occupies
+the right ~28% of that row. The rail motif survives as two diamond end-caps.
+
+## Verification
+
+- `dotnet build -c Release` → **0 warnings / 0 errors**.
+- **`SIGHTLINE_TUTTEST=1` → PASS.** New hook. Five parts: (1) arena rows/cols, deploy+foe seats
+  are floor and collision-free, every foe walk-reachable, the lesson-critical tiles exist;
+  (2) the drill is driven lesson by lesson — each predicate asserted **false → true**, then
+  `UpdateTraining` ticked twice to prove it advances **exactly one** step (reachable AND fires
+  once), plus the terminal lesson never self-advances and the patience fallback works;
+  (3) staging — monotonic reveals, the FIRE lesson reveals shoot+reload and does NOT leak
+  grenade, the terminal lesson turns staging off, the SHOW ALL escape round-trips,
+  **mission 2 is never staged**, and the load-bearing `TutStep*` constants + `TutPrompts`
+  length + `TutReveal` alignment are pinned (through an array, so the check isn't const-folded);
+  (4) tip bits/prios/codes unique and in range, bit 0 is BRACE, and every predicate is driven
+  to true on a real board (GRENADE by sweeping every floor tile — a stronger claim than one
+  hand-picked stance, and it survives an arena edit); (5) seen-flags round-trip through real
+  JSON, the mask is precise (an unseen bit stays unseen), a legacy `{"BraceTipSeen":true}` file
+  folds into bit 0, an empty file defaults everything to unseen, and a **live** drill played to
+  a win leaves save.json and meta.json byte-identical. The real display.json is stashed and
+  restored. (The test earned its keep immediately: its first run found four genuine bugs.)
+- **Full battery PASS** (Release binary, isolated `XDG_CONFIG_HOME`): TUTTEST, DKTEST,
+  RESCUETEST, STAGGERTEST, MORALETEST, BEACONTEST, COMBATTEST, SAVETEST, AITEST, ITEMTEST,
+  STATUSTEST, COVERTEST, TRAITTEST, WOUNDTEST, CDTEST, FIELDTEST, SIEGETEST, EVENTTEST,
+  VETTEST, OWTEST, SCARTEST, CONTRACTTEST, SHOVETEST, CONCEALTEST, HAZARDTEST, BENCHTEST,
+  DRAFTTEST, METATEST, CODEXTEST, MODETEST, HORDETEST, DEATHTEST, HEATLADDERTEST, SNAPTEST,
+  AUDIOTEST, AMBIENTTEST, EXPOSURETEST, DOWNTEST, PIKETEST, PODTEST — 40/40.
+  (`scripts/qa-sweep.sh` misses six of these; they were run separately.)
+- **`SIGHTLINE_PAIRTEST=1` → PASS** (byte-identical CRN legs).
+- **Autoplay ×5** clean: LOSE/WIN/WIN/WIN/WIN, mission 6, no exceptions, no TIMEOUT.
+  **Drill autoplay ×3**: WIN in 619-1011 frames — the drill is completable by the weak
+  smoke-test AI, so it cannot be a wall.
+- **`SIGHTLINE_BALANCE=10` byte-identical to base** (asserted `runs=20`), which is the proof
+  this is an interactive-only change: every new code path is `!NoPersist`-gated or
+  `Mode == Training`-gated, and `Maps.Layouts.Length` is untouched.
+- Screenshots inspected in **both** palettes (`SIGHTLINE_CB=1`): the drill at lessons 1/3/7/8,
+  the staged bar at the FIRE lesson (FIRE + RELOAD + SHOW ALL, where twelve buttons used to
+  sit), the SHOW ALL bypass (twelve buttons return, toggle reads ALL VERBS), the mission-1
+  OVERWATCH lesson (OVERWATCH + SHOW ALL only), a field-tip card, and the trimmed intro.
+
+## Notes for the next wave
+
+- **The top bar was lying.** In the drill it read `MISSION 1/6 · ELIMINATE`; it now reads
+  `TRAINING OP · <LESSON> n/8`. Worth remembering that mode-shaped HUD text defaults to the
+  campaign branch — a new mode has to claim its own readout or it inherits a false one.
+- **Deliberately left undone.** The drill teaches **tactics only** — nothing about the
+  barracks, perks, the campaign map or requisition. There is no per-lesson replay beyond the
+  whole-drill restart. And because a lesson card owns the tip slot, the tips never fire inside
+  the drill: a player who only ever runs the drill meets 8 verbs, and meets the other ten on
+  their first real deployment. All three are scope choices, not oversights.
+- **The `TutStep >= TutStepFire` completion gates** (`EnterBarracks` / `LoseRun`) were **not
+  touched** — the mission-1 track kept its exact semantics and constants, and TUTTEST now pins
+  them so a future renumber trips a test instead of silently re-offering onboarding forever.
 
 ---
 

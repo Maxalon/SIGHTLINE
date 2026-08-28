@@ -12,6 +12,12 @@ public static class Program
         // SIGHTLINE_AUTOPLAY=1    : skip intro, let an autopilot play full matches to a result.
         // Used to smoke-test the whole loop under Xvfb + software GL. See CLAUDE.md.
         bool shot = int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_SHOT"), out int shotFrame);
+        // SIGHTLINE_SEED=<n> : pin Util.Rng so two harness runs stage the SAME arena/roster. The
+        // renderer still reads the wall clock in ~50 places, so frames are not byte-identical — but
+        // this makes a before/after screenshot pair show the same BOARD, which is what a visual
+        // A/B actually needs. 0 / unset = today's clock seed (every existing path unchanged).
+        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_SEED"), out int seedPin) && seedPin != 0)
+            Util.Reseed(seedPin);
         // SIGHTLINE_SMARTPLAY=1 : like AUTOPLAY, but routes the autopilot through the
         // competent SmartStep() so a single headless game is played to win (balance gauge).
         bool smartplay = Environment.GetEnvironmentVariable("SIGHTLINE_SMARTPLAY") == "1";
@@ -93,9 +99,33 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        // SIGHTLINE_TUTTEST=1 : RESONANCE T1 onboarding — the training-op arena/script, every lesson
+        // trigger predicate (reachable + fires exactly once), the verb-staging cap + SHOW ALL escape,
+        // the field-tip table's bit/prio integrity, and the Display seen-flag round-trip. Tiny window
+        // (Game/Unit ctors + tile math). Preserves and restores the real display.json.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_TUTTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "tuttest");
+            Console.WriteLine(new Game().TutorialSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         if (Environment.GetEnvironmentVariable("SIGHTLINE_COMBATTEST") == "1")
         {
             Console.WriteLine(Combat.SelfTest());
+            return;
+        }
+        // SIGHTLINE_THREATTEST=1 : RESONANCE T2 — the incoming-fire FORECAST pinned against
+        // Combat.ComputeOdds on a synthetic board (gun count, best hit%, expected damage, cover /
+        // flank angle, out-of-range / dormant / dry / no-LoS exclusion, overwatch + focused cones,
+        // unreachable-tile skip, caged captive, non-mutation of the mover, signature cache) plus a
+        // measured worst-case rebuild cost. Tiny window (Game/Unit ctors).
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_THREATTEST") == "1")
+        {
+            Raylib.SetTraceLogLevel(TraceLogLevel.Error);
+            Raylib.InitWindow(64, 64, "sightline-threattest");
+            Console.WriteLine(new Game().ThreatSelfTest());
+            Raylib.CloseWindow();
             return;
         }
         // SIGHTLINE_CODEXTEST=1 : CODEX / FIELD MANUAL content-completeness (W6) — every documented enum
@@ -424,17 +454,55 @@ public static class Program
                 0x00D7, // multiply sign
                 0x00B7, // middle dot
             };
-            Font loaded = Raylib.LoadFontEx("assets/NotoMono-Regular.ttf", 64, codepoints, codepoints.Length);
+            // RESONANCE V1 — TWO ATLASES, and asset paths resolved next to the BINARY.
+            //
+            // (1) A single 64px atlas served everything from 11px to 92px. The 11-14px body text
+            //     is most of the words in the game, and minifying 64px glyphs ~5x with bilinear
+            //     filtering and no mip chain is exactly what turns small type into grey mush.
+            //     Bake a second atlas at 20px for text <= Cfg.UiFontMax and keep the 64px atlas
+            //     for the big sizes; Cfg.FontFor(size) routes every call site.
+            // (2) Ship-blocker: the path was relative to the CURRENT WORKING DIRECTORY. A player
+            //     launching the built binary from anywhere but the project root silently got
+            //     Raylib's built-in bitmap font and every em-dash rendered as '?'. Cfg.AssetPath
+            //     resolves against AppContext.BaseDirectory (with a cwd fallback for dev).
+            // Mipmaps + trilinear on both atlases so any residual off-size draw filters cleanly.
+            string notoPath = Cfg.AssetPath("assets/NotoMono-Regular.ttf");
+            Font loaded = Raylib.LoadFontEx(notoPath, 64, codepoints, codepoints.Length);
             if (loaded.Texture.Id != 0)
             {
-                Raylib.SetTextureFilter(loaded.Texture, TextureFilter.Bilinear);
+                Raylib.GenTextureMipmaps(ref loaded.Texture);
+                Raylib.SetTextureFilter(loaded.Texture, TextureFilter.Trilinear);
                 Cfg.Font = loaded;
-                Console.WriteLine("FONT: NotoMono-Regular loaded (glyph atlas ok)");
+                Console.WriteLine($"FONT: NotoMono-Regular 64px atlas loaded ({notoPath})");
+
+                Font ui = Raylib.LoadFontEx(notoPath, 20, codepoints, codepoints.Length);
+                if (ui.Texture.Id != 0)
+                {
+                    Raylib.GenTextureMipmaps(ref ui.Texture);
+                    Raylib.SetTextureFilter(ui.Texture, TextureFilter.Trilinear);
+                    Cfg.FontUi = ui;
+                    Console.WriteLine("FONT: NotoMono-Regular 20px UI atlas loaded");
+                }
             }
             else
             {
                 Cfg.Font = Raylib.GetFontDefault();
-                Console.WriteLine("FONT: NotoMono-Regular not found, falling back to default");
+                Console.WriteLine($"FONT: NotoMono-Regular NOT FOUND at {notoPath} — falling back to default");
+            }
+
+            // Display face (Chakra Petch Bold, OFL-1.1) — titles only; NotoMono keeps the data.
+            string dispPath = Cfg.AssetPath("assets/ChakraPetch-Bold.ttf");
+            Font disp = Raylib.LoadFontEx(dispPath, 96, codepoints, codepoints.Length);
+            if (disp.Texture.Id != 0)
+            {
+                Raylib.GenTextureMipmaps(ref disp.Texture);
+                Raylib.SetTextureFilter(disp.Texture, TextureFilter.Trilinear);
+                Cfg.FontTitle = disp;
+                Console.WriteLine("FONT: ChakraPetch-Bold display atlas loaded");
+            }
+            else
+            {
+                Console.WriteLine($"FONT: ChakraPetch-Bold NOT FOUND at {dispPath} — titles stay on NotoMono");
             }
         }
 
@@ -519,6 +587,8 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_PODSHOT") == "1") game.DebugPodShot();   // FUL-6: pair with SIGHTLINE_MISSION=3
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_WAVEBANNER") == "1") game.DebugWaveTelegraph();   // FUL-4: pair with SIGHTLINE_OBJ=defend
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_PIKESHOT") == "1") game.DebugPikemanLane();       // FUL-8: planted PIKEMAN lane (pair with SIGHTLINE_CB=1 for the second pass)
+        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_THREATSHOT") == "1") game.DebugThreatShot();      // RESONANCE T2: incoming-fire pips + tinted path + card (pair with SIGHTLINE_CB=1)
+        if (shot && int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_THREATPREF"), out int _tp)) game.ThreatPref = Util.Clamp(_tp, Game.ThreatOff, Game.ThreatFull);   // 0 off / 1 simple (pre-T2 read) / 2 full
         string downShot = Environment.GetEnvironmentVariable("SIGHTLINE_DOWNSHOT");
         if (shot && (downShot == "1" || downShot == "2")) game.DebugDownShot(downShot == "2");   // FUL-7: downed soldier + rescuer (=2 mid-rescue STABLE; pair with SIGHTLINE_CB=1 for the second pass)
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CONCEAL") == "1") game.DebugConcealment();
@@ -534,12 +604,24 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_UNITFX") == "1") game.DebugUnitFx();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_ELEV") == "1") game.DebugElevation();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_SHOP") == "1") game.DebugShop();
-        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_PREP") == "1") game.DebugPrep();
+        if (shot && !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("SIGHTLINE_PREP"))) game.DebugPrep();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_ARMORY") == "1") game.DebugArmory();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_BOON") == "1") game.DebugBoon();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_ENDLESSOFFER") == "1") game.DebugEndlessOffer();   // W7: pair with SIGHTLINE_ENDLESS=1
 
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_EVENT") == "1") game.DebugEvent();   // + SIGHTLINE_EVENTID=<id> pins the staged event (FUL-10)
+        // RESONANCE T1 harness entries:
+        //   SIGHTLINE_TRAINING=1        -> boot straight into the TRAINING OP (scripted drill)
+        //   SIGHTLINE_TRAINLESSON=<n>   -> park it on lesson n (1-based) for a staged-bar screenshot
+        //   SIGHTLINE_SHOWALL=1         -> flip the SHOW ALL escape on (staging bypass, before/after shot)
+        // All shot/autoplay-only and NoPersist, so nothing here can write a profile.
+        if ((shot || autoplay) && Environment.GetEnvironmentVariable("SIGHTLINE_TRAINING") == "1")
+        {
+            game.BeginTraining();
+            if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_TRAINLESSON"), out int _tl) && _tl > 0)
+                game.ShowTrainingLesson(_tl - 1);
+            if (Environment.GetEnvironmentVariable("SIGHTLINE_SHOWALL") == "1") game.ToggleShowAllVerbs();
+        }
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_DRAFT") == "1") game.BeginDraft();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_VETDRAFT") == "1") game.DebugVetDraft();   // draft w/ recalled veterans
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_FOCUSOW") == "1") game.DebugFocusOw();      // focused-overwatch cone
@@ -579,6 +661,10 @@ public static class Program
             float dt = (shot || autoplay) ? 1f / 60f : Raylib.GetFrameTime();
             Display.UpdateMouse();
             if (helpShot) Raylib.SetMousePosition(592, 740);   // park cursor on the ability button
+            // RESONANCE T2: a staged hover for the forecast screenshot — the card + path preview are
+            // hover-driven, so the harness has to hold the cursor on the tile every frame.
+            if (shot && game.DebugMousePark.HasValue)
+                Raylib.SetMousePosition((int)game.DebugMousePark.Value.X, (int)game.DebugMousePark.Value.Y);
             game.Update(dt);
             Audio.UpdateMusic(dt);
 

@@ -121,7 +121,7 @@ public static partial class Audio
         // with zero call-site changes.
         foreach (var kv in _recipes)
         {
-            if (LoadFile(kv.Key, $"assets/sfx/{kv.Key}.wav") || LoadFile(kv.Key, $"assets/sfx/{kv.Key}.ogg"))
+            if (LoadFile(kv.Key, Cfg.AssetPath($"assets/sfx/{kv.Key}.wav")) || LoadFile(kv.Key, Cfg.AssetPath($"assets/sfx/{kv.Key}.ogg")))
                 continue;
             LoadRecipe(kv.Key, kv.Value.dur, kv.Value.target, kv.Value.fill);
         }
@@ -420,8 +420,8 @@ public static partial class Audio
     {
         try
         {
-            _ambient = LoadMusicFile("assets/music/ambient.ogg", BuildAmbient);
-            _combat = LoadMusicFile("assets/music/combat.ogg", BuildCombat);
+            _ambient = LoadMusicFile(Cfg.AssetPath("assets/music/ambient.ogg"), BuildAmbient);
+            _combat = LoadMusicFile(Cfg.AssetPath("assets/music/combat.ogg"), BuildCombat);
             _ambient.Looping = true;
             _combat.Looping = true;
             Raylib.PlayMusicStream(_ambient);
@@ -1029,12 +1029,12 @@ public static partial class Audio
     {
         foreach (var id in SfxCueIds)
         {
-            string e = ValidateAudioFile($"assets/sfx/{id}.ogg", MaxSfxBytes)
-                    ?? ValidateAudioFile($"assets/sfx/{id}.wav", MaxSfxBytes);
+            string e = ValidateAudioFile(Cfg.AssetPath($"assets/sfx/{id}.ogg"), MaxSfxBytes)
+                    ?? ValidateAudioFile(Cfg.AssetPath($"assets/sfx/{id}.wav"), MaxSfxBytes);
             if (e != null) return e;
         }
-        return ValidateAudioFile("assets/music/ambient.ogg", MaxMusicBytes)
-            ?? ValidateAudioFile("assets/music/combat.ogg",  MaxMusicBytes);
+        return ValidateAudioFile(Cfg.AssetPath("assets/music/ambient.ogg"), MaxMusicBytes)
+            ?? ValidateAudioFile(Cfg.AssetPath("assets/music/combat.ogg"),  MaxMusicBytes);
     }
 
     /// Device-free report: which cues would resolve to a real dropped-in FILE vs the procedural
@@ -1046,14 +1046,14 @@ public static partial class Audio
         sb.AppendLine("AUDIO ASSETS (file overrides vs procedural synth):");
         foreach (var id in SfxCueIds)
         {
-            string f = File.Exists($"assets/sfx/{id}.ogg") ? $"assets/sfx/{id}.ogg"
-                     : File.Exists($"assets/sfx/{id}.wav") ? $"assets/sfx/{id}.wav" : null;
+            string f = File.Exists(Cfg.AssetPath($"assets/sfx/{id}.ogg")) ? Cfg.AssetPath($"assets/sfx/{id}.ogg")
+                     : File.Exists(Cfg.AssetPath($"assets/sfx/{id}.wav")) ? Cfg.AssetPath($"assets/sfx/{id}.wav") : null;
             if (f != null) files++;
             sb.AppendLine($"  {id,-14} {(f != null ? "FILE  " + f : "synth")}");
         }
         foreach (var m in new[] { "ambient", "combat" })
         {
-            bool has = File.Exists($"assets/music/{m}.ogg");
+            bool has = File.Exists(Cfg.AssetPath($"assets/music/{m}.ogg"));
             if (has) files++;
             sb.AppendLine($"  music:{m,-8} {(has ? "FILE  assets/music/" + m + ".ogg" : "synth")}");
         }

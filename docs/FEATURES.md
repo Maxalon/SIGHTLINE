@@ -16,6 +16,21 @@ seeds (mix of WIN/LOSE, no exceptions):
   profile (meta.json, append-only) banks SALVAGE currency, 7 ACHIEVEMENTS, a HALL OF FAME (fallen KIA + won-run
   legends), lifetime totals, and 3 additive UNLOCKS (StartIntel/StartBoon/StartArmor) bought with salvage — all
   strictly gated behind `!NoPersist` so the flywheel/harness stay byte-stable. `src/Meta.cs`, `src/Game.Meta.cs`.
+- **ONBOARDING — TRAINING OP + STAGED VERBS + FIELD TIPS (PROGRAM RESONANCE T1):** three pieces, replacing a
+  5-card strip that taught 3 of ~14 verbs. (A) **TRAINING OP** — a fixed, scripted, NON-PERSISTENT, restartable
+  drill (`GameMode.Training`, intro button / key **N**, **[P]** restarts) on its own authored arena
+  (`Maps.TrainingArena`, deliberately outside `Maps.Layouts` so the arena deck/daily are unmoved): two recruits,
+  four dormant targets, and 8 well-ordered problems — MOVE, COVER, FLANK, FIRE, OVERWATCH, GRENADE, ABILITY,
+  CLEAR — each solved by DOING it, each with a turn-budget fallback so no lesson can strand you. Writes nothing:
+  no save.json, no meta.json, no veteran reserve, no salvage, no achievements (asserted, not assumed).
+  (B) **STAGED VERBS** — during the drill and campaign mission 1 the action bar carries only what has been
+  taught and grows as lessons land, with a permanent **SHOW ALL** escape (**[V]**, remembered per profile);
+  staging is capped to those two places and never hides STABILIZE. (C) **JUST-IN-TIME FIELD TIPS** — 10 cards
+  (BRACE / STABILIZE / RELOAD / GRENADE / HUNKER / SHOVE / VAULT / DRAG / FOCUS / ITEM), each fired once per
+  profile the first time its precondition is actually true in play, priority-ordered so a bleeding-out ally
+  outranks a nicety. Seen-flags persist as a bitmask in display.json (FUL-12's `BraceTipSeen` migrates into
+  bit 0). The intro's six-bullet rules wall is now one line. Hook: `SIGHTLINE_TUTTEST`; screenshots via
+  `SIGHTLINE_TRAINING` / `SIGHTLINE_TRAINLESSON` / `SIGHTLINE_SHOWALL` / `SIGHTLINE_TIP`.
 - **CODEX / FIELD MANUAL (HORIZON W6):** a browsable in-game reference (bestiary + classes + perks/boons/contracts/
   specs/traits/scars/weapon-mods/status/objectives) from the intro (key K) + pause menu — closes the onboarding gap.
 - **EXPOSED BY FIRE + honest flywheel (HORIZON W1):** a unit that fires and doesn't move is easier to hit next turn
@@ -288,11 +303,22 @@ seeds (mix of WIN/LOSE, no exceptions):
   target's low cover; high cover still blocks); faux-3D platforms, height-aware
   overlays, AI seizes the high ground. Tooltip shows "+ HIGH GROUND" / "+ OVER LOW
   COVER".
-- **UX:** squad roster strip, end-turn confirmation, mute indicator, threat
-  preview (red pips on exposed reachable tiles while positioning), **camera
-  zoom/pan** (wheel + middle-drag, C to reset), a **keyboard tile cursor**
-  (arrows/WASD + Space), and a **pause/settings menu** (Esc: display, audio, screen
-  shake, threat-preview toggles, abandon run).
+- **Incoming-fire forecast** (RESONANCE T2; `Game.ComputeThreat` -> `ThreatCell[,]`,
+  `Renderer.DrawThreat`, `Hud.DrawThreatCard`): for every reachable tile, how many live
+  hostiles can shoot you there, the best enemy hit%, the expected post-armor damage,
+  whether you would be **flanked**, and whether the tile is in a live **overwatch / BRACE**
+  reaction lane. Derived from `Combat.ComputeOdds` with the mover placed on the candidate
+  tile (so the read can never disagree with the shot that fires) and modelling the states
+  moving clears (hunker drops, exposed-by-fire ends). Shown as a **danger meter** (1-3 bars
+  = gun count, shape-redundant and colorblind-safe; intensity = best hit%; a foot-rule marks
+  a flank), an **INCOMING FIRE hover card** with the detail, and a **move-path preview tinted
+  by the worst danger the route crosses**. Signature-cached (rebuilds on change, ~0.3-1.1 ms,
+  not per frame). Pause toggle is three-state: OFF / SIMPLE (the pre-T2 minimal tick) / FULL.
+  Self-test: `SIGHTLINE_THREATTEST`; screenshots: `SIGHTLINE_THREATSHOT` (+ `SIGHTLINE_THREATPREF`).
+- **UX:** squad roster strip, end-turn confirmation, mute indicator, the incoming-fire
+  forecast above, **camera zoom/pan** (wheel + middle-drag, C to reset), a **keyboard tile
+  cursor** (arrows/WASD + Space), and a **pause/settings menu** (Esc: display, audio, screen
+  shake, threat-preview OFF/SIMPLE/FULL, abandon run).
 - **Accessibility** (`src/Display.cs` + `Pal`): a **brightness** post-pass (70–130%,
   `Display.DrawBrightness`) + a **colorblind palette** toggle (`Pal.SetColorblind`, Foe→
   orange / Good→teal), both in the pause menu + persisted. (Phase 3 item 3.13.)

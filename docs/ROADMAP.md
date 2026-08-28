@@ -977,6 +977,56 @@ of record (container suspensions have wiped every scratchpad copy — docs are t
       it). README screenshot retaken (the FULCRUM board). Full tables + the program-close
       write-up: docs/DEVLOG.md §FUL-13.
 
+## PROGRAM "RESONANCE" — WAVE V1 "GROUND AND TYPE" (visual foundation)
+
+- [x] **V1-A — the board got a floor.** `Renderer.DrawBoard`'s floor loop and its grain pass
+      both skipped every non-`TileType.Floor` tile, so bare board backing (`Pal.RGBA(7,10,14)`)
+      showed under each cover block; with the block inset at 5px that was a hard-black gutter
+      ringing all ~45 blocks on every map. Both `continue`s dropped — the ground plane is now
+      continuous and cover sits ON it. Verify: `SIGHTLINE_SHOT=90 SIGHTLINE_FORCEBIOME=0..7`.
+- [x] **V1-A — real cast shadows.** `Renderer.LightOrigin` / `FloorLight` declared a board key
+      light that nothing cast from; cover used a fixed `+3,+4` offset (an emboss — identical in
+      every direction). New `Renderer.ShadowVec` returns the per-tile fall direction away from
+      the light, and `Renderer.CastShadow` sweeps the block footprint along it (dark at contact,
+      feathering to the tip). Length scales high 16 / low 8. Same treatment on the plateau
+      front-wall contact shadow. The plateau side wall (flat `Pal.HighSide` = near-black, which
+      read as a hole once the floor was continuous) now takes the biome hue + key light.
+- [x] **V1-B — two font atlases.** One 64px NotoMono atlas served 11px→92px; the 11–14px body
+      text (most of the words in the game) was minified ~5× with bilinear filtering and no mip
+      chain. Measured symptom: "WON" in the WAR ROOM hall of fame rendered as "NON". Now a 20px
+      UI atlas serves text ≤ `Cfg.UiFontMax` (18px) and 64px serves above it, both with
+      `GenTextureMipmaps` + `TextureFilter.Trilinear`; every call site routes through
+      `Cfg.Text`/`Cfg.Measure` (`Cfg.FontFor`). Hud.cs 10/11px raised to a 12px floor —
+      including the `Clip`/`WrapText`/`WrapLines`/`CenterText` measurement sizes, which would
+      otherwise wrap at 11 and draw at 12.
+- [x] **V1-B — SHIP BLOCKER: asset paths were cwd-relative.** A published binary launched from
+      any directory but its own silently fell back to Raylib's built-in bitmap font and rendered
+      every em-dash as `?`. New `Cfg.AssetPath` resolves against `AppContext.BaseDirectory`
+      (cwd fallback kept for dev); the font and the latent same-bug audio drop-in paths use it.
+      Verified against a real `dotnet publish -r linux-x64 --self-contained -p:PublishSingleFile=true`
+      run from a foreign cwd — before: "NotoMono-Regular not found, falling back to default";
+      after: all three atlases load by absolute path.
+- [x] **V1-C — a display voice.** `assets/ChakraPetch-Bold.ttf` (78,384 bytes) + its licence
+      text, handled exactly like NotoMono (csproj `CopyToOutputDirectory`). **SIL Open Font
+      License 1.1 — NOT CC0**: zero-cost and zero-royalty, but the licence text must ship with
+      the font and the font itself may not be sold. Provenance verified three ways: fetched from
+      `google/fonts` `ofl/chakrapetch`, its `METADATA.pb` reads `license: "OFL"`, and the font's
+      own name-table IDs 13/14 name the OFL 1.1. Baked at 96px, routed to titles ≥ 24px only via
+      `Cfg.TitleText`/`Cfg.TitleMeasure` (wordmark, VICTORY/RUN OVER, WAR ROOM, FIELD MANUAL,
+      SKIRMISH, ASSEMBLE STRIKE TEAM, MISSION n COMPLETE, REQUISITION, PROMOTION, SPECIALIZE,
+      FIELD DOCTRINE, event titles, PAUSED). Numerals and data stay on NotoMono. Corner brackets
+      derive from the measured width, so they re-fit the proportional face automatically.
+- [x] **V1-D — shop card title/price collision.** A long title ran straight into its right-
+      aligned price ("COUNTER-PREP: SYNDICATE" + "12 INTEL" → `SYNDICATE2 INTEL`). The card now
+      reserves the measured price column and shrinks the title 18→14 (new `Hud.FitSize`; `Clip`
+      only as the backstop) so the whole name survives. `SIGHTLINE_PREP` now takes a faction
+      name (`syndicate`/`legion`/`wardens`) so the longest title can be shot on demand.
+
+**Left for a later wave (deliberately):** board text in `Renderer.cs` still has 10/11px sizes
+(the two-atlas fix already sharpens them; bumping tile-constrained labels needs its own layout
+pass, and other waves own parts of that file). The biome signature pass stays floor-tile-only,
+so its emissive cues do not creep around cover bases.
+
 ## OPEN / NEXT (post-FULCRUM backlog — seeded at the FUL-13 close)
 
 Reference for any future wave: the FUL-13 ladder + re-set goal band (docs/DEVLOG.md §FUL-13)
@@ -1007,4 +1057,53 @@ sets, one lever per measured round, fresh same-slot R0 first, dip budgets, breac
 - [ ] **h8 corpsman blackout** (RELENTLESS kills backfill → corpsman fielded 13% of h8 missions,
       PATCH 5/batch): intended apex cruelty or a hole in the revive economy — pairs with the
       founding-corpsman decision.
+- [x] **RESONANCE T2 — "READ THE DANGER" (incoming-fire forecast).** The defensive read was a
+      single bool (`ComputeThreat`: some enemy has LoS AND cover==0) drawn as one identical tick,
+      so a tile enfiladed by four guns but covered from one read completely clean. Now a per-tile
+      `ThreatCell` grid (gun count / best enemy hit% / expected post-armor damage / flanked /
+      overwatch-lane), derived from `Combat.ComputeOdds` with the mover placed on the candidate
+      tile so it can never disagree with the shot that fires. Surfaced as a graded danger meter
+      (bar COUNT = guns, shape-redundant + CB-safe; intensity = heat), an INCOMING FIRE hover card,
+      and a worst-tier-tinted move-path preview. Pause toggle is now OFF/SIMPLE/FULL (SIMPLE = the
+      pre-T2 read). Signature-cached — rebuilds on change, not per frame. Read-side only: the
+      flywheel cannot see it and no win-rate claim is made. Details + perf + squint verdict in
+      DEVLOG §RESONANCE T2.
 - [ ] **On-device audio tuning** (carried; needs the human).
+
+---
+
+## PROGRAM "RESONANCE" — landed waves (see docs/DEVLOG.md for the write-ups)
+
+- [x] **T1 — BASIC TRAINING.** DONE. Onboarding stopped being a doc claim.
+      `docs/DESIGN.md` §4 graded onboarding "Addressed (W11)"; what shipped was a
+      5-card mission-1 callout strip teaching **3 of ~14 verbs** while the action bar
+      showed **twelve** (FUL-12 dimmed the other eleven — dimming is not staging), plus
+      a **six-bullet rules wall** on the intro. T1 ships:
+      - **TRAINING OP** (`GameMode.Training`, intro key **N**, in-drill **[P]** restarts):
+        a fixed, scripted, non-persistent drill on its own authored arena
+        (`Maps.TrainingArena` + `Mission.BuildTraining`) — **deliberately NOT appended to
+        `Maps.Layouts`**, because that array's length feeds the daily's arena derivation and
+        the per-run no-repeat deck (appending would have moved the whole measured campaign).
+        Eight well-ordered problems (`Game.TrainLessons`): MOVE → COVER → FLANK → FIRE →
+        OVERWATCH → GRENADE → ABILITY → CLEAR, each with a turn-budget patience fallback.
+        Two 12-HP recruits vs four dormant aim-45 targets = low-cost failure. Biome pinned
+        to STEEL so the teaching frame is fixed.
+      - **STAGED VERBS** (`Game.OnboardingActive` / `VerbStagingActive` / `VerbRevealed`,
+        applied at the end of `Hud.DrawActionButtons`): during the drill and mission 1 the
+        bar shows only what has been taught. Permanent **SHOW ALL** escape (**[V]**,
+        persisted). Capped to those two places; STABILIZE is never staged away.
+      - **JUST-IN-TIME FIELD TIPS** (`Game.FieldTips`): FUL-12's single BRACE tip became a
+        10-tip table, each fired once per profile the first time its precondition is true in
+        play, priority-ordered. Seen-flags are a `Display.TipsSeen` bitmask; the old
+        `BraceTipSeen` bool migrates into bit 0 (bridge verified in both directions).
+      - The intro's rules wall is now **one line**.
+      - Hook: **`SIGHTLINE_TUTTEST`** (arena/build, every lesson trigger reachable + fires
+        once + patience, staging monotonic/capped/escapable, tip bits+prios+reachability,
+        seen-flag round-trip + migration, and the drill's no-save/no-meta write contract).
+        Screenshot hooks: `SIGHTLINE_TRAINING` / `TRAINLESSON` / `SHOWALL` / `TIP`.
+      - **Left for a later wave** (deliberately, not forgotten): the drill teaches nothing
+        about the strategic layer (barracks, perks, the campaign map, requisition) — it is a
+        tactics drill only; there is no in-drill "replay this lesson" control beyond the
+        whole-drill restart; and the tips never fire *during* the drill by construction (the
+        lesson card owns the slot), so a player who only ever plays the drill meets 8 verbs,
+        not 18.

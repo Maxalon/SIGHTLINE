@@ -210,6 +210,78 @@ public partial class Game
     /// tough-but-fair regardless of the player's unlocked ceiling; the seed decides it, not the player.
     static int DailyHeat(int seed) => (int)(((uint)seed >> 16) % 4u);
 
+    // ── PROGRAM RESONANCE T1 — the TRAINING OP ────────────────────────────────────────────────────
+    // A fixed, scripted, NON-PERSISTENT, restartable drill. Every persistence seam in the codebase
+    // is already keyed on `Mode == GameMode.Campaign` (the save checkpoint in SetupMission, the
+    // barracks/debrief ladder, the secondary/intel-cache rolls) or on DailyMode (the meta bounty),
+    // so Mode == Training writes NOTHING by construction — no save.json, no meta.json, no veteran
+    // reserve, no salvage, no achievements, no daily best. TUTTEST asserts that emptiness rather
+    // than trusting it. The only profile-level flag the drill ever touches is Display.TrainingSeen,
+    // and only on COMPLETION (so the first-launch offer stops nagging).
+
+    /// Begin (or restart) the TRAINING OP from the intro screen. Restart is the same call: the drill
+    /// rebuilds itself from scratch every time, which is exactly the low-cost-failure contract.
+    /// Fixed biome seed for the drill (see BeginTraining). Biome.IndexFor is
+    /// (seed + mission-1) % Biome.All.Length, so 8 lands on STEEL — a cool neutral board, which is
+    /// the right ground for a teaching frame: nothing in the terrain competes with the amber
+    /// objective accent or the red threat accent the lessons are pointing at (DESIGN.md 3.H).
+    public const int TrainingMapSeed = 8;
+
+    public void BeginTraining()
+    {
+        ResetModeState();   // W1 mode-seam: inherit nothing (forced arena, daily seed, wave counter…)
+        Mode = GameMode.Training;
+        EnsureMetaLoaded();
+        _run = new Run();
+        _run.Start(Mission.TrainingSquad());   // the drill's own two recruits — never the campaign roster
+        _run.HeatLevel = 0;                    // no heat, no ascension, no contract, no boon
+        _run.MapSeed = TrainingMapSeed;        // pin the biome too: the drill looks the same every time
+                                               // (Run.Start rolled a random seed; the drill's board is
+                                               //  authored, so the only thing that seed still drives is
+                                               //  Biome.For — and a fixed drill should be fixed on screen)
+        _run.LossStreak = 0;
+        _run.CurrentCard = new MissionCard { Objective = Objective.Eliminate, ModName = "TRAINING", Reward = RewardKind.None };
+        Players = _run.Squad;
+        Wave = 0;
+        // NOT Stats.BeginRun: the drill is not a measured match and must never enter a balance batch.
+        SetupMission(1);
+    }
+
+    /// TRAINING OP end check. Deliberately simpler than CheckSkirmish: the drill is always Eliminate,
+    /// there is no VIP and no captive, so the only two outcomes are "field cleared" and "both recruits
+    /// are down". A downed (bleeding-out) recruit is NOT a loss — the bleed-out clock is itself one of
+    /// the things the drill can teach.
+    void CheckTraining()
+    {
+        if (AlivePlayers().Count(p => !p.IsVip) == 0) { EndTraining(false); return; }
+        if (AliveEnemies().Count == 0) EndTraining(true);
+    }
+
+    /// End the drill. No campaign side-effects of any kind; the ONLY write is the one-shot
+    /// Display.TrainingSeen on a completion, and only when the profile is live (!NoPersist).
+    void EndTraining(bool win)
+    {
+        Combat.EndRun();      // clear every mission-scoped combat static (mirrors LoseRun/EndSkirmish)
+        TrainStep = -1;
+        RevealedVerbs.Clear();
+        CalloutText = null;
+        if (win)
+        {
+            LoseTitle = null; LoseReason = null;
+            Phase = Phase.Win;
+            Audio.Play("win");
+            Audio.PlayStinger("victory");
+            if (!NoPersist) Display.MarkTrainingSeen();
+        }
+        else
+        {
+            LoseTitle = "DRILL ENDED";
+            LoseReason = "Nothing was lost - the training op never touches your campaign. Run it again, or deploy for real.";
+            Phase = Phase.Lose;
+            Audio.Play("lose");
+        }
+    }
+
     // ── Single-mission end/advance (called from CheckEnd instead of the campaign ladder) ─────────
 
     /// SKIRMISH/DAILY end check: a wipe (or a lost VIP/captive) ends the mission as a loss; completing

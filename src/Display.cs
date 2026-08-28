@@ -227,8 +227,36 @@ void main() {
 
     // FUL-12: one-shot BRACE field-tip flag (same lifecycle as TutorialSeen — the callout fires
     // once per profile, the first time a live fight makes the reaction verb relevant).
+    // T1: superseded by the TipsSeen bitmask below (bit 0 IS the brace tip). The field is kept as
+    // the on-disk migration bridge in BOTH directions: Load folds an old profile's true into bit 0,
+    // and Save keeps writing it from bit 0 so a downgrade doesn't re-show a tip the player has read.
     public static bool BraceTipSeen;
-    public static void MarkBraceTipSeen() { if (!BraceTipSeen) { BraceTipSeen = true; Save(); } }
+    public static void MarkBraceTipSeen() { MarkTipSeen(0); }
+
+    // ── PROGRAM RESONANCE T1 — just-in-time field tips ──────────────────────────────────────
+    // One bit per tip in Game.FieldTips (index == bit). A bitmask rather than a bool-per-tip so
+    // the DTO grows by ONE field for the whole table; absent in an old display.json = 0 = unseen.
+    // Cap is 32 tips — TipCount asserts against it in TUTTEST so a 33rd tip can't silently no-op.
+    public const int MaxTips = 32;
+    public static int TipsSeen;
+    public static bool TipSeen(int i) => i >= 0 && i < MaxTips && (TipsSeen & (1 << i)) != 0;
+    public static void MarkTipSeen(int i)
+    {
+        if (i < 0 || i >= MaxTips || TipSeen(i)) return;
+        TipsSeen |= 1 << i;
+        if (i == 0) BraceTipSeen = true;   // keep the legacy field in step for the downgrade bridge
+        Save();
+    }
+
+    // T1: the TRAINING OP has been completed (or explicitly declined) at least once. Drives the
+    // first-launch offer only — the drill itself stays reachable from the intro forever.
+    public static bool TrainingSeen;
+    public static void MarkTrainingSeen() { if (!TrainingSeen) { TrainingSeen = true; Save(); } }
+
+    // T1: the permanent SHOW ALL escape. Verb staging (training op + mission 1) never locks a
+    // returning player out of a verb they already know — one toggle, remembered per profile.
+    public static bool ShowAllVerbs;
+    public static void ToggleShowAllVerbs() { ShowAllVerbs = !ShowAllVerbs; Save(); }
 
     // ---- RESONANCE A2: per-category audio mix (persisted here alongside the other settings) ----
     // The whole game shipped with exactly one hard-coded SetMasterVolume(0.6f) and a binary
@@ -465,6 +493,9 @@ void main() {
         public bool PostFX { get; set; } = true;
         public bool AutoCam { get; set; }
         public bool BraceTipSeen { get; set; }   // FUL-12 (JSON field: absent in old files = false, back-compat)
+        public int TipsSeen { get; set; }        // T1 just-in-time tip bitmask (absent = 0 = all unseen)
+        public bool TrainingSeen { get; set; }   // T1 training op completed/declined once
+        public bool ShowAllVerbs { get; set; }   // T1 permanent staging escape
         // RESONANCE A2 — additive fields; a display.json written before A2 has none of them,
         // so these JSON defaults are what an existing install keeps (== the old behaviour).
         public float VolMaster { get; set; } = 0.60f;
@@ -478,9 +509,16 @@ void main() {
 
     static void Save()
     {
-        try { Directory.CreateDirectory(Dir); File.WriteAllText(FilePath, JsonSerializer.Serialize(new Dto { Fullscreen = Fullscreen, SizeIdx = SizeIdx, BrightIdx = BrightIdx, GammaIdx = GammaIdx, Colorblind = Pal.Colorblind, TutorialSeen = TutorialSeen, PostFX = PostFX, AutoCam = AutoCam, BraceTipSeen = BraceTipSeen, VolMaster = VolMaster, VolSfx = VolSfx, VolMusic = VolMusic, VolUi = VolUi })); }
+        try { Directory.CreateDirectory(Dir); File.WriteAllText(FilePath, JsonSerializer.Serialize(new Dto { Fullscreen = Fullscreen, SizeIdx = SizeIdx, BrightIdx = BrightIdx, GammaIdx = GammaIdx, Colorblind = Pal.Colorblind, TutorialSeen = TutorialSeen, PostFX = PostFX, AutoCam = AutoCam, BraceTipSeen = (TipsSeen & 1) != 0, TipsSeen = TipsSeen, TrainingSeen = TrainingSeen, ShowAllVerbs = ShowAllVerbs, VolMaster = VolMaster, VolSfx = VolSfx, VolMusic = VolMusic, VolUi = VolUi })); }
         catch { }
     }
+
+    /// Harness seam (SIGHTLINE_TUTTEST): the settings-file path plus explicit Save/Load, so the
+    /// onboarding self-test can round-trip the seen-flags through REAL JSON (not a field copy) and
+    /// then hand the player's file back byte-for-byte. Not used by gameplay code.
+    public static string SettingsPathPublic => FilePath;
+    public static void SaveForTest() => Save();
+    public static void LoadForTest() => Load();
 
     static void Load()
     {
@@ -499,6 +537,12 @@ void main() {
                 PostFX = d.PostFX;
                 AutoCam = d.AutoCam;
                 BraceTipSeen = d.BraceTipSeen;
+                // T1 migration bridge: an old profile only has the single BraceTipSeen bool — fold
+                // it into bit 0 so a player who already read the BRACE tip never sees it again.
+                TipsSeen = d.TipsSeen | (d.BraceTipSeen ? 1 : 0);
+                BraceTipSeen = (TipsSeen & 1) != 0;
+                TrainingSeen = d.TrainingSeen;
+                ShowAllVerbs = d.ShowAllVerbs;
                 VolMaster = Math.Clamp(d.VolMaster, 0f, 1f);
                 VolSfx    = Math.Clamp(d.VolSfx, 0f, 1f);
                 VolMusic  = Math.Clamp(d.VolMusic, 0f, 1f);
