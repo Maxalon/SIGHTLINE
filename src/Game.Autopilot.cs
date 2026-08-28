@@ -167,8 +167,14 @@ public partial class Game
         if (u.Ability == AbilityKind.Heal)
         {
             if (PrepAbility(u)) return;        // adjacent ally missing >=3 -> heal it now
-            if (TryMoveToPatch(u)) return;     // hurt ally at Cheby 2 -> step adjacent for next pass
+            if (TryMoveToPatch(u)) return;     // hurt ally at Cheby 2-3 -> step adjacent for next pass
         }
+
+        // ── FUL-5 R5: SMOKE cover is objective-agnostic too — the retreat it protects mostly
+        // happens on the march/hold routes the combat brain never sees (R4: ITEM ~1/20
+        // campaigns with the probe buried in step 2b). A likely kill still comes first; the
+        // 1-charge/mission budget bounds the verb no matter which route probes it.
+        if (u.Item == ItemKind.Smoke && u.ItemCharge > 0 && !HasStrongShot(u) && TrySmokeCover(u)) return;
 
         // ── OBJECTIVE ROUTING (preserved from AutoStep, with smart combat layered in) ──
         switch (Objective)
@@ -368,6 +374,28 @@ public partial class Game
     ///   FLASH       — lob onto a cluster of 2+ active foes (disorients them; no ally in blast).
     ///   INCENDIARY  — same cluster test (lays a fire field that denies ground + ignites foes).
     ///   BARRICADE   — drop adjacent cover when the soldier is exposed and has nothing to shoot.
+    /// FUL-5 — SMOKE the wounded retreat: cover the most-EXPOSED sub-half-HP squadmate in throw
+    /// range (self included). One exposed gun on a sub-half body is already a lethal-risk turn,
+    /// so the bar sits far below the self-pin case (>=2 guns); the 1-charge/mission budget
+    /// self-bounds it, which is what makes the objective-agnostic SmartStep probe safe. The old
+    /// ">=2 guns AND no shot AND it's me" conjunction measured ITEM at 0 per ~500 missions.
+    bool TrySmokeCover(Unit u)
+    {
+        if (u.Item != ItemKind.Smoke || u.ItemCharge <= 0 || u.ActionsLeft <= 0) return false;
+        Unit coverAlly = null; float worstExp = 6.9f;   // ~one exposed gun (6 + prio*0.5)
+        foreach (var p in AlivePlayers())
+        {
+            if (p.IsVip || p.MaxHp <= 0 || p.Hp * 2 > p.MaxHp) continue;
+            if (Util.TileDist(u.X, u.Y, p.X, p.Y) > ItemRange) continue;
+            float pexp = TileExposure(p, p.X, p.Y);
+            if (pexp > worstExp) { worstExp = pexp; coverAlly = p; }
+        }
+        if (coverAlly == null || !ItemTargetOk(u, coverAlly.X, coverAlly.Y)) return false;
+        Selected = u;   // IssueItem acts on Selected
+        IssueItem(coverAlly.X, coverAlly.Y);
+        return true;
+    }
+
     bool TrySmartItem(Unit u)
     {
         if (u.ItemCharge <= 0 || u.Item == ItemKind.None || u.ActionsLeft <= 0) return false;
@@ -377,22 +405,11 @@ public partial class Game
         {
             case ItemKind.Smoke:
             {
-                // FUL-5: cover a wounded soldier's retreat — smoke the most-EXPOSED sub-half-HP
-                // squadmate in throw range (self included). One exposed gun on a sub-half body
-                // is already a lethal-risk turn, so the bar is far lower than the self-pin case
-                // below; the old ">=2 guns AND no shot AND it's me" conjunction measured ITEM
-                // at 0 uses per ~500 missions. No shot-preference veto here: this runs after
-                // TakeBestShot declined, and the lane-break outvalues a sub-45% poke anyway.
-                Unit coverAlly = null; float worstExp = 6.9f;   // ~one exposed gun (6 + prio*0.5)
-                foreach (var p in AlivePlayers())
-                {
-                    if (p.IsVip || p.MaxHp <= 0 || p.Hp * 2 > p.MaxHp) continue;
-                    if (Util.TileDist(u.X, u.Y, p.X, p.Y) > ItemRange) continue;
-                    float pexp = TileExposure(p, p.X, p.Y);
-                    if (pexp > worstExp) { worstExp = pexp; coverAlly = p; }
-                }
-                if (coverAlly != null && ItemTargetOk(u, coverAlly.X, coverAlly.Y))
-                { IssueItem(coverAlly.X, coverAlly.Y); return true; }
+                // FUL-5 R5: wounded-retreat cover moved to the shared TrySmokeCover — probed
+                // objective-agnostically from SmartStep (this combat-brain path kept it at ~0:
+                // the R4 reading — most smoke moments live on the march/hold routes, and a
+                // carrier with any shot fired instead). Try it here too for the Eliminate case.
+                if (TrySmokeCover(u)) return true;
                 // original self-pin case: this soldier badly exposed (≥2 guns) with no shot —
                 // smoke its own tile to break the lanes.
                 if (TileExposure(u, u.X, u.Y) < 12f) return false;

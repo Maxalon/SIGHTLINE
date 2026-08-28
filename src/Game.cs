@@ -5749,7 +5749,7 @@ public partial class Game
         {
             var buyable = new List<int>();
             foreach (int i in offer)
-                if (!IsPrepItem(i) && CanBuy(i)) buyable.Add(i);
+                if (CanBuy(i)) buyable.Add(i);   // FUL-5: PREP now competes (was excluded — 0 buys ever)
             if (buyable.Count == 0) break;      // nothing useful/affordable left
 
             // value prior (competent-play proxy, mirrors SmartPerkValue's role): healing a hurt
@@ -5780,6 +5780,12 @@ public partial class Game
     float ShopValue(int item)
     {
         if (IsModItem(item)) return 6f;        // permanent firepower — the run's real reward sink
+        // FUL-5: COUNTER-PREP — a MODEST prior. The slot only exists when a faction IS
+        // telegraphed (RefreshShopOffer) and CanBuy re-gates it, so this is the honest
+        // "one-mission edge vs the fight we KNOW is coming" bet: below the permanent rows
+        // (a mod outlives the mission), above the generic floor. Was excluded outright — the
+        // prep's Combat reads were 0-exposure in every measured batch.
+        if (IsPrepItem(item)) return 4f;
         return item switch
         {
             0 => 9f,                            // FIELD MEDKIT (CanBuy gates on someone actually hurt)
@@ -5881,31 +5887,76 @@ public partial class Game
         return true;
     }
 
-    /// Autopilot/balance default: prefer a SAFE, beneficial legal choice (no intel cost, no gamble,
-    /// no self-wound, no heat) so the balance harness models SENSIBLE play — a human wouldn't gamble
-    /// half their intel or wound a soldier on every event. Falls back to the first legal choice, then
-    /// the last (always a no-op/safe option). Always returns a legal index -> one-tick resolve, no stall.
+    /// FUL-5: 70/30 VALUE-BIASED event choice (the ChoosePerk/AutoShop pattern), randomness
+    /// HASHED off (MapSeed, node id) — NEVER an Rng draw: a Util.Rng draw here would shift the
+    /// shared stream the paired legs replay (CRN) and desync every world after the first event;
+    /// the hash is fixed per (run, node), identical across legs and reloads (the Events.cs
+    /// GambleSucceeds precedent). The old "always the safe arm" rule left every costed/gamble/
+    /// trade-off arm at 0 exposure in ~500 measured missions — BY EVENT-CHOICE had nothing to
+    /// price (it replaced the IsSafeChoice/HasDownside pair, removed with it). 70%: the highest-
+    /// VALUE legal arm (EventChoiceValue, a competent-play prior); 30%: a hash-picked OTHER
+    /// legal arm, so every arm accrues honest exposure over a batch. Always returns a legal
+    /// index -> one-tick resolve, no stall.
     int AutoEventChoice()
     {
         if (_activeEvent == null) return 0;
-        int firstLegal = -1;
+        var legal = new List<int>();
         for (int i = 0; i < _activeEvent.Choices.Length; i++)
+            if (ChoiceLegal(_activeEvent.Choices[i])) legal.Add(i);
+        if (legal.Count == 0) return _activeEvent.Choices.Length - 1;   // defensive; the last arm is the no-op
+        int best = legal[0]; float bestV = float.NegativeInfinity;
+        foreach (int i in legal)
         {
-            if (!ChoiceLegal(_activeEvent.Choices[i])) continue;
-            if (firstLegal < 0) firstLegal = i;
-            if (IsSafeChoice(_activeEvent.Choices[i])) return i;   // prefer a downside-free benefit
+            float v = EventChoiceValue(_activeEvent.Choices[i]);
+            if (v > bestV) { bestV = v; best = i; }
         }
-        return firstLegal >= 0 ? firstLegal : _activeEvent.Choices.Length - 1;
+        if (legal.Count == 1) return best;
+        int h = unchecked((_run != null ? _run.MapSeed : 0) * 92821 ^ ((_eventNode != null ? _eventNode.Id : 0) + 3) * 68917);
+        if (((h % 100) + 100) % 100 < 70) return best;
+        var rest = legal.Where(i => i != best).ToList();
+        return rest[(((h >> 7) % rest.Count) + rest.Count) % rest.Count];
     }
 
-    /// A choice with no downside in either outcome (no intel spend, gamble, self-wound, or heat gain).
-    static bool IsSafeChoice(EventChoice ch)
-        => !HasDownside(ch.Outcome) && (!ch.HasSecond || !HasDownside(ch.Outcome2));
-    static bool HasDownside(EventOutcome o)
-        => (o.Kind == EventOutcomeKind.Intel && o.Amount < 0)
-           || o.Kind == EventOutcomeKind.GambleIntel
-           || o.Kind == EventOutcomeKind.WoundSoldier
-           || o.Kind == EventOutcomeKind.AddHeat;
+    /// FUL-5: the event-arm VALUE prior (competent-play proxy — the SmartPerkValue/ShopValue
+    /// family: a heuristic to bias exposure, not ground truth). Roughly on the ShopValue scale;
+    /// intel converts at ~0.3/pt so a 15-intel arm (4.5) competes with a free mod grant (5).
+    float EventChoiceValue(EventChoice ch)
+        => EventOutcomeValue(ch.Outcome) + (ch.HasSecond ? EventOutcomeValue(ch.Outcome2) : 0f);
+
+    float EventOutcomeValue(EventOutcome o)
+    {
+        switch (o.Kind)
+        {
+            case EventOutcomeKind.Intel: return o.Amount * 0.3f;             // signed: costs subtract
+            case EventOutcomeKind.HealSoldier:
+            {
+                // worth what it actually restores: the most-wounded soldier's deficit (full heal)
+                // or the capped amount. Zero when nobody is hurt — never overvalue a no-op arm.
+                var w = _run != null ? _run.Squad.Where(s => s.Alive && s.MaxHp > 0)
+                            .OrderBy(s => (float)s.Hp / s.MaxHp).FirstOrDefault() : null;
+                if (w == null) return 0f;
+                int deficit = w.MaxHp - w.Hp;
+                float v = (o.Amount < 0 ? deficit : Math.Min(o.Amount, deficit)) * 0.8f;
+                if (o.Amount < 0 && w.Wound > 0) v += 2f;                    // the cure rides along
+                return v;
+            }
+            case EventOutcomeKind.WoundSoldier: return -3f;                  // a fatigued next fight
+            case EventOutcomeKind.GambleIntel:
+                // EV = stake * (2*chance - 1); stake = half our intel. Slightly positive at 55%,
+                // but variance on the run economy keeps a competent prior lukewarm.
+                return (_run != null ? Math.Max(5, _run.Intel / 2) : 5) * (2f * o.ChancePct / 100f - 1f) * 0.3f;
+            case EventOutcomeKind.GrantWeaponMod: return 5f;                 // a 10-14 intel row, free
+            case EventOutcomeKind.GrantBonusPerk: return 5f;                 // ADV. TRAINING's effect
+            case EventOutcomeKind.GrantGrenades: return 2f;
+            case EventOutcomeKind.GrantArmor: return o.SquadWide ? 6f : 3f;
+            case EventOutcomeKind.Recruit:
+                return _run != null && _run.Squad.Count < Run.RosterMax ? (o.Veteran ? 7f : 5f) : 0f;
+            case EventOutcomeKind.GrantTrait: return o.Tr == Trait.IronWill ? 4f : 3f;
+            case EventOutcomeKind.AddHeat: return -4f * Math.Max(1, o.Amount);
+            case EventOutcomeKind.GrantBoon: return 6f;
+            default: return 0f;                                              // Nothing / unknown
+        }
+    }
 
     void ResolveEvent(int choiceIdx)
     {
