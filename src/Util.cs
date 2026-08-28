@@ -171,16 +171,20 @@ public class Biome
     /// so different runs surface different biomes (incl. the newer ones) across their
     /// missions while staying deterministic within a run. The 1-arg For() is kept for any
     /// caller that wants the fixed cycle; Game switches to this at integration.
-    public static Biome For(int missionNum, int runSeed)
+    public static Biome For(int missionNum, int runSeed) => All[IndexFor(missionNum, runSeed)];
+
+    /// FUL-9: the INDEX behind For(missionNum, runSeed) — the arena deck keys its theme hint
+    /// off the biome the player actually SEES (was mission-number-cycled, which both mismatched
+    /// the displayed room and re-coupled arena to mission number, the FUL-1 confound).
+    public static int IndexFor(int missionNum, int runSeed)
     {
         // TEST HOOK (byte-stable no-op unless SIGHTLINE_FORCEBIOME is set): pin the biome to a fixed
         // index so the headless screenshot harness can sweep all 8 biomes deterministically despite
         // MapSeed being random per process. Gameplay/normal runs never set it, so this is inert.
         var force = System.Environment.GetEnvironmentVariable("SIGHTLINE_FORCEBIOME");
         if (force != null && int.TryParse(force, out int fi))
-            return All[((fi % All.Length) + All.Length) % All.Length];
-        int idx = (int)(((uint)runSeed + (uint)(missionNum - 1)) % (uint)All.Length);
-        return All[idx];
+            return ((fi % All.Length) + All.Length) % All.Length;
+        return (int)(((uint)runSeed + (uint)(missionNum - 1)) % (uint)All.Length);
     }
 }
 
@@ -229,4 +233,15 @@ public static class Util
     public static bool  Roll(float pct) => Rng.NextDouble() * 100.0 < pct;
     public static float RandRange(float a, float b) => a + (b - a) * (float)Rng.NextDouble();
     public static T     Choice<T>(System.Collections.Generic.IList<T> a) => a[Rng.Next(a.Count)];
+
+    // FUL-9: seed-keyed avalanche hash (the Run.cs W5 finale-kit mixer, parameterised). For
+    // campaign structure that must derive from MapSeed WITHOUT touching Util.Rng or a .NET
+    // Random stream — nearby seeds keep .NET Random correlated for many draws (the measured
+    // W5 16/4/0 finale-kit collapse), and CRN pairing needs the derivation to take ZERO draws.
+    public static uint Hash3(int a, int b, int c)
+    {
+        uint h = (uint)a * 0x9E3779B1u ^ (uint)b * 0x85EBCA77u ^ (uint)c * 0xC2B2AE3Du;
+        h ^= h >> 16; h *= 0x45d9f3bu; h ^= h >> 16; h *= 0x45d9f3bu; h ^= h >> 16;
+        return h;
+    }
 }

@@ -30,15 +30,20 @@ public static class Mission
     // when it stamps Stats.BeginMission. Static like ForcedLayout (one Build at a time).
     public static int AppliedLayout = -1;
 
+    // FUL-9 THE DECK: the run's MapSeed, published by Game.SetupMission before every Build so
+    // the per-run no-repeat arena deck derives PURELY from it (no persisted list, no Util.Rng
+    // draws — see PickLayout). 0 = a bare harness Build with no run context (still deterministic).
+    public static int DeckSeed = 0;
+
     // Soft biome->layout affinity: each biome index (matching Biome.All order —
     // STEEL=0 ARID=1 TUNDRA=2 VERDANT=3 ASH=4 VOID=5 NEON=6 MAGMA=7) hints at a preferred
-    // arena index. When an authored map is rolled, there is a 50% chance to pick the hinted
-    // layout and a 50% chance to pick randomly — keeping variety while nudging theme.
-    // -1 means no preference (always picks randomly). This is SOFT: ForcedLayout
-    // overrides it completely, and the connectivity guard can still fall back to
-    // procedural if a hinted layout fails (though the arenas are designed to pass).
-    // Keep this array length-aligned with Biome.All (one entry per biome) so the two
-    // newest biomes also theme; PickLayout falls back to a random arena past the end.
+    // arena index. FUL-9: the hint is now a REDUCED weight WITHIN the no-repeat deck (25%
+    // pull-forward of the DISPLAYED biome's arena — was a 50% mission-number-keyed pick,
+    // which piled 57% of authored missions onto these 8 and left 6/35 arenas unseen in 251
+    // missions). -1 means no preference. This stays SOFT: ForcedLayout overrides it
+    // completely, and the connectivity guard can still fall back to procedural if a hinted
+    // layout fails (though the arenas are designed to pass). Keep this array length-aligned
+    // with Biome.All (one entry per biome); PickLayout deals from the plain deck past the end.
     static readonly int[] BiomeLayoutHint =
     {
         34,  // STEEL   → DONJON (walled tier-2 keep taken by a single ramp)
@@ -135,7 +140,12 @@ public static class Mission
         // back to the procedural generator. Both keep reserved tiles open.
         // W2 telemetry: AppliedLayout records the template index only once TryApplyLayout has
         // ACCEPTED it (the connectivity guard can reject a proposal); -1 = procedural fallback.
-        // The Roll(55)-before-PickLayout order is preserved exactly (same Util.Rng draw order).
+        // FUL-9 DRAW-ORDER CONTRACT (load-bearing for CRN pairing): the authored gate takes
+        // EXACTLY ONE Util.Roll and the arena pick takes ZERO — PickLayout derives purely from
+        // (DeckSeed, missionNum), so the shared stream is identical whichever arena is dealt.
+        // Roll 55->80 is the whole procedural lever: FUL-1 measured the reject lane EMPTY
+        // (authored 52.6% / reject 0.0% / proc-roll 47.4% at n~190), so the lost roll was the
+        // only road to procedural; 80 targets the 20-25% procedural share.
         bool authored = false;
         bool attempted = false;   // FUL-1 funnel: a template reached the connectivity guard
         AppliedLayout = -1;
@@ -145,7 +155,7 @@ public static class Mission
             authored = TryApplyLayout(grid, occupied, players, enemies, evacSet, terminal, Maps.Layouts[ForcedLayout], sabotage);
             if (authored) AppliedLayout = ForcedLayout;
         }
-        else if (Util.Roll(55))
+        else if (Util.Roll(80))
         {
             attempted = true;
             int pick = PickLayout(missionNum);
@@ -1148,18 +1158,49 @@ public static class Mission
             }
     }
 
-    /// Pick an authored layout INDEX to try, applying a soft biome affinity: 50% of the time
-    /// choose the biome's hinted layout (if one is set), else pick uniformly at random.
-    /// The connectivity guard in TryApplyLayout still validates the result regardless.
-    /// (W2: returns the index — not the template — so the caller can record WHICH arena
-    /// was applied; Rng draw order matches the old template-returning version exactly.)
-    static int PickLayout(int missionNum)
+    /// FUL-9 THE DECK: mission n's arena is draw n of a per-run no-repeat deck — a MapSeed-keyed
+    /// permutation of ALL authored layouts, with the DISPLAYED biome's themed arena pulled
+    /// forward at reduced weight. Replaces the mission-number-keyed 50% hint + uniform roll
+    /// (the FUL-1 confound: arena coupled to mission number, 57% of authored missions on the
+    /// 8 hint arenas, 6/35 unseen in 251 missions). Pure derivation, zero Util.Rng draws (the
+    /// Build draw-order contract), zero persisted state (round-trips on load by construction).
+    /// The connectivity guard in TryApplyLayout still validates whatever is dealt.
+    static int PickLayout(int missionNum) => DeckPick(DeckSeed, missionNum);
+
+    /// The deck derivation itself — public for SIGHTLINE_EXPOSURETEST. Deterministic in
+    /// (seed, missionNum); recomputes draws 1..n each call (n<=6 in every real mode, trivially
+    /// cheap) so no state needs persisting. Draws never repeat an arena until the whole deck
+    /// is exhausted (only reachable past 35 missions, i.e. never in shipping modes).
+    public static int DeckPick(int seed, int missionNum)
     {
-        int biomeIdx = (missionNum - 1 + Biome.All.Length) % Biome.All.Length;
-        int hint = (biomeIdx < BiomeLayoutHint.Length) ? BiomeLayoutHint[biomeIdx] : -1;
-        if (hint >= 0 && hint < Maps.Layouts.Length && Util.Roll(50))
-            return hint;
-        return Util.Rng.Next(Maps.Layouts.Length);   // == Util.Choice's draw (same Next(count) call)
+        int nLay = Maps.Layouts.Length;
+        // seed-keyed Fisher-Yates via avalanche hash — NOT .NET Random (nearby MapSeeds stay
+        // correlated for many draws: the measured W5 finale-kit collapse), NOT Util.Rng (zero draws)
+        var deck = new int[nLay];
+        for (int i = 0; i < nLay; i++) deck[i] = i;
+        for (int i = nLay - 1; i > 0; i--)
+        {
+            int j = (int)(Util.Hash3(seed, 101, i) % (uint)(i + 1));
+            (deck[i], deck[j]) = (deck[j], deck[i]);
+        }
+        var used = new bool[nLay];
+        int drawn = 0, pick = deck[0];
+        for (int m = 1; m <= missionNum; m++)
+        {
+            if (drawn == nLay) { Array.Clear(used, 0, nLay); drawn = 0; }   // >35-mission recycle guard
+            // theme hint at REDUCED weight (25%): pull the DISPLAYED biome's arena forward if
+            // it's still in the deck (Biome.IndexFor is the same (mission,seed) function the
+            // renderer uses, so hint and room agree). A hint pull does NOT consume the deck
+            // front — that card is simply dealt next mission, so nothing is starved.
+            int bi = Biome.IndexFor(m, seed);
+            int hint = bi >= 0 && bi < BiomeLayoutHint.Length ? BiomeLayoutHint[bi] : -1;
+            if (hint >= 0 && hint < nLay && !used[hint] && Util.Hash3(seed, 211, m) % 100 < 25)
+                pick = hint;
+            else
+                foreach (int d in deck) { if (!used[d]) { pick = d; break; } }
+            used[pick] = true; drawn++;
+        }
+        return pick;
     }
 
     static void TryCover(Grid g, HashSet<(int, int)> occ, int x, int y, TileType t)
