@@ -51,9 +51,11 @@ public static class Program
         // MoveStepAnim ACTIVATION asserting the destination tile is empty-or-self, and (b) a
         // per-frame sweep for two living units sharing a tile (episode-counted, with the longest
         // episode's duration). PASS requires BOTH at zero over a non-vacuous sample.
-        if (Environment.GetEnvironmentVariable("SIGHTLINE_STACKTEST") == "1")
+        // SIGHTLINE_STACKTEST=2 widens the same sweep to FULL campaigns under BOTH the dumb
+        // smoke bot and the competent one (the QA-scale measurement; several minutes).
+        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_STACKTEST"), out int stackMode) && stackMode > 0)
         {
-            StackTest();
+            StackTest(stackMode >= 2);
             return;
         }
 
@@ -945,7 +947,7 @@ public static class Program
     //       once) so the report shows how long a stack actually lingers.
     // Non-vacuity guard (the PAIRTEST precedent): a run with no display returns before frame one
     // and would "pass" on zero gameplay, so PASS also requires a real sample of move steps.
-    static void StackTest()
+    static void StackTest(bool wide = false)
     {
         Stats.Reset();
         Stats.Enabled = false;         // pure invariant sweep; no telemetry needed
@@ -979,14 +981,15 @@ public static class Program
         // one leg = the first mission of a campaign pinned to (objective, heat), dumb autopilot
         // (the reveal-scatter path is policy-independent, and the dumb bot blunders into pods
         // more often, which is exactly the trigger we want to sample).
-        void Leg(Objective obj, int heat, int slot)
+        void Leg(Objective obj, int heat, int slot, bool smart)
         {
             Environment.SetEnvironmentVariable("SIGHTLINE_HEAT", heat.ToString());
             Util.Reseed(70000 + slot);
-            var game = new Game { NoPersist = true, AutoPlay = true, ForcedObjective = obj };
+            var game = new Game { NoPersist = true, AutoPlay = true, SmartPlay = smart, ForcedObjective = obj };
             game.StartMission(1);
             int frame = 0;
-            const int legCap = 6000;
+            int legCap = wide ? 20000 : 6000;
+            int missionsThisLeg = 0;
             while (!Raylib.WindowShouldClose())
             {
                 game.Update(1f / 60f);
@@ -1013,25 +1016,29 @@ public static class Program
                 foreach (var k in stale) openEpisodes.Remove(k);
 
                 frame++;
-                // stop the moment the FIRST mission resolves (win advances RunState.Mission)
                 if (game.Phase == Phase.Lose || game.Phase == Phase.Win) break;
-                if (game.RunState != null && game.RunState.Mission > 1) break;
+                // narrow sweep: stop the moment the FIRST mission resolves (a win advances
+                // RunState.Mission). Wide sweep: play the whole campaign out.
+                int cleared = game.RunState != null ? game.RunState.Mission - 1 : 0;
+                if (cleared > missionsThisLeg) missionsThisLeg = cleared;
+                if (!wide && missionsThisLeg >= 1) break;
                 if (frame >= legCap) break;
             }
             foreach (var kv in openEpisodes) if (kv.Value > longestFrames) longestFrames = kv.Value;
             openEpisodes.Clear();
-            missionsSeen++;
+            missionsSeen += Math.Max(1, missionsThisLeg + (game.Phase == Phase.Lose ? 1 : 0));
         }
 
         var objs = new[] { Objective.Eliminate, Objective.Hack, Objective.Evac, Objective.Escort,
                            Objective.Sabotage, Objective.Rescue, Objective.Defend, Objective.Decapitate };
         int s2 = 0;
-        foreach (int heat in new[] { 0, 2 })
-            foreach (var o in objs)
-            {
-                if (Raylib.WindowShouldClose()) break;
-                Leg(o, heat, s2++);
-            }
+        foreach (bool smart in wide ? new[] { false, true } : new[] { false })
+            foreach (int heat in new[] { 0, 2 })
+                foreach (var o in objs)
+                {
+                    if (Raylib.WindowShouldClose()) break;
+                    Leg(o, heat, s2++, smart);
+                }
 
         MoveStepAnim.StackProbe = null;
         Util.Reseed(0);
@@ -1039,7 +1046,7 @@ public static class Program
         Renderer.UnloadNoise();
         Raylib.CloseWindow();
 
-        Console.WriteLine($"STACKTEST: missions={missionsSeen} moveSteps={steps} " +
+        Console.WriteLine($"STACKTEST: mode={(wide ? "wide" : "narrow")} missions={missionsSeen} moveSteps={steps} " +
                           $"stepCollisions={stepHits} ({(steps > 0 ? 100.0 * stepHits / steps : 0):0.000}%) " +
                           $"overlapEpisodes={episodes} overlapFrames={framesWithOverlap} longestEpisodeFrames={longestFrames}");
         foreach (var e in examples) Console.WriteLine("STACKTEST:   e.g. " + e);
