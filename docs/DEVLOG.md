@@ -3228,9 +3228,12 @@ well under units (146).
   which is run separately), each under `xvfb-run` with an isolated `XDG_CONFIG_HOME`.
 - **`SIGHTLINE_PAIRTEST=1` -> PASS** (byte-identical CRN legs).
 - **Autoplay x5** clean — LOSE/LOSE/LOSE/WIN/WIN, no exceptions, no TIMEOUT.
-- **`SIGHTLINE_BALANCE=10` byte-identical to base** (`runs=20` asserted on both). Expected:
-  `BalanceBatch` returns before the window is ever created, so the renderer is not on that
-  path at all — the batch is the proof that nothing gameplay-shaped moved.
+- **`SIGHTLINE_BALANCE=10` identical to base.** Both batches asserted `runs=20 missions=81`;
+  the two 532-line reports `diff` clean once the five wall-clock timing lines are stripped —
+  same 50% win rate, same greedy/sloppy 70/30 split, same action mix, same per-perk /
+  purchase / arena tables. Expected: `BalanceBatch` returns before the window is ever
+  created, so the renderer is not on that path at all. The batch is the proof that nothing
+  gameplay-shaped moved.
 - Captures **read and judged**: all 8 biomes before/after, before/after pair sheets for
   ARID / ASH / MAGMA / VOID, an `SIGHTLINE_ELEV` plateau close-up against a stashed base
   build, a `SIGHTLINE_CB=1` pass on STEEL and ASH, and a 4-biome downscaled+blurred
