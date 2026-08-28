@@ -1527,6 +1527,50 @@ container suspensions (Jul 6→13→21→22→Aug 6) wiped every scratchpad copy
   +6 COMBATTEST legs); Pinned comment truth. Verified: Release 0/0, 5 suites incl. new legs,
   INTRO-STASH, autoplay x5.
 
+- **FUL-11 CEREMONY** (959f5b2 + docs; wave dev on wt-ful11, survived a 3-week container
+  suspension mid-measurement — commit-and-push-per-step meant zero code loss). The finale gets a
+  ceremony and Wardens gets a real kit:
+  * **Presentation**: m6 opens on a danger-red intro card naming the hunt ("FINALE - KILL THE
+    WARLORD") with the kit's counter-verb clause on the W11 sub-line (Run.FinaleKitClause — ONE
+    source of truth for both ceremony sites); a one-shot HVT SIGHTED banner fires on the NEW
+    CONTACT lane when the boss first goes Active (consumes the ELITE contact slot — no
+    double-banner); the m6 top bar rides a red-tinged plate + red hairline + a red FINALE prefix
+    (value/alpha match the normal plate — hue only, squint-safe); the finale boss carries a
+    champion ground ring/aura (Pal.Elite double ring + soft wash, drawn under the gold HVT mark,
+    all alert states) keyed on a new transient Unit.IsBoss set only in MakeFinaleBoss —
+    presentation-only, zero combat/AI reads.
+  * **Wardens retinue**: MakeFinaleRetinue's null Wardens case becomes SIGNIFER (WARBRINGER, in
+    the boss's own pod 0 — the formation cannot rout until the banner falls) + ORDERLY (MEDIC —
+    contests the burst-down verb; chosen over the spec's CUSTODIAN option because the boss node
+    is always Decapitate and a keeper would be a dead mechanic there, the TERROR lesson).
+    Cost-neutral: replaces the two cascade-fill slots; MakeHostile draws zero RNG exactly like
+    the FactionRoster fill it replaced, so the world-build stream is unchanged. A deterministic
+    (no-RNG, post-all-draws) relocation pass walks Cheb rings out from the boss so the banner
+    aura (range 4) covers the boss AS SPAWNED — shuffled rows previously allowed Cheb 5-10.
+  * **Verified**: SIGHTLINE_FUL11PROBE=20 (new window-free hook): retinue slots present at low
+    heat (h0 finale = 6 bodies incl. boss+retinue; h4 = 9), bannerDistMax 4, banner cap holds,
+    per-kit boss names — PASS across 3 kits x 2 heats. COMBATTEST/AITEST/MORALETEST/SAVETEST
+    PASS; Release 0/0; autoplay x3 clean (WIN m6 / LOSE m4 / smart WIN m6 — two full runs
+    exercised the whole ceremony path). Shots: intro_card / hvt_aura / red_topbar /
+    boss_sighted (untracked, forwarded to the owner).
+
+## Measured (FUL-11 per-kit m6 conditional — h0, SIGHTLINE_FINALE-pinned, 3x SIGHTLINE_BALANCE=10
+chunks per kit on shared CRN slot sets 0-9/10-19/20-29, greedy+sloppy pooled)
+| slots | WARDENS | LEGION | SYNDICATE |
+|---|---|---|---|
+| 0-9 | 94% (16/17) | 81% (13/16) | 71% (12/17) |
+| 10-19 | 64% (9/14) | 93% (13/14) | 79% (11/14) |
+| 20-29 | 89% (16/18) | 89% (16/18) | 94% (17/18) |
+| **pooled** | **83.7% (41/49)** | **87.5% (42/48)** | **81.6% (40/49)** |
+
+All three kits in the 78-88 goal band; pooled 84.2% (123/146) inside 82±4; the Wardens weakest
+cell moved 73 → 83.7 with NO count/stat tuning — the support-heavy retinue swap (banner+medic in
+for ~two cascade shooters at bump 5) traded alpha damage for a target-priority puzzle and landed
+in band on its own. Chunk-level variance is large (Wardens 64-94 across slot sets — world-driven,
+the same reason W5 adopted CRN pairing), so per-kit drift stays a full-ladder-batch watch item
+(FUL-13 baseline inherits these pinned chunks' method). h0 run completion across the nine chunks:
+45-85% (chunk n=10 each; the 10-19 slot set is simply a harder world draw for every kit).
+
 ## Measured (FUL-2 LOS budget A/B — CRN slots, h0, N=10/leg, pre=16e24e9 vs post)
 | metric | pre | post | verdict |
 |---|---|---|---|
