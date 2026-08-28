@@ -876,15 +876,22 @@ of record (container suspensions have wiped every scratchpad copy — docs are t
       Budget: h0 completion 60 → 50/45 (−10 to −15, OUTSIDE ±7, reported not hidden): the drag
       is the newly-EXPOSED Defend/mid-Decapitate cells on ~every route, not the arenas —
       FUL-13's re-baseline input (full table in docs/DEVLOG.md).
-- [ ] **FUL-6 CRITICAL MASS** (P6, L). Pods of 3 (PodPlan greedy split, m3+; m1-2 and the finale
-      keep i/2 — FUL11PROBE stays green by construction) + pod cohesion (anchor-row clumping, zero
-      extra draws) + linked activation ("HEARD THE GUNS": ActivatePod links the nearest dormant pod
-      within 6 tiles to Suspicious, confirming unseen next turn — one link per wake, no chains) +
-      LAST STAND wave sub-pods (FUL-4's 100+/podded pattern; elite stays exempt; TERROR un-excluded
-      from endless boons) + the FIELD DRILLS rework (verdict consumed: +1 move after a drag/vault,
-      transient DrilledThisTurn, honest grant-site proc). RCL re-measured, not touched. Measured
-      wave: fresh same-slot R0 first, one lever per round, dip budget <=8, GRENADE >=10 predicted.
-      SIGHTLINE_PODTEST + PODSHOT. Full spec: docs/plans/FUL-6-critical-mass-FUL-7-last-light.md.
+- [x] **FUL-6 CRITICAL MASS** (P6, L) — **landed** (wt-ful6, base 588d781). Pods of 3 (PodPlan
+      greedy split, m3+; m1-2 and the finale keep i/2 — FUL11PROBE green by construction) + pod
+      cohesion (anchor-row clumping, zero extra draws) + linked activation ("HEARD THE GUNS":
+      ActivatePod links the nearest dormant pod within 6 tiles to Suspicious, confirming unseen
+      next turn — one link per wake, no chains, zero RNG) + LAST STAND wave sub-pods (100+/sealed;
+      elite exempt; TERROR un-excluded from endless boons) + the FIELD DRILLS rework (+1 move
+      after a drag/vault, grant-site proc). Measured wave (fresh same-slot R0 first, one lever
+      per round): the full stack breached the dip budget (-12.5 vs <=8), so **escalation lever 1
+      landed** (count-1 on 3-pod missions) -> combined h0 completion 40% == R0's 40% (dip 0, in
+      budget). GRENADE >=10 prediction did NOT materialize (verdict recorded: woken pods scatter
+      out of the bot's covered-cluster frag window; pre-fragging dormant clumps stays declined);
+      BRACE held >=30; TRR procs 18-31 (rout economy livelier at 3-pods); RCL now procs 1-3/batch
+      (no longer structurally dead); FDR 0 procs in wave batches (0 boon-held drags in those
+      worlds — mechanism PODTEST-pinned; FUL-7's drag stage prices it). Endless depth median
+      5.5-6 (in the APEX 5-6 band), zero cap hits. SIGHTLINE_PODTEST + PODSHOT. Rounds table in
+      docs/DEVLOG.md. Full spec: docs/plans/FUL-6-critical-mass-FUL-7-last-light.md.
 - [ ] **FUL-7 LAST LIGHT** (P7, L — after FUL-6; fresh post-FUL-6 reference). Lethal damage on a
       non-VIP soldier becomes a 3-turn BLEED-OUT (once per soldier per mission; AoE stays lethal;
       enemies never direct-fire the downed — the telegraphed-AoE valve keeps stakes): all through
