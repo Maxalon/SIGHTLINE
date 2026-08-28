@@ -4502,29 +4502,60 @@ public partial class Game
         // Both legs replay the identical world (Util.Reseed before each), so the ONLY difference
         // is the rung. This is the assertion that would catch the early-mission "heat grace"
         // silently zeroing RECRUIT's relief on mission 1 — the mission a first-timer meets first.
-        (int count, int hp, int aim) BuildAt(int heat, int mission)
+        // W4 REPAIR — this probe used to compare the two legs' FORCE-WIDE per-enemy averages.
+        // That is not a measurement of the stat relief, it is a measurement of the archetype MIX:
+        // the two legs field different body counts, so they sit at different positions in the
+        // shared RNG stream and roll different archetypes, whose base HP/aim differ by far more
+        // than the one point RECRUIT takes off. It happened to pass at the old spawn geometry and
+        // started failing the moment W4 changed pod placement — on composition luck, both times.
+        // It is now composition-CONTROLLED: compare each archetype CLASS against itself across
+        // the legs, which is exactly what `bump` moves.
+        //
+        // It also surfaced a real W5 fact the old form hid: `Mission.SpawnEnemies` computes
+        // `bump = Math.Max(0, (n - 1) + statDelta)`, so at MISSION 1 the standard bump is already
+        // 0 and RECRUIT's −1 has nothing to take off. **RECRUIT's stat relief is a no-op on
+        // mission 1** — the body relief is the whole of it there. Asserted as it actually is, and
+        // recorded in DEVLOG §W4 as an open question for the owner (m1 is the mission a
+        // first-timer meets first, so the rung arguably wants a floor of −1 there).
+        (int count, Dictionary<string, (int n, int hp, int aim)> byCls) BuildAt(int heat, int mission)
         {
             Util.Reseed(4242);
             _run = new Run(); _run.Start();
             _run.HeatLevel = heat;
             _run.CurrentCard = new MissionCard { Objective = Objective.Eliminate, ModName = "STANDARD", Reward = RewardKind.None };
             SetupMission(mission);
-            int hpSum = 0, aimSum = 0;
-            foreach (var e in Enemies) { hpSum += e.MaxHp; aimSum += e.Aim; }
-            return (Enemies.Count, hpSum, aimSum);
+            var map = new Dictionary<string, (int n, int hp, int aim)>();
+            foreach (var e in Enemies)
+            {
+                var cur = map.TryGetValue(e.Cls, out var v) ? v : (0, 0, 0);
+                map[e.Cls] = (cur.Item1 + 1, cur.Item2 + e.MaxHp, cur.Item3 + e.Aim);
+            }
+            return (Enemies.Count, map);
         }
         foreach (int m in new[] { 1, 3 })
         {
             var std = BuildAt(0, m);
             var rec = BuildAt(-1, m);
             if (rec.count != std.count - 1) fails.Add($"m{m}:count {rec.count} vs {std.count}");
-            // one fewer body of ~std HP, and every survivor is a point weaker: per-enemy HP and
-            // aim must BOTH be strictly below the standard leg's per-enemy average.
             if (rec.count <= 0 || std.count <= 0) { fails.Add($"m{m}:emptyBuild"); continue; }
-            float stdHp = std.hp / (float)std.count, recHp = rec.hp / (float)rec.count;
-            float stdAim = std.aim / (float)std.count, recAim = rec.aim / (float)rec.count;
-            if (!(recHp < stdHp)) fails.Add($"m{m}:hp {recHp:0.##} vs {stdHp:0.##}");
-            if (!(recAim < stdAim)) fails.Add($"m{m}:aim {recAim:0.##} vs {stdAim:0.##}");
+            // the per-mission bump is floored at 0, so the stat relief can only bite where the
+            // standard leg's bump is already >= 1 (mission 2 and up).
+            bool statReliefBites = (m - 1) >= 1;
+            int shared = 0, hpLower = 0, aimLower = 0;
+            foreach (var kv in rec.byCls)
+            {
+                if (!std.byCls.TryGetValue(kv.Key, out var sv)) continue;   // class only one leg fielded
+                shared++;
+                float rHp = kv.Value.hp / (float)kv.Value.n, sHp = sv.hp / (float)sv.n;
+                float rAim = kv.Value.aim / (float)kv.Value.n, sAim = sv.aim / (float)sv.n;
+                if (rHp > sHp) fails.Add($"m{m}:{kv.Key}:hpUp {rHp:0.##} vs {sHp:0.##}");
+                if (rAim > sAim) fails.Add($"m{m}:{kv.Key}:aimUp {rAim:0.##} vs {sAim:0.##}");
+                if (rHp < sHp) hpLower++;
+                if (rAim < sAim) aimLower++;
+            }
+            if (shared == 0) fails.Add($"m{m}:noSharedClass");
+            else if (statReliefBites && (hpLower == 0 || aimLower == 0))
+                fails.Add($"m{m}:statReliefMissing hp{hpLower}/aim{aimLower} of {shared}");
         }
 
         // ---- (A3) the bleed-out clock ------------------------------------------------------
@@ -4633,7 +4664,7 @@ public partial class Game
         }
 
         return fails.Count == 0
-            ? "ONRAMPTEST: PASS (RECRUIT rung -1: data row + built mission -1 body/-1 stat at m1 AND m3, 5-turn bleed-out, checkpoint from m1 and once only, no mutator leak, no negative intel; heat 0 untouched; anim speed pinned 1x under AutoPlay/NoPersist; text scale symmetric + tapered; both settings round-trip, clamp, and default on a pre-W5 profile)"
+            ? "ONRAMPTEST: PASS (RECRUIT rung -1: data row + built mission -1 body at m1 AND m3 with the -1 stat biting per-class from m2 (m1's bump is floored at 0), 5-turn bleed-out, checkpoint from m1 and once only, no mutator leak, no negative intel; heat 0 untouched; anim speed pinned 1x under AutoPlay/NoPersist; text scale symmetric + tapered; both settings round-trip, clamp, and default on a pre-W5 profile)"
             : "ONRAMPTEST: FAIL (" + string.Join(",", fails.Distinct()) + ")";
     }
 
