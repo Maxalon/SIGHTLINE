@@ -1894,3 +1894,79 @@ A/A CRN identity, hence hash-not-draw everywhere); autoplay x3 clean (no excepti
   fresh slot base (SIGHTLINE_BALANCE_BASE) before reading it as policy.
 - Never rebuild while a batch runs — dotnet's in-place DLL overwrite races the mapped image of
   the running process (observed surviving, not guaranteed).
+
+# PROGRAM FULCRUM — FUL-8 PIKEMAN (2026-08-28, wave dev on wt-ful8)
+
+**Goal.** The SARISSA/"PIKEMAN" — a Wardens lane-holder that plants a braced foe-red focus cone
+over a movement lane and STAGGERS the first soldier through. The 21-archetype roster contested HP,
+information, morale and progress; nothing contested MOVEMENT. This piece does, and it teaches the
+player's own BRACE [B] by mirroring it exactly. Binding spec:
+docs/plans/FUL-8-pikeman-FUL-10-forks.md §FUL-8 (every seam pre-verified against the tree).
+
+## What shipped (base e3bcb3b, includes FUL-5)
+- **Zero new combat machinery, as specced.** The enemy plant arms the exact player flag set
+  (OnOverwatch+OwBrace+OwFocused+OwDir) and the existing OnUnitEnteredTile reaction path does the
+  rest — halved no-crit stagger (Combat.BraceFullDamage is Team.Player-gated, so an enemy brace
+  ALWAYS takes the halving), cone gate, one-reaction cap, BeginTurn one-round lifetime.
+- **Ai.cs** — dedicated PIKEMAN branch after CUSTODIAN: opportunism first (a >=65% shot on an
+  EXPOSED soldier beats planting — holder, not statue), lane anchor = nearest non-VIP soldier,
+  plant only within cone reach (MaxRange+2), plant tile from `reach` keeping the action, scored
+  SPOTTER-style (cover*16 + height*8 − |dn−4|*1.4 − 22 if dn<=2) with a hard LoS-to-anchor filter
+  (a blind plant holds nothing). Gated e.Routed==0 (W8 rule) + !Disoriented (FLASH counterplay)
+  + Ammo>0; every failure falls through to the generic loop — never a dead turn.
+- **Game.cs exec** (ActAfterMove, before ShootTarget, SiegeCharge template): arms the flags,
+  sets Facing down the lane (the silhouette's pike IS the direction read), "BRACED" pop.
+- **Renderer** — DrawOverwatchThreat gained the cone TRUTH GATE (`w.OwFocused && !InOwCone →
+  skip`): zero-regression today, and the red wash now mirrors the reaction gate exactly. The
+  focus-cone edge-rays + chevron factored into shared DrawConeRays — drawn gold for the player,
+  foe-red for a braced+focused enemy, one vocabulary that can't drift. New PIKEMAN silhouette
+  (squat planted body + raised diagonal pike + crossbar lugs; flows into DrawCodexGlyph). Honesty
+  ride-along: the STAGGERED pop was Pal.Good unconditionally — now colored by victim team.
+- **Codex** — SARISSA/PIKEMAN bestiary row (counterplay: break its watch, go around the cone, or
+  feed it a cheap step) + "PIKEMAN" in the CODEXTEST required array. NEW CONTACT banner + enemy-ID
+  hovers automatic off the row.
+- **Spawns** (CRN draw-count neutral — exactly one RandF per spawn, only windows moved):
+  Wardens re-slice SNIPER 24→20 / MEDIC 14→12 / CUSTODIAN 8→6, **PIKEMAN 10% m2+** (m1 routes
+  SCOUT); default cascade m3+ ~3% mid-tail carved from SCREENER/BOMBARD/WARBRINGER (4/4/3 →
+  3/3/2), the 1% GRUNT/SCOUT/BRUISER tails and all first-appearance tiers unchanged. Defend rich
+  waves + LAST STAND inherit via SelectArchetype (observed in wave logs); no demote — a wave
+  PIKEMAN plants in plain sight. Stats: HP 7 / Aim 58 / Mob 5 / SMG (the cone is the pike, the
+  gun is flavour; W8 Wardens-support band).
+- **Bot** — `InEnemyBraceLane(x,y)` mirrors the reaction gate exactly (alive+active, armed watch,
+  unspent reaction, ammo, range+LoS(commanding), cone); TileExposure +18 (between an exposed gun
+  and the siege 30 — a stagger costs a turn, not a life). SmartApproach/ScoreDestTile/SmartStep
+  route around lanes with no other bot change.
+- **Harness** — SIGHTLINE_PIKETEST (plant emits Brace toward the anchor + exec arms the flag set;
+  the ==2 halving pin — mover HUNKERS so crit is structurally 0, making Math.Max(1,4/2) exact and
+  the no-crit assert honest rather than re-staged-away; cone blindness; a player stagger-back
+  drops the plant; Disoriented/Routed never plant) + SIGHTLINE_PIKESHOT (stages a planted lane
+  over the squad's approach).
+
+## Measured (paired slots; R0 = base e3bcb3b in a scratch clone, same SIGHTLINE_BALANCE_BASE slots)
+- **Completion** (h0 pooled n=40 matches/side, slots 0-19): R0 30% → R1 27.5% (chunks 40%/15% —
+  high slot variance, pooled inside the ±5 gate). h4 (n=20, slots 0-9): 35% → 40%.
+- **Composition** (R1): PIKEMAN 3%/3%/4% of faction-stamped spawns (h0a/h0b/h4) ≈ **10% of
+  Wardens fights** (Wardens ≈ 1/3 of stamped spawns), 1-3% of the default cascade (m3+ window
+  dilluted by m1-2 fights). R0 logs contain ZERO PIKEMAN lines — the baseline is honest.
+- **Route-tax gate** (the FUL-5 worry: the bot now paths AROUND enemy lanes): unpinned legs
+  showed Escort +1.2t pooled on n=6-9 — re-measured with whole-run objective pins at n≈90
+  missions/side: **Escort 5.9t/99% → 5.6t/100%, Evac 5.5t/97% → 5.8t/98%** — both inside the
+  +1t budget. The lane taxes routes; it does not stall them. The unpinned spike was slot noise.
+- Gates: Release 0/0; PIKETEST+STAGGERTEST+COMBATTEST+AITEST+SAVETEST+CODEXTEST PASS; autoplay
+  x7 no-exception/no-TIMEOUT. Save-compat: NONE touched (enemies never serialized; Cls is a
+  string; no enum appended). Callsign SARISSA (soldier pool owns "PIKE" — verified collision).
+
+## Gotchas / notes
+- **The ==2 halving pin needs crit structurally impossible, not re-rolled away.** The brace
+  halving OVERWRITES res.Crit at queue time, so a test can't tell a halved crit (4*1.5/2 = 3)
+  from a bug by the flag — the mover HUNKERS (Combat zeroes crit vs hunkered) so any connect is
+  exactly 2 and the assert never selects its own evidence.
+- **Screenshot staging needs the lane ON the squad** — a live-position plant reads as a distant
+  red thread; DebugPikemanLane teleports the watcher ~6 tiles off a soldier (WAVEBANNER staging
+  precedent) so wash+rays+chevron+BRC all land in one frame.
+- **A live-board Wardens shot is findable without new code:** the top-bar hostiles label reads
+  the faction name (Hud.cs), so loop SIGHTLINE_MISSION=3 SIGHTLINE_WAKE=1 shots until "WARDENS"
+  + a pike silhouette shows (dormant pods draw as "?" — WAKE is required to see archetypes).
+- Optional spec ride-along NOT taken: force-showing the BRACE field tip on first PIKEMAN
+  sighting (UpdateBraceCallout force path) — left for a teaching pass; the codex row + NEW
+  CONTACT banner already carry the mirror lesson.

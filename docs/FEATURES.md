@@ -379,6 +379,15 @@ seeds (mix of WIN/LOSE, no exceptions):
   its remaining actions THIS turn (its post-move shot/grenade is denied) — for reduced, non-crit damage. Trade a
   kill you won't land for tempo — an earnable comeback lever. One reaction/soldier/turn; green "BRC" badge + bracket
   icon. (`Unit.OwBrace`, `ShotAnim.Stagger`, `Game.DoBrace`; `SIGHTLINE_STAGGERTEST`.)
+- **PIKEMAN "SARISSA" — the enemy-side BRACE (FUL-8):** a Wardens lane-holder (10% m2+ faction slot;
+  ~3% default-cascade m3+ tail) that plants a braced focus cone over a movement lane and STAGGERS the
+  first soldier through — halved, no-crit damage via the IDENTICAL team-symmetric reaction path, so it
+  teaches the player's own BRACE by mirroring it. Foe-red cone wash + edge rays + chevron reuse the
+  player's gold FOCUS vocabulary; the enemy threat wash is cone-truth-gated; the STAGGERED pop colors
+  by victim team. Counters: kill it, stagger it back, FLASH/SHOVE it, rout its pod, smoke/LoS-break
+  the lane, walk outside the 90° cone, or feed it ONE cheap step (one reaction/round). The autopilot
+  prices live lanes at +18 TileExposure and routes around them. (`Ai.Plan` PIKEMAN branch,
+  `Game.InEnemyBraceLane`; `SIGHTLINE_PIKETEST` / `SIGHTLINE_PIKESHOT`; codex row SARISSA.)
 - **Enemy pod MORALE / ROUT:** pods carry shared morale; killed down to ≤ half their spawn strength, the survivors
   BREAK and ROUT for ~2 turns — flee toward their own edge, drop overwatch, and shoot wild (−18 aim) — then rally.
   Focus-firing a pod down is a genuine comeback: the second kill panics the pod. Green "ROUT" tag + "POD ROUTED"
