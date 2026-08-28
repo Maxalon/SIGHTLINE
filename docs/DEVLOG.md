@@ -4296,12 +4296,14 @@ completion, exists only at h0. It is recorded in ROADMAP for whoever picks the L
 | no objective mean past ~10 turns | <= ~10 | **BREACHED at baseline**: Escort 12.57, Rescue 15.33 (h0); Escort 11.34 (h4) | h0 max **8.90** (Defend); h4 Escort **11.85** | **MET at h0** (a 6.4-turn repair), **BREACHED at h4** (Escort, +0.5 on a cell that was already breaching) |
 | lead-swings/match not below 0.84 | >= 0.84 | 0.72 (h0) / 0.64 (h4) | **0.79 / 0.68** | **MISSED vs X1's published 0.84** — which this tip had already lost before W4 touched it; the wave improved both rungs (+0.07 / +0.04) |
 | `SIGHTLINE_PAIRTEST` | PASS | PASS | **PASS** | **MET** — the wave's critical gate |
-| autoplay x10 | no exception, no TIMEOUT | — | **4 WIN / 6 LOSE, max 13216 frames vs the 20000 cap** | **MET** |
+| autoplay x10 | no exception, no TIMEOUT | — | **no exception, no TIMEOUT; max 13484 frames vs the 20000 cap** | **MET** |
 
 ## VERIFICATION
 - `dotnet build -c Release` — **0 warnings / 0 errors**.
-- `bash scripts/qa-sweep.sh --full` — **44/44 PASS** at the shipped defaults (see the ONRAMPTEST
-  note below), autoplay x3 clean.
+- `bash scripts/qa-sweep.sh --full` — **44/44 PASS, 0 FAIL** at the shipped defaults (it caught
+  one real defect first — see the ONRAMPTEST note below), autoplay x3 clean. PODTEST /
+  ONRAMPTEST / EXPOSURETEST / PAIRTEST re-run individually after the last (signature-only)
+  refactor: all four PASS.
 - **`SIGHTLINE_PAIRTEST=1` under `xvfb-run` — PASS** with the whole W4 surface enabled
   (`DEPLOYMIX=3,3,1,3 PODUNIFORM=1 RIMWAVES=1`): h0 slot0 and h4 slot1 both byte-MATCH. This is
   the gate the wave lived or died on — a shape derived with one extra RNG draw would have broken
@@ -4311,9 +4313,12 @@ completion, exists only at h0. It is recorded in ROADMAP for whoever picks the L
   the 200 map-generating seeds (8/8 for the three directional shapes, 3/8 for ENVELOP by design),
   plus explicit assertions that `DeployFor` consumes **zero `Util.Rng` draws**, is deterministic,
   and never deals ENVELOP to an objective that forbids it.
-- **Autoplay x10** with the full surface on — 4 WIN / 6 LOSE, no exceptions, **no TIMEOUT**, max
-  13216 frames against the 20000 cap. New geometry was the wave's biggest pathfinder risk; it
-  stranded nothing.
+- **Autoplay x10**, twice. First with the full surface pinned by env (`DEPLOYMIX=3,3,1,3
+  PODUNIFORM=1 RIMWAVES=1`): 4 WIN / 6 LOSE, max 13216 frames. Then again on the **shipped
+  defaults** with no env at all: 1 WIN / 9 LOSE, max 13484 frames. Twenty matches, **no
+  exceptions and no TIMEOUT** in either set, against a 20000-frame cap. (The win split is the
+  weak smoke-test autopilot's, not a balance number — the contract is "no exception, no
+  TIMEOUT".) New geometry was the wave's biggest pathfinder risk; it stranded nothing.
 - **Screenshots** (archived downscaled in `docs/measurements/w4/shots/`): all four openings on
   one seed/mission/arena, plus DEFEND under ENVELOP. Read and judged — the board reads correctly
   in every shape, and the difference is legible at a glance: FRONTAL opens concealed with no
