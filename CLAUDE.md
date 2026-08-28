@@ -329,6 +329,17 @@ funnel, so a trade takes ~2 hits instead of 1 (Eliminate 3.60 → 5.30t, lead-sw
 0.60 → 0.84) with every measured rung still in band. Its raw chunk logs live in
 `docs/measurements/x1/`.
 
+RESONANCE **W4 "THE SECOND AXIS"** then made the OPENING GEOMETRY a variable: four deployment
+shapes (FRONTAL / PINCER / CROSSFIRE / **ENVELOP**, a centre-deploy surrounded opening gated to
+Eliminate/Decapitate/Defend) dealt per mission from `(MapSeed, mission)` with **zero extra RNG
+draws**, plus uniform pods. It **missed** its decision-density gates and says why with new
+instrumentation: `choices/ARMED-soldier-turn` is a **near-invariant at ~1.6** across five
+structurally different levers, because `CountMeaningfulChoices`' two halves ("which target?" and
+"where do I stand after?") respond to threat with **opposite signs** — chase it with a
+positioning lever at constant threat, never another threat lever (DEVLOG §W4). It also
+re-measured the ladder and found it **20+ points BELOW the FUL-13 band at h0 and h4 before any
+lever** (32.5% / 12.5% vs 55±8 / 30±8) — the biggest open number in the project.
+
 **Three doc over-claims were found and corrected** — they are the reason this project needs the
 "no over-claims" rule enforced hard: juice was graded "Strong" partly on audio nobody had heard;
 onboarding was graded "Addressed" when 12 of 14 verbs were untaught; and a published
