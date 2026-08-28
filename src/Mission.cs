@@ -72,7 +72,7 @@ public static class Mission
     public static void Build(Grid grid, List<Unit> players, List<Unit> enemies, int missionNum,
                              List<(int x, int y)> evac = null, (int x, int y)? terminal = null,
                              int enemyDelta = 0, int statDelta = 0, List<(int x, int y)> sabotage = null,
-                             int dmgDelta = 0, bool defend = false)
+                             int dmgDelta = 0, bool defend = false, int defendKeep = 0)
     {
         enemies.Clear();
         grid.ClearSmoke();
@@ -120,7 +120,7 @@ public static class Mission
         // a lighter hostile force (the loud-tempo IS the difficulty) + covered fighting positions
         // at each site (below) so the split squad can hold.
         bool sabotageObj = sabotage != null && sabotage.Count > 0;
-        SpawnEnemies(grid, enemies, missionNum, evacSet, enemyDelta, statDelta, sabotageObj, dmgDelta, defend);
+        SpawnEnemies(grid, enemies, missionNum, evacSet, enemyDelta, statDelta, sabotageObj, dmgDelta, defend, defendKeep);
 
         var occupied = new HashSet<(int, int)>();
         foreach (var u in players) occupied.Add((u.X, u.Y));
@@ -410,7 +410,7 @@ public static class Mission
 
     static void SpawnEnemies(Grid grid, List<Unit> enemies, int n, HashSet<(int, int)> evac,
                              int enemyDelta = 0, int statDelta = 0, bool sabotage = false,
-                             int dmgDelta = 0, bool defend = false)
+                             int dmgDelta = 0, bool defend = false, int defendKeep = 0)
     {
         // Headcount cap raised 10 -> 12 so the top-Heat "+enemy" rungs aren't silently wasted
         // (the +1/+1 from RELENTLESS/OVERWHELMING used to clip at 10 on later missions). 12 still
@@ -432,7 +432,13 @@ public static class Mission
         // the INITIAL screen PLUS every SpawnDefendWave reinforcement, so an untrimmed opener
         // double-counts the objective's difficulty — the timer IS the pressure. Mirror the
         // sabotage trim, one step deeper (waves keep arriving all mission; sabotage gets none).
-        if (defend) count = Math.Max(3, count - 3);
+        // FUL-13 R2 (defendKeep): the FLAT −3 was silently EATING the heat ladder's EnemyDelta
+        // (+2..+4 bodies at rungs 4-8) — with the timer bounding total exposure, Defend became
+        // the top rungs' free square (measured: 82% h0 -> 97% h6 / 91% h8 unpinned; 96% n=89
+        // defend-pinned h8, still 95-100% after the R1 wave-stat lever alone). defendKeep gives
+        // back half the GRACED heat bodies (0 at h0-2, 1 at h4-6, 2 at h8; the m1-2 grace zeroes
+        // it with heatEnemy) so heat reaches the hold without re-breaking FUL-4's h0 repair.
+        if (defend) count = Math.Max(3, count - 3 + Math.Clamp(defendKeep, 0, 2));
         // Final mission (the WARLORD boss): de-stack the force. This was the core of the ~90% m6
         // loss wall -- the squad cleared m1-5 (m5 often wins ~100%, partly because it isn't always
         // forced Eliminate) then got alpha-struck on m6's forced full-clear. The compounding cause:

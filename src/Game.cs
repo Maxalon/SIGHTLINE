@@ -1364,7 +1364,16 @@ public partial class Game
         Mission.DeckSeed = _run != null ? _run.MapSeed : 0;
         Mission.Build(Grid, Players, Enemies, n, EvacZone, reserve,
                       enemyDelta, statDelta, HasSabotage ? SabotageSites : null, heatDmg,
-                      Objective == Objective.Defend);   // FUL-4: trim the opener — waves are the force
+                      Objective == Objective.Defend,    // FUL-4: trim the opener — waves are the force
+                      // FUL-13 R2: give the hold back HALF the GRACED heat bodies (heatEnemy is
+                      // already m1-2-graced above) so FUL-4's flat trim stops eating the heat
+                      // ladder's EnemyDelta. Floor division is DELIBERATE: the R3 probe (ceil —
+                      // h6 keep 1->2) measured NO movement at its target (pinned h6 Defend 97%,
+                      // n=89, unchanged) while costing the h4 spot chunk −15 (its m2 ripple), so
+                      // it was reverted — at h6 extra bodies feed the rout economy instead of
+                      // pressuring the hold; it's h8's +4 stats that bite. The residual h6 cell
+                      // is recorded in DEVLOG §FUL-13 with this mechanism.
+                      Objective == Objective.Defend ? heatEnemy / 2 : 0);
         // PROGRAM HORIZON W2: Mission.Build laid out the arena + spawned a normal campaign force.
         // For LAST STAND we don't want that force — clear it and drop in the first horde wave (the
         // arena/terrain stays). SpawnEndlessWave uses the SpawnReinforcements machinery.
@@ -6348,6 +6357,10 @@ public partial class Game
         // FUL-10: a scar cure needs a scarred soldier; a release must leave a roster behind
         if (ChoiceHas(ch, EventOutcomeKind.CureScar) && !_run.Squad.Exists(u => u.Scars.Count > 0)) return false;
         if (ChoiceHas(ch, EventOutcomeKind.ReleaseSoldier) && _run.Squad.Count <= 1) return false;
+        // FUL-13: a GrantPrep arm with no telegraphed faction is a dead buy (informant's
+        // 12-intel dossier for a report line) — illegal, so the HUD greys it and the bot
+        // never spends into it. One rule, EventCatalog.PrepDead (EVENTTEST-pinned).
+        if (EventCatalog.PrepDead(_run, ch)) return false;
         return true;
     }
 
@@ -6388,9 +6401,14 @@ public partial class Game
     /// FUL-5: the event-arm VALUE prior (competent-play proxy — the SmartPerkValue/ShopValue
     /// family: a heuristic to bias exposure, not ground truth). Roughly on the ShopValue scale;
     /// intel converts at ~0.3/pt so a 15-intel arm (4.5) competes with a free mod grant (5).
+    // FUL-13: each outcome is weighted by the probability it actually FIRES (EventCatalog.
+    // FireWeight — success partner x p, OnFail partner x (1−p); GambleIntel/GrantScar
+    // self-price and stay x1), so a seeded gamble pair is priced as an EV instead of
+    // "both fire" (the FUL-10 review's warchest-arm0 asymmetry: 2.25 vs true ~1.5).
     float EventChoiceValue(EventChoice ch)
-        => EventOutcomeValue(ch.Outcome) + (ch.HasSecond ? EventOutcomeValue(ch.Outcome2) : 0f)
-           + (ch.HasThird ? EventOutcomeValue(ch.Outcome3) : 0f);   // FUL-10: triple arms
+        => EventOutcomeValue(ch.Outcome) * EventCatalog.FireWeight(ch.Outcome)
+           + (ch.HasSecond ? EventOutcomeValue(ch.Outcome2) * EventCatalog.FireWeight(ch.Outcome2) : 0f)
+           + (ch.HasThird ? EventOutcomeValue(ch.Outcome3) * EventCatalog.FireWeight(ch.Outcome3) : 0f);   // FUL-10: triple arms
 
     float EventOutcomeValue(EventOutcome o)
     {
