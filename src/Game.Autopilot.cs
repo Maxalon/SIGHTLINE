@@ -1333,7 +1333,9 @@ public partial class Game
         if (InSiegeZone(x, y)) threat += 30f;   // a charged SIEGE strike WILL land here -> vacate (cover-ignoring)
         // FUL-8 PIKEMAN: a live enemy BRACE lane costs a TURN (stagger), not a life — weighted between
         // an exposed gun (~6-10) and the siege zone's 30, so the bot paths around it, not through it.
-        if (InEnemyBraceLane(x, y)) threat += 18f;
+        // Review fix: an overwatch-immune mover (Sprinter/Outrunner) can never be reacted to — no
+        // phantom detour for the one soldier the lane can't touch.
+        if (!Combat.IgnoresOverwatch(mover) && InEnemyBraceLane(x, y)) threat += 18f;
         foreach (var e in Enemies)
         {
             if (!e.Alive || !e.Active || e.Ammo <= 0) continue;
