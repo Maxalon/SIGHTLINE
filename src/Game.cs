@@ -1061,6 +1061,10 @@ public partial class Game
         // a resumed run re-IDs contacts and tallies causes from the resume point onward.
         DeathsByClass.Clear();
         _seenArchetypes.Clear();
+        // FUL-11 review hardening: SetupMission already re-arms this per mission, but clearing
+        // at the mode seam too means a future second IsBoss spawn point can't silently turn
+        // "once per sighting ceremony" into a stale carry-over across mode entries.
+        _bossSighted = false;
         // FUL-12: the end-card meta payoff is per-RUN — a new mode entry must not inherit the
         // previous run's SALVAGE slab / HEAT UNLOCKED line / achievement roll.
         EndSalvage = 0; EndHeatUnlocked = 0; EndAchievements.Clear();

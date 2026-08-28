@@ -963,8 +963,10 @@ public static class Mission
                 // Decapitate, so a keeper has no terminal/charge to re-lock — a dead mechanic on the
                 // one map it would ship on (the TERROR lesson: verify the mechanic can actually fire).
                 // Stats verbatim from the Wardens FactionRoster/W8 lines. COST-NEUTRAL: replaces the
-                // two cascade-fill slots, and MakeHostile draws zero RNG — exactly like the
-                // FactionRoster fill it replaces, so the world-build stream is unchanged.
+                // two cascade-fill slots, and MakeHostile draws zero RNG at the PICK SITE — the
+                // downstream class-conditional grenade/smoke rolls can differ from the replaced
+                // picks, but only INSIDE the intentionally-changed m6 (pre-m6 stream and m6-reach
+                // verified identical in the FUL-11 review's pre/post A/B).
                 return i == 1
                     ? MakeHostile("SIGNIFER", "WARBRINGER", WeaponKind.Rifle, 8 + bump, 56 + bump, 5, x, y)
                     : MakeHostile("ORDERLY", "MEDIC", WeaponKind.Smg, 6 + bump, 52 + bump, 6, x, y);
