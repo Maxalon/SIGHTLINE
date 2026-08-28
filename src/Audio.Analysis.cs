@@ -172,6 +172,8 @@ public static partial class Audio
         public float StepMax;       // largest step the waveform takes ANYWHERE inside the loop
         public float StepP999;      // 99.9th percentile of those interior steps
         public float Ratio;         // ValueDelta / StepMax  — the scale-free click test
+        public float CurvMax;       // largest 2nd difference ANYWHERE inside the loop
+        public float CurvRatio;     // SlopeDelta / CurvMax  — the scale-free KINK test
     }
 
     /// Three views of the loop point, because one of them is a trap.
@@ -187,7 +189,28 @@ public static partial class Audio
     /// same waveform (ratio ~1 — and it lands near the top of the range here precisely
     /// because every partial is phase-aligned at zero at the loop point, which is where a
     /// sine's slope is steepest). A real click is a step the waveform never otherwise takes,
-    /// and shows up as a ratio in the tens. SlopeDelta is kept as a secondary absolute bound.
+    /// and shows up as a ratio in the tens.
+    ///
+    /// A2 EXTENDS THE SAME ARGUMENT TO THE SLOPE. A1 kept |1st-diff delta| as a secondary
+    /// ABSOLUTE bound (<= 0.005), but that constant was calibrated against beds whose largest
+    /// interior sample step was 0.076. The A2 beds are broadband (interior step max 0.20), and
+    /// a wider-band waveform simply BENDS harder everywhere — the rebuilt beds measured 0.016
+    /// / 0.035 at the wrap while being seamless by exactly the same construction (integer Hz,
+    /// double-accumulated phase, pulse envelopes that are functions of the loop phase only).
+    /// An absolute bound on a scale-dependent quantity is the same trap the value delta was.
+    /// So the slope check becomes CurvRatio: the wrap's second difference against the LARGEST
+    /// second difference the waveform takes anywhere inside the loop. A seamless wrap bends no
+    /// harder than the waveform's own worst interior bend.
+    ///
+    /// BUT BE HONEST ABOUT WHAT THESE RATIOS CAN AND CANNOT SEE. Both of them are ratios
+    /// against the waveform's own worst-case interior behaviour, and a BROADBAND bed's worst
+    /// case is large — so a small discontinuity hides inside it. Measured: adding a single
+    /// 333.37 Hz partial (deliberately off integer Hz, so it does NOT divide the loop) at
+    /// amplitude 0.05 to the ambient bed leaves ratio 0.03 and curv ratio 0.38, i.e. the gate
+    /// still says PASS on a bed that genuinely clicks. These two checks are therefore a
+    /// BACKSTOP for a gross break, not the guarantee. The guarantee is the PERIODICITY check
+    /// in GateReport, which compares the loop against its own continuation sample-for-sample
+    /// and catches that same de-tuned partial at 0.0250 against a 0.0001 tolerance.
     internal static SeamStats Seam(string id, float[] b)
     {
         int n = b.Length;
@@ -195,14 +218,22 @@ public static partial class Audio
         float dInt = b[n - 1] - b[n - 2];
         var steps = new float[n - 1];
         for (int i = 1; i < n; i++) steps[i - 1] = MathF.Abs(b[i] - b[i - 1]);
+        float curvMx = 0f;
+        for (int i = 1; i < n - 1; i++)
+        {
+            float c = MathF.Abs(b[i + 1] - 2f * b[i] + b[i - 1]);
+            if (c > curvMx) curvMx = c;
+        }
         Array.Sort(steps);
         float p999 = steps[(int)((steps.Length - 1) * 0.999f)];
         float mx = steps[steps.Length - 1];
+        float slope = MathF.Abs(dSeam - dInt);
         return new SeamStats
         {
             Id = id, First = b[0], Last = b[n - 1],
-            ValueDelta = MathF.Abs(dSeam), SlopeDelta = MathF.Abs(dSeam - dInt),
+            ValueDelta = MathF.Abs(dSeam), SlopeDelta = slope,
             StepMax = mx, StepP999 = p999, Ratio = mx > 1e-9f ? MathF.Abs(dSeam) / mx : 0f,
+            CurvMax = curvMx, CurvRatio = curvMx > 1e-9f ? slope / curvMx : 0f,
         };
     }
 
@@ -303,7 +334,7 @@ public static partial class Audio
             sb.AppendLine($"  music:{m,-8} first={F(sm.First, "+0.00000;-0.00000")} last={F(sm.Last, "+0.00000;-0.00000")}" +
                           $"  |value delta|={F(sm.ValueDelta, "0.00000")}  |1st-diff delta|={F(sm.SlopeDelta, "0.00000")}" +
                           $"  interior step max={F(sm.StepMax, "0.00000")} p99.9={F(sm.StepP999, "0.00000")}" +
-                          $"  ratio={F(sm.Ratio, "0.00")}");
+                          $"  ratio={F(sm.Ratio, "0.00")}  curv max={F(sm.CurvMax, "0.00000")} curv ratio={F(sm.CurvRatio, "0.00")}");
         }
 
         sb.AppendLine();
@@ -339,9 +370,12 @@ public static partial class Audio
     //  • tail <= -60 dBFS at index (int)(dur*SR)-1   Measured BEFORE the 8 zero pad samples
     //    BuildBuffer always appends — reading buf[^1] is the vacuous-test trap. -60 dBFS is
     //    ~1 LSB at 16-bit; anything above it is an audible truncation click.
-    //  • music >= 5% of energy above 1 kHz   Both beds measured 0.000% above 1 kHz. A laptop
-    //    speaker rolls off hard below ~300 Hz, so a bed with no top loses -11.6 dB and simply
-    //    vanishes on the hardware most people will play this on. 5% is a floor, not a target.
+    //  • music >= 15% of energy above 1 kHz   A1 set this floor at 5% and cleared it at 5.5 /
+    //    6.4% — a threshold picked by the same wave that had to pass it, and low enough that
+    //    the beds stayed two thin lines on a black spectrogram (a chord of pure tones with
+    //    literal silence between them, which reads to the ear as "the audio is off"). A2
+    //    raises it to 15% and rebuilds the beds to clear it honestly: harmonic pad stacks with
+    //    independent LFOs plus a loop-seamless band-limited air bed.
     //  • loop seam: wrap step <= the waveform's OWN 99.9th-percentile interior step, AND
     //    |1st-diff delta| <= 0.005. The naive "|b[0]-b[n-1]| <= 0.005" test is a trap: a
     //    provably seamless loop (integer Hz over an integer-second buffer — the design these
@@ -349,17 +383,25 @@ public static partial class Audio
     //    the top frequency present. The pre-A1 beds measured 0.023 / 0.009 on it while being
     //    click-free, and it is in direct tension with the brightness floor. The scale-free
     //    question is "does the wrap take a step this waveform never otherwise takes", so the
-    //    ratio (against the LARGEST interior step, +5% tolerance) is the primary gate and the
-    //    slope break is a secondary absolute bound.
+    //    ratio (against the LARGEST interior step, +5% tolerance) is a backstop. A2 makes the
+    //    SLOPE check scale-free the same way (CurvRatio) — see Seam() for why the old absolute
+    //    0.005 bound could not survive a broadband bed.
+    //  • music PERIODICITY: |bed[N+i] - bed[i]| <= 1e-4 over a 2048-sample probe. THIS is the
+    //    real seam guarantee, and it replaces trusting the two ratios above. Every generator
+    //    is a pure function of the sample index, so rendering N+2048 samples yields the loop
+    //    plus its own true continuation; a seamless loop repeats itself exactly there. Unlike
+    //    the ratios it is sensitive at any amplitude — see the measured de-tune probe in Seam().
 
     const float PeakCeilDb = -1.0f;
     const float MaxSpreadDb = 12.0f;
     const float MinCritOverHitDb = 4.0f;
     const float MaxDc = 0.002f;
     const float TailCeilDb = -60.0f;
-    const float MinMusicHiFrac = 0.05f;
-    const float MaxSeamSlope = 0.005f;
+    const float MinMusicHiFrac = 0.15f;
     const float MaxSeamRatio = 1.05f;
+    const float MaxSeamCurvRatio = 1.05f;
+    const int SeamProbe = 2048;
+    const float MaxPeriodErr = 1e-4f;
 
     // category -> (rms floor dBFS, rms ceiling dBFS)
     // Centres come from the mastered mix; the +-3 dB or so of slack is deliberate room for a
@@ -516,13 +558,30 @@ public static partial class Audio
             var buf = RenderMusic(m);
             var s = Measure("music:" + m, buf, buf.Length, MusicSecs * 1000f);
             float above1k = s.BHi + s.BAir;
-            Chk(above1k >= MinMusicHiFrac, $"music:{m} >1kHz >= 5%",
+            Chk(above1k >= MinMusicHiFrac, $"music:{m} >1kHz >= 15%",
                 $"{F(above1k * 100, "0.000")}% of energy above 1 kHz (centroid {F(s.CentroidHz, "0")} Hz)");
             var sm = Seam(m, buf);
-            Chk(sm.Ratio <= MaxSeamRatio && sm.SlopeDelta <= MaxSeamSlope, $"music:{m} loop seam",
+            Chk(sm.Ratio <= MaxSeamRatio && sm.CurvRatio <= MaxSeamCurvRatio, $"music:{m} loop seam",
                 $"wrap step {F(sm.ValueDelta, "0.00000")} vs largest interior step {F(sm.StepMax, "0.00000")} " +
-                $"= ratio {F(sm.Ratio, "0.00")} (<= {F(MaxSeamRatio, "0.0")}); |1st-diff delta| " +
-                $"{F(sm.SlopeDelta, "0.00000")} (<= {F(MaxSeamSlope, "0.000")})");
+                $"= ratio {F(sm.Ratio, "0.00")} (<= {F(MaxSeamRatio, "0.0")}); wrap bend " +
+                $"{F(sm.SlopeDelta, "0.00000")} vs largest interior bend {F(sm.CurvMax, "0.00000")} " +
+                $"= curv ratio {F(sm.CurvRatio, "0.00")} (<= {F(MaxSeamCurvRatio, "0.0")})");
+        }
+
+        // 11. THE REAL SEAM GUARANTEE — the bed must equal its own continuation.
+        foreach (var m in new[] { "ambient", "combat" })
+        {
+            int n = MusicSecs * SR;
+            var ext = BedRaw(m, n + SeamProbe);
+            float worst = 0f; int worstI = 0;
+            for (int i = 0; i < SeamProbe; i++)
+            {
+                float d = MathF.Abs(ext[n + i] - ext[i]);
+                if (d > worst) { worst = d; worstI = i; }
+            }
+            Chk(worst <= MaxPeriodErr, $"music:{m} periodicity",
+                $"worst |bed[N+i]-bed[i]| = {F(worst, "0.0000000")} at i={worstI} over a " +
+                $"{SeamProbe}-sample probe (<= {F(MaxPeriodErr, "0.0000")}) — the loop equals its own continuation");
         }
 
         sb.Append(fails.Count == 0

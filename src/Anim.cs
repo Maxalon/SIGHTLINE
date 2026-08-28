@@ -42,6 +42,16 @@ public class MoveStepAnim : Anim
         if (d.LengthSquared() > 0.01f) Unit.Facing = MathF.Atan2(d.Y, d.X);
         Unit.WalkLean = 1f;     // lean into the step (Renderer reads it as a forward body tilt); decays in Game.Update
         g.Fx.Dust(_from + new Vector2(0, 8f), 3);   // a small puff kicks up as the foot leaves
+        // RESONANCE A2 — a footfall PER TILE, panned to where the step actually happens.
+        // Audio.Play("move") used to fire once per move COMMAND, so a six-tile sprint got a
+        // single 80 ms thud at the start and then silence: movement, the most frequent action
+        // in the game, was effectively unvoiced. Diagonals are a touch heavier (longer stride).
+        //
+        // This belongs in OnStart and NOWHERE else: OnStart runs when an anim becomes ACTIVE
+        // (Game.cs's single `a.Started` site), never at Enqueue — enqueue-time OnStart is the
+        // old movement-jitter bug, and it would also fire a whole path's footfalls at once.
+        Audio.Play("move", pitchVar: diag ? 0.085f : 0.07f,
+                   panX: Util.Clamp(_from.X / Cfg.ScreenW, 0f, 1f));
     }
 
     public override bool Update(Game g, float dt)

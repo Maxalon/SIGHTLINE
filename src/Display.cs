@@ -263,6 +263,34 @@ void main() {
     public static bool ShowAllVerbs;
     public static void ToggleShowAllVerbs() { ShowAllVerbs = !ShowAllVerbs; Save(); }
 
+    // ---- RESONANCE A2: per-category audio mix (persisted here alongside the other settings) ----
+    // The whole game shipped with exactly one hard-coded SetMasterVolume(0.6f) and a binary
+    // mute, so the owner could not rebalance music against SFX without a rebuild. These four
+    // faders are read by Audio (master at the device, the rest per-cue / per-stream).
+    // Defaults reproduce the old behaviour exactly: master 0.60, everything else unity.
+    public static float VolMaster = 0.60f;
+    public static float VolSfx    = 1.00f;
+    public static float VolMusic  = 1.00f;
+    public static float VolUi     = 1.00f;
+    public static readonly string[] VolNames = { "MASTER", "SFX", "MUSIC", "UI" };
+
+    public static float Vol(int bus) => bus switch { 0 => VolMaster, 1 => VolSfx, 2 => VolMusic, _ => VolUi };
+
+    /// Live-set one fader (no disk write — a slider drag calls this every frame).
+    public static void SetVol(int bus, float v)
+    {
+        v = Math.Clamp(v, 0f, 1f);
+        switch (bus)
+        {
+            case 0: VolMaster = v; Audio.ApplyMasterVolume(); break;
+            case 1: VolSfx = v; break;
+            case 2: VolMusic = v; break;
+            default: VolUi = v; break;
+        }
+    }
+    /// Persist the faders — call once when the drag ends, not per frame.
+    public static void CommitVol() => Save();
+
     public static void Init(bool enabled)
     {
         Enabled = enabled;
@@ -473,6 +501,12 @@ void main() {
         public int TipsSeen { get; set; }        // T1 just-in-time tip bitmask (absent = 0 = all unseen)
         public bool TrainingSeen { get; set; }   // T1 training op completed/declined once
         public bool ShowAllVerbs { get; set; }   // T1 permanent staging escape
+        // RESONANCE A2 — additive fields; a display.json written before A2 has none of them,
+        // so these JSON defaults are what an existing install keeps (== the old behaviour).
+        public float VolMaster { get; set; } = 0.60f;
+        public float VolSfx { get; set; } = 1.00f;
+        public float VolMusic { get; set; } = 1.00f;
+        public float VolUi { get; set; } = 1.00f;
     }
     // Source-generated serializer (see SaveGame.SaveJson for the why): reflection-based
     // System.Text.Json loses its type metadata under `-p:PublishTrimmed=true`, which silently
@@ -486,7 +520,7 @@ void main() {
 
     static void Save()
     {
-        try { Directory.CreateDirectory(Dir); File.WriteAllText(FilePath, JsonSerializer.Serialize(new Dto { Fullscreen = Fullscreen, SizeIdx = SizeIdx, BrightIdx = BrightIdx, GammaIdx = GammaIdx, Colorblind = Pal.Colorblind, TutorialSeen = TutorialSeen, PostFX = PostFX, AutoCam = AutoCam, BraceTipSeen = (TipsSeen & 1) != 0, TipsSeen = TipsSeen, TrainingSeen = TrainingSeen, ShowAllVerbs = ShowAllVerbs }, DisplayJson.Default.Dto)); }
+        try { Directory.CreateDirectory(Dir); File.WriteAllText(FilePath, JsonSerializer.Serialize(new Dto { Fullscreen = Fullscreen, SizeIdx = SizeIdx, BrightIdx = BrightIdx, GammaIdx = GammaIdx, Colorblind = Pal.Colorblind, TutorialSeen = TutorialSeen, PostFX = PostFX, AutoCam = AutoCam, BraceTipSeen = (TipsSeen & 1) != 0, TipsSeen = TipsSeen, TrainingSeen = TrainingSeen, ShowAllVerbs = ShowAllVerbs, VolMaster = VolMaster, VolSfx = VolSfx, VolMusic = VolMusic, VolUi = VolUi }, DisplayJson.Default.Dto)); }
         catch { }
     }
 
@@ -520,6 +554,10 @@ void main() {
                 BraceTipSeen = (TipsSeen & 1) != 0;
                 TrainingSeen = d.TrainingSeen;
                 ShowAllVerbs = d.ShowAllVerbs;
+                VolMaster = Math.Clamp(d.VolMaster, 0f, 1f);
+                VolSfx    = Math.Clamp(d.VolSfx, 0f, 1f);
+                VolMusic  = Math.Clamp(d.VolMusic, 0f, 1f);
+                VolUi     = Math.Clamp(d.VolUi, 0f, 1f);
             }
         }
         catch { }

@@ -25,6 +25,9 @@ public static class Hud
     public static System.Collections.Generic.List<(Rectangle rect, Unit unit)> RosterChips = new();
     public static Rectangle PauseResume, PauseMute, PauseShake, PauseThreat, PauseFullscreen, PauseWindow, PauseAbandon;
     public static Rectangle PauseBright, PauseGamma, PauseColorblind, PauseAutoCam, PauseCodex;
+    /// RESONANCE A2 — the four mix faders (MASTER / SFX / MUSIC / UI), indexed to match
+    /// Display.VolNames. Click or drag anywhere in the track to set the level.
+    public static readonly Rectangle[] PauseVol = new Rectangle[4];
     // CODEX / FIELD MANUAL (W6): category tab rects + BACK, published by DrawCodex for hit-testing.
     public static readonly System.Collections.Generic.List<Rectangle> CodexTabBtns = new();
     public static Rectangle CodexBack;
@@ -221,7 +224,10 @@ public static class Hud
         // scrim fades in with the card so the pause lands rather than snaps
         float in_ = PanelAnim("pause", 0.13f);
         Raylib.DrawRectangle(0, 0, Cfg.ScreenW, Cfg.ScreenH, Raylib.Fade(Pal.RGBA(5, 8, 11), 0.82f * Util.EaseOutQuad(in_)));
-        int w = 440, h = 771;   // W9: grew for the GAMMA row (12 buttons)
+        // A2: TWO COLUMNS. The single stack was already 771px tall inside an 800px window —
+        // there was physically nowhere to put the four mix faders. Splitting display settings
+        // (left) from audio + exits (right) buys the room and reads better at twelve rows.
+        int w = 760, h = 588;
         int x = Cfg.ScreenW / 2 - w / 2, y = Cfg.ScreenH / 2 - h / 2;
         y -= (int)((1f - Util.EaseOutQuad(in_)) * 14f);
         var card = new Rectangle(x, y, w, h);
@@ -230,24 +236,24 @@ public static class Hud
 
         Cfg.TitleText("PAUSED", new Vector2(x + w / 2 - (int)Cfg.TitleMeasure("PAUSED", 40, 1f).X / 2, y + 22), 40, 1f, Pal.Friend);
 
-        int bw = 320, bh = 42, bx = x + w / 2 - bw / 2, by = y + 84, gap = 11;
-        PauseResume     = new Rectangle(bx, by, bw, bh); by += bh + gap;
-        PauseFullscreen = new Rectangle(bx, by, bw, bh); by += bh + gap;
-        PauseWindow     = new Rectangle(bx, by, bw, bh); by += bh + gap;
-        PauseMute       = new Rectangle(bx, by, bw, bh); by += bh + gap;
-        PauseShake      = new Rectangle(bx, by, bw, bh); by += bh + gap;
-        PauseThreat     = new Rectangle(bx, by, bw, bh); by += bh + gap;
-        PauseBright     = new Rectangle(bx, by, bw, bh); by += bh + gap;
-        PauseGamma      = new Rectangle(bx, by, bw, bh); by += bh + gap;   // W9: true gamma (post-FX)
-        PauseColorblind = new Rectangle(bx, by, bw, bh); by += bh + gap;
-        PauseAutoCam    = new Rectangle(bx, by, bw, bh); by += bh + gap;
-        PauseCodex      = new Rectangle(bx, by, bw, bh); by += bh + gap;
-        PauseAbandon    = new Rectangle(bx, by, bw, bh);
+        int bw = 320, bh = 42, gap = 11;
+        int cx1 = x + 40, cx2 = x + 400, top = y + 84;
+
+        // ---- left column: display / view settings ----
+        int by = top;
+        PauseResume     = new Rectangle(cx1, by, bw, bh); by += bh + gap;
+        PauseFullscreen = new Rectangle(cx1, by, bw, bh); by += bh + gap;
+        PauseWindow     = new Rectangle(cx1, by, bw, bh); by += bh + gap;
+        PauseShake      = new Rectangle(cx1, by, bw, bh); by += bh + gap;
+        PauseThreat     = new Rectangle(cx1, by, bw, bh); by += bh + gap;
+        PauseBright     = new Rectangle(cx1, by, bw, bh); by += bh + gap;
+        PauseGamma      = new Rectangle(cx1, by, bw, bh); by += bh + gap;   // W9: true gamma (post-FX)
+        PauseColorblind = new Rectangle(cx1, by, bw, bh); by += bh + gap;
+        PauseAutoCam    = new Rectangle(cx1, by, bw, bh);
 
         DrawButtonRect(PauseResume, "RESUME", "ESC", true, false, Pal.Friend);
         DrawButtonRect(PauseFullscreen, Display.Fullscreen ? "FULLSCREEN: ON" : "FULLSCREEN: OFF", "F", true, !Display.Fullscreen, Pal.Accent);
         DrawButtonRect(PauseWindow, "WINDOW: " + Display.SizeLabel, "", true, false, Pal.Accent);
-        DrawButtonRect(PauseMute, Audio.Enabled ? "AUDIO: ON" : "AUDIO: OFF", "M", true, !Audio.Enabled, Pal.Accent);
         DrawButtonRect(PauseShake, g.Fx.ShakeOn ? "SCREEN SHAKE: ON" : "SCREEN SHAKE: OFF", "", true, !g.Fx.ShakeOn, Pal.Accent);
         // RESONANCE T2: three-state — OFF / SIMPLE (the pre-T2 single exposure tick) / FULL (graded
         // incoming-fire pips + hover card + danger-tinted path). Cycles on click.
@@ -259,6 +265,25 @@ public static class Hud
         DrawButtonRect(PauseGamma, "GAMMA: " + Display.GammaLabel, "", true, false, Pal.Accent);
         DrawButtonRect(PauseColorblind, Pal.Colorblind ? "COLORBLIND: ON" : "COLORBLIND: OFF", "", true, Pal.Colorblind, Pal.Accent);
         DrawButtonRect(PauseAutoCam, Display.AutoCam ? "AUTO-CAM: ON" : "AUTO-CAM: OFF", "", true, Display.AutoCam, Pal.Accent);
+
+        // ---- right column: the audio mix, then the exits ----
+        by = top;
+        PauseMute = new Rectangle(cx2, by, bw, bh); by += bh + 10;
+        DrawButtonRect(PauseMute, Audio.Enabled ? "AUDIO: ON" : "AUDIO: OFF", "M", true, !Audio.Enabled, Pal.Accent);
+
+        int sh = 34, sgap = 8;
+        for (int i = 0; i < 4; i++)
+        {
+            PauseVol[i] = new Rectangle(cx2, by, bw, sh);
+            DrawVolSlider(PauseVol[i], Display.VolNames[i], Display.Vol(i), Audio.Enabled);
+            by += sh + sgap;
+        }
+
+        // bottom-align the two exits with the left column's last row, so the card reads as
+        // two balanced columns rather than one long one next to a short one
+        by = top + 9 * bh + 8 * gap - (bh + gap + bh);
+        PauseCodex   = new Rectangle(cx2, by, bw, bh); by += bh + gap;
+        PauseAbandon = new Rectangle(cx2, by, bw, bh);
         DrawButtonRect(PauseCodex, "FIELD MANUAL", "K", true, false, Pal.Good);
         // W1 mode-seam: the abandon verb is mode-true — a stand/fight is not a campaign "run".
         string abandonLbl = g.Mode == GameMode.Endless ? "END STAND"
@@ -269,6 +294,31 @@ public static class Hud
 
         string ctl = "Wheel zoom  -  Middle-drag pan  -  [C] reset camera  -  Arrows/WASD + [Space]";
         Cfg.Text(ctl, new Vector2(x + w / 2 - (int)Cfg.Measure(ctl, 12, 1f).X / 2, y + h - 24), 12, 1f, Pal.TxtDim);
+    }
+
+    /// A2 mix fader: a labelled track with a filled level and a percentage. Dimmed whole when
+    /// audio is muted, so the faders never look live while nothing can be heard.
+    static void DrawVolSlider(Rectangle r, string label, float v, bool live)
+    {
+        var bg = live ? Pal.RGBA(18, 23, 30) : Pal.RGBA(15, 18, 22);
+        Raylib.DrawRectangleRec(r, bg);
+        Raylib.DrawRectangleLinesEx(r, 1f, Pal.PanelBd);
+
+        // label row on top, track underneath — they must not overlap, or the handle draws
+        // straight through the percentage at 100%
+        Raylib.DrawTextEx(Cfg.Font, label, new Vector2(r.X + 9, r.Y + 4), 13, 1f, live ? Pal.Txt : Pal.TxtDim);
+        string pct = $"{(int)MathF.Round(v * 100f)}%";
+        float pw = Raylib.MeasureTextEx(Cfg.Font, pct, 13, 1f).X;
+        Raylib.DrawTextEx(Cfg.Font, pct, new Vector2(r.X + r.Width - 9 - pw, r.Y + 4), 13, 1f, live ? Pal.Txt : Pal.TxtDim);
+
+        var track = new Rectangle(r.X + 8, r.Y + 23, r.Width - 16, 6);
+        Raylib.DrawRectangleRec(track, Pal.RGBA(34, 40, 50));
+        float f = Util.Clamp(v, 0f, 1f);
+        if (f > 0f) Raylib.DrawRectangleRec(new Rectangle(track.X, track.Y, track.Width * f, track.Height),
+                                            live ? Pal.Accent : Pal.TxtDim);
+        // the handle — short, and clamped inside the track so it never leaves the row
+        float hx = Util.Clamp(track.X + track.Width * f, track.X + 2f, track.X + track.Width - 2f);
+        Raylib.DrawRectangle((int)hx - 2, (int)track.Y - 5, 4, 16, live ? Pal.Friend : Pal.TxtDim);
     }
 
     /// W9: true when any alive unit's on-screen figure overlaps `chip` — the roster strip

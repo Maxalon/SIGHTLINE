@@ -8,6 +8,10 @@
     <AssemblyName>Sightline</AssemblyName>
     <RootNamespace>Sightline</RootNamespace>
     <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- RESONANCE A2: Raylib.AttachAudioMixedProcessor takes a
+         `delegate* unmanaged[Cdecl]<void*, uint, void>` (the master limiter in Audio.cs).
+         Only that one callback needs it. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <ItemGroup>
