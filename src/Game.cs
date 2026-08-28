@@ -1012,6 +1012,10 @@ public partial class Game
     void UpdateBriefing(float dt)
     {
         if (BriefLines == null) return;
+        // The briefing is a PRE-FIGHT object. The moment real events start hitting the combat log
+        // the card's job is over — and the log panel is the one piece of chrome the centred card
+        // would sit on top of. The ledger is load-bearing ("why did that happen?"); flavour yields.
+        if (Stats.CombatLog.Count > 0) { BriefLines = null; return; }
         if (!BriefAllowed)
         {
             _briefHold += dt;

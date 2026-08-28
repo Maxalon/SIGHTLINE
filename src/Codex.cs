@@ -211,7 +211,10 @@ public static class Codex
     static List<CodexEntry> FactionEntries()
     {
         var e = new List<CodexEntry>();
-        foreach (Faction f in Enum.GetValues(typeof(Faction)))
+        // READING ORDER, not enum order: the three real opponents lead, and the unaligned
+        // "no colours" force closes the tab. Faction.None is ordinal 0, so iterating the enum
+        // would open the dossier tab on the faction that is defined by not being one.
+        foreach (Faction f in new[] { Faction.Syndicate, Faction.Legion, Faction.Wardens, Faction.None })
             e.Add(new CodexEntry
             {
                 Title = Voice.FactionEpithet(f),

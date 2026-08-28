@@ -25,9 +25,11 @@ public static class Hud
     // and sizes live HERE (next to the draw code that uses them) and SIGHTLINE_VOICETEST measures
     // against them. Change a width below and the self-test re-checks every generated line for
     // free; write a line too long and the test fails instead of the game shipping an ellipsis.
-    /// Combat-log panel width. C1 widened it 296 -> 340: a bark carries a 7-char callsign plus
-    /// quotes on top of a sentence, and 296 forced either truncation or telegraphese.
-    public const float LogPanelW = 340f;
+    /// Combat-log panel width. C1 deliberately LEFT THIS ALONE at its historic 296: widening it
+    /// would have pushed the panel further under the centred 760px tip/lesson card that already
+    /// clips its right edge, and the ledger losing pixels to flavour is exactly backwards. The
+    /// barks were written to the width instead, and VOICETEST measures every one of them.
+    public const float LogPanelW = 296f;
     public const float LogPadX = 9f;
     /// Usable text column inside the combat log.
     public const float LogTextWidth = LogPanelW - LogPadX * 2f;

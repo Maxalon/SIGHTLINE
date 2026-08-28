@@ -613,6 +613,13 @@ public static class Program
         }
         bool helpShot = shot && Environment.GetEnvironmentVariable("SIGHTLINE_HELP") == "1";  // hover the ability button
         int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_SHOTSEQ"), out int seqCount);   // Q1: consecutive-frame dump
+        // RESONANCE C1: SIGHTLINE_SHOTONBARK=1 — do not shoot a fixed frame; wait until a soldier
+        // BARK has actually landed in the combat log during live play, then shoot 40 frames later
+        // (long enough for the line to settle into the ledger, short enough that it is still one of
+        // the last six entries the panel shows). Pair with SIGHTLINE_AUTOPLAY=1 so a real fight is
+        // driving. Shot-mode only; inert everywhere else, so nothing measured changes.
+        bool shotOnBark = shot && Environment.GetEnvironmentVariable("SIGHTLINE_SHOTONBARK") == "1";
+        if (shotOnBark) shotFrame = int.MaxValue;
         int frame = 0;
         const int autoCap = 20000;
 
@@ -642,6 +649,9 @@ public static class Program
             if (shot || autoplay) frame++;
             if (shot)
             {
+                if (shotOnBark && shotFrame == int.MaxValue && frame > 60
+                    && Stats.CombatLog.Exists(e => e.Outcome == Voice.LogTag))
+                    shotFrame = frame + 40;
                 if (frame == shotFrame) Raylib.TakeScreenshot("sightline_shot.png");
                 // Q1 SIGHTLINE_SHOTSEQ=<n>: also dump the n consecutive frames from shotFrame as
                 // sightline_seq_NN.png. Pair with SIGHTLINE_AUTOPLAY=1 to film a multi-tile move —

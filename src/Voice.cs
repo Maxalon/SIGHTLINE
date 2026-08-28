@@ -398,18 +398,20 @@ public static class Voice
         int seed = f.MapSeed;
         var lines = new List<string>(5);
 
-        // ── 1. THE FILE — what this run was, in one sentence.
+        // ── 1. THE FILE — what this run was, in one sentence. On a WIN the card's own subtitle
+        //      already says "all N missions cleared", so this line spends its words on WHERE it
+        //      ended and WHAT fell there rather than repeating the count back at the player.
         if (f.Win)
             lines.Add(!string.IsNullOrEmpty(f.BossName)
-                ? $"All {Run.MaxMissions} operations run. The {f.BossName} fell last, and the file closed."
-                : $"All {Run.MaxMissions} operations run. The squad walked off the last field.");
+                ? $"The file closes at {RegionName(Run.MaxMissions, seed)}. The {f.BossName} fell last."
+                : $"The file closes at {RegionName(Run.MaxMissions, seed)}.");
         else if (f.Missions <= 0)
             lines.Add($"The run ended on the first operation, at {RegionName(1, seed)}.");
         else
             lines.Add($"{f.Missions} operation{(f.Missions == 1 ? "" : "s")} cleared. It ended at " +
                       $"{RegionName(f.Missions + 1, seed)}, on the {Ordinal(f.Missions + 1)}.");
 
-        // ── 2. THE COST — the count, plainly.
+        // ── 2. THE COST — the count, plainly. No adjectives; the number is the sentence.
         if (dead == 0)
             lines.Add("Nobody was left behind. The whole roster came home from every field.");
         else if (dead == 1)
@@ -419,6 +421,7 @@ public static class Voice
 
         // ── 3. THE NAME — one death, told properly. The costliest loss (most confirmed kills,
         //      ties broken by the later mission) gets the line; the rest are counted, not padded.
+        //      This is the sentence the whole wave exists for.
         if (dead > 0)
         {
             FallenRec worst = f.Memorial[0];
@@ -438,8 +441,17 @@ public static class Voice
         }
 
         // ── 4. WHAT IT TURNED ON — the thing that actually did the damage, or the soldier who did.
-        if (!string.IsNullOrEmpty(f.TopEnemyName) && f.TopEnemyKills > 0)
-            lines.Add($"The {f.TopEnemyName} did most of it: {f.TopEnemyKills} of the squad's losses were its work.");
+        //      Every branch below is grammatical AND TRUE at every count: "did most of it" is only
+        //      said when it is a majority, and "every one of them" only when it is all of them.
+        if (!string.IsNullOrEmpty(f.TopEnemyName) && f.TopEnemyKills > 0 && dead > 0)
+        {
+            int k = Math.Min(f.TopEnemyKills, dead);
+            lines.Add(k >= dead
+                ? $"Every one of them fell to the {f.TopEnemyName}."
+                : k * 2 > dead
+                    ? $"Most of them fell to the {f.TopEnemyName} — {k} of the {dead}."
+                    : $"{k} of the {dead} fell to the {f.TopEnemyName}.");
+        }
         else if (!string.IsNullOrEmpty(f.MvpName) && f.MvpKills > 0)
             lines.Add($"{f.MvpName} carried the shooting, {f.MvpKills} confirmed.");
         else if (f.Kills > 0)
@@ -447,18 +459,22 @@ public static class Voice
         else
             lines.Add("Nothing on this run was decided by the shooting.");
 
-        // ── 5. THE CLOSER — where it leaves them.
+        // ── 5. THE CLOSER — where it leaves them. HEAT is deliberately NOT appended: the card
+        //      already carries a HEAT slab, and a stat tacked onto the last sentence reads like
+        //      a receipt line rather than an ending.
         if (f.Survivors <= 0)
             lines.Add(dead > 0 ? "Nobody walked off the last field. The reserve remembers them."
                                : "Nobody walked off the last field.");
         else if (f.Win)
-            lines.Add(!string.IsNullOrEmpty(f.MvpName)
-                ? $"{f.MvpName} takes {(f.Survivors == 1 ? "the squad" : $"the other {f.Survivors - 1}")} forward."
-                : $"{f.Survivors} came home standing.");
+            lines.Add(f.Survivors == 1
+                ? (!string.IsNullOrEmpty(f.MvpName) ? $"{f.MvpName} walked off the last field alone."
+                                                    : "One soldier walked off the last field alone.")
+                : (!string.IsNullOrEmpty(f.MvpName) ? $"{f.MvpName} led the other {f.Survivors - 1} off the last field."
+                                                    : $"{f.Survivors} walked off the last field."));
         else
-            lines.Add($"{f.Survivors} still standing when the order came to stop. They carry the rest.");
-
-        if (f.Heat > 0) lines[4] += $" Heat {f.Heat}.";
+            lines.Add(dead > 0
+                ? $"{f.Survivors} still standing when the order came to stop. They carry the rest."
+                : $"{f.Survivors} still standing when the order came to stop.");
         return lines;
     }
 
@@ -632,17 +648,26 @@ public static class Voice
             new FallenRec { Name = "PIKE", Cls = "GUNNER",  Rank = "SERGEANT", Kills = 7, Mission = 4 },
             new FallenRec { Name = "MOTH", Cls = "CORPSMAN",Rank = "CORPORAL", Kills = 2, Mission = 4 },
         };
+        var mem1 = new List<FallenRec>
+        {
+            new FallenRec { Name = "LARK", Cls = "ASSAULT", Rank = "", Kills = 0, Mission = 2 },
+        };
+        // topKills sweeps 0 / 1 (minority) / 2 (majority of 3) / 3 (all) / 9 (over-count, which the
+        // caller can legitimately produce: DeathsByClass counts deaths, Memorial counts records, and
+        // they are populated by different code paths) — every branch of line 4 has to stay true.
         foreach (bool win in new[] { true, false })
         foreach (int miss in new[] { 0, 1, 3, Run.MaxMissions })
         foreach (int surv in new[] { 0, 1, 4 })
-        foreach (var mem in new[] { null, new List<FallenRec>(), mem3 })
+        foreach (var mem in new List<FallenRec>[] { null, new List<FallenRec>(), mem1, mem3 })
+        foreach (int topKills in new[] { 0, 1, 2, 3, 9 })
+        foreach (int mvpK in new[] { 0, 1, 11 })
             shapes.Add(new RunFacts
             {
                 Win = win, Missions = miss, MapSeed = 777 + miss, Heat = (miss % 3) * 4,
                 Kills = miss * 5, Survivors = surv,
-                MvpName = surv > 0 ? "VESPER" : null, MvpKills = surv > 0 ? miss : 0,
-                TopEnemyName = mem == mem3 ? "REAVER" : null, TopEnemyCls = mem == mem3 ? "BERSERKER" : null,
-                TopEnemyKills = mem == mem3 ? 2 : 0,
+                MvpName = surv > 0 && mvpK > 0 ? "VESPER" : null, MvpKills = surv > 0 ? mvpK : 0,
+                TopEnemyName = topKills > 0 ? "REAVER" : null, TopEnemyCls = topKills > 0 ? "BERSERKER" : null,
+                TopEnemyKills = topKills,
                 BossName = win ? "Siegelord" : null, Memorial = mem,
             });
         int epiMaxW = Hud.EpilogueWidth;
