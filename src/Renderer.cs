@@ -207,12 +207,18 @@ public static class Renderer
 
     // --- V3 PART A: a per-biome CELLULAR surface -----------------------------------------
     // Raylib bakes a Worley/cellular field on the CPU: dark at each cell seed, bright along the
-    // boundaries between cells. Drawn over a cover top face with a DARK colour, the boundaries
-    // read as GROUT / fracture lines — concrete slabs (STEEL), cracked basalt (MAGMA), ice
-    // plates (TUNDRA), gravel (ASH). The existing Perlin stays as the fine grain; the two
-    // together are what turn a flat lozenge into a material.
+    // boundaries between cells. We INVERT it at bake time, so the baked texture is bright inside
+    // each cell and black along the seams; drawing a LIGHT biome colour through it lifts the
+    // cell faces and leaves the seams behind, which reads as grouted stone — concrete slabs
+    // (STEEL), cracked basalt (MAGMA), ice plates (TUNDRA), gravel (ASH).
+    // The inversion is not cosmetic. Measured first without it, drawing a DARK colour through
+    // the un-inverted field: the result varies by alpha x (the dark colour's own luma, ~16) x
+    // the field's contrast — about ONE luma of structure. Interior std on a cover top actually
+    // FELL 3.6 -> 1.5 against the old build. A texture scales the colour you draw WITH, never
+    // the surface underneath, so a dark colour can only ever lay down a flat wash.
+    // The existing Perlin stays as the fine grain; the two together are the material.
     // Per-biome cell size = the material's grain. Order matches Biome.All.
-    static readonly int[] CellSize = { 22, 17, 38, 13, 10, 27, 31, 24 };
+    static readonly int[] CellSize = { 22, 17, 38, 16, 15, 27, 31, 24 };
     const float CellTexPx = 256f;
     static readonly Texture2D[] _cell = new Texture2D[Biome.All.Length];
     static readonly bool[] _cellReady = new bool[Biome.All.Length];
@@ -228,6 +234,7 @@ public static class Renderer
             // Raylib.GetRandomValue, so there is no stream to disturb).
             Raylib.SetRandomSeed((uint)(0x5165 + bi * 7919));
             var img = Raylib.GenImageCellular((int)CellTexPx, (int)CellTexPx, CellSize[bi]);
+            Raylib.ImageColorInvert(ref img);        // bright cell faces, black seams (see above)
             _cell[bi] = Raylib.LoadTextureFromImage(img);
             Raylib.UnloadImage(img);
             Raylib.SetTextureWrap(_cell[bi], TextureWrap.Repeat);
@@ -238,8 +245,8 @@ public static class Renderer
 
     /// Sample the biome's cellular field over a screen rect, board-anchored (same trick as
     /// DrawNoiseRect: llvmpipe ignores TextureWrap on a partial-rect sample, so keep the source
-    /// rect inside the texture). `col` is drawn THROUGH the field, so pass a dark colour and the
-    /// cell boundaries come out as grout.
+    /// rect inside the texture). `col` is drawn THROUGH the field, so pass a LIGHT colour: the
+    /// texture scales what you draw with, so only a light colour lays down visible structure.
     static void DrawCellRect(int bi, Rectangle dst, Color col, float alpha)
     {
         if (!_cellReady[bi]) return;
@@ -1884,13 +1891,16 @@ public static class Renderer
         // key light's 0.24 gain that works out to flat <= ~114, so HIGH tops sit at 112 and LOW
         // tops at 100, holding the high/low tier the shape cue also carries. Measured worst
         // case after this: 149 vs a 179-181 unit ring and a 215 specular catch.
-        Color cHi = Lift(Pal.Mix(Pal.Mix(Pal.CoverHi, tint, 0.55f),    shade, 0.10f), -4);
-        Color cHiTop = LiftTo(Pal.Mix(Pal.Mix(Pal.CoverHiTop, tint, 0.55f), shade, 0.14f), 112, 52);
-        Color cLo = Lift(Pal.Mix(Pal.Mix(Pal.CoverLo, tint, 0.55f),    shade, 0.10f), -4);
-        Color cLoTop = LiftTo(Pal.Mix(Pal.Mix(Pal.CoverLoTop, tint, 0.55f), shade, 0.14f), 100, 52);
+        Color cHi = Lift(Pal.Mix(Pal.Mix(Pal.CoverHi, tint, 0.55f),    shade, 0.10f), -14);
+        Color cHiTop = LiftTo(Pal.Mix(Pal.Mix(Pal.CoverHiTop, tint, 0.55f), shade, 0.14f), 92, 52);
+        Color cLo = Lift(Pal.Mix(Pal.Mix(Pal.CoverLo, tint, 0.55f),    shade, 0.10f), -14);
+        Color cLoTop = LiftTo(Pal.Mix(Pal.Mix(Pal.CoverLoTop, tint, 0.55f), shade, 0.14f), 80, 52);
         int bi = BiomeIndex(g.Biome);
-        // the grout colour the cellular field is drawn through: the room's own deep shadow.
-        Color grout = Pal.Mix(Pal.RGBA(0, 0, 0), tint, 0.22f);
+        // the colour the cellular field is drawn through: a light biome-tinted stone. The value
+        // targets above sit BELOW the finished face on purpose — this pass lifts the cell faces,
+        // and the ceiling that has to clear the units is the FINISHED pixel, not the base.
+        Color stone = Pal.Mix(Pal.RGBA(255, 255, 255), tint, 0.42f);
+        Color seam  = Pal.Mix(Pal.RGBA(0, 0, 0), tint, 0.22f);   // the chipped-corner shadow
         for (int x = 0; x < g.Grid.W; x++)
             for (int y = 0; y < g.Grid.H; y++)
             {
@@ -1953,7 +1963,7 @@ public static class Renderer
                 Raylib.DrawRectangleRounded(baseRect, jRad, 5, wallCol);
                 // V3: the biome's cellular field on the WALL face too, so the whole block is one
                 // material rather than a textured lid on a flat box.
-                DrawCellRect(bi, baseRect, grout, 0.13f);
+                DrawCellRect(bi, baseRect, stone, 0.10f);
                 // front-face shade gradient: a soft darkening toward the bottom of the wall so the
                 // block reads as a lit 3D volume (consistent top-light), and a thin lighter catch on
                 // the upper-left of the face. Cheap (a handful of thin bands), subtle (squint holds).
@@ -1978,11 +1988,11 @@ public static class Renderer
                 Raylib.DrawRectangleRounded(topRect, jRad + 0.04f, 5, topCol);
                 // 5.4: noise grain on the top face so cover reads as a physical object
                 DrawNoiseRect(topRect, tint, 0.10f);
-                // V3: the CELLULAR pass. GenImageCellular is dark at each cell seed and bright
-                // along the boundaries, so drawing it through a dark biome colour turns the
-                // boundaries into GROUT — concrete slabs / cracked basalt / ice plates / gravel,
-                // set by the per-biome cell size. This is the pass that makes cover a MATERIAL.
-                DrawCellRect(bi, topRect, grout, 0.16f);
+                // V3: the CELLULAR pass — the one that makes cover a MATERIAL. The baked field
+                // is inverted (bright cell faces, black seams), so a light biome stone drawn
+                // through it lifts each cell face and leaves the seams: concrete slabs /
+                // cracked basalt / ice plates / gravel, set by the per-biome cell size.
+                DrawCellRect(bi, topRect, stone, 0.13f);
                 // V3: a hash-picked CHIP knocked out of one corner of ~35% of top faces — a
                 // broken edge with its own light catch. Cheap (2 tris + a line), deterministic,
                 // and it is what stops a row of blocks reading as one widget stamped five times.
@@ -1996,7 +2006,7 @@ public static class Renderer
                     float syg = corner <= 1 ? 1f : -1f;
                     var q0 = new Vector2(ex + sxg * cw2, ey);
                     var q1 = new Vector2(ex, ey + syg * cw2);
-                    FillTri(new Vector2(ex, ey), q0, q1, Raylib.Fade(grout, 0.72f));
+                    FillTri(new Vector2(ex, ey), q0, q1, Raylib.Fade(seam, 0.72f));
                     Raylib.DrawLineEx(q0, q1, 1.2f, Raylib.Fade(Pal.RGBA(255, 255, 255), 0.09f));
                 }
                 // top edge highlight — a clear (but quiet) catch on the light-facing upper edge so
