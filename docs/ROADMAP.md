@@ -1178,7 +1178,8 @@ sets, one lever per measured round, fresh same-slot R0 first, dip budgets, breac
       `Combat` constant) + **named regions** on the campaign map (64 biome-true names off `MapSeed`).
 - [x] **Soldier barks** at six beats with four hard rate limits, tagged `VOICE` in the combat log.
 - [x] **Run epilogue** — five lines on the campaign end card, off the card's own telemetry.
-- [x] `SIGHTLINE_VOICETEST=1` (42nd self-test, wired into `scripts/qa-sweep.sh`): RNG-separation
+- [x] `SIGHTLINE_VOICETEST=1` (43rd self-test, wired into `scripts/qa-sweep.sh`; the sweep's
+      footer count was also off by one before this wave and is corrected): RNG-separation
       proof with a sensitivity probe, template-completeness, bark reachability + all four gates,
       and a pixel-width fit check for every generated line. `SIGHTLINE_BALANCE=10` byte-identical.
 

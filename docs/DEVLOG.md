@@ -3790,8 +3790,11 @@ their feet, so a bondless soldier can never draw a bond line.
 ### Verification (all run by hand, no CI)
 
 - `dotnet build -c Release` → **0 warnings / 0 errors**.
-- `bash scripts/qa-sweep.sh --full` → **42/42 PASS** (41 pre-existing + VOICETEST), autoplay ×3
-  clean (LOSE m5, LOSE m5, WIN m6 — no exceptions, no TIMEOUT).
+- `bash scripts/qa-sweep.sh --full` → **43/43 PASS** (42 pre-existing + VOICETEST), autoplay
+  ×5 clean across two sweeps + two extra runs (LOSE m3, WIN m6, WIN m6, LOSE m1, LOSE m1 — no
+  exceptions, no TIMEOUT). **Count correction:** the sweep's own footer claimed "41 self-tests"
+  while actually running 42 — an off-by-one that predates this wave. Counted by hand off the
+  `echo -n` lines and corrected in the script rather than carried forward.
 - `SIGHTLINE_PAIRTEST=1` → **PASS**.
 - `SIGHTLINE_BALANCE=10` → `runs=20  missions=76`, and a `diff` of the full report against the
   pre-change baseline is **empty once the four wall-clock progress lines and the wall-time footer

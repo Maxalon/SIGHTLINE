@@ -4,8 +4,12 @@
 # quirk: piping an xvfb-run child through $(...) / a for-loop silently drops its
 # stdout, so every test is a direct `CMD | grep` statement below.
 #
-#   bash scripts/qa-sweep.sh          # 41 self-tests + autoplay x3   (~2 min)
+#   bash scripts/qa-sweep.sh          # 42 self-tests + autoplay x3   (~2 min)
 #   bash scripts/qa-sweep.sh --full   # + PAIRTEST                    (~2 min 40 s)
+#
+# COUNT NOTE (C1): the footer used to claim 41 self-tests and the sweep actually ran 42 —
+# an off-by-one that predates VOICETEST. Counted by hand from the echo lines: 42 before this
+# wave, 43 with VOICETEST. Corrected below rather than carried forward.
 #
 # RUN --full BEFORE MERGING. PAIRTEST (38 s measured) is the CRN-pairing identity check
 # that every paired measurement in this project rests on: two identical greedy legs on the
@@ -91,5 +95,5 @@ echo -n "run1: "; SIGHTLINE_AUTOPLAY=1 run | grep -oE "RESULT: (WIN|LOSE|TIMEOUT
 echo -n "run2: "; SIGHTLINE_AUTOPLAY=1 run | grep -oE "RESULT: (WIN|LOSE|TIMEOUT) mission=[0-9]+" | head -1
 echo -n "run3: "; SIGHTLINE_AUTOPLAY=1 run | grep -oE "RESULT: (WIN|LOSE|TIMEOUT) mission=[0-9]+" | head -1
 echo "=== DONE ==="
-echo "(42 self-tests exist; this sweep ran $([ "$FULL" = 1 ] && echo 42 || echo 41). Every line above"
+echo "(43 self-tests exist; this sweep ran $([ "$FULL" = 1 ] && echo 43 || echo 42). Every line above"
 echo " must read PASS, and every autoplay must read WIN or LOSE — never TIMEOUT, never blank.)"
