@@ -668,10 +668,11 @@ public class Run
     /// Pure in (seed, col, row) + the plan columns — no draws, so it round-trips on load.
     static Objective DeckObjective(int seed, int col, int row, int anchorCol, int escortCol, int escortRow)
     {
-        // anchor column: Defend leaned 75/25 over Rescue — the lean (not 50/50) is what lifts
-        // Defend onto >=80% of played routes once the free pool's 1-in-7 shots are added.
+        // anchor column: Defend leaned 80/20 over Rescue — the lean (not 50/50) is what lifts
+        // Defend onto >=80% of PLAYED routes: early deaths truncate routes before the anchor,
+        // so the paired batch read 75% at a 75 lean; 80 + the free pool's 1-in-7 shots clears it.
         if (col == anchorCol)
-            return Util.Hash3(seed, 7, col * 8 + row) % 100 < 75 ? Objective.Defend : Objective.Rescue;
+            return Util.Hash3(seed, 7, col * 8 + row) % 100 < 80 ? Objective.Defend : Objective.Rescue;
         if (col == escortCol && row == escortRow) return Objective.Escort;
         int off = (int)(Util.Hash3(seed, 11, col) % (uint)FreePool.Length);
         return FreePool[(off + row) % FreePool.Length];   // rows<=3 < pool length -> siblings distinct

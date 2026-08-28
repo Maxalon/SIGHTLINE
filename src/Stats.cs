@@ -594,11 +594,18 @@ public static class Stats
         var deckRuns = Runs.Where(r => r.Mode == "campaign" && r.Missions.Count > 0).ToList();
         if (deckRuns.Count > 0)
         {
-            double meanDistinct = deckRuns.Average(r =>
-                (double)r.Missions.Where(m => m.Layout >= 0).Select(m => m.Layout).Distinct().Count());
+            double Distinct(RunRec r) => r.Missions.Where(m => m.Layout >= 0).Select(m => m.Layout).Distinct().Count();
+            double meanDistinct = deckRuns.Average(Distinct);
             int defendRuns = deckRuns.Count(r => r.Missions.Any(m => m.Objective == "Defend"));
+            // full-depth = the run reached the boss column: early deaths truncate routes (2-3
+            // fights), and an EVENT node on the route replaces a fight entirely — so the all-runs
+            // mean under-reads deck variety. The full-depth line is the apples-to-apples read
+            // (its own ceiling is fights/run x authored share, both printed for the arithmetic).
+            var full = deckRuns.Where(r => r.Win).ToList();
             sb.AppendLine($"\nDECK EXPOSURE (campaign runs n={deckRuns.Count}):");
-            sb.AppendLine($"  distinct authored arenas/run : {meanDistinct:0.00} mean");
+            sb.AppendLine($"  distinct authored arenas/run : {meanDistinct:0.00} mean (all runs)");
+            if (full.Count > 0)
+                sb.AppendLine($"  ... full-depth runs only     : {full.Average(Distinct):0.00} mean over {full.Average(r => (double)r.Missions.Count):0.0} fights/run (n={full.Count})");
             sb.AppendLine($"  Defend dealt on the route    : {Pct(defendRuns, deckRuns.Count)} of runs (n={defendRuns})");
         }
 
