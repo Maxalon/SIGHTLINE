@@ -1554,6 +1554,149 @@ public partial class Game
             : "STAGGERTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
+    /// SIGHTLINE_PIKETEST — FUL-8: the SARISSA/PIKEMAN enemy lane-holder. On a controlled scene
+    /// asserts (a) PLANT: Ai.Plan emits a Brace plan aimed at the nearest soldier and the
+    /// ActAfterMove exec arms the exact player-BRACE flag set (OnOverwatch+OwBrace+OwFocused+OwDir),
+    /// (b) PLANT->STAGGER: a soldier entering the cone eats a Stagger-flagged reaction whose
+    /// connect deals EXACTLY Math.Max(1, 4/2) == 2 (the enemy-side brace halving pin), never crits,
+    /// never kills, and zeroes the soldier's actions, (c) CONE BLINDNESS: a mover behind the plant
+    /// provokes NO reaction and the plant is not spent, (d) BREAK: a player braced reaction that
+    /// hits the pikeman drops its plant, and a Disoriented or Routed pikeman's Plan emits no Brace.
+    /// Tiny window (tile math). Returns a one-line report.
+    public string PikemanSelfTest()
+    {
+        NoPersist = true;
+        var fails = new System.Collections.Generic.List<string>();
+        _run = new Run(); _run.Start();
+
+        // controlled scene: empty flat floor, no cover — LoS always clear, no crit-from-cover terms.
+        Grid = new Grid();
+        Players = new System.Collections.Generic.List<Unit>();
+        Enemies = new System.Collections.Generic.List<Unit>();
+        Vip = null; CaptiveLocked = false; Hvt = null; SquadConcealed = false;
+        Objective = Objective.Eliminate;
+
+        var sol = new Unit { Name = "SOL", Cls = "ASSAULT", Team = Team.Player, X = 12, Y = 5,
+                             Hp = 8, MaxHp = 8, Aim = 65, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+        sol.Ammo = sol.Weapon.Clip; sol.SyncPos(); sol.BeginTurn();
+        Players.Add(sol);
+        // Aim 40 so the opportunism gate can't fire (no >=65% shot exists) — leg (a) must PLANT.
+        var pike = new Unit { Name = "SARISSA", Cls = "PIKEMAN", Team = Team.Enemy, X = 4, Y = 5,
+                              Hp = 7, MaxHp = 7, Aim = 40, Mobility = 5, Weapon = Weapon.Make(WeaponKind.Smg) };
+        pike.Ammo = pike.Weapon.Clip; pike.Alert = AlertLevel.Alert; pike.SyncPos(); pike.BeginTurn();
+        Enemies.Add(pike);
+
+        // ---- (a) PLANT: the Ai branch emits Brace toward the soldier; the exec arms the flag set ----
+        _aiUnits = AliveEnemies().Where(x => x.Active).ToList();
+        PlanEnemySquad();
+        var plan = Ai.Plan(this, pike);
+        if (!plan.Brace) fails.Add("planNoBrace");
+        else
+        {
+            if (plan.BraceDirX != 1) fails.Add($"planDirX={plan.BraceDirX}");   // soldier is due east
+            // run the REAL exec: teleport to the plan's destination (the move is already verified by
+            // the shared EnqueuePlannedMove machinery elsewhere), then drive the ActAfterMove stage.
+            if (plan.Path.Count > 0) { pike.X = plan.Path[^1].x; pike.Y = plan.Path[^1].y; pike.SyncPos(); }
+            _aiIdx = 0; _aiPlan = plan; _aiStage = AiStage.ActAfterMove; BannerTimer = 0f;
+            UpdateEnemy();
+            if (!pike.OnOverwatch || !pike.OwBrace || !pike.OwFocused) fails.Add("execFlagsNotArmed");
+            if (pike.OwDirX != plan.BraceDirX || pike.OwDirY != plan.BraceDirY) fails.Add("execDirMismatch");
+            if (pike.ActionsLeft != 0) fails.Add($"execActionsLeft={pike.ActionsLeft}");
+        }
+        _anims.Clear();
+
+        // ---- (b) PLANT->STAGGER: the ==2 halving pin on the enemy-side reaction ----
+        // Aim 95 + fixed 4 damage; the mover HUNKERS so crit is structurally 0 (Combat zeroes crit
+        // vs a hunkered target) — a connect (full hit OR graze, DmgMin==DmgMax) is then EXACTLY
+        // Math.Max(1, 4/2) == 2 after the brace halving, making the numeric pin deterministic.
+        pike.X = 4; pike.Y = 5; pike.SyncPos();
+        pike.Aim = 95; pike.Weapon.DmgMin = 4; pike.Weapon.DmgMax = 4; pike.Weapon.CritBase = 0;
+        sol.X = 9; sol.Y = 5; sol.SyncPos();                      // dist 5, dead center of the cone
+        bool connected = false;
+        for (int attempt = 0; attempt < 60 && !connected; attempt++)
+        {
+            pike.OnOverwatch = true; pike.OwBrace = true; pike.OwFocused = true;
+            pike.OwDirX = 1; pike.OwDirY = 0; pike.ReactedThisTurn = false; pike.Ammo = pike.Weapon.Clip;
+            sol.Hp = sol.MaxHp; sol.ActionsLeft = 2; sol.Hunkered = true; sol.OnOverwatch = false;
+            _anims.Clear();
+            OnUnitEnteredTile(sol);
+            var shot = _anims.OfType<ShotAnim>().FirstOrDefault(s => s.D == sol);
+            if (shot == null) { fails.Add("noPlantReaction"); break; }     // the reaction must ALWAYS queue
+            if (!shot.Stagger) { fails.Add("plantReactionNotStagger"); break; }
+            if (!shot.Res.Hit) continue;                                   // a miss re-stages the scene
+            connected = true;
+            if (shot.Res.Crit) fails.Add("braceReactionCrit");             // halving forces no-crit
+            if (shot.Res.Damage != 2) fails.Add($"halvingPin={shot.Res.Damage}");
+            while (_anims.Count > 0)                                       // pump so Apply actually runs
+            {
+                var a = _anims[0]; a.OnStart(this);
+                for (int i = 0; i < 200 && !a.Update(this, 0.05f); i++) { }
+                if (_anims.Count > 0 && _anims[0] == a) _anims.RemoveAt(0);
+            }
+            if (!sol.Alive) fails.Add("staggerKilledMover");
+            if (sol.ActionsLeft != 0) fails.Add($"moverNotStaggered={sol.ActionsLeft}");
+            if (sol.MaxHp - sol.Hp != 2) fails.Add($"damageTaken={sol.MaxHp - sol.Hp}");
+        }
+        if (!connected && !fails.Contains("noPlantReaction") && !fails.Contains("plantReactionNotStagger"))
+            fails.Add("noConnectIn60");                                    // effHit ~70: P ~ 0.3^60
+        sol.Hunkered = false;
+        _anims.Clear();
+
+        // ---- (c) CONE BLINDNESS: a mover BEHIND the plant provokes nothing and spends nothing ----
+        pike.OnOverwatch = true; pike.OwBrace = true; pike.OwFocused = true;
+        pike.OwDirX = 1; pike.OwDirY = 0; pike.ReactedThisTurn = false; pike.Ammo = pike.Weapon.Clip;
+        sol.X = 1; sol.Y = 5; sol.SyncPos(); sol.Hp = sol.MaxHp; sol.ActionsLeft = 2;
+        _anims.Clear();
+        OnUnitEnteredTile(sol);
+        if (_anims.OfType<ShotAnim>().Any(s => s.D == sol)) fails.Add("reactedOutsideCone");
+        if (!pike.OnOverwatch) fails.Add("blindStepSpentPlant");
+        _anims.Clear();
+
+        // ---- (d) BREAK: a player braced reaction drops the plant; Disoriented/Routed never re-plant ----
+        pike.Hp = pike.MaxHp; pike.ActionsLeft = 2;                        // planted state from (c)
+        var res = new ShotResult { Hit = true, Crit = false, Graze = false, Damage = 1 };
+        Enqueue(new ShotAnim(sol, pike, res, reaction: true) { Stagger = true }, Team.Player);
+        while (_anims.Count > 0)
+        {
+            var a = _anims[0]; a.OnStart(this);
+            for (int i = 0; i < 200 && !a.Update(this, 0.05f); i++) { }
+            if (_anims.Count > 0 && _anims[0] == a) _anims.RemoveAt(0);
+        }
+        if (pike.OnOverwatch) fails.Add("staggerBackKeptPlant");           // the teach-by-mirror beat
+        if (!pike.Alive) fails.Add("staggerBackKilled");
+
+        pike.AddStatus(StatusKind.Disoriented, 1);
+        if (Ai.Plan(this, pike).Brace) fails.Add("disorientedReplanted");
+        pike.Statuses.Clear();
+        pike.Routed = 2;
+        if (Ai.Plan(this, pike).Brace) fails.Add("routedReplanted");
+        pike.Routed = 0;
+
+        return fails.Count == 0
+            ? "PIKETEST: PASS (plant arms the player-BRACE flag set; in-cone stagger halves to exactly 2, no crit, non-lethal, actions denied; blind outside the cone; stagger-back breaks the plant; Disoriented/Routed never plant)"
+            : "PIKETEST: FAIL (" + string.Join(",", fails) + ")";
+    }
+
+    /// Harness (screenshot): SIGHTLINE_PIKESHOT — FUL-8: a planted PIKEMAN lane on a live board so
+    /// the foe-red cone wash + edge rays + chevron + "BRC" tag (and the NEW CONTACT / enemy-ID reads
+    /// keyed off the codex row) are all visible. Pair with SIGHTLINE_CB=1 for the colorblind pass
+    /// (coded-state rule, DESIGN.md 3.H).
+    public void DebugPikemanLane()
+    {
+        DebugWakeAll();
+        var foe = Enemies.FirstOrDefault(e => e.Alive);
+        if (foe == null) return;
+        foe.Cls = "PIKEMAN"; foe.Name = "SARISSA";
+        foe.Weapon = Weapon.Make(WeaponKind.Smg); foe.Ammo = foe.Weapon.Clip;   // the cone IS the pike (MaxRange 10)
+        Unit near = null; int nd = int.MaxValue;
+        foreach (var p in AlivePlayers())
+        { int d = Util.ChebyDist(foe.X, foe.Y, p.X, p.Y); if (d < nd) { nd = d; near = p; } }
+        foe.OnOverwatch = true; foe.OwBrace = true; foe.OwFocused = true;
+        foe.OwDirX = near != null ? Math.Sign(near.X - foe.X) : -1;
+        foe.OwDirY = near != null ? Math.Sign(near.Y - foe.Y) : 0;
+        if (foe.OwDirX == 0 && foe.OwDirY == 0) foe.OwDirX = -1;               // degenerate: face the squad side
+    }
+
     /// SIGHTLINE_MORALETEST — UNDERTOW W3: enemy pod MORALE / ROUT. On a controlled scene asserts:
     /// (1) killing one of a 2-unit pod ROUTS the survivor (BreakPodMorale threshold), (2) a routed unit
     /// shoots WILD (Combat aim penalty), (3) a routed unit FLEES (Ai.Plan moves it farther from the

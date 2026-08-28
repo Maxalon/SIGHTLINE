@@ -1331,6 +1331,9 @@ public partial class Game
         float threat = 0f;
         if (Grid.IsFire(x, y)) threat += 20f;   // never voluntarily end a move standing in fire (hazards)
         if (InSiegeZone(x, y)) threat += 30f;   // a charged SIEGE strike WILL land here -> vacate (cover-ignoring)
+        // FUL-8 PIKEMAN: a live enemy BRACE lane costs a TURN (stagger), not a life — weighted between
+        // an exposed gun (~6-10) and the siege zone's 30, so the bot paths around it, not through it.
+        if (InEnemyBraceLane(x, y)) threat += 18f;
         foreach (var e in Enemies)
         {
             if (!e.Alive || !e.Active || e.Ammo <= 0) continue;

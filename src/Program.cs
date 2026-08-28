@@ -195,6 +195,15 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        // SIGHTLINE_PIKETEST=1 : FUL-8 — the SARISSA/PIKEMAN lane-holder (plant / stagger-halving pin /
+        // cone blindness / break legs). Needs a tiny window for tile math.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_PIKETEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "piketest");
+            Console.WriteLine(new Game().PikemanSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         // SIGHTLINE_MORALETEST=1 : UNDERTOW W3 — enemy pod morale / rout.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_MORALETEST") == "1")
         {
@@ -470,6 +479,7 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_ALERT") == "1") game.DebugAlertTiers();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_PRESSURE") == "1") game.DebugPressure();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_WAVEBANNER") == "1") game.DebugWaveTelegraph();   // FUL-4: pair with SIGHTLINE_OBJ=defend
+        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_PIKESHOT") == "1") game.DebugPikemanLane();       // FUL-8: planted PIKEMAN lane (pair with SIGHTLINE_CB=1 for the second pass)
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CONCEAL") == "1") game.DebugConcealment();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_INTENT") == "1") game.DebugIntent();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_SIEGE") == "1") game.DebugSiege();
