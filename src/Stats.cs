@@ -373,6 +373,8 @@ public static class Stats
     // EVERY pair — win/win and loss/loss pairs contribute too, unlike the discordant-only
     // binary gap). A continuous paired outcome uses far more of each slot's information, so
     // its CI is roughly half the binary gap's at the same n. SE = sd/√n over the margins.
+    // Review nano: at n=1 pair the sd (hence SE) degenerates to 0.00 — like the Se helper's
+    // p∈{0,1} rows, a printed ±0.00 there means "one sample", not "certain".
     static (int n, double mean, double se) PairedMargin(List<(int slot, int heat, RunRec g, RunRec s)> pairs)
     {
         if (pairs.Count == 0) return (0, 0.0, 0.0);
@@ -688,11 +690,15 @@ public static class Stats
         // PYR +2-turn burn, FST double-charge grant, RCL cone re-arm). picks>0 with procs=0
         // means the boon was HELD but its effect never reached play — the FUL-5 finding.
         // '-' = code not instrumented (frequency-only, as before).
+        // Review fix: PYR counts the +2-turn-burn half ONLY; its second effect (squad Burning
+        // immunity, the Unit.AddStatus chokepoint) is deliberately uninstrumented — it fires
+        // per BLOCKED application and would swamp the column. The caption says so.
         var boons = new Dictionary<string, int>();
         foreach (var r in Runs) foreach (var b in r.BoonsPicked) Bump(boons, b);
         if (boons.Count > 0 || _boonProcs.Count > 0)
         {
-            sb.AppendLine("\nBOON PICK FREQUENCY (PROCS = effect fires at instrumented sites; '-' = not instrumented):");
+            sb.AppendLine("\nBOON PICK FREQUENCY (PROCS = effect fires at instrumented sites; '-' = not instrumented;");
+            sb.AppendLine("                      PYR counts the +2-turn-burn half only — the Burning-immunity half is uninstrumented):");
             sb.AppendLine("  code                 picks   PROCS");
             foreach (var k in boons.Keys.Concat(_boonProcs.Keys).Distinct()
                          .OrderByDescending(k => boons.GetValueOrDefault(k)).ThenBy(k => k))
@@ -962,6 +968,8 @@ public static class Stats
             boonPicks = boons.OrderByDescending(kv => kv.Value).ToDictionary(kv => kv.Key, kv => kv.Value),
             // FUL-1: effect fires at the instrumented boon sites (0 for a picked code = the
             // boon never reached play; codes absent from ProcInstrumented are not counted).
+            // Review fix: PYR counts the +2-turn-burn half only — the Burning-immunity half
+            // (Unit.AddStatus) is uninstrumented (per-blocked-application, would swamp it).
             boonProcs = ProcInstrumented.OrderBy(k => k).ToDictionary(k => k, k => _boonProcs.GetValueOrDefault(k)),
             // FUL-1: field-event arm frequency ("id:arm"), all modes.
             eventChoicePicks = evChoices.OrderByDescending(kv => kv.Value).ThenBy(kv => kv.Key).ToDictionary(kv => kv.Key, kv => kv.Value),

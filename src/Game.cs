@@ -3888,8 +3888,9 @@ public partial class Game
         int dx = Math.Sign(u.X - ally.X), dy = Math.Sign(u.Y - ally.Y);   // direction the ally MOVES (toward us)
         u.ActionsLeft = Math.Max(0, u.ActionsLeft - 1);   // 1 action; never ends the turn
         u.DragsThisTurn++;                                // counted vs Combat.FieldCraftLimit (anti-loop)
-        // FUL-1 PROC: a SECOND drag this turn is only reachable through the boon's raised limit
-        if (u.DragsThisTurn >= 2) Stats.RecordProc("FDR");
+        // FUL-1 PROC (review fix: explicit boon conjunct — the >=2 gate invariant holds today,
+        // but a future non-boon FieldCraftLimit>1 source must not silently corrupt the column)
+        if (u.DragsThisTurn >= 2 && HasBoon(Boon.FieldDrills)) Stats.RecordProc("FDR");
         Stats.RecordAction("DRAG");                       // W2 verb telemetry
         Fx.PopText(ally.Pos + new Vector2(0, -32), "DRAG", Pal.Friend, 17f);
         Fx.Burst(ally.Pos, Pal.Friend, 8, 100f, 0.35f, 2.5f);
@@ -3948,8 +3949,8 @@ public partial class Game
         var u = Selected;
         u.ActionsLeft = Math.Max(0, u.ActionsLeft - 1);   // 1 action; never ends the turn
         u.VaultsThisTurn++;                               // counted vs Combat.FieldCraftLimit (anti-loop)
-        // FUL-1 PROC: a SECOND vault this turn is only reachable through the boon's raised limit
-        if (u.VaultsThisTurn >= 2) Stats.RecordProc("FDR");
+        // FUL-1 PROC (review fix: explicit boon conjunct — mirrors the drag site above)
+        if (u.VaultsThisTurn >= 2 && HasBoon(Boon.FieldDrills)) Stats.RecordProc("FDR");
         Stats.RecordAction("VAULT");                      // W2 verb telemetry (review fix: no invisible verbs)
         Fx.PopText(u.Pos + new Vector2(0, -32), "VAULT", Pal.Good, 17f);
         Fx.Burst(u.Pos, Pal.Good, 8, 110f, 0.35f, 2.5f);
