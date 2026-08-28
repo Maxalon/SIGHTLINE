@@ -67,7 +67,7 @@ public static class Mission
     public static void Build(Grid grid, List<Unit> players, List<Unit> enemies, int missionNum,
                              List<(int x, int y)> evac = null, (int x, int y)? terminal = null,
                              int enemyDelta = 0, int statDelta = 0, List<(int x, int y)> sabotage = null,
-                             int dmgDelta = 0)
+                             int dmgDelta = 0, bool defend = false)
     {
         enemies.Clear();
         grid.ClearSmoke();
@@ -97,6 +97,9 @@ public static class Mission
             // This loop seats PLAYERS only, so enemy items are never doubled).
             u.ItemCharge = u.Item != ItemKind.None
                 ? (Combat.RunBoons.Contains(Boon.FieldStores) ? 2 : 1) : 0;
+            // FUL-1 PROC: FIELD STORES actually granted a double charge (per soldier-item, the
+            // grant IS the effect — the boon has no in-mission fire site of its own)
+            if (u.ItemCharge == 2) Stats.RecordProc("FST");
             u.Suppress = 0;
             u.OnOverwatch = false;
             u.Hunkered = false;
@@ -112,7 +115,7 @@ public static class Mission
         // a lighter hostile force (the loud-tempo IS the difficulty) + covered fighting positions
         // at each site (below) so the split squad can hold.
         bool sabotageObj = sabotage != null && sabotage.Count > 0;
-        SpawnEnemies(grid, enemies, missionNum, evacSet, enemyDelta, statDelta, sabotageObj, dmgDelta);
+        SpawnEnemies(grid, enemies, missionNum, evacSet, enemyDelta, statDelta, sabotageObj, dmgDelta, defend);
 
         var occupied = new HashSet<(int, int)>();
         foreach (var u in players) occupied.Add((u.X, u.Y));
@@ -134,20 +137,27 @@ public static class Mission
         // ACCEPTED it (the connectivity guard can reject a proposal); -1 = procedural fallback.
         // The Roll(55)-before-PickLayout order is preserved exactly (same Util.Rng draw order).
         bool authored = false;
+        bool attempted = false;   // FUL-1 funnel: a template reached the connectivity guard
         AppliedLayout = -1;
         if (ForcedLayout >= 0 && ForcedLayout < Maps.Layouts.Length)
         {
+            attempted = true;
             authored = TryApplyLayout(grid, occupied, players, enemies, evacSet, terminal, Maps.Layouts[ForcedLayout], sabotage);
             if (authored) AppliedLayout = ForcedLayout;
         }
         else if (Util.Roll(55))
         {
+            attempted = true;
             int pick = PickLayout(missionNum);
             authored = TryApplyLayout(grid, occupied, players, enemies, evacSet, terminal, Maps.Layouts[pick], sabotage);
             if (authored) AppliedLayout = pick;
         }
         if (!authored)
             BuildProcedural(grid, occupied, evacSet, missionNum);
+        // FUL-1 ARENA FUNNEL (telemetry only, no-op unless Stats.Enabled): the three exits sum
+        // to 100% of builds — a guard REJECT was previously indistinguishable from a lost roll.
+        Stats.RecordArenaFunnel(authored ? Stats.ArenaAuthored
+                                : attempted ? Stats.ArenaReject : Stats.ArenaProcRoll);
 
         // protective cover beside each soldier and hostile (both layout paths)
         foreach (var u in players) TryCover(grid, occupied, u.X + 1, u.Y, TileType.LowCover);
@@ -372,7 +382,7 @@ public static class Mission
 
     static void SpawnEnemies(Grid grid, List<Unit> enemies, int n, HashSet<(int, int)> evac,
                              int enemyDelta = 0, int statDelta = 0, bool sabotage = false,
-                             int dmgDelta = 0)
+                             int dmgDelta = 0, bool defend = false)
     {
         // Headcount cap raised 10 -> 12 so the top-Heat "+enemy" rungs aren't silently wasted
         // (the +1/+1 from RELENTLESS/OVERWHELMING used to clip at 10 on later missions). 12 still
@@ -390,6 +400,11 @@ public static class Mission
         // (floored at 3) so a divided squad isn't also out-gunned. Stat bump is untouched and the
         // Heat ladder still applies on top, so the mastery curve is preserved.
         if (sabotage) count = Math.Max(3, count - 2);
+        // FUL-4 HOLDFAST (Defend 38% h0 measured pre-fix, target 60-80): DEFEND's real force is
+        // the INITIAL screen PLUS every SpawnDefendWave reinforcement, so an untrimmed opener
+        // double-counts the objective's difficulty — the timer IS the pressure. Mirror the
+        // sabotage trim, one step deeper (waves keep arriving all mission; sabotage gets none).
+        if (defend) count = Math.Max(3, count - 3);
         // Final mission (the WARLORD boss): de-stack the force. This was the core of the ~90% m6
         // loss wall -- the squad cleared m1-5 (m5 often wins ~100%, partly because it isn't always
         // forced Eliminate) then got alpha-struck on m6's forced full-clear. The compounding cause:
@@ -519,6 +534,39 @@ public static class Mission
             // time, tagged faction-roster vs default-cascade (no-op unless the balance harness runs).
             Stats.RecordSpawn(e.Cls, Combat.MissionFaction != Faction.None);
             enemies.Add(e);
+        }
+
+        // FUL-11 — a retinue BANNER must actually ANCHOR the formation it ships with: rows are
+        // shuffled, so slot-1's SIGNIFER could land Chebyshev 5-10 from its own pod-0 boss and the
+        // kit's no-rout aura (Game.BannerRange = 4) covered nothing at spawn. Deterministic
+        // relocation — PURE repositioning after every stream draw above has already happened, zero
+        // RNG consumed, so the world-build draw count is byte-identical: walk Cheb rings 1..range
+        // out from the boss in a fixed scan order and take the first tile that passes the spawn
+        // loop's own invariants (in-bounds / unoccupied / off the evac zone; the grid is still bare
+        // floor here — arenas/barrels stamp AFTER SpawnEnemies and keep unit tiles open). Scoped to
+        // the EXPLICIT retinue slots (i<=2): Legion/Syndicate geometry is W5-measured and
+        // banner-free, and a cascade-rolled WARBRINGER in a later pod is its own formation.
+        if (n >= Run.MaxMissions && enemies.Count > 1)
+        {
+            var boss = enemies[0];
+            for (int i = 1; i < enemies.Count && i <= 2; i++)
+            {
+                var ban = enemies[i];
+                if (!ban.HasBanner || Util.ChebyDist(ban.X, ban.Y, boss.X, boss.Y) <= Game.BannerRange) continue;
+                bool moved = false;
+                for (int d = 1; d <= Game.BannerRange && !moved; d++)
+                    for (int dy = -d; dy <= d && !moved; dy++)
+                        for (int dx = -d; dx <= d && !moved; dx++)
+                        {
+                            if (Math.Max(Math.Abs(dx), Math.Abs(dy)) != d) continue;   // ring cells only
+                            int tx = boss.X + dx, ty = boss.Y + dy;
+                            if (!grid.InBounds(tx, ty) || used.Contains((tx, ty)) || evac.Contains((tx, ty))) continue;
+                            used.Remove((ban.X, ban.Y));
+                            ban.X = tx; ban.Y = ty;
+                            used.Add((tx, ty));
+                            moved = true;
+                        }
+            }
         }
     }
 
@@ -875,19 +923,22 @@ public static class Mission
     {
         // (On the WARLORD statline history: HP 20+2n -> 14+n, aim 72 -> 68 — mission-6 was a
         // ~90%-loss wall; every kit boss keeps 68 aim and a 1-frag pouch via the ELITE branches.)
-        return Combat.MissionFaction switch
+        Unit b = Combat.MissionFaction switch
         {
             Faction.Legion    => ArmSiege(MakeHostile("SIEGELORD", "ELITE", WeaponKind.Lmg, 14 + n, 68, 6, x, y)),
             Faction.Syndicate => ArmShield(MakeHostile("SPYMASTER", "ELITE", WeaponKind.Lmg, 12 + n, 68, 6, x, y)),
             _                 => MakeHostile("WARLORD", "ELITE", WeaponKind.Lmg, 14 + n, 68, 6, x, y),
         };
+        b.IsBoss = true;   // FUL-11: presentation-only key (champion ring + HVT SIGHTED banner)
+        return b;
     }
 
     /// The finale kit's EXPLICIT retinue (slots i==1/2, right behind the boss). Legion escorts its
     /// siege-lord with a LANCER phalanx pair (measured tune — see MakeFinaleBoss: pairing the boss's
     /// strikes with a second real artillery piece sank the kit to a 37% conditional; the boss IS the
-    /// kit's artillery); Syndicate screens its spymaster with a lane-blinding zoner + a leaper.
-    /// Wardens (today's fight) and None return null — the roster/cascade fills every slot as before.
+    /// kit's artillery); Syndicate screens its spymaster with a lane-blinding zoner + a leaper;
+    /// Wardens (FUL-11) anchors its warlord with a SIGNIFER banner + an ORDERLY medic.
+    /// None returns null — the cascade fills every slot as before (the safety invariant).
     static Unit MakeFinaleRetinue(int i, int n, int bump, int x, int y)
     {
         if (i > 2) return null;
@@ -903,6 +954,22 @@ public static class Mission
                     return z;
                 }
                 return MakeHostile("WRAITH", "STRIKER", WeaponKind.Smg, 4 + bump, 60 + bump, 9, x, y);
+            case Faction.Wardens:
+                // FUL-11 — the WARDENS kit stops being "today's fight": the enrage brick arrives
+                // ANCHORED. The SIGNIFER lands in the boss's own pod (i==1 -> PodId 0), so the whole
+                // formation is held against rout until the banner falls, and the ORDERLY contests the
+                // burst-down verb with heals — target priority (banner -> medic -> boss) instead of a
+                // plain HP race. MEDIC over the spec's CUSTODIAN option: the boss node is always
+                // Decapitate, so a keeper has no terminal/charge to re-lock — a dead mechanic on the
+                // one map it would ship on (the TERROR lesson: verify the mechanic can actually fire).
+                // Stats verbatim from the Wardens FactionRoster/W8 lines. COST-NEUTRAL: replaces the
+                // two cascade-fill slots, and MakeHostile draws zero RNG at the PICK SITE — the
+                // downstream class-conditional grenade/smoke rolls can differ from the replaced
+                // picks, but only INSIDE the intentionally-changed m6 (pre-m6 stream and m6-reach
+                // verified identical in the FUL-11 review's pre/post A/B).
+                return i == 1
+                    ? MakeHostile("SIGNIFER", "WARBRINGER", WeaponKind.Rifle, 8 + bump, 56 + bump, 5, x, y)
+                    : MakeHostile("ORDERLY", "MEDIC", WeaponKind.Smg, 6 + bump, 52 + bump, 6, x, y);
             default:
                 return null;
         }

@@ -753,6 +753,9 @@ public class IncendiaryAnim : LobAnim
         g.Fx.Burst(Util.TileCenter(Tx, Ty), Pal.RGBA(255, 160, 70), 30, 300f, 0.5f, 5f, true);
         // lay the fire field. W10 PYROMANIACS boon: a SQUAD-thrown incendiary burns +2 turns
         // (team-gated so a hostile fire-starter never inherits the player's boon).
+        // FUL-1 PROC: once per squad-thrown incendiary whose field got the extension
+        if (Thrower != null && Thrower.Team == Team.Player && g.HasBoon(Sightline.Boon.Pyromaniacs))
+            Stats.RecordProc("PYR");
         g.Grid.AddFire(Tx, Ty, Radius, Grid.FireTurns
             + (Thrower != null && Thrower.Team == Team.Player && g.HasBoon(Sightline.Boon.Pyromaniacs) ? 2 : 0));
 

@@ -774,29 +774,44 @@ of record (container suspensions have wiped every scratchpad copy — docs are t
       N=10/leg): completion 65%→60% (at the ±5 boundary, in budget); leg swings (greedy 70→50,
       sloppy 60→70) are ~1.3 SD at n=10 — carried as a FUL-13 watch item, fix retained per the
       W6a truthfulness precedent.
-- [ ] **FUL-1 COMPASS TRUTH** (P1, M). Stats.cs/Program.cs/Game.Harness.cs (+DESIGN.md re-grade):
-      per-slot records + pairedMarginMissions (all-pairs margin, ~halves CI) in BuildSummary;
-      (code,heat)-keyed WinRateBy when a batch spans heats; binomial ±SE on n<30 rows; boon PROC
-      counters at effect sites (SHOCK DOCTRINE Game.cs:1980 full-dmg branch, RECLAIMER :2070,
-      PYROMANIACS :2476, TERROR rout-start, FIELD DRILLS 2nd drag/vault, FIELD STORES grant) as a
-      PROCS column; arena funnel split authored-attempt/connectivity-reject/procedural
-      (Mission.cs:143) + BY ARENA stratified by mission; RecordEvent(id,arm) + BY EVENT-CHOICE;
-      SIGHTLINE_PERK=<code> probe mirroring SIGHTLINE_CONTRACT; DESIGN.md §4 re-graded (name
-      engagement mass + death stakes as the thin pillars). Zero game-logic change; NoPersist-safe;
-      verify BALANCE=10 h0+h4 shows the new columns, SHOT=90 byte-identical.
-- [ ] **FUL-4 HOLDFAST** (P4, M). Defend 23.1% h0 (n=26) / gap 100 → 60-80% h0, 55-70% h4,
-      gap <50. Mission.SpawnEnemies defend flag (count-3, mirror sabotage trim at Mission.cs:392);
-      SpawnDefendWave dose-response levers ONE at a time (first wave graced to t3; size 1+m/2;
-      rich-tier cap min(mission,4) in MakeWaveHostile; waves stop t5); wave pods get real PodIds +
-      _podOrig so morale/rout plays; SmartDefend co-fix (fall back to better cover / refuse a
-      flank); wave-edge telegraph one turn ahead via the W8 banner lane. Budget: other objectives
-      ±3 on an unpinned h0 batch.
-- [ ] **FUL-11 CEREMONY** (P11, M). m6 finale presentation kit (HVT-named intro card, red top-bar
-      plate, boss ring/aura in DrawUnit, first-sighting banner via NEW CONTACT lane); Wardens
-      finale kit — MakeFinaleRetinue (Mission.cs:891-909) returns null for Wardens: WARBRINGER +
-      CUSTODIAN/MEDIC retinue (cost-neutral, replaces cascade fill; W6 heat-gate for any EXTRA
-      body). Per-kit reference 89/82/85, weakest (Wardens) 73 → all kits 78-88, pooled ±4 of 82.
-      Lands before FUL-13's baseline.
+- [x] **FUL-1 COMPASS TRUTH** (a4ef1dd). Telemetry-only compass upgrade (zero game-logic change,
+      NoPersist-safe, CRN draw-count neutral): per-slot pair records + all-pairs missions-cleared
+      PAIRED MARGIN (every pair contributes, ~halves CI; ±SE printed) in report+JSON;
+      (code,heat)-keyed "@h<N>" win-rate tables when a batch spans heats; binomial ±SE on n<30
+      win-rate rows; boon PROC counters at the six effect sites as a PROCS column — h4 N=10:
+      SHK 7 picks/0 procs, FDR 3/0, RCL 3/0, PYR 4/2 (the FUL-5 finding, now measured; FST/TRR
+      fire); arena funnel authored-applied/connectivity-reject/procedural-roll summing to 100%
+      (h0: 52.6/0.0/47.4 — the guard rejects ~nothing, the 55-roll IS the funnel); BY ARENA
+      stratified by mission; RecordEvent(id,arm) + BY EVENT-CHOICE tables; SIGHTLINE_PERK=<code>
+      probe (PerkDef.Parse mirrors ContractDef.Parse; override lands AFTER the value roll draws —
+      probe-off RFX 1 pick vs probe-on 10/10). DESIGN.md §4 re-graded: engagement mass + death
+      stakes named the thin pillars. Verified Release 0/0, PAIRTEST/SAVETEST, BALANCE=10 h0+h4,
+      paired 2xN=5 probe; logic-identity vs a706152 by seeded-autoplay frame-exact A/B (5 seeds)
+      + BALANCE=2 same-slot JSON field-identity (29/29 base-schema fields) — SHOT byte-equality
+      is environmentally impossible for any change (clock-seeded RNG + wall-clock pulses; see
+      the FUL-1 DEVLOG gotcha).
+- [x] **FUL-4 HOLDFAST** (wt-ful4 through 021a84b). Defend 38% h0 (fresh n=32 reference; the
+      23.1% audit number was an older tree) / gap ~0 → **66-73% h0** (two disjoint CRN batches,
+      n=59/n=70), **69% h4**, |gap| <= 8 every round — all three bands HIT. Levers landed, one
+      measured round each: SmartDefend co-fix FIRST (fall back to better cover / refuse a flank),
+      defend flag in SpawnEnemies (opener count-3, mirrors the sabotage trim), first wave graced
+      to t3, wave size 1+m/2, waves as real morale pods (ids 100+, _podOrig-snapshotted;
+      pressure-clock waves stay morale-exempt), wave-edge telegraph one player turn ahead (shared
+      DefendWaveTurn read; SIGHTLINE_WAVEBANNER shot hook). The rich-tier cap + stop-t5 levers
+      were NOT needed — the band was reached without them (still in the toolbox for FUL-13).
+      Budget: unpinned h0 completion 60% (unchanged; FUL-13 input); nominal ±3 breaches on
+      Sabotage/Decapitate shown to be reference noise by a zero-Defend null batch (full rounds
+      table + analysis in docs/DEVLOG.md).
+- [x] **FUL-11 CEREMONY** (P11, M — wt-ful11). m6 finale presentation kit (HVT-named intro card, red
+      top-bar plate, boss ring/aura in DrawUnit, first-sighting banner via NEW CONTACT lane); Wardens
+      finale kit — MakeFinaleRetinue Wardens: SIGNIFER banner (pod 0) + ORDERLY medic (MEDIC over
+      CUSTODIAN — the boss node is always Decapitate, a keeper has nothing to re-lock; the TERROR
+      lesson), cost-neutral cascade-fill replacement (zero extra RNG draws); deterministic no-RNG
+      post-pass guarantees the banner aura covers the boss as spawned (FUL11PROBE: bannerDistMax 4,
+      retinue slots present at h0's 6-body and h4's 9-body finales, 20 seeds x 3 kits x 2 heats).
+      **Measured (h0, 30 campaigns/kit, CRN slots 0-29 shared across kits): Wardens 73 → 83.7,
+      Legion 87.5, Syndicate 81.6 — all in the 78-88 band; pooled 84.2 (n=146) vs the 82±4 goal.
+      No tuning needed; no breaches.** Landed before FUL-13's baseline as sequenced.
 - [ ] **FUL-12 SIGNPOSTS** (P12, L). Run-end card SALVAGE/HEAT-UNLOCKED/ACHIEVEMENT slabs (new
       Game fields from AwardMetaRunEnd/UnlockHeatOnWin — no Report parsing, NoPersist-gated);
       tutorial concealment/AMBUSH step + FIELD MANUAL pointer + one-shot BRACE callout (careful
@@ -807,6 +822,20 @@ of record (container suspensions have wiped every scratchpad copy — docs are t
       ranked order (21.4% arbitrary-fallback measured); campaign legend + ('*','BATTLE')
       ('S','START'); DrawCodexGlyph into Hall of Fame + end-card squad/KIA rows; WAR ROOM panels
       sized to content. (LOCK-ON/NO QUARTER copy already done in FUL-3.)
+- [x] **FUL-12 SIGNPOSTS** (wt-ful12). All nine sub-items shipped: run-end card SALVAGE slab +
+      HEAT-UNLOCKED line + achievement roll via new Game fields (EndSalvage/EndHeatUnlocked/
+      EndAchievements set in AwardMetaRunEnd/UnlockHeatOnWin/TryAchievement — no Report parsing,
+      dark under NoPersist; SIGHTLINE_SUMMARY stages them); tutorial gained a concealment/AMBUSH
+      step 0 + FIELD MANUAL pointer in the wrap-up (named TutStep* constants keep the FIRE-lesson
+      completion gates semantic across the renumber); one-shot BRACE field tip (Display.
+      BraceTipSeen, never overlaps a lesson card, SIGHTLINE_BRACETIP stages); dormant-enemy hover
+      ID card + alert-state line (DrawTooltip no-odds path, SIGHTLINE_IDHOVER); top-bar pill
+      hovers — turn/CONCEALED/HEAT/PRESSURE/CACHE all card on hover (SIGHTLINE_HOVERHUD grew the
+      ids); tutorial bar hierarchy (lesson verb bright, rest 0.45, min-composed with FUL-3's
+      per-button dim); RECOMMENDED draft ranks the full 16-boon pool (arbitrary fallback now an
+      unreachable guard); campaign legend names S/START + */BATTLE; DrawCodexGlyph into Hall of
+      Fame + end-card squad/KIA rows; WAR ROOM panels sized to content. (LOCK-ON/NO QUARTER copy
+      was already done in FUL-3.)
 - [ ] **FUL-5 HANDS** (P5, M — after FUL-1 merges). The EV bot learns the verbs: widen DoBrace
       (~Game.Autopilot.cs:1380) / PATCH (~:1037) gates (brace vs inbound rusher pods when no
       >=60% kill shot; PATCH range<=2 missing>=3; grenade 2-clusters in cover; smoke/medkit on

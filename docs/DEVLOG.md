@@ -1526,6 +1526,64 @@ container suspensions (Jul 6→13→21→22→Aug 6) wiped every scratchpad copy
   (sealed diagonal corners block at range, both directions; point-blank keeps true-corner=cover;
   +6 COMBATTEST legs); Pinned comment truth. Verified: Release 0/0, 5 suites incl. new legs,
   INTRO-STASH, autoplay x5.
+- **FUL-12 SIGNPOSTS** (wt-ful12): the game now points at its own systems. End card gained the
+  meta payoff (SALVAGE slab, HEAT UNLOCKED line, achievement roll) via new Game fields set in the
+  award path — no Report parsing, all-dark under NoPersist so harness cards are unchanged;
+  tutorial gained a concealment/AMBUSH step 0 and a FIELD MANUAL pointer (TutStep* constants keep
+  the reached-FIRE gates semantic), plus a once-per-profile BRACE field tip; hovers now answer
+  everywhere they didn't — every top-bar pill (turn/concealed/heat/pressure/cache) cards, and a
+  dormant/no-odds enemy hover draws an ID card with an honest alert-state line; the tutorial bar
+  dims to the lesson verb (min-composed with FUL-3's occlusion dim); RECOMMENDED draft ranks all
+  16 boons (was 6 + arbitrary fallback at 21.4%); campaign legend names S/START + */BATTLE; class
+  glyphs lead Hall of Fame + end-card squad/KIA rows; WAR ROOM panels size to content. New
+  harness seams: SIGHTLINE_IDHOVER, SIGHTLINE_BRACETIP, SIGHTLINE_HOVERHUD +5 ids, SUMMARY
+  stages the meta fields. Verified: Release 0/0, DRAFTTEST/SAVETEST/CODEXTEST/MODETEST, autoplay
+  x2, 12-shot staged sweep (win/lose cards, tutorial step 0, ID card, war room, campaign legend,
+  5 pill hovers, brace tip).
+
+- **FUL-11 CEREMONY** (959f5b2 + docs; wave dev on wt-ful11, survived a 3-week container
+  suspension mid-measurement — commit-and-push-per-step meant zero code loss). The finale gets a
+  ceremony and Wardens gets a real kit:
+  * **Presentation**: m6 opens on a danger-red intro card naming the hunt ("FINALE - KILL THE
+    WARLORD") with the kit's counter-verb clause on the W11 sub-line (Run.FinaleKitClause — ONE
+    source of truth for both ceremony sites); a one-shot HVT SIGHTED banner fires on the NEW
+    CONTACT lane when the boss first goes Active (consumes the ELITE contact slot — no
+    double-banner); the m6 top bar rides a red-tinged plate + red hairline + a red FINALE prefix
+    (value/alpha match the normal plate — hue only, squint-safe); the finale boss carries a
+    champion ground ring/aura (Pal.Elite double ring + soft wash, drawn under the gold HVT mark,
+    all alert states) keyed on a new transient Unit.IsBoss set only in MakeFinaleBoss —
+    presentation-only, zero combat/AI reads.
+  * **Wardens retinue**: MakeFinaleRetinue's null Wardens case becomes SIGNIFER (WARBRINGER, in
+    the boss's own pod 0 — the formation cannot rout until the banner falls) + ORDERLY (MEDIC —
+    contests the burst-down verb; chosen over the spec's CUSTODIAN option because the boss node
+    is always Decapitate and a keeper would be a dead mechanic there, the TERROR lesson).
+    Cost-neutral: replaces the two cascade-fill slots; MakeHostile draws zero RNG exactly like
+    the FactionRoster fill it replaced, so the world-build stream is unchanged. A deterministic
+    (no-RNG, post-all-draws) relocation pass walks Cheb rings out from the boss so the banner
+    aura (range 4) covers the boss AS SPAWNED — shuffled rows previously allowed Cheb 5-10.
+  * **Verified**: SIGHTLINE_FUL11PROBE=20 (new window-free hook): retinue slots present at low
+    heat (h0 finale = 6 bodies incl. boss+retinue; h4 = 9), bannerDistMax 4, banner cap holds,
+    per-kit boss names — PASS across 3 kits x 2 heats. COMBATTEST/AITEST/MORALETEST/SAVETEST
+    PASS; Release 0/0; autoplay x3 clean (WIN m6 / LOSE m4 / smart WIN m6 — two full runs
+    exercised the whole ceremony path). Shots: intro_card / hvt_aura / red_topbar /
+    boss_sighted (untracked, forwarded to the owner).
+
+## Measured (FUL-11 per-kit m6 conditional — h0, SIGHTLINE_FINALE-pinned, 3x SIGHTLINE_BALANCE=10
+chunks per kit on shared CRN slot sets 0-9/10-19/20-29, greedy+sloppy pooled)
+| slots | WARDENS | LEGION | SYNDICATE |
+|---|---|---|---|
+| 0-9 | 94% (16/17) | 81% (13/16) | 71% (12/17) |
+| 10-19 | 64% (9/14) | 93% (13/14) | 79% (11/14) |
+| 20-29 | 89% (16/18) | 89% (16/18) | 94% (17/18) |
+| **pooled** | **83.7% (41/49)** | **87.5% (42/48)** | **81.6% (40/49)** |
+
+All three kits in the 78-88 goal band; pooled 84.2% (123/146) inside 82±4; the Wardens weakest
+cell moved 73 → 83.7 with NO count/stat tuning — the support-heavy retinue swap (banner+medic in
+for ~two cascade shooters at bump 5) traded alpha damage for a target-priority puzzle and landed
+in band on its own. Chunk-level variance is large (Wardens 64-94 across slot sets — world-driven,
+the same reason W5 adopted CRN pairing), so per-kit drift stays a full-ladder-batch watch item
+(FUL-13 baseline inherits these pinned chunks' method). h0 run completion across the nine chunks:
+45-85% (chunk n=10 each; the 10-19 slot set is simply a harder world draw for every kit).
 
 ## Measured (FUL-2 LOS budget A/B — CRN slots, h0, N=10/leg, pre=16e24e9 vs post)
 | metric | pre | post | verdict |
@@ -1556,3 +1614,101 @@ policy definition gets the accept-vs-sharpen decision then, with data.
 5. **Docs over-claims survive until someone greps for the test hook.** SIGNAL's W7 claimed
    SIGHTLINE_EXPOSURETEST; the hook didn't exist. Closed-item claims are now verified against
    the tree (hook exists, commits exist) before any docs commit — and W7's spec became FUL-9.
+
+# PROGRAM FULCRUM — FUL-1 COMPASS TRUTH landing (2026-08, wave dev)
+
+- **FUL-1 COMPASS TRUTH** (a4ef1dd): the measurement compass now reports what the FULCRUM waves
+  need to aim. Per-slot pair records + the all-pairs missions-cleared PAIRED MARGIN (continuous,
+  every pair contributes — CI roughly half the discordant-only binary gap's), binomial ±SE on
+  n<30 win-rate rows, (code,heat) "@h<N>" keys whenever a batch spans heats, a boon PROCS column
+  counted at the six effect sites, the arena funnel (authored-applied / connectivity-reject /
+  procedural-roll, sums to 100% of builds), BY ARENA stratified by mission #, BY EVENT-CHOICE
+  (id:arm, run-scoped like boons), and the SIGHTLINE_PERK=<code> paired probe. Telemetry-only:
+  every addition no-ops unless Stats.Enabled; the probe overrides AFTER ChoosePerk's value roll
+  draws, so probe legs replay their baseline worlds (CRN-safe). DESIGN.md §4 re-graded to tree
+  truth — **engagement mass** and **death stakes** are the named thin pillars.
+
+## Measured (FUL-1 first readings; BALANCE=10 per heat)
+| finding | number | consumer |
+|---|---|---|
+| SHOCK DOCTRINE procs (h4: 7 picks) | **0** | FUL-5/6 — the verb-boon layer never reaches play |
+| FIELD DRILLS / RECLAIMER procs (h4: 3+3 picks) | **0 / 0** | FUL-5/6 |
+| PYROMANIACS procs (h4: 4 picks) | 2 | FUL-5 |
+| FIELD STORES procs | 63-84/batch | grant site fires as designed |
+| TERROR procs (h0) | 6 | rout-start reachable |
+| arena funnel (h0) | 52.6% applied / 0.0% reject / 47.4% proc-roll | FUL-9 — the guard rejects ~nothing; the 55-roll IS the funnel |
+| paired margin, h0 / h4 | −0.30 ±0.26 / +0.10 ±0.57 SE | FUL-13 baseline |
+| PERK probe RFX (paired 2xN=5, h0) | 1 pick baseline → 10/10 probe leg | perk pricing works |
+
+## Gotcha for future waves: SHOT byte-identity is environmentally impossible
+The "byte-identical screenshot" verification bar cannot be met by ANY change, a no-op included:
+Util.Rng is clock-seeded at startup (the PairTest comment in Program.cs already says so) and the
+Renderer's pulses read Raylib.GetTime() (wall clock), so two SHOT invocations differ on unchanged
+code. Measured with a temporary (uncommitted, applied identically to both trees) env-gated
+Util.Reseed overlay: same-code noise floor 1.30-3.38% of pixels; base-vs-FUL-1 diffs 0.28-3.39% —
+inside the floor, scenes pixel-inspected identical (same world/units/HUD). The replacement
+logic-identity proof, now precedent for telemetry-only waves:
+  (a) seeded full-campaign AUTOPLAY + SMARTPLAY A/B vs base — frame-exact identical RESULT lines
+      across 5 seeds (any draw-count or logic drift diverges a 10k-frame trajectory);
+  (b) SIGHTLINE_BALANCE=2, same slot base, both trees — all 29 base-schema JSON fields identical
+      (per-shot class tallies and action mix included);
+  (c) PAIRTEST + SAVETEST PASS.
+
+# PROGRAM FULCRUM — FUL-4 HOLDFAST (2026-08, wave dev on wt-ful4)
+
+Defend was the hidden low cell: the initial force was sized like an Eliminate screen AND rich
+waves landed from t1 at 2+m/2 — the one enemy-forced-tempo objective double-counted its own
+difficulty — and the measuring bot refused to leave a flanked tile (so part of the number was
+the bot, not the mission). Measured-wave rounds, ONE lever each (SIGHTLINE_OBJ=defend, N=10 CRN
+slots, h0 unless noted; a706152 base):
+
+| round | lever | Defend win% | greedy/sloppy | gap |
+|---|---|---|---|---|
+| R0 | reference | 38% (n=32) | 38/38 | 0 |
+| R1 | SmartDefend co-fix: fall back to better cover / refuse a flank (lands FIRST) | 38% (n=32) | 33/41 | -8 |
+| R2 | defend flag: opener count-3 (mirror the sabotage trim) | 41% (n=34) | 41/41 | 0 |
+| R3 | first wave graced to t3 | 57% (n=46) | 60/52 | 8 |
+| R4 | wave size 1+m/2 | 66% (n=58) | 67/64 | 2 |
+| R5 | waves = real morale pods (ids 100+, _podOrig) | 66% (n=59) | 67/66 | 1 |
+| — | h4 leg, final tree | 69% (n=59) | 69/70 | -1 |
+| — | h0 disjoint slots (BALANCE_BASE=10), final tree | 73% (n=70) | 73/73 | -0 |
+
+Bands: h0 60-80 HIT (66/73 across disjoint slot sets, pooled ~70); h4 55-70 HIT (69); Defend
+gap <50 HIT (|gap| <= 8 every round). The R0 reference read 38%, not the audit's 23.1% — older
+tree, and n=26 vs n=32 batch noise; the target band is what binds, not the entry number. The
+spec's remaining dose-response levers (rich-tier cap min(mission,4) in MakeWaveHostile; waves
+stop t5) were deliberately NOT applied — the method stops inside the band; they stay in the
+toolbox if FUL-13's re-baseline wants Defend softer at the top rungs.
+
+Telegraph: "WAVE INBOUND - EAST EDGE" one PLAYER TURN ahead of the wave acting, shown from
+BeginPlayerTurn and sharing the spawner's own DefendWaveTurn schedule read (the W8 never-lies
+pattern), with a sub-line in the W11 lane. SIGHTLINE_WAVEBANNER=1 + SIGHTLINE_OBJ=defend +
+SIGHTLINE_SHOT stages it for a screenshot (autoplay skips game.Draw entirely, so SHOT+AUTOPLAY
+can never photograph a live board — stage presentation via a Debug* hook).
+
+Spill budget (unpinned h0 N=10, base 0 — CRN-comparable to the m1 A/B reference): Eliminate 100
+(ref 100), Hack 100 (~100), Evac 100 (~100), Escort 100 (~96, +4), Rescue 100 (~98), Sabotage
+86 (~100, -14), Decapitate 75 (~81, -6); run completion 60% (unchanged — recorded as FUL-13
+input; Defend fielded only n=4 unpinned missions, the FUL-9 exposure problem). The Sabotage /
+Decapitate / Escort deviations exceed the ±3 window NOMINALLY; a disjoint-slot control batch
+(BALANCE_BASE=10) that happened to field ZERO Defend missions — i.e. code-path-identical to the
+pre-FUL-4 tree — read Eliminate 90 / Sabotage 80 / Decapitate 86 / completion 60% against the
+same references. The ±3 window is tighter than the metric's own batch noise at n~15; breach
+reported per protocol, nothing reverted. FUL-1's per-slot records are the real fix for this
+class of question.
+
+Review notes (SHIP verdict, note-level): (1) the telegraph can promise a wave the 12-alive
+clutter-cap then swallows (16/18 landed in a pinned autoplay) — the lie is only ever
+conservative (spawner+banner share one DefendWaveTurn read; an unannounced wave is impossible);
+(2) the banner lives ~72 frames, so SIGHTLINE_SHOT=90 photographs an empty telegraph — use
+SHOT=30 for the wave-banner shot.
+
+
+Verified: Release 0/0; COMBATTEST/AITEST/MORALETEST/SIEGETEST PASS; autoplay x3 clean + one
+defend-pinned autoplay (waves land on schedule, WIN m6, no exceptions/TIMEOUT); telegraph
+screenshot inspected (banner + sub-line + DEFEND 3/8 pill on a live board).
+
+Gotchas for future waves: SpawnReinforcements' `podded` flag is DEFEND-only by design (a
+routable pressure-clock punishment isn't a punishment); wave pod ids start at 100 (initial pods
+are i/2 <= 5, harness scenes use 90/91); the wave schedule is DefendWaveTurn — spawner and
+telegraph must keep sharing that one read.

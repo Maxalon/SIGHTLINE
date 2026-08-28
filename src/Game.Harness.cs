@@ -37,6 +37,16 @@ public partial class Game
         ShowBanner("ENEMY REINFORCEMENTS - MAX PRESSURE", false);
     }
 
+    /// FUL-4 harness hook (screenshot only; pair with SIGHTLINE_OBJ=defend): stage the wave-edge
+    /// telegraph by jumping the turn counter to the first wave turn and running the REAL
+    /// BeginPlayerTurn path (MaybeWaveTelegraph reads the spawner's own DefendWaveTurn schedule),
+    /// so the frame shows exactly what a live t3 shows — banner, sub-line, DEFEND 3/8 pill.
+    public void DebugWaveTelegraph()
+    {
+        _turnCount = 3;
+        MaybeWaveTelegraph();
+    }
+
     /// Harness hook (screenshot only): spread the three awareness tiers (4.3) across the
     /// enemies so one frame shows Unaware ("?") / Suspicious ("!") / Alert glyph states.
     public void DebugAlertTiers()
@@ -1060,13 +1070,20 @@ public partial class Game
             u.Rank = Math.Min(Run.Ranks.Length - 1, 1 + i);
         }
         if (squad.Count > 0) { squad[0].Nickname = "REAPER"; squad[0].Kills = 11; squad[0].Traits.Add(Trait.Killer); }
-        if (squad.Count > 1) squad[1].Nickname = " HALO";
+        if (squad.Count > 1) squad[1].Nickname = "HALO";   // FUL-12 review: staging data had a stray leading space (rendered KRESS " HALO"); FullName's formatter is fine
         // a couple of fallen, recorded across the run for the memorial roll.
         _run.Memorial.Add(new FallenRec { Name = "DALES \"BISHOP\"", Cls = "RANGER",  Rank = "SERGEANT", Kills = 7, Mission = 2 });
         _run.Memorial.Add(new FallenRec { Name = "OKONKWO",        Cls = "GUNNER",  Rank = "CORPORAL", Kills = 4, Mission = 4 });
         _run.Memorial.Add(new FallenRec { Name = "VEGA \"ASH\"",    Cls = "ASSAULT", Rank = "ROOKIE",   Kills = 1, Mission = 5 });
         _run.Mission = lose ? 5 : Run.MaxMissions;
         if (lose) { LoseTitle = "RUN OVER"; LoseReason = "The squad fell on mission 5."; }
+        // FUL-12: stage the meta-payoff FIELDS deterministically (AwardMetaRunEnd never runs under
+        // NoPersist), so the SALVAGE slab / HEAT UNLOCKED line / achievement roll can be framed.
+        // Fixed values -> the SUMMARY shot stays byte-stable; a lose card shows the consolation only.
+        EndSalvage = lose ? 18 : 79;
+        EndHeatUnlocked = lose ? 0 : 4;
+        EndAchievements.Clear();
+        if (!lose) { EndAchievements.Add("TURNING UP"); EndAchievements.Add("THE LONG WAR"); }   // HEAT3 + DEEP: both true of this staged run (3 KIA -> never FLAWLESS)
         Phase = lose ? Phase.Lose : Phase.Win;
     }
 
@@ -2811,6 +2828,76 @@ public partial class Game
                 Selected = u;
                 DoBeacon();
             }
+    }
+
+    /// FUL-11 — finale-kit spawn DISTRIBUTION probe (the TERROR lesson: verify the mechanic can
+    /// actually fire in the real distribution BEFORE measuring win-rates). For each kit x heat
+    /// {0 = Ai.Tier 0, 4 = Ai.Tier 1 via the ladder} x `seeds` flywheel-identical worlds
+    /// (Util.Reseed(50000+slot), the RunOne pairing seed), rebuild the m6 force and assert:
+    ///   * enemies[0] is the kit's named boss and carries IsBoss;
+    ///   * the EXPLICIT retinue occupies slots 1-2 at LOW heat too (the cost-neutral guarantee —
+    ///     the W6 heat gate trims CASCADE bodies, never the retinue);
+    ///   * Wardens: the SIGNIFER sits in pod 0 with its aura covering the boss AS SPAWNED
+    ///     (Cheb <= Game.BannerRange, the relocation post-pass contract), the ORDERLY is present,
+    ///     and the banner cap holds (exactly one WARBRINGER in the force).
+    /// Prints per-kit composition tallies + the banner-distance max, then PASS/FAIL.
+    public static string Ful11ProbeTest(int seeds)
+    {
+        var fails = new System.Collections.Generic.List<string>();
+        string oldHeat = Environment.GetEnvironmentVariable("SIGHTLINE_HEAT");
+        string oldFin = Environment.GetEnvironmentVariable("SIGHTLINE_FINALE");
+        var sb = new System.Text.StringBuilder();
+        foreach (string kit in new[] { "wardens", "legion", "syndicate" })
+            foreach (int heat in new[] { 0, 4 })
+            {
+                Environment.SetEnvironmentVariable("SIGHTLINE_FINALE", kit);
+                Environment.SetEnvironmentVariable("SIGHTLINE_HEAT", heat.ToString());
+                var comp = new System.Collections.Generic.Dictionary<string, int>();
+                int maxBanDist = -1, minCount = int.MaxValue, maxCount = 0;
+                for (int slot = 0; slot < seeds; slot++)
+                {
+                    Util.Reseed(50000 + slot);                      // the flywheel's pairing seed
+                    var g = new Game { NoPersist = true };
+                    g.StartMission(6);
+                    string tag = $"{kit}/h{heat}/s{slot}";
+                    var es = g.Enemies;
+                    minCount = Math.Min(minCount, es.Count); maxCount = Math.Max(maxCount, es.Count);
+                    foreach (var e in es) comp[e.Cls] = comp.GetValueOrDefault(e.Cls) + 1;
+                    if (es.Count < 3) { fails.Add($"{tag}:tooFewBodies={es.Count}"); continue; }
+                    var boss = es[0];
+                    if (!boss.IsBoss || boss.Cls != "ELITE") fails.Add($"{tag}:slot0NotBoss={boss.Name}");
+                    string wantBoss = kit == "legion" ? "SIEGELORD" : kit == "syndicate" ? "SPYMASTER" : "WARLORD";
+                    if (boss.Name != wantBoss) fails.Add($"{tag}:bossName={boss.Name}");
+                    switch (kit)
+                    {
+                        case "wardens":
+                            if (es[1].Cls != "WARBRINGER") fails.Add($"{tag}:slot1={es[1].Cls}");
+                            if (es[2].Cls != "MEDIC") fails.Add($"{tag}:slot2={es[2].Cls}");
+                            if (es[1].PodId != 0) fails.Add($"{tag}:bannerPod={es[1].PodId}");
+                            int bd = Util.ChebyDist(es[1].X, es[1].Y, boss.X, boss.Y);
+                            maxBanDist = Math.Max(maxBanDist, bd);
+                            if (bd > Game.BannerRange) fails.Add($"{tag}:auraMiss={bd}");
+                            if (es.Count(e => e.Cls == "WARBRINGER") != 1) fails.Add($"{tag}:bannerCap");
+                            break;
+                        case "legion":
+                            if (es[1].Cls != "LANCER" || es[2].Cls != "LANCER") fails.Add($"{tag}:legionRetinue={es[1].Cls}/{es[2].Cls}");
+                            break;
+                        default:
+                            if (es[1].Cls != "SCREENER" || es[2].Cls != "STRIKER") fails.Add($"{tag}:syndRetinue={es[1].Cls}/{es[2].Cls}");
+                            break;
+                    }
+                }
+                sb.Append($"  {kit,-9} h{heat}: bodies {minCount}-{maxCount}");
+                if (kit == "wardens") sb.Append($"  bannerDistMax {maxBanDist}");
+                sb.Append("  comp[");
+                sb.Append(string.Join(" ", comp.OrderByDescending(kv => kv.Value).Select(kv => $"{kv.Key}:{kv.Value}")));
+                sb.AppendLine("]");
+            }
+        Environment.SetEnvironmentVariable("SIGHTLINE_HEAT", oldHeat);
+        Environment.SetEnvironmentVariable("SIGHTLINE_FINALE", oldFin);
+        Console.Write(sb.ToString());
+        return fails.Count == 0 ? $"FUL11PROBE PASS ({seeds} seeds x 3 kits x 2 heats)"
+                                : "FUL11PROBE FAIL: " + string.Join(", ", fails.Take(12));
     }
 
     /// Harness (screenshot): show the event screen at a mid column.

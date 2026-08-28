@@ -194,6 +194,15 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        // SIGHTLINE_FUL11PROBE=<N> : FUL-11 — finale-kit spawn distribution probe (per-kit retinue
+        // slots, Wardens banner aura coverage as spawned, banner cap) across N flywheel seeds.
+        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_FUL11PROBE"), out int ful11N) && ful11N > 0)
+        {
+            Raylib.InitWindow(64, 64, "ful11probe");   // StartMission -> Unit.SyncPos uses tile->px math
+            Console.WriteLine(Game.Ful11ProbeTest(ful11N));
+            Raylib.CloseWindow();
+            return;
+        }
         // SIGHTLINE_TRAITTEST=1 : feats -> traits/nicknames + bonds round-trip (item 3.2). No window.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_TRAITTEST") == "1")
         {
@@ -384,6 +393,9 @@ public static class Program
         // SIGHTLINE_CONTRACT=ironveterans|highstakes|spearhead : force a run contract on the
         // headless run (honored only under NoPersist, since the draft never runs there); None otherwise.
         game.ForcedContract = ContractDef.Parse(Environment.GetEnvironmentVariable("SIGHTLINE_CONTRACT"));
+        // FUL-1: SIGHTLINE_PERK=<code> (e.g. RFX) : the bot takes this perk whenever a rank-up
+        // offers it (ChoosePerk override; NoPersist-only, draw-count neutral). Null otherwise.
+        game.ForcedPerk = PerkDef.Parse(Environment.GetEnvironmentVariable("SIGHTLINE_PERK"));
         // SIGHTLINE_INTRO=1 (shot only): stay on the intro with a save present, to
         // screenshot the CONTINUE-run button.
         if ((shot || autoplay) && int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_MAP"), out int forcedMap))
@@ -448,6 +460,7 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CONTENT") == "1") Mission.DebugContentShowcase(game);
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_ALERT") == "1") game.DebugAlertTiers();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_PRESSURE") == "1") game.DebugPressure();
+        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_WAVEBANNER") == "1") game.DebugWaveTelegraph();   // FUL-4: pair with SIGHTLINE_OBJ=defend
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CONCEAL") == "1") game.DebugConcealment();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_INTENT") == "1") game.DebugIntent();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_SIEGE") == "1") game.DebugSiege();
@@ -482,9 +495,9 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_KIA") == "1") game.DebugKia();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_SUMMARY") == "1") game.DebugSummary();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_SUMMARY") == "lose") game.DebugSummary(true);
-        // SIGHTLINE_TUTORIAL=<n>: show tutorial step n-1 (=1 keeps the historical "step 0" shot;
-        // =3 frames the rewritten FIRE-rule copy, =4 the final step). NoPersist is already set, so
-        // the completion-time MarkTutorialSeen can never fire from a shot run (!NoPersist-gated).
+        // SIGHTLINE_TUTORIAL=<n>: show tutorial step n-1 (FUL-12 numbering: =1 the NEW concealment/
+        // AMBUSH lesson, =2 MOVE, =3 OVERWATCH, =4 the FIRE-rule copy, =5 the FIELD MANUAL wrap-up).
+        // NoPersist is already set, so MarkTutorialSeen can never fire from a shot run.
         if (shot && int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_TUTORIAL"), out int _tut) && _tut > 0)
             game.ShowTutorialStep(_tut - 1);
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CB") == "1") Pal.SetColorblind(true);
@@ -606,6 +619,14 @@ public static class Program
         // SIGHTLINE_BALANCE_DUMB=1 runs the smoke-test autopilot instead of the competent AI,
         // so the same batch can produce a baseline to compare the smart AI (and balance changes) against.
         bool dumb = Environment.GetEnvironmentVariable("SIGHTLINE_BALANCE_DUMB") == "1";
+        // FUL-1: SIGHTLINE_PERK=<code> — the perk-probe leg of a paired A/B batch: the bot takes
+        // this perk whenever a rank-up offers it (ChoosePerk override, draw-count neutral, so the
+        // probe leg replays the baseline leg's exact worlds). Strict parse (SIGHTLINE_OBJ
+        // precedent): a typo runs UNPROBED with a loud warning, never a silently wrong A/B.
+        string perkEnv = Environment.GetEnvironmentVariable("SIGHTLINE_PERK");
+        Perk? forcedPerk = PerkDef.Parse(perkEnv);
+        if (forcedPerk == null && !string.IsNullOrEmpty(perkEnv))
+            Console.WriteLine($"BALANCE: unknown SIGHTLINE_PERK '{perkEnv}' — running unprobed");
 
         // One window for the whole batch (the autoplay smoke path uses Display.RenderFrame).
         Raylib.SetConfigFlags(ConfigFlags.Msaa4xHint);
@@ -657,7 +678,7 @@ public static class Program
             Util.Reseed(50000 + slot);
             Stats.Slot = slot;       // stamp the pair id onto the RunRec (BeginRun reads it)
             var game = new Game { NoPersist = true, AutoPlay = true, SmartPlay = !dumb, SmartSloppy = !dumb && sloppy,
-                                  ForcedObjective = forcedObj };
+                                  ForcedObjective = forcedObj, ForcedPerk = forcedPerk };
             game.SeedSloppy(1000 + slot);   // reproducible per-run perturbation (no-op unless sloppy)
             // both entries fire Stats.BeginRun internally (tagging policy + mode)
             if (endless) game.BeginEndless(); else game.StartMission(1);

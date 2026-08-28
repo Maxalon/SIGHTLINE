@@ -281,7 +281,7 @@ public partial class Game
         int heat = _run.HeatLevel;
         // 1) SALVAGE — scales with depth + heat
         int salvage = 3 * wavesSurvived + 3 * heat;
-        if (salvage > 0) { SaveGame.AddSalvage(salvage); _run.Report.Insert(0, $"SALVAGE +{salvage}"); }
+        if (salvage > 0) { SaveGame.AddSalvage(salvage); _run.Report.Insert(0, $"SALVAGE +{salvage}"); EndSalvage = salvage; }   // FUL-12: end-card slab field
 
         // 2) HALL OF FAME — the fallen (KIA) + any survivors (Won iff it was a deep stand, wave>=10).
         var legends = new List<SaveGame.LegendDto>();

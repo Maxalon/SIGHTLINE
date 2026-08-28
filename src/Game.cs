@@ -527,12 +527,19 @@ public partial class Game
     public int TutStep = -1;                 // -1 = inactive
     bool _tutMoved, _tutOver, _tutShot;
     float _tutDoneTimer;
+    // FUL-12: named step indices — every gate below compares against the SEMANTIC step, so a
+    // future insert/renumber can't silently re-point the "reached the FIRE lesson" completion
+    // gates (EnterBarracks/LoseRun) or the bar-hierarchy map (Hud.DrawActionButtons).
+    public const int TutStepConceal = 0, TutStepMove = 1, TutStepOverwatch = 2, TutStepFire = 3, TutStepDone = 4;
     public static readonly string[] TutPrompts =
     {
-        "WELCOME, COMMANDER. Click a glowing tile to MOVE the selected soldier. Cover (the raised blocks) shields you from fire - end your move beside one.",
+        // FUL-12: the opening CONCEALED state was the one core rule the onboarding never named —
+        // a new player read the quiet board as "no threat" and walked into the first pod blind.
+        "WELCOME, COMMANDER. The squad opens CONCEALED - the enemy pods ahead are dormant and blind to you. Position freely: your first attack from hiding is an AMBUSH (bonus aim + crit), so you choose where the fight starts.",
+        "Click a glowing tile to MOVE the selected soldier. Cover (the raised blocks) shields you from fire - end your move beside one.",
         "Now set OVERWATCH: press [2] (or the button). That soldier will fire on the first enemy that moves into its line of sight.",
         "Click a hostile to FIRE. A shot costs 1 action and does NOT end the turn - keep the other action to reposition (one shot per turn). Attacking from a side a foe has no cover on FLANKS it - far deadlier.",
-        "That's the basics: move into cover, flank, overwatch, fire - then END TURN. Promotions, perks and a branching campaign await. Good hunting.",
+        "That's the basics: move into cover, flank, overwatch, fire - then END TURN. Press [K] anytime for the FIELD MANUAL - every enemy, verb and rule lives there. Good hunting.",
     };
     public string TutorialText => (TutStep >= 0 && TutStep < TutPrompts.Length) ? TutPrompts[TutStep] : null;
 
@@ -550,32 +557,64 @@ public partial class Game
         if (TutStep < 0) return;
         switch (TutStep)
         {
-            // W11: turn-count fallback on step 1 — a player who's already ending turns without a
-            // "move" click (e.g. opened on overwatch/fire) clearly knows how to act; don't hold the
-            // MOVE card up forever, advance to the next lesson after a couple of full turns.
-            case 0: if (_tutMoved || _turnCount >= 3) AdvanceTutorial(); break;
+            // FUL-12: the concealment lesson lives while the opening is actually concealed — it
+            // yields the moment stealth breaks (lesson demonstrated) or turn 2 starts (the squad
+            // has seen the opening; on a no-conceal run — SPEARHEAD/EXPOSED — it yields at once).
+            case TutStepConceal: if (!SquadConcealed || _turnCount >= 2) AdvanceTutorial(); break;
+            // W11: turn-count fallback on the MOVE step — a player who's already ending turns
+            // without a "move" click (e.g. opened on overwatch/fire) clearly knows how to act;
+            // don't hold the MOVE card up forever, advance after a couple of full turns.
+            case TutStepMove: if (_tutMoved || _turnCount >= 3) AdvanceTutorial(); break;
             // W11 review: same fallback on the OVERWATCH lesson — a reaction-averse player who
-            // never arms a watch would otherwise park here below the TutStep>=2 "seen" gate and
+            // never arms a watch would otherwise park here below the reached-FIRE "seen" gate and
             // get the whole onboarding re-offered every future run.
-            case 1: if (_tutOver || _turnCount >= 6) AdvanceTutorial(); break;
-            case 2: if (_tutShot) AdvanceTutorial(); break;
-            case 3: _tutDoneTimer -= dt; if (_tutDoneTimer <= 0) CompleteTutorial(); break;
+            case TutStepOverwatch: if (_tutOver || _turnCount >= 6) AdvanceTutorial(); break;
+            case TutStepFire: if (_tutShot) AdvanceTutorial(); break;
+            case TutStepDone: _tutDoneTimer -= dt; if (_tutDoneTimer <= 0) CompleteTutorial(); break;
         }
     }
 
     void AdvanceTutorial()
     {
         TutStep++;
-        if (TutStep == 3) _tutDoneTimer = 7f;
+        if (TutStep == TutStepDone) _tutDoneTimer = 7f;
         if (TutStep >= TutPrompts.Length) CompleteTutorial();
     }
 
     /// Harness seam (SIGHTLINE_TUTORIAL=<n>): show a step directly. Seeds the final step's dwell
-    /// timer — without it, step 3 completes on the first Update tick and the shot frames a bare board.
+    /// timer — without it, the done step completes on the first Update tick and the shot frames a
+    /// bare board.
     public void ShowTutorialStep(int step)
     {
         TutStep = Math.Clamp(step, 0, TutPrompts.Length - 1);
-        if (TutStep == 3) _tutDoneTimer = 7f;
+        if (TutStep == TutStepDone) _tutDoneTimer = 7f;
+    }
+
+    // ---------------- FUL-12: one-shot BRACE field tip ----------------
+    // The BRACE interrupt is the comeback lever, but nothing in the game ever POINTS at it — the
+    // verb sat unused by exactly the players it rescues. One card, once per profile, the first
+    // time a live (Active) hostile makes the reaction real. Interactive-only: NoPersist runs
+    // (autoplay/shots) never see it unless SIGHTLINE_BRACETIP=1 stages it for the harness.
+    public string CalloutText;      // non-null => Hud draws the FIELD TIP card
+    public float CalloutTimer;      // seconds left on screen
+
+    void UpdateBraceCallout(float dt)
+    {
+        if (CalloutText != null)
+        {
+            CalloutTimer -= dt;
+            if (CalloutTimer <= 0) CalloutText = null;
+            return;
+        }
+        bool force = NoPersist && Environment.GetEnvironmentVariable("SIGHTLINE_BRACETIP") == "1";
+        if (!force && (NoPersist || Display.BraceTipSeen)) return;
+        if (Phase != Phase.PlayerTurn || TutorialText != null) return;   // never overlap a lesson card
+        if (!force && !Enemies.Any(e => e.Alive && e.Active)) return;    // fire when the threat is real
+        CalloutText = "BRACE [B]: a disrupting reaction. On a hit it STAGGERS the mover - the foe "
+                    + "loses its action this turn (for reduced damage). Deny a rushing enemy's alpha "
+                    + "instead of racing it for the kill.";
+        CalloutTimer = 9f;
+        if (!NoPersist) Display.MarkBraceTipSeen();   // one-shot: burned the moment it shows
     }
 
     /// APEX W2: finish the onboarding and persist the one-time "seen" flag. The !NoPersist gate is
@@ -690,6 +729,10 @@ public partial class Game
     // UNDERTOW W3 — pod MORALE: a pod that drops to <= half its original strength ROUTS its survivors.
     // _podOrig snapshots each pod's spawn size at mission start; the break/threshold logic is BreakPodMorale.
     readonly Dictionary<int, int> _podOrig = new();
+    // FUL-4 — DEFEND waves are real pods too (morale/rout must play on the one objective built
+    // from waves). Ids allocated from 100 up: initial pods are i/2 (<=5), harness scenes use 90/91,
+    // so wave pods can never collide with either. Reset per mission beside _podOrig.
+    int _nextWavePod = 100;
     public const int RoutDuration = 2;         // enemy turns a broken pod flees before it can rally (decrements in BeginTurn)
     // SIGNAL W8 — the WARBRINGER's banner aura reach (Chebyshev tiles). Pods with a living, active
     // banner inside this range cannot rout (BreakPodMorale) and rally one turn faster
@@ -708,8 +751,9 @@ public partial class Game
     }
 
     /// SIGNAL W8 — a pod's live head-count vs its spawn strength, for the WAVERING telegraph +
-    /// the "POD 2/4" tooltip line. `orig` falls back to the current count for un-snapshotted pods
-    /// (e.g. DEFEND reinforcement waves), mirroring BreakPodMorale's mates.Count+1 post-kill view.
+    /// the "POD 2/4" tooltip line. `orig` falls back to the current count for un-snapshotted pods,
+    /// mirroring BreakPodMorale's mates.Count+1 post-kill view. (FUL-4: DEFEND waves are now
+    /// snapshotted at spawn; the fallback still guards hypothetical future un-snapshotted pods.)
     public (int alive, int orig) PodStrength(int podId)
     {
         int alive = 0;
@@ -795,6 +839,11 @@ public partial class Game
     // test can verify each for no-crash/no-TIMEOUT. Program.cs sets this (a public field) BEFORE
     // StartMission; default None keeps plain autoplay byte-stable. Only honoured under NoPersist.
     public Contract ForcedContract = Contract.None;
+    // FUL-1 probe hook: SIGHTLINE_PERK forces the bot to TAKE this perk whenever a rank-up offer
+    // contains it (ChoosePerk), so a paired probe batch can price ONE perk against its absence.
+    // Honoured only under NoPersist; the override lands AFTER the value roll has drawn, so the
+    // probe leg and its paired baseline consume identical Util.Rng draws (CRN-safe).
+    public Perk? ForcedPerk = null;
     // W2 harness hook: WHOLE-RUN objective pin (SIGHTLINE_OBJ under the balance batch / autoplay).
     // DebugForceObjective rewrites only the CURRENT card — missions 2+ come from the campaign map,
     // so an objective sweep with the old pin measured 1 forced mission + ~5 normal ones. This pin
@@ -857,10 +906,28 @@ public partial class Game
             if (DraftPicked.Count < DraftCap) DraftPicked.Add(fixedSquad[i]);
             DraftRecommended.Add(fixedSquad[i]);
         }
-        // safest doctrine on offer: durability > sustain > flat aim, then whatever rolled first.
-        Boon[] pref = { Boon.Fortified, Boon.Scavenger, Boon.Marksmen, Boon.Executioners, Boon.Grenadier, Boon.Fervor };
+        // FUL-12: the safety ranking now covers the FULL 16-boon pool (a 6-entry list left 21.4%
+        // of first-run offers falling through to "whatever rolled first" — an arbitrary pick
+        // wearing the RECOMMENDED badge). The first six keep their measured order; the tail ranks
+        // by new-player value: passive/always-on before conditional, simple verbs before stealth
+        // micro (Ghost last — expert play wearing a beginner badge was the worst failure mode).
+        Boon[] pref =
+        {
+            Boon.Fortified, Boon.Scavenger, Boon.Marksmen, Boon.Executioners, Boon.Grenadier, Boon.Fervor,
+            Boon.RapidDeploy,    // +1 body all run: the most forgiving thing a new squad can have
+            Boon.FieldStores,    // doubled item charges: passive, no decision cost
+            Boon.Adrenaline,     // kill -> +1 action: triggers on the thing beginners already do
+            Boon.ShockDoctrine,  // BRACE at full damage: pairs with the FUL-12 brace field tip
+            Boon.Pyromaniacs,    // fire immunity half is pure safety even if the burn half idles
+            Boon.Venom,          // free chip damage on every hit; zero micro
+            Boon.FieldDrills,    // doubled DRAG/VAULT: useful but assumes the verbs are known
+            Boon.Reclaimer,      // focused-cone re-arm: needs the FOCUS verb in the vocabulary
+            Boon.Terror,         // longer routs: strong, but morale play is a mid-game concept
+            Boon.Ghost,          // concealment micro is expert tempo — never a first-run default
+        };
         foreach (var b in pref)
             if (DraftBoonOffer.Contains(b)) { DraftRecommendedBoon = b; break; }
+        // unreachable while pref spans the whole enum — kept as a guard for a future pool grow
         if (!DraftRecommendedBoon.HasValue && DraftBoonOffer.Count > 0) DraftRecommendedBoon = DraftBoonOffer[0];
         DraftSelectedBoon = DraftRecommendedBoon;
     }
@@ -994,6 +1061,13 @@ public partial class Game
         // a resumed run re-IDs contacts and tallies causes from the resume point onward.
         DeathsByClass.Clear();
         _seenArchetypes.Clear();
+        // FUL-11 review hardening: SetupMission already re-arms this per mission, but clearing
+        // at the mode seam too means a future second IsBoss spawn point can't silently turn
+        // "once per sighting ceremony" into a stale carry-over across mode entries.
+        _bossSighted = false;
+        // FUL-12: the end-card meta payoff is per-RUN — a new mode entry must not inherit the
+        // previous run's SALVAGE slab / HEAT UNLOCKED line / achievement roll.
+        EndSalvage = 0; EndHeatUnlocked = 0; EndAchievements.Clear();
         // Harness affordance (screenshot only, mirrors the SIGHTLINE_HEAT pattern): pre-seed the
         // cause-of-death tally, e.g. SIGHTLINE_DEATHS=SNIPER:2,GRUNT:1 — so the lose-card line can
         // be framed without playing a full losing run. Inert when unset -> plain shots byte-stable.
@@ -1263,7 +1337,8 @@ public partial class Game
             : (Objective == Objective.Rescue ? (Grid.W / 2, Grid.H / 2) : ((int, int)?)null);
         Grid.ClearHazards();              // wipe last mission's fire/barrels before terrain is rebuilt
         Mission.Build(Grid, Players, Enemies, n, EvacZone, reserve,
-                      enemyDelta, statDelta, HasSabotage ? SabotageSites : null, heatDmg);
+                      enemyDelta, statDelta, HasSabotage ? SabotageSites : null, heatDmg,
+                      Objective == Objective.Defend);   // FUL-4: trim the opener — waves are the force
         // PROGRAM HORIZON W2: Mission.Build laid out the arena + spawned a normal campaign force.
         // For LAST STAND we don't want that force — clear it and drop in the first horde wave (the
         // arena/terrain stays). SpawnEndlessWave uses the SpawnReinforcements machinery.
@@ -1329,6 +1404,7 @@ public partial class Game
         foreach (var u in Players)
         { u.FeatMultiKill = u.FeatClutch = u.FeatVengeful = u.WasNearDeath = u.FeatBurned = u.AllyDown = false; u.BondAura = false; u.ConsecutiveMisses = 0; u.Statuses.Clear(); u.LastDotSource = null; }
         _missionKia.Clear();
+        _bossSighted = false;        // FUL-11: the HVT SIGHTED ceremony banner re-arms per mission
         Scorches.Clear();            // death decals don't carry between missions
         _refundedThisTurn.Clear();   // flank-kill refund is per-turn; clear it for the mission's first turn too (review #2)
         _smartConcealTurns = 0;      // SmartStep: concealed-turn counter (hard anti-TIMEOUT cap)
@@ -1356,8 +1432,10 @@ public partial class Game
         }
         foreach (var u in Enemies) { u.BeginTurn(); u.OnOverwatch = false; u.Routed = 0; }
         // UNDERTOW W3: snapshot each pod's spawn strength so BreakPodMorale can tell when a pod has
-        // been chewed down to <= half and should rout its survivors (wave hostiles are PodId<0, ungrouped).
+        // been chewed down to <= half and should rout its survivors (FUL-4: DEFEND waves join the
+        // snapshot as pods 100+ at spawn time; pressure-clock/endless hostiles stay PodId<0, ungrouped).
         _podOrig.Clear();
+        _nextWavePod = 100;
         foreach (var e in Enemies) if (e.PodId >= 0) _podOrig[e.PodId] = _podOrig.GetValueOrDefault(e.PodId) + 1;
         Selected = Players.FirstOrDefault(p => p.CanAct);
         AimMode = false;
@@ -1369,7 +1447,17 @@ public partial class Game
         if (Mode == GameMode.Campaign)
         {
             string facTag = Combat.MissionFaction != Faction.None ? $" - {Run.FactionName(Combat.MissionFaction)}" : "";
-            ShowBanner($"MISSION {n} - {Biome.Name}{facTag}", false);
+            // FUL-11 CEREMONY: the finale opens on a card that names the HUNT, not a mission
+            // number — the named boss in the headline, its kit's verb clause on the W11 sub-line,
+            // in the danger colour (a threat announcement, not a turn cue). Gated on the boss
+            // node's Decapitate so SKIRMISH/forced-objective m6 builds keep the plain banner.
+            if (n >= Run.MaxMissions && Objective == Objective.Decapitate)
+            {
+                var kf = Combat.MissionFaction;
+                ShowBanner($"FINALE - KILL THE {Run.FinaleBossName(kf).ToUpperInvariant()}", true);
+                BannerSub = Run.FinaleKitClause(kf);
+            }
+            else ShowBanner($"MISSION {n} - {Biome.Name}{facTag}", false);
             StartTutorialMaybe();   // first-run onboarding is a campaign-only feature
         }
         else if (Mode == GameMode.Skirmish)
@@ -1583,9 +1671,10 @@ public partial class Game
         // APEX W2: tutorial completion fallback — the first mission ended with steps still pending
         // (e.g. the player never set overwatch), so close it out and mark it seen (NoPersist-gated
         // inside) rather than re-running the onboarding at the start of every future run.
-        // W11: mark "seen" only if the player actually reached the FIRE lesson (TutStep >= 2) —
-        // someone who never got past MOVE hasn't been onboarded; let the tutorial re-offer next run.
-        if (TutStep >= 2) CompleteTutorial(); else TutStep = -1;
+        // W11: mark "seen" only if the player actually reached the FIRE lesson — someone who never
+        // got past MOVE hasn't been onboarded; let the tutorial re-offer next run. (FUL-12: the
+        // named TutStepFire constant keeps this gate on the same SEMANTIC step across renumbers.)
+        if (TutStep >= TutStepFire) CompleteTutorial(); else TutStep = -1;
         // W5 SCARS: capture the just-played mission's faction BEFORE EndMission clears it, so
         // DebriefSurvivors can brand a VENDETTA grudge on a survived near-death (the faction that
         // nearly killed them). None on a mixed-force mission -> no grudge stamped (inert).
@@ -1710,12 +1799,21 @@ public partial class Game
             UnlockedHeat++;
             SaveGame.SaveMetaHeat(UnlockedHeat);
             _run.Report.Insert(0, $"HEAT {UnlockedHeat} UNLOCKED");
+            EndHeatUnlocked = UnlockedHeat;   // FUL-12: the end card reads the field, not the report
         }
     }
 
     // run-over screen text (set by LoseRun so the cause reads accurately)
     public string LoseTitle = "RUN OVER";
     public string LoseReason = "";
+
+    // FUL-12 SIGNPOSTS — end-card meta payoff, piped through FIELDS (never parsed back out of the
+    // Report strings). Set only inside the !NoPersist meta award path (AwardMetaRunEnd /
+    // UnlockHeatOnWin / TryAchievement / AwardMetaEndless), so every harness end card stays
+    // byte-stable (fields sit at defaults there); reset per mode entry in ResetModeState.
+    public int EndSalvage;                                  // salvage banked at run end (0 = no slab)
+    public int EndHeatUnlocked;                             // freshly-opened heat rung (0 = no line)
+    public readonly List<string> EndAchievements = new();   // display names of NEW unlocks this run-end
 
     // W11 HONEST LOSSES — which enemy archetype is killing this run's soldiers. Always-on (a
     // Dictionary bump costs nothing), bumped in KillUnit, read by the lose card's CAUSE OF DEATH
@@ -1726,14 +1824,16 @@ public partial class Game
 
     // W11 NEW CONTACT — archetypes already ID'd this run (banner fires once per archetype per run).
     readonly HashSet<string> _seenArchetypes = new();
+    // FUL-11 — the finale boss's first-sighting ceremony banner already fired this mission.
+    bool _bossSighted;
 
     /// End the run as a loss and clear the checkpoint so the intro stops offering CONTINUE.
     void LoseRun(string title, string reason)
     {
         // APEX W2: tutorial completion fallback (mirror of EnterBarracks) — a first-mission loss
         // still counts as "the onboarding ran"; don't re-show it forever. NoPersist-gated inside.
-        // W11: same reached-the-FIRE-lesson gate as EnterBarracks — a step-0/1 washout re-offers.
-        if (TutStep >= 2) CompleteTutorial(); else TutStep = -1;
+        // W11: same reached-the-FIRE-lesson gate as EnterBarracks — an early washout re-offers.
+        if (TutStep >= TutStepFire) CompleteTutorial(); else TutStep = -1;
         Combat.EndRun();   // TEMPO wave 4: clear every mission-scoped combat static (+ run boons) on run end
         LoseTitle = title;
         LoseReason = reason;
@@ -1771,7 +1871,7 @@ public partial class Game
         // funds the standing economy. h0 is UNCHANGED at 25+6m (~61 for a full clear). The loss
         // consolation stays additive.
         int salvage = win ? (25 + 6 * _run.Mission) * (10 + heat) / 10 : (4 * Math.Max(0, _run.Mission - 1) + 2 * heat);
-        if (salvage > 0) { SaveGame.AddSalvage(salvage); _run.Report.Insert(0, $"SALVAGE +{salvage}"); }
+        if (salvage > 0) { SaveGame.AddSalvage(salvage); _run.Report.Insert(0, $"SALVAGE +{salvage}"); EndSalvage = salvage; }   // FUL-12: field feeds the end-card slab
 
         // 2) HALL OF FAME — surviving squad (won runs) as legends, plus this run's fallen (KIA).
         var legends = new List<SaveGame.LegendDto>();
@@ -1812,6 +1912,7 @@ public partial class Game
         {
             SaveGame.AddSalvage(MetaProg.AchievementSalvage);
             _run.Report.Insert(0, $"ACHIEVEMENT: {MetaProg.AchievementName(id)}  (+{MetaProg.AchievementSalvage} salvage)");
+            EndAchievements.Add(MetaProg.AchievementName(id));   // FUL-12: end-card line (display name)
         }
     }
 
@@ -1832,6 +1933,20 @@ public partial class Game
     void CheckNewContact()
     {
         if (NoPersist && Environment.GetEnvironmentVariable("SIGHTLINE_NEWCONTACT") != "1") return;
+        // FUL-11 CEREMONY — the finale boss's first sighting outranks the generic bestiary ID:
+        // a one-shot HVT SIGHTED card on the same lane/window, naming the target + its kit's
+        // verb clause. Consumes the archetype's NEW CONTACT slot too, so the SAME unit can't
+        // double-banner as a generic contact one window later.
+        if (!_bossSighted)
+            foreach (var e in Enemies)
+            {
+                if (!e.Alive || !e.Active || !e.IsBoss) continue;
+                _bossSighted = true;
+                _seenArchetypes.Add(e.Cls);
+                ShowBanner($"HVT SIGHTED: {e.Name}", true);
+                BannerSub = Run.FinaleKitClause(Combat.MissionFaction);
+                return;
+            }
         foreach (var e in Enemies)
         {
             if (!e.Alive || !e.Active || _seenArchetypes.Contains(e.Cls)) continue;
@@ -1978,6 +2093,8 @@ public partial class Game
             // FULL damage AND staggers (Combat.BraceFullDamage; the stagger flag below is unchanged).
             bool brace = w.OwBrace;
             if (brace && res.Hit && !Combat.BraceFullDamage(w)) { res.Damage = Math.Max(1, res.Damage / 2); res.Crit = false; }
+            // FUL-1 PROC: the boon actually waived the halving on a landed brace (no-op unless Stats.Enabled)
+            if (brace && res.Hit && Combat.BraceFullDamage(w)) Stats.RecordProc("SHK");
             Fx.PopText(w.Pos + new Vector2(0, -30), brace ? "BRACE" : "OVERWATCH", brace ? Pal.Good : Pal.Accent, 18f);
             Audio.Play("over");
             var shot = new ShotAnim(w, mover, res, reaction: true) { Stagger = brace };
@@ -2071,6 +2188,7 @@ public partial class Game
         {
             rsa.A.OnOverwatch = true;
             rsa.A.ReactedThisTurn = false;
+            Stats.RecordProc("RCL");   // FUL-1 PROC: a cone kill actually re-armed the watch
             Fx.PopText(rsa.A.Pos + new Vector2(0, -30), "RECLAIMED", Pal.Accent, 17f);
             Fx.Flash(rsa.A.Pos, Pal.Accent, 18f, 0.14f, 0.45f);
         }
@@ -2188,6 +2306,8 @@ public partial class Game
             return;
         }
         if (!broke) return;                                 // survivors dormant or already routing
+        // FUL-1 PROC: a rout started with the extended TERROR duration applied (RoutDurationFor)
+        if (HasBoon(Boon.Terror)) Stats.RecordProc("TRR");
         var ldr = mates.FirstOrDefault(m => m.Active) ?? mates[0];
         Fx.PopText(ldr.Pos + new Vector2(0, -34), "BROKEN", Pal.Good, 20f);
         Fx.Flash(ldr.Pos, Pal.Good, 26f, 0.2f, 0.5f);
@@ -2462,6 +2582,9 @@ public partial class Game
         // cover demolition + lay fire on the floor tiles in the blast
         var chain = new List<(int x, int y)>();
         var wokePods = new HashSet<int>();
+        // FUL-1 PROC: once per player-credited blast under PYROMANIACS (the per-tile ternary
+        // below extends every tile's burn — counting per tile would inflate the column)
+        if (_barrelCreditTeam == Team.Player && HasBoon(Boon.Pyromaniacs)) Stats.RecordProc("PYR");
         for (int x = bx - BarrelRadius; x <= bx + BarrelRadius; x++)
             for (int y = by - BarrelRadius; y <= by + BarrelRadius; y++)
             {
@@ -2602,6 +2725,7 @@ public partial class Game
         if (!AutoPlay && Raylib.IsKeyPressed(KeyboardKey.F2)) CycleAnimSpeed();   // fast-forward anim pacing (1x/2x/3x)
         Audio.SetMusicIntensity(MusicIntensity());
         UpdateTutorial(dt);
+        UpdateBraceCallout(dt);        // FUL-12: one-shot BRACE field tip (never overlaps a lesson)
         Fx.UpdateAmbient(Biome, dt);   // per-biome ambient atmosphere (Wave B)
 
         // camera zoom-punch always relaxes; hit-stop freezes the rest of the sim
@@ -3875,6 +3999,9 @@ public partial class Game
         int dx = Math.Sign(u.X - ally.X), dy = Math.Sign(u.Y - ally.Y);   // direction the ally MOVES (toward us)
         u.ActionsLeft = Math.Max(0, u.ActionsLeft - 1);   // 1 action; never ends the turn
         u.DragsThisTurn++;                                // counted vs Combat.FieldCraftLimit (anti-loop)
+        // FUL-1 PROC (review fix: explicit boon conjunct — the >=2 gate invariant holds today,
+        // but a future non-boon FieldCraftLimit>1 source must not silently corrupt the column)
+        if (u.DragsThisTurn >= 2 && HasBoon(Boon.FieldDrills)) Stats.RecordProc("FDR");
         Stats.RecordAction("DRAG");                       // W2 verb telemetry
         Fx.PopText(ally.Pos + new Vector2(0, -32), "DRAG", Pal.Friend, 17f);
         Fx.Burst(ally.Pos, Pal.Friend, 8, 100f, 0.35f, 2.5f);
@@ -3933,6 +4060,8 @@ public partial class Game
         var u = Selected;
         u.ActionsLeft = Math.Max(0, u.ActionsLeft - 1);   // 1 action; never ends the turn
         u.VaultsThisTurn++;                               // counted vs Combat.FieldCraftLimit (anti-loop)
+        // FUL-1 PROC (review fix: explicit boon conjunct — mirrors the drag site above)
+        if (u.VaultsThisTurn >= 2 && HasBoon(Boon.FieldDrills)) Stats.RecordProc("FDR");
         Stats.RecordAction("VAULT");                      // W2 verb telemetry (review fix: no invisible verbs)
         Fx.PopText(u.Pos + new Vector2(0, -32), "VAULT", Pal.Good, 17f);
         Fx.Burst(u.Pos, Pal.Good, 8, 110f, 0.35f, 2.5f);
@@ -4615,15 +4744,27 @@ public partial class Game
     /// (see MakeWaveHostile's doc — hardening turtle punishment would widen the policy gap).
     void SpawnDefendWave()
     {
-        if (_turnCount % 2 == 0 || _turnCount >= DefendTurns) return;  // waves on odd turns, not the last
-        SpawnReinforcements(2 + _run.Mission / 2, 12, "WAVE", rich: true);
+        if (!DefendWaveTurn(_turnCount)) return;
+        // FUL-4: wave size 1+m/2 (was 2+m/2) — with three waves landing per mission the old +1
+        // body per wave compounded to +3 per mission over the whole timer. podded: each wave is
+        // a real morale pod (focus-firing a wave down routs its survivors, like any pod).
+        SpawnReinforcements(1 + _run.Mission / 2, 12, "WAVE", rich: true, podded: true);
     }
+
+    /// FUL-4: the DEFEND wave schedule — ONE shared read for the spawner and the start-of-turn
+    /// telegraph (the W8 never-lies pattern). Waves land at the END of odd player turns from t3
+    /// (first wave graced past t1 — a rich wave on a squad with ZERO player turns to set a line
+    /// was a coin-flip opener), never on the timer's final turn.
+    bool DefendWaveTurn(int turn) =>
+        Objective == Objective.Defend && turn >= 3 && turn % 2 == 1 && turn < DefendTurns;
 
     /// Shared reinforcement spawner: drops up to `want` active wave-hostiles in from the right
     /// board edge (already engaged), honoring a live-enemy `cap`. Used by both the DEFEND objective
     /// (`rich` waves — full roster) and the anti-turtle PRESSURE CLOCK (default cheap grunt/scout
-    /// mix). Returns how many it actually added.
-    int SpawnReinforcements(int want, int cap, string label, bool rich = false)
+    /// mix). Returns how many it actually added. FUL-4 `podded`: the wave lands as ONE fresh
+    /// morale pod (id 100+, _podOrig-snapshotted) so rout plays; default keeps PodId=-1 —
+    /// pressure-clock punishment waves stay morale-exempt (a routable punishment isn't one).
+    int SpawnReinforcements(int want, int cap, string label, bool rich = false, bool podded = false)
     {
         if (AliveEnemies().Count >= cap) return 0;                     // clutter cap
         int n = _run.Mission;
@@ -4640,7 +4781,8 @@ public partial class Game
                 if (!Grid.IsFloor(x, y) || IsOccupiedByOther(x, y, null)) continue;
             }
             var e = Mission.MakeWaveHostile(n, x, y, rich);
-            e.Alert = AlertLevel.Alert; e.PodId = -1;   // reinforcements arrive already engaged
+            e.Alert = AlertLevel.Alert;                          // reinforcements arrive already engaged
+            e.PodId = podded ? _nextWavePod : -1;                // FUL-4: defend waves are morale pods
             e.SyncPos();
             Stats.RecordSpawn(e.Cls, Combat.MissionFaction != Faction.None);   // APEX W5 composition tally
             Enemies.Add(e);
@@ -4648,6 +4790,9 @@ public partial class Game
             Fx.Burst(e.Pos, Pal.Foe, 14, 160f, 0.5f, 3f, true);
             added++;
         }
+        // FUL-4: seal the wave's morale snapshot (the _podOrig pattern SetupMission uses for the
+        // initial force) — one pod per wave, sized to what ACTUALLY landed under the cap.
+        if (podded && added > 0) { _podOrig[_nextWavePod] = added; _nextWavePod++; }
         if (added > 0) { Fx.PopText(Util.TileCenter(Grid.W - 2, 0) + new Vector2(0, -10), label, Pal.Foe, 20f); Audio.Play("turn"); RefreshCombatRoster(); }
         // APEX W5: headless-harness echo so an autoplay log shows what the waves actually field
         // (AutoPlay is the env-gated smoke/balance path only — never set in normal play).
@@ -4716,7 +4861,7 @@ public partial class Game
         // stealth-race plan — see the concealment block in SmartStep). Harmless otherwise.
         if (SquadConcealed) _smartConcealTurns++;
         // keep the tutorial progressing even if the player skipped a prompted action
-        if (TutStep >= 0 && TutStep < 3) AdvanceTutorial();
+        if (TutStep >= 0 && TutStep < TutStepDone) AdvanceTutorial();
         EndTurnArmed = false;
         AimMode = false;
         SnapShot = false;
@@ -4790,6 +4935,19 @@ public partial class Game
         ItemMode = false;
         ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false; DragMode = false; VaultMode = false;
         ShowBanner("PLAYER TURN", false);
+        MaybeWaveTelegraph();
+    }
+
+    /// FUL-4: DEFEND wave-edge telegraph, ONE PLAYER TURN ahead of the wave acting — this turn
+    /// ENDS with reinforcements at the east edge (DefendWaveTurn is the spawner's own schedule
+    /// read, so the warning can never lie about timing). Deliberately overrides the PLAYER TURN
+    /// banner in the W8 lane: the higher-stakes information wins the single banner slot.
+    /// Shared by BeginPlayerTurn and the SIGHTLINE_WAVEBANNER shot hook (same real path).
+    void MaybeWaveTelegraph()
+    {
+        if (!DefendWaveTurn(_turnCount)) return;
+        ShowBanner("WAVE INBOUND - EAST EDGE", true);
+        BannerSub = "reinforcements land when this turn ends";
     }
 
     /// ESCORT VIP LEASH: at the start of each player turn the fragile asset TAGS ALONG with the squad
@@ -5356,6 +5514,13 @@ public partial class Game
             int better = SmartPerkValue(off.Unit, off.A) >= SmartPerkValue(off.Unit, off.B) ? 0 : 1;
             which = Util.Roll(70f) ? better : 1 - better;
         }
+        // FUL-1: SIGHTLINE_PERK probe — override AFTER the value roll above (its Util.Rng draw
+        // must land in both probe legs, keeping the worlds CRN-paired). NoPersist only.
+        if (NoPersist && ForcedPerk.HasValue)
+        {
+            if (off.A == ForcedPerk.Value) which = 0;
+            else if (off.B == ForcedPerk.Value) which = 1;
+        }
         Perk p = which == 0 ? off.A : off.B;
         Run.ApplyPerk(off.Unit, p);
         Stats.RecordPerk(PerkDef.Code(p));   // balance telemetry (no-op unless Stats.Enabled)
@@ -5816,6 +5981,7 @@ public partial class Game
         if (choiceIdx < 0 || choiceIdx >= _activeEvent.Choices.Length) choiceIdx = AutoEventChoice();
         var ch = _activeEvent.Choices[choiceIdx];
         if (!ChoiceLegal(ch)) return;   // ignore clicks on illegal choices
+        Stats.RecordEvent(_activeEvent.Id, choiceIdx);   // FUL-1: BY EVENT-CHOICE telemetry (no-op unless Enabled)
         string line = EventCatalog.Apply(_run, ch.Outcome, _eventNode);
         if (ch.HasSecond)
         {
