@@ -61,7 +61,7 @@ public static partial class Audio
     // Recipe registry: id -> (duration, fill). Populated by BuildRecipes() and shared by both
     // the device-load path (Init) and the device-free self-test (BuildBuffer/SelfTest), so
     // the buffer-generation path is validated even where there is no audio device.
-    static readonly Dictionary<string, (float dur, Action<float[]> fill)> _recipes = new();
+    static readonly Dictionary<string, (float dur, float target, Action<float[]> fill)> _recipes = new();
 
     // procedural music (3.10): a looping ambient bed + a combat layer that ducks in on
     // the enemy turn / when hostiles are active. Crossfaded by volume; mute kills both.
@@ -91,7 +91,7 @@ public static partial class Audio
         {
             if (LoadFile(kv.Key, $"assets/sfx/{kv.Key}.wav") || LoadFile(kv.Key, $"assets/sfx/{kv.Key}.ogg"))
                 continue;
-            LoadRecipe(kv.Key, kv.Value.dur, kv.Value.fill);
+            LoadRecipe(kv.Key, kv.Value.dur, kv.Value.target, kv.Value.fill);
         }
 
         InitMusic();
@@ -119,29 +119,33 @@ public static partial class Audio
     {
         if (_recipes.Count > 0) return;   // idempotent (Init or SelfTest, whichever runs first)
 
-        void Reg(string id, float dur, Action<float[]> fill) => _recipes[id] = (dur, fill);
+        // RESONANCE A1 — `target` is the cue's PEAK level in dBFS. RenderCue normalises
+        // UNCONDITIONALLY to it, so this column IS the mix: what sits on top of what. It is
+        // deliberately not flat (see the budget rationale in Audio.Analysis.cs).
+        void Reg(string id, float dur, float target, Action<float[]> fill)
+            => _recipes[id] = (dur, target, fill);
 
         // ───────── baseline action cues ─────────
         // SELECT: a crisp two-tone blip (clicky UI confirm).
-        Reg("select", 0.09f, b => {
+        Reg("select", 0.09f, -14f, b => {
             Click(b, 0, 0.22f);
             Tone(b, 540, 0, 0.05f, Wv.Square, 0.26f, atk: 0.002f, dec: 5f);
             Tone(b, 810, 0.012f, 0.04f, Wv.Sine, 0.18f, atk: 0.002f, dec: 6f);
         });
         // MOVE: a soft, short footfall thud (low, rounded — fires a lot, stays gentle).
-        Reg("move", 0.08f, b => {
+        Reg("move", 0.08f, -14.5f, b => {
             Tone(b, 220, 0, 0.06f, Wv.Tri, 0.22f, slideTo: 150, atk: 0.003f, dec: 5f);
             Noise(b, 0, 0.03f, 0.10f, lp: 0.5f);
         });
         // RELOAD: a mechanical two-click "cha-chk" (mag out, mag in + bolt).
-        Reg("reload", 0.18f, b => {
+        Reg("reload", 0.18f, -11f, b => {
             Click(b, 0, 0.30f);
             Tone(b, 520, 0.005f, 0.04f, Wv.Square, 0.22f, atk: 0.001f, dec: 7f);
             Click(b, 0.085f, 0.34f);
             Tone(b, 360, 0.090f, 0.05f, Wv.Square, 0.20f, atk: 0.001f, dec: 6f);
         });
         // HUNKER: a low settling thunk (dig in).
-        Reg("hunker", 0.18f, b => {
+        Reg("hunker", 0.18f, -12.5f, b => {
             Tone(b, 230, 0, 0.15f, Wv.Tri, 0.30f, slideTo: 170, atk: 0.006f, dec: 3.2f);
             Noise(b, 0, 0.05f, 0.12f, lp: 0.4f);
         });
@@ -150,30 +154,30 @@ public static partial class Audio
         // Construction pattern: a sharp transient CLICK (the mechanism) + a NOISE burst
         // (the powder crack) + a BODY tone with a quick pitch-drop (the report), tuned per
         // weapon so each is unmistakable. "shoot" stays the baseline RIFLE voice.
-        Reg("shoot",   0.16f, FillRifle);
-        Reg("w_rifle", 0.16f, FillRifle);
+        Reg("shoot",   0.16f, -6f, FillRifle);
+        Reg("w_rifle", 0.16f, -6f, FillRifle);
         // SHOTGUN: a fat low boom + a wide, long noise wash (heavy, blunt).
-        Reg("w_shotgun", 0.24f, b => {
+        Reg("w_shotgun", 0.24f, -5f, b => {
             Click(b, 0, 0.30f);
             Noise(b, 0, 0.20f, 0.62f, lp: 0.65f);                 // broad blast wash
             Tone(b, 110, 0, 0.18f, Wv.Saw, 0.46f, slideTo: 55, atk: 0.001f, dec: 3.0f);
             Tone(b, 150, 0, 0.06f, Wv.Square, 0.28f, slideTo: 70, atk: 0.001f, dec: 7f);
         });
         // SNIPER: a hard transient + a bright high crack + a long ringing metallic tail.
-        Reg("w_sniper", 0.30f, b => {
+        Reg("w_sniper", 0.30f, -5.5f, b => {
             Click(b, 0, 0.40f);
             Noise(b, 0, 0.045f, 0.52f, lp: 1f);                   // tight bright crack
             Tone(b, 1020, 0, 0.05f, Wv.Square, 0.40f, slideTo: 520, atk: 0.0006f, dec: 8f);
             Tone(b, 300, 0.02f, 0.26f, Wv.Saw, 0.26f, slideTo: 150, atk: 0.002f, dec: 1.8f); // ringing tail
         });
         // SMG: a quick, bright, snappy crack (tight + punchy).
-        Reg("w_smg", 0.11f, b => {
+        Reg("w_smg", 0.11f, -6.5f, b => {
             Click(b, 0, 0.26f);
             Noise(b, 0, 0.06f, 0.42f, lp: 0.9f);
             Tone(b, 360, 0, 0.06f, Wv.Square, 0.30f, slideTo: 200, atk: 0.0008f, dec: 8f);
         });
         // LMG: a heavy chug — thick low body + a long rolling noise (big bore).
-        Reg("w_lmg", 0.22f, b => {
+        Reg("w_lmg", 0.22f, -5.4f, b => {
             Click(b, 0, 0.32f);
             Noise(b, 0, 0.18f, 0.54f, lp: 0.55f);
             Tone(b, 135, 0, 0.16f, Wv.Saw, 0.44f, slideTo: 60, atk: 0.001f, dec: 3.2f);
@@ -182,46 +186,50 @@ public static partial class Audio
 
         // ───────── impact cues (crit layered heavier than a normal hit) ─────────
         // HIT: a meaty thump — a noise smack + a short low body.
-        Reg("hit", 0.18f, b => {
+        Reg("hit", 0.18f, -9f, b => {
             Noise(b, 0, 0.10f, 0.50f, lp: 0.55f);
             Tone(b, 150, 0, 0.12f, Wv.Square, 0.42f, slideTo: 90, atk: 0.001f, dec: 4.5f);
         });
         // CRIT: the HIT smack PLUS a deeper sub-bass thud + a metallic ping (lands heavier).
-        Reg("crit", 0.30f, b => {
+        Reg("crit", 0.30f, -4f, b => {
             Noise(b, 0, 0.14f, 0.55f, lp: 0.7f);
             Tone(b, 240, 0, 0.16f, Wv.Saw, 0.40f, slideTo: 110, atk: 0.001f, dec: 3.2f);
             Tone(b, 70, 0, 0.26f, Wv.Sine, 0.46f, slideTo: 46, atk: 0.002f, dec: 2.0f);   // sub-bass thud
             Tone(b, 1200, 0.005f, 0.06f, Wv.Sine, 0.16f, atk: 0.0006f, dec: 9f);          // bright ping
         });
         // MISS: a quick zip past the ear (high, descending, airy).
-        Reg("miss", 0.14f, b => {
+        Reg("miss", 0.14f, -12f, b => {
             Tone(b, 1400, 0, 0.11f, Wv.Sine, 0.22f, slideTo: 520, atk: 0.003f, dec: 3.5f);
             Noise(b, 0, 0.05f, 0.07f, lp: 1f);
         });
         // OVERWATCH set: a tense rising two-note "ready" tone.
-        Reg("over", 0.20f, b => {
+        Reg("over", 0.20f, -15.5f, b => {
             Tone(b, 440, 0, 0.08f, Wv.Square, 0.28f, atk: 0.004f, dec: 4f);
             Tone(b, 660, 0.075f, 0.10f, Wv.Square, 0.24f, atk: 0.004f, dec: 3.5f);
         });
-        // DEATH: a downward collapse — a saw fall + a noise crumple.
-        Reg("death", 0.36f, b => {
+        // DEATH: a downward collapse — a saw fall + a noise crumple, now with a REAL TAIL.
+        // (A1) every layer used to end by 320ms inside a 360ms buffer: the collapse just
+        // stopped dead and 40ms of digital silence followed. The sub now rings on and a
+        // soft body resonance decays under it, finishing ~60ms before the buffer ends.
+        Reg("death", 0.52f, -7f, b => {
             Tone(b, 260, 0, 0.32f, Wv.Saw, 0.38f, slideTo: 60, atk: 0.004f, dec: 2.2f);
             Noise(b, 0, 0.26f, 0.30f, lp: 0.5f);
-            Tone(b, 80, 0.02f, 0.22f, Wv.Sine, 0.30f, slideTo: 44, atk: 0.004f, dec: 2.4f);
+            Tone(b, 80, 0.02f, 0.42f, Wv.Sine, 0.30f, slideTo: 40, atk: 0.004f, dec: 2.1f);  // sub rings on
+            Tone(b, 150, 0.05f, 0.40f, Wv.Tri, 0.11f, slideTo: 68, atk: 0.020f, dec: 2.6f);  // body resonance
         });
         // TURN: a clear rising two-note announce (the round changes hands).
-        Reg("turn", 0.30f, b => {
+        Reg("turn", 0.30f, -14f, b => {
             Tone(b, 330, 0, 0.13f, Wv.Tri, 0.30f, atk: 0.006f, dec: 3.2f);
             Tone(b, 494, 0.11f, 0.16f, Wv.Tri, 0.27f, atk: 0.006f, dec: 2.8f);
         });
         // WIN: a bright ascending major arpeggio (legacy cue alongside the victory stinger).
-        Reg("win", 0.72f, b => Arp(b, new[] { 523, 659, 784, 1046 }, 0.11f, 0.20f, Wv.Tri, 0.30f));
+        Reg("win", 0.72f, -10f, b => Arp(b, new[] { 523, 659, 784, 1046 }, 0.11f, 0.20f, Wv.Tri, 0.30f));
         // LOSE: a sinking minor descent (legacy cue alongside the lose stinger).
-        Reg("lose", 0.82f, b => Arp(b, new[] { 392, 330, 262, 196 }, 0.13f, 0.24f, Wv.Saw, 0.28f));
+        Reg("lose", 0.82f, -10f, b => Arp(b, new[] { 392, 330, 262, 196 }, 0.13f, 0.24f, Wv.Saw, 0.28f));
 
         // ───────── event stingers (short emphatic phrases; fired via PlayStinger) ─────────
         // KILL: a quick decisive down-flick + a noise crunch (a confirmed takedown).
-        Reg("st_kill", 0.30f, b => {
+        Reg("st_kill", 0.30f, -6f, b => {
             Tone(b, 587, 0, 0.07f, Wv.Square, 0.30f, atk: 0.002f, dec: 5f);
             Tone(b, 392, 0.06f, 0.13f, Wv.Saw, 0.30f, slideTo: 320, atk: 0.002f, dec: 3f);
             Noise(b, 0, 0.05f, 0.22f, lp: 0.7f);
@@ -229,14 +237,14 @@ public static partial class Audio
         });
         // LASTKILL: the blow that clears the field — a brighter rising flourish that resolves
         // up (heavier than a plain kill, lighter than full VICTORY) over a sub thud.
-        Reg("st_lastkill", 0.58f, b => {
+        Reg("st_lastkill", 0.58f, -7.5f, b => {
             Arp(b, new[] { 523, 659, 880 }, 0.10f, 0.18f, Wv.Tri, 0.32f);
             Tone(b, 70, 0, 0.34f, Wv.Sine, 0.40f, slideTo: 52, atk: 0.004f, dec: 1.6f);  // sub thud
             Noise(b, 0, 0.05f, 0.20f, lp: 0.8f);
         });
         // VICTORY: a fuller, longer major-add9 resolve (mission won) — arpeggio that lands on
         // a sustained tonic chord so it RESOLVES rather than just trailing off.
-        Reg("st_victory", 1.05f, b => {
+        Reg("st_victory", 1.05f, -8f, b => {
             Arp(b, new[] { 523, 659, 784, 1046, 1318 }, 0.11f, 0.22f, Wv.Tri, 0.28f);
             // sustained resolving C-major triad under the tail
             Tone(b, 523, 0.55f, 0.46f, Wv.Sine, 0.20f, atk: 0.02f, dec: 1.2f);
@@ -245,15 +253,18 @@ public static partial class Audio
         });
         // LOSE: a sinking minor descent that settles on a low sustained minor chord (failed,
         // but the run goes on).
-        Reg("st_lose", 0.95f, b => {
+        // (A1) the chord used to end at exactly 0.95s in a 0.95s buffer — the last real sample
+        // was the only non-silent tail in the game. The buffer is now longer than the chord,
+        // so the resolve decays into genuine silence instead of being cut at the edge.
+        Reg("st_lose", 1.30f, -8.5f, b => {
             Arp(b, new[] { 440, 349, 277, 220 }, 0.13f, 0.24f, Wv.Saw, 0.30f);
-            Tone(b, 220, 0.55f, 0.40f, Wv.Sine, 0.20f, atk: 0.03f, dec: 1.4f);   // A
-            Tone(b, 262, 0.55f, 0.40f, Wv.Sine, 0.15f, atk: 0.03f, dec: 1.4f);   // C (minor third)
-            Tone(b, 165, 0.55f, 0.40f, Wv.Sine, 0.18f, atk: 0.03f, dec: 1.4f);   // E below
+            Tone(b, 220, 0.55f, 0.65f, Wv.Sine, 0.20f, atk: 0.03f, dec: 2.6f);   // A
+            Tone(b, 262, 0.55f, 0.65f, Wv.Sine, 0.15f, atk: 0.03f, dec: 2.6f);   // C (minor third)
+            Tone(b, 165, 0.55f, 0.65f, Wv.Sine, 0.18f, atk: 0.03f, dec: 2.6f);   // E below
         });
         // SQUADWIPE: the run-ending gut-punch — a low ominous drop + noise wash + a dissonant
         // low tritone so it reads as final/wrong.
-        Reg("st_squadwipe", 1.05f, b => {
+        Reg("st_squadwipe", 1.05f, -7.5f, b => {
             Tone(b, 196, 0, 0.55f, Wv.Saw, 0.40f, slideTo: 70, atk: 0.01f, dec: 1.3f);
             Tone(b, 98, 0, 0.75f, Wv.Sine, 0.42f, slideTo: 49, atk: 0.01f, dec: 1.0f);
             Tone(b, 138, 0.18f, 0.55f, Wv.Saw, 0.20f, atk: 0.02f, dec: 1.3f);   // tritone-ish dissonance
@@ -369,6 +380,15 @@ public static partial class Audio
         PadTone(b, 330, 0.045f, 2);   // E4 octave fifth (air)
         PadTone(b, 494, 0.030f, 4);   // B4 add9 (sparkle, faster tremolo)
         Shimmer(b, 880, 0.022f, 1);   // very soft high beating layer (movement)
+        // (A1) AIR. The bed measured 0.000% of its energy above 1 kHz, so a laptop speaker
+        // (which rolls off hard under ~300 Hz) simply lost it: -11.6 dB through a 300 Hz
+        // highpass. These are chord tones an octave or two up — E6 / A6 / C7 / E7 — at very
+        // low amplitude, so the pad gains a top without gaining a whistle. Integer Hz and
+        // whole-cycle LFO periods, so the loop stays seamless.
+        PadTone(b, 1320, 0.041f, 2);  // E6  (fifth)
+        PadTone(b, 1760, 0.036f, 3);  // A6  (root)
+        PadTone(b, 2093, 0.027f, 5);  // C7  (minor third)
+        Shimmer(b, 2640, 0.025f, 2);  // E7  beating air
         return b;
     }
 
@@ -385,6 +405,12 @@ public static partial class Audio
         Pulse(b, 55, 2f, 0.24f);      // driving sub-bass pulse (16 hits / loop)
         Pulse(b, 110, 2f, 0.11f);     // octave reinforcement
         Pulse(b, 220, 4f, 0.06f);     // faster mid tick (32/loop) — adds urgency
+        // (A1) AIR + BITE. Same 0.000%-above-1 kHz problem as the ambient bed. The combat
+        // bed gets its top from the tension interval (Eb6) plus a bright high tick, so the
+        // brightness reads as urgency rather than as sweetness.
+        PadTone(b, 1244, 0.052f, 2);  // ~Eb6 (the flat-five, up two octaves)
+        PadTone(b, 1760, 0.028f, 3);  // A6
+        Pulse(b, 1320, 4f, 0.072f);   // bright tick (32/loop) — the top-end pulse
         return b;
     }
 
@@ -502,22 +528,51 @@ public static partial class Audio
     /// the recipe, then apply the mastering stage. Both the device path (LoadRecipe) and the
     /// device-free measurement harness (AUDIODUMP/AUDIOGATE) go through here, so what the
     /// gate measures is byte-for-byte what the speaker gets.
-    internal static float[] RenderCue(string id, float dur, Action<float[]> fill)
+    internal static float[] RenderCue(string id, float dur, float targetDb, Action<float[]> fill)
     {
         SeedFor(id);                       // reproducible noise/click for this cue
         var buf = BuildBuffer(dur, fill);
-        // normalise to avoid clipping
-        float peak = 0.0001f;
-        for (int i = 0; i < buf.Length; i++) peak = MathF.Max(peak, MathF.Abs(buf[i]));
-        float g = peak > 1f ? 1f / peak : 1f;
-        if (g != 1f) for (int i = 0; i < buf.Length; i++) buf[i] *= g;
+        DcBlock(buf);                      // 20 Hz one-pole HPF — see below
+        NormalizeTo(buf, targetDb);        // MASTERING: unconditional, to the designed level
         return buf;
     }
 
-    // Load a single recipe into a device Sound (device path only).
-    static void LoadRecipe(string id, float dur, Action<float[]> fill)
+    /// A 20 Hz one-pole DC-blocking highpass. The layered saw/square voices sum to a small
+    /// but consistently POSITIVE bias (w_lmg measured +0.0037): a DC offset costs headroom
+    /// on every stack it takes part in and thumps the speaker on cue start/stop. 20 Hz is
+    /// below anything the synth deliberately produces, so nothing audible is touched.
+    static void DcBlock(float[] b)
     {
-        byte[] wav = EncodeWav(RenderCue(id, dur, fill), 1f);
+        const float Fc = 20f;
+        float r = MathF.Exp(-2f * MathF.PI * Fc / SR);   // ~0.99715
+        float x1 = 0f, y1 = 0f;
+        for (int i = 0; i < b.Length; i++)
+        {
+            float x = b[i];
+            float y = x - x1 + r * y1;
+            x1 = x; y1 = y;
+            b[i] = y;
+        }
+    }
+
+    /// MASTERING. The old code was a CLIP GUARD, not a mixer: `g = peak > 1 ? 1/peak : 1`
+    /// only ever fired for one cue (crit), so 22 of 23 cues shipped at whatever level their
+    /// layer amplitudes happened to sum to — a 16.2 dB RMS spread nobody designed, with the
+    /// heaviest hit in the game only 2.0 dB over a normal one. This normalises EVERY cue to
+    /// its registered target, which makes the per-cue target column the actual mix decision.
+    static void NormalizeTo(float[] b, float targetDb)
+    {
+        float peak = 0f;
+        for (int i = 0; i < b.Length; i++) peak = MathF.Max(peak, MathF.Abs(b[i]));
+        if (peak < 1e-6f) return;                       // silent buffer: nothing to scale
+        float g = MathF.Pow(10f, targetDb / 20f) / peak;
+        for (int i = 0; i < b.Length; i++) b[i] *= g;
+    }
+
+    // Load a single recipe into a device Sound (device path only).
+    static void LoadRecipe(string id, float dur, float targetDb, Action<float[]> fill)
+    {
+        byte[] wav = EncodeWav(RenderCue(id, dur, targetDb, fill), 1f);
         Wave w = Raylib.LoadWaveFromMemory(".wav", wav);
         _snd[id] = Raylib.LoadSoundFromWave(w);
         Raylib.UnloadWave(w);
@@ -554,7 +609,7 @@ public static partial class Audio
             // build + validate every SFX buffer
             foreach (var kv in _recipes)
             {
-                var (dur, fill) = kv.Value;
+                var (dur, target, fill) = kv.Value;
                 if (dur <= 0f) return $"AUDIOTEST: FAIL '{kv.Key}' non-positive duration {dur}";
                 float[] buf;
                 try { buf = BuildBuffer(dur, fill); }

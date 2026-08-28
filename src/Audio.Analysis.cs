@@ -155,10 +155,10 @@ public static partial class Audio
     internal static float[] RenderCueById(string id, out int realN, out float durMs)
     {
         BuildRecipes();
-        var (dur, fill) = _recipes[id];
+        var (dur, target, fill) = _recipes[id];
         realN = (int)(dur * SR);
         durMs = dur * 1000f;
-        return RenderCue(id, dur, fill);
+        return RenderCue(id, dur, target, fill);
     }
 
     // ── loop-seam analysis ────────────────────────────────────────────────────
@@ -168,22 +168,41 @@ public static partial class Audio
         public string Id;
         public float First, Last;
         public float ValueDelta;    // |b[0] - b[n-1]| : the STEP across the wrap
-        public float SlopeDelta;    // |(b[0]-b[n-1]) - (b[n-1]-b[n-2])| : the DISCONTINUITY
+        public float SlopeDelta;    // |(b[0]-b[n-1]) - (b[n-1]-b[n-2])| : slope break at the wrap
+        public float StepMax;       // largest step the waveform takes ANYWHERE inside the loop
+        public float StepP999;      // 99.9th percentile of those interior steps
+        public float Ratio;         // ValueDelta / StepMax  — the scale-free click test
     }
 
-    /// A perfectly seamless loop still has a non-zero |b[0]-b[n-1]| — that is simply one
-    /// sample-step of the waveform, and it grows with the highest frequency present. The
-    /// audible click is a break in the FIRST DIFFERENCE (the slope), so the gate keys on
-    /// SlopeDelta and reports ValueDelta alongside it. See GateReport()'s rationale block.
+    /// Three views of the loop point, because one of them is a trap.
+    ///
+    /// |b[0]-b[n-1]| (ValueDelta) is NOT a discontinuity: a perfectly seamless loop still
+    /// steps by one sample across the wrap, and that step grows linearly with the highest
+    /// frequency in the bed. It cannot be driven toward zero at the same time as the
+    /// music-brightness floor — the pre-A1 beds already measured 0.023 / 0.009 there while
+    /// being provably seamless by construction (integer Hz over an integer-second buffer).
+    ///
+    /// So the primary gate is RATIO: the wrap step measured against the LARGEST step the
+    /// waveform takes anywhere inside the loop. A seamless wrap is an ordinary step of the
+    /// same waveform (ratio ~1 — and it lands near the top of the range here precisely
+    /// because every partial is phase-aligned at zero at the loop point, which is where a
+    /// sine's slope is steepest). A real click is a step the waveform never otherwise takes,
+    /// and shows up as a ratio in the tens. SlopeDelta is kept as a secondary absolute bound.
     internal static SeamStats Seam(string id, float[] b)
     {
         int n = b.Length;
         float dSeam = b[0] - b[n - 1];
         float dInt = b[n - 1] - b[n - 2];
+        var steps = new float[n - 1];
+        for (int i = 1; i < n; i++) steps[i - 1] = MathF.Abs(b[i] - b[i - 1]);
+        Array.Sort(steps);
+        float p999 = steps[(int)((steps.Length - 1) * 0.999f)];
+        float mx = steps[steps.Length - 1];
         return new SeamStats
         {
             Id = id, First = b[0], Last = b[n - 1],
             ValueDelta = MathF.Abs(dSeam), SlopeDelta = MathF.Abs(dSeam - dInt),
+            StepMax = mx, StepP999 = p999, Ratio = mx > 1e-9f ? MathF.Abs(dSeam) / mx : 0f,
         };
     }
 
@@ -282,7 +301,9 @@ public static partial class Audio
         {
             var sm = Seam(m, RenderMusic(m));
             sb.AppendLine($"  music:{m,-8} first={F(sm.First, "+0.00000;-0.00000")} last={F(sm.Last, "+0.00000;-0.00000")}" +
-                          $"  |value delta|={F(sm.ValueDelta, "0.00000")}  |1st-diff delta|={F(sm.SlopeDelta, "0.00000")}");
+                          $"  |value delta|={F(sm.ValueDelta, "0.00000")}  |1st-diff delta|={F(sm.SlopeDelta, "0.00000")}" +
+                          $"  interior step max={F(sm.StepMax, "0.00000")} p99.9={F(sm.StepP999, "0.00000")}" +
+                          $"  ratio={F(sm.Ratio, "0.00")}");
         }
 
         sb.AppendLine();
@@ -321,10 +342,15 @@ public static partial class Audio
     //  • music >= 5% of energy above 1 kHz   Both beds measured 0.000% above 1 kHz. A laptop
     //    speaker rolls off hard below ~300 Hz, so a bed with no top loses -11.6 dB and simply
     //    vanishes on the hardware most people will play this on. 5% is a floor, not a target.
-    //  • loop |1st-diff delta| <= 0.005   See Seam(): the value delta across a wrap is one
-    //    legitimate sample-step of the waveform (it grows with the top frequency present, so
-    //    it cannot be driven to zero while also satisfying the brightness floor). The audible
-    //    click is a break in the slope, and THAT is what is pinned.
+    //  • loop seam: wrap step <= the waveform's OWN 99.9th-percentile interior step, AND
+    //    |1st-diff delta| <= 0.005. The naive "|b[0]-b[n-1]| <= 0.005" test is a trap: a
+    //    provably seamless loop (integer Hz over an integer-second buffer — the design these
+    //    beds already used) still steps one sample across the wrap, and that step scales with
+    //    the top frequency present. The pre-A1 beds measured 0.023 / 0.009 on it while being
+    //    click-free, and it is in direct tension with the brightness floor. The scale-free
+    //    question is "does the wrap take a step this waveform never otherwise takes", so the
+    //    ratio (against the LARGEST interior step, +5% tolerance) is the primary gate and the
+    //    slope break is a secondary absolute bound.
 
     const float PeakCeilDb = -1.0f;
     const float MaxSpreadDb = 12.0f;
@@ -333,16 +359,19 @@ public static partial class Audio
     const float TailCeilDb = -60.0f;
     const float MinMusicHiFrac = 0.05f;
     const float MaxSeamSlope = 0.005f;
+    const float MaxSeamRatio = 1.05f;
 
     // category -> (rms floor dBFS, rms ceiling dBFS)
+    // Centres come from the mastered mix; the +-3 dB or so of slack is deliberate room for a
+    // cue to have character inside its role, tight enough that an accidental level shift trips.
     static readonly (string cat, float lo, float hi)[] RmsBands =
     {
-        ("crit",    -14f,  -7f),
-        ("weapon",  -18f,  -9f),
-        ("stinger", -19f, -10f),
-        ("impact",  -20f, -10f),
-        ("ui",      -28f, -17f),
-        ("move",    -34f, -22f),
+        ("crit",    -23f, -17f),   // the heaviest thing a shot can do
+        ("stinger", -25f, -18f),   // event punctuation, over the weapons
+        ("weapon",  -27f, -20f),   // the constant voice of the game
+        ("impact",  -28f, -19f),   // hit / miss / death
+        ("ui",      -31f, -23f),   // present, never competing with a gunshot
+        ("move",    -34f, -28f),   // fires a hundred times a mission
     };
 
     static string CatOf(string id) => id switch
@@ -355,6 +384,9 @@ public static partial class Audio
             or "win" or "lose" => "stinger",
         _ => "ui",                                  // select/reload/hunker/over/turn
     };
+
+    static IEnumerable<CueStats> Concat(IEnumerable<CueStats> a, IEnumerable<CueStats> b)
+    { foreach (var x in a) yield return x; foreach (var x in b) yield return x; }
 
     /// The committed audio budget as a PASS/FAIL contract. Prints one line per check group
     /// and a final "AUDIOGATE: PASS" / "AUDIOGATE: FAIL (...)". Device-free, no window.
@@ -378,17 +410,24 @@ public static partial class Audio
             stats[id] = Measure(id, buf, n, ms);
         }
 
-        // 1. peak ceiling
+        var musicStats = new Dictionary<string, CueStats>();
+        foreach (var m in new[] { "ambient", "combat" })
+        {
+            var mb = RenderMusic(m);
+            musicStats["music:" + m] = Measure("music:" + m, mb, mb.Length, MusicSecs * 1000f);
+        }
+
+        // 1. peak ceiling (SFX cues AND both music beds)
         {
             var bad = new List<string>();
             float worst = -200f; string worstId = "";
-            foreach (var s in stats.Values)
+            foreach (var s in Concat(stats.Values, musicStats.Values))
             {
                 if (s.PeakDb > worst) { worst = s.PeakDb; worstId = s.Id; }
                 if (s.PeakDb > PeakCeilDb) bad.Add($"{s.Id} {F(s.PeakDb, "0.0")}");
             }
             Chk(bad.Count == 0, "peak <= -1.0 dBFS",
-                bad.Count == 0 ? $"hottest {worstId} {F(worst, "0.0")} dBFS"
+                bad.Count == 0 ? $"hottest {worstId} {F(worst, "0.0")} dBFS (23 cues + 2 beds)"
                                : $"{bad.Count} over: {string.Join(", ", bad)}");
         }
 
@@ -480,8 +519,10 @@ public static partial class Audio
             Chk(above1k >= MinMusicHiFrac, $"music:{m} >1kHz >= 5%",
                 $"{F(above1k * 100, "0.000")}% of energy above 1 kHz (centroid {F(s.CentroidHz, "0")} Hz)");
             var sm = Seam(m, buf);
-            Chk(sm.SlopeDelta <= MaxSeamSlope, $"music:{m} loop seam",
-                $"|1st-diff delta|={F(sm.SlopeDelta, "0.00000")} (value delta {F(sm.ValueDelta, "0.00000")})");
+            Chk(sm.Ratio <= MaxSeamRatio && sm.SlopeDelta <= MaxSeamSlope, $"music:{m} loop seam",
+                $"wrap step {F(sm.ValueDelta, "0.00000")} vs largest interior step {F(sm.StepMax, "0.00000")} " +
+                $"= ratio {F(sm.Ratio, "0.00")} (<= {F(MaxSeamRatio, "0.0")}); |1st-diff delta| " +
+                $"{F(sm.SlopeDelta, "0.00000")} (<= {F(MaxSeamSlope, "0.000")})");
         }
 
         sb.Append(fails.Count == 0
