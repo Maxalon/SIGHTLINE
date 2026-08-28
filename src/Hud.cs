@@ -548,6 +548,16 @@ public static class Hud
             preTxt = ""; preCol = Pal.TxtDim;
             objTxt = g.SkirmishHud; objCol = g.DailyMode ? Pal.Accent : Pal.Friend;
         }
+        else if (g.Mode == GameMode.Training)
+        {
+            // T1: the drill is not "MISSION 1/6" — saying so would be the first thing the onboarding
+            // lies about. It reports the lesson it is on, or CLEAR THE FIELD once teaching is done.
+            preTxt = "TRAINING OP"; preCol = Raylib.Fade(Pal.Good, 0.85f);
+            objTxt = g.TrainStep >= 0
+                ? $"{Game.TrainLessons[g.TrainStep].Code}   {g.TrainStep + 1}/{Game.TrainLessons.Length}"
+                : "CLEAR THE FIELD";
+            objCol = Pal.Good;
+        }
         else
         {
             // FUL-11: the finale's prefix names the moment in the danger hue (the LAST STAND
@@ -1930,7 +1940,9 @@ public static class Hud
         // front of a player who has not taken a turn yet. The rules are now TAUGHT (TRAINING OP,
         // the mission-1 lesson strip, the just-in-time field tips) and REFERENCED (FIELD MANUAL);
         // the intro's job is to say what the game is and get out of the way.
-        string pitch = $"Lead one squad through {Run.MaxMissions} escalating missions. They carry their wounds, their rank, and their names.";
+        // Kept SHORT on purpose: the HEAT/ASCENSION panel occupies the right ~28% of this row, so a
+        // long centred line runs under it.
+        string pitch = $"One squad. {Run.MaxMissions} escalating missions. They carry it all.";
         int ry0 = (int)(wy + tfs + 70);
         float railIn = PanelAnim("introRail", 0.5f, 0.25f);
         {

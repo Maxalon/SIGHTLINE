@@ -221,6 +221,12 @@ public partial class Game
 
     /// Begin (or restart) the TRAINING OP from the intro screen. Restart is the same call: the drill
     /// rebuilds itself from scratch every time, which is exactly the low-cost-failure contract.
+    /// Fixed biome seed for the drill (see BeginTraining). Biome.IndexFor is
+    /// (seed + mission-1) % Biome.All.Length, so 8 lands on STEEL — a cool neutral board, which is
+    /// the right ground for a teaching frame: nothing in the terrain competes with the amber
+    /// objective accent or the red threat accent the lessons are pointing at (DESIGN.md 3.H).
+    public const int TrainingMapSeed = 8;
+
     public void BeginTraining()
     {
         ResetModeState();   // W1 mode-seam: inherit nothing (forced arena, daily seed, wave counter…)
@@ -229,6 +235,10 @@ public partial class Game
         _run = new Run();
         _run.Start(Mission.TrainingSquad());   // the drill's own two recruits — never the campaign roster
         _run.HeatLevel = 0;                    // no heat, no ascension, no contract, no boon
+        _run.MapSeed = TrainingMapSeed;        // pin the biome too: the drill looks the same every time
+                                               // (Run.Start rolled a random seed; the drill's board is
+                                               //  authored, so the only thing that seed still drives is
+                                               //  Biome.For — and a fixed drill should be fixed on screen)
         _run.LossStreak = 0;
         _run.CurrentCard = new MissionCard { Objective = Objective.Eliminate, ModName = "TRAINING", Reward = RewardKind.None };
         Players = _run.Squad;

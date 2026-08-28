@@ -1362,8 +1362,9 @@ public static class Mission
     // ─── PROGRAM RESONANCE T1 — the TRAINING OP ────────────────────────────────────────────
     // A fixed, scripted drill: a 2-soldier squad, a hand-authored arena (Maps.TrainingArena) and
     // four dormant hostiles on fixed seats. Nothing here draws from Util.Rng and nothing scales
-    // with mission depth, so the drill plays IDENTICALLY every time — which is the whole point:
-    // the lesson table (Game.TrainLessons) is authored against these exact tiles.
+    // with mission depth, so the drill's BOARD is identical every time — which is the whole point:
+    // the lesson table (Game.TrainLessons) is authored against these exact tiles. (Combat still
+    // rolls dice; Game.BeginTraining pins the biome so the frame is fixed too.)
 
     /// The two drill soldiers. Deliberately NOT Mission.NewRunSquad(): the drill must never touch
     /// (or resemble) the campaign roster, and it needs exactly the two classes its lessons name —

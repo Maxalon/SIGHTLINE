@@ -479,6 +479,13 @@ void main() {
         catch { }
     }
 
+    /// Harness seam (SIGHTLINE_TUTTEST): the settings-file path plus explicit Save/Load, so the
+    /// onboarding self-test can round-trip the seen-flags through REAL JSON (not a field copy) and
+    /// then hand the player's file back byte-for-byte. Not used by gameplay code.
+    public static string SettingsPathPublic => FilePath;
+    public static void SaveForTest() => Save();
+    public static void LoadForTest() => Load();
+
     static void Load()
     {
         try

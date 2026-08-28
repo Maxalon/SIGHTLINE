@@ -3692,4 +3692,346 @@ public partial class Game
         return sb.ToString();
     }
 
+
+    // ─── PROGRAM RESONANCE T1 — onboarding self-test (SIGHTLINE_TUTTEST=1) ────────────────────
+    /// Pins the whole T1 contract:
+    ///   (1) the TRAINING OP arena/script is well-formed and the drill builds on it;
+    ///   (2) EVERY lesson trigger predicate is REACHABLE and fires EXACTLY ONCE (plus its patience
+    ///       fallback, so no lesson can strand a player who solves it another way);
+    ///   (3) verb staging reveals monotonically, is CAPPED to the drill + mission 1, exempts the
+    ///       emergency verb, and the SHOW ALL escape bypasses it;
+    ///   (4) the field-tip table's on-disk bits / priorities / codes are internally consistent and
+    ///       every predicate is callable and fires at most once per profile;
+    ///   (5) every seen-flag round-trips through Display.Save/Load (incl. the FUL-12 BraceTipSeen
+    ///       migration bridge), and the drill writes NO run/meta file.
+    /// Preserves and restores the real display.json around the round-trip.
+    public string TutorialSelfTest()
+    {
+        var fails = new List<string>();
+
+        // ---- (1) the drill's arena + build ----------------------------------------------------
+        var probe = new Grid();
+        if (Maps.TrainingArena.Length != probe.H) fails.Add("arenaRows");
+        foreach (var row in Maps.TrainingArena) if (row.Length != probe.W) fails.Add("arenaCols");
+        if (Maps.TrainingDeploy.Length < 2) fails.Add("deploySeats");
+        if (Maps.TrainingFoes.Length < 4) fails.Add("foeSeats");
+
+        var g = new Game { NoPersist = true };
+        g.BeginTraining();
+        if (g.Mode != GameMode.Training) fails.Add("modeNotTraining");
+        if (g.Objective != Objective.Eliminate) fails.Add("drillObjective");
+        if (g.Players.Count != 2) fails.Add("drillSquadSize");
+        if (g.Enemies.Count != Maps.TrainingFoes.Length) fails.Add("drillForceSize");
+        if (g.RunState != null && g.RunState.HeatLevel != 0) fails.Add("drillHeat");
+        if (!g.SquadConcealed) fails.Add("drillNotConcealed");
+        if (g.Enemies.Any(e => e.Active)) fails.Add("drillFoesNotDormant");
+        // deploy + hostile seats survived the template stamp as open floor, and nobody shares a tile
+        var seats = new HashSet<(int, int)>();
+        foreach (var u in g.Players)
+        {
+            if (!g.Grid.IsFloor(u.X, u.Y)) fails.Add("deployNotFloor");
+            if (!seats.Add((u.X, u.Y))) fails.Add("seatCollision");
+        }
+        foreach (var e in g.Enemies)
+        {
+            if (!g.Grid.IsFloor(e.X, e.Y)) fails.Add("foeNotFloor");
+            if (!seats.Add((e.X, e.Y))) fails.Add("seatCollision");
+        }
+        // every hostile is walkable-reachable from the first recruit (the drill must be completable)
+        {
+            var cost = g.Grid.CostMap(g.Players[0].X, g.Players[0].Y, (x, y) => false, out _, 9999);
+            foreach (var e in g.Enemies) if (cost[e.X, e.Y] < 0) fails.Add("foeUnreachable");
+        }
+        // the two lesson-critical tiles the arena was authored around must exist as open floor:
+        // (4,4)/(4,6) are the COVER lesson's blocks, (12,1) is the FLANK lesson's answer tile.
+        if (g.Grid.Tiles[4, 4] != TileType.LowCover || g.Grid.Tiles[4, 6] != TileType.LowCover) fails.Add("coverLessonTiles");
+        if (!g.Grid.IsFloor(12, 1)) fails.Add("flankLessonTile");
+
+        // ---- (2) the lesson table + every trigger predicate -------------------------------------
+        var codes = new HashSet<string>();
+        var barIds = new HashSet<string>
+        {
+            "shoot", "grenade", "ability", "item", "shove", "drag", "vault", "stabilize",
+            "overwatch", "focusow", "brace", "hunker", "hack", "beacon", "extract", "reload",
+        };
+        foreach (var l in TrainLessons)
+        {
+            if (string.IsNullOrEmpty(l.Code) || !codes.Add(l.Code)) fails.Add("lessonCode:" + l.Code);
+            if (string.IsNullOrWhiteSpace(l.Text)) fails.Add("lessonText:" + l.Code);
+            if (l.Done == null) fails.Add("lessonPredicate:" + l.Code);
+            foreach (var v in l.Reveal) if (!barIds.Contains(v)) fails.Add("lessonRevealsUnknownVerb:" + v);
+        }
+        if (TrainLessons[TrainLessons.Length - 1].Done(g)) fails.Add("terminalLessonSelfSolves");
+
+        // Drive the drill lesson by lesson. Each step: assert the predicate is FALSE, apply the
+        // one world change that solves it, assert it goes TRUE, tick UpdateTraining ONCE and assert
+        // the track advanced by EXACTLY one (fires once, never twice).
+        void Step(string code, Action solve)
+        {
+            int at = g.TrainStep;
+            if (at < 0 || at >= TrainLessons.Length || TrainLessons[at].Code != code)
+            { fails.Add("lessonOrder@" + code + "(was " + (at >= 0 && at < TrainLessons.Length ? TrainLessons[at].Code : "-") + ")"); return; }
+            if (TrainLessons[at].Done(g)) fails.Add("lessonPreSolved:" + code);
+            solve();
+            if (!TrainLessons[at].Done(g)) fails.Add("lessonUnreachable:" + code);
+            g.UpdateTraining(1f / 60f);
+            if (g.TrainStep != at + 1) fails.Add("lessonAdvance:" + code + "->" + g.TrainStep);
+            g.UpdateTraining(1f / 60f);   // a second tick must not skip the NEXT lesson too
+            if (g.TrainStep != at + 1) fails.Add("lessonDoubleFire:" + code);
+        }
+        if (g.TrainStep != 0) fails.Add("drillLessonNotOpen");
+        Step("MOVE",      () => g.DebugSetTutFlag("move"));
+        Step("COVER",     () => { g.Players[0].X = 5; g.Players[0].Y = 4; g.Players[0].SyncPos(); });
+        Step("FLANK",     () => { g.Players[0].X = 12; g.Players[0].Y = 1; g.Players[0].SyncPos(); });
+        Step("FIRE",      () => g.DebugSetTutFlag("shot"));
+        Step("OVERWATCH", () => g.DebugSetTutFlag("over"));
+        Step("GRENADE",   () => g.DebugSetTutFlag("grenade"));
+        Step("ABILITY",   () => g.DebugSetTutFlag("ability"));
+        if (g.TrainStep != TrainLessons.Length - 1) fails.Add("didNotReachTerminalLesson");
+        // the terminal lesson never self-advances, and never runs off the end of the table
+        for (int i = 0; i < 8; i++) g.UpdateTraining(1f / 60f);
+        if (g.TrainStep != TrainLessons.Length - 1) fails.Add("terminalLessonAdvanced");
+
+        // patience fallback: a lesson yields on its turn budget even when never solved
+        {
+            var pg = new Game { NoPersist = true };
+            pg.BeginTraining();
+            int p0 = pg.TrainStep;
+            pg.DebugSetTurn(1 + TrainLessons[p0].Patience);
+            pg.UpdateTraining(1f / 60f);
+            if (pg.TrainStep != p0 + 1) fails.Add("patienceFallback");
+        }
+
+        // ---- (3) verb staging ------------------------------------------------------------------
+        {
+            var sg = new Game { NoPersist = true };
+            sg.BeginTraining();
+            if (!sg.OnboardingActive || !sg.VerbStagingActive) fails.Add("stagingNotActiveAtOpen");
+            if (sg.VerbRevealed("shoot")) fails.Add("stagedShootVisibleAtOpen");
+            if (sg.VerbRevealed("brace")) fails.Add("stagedBraceVisibleAtOpen");
+            if (!sg.VerbRevealed("stabilize")) fails.Add("emergencyVerbStagedAway");
+            // reveals are MONOTONIC: replaying up to lesson k must never drop an earlier verb
+            var seen = new HashSet<string>();
+            for (int k = 0; k < TrainLessons.Length; k++)
+            {
+                sg.ShowTrainingLesson(k);
+                foreach (var v in seen) if (!sg.RevealedVerbs.Contains(v)) fails.Add("revealRegressed:" + v);
+                foreach (var v in TrainLessons[k].Reveal) seen.Add(v);
+            }
+            sg.ShowTrainingLesson(3);   // the FIRE lesson
+            if (!sg.VerbRevealed("shoot") || !sg.VerbRevealed("reload")) fails.Add("fireLessonRevealsShoot");
+            if (sg.VerbRevealed("grenade")) fails.Add("fireLessonLeaksGrenade");
+            // the terminal lesson is the graduation: staging off, everything visible
+            sg.ShowTrainingLesson(TrainLessons.Length - 1);
+            if (sg.OnboardingActive || sg.VerbStagingActive) fails.Add("terminalLessonStillStaging");
+            if (!sg.VerbRevealed("brace")) fails.Add("terminalLessonNotFullBar");
+            // SHOW ALL escape bypasses staging in BOTH directions and never desyncs OnboardingActive
+            sg.ShowTrainingLesson(0);
+            sg.ToggleShowAllVerbs();
+            if (!sg.ShowAllVerbs) fails.Add("showAllToggleOn");
+            if (sg.VerbStagingActive) fails.Add("showAllDidNotBypass");
+            if (!sg.OnboardingActive) fails.Add("showAllKilledOnboardingContext");
+            if (!sg.VerbRevealed("brace")) fails.Add("showAllStillHiding");
+            sg.ToggleShowAllVerbs();
+            if (sg.ShowAllVerbs || !sg.VerbStagingActive) fails.Add("showAllToggleOff");
+        }
+        // the CAP: campaign mission 2+ is never staged, whatever TutStep says
+        {
+            var cg = new Game { NoPersist = true };
+            cg.StartMission(2);
+            cg.ShowTutorialStep(TutStepOverwatch);
+            if (cg.OnboardingActive || cg.VerbStagingActive) fails.Add("mission2Staged");
+            if (!cg.VerbRevealed("brace")) fails.Add("mission2HidingVerbs");
+        }
+        // mission 1 IS staged while the strip runs, and the wrap-up card ends it
+        {
+            var cg = new Game { NoPersist = true };
+            cg.StartMission(1);
+            cg.ShowTutorialStep(TutStepConceal);
+            if (!cg.VerbStagingActive) fails.Add("mission1NotStaged");
+            if (cg.VerbRevealed("shoot")) fails.Add("mission1LeaksShootAtConceal");
+            cg.ShowTutorialStep(TutStepFire);
+            if (!cg.VerbRevealed("shoot") || !cg.VerbRevealed("overwatch")) fails.Add("mission1FireReveal");
+            cg.ShowTutorialStep(TutStepDone);
+            if (cg.OnboardingActive) fails.Add("wrapUpStillStaging");
+        }
+        // the LOAD-BEARING completion gates (EnterBarracks/LoseRun compare against TutStepFire)
+        // (through an array so the check is a real runtime comparison, not const-folded away)
+        int[] gates = { TutStepConceal, TutStepMove, TutStepOverwatch, TutStepFire, TutStepDone };
+        for (int gi = 0; gi < gates.Length; gi++) if (gates[gi] != gi) fails.Add("tutStepConstantsMoved");
+        if (TutPrompts.Length != TutStepDone + 1) fails.Add("tutPromptCount");
+        if (TutReveal.Length != TutPrompts.Length) fails.Add("tutRevealMisaligned");
+
+        // ---- (4) the field-tip table -----------------------------------------------------------
+        {
+            var bits = new HashSet<int>(); var prios = new HashSet<int>(); var tcodes = new HashSet<string>();
+            foreach (var t in FieldTips)
+            {
+                if (t.Bit < 0 || t.Bit >= Display.MaxTips) fails.Add("tipBitRange:" + t.Code);
+                if (!bits.Add(t.Bit)) fails.Add("tipBitDup:" + t.Code);
+                if (!prios.Add(t.Prio)) fails.Add("tipPrioDup:" + t.Code);
+                if (string.IsNullOrEmpty(t.Code) || !tcodes.Add(t.Code)) fails.Add("tipCodeDup:" + t.Code);
+                if (string.IsNullOrWhiteSpace(t.Text)) fails.Add("tipText:" + t.Code);
+                if (t.When == null) { fails.Add("tipPredicate:" + t.Code); continue; }
+                try { t.When(g); } catch { fails.Add("tipPredicateThrew:" + t.Code); }
+            }
+            if (FieldTips.Length < 10) fails.Add("tipTableTooSmall");
+            if (FieldTips[0].Bit != 0 || FieldTips[0].Code != "BRACE") fails.Add("braceTipNotBit0");
+
+            // Every predicate is REACHABLE: stage the world state each one names and assert it turns
+            // true. One shared drill board, mutated per tip and rolled back.
+            var tg = new Game { NoPersist = true };
+            tg.BeginTraining();
+            foreach (var e in tg.Enemies) e.Alert = AlertLevel.Alert;   // "a live threat" for all of them
+            var pa = tg.Players[0]; var pb = tg.Players[1];
+            bool Fires(string code)
+            {
+                foreach (var t in FieldTips) if (t.Code == code) return t.When(tg);
+                fails.Add("tipMissing:" + code); return false;
+            }
+            if (!Fires("BRACE")) fails.Add("tipUnreachable:BRACE");
+            pa.Ammo = 0;              if (!Fires("RELOAD")) fails.Add("tipUnreachable:RELOAD");
+            pa.Ammo = pa.Weapon.Clip;
+            // GRENADE: the drill's cover-hugging pair at (12,4)/(12,6) IS the staged case — sweep
+            // the board for ANY stance that sees one of them in cover (a stronger reachability claim
+            // than one hand-picked tile, and it survives an arena edit).
+            pa.Grenades = 1; pb.X = 2; pb.Y = 6; pb.SyncPos();
+            bool grenReach = false;
+            for (int gx = 0; gx < tg.Grid.W && !grenReach; gx++)
+                for (int gy = 0; gy < tg.Grid.H && !grenReach; gy++)
+                {
+                    if (!tg.Grid.IsFloor(gx, gy) || tg.Enemies.Any(e => e.X == gx && e.Y == gy)) continue;
+                    pa.X = gx; pa.Y = gy; pa.SyncPos();
+                    if (Fires("GRENADE")) grenReach = true;
+                }
+            if (!grenReach) fails.Add("tipUnreachable:GRENADE");
+            // HUNKER: a soldier in the open, seen by a live foe, with an action in hand
+            pa.X = 12; pa.Y = 2; pa.SyncPos(); pa.ActionsLeft = 2;
+            pb.X = 12; pb.Y = 3; pb.SyncPos();
+            if (!Fires("HUNKER")) fails.Add("tipUnreachable:HUNKER");
+            // SHOVE: step a recruit adjacent to a hostile
+            pa.X = 12; pa.Y = 3; pa.SyncPos(); pb.X = 2; pb.Y = 6; pb.SyncPos();
+            if (!Fires("SHOVE")) fails.Add("tipUnreachable:SHOVE");
+            // VAULT / DRAG: park the pair beside the drill's cover blocks, shoulder to shoulder
+            // (DRAG needs a Chebyshev-2 ally: you cannot pull someone already shoulder-to-shoulder)
+            pa.X = 5; pa.Y = 4; pa.SyncPos(); pa.ActionsLeft = 2;
+            pb.X = 5; pb.Y = 6; pb.SyncPos(); pb.ActionsLeft = 2;
+            if (!Fires("VAULT")) fails.Add("tipUnreachable:VAULT");
+            if (!Fires("DRAG")) fails.Add("tipUnreachable:DRAG");
+            tg.DebugSetTutFlag("over");
+            if (!Fires("FOCUS")) fails.Add("tipUnreachable:FOCUS");
+            if (!Fires("ITEM")) fails.Add("tipUnreachable:ITEM");
+            // STABILIZE: the one tip keyed on a bleeding-out ally
+            pb.Downed = true;
+            if (!Fires("STABILIZE")) fails.Add("tipUnreachable:STABILIZE");
+            pb.Downed = false;
+        }
+
+        // ---- (5) persistence: round-trip + migration + the drill's no-write contract ------------
+        string dispPath = Display.SettingsPathPublic;
+        string dispStash = null; bool hadDisp = false;
+        try { hadDisp = System.IO.File.Exists(dispPath); if (hadDisp) dispStash = System.IO.File.ReadAllText(dispPath); } catch { }
+        int savedTips = Display.TipsSeen; bool savedTrain = Display.TrainingSeen;
+        bool savedShow = Display.ShowAllVerbs, savedBrace = Display.BraceTipSeen, savedTut = Display.TutorialSeen;
+        try
+        {
+            // every tip bit, plus both new bools, survive a real JSON round trip
+            Display.TipsSeen = 0;
+            foreach (var t in FieldTips) Display.MarkTipSeen(t.Bit);
+            Display.TrainingSeen = true; Display.ShowAllVerbs = true;
+            int wrote = Display.TipsSeen;
+            Display.SaveForTest();
+            Display.TipsSeen = 0; Display.TrainingSeen = false; Display.ShowAllVerbs = false; Display.BraceTipSeen = false;
+            Display.LoadForTest();
+            if (Display.TipsSeen != wrote) fails.Add("tipsSeenRoundTrip");
+            foreach (var t in FieldTips) if (!Display.TipSeen(t.Bit)) fails.Add("tipFlagRoundTrip:" + t.Code);
+            if (!Display.TrainingSeen) fails.Add("trainingSeenRoundTrip");
+            if (!Display.ShowAllVerbs) fails.Add("showAllRoundTrip");
+            if (!Display.BraceTipSeen) fails.Add("braceBridgeOnSave");
+
+            // an unseen tip stays unseen across the trip (the mask is not a blanket "all true")
+            Display.TipsSeen = 0; Display.MarkTipSeen(1);
+            Display.SaveForTest(); Display.TipsSeen = 0; Display.LoadForTest();
+            if (!Display.TipSeen(1) || Display.TipSeen(0) || Display.TipSeen(2)) fails.Add("tipMaskPrecision");
+
+            // FUL-12 migration bridge: an OLD display.json has only BraceTipSeen — it must fold
+            // into bit 0 so a player who already read that tip never sees it again.
+            System.IO.File.WriteAllText(dispPath, "{\"BraceTipSeen\":true}");
+            Display.TipsSeen = 0; Display.BraceTipSeen = false;
+            Display.LoadForTest();
+            if (!Display.TipSeen(0) || !Display.BraceTipSeen) fails.Add("legacyBraceMigration");
+            // ...and a file with neither field leaves everything unseen
+            System.IO.File.WriteAllText(dispPath, "{}");
+            Display.TipsSeen = 0x7f; Display.TrainingSeen = true; Display.ShowAllVerbs = true;
+            Display.LoadForTest();
+            if (Display.TipsSeen != 0 || Display.TrainingSeen || Display.ShowAllVerbs) fails.Add("emptyProfileDefaults");
+        }
+        catch (Exception ex) { fails.Add("persistThrew:" + ex.GetType().Name); }
+        finally
+        {
+            Display.TipsSeen = savedTips; Display.TrainingSeen = savedTrain;
+            Display.ShowAllVerbs = savedShow; Display.BraceTipSeen = savedBrace; Display.TutorialSeen = savedTut;
+            try
+            {
+                if (hadDisp) System.IO.File.WriteAllText(dispPath, dispStash);
+                else if (System.IO.File.Exists(dispPath)) System.IO.File.Delete(dispPath);
+            }
+            catch { }
+        }
+
+        // The drill's NO-WRITE contract: a LIVE (persisting) training op must not create or touch
+        // save.json or meta.json. Snapshot both, run a full drill to a win, compare.
+        {
+            string sp = SaveGame.SavePathPublic, mp = SaveGame.MetaPathPublic;
+            bool hadSave = System.IO.File.Exists(sp), hadMeta = System.IO.File.Exists(mp);
+            string saveBefore = hadSave ? System.IO.File.ReadAllText(sp) : null;
+            string metaBefore = hadMeta ? System.IO.File.ReadAllText(mp) : null;
+            bool trainBefore = Display.TrainingSeen;
+            var lg = new Game();                 // NoPersist deliberately FALSE — the live path
+            lg.BeginTraining();
+            foreach (var e in lg.Enemies) { e.Hp = 0; e.Alive = false; }
+            lg.DebugCheckEnd();
+            if (lg.Phase != Phase.Win) fails.Add("drillWinNotDetected");
+            bool hadSaveAfter = System.IO.File.Exists(sp), hadMetaAfter = System.IO.File.Exists(mp);
+            if (hadSave != hadSaveAfter) fails.Add("drillTouchedSaveExistence");
+            if (hadMeta != hadMetaAfter) fails.Add("drillTouchedMetaExistence");
+            if (hadSave && hadSaveAfter && System.IO.File.ReadAllText(sp) != saveBefore) fails.Add("drillWroteSave");
+            if (hadMeta && hadMetaAfter && System.IO.File.ReadAllText(mp) != metaBefore) fails.Add("drillWroteMeta");
+            if (!Display.TrainingSeen) fails.Add("drillDidNotMarkSeen");   // the ONE flag it may set
+            // restore the profile flag + its file exactly as we found it
+            if (!trainBefore)
+            {
+                Display.TrainingSeen = false;
+                try
+                {
+                    if (hadDisp) System.IO.File.WriteAllText(dispPath, dispStash);
+                    else if (System.IO.File.Exists(dispPath)) System.IO.File.Delete(dispPath);
+                }
+                catch { }
+            }
+        }
+
+        return fails.Count == 0
+            ? $"TUTTEST: PASS (drill arena+build, {TrainLessons.Length} lesson triggers reachable/once/patience, "
+              + $"staging monotonic+capped+escapable, {FieldTips.Length} field tips reachable+unique, "
+              + "seen-flag round-trip + BraceTipSeen migration, drill writes no save/meta)"
+            : "TUTTEST: FAIL (" + string.Join(",", fails.Distinct()) + ")";
+    }
+
+    /// TUTTEST seams: set one of the verb-performed lesson flags / the turn counter / force an end
+    /// check, without reaching into private state from the test body. Harness-only.
+    public void DebugSetTutFlag(string which)
+    {
+        switch (which)
+        {
+            case "move": _tutMoved = true; break;
+            case "shot": _tutShot = true; break;
+            case "over": _tutOver = true; break;
+            case "grenade": _tutGrenade = true; break;
+            case "ability": _tutAbility = true; break;
+        }
+    }
+    public void DebugSetTurn(int t) => _turnCount = t;
+    public void DebugCheckEnd() => CheckEnd();
+
 }
