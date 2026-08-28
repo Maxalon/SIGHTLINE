@@ -16,6 +16,21 @@ seeds (mix of WIN/LOSE, no exceptions):
   profile (meta.json, append-only) banks SALVAGE currency, 7 ACHIEVEMENTS, a HALL OF FAME (fallen KIA + won-run
   legends), lifetime totals, and 3 additive UNLOCKS (StartIntel/StartBoon/StartArmor) bought with salvage — all
   strictly gated behind `!NoPersist` so the flywheel/harness stay byte-stable. `src/Meta.cs`, `src/Game.Meta.cs`.
+- **ONBOARDING — TRAINING OP + STAGED VERBS + FIELD TIPS (PROGRAM RESONANCE T1):** three pieces, replacing a
+  5-card strip that taught 3 of ~14 verbs. (A) **TRAINING OP** — a fixed, scripted, NON-PERSISTENT, restartable
+  drill (`GameMode.Training`, intro button / key **N**, **[P]** restarts) on its own authored arena
+  (`Maps.TrainingArena`, deliberately outside `Maps.Layouts` so the arena deck/daily are unmoved): two recruits,
+  four dormant targets, and 8 well-ordered problems — MOVE, COVER, FLANK, FIRE, OVERWATCH, GRENADE, ABILITY,
+  CLEAR — each solved by DOING it, each with a turn-budget fallback so no lesson can strand you. Writes nothing:
+  no save.json, no meta.json, no veteran reserve, no salvage, no achievements (asserted, not assumed).
+  (B) **STAGED VERBS** — during the drill and campaign mission 1 the action bar carries only what has been
+  taught and grows as lessons land, with a permanent **SHOW ALL** escape (**[V]**, remembered per profile);
+  staging is capped to those two places and never hides STABILIZE. (C) **JUST-IN-TIME FIELD TIPS** — 10 cards
+  (BRACE / STABILIZE / RELOAD / GRENADE / HUNKER / SHOVE / VAULT / DRAG / FOCUS / ITEM), each fired once per
+  profile the first time its precondition is actually true in play, priority-ordered so a bleeding-out ally
+  outranks a nicety. Seen-flags persist as a bitmask in display.json (FUL-12's `BraceTipSeen` migrates into
+  bit 0). The intro's six-bullet rules wall is now one line. Hook: `SIGHTLINE_TUTTEST`; screenshots via
+  `SIGHTLINE_TRAINING` / `SIGHTLINE_TRAINLESSON` / `SIGHTLINE_SHOWALL` / `SIGHTLINE_TIP`.
 - **CODEX / FIELD MANUAL (HORIZON W6):** a browsable in-game reference (bestiary + classes + perks/boons/contracts/
   specs/traits/scars/weapon-mods/status/objectives) from the intro (key K) + pause menu — closes the onboarding gap.
 - **EXPOSED BY FIRE + honest flywheel (HORIZON W1):** a unit that fires and doesn't move is easier to hit next turn

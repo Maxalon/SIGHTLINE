@@ -1008,3 +1008,41 @@ sets, one lever per measured round, fresh same-slot R0 first, dip budgets, breac
       PATCH 5/batch): intended apex cruelty or a hole in the revive economy — pairs with the
       founding-corpsman decision.
 - [ ] **On-device audio tuning** (carried; needs the human).
+
+---
+
+## PROGRAM "RESONANCE" — landed waves (see docs/DEVLOG.md for the write-ups)
+
+- [x] **T1 — BASIC TRAINING.** DONE. Onboarding stopped being a doc claim.
+      `docs/DESIGN.md` §4 graded onboarding "Addressed (W11)"; what shipped was a
+      5-card mission-1 callout strip teaching **3 of ~14 verbs** while the action bar
+      showed **twelve** (FUL-12 dimmed the other eleven — dimming is not staging), plus
+      a **six-bullet rules wall** on the intro. T1 ships:
+      - **TRAINING OP** (`GameMode.Training`, intro key **N**, in-drill **[P]** restarts):
+        a fixed, scripted, non-persistent drill on its own authored arena
+        (`Maps.TrainingArena` + `Mission.BuildTraining`) — **deliberately NOT appended to
+        `Maps.Layouts`**, because that array's length feeds the daily's arena derivation and
+        the per-run no-repeat deck (appending would have moved the whole measured campaign).
+        Eight well-ordered problems (`Game.TrainLessons`): MOVE → COVER → FLANK → FIRE →
+        OVERWATCH → GRENADE → ABILITY → CLEAR, each with a turn-budget patience fallback.
+        Two 12-HP recruits vs four dormant aim-45 targets = low-cost failure. Biome pinned
+        to STEEL so the teaching frame is fixed.
+      - **STAGED VERBS** (`Game.OnboardingActive` / `VerbStagingActive` / `VerbRevealed`,
+        applied at the end of `Hud.DrawActionButtons`): during the drill and mission 1 the
+        bar shows only what has been taught. Permanent **SHOW ALL** escape (**[V]**,
+        persisted). Capped to those two places; STABILIZE is never staged away.
+      - **JUST-IN-TIME FIELD TIPS** (`Game.FieldTips`): FUL-12's single BRACE tip became a
+        10-tip table, each fired once per profile the first time its precondition is true in
+        play, priority-ordered. Seen-flags are a `Display.TipsSeen` bitmask; the old
+        `BraceTipSeen` bool migrates into bit 0 (bridge verified in both directions).
+      - The intro's rules wall is now **one line**.
+      - Hook: **`SIGHTLINE_TUTTEST`** (arena/build, every lesson trigger reachable + fires
+        once + patience, staging monotonic/capped/escapable, tip bits+prios+reachability,
+        seen-flag round-trip + migration, and the drill's no-save/no-meta write contract).
+        Screenshot hooks: `SIGHTLINE_TRAINING` / `TRAINLESSON` / `SHOWALL` / `TIP`.
+      - **Left for a later wave** (deliberately, not forgotten): the drill teaches nothing
+        about the strategic layer (barracks, perks, the campaign map, requisition) — it is a
+        tactics drill only; there is no in-drill "replay this lesson" control beyond the
+        whole-drill restart; and the tips never fire *during* the drill by construction (the
+        lesson card owns the slot), so a player who only ever plays the drill meets 8 verbs,
+        not 18.
