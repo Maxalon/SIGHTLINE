@@ -3717,3 +3717,140 @@ the three and could go to zero if the owner wants an even quieter board.
   above); `DrawThreat` / `DrawPathPreview` untouched (T2 owns them); `Display` post-FX
   untouched, so the bloom knee was NOT re-tuned against the new grade — the rim/lip alphas were
   raised on the assumption the knee is still ~0.36 luma and that is worth a look on hardware.
+
+---
+
+## PROGRAM RESONANCE — WAVE V3 "SURFACES" (cover as material, biomes as places, silhouettes)
+
+**Branch** `wt-v3` off the integration tip. Owner: V3. Files touched: `src/Renderer.cs` only.
+`DrawThreat` / `DrawPathPreview` (T2) untouched; the V2 move-overlay boundary work extended in
+no way and its hue table re-run to prove it.
+
+### What was wrong (measured, not asserted)
+
+1. **Cover was a whitebox widget.** Two variants (high/low), identical geometry every tile:
+   same 5px inset, same 0.18/0.22 corner radius, same lift, same `△`/`—`. Forty-five clones.
+2. **Cover never joined its biome.** The tint pull was 0.28 over a strongly slate base. Exact
+   from the colour math: six of eight biomes' cover tops sat at hue 190-235 — *blue* — no
+   matter the room. ARID cover: hue **204, saturation 0.03**. MAGMA: hue 320, sat 0.05.
+3. **Biomes had no terrain structure.** `DrawBiomeSignature` ran per tile and drew everything
+   *inside* that tile, so MAGMA was a field of ~45 identical orange squiggles rather than a
+   fissure that goes somewhere.
+4. **Team rode on hue alone.** Player ASSAULT and enemy GRUNT were the same wedge 1px apart;
+   GRUNT/SCOUT/HUNTER differed by 2px of half-width. Dormant contacts were near-invisible.
+
+### What shipped
+
+**A — cover as material.** A per-biome `GenImageCellular(256², biome cell size)` baked once on
+the CPU (**no committed bytes**), `ImageColorInvert`ed at bake, drawn through a light biome
+stone on the cover top and wall. Purely-visual footprint jitter (±3px), hash-picked corner
+radius 0.12–0.32, ±1.2px lift jitter, and a chipped corner on ~35% of tops. Tint pull
+0.28 → **0.55**. Cover tops are **value-targeted** (new `Renderer.LiftTo`) rather than
+flat-lifted.
+
+> **The bug worth writing down.** The first cut drew a *dark* colour through the *un-inverted*
+> field, on the theory that the bright cell boundaries would come out as grout. They did not:
+> a texture scales the colour you draw **with**, never the surface underneath, so a dark colour
+> can only ever lay down a flat wash. Measured, cover-top interior std *fell* 3.63 → 1.46 vs
+> the old build — the pass made cover **flatter**. Inverting the field and drawing a light
+> stone through it puts the structure back: std 3.5 → **5.1 (ASH) / 5.5 (TUNDRA)**.
+
+`GenImageCellular` seeds its cells from raylib's global `rand()`, which `InitWindow` seeds from
+the clock. Left alone that makes every screenshot differ. `Raylib.SetRandomSeed` is pinned per
+biome before the bake; nothing else in the game reads raylib's RNG. Verified: two identical
+capture runs differ **only** in the pre-existing animated elements (units, barrel, objective
+pip) — the diff map over floor, cover and features is empty.
+
+**B — board-scale features.** `DrawBiomeFeatures`: 6–12 features per mission that span tiles —
+fissure + pool (MAGMA), frost drift (TUNDRA), soot fan (ASH), dune ridge (ARID), lattice trunk
+(VOID/NEON), moss patch (VERDANT), plate seam (STEEL) — drawn under the terrain. Everything
+derives from `Run.MapSeed` through `Util.Hash3`: **no `Random`, zero draws from `Util.Rng`**,
+built once per (seed, biome, grid) into fixed-size static buffers, so the per-frame cost is the
+draw only and there is no allocation. Time-varying pulses reuse `DrawBiomeSignature`'s single
+existing `GetTime` read — **no new `Raylib.GetTime()` calls**. MAGMA's per-tile squiggle drops
+from 40% to 16% of tiles now that a real fissure carries the structure.
+
+*Colorblind:* V2 caught MAGMA's veins landing on the CB foe orange (238,138,40). A board-scale
+version of that hue would be worse, so under `SIGHTLINE_CB` the fissure gives up saturated
+warmth and works in **value** (dark crevasse, pale hot core), and the surviving per-tile vein
+goes to a dull brown with a near-white core. Terrain wearing the CB-foe hue band on MAGMA:
+**0.83% → 0.61%** of board pixels; ARID unchanged at 0.37% (its ridges are below the
+saturation threshold).
+
+**C — silhouettes.** A **team chassis carried by topology**: player = a closed ring doubled by
+an outer hairline; enemy = a ring **broken** into three arcs with three notches (the four
+special enemy rings — TURRET square / BRUISER hex / SCOUT dash / banner diamond — get the same
+three notches). A gap survives greyscale and `SIGHTLINE_CB`; a hue does not.
+GRUNT / SCOUT / HUNTER re-cut by **topology**: solid wedge / hollow wedge with a sensor pip /
+twin chevrons with no body. ASSAULT gains a shoulder bar so it cannot be read as a GRUNT.
+Every unit gets a dark **keyline** contour (value contrast, palette-free) and a white specular
+catch on the upper-left. Dormant contacts: pale slate body, tighter dashed ring, and a **dark
+backing arc under each dash** so the read no longer depends on which biome the pod is standing
+in.
+
+*Codex sync.* The HUNTER's twin chevrons used to be drawn in `DrawUnit` only, on top of a plain
+dart silhouette — so the field manual showed a dart and the board showed a dart with chevrons.
+They are now the silhouette itself. `DrawCodexGlyph` also wears the team chassis (at scale
+≥ 1.2 only: the 0.8–0.95 row glyphs sit in 26px rows beside their own label).
+
+### The grade — what moved, and what deliberately did not
+
+V2 hit board median 66.6 but missed its p95 150 target at 114, and recorded the real blocker:
+cover top faces were level with soldier bodies, so the prerequisite was **raising the unit tier
+into the >180 band the grade reserves**. That was this wave's job and it is done:
+
+| | base | V3 |
+|---|---|---|
+| unit ring stroke (analytic, Friend/Foe/Foe-CB) | 153–156 | **179–182** |
+| specular catch over the ring | — | **215** |
+| board pixels above luma 180 | 0.06–0.15% | **0.49–0.66%** |
+| worst possible cover-top pixel (high cover, cell face, klit=+1, +grain) | ~142 | **~149** |
+| cover-top luma spread across the 8 biomes | 12 | **0** (value-targeted) |
+
+Board median is **identical to base** on all eight biomes; p95 is within ±2 (106/114/124/111/
+110/110/112/112 → 107/114/126/111/110/110/112/111). **The grade itself was not moved.** Cover
+tops were re-targeted only to pay back what the cellular pass costs and to put the eight biomes
+on one rung; the ceiling was chosen from the constraint, not from taste — the brightest pixel a
+cover top can produce must stay under a soldier's body fill (153), which with the key light's
+0.24 gain works out to a flat base of ≤114, hence targets of 112/100 pre-grout, 92/80 with the
+lifting cellular pass.
+
+**The p95 = 150 target is still unmet and was not chased.** Cover cannot get there: a 5-luma
+board-p95 gain costs roughly 10 luma on cover tops, and ~35 more luma would put terrain through
+the soldier body. p95 150 needs either a brighter floor mid-tone or more high-value *area*
+(plateaus), which is a floor/grade decision, not a surfaces one. Three programs have now pushed
+on this axis; V2 stopped on evidence and so does V3.
+
+### Verification
+
+- `dotnet build -c Release` → **0 warnings / 0 errors**
+- `bash scripts/qa-sweep.sh --full` → **41/41 PASS**, 0 FAIL (PAIRTEST included)
+- autoplay ×5 → clean, no exceptions, no TIMEOUT
+- `SIGHTLINE_BALANCE=10` → **runs=20 missions=76**, output **byte-identical to base**
+  (0 diff lines after stripping wall-clock stamps) — the proof this wave is visual-only
+- V2's hue-convergence table re-run (`scripts/board-metrics.py hue`, seed 4242, 8 biomes):
+  no regression — dHue equal or better everywhere (ASH 30 → 24, dMed 10 → 5), cyan% within
+  1.5pp (VERDANT improved 4.5 → 2.1)
+- captures read and judged: 8-biome before/after (with and without `SIGHTLINE_NOMOVE`), cover
+  close-ups at 3–6×, the board-scale features, `SIGHTLINE_ALERT` silhouettes, `SIGHTLINE_CODEX`
+  glyph strip, and `SIGHTLINE_CB=1` on MAGMA and ARID with live hostiles
+
+### Honest verdict / left undone
+
+- **Better:** every biome now has a floor *and* cover of its own colour; terrain has structure
+  that goes somewhere; friend/foe is readable with the colour turned off; GRUNT/SCOUT/HUNTER are
+  three different things; dormant pods are findable.
+- **Worse, and it is a real trade:** on VERDANT and VOID, cover now sits closer to the floor in
+  hue and value than it did when it was slate, so the blocks *pop* slightly less. Value
+  separation still carries it (cast shadow + lifted top + rim), but a room that reads as one
+  material is a room where cover is less shouty. If that costs tactical reading in play, the
+  lever is the tint pull (0.55) and the cover-top targets (112/100), both in one place.
+- TUNDRA's drift lobes read slightly bubbly at 1:1 (overlapping discs). Fine at play distance;
+  a noise-warped outline would fix it properly.
+- The dormant-contact brightness is a judgement call: the first tune had them out-shouting the
+  live foe and was pulled back twice. They are now clearly findable and clearly subordinate.
+- MAGMA in colorblind mode is improved but not solved: the floor hue is fundamentally warm, so
+  a CB foe still shares a hue family with the room. Value (keyline + >180 ring) is what carries
+  it now. Fixing it at the root means moving MAGMA's floor hue, which is a biome decision.
+- Not attempted: cellular material on the plateau tops (they are still Perlin-only), and any
+  floor-tier grade move.

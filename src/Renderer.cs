@@ -3069,15 +3069,15 @@ public static class Renderer
                 // so the DORMANT tier reads at a glance against any biome floor — still cold/quiet,
                 // still clearly subordinate to the amber SUSPICIOUS ring and the hot-red LIVE halo.
                 float t = (float)Raylib.GetTime();
-                Color dim = Pal.RGBA(202, 214, 228);   // V3: cold slate, lifted for contrast
+                Color dim = Pal.RGBA(184, 198, 214);   // V3: cold slate, lifted for contrast
                 for (int k = 0; k < 8; k++)
                 {
                     float a0 = k * 45f + t * 14f;          // slow rotation so it reads as "scanning"
                     // V3: a dark backing arc under each dash, so the dormant ring holds its
                     // contrast on a pale TUNDRA drift as well as on a dark VOID floor — the
                     // read stops depending on which biome the pod happens to be standing in.
-                    Raylib.DrawRing(p, 21.6f, 27.4f, a0 - 1.5f, a0 + 27.5f, 6, Raylib.Fade(Pal.RGBA(4, 7, 11), 0.55f));
-                    Raylib.DrawRing(p, 23f, 26f, a0, a0 + 26f, 6, Raylib.Fade(dim, 0.86f));
+                    Raylib.DrawRing(p, 19.6f, 24.4f, a0 - 1.5f, a0 + 27.5f, 6, Raylib.Fade(Pal.RGBA(4, 7, 11), 0.60f));
+                    Raylib.DrawRing(p, 21f, 23.6f, a0, a0 + 26f, 6, Raylib.Fade(dim, 0.80f));
                 }
                 float qw = Cfg.Measure("?", 23, 1f).X;
                 var qp = new Vector2((int)(p.X - qw / 2), (int)(p.Y - 13));
