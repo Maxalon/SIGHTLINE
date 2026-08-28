@@ -511,3 +511,30 @@ seeds (mix of WIN/LOSE, no exceptions):
 - **The compass (dev-facing):** CRN-paired greedy/sloppy legs over identical worlds, positional
   error injection, ACTION MIX + BY PERK/PURCHASE/ARENA tables, whole-run objective pins,
   SIGHTLINE_PAIRTEST.
+
+## PROGRAM FULCRUM — death gets a window (FUL-7 LAST LIGHT)
+- **DOWN / bleed-out:** lethal damage on a non-VIP soldier opens a **3-turn DOWN window** instead of an
+  instant kill — the whole state machine enters as one guard at the top of `Game.KillUnit` (the single
+  lethal seam every damage path funnels through). While down: Hp 0 but ALIVE, prone 0.6x body + pulsing
+  red ground ring + a red `DOWN 3/2/1` pill (amber `STABLE` once stabilized), HP bar hidden, red roster-
+  chip state, never selectable, and never targeted by enemy **direct** fire (one filter at the top of
+  `Ai.Plan`, mirrored by the aim helpers + the dragged-body overwatch guard) — but **AoE stays blind**:
+  a shell/frag/barrel/fire field that catches the body kills it outright (the telegraphed-weapons
+  honesty valve), and **nobody goes down twice in one mission** (`WasDownedThisMission`).
+- **The rescue kit:** **STABILIZE** (universal verb, key E; adjacent, 1 action, doesn't end the turn)
+  freezes the timer — the soldier stays down but stops dying; the corpsman's **PATCH revives** (PatchHeal
+  HP, up-but-actionless that turn; CombatMedic reach-2 and FieldSurgeon triage ride along; same Cd 3);
+  **DRAG/EXTRACT carry the body** (pinned against regression); a **WON field recovers** every downed
+  survivor at Hp 1 / Wound 3 + the near-death scar track ("recovered from the field - gravely wounded");
+  LAST STAND's wave-clear breather revives the downed at the mend value. A bleed-out runs the FULL death
+  flow — Fallen + Memorial + KIA stamp, and the honest loss card names the DOWNING archetype.
+- **Honest bounds + vocabulary:** timers tick on the squad's clock (StartPlayerTurn) and UNFREEZE when no
+  soldier is left standing, so an all-downed board always resolves in <= 3 turns; the soldier true-death
+  pop is renamed **KIA** (DOWN now means the window) and the combat log logs `DOWN`, not `KILL`, for a
+  lethal blow the soldier survives. Transient end to end — nothing persists (DTO whitelist; SAVETEST leg).
+  (`Game.EnterDowned/ExpireDowned/DoStabilize`; autopilot revive/stabilize arm + generalized
+  `TryMoveToPatch` + the Evac no-corpsman freeze guard; `SIGHTLINE_DOWNTEST` (legs a-h) /
+  `SIGHTLINE_DOWNSHOT` (=2 mid-rescue); codex row DOWN (BLEEDING OUT); down telemetry in the balance
+  report: downs -> revived/recovered/bled-out/finished + honest save-rate + corpsman-fielded
+  missions. Review round F1-F6: downed bodies exit EVERY enemy-attention seam — the squad focus
+  pick, shield facing, reposition exposure — plus the honest ledger/banner/pill wording.)

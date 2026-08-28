@@ -316,7 +316,7 @@ public class ShotAnim : Anim
             // target — it loses its remaining actions this turn (its post-move shot/grenade is denied,
             // since ActAfterMove gates every action on ActionsLeft>0). The felt comeback lever: trade a
             // kill for tempo. A dead target needs no stagger.
-            if (Stagger && D.Alive)
+            if (Stagger && D.Alive && !D.Downed)   // FUL-7: a body already down has nothing left to deny
             {
                 D.ActionsLeft = 0;
                 D.OnOverwatch = false;                       // a rattled unit drops any held reaction too
@@ -352,7 +352,9 @@ public class ShotAnim : Anim
         // combat-log ledger (always-on readability): one terse line per shot with the rolled odds
         // and outcome, so a player can audit a bad miss instead of feeling cheated.
         bool killed = Res.Hit && D.Hp <= 0;
-        string oc = killed ? "KILL" : Res.Crit ? "CRIT" : Res.Graze ? "GRAZE" : Res.Hit ? "HIT" : "MISS";
+        // FUL-7 ledger honesty: a lethal blow that DOWNED a soldier (Alive, bleeding out) logs
+        // "DOWN", not "KILL" — the combat log must never claim a death that hasn't happened.
+        string oc = killed ? (D.Alive && D.Downed ? "DOWN" : "KILL") : Res.Crit ? "CRIT" : Res.Graze ? "GRAZE" : Res.Hit ? "HIT" : "MISS";
         string ln = $"{A.Name} > {D.Name}  {oc}" + (Res.Hit ? $" {Res.Damage}" : "") + $"  ({Res.Odds.HitChance}%)";
         Stats.Log(g.Turn, (int)A.Team, ln, oc);
     }

@@ -893,15 +893,25 @@ of record (container suspensions have wiped every scratchpad copy — docs are t
       worlds — mechanism PODTEST-pinned; FUL-7's drag stage prices it). Endless depth median
       5.5-6 (in the APEX 5-6 band), zero cap hits. SIGHTLINE_PODTEST + PODSHOT. Rounds table in
       docs/DEVLOG.md. Full spec: docs/plans/FUL-6-critical-mass-FUL-7-last-light.md.
-- [ ] **FUL-7 LAST LIGHT** (P7, L — after FUL-6; fresh post-FUL-6 reference). Lethal damage on a
-      non-VIP soldier becomes a 3-turn BLEED-OUT (once per soldier per mission; AoE stays lethal;
-      enemies never direct-fire the downed — the telegraphed-AoE valve keeps stakes): all through
-      the single KillUnit seam; STABILIZE universal verb freezes the timer; corpsman PATCH revives
-      (MostWoundedAdjacentAlly already targets Hp 0); DRAG/EXTRACT already carry a downed body;
-      EnterBarracks recovers survivors at Wound 3 + the near-death scar track; bleed-out KIA flows
-      the full death path (Fallen/Memorial/honest loss card — LGD's RemoveVeterans needs no special
-      case). Zero persistence (single checkpoint site verified; DTO whitelist). SIGHTLINE_DOWNTEST +
-      DOWNSHOT. Full spec: docs/plans/FUL-6-critical-mass-FUL-7-last-light.md.
+- [x] **FUL-7 LAST LIGHT** — **landed** (wt-ful7, base c74378e). Lethal damage on a non-VIP
+      soldier becomes a 3-turn BLEED-OUT (once per soldier per mission; AoE/fire on a downed body
+      stays lethal; enemies never direct-target the downed — the telegraphed-AoE valve keeps
+      stakes): all through the single KillUnit seam. STABILIZE universal verb (key E) freezes the
+      timer (the freeze needs a standing squad — all-downed boards stay <= 3-turn bounded);
+      corpsman PATCH revives; DRAG/EXTRACT carry pinned; EnterBarracks recovers survivors at Hp 1 /
+      Wound 3 + the near-death scar track; a bleed-out runs the full death path (Fallen/Memorial/
+      honest loss card names the DOWNING archetype — LGD's veteran-erase needed no special case);
+      endless wave-clear revives at the mend value. Zero persistence (DTO whitelist + SAVETEST
+      leg); no enum touched. **Measured (paired h0, fresh same-slot R0; review-fixed build):**
+      soldier true-KIA **-40%** (125→75 on the re-measured chunk; target band 30-50%); save-rate
+      **33%** on the honest ledger (review F2 — a body finished while down is a death, not a
+      save); STABILIZE ~50-60 uses/chunk; PATCH >= 10 met in aggregate at 0.27/corpsman-fielded-
+      mission — corpsman present in only ~38-41% of missions: the roster-presence verdict
+      recorded for FUL-13; completion 50% → 60% re-measured (+10, at the budget boundary — saved
+      bodies play better, and review F1 restored the enemy focus layer while a body is down).
+      h4 close leg + the SHIP-WITH-FIXES review round (F1-F6) in docs/DEVLOG.md §FUL-7.
+      SIGHTLINE_DOWNTEST (legs a-h) + DOWNSHOT (both palettes + mid-rescue). Full spec:
+      docs/plans/FUL-6-critical-mass-FUL-7-last-light.md; details docs/DEVLOG.md §FUL-7.
 - [x] **FUL-8 PIKEMAN** (wt-ful8). The SARISSA — a Wardens lane-holder that plants a braced
       foe-red cone over a movement lane and STAGGERS the first soldier through; the roster's first
       piece that contests WHERE YOU MAY WALK, and it teaches the player's BRACE by being the

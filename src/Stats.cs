@@ -179,6 +179,21 @@ public static class Stats
         _run.EventChoices.Add($"{id}:{arm}");
     }
 
+    // ── FUL-7: DOWN / bleed-out telemetry ────────────────────────────────────────
+    // Downs staged and how each resolved: revived (a corpsman's PATCH), recovered (a won
+    // field / the endless breather), expired (bled out), or FINISHED (killed while down —
+    // AoE/fire/second-lethal, review F2). save-rate = 1 - (expired+finished)/downs — the
+    // measured number DESIGN §4's death-stakes re-grade reads. CorpsmanMissions counts
+    // missions with a corpsman fielded (the PATCH per-presence denominator). Batch-global.
+    static int _downs, _downExpired, _downFinished, _downRevived, _downRecovered, _corpsmanMissions;
+    public static void RecordDown()            { if (Enabled) _downs++; }
+    public static void RecordDownExpired()     { if (Enabled) _downExpired++; }
+    public static void RecordDownFinished()    { if (Enabled) _downFinished++; }
+    public static void RecordDownRevived()     { if (Enabled) _downRevived++; }
+    public static void RecordDownRecovered()   { if (Enabled) _downRecovered++; }
+    public static void RecordCorpsmanFielded() { if (Enabled) _corpsmanMissions++; }
+    public static int DownCount => _downs;     // DOWNTEST read hook
+
     public static void Reset()
     {
         Runs.Clear(); _run = null; _mission = null;
@@ -186,6 +201,7 @@ public static class Stats
         _actionsByPolicy.Clear();
         _boonProcs.Clear();
         _arenaFunnel[0] = _arenaFunnel[1] = _arenaFunnel[2] = 0;
+        _downs = _downExpired = _downFinished = _downRevived = _downRecovered = _corpsmanMissions = 0;   // FUL-7
         Slot = -1;
     }
 
@@ -671,6 +687,19 @@ public static class Stats
             foreach (var kv in deaths.OrderByDescending(kv => kv.Value))
                 sb.AppendLine($"  {kv.Key,-11}: {kv.Value}");
         }
+
+        // ── FUL-7: the DOWN ledger — downs staged and how each resolved. save-rate =
+        // 1 - (bled-out + finished)/downs (review F2: a body killed while down is a death, not
+        // a save; a down still open at run end counts saved — the run decided first).
+        // The corpsman-fielded count is the PATCH per-presence denominator.
+        if (_downs > 0)
+        {
+            int saved = _downs - _downExpired - _downFinished;
+            sb.AppendLine($"\nSOLDIER DOWNS (FUL-7 bleed-out): {_downs} downs -> revived {_downRevived} / recovered {_downRecovered} / bled out {_downExpired} / finished {_downFinished}  (save-rate {Pct(saved, _downs)})");
+            sb.AppendLine($"  corpsman fielded in {_corpsmanMissions} missions");
+        }
+        else if (_corpsmanMissions > 0)
+            sb.AppendLine($"\nSOLDIER DOWNS (FUL-7 bleed-out): 0  (corpsman fielded in {_corpsmanMissions} missions)");
 
         // ── APEX W5: ENEMY COMPOSITION (spawn tally, faction-stamped vs default cascade) ──────
         // The content-reachability metric: which archetypes the campaign actually FIELDS, split by

@@ -354,6 +354,21 @@ public class Unit
     // Transient (never persisted, never gameplay-read).
     public string LastDotSource;
 
+    // ---- FUL-7 LAST LIGHT: the DOWN (bleeding-out) state machine. ALL transient — never
+    // persisted (ToUnitDto whitelist; reset in Game.SetupMission; EnterBarracks resolves every
+    // Downed before the next checkpoint writes). Downed keeps Alive == true so the existing
+    // carry kit (DRAG/EXTRACT gate on Alive), the wipe test, and Evac's all-in-zone win all see
+    // a breathing body; CanAct stays false every turn (ActionsLeft zeroed in StartPlayerTurn),
+    // so a downed soldier never acts, reacts, or is selectable. WasDownedThisMission is the
+    // anti-revive-tank rule: ONE down per soldier per mission — the second lethal event kills
+    // outright (Game.CanGoDown), as does ANY damage reaching a body already down (AoE/fire:
+    // the telegraphed-weapons honesty valve).
+    public bool Downed;              // bleeding out (Hp 0, Alive true, out of the fight)
+    public bool Stabilized;          // timer frozen — stays down (drag-able); recovered on a won field
+    public int DownedTurns;          // player-turn countdown to bleed-out (Game.DownedTimerTurns)
+    public bool WasDownedThisMission;
+    public string DownedByCls;       // the DOWNING attribution (enemy archetype, or a DoT label) — the honest cause at expiry
+
     // Streak-breaker (S4-C): counts consecutive CLEAN misses by this unit. After each
     // miss the next shot gets a small hidden aim bonus (see Combat.Resolve). Resets to
     // 0 on any hit or graze. Intentionally NOT persisted — per-mission accumulation only;
