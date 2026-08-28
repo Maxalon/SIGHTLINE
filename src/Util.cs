@@ -18,9 +18,59 @@ public static class Cfg
     public static int OriginX => (ScreenW - BoardW) / 2; // 64 — NOTE: the roster strip (x 8..140) still overlaps board column 0 (x 64..128); Hud.DrawRoster reflows occluded chips
     public const int OriginY = 40;                  // board floats near the top; translucent HUD overlays its edges
 
-    // Real bitmap font (Phase 5.3) — loaded in Program.cs after InitWindow.
-    // Falls back to Raylib's default if the TTF is missing (graceful degradation).
-    public static Font Font;
+    // ---- Type (Phase 5.3 font; RESONANCE V1 two-atlas + display face) --------------------
+    // Loaded in Program.cs after InitWindow; each falls back gracefully if its TTF is missing.
+    //
+    // V1: ONE 64px atlas used to serve every size from 11px to 92px. Most of the words in the
+    // game are 11-14px labels, and minifying a 64px atlas by 5x with bilinear filtering and no
+    // mip chain is exactly the case that turns type into grey mush. Bake a second atlas at the
+    // size the body text is actually drawn at, and pick per call site by size.
+    public static Font Font;        // 64px NotoMono — data/large text (> UiFontMax)
+    public static Font FontUi;      // 20px NotoMono — body/label text (<= UiFontMax)
+    public static Font FontTitle;   // 96px display face (Chakra Petch) — titles only
+
+    /// Largest point size still served by the small UI atlas.
+    public const float UiFontMax = 18f;
+
+    static bool Has(Font f) => f.Texture.Id != 0;
+
+    /// The NotoMono atlas whose bake size is closest to `size` (see the two-atlas note above).
+    public static Font FontFor(float size) => size <= UiFontMax && Has(FontUi) ? FontUi : Font;
+
+    /// The display face, for titles only. Falls back to NotoMono when the TTF is absent.
+    public static Font TitleFontFor(float size) => Has(FontTitle) ? FontTitle : FontFor(size);
+
+    // Size-routed text helpers. Every DrawTextEx/MeasureTextEx call site in the game goes
+    // through these so the atlas choice is made in exactly one place.
+    public static void Text(string t, Vector2 pos, float size, float spacing, Color tint) =>
+        Raylib.DrawTextEx(FontFor(size), t, pos, size, spacing, tint);
+    public static Vector2 Measure(string t, float size, float spacing) =>
+        Raylib.MeasureTextEx(FontFor(size), t, size, spacing);
+
+    /// Title text — routed to the display face. Use for headline/card titles only; numerals and
+    /// data stay on NotoMono (a good data face) via Text/Measure.
+    public static void TitleText(string t, Vector2 pos, float size, float spacing, Color tint) =>
+        Raylib.DrawTextEx(TitleFontFor(size), t, pos, size, spacing, tint);
+    public static Vector2 TitleMeasure(string t, float size, float spacing) =>
+        Raylib.MeasureTextEx(TitleFontFor(size), t, size, spacing);
+
+    /// Resolve a bundled asset next to the BINARY, not the current working directory.
+    /// V1 ship-blocker: every asset path was relative to the cwd, so launching the built
+    /// binary from anywhere but the project root silently fell back to Raylib's built-in
+    /// bitmap font (and every em-dash rendered as `?`). Keeps a cwd fallback so a loose
+    /// asset dropped next to a `dotnet run` still resolves.
+    public static string AssetPath(string rel)
+    {
+        // F1 hardening: BaseDirectory/File.Exists can throw on an odd host; never let an asset
+        // lookup take the process down - fall through to the cwd-relative path instead.
+        try
+        {
+            string baked = System.IO.Path.Combine(AppContext.BaseDirectory, rel);
+            if (System.IO.File.Exists(baked)) return baked;
+        }
+        catch { /* fall through */ }
+        return rel;   // fall back to cwd-relative (dev convenience / dropped-in files)
+    }
 }
 
 /// Colour palette + helpers.
@@ -93,8 +143,29 @@ public static class Pal
     public static readonly Color Panel     = RGBA(16, 22, 30, 235);
     public static readonly Color PanelBd   = RGBA(38, 49, 63);
 
-    public static readonly Color MoveBlue  = RGBA(56, 189, 248, 60);
-    public static readonly Color MoveYellow= RGBA(251, 191, 36, 55);
+    // RESONANCE V2 — the MOVE RANGE is a BOUNDARY, not a wash.
+    // These used to be per-tile FILLS at alpha 60/55, painted over every reachable tile: on an
+    // 18x11 board with a 6-10 tile budget that is 60-120 tiles of flat colour, on screen for the
+    // whole player turn. Measured, it collapsed all eight biomes into one cyan family, smeared
+    // the friendly-reserved hue across half the room (DESIGN 3.H: one job per accent), and made
+    // dash-yellow indistinguishable from a warm-biome plateau top. Now the region is drawn as an
+    // OUTLINE + corner lattice + a whisper of inner tint, so the same information costs a
+    // fraction of the pixels and the room keeps its own colour.
+    //   MoveBlue / MoveYellow  — the region STROKE (walk solid, dash dashed)
+    //   MoveWalkTint / MoveDashTint — the whisper-level inner lift (see DrawMoveOverlay)
+    //   MoveTick               — the per-tile corner lattice (walk only)
+    // The inner lift is WHITE, not cyan, and that is deliberate. Mixing white into a colour
+    // preserves its HUE exactly and only drops saturation, so the region can be marked without
+    // moving one degree of the biome's hue — measured, an alpha-22 CYAN tint still flipped ASH
+    // (a near-neutral grey biome, saturation ~0.1) a full 170 degrees to cyan, because on an
+    // almost-colourless floor even a whisper of blue decides the hue. A value lift is also the
+    // channel DESIGN 3.H asks for: value carries, hue does not. The friendly-cyan identity of
+    // the affordance rides on the stroke and the tick lattice, which are lines and points.
+    public static readonly Color MoveBlue     = RGBA(56, 189, 248, 205);
+    public static readonly Color MoveYellow   = RGBA(251, 191, 36, 190);
+    public static readonly Color MoveWalkTint = RGBA(255, 255, 255, 15);
+    public static readonly Color MoveDashTint = RGBA(255, 255, 255, 6);
+    public static readonly Color MoveTick     = RGBA(120, 210, 250, 150);
 }
 
 /// The kind of ambient atmosphere a biome breathes — a small library of motions the
@@ -244,4 +315,5 @@ public static class Util
         h ^= h >> 16; h *= 0x45d9f3bu; h ^= h >> 16; h *= 0x45d9f3bu; h ^= h >> 16;
         return h;
     }
+
 }

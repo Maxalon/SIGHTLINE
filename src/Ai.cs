@@ -52,7 +52,17 @@ public static class Ai
     internal static int Damp(int baseChance)
         => baseChance >= 75 ? baseChance : Math.Min(baseChance + 10 * Tier, 75);
 
-    public static EnemyPlan Plan(Game g, Unit e)
+    /// `reserved` (Q1): tiles that are logically taken even though nobody is STANDING on them
+    /// yet — the destinations of moves that are already planned/queued but have not executed.
+    /// Unit.X/Y only commits when a MoveStepAnim FINISHES, so any caller that plans several
+    /// units against one board snapshot before running any of them (Game.ActivatePod's reveal
+    /// scatter) must pass its running claim set here, or the second planner walks onto the
+    /// first one's destination. Null (the default) restores the exact pre-Q1 predicate, so
+    /// every one-unit-at-a-time caller — the enemy turn, the harness intent previews — is
+    /// bit-for-bit unchanged.
+    public static EnemyPlan Plan(Game g, Unit e) => Plan(g, e, null);
+
+    public static EnemyPlan Plan(Game g, Unit e, HashSet<(int x, int y)> reserved)
     {
         var plan = new EnemyPlan();
         // FUL-7 LAST LIGHT — the single AI seam: enemies do NOT target downed (bleeding-out)
@@ -68,7 +78,9 @@ public static class Ai
         if (players.Count == 0) return plan;
 
         // movement reachability (other units block)
-        Func<int, int, bool> blocked = (x, y) => g.IsOccupiedByOther(x, y, e);
+        Func<int, int, bool> blocked = reserved == null
+            ? (x, y) => g.IsOccupiedByOther(x, y, e)
+            : (x, y) => g.IsOccupiedByOther(x, y, e) || reserved.Contains((x, y));
         var cost = g.Grid.CostMap(e.X, e.Y, blocked, out var cameFrom, e.MoveBudget * 2);
 
         // gather reachable tiles incl. current position

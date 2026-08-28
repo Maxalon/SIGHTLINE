@@ -1008,12 +1008,18 @@ public partial class Game
     /// tooltip's red low-confidence band (>=70 good / 40-69 caution / <40 threat) inside the
     /// neutral PanelBd frame. The next Update's UpdateHoverAndAim recomputes + shows the odds
     /// naturally (no special draw path), so the screenshot matches real play.
-    public void DebugTooltip()
+    /// Q1: `hover` stages the OTHER odds path — no aim mode, the board cursor parked on the foe
+    /// (the keyboard-cursor route, so a headless shot needs no live mouse) with the soldier having
+    /// already fired this turn. That is the D4 case: the plain-hover tooltip applies the -15 SNAP
+    /// penalty to the displayed hit%, and (pre-Q1) explained none of it.
+    public void DebugTooltip(bool hover = false)
     {
         var c = Players.Where(p => !p.IsVip && p.Alive).ToList();
         if (c.Count == 0) return;
         var s = c[0];
         s.ConsecutiveMisses = 2;                       // bank +12 STEADYING (the streak cap)
+        s.FiredThisTurn = true;                        // Q1: stage the RUSHED 2ND SHOT badge too
+        s.RunGun = false;
         SquadConcealed = false;                        // CanTarget refuses while concealed
         var foe = Enemies.FirstOrDefault(e => e.Alive);
         if (foe != null)
@@ -1040,7 +1046,8 @@ public partial class Game
             }
             foe.Alert = AlertLevel.Alert;
             Selected = s; RecomputeMoveCost();
-            AimMode = true; AimTarget = foe;
+            if (hover) { AimMode = false; KbCursor = true; CurX = foe.X; CurY = foe.Y; }
+            else { AimMode = true; AimTarget = foe; }
         }
     }
 
@@ -1151,9 +1158,18 @@ public partial class Game
     {
         DebugShop();
         _run.Intel = 40;
-        // force a faction onto a reachable next node so UpcomingFaction() returns it
+        // force a faction onto a reachable next node so UpcomingFaction() returns it.
+        // V1: honour SIGHTLINE_PREP=syndicate|legion|wardens so the LONGEST prep title
+        // ("COUNTER-PREP: SYNDICATE") can be shot on demand — it is the card-title/price
+        // collision case. Defaults to Wardens, so existing captures are unchanged.
+        Faction pf = (Environment.GetEnvironmentVariable("SIGHTLINE_PREP") ?? "").ToLowerInvariant() switch
+        {
+            "syndicate" => Faction.Syndicate,
+            "legion"    => Faction.Legion,
+            _           => Faction.Wardens,
+        };
         var next = _run.NextNodes();
-        if (next.Count > 0) next[0].Faction = Faction.Wardens;
+        if (next.Count > 0) next[0].Faction = pf;
         RefreshShopOffer();   // re-roll now that a faction is telegraphed, so the PREP slot shows
     }
 
@@ -3691,5 +3707,642 @@ public partial class Game
             : $"EXPOSURETEST FAIL: {string.Join(", ", fails.Take(12))}{(fails.Count > 12 ? $" (+{fails.Count - 12} more)" : "")}");
         return sb.ToString();
     }
+
+    // ================= RESONANCE T2 — the incoming-fire forecast ==========
+    /// SIGHTLINE_THREATTEST — pins Game.ComputeThreat's per-tile forecast against the SAME
+    /// Combat.ComputeOdds the resolver uses, on a controlled synthetic board. It asserts the
+    /// FINDING the wave fixes as well as the mechanics:
+    ///   (1) gun COUNT is real (only live+active+armed+in-range+in-LoS hostiles count),
+    ///   (2) BestHit / WorstCls / ExpDmg equal a hand-recomputed ComputeOdds pass,
+    ///   (3) the pre-T2 blind spot: a tile in cover from EVERY bearing gun still reports Guns>0
+    ///       (the old bool[,] called it completely clean),
+    ///   (4) cover levels + flank ANGLE are read from the mover's would-be position,
+    ///   (5) out-of-range / no-LoS / dormant / dry / dead hostiles are excluded,
+    ///   (6) overwatch + FOCUSED (braced-cone) reaction lanes are flagged only where a reaction
+    ///       would genuinely fire,
+    ///   (7) unreachable tiles are never computed, and the caged captive forecasts empty,
+    ///   (8) the mover's real X/Y/Hunkered/MovedAfterFire survive the probe untouched,
+    ///   (9) the post-move state model (moving drops HUNKER) is applied per tile, and
+    ///  (10) the signature cache actually suppresses redundant rebuilds.
+    /// Finishes with a measured worst-case rebuild cost (198 tiles x 8 guns). One-line report.
+    public string ThreatSelfTest()
+    {
+        NoPersist = true;
+        var fails = new System.Collections.Generic.List<string>();
+
+        // ---- deterministic combat statics (a prior test in the same process must not bleed in) ----
+        Combat.AllUnits = System.Array.Empty<Unit>();
+        Combat.MissionFaction = Faction.None;
+        Combat.PrepFaction = Faction.None;
+        Combat.RunBoons.Clear();
+        Combat.PressureAim = 0;
+
+        _run = new Run(); _run.Start();
+        Objective = Objective.Eliminate;
+        Vip = null; CaptiveLocked = false; Hvt = null; EvacZone.Clear();
+        Phase = Phase.PlayerTurn;
+        ThreatPref = ThreatFull;
+
+        Unit MkP(int x, int y) {
+            var u = new Unit { Name = "SOL", Cls = "ASSAULT", Team = Team.Player, X = x, Y = y,
+                               Hp = 8, MaxHp = 8, Aim = 65, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+            u.Ammo = u.Weapon.Clip; u.SyncPos(); u.BeginTurn(); return u;
+        }
+        Unit MkE(string name, int x, int y) {
+            var u = new Unit { Name = name, Cls = "GRUNT", Team = Team.Enemy, X = x, Y = y,
+                               Hp = 6, MaxHp = 6, Aim = 60, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle), PodId = 0 };
+            u.Ammo = u.Weapon.Clip; u.Alert = AlertLevel.Alert; u.SyncPos(); u.BeginTurn(); return u;
+        }
+
+        // Fresh scene: empty floor, one soldier, an all-reachable MoveCost so every tile is probed.
+        Unit sol = null;
+        void Scene(int sx, int sy)
+        {
+            Grid = new Grid();
+            Players = new System.Collections.Generic.List<Unit>();
+            Enemies = new System.Collections.Generic.List<Unit>();
+            sol = MkP(sx, sy);
+            Players.Add(sol);
+            Selected = sol;
+        }
+        void AllReachable()
+        {
+            MoveCost = new int[Grid.W, Grid.H];
+            for (int x = 0; x < Grid.W; x++)
+                for (int y = 0; y < Grid.H; y++)
+                    MoveCost[x, y] = (x == sol.X && y == sol.Y) ? 0 : 1;
+        }
+        void Rebuild() { _threatSig = 0; ComputeThreat(); }
+
+        // ---------- (1)(2)(5) count / best / expected damage / exclusions ----------
+        Scene(5, 5); AllReachable();
+        var a1 = MkE("A", 9, 5);                 // 4 east  — clear LoS, in range
+        var a2 = MkE("B", 5, 9);                 // 4 south — clear LoS, in range
+        var a3 = MkE("C", 2, 2);                 // NW diagonal — clear LoS, in range
+        var far = MkE("FAR", 14, 5);             // SHOTGUN (MaxRange 8) at dist 9 -> out of range
+        far.Weapon = Weapon.Make(WeaponKind.Shotgun); far.Ammo = far.Weapon.Clip;
+        var dormant = MkE("SLEEP", 7, 5);        // in range but NOT active
+        var dry = MkE("DRY", 3, 5);              // in range but out of ammo
+        var dead = MkE("DEAD", 6, 6);            // in range but dead
+        foreach (var e in new[] { a1, a2, a3, far, dormant, dry, dead }) Enemies.Add(e);   // MkE already sets Alert = Alert (=> Active)
+        dormant.Alert = AlertLevel.Unaware; dry.Ammo = 0; dead.Hp = 0; dead.Alive = false;
+        if (Util.TileDist(5, 5, far.X, far.Y) <= far.Weapon.MaxRange) fails.Add("scene_farInRange");
+        Rebuild();
+        if (Threat == null) { return "THREATTEST FAIL: nullForecast"; }
+        var c0 = Threat[5, 5];
+        if (c0.Guns != 3) fails.Add($"gunCount={c0.Guns} want 3");
+
+        // hand-recompute the same three shots and pin best / worst / expected damage
+        int wantBest = 0; string wantCls = null; float wantExp = 0f; float wantScore = -1f;
+        foreach (var e in new[] { a1, a2, a3 })
+        {
+            var o = Combat.ComputeOdds(Grid, e, sol);
+            wantExp += o.HitChance * 0.01f * ((Combat.HardenedReduce(sol, o.DmgMin, false) + Combat.HardenedReduce(sol, o.DmgMax, false)) * 0.5f);
+            float sc = o.HitChance * 1000f + (o.DmgMin + o.DmgMax);
+            if (sc > wantScore) { wantScore = sc; wantBest = o.HitChance; wantCls = e.Cls; }
+        }
+        if (c0.BestHit != wantBest) fails.Add($"bestHit={c0.BestHit} want {wantBest}");
+        if (c0.WorstCls != wantCls) fails.Add($"worstCls={c0.WorstCls} want {wantCls}");
+        if (MathF.Abs(c0.ExpDmg - wantExp) > 0.01f) fails.Add($"expDmg={c0.ExpDmg:0.###} want {wantExp:0.###}");
+        if (wantBest <= 0) fails.Add("vacuousBestHit");         // guard: the scene must actually produce shots
+        if (wantExp <= 0f) fails.Add("vacuousExpDmg");
+        if (!c0.Exposed) fails.Add("openGroundNotExposed");     // no cover anywhere on this board
+        if (c0.Tier != 3) fails.Add($"tier={c0.Tier} want 3");
+        // exclusions must genuinely bite: waking the dormant gun changes the count
+        dormant.Alert = AlertLevel.Alert; Rebuild();
+        if (Threat[5, 5].Guns != 4) fails.Add($"dormantExclusionInert={Threat[5, 5].Guns}");
+        dormant.Alert = AlertLevel.Unaware;
+        // a wall between (5,5) and the east gun drops it (LoS gate)
+        Grid.Tiles[7, 5] = TileType.HighCover; Rebuild();
+        if (Threat[5, 5].Guns != 2) fails.Add($"losExclusion={Threat[5, 5].Guns} want 2");
+        Grid.Tiles[7, 5] = TileType.Floor;
+
+        // ---------- (7) unreachable tiles are never computed ----------
+        Rebuild();
+        int probeX = 5, probeY = 3;                              // open, in every gun's reach
+        if (Threat[probeX, probeY].Guns == 0) fails.Add("probeTileHadNoGuns");   // guard: the tile IS hot
+        MoveCost[probeX, probeY] = 0; Rebuild();
+        if (Threat[probeX, probeY].Guns != 0) fails.Add("unreachableTileComputed");
+        MoveCost[probeX, probeY] = 1;
+
+        // ---------- (8) the probe leaves the mover untouched ----------
+        sol.Hunkered = true; sol.FiredThisTurn = true; sol.MovedAfterFire = false;
+        int sx0 = sol.X, sy0 = sol.Y;
+        Rebuild();
+        if (sol.X != sx0 || sol.Y != sy0) fails.Add("moverPositionClobbered");
+        if (!sol.Hunkered || sol.MovedAfterFire) fails.Add("moverStateClobbered");
+
+        // ---------- (9) post-move state model: HUNKER only holds on the tile you stand on ----------
+        var hereCell = Threat[sol.X, sol.Y];
+        var stepCell = Threat[sol.X, sol.Y - 1];
+        if (hereCell.BestHit >= stepCell.BestHit) fails.Add($"hunkerNotModelled here={hereCell.BestHit} step={stepCell.BestHit}");
+        sol.Hunkered = false; sol.FiredThisTurn = false; sol.MovedAfterFire = false;
+
+        // ---------- (3)(4) cover levels + flank ANGLE, read from the would-be position ----------
+        // Scene: soldier at (5,5). Candidate tile (8,5) has HIGH cover on its EAST side (9,5).
+        // ONE gun due east (covered) and, later, a second gun due north (flanking).
+        Scene(5, 5); AllReachable();
+        // LOW cover, not HIGH: high cover BLOCKS the cardinal sightline outright (Grid.BlocksSight),
+        // so there'd be no shot at all to forecast. Low cover shades the shot without severing it.
+        Grid.Tiles[9, 5] = TileType.LowCover;
+        var east = MkE("EAST", 12, 5); Enemies.Add(east);
+        Rebuild();
+        var covered = Threat[8, 5];
+        if (covered.Guns != 1) fails.Add($"coveredGuns={covered.Guns} want 1");
+        if (covered.Exposed) fails.Add("coveredTileReadsExposed");
+        if (covered.Flanked) fails.Add("coveredTileReadsFlanked");
+        var oCov = Combat.ComputeOdds(Grid, east, new Unit { Team = Team.Player, X = 8, Y = 5, Hp = 8, MaxHp = 8,
+                                                             Aim = 65, Weapon = Weapon.Make(WeaponKind.Rifle) });
+        if (oCov.CoverLevel != 1) fails.Add($"sceneCoverLevel={oCov.CoverLevel} want 1");
+        if (covered.BestHit != oCov.HitChance) fails.Add($"coveredBestHit={covered.BestHit} want {oCov.HitChance}");
+        // THE FINDING: a second gun on a DIFFERENT angle. The tile is still in cover from nobody's
+        // point of view but the north gun's — pre-T2 the tile was flagged only via the raw bool, and
+        // a tile covered from EVERY gun read completely clean. Now the COUNT is always honest.
+        var north = MkE("NORTH", 8, 1); Enemies.Add(north);
+        Rebuild();
+        var enfiladed = Threat[8, 5];
+        if (enfiladed.Guns != 2) fails.Add($"enfiladedGuns={enfiladed.Guns} want 2");
+        if (!enfiladed.Flanked) fails.Add("northGunNotFlanking");
+        if (enfiladed.BestHit <= covered.BestHit) fails.Add("flankNotHarderHit");
+        // and the pre-T2 blind spot itself: box the tile so BOTH guns are covered -> Guns still 2,
+        // Exposed false. The old bool[,] drew nothing at all here.
+        Grid.Tiles[8, 4] = TileType.LowCover; Rebuild();
+        var boxed = Threat[8, 5];
+        if (boxed.Guns != 2) fails.Add($"boxedGuns={boxed.Guns} want 2");
+        if (boxed.Exposed) fails.Add("boxedTileExposed");
+        if (boxed.Flanked) fails.Add("boxedTileFlanked");
+        if (boxed.Tier != 2) fails.Add($"boxedTier={boxed.Tier} want 2");
+
+        // ---------- (6) overwatch / focused-cone reaction lanes ----------
+        Scene(5, 5); AllReachable();
+        var watcher = MkE("WATCH", 11, 5); watcher.OnOverwatch = true; Enemies.Add(watcher);
+        Rebuild();
+        if (!Threat[8, 5].Watched) fails.Add("wideOverwatchNotWatched");
+        watcher.OwFocused = true; watcher.OwDirX = -1; watcher.OwDirY = 0;   // braced WEST, down the row
+        Rebuild();
+        if (!Threat[8, 5].Watched) fails.Add("inConeNotWatched");
+        if (!InOwCone(watcher, 8, 5)) fails.Add("sceneConeSanity");
+        // a tile the cone does NOT cover must not claim a reaction (perpendicular, still in LoS+range)
+        if (InOwCone(watcher, 11, 2)) fails.Add("scenePerpConeSanity");
+        if (Threat[11, 2].Watched) fails.Add("outOfConeWatched");
+        if (Threat[11, 2].Guns == 0) fails.Add("outOfConeTileHadNoGuns");   // guard: it IS shootable, just not watched
+        watcher.OnOverwatch = false; Rebuild();
+        if (Threat[8, 5].Watched) fails.Add("overwatchClearedButStillWatched");
+
+        // ---------- (7b) the caged Rescue captive forecasts empty ----------
+        Scene(5, 5); AllReachable();
+        var gun = MkE("G", 9, 5); Enemies.Add(gun);
+        Rebuild();
+        if (Threat[5, 5].Guns == 0) fails.Add("captiveSceneNoGuns");
+        Vip = sol; CaptiveLocked = true; Rebuild();
+        if (Threat[5, 5].Guns != 0) fails.Add("cagedCaptiveForecastsFire");
+        Vip = null; CaptiveLocked = false;
+
+        // ---------- (10) the signature cache suppresses redundant rebuilds ----------
+        Rebuild();
+        int r0 = ThreatRebuilds;
+        ComputeThreat(); ComputeThreat(); ComputeThreat();
+        if (ThreatRebuilds != r0) fails.Add($"cacheMissedOnNoChange (+{ThreatRebuilds - r0})");
+        gun.X = 8; gun.SyncPos(); ComputeThreat();
+        if (ThreatRebuilds != r0 + 1) fails.Add("cacheDidNotInvalidateOnEnemyMove");
+        Grid.Tiles[3, 3] = TileType.LowCover; ComputeThreat();
+        if (ThreatRebuilds != r0 + 2) fails.Add("cacheDidNotInvalidateOnTerrainChange");
+
+        // ---------- perf: worst case — every tile reachable, 8 armed guns ----------
+        Scene(9, 5);
+        for (int i = 0; i < 8; i++)
+        {
+            var e = MkE($"P{i}", 1 + (i % 4) * 4, i < 4 ? 1 : 9);
+            Enemies.Add(e);
+        }
+        AllReachable();
+        Rebuild();                                   // warm the JIT
+        const int reps = 40;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        for (int i = 0; i < reps; i++) Rebuild();
+        sw.Stop();
+        double ms = sw.Elapsed.TotalMilliseconds / reps;
+        int guns = Threat[9, 5].Guns;
+
+        Combat.AllUnits = System.Array.Empty<Unit>();
+        return fails.Count == 0
+            ? $"THREATTEST PASS (worst-case rebuild {ms:0.000} ms over {Cfg.GridW * Cfg.GridH} tiles x 8 guns; centre sees {guns})"
+            : $"THREATTEST FAIL: {string.Join(", ", fails)}";
+    }
+
+    /// Harness (screenshot): SIGHTLINE_THREATSHOT — stage a real fight where the selected soldier
+    /// can walk into 1-, 2- and 3-gun tiles, then park the cursor on a hot destination so the pips,
+    /// the danger-tinted path and the INCOMING FIRE card all land in one frame. Pair with
+    /// SIGHTLINE_CB=1 for the colorblind pass (coded-state rule, DESIGN.md 3.H).
+    public void DebugThreatShot()
+    {
+        DebugWakeAll();
+        var sol = AlivePlayers().FirstOrDefault(p => !p.IsVip && p.CanAct) ?? AlivePlayers().FirstOrDefault();
+        if (sol == null) return;
+        Selected = sol;
+        ThreatPref = ThreatFull;
+
+        // Fan the live hostiles onto clear firing angles around the soldier so several guns bear on
+        // the tiles it can reach (staging only — the same free-staging precedent as DebugPikemanLane).
+        var foes = AliveEnemies().Take(4).ToList();
+        var rings = new (int dx, int dy)[] { (6, -2), (5, 4), (-5, 3), (-4, -4) };
+        for (int i = 0; i < foes.Count && i < rings.Length; i++)
+        {
+            var f = foes[i];
+            int tx = Util.Clamp(sol.X + rings[i].dx, 0, Grid.W - 1);
+            int ty = Util.Clamp(sol.Y + rings[i].dy, 0, Grid.H - 1);
+            for (int r = 0; r <= 3 && !PlaceFoe(f, tx, ty, r); r++) { }
+            f.Alert = AlertLevel.Alert; f.Ammo = f.Weapon.Clip;
+        }
+        if (foes.Count > 0) { foes[0].OnOverwatch = true; }   // one live reaction lane in the frame
+
+        RecomputeMoveCost();
+        // Measured per-selection cost on a REAL board (real reachable set, real roster), warm —
+        // the number the wave report quotes. Console-only; NoPersist keeps it out of live play.
+        {
+            int reach = 0;
+            if (MoveCost != null)
+                for (int x = 0; x < Grid.W; x++) for (int y = 0; y < Grid.H; y++) if (MoveCost[x, y] > 0) reach++;
+            for (int i = 0; i < 5; i++) { _threatSig = 0; ComputeThreat(); }        // warm
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            for (int i = 0; i < 50; i++) { _threatSig = 0; ComputeThreat(); }
+            sw.Stop();
+            int foeN = AliveEnemies().Count(e => e.Active && e.Ammo > 0);
+            Console.WriteLine($"HARNESS THREATPERF: reachable={reach} guns={foeN} rebuild={sw.Elapsed.TotalMilliseconds / 50.0:0.000} ms");
+        }
+        // park the cursor on the hottest tile the soldier can actually reach (most guns, then
+        // furthest from the soldier so the tinted path has some length to show).
+        int bx = sol.X, by = sol.Y, best = -1;
+        if (Threat != null && MoveCost != null)
+            for (int x = 0; x < Grid.W; x++)
+                for (int y = 0; y < Grid.H; y++)
+                {
+                    if (MoveCost[x, y] <= 0 || MoveCost[x, y] > sol.MoveBudget) continue;
+                    if (UnitAt(x, y) != null) continue;
+                    int score = Threat[x, y].Guns * 100 + (int)Util.TileDist(sol.X, sol.Y, x, y);
+                    if (score > best) { best = score; bx = x; by = y; }
+                }
+        DebugMousePark = Util.TileCenter(bx, by);
+    }
+
+    /// Set by DebugThreatShot: Program parks the headless cursor here every frame so hover-driven
+    /// chrome (path preview + the incoming-fire card) is present in the captured frame.
+    public System.Numerics.Vector2? DebugMousePark;
+
+    /// Move `f` to (tx,ty) or the first free floor tile within `r` of it. True on success.
+    bool PlaceFoe(Unit f, int tx, int ty, int r)
+    {
+        for (int dx = -r; dx <= r; dx++)
+            for (int dy = -r; dy <= r; dy++)
+            {
+                int x = tx + dx, y = ty + dy;
+                if (!Grid.InBounds(x, y) || !Grid.IsFloor(x, y)) continue;
+                if (IsOccupiedByOther(x, y, f)) continue;
+                f.X = x; f.Y = y; f.SyncPos(); return true;
+            }
+        return false;
+    }
+
+
+    // ─── PROGRAM RESONANCE T1 — onboarding self-test (SIGHTLINE_TUTTEST=1) ────────────────────
+    /// Pins the whole T1 contract:
+    ///   (1) the TRAINING OP arena/script is well-formed and the drill builds on it;
+    ///   (2) EVERY lesson trigger predicate is REACHABLE and fires EXACTLY ONCE (plus its patience
+    ///       fallback, so no lesson can strand a player who solves it another way);
+    ///   (3) verb staging reveals monotonically, is CAPPED to the drill + mission 1, exempts the
+    ///       emergency verb, and the SHOW ALL escape bypasses it;
+    ///   (4) the field-tip table's on-disk bits / priorities / codes are internally consistent and
+    ///       every predicate is callable and fires at most once per profile;
+    ///   (5) every seen-flag round-trips through Display.Save/Load (incl. the FUL-12 BraceTipSeen
+    ///       migration bridge), and the drill writes NO run/meta file.
+    /// Preserves and restores the real display.json around the round-trip.
+    public string TutorialSelfTest()
+    {
+        var fails = new List<string>();
+
+        // ---- (1) the drill's arena + build ----------------------------------------------------
+        var probe = new Grid();
+        if (Maps.TrainingArena.Length != probe.H) fails.Add("arenaRows");
+        foreach (var row in Maps.TrainingArena) if (row.Length != probe.W) fails.Add("arenaCols");
+        if (Maps.TrainingDeploy.Length < 2) fails.Add("deploySeats");
+        if (Maps.TrainingFoes.Length < 4) fails.Add("foeSeats");
+
+        var g = new Game { NoPersist = true };
+        g.BeginTraining();
+        if (g.Mode != GameMode.Training) fails.Add("modeNotTraining");
+        if (g.Objective != Objective.Eliminate) fails.Add("drillObjective");
+        if (g.Players.Count != 2) fails.Add("drillSquadSize");
+        if (g.Enemies.Count != Maps.TrainingFoes.Length) fails.Add("drillForceSize");
+        if (g.RunState != null && g.RunState.HeatLevel != 0) fails.Add("drillHeat");
+        if (!g.SquadConcealed) fails.Add("drillNotConcealed");
+        if (g.Enemies.Any(e => e.Active)) fails.Add("drillFoesNotDormant");
+        // deploy + hostile seats survived the template stamp as open floor, and nobody shares a tile
+        var seats = new HashSet<(int, int)>();
+        foreach (var u in g.Players)
+        {
+            if (!g.Grid.IsFloor(u.X, u.Y)) fails.Add("deployNotFloor");
+            if (!seats.Add((u.X, u.Y))) fails.Add("seatCollision");
+        }
+        foreach (var e in g.Enemies)
+        {
+            if (!g.Grid.IsFloor(e.X, e.Y)) fails.Add("foeNotFloor");
+            if (!seats.Add((e.X, e.Y))) fails.Add("seatCollision");
+        }
+        // every hostile is walkable-reachable from the first recruit (the drill must be completable)
+        {
+            var cost = g.Grid.CostMap(g.Players[0].X, g.Players[0].Y, (x, y) => false, out _, 9999);
+            foreach (var e in g.Enemies) if (cost[e.X, e.Y] < 0) fails.Add("foeUnreachable");
+        }
+        // the two lesson-critical tiles the arena was authored around must exist as open floor:
+        // (4,4)/(4,6) are the COVER lesson's blocks, (12,1) is the FLANK lesson's answer tile.
+        if (g.Grid.Tiles[4, 4] != TileType.LowCover || g.Grid.Tiles[4, 6] != TileType.LowCover) fails.Add("coverLessonTiles");
+        if (!g.Grid.IsFloor(12, 1)) fails.Add("flankLessonTile");
+
+        // ---- (2) the lesson table + every trigger predicate -------------------------------------
+        var codes = new HashSet<string>();
+        var barIds = new HashSet<string>
+        {
+            "shoot", "grenade", "ability", "item", "shove", "drag", "vault", "stabilize",
+            "overwatch", "focusow", "brace", "hunker", "hack", "beacon", "extract", "reload",
+        };
+        foreach (var l in TrainLessons)
+        {
+            if (string.IsNullOrEmpty(l.Code) || !codes.Add(l.Code)) fails.Add("lessonCode:" + l.Code);
+            if (string.IsNullOrWhiteSpace(l.Text)) fails.Add("lessonText:" + l.Code);
+            if (l.Done == null) fails.Add("lessonPredicate:" + l.Code);
+            foreach (var v in l.Reveal) if (!barIds.Contains(v)) fails.Add("lessonRevealsUnknownVerb:" + v);
+        }
+        if (TrainLessons[TrainLessons.Length - 1].Done(g)) fails.Add("terminalLessonSelfSolves");
+
+        // Drive the drill lesson by lesson. Each step: assert the predicate is FALSE, apply the
+        // one world change that solves it, assert it goes TRUE, tick UpdateTraining ONCE and assert
+        // the track advanced by EXACTLY one (fires once, never twice).
+        void Step(string code, Action solve)
+        {
+            int at = g.TrainStep;
+            if (at < 0 || at >= TrainLessons.Length || TrainLessons[at].Code != code)
+            { fails.Add("lessonOrder@" + code + "(was " + (at >= 0 && at < TrainLessons.Length ? TrainLessons[at].Code : "-") + ")"); return; }
+            if (TrainLessons[at].Done(g)) fails.Add("lessonPreSolved:" + code);
+            solve();
+            if (!TrainLessons[at].Done(g)) fails.Add("lessonUnreachable:" + code);
+            g.UpdateTraining(1f / 60f);
+            if (g.TrainStep != at + 1) fails.Add("lessonAdvance:" + code + "->" + g.TrainStep);
+            g.UpdateTraining(1f / 60f);   // a second tick must not skip the NEXT lesson too
+            if (g.TrainStep != at + 1) fails.Add("lessonDoubleFire:" + code);
+        }
+        if (g.TrainStep != 0) fails.Add("drillLessonNotOpen");
+        Step("MOVE",      () => g.DebugSetTutFlag("move"));
+        Step("COVER",     () => { g.Players[0].X = 5; g.Players[0].Y = 4; g.Players[0].SyncPos(); });
+        Step("FLANK",     () => { g.Players[0].X = 12; g.Players[0].Y = 1; g.Players[0].SyncPos(); });
+        Step("FIRE",      () => g.DebugSetTutFlag("shot"));
+        Step("OVERWATCH", () => g.DebugSetTutFlag("over"));
+        Step("GRENADE",   () => g.DebugSetTutFlag("grenade"));
+        Step("ABILITY",   () => g.DebugSetTutFlag("ability"));
+        if (g.TrainStep != TrainLessons.Length - 1) fails.Add("didNotReachTerminalLesson");
+        // the terminal lesson never self-advances, and never runs off the end of the table
+        for (int i = 0; i < 8; i++) g.UpdateTraining(1f / 60f);
+        if (g.TrainStep != TrainLessons.Length - 1) fails.Add("terminalLessonAdvanced");
+
+        // patience fallback: a lesson yields on its turn budget even when never solved
+        {
+            var pg = new Game { NoPersist = true };
+            pg.BeginTraining();
+            int p0 = pg.TrainStep;
+            pg.DebugSetTurn(1 + TrainLessons[p0].Patience);
+            pg.UpdateTraining(1f / 60f);
+            if (pg.TrainStep != p0 + 1) fails.Add("patienceFallback");
+        }
+
+        // ---- (3) verb staging ------------------------------------------------------------------
+        {
+            var sg = new Game { NoPersist = true };
+            sg.BeginTraining();
+            if (!sg.OnboardingActive || !sg.VerbStagingActive) fails.Add("stagingNotActiveAtOpen");
+            if (sg.VerbRevealed("shoot")) fails.Add("stagedShootVisibleAtOpen");
+            if (sg.VerbRevealed("brace")) fails.Add("stagedBraceVisibleAtOpen");
+            if (!sg.VerbRevealed("stabilize")) fails.Add("emergencyVerbStagedAway");
+            // reveals are MONOTONIC: replaying up to lesson k must never drop an earlier verb
+            var seen = new HashSet<string>();
+            for (int k = 0; k < TrainLessons.Length; k++)
+            {
+                sg.ShowTrainingLesson(k);
+                foreach (var v in seen) if (!sg.RevealedVerbs.Contains(v)) fails.Add("revealRegressed:" + v);
+                foreach (var v in TrainLessons[k].Reveal) seen.Add(v);
+            }
+            sg.ShowTrainingLesson(3);   // the FIRE lesson
+            if (!sg.VerbRevealed("shoot") || !sg.VerbRevealed("reload")) fails.Add("fireLessonRevealsShoot");
+            if (sg.VerbRevealed("grenade")) fails.Add("fireLessonLeaksGrenade");
+            // the terminal lesson is the graduation: staging off, everything visible
+            sg.ShowTrainingLesson(TrainLessons.Length - 1);
+            if (sg.OnboardingActive || sg.VerbStagingActive) fails.Add("terminalLessonStillStaging");
+            if (!sg.VerbRevealed("brace")) fails.Add("terminalLessonNotFullBar");
+            // SHOW ALL escape bypasses staging in BOTH directions and never desyncs OnboardingActive
+            sg.ShowTrainingLesson(0);
+            sg.ToggleShowAllVerbs();
+            if (!sg.ShowAllVerbs) fails.Add("showAllToggleOn");
+            if (sg.VerbStagingActive) fails.Add("showAllDidNotBypass");
+            if (!sg.OnboardingActive) fails.Add("showAllKilledOnboardingContext");
+            if (!sg.VerbRevealed("brace")) fails.Add("showAllStillHiding");
+            sg.ToggleShowAllVerbs();
+            if (sg.ShowAllVerbs || !sg.VerbStagingActive) fails.Add("showAllToggleOff");
+        }
+        // the CAP: campaign mission 2+ is never staged, whatever TutStep says
+        {
+            var cg = new Game { NoPersist = true };
+            cg.StartMission(2);
+            cg.ShowTutorialStep(TutStepOverwatch);
+            if (cg.OnboardingActive || cg.VerbStagingActive) fails.Add("mission2Staged");
+            if (!cg.VerbRevealed("brace")) fails.Add("mission2HidingVerbs");
+        }
+        // mission 1 IS staged while the strip runs, and the wrap-up card ends it
+        {
+            var cg = new Game { NoPersist = true };
+            cg.StartMission(1);
+            cg.ShowTutorialStep(TutStepConceal);
+            if (!cg.VerbStagingActive) fails.Add("mission1NotStaged");
+            if (cg.VerbRevealed("shoot")) fails.Add("mission1LeaksShootAtConceal");
+            cg.ShowTutorialStep(TutStepFire);
+            if (!cg.VerbRevealed("shoot") || !cg.VerbRevealed("overwatch")) fails.Add("mission1FireReveal");
+            cg.ShowTutorialStep(TutStepDone);
+            if (cg.OnboardingActive) fails.Add("wrapUpStillStaging");
+        }
+        // the LOAD-BEARING completion gates (EnterBarracks/LoseRun compare against TutStepFire)
+        // (through an array so the check is a real runtime comparison, not const-folded away)
+        int[] gates = { TutStepConceal, TutStepMove, TutStepOverwatch, TutStepFire, TutStepDone };
+        for (int gi = 0; gi < gates.Length; gi++) if (gates[gi] != gi) fails.Add("tutStepConstantsMoved");
+        if (TutPrompts.Length != TutStepDone + 1) fails.Add("tutPromptCount");
+        if (TutReveal.Length != TutPrompts.Length) fails.Add("tutRevealMisaligned");
+
+        // ---- (4) the field-tip table -----------------------------------------------------------
+        {
+            var bits = new HashSet<int>(); var prios = new HashSet<int>(); var tcodes = new HashSet<string>();
+            foreach (var t in FieldTips)
+            {
+                if (t.Bit < 0 || t.Bit >= Display.MaxTips) fails.Add("tipBitRange:" + t.Code);
+                if (!bits.Add(t.Bit)) fails.Add("tipBitDup:" + t.Code);
+                if (!prios.Add(t.Prio)) fails.Add("tipPrioDup:" + t.Code);
+                if (string.IsNullOrEmpty(t.Code) || !tcodes.Add(t.Code)) fails.Add("tipCodeDup:" + t.Code);
+                if (string.IsNullOrWhiteSpace(t.Text)) fails.Add("tipText:" + t.Code);
+                if (t.When == null) { fails.Add("tipPredicate:" + t.Code); continue; }
+                try { t.When(g); } catch { fails.Add("tipPredicateThrew:" + t.Code); }
+            }
+            if (FieldTips.Length < 10) fails.Add("tipTableTooSmall");
+            if (FieldTips[0].Bit != 0 || FieldTips[0].Code != "BRACE") fails.Add("braceTipNotBit0");
+
+            // Every predicate is REACHABLE: stage the world state each one names and assert it turns
+            // true. One shared drill board, mutated per tip and rolled back.
+            var tg = new Game { NoPersist = true };
+            tg.BeginTraining();
+            foreach (var e in tg.Enemies) e.Alert = AlertLevel.Alert;   // "a live threat" for all of them
+            var pa = tg.Players[0]; var pb = tg.Players[1];
+            bool Fires(string code)
+            {
+                foreach (var t in FieldTips) if (t.Code == code) return t.When(tg);
+                fails.Add("tipMissing:" + code); return false;
+            }
+            if (!Fires("BRACE")) fails.Add("tipUnreachable:BRACE");
+            pa.Ammo = 0;              if (!Fires("RELOAD")) fails.Add("tipUnreachable:RELOAD");
+            pa.Ammo = pa.Weapon.Clip;
+            // GRENADE: the drill's cover-hugging pair at (12,4)/(12,6) IS the staged case — sweep
+            // the board for ANY stance that sees one of them in cover (a stronger reachability claim
+            // than one hand-picked tile, and it survives an arena edit).
+            pa.Grenades = 1; pb.X = 2; pb.Y = 6; pb.SyncPos();
+            bool grenReach = false;
+            for (int gx = 0; gx < tg.Grid.W && !grenReach; gx++)
+                for (int gy = 0; gy < tg.Grid.H && !grenReach; gy++)
+                {
+                    if (!tg.Grid.IsFloor(gx, gy) || tg.Enemies.Any(e => e.X == gx && e.Y == gy)) continue;
+                    pa.X = gx; pa.Y = gy; pa.SyncPos();
+                    if (Fires("GRENADE")) grenReach = true;
+                }
+            if (!grenReach) fails.Add("tipUnreachable:GRENADE");
+            // HUNKER: a soldier in the open, seen by a live foe, with an action in hand
+            pa.X = 12; pa.Y = 2; pa.SyncPos(); pa.ActionsLeft = 2;
+            pb.X = 12; pb.Y = 3; pb.SyncPos();
+            if (!Fires("HUNKER")) fails.Add("tipUnreachable:HUNKER");
+            // SHOVE: step a recruit adjacent to a hostile
+            pa.X = 12; pa.Y = 3; pa.SyncPos(); pb.X = 2; pb.Y = 6; pb.SyncPos();
+            if (!Fires("SHOVE")) fails.Add("tipUnreachable:SHOVE");
+            // VAULT / DRAG: park the pair beside the drill's cover blocks, shoulder to shoulder
+            // (DRAG needs a Chebyshev-2 ally: you cannot pull someone already shoulder-to-shoulder)
+            pa.X = 5; pa.Y = 4; pa.SyncPos(); pa.ActionsLeft = 2;
+            pb.X = 5; pb.Y = 6; pb.SyncPos(); pb.ActionsLeft = 2;
+            if (!Fires("VAULT")) fails.Add("tipUnreachable:VAULT");
+            if (!Fires("DRAG")) fails.Add("tipUnreachable:DRAG");
+            tg.DebugSetTutFlag("over");
+            if (!Fires("FOCUS")) fails.Add("tipUnreachable:FOCUS");
+            if (!Fires("ITEM")) fails.Add("tipUnreachable:ITEM");
+            // STABILIZE: the one tip keyed on a bleeding-out ally
+            pb.Downed = true;
+            if (!Fires("STABILIZE")) fails.Add("tipUnreachable:STABILIZE");
+            pb.Downed = false;
+        }
+
+        // ---- (5) persistence: round-trip + migration + the drill's no-write contract ------------
+        string dispPath = Display.SettingsPathPublic;
+        string dispStash = null; bool hadDisp = false;
+        try { hadDisp = System.IO.File.Exists(dispPath); if (hadDisp) dispStash = System.IO.File.ReadAllText(dispPath); } catch { }
+        int savedTips = Display.TipsSeen; bool savedTrain = Display.TrainingSeen;
+        bool savedShow = Display.ShowAllVerbs, savedBrace = Display.BraceTipSeen, savedTut = Display.TutorialSeen;
+        try
+        {
+            // every tip bit, plus both new bools, survive a real JSON round trip
+            Display.TipsSeen = 0;
+            foreach (var t in FieldTips) Display.MarkTipSeen(t.Bit);
+            Display.TrainingSeen = true; Display.ShowAllVerbs = true;
+            int wrote = Display.TipsSeen;
+            Display.SaveForTest();
+            Display.TipsSeen = 0; Display.TrainingSeen = false; Display.ShowAllVerbs = false; Display.BraceTipSeen = false;
+            Display.LoadForTest();
+            if (Display.TipsSeen != wrote) fails.Add("tipsSeenRoundTrip");
+            foreach (var t in FieldTips) if (!Display.TipSeen(t.Bit)) fails.Add("tipFlagRoundTrip:" + t.Code);
+            if (!Display.TrainingSeen) fails.Add("trainingSeenRoundTrip");
+            if (!Display.ShowAllVerbs) fails.Add("showAllRoundTrip");
+            if (!Display.BraceTipSeen) fails.Add("braceBridgeOnSave");
+
+            // an unseen tip stays unseen across the trip (the mask is not a blanket "all true")
+            Display.TipsSeen = 0; Display.MarkTipSeen(1);
+            Display.SaveForTest(); Display.TipsSeen = 0; Display.LoadForTest();
+            if (!Display.TipSeen(1) || Display.TipSeen(0) || Display.TipSeen(2)) fails.Add("tipMaskPrecision");
+
+            // FUL-12 migration bridge: an OLD display.json has only BraceTipSeen — it must fold
+            // into bit 0 so a player who already read that tip never sees it again.
+            System.IO.File.WriteAllText(dispPath, "{\"BraceTipSeen\":true}");
+            Display.TipsSeen = 0; Display.BraceTipSeen = false;
+            Display.LoadForTest();
+            if (!Display.TipSeen(0) || !Display.BraceTipSeen) fails.Add("legacyBraceMigration");
+            // ...and a file with neither field leaves everything unseen
+            System.IO.File.WriteAllText(dispPath, "{}");
+            Display.TipsSeen = 0x7f; Display.TrainingSeen = true; Display.ShowAllVerbs = true;
+            Display.LoadForTest();
+            if (Display.TipsSeen != 0 || Display.TrainingSeen || Display.ShowAllVerbs) fails.Add("emptyProfileDefaults");
+        }
+        catch (Exception ex) { fails.Add("persistThrew:" + ex.GetType().Name); }
+        finally
+        {
+            Display.TipsSeen = savedTips; Display.TrainingSeen = savedTrain;
+            Display.ShowAllVerbs = savedShow; Display.BraceTipSeen = savedBrace; Display.TutorialSeen = savedTut;
+            try
+            {
+                if (hadDisp) System.IO.File.WriteAllText(dispPath, dispStash);
+                else if (System.IO.File.Exists(dispPath)) System.IO.File.Delete(dispPath);
+            }
+            catch { }
+        }
+
+        // The drill's NO-WRITE contract: a LIVE (persisting) training op must not create or touch
+        // save.json or meta.json. Snapshot both, run a full drill to a win, compare.
+        {
+            string sp = SaveGame.SavePathPublic, mp = SaveGame.MetaPathPublic;
+            bool hadSave = System.IO.File.Exists(sp), hadMeta = System.IO.File.Exists(mp);
+            string saveBefore = hadSave ? System.IO.File.ReadAllText(sp) : null;
+            string metaBefore = hadMeta ? System.IO.File.ReadAllText(mp) : null;
+            bool trainBefore = Display.TrainingSeen;
+            var lg = new Game();                 // NoPersist deliberately FALSE — the live path
+            lg.BeginTraining();
+            foreach (var e in lg.Enemies) { e.Hp = 0; e.Alive = false; }
+            lg.DebugCheckEnd();
+            if (lg.Phase != Phase.Win) fails.Add("drillWinNotDetected");
+            bool hadSaveAfter = System.IO.File.Exists(sp), hadMetaAfter = System.IO.File.Exists(mp);
+            if (hadSave != hadSaveAfter) fails.Add("drillTouchedSaveExistence");
+            if (hadMeta != hadMetaAfter) fails.Add("drillTouchedMetaExistence");
+            if (hadSave && hadSaveAfter && System.IO.File.ReadAllText(sp) != saveBefore) fails.Add("drillWroteSave");
+            if (hadMeta && hadMetaAfter && System.IO.File.ReadAllText(mp) != metaBefore) fails.Add("drillWroteMeta");
+            if (!Display.TrainingSeen) fails.Add("drillDidNotMarkSeen");   // the ONE flag it may set
+            // restore the profile flag + its file exactly as we found it
+            if (!trainBefore)
+            {
+                Display.TrainingSeen = false;
+                try
+                {
+                    if (hadDisp) System.IO.File.WriteAllText(dispPath, dispStash);
+                    else if (System.IO.File.Exists(dispPath)) System.IO.File.Delete(dispPath);
+                }
+                catch { }
+            }
+        }
+
+        return fails.Count == 0
+            ? $"TUTTEST: PASS (drill arena+build, {TrainLessons.Length} lesson triggers reachable/once/patience, "
+              + $"staging monotonic+capped+escapable, {FieldTips.Length} field tips reachable+unique, "
+              + "seen-flag round-trip + BraceTipSeen migration, drill writes no save/meta)"
+            : "TUTTEST: FAIL (" + string.Join(",", fails.Distinct()) + ")";
+    }
+
+    /// TUTTEST seams: set one of the verb-performed lesson flags / the turn counter / force an end
+    /// check, without reaching into private state from the test body. Harness-only.
+    public void DebugSetTutFlag(string which)
+    {
+        switch (which)
+        {
+            case "move": _tutMoved = true; break;
+            case "shot": _tutShot = true; break;
+            case "over": _tutOver = true; break;
+            case "grenade": _tutGrenade = true; break;
+            case "ability": _tutAbility = true; break;
+        }
+    }
+    public void DebugSetTurn(int t) => _turnCount = t;
+    public void DebugCheckEnd() => CheckEnd();
 
 }

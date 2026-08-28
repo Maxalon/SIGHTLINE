@@ -85,6 +85,7 @@ content to the right home:
 | **`docs/DEVLOG.md`** | Curated process log | Per-program/sprint goals, who did what, review/QA outcomes, measured balance, gotchas. **Session write-ups go here, not CLAUDE.md.** |
 | **`docs/DEVLOG-ARCHIVE.md`** | Raw migrated WIP notes | The old CLAUDE.md WIP-NOTES blob, kept verbatim for provenance. Append here only if a note doesn't fit the curated DEVLOG. |
 | **`docs/AUDIT-2026.md`** | Standing audit | The independent-auditor findings that drive balance priorities. |
+| **`docs/DISTRIBUTION.md`** | Shipping contract | How to publish, the measured publish matrix, the `PublishTrimmed` hazard, third-party licence status, the open root-LICENSE decision, and where player data lives. |
 
 **Rule of thumb:** if it's *what to do next* → ROADMAP; *why the game is this way* →
 DESIGN; *what happened in a session* → DEVLOG; *what exists* → FEATURES. CLAUDE.md
@@ -127,17 +128,57 @@ SIGHTLINE_AUTOPLAY=1 xvfb-run -a -s "-screen 0 1280x800x24" dotnet run -c Debug
 SIGHTLINE_MISSION=2 SIGHTLINE_SHOT=80 xvfb-run -a -s "-screen 0 1280x800x24" dotnet run -c Debug
 ```
 
+**Harness isolation (house procedure — export these in EVERY shell).** The persistence
+self-tests stash-and-restore the real user-data dir and `SIGHTLINE_BALANCE` writes a
+shared `/tmp/balance.json`, so parallel agents corrupt each other's runs without it:
+
+```bash
+mkdir -p "$PWD/.xdg"                       # must EXIST: an absent dir makes GetFolderPath
+export XDG_CONFIG_HOME="$PWD/.xdg"         # return "" and saves land in a relative ./Sightline
+export SIGHTLINE_BALANCE_JSON="$PWD/balance.json"
+```
+
 Run autoplay a few times (RNG varies); confirm **no exceptions and no TIMEOUT**. The
-autopilot is a weak smoke-test AI and LOSES most seeds — that's expected; the contract
-is "no exceptions, no TIMEOUT", not a win. `sightline_shot.png` is gitignored;
+contract is "no exceptions, no TIMEOUT" — *not* a win, and not a loss either. Measured over
+15 Debug autoplays (F1): 3 WIN / 12 LOSE, finale reached on 5, earliest death mission 1,
+zero TIMEOUTs. **A WIN is normal, not suspicious.** `sightline_shot.png` is gitignored;
 `docs/screenshot.png` (README image) is committed.
 
 **Self-tests & measurement:** many features ship a window-free `SIGHTLINE_*TEST` hook
-(e.g. `COMBATTEST`, `SAVETEST`, `AITEST`, `ITEMTEST`) that prints `PASS/FAIL`, and there
+(e.g. `COMBATTEST`, `SAVETEST`, `AITEST`, `ITEMTEST`, `STACKTEST`) that prints `PASS/FAIL`, and there
 are `SIGHTLINE_*` screenshot hooks per feature. The `SIGHTLINE_BALANCE=<N>` flywheel runs
 N headless campaigns and reports win-rate/decision-richness/policy-gap. A fuller (but
 non-exhaustive) list of hooks is scattered through `docs/DEVLOG.md`; grep `Program.cs`
 for `SIGHTLINE_` for the authoritative set.
+**Reference timings** (this container; the whole suite is `bash scripts/qa-sweep.sh --full`,
+~2 min 40 s, which is the mode to run before merging):
+
+| | |
+|---|---|
+| `dotnet build -c Release`, no-op | 1.5 s (≈12 s after touching one source file) |
+| one self-test, Release binary directly | 0.1–0.4 s |
+| one self-test via `xvfb-run dotnet run -c Debug` | 1–2 s |
+| `SIGHTLINE_PAIRTEST=1` | 38 s |
+| `SIGHTLINE_AUTOPLAY=1` (Debug) | ~22 s |
+| `SIGHTLINE_BALANCE=10` (Release binary, **under xvfb**) | 311 s (~31 s/slot) |
+
+**Free keys** (nothing is bound to them — check here before adding a shortcut):
+**`I J N O P Q U V Z`**. Bound today: `A B C D E F G H K L M R S T W X Y`, `1`–`9`, the
+arrows, Tab/Space/Enter/Escape/Backspace/F2/Kp+/Kp−.
+
+**Distribution** (publishing a build, the licence position, where saves live, and the
+`PublishTrimmed` hazard): [`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md) +
+`bash scripts/publish.sh`.
+
+**Self-tests & measurement:** 41 features ship a window-free `SIGHTLINE_*TEST` hook
+(e.g. `COMBATTEST`, `SAVETEST`, `AITEST`, `ITEMTEST`) that prints `PASS/FAIL`, and there
+are `SIGHTLINE_*` screenshot hooks per feature. `bash scripts/qa-sweep.sh --full` runs all
+41 plus autoplay ×3 and is the pre-merge gate; without `--full` it skips the 38 s PAIRTEST.
+The `SIGHTLINE_BALANCE=<N>` flywheel runs N headless campaigns and reports
+win-rate/decision-richness/policy-gap — **it needs a display**, so run it under `xvfb-run`;
+without one it silently reports `runs=0`. A fuller (but non-exhaustive) list of hooks is
+scattered through `docs/DEVLOG.md`; grep `Program.cs` for `SIGHTLINE_` for the
+authoritative set.
 
 ---
 
@@ -171,6 +212,9 @@ src/
   Display.cs    render-target, post-FX shader, brightness/colorblind, settings
   Stats.cs      SIGHTLINE_BALANCE analytics harness
 scripts/dev-setup.sh   sandbox setup
+scripts/qa-sweep.sh    all 41 self-tests + autoplay x3 (--full adds PAIRTEST)
+scripts/publish.sh     hand-run distributable build + persistence re-proof
+THIRD-PARTY-NOTICES.txt  raylib/Raylib-cs (Zlib) + .NET (MIT); copied to build output
 docs/screenshot.png    README image
 ```
 
@@ -199,9 +243,13 @@ docs/screenshot.png    README image
   corner → flank). High ground negates the target's LOW cover. Verified by
   `SIGHTLINE_COMBATTEST`.
 - Each `WeaponKind` has its own `RangeMod` curve + `MaxRange` + clip + crit base.
-- **Six persisted-by-ordinal enums** (Objective/WeaponKind/Perk/WeaponMod/Trait/Boon/
-  Faction and friends) are **APPEND-ONLY** — a reorder/removal corrupts saves and fails
-  `SIGHTLINE_SAVETEST`. Add new values at the end only.
+- **Thirteen persisted-by-ordinal enums** (Objective, WeaponKind, Perk, WeaponMod, Trait,
+  Boon, SecondaryKind, Faction, Spec, Scar, Contract, MetaUnlock, RewardKind) are
+  **APPEND-ONLY** — the ordinal IS the save format. `SIGHTLINE_SAVETEST` pins each one with
+  a golden fingerprint over its full ordinal→name mapping (`SaveGame.PersistedEnums`), so a
+  reorder, removal, rename **or mid-enum insertion** fails loudly. **To add a member:**
+  append it at the END, run SAVETEST, paste the "actual" hash it prints into
+  `PersistedEnums`. Anything other than an append is a save-format break.
 
 ---
 
@@ -218,71 +266,61 @@ docs/screenshot.png    README image
   drawn outside the camera.
 - `DrawPoly`/`DrawPolyLinesEx` are safe for glyphs (winding handled internally); be careful
   with raw `DrawTriangle` winding.
+- **Text goes through `Cfg.Text` / `Cfg.Measure`, never `Raylib.DrawTextEx` directly.** Two
+  NotoMono atlases are baked (20px for sizes ≤ `Cfg.UiFontMax` = 18, 64px above); `Cfg.FontFor`
+  picks. Titles ≥24px use the Chakra Petch display face via `Cfg.TitleText`/`Cfg.TitleMeasure`;
+  numerals/data stay on NotoMono. **12px is the small-text floor.** When a call site *measures*
+  through `Clip`/`WrapText`/`WrapLines`/`CenterText` and *draws* separately, the two sizes must
+  match or the text wraps at one size and paints at another.
+- **Bundled assets resolve via `Cfg.AssetPath(rel)`** (`AppContext.BaseDirectory`, cwd fallback),
+  never a bare relative path — a binary launched from another directory otherwise silently loses
+  the font. Never publish with `-p:PublishTrimmed=true`: it destroys save/load while the game
+  still boots.
 - **Headless byte-stability:** the screenshot harness keeps `Display` (post-FX) OFF and
   never touches disk/meta (gated by `NoPersist`), so shots stay byte-identical and the
   balance flywheel is reproducible. Keep new persistent/random/post-FX work behind those
   gates.
+- **Headless determinism — what is actually guaranteed.** The harness keeps `Display`
+  (post-FX) OFF and never touches disk/meta (gated by `NoPersist`), and the flywheel
+  reseeds explicitly (`Util.Reseed(50000+slot)`), so **paired measurement** is
+  reproducible. **Screenshots are NOT byte-identical** and never were: two
+  `SIGHTLINE_SHOT=90` runs measurably differ in ~30% of pixels (measured 303,065 of
+  1,024,000 px), because 58 `Raylib.GetTime()` wall-clock reads drive animation
+  (46 in `Renderer.cs`, 12 in `Hud.cs`) and `Util.Rng` is clock-seeded by default. Never
+  gate anything on a screenshot hash — **`SIGHTLINE_PAIRTEST` byte-identity is the real
+  determinism gate**. Keep new persistent/random/post-FX work behind the `NoPersist`/
+  Display gates so that stays true.
 
 ---
 
 ## Current state (short)
 
-Playable, feature-complete vertical slice; builds clean (0 warn / 0 err), autoplay-verified
-across seeds. Four game modes (DEPLOY campaign / LAST STAND endless / SKIRMISH / DAILY), a
-cross-run meta profile (WAR ROOM) that now carries a **persistent VETERAN reserve** (promoted
-survivors are recruitable in future runs), a deep per-run loop (perks, specs, traits, scars,
-boons, contracts, branching campaign map, field events), a broad enemy/objective/arena roster
-(35 authored arenas), reactive verbs incl. **focused (cone) overwatch** and the **BRACE interrupt**
-(a disrupting reaction that staggers a foe — denies its action for tempo, the comeback lever),
-**enemy pod morale/rout** (kill a pod down and the survivors break), distinct **per-biome
-visual identity** with a **lit board-space depth** pass, and a full juice/audio/post-FX presentation
-layer. `Game.cs` is sliced into `Game.Autopilot.cs` + `Game.Harness.cs` (+ the older Endless/Meta/
-Modes/Codex slices). PROGRAM UNDERTOW (7 waves) added the interrupt+morale comeback economy, sequenced
-enemy coordination, an Evac forward-beacon de-drag, and the board-depth pass — flywheel-validated
-(lead-swings 0.48→0.59, the +29 punish-gap collapsed, Evac drag 10.9→7.8t). PROGRAM APEX (10 waves)
-made the TOP END real: the heat 7-8 zero-roster crash fixed (first measured heat-8 completion ~25%),
-LAST STAND turned into a tuned ladder (opener grace, mid-stand promotions/boons, a real ending; depth
-median 3→5-6), the AI plays better at the apex instead of aiming better (commanding-LoS truthfulness,
-data-driven `Ai.Tier` at rungs 6+, NO QUARTER +1 dmg), the four setup-verb archetypes reachable in
-faction fights, Escort de-dragged 12.9-15.8t → 5.8t (real-anims leash + hard-gated forward beacon),
-atomic saves with corrupt-file recovery, a flywheel that spans heats {0,2,4,6,8} + endless + veteran
-pricing, and an owner-feedback UI readability pass (wrapping action bar — no ellipsis ever — banded
-odds colors, true gamma, three-zone top bar). PROGRAM SIGNAL (12 waves planned, 11 shipped across
-two milestones) hardened the seams and made the strategic layer earn its place: mode-seam integrity
-(ResetModeState at all five entries, mode-aware abandon), a rebuilt measurement compass (CRN-paired
-policy legs, per-perk/purchase/arena telemetry, DoT attribution), board reads (biome-true plateaus,
-visible focus cone, status pills, role rings), Rescue repaired (soft-lock closed; 9.0t/67% →
-6.07t/98.3% h0), faction boss identity + three finale kits (m6 96% → 82%), a fresh-baselined heat
-ladder with a rung-4 coordination tooth (80/70/50/32.5/17.5 vs goal 80/70/60/40/20 ±8), morale made
-visible and contested (WAVERING telegraph, WARBRINGER anchor, CUSTODIAN re-locker), a standing
-salvage economy (priced veteran recall 10+8×rank, quit-safe barracks sinks, daily payouts), a verb
-pool expansion (6 boons, BIPOD/SUPPRESSOR, 3 secondaries, INTEL CACHE), in-mission teaching (FIELD
-CRAFT codex, enemy-ID tooltips, honest loss cards), and a strategic-layer facelift (sized-to-fit
-campaign map, class glyphs, coherent intro, first-run RECOMMENDED draft). W7 exposure plumbing was
-caught as a docs over-claim at landing and carried forward as an open, ready-to-dev spec — which
-PROGRAM FULCRUM then built as FUL-9. FULCRUM (13 waves, CLOSED 2026-08-28) made the systems that
-existed actually REACH play, then made the published numbers true: seam/chrome integrity, a compass
-that prices verbs/procs/events with per-slot CRN pair records, Defend repaired + telegraphed, the
-EV bot learned BRACE/ITEM/PATCH/DRAG (the verb layer stopped being balance-blind), pods of 3 +
-linked activation, lethal damage became a 3-turn bleed-out with STABILIZE/revive (true-KIA −40%),
-the SARISSA/PIKEMAN contests movement, every route now deals Defend-or-Rescue + <=1 Escort off a
-no-repeat arena deck, seven trade-off events + two veteran contracts, a finale ceremony + Wardens
-retinue, and in-game signposting. FUL-13 TRUE NORTH closed it: definitive proper-N ladder
-**52.5/35/30/22.5/10** vs a RE-SET goal band **55/40/30/20/10 ±8** (h8 ±5; the old 80/70/60/40/20
-predates the exposure repair — reasoning in DEVLOG §FUL-13), Defend's top-rung inversion fixed
-(heat-blind waves + the flat trim eating heat's bodies; pinned h8 96→87 = h0 parity, h6 residual
-recorded), the LOS policy-gap thread closed at N=100 pairs (gap zero — forgiving-by-design
-accepted), intel flood resolved no-drain (the kicker converts to shop spend, the slope survives),
-event EV pricing + the informant dead-buy gate, endless median 6 (band top edge).
+> **Keep this section SHORT.** It is a pointer for a fresh session, not a changelog.
+> Per-program detail belongs in `docs/DEVLOG.md`; what exists belongs in `docs/FEATURES.md`.
+> (It had grown to ~40 lines of accreted program summaries again; RESONANCE cut it back.)
 
-**The exhaustive feature list is in [`docs/FEATURES.md`](docs/FEATURES.md).** The build
-history and open/next backlog are in [`docs/ROADMAP.md`](docs/ROADMAP.md) (§OPEN/NEXT
-post-FULCRUM) and docs/DEVLOG.md §FUL-13. Recurring open threads: the owner-decision docket
-(skirmish numeric heat / founding corpsman / grenade pre-frag — recommendations written in
-DEVLOG §FUL-13), the h6 Defend residual, Escort at the apex, event-exposure levers, and
-on-device audio tuning (needs the human).
+Playable and feature-complete: four modes (campaign / endless / skirmish / daily), a cross-run
+meta profile, a deep per-run loop, 8 objectives, ~21 enemy archetypes, 35 arenas, and a full
+juice/audio/post-FX layer. Builds 0 warn / 0 err; `bash scripts/qa-sweep.sh --full` runs all
+self-tests and must be green; autoplay must never TIMEOUT or throw.
 
----
+Nine autonomous programs (through **FULCRUM**, closed 2026-08-28) built and balance-tuned the
+game. The reference heat ladder and goal band of record are in `docs/DEVLOG.md` §FUL-13.
+
+**PROGRAM RESONANCE** (current) is the tenth. Its thesis: the game had been tuned far past the
+point where anyone verified how it actually *lands*. It found and fixed several things nine
+win-rate-driven programs could not see — the audio had never been heard by anyone (a one-line
+filter bug meant every weapon was raw white noise), the board's biome identity was erased by a
+move overlay that flooded it, only 3 of ~14 verbs were ever taught, the displayed hit% was not
+the hit probability, a pod scatter bug stacked units on one tile so the buried one could not be
+clicked, and a published build launched from the wrong directory silently lost its font. Detail
+in `docs/DEVLOG.md` §RESONANCE; open work in `docs/ROADMAP.md`.
+
+**Three doc over-claims were found and corrected** — they are the reason this project needs the
+"no over-claims" rule enforced hard: juice was graded "Strong" partly on audio nobody had heard;
+onboarding was graded "Addressed" when 12 of 14 verbs were untaught; and a published
+`meaningful-choices/turn = 6.15` measured **2.25** on a fresh batch. **Do not cite a number you
+have not just re-measured.**
 
 ## Handoff protocol (when context gets heavy)
 You judge when context rot risks quality (don't wait for the 1M hard limit). Before stopping:

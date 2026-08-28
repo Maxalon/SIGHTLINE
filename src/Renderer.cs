@@ -37,6 +37,44 @@ public static class Renderer
         return Math.Clamp(lit, -0.55f, 1f);
     }
 
+    // RESONANCE V1 — CAST SHADOWS FROM THE KEY LIGHT.
+    // FloorLight above declares a key light at board-fraction LightOrigin, but until now nothing
+    // actually cast from it: cover used a fixed (+3,+4) offset "drop shadow" in every direction,
+    // which is an emboss, not a shadow — blocks on the far side of the light threw their shadow
+    // back TOWARD it. This returns the on-screen direction a shadow should fall for the tile at
+    // (x,y): away from LightOrigin, with a downward bias so a block standing at the light's own
+    // foot still drops a short shadow underneath itself (the key is elevated, not on the deck).
+    // Pure function of tile coords + frozen constants -> byte-stable under SIGHTLINE_SHOT.
+    static Vector2 ShadowVec(Game g, int x, int y, float len)
+    {
+        float fx = g.Grid.W > 1 ? x / (float)(g.Grid.W - 1) : 0.5f;
+        float fy = g.Grid.H > 1 ? y / (float)(g.Grid.H - 1) : 0.5f;
+        float dx = fx - LightOrigin.X, dy = fy - LightOrigin.Y;
+        float dist = MathF.Sqrt(dx * dx + dy * dy);            // 0 at the light .. ~1.15 far corner
+        dy += 0.34f;                                            // elevated key: always some drop
+        float m = MathF.Sqrt(dx * dx + dy * dy);
+        if (m < 1e-4f) { dx = 0f; dy = 1f; m = 1f; }
+        // shadows lengthen with distance from the light (grazing angle), clamped so the far
+        // corner never smears into a slick.
+        float scale = Util.Clamp(0.42f + dist * 0.85f, 0.42f, 1.30f);
+        return new Vector2(dx / m * len * scale, dy / m * len * scale);
+    }
+
+    // Soft cast shadow: sweep `rect` from its own position out along `off` in a few overlapping
+    // steps, so the pool is darkest at the contact point and feathers to nothing at the tip.
+    // Cheap (steps+1 rounded rects), deterministic, and it reads as ONE shadow rather than a
+    // duplicate silhouette.
+    static void CastShadow(Rectangle rect, Vector2 off, float strength, int steps = 5)
+    {
+        float per = strength / steps;
+        for (int i = steps; i >= 1; i--)
+        {
+            float t = i / (float)steps;
+            var r = new Rectangle(rect.X + off.X * t, rect.Y + off.Y * t, rect.Width, rect.Height);
+            Raylib.DrawRectangleRounded(r, 0.55f, 5, Raylib.Fade(Pal.RGBA(0, 0, 0), per));
+        }
+    }
+
     // Apply a key-light factor (from FloorLight) to a surface colour: lift toward white on the
     // lit side, sink toward near-black in shadow. Moves VALUE only (colorblind-safe). `amt` caps
     // how far the light can push so terrain stays QUIET relative to units.
@@ -327,9 +365,19 @@ public static class Renderer
         // W6: Tint pull 0.22 -> 0.40 (the marquee lever — biomes now diverge in hue at a glance);
         // checker retention 0.32 -> 0.40 so the strengthened FloorA/FloorB pair still reads as a
         // checker after the tint. Mean stays dark enough that units/objectives keep the hierarchy.
+        // RESONANCE V2 RE-GRADE — the 0.16 pull toward near-black was one of four independent
+        // "tune it down to protect the units" decisions whose SUM was a flat dark plate. Cut to
+        // 0.06 and give the mean a +10 VALUE lift: the room now has a mid-tone for the widened
+        // key light to model, instead of a floor already pinned near the bottom of the range.
         Color floorMean = Pal.Mix(bm.FloorA, bm.FloorB, 0.5f);
-        floorMean = Pal.Mix(floorMean, Pal.RGBA(6, 9, 13), 0.16f);       // slightly darker base
-        floorMean = Pal.Mix(floorMean, bm.Tint, 0.40f);                  // LAND the biome hue (marquee)
+        floorMean = Pal.Mix(floorMean, Pal.RGBA(6, 9, 13), 0.06f);
+        // The lift is split between a STRONGER biome-tint pull (0.40 -> 0.50) and a small flat
+        // value lift, not all flat: Lift() adds the same amount to R/G/B, which raises value but
+        // DESATURATES, and the biome hue in the floor is a marquee lever V1/W6 paid for. Pulling
+        // harder toward the (brighter, saturated) biome Tint buys most of the value back while
+        // keeping the room coloured; measured board saturation lands within ~2% of the original.
+        floorMean = Pal.Mix(floorMean, bm.Tint, 0.50f);                  // LAND the biome hue (marquee)
+        floorMean = Lift(floorMean, 7);
         Color fa = Pal.Mix(floorMean, bm.FloorA, 0.40f);                 // keep a readable checker
         Color fb = Pal.Mix(floorMean, bm.FloorB, 0.40f);
         // UNDERTOW W7 — bake the board key light into the floor value so the room reads as a
@@ -338,18 +386,29 @@ public static class Renderer
         // (STEEL cool / ARID warm / …) intact — the light only reshapes VALUE across the board.
         Color litCol = Pal.Mix(Pal.RGBA(255, 250, 236), bm.Tint, 0.30f); // warm key, tinted toward biome
         Color shadeCol = Pal.Mix(Pal.RGBA(4, 6, 10), bm.Tint, 0.18f);    // cool deep, tinted toward biome
+        // RESONANCE V1 — the floor is a CONTINUOUS ground plane. This loop used to skip every
+        // non-floor tile, so under each of the ~45 cover blocks sat bare board backing
+        // (RGBA 7,10,14); with the block inset 5px that left a hard-black gutter ringing every
+        // block on every map. That single `continue` is why the board read as stickers punched
+        // into a grid rather than objects standing in a room. Paint the ground everywhere;
+        // cover and plateaus then sit ON it.
         for (int x = 0; x < g.Grid.W; x++)
             for (int y = 0; y < g.Grid.H; y++)
             {
-                if (g.Grid.Tiles[x, y] != TileType.Floor) continue;
                 var r = Util.TileRect(x, y);
                 Color baseCol = ((x + y) & 1) == 0 ? fa : fb;
                 float lit = FloorLight(g, x, y);
                 // positive light -> lift toward the warm key (capped so the floor never rivals
                 // units); negative -> sink toward the cool deep so far corners genuinely recede.
+                // RESONANCE V2 RE-GRADE — the key light's throw was 0.16 up / 0.34 down, which
+                // (stacked with a deliberately darkened floor mean, a receded cover pass and a
+                // +30 plateau) put 95% of board pixels in the bottom 40% of the value range:
+                // measured median ~75, p95 ~95, no highlight tier and no deep shadow — the
+                // textbook definition of muddy. Widened to 0.26 up / 0.45 down so the room has a
+                // lit side and a dark side. VALUE only, so it survives Pal.SetColorblind.
                 Color lc = lit >= 0f
-                    ? Pal.Mix(baseCol, litCol, lit * 0.16f)
-                    : Pal.Mix(baseCol, shadeCol, -lit * 0.34f);
+                    ? Pal.Mix(baseCol, litCol, lit * 0.32f)
+                    : Pal.Mix(baseCol, shadeCol, -lit * 0.45f);
                 Raylib.DrawRectangleRec(r, lc);
             }
 
@@ -358,16 +417,24 @@ public static class Renderer
         if (_noiseReady)
             for (int x = 0; x < g.Grid.W; x++)
                 for (int y = 0; y < g.Grid.H; y++)
-                {
-                    if (g.Grid.Tiles[x, y] != TileType.Floor) continue;
+                    // V1: grain the WHOLE plane (see the floor loop above) so the ring of ground
+                    // visible around each cover block is the same material as the open floor.
                     DrawNoiseRect(Util.TileRect(x, y), bm.Tint, 0.13f);
-                }
 
         // HORIZON W5: one BOLD structural signature per biome so a mission reads as a distinct
         // *place*, not just a colour tint (magma fissures / frost sheen / void-neon grid glow /
         // ash soot / arid dune banding / verdant speckle / steel seams). Deterministic (a pure
         // function of tile coords + frozen constants — no RNG), on the floor under terrain/units.
         DrawBiomeSignature(g, bm);
+
+        // RESONANCE V2 — per-biome AMBIENT-OCCLUSION VIGNETTE on the board rect. The third leg of
+        // the re-grade (with the widened key light and the raised plateau/cover tops): the room
+        // needs a deep-shadow tier, and the cheapest honest one is the ground falling off into
+        // the corners of the space. Drawn UNDER terrain and units, so it darkens the FLOOR — the
+        // majority of board pixels, which is what the median measures — and never dims a soldier
+        // standing at the board edge. Tinted toward the biome so the shadow is that room's
+        // shadow. Deterministic: a fixed ramp, no clock, no allocation.
+        DrawBoardVignette(bm);
 
         g.Fx.DrawAmbient();   // per-biome ambient atmosphere, under terrain/units (Wave B)
 
@@ -411,6 +478,25 @@ public static class Renderer
         g.Fx.DrawText();
     }
 
+    // Inward AO ramp on the board rect: VignetteDepth 1px rings, alpha falling off quadratically
+    // from the edge, in the biome-tinted deep. Square rings (DrawRectangleRoundedLines is
+    // version-volatile per CLAUDE.md; the board backing is only 0.02-rounded anyway).
+    const int VignetteDepth = 88;
+    static void DrawBoardVignette(Biome bm)
+    {
+        Color deep = Pal.Mix(Pal.RGBA(0, 0, 0), bm.Tint, 0.22f);
+        for (int i = 0; i < VignetteDepth; i++)
+        {
+            float t = 1f - i / (float)VignetteDepth;      // 1 at the edge -> 0 inward
+            float a = 0.22f * t * t * t;                  // cubic: hugs the rim, clears the middle
+            if (a < 0.004f) continue;
+            Raylib.DrawRectangleLinesEx(
+                new Rectangle(Cfg.OriginX + i, Cfg.OriginY + i,
+                              Cfg.BoardW - i * 2, Cfg.BoardH - i * 2),
+                1f, Raylib.Fade(deep, a));
+        }
+    }
+
     // Raised plateaus: faux-3D platform with a front wall + lit top edge so the
     // high ground reads clearly. Drawn back-to-front (top rows first).
     static void DrawElevation(Game g)
@@ -431,8 +517,13 @@ public static class Renderer
         Color fmean = Pal.Mix(bm.FloorA, bm.FloorB, 0.5f);
         fmean = Pal.Mix(fmean, Pal.RGBA(6, 9, 13), 0.16f);   // same low base as DrawBoard's floor
         fmean = Pal.Mix(fmean, tint, 0.58f);                 // stronger biome-hue pull than the floor
-        Color hiA = Lift(Pal.Mix(fmean, bm.FloorA, 0.30f), 30);
-        Color hiB = Lift(Pal.Mix(fmean, bm.FloorB, 0.30f), 30);
+        // RESONANCE V2 — PART C, elevation legibility. High ground is one of the three or four
+        // load-bearing tactical facts in this game and it was reading as a ~10-luma bump: a +30
+        // lift, against a floor the key light was already pushing +/-, is inside the noise. The
+        // lift is now +64, which puts a plateau top a clear step above ANY floor tile in the same
+        // room while still sitting far below the >180 band reserved for units/objectives/FX.
+        Color hiA = Lift(Pal.Mix(fmean, bm.FloorA, 0.30f), 64);
+        Color hiB = Lift(Pal.Mix(fmean, bm.FloorB, 0.30f), 64);
         // per-biome warm key endpoint (matches DrawBoard's litCol) so the key light warms plateau
         // tops toward the biome hue the same way it warms the floor — not a universal white.
         Color litCol = Pal.Mix(Pal.RGBA(255, 250, 236), tint, 0.30f);
@@ -446,9 +537,21 @@ public static class Renderer
                 // exposed front wall down to whatever the tile below sits at (taller for tier 2)
                 int belowH = g.Grid.HeightAt(x, y + 1);
                 if (belowH < h)
+                {
+                    // V1: the exposed wall used to be flat Pal.HighSide (14,19,26) — effectively
+                    // black. That was invisible while the board was full of black gutters, but on a
+                    // continuous lit floor it read as a hole punched in the ground. Give it the
+                    // biome hue and the key light, kept clearly darker than the top face so the
+                    // step still reads as a step.
+                    // V2: with the top face +55 the wall must fall the other way or the step
+                    // flattens again — take 12 off it and let the key light work harder (0.10 ->
+                    // 0.16). Wall dark / top light IS the elevation cue.
+                    Color sideCol = Lift(KeyLit(Pal.Mix(Pal.HighSide, Pal.Mix(fmean, tint, 0.35f), 0.42f),
+                                                FloorLight(g, x, y), 0.16f), -12);
                     Raylib.DrawRectangleRec(
                         new Rectangle(r.X, r.Y + r.Height - lift, r.Width, (h - belowH) * ElevLift + 3),
-                        Pal.HighSide);
+                        sideCol);
+                }
                 // raised top face — tier 2 reads a touch brighter so the height tier is legible
                 var top = new Rectangle(r.X, r.Y - lift, r.Width, r.Height);
                 Color ca = h >= 2 ? Pal.Mix(hiA, Pal.RGBA(255, 255, 255), 0.12f) : hiA;
@@ -458,37 +561,48 @@ public static class Renderer
                 // SIGNAL W3: the warm endpoint is the biome-tinted litCol (see above), not white.
                 float plit = FloorLight(g, x, y);
                 Color topBase = ((x + y) & 1) == 0 ? ca : cb;
+                // V2: the plateau top gets the same widened key throw as the floor (0.14 -> 0.22
+                // up / 0.26 down) so raised ground is modelled, not a flat plate.
                 Raylib.DrawRectangleRec(top, plit >= 0f
-                    ? Pal.Mix(topBase, litCol, plit * 0.14f)
-                    : Pal.Mix(topBase, Pal.RGBA(3, 5, 9), -plit * 0.14f));
-                // contact shadow at the base of the front wall — grounds the plateau
+                    ? Pal.Mix(topBase, litCol, plit * 0.22f)
+                    : Pal.Mix(topBase, Pal.RGBA(3, 5, 9), -plit * 0.26f));
+                // contact shadow at the base of the front wall — grounds the plateau. V1: the
+                // tight AO band stays (occlusion), and a real cast shadow now falls away from the
+                // board key light, scaled by how much wall is exposed.
                 if (belowH < h)
+                {
+                    float wallBase = r.Y + r.Height - lift + (h - belowH) * ElevLift;
+                    CastShadow(new Rectangle(r.X + 2, wallBase - 4, r.Width - 4, 10),
+                               ShadowVec(g, x, y, 6f + (h - belowH) * 7f), 0.26f, 4);
                     Raylib.DrawRectangleRec(
-                        new Rectangle(r.X + 2, r.Y + r.Height - lift + (h - belowH) * ElevLift + 2, r.Width - 4, 5),
+                        new Rectangle(r.X + 2, wallBase + 2, r.Width - 4, 5),
                         Raylib.Fade(Pal.RGBA(0, 0, 0), 0.28f));
+                }
                 // 5.4: noise grain on the plateau top so it reads as raised stone/metal
                 DrawNoiseRect(top, tint, 0.11f);
                 // lit front edge of the top face (base glow at alpha 0.50)
+                // V2: the front lip is the single line that says "this surface is above you" —
+                // raised 0.50 -> 0.72 and thickened, now that there is headroom in the grade.
                 Raylib.DrawLineEx(new Vector2(top.X, top.Y + top.Height - 1),
                                   new Vector2(top.X + top.Width, top.Y + top.Height - 1),
-                                  2f, Raylib.Fade(Pal.HighEdge, 0.5f));
+                                  2.4f, Raylib.Fade(Pal.HighEdge, 0.72f));
                 // emissive rim: a narrow bright inner accent — the 5.2 bloom will catch this on
                 // hardware. HORIZON W5: dimmed (was 0.55/0.40) so the front edge still reads the
                 // height tier but sits below the (lowered) bloom knee — cover/terrain never floods.
                 Raylib.DrawLineEx(new Vector2(top.X + 1, top.Y + top.Height - 2),
                                   new Vector2(top.X + top.Width - 1, top.Y + top.Height - 2),
-                                  1f, Raylib.Fade(Pal.RGBA(200, 230, 255), h >= 2 ? 0.34f : 0.24f));
+                                  1f, Raylib.Fade(Pal.RGBA(200, 230, 255), h >= 2 ? 0.46f : 0.34f));
                 // top-edge highlight where it meets a lower tile above
                 if (g.Grid.HeightAt(x, y - 1) < h)
                 {
                     Raylib.DrawLineEx(new Vector2(top.X, top.Y),
                                       new Vector2(top.X + top.Width, top.Y),
-                                      1.5f, Raylib.Fade(Pal.HighEdge, 0.35f));
+                                      1.5f, Raylib.Fade(Pal.HighEdge, 0.50f));
                     // emissive rim on the exposed top edge (1px inner) — HORIZON W5 dimmed
                     // (was 0.45/0.30) to keep terrain below the bloom knee.
                     Raylib.DrawLineEx(new Vector2(top.X + 1, top.Y + 1),
                                       new Vector2(top.X + top.Width - 1, top.Y + 1),
-                                      1f, Raylib.Fade(Pal.RGBA(200, 230, 255), h >= 2 ? 0.28f : 0.18f));
+                                      1f, Raylib.Fade(Pal.RGBA(200, 230, 255), h >= 2 ? 0.38f : 0.26f));
                 }
             }
     }
@@ -541,10 +655,10 @@ public static class Renderer
                 if (d < best) { best = d; lax = cx0; }
             }
             float lay = Cfg.OriginY + minY * Cfg.Tile + Cfg.Tile * 0.5f;
-            float tw = Raylib.MeasureTextEx(Cfg.Font, "EVAC", 14, 1f).X;
+            float tw = Cfg.Measure("EVAC", 14, 1f).X;
             Raylib.DrawRectangleRounded(new Rectangle(lax - tw / 2f - 8f, lay - 11f, tw + 16f, 22f),
                                         0.5f, 8, Pal.RGBA(9, 13, 18, 210));
-            Raylib.DrawTextEx(Cfg.Font, "EVAC", new Vector2((int)(lax - tw / 2f), (int)(lay - 7f)), 14, 1f, Pal.Good);
+            Cfg.Text("EVAC", new Vector2((int)(lax - tw / 2f), (int)(lay - 7f)), 14, 1f, Pal.Good);
         }
 
         // Forward BEACON marker: a raised mast + pulsing broadcast rings on its centre tile, so the
@@ -562,7 +676,7 @@ public static class Renderer
             // the mast + emitter
             Raylib.DrawLineEx(new Vector2(bc.X, bc.Y + 8f), new Vector2(bc.X, bc.Y - 10f), 2.4f, Pal.Good);
             Raylib.DrawCircleV(new Vector2(bc.X, bc.Y - 11f), 3f + 1.5f * bp, Raylib.Fade(Pal.Good, 0.6f + 0.4f * bp));
-            Raylib.DrawTextEx(Cfg.Font, "BEACON", new Vector2((int)bc.X - 20, (int)(bc.Y + Cfg.Tile / 2 - 6)), 12, 1f, Pal.Good);
+            Cfg.Text("BEACON", new Vector2((int)bc.X - 20, (int)(bc.Y + Cfg.Tile / 2 - 6)), 12, 1f, Pal.Good);
         }
     }
 
@@ -599,7 +713,7 @@ public static class Renderer
 
         // FUL-3: a row-0 marker label would sit under the top bar — flip it below the tile.
         float tly = r.Y - 13 < 30 ? r.Y + r.Height + 2 : r.Y - 13;
-        Raylib.DrawTextEx(Cfg.Font, "TERMINAL", new Vector2((int)c.X - 26, (int)tly), 11, 1f, col);
+        Cfg.Text("TERMINAL", new Vector2((int)c.X - 26, (int)tly), 11, 1f, col);
     }
 
     // SABOTAGE charge sites: a blinking demolition console per site; armed once planted.
@@ -630,7 +744,7 @@ public static class Renderer
 
             // FUL-3: a row-0 marker label would sit under the top bar — flip it below the tile.
             float cly = r.Y - 13 < 30 ? r.Y + r.Height + 2 : r.Y - 13;
-            Raylib.DrawTextEx(Cfg.Font, blown ? "ARMED" : "CHARGE", new Vector2((int)c.X - 18, (int)cly), 10, 1f, col);
+            Cfg.Text(blown ? "ARMED" : "CHARGE", new Vector2((int)c.X - 18, (int)cly), 10, 1f, col);
         }
     }
 
@@ -662,10 +776,10 @@ public static class Renderer
         // FUL-3: a row-0 label would sit under the top bar — flip it below the tile (the turns
         // clock steps down with it). Placement now avoids row 0, but stay robust to old saves.
         bool flip = r.Y - 13 < 30;
-        Raylib.DrawTextEx(Cfg.Font, "INTEL", new Vector2((int)c.X - 15, (int)(flip ? r.Y + r.Height + 2 : r.Y - 13)), 11, 1f, col);
+        Cfg.Text("INTEL", new Vector2((int)c.X - 15, (int)(flip ? r.Y + r.Height + 2 : r.Y - 13)), 11, 1f, col);
         string tt = $"{g.CacheTurnsLeft}T";
-        float tw = Raylib.MeasureTextEx(Cfg.Font, tt, 10, 1f).X;
-        Raylib.DrawTextEx(Cfg.Font, tt, new Vector2((int)(c.X - tw / 2), (int)(r.Y + r.Height + (flip ? 15 : 1))), 10, 1f,
+        float tw = Cfg.Measure(tt, 10, 1f).X;
+        Cfg.Text(tt, new Vector2((int)(c.X - tw / 2), (int)(r.Y + r.Height + (flip ? 15 : 1))), 10, 1f,
                           expiring ? Pal.Foe : Raylib.Fade(col, 0.8f));
     }
 
@@ -701,46 +815,241 @@ public static class Renderer
                               1f, gl);
     }
 
+    // ── RESONANCE V2 — MOVE RANGE AS A BOUNDARY ─────────────────────────────────────────
+    // This used to be one line: fill every reachable tile with MoveBlue (a=60) and every dash
+    // tile with MoveYellow (a=55). Cheap to write, and the single biggest visual problem on the
+    // board. Measured (chroma-weighted mean board hue, overlaid third vs clean third, 8 biomes):
+    // the fill dragged ASH 172 degrees, ARID 68 and MAGMA 29 off their own hue, and pushed the
+    // cool biomes to 75-79% cyan coverage. Every hour spent on biome identity was erased for the
+    // entire player turn, the friendly-reserved cool accent was smeared over half the room
+    // (DESIGN 3.H: one job per accent colour), and dash-yellow sat at almost exactly the hue AND
+    // value of a warm-biome plateau top — so in ASH/ARID you could not tell dash range from high
+    // ground. That last one is a TACTICAL failure, not a cosmetic one.
+    //
+    // Same information, a fraction of the ink:
+    //   1. a whisper-level inner LIFT (WHITE, a=15 walk / a=6 dash, was cyan/gold a=60/55) —
+    //      enough to say "this side of the line", not enough to repaint the room. White mixed
+    //      into a colour preserves its HUE exactly and only drops saturation, so the lift moves
+    //      VALUE only and the biome keeps its own colour (see the Pal.MoveWalkTint note);
+    //   2. a marching-squares OUTLINE around each region: a solid stroke on the walk boundary,
+    //      a DASHED stroke on the dash boundary. A dashed line can never be confused with a
+    //      plateau, which is a filled surface — the ASH/ARID ambiguity closes on SHAPE, so it
+    //      survives SIGHTLINE_CB and a greyscale squint (3.H: never hue alone);
+    //   3. a corner-tick lattice on walk tiles so per-tile granularity (how far is 4 tiles?)
+    //      survives the loss of the fill.
+    // Deterministic, no wall-clock reads, no per-frame allocation (the class buffer is reused).
+    //
+    // QA hook: SIGHTLINE_NOMOVE=1 suppresses the overlay entirely, so a capture pair can be
+    // measured against the bare room (ground-truth biome hue). Read once at static init.
+    static readonly bool NoMoveOverlay = Environment.GetEnvironmentVariable("SIGHTLINE_NOMOVE") == "1";
+
+    const byte MoveNone = 0, MoveWalk = 1, MoveDash = 2;
+    static byte[] _moveCls;      // reachability class per tile, reused frame to frame
+    static int _moveClsW, _moveClsH;
+
+    // A stroked line broken into dashes. Used for the DASH-range boundary so the two regions are
+    // distinguished by stroke STYLE (solid vs dashed), not only by hue.
+    static void DashLine(Vector2 a, Vector2 b, float thick, float on, float off, Color c)
+    {
+        Vector2 d = b - a;
+        float len = MathF.Sqrt(d.X * d.X + d.Y * d.Y);
+        if (len < 0.5f) return;
+        Vector2 u = new(d.X / len, d.Y / len);
+        for (float t = 0f; t < len; t += on + off)
+        {
+            float e = MathF.Min(t + on, len);
+            Raylib.DrawLineEx(a + u * t, a + u * e, thick, c);
+        }
+    }
+
     static void DrawMoveOverlay(Game g)
     {
+        if (NoMoveOverlay) return;
         if (g.Selected == null || !g.IsPlayerInteractive() || g.AimMode || g.GrenadeMode) return;
         if (g.Selected.Team != Team.Player || !g.Selected.CanAct) return;
         var cost = g.MoveCost;
         if (cost == null) return;
         int budget = g.Selected.MoveBudget;
-        for (int x = 0; x < g.Grid.W; x++)
-            for (int y = 0; y < g.Grid.H; y++)
+        bool canDash = g.Selected.ActionsLeft >= 2;   // one action left = no dash ring at all
+        int W = g.Grid.W, H = g.Grid.H;
+        if (_moveCls == null || _moveClsW != W || _moveClsH != H)
+        { _moveCls = new byte[W * H]; _moveClsW = W; _moveClsH = H; }
+        var cls = _moveCls;
+
+        // 1. classify
+        for (int x = 0; x < W; x++)
+            for (int y = 0; y < H; y++)
             {
                 int c = cost[x, y];
-                if (c <= 0) continue;
-                bool dash = c > budget;
-                if (dash && g.Selected.ActionsLeft < 2) continue; // can't dash with 1 action
-                var r = ElevRect(g, x, y);
-                Raylib.DrawRectangleRec(r, dash ? Pal.MoveYellow : Pal.MoveBlue);
+                byte k = MoveNone;
+                if (c > 0) k = c > budget ? (canDash ? MoveDash : MoveNone) : MoveWalk;
+                cls[y * W + x] = k;
             }
+        byte At(int x, int y) => (x < 0 || y < 0 || x >= W || y >= H) ? MoveNone : cls[y * W + x];
+        // Edge weighting. An edge against a COVER BLOCK is drawn THIN AND FAINT rather than at
+        // full weight: the block is drawn on top of that tile and is self-evidently not standable,
+        // so a full-weight outline rings every crate on the board in friendly blue and reads as if
+        // the cover itself were highlighted. Dropping those edges entirely was tried first and it
+        // shatters the silhouette on a cover-dense arena — the region stops reading as a region,
+        // which is the one thing this overlay must do. So: keep them, at ~a third of the weight,
+        // and give FULL weight to the edges against open-but-unreachable floor, which are the ones
+        // that actually answer "how far can I go". The board edge counts as open.
+        bool Solid(int x, int y) => x >= 0 && y >= 0 && x < W && y < H && g.Grid.Tiles[x, y] != TileType.Floor;
+
+        // 2. inner lift — a whisper of WHITE. The alpha here is the whole argument of this pass:
+        //    it is what turns "the overlay repaints the room" into "the overlay marks the room".
+        for (int x = 0; x < W; x++)
+            for (int y = 0; y < H; y++)
+            {
+                byte k = cls[y * W + x];
+                if (k == MoveNone) continue;
+                Raylib.DrawRectangleRec(ElevRect(g, x, y),
+                                        k == MoveWalk ? Pal.MoveWalkTint : Pal.MoveDashTint);
+            }
+
+        // 3. corner-tick lattice on the WALK region only (the region you can actually reach this
+        //    action). Four 3px nubs inset from each tile corner: enough to count tiles by eye,
+        //    ~0.6% of the tile's area. Skipped on the dash ring so the two regions differ in
+        //    texture as well as stroke.
+        for (int x = 0; x < W; x++)
+            for (int y = 0; y < H; y++)
+            {
+                if (cls[y * W + x] != MoveWalk) continue;
+                var r = ElevRect(g, x, y);
+                const float ins = 3f, sz = 3f;
+                float rx = r.X + r.Width, ry = r.Y + r.Height;
+                Raylib.DrawRectangleRec(new Rectangle(r.X + ins, r.Y + ins, sz, sz), Pal.MoveTick);
+                Raylib.DrawRectangleRec(new Rectangle(rx - ins - sz, r.Y + ins, sz, sz), Pal.MoveTick);
+                Raylib.DrawRectangleRec(new Rectangle(r.X + ins, ry - ins - sz, sz, sz), Pal.MoveTick);
+                Raylib.DrawRectangleRec(new Rectangle(rx - ins - sz, ry - ins - sz, sz, sz), Pal.MoveTick);
+            }
+
+        // 4. marching-squares boundaries. A tile contributes an edge wherever its neighbour is
+        //    NOT in the same region; each edge is drawn on the tile's OWN elevated rect, so a
+        //    boundary that climbs a plateau steps up with it instead of cutting through the wall.
+        //    Dash first (outer), then walk (inner) so the solid line reads on top at a shared corner.
+        for (int pass = 0; pass < 2; pass++)
+        {
+            byte want = pass == 0 ? MoveDash : MoveWalk;
+            for (int x = 0; x < W; x++)
+                for (int y = 0; y < H; y++)
+                {
+                    if (cls[y * W + x] != want) continue;
+                    var r = ElevRect(g, x, y);
+                    var tl = new Vector2(r.X, r.Y);
+                    var tr = new Vector2(r.X + r.Width, r.Y);
+                    var bl = new Vector2(r.X, r.Y + r.Height);
+                    var br = new Vector2(r.X + r.Width, r.Y + r.Height);
+                    if (pass == 0)
+                    {
+                        // DASH boundary: dashed, and only where the neighbour is outside BOTH
+                        // regions (the walk/dash seam is carried by the solid stroke below).
+                        Color c = Pal.MoveYellow, cw = Raylib.Fade(c, 0.30f);
+                        if (At(x, y - 1) == MoveNone) DashLine(tl, tr, Solid(x, y - 1) ? 1.2f : 2f, 7f, 5f, Solid(x, y - 1) ? cw : c);
+                        if (At(x, y + 1) == MoveNone) DashLine(bl, br, Solid(x, y + 1) ? 1.2f : 2f, 7f, 5f, Solid(x, y + 1) ? cw : c);
+                        if (At(x - 1, y) == MoveNone) DashLine(tl, bl, Solid(x - 1, y) ? 1.2f : 2f, 7f, 5f, Solid(x - 1, y) ? cw : c);
+                        if (At(x + 1, y) == MoveNone) DashLine(tr, br, Solid(x + 1, y) ? 1.2f : 2f, 7f, 5f, Solid(x + 1, y) ? cw : c);
+                    }
+                    else
+                    {
+                        Color c = Pal.MoveBlue, cw = Raylib.Fade(c, 0.34f);
+                        if (At(x, y - 1) != MoveWalk) Raylib.DrawLineEx(tl, tr, Solid(x, y - 1) ? 1.2f : 2.2f, Solid(x, y - 1) ? cw : c);
+                        if (At(x, y + 1) != MoveWalk) Raylib.DrawLineEx(bl, br, Solid(x, y + 1) ? 1.2f : 2.2f, Solid(x, y + 1) ? cw : c);
+                        if (At(x - 1, y) != MoveWalk) Raylib.DrawLineEx(tl, bl, Solid(x - 1, y) ? 1.2f : 2.2f, Solid(x - 1, y) ? cw : c);
+                        if (At(x + 1, y) != MoveWalk) Raylib.DrawLineEx(tr, br, Solid(x + 1, y) ? 1.2f : 2.2f, Solid(x + 1, y) ? cw : c);
+                    }
+                }
+        }
     }
 
-    // Red warning pips on reachable tiles that a live enemy could fire on with no
-    // cover — a quick read on which destinations leave the soldier exposed.
+    // RESONANCE T2 — the INCOMING-FIRE FORECAST overlay. The board used to answer "is this tile
+    // exposed?" with one identical tick; it now answers "how much fire am I standing in?" with a
+    // GRADED PIP STACK in the tile's top-right corner: one small triangle per bearing gun, capped
+    // at three (3+). The COUNT is the signal, so the read survives Pal.SetColorblind and a
+    // greyscale squint (DESIGN.md 3.H: shape-redundancy, never hue alone) — alpha only reinforces
+    // it. A FLANK adds one short underline bar beneath the stack ("your cover does nothing here").
+    //
+    // Everything numeric (best hit%, expected damage, which gun) lives in the HOVER CARD, not on
+    // the board: 3.C/3.H forbid a field of numbers over the play surface. Detail on demand.
+    //
+    // SIMPLE mode restores the pre-T2 minimal read (one tick on any tile where a gun has a clean
+    // shot) for players who want the quiet board back. Same glyph/alpha/pulse; the trigger now
+    // comes from ComputeOdds's CoverLevel, so unlike the old raw GetCover test it also respects
+    // high-ground see-over, the DRONE's cover-ignoring attack and SHIELD arcs.
     static void DrawThreat(Game g)
     {
         if (g.Selected == null || !g.IsPlayerInteractive() || g.AimMode || g.GrenadeMode) return;
         if (g.Selected.Team != Team.Player || !g.Selected.CanAct) return;
         if (g.Threat == null || g.MoveCost == null) return;
 
+        bool full = g.ThreatPref >= Game.ThreatFull;
         float pulse = 0.6f + 0.4f * MathF.Sin((float)Raylib.GetTime() * 4f);
         for (int x = 0; x < g.Grid.W; x++)
             for (int y = 0; y < g.Grid.H; y++)
             {
-                if (!g.Threat[x, y]) continue;
+                var c = g.Threat[x, y];
                 bool here = x == g.Selected.X && y == g.Selected.Y;
                 if (!here && g.MoveCost[x, y] <= 0) continue;
                 var r = ElevRect(g, x, y);
-                var pos = new Vector2(r.X + r.Width - 9, r.Y + 9);
-                // a single small subtle danger tick (was a loud filled triangle + bright outline)
-                // — informs "this tile is exposed" without a field of red pips drowning the units.
-                Raylib.DrawPoly(pos, 3, 4.5f, -90f, Raylib.Fade(Pal.Foe, 0.32f + 0.18f * pulse));
-                Raylib.DrawPolyLinesEx(pos, 3, 4.5f, -90f, 1.2f, Raylib.Fade(Pal.Foe, 0.45f));
+
+                if (!full)
+                {
+                    // SIMPLE: the pre-T2 tick, on the pre-T2 condition (seen with NO cover).
+                    if (!c.Exposed) continue;
+                    var p0 = new Vector2(r.X + r.Width - 9, r.Y + 9);
+                    Raylib.DrawPoly(p0, 3, 4.5f, -90f, Raylib.Fade(Pal.Foe, 0.32f + 0.18f * pulse));
+                    Raylib.DrawPolyLinesEx(p0, 3, 4.5f, -90f, 1.2f, Raylib.Fade(Pal.Foe, 0.45f));
+                    continue;
+                }
+
+                int tier = c.Tier;
+                if (tier <= 0) continue;
+                // NOISE FLOOR. On an open arena with six alerted hostiles, SOME gun bears on nearly
+                // every reachable tile, so marking all of them spends the board's signal budget on
+                // the ambient condition. Draw only what changes a decision: a gun with a clean shot
+                // (exactly the pre-T2 trigger, preserved), TWO OR MORE guns (the blind spot this
+                // wave exists to fix), or one covered gun that still shoots well. The suppressed
+                // case — a single covered gun at poor odds — is still fully reported by the hover
+                // card, so nothing is hidden from a player who asks; it is only kept off the board.
+                if (!c.Exposed && c.Guns < 2 && c.BestHit < 50) continue;
+                // A DANGER METER, not a scatter of ticks: 1-3 bottom-aligned bars of rising height
+                // in the tile's top-right corner, read exactly like signal strength. The first
+                // draft stacked 1-3 separate triangles down the tile edge and, across 80+ reachable
+                // tiles, that read as speckled TEXTURE rather than as a number (own squint test).
+                // One compact glyph per tile whose SILHOUETTE grows with the count keeps the count
+                // legible at a squint, survives greyscale/SIGHTLINE_CB, and leaves the board calm.
+                // TWO CHANNELS, because count alone is not danger. The BAR COUNT is the honest
+                // number of guns (that is the blind spot T2 exists to fix); the INTENSITY is how
+                // hard the best of them actually shoots, straight off the forecast's BestHit. So a
+                // tile in cover from two distant rifles sits at the bottom of the range and a tile
+                // three flankers can hit at 90% burns — which is what the eye needs at a squint.
+                // A first draft keyed intensity to the count and the whole reachable set read as
+                // one uniform red speckle (own squint test on the mission-2 capture).
+                //
+                // STATIC alpha (no Raylib.GetTime pulse): standing information about the ground,
+                // not an alarm — ~50 breathing glyphs is exactly the motion noise 3.C warns about,
+                // and it keeps one more clock read out of the renderer. SIMPLE keeps its pulse.
+                float heat = Util.Clamp((c.BestHit - 15) / 65f, 0f, 1f);   // ~15% -> floor, ~80%+ -> full
+                float a = 0.16f + 0.60f * heat;
+                Color fill = Raylib.Fade(Pal.Foe, a);
+                Color line = Raylib.Fade(Pal.FoeDk, Math.Min(0.9f, a + 0.20f));
+                const float bw = 3.5f, gap = 1.5f;
+                float baseY = r.Y + 18f, rx = r.X + r.Width - 6f;
+                for (int i = 0; i < tier; i++)
+                {
+                    float hgt = 4f + i * 4f;                                // 4 / 8 / 12 px
+                    var bar = new Rectangle(rx - (tier - i) * (bw + gap) + gap, baseY - hgt, bw, hgt);
+                    Raylib.DrawRectangleRec(bar, fill);
+                    Raylib.DrawRectangleLinesEx(bar, 0.8f, line);
+                }
+                // FLANK: a foot-rule the bars stand on — "your cover does nothing on this tile".
+                // A second, non-hue channel welded to the same glyph, so it can't read as a 4th bar.
+                if (c.Flanked)
+                {
+                    float wdt = tier * (bw + gap) + 1f;
+                    Raylib.DrawRectangleRec(new Rectangle(rx - wdt, baseY + 1.2f, wdt, 1.8f),
+                                            Raylib.Fade(Pal.Foe, Math.Min(0.95f, a + 0.25f)));
+                }
             }
     }
 
@@ -942,20 +1251,42 @@ public static class Renderer
         }
     }
 
+    /// RESONANCE T2: the route is priced, not just the destination. The connecting line takes the
+    /// colour of the WORST danger tier anywhere along the path (a safe-looking destination reached
+    /// by walking through a crossfire is no longer free), and each step node is drawn in ITS OWN
+    /// tier — clean steps stay round dots, threatened steps become triangles (the same pip glyph
+    /// the forecast overlay uses), so the exact stretch that is hot reads without a legend and
+    /// without hue (DESIGN.md 3.H shape-redundancy).
+    static Color PathTierColor(int tier) =>
+        tier <= 0 ? Pal.Accent : tier == 1 ? Pal.Suspect : Pal.Foe;
+
     static void DrawPathPreview(Game g)
     {
         if (g.PathPreview == null || g.PathPreview.Count == 0 || g.Selected == null) return;
+        var th = g.ThreatPref >= Game.ThreatFull ? g.Threat : null;
+
+        int worst = 0;
+        if (th != null)
+            foreach (var (x, y) in g.PathPreview)
+                if (g.Grid.InBounds(x, y)) worst = Math.Max(worst, th[x, y].Tier);
+        Color lineCol = PathTierColor(worst);
+        float lineA = worst <= 0 ? 0.55f : worst == 1 ? 0.62f : 0.72f;
+
         Vector2 prev = ElevCenter(g, g.Selected.X, g.Selected.Y);
         foreach (var (x, y) in g.PathPreview)
         {
             var c = ElevCenter(g, x, y);
-            Raylib.DrawLineEx(prev, c, 2.5f, Raylib.Fade(Pal.Accent, 0.55f));
+            Raylib.DrawLineEx(prev, c, worst >= 2 ? 3.0f : 2.5f, Raylib.Fade(lineCol, lineA));
             prev = c;
         }
         foreach (var (x, y) in g.PathPreview)
         {
             var c = ElevCenter(g, x, y);
-            Raylib.DrawCircleV(c, 3.5f, Raylib.Fade(Pal.Accent, 0.8f));
+            int t = (th != null && g.Grid.InBounds(x, y)) ? th[x, y].Tier : 0;
+            if (t <= 0) { Raylib.DrawCircleV(c, 3.5f, Raylib.Fade(Pal.Accent, 0.8f)); continue; }
+            var col = Raylib.Fade(PathTierColor(t), 0.88f);
+            Raylib.DrawPoly(c, 3, 4.6f + t * 0.5f, -90f, col);            // hot step: the pip glyph
+            Raylib.DrawPolyLinesEx(c, 3, 4.6f + t * 0.5f, -90f, 1.2f, Raylib.Fade(PathTierColor(t), 1f));
         }
     }
 
@@ -1092,13 +1423,13 @@ public static class Renderer
                     : plan.Path.Count > 0 ? "MOVING"
                     : plan.Hunker ? "HUNKER" : "HOLD";
         Vector2 cap = e.Pos - new Vector2(0, (g.Grid.IsHigh(e.X, e.Y) ? ElevLift : 0f) + 44f);
-        var sz = Raylib.MeasureTextEx(Cfg.Font, verb, 14f, 1f);
+        var sz = Cfg.Measure(verb, 14f, 1f);
         // a definitive bordered pill (opaque dark fill + thin danger outline) so the verb reads as a
         // hard label, not a wash — the player can name the threat at a glance.
         var pill = new Rectangle(cap.X - sz.X / 2f - 5, cap.Y - 2, sz.X + 10, sz.Y + 4);
         Raylib.DrawRectangleRounded(pill, 0.5f, 6, Raylib.Fade(Pal.RGBA(24, 6, 6), 0.92f));
         Raylib.DrawRectangleLinesEx(pill, 1f, Raylib.Fade(danger, 0.7f + 0.25f * pulse));   // square outline (RoundedLines is version-volatile)
-        Raylib.DrawTextEx(Cfg.Font, verb, new Vector2(cap.X - sz.X / 2f, cap.Y), 14f, 1f,
+        Cfg.Text(verb, new Vector2(cap.X - sz.X / 2f, cap.Y), 14f, 1f,
                           Raylib.Fade(Pal.RGBA(255, 215, 215), 1f));
     }
 
@@ -1134,11 +1465,16 @@ public static class Renderer
         // Dial the recede WAY back (walls 0.24->0.10, tops 0.36->0.14) so the blocks read as
         // grounded volumes, then let the rim/edge light (below) do the "pop", and keep the
         // squint hierarchy with units by NOT letting the top faces cross the bloom knee.
+        // RESONANCE V2 RE-GRADE — cover carried a big share of the muddiness: wall and top sat
+        // ~20 luma apart in the same narrow mid band, so a block read as one grey lozenge rather
+        // than a lit volume. SEPARATE them (top +15, wall -10, VALUE only). The top face still
+        // lands well under the >180 band reserved for units/objectives/FX, so the squint
+        // hierarchy is unchanged — cover gets MODELLING, not salience.
         Color shade = Pal.RGBA(8, 11, 15);
-        Color cHi = Pal.Mix(Pal.Mix(Pal.CoverHi, tint, 0.28f),    shade, 0.10f);
-        Color cHiTop = Pal.Mix(Pal.Mix(Pal.CoverHiTop, tint, 0.28f), shade, 0.14f);   // top face reads clearly (was 0.36)
-        Color cLo = Pal.Mix(Pal.Mix(Pal.CoverLo, tint, 0.28f),    shade, 0.10f);
-        Color cLoTop = Pal.Mix(Pal.Mix(Pal.CoverLoTop, tint, 0.28f), shade, 0.14f);   // top face reads clearly (was 0.36)
+        Color cHi = Lift(Pal.Mix(Pal.Mix(Pal.CoverHi, tint, 0.28f),    shade, 0.10f), -8);
+        Color cHiTop = Lift(Pal.Mix(Pal.Mix(Pal.CoverHiTop, tint, 0.28f), shade, 0.14f), 16);
+        Color cLo = Lift(Pal.Mix(Pal.Mix(Pal.CoverLo, tint, 0.28f),    shade, 0.10f), -8);
+        Color cLoTop = Lift(Pal.Mix(Pal.Mix(Pal.CoverLoTop, tint, 0.28f), shade, 0.14f), 16);
         for (int x = 0; x < g.Grid.W; x++)
             for (int y = 0; y < g.Grid.H; y++)
             {
@@ -1151,9 +1487,17 @@ public static class Renderer
                 {
                     var foot = Util.TileRect(x, y);
                     foot.Y -= g.Grid.HeightAt(x, y) * ElevLift;
+                    // V1: the block's real ground footprint, swept AWAY from the key light
+                    // (ShadowVec) instead of the old fixed +3/+4 emboss. Length scales with the
+                    // block's height, so high cover throws twice the shadow low cover does.
+                    bool tall = t == TileType.HighCover;
+                    var fp = new Rectangle(foot.X + 4, foot.Y + foot.Height - 17, foot.Width - 8, 15);
+                    CastShadow(fp, ShadowVec(g, x, y, tall ? 16f : 8f), 0.34f);
+                    // tight contact AO right under the block — omnidirectional on purpose: this is
+                    // occlusion, not a shadow, and it is what actually welds the block to the floor.
                     Raylib.DrawRectangleRounded(
-                        new Rectangle(foot.X + 3, foot.Y + foot.Height - 12, foot.Width - 6, 14),
-                        0.6f, 6, Raylib.Fade(Pal.RGBA(0, 0, 0), 0.20f));
+                        new Rectangle(foot.X + 6, foot.Y + foot.Height - 13, foot.Width - 12, 11),
+                        0.7f, 6, Raylib.Fade(Pal.RGBA(0, 0, 0), 0.24f));
                 }
                 r.Y -= g.Grid.HeightAt(x, y) * ElevLift;   // sit cover on the plateau top (per tier)
                 bool high = t == TileType.HighCover;
@@ -1167,12 +1511,17 @@ public static class Renderer
                 var topRect = new Rectangle(r.X + inset, r.Y + inset,
                                             r.Width - inset * 2, r.Height - inset * 2 - lift);
                 // apply the key light to the wall + top faces (VALUE only — survives colorblind).
-                Color wallCol = KeyLit(high ? cHi : cLo, klit, 0.13f);
-                Color topCol  = KeyLit(high ? cHiTop : cLoTop, klit, 0.16f);
-                // drop shadow
+                // V2: widened with the rest of the grade (0.13/0.16 -> 0.20/0.24) so a block on
+                // the lit side of the room is visibly a block on the lit side of the room.
+                Color wallCol = KeyLit(high ? cHi : cLo, klit, 0.20f);
+                Color topCol  = KeyLit(high ? cHiTop : cLoTop, klit, 0.24f);
+                // V1: the old fixed (+3,+4) "drop shadow" here was an emboss — same offset for
+                // every block regardless of where the key light is. The real cast shadow is now
+                // laid on the FLOOR above (CastShadow/ShadowVec); all this needs is a hairline
+                // dark edge so the wall silhouette stays crisp against a lit ground plane.
                 Raylib.DrawRectangleRounded(
-                    new Rectangle(baseRect.X + 3, baseRect.Y + 4, baseRect.Width, baseRect.Height),
-                    0.18f, 5, Raylib.Fade(Pal.RGBA(0, 0, 0), 0.35f));
+                    new Rectangle(baseRect.X - 1, baseRect.Y - 1, baseRect.Width + 2, baseRect.Height + 2),
+                    0.18f, 5, Raylib.Fade(Pal.RGBA(0, 0, 0), 0.30f));
                 Raylib.DrawRectangleRounded(baseRect, 0.18f, 5, wallCol);
                 // front-face shade gradient: a soft darkening toward the bottom of the wall so the
                 // block reads as a lit 3D volume (consistent top-light), and a thin lighter catch on
@@ -1203,13 +1552,13 @@ public static class Renderer
                 // over-receded, this can lift back toward a legible whisper (0.035 -> 0.06).
                 Raylib.DrawLineEx(new Vector2(topRect.X + 4, topRect.Y + 2),
                                   new Vector2(topRect.X + topRect.Width - 4, topRect.Y + 2),
-                                  1.5f, Raylib.Fade(Pal.RGBA(255, 255, 255), 0.06f));
+                                  1.5f, Raylib.Fade(Pal.RGBA(255, 255, 255), 0.10f));
                 // structural rim — a narrow bright accent on the top's light edge (upper + left)
                 // so the 3D form pops. UNDERTOW W7: restored toward the pre-W5 catch (0.13/0.10)
                 // now that cover reads as a solid — still tuned to sit just UNDER the bloom knee
                 // (~0.36 luma) so cover never floods; only units/objectives cross it.
                 Color rimCol = Pal.Mix(Pal.HighEdge, Pal.RGBA(255, 255, 255), 0.45f);
-                float rimA = high ? 0.13f : 0.10f;
+                float rimA = high ? 0.22f : 0.17f;   // V2: room in the grade to raise the rim
                 Raylib.DrawLineEx(new Vector2(topRect.X + 5, topRect.Y + 3),
                                   new Vector2(topRect.X + topRect.Width - 5, topRect.Y + 3),
                                   1f, Raylib.Fade(rimCol, rimA));
@@ -1788,16 +2137,16 @@ public static class Renderer
         Color downCol = u.Stabilized ? Pal.Suspect : Pal.Foe;
         float rowW = 0f;
         if (downCode != null)
-            rowW += 17f + Raylib.MeasureTextEx(Cfg.Font, downCode, 13, 1f).X + 8f + 3f;
+            rowW += 17f + Cfg.Measure(downCode, 13, 1f).X + 8f + 3f;
         foreach (var s in u.Statuses)
             if (s.Turns > 0)
-                rowW += 17f + Raylib.MeasureTextEx(Cfg.Font, StatusDef.Code(s.Kind), 13, 1f).X + 8f + 3f;
+                rowW += 17f + Cfg.Measure(StatusDef.Code(s.Kind), 13, 1f).X + 8f + 3f;
         if (rowW <= 0f) return;
         float cxs = p.X - (rowW - 3f) / 2f;
         float cys = p.Y + 24f;
         if (downCode != null)
         {
-            float tw0 = Raylib.MeasureTextEx(Cfg.Font, downCode, 13, 1f).X;
+            float tw0 = Cfg.Measure(downCode, 13, 1f).X;
             float w0 = 17f + tw0 + 8f;
             Raylib.DrawRectangleRounded(new Rectangle(cxs - 1f, cys - 1f, w0 + 2f, chipH + 2f),
                                         0.5f, 6, Raylib.Fade(downCol, 0.55f));
@@ -1813,7 +2162,7 @@ public static class Renderer
                 Raylib.DrawLineEx(new Vector2(gx - 4f, gy - 3f), new Vector2(gx, gy + 3f), 2f, downCol);
                 Raylib.DrawLineEx(new Vector2(gx + 4f, gy - 3f), new Vector2(gx, gy + 3f), 2f, downCol);
             }
-            Raylib.DrawTextEx(Cfg.Font, downCode, new Vector2((int)(cxs + 17f), (int)(cys + 2f)), 13, 1f, downCol);
+            Cfg.Text(downCode, new Vector2((int)(cxs + 17f), (int)(cys + 2f)), 13, 1f, downCol);
             cxs += w0 + 3f;
         }
         foreach (var s in u.Statuses)
@@ -1827,7 +2176,7 @@ public static class Renderer
                 _ => Pal.RGBA(150, 120, 220),       // Disoriented
             };
             string code = StatusDef.Code(s.Kind);
-            float tw = Raylib.MeasureTextEx(Cfg.Font, code, 13, 1f).X;
+            float tw = Cfg.Measure(code, 13, 1f).X;
             float w = 17f + tw + 8f;
             // faint coloured rim = a slightly larger rounded rect UNDER the dark pill
             // (DrawRectangleRoundedLines is version-volatile — never use it)
@@ -1836,7 +2185,7 @@ public static class Renderer
             Raylib.DrawRectangleRounded(new Rectangle(cxs, cys, w, chipH), 0.5f, 6, Pal.RGBA(9, 13, 18, 216));
             // 5.5: the shape glyph so the effect reads without relying on hue or the code text
             DrawStatusGlyph(s.Kind, cxs + 9f, cys + chipH * 0.5f, sc);
-            Raylib.DrawTextEx(Cfg.Font, code, new Vector2((int)(cxs + 17f), (int)(cys + 2f)), 13, 1f, sc);
+            Cfg.Text(code, new Vector2((int)(cxs + 17f), (int)(cys + 2f)), 13, 1f, sc);
             cxs += w + 3f;
         }
     }
@@ -2115,8 +2464,8 @@ public static class Renderer
             Raylib.DrawLineEx(new Vector2(p.X - 3.5f, cyT - 3f), new Vector2(p.X, cyT + 2f), 2f, hc);
             Raylib.DrawLineEx(new Vector2(p.X, cyT + 2f), new Vector2(p.X + 3.5f, cyT - 3f), 2f, hc);
             Raylib.DrawLineEx(new Vector2(p.X + 3.5f, cyT - 3f), new Vector2(p.X + 7f, cyT + 4f), 2f, hc);
-            float tw = Raylib.MeasureTextEx(Cfg.Font, "HVT", 11, 1f).X;
-            Raylib.DrawTextEx(Cfg.Font, "HVT", new Vector2((int)(p.X - tw / 2), (int)(cyT - 18f)), 11, 1f, hc);
+            float tw = Cfg.Measure("HVT", 11, 1f).X;
+            Cfg.Text("HVT", new Vector2((int)(p.X - tw / 2), (int)(cyT - 18f)), 11, 1f, hc);
         }
 
         // not-yet-engaged enemies: an awareness marker, no facing/pips/status
@@ -2131,8 +2480,8 @@ public static class Renderer
                 Raylib.DrawRing(p, 24f, 28f, 0, 360, 44, Raylib.Fade(Pal.Suspect, 0.42f + 0.48f * pulse));
                 Raylib.DrawRing(p, 28f, 29.5f, 0, 360, 44, Raylib.Fade(Pal.Suspect, 0.18f + 0.20f * pulse));
                 var qp = new Vector2((int)(p.X - 2), (int)(p.Y - 42));
-                Raylib.DrawTextEx(Cfg.Font, "!", qp + new Vector2(1.2f, 1.2f), 22, 1f, Raylib.Fade(Pal.RGBA(8, 6, 2), 0.85f)); // drop shadow for contrast
-                Raylib.DrawTextEx(Cfg.Font, "!", qp, 22, 1f, Pal.Suspect);
+                Cfg.Text("!", qp + new Vector2(1.2f, 1.2f), 22, 1f, Raylib.Fade(Pal.RGBA(8, 6, 2), 0.85f)); // drop shadow for contrast
+                Cfg.Text("!", qp, 22, 1f, Pal.Suspect);
             }
             else
             {
@@ -2148,10 +2497,10 @@ public static class Renderer
                     float a0 = k * 45f + t * 14f;          // slow rotation so it reads as "scanning"
                     Raylib.DrawRing(p, 23f, 26f, a0, a0 + 26f, 6, Raylib.Fade(dim, 0.68f));
                 }
-                float qw = Raylib.MeasureTextEx(Cfg.Font, "?", 23, 1f).X;
+                float qw = Cfg.Measure("?", 23, 1f).X;
                 var qp = new Vector2((int)(p.X - qw / 2), (int)(p.Y - 13));
-                Raylib.DrawTextEx(Cfg.Font, "?", qp + new Vector2(1.2f, 1.2f), 23, 1f, Raylib.Fade(Pal.RGBA(6, 8, 12), 0.85f)); // drop shadow
-                Raylib.DrawTextEx(Cfg.Font, "?", qp, 23, 1f, Raylib.Fade(dim, 1.0f));
+                Cfg.Text("?", qp + new Vector2(1.2f, 1.2f), 23, 1f, Raylib.Fade(Pal.RGBA(6, 8, 12), 0.85f)); // drop shadow
+                Cfg.Text("?", qp, 23, 1f, Raylib.Fade(dim, 1.0f));
             }
             return;
         }
@@ -2330,21 +2679,21 @@ public static class Renderer
             // it disrupts rather than kills, so its badge shouldn't imply a kill-lane.
             Color owc = u.OwBrace ? Pal.Good : Pal.Accent;
             Raylib.DrawCircle((int)p.X, (int)(p.Y - 34), 6f, Raylib.Fade(owc, 0.25f));
-            Raylib.DrawTextEx(Cfg.Font, u.OwBrace ? "BRC" : "OW", new Vector2((int)(p.X - (u.OwBrace ? 11 : 9)), (int)(p.Y - 39)), 10, 1f, owc);
+            Cfg.Text(u.OwBrace ? "BRC" : "OW", new Vector2((int)(p.X - (u.OwBrace ? 11 : 9)), (int)(p.Y - 39)), 10, 1f, owc);
         }
         if (u.Hunkered)
             Raylib.DrawPoly(new Vector2(p.X, p.Y - 35), 4, 6f, 45f, Pal.Good);
 
         // active ability stance tag (friendly) / suppression tag (enemy) — pushed out past the wider body
-        if (u.RunGun) Raylib.DrawTextEx(Cfg.Font, "R&G", new Vector2((int)(p.X + 18), (int)(p.Y - 34)), 11, 1f, Pal.Accent);
-        else if (u.Blitz) Raylib.DrawTextEx(Cfg.Font, "BLZ", new Vector2((int)(p.X + 18), (int)(p.Y - 34)), 11, 1f, Pal.Accent);
-        else if (u.Steady) Raylib.DrawTextEx(Cfg.Font, "AIM", new Vector2((int)(p.X + 18), (int)(p.Y - 34)), 11, 1f, Pal.Good);
+        if (u.RunGun) Cfg.Text("R&G", new Vector2((int)(p.X + 18), (int)(p.Y - 34)), 11, 1f, Pal.Accent);
+        else if (u.Blitz) Cfg.Text("BLZ", new Vector2((int)(p.X + 18), (int)(p.Y - 34)), 11, 1f, Pal.Accent);
+        else if (u.Steady) Cfg.Text("AIM", new Vector2((int)(p.X + 18), (int)(p.Y - 34)), 11, 1f, Pal.Good);
         if (u.Team == Team.Enemy && u.Suppress > 0)
-            Raylib.DrawTextEx(Cfg.Font, "SUPP", new Vector2((int)(p.X + 17), (int)(p.Y - 34)), 11, 1f, Pal.Foe);
+            Cfg.Text("SUPP", new Vector2((int)(p.X + 17), (int)(p.Y - 34)), 11, 1f, Pal.Foe);
         // UNDERTOW W3 — a ROUTED (broken) enemy reads clearly: it's fleeing + shooting wild, so the
         // player knows this threat is temporarily neutralized (the earned comeback beat).
         if (u.Team == Team.Enemy && u.Routed > 0)
-            Raylib.DrawTextEx(Cfg.Font, "ROUT", new Vector2((int)(p.X + 17), (int)(p.Y - 34)), 11, 1f, Pal.Good);
+            Cfg.Text("ROUT", new Vector2((int)(p.X + 17), (int)(p.Y - 34)), 11, 1f, Pal.Good);
         // SIGNAL W8 — WAVERING: this pod is ONE KILL from breaking (Game.PodWavering — banner-held
         // members are excluded so the mark never lies). Amber "WVR" + a jagged CRACK glyph on the
         // figure's left (mutually exclusive with ROUT by definition; shape carries the meaning
@@ -2352,7 +2701,7 @@ public static class Renderer
         // telegraphed: the player can PLAN the breaking kill instead of being surprised by it.
         else if (u.Team == Team.Enemy && g.PodWavering(u))
         {
-            Raylib.DrawTextEx(Cfg.Font, "WVR", new Vector2((int)(p.X - 39), (int)(p.Y - 39)), 11, 1f, Pal.Suspect);
+            Cfg.Text("WVR", new Vector2((int)(p.X - 39), (int)(p.Y - 39)), 11, 1f, Pal.Suspect);
             DrawCrackGlyph(new Vector2(p.X - 46f, p.Y - 33f), Pal.Suspect);
         }
 
@@ -2364,7 +2713,7 @@ public static class Renderer
         if (elite)
         {
             string tag = u.Frenzied ? u.Name + " FRENZIED" : (u.Enraged ? u.Name + " ENRAGED" : u.Name);
-            Raylib.DrawTextEx(Cfg.Font, tag, new Vector2((int)(p.X - (int)Raylib.MeasureTextEx(Cfg.Font, tag, 11, 1f).X / 2), (int)(p.Y - 42)), 11, 1f, Pal.Elite);
+            Cfg.Text(tag, new Vector2((int)(p.X - (int)Cfg.Measure(tag, 11, 1f).X / 2), (int)(p.Y - 42)), 11, 1f, Pal.Elite);
         }
 
         // VIP / captive marker: diamond + tag above the asset
@@ -2375,7 +2724,7 @@ public static class Renderer
             Raylib.DrawPoly(new Vector2(p.X, p.Y - 39), 4, 5.5f, 45f, vc);
             Raylib.DrawPolyLinesEx(new Vector2(p.X, p.Y - 39), 4, 5.5f, 45f, 1.5f, Pal.Txt);
             string vtag = caged ? "CAPTIVE" : (u.Name == "CAPTIVE" ? "FREED" : "VIP");
-            Raylib.DrawTextEx(Cfg.Font, vtag, new Vector2((int)(p.X - (int)Raylib.MeasureTextEx(Cfg.Font, vtag, 12, 1f).X / 2), (int)(p.Y - 53)), 12, 1f, vc);
+            Cfg.Text(vtag, new Vector2((int)(p.X - (int)Cfg.Measure(vtag, 12, 1f).X / 2), (int)(p.Y - 53)), 12, 1f, vc);
             if (caged)   // cage bars over the figure
                 for (int i = -1; i <= 1; i++)
                     Raylib.DrawLineEx(new Vector2(p.X + i * 6, p.Y - 12), new Vector2(p.X + i * 6, p.Y + 12),
@@ -2565,7 +2914,7 @@ public static class Renderer
                 var pb = c + AngVec(a0) * (r + 5f);
                 Raylib.DrawLineEx(pa, pb, 2f, Raylib.Fade(Pal.Foe, 0.85f));
             }
-            Raylib.DrawTextEx(Cfg.Font, "MARKED", new Vector2(c.X - 22, c.Y - r - 16), 12, 1f, Pal.Foe);
+            Cfg.Text("MARKED", new Vector2(c.X - 22, c.Y - r - 16), 12, 1f, Pal.Foe);
         }
     }
 
@@ -2647,7 +2996,7 @@ public static class Renderer
                 Raylib.DrawLineEx(corner, corner - new Vector2(sx * 8f, 0), 2.2f, col);
                 Raylib.DrawLineEx(corner, corner - new Vector2(0, sy * 8f), 2.2f, col);
             }
-            Raylib.DrawTextEx(Cfg.Font, "PINNED", new Vector2(c.X - 22, c.Y - r - 16), 11, 1f, Pal.Foe);
+            Cfg.Text("PINNED", new Vector2(c.X - 22, c.Y - r - 16), 11, 1f, Pal.Foe);
         }
     }
 
@@ -2774,7 +3123,7 @@ public static class Renderer
         Raylib.DrawLineEx(new Vector2(d.X + 16, d.Y - 6), new Vector2(d.X + 9, d.Y), 1.8f, lab);
         Raylib.DrawLineEx(new Vector2(d.X + 16, d.Y + 6), new Vector2(d.X + 9, d.Y), 1.8f, lab);
         var lp = new Vector2((int)d.X - 30, (int)(d.Y + 22));
-        Raylib.DrawTextEx(Cfg.Font, "CROSSFIRE", lp, 11, 1f, lab);
+        Cfg.Text("CROSSFIRE", lp, 11, 1f, lab);
     }
 
     // One converging-fire prong: a thin low-alpha line from a squadmate to the target, with a short

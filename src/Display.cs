@@ -10,22 +10,27 @@ namespace Sightline;
 /// so it stays readable on big / high-DPI / 4K displays (window size + fullscreen).
 /// At exactly 1280x800 windowed it draws directly (keeping MSAA crispness); scaling
 /// only kicks in once the window is enlarged. Disabled in the headless harness so the
-/// smoke-test screenshots stay byte-identical.
+/// smoke-test path carries no render-target or shader state (NOT because shots are
+/// byte-identical - they are not; see the note on the Display class below).
 ///
 /// Phase 5.2 adds an optional post-FX shader pass (bloom + vignette + biome colour
 /// grading + chromatic aberration). The pass is always OFF when Display is disabled
-/// (headless harness), so plain SIGHTLINE_SHOT screenshots remain byte-identical.
+/// (headless harness), which keeps the shot path free of shader state. NOTE (RESONANCE):
+/// this comment used to claim plain SIGHTLINE_SHOT screenshots are byte-identical - they
+/// are NOT. Two identical shot runs differ in ~30% of pixels (58 Raylib.GetTime() reads in
+/// the renderer/HUD plus a clock-seeded Util.Rng). Never gate on a screenshot hash;
+/// SIGHTLINE_PAIRTEST byte-identity is the real determinism gate.
 /// Enable for verification with SIGHTLINE_POSTFX=1 (forces Display.Init(true) even
 /// during shot mode and sets a strong demo bloom so the effect is clearly visible).
-public static class Display
+public static partial class Display
 {
     public static bool Enabled;
     static RenderTexture2D _target;
 
     // ---- post-FX shader (Phase 5.2) ----
     // PostFX is enabled by default whenever Display is enabled (i.e. live game).
-    // It is always OFF when Display is disabled so the headless smoke-test screenshots
-    // are byte-identical. Toggle via the pause menu or set Display.PostFX = false.
+    // It is always OFF when Display is disabled, so the headless smoke-test path carries no
+    // shader state. Toggle via the pause menu or set Display.PostFX = false.
     public static bool PostFX = true;
     static Shader _fx;
     static bool   _fxReady;
@@ -227,8 +232,64 @@ void main() {
 
     // FUL-12: one-shot BRACE field-tip flag (same lifecycle as TutorialSeen — the callout fires
     // once per profile, the first time a live fight makes the reaction verb relevant).
+    // T1: superseded by the TipsSeen bitmask below (bit 0 IS the brace tip). The field is kept as
+    // the on-disk migration bridge in BOTH directions: Load folds an old profile's true into bit 0,
+    // and Save keeps writing it from bit 0 so a downgrade doesn't re-show a tip the player has read.
     public static bool BraceTipSeen;
-    public static void MarkBraceTipSeen() { if (!BraceTipSeen) { BraceTipSeen = true; Save(); } }
+    public static void MarkBraceTipSeen() { MarkTipSeen(0); }
+
+    // ── PROGRAM RESONANCE T1 — just-in-time field tips ──────────────────────────────────────
+    // One bit per tip in Game.FieldTips (index == bit). A bitmask rather than a bool-per-tip so
+    // the DTO grows by ONE field for the whole table; absent in an old display.json = 0 = unseen.
+    // Cap is 32 tips — TipCount asserts against it in TUTTEST so a 33rd tip can't silently no-op.
+    public const int MaxTips = 32;
+    public static int TipsSeen;
+    public static bool TipSeen(int i) => i >= 0 && i < MaxTips && (TipsSeen & (1 << i)) != 0;
+    public static void MarkTipSeen(int i)
+    {
+        if (i < 0 || i >= MaxTips || TipSeen(i)) return;
+        TipsSeen |= 1 << i;
+        if (i == 0) BraceTipSeen = true;   // keep the legacy field in step for the downgrade bridge
+        Save();
+    }
+
+    // T1: the TRAINING OP has been completed (or explicitly declined) at least once. Drives the
+    // first-launch offer only — the drill itself stays reachable from the intro forever.
+    public static bool TrainingSeen;
+    public static void MarkTrainingSeen() { if (!TrainingSeen) { TrainingSeen = true; Save(); } }
+
+    // T1: the permanent SHOW ALL escape. Verb staging (training op + mission 1) never locks a
+    // returning player out of a verb they already know — one toggle, remembered per profile.
+    public static bool ShowAllVerbs;
+    public static void ToggleShowAllVerbs() { ShowAllVerbs = !ShowAllVerbs; Save(); }
+
+    // ---- RESONANCE A2: per-category audio mix (persisted here alongside the other settings) ----
+    // The whole game shipped with exactly one hard-coded SetMasterVolume(0.6f) and a binary
+    // mute, so the owner could not rebalance music against SFX without a rebuild. These four
+    // faders are read by Audio (master at the device, the rest per-cue / per-stream).
+    // Defaults reproduce the old behaviour exactly: master 0.60, everything else unity.
+    public static float VolMaster = 0.60f;
+    public static float VolSfx    = 1.00f;
+    public static float VolMusic  = 1.00f;
+    public static float VolUi     = 1.00f;
+    public static readonly string[] VolNames = { "MASTER", "SFX", "MUSIC", "UI" };
+
+    public static float Vol(int bus) => bus switch { 0 => VolMaster, 1 => VolSfx, 2 => VolMusic, _ => VolUi };
+
+    /// Live-set one fader (no disk write — a slider drag calls this every frame).
+    public static void SetVol(int bus, float v)
+    {
+        v = Math.Clamp(v, 0f, 1f);
+        switch (bus)
+        {
+            case 0: VolMaster = v; Audio.ApplyMasterVolume(); break;
+            case 1: VolSfx = v; break;
+            case 2: VolMusic = v; break;
+            default: VolUi = v; break;
+        }
+    }
+    /// Persist the faders — call once when the drag ends, not per frame.
+    public static void CommitVol() => Save();
 
     public static void Init(bool enabled)
     {
@@ -378,7 +439,7 @@ void main() {
     // Brightness FALLBACK (W9): survives only for the !PostFX paths — when the shader is
     // active, brightness/gamma are applied in-shader (uBright/uGamma) instead, because this
     // translucent lighten quad WASHES the frame (raising brightness lowered readability).
-    // Neutral (100%) draws nothing, so the headless harness stays byte-identical.
+    // Neutral (100%) draws nothing, so the headless harness never takes this path.
     static void DrawBrightness()
     {
         float b = Brightness;
@@ -426,7 +487,7 @@ void main() {
     }
 
     // ---- persistence (alongside the save file, not in the repo) ----
-    class Dto
+    internal class Dto
     {
         public bool Fullscreen { get; set; }
         public int SizeIdx { get; set; }
@@ -437,23 +498,45 @@ void main() {
         public bool PostFX { get; set; } = true;
         public bool AutoCam { get; set; }
         public bool BraceTipSeen { get; set; }   // FUL-12 (JSON field: absent in old files = false, back-compat)
+        public int TipsSeen { get; set; }        // T1 just-in-time tip bitmask (absent = 0 = all unseen)
+        public bool TrainingSeen { get; set; }   // T1 training op completed/declined once
+        public bool ShowAllVerbs { get; set; }   // T1 permanent staging escape
+        // RESONANCE A2 — additive fields; a display.json written before A2 has none of them,
+        // so these JSON defaults are what an existing install keeps (== the old behaviour).
+        public float VolMaster { get; set; } = 0.60f;
+        public float VolSfx { get; set; } = 1.00f;
+        public float VolMusic { get; set; } = 1.00f;
+        public float VolUi { get; set; } = 1.00f;
     }
+    // Source-generated serializer (see SaveGame.SaveJson for the why): reflection-based
+    // System.Text.Json loses its type metadata under `-p:PublishTrimmed=true`, which silently
+    // breaks settings persistence in a trimmed distributable.
+    [System.Text.Json.Serialization.JsonSerializable(typeof(Dto))]
+    internal partial class DisplayJson : System.Text.Json.Serialization.JsonSerializerContext { }
+
     static string Dir => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Sightline");
     static string FilePath => Path.Combine(Dir, "display.json");
 
     static void Save()
     {
-        try { Directory.CreateDirectory(Dir); File.WriteAllText(FilePath, JsonSerializer.Serialize(new Dto { Fullscreen = Fullscreen, SizeIdx = SizeIdx, BrightIdx = BrightIdx, GammaIdx = GammaIdx, Colorblind = Pal.Colorblind, TutorialSeen = TutorialSeen, PostFX = PostFX, AutoCam = AutoCam, BraceTipSeen = BraceTipSeen })); }
+        try { Directory.CreateDirectory(Dir); File.WriteAllText(FilePath, JsonSerializer.Serialize(new Dto { Fullscreen = Fullscreen, SizeIdx = SizeIdx, BrightIdx = BrightIdx, GammaIdx = GammaIdx, Colorblind = Pal.Colorblind, TutorialSeen = TutorialSeen, PostFX = PostFX, AutoCam = AutoCam, BraceTipSeen = (TipsSeen & 1) != 0, TipsSeen = TipsSeen, TrainingSeen = TrainingSeen, ShowAllVerbs = ShowAllVerbs, VolMaster = VolMaster, VolSfx = VolSfx, VolMusic = VolMusic, VolUi = VolUi }, DisplayJson.Default.Dto)); }
         catch { }
     }
+
+    /// Harness seam (SIGHTLINE_TUTTEST): the settings-file path plus explicit Save/Load, so the
+    /// onboarding self-test can round-trip the seen-flags through REAL JSON (not a field copy) and
+    /// then hand the player's file back byte-for-byte. Not used by gameplay code.
+    public static string SettingsPathPublic => FilePath;
+    public static void SaveForTest() => Save();
+    public static void LoadForTest() => Load();
 
     static void Load()
     {
         try
         {
             if (!File.Exists(FilePath)) return;
-            var d = JsonSerializer.Deserialize<Dto>(File.ReadAllText(FilePath));
+            var d = JsonSerializer.Deserialize(File.ReadAllText(FilePath), DisplayJson.Default.Dto);
             if (d != null)
             {
                 Fullscreen = d.Fullscreen;
@@ -465,6 +548,16 @@ void main() {
                 PostFX = d.PostFX;
                 AutoCam = d.AutoCam;
                 BraceTipSeen = d.BraceTipSeen;
+                // T1 migration bridge: an old profile only has the single BraceTipSeen bool — fold
+                // it into bit 0 so a player who already read the BRACE tip never sees it again.
+                TipsSeen = d.TipsSeen | (d.BraceTipSeen ? 1 : 0);
+                BraceTipSeen = (TipsSeen & 1) != 0;
+                TrainingSeen = d.TrainingSeen;
+                ShowAllVerbs = d.ShowAllVerbs;
+                VolMaster = Math.Clamp(d.VolMaster, 0f, 1f);
+                VolSfx    = Math.Clamp(d.VolSfx, 0f, 1f);
+                VolMusic  = Math.Clamp(d.VolMusic, 0f, 1f);
+                VolUi     = Math.Clamp(d.VolUi, 0f, 1f);
             }
         }
         catch { }

@@ -12,6 +12,12 @@ public static class Program
         // SIGHTLINE_AUTOPLAY=1    : skip intro, let an autopilot play full matches to a result.
         // Used to smoke-test the whole loop under Xvfb + software GL. See CLAUDE.md.
         bool shot = int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_SHOT"), out int shotFrame);
+        // SIGHTLINE_SEED=<n> : pin Util.Rng so two harness runs stage the SAME arena/roster. The
+        // renderer still reads the wall clock in ~50 places, so frames are not byte-identical — but
+        // this makes a before/after screenshot pair show the same BOARD, which is what a visual
+        // A/B actually needs. 0 / unset = today's clock seed (every existing path unchanged).
+        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_SEED"), out int seedPin) && seedPin != 0)
+            Util.Reseed(seedPin);
         // SIGHTLINE_SMARTPLAY=1 : like AUTOPLAY, but routes the autopilot through the
         // competent SmartStep() so a single headless game is played to win (balance gauge).
         bool smartplay = Environment.GetEnvironmentVariable("SIGHTLINE_SMARTPLAY") == "1";
@@ -43,6 +49,19 @@ public static class Program
         if (Environment.GetEnvironmentVariable("SIGHTLINE_PAIRTEST") == "1")
         {
             PairTest();
+            return;
+        }
+
+        // Q1: SIGHTLINE_STACKTEST=1 : the NO-TWO-IN-ONE-PLACE invariant. Drives real missions across
+        // all 8 objectives at heat 0/2 with two detectors running at once — (a) a hook on every
+        // MoveStepAnim ACTIVATION asserting the destination tile is empty-or-self, and (b) a
+        // per-frame sweep for two living units sharing a tile (episode-counted, with the longest
+        // episode's duration). PASS requires BOTH at zero over a non-vacuous sample.
+        // SIGHTLINE_STACKTEST=2 widens the same sweep to FULL campaigns under BOTH the dumb
+        // smoke bot and the competent one (the QA-scale measurement; several minutes).
+        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_STACKTEST"), out int stackMode) && stackMode > 0)
+        {
+            StackTest(stackMode >= 2);
             return;
         }
 
@@ -93,9 +112,33 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        // SIGHTLINE_TUTTEST=1 : RESONANCE T1 onboarding — the training-op arena/script, every lesson
+        // trigger predicate (reachable + fires exactly once), the verb-staging cap + SHOW ALL escape,
+        // the field-tip table's bit/prio integrity, and the Display seen-flag round-trip. Tiny window
+        // (Game/Unit ctors + tile math). Preserves and restores the real display.json.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_TUTTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "tuttest");
+            Console.WriteLine(new Game().TutorialSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         if (Environment.GetEnvironmentVariable("SIGHTLINE_COMBATTEST") == "1")
         {
             Console.WriteLine(Combat.SelfTest());
+            return;
+        }
+        // SIGHTLINE_THREATTEST=1 : RESONANCE T2 — the incoming-fire FORECAST pinned against
+        // Combat.ComputeOdds on a synthetic board (gun count, best hit%, expected damage, cover /
+        // flank angle, out-of-range / dormant / dry / no-LoS exclusion, overwatch + focused cones,
+        // unreachable-tile skip, caged captive, non-mutation of the mover, signature cache) plus a
+        // measured worst-case rebuild cost. Tiny window (Game/Unit ctors).
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_THREATTEST") == "1")
+        {
+            Raylib.SetTraceLogLevel(TraceLogLevel.Error);
+            Raylib.InitWindow(64, 64, "sightline-threattest");
+            Console.WriteLine(new Game().ThreatSelfTest());
+            Raylib.CloseWindow();
             return;
         }
         // SIGHTLINE_CODEXTEST=1 : CODEX / FIELD MANUAL content-completeness (W6) — every documented enum
@@ -139,6 +182,24 @@ public static class Program
         if (Environment.GetEnvironmentVariable("SIGHTLINE_AUDIOASSETS") == "1")
         {
             Console.Write(Audio.AudioAssetsReport());
+            return;
+        }
+        // RESONANCE A1: SIGHTLINE_AUDIODUMP=1 : render every SFX cue + both music beds to
+        // audio_dump/*.wav and print the full measurement table (level / spectrum / tails /
+        // loop seams / concurrent-stack headroom). Device-free, no window. Feed the WAVs to
+        // scripts/audio-report.py for a spectrogram contact sheet.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_AUDIODUMP") == "1")
+        {
+            Console.Write(Audio.DumpReport(Environment.GetEnvironmentVariable("SIGHTLINE_AUDIODIR") ?? "audio_dump"));
+            return;
+        }
+        // RESONANCE A1: SIGHTLINE_AUDIOGATE=1 : the committed audio budget as a PASS/FAIL
+        // contract (peak ceiling, per-role RMS bands, spread, crit/hit separation, DC,
+        // clipping incl. concurrent stacks, real tails, music brightness, loop seams).
+        // Device-free, no window.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_AUDIOGATE") == "1")
+        {
+            Console.WriteLine(Audio.GateReport());
             return;
         }
         // SIGHTLINE_AMBIENTTEST=1 : per-biome ambient field stays bounded/finite/on-board (Phase 5). No window.
@@ -406,17 +467,55 @@ public static class Program
                 0x00D7, // multiply sign
                 0x00B7, // middle dot
             };
-            Font loaded = Raylib.LoadFontEx("assets/NotoMono-Regular.ttf", 64, codepoints, codepoints.Length);
+            // RESONANCE V1 — TWO ATLASES, and asset paths resolved next to the BINARY.
+            //
+            // (1) A single 64px atlas served everything from 11px to 92px. The 11-14px body text
+            //     is most of the words in the game, and minifying 64px glyphs ~5x with bilinear
+            //     filtering and no mip chain is exactly what turns small type into grey mush.
+            //     Bake a second atlas at 20px for text <= Cfg.UiFontMax and keep the 64px atlas
+            //     for the big sizes; Cfg.FontFor(size) routes every call site.
+            // (2) Ship-blocker: the path was relative to the CURRENT WORKING DIRECTORY. A player
+            //     launching the built binary from anywhere but the project root silently got
+            //     Raylib's built-in bitmap font and every em-dash rendered as '?'. Cfg.AssetPath
+            //     resolves against AppContext.BaseDirectory (with a cwd fallback for dev).
+            // Mipmaps + trilinear on both atlases so any residual off-size draw filters cleanly.
+            string notoPath = Cfg.AssetPath("assets/NotoMono-Regular.ttf");
+            Font loaded = Raylib.LoadFontEx(notoPath, 64, codepoints, codepoints.Length);
             if (loaded.Texture.Id != 0)
             {
-                Raylib.SetTextureFilter(loaded.Texture, TextureFilter.Bilinear);
+                Raylib.GenTextureMipmaps(ref loaded.Texture);
+                Raylib.SetTextureFilter(loaded.Texture, TextureFilter.Trilinear);
                 Cfg.Font = loaded;
-                Console.WriteLine("FONT: NotoMono-Regular loaded (glyph atlas ok)");
+                Console.WriteLine($"FONT: NotoMono-Regular 64px atlas loaded ({notoPath})");
+
+                Font ui = Raylib.LoadFontEx(notoPath, 20, codepoints, codepoints.Length);
+                if (ui.Texture.Id != 0)
+                {
+                    Raylib.GenTextureMipmaps(ref ui.Texture);
+                    Raylib.SetTextureFilter(ui.Texture, TextureFilter.Trilinear);
+                    Cfg.FontUi = ui;
+                    Console.WriteLine("FONT: NotoMono-Regular 20px UI atlas loaded");
+                }
             }
             else
             {
                 Cfg.Font = Raylib.GetFontDefault();
-                Console.WriteLine("FONT: NotoMono-Regular not found, falling back to default");
+                Console.WriteLine($"FONT: NotoMono-Regular NOT FOUND at {notoPath} — falling back to default");
+            }
+
+            // Display face (Chakra Petch Bold, OFL-1.1) — titles only; NotoMono keeps the data.
+            string dispPath = Cfg.AssetPath("assets/ChakraPetch-Bold.ttf");
+            Font disp = Raylib.LoadFontEx(dispPath, 96, codepoints, codepoints.Length);
+            if (disp.Texture.Id != 0)
+            {
+                Raylib.GenTextureMipmaps(ref disp.Texture);
+                Raylib.SetTextureFilter(disp.Texture, TextureFilter.Trilinear);
+                Cfg.FontTitle = disp;
+                Console.WriteLine("FONT: ChakraPetch-Bold display atlas loaded");
+            }
+            else
+            {
+                Console.WriteLine($"FONT: ChakraPetch-Bold NOT FOUND at {dispPath} — titles stay on NotoMono");
             }
         }
 
@@ -501,6 +600,8 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_PODSHOT") == "1") game.DebugPodShot();   // FUL-6: pair with SIGHTLINE_MISSION=3
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_WAVEBANNER") == "1") game.DebugWaveTelegraph();   // FUL-4: pair with SIGHTLINE_OBJ=defend
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_PIKESHOT") == "1") game.DebugPikemanLane();       // FUL-8: planted PIKEMAN lane (pair with SIGHTLINE_CB=1 for the second pass)
+        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_THREATSHOT") == "1") game.DebugThreatShot();      // RESONANCE T2: incoming-fire pips + tinted path + card (pair with SIGHTLINE_CB=1)
+        if (shot && int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_THREATPREF"), out int _tp)) game.ThreatPref = Util.Clamp(_tp, Game.ThreatOff, Game.ThreatFull);   // 0 off / 1 simple (pre-T2 read) / 2 full
         string downShot = Environment.GetEnvironmentVariable("SIGHTLINE_DOWNSHOT");
         if (shot && (downShot == "1" || downShot == "2")) game.DebugDownShot(downShot == "2");   // FUL-7: downed soldier + rescuer (=2 mid-rescue STABLE; pair with SIGHTLINE_CB=1 for the second pass)
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CONCEAL") == "1") game.DebugConcealment();
@@ -516,12 +617,24 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_UNITFX") == "1") game.DebugUnitFx();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_ELEV") == "1") game.DebugElevation();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_SHOP") == "1") game.DebugShop();
-        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_PREP") == "1") game.DebugPrep();
+        if (shot && !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("SIGHTLINE_PREP"))) game.DebugPrep();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_ARMORY") == "1") game.DebugArmory();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_BOON") == "1") game.DebugBoon();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_ENDLESSOFFER") == "1") game.DebugEndlessOffer();   // W7: pair with SIGHTLINE_ENDLESS=1
 
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_EVENT") == "1") game.DebugEvent();   // + SIGHTLINE_EVENTID=<id> pins the staged event (FUL-10)
+        // RESONANCE T1 harness entries:
+        //   SIGHTLINE_TRAINING=1        -> boot straight into the TRAINING OP (scripted drill)
+        //   SIGHTLINE_TRAINLESSON=<n>   -> park it on lesson n (1-based) for a staged-bar screenshot
+        //   SIGHTLINE_SHOWALL=1         -> flip the SHOW ALL escape on (staging bypass, before/after shot)
+        // All shot/autoplay-only and NoPersist, so nothing here can write a profile.
+        if ((shot || autoplay) && Environment.GetEnvironmentVariable("SIGHTLINE_TRAINING") == "1")
+        {
+            game.BeginTraining();
+            if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_TRAINLESSON"), out int _tl) && _tl > 0)
+                game.ShowTrainingLesson(_tl - 1);
+            if (Environment.GetEnvironmentVariable("SIGHTLINE_SHOWALL") == "1") game.ToggleShowAllVerbs();
+        }
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_DRAFT") == "1") game.BeginDraft();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_VETDRAFT") == "1") game.DebugVetDraft();   // draft w/ recalled veterans
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_FOCUSOW") == "1") game.DebugFocusOw();      // focused-overwatch cone
@@ -530,7 +643,10 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_HAZARD") == "1") game.DebugHazards();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_TAGEDIT") == "1") game.DebugTagEditor();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_WOUND") == "1") game.DebugWound();
-        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_TOOLTIP") == "1") game.DebugTooltip();
+        // Q1: =1 stages the AIM-mode tooltip, =hover the plain hover-an-enemy tooltip (D4).
+        bool tooltipHover = shot && Environment.GetEnvironmentVariable("SIGHTLINE_TOOLTIP") == "hover";
+        if (shot && (Environment.GetEnvironmentVariable("SIGHTLINE_TOOLTIP") == "1" || tooltipHover))
+            game.DebugTooltip(tooltipHover);
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_BENCH") == "1") game.DebugBench();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_TRAITS") == "1") game.DebugTraits();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_STATUS") == "1") game.DebugStatus();
@@ -553,6 +669,7 @@ public static class Program
             Display.ChromaIntensity = 0.6f;
         }
         bool helpShot = shot && Environment.GetEnvironmentVariable("SIGHTLINE_HELP") == "1";  // hover the ability button
+        int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_SHOTSEQ"), out int seqCount);   // Q1: consecutive-frame dump
         int frame = 0;
         const int autoCap = 20000;
 
@@ -561,12 +678,21 @@ public static class Program
             float dt = (shot || autoplay) ? 1f / 60f : Raylib.GetFrameTime();
             Display.UpdateMouse();
             if (helpShot) Raylib.SetMousePosition(592, 740);   // park cursor on the ability button
+            // RESONANCE T2: a staged hover for the forecast screenshot — the card + path preview are
+            // hover-driven, so the harness has to hold the cursor on the tile every frame.
+            if (shot && game.DebugMousePark.HasValue)
+                Raylib.SetMousePosition((int)game.DebugMousePark.Value.X, (int)game.DebugMousePark.Value.Y);
+            if (tooltipHover) game.KbCursor = true;            // Q1: hold the board cursor on the foe (a mouse
+                                                               // delta from the Xvfb pointer clears it otherwise)
             game.Update(dt);
             Audio.UpdateMusic(dt);
 
             Display.RenderFrame(() =>
             {
-                if (autoplay) Raylib.ClearBackground(Pal.Bg);  // skip heavy draw during smoke test
+                // Q1: autoplay normally skips the heavy draw (it's a smoke test), but a shot frame
+                // requested ON TOP of autoplay is asking for a picture of live play — the only way
+                // to photograph a unit MID-MOVE — so draw for real in that combination.
+                if (autoplay && !shot) Raylib.ClearBackground(Pal.Bg);
                 else game.Draw();
             });
 
@@ -574,7 +700,15 @@ public static class Program
             if (shot)
             {
                 if (frame == shotFrame) Raylib.TakeScreenshot("sightline_shot.png");
-                if (!autoplay && frame >= shotFrame + 2) break;
+                // Q1 SIGHTLINE_SHOTSEQ=<n>: also dump the n consecutive frames from shotFrame as
+                // sightline_seq_NN.png. Pair with SIGHTLINE_AUTOPLAY=1 to film a multi-tile move —
+                // the eyes-only check for the MoveStepAnim OnStart-at-enqueue jitter landmine
+                // (CLAUDE.md: a step that captures _from at the ORIGINAL tile snaps back every
+                // tile, and no test catches it).
+                if (seqCount > 0 && frame >= shotFrame && frame < shotFrame + seqCount)
+                    Raylib.TakeScreenshot($"sightline_seq_{frame - shotFrame:00}.png");
+                if (!autoplay && frame >= shotFrame + Math.Max(2, seqCount)) break;
+                if (autoplay && seqCount > 0 && frame >= shotFrame + seqCount) break;
             }
             if (autoplay)
             {
@@ -913,6 +1047,137 @@ public static class Program
             case "decapitate": case "decap": return Objective.Decapitate;
             default: return Objective.Eliminate;
         }
+    }
+
+    // ── Q1 "NO TWO IN ONE PLACE" — SIGHTLINE_STACKTEST ────────────────────────────────────
+    // Two living units must never occupy the same tile. They used to: Game.ActivatePod planned
+    // EVERY dormant pod member against the live board and enqueued all their reveal-scatter
+    // steps before any of them ran, so member 2 planned blind to where member 1 was going (and
+    // blind to the player's own still-queued path steps, which sit AHEAD of the scatter in the
+    // queue). Two bodies on one tile is not cosmetic: Game.UnitAt returns the FIRST match
+    // (Players before Enemies), and both hover and click route through it, so the buried unit
+    // cannot be hovered, cannot show odds, and cannot be clicked to target — a direct hit on the
+    // "reads clearly" pillar — while both read cover=0/flanked at range 0.
+    //
+    // Two independent detectors, both live for the whole sweep:
+    //   (a) STEP detector — MoveStepAnim.StackProbe fires when a step becomes the ACTIVE anim.
+    //       Unit.X/Y is still the origin there and only one anim is ever active, so a non-null
+    //       UnitAt(Tx,Ty) that isn't the mover is a proven imminent collision, not an artifact.
+    //   (b) FRAME detector — a per-frame sweep over the living roster for a shared tile,
+    //       collapsed into EPISODES (a tile+pair overlap that persists across frames counts
+    //       once) so the report shows how long a stack actually lingers.
+    // Non-vacuity guard (the PAIRTEST precedent): a run with no display returns before frame one
+    // and would "pass" on zero gameplay, so PASS also requires a real sample of move steps.
+    static void StackTest(bool wide = false)
+    {
+        Stats.Reset();
+        Stats.Enabled = false;         // pure invariant sweep; no telemetry needed
+        Mission.ForcedLayout = -1;
+        Pal.SetColorblind(false);
+
+        Raylib.SetConfigFlags(ConfigFlags.Msaa4xHint);
+        Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "SIGHTLINE — stack test");
+        Raylib.SetExitKey(KeyboardKey.Null);
+        Cfg.Font = Raylib.GetFontDefault();
+        Display.Init(false);
+        Raylib.SetTargetFPS(0);
+
+        long steps = 0, stepHits = 0;
+        int episodes = 0, longestFrames = 0, framesWithOverlap = 0;
+        var openEpisodes = new System.Collections.Generic.Dictionary<string, int>();
+        var seenThisFrame = new System.Collections.Generic.HashSet<string>();
+        var examples = new System.Collections.Generic.List<string>();
+        int missionsSeen = 0;
+
+        MoveStepAnim.StackProbe = (g, m) =>
+        {
+            steps++;
+            var occ = g.UnitAt(m.Tx, m.Ty);
+            if (occ == null || occ == m.Unit) return;
+            stepHits++;
+            if (examples.Count < 6)
+                examples.Add($"{m.Unit.Team}/{m.Unit.Cls} -> ({m.Tx},{m.Ty}) already held by {occ.Team}/{occ.Cls} [phase={g.Phase}]");
+        };
+
+        // one leg = the first mission of a campaign pinned to (objective, heat), dumb autopilot
+        // (the reveal-scatter path is policy-independent, and the dumb bot blunders into pods
+        // more often, which is exactly the trigger we want to sample).
+        void Leg(Objective obj, int heat, int slot, bool smart)
+        {
+            Environment.SetEnvironmentVariable("SIGHTLINE_HEAT", heat.ToString());
+            Util.Reseed(70000 + slot);
+            var game = new Game { NoPersist = true, AutoPlay = true, SmartPlay = smart, ForcedObjective = obj };
+            game.StartMission(1);
+            int frame = 0;
+            int legCap = wide ? 20000 : 6000;
+            int missionsThisLeg = 0;
+            while (!Raylib.WindowShouldClose())
+            {
+                game.Update(1f / 60f);
+                Display.RenderFrame(() => Raylib.ClearBackground(Pal.Bg));
+
+                // ---- (b) per-frame shared-tile sweep ----
+                seenThisFrame.Clear();
+                var all = new System.Collections.Generic.List<Unit>();
+                foreach (var u in game.Players) if (u.Alive) all.Add(u);
+                foreach (var u in game.Enemies) if (u.Alive) all.Add(u);
+                for (int i = 0; i < all.Count; i++)
+                    for (int j = i + 1; j < all.Count; j++)
+                        if (all[i].X == all[j].X && all[i].Y == all[j].Y)
+                            seenThisFrame.Add($"{obj}h{heat}:{all[i].X},{all[i].Y}:{all[i].Cls}|{all[j].Cls}");
+                if (seenThisFrame.Count > 0) framesWithOverlap++;
+                foreach (var k in seenThisFrame)
+                {
+                    if (openEpisodes.TryGetValue(k, out int n)) openEpisodes[k] = n + 1;
+                    else { openEpisodes[k] = 1; episodes++; }
+                }
+                var stale = new System.Collections.Generic.List<string>();
+                foreach (var kv in openEpisodes)
+                    if (!seenThisFrame.Contains(kv.Key)) { if (kv.Value > longestFrames) longestFrames = kv.Value; stale.Add(kv.Key); }
+                foreach (var k in stale) openEpisodes.Remove(k);
+
+                frame++;
+                if (game.Phase == Phase.Lose || game.Phase == Phase.Win) break;
+                // narrow sweep: stop the moment the FIRST mission resolves (a win advances
+                // RunState.Mission). Wide sweep: play the whole campaign out.
+                int cleared = game.RunState != null ? game.RunState.Mission - 1 : 0;
+                if (cleared > missionsThisLeg) missionsThisLeg = cleared;
+                if (!wide && missionsThisLeg >= 1) break;
+                if (frame >= legCap) break;
+            }
+            foreach (var kv in openEpisodes) if (kv.Value > longestFrames) longestFrames = kv.Value;
+            openEpisodes.Clear();
+            missionsSeen += Math.Max(1, missionsThisLeg + (game.Phase == Phase.Lose ? 1 : 0));
+        }
+
+        var objs = new[] { Objective.Eliminate, Objective.Hack, Objective.Evac, Objective.Escort,
+                           Objective.Sabotage, Objective.Rescue, Objective.Defend, Objective.Decapitate };
+        int s2 = 0;
+        foreach (bool smart in wide ? new[] { false, true } : new[] { false })
+            foreach (int heat in new[] { 0, 2 })
+                foreach (var o in objs)
+                {
+                    if (Raylib.WindowShouldClose()) break;
+                    Leg(o, heat, s2++, smart);
+                }
+
+        MoveStepAnim.StackProbe = null;
+        Util.Reseed(0);
+        Display.Shutdown();
+        Renderer.UnloadNoise();
+        Raylib.CloseWindow();
+
+        Console.WriteLine($"STACKTEST: mode={(wide ? "wide" : "narrow")} missions={missionsSeen} moveSteps={steps} " +
+                          $"stepCollisions={stepHits} ({(steps > 0 ? 100.0 * stepHits / steps : 0):0.000}%) " +
+                          $"overlapEpisodes={episodes} overlapFrames={framesWithOverlap} longestEpisodeFrames={longestFrames}");
+        foreach (var e in examples) Console.WriteLine("STACKTEST:   e.g. " + e);
+        var fails = new System.Collections.Generic.List<string>();
+        if (stepHits > 0) fails.Add($"stepCollisions={stepHits}");
+        if (episodes > 0) fails.Add($"overlapEpisodes={episodes}");
+        if (steps < 500) fails.Add($"vacuous(moveSteps={steps})");   // no display / no gameplay
+        Console.WriteLine(fails.Count == 0
+            ? "STACKTEST: PASS (no move step ever entered an occupied tile; no two living units ever shared one)"
+            : "STACKTEST: FAIL (" + string.Join(",", fails) + ")");
     }
 
     // SIGHTLINE_WOUNDTEST: a survivor that ends a mission badly hurt carries a Wound

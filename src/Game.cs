@@ -19,8 +19,31 @@ public enum SecondaryKind { None, NoLosses, Swift, CleanSweep, Ghost, Demolition
 // PROGRAM HORIZON W2/W4: game modes. Campaign = the 6-mission run (all prior behaviour); Endless =
 // LAST STAND horde survival on one arena; Skirmish = a SINGLE-MISSION mode (both free SKIRMISH and the
 // seeded DAILY, differentiated by Game.DailyMode). APPEND-ONLY (Mode isn't persisted, but keep it stable).
-public enum GameMode { Campaign, Endless, Skirmish }
+// T1: Training appended at the END (GameMode is not persisted anywhere — verified against
+// SaveGame/Run/Stats — but the append-only habit costs nothing and protects the next reader).
+public enum GameMode { Campaign, Endless, Skirmish, Training }
 enum AiStage { PickNext, Telegraph, ActAfterMove }
+
+/// RESONANCE T2 — the INCOMING-FIRE FORECAST for one board tile: everything the player needs to
+/// answer "what happens to me if I stand HERE?", derived from the SAME Combat.ComputeOdds the
+/// shot tooltip uses (so the read side can never drift from the resolver).
+///
+/// The old model was a single bool ("some enemy sees this tile and it has no cover"), which made a
+/// tile covered from one gun but enfiladed by four others read completely clean. This carries the
+/// count, the worst hit%, the expected damage and the flank/reaction state instead.
+public struct ThreatCell
+{
+    public byte Guns;        // how many live, ACTIVE, armed hostiles can actually shoot a soldier standing here
+    public sbyte BestHit;    // the best (highest) enemy hit% among those guns, 0 when none
+    public float ExpDmg;     // expected incoming damage if every bearing gun fires once (post-armor)
+    public bool Flanked;     // at least one bearing gun would have the mover FLANKED (cover negated)
+    public bool Exposed;     // at least one bearing gun sees the mover with NO cover at all (the pre-T2 bool, now via ComputeOdds so see-over/DRONE/SHIELD count)
+    public bool Watched;     // the tile sits inside a live enemy OVERWATCH / braced (PIKEMAN) reaction lane
+    public string WorstCls;  // archetype of the gun with the best hit% (named on the hover card)
+    /// Danger grade 0..3 — the pip count. 0 = clean, 3 = three or more guns bear.
+    public int Tier => Guns >= 3 ? 3 : Guns;
+    public bool Any => Guns > 0 || Watched;
+}
 
 public partial class Game
 {
@@ -52,7 +75,12 @@ public partial class Game
     public int HoverX, HoverY;
     public bool HoverValid;
     public int[,] MoveCost;
-    public bool[,] Threat;          // reachable tiles exposed to active-enemy fire (no cover)
+    // RESONANCE T2: the per-tile INCOMING-FIRE FORECAST over reachable tiles (null when the
+    // preview is off / nothing is selected). Recomputed only when the board actually changes
+    // (see ComputeThreat's signature cache) — NOT every frame.
+    public ThreatCell[,] Threat;
+    public double ThreatMs;         // wall-clock cost of the last real forecast rebuild (perf probe)
+    public int ThreatRebuilds;      // how many rebuilds happened (cache-miss counter, for the perf probe)
     (int, int)[,] _cameFrom;
     public List<(int x, int y)> PathPreview = new();
 
@@ -510,6 +538,9 @@ public partial class Game
         // phantom mission-1-scaled reinforcement waves on top of its own wave economy. Endless
         // difficulty is owned by the wave escalation, not the campaign clock.
         Mode != GameMode.Endless &&
+        // T1: and none in the TRAINING OP — a drill you are reading lesson cards through must not
+        // quietly ramp enemy aim while you think.
+        Mode != GameMode.Training &&
         (Objective == Objective.Eliminate || Objective == Objective.Hack || Objective == Objective.Decapitate);
 
     // HUD reads this to decide whether to draw the PRESSURE meter (only on clock objectives,
@@ -524,9 +555,23 @@ public partial class Game
         return Math.Min(rung, PressureMax);
     }
 
-    // onboarding tutorial (3.12): non-blocking contextual callouts on the first-ever run
+    // ═══════════════════════════════════════════════════════════════════════════════════════
+    // ONBOARDING (3.12 -> PROGRAM RESONANCE T1)
+    //
+    // Three cooperating pieces, deliberately kept in one place:
+    //   A. TRAINING OP  — TrainStep / TrainLessons: a scripted, non-persistent, restartable drill
+    //                     (Mode == GameMode.Training) that teaches by posing small problems.
+    //   B. VERB STAGING — RevealedVerbs: during the drill AND campaign mission 1 the action bar
+    //                     shows only what has been taught, and grows as lessons land. Permanent
+    //                     SHOW ALL escape ([V]) so a returning player is never locked out.
+    //   C. FIELD TIPS   — FieldTips: ~10 once-per-profile just-in-time cards, each fired the first
+    //                     time its precondition is actually TRUE in play.
+    // ═══════════════════════════════════════════════════════════════════════════════════════
+
+    // ---- A(campaign): the original mission-1 callout strip. UNCHANGED semantics ----
     public int TutStep = -1;                 // -1 = inactive
     bool _tutMoved, _tutOver, _tutShot;
+    bool _tutGrenade, _tutAbility;           // T1: two more verb-performed flags the drill reads
     float _tutDoneTimer;
     // FUL-12: named step indices — every gate below compares against the SEMANTIC step, so a
     // future insert/renumber can't silently re-point the "reached the FIRE lesson" completion
@@ -542,13 +587,28 @@ public partial class Game
         "Click a hostile to FIRE. A shot costs 1 action and does NOT end the turn - keep the other action to reposition (one shot per turn). Attacking from a side a foe has no cover on FLANKS it - far deadlier.",
         "That's the basics: move into cover, flank, overwatch, fire - then END TURN. Press [K] anytime for the FIELD MANUAL - every enemy, verb and rule lives there. Good hunting.",
     };
+    /// T1 (Part B): what each mission-1 lesson PUTS ON THE BAR when it opens. Index-aligned with
+    /// TutPrompts through the same named constants, so a renumber moves both together. The first
+    /// two lessons are BOARD lessons (move/conceal are clicks, not buttons) and add nothing —
+    /// the bar carries only the SHOW ALL escape then, which is the honest state: nothing taught yet.
+    static readonly string[][] TutReveal =
+    {
+        new string[0],                                   // TutStepConceal — board lesson
+        new string[0],                                   // TutStepMove    — board lesson
+        new[] { "overwatch" },                           // TutStepOverwatch
+        new[] { "shoot", "reload" },                     // TutStepFire (RELOAD rides with FIRE: a
+                                                         // staged-away RELOAD could strand a dry soldier)
+        new string[0],                                   // TutStepDone — staging is OFF by then
+    };
     public string TutorialText => (TutStep >= 0 && TutStep < TutPrompts.Length) ? TutPrompts[TutStep] : null;
 
     void StartTutorialMaybe()
     {
         if (NoPersist || _run.Mission != 1 || Display.TutorialSeen) return;
         TutStep = 0;
-        _tutMoved = _tutOver = _tutShot = false;
+        _tutMoved = _tutOver = _tutShot = _tutGrenade = _tutAbility = false;
+        RevealedVerbs.Clear();
+        ApplyReveal(TutReveal[0]);
         // APEX W2: "seen" is now marked at tutorial COMPLETION (CompleteTutorial), not here — a
         // player who quit on step 0 used to have the whole onboarding burned without reading it.
     }
@@ -579,43 +639,19 @@ public partial class Game
     {
         TutStep++;
         if (TutStep == TutStepDone) _tutDoneTimer = 7f;
+        if (TutStep >= 0 && TutStep < TutReveal.Length) ApplyReveal(TutReveal[TutStep]);
         if (TutStep >= TutPrompts.Length) CompleteTutorial();
     }
 
     /// Harness seam (SIGHTLINE_TUTORIAL=<n>): show a step directly. Seeds the final step's dwell
     /// timer — without it, the done step completes on the first Update tick and the shot frames a
-    /// bare board.
+    /// bare board. T1: also replays the cumulative reveal set so a staged-bar screenshot is honest.
     public void ShowTutorialStep(int step)
     {
         TutStep = Math.Clamp(step, 0, TutPrompts.Length - 1);
         if (TutStep == TutStepDone) _tutDoneTimer = 7f;
-    }
-
-    // ---------------- FUL-12: one-shot BRACE field tip ----------------
-    // The BRACE interrupt is the comeback lever, but nothing in the game ever POINTS at it — the
-    // verb sat unused by exactly the players it rescues. One card, once per profile, the first
-    // time a live (Active) hostile makes the reaction real. Interactive-only: NoPersist runs
-    // (autoplay/shots) never see it unless SIGHTLINE_BRACETIP=1 stages it for the harness.
-    public string CalloutText;      // non-null => Hud draws the FIELD TIP card
-    public float CalloutTimer;      // seconds left on screen
-
-    void UpdateBraceCallout(float dt)
-    {
-        if (CalloutText != null)
-        {
-            CalloutTimer -= dt;
-            if (CalloutTimer <= 0) CalloutText = null;
-            return;
-        }
-        bool force = NoPersist && Environment.GetEnvironmentVariable("SIGHTLINE_BRACETIP") == "1";
-        if (!force && (NoPersist || Display.BraceTipSeen)) return;
-        if (Phase != Phase.PlayerTurn || TutorialText != null) return;   // never overlap a lesson card
-        if (!force && !Enemies.Any(e => e.Alive && e.Active)) return;    // fire when the threat is real
-        CalloutText = "BRACE [B]: a disrupting reaction. On a hit it STAGGERS the mover - the foe "
-                    + "loses its action this turn (for reduced damage). Deny a rushing enemy's alpha "
-                    + "instead of racing it for the kill.";
-        CalloutTimer = 9f;
-        if (!NoPersist) Display.MarkBraceTipSeen();   // one-shot: burned the moment it shows
+        RevealedVerbs.Clear();
+        for (int i = 0; i <= TutStep && i < TutReveal.Length; i++) ApplyReveal(TutReveal[i]);
     }
 
     /// APEX W2: finish the onboarding and persist the one-time "seen" flag. The !NoPersist gate is
@@ -627,7 +663,306 @@ public partial class Game
     void CompleteTutorial()
     {
         TutStep = -1;
+        RevealedVerbs.Clear();      // staging ends with the lessons: the full bar is the graduation
         if (!NoPersist) Display.MarkTutorialSeen();
+    }
+
+    // ───────────────────────────── A. TRAINING OP ─────────────────────────────────────────────
+    /// One drill lesson: a small problem, the verbs it puts on the bar, and the predicate that
+    /// says the recruit solved it. `Patience` is the turn budget after which the lesson yields
+    /// anyway — the drill must never be able to strand someone who solves it a different way.
+    public sealed class Lesson
+    {
+        public string Code;                 // stable id (harness + TUTTEST)
+        public string Text;                 // the card body
+        public string[] Reveal;             // verbs added to the bar when this lesson OPENS
+        public Func<Game, bool> Done;       // solved?
+        public int Patience;                // player turns before it yields anyway (0 = never)
+    }
+
+    /// The drill's well-ordered problems (DESIGN.md 3.G): each one is a thing to DO, in an order
+    /// where every step is solvable with what the previous step taught. The last lesson has no
+    /// predicate — CheckTraining ends the drill when the field is clear.
+    public static readonly Lesson[] TrainLessons =
+    {
+        new Lesson { Code = "MOVE", Patience = 3,
+            Reveal = new string[0],
+            Text = "TRAINING OP. Two recruits, four dormant targets, no consequences - nothing here touches your campaign. Select a soldier and click a glowing tile to MOVE. Move costs 1 of 2 actions; a far (dashed) tile costs both.",
+            Done = g => g._tutMoved },
+        new Lesson { Code = "COVER", Patience = 4,
+            Reveal = new string[0],
+            Text = "TAKE COVER. The raised blocks are cover: low blocks cut enemy aim by 20, high blocks by 40 - but only from the side they sit on. End a move with a soldier BESIDE one of the blocks ahead of you.",
+            Done = g => g.AnySoldierBesideCover() },
+        new Lesson { Code = "FLANK", Patience = 6,
+            Reveal = new string[0],
+            Text = "FLANK THEM. The two targets ahead hide behind blocks on their WEST side - shooting straight down the lane wastes the shot. Walk a soldier around to their north or south until the target reads FLANKED.",
+            Done = g => g.AnySoldierHasFlankingShot() },
+        new Lesson { Code = "FIRE", Patience = 5,
+            Reveal = new[] { "shoot", "reload" },
+            Text = "OPEN FIRE. Press [1] or FIRE, then click a target. A shot costs 1 action and does NOT end the turn - you keep the second action to reposition. Your first shot from concealment is an AMBUSH: bonus aim and crit.",
+            Done = g => g._tutShot },
+        new Lesson { Code = "OVERWATCH", Patience = 4,
+            Reveal = new[] { "overwatch" },
+            Text = "SET A TRAP. OVERWATCH [2] ends a soldier's turn but fires automatically at the first enemy that moves into its line of sight. Arm one, then end the turn and let them walk into it.",
+            Done = g => g._tutOver },
+        new Lesson { Code = "GRENADE", Patience = 4,
+            Reveal = new[] { "grenade" },
+            Text = "BREAK THE COVER. A GRENADE [4] always hits - it damages everything in a 3x3 and DESTROYS the cover they are hiding behind. One per soldier per mission. Throw one.",
+            Done = g => g._tutGrenade },
+        new Lesson { Code = "ABILITY", Patience = 4,
+            Reveal = new[] { "ability" },
+            Text = "USE THE KIT. Every class has a signature ability on key [5], on a short cooldown - the ASSAULT yanks a foe out of cover with GRAPPLE, the SHARPSHOOTER designates one with MARK. Use one now.",
+            Done = g => g._tutAbility },
+        new Lesson { Code = "CLEAR", Patience = 0,
+            Reveal = new string[0],   // graduation: staging switches OFF at this lesson, full bar
+            Text = "FINISH IT. That is the loop: move, cover, flank, fire, react. Clear the remaining targets to complete the drill. The full action bar is now unlocked - press [K] any time for the FIELD MANUAL.",
+            Done = g => false },
+    };
+
+    public int TrainStep = -1;          // -1 = the drill's lesson track is inactive
+    int _trainLessonTurn = 1;           // _turnCount when the current lesson opened (patience clock)
+
+    public string TrainingText => (TrainStep >= 0 && TrainStep < TrainLessons.Length)
+        ? TrainLessons[TrainStep].Text : null;
+
+    /// True while a drill lesson card is up; Hud uses it to title the card TRAINING OP n/N.
+    public bool TrainingActive => Mode == GameMode.Training && TrainStep >= 0;
+
+    void UpdateTraining(float dt)
+    {
+        if (Mode != GameMode.Training || TrainStep < 0) return;
+        if (TrainStep >= TrainLessons.Length) { TrainStep = -1; return; }
+        var l = TrainLessons[TrainStep];
+        bool solved = l.Done != null && l.Done(this);
+        bool spent  = l.Patience > 0 && _turnCount - _trainLessonTurn >= l.Patience;
+        if (solved || spent) AdvanceTraining();
+    }
+
+    void AdvanceTraining()
+    {
+        if (TrainStep < 0) return;
+        TrainStep++;
+        _trainLessonTurn = _turnCount;
+        if (TrainStep >= TrainLessons.Length) { TrainStep = TrainLessons.Length - 1; return; }
+        ApplyReveal(TrainLessons[TrainStep].Reveal);
+        Audio.Play("select");
+    }
+
+    /// Harness seam (SIGHTLINE_TRAINLESSON=<n>): park the drill on one lesson for a screenshot,
+    /// replaying the cumulative reveal set so the staged bar in the frame is the real one.
+    public void ShowTrainingLesson(int step)
+    {
+        TrainStep = Math.Clamp(step, 0, TrainLessons.Length - 1);
+        _trainLessonTurn = _turnCount;
+        RevealedVerbs.Clear();
+        for (int i = 0; i <= TrainStep; i++) ApplyReveal(TrainLessons[i].Reveal);
+    }
+
+    /// A soldier is standing beside (4-way) a cover block — the COVER lesson's solved state.
+    public bool AnySoldierBesideCover()
+    {
+        foreach (var p in Players)
+        {
+            if (!p.Alive || p.IsVip || p.Downed) continue;
+            for (int d = 0; d < 4; d++)
+            {
+                int nx = p.X + (d == 0 ? 1 : d == 1 ? -1 : 0);
+                int ny = p.Y + (d == 2 ? 1 : d == 3 ? -1 : 0);
+                if (!Grid.InBounds(nx, ny)) continue;
+                var t = Grid.Tiles[nx, ny];
+                if (t == TileType.LowCover || t == TileType.HighCover) return true;
+            }
+        }
+        return false;
+    }
+
+    /// Some soldier currently has a FLANKING line on some live hostile — the FLANK lesson's
+    /// solved state. Reads the same Combat.ComputeOdds the HUD shows, so the lesson can never
+    /// disagree with the reticle the player is looking at.
+    public bool AnySoldierHasFlankingShot()
+    {
+        foreach (var p in Players)
+        {
+            if (!p.Alive || p.IsVip || p.Downed) continue;
+            foreach (var e in Enemies)
+            {
+                if (!e.Alive) continue;
+                if (!Grid.HasLineOfSight(p.X, p.Y, e.X, e.Y)) continue;
+                if (Combat.ComputeOdds(Grid, p, e).Flanked) return true;
+            }
+        }
+        return false;
+    }
+
+    // ───────────────────────────── B. VERB STAGING ────────────────────────────────────────────
+    /// Verbs the player has been shown. Empty + staging-active = only the SHOW ALL escape is on
+    /// the bar. Cleared when onboarding ends, which IS the "full bar" graduation.
+    public readonly HashSet<string> RevealedVerbs = new();
+    void ApplyReveal(string[] ids) { if (ids != null) foreach (var i in ids) RevealedVerbs.Add(i); }
+
+    bool _showAllLocal;   // NoPersist mirror of Display.ShowAllVerbs (the harness never writes disk)
+    public bool ShowAllVerbs => NoPersist ? _showAllLocal : Display.ShowAllVerbs;
+    public void ToggleShowAllVerbs()
+    {
+        if (NoPersist) _showAllLocal = !_showAllLocal; else Display.ToggleShowAllVerbs();
+        Audio.Play("select");
+    }
+
+    /// Staging is CAPPED, by design, to the two places a player can still be learning: the drill
+    /// and campaign mission 1's lesson strip. From mission 2 (and in every other mode) the bar is
+    /// always whole — a staged verb the player already knows would be a bug, not a lesson.
+    public bool OnboardingActive
+    {
+        get
+        {
+            // The drill's LAST lesson ("CLEAR") is the graduation: staging switches off there and
+            // the recruit finishes the fight with the whole bar.
+            if (Mode == GameMode.Training) return TrainStep >= 0 && TrainStep < TrainLessons.Length - 1;
+            // Mission 1 only, and only while the callout strip is actually running. TutStepDone is
+            // the wrap-up card ("that's the basics") — the bar is whole from there.
+            return Mode == GameMode.Campaign && _run != null && _run.Mission <= 1
+                   && TutStep >= 0 && TutStep < TutStepDone;
+        }
+    }
+
+    /// Onboarding is running AND the player hasn't taken the SHOW ALL escape.
+    public bool VerbStagingActive => OnboardingActive && !ShowAllVerbs;
+
+    /// Should this action-bar verb be drawn at all this frame?
+    public bool VerbRevealed(string id)
+    {
+        if (!VerbStagingActive) return true;
+        // Emergency verbs are NEVER staged away: STABILIZE only appears at all while a squadmate
+        // is bleeding out, and hiding the one answer to that would be the exact failure mode the
+        // SHOW ALL escape exists to prevent.
+        if (id == "stabilize") return true;
+        return RevealedVerbs.Contains(id);
+    }
+
+    // ───────────────────────────── C. JUST-IN-TIME FIELD TIPS ─────────────────────────────────
+    /// One once-per-profile card for a verb the lessons never reach, fired the first time its
+    /// precondition is actually TRUE in play. `Bit` is the Display.TipsSeen bit (STABLE — it is
+    /// on disk; append new tips at the end and never renumber). `Prio` orders simultaneous
+    /// candidates by teaching urgency, so a bleeding-out ally outranks a spare-ammo nicety.
+    public sealed class FieldTip
+    {
+        public int Bit;
+        public int Prio;
+        public string Code;
+        public string Text;
+        public Func<Game, bool> When;
+    }
+
+    /// Helper predicates kept tiny and side-effect-free — TUTTEST calls every one of them.
+    static bool AnyLiveThreat(Game g) => g.Enemies.Any(e => e.Alive && e.Active);
+    static IEnumerable<Unit> Soldiers(Game g) => g.Players.Where(p => p.Alive && !p.IsVip && !p.Downed);
+
+    /// BIT ORDER IS ON DISK. Bit 0 is BRACE (it inherits FUL-12's BraceTipSeen bool through the
+    /// Display migration bridge). Append only.
+    public static readonly FieldTip[] FieldTips =
+    {
+        new FieldTip { Bit = 0, Prio = 2, Code = "BRACE",
+            Text = "BRACE [B]: a disrupting reaction. On a hit it STAGGERS the mover - the foe loses its action this turn (for reduced damage). Deny a rushing enemy's alpha instead of racing it for the kill.",
+            When = g => AnyLiveThreat(g) },
+        new FieldTip { Bit = 1, Prio = 0, Code = "STABILIZE",
+            Text = "STABILIZE [E]: that soldier is BLEEDING OUT, not dead - three turns on the clock. Step a squadmate adjacent and STABILIZE to freeze the timer; a CORPSMAN can PATCH them back onto their feet. Win the field and they come home wounded.",
+            When = g => g.Players.Any(p => p.Alive && p.Downed) },
+        new FieldTip { Bit = 2, Prio = 1, Code = "RELOAD",
+            Text = "RELOAD [R]: that soldier's clip is DRY - it cannot fire or set overwatch until it reloads, and reloading costs an action. Reload behind cover on a quiet turn, not in the open mid-firefight.",
+            When = g => AnyLiveThreat(g) && Soldiers(g).Any(p => p.Ammo <= 0) },
+        new FieldTip { Bit = 3, Prio = 3, Code = "GRENADE",
+            Text = "GRENADE [4]: that target is behind cover, and a grenade does not care - it cannot miss, it hits a 3x3, and it DESTROYS the cover itself. One per soldier per mission: spend it on a dug-in pod, not a straggler.",
+            When = g => Soldiers(g).Any(p => p.Grenades > 0 && g.Enemies.Any(e =>
+                        e.Alive && e.Active && g.Grid.HasLineOfSight(p.X, p.Y, e.X, e.Y)
+                        && Combat.ComputeOdds(g.Grid, p, e).CoverLevel > 0)) },
+        new FieldTip { Bit = 4, Prio = 4, Code = "HUNKER",
+            Text = "HUNKER [3]: that soldier is standing in the open with hostiles looking at it. Hunkering ends its turn but doubles the cover bonus and cuts incoming crits - the right answer when you cannot reach cover and cannot kill.",
+            When = g => AnyLiveThreat(g) && Soldiers(g).Any(p => p.ActionsLeft > 0 && !g.SoldierBesideCover(p)
+                        && g.Enemies.Any(e => e.Alive && e.Active && g.Grid.HasLineOfSight(e.X, e.Y, p.X, p.Y))) },
+        new FieldTip { Bit = 5, Prio = 5, Code = "SHOVE",
+            Text = "SHOVE [8]: an enemy is standing right next to you. A shove costs 1 action, does not end the turn, and knocks it a tile back - out of its cover, off high ground, or into a fire. Position is damage.",
+            When = g => Soldiers(g).Any(p => g.CanShove(p)) },
+        new FieldTip { Bit = 6, Prio = 6, Code = "VAULT",
+            Text = "VAULT [9]: you can hop straight over that cover block instead of walking around it. One action, no turn end - the fastest way to break a stalemate across a wall.",
+            When = g => AnyLiveThreat(g) && Soldiers(g).Any(p => g.CanVault(p)) },
+        new FieldTip { Bit = 7, Prio = 7, Code = "DRAG",
+            Text = "DRAG [7]: pull an adjacent squadmate one tile toward you. Use it to haul a bleeding-out soldier out of a firing lane, or to yank a pinned ally into cover without spending their turn.",
+            When = g => AnyLiveThreat(g) && Soldiers(g).Any(p => g.CanDrag(p)) },
+        new FieldTip { Bit = 8, Prio = 8, Code = "FOCUS",
+            Text = "FOCUS [F]: overwatch, narrowed. It watches a CONE instead of the full arc, but reacts with better aim - the answer when you know which way they are coming and want the reaction to land.",
+            When = g => g._tutOver && g.Enemies.Count(e => e.Alive && e.Active) >= 2 },
+        new FieldTip { Bit = 9, Prio = 9, Code = "ITEM",
+            Text = "UTILITY [6]: each class carries a second throwable beyond the grenade - SMOKE to blind a lane, FLASH to disorient a pod, BARRICADE to build cover, INCENDIARY to deny ground. One charge a mission; it is not a grenade, it is a tool.",
+            When = g => AnyLiveThreat(g) && Soldiers(g).Any(p => p.Item != ItemKind.None && p.ItemCharge > 0) },
+    };
+
+    public string CalloutText;      // non-null => Hud draws the FIELD TIP card
+    public string CalloutHead = "FIELD TIP";
+    public float CalloutTimer;      // seconds left on screen
+    float _tipCooldown;             // breathing room between two tips
+
+    /// True when the tip layer may speak at all: an interactive player turn with no lesson card up.
+    bool TipsAllowed => Phase == Phase.PlayerTurn && TutorialText == null && TrainingText == null;
+
+    /// Public so the COVER tip predicate and the lesson share ONE definition of "beside cover".
+    public bool SoldierBesideCover(Unit p)
+    {
+        for (int d = 0; d < 4; d++)
+        {
+            int nx = p.X + (d == 0 ? 1 : d == 1 ? -1 : 0);
+            int ny = p.Y + (d == 2 ? 1 : d == 3 ? -1 : 0);
+            if (!Grid.InBounds(nx, ny)) continue;
+            var t = Grid.Tiles[nx, ny];
+            if (t == TileType.LowCover || t == TileType.HighCover) return true;
+        }
+        return false;
+    }
+
+    /// FUL-12 -> T1: was UpdateBraceCallout (one hard-coded card). Now a scan of the FieldTips
+    /// table by teaching priority. Interactive-only: NoPersist runs (autoplay/shots/the balance
+    /// flywheel) never see a tip unless the harness explicitly stages one, so the measured game
+    /// is untouched — the byte-stability contract this whole wave rides on.
+    void UpdateFieldTips(float dt)
+    {
+        if (CalloutText != null)
+        {
+            CalloutTimer -= dt;
+            if (CalloutTimer <= 0) { CalloutText = null; _tipCooldown = 5f; }
+            return;
+        }
+        if (_tipCooldown > 0) { _tipCooldown -= dt; return; }
+
+        int forced = -1;
+        if (NoPersist)
+        {
+            // harness staging: SIGHTLINE_TIP=<bit>, plus FUL-12's SIGHTLINE_BRACETIP=1 (== bit 0)
+            if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_TIP"), out int tb)) forced = tb;
+            else if (Environment.GetEnvironmentVariable("SIGHTLINE_BRACETIP") == "1") forced = 0;
+            if (forced < 0) return;
+        }
+        if (!TipsAllowed) return;
+
+        FieldTip pick = null;
+        if (forced >= 0)
+        {
+            foreach (var t in FieldTips) if (t.Bit == forced) pick = t;
+        }
+        else
+        {
+            foreach (var t in FieldTips)
+            {
+                if (Display.TipSeen(t.Bit)) continue;
+                if (pick != null && t.Prio >= pick.Prio) continue;
+                if (!t.When(this)) continue;
+                pick = t;
+            }
+        }
+        if (pick == null) return;
+
+        CalloutHead = "FIELD TIP - " + pick.Code;
+        CalloutText = pick.Text;
+        CalloutTimer = 9f;
+        if (!NoPersist) Display.MarkTipSeen(pick.Bit);   // one-shot: burned the moment it shows
     }
 
     // optional secondary objective (3.9): a per-mission bonus goal worth extra intel
@@ -714,7 +1049,16 @@ public partial class Game
 
     // pause / settings overlay
     public bool Paused;
-    public bool ShowThreatPref = true;
+    // RESONANCE A2: which mix fader (0..3) the mouse is currently dragging in the pause menu,
+    // or -1. Held across frames so a drag keeps tracking once it leaves the row's rect.
+    int _volDrag = -1;
+    // THREAT PREVIEW preference — three-state (RESONANCE T2): 0 OFF / 1 SIMPLE (the pre-T2 minimal
+    // "this tile is exposed" tick) / 2 FULL (graded pips + hover card + danger-tinted path). Not
+    // persisted (a per-session view pref, like the camera).
+    public const int ThreatOff = 0, ThreatSimple = 1, ThreatFull = 2;
+    public int ThreatPref = ThreatFull;
+    public bool ShowThreatPref => ThreatPref > ThreatOff;
+    public void CycleThreatPref() { ThreatPref = ThreatPref >= ThreatFull ? ThreatOff : ThreatPref + 1; }
 
     // custom-tag text editor (modal): key T in a mission, or from the perk chooser
     public bool EditingTag;
@@ -1272,6 +1616,9 @@ public partial class Game
         // PROGRAM HORIZON W2: LAST STAND is a pure kill-the-horde arena — force Eliminate so every
         // objective-gated setup block below (evac/terminal/sabotage/escort/rescue) is a no-op.
         if (Mode == GameMode.Endless) Objective = Objective.Eliminate;
+        // T1: the TRAINING OP is a fixed kill-the-targets drill — force Eliminate so every
+        // objective-gated setup block below (evac/terminal/sabotage/escort/rescue) is a no-op.
+        if (Mode == GameMode.Training) Objective = Objective.Eliminate;
         EvacZone.Clear();
         BeaconPlanted = false; BeaconZone.Clear(); BeaconTile = default;   // forward evac beacon is fresh each mission
         HackProgress = 0;
@@ -1378,6 +1725,10 @@ public partial class Game
         // For LAST STAND we don't want that force — clear it and drop in the first horde wave (the
         // arena/terrain stays). SpawnEndlessWave uses the SpawnReinforcements machinery.
         if (Mode == GameMode.Endless) { Enemies.Clear(); SpawnEndlessWave(1); }
+        // T1: same seam — throw away the campaign terrain/force and stamp the authored drill
+        // arena with its fixed 4-hostile scripted force. Nothing below this line special-cases
+        // the drill: it reuses the whole normal per-mission reset that follows.
+        if (Mode == GameMode.Training) Mission.BuildTraining(Grid, Players, Enemies);
         if (Vip != null) { Vip.Grenades = 0; Vip.AbilityCd = 99; }  // the asset has no kit (never ready)
         if (Objective == Objective.Rescue && Vip != null)
         {
@@ -1499,6 +1850,16 @@ public partial class Game
         }
         else if (Mode == GameMode.Skirmish)
             ShowBanner($"{(DailyMode ? $"DAILY {DailyStamp}" : "SKIRMISH")} - {SkirmishObjectiveLabel(Objective)} - {Biome.Name}", false);
+        else if (Mode == GameMode.Training)
+        {
+            ShowBanner("TRAINING OP - LIVE-FIRE DRILL", false);
+            BannerSub = "Nothing here is saved. [P] restarts the drill.";
+            TrainStep = 0;                       // open lesson 1
+            _trainLessonTurn = _turnCount;
+            _tutMoved = _tutOver = _tutShot = _tutGrenade = _tutAbility = false;
+            RevealedVerbs.Clear();
+            ApplyReveal(TrainLessons[0].Reveal);
+        }
         else ShowBanner($"LAST STAND - {Biome.Name}", false);   // SpawnEndlessWave already banner'd WAVE 1
 
         // checkpoint the run at the start of each mission (CAMPAIGN only). LAST STAND, SKIRMISH, and
@@ -2982,7 +3343,8 @@ public partial class Game
         if (!AutoPlay && Raylib.IsKeyPressed(KeyboardKey.F2)) CycleAnimSpeed();   // fast-forward anim pacing (1x/2x/3x)
         Audio.SetMusicIntensity(MusicIntensity());
         UpdateTutorial(dt);
-        UpdateBraceCallout(dt);        // FUL-12: one-shot BRACE field tip (never overlaps a lesson)
+        UpdateTraining(dt);            // T1: the TRAINING OP lesson track (drill mode only)
+        UpdateFieldTips(dt);           // FUL-12 -> T1: once-per-profile JIT tips (never overlap a lesson)
         Fx.UpdateAmbient(Biome, dt);   // per-biome ambient atmosphere (Wave B)
 
         // camera zoom-punch always relaxes; hit-stop freezes the rest of the sim
@@ -3143,6 +3505,7 @@ public partial class Game
         if (Mode == GameMode.Endless) { CheckEndless(); return; }
         // PROGRAM HORIZON W4: SKIRMISH / DAILY are single-mission — reuse the SAME per-objective win
         // tests, but route to Phase.Win/Lose (no barracks / checkpoint valve / save.json).
+        if (Mode == GameMode.Training) { CheckTraining(); return; }   // T1: the drill ends on its own terms
         if (Mode == GameMode.Skirmish) { CheckSkirmish(); return; }
         var alivePlayers = AlivePlayers();
         // APEX W2: RESCUE soft-lock. The caged captive is invulnerable AND actionless, so if every
@@ -3190,7 +3553,8 @@ public partial class Game
             // reachable win OR loss — the soft-lock. Never let a dead asset stall the run.
             if (Vip == null || !Vip.Alive)
             { LoseRun("CAPTIVE LOST", $"The captive died on mission {_run.Mission}."); return; }
-            if (!CaptiveLocked && Vip != null && EvacZone.Contains((Vip.X, Vip.Y))) EnterBarracks();
+            // (no Vip null-check: the guard above returns on a null/dead captive)
+            if (!CaptiveLocked && EvacZone.Contains((Vip.X, Vip.Y))) EnterBarracks();
         }
         else if (Objective == Objective.Defend) // hold out for DefendTurns player turns
         {
@@ -3433,6 +3797,25 @@ public partial class Game
     public void ActivatePod(int podId)
     {
         bool any = false;
+        // Q1 "NO TWO IN ONE PLACE" — the running CLAIM SET for this scatter batch.
+        // Unit.X/Y only commits when a MoveStepAnim FINISHES, but this loop plans EVERY dormant
+        // member against one board snapshot and enqueues all their steps before any of them run.
+        // Ai.Plan's blocked predicate reads live X/Y, so without a claim set member 2 planned
+        // blind to member 1's destination — and the whole pod planned blind to the PLAYER's
+        // destination, because the steps that carry the player there are still queued AHEAD of
+        // this scatter and land first. Result: two living bodies on one tile, sometimes for
+        // several turns. That is not cosmetic — UnitAt returns the FIRST match (Players before
+        // Enemies) and both hover and click route through it, so the buried unit cannot be
+        // hovered, cannot show odds, and cannot be clicked to target.
+        // Seed with the FINAL destination of every already-queued move (any unit, any team;
+        // last step per unit wins), then add each scatter's own landing tile as it is decided.
+        // Current tiles need no entry — Ai.Plan's IsOccupiedByOther already blocks those.
+        // Guarded by SIGHTLINE_STACKTEST.
+        var claimed = new HashSet<(int x, int y)>();
+        var lastDest = new Dictionary<Unit, (int x, int y)>();
+        foreach (var a in _anims)
+            if (a is MoveStepAnim ms && ms.Unit != null && ms.Unit.Alive) lastDest[ms.Unit] = (ms.Tx, ms.Ty);
+        foreach (var kv in lastDest) claimed.Add(kv.Value);
         foreach (var e in Enemies)
         {
             if (!e.Alive || e.Active || e.PodId != podId) continue;
@@ -3440,7 +3823,7 @@ public partial class Game
             any = true;
             // free scatter toward cover/line of fire (move only, no shot); 4.2 caps it to a
             // SINGLE move — no free dash on reveal (an immobile turret gets none).
-            var plan = Ai.Plan(this, e);
+            var plan = Ai.Plan(this, e, claimed);
             int cap = Math.Max(0, e.Mobility) * 2, spent = 0, lx = e.X, ly = e.Y;
             foreach (var (px, py) in plan.Path)
             {
@@ -3449,6 +3832,10 @@ public partial class Game
                 spent += step; lx = px; ly = py;
                 Enqueue(new MoveStepAnim(e, px, py), Team.Enemy);
             }
+            // claim where this member actually LANDS — after the move cap truncates the plan,
+            // which can be short of plan.Path's end (or nowhere at all, in which case its
+            // current tile is already covered by IsOccupiedByOther).
+            if (lx != e.X || ly != e.Y) claimed.Add((lx, ly));
         }
         if (any)
         {
@@ -3581,7 +3968,7 @@ public partial class Game
         if (Selected == null || !Selected.CanAct)
         {
             var next = Players.FirstOrDefault(p => p.CanAct);
-            if (next != null && (Selected == null || !Selected.CanAct)) Selected = next ?? Selected;
+            if (next != null) Selected = next;   // (inside `next != null`, `next ?? Selected` was always `next`)
         }
 
         RecomputeMoveCost();
@@ -3597,29 +3984,131 @@ public partial class Game
             MoveCost = Grid.CostMap(Selected.X, Selected.Y, blocked, out _cameFrom, Selected.MoveBudget * 2);
             ComputeThreat();
         }
-        else { MoveCost = null; _cameFrom = null; Threat = null; }
+        else { MoveCost = null; _cameFrom = null; Threat = null; _threatSig = 0; }
     }
 
-    // Mark each reachable tile (and the current one) that a live, active enemy could
-    // fire on with no cover for the mover — i.e. tiles you'd be exposed standing on.
+    // ---------------- RESONANCE T2: the incoming-fire forecast ----------------
+    // Cache key for the forecast. ComputeThreat runs off RecomputeMoveCost, which fires EVERY
+    // frame of the player turn, and the forecast is ~(reachable tiles x hostiles) ComputeOdds
+    // calls — far too much to redo 60x a second for a board that hasn't changed. The signature
+    // folds in everything the forecast reads (selection, both rosters' positions/state, the
+    // mutable terrain layers, the pref) so a real change always misses the cache and nothing
+    // else ever does. 0 = "no valid cache".
+    long _threatSig;
+    readonly System.Diagnostics.Stopwatch _threatClock = new();
+
+    long ThreatSignature()
+    {
+        unchecked
+        {
+            long h = 1469598103934665603L;
+            void Mix(long v) { h = (h ^ v) * 1099511628211L; }
+            Mix(ThreatPref);
+            Mix(Selected == null ? 0 : System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(Selected));
+            if (Selected != null) { Mix(Selected.X * 31 + Selected.Y); Mix(Selected.ActionsLeft); Mix(Selected.MoveBudget);
+                                    Mix((Selected.Hunkered ? 1 : 0) | (Selected.FiredThisTurn ? 2 : 0) | (Selected.MovedAfterFire ? 4 : 0) | (Selected.Hp << 4)); }
+            Mix(Turn); Mix(SquadConcealed ? 1 : 0); Mix(Pressure);   // coarse catch-alls for turn-scoped combat state
+            foreach (var e in Enemies)
+            {
+                if (!e.Alive) continue;
+                Mix(e.X * 31 + e.Y);
+                Mix((e.Active ? 1 : 0) | (e.Ammo > 0 ? 2 : 0) | (e.OnOverwatch ? 4 : 0) | (e.OwFocused ? 8 : 0)
+                    | (e.Hp << 8) | (e.Routed << 16) | (e.Pinned << 20) | (e.Suppress << 24));
+                Mix(e.OwDirX * 7 + e.OwDirY);
+            }
+            foreach (var p in Players) { if (!p.Alive) continue; Mix(p.X * 31 + p.Y); Mix(p.Hp); }   // crossfire reads squadmates
+            // mutable terrain layers (cover can be chipped, smoke/fire tick, barrels blow up)
+            for (int x = 0; x < Grid.W; x++)
+                for (int y = 0; y < Grid.H; y++)
+                    Mix((long)Grid.Tiles[x, y] | ((long)Grid.Height[x, y] << 3) | ((long)(Grid.Smoke[x, y] > 0 ? 1 : 0) << 6)
+                        | ((long)(Grid.Fire[x, y] > 0 ? 1 : 0) << 7) | ((long)(Grid.Barrel[x, y] ? 1 : 0) << 8));
+            return h == 0 ? 1 : h;
+        }
+    }
+
+    /// The INCOMING-FIRE FORECAST (RESONANCE T2). For every tile the selected soldier can reach
+    /// (plus the tile it stands on), answer the defensive question the board never answered:
+    /// how many hostiles bear on it, how well the best of them shoots, how much damage that adds
+    /// up to, whether standing there is a FLANK, and whether it sits in a reaction lane.
+    ///
+    /// TRUTHFULNESS: the numbers come from Combat.ComputeOdds with the mover TEMPORARILY placed on
+    /// the candidate tile (the exact call Resolve would make if the enemy fired at it), gated by the
+    /// same range + commanding-LoS test as Game.CanTarget. So the forecast can never disagree with
+    /// the shot that actually happens. The mover's X/Y is restored in a finally.
     void ComputeThreat()
     {
-        if (!ShowThreatPref) { Threat = null; return; }   // disabled in settings
-        Threat = new bool[Grid.W, Grid.H];
-        var foes = Enemies.Where(e => e.Alive && e.Active && e.Ammo > 0).ToList();
-        if (foes.Count == 0) return;
-        for (int x = 0; x < Grid.W; x++)
-            for (int y = 0; y < Grid.H; y++)
-            {
-                bool here = x == Selected.X && y == Selected.Y;
-                if (!here && MoveCost[x, y] <= 0) continue;
-                foreach (var e in foes)
+        if (!ShowThreatPref || Selected == null || MoveCost == null) { Threat = null; _threatSig = 0; return; }
+
+        long sig = ThreatSignature();
+        if (sig == _threatSig && Threat != null) return;   // nothing the forecast reads has changed
+        _threatSig = sig;
+        _threatClock.Restart();
+
+        var cells = new ThreatCell[Grid.W, Grid.H];
+        Threat = cells;
+        ThreatRebuilds++;
+
+        // the caged Rescue captive is invulnerable until freed — nothing bears on it anywhere
+        bool untouchable = Selected == Vip && CaptiveLocked;
+        List<Unit> foes = null;
+        if (!untouchable)
+            foreach (var e in Enemies)
+                if (e.Alive && e.Active && e.Ammo > 0 && e.Weapon != null)
+                    (foes ??= new List<Unit>()).Add(e);
+        if (foes == null) { _threatClock.Stop(); ThreatMs = _threatClock.Elapsed.TotalMilliseconds; return; }
+
+        int ox = Selected.X, oy = Selected.Y;
+        // Moving CLEARS two defensive states (MoveStepAnim.OnStart drops Hunkered;
+        // OnUnitEnteredTile sets MovedAfterFire, ending EXPOSED BY FIRE), so a forecast for any
+        // tile the soldier has to WALK to must model the post-move soldier or it lies about both.
+        bool oHunk = Selected.Hunkered, oMaf = Selected.MovedAfterFire;
+        try
+        {
+            for (int x = 0; x < Grid.W; x++)
+                for (int y = 0; y < Grid.H; y++)
                 {
-                    if (Util.TileDist(x, y, e.X, e.Y) > e.Weapon.MaxRange) continue;
-                    if (!Grid.HasLineOfSight(e.X, e.Y, x, y)) continue;
-                    if (Grid.GetCover(x, y, e.X, e.Y).Level == 0) { Threat[x, y] = true; break; }
+                    bool here = x == ox && y == oy;
+                    if (!here && MoveCost[x, y] <= 0) continue;
+
+                    // place the mover on the candidate tile so ComputeOdds sees the real geometry
+                    Selected.X = x; Selected.Y = y;
+                    Selected.Hunkered = here && oHunk;
+                    Selected.MovedAfterFire = here ? oMaf : true;
+                    ref var c = ref cells[x, y];
+                    int bestHit = 0; float bestScore = -1f;
+
+                    for (int i = 0; i < foes.Count; i++)
+                    {
+                        var e = foes[i];
+                        if (Util.TileDist(x, y, e.X, e.Y) > e.Weapon.MaxRange) continue;
+                        bool commanding = Grid.HeightAt(e.X, e.Y) - Grid.HeightAt(x, y) >= 2;   // CanTarget's rule
+                        if (!Grid.HasLineOfSight(e.X, e.Y, x, y, commanding)) continue;
+
+                        var o = Combat.ComputeOdds(Grid, e, Selected);
+                        if (c.Guns < 255) c.Guns++;
+                        if (o.Flanked) c.Flanked = true;
+                        if (o.CoverLevel == 0) c.Exposed = true;
+                        // expected damage = hit% x post-armor average. Crits (up) and the graze floor
+                        // (down) are deliberately NOT modelled: this is the honest first-order read the
+                        // card labels "expected", not a simulation of the damage roll.
+                        int lo = Combat.HardenedReduce(Selected, o.DmgMin, crit: false);
+                        int hi = Combat.HardenedReduce(Selected, o.DmgMax, crit: false);
+                        c.ExpDmg += o.HitChance * 0.01f * ((lo + hi) * 0.5f);
+                        // "worst" gun = highest hit%, tie-broken by the bigger average bite
+                        float score = o.HitChance * 1000f + (o.DmgMin + o.DmgMax);
+                        if (score > bestScore) { bestScore = score; bestHit = o.HitChance; c.WorstCls = e.Cls; }
+
+                        // a live reaction lane: mirrors Game.OnUnitEnteredTile's overwatch gate exactly
+                        // (range + commanding LoS already checked above, plus the FOCUSED cone).
+                        if (e.OnOverwatch && (!e.OwFocused || InOwCone(e, x, y))) c.Watched = true;
+                    }
+                    c.BestHit = (sbyte)Math.Min(bestHit, (int)sbyte.MaxValue);
                 }
-            }
+        }
+        finally { Selected.X = ox; Selected.Y = oy; Selected.Hunkered = oHunk; Selected.MovedAfterFire = oMaf; }
+
+        _threatClock.Stop();
+        ThreatMs = _threatClock.Elapsed.TotalMilliseconds;
     }
 
     void UpdateHoverAndAim()
@@ -3757,6 +4246,10 @@ public partial class Game
         if (Raylib.IsKeyPressed(KeyboardKey.G)) DoBeacon();          // UNDERTOW W6: deploy forward evac beacon (moved off B — collided with W2 BRACE)
         if (Raylib.IsKeyPressed(KeyboardKey.X)) DoExtract();
         if (Raylib.IsKeyPressed(KeyboardKey.R)) DoReload();
+        // T1: [P] restarts the TRAINING OP from the top — the drill is the one place where
+        // "just start over" must be one keystroke away. Drill-only, so it can never nuke a run.
+        if (Mode == GameMode.Training && Raylib.IsKeyPressed(KeyboardKey.P)) { BeginTraining(); return; }
+        if (Raylib.IsKeyPressed(KeyboardKey.V)) { ToggleShowAllVerbs(); return; }   // T1: SHOW ALL verbs (staging escape)
         if (Raylib.IsKeyPressed(KeyboardKey.T)) { OpenTagEditor(Selected); return; }
 
         // keyboard tile cursor: arrows / WASD move it, Space acts on it
@@ -3937,16 +4430,36 @@ public partial class Game
         CamPan.Y = CamPan.Y + (targetPan.Y - CamPan.Y) * alpha;
     }
 
+    /// Where along a fader's track a mouse-x lands, 0..1 (the track is inset 8px each side —
+    /// keep in sync with Hud.DrawVolSlider).
+    static float VolFrac(Rectangle r, float mx) => Util.Clamp((mx - (r.X + 8f)) / MathF.Max(1f, r.Width - 16f), 0f, 1f);
+
     void HandlePauseMenu()
     {
-        if (!Raylib.IsMouseButtonPressed(MouseButton.Left)) return;
         var m = Raylib.GetMousePosition();
+        // A2 mix faders: a drag in progress owns the mouse until it is released, and only THEN
+        // does the setting hit disk (Display.SetVol is live, CommitVol writes display.json).
+        if (_volDrag >= 0)
+        {
+            if (Raylib.IsMouseButtonDown(MouseButton.Left)) { Display.SetVol(_volDrag, VolFrac(Hud.PauseVol[_volDrag], m.X)); return; }
+            Display.CommitVol();
+            _volDrag = -1;
+            return;
+        }
+        if (!Raylib.IsMouseButtonPressed(MouseButton.Left)) return;
+        for (int i = 0; i < Hud.PauseVol.Length; i++)
+            if (Raylib.CheckCollisionPointRec(m, Hud.PauseVol[i]))
+            {
+                _volDrag = i;
+                Display.SetVol(i, VolFrac(Hud.PauseVol[i], m.X));
+                return;
+            }
         if (Raylib.CheckCollisionPointRec(m, Hud.PauseResume)) Paused = false;
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseFullscreen)) Display.ToggleFullscreen();
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseWindow)) Display.CycleSize();
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseMute)) Audio.ToggleMute();
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseShake)) Fx.ShakeOn = !Fx.ShakeOn;
-        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseThreat)) ShowThreatPref = !ShowThreatPref;
+        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseThreat)) CycleThreatPref();
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseBright)) Display.CycleBrightness();
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseGamma)) Display.CycleGamma();   // W9: true gamma (post-FX pass)
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseColorblind)) Display.ToggleColorblind();
@@ -3966,6 +4479,7 @@ public partial class Game
     {
         Paused = false;
         if (TutStep >= 0) CompleteTutorial();   // mirrors LoseRun: the onboarding ran
+        if (Mode == GameMode.Training) { EndTraining(false); return; }   // T1: abandoning a drill is just leaving it
         if (Mode == GameMode.Skirmish) { EndSkirmish(false); return; }
         if (Mode == GameMode.Endless) { EndEndless(); return; }
         Combat.EndRun();
@@ -3998,6 +4512,7 @@ public partial class Game
             case "extract": DoExtract(); break;
             case "stabilize": DoStabilize(); break;   // FUL-7: freeze an adjacent downed ally's timer
             case "reload": DoReload(); break;
+            case "showall": ToggleShowAllVerbs(); break;   // T1: the permanent verb-staging escape
         }
     }
 
@@ -4053,6 +4568,7 @@ public partial class Game
         Selected.ActionsLeft = 0;
         Enqueue(new GrenadeAnim(Selected, tx, ty), Team.Player);
         Stats.RecordAction("GRENADE");   // W2 verb telemetry
+        _tutGrenade = true;              // T1: the drill's GRENADE lesson watches this
         GrenadeMode = false;
     }
 
@@ -4380,8 +4896,7 @@ public partial class Game
         Stats.RecordAction("VAULT");                      // W2 verb telemetry (review fix: no invisible verbs)
         Fx.PopText(u.Pos + new Vector2(0, -32), "VAULT", Pal.Good, 17f);
         Fx.Burst(u.Pos, Pal.Good, 8, 110f, 0.35f, 2.5f);
-        Audio.Play("move");
-        Enqueue(new MoveStepAnim(u, tx, ty), Team.Player);
+        Enqueue(new MoveStepAnim(u, tx, ty), Team.Player);   // A2: the footfall is per-tile now (MoveStepAnim.OnStart)
         VaultMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false; DragMode = false;
     }
 
@@ -4408,8 +4923,7 @@ public partial class Game
         Stats.RecordAction("MOVE");   // W2 verb telemetry (no-op unless the balance harness)
         AimMode = false;
         PathPreview.Clear();
-        Audio.Play("move");
-        _tutMoved = true;
+        _tutMoved = true;   // A2: no cue here — MoveStepAnim.OnStart plays one footfall PER TILE
     }
 
     void IssueShoot(Unit target)
@@ -4957,6 +5471,9 @@ public partial class Game
     {
         var u = Selected;
         if (!CanAbility(u)) return;
+        _tutAbility = true;   // T1: the drill's ABILITY lesson — counts the three targeting verbs
+                              // (MARK/GRAPPLE/PIN) at the point the player opens their mode, since
+                              // reaching the mode is the thing the lesson is teaching.
         // the targeting VERBS enter a targeting mode for the human player (the AI/autopilot calls
         // IssueMark/IssueGrapple/IssuePin directly via PrepAbilityFor, so it never opens a mode).
         if (u.Ability == AbilityKind.Mark)    { ToggleMark();    return; }
@@ -5818,8 +6335,7 @@ public partial class Game
             if (keep == 0) { Fx.PopText(e.Pos + new Vector2(0, -34), "PINNED", Pal.Foe, 16f); return; }
         }
         e.ActionsLeft -= moveActions;
-        foreach (var (px, py) in path) Enqueue(new MoveStepAnim(e, px, py), Team.Enemy);
-        Audio.Play("move");
+        foreach (var (px, py) in path) Enqueue(new MoveStepAnim(e, px, py), Team.Enemy);   // A2: per-tile footfalls
     }
 
     // TEMPO mirror: after an enemy fires (a 1-action, non-turn-ending shot) it spends any remaining
@@ -5877,8 +6393,7 @@ public partial class Game
         var path = Grid.ReconstructPath(cameFrom, e.X, e.Y, best.x, best.y);
         if (path.Count == 0) return;
         e.ActionsLeft = Math.Max(0, e.ActionsLeft - 1);
-        foreach (var (px, py) in path) Enqueue(new MoveStepAnim(e, px, py), Team.Enemy);
-        Audio.Play("move");
+        foreach (var (px, py) in path) Enqueue(new MoveStepAnim(e, px, py), Team.Enemy);   // A2: per-tile footfalls
     }
 
     // Clear the enemy-intent telegraph (so it doesn't render past the unit's action or into the
@@ -6628,6 +7143,16 @@ public partial class Game
             if (daily) { BeginDaily(); return; }
         }
 
+        // RESONANCE T1: intro TRAINING OP — the scripted drill (button or key N). Always available,
+        // never gated on a "first launch" flag: a returning player can re-run it whenever.
+        if (Phase == Phase.Intro)
+        {
+            bool train = (Raylib.IsMouseButtonPressed(MouseButton.Left) &&
+                          Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.OverlayBtn8))
+                         || Raylib.IsKeyPressed(KeyboardKey.N);
+            if (train) { BeginTraining(); return; }
+        }
+
         // W1 mode-seam: end-card MAIN MENU (OverlayBtn2, button or Esc) — back to the intro without
         // founding a new run and WITHOUT touching the campaign checkpoint. Same mode resets as NEW
         // RUN below, so a LAST STAND / SKIRMISH / DAILY end card can never leak its mode (or a
@@ -6658,6 +7183,9 @@ public partial class Game
         if (!click && !enter) return;
 
         if (Phase == Phase.Barracks) NextMission();   // deploy to next mission
+        // RESONANCE T1: a finished TRAINING OP re-runs the drill on its primary button (MAIN MENU,
+        // handled above, is the way out) — restartable is half the point of a low-cost drill.
+        else if (Mode == GameMode.Training) BeginTraining();
         // intro / win / lose -> new run. INTERACTIVELY this opens the run-opening DRAFT (pick a
         // founding squad + starting boon). The harness NEVER reaches here (it calls StartMission
         // DIRECTLY, bypassing the intro), but gate on !NoPersist defensively so the smoke test /

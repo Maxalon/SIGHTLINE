@@ -11,23 +11,82 @@ namespace Sightline;
 /// reloads it and resumes that mission from its start. The save is deleted when a
 /// run ends (win or wipe). Compact DTOs keep only persistent fields; transient
 /// per-mission state (ammo/grenades/ability/position) is rebuilt by Mission.Build.
-public static class SaveGame
+public static partial class SaveGame
 {
-    // ~/.local/share/Sightline (Linux) / %AppData%/Sightline (Windows) / ~/Library/... (mac)
-    static string Dir => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Sightline");
+    // SpecialFolder.ApplicationData resolves to $XDG_CONFIG_HOME (when set AND the directory
+    // already exists) else $HOME/.config on Linux -- so the real save dir is
+    // ~/.config/Sightline (Linux) / %AppData%\\Sightline (Windows) / ~/Library/Application Support/Sightline (mac).
+    // NOT ~/.local/share -- that is LocalApplicationData, which this game does not use.
+    // Edge case worth knowing: GetFolderPath uses SpecialFolderOption.None, which returns "" when
+    // the resolved directory does not exist yet. Path.Combine("", "Sightline") would then be a
+    // RELATIVE dir next to the process CWD, scattering saves per-launch-directory -- so fall back
+    // to $HOME/.config/Sightline (which Save/WriteMetaDto create on demand) when that happens.
+    static string Dir
+    {
+        get
+        {
+            string root = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            if (string.IsNullOrEmpty(root))
+            {
+                string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                if (string.IsNullOrEmpty(home)) home = Environment.GetEnvironmentVariable("HOME") ?? ".";
+                root = Path.Combine(home, ".config");
+            }
+            return Path.Combine(root, "Sightline");
+        }
+    }
     static string FilePath => Path.Combine(Dir, "save.json");
     static string MetaPath => Path.Combine(Dir, "meta.json");
 
-    static readonly JsonSerializerOptions Opts = new()
-    {
-        IncludeFields = true,
-        WriteIndented = true,
-    };
+    /// Save-format schema version stamped into every file this build writes (RunDto/MetaDto
+    /// .SchemaVersion). Files written before the field existed read back as 0. Bump this in the
+    /// same commit as any change that DEFAULTS CANNOT RESCUE -- a field whose type or meaning
+    /// changed -- and branch on the stored value in FromDto / LoadMetaDto. Purely additive fields
+    /// still need no bump: they default inert on their own.
+    public const int CurrentSchema = 1;
 
+    // Serialization goes through a SOURCE-GENERATED context, not reflection. Reflection-based
+    // System.Text.Json needs type metadata that `dotnet publish -p:PublishTrimmed=true` strips:
+    // the game booted, played and finished a whole campaign on a trimmed build while silently
+    // losing every save and the entire cross-run meta profile (measured -- SAVETEST and METATEST
+    // both failed against the trimmed binary). The generator emits the (de)serializers at compile
+    // time, so the trimmer can see them and a trimmed build persists correctly. Keep every new DTO
+    // reachable from one of the [JsonSerializable] roots below.
+    [System.Text.Json.Serialization.JsonSourceGenerationOptions(IncludeFields = true, WriteIndented = true)]
+    [System.Text.Json.Serialization.JsonSerializable(typeof(RunDto))]
+    [System.Text.Json.Serialization.JsonSerializable(typeof(MetaDto))]
+    internal partial class SaveJson : System.Text.Json.Serialization.JsonSerializerContext { }
+
+    // D2: the intro polls Exists EVERY FRAME (Hud draws CONTINUE off it), so it cannot re-parse
+    // save.json each time -- memoise the verdict against the file's (write-time, length) so an
+    // external edit still forces a re-validation. Cleared implicitly when the file goes away.
+    static long _existsTicks = -1, _existsLen = -1;
+    static bool _existsVerdict;
+
+    /// Drop the memoised Exists verdict. Called after every write/delete of save.json so a rewrite
+    /// that happens to land the same (write-time, length) as the previous file can never be judged
+    /// by the stale answer.
+    static void InvalidateExistsCache() { _existsTicks = _existsLen = -1; }
+
+    /// True only when a save exists AND is structurally usable. A structurally-VALID-but-empty
+    /// save ({}, null, or one whose Squad key was renamed) used to leave CONTINUE drawn forever
+    /// over a run that could never load; validating here routes it through Load's stash-and-remove
+    /// so the offer disappears on its own and the bytes survive as save.json.bak.
     public static bool Exists
     {
-        get { try { return File.Exists(FilePath); } catch { return false; } }
+        get
+        {
+            try
+            {
+                var fi = new FileInfo(FilePath);
+                if (!fi.Exists) { _existsTicks = _existsLen = -1; return _existsVerdict = false; }
+                long ticks = fi.LastWriteTimeUtc.Ticks, len = fi.Length;
+                if (ticks == _existsTicks && len == _existsLen) return _existsVerdict;
+                _existsTicks = ticks; _existsLen = len;
+                return _existsVerdict = (Load() != null);
+            }
+            catch { return false; }
+        }
     }
 
     /// Test-only path exposure (MODETEST abandon leg preserves/restores any real save.json,
@@ -37,6 +96,7 @@ public static class SaveGame
     public static void Delete()
     {
         try { if (File.Exists(FilePath)) File.Delete(FilePath); } catch { /* best effort */ }
+        InvalidateExistsCache();
     }
 
     public static void Save(Run run)
@@ -49,8 +109,9 @@ public static class SaveGame
             // torn write mid-save can never leave a half-written save.json behind.
             Directory.CreateDirectory(Dir);
             string tmp = FilePath + ".tmp";
-            File.WriteAllText(tmp, JsonSerializer.Serialize(ToDto(run), Opts));
+            File.WriteAllText(tmp, JsonSerializer.Serialize(ToDto(run), SaveJson.Default.RunDto));
             File.Move(tmp, FilePath, overwrite: true);
+            InvalidateExistsCache();
         }
         catch { /* a failed save must never crash the game */ }
     }
@@ -63,17 +124,31 @@ public static class SaveGame
         try
         {
             if (!File.Exists(FilePath)) return null;
-            var dto = JsonSerializer.Deserialize<RunDto>(File.ReadAllText(FilePath), Opts);
-            return dto == null ? null : FromDto(dto);
+            var dto = JsonSerializer.Deserialize(File.ReadAllText(FilePath), SaveJson.Default.RunDto);
+            // D2: "parses fine but is unusable" is corruption too. `null`, `{}`, or a save whose
+            // Squad key was renamed/emptied deserializes WITHOUT throwing, so this used to return
+            // null and leave the file in place -- Game.ContinueRun refused it (empty squad) while
+            // Hud kept drawing CONTINUE off SaveGame.Exists, giving a button that did nothing,
+            // forever, with no banner and no stash. Route it through the same recovery path as an
+            // unparseable file: the squad is the one field a resumable run cannot do without.
+            if (dto == null || dto.Squad == null || dto.Squad.Count == 0) { StashCorruptSave(); return null; }
+            return FromDto(dto);
         }
         catch
         {
-            // Never destroy evidence: stash the unreadable save instead of deleting it.
-            // Recovery I/O must never crash (we're already inside the failure path).
-            try { if (File.Exists(FilePath)) File.Move(FilePath, FilePath + ".bak", overwrite: true); }
-            catch { }
+            StashCorruptSave();
             return null;
         }
+    }
+
+    /// Move an unusable save.json aside to save.json.bak: evidence preserved, and the intro stops
+    /// offering a CONTINUE that cannot work (Exists goes false once the file is gone). Recovery I/O
+    /// must never crash -- we are already inside a failure path.
+    static void StashCorruptSave()
+    {
+        try { if (File.Exists(FilePath)) File.Move(FilePath, FilePath + ".bak", overwrite: true); }
+        catch { }
+        InvalidateExistsCache();
     }
 
     // ---- meta persistence (Heat/Ascension unlock) ----
@@ -89,7 +164,7 @@ public static class SaveGame
 
     static MetaDto LoadMetaDto()
     {
-        try { if (File.Exists(MetaPath)) return JsonSerializer.Deserialize<MetaDto>(File.ReadAllText(MetaPath), Opts) ?? new MetaDto(); }
+        try { if (File.Exists(MetaPath)) return JsonSerializer.Deserialize(File.ReadAllText(MetaPath), SaveJson.Default.MetaDto) ?? new MetaDto(); }
         catch
         {
             // Never destroy evidence: an unreadable meta.json used to yield a fresh
@@ -118,8 +193,9 @@ public static class SaveGame
             // Atomic write (same pattern as Save): .tmp then rename, so the game's only
             // permanent state can't be torn by a crash mid-write.
             Directory.CreateDirectory(Dir);
+            dto.SchemaVersion = CurrentSchema;
             string tmp = MetaPath + ".tmp";
-            File.WriteAllText(tmp, JsonSerializer.Serialize(dto, Opts));
+            File.WriteAllText(tmp, JsonSerializer.Serialize(dto, SaveJson.Default.MetaDto));
             File.Move(tmp, MetaPath, overwrite: true);
         }
         catch { /* a failed meta save must never crash the game */ }
@@ -299,8 +375,10 @@ public static class SaveGame
 
     // append-only: new fields default to 0 / null, so an old meta.json (heat/streak/bestwave only)
     // still loads. Lists default null -> the accessors coalesce to empty (never NRE).
-    class MetaDto
+    internal class MetaDto
     {
+        /// Migration hook -- see RunDto.SchemaVersion. 0 on every profile written before it existed.
+        public int SchemaVersion;
         public int MaxHeat; public int LossStreak; public int BestWave;
         // W3 WAR ROOM (all append-only):
         public int Salvage;
@@ -366,22 +444,22 @@ public static class SaveGame
         {
             Name = d.Name, Cls = d.Cls, Team = Team.Player,
             Hp = d.Hp, MaxHp = d.MaxHp, Aim = d.Aim, Mobility = d.Mobility,
-            Weapon = Weapon.Make((WeaponKind)d.Weapon),
+            Weapon = Weapon.Make(EnumOr(d.Weapon, WeaponKind.Rifle)),
             Kills = d.Kills, Rank = d.Rank, Alive = true,
             BonusGrenades = d.BonusGrenades, CustomTag = d.CustomTag, Wound = d.Wound,
             Armor = d.Armor,
             Nickname = d.Nickname, Benched = d.Benched,
-            Spec = (Spec)d.Spec,
+            Spec = EnumOr(d.Spec, Spec.None),
             FromReserve = fromReserve,
         };
-        if (d.Perks != null) foreach (var p in d.Perks) u.Perks.Add((Perk)p);
-        if (d.WeaponMods != null) foreach (var m in d.WeaponMods) u.WeaponMods.Add((WeaponMod)m);
+        AddDefined(u.Perks, d.Perks);
+        AddDefined(u.WeaponMods, d.WeaponMods);
         u.RefreshWeaponMods();
         u.Ammo = u.Weapon.Clip;
-        if (d.Traits != null) foreach (var t in d.Traits) u.Traits.Add((Trait)t);
+        AddDefined(u.Traits, d.Traits);
         if (d.Bonds != null) u.Bonds = new List<string>(d.Bonds);
-        if (d.Scars != null) foreach (var s in d.Scars) u.Scars.Add((Scar)s);
-        u.VendettaFaction = (Faction)d.VendettaFaction;
+        AddDefined(u.Scars, d.Scars);
+        u.VendettaFaction = EnumOr(d.VendettaFaction, Faction.None);
         u.NearDeathCount = d.NearDeathCount;
         return u;
     }
@@ -453,6 +531,7 @@ public static class SaveGame
     {
         var dto = new RunDto
         {
+            SchemaVersion = CurrentSchema,
             Mission = r.Mission, Intel = r.Intel, Fallen = new List<string>(r.Fallen),
             BondTally = new Dictionary<string, int>(r.BondTally),
             MapSeed = r.MapSeed, MapPos = r.MapPos,
@@ -476,15 +555,32 @@ public static class SaveGame
         return dto;
     }
 
+    // ---- D5: defensive enum reads --------------------------------------------------------
+    // Persisted ordinals are cast straight out of the DTOs. A hand-edited save, or one written by
+    // a NEWER build that appended members, carries values this build has no member for -- the cast
+    // is legal C# so nothing throws and the bogus value reaches gameplay. (Measured: `Objective:99`
+    // loaded and ran, and Game.CheckEnd's final `else` treated the unknown objective as Evac, so
+    // the mission had an unreachable win condition until the squad wiped.) Unknown -> a safe
+    // fallback; unknown members of a LIST are dropped rather than defaulted, since a bogus perk
+    // silently becoming Perk[0] would be a stealth buff.
+    static T EnumOr<T>(int raw, T fallback) where T : struct, Enum
+        => Enum.IsDefined(typeof(T), raw) ? (T)(object)raw : fallback;
+
+    static void AddDefined<T>(List<T> into, List<int> raw) where T : struct, Enum
+    {
+        if (raw == null) return;
+        foreach (int v in raw) if (Enum.IsDefined(typeof(T), v)) into.Add((T)(object)v);
+    }
+
     static Run FromDto(RunDto dto)
     {
         var r = new Run { Mission = dto.Mission, Intel = dto.Intel, Squad = new List<Unit>(), HeatLevel = Heat.Clamp(dto.HeatLevel) };
         if (dto.Fallen != null) r.Fallen = new List<string>(dto.Fallen);
         if (dto.BondTally != null) r.BondTally = new Dictionary<string, int>(dto.BondTally);
-        if (dto.ActiveBoons != null) foreach (var b in dto.ActiveBoons) r.ActiveBoons.Add((Boon)b);
-        r.PrepFaction = (Faction)dto.PrepFaction;   // append-only: old saves default 0 == Faction.None
+        AddDefined(r.ActiveBoons, dto.ActiveBoons);
+        r.PrepFaction = EnumOr(dto.PrepFaction, Faction.None);   // append-only: old saves default 0 == Faction.None
         r.CheckpointUsed = dto.CheckpointUsed;      // append-only: old saves default false
-        r.Contract = (Contract)dto.Contract;        // append-only: old saves default 0 == Contract.None
+        r.Contract = EnumOr(dto.Contract, Contract.None);        // append-only: old saves default 0 == Contract.None
         r.PendingSalvageReward = dto.PendingSalvageReward;   // append-only: FUL-10 event salvage claim (old saves default 0)
         // regenerate the branching campaign map from its seed and restore the position
         if (dto.MapSeed != 0)
@@ -503,16 +599,23 @@ public static class SaveGame
             ? Run.StandardCard(Math.Max(1, dto.Mission))
             : new MissionCard
             {
-                Objective = (Objective)cd.Objective, ModName = cd.ModName,
+                // an unknown objective falls back to Eliminate: the one goal that is always
+                // reachable, so a mangled card degrades to a winnable fight, not a soft-lock.
+                Objective = EnumOr(cd.Objective, Objective.Eliminate), ModName = cd.ModName,
                 EnemyDelta = cd.EnemyDelta, StatDelta = cd.StatDelta,
-                Reward = (RewardKind)cd.Reward, RewardText = cd.RewardText,
+                Reward = EnumOr(cd.Reward, RewardKind.None), RewardText = cd.RewardText,
             };
         return r;
     }
 
     // ---- DTOs (public fields, IncludeFields = true) ----
-    class RunDto
+    internal class RunDto
     {
+        /// Migration hook. Additive fields default safely on their own, so this is 0 on every save
+        /// written before it existed and stays 0 until a change actually needs a migration (a field
+        /// whose TYPE or MEANING changed, which defaults cannot rescue). Bump it in the same commit
+        /// as such a change and branch on it in FromDto. Persisted; do not repurpose.
+        public int SchemaVersion;
         public int Mission;
         public int Intel;
         public List<UnitDto> Squad = new();
@@ -529,7 +632,7 @@ public static class SaveGame
         public int PendingSalvageReward;   // append-only: FUL-10 event salvage awaiting the run-end commit (old saves default 0)
     }
 
-    class UnitDto
+    internal class UnitDto
     {
         public string Name, Cls, CustomTag, Nickname;
         public int Hp, MaxHp, Aim, Mobility, Weapon, Kills, Rank, BonusGrenades, Wound, Armor;
@@ -544,7 +647,7 @@ public static class SaveGame
         public int NearDeathCount;        // append-only: survived near-deaths (old saves default 0)
     }
 
-    class CardDto
+    internal class CardDto
     {
         public int Objective;
         public string ModName;
@@ -605,10 +708,13 @@ public static class SaveGame
             src.CurrentCard = new MissionCard { Objective = Objective.Hack, ModName = "ONSLAUGHT", EnemyDelta = 2, StatDelta = 1, Reward = RewardKind.BonusPerk, RewardText = "Bonus perk" };
 
             Save(src);
+            // the migration hook must actually be stamped on disk, not just declared
+            int diskSchema = JsonSerializer.Deserialize(File.ReadAllText(FilePath), SaveJson.Default.RunDto).SchemaVersion;
             var got = Load();
             if (got == null) return "SAVETEST: FAIL (load returned null)";
 
             var fails = new List<string>();
+            if (diskSchema != CurrentSchema) fails.Add("runSchemaVersion");
             if (got.Mission != src.Mission) fails.Add("mission");
             if (got.Intel != src.Intel) fails.Add("intel");
             if (got.Squad.Count != src.Squad.Count) fails.Add("squadCount");
@@ -653,65 +759,14 @@ public static class SaveGame
             if (got.Contract != Contract.HighStakes) fails.Add("contract");
             if (got.PendingSalvageReward != 25) fails.Add("pendingSalvageReward");   // FUL-10
 
-            // APPEND-ONLY GUARD: Objective is persisted as a raw ordinal (CardDto.Objective). If a
-            // future edit reorders/removes a member, saved runs load the wrong objective. Check the
-            // value order at runtime (Enum.GetValues is sorted by underlying value) so such a reorder
-            // fails this test loudly instead of silently corrupting saves.
-            var objVals = (Objective[])Enum.GetValues(typeof(Objective));
-            if (objVals.Length < 8 || objVals[0] != Objective.Eliminate || objVals[7] != Objective.Decapitate)
-                fails.Add("objectiveOrdinals");
-
-            // Same append-only guard for every other enum persisted by raw (int) ordinal in the
-            // DTOs (Unit weapon/perks/mods/traits, Run boons, mission faction). A future reorder or
-            // removal silently corrupts existing saves — these checks make that fail SAVETEST loudly.
-            var weaponVals = (WeaponKind[])Enum.GetValues(typeof(WeaponKind));
-            if (weaponVals.Length < 5 || weaponVals[0] != WeaponKind.Rifle || weaponVals[weaponVals.Length - 1] != WeaponKind.Smg)
-                fails.Add("weaponKindOrdinals");
-            var perkVals = (Perk[])Enum.GetValues(typeof(Perk));
-            if (perkVals.Length < 20 || perkVals[0] != Perk.LockOn || perkVals[perkVals.Length - 1] != Perk.Siegebreaker)
-                fails.Add("perkOrdinals");
-            // W10: the tail advanced Stabilizer -> Suppressor (Bipod, Suppressor appended).
-            var modVals = (WeaponMod[])Enum.GetValues(typeof(WeaponMod));
-            if (modVals.Length < 6 || modVals[0] != WeaponMod.Scope || modVals[4] != WeaponMod.Bipod
-                || modVals[modVals.Length - 1] != WeaponMod.Suppressor)
-                fails.Add("weaponModOrdinals");
-            var traitVals = (Trait[])Enum.GetValues(typeof(Trait));
-            if (traitVals.Length < 4 || traitVals[0] != Trait.Killer || traitVals[traitVals.Length - 1] != Trait.Vengeful)
-                fails.Add("traitOrdinals");
-            // W10: the tail advanced RapidDeploy -> Reclaimer (6 verb boons appended). Pin the old
-            // tail's ORDINAL POSITION too (RapidDeploy must still be [9]) so an insertion anywhere
-            // before the new block also fails loudly.
-            var boonVals = (Boon[])Enum.GetValues(typeof(Boon));
-            if (boonVals.Length < 16 || boonVals[0] != Boon.Marksmen || boonVals[9] != Boon.RapidDeploy
-                || boonVals[10] != Boon.ShockDoctrine || boonVals[boonVals.Length - 1] != Boon.Reclaimer)
-                fails.Add("boonOrdinals");
-            // W10: SecondaryKind joins the guarded set (treated as persisted/append-only; Ghost/
-            // Demolition/Bounty appended at the END after CleanSweep).
-            var secVals = (SecondaryKind[])Enum.GetValues(typeof(SecondaryKind));
-            if (secVals.Length < 7 || secVals[0] != SecondaryKind.None || secVals[3] != SecondaryKind.CleanSweep
-                || secVals[secVals.Length - 1] != SecondaryKind.Bounty)
-                fails.Add("secondaryKindOrdinals");
-            var factionVals = (Faction[])Enum.GetValues(typeof(Faction));
-            if (factionVals.Length < 4 || factionVals[0] != Faction.None || factionVals[factionVals.Length - 1] != Faction.Wardens)
-                fails.Add("factionOrdinals");
-            var specVals = (Spec[])Enum.GetValues(typeof(Spec));
-            if (specVals.Length < 11 || specVals[0] != Spec.None || specVals[^1] != Spec.CombatMedic)
-                fails.Add("specOrdinals");
-            var scarVals = (Scar[])Enum.GetValues(typeof(Scar));
-            if (scarVals.Length < 4 || scarVals[0] != Scar.ShellShocked || scarVals[^1] != Scar.Vendetta)
-                fails.Add("scarOrdinals");
-            // FUL-10: the tail advanced Spearhead -> LivingLegends (MercenaryClause, LivingLegends
-            // appended). Pin the old tail's ORDINAL POSITION too (Spearhead must still be [3]) so an
-            // insertion anywhere before the new block also fails loudly.
-            var contractVals = (Contract[])Enum.GetValues(typeof(Contract));
-            if (contractVals.Length < 6 || contractVals[0] != Contract.None || contractVals[3] != Contract.Spearhead
-                || contractVals[^1] != Contract.LivingLegends)
-                fails.Add("contractOrdinals");
-            // W9: MetaUnlock is persisted by ordinal in meta.json's Unlocks list — same append-only
-            // guard (first + last member) so a reorder/removal fails SAVETEST loudly.
-            var unlockVals = (MetaUnlock[])Enum.GetValues(typeof(MetaUnlock));
-            if (unlockVals.Length < 6 || unlockVals[0] != MetaUnlock.StartIntel || unlockVals[^1] != MetaUnlock.StandingReserve)
-                fails.Add("metaUnlockOrdinals");
+            // APPEND-ONLY GUARD (golden fingerprints). Every enum in PersistedEnums below is
+            // stored BY ORDINAL -- a raw int in a DTO, or in meta.json's Unlocks list. Reordering,
+            // removing, renaming or INSERTING a member silently re-points every save an older build
+            // wrote. This used to be pinned positionally (first + last member, occasionally one in
+            // the middle), which a mid-enum insertion walked straight past: inserting a perk at
+            // index 5 of Perk shifted 18 ordinals, corrupted every save, and still PASSED. Hashing
+            // the whole ordered member list catches any shape change at all.
+            EnumShapeFails(fails);
 
             // meta (unlocked-max heat) round-trips through its own meta.json
             string metaSaved = File.Exists(MetaPath) ? File.ReadAllText(MetaPath) : null;
@@ -753,6 +808,7 @@ public static class SaveGame
                 if (r1 != r0 + 2 || w1 != w0 + 1 || b1 != Math.Max(b0, 6)) fails.Add("metaRunTotals");
                 // whole-DTO r-m-w must NOT have clobbered heat set above (99 -> clamped Heat.Max)
                 if (LoadMetaHeat() != Heat.Max) fails.Add("metaW3ClobberedHeat");
+                if (LoadMetaDto().SchemaVersion != CurrentSchema) fails.Add("metaSchemaVersion");
             }
             finally
             {
@@ -764,15 +820,160 @@ public static class SaveGame
             string corrupt = CorruptionSelfTest();
             if (corrupt != null) fails.Add(corrupt);
 
+            // D2/D5: structurally-valid-but-unusable saves, and out-of-range enum ordinals on read
+            string structure = StructureSelfTest();
+            if (structure != null) fails.Add(structure);
+
             return fails.Count == 0
-                ? "SAVETEST: PASS (run round-trips squad/perks/weapon-mods/card/heat; meta heat round-trips; corrupt meta stashed to .bak, rewrite clean)"
-                : "SAVETEST: FAIL (" + string.Join(",", fails) + ")";
+                ? "SAVETEST: PASS (run round-trips squad/perks/weapon-mods/card/heat; schema stamped; 13 persisted-enum fingerprints match; meta heat round-trips; corrupt meta stashed to .bak, rewrite clean; unusable saves stashed + un-offered; junk ordinals clamped)"
+                : "SAVETEST: FAIL (" + string.Join(",", fails) + ")"
+                  + (fails.Exists(f => f.StartsWith("enumShape:")) ? EnumShapeAdvice : "");
         }
         catch (Exception e) { return "SAVETEST: FAIL (exception " + e.Message + ")"; }
         finally
         {
             if (saved != null) { try { Directory.CreateDirectory(Dir); File.WriteAllText(FilePath, saved); } catch { } }
             else Delete();
+        }
+    }
+
+    // ---- APPEND-ONLY ENUM GUARD (golden fingerprints) -------------------------------------
+    // FNV-1a over "<value>:<NAME>;" for every member in underlying-value order. Enum.GetValues is
+    // sorted by value, so the digest covers the exact ordinal->name mapping that saves depend on.
+    static uint EnumFingerprint(Type t)
+    {
+        uint h = 2166136261u;
+        var vals = Enum.GetValues(t);
+        foreach (var v in vals)
+        {
+            string s = Convert.ToInt64(v).ToString(System.Globalization.CultureInfo.InvariantCulture)
+                       + ":" + Enum.GetName(t, v) + ";";
+            foreach (char c in s) { h ^= c; h *= 16777619u; }
+        }
+        return h;
+    }
+
+    /// Every enum persisted by raw ordinal, with the fingerprint of its committed shape.
+    /// TO ADD A MEMBER: append it at the END of the enum, run SIGHTLINE_SAVETEST=1, and paste the
+    /// "actual" hash it prints in here. Anything other than an append is a save-format break.
+    static readonly (Type Type, uint Golden)[] PersistedEnums =
+    {
+        (typeof(Objective),     0x65158518u),
+        (typeof(WeaponKind),    0x00BF6448u),
+        (typeof(Perk),          0xEADD48BAu),
+        (typeof(WeaponMod),     0xB2635D54u),
+        (typeof(Trait),         0xB4F9F2EAu),
+        (typeof(Boon),          0xD35220A4u),
+        (typeof(SecondaryKind), 0x605C1DA5u),
+        (typeof(Faction),       0x4C8FFBCFu),
+        (typeof(Spec),          0xD1E12AEDu),
+        (typeof(Scar),          0xB165F9D9u),
+        (typeof(Contract),      0x9EC11430u),
+        (typeof(MetaUnlock),    0xC672FAD5u),
+        (typeof(RewardKind),    0x388AFEA8u),   // persisted as CardDto.Reward (raw int)
+    };
+
+    /// Guidance appended to a FAILing SAVETEST report when an enum's shape moved. Kept next to the
+    /// table so the dev who trips it is told, in the failure itself, what is and is not safe.
+    const string EnumShapeAdvice =
+        "\n  >> A persisted enum changed shape. Ordinals ARE the save format: appending a member at "
+      + "the END is safe (old saves keep their meaning); inserting, reordering, removing or renaming "
+      + "one silently re-points every existing save and every meta.json profile. If you appended, "
+      + "paste the actual hash above into SaveGame.PersistedEnums. If you did anything else, undo it.";
+
+    static void EnumShapeFails(List<string> fails)
+    {
+        foreach (var (t, golden) in PersistedEnums)
+        {
+            uint got = EnumFingerprint(t);
+            if (got != golden)
+                fails.Add("enumShape:" + t.Name + " (golden 0x" + golden.ToString("X8")
+                          + ", actual 0x" + got.ToString("X8") + ")");
+        }
+    }
+
+    /// D2 + D5 armor (dispatched from inside SelfTest, so SAVETEST covers both).
+    /// D2: a save that PARSES but cannot produce a resumable run (`null`, `{}`, a renamed/emptied
+    /// Squad key) must be treated exactly like an unparseable one -- stashed to save.json.bak and
+    /// removed -- so SaveGame.Exists goes false and the intro stops drawing a CONTINUE button that
+    /// silently does nothing. D5: out-of-range enum ordinals from a hand-edited or newer-build save
+    /// must not reach gameplay (an unknown Objective used to run the mission as Evac, i.e. with an
+    /// unreachable win condition). Snapshots and restores save.json + save.json.bak.
+    /// Returns null on success, else a short failure tag.
+    static string StructureSelfTest()
+    {
+        string bakPath = FilePath + ".bak";
+        string saved = File.Exists(FilePath) ? File.ReadAllText(FilePath) : null;
+        string bakSaved = File.Exists(bakPath) ? File.ReadAllText(bakPath) : null;
+        try
+        {
+            Directory.CreateDirectory(Dir);
+
+            // --- D2: each of these parses cleanly and yields no usable run.
+            var dead = new (string Tag, string Json)[]
+            {
+                ("null",     "null"),
+                ("empty",    "{}"),
+                ("noSquad",  "{ \"Mission\": 3, \"Intel\": 5, \"Roster\": [] }"),
+                ("emptySquad", "{ \"Mission\": 3, \"Squad\": [] }"),
+            };
+            foreach (var (tag, json) in dead)
+            {
+                try { if (File.Exists(bakPath)) File.Delete(bakPath); } catch { }
+                File.WriteAllText(FilePath, json);
+                InvalidateExistsCache();
+                if (Exists) return "deadSaveStillOffered:" + tag;          // CONTINUE must not be drawn
+                if (File.Exists(FilePath)) return "deadSaveNotRemoved:" + tag;
+                if (!File.Exists(bakPath) || File.ReadAllText(bakPath) != json)
+                    return "deadSaveEvidenceLost:" + tag;                  // bytes preserved verbatim
+            }
+
+            // --- D5: a well-formed save carrying impossible ordinals loads, clamps, and drops junk.
+            var probe = new Run { Mission = 2, Intel = 1 };
+            probe.Squad.Add(new Unit
+            {
+                Name = "PROBE", Cls = "ASSAULT", Team = Team.Player, Hp = 5, MaxHp = 5,
+                Aim = 65, Mobility = 6, Weapon = Weapon.Make(WeaponKind.Rifle),
+            });
+            probe.CurrentCard = new MissionCard { Objective = Objective.Hack, Reward = RewardKind.None };
+            Save(probe);
+            string text = File.ReadAllText(FilePath);
+            var doc = JsonSerializer.Deserialize(text, SaveJson.Default.RunDto);
+            doc.Card.Objective = 99;                 // no such objective in ANY build
+            doc.Card.Reward = -5;
+            doc.Squad[0].Weapon = 999;
+            doc.Squad[0].Spec = -1;
+            doc.Squad[0].Perks = new List<int> { 0, 999, -5 };
+            doc.Squad[0].Traits = new List<int> { 12345 };
+            doc.Squad[0].Scars = new List<int> { -2 };
+            doc.PrepFaction = 77; doc.Contract = 77;
+            doc.ActiveBoons = new List<int> { 0, 4242 };
+            File.WriteAllText(FilePath, JsonSerializer.Serialize(doc, SaveJson.Default.RunDto));
+            InvalidateExistsCache();
+            var back = Load();
+            if (back == null) return "junkOrdinalsRejectedWholeSave";      // must degrade, not discard
+            if (back.CurrentCard.Objective != Objective.Eliminate) return "junkObjectiveNotClamped";
+            if (back.CurrentCard.Reward != RewardKind.None) return "junkRewardNotClamped";
+            var pu = back.Squad[0];
+            if (pu.Weapon.Kind != WeaponKind.Rifle) return "junkWeaponNotClamped";
+            if (pu.Spec != Spec.None) return "junkSpecNotClamped";
+            if (pu.Perks.Count != 1 || pu.Perks[0] != Perk.LockOn) return "junkPerksNotFiltered";
+            if (pu.Traits.Count != 0) return "junkTraitsNotFiltered";
+            if (pu.Scars.Count != 0) return "junkScarsNotFiltered";
+            if (back.PrepFaction != Faction.None || back.Contract != Contract.None)
+                return "junkRunEnumsNotClamped";
+            if (back.ActiveBoons.Count != 1 || back.ActiveBoons[0] != Boon.Marksmen)
+                return "junkBoonsNotFiltered";
+            return null;
+        }
+        catch (Exception e) { return "structureException:" + e.GetType().Name; }
+        finally
+        {
+            if (saved != null) { try { File.WriteAllText(FilePath, saved); } catch { } }
+            else { try { if (File.Exists(FilePath)) File.Delete(FilePath); } catch { } }
+            if (bakSaved != null) { try { File.WriteAllText(bakPath, bakSaved); } catch { } }
+            else { try { if (File.Exists(bakPath)) File.Delete(bakPath); } catch { } }
+            InvalidateExistsCache();
         }
     }
 

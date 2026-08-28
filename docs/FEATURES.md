@@ -16,6 +16,21 @@ seeds (mix of WIN/LOSE, no exceptions):
   profile (meta.json, append-only) banks SALVAGE currency, 7 ACHIEVEMENTS, a HALL OF FAME (fallen KIA + won-run
   legends), lifetime totals, and 3 additive UNLOCKS (StartIntel/StartBoon/StartArmor) bought with salvage — all
   strictly gated behind `!NoPersist` so the flywheel/harness stay byte-stable. `src/Meta.cs`, `src/Game.Meta.cs`.
+- **ONBOARDING — TRAINING OP + STAGED VERBS + FIELD TIPS (PROGRAM RESONANCE T1):** three pieces, replacing a
+  5-card strip that taught 3 of ~14 verbs. (A) **TRAINING OP** — a fixed, scripted, NON-PERSISTENT, restartable
+  drill (`GameMode.Training`, intro button / key **N**, **[P]** restarts) on its own authored arena
+  (`Maps.TrainingArena`, deliberately outside `Maps.Layouts` so the arena deck/daily are unmoved): two recruits,
+  four dormant targets, and 8 well-ordered problems — MOVE, COVER, FLANK, FIRE, OVERWATCH, GRENADE, ABILITY,
+  CLEAR — each solved by DOING it, each with a turn-budget fallback so no lesson can strand you. Writes nothing:
+  no save.json, no meta.json, no veteran reserve, no salvage, no achievements (asserted, not assumed).
+  (B) **STAGED VERBS** — during the drill and campaign mission 1 the action bar carries only what has been
+  taught and grows as lessons land, with a permanent **SHOW ALL** escape (**[V]**, remembered per profile);
+  staging is capped to those two places and never hides STABILIZE. (C) **JUST-IN-TIME FIELD TIPS** — 10 cards
+  (BRACE / STABILIZE / RELOAD / GRENADE / HUNKER / SHOVE / VAULT / DRAG / FOCUS / ITEM), each fired once per
+  profile the first time its precondition is actually true in play, priority-ordered so a bleeding-out ally
+  outranks a nicety. Seen-flags persist as a bitmask in display.json (FUL-12's `BraceTipSeen` migrates into
+  bit 0). The intro's six-bullet rules wall is now one line. Hook: `SIGHTLINE_TUTTEST`; screenshots via
+  `SIGHTLINE_TRAINING` / `SIGHTLINE_TRAINLESSON` / `SIGHTLINE_SHOWALL` / `SIGHTLINE_TIP`.
 - **CODEX / FIELD MANUAL (HORIZON W6):** a browsable in-game reference (bestiary + classes + perks/boons/contracts/
   specs/traits/scars/weapon-mods/status/objectives) from the intro (key K) + pause menu — closes the onboarding gap.
 - **EXPOSED BY FIRE + honest flywheel (HORIZON W1):** a unit that fires and doesn't move is easier to hit next turn
@@ -98,9 +113,14 @@ seeds (mix of WIN/LOSE, no exceptions):
   clock escalates after turn 4 — enemy aim creep (`Combat.PressureAim`) + reinforcement waves — so turtling is
   strictly worse than advancing. `PRES` rung-pip meter in the top bar; `Game.PressureRungFor/UpdatePressure/
   SpawnReinforcements/PressureClockObjective`. `SIGHTLINE_PRESSURE`.
-- **Visible randomness mitigation (AGENCY W1):** the shot tooltip surfaces the hidden graze floor + streak-
-  breaker (`DMG GRAZE n / min-max`, `+N STEADYING`) via `ShotOdds.GrazeFloor/StreakBonus` — missing a high-%
-  shot reads as less of a betrayal (math unchanged). `SIGHTLINE_TOOLTIP`.
+- **Visible randomness mitigation (AGENCY W1):** the shot tooltip surfaces the graze floor + streak-breaker
+  (`DMG GRAZE n / min-max`, `+N STEADYING`) via `ShotOdds.GrazeFloor/StreakBonus` — missing a high-% shot reads
+  as less of a betrayal. `SIGHTLINE_TOOLTIP`. **RESONANCE Q1 (D3):** the STEADYING bonus is now folded into
+  `Combat.ComputeOdds` itself, so the headline HIT% *is* the roll's probability (it under-reported by up to 12
+  points: displayed 66 / rolled 77.89% over 40k seeded rolls); the badge is now the explanation, not the
+  disclosure of a hidden loader. Pinned by `SIGHTLINE_COMBATTEST` (`steadyNotInHit` / `steadyRollNotDisplayed`
+  / `steadyLeakedToEnemy`). **Q1 (D4):** the `RUSHED 2ND SHOT` / `DOUBLE-TAP` badge is no longer gated on aim
+  mode — both odds paths apply the −15 penalty, so both now explain it.
 - **Run-end payoff (AGENCY W1):** rich VICTORY/RUN OVER summary card (`Hud.DrawEndScreen`) — stat slabs +
   SURVIVING SQUAD (MVP) + KIA MEMORIAL (`Run.Memorial`/`FallenRec`, not persisted) + `Fx.VictoryBurst`
   flourish on the final win. `SIGHTLINE_SUMMARY`.
@@ -288,11 +308,22 @@ seeds (mix of WIN/LOSE, no exceptions):
   target's low cover; high cover still blocks); faux-3D platforms, height-aware
   overlays, AI seizes the high ground. Tooltip shows "+ HIGH GROUND" / "+ OVER LOW
   COVER".
-- **UX:** squad roster strip, end-turn confirmation, mute indicator, threat
-  preview (red pips on exposed reachable tiles while positioning), **camera
-  zoom/pan** (wheel + middle-drag, C to reset), a **keyboard tile cursor**
-  (arrows/WASD + Space), and a **pause/settings menu** (Esc: display, audio, screen
-  shake, threat-preview toggles, abandon run).
+- **Incoming-fire forecast** (RESONANCE T2; `Game.ComputeThreat` -> `ThreatCell[,]`,
+  `Renderer.DrawThreat`, `Hud.DrawThreatCard`): for every reachable tile, how many live
+  hostiles can shoot you there, the best enemy hit%, the expected post-armor damage,
+  whether you would be **flanked**, and whether the tile is in a live **overwatch / BRACE**
+  reaction lane. Derived from `Combat.ComputeOdds` with the mover placed on the candidate
+  tile (so the read can never disagree with the shot that fires) and modelling the states
+  moving clears (hunker drops, exposed-by-fire ends). Shown as a **danger meter** (1-3 bars
+  = gun count, shape-redundant and colorblind-safe; intensity = best hit%; a foot-rule marks
+  a flank), an **INCOMING FIRE hover card** with the detail, and a **move-path preview tinted
+  by the worst danger the route crosses**. Signature-cached (rebuilds on change, ~0.3-1.1 ms,
+  not per frame). Pause toggle is three-state: OFF / SIMPLE (the pre-T2 minimal tick) / FULL.
+  Self-test: `SIGHTLINE_THREATTEST`; screenshots: `SIGHTLINE_THREATSHOT` (+ `SIGHTLINE_THREATPREF`).
+- **UX:** squad roster strip, end-turn confirmation, mute indicator, the incoming-fire
+  forecast above, **camera zoom/pan** (wheel + middle-drag, C to reset), a **keyboard tile
+  cursor** (arrows/WASD + Space), and a **pause/settings menu** (Esc: display, audio, screen
+  shake, threat-preview OFF/SIMPLE/FULL, abandon run).
 - **Accessibility** (`src/Display.cs` + `Pal`): a **brightness** post-pass (70–130%,
   `Display.DrawBrightness`) + a **colorblind palette** toggle (`Pal.SetColorblind`, Foe→
   orange / Good→teal), both in the pause menu + persisted. (Phase 3 item 3.13.)
@@ -419,6 +450,18 @@ seeds (mix of WIN/LOSE, no exceptions):
 - **Board-space depth (presentation):** a deterministic board key-light + restored cover legibility + contact-shadow
   AO so the arena reads as a lit, dimensional space instead of a flat checkerboard, units still dominant
   (colorblind-safe, byte-stable). (`Renderer` FloorLight/KeyLit/DrawCover/DrawEvac.)
+- **Move range as a BOUNDARY (RESONANCE V2):** the reachable/dash regions are drawn as a marching-squares
+  outline (**solid** walk / **dashed** dash — stroke style, so the two never read as one another or as a
+  plateau, in either palette), a per-tile corner-tick lattice, and a whisper of **white** inner lift (hue-
+  preserving). It replaced a flat per-tile alpha-60/55 cyan+gold fill that covered 60-120 tiles for the whole
+  player turn and collapsed all eight biomes into one cyan family. (`Renderer.DrawMoveOverlay`; QA hook
+  `SIGHTLINE_NOMOVE=1`; measurement `scripts/board-metrics.py`.)
+- **The board grade (RESONANCE V2):** one coordinated value pass — floor mean un-darkened and pulled harder
+  toward the biome tint, key-light throw widened to x0.32 lit / x0.45 shadow, cover tops +16 / walls -8 with a
+  raised rim, plateau tops +64 with a darker front wall and a stronger lit lip, and a per-biome AO vignette on
+  the board rect (under terrain, so it never dims a unit). Board median luma 75 -> 67 with the p50->p95 span
+  more than doubled; luma >180 stays reserved for units/objectives/FX. (`Renderer.DrawBoard`/`DrawElevation`/
+  `DrawCover`/`DrawBoardVignette`.)
 - **Balance roots:** LockOn narrowed to a FLANK reward (was any-exposed, a superset that killed the situational
   perks); BALLISTIC PLATING de-throned from the autopilot's always-buy slot so requisition purchases spread (PLATING
   369→203 buys; dead perks Hardened/Tank 2/4 → 11/11). Plus a double-kill correctness fix that makes the
