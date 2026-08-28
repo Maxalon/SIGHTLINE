@@ -78,7 +78,11 @@ public static partial class Audio
     /// SetSoundPan mutate that shared buffer, so an ALREADY-PLAYING shot's pitch and pan
     /// jumped the instant the next one started. LoadSoundAlias gives each voice its own
     /// stream state over shared sample data; a round-robin ring with oldest-steal fixes both.
-    sealed class Voices { public Sound[] Ring; public int Next; }
+    /// `Aliased` counts how many of Ring[1..] are REAL aliases. There is deliberately no
+    /// struct comparison at teardown: Sound is an unmanaged struct of raw pointers, and this
+    /// whole path is unreachable in the sandbox (no audio device), so "unload exactly the
+    /// handles we created" has to be bookkeeping, not inference.
+    sealed class Voices { public Sound[] Ring; public int Next; public int Aliased; }
     static readonly Dictionary<string, Voices> _voices = new();
     const int RingSize = 6;
 
@@ -143,12 +147,16 @@ public static partial class Audio
         {
             var ring = new Sound[RingSize];
             ring[0] = kv.Value;
+            int aliased = 0;
             for (int i = 1; i < RingSize; i++)
             {
-                try { ring[i] = Raylib.LoadSoundAlias(kv.Value); }
-                catch { ring[i] = kv.Value; }        // alias unavailable: degrade to the base voice
+                try { ring[i] = Raylib.LoadSoundAlias(kv.Value); aliased = i; }
+                catch { ring[i] = kv.Value; break; }  // alias unavailable: degrade to the base voice
             }
-            _voices[kv.Key] = new Voices { Ring = ring, Next = 0 };
+            // a failed alias leaves the rest of the ring pointing at the base sound; shrink the
+            // ring to what actually works so Play never round-robins onto a duplicate handle
+            if (aliased < RingSize - 1) Array.Resize(ref ring, aliased + 1);
+            _voices[kv.Key] = new Voices { Ring = ring, Next = 0, Aliased = aliased };
         }
     }
 
@@ -848,8 +856,8 @@ public static partial class Audio
         // aliases first — they share the base sound's sample data, so unloading the base out
         // from under a live alias is a use-after-free.
         foreach (var v in _voices.Values)
-            for (int i = 1; i < v.Ring.Length; i++)
-                if (!v.Ring[i].Equals(v.Ring[0])) { try { Raylib.UnloadSoundAlias(v.Ring[i]); } catch { } }
+            for (int i = 1; i <= v.Aliased; i++)
+                { try { Raylib.UnloadSoundAlias(v.Ring[i]); } catch { } }
         _voices.Clear();
         foreach (var s in _snd.Values) Raylib.UnloadSound(s);
         _snd.Clear();
