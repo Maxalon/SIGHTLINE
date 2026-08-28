@@ -1558,14 +1558,18 @@ public static class Hud
         if (o.Steady)    flags.Add(("STEADY", $"+{Combat.SteadyAim} aim, +{Combat.SteadyCrit} crit", Pal.Good));
         if (o.Ambush)    flags.Add(("AMBUSH", $"+{Combat.AmbushAim} aim, +{Combat.AmbushCrit} crit", Pal.Good));
         if (o.ExposedFire) flags.Add(("EXPOSED BY FIRE", $"+{Combat.ExposedFireAim} aim, +{Combat.ExposedFireCrit} crit", Pal.Good));   // HORIZON: target fired last turn + stayed put
-        // Surface the hidden streak-breaker: after consecutive misses this soldier's next
-        // shot quietly aims truer (the bonus is in the roll, NOT in the HIT% shown). Naming it
-        // "STEADYING" tells the player the safety net is working so a miss streak feels recoverable.
+        // STEADYING (the streak-breaker): after consecutive misses this soldier aims truer.
+        // Q1 D3 — the bonus is now INSIDE the HIT% above (Combat.ComputeOdds), so this badge is
+        // the EXPLANATION of why the number is higher, not the disclosure of a hidden one.
         if (o.StreakBonus > 0) flags.Add(("STEADYING", $"+{o.StreakBonus} aim", Pal.Good));
         // TEMPO: a SECOND shot in the same turn is a rushed follow-up at the SnapAim penalty (the
         // HitChance shown already reflects it). RUN&GUN's bonus shot + the GUNSLINGER perk are full
         // aim — GUNSLINGER instead gets a "DOUBLE-TAP" confirmation badge.
-        if (g.AimMode && a != null && a.FiredThisTurn && !a.RunGun)
+        // Q1 D4 — NOT gated on AimMode. BOTH odds paths apply the penalty to the displayed hit%
+        // (Game.UpdateHoverAndAim does it in the AimMode branch AND in the plain hover-an-enemy
+        // branch), and this tooltip renders on both, so gating the badge on aim mode meant a plain
+        // hover showed a number 15 points lower than the first shot with no reason given.
+        if (a != null && a.FiredThisTurn && !a.RunGun)
             flags.Add(a.HasPerk(Perk.Gunslinger) ? ("DOUBLE-TAP", "full aim", Pal.Good) : ("RUSHED 2ND SHOT", $"{Game.SnapAim} aim", Pal.Foe));
 
         // — modifiers that read live attacker/target state (mirror Combat.ComputeOdds) —

@@ -543,7 +543,10 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_HAZARD") == "1") game.DebugHazards();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_TAGEDIT") == "1") game.DebugTagEditor();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_WOUND") == "1") game.DebugWound();
-        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_TOOLTIP") == "1") game.DebugTooltip();
+        // Q1: =1 stages the AIM-mode tooltip, =hover the plain hover-an-enemy tooltip (D4).
+        bool tooltipHover = shot && Environment.GetEnvironmentVariable("SIGHTLINE_TOOLTIP") == "hover";
+        if (shot && (Environment.GetEnvironmentVariable("SIGHTLINE_TOOLTIP") == "1" || tooltipHover))
+            game.DebugTooltip(tooltipHover);
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_BENCH") == "1") game.DebugBench();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_TRAITS") == "1") game.DebugTraits();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_STATUS") == "1") game.DebugStatus();
@@ -566,6 +569,7 @@ public static class Program
             Display.ChromaIntensity = 0.6f;
         }
         bool helpShot = shot && Environment.GetEnvironmentVariable("SIGHTLINE_HELP") == "1";  // hover the ability button
+        int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_SHOTSEQ"), out int seqCount);   // Q1: consecutive-frame dump
         int frame = 0;
         const int autoCap = 20000;
 
@@ -574,12 +578,17 @@ public static class Program
             float dt = (shot || autoplay) ? 1f / 60f : Raylib.GetFrameTime();
             Display.UpdateMouse();
             if (helpShot) Raylib.SetMousePosition(592, 740);   // park cursor on the ability button
+            if (tooltipHover) game.KbCursor = true;            // Q1: hold the board cursor on the foe (a mouse
+                                                               // delta from the Xvfb pointer clears it otherwise)
             game.Update(dt);
             Audio.UpdateMusic(dt);
 
             Display.RenderFrame(() =>
             {
-                if (autoplay) Raylib.ClearBackground(Pal.Bg);  // skip heavy draw during smoke test
+                // Q1: autoplay normally skips the heavy draw (it's a smoke test), but a shot frame
+                // requested ON TOP of autoplay is asking for a picture of live play — the only way
+                // to photograph a unit MID-MOVE — so draw for real in that combination.
+                if (autoplay && !shot) Raylib.ClearBackground(Pal.Bg);
                 else game.Draw();
             });
 
@@ -587,7 +596,15 @@ public static class Program
             if (shot)
             {
                 if (frame == shotFrame) Raylib.TakeScreenshot("sightline_shot.png");
-                if (!autoplay && frame >= shotFrame + 2) break;
+                // Q1 SIGHTLINE_SHOTSEQ=<n>: also dump the n consecutive frames from shotFrame as
+                // sightline_seq_NN.png. Pair with SIGHTLINE_AUTOPLAY=1 to film a multi-tile move —
+                // the eyes-only check for the MoveStepAnim OnStart-at-enqueue jitter landmine
+                // (CLAUDE.md: a step that captures _from at the ORIGINAL tile snaps back every
+                // tile, and no test catches it).
+                if (seqCount > 0 && frame >= shotFrame && frame < shotFrame + seqCount)
+                    Raylib.TakeScreenshot($"sightline_seq_{frame - shotFrame:00}.png");
+                if (!autoplay && frame >= shotFrame + Math.Max(2, seqCount)) break;
+                if (autoplay && seqCount > 0 && frame >= shotFrame + seqCount) break;
             }
             if (autoplay)
             {

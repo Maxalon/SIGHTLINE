@@ -182,8 +182,9 @@ public static class Codex
             $"(max {Game.PressureMax} rungs), with reinforcements from rung 2. Advance.");
         Add("GRAZE", "SAFETY NET",
             $"A shot that misses by {Combat.GrazeBand} or less GRAZES: minimum damage, no crit — never nothing. " +
-            $"A {Combat.GrazeMinMiss}% true-miss window always remains. Each clean miss also banks a hidden " +
-            $"+{Combat.StreakBonusPerMiss} aim (STEADYING, max +{Combat.MaxStreakBonus}) until you connect.");
+            $"A {Combat.GrazeMinMiss}% true-miss window always remains. Each clean miss also banks " +
+            $"+{Combat.StreakBonusPerMiss} aim (STEADYING, max +{Combat.MaxStreakBonus}) until you connect — " +
+            "it is already counted in the HIT% you see.");
         Add("TEMPO", "FIRE & MOVE",
             "Firing costs 1 action and does NOT end the turn — shoot, then reposition, in either order. " +
             $"One full-aim shot per soldier per turn: a second is RUSHED at {Game.SnapAim} aim.");

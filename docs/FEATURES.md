@@ -98,9 +98,14 @@ seeds (mix of WIN/LOSE, no exceptions):
   clock escalates after turn 4 — enemy aim creep (`Combat.PressureAim`) + reinforcement waves — so turtling is
   strictly worse than advancing. `PRES` rung-pip meter in the top bar; `Game.PressureRungFor/UpdatePressure/
   SpawnReinforcements/PressureClockObjective`. `SIGHTLINE_PRESSURE`.
-- **Visible randomness mitigation (AGENCY W1):** the shot tooltip surfaces the hidden graze floor + streak-
-  breaker (`DMG GRAZE n / min-max`, `+N STEADYING`) via `ShotOdds.GrazeFloor/StreakBonus` — missing a high-%
-  shot reads as less of a betrayal (math unchanged). `SIGHTLINE_TOOLTIP`.
+- **Visible randomness mitigation (AGENCY W1):** the shot tooltip surfaces the graze floor + streak-breaker
+  (`DMG GRAZE n / min-max`, `+N STEADYING`) via `ShotOdds.GrazeFloor/StreakBonus` — missing a high-% shot reads
+  as less of a betrayal. `SIGHTLINE_TOOLTIP`. **RESONANCE Q1 (D3):** the STEADYING bonus is now folded into
+  `Combat.ComputeOdds` itself, so the headline HIT% *is* the roll's probability (it under-reported by up to 12
+  points: displayed 66 / rolled 77.89% over 40k seeded rolls); the badge is now the explanation, not the
+  disclosure of a hidden loader. Pinned by `SIGHTLINE_COMBATTEST` (`steadyNotInHit` / `steadyRollNotDisplayed`
+  / `steadyLeakedToEnemy`). **Q1 (D4):** the `RUSHED 2ND SHOT` / `DOUBLE-TAP` badge is no longer gated on aim
+  mode — both odds paths apply the −15 penalty, so both now explain it.
 - **Run-end payoff (AGENCY W1):** rich VICTORY/RUN OVER summary card (`Hud.DrawEndScreen`) — stat slabs +
   SURVIVING SQUAD (MVP) + KIA MEMORIAL (`Run.Memorial`/`FallenRec`, not persisted) + `Fx.VictoryBurst`
   flourish on the final win. `SIGHTLINE_SUMMARY`.
