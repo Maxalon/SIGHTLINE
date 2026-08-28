@@ -190,6 +190,12 @@ public static class Codex
         Add("SUPPRESSION", $"-{Combat.SuppressAim} AIM",
             $"Weight of fire pins a target: -{Combat.SuppressAim} aim, and a PINNED foe cannot dash. " +
             $"A sharpshooter's MARK is the mirror: the whole squad gains +{Combat.MarkAim} aim against the painted foe.");
+        // FUL-6: the two universal positioning verbs get a rules row (they had none), incl. the
+        // reworked FIELD DRILLS drill effect so the boon's copy is anchored in the rules tab.
+        Add("DRAG & VAULT", "FIELD CRAFT",
+            "Two universal 1-action verbs, once per soldier per turn each: DRAG pulls an ally within reach one tile " +
+            "toward you (haul a wounded mate out of a lane); VAULT leaps an adjacent cover block to the floor beyond. " +
+            "Neither ends the turn. The FIELD DRILLS boon makes either DRILL the soldier: +1 tile of movement that turn.");
 
         return e;
     }
@@ -308,7 +314,10 @@ public static class Codex
         // ordinal and stays append-only). Every banner/pop-text word a fight can stamp on a unit
         // is now findable here. Magnitudes are the real constants.
         e.Add(new CodexEntry { Title = "ROUTED", Code = "MORALE",
-            Desc = $"Its pod broke at half strength: flees toward its own edge, drops overwatch and shoots wild for {Game.RoutDuration} turns, then rallies." });
+            Desc = $"Its pod broke at half strength — in a pod of 3 the first kill sets the survivors WAVERING and the second breaks them: flees toward its own edge, drops overwatch and shoots wild for {Game.RoutDuration} turns, then rallies." });
+        // FUL-6: linked activation is a coded battlefield state the player must be able to look up.
+        e.Add(new CodexEntry { Title = "LINKED ALERTS", Code = "HEARD THE GUNS",
+            Desc = $"Gunfire carries: waking a pod alerts the nearest dormant pod within earshot ({Game.LinkRange} tiles, missions 3+); it arrives one turn later, without the ambush scatter. You always get the warning. Counters: kill the woken pod inside the warning turn and set a line (BRACE/overwatch/frag) for the second; pre-frag the telegraphed pod (it lands clumped); or open the fight from a lane where no second pod sits within earshot." });
         e.Add(new CodexEntry { Title = "STAGGERED", Code = "BRACE",
             Desc = "Interrupted by a BRACE reaction: remaining actions this turn are denied and any held overwatch drops." });
         e.Add(new CodexEntry { Title = "SUPPRESSED", Code = $"-{Combat.SuppressAim} AIM",
@@ -430,7 +439,8 @@ public static class Codex
 
         // W11: the STATUS tab documents the out-of-enum battlefield states too.
         var statusRows = StatusEntries();
-        foreach (var want in new[] { "ROUTED", "STAGGERED", "SUPPRESSED", "PINNED", "MARKED", "CONCEALED" })
+        foreach (var want in new[] { "ROUTED", "STAGGERED", "SUPPRESSED", "PINNED", "MARKED", "CONCEALED",
+                                     "LINKED ALERTS" })   // FUL-6: the heard-the-guns telegraph row
             if (!statusRows.Exists(r => r.Title == want && !string.IsNullOrWhiteSpace(r.Desc)))
                 fails.Add($"STATUS missing W11 row {want}");
 

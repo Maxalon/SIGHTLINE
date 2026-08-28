@@ -239,6 +239,12 @@ seeds (mix of WIN/LOSE, no exceptions):
   frags clustered/covered soldiers (from mission 2; never hits its own).
 - **Activation pods:** enemies dormant (dimmed, "?") until a soldier sights them,
   then the pod wakes + scatters to cover ("CONTACT!"). Scouting carries risk.
+  **FUL-6:** missions 3+ group the initial force into **pods of 3** (pure `Mission.PodPlan`
+  greedy split — 9 -> {3,3,3}; m1-2 and the finale keep the classic pairs) that spawn as
+  **visible clumps** (members anchor to the pod lead's row/column band), and **gunfire
+  carries**: waking a pod puts the nearest dormant pod within 6 tiles on the telegraphed
+  Suspicious track ("HEARD THE GUNS"), confirming to Alert one turn later even unseen —
+  one link per wake, never chains, zero RNG. Codex LINKED ALERTS row; `SIGHTLINE_PODTEST`.
 - **Run save/load:** the campaign is checkpointed to the OS user-data dir at each
   mission start (`src/SaveGame.cs`); the intro offers **CONTINUE RUN** (key C) to
   resume. The save is cleared when a run ends.
@@ -397,7 +403,10 @@ seeds (mix of WIN/LOSE, no exceptions):
 - **Enemy pod MORALE / ROUT:** pods carry shared morale; killed down to ≤ half their spawn strength, the survivors
   BREAK and ROUT for ~2 turns — flee toward their own edge, drop overwatch, and shoot wild (−18 aim) — then rally.
   Focus-firing a pod down is a genuine comeback: the second kill panics the pod. Green "ROUT" tag + "POD ROUTED"
-  banner. (`Unit.Routed`, `Game.BreakPodMorale`; `SIGHTLINE_MORALETEST`.)
+  banner. (`Unit.Routed`, `Game.BreakPodMorale`; `SIGHTLINE_MORALETEST`.) **FUL-6:** pods of 3 (m3+) give the
+  arc its full staging — kill 1 of 3 flags WAVERING, kill 2 breaks the survivor — and **LAST STAND waves join
+  morale**: each wave's landed bodies split into sub-pods (ids 100+, `_podOrig`-sealed), so routs play mid-stand
+  (the injected deep-wave ELITE stays morale-exempt); TERROR is live in endless boon offers again.
 - **Sequenced enemy coordination:** setup verbs (SAPPER breach / STRIKER + adjacent shove) act BEFORE the finishers,
   and the squad's shared focus is recomputed live per unit — so a shove/breach that exposes a soldier redirects the
   pod onto that opening the same turn (setup-then-collapse). Advisory-only, TIMEOUT-safe. (`Game.IsSetupUnit` + a
@@ -480,7 +489,8 @@ seeds (mix of WIN/LOSE, no exceptions):
   STANDING RESERVE (3rd recall slot); heat multiplies the win bounty; daily wins pay 10+heat
   once per calendar stamp with a streak counter and two achievements.
 - **Pools:** boons SHOCK DOCTRINE (braced interrupts deal full damage), TERROR (routs last +2
-  turns), FIELD DRILLS (DRAG/VAULT ×2 per turn), PYROMANIACS (own fire +2 turns, squad
+  turns), FIELD DRILLS (FUL-6 rework: a DRAG or VAULT *drills* the soldier — +1 tile of movement
+  for the rest of that turn, and DRAG/VAULT ×2 per turn), PYROMANIACS (own fire +2 turns, squad
   burn-immune), FIELD STORES (utility items ×2 charges), RECLAIMER (focused-cone overwatch kills
   refund the reaction); weapon mods BIPOD (+10 aim if unmoved) and SUPPRESSOR (a suppressed shot
   wakes only the target's pod); secondaries GHOST / DEMOLITION / BOUNTY; the INTEL CACHE (an

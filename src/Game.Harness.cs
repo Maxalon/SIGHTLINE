@@ -1882,6 +1882,240 @@ public partial class Game
             : "MORALETEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
+    /// FUL-6 CRITICAL MASS self-test (SIGHTLINE_PODTEST). Six legs:
+    ///  (a) PLAN PIN — PodPlan {7,8,9,12} -> {3,2,2}/{3,3,2}/{3,3,3}/{3,3,3,3}, no pod of 1
+    ///      from any count >= 2; a built m3 force groups to plan sizes with _podOrig matching;
+    ///      an m1 force stays i/2 pairs; a finale force stays i/2 (FUL11PROBE by construction).
+    ///  (b) COHESION — every m3 pod's max intra-pod Chebyshev spread <= 3 as spawned.
+    ///  (c) LINK — waking pod A links ONLY the nearest in-earshot pod B (Suspicious +
+    ///      _linkedPods); ResolveSuspicion confirms B to Alert UNSEEN, never chains to C
+    ///      (in earshot of B, out of earshot of A); an out-of-earshot pod never links.
+    ///  (d) ARC — in a pod of 3, kill 1 -> survivors WAVERING (not routed); kill 2 -> rout.
+    ///  (e) ENDLESS — wave bodies land in sub-pods with ids >= 100 and sealed _podOrig;
+    ///      the injected elite stays PodId -1 (morale-exempt).
+    ///  (f) FDR — a boon-held drag drills once (+2 half-steps MoveBudget, exactly one FDR
+    ///      proc); no boon -> no grant; a second drag the same turn -> no second proc.
+    public string PodSelfTest()
+    {
+        NoPersist = true;
+        var fails = new System.Collections.Generic.List<string>();
+
+        // ---- (a) PLAN PIN: the pure split ----
+        var pins = new (int n, int[] want)[]
+        {
+            (7, new[] { 3, 2, 2 }), (8, new[] { 3, 3, 2 }), (9, new[] { 3, 3, 3 }), (12, new[] { 3, 3, 3, 3 }),
+            (2, new[] { 2 }), (3, new[] { 3 }), (4, new[] { 2, 2 }),
+        };
+        foreach (var (pn, pwant) in pins)
+        {
+            var got = Mission.PodPlan(pn);
+            if (!got.SequenceEqual(pwant)) fails.Add($"plan{pn}=[{string.Join(",", got)}]");
+        }
+        for (int c = 2; c <= 12; c++)
+        {
+            var pl = Mission.PodPlan(c);
+            if (pl.Sum() != c) fails.Add($"planSum{c}");
+            if (pl.Any(s => s < 2)) fails.Add($"podOf1@{c}");
+        }
+
+        // ---- (a)+(b): built forces. m3 groups to plan sizes, _podOrig matches, pods clump. ----
+        for (int slot = 0; slot < 3; slot++)
+        {
+            Util.Reseed(50000 + slot);
+            var g = new Game { NoPersist = true, ForcedObjective = Objective.Eliminate };
+            g.StartMission(3);
+            var pods = g.Enemies.Where(e => e.PodId >= 0 && e.PodId < 100)
+                                .GroupBy(e => e.PodId).OrderBy(gr => gr.Key).ToList();
+            int nBodies = pods.Sum(gr => gr.Count());
+            var plan = Mission.PodPlan(nBodies);
+            if (pods.Count != plan.Length) fails.Add($"m3s{slot}podCount={pods.Count}(want{plan.Length})");
+            else
+                for (int p = 0; p < plan.Length; p++)
+                    if (pods[p].Count() != plan[p]) fails.Add($"m3s{slot}pod{p}size={pods[p].Count()}(want{plan[p]})");
+            foreach (var gr in pods)
+            {
+                if (g._podOrig.GetValueOrDefault(gr.Key) != gr.Count())
+                    fails.Add($"m3s{slot}podOrig{gr.Key}={g._podOrig.GetValueOrDefault(gr.Key)}");
+                int spread = 0;
+                foreach (var a in gr) foreach (var b in gr)
+                    spread = Math.Max(spread, Util.ChebyDist(a.X, a.Y, b.X, b.Y));
+                if (spread > 3) fails.Add($"m3s{slot}pod{gr.Key}spread={spread}");
+            }
+        }
+        {
+            Util.Reseed(50001);
+            var g = new Game { NoPersist = true, ForcedObjective = Objective.Eliminate };
+            g.StartMission(1);                              // teaching tier: i/2 pairs exactly
+            for (int i = 0; i < g.Enemies.Count; i++)
+                if (g.Enemies[i].PodId != i / 2) { fails.Add("m1NotPairs"); break; }
+        }
+        {
+            Util.Reseed(50002);
+            var g = new Game { NoPersist = true };
+            g.StartMission(6);                              // finale: i/2 EXACTLY (FUL-11 kit geometry)
+            for (int i = 0; i < g.Enemies.Count; i++)
+                if (g.Enemies[i].PodId != i / 2) { fails.Add("finaleNotIOver2"); break; }
+        }
+
+        // ---- controlled scene helpers (the MORALETEST staging pattern) ----
+        Unit MkP(string name, int x, int y) {
+            var u = new Unit { Name = name, Cls = "ASSAULT", Team = Team.Player, X = x, Y = y,
+                               Hp = 8, MaxHp = 8, Aim = 65, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+            u.Ammo = u.Weapon.Clip; u.SyncPos(); u.BeginTurn(); return u;
+        }
+        Unit MkE(string name, int x, int y, int pod, AlertLevel alert) {
+            var u = new Unit { Name = name, Cls = "GRUNT", Team = Team.Enemy, X = x, Y = y,
+                               Hp = 6, MaxHp = 6, Aim = 60, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle), PodId = pod };
+            u.Ammo = u.Weapon.Clip; u.Alert = alert; u.SyncPos(); u.BeginTurn(); return u;
+        }
+        void FreshScene()
+        {
+            Grid = new Grid();
+            Players = new System.Collections.Generic.List<Unit>();
+            Enemies = new System.Collections.Generic.List<Unit>();
+            Vip = null; CaptiveLocked = false; Hvt = null;
+            Objective = Objective.Eliminate; EvacZone.Clear();
+            SquadConcealed = false;
+            _podOrig.Clear(); _linkedPods.Clear(); _anims.Clear();
+        }
+
+        // ---- (c) LINK: nearest-only, confirm-unseen, no chain ----
+        _run = new Run(); _run.Start();
+        _run.Mission = 3;                                   // the link is a mission-3+ rule
+        FreshScene();
+        var sol = MkP("SOL", 0, 0);                         // far from B: out of sight for the resolve
+        Players.Add(sol);
+        var a1 = MkE("A1", 4, 5, 90, AlertLevel.Unaware); var a2 = MkE("A2", 5, 5, 90, AlertLevel.Unaware);
+        var b1 = MkE("B1", 10, 5, 91, AlertLevel.Unaware); var b2 = MkE("B2", 11, 5, 91, AlertLevel.Unaware);
+        var c1 = MkE("C1", 9, 9, 92, AlertLevel.Unaware); var c2 = MkE("C2", 10, 9, 92, AlertLevel.Unaware);
+        Enemies.AddRange(new[] { a1, a2, b1, b2, c1, c2 });
+        _podOrig[90] = 2; _podOrig[91] = 2; _podOrig[92] = 2;
+        // geometry: B's closest member is TileDist 5.0 from A's; C's is 5.66 from A's (also in
+        // earshot!) and 4.0 from B's — the NEAREST-only rule must pick B, and the resolve must
+        // not chain B -> C even though C is well inside B's earshot.
+        ActivatePod(90);
+        if (Enemies.Where(e => e.PodId == 90).Any(e => e.Alert != AlertLevel.Alert)) fails.Add("linkPodANotAwake");
+        if (b1.Alert != AlertLevel.Suspicious || b2.Alert != AlertLevel.Suspicious) fails.Add($"linkBNotSuspicious={b1.Alert}/{b2.Alert}");
+        if (!_linkedPods.Contains(91)) fails.Add("linkBNotFlagged");
+        if (c1.Alert != AlertLevel.Unaware || c2.Alert != AlertLevel.Unaware) fails.Add("linkCWoken(nearest-only broke)");
+        if (_linkedPods.Contains(92)) fails.Add("linkCFlagged");
+        ResolveSuspicion();                                 // no soldier in sight of B (dist ~11 > SightRange 9)
+        if (b1.Alert != AlertLevel.Alert || b2.Alert != AlertLevel.Alert) fails.Add($"linkBNotConfirmedUnseen={b1.Alert}/{b2.Alert}");
+        if (c1.Alert != AlertLevel.Unaware || c2.Alert != AlertLevel.Unaware) fails.Add("linkChainedToC");
+        if (_linkedPods.Count != 0) fails.Add("linkSetNotCleared");
+        // second scene: a pod OUT of earshot (7.3 > LinkRange 6) never links
+        FreshScene();
+        Players.Add(sol);
+        var d1 = MkE("D1", 4, 5, 93, AlertLevel.Unaware); var d2 = MkE("D2", 5, 5, 93, AlertLevel.Unaware);
+        var f1 = MkE("F1", 12, 7, 94, AlertLevel.Unaware); var f2 = MkE("F2", 13, 7, 94, AlertLevel.Unaware);
+        Enemies.AddRange(new[] { d1, d2, f1, f2 });
+        _podOrig[93] = 2; _podOrig[94] = 2;
+        ActivatePod(93);
+        if (f1.Alert != AlertLevel.Unaware || f2.Alert != AlertLevel.Unaware) fails.Add("outOfEarshotLinked");
+        if (_linkedPods.Count != 0) fails.Add("outOfEarshotFlagged");
+
+        // ---- (d) ARC: pods of 3 give morale its full waver -> rout arc ----
+        FreshScene();
+        Players.Add(sol);
+        var w1 = MkE("W1", 10, 3, 95, AlertLevel.Alert);
+        var w2 = MkE("W2", 11, 3, 95, AlertLevel.Alert);
+        var w3 = MkE("W3", 10, 4, 95, AlertLevel.Alert);
+        Enemies.AddRange(new[] { w1, w2, w3 });
+        DebugPodOrig(95, 3);
+        if (PodWavering(w1)) fails.Add("arcWaverAtFull");
+        w3.Hp = 0; KillUnit(w3);                            // 2 of 3 alive: one kill from the threshold
+        if (!PodWavering(w1) || !PodWavering(w2)) fails.Add("arcNoWaverAt2of3");
+        if (w1.Routed != 0 || w2.Routed != 0) fails.Add("arcRoutedEarly");
+        w2.Hp = 0; KillUnit(w2);                            // 1 <= 3/2 -> the survivor breaks
+        if (w1.Routed <= 0) fails.Add($"arcSurvivorNotRouted={w1.Routed}");
+
+        // ---- (e) ENDLESS: wave sub-pods 100+ sealed; the elite stays -1 ----
+        {
+            var g = new Game { NoPersist = true };
+            g._run = new Run(); g._run.Start(); g._run.HeatLevel = 0;
+            g.Mode = GameMode.Endless;
+            g.Players = g._run.Squad;
+            g.Wave = 0;
+            g.SetupMission(1);                              // arena + wave 1 (the HORDETEST staging)
+            var alive = g.AliveEnemies();
+            if (alive.Count == 0) fails.Add("endlessWaveEmpty");
+            if (alive.Any(e => e.PodId < 100)) fails.Add("endlessBodyBelow100");
+            var wavePods = alive.GroupBy(e => e.PodId).ToList();
+            foreach (var gr in wavePods)
+                if (g._podOrig.GetValueOrDefault(gr.Key) != gr.Count())
+                    fails.Add($"endlessPodOrig{gr.Key}={g._podOrig.GetValueOrDefault(gr.Key)}(want{gr.Count()})");
+            var sizes = wavePods.Select(gr => gr.Count()).OrderByDescending(s => s).ToList();
+            var wantSizes = Mission.PodPlan(alive.Count).OrderByDescending(s => s).ToList();
+            if (!sizes.SequenceEqual(wantSizes)) fails.Add($"endlessSizes=[{string.Join(",", sizes)}]");
+            g.SpawnEndlessElite(5);
+            var elite = g.AliveEnemies().FirstOrDefault(e => e.Cls == "ELITE");
+            if (elite == null) fails.Add("endlessNoElite");
+            else if (elite.PodId != -1) fails.Add($"elitePodJoined={elite.PodId}");
+        }
+
+        // ---- (f) FDR: the drill grant (proc-at-grant, once per soldier per turn) ----
+        _run = new Run(); _run.Start();                     // fresh boons (none held)
+        FreshScene();
+        var dr = MkP("DRAGGER", 5, 5);
+        var m1 = MkP("MATE1", 7, 5);                        // Cheby 2 -> legal drag, lands (6,5)
+        var m2 = MkP("MATE2", 3, 5);                        // Cheby 2 -> legal drag, lands (4,5)
+        Players.AddRange(new[] { dr, m1, m2 });
+        bool statsWere = Stats.Enabled; Stats.Enabled = true;
+        int p0 = Stats.ProcCount("FDR");
+        Selected = dr;
+        IssueDrag(m1);                                      // NO boon: a plain drag must not drill
+        if (dr.DrilledThisTurn) fails.Add("fdrDrillWithoutBoon");
+        if (Stats.ProcCount("FDR") != p0) fails.Add("fdrProcWithoutBoon");
+        _run.ActiveBoons.Add(Boon.FieldDrills);
+        Combat.RunBoons.Add(Boon.FieldDrills);              // publish (FieldCraftLimit reads the static)
+        foreach (var u in Players) u.BeginTurn();           // fresh turn (Drags/DrilledThisTurn reset)
+        _anims.Clear();
+        int mb0 = dr.MoveBudget;
+        Selected = dr;
+        IssueDrag(m2);                                      // boon held: first drag drills
+        if (!dr.DrilledThisTurn) fails.Add("fdrNoDrill");
+        if (Stats.ProcCount("FDR") != p0 + 1) fails.Add($"fdrProcs={Stats.ProcCount("FDR") - p0}(want1)");
+        if (dr.MoveBudget != mb0 + 2) fails.Add($"fdrBudget={dr.MoveBudget}(want{mb0 + 2})");
+        m1.X = 7; m1.Y = 7; m1.SyncPos();                   // give the SECOND drag a legal target
+        IssueDrag(m1);                                      // limit 2/turn: legal — but no second proc
+        if (dr.DragsThisTurn != 2) fails.Add($"fdrSecondDragBlocked={dr.DragsThisTurn}");
+        if (Stats.ProcCount("FDR") != p0 + 1) fails.Add("fdrDoubleProc");
+        if (dr.MoveBudget != mb0 + 2) fails.Add("fdrDrillStacked");
+        dr.BeginTurn();
+        if (dr.DrilledThisTurn) fails.Add("fdrDrillPersistedTurn");
+        Stats.Enabled = statsWere;
+
+        return fails.Count == 0
+            ? "PODTEST: PASS (plan pins + m3 groups/cohesion + m1/finale i/2; link nearest-only, confirms unseen, "
+              + "never chains, earshot-gated; 3-pod waver->rout arc; endless wave sub-pods 100+ sealed, elite exempt; "
+              + "FIELD DRILLS drills once at the grant site)"
+            : "PODTEST: FAIL (" + string.Join(",", fails) + ")";
+    }
+
+    /// FUL-6 harness hook (screenshot only; pair with SIGHTLINE_MISSION=3): stage the CRITICAL
+    /// MASS reads — pods land as visible 3-clumps (the m3+ PodPlan spawn), and waking one pod
+    /// through the REAL ActivatePod fires the linked-activation rider, so the frame shows the
+    /// woken pod + the "!"-telegraphed linked pod (HEARD THE GUNS pop, CONTACT! banner + sub).
+    /// Picks the dormant pod with the smallest closest-member gap to another dormant pod
+    /// (<= LinkRange) so a link is guaranteed to fire on any seed that allows one.
+    public void DebugPodShot()
+    {
+        SquadConcealed = false;                 // the wake must not be masked by squad stealth
+        int bestPod = -1; float best = float.MaxValue;
+        foreach (var a in Enemies)
+        {
+            if (!a.Alive || a.PodId < 0 || a.Alert != AlertLevel.Unaware) continue;
+            foreach (var b in Enemies)
+            {
+                if (!b.Alive || b.PodId < 0 || b.PodId == a.PodId || b.Alert != AlertLevel.Unaware) continue;
+                float d = Util.TileDist(a.X, a.Y, b.X, b.Y);
+                if (d <= LinkRange && d < best) { best = d; bestPod = a.PodId; }
+            }
+        }
+        if (bestPod >= 0) ActivatePod(bestPod);
+        else if (Enemies.Count > 0) ActivatePod(Enemies[0].PodId);   // no linkable pair on this seed
+    }
+
     /// Headless self-test (SIGHTLINE_STATUSTEST): status effects tick, decay, and read
     /// correctly — burning/bleed DoT, stun (lose an action), disoriented (aim + no
     /// overwatch). Needs a tiny window (Game uses tile math). Returns a one-line report.

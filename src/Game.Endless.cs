@@ -141,6 +141,7 @@ public partial class Game
     int SpawnEndlessBodies(int want, int scaleN)
     {
         int added = 0;
+        var landed = new List<Unit>();   // FUL-6: collected for the wave-pod split below
         // spawn from the RIGHT edge only (the squad deploys far-left at cols 1-2, so left-edge spawns
         // would drop hostiles point-blank on the squad — unfair). Matches the reinforcement pattern.
         int[] cols = { Grid.W - 2, Grid.W - 1 };
@@ -156,13 +157,31 @@ public partial class Game
             // siege deepen the swarm as it escalates). SelectArchetype (via MakeEndlessHostile) already
             // ramps toughness with the tier; no manual body-swap needed.
             var e = Mission.MakeEndlessHostile(scaleN, placeX, y);
-            e.Alert = AlertLevel.Alert; e.PodId = -1;   // horde arrives already engaged (no pods)
+            e.Alert = AlertLevel.Alert; e.PodId = -1;   // arrives engaged; FUL-6 assigns a morale pod below
             e.SyncPos();
             e.BeginTurn(); e.OnOverwatch = false;
             Stats.RecordSpawn(e.Cls, Combat.MissionFaction != Faction.None);   // APEX W5 composition tally
             Enemies.Add(e);
+            landed.Add(e);
             Fx.Burst(e.Pos, Pal.Foe, 14, 160f, 0.5f, 3f, true);
             added++;
+        }
+        // FUL-6 CRITICAL MASS — morale reaches the horde: split each wave's LANDED bodies into
+        // sub-pods via the shared Mission.PodPlan (ids _nextWavePod++ per sub-pod, 100+ so they
+        // can never collide with the campaign's i/2 pods or harness scenes; _podOrig sealed to
+        // what landed — the FUL-4 SpawnReinforcements seal pattern), so killing a sub-pod down
+        // routs its survivors mid-stand. Bodies still spawn fully Alert (no dormant pods), so
+        // the linked-activation rider stays inert here by construction. SpawnEndlessElite keeps
+        // PodId = -1 — the "ending" must not be routable (HORDETEST's elitePodJoined pin).
+        if (added > 0)
+        {
+            int[] plan = Mission.PodPlan(added);
+            for (int p = 0, idx = 0; p < plan.Length; p++)
+            {
+                int id = _nextWavePod++;
+                for (int m = 0; m < plan[p] && idx < landed.Count; m++, idx++) landed[idx].PodId = id;
+                _podOrig[id] = plan[p];
+            }
         }
         if (added > 0) RefreshCombatRoster();   // expose the grown roster to Combat.ComputeOdds
         return added;

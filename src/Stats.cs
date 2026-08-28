@@ -152,6 +152,9 @@ public static class Stats
         if (!Enabled || string.IsNullOrEmpty(code)) return;
         Bump(_boonProcs, code);
     }
+    /// FUL-6 PODTEST read hook: current proc tally for a code (0 if never fired). Test-only read;
+    /// the balance report keeps printing from the dictionary directly.
+    public static int ProcCount(string code) => _boonProcs.GetValueOrDefault(code, 0);
 
     // ── FUL-1: ARENA FUNNEL ──────────────────────────────────────────────────────
     // Mission.Build's layout decision, split into the three exits that sum to 100% of

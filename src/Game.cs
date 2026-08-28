@@ -733,6 +733,17 @@ public partial class Game
     // from waves). Ids allocated from 100 up: initial pods are i/2 (<=5), harness scenes use 90/91,
     // so wave pods can never collide with either. Reset per mission beside _podOrig.
     int _nextWavePod = 100;
+    // FUL-6 CRITICAL MASS — LINKED ACTIVATION ("they heard the guns"): pods flagged here were put
+    // Suspicious by a nearby pod's wake (ActivatePod's link rider) and CONFIRM to Alert at the next
+    // ResolveSuspicion pass even when unseen (the sound was enough). Cleared per mission in
+    // SetupMission beside _podOrig, and wholesale after each ResolveSuspicion pass. Transient,
+    // never persisted (enemies are never serialized).
+    readonly HashSet<int> _linkedPods = new();
+    // Sound radius (Util.TileDist — the HackNoiseRange metric) for the link: a waking pod alerts
+    // the nearest OTHER dormant pod whose closest member is within this range of the woken pod's
+    // closest member. Missions 3+ only; exactly ONE pod per activation call; never chains (a
+    // linked pod wakes via ResolveSuspicion, which never calls ActivatePod).
+    public const int LinkRange = 6;
     public const int RoutDuration = 2;         // enemy turns a broken pod flees before it can rally (decrements in BeginTurn)
     // SIGNAL W8 — the WARBRINGER's banner aura reach (Chebyshev tiles). Pods with a living, active
     // banner inside this range cannot rout (BreakPodMorale) and rally one turn faster
@@ -1449,6 +1460,7 @@ public partial class Game
         // been chewed down to <= half and should rout its survivors (FUL-4: DEFEND waves join the
         // snapshot as pods 100+ at spawn time; pressure-clock/endless hostiles stay PodId<0, ungrouped).
         _podOrig.Clear();
+        _linkedPods.Clear();   // FUL-6: no linked-alert carryover across missions
         _nextWavePod = 100;
         foreach (var e in Enemies) if (e.PodId >= 0) _podOrig[e.PodId] = _podOrig.GetValueOrDefault(e.PodId) + 1;
         Selected = Players.FirstOrDefault(p => p.CanAct);
@@ -3198,13 +3210,18 @@ public partial class Game
         foreach (var e in Enemies)
         {
             if (!e.Alive || e.Alert != AlertLevel.Suspicious) continue;
-            if (ClosestSightedDist(e) >= 0)
+            // FUL-6 LINKED ACTIVATION arm: a Suspicious enemy whose pod was linked by a nearby
+            // wake (_linkedPods) confirms to Alert even when UNSEEN — the sound was enough.
+            // NO scatter either way (the telegraphed path, exactly like the sighted confirm),
+            // and never a chain: this pass never calls ActivatePod.
+            if (ClosestSightedDist(e) >= 0 || _linkedPods.Contains(e.PodId))
             {
                 e.Alert = AlertLevel.Alert;
                 Fx.PopText(e.Pos + new Vector2(0, -32), "ALERT", Pal.Foe, 18f);
             }
             else e.Alert = AlertLevel.Unaware;   // squad broke contact in time
         }
+        _linkedPods.Clear();   // every linked pod resolves in the pass above; entries never linger
     }
 
     /// RESCUE: free the caged captive once a soldier reaches it; it then becomes a
@@ -3254,6 +3271,42 @@ public partial class Game
             BannerText = "CONTACT!"; BannerEnemy = true; BannerMax = BannerTimer = 1.0f;
             Fx.AddShake(3f);
             Audio.Play("over");
+            // FUL-6 CRITICAL MASS — LINKED ACTIVATION rider ("they heard the guns"): from
+            // mission 3 on, waking a real pod puts the NEAREST other pod with a dormant member
+            // within LinkRange (closest member to closest member, Util.TileDist — a sound
+            // radius) on the telegraphed Suspicious track, flagged in _linkedPods so the next
+            // ResolveSuspicion pass confirms it to Alert EVEN UNSEEN. Exactly ONE pod per
+            // activation call (the nearest); a linked pod can never chain (ResolveSuspicion
+            // never calls ActivatePod) — but directly shooting/blundering into pod B still
+            // links pod C (that routes through ActivatePod), which is correct: new gunfire,
+            // new sound. Endless/Defend waves spawn already-Alert, so the rider is inert
+            // there by construction. Zero RNG — the link fires off positions alone (CRN-safe).
+            // The read never lies: a linked pod IS coming, with the existing 4.3 Suspicious
+            // warning (the remainder of this turn + the turn-end beat; no scatter either way).
+            if (podId >= 0 && _run != null && _run.Mission >= 3)
+            {
+                int bestPod = -1; float bestDist = float.MaxValue; Unit bestMember = null;
+                foreach (var s in Enemies)
+                {
+                    if (!s.Alive || s.PodId != podId) continue;
+                    foreach (var o in Enemies)
+                    {
+                        if (!o.Alive || o.PodId < 0 || o.PodId == podId || o.Alert != AlertLevel.Unaware) continue;
+                        float d = Util.TileDist(s.X, s.Y, o.X, o.Y);
+                        if (d <= LinkRange && d < bestDist) { bestDist = d; bestPod = o.PodId; bestMember = o; }
+                    }
+                }
+                if (bestPod >= 0)
+                {
+                    SetPodSuspicious(bestPod);
+                    _linkedPods.Add(bestPod);
+                    Fx.PopText(bestMember.Pos + new Vector2(0, -30), "HEARD THE GUNS", Pal.Suspect, 16f);
+                    // SetPodSuspicious's CONTACT? banner must not mask the wake itself — restore
+                    // the CONTACT! banner and hang the link telegraph under it as the sub-line.
+                    BannerText = "CONTACT!"; BannerEnemy = true; BannerMax = BannerTimer = 1.0f;
+                    BannerSub = "a nearby pod is moving to the sound";
+                }
+            }
         }
     }
 
@@ -4009,6 +4062,24 @@ public partial class Game
         ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false; DragMode = false; VaultMode = false;
     }
 
+    /// FUL-6 FIELD DRILLS rework (the FUL-5 verdict consumed — REWORK, not retire): the old proc
+    /// (a SECOND drag/vault by one soldier in one turn) was self-consuming — a legal drag lands
+    /// its target at Cheby-1, which is un-draggable (DragTargetOk's toward-tile rule), so the
+    /// geometry the second use needs is destroyed by the first; measured 0 procs across every
+    /// batch, vaults 0. New effect: *a DRAG or VAULT drills the soldier forward — +1 tile of
+    /// movement for the rest of that turn* (MoveBudget +2 half-steps; Combat.FieldCraftLimit
+    /// stays 2/turn — COMBATTEST's fieldDrills pins untouched). PROC honesty: RecordProc fires
+    /// HERE at the grant site — the effect deterministically exists once granted (the TRR
+    /// rout-start precedent). Once per soldier per turn (DrilledThisTurn, reset in BeginTurn).
+    void GrantFieldDrill(Unit u)
+    {
+        if (!HasBoon(Boon.FieldDrills) || u.DrilledThisTurn) return;
+        u.DrilledThisTurn = true;
+        Stats.RecordProc("FDR");
+        Fx.PopText(u.Pos + new Vector2(0, -46), "DRILLED +1 MOVE", Pal.Good, 15f);
+        RecomputeMoveCost();   // the surplus tile must appear in the move overlay immediately
+    }
+
     // ---- DRAG (FIELD CRAFT W1, universal): pull an adjacent ALLY one tile toward you ----
     /// Can the selected soldier DRAG right now? Needs an action, no drag spent this turn, and at
     /// least one adjacent (Chebyshev==1) alive friendly with a legal landing tile (one step toward us).
@@ -4060,9 +4131,7 @@ public partial class Game
         int dx = Math.Sign(u.X - ally.X), dy = Math.Sign(u.Y - ally.Y);   // direction the ally MOVES (toward us)
         u.ActionsLeft = Math.Max(0, u.ActionsLeft - 1);   // 1 action; never ends the turn
         u.DragsThisTurn++;                                // counted vs Combat.FieldCraftLimit (anti-loop)
-        // FUL-1 PROC (review fix: explicit boon conjunct — the >=2 gate invariant holds today,
-        // but a future non-boon FieldCraftLimit>1 source must not silently corrupt the column)
-        if (u.DragsThisTurn >= 2 && HasBoon(Boon.FieldDrills)) Stats.RecordProc("FDR");
+        GrantFieldDrill(u);                               // FUL-6: FIELD DRILLS +1-move drill (proc at grant)
         Stats.RecordAction("DRAG");                       // W2 verb telemetry
         Fx.PopText(ally.Pos + new Vector2(0, -32), "DRAG", Pal.Friend, 17f);
         Fx.Burst(ally.Pos, Pal.Friend, 8, 100f, 0.35f, 2.5f);
@@ -4121,8 +4190,7 @@ public partial class Game
         var u = Selected;
         u.ActionsLeft = Math.Max(0, u.ActionsLeft - 1);   // 1 action; never ends the turn
         u.VaultsThisTurn++;                               // counted vs Combat.FieldCraftLimit (anti-loop)
-        // FUL-1 PROC (review fix: explicit boon conjunct — mirrors the drag site above)
-        if (u.VaultsThisTurn >= 2 && HasBoon(Boon.FieldDrills)) Stats.RecordProc("FDR");
+        GrantFieldDrill(u);                               // FUL-6: FIELD DRILLS +1-move drill (proc at grant)
         Stats.RecordAction("VAULT");                      // W2 verb telemetry (review fix: no invisible verbs)
         Fx.PopText(u.Pos + new Vector2(0, -32), "VAULT", Pal.Good, 17f);
         Fx.Burst(u.Pos, Pal.Good, 8, 110f, 0.35f, 2.5f);

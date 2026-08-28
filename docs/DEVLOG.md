@@ -2049,3 +2049,98 @@ docs/plans/FUL-8-pikeman-FUL-10-forks.md §FUL-8 (every seam pre-verified agains
 - Optional spec ride-along NOT taken: force-showing the BRACE field tip on first PIKEMAN
   sighting (UpdateBraceCallout force path) — left for a teaching pass; the codex row + NEW
   CONTACT banner already carry the mirror lesson.
+
+# PROGRAM FULCRUM — FUL-6 CRITICAL MASS landing (2026-08-28, wave dev on wt-ful6)
+
+- **FUL-6 CRITICAL MASS** (wt-ful6, base 588d781 — the full program tip): pods of 3 + linked
+  activation in mid/late missions — one real multi-pod battle per mission instead of six 2-enemy
+  executions, so the comeback economy (BRACE/morale/verb boons/grenades) gets its stage;
+  morale/rout reaches LAST STAND's horde; the FUL-5 FIELD DRILLS verdict consumed (rework, not
+  retire).
+  - **PodPlan (Mission.cs):** pure greedy split, no RNG (7->{3,2,2}, 8->{3,3,2}, 9->{3,3,3},
+    12->{3,3,3,3}; never a pod of 1 from count>=2), missions 3+ only; m1-2 keep i/2 pairs and
+    the finale keeps i/2 EXACTLY (FUL-11 kit geometry — FUL11PROBE green by construction).
+    **Cohesion:** members 2-3 anchor to the pod lead's post-relocate row (+1/+2, flipped at the
+    board edge), sharing the pod's column band — pods land as visible clumps, ZERO extra draws
+    (the collision-relocate loop stays the only conditional draw source). The m3/m5 mid-boss
+    joins a pod of 3 (its screen can rout out from under it) — accepted, watch item.
+  - **Linked activation (Game.cs):** ActivatePod rider (m3+, real pods, inside the `any` gate):
+    the nearest OTHER pod with a dormant member within LinkRange=6 (closest member to closest
+    member, TileDist) goes Suspicious + `_linkedPods`; ResolveSuspicion gains one arm — a linked
+    pod confirms to Alert even UNSEEN (no scatter, the telegraphed 4.3 path) and the set clears
+    after the pass. One link per wake; never chains (ResolveSuspicion never calls ActivatePod);
+    zero RNG — position-derived (PAIRTEST green every round). Telegraph: HEARD THE GUNS pop +
+    CONTACT! BannerSub "a nearby pod is moving to the sound"; LINKED ALERTS codex row + CODEXTEST
+    entry (the counterplay list IS the row).
+  - **LAST STAND morale (Game.Endless.cs):** SpawnEndlessBodies splits each wave's LANDED bodies
+    into sub-pods via the shared PodPlan (ids _nextWavePod++ from 100, _podOrig sealed to what
+    landed — the FUL-4 seal pattern); elite stays PodId -1 (HORDETEST pin); pressure-clock waves
+    stay podded:false. TERROR un-excluded from endless boon offers (its exclusion comment went
+    false this wave) — endless-only pool composition change, campaign CRN untouched.
+  - **FIELD DRILLS rework:** the old proc (a second drag/vault by one soldier in one turn) was
+    self-consuming (0 procs, every batch ever). New: *a DRAG or VAULT drills the soldier forward
+    — +1 tile of movement for the rest of that turn* (transient Unit.DrilledThisTurn, reset in
+    BeginTurn, never persisted; MoveBudget +2 half-steps after the *2), granted once/soldier/turn
+    at IssueDrag/IssueVault via GrantFieldDrill — also the honest RecordProc("FDR") site (the TRR
+    grant-site precedent; BOTH old >=2 proc lines deleted). FieldCraftLimit stays 2 (COMBATTEST
+    pins untouched); Boon ordinal untouched (Desc + codex copy only; new DRAG & VAULT rules row).
+  - **Escalation lever 1 (R5, measured breach):** the full stack ran -12.5 pts h0 completion vs
+    the fresh same-slot R0 (budget <=8) -> the spec's first lever landed: initial force -1 on
+    3-pod missions (floor 3, the FUL-4 defend-trim precedent). Result: combined h0 == R0 (dip 0).
+    Levers 2 (LinkRange 6->4) and 3 (one-link-per-mission latch) were NOT needed.
+
+## Measured (paired h0; each round = two N=10 chunks, slots 0-9 "a" + slots 10-19 "b" via
+## SIGHTLINE_BALANCE_BASE; R0 = FRESH base-588d781 reference on the same slots, run first.
+## Completion = greedy/sloppy % per chunk; counters greedy/sloppy per chunk)
+| round | lever | a: g/s | b: g/s | key counters (a; b) |
+|---|---|---|---|---|
+| R0 | base 588d781 reference | 40/60 | 30/30 | BRACE 36/43; 79/36 · GREN 2/7; 0/5 · PATCH 3/6; 3/5 · DRAG 0/3; 0/0 · FDR 0 procs (4 picks); 0 (2) · RCL 2 (2); 1 (3) · TRR 13 (4); 9 (1) |
+| R1 | PodPlan + cohesion | 30/40 | 30/20 | BRACE 32/46; 127/165 · GREN 2/5; 0/2 · FDR 0 (1); 0 (3) · RCL 3 (4); 0 (2) · TRR 31 (6); 6 (1) · greedy-a OVERWATCH 38->343 (hold-heavy vs 3-gun contacts) |
+| R2 | + linked activation | 40/50 | 10/10 | BRACE 32/55; 117/152 · GREN 3/5; 1/1 · FDR 0; 0 · RCL 3 (2); 1 (2) · TRR 29 (5); 6 (1) |
+| R3 | + endless wave pods | 40/50 | 10/10 | campaign chunks BYTE-IDENTICAL to R2 — the lever is endless-only by construction (CRN discipline visible); endless leg below |
+| R4 | + FDR rework | 40/50 | 10/10 | BYTE-IDENTICAL to R3: zero boon-held drags occurred in these 40 worlds -> zero grants (the mechanism procs deterministically — PODTEST leg f) |
+| R5 | escalation lever 1 (count-1 on 3-pod missions) | 50/80 | 10/20 | BRACE 62/28; 63/51 · GREN 1/8; 1/4 · PATCH 1/2; 4/3 · FDR 0 (4); 0 (1) · RCL 2 (4); 0 (2) · TRR 20 (4); 18 (2) |
+| h4 | close leg, final stack (slots 0-9) | 20/20 | — | BRACE 55/22 · GREN 3/4 · PATCH 4/2 · FDR 0 (5) · RCL 0 (2) · TRR 11 (3) · h4 mission win-rate 76%, paired margin +0.10 ±0.64 |
+
+Combined h0 (40 matches): R0 40% -> R1 30% (-10) -> R2/R3/R4 27.5% (-12.5, BREACH of the <=8
+budget) -> R5 40% (dip 0, IN BUDGET; chunk split +15/-15 — world-to-world variance dominates
+absolute chunk levels, the FUL-5 R7b lesson; the paired greedy-sloppy margins stayed -0.6..-1.1
+throughout). PAIRTEST PASS on every round's tree.
+
+**Endless depth leg (R3 stack, 32 stands, default heat cycle {0,2,4,6,8}, chunks of
+SIGHTLINE_BALANCE_ENDLESS=8 at BASE 0/8):** slots 0-7 mean 6.0 / median 6 / p90 7 (h0 median
+6.5); slots 8-15 mean 5.4 / median 5.5 / p90 6 (h0 median 6). **IN the APEX 5-6 band**; zero
+wave-cap/frame-cap hits; wave sub-pods live (routs play mid-stand; the ending elite stays
+morale-exempt).
+
+## Design verdicts (recorded, not tuned around)
+1. **GRENADE >=10 did NOT materialize (measured 2-9/batch combined, R0-level).** The FUL-5
+   verdict predicted pods-of-3 as the frag stage; measured, the bot's window (covered 2+ ACTIVE
+   cluster, pre-shot) still anti-correlates: dormant pods now CLUMP (the stage exists on the
+   board) but woken pods scatter-to-cover and de-cluster before the bot's frag gate re-fires,
+   and pre-fragging dormant clumps remains declined as perfect-info bot play. The stage is real
+   for HUMANS (the clump is visible pre-fight); the bot cannot price it honestly. FUL-13 input.
+2. **FDR: 0 procs in the wave batches — an honest zero, not a dead mechanism.** The rework's
+   proc surface now equals drag/vault-under-boon frequency; in these 100 campaigns drag volume
+   was 0-3/batch (Escort straggler pulls) and never overlapped a FIELD DRILLS pick. PODTEST leg
+   f pins the grant (drill + exactly one proc + MoveBudget +2). FUL-7's recurring drag stage
+   (downed-soldier carry chains) is where this boon prices — as the FUL-5 brief expected.
+3. **RCL is no longer structurally dead: 0 -> 1-3 procs/batch** (R1a 3, R2a 3+1, R5a 2) — more
+   movers through focused cones at 3-pod contacts re-arm the watch occasionally. Volume still
+   thin; keep the FUL-13 retire-or-rework question open but with a live baseline now.
+4. **TRR procs 6-31/batch (was 9-13):** the rout economy is livelier — a 3-pod break routs more
+   survivors at once. BRACE budget held (>=30/batch every round; up to 165 on hold-heavy worlds).
+5. **The b-chunk (slots 10-19) is structurally harsher under the pod stack** (R0b 30% -> stack
+   10-15%) while the a-chunk recovered fully (50 -> 65 at R5). Same-slot pairing shows the dip
+   concentrates where R0 was already losing — bigger contacts punish already-marginal worlds.
+   FUL-13 re-baseline input.
+
+## Gotchas (process)
+- **A worktree COPY (`cp -r`) shares the original's .git worktree metadata** — `git checkout`
+  inside the copy detaches the REAL worktree's shared HEAD (files stay put; symbolic-ref +
+  reset recovers). Use `git archive <commit> | tar -x` for scratch measurement trees.
+- **R3/R4 coming back byte-identical to R2 is the CRN discipline working**, and it localizes
+  each lever's true surface: endless-only (R3) and grant-only (R4) levers cannot move campaign
+  batches. Cheap self-verification, same family as FUL-5's "byte-identical is a finding".
+- The balance harness's Combat.RunBoons is the FieldCraftLimit read, not Run.ActiveBoons — a
+  harness scene granting a boon must publish to both (PODTEST leg f does).
