@@ -5412,3 +5412,235 @@ unmoved: win-rate 50→50, missions 83→83, policy gap 20→20, paired gap 20�
 only micro-jitter in decision richness (meaningful choices/turn 2.757→2.737, lead swings/match
 0.60→0.63, avg max swing 51.13→50.70). FIX 1 changes procedural ENVELOP geometry in ~1-4% of
 builds, which is the size of that jitter.
+
+---
+
+# PROGRAM RESONANCE — Wave X3 "CONFIRM" (dev; worktree `wt-x3`)
+
+**Base commit of every number below: `d350416`** (PROGRAM RESONANCE milestone 2 — the
+orchestrator's integration tip). Raw chunks, logs, JSON and the exact command lines are archived
+in [`docs/measurements/x3/`](measurements/x3/README.md). The wave's own class-role scaffolding is
+**default-off at `SIGHTLINE_CLASSBAL=0` and measured to be so** (round `R0diag`, below), so the
+R0 rows are the integration tip itself, not an approximation of it.
+
+## 1. WHY THIS WAVE MEASURED INSTEAD OF LEVERING
+
+X2 published the ladder of record and, in the same breath, said its instrument could not resolve
+it: per-rung SE ±6-8 at n=40 — the band's whole ±8 tolerance, and **larger than the 10-point step
+between rungs**. Three of its six shipped deltas were indistinguishable from noise, and X2's own
+top recommendation was "not another lever — n≥80 on the state already shipped."
+
+So: **every rung re-measured at n=80** — four disjoint CRN slot sets
+(`SIGHTLINE_BALANCE_BASE` 0/10/20/30) × greedy+sloppy — with `runs=20` asserted in all 53 chunks.
+SE fell to ±3.4-5.6. Budget: 53 chunks × ~5 min at P=4 ≈ 75 minutes of batches.
+
+## 2. THE CONFIRMED LADDER — round R0, no lever, n=80/rung
+
+| | RECRUIT | h0 | h2 | h4 | h6 | h8 |
+|---|---|---|---|---|---|---|
+| **confirmed (n=80)** | **73.8** | **48.8** | **33.8** | **21.2** | **17.5** | **10.0** |
+| SE | ±4.9 | ±5.6 | ±5.3 | ±4.6 | ±4.2 | ±3.4 |
+| X2's shipped table (n=40) | 75.0 | 57.5 | 35.0 | 30.0 | 20.0 | 17.5 |
+| band | *(75)* | 55±8 | 40±8 | 30±8 | 20±8 | 10±5 |
+| verdict | in | in | in | **0.8 BELOW** | in | **in** |
+
+**The two questions X2 could not answer.**
+
+**(a) Is h8 out of band?** *No.* It reads **10.0 ±3.4** — the band's nominal value, dead centre.
+X2's 17.5 does not reproduce, and the reason is visible in the chunk-level data rather than
+argued: **X2's own archived chunks reproduce BIT-EXACTLY on this tree.** Its h8 slots 0-19 give
+15% and 20% here too; slots 20-39, which nobody had run, give **0% and 5%**. 17.5 was the top
+half of an 80-run distribution whose mean is 10.
+
+The same holds down the ladder — h0 `[65, 55, 40, 35]`, h2 `[40, 30, 35, 30]`,
+h4 `[25, 25, 5, 30]`, h6 `[35, 5, 15, 15]`, h8 `[15, 20, 0, 5]` — with the first two entries of
+every row identical to X2's archive. **So the whole 57.5 → 48.8 drop at h0 is SAMPLING, not tree
+drift.** (The one genuine drift is at RECRUIT: X2 measured `[75, 75]`, this tree gives
+`[65, 80]` on the same slots. Milestone 2's `EnsureConnectivity` repair changes procedural
+geometry in a small fraction of builds; it lands on the RECRUIT rung and nowhere else in this
+sweep. Pooled, RECRUIT is unmoved: 75.0 → 73.8.)
+
+**(b) Is the h2/h4 ordering real?** *Yes.* 33.8 vs 21.2 is Δ12.6 ± 7.0 (1.8 SE), and the whole
+n=80 ladder is monotone: 73.8 > 48.8 > 33.8 > 21.2 > 17.5 > 10.0. What is still **not** resolvable
+is **h4 vs h6** — 21.2 vs 17.5, Δ3.7 ± 6.2. n=80 buys rung order across a 10-point step, not
+across a 4-point one. Do not spend a lever on an h4/h6 inversion without n≥200.
+
+**h4 is the one rung out**, and by 0.8 of a point — a sixth of its own SE. It is not a finding
+that justifies a lever on its own; the class pass (below) put it back inside the band as a side
+effect, which is the honest way for a 0.8-point breach to close.
+
+### The apex is still a wall made of four objectives (h8, n=80)
+
+| objective | n | win% | turns | | objective | n | win% | turns |
+|---|---|---|---|---|---|---|---|---|
+| Escort | 20 | **35.0** | 9.61 | | Eliminate | 87 | 88.5 | 4.09 |
+| Rescue | 14 | **35.7** | 4.59 | | Hack | 19 | 94.7 | 3.58 |
+| Evac | 6 | **33.3** | 4.83 | | Sabotage | 16 | 81.2 | 3.90 |
+| Decapitate | 31 | **32.3** | 5.44 | | Defend | 49 | 77.5 | 8.49 |
+
+X2's characterisation **confirms at n=80**: the apex is not a rung average, it is a bimodal split
+between four objectives at 32-36% and four at 77-95%. Loss causes name the mechanism —
+`VIP LOST=10`, `CAPTIVE LOST=9` out of 80 runs. **Every one of the four is an objective with an
+asset you do not control.** Evac's 6 samples cannot carry weight on their own; the other three can.
+
+## 3. PART 2 — CLASS DOMINANCE, CLOSED ON EFFICIENCY
+
+`docs/AUDIT-2026.md` #2 has carried **PARTIAL** through several programs: "Sharpshooter's lead is
+damage+aim driven … finishing it (a measured damage/aim pass) is the open follow-up." At n=80
+over the whole ladder (480 campaigns) the gap is unambiguous:
+
+| class | shots | hit% | dmg/shot | kills | **s/kill** |
+|---|---|---|---|---|---|
+| SHARPSHOOTER | 3643 | 90.8 | 6.76 | 1508 | **2.42** |
+| RANGER | 2539 | 85.8 | 5.77 | 959 | 2.65 |
+| GUNNER | 4357 | 84.0 | 4.44 | 1284 | 3.39 |
+| ASSAULT | 3751 | 86.8 | 4.45 | 957 | **3.92** |
+| CORPSMAN | 979 | 83.1 | 3.09 | 121 | 8.09 |
+
+**hit% was never the problem** — the four shooters sit inside 6.8 points, already under the
+10-point half of the gate. **Damage-per-shot is**: 6.76 against 4.44 is a 52% lead, and it
+compounds with the sniper's reach (`MaxRange` 20, +16 range aim past 8 tiles) into a 1.62×
+efficiency spread.
+
+### The lever: a per-class damage redistribution, shaped per band END
+
+`Combat.ComputeOdds` / `HardenedReduce` are the single funnels the HUD forecast, the AI and
+`Resolve` all read, so the deltas live there, keyed on `Unit.Cls`, gated on `Team.Player`:
+
+| class | Δ floor | Δ ceiling | what it keeps | what it now pays |
+|---|---|---|---|---|
+| SHARPSHOOTER | −1 | −1 | reach 20, +16 long-range aim, crit 14, MARK | it is no longer the biggest gun anywhere |
+| RANGER | 0 | −1 | crit 15, the +24 point-blank band | its 7-damage burst ceiling |
+| GUNNER | **+1** | 0 | 10 HP, clip 5, PIN | still the lowest aim (62) and crit (5) of the four |
+| ASSAULT | +1 | +1 | mobility 7, GRAPPLE, best consistency | it has no PEAK band anywhere |
+| CORPSMAN | — | — | *(FIELD PRESENCE, below)* | it is still not a gun |
+
+Keyed on the class, not the weapon, so it survives an armory swap and **never touches a hostile
+carrying the same gun** — the reason it is not a `Weapon.Make` edit.
+
+**Round C1 got the shape wrong and the measurement caught it.** C1 gave the GUNNER +1 on BOTH
+ends and the ASSAULT +1 on the ceiling only: spread closed 1.62 → 1.31, but the Gunner **flipped
+to best in the game** at 2.64 s/kill — dominance moved rather than dissolved. C2 moved the
+Gunner's point to the FLOOR (its bad rolls stop being 3s; it gains no new ceiling, which is what
+an attrition gun should be) and lifted the Assault's whole band. That is the shipped shape.
+
+### CORPSMAN FIELD PRESENCE — a reason to hold the slot that is not damage
+
+A soldier standing within **2 tiles** (Chebyshev) of a living, standing Corpsman takes **−1 off
+every hit**. Flat, non-stacking, never on the Corpsman itself, never on the escort VIP (Escort's
+tuning is hard-won and stays out of this wave's attribution). It reads through `HardenedReduce`,
+so the incoming-fire forecast R2 repaired stays honest about it for free. Magnitude precedent:
+`PrepLegionArmor` is the same −1, squad-wide, for a whole mission.
+
+Priced by its own round — `C3` is the four damage deltas with the aura OFF, h0, n=80:
+
+| | completion (h0, n=80) | soldier deaths / mission | CORPSMAN s/kill |
+|---|---|---|---|
+| R0 (no lever) | 48.8 ±5.6 | 0.975 | 8.89 |
+| C3 (shooters only) | 47.5 ±5.6 | 0.971 | 9.38 |
+| **S1 (shooters + aura)** | **50.0 ±5.6** | **0.930** | 7.58 |
+
+Two honest readings. **The shooter redistribution alone is lethality-neutral** — 47.5 vs 48.8 is
+Δ −1.3 ± 7.9, which is what a redistribution should measure. **The aura is worth about +2.5
+points and a 4.2% cut in soldier deaths per mission**; neither is individually resolvable at
+n=80, but both point the same way and the mechanism is direct. It is shipped as a small, legible
+role, not as a proven win-rate lever, and this paragraph is the claim — nothing stronger.
+
+## 4. THE SHIPPED STATE — round S1, `CLASSBAL=1` default, n=80/rung
+
+| | RECRUIT | h0 | h2 | h4 | h6 | h8 |
+|---|---|---|---|---|---|---|
+| R0 (confirmed baseline) | 73.8 | 48.8 | 33.8 | **21.2** | 17.5 | 10.0 |
+| **S1 (shipped)** | **72.5** | **50.0** | **35.0** | **22.5** | **23.8** | **13.8** |
+| SE | ±5.0 | ±5.6 | ±5.3 | ±4.7 | ±4.8 | ±3.9 |
+| band | *(75)* | 55±8 | 40±8 | 30±8 | 20±8 | 10±5 |
+
+**Every rung is in band**, including h4, which crosses back over its 22 floor. Note the ladder is
+no longer strictly monotone — h4 22.5 vs h6 23.8 — but Δ −1.3 ± 6.7 is a third of one SE, the
+inversion §2(b) already said n=80 cannot resolve. It is reported, not repaired.
+
+`SIGHTLINE_CLASSBAL=1` is now the **default**, and `SHIPdiag-h0-b0` (the shipped binary, no
+env at all) is identical to `S1-h0-b0` on every compared field — the ship state is the measured
+state, not a re-derivation of it. `SIGHTLINE_CLASSBAL=0` restores the pre-X3 tree exactly.
+
+### The class table, before and after (pooled over all six rungs, n=480 campaigns each)
+
+| class | R0 s/kill | **S1 s/kill** | R0 hit% | S1 hit% | R0 dmg/shot | S1 dmg/shot |
+|---|---|---|---|---|---|---|
+| SHARPSHOOTER | 2.42 | **2.92** | 90.8 | 91.8 | 6.76 | 5.64 |
+| GUNNER | 3.39 | **2.97** | 84.0 | 84.5 | 4.44 | 5.02 |
+| RANGER | 2.65 | **3.08** | 85.8 | 85.9 | 5.77 | 5.21 |
+| ASSAULT | 3.92 | **3.15** | 86.8 | 85.7 | 4.45 | 5.35 |
+| CORPSMAN | 8.09 | 7.02 | 83.1 | 83.5 | 3.09 | 3.18 |
+| **spread (max/min, shooters)** | **1.62×** | **1.08×** | 6.8 pts | 7.3 pts | | |
+
+**The efficiency half of the gate is met: 1.08×, i.e. every shooter inside ±4% of the mean.** The
+hit% half was never breached and is not breached now (7.3 < 10).
+
+### The raw-KILLS half of the gate is NOT met, and it should not be
+
+Target as written was "the three shooters within ±20% on kills". S1 kills are SHARPSHOOTER 1138 /
+GUNNER 1502 / RANGER 847 / ASSAULT 1215 — a −28% to +28% spread, *wider* than R0's −19% to +28%.
+That is not a failure of the lever; it is the wrong instrument, and here is the evidence:
+
+> R0 shot counts, descending: **GUNNER 4357 > ASSAULT 3751 > SHARPSHOOTER 3643 > RANGER 2539.**
+> Clip sizes, descending: **GUNNER 5 > ASSAULT 4 > SHARPSHOOTER 3 > RANGER 2.** Identical order.
+
+Shot volume is a *designed* class property — reload cadence, not power. Once efficiency is
+equalized, kills track volume by arithmetic, so forcing equal kills would mean making the Gunner
+strictly worse per shot than everyone else and re-creating dominance pointing the other way.
+**shots-per-kill is the efficiency gate; raw kills is a volume readout.** Both are published above.
+
+## 5. THE GATES — every one, with its number
+
+| gate | R0 | **S1 (shipped)** | verdict |
+|---|---|---|---|
+| shots-per-kill ≥ 3.0 overall | 3.16 pooled | **3.16 pooled** (per rung 3.27/3.13/3.20/3.01/3.21/3.16) | **PASS**, tightest at h4 3.01 |
+| armed/turn ≥ 1.55 | 1.52/1.59/1.50/1.63/1.03/0.94 | **1.56/1.62/1.68/1.58/1.08/0.95** | **PASS at RECRUIT-h4** (improved at 5 of 6 rungs); h6/h8 sit at 1.08/0.95 — the EXPOSED / NO QUARTER mutator rungs, never above 1.55 at baseline either, untouched by this wave |
+| no objective mean > ~10 turns at h0 or h4 | h0 Escort **10.73**; h4 Evac **11.81** / Escort **11.61** | h0 Escort **12.69**; h4 Evac **10.30** / Escort **6.53** | **BREACH, pre-existing** — see below |
+| RECRUIT − h0 ≥ 15 | 25.0 | **22.5** | **PASS** |
+| ladder in band at every rung | 5 of 6 (h4 −0.8) | **6 of 6** | **PASS** |
+| class spread (s/kill max/min) | 1.62× | **1.08×** | **PASS** |
+| class hit% spread ≤ 10 pts | 6.8 | **7.3** | **PASS** |
+| class kills within ±20% | −19…+28% | −28…+28% | **NOT MET** — §4, wrong instrument |
+| `choices/ARMED` *(reported, never tuned)* | 1.74/1.75/1.63/1.83/1.48/1.53 | 1.57/1.70/1.69/**1.92**/1.49/1.57 | W4's self-limiting metric; 1.92 at h4 is the highest this project has published and it was not aimed at |
+
+**The drag breach, straight — and it goes both ways.** It is not this wave's invention: **R0
+already breaches at three of the four gated cells** (h0 Escort 10.73t, h4 Evac 11.81t, h4 Escort
+11.61t), and X2 recorded Escort at 12.81t on its own shipped state and accepted it. S1 **improves
+h4** — Evac 11.81 → 10.30 and Escort 11.61 → **6.53**, the latter a real move well outside noise
+— and **worsens h0 Escort**, 10.73 → 12.69 (Δ 2.0t on n=31/29 mission samples, ~1.3 SE, inside
+X2's historical range). Net: one gated cell left over the line instead of three, but **h0 Escort
+is now the only objective in the game whose mean exceeds the gate and nobody has moved it in four
+programs.** It stays on the docket as its own wave, not as a footnote here.
+
+## 6. VERIFICATION
+
+Release **0 warn / 0 err**. `qa-sweep.sh --full`: **all 49 tests/gates PASS** (47 run),
+**COVERAGE GAP block empty**, **PAIRTEST PASS**. `HEATLADDERTEST`, `COMBATTEST`, `AITEST`,
+`SNAPTEST` all PASS with the new defaults underneath them. **Autoplay ×13 clean on the shipped
+defaults** (9 WIN / 4 LOSE, no TIMEOUT, no exceptions). `COMBATTEST` gained an `x3-class-role` block — off-identity,
+per-class targeting, enemy-with-the-same-`Cls` exclusion, the DmgMin≥1 floor, and six aura gates
+(in range / no-stack / skips the VIP / player-only / out of range / downed and dead inert) — so
+the funnel is pinned by an existing self-test and adds no coverage gap.
+
+Two identity rounds, both measured rather than asserted: **`R0diag`** (X3 tree, knobs at 0) is
+identical to **`R0`** on every compared field, and **`SHIPdiag`** (shipped binary, no env) is
+identical to **`S1`**.
+
+## 7. OPEN / NEXT
+
+1. **Escort at h0 (12.69t vs a ~10t gate)** — after S1 cut h4 Escort to 6.53t and h4 Evac to
+   10.30t, this is the last gated cell over the line, and it has been unmoved by four programs.
+   Its own wave.
+2. **The h8 asset wall** — Escort 35 / Rescue 36 / Decapitate 32 / Evac 33 against 77-95 for the
+   rest. This is now measured at n=80 and is the single biggest shape problem in the ladder;
+   the apex is not "hard", it is *four objectives that are hard and four that are not*.
+3. **h4 vs h6 is unresolvable at n=80** (Δ3.7 ± 6.2). Anything aimed at the middle of the ladder
+   needs n≥200 or it is guessing.
+4. **The CORPSMAN is still not a decision** at 7.02 s/kill. FIELD PRESENCE gives it a reason to
+   exist; whether a player would *choose* it over a fourth gun is untested, because the founding
+   squad has no Corpsman and the bot never positions to collect the aura. A positioning-aware EV
+   bot would price it properly — and would be the honest way to test it.
+5. **Do not chase `choices/ARMED`.** W4's finding holds across two more levers here (1.48-1.92
+   over twelve rung-measurements). The additive re-spec in ROADMAP is still the only real fix.

@@ -1383,15 +1383,20 @@ sets, one lever per measured round, fresh same-slot R0 first, dip budgets, breac
       budgets), `SIGHTLINE_TOUGH` / `SIGHTLINE_TRIM` (X1's pair, now pinnable), and
       `SIGHTLINE_ENEMYBASE`.
 
-- [ ] **RAISE N BEFORE SPENDING ANOTHER LEVER.** The highest-value measurement in the project
-      right now is **n≥80 per rung on the state that is already shipped**. At n=40 the error bar
+- [x] **RAISE N BEFORE SPENDING ANOTHER LEVER.** *(DONE — RESONANCE X3 "CONFIRM", n=80 per rung
+      on all six rungs, base `d350416`; see the X3 entry below.)* The highest-value measurement in
+      the project was **n≥80 per rung on the state that is already shipped**. At n=40 the error bar
       (±6-8) is the size of the band tolerance and bigger than the step between rungs; three of
       the six deltas in X2's shipped table are indistinguishable from noise, and two waves have
       now argued about rung inversions that no data could resolve.
-- [ ] **Heat 8 is out of band at 17.5%** (band 5-15, so +2.5 over the ceiling, 0.4 SE). Do not
-      aim a rung-average lever at it: the apex is a wall made of four objectives —
-      **Escort 33% (n=15), Evac 0% (n=4), Rescue 33% (n=3), Decapitate 41% (n=17)** — and the
-      rung average is what those produce.
+- [x] **Heat 8 is out of band at 17.5%** — *REFUTED at n=80 (X3): h8 measures **10.0 ±3.4**, the
+      band's nominal value, with X2's own chunks reproducing bit-exactly. The 17.5 was the top
+      half of an 80-run distribution.* The rest of the item **stands and is confirmed**: the apex
+      is a wall made of four objectives — at n=80, **Escort 35.0 (n=20), Rescue 35.7 (n=14),
+      Evac 33.3 (n=6), Decapitate 32.3 (n=31)** against 77-95% for Eliminate / Hack / Sabotage /
+      Defend, with `VIP LOST` and `CAPTIVE LOST` naming the mechanism. Every one of the four is an
+      objective with an asset you do not control. **This is now the biggest shape problem in the
+      ladder.**
 - [ ] **Escort is the drag objective and its repair was flattered by a broken ladder.**
       12.81 turns at h0 and 13.48 at RECRUIT in the shipped state, against the 8.03/8.19 that
       W4 and X2's own baseline recorded — those samples contained only the runs healthy enough
@@ -1428,3 +1433,54 @@ sets, one lever per measured round, fresh same-slot R0 first, dip budgets, breac
       Rungs 1-7 add bodies and stat points that the measurement cannot see. Either the rungs need
       real teeth or the ladder needs fewer, bigger steps — but the first job is a **higher-N**
       measurement (n≥80/rung) so the question can be asked at a precision that can answer it.
+
+### PROGRAM RESONANCE — X3 "CONFIRM" (2026-08-29, details in DEVLOG §X3)
+
+- [x] **THE LADDER CONFIRMED AT n=80.** Every rung re-measured on the integration tip — four
+      disjoint CRN slot sets (`SIGHTLINE_BALANCE_BASE` 0/10/20/30) × greedy+sloppy, `runs=20`
+      asserted in all 53 chunks, base commit `d350416`, raw data in `docs/measurements/x3/`.
+      Per-rung SE fell from ±6-8 to **±3.4-5.6**. Baseline (no lever):
+      **73.8 / 48.8 / 33.8 / 21.2 / 17.5 / 10.0**. Supersedes X2's n=40 table.
+- [x] **X2's table was a SAMPLING excursion, not tree drift — proved, not argued.** X2's archived
+      chunks reproduce **bit-exactly** on this tree at every rung h0-h8 (same slots, same
+      outcomes); the two slot sets nobody had run pull h0 from 57.5 to 48.8 and h8 from 17.5 to
+      10.0. The only genuine milestone-2 drift lands on RECRUIT (`EnsureConnectivity`'s geometry
+      repair), and pools to nothing: 75.0 → 73.8.
+- [x] **The two questions n=40 could not answer, answered.** **h8 is IN band** (10.0 ±3.4 vs a
+      5-15 window) — the +2.5 breach does not reproduce. **The h2/h4 ordering is REAL**
+      (Δ12.6 ± 7.0) and the whole n=80 baseline ladder is monotone. **h4 vs h6 is still not
+      resolvable** (Δ3.7 ± 6.2) — below n≈200, do not spend a lever on an adjacent-rung inversion.
+- [x] **CLASS DOMINANCE closed on efficiency** (AUDIT-2026 #2, PARTIAL since FULCRUM). Cause
+      measured at n=480 campaigns: **damage-per-shot, not hit%** (shooters already inside 6.8 pts
+      of hit%; dmg/shot 6.76 vs 4.44). Fix is a per-class redistribution shaped per band END in
+      `Combat.ComputeOdds`, keyed on `Unit.Cls` (survives an armory swap; never touches a hostile
+      with the same gun): SHARPSHOOTER −1/−1, RANGER 0/−1, GUNNER **+1 on the FLOOR**,
+      ASSAULT +1/+1. **shots-per-kill spread 1.62× → 1.08×** (2.92 / 2.97 / 3.08 / 3.15), hit%
+      spread 7.3, ladder in band at **all six rungs**, overall shots-per-kill unchanged at 3.16.
+- [x] **CORPSMAN FIELD PRESENCE** — a soldier within 2 tiles of a living, standing Corpsman takes
+      −1 off every hit (flat, non-stacking, never the Corpsman itself, never the VIP). Priced by
+      its own round: **+2.5 points of completion and −4.2% soldier deaths per mission** at h0,
+      direction-consistent but not individually resolvable at n=80. Shipped as a legible role, not
+      as a proven win-rate lever.
+- [x] **`SIGHTLINE_CLASSBAL` shipped at 1** with per-class sub-knobs (`SIGHTLINE_SHARPDMG` /
+      `_RANGERDMG` / `_GUNNERDMG` / `_ASSAULTDMG` / `_GUNNERAIM` / `_MEDICAURA`).
+      `SIGHTLINE_CLASSBAL=0` restores the pre-X3 tree exactly — and that identity is **measured**
+      (`R0diag`), as is the claim that the shipped binary reproduces the measured state
+      (`SHIPdiag`). `COMBATTEST` gained an `x3-class-role` block (13 gates) — no new env var, so
+      no coverage gap.
+
+- [ ] **Escort at h0 is the last gated drag cell.** 12.69t against a ~10t gate. X3 **improved h4**
+      (Evac 11.81 → 10.30, Escort 11.61 → **6.53**) but h0 Escort is unmoved by four programs and
+      is now the only objective in the game over the line. Its own wave.
+- [ ] **The h8 asset wall** (see the X2 item above, now confirmed at n=80). Four objectives at
+      32-36% against four at 77-95%. The apex is not "hard" — it is *half hard*.
+- [ ] **Raw class KILLS are still −28%…+28% apart, and that is the wrong gate.** Once efficiency
+      is equal, kills track SHOT VOLUME, and volume follows clip size exactly (GUNNER 5 /
+      ASSAULT 4 / SHARPSHOOTER 3 / RANGER 2 is the precise ordering of their shot counts).
+      Equalising kills would mean making the Gunner worse per shot than everyone else. If this
+      matters, the lever is **clip/cadence**, not damage — and it should be argued as a design
+      change before it is measured as a balance one.
+- [ ] **The CORPSMAN is still not a decision** (7.02 s/kill). The founding squad has no Corpsman
+      and the EV bot never positions to collect FIELD PRESENCE, so the aura is measured with a
+      bot that does not know it exists. A positioning-aware EV bot would price it honestly — and
+      is the prerequisite for the standing "founding corpsman" owner-decision.

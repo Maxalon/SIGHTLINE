@@ -140,6 +140,7 @@ The compass now *measures* these, so the next program can fix them and prove it:
    becomes the core bet" — and deserves its own dedicated, carefully-verified program.
 2. **Class dominance** — SHARPSHOOTER's Sniper crit/range edge + the squad-wide MARK
    multiplier make it the first pick; normalize toward a real composition decision.
+   *(Efficiency half CLOSED by RESONANCE X3 — spread 1.62× → 1.08×; see the status list below.)*
 3. **Content de-bloat** — the audit's third thrust. Evac/Escort/Rescue are one objective in
    three costumes; Decapitate ≈ Eliminate; ~5 enemy archetypes are `advW`-constant reskins;
    ~20 arenas are near-duplicates. Concentrate toward the distinct, but verify it doesn't
@@ -158,11 +159,28 @@ to itself (always 0) — a vacuous condition with no behavioral impact.
   is 1 action, so position-after-acting (shoot→reposition) is the new core bet; a 2nd shot is a
   rushed follow-up (preserves the load-bearing ~2-shots/turn ceiling). MEASURED: meaningful-choices/
   turn **1.76 → 6.15** at IDENTICAL run-completion (67.9 → 68.8%), holds at heat-4 (7.43 / 50%).
-- **#2 Class dominance — PARTIAL.** Sniper crit/dmg/range trimmed, MARK crit amp removed, Ranger
-  given a close-range niche. The crit-trim hypothesis here proved INSUFFICIENT — Sharpshooter's
-  lead is damage+aim driven, so it remains the top single-target dealer (a sniper, thematically)
-  while the other three classes are tightly grouped with clear niches. Finishing it (a measured
-  damage/aim pass) is the open follow-up.
+- **#2 Class dominance — CLOSED on efficiency (RESONANCE X3 "CONFIRM", base `d350416`).** The
+  crit-trim hypothesis was insufficient, as recorded below; X3 measured the real cause at n=80
+  over the whole ladder (480 campaigns) and it was **damage-per-shot, not hit%**: the four
+  shooters already sat inside **6.8 points of hit%** while dmg/shot ran SHARPSHOOTER **6.76** vs
+  GUNNER **4.44**, a 52% lead compounding with the sniper's reach into a **1.62×** shots-per-kill
+  spread (2.42 / 2.65 / 3.39 / 3.92). The fix is a per-class damage redistribution shaped per band
+  END, applied in `Combat.ComputeOdds` and keyed on `Unit.Cls` so it survives an armory swap and
+  never touches a hostile with the same gun: SHARPSHOOTER −1/−1, RANGER 0/−1, GUNNER **+1 on the
+  FLOOR**, ASSAULT +1/+1. **Measured after: 2.92 / 2.97 / 3.08 / 3.15 — a 1.08× spread, every
+  shooter inside ±4% of the mean, hit% spread 7.3** — with the ladder in band at all six rungs and
+  overall shots-per-kill unchanged at 3.16. An intermediate round (GUNNER +1 on both ends) closed
+  the spread to 1.31 but flipped the Gunner to *best*; dominance moving is not dominance closing,
+  and the measurement caught it.
+  **Still open:** raw KILLS remain −28%…+28% apart, because once efficiency is equal, kills track
+  SHOT VOLUME — and volume follows clip size exactly (GUNNER 5 / ASSAULT 4 / SHARPSHOOTER 3 /
+  RANGER 2 is the precise ordering of their shot counts). Equalising kills would mean making the
+  Gunner worse per shot than everyone else. And the **CORPSMAN is still not a gun** (7.02
+  s/kill); X3 gave it FIELD PRESENCE (−1 damage to any soldier within 2 tiles) as a reason to hold
+  a slot that isn't damage, worth ~+2.5 points of completion and a 4.2% cut in soldier deaths per
+  mission at h0 — direction-consistent but not individually resolvable at n=80. Whether a player
+  would *choose* it over a fourth gun is untested: the founding squad has no Corpsman and the EV
+  bot never positions to collect the aura.
 - **#3 Content de-bloat — DEFERRED (deliberate).** Removing enemies/arenas risks stripping replay
   variety for marginal clarity; recommend doing it as a VALUE-ADD instead (shorten the Evac/Escort
   ~10-turn drag via a closer win tolerance), not a removal.

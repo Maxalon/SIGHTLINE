@@ -186,23 +186,27 @@ public static class Combat
     // Player-only by construction (every read gates on Team.Player), keyed on Unit.Cls like the
     // rest of the class plumbing, and applied inside ComputeOdds/HardenedReduce — the single
     // funnels the HUD forecast, the AI and Resolve all read, so the numbers on screen stay honest.
-    // DEFAULT 0 == the shipped tree exactly (safety invariant, asserted by the X3 R0diag round).
+    // SHIPPED DOSE 1 (round S1). `SIGHTLINE_CLASSBAL=0` restores the pre-X3 tree EXACTLY — the
+    // round-R0diag identity check proved the scaffolding is logic-free at 0, so the 0 path is the
+    // honest control, not an approximation of one.
 
     /// Per-class damage deltas on a PLAYER soldier's shot, applied to both ends of the band
     /// (DmgMin floored at 1). Keyed on Unit.Cls, so a class carries its role through an armory
     /// weapon swap and a hostile with the same gun is never touched. All 0 by default.
-    public static int SharpDmgTrim = 0;      // SHARPSHOOTER: -n on BOTH ends  (pays for reach + MARK)
-    public static int RangerDmgTrim = 0;     // RANGER:       -n on the TOP end (pays for crit 15 + the +24 close band)
-    public static int GunnerDmgBonus = 0;    // GUNNER:       +n on the FLOOR  (paid for with the lowest aim + crit of the four)
-    public static int AssaultDmgBonus = 0;   // ASSAULT:      +n on BOTH ends  (paid for with no peak band anywhere)
+    /// SHIPPED at 1 (X3 round S1, base d350416, n=80/rung). `SIGHTLINE_CLASSBAL=0` restores the
+    /// pre-X3 tree exactly, and each class has its own sub-knob for attribution.
+    public static int SharpDmgTrim = 1;      // SHARPSHOOTER: -n on BOTH ends  (pays for reach + MARK)
+    public static int RangerDmgTrim = 1;     // RANGER:       -n on the TOP end (pays for crit 15 + the +24 close band)
+    public static int GunnerDmgBonus = 1;    // GUNNER:       +n on the FLOOR  (paid for with the lowest aim + crit of the four)
+    public static int AssaultDmgBonus = 1;   // ASSAULT:      +n on BOTH ends  (paid for with no peak band anywhere)
     /// Aim points added to a player GUNNER's shot. Held at 0 in the shipped composite — kept as a
     /// separate lever for the hit%-spread half of the gate.
     public static int GunnerAimBonus = 0;
     /// FIELD PRESENCE: damage subtracted from every hit on a soldier standing within
     /// MedicAuraRange of a living, non-downed CORPSMAN. Does NOT stack (presence, not plating),
     /// never applies to the Corpsman itself (support, not a tank) and never to the escort VIP
-    /// (Escort's tuning is hard-won and stays out of this wave's attribution).
-    public static int MedicAuraReduce = 0;
+    /// (Escort's tuning is hard-won and stays out of this wave's attribution). SHIPPED at 1.
+    public static int MedicAuraReduce = 1;
     public const int MedicAuraRange = 2;   // Chebyshev tiles: a squad's natural spacing, not a touch
 
     /// The player-class damage deltas on this attacker's shot, one per BAND END. The shape of
