@@ -170,10 +170,10 @@ arrows, Tab/Space/Enter/Escape/Backspace/F2/Kp+/Kp−.
 `PublishTrimmed` hazard): [`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md) +
 `bash scripts/publish.sh`.
 
-**Self-tests & measurement:** 41 features ship a window-free `SIGHTLINE_*TEST` hook
+**Self-tests & measurement:** 51 features ship a window-free `SIGHTLINE_*TEST` hook
 (e.g. `COMBATTEST`, `SAVETEST`, `AITEST`, `ITEMTEST`) that prints `PASS/FAIL`, and there
 are `SIGHTLINE_*` screenshot hooks per feature. `bash scripts/qa-sweep.sh --full` runs all
-41 plus autoplay ×3 and is the pre-merge gate; without `--full` it skips the 38 s PAIRTEST.
+51 plus autoplay ×3 and is the pre-merge gate; without `--full` it skips the 38 s PAIRTEST.
 The `SIGHTLINE_BALANCE=<N>` flywheel runs N headless campaigns and reports
 win-rate/decision-richness/policy-gap — **it needs a display**, so run it under `xvfb-run`;
 without one it silently reports `runs=0`. A fuller (but non-exhaustive) list of hooks is
@@ -228,7 +228,7 @@ src/
   Display.cs    render-target, post-FX shader, brightness/colorblind, settings
   Stats.cs      SIGHTLINE_BALANCE analytics harness
 scripts/dev-setup.sh   sandbox setup
-scripts/qa-sweep.sh    all 41 self-tests + autoplay x3 (--full adds PAIRTEST)
+scripts/qa-sweep.sh    all 51 self-tests + autoplay x3 (--full adds PAIRTEST)
 scripts/publish.sh     hand-run distributable build + persistence re-proof
 THIRD-PARTY-NOTICES.txt  raylib/Raylib-cs (Zlib) + .NET (MIT); copied to build output
 docs/screenshot.png    README image
@@ -402,6 +402,18 @@ restores the pre-X2 opener; `SIGHTLINE_AIMTRIM` / `SIGHTLINE_TOUGH` / `SIGHTLINE
 onboarding was graded "Addressed" when 12 of 14 verbs were untaught; and a published
 `meaningful-choices/turn = 6.15` measured **2.25** on a fresh batch. **Do not cite a number you
 have not just re-measured.**
+
+RESONANCE **TRUE BAND** re-specified the INSTRUMENT those decision-density numbers came from.
+`CountMeaningfulChoices` now bands both axes **ADDITIVELY** (within a fixed number of score points
+of the best) instead of multiplicatively (within a fraction of it), and its anti-inflation cap
+went 2 → 4. **Every `ch/ARMED` / `ch/turn` / `target-choices` / `position-choices` figure dated
+before 2026-08-29 — W4's ~1.6, X1's ~1.5, X2's 1.44-1.78 — is a MULTIPLICATIVE number and is NOT
+comparable to anything measured since.** `SIGHTLINE_CHOICEBAND=mult` reproduces the old rule
+exactly; `SIGHTLINE_BANDTEST` pins that reproduction against a literal transcription. It also
+corrected W4's stated mechanism: `pbest` does **not** fall with threat (median 40 at every rung,
+n=848 soldier-turns) — what flattened axis (b) was the cap of **2**, which sat below the median of
+the admitted-count distribution. Proven gameplay-inert (686 aggregate fields diffed on five paired
+batches, zero non-choice fields moved). DEVLOG §TRUE BAND; raw chunks `docs/measurements/tb/`.
 
 ## Handoff protocol (when context gets heavy)
 You judge when context rot risks quality (don't wait for the 1M hard limit). Before stopping:

@@ -5412,3 +5412,320 @@ unmoved: win-rate 50→50, missions 83→83, policy gap 20→20, paired gap 20�
 only micro-jitter in decision richness (meaningful choices/turn 2.757→2.737, lead swings/match
 0.60→0.63, avg max swing 51.13→50.70). FIX 1 changes procedural ENVELOP geometry in ~1-4% of
 builds, which is the size of that jitter.
+
+---
+
+# PROGRAM RESONANCE — WAVE "TRUE BAND" (2026-08-29, dev on `wave/true-band`)
+
+**The spec.** ROADMAP carried a ready-to-dev spec, written by X2 out of W4's finding: re-specify
+`Game.Autopilot.cs :: CountMeaningfulChoices` axis (b) as an **additive** band. The stated
+mechanism was that axis (b) counts destinations scoring within **15% of the BEST** safety score
+`24 − TileExposure + cover*8 + height*5`, so raising board threat lowers the best score, shrinks
+the *absolute* window `0.15 × pbest`, and disqualifies tiles — which would make axis (a) (rises
+with threat) and axis (b) (falls with it) anti-correlated, their sum near-conserved, and the
+decision-density gate structurally unreachable. Two waves (X1, W4) had already missed against it.
+
+**BASE COMMIT OF EVERY NUMBER BELOW: `d350416`** (PROGRAM RESONANCE milestone 2 — the
+integration tip, with X2's ladder already merged), plus this wave's own instrument change, which
+is proven gameplay-inert in §4. Raw chunks: `docs/measurements/tb/` (README there gives the exact
+command lines and the `runs=10` assertions).
+
+> **⚠ THIS WAVE CHANGED THE INSTRUMENT. Every `ch/turn`, `ch/ARMED`, `target-choices/ARMED` and
+> `position-choices/ARMED` number published anywhere in this repo before today — FUL-13, X1, W4,
+> X2, and the `[choice-split]` blocks in every archived report — was measured on the
+> MULTIPLICATIVE instrument and is NOT comparable to any number measured after it.** The
+> historical write-ups are left exactly as they are (they are provenance, and rewriting them
+> would be worse than the mismatch); this note is the single place that says so.
+> `SIGHTLINE_CHOICEBAND=mult` reproduces the old rule exactly if one ever has to be re-derived,
+> and `SIGHTLINE_BANDTEST` pins that reproduction against a literal transcription of the old
+> method. **`docs/DEVLOG.md` §W4, §X1 and §X2 and `docs/ROADMAP.md`'s W4/X2 sections all carry
+> pre-wave `ch/ARMED` figures. Read them as history, not as a baseline.**
+
+## 0. MEASURE THE OLD INSTRUMENT FIRST — and the spec's premise turns out to be FALSE
+
+Before changing a line I built `SIGHTLINE_BANDPROBE=1` (`ChoiceProbe` in `Game.Autopilot.cs`):
+a default-off, allocation-free, read-only probe that records, over real balance batches, the
+distribution of the score each axis bands against, the distribution of every candidate's GAP to
+it, and how many candidates a multiplicative window and four additive ones would each admit over
+the identical sample. It is the answer to "is 3 the right constant, or 2, or 5?" — the brief's
+first question, and one nobody had ever asked of this metric.
+
+**The best safety score `pbest`, over real armed soldier-turns (slot base 50, n=10 campaigns per
+rung):**
+
+| rung | soldier-turns | mean | p5 | p25 | **p50** | p75 | p95 |
+|---|---|---|---|---|---|---|---|
+| heat 0 | 414 | 37.69 | 24 | 32 | **40** | 40 | 45 |
+| heat 4 | 306 | 38.59 | 32 | 40 | **40** | 40 | 45 |
+| heat 8 | 128 | 38.82 | 32 | 40 | **40** | 40 | 50 |
+
+**`pbest` does not fall with threat. It is pinned at 40 at every rung, and its mean RISES
+slightly as the board gets hotter.** 40 is exactly `24 + 2×8 − 0`: full (level-2) cover, zero
+exposure, ground level. The maximum of the safety score over one-action-reachable tiles is a
+property of the **map grammar** — is there a high-cover tile within one move? — and this game's
+arenas nearly always provide one. Threat does not lower the best tile; it lowers all the *other*
+tiles. So the multiplicative window `0.15 × pbest` was **≈6 points wide at every rung**, and was
+never shrinking with difficulty.
+
+The second half of the premise fares no better. I expected the `pbest > 0` guard to be a
+threat-coupled disqualifier that silently deletes the whole axis on a hot board. Measured, it
+fires on **0.5% / 1.0% / 0.0%** of soldier-turns at heat 0 / 4 / 8. It is nearly inert.
+
+**This is a legitimate and valuable outcome, and it is stated first because it reassigns the
+blame.** The spec's *fix* is still right — banding by a fraction of a magnitude nobody chose is
+the wrong shape, and §2 shows axis (a) is genuinely damaged by it — but the spec's *mechanism*
+is not what is happening here, and a wave that shipped the fix while repeating the story would
+have written a fourth over-claim into this file.
+
+**The gap distribution, `pbest − s` over every candidate destination:**
+
+| rung | candidate tiles | mean | p5 | p25 | p50 | p75 | p95 |
+|---|---|---|---|---|---|---|---|
+| heat 0 | 16,159 | 21.31 | 0 | 16 | 16 | 27 | 54 |
+| heat 4 | 12,726 | 22.45 | 0 | 16 | 16 | 27 | 60 |
+| heat 8 | 6,300 | 24.65 | 0 | 16 | 24 | 32 | 60 |
+
+The gaps live on a **lattice** — 16 is two cover levels, 8 is one, 5 is an elevation step, 6-10 is
+one exposed gun — which is why the median sits on 16 and barely moves. This is the fact that makes
+an additive band expressible at all: the score has natural units, so a band can be stated in them.
+
+## 1. WHAT ACTUALLY FLATTENS AXIS (b): the anti-inflation CAP, not the window
+
+The shipped contribution of axis (b) is `min(cap, admitted − 1)`, and the cap was **2**. Against
+the measured admitted-count distribution that is not a tail-clip:
+
+| rung | admitted/turn (additive band 3): p50 | p75 | p95 | mean |
+|---|---|---|---|---|
+| heat 0 | 2 | 4 | 15 | 3.64 |
+| heat 4 | 3 | 5 | 9 | 3.40 |
+| heat 8 | 2 | 4 | 7 | 2.99 |
+
+A cap of 2 sits between the **p25 and the p50**. It clips the median turn. The axis was not
+being measured, it was being answered with a near-binary "were there 3+ near-best tiles, yes or
+no?", and it retained only **41-55%** of the uncapped signal (1.082 of 2.640 at heat 0, 1.242 of
+2.399 at heat 4, 1.094 of 1.992 at heat 8). Of the two compressions the band change removes,
+this is the larger one — the cap raise moves the axis by ~0.4-0.5 per armed soldier-turn (§5),
+the window shape by far less. (Directionally; at n=10 a *spread* comparison is a direction, not
+a measurement — see §5 and §7.1.)
+
+**The cap is kept and raised to 4**, which sits at the measured **p75-p80**: it preserves the
+median and the interquartile body and clips only the tail, and retains **60-84%** of the signal.
+The cap itself is right and worth defending — the tail is the open field, and a soldier with
+fifteen identically-safe tiles around it is facing one shrug, not fourteen decisions. A cap at
+the p75 clips shrugs; a cap at the p50 clips the metric.
+
+**What I will NOT claim:** I priced caps 2 / 4 / uncapped against the heat rungs as well, and
+that comparison resolves nothing. On slot bases 50/60/70 the capped-4 axis read 1.59 / 1.86 /
+2.11 (monotone, tidy); re-run on a **common** base 50 the same three rungs read 1.59 / 1.84 /
+1.66 (not monotone). A ±0.4 swing from the world set alone at n=10 is larger than every rung
+difference in the table. The cap value is chosen from the **distribution**, which n=10 measures
+precisely (12,726 candidate tiles in the heat-4 chunk alone), and not from a rung ordering, which
+n=10 cannot measure at all. That distinction is the entire lesson of X2's ±SE section and it
+applies here with more force, not less.
+
+## 2. AXIS (a) NEEDED THE ADDITIVE BAND TOO, on its own evidence
+
+The brief asked for a decision on axis (a) with evidence rather than a guess. Here it is: the
+best shot value spans **p5 = 2-4 to p95 = 20-25** with a median of 11-13, an eight-fold range. A
+12% window is therefore **0.36 points wide against a weak best shot and 3.0 wide against a strong
+one** — it widens exactly when one target is obviously the right one (a finisher, a flank), which
+is backwards for a metric asking "did this soldier face a real choice of target?".
+
+The gap to the best shot is bimodal (p50 = 0-1, p75 = 4-5, p95 = 9-13): a rival is either a
+near-duplicate or a different proposition, because the finisher and flank bonuses in `ShotValue`
+are 4-14 points. **`ShotBand = 2`** admits the duplicates and not the different propositions, and
+lands close to the old window at the *median* best (0.12 × 11 ≈ 1.3), so the axis-(a) level barely
+moves. The point of changing it is not to move it — it is that both axes now band on the same
+terms, in the units their scores are made of.
+
+## 3. WHAT SHIPPED
+
+**1. The additive band, default on** (`Game.Autopilot.cs`). One factored-out rule,
+`AdmitNearBest(vals, best, mult, frac, band)`, used by both axes, so they provably cannot drift
+apart again. Constants, all `static readonly` rather than `const` **so BANDTEST's pins are not
+folded away by the compiler**:
+
+| constant | value | in the units of |
+|---|---|---|
+| `ShotBand` | 2 | shot-value points (a finisher bonus is 4-14) |
+| `PosBand` | 3 | safety points (cover 8, elevation 5, one exposed gun 6-10) |
+| `PosChoiceCap` | 4 | near-best destinations, at the p75-p80 of the measured distribution |
+| `MultShotFrac` / `MultPosFrac` | 0.88 / 0.85 | the pre-wave windows, kept for reproduction |
+
+**2. `SIGHTLINE_CHOICEBAND=mult`** restores the pre-wave rule *exactly* — both windows, the
+`pbest > 0` guard and the cap of 2 — so any archived number can be re-derived on any future tree.
+
+**3. The `pbest > 0` guard is dropped in additive mode and kept in mult mode.** It exists because
+`0.85 × pbest` is **degenerate** at a non-positive best: for `pbest < 0` the cut sits *above*
+`pbest`, so nothing at all qualifies. The additive band has no such degeneracy. Measured, the
+guard is nearly inert (§0), so this is not what moves the number; it goes because it is a
+threat-coupled disqualifier that deletes the axis exactly when the board is worst.
+
+**4. `SIGHTLINE_BANDPROBE=1`** — the instrument-design probe, kept (default off, allocation-free,
+read-only, reachable only from the balance batch). It is how the next person re-derives a
+constant instead of arguing about one.
+
+**5. `SIGHTLINE_BANDTEST=1`**, wired into `scripts/qa-sweep.sh`. Its footer count is re-derived —
+and while re-deriving it I found the *recipe* wrong too: the "DERIVED" grep in the sweep's header
+matched only `...TEST|FUL11PROBE`, so it never counted `AUDIOGATE`, and it counted over
+`qa-sweep.sh` while the label said "exist". Both halves now derive from the right place (`src/*.cs`
+for "exist", this file for "run") and the header says they must be EQUAL; the honest numbers are
+**51 exist, 51 run with `--full`, 50 without** (the one skipped is PAIRTEST), not the 49/47/46 the
+footer had been carrying.
+It pins, in order: the five constants; the RULE on the pure helper — the additive band is
+invariant under a uniform shift of the score scale and the multiplicative one is not, and the
+multiplicative one is degenerate at a non-positive best; that `CHOICEBAND=mult` still reproduces
+the PRE-WAVE counts **exactly**, checked field-by-field against a literal transcription of the old
+method (`OldChoiceReference`) over **120 constructed boards**; that the band never moves the shot
+GATE (`acting` / `armed` / `losTargets` are identical in both modes) and that the two halves sum
+to the total by construction; that the counter **mutates no game state** (a full board+unit
+fingerprint before and after); and that it takes **zero `Util.Rng` draws** — the last with a
+**sensitivity probe**: the same detector, handed the same body plus one hand-injected draw, must
+FAIL, so a green purity result can never be the detector failing to detect.
+
+## 4. THE INERTNESS PROOF — the change is bookkeeping and nothing else
+
+`CountMeaningfulChoices` is read-only telemetry; if the band change moved anything in the game,
+the instrument would be measuring its own footprint. `diff_chunks.py` flattens two
+`SIGHTLINE_BALANCE` aggregates to dotted scalar paths and reports every field that differs.
+Paired `mult` vs `add` batches, each pair on the **same slot base**:
+
+| pair | fields compared | choice fields moved | **non-choice fields moved** | verdict |
+|---|---|---|---|---|
+| heat 0, base 50 | 686 | 10 | **0** | INERT |
+| heat 4, base 50 | 686 | 10 | **0** | INERT |
+| heat 8, base 50 | 686 | 10 | **0** | INERT |
+| heat 4, base 60 | 686 | 10 | **0** | INERT |
+| heat 8, base 70 | 686 | 10 | **0** | INERT |
+
+Five pairs across three world sets, because the first three were run before it was noticed that
+the *rung* comparison in §5 needs a common slot base; the extra world sets are free extra
+confirmations of inertness.
+
+Run completion, missions, `runWinRate`, `byObjective`, `byMission`, `byHeat`, `lossCauses`,
+`actionMix`, `armedSoldiersPerTurn`, `losTargetsPerArmedSoldierTurn` and every per-slot paired
+record are **byte-identical**. The only fields that move are the four `decisionRichness` choice
+fields plus their six `byDeploy` mirrors. `SIGHTLINE_PAIRTEST=1` is **PASS** (h0 slot0 and h4
+slot1 both MATCH).
+
+## 5. THE RE-BASELINE — the new instrument, and whether it separates the rungs
+
+`SIGHTLINE_BALANCE=5` per chunk (**10 campaigns**, `runs=10` asserted in all ten `add-*`/`mult-*`
+chunks; the two exploratory `probe-*` chunks were `SIGHTLINE_BALANCE=3`, `runs=6` asserted), common
+slot base 50, so the three rungs replay the same worlds and the two rules replay them identically.
+**These are instrument reads, not a ladder.** A run-completion figure at n=10 carries roughly ±15
+points; nothing here supersedes X2's ladder or should ever be quoted as a rung.
+
+| rung | instrument | run compl (n=10) | **ch/ARMED** | tgt/ARMED | pos/ARMED | armed/turn | los/ARMED |
+|---|---|---|---|---|---|---|---|
+| heat 0 | mult (pre-wave) | 40.0% | 1.926 | 0.724 | 1.202 | 1.564 | 2.741 |
+| heat 0 | **add (shipped)** | 40.0% | **2.389** | 0.815 | 1.574 | 1.564 | 2.741 |
+| heat 4 | mult (pre-wave) | 20.0% | 1.765 | 0.446 | 1.319 | 1.236 | 2.785 |
+| heat 4 | **add (shipped)** | 20.0% | **2.307** | 0.534 | 1.773 | 1.236 | 2.785 |
+| heat 8 | mult (pre-wave) | 0.0% | 1.393 | 0.119 | 1.274 | 0.683 | 1.750 |
+| heat 8 | **add (shipped)** | 0.0% | **1.976** | 0.179 | 1.798 | 0.683 | 1.750 |
+
+`armed/turn` and `los/ARMED` are identical down the pairs — the band moved the near-best count and
+nothing else, exactly as §4 requires.
+
+**The paired mult → add lift, which carries NO sampling error** (identical worlds, identical play):
+
+| rung | ch/ARMED | tgt/ARMED | pos/ARMED |
+|---|---|---|---|
+| heat 0 | +0.463 | +0.091 | +0.372 |
+| heat 4 | +0.542 | +0.088 | +0.454 |
+| heat 8 | +0.583 | +0.060 | +0.524 |
+
+**The lift grows monotonically with heat, and almost all of it is axis (b).** That is the spec's
+*conclusion* confirmed even though its *mechanism* was wrong: the old instrument really was
+under-reading the positioning decision on a dangerous board relative to a safe one, by an amount
+that grows with the danger. Under the new band `pos/ARMED` is monotone in heat (1.574 → 1.773 →
+1.798) where the old one wandered (1.202 → 1.319 → 1.274), and its spread across the three rungs
+roughly doubles (0.117 → 0.224).
+
+**Does the new instrument separate the rungs where the old one did not?** **No — and it makes the conservation WORSE.** Across heats 0/4/8 on the common base, the
+old instrument's `ch/ARMED` spread is **0.533** (31.5% of its mean) and the new one's is **0.413**
+(18.6%). The new band separates the rungs *less*.
+
+The reason is the wave's second correction to the record, and it is bigger than the first:
+
+| axis | mult h0 / h4 / h8 | add h0 / h4 / h8 |
+|---|---|---|
+| tgt/ARMED ("which target?") | 0.724 / 0.446 / **0.119** | 0.815 / 0.534 / **0.179** |
+| pos/ARMED ("where do I stand?") | 1.202 / 1.319 / 1.274 | 1.574 / 1.773 / **1.798** |
+
+**Axis (a) does not rise with threat on the heat axis — it collapses**, by 78-84% from heat 0 to
+heat 8, tracking `los/ARMED` (2.74 → 2.79 → 1.75) and `armed/turn` (1.56 → 1.24 → 0.68). Heat does
+not put more guns in front of a soldier; it kills the soldiers and shortens the fight, so fewer of
+them are in contact at all and each sees fewer targets. Meanwhile axis (b) rises. The two halves
+are still anti-correlated — with the **opposite signs** to the ones W4 named — and because the
+additive band amplifies axis (b)'s rise, the sum is *more* conserved than before, not less.
+
+So the standing conclusion stands, on new evidence and for a new reason: **a decision-density gate
+stated on `ch/ARMED` is structurally hard, and no band shape fixes it.** It is hard because the
+two axes are driven in opposite directions by the same variable (contact breadth), and the metric
+adds them. If a future wave wants a gate it can move, it should gate the two halves *separately*
+— `target-choices/ARMED` and `position-choices/ARMED` are both shipped and both move a lot — or
+gate `meaningful-choices/turn`, whose other factor (`armed-soldiers/turn`, 1.56 → 0.68 here) W4
+already showed is very movable.
+
+**All of this is n=10 per rung and the rung spreads are not resolvable at that N** (§7.1). The
+paired lift table above *is* exact; the spread comparison is a direction, not a measurement.
+
+## 6. VERIFICATION
+
+* `dotnet build -c Release` — **0 warnings / 0 errors**.
+* `bash scripts/qa-sweep.sh --full` — **all 51 self-tests PASS** (BANDTEST among them), COVERAGE
+  GAP block empty, PAIRTEST PASS, autoplay x3 `WIN mission=6 / LOSE mission=6 / WIN mission=6` —
+  no TIMEOUT, no blank line, no exception. (The only source edit after that sweep was a one-word
+  correction inside a `///` comment — `p95=8-13` to `p95=9-13` in the `ShotBand` rationale. Release
+  rebuilt 0/0 and BANDTEST re-run PASS on the final tree afterwards.)
+* `SIGHTLINE_PAIRTEST=1` — **PASS**, both legs MATCH.
+* `SIGHTLINE_BANDTEST=1` — **PASS** (`boards=120 bandMoved=45 posMoved=40 posBand=3 shotBand=2
+  cap=4`).
+* **BANDTEST proven to fail on the pre-change behaviour.** Two one-line reversions of the
+  production code, rebuilt and re-run:
+  * `AdmitNearBest`'s cut forced back to `best * frac` (no additive band):
+    `BANDTEST: FAIL additiveNotShiftInvariant:3/3/2, additiveBrokenAtNegativeBest`
+  * that plus `PosChoiceCap` back to 2 (the full pre-wave rule):
+    `BANDTEST: FAIL posChoiceCap=2, additiveNotShiftInvariant:3/3/2,
+    additiveBrokenAtNegativeBest, bandDialInert:0/120, posAxisDialInert:0/120`
+
+  `additiveNotShiftInvariant:3/3/2` is the defect itself, printed: the same board structure, shifted
+  down 20 points on the score scale, reads as strictly fewer choices under the old rule.
+* No screenshots — this wave changes no pixel. `CountMeaningfulChoices` is called only from
+  `SmartStep` under `Stats.Enabled`, i.e. only inside the balance harness; interactive play never
+  reaches it.
+
+## 7. WHAT I DID NOT FIX, AND WHAT IT COST
+
+1. **The rung-separation question is NOT answered, and n=10 cannot answer it.** The wave's
+   headline deliverable was supposed to be "does the new instrument separate the rungs?", and the
+   honest answer is that at n=10 per rung the world set moves the metric by ±0.4 — more than any
+   rung difference on the table. The paired mult→add delta *is* exact (identical worlds, identical
+   play), so the instrument comparison stands; the rung comparison does not. **Anyone who wants
+   the rung answer must re-run this at n≥40** — 4x the campaigns across six rung/instrument
+   cells, i.e. ~24 chunks, several hours of wall time on a container this contended. I chose to
+   spend the wave's runtime on the distributions (which n=10 measures precisely — 16,159 candidate
+   tiles at heat 0) rather than on rungs it could not resolve.
+2. **The archive is now split across two instruments and I did not migrate it.** Every
+   `ch/ARMED` in this file older than today is a multiplicative number. Re-measuring them would
+   cost more machine time than the whole program has spent on decision density, and rewriting
+   them in place would destroy provenance. The banner at the top of this section is the entire
+   mitigation, and it is a weak one: someone will quote 1.55 next to 2.39 and draw a conclusion.
+3. **`ShotBand = 2` and `PosBand = 3` are defensible, not derived.** The distributions say the
+   band should be small and stated in score units, and they rule out 1 (too tight — it excludes
+   near-duplicates at the p50 gap of 0-1) and 5+ (starts admitting a whole elevation step). They
+   do not uniquely determine 2 and 3 within that range. The probe is shipped so the next person
+   can argue with numbers instead of taste.
+4. **The near-invariance claim itself was never re-tested at power.** W4's "1.55-1.64 across five
+   levers" and X2's "1.44-1.78 across six rungs" are the reason this wave exists, and both were
+   measured on the old instrument at n=40 and n=40. I re-measured the *mechanism* they blamed and
+   found it false; I did **not** re-measure the *phenomenon* at n=40 on the new instrument. §5's
+   n=10 read says the sum is *more* conserved under the new band, not less, and gives a new reason
+   for it (the two axes are driven in opposite directions by contact breadth) — but that is a
+   direction at n=10, not a measurement, and it is the single most important thing left open here.
+5. **I did not touch `SafetyAt` itself**, and it deserves the same scrutiny the band just got: it
+   consults only the **nearest** foe for cover, it does not consider whether a destination keeps a
+   shot, and its `24` base is arbitrary. Any of those could matter more than the band. Out of
+   scope for a wave whose whole point was to change one thing and prove it inert.

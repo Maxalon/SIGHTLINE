@@ -341,10 +341,10 @@ public partial class Game
     // MEASURED CORRECTION (TRUE BAND, SIGHTLINE_BANDPROBE, docs/measurements/tb/): that
     // MECHANISM is not what happens on this tree. `pbest` does NOT slide with threat — it is
     // pinned at the "full cover, unexposed, ground level" value of 40 (24 + 2*8) at every rung
-    // (median 40 at heat 0, 4 and 8; mean 37.7 / 35.4 / 36.6), because the autopilot almost
-    // always has one such tile in one-action reach. The multiplicative window was therefore
-    // already ~6 points wide everywhere, and the `pbest > 0` guard fired on 0.5-2.3% of
-    // soldier-turns. What actually flattens the axis is the CAP, and what makes the window
+    // (median 40 at heat 0, 4 and 8; mean 37.7 / 38.6 / 38.8 — it RISES with heat), because the
+    // autopilot almost always has one such tile in one-action reach. The multiplicative window
+    // was therefore already ~6 points wide everywhere, and the `pbest > 0` guard fired on
+    // 0.5% / 1.0% / 0.0% of soldier-turns. What actually flattens the axis is the CAP, and what makes the window
     // wrong is that it is a fraction of a number whose own scale is arbitrary. Both are fixed
     // here anyway: an ADDITIVE band means a candidate is a real alternative when it scores
     // within a FIXED number of points of the best, so the window is stated in the units the
@@ -359,10 +359,10 @@ public partial class Game
     public static readonly float MultShotFrac = 0.88f;   // pre-wave axis (a): within 12% of the best shot
     public static readonly float MultPosFrac  = 0.85f;   // pre-wave axis (b): within 15% of the best safety
     /// Axis (a) additive band, in SHOT-VALUE points. Axis (a) needed the same treatment and the
-    /// evidence is its own: the best shot value spans p5=3 to p95=25 (median 11-13), so the old
+    /// evidence is its own: the best shot value spans p5=2-4 to p95=20-25 (median 11-13), so the old
     /// 12% window ran 0.36 points wide against a weak best shot and 3.0 wide against a strong
     /// one — it WIDENED exactly when one target was obviously best, which is backwards. The gap
-    /// to the best is bimodal (p50=0-1, p75=4-5, p95=8-13): a rival is either a near-duplicate
+    /// to the best is bimodal (p50=0-1, p75=4-5, p95=9-13): a rival is either a near-duplicate
     /// or a different proposition. 2 points admits the duplicates without admitting a shot a
     /// whole finisher/flank bonus (4-14) away, and it lands near the old window at the MEDIAN
     /// best (0.12 x 11 = 1.3), so the axis-(a) level barely moves — the point is that both axes
@@ -373,18 +373,19 @@ public partial class Game
     /// is deliberately BELOW all three — a tile inside the band is one you could stand on without
     /// giving up a cover step, an elevation step or eating an extra gun.
     public static readonly float PosBand = 3f;
-    /// Anti-inflation cap on axis (b). KEPT, and this is the wave's least obvious result: the
-    /// cap is not a wart on the metric, it is load-bearing. The admitted-count distribution is
-    /// hard right-skewed (p50=2-3, p75=4-5, p95=9-15) and the long tail is concentrated in the
-    /// SAFE states — a soldier in an empty quiet field has a dozen identically safe tiles and
-    /// faces one shrug, not a dozen decisions. Measured over heats 0/4/8, of the three caps
-    /// available (2, 4, uncapped) only 4 both separates the rungs and leaves the body of the
-    /// distribution alone: UNCAPPED reads 2.64 / 3.00 / 2.62 (h0 and h8 indistinguishable — the
-    /// tail swamps the signal), cap 2 reads 1.08 / 1.24 / 1.38 (separates, but saturates against
-    /// the cap and compresses the spread to 0.30), cap 4 reads 1.59 / 1.86 / 2.11 (monotone, and
-    /// the widest spread of the three at 0.52). 4 also sits at the measured p75-p80 of the
-    /// admitted count, so it preserves the median and the interquartile body and clips only the
-    /// open-field tail. Raising it towards uncapped buys inflation, not signal.
+    /// Anti-inflation cap on axis (b). KEPT — a cap is right, because the admitted-count
+    /// distribution is hard right-skewed (measured p50=2-3, p75=4-5, p95=7-15) and its long tail
+    /// is the open field: a soldier with fifteen identically safe tiles around it faces one
+    /// shrug, not fourteen decisions. But the pre-wave cap of **2** was not clipping a tail, it
+    /// was clipping the MEDIAN — it sits at the p25-p50 of the distribution, which turns the axis
+    /// into a near-binary "were there 3+ near-best tiles or not?" and retains only 41-55% of the
+    /// uncapped signal (measured 1.082/2.640 at heat 0, 1.242/2.399 at heat 4, 1.094/1.992 at
+    /// heat 8, common slot base). 4 sits at the measured **p75-p80**: it preserves the median and
+    /// the interquartile body, retains 60-84% of the signal, and clips only the tail. That is the
+    /// whole argument — it is a distribution argument, not a "which cap moves the number most"
+    /// argument. (Three caps were priced against the heat rungs too; at n=10/rung the rung
+    /// ordering flipped between two different slot bases, so that comparison resolves nothing and
+    /// is NOT the reason for this value. See DEVLOG §TRUE BAND.)
     public static readonly int PosChoiceCap = 4;
 
     /// THE BAND itself, factored out so both axes provably apply the same rule and so
@@ -460,7 +461,7 @@ public partial class Game
                 foreach (var v in vals)
                 {
                     ChoiceProbe.Gap(ChoiceProbe.ShotGap, best - v);
-                    if (v >= best * 0.88f) ChoiceProbe.ShotMult++;
+                    if (v >= best * MultShotFrac) ChoiceProbe.ShotMult++;
                     if (v >= best - 1f) ChoiceProbe.ShotAdd1++;
                     if (v >= best - 2f) ChoiceProbe.ShotAdd2++;
                     if (v >= best - 3f) ChoiceProbe.ShotAdd3++;
@@ -498,7 +499,7 @@ public partial class Game
                     foreach (var s in pvals)
                     {
                         ChoiceProbe.Gap(ChoiceProbe.PosGap, pbest - s);
-                        if (pbest > 0f && s >= pbest * 0.85f) { ChoiceProbe.PosMult++; am++; }
+                        if (pbest > 0f && s >= pbest * MultPosFrac) { ChoiceProbe.PosMult++; am++; }
                         if (s >= pbest - 2f) ChoiceProbe.PosAdd2++;
                         if (s >= pbest - 3f) { ChoiceProbe.PosAdd3++; a3++; }
                         if (s >= pbest - 4f) ChoiceProbe.PosAdd4++;
