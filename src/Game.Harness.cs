@@ -4620,6 +4620,131 @@ public partial class Game
         => MathF.Abs(a.X - b.X) < 0.01f && MathF.Abs(a.Y - b.Y) < 0.01f
         && MathF.Abs(a.Width - b.Width) < 0.01f && MathF.Abs(a.Height - b.Height) < 0.01f;
 
+
+    // ─── W5 THE FIRST HOUR — THE DOORS self-test (SIGHTLINE_QUITTEST=1) ────────────────────────
+    /// The two ways OUT of a screen that the audit found missing, pinned together because they are
+    /// the same problem: a route the player needed and could not find.
+    ///
+    ///  (A) wildcard-3 — QUIT TO DESKTOP. The pause card carried 18 controls and no exit; the main
+    ///      menu 9 entries and no exit; and `SetExitKey(KeyboardKey.Null)` means ESC deliberately
+    ///      cannot close the window either. The only sanctioned ways out were ABANDON RUN (which
+    ///      destroys the run) or alt-F4. Asserts the arm-then-confirm contract, and — the part
+    ///      that matters — that the quit path is PERSISTENCE-INERT: it writes nothing, deletes
+    ///      nothing, and leaves the mission-start checkpoint and meta.json byte-identical. That is
+    ///      what makes the confirm text ("the current mission restarts from its start") TRUE.
+    ///  (B) newplayer-2 — the end card's third door. Asserts DrawSummary publishes THREE distinct,
+    ///      non-overlapping hit-test rects, and that the third one's handler reaches the War Room.
+    ///
+    /// Runs the LIVE (non-NoPersist) path, so it stashes and restores save.json / meta.json.
+    public string QuitSelfTest()
+    {
+        var fails = new List<string>();
+        string sp = SaveGame.SavePathPublic, mp = SaveGame.MetaPathPublic;
+        bool hadSave = false, hadMeta = false;
+        string saveStash = null, metaStash = null;
+        try
+        {
+            hadSave = System.IO.File.Exists(sp); if (hadSave) saveStash = System.IO.File.ReadAllText(sp);
+            hadMeta = System.IO.File.Exists(mp); if (hadMeta) metaStash = System.IO.File.ReadAllText(mp);
+        }
+        catch { }
+
+        try
+        {
+            // ---- (A1) arm, then quit. One press must never take the window down --------------
+            {
+                var g = new Game { NoPersist = true };
+                if (g.QuitArmed || g.QuitRequested) fails.Add("quitArmedAtBoot");
+                g.RequestQuit();
+                if (!g.QuitArmed) fails.Add("firstPressDidNotArm");
+                if (g.QuitRequested) fails.Add("firstPressQuit");
+                g.RequestQuit();
+                if (!g.QuitRequested) fails.Add("secondPressDidNotQuit");
+            }
+
+            // ---- (A2) the quit path is PERSISTENCE-INERT ------------------------------------
+            {
+                var g = new Game();                     // live path
+                g.StartMission(1);                      // writes the mission-start checkpoint
+                if (!System.IO.File.Exists(sp)) fails.Add("noCheckpointAtMissionStart");
+                string saveAt = System.IO.File.ReadAllText(sp);
+                bool metaAt = System.IO.File.Exists(mp);
+                string metaBody = metaAt ? System.IO.File.ReadAllText(mp) : null;
+
+                // play forward a little so the LIVE state has diverged from the checkpoint, then quit
+                g.DebugSetTurn(4);
+                foreach (var u in g.Players) u.Hp = Math.Max(1, u.Hp - 2);
+                g.RequestQuit(); g.RequestQuit();
+                if (!g.QuitRequested) fails.Add("quitNotRequested");
+
+                if (!System.IO.File.Exists(sp)) fails.Add("quitDeletedTheCheckpoint");
+                else if (System.IO.File.ReadAllText(sp) != saveAt) fails.Add("quitRewroteTheCheckpoint");
+                if (System.IO.File.Exists(mp) != metaAt) fails.Add("quitTouchedMetaExistence");
+                else if (metaAt && System.IO.File.ReadAllText(mp) != metaBody) fails.Add("quitWroteMeta");
+
+                // and the checkpoint it kept is the MISSION-START one, so the confirm text is true
+                var resumed = SaveGame.Load();
+                if (resumed == null) fails.Add("checkpointUnreadable");
+                else if (resumed.Mission != 1) fails.Add("checkpointNotMissionStart:" + resumed.Mission);
+            }
+
+            // ---- (A3) the confirm disarms rather than latching -------------------------------
+            {
+                var g = new Game { NoPersist = true };
+                g.RequestQuit();
+                g.QuitArmed = false;                    // what closing the pause / any other control does
+                g.RequestQuit();
+                if (g.QuitRequested) fails.Add("disarmDidNotResetTheConfirm");
+            }
+
+            // ---- (B) the end card publishes THREE doors, and the third is the War Room --------
+            {
+                var g = new Game { NoPersist = true };
+                g.DebugSummary(false);                  // the staged VICTORY card
+                Raylib.BeginDrawing();
+                Hud.Draw(g);
+                Raylib.EndDrawing();
+                var a = Hud.OverlayBtn; var b = Hud.OverlayBtn2; var c = Hud.EndWarRoomBtn;
+                if (a.Width < 20 || b.Width < 20 || c.Width < 20) fails.Add("endCardMissingADoor");
+                if (Raylib.CheckCollisionRecs(a, b) || Raylib.CheckCollisionRecs(b, c) || Raylib.CheckCollisionRecs(a, c))
+                    fails.Add("endCardDoorsOverlap");
+                if (!(a.X < b.X && b.X < c.X)) fails.Add("endCardDoorOrder");
+                if (g.EndReserve < 0) fails.Add("endReserveNegative");
+                // the third door's handler
+                g.BeginWarRoom();
+                if (g.Phase != Phase.WarRoom) fails.Add("warRoomDoorDoesNotOpen");
+
+                // ...and the LOSE card, which is the one the audit called the highest-leverage
+                // retention moment in the product, publishes the same three.
+                var gl = new Game { NoPersist = true };
+                gl.DebugSummary(true);
+                Raylib.BeginDrawing();
+                Hud.Draw(gl);
+                Raylib.EndDrawing();
+                if (Hud.EndWarRoomBtn.Width < 20) fails.Add("loseCardMissingWarRoom");
+                if (gl.EndSalvage <= 0) fails.Add("loseCardBanksNoSalvage");   // the slab the subtitle explains
+            }
+        }
+        catch (Exception ex) { fails.Add("threw:" + ex.GetType().Name + ":" + ex.Message); }
+        finally
+        {
+            try
+            {
+                if (hadSave) System.IO.File.WriteAllText(sp, saveStash);
+                else if (System.IO.File.Exists(sp)) System.IO.File.Delete(sp);
+                if (hadMeta) System.IO.File.WriteAllText(mp, metaStash);
+                else if (System.IO.File.Exists(mp)) System.IO.File.Delete(mp);
+            }
+            catch { }
+        }
+
+        return fails.Count == 0
+            ? "QUITTEST: PASS (quit arms then confirms and disarms; the quit path keeps the "
+              + "mission-start checkpoint byte-identical and never touches meta.json; both end "
+              + "cards publish three non-overlapping doors and the third opens the War Room)"
+            : "QUITTEST: FAIL (" + string.Join(",", fails.Distinct()) + ")";
+    }
+
     /// TUTTEST seams: set one of the verb-performed lesson flags / the turn counter / force an end
     /// check, without reaching into private state from the test body. Harness-only.
     public void DebugSetTutFlag(string which)
@@ -4634,6 +4759,9 @@ public partial class Game
         }
     }
     public void DebugSetTurn(int t) => _turnCount = t;
+    /// W5 ONRAMPTEST seam: run the once-per-process meta load on THIS instance (EnsureMetaLoaded
+    /// is private and idempotent per Game), so the test can read the profile defaults it sets.
+    public void DebugLoadMeta() => EnsureMetaLoaded();
     public void DebugCheckEnd() => CheckEnd();
 
     // ─── W5 THE FIRST HOUR — the mission-1 briefing (SIGHTLINE_BRIEFTEST=1) ────────────────────
@@ -5110,8 +5238,57 @@ public partial class Game
             Display.AnimSpeedIdx = savedAnim; Display.UiScaleIdx = savedScale; Cfg.UiScale = savedCfg;
         }
 
+
+        // ── (C) W5 THE FIRST HOUR: the on-ramp is now the DEFAULT on a never-played profile ────
+        // Audit newplayer-4: RECRUIT was always selectable and always unlabelled, so nothing at
+        // level 0 hinted anything existed below it, and the copy framed 0 as the floor. The
+        // archived X2 ladder (n=40/rung, base a61ef42) puts RECRUIT at 75.0% run completion
+        // against heat 0's 57.5% — a 17.5-point gap outside the +-6-8 error bar, i.e. roughly two
+        // in five first campaigns ended in a loss the on-ramp exists to prevent.
+        //
+        // This asserts a DEFAULT, not a rung: (A) above is what pins the rung's actual numbers,
+        // and they are untouched. It runs the LIVE (non-NoPersist) path — the whole point is what
+        // a real profile does — so it stashes and restores save.json / meta.json.
+        {
+            string sp2 = SaveGame.SavePathPublic, mp2 = SaveGame.MetaPathPublic;
+            bool hadS = false, hadM = false; string sStash = null, mStash = null;
+            try
+            {
+                hadS = System.IO.File.Exists(sp2); if (hadS) sStash = System.IO.File.ReadAllText(sp2);
+                hadM = System.IO.File.Exists(mp2); if (hadM) mStash = System.IO.File.ReadAllText(mp2);
+                if (System.IO.File.Exists(mp2)) System.IO.File.Delete(mp2);   // a never-played profile
+
+                var fresh = new Game { NoPersist = false };
+                fresh.DebugLoadMeta();
+                if (!fresh.FirstTimeProfile) fails.Add("freshProfileNotFlagged");
+                if (fresh.PendingHeat != Sightline.Heat.Recruit)
+                    fails.Add("freshProfilePendingHeat=" + fresh.PendingHeat);
+                if (fresh.UnlockedHeat != 0) fails.Add("freshProfileUnlocked=" + fresh.UnlockedHeat);
+
+                // ...and a profile that HAS finished a run keeps the standard rung. The default is
+                // an on-ramp for a first-timer, never a silent difficulty drop for a returning one.
+                SaveGame.RecordRunTotals(false, 2);
+                var seasoned = new Game { NoPersist = false };
+                seasoned.DebugLoadMeta();
+                if (seasoned.FirstTimeProfile) fails.Add("seasonedProfileFlaggedFresh");
+                if (seasoned.PendingHeat != 0) fails.Add("seasonedProfilePendingHeat=" + seasoned.PendingHeat);
+            }
+            catch (Exception ex) { fails.Add("onRampDefaultThrew:" + ex.GetType().Name); }
+            finally
+            {
+                try
+                {
+                    if (hadS) System.IO.File.WriteAllText(sp2, sStash);
+                    else if (System.IO.File.Exists(sp2)) System.IO.File.Delete(sp2);
+                    if (hadM) System.IO.File.WriteAllText(mp2, mStash);
+                    else if (System.IO.File.Exists(mp2)) System.IO.File.Delete(mp2);
+                }
+                catch { }
+            }
+        }
+
         return fails.Count == 0
-            ? "ONRAMPTEST: PASS (RECRUIT rung -1: data row + built mission -1 body and -1 stat on EVERY shared rank-and-file class, over a 12-seed sweep, at m1 AND m3; 5-turn bleed-out, checkpoint from m1 and once only, no mutator leak, no negative intel; heat 0 untouched; anim speed pinned 1x under AutoPlay/NoPersist; text scale symmetric + tapered; both settings round-trip, clamp, and default on a pre-W5 profile)"
+            ? "ONRAMPTEST: PASS (RECRUIT rung -1: data row + built mission -1 body and -1 stat on EVERY shared rank-and-file class, over a 12-seed sweep, at m1 AND m3; 5-turn bleed-out, checkpoint from m1 and once only, no mutator leak, no negative intel; heat 0 untouched; anim speed pinned 1x under AutoPlay/NoPersist; text scale symmetric + tapered; both settings round-trip, clamp, and default on a pre-W5 profile; W5: a zero-run profile DEFAULTS to RECRUIT and a played one does not)"
             : "ONRAMPTEST: FAIL (" + string.Join(",", fails.Distinct()) + ")";
     }
 

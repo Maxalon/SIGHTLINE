@@ -595,7 +595,12 @@ public partial class Game
         // FUL-12: the opening CONCEALED state was the one core rule the onboarding never named —
         // a new player read the quiet board as "no threat" and walked into the first pod blind.
         "WELCOME, COMMANDER. The squad opens CONCEALED - the enemy pods ahead are dormant and blind to you. Position freely: your first attack from hiding is an AMBUSH (bonus aim + crit), so you choose where the fight starts.",
-        "Click a glowing tile to MOVE the selected soldier. Cover (the raised blocks) shields you from fire - end your move beside one.",
+        // W5 (audit newplayer-5): this used to point the player at "a glow". Wave V deliberately
+        // replaced the old flood-fill with a thin cyan CONTOUR plus corner ticks the code itself
+        // describes as ~0.6% of a tile's area — measured at a 5/255 modal inner lift, a ~2% luma
+        // change. The visual was right; the copy was never updated with it, so the very first
+        // sentence of instruction in the game pointed at a cue that had been reduced to a whisper.
+        "Click inside the CYAN OUTLINE to MOVE the selected soldier - the corner ticks mark each tile you can reach, and the DASHED outer ring costs both actions. Cover (the raised blocks) shields you from fire: end your move beside one.",
         "Now set OVERWATCH: press [2] (or the button). That soldier will fire on the first enemy that moves into its line of sight.",
         "Click a hostile to FIRE. A shot costs 1 action and does NOT end the turn - keep the other action to reposition (one shot per turn). Attacking from a side a foe has no cover on FLANKS it - far deadlier.",
         "That's the basics: move into cover, flank, overwatch, fire - then END TURN. Press [K] anytime for the FIELD MANUAL - every enemy, verb and rule lives there. Good hunting.",
@@ -752,7 +757,9 @@ public partial class Game
     {
         new Lesson { Code = "MOVE", Patience = 3,
             Reveal = new string[0],
-            Text = "TRAINING OP. Two recruits, four dormant targets, no consequences - nothing here touches your campaign. Select a soldier and click a glowing tile to MOVE. Move costs 1 of 2 actions; a far (dashed) tile costs both.",
+            // W5 (audit newplayer-5): same repair as the campaign strip's MOVE card — name the
+            // outline and the corner ticks the board actually draws, not a glow it does not.
+            Text = "TRAINING OP. Two recruits, four dormant targets, no consequences - nothing here touches your campaign. Select a soldier and click inside the CYAN OUTLINE to MOVE; the corner ticks mark each reachable tile. Move costs 1 of 2 actions; a tile in the DASHED outer ring costs both.",
             Done = g => g._tutMoved },
         new Lesson { Code = "COVER", Patience = 4,
             Reveal = new string[0],

@@ -273,6 +273,32 @@ public partial class Game
                 if (gl._metaLossStreak != gl.RunState.LossStreak) fails.Add("lossStreakCacheStale");
             }
 
+            // (6c) W5 THE DOORS: the end card's "N JOIN THE RESERVE" line can never over-claim.
+            //      Game.EndReserve is set as the DELTA of SaveGame.VeteranCount() across
+            //      EnshrineVeterans, so the card's count is the number that actually landed on
+            //      disk — not vets.Count, which would double-count a survivor who was ALREADY a
+            //      reserve record (a recalled veteran who came home again). Both legs asserted.
+            {
+                var gr = new Game { NoPersist = false };
+                gr.StartMission(1);
+                foreach (var u in gr.RunState.Squad) if (!u.IsVip) u.Rank = 2;   // all reserve-eligible
+                int vetsBefore = SaveGame.VeteranCount();
+                gr.LoseRun("METATEST", "reserve-delta leg");
+                int delta = SaveGame.VeteranCount() - vetsBefore;
+                if (gr.EndReserve != delta) fails.Add($"reserveDelta={gr.EndReserve}!={delta}");
+                if (gr.EndReserve > SaveGame.VeteranCount()) fails.Add("reserveOverClaim");
+                // ...and re-enshrining the SAME names adds nobody, so the card must read 0.
+                var gr2 = new Game { NoPersist = false };
+                gr2.StartMission(1);
+                var names = new List<string>();
+                foreach (var u in gr.RunState.Squad) if (!u.IsVip) names.Add(u.Name);
+                for (int i = 0; i < gr2.RunState.Squad.Count && i < names.Count; i++)
+                { gr2.RunState.Squad[i].Name = names[i]; gr2.RunState.Squad[i].Rank = 2; }
+                int before2 = SaveGame.VeteranCount();
+                gr2.LoseRun("METATEST", "reserve-rejoin leg");
+                if (gr2.EndReserve != SaveGame.VeteranCount() - before2) fails.Add("reserveRejoinDelta");
+            }
+
             // ── W9 (SIGNAL): the standing economy ─────────────────────────────────────────────
             // Start from a wiped meta again so the pricing/bounty numbers are deterministic.
             try { if (System.IO.File.Exists(SaveGame.MetaPathPublic)) System.IO.File.Delete(SaveGame.MetaPathPublic); } catch { }

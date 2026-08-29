@@ -210,6 +210,17 @@ public static class Program
         // shipped post-FX composite. Boots a REAL 1280x800 window with Display + PostFX ON and
         // reads the framebuffer back; a screen read is the only honest instrument, because the
         // whole defect lived in the composite. Stashes/restores save.json (it stages a CONTINUE).
+        // SIGHTLINE_QUITTEST=1 : W5 THE FIRST HOUR — the two exits the audit found missing.
+        // Drives the LIVE (persisting) path to prove the quit is persistence-inert, so it stashes
+        // and restores save.json / meta.json. Draws the end cards, so it needs a context + fonts.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_QUITTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "quittest");
+            LoadGameFonts();
+            Console.WriteLine(new Game().QuitSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         // SIGHTLINE_CHROMETEST=1 : W5 THE FIRST HOUR — the action bar's fixed slot map, the
         // CONCEALED pill's pulse envelope, and the doctrine cards fitting their own text.
         // Needs a real draw context (the bar's layout and its paint are one pass), so it runs

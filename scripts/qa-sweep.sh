@@ -4,7 +4,7 @@
 # quirk: piping an xvfb-run child through $(...) / a for-loop silently drops its
 # stdout, so every test is a direct `CMD | grep` statement below.
 #
-#   bash scripts/qa-sweep.sh          # 46 self-tests + autoplay x3   (~2 min)
+#   bash scripts/qa-sweep.sh          # 50 self-tests + autoplay x3   (~2 min)
 #   bash scripts/qa-sweep.sh --full   # + PAIRTEST                    (~2 min 40 s)
 #
 # COUNT NOTE: this footer has been wrong twice. C1 found it claiming 41 while running 42;
@@ -96,6 +96,7 @@ echo -n "TUTTEST    : "; SIGHTLINE_TUTTEST=1  run | grep -oE "TUTTEST: (PASS|FAI
 echo -n "BRIEFTEST  : "; SIGHTLINE_BRIEFTEST=1 run | grep -oE "BRIEFTEST: (PASS|FAIL)" | head -1
 echo -n "CONTRASTTEST: "; SIGHTLINE_CONTRASTTEST=1 run | grep -oE "CONTRASTTEST: (PASS|FAIL)" | head -1
 echo -n "CHROMETEST : "; SIGHTLINE_CHROMETEST=1 run | grep -oE "CHROMETEST: (PASS|FAIL)" | head -1
+echo -n "QUITTEST   : "; SIGHTLINE_QUITTEST=1   run | grep -oE "QUITTEST: (PASS|FAIL)" | head -1
 echo -n "THREATTEST : "; SIGHTLINE_THREATTEST=1 run | grep -oE "THREATTEST (PASS|FAIL)" | head -1
 # R2 FIX 1: the nobody-is-walled-out geometry invariant (all 4 deployment shapes x 8 objectives
 # x 2 heats, thousands of fresh boards). ~25 s.
@@ -125,5 +126,5 @@ echo -n "run1: "; SIGHTLINE_AUTOPLAY=1 run | grep -oE "RESULT: (WIN|LOSE|TIMEOUT
 echo -n "run2: "; SIGHTLINE_AUTOPLAY=1 run | grep -oE "RESULT: (WIN|LOSE|TIMEOUT) mission=[0-9]+" | head -1
 echo -n "run3: "; SIGHTLINE_AUTOPLAY=1 run | grep -oE "RESULT: (WIN|LOSE|TIMEOUT) mission=[0-9]+" | head -1
 echo "=== DONE ==="
-echo "(49 self-tests exist; this sweep ran $([ "$FULL" = 1 ] && echo 47 || echo 46). Every line above"
+echo "(53 self-tests exist; this sweep ran $([ "$FULL" = 1 ] && echo 51 || echo 50). Every line above"
 echo " must read PASS, and every autoplay must read WIN or LOSE — never TIMEOUT, never blank.)"

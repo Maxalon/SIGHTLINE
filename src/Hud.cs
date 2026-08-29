@@ -1249,6 +1249,38 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         Cfg.Text(ammo, new Vector2(x + 250 - (int)Cfg.Measure(ammo, 12, 1f).X - 14, y + 60), 12, 1f, u.Ammo == 0 ? Pal.Foe : Pal.TxtDim);
     }
 
+    // ── W5 THE WORDS (audit newplayer-7) ──────────────────────────────────────────────────────
+    /// Every action-bar verb, its hotkey, and its help text — read straight out of ActionDesc so
+    /// the Field Manual and the bar's own tooltip are ONE source. The audit found three verbs
+    /// (SHOVE and the four utility items among them) whose ONLY explanation in the entire product
+    /// was a 9-second just-in-time card that burns permanently the first time it shows; if the
+    /// player was mid-thought or alt-tabbed, that verb was gone for good. There was also no
+    /// controls reference anywhere in 45k lines.
+    ///
+    /// ORDER: the bar's own reading order, so the tab and the bar agree.
+    public static readonly (string Id, string Label, string Key)[] VerbTable =
+    {
+        ("shoot",     "FIRE",       "1"),
+        ("grenade",   "GRENADE",    "4"),
+        ("ability",   "ABILITY",    "5"),
+        ("item",      "UTILITY ITEM", "6"),
+        ("shove",     "SHOVE",      "8"),
+        ("drag",      "DRAG",       "7"),
+        ("vault",     "VAULT",      "9"),
+        ("overwatch", "OVERWATCH",  "2"),
+        ("focusow",   "FOCUS",      "F"),
+        ("brace",     "BRACE",      "B"),
+        ("hunker",    "HUNKER",     "3"),
+        ("hack",      "HACK / PLANT", "H"),
+        ("beacon",    "BEACON",     "G"),
+        ("extract",   "EXTRACT",    "X"),
+        ("stabilize", "STABILIZE",  "E"),
+        ("reload",    "RELOAD",     "R"),
+    };
+
+    /// The help text for a verb id, with no live game. See VerbTable.
+    public static string VerbHelp(string id) => ActionDesc(null, id);
+
     /// W5 CHROMETEST seam: run the REAL action-bar layout for `g` and hand back the rects it
     /// publishes. Layout and paint are one pass by design (widths come from measured labels), so
     /// this draws — call it inside a BeginDrawing/EndDrawing pair. Harness-only.
@@ -1872,6 +1904,10 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     // gates on g.NoPersist so a stray env var can never pin a help card open in live play).
     static readonly string _forcedHelpId = Environment.GetEnvironmentVariable("SIGHTLINE_HELPBTN");
 
+    // W5 (audit newplayer-7): the FIELD MANUAL's VERBS & KEYS tab is generated from THIS switch
+    // rather than authored twice, so a verb's help text and its manual entry can never drift.
+    // `g` may be NULL — the codex has no live game — and the four situational entries below fall
+    // back to a generic sentence when it is.
     static string ActionDesc(Game g, string id)
     {
         switch (id)
@@ -1886,22 +1922,26 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
             case "focusow": return "Braced kill-lane: reaction fire only inside a 90-degree cone toward the aimed tile, but at +aim. Blind outside the cone.";
             case "brace": return "Brace a DISRUPTING reaction: on a hit it STAGGERS the mover (denies its action this turn) for reduced damage. Deny the enemy's alpha instead of going for the kill.";
             case "hunker": return "Hunker down for extra cover defense; you can't be crit.";
-            case "hack": return g.HasSabotage
+            case "hack": return g == null ? "Work the objective site: HACK a terminal, or PLANT a demolition charge on a sabotage target. Costs 1 action."
+                : g.HasSabotage
                 ? $"Plant a demolition charge on an adjacent site ({g.SabotageBlown.Count}/{g.SabotageSites.Count} set). Costs 1 action."
                 : $"Work the terminal ({g.HackProgress}/{Game.HackRequired} done). Costs 1 action.";
-            case "beacon": return g.Objective == Objective.Escort
+            case "beacon": return g == null ? "Deploy a forward evac beacon on your tile: opens a 3x3 extraction zone right here (in addition to the far corner). One per mission. Costs 1 action, won't end your turn."
+                : g.Objective == Objective.Escort
                 ? "Deploy a forward evac beacon for the VIP: opens a 3x3 extraction zone right here (in addition to the far corner). ESCORT: needs the FAR THIRD of the map and a COLD LZ (no living enemy within 3 tiles - dormant counts). One per mission. Costs 1 action, won't end your turn."
                 : "Deploy a forward evac beacon on your tile: opens a 3x3 extraction zone right here (in addition to the far corner). One per mission. Costs 1 action, won't end your turn.";
             case "extract": return "Haul an adjacent ally / asset aboard - pulls them into the extraction zone. Costs 1 action.";
             case "reload": return "Reload your weapon to full.";
             case "showall": return "The action bar is STAGED while you are learning - it shows only the verbs the lessons have covered. Turn this on to see every verb now; the choice is remembered.";
             case "ability":
+                if (g == null) return "Your class's signature ability, on a cooldown. PATCH / GRAPPLE / MARK / SLIPSTREAM / SUPPR. FIRE - see the CLASSES tab for which soldier carries which.";
                 return g.Selected != null && g.Selected.Ability != AbilityKind.None
                     ? g.Selected.AbilityDesc + (g.Selected.AbilityCd > 0
                         ? $"  (cooldown: {g.Selected.AbilityCd} turn{(g.Selected.AbilityCd == 1 ? "" : "s")})"
                         : $"  (cooldown {Unit.AbilityCooldownFor(g.Selected.Ability)} turn{(Unit.AbilityCooldownFor(g.Selected.Ability) == 1 ? "" : "s")})")
                     : "";
             case "item":
+                if (g == null) return "Your class's utility throwable, ONE charge per mission. SMOKE blocks line of sight and overwatch through it; FLASH disorients everyone in the blast; BARRICADE drops low cover on an empty tile; INCENDIARY sets a 3x3 fire field.";
                 return g.Selected != null && g.Selected.Item != ItemKind.None
                     ? g.Selected.ItemDesc + "  (1 charge/mission)"
                     : "";
