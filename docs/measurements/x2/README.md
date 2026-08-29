@@ -52,5 +52,18 @@ rather than raw sums (the W4 convention, kept so rows stay comparable across wav
 | `O1-h0-b*` | `SIGHTLINE_OPENERTRIM=1` — one body off the m1 / m2 force | h0 |
 | `S1-h{R,0,2,4,6,8}-b{0,10}` | **the shipped state** — `OPENERTRIM=1`, measured end to end at every rung | RECRUIT / h0 / h2 / h4 / h6 / h8 |
 
-`R0-LADDER.txt` and `R0-BYOBJECTIVE.txt` are the pooled baseline tables as `agg.py` printed
-them; `S1-LADDER.txt` is the same for the shipped state.
+`R0-LADDER.txt` / `R0-BYOBJECTIVE.txt` are the pooled baseline tables as `agg.py` printed them;
+`S1-LADDER.txt` / `S1-BYOBJECTIVE.txt` are the same for the shipped state. Every chunk's raw
+`.log` is force-added alongside its `.json` and `.report.txt` (the repo `.gitignore` blocks
+`*.log` globally).
+
+## The headline
+
+| | RECRUIT | h0 | h2 | h4 | h6 | h8 |
+|---|---|---|---|---|---|---|
+| R0 (baseline) | 75.0 | 35.0 | 40.0 | 20.0 | 32.5 | 7.5 |
+| **S1 (shipped)** | **75.0** | **57.5** | **35.0** | **30.0** | **20.0** | **17.5** |
+| band | *(75)* | 55±8 | 40±8 | 30±8 | 20±8 | 10±5 |
+
+n=40 per rung, ±6-8 SE. The shipped ladder is monotone; heat 8 is the one rung out of band
+(+2.5 over the ceiling, 0.4 SE).
