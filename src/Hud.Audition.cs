@@ -20,7 +20,7 @@ namespace Sightline;
 //      same screen, live, while cues are playing.
 //  Draw-only: every rect published here is hit-tested by Game.HandleAudition.
 //
-//  NO Raylib.GetTime(): the backdrop and the row glows run off Game.AudClock (a dt accumulator).
+//  NO new GetTime reads: the backdrop and the row glows run off Game.AudClock (a dt accumulator).
 // ═══════════════════════════════════════════════════════════════════════════════════════════
 public static partial class Hud
 {
