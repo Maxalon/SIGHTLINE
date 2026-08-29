@@ -198,6 +198,18 @@ public static class Program
             Console.WriteLine(Combat.SelfTest());
             return;
         }
+        // RESONANCE W6: SIGHTLINE_KEYTEST=1 : the KEY MAP as a contract. Asserts the shipped table
+        // double-binds nothing (the check that would have caught the `F` = fullscreen AND focused-
+        // overwatch bug on day one), that a rebind round-trips through the real encode/decode, that
+        // a conflicting or cross-scope rebind is refused/allowed correctly, that a swap survives a
+        // reload, that a corrupt or hostile settings string is repaired rather than shipped
+        // double-bound, and above all that NOTHING the player or a hand-edited file can do takes
+        // Escape (and therefore the pause menu and RESET DEFAULTS) away. No window: pure table logic.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_KEYTEST") == "1")
+        {
+            Console.WriteLine(Keymap.SelfTest());
+            return;
+        }
         // SIGHTLINE_THREATTEST=1 : RESONANCE T2 — the incoming-fire FORECAST pinned against
         // Combat.ComputeOdds on a synthetic board (gun count, best hit%, expected damage, cover /
         // flank angle, out-of-range / dormant / dry / no-LoS exclusion, overwatch + focused cones,
@@ -580,6 +592,28 @@ public static class Program
         Raylib.SetTargetFPS(autoplay ? 0 : 60);   // uncapped during the smoke test
         Audio.Init();
 
+        // RESONANCE W6 harness seams for the KEY MAP (both inert unless set, both applied AFTER
+        // Display.Init so they sit on top of whatever the player's settings file decoded to):
+        //   SIGHTLINE_KEYBIND="shoot=Q;hunker=I"  — apply overrides through the REAL Keymap.Set, so
+        //     the same conflict check the CONTROLS screen uses runs, and refusals are printed.
+        //   SIGHTLINE_KEYLOG=1                    — print `KEYACT <id> <KEY>` whenever a bound
+        //     action actually fires, so a live xdotool session can PROVE which action a physical
+        //     key reached (and, just as importantly, that the OLD key no longer reaches it).
+        string keyBind = Environment.GetEnvironmentVariable("SIGHTLINE_KEYBIND");
+        if (!string.IsNullOrEmpty(keyBind))
+            foreach (var part in keyBind.Split(';', StringSplitOptions.RemoveEmptyEntries))
+            {
+                int eq = part.IndexOf('=');
+                if (eq <= 0) { Console.WriteLine("KEYBIND: bad clause '" + part + "'"); continue; }
+                string bid = part.Substring(0, eq).Trim();
+                if (!Enum.TryParse(part.Substring(eq + 1).Trim(), false, out KeyboardKey bk))
+                { Console.WriteLine("KEYBIND: unknown key in '" + part + "'"); continue; }
+                string berr = Keymap.Set(bid, bk);
+                Console.WriteLine("KEYBIND: " + bid + " -> " + Keymap.KeyLabel(bk)
+                                  + (berr == null ? " OK" : " REFUSED (" + berr + ")"));
+            }
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_KEYLOG") == "1") Keymap.LogActions = true;
+
         var game = new Game();
         game.NoPersist = shot || autoplay;   // the harness never reads/writes the save file
         // SIGHTLINE_CONTRACT=ironveterans|highstakes|spearhead|mrc|lgd (FUL-10) : force a run contract
@@ -716,6 +750,13 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_WARROOM") == "1") game.DebugWarRoom();   // W3 cross-run meta screen
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CODEX") == "1") game.DebugCodex();       // W6 field-manual reference screen
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_AUDITION") == "1") game.DebugAudition();  // A3 AUDIO CHECK screen (+ SIGHTLINE_AUDITIONFIRE=1 lights the just-played rows)
+        // W6 CONTROLS screen: =1 the list, =capture the "press a key" state, =conflict a refusal
+        // on screen, =remap a map with rows moved off their defaults. Pair with SIGHTLINE_CB=1 /
+        // SIGHTLINE_UISCALE=<i> for the palette + text-scale passes.
+        {
+            string ctlShot = Environment.GetEnvironmentVariable("SIGHTLINE_CONTROLS");
+            if (shot && !string.IsNullOrEmpty(ctlShot)) game.DebugControls(ctlShot);
+        }
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_HAZARD") == "1") game.DebugHazards();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_TAGEDIT") == "1") game.DebugTagEditor();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_WOUND") == "1") game.DebugWound();

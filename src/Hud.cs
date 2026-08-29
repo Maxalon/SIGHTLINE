@@ -109,6 +109,13 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     public static Rectangle PauseBright, PauseGamma, PauseColorblind, PauseAutoCam, PauseCodex;
     public static Rectangle PauseAudio;   // A3: pause-menu entry to the AUDIO CHECK screen
     public static Rectangle PauseAnimSpeed, PauseUiScale;   // W5 ON-RAMP comfort controls
+    public static Rectangle PauseControls;                  // W6: entry to the CONTROLS / rebinding screen
+
+    // CONTROLS (W6): one clickable rect per listed key row, plus BACK / RESET DEFAULTS and the
+    // scroll bound — all published by DrawControls for Game.HandleControlsInput to hit-test.
+    public static readonly System.Collections.Generic.List<(string id, Rectangle rect)> CtlRows = new();
+    public static Rectangle CtlBack, CtlReset;
+    public static float CtlScrollMax;
     /// RESONANCE A2 — the four mix faders (MASTER / SFX / MUSIC / UI), indexed to match
     /// Display.VolNames. Click or drag anywhere in the track to set the level.
     public static readonly Rectangle[] PauseVol = new Rectangle[4];
@@ -378,8 +385,8 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         PauseAnimSpeed  = new Rectangle(cx1, by, bw, bh); by += bh + gap;   // W5 comfort
         PauseUiScale    = new Rectangle(cx1, by, bw, bh);                   // W5 comfort
 
-        DrawButtonRect(PauseResume, "RESUME", "ESC", true, false, Pal.Friend);
-        DrawButtonRect(PauseFullscreen, Display.Fullscreen ? "FULLSCREEN: ON" : "FULLSCREEN: OFF", "F11", true, !Display.Fullscreen, Pal.Accent);   // R1: was "F" — F is FOCUS
+        DrawButtonRect(PauseResume, "RESUME", Keymap.Label(Keymap.Menu), true, false, Pal.Friend);
+        DrawButtonRect(PauseFullscreen, Display.Fullscreen ? "FULLSCREEN: ON" : "FULLSCREEN: OFF", Keymap.Label(Keymap.Fullscreen), true, !Display.Fullscreen, Pal.Accent);   // R1: was "F" — F is FOCUS; W6: the tag now comes from the keymap
         DrawButtonRect(PauseWindow, "WINDOW: " + Display.SizeLabel, "", true, false, Pal.Accent);
         DrawButtonRect(PauseShake, g.Fx.ShakeOn ? "SCREEN SHAKE: ON" : "SCREEN SHAKE: OFF", "", true, !g.Fx.ShakeOn, Pal.Accent);
         // RESONANCE T2: three-state — OFF / SIMPLE (the pre-T2 single exposure tick) / FULL (graded
@@ -394,13 +401,13 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         DrawButtonRect(PauseAutoCam, Display.AutoCam ? "AUTO-CAM: ON" : "AUTO-CAM: OFF", "", true, Display.AutoCam, Pal.Accent);
         // W5 ON-RAMP — the two comfort controls. ANIM SPEED multiplies the animation-queue dt only
         // (the queue's state machine is untouched); TEXT SIZE scales the body-text layer.
-        DrawButtonRect(PauseAnimSpeed, "ANIM SPEED: " + Display.AnimSpeedLabel, "F2", true, Display.AnimSpeedIdx != 0, Pal.Accent);
+        DrawButtonRect(PauseAnimSpeed, "ANIM SPEED: " + Display.AnimSpeedLabel, Keymap.Label(Keymap.AnimSpeed), true, Display.AnimSpeedIdx != 0, Pal.Accent);
         DrawButtonRect(PauseUiScale, "TEXT SIZE: " + Display.UiScaleLabel, "", true, Display.UiScaleIdx != 1, Pal.Accent);
 
         // ---- right column: the audio mix, then the exits ----
         by = top;
         PauseMute = new Rectangle(cx2, by, bw, bh); by += bh + 10;
-        DrawButtonRect(PauseMute, Audio.Enabled ? "AUDIO: ON" : "AUDIO: OFF", "M", true, !Audio.Enabled, Pal.Accent);
+        DrawButtonRect(PauseMute, Audio.Enabled ? "AUDIO: ON" : "AUDIO: OFF", Keymap.Label(Keymap.Mute), true, !Audio.Enabled, Pal.Accent);
 
         int sh = 34, sgap = 8;
         for (int i = 0; i < 4; i++)
@@ -413,14 +420,21 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         // additive, in the right column's existing dead space, so the two-column layout above and
         // the bottom-aligned exits below are untouched.
         PauseAudio = new Rectangle(cx2, by + 6, bw, bh);
-        DrawButtonRect(PauseAudio, "AUDIO CHECK", "U", true, false, Pal.Accent);
+        DrawButtonRect(PauseAudio, "AUDIO CHECK", Keymap.Label(Keymap.PauseAudio), true, false, Pal.Accent);
+        // W6: CONTROLS — the key-rebinding surface, in the right column's remaining dead space.
+        // The key tags on these three buttons are read from the KEYMAP rather than typed, which is
+        // how they stopped being a lie: the pause overlay was mouse-only, so the "K" and "U" tags
+        // that shipped with FIELD MANUAL and AUDIO CHECK advertised keys that did nothing.
+        PauseControls = new Rectangle(cx2, by + 6 + bh + gap, bw, bh);
+        DrawButtonRect(PauseControls, "CONTROLS" + (Keymap.AnyChanged() ? ": CUSTOM" : ""),
+                       Keymap.Label(Keymap.PauseControls), true, Keymap.AnyChanged(), Pal.Accent);
 
         // bottom-align the two exits with the left column's last row, so the card reads as
         // two balanced columns rather than one long one next to a short one
         by = top + leftRows * bh + (leftRows - 1) * gap - (bh + gap + bh);
         PauseCodex   = new Rectangle(cx2, by, bw, bh); by += bh + gap;
         PauseAbandon = new Rectangle(cx2, by, bw, bh);
-        DrawButtonRect(PauseCodex, "FIELD MANUAL", "K", true, false, Pal.Good);
+        DrawButtonRect(PauseCodex, "FIELD MANUAL", Keymap.Label(Keymap.PauseCodex), true, false, Pal.Good);
         // W1 mode-seam: the abandon verb is mode-true — a stand/fight is not a campaign "run".
         string abandonLbl = g.Mode == GameMode.Endless ? "END STAND"
                           : g.Mode == GameMode.Skirmish ? "ABANDON FIGHT"
@@ -428,7 +442,11 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
                           : "ABANDON RUN";
         DrawButtonRect(PauseAbandon, abandonLbl, "", true, false, Pal.Foe);
 
-        string ctl = "Wheel zoom  -  Middle-drag pan  -  [C] reset camera  -  Arrows/WASD + [Space]";
+        // W6: the hint reads the live keymap, so a rebind is reflected here instead of the card
+        // continuing to advertise the shipped defaults.
+        string ctl = "Wheel zoom  -  Middle-drag pan  -  [" + Keymap.Label(Keymap.CamReset) + "] reset camera  -  Arrows/"
+                   + Keymap.Label(Keymap.CursorUp) + Keymap.Label(Keymap.CursorLeft) + Keymap.Label(Keymap.CursorDown)
+                   + Keymap.Label(Keymap.CursorRight) + " + [" + Keymap.Label(Keymap.Act) + "]";
         Cfg.Text(ctl, new Vector2(x + w / 2 - (int)Cfg.Measure(ctl, 12, 1f).X / 2, y + h - 24), 12, 1f, Pal.TxtDim);
     }
 
@@ -686,9 +704,9 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         EndTurnRect = new Rectangle(Cfg.ScreenW - 170, cy - 15, 150, 30);
         bool canEnd = g.IsPlayerInteractive();
         if (g.EndTurnArmed)
-            DrawButtonRect(EndTurnRect, "CONFIRM?", "ENT", canEnd, true, Pal.Accent);
+            DrawButtonRect(EndTurnRect, "CONFIRM?", Keymap.Label(Keymap.EndTurn), canEnd, true, Pal.Accent);
         else
-            DrawButtonRect(EndTurnRect, "END TURN", "ENT", canEnd, false, Pal.Accent);
+            DrawButtonRect(EndTurnRect, "END TURN", Keymap.Label(Keymap.EndTurn), canEnd, false, Pal.Accent);
         rx = EndTurnRect.X - 16;
 
         // mute indicator (small, dim — a persistent state, not a signal)
@@ -1151,7 +1169,9 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
 
         // hint — pinned to the strip BELOW the bar's bottom row (the bar grows upward, so this
         // baseline never collides with buttons at any row count)
-        string hint = "MOVE / FIRE by click  -  [Tab] next  -  [5] ability  -  [T] tag  -  [Esc] menu";
+        string hint = "MOVE / FIRE by click  -  [" + Keymap.Label(Keymap.Cycle) + "] next  -  ["
+                    + Keymap.Label(Keymap.Ability) + "] ability  -  [" + Keymap.Label(Keymap.Tag) + "] tag  -  ["
+                    + Keymap.Label(Keymap.Menu) + "] menu";
         int hw = (int)Cfg.Measure(hint, 13, 1f).X;
         Cfg.Text(hint, new Vector2(Cfg.ScreenW - hw - 24, Cfg.ScreenH - 26), 13, 1f, Pal.TxtDim);
     }
@@ -1218,37 +1238,37 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         // TEMPO: FIRE is 1 action and does NOT end the turn. The soldier keeps its second action to
         // reposition, take a rushed FOLLOW-UP shot (at -aim), or a support act. SNAP is retired (the
         // default full-aim non-ending shot replaces it; the 2nd shot/turn carries the penalty).
-        Add("shoot", "FIRE", "1", interactive && u != null && u.CanAct && u.Ammo > 0 && hasTargets, g.AimMode);
-        Add("grenade", "GRENADE", "4", interactive && u != null && u.CanAct && u.Grenades > 0, g.GrenadeMode);
+        Add("shoot", "FIRE", Keymap.Label(Keymap.Shoot), interactive && u != null && u.CanAct && u.Ammo > 0 && hasTargets, g.AimMode);
+        Add("grenade", "GRENADE", Keymap.Label(Keymap.Grenade), interactive && u != null && u.CanAct && u.Grenades > 0, g.GrenadeMode);
         if (u != null && u.Ability != AbilityKind.None)
         {
             string abLabel = u.AbilityCd > 0 ? $"{u.AbilityName} ({u.AbilityCd})" : u.AbilityName;   // append remaining cooldown
-            Add("ability", abLabel, "5", interactive && g.CanAbility(u), u.RunGun || u.Blitz || u.Steady || u.Slipstreaming || g.MarkMode || g.GrappleMode || g.PinMode);
+            Add("ability", abLabel, Keymap.Label(Keymap.Ability), interactive && g.CanAbility(u), u.RunGun || u.Blitz || u.Steady || u.Slipstreaming || g.MarkMode || g.GrappleMode || g.PinMode);
         }
         if (u != null && u.Item != ItemKind.None)
-            Add("item", u.ItemName, "6", interactive && u.CanAct && u.ItemCharge > 0, g.ItemMode);
+            Add("item", u.ItemName, Keymap.Label(Keymap.Item), interactive && u.CanAct && u.ItemCharge > 0, g.ItemMode);
         // SHOVE: forced-movement verb (1 action, no end-turn, 1/turn). Enabled only when an
         // enemy is adjacent (CanShove), so it surfaces exactly when it's usable.
-        Add("shove", "SHOVE", "8", interactive && g.CanShove(u), g.ShoveMode);
+        Add("shove", "SHOVE", Keymap.Label(Keymap.Shove), interactive && g.CanShove(u), g.ShoveMode);
         // FIELD CRAFT (W1): two universal positioning verbs. DRAG pulls an adjacent ally toward you;
         // VAULT leaps an adjacent cover tile. Both surface only when usable (CanDrag/CanVault).
-        Add("drag", "DRAG", "7", interactive && g.CanDrag(u), g.DragMode);
-        Add("vault", "VAULT", "9", interactive && g.CanVault(u), g.VaultMode);
+        Add("drag", "DRAG", Keymap.Label(Keymap.Drag), interactive && g.CanDrag(u), g.DragMode);
+        Add("vault", "VAULT", Keymap.Label(Keymap.Vault), interactive && g.CanVault(u), g.VaultMode);
         // FUL-7: STABILIZE — the universal rescue verb. Surfaces only while a squadmate is DOWN
         // (exactly the moment it matters); enabled when one lies adjacent and un-stabilized.
         if (g.Players.Any(p => p.Alive && p.Downed))
-            Add("stabilize", "STABILIZE", "E", interactive && g.CanStabilize(u), false);
-        Add("overwatch", "OVERWATCH", "2", interactive && u != null && u.CanAct && u.Ammo > 0, false);
-        Add("focusow", "FOCUS", "F", interactive && u != null && u.CanAct && u.Ammo > 0, false);   // braced cone watch
-        Add("brace", "BRACE", "B", interactive && u != null && u.CanAct && u.Ammo > 0, false);      // UNDERTOW W2: disrupting interrupt watch
-        Add("hunker", "HUNKER", "3", interactive && u != null && u.CanAct, u != null && u.Hunkered);
+            Add("stabilize", "STABILIZE", Keymap.Label(Keymap.Stabilize), interactive && g.CanStabilize(u), false);
+        Add("overwatch", "OVERWATCH", Keymap.Label(Keymap.Overwatch), interactive && u != null && u.CanAct && u.Ammo > 0, false);
+        Add("focusow", "FOCUS", Keymap.Label(Keymap.FocusOw), interactive && u != null && u.CanAct && u.Ammo > 0, false);   // braced cone watch
+        Add("brace", "BRACE", Keymap.Label(Keymap.Brace), interactive && u != null && u.CanAct && u.Ammo > 0, false);      // UNDERTOW W2: disrupting interrupt watch
+        Add("hunker", "HUNKER", Keymap.Label(Keymap.Hunker), interactive && u != null && u.CanAct, u != null && u.Hunkered);
         if (g.HasHackAction)
-            Add("hack", g.HasSabotage ? "PLANT" : "HACK", "H", interactive && g.CanHack(u), false);
+            Add("hack", g.HasSabotage ? "PLANT" : "HACK", Keymap.Label(Keymap.Hack), interactive && g.CanHack(u), false);
         if (g.HasBeaconAction && !g.BeaconPlanted)
-            Add("beacon", "BEACON", "G", interactive && g.CanBeacon(u), false);
+            Add("beacon", "BEACON", Keymap.Label(Keymap.Beacon), interactive && g.CanBeacon(u), false);
         if (g.HasExtractAction)
-            Add("extract", "EXTRACT", "X", interactive && g.CanExtract(u), false);
-        Add("reload", "RELOAD", "R", interactive && u != null && u.CanAct && u.Ammo < u.Weapon.Clip, false);
+            Add("extract", "EXTRACT", Keymap.Label(Keymap.Extract), interactive && g.CanExtract(u), false);
+        Add("reload", "RELOAD", Keymap.Label(Keymap.Reload), interactive && u != null && u.CanAct && u.Ammo < u.Weapon.Clip, false);
 
         // ── RESONANCE T1 (Part B) — VERB STAGING ──────────────────────────────────────────────
         // Before T1 the bar showed TWELVE verbs during tutorial card 1 of 5 and FUL-12 dimmed the
@@ -1266,7 +1286,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         if (g.OnboardingActive)
         {
             if (g.VerbStagingActive) specs.RemoveAll(sp => !g.VerbRevealed(sp.id));
-            Add("showall", g.ShowAllVerbs ? "ALL VERBS" : "SHOW ALL", "V", true, g.ShowAllVerbs);
+            Add("showall", g.ShowAllVerbs ? "ALL VERBS" : "SHOW ALL", Keymap.Label(Keymap.ShowAll), true, g.ShowAllVerbs);
         }
 
         // W10 (owner feedback): every button sizes to its RENDERED content (icon zone + measured
@@ -2220,6 +2240,8 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
             DrawSkirmishSetup(g);
         else if (g.Phase == Phase.AudioCheck)
             DrawAudition(g);   // A3: the cue/mix audition screen
+        else if (g.Phase == Phase.Controls)
+            DrawControls(g);   // W6: the key-rebinding surface
     }
 
     // ============================================================================
@@ -2363,8 +2385,14 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         // bench rather than a mode, so it takes the same neutral outline and sits last.
         float acIn = PanelAnim("introAudio", 0.3f, 0.80f);
         int acBy = smBy + 48;
-        OverlayBtn9 = new Rectangle(W / 2 - miniW / 2, acBy, miniW, 40);
+        // RESONANCE W6: CONTROLS joins it, so the last row is a PAIR at the same width as the 2x2
+        // grid above rather than one lonely centred plate. Reaching the key map must NOT require
+        // starting a mission first: a player who cannot use the default layout has to be able to
+        // fix it before they deploy, and the pause menu does not exist on this screen.
+        OverlayBtn9 = new Rectangle(W / 2 - miniW - miniGap / 2, acBy, miniW, 40);
         DrawGhostButton(OverlayBtn9, "AUDIO CHECK", "U", acIn);
+        OverlayBtn10 = new Rectangle(W / 2 + miniGap / 2, acBy, miniW, 40);
+        DrawGhostButton(OverlayBtn10, "CONTROLS", "O", acIn);
 
         // ---- shared caption slot (between LAST STAND and the grid) ----
         // Hovering ANY mode button explains it here; at rest it carries LAST STAND's best-wave
@@ -2389,6 +2417,8 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         { caption = "TRAINING OP - a short live-fire drill; nothing is saved, restart it any time"; capCol = Pal.Good; }
         else if (Raylib.CheckCollisionPointRec(introMouse, OverlayBtn9))
         { caption = "AUDIO CHECK - hear every cue, sweep the music, move the mix; measured numbers beside each"; capCol = Pal.Accent; }
+        else if (Raylib.CheckCollisionPointRec(introMouse, OverlayBtn10))
+        { caption = "CONTROLS - rebind any key; [Esc] is reserved so you can always get back here"; capCol = Pal.Accent; }
         else
         {
             caption = bestWave > 0 ? $"LAST STAND BEST: {bestWave} WAVE{(bestWave == 1 ? "" : "S")}" : "ENDLESS HORDE SURVIVAL";
@@ -2952,6 +2982,224 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     //  DrawCodexGlyph silhouette left of the text for ENEMIES/CLASSES). All content
     //  is assembled by Codex.Build() from the existing Def strings — no new data.
     // ============================================================================
+
+    // ============================================================================
+    //  CONTROLS (W6) — the key-rebinding surface.
+    //
+    //  Every metric here is DERIVED from measured text, not hand-tuned pixels: R2's rule for the
+    //  text-scale setting is "grow the chrome, never shrink the writing", and this screen is the
+    //  one place a player with a reading difficulty is most likely to be sitting at 120%. Row and
+    //  header heights come from Cfg.Measure, the two columns split on measured content, and
+    //  anything that still does not fit scrolls rather than clipping.
+    //
+    //  What the screen has to communicate, in this order:
+    //    1. ESC IS RESERVED and is the way back — it is the first row, it is drawn as LOCKED, and
+    //       the footer repeats it. A player who has bound themselves into a corner reads the
+    //       answer without leaving the screen.
+    //    2. WHY A REBIND WAS REFUSED — the refusal names the action that already holds the key and
+    //       the context it holds it in ("F is already FOCUS (CONE) - IN MISSION"), because "that
+    //       key is taken" without saying by what is the same dead end as no message at all.
+    //    3. WHAT IS NON-DEFAULT — a moved row's chip is accented, so the player can see at a
+    //       glance what they changed, and RESET DEFAULTS lights up only when there is something
+    //       to reset.
+    // ============================================================================
+    static void DrawControls(Game g)
+    {
+        float t = (float)Raylib.GetTime();
+        DrawTacticalBackdrop(t, Pal.Accent, 0f);
+        CtlRows.Clear();
+        int W = Cfg.ScreenW;
+
+        // ---- title ----
+        float titleIn = PanelAnim("ctlTitle", 0.5f);
+        string title = "CONTROLS";
+        int tfs = 52;
+        Vector2 tm = Cfg.TitleMeasure(title, tfs, 4f);
+        float tx = W / 2f - tm.X / 2f;
+        float ty = 28f - (1f - Util.EaseOutBack(Util.Clamp(titleIn, 0f, 1f))) * 20f;
+        for (int i = 1; i <= 3; i++)
+            Cfg.TitleText(title, new Vector2(tx, ty - i), tfs, 4f, Raylib.Fade(Pal.Accent, 0.10f * titleIn));
+        Cfg.TitleText(title, new Vector2(tx, ty), tfs, 4f, Raylib.Fade(Pal.Txt, titleIn));
+        DrawCornerBrackets(new Rectangle(tx - 20, ty + 6, tm.X + 40, tfs - 8),
+                           Raylib.Fade(Pal.Accent, 0.5f * titleIn), 16f);
+        string sub = "Click a row, then press the key you want it on.";
+        Vector2 sm = Cfg.Measure(sub, 13, 1f);
+        Cfg.Text(sub, new Vector2(W / 2f - sm.X / 2f, ty + tfs + 2), 13, 1f, Raylib.Fade(Pal.TxtDim, titleIn));
+
+        // ---- metrics (all measured, so 90-120% text all fit) ----
+        const int lblFs = 14, keyFs = 12, hdrFs = 12;
+        int rowH = (int)MathF.Max(24f, Cfg.Measure("Ag", lblFs, 1f).Y + 11f);
+        int hdrH = (int)MathF.Max(22f, Cfg.Measure("Ag", hdrFs, 1f).Y + 16f);
+
+        int top = (int)(ty + tfs + 26);
+        int marginX = 56;
+        int panelW = W - marginX * 2;
+        int pad = 16, colGap = 26;
+        int colW = (panelW - pad * 2 - colGap) / 2;
+
+        // ---- entries: a header before each group, then its rows ----
+        var entries = new System.Collections.Generic.List<(string hdr, Keymap.Bind b)>();
+        string cur = null;
+        foreach (var b in Keymap.Rows)
+        {
+            if (b.Group != cur) { cur = b.Group; entries.Add((cur, null)); }
+            entries.Add((null, b));
+        }
+        // Split into two balanced columns on MEASURED height. A header is never left stranded at
+        // the foot of a column: if the break lands on one, it moves down with its group. When the
+        // break lands INSIDE a group, the second column re-states it as "<GROUP> (CONT.)" — a
+        // column of verbs with no heading above it is a list the reader has to guess the scope of.
+        float total = 0f;
+        foreach (var e in entries) total += e.b == null ? hdrH : rowH;
+        int split = entries.Count;
+        {
+            float acc = 0f;
+            for (int i = 0; i < entries.Count; i++)
+            {
+                acc += entries[i].b == null ? hdrH : rowH;
+                if (acc >= total * 0.5f) { split = i + 1; break; }
+            }
+            while (split > 0 && split < entries.Count && entries[split - 1].b == null) split--;
+        }
+        if (split > 0 && split < entries.Count && entries[split].b != null)
+            entries.Insert(split, (entries[split].b.Group + " (CONT.)", null));
+
+        // Height the panel to its CONTENT (measured, so it is right at every text scale) and cap it
+        // at what the screen has left; anything past the cap scrolls.
+        float colAH = 0f, colBH = 0f;
+        for (int i = 0; i < entries.Count; i++)
+        {
+            float hgt = entries[i].b == null ? hdrH : rowH;
+            if (i < split) colAH += hgt; else colBH += hgt;
+        }
+        int availH = Cfg.ScreenH - top - 112;
+        int panelH = (int)MathF.Min(availH, MathF.Max(colAH, colBH) + pad * 2);
+        var panel = new Rectangle(marginX, top, panelW, panelH);
+        float panIn = PanelAnim("ctlPanel", 0.4f, 0.14f);
+        Raylib.DrawRectangleRounded(panel, 0.03f, 8, Raylib.Fade(Pal.Panel, 0.92f * panIn));
+        Raylib.DrawRectangleLinesEx(panel, 1.2f, Raylib.Fade(Pal.Accent, 0.35f * panIn));
+
+        // ---- draw both columns under one scroll offset ----
+        var mouse = Raylib.GetMousePosition();
+        string hoverNote = null;
+        Raylib.BeginScissorMode((int)panel.X + 1, (int)panel.Y + 1, (int)panel.Width - 2, (int)panel.Height - 2);
+        float colH0 = 0f, colH1 = 0f;
+        for (int col = 0; col < 2; col++)
+        {
+            int from = col == 0 ? 0 : split, to = col == 0 ? split : entries.Count;   // the (CONT.) header, if any, opens column B
+            int cx = (int)(panel.X + pad + col * (colW + colGap));
+            int y = (int)(panel.Y + pad - g.CtlScroll);
+            for (int i = from; i < to; i++)
+            {
+                var (hdr, b) = entries[i];
+                if (hdr != null)
+                {
+                    if (y + hdrH >= panel.Y && y <= panel.Y + panelH)
+                    {
+                        float baseY = y + hdrH - Cfg.Measure("Ag", hdrFs, 1f).Y - 4f;
+                        Cfg.Text(hdr, new Vector2(cx, baseY), hdrFs, 2f, Pal.Accent);
+                        float hw = Cfg.Measure(hdr, hdrFs, 2f).X;
+                        Raylib.DrawLine(cx + (int)hw + 10, (int)(baseY + Cfg.Measure("Ag", hdrFs, 1f).Y * 0.55f),
+                                        cx + colW, (int)(baseY + Cfg.Measure("Ag", hdrFs, 1f).Y * 0.55f),
+                                        Raylib.Fade(Pal.PanelBd, 0.8f));
+                    }
+                    y += hdrH;
+                    continue;
+                }
+
+                var r = new Rectangle(cx, y, colW, rowH - 3);
+                CtlRows.Add((b.Id, r));
+                if (y + rowH >= panel.Y && y <= panel.Y + panelH)
+                {
+                    bool capturing = g.KeyCapture == b.Id;
+                    bool hover = Raylib.CheckCollisionPointRec(mouse, r) && g.KeyCapture == null;
+                    if (hover) hoverNote = !string.IsNullOrEmpty(b.Note) ? b.Note
+                                         : b.Fixed ? "Reserved - this one cannot be moved."
+                                         : "Click to rebind - " + Keymap.ScopeName(b.Scope).ToLowerInvariant() + ".";
+                    if (capturing || hover)
+                        Raylib.DrawRectangleRounded(r, 0.2f, 5,
+                            capturing ? Pal.RGBA(40, 34, 12) : Pal.RGBA(22, 32, 44));
+
+                    Color lc = b.Fixed ? Pal.TxtDim : Pal.Txt;
+                    Vector2 lm = Cfg.Measure(b.Label, lblFs, 1f);
+                    Cfg.Text(b.Label, new Vector2(r.X + 9, r.Y + r.Height / 2f - lm.Y / 2f), lblFs, 1f, lc);
+
+                    // the key chip, right-aligned in the row
+                    string ktag = capturing ? "PRESS A KEY" : Keymap.KeyLabel(b.Key);
+                    Color kc = capturing ? Pal.Friend
+                             : b.Fixed ? Pal.TxtDim
+                             : (Keymap.IsDefault(b) ? Pal.Txt : Pal.Accent);
+                    Vector2 km = Cfg.Measure(ktag, keyFs, 1f);
+                    var chip = new Rectangle(r.X + r.Width - km.X - 18, r.Y + r.Height / 2f - km.Y / 2f - 3f,
+                                             km.X + 12, km.Y + 6);
+                    if (capturing)
+                    {
+                        // a slow pulse so "we are waiting for you" is unmistakable at a glance
+                        float pulse = 0.55f + 0.45f * MathF.Sin(t * 6f);
+                        Raylib.DrawRectangleRounded(chip, 0.35f, 5, Raylib.Fade(Pal.Friend, 0.16f * pulse));
+                    }
+                    Raylib.DrawRectangleLinesEx(chip, 1f, Raylib.Fade(kc, b.Fixed ? 0.35f : 0.55f));
+                    Cfg.Text(ktag, new Vector2(chip.X + 6, chip.Y + 3), keyFs, 1f, kc);
+                    if (b.Fixed)
+                    {
+                        // a padlock tick so "reserved" reads without colour (DESIGN 3.H: value carries)
+                        Raylib.DrawRectangleLinesEx(new Rectangle(chip.X - 11, chip.Y + 3, 6, 7), 1f,
+                                                    Raylib.Fade(Pal.TxtDim, 0.8f));
+                        Raylib.DrawLine((int)chip.X - 9, (int)chip.Y + 3, (int)chip.X - 9, (int)chip.Y,
+                                        Raylib.Fade(Pal.TxtDim, 0.8f));
+                        Raylib.DrawLine((int)chip.X - 9, (int)chip.Y, (int)chip.X - 6, (int)chip.Y,
+                                        Raylib.Fade(Pal.TxtDim, 0.8f));
+                        Raylib.DrawLine((int)chip.X - 6, (int)chip.Y, (int)chip.X - 6, (int)chip.Y + 3,
+                                        Raylib.Fade(Pal.TxtDim, 0.8f));
+                    }
+                }
+                y += rowH;
+            }
+            float used = y + g.CtlScroll - (panel.Y + pad);
+            if (col == 0) colH0 = used; else colH1 = used;
+        }
+        Raylib.EndScissorMode();
+        CtlScrollMax = MathF.Max(0f, MathF.Max(colH0, colH1) - (panelH - pad * 2));
+
+        // ---- caption slot: the hovered row's note, or the reserved-key reminder ----
+        string caption = hoverNote
+            ?? "[Esc] is reserved: it cancels targeting, opens the pause menu, and backs out of here. "
+             + "Arrow keys always move the board cursor. Menu-screen letters are fixed.";
+        Color capCol = hoverNote != null ? Pal.Txt : Pal.TxtDim;
+
+        // ---- a refusal, or a repaired-settings note, outranks the caption ----
+        if (g.KeyError != null) { caption = "REFUSED - " + g.KeyError; capCol = Pal.Foe; }
+        else if (g.KeyCapture != null)
+            { caption = "Press the key for " + (Keymap.Get(g.KeyCapture)?.Label ?? "") + "  -  [Esc] or right-click cancels."; capCol = Pal.Friend; }
+        else if (Display.KeysDropped > 0)
+            { caption = "Your saved controls file had " + Display.KeysDropped
+                        + " binding(s) that no longer fit; those rows were put back to default."; capCol = Pal.Accent; }
+        else
+        {
+            var live = Keymap.Conflicts();
+            if (live.Count > 0)
+                { caption = "CONFLICT - " + Keymap.KeyLabel(live[0].A.Key) + " is on both "
+                            + live[0].A.Label + " and " + live[0].B.Label + ". RESET DEFAULTS fixes it."; capCol = Pal.Foe; }
+        }
+        // Two wrapped lines, centred. Measured wrapping (not a fixed width) is what keeps the
+        // longest refusal readable at 120% instead of running off the panel.
+        var capLines = WrapText(caption, 13, panelW - 24);
+        float capLh = Cfg.Measure("Ag", 13, 1f).Y + 3f;
+        for (int i = 0; i < capLines.Count && i < 2; i++)
+        {
+            Vector2 cm = Cfg.Measure(capLines[i], 13, 1f);
+            Cfg.Text(capLines[i], new Vector2(W / 2f - cm.X / 2f, panel.Y + panelH + 8 + i * capLh), 13, 1f, capCol);
+        }
+
+        // ---- BACK + RESET DEFAULTS ----
+        int bw = 220, bh = 42;
+        CtlBack  = new Rectangle(W / 2 - bw / 2, Cfg.ScreenH - 60, bw, bh);
+        CtlReset = new Rectangle(marginX, Cfg.ScreenH - 60, 220, bh);
+        bool changed = Keymap.AnyChanged();
+        DrawButtonRect(CtlReset, "RESET DEFAULTS", "", changed, false, Pal.Foe);
+        DrawOverlayButton(CtlBack, "BACK", Pal.Friend, "Esc", 1f);
+    }
+
     static void DrawCodex(Game g)
     {
         float t = (float)Raylib.GetTime();
@@ -5045,6 +5293,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     public static Rectangle OverlayBtn7;   // intro DAILY (seeded challenge) button (PROGRAM HORIZON W4)
     public static Rectangle OverlayBtn8;   // intro TRAINING OP (scripted drill) button (RESONANCE T1)
     public static Rectangle OverlayBtn9;   // intro AUDIO CHECK (cue/mix audition) button (RESONANCE A3)
+    public static Rectangle OverlayBtn10;  // intro CONTROLS (key rebinding) button (RESONANCE W6)
 
     // SKIRMISH setup (W4): objective cycler + heat dial + START/BACK, published by DrawSkirmishSetup.
     public static Rectangle SkirmObjPrev, SkirmObjNext, SkirmHeatMinus, SkirmHeatPlus, SkirmStart, SkirmBack;
