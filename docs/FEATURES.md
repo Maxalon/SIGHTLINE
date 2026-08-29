@@ -326,12 +326,34 @@ seeds (mix of WIN/LOSE, no exceptions):
   shake, threat-preview OFF/SIMPLE/FULL, abandon run).
 - **Accessibility** (`src/Display.cs` + `Pal`): a **brightness** post-pass (70–130%,
   `Display.DrawBrightness`) + a **colorblind palette** toggle (`Pal.SetColorblind`, Foe→
-  orange / Good→teal), both in the pause menu + persisted. (Phase 3 item 3.13.)
+  vermillion / Good→teal), both in the pause menu + persisted. (Phase 3 item 3.13.) RESONANCE
+  W6 re-derived the colorblind foe hue from Viénot-1999 dichromat simulation rather than by
+  eye (`docs/measurements/w6/cvd-palette.py`): the old swap had moved the hostile hue INTO the
+  amber objective band, so a deuteranope read Foe/Accent at 39.8 with the toggle ON versus
+  50.5 with it OFF. `FoeCb` is now `(255,120,0)`, which improves EVERY pair against
+  Friend/Good/Accent/Suspect/VipGold/Elite in every simulation.
+- **Key rebinding** (`src/Keymap.cs`, RESONANCE W6): one table owns every rebindable key and
+  declares the **scope** each control is live in (MENUS / IN MISSION / PAUSE MENU); every read
+  goes through `Keymap.Pressed`. Two controls in overlapping scopes cannot share a key — a
+  duplicate is a `SIGHTLINE_KEYTEST` failure, not a bug waiting to be noticed. **`Escape` is
+  reserved**: unassignable, refused as any rebind target, and the key that cancels targeting
+  and opens the pause menu, so `Esc → pause → CONTROLS → RESET DEFAULTS` exists from any map a
+  player or a corrupt settings file can produce. Refusals name the holder and its context ("F
+  is already FOCUS (CONE) - IN MISSION"). The **CONTROLS** screen is reached from the pause
+  menu **and** the intro (`[O]`). Persisted as an `id=KeyName` override string in
+  `display.json` — no new enum. Every key hint in the HUD reads the live map.
+- **Keyboard-only comfort settings** (RESONANCE W6): the pause card takes `Up`/`Down` to pick a
+  row, `Left`/`Right` to adjust (5% steps on the four mix faders), `Enter` to activate — off
+  the same ordered row list that drives the mouse hit-test, so a row cannot be clickable and
+  keyboard-unreachable. Before W6 every comfort setting was a mouse-only 320x42 plate or a
+  304px fader drag.
 - **Display settings** (`src/Display.cs`): the fixed 1280x800 game is rendered to a
   letterboxed render-target scaled to the window, so it stays readable on big/4K
   screens. Pause menu offers **FULLSCREEN** (key **F11** — it was `F`, which the player
-  turn also binds to FOCUS; see the keymap note in `Game.Update`) + a **WINDOW** size cycle
-  (1280x800 → 3200x2000); the window is also free-resizable. Mouse is mapped back to
+  turn also binds to FOCUS; the table in `src/Keymap.cs` now makes that class of collision
+  impossible) + a **WINDOW** size cycle (1280x800 → 3200x2000); the window is also
+  free-resizable. **This, not TEXT SIZE, is the low-vision magnifier** — the whole frame
+  scales, up to 2.5x linear — and at the top TEXT SIZE step the pause card says so. Mouse is mapped back to
   virtual space via `SetMouseOffset/Scale`. At native 1280x800 windowed it draws
   directly (keeps MSAA). Settings persist to `display.json` in the user-data dir.
   Disabled in the headless harness (`Display.Init(!(shot||autoplay))`) so screenshots

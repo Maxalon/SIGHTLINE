@@ -4,7 +4,7 @@
 # quirk: piping an xvfb-run child through $(...) / a for-loop silently drops its
 # stdout, so every test is a direct `CMD | grep` statement below.
 #
-#   bash scripts/qa-sweep.sh          # 46 self-tests + autoplay x3   (~2 min)
+#   bash scripts/qa-sweep.sh          # 47 self-tests + autoplay x3   (~2 min)
 #   bash scripts/qa-sweep.sh --full   # + PAIRTEST                    (~2 min 40 s)
 #
 # COUNT NOTE: this footer has been wrong twice. C1 found it claiming 41 while running 42;
@@ -94,6 +94,11 @@ echo -n "OPENERTEST : "; SIGHTLINE_OPENERTEST=1 run | grep -oE "OPENERTEST: (PAS
 # "NAME PASS" with no colon, like EXPOSURETEST.
 echo -n "TUTTEST    : "; SIGHTLINE_TUTTEST=1  run | grep -oE "TUTTEST: (PASS|FAIL)" | head -1
 echo -n "THREATTEST : "; SIGHTLINE_THREATTEST=1 run | grep -oE "THREATTEST (PASS|FAIL)" | head -1
+# RESONANCE W6: the KEY MAP contract - the shipped table double-binds nothing (the check that
+# would have caught `F` = fullscreen AND focused overwatch), rebinds round-trip through the real
+# encode/decode, conflicts are refused, cross-scope reuse is allowed, and no remap or corrupt
+# settings string can take Escape (and with it the pause menu + RESET DEFAULTS) away.
+echo -n "KEYTEST    : "; SIGHTLINE_KEYTEST=1 run | grep -oE "KEYTEST: (PASS|FAIL)" | head -1
 # R2 FIX 1: the nobody-is-walled-out geometry invariant (all 4 deployment shapes x 8 objectives
 # x 2 heats, thousands of fresh boards). ~25 s.
 echo -n "GEOMTEST   : "; SIGHTLINE_GEOMTEST=1 run | grep -oE "GEOMTEST: (PASS|FAIL)" | head -1
@@ -122,5 +127,5 @@ echo -n "run1: "; SIGHTLINE_AUTOPLAY=1 run | grep -oE "RESULT: (WIN|LOSE|TIMEOUT
 echo -n "run2: "; SIGHTLINE_AUTOPLAY=1 run | grep -oE "RESULT: (WIN|LOSE|TIMEOUT) mission=[0-9]+" | head -1
 echo -n "run3: "; SIGHTLINE_AUTOPLAY=1 run | grep -oE "RESULT: (WIN|LOSE|TIMEOUT) mission=[0-9]+" | head -1
 echo "=== DONE ==="
-echo "(49 self-tests exist; this sweep ran $([ "$FULL" = 1 ] && echo 47 || echo 46). Every line above"
+echo "(50 self-tests exist; this sweep ran $([ "$FULL" = 1 ] && echo 48 || echo 47). Every line above"
 echo " must read PASS, and every autoplay must read WIN or LOSE — never TIMEOUT, never blank.)"

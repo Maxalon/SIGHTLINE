@@ -722,6 +722,12 @@ void main() {
         // exactly the pre-W5 behaviour (1x playback, 100% text).
         public int AnimSpeedIdx { get; set; }        // absent = 0 = 1x
         public int UiScaleIdx { get; set; } = 1;     // absent = 1 = 100%
+        // W6 KEY REBINDING — the keymap, as a plain `id=KeyName;...` string of OVERRIDES ONLY
+        // (see Keymap.Encode). Deliberately NOT a new enum and NOT an ordinal table: keys are
+        // stored by their Raylib enum NAME, so nothing here touches the APPEND-ONLY persisted-enum
+        // fingerprints in SaveGame, and a human can read (and fix) the line in a text editor.
+        // Absent in any display.json written before W6 = "" = the shipped defaults.
+        public string Keys { get; set; } = "";
     }
     // Source-generated serializer (see SaveGame.SaveJson for the why): reflection-based
     // System.Text.Json loses its type metadata under `-p:PublishTrimmed=true`, which silently
@@ -740,7 +746,7 @@ void main() {
 
     static void Save()
     {
-        try { Directory.CreateDirectory(Dir); File.WriteAllText(FilePath, JsonSerializer.Serialize(new Dto { Fullscreen = Fullscreen, SizeIdx = SizeIdx, BrightIdx = BrightIdx, GammaIdx = GammaIdx, Colorblind = Pal.Colorblind, TutorialSeen = TutorialSeen, PostFX = PostFX, AutoCam = AutoCam, BraceTipSeen = (TipsSeen & 1) != 0, TipsSeen = TipsSeen, TrainingSeen = TrainingSeen, ShowAllVerbs = ShowAllVerbs, VolMaster = VolMaster, VolSfx = VolSfx, VolMusic = VolMusic, VolUi = VolUi, AnimSpeedIdx = AnimSpeedIdx, UiScaleIdx = UiScaleIdx }, DisplayJson.Default.Dto)); }
+        try { Directory.CreateDirectory(Dir); File.WriteAllText(FilePath, JsonSerializer.Serialize(new Dto { Fullscreen = Fullscreen, SizeIdx = SizeIdx, BrightIdx = BrightIdx, GammaIdx = GammaIdx, Colorblind = Pal.Colorblind, TutorialSeen = TutorialSeen, PostFX = PostFX, AutoCam = AutoCam, BraceTipSeen = (TipsSeen & 1) != 0, TipsSeen = TipsSeen, TrainingSeen = TrainingSeen, ShowAllVerbs = ShowAllVerbs, VolMaster = VolMaster, VolSfx = VolSfx, VolMusic = VolMusic, VolUi = VolUi, AnimSpeedIdx = AnimSpeedIdx, UiScaleIdx = UiScaleIdx, Keys = Keymap.Encode() }, DisplayJson.Default.Dto)); }
         catch { }
     }
 
@@ -750,6 +756,16 @@ void main() {
     public static string SettingsPathPublic => FilePath;
     public static void SaveForTest() => Save();
     public static void LoadForTest() => Load();
+
+    /// W6: how many keymap overrides the last Load had to drop (unparseable, unknown, reserved, or
+    /// conflicting). Non-zero means the CONTROLS screen shows a "settings were repaired" note
+    /// instead of silently pretending the file was fine.
+    public static int KeysDropped;
+
+    /// Persist the keymap. Called by Keymap after every accepted rebind / reset — the whole
+    /// settings blob is rewritten, which is what every other pause-menu control already does.
+    /// A no-op when Display is disabled (headless), so no self-test or balance run writes a map.
+    public static void SaveKeymap() { if (Enabled) Save(); }
 
     /// Set once a corrupt display.json has been stashed this session, so a later corrupt read
     /// can never overwrite that evidence with a fresher corpse (mirrors SaveGame's meta rule).
@@ -785,6 +801,11 @@ void main() {
                 AnimSpeedIdx = Math.Clamp(d.AnimSpeedIdx, 0, AnimSpeedLevels.Length - 1);
                 UiScaleIdx   = Math.Clamp(d.UiScaleIdx, 0, UiScaleLevels.Length - 1);
                 ApplyUiScale();
+                // W6: Decode never trusts the string — it resets to defaults, then re-validates
+                // every override through the same conflict check the CONTROLS screen uses, so a
+                // hand-edited or newer-build file can never install a double-bind (and can never
+                // move CANCEL/MENU off Escape, which is a fixed row Decode refuses to touch).
+                KeysDropped = Keymap.Decode(d.Keys);
             }
         }
         catch

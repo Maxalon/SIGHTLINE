@@ -162,9 +162,15 @@ for `SIGHTLINE_` for the authoritative set.
 | `SIGHTLINE_AUTOPLAY=1` (Debug) | ~22 s |
 | `SIGHTLINE_BALANCE=10` (Release binary, **under xvfb**) | 311 s (~31 s/slot) |
 
-**Free keys** (nothing is bound to them — check here before adding a shortcut):
-**`I J N O P Q U V Z`**. Bound today: `A B C D E F G H K L M R S T W X Y`, `1`–`9`, the
-arrows, Tab/Space/Enter/Escape/Backspace/F2/Kp+/Kp−.
+**Keys are a TABLE now, not a list in this file** (RESONANCE W6). `src/Keymap.cs` owns every
+rebindable control and the SCOPE it is live in; `Keymap.Rows` is the authoritative keymap and the
+in-game CONTROLS screen prints it. Two controls in overlapping scopes cannot share a key —
+`SIGHTLINE_KEYTEST=1` fails if they do (the check that would have caught `F` = fullscreen AND
+focused overwatch, which shipped undetected for the life of the project). **Before adding a
+shortcut, add a row to that table and let the self-test tell you if it collides** — do not hand-
+maintain a free-key list here, which is exactly how the last one rotted (it still listed `N P U
+V` as free long after they were bound). **`Escape` is reserved and unassignable**: it is the
+guaranteed route to the pause menu and from there to CONTROLS → RESET DEFAULTS.
 
 **Distribution** (publishing a build, the licence position, where saves live, and the
 `PublishTrimmed` hazard): [`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md) +

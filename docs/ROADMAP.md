@@ -473,8 +473,19 @@ ASCII-only **until a font ships** (Phase 5.3; see the clarified Art policy), ver
       independent UI text scale (invasive — all DrawText sizes are fixed).~~ **BOTH DONE** —
       true gamma landed in APEX W9 (`uGamma` in the post-FX shader); the **UI text scale**
       landed in RESONANCE W5 (`Display.UiScaleLevels` 90/100/110/120%, applied once in
-      `Cfg.Text`/`Cfg.Measure` with a size taper; see DEVLOG §W5 ON-RAMP). Still open from the
-      same family: **key rebinding**.
+      `Cfg.Text`/`Cfg.Measure` with a size taper; see DEVLOG §W5 ON-RAMP). ~~Still open from the
+      same family: **key rebinding**.~~ **KEY REBINDING DONE** — RESONANCE W6 (`src/Keymap.cs`
+      + the CONTROLS screen + `SIGHTLINE_KEYTEST`); see DEVLOG §W6. The same wave re-derived
+      the colorblind foe hue from dichromat simulation and gave the pause card a keyboard
+      route, which closes the last of the 3.13 family.
+
+      **Still open (measured, sized, deliberately not taken in W6):** text scale above 120%.
+      The strategic screens survive 130% with two pre-existing ellipsis; the IN-MISSION HUD
+      does not, and the blockers are specific — the roster chip is a fixed 132x58 box with five
+      hand-tuned row offsets, so at 130% the rank word overprints the class glyph at `x+118`;
+      at 150% `Hud.EndTurnRect` (a fixed 150x30) overflows and the top bar's right zone
+      collides with it. Growing the chip's WIDTH eats board columns the FUL-3 occlusion work
+      deliberately fought for. See DEVLOG §W6 for the screenshots and the recommendation.
 
 **PHASE 3 IS COMPLETE — every item 3.1 through 3.13 is DONE and on `main`.** The game is
 feature-complete against the whole spec. Remaining work is now *open-ended polish*, not a

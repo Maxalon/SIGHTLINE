@@ -6,7 +6,7 @@ using Raylib_cs;
 
 namespace Sightline;
 
-public enum Phase { Intro, PlayerTurn, EnemyTurn, Barracks, Win, Lose, Draft, WarRoom, Codex, SkirmishSetup, AudioCheck }   // WarRoom (W3), Codex (W6), SkirmishSetup (W4), AudioCheck (A3) appended; none persisted
+public enum Phase { Intro, PlayerTurn, EnemyTurn, Barracks, Win, Lose, Draft, WarRoom, Codex, SkirmishSetup, AudioCheck, Controls }   // WarRoom (W3), Codex (W6), SkirmishSetup (W4), AudioCheck (A3), Controls (RESONANCE W6 rebinding) appended; none persisted
 // APPEND-ONLY: serialized as a raw (int) in SaveGame (CardDto.Objective). Never reorder or
 // remove a member — a saved run stores the ordinal, so a reorder silently corrupts the loaded
 // objective. Add new objectives at the END only. (SaveGame.SelfTest asserts the tail ordinal.)
@@ -3541,30 +3541,25 @@ public partial class Game
 
         // ── GLOBAL keys (read every phase, before any per-phase handler) ────────────────────
         // These fire ON TOP of whatever the current phase binds, so anything claimed here is
-        // claimed EVERYWHERE. Keep the set tiny, and never give a global a letter that an
-        // in-mission verb wants.
+        // claimed EVERYWHERE — they carry Keymap.ScopeAll, and the conflict scan treats them
+        // accordingly (a global that lands on a mission verb OR on an intro-screen letter is
+        // refused at the point of rebinding, and SIGHTLINE_KEYTEST fails if the shipped table
+        // ever ships one).
         //
-        // R1 REVIEW FIX — fullscreen was on `F`, which UpdatePlayer also binds to FOCUS (cone
-        // overwatch, advertised as "FOCUS F" on the action bar). IsKeyPressed is true for BOTH
-        // reads in the same frame, so pressing F during the player turn spent the soldier's
-        // action AND toggled fullscreen. The HUD advertises the verb, so the verb wins: fullscreen
-        // moves to F11, the platform convention for it, and the only function key besides F2 that
-        // this game binds. (The pause menu's FULLSCREEN button is unchanged and still the
-        // discoverable path; its key hint now reads F11.)
+        // W6 KEY REBINDING — every read below, and every read in HandlePlayerInput /
+        // HandlePauseMenu / HandleCamera, now goes through `Keymap.Pressed(<id>)`. There is
+        // exactly one table of keys (src/Keymap.cs) and it declares the scope each control is
+        // live in. That is what closes the R1 bug for good rather than by inspection: `F` used
+        // to be bound to BOTH fullscreen here and FOCUS (cone overwatch) in the player turn, and
+        // because IsKeyPressed is true for both reads on the same frame, one press spent a
+        // soldier's action AND toggled the window. Nothing could catch it, because nothing knew
+        // the two reads existed. Now they are rows, and a duplicate is a self-test failure.
         //
-        // Audited with it: the full in-mission player-turn keymap is
-        //   global   M mute · F11 fullscreen · F2 anim speed · Esc cancel-target/pause · C cam reset
-        //   verbs    1 aim · 2 overwatch · F focus · B brace · 3 hunker · 4 grenade · 5 ability
-        //            6 item · 7 drag · 8 shove · 9 vault · E stabilize · G beacon · H hack
-        //            X extract · R reload · T tag · V show-all-verbs · P restart drill
-        //            Tab cycle · Enter end turn · Space act · WASD/arrows cursor
-        // — no other key appears twice in one context. The other contexts (Intro, skirmish setup,
-        // codex, barracks/shop, tag editor) are each internally unique and are reached only when
-        // UpdatePlayer is not, so a letter may safely mean different things across them. Free
-        // letters remaining, for whoever binds next: I J O Q U Z.
-        if (Raylib.IsKeyPressed(KeyboardKey.M)) Audio.ToggleMute();
-        if (!AutoPlay && Raylib.IsKeyPressed(KeyboardKey.F11)) Display.ToggleFullscreen();
-        if (!AutoPlay && Raylib.IsKeyPressed(KeyboardKey.F2)) CycleAnimSpeed();   // fast-forward anim pacing (persisted; also in the pause menu)
+        // The full audited keymap now LIVES IN THE TABLE (Keymap.BuildTable) instead of in this
+        // comment, where it could rot; the CONTROLS screen prints it, and the player can change it.
+        if (Keymap.Pressed(Keymap.Mute)) Audio.ToggleMute();
+        if (!AutoPlay && Keymap.Pressed(Keymap.Fullscreen)) Display.ToggleFullscreen();
+        if (!AutoPlay && Keymap.Pressed(Keymap.AnimSpeed)) CycleAnimSpeed();   // fast-forward anim pacing (persisted; also in the pause menu)
         Audio.SetMusicIntensity(MusicIntensity());
         UpdateTutorial(dt);
         UpdateTraining(dt);            // T1: the TRAINING OP lesson track (drill mode only)
@@ -3597,7 +3592,11 @@ public partial class Game
         // pause/settings overlay + camera controls (live play only, never in autoplay)
         if (!AutoPlay && (Phase == Phase.PlayerTurn || Phase == Phase.EnemyTurn))
         {
-            if (Raylib.IsKeyPressed(KeyboardKey.Escape))
+            // W6: read through the table like every other control. `menu` is a FIXED row pinned to
+            // Escape — Keymap refuses to bind it anywhere else and refuses Escape as the target of
+            // any other rebind — so this read is the guaranteed route to the pause menu no matter
+            // what the player (or a hand-edited settings file) has done to the rest of the map.
+            if (Keymap.Pressed(Keymap.Menu))
             {
                 if (AimMode || GrenadeMode || ItemMode || ShoveMode || MarkMode || GrappleMode || PinMode || DragMode || VaultMode) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false; DragMode = false; VaultMode = false; }
                 else Paused = !Paused;
@@ -3632,7 +3631,7 @@ public partial class Game
         // advance animation queue — but NEVER while the codex is open (FUL-2: BeginCodex clears
         // Paused for the overlay, which let queued enemy ShotAnims resolve while the player read
         // the field manual; the queue freezes with the fight and resumes on ExitCodex).
-        if (Phase != Phase.Codex && Phase != Phase.AudioCheck && _anims.Count > 0)   // A3: the audition screen freezes the fight exactly like the codex does
+        if (Phase != Phase.Codex && Phase != Phase.AudioCheck && Phase != Phase.Controls && _anims.Count > 0)   // A3/W6: the audition + controls screens freeze the fight exactly like the codex does
         {
             var a = _anims[0];
             if (!a.Started) { a.Started = true; a.OnStart(this); }
@@ -3716,6 +3715,7 @@ public partial class Game
             case Phase.WarRoom: HandleWarRoomClick(); break;   // W3: cross-run meta screen
             case Phase.Codex: HandleCodexInput(); break;       // W6: field manual / reference
             case Phase.AudioCheck: HandleAudition(t); break;   // A3: the AUDIO CHECK audition screen
+            case Phase.Controls: HandleControlsInput(t); break; // W6: the key-rebinding surface
             case Phase.SkirmishSetup: HandleSkirmishSetup(); break;  // W4: skirmish objective/heat picker
         }
 
@@ -4461,38 +4461,45 @@ public partial class Game
     void HandlePlayerInput()
     {
         // keys
-        if (Raylib.IsKeyPressed(KeyboardKey.Enter)) { RequestEndTurn(); return; }
-        if (Raylib.IsKeyPressed(KeyboardKey.Tab)) CycleSelection();
-        if (Raylib.IsKeyPressed(KeyboardKey.One)) ToggleAim();
-        if (Raylib.IsKeyPressed(KeyboardKey.Two)) DoOverwatch();
-        if (Raylib.IsKeyPressed(KeyboardKey.F)) DoFocusOverwatch();   // COUNTERPLAY: braced cone watch
-        if (Raylib.IsKeyPressed(KeyboardKey.B)) DoBrace();            // UNDERTOW W2: disrupting interrupt watch
-        if (Raylib.IsKeyPressed(KeyboardKey.Three)) DoHunker();
-        if (Raylib.IsKeyPressed(KeyboardKey.Four)) ToggleGrenade();
-        if (Raylib.IsKeyPressed(KeyboardKey.Five)) DoAbility();
-        if (Raylib.IsKeyPressed(KeyboardKey.Six)) ToggleItem();
-        if (Raylib.IsKeyPressed(KeyboardKey.Eight)) ToggleShove();
-        if (Raylib.IsKeyPressed(KeyboardKey.Seven)) ToggleDrag();
-        if (Raylib.IsKeyPressed(KeyboardKey.Nine)) ToggleVault();
-        if (Raylib.IsKeyPressed(KeyboardKey.H)) DoHack();
-        if (Raylib.IsKeyPressed(KeyboardKey.E)) DoStabilize();   // FUL-7: stabilize an adjacent downed ally (T is the tag editor)
-        if (Raylib.IsKeyPressed(KeyboardKey.G)) DoBeacon();          // UNDERTOW W6: deploy forward evac beacon (moved off B — collided with W2 BRACE)
-        if (Raylib.IsKeyPressed(KeyboardKey.X)) DoExtract();
-        if (Raylib.IsKeyPressed(KeyboardKey.R)) DoReload();
-        // T1: [P] restarts the TRAINING OP from the top — the drill is the one place where
-        // "just start over" must be one keystroke away. Drill-only, so it can never nuke a run.
-        if (Mode == GameMode.Training && Raylib.IsKeyPressed(KeyboardKey.P)) { BeginTraining(); return; }
-        if (Raylib.IsKeyPressed(KeyboardKey.V)) { ToggleShowAllVerbs(); return; }   // T1: SHOW ALL verbs (staging escape)
-        if (Raylib.IsKeyPressed(KeyboardKey.T)) { OpenTagEditor(Selected); return; }
+        // W6: every one of these is a ROW in Keymap (scope = in-mission), so the player can move
+        // any of them and no two can silently claim the same key. The ids match the action-bar
+        // button ids in Hud.DrawActionButtons, which is why the bar's key hints are just
+        // Keymap.Label(id) and can never drift from what the key actually does.
+        if (Keymap.Pressed(Keymap.EndTurn)) { RequestEndTurn(); return; }
+        if (Keymap.Pressed(Keymap.Cycle)) CycleSelection();
+        if (Keymap.Pressed(Keymap.Shoot)) ToggleAim();
+        if (Keymap.Pressed(Keymap.Overwatch)) DoOverwatch();
+        if (Keymap.Pressed(Keymap.FocusOw)) DoFocusOverwatch();   // COUNTERPLAY: braced cone watch
+        if (Keymap.Pressed(Keymap.Brace)) DoBrace();              // UNDERTOW W2: disrupting interrupt watch
+        if (Keymap.Pressed(Keymap.Hunker)) DoHunker();
+        if (Keymap.Pressed(Keymap.Grenade)) ToggleGrenade();
+        if (Keymap.Pressed(Keymap.Ability)) DoAbility();
+        if (Keymap.Pressed(Keymap.Item)) ToggleItem();
+        if (Keymap.Pressed(Keymap.Shove)) ToggleShove();
+        if (Keymap.Pressed(Keymap.Drag)) ToggleDrag();
+        if (Keymap.Pressed(Keymap.Vault)) ToggleVault();
+        if (Keymap.Pressed(Keymap.Hack)) DoHack();
+        if (Keymap.Pressed(Keymap.Stabilize)) DoStabilize();   // FUL-7: stabilize an adjacent downed ally
+        if (Keymap.Pressed(Keymap.Beacon)) DoBeacon();         // UNDERTOW W6: deploy forward evac beacon
+        if (Keymap.Pressed(Keymap.Extract)) DoExtract();
+        if (Keymap.Pressed(Keymap.Reload)) DoReload();
+        // T1: RESTART DRILL restarts the TRAINING OP from the top — the drill is the one place
+        // where "just start over" must be one keystroke away. Drill-only, so it can never nuke a run.
+        if (Mode == GameMode.Training && Keymap.Pressed(Keymap.RestartDrill)) { BeginTraining(); return; }
+        if (Keymap.Pressed(Keymap.ShowAll)) { ToggleShowAllVerbs(); return; }   // T1: SHOW ALL verbs (staging escape)
+        if (Keymap.Pressed(Keymap.Tag)) { OpenTagEditor(Selected); return; }
 
-        // keyboard tile cursor: arrows / WASD move it, Space acts on it
+        // Keyboard tile cursor. The four cursor directions are rebindable (WASD by default); the
+        // ARROWS are a FIXED alternate that is never rebindable and never removable, so whatever
+        // the player does to the letter keys the board always stays drivable. Keymap carries the
+        // arrows as reserved rows so a rebind onto one is refused rather than silently shadowing it.
         int cdx = 0, cdy = 0;
-        if (Raylib.IsKeyPressed(KeyboardKey.Up) || Raylib.IsKeyPressed(KeyboardKey.W)) cdy = -1;
-        else if (Raylib.IsKeyPressed(KeyboardKey.Down) || Raylib.IsKeyPressed(KeyboardKey.S)) cdy = 1;
-        else if (Raylib.IsKeyPressed(KeyboardKey.Left) || Raylib.IsKeyPressed(KeyboardKey.A)) cdx = -1;
-        else if (Raylib.IsKeyPressed(KeyboardKey.Right) || Raylib.IsKeyPressed(KeyboardKey.D)) cdx = 1;
+        if (Raylib.IsKeyPressed(KeyboardKey.Up) || Keymap.Pressed(Keymap.CursorUp)) cdy = -1;
+        else if (Raylib.IsKeyPressed(KeyboardKey.Down) || Keymap.Pressed(Keymap.CursorDown)) cdy = 1;
+        else if (Raylib.IsKeyPressed(KeyboardKey.Left) || Keymap.Pressed(Keymap.CursorLeft)) cdx = -1;
+        else if (Raylib.IsKeyPressed(KeyboardKey.Right) || Keymap.Pressed(Keymap.CursorRight)) cdx = 1;
         if (cdx != 0 || cdy != 0) MoveCursor(cdx, cdy);
-        if (Raylib.IsKeyPressed(KeyboardKey.Space) && HoverValid) { BoardAct(HoverX, HoverY); return; }
+        if (Keymap.Pressed(Keymap.Act) && HoverValid) { BoardAct(HoverX, HoverY); return; }
         if (KbCursor && Raylib.GetMouseDelta() != Vector2.Zero) KbCursor = false;  // mouse takes back over
 
         if (Raylib.IsMouseButtonPressed(MouseButton.Right)) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false; DragMode = false; VaultMode = false; return; }
@@ -4613,7 +4620,7 @@ public partial class Game
             _autoCamManual = true;
             CamPan -= Raylib.GetMouseDelta() / CamZoom;
         }
-        if (Raylib.IsKeyPressed(KeyboardKey.C)) { CamZoom = 1f; CamPan = Vector2.Zero; _autoCamManual = false; }
+        if (Keymap.Pressed(Keymap.CamReset)) { CamZoom = 1f; CamPan = Vector2.Zero; _autoCamManual = false; }
 
         if (CamZoom <= 1.001f) { CamZoom = 1f; CamPan = Vector2.Zero; }  // no pan when fully out
         else
@@ -4667,9 +4674,97 @@ public partial class Game
     /// keep in sync with Hud.DrawVolSlider).
     static float VolFrac(Rectangle r, float mx) => Util.Clamp((mx - (r.X + 8f)) / MathF.Max(1f, r.Width - 16f), 0f, 1f);
 
+    /// W6 fine-motor accessibility: the pause card's keyboard cursor (-1 = mouse mode). Every
+    /// comfort setting in the game lives on this card — text size, brightness, gamma, colorblind,
+    /// screen shake, animation speed, the four mix faders — and until W6 all of them were reachable
+    /// ONLY by landing a mouse on a 320x42 plate or dragging a 304px fader track. A player who
+    /// needs the text at 120% or the brightness up is, by definition, a player who may not be able
+    /// to do that comfortably.
+    public int PauseSel = -1;
+
+    /// Run one pause-card row. The SAME switch serves the mouse and the keyboard, off the SAME
+    /// ordered list Hud publishes — so a row cannot be clickable and keyboard-unreachable, which
+    /// is how "mouse-only" creeps back in one button at a time.
+    void ActivatePauseRow(string id)
+    {
+        switch (id)
+        {
+            case "resume": Paused = false; break;
+            case "fullscreen": Display.ToggleFullscreen(); break;
+            case "window": Display.CycleSize(); break;
+            case "shake": Fx.ShakeOn = !Fx.ShakeOn; break;
+            case "threat": CycleThreatPref(); break;
+            case "bright": Display.CycleBrightness(); break;
+            case "gamma": Display.CycleGamma(); break;                 // W9: true gamma (post-FX pass)
+            case "colorblind": Display.ToggleColorblind(); break;
+            case "autocam": Display.ToggleAutoCam(); if (!Display.AutoCam) { CamZoom = 1f; CamPan = Vector2.Zero; } break;
+            case "animspeed": CycleAnimSpeed(); break;                 // W5 comfort: playback pacing
+            case "uiscale": Display.CycleUiScale(); break;             // W5 comfort: UI text size
+            case "mute": Audio.ToggleMute(); break;
+            case "audio": BeginAudition(); break;                      // A3 (remember-and-restore, like the codex)
+            case "controls": BeginControls(); break;                   // W6 key rebinding
+            case "codex": BeginCodex(); break;                         // W6/HORIZON: the field manual
+            case "abandon": AbandonRun(); break;
+        }
+    }
+
+    /// Nudge one mix fader by `dir` steps of 5% (the keyboard's answer to dragging a 304px track).
+    void NudgeVol(int idx, int dir)
+    {
+        if (idx < 0 || idx >= Hud.PauseVol.Length) return;
+        Display.SetVol(idx, Util.Clamp(Display.Vol(idx) + dir * 0.05f, 0f, 1f));
+        Display.CommitVol();
+    }
+
     void HandlePauseMenu()
     {
+        // W6: the three pause-overlay buttons that carry a KEY TAG now actually respond to it.
+        // They have advertised "K" / "U" since the day they shipped and this handler was
+        // mouse-only, so the tags were decoration. They live in the keymap at ScopePause — a
+        // namespace of their own, which is why K may also be a mission verb's key without either
+        // being a conflict.
+        if (Keymap.Pressed(Keymap.PauseCodex)) { BeginCodex(); return; }
+        if (Keymap.Pressed(Keymap.PauseAudio)) { BeginAudition(); return; }
+        if (Keymap.Pressed(Keymap.PauseControls)) { BeginControls(); return; }
+
         var m = Raylib.GetMousePosition();
+
+        // ---- W6 keyboard route through the card ------------------------------------------------
+        // Arrows + Enter, held at ScopePause in Keymap's reserved table so no rebind can shadow
+        // them. Up/Down pick a row, Enter runs it, Left/Right adjust anything that has a range
+        // (the four faders by 5%, every cycling setting by one step). Moving the mouse hands
+        // control back, exactly like the board's KbCursor.
+        int step = 0;
+        if (Raylib.IsKeyPressed(KeyboardKey.Down)) step = 1;
+        else if (Raylib.IsKeyPressed(KeyboardKey.Up)) step = -1;
+        if (step != 0 && Hud.PauseRows.Count > 0)
+        {
+            PauseSel = PauseSel < 0 ? (step > 0 ? 0 : Hud.PauseRows.Count - 1)
+                                    : (PauseSel + step + Hud.PauseRows.Count) % Hud.PauseRows.Count;
+            Audio.Play("select");
+            return;
+        }
+        if (PauseSel >= 0 && PauseSel < Hud.PauseRows.Count)
+        {
+            string sid = Hud.PauseRows[PauseSel].id;
+            int dir = Raylib.IsKeyPressed(KeyboardKey.Right) ? 1 : (Raylib.IsKeyPressed(KeyboardKey.Left) ? -1 : 0);
+            if (dir != 0)
+            {
+                if (sid.StartsWith("vol", StringComparison.Ordinal)) NudgeVol(sid[3] - '0', dir);
+                // Every other adjustable row is a one-way cycle (its own click behaviour), so a
+                // left-nudge cycles too rather than pretending to be a reversible slider.
+                else ActivatePauseRow(sid);
+                return;
+            }
+            if (Raylib.IsKeyPressed(KeyboardKey.Enter))
+            {
+                if (!sid.StartsWith("vol", StringComparison.Ordinal)) ActivatePauseRow(sid);
+                return;
+            }
+        }
+        if (PauseSel >= 0 && Raylib.GetMouseDelta() != Vector2.Zero) PauseSel = -1;   // mouse takes back over
+
+        // ---- mouse ------------------------------------------------------------------------------
         // A2 mix faders: a drag in progress owns the mouse until it is released, and only THEN
         // does the setting hit disk (Display.SetVol is live, CommitVol writes display.json).
         if (_volDrag >= 0)
@@ -4687,21 +4782,8 @@ public partial class Game
                 Display.SetVol(i, VolFrac(Hud.PauseVol[i], m.X));
                 return;
             }
-        if (Raylib.CheckCollisionPointRec(m, Hud.PauseResume)) Paused = false;
-        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseFullscreen)) Display.ToggleFullscreen();
-        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseWindow)) Display.CycleSize();
-        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseMute)) Audio.ToggleMute();
-        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseShake)) Fx.ShakeOn = !Fx.ShakeOn;
-        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseThreat)) CycleThreatPref();
-        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseBright)) Display.CycleBrightness();
-        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseGamma)) Display.CycleGamma();   // W9: true gamma (post-FX pass)
-        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseColorblind)) Display.ToggleColorblind();
-        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseAutoCam)) { Display.ToggleAutoCam(); if (!Display.AutoCam) { CamZoom = 1f; CamPan = Vector2.Zero; } }
-        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseAnimSpeed)) CycleAnimSpeed();   // W5 comfort: playback pacing
-        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseUiScale)) Display.CycleUiScale();  // W5 comfort: UI text size
-        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseCodex)) { BeginCodex(); }   // W6: open the field manual (remembers this phase for BACK)
-        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseAudio)) { BeginAudition(); }   // A3: open AUDIO CHECK (same remember-and-restore contract as the codex)
-        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseAbandon)) AbandonRun();
+        foreach (var (id, r) in Hud.PauseRows)
+            if (Raylib.CheckCollisionPointRec(m, r)) { ActivatePauseRow(id); return; }
     }
 
     /// PAUSE-menu ABANDON — mode-aware teardown (W1 mode-seam). LAST STAND and SKIRMISH/DAILY route
@@ -7419,6 +7501,19 @@ public partial class Game
                           Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.OverlayBtn9))
                          || Raylib.IsKeyPressed(KeyboardKey.U);
             if (audio) { BeginAudition(); return; }
+        }
+
+        // RESONANCE W6: intro CONTROLS — the key-rebinding surface (button or key O). Deliberately
+        // reachable from the MAIN MENU and not only from the pause overlay: a player who cannot
+        // use the shipped layout must be able to change it before deploying. `O` was one of the
+        // free letters in the R1 audit and is registered in Keymap as a reserved MENU-scope key,
+        // so a rebind that would shadow it here is refused.
+        if (Phase == Phase.Intro)
+        {
+            bool ctl = (Raylib.IsMouseButtonPressed(MouseButton.Left) &&
+                        Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.OverlayBtn10))
+                       || Raylib.IsKeyPressed(KeyboardKey.O);
+            if (ctl) { BeginControls(); return; }
         }
 
         // W1 mode-seam: end-card MAIN MENU (OverlayBtn2, button or Esc) — back to the intro without
