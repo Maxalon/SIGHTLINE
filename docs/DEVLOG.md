@@ -4652,3 +4652,79 @@ The two things I would tell the next wave, in order:
    options at constant threat (a terrain-grammar pass — more LOW cover, which raises the
    position axis without blocking the sightlines the target axis needs), or re-specify axis (b)
    with an additive band so it stops reading "the fight got safer" as "the decision got richer".
+
+# PROGRAM RESONANCE — WAVE X2 "TRUE NORTH II" (2026-08-29, senior dev on wt-x2)
+
+**The charter.** Fourteen waves merged into this program and **every balance number in it was
+measured on the tree its wave branched from, never on the merged tree.** Each wave held its own
+base's ladder; the composition was never measured. X2 is a measurement-and-correction wave: run
+the definitive post-merge ladder, decide what the target should be and say why, then correct
+toward it one lever per round.
+
+**THE BASE COMMIT OF EVERY NUMBER BELOW IS `a61ef42`** (RESONANCE W4 "THE SECOND AXIS", the
+integration tip) plus X2's own default-off measurement scaffolding. Omitting that line is what
+created this wave; it will not be omitted again.
+
+## Method
+`SIGHTLINE_BALANCE=10` per chunk under `xvfb-run` on a **snapshot of the Release binary**
+(`runbin/<tag>/`, so the tree can keep building while a round is in flight), two disjoint CRN
+slot sets (`SIGHTLINE_BALANCE_BASE` 0 / 10) x greedy+sloppy = **40 campaigns per rung**. The
+chunk runner asserts the JSON's own `runs` field (it cannot be half-written) and prints OK/BAD;
+**every chunk quoted here printed OK with `runs=20`.** `XDG_CONFIG_HOME` and
+`SIGHTLINE_BALANCE_JSON` are pinned per chunk (several dev agents share the container). Every
+chunk's JSON, report extract and raw log is archived under `docs/measurements/x2/`, with the
+exact command lines in its README.
+
+## 1. THE DEFINITIVE POST-MERGE LADDER (no lever; n=40 per rung; `runs=20` asserted x12 chunks)
+
+| rung | run completion | ±SE | mission win (n) | mean turns | ch/turn | ch/ARMED | armed/turn | swings | shots/kill |
+|---|---|---|---|---|---|---|---|---|---|
+| RECRUIT | **75.0%** | 6.8 | 94.3 (175) | 5.65 | 2.45 | 1.52 | 1.61 | 0.77 | 3.26 |
+| heat 0 | **35.0%** | 7.5 | 80.2 (131) | 5.66 | 2.38 | 1.53 | 1.56 | 0.79 | 3.22 |
+| heat 2 | **40.0%** | 7.7 | 82.6 (132) | 5.71 | 2.76 | 1.78 | 1.55 | 0.63 | 3.07 |
+| heat 4 | **20.0%** | 6.3 | 75.0 (124) | 6.34 | 2.63 | 1.67 | 1.58 | 0.69 | 2.99 |
+| heat 6 | **32.5%** | 7.4 | 81.7 (142) | 5.83 | 1.69 | 1.44 | 1.18 | 0.85 | 3.10 |
+| heat 8 | **7.5%** | 4.2 | 68.4 (117) | 6.01 | 1.36 | 1.50 | 0.91 | 0.73 | 3.06 |
+
+This supersedes every ladder published before it, including X1's 52.5/27.5/15.0 (base `2100858`),
+W5's on-ramp pair (base `b68f38a`) and FUL-13's 52.5/35/30/22.5/10.
+
+**Three facts fall out, and only the first was expected.**
+
+**(a) The published band is missed at exactly ONE rung.** Against FUL-13's
+55 / 40 / 30 / 20 / 10 ±8 (h8 ±5): h2 **IN**, h8 **IN**, h4 2.0 low, h6 4.5 **ABOVE**, and
+**h0 12.0 low** — the only rung outside by more than noise. The "20+ points below the band at
+h0 and h4" the brief inherited from W4 is half right: h0 is genuinely low, h4 is a rounding
+error from its floor, and the top of the ladder is fine.
+
+**(b) The ladder is not monotonic, and at n=40 it cannot be.** h2 (40.0) reads *above* h0
+(35.0) and h6 (32.5) reads *above* h4 (20.0). The standard error on a 40-campaign rung is
+**±6-8 points**, which is the same size as the ±8 band tolerance and larger than the 10-point
+step the band asks between rungs. Every wave in this program has been resolving the ladder at a
+precision that cannot see it. The honest statement of this measurement is: *RECRUIT is clearly
+easiest, h8 is clearly hardest, and heats 0-6 are one flat 20-40% plateau that n=40 cannot
+order.*
+
+**(c) The real defect is the COLD OPENER, and RECRUIT already ran the experiment.**
+Mission 1 is always Eliminate (`Run.CardForNode`'s Start node → `ObjectiveFor(1)`), so
+"Eliminate mean turns" and "mission 1" are very nearly the same measurement on this tree. At
+heat 0 the per-mission curve is **U-shaped**:
+
+| | m1 | m2 | m3 | m4 | m5 | m6 |
+|---|---|---|---|---|---|---|
+| heat 0 win% (n) | **75 (40)** | 79 (14) | 89 (19) | 91 (22) | 76 (17) | 74 (19) |
+| RECRUIT win% (n) | **100 (40)** | 89 (18) | 92 (26) | 94 (32) | 100 (25) | 88 (34) |
+
+The opener is as lethal as the finale and 15 points harder than the middle of the run — the
+front-loaded anxiety `docs/DESIGN.md` §3.D explicitly forbids ("Don't front-load anxiety… give
+the player a beat to find footing before the spike"). `Game.SetupMission` already carries a fix
+for this exact failure mode — the EARLY-MISSION HEAT GRACE, whose comment reads "the measured
+~20% mission-1 loss (which hard-caps run completion, a geometric product)" — but it is **gated
+on `heat > 0`**, so it protects rungs 1-8 from *their* extra bodies and leaves the base force
+untouched at the rung that needs it most.
+
+And the size of the effect is not a guess. On the **same 40 worlds**, RECRUIT's only
+mission-1 difference from heat 0 is **one hostile body** (its −1 stat is a no-op at m1, where
+`bump = Math.Max(0, (n-1) + statDelta)` is already 0 — the fact W4's ONRAMPTEST repair
+surfaced) plus the 5-turn bleed-out valve. Mission 1 goes **75% → 100%, zero losses in 40
+campaigns.** Ten of heat 0's twenty-six lost runs die on the opening mission.
