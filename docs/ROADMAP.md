@@ -1428,3 +1428,57 @@ sets, one lever per measured round, fresh same-slot R0 first, dip budgets, breac
       Rungs 1-7 add bodies and stat points that the measurement cannot see. Either the rungs need
       real teeth or the ladder needs fewer, bigger steps — but the first job is a **higher-N**
       measurement (n≥80/rung) so the question can be asked at a precision that can answer it.
+
+### PROGRAM RESONANCE — W4 "THE BOARD BECOMES A PLACE" (2026-08-29, details in DEVLOG §W4 BOARD)
+
+Rendering only (base `d350416`); `src/Renderer.cs` draw path + the `Pal` block of `src/Util.cs`.
+Proved gameplay-inert two ways: `SIGHTLINE_PAIRTEST` byte-identical, and a pinned-slot
+`SIGHTLINE_BALANCE=5 BASE=140` chunk (`runs=10` asserted both sides) **field-for-field identical**
+to the same batch on the branch point.
+
+- [x] **COVER IS MERGED VOLUMES** (audit `visual-1`). Union-find over 4-connected same-`TileType`
+      tiles at the same elevation tier; inset, rounding, cast shadow, contact AO, front-face
+      gradient, top-edge highlight, structural rim and corner chip all gated on which side is a
+      group seam; the top face extends over the wall band on an interior south edge so a run is
+      one slab with one wall. Jitter/lift/radius moved from per TILE to per GROUP.
+      **Measured: 684 authored cover tiles → 383 groups = 19.0 boxes/map → 10.6 volumes/map (−44%);
+      on one seed the rendered connected-component count goes 19 → 12.** `SIGHTLINE_COVERMERGE=0`.
+- [x] **PER-BIOME FORM VOCABULARY** (audit `visual-1b`). CRATE / WALL / BOULDER / WRECK, one per
+      merged volume, three candidates per biome — 4-6 object types per map instead of one.
+- [x] **THE VALUE HIERARCHY, RIGHT WAY UP** (audit `visual-3` + `visual-4`, taken as ONE decision).
+      Ring demoted to a 2px state indicator (topology kept — it is the colourblind team/role
+      channel), the white specular catch retired, the archetype form drawn as an outlined figure on
+      an explicit value rung (`Renderer.ToLuma`), the dormant pod moved onto outline weight + glyph.
+      **Measured (14px patches, before → after): SELECTED soldier peak 188.1 → 201.7, ACTIVE
+      hostile 211.1 → 171.0, SUSPICIOUS 205.1 → 161.7, DORMANT pod 219.9 → 149.3** — a complete
+      inversion becomes monotone, and stays monotone in the colourblind palette (201.7/171.5/149.3).
+      **Bright-pixel share inside the archetype figure: 0% → 87%.** `SIGHTLINE_TOKENSTYLE=0`.
+- [x] **THE MOVE OVERLAY IS ONE REGION, ONE CONTOUR, AND NOT GOLD** (audit `visual-5`). Dash region
+      on demand (hold SHIFT, or hover a tile outside walk range); boundary stitched by marching
+      squares into closed loops with a continuous dash phase (**58 edges as 5 strokes = 11.6
+      edges/primitive, against 1.0 before**); `Pal.MoveYellow` (byte-identical to the reserved
+      objective gold) renamed `Pal.MoveDash` and moved onto a value variant of the friendly cyan.
+      `SIGHTLINE_MOVESTYLE=0`, `SIGHTLINE_MOVEDASH=1`.
+- [x] **`SIGHTLINE_BOARDTEST`** — the project's only pixel-measuring self-test, wired into
+      `scripts/qa-sweep.sh`. Fails on each pre-wave dial (TOKENSTYLE=0 reproduces the auditor's own
+      166.8 / 219.9; COVERMERGE=0 measures a 10px gutter; MOVESTYLE=0 measures 1.0 edges/stroke).
+
+**Left open by this wave (see DEVLOG §W4 BOARD "WHAT I DID NOT FIX"):**
+- [ ] **The merged volumes are still axis-aligned rectangles on a square grid**, because the drawn
+      footprint is the tile grid and this wave was correctly forbidden from touching tile geometry.
+      A board that reads as terrain rather than as well-dressed blocks needs the footprint itself to
+      stop being axis-aligned — a different wave, with a gameplay-inertness argument this one
+      cannot make.
+- [ ] **The S4-B cover-tier cue (△ / —) is still one stamp per TILE, not per volume**, so a
+      four-tile wall carries four identical marks. Kept deliberately: cover tier is a per-tile
+      gameplay fact and DESIGN.md §3.H names the glyph as its non-colour channel. Revisit only with
+      a read that keeps the tier legible at the far end of a long run.
+- [ ] **The dash-on-demand SHIFT modifier is undiscoverable** — nothing labels it. The hover
+      trigger covers the case that matters and no information is lost, but it wants a FIELD MANUAL
+      line.
+- [ ] **`DrawMoveOverlay` reads `Raylib.IsKeyDown` directly.** Presentation-only and deterministic
+      under the harness, but input in a draw path is off-architecture; route it through `Game` when
+      a wave owns that file.
+- [ ] **Board rendering performance is unmeasured on real hardware.** Three 900-frame llvmpipe runs
+      per configuration could not resolve a difference: 86.9/92.0/120.4 ms/frame new against
+      84.7/103.8/123.4 old, i.e. ±20% of container noise in both.

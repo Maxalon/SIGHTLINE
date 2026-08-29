@@ -117,6 +117,8 @@ env-gated harness baked into `Program.cs`:
 export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe
 
 # Screenshot a frame -> sightline_shot.png  (then Read it to inspect visuals)
+# NOTE: the mission BRIEFING card holds for 11 s and covers the middle of the board, so any
+# frame under ~700 photographs the card, not the board. Use SIGHTLINE_SHOT=760 for board shots.
 SIGHTLINE_SHOT=90 xvfb-run -a -s "-screen 0 1280x800x24" dotnet run -c Debug
 
 # Full-match autopilot smoke test -> prints "RESULT: WIN|LOSE|TIMEOUT mission=N"
@@ -164,7 +166,8 @@ for `SIGHTLINE_` for the authoritative set.
 
 **Free keys** (nothing is bound to them — check here before adding a shortcut):
 **`I J N O P Q U V Z`**. Bound today: `A B C D E F G H K L M R S T W X Y`, `1`–`9`, the
-arrows, Tab/Space/Enter/Escape/Backspace/F2/Kp+/Kp−.
+arrows, Tab/Space/Enter/Escape/Backspace/F2/Kp+/Kp−, and **held SHIFT** (W4: reveals the
+dash/sprint region in the move overlay — the only held modifier in the game).
 
 **Distribution** (publishing a build, the licence position, where saves live, and the
 `PublishTrimmed` hazard): [`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md) +
