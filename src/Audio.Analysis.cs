@@ -589,4 +589,46 @@ public static partial class Audio
             : $"AUDIOGATE: FAIL ({string.Join(", ", fails)})");
         return sb.ToString();
     }
+
+    // ── RESONANCE A3: the numbers, one cue at a time, for the AUDIO CHECK screen ──────────
+    //
+    // DumpReport/GateReport measure everything at once and print a table. The audition screen
+    // needs the SAME numbers per row, on a 60 fps draw, so it can put "that sounds thin" next
+    // to "-26.4 dB RMS, 8% above 1 kHz" and turn a vague impression into a filed report.
+    // Rendering + a 4096-pt Welch spectrum per cue is far too much to do per frame, so the
+    // result is memoised; the screen warms the cache a few cues at a time (see Game.Audition).
+
+    static readonly Dictionary<string, CueStats> _cueStatCache = new();
+
+    /// The cue's MIX ROLE and the RMS window the budget holds it inside — the same category map
+    /// and the same band table AUDIOGATE checks against. The audition screen prints the band next
+    /// to the measured value so a level that has drifted out of its role is visible, not just
+    /// audible. (Reuses CatOf, so "what counts as UI" stays one decision in one place.)
+    public static (string role, float lo, float hi) CueBand(string id)
+    {
+        string cat = CatOf(id);
+        foreach (var (c, lo, hi) in RmsBands) if (c == cat) return (cat, lo, hi);
+        return (cat, -200f, 0f);
+    }
+
+    /// TRUE if `id`'s measurement is already computed (the screen shows a placeholder until it is).
+    public static bool CueMeasured(string id) => _cueStatCache.ContainsKey(id);
+
+    /// Measure one cue exactly as the gate does (render through the real mastering stage, then
+    /// analyse the first `realN` samples). Memoised — repeated calls are a dictionary hit.
+    /// Returns peak/rms in dBFS, the >1 kHz energy share as a 0..1 fraction, and the duration.
+    public static (float peakDb, float rmsDb, float hiFrac, float durMs) CueMeasure(string id)
+    {
+        if (!_cueStatCache.TryGetValue(id, out var st))
+        {
+            BuildRecipes();
+            if (!_recipes.ContainsKey(id)) return (-200f, -200f, 0f, 0f);
+            var buf = RenderCueById(id, out int realN, out float durMs);
+            st = Measure(id, buf, realN, durMs);
+            _cueStatCache[id] = st;
+        }
+        // BHi is 1-5 kHz and BAir is >5 kHz; their sum is the ">1 kHz share" the A2 rebuild
+        // was steered by (raw white noise sat at 94%, a real band-limited report near 50-70%).
+        return (st.PeakDb, st.RmsDb, Util.Clamp(st.BHi + st.BAir, 0f, 1f), st.DurMs);
+    }
 }

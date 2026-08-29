@@ -1336,4 +1336,94 @@ public static partial class Audio
         w.Flush();
         return ms.ToArray();
     }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════
+    //  RESONANCE A3 — THE AUDITION SURFACE.
+    //
+    //  A1 gave the mix an EAR (device-free measurement); A2 rebuilt it against those numbers.
+    //  Neither could tell you whether any of it SOUNDS right, because nothing in this sandbox
+    //  has a speaker and the owner never had a fast way to sit down and sweep the whole layer.
+    //  This block is the small, honest API the in-game AUDIO CHECK screen drives:
+    //    * the cue TAXONOMY (what to list, grouped, in a scan-friendly order),
+    //    * the three device-state reads the screen must be truthful about,
+    //    * a live look at the music crossfade so the owner can SEE the bed they are sweeping.
+    //  Nothing here synthesises, plays, or measures anything by itself — the screen owns the
+    //  scheduling, Play/PlayStack owns the sound, Audio.Analysis owns the numbers.
+    // ═════════════════════════════════════════════════════════════════════════════════════
+
+    /// The AUDIO CHECK listing: group label -> cue ids, in the order the screen prints them.
+    /// AUDITIONTEST asserts (a) every id is a registered recipe and (b) the union is EXACTLY
+    /// SfxCueIds — so a cue added to BuildRecipes and forgotten here fails loudly instead of
+    /// quietly becoming the one sound nobody ever auditions.
+    public static readonly (string Group, string[] Ids)[] AuditionGroups =
+    {
+        ("WEAPONS",  new[] { "w_rifle", "w_shotgun", "w_sniper", "w_lmg", "w_smg", "shoot" }),
+        ("COMBAT",   new[] { "hit", "crit", "miss", "over", "death" }),
+        ("UI",       new[] { "select", "move", "reload", "hunker", "turn", "win", "lose" }),
+        ("STINGERS", new[] { "st_kill", "st_lastkill", "st_victory", "st_lose", "st_squadwipe" }),
+    };
+
+    /// The same cues, flattened — the screen's row order, and the index space its rects use.
+    public static readonly string[] AuditionCues = BuildAuditionCues();
+    static string[] BuildAuditionCues()
+    {
+        var list = new List<string>();
+        foreach (var (_, ids) in AuditionGroups) list.AddRange(ids);
+        return list.ToArray();
+    }
+
+    /// A one-line "what is this sound for" caption per cue. The screen prints it next to the
+    /// button so the owner is judging a cue against its JOB, not against a filename.
+    public static string CueRole(string id) => id switch
+    {
+        "w_rifle"     => "baseline rifle report",
+        "w_shotgun"   => "close blast, blunt and low",
+        "w_sniper"    => "hard crack, ringing tail",
+        "w_lmg"       => "heavy chug, big bore",
+        "w_smg"       => "tight snappy burst voice",
+        "shoot"       => "legacy alias: rifle voice",
+        "hit"         => "round lands on a body",
+        "crit"        => "heavier than a plain hit",
+        "miss"        => "round goes past the ear",
+        "over"        => "overwatch set, two notes",
+        "death"       => "a soldier collapses",
+        "select"      => "unit picked up",
+        "move"        => "one tile of footfall",
+        "reload"      => "mag out, mag in, bolt",
+        "hunker"      => "digging in",
+        "turn"        => "the round changes hands",
+        "win"         => "legacy win arpeggio",
+        "lose"        => "legacy loss descent",
+        "st_kill"     => "confirmed takedown",
+        "st_lastkill" => "the shot that clears it",
+        "st_victory"  => "mission won, full resolve",
+        "st_lose"     => "mission lost, settles low",
+        "st_squadwipe"=> "the run-ending gut punch",
+        _             => "",
+    };
+
+    /// TRUE when `id` is a registered SFX recipe (device-free — the recipe table, not the
+    /// device's Sound table, so it answers the same in the sandbox as on the owner's machine).
+    public static bool HasCue(string id)
+    {
+        BuildRecipes();
+        return _recipes.ContainsKey(id);
+    }
+
+    /// TRUE when a real audio device came up. The audition screen says so on its face rather
+    /// than looking broken in a sandbox that physically cannot make a sound.
+    public static bool DeviceReady => _ready;
+    /// TRUE when both music beds loaded and are streaming (device path only).
+    public static bool MusicReady => _music;
+    /// The live crossfade: the two bed gains actually pushed at Raylib this frame, plus the
+    /// intensity driving them. Lets the screen SHOW the sweep it is asking the owner to hear.
+    public static (float amb, float comb, float intensity) MusicLevels => (_ambVol, _combVol, _intensity);
+
+    /// The concurrent stacks AUDIOGATE measures, exposed by name so the screen can fire the
+    /// SAME worst cases the budget is written against (a kill stack, an overwatch chain).
+    public static int StackCount => Stacks.Length;
+    public static string StackName(int i) => (uint)i < (uint)Stacks.Length ? Stacks[i].name : "";
+    /// The (cue, offset-seconds) parts of stack `i`. The caller schedules them; nothing plays here.
+    public static (string cue, float at)[] StackParts(int i)
+        => (uint)i < (uint)Stacks.Length ? Stacks[i].parts : Array.Empty<(string, float)>();
 }

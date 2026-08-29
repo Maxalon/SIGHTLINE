@@ -18,7 +18,7 @@ public struct UiButton
 
 /// All on-screen UI: top/bottom bars, action buttons, shot tooltip, overlays.
 /// Button rects are stored after Draw so Game can hit-test clicks.
-public static class Hud
+public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Audition.cs
 {
     // ── RESONANCE C1 (VOICE) — text-fitting contract, shared with src/Voice.cs ──────────────
     // Every string Voice generates has to physically fit the chrome that draws it, so the widths
@@ -48,6 +48,7 @@ public static class Hud
     public static System.Collections.Generic.List<(Rectangle rect, Unit unit)> RosterChips = new();
     public static Rectangle PauseResume, PauseMute, PauseShake, PauseThreat, PauseFullscreen, PauseWindow, PauseAbandon;
     public static Rectangle PauseBright, PauseGamma, PauseColorblind, PauseAutoCam, PauseCodex;
+    public static Rectangle PauseAudio;   // A3: pause-menu entry to the AUDIO CHECK screen
     public static Rectangle PauseAnimSpeed, PauseUiScale;   // W5 ON-RAMP comfort controls
     /// RESONANCE A2 — the four mix faders (MASTER / SFX / MUSIC / UI), indexed to match
     /// Display.VolNames. Click or drag anywhere in the track to set the level.
@@ -347,6 +348,11 @@ public static class Hud
             DrawVolSlider(PauseVol[i], Display.VolNames[i], Display.Vol(i), Audio.Enabled);
             by += sh + sgap;
         }
+        // RESONANCE A3: the AUDIO CHECK entry sits directly under the faders it belongs with —
+        // additive, in the right column's existing dead space, so the two-column layout above and
+        // the bottom-aligned exits below are untouched.
+        PauseAudio = new Rectangle(cx2, by + 6, bw, bh);
+        DrawButtonRect(PauseAudio, "AUDIO CHECK", "U", true, false, Pal.Accent);
 
         // bottom-align the two exits with the left column's last row, so the card reads as
         // two balanced columns rather than one long one next to a short one
@@ -2123,6 +2129,8 @@ public static class Hud
             DrawCodex(g);
         else if (g.Phase == Phase.SkirmishSetup)
             DrawSkirmishSetup(g);
+        else if (g.Phase == Phase.AudioCheck)
+            DrawAudition(g);   // A3: the cue/mix audition screen
     }
 
     // ============================================================================
@@ -2262,6 +2270,12 @@ public static class Hud
         DrawGhostButton(OverlayBtn6, "SKIRMISH", "S", smIn);
         OverlayBtn7 = new Rectangle(W / 2 + miniGap / 2, smBy, miniW, 40);
         DrawGhostButton(OverlayBtn7, "DAILY", "Y", smIn);
+        // RESONANCE A3: AUDIO CHECK — a third utility row, one centred plate. It is a tuning
+        // bench rather than a mode, so it takes the same neutral outline and sits last.
+        float acIn = PanelAnim("introAudio", 0.3f, 0.80f);
+        int acBy = smBy + 48;
+        OverlayBtn9 = new Rectangle(W / 2 - miniW / 2, acBy, miniW, 40);
+        DrawGhostButton(OverlayBtn9, "AUDIO CHECK", "U", acIn);
 
         // ---- shared caption slot (between LAST STAND and the grid) ----
         // Hovering ANY mode button explains it here; at rest it carries LAST STAND's best-wave
@@ -2284,6 +2298,8 @@ public static class Hud
             caption = "DAILY - today's seeded run, one attempt, ranked by turns";
         else if (Raylib.CheckCollisionPointRec(introMouse, OverlayBtn8))
         { caption = "TRAINING OP - a short live-fire drill; nothing is saved, restart it any time"; capCol = Pal.Good; }
+        else if (Raylib.CheckCollisionPointRec(introMouse, OverlayBtn9))
+        { caption = "AUDIO CHECK - hear every cue, sweep the music, move the mix; measured numbers beside each"; capCol = Pal.Accent; }
         else
         {
             caption = bestWave > 0 ? $"LAST STAND BEST: {bestWave} WAVE{(bestWave == 1 ? "" : "S")}" : "ENDLESS HORDE SURVIVAL";
@@ -4555,6 +4571,7 @@ public static class Hud
     public static Rectangle OverlayBtn6;   // intro SKIRMISH (one custom fight) button (PROGRAM HORIZON W4)
     public static Rectangle OverlayBtn7;   // intro DAILY (seeded challenge) button (PROGRAM HORIZON W4)
     public static Rectangle OverlayBtn8;   // intro TRAINING OP (scripted drill) button (RESONANCE T1)
+    public static Rectangle OverlayBtn9;   // intro AUDIO CHECK (cue/mix audition) button (RESONANCE A3)
 
     // SKIRMISH setup (W4): objective cycler + heat dial + START/BACK, published by DrawSkirmishSetup.
     public static Rectangle SkirmObjPrev, SkirmObjNext, SkirmHeatMinus, SkirmHeatPlus, SkirmStart, SkirmBack;
