@@ -5563,13 +5563,17 @@ from a board that anim was about to change; `AutoStep` and `SmartStep` now retur
 | seed | before | after |
 |---|---|---|
 | 2001 | `TIMEOUT mission=6 frame=20000` | `LOSE mission=6 frame=20661 turns=44` |
-| 3001 | `TIMEOUT mission=5 frame=20000` | `WIN mission=6 frame=12813 turns=30` |
+| 3001 | `TIMEOUT mission=5 frame=20000` | `WIN mission=6 frame=12813 turns=36` |
 
-**Caps recalibrated from a MEASURED 20-seed census** (RESULT lines now carry `turns=`): longest
-real campaign 44 run-turns / 20,661 frames, worst ratio 681 frames per run-turn (frames include the
-between-mission screens, which cost frames and no turns). `AutoMaxRunTurns = 100` (~2.3x the
-longest real campaign), `AutoFrameCap = 90000`, and the frame cap now lives in `Game` beside the
-turn cap it must dominate. BalanceBatch and PAIRTEST read the same constant: **at 20,000 the batch
+**Caps calibrated on a MEASURED 20-seed census of the FINAL tree** (RESULT lines now carry
+`turns=`): all 20 finish, longest campaign **75 run-turns / 18,992 frames**, next longest 38.
+`AutoMaxRunTurns = 150` — 2x the longest measured campaign, because firing this cap on a
+LEGITIMATE run would score it a LOSS and put back the same downward ladder bias the old frame
+budget had. `AutoFrameCap = 100000` against `AutoFramesPerTurn = 600` (measured 253 frames/turn at
+75 turns — a long campaign is long because it is ATTRITED, and a small squad takes cheap turns;
+short full-squad runs cost more per turn but come nowhere near the cap), so 150 x 600 = 90,000
+<= 100,000 and the turn cap always bites first. The frame cap now lives in `Game` beside the turn
+cap it must dominate, and STALLTEST pins the inequality. BalanceBatch and PAIRTEST read the same constant: **at 20,000 the batch
 RIGHT-CENSORED the longest campaigns as losses** (the archived x2 chunks log `frame-cap hits: 1`),
 a small unattributed downward bias in the ladder of record that is now gone.
 
