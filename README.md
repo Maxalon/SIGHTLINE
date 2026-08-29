@@ -4,16 +4,21 @@ A compact, XCOM-style tactics game built in **C# + [Raylib](https://www.raylib.c
 Command a four-soldier squad on a grid battlefield: spend action points, use cover,
 flank the enemy, set overwatch, and wipe the hostiles before they wipe you.
 
-No art or audio asset files — the whole game is drawn from geometry, particles
-and screen-shake, and every sound effect is **synthesised procedurally at
-runtime**. It stays small, fast, and runs natively on Linux, macOS and Windows.
+Almost everything is generated: the board is geometry, particles, procedural
+textures and shaders, and every sound effect and music bed is **synthesised at
+runtime** — no recorded audio ships. The only committed binaries are two text
+fonts (Noto Mono and Chakra Petch, both SIL Open Font License 1.1, licence text
+in `THIRD-PARTY-NOTICES.txt`). It stays small, fast, and runs natively on Linux,
+macOS and Windows.
 
 ![SIGHTLINE gameplay](docs/screenshot.png)
 
 ## The game loop
 
-- **Two actions per soldier.** Move, then fire — firing ends that soldier's turn.
-  A double-move ("dash", shown in yellow) spends both actions.
+- **Two actions per soldier.** Firing costs one action and does *not* end the
+  turn, so **where you stand after shooting is the real bet** — shoot then
+  reposition, or spend the second action on a rushed follow-up shot. A
+  double-move ("dash") spends both actions.
 - **Cover is everything.** Stand beside a wall and incoming aim drops sharply
   (low cover −20, high cover −40). Get **flanked** — hit from a side your cover
   doesn't block — and you're exposed *and* far more likely to be crit.
@@ -40,9 +45,10 @@ A run is **six escalating missions** played with a single, persistent squad:
 - A **barracks debrief** between missions shows survivors, promotions, heals and
   the fallen — and **fresh rookies backfill** any empty slots so a bad mission
   doesn't doom the run — then deploys you to a tougher fight.
-- Missions vary by **objective**: most are *eliminate all hostiles*, but every
-  third is an *extraction* — get the whole squad to the marked EVAC zone (fight
-  through, or sneak past dormant pods).
+- Missions vary by **objective** — eliminate, extract, hack, escort, sabotage,
+  rescue, hold, decapitate — dealt so every route mixes them, and the **opening
+  geometry varies too**: a frontal push, a pincer, a crossfire, or an envelop
+  that starts you surrounded.
 - Lose the whole squad and the run ends; clear all six and the campaign is won.
 
 ### Soldiers & weapons
@@ -124,9 +130,21 @@ src/
   Util.cs       layout constants, palette, math/rng helpers
 ```
 
-## Ideas for where to take it next
+## Where it stands
 
-- More abilities + ammo types, additional enemy archetypes
-- Elevation / high ground and destructible high cover
-- Hand-authored maps and mission objectives (evac, VIP escort, hack-the-terminal)
-- Saving runs to disk; a wider roster with recruits replacing the fallen
+The tactical layer, the campaign, the meta profile and the presentation are all
+built. Recent work (PROGRAM RESONANCE) added a **TRAINING OP** and staged verb
+teaching, a **RECRUIT** difficulty below standard, an **incoming-fire forecast**
+that shows how many guns bear on a tile before you move there, generated
+**briefings and a run epilogue**, per-biome cover materials and terrain, and a
+real audio mix — plus a shippable self-contained build.
+
+Verification is by hand, by design: there is **no CI and there never will be**.
+`bash scripts/qa-sweep.sh --full` runs every self-test in the tree (it derives
+the list from `src/`, so a test that exists but is never run gets reported), and
+`SIGHTLINE_BALANCE=<N>` runs headless campaigns for balance telemetry.
+
+Open work — including a post-merge difficulty re-baseline, which is currently
+the biggest known gap — lives in [`docs/ROADMAP.md`](docs/ROADMAP.md); the
+per-wave history and every measured number is in
+[`docs/DEVLOG.md`](docs/DEVLOG.md).
