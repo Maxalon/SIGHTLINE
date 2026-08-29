@@ -1802,8 +1802,80 @@ public static class Combat
             if (gSm.HasLineOfSight(4, 4, 6, 6, true)) fails.Add("supercoverSmokeSealed");
         }
 
+        // --- X3 CONFIRM: the CLASS ROLE funnel (four shooter damage deltas + CORPSMAN FIELD
+        // PRESENCE). Gates: (a) OFF is exact identity, (b) each delta moves only its own class,
+        // (c) an ENEMY with the same class string is never touched, (d) DmgMin floors at 1,
+        // (e) the aura reduces a soldier's incoming damage only inside range, never the Corpsman
+        // itself, never the VIP, and never stacks with a second Corpsman. Every static is
+        // restored before returning, so the rest of the suite runs on the shipped defaults. ---
+        {
+            int svS = SharpDmgTrim, svR = RangerDmgTrim, svG = GunnerDmgBonus, svA = AssaultDmgBonus,
+                svM = MedicAuraReduce, svAim = GunnerAimBonus;
+            var svAll = AllUnits;
+            var gX = new Grid();
+            Unit Shooter(string cls, WeaponKind w, Team t) =>
+                new Unit { Cls = cls, Aim = 70, Weapon = Weapon.Make(w), Team = t, X = 2, Y = 5, Hp = 8, MaxHp = 8 };
+            var tgt = new Unit { Cls = "GRUNT", Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle),
+                                 Team = Team.Enemy, X = 8, Y = 5, Hp = 8, MaxHp = 8 };
+            var snp = Shooter("SHARPSHOOTER", WeaponKind.Sniper, Team.Player);
+            var gun = Shooter("GUNNER", WeaponKind.Lmg, Team.Player);
+            var foe = Shooter("SHARPSHOOTER", WeaponKind.Sniper, Team.Enemy);   // same Cls, wrong team
+            var foeD = new Unit { Cls = "GRUNT", Weapon = Weapon.Make(WeaponKind.Rifle),
+                                  Team = Team.Player, X = 8, Y = 5, Hp = 8, MaxHp = 8 };
+
+            SharpDmgTrim = RangerDmgTrim = GunnerDmgBonus = AssaultDmgBonus = MedicAuraReduce = 0;
+            var offS = ComputeOdds(gX, snp, tgt); var offG = ComputeOdds(gX, gun, tgt);
+            if (offS.DmgMin != snp.Weapon.DmgMin || offS.DmgMax != snp.Weapon.DmgMax) fails.Add("x3RoleOffIdentity");
+            int gunAimOff = offG.HitChance;
+
+            SharpDmgTrim = 1; GunnerDmgBonus = 1;
+            var onS = ComputeOdds(gX, snp, tgt); var onG = ComputeOdds(gX, gun, tgt);
+            if (onS.DmgMin != offS.DmgMin - 1 || onS.DmgMax != offS.DmgMax - 1) fails.Add("x3SharpTrim");
+            if (onG.DmgMin != offG.DmgMin + 1 || onG.DmgMax != offG.DmgMax + 1) fails.Add("x3GunnerBonus");
+            var onFoe = ComputeOdds(gX, foe, foeD);
+            if (onFoe.DmgMin != foe.Weapon.DmgMin) fails.Add("x3EnemyClsUntouched");
+            // floor: a huge trim can never take a band below 1, and never inverts min/max
+            SharpDmgTrim = 99;
+            var floorS = ComputeOdds(gX, snp, tgt);
+            if (floorS.DmgMin != 1 || floorS.DmgMax < floorS.DmgMin) fails.Add("x3DmgFloor");
+            SharpDmgTrim = 0; GunnerDmgBonus = 0;
+
+            // the GUNNER aim lever moves the gunner and nothing else
+            GunnerAimBonus = 7;
+            if (ComputeOdds(gX, gun, tgt).HitChance != gunAimOff + 7) fails.Add("x3GunnerAim");
+            if (ComputeOdds(gX, snp, tgt).HitChance != offS.HitChance) fails.Add("x3GunnerAimClassOnly");
+            GunnerAimBonus = 0;
+
+            // --- CORPSMAN FIELD PRESENCE ---
+            var med = new Unit { Cls = "CORPSMAN", Weapon = Weapon.Make(WeaponKind.Smg), Team = Team.Player, X = 8, Y = 5, Hp = 7, MaxHp = 7 };
+            var med2 = new Unit { Cls = "CORPSMAN", Weapon = Weapon.Make(WeaponKind.Smg), Team = Team.Player, X = 9, Y = 5, Hp = 7, MaxHp = 7 };
+            var ally = new Unit { Cls = "ASSAULT", Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 7, Y = 5, Hp = 8, MaxHp = 8 };
+            var vip  = new Unit { Cls = "VIP", Weapon = Weapon.Make(WeaponKind.Smg), Team = Team.Player, X = 7, Y = 6, Hp = 8, MaxHp = 8, IsVip = true };
+            var hostile = new Unit { Cls = "GRUNT", Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 7, Y = 4, Hp = 5, MaxHp = 5 };
+            AllUnits = new System.Collections.Generic.List<Unit> { med, med2, ally, vip, hostile };
+            MedicAuraReduce = 1;
+            if (HardenedReduce(ally, 5, false) != 4) fails.Add("x3AuraInRange");
+            if (HardenedReduce(med, 5, false) != 4) fails.Add("x3AuraNoStack");      // med2 covers med: -1, never -2
+            if (HardenedReduce(vip, 5, false) != 5) fails.Add("x3AuraSkipsVip");
+            if (HardenedReduce(hostile, 5, false) != 5) fails.Add("x3AuraPlayerOnly");
+            ally.X = 9 + MedicAuraRange + 1;                                          // walk out of BOTH auras (med2 sits at x=9)
+            if (HardenedReduce(ally, 5, false) != 5) fails.Add("x3AuraOutOfRange");
+            ally.X = 7;
+            med.Downed = true; med2.Downed = true;                                    // a downed medic protects nobody
+            if (HardenedReduce(ally, 5, false) != 5) fails.Add("x3AuraDownedInert");
+            med.Downed = med2.Downed = false;
+            med.Alive = med2.Alive = false;
+            if (HardenedReduce(ally, 5, false) != 5) fails.Add("x3AuraDeadInert");
+            med.Alive = med2.Alive = true;
+            MedicAuraReduce = 0;
+            if (HardenedReduce(ally, 5, false) != 5) fails.Add("x3AuraOffIdentity");
+
+            SharpDmgTrim = svS; RangerDmgTrim = svR; GunnerDmgBonus = svG; AssaultDmgBonus = svA;
+            MedicAuraReduce = svM; GunnerAimBonus = svAim; AllUnits = svAll;
+        }
+
         return fails.Count == 0
-            ? "COMBATTEST: PASS (cover A-E + high-ground + tier-2 + drone/shield + boss-arc-flag + ambush + graze + streak + perk-balance + build-perks + vantage/breaker/siegebreaker + fragile-floor + armor + bulwark-plating + momentum + outrunner + vanguard + crossfire + factions + faction-prep + spec-forks + bipod/suppressor + field-drills/shock-doctrine + supercover-corner gates all hold)"
+            ? "COMBATTEST: PASS (cover A-E + high-ground + tier-2 + drone/shield + boss-arc-flag + ambush + graze + streak + perk-balance + build-perks + vantage/breaker/siegebreaker + fragile-floor + armor + bulwark-plating + momentum + outrunner + vanguard + crossfire + factions + faction-prep + spec-forks + bipod/suppressor + field-drills/shock-doctrine + supercover-corner + x3-class-role gates all hold)"
             : "COMBATTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 }
