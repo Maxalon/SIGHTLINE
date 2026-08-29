@@ -1536,10 +1536,16 @@ public static class Mission
         // R2 FIX 1b — ELBOW ROOM. A soldier can be perfectly *reachable* and still have no legal
         // move on turn 1: every neighbour is either cover or a teammate, and CostMap's corner rule
         // kills the diagonals. ENVELOP packs the squad four-abreast into the mid-field cover band,
-        // so this shows up on its own (measured 1 build in 5760 across the shape sweep) and it is
-        // the same defect wearing a different hat. Open ONE adjacent cover tile — cardinals first,
-        // in a fixed direction order — so nobody opens the mission frozen. Deterministic: zero RNG
-        // draws, and a no-op on every build that already had a step (so h0 batches stay paired).
+        // so this shows up on its own and it is the same defect wearing a different hat. Open ONE
+        // adjacent cover tile — cardinals first, in a fixed direction order — so nobody opens the
+        // mission frozen. Deterministic: zero RNG draws, and a no-op on every build that already
+        // had a step (so h0 batches stay paired).
+        //
+        // MEASURED FIRING RATE, 1536 fresh boards across all four shapes x 8 objectives x 6
+        // missions x heats {0,8}: 22 builds (1.4%), and EVERY ONE of them under ENVELOP — 15 on
+        // the procedural fallback, 7 on two authored arenas (28 and 3, whose centre seats can box
+        // a soldier too). It never fires under FRONTAL/PINCER/CROSSFIRE, so no pre-W4 opening has
+        // its geometry touched at all.
         var occupied = new HashSet<(int, int)>();
         foreach (var u in players) occupied.Add((u.X, u.Y));
         foreach (var u in enemies) occupied.Add((u.X, u.Y));

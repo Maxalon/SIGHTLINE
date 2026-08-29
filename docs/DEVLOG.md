@@ -5292,3 +5292,123 @@ C1 shipped the fiction frame and named its own two weaknesses. Both are closed.
 - The `>1 kHz` column is deliberately **not** banded or colour-graded: the program has a
   committed target for the music beds (>= 15%) and none for SFX, and inventing one on the
   screen would be a judgement this wave has not earned.
+
+---
+
+## PROGRAM RESONANCE — Wave R2 "QA FIXES" (dev; worktree `wt-r2`)
+
+Four defects a second adversarial QA pass reproduced on the composed tree, plus the four LOWs
+QA listed as optional. Every one was re-reproduced here with QA's own probes before being
+fixed, and every fix is measured against its reproduction. Base: `3a20d18` (A3 AUDITION).
+
+**FIX 1 (HIGH) — the ENVELOP opening could wall a soldier out of the mission.**
+`Mission.EnsureConnectivity` floods from `players[0]` and repaired enemies, evac tiles, the
+terminal and sabotage sites — but never the OTHER PLAYERS. Invisible while every deployment
+shape seated the squad in cols 0-3 (which `BuildProcedural` deliberately keeps clear); W4's
+ENVELOP centre seat (cols 7-10, rows 3-6) drops soldiers into the mid-field HIGH-cover band,
+and `Grid.CostMap`'s no-corner-cutting rule seals pockets around them. The intent already
+existed 55 lines away: `PlaceBarrels` puts every player in its `required` set.
+
+Isolated soldiers over 5760 fresh boards per heat (4 shapes × 8 objectives × 6 missions ×
+30 seeds), all of them under ENVELOP:
+
+| heat | RECRUIT | 0 | 2 | 4 | 6 | 8 |
+|---|---|---|---|---|---|---|
+| before | 25 | 23 | — | 11 | — | 7 |
+| after  | 0 | 0 | 0 | 0 | 0 | 0 |
+
+34,560 boards after the fix: zero isolations, zero entombments, zero unreachable
+hostiles/objectives. Deterministic repro (`Probe2 dump 3 Defend 3 3`): NOX at (9,6) had
+neighbours `# # # / o . # / # # #`, no legal move and no path to the squad — cost `-1` before,
+`8` after. **FIX 1b ELBOW ROOM**: a soldier can be reachable and still be frozen on turn 1
+(every neighbour cover or a teammate, diagonals killed by the corner rule), so one adjacent
+cardinal cover tile is opened. Measured firing rate 22 / 1536 boards (1.4%) and **every one
+under ENVELOP** — 15 procedural, 7 on authored arenas 28 and 3; it never fires under
+FRONTAL/PINCER/CROSSFIRE, so no pre-W4 opening's geometry is touched. Zero extra RNG draws
+(PAIRTEST PASS).
+
+**New standing guard `SIGHTLINE_GEOMTEST`** (wired into `scripts/qa-sweep.sh`): 3072 fresh
+boards across 4 shapes × 8 objectives × 6 missions × heats {0,8}, asserting soldier
+reachability + elbow room + hostile/objective reachability, with a per-heat ENVELOP
+non-vacuity guard. QA flagged that `STACKTEST` structurally could not have caught this — it
+is a fixed 16-board sample that never varies the deployment shape. GEOMTEST fails loudly on
+the pre-fix tree.
+
+**FIX 2 (MEDIUM) — the incoming-fire forecast under-read real damage by 31-44%.**
+It was `hit% × mean(post-armor band)`, whose comment claimed crits (up) and "the graze floor
+(down)" cancelled. The graze term is not down: a graze deals `max(1, reduce(DmgMin))` on a
+roll that would otherwise deal **zero**, so both omissions pushed the same way. Measured over
+200k `Combat.Resolve` rolls per weapon on the post-X1 bands:
+
+| weapon | old card | real mean | old ratio | new card | new ratio |
+|---|---|---|---|---|---|
+| Rifle | 2.13 | 2.96 | 1.392× | 2.960 | 1.002× |
+| Shotgun | 3.29 | 4.58 | 1.394× | 4.578 | 1.000× |
+| Sniper | 3.40 | 4.80 | 1.412× | 4.798 | 1.001× |
+| Lmg | 2.59 | 3.41 | 1.315× | 3.401 | 1.001× |
+| Smg | 1.42 | 2.04 | 1.435× | 2.034 | 1.002× |
+
+New `Combat.ExpectedDamage` enumerates the real roll (uniform band with per-roll crit, plus
+the graze leg at Resolve's exact `grazeTop`) and is the single source of truth for the card.
+`Combat.FragileFloor` stays excluded, deliberately and one-directionally: it fires on at most
+the first shot of a volley at full HP, so folding it into a per-tile sum over every bearing
+gun would under-read. **Why the test missed it**: `THREATTEST` hand-recomputed the same
+formula, so a wrong formula agreed with itself. New leg (11) rolls 100k real `Resolve` shots
+per weapon and asserts the forecast matches within 2% (~6σ). It fails on the old formula at
+23.9-29.2%. The autopilot's own `(DmgMin+DmgMax)*0.5` EV heuristic (`Game.Autopilot.cs:1008`)
+was deliberately left alone — it is not a displayed number, and changing it moves the
+flywheel's policy legs.
+
+**FIX 3 (MEDIUM) — the chrome-fit contract was only asserted at one text scale.**
+`VOICETEST` asserted "no generated line overflows the chrome that draws it" at `Cfg.UiScale
+== 1` while W5 ships {0.90, 1.00, 1.10, 1.20} against **fixed-pixel** chrome. Measured at the
+real game font (QA's probe used the Raylib default face and under-counted): 4 of 36 barks over
+the log column at 110%, 14 at 120% (worst 311px vs 278px); the combat log's row pitch was a
+hard-coded 14px against a 14.4px glyph box, so rows touched; the shop ellipsized card bodies
+mid-word (`"…installed on a soldi…"`, `"counters SYNDICATE for one …"`), the WAR ROOM silently
+dropped a row's words behind an `li < 2` cap, and `RE-ROLL SLATE (5 SALV)` overran its fixed
+178px button.
+
+Fixed by growing the chrome rather than shrinking the writing: `Hud.LogPanelW` /
+`LogTextWidth` / `LogPanelX` scale with the setting (never below the authored 296px; the FIELD
+TIP card already yields this column and just slides further left — at 120% it needs 780px of
+room and has 911). `Hud.LogRowPitch()` is measured from the glyph box (identical 14px at every
+scale ≤ 100%). New `Hud.FitWrap` shrinks one type step instead of ellipsizing, applied to the
+shop desc + effect line, both WAR ROOM unlock bodies and the achievement descs; the RE-ROLL
+button is sized to its measured label. Five barks were trimmed anyway and DAWN PATROL's desc
+shortened (it needed two rows at the 10px floor in a 224px lane). `VOICETEST` leg (8) re-runs
+barks + briefs + row pitch + tip-card no-overlap + **every card body in the game** at all four
+scales, failing if the body fitter reaches its floor: 19 violations before, PASS after.
+Screenshots at 120% (shop / WAR ROOM / in-mission log) confirm no ellipsis, no touching rows,
+no label outside its frame.
+
+**FIX 4 (LOW-MEDIUM) — a corrupt meta could lock the difficulty picker on RECRUIT.**
+`SaveGame.LoadMetaHeat` clamped `MaxHeat` through `Heat.Clamp`, whose floor W5 moved to −1.
+But `MaxHeat` is an unlock **ceiling**, not a dialled level. `{"MaxHeat":-9}` loaded as −1 →
+`UnlockedHeat = -1` → `PendingHeat` pinned to −1 → both intro steppers dead (minus needs
+`level > Heat.Min`, plus needs `level < unlocked`), with no way out but deleting `meta.json`.
+`Game.cs:1727` already guarded the env path with `Math.Max(0, …)`; the disk path was missed.
+Both load and save now `Math.Clamp(_, 0, Heat.Max)`. `METATEST` leg (12) asserts the floor,
+the write path, and that the picker's own predicates leave a direction live; it fails pre-fix.
+
+**LOWs, all four addressed.** (1) `SaveGame.FromUnitDto` clamps the scalars F1 left verbatim —
+`Mobility:1000000` gave a MoveBudget of 2,000,000 (and a Dijkstra flood over the whole grid on
+every hover), `Mobility:-9` a MoveBudget of 2, plus `Aim:100000`, `Armor:-50` (armor that
+*added* damage through `HardenedReduce`) and `Rank:99`. Generous envelopes, not gameplay caps:
+a legitimate save round-trips byte-identically and SAVETEST's 13 enum fingerprints are
+untouched. (2) `SchemaVersion` is now **read**: a file newer than `CurrentSchema` is refused
+and stashed to `.bak` instead of being silently misread. (3) a corrupt `display.json` is
+copied to `display.json.bak` before being discarded, latched once per session like the meta
+rule — it used to take the player's whole settings profile with it. (4) `Run.AssistLevel`'s
+RECRUIT stack was reviewed and **kept**, now documented as a decision: the assist answers a
+loss streak rather than a rung, the player most likely to have one is the player on the
+on-ramp, and the stack is worth one point (RECRUIT −1 on top of an assist already capped at −5
+at heat 0) while the gate that matters — nothing above standard — is intact.
+
+**Verification.** Release 0 warn / 0 err. `qa-sweep.sh --full`: 49/49 PASS (47 run), COVERAGE
+GAP block empty, PAIRTEST PASS. Autoplay ×10 clean (3 WIN / 7 LOSE, no TIMEOUT).
+`SIGHTLINE_BALANCE=10` → runs=20; against the same batch on base `3a20d18` the flywheel is
+unmoved: win-rate 50→50, missions 83→83, policy gap 20→20, paired gap 20→20, concordant 8→8;
+only micro-jitter in decision richness (meaningful choices/turn 2.757→2.737, lead swings/match
+0.60→0.63, avg max swing 51.13→50.70). FIX 1 changes procedural ENVELOP geometry in ~1-4% of
+builds, which is the size of that jitter.
