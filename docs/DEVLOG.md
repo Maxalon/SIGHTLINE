@@ -4778,3 +4778,11 @@ ladder and nothing anywhere else** — which is a much smaller and much better-a
 "20+ points everywhere" the brief inherited, and it is the exact shape a cold-opener repair
 produces: relief on missions 1-2 multiplies every rung's completion by the same factor, and the
 same multiplier is worth the most absolute points where completion is highest.
+
+## 3. THE ROUND TABLE — one lever per measured round, h0, n=40 each, `runs=20` asserted per chunk
+
+| round | lever | compl | ±SE | mis-win | mean t | Elim t | Escort t | ch/turn | ch/ARMED | armed/t | swings | s/kill | m1 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| R0 | baseline (shipped defaults) | 35.0% | 7.5 | 80.2 | 5.66 | 5.10 | 8.03 | 2.38 | 1.53 | 1.56 | 0.79 | 3.22 | 75% |
+| A1 | `HostileAimTrim=5` | **42.5%** | 7.8 | 82.9 | 5.46 | **5.10** | 6.30 | 2.61 | 1.68 | 1.56 | 0.74 | 3.12 | 75% |
+| A2 | `HostileAimTrim=10` | **50.0%** | 7.9 | 86.4 | 6.36 | **4.80** | **13.66** | 3.01 | 1.76 | 1.71 | 0.76 | 3.18 | 82% |
