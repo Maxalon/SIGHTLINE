@@ -5202,3 +5202,93 @@ lever; it was produced by looking at `byMission` instead of the rung average, an
 that a rung the project already ships (RECRUIT) was a controlled experiment nobody had read.
 The rung average hid a 25% mission-1 failure behind a plausible-looking 35%. Before spending
 another twenty minutes of CPU on a dial, read the decomposition you already have.
+# PROGRAM RESONANCE — WAVE A3 "AUDITION" (2026-08-29, dev on wt-a3)
+
+**The charter.** A1 built the ear (`SIGHTLINE_AUDIODUMP` / `AUDIOGATE` — a device-free
+measurement rig over the exact float samples the synth hands Raylib) and A2 rebuilt the mix
+against those numbers: the white-noise weapons, the beds with 0.000% of their energy above
+1 kHz, the undesigned 16 dB spread, the clipping kill stack. All of it was fixed **by
+measurement**, and all of it was decided **blind** — there is no audio device in this sandbox
+and nobody has ever heard this game. A3's job was the last mile: not to judge the sound, which
+this session cannot do, but to build the instrument the owner uses to judge it.
+
+## PART A — the AUDIO CHECK screen
+Reached from the intro (`[U]`, third utility row) and from the pause menu (right column, under
+the mix faders). One screen, designed for a two-minute sweep:
+
+- **23 cues, one row each**, grouped WEAPONS / COMBAT / UI / STINGERS, each with a one-line
+  "what it is for" so a cue is judged against its JOB and not its filename.
+- **Single and BURST.** BURST fires five at 105 ms — the per-shot pitch/gain jitter and the
+  six-voice round-robin only become audible under repeat fire, which is where a bad firing
+  voice actually reveals itself (A2's monotone-glissando bug would have been obvious here).
+- **The numbers beside the button**: peak dBFS, RMS dBFS and the >1 kHz energy share, computed
+  through `Audio.CueMeasure` — the same render + Welch spectrum `AUDIOGATE` uses, so what the
+  row prints is what the gate measures. RMS is tinted against the cue's mix-role band and
+  marked with a leading `!` when it has drifted out (a glyph, not only a colour, for CB mode).
+- **The mix, live**: all four faders on the same screen as the cues, movable while sound is
+  playing, persisted on release (and only then — glancing at the bench does not touch disk).
+- **The music beds**: AMBIENT / COMBAT snaps plus a hand-swept INTENSITY slider, with the two
+  bed gains actually being pushed at Raylib drawn as bars, so the crossfade is visible as well
+  as audible.
+- **The four concurrent stacks** the gate is written against (`w_lmg+crit+death+st_kill`, the
+  3-shot overwatch chain, …) fired at the SAME offsets, so the limiter gets an ear test to go
+  with its clipped-sample count.
+
+**Device-free-safe.** With no device every `Play` is a silent no-op, and the screen says
+`NO AUDIO DEVICE` on its face with a line explaining that the controls and the numbers are
+still real — rather than looking broken. The measurement table warms 3 cues/frame so entering
+the screen is never a hitch on a real machine. **No new `Raylib.GetTime()` reads**: the screen
+runs on its own dt accumulator (`Game.AudClock`).
+
+`SIGHTLINE_AUDITION=1` (+ `SIGHTLINE_AUDITIONFIRE=1` to light the just-played rows) shoots it.
+`SIGHTLINE_AUDITIONTEST=1` is the contract: the listing covers `SfxCueIds` **exactly** (a cue
+added to `BuildRecipes` and forgotten here would otherwise become the one sound nobody ever
+auditions), every cue has a role caption, nothing overflows its column at **120% text scale**,
+every stack resolves to known cues, and every printed number is finite and inside budget.
+Wired into `qa-sweep.sh` (now 46).
+
+## PART B — the writing C1 flagged
+C1 shipped the fiction frame and named its own two weaknesses. Both are closed.
+
+1. **Bark pools 3 → 6 variants per beat, no new beats** (C1's own recommendation; the rate
+   limit is the feature). With a ceiling of six lines a mission and one firing per beat, three
+   variants meant a returning player heard the same sentence on the same trigger every other
+   run. `VOICETEST` now pins depth `>= 6`, asserts the variants inside a beat are **distinct**
+   (widening can never mean padding with repeats) and rejects an exclamation mark outright.
+2. **The opposition line stopped being a template.** Three of four factions read
+   `"<X> ground: a, b, c. <rule>."` — one shape, in the middle slot of a three-line card whose
+   other two lines are fixed in form. Each line now has its own sentence shape: a prohibition
+   (Syndicate), a thesis (Legion), an observation (Wardens), a shrug (unaligned). **The
+   load-bearing half is untouched** — every number is still interpolated from the constant the
+   resolver applies, and low cover's `20` is now read off `Grid.CoverInfo.Defense` itself
+   rather than retyped, so a cover retune cannot leave the briefing lying. `VOICETEST` asserts
+   each value is literally present in its line, that no line uses the old template, and that no
+   two open on the same word.
+
+## VERIFICATION
+- Release **0 warnings / 0 errors**.
+- `qa-sweep.sh --full`: **46/46 PASS**, empty COVERAGE GAP block, PAIRTEST PASS.
+- `AUDIOGATE` PASS (14/14 checks) · `VOICETEST` PASS · `AUDITIONTEST` PASS.
+- **The RNG-separation probe was falsified by hand**: one `Util.Rng.Next()` injected into
+  `LowCoverDefense` turns VOICETEST into `FAIL — RNG SEPARATION`, then restored. The check is
+  not passing vacuously.
+- `SIGHTLINE_BALANCE=10` (`runs=20` asserted) on wt-a3 vs the branch point: the **entire
+  aggregate JSON is identical** field-for-field after dropping timing. Seeded autoplay
+  (`SIGHTLINE_SEED` 11/22/33/44/55) is **frame-identical** to base on every seed. The wave is
+  gameplay-inert, which is the proof the new text takes zero shared draws.
+- Autoplay: 19 runs on this branch, one TIMEOUT at frame 20000 on an unseeded clock seed. It is
+  **not attributable to this wave** — the seeded pairing above shows the two trees produce the
+  same frame counts, and base independently produced a 17,845-frame run against the same 20,000
+  cap. It is a tail flake of the weak smoke-test autopilot, pre-existing.
+- Screenshots read and judged: the screen at the default palette, under `SIGHTLINE_CB=1`, and
+  at `SIGHTLINE_UISCALE=3` (120%), plus the pause menu and the intro. **Every one of them is
+  the no-audio-device state** — this sandbox has no other state to photograph.
+
+## LEFT UNDONE / FOR THE OWNER
+- **The taste.** Nothing here judges a sound. The screen exists so the owner can, and the
+  useful output is a list of cue ids with a sentence each.
+- The two music beds are auditioned by crossfade, not measured on-screen (rendering 16 s of bed
+  per frame is not a thing a screen can do); their numbers stay in `AUDIODUMP` / `AUDIOGATE`.
+- The `>1 kHz` column is deliberately **not** banded or colour-graded: the program has a
+  committed target for the music beds (>= 15%) and none for SFX, and inventing one on the
+  screen would be a judgement this wave has not earned.

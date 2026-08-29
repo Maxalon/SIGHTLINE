@@ -166,17 +166,33 @@ public static class Voice
         _                 => "LOCAL FORCES",
     };
 
+    /// The defence low cover WOULD be worth, read straight off the resolver's own CoverInfo rather
+    /// than retyped here. The Syndicate line quotes this number to say what their optics take away,
+    /// so a tuning change to cover can never leave the briefing quietly lying about it.
+    static int LowCoverDefense => new Grid.CoverInfo { Level = 1 }.Defense;
+
     /// The briefing's opposition line: who holds the ground and the one thing they do to you.
+    ///
+    /// A3 REWRITE. C1 shipped these as a template and said so: three of the four read
+    /// "<Faction> ground: a, b, c. <rule>." — which is fine once and obvious by run four, because
+    /// the briefing card is the same three-line shape every mission and the middle line was the
+    /// only slot with any room to vary. Each line now has its OWN sentence shape (a prohibition,
+    /// a thesis, an observation, a shrug) so four runs read as four briefings.
+    ///
+    /// What did NOT change is the load-bearing half: every number below is interpolated from the
+    /// constant the resolver actually applies (Combat.LegionCloseAim / LegionCloseCrit /
+    /// WardenLongAim, Unit.CloseRange / LongRange, and cover's own Defense). That is what makes
+    /// this line worth reading instead of decoration, and VOICETEST asserts each value is present.
     public static string FactionBriefLine(Faction f) => f switch
     {
         Faction.Syndicate =>
-            $"Syndicate ground: drones, shield walls, screen cells. Their optics see over low cover — take high cover or take height.",
+            $"Do not trust low cover here. Syndicate optics shoot over it, and the {LowCoverDefense} it should cost them is worth nothing. High walls, or height.",
         Faction.Legion =>
-            $"Legion ground: rushers, lancers, hounds. Inside {Unit.CloseRange} tiles they hit +{Combat.LegionCloseAim} aim and +{Combat.LegionCloseCrit} crit. Do not let them arrive.",
+            $"Range is the whole fight. Let the Legion inside {Unit.CloseRange} tiles and it picks up +{Combat.LegionCloseAim} aim and +{Combat.LegionCloseCrit} crit. Hold them off, or brace them.",
         Faction.Wardens =>
-            $"Warden ground: snipers, screeners, artillery. At long range they gain +{Combat.WardenLongAim} aim. Close the distance or break the lane.",
+            $"The Wardens will not come to you. Past {Unit.LongRange} tiles their rifles gain +{Combat.WardenLongAim} aim, so every turn in the open is one they are paid for.",
         _ =>
-            "No colours on this one — a mixed local force. Expect a little of everything and read the pods.",
+            "No colours flying. Deserters and contractors holding what they stand on. No faction rule applies — fight the pods you can see.",
     };
 
     /// The FIELD MANUAL dossier. Three short paragraphs: who they are, how they fight, how you
@@ -268,6 +284,17 @@ public static class Voice
     /// is handed none simply does not fire — the "soldier with no bond gets a bond line" trap.
     static bool NeedsOther(Beat b) => b == Beat.BondDown;
 
+    // A3: THE POOLS ARE SIX DEEP, NOT THREE.
+    // C1 shipped three variants a beat and named the weakness itself: "widen the pools before
+    // widening the beat list." With a ceiling of six lines a MISSION and a beat that fires once
+    // each, three variants meant a returning player heard the same sentence on the same trigger
+    // roughly every other run. Doubling the pool is the cheapest possible fix and costs the log
+    // nothing. Deliberately NO new beats: the rate limit is the feature (see the gates above),
+    // and more triggers would spend the budget the mechanical lines need.
+    //
+    // The bar has not moved. Every line is somebody on a radio with a rifle in their hands:
+    // present tense, one or two clauses, no exclamation marks, no narration, nothing that
+    // comments on the game. VOICETEST pins the pool depth, the duplicate check and the width.
     static readonly Dictionary<Beat, string[]> Lines = new()
     {
         [Beat.FirstBlood] = new[]
@@ -275,36 +302,54 @@ public static class Voice
             "First one's down.",
             "That's one. Keep moving.",
             "Contact confirmed. One down.",
+            "Scratch one.",
+            "One down. Watch your angles.",
+            "Down. Next.",
         },
         [Beat.BondDown] = new[]
         {
             "{0} is down. Cover me.",
             "Get to {0}. Now.",
             "{0}, stay with me.",
+            "{0} is hit. I'm going.",
+            "That's {0} hit. Cover.",
+            "{0}. Talk to me.",
         },
         [Beat.PodRout] = new[]
         {
             "They're breaking. Push.",
             "That's it, they're running.",
             "Line's cracked. Press it.",
+            "They've had enough. Move up.",
+            "Their nerve's gone. Go.",
+            "Broken. Keep them broken.",
         },
         [Beat.Stabilize] = new[]
         {
             "Pressure on. Stay awake.",
             "You're not dying here.",
             "I've got you. Hold on.",
+            "Bleeding's stopped.",
+            "Still with us. Barely.",
+            "Wound's packed. Lie still.",
         },
         [Beat.Vendetta] = new[]
         {
             "That's for last time.",
             "I remember this outfit.",
             "Been waiting for you lot.",
+            "Same colours. Good.",
+            "I owe this lot a bad day.",
+            "We've met. It went badly.",
         },
         [Beat.LastStanding] = new[]
         {
             "I'm the last one up.",
             "Just me. Still shooting.",
             "Squad's down. Still here.",
+            "Everyone's down but me.",
+            "On my own out here.",
+            "Down to me. Still working.",
         },
     };
 
@@ -565,6 +610,31 @@ public static class Voice
             Chk(dos.Split('\n').Length == 3, $"FACTION {fc} dossier is not 3 paragraphs");
             foreach (var para in dos.Split('\n')) Chk(Filled(para), $"FACTION {fc} dossier has an empty paragraph");
         }
+        // A3 — THE NUMBERS MUST STAY TRUE. Each rewritten opposition line quotes the constant the
+        // resolver actually applies; assert the interpolated value is literally present, so a
+        // tuning change to any of them fails here instead of leaving the briefing lying.
+        string synLine = FactionBriefLine(Faction.Syndicate);
+        string legLine = FactionBriefLine(Faction.Legion);
+        string wrdLine = FactionBriefLine(Faction.Wardens);
+        Chk(synLine.Contains(LowCoverDefense.ToString()), $"SYNDICATE brief no longer states low cover's real defence ({LowCoverDefense}): {synLine}");
+        Chk(legLine.Contains(Unit.CloseRange.ToString()), $"LEGION brief no longer states Unit.CloseRange ({Unit.CloseRange}): {legLine}");
+        Chk(legLine.Contains("+" + Combat.LegionCloseAim), $"LEGION brief no longer states LegionCloseAim (+{Combat.LegionCloseAim}): {legLine}");
+        Chk(legLine.Contains("+" + Combat.LegionCloseCrit), $"LEGION brief no longer states LegionCloseCrit (+{Combat.LegionCloseCrit}): {legLine}");
+        Chk(wrdLine.Contains(Unit.LongRange.ToString()), $"WARDEN brief no longer states Unit.LongRange ({Unit.LongRange}): {wrdLine}");
+        Chk(wrdLine.Contains("+" + Combat.WardenLongAim), $"WARDEN brief no longer states WardenLongAim (+{Combat.WardenLongAim}): {wrdLine}");
+        // A3 — AND THEY MUST NOT BE THE SAME SENTENCE FOUR TIMES. C1's own review found three of
+        // the four sharing one template ("<Faction> ground: a, b, c. <rule>."), which is what makes
+        // the briefing card read as boilerplate by run four. Pin it: no line may use that shape,
+        // and no two may open with the same word.
+        var openers = new HashSet<string>();
+        foreach (Faction fc in Enum.GetValues(typeof(Faction)))
+        {
+            string bl = FactionBriefLine(fc);
+            Chk(!System.Text.RegularExpressions.Regex.IsMatch(bl, @"^\w+ ground: "),
+                $"FACTION {fc} brief line fell back to the '<X> ground: ...' template: {bl}");
+            string first = bl.Split(' ')[0].ToLowerInvariant();
+            Chk(openers.Add(first), $"FACTION {fc} brief line opens on '{first}', already used by another faction");
+        }
 
         // ── (5) BRIEFINGS — every objective x faction x arena (incl. procedural + finale) resolves
         //      to exactly 3 filled lines that fit the briefing card without wrapping past 3 rows.
@@ -601,9 +671,15 @@ public static class Voice
         string longest = "KESTREL";   // widest callsign in Mission.Callsigns (7 chars)
         foreach (Beat bt in Enum.GetValues(typeof(Beat)))
         {
-            Chk(Lines.ContainsKey(bt) && Lines[bt].Length >= 2, $"BEAT {bt} has fewer than 2 lines");
+            // A3 widened every pool from 3 to 6. Pinned at >= 6 so the depth cannot quietly
+            // regress, and asserted DISTINCT so "widening" can never mean padding with repeats.
+            Chk(Lines.ContainsKey(bt) && Lines[bt].Length >= 6, $"BEAT {bt} has fewer than 6 variants");
+            var beatSeen = new HashSet<string>();
+            foreach (var dup in Lines[bt]) Chk(beatSeen.Add(dup), $"BEAT {bt} lists the same line twice: {dup}");
             foreach (var raw in Lines[bt])
             {
+                // the writing bar, as a check: a soldier on a radio does not shout in punctuation.
+                Chk(!raw.Contains('!'), $"BEAT {bt} line uses an exclamation mark: {raw}");
                 Chk(!string.IsNullOrWhiteSpace(raw), $"BEAT {bt} has an empty line");
                 Chk(NeedsOther(bt) == raw.Contains("{0}"),
                     $"BEAT {bt} line slot mismatch (needs-other={NeedsOther(bt)}): {raw}");

@@ -6,7 +6,7 @@ using Raylib_cs;
 
 namespace Sightline;
 
-public enum Phase { Intro, PlayerTurn, EnemyTurn, Barracks, Win, Lose, Draft, WarRoom, Codex, SkirmishSetup }   // WarRoom (W3), Codex (W6), SkirmishSetup (W4) appended; none persisted
+public enum Phase { Intro, PlayerTurn, EnemyTurn, Barracks, Win, Lose, Draft, WarRoom, Codex, SkirmishSetup, AudioCheck }   // WarRoom (W3), Codex (W6), SkirmishSetup (W4), AudioCheck (A3) appended; none persisted
 // APPEND-ONLY: serialized as a raw (int) in SaveGame (CardDto.Objective). Never reorder or
 // remove a member — a saved run stores the ordinal, so a reorder silently corrupts the loaded
 // objective. Add new objectives at the END only. (SaveGame.SelfTest asserts the tail ordinal.)
@@ -3631,7 +3631,7 @@ public partial class Game
         // advance animation queue — but NEVER while the codex is open (FUL-2: BeginCodex clears
         // Paused for the overlay, which let queued enemy ShotAnims resolve while the player read
         // the field manual; the queue freezes with the fight and resumes on ExitCodex).
-        if (Phase != Phase.Codex && _anims.Count > 0)
+        if (Phase != Phase.Codex && Phase != Phase.AudioCheck && _anims.Count > 0)   // A3: the audition screen freezes the fight exactly like the codex does
         {
             var a = _anims[0];
             if (!a.Started) { a.Started = true; a.OnStart(this); }
@@ -3714,6 +3714,7 @@ public partial class Game
             case Phase.Draft: HandleDraftClick(); break;
             case Phase.WarRoom: HandleWarRoomClick(); break;   // W3: cross-run meta screen
             case Phase.Codex: HandleCodexInput(); break;       // W6: field manual / reference
+            case Phase.AudioCheck: HandleAudition(t); break;   // A3: the AUDIO CHECK audition screen
             case Phase.SkirmishSetup: HandleSkirmishSetup(); break;  // W4: skirmish objective/heat picker
         }
 
@@ -4696,6 +4697,7 @@ public partial class Game
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseAnimSpeed)) CycleAnimSpeed();   // W5 comfort: playback pacing
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseUiScale)) Display.CycleUiScale();  // W5 comfort: UI text size
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseCodex)) { BeginCodex(); }   // W6: open the field manual (remembers this phase for BACK)
+        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseAudio)) { BeginAudition(); }   // A3: open AUDIO CHECK (same remember-and-restore contract as the codex)
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseAbandon)) AbandonRun();
     }
 
@@ -7405,6 +7407,15 @@ public partial class Game
                           Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.OverlayBtn8))
                          || Raylib.IsKeyPressed(KeyboardKey.N);
             if (train) { BeginTraining(); return; }
+        }
+
+        // RESONANCE A3: intro AUDIO CHECK — the cue/mix audition screen (button or key U).
+        if (Phase == Phase.Intro)
+        {
+            bool audio = (Raylib.IsMouseButtonPressed(MouseButton.Left) &&
+                          Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.OverlayBtn9))
+                         || Raylib.IsKeyPressed(KeyboardKey.U);
+            if (audio) { BeginAudition(); return; }
         }
 
         // W1 mode-seam: end-card MAIN MENU (OverlayBtn2, button or Esc) — back to the intro without

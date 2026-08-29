@@ -283,6 +283,19 @@ public static class Program
             Console.WriteLine(Audio.GateReport());
             return;
         }
+        // RESONANCE A3: SIGHTLINE_AUDITIONTEST=1 : the AUDIO CHECK screen's contract — every cue
+        // in SfxCueIds is listed exactly once and is a registered recipe, every cue has a role
+        // caption, no label overflows its column at 120% text scale, every gate stack resolves to
+        // known cues, and the numbers the rows print are finite and inside the budget. Needs a tiny
+        // window + the real atlases (the width assertions measure actual glyphs).
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_AUDITIONTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "auditiontest");
+            LoadGameFonts();
+            Console.WriteLine(Game.AuditionSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         // SIGHTLINE_AMBIENTTEST=1 : per-biome ambient field stays bounded/finite/on-board (Phase 5). No window.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_AMBIENTTEST") == "1")
         {
@@ -688,6 +701,7 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_FOCUSOW") == "1") game.DebugFocusOw();      // focused-overwatch cone
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_WARROOM") == "1") game.DebugWarRoom();   // W3 cross-run meta screen
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CODEX") == "1") game.DebugCodex();       // W6 field-manual reference screen
+        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_AUDITION") == "1") game.DebugAudition();  // A3 AUDIO CHECK screen (+ SIGHTLINE_AUDITIONFIRE=1 lights the just-played rows)
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_HAZARD") == "1") game.DebugHazards();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_TAGEDIT") == "1") game.DebugTagEditor();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_WOUND") == "1") game.DebugWound();
