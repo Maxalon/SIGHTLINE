@@ -327,17 +327,91 @@ public partial class Game
         return p - e;
     }
 
+    // ── TRUE BAND — the choice-band RULE (SIGHTLINE_CHOICEBAND=mult restores the old one) ──
+    // Both axes of CountMeaningfulChoices ask the same question — "how many candidates are
+    // near-best?" — and until this wave both answered it with a MULTIPLICATIVE window: within
+    // 12% of the best shot value, within 15% of the best safety score. That makes the window
+    // WIDTH a function of the best score's magnitude, and on axis (b) the best safety score
+    // `24 − TileExposure + cover*8 + height*5` FALLS as the board gets dangerous. So raising
+    // threat shrank the absolute window `0.15 × pbest` and disqualified tiles: the instrument
+    // read "the fight got safer" as "the decision got richer". Axis (a) rises with threat and
+    // axis (b) fell with it, and the sum sat at 1.55-1.64 across five structurally different
+    // levers (W4) and 1.44-1.78 across six difficulty rungs (X2) — a near-invariant that made
+    // the decision-density gate structurally unreachable, and that two waves missed against.
+    // MEASURED CORRECTION (TRUE BAND, SIGHTLINE_BANDPROBE, docs/measurements/tb/): that
+    // MECHANISM is not what happens on this tree. `pbest` does NOT slide with threat — it is
+    // pinned at the "full cover, unexposed, ground level" value of 40 (24 + 2*8) at every rung
+    // (median 40 at heat 0, 4 and 8; mean 37.7 / 35.4 / 36.6), because the autopilot almost
+    // always has one such tile in one-action reach. The multiplicative window was therefore
+    // already ~6 points wide everywhere, and the `pbest > 0` guard fired on 0.5-2.3% of
+    // soldier-turns. What actually flattens the axis is the CAP, and what makes the window
+    // wrong is that it is a fraction of a number whose own scale is arbitrary. Both are fixed
+    // here anyway: an ADDITIVE band means a candidate is a real alternative when it scores
+    // within a FIXED number of points of the best, so the window is stated in the units the
+    // score is actually made of (cover 8, elevation 5, a gun 6-10) instead of in a percentage
+    // of a magnitude nobody chose. See DEVLOG §TRUE BAND for the tables and the honest
+    // accounting of which half of this change moved the number.
+    // NOTE: these five are `static readonly`, not `const`, on purpose — SIGHTLINE_BANDTEST PINS
+    // them by value, and a const would be folded at the comparison so the pin could never fail.
+    /// The pre-wave multiplicative rule, kept reproducible for the paired instrument diff.
+    public static bool MultChoiceBand =
+        Environment.GetEnvironmentVariable("SIGHTLINE_CHOICEBAND") == "mult";
+    public static readonly float MultShotFrac = 0.88f;   // pre-wave axis (a): within 12% of the best shot
+    public static readonly float MultPosFrac  = 0.85f;   // pre-wave axis (b): within 15% of the best safety
+    /// Axis (a) additive band, in SHOT-VALUE points. Axis (a) needed the same treatment and the
+    /// evidence is its own: the best shot value spans p5=3 to p95=25 (median 11-13), so the old
+    /// 12% window ran 0.36 points wide against a weak best shot and 3.0 wide against a strong
+    /// one — it WIDENED exactly when one target was obviously best, which is backwards. The gap
+    /// to the best is bimodal (p50=0-1, p75=4-5, p95=8-13): a rival is either a near-duplicate
+    /// or a different proposition. 2 points admits the duplicates without admitting a shot a
+    /// whole finisher/flank bonus (4-14) away, and it lands near the old window at the MEDIAN
+    /// best (0.12 x 11 = 1.3), so the axis-(a) level barely moves — the point is that both axes
+    /// now band on the same terms, not that this one changes.
+    public static readonly float ShotBand = 2f;
+    /// Axis (b) additive band, in SAFETY points. The safety scale's own units are the tactical
+    /// steps: one cover level = 8, one elevation step = 5, one exposed enemy gun = 6-10. 3 points
+    /// is deliberately BELOW all three — a tile inside the band is one you could stand on without
+    /// giving up a cover step, an elevation step or eating an extra gun.
+    public static readonly float PosBand = 3f;
+    /// Anti-inflation cap on axis (b). KEPT, and this is the wave's least obvious result: the
+    /// cap is not a wart on the metric, it is load-bearing. The admitted-count distribution is
+    /// hard right-skewed (p50=2-3, p75=4-5, p95=9-15) and the long tail is concentrated in the
+    /// SAFE states — a soldier in an empty quiet field has a dozen identically safe tiles and
+    /// faces one shrug, not a dozen decisions. Measured over heats 0/4/8, of the three caps
+    /// available (2, 4, uncapped) only 4 both separates the rungs and leaves the body of the
+    /// distribution alone: UNCAPPED reads 2.64 / 3.00 / 2.62 (h0 and h8 indistinguishable — the
+    /// tail swamps the signal), cap 2 reads 1.08 / 1.24 / 1.38 (separates, but saturates against
+    /// the cap and compresses the spread to 0.30), cap 4 reads 1.59 / 1.86 / 2.11 (monotone, and
+    /// the widest spread of the three at 0.52). 4 also sits at the measured p75-p80 of the
+    /// admitted count, so it preserves the median and the interquartile body and clips only the
+    /// open-field tail. Raising it towards uncapped buys inflation, not signal.
+    public static readonly int PosChoiceCap = 4;
+
+    /// THE BAND itself, factored out so both axes provably apply the same rule and so
+    /// SIGHTLINE_BANDTEST can pin it without needing a board. Returns how many of `vals` count
+    /// as near-best. `mult` = the pre-wave multiplicative window (cut at `best * frac`);
+    /// otherwise the additive band (cut at `best - band`). Pure — no state, no Util.Rng.
+    public static int AdmitNearBest(List<float> vals, float best, bool mult, float frac, float band)
+    {
+        float cut = mult ? best * frac : best - band;
+        int n = 0;
+        foreach (var v in vals) if (v >= cut) n++;
+        return n;
+    }
+
     /// Decision-richness proxy for THIS player turn. Two axes of real choice, summed across every
     /// soldier that can still act:
-    ///   (a) WHICH TARGET — how many distinct candidate shots are within ~12% of the soldier's best
-    ///       shot (a real "who do I shoot?" call, not a forced single option).
+    ///   (a) WHICH TARGET — how many distinct candidate shots are within `ShotBand` value points
+    ///       of the soldier's best shot (a real "who do I shoot?" call, not a forced single option).
     ///   (b) WHERE TO STAND AFTER FIRING (TEMPO) — because the aimed shot no longer ends the turn,
     ///       a soldier that has a shot AND a spare action faces a genuine "where do I end up after
-    ///       firing?" bet: how many distinct safe destinations (low exposure / good cover) are
-    ///       near-best. This axis simply DID NOT EXIST before the tempo change (firing zeroed the
-    ///       budget), so its contribution is new decision depth, not a re-weighting. Capped per
-    ///       soldier so an open map can't trivially inflate it.
-    /// Reuses ShotValue/ComputeOdds/TileExposure (read-only — never mutates state). Cheap + bounded.
+    ///       firing?" bet: how many distinct safe destinations (low exposure / good cover) score
+    ///       within `PosBand` safety points of the best. This axis simply DID NOT EXIST before the
+    ///       tempo change (firing zeroed the budget), so its contribution is new decision depth,
+    ///       not a re-weighting. Capped per soldier (`PosChoiceCap`) so an open map can't
+    ///       trivially inflate it.
+    /// Reuses ShotValue/ComputeOdds/TileExposure (read-only — never mutates state, never draws
+    /// from Util.Rng: SIGHTLINE_BANDTEST pins both). Cheap + bounded.
     int CountMeaningfulChoices() => CountMeaningfulChoices(out _, out _, out _, out _, out _);
     int CountMeaningfulChoices(out int acting, out int armed)
         => CountMeaningfulChoices(out acting, out armed, out _, out _, out _);
@@ -377,8 +451,22 @@ public partial class Game
             if (best <= 0f) continue;                                      // no shot -> no shot/positioning decision
             armed++;
             losTargets += vals.Count;                                      // W4: raw simultaneous presentation
-            foreach (var v in vals) if (v >= best * 0.88f) comparable++;   // within ~12% of best
+            comparable = AdmitNearBest(vals, best, MultChoiceBand, MultShotFrac, ShotBand);
             if (comparable >= 2) { total += comparable - 1; tgtChoices += comparable - 1; }  // real target alternatives
+            if (ChoiceProbe.On)
+            {
+                ChoiceProbe.ShotTurns++; ChoiceProbe.ShotCands += vals.Count;
+                ChoiceProbe.Score(ChoiceProbe.ShotBest, best);
+                foreach (var v in vals)
+                {
+                    ChoiceProbe.Gap(ChoiceProbe.ShotGap, best - v);
+                    if (v >= best * 0.88f) ChoiceProbe.ShotMult++;
+                    if (v >= best - 1f) ChoiceProbe.ShotAdd1++;
+                    if (v >= best - 2f) ChoiceProbe.ShotAdd2++;
+                    if (v >= best - 3f) ChoiceProbe.ShotAdd3++;
+                    if (v >= best - 4f) ChoiceProbe.ShotAdd4++;
+                }
+            }
 
             // (b) where to stand after firing — only when the soldier can fire AND still has an
             // action left to move (the post-shot positioning bet). Score each 1-action-reachable
@@ -401,14 +489,44 @@ public partial class Game
                         if (pcost[x, y] <= 0 || pcost[x, y] > u.MoveBudget) continue;  // 1-action steps only
                         float s = SafetyAt(x, y); pvals.Add(s); if (s > pbest) pbest = s;
                     }
-                if (pbest > 0f)
+                if (ChoiceProbe.On)
                 {
-                    int pComparable = 0;
-                    foreach (var s in pvals) if (s >= pbest * 0.85f) pComparable++;
+                    ChoiceProbe.PosTurns++; ChoiceProbe.PosCands += pvals.Count;
+                    if (pbest <= 0f) ChoiceProbe.PosSkippedGuard++;
+                    ChoiceProbe.Score(ChoiceProbe.PosBest, pbest);
+                    int a3 = 0, am = 0;
+                    foreach (var s in pvals)
+                    {
+                        ChoiceProbe.Gap(ChoiceProbe.PosGap, pbest - s);
+                        if (pbest > 0f && s >= pbest * 0.85f) { ChoiceProbe.PosMult++; am++; }
+                        if (s >= pbest - 2f) ChoiceProbe.PosAdd2++;
+                        if (s >= pbest - 3f) { ChoiceProbe.PosAdd3++; a3++; }
+                        if (s >= pbest - 4f) ChoiceProbe.PosAdd4++;
+                        if (s >= pbest - 5f) ChoiceProbe.PosAdd5++;
+                    }
+                    ChoiceProbe.AdmitAdd3[Math.Min(ChoiceProbe.AdmitMax, a3)]++;
+                    ChoiceProbe.AdmitMult[Math.Min(ChoiceProbe.AdmitMax, am)]++;
+                    if (a3 >= 2)
+                    {
+                        ChoiceProbe.PosRawAdd3 += a3 - 1;
+                        ChoiceProbe.PosCap2Add3 += Math.Min(2, a3 - 1);
+                        ChoiceProbe.PosCap4Add3 += Math.Min(4, a3 - 1);
+                    }
+                }
+                // MULT mode keeps the pre-wave `pbest > 0` guard, because a non-positive best
+                // makes `MultPosFrac * pbest` DEGENERATE (for pbest<0 the cut sits ABOVE pbest,
+                // so nothing at all qualifies) — the old rule had to skip the axis outright. The
+                // additive band has no such degeneracy and needs no guard. Measured, the guard is
+                // nearly inert anyway (2/210 soldier-turns at heat 0, 0/91 at heat 8), so dropping
+                // it is not what moves the number; it goes because it is a threat-coupled
+                // disqualifier that silently deletes the axis exactly when the board is worst.
+                if (!MultChoiceBand || pbest > 0f)
+                {
+                    int pComparable = AdmitNearBest(pvals, pbest, MultChoiceBand, MultPosFrac, PosBand);
                     if (pComparable >= 2)
                     {
-                        int add = Math.Min(2, pComparable - 1);                        // capped: anti-inflation
-                        total += add; posChoices += add;
+                        int add = Math.Min(MultChoiceBand ? 2 : PosChoiceCap, pComparable - 1);
+                        total += add; posChoices += add;                                // capped: anti-inflation
                     }
                 }
             }
@@ -1967,5 +2085,80 @@ public partial class Game
         if (bx >= 0 && (my < 0 || best < my)) { IssueMove(bx, by); return true; }
         if (reachable.Count > 0) { var (rx, ry) = Util.Choice(reachable); IssueMove(rx, ry); return true; }
         return false;
+    }
+}
+
+/// ── TRUE BAND: the instrument-DESIGN probe (SIGHTLINE_BANDPROBE=1) ──────────────────
+/// CountMeaningfulChoices bands its two axes against a score whose SCALE nobody had ever
+/// looked at. This probe records that scale: histograms of the per-soldier best score on
+/// each axis (`best` for "which target", `pbest` for "where do I stand"), histograms of
+/// every candidate's GAP to it, and the candidate counts that a multiplicative window and
+/// several additive ones would each admit over the identical sample. It exists so the band
+/// constants are chosen from the distribution instead of guessed.
+/// Default OFF; when on it is allocation-free (fixed arrays), read-only, and takes no RNG
+/// draw. Only reachable from the balance batch (CountMeaningfulChoices runs under
+/// Stats.Enabled only), so interactive play never pays for it.
+public static class ChoiceProbe
+{
+    public static bool On;
+    public const int NegOff = 40, ScoreMax = 120;   // score bucket = round(v)+40, range -40..80
+    public const int GapMax = 60;                   // gap bucket = round(best - v), clamped
+    public static readonly long[] ShotBest = new long[ScoreMax + 1];
+    public static readonly long[] ShotGap = new long[GapMax + 1];
+    public static readonly long[] PosBest = new long[ScoreMax + 1];
+    public static readonly long[] PosGap = new long[GapMax + 1];
+    // axis (a): armed soldier-turns scored, total candidate shots, and how many candidates
+    // each window admits (mult 0.88 = the pre-wave rule; add-N = within N value points).
+    public static long ShotTurns, ShotCands, ShotMult, ShotAdd1, ShotAdd2, ShotAdd3, ShotAdd4;
+    // axis (b): soldier-turns reaching the positioning axis, how many were SKIPPED by the
+    // pre-wave `pbest > 0` guard (a threat-coupled disqualifier), candidates, and windows.
+    public static long PosTurns, PosSkippedGuard, PosCands, PosMult, PosAdd2, PosAdd3, PosAdd4, PosAdd5;
+    // capped-contribution sums, so the effect of the anti-inflation cap is visible: raw
+    // (n-1) vs the shipped min(2, n-1), under the additive-3 rule.
+    public static long PosRawAdd3, PosCap2Add3, PosCap4Add3;
+    // per-turn ADMITTED-COUNT histograms (clamped at 40): the distribution the anti-inflation
+    // cap actually clips. Choosing the cap needs this, not the mean.
+    public const int AdmitMax = 40;
+    public static readonly long[] AdmitAdd3 = new long[AdmitMax + 1];
+    public static readonly long[] AdmitMult = new long[AdmitMax + 1];
+
+    public static void Score(long[] h, float v)
+    { int i = (int)MathF.Round(v) + NegOff; h[i < 0 ? 0 : (i > ScoreMax ? ScoreMax : i)]++; }
+    public static void Gap(long[] h, float d)
+    { int i = (int)MathF.Round(d); h[i < 0 ? 0 : (i > GapMax ? GapMax : i)]++; }
+
+    static string Pct(long[] h, int off)
+    {
+        long n = 0; foreach (var c in h) n += c;
+        if (n == 0) return "(no data)";
+        var qs = new[] { 0.05, 0.25, 0.50, 0.75, 0.95 };
+        var outp = new System.Text.StringBuilder();
+        int qi = 0; long run = 0;
+        for (int i = 0; i < h.Length && qi < qs.Length; i++)
+        {
+            run += h[i];
+            while (qi < qs.Length && run >= qs[qi] * n)
+            { outp.Append($"p{qs[qi] * 100:0}={i - off} "); qi++; }
+        }
+        double mean = 0; for (int i = 0; i < h.Length; i++) mean += (double)h[i] * (i - off);
+        return $"n={n} mean={mean / n:0.00} {outp}".TrimEnd();
+    }
+
+    public static string Report()
+    {
+        var s = new System.Text.StringBuilder();
+        s.AppendLine("── CHOICE-BAND PROBE (SIGHTLINE_BANDPROBE) ───────────────────────────────");
+        s.AppendLine($"axis(a) which-target : armedTurns={ShotTurns} cands={ShotCands} ({(double)ShotCands / Math.Max(1, ShotTurns):0.00}/turn)");
+        s.AppendLine($"  best-shot-value    : {Pct(ShotBest, NegOff)}");
+        s.AppendLine($"  gap(best-v)        : {Pct(ShotGap, 0)}");
+        s.AppendLine($"  admitted/turn      : mult.88={(double)ShotMult / Math.Max(1, ShotTurns):0.000}  add1={(double)ShotAdd1 / Math.Max(1, ShotTurns):0.000}  add2={(double)ShotAdd2 / Math.Max(1, ShotTurns):0.000}  add3={(double)ShotAdd3 / Math.Max(1, ShotTurns):0.000}  add4={(double)ShotAdd4 / Math.Max(1, ShotTurns):0.000}");
+        s.AppendLine($"axis(b) where-to-stand: turns={PosTurns} guardSkipped={PosSkippedGuard} ({100.0 * PosSkippedGuard / Math.Max(1, PosTurns):0.0}%) cands={PosCands} ({(double)PosCands / Math.Max(1, PosTurns):0.0}/turn)");
+        s.AppendLine($"  best-safety(pbest) : {Pct(PosBest, NegOff)}");
+        s.AppendLine($"  gap(pbest-s)       : {Pct(PosGap, 0)}");
+        s.AppendLine($"  admitted/turn      : mult.85={(double)PosMult / Math.Max(1, PosTurns):0.00}  add2={(double)PosAdd2 / Math.Max(1, PosTurns):0.00}  add3={(double)PosAdd3 / Math.Max(1, PosTurns):0.00}  add4={(double)PosAdd4 / Math.Max(1, PosTurns):0.00}  add5={(double)PosAdd5 / Math.Max(1, PosTurns):0.00}");
+        s.AppendLine($"  contribution/turn  : add3 raw={(double)PosRawAdd3 / Math.Max(1, PosTurns):0.000}  cap2={(double)PosCap2Add3 / Math.Max(1, PosTurns):0.000}  cap4={(double)PosCap4Add3 / Math.Max(1, PosTurns):0.000}");
+        s.AppendLine($"  admitted/turn dist : add3 {Pct(AdmitAdd3, 0)}");
+        s.AppendLine($"                     : mult {Pct(AdmitMult, 0)}");
+        return s.ToString();
     }
 }

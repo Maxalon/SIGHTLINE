@@ -489,6 +489,18 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        // SIGHTLINE_BANDTEST=1 : TRUE BAND — the decision-density INSTRUMENT as a contract.
+        // Pins the choice-band constants, proves SIGHTLINE_CHOICEBAND=mult still reproduces the
+        // pre-wave counts exactly against a literal transcription over 120 constructed boards,
+        // and proves the counter mutates no state and draws zero Util.Rng (with a sensitivity
+        // probe on the purity detector itself). Window only for Unit.SyncPos's tile->px math.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_BANDTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "bandtest");
+            Console.WriteLine(new Game().BandSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         // SIGHTLINE_SNAPTEST=1 : snap-shot cost/turn-end + flank-kill action-refund check.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_SNAPTEST") == "1")
         {
@@ -863,6 +875,10 @@ public static class Program
         // Keep batch-wide static state deterministic across matches.
         Mission.ForcedLayout = -1;       // no forced arena
         Pal.SetColorblind(false);        // default palette (irrelevant headless, set defensively)
+        // TRUE BAND: SIGHTLINE_BANDPROBE=1 dumps the CHOICE-BAND score distributions alongside
+        // the report (see ChoiceProbe). Read-only, default OFF, no RNG draw — the batch it runs
+        // under is byte-identical to the same batch without it.
+        ChoiceProbe.On = Environment.GetEnvironmentVariable("SIGHTLINE_BANDPROBE") == "1";
 
         // Optional pinned heat; otherwise cycle the ladder-spanning default set so the curve shows.
         // APEX W4: the default re-baseline now SPANS THE LADDER — {0,2,4,6,8} instead of i%5 —
@@ -1015,6 +1031,7 @@ public static class Program
         Stats.Slot = -1;
         Console.WriteLine();
         Console.WriteLine(Stats.Report());
+        if (ChoiceProbe.On) Console.WriteLine(ChoiceProbe.Report());
         Console.WriteLine(endless
             ? $"batch wall-time: {sw.Elapsed.TotalSeconds:0.0}s  ({totalMatches} stands across {runs} slots × {sloppyModes.Length} policy, wave-cap hits: {waveCapped}, frame-cap hits: {capped})"
             : $"batch wall-time: {sw.Elapsed.TotalSeconds:0.0}s  ({totalMatches} matches across {runs} campaigns × {sloppyModes.Length} policy, frame-cap hits: {capped})");

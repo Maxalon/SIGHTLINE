@@ -4946,4 +4946,257 @@ public partial class Game
     /// position dump in Program.cs. Null before the hook runs.
     public Unit DebugFilmUnit => Selected;
 
+
+    // ── TRUE BAND: SIGHTLINE_BANDTEST — the decision-density INSTRUMENT as a contract ───────
+    /// `CountMeaningfulChoices` is the number every balance wave in this project has argued
+    /// about, and until TRUE BAND nobody had pinned it. It is READ-ONLY bookkeeping whose
+    /// constants ARE the meaning of every archived `ch/ARMED` figure, so this test pins:
+    ///   1. the band CONSTANTS (a silent retune silently invalidates the archive);
+    ///   2. the RULE, on the pure `AdmitNearBest` helper — the additive band is invariant under
+    ///      a uniform shift of the score scale and the multiplicative one is NOT (that shift
+    ///      sensitivity IS the defect this wave removed), and the multiplicative rule is
+    ///      degenerate at a non-positive best (which is why it needed the `pbest > 0` guard);
+    ///   3. that `SIGHTLINE_CHOICEBAND=mult` reproduces the PRE-WAVE counts EXACTLY, checked
+    ///      against a literal transcription of the old method over 120 constructed boards —
+    ///      and that the band dial actually moves the number on a good share of them (a dial
+    ///      that changed nothing would pass every other assertion here);
+    ///   4. that the two halves sum to the total by construction, in BOTH modes, and that the
+    ///      band never moves the shot GATE (`armed`) — only the near-best count;
+    ///   5. that the counter mutates NO game state and takes ZERO `Util.Rng` draws — the latter
+    ///      with a SENSITIVITY probe (the same detector, fed one hand-injected draw, must FAIL),
+    ///      so a green purity result can never be the detector not detecting.
+    /// Window-free apart from Unit.SyncPos's tile->px math. Prints "BANDTEST: PASS|FAIL".
+    public string BandSelfTest()
+    {
+        NoPersist = true;
+        var fails = new List<string>();
+        bool savedBand = MultChoiceBand;
+
+        // ── 1. constants ──────────────────────────────────────────────────────────────
+        if (PosBand != 3f) fails.Add($"posBand={PosBand}");
+        if (ShotBand != 2f) fails.Add($"shotBand={ShotBand}");
+        if (PosChoiceCap != 4) fails.Add($"posChoiceCap={PosChoiceCap}");
+        if (MultPosFrac != 0.85f) fails.Add($"multPosFrac={MultPosFrac}");
+        if (MultShotFrac != 0.88f) fails.Add($"multShotFrac={MultShotFrac}");
+
+        // ── 2. the rule, on the pure helper ───────────────────────────────────────────
+        // Same RELATIVE structure (gaps 0/3/6/20), three absolute levels. The additive band
+        // must return the same count at every level; the multiplicative window must not.
+        var mid = new List<float> { 40f, 37f, 34f, 20f };
+        var hi = mid.Select(v => v + 20f).ToList();
+        var lo = mid.Select(v => v - 20f).ToList();
+        int aMid = AdmitNearBest(mid, 40f, false, MultPosFrac, PosBand);
+        int aHi = AdmitNearBest(hi, 60f, false, MultPosFrac, PosBand);
+        int aLo = AdmitNearBest(lo, 20f, false, MultPosFrac, PosBand);
+        if (aMid != 2 || aHi != 2 || aLo != 2)
+            fails.Add($"additiveNotShiftInvariant:{aMid}/{aHi}/{aLo}");
+        int mMid = AdmitNearBest(mid, 40f, true, MultPosFrac, PosBand);
+        int mHi = AdmitNearBest(hi, 60f, true, MultPosFrac, PosBand);
+        int mLo = AdmitNearBest(lo, 20f, true, MultPosFrac, PosBand);
+        // the pre-wave defect, pinned so it can never be mistaken for a fixed instrument:
+        // drop every score by 20 and the SAME board reads as strictly fewer choices.
+        if (!(mMid == 3 && mHi == 3 && mLo == 2))
+            fails.Add($"multWindowNotAsSpecified:{mMid}/{mHi}/{mLo}");
+        // degeneracy at a non-positive best — the reason the old rule carried a `pbest > 0` guard.
+        var neg = new List<float> { -10f, -13f };
+        if (AdmitNearBest(neg, -10f, true, MultPosFrac, PosBand) != 0)
+            fails.Add("multNotDegenerateAtNegativeBest");
+        if (AdmitNearBest(neg, -10f, false, MultPosFrac, PosBand) != 2)
+            fails.Add("additiveBrokenAtNegativeBest");
+
+        // ── 3./4. constructed boards ──────────────────────────────────────────────────
+        // A LOCAL Random on purpose: the Util.Rng purity check in step 5 must not have to
+        // subtract the scene builder's own draws.
+        var scenes = new Random(20260829);
+        int n = 0, bandMoved = 0, posMoved = 0;
+        for (int s = 0; s < 120; s++)
+        {
+            BuildBandScene(scenes);
+            MultChoiceBand = true;
+            int mt = CountMeaningfulChoices(out int mAct, out int mArm, out int mLos, out int mTgt, out int mPos);
+            var o = OldChoiceReference();
+            if (mt != o.total || mAct != o.acting || mArm != o.armed || mLos != o.losTargets
+                || mTgt != o.tgtChoices || mPos != o.posChoices)
+                fails.Add($"scene{s}:multNotOldRule got({mt},{mAct},{mArm},{mLos},{mTgt},{mPos}) "
+                          + $"want({o.total},{o.acting},{o.armed},{o.losTargets},{o.tgtChoices},{o.posChoices})");
+            if (mTgt + mPos != mt) fails.Add($"scene{s}:multHalvesDontSum {mTgt}+{mPos}!={mt}");
+            MultChoiceBand = false;
+            int at = CountMeaningfulChoices(out int aAct, out int aArm, out int aLos, out int aTgt, out int aPos);
+            if (aTgt + aPos != at) fails.Add($"scene{s}:addHalvesDontSum {aTgt}+{aPos}!={at}");
+            // the band decides only WHICH candidates count as near-best — never who is eligible.
+            if (aAct != mAct || aArm != mArm || aLos != mLos)
+                fails.Add($"scene{s}:bandMovedTheGate acting {mAct}->{aAct} armed {mArm}->{aArm} los {mLos}->{aLos}");
+            if (at != mt) bandMoved++;
+            if (aPos != mPos) posMoved++;
+            n++;
+        }
+        if (n != 120) fails.Add($"sceneCount={n}");
+        if (bandMoved < 20) fails.Add($"bandDialInert:{bandMoved}/{n}");
+        if (posMoved < 20) fails.Add($"posAxisDialInert:{posMoved}/{n}");
+
+        // ── 5a. no state mutation ─────────────────────────────────────────────────────
+        BuildBandScene(new Random(4242));
+        string before = BandBoardFingerprint();
+        MultChoiceBand = false; CountMeaningfulChoices();
+        MultChoiceBand = true; CountMeaningfulChoices();
+        string after = BandBoardFingerprint();
+        if (after != before) fails.Add("counterMutatedState");
+
+        // ── 5b. zero Util.Rng draws, WITH a sensitivity probe ─────────────────────────
+        bool Pure(Action body)
+        {
+            Util.Reseed(777);
+            int refDraw = Util.RandInt(0, 1000000);
+            Util.Reseed(777);
+            for (int k = 0; k < 200; k++) body();
+            return Util.RandInt(0, 1000000) == refDraw;
+        }
+        MultChoiceBand = false;
+        if (!Pure(() => CountMeaningfulChoices())) fails.Add("counterConsumesRng");
+        MultChoiceBand = true;
+        if (!Pure(() => CountMeaningfulChoices())) fails.Add("counterConsumesRngMult");
+        // The detector must be able to FAIL: feed it the same body plus one hand-injected draw.
+        if (Pure(() => { CountMeaningfulChoices(); Util.RandF(); }))
+            fails.Add("rngPurityProbeInsensitive");
+        Util.Reseed(0);                       // never leave a deterministic stream behind
+
+        MultChoiceBand = savedBand;
+        return fails.Count == 0
+            ? $"BANDTEST: PASS (boards={n} bandMoved={bandMoved} posMoved={posMoved} "
+              + $"posBand={PosBand} shotBand={ShotBand} cap={PosChoiceCap})"
+            : "BANDTEST: FAIL " + string.Join(", ", fails.Take(12));
+    }
+
+    /// Build a controlled board for BandSelfTest: scattered cover + a little high ground (so the
+    /// cover*8 and height*5 terms of the safety score both vary across the reachable set), 2-4
+    /// soldiers with mixed kit and 2-5 hostiles, all on distinct floor tiles and all with a fresh
+    /// 2-action turn. Draws ONLY from the caller's local Random — never Util.Rng.
+    void BuildBandScene(Random r)
+    {
+        Grid = new Grid();
+        Players = new List<Unit>();
+        Enemies = new List<Unit>();
+        Vip = null; CaptiveLocked = false;
+        Objective = Objective.Eliminate;
+        EvacZone.Clear();
+
+        for (int i = 0, blocks = 25 + r.Next(45); i < blocks; i++)
+            Grid.Tiles[r.Next(Grid.W), r.Next(Grid.H)] =
+                r.Next(2) == 0 ? TileType.LowCover : TileType.HighCover;
+        for (int i = 0; i < 14; i++) Grid.Height[r.Next(Grid.W), r.Next(Grid.H)] = 1;
+        Grid.ResetCoverHp();
+
+        var taken = new HashSet<(int, int)>();
+        (int x, int y) Spot()
+        {
+            for (int t = 0; t < 200; t++)
+            {
+                int x = r.Next(Grid.W), y = r.Next(Grid.H);
+                if (!taken.Add((x, y))) continue;
+                Grid.Tiles[x, y] = TileType.Floor;   // stand on floor, never inside cover
+                return (x, y);
+            }
+            return (0, 0);
+        }
+        var kinds = new[] { WeaponKind.Rifle, WeaponKind.Shotgun, WeaponKind.Sniper,
+                            WeaponKind.Smg, WeaponKind.Lmg };
+        for (int i = 0, np = 2 + r.Next(3); i < np; i++)
+        {
+            var (x, y) = Spot();
+            var u = new Unit { Name = "P" + i, Cls = "ASSAULT", Team = Team.Player, X = x, Y = y,
+                               Hp = 4 + r.Next(5), MaxHp = 8, Aim = 55 + r.Next(20),
+                               Mobility = 3 + r.Next(3), Weapon = Weapon.Make(kinds[r.Next(kinds.Length)]) };
+            u.Ammo = u.Weapon.Clip; u.SyncPos(); u.BeginTurn();
+            Players.Add(u);
+        }
+        for (int i = 0, ne = 2 + r.Next(4); i < ne; i++)
+        {
+            var (x, y) = Spot();
+            var e = new Unit { Name = "E" + i, Cls = "GRUNT", Team = Team.Enemy, X = x, Y = y,
+                               Hp = 3 + r.Next(7), MaxHp = 9, Aim = 55 + r.Next(15),
+                               Mobility = 4, Weapon = Weapon.Make(kinds[r.Next(kinds.Length)]) };
+            e.Ammo = e.Weapon.Clip; e.Alert = AlertLevel.Alert; e.SyncPos(); e.BeginTurn();
+            Enemies.Add(e);
+        }
+    }
+
+    /// Everything CountMeaningfulChoices could conceivably touch, as one string — the
+    /// no-mutation assertion.
+    string BandBoardFingerprint()
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.Append((int)Phase).Append('|').Append(Selected?.Name ?? "-").Append('|');
+        foreach (var u in Players.Concat(Enemies))
+            sb.Append(u.Name).Append(':').Append(u.X).Append(',').Append(u.Y).Append(',')
+              .Append(u.Hp).Append(',').Append(u.Ammo).Append(',').Append(u.ActionsLeft).Append(',')
+              .Append(u.Alive ? 1 : 0).Append(',').Append(u.OnOverwatch ? 1 : 0).Append(';');
+        for (int x = 0; x < Grid.W; x++)
+            for (int y = 0; y < Grid.H; y++)
+                sb.Append((int)Grid.Tiles[x, y]).Append(Grid.Height[x, y]).Append(Grid.CoverHp[x, y]);
+        return sb.ToString();
+    }
+
+    /// A LITERAL transcription of `CountMeaningfulChoices` as it stood before TRUE BAND
+    /// (multiplicative windows 0.88 / 0.85, the `pbest > 0` guard, the cap of 2). Exists only so
+    /// BandSelfTest can prove `SIGHTLINE_CHOICEBAND=mult` still reproduces it EXACTLY — every
+    /// archived `ch/ARMED` number in docs/ was measured by this code, and the reproduction is
+    /// what lets a future wave re-derive one. Do not "clean it up": its value is being a copy.
+    (int total, int acting, int armed, int losTargets, int tgtChoices, int posChoices) OldChoiceReference()
+    {
+        int total = 0, acting = 0, armed = 0, losTargets = 0, tgtChoices = 0, posChoices = 0;
+        foreach (var u in Players)
+        {
+            if (!u.Alive || !u.CanAct || u.IsVip || u.Ammo <= 0) continue;
+            acting++;
+            float best = 0f; int comparable = 0;
+            var vals = new List<float>();
+            foreach (var e in Enemies)
+            {
+                if (!e.Alive || (e == Vip && CaptiveLocked)) continue;
+                if (Util.TileDist(u.X, u.Y, e.X, e.Y) > u.Weapon.MaxRange) continue;
+                bool commanding = Grid.HeightAt(u.X, u.Y) - Grid.HeightAt(e.X, e.Y) >= 2;
+                if (!Grid.HasLineOfSight(u.X, u.Y, e.X, e.Y, commanding)) continue;
+                float v = ShotValue(Combat.ComputeOdds(Grid, u, e), e);
+                vals.Add(v);
+                if (v > best) best = v;
+            }
+            if (best <= 0f) continue;
+            armed++;
+            losTargets += vals.Count;
+            foreach (var v in vals) if (v >= best * 0.88f) comparable++;
+            if (comparable >= 2) { total += comparable - 1; tgtChoices += comparable - 1; }
+
+            if (u.ActionsLeft >= 2)
+            {
+                float SafetyAt(int x, int y)
+                {
+                    float s = 24f - TileExposure(u, x, y);
+                    var foe = AliveEnemies().OrderBy(en => Util.TileDist(x, y, en.X, en.Y)).FirstOrDefault();
+                    if (foe != null) s += Grid.GetCover(x, y, foe.X, foe.Y).Level * 8f;
+                    s += Grid.HeightAt(x, y) * 5f;
+                    return s;
+                }
+                var pcost = Grid.CostMap(u.X, u.Y, (x, y) => IsOccupiedByOther(x, y, u), out _, u.MoveBudget * 2);
+                float pbest = SafetyAt(u.X, u.Y); var pvals = new List<float> { pbest };
+                for (int x = 0; x < Grid.W; x++)
+                    for (int y = 0; y < Grid.H; y++)
+                    {
+                        if (pcost[x, y] <= 0 || pcost[x, y] > u.MoveBudget) continue;
+                        float s = SafetyAt(x, y); pvals.Add(s); if (s > pbest) pbest = s;
+                    }
+                if (pbest > 0f)
+                {
+                    int pComparable = 0;
+                    foreach (var s in pvals) if (s >= pbest * 0.85f) pComparable++;
+                    if (pComparable >= 2)
+                    {
+                        int add = Math.Min(2, pComparable - 1);
+                        total += add; posChoices += add;
+                    }
+                }
+            }
+        }
+        return (total, acting, armed, losTargets, tgtChoices, posChoices);
+    }
+
 }
