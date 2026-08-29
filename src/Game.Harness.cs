@@ -4676,6 +4676,10 @@ public partial class Game
                 }
             }
 
+            // (4b) the autopilot's HVT focus policy ships ON — it is the policy every published
+            //      Decapitate number was measured through, so its default is part of the contract.
+            if (!SmartHvtFocus) fails.Add("hvtPolicyDefaultOff");
+
             // ---- (6) no HVT on any other objective -------------------------------------------
             Build(3, 4242, sBase, sPer, sAim, Objective.Eliminate);
             if (Hvt != null || HvtBuffed) fails.Add("hvtLeakedOffObjective");

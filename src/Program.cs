@@ -102,6 +102,10 @@ public static class Program
             Combat.HvtHpBonusPerMission = xhvtd;
         if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_HVTAIM"), out int xhvta) && xhvta >= 0)
             Combat.HvtAimBonus = xhvta;
+        //   SIGHTLINE_HVTPOLICY=0 : an INSTRUMENT dial (autopilot only, no player-facing effect).
+        //   Demotes the HVT from "every soldier charges it" to an ordinary target, so a Decapitate
+        //   win rate can be split into what the MISSION costs and what the BOT's focus policy costs.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_HVTPOLICY") == "0") Game.SmartHvtFocus = false;
 
         bool smartplay = Environment.GetEnvironmentVariable("SIGHTLINE_SMARTPLAY") == "1";
         bool autoplay = Environment.GetEnvironmentVariable("SIGHTLINE_AUTOPLAY") == "1" || smartplay;

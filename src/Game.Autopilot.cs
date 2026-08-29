@@ -1023,8 +1023,23 @@ public partial class Game
         return false;
     }
 
+    // W8 THE HALF WALL — an INSTRUMENT dial, not a game rule. `SmartDecapitate` below is a hard
+    // focus policy: while the HVT lives, every soldier peels its guards, shoots it, grenades it or
+    // WALKS AT IT, and ignores the rest of the force except a blocker within 3 tiles. On the
+    // finale that is fine — Mission.Build de-stacks the boss force by 3-4 bodies. On a mid-run
+    // Decapitate the force is NOT de-stacked (an ELITE node even adds +2 bodies and +1 stat), so
+    // the same policy walks a squad across an intact firing line. That makes "the mid-run
+    // Decapitate is hard" ambiguous between the GAME and the BOT, and this wave will not publish
+    // a number that cannot tell them apart. `SIGHTLINE_HVTPOLICY=0` demotes the HVT to an ordinary
+    // target (generic combat: clear what is shooting you, kill the HVT when it is the best shot),
+    // EXCEPT when it is the last active hostile, where the focus branch still runs so a batch can
+    // never stall. DEFAULT true == today's behaviour exactly.
+    public static bool SmartHvtFocus = true;
+
     bool SmartDecapitate(Unit u)
     {
+        if (!SmartHvtFocus && Hvt != null && Hvt.Alive
+            && Enemies.Count(e => e.Alive && e.Active) > 1) return false;
         if (Hvt != null && Hvt.Alive)
         {
             // GUARDED HVT (W4): while the HVT shrugs off damage, PEEL its bodyguards first — shoot a
