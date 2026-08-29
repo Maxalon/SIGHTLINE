@@ -4466,6 +4466,69 @@ public partial class Game
     ///      the text scale reaches Cfg symmetrically (measure and draw share one multiplier), and
     ///      the animation multiplier is HARD-PINNED to 1x under AutoPlay/NoPersist — the guard that
     ///      keeps the autopilot smoke test and the SIGHTLINE_BALANCE flywheel bit-for-bit as before.
+    /// X2 TRUE NORTH II — SIGHTLINE_OPENERTEST. Pins the COLD-OPENER GRACE (`Mission.OpenerTrim`):
+    /// the base force is trimmed by the full amount on mission 1, by half (rounded up) on mission
+    /// 2, and NOT AT ALL from mission 3 — the same ramp `Game.SetupMission` already applies to
+    /// Heat's own escalation, applied to the force heat's grace cannot reach. Also pins the
+    /// floor (a trim can never take the force below 3 bodies), determinism, and the shipped
+    /// default, so a future wave cannot silently un-ship the repair that moved mission 1 from
+    /// 75% to 100% (DEVLOG §X2).
+    public string OpenerSelfTest()
+    {
+        NoPersist = true;
+        var fails = new List<string>();
+        int shipped = Sightline.Mission.OpenerTrim;
+
+        int CountAt(int mission, int trim, int heat = 0)
+        {
+            Sightline.Mission.OpenerTrim = trim;
+            Util.Reseed(4242);
+            _run = new Run(); _run.Start();
+            _run.HeatLevel = heat;
+            _run.CurrentCard = new MissionCard { Objective = Objective.Eliminate, ModName = "STANDARD", Reward = RewardKind.None };
+            SetupMission(mission);
+            return Enemies.Count;
+        }
+
+        try
+        {
+            // (1) the shipped default is the measured one — 1 body off the opener.
+            if (shipped != 1) fails.Add("shippedTrim=" + shipped);
+
+            // (2) the ramp's SHAPE: full on m1, half (rounded up) on m2, nothing from m3.
+            foreach (int trim in new[] { 1, 2 })
+            {
+                int m1Off = CountAt(1, 0) - CountAt(1, trim);
+                int m2Off = CountAt(2, 0) - CountAt(2, trim);
+                int m3Off = CountAt(3, 0) - CountAt(3, trim);
+                if (m1Off != trim) fails.Add($"trim{trim}:m1Off={m1Off}");
+                if (m2Off != (trim + 1) / 2) fails.Add($"trim{trim}:m2Off={m2Off}");
+                if (m3Off != 0) fails.Add($"trim{trim}:m3Off={m3Off}");
+            }
+
+            // (3) OFF is the pre-X2 opener, and it is not accidentally the same as ON.
+            if (CountAt(1, 0) == CountAt(1, 1)) fails.Add("trimIsNoOp");
+
+            // (4) the floor: a huge trim can never field fewer than 3 bodies (or none at all).
+            int floored = CountAt(1, 99);
+            if (floored < 3) fails.Add("floorBroken=" + floored);
+
+            // (5) deterministic — the same seed and trim build the same force twice.
+            if (CountAt(1, 1) != CountAt(1, 1)) fails.Add("nonDeterministic");
+
+            // (6) the ramp is a BASE-force grace and stacks with Heat's own: the RECRUIT rung
+            //     (-1 body) still fields exactly one fewer than heat 0 at m1 with the trim on,
+            //     which is the relation ONRAMPTEST pins from the other side.
+            int stdM1 = CountAt(1, 1, 0), recM1 = CountAt(1, 1, -1);
+            if (recM1 != stdM1 - 1) fails.Add($"recruitDelta {recM1} vs {stdM1}");
+        }
+        finally { Sightline.Mission.OpenerTrim = shipped; }
+
+        return fails.Count == 0
+            ? "OPENERTEST: PASS (cold-opener grace: full trim at m1, half at m2, none from m3; shipped default 1; floor 3 holds; deterministic; RECRUIT still one body under heat 0 at m1)"
+            : "OPENERTEST: FAIL " + string.Join(", ", fails);
+    }
+
     public string OnRampSelfTest()
     {
         NoPersist = true;

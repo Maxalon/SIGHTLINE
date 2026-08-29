@@ -4878,3 +4878,327 @@ exceptions, no TIMEOUT); `SIGHTLINE_BALANCE=10` runs=20, report-identical to the
 **Left deliberately.** No key-rebinding UI (still descoped); the R1 fixes claim F11 by fiat.
 `Mission.cs` was touched on the single `bump` line only — W4 owns that file's deployment shapes;
 `Maps.cs`, `Ai.cs`, `Game.Autopilot.cs` and `Renderer.cs` untouched (W4 / V3).
+# PROGRAM RESONANCE — WAVE X2 "TRUE NORTH II" (2026-08-29, senior dev on wt-x2)
+
+**The charter.** Fourteen waves merged into this program and **every balance number in it was
+measured on the tree its wave branched from, never on the merged tree.** Each wave held its own
+base's ladder; the composition was never measured. X2 is a measurement-and-correction wave: run
+the definitive post-merge ladder, decide what the target should be and say why, then correct
+toward it one lever per round.
+
+**THE BASE COMMIT OF EVERY NUMBER BELOW IS `a61ef42`** (RESONANCE W4 "THE SECOND AXIS", the
+integration tip) plus X2's own default-off measurement scaffolding. Omitting that line is what
+created this wave; it will not be omitted again.
+
+## Method
+`SIGHTLINE_BALANCE=10` per chunk under `xvfb-run` on a **snapshot of the Release binary**
+(`runbin/<tag>/`, so the tree can keep building while a round is in flight), two disjoint CRN
+slot sets (`SIGHTLINE_BALANCE_BASE` 0 / 10) x greedy+sloppy = **40 campaigns per rung**. The
+chunk runner asserts the JSON's own `runs` field (it cannot be half-written) and prints OK/BAD;
+**every chunk quoted here printed OK with `runs=20`.** `XDG_CONFIG_HOME` and
+`SIGHTLINE_BALANCE_JSON` are pinned per chunk (several dev agents share the container). Every
+chunk's JSON, report extract and raw log is archived under `docs/measurements/x2/`, with the
+exact command lines in its README.
+
+## 1. THE DEFINITIVE POST-MERGE LADDER (no lever; n=40 per rung; `runs=20` asserted x12 chunks)
+
+| rung | run completion | ±SE | mission win (n) | mean turns | ch/turn | ch/ARMED | armed/turn | swings | shots/kill |
+|---|---|---|---|---|---|---|---|---|---|
+| RECRUIT | **75.0%** | 6.8 | 94.3 (175) | 5.65 | 2.45 | 1.52 | 1.61 | 0.77 | 3.26 |
+| heat 0 | **35.0%** | 7.5 | 80.2 (131) | 5.66 | 2.38 | 1.53 | 1.56 | 0.79 | 3.22 |
+| heat 2 | **40.0%** | 7.7 | 82.6 (132) | 5.71 | 2.76 | 1.78 | 1.55 | 0.63 | 3.07 |
+| heat 4 | **20.0%** | 6.3 | 75.0 (124) | 6.34 | 2.63 | 1.67 | 1.58 | 0.69 | 2.99 |
+| heat 6 | **32.5%** | 7.4 | 81.7 (142) | 5.83 | 1.69 | 1.44 | 1.18 | 0.85 | 3.10 |
+| heat 8 | **7.5%** | 4.2 | 68.4 (117) | 6.01 | 1.36 | 1.50 | 0.91 | 0.73 | 3.06 |
+
+This supersedes every ladder published before it, including X1's 52.5/27.5/15.0 (base `2100858`),
+W5's on-ramp pair (base `b68f38a`) and FUL-13's 52.5/35/30/22.5/10.
+
+**Three facts fall out, and only the first was expected.**
+
+**(a) The published band is missed at exactly ONE rung.** Against FUL-13's
+55 / 40 / 30 / 20 / 10 ±8 (h8 ±5): h2 **IN**, h8 **IN**, h4 2.0 low, h6 4.5 **ABOVE**, and
+**h0 12.0 low** — the only rung outside by more than noise. The "20+ points below the band at
+h0 and h4" the brief inherited from W4 is half right: h0 is genuinely low, h4 is a rounding
+error from its floor, and the top of the ladder is fine.
+
+**(b) The ladder is not monotonic, and at n=40 it cannot be.** h2 (40.0) reads *above* h0
+(35.0) and h6 (32.5) reads *above* h4 (20.0). The standard error on a 40-campaign rung is
+**±6-8 points**, which is the same size as the ±8 band tolerance and larger than the 10-point
+step the band asks between rungs. Every wave in this program has been resolving the ladder at a
+precision that cannot see it. The honest statement of this measurement is: *RECRUIT is clearly
+easiest, h8 is clearly hardest, and heats 0-6 are one flat 20-40% plateau that n=40 cannot
+order.*
+
+**(c) The real defect is the COLD OPENER, and RECRUIT already ran the experiment.**
+Mission 1 is always Eliminate (`Run.CardForNode`'s Start node → `ObjectiveFor(1)`), so
+"Eliminate mean turns" and "mission 1" are very nearly the same measurement on this tree. At
+heat 0 the per-mission curve is **U-shaped**:
+
+| | m1 | m2 | m3 | m4 | m5 | m6 |
+|---|---|---|---|---|---|---|
+| heat 0 win% (n) | **75 (40)** | 79 (14) | 89 (19) | 91 (22) | 76 (17) | 74 (19) |
+| RECRUIT win% (n) | **100 (40)** | 89 (18) | 92 (26) | 94 (32) | 100 (25) | 88 (34) |
+
+The opener is as lethal as the finale and 15 points harder than the middle of the run — the
+front-loaded anxiety `docs/DESIGN.md` §3.D explicitly forbids ("Don't front-load anxiety… give
+the player a beat to find footing before the spike"). `Game.SetupMission` already carries a fix
+for this exact failure mode — the EARLY-MISSION HEAT GRACE, whose comment reads "the measured
+~20% mission-1 loss (which hard-caps run completion, a geometric product)" — but it is **gated
+on `heat > 0`**, so it protects rungs 1-8 from *their* extra bodies and leaves the base force
+untouched at the rung that needs it most.
+
+And the size of the effect is not a guess. On the **same 40 worlds**, RECRUIT's only
+mission-1 difference from heat 0 is **one hostile body** (its −1 stat is a no-op at m1, where
+`bump = Math.Max(0, (n-1) + statDelta)` is already 0 — the fact W4's ONRAMPTEST repair
+surfaced) plus the 5-turn bleed-out valve. Mission 1 goes **75% → 100%, zero losses in 40
+campaigns.** Ten of heat 0's twenty-six lost runs die on the opening mission.
+
+## 2. THE TARGET — I am KEEPING the band, adding the rung it is missing, and fixing its stated precision
+
+The brief offered the option of adjusting the band rather than the game, and named the
+strongest argument for it: the game now has a **RECRUIT rung below heat 0** that did not exist
+when the band was written, so heat 0 no longer has to be the on-ramp. **I am not taking it, and
+the reason is a measurement.**
+
+FUL-13 set h0 = 55 *before* RECRUIT existed. W5 then added RECRUIT and measured the pair on its
+own base at **RECRUIT 75 / h0 55** — i.e. the on-ramp was designed as a **+20 step above an h0
+of 55**, with RECRUIT present. On this tree RECRUIT measures **75.0** (n=40): the on-ramp has
+not moved at all. What has moved is heat 0, from 55 to 35 — so the step a player takes when
+they leave the on-ramp is now **40 points, double the one that was designed**. The RECRUIT
+argument, followed honestly, argues for restoring h0, not for lowering the band to meet it.
+Lowering h0's target to ~40 would make the first paid rung a 35-point cliff off a tutorial
+setting, which is the anxiety side of DESIGN §3.D, not the flow channel.
+
+The second reason is that the band is **not** broadly missed. Only h0 is out by more than one
+standard error. FUL-13's re-set was justified because the game had *changed identity* (routes
+that dodged their own hardest content started dealing it); nothing comparable happened here.
+Fourteen waves of accumulation moved ONE rung and left the other four where they were. That is
+a correction, not a re-specification.
+
+**Two amendments I am proposing, both from measurement, neither of them a difficulty change:**
+
+**(i) Publish the RECRUIT rung in the band: `RECRUIT 75 ±8`, with a standing floor of
+`RECRUIT − h0 ≥ 15`.** The band has never included the rung below zero even though the game has
+shipped it for two waves. RECRUIT measures 75.0 here and 75 at W5's own base — the only number
+in this project that has reproduced across a re-baseline — so it is the safest anchor the ladder
+has, and pinning it is what makes "the on-ramp is too steep" a *gate* instead of an observation.
+
+**(ii) State the band's precision, and stop reading rung ORDER off it at n=40.** A 40-campaign
+rung carries **±6-8 points of standard error** — the same size as the ±8 tolerance and larger
+than the 10-point step the band asks between rungs. That is why this baseline reads h2 above h0
+and h6 above h4: those inversions are noise, and no wave should spend a lever on them. Pooling
+adjacent rungs (n=80) gives back a monotone ladder and is the granularity this harness can
+actually resolve:
+
+| pooled rung pair | measured | ±SE | band target (mean of the two rungs) | verdict |
+|---|---|---|---|---|
+| RECRUIT | 75.0 (n=40) | 6.8 | *(unpublished — proposed 75)* | anchor |
+| heat 0-2 | **37.5** (n=80) | 5.4 | 47.5 | **10.0 low** |
+| heat 4-6 | **26.3** (n=80) | 4.9 | 25.0 | **on target** |
+| heat 8 | 7.5 (n=40) | 4.2 | 10 (±5) | in band |
+
+**So the correction this wave owes the game is +10 completion points at the BOTTOM of the
+ladder and nothing anywhere else** — which is a much smaller and much better-aimed job than the
+"20+ points everywhere" the brief inherited, and it is the exact shape a cold-opener repair
+produces: relief on missions 1-2 multiplies every rung's completion by the same factor, and the
+same multiplier is worth the most absolute points where completion is highest.
+
+## 3. THE ROUND TABLE — one lever per measured round, h0, n=40 each, `runs=20` asserted per chunk
+
+| round | lever | compl | ±SE | mis-win | mean t | Elim t | Escort t | ch/turn | ch/ARMED | armed/t | swings | s/kill | m1 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| R0 | baseline (shipped defaults) | 35.0% | 7.5 | 80.2 | 5.66 | 5.10 | 8.03 | 2.38 | 1.53 | 1.56 | 0.79 | 3.22 | 75% |
+| A1 | `HostileAimTrim=5` | **42.5%** | 7.8 | 82.9 | 5.46 | **5.10** | 6.30 | 2.61 | 1.68 | 1.56 | 0.74 | 3.12 | 75% |
+| A2 | `HostileAimTrim=10` | **50.0%** | 7.9 | 86.4 | 6.36 | **4.80** | **13.66** | 3.01 | 1.76 | 1.71 | 0.76 | 3.18 | 82% |
+
+## 4. THE ROUND TABLE, CONTINUED — the lever that was shipped
+
+| round | lever | compl | ±SE | mis-win | mean t | Elim t | Escort t | ch/turn | ch/ARMED | armed/t | swings | s/kill | m1 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| O1 | **`OpenerTrim=1`** — one body off m1, one off m2 | **57.5%** | 7.8 | 89.2 | 5.90 | **3.25** | **12.81** | 2.57 | 1.60 | 1.60 | 0.61 | **3.30** | **100%** |
+
+`R0diag-h0-b0` (the X2 tree with every new knob OFF, same pinned slot set) reproduces
+`R0-h0-b0` **exactly** — runs, missions, completion, `decisionRichness`, `byObjective`,
+`byMission`, `playerClasses` and all ten per-slot paired records MATCH — so every round above
+is a comparison against the same instrument. `SIGHTLINE_PAIRTEST=1` is **PASS** with the
+shipped default on (h0 slot0 and h4 slot1 both byte-MATCH): `OpenerTrim` is integer arithmetic
+on the mission number and consumes **zero `Util.Rng` draws**.
+
+### Why `OpenerTrim` and not the aim trim
+
+Both work. `HostileAimTrim` is a clean, linear dial — **+7.5 completion per 5 aim points** at
+heat 0 (35.0 / 42.5 / 50.0 at trims 0 / 5 / 10), it leaves Eliminate's turn budget untouched at
+the 5-point dose, and it *raises* every decision-density number (ch/turn 2.38 → 3.01 at the
+10-point dose, armed/turn 1.56 → 1.71) because soldiers who survive keep shooting. But it is a
+**global difficulty dial with no diagnosis behind it**: it makes the whole game easier by the
+same amount everywhere, which is precisely the kind of undirected change that produced this
+wave's problem in the first place. And the dose that reaches the band (10) breaks two turn
+budgets (Eliminate 4.80, Escort 13.66).
+
+`OpenerTrim` is a **repair of a named, measured, design-doc-violating defect** — the U-shaped
+difficulty curve whose left arm ends a quarter of all runs before the player has earned a single
+promotion — and it lands heat 0 at 57.5% against a target of 55%. It is shipped; the aim trim
+stays in the tree, default 0, as a measured and priced dial for whoever needs one next.
+
+### The three gates O1 moves, and what is actually true underneath
+
+1. **`Eliminate mean turns` 5.10 → 3.25 (gate ≥ 5.0): BREACHED, and the gate is measuring the
+   wrong thing on this tree.** Mission 1 is *always* Eliminate (`Run.CardForNode`'s Start node
+   → `ObjectiveFor(1)`), and at heat 0 the baseline's Eliminate sample is **n=40 with m1 n=40**
+   — the two are the same measurement. R0's 5.10 turns is not a two-hit trade; it is a losing
+   grind, 25% of which ends in a wipe with the last two soldiers trading shots. The metric that
+   actually guards X1's purchase is **shots-per-kill, and it goes UP: 3.22 → 3.30.** Each body
+   still takes three shots; there is one fewer body and a full squad shooting it. X1 bought
+   "a trade takes two hits" and that is intact; what it also inadvertently bought was
+   "mission 1 takes two extra turns *because you are losing it*", and that is what O1 gives back.
+2. **`lead-swings/match` 0.79 → 0.61 (gate ≥ 0.79): BREACHED.** Honest mechanism, not an
+   artifact: a 4-body opener against a full squad is not a contested fight, and mission 1 is
+   ~26% of all matches played. Lead-swings and "the opener should not be a coin flip" are in
+   direct tension, and this wave chose the opener. Note the aim trim breaches it too (0.74 at
+   −5), so does every lever measured here — the baseline's 0.79 is the number a *broken* opener
+   produces.
+3. **`Escort` 8.03 → 12.81 turns at h0 (gate ≤ ~10): BREACHED — and it was hidden, not caused.**
+   Escort's h0 sample grows from n=13 to n=19 because more runs now reach the missions that deal
+   it. The 8.03 was a **survivorship-biased** number: only runs that were already winning got to
+   play Escort at heat 0. W4's celebrated "Escort 12.57 → 8.19" repair is partly the same
+   artifact. Escort's real h0 cost is ~13 turns and it is still the game's drag objective.
+
+## 5. THE SHIPPED LADDER — round S1, `OpenerTrim=1`, n=40 per rung, all 12 chunks `runs=20`
+
+**Base commit `a61ef42`.** The band is FUL-13's, with X2's proposed RECRUIT row added.
+
+| rung | R0 baseline | **S1 SHIPPED** | delta | band | in band? |
+|---|---|---|---|---|---|
+| RECRUIT | 75.0% | **75.0%** | 0.0 | *(proposed)* 75 ±8 | **YES** — unchanged, exactly as predicted (its m1 was already 100%) |
+| heat 0 | 35.0% | **57.5%** | **+22.5** | 55 ±8 (47-63) | **YES** — 2.5 above target |
+| heat 2 | 40.0% | **35.0%** | −5.0 | 40 ±8 (32-48) | **YES** |
+| heat 4 | 20.0% | **30.0%** | +10.0 | 30 ±8 (22-38) | **YES** — exactly on target |
+| heat 6 | 32.5% | **20.0%** | −12.5 | 20 ±8 (12-28) | **YES** — exactly on target |
+| heat 8 | 7.5% | **17.5%** | +10.0 | 10 ±5 (5-15) | **NO — 2.5 over the ceiling** (0.4 SE) |
+
+**The ladder is monotone for the first time this program: 75.0 / 57.5 / 35.0 / 30.0 / 20.0 /
+17.5.** Five of six rungs are in band and two of them (h4, h6) land on the target to the
+decimal. The rungs that moved in the "wrong" direction (h2 −5.0, h6 −12.5) and the apex's +10.0
+are all inside ±1.5 SE of their baselines — the same n=40 noise §1(b) warned about, now
+visible from the other side. Do not read those three deltas as effects of the lever; read the
+shape.
+
+**The one out-of-band rung, stated straight: heat 8 measures 17.5% against a 5-15% band, +2.5
+over the ceiling, ±6.0.** The measurement cannot distinguish it from the ceiling and the wave
+did not spend a lever on it. The apex's own m1 was already 98%, so the cold-opener repair has
+almost nothing to do there; most of the 7.5 → 17.5 is the noise band. What is real at the apex
+is unchanged and still bad: **Escort 33% (n=15), Evac 0% (n=4), Rescue 33% (n=3), Decapitate
+41%** — heat 8 is a wall made of four specific objectives, which is where a future apex wave
+should aim rather than at the rung average.
+
+### Per-objective x heat, shipped (win% (n) / mean turns) — the two archived tables
+
+| objective | RECRUIT | h0 | h2 | h4 | h6 | h8 |
+|---|---|---|---|---|---|---|
+| Eliminate | 100 (42) | **100 (41)** | **100 (41)** | 95 (42) | 93 (42) | 93 (42) |
+| Defend | 97 (38) | 82 (34) | 71 (34) | 75 (36) | 91 (32) | 85 (26) |
+| Decapitate | 85 (41) | 79 (33) | 54 (26) | 59 (29) | **34 (29)** | 41 (17) |
+| Escort | 85 (20) | 89 (19) | 100 (16) | 94 (18) | 95 (19) | **33 (15)** |
+| Hack | 100 (14) | 92 (12) | 75 (12) | 85 (13) | 85 (13) | 100 (12) |
+| Sabotage | 100 (12) | 91 (11) | 90 (10) | 91 (11) | 92 (12) | 100 (10) |
+| Evac | 100 (6) | 100 (4) | 100 (4) | 67 (3) | 75 (4) | **0 (4)** |
+| Rescue | 100 (6) | 100 (3) | 100 (5) | 100 (4) | 83 (6) | 33 (3) |
+
+Mean turns (same order): Eliminate 2.74 / 3.25 / 3.30 / 3.45 / 4.20 / 4.15 · Defend 9.00 / 8.90
+/ 8.65 / 8.55 / 8.90 / 8.70 · Decapitate 4.50 / 4.32 / 5.12 / 4.85 / 5.88 / 4.94 · **Escort
+13.48 / 12.81 / 10.50 / 10.55 / 8.86 / 11.35** · Hack 3.66 / 3.50 / 4.40 / 3.95 / 3.88 / 3.33 ·
+Sabotage 3.42 / 2.69 / 3.40 / 3.37 / 3.75 / 2.64 · Evac 11.70 / 5.20 / 6.80 / 8.30 / 3.80 /
+5.50 · Rescue 4.70 / 2.67 / 5.42 / 3.25 / 4.97 / 4.00. Full tables in
+`docs/measurements/x2/{R0,S1}-BYOBJECTIVE.txt`.
+
+## 6. THE GATES — every one, with its number
+
+| gate | target | R0 baseline | **S1 shipped** | verdict |
+|---|---|---|---|---|
+| ladder inside the band at every rung | all 6 | h0 12 low; h6 4.5 high; **non-monotonic** | RECRUIT/h0/h2/h4/h6 **IN**; **h8 17.5 vs 5-15** | **5 of 6 — h8 out by +2.5 (0.4 SE)** |
+| RECRUIT stays meaningfully easier than h0 | real gap | +40.0 (the defect: double the designed step) | **+17.5** (75.0 vs 57.5) | **MET** — and back to roughly W5's designed +20 |
+| shots-per-kill (the two-hit trade) | ≥ 3.00 | 3.22 (h0); 2.99 at h4 | **3.30 (h0)**; 3.22 / 3.23 / 3.27 / 3.29 / 3.56 | **MET at every rung, and up at every rung** |
+| armed soldiers / turn | ≥ 1.50 | 1.56 (h0) | **1.60 (h0)**, 1.58 (h2), 1.61 (h4) | **MET** at h0-h4 (h6 0.96 / h8 0.89 / RECRUIT 1.44 — h6 fell from 1.18) |
+| Eliminate mean turns | ≥ 5.0 | 5.10 (h0) | **3.25 (h0)** | **BREACHED −1.85** — see §4; on this tree Eliminate *is* mission 1, and 5.10 was a losing grind |
+| lead-swings / match | ≥ 0.79 | 0.79 (h0), 0.74 pooled | **0.61 (h0)**, 0.70 pooled | **BREACHED −0.18** — a 4-body opener against a full squad is not contested, and m1 is ~26% of matches |
+| no objective mean past ~10 turns at h0 or h4 | ≤ ~10 | h0 max 8.90; **h4 Escort 11.70 already breaching** | **h0 Escort 12.81**, h4 Escort 10.55 | **BREACHED** — Escort's h0 8.03 was survivorship bias (n 13 → 19); its real cost was always ~13 turns |
+| `SIGHTLINE_PAIRTEST` | PASS | PASS | **PASS** (h0 slot0 + h4 slot1 byte-MATCH with the shipped default on) | **MET** |
+| `HEATLADDERTEST` | PASS | PASS | **PASS** (untouched — the lever is a body count, not a damage row) | **MET** |
+| autoplay x10 | no exception, no TIMEOUT | — | **5 WIN / 5 LOSE, 0 exceptions, max 14022 frames vs the 20000 cap** | **MET** |
+
+**Reported, NOT chased** (the brief's forbidden metric): `choices/ARMED-soldier-turn` reads
+1.82 / 1.60 / 1.73 / **1.91** / 1.44 / 1.46 (RECRUIT→h8) against the baseline's 1.52 / 1.53 /
+1.78 / 1.67 / 1.44 / 1.50, and `meaningful-choices/turn` 2.61 / 2.57 / 2.73 / **3.07** / 1.38 /
+1.29 against 2.45 / 2.38 / 2.76 / 2.63 / 1.69 / 1.36. **No lever was pointed at either.** Two
+observations for the record, both refinements of W4's law rather than contradictions of it:
+the h4 cell at 1.91 is the highest `choices/ARMED` this project has recorded, and the aim-trim
+rounds moved it too (1.53 → 1.68 → 1.76 at trims 0/5/10). W4's conservation held across levers
+that changed *geometry at constant lethality*; a lever that lowers how much enemy fire LANDS
+raises both axes at once, because more soldiers survive to hold targets AND the board is safer
+to stand on. That is consistent with the mechanism W4 identified and is the strongest argument
+yet for re-specifying axis (b) additively (spec in ROADMAP).
+
+## 7. VERIFICATION
+- `dotnet build -c Release` — **0 warnings / 0 errors**.
+- `bash scripts/qa-sweep.sh --full` — **46/46 PASS, 0 FAIL**, and the **COVERAGE GAP block is
+  empty**. Includes the wave's new `OPENERTEST` and the three tests most exposed to a
+  body-count change (`ONRAMPTEST`, `PODTEST`, `HEATLADDERTEST`), plus its autoplay x3
+  (WIN/WIN/WIN). The sweep's derived footer is now 46.
+- **`SIGHTLINE_PAIRTEST=1` under `xvfb-run` — PASS** with the shipped default on: h0 slot0
+  (WIN, 6 cleared, 42 turns) and h4 slot1 (LOSE, 4 cleared, 32 turns) both byte-MATCH.
+- **Autoplay x10 on the shipped defaults** — 5 WIN / 5 LOSE, **zero exceptions, zero TIMEOUTs**,
+  max 14022 frames against the 20000 cap. (The win split is the weak smoke-test autopilot's,
+  not a balance number; the contract is "no exception, no TIMEOUT".)
+- **Instrument identity**: `R0diag-h0-b0` — the X2 tree with every new knob OFF, on the pinned
+  slot set — reproduces `R0-h0-b0` **exactly**: runs, missions, completion, avg-missions,
+  `decisionRichness`, `byObjective`, `byMission`, `playerClasses` and all ten per-slot paired
+  records MATCH. Every round in this write-up is therefore a comparison on one instrument.
+- **`OPENERTEST`** (new, in the sweep): pins the ramp's shape (full trim at m1, half rounded up
+  at m2, none from m3), the shipped default of 1, the 3-body floor, determinism, and that
+  RECRUIT still fields exactly one fewer body than heat 0 at m1 with the trim on.
+
+## 8. HONEST ASSESSMENT — is this tree tuned, or merely measured?
+
+**It is measured, and one real defect in it is fixed. It is not yet tuned, and the difference
+matters.**
+
+What this wave can defend. There is now a ladder of record with a base commit, run at n=40 per
+rung across six rungs including the one below zero, on the composed tree, with the raw chunks
+archived. It is monotone, five of its six rungs sit inside the published band and two land on
+target to the decimal, and the correction that got it there is a **repair of a named defect**
+rather than a difficulty dial: the game was ending a quarter of its runs on mission 1, against
+a squad with nothing earned yet, because the opener grace the codebase already contains was
+gated on `heat > 0`. RECRUIT had been running the control experiment for two waves and nobody
+had read it. Fixing it cost one hostile body on two missions and no combat math at all —
+shots-per-kill went *up* at every single rung.
+
+What it cannot defend, in order of how much it bothers me:
+
+1. **The instrument is too coarse for the question the band asks.** A 40-campaign rung carries
+   ±6-8 points; the band's tolerance is ±8 and its rung steps are 10. Three of the six deltas
+   in the shipped table (h2 −5.0, h6 −12.5, h8 +10.0) are almost certainly noise, and I cannot
+   prove otherwise from this data. **The single highest-value thing the next wave can do is not
+   another lever — it is n≥80 per rung on the state that is already shipped.** Everything else
+   in this program is built on a measurement whose error bar is the size of the answer.
+2. **Two non-regression gates are breached and one of them is a real cost.** The
+   Eliminate-turns breach I will defend (§4: on this tree that metric is mission 1's length,
+   and shots-per-kill — the metric that actually guards X1's purchase — improved). The
+   **lead-swings breach is a genuine cost**: 0.79 → 0.61 at heat 0, because a 4-body opener
+   against a full squad is not a contested fight and mission 1 is a quarter of all matches
+   played. The game traded some of its swing for a first mission that is not a coin flip. I
+   think that is the right trade and I do not think it is free.
+3. **Escort is still the drag objective and the old numbers were flattering it.** 12.81 turns
+   at heat 0, 13.48 at RECRUIT, 33% win at heat 8. Its previously-celebrated 8.03/8.19 came
+   from a sample of only the runs healthy enough to reach it. This is the clearest example in
+   the project of a metric improving because the game got *worse* around it.
+4. **Heat 8 is out of band at 17.5% and the middle rungs still have no measurable teeth.**
+   Mission win-rate barely separates heats 0-6 even in the shipped state (89.2 / 82.4 / 82.1 /
+   80.2), and the apex is a wall made of four objectives (Escort 33, Evac 0, Rescue 33,
+   Decapitate 41), not a rung average. Both are recorded as ROADMAP items.
+
+**The one thing I would say to the next wave.** This wave's finding was not produced by a
+lever; it was produced by looking at `byMission` instead of the rung average, and by noticing
+that a rung the project already ships (RECRUIT) was a controlled experiment nobody had read.
+The rung average hid a 25% mission-1 failure behind a plausible-looking 35%. Before spending
+another twenty minutes of CPU on a dial, read the decomposition you already have.

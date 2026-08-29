@@ -1360,3 +1360,71 @@ sets, one lever per measured round, fresh same-slot R0 first, dip budgets, breac
 - [ ] **CROSSFIRE drags Escort** (13.40t pinned vs PINCER's 5.65t) — its NE mass sits on the
       cols 16-17 extraction corner and gets scattered by the spawn-collision loop. Gating it
       off evac objectives the way ENVELOP is gated is the cheap fix, unmeasured.
+
+### PROGRAM RESONANCE — X2 "TRUE NORTH II" (2026-08-29, details in DEVLOG §X2)
+
+- [x] **THE LADDER OF RECORD.** The first ladder ever measured on the COMPOSED tree: n=40
+      campaigns per rung across six rungs (RECRUIT + h0/2/4/6/8), `runs=20` asserted in all 12
+      chunks, base commit `a61ef42`, raw data archived in `docs/measurements/x2/`. Supersedes
+      X1's, W5's, W4's and FUL-13's ladders, each of which was measured on its own base.
+- [x] **THE BAND, re-argued and KEPT** (h0 55 / h2 40 / h4 30 / h6 20 / h8 10, ±8; h8 ±5), with
+      two amendments from measurement: **RECRUIT joins it at 75 ±8** with a standing
+      `RECRUIT − h0 ≥ 15` floor, and the band's ±8 is now documented as **≈1 standard error at
+      n=40**, so rung ORDER is not a gate at that N.
+- [x] **THE COLD-OPENER GRACE** (`Mission.OpenerTrim`, shipped 1). Mission 1 measured **75%**
+      win at heat 0 against 90% for m3-m4 — a U-shaped curve whose left arm ended a quarter of
+      all runs before the player had earned anything, and the exact front-loaded anxiety
+      DESIGN §3.D forbids. The heat grace that already fixes this is gated on `heat > 0`. One
+      body off m1 and m2 takes mission 1 to **100% (n=40, zero losses)** and heat 0 from
+      **35.0% → 57.5%**, with shots-per-kill UP at every rung. `OPENERTEST` pins it.
+- [x] **Three default-OFF dials, measured and priced, for whoever needs one**:
+      `SIGHTLINE_AIMTRIM` (**+7.5 completion per 5 aim points** at h0, Eliminate's turn budget
+      untouched at the 5-point dose; the 10-point dose reaches the band but breaks two turn
+      budgets), `SIGHTLINE_TOUGH` / `SIGHTLINE_TRIM` (X1's pair, now pinnable), and
+      `SIGHTLINE_ENEMYBASE`.
+
+- [ ] **RAISE N BEFORE SPENDING ANOTHER LEVER.** The highest-value measurement in the project
+      right now is **n≥80 per rung on the state that is already shipped**. At n=40 the error bar
+      (±6-8) is the size of the band tolerance and bigger than the step between rungs; three of
+      the six deltas in X2's shipped table are indistinguishable from noise, and two waves have
+      now argued about rung inversions that no data could resolve.
+- [ ] **Heat 8 is out of band at 17.5%** (band 5-15, so +2.5 over the ceiling, 0.4 SE). Do not
+      aim a rung-average lever at it: the apex is a wall made of four objectives —
+      **Escort 33% (n=15), Evac 0% (n=4), Rescue 33% (n=3), Decapitate 41% (n=17)** — and the
+      rung average is what those produce.
+- [ ] **Escort is the drag objective and its repair was flattered by a broken ladder.**
+      12.81 turns at h0 and 13.48 at RECRUIT in the shipped state, against the 8.03/8.19 that
+      W4 and X2's own baseline recorded — those samples contained only the runs healthy enough
+      to REACH an Escort (n 13 → 19 once the opener was repaired). Its real h0 cost is ~13 turns.
+- [ ] **Lead-swings fell 0.79 → 0.61 at heat 0** and the wave accepted it: a 4-body opener
+      against a full squad is not a contested fight, and mission 1 is ~26% of matches played.
+      If the swing metric matters more than the opener's shape, the honest fix is to make m1
+      contested *some other way* (a mid-mission reinforcement beat, a timed objective), not to
+      put the fifth body back.
+
+- [ ] **SPEC (ready to dev, do NOT implement inside a tuning wave): re-specify
+      `CountMeaningfulChoices` axis (b) as an ADDITIVE band.** Two waves (X1, W4) have now missed
+      a decision-density gate that X2's baseline shows is not merely hard but *structurally
+      unreachable*: axis (b) counts destinations scoring within **15% of the BEST** safety score
+      (`24 − TileExposure + cover*8 + height*5`), so raising threat lowers the best score, shrinks
+      the absolute window `0.15 × best`, and disqualifies tiles. Axis (a) ("which target?") and
+      axis (b) ("where do I stand after?") therefore respond to threat with **opposite signs** and
+      their sum is close to conserved — W4 measured 1.55-1.64 across five structurally different
+      levers, and X2's baseline reads 1.44-1.78 across six *rungs*, which is the same invariance
+      seen from the difficulty axis instead of the lever axis.
+      **The fix:** replace the multiplicative window with an **additive** one — count a destination
+      as a real alternative when it scores within a FIXED number of safety points of the best
+      (start at 3, i.e. within roughly one cover step or half an elevation step), not within a
+      fraction of it. An additive band measures "are there several places worth standing?" without
+      being deflated by how dangerous the board is, which is what the metric was always trying to
+      ask. It is a **pure instrument change**: it invalidates every archived `ch/ARMED` number, so
+      it must ship with its own paired R0 re-baseline (the X1/W4/X2 `R0diag` pattern: run the
+      instrumented tree lever-off on a pinned slot set and diff the per-slot records) and the
+      DEVLOG must state that pre-change numbers are not comparable. Land it in a wave that is NOT
+      also tuning difficulty, so the two effects can never be confused.
+- [ ] **The heat ladder's MIDDLE does not measurably escalate.** X2's baseline (n=40/rung, ±6-8)
+      reads mission-win 80.2 (h0) / 82.6 (h2) / 75.0 (h4) / 81.7 (h6) — a 2.8-point spread on
+      n=263 vs n=266 pooled halves, i.e. nothing. Only RECRUIT (94.3) and heat 8 (68.4) separate.
+      Rungs 1-7 add bodies and stat points that the measurement cannot see. Either the rungs need
+      real teeth or the ladder needs fewer, bigger steps — but the first job is a **higher-N**
+      measurement (n≥80/rung) so the question can be asked at a precision that can answer it.

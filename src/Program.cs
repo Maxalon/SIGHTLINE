@@ -58,6 +58,23 @@ public static class Program
         // W4 — SIGHTLINE_ESCORTFIX=0 restores the pre-fix SmartEscort lone-VIP test (a DOWNED
         // soldier counted as still standing) so the instrument fix has a paired measurement.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_ESCORTFIX") == "0") Game.EscortDownedFix = false;
+        // X2 TRUE NORTH II — the X1 durability pair, pinnable per measured round.
+        //   SIGHTLINE_TOUGH=<n> : Mission.HostileToughness (flat HP surcharge; X1 shipped 3)
+        //   SIGHTLINE_TRIM=<n>  : Mission.HostileDamageTrim (flat points off both ends; shipped 1)
+        // Unset = the shipped defaults, so an unpinned batch is unchanged.
+        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_TOUGH"), out int xtough) && xtough >= 0)
+            Mission.HostileToughness = xtough;
+        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_TRIM"), out int xtrim) && xtrim >= 0)
+            Mission.HostileDamageTrim = xtrim;
+        //   SIGHTLINE_AIMTRIM=<n>    : Mission.HostileAimTrim (flat points off every hostile's aim)
+        //   SIGHTLINE_ENEMYBASE=<n>  : Mission.EnemyBaseCount (the `count = base + mission` constant)
+        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_AIMTRIM"), out int xaim) && xaim >= 0)
+            Mission.HostileAimTrim = xaim;
+        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_ENEMYBASE"), out int xbase) && xbase >= 0)
+            Mission.EnemyBaseCount = xbase;
+        //   SIGHTLINE_OPENERTRIM=<n> : Mission.OpenerTrim (bodies off the m1 / half off m2 force)
+        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_OPENERTRIM"), out int xopen) && xopen >= 0)
+            Mission.OpenerTrim = xopen;
 
         bool smartplay = Environment.GetEnvironmentVariable("SIGHTLINE_SMARTPLAY") == "1";
         bool autoplay = Environment.GetEnvironmentVariable("SIGHTLINE_AUTOPLAY") == "1" || smartplay;
@@ -276,6 +293,15 @@ public static class Program
         {
             Raylib.InitWindow(64, 64, "deathtest");   // a Game/Audio-free path still needs tile math; window is tiny
             Console.WriteLine(new Game().DeathConsequenceTest());
+            Raylib.CloseWindow();
+            return;
+        }
+        // SIGHTLINE_OPENERTEST=1 : RESONANCE X2 — the COLD-OPENER GRACE (Mission.OpenerTrim): the
+        // base force's m1 / m2 ramp, its floor, its shipped default and its determinism.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_OPENERTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "openertest");   // SetupMission uses tile math
+            Console.WriteLine(new Game().OpenerSelfTest());
             Raylib.CloseWindow();
             return;
         }

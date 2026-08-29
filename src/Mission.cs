@@ -596,6 +596,18 @@ public static class Mission
     /// survivor) and none is a shapeless blob. Pure — no RNG draw.
     public static int PodMass = 3;
 
+    /// X2 measurement knob (SIGHTLINE_ENEMYBASE): the constant in `count = base + missionNum`.
+    /// Default 4 = the historical force size.
+    public static int EnemyBaseCount = 4;
+
+    /// X2 (SIGHTLINE_OPENERTRIM): bodies removed from the BASE force on the opening missions —
+    /// the full trim on mission 1, half (rounded up) on mission 2, none from mission 3. The same
+    /// shape as Game.SetupMission's heat grace, applied to the force heat's grace cannot reach.
+    ///
+    /// SHIPPED at 1, measured end-to-end (DEVLOG §X2 round O1/S1). `SIGHTLINE_OPENERTRIM=0`
+    /// restores the pre-X2 opener exactly.
+    public static int OpenerTrim = 1;
+
     /// W4 — every body in a pod fields the pod LEAD's archetype (see the spawn loop). SHIPPED
     /// ON: measured exactly ladder-neutral (32.5% = 32.5% run completion, n=40) for the wave's
     /// biggest single gain on the "which target?" axis (+0.06 target-choices/ARMED) and
@@ -636,7 +648,9 @@ public static class Mission
         // Armor, and the Evac fix stacked huge squad power -> heat-0 hit ~97%/mission (too trivial).
         // Restored the enemy headcount (4+n, cap 12) and the full per-mission stat bump (n-1) so the
         // now-strong squad faces a real fight; Heat's deltas still stack for the mastery ladder.
-        int count = Math.Clamp(4 + n + enemyDelta, 3, 12);   // deployment-card + Heat modifier
+        // X2: the base headcount is a static (default 4 — the historical `4 + n`) so a measured
+        // round can price the BODY lever against the ACCURACY lever without a rebuild.
+        int count = Math.Clamp(EnemyBaseCount + n + enemyDelta, 3, 12);   // deployment-card + Heat modifier
         // R1 REVIEW FIX — the floor was `Math.Max(0, ...)`, which silently ATE the RECRUIT rung's
         // advertised relief on MISSION 1, the exact mission the on-ramp exists for: at n == 1 the
         // growth term is 0, so heat 0 gave max(0, 0) = 0 and RECRUIT (statDelta -1) gave
@@ -647,6 +661,22 @@ public static class Mission
         // Heats 1-8 are bit-for-bit unchanged by construction: there statDelta = card.StatDelta +
         // heatStat is never negative, so (n-1)+statDelta >= 0 and the new floor is unreachable.
         int bump = Math.Max(-1, (n - 1) + statDelta);        // stat growth per mission +/- card (relief floor -1)
+        // X2 TRUE NORTH II — THE COLD OPENER. Game.SetupMission already ramps HEAT's escalation in
+        // over m1-2 ("the measured ~20% mission-1 loss, which hard-caps run completion"), but that
+        // grace is gated on heat > 0, so the BASE force meets the coldest squad in the game with no
+        // ramp at all: 5 hostiles against 4 rookies with no promotion, perk, mod or boon — and,
+        // since X1, +3 HP each. The X2 baseline measured mission 1 at 75% win (n=40) against
+        // 90% for missions 3-4, i.e. the difficulty curve is U-SHAPED at heat 0 and the opener is
+        // as lethal as the finale — exactly the front-loaded anxiety DESIGN.md §3.D forbids.
+        // RECRUIT ran the experiment for us: over the SAME 40 worlds its only mission-1 difference
+        // is one fewer body (its -1 stat is a no-op at m1, where bump is already 0), and mission 1
+        // reads 100% (n=40, zero losses). OpenerTrim gives the base force the same ramp heat has:
+        // full trim on m1, half on m2, nothing from m3. Default 0 = the pre-X2 opener.
+        // INTEGRATION NOTE: R1's -1 relief floor now makes RECRUIT's m1 stat relief real, so the
+        // "its -1 stat is a no-op at m1" clause above is no longer true post-R1 — the OpenerTrim
+        // diagnosis and its measurement are unaffected (they turn on the BODY count, not the stat).
+        if (OpenerTrim > 0 && n <= 2)
+            count = Math.Max(3, count - (n == 1 ? OpenerTrim : (OpenerTrim + 1) / 2));
         // SABOTAGE relief (the weakest objective / m5 gate, ~65% -> aiming ~85%): the difficulty of
         // this objective IS the 3x split-and-go-loud tempo, not raw bodies, so trim the force by 2
         // (floored at 3) so a divided squad isn't also out-gunned. Stat bump is untouched and the
@@ -1249,7 +1279,10 @@ public static class Mission
     /// targets is (sum player HP - sum ACTIVE enemy HP), and scaling both pools leaves that ratio
     /// (and therefore lead-swings) exactly where it was. The squad's exposure cost of the longer
     /// fight is the measured trade; see the wave's round table in docs/DEVLOG.md.
-    public const int HostileToughness = 3;
+    /// X2 TRUE NORTH II: `const` -> static field so the post-merge correction wave can pin it
+    /// per measured round from `SIGHTLINE_TOUGH` (Program.cs). Default is X1's shipped 3 — a
+    /// batch with no override is byte-identical to the const form.
+    public static int HostileToughness = 3;
 
     /// X1 THE EXCHANGE, the SYMMETRY half. Points trimmed off BOTH ends of every hostile
     /// weapon's damage band (DmgMin floored at 1). MEASURED necessity, not a guess: shipping
@@ -1262,11 +1295,29 @@ public static class Mission
     /// hostile's per-shot lethality instead. Net design statement: a hostile is a BODY TO BE
     /// WORN DOWN, not a glass cannon trading one-shot kills — the same trade the player now
     /// faces going the other way.
-    public const int HostileDamageTrim = 1;
+    /// X2 TRUE NORTH II: `const` -> static field, pinnable from `SIGHTLINE_TRIM`. Default 1.
+    public static int HostileDamageTrim = 1;
+
+    /// X2 TRUE NORTH II — the POST-MERGE CORRECTION lever, and the third member of the X1 pair.
+    /// Flat points off EVERY hostile's aim, applied in the same single funnel as HostileToughness
+    /// (aim floored at 20 so no body becomes a harmless prop). Default 0 = the pre-X2 force.
+    ///
+    /// WHY ACCURACY, and not bodies or durability. Fourteen waves each measured on their own base
+    /// composed into a tree 20 points below its own published band. Almost none of that drift was
+    /// a difficulty DECISION: Q1 stopped pod scatter stacking two bodies in one tile, FUL-9
+    /// repaired route exposure, FUL-6 fielded pods of 3 with linked activation, W6 gave the mid
+    /// ladder a coordination tier, W4 opened the fight on more than one bearing. Every one of them
+    /// made the SAME force put MORE FIRE on the squad. The give-back therefore comes out of the
+    /// same quantity — how much of that fire lands — and out of nothing the waves deliberately
+    /// bought: hostile HP (X1's two-hit trade), hostile COUNT (W4's contact breadth, armed/turn
+    /// 1.39 -> 1.55) and player damage (shots-per-kill) are all untouched by construction, so
+    /// Eliminate's turn budget and the decision-density instruments cannot move through this knob.
+    public static int HostileAimTrim = 0;
 
     static Unit MakeHostile(string name, string cls, WeaponKind w, int hp, int aim, int mob, int x, int y)
     {
         int thp = hp + HostileToughness;
+        if (HostileAimTrim > 0) aim = Math.Max(20, aim - HostileAimTrim);   // no-op (identity) at the default 0
         var u = new Unit { Name = name, Cls = cls, Team = Team.Enemy, X = x, Y = y, Hp = thp, MaxHp = thp, Aim = aim, Mobility = mob, Weapon = Weapon.Make(w) };
         u.Weapon.TrimBaseDamage(HostileDamageTrim);
         u.Ammo = u.Weapon.Clip;

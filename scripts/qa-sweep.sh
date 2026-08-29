@@ -4,7 +4,7 @@
 # quirk: piping an xvfb-run child through $(...) / a for-loop silently drops its
 # stdout, so every test is a direct `CMD | grep` statement below.
 #
-#   bash scripts/qa-sweep.sh          # 45 self-tests + autoplay x3   (~2 min)
+#   bash scripts/qa-sweep.sh          # 46 self-tests + autoplay x3   (~2 min)
 #   bash scripts/qa-sweep.sh --full   # + PAIRTEST                    (~2 min 40 s)
 #
 # COUNT NOTE: this footer has been wrong twice. C1 found it claiming 41 while running 42;
@@ -86,6 +86,7 @@ echo -n "EXPOSURETEST: "; SIGHTLINE_EXPOSURETEST=1 run | grep -oE "EXPOSURETEST 
 echo -n "FUL11PROBE : "; SIGHTLINE_FUL11PROBE=40 run | grep -oE "FUL11PROBE (PASS|FAIL)" | head -1
 # RESONANCE W5: the RECRUIT rung + the comfort settings (anim speed / UI text scale).
 echo -n "ONRAMPTEST : "; SIGHTLINE_ONRAMPTEST=1 run | grep -oE "ONRAMPTEST: (PASS|FAIL)" | head -1
+echo -n "OPENERTEST : "; SIGHTLINE_OPENERTEST=1 run | grep -oE "OPENERTEST: (PASS|FAIL)" | head -1
 # RESONANCE T1/T2: the onboarding contract and the incoming-fire forecast. These two EXISTED
 # but were never run by this sweep - the integration review caught it. THREATTEST prints
 # "NAME PASS" with no colon, like EXPOSURETEST.
@@ -116,5 +117,5 @@ echo -n "run1: "; SIGHTLINE_AUTOPLAY=1 run | grep -oE "RESULT: (WIN|LOSE|TIMEOUT
 echo -n "run2: "; SIGHTLINE_AUTOPLAY=1 run | grep -oE "RESULT: (WIN|LOSE|TIMEOUT) mission=[0-9]+" | head -1
 echo -n "run3: "; SIGHTLINE_AUTOPLAY=1 run | grep -oE "RESULT: (WIN|LOSE|TIMEOUT) mission=[0-9]+" | head -1
 echo "=== DONE ==="
-echo "(45 self-tests exist; this sweep ran $([ "$FULL" = 1 ] && echo 45 || echo 44). Every line above"
+echo "(46 self-tests exist; this sweep ran $([ "$FULL" = 1 ] && echo 46 || echo 45). Every line above"
 echo " must read PASS, and every autoplay must read WIN or LOSE — never TIMEOUT, never blank.)"
