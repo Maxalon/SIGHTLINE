@@ -5638,9 +5638,13 @@ identical to **`S1`**.
    the apex is not "hard", it is *four objectives that are hard and four that are not*.
 3. **h4 vs h6 is unresolvable at n=80** (Δ3.7 ± 6.2). Anything aimed at the middle of the ladder
    needs n≥200 or it is guessing.
-4. **The CORPSMAN is still not a decision** at 7.02 s/kill. FIELD PRESENCE gives it a reason to
+4. **FIELD PRESENCE has no board-level tell.** The forecast is honest about it (it reads through
+   `HardenedReduce`), but there is no aura ring or tooltip line saying *why* the number dropped,
+   and X3 owned no UI files. A rule a player can only infer from a percentage is a rule most
+   players never learn.
+5. **The CORPSMAN is still not a decision** at 7.02 s/kill. FIELD PRESENCE gives it a reason to
    exist; whether a player would *choose* it over a fourth gun is untested, because the founding
    squad has no Corpsman and the bot never positions to collect the aura. A positioning-aware EV
    bot would price it properly — and would be the honest way to test it.
-5. **Do not chase `choices/ARMED`.** W4's finding holds across two more levers here (1.48-1.92
+6. **Do not chase `choices/ARMED`.** W4's finding holds across two more levers here (1.48-1.92
    over twelve rung-measurements). The additive re-spec in ROADMAP is still the only real fix.

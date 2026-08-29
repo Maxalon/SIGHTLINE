@@ -1480,6 +1480,11 @@ sets, one lever per measured round, fresh same-slot R0 first, dip budgets, breac
       Equalising kills would mean making the Gunner worse per shot than everyone else. If this
       matters, the lever is **clip/cadence**, not damage — and it should be argued as a design
       change before it is measured as a balance one.
+- [ ] **FIELD PRESENCE has no board-level TELL.** The rule reads through `Combat.HardenedReduce`,
+      so the incoming-fire forecast is honest about it — but there is no aura ring, pill or
+      tooltip line saying *why* the number is lower, and a rule the player can only infer from a
+      percentage is a rule most players will never learn. X3 owned no UI files; this is a
+      one-screen job for whoever owns `Renderer.cs` / `Hud.cs` next.
 - [ ] **The CORPSMAN is still not a decision** (7.02 s/kill). The founding squad has no Corpsman
       and the EV bot never positions to collect FIELD PRESENCE, so the aura is measured with a
       bot that does not know it exists. A positioning-aware EV bot would price it honestly — and
