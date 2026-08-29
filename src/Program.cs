@@ -600,6 +600,7 @@ public static class Program
         //     action actually fires, so a live xdotool session can PROVE which action a physical
         //     key reached (and, just as importantly, that the OLD key no longer reaches it).
         string keyBind = Environment.GetEnvironmentVariable("SIGHTLINE_KEYBIND");
+        Keymap.SuppressSave = !string.IsNullOrEmpty(keyBind);   // an env var must not rewrite a real settings file
         if (!string.IsNullOrEmpty(keyBind))
             foreach (var part in keyBind.Split(';', StringSplitOptions.RemoveEmptyEntries))
             {
@@ -612,6 +613,7 @@ public static class Program
                 Console.WriteLine("KEYBIND: " + bid + " -> " + Keymap.KeyLabel(bk)
                                   + (berr == null ? " OK" : " REFUSED (" + berr + ")"));
             }
+        Keymap.SuppressSave = false;   // the CONTROLS screen persists normally again
         if (Environment.GetEnvironmentVariable("SIGHTLINE_KEYLOG") == "1") Keymap.LogActions = true;
 
         var game = new Game();

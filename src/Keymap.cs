@@ -213,6 +213,14 @@ public static class Keymap
     public static Bind Get(string id) => ById.TryGetValue(id, out var b) ? b : null;
 
     // ---- reading ---------------------------------------------------------------------------
+    /// Harness seam (SIGHTLINE_KEYBIND): apply overrides through the REAL Set — same conflict
+    /// check, same refusals — WITHOUT writing them to the player's settings file. A debugging env
+    /// var must never silently repoint someone's controls; the evidence scripts rely on Set's
+    /// validation, not on its persistence.
+    public static bool SuppressSave;
+
+    static void Persist() { if (!SuppressSave) Display.SaveKeymap(); }
+
     /// Harness seam (SIGHTLINE_KEYLOG=1): print `KEYACT <id> <KEY>` whenever a bound action fires,
     /// so a live xdotool session can PROVE which action a physical key reached. Off by default; the
     /// flag is only ever set from Program.cs, so no shipped or measured path is affected.
@@ -347,7 +355,7 @@ public static class Keymap
             return KeyLabel(k) + " is already " + other.Label
                    + (other.Fixed ? " (reserved)" : "") + " - " + ScopeName(other.Scope);
         b.Key = k;
-        Display.SaveKeymap();
+        Persist();
         return null;
     }
 
@@ -356,7 +364,7 @@ public static class Keymap
     public static void ResetAll()
     {
         foreach (var b in Table) b.Key = b.Def;
-        Display.SaveKeymap();
+        Persist();
     }
 
     public static bool IsDefault(Bind b) => b.Key == b.Def;

@@ -5643,6 +5643,8 @@ end: `[Esc]` is what opened the card.
 - `SIGHTLINE_CONTROLS=1|capture|conflict|remap` (shot) — the CONTROLS screen in each state.
 - `SIGHTLINE_KEYBIND="id=Key;..."` — apply overrides through the real `Keymap.Set` at startup
   (prints OK / REFUSED per clause). Works in a LIVE run, which is what the xdotool evidence needs.
+  It runs under `Keymap.SuppressSave`, so it exercises Set's VALIDATION without rewriting the
+  player's `display.json` — a debugging env var must never silently repoint someone's controls.
 - `SIGHTLINE_KEYLOG=1` — print `KEYACT <id> <KEY>` whenever a bound action fires.
 - `SIGHTLINE_PAUSESEL=<row>` (shot) — park the pause card's keyboard cursor on a row. Held every
   frame, because the card hands control back to the mouse on any pointer movement and the Xvfb
