@@ -94,6 +94,9 @@ echo -n "FUL11PROBE : "; SIGHTLINE_FUL11PROBE=40 run | grep -oE "FUL11PROBE (PAS
 # RESONANCE W5: the RECRUIT rung + the comfort settings (anim speed / UI text scale).
 echo -n "ONRAMPTEST : "; SIGHTLINE_ONRAMPTEST=1 run | grep -oE "ONRAMPTEST: (PASS|FAIL)" | head -1
 echo -n "OPENERTEST : "; SIGHTLINE_OPENERTEST=1 run | grep -oE "OPENERTEST: (PASS|FAIL)" | head -1
+# RESONANCE W8: DECAPITATE's punch-through target (DesignateHvt) — selection rule, the ELITE
+# exemption AND the mid-run buff it is the mirror of, magnitude at every depth, shipped defaults.
+echo -n "HVTTEST    : "; SIGHTLINE_HVTTEST=1 run | grep -oE "HVTTEST: (PASS|FAIL)" | head -1
 # RESONANCE T1/T2: the onboarding contract and the incoming-fire forecast. These two EXISTED
 # but were never run by this sweep - the integration review caught it. THREATTEST prints
 # "NAME PASS" with no colon, like EXPOSURETEST.

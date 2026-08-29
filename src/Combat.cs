@@ -157,6 +157,23 @@ public static class Combat
     public const int HvtGuardReduce = 3;   // damage subtracted per hit while guarded (floored to >=1)
     public static bool HvtGuardReducePending = false;   // set when a reduction fires; drained by Game.Update
 
+    // ── W8 THE HALF WALL — the DECAPITATE HVT statline buff, made pinnable ────────────────────
+    // Game.DesignateHvt turns the toughest rank-and-file body into the punch-through target with
+    // `+ (HvtHpBonusBase + HvtHpBonusPerMission * mission)` HP and `+ HvtAimBonus` aim, on top of
+    // the +3 HP every hostile already carries from Mission.HostileToughness. The ELITE exemption
+    // (a named boss is already tuned) means the CAMPAIGN FINALE never takes this — only the
+    // mid-run Decapitates do, which is the asymmetry wave W8 measured (mid-run 46.0% n=163 vs the
+    // boss node's 69.7% n=479, L2 archive). These three are the levers that asymmetry can be
+    // priced with; the DEFAULTS 6 / 1 / 6 reproduce the pre-W8 behaviour EXACTLY (identity), and
+    // Program.cs exposes them as SIGHTLINE_HVTBUFF / SIGHTLINE_HVTDEPTH / SIGHTLINE_HVTAIM.
+    public static int HvtHpBonusBase       = 6;   // flat HP added to a non-ELITE HVT
+    public static int HvtHpBonusPerMission = 1;   // HP added per mission of depth (may be negative)
+    public static int HvtAimBonus          = 6;   // aim points added (clamped to 85 as before)
+
+    /// The HP surcharge a non-ELITE HVT takes at this mission depth. Floored at 0 so a negative
+    /// depth coefficient can flatten the buff but never make the HVT weaker than its own archetype.
+    public static int HvtHpBonus(int mission) => Math.Max(0, HvtHpBonusBase + HvtHpBonusPerMission * mission);
+
     // ──────────────────────────────────────────────────────────────────────────────────────────
     // MISSION-STATIC LIFECYCLE (PROGRAM TEMPO wave 4). The five per-mission combat statics above
     // (RunBoons / AllUnits / MissionFaction / PrepFaction / PressureAim) were previously set and

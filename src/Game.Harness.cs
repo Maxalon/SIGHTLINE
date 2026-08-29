@@ -4554,6 +4554,143 @@ public partial class Game
     /// floor (a trim can never take the force below 3 bodies), determinism, and the shipped
     /// default, so a future wave cannot silently un-ship the repair that moved mission 1 from
     /// 75% to 100% (DEVLOG §X2).
+    /// SIGHTLINE_HVTTEST — RESONANCE W8 "THE HALF WALL". Pins DECAPITATE's punch-through target,
+    /// `Game.DesignateHvt`, because the objective's difficulty is almost entirely that one body and
+    /// nothing pinned it. What this pins, and why each clause exists:
+    ///
+    ///  (1) THE SELECTION RULE — the HVT is the toughest NON-SPECIAL alive hostile, and it is
+    ///      always a member of Enemies (a legal, clickable, shootable target). A TURRET/MEDIC/
+    ///      SAPPER/SHIELD/DRONE/MORTAR makes a poor punch-through and is excluded whenever any
+    ///      other body exists. If this rule ever drifts, "kill the HVT" silently becomes a
+    ///      different mission.
+    ///  (2) THE ELITE EXEMPTION AND ITS ASYMMETRY — the whole reason this wave exists. A named
+    ///      boss (the m6 finale, and the m3/m5 mid-boss) is already tuned, so it takes the HVT
+    ///      marker and NO statline buff; a rank-and-file HVT on any other mission takes the full
+    ///      buff. The finale is therefore the ONLY Decapitate the buff never touches, which is
+    ///      how the mid-run case ended up 23.7 points harder than the climax (L2, n=163/479).
+    ///      Both halves are asserted, so neither can move without this test noticing.
+    ///  (3) THE EXACT MAGNITUDE, at several depths — `+(HvtHpBonusBase + HvtHpBonusPerMission *
+    ///      mission)` HP and `+HvtAimBonus` aim (aim clamped at 85), measured as a DIFFERENCE
+    ///      against the same seed built with the buff zeroed, so it pins the arithmetic and not
+    ///      an archetype's statline.
+    ///  (4) THE SHIPPED DEFAULTS — 6 / 1 / 6, i.e. the pre-W8 literal `6 + _run.Mission` and `+6`
+    ///      exactly. W8 moved those numbers out of the method body and behind three dials; this
+    ///      clause is what stops the move from silently becoming a balance change, and it is the
+    ///      clause `SIGHTLINE_HVTBUFF=<anything but 6>` makes FAIL.
+    ///  (5) THE DIALS ARE REAL — zeroing them must actually produce a weaker HVT (a dial that is
+    ///      a no-op would make every future measured round a lie), and a negative depth
+    ///      coefficient must floor the bonus at 0 rather than going through zero.
+    ///  (6) NO HVT OFF-OBJECTIVE — an Eliminate mission leaves Hvt null and HvtBuffed false, so
+    ///      the balance telemetry's `hvtKind = -1` row means what it says.
+    public string HvtSelfTest()
+    {
+        NoPersist = true;
+        var fails = new List<string>();
+        int sBase = Combat.HvtHpBonusBase, sPer = Combat.HvtHpBonusPerMission, sAim = Combat.HvtAimBonus;
+
+        bool IsSpecialCls(string c) => c == "TURRET" || c == "MEDIC" || c == "SAPPER"
+                                    || c == "SHIELD" || c == "DRONE" || c == "MORTAR";
+
+        // Build one Decapitate mission at a given depth/seed with the buff dials pinned.
+        void Build(int mission, int seed, int bBase, int bPer, int bAim, Objective obj = Objective.Decapitate)
+        {
+            Combat.HvtHpBonusBase = bBase; Combat.HvtHpBonusPerMission = bPer; Combat.HvtAimBonus = bAim;
+            Util.Reseed(seed);
+            _run = new Run(); _run.Start();
+            _run.HeatLevel = 0;
+            _run.CurrentCard = new MissionCard { Objective = obj, ModName = "STANDARD", Reward = RewardKind.None };
+            SetupMission(mission);
+        }
+
+        try
+        {
+            // ---- (4) the shipped defaults ARE the pre-W8 arithmetic ---------------------------
+            if (sBase != 6) fails.Add("shippedHpBase=" + sBase);
+            if (sPer != 1) fails.Add("shippedHpPerMission=" + sPer);
+            if (sAim != 6) fails.Add("shippedAim=" + sAim);
+            for (int m = 1; m <= Run.MaxMissions; m++)
+            {
+                Combat.HvtHpBonusBase = sBase; Combat.HvtHpBonusPerMission = sPer;
+                if (Combat.HvtHpBonus(m) != 6 + m) fails.Add($"bonus(m{m})={Combat.HvtHpBonus(m)}");
+            }
+            // (5b) a negative depth coefficient flattens the buff but never inverts it
+            Combat.HvtHpBonusBase = 2; Combat.HvtHpBonusPerMission = -5;
+            if (Combat.HvtHpBonus(6) != 0) fails.Add("bonusFloor=" + Combat.HvtHpBonus(6));
+            Combat.HvtHpBonusBase = sBase; Combat.HvtHpBonusPerMission = sPer;
+
+            // ---- (1)(2)(3) over a spread of seeds and depths ---------------------------------
+            int buffedSeen = 0, exemptSeen = 0;
+            foreach (int seed in new[] { 1301, 4242, 90210, 777 })
+            {
+                for (int m = 1; m <= Run.MaxMissions; m++)
+                {
+                    Build(m, seed, sBase, sPer, sAim);
+                    var live = Enemies.Where(e => e.Alive).ToList();
+                    if (Hvt == null) { fails.Add($"noHvt s{seed} m{m}"); continue; }
+
+                    // (1) a legal target: alive, hostile, and actually on the board.
+                    if (!Hvt.Alive || Hvt.Team != Team.Enemy || !Enemies.Contains(Hvt))
+                        fails.Add($"illegalHvt s{seed} m{m}");
+                    // (1) specials are excluded whenever any non-special body exists.
+                    if (live.Any(e => !IsSpecialCls(e.Cls)) && IsSpecialCls(Hvt.Cls))
+                        fails.Add($"specialHvt s{seed} m{m} {Hvt.Cls}");
+
+                    // (2) the exemption keys on ELITE, both ways.
+                    if (HvtBuffed != (Hvt.Cls != "ELITE")) fails.Add($"exemptFlag s{seed} m{m} {Hvt.Cls}");
+                    if (HvtBuffed) buffedSeen++; else exemptSeen++;
+
+                    // (3) magnitude: rebuild the SAME world with the buff zeroed and difference it.
+                    int hpOn = Hvt.MaxHp, aimOn = Hvt.Aim; string cls = Hvt.Cls, name = Hvt.Name;
+                    Build(m, seed, 0, 0, 0);
+                    if (Hvt == null) { fails.Add($"noHvtZeroed s{seed} m{m}"); continue; }
+                    if (Hvt.Cls != cls) { fails.Add($"unstableHvt s{seed} m{m}"); continue; }
+                    int wantHp = cls == "ELITE" ? 0 : 6 + m;
+                    int wantAim = cls == "ELITE" ? 0 : Math.Min(85, Hvt.Aim + 6) - Hvt.Aim;
+                    if (hpOn - Hvt.MaxHp != wantHp) fails.Add($"hpDelta s{seed} m{m} {hpOn - Hvt.MaxHp}!={wantHp}");
+                    if (aimOn - Hvt.Aim != wantAim) fails.Add($"aimDelta s{seed} m{m} {aimOn - Hvt.Aim}!={wantAim}");
+                    // (5) the dial is not a no-op on a body that is supposed to take it.
+                    if (cls != "ELITE" && hpOn <= Hvt.MaxHp) fails.Add($"dialNoOp s{seed} m{m}");
+                    // (1) toughest non-special: nothing else non-special out-bulks the UNBUFFED HVT.
+                    int hvtBase = Hvt.MaxHp;
+                    foreach (var e in Enemies.Where(e => e.Alive && !IsSpecialCls(e.Cls) && e != Hvt))
+                        if (e.MaxHp > hvtBase) { fails.Add($"notToughest s{seed} m{m} {e.Cls}{e.MaxHp}>{hvtBase}"); break; }
+                    // (2) the name marker follows the buff branch exactly.
+                    if ((cls != "ELITE") != name.StartsWith("HVT-")) fails.Add($"marker s{seed} m{m} {name}");
+                }
+            }
+            // both populations must actually have been exercised, or the asymmetry above is vacuous.
+            if (buffedSeen == 0) fails.Add("noBuffedCaseSeen");
+            if (exemptSeen == 0) fails.Add("noExemptCaseSeen");
+
+            // ---- (2) THE ASYMMETRY, stated as the wave found it ------------------------------
+            // The campaign FINALE is always an ELITE and therefore always exempt; a mid-run
+            // Decapitate at m2/m4 is always a rank-and-file body and therefore always buffed.
+            foreach (int seed in new[] { 1301, 4242, 90210, 777 })
+            {
+                Build(Run.MaxMissions, seed, sBase, sPer, sAim);
+                if (Hvt == null || Hvt.Cls != "ELITE" || HvtBuffed) fails.Add($"finaleNotExempt s{seed}");
+                foreach (int m in new[] { 2, 4 })
+                {
+                    Build(m, seed, sBase, sPer, sAim);
+                    if (Hvt == null || Hvt.Cls == "ELITE" || !HvtBuffed) fails.Add($"midRunNotBuffed s{seed} m{m}");
+                }
+            }
+
+            // ---- (6) no HVT on any other objective -------------------------------------------
+            Build(3, 4242, sBase, sPer, sAim, Objective.Eliminate);
+            if (Hvt != null || HvtBuffed) fails.Add("hvtLeakedOffObjective");
+        }
+        finally
+        {
+            Combat.HvtHpBonusBase = sBase; Combat.HvtHpBonusPerMission = sPer; Combat.HvtAimBonus = sAim;
+        }
+
+        return fails.Count == 0
+            ? "HVTTEST: PASS (toughest non-special, always a legal target; ELITE exempt and mid-run buffed; "
+              + "+6+1*mission HP / +6 aim at every depth; dials real, floored, default-identical; no HVT off-objective)"
+            : "HVTTEST: FAIL " + string.Join(", ", fails);
+    }
+
     public string OpenerSelfTest()
     {
         NoPersist = true;

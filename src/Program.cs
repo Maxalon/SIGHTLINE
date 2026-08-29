@@ -89,6 +89,19 @@ public static class Program
         //   SIGHTLINE_OPENERTRIM=<n> : Mission.OpenerTrim (bodies off the m1 / half off m2 force)
         if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_OPENERTRIM"), out int xopen) && xopen >= 0)
             Mission.OpenerTrim = xopen;
+        // W8 THE HALF WALL — the DECAPITATE HVT statline buff (Game.DesignateHvt), pinnable so the
+        // mid-run/finale asymmetry can be priced one lever at a time. Unset = the shipped defaults
+        // 6 / 1 / 6, which are the pre-W8 arithmetic exactly, so an unpinned batch is unchanged.
+        //   SIGHTLINE_HVTBUFF=<n>  : Combat.HvtHpBonusBase       (flat HP on a non-ELITE HVT)
+        //   SIGHTLINE_HVTDEPTH=<n> : Combat.HvtHpBonusPerMission (HP per mission of depth; may be
+        //                            NEGATIVE — "-1" is accepted, so this one is not >=0 gated)
+        //   SIGHTLINE_HVTAIM=<n>   : Combat.HvtAimBonus          (aim points on a non-ELITE HVT)
+        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_HVTBUFF"), out int xhvt) && xhvt >= 0)
+            Combat.HvtHpBonusBase = xhvt;
+        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_HVTDEPTH"), out int xhvtd))
+            Combat.HvtHpBonusPerMission = xhvtd;
+        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_HVTAIM"), out int xhvta) && xhvta >= 0)
+            Combat.HvtAimBonus = xhvta;
 
         bool smartplay = Environment.GetEnvironmentVariable("SIGHTLINE_SMARTPLAY") == "1";
         bool autoplay = Environment.GetEnvironmentVariable("SIGHTLINE_AUTOPLAY") == "1" || smartplay;
@@ -343,6 +356,16 @@ public static class Program
         {
             Raylib.InitWindow(64, 64, "deathtest");   // a Game/Audio-free path still needs tile math; window is tiny
             Console.WriteLine(new Game().DeathConsequenceTest());
+            Raylib.CloseWindow();
+            return;
+        }
+        // SIGHTLINE_HVTTEST=1 : RESONANCE W8 — DECAPITATE's punch-through target (Game.DesignateHvt):
+        // the selection rule, the ELITE exemption AND its mid-run counterpart, the buff's exact
+        // magnitude at every depth, the shipped defaults, and that the new dials are not no-ops.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_HVTTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "hvttest");   // SetupMission uses tile math
+            Console.WriteLine(new Game().HvtSelfTest());
             Raylib.CloseWindow();
             return;
         }

@@ -58,6 +58,13 @@ public static class Stats
         // These two fields are what let byObjectiveByBucket hold survivorship still.
         public string NodeKind = "";
         public int SquadHpPct = 100;
+        // W8 THE HALF WALL: the DECAPITATE punch-through target. HvtKind is -1 on every other
+        // objective, 0 when the HVT was an ELITE (DesignateHvt's exemption — the campaign finale's
+        // named boss, or the m3/m5 mid-boss) and 1 when a rank-and-file body took the statline
+        // buff. HvtMaxHp is the target's MaxHp AFTER any buff. Without these the objective's row
+        // pools a capstone with a mid-run node, which is how a 24-point gap hid for ten waves.
+        public int HvtKind = -1;
+        public int HvtMaxHp;
         public int DamageDealt, DamageTaken;
         public bool Win;
         public string LossCause = "";
@@ -316,7 +323,8 @@ public static class Stats
 
     public static void BeginMission(int mission, string objective, int heat, int squad, int enemies, int layout = -1,
                                     int deploy = Sightline.Mission.DeployFrontal,
-                                    string nodeKind = "", int squadHpPct = 100)
+                                    string nodeKind = "", int squadHpPct = 100,
+                                    int hvtKind = -1, int hvtMaxHp = 0)
     {
         if (!Enabled) return;
         if (_run == null) BeginRun(heat);
@@ -324,7 +332,8 @@ public static class Stats
         {
             Mission = mission, Objective = objective, Heat = heat,
             SquadStart = squad, EnemiesStart = enemies, Layout = layout, Deploy = deploy,
-            NodeKind = nodeKind ?? "", SquadHpPct = squadHpPct
+            NodeKind = nodeKind ?? "", SquadHpPct = squadHpPct,
+            HvtKind = hvtKind, HvtMaxHp = hvtMaxHp
         };
         ResetLeadTracker();   // swings/lead are scoped to one match
     }
@@ -703,6 +712,45 @@ public static class Stats
             sb.AppendLine("\nMISSION WIN-RATE BY OBJECTIVE:");
             foreach (var g in missions.GroupBy(m => m.Objective).OrderByDescending(g => g.Count()))
                 sb.AppendLine($"  {g.Key,-11}: {Pct(g.Count(m => m.Win), g.Count())}{Se(g.Count(m => m.Win), g.Count())}  (n={g.Count()}, avg {g.Average(m => (double)m.Turns):0.0} turns)");
+
+            // ── W8 THE HALF WALL: OBJECTIVE x CAMPAIGN NODE KIND ─────────────────────────────
+            // The row above pools a CAPSTONE with a mid-run node whenever the map deals the same
+            // objective to both, and for Decapitate it always does: Run.cs makes exactly one Boss
+            // node (the map's last) and CardForNode makes the Boss ALWAYS Decapitate. Over the L2
+            // archive's 960 campaigns the flat row read 63.7% while its two halves read 69.7%
+            // (finale, n=479) and 46.0% (mid-run, n=163) — a 23.7-point gap invisible above and
+            // costing 480 campaigns to find. This cross-tab makes it a column you cannot miss.
+            // The DEPTH cells beside them exist because node kind is not the only thing an
+            // objective row pools. `Run.DeckObjective` deals a fight objective from a hash of the
+            // COLUMN, and a column IS a mission number — so an objective's win rate carries a
+            // mission-depth mix as well as a difficulty, and the two are not separable from the
+            // flat row either. Read the cells, not the row.
+            sb.AppendLine("\nMISSION WIN-RATE BY OBJECTIVE x NODE KIND (a capstone must never pool with a mid-run node):");
+            foreach (var og in missions.GroupBy(m => m.Objective).OrderByDescending(g => g.Count()))
+            {
+                string cells = string.Join("  ", og.GroupBy(m => string.IsNullOrEmpty(m.NodeKind) ? "?" : m.NodeKind)
+                    .OrderByDescending(g => g.Count())
+                    .Select(g => $"{g.Key}:{Pct(g.Count(m => m.Win), g.Count())}(n={g.Count()})"));
+                string depth = string.Join(" ", og.GroupBy(m => m.Mission).OrderBy(g => g.Key)
+                    .Select(g => $"m{g.Key}:{(int)Math.Round(100.0 * g.Count(m => m.Win) / g.Count())}%({g.Count()})"));
+                sb.AppendLine($"  {og.Key,-11}: {cells}");
+                sb.AppendLine($"  {"",-11}  depth: {depth}");
+            }
+
+            // ── W8: the DECAPITATE punch-through target, split by whether it took the buff ────
+            // DesignateHvt gives a rank-and-file HVT +(base + perMission*depth) HP and +aim, but
+            // EXEMPTS an ELITE because "an ELITE is ALREADY a tuned boss". The finale is always an
+            // ELITE, so the exemption removed the stat-check wall from the boss and left it in
+            // every mid-run Decapitate. These two rows are that comparison, held side by side.
+            var hvtMissions = missions.Where(m => m.HvtKind >= 0).ToList();
+            if (hvtMissions.Count > 0)
+            {
+                sb.AppendLine($"\nDECAPITATE HVT (buff = +{Combat.HvtHpBonusBase}{(Combat.HvtHpBonusPerMission >= 0 ? "+" : "")}{Combat.HvtHpBonusPerMission}*mission HP, +{Combat.HvtAimBonus} aim; ELITE exempt):");
+                foreach (var g in hvtMissions.GroupBy(m => m.HvtKind).OrderBy(g => g.Key))
+                    sb.AppendLine($"  {(g.Key == 1 ? "BUFFED  " : "EXEMPT  ")}: {Pct(g.Count(m => m.Win), g.Count())}{Se(g.Count(m => m.Win), g.Count())}"
+                        + $"  (n={g.Count()}, avg {g.Average(m => (double)m.Turns):0.0} turns, HVT {g.Average(m => (double)m.HvtMaxHp):0.0} max HP)"
+                        + $"  [{string.Join(" ", g.GroupBy(m => m.Mission).OrderBy(x => x.Key).Select(x => $"m{x.Key}:{(int)Math.Round(100.0 * x.Count(m => m.Win) / x.Count())}%({x.Count()})"))}]");
+            }
 
             // Win-rate by mission number (difficulty curve)
             sb.AppendLine("\nMISSION WIN-RATE BY MISSION #:");
@@ -1232,6 +1280,64 @@ public static class Stats
                 nodeKind = g.Key, n = g.Count(), winRate = WinRate(g), se = SeVal(g.Count(m => m.Win), g.Count()),
                 avgTurns = Math.Round(g.Average(m => (double)m.Turns), 1)
             }).ToList(),
+            // W8 THE HALF WALL: objective x campaign NODE KIND. byObjective alone pools a capstone
+            // with a mid-run node — for Decapitate it always does (one Boss node, always the map's
+            // last, always Decapitate), which hid a 23.7-point split for ten waves. Sparse by
+            // construction; pool cells, never read an n=2 one.
+            byObjectiveByNodeKind = missions
+                .GroupBy(m => new { m.Objective, NodeKind = string.IsNullOrEmpty(m.NodeKind) ? "?" : m.NodeKind })
+                .OrderBy(g => g.Key.Objective).ThenBy(g => g.Key.NodeKind)
+                .Select(g => new
+                {
+                    objective = g.Key.Objective, nodeKind = g.Key.NodeKind,
+                    n = g.Count(), winRate = WinRate(g), se = SeVal(g.Count(m => m.Win), g.Count()),
+                    avgTurns = Math.Round(g.Average(m => (double)m.Turns), 1)
+                }).ToList(),
+            // W8: objective x MISSION DEPTH. Node kind is not the only mix an objective's flat row
+            // hides: Run.DeckObjective deals a fight objective from a hash of the map COLUMN, and a
+            // column is a mission number, so every objective row also carries a depth mix. W8 found
+            // the two mid-run KILL objectives (Eliminate, Decapitate) far below the extract/hold
+            // ones on the same node kinds, which is only interpretable with these cells in hand.
+            byObjectiveByMission = missions
+                .GroupBy(m => new { m.Objective, m.Mission })
+                .OrderBy(g => g.Key.Objective).ThenBy(g => g.Key.Mission)
+                .Select(g => new
+                {
+                    objective = g.Key.Objective, mission = g.Key.Mission,
+                    n = g.Count(), winRate = WinRate(g), se = SeVal(g.Count(m => m.Win), g.Count()),
+                    avgTurns = Math.Round(g.Average(m => (double)m.Turns), 1)
+                }).ToList(),
+            // W8: the DECAPITATE HVT split by DesignateHvt's ELITE exemption. buffed=false is the
+            // named boss (finale or m3/m5 mid-boss) that keeps its own statline; buffed=true is a
+            // rank-and-file body carrying + (base + perMission*depth) HP and + aim on top of the
+            // +3 Mission.HostileToughness already gives it. The dials that set those three
+            // magnitudes are echoed so a chunk's JSON records the tree it was measured on.
+            hvt = new
+            {
+                hpBonusBase = Combat.HvtHpBonusBase,
+                hpBonusPerMission = Combat.HvtHpBonusPerMission,
+                aimBonus = Combat.HvtAimBonus,
+                rows = missions.Where(m => m.HvtKind >= 0).GroupBy(m => m.HvtKind == 1)
+                    .OrderBy(g => g.Key).Select(g => new
+                    {
+                        buffed = g.Key, n = g.Count(), winRate = WinRate(g),
+                        se = SeVal(g.Count(m => m.Win), g.Count()),
+                        avgTurns = Math.Round(g.Average(m => (double)m.Turns), 1),
+                        avgHvtMaxHp = Math.Round(g.Average(m => (double)m.HvtMaxHp), 1)
+                    }).ToList(),
+                // ...and the same split held at each depth. The buff scales UP with mission
+                // (+6+mission), so this is where a "the target out-bulks the campaign's own final
+                // boss two missions early" claim has to be checked rather than asserted.
+                byMission = missions.Where(m => m.HvtKind >= 0)
+                    .GroupBy(m => new { m.Mission, Buffed = m.HvtKind == 1 })
+                    .OrderBy(g => g.Key.Mission).ThenBy(g => g.Key.Buffed)
+                    .Select(g => new
+                    {
+                        mission = g.Key.Mission, buffed = g.Key.Buffed, n = g.Count(),
+                        winRate = WinRate(g), se = SeVal(g.Count(m => m.Win), g.Count()),
+                        avgHvtMaxHp = Math.Round(g.Average(m => (double)m.HvtMaxHp), 1)
+                    }).ToList()
+            },
             // W1: the SHOT-GAP distribution (see RecordShotGap). deciles[i] counts armed
             // soldier-turns whose best-vs-runner-up gap fell in [i/10, (i+1)/10); deciles[9]
             // is "the shot picks itself" (a lone legal target, or a runner-up worth <10% of it).
