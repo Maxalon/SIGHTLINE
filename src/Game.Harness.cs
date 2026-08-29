@@ -4787,6 +4787,107 @@ public partial class Game
         return bestLen;
     }
 
+
+    // ── R2 FIX 1 "NOBODY IS WALLED OUT" — SIGHTLINE_GEOMTEST ───────────────────────────────
+    /// Every deployed SOLDIER must be able to reach the rest of the squad and must have at
+    /// least one legal move on turn 1 — and every hostile / evac tile / terminal / sabotage
+    /// site must stay reachable from the squad. Mission.EnsureConnectivity is the net that
+    /// guarantees it; before R2 it repaired everything EXCEPT the other players, which was
+    /// invisible until W4's ENVELOP shape seated the squad in the mid-field cover band
+    /// (measured 23 stranded soldiers / 5760 fresh builds at heat 0, one fully entombed).
+    ///
+    /// This sweeps what STACKTEST structurally cannot: STACKTEST is a fixed 16-board sample
+    /// that never varies the deployment shape, so it could not have caught a shape-specific
+    /// geometry defect. Here every shape x objective x mission x seed x heat is BUILT fresh
+    /// (no play — StartMission only), which is cheap enough to sweep thousands of boards.
+    /// Both terrain paths are exercised: authored arenas and the procedural fallback (the
+    /// defect only ever appeared on the procedural one; the split is reported so a future
+    /// change that silently stops sampling one of them is visible).
+    /// Non-vacuity: PASS requires a real sample AND at least one ENVELOP build per heat.
+    public static string GeomSelfTest(int seeds = 8)
+    {
+        var fails = new List<string>();
+        int cases = 0, envelopBuilds = 0, authored = 0, procedural = 0;
+        string prevHeat = Environment.GetEnvironmentVariable("SIGHTLINE_HEAT");
+        int prevDeploy = Mission.ForcedDeploy;
+        var objs = (Objective[])Enum.GetValues(typeof(Objective));
+        var shapeName = new[] { "FRONTAL", "PINCER", "CROSSFIRE", "ENVELOP" };
+
+        foreach (int heat in new[] { 0, 8 })
+        {
+            Environment.SetEnvironmentVariable("SIGHTLINE_HEAT", heat.ToString());
+            int envelopThisHeat = 0;
+            for (int shape = 0; shape < Mission.DeployShapes; shape++)
+            {
+                Mission.ForcedDeploy = shape;
+                foreach (var obj in objs)
+                    for (int m = 1; m <= Run.MaxMissions; m++)
+                        for (int s = 0; s < seeds; s++)
+                        {
+                            Util.Reseed(90001 + s * 7919 + m * 131 + (int)obj * 17 + shape * 3 + heat * 104729);
+                            Game g;
+                            try { g = new Game { NoPersist = true, ForcedObjective = obj }; g.StartMission(m); }
+                            catch (Exception ex)
+                            { fails.Add($"h{heat}/{shapeName[shape]}/{obj}/m{m}/s{s} THREW {ex.GetType().Name}"); continue; }
+                            cases++;
+                            if (Mission.AppliedDeploy == Mission.DeployEnvelop) { envelopBuilds++; envelopThisHeat++; }
+                            if (Mission.AppliedLayout >= 0) authored++; else procedural++;
+                            string tag = $"h{heat}/{shapeName[shape]}/{obj}/m{m}/s{s}";
+                            if (fails.Count > 30) continue;   // the report is already damning; stop collecting
+
+                            var p0 = g.Players.FirstOrDefault(p => p.Alive);
+                            if (p0 == null) { fails.Add(tag + ": no living squad"); continue; }
+                            var cost = g.Grid.CostMap(p0.X, p0.Y, (x, y) => false, out _, 9999);
+                            bool Stuck(int x, int y) => !g.Grid.InBounds(x, y) || cost[x, y] < 0;
+
+                            foreach (var u in g.Players)
+                                if (u.Alive && Stuck(u.X, u.Y))
+                                    fails.Add($"{tag}: SOLDIER {u.Name} walled off at ({u.X},{u.Y}) layout={Mission.AppliedLayout}");
+                            foreach (var u in g.Enemies)
+                                if (u.Alive && Stuck(u.X, u.Y)) fails.Add($"{tag}: hostile {u.Cls} unreachable at ({u.X},{u.Y})");
+                            foreach (var t in g.EvacZone)
+                                if (Stuck(t.x, t.y)) fails.Add($"{tag}: evac tile ({t.x},{t.y}) unreachable");
+                            if (g.HasTerminal && Stuck(g.Terminal.x, g.Terminal.y)) fails.Add(tag + ": terminal unreachable");
+                            foreach (var st in g.SabotageSites)
+                                if (Stuck(st.x, st.y)) fails.Add($"{tag}: sabotage site ({st.x},{st.y}) unreachable");
+
+                            // ELBOW ROOM: a soldier can be reachable and still be frozen on turn 1
+                            // (every neighbour cover or a teammate, diagonals killed by the corner rule).
+                            foreach (var u in g.Players)
+                            {
+                                if (!u.Alive || u.IsVip) continue;
+                                bool step = false;
+                                for (int dx = -1; dx <= 1 && !step; dx++)
+                                    for (int dy = -1; dy <= 1 && !step; dy++)
+                                    {
+                                        if (dx == 0 && dy == 0) continue;
+                                        bool OpenT(int ax, int ay) => g.Grid.IsFloor(ax, ay) && g.UnitAt(ax, ay) == null;
+                                        if (!OpenT(u.X + dx, u.Y + dy)) continue;
+                                        if (dx != 0 && dy != 0 && (!OpenT(u.X + dx, u.Y) || !OpenT(u.X, u.Y + dy))) continue;
+                                        step = true;
+                                    }
+                                if (!step) fails.Add($"{tag}: SOLDIER {u.Name} ENTOMBED at ({u.X},{u.Y}) — no legal move");
+                            }
+                        }
+            }
+            if (envelopThisHeat == 0) fails.Add($"h{heat}: VACUOUS — no ENVELOP build sampled");
+        }
+
+        Mission.ForcedDeploy = prevDeploy;
+        Environment.SetEnvironmentVariable("SIGHTLINE_HEAT", prevHeat);
+        if (cases < 1000) fails.Add($"VACUOUS — only {cases} boards built");
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"GEOMTEST: {cases} fresh boards (authored {authored} / procedural {procedural}), "
+                    + $"{envelopBuilds} ENVELOP, heats 0+8, {seeds} seeds x 4 shapes x 8 objectives x {Run.MaxMissions} missions");
+        foreach (var f in fails.Take(12)) sb.AppendLine("  " + f);
+        if (fails.Count > 12) sb.AppendLine($"  (+{fails.Count - 12} more)");
+        sb.Append(fails.Count == 0
+            ? "GEOMTEST: PASS (every soldier reachable and able to move; every hostile/objective tile reachable)"
+            : $"GEOMTEST: FAIL ({fails.Count} violations)");
+        return sb.ToString();
+    }
+
     /// The unit the filmstrip is following (the one DebugLongMove staged), for the per-frame
     /// position dump in Program.cs. Null before the hook runs.
     public Unit DebugFilmUnit => Selected;

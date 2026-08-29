@@ -121,6 +121,20 @@ public static class Program
             return;
         }
 
+        // R2 FIX 1: SIGHTLINE_GEOMTEST=1 : the NOBODY-IS-WALLED-OUT invariant. Builds thousands of
+        // fresh boards across all 4 deployment shapes x 8 objectives x every mission x 2 heats and
+        // asserts every soldier can reach the squad and has a legal turn-1 move, and every hostile /
+        // objective tile stays reachable. STACKTEST could not have caught this: it is a fixed
+        // 16-board sample that never varies the deployment shape. SIGHTLINE_GEOMTEST=<N> widens the
+        // seed count. Needs a window only because Unit.SyncPos does tile->px math.
+        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_GEOMTEST"), out int geomN) && geomN > 0)
+        {
+            Raylib.InitWindow(64, 64, "geomtest");
+            Console.WriteLine(Game.GeomSelfTest(geomN == 1 ? 8 : geomN));
+            Raylib.CloseWindow();
+            return;
+        }
+
         // SIGHTLINE_SAVETEST=1 : headless round-trip check for run persistence (item E). No window.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_SAVETEST") == "1")
         {

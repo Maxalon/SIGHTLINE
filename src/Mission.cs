@@ -1503,22 +1503,77 @@ public static class Mission
         return e;
     }
 
-    /// Procedural-path safety net: every hostile / objective tile must stay reachable
+    /// Procedural-path safety net: every SOLDIER / hostile / objective tile must stay reachable
     /// from the squad over walkable terrain. If a generated structure walled one off,
     /// carve an L-shaped lane back toward the squad by clearing the blocking cover. Runs
     /// universally (authored maps are pre-verified, but the protective cover is added
     /// after that check, so this catches any edge case for both paths).
+    ///
+    /// R2 FIX 1: the OTHER PLAYERS are repaired too. This net floods from players[0] and used
+    /// to repair only enemies / evac / terminal / sabotage — the rest of the squad was never
+    /// checked. Invisible while every deployment shape seated the squad in cols 0-3 (which
+    /// BuildProcedural deliberately keeps clear), but W4's ENVELOP centre seat (cols 7-10,
+    /// rows 3-6) drops soldiers into the mid-field HIGH-cover band, and Grid.CostMap's
+    /// no-corner-cutting rule then seals pockets around them: measured 23 stranded soldiers in
+    /// 540 ENVELOP builds (~4.3%, i.e. ~20-25% of the procedural ones), one fully entombed with
+    /// no legal move for the whole mission. A stranded soldier is a silent force reduction, and
+    /// if it is ever downed nobody can reach it to STABILIZE, so the bleed-out is a guaranteed
+    /// KIA. PlaceBarrels already treats every player tile as required (see its `required` set)
+    /// — this brings the second net in line with the first. SIGHTLINE_GEOMTEST is the standing
+    /// guard (it sweeps all four deployment shapes; STACKTEST's fixed 16-board sample does not).
+    static readonly int[,] ElbowDirs =
+    {
+        { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 },
+        { 1, 1 }, { 1, -1 }, { -1, 1 }, { -1, -1 }
+    };
+
     static void EnsureConnectivity(Grid g, List<Unit> players, List<Unit> enemies,
                                    HashSet<(int, int)> evac, (int x, int y)? terminal, List<(int x, int y)> sabotage)
     {
         if (players.Count == 0) return;
         var from = players[0];
+
+        // R2 FIX 1b — ELBOW ROOM. A soldier can be perfectly *reachable* and still have no legal
+        // move on turn 1: every neighbour is either cover or a teammate, and CostMap's corner rule
+        // kills the diagonals. ENVELOP packs the squad four-abreast into the mid-field cover band,
+        // so this shows up on its own (measured 1 build in 5760 across the shape sweep) and it is
+        // the same defect wearing a different hat. Open ONE adjacent cover tile — cardinals first,
+        // in a fixed direction order — so nobody opens the mission frozen. Deterministic: zero RNG
+        // draws, and a no-op on every build that already had a step (so h0 batches stay paired).
+        var occupied = new HashSet<(int, int)>();
+        foreach (var u in players) occupied.Add((u.X, u.Y));
+        foreach (var u in enemies) occupied.Add((u.X, u.Y));
+        bool Free(int x, int y) => g.IsFloor(x, y) && !occupied.Contains((x, y));
+        bool HasStep(int x, int y)
+        {
+            for (int i = 0; i < 8; i++)
+            {
+                int dx = ElbowDirs[i, 0], dy = ElbowDirs[i, 1];
+                if (!Free(x + dx, y + dy)) continue;
+                if (dx != 0 && dy != 0 && (!Free(x + dx, y) || !Free(x, y + dy))) continue;   // no corner cutting
+                return true;
+            }
+            return false;
+        }
+        foreach (var u in players)
+        {
+            if (HasStep(u.X, u.Y)) continue;
+            for (int i = 0; i < 4; i++)   // cardinals only — a diagonal opening can still be corner-blocked
+            {
+                int nx = u.X + ElbowDirs[i, 0], ny = u.Y + ElbowDirs[i, 1];
+                if (!g.InBounds(nx, ny) || occupied.Contains((nx, ny))) continue;
+                g.Tiles[nx, ny] = TileType.Floor; g.Barrel[nx, ny] = false;
+                break;
+            }
+        }
+
         for (int attempt = 0; attempt < 8; attempt++)
         {
             var cost = g.CostMap(from.X, from.Y, (x, y) => false, out _, 9999);
             bool Stuck(int x, int y) => g.InBounds(x, y) && cost[x, y] < 0;
 
             var stuck = new List<(int x, int y)>();
+            foreach (var p in players) if (Stuck(p.X, p.Y)) stuck.Add((p.X, p.Y));
             foreach (var e in enemies) if (Stuck(e.X, e.Y)) stuck.Add((e.X, e.Y));
             foreach (var t in evac) if (Stuck(t.Item1, t.Item2)) stuck.Add(t);
             if (terminal.HasValue && Stuck(terminal.Value.x, terminal.Value.y)) stuck.Add(terminal.Value);
