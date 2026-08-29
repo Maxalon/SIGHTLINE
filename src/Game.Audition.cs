@@ -47,6 +47,7 @@ public partial class Game
     float _audPriorIntensity;        // music intensity as found, restored on exit
     int _audWarm;                    // how many cue measurements have been computed so far
     bool _audHoldFlash;              // shot harness only: hold the "just played" glows for a fixed frame
+    bool _audVolTouched;             // a fader actually moved on this visit (only then is display.json written)
 
     /// How many cue measurements to compute per frame while the screen warms up. Rendering a cue
     /// through the real mastering stage and running a 4096-pt Welch spectrum over it is ~10 ms;
@@ -67,6 +68,8 @@ public partial class Game
         _audVolDrag = -1;
         _audMusicDrag = false;
         _audWarm = 0;
+        _audHoldFlash = false;
+        _audVolTouched = false;
         Phase = Phase.AudioCheck;
         Paused = false;
         Audio.Play("select");
@@ -78,7 +81,9 @@ public partial class Game
     {
         _audQ.Clear();
         Audio.SetMusicIntensity(_audPriorIntensity);
-        Display.CommitVol();          // a fader moved on this screen is remembered
+        // Only write display.json if a fader was actually moved. Merely LOOKING at the bench must
+        // not touch disk (house rule: the harness paths stay disk-clean and byte-stable).
+        if (_audVolTouched) { Display.CommitVol(); _audVolTouched = false; }
         Phase = (_audPrior == Phase.PlayerTurn || _audPrior == Phase.EnemyTurn) ? _audPrior : Phase.Intro;
         if (_audFromPause && (Phase == Phase.PlayerTurn || Phase == Phase.EnemyTurn)) Paused = true;
         _audFromPause = false;
@@ -155,6 +160,7 @@ public partial class Game
             if (Raylib.IsMouseButtonDown(MouseButton.Left))
             { Display.SetVol(_audVolDrag, VolFrac(Hud.AudVol[_audVolDrag], m.X)); return; }
             Display.CommitVol();
+            _audVolTouched = false;   // just written; nothing left to flush on exit
             _audVolDrag = -1;
             return;
         }
@@ -179,7 +185,7 @@ public partial class Game
 
         for (int i = 0; i < Hud.AudVol.Length; i++)
             if (Raylib.CheckCollisionPointRec(m, Hud.AudVol[i]))
-            { _audVolDrag = i; Display.SetVol(i, VolFrac(Hud.AudVol[i], m.X)); return; }
+            { _audVolDrag = i; _audVolTouched = true; Display.SetVol(i, VolFrac(Hud.AudVol[i], m.X)); return; }
 
         if (Raylib.CheckCollisionPointRec(m, Hud.AudMusicSlider))
         { _audMusicDrag = true; Audio.SetMusicIntensity(VolFrac(Hud.AudMusicSlider, m.X)); return; }
