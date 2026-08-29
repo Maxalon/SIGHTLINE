@@ -31,14 +31,33 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     /// barks were written to the width instead, and VOICETEST measures every one of them.
     /// R1 REVIEW FIX: the clash itself is closed — the tip card now yields this column whenever
     /// the log is on screen (Hud.TipCardBox), and VOICETEST asserts the two never overlap.
-    public const float LogPanelW = 296f;
+    /// Authored width of the combat-log panel at 100% text scale.
+    public const float LogPanelWBase = 296f;
+    /// R2 FIX 3 — the panel GROWS with the TEXT SIZE setting instead of the words shrinking into
+    /// it. The barks are written to this column and VOICETEST measures every one of them, but it
+    /// measured them only at 100%: at 110% four and at 120% fourteen of the 36 (A3-widened) barks
+    /// ran past the edge. Shortening fourteen lines to fit a fixed box would pay for a
+    /// READABILITY setting with worse writing — exactly backwards. The panel scales instead, and
+    /// the FIELD TIP card (which already yields this column, Hud.TipCardBox) simply slides a
+    /// little further left: at 120% LogPanelX is 911, and the card needs only 780. Never SHRINKS
+    /// below the authored width (scales under 1.0 only make the column roomier).
+    public static float LogPanelW => MathF.Round(LogPanelWBase * MathF.Max(1f, Cfg.UiScale));
     public const float LogPadX = 9f;
     /// Usable text column inside the combat log.
-    public const float LogTextWidth = LogPanelW - LogPadX * 2f;
+    public static float LogTextWidth => LogPanelW - LogPadX * 2f;
+    /// Point size of a combat-log row.
+    public const int LogRowFontSize = 12;
+    /// R2 FIX 3 — vertical pitch between combat-log rows, MEASURED rather than hard-coded.
+    /// It was a flat 14f at font 12: correct at 100%, but W5's TEXT SIZE setting ships {0.90,
+    /// 1.00, 1.10, 1.20} and at 120% the glyph box is 14.4px, so consecutive rows touched.
+    /// Deriving it from Cfg.Measure keeps it exactly 14 at every scale <= 100% (identical
+    /// pixels to before) and opens the rows up as the type grows. VOICETEST asserts it at
+    /// every shipped scale.
+    public static float LogRowPitch() => MathF.Max(14f, MathF.Ceiling(Cfg.Measure("Ag", LogRowFontSize, 1f).Y) + 2f);
     /// Right margin between the combat-log panel and the screen edge (DrawCombatLog's `x`).
     public const float LogPanelMarginX = 14f;
     /// Left edge of the combat-log panel — the column the centred tip/lesson cards must not cross.
-    public const float LogPanelX = Cfg.ScreenW - LogPanelW - LogPanelMarginX;   // 970
+    public static float LogPanelX => Cfg.ScreenW - LogPanelW - LogPanelMarginX;   // 970 at 100%
     /// Shared width of the FIELD TIP / TRAINING lesson / briefing card chrome.
     public const int TipCardW = 760;
     /// Clear air kept between the tip card's right edge and the log panel's left edge.
@@ -1026,7 +1045,10 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         // tall dark box with one line at the top.
         if (log.Count == 0) return;
         const int cap = 6;
-        const float w = LogPanelW, lh = 14f, padX = LogPadX, headH = 18f, padY = 6f;
+        float w = LogPanelW;
+        const float padX = LogPadX, padY = 6f;
+        float lh = LogRowPitch();                       // R2 FIX 3: scales with the TEXT SIZE setting
+        float headH = MathF.Max(18f, lh + 4f);          // the "LOG" header sits on the same type
         int shown = Math.Min(cap, log.Count);
         float bodyH = shown * lh;
         float h = headH + bodyH + padY;
@@ -1078,6 +1100,31 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
             if (Cfg.Measure(text, s, 1f).X <= maxW) return s;
         return minSize;
     }
+
+    /// R2 FIX 3 — the largest size in (minSize..maxSize] at which `text` wraps into at most
+    /// `rows` rows of width `maxW`, falling back to minSize. The card chrome in this game is
+    /// fixed-pixel while W5's TEXT SIZE setting scales the type, so at 120% two-row bodies became
+    /// three: the shop's Clip backstop then ellipsized mid-word ("…installed on a soldi…") and the
+    /// WAR ROOM's `li < 2` cap dropped the third row's words entirely with no sign it had. One
+    /// step of type shrink is strictly better than losing words — VOICETEST asserts every card
+    /// body in the game fits at every shipped scale WITHOUT reaching the floor.
+    public static int FitWrap(string text, int maxSize, int minSize, int maxW, int rows)
+    {
+        for (int sz = maxSize; sz > minSize; sz--)
+            if (WrapText(text, sz, maxW).Count <= rows) return sz;
+        return minSize;
+    }
+
+    /// R2 FIX 3 — the FIXED-PIXEL body columns whose text must survive every shipped TEXT SIZE.
+    /// Derived here, once, from the same literals the draw code lays out with, so VOICETEST can
+    /// assert the fit without a frame and the two can never drift apart.
+    public const int ShopCardW = 808;                                            // DrawRequisition's card
+    public const int ShopBodyWidth = (ShopCardW - 60 - 16) / 2 - 28 - 24;        // 314: col width less pad + icon gutter
+    public const int WarColWidth = (Cfg.ScreenW - 60 * 2 - 24 * 2) / 3;          // 370: DrawWarRoom's three columns
+    public const int WarUnlockBodyWidth = WarColWidth - 24 - 24;                 // 322: card inset, then its own padding
+    public const int WarAchDescWidth = WarColWidth - 34 - 112;                   // 224: row inset less the progress lane
+    /// Card-body type: authored size, the smallest size the fitter may fall to, and the row budget.
+    public const int CardBodySize = 12, CardBodyMinSize = 10, CardBodyRows = 2;
 
     static string Clip(string text, int size, int maxW)
     {
@@ -3100,7 +3147,10 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
             if (got) Raylib.DrawRectangleRounded(mk, 0.3f, 4, Raylib.Fade(Pal.VipGold, rowA));
             else Raylib.DrawRectangleLinesEx(mk, 1.2f, Raylib.Fade(Pal.TxtDim, rowA));
             Cfg.Text(a.Name, new Vector2(x + 34, rowY), 14, 1f, Raylib.Fade(nameCol, rowA));
-            Cfg.Text(Clip(a.Desc, 12, w - 34 - 112), new Vector2(x + 34, rowY + 16), 12, 1f, Raylib.Fade(Pal.TxtDim, rowA));
+            // R2 FIX 3: was Clip -> an ellipsis at 120%. One row, shrink-to-fit, Clip only as backstop.
+            int adW = w - 34 - 112;
+            int adFs = FitWrap(a.Desc, CardBodySize, CardBodyMinSize, adW, 1);
+            Cfg.Text(Clip(a.Desc, adFs, adW), new Vector2(x + 34, rowY + 16), adFs, 1f, Raylib.Fade(Pal.TxtDim, rowA));
             // W12: a per-achievement PROGRESS BAR (right lane) — earned = full gold; in-progress
             // = amber fill with the cur/max fraction, so "how close am I?" reads at a glance.
             // Review fix: an UNEARNED achievement caps its shown progress at max-1 — a full bar
@@ -3175,9 +3225,12 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
             Raylib.DrawRectangleLinesEx(card, 1.4f, Raylib.Fade(Pal.VipGold, 0.75f * anim));
             Cfg.Text("NEXT UNLOCK", new Vector2(card.X + 12, card.Y + 7), 12, 1f, Raylib.Fade(Pal.VipGold, anim));
             Cfg.Text(MetaProg.UnlockName(u), new Vector2(card.X + 12, card.Y + 22), 16, 1f, Raylib.Fade(Pal.Txt, anim));
-            var descLines = WrapText(MetaProg.UnlockDesc(u), 12, (int)card.Width - 24);
-            for (int li = 0; li < descLines.Count && li < 2; li++)
-                Cfg.Text(descLines[li], new Vector2(card.X + 12, card.Y + 44 + li * 13), 12, 1f, Raylib.Fade(Pal.TxtDim, anim));
+            // R2 FIX 3: `li < 2` silently DROPPED a third row's words at 120%. Shrink to fit instead.
+            int nuW = (int)card.Width - 24;
+            int nuFs = FitWrap(MetaProg.UnlockDesc(u), CardBodySize, CardBodyMinSize, nuW, CardBodyRows);
+            var descLines = WrapText(MetaProg.UnlockDesc(u), nuFs, nuW);
+            for (int li = 0; li < descLines.Count && li < CardBodyRows; li++)
+                Cfg.Text(descLines[li], new Vector2(card.X + 12, card.Y + 44 + li * TextRow(13)), nuFs, 1f, Raylib.Fade(Pal.TxtDim, anim));
             // salvage progress toward the price + the BUY chip
             var bar = new Rectangle(card.X + 12, card.Y + 76, card.Width - 116, 8);
             Raylib.DrawRectangleRounded(bar, 0.5f, 4, Raylib.Fade(Pal.RGBA(10, 15, 21), anim));
@@ -3207,9 +3260,11 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
             Raylib.DrawRectangleRounded(card, 0.10f, 6, Raylib.Fade(Pal.RGBA(14, 20, 28), 0.9f * anim));
             Raylib.DrawRectangleLinesEx(card, 1f, Raylib.Fade(Pal.PanelBd, 0.6f * anim));
             Cfg.Text(MetaProg.UnlockName(u), new Vector2(card.X + 12, card.Y + 7), 14, 1f, Raylib.Fade(Pal.Txt, anim));
-            var dl = WrapText(MetaProg.UnlockDesc(u), 12, (int)card.Width - 24);
-            for (int li = 0; li < dl.Count && li < 2; li++)
-                Cfg.Text(dl[li], new Vector2(card.X + 12, card.Y + 27 + li * 13), 12, 1f, Raylib.Fade(Pal.TxtDim, anim));
+            int cuW = (int)card.Width - 24;
+            int cuFs = FitWrap(MetaProg.UnlockDesc(u), CardBodySize, CardBodyMinSize, cuW, CardBodyRows);   // R2 FIX 3
+            var dl = WrapText(MetaProg.UnlockDesc(u), cuFs, cuW);
+            for (int li = 0; li < dl.Count && li < CardBodyRows; li++)
+                Cfg.Text(dl[li], new Vector2(card.X + 12, card.Y + 27 + li * TextRow(13)), cuFs, 1f, Raylib.Fade(Pal.TxtDim, anim));
             var chip = new Rectangle(card.X + card.Width - 82, card.Y + 5, 70, 18);
             bool hover = afford && Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), chip);
             Color chipCol = afford ? (hover ? Pal.Good : Pal.RGBA(30, 44, 34)) : Pal.RGBA(30, 24, 24);
@@ -4479,14 +4534,18 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
             // W11: the desc WRAPS to (max) two 11px lines inside the card — several descs (FRAG
             // CACHE, BALLISTIC PLATING, the prep rows) measured wider than the card and ran under
             // the neighbouring column. Two lines cover every current desc; Clip is the backstop.
-            var descLines = WrapText(g.ShopDescAt(i), 12, (int)r.Width - 28 - icoGut);
-            if (descLines.Count > 2)
+            // R2 FIX 3: shrink one step rather than ellipsize. At 120% these bodies wrapped to a
+            // third row and the Clip backstop below ate the tail mid-word.
+            int descW = (int)r.Width - 28 - icoGut;
+            int descFs = FitWrap(g.ShopDescAt(i), CardBodySize, CardBodyMinSize, descW, CardBodyRows);
+            var descLines = WrapText(g.ShopDescAt(i), descFs, descW);
+            if (descLines.Count > CardBodyRows)
             {
-                descLines[1] = Clip(descLines[1] + " " + string.Join(" ", descLines.GetRange(2, descLines.Count - 2)), 12, (int)r.Width - 28 - icoGut);
+                descLines[1] = Clip(descLines[1] + " " + string.Join(" ", descLines.GetRange(2, descLines.Count - 2)), descFs, descW);
                 descLines.RemoveRange(2, descLines.Count - 2);
             }
             for (int li = 0; li < descLines.Count; li++)
-                Cfg.Text(descLines[li], new Vector2(textX, (int)r.Y + 32 + li * TextRow(13)), 12, 1f, Pal.TxtDim);
+                Cfg.Text(descLines[li], new Vector2(textX, (int)r.Y + 32 + li * TextRow(13)), descFs, 1f, Pal.TxtDim);
             // W5: the effect line and the BUY / "- unavailable -" column share the card's last row,
             // and the effect line was drawn with NO width limit — at 100% "counters SYNDICATE for
             // one mission" already stopped a couple of px short of "[ BUY ]", and any text scale
@@ -4495,7 +4554,11 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
             int rightW = (int)Cfg.Measure(rightLbl, 12, 1f).X + 22;
             int effMaxW = (int)r.Width - 28 - icoGut - rightW;
             int effY = (int)r.Y + 32 + 2 * TextRow(13) + 1;
-            Cfg.Text(Clip(g.ShopEffect(i), 12, effMaxW), new Vector2(textX, effY), 12, 1f, can ? Pal.Accent : Pal.TxtDim);  // concrete effect
+            // R2 FIX 3: shrink-to-fit before clipping — at 120% "counters WARDENS for one mission"
+            // still ellipsized ("...for one mi…") after W5 reserved the right column.
+            string effTxt = g.ShopEffect(i);
+            int effFs = FitSize(effTxt, 12, 9, effMaxW);
+            Cfg.Text(Clip(effTxt, effFs, effMaxW), new Vector2(textX, effY), effFs, 1f, can ? Pal.Accent : Pal.TxtDim);  // concrete effect
             Color cc = run.Intel >= icost ? Pal.Good : Pal.Foe;
             Cfg.Text(cost, new Vector2((int)(r.X + r.Width - costW - 14), (int)r.Y + 12), 16, 1f, cc);
             // -5 puts the label back on its authored r.Y+54 baseline at 100% (effY is r.Y+59 there),
@@ -4509,12 +4572,18 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         CenterText("PROCEED TO DEPLOYMENT", ShopProceed, 15, Pal.RGBA(3, 18, 26));
 
         // ---- W9: paid slate RE-ROLL (salvage sink; Game refuses the click when broke) ----
-        ShopReroll = new Rectangle(x + w - 30 - 178, y + h - 56, 178, 36);
+        // R2 FIX 3: the button was a fixed 178px and its label overran the chrome at 120%.
+        // Size it to the measured label (right edge pinned; it grows leftward) and never let it
+        // reach PROCEED — 24px of padding keeps the label inside its own frame at every scale.
+        string rrLbl = $"RE-ROLL SLATE ({MetaProg.ShopRerollCost} SALV)";
+        int rrW = Math.Max(178, (int)MathF.Ceiling(Cfg.Measure(rrLbl, 12, 1f).X) + 24);
+        rrW = Math.Min(rrW, (int)(x + w - 30 - (ShopProceed.X + ShopProceed.Width + 12)));
+        ShopReroll = new Rectangle(x + w - 30 - rrW, y + h - 56, rrW, 36);
         bool srCan = g.BarracksSalvage >= MetaProg.ShopRerollCost;
         bool srHov = srCan && Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), ShopReroll);
         Raylib.DrawRectangleRounded(ShopReroll, 0.3f, 8, srHov ? Pal.RGBA(30, 44, 34) : Pal.RGBA(14, 20, 28));
         Raylib.DrawRectangleLinesEx(ShopReroll, 1.4f, srCan ? (srHov ? Pal.VipGold : Pal.PanelBd) : Pal.RGBA(40, 46, 54));
-        CenterText($"RE-ROLL SLATE ({MetaProg.ShopRerollCost} SALV)", ShopReroll, 12, srCan ? (srHov ? Pal.VipGold : Pal.Txt) : Pal.TxtDim);
+        CenterText(rrLbl, ShopReroll, FitSize(rrLbl, 12, 9, rrW - 12), srCan ? (srHov ? Pal.VipGold : Pal.Txt) : Pal.TxtDim);
     }
 
     /// The ARMORY sub-screen of REQUISITION: re-arm a soldier with a different weapon their class

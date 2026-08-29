@@ -444,7 +444,7 @@ public partial class Game
     // if every reachable node is mixed-force -> the prep row is unavailable/greyed.
     public Faction PrepFactionOffered => _run != null ? _run.UpcomingFaction() : Faction.None;
 
-    static string PrepDescFor(Faction f) => f switch
+    public static string PrepDescFor(Faction f) => f switch
     {
         Faction.Syndicate => "HARDENED OPTICS: deny their see-over-low cover next mission.",
         Faction.Legion    => "REACTIVE PLATING: squad takes -1 damage next mission.",

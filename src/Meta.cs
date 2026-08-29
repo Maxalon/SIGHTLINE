@@ -105,7 +105,7 @@ public static class MetaProg
         new("STAND10",   "UNBROKEN",      "Reach wave 10 in LAST STAND."),
         // W9 (SIGNAL): the retention modes feed the meta — appended at the END (ids are stable strings).
         new("DAILY_WIN", "DAY SHIFT",     "Win a SEEDED DAILY."),
-        new("STREAK5",   "DAWN PATROL",   "Win dailies on 5 consecutive days."),
+        new("STREAK5",   "DAWN PATROL",   "Win 5 dailies in a row."),
     };
 
     public static string AchievementName(string id)
