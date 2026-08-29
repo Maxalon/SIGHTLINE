@@ -1529,3 +1529,50 @@ sets, one lever per measured round, fresh same-slot R0 first, dip budgets, breac
       Rungs 1-7 add bodies and stat points that the measurement cannot see. Either the rungs need
       real teeth or the ladder needs fewer, bigger steps — but the first job is a **higher-N**
       measurement (n≥80/rung) so the question can be asked at a precision that can answer it.
+
+---
+
+## PROGRAM CROSSCUT — THE OPEN BALANCE TARGET (measured, replicated, unspent)
+
+**THE LADDER IS COMPRESSED, NOT LOW.** Three independent measurements on the post-W1 tree agree:
+
+| rung | band | L2 (n=160/rung) | W2's dial-OFF control (n=80/rung) | mean vs band |
+|---|---|---|---|---|
+| heat 0 | 55 | 46.9 | 47.5 | **−7.8** |
+| heat 2 | 40 | 36.9 | 26.2 | **−8.5** |
+| heat 4 | 30 | 23.1 | 22.5 | **−7.2** |
+| heat 6 | 20 | 20.6 | 17.5 | −0.9 |
+| heat 8 | 10 | 8.8 | 12.5 | +0.7 |
+
+The COLD rungs sit ~7-8 points below band; the HOT rungs sit on it. **The game starts too hard and
+then stops getting harder.** That is a different defect from "the ladder is low", and it has a
+different repair: the cold end needs relief, or the hot end needs teeth — not a uniform shift.
+
+**The mechanism is already identified and replicated.** The `h4 → h6` step is the smallest on BOTH
+ladders (**−3.8** on L1, **−2.5** on L2) against neighbours of −12.5/−13.8 and −7.5/−11.9.
+`Heat.Mods` explains it exactly: **rung 8 is the ONLY entry in the table carrying either `DmgDelta`
+or `AiTier`.** The middle rungs add bodies and stats; only the apex changes KIND. So heat 5 and 6
+buy almost nothing, and the ladder's shape is a table property rather than an emergent one.
+
+- [ ] **THE COMPRESSION WAVE (specced, not started).** Reshape `Heat.Mods` so the middle rungs
+      change KIND rather than only quantity — the audit's `balance-3` finding proposed moving
+      `DmgDelta` to rung 6 and `AiTier 2` to rung 7, which is the obvious first candidate. Price it
+      as ONE lever with a CRN-paired round against a fresh same-slot baseline on the merged tree.
+      **Do not aim a rung-average lever at this** — pair it with the per-objective decomposition,
+      because the apex is a wall made of specific objectives and the cold end is a different
+      problem from the hot end.
+      **Note the prerequisite:** waves W2, W9 and W8 all move gameplay, so this must be measured
+      AFTER they merge, on the composed tree. Measuring it before is exactly the mistake fourteen
+      waves made before X2 caught it.
+
+- [ ] **THE MID-RUN DECAPITATE** (wave W8, in flight). 46.0% ±3.9 (n=163) against the boss
+      finale's 69.7% (n=479), replicated from L1's 48.9/70.1 on disjoint worlds. Worst mission of
+      any kind in the game. `Game.DesignateHvt` skips the HVT buff for an ELITE by its own comment
+      and applies `+6 + mission` HP and +6 aim everywhere else — the stat-check wall was removed
+      from the boss and left in the mid-run case.
+
+- [x] **RETRACTED — the slot-set effect.** L1 measured bases 0/10 running +8.3 points easier than
+      fresh sets (z=1.93, p=0.053) and recorded it as NOT established. L2 tested it with six fresh
+      sets over 960 campaigns: +3.1 points, p=0.394, three of six rungs reversed. **The effect is
+      not there.** The method rule (a rung is four slot sets) stays on COST grounds — it is free
+      insurance — but must not be cited as evidence of a world-set artefact.
