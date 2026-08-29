@@ -2866,10 +2866,10 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         // ---- title + SALVAGE readout ----
         float titleIn = PanelAnim("warTitle", 0.5f);
         string title = "WAR ROOM";
-        int tfs = 64;
+        int tfs = WarTitleSize;
         Vector2 tm = Cfg.Measure(title, tfs, 4f);
         float tx = W / 2f - tm.X / 2f;
-        float ty = 40f - (1f - Util.EaseOutBack(Util.Clamp(titleIn, 0f, 1f))) * 22f;
+        float ty = WarTitleY - (1f - Util.EaseOutBack(Util.Clamp(titleIn, 0f, 1f))) * 22f;
         for (int i = 1; i <= 3; i++)
             Cfg.TitleText(title, new Vector2(tx, ty - i), tfs, 4f, Raylib.Fade(Pal.Accent, 0.10f * titleIn));
         Cfg.TitleText(title, new Vector2(tx, ty), tfs, 4f, Raylib.Fade(Pal.Txt, titleIn));
@@ -2889,7 +2889,8 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         int colGap = 24;
         int marginX = 60;
         int colW = (W - marginX * 2 - colGap * 2) / 3;
-        const int footerY = 618, footerH = 82;
+        const int footerH = 82;
+        int footerY = WarFooterY;
         int colH = footerY - top - 16;
         int c0 = marginX, c1 = marginX + colW + colGap, c2 = marginX + (colW + colGap) * 2;
 
@@ -2902,7 +2903,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         int hofH = hofRows == 0 ? 86 : Math.Min(colH, 44 + hofRows * 34 + 8);
         int ownedN = 0, unownedN = 0;
         foreach (var u in MetaProg.AllUnlocks) if (p.Unlocks.Contains((int)u)) ownedN++; else unownedN++;
-        int unlH = Math.Min(colH, 44 + (unownedN > 0 ? 106 + (unownedN - 1) * 70 : 0) + ownedN * 24 + 8);
+        int unlH = WarUnlockPlan(colH, ownedN, unownedN).panelH;
 
         DrawWarAchievements(p, c0, top, colW, achH, PanelAnim("warAch", 0.4f, 0.15f));
         DrawWarHallOfFame(p, c1, top, colW, hofH, PanelAnim("warHof", 0.4f, 0.25f));
@@ -3207,6 +3208,46 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         }
     }
 
+    // W9 THE REPAIR — the WAR ROOM's settled column geometry as NAMED constants, and the UNLOCKS
+    // column's row plan as a PURE function. Both exist so a headless test can assert the thing that
+    // silently broke: that every UNOWNED unlock actually gets a card, and therefore a
+    // WarRoomBuyBtns hit-rect, at every owned/unowned split — including the FRESH PROFILE, which is
+    // the state every new player is in and the one state the screenshot harness cannot photograph
+    // (DebugWarRoom hard-codes a 2-owned demo profile, which happens to fit).
+    // During the title's entrance ease the column top runs up to 22px HIGHER, so the settled values
+    // below are the TIGHTEST case and the right thing to hold the fit against.
+    public const int WarTitleY = 40, WarTitleSize = 64, WarFooterY = 618;
+    public static int WarColumnTop => WarTitleY + WarTitleSize + 52;
+    public static int WarColumnHeight => WarFooterY - WarColumnTop - 16;
+
+    /// The UNLOCKS column's layout decision, derived once and used by both the panel-height call in
+    /// DrawWarRoom and the card loop in DrawWarUnlocks. `drawn` is how many COMPACT cards the loop
+    /// will actually paint — it must always equal unownedN-1 (the hero card carries the other one),
+    /// or an unlock is invisible AND unbuyable. Rows shrink to fit rather than the list truncating.
+    public static (int panelH, int pitch, int cardH, int descRows, int drawn)
+        WarUnlockPlan(int colH, int ownedN, int unownedN)
+    {
+        int heroH = unownedN > 0 ? 106 : 0;
+        int compactN = Math.Max(0, unownedN - 1);
+        int panelH = Math.Min(colH, 44 + heroH + compactN * 70 + ownedN * 24 + 8);
+        int rowY = 44 + heroH;
+        int room = (panelH - 8) - rowY - ownedN * 24;
+        int pitch = 70, cardH = 62, descRows = CardBodyRows;
+        if (compactN > 0 && compactN * pitch - 8 > room)
+        {
+            pitch = Math.Max(26, room / compactN);
+            cardH = Math.Max(20, pitch - 8);
+            descRows = cardH >= 56 ? CardBodyRows : (cardH >= 42 ? 1 : 0);
+        }
+        int drawn = 0;
+        for (int i = 0; i < compactN; i++)
+        {
+            if (rowY + cardH > panelH) break;
+            drawn++; rowY += pitch;
+        }
+        return (panelH, pitch, cardH, descRows, drawn);
+    }
+
     static void DrawWarUnlocks(Game g, Game.WarRoomProfile p, int x, int y, int w, int h, float anim)
     {
         WarRoomBuyBtns.Clear();
@@ -3257,22 +3298,50 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
             rowY += 106;
         }
 
-        // remaining unowned unlocks: compact cards
+        // remaining unowned unlocks: compact cards.
+        // W9 THE REPAIR — SIZE THE ROWS TO THE ROOM instead of `break`ing off the end of the list.
+        // On a FRESH PROFILE (0 owned) the six-entry catalogue wants 44 + 106 + 5*70 + 8 = 508px in a
+        // 446px column, so the old overflow `break` fired on the FIFTH compact card and silently
+        // dropped STANDING RESERVE — no card, no BUY chip, no scroll bar, no "+N more". And because
+        // the break preceded WarRoomBuyBtns.Add, no hit-rect was published either, so it was
+        // UNBUYABLE, not merely off-screen: a permanent unlock the player banks salvage toward, third
+        // cheapest in the game, invisible in the one profile state every new player is in. (The
+        // harness could never photograph it — DebugWarRoom hard-codes a 2-owned demo profile, which
+        // is exactly the configuration that fits.)
+        // Shrinking the pitch keeps every entry present and clickable, and degrades gracefully as the
+        // catalogue grows: full 62px cards with two description rows while they fit, then one row,
+        // then a name+BUY ledger row. Description text still goes through FitWrap, so the 12px floor
+        // is untouched. `owned * 24` is reserved for the receipts below.
+        int ownedRows = 0, unownedRows = 0;
+        foreach (var u in MetaProg.AllUnlocks) if (p.Unlocks.Contains((int)u)) ownedRows++; else unownedRows++;
+        var plan = WarUnlockPlan(h, ownedRows, unownedRows);
+        int pitch = plan.pitch, cardH = plan.cardH, descRows = plan.descRows;
         foreach (var u in MetaProg.AllUnlocks)
         {
             if (p.Unlocks.Contains((int)u) || (next.HasValue && u == next.Value)) continue;
-            if (rowY > y + h - 58) break;
+            if (rowY + cardH > y + h) break;   // true safety net; with the pitch above it should never fire
             int cost = MetaProg.UnlockCost(u);
             bool afford = p.Salvage >= cost;
-            var card = new Rectangle(x + 12, rowY, w - 24, 62);
+            var card = new Rectangle(x + 12, rowY, w - 24, cardH);
             Raylib.DrawRectangleRounded(card, 0.10f, 6, Raylib.Fade(Pal.RGBA(14, 20, 28), 0.9f * anim));
             Raylib.DrawRectangleLinesEx(card, 1f, Raylib.Fade(Pal.PanelBd, 0.6f * anim));
             Cfg.Text(MetaProg.UnlockName(u), new Vector2(card.X + 12, card.Y + 7), 14, 1f, Raylib.Fade(Pal.Txt, anim));
             int cuW = (int)card.Width - 24;
-            int cuFs = FitWrap(MetaProg.UnlockDesc(u), CardBodySize, CardBodyMinSize, cuW, CardBodyRows);   // R2 FIX 3
-            var dl = WrapText(MetaProg.UnlockDesc(u), cuFs, cuW);
-            for (int li = 0; li < dl.Count && li < CardBodyRows; li++)
-                Cfg.Text(dl[li], new Vector2(card.X + 12, card.Y + 27 + li * TextRow(13)), cuFs, 1f, Raylib.Fade(Pal.TxtDim, anim));
+            if (descRows > 0)
+            {
+                int cuFs = FitWrap(MetaProg.UnlockDesc(u), CardBodySize, CardBodyMinSize, cuW, descRows);   // R2 FIX 3
+                var dl = WrapText(MetaProg.UnlockDesc(u), cuFs, cuW);
+                for (int li = 0; li < dl.Count && li < descRows; li++)
+                {
+                    // W9: on the LAST row we are allowed to paint, ellipsize rather than cutting a
+                    // word in half — a shrunk row still has to read as a finished sentence or a
+                    // deliberate "there's more", never as a rendering accident.
+                    bool last = li == descRows - 1 && dl.Count > descRows;
+                    string row = last ? Clip(dl[li] + " " + string.Join(" ", dl.GetRange(li + 1, dl.Count - li - 1)), cuFs, cuW)
+                                      : dl[li];
+                    Cfg.Text(row, new Vector2(card.X + 12, card.Y + 27 + li * TextRow(13)), cuFs, 1f, Raylib.Fade(Pal.TxtDim, anim));
+                }
+            }
             var chip = new Rectangle(card.X + card.Width - 82, card.Y + 5, 70, 18);
             bool hover = afford && Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), chip);
             Color chipCol = afford ? (hover ? Pal.Good : Pal.RGBA(30, 44, 34)) : Pal.RGBA(30, 24, 24);
@@ -3280,7 +3349,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
             Raylib.DrawRectangleLinesEx(chip, 1f, Raylib.Fade(afford ? Pal.Good : Pal.Foe, 0.6f * anim));
             CenterText($"BUY {cost}", chip, 12, Raylib.Fade(afford ? Pal.Txt : Pal.TxtDim, anim));
             WarRoomBuyBtns.Add((u, chip));   // hit-testable regardless of affordability (Game refuses)
-            rowY += 70;
+            rowY += pitch;
         }
 
         // owned unlocks: one-line receipts
