@@ -5538,6 +5538,18 @@ backdrop in the bloom-source pass they painted straight over the main menu until
 BARRACKS and AUDIO CHECK are deliberately absent — neither draws a backdrop, so their frame order
 is unchanged.
 
+**And one more thing the split broke, found by looking at a screenshot rather than by a test.**
+PAUSE, the tag editor and the whole BARRACKS modal family (requisition / perk / spec / boon /
+field event) dim the live board with a full-screen wash drawn from the CHROME pass — which now
+runs *after* `BuildBloom`, while the composite ADDs `glow * 1.45` on top of whatever the chrome
+laid down. So the scrim darkened the board and the board's own glow punched straight back through
+it: the pause card ended up with the squad's cyan halos blooming over its own scrim, which is the
+exact opposite of what a scrim is for. `Hud.BoardScrimAlpha` now lays the same wash in the
+bloom-source pass, so the bright pass never sees the glow. The board consequently takes the wash
+twice and reads darker under a modal than it did pre-W5 — deliberate, and the better of the two
+available errors, because the card is the focus. Three-way crop (pre-split / split-without-this /
+shipped) confirmed it by eye.
+
 **One accepted side effect, recorded rather than hidden.** `PruneAnims` forgets a panel's entrance
 key when it is not drawn in a frame ("re-animate on re-show" — its own comment). The in-mission
 chrome used to be drawn *and buried* under an overlay screen's backdrop, so its keys stayed warm;
@@ -5719,7 +5731,7 @@ merely close.
   (dark plate + coloured left rule, one filled treatment for the single primary verb, hotkey
   badges in a fixed column, LAST STAND's reserved danger red demoted to a rule). The brief marked
   it droppable-last and I dropped it. Two reasons, one good and one honest: the half of it that
-  was *measurable* — the labels washing out — is fixed by W5-2 and now reads 5.79–11.6:1 with FX
+  was *measurable* — the labels washing out — is fixed by W5-2 and now reads 6.51–13.65:1 with FX
   on; and the rest is a substantial aesthetic redesign of the storefront screen whose only
   reviewer this session is my own screenshot, where the downside (flat saturated primaries are
   loud, but they are also the clearest call-to-action on the page) is a judgement I would be
@@ -5744,6 +5756,12 @@ merely close.
   needs a third pass (grade-only shader over a second target) that costs a full-screen RT and a
   blit per frame — on a game with no frame-time instrument (`wildcard-7`). Left open in ROADMAP
   with the shape of the fix written down.
+- **A modal now sits over a DARKER board than it did pre-W5.** PAUSE / the tag editor / the
+  BARRACKS family take their full-screen wash twice — once in the bloom-source pass so the glow
+  cannot punch back through it, once in the chrome pass so the HUD still dims. Reproducing the
+  old brightness exactly would need the two alphas re-solved so their product is the original
+  (0.576 each for 0.82), which would leave the HUD brighter behind the card than before. I took
+  the darker board: the card is the focus, and the alternative error was visible.
 - **`SIGHTLINE_POSTFX=1`'s stale demo-bloom comment is documented above but not fixed.** Removing
   the dead injection is a one-liner; it belongs with whoever next touches that hook, and changing
   it now would have made my before/after contrast pair non-comparable.

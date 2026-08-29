@@ -2576,7 +2576,33 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
                 Raylib.DrawRectangle(0, 0, Cfg.ScreenW, Cfg.ScreenH, Raylib.Fade(Pal.RGBA(6, 9, 13), 0.82f));
                 break;
         }
+        // W5, and this cost a screenshot to find: the SCRIM SCREENS need their wash in the
+        // BLOOM SOURCE too. PAUSE, the tag editor and the whole BARRACKS family dim the live
+        // board from the CHROME pass — which now runs AFTER BuildBloom, and the composite ADDS
+        // `glow * 1.45` on top of whatever the chrome laid down. So the scrim darkened the board
+        // and the board's own glow punched straight back through it: the pause card ended up with
+        // the squad's cyan halos blooming over its scrim, which is the exact opposite of what a
+        // scrim is for. Laying the same wash here attenuates the bright-pass input, so the glow
+        // is gone before the composite can add it back.
+        //
+        // The board therefore takes the wash TWICE (once here, once in the chrome pass, which
+        // still owns dimming the HUD) and reads darker under a modal than it did pre-W5. That is
+        // deliberate and it is the better of the two available errors: the card is the focus.
+        float scrim = BoardScrimAlpha(g);
+        if (scrim > 0f)
+            Raylib.DrawRectangle(0, 0, Cfg.ScreenW, Cfg.ScreenH, Raylib.Fade(Pal.RGBA(5, 8, 11), scrim));
     }
+
+    /// The alpha of the full-screen wash the CHROME pass is about to lay over the live board.
+    /// Screens with an OPAQUE backdrop are handled by DrawBackdropLayer's switch above and are
+    /// deliberately absent. BARRACKS covers its whole modal family (REQUISITION / perk / spec /
+    /// boon / field event, all drawn inside DrawBarracks at 0.85-0.90) with the lightest of them:
+    /// the heavier ones simply get a little more attenuation than they strictly need.
+    static float BoardScrimAlpha(Game g)
+        => g.Paused ? 0.82f * Util.EaseOutQuad(PanelAnim("pause", 0.13f))
+         : g.EditingTag ? 0.70f
+         : g.Phase == Phase.Barracks ? 0.85f
+         : 0f;
 
     /// A reusable animated geometric backdrop: an opaque graded fill, a slow-drifting
     /// perspective-ish grid, a horizontal scanning sightline, drifting reticle rings,

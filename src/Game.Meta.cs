@@ -297,6 +297,11 @@ public partial class Game
                 int before2 = SaveGame.VeteranCount();
                 gr2.LoseRun("METATEST", "reserve-rejoin leg");
                 if (gr2.EndReserve != SaveGame.VeteranCount() - before2) fails.Add("reserveRejoinDelta");
+                // ...and when EVERY survivor was already a reserve record under the same name, the
+                // delta is exactly 0 — vets.Count would have claimed the whole squad joined again.
+                int renamed = Math.Min(gr2.RunState.Squad.Count, names.Count);
+                if (renamed == gr2.RunState.Squad.Count(u => !u.IsVip) && gr2.EndReserve != 0)
+                    fails.Add("reserveRejoinNotZero=" + gr2.EndReserve);
             }
 
             // ── W9 (SIGNAL): the standing economy ─────────────────────────────────────────────
