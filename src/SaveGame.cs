@@ -175,7 +175,31 @@ public static partial class SaveGame
 
     static MetaDto LoadMetaDto()
     {
-        try { if (File.Exists(MetaPath)) return JsonSerializer.Deserialize(File.ReadAllText(MetaPath), SaveJson.Default.MetaDto) ?? new MetaDto(); }
+        try
+        {
+            if (File.Exists(MetaPath))
+            {
+                var dto = JsonSerializer.Deserialize(File.ReadAllText(MetaPath), SaveJson.Default.MetaDto) ?? new MetaDto();
+                // W9 THE REPAIR — the meta SchemaVersion POLICY, made EXPLICIT (it was an accident:
+                // WriteMetaDto stamped the field, SAVETEST asserted the stamp, and nothing ever read
+                // it back). meta.json is deliberately FORWARD-TOLERANT, the OPPOSITE of Load's
+                // refuse-and-stash for save.json, and that asymmetry is the decision:
+                //   * a run save is ONE campaign; meta.json is EVERY campaign — salvage, unlocks,
+                //     achievements, the veteran reserve, the hall of fame, the heat ceiling. Refusing
+                //     it would hand a player who merely downgrades a build a BLANK CAREER, which is a
+                //     far worse outcome than misreading one field.
+                //   * every MetaDto field is APPEND-ONLY and defaults inert, so an older build reads
+                //     its own fields correctly and simply cannot see newer ones. MaxHeat is clamped on
+                //     read (LoadMetaHeat), unlock ordinals are membership-tested, and the sanitiser
+                //     below drops anything structurally unusable.
+                // The one REAL cost of reading it is the WRITE-BACK: this build's DTO cannot round-trip
+                // fields it does not know about, so the first read-modify-write silently drops them.
+                // So stash an untouched copy to meta.json.bak (once per session, sharing the corrupt
+                // path's guard) BEFORE that can happen — the newer build can still recover its profile.
+                if (dto.SchemaVersion > CurrentSchema) StashFutureMeta();
+                return SanitiseMeta(dto);
+            }
+        }
         catch
         {
             // Never destroy evidence: an unreadable meta.json used to yield a fresh
@@ -195,6 +219,50 @@ public static partial class SaveGame
             catch { }
         }
         return new MetaDto();
+    }
+
+    /// W9 THE REPAIR — "parses fine but is unusable is corruption too", for the PROFILE.
+    /// SaveGame.Load has applied exactly that rule to save.json since D2 (see the guard above the
+    /// SchemaVersion check); meta.json — the ONE file holding all permanent progress — had no
+    /// analogue, so three hand-edit / disk-damage shapes each killed the game with an UNHANDLED
+    /// exception on its own primary entry button, with no stash and no in-game recovery:
+    ///   {"Veterans":[null]}                 -> NRE in FromUnitDto, on NEW CAMPAIGN
+    ///   {"Veterans":[{"Cls":null,...}]}     -> ArgumentNullException on a Dictionary key in
+    ///                                          Run.GenerateDraftPool, on NEW CAMPAIGN
+    ///   {"Legends":[null]}                  -> NRE in Hud.AchProgress, in the WAR ROOM DRAW path
+    /// The game itself can never author these (EnshrineVeterans/AddLegend filter, and the write is
+    /// atomic), which is precisely why nothing caught them — same as the unparseable case.
+    /// Sanitising HERE means every consumer (LoadVeterans / LoadLegends / LoadSalvage / the WAR ROOM
+    /// profile / the draft pool) is covered by one guard; the call sites keep their own cheap null
+    /// checks as defence in depth. Dropping a structurally broken entry is deliberate: a veteran with
+    /// no name or class cannot be drafted or drawn, and a half-blank draft card is worse than one
+    /// fewer recall option.
+    static MetaDto SanitiseMeta(MetaDto d)
+    {
+        d.Veterans?.RemoveAll(v => v == null || string.IsNullOrEmpty(v.Name) || string.IsNullOrEmpty(v.Cls));
+        d.Legends?.RemoveAll(l => l == null);
+        if (d.Legends != null)
+            foreach (var l in d.Legends)   // a legend is display-only: coalesce rather than drop it
+            { l.Name = l.Name ?? "?"; l.Cls = l.Cls ?? "?"; l.Rank = l.Rank ?? "?"; }
+        d.Achievements?.RemoveAll(string.IsNullOrEmpty);
+        return d;
+    }
+
+    /// Preserve a meta.json stamped by a NEWER build before this build's first read-modify-write
+    /// drops the fields it cannot see. Same one-shot guard and same never-crash contract as
+    /// StashCorruptSave / the corrupt-meta path — and deliberately a COPY, not a move: the profile
+    /// stays loadable (see the forward-tolerance policy at LoadMetaDto).
+    static void StashFutureMeta()
+    {
+        try
+        {
+            if (!_metaEvidenceStashed && File.Exists(MetaPath))
+            {
+                File.Copy(MetaPath, MetaPath + ".bak", true);
+                _metaEvidenceStashed = true;
+            }
+        }
+        catch { }
     }
 
     static void WriteMetaDto(MetaDto dto)
@@ -471,6 +539,7 @@ public static partial class SaveGame
 
     static Unit FromUnitDto(UnitDto d, bool fromReserve = false)
     {
+        if (d == null) return null;   // W9: a null element in a persisted array is not a soldier (callers skip nulls)
         int maxHp = Math.Clamp(d.MaxHp, 1, MaxHpCap);
         var u = new Unit
         {
@@ -517,6 +586,7 @@ public static partial class SaveGame
             foreach (var d in dtos)
             {
                 var u = FromUnitDto(d, fromReserve: true);
+                if (u == null) continue;   // W9: LoadMetaDto already drops nulls; this survives a future caller
                 u.Hp = u.MaxHp; u.Wound = 0;
                 list.Add(u);
             }
@@ -854,6 +924,11 @@ public static partial class SaveGame
             string corrupt = CorruptionSelfTest();
             if (corrupt != null) fails.Add(corrupt);
 
+            // W9: the PROFILE's "parses fine but is unusable" leg — the meta.json analogue of
+            // StructureSelfTest, which covered save.json only.
+            string metaStruct = MetaStructureSelfTest();
+            if (metaStruct != null) fails.Add(metaStruct);
+
             // D2/D5: structurally-valid-but-unusable saves, and out-of-range enum ordinals on read
             string structure = StructureSelfTest();
             if (structure != null) fails.Add(structure);
@@ -1008,6 +1083,95 @@ public static partial class SaveGame
             if (bakSaved != null) { try { File.WriteAllText(bakPath, bakSaved); } catch { } }
             else { try { if (File.Exists(bakPath)) File.Delete(bakPath); } catch { } }
             InvalidateExistsCache();
+        }
+    }
+
+    /// W9 THE REPAIR — the HOSTILE-meta.json leg (dispatched from SelfTest, so SAVETEST covers it).
+    ///
+    /// THE GAP THIS CLOSES: no self-test in the project has ever read a meta.json it did not itself
+    /// WRITE. VETTEST/METATEST/SAVETEST all delete-or-stash the real file first and then write their
+    /// own fixture through EnshrineVeterans/AddLegends, which structurally cannot emit a null element;
+    /// CorruptionSelfTest was the only hostile-meta input and it feeds exactly one shape, an
+    /// UNPARSEABLE string. The parses-fine-but-is-unusable class — StructureSelfTest's whole subject —
+    /// was tested for save.json and not for the file holding ALL permanent progress. Three shapes in
+    /// that class each ended the process with an unhandled exception on a primary entry button.
+    ///
+    /// Each leg writes RAW BYTES to meta.json (never the writer), then drives the REAL consumer:
+    /// LoadVeterans -> Run.GenerateDraftPool (the NEW CAMPAIGN path) and LoadLegends (the WAR ROOM
+    /// path). Snapshots and restores meta.json + meta.json.bak like its siblings.
+    static string MetaStructureSelfTest()
+    {
+        string bakPath = MetaPath + ".bak";
+        string metaSaved = File.Exists(MetaPath) ? File.ReadAllText(MetaPath) : null;
+        string bakSaved = File.Exists(bakPath) ? File.ReadAllText(bakPath) : null;
+        bool stashSaved = _metaEvidenceStashed;
+        try
+        {
+            Directory.CreateDirectory(Dir);
+
+            // (1) a NULL element in Veterans — used to NRE inside FromUnitDto, on NEW CAMPAIGN.
+            File.WriteAllText(MetaPath, "{\"Salvage\":250,\"MaxHeat\":4,\"Veterans\":[null]}");
+            var v1 = LoadVeterans();
+            if (v1 == null || v1.Count != 0) return "metaNullVeteranNotDropped";
+            if (Run.GenerateDraftPool(v1, 2, false).Count == 0) return "metaNullVeteranNoPool";
+            if (LoadSalvage() != 250) return "metaNullVeteranLostSalvage";   // the survivable rest still loads
+
+            // (2) a veteran with a NULL Cls — used to throw ArgumentNullException on a Dictionary
+            //     key inside Run.GenerateDraftPool, on NEW CAMPAIGN.
+            File.WriteAllText(MetaPath,
+                "{\"Veterans\":[{\"Name\":\"VEGA\",\"Cls\":null,\"Hp\":9,\"MaxHp\":9,\"Aim\":70,\"Mobility\":7," +
+                "\"Weapon\":0,\"Kills\":5,\"Rank\":2}]}");
+            var v2 = LoadVeterans();
+            if (v2.Count != 0) return "metaNullClsNotDropped";
+            if (Run.GenerateDraftPool(v2, 2, false).Count == 0) return "metaNullClsNoPool";
+            // and the same shape must survive even if it reaches the pool builder by another route
+            Run.GenerateDraftPool(new List<Unit> { null, new Unit { Name = "X", Cls = null } }, 2, false);
+
+            // (3) a NULL element in Legends — used to NRE in Hud.AchProgress, in the WAR ROOM DRAW
+            //     path (unavoidable the frame the screen opens).
+            File.WriteAllText(MetaPath,
+                "{\"Salvage\":250,\"Legends\":[null,{\"Name\":\"NOX\",\"Cls\":\"RANGER\",\"Rank\":\"SGT\"," +
+                "\"Kills\":4,\"Heat\":2,\"Won\":true}]}");
+            var lg = LoadLegends();
+            if (lg.Count != 1 || lg[0] == null || lg[0].Name != "NOX") return "metaNullLegendNotDropped";
+
+            // (4) null STRINGS on an otherwise-fine legend: kept (display-only) but coalesced, so no
+            //     draw site can fault on them.
+            File.WriteAllText(MetaPath, "{\"Legends\":[{\"Name\":null,\"Cls\":null,\"Rank\":null,\"Won\":true}]}");
+            var lg2 = LoadLegends();
+            if (lg2.Count != 1 || lg2[0].Name == null || lg2[0].Cls == null || lg2[0].Rank == null)
+                return "metaNullLegendStringsNotCoalesced";
+
+            // (5) an empty-string achievement id must not survive into the profile.
+            File.WriteAllText(MetaPath, "{\"Achievements\":[\"\",null,\"FIRST_WIN\"]}");
+            var ach = LoadAchievements();
+            if (ach.Count != 1 || ach[0] != "FIRST_WIN") return "metaBlankAchievementNotDropped";
+
+            // (6) THE SCHEMA POLICY, PINNED. meta is deliberately FORWARD-TOLERANT (see LoadMetaDto):
+            //     a future-stamped profile still LOADS — refusing it would blank a career — but it is
+            //     copied to meta.json.bak before this build's first write-back can drop fields it
+            //     cannot see. Both halves are asserted so the asymmetry with Load() stays a decision.
+            _metaEvidenceStashed = false;
+            try { if (File.Exists(bakPath)) File.Delete(bakPath); } catch { }
+            string future = "{\"SchemaVersion\":999,\"MaxHeat\":4,\"Salvage\":500}";
+            File.WriteAllText(MetaPath, future);
+            if (LoadSalvage() != 500) return "metaFutureSchemaRefused";        // forward-tolerant: still read
+            if (LoadMetaHeat() != 4) return "metaFutureSchemaHeatLost";
+            if (!File.Exists(bakPath) || File.ReadAllText(bakPath) != future)
+                return "metaFutureSchemaNotPreserved";                          // ...but preserved first
+            if (!File.Exists(MetaPath) || File.ReadAllText(MetaPath) != future)
+                return "metaFutureSchemaStashedAway";                           // COPY, not move
+
+            return null;
+        }
+        catch (Exception e) { return "metaStructureException:" + e.GetType().Name; }
+        finally
+        {
+            _metaEvidenceStashed = stashSaved;
+            if (metaSaved != null) { try { File.WriteAllText(MetaPath, metaSaved); } catch { } }
+            else { try { if (File.Exists(MetaPath)) File.Delete(MetaPath); } catch { } }
+            if (bakSaved != null) { try { File.WriteAllText(bakPath, bakSaved); } catch { } }
+            else { try { if (File.Exists(bakPath)) File.Delete(bakPath); } catch { } }
         }
     }
 

@@ -3115,7 +3115,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         int wonHeat = 0;
         if (p.Legends != null)
             foreach (var l in p.Legends)
-                if (l.Won && l.Heat > wonHeat) wonHeat = l.Heat;
+                if (l != null && l.Won && l.Heat > wonHeat) wonHeat = l.Heat;   // W9: a null row must never fault the DRAW path
         return id switch
         {
             "FIRST_WIN" => (Math.Min(p.Wins, 1), 1),
@@ -3185,6 +3185,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         }
         foreach (var l in p.Legends)
         {
+            if (l == null) continue;   // W9: a null row must never fault the DRAW path
             if (rowY > y + h - 30) break;
             Color tag = l.Won ? Pal.VipGold : Pal.TxtDim;
             string status = l.Won ? "WON" : "KIA";

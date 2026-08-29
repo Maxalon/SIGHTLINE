@@ -1052,7 +1052,13 @@ public class Run
         // silently merged bond/memorial/veteran records, which all key on Unit.Name).
         var takenNames = new HashSet<string>();
         ReserveNames = new HashSet<string>();
-        if (veterans != null) foreach (var v in veterans) ReserveNames.Add(v.Name);
+        // W9 THE REPAIR: skip a structurally broken recall. SaveGame.LoadMetaDto now drops these at
+        // the source, but this loop is PUBLIC and reachable with a hand-built list, and a null Cls
+        // walked straight into a raw Dictionary key lookup below (ArgumentNullException, unhandled, on
+        // NEW CAMPAIGN) while a null Name went silently into ReserveNames. Same class of defect the
+        // EnumOr/AddDefined ordinal clamps closed for enums, left open for strings.
+        static bool VeteranUsable(Unit v) => v != null && !string.IsNullOrEmpty(v.Name) && !string.IsNullOrEmpty(v.Cls);
+        if (veterans != null) foreach (var v in veterans) if (VeteranUsable(v)) ReserveNames.Add(v.Name);
         // Phase 0 — seat up to vetCap recalled veterans (already most-storied-first from the
         // reserve). They bypass the class-variety cap (a returning legend is a deliberate exception) but
         // still count toward the pool size, so the fresh phases fill the remainder.
@@ -1060,6 +1066,7 @@ public class Run
             foreach (var v in veterans)
             {
                 if (pool.Count >= vetCap) break;
+                if (!VeteranUsable(v)) continue;
                 pool.Add(v);
                 takenNames.Add(v.Name);
                 classCount.TryGetValue(v.Cls, out int vc);
