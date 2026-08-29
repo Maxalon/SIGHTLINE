@@ -77,15 +77,32 @@ public static class Cfg
     // NOTE the atlas routes on the AUTHORED size, not the scaled one: body text stays on the
     // crisp 20px UI bake even at 120%, instead of falling off the <=18px cliff onto the 64px
     // atlas (which is minification mush at label sizes — the whole reason V1 split them).
-    public static void Text(string t, Vector2 pos, float size, float spacing, Color tint) =>
+    /// W9 REVIEW FIX — TEST-ONLY TEXT CAPTURE. When non-null, EVERY string this game paints is
+    /// recorded here with the size it was painted at. It exists so a self-test can assert on what
+    /// the UI ACTUALLY SAYS instead of on a re-derivation of what it ought to say.
+    /// That distinction is the whole point: W9's first TRUTHTEST asserted `o.DmgMinEff` and
+    /// `Combat.LockOnAim(...)` — the values the HUD is SUPPOSED to read — and nothing bound the HUD
+    /// to them, so reverting Hud.DrawTooltip's DMG row to the raw band and its LOCK-ON badge to the
+    /// old CoverLevel==0 predicate left TRUTHTEST PASSing. Capturing at the draw call closes that
+    /// seam: whatever the tooltip paints is what the test reads, however it was computed.
+    /// Null in every normal run (one predictable branch, no allocation, no behaviour change).
+    public static System.Collections.Generic.List<(string text, float size)> CaptureText;
+
+    public static void Text(string t, Vector2 pos, float size, float spacing, Color tint)
+    {
+        if (CaptureText != null) CaptureText.Add((t, size));
         Raylib.DrawTextEx(FontFor(size), t, pos, Scaled(size), spacing, tint);
+    }
     public static Vector2 Measure(string t, float size, float spacing) =>
         Raylib.MeasureTextEx(FontFor(size), t, Scaled(size), spacing);
 
     /// Title text — routed to the display face. Use for headline/card titles only; numerals and
     /// data stay on NotoMono (a good data face) via Text/Measure.
-    public static void TitleText(string t, Vector2 pos, float size, float spacing, Color tint) =>
+    public static void TitleText(string t, Vector2 pos, float size, float spacing, Color tint)
+    {
+        if (CaptureText != null) CaptureText.Add((t, size));
         Raylib.DrawTextEx(TitleFontFor(size), t, pos, Scaled(size), spacing, tint);
+    }
     public static Vector2 TitleMeasure(string t, float size, float spacing) =>
         Raylib.MeasureTextEx(TitleFontFor(size), t, Scaled(size), spacing);
 

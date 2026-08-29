@@ -3022,8 +3022,14 @@ public partial class Game
                            // covered the VICTIM's side, so a soldier downed while its OWN shot sat in
                            // the queue behind the blow that felled it still fired: full damage, a
                            // credited kill, Stats bucketed under the downed soldier's class, and the
-                           // takedown stinger — off a body at Hp 0. Same ActiveAnim exemption as the
-                           // target clause, so the blow in flight still finishes.
+                           // takedown stinger — off a body at Hp 0.
+                           // W9 REVIEW FIX to this comment: it used to claim the ActiveAnim exemption
+                           // means "the blow in flight still finishes". TRUE for the target clause
+                           // above; FALSE here — ShotAnim.Update self-cancels for a dead/downed
+                           // ATTACKER, so an exempted active shot by the felled unit is cancelled one
+                           // frame later anyway. The exemption is kept for symmetry and to avoid
+                           // mutating the list under the active anim, but on this clause it is inert.
+                           // A body does not shoot, in flight or not — which is the intended rule.
                            || (a is ShotAnim s2 && s2.A == d && a != ActiveAnim));
     }
 
@@ -3972,11 +3978,16 @@ public partial class Game
     /// PAIR: if the frame budget can expire before AutoMaxRunTurns is reached, RESULT: TIMEOUT is
     /// reachable again. STALLTEST pins AutoMaxRunTurns * AutoFramesPerTurn <= AutoFrameCap so a future
     /// edit to either number fails loudly instead of quietly re-opening the hole.
-    public const int AutoFrameCap = 100000;
-    /// The per-turn frame ceiling for that arithmetic, in the LONG-CAMPAIGN regime the turn cap
-    /// actually governs (measured 253 frames/turn at 75 turns; short runs cost more per turn but come
-    /// nowhere near the cap). 150 x 600 = 90,000 <= the 100,000 budget.
-    public const int AutoFramesPerTurn = 600;
+    public const int AutoFrameCap = 120000;
+    /// The per-turn frame ceiling for that arithmetic. W9 REVIEW FIX: this was 600, chosen from the
+    /// LONG-CAMPAIGN regime (253 frames/turn at 75 turns) — but the measured SPREAD runs to 681
+    /// (Program.cs), so a campaign that somehow sustained its worst observed rate for 150 turns would
+    /// have hit the frame cap at ~147 turns, three turns before the turn cap. "TIMEOUT is unreachable"
+    /// would then have been EMPIRICAL rather than STRUCTURAL — and that matters more now the sweep
+    /// hard-fails on a TIMEOUT, because a rare false positive becomes a merge block. Set to the
+    /// measured WORST case instead: 150 x 700 = 105,000 <= the 120,000 budget, with no regime
+    /// assumption left in the argument.
+    public const int AutoFramesPerTurn = 700;
 
     // ---------------- activation pods (4.3 awareness tiers) ----------------
     // Baselines; Heat "SHORT FUSE"/"RELENTLESS" shrink first-contact ranges by 1 (read off the
@@ -7310,6 +7321,10 @@ public partial class Game
         if (choiceIdx < 0 || choiceIdx >= _activeEvent.Choices.Length) choiceIdx = AutoEventChoice();
         var ch = _activeEvent.Choices[choiceIdx];
         if (!ChoiceLegal(ch)) return;   // ignore clicks on illegal choices
+        // W9 REVIEW FIX: snapshot the roster BEFORE the outcomes so the reconcile below can tell an
+        // event that actually moved a body from one that did not (see the comment at the call).
+        var rosterBefore = new System.Collections.Generic.HashSet<Unit>(_run.Squad);
+        int deployedBefore = _run.Deployed.Count;
         Stats.RecordEvent(_activeEvent.Id, choiceIdx);   // FUL-1: BY EVENT-CHOICE telemetry (no-op unless Enabled)
         string line = EventCatalog.Apply(_run, ch.Outcome, _eventNode);
         if (ch.HasSecond)
@@ -7319,7 +7334,7 @@ public partial class Game
         }
         if (ch.HasThird) line = line + "; " + EventCatalog.Apply(_run, ch.Outcome3, _eventNode);   // FUL-10
         _run.Report.Insert(0, $"EVENT: {_activeEvent.Title} -- {line}");
-        // W9 THE REPAIR — RE-DERIVE THE DEPLOYMENT. A field event can add or remove a body, and
+        // W9 THE REPAIR — RECONCILE THE DEPLOYMENT. A field event can add or remove a body, and
         // Run.DebriefSurvivors' AutoDeploy() has ALREADY run by the time this resolves, so the
         // roster and the deployment disagreed in BOTH directions:
         //   * a free RECRUIT (DEFECTOR) arrived un-benched, so the barracks header printed
@@ -7329,10 +7344,22 @@ public partial class Game
         //   * a RELEASE (THE RESERVE CALLS) freed a DEPLOYED slot and never handed it to the healthy
         //     benched soldier, so the squad fielded 3/4 with a 6/6-HP body sitting out while the
         //     header printed its "cap grows over the campaign - field up to it" hint.
-        // AutoDeploy re-derives Benched across the WHOLE roster against NextDeployCap (healthy before
-        // wounded, senior before junior, stable tiebreak), so it fixes both with one call and is a
-        // no-op for every event that does not touch the roster. It takes no RNG draw.
-        _run.AutoDeploy();
+        //
+        // W9 REVIEW FIX — GATED, and NOT AutoDeploy. The first cut called _run.AutoDeploy()
+        // UNCONDITIONALLY here, and the comment claimed it was "a no-op for every event that does not
+        // touch the roster". It is not: AutoDeploy re-derives Benched across the WHOLE roster from a
+        // fixed rule, so it silently discarded the player's own barracks swap on EVERY event —
+        // measured on an Intel-only outcome, MANUAL VEGA[B],KRESS[D],NOX[D],BISHOP[D],LYNX[D] came
+        // back VEGA[D],...,NOX[B],... . Reachable in normal play (HandleBenchClick and ChooseNode sit
+        // in the same barracks branch), and ResolveEvent is the CHECKPOINT site, so the clobbered
+        // deployment is what gets persisted.
+        // So: fire only when the roster ACTUALLY moved, and reconcile by exception —
+        // Run.ReconcileDeployment benches only what the event added, fills only slots the event
+        // freed, trims only over the cap, and leaves every deliberate choice alone. No RNG draw.
+        bool rosterMoved = _run.Squad.Count != rosterBefore.Count
+                           || _run.Squad.Exists(u => !rosterBefore.Contains(u))
+                           || _run.Deployed.Count != deployedBefore;
+        if (rosterMoved) _run.ReconcileDeployment(rosterBefore);
         Audio.Play("turn");
         _activeEvent = null; _eventNode = null;
         // The event node is now CurrentNode (MapPos already advanced), so NextNodes() offers its

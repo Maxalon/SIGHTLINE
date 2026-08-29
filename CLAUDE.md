@@ -144,9 +144,12 @@ that contract TRUE rather than merely claimed**: it was violated at ~1% per run 
 causes (a per-mission stall cap that the checkpoint redeploy re-armed under a whole-campaign frame
 budget, and a within-turn DEADLOCK the turn-boundary guard structurally could not see). The
 backstop is now run-scoped (`Game.AutoMaxRunTurns`) plus a within-turn idle guard, the harness
-frame budget is `Game.AutoFrameCap` (raised 20000 -> 100000 — the old value right-censored the
+frame budget is `Game.AutoFrameCap` (raised 20000 -> 120000 — the old value right-censored the
 longest campaigns as losses in the BALANCE batch), and `SIGHTLINE_STALLTEST` asserts all of it.
-A `RESULT: TIMEOUT` today is a real regression, not a flake. Measured over
+A `RESULT: TIMEOUT` today is a real regression, not a flake. **Note it cuts BOTH ways for anyone
+re-measuring:** the frame cap loosened, but `AutoMaxRunTurns` is a NEW force-lose arm that is
+STRICTER than the old per-mission `_turnCount > 50` for a long campaign — the change is a
+loosening and a tightening in one. Measured over
 15 Debug autoplays (F1): 3 WIN / 12 LOSE, finale reached on 5, earliest death mission 1,
 zero TIMEOUTs. **A WIN is normal, not suspicious.** `sightline_shot.png` is gitignored;
 `docs/screenshot.png` (README image) is committed.
@@ -379,7 +382,7 @@ funnel, so a trade takes roughly two hits instead of one. Its raw chunk logs liv
 > grappler, so it no longer draws its FX; a downed unit's queued shot no longer rolls; the
 > autopilot returns after a GRAPPLE and takes an extra `Util.Roll(45)` next step) and two that
 > change composition without changing draw order (the skirmish/daily heat gate, the post-event
-> `AutoDeploy`). It also raised the batch frame cap 20000 -> 100000, which REMOVES the
+> `AutoDeploy`). It also raised the batch frame cap 20000 -> 120000, which REMOVES the
 > right-censoring that had been scoring the longest campaigns as losses. W9 deliberately did not
 > price any of it. The table above remains the last MEASURED ladder and its base commit; it is no
 > longer a description of this tree.

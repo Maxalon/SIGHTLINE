@@ -198,12 +198,35 @@ public static class Program
             Console.WriteLine(Combat.SelfTest());
             return;
         }
-        // SIGHTLINE_TRUTHTEST=1 : W9 THE REPAIR — "what the UI says is what the dice do". Ground-truths
-        // the DISPLAYED shot numbers (the tooltip's DMG band, its GRAZE row, its LOCK-ON badge) against
-        // real Combat.Resolve rolls, and pins ComputeOdds/ExpectedDamage as side-effect free. Window-free.
+        // SIGHTLINE_TRUTHTEST=1 : W9 — "what the UI says is what the dice do". TWO halves, and the
+        // second is the one the review sent this wave back for:
+        //   MATH  (Combat.TruthFails)        — the effective band, the graze agreement, the shared
+        //                                      LockOn predicate, and ComputeOdds/ExpectedDamage purity.
+        //   UI    (Game.TooltipTruthFails)   — drives the REAL hover/aim path, RENDERS the REAL
+        //                                      tooltip, and asserts on the strings it PAINTS
+        //                                      (captured at the draw call). The math half alone still
+        //                                      passed with Hud.DrawTooltip reverted to the raw DMG
+        //                                      band and the stale LOCK-ON predicate: it re-derived the
+        //                                      right answer instead of observing the panel.
+        // Needs a real window (it draws).
         if (Environment.GetEnvironmentVariable("SIGHTLINE_TRUTHTEST") == "1")
         {
-            Console.WriteLine(Combat.TruthSelfTest());
+            Raylib.SetTraceLogLevel(TraceLogLevel.Error);
+            Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "sightline-truthtest");
+            Raylib.SetExitKey(KeyboardKey.Null);
+            Cfg.Font = Raylib.GetFontDefault();
+            string mathFails = Combat.TruthFails();
+            string uiFails = new Game().TooltipTruthFails();
+            Raylib.CloseWindow();
+            string all = string.Join(",", System.Linq.Enumerable.Where(new[] { mathFails, uiFails }, x => !string.IsNullOrEmpty(x)));
+            Console.WriteLine(all.Length == 0
+                ? "TRUTHTEST: PASS (UI-OBSERVED: the tooltip's PAINTED DMG row equals the damage Resolve "
+                  + "deals to that same defender on a plain foe AND a guarded HVT, moves when the defender "
+                  + "does, and agrees with the GRAZE row beneath it; the PAINTED LOCK-ON badge appears iff "
+                  + "the perk moved the hit% and shows that exact delta; no tooltip string is painted below "
+                  + "12px. MATH: the raw band stays raw for ExpectedDamage/threat; armor moves the shown "
+                  + "band; ComputeOdds + ExpectedDamage are side-effect free while Resolve still telegraphs)"
+                : "TRUTHTEST: FAIL (" + all + ")");
             return;
         }
         // SIGHTLINE_THREATTEST=1 : RESONANCE T2 — the incoming-fire FORECAST pinned against
@@ -786,7 +809,7 @@ public static class Program
         int frame = 0;
         // W9 THE REPAIR: 20000 frames bought the WHOLE 6-mission campaign only ~30-40 turns (measured
         // 427-681 frames per run-turn, including the between-mission screens), so the harness budget — not any stall — was ending ~1% of
-        // runs as RESULT: TIMEOUT. Game.AutoMaxRunTurns (90 run-turns) is now the binding backstop and
+        // runs as RESULT: TIMEOUT. Game.AutoMaxRunTurns (150 run-turns) is now the binding backstop and
         // force-loses well under this; the cap stays purely as a hang guard. The number lives in Game
         // beside the turn cap it must dominate, and STALLTEST pins that relationship.
         const int autoCap = Game.AutoFrameCap;
@@ -941,7 +964,7 @@ public static class Program
         // hit is scored as a LOSS below, so at 20000 the batch RIGHT-CENSORED exactly the longest
         // campaigns (the archived x2 chunks show it firing: one 20-match chunk logs "frame-cap hits:
         // 1"), putting a small unattributed downward bias into the ladder of record.
-        // Game.AutoMaxRunTurns (90 run-turns) now force-loses a genuinely dragging campaign long
+        // Game.AutoMaxRunTurns (150 run-turns) now force-loses a genuinely dragging campaign long
         // before this, so the cap is a hang guard only.
         const int frameCap = Game.AutoFrameCap;   // per-match safety cap; a hit cap counts as a loss
         // APEX W4 — explicit ENDLESS CAP POLICY (so the wave-depth p90 is never silently censored):

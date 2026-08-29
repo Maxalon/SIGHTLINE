@@ -963,20 +963,53 @@ public class Run
     {
         int cap = NextDeployCap;
         var ordered = new List<Unit>(Squad);
-        ordered.Sort((a, b) =>
-        {
-            int aw = a.Wound > 0 ? 1 : 0, bw = b.Wound > 0 ? 1 : 0;
-            if (aw != bw) return aw - bw;                       // healthy before wounded
-            if (a.Rank != b.Rank) return b.Rank - a.Rank;       // senior before junior
-            if (a.Hp != b.Hp) return b.Hp - a.Hp;               // healthier before hurt
-            if (a.Kills != b.Kills) return b.Kills - a.Kills;   // bloodier before green
-            return string.CompareOrdinal(a.Name, b.Name);       // stable tiebreak
-        });
+        ordered.Sort(DeployPreference);   // W9: shared with ReconcileDeployment so the two can't diverge
         for (int i = 0; i < ordered.Count; i++) ordered[i].Benched = i >= cap;
     }
 
     /// Soldiers that will deploy next mission (Benched == false), for UI/queries.
     public List<Unit> Deployed => Squad.FindAll(u => !u.Benched);
+
+    /// W9 REVIEW FIX — reconcile the deployment after a ROSTER CHANGE while PRESERVING the player's
+    /// own bench choices.
+    ///
+    /// AutoDeploy above re-derives Benched for the WHOLE roster from a fixed rule, which is right at
+    /// a DEBRIEF (nobody has expressed a preference yet) and wrong afterwards: calling it from
+    /// Game.ResolveEvent silently discarded a manual swap the player had just made in the barracks,
+    /// on EVERY event — including outcomes with no roster change at all. Measured on an Intel-only
+    /// outcome: MANUAL `VEGA[B],KRESS[D],NOX[D],BISHOP[D],LYNX[D]` came back
+    /// `VEGA[D],KRESS[D],NOX[B],BISHOP[D],LYNX[D]`. ResolveEvent is the checkpoint site, so the
+    /// clobbered deployment is what gets persisted.
+    ///
+    /// This touches only as many soldiers as the change forces:
+    ///   1. anyone the event ADDED (absent from `known`) starts BENCHED — the player never picked them;
+    ///   2. fill free slots from the bench, best first — this is the freed-slot case (a release took a
+    ///      DEPLOYED body and left a hole the player did not choose);
+    ///   3. trim over the cap, worst first — a cap is a cap.
+    /// Everyone the player deliberately seated or benched keeps that state. No RNG draw.
+    public void ReconcileDeployment(HashSet<Unit> known)
+    {
+        int cap = NextDeployCap;
+        foreach (var u in Squad) if (known != null && !known.Contains(u)) u.Benched = true;   // (1)
+        var order = new List<Unit>(Squad);
+        order.Sort(DeployPreference);
+        foreach (var u in order)                                                              // (2)
+            if (u.Benched && Deployed.Count < cap) u.Benched = false;
+        for (int i = order.Count - 1; i >= 0 && Deployed.Count > cap; i--)                    // (3)
+            if (!order[i].Benched) order[i].Benched = true;
+    }
+
+    /// The deploy ORDER used by both AutoDeploy and ReconcileDeployment: healthy before wounded,
+    /// senior before junior, healthier before hurt, bloodier before green, stable name tiebreak.
+    static int DeployPreference(Unit a, Unit b)
+    {
+        int aw = a.Wound > 0 ? 1 : 0, bw = b.Wound > 0 ? 1 : 0;
+        if (aw != bw) return aw - bw;
+        if (a.Rank != b.Rank) return b.Rank - a.Rank;
+        if (a.Hp != b.Hp) return b.Hp - a.Hp;
+        if (a.Kills != b.Kills) return b.Kills - a.Kills;
+        return string.CompareOrdinal(a.Name, b.Name);
+    }
 
     // ---- boon offers ----
     /// Build a fresh pick-1-of-3 boon offer from the boons not yet taken this run (fewer if the

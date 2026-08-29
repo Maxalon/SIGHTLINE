@@ -552,6 +552,15 @@ public partial class Game
                         fails.Add($"warUnlockDropped owned={owned} unowned={unowned} drew={plan.drawn}/{wantCompact}");
                     if (plan.panelH > colH) fails.Add($"warUnlockPanelOverflow owned={owned}");
                     if (unowned > 1 && plan.cardH < 20) fails.Add($"warUnlockCardCollapsed owned={owned}");
+                    // W9 REVIEW FIX — the 12px SMALL-TEXT FLOOR, asserted where it broke. The first
+                    // cut let a compressed card run FitWrap, whose floor is CardBodyMinSize = 10, so
+                    // a FRESH PROFILE (0 owned / 6 unowned -> cardH 49 -> descRows 1) painted five of
+                    // six unlock descriptions at 10px. A body row is now either >= 12px or absent.
+                    if (plan.descRows > 0 && plan.bodySize < 12)
+                        fails.Add($"warUnlockSubFloorBody owned={owned} size={plan.bodySize} rows={plan.descRows}");
+                    // and a card that claims description rows must have the height to paint them
+                    if (plan.descRows > 0 && plan.cardH < 27 + plan.descRows * Hud.TextRowPublic(13))
+                        fails.Add($"warUnlockBodyOverflows owned={owned} cardH={plan.cardH} rows={plan.descRows}");
                 }
             }
         }
@@ -568,7 +577,7 @@ public partial class Game
             ? "METATEST: PASS (salvage/achievements/unlocks/legends/totals round-trip; unlock gated by NoPersist; "
               + "recall charged once in ConfirmDraft + broke-confirm refuses; barracks sinks pend until the checkpoint commit "
               + "(quit-at-barracks keeps the money); daily bounty once-per-stamp, pay+mark atomic; save.json preserved; "
-              + "a corrupt MaxHeat can never lock the difficulty picker; the WAR ROOM publishes a buy-rect for every unowned unlock at every owned/unowned split)"
+              + "a corrupt MaxHeat can never lock the difficulty picker; the WAR ROOM publishes a buy-rect for every unowned unlock at every owned/unowned split, and never paints an unlock body below the 12px floor)"
             : "METATEST: FAIL (" + string.Join(",", fails) + ")";
     }
 }

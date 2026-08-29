@@ -1077,7 +1077,7 @@ sets, one lever per measured round, fresh same-slot R0 first, dip budgets, breac
       changing draw order (the skirmish/daily heat gate, the post-event `AutoDeploy`). **Every
       ladder figure published before W9 is therefore void against this tree.** W9 deliberately did
       NOT price them — a batch would only confirm the numbers moved. Note the frame cap also moved
-      20000 -> 100000, which REMOVES the right-censoring that scored the longest campaigns as
+      20000 -> 120000, which REMOVES the right-censoring that scored the longest campaigns as
       losses (the archived x2 chunks log `frame-cap hits: 1`), so the new baseline may read
       slightly higher for that reason alone.
 - [ ] **`Mission.OpenerTrim` still trims a SKIRMISH / DAILY force** (one body off any `n <= 1`

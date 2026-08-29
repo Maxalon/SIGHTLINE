@@ -490,6 +490,8 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     /// grow is how a scaled layout starts overprinting itself. Identity at 100% and below (the
     /// authored layout already fits smaller type), so no headless screenshot moves by a pixel.
     static int TextRow(int authored) => (int)MathF.Round(authored * MathF.Max(1f, Cfg.UiScale));
+    /// W9 REVIEW FIX: METATEST needs the SAME row pitch the cards are laid out with, not a copy.
+    public static int TextRowPublic(int authored) => TextRow(authored);
 
     static int ChipGrow => (int)MathF.Round(MathF.Max(0f, Cfg.UiScale - 1f) * 30f);
     static int ChipH => 58 + ChipGrow;
@@ -1825,6 +1827,11 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     // attacker/target state (bonds, earned traits, range/exposure perks, suppression,
     // wounds, daze, target hunker/smoke). Each badge's condition mirrors ComputeOdds
     // EXACTLY so the explanation always matches the math. Display-only; no rule changes.
+    /// W9 REVIEW FIX — run ONLY the shot tooltip, for the headless UI-truth test. Same method, same
+    /// argument, no other panel drawing over the capture, so every string the test reads is
+    /// unambiguously the tooltip's own. Test-only; nothing in normal play calls it.
+    public static void DebugDrawTooltip(Game g) => DrawTooltip(g);
+
     static void DrawTooltip(Game g)
     {
         if (!g.ShowOdds) { DrawHoverIdCard(g); return; }
@@ -3224,7 +3231,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     /// DrawWarRoom and the card loop in DrawWarUnlocks. `drawn` is how many COMPACT cards the loop
     /// will actually paint — it must always equal unownedN-1 (the hero card carries the other one),
     /// or an unlock is invisible AND unbuyable. Rows shrink to fit rather than the list truncating.
-    public static (int panelH, int pitch, int cardH, int descRows, int drawn)
+    public static (int panelH, int pitch, int cardH, int descRows, int bodySize, int drawn)
         WarUnlockPlan(int colH, int ownedN, int unownedN)
     {
         int heroH = unownedN > 0 ? 106 : 0;
@@ -3232,12 +3239,24 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         int panelH = Math.Min(colH, 44 + heroH + compactN * 70 + ownedN * 24 + 8);
         int rowY = 44 + heroH;
         int room = (panelH - 8) - rowY - ownedN * 24;
-        int pitch = 70, cardH = 62, descRows = CardBodyRows;
+        int pitch = 70, cardH = 62, descRows = CardBodyRows, bodySize = CardBodySize;
         if (compactN > 0 && compactN * pitch - 8 > room)
         {
             pitch = Math.Max(26, room / compactN);
             cardH = Math.Max(20, pitch - 8);
-            descRows = cardH >= 56 ? CardBodyRows : (cardH >= 42 ? 1 : 0);
+            // W9 REVIEW FIX — THE 12px SMALL-TEXT FLOOR IS A HARD RULE, and the first cut broke it on
+            // the very screen this repair exists for. At 0 owned / 6 unowned the plan lands
+            // cardH = 49 -> descRows = 1, and the old code then asked FitWrap to squeeze a whole
+            // sentence into ONE row: FitWrap's floor is CardBodyMinSize = 10, NOT 12, so five of six
+            // unlock descriptions rendered at 10px — in the one profile state every new player is in.
+            // A compressed row now keeps CardBodySize (12) and ELLIPSIZES through Clip instead of
+            // shrinking below the floor; when even one 12px row will not fit the card, the body is
+            // dropped entirely rather than painted at sub-floor type. A name + BUY chip is legible
+            // and honest; 10px type is neither, and the description still reads in full on the
+            // NEXT UNLOCK hero card as each entry becomes the cheapest.
+            descRows = cardH >= 27 + 2 * TextRow(13) ? CardBodyRows
+                     : cardH >= 27 + TextRow(13)     ? 1
+                     : 0;
         }
         int drawn = 0;
         for (int i = 0; i < compactN; i++)
@@ -3245,7 +3264,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
             if (rowY + cardH > panelH) break;
             drawn++; rowY += pitch;
         }
-        return (panelH, pitch, cardH, descRows, drawn);
+        return (panelH, pitch, cardH, descRows, bodySize, drawn);
     }
 
     static void DrawWarUnlocks(Game g, Game.WarRoomProfile p, int x, int y, int w, int h, float anim)
@@ -3309,9 +3328,13 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         // harness could never photograph it — DebugWarRoom hard-codes a 2-owned demo profile, which
         // is exactly the configuration that fits.)
         // Shrinking the pitch keeps every entry present and clickable, and degrades gracefully as the
-        // catalogue grows: full 62px cards with two description rows while they fit, then one row,
-        // then a name+BUY ledger row. Description text still goes through FitWrap, so the 12px floor
-        // is untouched. `owned * 24` is reserved for the receipts below.
+        // catalogue grows: full 62px cards with two description rows while they fit, then ONE row at
+        // the 12px floor with an ellipsis, then a name + BUY ledger row with no body at all.
+        // NOTE (W9 review): the first cut of this comment claimed "description text still goes
+        // through FitWrap, so the 12px floor is untouched". That was FALSE in both halves — FitWrap's
+        // floor is CardBodyMinSize = 10, and on a fresh profile it duly painted five of six
+        // descriptions at 10px. The compressed rows no longer go through FitWrap at all.
+        // `owned * 24` is reserved for the receipts below.
         int ownedRows = 0, unownedRows = 0;
         foreach (var u in MetaProg.AllUnlocks) if (p.Unlocks.Contains((int)u)) ownedRows++; else unownedRows++;
         var plan = WarUnlockPlan(h, ownedRows, unownedRows);
@@ -3329,7 +3352,12 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
             int cuW = (int)card.Width - 24;
             if (descRows > 0)
             {
-                int cuFs = FitWrap(MetaProg.UnlockDesc(u), CardBodySize, CardBodyMinSize, cuW, descRows);   // R2 FIX 3
+                // W9 REVIEW FIX: only the UNCOMPRESSED card may run the shrink-to-fit fitter (whose
+                // floor is CardBodyMinSize = 10). A compressed card paints at the 12px floor and
+                // ellipsizes below, so no unlock description is ever rendered at sub-floor type.
+                int cuFs = descRows >= CardBodyRows
+                    ? FitWrap(MetaProg.UnlockDesc(u), CardBodySize, CardBodyMinSize, cuW, descRows)   // R2 FIX 3
+                    : plan.bodySize;
                 var dl = WrapText(MetaProg.UnlockDesc(u), cuFs, cuW);
                 for (int li = 0; li < dl.Count && li < descRows; li++)
                 {

@@ -291,6 +291,175 @@ public partial class Game
             : "SHOVETEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
+    /// W9 REVIEW FIX — the UI half of SIGHTLINE_TRUTHTEST: read what the TOOLTIP ACTUALLY PAINTS.
+    ///
+    /// WHY THIS EXISTS. W9's first TRUTHTEST asserted `ShotOdds.DmgMinEff/DmgMaxEff` and
+    /// `Combat.LockOnAim(...)` — the values the HUD is SUPPOSED to read. Nothing bound the HUD to
+    /// them, so reverting Hud.DrawTooltip's DMG row to `$"{o.DmgMin}-{o.DmgMax}"` and its LOCK-ON
+    /// badge to the old `o.CoverLevel == 0` predicate left TRUTHTEST PASSing on BOTH of the display
+    /// defects it was written for. A test that re-derives the right answer is a PIN, not a test.
+    /// So this half drives the REAL hover/aim path (Game.Update -> UpdateHoverAndAim -> ComputeOdds),
+    /// renders the REAL tooltip, and captures every string it paints AT THE DRAW CALL
+    /// (Cfg.CaptureText). Whatever the panel says is what this reads, however it was computed.
+    ///
+    /// Returns "" when every leg holds, else a comma-joined fail list.
+    public string TooltipTruthFails()
+    {
+        NoPersist = true;
+        var fails = new System.Collections.Generic.List<string>();
+        var savedCapture = Cfg.CaptureText;
+        try
+        {
+            // ---- a controlled two-unit board; the fire lane is clear so nothing warps the odds ----
+            void Scene()
+            {
+                Grid = new Grid();
+                Players = new System.Collections.Generic.List<Unit>();
+                Enemies = new System.Collections.Generic.List<Unit>();
+                Vip = null; CaptiveLocked = false;
+                Objective = Objective.Eliminate; EvacZone.Clear();
+                Fx = new Fx(); _anims.Clear();
+                Phase = Phase.PlayerTurn; SquadConcealed = false;
+                Combat.MissionFaction = Faction.None; Combat.PrepFaction = Faction.None;
+                Combat.RunBoons.Clear();
+                AimMode = false; KbCursor = false;
+            }
+            Unit MkP(int x, int y)
+            {
+                var u = new Unit { Name = "SOL", Cls = "ASSAULT", Team = Team.Player, X = x, Y = y,
+                                   Hp = 8, MaxHp = 8, Aim = 75, Mobility = 4,
+                                   Weapon = Weapon.Make(WeaponKind.Rifle), Alive = true };
+                u.Ammo = u.Weapon.Clip; u.SyncPos(); u.BeginTurn(); return u;
+            }
+            Unit MkE(int x, int y)
+            {
+                var u = new Unit { Name = "FOE", Cls = "GRUNT", Team = Team.Enemy, X = x, Y = y,
+                                   Hp = 40, MaxHp = 40, Aim = 60, Mobility = 4,
+                                   Weapon = Weapon.Make(WeaponKind.Rifle), Alive = true };
+                u.Ammo = u.Weapon.Clip; u.Alert = AlertLevel.Alert; u.SyncPos(); u.BeginTurn(); return u;
+            }
+
+            // Drive the REAL aim path, then paint the REAL tooltip and return everything it SAID.
+            System.Collections.Generic.List<(string text, float size)> PaintTooltip(Unit a, Unit d)
+            {
+                Selected = a; AimMode = true; AimTarget = d;
+                Update(1f / 60f);                        // -> UpdateHoverAndAim -> ShowOdds/HoverOdds
+                var cap = new System.Collections.Generic.List<(string text, float size)>();
+                Cfg.CaptureText = cap;
+                Raylib.BeginDrawing();
+                Hud.DebugDrawTooltip(this);
+                Raylib.EndDrawing();
+                Cfg.CaptureText = null;
+                return cap;
+            }
+            // the value painted immediately after a label IS that tooltip row (label then value)
+            string RowAfter(System.Collections.Generic.List<(string text, float size)> cap, string label)
+            {
+                for (int i = 0; i < cap.Count - 1; i++) if (cap[i].text == label) return cap[i + 1].text;
+                return null;
+            }
+            bool Painted(System.Collections.Generic.List<(string text, float size)> cap, string label)
+            {
+                foreach (var c in cap) if (c.text == label) return true;
+                return false;
+            }
+
+            // ============ (1) the DMG ROW the panel PAINTS vs the damage Resolve DEALS ============
+            // Two defenders differing ONLY in HvtGuarded. A raw-band row is identical for both and
+            // wrong for the guarded one; the rolled ground truth is what catches it.
+            string plainRow = null, guardedRow = null;
+            foreach (bool guarded in new[] { false, true })
+            {
+                Scene();
+                var a = MkP(4, 5); var d = MkE(9, 5);
+                d.HvtGuarded = guarded;
+                Players.Add(a); Enemies.Add(d);
+                var cap = PaintTooltip(a, d);
+                string tag = guarded ? "Guarded" : "Plain";
+                string row = RowAfter(cap, "DMG");
+                if (guarded) guardedRow = row; else plainRow = row;
+                if (string.IsNullOrEmpty(row)) { fails.Add("uiNoDmgRow" + tag); continue; }
+                var parts = row.Split('-');
+                if (parts.Length != 2 || !int.TryParse(parts[0], out int shownLo)
+                                      || !int.TryParse(parts[1], out int shownHi))
+                { fails.Add("uiDmgRowShape" + tag + ":" + row); continue; }
+
+                // ground truth: roll real shots at the SAME defender, keep clean non-crit hits
+                Util.Reseed(90210);
+                int lo = int.MaxValue, hi = int.MinValue, n = 0;
+                for (int i = 0; i < 40000; i++)
+                {
+                    a.ConsecutiveMisses = 0; d.Hp = d.MaxHp;
+                    var r = Combat.Resolve(Grid, a, d);
+                    if (!r.Hit || r.Graze || r.Crit) continue;
+                    n++;
+                    if (r.Damage < lo) lo = r.Damage;
+                    if (r.Damage > hi) hi = r.Damage;
+                }
+                if (n < 500) { fails.Add("uiNoSample" + tag); continue; }
+                if (shownLo != lo || shownHi != hi)
+                    fails.Add($"uiDmgRowLies{tag} shows={row} deals={lo}-{hi}");
+                // the GRAZE row directly beneath it is computed from the same defender: they must agree
+                string gz = RowAfter(cap, "GRAZE");
+                if (gz != null && !gz.StartsWith(shownLo.ToString() + " "))
+                    fails.Add($"uiGrazeDisagrees{tag} dmg={row} graze={gz}");
+            }
+            // ...and the guard must MOVE the painted row, or leg (1) proves nothing
+            if (plainRow != null && guardedRow != null && plainRow == guardedRow)
+                fails.Add($"uiDmgRowIgnoresDefender both={plainRow}");
+
+            // ============ (2) the LOCK-ON BADGE the panel PAINTS vs the hit% it moves =============
+            // OPEN target (CoverLevel 0, NOT flanked) — the modal targeting state, and the exact case
+            // the stale badge fired on. FLANKED — the case the perk really applies to.
+            foreach (bool flankGeom in new[] { false, true })
+            {
+                Scene();
+                var a = MkP(4, 5);
+                Unit d;
+                if (flankGeom)
+                {
+                    d = MkE(9, 5);
+                    Grid.Tiles[10, 5] = TileType.HighCover;   // cover on its FAR side: flanked from us
+                    Grid.SetCoverHp(10, 5);
+                }
+                else d = MkE(9, 9);                            // open ground, no cover anywhere near
+                Players.Add(a); Enemies.Add(d);
+
+                var plainOdds = Combat.ComputeOdds(Grid, a, d);
+                string tag = flankGeom ? "Flanked" : "Open";
+                if (flankGeom && !plainOdds.Flanked) { fails.Add("uiFlankSetup"); continue; }
+                if (!flankGeom && (plainOdds.Flanked || plainOdds.CoverLevel != 0)) { fails.Add("uiOpenSetup"); continue; }
+
+                a.Perks.Add(Perk.LockOn);
+                int mathDelta = Combat.ComputeOdds(Grid, a, d).HitChance - plainOdds.HitChance;
+                var cap = PaintTooltip(a, d);
+                bool badge = Painted(cap, "LOCK-ON");
+                if (badge != (mathDelta != 0))
+                    fails.Add($"uiLockOnBadgeLies{tag} painted={badge} hitDelta={mathDelta}");
+                if (badge)
+                {
+                    string val = RowAfter(cap, "LOCK-ON");
+                    if (val != $"+{mathDelta} aim") fails.Add($"uiLockOnValue{tag}={val} delta={mathDelta}");
+                }
+            }
+
+            // ============ (3) the panel obeys the 12px small-text floor ===========================
+            // Cheap, and captured at the DRAW CALL, so it covers every string the tooltip paints at
+            // whatever size the fitters settled on.
+            {
+                Scene();
+                var a = MkP(4, 5); var d = MkE(9, 5);
+                Players.Add(a); Enemies.Add(d);
+                foreach (var c in PaintTooltip(a, d))
+                    if (c.size < 12f) { fails.Add($"uiSubFloorText '{c.text}'@{c.size}"); break; }
+            }
+
+            return string.Join(",", fails);
+        }
+        catch (Exception e) { return "uiException:" + e.GetType().Name + ":" + e.Message; }
+        finally { Cfg.CaptureText = savedCapture; }
+    }
+
     /// W9 THE REPAIR — SIGHTLINE_STALLTEST: the autopilot's own no-TIMEOUT CONTRACT, asserted.
     ///
     /// THE GAP THIS CLOSES: NOTHING asserted the backstop's contract. Game.Autopilot.cs states it in
@@ -315,7 +484,13 @@ public partial class Game
         var fails = new System.Collections.Generic.List<string>();
 
         // ---- (1) BUDGET ARITHMETIC: the turn cap must always bite before the frame cap ----
-        // If this fails, RESULT: TIMEOUT is reachable again no matter what the other legs say.
+        // HONEST ABOUT WHAT THIS IS (W9 review): it is true BY CONSTRUCTION for the three constants
+        // as shipped — it cannot fail on this tree. That is the point: it is a COUPLING check, not an
+        // empirical proof. AutoMaxRunTurns, AutoFramesPerTurn and AutoFrameCap are a triple that only
+        // means anything together, and they live in two files; this fails the moment someone edits one
+        // without the others and quietly re-opens the TIMEOUT hole. The EMPIRICAL half of the claim is
+        // AutoFramesPerTurn itself, which is now the measured WORST frames-per-turn (700 vs an
+        // observed 681), not a regime average — so no assumption about campaign shape is left in it.
         // (through locals: a const-folded comparison compiles to unreachable code and stops being a check)
         long capTurns = AutoMaxRunTurns, perTurn = AutoFramesPerTurn, frameCap = AutoFrameCap;
         if (capTurns * perTurn > frameCap)
@@ -707,6 +882,41 @@ public partial class Game
                 fails.Add($"eventRecruitDeployed={_run.Deployed.Count} want={Want()} (was {before}, cap {capNow})");
             if (_run.Deployed.Count > _run.NextDeployCap) fails.Add("eventRecruitOverCap");
 
+            // (4a2) W9 REVIEW FIX — THE PLAYER'S OWN BENCH CHOICE SURVIVES AN EVENT.
+            // THE LESSON, and why (4a)/(4b) below could not catch this: they assert a COUNT invariant,
+            // `Deployed.Count == min(Squad.Count, NextDeployCap)` — and a CLOBBERING implementation
+            // satisfies that exactly as well as a preserving one. The first cut called AutoDeploy()
+            // unconditionally here, which re-derives Benched for the WHOLE roster from a fixed rule and
+            // so discarded a manual barracks swap on EVERY event, including outcomes with NO roster
+            // change at all. ResolveEvent is the checkpoint site, so that is what got persisted.
+            // Assert IDENTITY, not arithmetic: who is benched, by name.
+            {
+                foreach (var u in _run.Squad) { u.Wound = 0; u.Hp = u.MaxHp; }
+                _run.AutoDeploy();
+                // the player then swaps by hand: bench the soldier AutoDeploy would seat FIRST, and
+                // seat one it benched — the choice a re-derivation is guaranteed to undo.
+                var seated = _run.Deployed[0];
+                var benched = _run.Squad.Find(u => u.Benched);
+                if (benched == null) fails.Add("4a2:noBenchToSwap");
+                else
+                {
+                    seated.Benched = true; benched.Benched = false;
+                    string manual = string.Join(",", _run.Squad.ConvertAll(u => u.Name + (u.Benched ? "[B]" : "[D]")));
+                    // an outcome with NO roster change at all — the reviewer's exact repro
+                    DebugResolveEventOutcome(new EventOutcome { Kind = EventOutcomeKind.Intel, Amount = 5 });
+                    string after = string.Join(",", _run.Squad.ConvertAll(u => u.Name + (u.Benched ? "[B]" : "[D]")));
+                    if (after != manual) fails.Add($"4a2:benchClobbered manual={manual} after={after}");
+                    // ...and a roster-CHANGING outcome must still not move anyone it did not have to
+                    var untouched = _run.Squad.FindAll(u => u != seated && u != benched);
+                    var wasBenched = untouched.ConvertAll(u => u.Benched);
+                    DebugResolveEventOutcome(new EventOutcome { Kind = EventOutcomeKind.Recruit, Veteran = true });
+                    for (int i = 0; i < untouched.Count; i++)
+                        if (untouched[i].Benched != wasBenched[i] && _run.Deployed.Count <= _run.NextDeployCap)
+                        { fails.Add($"4a2:recruitMovedBystander {untouched[i].Name}"); break; }
+                    if (_run.Deployed.Count > _run.NextDeployCap) fails.Add("4a2:recruitOverCap");
+                }
+            }
+
             // (4b) RELEASE: a DEPLOYED body leaves and the freed slot must go to a benched soldier.
             while (_run.Squad.Count <= _run.NextDeployCap) _run.Squad.Add(Mission.MakeRecruit());
             foreach (var u in _run.Squad) { u.Wound = 0; u.Hp = u.MaxHp; }   // everyone healthy: no bench excuse
@@ -720,7 +930,7 @@ public partial class Game
         }
 
         return fails.Count == 0
-            ? "BENCHTEST: PASS (auto-bench wounded, deploy<=cap, roster<=max, benched recover+preserved; a field event's recruit/release re-derives the deployment so the field is never cap+1 or cap-1)"
+            ? "BENCHTEST: PASS (auto-bench wounded, deploy<=cap, roster<=max, benched recover+preserved; a field event's recruit/release reconciles the deployment so the field is never cap+1 or cap-1, AND the player's own manual bench swap survives an event untouched)"
             : "BENCHTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 

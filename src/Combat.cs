@@ -1784,7 +1784,12 @@ public static class Combat
     // So this test ground-truths the displayed numbers against real rolled outcomes, and pins the
     // read/write split on the one static ComputeOdds could touch.
     // =====================================================================================
-    public static string TruthSelfTest()
+    /// Returns "" when every leg holds, else a comma-joined fail list. W9 REVIEW FIX: this half is
+    /// the MATH/PURITY half. It is composed with Game.TooltipTruthFails — which reads what the HUD
+    /// ACTUALLY PAINTS — into the single SIGHTLINE_TRUTHTEST line. Neither half is sufficient alone:
+    /// this one proves the effective band and the shared LockOn predicate are RIGHT, and the UI half
+    /// proves the tooltip is the thing that reads them.
+    public static string TruthFails()
     {
         var fails = new System.Collections.Generic.List<string>();
         var savedFaction = MissionFaction; var savedPrep = PrepFaction;
@@ -1895,11 +1900,9 @@ public static class Combat
                 if (mathFlank != Unit.PerkAim) fails.Add("truthLockOnFlankNoBonus");
             }
 
-            return fails.Count == 0
-                ? "TRUTHTEST: PASS (the tooltip DMG band brackets rolled damage on a plain foe AND a guarded HVT and agrees with GRAZE; the raw band stays raw for ExpectedDamage/threat; ComputeOdds + ExpectedDamage are side-effect free while Resolve still telegraphs; the LOCK-ON badge is the same predicate as the hit%)"
-                : "TRUTHTEST: FAIL (" + string.Join(",", fails) + ")";
+            return string.Join(",", fails);
         }
-        catch (Exception e) { return "TRUTHTEST: FAIL (exception " + e.GetType().Name + ": " + e.Message + ")"; }
+        catch (Exception e) { return "mathException:" + e.GetType().Name + ":" + e.Message; }
         finally
         {
             MissionFaction = savedFaction; PrepFaction = savedPrep;

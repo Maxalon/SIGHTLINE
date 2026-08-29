@@ -5728,14 +5728,118 @@ the WAR ROOM layout, and the skirmish key bindings.
 * **The caps are calibrated on THAT census, not on a guess.** `AutoMaxRunTurns = 150` is 2x the
   longest campaign measured — the headroom is the point, because firing this cap on a LEGITIMATE
   run would score it a LOSS and put back exactly the downward bias the old frame cap had.
-  `AutoFrameCap = 100000` with `AutoFramesPerTurn = 600` (measured 253 frames/turn at 75 turns —
-  a long campaign is long because it is ATTRITED, and a small squad takes cheap turns), so
-  150 x 600 = 90,000 <= 100,000 and the turn cap always bites first. STALLTEST pins that
-  inequality, so a future edit to either number fails loudly.
+  `AutoFrameCap = 120000` with `AutoFramesPerTurn = 700` — the measured WORST frames-per-turn (681),
+  not a regime average, after the review pointed out that the first cut's 600 came from the
+  long-campaign regime and left the claim EMPIRICAL: a campaign sustaining its worst observed rate
+  would have hit the frame cap ~3 turns before the turn cap. 150 x 700 = 105,000 <= 120,000 with no
+  regime assumption left in it. STALLTEST pins the inequality — true by construction, which is the
+  point: the three constants live in two files and only mean anything together.
 * **Residual, stated honestly:** the within-turn idle guard covers the PLAYER turn only
   (`UpdatePlayer`). A deadlock inside `UpdateEnemy` would still be bounded only by the frame cap.
   Nothing in 40 seeded campaigns showed one, and adding an untested guard to the enemy stager
-  looked riskier than the hole; it is a known gap, not an oversight.
+  looked riskier than the hole; it is a known gap, not an oversight. **And the raised frame cap makes
+  it 6x slower to surface** (120,000 frames instead of 20,000) — the censoring went down and the
+  detection cost went up, which the first write-up did not say.
 * **Screenshots** read and judged: the WAR ROOM unlocks column on a FRESH profile (all six entries
-  present and buyable, two descriptions ellipsized) and on the shipped 2-owned demo profile
-  (unchanged).
+  present and buyable) and on the shipped 2-owned demo profile (unchanged). **This judgement missed
+  a real defect** — five of the six descriptions were rendering at 10px, under the project's 12px
+  floor. A reviewer caught it by measuring through the public geometry rather than by looking. See
+  R3 below; "read and judged" is not a measurement, and this is what that costs.
+
+### W9 REVIEW FIXES — what four reviewers found that this wave had got wrong
+
+The review upheld all four of the wave's deviations from the brief and independently reintroduced
+11 of the 15 defects, each producing the recorded failure string. It also found six things wrong
+with the wave itself. Three of them are the same failure mode the wave was written to attack — **a
+claim in a comment that the tree does not honour** — which is worth recording plainly rather than
+quietly patching.
+
+**R1 (BLOCKING) — TRUTHTEST could not fail on EITHER display defect it was written for.**
+The adjudicator reverted only `Hud.cs:1896` back to `(a.HasPerk(Perk.LockOn) && o.CoverLevel == 0)`
+and `Hud.cs:2008` back to `$"{o.DmgMin}-{o.DmgMax}"`, changed nothing else, and got
+**TRUTHTEST: PASS, COMBATTEST: PASS, THREATTEST PASS**. He is right, and the diagnosis is exact:
+the test asserted `ShotOdds.DmgMinEff/DmgMaxEff` and `Combat.LockOnAim(...)` — the values the HUD is
+*supposed* to read — and **nothing bound the HUD to them**. It re-derived the right answer instead
+of observing the panel. That is a pin, not a test, and it is precisely the seam this wave exists to
+close: the flagship "what the UI says is what the dice do" test did not read the UI.
+
+The fix observes the draw call. `Cfg.CaptureText` (null in every normal run) records every string
+the game paints, with the size it was painted at. `Game.TooltipTruthFails` stages a controlled
+board, drives the REAL hover/aim path (`Update` → `UpdateHoverAndAim` → `ComputeOdds`), renders the
+REAL tooltip through `Hud.DebugDrawTooltip`, and asserts on the captured strings — so whatever the
+panel says is what the test reads, *however it was computed*. SIGHTLINE_TRUTHTEST is now two halves
+(`Combat.TruthFails` for the math and purity, `Game.TooltipTruthFails` for the UI) composed into one
+line. Both reverts now fail, with the defect's own signature:
+
+| the adjudicator's revert | result |
+|---|---|
+| `Hud.cs` LOCK-ON badge → `o.CoverLevel == 0` | `TRUTHTEST: FAIL (uiLockOnBadgeLiesOpen painted=True hitDelta=0, uiLockOnValueOpen=+15 aim delta=0)` |
+| `Hud.cs` DMG row → `{o.DmgMin}-{o.DmgMax}` | `TRUTHTEST: FAIL (uiDmgRowLiesGuarded shows=3-5 deals=1-2, uiGrazeDisagreesGuarded dmg=3-5 graze=1 on near miss, uiDmgRowIgnoresDefender both=3-5)` |
+| restored | `TRUTHTEST: PASS` |
+
+`shows=3-5 deals=1-2` is the original dossier entry, now reproduced by the test itself.
+
+**R2 (BLOCKING) — the post-event `_run.AutoDeploy()` discarded the player's manual bench choice on
+EVERY event, and the comment I shipped with it asserted the opposite.** A reviewer proved it on an
+Intel-only outcome: `MANUAL VEGA[B],KRESS[D],NOX[D],BISHOP[D],LYNX[D]` came back
+`VEGA[D],KRESS[D],NOX[B],BISHOP[D],LYNX[D]`. `AutoDeploy` re-derives `Benched` for the WHOLE roster
+from a fixed rule — right at a debrief, wrong afterwards — and `ResolveEvent` is the checkpoint
+site, so the clobbered deployment is what gets persisted. The dossier's own sketch said to gate it
+and I generalised past it. Now gated on a real roster change, and reconciling BY EXCEPTION:
+`Run.ReconcileDeployment` benches only what the event added, fills only slots the event freed, trims
+only over the cap, and leaves every deliberate choice alone. `AutoDeploy` and it share one
+comparator so they cannot diverge.
+
+**And the lesson the reviewer drew is the important part.** BENCHTEST could not catch this because
+it asserts a COUNT invariant — `Deployed.Count == min(Squad.Count, NextDeployCap)` — which **a
+clobbering implementation satisfies exactly as well as a preserving one**. The new leg asserts
+IDENTITY, by name, after an outcome with no roster change at all. It fails on the shipped
+implementation: `BENCHTEST: FAIL (4a2:benchClobbered manual=VEGA[B],KRESS[D],NOX[B],... after=VEGA[D],KRESS[B],NOX[B],...)`.
+
+**R3 (BLOCKING) — the WAR ROOM fix breached the 12px small-text floor on a FRESH PROFILE, and its
+comment claimed it did not.** At 0 owned / 6 unowned the plan lands `cardH = 49 → descRows = 1`, and
+the old code then asked `FitWrap` to squeeze a whole sentence into one row. **FitWrap's floor is
+`CardBodyMinSize = 10`, not 12** — so five of six unlock descriptions rendered at 10px, on the exact
+screen the repair exists for, in the one profile state every new player is in. My DEVLOG recorded
+that screenshot as "read and judged" and did not notice. A compressed row now paints at
+`CardBodySize` (12) and ellipsizes through `Clip` instead of shrinking; when not even one 12px row
+fits, the body is dropped rather than painted sub-floor. `descRows` is derived from the real row
+pitch (`27 + n * TextRow(13)`) instead of hard-coded pixel bands. METATEST asserts
+`bodySize >= 12` at every owned/unowned split, and fails on the old sizing:
+`METATEST: FAIL (warUnlockSubFloorBody owned=0 size=10 rows=1)`. Re-screenshotted: all six entries
+present and buyable, bodies now uniform with the hero card's, four of five ellipsized.
+
+**R4 (BLOCKING) — three shipped numbers stated the opposite of the tree**, in the wave whose own
+commit is titled "attribute every number to whoever measured it". `Program.cs` said
+"AutoMaxRunTurns (90 run-turns)" twice while the constant is 150; commit `2664349` recalibrated it
+and updated DEVLOG and CLAUDE.md but missed both source comments. Fixed.
+
+**R5 — `qa-sweep.sh` exited non-zero only on `_autofail`.** A self-test line reading FAIL, or a
+non-empty COVERAGE GAP block, still exited 0 — so `SWEEP-EXIT=0` read as a whole-sweep verdict while
+it was only an autoplay verdict, and the lead relies on that code at every merge. This is the same
+defect class as the wave's own D10 (a gate that prints instead of failing), shipped by the wave that
+fixed D10. All 38 self-test captures now route through one `verdict` helper that records a FAIL —
+and a BLANK capture, which is how a crashed self-test used to read as a quiet empty line — and the
+COVERAGE GAP block sets the flag too. Verified: `verdict` sets the flag on FAIL and on blank
+(`A: PASS → 0, B: FAIL → 1, C: <no result line> → 1`), and the exit block's truth table is
+`(0,0)→0, (1,0)→1, (0,1)→1, (1,1)→1`. A self-test FAIL alone now blocks the merge; it did not before.
+
+**R6 — STALLTEST's budget leg was resting on a regime assumption.** `AutoFramesPerTurn = 600` came
+from the long-campaign regime (253 frames/turn at 75 turns), but the measured spread runs to 681, so
+a campaign sustaining its worst observed rate would hit the frame cap at ~147 run-turns — three
+turns before the turn cap. "TIMEOUT is unreachable" would have been EMPIRICAL, and that matters more
+now the sweep hard-fails on a TIMEOUT, because a rare false positive becomes a merge block. Set to
+the measured WORST case instead: `AutoFramesPerTurn = 700`, `AutoFrameCap = 120000`, so
+150 × 700 = 105,000 ≤ 120,000 with no regime assumption left in the argument. The leg's own comment
+now says plainly what it is: **true by construction, and that is the point** — the three constants
+live in two files and only mean anything together, so it fails the moment one is edited alone. It is
+a coupling check, not a proof.
+
+**Two comment corrections, no behaviour change.** (a) `PurgeAnimsFor`'s new shooter clause claimed
+its `ActiveAnim` exemption means "the blow in flight still finishes" — true for the target clause,
+FALSE for this one, because `ShotAnim.Update` self-cancels for a dead/downed attacker a frame later
+anyway. The exemption is inert on that clause and is now documented as such; a body does not shoot,
+in flight or not, which is the intended rule. (b) The frame-cap raise makes the wave's own declared
+residual — a deadlock inside `UpdateEnemy`, which the within-turn idle guard does not cover — **6×
+slower to surface** (120,000 frames instead of 20,000). The censoring went down and the detection
+cost went up; both are real and neither was noted before.
