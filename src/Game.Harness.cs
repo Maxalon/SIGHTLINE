@@ -4496,6 +4496,130 @@ public partial class Game
             : "TUTTEST: FAIL (" + string.Join(",", fails.Distinct()) + ")";
     }
 
+
+    // ─── W5 THE FIRST HOUR — the CHROME self-test (SIGHTLINE_CHROMETEST=1) ─────────────────────
+    /// Three audit findings that all reduce to "a thing the player is reading moved, or vanished,
+    /// or fell out of its box". Each leg fails on the pre-W5 tree; SIGHTLINE_BARREFLOW=1 restores
+    /// the old action-bar order so the first one is falsifiable without reverting.
+    ///
+    ///  (A) visual-7 — THE ACTION BAR RE-FLOWED BETWEEN TURNS. The auditor measured OVERWATCH
+    ///      moving from bottom-row slot 8 to TOP-row slot 1 purely because a squadmate went down
+    ///      and STABILIZE appeared ahead of it in the list. Drive one soldier through three
+    ///      states — full verbs / no ammo / squadmate down — and assert every verb present in all
+    ///      three has a BYTE-IDENTICAL rect. Also asserts the ability slot's width absorbs its
+    ///      " (N)" cooldown suffix, which is the same defect wearing a different hat.
+    ///  (B) newplayer-3 — THE CONCEALED PILL FADED TO 10% ALPHA, so the opening state read as
+    ///      "off" for part of every 1.8 s cycle. Asserts the pulse envelope's floor and its
+    ///      peak/trough ratio directly, at the four fixed phases the auditor sampled.
+    ///  (C) newplayer-6 — DOCTRINE CARD TEXT OVERFLOWED ITS BOX on the first screen a new player
+    ///      touches. Asserts `body top + lines*lineH + pad <= card height` for EVERY boon in the
+    ///      catalogue, not just the three in one offer, and that the operator blurb column clears
+    ///      the class-glyph disc.
+    public string ChromeSelfTest()
+    {
+        var fails = new List<string>();
+
+        // ---- (A) the fixed slot map ----------------------------------------------------------
+        {
+            var g = new Game { NoPersist = true };
+            g.StartMission(1);
+            var u = g.Players.FirstOrDefault(p => p.Alive && !p.IsVip);
+            var mate = g.Players.FirstOrDefault(p => p != u && p.Alive && !p.IsVip);
+            if (u == null || mate == null) fails.Add("noSquadForBarProbe");
+            else
+            {
+                g.Selected = u;
+                Dictionary<string, Rectangle> Snap()
+                {
+                    Raylib.BeginDrawing();
+                    var bar = Hud.ProbeActionBar(g);
+                    Raylib.EndDrawing();
+                    var d = new Dictionary<string, Rectangle>();
+                    foreach (var b in bar) d[b.Id] = b.Rect;
+                    return d;
+                }
+                int ammo = u.Ammo;
+                var full = Snap();                            // state 1: everything available
+                u.Ammo = 0; var dry = Snap();                 // state 2: no ammo
+                u.Ammo = ammo;
+                mate.Downed = true; var down = Snap();        // state 3: a squadmate is bleeding out
+                mate.Downed = false;
+
+                if (full.Count < 8) fails.Add("barTooSmall:" + full.Count);
+                if (!down.ContainsKey("stabilize")) fails.Add("stabilizeNeverSurfaced");
+                if (dry.Count != full.Count) fails.Add("dryChangedTheVerbSet");
+                foreach (var id in full.Keys)
+                {
+                    if (!dry.TryGetValue(id, out var rd) || !SameRect(full[id], rd))
+                        fails.Add("moved(noAmmo):" + id);
+                    if (!down.TryGetValue(id, out var rw) || !SameRect(full[id], rw))
+                        fails.Add("moved(mateDown):" + id);
+                }
+                // the ability slot must already be wide enough for its cooldown suffix
+                if (u.Ability != AbilityKind.None && full.ContainsKey("ability"))
+                {
+                    var before = full["ability"];
+                    u.AbilityCd = 3;
+                    var cd = Snap();
+                    u.AbilityCd = 0;
+                    if (!cd.TryGetValue("ability", out var ra) || !SameRect(before, ra))
+                        fails.Add("abilitySlotGrewOnCooldown");
+                    foreach (var id in full.Keys)
+                        if (cd.TryGetValue(id, out var r2) && !SameRect(full[id], r2))
+                            fails.Add("moved(abilityCd):" + id);
+                }
+            }
+        }
+
+        // ---- (B) the CONCEALED pill's pulse envelope ------------------------------------------
+        {
+            // The exact expression Hud draws with, sampled at the four phases the audit used.
+            float lo = 2f, hi = -1f;
+            foreach (float t in new[] { 0.5f, 1.0f, 1.5f, 2.5f })
+            {
+                float pulse = Hud.ConcealPulse(t);
+                lo = MathF.Min(lo, pulse); hi = MathF.Max(hi, pulse);
+            }
+            // measured floor across the whole cycle, not just those four samples
+            float trueLo = Hud.ConcealPulseFloor;
+            if (trueLo < 0.5f) fails.Add($"pillFloor={trueLo:0.00}");
+            if (Hud.ConcealPulseCeil / MathF.Max(0.001f, trueLo) > 2.0f)
+                fails.Add($"pillSwing={Hud.ConcealPulseCeil / trueLo:0.00}x");
+            if (hi <= lo) fails.Add("pillDoesNotPulse");   // it must still BREATHE, not go static
+        }
+
+        // ---- (C) the doctrine card fits its own text, for every boon in the catalogue ---------
+        {
+            foreach (var b in BoonDef.All)
+            {
+                int lines = Hud.DraftBoonLineCount(b);
+                int need = Hud.DraftBoonBodyTop + lines * Hud.DraftBoonLineH + Hud.DraftBoonPadB;
+                if (need > Hud.DraftBoonCardHeight(lines)) fails.Add("boonOverflow:" + BoonDef.Code(b));
+                if (lines >= 3 && Hud.DraftBoonCardHeight(lines) <= 74)
+                    fails.Add("boonCardStillFixed:" + BoonDef.Code(b));
+            }
+            // ...and the operator blurb must clear the class-glyph disc VERTICALLY (the disc
+            // dropped into the corner) and fit its column HORIZONTALLY (so nothing ellipsizes —
+            // the sentence is the whole point of the row).
+            if (Hud.DraftGlyphTop() < Hud.DraftBlurbBottom())
+                fails.Add($"glyphOverlapsBlurb({Hud.DraftGlyphTop():0}<{Hud.DraftBlurbBottom()})");
+            foreach (var bl in Hud.ClassBlurbsForTest())
+                if (Cfg.Measure(bl, Hud.DraftBlurbFs, 1f).X > Hud.DraftBlurbWidth())
+                    fails.Add("blurbEllipsizes:" + bl);
+        }
+
+        return fails.Count == 0
+            ? "CHROMETEST: PASS (action-bar rects identical across full/no-ammo/mate-down + ability "
+              + $"cooldown, CONCEALED pulse {Hud.ConcealPulseFloor:0.00}-{Hud.ConcealPulseCeil:0.00} "
+              + $"({Hud.ConcealPulseCeil / Hud.ConcealPulseFloor:0.00}x), {BoonDef.All.Length} doctrine "
+              + "cards fit their text, blurb column clears the glyph)"
+            : "CHROMETEST: FAIL (" + string.Join(",", fails.Distinct()) + ")";
+    }
+
+    static bool SameRect(Rectangle a, Rectangle b)
+        => MathF.Abs(a.X - b.X) < 0.01f && MathF.Abs(a.Y - b.Y) < 0.01f
+        && MathF.Abs(a.Width - b.Width) < 0.01f && MathF.Abs(a.Height - b.Height) < 0.01f;
+
     /// TUTTEST seams: set one of the verb-performed lesson flags / the turn counter / force an end
     /// check, without reaching into private state from the test body. Harness-only.
     public void DebugSetTutFlag(string which)

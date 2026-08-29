@@ -210,6 +210,22 @@ public static class Program
         // shipped post-FX composite. Boots a REAL 1280x800 window with Display + PostFX ON and
         // reads the framebuffer back; a screen read is the only honest instrument, because the
         // whole defect lived in the composite. Stashes/restores save.json (it stages a CONTINUE).
+        // SIGHTLINE_CHROMETEST=1 : W5 THE FIRST HOUR — the action bar's fixed slot map, the
+        // CONCEALED pill's pulse envelope, and the doctrine cards fitting their own text.
+        // Needs a real draw context (the bar's layout and its paint are one pass), so it runs
+        // inside a tiny window and draws into it.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_CHROMETEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "chrometest");
+            // LOAD-BEARING: this test measures TEXT (button widths, wrapped line counts), and
+            // without the real atlases Cfg.Measure falls back to raylib's default font, whose
+            // metrics are narrower — every doctrine description fitted on one line and the
+            // overflow leg silently could not fail.
+            LoadGameFonts();
+            Console.WriteLine(new Game().ChromeSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         if (Environment.GetEnvironmentVariable("SIGHTLINE_CONTRASTTEST") == "1")
         {
             Console.WriteLine(ContrastSelfTest());
