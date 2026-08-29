@@ -937,7 +937,7 @@ public static class Program
         Display.Init(false);                  // headless render-frame path (no post-FX / no save)
         Raylib.SetTargetFPS(0);               // uncapped — run as fast as the sim allows
 
-        // W9 THE REPAIR: raised 20000 -> Game.AutoFrameCap (60000) with the autoplay cap. A frame-cap
+        // W9 THE REPAIR: raised 20000 -> Game.AutoFrameCap with the autoplay cap. A frame-cap
         // hit is scored as a LOSS below, so at 20000 the batch RIGHT-CENSORED exactly the longest
         // campaigns (the archived x2 chunks show it firing: one 20-match chunk logs "frame-cap hits:
         // 1"), putting a small unattributed downward bias into the ladder of record.

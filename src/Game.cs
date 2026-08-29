@@ -3957,20 +3957,25 @@ public partial class Game
     /// The backstop was roughly 5x too loose to bound what it claimed to bound: 2 TIMEOUTs in 214
     /// seeded campaigns (~1%), which qa-sweep printed and never failed on, and which BalanceBatch
     /// scores as a LOSS — right-censoring exactly the longest campaigns.
-    /// Calibrated from a measured 20-seed census of this tree's own autoplay (RESULT lines now
-    /// carry `turns=`): the longest campaign ran 44 run-turns / 20,661 frames, and the worst
-    /// frames-per-turn ratio observed was 681 (frames include the between-mission barracks / shop /
-    /// campaign-map screens, which cost frames and no turns). 100 run-turns is ~2.3x the longest real
-    /// campaign, so this only ever fires on something genuinely stuck.
-    public const int AutoMaxRunTurns = 100;
+    /// CALIBRATED FROM A MEASURED CENSUS of this tree's own autoplay, 20 seeded campaigns, RESULT
+    /// lines carrying `turns=`: every run finished, the longest took 75 run-turns / 18,992 frames and
+    /// the next longest 38, and the per-turn frame cost falls as a campaign lengthens (a long campaign
+    /// is long because it is ATTRITED, and a small squad takes cheap turns — the 75-turn outlier ran
+    /// 253 frames/turn against 400-680 on short full-squad runs).
+    /// 150 is 2x the longest campaign measured. That headroom is the point: firing this cap on a
+    /// LEGITIMATE run would score it a LOSS and put the same downward bias into the ladder that the
+    /// old 20,000-frame budget did. It must only ever catch something genuinely stuck.
+    public const int AutoMaxRunTurns = 150;
     /// The harness's whole-campaign FRAME budget (Program.cs's autoplay loop and BalanceBatch both
     /// read it). It lives HERE, next to the turn cap it must dominate, because the two numbers are a
     /// PAIR: if the frame budget can expire before AutoMaxRunTurns is reached, RESULT: TIMEOUT is
     /// reachable again. STALLTEST pins AutoMaxRunTurns * AutoFramesPerTurn <= AutoFrameCap so a future
     /// edit to either number fails loudly instead of quietly re-opening the hole.
-    public const int AutoFrameCap = 90000;
-    /// A generous per-turn frame ceiling for that arithmetic: 750 against a measured worst of 681.
-    public const int AutoFramesPerTurn = 750;
+    public const int AutoFrameCap = 100000;
+    /// The per-turn frame ceiling for that arithmetic, in the LONG-CAMPAIGN regime the turn cap
+    /// actually governs (measured 253 frames/turn at 75 turns; short runs cost more per turn but come
+    /// nowhere near the cap). 150 x 600 = 90,000 <= the 100,000 budget.
+    public const int AutoFramesPerTurn = 600;
 
     // ---------------- activation pods (4.3 awareness tiers) ----------------
     // Baselines; Heat "SHORT FUSE"/"RELENTLESS" shrink first-contact ranges by 1 (read off the

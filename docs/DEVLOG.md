@@ -5713,10 +5713,22 @@ the WAR ROOM layout, and the skirmish key bindings.
   frame=16417 turns=51` / `WIN mission=6 frame=10341 turns=25`. No TIMEOUT, no blank.
 * **PAIRTEST is green and must be** — it asserts that two identical legs match EACH OTHER, not
   that they match an archived number, so the draw-order changes above do not and cannot break it.
-* **Seeded census, 20 campaigns, before and after.** Before: 2 TIMEOUTs (seeds 2001, 3001), longest
-  finished run 14,507 frames. After: **zero TIMEOUTs**, all 20 finish, longest 20,661 frames /
-  44 run-turns — i.e. one of the two "TIMEOUTs" was a campaign that simply needed 3% more budget
-  than it had, and the other was a genuine deadlock.
+* **Seeded census, the same 20 campaigns, before and after (base `d350416` vs the final tree).**
+  Before: **2 TIMEOUTs** (seeds 2001 and 3001, both at the 20,000-frame cap), longest FINISHED run
+  14,507 frames. After: **zero TIMEOUTs — all 20 finish**, 11 WIN / 9 LOSE, longest 18,992 frames /
+  **75 run-turns** (seed 2001), next longest 38. The two "TIMEOUTs" turned out to have different
+  causes: 2001 was a campaign that simply needed more budget than it had, 3001 was the deadlock.
+* **The caps are calibrated on THAT census, not on a guess.** `AutoMaxRunTurns = 150` is 2x the
+  longest campaign measured — the headroom is the point, because firing this cap on a LEGITIMATE
+  run would score it a LOSS and put back exactly the downward bias the old frame cap had.
+  `AutoFrameCap = 100000` with `AutoFramesPerTurn = 600` (measured 253 frames/turn at 75 turns —
+  a long campaign is long because it is ATTRITED, and a small squad takes cheap turns), so
+  150 x 600 = 90,000 <= 100,000 and the turn cap always bites first. STALLTEST pins that
+  inequality, so a future edit to either number fails loudly.
+* **Residual, stated honestly:** the within-turn idle guard covers the PLAYER turn only
+  (`UpdatePlayer`). A deadlock inside `UpdateEnemy` would still be bounded only by the frame cap.
+  Nothing in 40 seeded campaigns showed one, and adding an untested guard to the enemy stager
+  looked riskier than the hole; it is a known gap, not an oversight.
 * **Screenshots** read and judged: the WAR ROOM unlocks column on a FRESH profile (all six entries
   present and buyable, two descriptions ellipsized) and on the shipped 2-owned demo profile
   (unchanged).
