@@ -72,6 +72,7 @@ echo -n "DEATHTEST  : "; SIGHTLINE_DEATHTEST=1 run | grep -oE "DEATHTEST: (PASS|
 echo -n "HEATLADDERTEST: "; SIGHTLINE_HEATLADDERTEST=1 run | grep -oE "HEATLADDERTEST: (PASS|FAIL)" | head -1
 echo -n "SNAPTEST   : "; SIGHTLINE_SNAPTEST=1  run | grep -oE "SNAPTEST: (PASS|FAIL)" | head -1
 echo -n "AUDIOTEST  : "; SIGHTLINE_AUDIOTEST=1 run | grep -oE "AUDIOTEST: (PASS|FAIL)" | head -1
+echo -n "AUDIOGATE  : "; SIGHTLINE_AUDIOGATE=1 run | grep -oE "AUDIOGATE: (PASS|FAIL)" | head -1
 echo -n "AMBIENTTEST: "; SIGHTLINE_AMBIENTTEST=1 run | grep -oE "AMBIENTTEST: (PASS|FAIL)" | head -1
 # Q1: the no-two-units-on-one-tile invariant. Drives 16 real missions (~70s), so it goes last.
 echo -n "STACKTEST  : "; SIGHTLINE_STACKTEST=1 run | grep -oE "STACKTEST: (PASS|FAIL)" | head -1
@@ -103,8 +104,8 @@ fi
 # counter said 41 while 42 ran; a later recount still missed TUTTEST and THREATTEST). Derive
 # it instead of trusting it - if a self-test exists in src/ and is not invoked above, say so.
 _missing=$(comm -23 \
-  <(grep -ohE 'SIGHTLINE_[A-Z0-9_]+TEST' src/*.cs | sort -u) \
-  <(grep -ohE 'SIGHTLINE_[A-Z0-9_]+TEST' scripts/qa-sweep.sh | sort -u))
+  <(grep -ohE 'SIGHTLINE_[A-Z0-9_]+(TEST|GATE)' src/*.cs | sort -u) \
+  <(grep -ohE 'SIGHTLINE_[A-Z0-9_]+(TEST|GATE)' scripts/qa-sweep.sh | sort -u))
 if [ -n "$_missing" ]; then
   echo "!! COVERAGE GAP - these self-tests exist in src/ but this sweep never runs them:"
   echo "$_missing" | sed 's/^/     /'
