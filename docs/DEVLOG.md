@@ -6524,3 +6524,79 @@ enough to read at all (X2 had it at n=4 per rung).
   means a player who turns it off is playing different dice. That repair **invalidates every CRN
   world in `docs/measurements/l1/`**. L1 is therefore the **pre-repair ladder** and the only n>=80
   picture of the pre-repair tree that will ever exist.
+
+---
+
+# PROGRAM CROSSCUT — L2 "THE POST-REPAIR LADDER AT n=160" (2026-08-29, lead)
+
+**Base commit `4784803`** (the integration tip carrying W1 TRUE INSTRUMENT + TRUE BAND).
+960 campaigns. 6 rungs x EIGHT disjoint slot sets x greedy+sloppy = **160 per rung**, all 48
+chunks `OK runs=20` and re-asserted from the JSON afterwards. Full tables:
+`docs/measurements/l2/README.md`.
+
+W1 re-rolled every CRN world in the project, so L1 and everything before it are formally
+incomparable to this table. W1 also made the instrument ~20x faster, so this round cost minutes.
+
+| rung | L2 (n=160) | +-SE | L1 (n=80) | delta | band | step |
+|---|---|---|---|---|---|---|
+| RECRUIT | **72.5** | 3.5 | 73.8 | -1.3 | 75+-8 | - |
+| heat 0 | **46.9** | 3.9 | 48.8 | -1.9 | 55+-8 | -25.6 |
+| heat 2 | **36.9** | 3.8 | 33.8 | +3.1 | 40+-8 | -10.0 |
+| heat 4 | **23.1** | 3.3 | 21.2 | +1.9 | 30+-8 | -13.8 |
+| heat 6 | **20.6** | 3.2 | 17.5 | +3.1 | 20+-8 | **-2.5** |
+| heat 8 | **8.8** | 2.2 | 10.0 | -1.2 | 10+-5 | -11.9 |
+
+Monotone at every step; five of six in band; heat 0 sits 0.1 under its floor, which at SE 3.9 is
+the floor.
+
+## 1. Severing the frame-coupled dice did NOT change the difficulty
+
+The largest per-rung move between L1 and L2 is **3.1 points** against a combined SE of ~5. W1's
+repair changed WHICH worlds you get, not how hard they are. The archive it invalidated was
+mis-INDEXED, not mis-CALIBRATED. That was not obvious in advance and is worth having on the record.
+
+## 2. The flat middle REPLICATES on disjoint worlds
+
+`h4 -> h6` is the smallest step on BOTH ladders: **-3.8 (L1) and -2.5 (L2)**, against neighbours of
+-12.5/-13.8 and -7.5/-11.9. `Heat.Mods` explains it exactly — rung 8 is the ONLY entry carrying
+`DmgDelta` or `AiTier`, so the middle rungs add bodies and stats and only the apex changes KIND.
+This is now replicated, not suspected, and it is the clearest open balance target in the project.
+
+## 3. L1's slot-set finding FAILED TO REPLICATE — RETRACTED
+
+L1 reported the two slot sets every wave has used since W2 running **+8.3 points easier** than
+fresh ones (z=1.93, p=0.053) and recorded it as "suggestive and NOT established". L2 tests the same
+hypothesis with SIX fresh sets against those two over 960 campaigns: old 89/240 = 37.1%, new
+245/720 = 34.0%, **+3.1 points, SE 3.6, z=0.85, p=0.394**, with three of six rungs now going the
+other way.
+
+**The effect is not there, and this entry retracts it** rather than leaving a p=0.053 to be quoted
+by a future wave as though it were a result. This is exactly the outcome L1's hedge existed to
+permit, and the hedge is why the retraction costs nothing.
+
+**The method rule stays** — a rung is four slot sets or it is not a rung — but it is now justified
+on COST (free insurance against a world-set artefact) rather than on evidence of one.
+
+## 4. The mid-run Decapitate REPLICATES and strengthens
+
+| | L1 | L2 |
+|---|---|---|
+| finale (BOSS node, m6) | 70.1% (n=234) | **69.7%** (n=479) |
+| **mid-run Decapitate** | 48.9% +-5.2 (n=92) | **46.0% +-3.9** (n=163) |
+
+**A mid-run Decapitate is 23.7 points harder than the campaign's climactic boss fight**, measured
+twice on disjoint worlds. Pooled over 960 campaigns Decapitate is 63.7% +-1.9 (n=642) — the worst
+objective in the game; the next worst is Sabotage at 83.5%. `Game.DesignateHvt` skips the buff for
+an ELITE by its own comment ("double-buffing it would re-create the stat-check wall we're
+removing") and applies `+6 + mission` HP and +6 aim everywhere else. **The wall was removed from
+the boss and left in the mid-run case.** Still a hypothesis with a named mechanism; it is one
+expression to test and it is now the best-evidenced open defect in the project.
+
+## What this round did NOT do
+
+- **No lever, no game code.** Same discipline as L1.
+- **The decision-richness columns are on a NEW instrument** (TRUE BAND's additive band) and read
+  2.0-2.6 against L1's 1.5-1.8. That is the instrument, not the game. Never compare them.
+- **Three waves are still unmerged** (W4 board, W5 first hour, W9 repair) and W9 explicitly changes
+  RNG draw order and composition. **This table will need re-running once they land** — it is the
+  post-W1 ladder, not the final one.
