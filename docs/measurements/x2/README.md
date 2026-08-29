@@ -45,6 +45,12 @@ rather than raw sums (the W4 convention, kept so rows stay comparable across wav
 
 | tag | state | rungs |
 |---|---|---|
-| `R0-h{R,0,2,4,6,8}-b{0,10}` | **the definitive post-merge baseline** — no lever, shipped defaults | RECRUIT / h0 / h2 / h4 / h6 / h8 |
+| `R0-h{R,0,2,4,6,8}-b{0,10}` | **the definitive post-merge baseline** — no lever, shipped W4 defaults | RECRUIT / h0 / h2 / h4 / h6 / h8 |
+| `R0diag-h0-b0` | the X2 tree with every new knob OFF — the logic-identity check against `R0-h0-b0` (runs, missions, completion, `decisionRichness`, `byObjective`, `byMission`, `playerClasses` and the per-slot paired records all MATCH exactly) | h0 |
+| `A1-h0-b*` | `SIGHTLINE_AIMTRIM=5` — flat −5 aim on every hostile | h0 |
+| `A2-h0-b*` | `SIGHTLINE_AIMTRIM=10` — the double dose (**not shipped**: Eliminate 4.80t, Escort 13.66t) | h0 |
+| `O1-h0-b*` | `SIGHTLINE_OPENERTRIM=1` — one body off the m1 / m2 force | h0 |
+| `S1-h{R,0,2,4,6,8}-b{0,10}` | **the shipped state** — `OPENERTRIM=1`, measured end to end at every rung | RECRUIT / h0 / h2 / h4 / h6 / h8 |
 
-(rows appended as rounds land)
+`R0-LADDER.txt` and `R0-BYOBJECTIVE.txt` are the pooled baseline tables as `agg.py` printed
+them; `S1-LADDER.txt` is the same for the shipped state.

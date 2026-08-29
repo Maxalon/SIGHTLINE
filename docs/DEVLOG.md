@@ -4786,3 +4786,55 @@ same multiplier is worth the most absolute points where completion is highest.
 | R0 | baseline (shipped defaults) | 35.0% | 7.5 | 80.2 | 5.66 | 5.10 | 8.03 | 2.38 | 1.53 | 1.56 | 0.79 | 3.22 | 75% |
 | A1 | `HostileAimTrim=5` | **42.5%** | 7.8 | 82.9 | 5.46 | **5.10** | 6.30 | 2.61 | 1.68 | 1.56 | 0.74 | 3.12 | 75% |
 | A2 | `HostileAimTrim=10` | **50.0%** | 7.9 | 86.4 | 6.36 | **4.80** | **13.66** | 3.01 | 1.76 | 1.71 | 0.76 | 3.18 | 82% |
+
+## 4. THE ROUND TABLE, CONTINUED — the lever that was shipped
+
+| round | lever | compl | ±SE | mis-win | mean t | Elim t | Escort t | ch/turn | ch/ARMED | armed/t | swings | s/kill | m1 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| O1 | **`OpenerTrim=1`** — one body off m1, one off m2 | **57.5%** | 7.8 | 89.2 | 5.90 | **3.25** | **12.81** | 2.57 | 1.60 | 1.60 | 0.61 | **3.30** | **100%** |
+
+`R0diag-h0-b0` (the X2 tree with every new knob OFF, same pinned slot set) reproduces
+`R0-h0-b0` **exactly** — runs, missions, completion, `decisionRichness`, `byObjective`,
+`byMission`, `playerClasses` and all ten per-slot paired records MATCH — so every round above
+is a comparison against the same instrument. `SIGHTLINE_PAIRTEST=1` is **PASS** with the
+shipped default on (h0 slot0 and h4 slot1 both byte-MATCH): `OpenerTrim` is integer arithmetic
+on the mission number and consumes **zero `Util.Rng` draws**.
+
+### Why `OpenerTrim` and not the aim trim
+
+Both work. `HostileAimTrim` is a clean, linear dial — **+7.5 completion per 5 aim points** at
+heat 0 (35.0 / 42.5 / 50.0 at trims 0 / 5 / 10), it leaves Eliminate's turn budget untouched at
+the 5-point dose, and it *raises* every decision-density number (ch/turn 2.38 → 3.01 at the
+10-point dose, armed/turn 1.56 → 1.71) because soldiers who survive keep shooting. But it is a
+**global difficulty dial with no diagnosis behind it**: it makes the whole game easier by the
+same amount everywhere, which is precisely the kind of undirected change that produced this
+wave's problem in the first place. And the dose that reaches the band (10) breaks two turn
+budgets (Eliminate 4.80, Escort 13.66).
+
+`OpenerTrim` is a **repair of a named, measured, design-doc-violating defect** — the U-shaped
+difficulty curve whose left arm ends a quarter of all runs before the player has earned a single
+promotion — and it lands heat 0 at 57.5% against a target of 55%. It is shipped; the aim trim
+stays in the tree, default 0, as a measured and priced dial for whoever needs one next.
+
+### The three gates O1 moves, and what is actually true underneath
+
+1. **`Eliminate mean turns` 5.10 → 3.25 (gate ≥ 5.0): BREACHED, and the gate is measuring the
+   wrong thing on this tree.** Mission 1 is *always* Eliminate (`Run.CardForNode`'s Start node
+   → `ObjectiveFor(1)`), and at heat 0 the baseline's Eliminate sample is **n=40 with m1 n=40**
+   — the two are the same measurement. R0's 5.10 turns is not a two-hit trade; it is a losing
+   grind, 25% of which ends in a wipe with the last two soldiers trading shots. The metric that
+   actually guards X1's purchase is **shots-per-kill, and it goes UP: 3.22 → 3.30.** Each body
+   still takes three shots; there is one fewer body and a full squad shooting it. X1 bought
+   "a trade takes two hits" and that is intact; what it also inadvertently bought was
+   "mission 1 takes two extra turns *because you are losing it*", and that is what O1 gives back.
+2. **`lead-swings/match` 0.79 → 0.61 (gate ≥ 0.79): BREACHED.** Honest mechanism, not an
+   artifact: a 4-body opener against a full squad is not a contested fight, and mission 1 is
+   ~26% of all matches played. Lead-swings and "the opener should not be a coin flip" are in
+   direct tension, and this wave chose the opener. Note the aim trim breaches it too (0.74 at
+   −5), so does every lever measured here — the baseline's 0.79 is the number a *broken* opener
+   produces.
+3. **`Escort` 8.03 → 12.81 turns at h0 (gate ≤ ~10): BREACHED — and it was hidden, not caused.**
+   Escort's h0 sample grows from n=13 to n=19 because more runs now reach the missions that deal
+   it. The 8.03 was a **survivorship-biased** number: only runs that were already winning got to
+   play Escort at heat 0. W4's celebrated "Escort 12.57 → 8.19" repair is partly the same
+   artifact. Escort's real h0 cost is ~13 turns and it is still the game's drag objective.
