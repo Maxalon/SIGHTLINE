@@ -6438,6 +6438,11 @@ public partial class Game
         if (_aiStage == AiStage.ActAfterMove)
         {
             var e = _aiUnits[_aiIdx];
+            // W2 THE OPPONENT ACTS — the idle detector's baseline. EVERY branch in the chain below
+            // changes ActionsLeft (ten set it to 0; the shot decrements it), so "ActionsLeft > 0 AND
+            // unchanged" is an exact structural test for "no branch fired" — the auditor's definition
+            // of an idle act — without a `fired` flag threaded through eleven branch bodies.
+            int actionsBefore = e.ActionsLeft, ammoBefore = e.Ammo;
             if (e.Alive)
             {
                 if (_aiPlan.SiegeCharge != null && e.HasSiege && e.ChargeTurns == 0 && e.ActionsLeft > 0)
@@ -6562,15 +6567,83 @@ public partial class Game
                     Fx.PopText(e.Pos + new Vector2(0, -30), "OVERWATCH", Pal.Accent, 16f);
                     Audio.Play("over");
                 }
+                else if (_aiPlan.Reload && e.ActionsLeft > 0 && e.Ammo < e.Weapon.Clip)
+                {
+                    // W2 THE OPPONENT ACTS — the enemy AMMO ECONOMY, decided rather than defaulted
+                    // into (docs/DESIGN.md §B.1). Hostiles used to be handed exactly one clip at spawn
+                    // with no reload verb anywhere, so "dry" was PERMANENT: 7.1% of measured enemy acts
+                    // were made with an empty weapon and 94% of those did nothing at all. A dry gun is
+                    // now RELOADED, on the player's own terms — one action, same clip refill as
+                    // Game.DoReload — which makes running a hostile dry a real tempo window the player
+                    // can bait and push into, instead of a unit that silently stops existing.
+                    e.Ammo = e.Weapon.Clip;
+                    e.ActionsLeft = Math.Max(0, e.ActionsLeft - 1);
+                    Fx.PopText(e.Pos + new Vector2(0, -30), "RELOADING", Pal.TxtDim, 16f);
+                    Audio.Play("reload");
+                    Enqueue(new WaitAnim(0.2f), Team.Enemy);
+                    // a spare action after the mag change digs in behind it (never a free extra shot —
+                    // choosing what to do with a fresh clip is W3's question, not this wave's).
+                    if (e.ActionsLeft > 0) { e.Hunkered = true; e.ActionsLeft = 0; }
+                }
                 else if (_aiPlan.Hunker && e.ActionsLeft > 0)
                 {
                     e.Hunkered = true; e.ActionsLeft = 0;
+                    // W2: the enemy hunker was the one branch that fired in COMPLETE silence — no pop,
+                    // no sound, only a small diamond in the status row. It reads identically to the
+                    // paralysis this wave removes, so give it the same beat the player's own HUNKER has.
+                    if (AiIdleFix)
+                    {
+                        Fx.PopText(e.Pos + new Vector2(0, -30), "HUNKERED", Pal.Foe, 16f);
+                        Audio.Play("hunker");
+                    }
+                }
+                // W2 TERMINAL GUARANTEE: no branch fired and the unit still holds an action. Every
+                // gate above is a plan-vs-board disagreement (the planned target died or slid out of
+                // CanTarget, a PINNED clamp shortened the move out of range, a Disoriented unit's
+                // watch was refused, ...). Ai.Plan's own terminal else covers the planner's side; this
+                // covers the EXEC's, so the invariant "an act-opportunity never ends unspent" holds
+                // structurally rather than by enumerating the ways a plan can go stale. Reload if the
+                // gun is empty (the same economy decision), else dig in — both are real, readable,
+                // mechanically live actions (HUNKERED is -25 to hit against it and no crit).
+                else if (AiIdleFix && e.ActionsLeft > 0 && e.ActionsLeft == actionsBefore)
+                {
+                    if (e.Ammo <= 0 && e.Weapon.Clip > 0)
+                    {
+                        e.Ammo = e.Weapon.Clip;
+                        Fx.PopText(e.Pos + new Vector2(0, -30), "RELOADING", Pal.TxtDim, 16f);
+                        Audio.Play("reload");
+                    }
+                    else
+                    {
+                        Fx.PopText(e.Pos + new Vector2(0, -30), "HUNKERED", Pal.Foe, 16f);
+                        Audio.Play("hunker");
+                    }
+                    e.Hunkered = true;
+                    e.ActionsLeft = 0;
                 }
             }
+            // W2 AIIDLETEST probe (harness-only; ALWAYS null in normal play, so this costs one null
+            // check per enemy act). Fires once per act-opportunity with the plan that was executed and
+            // the unit's pre-chain action/ammo counts, so the harness can classify idle / dry / no-target
+            // without the game itself carrying a counter.
+            if (ActProbe != null && e.Alive) ActProbe(e, _aiPlan, actionsBefore, ammoBefore);
             _aiIdx++;
             _aiStage = AiStage.PickNext;
         }
     }
+
+    // ── W2 THE OPPONENT ACTS ────────────────────────────────────────────────────────────────
+    /// SIGHTLINE_AIIDLEFIX — the wave's single dial. OFF restores the pre-W2 opponent exactly
+    /// (the planner ignores its own ammo, the no-shot fallback has no terminal else, and a dry
+    /// hostile never reloads), which is what makes the CRN-paired round possible and a bad
+    /// ladder one env var from reverted. Set from SIGHTLINE_AIIDLEFIX in Program.Main; mutable
+    /// so SIGHTLINE_AIIDLETEST can run BOTH legs in one process.
+    public static bool AiIdleFix = false;
+
+    /// SIGHTLINE_AIIDLETEST probe (harness-only; ALWAYS null in normal play). Called once per
+    /// enemy act-opportunity, immediately after the ActAfterMove branch chain:
+    /// (unit, the plan it executed, ActionsLeft before the chain, Ammo before the chain).
+    public static Action<Unit, EnemyPlan, int, int> ActProbe;
 
     // Enqueue the move steps for the just-planned enemy (shared by the AutoPlay fast path and
     // the post-telegraph path so the move timing/cost accounting is identical either way).

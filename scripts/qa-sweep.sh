@@ -4,8 +4,8 @@
 # quirk: piping an xvfb-run child through $(...) / a for-loop silently drops its
 # stdout, so every test is a direct `CMD | grep` statement below.
 #
-#   bash scripts/qa-sweep.sh          # 50 self-tests + autoplay x3   (~2 min)
-#   bash scripts/qa-sweep.sh --full   # all 51 (adds PAIRTEST)         (~2 min 40 s)
+#   bash scripts/qa-sweep.sh          # 51 self-tests + autoplay x3   (~2 min)
+#   bash scripts/qa-sweep.sh --full   # all 52 (adds PAIRTEST)         (~2 min 50 s)
 #
 # COUNT NOTE: this footer has been wrong three times now. C1 found it claiming 41 while running
 # 42; the W5/C1 integration then had two waves bumping it from different bases; and TRUE BAND
@@ -49,6 +49,11 @@ echo -n "BEACONTEST : "; SIGHTLINE_BEACONTEST=1 run | grep -oE "BEACONTEST: (PAS
 echo -n "COMBATTEST : "; SIGHTLINE_COMBATTEST=1 run | grep -oE "COMBATTEST: (PASS|FAIL)" | head -1
 echo -n "SAVETEST   : "; SIGHTLINE_SAVETEST=1  run | grep -oE "SAVETEST: (PASS|FAIL)" | head -1
 echo -n "AITEST     : "; SIGHTLINE_AITEST=1    run | grep -oE "AITEST: (PASS|FAIL)" | head -1
+# W2 THE OPPONENT ACTS (~10 s): no enemy act-opportunity may end with an unspent action. Runs 32
+# full campaigns on the SAME seeds with SIGHTLINE_AIIDLEFIX off and on; PASS needs the ON leg at
+# zero idles AND the OFF leg still idling, so the probe can never pass vacuously. Note the
+# grep tail -1: the two counter rows are printed first and also start with "AIIDLETEST:".
+echo -n "AIIDLETEST : "; SIGHTLINE_AIIDLETEST=1 run | grep -oE "AIIDLETEST: (PASS|FAIL)" | tail -1
 echo -n "BANDTEST   : "; SIGHTLINE_BANDTEST=1 run | grep -oE "BANDTEST: (PASS|FAIL)" | head -1
 echo -n "ITEMTEST   : "; SIGHTLINE_ITEMTEST=1  run | grep -oE "ITEMTEST: (PASS|FAIL)" | head -1
 echo -n "STATUSTEST : "; SIGHTLINE_STATUSTEST=1 run | grep -oE "STATUSTEST: (PASS|FAIL)" | head -1

@@ -459,6 +459,66 @@ and readability?* Until that bar is cleared, we do not pay its price.
 
 ---
 
+## 5.1 The enemy ammo economy (decided 2026-08-29, wave W2 "THE OPPONENT ACTS")
+
+This section exists because the project had never *made* this decision — it **defaulted
+into** one, and the default was the bad half of a real design fork.
+
+**What was actually shipping.** Hostiles are handed exactly one clip at spawn
+(`Mission.cs:277/1236/1249/1323/1832`) and there was **no enemy reload verb anywhere in the
+codebase.** So "dry" was not a tempo state, it was **death by other means**: a hostile that
+emptied its magazine stopped being a combatant for the rest of the mission and simply stood
+on the board. It was invisible on top of that — enemy ammo appeared nowhere in `Hud.cs` or
+`Renderer.cs`, so the player could neither read it nor plan around it. Measured over 32
+instrumented campaigns on the current tree: **11.5% of enemy act-opportunities were made
+holding an empty weapon**, and essentially all of them produced no action at all.
+
+**The fork.** Two coherent options, and only two:
+
+| | **(a) A reload verb** | **(b) Per-turn clip refresh** |
+|---|---|---|
+| Rule | a dry hostile spends 1 action changing the mag | ammo silently refills each enemy turn |
+| Cost to the player | a free turn of tempo they can *bait and punish* | none — the state is deleted |
+| What it adds | suppressing fire and long fights acquire a point | nothing; it removes a system |
+| What it costs us | one more branch, and it must be **legible** or it is invisible pressure | the enemy's magazine stops meaning anything |
+
+**The decision: (a), the reload verb** — mirroring the player's own `Game.DoReload` exactly
+(one action, full clip, does not end the turn). Rationale, in the order that decided it:
+
+1. **Symmetry is the game's contract.** The player reloads; the reaction system, the shove,
+   the brace and the overwatch cone are all already team-symmetric (see `CLAUDE.md` →
+   "How a turn flows"). An opponent that never has to manage a magazine is playing a
+   different game from the one the player is playing, and §3.A calls that a false choice
+   worn by the *player's* ammo management.
+2. **It creates a decision instead of deleting one.** §3.A: an interesting decision needs
+   consequences. Option (b) makes "how much fire has this hostile put out?" unanswerable and
+   therefore unusable. Option (a) makes it a live read — *this one is empty, push now* — which
+   is exactly the kind of minute-to-minute lever §2 asks for and costs no new verb, no new
+   screen and no new number.
+3. **It is the only option that fixes the actual defect.** The defect was not "enemies run
+   out of ammo"; it was "a hostile that runs out stops existing while still standing on the
+   board." (b) hides that by making the state unreachable. (a) turns it into a beat.
+
+**The constraint that comes with it, and it is not optional.** A reload the player cannot
+see is invisible pressure — a hidden clock that quietly makes the game harder. So the
+decision *includes* the read: the hostile token now carries a small ammo pip row, and a dry
+hostile is labelled **DRY** in words (`Renderer.DrawEnemyAmmo`). Per §3.H the actionable
+state is carried by TEXT, not by hue, and the pips are drawn only for hostiles already in
+contact (`AlertLevel.Alert`) so a dormant "?" pod still gives nothing away. **If a future
+wave removes the read, it must remove the reload with it** — the two are one decision.
+
+**What this is NOT.** It is not an ammo *economy* in the resource-management sense: there
+are no magazines to count, no ammo pickups, and no attrition model. A hostile can reload
+indefinitely. The only thing being bought here is a **one-action tempo window** the player
+can create and then spend, and that is the whole of the intended scope.
+
+**The honest cost.** This makes the game harder — a hostile that used to be permanently
+neutralised at ~11.5% of its act-opportunities is now merely delayed by one action. That
+cost is measured, not asserted: see `docs/measurements/w2/` and `docs/DEVLOG.md` §W2 for
+the CRN-paired round, and `SIGHTLINE_AIIDLEFIX=0` restores the pre-W2 behaviour exactly.
+
+---
+
 ## 6. Encounter-design intent (feeds Phase 4)
 
 Design intent only — the build checklist lives in `CLAUDE.md` → **ROADMAP — PHASE 4**.

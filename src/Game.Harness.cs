@@ -28,6 +28,23 @@ public partial class Game
     /// Harness hook (screenshot only): reveal all dormant enemies (fully alert).
     public void DebugWakeAll() { foreach (var e in Enemies) if (e.Alive) e.Alert = AlertLevel.Alert; }
 
+    /// W2 harness hook (screenshot only): SIGHTLINE_AIIDLESHOT — the enemy AMMO read. Wakes the
+    /// board and walks every live hostile's clip down a different amount, leaving the first one
+    /// DRY, so one frame shows the whole range of the token's ammo row: a full mag, partial mags,
+    /// and the word DRY on the hostile that must now spend an action reloading. Pair with
+    /// SIGHTLINE_CB=1 for the colorblind pass (the DRY state is carried by text, not hue).
+    public void DebugAmmoShot()
+    {
+        DebugWakeAll();
+        int i = 0;
+        foreach (var e in Enemies)
+        {
+            if (!e.Alive || e.Weapon == null) continue;
+            e.Ammo = Math.Min(e.Weapon.Clip, i);       // 0 (DRY), 1, 2, ... rounds left across the board
+            i++;
+        }
+    }
+
     /// Harness hook (screenshot only): drive the anti-turtle pressure clock to its max rung so a
     /// single frame shows the PRESSURE meter filled in the top bar (and its escalation banner).
     public void DebugPressure()

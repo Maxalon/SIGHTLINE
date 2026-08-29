@@ -3255,6 +3255,15 @@ public static class Renderer
         }
         if (u.Hunkered)
             Raylib.DrawPoly(new Vector2(p.X, p.Y - 35), 4, 6f, 45f, Pal.Good);
+        // W2 THE OPPONENT ACTS — the enemy AMMO read. Running a hostile dry is now a real tempo
+        // window (it spends its next action changing the mag instead of shooting), so it has to be
+        // BAITABLE rather than invisible: enemy ammo appeared nowhere in Hud.cs or Renderer.cs
+        // before this line. A thin pip row under the body counts the rounds left, and at zero the
+        // row is replaced by the word DRY — the state that changes the player's plan is carried by
+        // TEXT, not by hue, so it survives the colorblind pass (DESIGN.md 3.H). Drawn only for
+        // hostiles in contact (Alert), so a dormant "?" pod still gives nothing away.
+        if (u.Team == Team.Enemy && u.Weapon != null && u.Weapon.Clip > 0 && u.Alert == AlertLevel.Alert && !u.Downed)
+            DrawEnemyAmmo(u, p);
 
         // active ability stance tag (friendly) / suppression tag (enemy) — pushed out past the wider body
         if (u.RunGun) Cfg.Text("R&G", new Vector2((int)(p.X + 18), (int)(p.Y - 34)), 11, 1f, Pal.Accent);
@@ -3302,6 +3311,38 @@ public static class Renderer
                     Raylib.DrawLineEx(new Vector2(p.X + i * 6, p.Y - 12), new Vector2(p.X + i * 6, p.Y + 12),
                                       1.5f, Raylib.Fade(Pal.Txt, 0.6f));
         }
+    }
+
+    /// W2: the hostile's remaining rounds, drawn as a thin pip row just under the body (the HP pips
+    /// sit above it, so the two reads never collide). At zero the row becomes the word "DRY": a dry
+    /// hostile cannot shoot and must spend an action reloading, which is the one ammo state that
+    /// changes what the player should do, so it reads in words rather than in an absent pip.
+    /// Deliberately small and low-contrast — this is a supporting read, not a second HP bar.
+    static void DrawEnemyAmmo(Unit u, Vector2 p)
+    {
+        // the row sits just BELOW the 24px body disc (HP pips are above it), so the two never collide.
+        if (u.Ammo <= 0)
+        {
+            // DRY gets an opaque pill in the status-chip idiom, and — unlike a bare label — it is
+            // kept INSIDE the unit's own 64px tile (+20..+32 of a ±32 half-tile). The first version
+            // sat at +23 with no backing and was punched through by the HP pip row of whatever
+            // hostile stood one tile below it, which is exactly the kind of overlap the chip pass
+            // exists to avoid.
+            float tw = Cfg.Measure("DRY", 12, 1f).X;
+            var pill = new Rectangle(p.X - tw / 2f - 4f, p.Y + 18f, tw + 8f, 15f);
+            Raylib.DrawRectangleRounded(pill, 0.5f, 6, Raylib.Fade(Pal.Suspect, 0.45f));
+            Raylib.DrawRectangleRounded(new Rectangle(pill.X + 1f, pill.Y + 1f, pill.Width - 2f, pill.Height - 2f),
+                                        0.5f, 6, Pal.RGBA(9, 13, 18, 216));
+            Cfg.Text("DRY", new Vector2((int)(p.X - (int)tw / 2), (int)(p.Y + 20)), 12, 1f, Pal.Suspect);
+            return;
+        }
+        int clip = Math.Min(u.Weapon.Clip, 8);                    // a deep mag caps the row's width
+        int have = Math.Min(u.Ammo, clip);
+        float totalW = clip * 5f - 2f;
+        float sx = p.X - totalW / 2f;
+        for (int i = 0; i < clip; i++)
+            Raylib.DrawRectangle((int)(sx + i * 5f), (int)(p.Y + 29f), 3, 3,
+                                 i < have ? Raylib.Fade(Pal.Foe, 0.95f) : Pal.RGBA(96, 106, 122));
     }
 
     static void DrawHpPips(Unit u, Vector2 p)

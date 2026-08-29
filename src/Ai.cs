@@ -22,6 +22,7 @@ public class EnemyPlan
     public (int x, int y)? RelockTile;  // CUSTODIAN (W8): re-lock/re-arm the objective at this site (else null)
     public bool Brace;                  // PIKEMAN (FUL-8): plant a braced focus cone over a movement lane
     public int BraceDirX, BraceDirY;    // FUL-8: cone axis = anchor - plant tile (Math.Sign per component)
+    public bool Reload;                 // W2: the gun is empty — spend the action changing the mag
 }
 
 /// Tactical decision-making for a single enemy. Greedy, but reads as competent:
@@ -94,6 +95,13 @@ public static class Ai
         int bestCost = 0;
         float bestScore = float.NegativeInfinity;
         Unit bestShotTarget = null;
+        // W2 THE OPPONENT ACTS — the best FULL-BUDGET (two-action) destination, tracked by the same
+        // per-tile scorer in the same pass. It is the terminal else of the no-shot fallback: when a
+        // unit has a spare action and nothing to spend it on, it spends it on GROUND. Tracking it
+        // here rather than re-scoring later means no second traversal and — critically — no extra
+        // Util.Rng draw, so the CRN pairing the whole measurement methodology rests on is unmoved.
+        (int x, int y) bestDash = (-1, -1);
+        float bestDashScore = float.NegativeInfinity;
 
         Unit nearest = null; int nd = int.MaxValue;
         foreach (var p in players)
@@ -406,7 +414,13 @@ public static class Ai
             // best shootable target from this tile (must keep an action to fire)
             Unit shoot = null;
             float bestHit = -1f;
-            if (actionsToReach <= 1)
+            // W2 THE OPPONENT ACTS — the AMMO GATE. `Ammo` appeared in this file at exactly two
+            // lines (the PIKEMAN plant gate and the overwatch fallback), NEITHER of them here, so a
+            // hostile with an empty weapon still planned a ShootTarget. A non-null ShootTarget then
+            // suppressed the whole no-shot fallback block below, and Game.ActAfterMove's own
+            // `e.Ammo > 0` gate refused the shot — the unit stood there having spent nothing. That
+            // single missing term was 16% of all measured idle acts and 94% of every dry-weapon act.
+            if (actionsToReach <= 1 && (!Game.AiIdleFix || e.Ammo > 0))
             {
                 foreach (var p in players)
                 {
@@ -738,6 +752,8 @@ public static class Ai
                 bestCost = c;
                 bestShotTarget = shoot;
             }
+            // W2: best tile that costs BOTH actions to reach (same score, no re-scoring, no new draw).
+            if (actionsToReach >= 2 && score > bestDashScore) { bestDashScore = score; bestDash = (tx, ty); }
         }
 
         // build path
@@ -930,8 +946,34 @@ public static class Ai
                 // commanding perch it genuinely controls.
                 bool cmdOw = g.Grid.HeightAt(bestTile.x, bestTile.y) - g.Grid.HeightAt(nearest.X, nearest.Y) >= 2;
                 bool sees = g.Grid.HasLineOfSight(bestTile.x, bestTile.y, nearest.X, nearest.Y, cmdOw);
-                if (sees && e.Ammo > 0 && !routing) plan.Overwatch = true;
+                // W2 THE OPPONENT ACTS — the AMMO ECONOMY (docs/DESIGN.md §B.1). A dry gun is the
+                // FIRST thing worth an action: every other branch here either needs ammo (overwatch)
+                // or is a way of surviving until the unit has some. Ordered ahead of hunker on
+                // purpose — a hostile digging in behind cover with an empty weapon is the statue
+                // this wave exists to remove.
+                if (Game.AiIdleFix && e.Ammo <= 0 && e.Weapon.Clip > 0) plan.Reload = true;
+                // W2: mirror ActAfterMove's own overwatch gate. A Disoriented unit's watch is refused
+                // by the exec, and the plan had no way of knowing — so it planned a watch, the exec
+                // declined it, and the unit stood still. Plan what the exec will actually accept.
+                else if (sees && e.Ammo > 0 && !routing
+                         && (!Game.AiIdleFix || !e.HasStatus(StatusKind.Disoriented))) plan.Overwatch = true;
                 else if (coverHere.Level > 0) plan.Hunker = true;
+                // W2 TERMINAL ELSE — the missing 84%. `if (watch) ... else if (cover) ...` with no
+                // final branch meant a hostile that had lost line of sight to the squad AND was
+                // standing on open floor got neither, and froze in the open holding a live action.
+                // It now spends that action on GROUND: re-target the move at the best tile the same
+                // per-tile scorer ranked among those needing the FULL two-action budget. No new
+                // policy (identical scoring function), no new randomness, and the unit closes,
+                // withdraws or seeks cover exactly as its archetype terms already say it should.
+                else if (Game.AiIdleFix && bestDash.x >= 0 && bestDash != bestTile)
+                {
+                    plan.Path = g.Grid.ReconstructPath(cameFrom, e.X, e.Y, bestDash.x, bestDash.y);
+                    plan.MoveActions = 2;
+                }
+                // boxed in — no two-action tile exists at all. Dig in where it stands: HUNKERED is a
+                // real mechanical state (-25 to hit against it, no crit) and the player's own HUNKER
+                // has no cover requirement either, so this is symmetric, not a consolation prize.
+                else if (Game.AiIdleFix) plan.Hunker = true;
             }
         }
 

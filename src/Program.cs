@@ -89,6 +89,12 @@ public static class Program
         //   SIGHTLINE_OPENERTRIM=<n> : Mission.OpenerTrim (bodies off the m1 / half off m2 force)
         if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_OPENERTRIM"), out int xopen) && xopen >= 0)
             Mission.OpenerTrim = xopen;
+        // W2 THE OPPONENT ACTS — SIGHTLINE_AIIDLEFIX=0/1: the enemy stops spending a quarter of its
+        // act-opportunities on nothing (planner ammo gate + terminal-else reposition + a reload verb).
+        // It is a DIFFICULTY change and is priced as one; see docs/measurements/w2/ for the round and
+        // docs/DEVLOG.md §W2 for the shipped default. =0 restores the pre-W2 opponent exactly.
+        string aiIdleEnv = Environment.GetEnvironmentVariable("SIGHTLINE_AIIDLEFIX");
+        if (aiIdleEnv == "1") Game.AiIdleFix = true; else if (aiIdleEnv == "0") Game.AiIdleFix = false;
 
         bool smartplay = Environment.GetEnvironmentVariable("SIGHTLINE_SMARTPLAY") == "1";
         bool autoplay = Environment.GetEnvironmentVariable("SIGHTLINE_AUTOPLAY") == "1" || smartplay;
@@ -141,6 +147,18 @@ public static class Program
         if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_STACKTEST"), out int stackMode) && stackMode > 0)
         {
             StackTest(stackMode >= 2);
+            return;
+        }
+
+        // W2 THE OPPONENT ACTS: SIGHTLINE_AIIDLETEST=1 : the NO-IDLE-ENEMY-TURN invariant. Drives
+        // real missions across all 8 objectives at heat 0/4 TWICE on the same seeds — once with
+        // SIGHTLINE_AIIDLEFIX off, once on — and asserts the OFF leg still idles (the probe cannot
+        // pass vacuously, and the pre-wave rate is printed) while the ON leg idles exactly zero
+        // times and never leaves a dry weapon holding an action. SIGHTLINE_AIIDLETEST=<N> widens
+        // the sample. See docs/DEVLOG.md §W2.
+        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_AIIDLETEST"), out int idleN) && idleN > 0)
+        {
+            AiIdleTest(idleN);
             return;
         }
 
@@ -718,6 +736,7 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_WAVEBANNER") == "1") game.DebugWaveTelegraph();   // FUL-4: pair with SIGHTLINE_OBJ=defend
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_PIKESHOT") == "1") game.DebugPikemanLane();       // FUL-8: planted PIKEMAN lane (pair with SIGHTLINE_CB=1 for the second pass)
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_THREATSHOT") == "1") game.DebugThreatShot();      // RESONANCE T2: incoming-fire pips + tinted path + card (pair with SIGHTLINE_CB=1)
+        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_AIIDLESHOT") == "1") game.DebugAmmoShot();        // W2: the enemy ammo row + the DRY read (pair with SIGHTLINE_CB=1)
         if (shot && int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_THREATPREF"), out int _tp)) game.ThreatPref = Util.Clamp(_tp, Game.ThreatOff, Game.ThreatFull);   // 0 off / 1 simple (pre-T2 read) / 2 full
         string downShot = Environment.GetEnvironmentVariable("SIGHTLINE_DOWNSHOT");
         if (shot && (downShot == "1" || downShot == "2")) game.DebugDownShot(downShot == "2");   // FUL-7: downed soldier + rescuer (=2 mid-rescue STABLE; pair with SIGHTLINE_CB=1 for the second pass)
@@ -1525,6 +1544,120 @@ public static class Program
         Console.WriteLine(fails.Count == 0
             ? "STACKTEST: PASS (no move step ever entered an occupied tile; no two living units ever shared one)"
             : "STACKTEST: FAIL (" + string.Join(",", fails) + ")");
+    }
+
+    // ── W2 THE OPPONENT ACTS — SIGHTLINE_AIIDLETEST ───────────────────────────────────────
+    // The invariant: NO enemy act-opportunity ever ends with an unspent action and no branch
+    // fired. The auditor measured the violation at 111/465 = 23.9% of act-opportunities over 6
+    // instrumented campaigns and 171/641 = 26.7% over 10 — roughly one enemy turn in four
+    // produced a banner, a telegraph, a move, and then nothing at all.
+    //
+    // The probe is Game.ActProbe, fired once per act-opportunity right after ActAfterMove's
+    // branch chain. Every branch in that chain changes ActionsLeft (ten zero it, the shot
+    // decrements it), so "still holds an action AND ActionsLeft is unchanged" is an exact
+    // structural test for "no branch fired" — it needs no cooperation from the branches and it
+    // cannot be fooled by a future branch that forgets to spend (that IS an idle).
+    //
+    // NON-VACUITY, and the reason this test cannot pass by accident: it runs the SAME seeds
+    // TWICE — leg A with Game.AiIdleFix off (the pre-wave opponent) and leg B with it on. PASS
+    // requires idle == 0 AND dry-idle == 0 in leg B *and* idle > 0 in leg A. A test that cannot
+    // fail is not a test, so the failing tree is part of the assertion, not a footnote.
+    static void AiIdleTest(int n)
+    {
+        Stats.Reset();
+        Stats.Enabled = false;
+        Mission.ForcedLayout = -1;
+        Pal.SetColorblind(false);
+
+        Raylib.SetConfigFlags(ConfigFlags.Msaa4xHint);
+        Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "SIGHTLINE — ai idle test");
+        RequireWindow("AIIDLETEST");   // zero sampled enemy turns is not a clean sweep
+        Raylib.SetExitKey(KeyboardKey.Null);
+        Cfg.Font = Raylib.GetFontDefault();
+        Display.Init(false);
+        Raylib.SetTargetFPS(0);
+
+        bool shipped = Game.AiIdleFix;
+
+        // one leg's counters. `acts` = act-opportunities (a living enemy reaching ActAfterMove);
+        // `actsDry` = those made holding an empty weapon; `idle` = ended with an action unspent and
+        // no branch fired; `idleDry` = idles by a dry unit; `noTgt` = idles where the planner had
+        // planned no shot at all (the fallback-with-no-terminal-else family).
+        (long acts, long actsDry, long idle, long idleDry, long noTgt, int missions) Leg(bool fix)
+        {
+            Game.AiIdleFix = fix;
+            long acts = 0, actsDry = 0, idle = 0, idleDry = 0, noTgt = 0;
+            int missions = 0;
+            Game.ActProbe = (u, plan, actionsBefore, ammoBefore) =>
+            {
+                acts++;
+                if (ammoBefore <= 0) actsDry++;
+                bool isIdle = u.ActionsLeft > 0 && u.ActionsLeft == actionsBefore;
+                if (!isIdle) return;
+                idle++;
+                if (ammoBefore <= 0) idleDry++;
+                if (plan == null || plan.ShootTarget == null) noTgt++;
+            };
+
+            var objs = new[] { Objective.Eliminate, Objective.Hack, Objective.Evac, Objective.Escort,
+                               Objective.Sabotage, Objective.Rescue, Objective.Defend, Objective.Decapitate };
+            int slot = 0;
+            foreach (int heat in new[] { 0, 4 })
+                foreach (var o in objs)
+                    for (int rep = 0; rep < n; rep++)
+                    {
+                        if (Raylib.WindowShouldClose()) break;
+                        Environment.SetEnvironmentVariable("SIGHTLINE_HEAT", heat.ToString());
+                        // paired: leg A and leg B replay the identical worlds until the opponent's
+                        // own behaviour diverges, so the two counter sets are comparable.
+                        Util.Reseed(90000 + slot++);
+                        var game = new Game { NoPersist = true, AutoPlay = true, SmartPlay = true,
+                                              ForcedObjective = o };
+                        game.StartMission(1);
+                        int frame = 0;
+                        // WHOLE campaigns, not single missions — this is the auditor's own sampling
+                        // frame. Mission 1 is the shortest, coldest fight in the game (a trimmed
+                        // opener the greedy bot clears in two turns); measuring only mission 1 samples
+                        // ~2 enemy act-opportunities per leg entry and would report an idle rate drawn
+                        // almost entirely from the opening exchange.
+                        while (!Raylib.WindowShouldClose())
+                        {
+                            game.Update(1f / 60f);
+                            BatchPump();
+                            if (++frame >= 20000) break;
+                            if (game.Phase == Phase.Lose || game.Phase == Phase.Win) break;
+                        }
+                        missions += game.RunState != null ? Math.Max(1, game.RunState.Mission) : 1;
+                    }
+
+            Game.ActProbe = null;
+            return (acts, actsDry, idle, idleDry, noTgt, missions);
+        }
+
+        var off = Leg(false);
+        var on  = Leg(true);
+
+        Game.AiIdleFix = shipped;
+        Util.Reseed(0);
+        Display.Shutdown();
+        Renderer.UnloadNoise();
+        Raylib.CloseWindow();
+
+        string Row(string tag, (long acts, long actsDry, long idle, long idleDry, long noTgt, int missions) r)
+            => $"AIIDLETEST: {tag} missions={r.missions} acts={r.acts} actsDry={r.actsDry} " +
+               $"idle={r.idle} ({(r.acts > 0 ? 100.0 * r.idle / r.acts : 0):0.0}%) " +
+               $"idleDry={r.idleDry} noTgt={r.noTgt}";
+        Console.WriteLine(Row("AIIDLEFIX=0", off));
+        Console.WriteLine(Row("AIIDLEFIX=1", on));
+
+        var idleFails = new System.Collections.Generic.List<string>();
+        if (on.idle > 0)    idleFails.Add($"idleActs={on.idle}");
+        if (on.idleDry > 0) idleFails.Add($"idleDryActs={on.idleDry}");
+        if (off.idle == 0)  idleFails.Add("probeInsensitive(the pre-wave tree idled zero times — the probe is not measuring)");
+        if (on.acts < 200)  idleFails.Add($"vacuous(acts={on.acts})");   // no display / no gameplay
+        Console.WriteLine(idleFails.Count == 0
+            ? "AIIDLETEST: PASS (no enemy act-opportunity ends with an unspent action; no dry weapon holds one; the pre-wave tree still fails the same probe)"
+            : "AIIDLETEST: FAIL (" + string.Join(",", idleFails) + ")");
     }
 
     // SIGHTLINE_WOUNDTEST: a survivor that ends a mission badly hurt carries a Wound
