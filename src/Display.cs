@@ -184,7 +184,7 @@ void main() {
     // Both are deliberately at the edge of perception. The scan is a 3px-period cosine at
     // <=0.03 amplitude — enough to read as a CRT/tac-display surface, not enough to fight the
     // board. The grain is a repeat-wrapped white-noise tile scrolled by uTime (which is fed by
-    // Display.AdvanceTime(dt) — no Raylib.GetTime() anywhere in the FX path) and is FADED OUT
+    // Display.AdvanceTime(dt) — no wall-clock read anywhere in the FX path) and is FADED OUT
     // in the darks, so the black board floor and the letterbox stay clean instead of speckling.
     float scan = 1.0 - 0.028 * (0.5 + 0.5 * cos(uv.y * uResolution.y * 2.0943951));
     graded *= scan;
