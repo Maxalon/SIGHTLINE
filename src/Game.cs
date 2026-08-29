@@ -615,10 +615,48 @@ public partial class Game
     };
     public string TutorialText => (TutStep >= 0 && TutStep < TutPrompts.Length) ? TutPrompts[TutStep] : null;
 
+    // ── W5 THE FIRST HOUR: the briefing goes FIRST on mission 1 ───────────────────────────────
+    // The defect (audit newplayer-1, pinned by SIGHTLINE_BRIEFTEST): on a FIRST-EVER campaign run
+    // the mission-1 briefing could not draw at all. `BriefAllowed` requires TutorialText == null,
+    // the strip was non-null from the frame SetupMission armed it, and `UpdateBriefing` destroys
+    // the card outright the moment Stats.CombatLog fills — which the strip's own FIRE lesson does.
+    // So the card HELD for the whole strip (never burning its 11 s clock) and was then killed by
+    // the first exchange, or by BriefHoldMax at 45 s. Measured before the fix: 0.00 s of 11 s.
+    //
+    // The repair is ORDERING, not content (DESIGN.md §1.1 caps the narrative frame: this makes an
+    // EXISTING card reachable, it does not write more of it). The board is not yet contested on
+    // turn 1, so the briefing is a genuine PRE-FIGHT beat: arm the strip PENDING, let the card
+    // play, open the strip the frame it retires. Any key or click still dismisses the card, so a
+    // player who wants to move immediately reaches the lesson in one input.
+    bool _tutPending;
+    /// True while the mission-1 lesson strip is armed but yielding to the pre-fight briefing.
+    public bool TutPending => _tutPending;
+    /// Turn at which the FIRE lesson yields anyway. Its three siblings have had a patience
+    /// fallback for waves (CONCEAL 2, MOVE 3, OVERWATCH 6); FIRE was the one lesson whose only
+    /// exit was performing the verb, which is also the action that destroyed the briefing.
+    public const int TutFirePatience = 9;
+    /// Off-switch for the reordering (SIGHTLINE_BRIEFFIRST=0 restores the pre-W5 behaviour), so
+    /// BRIEFTEST is falsifiable without reverting the tree. Default ON.
+    static readonly bool BriefFirst = Environment.GetEnvironmentVariable("SIGHTLINE_BRIEFFIRST") != "0";
+
+    /// Harness seam (SIGHTLINE_FIRSTRUN=1, screenshot only). The NoPersist gate below is EXACTLY
+    /// what hid the W5 defect for ten programs: every SHOT/AUTOPLAY path sets NoPersist, so the
+    /// strip never armed and every mission-1 screenshot ever taken showed the briefing precisely
+    /// because the tutorial was not running. This override arms the strip under NoPersist so a
+    /// frame can show what a FIRST-EVER player actually sees. Disk stays untouched (CompleteTutorial
+    /// keeps its own !NoPersist gate), and it is inert unless the variable is set -> PAIRTEST-safe.
+    static readonly bool FirstRunShot = Environment.GetEnvironmentVariable("SIGHTLINE_FIRSTRUN") == "1";
+
     void StartTutorialMaybe()
     {
-        if (NoPersist || _run.Mission != 1 || Display.TutorialSeen) return;
-        TutStep = 0;
+        if (_run.Mission != 1) return;
+        if (NoPersist ? !FirstRunShot : Display.TutorialSeen) return;
+        // SetupMission calls this BEFORE BeginBriefing, so "will there be a card?" is not knowable
+        // here — arm PENDING and let UpdateTutorial open the strip on the first frame the card is
+        // gone. When no briefing composes (BriefLines stays null) that is the very next tick, so a
+        // non-campaign or briefing-less path is unchanged in everything but one frame of latency.
+        _tutPending = BriefFirst;
+        TutStep = BriefFirst ? -1 : 0;
         _tutMoved = _tutOver = _tutShot = _tutGrenade = _tutAbility = false;
         RevealedVerbs.Clear();
         ApplyReveal(TutReveal[0]);
@@ -628,6 +666,13 @@ public partial class Game
 
     void UpdateTutorial(float dt)
     {
+        if (_tutPending)
+        {
+            if (BriefLines != null) return;      // the pre-fight card still owns the slot
+            _tutPending = false;
+            TutStep = 0;
+            ApplyReveal(TutReveal[0]);
+        }
         if (TutStep < 0) return;
         switch (TutStep)
         {
@@ -643,7 +688,12 @@ public partial class Game
             // never arms a watch would otherwise park here below the reached-FIRE "seen" gate and
             // get the whole onboarding re-offered every future run.
             case TutStepOverwatch: if (_tutOver || _turnCount >= 6) AdvanceTutorial(); break;
-            case TutStepFire: if (_tutShot) AdvanceTutorial(); break;
+            // W5: the patience fallback the other three lessons already had. FIRE was the one step
+            // whose ONLY exit was performing the verb — and performing it wrote the combat-log
+            // entry that destroyed the briefing, so the action that ended the lesson was the same
+            // action that killed the card. A player who wins mission 1 on overwatch reactions
+            // alone (their soldier never takes an aimed shot) used to hold this card all mission.
+            case TutStepFire: if (_tutShot || (BriefFirst && _turnCount >= TutFirePatience)) AdvanceTutorial(); break;
             case TutStepDone: _tutDoneTimer -= dt; if (_tutDoneTimer <= 0) CompleteTutorial(); break;
         }
     }
@@ -662,6 +712,7 @@ public partial class Game
     public void ShowTutorialStep(int step)
     {
         TutStep = Math.Clamp(step, 0, TutPrompts.Length - 1);
+        _tutPending = false;   // W5: forcing a step IS opening the strip — drop the pre-fight arm
         if (TutStep == TutStepDone) _tutDoneTimer = 7f;
         RevealedVerbs.Clear();
         for (int i = 0; i <= TutStep && i < TutReveal.Length; i++) ApplyReveal(TutReveal[i]);
@@ -676,6 +727,7 @@ public partial class Game
     void CompleteTutorial()
     {
         TutStep = -1;
+        _tutPending = false;   // W5: a strip that never opened is still finished
         RevealedVerbs.Clear();      // staging ends with the lessons: the full bar is the graduation
         if (!NoPersist) Display.MarkTutorialSeen();
     }
@@ -833,8 +885,10 @@ public partial class Game
             if (Mode == GameMode.Training) return TrainStep >= 0 && TrainStep < TrainLessons.Length - 1;
             // Mission 1 only, and only while the callout strip is actually running. TutStepDone is
             // the wrap-up card ("that's the basics") — the bar is whole from there.
+            // W5: _tutPending counts. The strip is armed and about to open; without this the bar
+            // would draw WHOLE for the briefing's 11 s and then visibly collapse to one button.
             return Mode == GameMode.Campaign && _run != null && _run.Mission <= 1
-                   && TutStep >= 0 && TutStep < TutStepDone;
+                   && (_tutPending || (TutStep >= 0 && TutStep < TutStepDone));
         }
     }
 
@@ -1582,6 +1636,9 @@ public partial class Game
         // at the mode seam too means a future second IsBoss spawn point can't silently turn
         // "once per sighting ceremony" into a stale carry-over across mode entries.
         _bossSighted = false;
+        // W5: the mission-1 strip's PENDING arm is per-run state too — a new mode entry must never
+        // inherit an arm from a run that ended before the briefing retired.
+        _tutPending = false;
         // FUL-12: the end-card meta payoff is per-RUN — a new mode entry must not inherit the
         // previous run's SALVAGE slab / HEAT UNLOCKED line / achievement roll.
         EndSalvage = 0; EndHeatUnlocked = 0; EndAchievements.Clear();
@@ -2241,7 +2298,9 @@ public partial class Game
         // W11: mark "seen" only if the player actually reached the FIRE lesson — someone who never
         // got past MOVE hasn't been onboarded; let the tutorial re-offer next run. (FUL-12: the
         // named TutStepFire constant keeps this gate on the same SEMANTIC step across renumbers.)
-        if (TutStep >= TutStepFire) CompleteTutorial(); else TutStep = -1;
+        // W5: a strip still PENDING behind the briefing never opened, so it can never have
+        // reached FIRE — clear the arm and let the onboarding re-offer next run.
+        if (TutStep >= TutStepFire) CompleteTutorial(); else { TutStep = -1; _tutPending = false; }
         // W5 SCARS: capture the just-played mission's faction BEFORE EndMission clears it, so
         // DebriefSurvivors can brand a VENDETTA grudge on a survived near-death (the faction that
         // nearly killed them). None on a mixed-force mission -> no grudge stamped (inert).
@@ -2423,7 +2482,9 @@ public partial class Game
         // APEX W2: tutorial completion fallback (mirror of EnterBarracks) — a first-mission loss
         // still counts as "the onboarding ran"; don't re-show it forever. NoPersist-gated inside.
         // W11: same reached-the-FIRE-lesson gate as EnterBarracks — an early washout re-offers.
-        if (TutStep >= TutStepFire) CompleteTutorial(); else TutStep = -1;
+        // W5: a strip still PENDING behind the briefing never opened, so it can never have
+        // reached FIRE — clear the arm and let the onboarding re-offer next run.
+        if (TutStep >= TutStepFire) CompleteTutorial(); else { TutStep = -1; _tutPending = false; }
         Combat.EndRun();   // TEMPO wave 4: clear every mission-scoped combat static (+ run boons) on run end
         LoseTitle = title;
         LoseReason = reason;
@@ -4714,7 +4775,7 @@ public partial class Game
     void AbandonRun()
     {
         Paused = false;
-        if (TutStep >= 0) CompleteTutorial();   // mirrors LoseRun: the onboarding ran
+        if (TutStep >= 0 || _tutPending) CompleteTutorial();   // mirrors LoseRun: the onboarding ran
         if (Mode == GameMode.Training) { EndTraining(false); return; }   // T1: abandoning a drill is just leaving it
         if (Mode == GameMode.Skirmish) { EndSkirmish(false); return; }
         if (Mode == GameMode.Endless) { EndEndless(); return; }

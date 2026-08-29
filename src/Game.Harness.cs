@@ -4509,6 +4509,186 @@ public partial class Game
     public void DebugSetTurn(int t) => _turnCount = t;
     public void DebugCheckEnd() => CheckEnd();
 
+    // ─── W5 THE FIRST HOUR — the mission-1 briefing (SIGHTLINE_BRIEFTEST=1) ────────────────────
+    /// BRIEFTEST seam: tick EXACTLY the teaching/briefing chain `Game.Update` runs, in Update's
+    /// order (Game.cs, the four calls under the global-key block). No window, no input device, no
+    /// turn flow — this is the observation instrument the W5 audit finding had no way to build,
+    /// because every existing harness path sets NoPersist and NoPersist makes StartTutorialMaybe
+    /// return before the strip ever arms.
+    public void DebugTeachTick(float dt) { UpdateTutorial(dt); UpdateTraining(dt); UpdateFieldTips(dt); UpdateBriefing(dt); }
+
+    /// BRIEFTEST seam: the tutorial half of EndPlayerTurn (Game.cs) plus the turn bump, so the
+    /// test can drive a player who is ENDING TURNS without staging a whole enemy phase.
+    public void DebugEndTurnTutorial() { if (TutStep >= 0 && TutStep < TutStepDone) AdvanceTutorial(); _turnCount++; }
+
+    /// SIGHTLINE_BRIEFTEST — PROGRAM RESONANCE W5 "THE FIRST HOUR".
+    ///
+    /// THE DEFECT THIS TEST EXISTS TO PIN. On a FIRST-EVER campaign run, mission 1's briefing —
+    /// RESONANCE C1's entire narrative frame, the faction, the region, the reason the squad is on
+    /// this field — could not draw. `BriefAllowed` requires `TutorialText == null`; the mission-1
+    /// lesson strip is non-null from the moment `SetupMission` arms it; `UpdateBriefing` nulls the
+    /// card outright the instant `Stats.CombatLog` fills, and the log fills on the first shot by
+    /// either side. So the card spent the whole strip HOLDING (never burning its 11 s clock) and
+    /// was then destroyed by the first exchange — or by `BriefHoldMax` (45 s), whichever came
+    /// first. Mission 1 is the only mission a first-time player is guaranteed to see.
+    ///
+    /// The fix is an ORDERING one: on mission 1 the briefing is a PRE-FIGHT beat and goes FIRST —
+    /// `StartTutorialMaybe` arms the strip PENDING (`TutPending`), and `UpdateTutorial` opens it
+    /// the moment the card retires. Verb staging is live throughout, so the action bar does not
+    /// flicker between whole and staged. `TutStepFire` also gains the turn-count patience fallback
+    /// its three siblings already had.
+    ///
+    /// Every leg runs a LIVE (NoPersist == false) game — that is the whole point — so the real
+    /// display.json / save.json / meta.json are stashed and restored around the body.
+    public string BriefingSelfTest()
+    {
+        var fails = new List<string>();
+        const float Dt = 1f / 60f;
+
+        string dispPath = Display.SettingsPathPublic;
+        string sp = SaveGame.SavePathPublic, mp = SaveGame.MetaPathPublic;
+        bool hadDisp = false, hadSave = false, hadMeta = false;
+        string dispStash = null, saveStash = null, metaStash = null;
+        try
+        {
+            hadDisp = System.IO.File.Exists(dispPath); if (hadDisp) dispStash = System.IO.File.ReadAllText(dispPath);
+            hadSave = System.IO.File.Exists(sp); if (hadSave) saveStash = System.IO.File.ReadAllText(sp);
+            hadMeta = System.IO.File.Exists(mp); if (hadMeta) metaStash = System.IO.File.ReadAllText(mp);
+        }
+        catch { }
+        bool savedTut = Display.TutorialSeen, savedShow = Display.ShowAllVerbs;
+        int savedTips = Display.TipsSeen;
+
+        // Drive `secs` seconds of an IDLE, READING player and return how many of them the briefing
+        // card actually spent burning its own clock. Zero = the card was on screen for none of it.
+        float Watch(Game g, float secs)
+        {
+            float shown = 0f;
+            for (int i = 0; i < (int)(secs * 60); i++)
+            {
+                float before = g.BriefLines != null ? g.BriefTimer : -1f;
+                g.DebugTeachTick(Dt);
+                if (before >= 0f && g.BriefLines != null && g.BriefTimer < before) shown += before - g.BriefTimer;
+            }
+            return shown;
+        }
+
+        try
+        {
+            Display.TipsSeen = ~0;        // burn every just-in-time field tip: this test is about
+            Display.ShowAllVerbs = false; // the LESSON strip, and a tip would be a second variable
+
+            // ---- (A) THE FIRST-EVER RUN. The card must play, in full, before the strip opens ----
+            Display.TutorialSeen = false;
+            var g = new Game();                       // NoPersist deliberately FALSE — the live path
+            g.StartMission(1);
+            if (g.BriefLines == null) fails.Add("briefNotComposed");
+            if (g.BriefHead == null) fails.Add("briefHeadMissing");
+            if (Stats.CombatLog.Count != 0) fails.Add("logNotEmptyAtMissionStart");
+            // The strip is ARMED but DEFERRED, and the bar is staged the whole time (no flicker
+            // between a whole bar during the briefing and a staged one after it).
+            if (!g.TutPending) fails.Add("stripNotArmedPending");
+            if (g.TutorialText != null) fails.Add("stripOpenedOverTheBriefing");
+            if (!g.OnboardingActive) fails.Add("stagingOffDuringBriefing");
+            if (!g.VerbStagingActive) fails.Add("verbStagingOffDuringBriefing");
+
+            // 12 s of a player reading: the card is 11 s (BriefShowSeconds) and must burn nearly
+            // all of it. THIS IS THE HEADLINE ASSERTION and it measured 0.00 s before the fix.
+            float shown = Watch(g, 12f);
+            if (shown < BriefShowSeconds - 0.5f)
+                fails.Add($"briefShownOnlyFor{shown:0.00}sOf{BriefShowSeconds:0}s");
+            if (g.BriefLines != null) fails.Add("briefNeverRetired");
+            // ...and the strip opens the moment the card retires — the lesson is not lost, it is
+            // re-ordered. TutStepConceal holds while the squad is concealed on turn 1.
+            if (g.TutPending) fails.Add("stripStillPendingAfterBrief");
+            if (g.TutStep != TutStepConceal) fails.Add("stripDidNotOpenAfterBrief:" + g.TutStep);
+            if (g.TutorialText == null) fails.Add("stripTextNullAfterBrief");
+
+            // ---- (B) the strip still RUNS and still COMPLETES (the fix reorders, never removes) --
+            for (int t = 0; t < 6 && g.TutStep >= 0 && g.TutStep < TutStepDone; t++)
+            { g.DebugEndTurnTutorial(); g.DebugTeachTick(Dt); }
+            if (g.TutStep != TutStepDone) fails.Add("stripDidNotReachDone:" + g.TutStep);
+            for (int i = 0; i < 60 * 9; i++) g.DebugTeachTick(Dt);   // the 7 s wrap-up dwell
+            if (g.TutStep != -1) fails.Add("stripDidNotComplete:" + g.TutStep);
+            if (!Display.TutorialSeen) fails.Add("completionDidNotMarkSeen");
+
+            // ---- (C) TutStepFire's patience fallback (its three siblings have had one for waves) --
+            {
+                Display.TutorialSeen = false;
+                var pg = new Game();
+                pg.StartMission(1);
+                pg.ShowTutorialStep(TutStepFire);
+                pg.DebugSetTurn(TutFirePatience - 1);
+                pg.DebugTeachTick(Dt);
+                if (pg.TutStep != TutStepFire) fails.Add("fireStepYieldedEarly");   // not before its turn
+                pg.DebugSetTurn(TutFirePatience);
+                pg.DebugTeachTick(Dt);
+                if (pg.TutStep == TutStepFire) fails.Add("fireStepHasNoPatienceFallback");
+                // and the shot still ends it immediately, whatever the turn count
+                Display.TutorialSeen = false;
+                var sg = new Game();
+                sg.StartMission(1);
+                sg.ShowTutorialStep(TutStepFire);
+                sg.DebugSetTutFlag("shot");
+                sg.DebugTeachTick(Dt);
+                if (sg.TutStep == TutStepFire) fails.Add("fireStepIgnoredTheShot");
+            }
+
+            // ---- (D) THE CONTROL. A RETURNING player (TutorialSeen) has no strip, so the card has
+            //          always worked for them. If this leg ever failed, the test would be measuring
+            //          something other than the tutorial interaction.
+            {
+                Display.TutorialSeen = true;
+                var rg = new Game();
+                rg.StartMission(1);
+                if (rg.TutPending || rg.TutStep >= 0) fails.Add("stripArmedForReturningPlayer");
+                float rshown = Watch(rg, 12f);
+                if (rshown < BriefShowSeconds - 0.5f) fails.Add($"controlBriefShownOnlyFor{rshown:0.00}s");
+            }
+
+            // ---- (E) the combat log still retires the card — the pre-fight contract is intact ----
+            {
+                Display.TutorialSeen = true;
+                var lg = new Game();
+                lg.StartMission(1);
+                Stats.Log(1, (int)Team.Player, "BRIEFTEST synthetic exchange");
+                lg.DebugTeachTick(Dt);
+                if (lg.BriefLines != null) fails.Add("logDidNotRetireTheCard");
+                Stats.ClearLog();
+            }
+
+            // ---- (F) non-campaign modes still say nothing (the briefing is campaign vocabulary) --
+            {
+                var tg = new Game { NoPersist = true };
+                tg.BeginTraining();
+                if (tg.BriefLines != null) fails.Add("drillComposedABriefing");
+            }
+        }
+        catch (Exception ex) { fails.Add("threw:" + ex.GetType().Name + ":" + ex.Message); }
+        finally
+        {
+            Display.TutorialSeen = savedTut; Display.ShowAllVerbs = savedShow; Display.TipsSeen = savedTips;
+            Stats.ClearLog();
+            try
+            {
+                if (hadDisp) System.IO.File.WriteAllText(dispPath, dispStash);
+                else if (System.IO.File.Exists(dispPath)) System.IO.File.Delete(dispPath);
+                if (hadSave) System.IO.File.WriteAllText(sp, saveStash);
+                else if (System.IO.File.Exists(sp)) System.IO.File.Delete(sp);
+                if (hadMeta) System.IO.File.WriteAllText(mp, metaStash);
+                else if (System.IO.File.Exists(mp)) System.IO.File.Delete(mp);
+            }
+            catch { }
+        }
+
+        return fails.Count == 0
+            ? "BRIEFTEST: PASS (live first-ever mission 1: briefing plays its full "
+              + $"{BriefShowSeconds:0}s pre-fight, strip opens after it with staging unbroken, strip still "
+              + $"completes, FIRE lesson yields at turn {TutFirePatience}, returning-player control + "
+              + "combat-log retirement + drill silence)"
+            : "BRIEFTEST: FAIL (" + string.Join(",", fails.Distinct()) + ")";
+    }
+
     /// SIGHTLINE_ONRAMPTEST — PROGRAM RESONANCE W5 "ON-RAMP". Two features, one test:
     ///
     ///  (A) the RECRUIT rung (Heat.Min == -1) is a REAL, measurable difficulty below standard —

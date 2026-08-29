@@ -193,6 +193,19 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        // SIGHTLINE_BRIEFTEST=1 : W5 THE FIRST HOUR — drives a LIVE (non-NoPersist) first-ever
+        // campaign mission 1 and asserts the briefing card actually plays before the lesson strip
+        // opens. This is the ONE self-test that deliberately runs the persisting path (every other
+        // harness hook sets NoPersist, and NoPersist is exactly what hid this defect), so it
+        // stashes and restores display.json / save.json / meta.json around its body.
+        // SIGHTLINE_BRIEFFIRST=0 restores the pre-W5 ordering and turns this test red.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_BRIEFTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "brieftest");   // StartMission -> Unit.SyncPos uses tile math
+            Console.WriteLine(new Game().BriefingSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         if (Environment.GetEnvironmentVariable("SIGHTLINE_COMBATTEST") == "1")
         {
             Console.WriteLine(Combat.SelfTest());
