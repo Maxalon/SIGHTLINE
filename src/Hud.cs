@@ -107,6 +107,11 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     public static System.Collections.Generic.List<(Rectangle rect, Unit unit)> RosterChips = new();
     public static Rectangle PauseResume, PauseMute, PauseShake, PauseThreat, PauseFullscreen, PauseWindow, PauseAbandon;
     public static Rectangle PauseBright, PauseGamma, PauseColorblind, PauseAutoCam, PauseCodex;
+    // W5 THE DOORS (audit wildcard-3): the pause card had 18 controls and no way out of the game,
+    // and Raylib's exit key is deliberately Null (ESC cancels aim / opens pause), so ESC cannot
+    // close the window either. Until W5 the only sanctioned exits were ABANDON RUN — which destroys
+    // the run — or alt-F4.
+    public static Rectangle PauseQuit;
     public static Rectangle PauseAudio;   // A3: pause-menu entry to the AUDIO CHECK screen
     public static Rectangle PauseAnimSpeed, PauseUiScale;   // W5 ON-RAMP comfort controls
     /// RESONANCE A2 — the four mix faders (MASTER / SFX / MUSIC / UI), indexed to match
@@ -436,9 +441,10 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
 
         // bottom-align the two exits with the left column's last row, so the card reads as
         // two balanced columns rather than one long one next to a short one
-        by = top + leftRows * bh + (leftRows - 1) * gap - (bh + gap + bh);
+        by = top + leftRows * bh + (leftRows - 1) * gap - (bh + gap + bh + gap + bh);
         PauseCodex   = new Rectangle(cx2, by, bw, bh); by += bh + gap;
-        PauseAbandon = new Rectangle(cx2, by, bw, bh);
+        PauseAbandon = new Rectangle(cx2, by, bw, bh); by += bh + gap;
+        PauseQuit    = new Rectangle(cx2, by, bw, bh);
         DrawButtonRect(PauseCodex, "FIELD MANUAL", "K", true, false, Pal.Good);
         // W1 mode-seam: the abandon verb is mode-true — a stand/fight is not a campaign "run".
         string abandonLbl = g.Mode == GameMode.Endless ? "END STAND"
@@ -446,6 +452,19 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
                           : g.Mode == GameMode.Training ? "END DRILL"          // T1: nothing to abandon
                           : "ABANDON RUN";
         DrawButtonRect(PauseAbandon, abandonLbl, "", true, false, Pal.Foe);
+        // W5 THE DOORS: QUIT TO DESKTOP, with an ARMED confirm rather than a modal — one more
+        // click, and the honest sentence about what it costs. It is NOT red: quitting is a normal
+        // thing a person needs to do, and the reserved danger colour belongs to ABANDON, which is
+        // the destructive verb of the two.
+        DrawButtonRect(PauseQuit, g.QuitArmed ? "QUIT - CLICK AGAIN" : "QUIT TO DESKTOP", "Q",
+                       true, g.QuitArmed, g.QuitArmed ? Pal.Foe : Pal.Accent);
+        if (g.QuitArmed)
+        {
+            const string warn = "the current mission restarts from its start";
+            float ww = Cfg.Measure(warn, 12, 1f).X;
+            Cfg.Text(warn, new Vector2((int)(PauseQuit.X + PauseQuit.Width / 2 - ww / 2), (int)(PauseQuit.Y + PauseQuit.Height + 5)),
+                     12, 1f, Pal.Accent);
+        }
 
         string ctl = "Wheel zoom  -  Middle-drag pan  -  [C] reset camera  -  Arrows/WASD + [Space]";
         Cfg.Text(ctl, new Vector2(x + w / 2 - (int)Cfg.Measure(ctl, 12, 1f).X / 2, y + h - 24), 12, 1f, Pal.TxtDim);
@@ -2381,8 +2400,12 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         // bench rather than a mode, so it takes the same neutral outline and sits last.
         float acIn = PanelAnim("introAudio", 0.3f, 0.80f);
         int acBy = smBy + 48;
-        OverlayBtn9 = new Rectangle(W / 2 - miniW / 2, acBy, miniW, 40);
+        OverlayBtn9 = new Rectangle(W / 2 - miniW - miniGap / 2, acBy, miniW, 40);
         DrawGhostButton(OverlayBtn9, "AUDIO CHECK", "U", acIn);
+        // W5 THE DOORS: the front door swings both ways. Same neutral outline as the utility grid —
+        // leaving is not a mode, and it is certainly not a danger.
+        IntroQuitBtn = new Rectangle(W / 2 + miniGap / 2, acBy, miniW, 40);
+        DrawGhostButton(IntroQuitBtn, "QUIT", "Q", acIn);
 
         // ---- shared caption slot (between LAST STAND and the grid) ----
         // Hovering ANY mode button explains it here; at rest it carries LAST STAND's best-wave
@@ -2407,6 +2430,8 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         { caption = "TRAINING OP - a short live-fire drill; nothing is saved, restart it any time"; capCol = Pal.Good; }
         else if (Raylib.CheckCollisionPointRec(introMouse, OverlayBtn9))
         { caption = "AUDIO CHECK - hear every cue, sweep the music, move the mix; measured numbers beside each"; capCol = Pal.Accent; }
+        else if (Raylib.CheckCollisionPointRec(introMouse, IntroQuitBtn))
+        { caption = "QUIT - close the game; a campaign in progress resumes from its last mission start"; capCol = Pal.TxtDim; }
         else
         {
             caption = bestWave > 0 ? $"LAST STAND BEST: {bestWave} WAVE{(bestWave == 1 ? "" : "S")}" : "ENDLESS HORDE SURVIVAL";
@@ -2752,6 +2777,22 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
             Cfg.Text(stats[i].label, new Vector2(slab.X + slab.Width / 2 - lz.X / 2, slab.Y + 64), 12, 1f, Raylib.Fade(Pal.TxtDim, a));
         }
 
+        // W5 THE DOORS (audit newplayer-2): the salvage slab showed a number with no meaning and
+        // no route. One quiet line under the row says what it is FOR; the WAR ROOM button below is
+        // the way there. The loss card is the highest-leverage retention moment in the product —
+        // the player has just lost their first squad and is deciding whether there is a second run.
+        if (g.EndSalvage > 0)
+        {
+            const string spend = "spend it in the WAR ROOM";
+            float sw = Cfg.Measure(spend, 12, 1f).X;
+            // centred under the SALVAGE slab (the last one in the row), not under the whole card:
+            // the line explains that number, and a caption under the row would read as a footnote
+            // on MISSIONS CLEARED.
+            float salvCx = sx0 + (n - 1) * (slabW + gap) + slabW / 2f;
+            Cfg.Text(spend, new Vector2((int)(salvCx - sw / 2f), sy + 88), 12, 1f,
+                     Raylib.Fade(Pal.Accent, 0.85f * Util.EaseOutQuad(statsIn)));
+        }
+
         // ---- two-column dossier: SURVIVING SQUAD (+ MVP) | KIA MEMORIAL ------------------
         int dy = sy + 100;
         int colGap = 28;
@@ -2804,13 +2845,15 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         string newRun = !g.NoPersist && SaveGame.Exists ? "NEW RUN (overwrites save)" : "NEW RUN";
         int bgap = 22;
         int bw1 = Math.Max(200, (int)Cfg.Measure(newRun, 18, 1f).X + 36);
-        int bw2 = 200;
-        OverlayBtn  = new Rectangle(W / 2 - (bw1 + bgap + bw2) / 2, by, bw1, 46);
+        int bw2 = 200, bw3 = 172;
+        OverlayBtn  = new Rectangle(W / 2 - (bw1 + bgap + bw2 + bgap + bw3) / 2, by, bw1, 46);
         OverlayBtn2 = new Rectangle(OverlayBtn.X + bw1 + bgap, by, bw2, 46);
+        EndWarRoomBtn = new Rectangle(OverlayBtn2.X + bw2 + bgap, by, bw3, 46);
         // W12 hierarchy: the forward verb keeps the filled Pal.Friend primary plate (matching the
         // intro's CONTINUE/DEPLOY); MAIN MENU drops to the neutral-outline ghost.
         DrawOverlayButton(OverlayBtn, newRun, Pal.Friend, null, btnIn);
         DrawGhostButton(OverlayBtn2, "MAIN MENU", "Esc", btnIn);
+        DrawGhostButton(EndWarRoomBtn, "WAR ROOM", "W", btnIn);
     }
 
     // ============================================================================
@@ -3394,9 +3437,19 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         Raylib.DrawRectangleRounded(panel, 0.06f, 8, Raylib.Fade(Pal.Panel, 0.90f * anim));
         Raylib.DrawRectangleLinesEx(panel, 1.2f, Raylib.Fade(Pal.Good, 0.40f * anim));
         Cfg.Text("SURVIVING SQUAD", new Vector2(x + 14, y + 12), 15, 1f, Raylib.Fade(Pal.Good, anim));
+        // W5 THE DOORS: say what surviving is FOR. The reserve is the run-to-run half of pillar 3
+        // and the end card never named it. The count is Game.EndReserve — the measured delta of
+        // SaveGame.VeteranCount() across the award — so it can never claim more than landed.
+        int hdrDrop = 0;
+        if (g != null && g.EndReserve > 0)
+        {
+            string res = $"{g.EndReserve} JOIN THE RESERVE - recallable at the next draft";
+            Cfg.Text(res, new Vector2(x + 14, y + 31), 12, 1f, Raylib.Fade(Pal.Good, 0.80f * anim));
+            hdrDrop = 20;
+        }
 
         var squad = run?.Squad;
-        int rowY = y + 40;
+        int rowY = y + 40 + hdrDrop;
         int shown = 0;
         if (squad != null)
         {
@@ -3423,6 +3476,15 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
                 string ks = $"{u.Kills} K";
                 float kw = Cfg.Measure(ks, 14, 1f).X;
                 Cfg.Text(ks, new Vector2(x + w - 14 - kw, rowY + 4), 14, 1f, Raylib.Fade(Pal.Friend, a));
+                // W5: what it costs to call them back. Only for soldiers who actually enshrined
+                // (Rank >= 1 is the reserve gate) and only when some of them did — a MERCENARY
+                // CLAUSE run banks no reserve, so quoting a price there would be a lie.
+                if (g != null && g.EndReserve > 0 && u.Rank >= 1)
+                {
+                    string rc = $"recall {MetaProg.RecallCost(u.Rank)}";
+                    float rw = Cfg.Measure(rc, 11, 1f).X;
+                    Cfg.Text(rc, new Vector2(x + w - 14 - rw, rowY + 20), 11, 1f, Raylib.Fade(Pal.TxtDim, 0.9f * a));
+                }
                 rowY += 34;
                 shown++;
             }
@@ -5096,6 +5158,14 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     public static Rectangle OverlayBtn7;   // intro DAILY (seeded challenge) button (PROGRAM HORIZON W4)
     public static Rectangle OverlayBtn8;   // intro TRAINING OP (scripted drill) button (RESONANCE T1)
     public static Rectangle OverlayBtn9;   // intro AUDIO CHECK (cue/mix audition) button (RESONANCE A3)
+    // W5 THE DOORS: the end card's THIRD button — WAR ROOM. It gets its own rect rather than
+    // reusing OverlayBtn3 (the intro's LAST STAND): the two screens publish into the same statics,
+    // and a stale end-card rect surviving one frame into the intro would turn a click on the door
+    // the player just used into an accidental LAST STAND. Zeroed by Game when the card is left.
+    public static Rectangle EndWarRoomBtn;
+    /// W5 THE DOORS: the main menu's QUIT TO DESKTOP plate. Key [Q] — verified free against both
+    /// registries and `grep KeyboardKey.Q` before binding.
+    public static Rectangle IntroQuitBtn;
 
     // SKIRMISH setup (W4): objective cycler + heat dial + START/BACK, published by DrawSkirmishSetup.
     public static Rectangle SkirmObjPrev, SkirmObjNext, SkirmHeatMinus, SkirmHeatPlus, SkirmStart, SkirmBack;
@@ -5151,8 +5221,18 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         HeatPlus = new Rectangle(x + w - 52, y + 50, 34, 34);
         DrawStepper(HeatMinus, "-", level > Sightline.Heat.Min);
         DrawStepper(HeatPlus, "+", level < unlocked);
-
         Cfg.Text($"MAX UNLOCKED: {unlocked}", new Vector2(x + 18, y + 92), 12, 1f, heatTxt2);
+        // W5 THE ON-RAMP (audit newplayer-4): NAME the rung the minus stepper leads to. RECRUIT
+        // was always selectable and always unlabelled, so nothing at level 0 hinted that anything
+        // existed below it — the on-ramp was reachable only by pressing an unmarked button. It
+        // rides the MAX UNLOCKED line (right-aligned) rather than under the stepper, where it
+        // would have collided with that line's ascenders.
+        if (level == 0)
+        {
+            const string below = "< RECRUIT";
+            float bw2 = Cfg.Measure(below, 12, 1f).X;
+            Cfg.Text(below, new Vector2(x + w - 18 - bw2, y + 92), 12, 1f, Raylib.Fade(Pal.Good, 0.9f));
+        }
         // W11 HONEST LOSSES: the adaptive assist (repeated losses ease hostile stats at heat 0)
         // was invisible — surface it as a FIELD SUPPORT chip so the player knows help is active
         // and that a win (or dialling heat up) stands it down. Review fix: the chip REPLACES the
@@ -5171,8 +5251,12 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         }
         else
         {
+            // W5: on a profile that has never finished a run, level 0's copy no longer frames
+            // itself as the floor. "the designed fight" is true and stays true for a returning
+            // player; for a first-timer it was actively steering them past the on-ramp.
             string hint = level > 0 ? $"+{Sightline.Heat.IntelBonus(level)} intel / mission"
                         : recruit ? "same campaign, wider margin"
+                        : g.FirstTimeProfile ? "standard difficulty - [<] for a gentler first run"
                         : "standard difficulty - the designed fight";
             Cfg.Text(hint, new Vector2(x + 18, y + 110), 12, 1f, level > 0 ? Pal.Good : heatTxt2);
         }

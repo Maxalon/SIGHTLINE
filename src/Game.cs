@@ -1641,7 +1641,7 @@ public partial class Game
         _tutPending = false;
         // FUL-12: the end-card meta payoff is per-RUN — a new mode entry must not inherit the
         // previous run's SALVAGE slab / HEAT UNLOCKED line / achievement roll.
-        EndSalvage = 0; EndHeatUnlocked = 0; EndAchievements.Clear();
+        EndSalvage = 0; EndReserve = 0; EndHeatUnlocked = 0; EndAchievements.Clear();
         // Harness affordance (screenshot only, mirrors the SIGHTLINE_HEAT pattern): pre-seed the
         // cause-of-death tally, e.g. SIGHTLINE_DEATHS=SNIPER:2,GRUNT:1 — so the lose-card line can
         // be framed without playing a full losing run. Inert when unset -> plain shots byte-stable.
@@ -1768,12 +1768,33 @@ public partial class Game
     /// exists). The intro heat panel shows it as a FIELD SUPPORT chip — the easing was invisible.
     /// 0 headless (streak never loads under NoPersist), so plain intro shots stay byte-stable.
     public int AssistPreview => PendingHeat > 0 ? 0 : Math.Min(Run.AssistMax, _metaLossStreak);
+
+    // ── W5 THE ON-RAMP (audit newplayer-4) ────────────────────────────────────────────────────
+    /// True when this profile has never finished a run. The intro uses it twice: it DEFAULTS the
+    /// difficulty dial to RECRUIT, and it changes level 0's hint so the rung below is named
+    /// instead of hidden behind an unlabelled "-".
+    ///
+    /// The game already built a proper beginner rung and then defaulted every first-time player
+    /// off it, with copy ("standard difficulty - the designed fight") that framed 0 as the floor.
+    /// The archived X2 ladder (n=40/rung, base a61ef42, docs/measurements/x2/) puts RECRUIT at
+    /// 75.0% run completion against heat 0's 57.5% — a 17.5-point gap, outside the +-6-8 error
+    /// bar. Roughly two in five first campaigns were ending in a loss the on-ramp exists to
+    /// prevent. This moves a DEFAULT, not a rung: every heat number in docs/ is untouched, and
+    /// the measurement harness sets heat explicitly (SIGHTLINE_HEAT / SIGHTLINE_BALANCE_HEAT)
+    /// under NoPersist, which returns from EnsureMetaLoaded before this can be read.
+    public bool FirstTimeProfile;
+
     void EnsureMetaLoaded()
     {
         if (_metaLoaded) return;
         _metaLoaded = true;
         if (NoPersist)
         {
+            // W5: SIGHTLINE_FIRSTRUN=1 (the same flag that arms the mission-1 strip under the
+            // harness) also simulates a NEVER-PLAYED profile here, so the intro's on-ramp default
+            // can be photographed headless. An explicit SIGHTLINE_HEAT below still overrides it.
+            // Inert unless the variable is set -> plain shots and PAIRTEST stay byte-stable.
+            if (FirstRunShot) { FirstTimeProfile = true; PendingHeat = Sightline.Heat.Recruit; }
             // Harness/screenshot affordance only: SIGHTLINE_HEAT lets the headless intro shot
             // preview the dialled-in level + its unlocked ceiling. No disk I/O; default 0 keeps
             // a plain shot byte-stable.
@@ -1792,6 +1813,13 @@ public partial class Game
             return;
         }
         UnlockedHeat = SaveGame.LoadMetaHeat();
+        var (metaRuns, _, _) = SaveGame.LoadRunTotals();
+        FirstTimeProfile = metaRuns == 0;
+        // W5 THE ON-RAMP: a profile that has never finished a run opens on RECRUIT. One-shot —
+        // EnsureMetaLoaded runs once per process (_metaLoaded), so every later stepper press is
+        // the player's and sticks. The Min() below still applies, and clamps to -1 at UnlockedHeat
+        // 0, so this can never dial a rung the player has not earned.
+        if (FirstTimeProfile) PendingHeat = Sightline.Heat.Recruit;
         PendingHeat = Math.Min(PendingHeat, UnlockedHeat);
         _metaLossStreak = SaveGame.LoadMetaLossStreak();
     }
@@ -2452,6 +2480,24 @@ public partial class Game
         }
     }
 
+    // ── W5 THE DOORS (audit wildcard-3) ───────────────────────────────────────────────────────
+    /// Set when the player has confirmed QUIT TO DESKTOP; Program's frame loop breaks on it.
+    /// The quit path is deliberately INERT with respect to persistence: it writes nothing, deletes
+    /// nothing, and touches neither save.json nor meta.json. The campaign checkpoint is written at
+    /// MISSION START (SetupMission), so quitting mid-mission resumes that mission from its start —
+    /// which is exactly what the confirm text says out loud. SIGHTLINE_QUITTEST pins all of it.
+    public bool QuitRequested;
+    /// One-click-arms, two-clicks-quits. Disarmed by any other pause interaction and by closing the
+    /// pause card, so a stray click can never take the window down mid-fight.
+    public bool QuitArmed;
+
+    /// The QUIT verb. Arms on the first press, quits on the second.
+    public void RequestQuit()
+    {
+        if (!QuitArmed) { QuitArmed = true; Audio.Play("select"); return; }
+        QuitRequested = true;
+    }
+
     // run-over screen text (set by LoseRun so the cause reads accurately)
     public string LoseTitle = "RUN OVER";
     public string LoseReason = "";
@@ -2461,6 +2507,12 @@ public partial class Game
     // UnlockHeatOnWin / TryAchievement / AwardMetaEndless), so every harness end card stays
     // byte-stable (fields sit at defaults there); reset per mode entry in ResetModeState.
     public int EndSalvage;                                  // salvage banked at run end (0 = no slab)
+    // W5 THE DOORS: how many survivors NEWLY joined the persistent reserve at run end. Measured as
+    // the DELTA of SaveGame.VeteranCount() across EnshrineVeterans — never as vets.Count — so the
+    // end card structurally cannot over-claim: a survivor who was already a reserve record does not
+    // "join" twice, and the MERCENARY CLAUSE run (which enshrines nobody) reads 0 without a special
+    // case. SIGHTLINE_METATEST pins that identity.
+    public int EndReserve;
     public int EndHeatUnlocked;                             // freshly-opened heat rung (0 = no line)
     public readonly List<string> EndAchievements = new();   // display names of NEW unlocks this run-end
 
@@ -2559,7 +2611,12 @@ public partial class Game
         // (promoted-at-least-once) gate keeps green rookies out so the reserve stays a roster of legends.
         var vets = _run.Squad.Where(u => u.Alive && !u.IsVip && u.Rank >= 1).ToList();
         // FUL-10 MRC: cheap recalls now, no pipeline later — this run's survivors never enshrine.
+        // W5: measure the reserve DELTA around the enshrine (before LGD's RemoveVeterans below can
+        // touch it) so the end card's "N JOIN THE RESERVE" line is the count that actually landed
+        // on disk — a name already in the reserve updates its record and does not re-join.
+        int vetsBefore = SaveGame.VeteranCount();
         if (vets.Count > 0 && _run.Contract != Contract.MercenaryClause) SaveGame.EnshrineVeterans(vets);
+        EndReserve = Math.Max(0, SaveGame.VeteranCount() - vetsBefore);
         // FUL-10 LGD: a KIA whose name matches a reserve record ERASES it — veterans are mortal
         // across runs, not just priced. Name-keyed exactly like EnshrineVeterans' dedupe.
         if (_run.Contract == Contract.LivingLegends && _run.Fallen.Count > 0)
@@ -3661,7 +3718,7 @@ public partial class Game
             if (Raylib.IsKeyPressed(KeyboardKey.Escape))
             {
                 if (AimMode || GrenadeMode || ItemMode || ShoveMode || MarkMode || GrappleMode || PinMode || DragMode || VaultMode) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false; DragMode = false; VaultMode = false; }
-                else Paused = !Paused;
+                else { Paused = !Paused; QuitArmed = false; }   // W5: closing the card disarms QUIT
             }
             if (Paused) { HandlePauseMenu(); return; }
             HandleCamera();
@@ -4731,6 +4788,9 @@ public partial class Game
     void HandlePauseMenu()
     {
         var m = Raylib.GetMousePosition();
+        // W5 THE DOORS: [Q] is the pause card's quit shortcut (arms, then quits — same two-step as
+        // the button). Q was verified unbound in every context before being claimed.
+        if (Raylib.IsKeyPressed(KeyboardKey.Q)) { RequestQuit(); return; }
         // A2 mix faders: a drag in progress owns the mouse until it is released, and only THEN
         // does the setting hit disk (Display.SetVol is live, CommitVol writes display.json).
         if (_volDrag >= 0)
@@ -4748,6 +4808,8 @@ public partial class Game
                 Display.SetVol(i, VolFrac(Hud.PauseVol[i], m.X));
                 return;
             }
+        if (Raylib.CheckCollisionPointRec(m, Hud.PauseQuit)) { RequestQuit(); return; }
+        QuitArmed = false;   // any other pause control disarms the confirm
         if (Raylib.CheckCollisionPointRec(m, Hud.PauseResume)) Paused = false;
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseFullscreen)) Display.ToggleFullscreen();
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseWindow)) Display.CycleSize();
@@ -4775,6 +4837,7 @@ public partial class Game
     void AbandonRun()
     {
         Paused = false;
+        QuitArmed = false;
         if (TutStep >= 0 || _tutPending) CompleteTutorial();   // mirrors LoseRun: the onboarding ran
         if (Mode == GameMode.Training) { EndTraining(false); return; }   // T1: abandoning a drill is just leaving it
         if (Mode == GameMode.Skirmish) { EndSkirmish(false); return; }
@@ -7480,6 +7543,13 @@ public partial class Game
                           Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.OverlayBtn9))
                          || Raylib.IsKeyPressed(KeyboardKey.U);
             if (audio) { BeginAudition(); return; }
+
+            // W5 THE DOORS: QUIT from the main menu. No confirm here — nothing is in flight on the
+            // title screen, and a campaign in progress is already on disk at its last mission start.
+            bool quit = (Raylib.IsMouseButtonPressed(MouseButton.Left) &&
+                         Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.IntroQuitBtn))
+                        || Raylib.IsKeyPressed(KeyboardKey.Q);
+            if (quit) { QuitRequested = true; return; }
         }
 
         // W1 mode-seam: end-card MAIN MENU (OverlayBtn2, button or Esc) — back to the intro without
@@ -7488,6 +7558,18 @@ public partial class Game
         // daily-forced arena) into whatever is picked next.
         if (Phase == Phase.Win || Phase == Phase.Lose)
         {
+            // W5 THE DOORS (audit newplayer-2): the end card banks salvage and never named the
+            // room that spends it. WAR ROOM [W] is the third plate; BACK from there lands on the
+            // main menu, which is where MAIN MENU would have gone anyway.
+            bool war = (Raylib.IsMouseButtonPressed(MouseButton.Left) &&
+                        Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.EndWarRoomBtn))
+                       || Raylib.IsKeyPressed(KeyboardKey.W);
+            if (war)
+            {
+                Hud.EndWarRoomBtn = new Rectangle(0, 0, 0, 0);   // no stale rect into the next screen
+                BeginWarRoom();
+                return;
+            }
             bool menu = (Raylib.IsMouseButtonPressed(MouseButton.Left) &&
                          Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.OverlayBtn2))
                         || Raylib.IsKeyPressed(KeyboardKey.Escape);
@@ -7500,6 +7582,7 @@ public partial class Game
                 // same OverlayBtn2, so a stale end-card rect could otherwise turn a second click
                 // at this position into an accidental CONTINUE before the next Draw republishes it.
                 Hud.OverlayBtn2 = new Rectangle(0, 0, 0, 0);
+                Hud.EndWarRoomBtn = new Rectangle(0, 0, 0, 0);
                 Phase = Phase.Intro;
                 Audio.Play("select");
                 return;

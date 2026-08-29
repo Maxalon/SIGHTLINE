@@ -1088,6 +1088,9 @@ public partial class Game
         // NoPersist), so the SALVAGE slab / HEAT UNLOCKED line / achievement roll can be framed.
         // Fixed values -> the SUMMARY shot stays byte-stable; a lose card shows the consolation only.
         EndSalvage = lose ? 18 : 79;
+        // W5: the reserve line + per-survivor recall prices. Derived from the staged squad rather
+        // than hard-coded, so the header count and the priced rows can never disagree on the card.
+        EndReserve = squad.Count(u => u != null && !u.IsVip && u.Rank >= 1);
         EndHeatUnlocked = lose ? 0 : 4;
         EndAchievements.Clear();
         if (!lose) { EndAchievements.Add("TURNING UP"); EndAchievements.Add("THE LONG WAR"); }   // HEAT3 + DEEP: both true of this staged run (3 KIA -> never FLAWLESS)

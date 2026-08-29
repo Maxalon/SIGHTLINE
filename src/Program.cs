@@ -802,6 +802,10 @@ public static class Program
             else
                 Display.RenderFrame(game.DrawBoardLayer, game.DrawHudLayer);
 
+            // W5 THE DOORS: the player asked to leave. Nothing to flush — the quit path writes
+            // nothing (the campaign checkpoint was written at mission start), so break straight
+            // into the normal shutdown below.
+            if (game.QuitRequested) break;
             if (shot || autoplay) frame++;
             // W5: dump the filmed unit's tweened board position every frame, so "positions advance
             // monotonically, no backwards step" is a MEASURED claim rather than an eyeball on PNGs.
