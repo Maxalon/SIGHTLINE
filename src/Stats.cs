@@ -934,6 +934,16 @@ public static class Stats
         Justification = "Anonymous-type telemetry; app assembly is rooted via TrimmerRootAssembly and JSON reflection is re-enabled for trimmed publishes. Dev-harness only (SIGHTLINE_BALANCE).")]
     public static void WriteJson(string path)
     {
+        // W1 TRUE INSTRUMENT: a batch that recorded NOTHING must not leave a file behind that
+        // looks like an answer. The pre-W1 behaviour was to serialise the empty aggregate —
+        // runs=0, every rate 0.0, every table [] — over whatever was at `path`, so a chunk that
+        // silently ran on no display destroyed the previous chunk's data and reported a full
+        // set of zeroes. Refuse, name it, and leave the existing file's bytes AND mtime alone.
+        if (Runs.Count == 0)
+        {
+            Console.WriteLine($"stats JSON export REFUSED ({path}): runs=0 — nothing was measured, existing file left untouched");
+            return;
+        }
         try
         {
             string dir = Path.GetDirectoryName(path);

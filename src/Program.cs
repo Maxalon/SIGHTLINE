@@ -848,12 +848,46 @@ public static class Program
     //   SIGHTLINE_BALANCE_DUMB=1    use the dumb smoke-test autopilot (single policy, baseline)
     //   SIGHTLINE_BALANCE_SLOPPY=1  run ONLY the sloppy policy (else greedy+sloppy paired)
     //   SIGHTLINE_BALANCE_JSON=<p>  override the JSON artifact path (else <tmp>/balance.json)
+    //   SIGHTLINE_BALANCE_DRAW=1    W1: restore the pre-W1 per-frame GL clear (see BatchPump).
+    //                               Provably inert on the numbers; it only costs wall-clock.
     //
     // APEX W4 — `endless: true` (SIGHTLINE_BALANCE_ENDLESS=<N>) points the same machinery at
     // LAST STAND: each "campaign" slot becomes one endless stand via BeginEndless, and depth
     // (waves survived) is logged from game.Wave at EVERY exit — wipe, wave-cap, frame-cap,
     // abort — NEVER from RunState.Mission (endless keeps Mission==1, so the old campaign
     // fallback would log every capped deep stand as depth 0 and corrupt the p90).
+    // ── W1 TRUE INSTRUMENT: the headless batch frame pump ───────────────────────────────
+    // Every headless batch loop (balance / pairtest / stacktest) used to call
+    // `Display.RenderFrame(() => Raylib.ClearBackground(Pal.Bg))` once per SIMULATED frame.
+    // Nothing in that call draws game content — its only job was to make raylib pump the
+    // window's event queue so `WindowShouldClose()` stays honest — but it still cost a full
+    // llvmpipe clear + buffer swap per frame, and a 20 000-frame campaign pays it 20 000
+    // times for a picture nobody looks at. `PollInputEvents()` IS that pump on its own
+    // (raylib's `EndDrawing()` is `SwapScreenBuffer() + PollInputEvents()`), so the close
+    // semantics are preserved exactly and the swap is dropped.
+    // SIGHTLINE_BALANCE_DRAW=1 restores the old path verbatim for an A/B.
+    static readonly bool BatchDraw = Environment.GetEnvironmentVariable("SIGHTLINE_BALANCE_DRAW") == "1";
+    static void BatchPump()
+    {
+        if (BatchDraw) Display.RenderFrame(() => Raylib.ClearBackground(Pal.Bg));
+        else Raylib.PollInputEvents();
+    }
+
+    // W1: a headless batch with NO DISPLAY was indistinguishable from a completed one.
+    // InitWindow fails, `WindowShouldClose()` returns true before frame one, every match loop
+    // falls straight through, and the process STILL printed a full-looking report, still wrote
+    // an aggregate JSON (with runs=0 in it), still claimed N matches — and then exited 139 out
+    // of the GL teardown, which is easy to read as "finished, then crashed on the way out".
+    // X2 had to bolt an external `runs`-field assertion onto every chunk script because of it.
+    // Refuse at the door instead: name the cause, write nothing, exit non-zero.
+    static void RequireWindow(string what)
+    {
+        if (Raylib.IsWindowReady()) return;
+        Console.Error.WriteLine($"{what}: no display - run under xvfb-run. No data written.");
+        Console.Error.Flush();
+        Environment.Exit(2);
+    }
+
     static void BalanceBatch(int runs, bool endless = false)
     {
         // Cumulative telemetry across the whole batch (NOT reset per match).
@@ -897,6 +931,7 @@ public static class Program
         // One window for the whole batch (the autoplay smoke path uses Display.RenderFrame).
         Raylib.SetConfigFlags(ConfigFlags.Msaa4xHint);
         Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "SIGHTLINE — balance batch");
+        RequireWindow("BALANCE");   // W1: no display => refuse, write nothing, exit 2
         Raylib.SetExitKey(KeyboardKey.Null);
         Cfg.Font = Raylib.GetFontDefault();   // no draw of game content in autoplay; default font is enough
         Display.Init(false);                  // headless render-frame path (no post-FX / no save)
@@ -953,7 +988,7 @@ public static class Program
             while (!Raylib.WindowShouldClose())
             {
                 game.Update(1f / 60f);
-                Display.RenderFrame(() => Raylib.ClearBackground(Pal.Bg));   // minimal draw
+                BatchPump();   // W1: event pump only (SIGHTLINE_BALANCE_DRAW=1 restores the GL clear)
                 frame++;
                 if (endless)
                 {
@@ -1050,6 +1085,7 @@ public static class Program
 
         Raylib.SetConfigFlags(ConfigFlags.Msaa4xHint);
         Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "SIGHTLINE — pair test");
+        RequireWindow("PAIRTEST");  // W1: a display-less PAIRTEST proves nothing; do not pretend
         Raylib.SetExitKey(KeyboardKey.Null);
         Cfg.Font = Raylib.GetFontDefault();
         Display.Init(false);
@@ -1069,7 +1105,7 @@ public static class Program
             while (!Raylib.WindowShouldClose())
             {
                 game.Update(1f / 60f);
-                Display.RenderFrame(() => Raylib.ClearBackground(Pal.Bg));
+                BatchPump();
                 if (game.Phase == Phase.Win || game.Phase == Phase.Lose || ++frame >= frameCap) break;
             }
             // natural exits already finalised the run record; the frame-cap close is defensive.
@@ -1167,6 +1203,7 @@ public static class Program
 
         Raylib.SetConfigFlags(ConfigFlags.Msaa4xHint);
         Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "SIGHTLINE — stack test");
+        RequireWindow("STACKTEST"); // W1: ditto — zero sampled frames is not a clean sweep
         Raylib.SetExitKey(KeyboardKey.Null);
         Cfg.Font = Raylib.GetFontDefault();
         Display.Init(false);
@@ -1204,7 +1241,7 @@ public static class Program
             while (!Raylib.WindowShouldClose())
             {
                 game.Update(1f / 60f);
-                Display.RenderFrame(() => Raylib.ClearBackground(Pal.Bg));
+                BatchPump();
 
                 // ---- (b) per-frame shared-tile sweep ----
                 seenThisFrame.Clear();
