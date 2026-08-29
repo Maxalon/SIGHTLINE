@@ -493,7 +493,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         // magnifier and TEXT SIZE is "labels bigger RELATIVE to the board". A player who hits the
         // 120% cap should not conclude the game cannot go bigger.
         string ctl2 = Display.UiScaleIdx == Display.UiScaleLevels.Length - 1
-            ? "TEXT SIZE tops out at " + Display.UiScaleLabel + " - for a bigger PICTURE use WINDOW / FULLSCREEN: the whole frame scales."
+            ? "TEXT SIZE caps at " + Display.UiScaleLabel + " - for a bigger PICTURE use WINDOW / FULLSCREEN."
             : "Keyboard: [Up]/[Down] pick a row, [Left]/[Right] adjust, [Enter] activate.";
         Cfg.Text(ctl2, new Vector2(x + w / 2 - (int)Cfg.Measure(ctl2, 12, 1f).X / 2, y + h - 22), 12, 1f,
                  Display.UiScaleIdx == Display.UiScaleLevels.Length - 1 ? Pal.Accent : Pal.TxtDim);

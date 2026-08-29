@@ -5412,3 +5412,250 @@ unmoved: win-rate 50→50, missions 83→83, policy gap 20→20, paired gap 20�
 only micro-jitter in decision richness (meaningful choices/turn 2.757→2.737, lead swings/match
 0.60→0.63, avg max swing 51.13→50.70). FIX 1 changes procedural ENVELOP geometry in ~1-4% of
 builds, which is the size of that jitter.
+
+---
+
+# PROGRAM RESONANCE — Wave W6 "REACH" (dev; worktree `wt-w6`)
+
+**Goal.** Part A: finish the key rebinding W5 and R2 both traded away on scope. Part B: survey
+the accessibility tail — the text-scale ceiling, the colorblind palette against the board V3
+rebuilt, and anything else load-bearing for a player who cannot rely on colour, fine motor
+precision, or reading small type.
+
+## PART A — the key map
+
+### Why a table, and not thirty-five tidier `IsKeyPressed` calls
+
+The R1 review found `F` bound to BOTH fullscreen (a global, read every phase) and FOCUS
+overwatch (a player-turn verb). `IsKeyPressed` is true for both reads on the same frame, so one
+press spent a soldier's action AND toggled the window — for the entire life of the project.
+Nothing could catch it, because **nothing knew the two reads existed**. R1 fixed the instance
+(fullscreen moved to `F11`) and wrote an audited keymap into a comment in `Game.Update`. A
+comment is not a guard; the CLAUDE.md free-key list beside it had already rotted (it still
+listed `N P U V` as free long after they were bound).
+
+`src/Keymap.cs` makes the class of bug structural instead of vigilant. One table, 62 rows (33
+rebindable, 29 reserved), each declaring the **scope** it is live in. Every read in `Game.cs`,
+`HandlePlayerInput`, `HandleCamera` and `HandlePauseMenu` goes through `Keymap.Pressed(id)`, and
+`Keymap.SelfCheck()` fails the moment two rows in overlapping scopes claim the same key.
+
+**Proof the check is not vacuous:** setting `Fullscreen`'s default back to `KeyboardKey.F`
+reproduces the historical bug and `SIGHTLINE_KEYTEST` fails with
+
+```
+KEYTEST: FAIL
+  shipped defaults double-bind: F = FULLSCREEN AND FOCUS (CONE)
+```
+
+### The three requirements, and how each is met
+
+**1. A rebind can never strand the player.** `Escape` is a `Fixed` row. It is not in the
+assignable set (`Keymap.IsAssignable` refuses it by name), `Set` refuses it as a target for every
+other row, `Decode` refuses to move it however hostile the string, and while a key capture is
+armed it CANCELS the capture rather than being captured. So `Esc → pause menu → CONTROLS →
+RESET DEFAULTS` exists from any map a player or a hand-edited settings file can produce. The
+self-test asserts this four ways, including a "worst legal remap" that moves all 33 rebindable
+rows onto exotic keys, round-trips them through the real encode/decode, and checks Escape and
+the reset both still work. The four ARROW keys are reserved too, as an always-available board
+cursor alternate — whatever the player does to WASD, the board stays drivable.
+
+**2. Conflicts are surfaced, never silent.** `Set` refuses and names the holder AND its context:
+*"F is already FOCUS (CONE) - IN MISSION"*. `Decode` re-validates a whole loaded map through the
+same check, and **unbinds the overridden rows before it re-applies them**, which is what lets an
+honest swap (HUNKER→H, HACK→3) survive a reload instead of each half looking like a conflict
+against the other's default. Anything that still does not fit is dropped, the row goes back to
+its default, and the count surfaces on the CONTROLS screen as "your saved controls file had N
+binding(s) that no longer fit". Nine hostile strings are in the self-test, including an explicit
+double-bind, an unparseable key, a bare modifier, an id from a newer build and a 4 KB garbage
+blob; every one must leave the map conflict-free with Escape intact.
+
+**3. Contexts are real, so the conflicts are true.** Three scopes — `MENUS`, `IN MISSION`,
+`PAUSE MENU` — and two rows only conflict when their masks intersect, which is exactly the
+condition under which both reads run on the same frame. `K` is FIELD MANUAL on the pause overlay
+and nothing at all during the player turn; flattening those would manufacture a conflict that
+does not exist. The menu-screen letters R1 identified as safely reusable (`C L W K S Y N U O A
+D`, the arrows, `Kp±`, Enter, Backspace) are in the table as reserved MENU-scope rows, so a
+SYSTEM row (which is live everywhere) that landed on one IS caught — `MUTE → L` is refused.
+
+### What else the table fixed on the way past
+
+The pause overlay's FIELD MANUAL and AUDIO CHECK buttons have carried key tags `K` and `U` since
+the day they shipped, and `HandlePauseMenu` was **mouse-only** — the tags were decoration. They
+are now rows at `ScopePause` and the keys work. Every key hint in the game (the action bar, END
+TURN, the pause card's five tagged buttons, the bottom-of-screen hint, the pause controls hint)
+now reads `Keymap.Label(id)` instead of a typed literal, so a rebind is reflected everywhere and
+a hint cannot drift from what the key does.
+
+### The CONTROLS screen
+
+`Phase.Controls` (appended; Phase is not persisted), reached from the pause menu **and from the
+intro** — a player who cannot use the shipped layout must be able to fix it before deploying,
+and the pause menu does not exist on the title screen. Two measured columns with a `(CONT.)`
+continuation header, a panel sized to its content and scrolled only if it overflows, a caption
+slot that carries the hovered row's note / the capture prompt / the refusal, `RESET DEFAULTS`
+(enabled only when something has moved), and `BACK`. Every metric comes from `Cfg.Measure`, so
+all four shipped text scales fit.
+
+### Persistence
+
+A plain `id=KeyName;...` string of **overrides only**, carried in `display.json`
+(`Display.Dto.Keys`). Keys are stored by their Raylib enum NAME, not an ordinal: no new enum,
+nothing for the APPEND-ONLY fingerprint guard in `SaveGame` to care about, and a line a human can
+read and repair in a text editor. Writing only the overrides means a future change to a shipped
+default reaches every player who never touched that row.
+
+### MEASURED EVIDENCE (`docs/measurements/w6/`)
+
+Driven live under a real Xvfb display with `xdotool` — not the screenshot harness.
+
+**The method note R1 paid two runs for, and this wave paid a third for:** `xdotool key X` presses
+AND releases inside one frame, so `IsKeyPressed` (which diffs this frame against the last) never
+observes it. **The same is true of `xdotool click 1` against `IsMouseButtonPressed`** — the first
+UI-driven rebind attempt failed silently for exactly that reason, with the row hovering correctly
+and the click never landing. Every press and click in the archived scripts is
+`down / sleep 0.35s / up`.
+
+`SIGHTLINE_KEYLOG=1` makes `Keymap.Pressed` print `KEYACT <id> <KEY>` when a bound action fires.
+
+| run | presses (in order) | log |
+|---|---|---|
+| baseline, shipped defaults | `1`, `q`, `2` | `KEYACT shoot One` / `KEYACT overwatch Two` |
+| `SIGHTLINE_KEYBIND="shoot=Q;hunker=I"` | `1`, `q`, `3`, `i` | `KEYACT shoot Q` / `KEYACT hunker I` |
+| rebound through the UI, then a FRESH process | `1`, `q`, `2` | `KEYACT shoot Q` / `KEYACT overwatch Two` |
+
+The new keys fire and **the old keys produce nothing** — `1` and `3` are dead, which is the half
+of the claim a naive test misses. The third row is the full chain: intro → `[O]` CONTROLS → click
+the FIRE row → hold `Q`; `display.json` then reads `"Keys":"shoot=Q"`; a fresh process with no
+environment override honours it.
+
+## PART B — the accessibility tail
+
+### Text scale above 120%: NOT taken, and here is exactly what blocks it
+
+Screenshots at a temporarily-extended `UiScaleLevels` (130 / 140 / 150%):
+
+- The **strategic** screens survive 130% — REQUISITION and WAR ROOM lose nothing but the two
+  ellipsis W5 already put on the watch list (the shop's longest effect line, the longest
+  achievement description).
+- The **in-mission HUD** does not. At **130%** the roster chip's rank word ("ROOKIE", 12px at
+  `x+58`) overprints the class glyph at `x+118`: the chip is a fixed **132x58** box with five
+  hand-tuned row offsets, and W5 grew only its HEIGHT. At **150%** `Hud.EndTurnRect` (a fixed
+  150x30) overflows its own border and the top bar's right-to-left zone packing collides with it.
+
+**Recommendation: do not chase 130%+ in the text scale.** Growing the chip's WIDTH is the one
+required fix and it eats board columns that FUL-3 and W11's occlusion work deliberately fought
+for; re-flowing the top bar's three-zone packing is a day in the most-tuned chrome in the game,
+for a setting that is the wrong tool anyway. **The real low-vision magnifier already ships and is
+unadvertised:** `Display` renders the fixed 1280x800 frame to a letterboxed render-target scaled
+to the window, and the WINDOW cycle goes to 3200x2000 (2.5x linear) with fullscreen on top of
+that — every glyph in the game gets bigger, with zero layout risk, because nothing re-flows.
+TEXT SIZE is the *different* control: labels bigger **relative to the board**. Landed instead: at
+the top TEXT SIZE step the pause card now says so, so a player who hits the 120% cap does not
+conclude the game cannot go bigger.
+
+### Colorblind: the toggle had a regression nobody had measured
+
+V3's note ("MAGMA in colorblind is improved, not solved; the floor hue is fundamentally warm, so
+value carries the foe now; fixing it at the root means moving MAGMA's floor hue") pointed at the
+biome. **The measurement says the biome is not the problem.** On a seed- and map-pinned paired
+capture of MAGMA with woken foes, the foe-vs-floor luminance separation under a Viénot-1999
+deuteranope simulation is **86.1 (normal palette) vs 86.2 (colorblind palette)** — identical, and
+already large. Moving MAGMA's floor hue would cost the biome the identity HORIZON W6 built for it
+and buy nothing measurable for the foe read.
+
+Simulating the whole semantic palette instead (`docs/measurements/w6/cvd-palette.py`) found the
+actual defect, and it is palette-level, not biome-level: **the colorblind swap had moved the
+hostile hue INTO the amber band the objective accent already occupies.** For a deuteranope,
+
+```
+Foe/Accent   50.5  (normal palette)  ->  39.8  (COLORBLIND palette)
+```
+
+— turning the accessibility option ON made a hostile and an objective marker *harder* to tell
+apart. Two more pairs sat under the same threshold: deut `Foe/Elite` 39.4, trit `Foe/Accent`
+34.4. On MAGMA it merely *felt* worst because the floor is in the same band, which is why the
+symptom got attributed to the biome.
+
+`Pal.FoeCb` moves `(238,138,40) → (255,120,0)`, chosen by a search constrained to stay clearly
+hostile, keep a luminance that pops off all eight biome floors, and maximise the WORST pair. It
+is strictly dominant — every pair against Friend / Good / Accent / Suspect / VipGold / Elite
+improves in **every** simulation:
+
+| | none | deut | prot | trit |
+|---|---|---|---|---|
+| Foe/Accent | 54.7 → 79.7 | **39.8 → 55.6** | 44.2 → 60.3 | **34.4 → 73.4** |
+| Foe/Elite | 52.8 → 92.2 | **39.4 → 69.7** | 41.1 → 74.1 | 43.1 → 82.4 |
+| Foe/Friend | 281 → 325 | 218 → 248 | 204 → 235 | 258 → 300 |
+
+Worst UI pair across all four simulations **34.4 → 55.6**; worst separation from the darkest
+biome floors **114.6 → 137.3**. Still Okabe-Ito vermillion, so "hostile" looks the same — it is
+simply further from amber. Colorblind is off by default and `Display.Init(false)` never Loads, so
+no screenshot, self-test or balance run can observe the constant.
+
+**Left open, with the numbers:** `Accent/Suspect` (19.7 deut) and `Accent/VipGold` (26.5 deut)
+collide in BOTH palettes and at every simulation including normal vision. Both are backed by
+non-colour channels — the awareness tier carries a `?`/`!` glyph, the VIP a distinct silhouette —
+so neither is colour-only, and moving Accent would touch every highlight in the game. Recorded
+rather than taken.
+
+### Fine motor: the pause card stops being mouse-only
+
+Every comfort setting in the game lives on the pause card — text size, brightness, gamma,
+colorblind, screen shake, animation speed, the four mix faders — and all of them were reachable
+**only** by landing a mouse on a 320x42 plate or dragging a 304px fader track. A player who needs
+the text at 120% or the brightness up is by definition a player who may not manage that.
+
+`Up`/`Down` pick a row, `Left`/`Right` adjust (5% steps on the faders, one cycle step on
+everything else), `Enter` activates — off the SAME ordered row list (`Hud.PauseRows`) that now
+drives the mouse hit-test, through the SAME activation switch (`Game.ActivatePauseRow`), so a row
+cannot be clickable and keyboard-unreachable. Those five keys are reserved at `ScopePause` in
+`Keymap`, so no rebind can shadow the only non-mouse route to the comfort settings. The selection
+draws as a ring **plus a caret** so it reads by shape, not only hue. (The caret's first version
+drew nothing: raylib culls a clockwise triangle in y-down space — the CLAUDE.md warning about
+`DrawTriangle` winding is real.)
+
+**Measured**, keyboard only, no mouse at all
+(`docs/measurements/w6/evid-pause-keyboard.sh`): intro → `[N]` → `[Esc]` → `[Down]`x11 →
+`[Enter]` → `[Down]`x2 → `[Left]`x2 leaves `display.json` at `UiScaleIdx = 2` (TEXT SIZE 100% →
+110%) and `VolMaster = 0.5` (0.60 → 0.50). That run also exercises the strand guarantee end to
+end: `[Esc]` is what opened the card.
+
+## VERIFICATION
+
+- `dotnet build -c Release` — **0 warnings / 0 errors**.
+- `bash scripts/qa-sweep.sh --full` — **all 50 PASS** (48 run + PAIRTEST), **COVERAGE GAP block
+  empty**. `KEYTEST` is wired into the sweep.
+- `SIGHTLINE_PAIRTEST=1` PASS.
+- Autoplay x5: LOSE m2 / WIN m6 / LOSE m5 / LOSE m3 / WIN m6 — no exceptions, no TIMEOUT.
+- `SIGHTLINE_BALANCE=10` (Release binary, under `xvfb-run`), **base = the integration tip
+  `d350416`, W6 = this branch, same slots**: both `runs=20`, and the two `balance.json` files are
+  **byte-identical** (`md5 4869560991b103975c78cf8e8e82e1a9`). The console logs differ only in the
+  working directory and wall-clock seconds; every one of the 20 match outcomes matches. That is
+  the proof an input-layer change was expected to produce.
+- Screenshots read and judged: the CONTROLS list, a capture armed, a refusal on screen, a remapped
+  map, and the pause card — across **90 / 100 / 110 / 120%** and **both palettes**. Nothing clips
+  at any of them. (One thing did, and was fixed: the max-scale hint line overhung the card at
+  120% until it was shortened.)
+
+## NEW / CHANGED HARNESS HOOKS
+
+- `SIGHTLINE_KEYTEST=1` — the key-map contract (in `qa-sweep.sh`; the sweep is now **50** tests).
+- `SIGHTLINE_CONTROLS=1|capture|conflict|remap` (shot) — the CONTROLS screen in each state.
+- `SIGHTLINE_KEYBIND="id=Key;..."` — apply overrides through the real `Keymap.Set` at startup
+  (prints OK / REFUSED per clause). Works in a LIVE run, which is what the xdotool evidence needs.
+- `SIGHTLINE_KEYLOG=1` — print `KEYACT <id> <KEY>` whenever a bound action fires.
+- `SIGHTLINE_PAUSESEL=<row>` (shot) — park the pause card's keyboard cursor on a row. Held every
+  frame, because the card hands control back to the mouse on any pointer movement and the Xvfb
+  pointer twitches.
+
+## LEFT UNDONE / WATCH LIST
+
+- **Text scale above 120%** — see Part B; sized, not taken, with the specific blockers named.
+- **`Accent/Suspect` and `Accent/VipGold`** collide under every simulation in both palettes; both
+  are glyph-backed, so not colour-only. Moving `Accent` touches every highlight in the game.
+- **The rest of the game is still mouse-only for content choices** — the draft, the campaign-map
+  node pick, buying in REQUISITION, and the WAR ROOM are all click-only. W6 fixed the surface
+  where the *accessibility settings themselves* live, which was the one that gates the others; the
+  same `PauseRows` + `Activate...` pattern would extend to them cheaply, one screen at a time.
+- The CONTROLS screen rebinds **single keys only** — no chords, and no gamepad. Neither was asked
+  for and both are real features, not extensions of this one.
