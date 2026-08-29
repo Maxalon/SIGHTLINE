@@ -160,7 +160,18 @@ for `SIGHTLINE_` for the authoritative set.
 | one self-test via `xvfb-run dotnet run -c Debug` | 1–2 s |
 | `SIGHTLINE_PAIRTEST=1` | 38 s |
 | `SIGHTLINE_AUTOPLAY=1` (Debug) | ~22 s |
-| `SIGHTLINE_BALANCE=10` (Release binary, **under xvfb**) | 311 s (~31 s/slot) |
+| `SIGHTLINE_BALANCE=10` (Release binary, **under xvfb**) | **~5 s** (was 311-509 s before W1) |
+
+> **W1: the batch stopped rendering and the numbers did not move.** The headless loops used to
+> run a full llvmpipe frame per SIMULATED frame purely to pump the window event queue; they now
+> call `Raylib.PollInputEvents()`. **The controlled speed-up is 17-33x, median ~23x** — same
+> binary, same seed, identical frame counts, only the GL work removed
+> (`docs/measurements/w1/autoplay_ab.txt`, four measured pairs; the spread is container load on a
+> shared four-core box, not the change). The batch table above shows a larger ratio, but those
+> rows ran on different binaries at unrecorded load — quote the controlled range, not that.
+> Inertness is proven by a balance JSON **identical on every key once the `harness{}` block is
+> excluded** — that block records nproc/loadavg/elapsed and is designed to vary, which is why
+> `inert_diff.sh` strips it. `SIGHTLINE_BALANCE_DRAW=1` restores the old path.
 
 **Free keys** (nothing is bound to them — check here before adding a shortcut):
 **`I J N O P Q U V Z`**. Bound today: `A B C D E F G H K L M R S T W X Y`, `1`–`9`, the
@@ -181,10 +192,20 @@ scattered through `docs/DEVLOG.md`; grep `Program.cs` for `SIGHTLINE_` for the
 authoritative set.
 
 **The `SIGHTLINE_BALANCE` measurement contract (X2 — do not shortcut any of it):**
-1. `SIGHTLINE_BALANCE=<N>` **requires `xvfb-run`.** Without a display it prints `runs=0 /
-   (no data)`, still claims N matches and exits 139 — a silent zero-data batch that looks
-   completed. **Assert the JSON's own `runs` field in every chunk** (see
-   `docs/measurements/x2/run_chunk.sh`, which does it and prints OK/BAD).
+1. `SIGHTLINE_BALANCE=<N>` **requires `xvfb-run`.** Since W1 a display-less batch REFUSES —
+   it prints `BALANCE: no display - run under xvfb-run. No data written.` on stderr, writes
+   nothing, and **exits 2**. Before W1 it printed `runs=0 / (no data)`, still claimed N matches,
+   still overwrote the previous chunk's file with zeroes, and exited 139.
+   **THE ASSERTION CHANGED WITH IT — read this before copying an old chunk script.** The refusal
+   deliberately leaves the previous chunk's file byte- and mtime-identical, so a bare
+   `json.load(out)['runs'] == 2N` check now reads the PREVIOUS chunk's `runs` and prints OK for a
+   batch that measured nothing. Pre-W1 that same check worked *because* the file got clobbered
+   with `runs=0`. So a chunk script MUST do both, in this order:
+   **(a) `rm -f` the target JSON before launching** — this is now mandatory, not tidiness; it is
+   what makes a missing file mean "no data". **(b) check the process EXIT CODE** — 2 means "no
+   display, nothing written", and it is the only signal that cannot be faked by a stale file.
+   The `runs`-field assertion stays as a third line of defence (it still catches a short batch).
+   `docs/measurements/w1/run_chunk.sh` does all three.
 2. Run the **Release binary directly**, and from a *snapshot* (`runbin/<tag>/`, gitignored) so
    the tree can keep building while a round is in flight.
 3. Two disjoint CRN slot sets (`SIGHTLINE_BALANCE_BASE` 0 / 10) x greedy+sloppy = 40 campaigns
@@ -274,6 +295,14 @@ docs/screenshot.png    README image
   reorder, removal, rename **or mid-enum insertion** fails loudly. **To add a member:**
   append it at the END, run SAVETEST, paste the "actual" hash it prints into
   `PersistedEnums`. Anything other than an append is a save-format break.
+- **The MAP GENERATOR is the save format's other half** (W1). A save stores the campaign map as
+  ONE int — `MapSeed` — and regenerates the whole DAG from it on load, so `Run.GenerateMap`'s
+  DRAW ORDER is as load-bearing as any ordinal: one stray `rng.Next()` re-deals every existing
+  save's node kinds, factions and edges and re-points `MapPos` at another mission. SAVETEST pins
+  three seeds through `SaveGame.MapFingerprint` / `PersistedGenerators`; a `mapShape:` line means
+  the generator moved. A deliberate map change ⇒ paste the printed hashes in **and re-measure**.
+  `HEATLADDERTEST` pins the difficulty axis the same way: the cumulative
+  `(EnemyDelta, StatDelta, DmgDelta, AiTier)` vector for all ten heat levels.
 
 ---
 
@@ -314,6 +343,15 @@ docs/screenshot.png    README image
   gate anything on a screenshot hash — **`SIGHTLINE_PAIRTEST` byte-identity is the real
   determinism gate**. Keep new persistent/random/post-FX work behind the `NoPersist`/
   Display gates so that stays true.
+- **PRESENTATION MUST NEVER DRAW FROM `Util.Rng`** (W1). `Fx.cs` used to roll the screen-shake
+  jitter once per RENDERED FRAME on the shared gameplay stream, so the dice were a function of
+  the frame rate, the animation-speed setting and the `Fx.ShakeOn` comfort toggle — one seed,
+  four different fights. Everything in `Fx.cs` (and `Anim.cs`'s miss-scatter) now draws from
+  **`Util.FxRng`**, a separate stream `Util.Reseed` deliberately does not touch. Use
+  `Util.FxRandF/FxRandInt/FxRandRange` for anything visual; the shared `Util.Rand*` is gameplay
+  only. **`SIGHTLINE_RNGFRAMETEST` is the gate** (four seeds x {1x,8x} x {shake on,off} must all
+  agree); `SIGHTLINE_FXRNG=0` reproduces the old coupling on demand. PAIRTEST alone could never
+  have caught this — it pins dt AND AnimSpeed, so both its legs draw the same number of frames.
 
 ---
 
@@ -345,6 +383,20 @@ funnel, so a trade takes roughly two hits instead of one. Its raw chunk logs liv
 `docs/measurements/x1/`.
 
 > **NUMBERS AND THEIR BASE COMMIT — read before quoting any balance figure.**
+>
+> > ### ⚠ EVERY LADDER BELOW WAS MEASURED ON A GAMEPLAY RNG STREAM THAT NO LONGER EXISTS.
+> > Wave **W1 TRUE INSTRUMENT** severed presentation from the shared `Util.Rng` stream (screen-shake
+> > jitter was rolled once per RENDERED FRAME; `Unit()`'s idle-bob phase was rolled on first draw).
+> > That deliberately **INVALIDATES every archived CRN world in this repository**: the same slot seed
+> > now plays a different world. Measured over the exact 10 slots X2 archived as `S1-h0-b0`, the tree
+> > reproduced **10/10** slots up to W1's break and **3/10** after it.
+> >
+> > So the table below, and every archive under `docs/measurements/` dated before W1
+> > (`x1/`, `x2/`, `w4/`, `l1/`), are **INCOMPARABLE with anything measured on the current tree**.
+> > They remain valid as history — L1 in particular is the only n≥80 picture of the pre-repair tree
+> > that will ever exist — but a number from them may not be **compared** with, or **rescaled** to, a
+> > number from today's tree. **Re-measure. Do not rescale.** See `docs/DEVLOG.md` §W1.
+>
 >
 > **THE LADDER OF RECORD (wave X2 "TRUE NORTH II", base commit `a61ef42` + X2's own repair,
 > n=40 campaigns per rung, `runs=20` asserted in all 12 chunks, raw data in

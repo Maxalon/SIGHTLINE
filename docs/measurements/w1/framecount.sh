@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
-# W1: measure the AUTOPLAY frame budget. autoCap (Program.cs) has been a round 20000 since it was
-# written; nothing in the repo says where that number came from or whether a campaign has ever
-# come close to it. Runs N fresh autoplays, prints every RESULT line with its frame count, then
-# the p50/p90/p99/max — the numbers autoCap should actually be derived from.
+# W1: measure the AUTOPLAY frame budget. The cap in Program.cs had been a round 20000 since it was
+# written; nothing in the repo said where that number came from or whether a campaign has ever come
+# close to it. Runs N fresh autoplays and prints every RESULT line with its frame count, then the
+# distribution.
+# READ THE p99 WITH SUSPICION AT SMALL N: at the default n=30 the "p99" is just an interpolation
+# between the two largest observations, so the shipped constant is `autoMax` — the observed MAXIMUM
+# — and not a quantile. Raise N well above 100 before quoting a p99 as a p99.
 #   Usage: framecount.sh [N]   Env: BIN=<dir>
 set -u
 cd "$(dirname "$0")/../../.." || exit 1

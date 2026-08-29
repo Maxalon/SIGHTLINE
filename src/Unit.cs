@@ -634,8 +634,7 @@ public class Unit
         // subtler way: Renderer holds `static readonly Unit _codexGlyphStub = new Unit()`, whose
         // initializer fires lazily on the first DrawBoard. So a process that RENDERS took one
         // gameplay draw that a process that does not render never took, and after W1/1 and W1/4
-        // the flywheel, PAIRTEST, autoplay and RNGFRAMETEST render nothing at all. Same binary,
-        // same pinned seed: no-draw gave WIN m=6 f=6008 and forced-draw LOSE m=4 f=3962. A fixed
+        // the flywheel, PAIRTEST, autoplay and RNGFRAMETEST render nothing at all. A fixed
         // one-draw offset between the instrument and the shipped game is exactly the class of
         // defect this wave exists to delete. Guarded now by RNGFRAMETEST's RENDER-PURITY phase.
         Bob = Util.FxRandF() * MathF.PI * 2f;

@@ -1,0 +1,22 @@
+=== (a) PRE-FIX behaviour: SIGHTLINE_FXRNG=0 (Fx draws from the gameplay stream) ===
+RNGFRAMETEST: seed99  1x/shake WIN m=5 t=28 f=9713 shk=200 | 8x/shake LOSE m=3 t=23 f=3287 shk=216 | 1x/noshake WIN m=5 t=30 f=15091 shk=0 | 8x/noshake WIN m=5 t=30 f=4393 shk=0  -> MISMATCH
+RNGFRAMETEST: seed777  1x/shake LOSE m=2 t=12 f=4473 shk=83 | 8x/shake LOSE m=4 t=22 f=3189 shk=215 | 1x/noshake LOSE m=4 t=22 f=10966 shk=0 | 8x/noshake LOSE m=4 t=22 f=3035 shk=0  -> MISMATCH
+RNGFRAMETEST: seed4242  1x/shake LOSE m=2 t=10 f=5490 shk=101 | 8x/shake WIN m=4 t=14 f=2142 shk=118 | 1x/noshake LOSE m=2 t=20 f=10777 shk=0 | 8x/noshake LOSE m=2 t=20 f=3186 shk=0  -> MISMATCH
+RNGFRAMETEST: seed31337  1x/shake WIN m=4 t=16 f=7356 shk=183 | 8x/shake LOSE m=3 t=18 f=2718 shk=227 | 1x/noshake WIN m=4 t=16 f=7180 shk=0 | 8x/noshake WIN m=4 t=16 f=1944 shk=0  -> MISMATCH
+RNGFRAMETEST: render-purity  newUnit=DREW  draw30Frames=DREW  probeSensitive=yes  -> FAIL
+RNGFRAMETEST: FAIL
+
+=== (b) POST-FIX behaviour: default (Fx draws from Util.FxRng) ===
+RNGFRAMETEST: seed99  1x/shake LOSE m=3 t=25 f=14241 shk=264 | 8x/shake LOSE m=3 t=25 f=4081 shk=264 | 1x/noshake LOSE m=3 t=25 f=14241 shk=0 | 8x/noshake LOSE m=3 t=25 f=4081 shk=0  -> MATCH
+RNGFRAMETEST: seed777  1x/shake LOSE m=5 t=75 f=12956 shk=257 | 8x/shake LOSE m=5 t=75 f=5220 shk=257 | 1x/noshake LOSE m=5 t=75 f=12956 shk=0 | 8x/noshake LOSE m=5 t=75 f=5220 shk=0  -> MATCH
+RNGFRAMETEST: seed4242  1x/shake LOSE m=6 t=24 f=11548 shk=171 | 8x/shake LOSE m=6 t=24 f=3232 shk=171 | 1x/noshake LOSE m=6 t=24 f=11548 shk=0 | 8x/noshake LOSE m=6 t=24 f=3232 shk=0  -> MATCH
+RNGFRAMETEST: seed31337  1x/shake LOSE m=5 t=38 f=12321 shk=163 | 8x/shake LOSE m=5 t=38 f=3761 shk=163 | 1x/noshake LOSE m=5 t=38 f=12321 shk=0 | 8x/noshake LOSE m=5 t=38 f=3761 shk=0  -> MATCH
+RNGFRAMETEST: render-purity  newUnit=clean  draw30Frames=clean  probeSensitive=yes  -> PASS
+RNGFRAMETEST: PASS
+
+=== raw reproduction: one seed, two animation speeds, PRE-FIX (SIGHTLINE_FXRNG=0) ===
+  ANIMSPEED=1  RESULT: WIN mission=6
+  ANIMSPEED=20  RESULT: LOSE mission=3
+=== raw reproduction: the same pair POST-FIX (default) ===
+  ANIMSPEED=1  RESULT: WIN mission=6
+  ANIMSPEED=20  RESULT: WIN mission=6

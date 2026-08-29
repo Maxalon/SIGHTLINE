@@ -257,8 +257,9 @@ public static class Stats
     // shots, both 40 value" from "two shots, 40 and 39". This histogram is the same population
     // measured as a CONTINUOUS distribution, which can: a mass piled at decile 9 means the shot
     // picks itself and no threshold could ever have found a decision there.
-    // Batch-global (the arena-funnel precedent). ZERO RNG draws: it reads values the caller
-    // already computed for its own count and adds a sort of a <=6-element list.
+    // Batch-global (the arena-funnel precedent). ZERO RNG draws, zero allocation: it reads values
+    // the caller already computed for its own count, and the runner-up costs one extra linear
+    // scan of that same short list.
     static readonly int[] _shotGapDeciles = new int[10];
     static int _shotGapArmedTurns;
     static double _shotGapSum;

@@ -1351,6 +1351,43 @@ sets, one lever per measured round, fresh same-slot R0 first, dip budgets, breac
       (DEVLOG §W4). The two honest routes: a terrain-grammar pass that adds equally-good
       destinations at constant threat (more LOW cover, which also does not block sightlines),
       or re-specifying axis (b) with an additive rather than multiplicative band.
+      **W1 UPDATE — re-argue this against `shotGap` first.** The new decile histogram measures
+      the same population continuously instead of through a 12% threshold, and it comes back
+      strongly BIMODAL (POOLED n=2412 armed soldier-turns over three h0 chunks: 28.4% in decile 0,
+      35.2% in decile 9, a thin middle; each chunk shows the same shape). W4's ~1.6 may be the
+      mean of a bimodal population — the statistic least informative about one. DEVLOG §W1.
+
+### RESONANCE W1 "TRUE INSTRUMENT" — opened by the instrument, not yet spent
+
+- [ ] **The route the flywheel walks is not a fair sample of the campaign map.** `ROUTETEST`:
+      over 400 maps / 678 real (k≥2) branch choices the shipped `first` policy takes branch 0
+      **81.4%** of the time where a fair deal takes it 45.1%, playing **48% more "?" beats and
+      15% fewer ELITE fights**. `SIGHTLINE_ROUTE=hash` is built, proven draw-free and
+      near-uniform, and **shipped OFF** — switching it is a balance decision and a second
+      archive invalidation. One flag, one paired round.
+- [ ] **What ELITE nodes actually cost is UNMEASURED — do not read the W1 chunks as an answer.**
+      `byNodeKind` pooled over W1's three instrumented chunks: Elite 79.3% (n=29) vs Combat 89.2%
+      (n=74), but the three Elite cells range over 35 points (57.1 / 80.0 / 91.7 at n=7/10/12) and
+      the chunks straddle the W1/3 CRN break, so they are not strictly poolable. n=29 carries
+      ~±7.5 points. A first draft of the W1 write-up quoted the last chunk alone and concluded
+      "ELITE measures identical to Combat"; that was cherry-picked and is withdrawn. The open
+      question stands — ELITE pays an intel premium AND a bonus perk, so it should read HARDER —
+      but it needs a real n on one side of the break.
+- [ ] **`runWinRateExStalemate` fired on its first archive and needs a rung sweep.** `R0diag-h0-b0`
+      (h0, n=20) reads runWinRate 65.0 vs exStalemate **68.4** — one STALEMATE in twenty, i.e. a
+      3.4-point correction at the EASIEST rung, where a stalled autopilot should be rarest. One run
+      is not a rate. Whether the harness is quietly scoring its own stalls as campaign losses at
+      h6/h8 is **unmeasured**, and a 40-campaign rung can carry two of these.
+- [ ] **Make the draw-side RNG counter a permanent tool.** The W1 review found the `Bob` draw by
+      swapping `Util.Rng` for a counting property with `StackTrace` capture and running one
+      campaign — about ten lines, and it located a defect two rounds of review had missed. W1
+      shipped the *assertion* (RNGFRAMETEST phase 2: constructing a Unit and drawing 30 frames must
+      leave the stream untouched) but not the *instrument*. A `SIGHTLINE_RNGTRACE=1` dial that
+      prints draw-site stacks by frequency would make "who is drawing, and from where" answerable
+      on demand rather than by hand-patching `Util.cs`.
+- [ ] **`byObjectiveByBucket` is shipped and unread** — deliberately fine-grained (objective ×
+      squad size × HP band), so every cell is n≤4 at n=20. It is for the n≥80 wave, and it is
+      the fix for the survivorship trap that gave X2 a public 8.03t Escort that was really 12.81t.
 - [ ] **ENVELOP rim waves** (`SIGHTLINE_RIMWAVES=1`) — built, deterministic, PAIRTEST-clean,
       shipped OFF because the round budget ran out. One flag, one paired round.
 - [ ] **A heavier PINCER / ENVELOP weighting.** Pinned at h0 (n=40 each) PINCER ran 47.5%
