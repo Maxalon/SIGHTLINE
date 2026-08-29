@@ -35,7 +35,8 @@ public struct ThreatCell
 {
     public byte Guns;        // how many live, ACTIVE, armed hostiles can actually shoot a soldier standing here
     public sbyte BestHit;    // the best (highest) enemy hit% among those guns, 0 when none
-    public float ExpDmg;     // expected incoming damage if every bearing gun fires once (post-armor)
+    public float ExpDmg;     // TRUE expected incoming damage if every bearing gun fires once (post-armor,
+                             // crit- and graze-inclusive -- Combat.ExpectedDamage; R2 FIX 2)
     public bool Flanked;     // at least one bearing gun would have the mover FLANKED (cover negated)
     public bool Exposed;     // at least one bearing gun sees the mover with NO cover at all (the pre-T2 bool, now via ComputeOdds so see-over/DRONE/SHIELD count)
     public bool Watched;     // the tile sits inside a live enemy OVERWATCH / braced (PIKEMAN) reaction lane
@@ -443,7 +444,7 @@ public partial class Game
     // if every reachable node is mixed-force -> the prep row is unavailable/greyed.
     public Faction PrepFactionOffered => _run != null ? _run.UpcomingFaction() : Faction.None;
 
-    static string PrepDescFor(Faction f) => f switch
+    public static string PrepDescFor(Faction f) => f switch
     {
         Faction.Syndicate => "HARDENED OPTICS: deny their see-over-low cover next mission.",
         Faction.Legion    => "REACTIVE PLATING: squad takes -1 damage next mission.",
@@ -4318,12 +4319,14 @@ public partial class Game
                         if (c.Guns < 255) c.Guns++;
                         if (o.Flanked) c.Flanked = true;
                         if (o.CoverLevel == 0) c.Exposed = true;
-                        // expected damage = hit% x post-armor average. Crits (up) and the graze floor
-                        // (down) are deliberately NOT modelled: this is the honest first-order read the
-                        // card labels "expected", not a simulation of the damage roll.
-                        int lo = Combat.HardenedReduce(Selected, o.DmgMin, crit: false);
-                        int hi = Combat.HardenedReduce(Selected, o.DmgMax, crit: false);
-                        c.ExpDmg += o.HitChance * 0.01f * ((lo + hi) * 0.5f);
+                        // R2 FIX 2: the TRUE expectation of the damage roll — clean hit (uniform band,
+                        // crit-rolled) PLUS the graze leg. This used to be hit% x mean(post-armor band),
+                        // whose comment claimed crits (up) and "the graze floor (down)" cancelled. They
+                        // don't: a graze deals max(1, reduce(DmgMin)) on a roll that would otherwise deal
+                        // ZERO, so both omissions pushed the same way and the card read 31-44% low.
+                        // Combat.ExpectedDamage is the single source of truth (THREATTEST measures it
+                        // against real Resolve rolls); see its doc for what stays excluded and why.
+                        c.ExpDmg += Combat.ExpectedDamage(Selected, o);
                         // "worst" gun = highest hit%, tie-broken by the bigger average bite
                         float score = o.HitChance * 1000f + (o.DmgMin + o.DmgMax);
                         if (score > bestScore) { bestScore = score; bestHit = o.HitChance; c.WorstCls = e.Cls; }

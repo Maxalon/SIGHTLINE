@@ -301,18 +301,18 @@ public static class Voice
         {
             "First one's down.",
             "That's one. Keep moving.",
-            "Contact confirmed. One down.",
+            "Confirmed. One down.",
             "Scratch one.",
-            "One down. Watch your angles.",
+            "One down. Watch angles.",
             "Down. Next.",
         },
         [Beat.BondDown] = new[]
         {
-            "{0} is down. Cover me.",
+            "{0} down. Cover me.",
             "Get to {0}. Now.",
             "{0}, stay with me.",
             "{0} is hit. I'm going.",
-            "That's {0} hit. Cover.",
+            "{0} took one. Cover.",
             "{0}. Talk to me.",
         },
         [Beat.PodRout] = new[]
@@ -320,7 +320,7 @@ public static class Voice
             "They're breaking. Push.",
             "That's it, they're running.",
             "Line's cracked. Press it.",
-            "They've had enough. Move up.",
+            "They've had enough.",
             "Their nerve's gone. Go.",
             "Broken. Keep them broken.",
         },
@@ -535,7 +535,7 @@ public static class Voice
     // ─────────────────────────────────────────────────────────────────────────────────────
 
     /// Pixel budget available to a combat-log line: the panel's text column, from Hud.
-    public const float LogTextW = Hud.LogTextWidth;
+    public static float LogTextW => Hud.LogTextWidth;
     public const int LogFontSize = 12;
 
     public static string SelfTest()
@@ -786,9 +786,88 @@ public static class Voice
         Chk(MathF.Abs(Hud.LogPanelX - (Cfg.ScreenW - Hud.LogPanelW - Hud.LogPanelMarginX)) < 0.01f,
             "LOGPANELX drifted from the drawn panel");
 
+        // ── (8) R2 FIX 3 — THE CHROME-FIT CONTRACT AT EVERY SHIPPED TEXT SCALE ──────────────
+        // Every width assertion above was taken at Cfg.UiScale == 1, but W5 ships four scales
+        // {0.90, 1.00, 1.10, 1.20} and the chrome those measurements are made against is
+        // FIXED-PIXEL. So the contract held only at 100%: at 120% five of the (A3-widened) 36
+        // barks ran past the log column, the combat log's row pitch was a hard-coded 14px against
+        // a 14.4px glyph box so rows touched, and the shop / WAR ROOM card bodies wrapped to a
+        // third row — one ellipsizing mid-word, the other silently dropping the row's words.
+        // A contract asserted at one point of a shipped range is not asserted. This re-runs the
+        // width legs at ALL of them, and adds the row-pitch and card-body legs the drawing code
+        // needs. Cfg.UiScale is restored in a finally: a leaked scale would poison every later
+        // test in the same process.
+        float uiScale0 = Cfg.UiScale;
+        try
+        {
+            int scalesSeen = 0;
+            foreach (float sc in Display.UiScaleLevels)
+            {
+                Cfg.UiScale = sc;
+                scalesSeen++;
+                string tag = $"@{sc:0.00}";
+
+                // (a) barks still fit the log column
+                foreach (Beat bt in Enum.GetValues(typeof(Beat)))
+                    foreach (var raw in Lines[bt])
+                    {
+                        string composed = Compose(longest, NeedsOther(bt) ? raw.Replace("{0}", longest) : raw);
+                        float wpx = Cfg.Measure(composed, LogFontSize, 1f).X;
+                        Chk(wpx <= LogTextW, $"BARK {tag} overflows the log ({wpx:0}px > {LogTextW:0}px): {composed}");
+                    }
+
+                // (b) combat-log rows do not touch: the pitch must clear the glyph box
+                float glyphH = Cfg.Measure("Ag", Hud.LogRowFontSize, 1f).Y;
+                Chk(Hud.LogRowPitch() >= glyphH + 1f,
+                    $"LOG ROW PITCH {tag} is {Hud.LogRowPitch():0.#}px against a {glyphH:0.#}px glyph box — rows touch");
+
+                // (c) briefing lines still fit the briefing card (sampled across the space —
+                //     the full enumeration at 100% above is the exhaustive leg)
+                foreach (Objective ob in Enum.GetValues(typeof(Objective)))
+                    foreach (Faction fc in Enum.GetValues(typeof(Faction)))
+                        for (int lay = -1; lay < Arenas.Length; lay += 6)
+                            foreach (var ln in Brief(3, 987654321, lay, ob, fc, false, null, null))
+                                Chk(Hud.WrapCount(ln, Hud.BriefFontSize, Hud.BriefBodyWidth) <= 2,
+                                    $"BRIEF line {tag} wraps past 2 rows ({ob}/{fc}/{lay}): {ln}");
+
+                // (d) CARD BODIES — every shop row, every WAR ROOM unlock, every achievement.
+                //     The fitter may shrink one step, but reaching its floor means the body is
+                //     about to lose words, so the floor is the failure condition.
+                void Body(string what, string text, int width, int rows)
+                {
+                    if (string.IsNullOrEmpty(text)) return;
+                    int fs = Hud.FitWrap(text, Hud.CardBodySize, Hud.CardBodyMinSize, width, rows);
+                    Chk(Hud.WrapCount(text, fs, width) <= rows,
+                        $"{what} {tag} still needs {Hud.WrapCount(text, fs, width)} rows at the {fs}px floor ({width}px column): {text}");
+                }
+                foreach (var d in Game.ShopDesc) Body("SHOP body", d, Hud.ShopBodyWidth, Hud.CardBodyRows);
+                foreach (Faction fc in Enum.GetValues(typeof(Faction)))
+                    Body("SHOP prep body", Game.PrepDescFor(fc), Hud.ShopBodyWidth, Hud.CardBodyRows);
+                foreach (var u in MetaProg.AllUnlocks)
+                    Body("WARROOM unlock body", MetaProg.UnlockDesc(u), Hud.WarUnlockBodyWidth, Hud.CardBodyRows);
+                foreach (var a in MetaProg.All)
+                    Body("WARROOM achievement desc", a.Desc, Hud.WarAchDescWidth, 1);
+
+                // (e) the widened log must not push the FIELD TIP card off the screen, and the
+                //     no-overlap contract must hold at every scale, not just at 100%.
+                var tf = Hud.TipCardBox(false);
+                var tl = Hud.TipCardBox(true);
+                Chk(tf.w == Hud.TipCardW, $"TIPCARD {tag} width changed with no log ({tf.w})");
+                Chk(tl.x + tl.w <= Hud.LogPanelX, $"TIPCARD {tag} overlaps the log ({tl.x + tl.w:0.#} > {Hud.LogPanelX:0.#})");
+                Chk(tl.x >= Hud.TipCardMinX - 0.01f, $"TIPCARD {tag} slid off the left edge (x={tl.x:0.#})");
+                Chk(tl.w >= 560, $"TIPCARD {tag} narrowed past readability ({tl.w}px)");
+                Chk(Hud.LogPanelW >= Hud.LogPanelWBase, $"LOG PANEL {tag} narrower than authored ({Hud.LogPanelW:0.#}px)");
+            }
+            Chk(scalesSeen == Display.UiScaleLevels.Length,
+                $"scale sweep covered {scalesSeen} of {Display.UiScaleLevels.Length} shipped text scales");
+            Chk(scalesSeen >= 2, "scale sweep is VACUOUS — only one text scale exists to check");
+        }
+        finally { Cfg.UiScale = uiScale0; }
+
         // leave the bark state clean for whatever runs next in this process
         BeginMission(0, 0);
-        if (fails.Count == 0) return "VOICETEST: PASS";
+        if (fails.Count == 0) return "VOICETEST: PASS (chrome fit asserted at all "
+                                     + Display.UiScaleLevels.Length + " shipped text scales)";
         return "VOICETEST: FAIL\n  " + string.Join("\n  ", fails);
     }
 

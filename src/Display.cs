@@ -751,6 +751,10 @@ void main() {
     public static void SaveForTest() => Save();
     public static void LoadForTest() => Load();
 
+    /// Set once a corrupt display.json has been stashed this session, so a later corrupt read
+    /// can never overwrite that evidence with a fresher corpse (mirrors SaveGame's meta rule).
+    static bool _settingsEvidenceStashed;
+
     static void Load()
     {
         try
@@ -783,6 +787,24 @@ void main() {
                 ApplyUiScale();
             }
         }
-        catch { }
+        catch
+        {
+            // R2 (LOW-3): PRESERVE THE EVIDENCE. save.json and meta.json both stash an unreadable
+            // file as <name>.bak before moving on; display.json alone was silently discarded and
+            // then overwritten by the next Save() with defaults. That is the player's whole
+            // settings profile (volumes, text scale, brightness, tips-seen) gone with no trace of
+            // what went wrong. Copy, don't move: the file is still the live path, and a stale .bak
+            // from an older session may be overwritten but one stashed earlier THIS session may
+            // not. Recovery I/O must never throw — we are already inside a failure path.
+            try
+            {
+                if (!_settingsEvidenceStashed && File.Exists(FilePath))
+                {
+                    File.Copy(FilePath, FilePath + ".bak", true);
+                    _settingsEvidenceStashed = true;
+                }
+            }
+            catch { }
+        }
     }
 }

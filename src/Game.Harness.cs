@@ -3833,12 +3833,20 @@ public partial class Game
     ///   (7) unreachable tiles are never computed, and the caged captive forecasts empty,
     ///   (8) the mover's real X/Y/Hunkered/MovedAfterFire survive the probe untouched,
     ///   (9) the post-move state model (moving drops HUNKER) is applied per tile, and
-    ///  (10) the signature cache actually suppresses redundant rebuilds.
+    ///  (10) the signature cache actually suppresses redundant rebuilds, and
+    ///  (11) R2 FIX 2 — the forecast is TRUE: for every weapon kind, the number the card shows is
+    ///       measured against 100k real Combat.Resolve rolls and must match the sample mean.
+    /// Leg (11) exists because legs (1)-(10) could not have caught the defect it guards. They
+    /// hand-recomputed the SAME formula the forecast used, so a wrong formula agreed with itself:
+    /// the card read 31-44% low for two years' worth of waves (crit AND graze both omitted, both
+    /// pushing the same way) and every assertion here passed. Comparing against the resolver is
+    /// the only kind of check that catches that class of defect.
     /// Finishes with a measured worst-case rebuild cost (198 tiles x 8 guns). One-line report.
     public string ThreatSelfTest()
     {
         NoPersist = true;
         var fails = new System.Collections.Generic.List<string>();
+        string groundTruth = "ground truth NOT MEASURED";
 
         // ---- deterministic combat statics (a prior test in the same process must not bleed in) ----
         Combat.AllUnits = System.Array.Empty<Unit>();
@@ -3907,7 +3915,7 @@ public partial class Game
         foreach (var e in new[] { a1, a2, a3 })
         {
             var o = Combat.ComputeOdds(Grid, e, sol);
-            wantExp += o.HitChance * 0.01f * ((Combat.HardenedReduce(sol, o.DmgMin, false) + Combat.HardenedReduce(sol, o.DmgMax, false)) * 0.5f);
+            wantExp += Combat.ExpectedDamage(sol, o);   // R2 FIX 2: the shared source of truth, ground-truthed in leg (11)
             float sc = o.HitChance * 1000f + (o.DmgMin + o.DmgMax);
             if (sc > wantScore) { wantScore = sc; wantBest = o.HitChance; wantCls = e.Cls; }
         }
@@ -4018,6 +4026,52 @@ public partial class Game
         Grid.Tiles[3, 3] = TileType.LowCover; ComputeThreat();
         if (ThreatRebuilds != r0 + 2) fails.Add("cacheDidNotInvalidateOnTerrainChange");
 
+        // ---------- (11) R2 FIX 2: GROUND TRUTH — the forecast vs 100k real Resolve rolls ----------
+        // One enemy attacker per weapon kind at a fixed range on open ground, firing at a soldier
+        // pinned off full HP (so Combat.FragileFloor — the only term ExpectedDamage deliberately
+        // omits — can never fire and skew the sample). The attacker is an ENEMY on purpose: the
+        // streak-breaker aim bonus Resolve folds into effHit is player-only, so the displayed
+        // HitChance is exactly the roll threshold and the comparison is apples to apples.
+        {
+            const int rolls = 100000;
+            double worstRel = 0; string worstName = "";
+            foreach (WeaponKind wk in System.Enum.GetValues(typeof(WeaponKind)))
+            {
+                var g2 = new Grid();
+                var atk = new Unit { Name = "FOE", Cls = "GRUNT", Team = Team.Enemy, X = 5, Y = 5, Hp = 6, MaxHp = 6,
+                                     Aim = 65, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+                atk.Weapon = Weapon.Make(wk);
+                var def = new Unit { Name = "SOL", Cls = "ASSAULT", Team = Team.Player, X = 9, Y = 5, Hp = 400, MaxHp = 401,
+                                     Aim = 65, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+                atk.Ammo = 9999; def.Ammo = def.Weapon.Clip;
+                if (Util.TileDist(atk.X, atk.Y, def.X, def.Y) > atk.Weapon.MaxRange) { fails.Add($"gt_{wk}_outOfRange"); continue; }
+                Combat.AllUnits = new System.Collections.Generic.List<Unit> { atk, def };
+
+                var o = Combat.ComputeOdds(g2, atk, def);
+                float shown = Combat.ExpectedDamage(def, o);
+                if (shown <= 0f) { fails.Add($"gt_{wk}_vacuousForecast"); continue; }
+
+                Util.Reseed(7723 + (int)wk);
+                long total = 0;
+                for (int i = 0; i < rolls; i++)
+                {
+                    def.Hp = 400;                     // never full HP -> FragileFloor stays out of the sample
+                    atk.ConsecutiveMisses = 0;        // enemy streak is inert in ComputeOdds; pin it anyway
+                    total += Combat.Resolve(g2, atk, def).Damage;
+                }
+                double measured = (double)total / rolls;
+                double rel = Math.Abs(measured - shown) / Math.Max(0.001, measured);
+                if (rel > worstRel) { worstRel = rel; worstName = wk.ToString(); }
+                // 2% is ~6 sigma at this sample size for every band here; the pre-fix formula was
+                // off by 31-44%, so this tolerance separates "true" from "wrong formula" by 15x.
+                if (rel > 0.02)
+                    fails.Add($"gt_{wk}_forecast={shown:0.000}_measured={measured:0.000}_off={rel * 100:0.0}%");
+            }
+            Combat.AllUnits = System.Array.Empty<Unit>();
+            if (worstName.Length == 0) fails.Add("gt_noWeaponSampled");
+            groundTruth = $"worst forecast-vs-Resolve error {worstRel * 100:0.00}% ({worstName}, {rolls} rolls/weapon)";
+        }
+
         // ---------- perf: worst case — every tile reachable, 8 armed guns ----------
         Scene(9, 5);
         for (int i = 0; i < 8; i++)
@@ -4036,7 +4090,7 @@ public partial class Game
 
         Combat.AllUnits = System.Array.Empty<Unit>();
         return fails.Count == 0
-            ? $"THREATTEST PASS (worst-case rebuild {ms:0.000} ms over {Cfg.GridW * Cfg.GridH} tiles x 8 guns; centre sees {guns})"
+            ? $"THREATTEST PASS ({groundTruth}; worst-case rebuild {ms:0.000} ms over {Cfg.GridW * Cfg.GridH} tiles x 8 guns; centre sees {guns})"
             : $"THREATTEST FAIL: {string.Join(", ", fails)}";
     }
 
@@ -4785,6 +4839,107 @@ public partial class Game
         for (int i = 1; i <= bestLen; i++)
             Enqueue(new MoveStepAnim(u, u.X + bestDir.dx * i, u.Y + bestDir.dy * i), Team.Player);
         return bestLen;
+    }
+
+
+    // ── R2 FIX 1 "NOBODY IS WALLED OUT" — SIGHTLINE_GEOMTEST ───────────────────────────────
+    /// Every deployed SOLDIER must be able to reach the rest of the squad and must have at
+    /// least one legal move on turn 1 — and every hostile / evac tile / terminal / sabotage
+    /// site must stay reachable from the squad. Mission.EnsureConnectivity is the net that
+    /// guarantees it; before R2 it repaired everything EXCEPT the other players, which was
+    /// invisible until W4's ENVELOP shape seated the squad in the mid-field cover band
+    /// (measured 23 stranded soldiers / 5760 fresh builds at heat 0, one fully entombed).
+    ///
+    /// This sweeps what STACKTEST structurally cannot: STACKTEST is a fixed 16-board sample
+    /// that never varies the deployment shape, so it could not have caught a shape-specific
+    /// geometry defect. Here every shape x objective x mission x seed x heat is BUILT fresh
+    /// (no play — StartMission only), which is cheap enough to sweep thousands of boards.
+    /// Both terrain paths are exercised: authored arenas and the procedural fallback (the
+    /// defect only ever appeared on the procedural one; the split is reported so a future
+    /// change that silently stops sampling one of them is visible).
+    /// Non-vacuity: PASS requires a real sample AND at least one ENVELOP build per heat.
+    public static string GeomSelfTest(int seeds = 8)
+    {
+        var fails = new List<string>();
+        int cases = 0, envelopBuilds = 0, authored = 0, procedural = 0;
+        string prevHeat = Environment.GetEnvironmentVariable("SIGHTLINE_HEAT");
+        int prevDeploy = Mission.ForcedDeploy;
+        var objs = (Objective[])Enum.GetValues(typeof(Objective));
+        var shapeName = new[] { "FRONTAL", "PINCER", "CROSSFIRE", "ENVELOP" };
+
+        foreach (int heat in new[] { 0, 8 })
+        {
+            Environment.SetEnvironmentVariable("SIGHTLINE_HEAT", heat.ToString());
+            int envelopThisHeat = 0;
+            for (int shape = 0; shape < Mission.DeployShapes; shape++)
+            {
+                Mission.ForcedDeploy = shape;
+                foreach (var obj in objs)
+                    for (int m = 1; m <= Run.MaxMissions; m++)
+                        for (int s = 0; s < seeds; s++)
+                        {
+                            Util.Reseed(90001 + s * 7919 + m * 131 + (int)obj * 17 + shape * 3 + heat * 104729);
+                            Game g;
+                            try { g = new Game { NoPersist = true, ForcedObjective = obj }; g.StartMission(m); }
+                            catch (Exception ex)
+                            { fails.Add($"h{heat}/{shapeName[shape]}/{obj}/m{m}/s{s} THREW {ex.GetType().Name}"); continue; }
+                            cases++;
+                            if (Mission.AppliedDeploy == Mission.DeployEnvelop) { envelopBuilds++; envelopThisHeat++; }
+                            if (Mission.AppliedLayout >= 0) authored++; else procedural++;
+                            string tag = $"h{heat}/{shapeName[shape]}/{obj}/m{m}/s{s}";
+                            if (fails.Count > 30) continue;   // the report is already damning; stop collecting
+
+                            var p0 = g.Players.FirstOrDefault(p => p.Alive);
+                            if (p0 == null) { fails.Add(tag + ": no living squad"); continue; }
+                            var cost = g.Grid.CostMap(p0.X, p0.Y, (x, y) => false, out _, 9999);
+                            bool Stuck(int x, int y) => !g.Grid.InBounds(x, y) || cost[x, y] < 0;
+
+                            foreach (var u in g.Players)
+                                if (u.Alive && Stuck(u.X, u.Y))
+                                    fails.Add($"{tag}: SOLDIER {u.Name} walled off at ({u.X},{u.Y}) layout={Mission.AppliedLayout}");
+                            foreach (var u in g.Enemies)
+                                if (u.Alive && Stuck(u.X, u.Y)) fails.Add($"{tag}: hostile {u.Cls} unreachable at ({u.X},{u.Y})");
+                            foreach (var t in g.EvacZone)
+                                if (Stuck(t.x, t.y)) fails.Add($"{tag}: evac tile ({t.x},{t.y}) unreachable");
+                            if (g.HasTerminal && Stuck(g.Terminal.x, g.Terminal.y)) fails.Add(tag + ": terminal unreachable");
+                            foreach (var st in g.SabotageSites)
+                                if (Stuck(st.x, st.y)) fails.Add($"{tag}: sabotage site ({st.x},{st.y}) unreachable");
+
+                            // ELBOW ROOM: a soldier can be reachable and still be frozen on turn 1
+                            // (every neighbour cover or a teammate, diagonals killed by the corner rule).
+                            foreach (var u in g.Players)
+                            {
+                                if (!u.Alive || u.IsVip) continue;
+                                bool step = false;
+                                for (int dx = -1; dx <= 1 && !step; dx++)
+                                    for (int dy = -1; dy <= 1 && !step; dy++)
+                                    {
+                                        if (dx == 0 && dy == 0) continue;
+                                        bool OpenT(int ax, int ay) => g.Grid.IsFloor(ax, ay) && g.UnitAt(ax, ay) == null;
+                                        if (!OpenT(u.X + dx, u.Y + dy)) continue;
+                                        if (dx != 0 && dy != 0 && (!OpenT(u.X + dx, u.Y) || !OpenT(u.X, u.Y + dy))) continue;
+                                        step = true;
+                                    }
+                                if (!step) fails.Add($"{tag}: SOLDIER {u.Name} ENTOMBED at ({u.X},{u.Y}) — no legal move");
+                            }
+                        }
+            }
+            if (envelopThisHeat == 0) fails.Add($"h{heat}: VACUOUS — no ENVELOP build sampled");
+        }
+
+        Mission.ForcedDeploy = prevDeploy;
+        Environment.SetEnvironmentVariable("SIGHTLINE_HEAT", prevHeat);
+        if (cases < 1000) fails.Add($"VACUOUS — only {cases} boards built");
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"GEOMTEST: {cases} fresh boards (authored {authored} / procedural {procedural}), "
+                    + $"{envelopBuilds} ENVELOP, heats 0+8, {seeds} seeds x 4 shapes x 8 objectives x {Run.MaxMissions} missions");
+        foreach (var f in fails.Take(12)) sb.AppendLine("  " + f);
+        if (fails.Count > 12) sb.AppendLine($"  (+{fails.Count - 12} more)");
+        sb.Append(fails.Count == 0
+            ? "GEOMTEST: PASS (every soldier reachable and able to move; every hostile/objective tile reachable)"
+            : $"GEOMTEST: FAIL ({fails.Count} violations)");
+        return sb.ToString();
     }
 
     /// The unit the filmstrip is following (the one DebugLongMove staged), for the per-frame

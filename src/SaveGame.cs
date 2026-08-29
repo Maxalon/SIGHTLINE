@@ -136,6 +136,13 @@ public static partial class SaveGame
             // forever, with no banner and no stash. Route it through the same recovery path as an
             // unparseable file: the squad is the one field a resumable run cannot do without.
             if (dto == null || dto.Squad == null || dto.Squad.Count == 0) { StashCorruptSave(); return null; }
+            // R2 (LOW-2): SchemaVersion was WRITTEN and self-tested but never READ, so a file
+            // stamped 999 loaded silently — the one thing the field exists to prevent. We cannot
+            // know what a FUTURE build meant by its fields, so refuse it rather than misread it;
+            // the stash keeps the file so a newer build can still load it. Older files (0 = written
+            // before the field, or any version up to ours) still load: every change so far has been
+            // additive, which is exactly what CurrentSchema's contract says a bump is NOT for.
+            if (dto.SchemaVersion > CurrentSchema) { StashCorruptSave(); return null; }
             return FromDto(dto);
         }
         catch
@@ -205,11 +212,20 @@ public static partial class SaveGame
         catch { /* a failed meta save must never crash the game */ }
     }
 
-    public static int LoadMetaHeat() => Heat.Clamp(LoadMetaDto().MaxHeat);
+    /// The highest heat rung the profile has UNLOCKED. R2 FIX 4: floored at 0, not at Heat.Min.
+    /// W5 moved Heat.Clamp's floor to -1 (RECRUIT) — correct for a DIALLED level, wrong for an
+    /// unlock CEILING, which starts at 0 and only ever rises. A corrupt/edited meta carrying
+    /// {"MaxHeat":-9} clamped to -1, so Game.RefreshMeta set UnlockedHeat = -1, PendingHeat was
+    /// pinned to -1, and BOTH intro steppers went dead (minus needs level > Heat.Min, plus needs
+    /// level < unlocked) — the difficulty picker locked on RECRUIT with no way out but deleting
+    /// meta.json. Game.cs:1727 already applies Math.Max(0, ...) on the SIGHTLINE_HEAT env path,
+    /// so the invariant was known; this is the disk path that was missed. SaveMetaHeat floors
+    /// the same way so a bad ceiling can never be written back either.
+    public static int LoadMetaHeat() => Math.Clamp(LoadMetaDto().MaxHeat, 0, Heat.Max);
 
     public static void SaveMetaHeat(int maxHeat)
     {
-        var d = LoadMetaDto(); d.MaxHeat = Heat.Clamp(maxHeat); WriteMetaDto(d);
+        var d = LoadMetaDto(); d.MaxHeat = Math.Clamp(maxHeat, 0, Heat.Max); WriteMetaDto(d);   // R2 FIX 4: a CEILING floors at 0
     }
 
     /// Adaptive-assist meta: how many runs the player has lost in a row (0 on a fresh profile).
@@ -442,16 +458,30 @@ public static partial class SaveGame
     /// Rebuild a Unit from a persisted UnitDto (Team.Player, Alive, weapon mods re-baked, ammo seeded).
     /// Shared by the run load and the veteran reserve. `fromReserve` tags a returning veteran for the
     /// draft-screen display (transient, never persisted).
+    // R2 (LOW-1) — SCALAR SANITY BOUNDS for a loaded soldier. F1 hardened the persisted ENUM
+    // ordinals (EnumOr / AddDefined) but left every scalar to load verbatim: {"Mobility":1000000}
+    // gave a MoveBudget of 2,000,000 half-steps (a soldier that reaches any tile on the board,
+    // and a Dijkstra flood that walks the whole grid every hover), {"Mobility":-9} a MoveBudget of
+    // 2 (a soldier that cannot cross a tile), {"Aim":100000}, {"Armor":-50} (armor that ADDS
+    // damage through HardenedReduce), {"Rank":99} (Unit.RankName only survives because it clamps).
+    // These are generous envelopes around what the game can legitimately produce, not gameplay
+    // caps — the shop's own limits (Unit.ArmorMax etc.) still govern real play. A save inside the
+    // envelope is byte-identical after a round trip, so SAVETEST's fingerprints are untouched.
+    const int MaxHpCap = 99, AimCap = 100, MobilityCap = 20, ArmorCap = 10, WoundCap = 20, GrenadeCap = 9;
+
     static Unit FromUnitDto(UnitDto d, bool fromReserve = false)
     {
+        int maxHp = Math.Clamp(d.MaxHp, 1, MaxHpCap);
         var u = new Unit
         {
             Name = d.Name, Cls = d.Cls, Team = Team.Player,
-            Hp = d.Hp, MaxHp = d.MaxHp, Aim = d.Aim, Mobility = d.Mobility,
+            Hp = Math.Clamp(d.Hp, 1, maxHp), MaxHp = maxHp,
+            Aim = Math.Clamp(d.Aim, 1, AimCap), Mobility = Math.Clamp(d.Mobility, 1, MobilityCap),
             Weapon = Weapon.Make(EnumOr(d.Weapon, WeaponKind.Rifle)),
-            Kills = d.Kills, Rank = d.Rank, Alive = true,
-            BonusGrenades = d.BonusGrenades, CustomTag = d.CustomTag, Wound = d.Wound,
-            Armor = d.Armor,
+            Kills = Math.Max(0, d.Kills), Rank = Math.Clamp(d.Rank, 0, Run.Ranks.Length - 1), Alive = true,
+            BonusGrenades = Math.Clamp(d.BonusGrenades, 0, GrenadeCap), CustomTag = d.CustomTag,
+            Wound = Math.Clamp(d.Wound, 0, WoundCap),
+            Armor = Math.Clamp(d.Armor, 0, ArmorCap),
             Nickname = d.Nickname, Benched = d.Benched,
             Spec = EnumOr(d.Spec, Spec.None),
             FromReserve = fromReserve,
@@ -464,7 +494,7 @@ public static partial class SaveGame
         if (d.Bonds != null) u.Bonds = new List<string>(d.Bonds);
         AddDefined(u.Scars, d.Scars);
         u.VendettaFaction = EnumOr(d.VendettaFaction, Faction.None);
-        u.NearDeathCount = d.NearDeathCount;
+        u.NearDeathCount = Math.Max(0, d.NearDeathCount);
         return u;
     }
 
