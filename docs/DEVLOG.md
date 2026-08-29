@@ -4838,3 +4838,78 @@ stays in the tree, default 0, as a measured and priced dial for whoever needs on
    it. The 8.03 was a **survivorship-biased** number: only runs that were already winning got to
    play Escort at heat 0. W4's celebrated "Escort 12.57 → 8.19" repair is partly the same
    artifact. Escort's real h0 cost is ~13 turns and it is still the game's drag objective.
+
+## 5. THE SHIPPED LADDER — round S1, `OpenerTrim=1`, n=40 per rung, all 12 chunks `runs=20`
+
+**Base commit `a61ef42`.** The band is FUL-13's, with X2's proposed RECRUIT row added.
+
+| rung | R0 baseline | **S1 SHIPPED** | delta | band | in band? |
+|---|---|---|---|---|---|
+| RECRUIT | 75.0% | **75.0%** | 0.0 | *(proposed)* 75 ±8 | **YES** — unchanged, exactly as predicted (its m1 was already 100%) |
+| heat 0 | 35.0% | **57.5%** | **+22.5** | 55 ±8 (47-63) | **YES** — 2.5 above target |
+| heat 2 | 40.0% | **35.0%** | −5.0 | 40 ±8 (32-48) | **YES** |
+| heat 4 | 20.0% | **30.0%** | +10.0 | 30 ±8 (22-38) | **YES** — exactly on target |
+| heat 6 | 32.5% | **20.0%** | −12.5 | 20 ±8 (12-28) | **YES** — exactly on target |
+| heat 8 | 7.5% | **17.5%** | +10.0 | 10 ±5 (5-15) | **NO — 2.5 over the ceiling** (0.4 SE) |
+
+**The ladder is monotone for the first time this program: 75.0 / 57.5 / 35.0 / 30.0 / 20.0 /
+17.5.** Five of six rungs are in band and two of them (h4, h6) land on the target to the
+decimal. The rungs that moved in the "wrong" direction (h2 −5.0, h6 −12.5) and the apex's +10.0
+are all inside ±1.5 SE of their baselines — the same n=40 noise §1(b) warned about, now
+visible from the other side. Do not read those three deltas as effects of the lever; read the
+shape.
+
+**The one out-of-band rung, stated straight: heat 8 measures 17.5% against a 5-15% band, +2.5
+over the ceiling, ±6.0.** The measurement cannot distinguish it from the ceiling and the wave
+did not spend a lever on it. The apex's own m1 was already 98%, so the cold-opener repair has
+almost nothing to do there; most of the 7.5 → 17.5 is the noise band. What is real at the apex
+is unchanged and still bad: **Escort 33% (n=15), Evac 0% (n=4), Rescue 33% (n=3), Decapitate
+41%** — heat 8 is a wall made of four specific objectives, which is where a future apex wave
+should aim rather than at the rung average.
+
+### Per-objective x heat, shipped (win% (n) / mean turns) — the two archived tables
+
+| objective | RECRUIT | h0 | h2 | h4 | h6 | h8 |
+|---|---|---|---|---|---|---|
+| Eliminate | 100 (42) | **100 (41)** | **100 (41)** | 95 (42) | 93 (42) | 93 (42) |
+| Defend | 97 (38) | 82 (34) | 71 (34) | 75 (36) | 91 (32) | 85 (26) |
+| Decapitate | 85 (41) | 79 (33) | 54 (26) | 59 (29) | **34 (29)** | 41 (17) |
+| Escort | 85 (20) | 89 (19) | 100 (16) | 94 (18) | 95 (19) | **33 (15)** |
+| Hack | 100 (14) | 92 (12) | 75 (12) | 85 (13) | 85 (13) | 100 (12) |
+| Sabotage | 100 (12) | 91 (11) | 90 (10) | 91 (11) | 92 (12) | 100 (10) |
+| Evac | 100 (6) | 100 (4) | 100 (4) | 67 (3) | 75 (4) | **0 (4)** |
+| Rescue | 100 (6) | 100 (3) | 100 (5) | 100 (4) | 83 (6) | 33 (3) |
+
+Mean turns (same order): Eliminate 2.74 / 3.25 / 3.30 / 3.45 / 4.20 / 4.15 · Defend 9.00 / 8.90
+/ 8.65 / 8.55 / 8.90 / 8.70 · Decapitate 4.50 / 4.32 / 5.12 / 4.85 / 5.88 / 4.94 · **Escort
+13.48 / 12.81 / 10.50 / 10.55 / 8.86 / 11.35** · Hack 3.66 / 3.50 / 4.40 / 3.95 / 3.88 / 3.33 ·
+Sabotage 3.42 / 2.69 / 3.40 / 3.37 / 3.75 / 2.64 · Evac 11.70 / 5.20 / 6.80 / 8.30 / 3.80 /
+5.50 · Rescue 4.70 / 2.67 / 5.42 / 3.25 / 4.97 / 4.00. Full tables in
+`docs/measurements/x2/{R0,S1}-BYOBJECTIVE.txt`.
+
+## 6. THE GATES — every one, with its number
+
+| gate | target | R0 baseline | **S1 shipped** | verdict |
+|---|---|---|---|---|
+| ladder inside the band at every rung | all 6 | h0 12 low; h6 4.5 high; **non-monotonic** | RECRUIT/h0/h2/h4/h6 **IN**; **h8 17.5 vs 5-15** | **5 of 6 — h8 out by +2.5 (0.4 SE)** |
+| RECRUIT stays meaningfully easier than h0 | real gap | +40.0 (the defect: double the designed step) | **+17.5** (75.0 vs 57.5) | **MET** — and back to roughly W5's designed +20 |
+| shots-per-kill (the two-hit trade) | ≥ 3.00 | 3.22 (h0); 2.99 at h4 | **3.30 (h0)**; 3.22 / 3.23 / 3.27 / 3.29 / 3.56 | **MET at every rung, and up at every rung** |
+| armed soldiers / turn | ≥ 1.50 | 1.56 (h0) | **1.60 (h0)**, 1.58 (h2), 1.61 (h4) | **MET** at h0-h4 (h6 0.96 / h8 0.89 / RECRUIT 1.44 — h6 fell from 1.18) |
+| Eliminate mean turns | ≥ 5.0 | 5.10 (h0) | **3.25 (h0)** | **BREACHED −1.85** — see §4; on this tree Eliminate *is* mission 1, and 5.10 was a losing grind |
+| lead-swings / match | ≥ 0.79 | 0.79 (h0), 0.74 pooled | **0.61 (h0)**, 0.70 pooled | **BREACHED −0.18** — a 4-body opener against a full squad is not contested, and m1 is ~26% of matches |
+| no objective mean past ~10 turns at h0 or h4 | ≤ ~10 | h0 max 8.90; **h4 Escort 11.70 already breaching** | **h0 Escort 12.81**, h4 Escort 10.55 | **BREACHED** — Escort's h0 8.03 was survivorship bias (n 13 → 19); its real cost was always ~13 turns |
+| `SIGHTLINE_PAIRTEST` | PASS | PASS | **PASS** (h0 slot0 + h4 slot1 byte-MATCH with the shipped default on) | **MET** |
+| `HEATLADDERTEST` | PASS | PASS | **PASS** (untouched — the lever is a body count, not a damage row) | **MET** |
+| autoplay x10 | no exception, no TIMEOUT | — | **5 WIN / 5 LOSE, 0 exceptions, max 14022 frames vs the 20000 cap** | **MET** |
+
+**Reported, NOT chased** (the brief's forbidden metric): `choices/ARMED-soldier-turn` reads
+1.82 / 1.60 / 1.73 / **1.91** / 1.44 / 1.46 (RECRUIT→h8) against the baseline's 1.52 / 1.53 /
+1.78 / 1.67 / 1.44 / 1.50, and `meaningful-choices/turn` 2.61 / 2.57 / 2.73 / **3.07** / 1.38 /
+1.29 against 2.45 / 2.38 / 2.76 / 2.63 / 1.69 / 1.36. **No lever was pointed at either.** Two
+observations for the record, both refinements of W4's law rather than contradictions of it:
+the h4 cell at 1.91 is the highest `choices/ARMED` this project has recorded, and the aim-trim
+rounds moved it too (1.53 → 1.68 → 1.76 at trims 0/5/10). W4's conservation held across levers
+that changed *geometry at constant lethality*; a lever that lowers how much enemy fire LANDS
+raises both axes at once, because more soldiers survive to hold targets AND the board is safer
+to stand on. That is consistent with the mechanism W4 identified and is the strongest argument
+yet for re-specifying axis (b) additively (spec in ROADMAP).
