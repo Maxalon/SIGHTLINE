@@ -1857,7 +1857,24 @@ public partial class Game
         // W5: the grace ramps HEAT's escalation in — it must not also ramp the RECRUIT rung's
         // RELIEF out. Rung -1's whole point is that mission 1 is survivable, which is exactly the
         // mission the grace would zero. Gated on heat > 0 so heats 1-8 are bit-for-bit unchanged.
-        if (heat > 0)
+        // W9 THE REPAIR — the grace is gated on CAMPAIGN, which makes it the thing it always claimed
+        // to be. It exists to protect "a green 4-rookie squad meeting Heat before it has earned a
+        // single promotion, perk or boon" — a statement about the CAMPAIGN OPENER. But SKIRMISH and
+        // DAILY both enter through SetupMission(1) (Game.Modes.cs), so `n <= 1` was true for EVERY
+        // skirmish and EVERY daily, and the grace zeroed the entire numeric ladder in two of the four
+        // shipped modes. MEASURED: skirmish eliminate, seed 4242, arena 5 reads "4 SQUAD 4 HOSTILES"
+        // at heat 0 and "4 SQUAD 4 HOSTILES  HEAT 8" at heat 8 — the red chip was the only difference
+        // on screen — against a campaign control of 6 vs 10 hostiles on the same seed and arena. Only
+        // the qualitative flags (Ai.Tier at rung 6+, SHORT FUSE, EXPOSED, NO QUARTER's label)
+        // survived; every body, stat and damage point the dial promises was discarded.
+        // This is ROADMAP:1066's own recommendation, which it left as an owner decision. THE CALL,
+        // made: a SKIRMISH or DAILY player explicitly DIALLED the rung — the setup screen renders the
+        // ladder and its per-rung modifier text, the intro sells "pick the objective and the heat",
+        // and FEATURES.md line 13 sells "one fight with a chosen objective+heat". There is no green
+        // squad to protect and no campaign ahead to front-load anxiety into; there is only the fight
+        // they asked for. The grace stays exactly as it was for CAMPAIGN (and for ENDLESS, which
+        // opens at n==1 too and whose escalation is the wave ladder, not heat).
+        if (heat > 0 && Mode != GameMode.Skirmish)
         {
             if (n <= 1)      { heatEnemy = 0; heatStat = 0; heatDmg = 0; }
             else if (n == 2) { heatEnemy /= 2; heatStat /= 2; heatDmg /= 2; }   // W6c: +1 dmg graces to 0 on m1-2 like the other deltas
@@ -7296,6 +7313,20 @@ public partial class Game
         }
         if (ch.HasThird) line = line + "; " + EventCatalog.Apply(_run, ch.Outcome3, _eventNode);   // FUL-10
         _run.Report.Insert(0, $"EVENT: {_activeEvent.Title} -- {line}");
+        // W9 THE REPAIR — RE-DERIVE THE DEPLOYMENT. A field event can add or remove a body, and
+        // Run.DebriefSurvivors' AutoDeploy() has ALREADY run by the time this resolves, so the
+        // roster and the deployment disagreed in BOTH directions:
+        //   * a free RECRUIT (DEFECTOR) arrived un-benched, so the barracks header printed
+        //     "DEPLOY 5/4 (squad at capacity)" over five DEPLOYED soldiers and the next mission
+        //     fielded FIVE where Run.DeployCapFor(2) == 4. HandleBenchClick refuses to un-bench past
+        //     the cap, so the event path was the only way over it. A cap is a cap.
+        //   * a RELEASE (THE RESERVE CALLS) freed a DEPLOYED slot and never handed it to the healthy
+        //     benched soldier, so the squad fielded 3/4 with a 6/6-HP body sitting out while the
+        //     header printed its "cap grows over the campaign - field up to it" hint.
+        // AutoDeploy re-derives Benched across the WHOLE roster against NextDeployCap (healthy before
+        // wounded, senior before junior, stable tiebreak), so it fixes both with one call and is a
+        // no-op for every event that does not touch the roster. It takes no RNG draw.
+        _run.AutoDeploy();
         Audio.Play("turn");
         _activeEvent = null; _eventNode = null;
         // The event node is now CurrentNode (MapPos already advanced), so NextNodes() offers its

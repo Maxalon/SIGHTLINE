@@ -683,8 +683,44 @@ public partial class Game
         if (_run.Squad.Count > Run.RosterMax) fails.Add("rosterOverMax");
         if (_run.Deployed.Count > _run.NextDeployCap) fails.Add("deployedOverCapAfterDebrief");
 
+        // (4) W9 THE REPAIR — caps hold after a FIELD EVENT too.
+        // THE GAP: this test asserted the cap only immediately after DebriefSurvivors(), the one
+        // moment AutoDeploy has just run, and EVENTTEST exercises EventCatalog.Apply against a bare
+        // test Run with no deployment or bench state at all (it checks Squad.Count and nothing else).
+        // Nothing anywhere composed the ordering the campaign actually uses — debrief -> AutoDeploy
+        // -> resolve an event -> read Deployed — so a roster change made by an event went straight
+        // past the cap in BOTH directions: a free RECRUIT deployed cap+1 ("DEPLOY 5/4" over five
+        // deployed soldiers, five on the next board where DeployCapFor(2) == 4), and a RELEASE left
+        // the freed slot empty while a 6/6-HP soldier sat benched ("DEPLOY 3/4").
+        // The invariant, both ways: Deployed.Count == min(healthy roster, NextDeployCap).
+        {
+            _run.DebriefSurvivors();                                    // the campaign's real ordering
+            int capNow = _run.NextDeployCap;
+            int Want() => Math.Min(_run.Squad.Count, _run.NextDeployCap);
+
+            // (4a) RECRUIT: a body arrives mid-barracks and must not push the field over the cap.
+            while (_run.Squad.Count >= Run.RosterMax) _run.Squad.RemoveAt(_run.Squad.Count - 1);
+            _run.AutoDeploy();
+            int before = _run.Deployed.Count;
+            DebugResolveEventOutcome(new EventOutcome { Kind = EventOutcomeKind.Recruit, Veteran = true });
+            if (_run.Deployed.Count != Want())
+                fails.Add($"eventRecruitDeployed={_run.Deployed.Count} want={Want()} (was {before}, cap {capNow})");
+            if (_run.Deployed.Count > _run.NextDeployCap) fails.Add("eventRecruitOverCap");
+
+            // (4b) RELEASE: a DEPLOYED body leaves and the freed slot must go to a benched soldier.
+            while (_run.Squad.Count <= _run.NextDeployCap) _run.Squad.Add(Mission.MakeRecruit());
+            foreach (var u in _run.Squad) { u.Wound = 0; u.Hp = u.MaxHp; }   // everyone healthy: no bench excuse
+            _run.AutoDeploy();
+            int deployedBefore = _run.Deployed.Count;
+            DebugResolveEventOutcome(new EventOutcome { Kind = EventOutcomeKind.ReleaseSoldier });
+            if (_run.Deployed.Count != Want())
+                fails.Add($"eventReleaseDeployed={_run.Deployed.Count} want={Want()} (was {deployedBefore})");
+            if (_run.Squad.Any(u => u.Benched && u.Wound == 0 && _run.Deployed.Count < _run.NextDeployCap))
+                fails.Add("eventReleaseStrandedHealthyBench");
+        }
+
         return fails.Count == 0
-            ? "BENCHTEST: PASS (auto-bench wounded, deploy<=cap, roster<=max, benched recover+preserved)"
+            ? "BENCHTEST: PASS (auto-bench wounded, deploy<=cap, roster<=max, benched recover+preserved; a field event's recruit/release re-derives the deployment so the field is never cap+1 or cap-1)"
             : "BENCHTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
@@ -4831,6 +4867,21 @@ public partial class Game
     }
     public void DebugSetTurn(int t) => _turnCount = t;
     public int DebugAnimCount => _anims.Count;
+
+    /// W9 THE REPAIR — drive the REAL Game.ResolveEvent with a single synthetic outcome. BENCHTEST
+    /// needs the whole path (EventCatalog.Apply + the report line + the re-derive), not just Apply,
+    /// because the defect lived in the CALLER: ResolveEvent mutated the roster and never re-derived
+    /// the deployment that DebriefSurvivors had already computed.
+    public void DebugResolveEventOutcome(EventOutcome o)
+    {
+        _activeEvent = new GameEvent
+        {
+            Id = "w9probe", Title = "W9 PROBE", Flavor = "-",
+            Choices = new[] { new EventChoice { Label = "-", Preview = "-", Outcome = o } },
+        };
+        _eventNode = null;
+        ResolveEvent(0);
+    }
     public void DebugCheckEnd() => CheckEnd();
 
     /// SIGHTLINE_ONRAMPTEST — PROGRAM RESONANCE W5 "ON-RAMP". Two features, one test:
