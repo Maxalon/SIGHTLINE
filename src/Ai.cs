@@ -418,8 +418,9 @@ public static class Ai
             // lines (the PIKEMAN plant gate and the overwatch fallback), NEITHER of them here, so a
             // hostile with an empty weapon still planned a ShootTarget. A non-null ShootTarget then
             // suppressed the whole no-shot fallback block below, and Game.ActAfterMove's own
-            // `e.Ammo > 0` gate refused the shot — the unit stood there having spent nothing. That
-            // single missing term was 16% of all measured idle acts and 94% of every dry-weapon act.
+            // `e.Ammo > 0` gate refused the shot — the unit stood there having spent nothing. Measured
+            // on this tree: 120 of 1048 enemy acts were made on an empty weapon and 93 of those (77.5%)
+            // produced no action at all.
             if (actionsToReach <= 1 && (!Game.AiIdleFix || e.Ammo > 0))
             {
                 foreach (var p in players)
@@ -946,7 +947,7 @@ public static class Ai
                 // commanding perch it genuinely controls.
                 bool cmdOw = g.Grid.HeightAt(bestTile.x, bestTile.y) - g.Grid.HeightAt(nearest.X, nearest.Y) >= 2;
                 bool sees = g.Grid.HasLineOfSight(bestTile.x, bestTile.y, nearest.X, nearest.Y, cmdOw);
-                // W2 THE OPPONENT ACTS — the AMMO ECONOMY (docs/DESIGN.md §B.1). A dry gun is the
+                // W2 THE OPPONENT ACTS — the AMMO ECONOMY (docs/DESIGN.md §5.1). A dry gun is the
                 // FIRST thing worth an action: every other branch here either needs ammo (overwatch)
                 // or is a way of surviving until the unit has some. Ordered ahead of hunker on
                 // purpose — a hostile digging in behind cover with an empty weapon is the statue
@@ -958,7 +959,7 @@ public static class Ai
                 else if (sees && e.Ammo > 0 && !routing
                          && (!Game.AiIdleFix || !e.HasStatus(StatusKind.Disoriented))) plan.Overwatch = true;
                 else if (coverHere.Level > 0) plan.Hunker = true;
-                // W2 TERMINAL ELSE — the missing 84%. `if (watch) ... else if (cover) ...` with no
+                // W2 TERMINAL ELSE — the missing 87.6%. `if (watch) ... else if (cover) ...` with no
                 // final branch meant a hostile that had lost line of sight to the squad AND was
                 // standing on open floor got neither, and froze in the open holding a live action.
                 // It now spends that action on GROUND: re-target the move at the best tile the same

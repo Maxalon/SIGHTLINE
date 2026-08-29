@@ -6570,9 +6570,10 @@ public partial class Game
                 else if (_aiPlan.Reload && e.ActionsLeft > 0 && e.Ammo < e.Weapon.Clip)
                 {
                     // W2 THE OPPONENT ACTS — the enemy AMMO ECONOMY, decided rather than defaulted
-                    // into (docs/DESIGN.md §B.1). Hostiles used to be handed exactly one clip at spawn
-                    // with no reload verb anywhere, so "dry" was PERMANENT: 7.1% of measured enemy acts
-                    // were made with an empty weapon and 94% of those did nothing at all. A dry gun is
+                    // into (docs/DESIGN.md §5.1). Hostiles used to be handed exactly one clip at spawn
+                    // with no reload verb anywhere, so "dry" was PERMANENT: measured on this tree,
+                    // 120 of 1048 enemy acts (11.5%) were made with an empty weapon and 93 of those
+                    // (77.5%) produced no action at all. A dry gun is
                     // now RELOADED, on the player's own terms — one action, same clip refill as
                     // Game.DoReload — which makes running a hostile dry a real tempo window the player
                     // can bait and push into, instead of a unit that silently stops existing.
