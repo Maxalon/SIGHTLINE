@@ -692,6 +692,24 @@ public static class Voice
         var moved = shapes[0]; moved.Kills += 1;
         Chk(!ReferenceEquals(e1, Epilogue(moved)), "EPILOGUE memo returned a stale line set");
 
+        // ---- R1 REVIEW FIX: the tip/lesson card must never paint over the combat log ---------
+        // The ledger answers "why did that happen?" and outranks every teaching/flavour card that
+        // shares its y-band. Hud.TipCardBox is pure, so the contract is checkable without a frame:
+        // centred when there is no log, slid clear of Hud.LogPanelX when there is, never narrower
+        // than the text it has to hold, never off the left edge.
+        var tipFree = Hud.TipCardBox(false);
+        var tipLog  = Hud.TipCardBox(true);
+        Chk(tipFree.w == Hud.TipCardW, $"TIPCARD width changed with no log ({tipFree.w})");
+        Chk(MathF.Abs(tipFree.x - (Cfg.ScreenW / 2f - Hud.TipCardW / 2f)) < 0.5f,
+            $"TIPCARD not centred with no log (x={tipFree.x:0.#})");
+        Chk(tipLog.x + tipLog.w <= Hud.LogPanelX,
+            $"TIPCARD overlaps the combat log: right edge {tipLog.x + tipLog.w:0.#} > log x {Hud.LogPanelX:0.#}");
+        Chk(tipLog.x >= Hud.TipCardMinX - 0.01f, $"TIPCARD slid off the left edge (x={tipLog.x:0.#})");
+        Chk(tipLog.w >= 560, $"TIPCARD narrowed past readability ({tipLog.w}px)");
+        // and the log panel it dodges is where DrawCombatLog actually puts it
+        Chk(MathF.Abs(Hud.LogPanelX - (Cfg.ScreenW - Hud.LogPanelW - Hud.LogPanelMarginX)) < 0.01f,
+            "LOGPANELX drifted from the drawn panel");
+
         // leave the bark state clean for whatever runs next in this process
         BeginMission(0, 0);
         if (fails.Count == 0) return "VOICETEST: PASS";

@@ -637,7 +637,16 @@ public static class Mission
         // Restored the enemy headcount (4+n, cap 12) and the full per-mission stat bump (n-1) so the
         // now-strong squad faces a real fight; Heat's deltas still stack for the mastery ladder.
         int count = Math.Clamp(4 + n + enemyDelta, 3, 12);   // deployment-card + Heat modifier
-        int bump = Math.Max(0, (n - 1) + statDelta);         // stat growth per mission +/- card
+        // R1 REVIEW FIX — the floor was `Math.Max(0, ...)`, which silently ATE the RECRUIT rung's
+        // advertised relief on MISSION 1, the exact mission the on-ramp exists for: at n == 1 the
+        // growth term is 0, so heat 0 gave max(0, 0) = 0 and RECRUIT (statDelta -1) gave
+        // max(0, -1) = 0 — identical. Only the body count moved, while Hud.RecruitLines and
+        // Heat.RecruitMod.Desc both promise "each -1 HP and aim". The floor drops to -1: one point
+        // of force-wide relief may go BELOW the base, and no more (a deeper stack — RECRUIT plus a
+        // multi-tier adaptive assist — still bottoms out at -1, so no archetype can be trivialised).
+        // Heats 1-8 are bit-for-bit unchanged by construction: there statDelta = card.StatDelta +
+        // heatStat is never negative, so (n-1)+statDelta >= 0 and the new floor is unreachable.
+        int bump = Math.Max(-1, (n - 1) + statDelta);        // stat growth per mission +/- card (relief floor -1)
         // SABOTAGE relief (the weakest objective / m5 gate, ~65% -> aiming ~85%): the difficulty of
         // this objective IS the 3x split-and-go-loud tempo, not raw bodies, so trim the force by 2
         // (floored at 3) so a divided squad isn't also out-gunned. Stat bump is untouched and the

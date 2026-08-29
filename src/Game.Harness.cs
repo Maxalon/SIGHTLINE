@@ -4498,10 +4498,12 @@ public partial class Game
             fails.Add("heat0NotNoOp");
         if (Sightline.Heat.EnemyDelta(1) != 1 || Sightline.Heat.IntelBonus(1) != 3) fails.Add("heat1Moved");
 
-        // ---- (A2) the BUILT mission: same seed, one fewer + weaker hostile ------------------
+        // ---- (A2) the BUILT mission: a SEED SWEEP, one fewer + weaker hostile ----------------
         // Both legs replay the identical world (Util.Reseed before each), so the ONLY difference
-        // is the rung. This is the assertion that would catch the early-mission "heat grace"
-        // silently zeroing RECRUIT's relief on mission 1 — the mission a first-timer meets first.
+        // is the rung. This is the assertion that catches the early-mission "heat grace" (W5) and
+        // the SpawnEnemies bump FLOOR (R1) silently zeroing RECRUIT's relief on mission 1 — the
+        // mission a first-timer meets first.
+        //
         // W4 REPAIR — this probe used to compare the two legs' FORCE-WIDE per-enemy averages.
         // That is not a measurement of the stat relief, it is a measurement of the archetype MIX:
         // the two legs field different body counts, so they sit at different positions in the
@@ -4511,15 +4513,22 @@ public partial class Game
         // It is now composition-CONTROLLED: compare each archetype CLASS against itself across
         // the legs, which is exactly what `bump` moves.
         //
-        // It also surfaced a real W5 fact the old form hid: `Mission.SpawnEnemies` computes
-        // `bump = Math.Max(0, (n - 1) + statDelta)`, so at MISSION 1 the standard bump is already
-        // 0 and RECRUIT's −1 has nothing to take off. **RECRUIT's stat relief is a no-op on
-        // mission 1** — the body relief is the whole of it there. Asserted as it actually is, and
-        // recorded in DEVLOG §W4 as an open question for the owner (m1 is the mission a
-        // first-timer meets first, so the rung arguably wants a floor of −1 there).
-        (int count, Dictionary<string, (int n, int hp, int aim)> byCls) BuildAt(int heat, int mission)
+        // R1 REVIEW FIX — W4's per-class control is kept and two things are added on top:
+        //   * A SEED SWEEP. The old form asserted on the single hard-coded seed 4242, and a
+        //     reviewer's 12-seed probe of it scored 5 pass / 7 fail — a rung-wide claim needs a
+        //     rung-wide sample, and a test that is green on 5 seeds of 12 is worse than no test.
+        //   * A STRICT per-class row. Within one mission every member of a class shares one base,
+        //     so a class's mean HP/aim is exactly `base + bump`: with composition controlled the
+        //     relief is not "at least one class moved", it is EVERY shared rank-and-file class
+        //     moved, on every seed. Named ELITEs (the m3/m5 mid-boss, the finale boss) are spawned
+        //     with explicit stats and never read `bump`, so they are exempt by construction.
+        //   * And it now bites at MISSION 1 as well: W4 recorded, correctly, that the m1 relief
+        //     was a no-op because `bump = Math.Max(0, (n - 1) + statDelta)` floored RECRUIT's −1
+        //     away on the one mission the on-ramp exists for. That floor is now −1
+        //     (Mission.SpawnEnemies), so m1 is asserted exactly like m3 rather than excused.
+        (int count, Dictionary<string, (int n, int hp, int aim)> byCls) BuildAt(int heat, int mission, int seed)
         {
-            Util.Reseed(4242);
+            Util.Reseed(seed);
             _run = new Run(); _run.Start();
             _run.HeatLevel = heat;
             _run.CurrentCard = new MissionCard { Objective = Objective.Eliminate, ModName = "STANDARD", Reward = RewardKind.None };
@@ -4532,30 +4541,33 @@ public partial class Game
             }
             return (Enemies.Count, map);
         }
+        int[] sweepSeeds = { 1, 7, 42, 99, 123, 777, 1234, 2026, 4242, 8675, 31337, 65535 };
         foreach (int m in new[] { 1, 3 })
         {
-            var std = BuildAt(0, m);
-            var rec = BuildAt(-1, m);
-            if (rec.count != std.count - 1) fails.Add($"m{m}:count {rec.count} vs {std.count}");
-            if (rec.count <= 0 || std.count <= 0) { fails.Add($"m{m}:emptyBuild"); continue; }
-            // the per-mission bump is floored at 0, so the stat relief can only bite where the
-            // standard leg's bump is already >= 1 (mission 2 and up).
-            bool statReliefBites = (m - 1) >= 1;
-            int shared = 0, hpLower = 0, aimLower = 0;
-            foreach (var kv in rec.byCls)
+            int seedsChecked = 0;
+            foreach (int seed in sweepSeeds)
             {
-                if (!std.byCls.TryGetValue(kv.Key, out var sv)) continue;   // class only one leg fielded
-                shared++;
-                float rHp = kv.Value.hp / (float)kv.Value.n, sHp = sv.hp / (float)sv.n;
-                float rAim = kv.Value.aim / (float)kv.Value.n, sAim = sv.aim / (float)sv.n;
-                if (rHp > sHp) fails.Add($"m{m}:{kv.Key}:hpUp {rHp:0.##} vs {sHp:0.##}");
-                if (rAim > sAim) fails.Add($"m{m}:{kv.Key}:aimUp {rAim:0.##} vs {sAim:0.##}");
-                if (rHp < sHp) hpLower++;
-                if (rAim < sAim) aimLower++;
+                var std = BuildAt(0, m, seed);
+                var rec = BuildAt(-1, m, seed);
+                seedsChecked++;
+                if (rec.count != std.count - 1) { fails.Add($"m{m}s{seed}:count {rec.count} vs {std.count}"); continue; }
+                if (rec.count <= 0 || std.count <= 0) { fails.Add($"m{m}s{seed}:emptyBuild"); continue; }
+                int shared = 0;
+                foreach (var kv in rec.byCls)
+                {
+                    if (!std.byCls.TryGetValue(kv.Key, out var sv)) continue;   // class only one leg fielded
+                    // named ELITEs carry explicit stats and never read `bump` — the force's fixed
+                    // tooth, which the rung cannot and should not move.
+                    if (kv.Key == "ELITE") continue;
+                    shared++;
+                    float rHp = kv.Value.hp / (float)kv.Value.n, sHp = sv.hp / (float)sv.n;
+                    float rAim = kv.Value.aim / (float)kv.Value.n, sAim = sv.aim / (float)sv.n;
+                    if (!(rHp < sHp))  fails.Add($"m{m}s{seed}:{kv.Key}:hp {rHp:0.##} vs {sHp:0.##}");
+                    if (!(rAim < sAim)) fails.Add($"m{m}s{seed}:{kv.Key}:aim {rAim:0.##} vs {sAim:0.##}");
+                }
+                if (shared == 0) fails.Add($"m{m}s{seed}:noSharedClass");
             }
-            if (shared == 0) fails.Add($"m{m}:noSharedClass");
-            else if (statReliefBites && (hpLower == 0 || aimLower == 0))
-                fails.Add($"m{m}:statReliefMissing hp{hpLower}/aim{aimLower} of {shared}");
+            if (seedsChecked != sweepSeeds.Length) fails.Add($"m{m}:sweepShort {seedsChecked}/{sweepSeeds.Length}");
         }
 
         // ---- (A3) the bleed-out clock ------------------------------------------------------
@@ -4627,6 +4639,17 @@ public partial class Game
 
         // ---- (B3) both settings survive a REAL JSON round trip -------------------------------
         string dispPath = Display.SettingsPathPublic;
+        // R1 REVIEW FIX — and they must survive it in the SAME PLACE every launch. SaveGame.Dir
+        // guards a real hazard that Display.Dir did not: GetFolderPath(ApplicationData) returns
+        // "" when the resolved directory does not exist yet, so Path.Combine("", "Sightline") is
+        // a RELATIVE dir next to the process CWD. Saves and meta fell back to $HOME/.config;
+        // display.json did not, so settings scattered per launch directory and read back as a
+        // reset to the player — tutorial-tip flags, the four volume faders, animation speed and
+        // text scale all inherit it. Reproduce with XDG_CONFIG_HOME pointed at a directory that
+        // does not exist: before the fix this asserts `Sightline/display.json`, relative.
+        if (!System.IO.Path.IsPathRooted(dispPath)) fails.Add("displayPathRelative:" + dispPath);
+        if (System.IO.Path.GetDirectoryName(dispPath) != SaveGame.ConfigDir)
+            fails.Add($"displayDirSplit:{System.IO.Path.GetDirectoryName(dispPath)} vs {SaveGame.ConfigDir}");
         string dispStash = null; bool hadDisp = false;
         try { hadDisp = System.IO.File.Exists(dispPath); if (hadDisp) dispStash = System.IO.File.ReadAllText(dispPath); } catch { }
         try
@@ -4664,7 +4687,7 @@ public partial class Game
         }
 
         return fails.Count == 0
-            ? "ONRAMPTEST: PASS (RECRUIT rung -1: data row + built mission -1 body at m1 AND m3 with the -1 stat biting per-class from m2 (m1's bump is floored at 0), 5-turn bleed-out, checkpoint from m1 and once only, no mutator leak, no negative intel; heat 0 untouched; anim speed pinned 1x under AutoPlay/NoPersist; text scale symmetric + tapered; both settings round-trip, clamp, and default on a pre-W5 profile)"
+            ? "ONRAMPTEST: PASS (RECRUIT rung -1: data row + built mission -1 body and -1 stat on EVERY shared rank-and-file class, over a 12-seed sweep, at m1 AND m3; 5-turn bleed-out, checkpoint from m1 and once only, no mutator leak, no negative intel; heat 0 untouched; anim speed pinned 1x under AutoPlay/NoPersist; text scale symmetric + tapered; both settings round-trip, clamp, and default on a pre-W5 profile)"
             : "ONRAMPTEST: FAIL (" + string.Join(",", fails.Distinct()) + ")";
     }
 

@@ -35,6 +35,10 @@ public static partial class SaveGame
             return Path.Combine(root, "Sightline");
         }
     }
+    /// The one config directory this game writes to, with the empty-ApplicationData fallback
+    /// above already applied. Public so `Display` can share the guard instead of re-deriving the
+    /// path (R1 review: it re-derived it WITHOUT the fallback and could write a relative path).
+    public static string ConfigDir => Dir;
     static string FilePath => Path.Combine(Dir, "save.json");
     static string MetaPath => Path.Combine(Dir, "meta.json");
 

@@ -4652,3 +4652,95 @@ The two things I would tell the next wave, in order:
    options at constant threat (a terrain-grammar pass — more LOW cover, which raises the
    position axis without blocking the sightlines the target axis needs), or re-specify axis (b)
    with an additive band so it stops reading "the fight got safer" as "the decision got richer".
+
+---
+
+## PROGRAM RESONANCE — Wave R1 "REVIEW FIXES" (dev; worktree `wt-r1`)
+
+Four defects an adversarial review of the composed tree reproduced with probes. Each was
+re-reproduced here before being fixed, and each fix is measured against the reproduction.
+
+**FIX 1 — RECRUIT's advertised stat relief did not exist on mission 1.**
+`Mission.SpawnEnemies` floored the force-wide stat bump at 0: `Math.Max(0, (n-1) + statDelta)`.
+At `n == 1` the growth term is 0, so heat 0 gave `max(0, 0) = 0` and RECRUIT (`statDelta -1`)
+gave `max(0, -1) = 0` — identical. W5 had correctly stopped the early-mission *heat grace* from
+eating the relief; this floor ate it anyway, on the one mission the on-ramp exists for. Both
+`Hud.RecruitLines` and `Heat.RecruitMod.Desc` promise "each −1 HP and aim". Measured
+(4-seed rank-and-file totals, ELITEs excluded):
+
+| | m1 heat 0 | m1 RECRUIT before | m1 RECRUIT after |
+|---|---|---|---|
+| per-body HP  | 7.25 | **7.25** | **6.25** |
+| per-body aim | 58.50 | **58.50** | **57.50** |
+
+The floor is now −1: one point of force-wide relief may go below the base and no more, so a
+deeper stack (RECRUIT + a multi-tier adaptive assist) still bottoms out at −1. **Heats 1–8 are
+bit-for-bit unchanged**, proved with a 720-row heat×mission×seed roster fingerprint
+(heat −1..8 × 6 missions × 12 seeds, hashing class/name/HP/aim/pos/grenades/weapon): 15 RECRUIT
+rows move, all 648 rows at heats 0–8 are byte-identical. `SIGHTLINE_BALANCE=10` (runs=20) is
+report-identical to the pre-branch tip apart from wall-clock. Heat −1 pinned, n=20 paired
+campaigns: completion 85% → 85%, mission win-rate 97% (n=87) → 98% (n=89).
+
+**FIX 1b — `ONRAMPTEST`'s RECRUIT probe.** It asserted `recHp < stdHp` on the single hard-coded
+seed 4242; the reviewer's 12-seed sweep of that form scored 5 pass / 7 fail. Wave W4 landed a
+repair from the other direction (per-CLASS comparison, because the legs field different body
+counts and roll different archetypes) mid-wave. The two were **reconciled, not duplicated**:
+W4's composition control is the base, with R1's 12-seed sweep and a *strict* per-class row on
+top — within a mission every member of a class shares one base, so a class mean is exactly
+`base + bump`, and the claim is "every shared rank-and-file class moved, on every seed", not
+"at least one moved". Named ELITEs stay exempt (explicit stats, never read `bump`). W4 recorded
+the m1 no-op as an open owner question; FIX 1 closes it, so m1 is asserted like m3 rather than
+excused. Against the merged tip: without the floor change the sweep fails on all 12 seeds at m1
+(37 assertions, m3 clean); with it, PASS.
+
+**FIX 2 — the tip/lesson card occluded the combat log.** `DrawTipCard` is 760px centred
+(x 260..1020) and the log panel starts at x 970; both anchor to `_barTop`, so the card's
+0.96-alpha background covered ~50px — the speaker's name — on every log line. Not an edge case:
+most `FieldTip.When` predicates require a live threat, so tips fire mid-fight, exactly when the
+ledger is populated. C1's briefing guard (drop the card once the log has an entry) is right for
+flavour and wrong for teaching, so the tip card **yields space** instead: new pure
+`Hud.TipCardBox(logVisible)` slides it left until its right edge clears `Hud.LogPanelX`
+(202..962 at 1280), narrowing only if the slide runs out of room, and stays exactly centred when
+no log is drawn. `DrawCombatLog` reads `LogPanelX` too, so there is one source of truth.
+`VOICETEST` gains the no-overlap contract. Reproduced and re-shot at
+`SIGHTLINE_TIP=0 SIGHTLINE_AUTOPLAY=1 SIGHTLINE_SHOT=1100/1200`.
+
+**FIX 3 — `Display` settings could be written to a relative path.** `SaveGame.Dir` documents and
+guards the hazard: `GetFolderPath(ApplicationData)` returns `""` when the resolved directory does
+not exist, so it falls back to `$HOME/.config/Sightline`. `Display.Dir` re-derived the path
+without that guard, so `Path.Combine("", "Sightline")` was **relative** — settings scattered per
+launch directory and read back to the player as a reset while saves and meta went to the right
+place. Every field the recent waves added (tutorial tips, four volume faders, anim speed, text
+scale) inherited it. Now one derivation, one guard: `SaveGame.ConfigDir` is public and
+`Display.Dir` reads it; `ONRAMPTEST` asserts the settings path is rooted AND shares the save
+directory. Under `XDG_CONFIG_HOME=/nonexistent/...`, before:
+`displayPathRelative:Sightline/display.json` plus a real `Sightline/display.json` appearing next
+to the CWD; after: PASS and nothing written next to the CWD.
+
+**FIX 4 — `F` was double-bound: fullscreen AND focused overwatch.** `Game.Update` bound `F` to
+`Display.ToggleFullscreen` near the top of every frame; `HandlePlayerInput` bound `F` to
+`DoFocusOverwatch`. `IsKeyPressed` is true for both reads in the same frame, so pressing F during
+the player turn spent the soldier's action *and* toggled fullscreen, while the action bar
+advertises "FOCUS F". The HUD advertises the verb, so the verb wins: **fullscreen claims F11** —
+the platform convention, and besides F2 the only function key this game binds. Pause-menu key
+hint and `docs/FEATURES.md` corrected. Measured end to end under Xvfb with xdotool
+(keydown/hold/keyup ×3, in PlayerTurn with a soldier selected and interactive): before, F → 3
+FOCUS + 3 FULLSCREEN; after, F → 3 FOCUS + 0 FULLSCREEN; F11 → 0 FOCUS + 3 FULLSCREEN.
+*(Method note: `xdotool key` presses and releases inside one frame, so `IsKeyPressed` never sees
+it — the queue does. Hold the key across a frame or the experiment lies.)*
+
+**Key audit (asked for either way): `F` was the only double-binding.** The full in-mission
+player-turn map is now recorded as a comment at the global-key block in `Game.Update` — globals
+`M` mute / `F11` fullscreen / `F2` anim speed / `Esc` cancel-target-or-pause / `C` cam reset;
+verbs `1 2 F B 3 4 5 6 7 8 9 E G H X R T V P`, `Tab`, `Enter`, `Space`, WASD/arrows. No other key
+appears twice in one context. The other contexts (Intro, skirmish setup, codex, barracks/shop,
+tag editor) are each internally unique and are reached only when `UpdatePlayer` is not, so a
+letter may safely mean different things across them. **Free letters remaining: I J O Q U Z.**
+
+**Verification.** Release 0/0; `qa-sweep.sh --full` 45/45 PASS with no COVERAGE GAP block;
+`SIGHTLINE_PAIRTEST` PASS; autoplay ×5 clean (LOSE m5 / LOSE m6 / WIN m6 / WIN m6 / LOSE m5 — no
+exceptions, no TIMEOUT); `SIGHTLINE_BALANCE=10` runs=20, report-identical to the tip.
+
+**Left deliberately.** No key-rebinding UI (still descoped); the R1 fixes claim F11 by fiat.
+`Mission.cs` was touched on the single `bump` line only — W4 owns that file's deployment shapes;
+`Maps.cs`, `Ai.cs`, `Game.Autopilot.cs` and `Renderer.cs` untouched (W4 / V3).

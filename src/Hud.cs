@@ -26,13 +26,53 @@ public static class Hud
     // against them. Change a width below and the self-test re-checks every generated line for
     // free; write a line too long and the test fails instead of the game shipping an ellipsis.
     /// Combat-log panel width. C1 deliberately LEFT THIS ALONE at its historic 296: widening it
-    /// would have pushed the panel further under the centred 760px tip/lesson card that already
-    /// clips its right edge, and the ledger losing pixels to flavour is exactly backwards. The
+    /// would have pushed the panel further under the centred 760px tip/lesson card that then
+    /// clipped its left edge, and the ledger losing pixels to flavour is exactly backwards. The
     /// barks were written to the width instead, and VOICETEST measures every one of them.
+    /// R1 REVIEW FIX: the clash itself is closed — the tip card now yields this column whenever
+    /// the log is on screen (Hud.TipCardBox), and VOICETEST asserts the two never overlap.
     public const float LogPanelW = 296f;
     public const float LogPadX = 9f;
     /// Usable text column inside the combat log.
     public const float LogTextWidth = LogPanelW - LogPadX * 2f;
+    /// Right margin between the combat-log panel and the screen edge (DrawCombatLog's `x`).
+    public const float LogPanelMarginX = 14f;
+    /// Left edge of the combat-log panel — the column the centred tip/lesson cards must not cross.
+    public const float LogPanelX = Cfg.ScreenW - LogPanelW - LogPanelMarginX;   // 970
+    /// Shared width of the FIELD TIP / TRAINING lesson / briefing card chrome.
+    public const int TipCardW = 760;
+    /// Clear air kept between the tip card's right edge and the log panel's left edge.
+    public const float TipCardGap = 8f;
+    /// Minimum left margin for the tip card once it has been shifted off the log.
+    public const float TipCardMinX = 12f;
+
+    /// R1 REVIEW FIX — where the tip/lesson card actually starts.
+    ///
+    /// The card is 760px CENTRED, so on a 1280px screen it spans x 260..1020 while the combat-log
+    /// panel starts at x 970 (= LogPanelX). Both are anchored to `_barTop`, so their y-ranges
+    /// always meet: the card's 0.96-alpha background used to paint over the leftmost ~50px of
+    /// every log line — the speaker's name, about 5-6 characters, on every row. That is not an
+    /// edge case: most FieldTip.When predicates require a live threat, so tips fire mid-fight,
+    /// precisely when the log is populated and load-bearing ("why did that happen?").
+    ///
+    /// Wave C1 solved this for the BRIEFING by simply killing the card once the log has an entry
+    /// (Game.UpdateBriefing) — correct there, because a briefing is flavour. A teaching card is
+    /// not flavour and cannot be dropped, so it YIELDS SPACE instead: while the log is on screen
+    /// the card slides left until its right edge clears LogPanelX, and only narrows if the slide
+    /// runs out of room (it does not at 1280: 970 - 8 - 760 = 202 >= TipCardMinX). With no log
+    /// drawn the card is exactly where it always was, centred.
+    ///
+    /// Pure + static so SIGHTLINE_VOICETEST can assert the no-overlap contract without a frame.
+    public static (float x, int w) TipCardBox(bool logVisible)
+    {
+        int w = TipCardW;
+        float x = Cfg.ScreenW / 2f - w / 2f;
+        if (!logVisible) return (x, w);
+        float limit = LogPanelX - TipCardGap;
+        if (x + w > limit) x = limit - w;
+        if (x < TipCardMinX) { w -= (int)MathF.Ceiling(TipCardMinX - x); x = TipCardMinX; }
+        return (x, w);
+    }
     /// Briefing card: same 760px chrome as the FIELD TIP / lesson cards, same 16px padding.
     public const int BriefCardW = 760, BriefPad = 16, BriefFontSize = 15;
     public const int BriefBodyWidth = BriefCardW - BriefPad * 2;
@@ -180,7 +220,9 @@ public static class Hud
     /// lessons are the same visual object — one accent color apart).
     static void DrawTipCard(string head, string body, Color accent)
     {
-        int w = 760, x = Cfg.ScreenW / 2 - w / 2, pad = 16;
+        // R1: yield the log's column rather than paint over the ledger (see Hud.TipCardBox).
+        var box = TipCardBox(Stats.CombatLog.Count > 0);
+        int w = box.w, x = (int)box.x, pad = 16;
         // word-wrap the body at ~size 15
         var lines = WrapText(body, 15, w - pad * 2);
         int h = 40 + lines.Count * 20 + 10;
@@ -317,7 +359,7 @@ public static class Hud
         PauseUiScale    = new Rectangle(cx1, by, bw, bh);                   // W5 comfort
 
         DrawButtonRect(PauseResume, "RESUME", "ESC", true, false, Pal.Friend);
-        DrawButtonRect(PauseFullscreen, Display.Fullscreen ? "FULLSCREEN: ON" : "FULLSCREEN: OFF", "F", true, !Display.Fullscreen, Pal.Accent);
+        DrawButtonRect(PauseFullscreen, Display.Fullscreen ? "FULLSCREEN: ON" : "FULLSCREEN: OFF", "F11", true, !Display.Fullscreen, Pal.Accent);   // R1: was "F" — F is FOCUS
         DrawButtonRect(PauseWindow, "WINDOW: " + Display.SizeLabel, "", true, false, Pal.Accent);
         DrawButtonRect(PauseShake, g.Fx.ShakeOn ? "SCREEN SHAKE: ON" : "SCREEN SHAKE: OFF", "", true, !g.Fx.ShakeOn, Pal.Accent);
         // RESONANCE T2: three-state — OFF / SIMPLE (the pre-T2 single exposure tick) / FULL (graded
@@ -984,7 +1026,7 @@ public static class Hud
         float h = headH + bodyH + padY;
         // bottom edge sits just above the action bar's TOP row (the W10 bar can wrap to extra
         // rows that grow upward; _barTop tracks it) and clear of the unit card (x 20..270)
-        float x = Cfg.ScreenW - w - 14f;
+        float x = LogPanelX;               // one source of truth — Hud.TipCardBox keeps clear of it
         float y = MathF.Min(712f, _barTop - 8f) - h;
         var panel = new Rectangle(x, y, w, h);
 
