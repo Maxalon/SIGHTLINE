@@ -78,9 +78,9 @@ public static class Program
 
         // X3 CONFIRM — the CLASS ROLE knobs (Combat.cs). Unset/0 = the shipped tree exactly.
         //   SIGHTLINE_CLASSBAL=<n>  : the composite dose (ONE lever per measured round) — sets the
-        //                             four shooter damage deltas (-n SHARPSHOOTER / -n RANGER /
-        //                             +n GUNNER / +n ASSAULT, summing to zero) and the CORPSMAN
-        //                             FIELD PRESENCE aura. An explicit sub-knob below wins over it.
+        //                             four shooter damage deltas (SHARPSHOOTER -n/-n, RANGER 0/-n,
+        //                             GUNNER +n/0, ASSAULT +n/+n across the band's two ends) and the
+        //                             CORPSMAN FIELD PRESENCE aura. A sub-knob below wins over it.
         //   SIGHTLINE_SHARPDMG / _RANGERDMG / _GUNNERDMG / _ASSAULTDMG : the four damage deltas
         //   SIGHTLINE_GUNNERAIM=<n> : Combat.GunnerAimBonus  (0 in the composite)
         //   SIGHTLINE_MEDICAURA=<n> : Combat.MedicAuraReduce (-dmg/hit near a Corpsman)

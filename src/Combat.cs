@@ -191,10 +191,10 @@ public static class Combat
     /// Per-class damage deltas on a PLAYER soldier's shot, applied to both ends of the band
     /// (DmgMin floored at 1). Keyed on Unit.Cls, so a class carries its role through an armory
     /// weapon swap and a hostile with the same gun is never touched. All 0 by default.
-    public static int SharpDmgTrim = 0;      // SHARPSHOOTER: -n  (pays for reach + MARK)
-    public static int RangerDmgTrim = 0;     // RANGER:       -n  (pays for the +24 close band + crit 15)
-    public static int GunnerDmgBonus = 0;    // GUNNER:       +n  (paid for with the lowest aim + crit)
-    public static int AssaultDmgBonus = 0;   // ASSAULT:      +n  (paid for with no peak band anywhere)
+    public static int SharpDmgTrim = 0;      // SHARPSHOOTER: -n on BOTH ends  (pays for reach + MARK)
+    public static int RangerDmgTrim = 0;     // RANGER:       -n on the TOP end (pays for crit 15 + the +24 close band)
+    public static int GunnerDmgBonus = 0;    // GUNNER:       +n on the FLOOR  (paid for with the lowest aim + crit of the four)
+    public static int AssaultDmgBonus = 0;   // ASSAULT:      +n on BOTH ends  (paid for with no peak band anywhere)
     /// Aim points added to a player GUNNER's shot. Held at 0 in the shipped composite — kept as a
     /// separate lever for the hit%-spread half of the gate.
     public static int GunnerAimBonus = 0;
@@ -205,22 +205,30 @@ public static class Combat
     public static int MedicAuraReduce = 0;
     public const int MedicAuraRange = 2;   // Chebyshev tiles: a squad's natural spacing, not a touch
 
-    /// The player-class damage delta on this attacker's shot. 0 for every enemy and for every
-    /// class with no dialled-in delta, so the default tree is byte-identical.
-    static int RoleDmgDelta(Unit a)
+    /// The player-class damage deltas on this attacker's shot, one per BAND END. The shape of
+    /// each class's delta is part of the role, not just its size:
+    ///   SHARPSHOOTER  -n / -n   the whole band drops — it is no longer the biggest gun anywhere.
+    ///   RANGER        0 / -n    it loses its 7-damage CEILING (the burst spike) and keeps its floor.
+    ///   GUNNER       +n / 0     its FLOOR lifts — the volume gun stops rolling 3s; no new ceiling,
+    ///                            which is exactly the attrition role its 5-round clip is drawn for.
+    ///   ASSAULT      +n / +n    the whole band lifts to rifle-competitive; the generalist still has
+    ///                            no PEAK anywhere (its band equals the trimmed sniper's) and pays
+    ///                            with 2 less base aim, no reach and no range bonus.
+    /// 0 for every enemy and every un-dialled class, so the default tree is byte-identical.
+    static void RoleDmgDelta(Unit a, out int dMin, out int dMax)
     {
-        if (a.Team != Team.Player) return 0;
+        dMin = dMax = 0;
+        if (a.Team != Team.Player) return;
         switch (a.Cls)
         {
-            case "SHARPSHOOTER": return -SharpDmgTrim;
-            case "RANGER":       return -RangerDmgTrim;
-            case "GUNNER":       return  GunnerDmgBonus;
-            case "ASSAULT":      return  AssaultDmgBonus;
-            default:             return 0;
+            case "SHARPSHOOTER": dMin = -SharpDmgTrim;   dMax = -SharpDmgTrim;   break;
+            case "RANGER":                               dMax = -RangerDmgTrim;  break;
+            case "GUNNER":       dMin =  GunnerDmgBonus;                          break;
+            case "ASSAULT":      dMin =  AssaultDmgBonus; dMax =  AssaultDmgBonus; break;
         }
     }
-    static int RoleDmgMin(Unit a) => Math.Max(1, a.Weapon.DmgMin + RoleDmgDelta(a));
-    static int RoleDmgMax(Unit a) => Math.Max(RoleDmgMin(a), a.Weapon.DmgMax + RoleDmgDelta(a));
+    static int RoleDmgMin(Unit a) { RoleDmgDelta(a, out int lo, out _); return Math.Max(1, a.Weapon.DmgMin + lo); }
+    static int RoleDmgMax(Unit a) { RoleDmgDelta(a, out _, out int hi); return Math.Max(RoleDmgMin(a), a.Weapon.DmgMax + hi); }
 
     /// True when a living, standing CORPSMAN other than `d` is within MedicAuraRange of `d`.
     /// O(AllUnits) (<= ~18) and allocation-free, exactly like the crossfire scan beside it.
@@ -1831,7 +1839,15 @@ public static class Combat
             SharpDmgTrim = 1; GunnerDmgBonus = 1;
             var onS = ComputeOdds(gX, snp, tgt); var onG = ComputeOdds(gX, gun, tgt);
             if (onS.DmgMin != offS.DmgMin - 1 || onS.DmgMax != offS.DmgMax - 1) fails.Add("x3SharpTrim");
-            if (onG.DmgMin != offG.DmgMin + 1 || onG.DmgMax != offG.DmgMax + 1) fails.Add("x3GunnerBonus");
+            if (onG.DmgMin != offG.DmgMin + 1 || onG.DmgMax != offG.DmgMax) fails.Add("x3GunnerFloorOnly");
+            var rng = Shooter("RANGER", WeaponKind.Shotgun, Team.Player);
+            var asl = Shooter("ASSAULT", WeaponKind.Rifle, Team.Player);
+            var offR = ComputeOdds(gX, rng, tgt); var offA = ComputeOdds(gX, asl, tgt);
+            RangerDmgTrim = 1; AssaultDmgBonus = 1;
+            var onR = ComputeOdds(gX, rng, tgt); var onA = ComputeOdds(gX, asl, tgt);
+            if (onR.DmgMin != offR.DmgMin || onR.DmgMax != offR.DmgMax - 1) fails.Add("x3RangerTopOnly");
+            if (onA.DmgMin != offA.DmgMin + 1 || onA.DmgMax != offA.DmgMax + 1) fails.Add("x3AssaultBothEnds");
+            RangerDmgTrim = 0; AssaultDmgBonus = 0;
             var onFoe = ComputeOdds(gX, foe, foeD);
             if (onFoe.DmgMin != foe.Weapon.DmgMin) fails.Add("x3EnemyClsUntouched");
             // floor: a huge trim can never take a band below 1, and never inverts min/max
