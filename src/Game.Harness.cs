@@ -3833,12 +3833,20 @@ public partial class Game
     ///   (7) unreachable tiles are never computed, and the caged captive forecasts empty,
     ///   (8) the mover's real X/Y/Hunkered/MovedAfterFire survive the probe untouched,
     ///   (9) the post-move state model (moving drops HUNKER) is applied per tile, and
-    ///  (10) the signature cache actually suppresses redundant rebuilds.
+    ///  (10) the signature cache actually suppresses redundant rebuilds, and
+    ///  (11) R2 FIX 2 — the forecast is TRUE: for every weapon kind, the number the card shows is
+    ///       measured against 100k real Combat.Resolve rolls and must match the sample mean.
+    /// Leg (11) exists because legs (1)-(10) could not have caught the defect it guards. They
+    /// hand-recomputed the SAME formula the forecast used, so a wrong formula agreed with itself:
+    /// the card read 31-44% low for two years' worth of waves (crit AND graze both omitted, both
+    /// pushing the same way) and every assertion here passed. Comparing against the resolver is
+    /// the only kind of check that catches that class of defect.
     /// Finishes with a measured worst-case rebuild cost (198 tiles x 8 guns). One-line report.
     public string ThreatSelfTest()
     {
         NoPersist = true;
         var fails = new System.Collections.Generic.List<string>();
+        string groundTruth = "ground truth NOT MEASURED";
 
         // ---- deterministic combat statics (a prior test in the same process must not bleed in) ----
         Combat.AllUnits = System.Array.Empty<Unit>();
@@ -3907,7 +3915,7 @@ public partial class Game
         foreach (var e in new[] { a1, a2, a3 })
         {
             var o = Combat.ComputeOdds(Grid, e, sol);
-            wantExp += o.HitChance * 0.01f * ((Combat.HardenedReduce(sol, o.DmgMin, false) + Combat.HardenedReduce(sol, o.DmgMax, false)) * 0.5f);
+            wantExp += Combat.ExpectedDamage(sol, o);   // R2 FIX 2: the shared source of truth, ground-truthed in leg (11)
             float sc = o.HitChance * 1000f + (o.DmgMin + o.DmgMax);
             if (sc > wantScore) { wantScore = sc; wantBest = o.HitChance; wantCls = e.Cls; }
         }
@@ -4018,6 +4026,52 @@ public partial class Game
         Grid.Tiles[3, 3] = TileType.LowCover; ComputeThreat();
         if (ThreatRebuilds != r0 + 2) fails.Add("cacheDidNotInvalidateOnTerrainChange");
 
+        // ---------- (11) R2 FIX 2: GROUND TRUTH — the forecast vs 100k real Resolve rolls ----------
+        // One enemy attacker per weapon kind at a fixed range on open ground, firing at a soldier
+        // pinned off full HP (so Combat.FragileFloor — the only term ExpectedDamage deliberately
+        // omits — can never fire and skew the sample). The attacker is an ENEMY on purpose: the
+        // streak-breaker aim bonus Resolve folds into effHit is player-only, so the displayed
+        // HitChance is exactly the roll threshold and the comparison is apples to apples.
+        {
+            const int rolls = 100000;
+            double worstRel = 0; string worstName = "";
+            foreach (WeaponKind wk in System.Enum.GetValues(typeof(WeaponKind)))
+            {
+                var g2 = new Grid();
+                var atk = new Unit { Name = "FOE", Cls = "GRUNT", Team = Team.Enemy, X = 5, Y = 5, Hp = 6, MaxHp = 6,
+                                     Aim = 65, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+                atk.Weapon = Weapon.Make(wk);
+                var def = new Unit { Name = "SOL", Cls = "ASSAULT", Team = Team.Player, X = 9, Y = 5, Hp = 400, MaxHp = 401,
+                                     Aim = 65, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+                atk.Ammo = 9999; def.Ammo = def.Weapon.Clip;
+                if (Util.TileDist(atk.X, atk.Y, def.X, def.Y) > atk.Weapon.MaxRange) { fails.Add($"gt_{wk}_outOfRange"); continue; }
+                Combat.AllUnits = new System.Collections.Generic.List<Unit> { atk, def };
+
+                var o = Combat.ComputeOdds(g2, atk, def);
+                float shown = Combat.ExpectedDamage(def, o);
+                if (shown <= 0f) { fails.Add($"gt_{wk}_vacuousForecast"); continue; }
+
+                Util.Reseed(7723 + (int)wk);
+                long total = 0;
+                for (int i = 0; i < rolls; i++)
+                {
+                    def.Hp = 400;                     // never full HP -> FragileFloor stays out of the sample
+                    atk.ConsecutiveMisses = 0;        // enemy streak is inert in ComputeOdds; pin it anyway
+                    total += Combat.Resolve(g2, atk, def).Damage;
+                }
+                double measured = (double)total / rolls;
+                double rel = Math.Abs(measured - shown) / Math.Max(0.001, measured);
+                if (rel > worstRel) { worstRel = rel; worstName = wk.ToString(); }
+                // 2% is ~6 sigma at this sample size for every band here; the pre-fix formula was
+                // off by 31-44%, so this tolerance separates "true" from "wrong formula" by 15x.
+                if (rel > 0.02)
+                    fails.Add($"gt_{wk}_forecast={shown:0.000}_measured={measured:0.000}_off={rel * 100:0.0}%");
+            }
+            Combat.AllUnits = System.Array.Empty<Unit>();
+            if (worstName.Length == 0) fails.Add("gt_noWeaponSampled");
+            groundTruth = $"worst forecast-vs-Resolve error {worstRel * 100:0.00}% ({worstName}, {rolls} rolls/weapon)";
+        }
+
         // ---------- perf: worst case — every tile reachable, 8 armed guns ----------
         Scene(9, 5);
         for (int i = 0; i < 8; i++)
@@ -4036,7 +4090,7 @@ public partial class Game
 
         Combat.AllUnits = System.Array.Empty<Unit>();
         return fails.Count == 0
-            ? $"THREATTEST PASS (worst-case rebuild {ms:0.000} ms over {Cfg.GridW * Cfg.GridH} tiles x 8 guns; centre sees {guns})"
+            ? $"THREATTEST PASS ({groundTruth}; worst-case rebuild {ms:0.000} ms over {Cfg.GridW * Cfg.GridH} tiles x 8 guns; centre sees {guns})"
             : $"THREATTEST FAIL: {string.Join(", ", fails)}";
     }
 

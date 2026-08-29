@@ -661,6 +661,57 @@ public static class Combat
         return res;
     }
 
+    /// R2 FIX 2 — the TRUE expected damage of one shot with these odds against `d`, in HP.
+    /// Single source of truth for the incoming-fire forecast (Game.RecomputeThreat -> the
+    /// "expected" number on the threat card) and for THREATTEST, which now measures it against
+    /// real Combat.Resolve rolls instead of re-deriving the same formula.
+    ///
+    /// The old forecast was `hit% x mean(post-armor band)` and its comment claimed crits (up) and
+    /// "the graze floor (down)" cancelled as a neutral first-order read. The graze term is NOT
+    /// down: a graze deals max(1, reduce(DmgMin)) on a roll that would otherwise deal ZERO, so it
+    /// strictly ADDS. Both omitted terms pushed the same way and the card read 31-44% low
+    /// (measured, 200k Resolve rolls/weapon: Rifle 2.13 shown vs 2.96 real, Smg 1.42 vs 2.04).
+    /// On an 8 HP rookie the card said "~2" for a shot averaging 3 — in a game whose identity is
+    /// perfect-information tactics. This enumerates the real roll instead:
+    ///   P(clean hit) = effHit/100                  -> Uniform{DmgMin..DmgMax}, crit at CritChance
+    ///                                                 (ceil(dmg*1.5)+1), then armor, floor 1
+    ///   P(graze)     = (grazeTop - effHit)/100     -> max(1, reduce(DmgMin)), never crits
+    ///   otherwise 0. grazeTop mirrors Resolve exactly: min(effHit + GrazeBand, 100 - GrazeMinMiss).
+    /// EXCLUDED, deliberately and one-directionally: Combat.FragileFloor (a full-HP player cannot
+    /// be dropped below 1 HP by a SINGLE shot). It applies to at most the first shot of an
+    /// incoming volley and vanishes as soon as the soldier is chipped, so folding it into a
+    /// per-tile sum over every gun that can see the tile would under-read the volley. It only
+    /// ever caps damage, so the forecast stays the conservative (never-optimistic) read there.
+    /// Also excluded: Resolve's `aimMod` (the -10 overwatch reaction penalty and Guardian's
+    /// cancel of it), which the forecast has no shot context for — the same omission as before.
+    /// PURE: no RNG draw, no mutation. HardenedReduce's only side effect (HvtGuardReducePending)
+    /// is gated on an ENEMY defender, and the forecast's defender is always the player's soldier.
+    public static float ExpectedDamage(Unit d, in ShotOdds o)
+    {
+        int effHit = Util.Clamp(o.HitChance, 1, 99);
+        double grazeTop = Math.Min(effHit + GrazeBand, 100.0 - GrazeMinMiss);
+        double pHit = effHit / 100.0;
+        double pGraze = Math.Max(0.0, grazeTop - effHit) / 100.0;
+
+        // graze leg: minimum damage through armor, floored at 1, never a crit
+        double grazeDmg = Math.Max(1, HardenedReduce(d, o.DmgMin, crit: false));
+
+        // clean-hit leg: the uniform band, each roll independently crit-rolled
+        int lo = Math.Min(o.DmgMin, o.DmgMax), hi = Math.Max(o.DmgMin, o.DmgMax);
+        double pCrit = Util.Clamp(o.CritChance, 0, 100) / 100.0;
+        double sum = 0;
+        for (int raw = lo; raw <= hi; raw++)
+        {
+            double plain = Math.Max(1, HardenedReduce(d, raw, crit: false));
+            int critRaw = (int)MathF.Ceiling(raw * 1.5f) + 1;
+            double critted = Math.Max(1, HardenedReduce(d, critRaw, crit: true));
+            sum += (1.0 - pCrit) * plain + pCrit * critted;
+        }
+        double hitDmg = sum / Math.Max(1, hi - lo + 1);
+
+        return (float)(pHit * hitDmg + pGraze * grazeDmg);
+    }
+
     /// Fragile-unit anti-one-shot floor: a PLAYER unit (Team.Player, incl. the VIP) that is at
     /// FULL HP cannot be dropped below 1 HP by a SINGLE shot — cap the damage at MaxHp-1 so a lucky
     /// crit leaves them clinging at 1 HP instead of dead. Softens the worst output-randomness
