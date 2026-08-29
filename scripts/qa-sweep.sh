@@ -172,5 +172,3 @@ echo "($_exist self-tests exist in src/; this sweep ran $_ran of them, plus the 
 echo " Both counts are derived at runtime, not typed. The COVERAGE GUARD block above is the real"
 echo " check — if it is empty, every self-test in src/ was invoked. Every line above must read PASS,"
 echo " and every autoplay must read WIN or LOSE — never TIMEOUT, never blank.)"
-echo "(50 self-tests exist; this sweep ran $([ "$FULL" = 1 ] && echo 48 || echo 47). Every line above"
-echo " must read PASS, and every autoplay must read WIN or LOSE — never TIMEOUT, never blank.)"
