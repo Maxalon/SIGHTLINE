@@ -600,6 +600,11 @@ public static class Mission
     /// Default 4 = the historical force size.
     public static int EnemyBaseCount = 4;
 
+    /// X2 (SIGHTLINE_OPENERTRIM): bodies removed from the BASE force on the opening missions —
+    /// the full trim on mission 1, half (rounded up) on mission 2, none from mission 3. The same
+    /// shape as Game.SetupMission's heat grace, applied to the force heat's grace cannot reach.
+    public static int OpenerTrim = 0;
+
     /// W4 — every body in a pod fields the pod LEAD's archetype (see the spawn loop). SHIPPED
     /// ON: measured exactly ladder-neutral (32.5% = 32.5% run completion, n=40) for the wave's
     /// biggest single gain on the "which target?" axis (+0.06 target-choices/ARMED) and
@@ -644,6 +649,19 @@ public static class Mission
         // round can price the BODY lever against the ACCURACY lever without a rebuild.
         int count = Math.Clamp(EnemyBaseCount + n + enemyDelta, 3, 12);   // deployment-card + Heat modifier
         int bump = Math.Max(0, (n - 1) + statDelta);         // stat growth per mission +/- card
+        // X2 TRUE NORTH II — THE COLD OPENER. Game.SetupMission already ramps HEAT's escalation in
+        // over m1-2 ("the measured ~20% mission-1 loss, which hard-caps run completion"), but that
+        // grace is gated on heat > 0, so the BASE force meets the coldest squad in the game with no
+        // ramp at all: 5 hostiles against 4 rookies with no promotion, perk, mod or boon — and,
+        // since X1, +3 HP each. The X2 baseline measured mission 1 at 75% win (n=40) against
+        // 90% for missions 3-4, i.e. the difficulty curve is U-SHAPED at heat 0 and the opener is
+        // as lethal as the finale — exactly the front-loaded anxiety DESIGN.md §3.D forbids.
+        // RECRUIT ran the experiment for us: over the SAME 40 worlds its only mission-1 difference
+        // is one fewer body (its -1 stat is a no-op at m1, where bump is already 0), and mission 1
+        // reads 100% (n=40, zero losses). OpenerTrim gives the base force the same ramp heat has:
+        // full trim on m1, half on m2, nothing from m3. Default 0 = the pre-X2 opener.
+        if (OpenerTrim > 0 && n <= 2)
+            count = Math.Max(3, count - (n == 1 ? OpenerTrim : (OpenerTrim + 1) / 2));
         // SABOTAGE relief (the weakest objective / m5 gate, ~65% -> aiming ~85%): the difficulty of
         // this objective IS the 3x split-and-go-loud tempo, not raw bodies, so trim the force by 2
         // (floored at 3) so a divided squad isn't also out-gunned. Stat bump is untouched and the
