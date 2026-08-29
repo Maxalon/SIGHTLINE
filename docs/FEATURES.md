@@ -687,7 +687,11 @@ branch point.
   the six screen builders) into `_target`, runs `BuildBloom` on **that**, and only then paints the
   chrome into the same target — so no plate can flood its own label, while brightness, gamma, the
   biome grade and the vignette stay uniform across the whole frame. `Hud.BackdropOwnsFrame` skips
-  the in-mission chrome on the seven screens with an opaque backdrop. Main-menu TRAINING OP:
+  the in-mission chrome on the **eight** screens with an opaque backdrop — Intro, Win, Lose,
+  Skirmish setup, War Room, Codex, Draft and **AUDIO CHECK**, which W5 missed and W5-FIX added
+  (it drew its own backdrop from the chrome pass, so the composite added the live board's glow
+  straight through it: 17,010 px brightened >20 luma against a `d350416` build, now 0).
+  Main-menu TRAINING OP:
   **2.19:1 → 10.76:1** glyph-vs-plate with post-FX ON. (`SIGHTLINE_CONTRASTTEST` boots a real
   1280x800 window and reads the framebuffer back; `SIGHTLINE_HUDINFX=1` puts the chrome back in
   the bloom source and turns it red.)
@@ -713,8 +717,18 @@ branch point.
 - **The CONCEALED pill breathes 0.56–1.00** instead of 0.10–1.00 (`Hud.ConcealPulse`, read by both
   the renderer and the test).
 - **Doctrine cards size to their content** (`Hud.DraftBoonCardHeight`) and the operator blurb's row
-  clears the class-glyph disc. (`SIGHTLINE_CHROMETEST` covers all three chrome items;
+  clears the class-glyph disc. The whole draft screen is laid out by **one** clamped stack
+  (`Hud.DraftLayout`), which reclaims a taller card's height from the gaps rather than pushing the
+  DEPLOY row off the bottom, and the doctrine row spans the same width as the RUN CONTRACT row
+  beneath it. `[R]` re-rolls the pool. (`SIGHTLINE_CHROMETEST` covers all three chrome items and
+  asserts the DEPLOY row is on screen for all 16 boons × all 4 text sizes;
   `SIGHTLINE_OLDCHROME=1` restores the pre-W5 chrome and turns it red.)
+- **One registry owns the full-screen backdrops** (`Hud.BackdropPhase` + `Hud.DrawBackdropLayer`'s
+  switch — every `DrawTacticalBackdrop` call in the project lives in that switch).
+  `SIGHTLINE_BACKDROPTEST` drives every `Phase` through the chrome pass and fails if any screen
+  builder paints a backdrop of its own, then checks the registry and the switch are the same set,
+  then that the modal scrim doubles only where the composite runs. (`SIGHTLINE_AUDBACKDROP=1`
+  restores the AUDIO CHECK defect and turns it red.)
 - **Teaching layer:** both "glowing tile" prompts rewritten to name the CYAN OUTLINE, the corner
   ticks and the DASHED outer ring; **FIELD CRAFT** gains **SHOVE** and **UTILITY ITEMS** rows (the
   two verbs whose only explanation was a one-shot 9-second tip); and a new **VERBS & KEYS** codex
