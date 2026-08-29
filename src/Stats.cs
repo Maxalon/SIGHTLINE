@@ -1039,6 +1039,12 @@ public static class Stats
 
         return new
         {
+            // TRUE BAND: the DECISION-DENSITY INSTRUMENT this batch was measured on. "mult-v1" is
+            // the multiplicative near-best window every number archived before 2026-08-29 used;
+            // "add-v2" is the additive band shipped by wave TRUE BAND. The two are NOT comparable
+            // on any `choices*` field, so a comparison script must refuse a diff across them —
+            // which is why this is emitted as data instead of trusted to a doc banner.
+            instrument = Game.InstrumentTag,
             runs = Runs.Count,
             // APEX W4: run counts by mode, so a consumer can see at a glance what the batch mixed.
             runsByMode = Runs.GroupBy(r => r.Mode).OrderBy(g => g.Key).ToDictionary(g => g.Key, g => g.Count()),

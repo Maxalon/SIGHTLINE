@@ -4,7 +4,7 @@
 Compares two SIGHTLINE_BALANCE aggregate JSONs that differ ONLY in the choice-band rule
 (SIGHTLINE_CHOICEBAND) on the SAME slot base.  CountMeaningfulChoices is read-only
 bookkeeping, so EVERY field except the four decision-richness fields must be byte-identical.
-Usage: diff_chunks.py <a.json> <b.json>
+Usage: diff_chunks.py <a.json> <b.json> [--cross]
 Exit 0 = inert (only the whitelisted choice fields moved).
 """
 import json, sys
@@ -31,8 +31,24 @@ def walk(node, path=""):
         yield path, node
 
 
-a = dict(walk(json.load(open(sys.argv[1]))))
-b = dict(walk(json.load(open(sys.argv[2]))))
+ja, jb = json.load(open(sys.argv[1])), json.load(open(sys.argv[2]))
+
+# TRUE BAND: `instrument` names the decision-density instrument the batch was measured on.
+# A diff ACROSS instruments is the thing this wave exists to prevent being done by accident,
+# so it is allowed only when explicitly asked for (--cross), and it is then reported loudly.
+ia, ib = ja.get("instrument", "unknown"), jb.get("instrument", "unknown")
+cross = "--cross" in sys.argv
+if ia != ib and not cross:
+    print(f"REFUSING: instrument mismatch ({ia} vs {ib}). The `choices*` fields are not "
+          f"comparable across instruments. Re-run with --cross if that is deliberate.")
+    sys.exit(2)
+if ia != ib:
+    print(f"!! CROSS-INSTRUMENT DIFF ({ia} vs {ib}) — every `choices*` delta below is an "
+          f"instrument artefact, not a game effect.")
+
+a = dict(walk(ja))
+b = dict(walk(jb))
+a.pop("instrument", None); b.pop("instrument", None)
 
 keys = sorted(set(a) | set(b))
 moved_choice, moved_other = [], []

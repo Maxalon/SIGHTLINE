@@ -411,9 +411,14 @@ before 2026-08-29 — W4's ~1.6, X1's ~1.5, X2's 1.44-1.78 — is a MULTIPLICATI
 comparable to anything measured since.** `SIGHTLINE_CHOICEBAND=mult` reproduces the old rule
 exactly; `SIGHTLINE_BANDTEST` pins that reproduction against a literal transcription. It also
 corrected W4's stated mechanism: `pbest` does **not** fall with threat (median 40 at every rung,
-n=848 soldier-turns) — what flattened axis (b) was the cap of **2**, which sat below the median of
-the admitted-count distribution. Proven gameplay-inert (686 aggregate fields diffed on five paired
-batches, zero non-choice fields moved). DEVLOG §TRUE BAND; raw chunks `docs/measurements/tb/`.
+n=848 soldier-turns) — what compressed axis (b) was the cap of **2**, which retained only 41-55%
+of the uncapped signal (cap 4 retains 60-84%). **The CAP, not the band, is the half that moves the
+number**: the exact 2x2 reads a band effect of −0.150/−0.098/−0.141 against a cap effect of
++0.510/+0.601/+0.570 at h0/h4/h8. Proven gameplay-inert (600-686 aggregate fields diffed on five
+paired batches, **zero** non-choice fields moved on every one).
+**W4's gates `ch/ARMED >= 2.00` and `meaningful-choices/turn >= 3.00` are now VOID, not met** —
+this tree reads 2.389 / 3.738 at h0, but the thresholds were set on the old instrument, so nobody
+may claim them until they are restated. DEVLOG §TRUE BAND; raw chunks `docs/measurements/tb/`.
 
 ## Handoff protocol (when context gets heavy)
 You judge when context rot risks quality (don't wait for the 1M hard limit). Before stopping:

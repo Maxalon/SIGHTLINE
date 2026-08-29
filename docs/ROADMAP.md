@@ -1407,30 +1407,51 @@ sets, one lever per measured round, fresh same-slot R0 first, dip budgets, breac
 
 ### PROGRAM RESONANCE — TRUE BAND (2026-08-29, details in DEVLOG §TRUE BAND)
 
+- [x] **THE CAP, NOT THE BAND, IS THE HALF THAT MOVES THE NUMBER** (post-review correction). The
+      probe's exact same-denominator 2x2 — {mult window, additive band} x {cap 2, cap 4} over the
+      same soldier-turns — reads, at heats 0/4/8 on common base 50: **band effect at fixed cap
+      −0.150 / −0.098 / −0.141** (the additive band is NARROWER than the window it replaced and
+      admits strictly fewer destinations at every rung) against a **cap effect of +0.510 / +0.601
+      / +0.570**. The wave's first write-up credited the lift to the band; it is entirely the cap,
+      and the band's own contribution is negative. The band is still right — stated in the score's
+      own units, immune to the score's absolute level, not degenerate at a non-positive best — but
+      **"it raised the number" is not a reason to prefer it.**
 - [x] **THE SPEC ABOVE IS SHIPPED — `CountMeaningfulChoices` now bands both axes ADDITIVELY**
       (`ShotBand` 2 shot-value points, `PosBand` 3 safety points, `PosChoiceCap` raised 2 → 4;
       `SIGHTLINE_CHOICEBAND=mult` restores the pre-wave rule exactly). Proven **gameplay-inert**:
-      686 aggregate fields diffed on **five** paired mult/add batches (each pair on one slot base;
-      heats 0/4/8 on base 50 plus heats 4/8 on bases 60/70) — **zero non-choice fields moved** on
-      every one, PAIRTEST green. `SIGHTLINE_BANDTEST` pins the
+      **600-686 aggregate fields diffed on five** paired mult/add batches (each pair on one slot
+      base; heats 0/4/8 on base 50 plus heats 4/8 on bases 60/70), 10-12 choice fields moving and
+      **zero non-choice fields moved on every one** — the field counts differ per pair because
+      `byDeploy`/`byObjective`/`byArena` are variable-length arrays. PAIRTEST green. `SIGHTLINE_BANDTEST` pins the
       constants, the rule, the exact reproduction of the pre-wave counts against a literal
       transcription over 120 boards, no state mutation and zero `Util.Rng` draws (with a
       sensitivity probe on the purity detector). `SIGHTLINE_BANDPROBE=1` ships as the
       instrument-design probe that chose the constants.
 - [x] **THE SPEC'S PREMISE WAS FALSE AND IS NOW CORRECTED IN THE RECORD.** `pbest` does **not**
       slide with threat: measured over 848 armed soldier-turns it is pinned at a **median of 40**
-      at heats 0, 4 and 8 (the "full cover, unexposed, ground level" value 24 + 2×8), and its mean
-      *rises* with heat. The multiplicative window was ~6 points wide at every rung and was never
+      at heats 0, 4 and 8 (the "full cover, unexposed, ground level" value 24 + 2×8), confirmed in
+      all five chunks. (Its *mean* also rises with heat on the common CRN base, but that reverses
+      off-base and is world-set noise — not claimed.) The multiplicative window was ~6 points wide at every rung and was never
       shrinking; the `pbest > 0` guard fires on 0.0-1.0% of soldier-turns. **What actually flattened
       axis (b) was the anti-inflation CAP of 2**, which sat between the p25 and p50 of the
-      admitted-count distribution and retained only 41-55% of the signal — it was clipping the
-      median turn, not a tail.
+      admitted-count distribution: `Math.Min(cap, admitted-1)` means cap 2 first binds at
+      `admitted >= 4` (~p70-75) and cap 4 at `admitted >= 6` (~p80-88), so cap 2 retained only
+      **41-55%** of the uncapped signal where cap 4 retains 60-84%. (An earlier version of this
+      bullet said cap 2 "clipped the median turn". That was arithmetically false — review caught
+      it — and it is corrected rather than deleted.)
 - [ ] **⚠ EVERY `ch/ARMED` / `ch/turn` / `target-choices` / `position-choices` NUMBER IN THIS FILE
       AND IN `docs/DEVLOG.md` DATED BEFORE 2026-08-29 IS A *MULTIPLICATIVE* NUMBER** and is not
       comparable to anything measured after TRUE BAND. That includes the W4 section above
       (1.55-1.64, 1.70 vs 1.39, the whole `[choice-split]` table), X1's ~1.5, X2's 1.44-1.78 rung
       column, and FUL-13's. They are left in place as provenance. Re-derive with
       `SIGHTLINE_CHOICEBAND=mult` rather than comparing across the change.
+- [ ] **W4's TWO DECISION-DENSITY GATES ARE VOID AND MUST BE RESTATED BEFORE ANYONE CLAIMS THEM.**
+      On the new instrument this tree reads `ch/ARMED` **2.389** and `meaningful-choices/turn`
+      **3.738** at heat 0, crossing W4's published `>= 2.00` and `>= 3.00` (which W4 recorded as
+      MISSED at 1.53 / 2.36). **That is not a pass.** Both thresholds were set against the
+      multiplicative instrument and name quantities that no longer exist; the numbers moved
+      because the ruler did, and §4's inertness proof shows the game did not move at all.
+      Restating them is a judgement call about what a rich turn is, and it wants its own round.
 - [ ] **THE RUNG-SEPARATION QUESTION IS STILL OPEN — n=10 could not answer it.** TRUE BAND
       re-baselined at `SIGHTLINE_BALANCE=5` per chunk (10 campaigns, `runs=10` asserted ×10). The
       *paired* mult→add delta is exact (identical worlds, identical play), but the rung-to-rung
@@ -1443,6 +1464,23 @@ sets, one lever per measured round, fresh same-slot R0 first, dip budgets, breac
       "1.55-1.64 across five levers" is what this wave exists to answer, and TRUE BAND disproved
       the *mechanism* it blamed without re-measuring the *phenomenon* at n=40. It may still be
       near-invariant for a reason nobody has found yet.
+- [x] **The archive split is now enforced in DATA, not just in a banner** (review's own point that
+      the banner was weak, which the wave had conceded). `SIGHTLINE_CHOICEBAND` is STRICTLY parsed
+      — anything but `mult`/`add`/unset makes the binary refuse to start with exit 2, instead of a
+      typo silently selecting the new rule — and every `SIGHTLINE_BALANCE` aggregate now carries
+      an `instrument` field (`"mult-v1"` / `"add-v2"`). `diff_chunks.py` REFUSES a cross-instrument
+      diff unless passed `--cross`, and says why.
+- [ ] **SPEC: axis (a)'s additive band is still magnitude-dependent at the bottom of its range.**
+      When the best shot is worth under `ShotBand` (2) points — measured p5 is 2-4, so rare but
+      not empty — the cut `best - 2` is at or below zero and **every** rival is admitted however
+      worthless: at `best = 1.5` the band is 133% of the best, which is the same
+      magnitude-dependence TRUE BAND removed, mirrored. The shipped `floorAtZero` clamp documents
+      the invariant that makes it arithmetically harmless today (every `ShotValue` is > 0, so the
+      interval `[best-2, 0)` is empty of candidates — `SIGHTLINE_BANDTEST` asserts the positivity
+      over 200+ real shots) but it does **not** fix the wart. The real options are a hybrid cut
+      (`max(best - ShotBand, 0.5 * best)`, a multiplicative FLOOR under an additive band) or an
+      eligibility floor on `best` itself. Both are new levers and neither belongs in a wave that
+      already shipped two — measure it as its own round.
 - [ ] **`SafetyAt` deserves the scrutiny the band just got.** It consults only the NEAREST foe for
       cover, ignores whether a destination keeps a shot, and its `24` base is arbitrary. Any of
       those could matter more to axis (b) than the band shape did. Deliberately out of scope for a

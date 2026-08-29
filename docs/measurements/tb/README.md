@@ -19,11 +19,31 @@ from `const` to `static readonly` (same values — done so `SIGHTLINE_BANDTEST` 
 the compiler folding the comparison away), and comment-only changes. Nothing in `Game.Harness.cs`,
 `Program.cs` or `scripts/` that landed after the snapshot is reachable from a balance batch.
 
+**How that logic identity was actually established — and how the contract says it should have
+been.** `CLAUDE.md`'s measurement contract asks for an **`R0diag` chunk**: run the newly
+instrumented tree lever-off on a pinned slot set and diff the per-slot records BEFORE spending a
+round. This wave did not do that. It established identity **post hoc** instead, three ways:
+(1) the five paired `mult`/`add` diffs below, which show zero non-choice movement; (2) a
+reviewer's independent cross-tree check against a fresh build of `main` — 529 fields compared,
+**0 moved** — which is the R0diag the contract wanted, run by someone else and after the fact;
+and (3) the `v2-*` chunks below, re-run on `runbin/tb3` (the post-review tree, carrying the
+axis-(a) zero floor, the `AdmitNearBest` extraction, the strict `CHOICEBAND` parse and the probe's
+2x2 accumulators) and diffed against the `add-*` chunks they replicate. Post-hoc verification that
+comes back clean is still weaker than the pre-flight diagnostic the contract specifies, and it is
+recorded that way rather than presented as equivalent.
+
 > **THIS WAVE CHANGED THE INSTRUMENT.** Every `ch/ARMED`, `ch/turn`, `target-choices/ARMED` and
 > `position-choices/ARMED` number archived anywhere else in this repo — X1, W4, X2, FUL-13 —
 > was measured on the multiplicative instrument and is **not comparable** to anything measured
 > after this wave. `SIGHTLINE_CHOICEBAND=mult` reproduces the old rule exactly if one ever has
 > to be re-derived; `SIGHTLINE_BANDTEST` pins that reproduction against a literal transcription.
+>
+> Since the post-review pass this is **enforced in data, not prose**: every aggregate written from
+> here on carries an `instrument` field (`"mult-v1"` / `"add-v2"`), `diff_chunks.py` refuses a
+> cross-instrument diff unless given `--cross`, and a mistyped `SIGHTLINE_CHOICEBAND` makes the
+> binary refuse to start (exit 2) rather than silently selecting the new rule. The chunks archived
+> here that predate that field report `unknown` and diff normally — `probe-*`, `mult-*` and
+> `add-*` are all pre-field; only the `v2-*` chunks carry a real tag.
 
 ## How every chunk was run
 
@@ -75,6 +95,7 @@ carries no sampling error at all.
 | `mult-h8` / `add-h8` | mult / add | 8 | 70 | paired inertness |
 | `mult-h4b` / `add-h4b` | mult / add | 4 | 50 | rung read on the SAME world set as h0 |
 | `mult-h8b` / `add-h8b` | mult / add | 8 | 50 | rung read on the SAME world set as h0 |
+| `v2-add-h0/h4/h8` | add | 0/4/8 | 50 | post-review re-run on `runbin/tb3`: replicates `add-h0`/`add-h4b`/`add-h8b` to prove the post-review source changes inert, and carries the probe's exact same-denominator 2x2 decomposition |
 
 The `*-h4`/`*-h8` pairs were run on their own bases before it was noticed that a rung-to-rung
 comparison needs a *common* slot set; the `b` chunks redo h4 and h8 on base 50 so the three-rung
@@ -89,10 +110,24 @@ python3 docs/measurements/tb/diff_chunks.py <mult>.json <add>.json
 
 flattens both aggregates to dotted scalar paths and reports every field that moved.
 `CountMeaningfulChoices` is read-only bookkeeping, so **only the decision-richness fields may
-move**. Result, on **all five** mult/add pairs (heats 0/4/8 on base 50, plus heats 4/8 on bases
-60/70): **686 fields compared, 0 non-choice fields moved, VERDICT INERT.** Run completion,
-missions, `byObjective`, `byMission`, `byHeat`, `lossCauses`, `actionMix`, `armedSoldiersPerTurn`,
-`losTargetsPerArmedSoldierTurn` and the per-slot paired records — all byte-identical.
+move**. Result, on **all five** mult/add pairs:
+
+| pair | fields compared | choice fields moved | non-choice fields moved |
+|---|---|---|---|
+| heat 0, base 50 | 686 | 10 | **0** |
+| heat 4, base 50 | 662 | 12 | **0** |
+| heat 8, base 50 | 600 | 10 | **0** |
+| heat 4, base 60 | 641 | 10 | **0** |
+| heat 8, base 70 | 642 | 12 | **0** |
+
+The totals differ per pair because `byDeploy`/`byObjective`/`byArena` are variable-length arrays —
+a shorter batch flattens to fewer dotted paths. Run completion, missions, `byObjective`,
+`byMission`, `byHeat`, `lossCauses`, `actionMix`, `armedSoldiersPerTurn`,
+`losTargetsPerArmedSoldierTurn` and the per-slot paired records are byte-identical in every pair.
+
+`diff_chunks.py` also REFUSES a diff whose two aggregates carry different `instrument` tags
+(`--cross` overrides, loudly). Chunks archived before that field existed report `unknown` and
+still diff normally.
 
 `table.py` prints the summary table used in the DEVLOG; `deltas.py` prints the paired
 mult -> add lift per rung and each instrument's spread across the three rungs.

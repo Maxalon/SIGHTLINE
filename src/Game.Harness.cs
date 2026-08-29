@@ -5009,6 +5009,12 @@ public partial class Game
         // subtract the scene builder's own draws.
         var scenes = new Random(20260829);
         int n = 0, bandMoved = 0, posMoved = 0;
+        // review fix: the ADD mode is the rule every future archived number will be measured
+        // with, and the first version of this test pinned NO additive behaviour at all. Three
+        // knob-level breaks are tracked scene by scene so each pin can be shown NON-VACUOUS —
+        // a pin that never differs from its variant is a pin that cannot fail.
+        int capPinLive = 0, shotBandPinLive = 0;
+        ulong golden = 1469598103934665603UL;   // FNV-1a over the add-mode (total,tgt,pos) triples
         for (int s = 0; s < 120; s++)
         {
             BuildBandScene(scenes);
@@ -5023,6 +5029,22 @@ public partial class Game
             MultChoiceBand = false;
             int at = CountMeaningfulChoices(out int aAct, out int aArm, out int aLos, out int aTgt, out int aPos);
             if (aTgt + aPos != at) fails.Add($"scene{s}:addHalvesDontSum {aTgt}+{aPos}!={at}");
+            // THE ADD-MODE PIN: the shipped rule must equal an independent transcription of it,
+            // field for field. This is what catches a constant being right while its USE is not.
+            var a = NewChoiceReference();
+            if (at != a.total || aAct != a.acting || aArm != a.armed || aLos != a.losTargets
+                || aTgt != a.tgtChoices || aPos != a.posChoices)
+                fails.Add($"scene{s}:addNotNewRule got({at},{aAct},{aArm},{aLos},{aTgt},{aPos}) "
+                          + $"want({a.total},{a.acting},{a.armed},{a.losTargets},{a.tgtChoices},{a.posChoices})");
+            // each knob, shown load-bearing: swap it in the reference and the answer must move
+            // somewhere across the sweep (counted, asserted after the loop).
+            if (ChoiceReference(false, MultShotFrac, ShotBand, MultPosFrac, PosBand, 2, false, true).posChoices != a.posChoices)
+                capPinLive++;
+            if (ChoiceReference(false, MultShotFrac, PosBand, MultPosFrac, PosBand, PosChoiceCap, false, true).tgtChoices != a.tgtChoices)
+                shotBandPinLive++;
+            // golden regression anchor over the fixed-seed sweep (FNV-1a, deterministic).
+            foreach (int v in new[] { at, aTgt, aPos })
+            { golden ^= (ulong)(uint)v; golden *= 1099511628211UL; }
             // the band decides only WHICH candidates count as near-best — never who is eligible.
             if (aAct != mAct || aArm != mArm || aLos != mLos)
                 fails.Add($"scene{s}:bandMovedTheGate acting {mAct}->{aAct} armed {mArm}->{aArm} los {mLos}->{aLos}");
@@ -5033,6 +5055,62 @@ public partial class Game
         if (n != 120) fails.Add($"sceneCount={n}");
         if (bandMoved < 20) fails.Add($"bandDialInert:{bandMoved}/{n}");
         if (posMoved < 20) fails.Add($"posAxisDialInert:{posMoved}/{n}");
+        if (capPinLive < 10) fails.Add($"capPinVacuous:{capPinLive}/{n}");
+        if (shotBandPinLive < 10) fails.Add($"shotBandPinVacuous:{shotBandPinLive}/{n}");
+        // Golden triples for ADD mode over the fixed-seed sweep. Belt and braces next to the
+        // reference above: it also catches the reference itself being edited in lockstep with
+        // a broken implementation. Regenerate ONLY with a deliberate, documented rule change.
+        const ulong GoldenAddTriples = 0xA58D4F1D8838497BUL;
+        if (golden != GoldenAddTriples)
+            fails.Add($"addGoldenTriples=0x{golden:X16} (want 0x{GoldenAddTriples:X16})");
+
+        // ── 4b. the NEGATIVE-SAFETY board: the dropped `pbest > 0` guard, pinned ──────
+        // The 120 random scenes never produce pbest <= 0, which is exactly why reinstating the
+        // guard in additive mode was invisible. On this board every reachable tile is negative.
+        BuildNegativeSafetyScene();
+        var negPvals = BandPosCandidates(out float negBest);
+        if (negPvals.Count < 2) fails.Add($"negSceneNoCandidates:{negPvals.Count}");
+        if (negBest >= 0f) fails.Add($"negSceneNotNegative:pbest={negBest:0.0}");
+        int negUncapped = AdmitNearBest(negPvals, negBest, false, MultPosFrac, PosBand) - 1;
+        if (negUncapped < 5) fails.Add($"negSceneNotEnoughCandidates:{negUncapped}");
+        MultChoiceBand = false;
+        CountMeaningfulChoices(out _, out int negArmed, out _, out _, out int negAddPos);
+        if (negArmed < 1) fails.Add("negSceneSoldierNotArmed");
+        // BEHAVIOURAL cap pin: >=5 near-best destinations on offer, so the contribution must be
+        // exactly PosChoiceCap. A hardcoded Math.Min(2, ...) at the use site fails here.
+        if (negAddPos != PosChoiceCap)
+            fails.Add($"negSceneAddPos={negAddPos} want {PosChoiceCap} (uncapped {negUncapped})");
+        MultChoiceBand = true;
+        CountMeaningfulChoices(out _, out _, out _, out _, out int negMultPos);
+        // and the pre-wave rule must contribute NOTHING here — that is the guard, and it is the
+        // whole reason dropping it is a real change rather than a cosmetic one.
+        if (negMultPos != 0) fails.Add($"negSceneMultPos={negMultPos} want 0 (the pbest>0 guard)");
+
+        // ── 4c. the precondition the axis-(a) zero floor rests on ────────────────────
+        // `AdmitNearBest(..., floorAtZero: true)` is only a no-op because every legal ShotValue
+        // is strictly positive. Assert that rather than assume it.
+        MultChoiceBand = false;
+        var shotScenes = new Random(31337);
+        int shotVals = 0;
+        for (int s = 0; s < 40; s++)
+        {
+            BuildBandScene(shotScenes);
+            foreach (var u in Players)
+            {
+                if (!u.Alive || u.Ammo <= 0) continue;
+                foreach (var e in Enemies)
+                {
+                    if (!e.Alive) continue;
+                    if (Util.TileDist(u.X, u.Y, e.X, e.Y) > u.Weapon.MaxRange) continue;
+                    bool commanding = Grid.HeightAt(u.X, u.Y) - Grid.HeightAt(e.X, e.Y) >= 2;
+                    if (!Grid.HasLineOfSight(u.X, u.Y, e.X, e.Y, commanding)) continue;
+                    float v = ShotValue(Combat.ComputeOdds(Grid, u, e), e);
+                    shotVals++;
+                    if (v <= 0f) fails.Add($"shotValueNotPositive:{v}");
+                }
+            }
+        }
+        if (shotVals < 200) fails.Add($"shotValueSampleTooSmall:{shotVals}");
 
         // ── 5a. no state mutation ─────────────────────────────────────────────────────
         BuildBandScene(new Random(4242));
@@ -5136,12 +5214,19 @@ public partial class Game
         return sb.ToString();
     }
 
-    /// A LITERAL transcription of `CountMeaningfulChoices` as it stood before TRUE BAND
-    /// (multiplicative windows 0.88 / 0.85, the `pbest > 0` guard, the cap of 2). Exists only so
-    /// BandSelfTest can prove `SIGHTLINE_CHOICEBAND=mult` still reproduces it EXACTLY — every
-    /// archived `ch/ARMED` number in docs/ was measured by this code, and the reproduction is
-    /// what lets a future wave re-derive one. Do not "clean it up": its value is being a copy.
-    (int total, int acting, int armed, int losTargets, int tgtChoices, int posChoices) OldChoiceReference()
+    /// A LITERAL transcription of `CountMeaningfulChoices`, PARAMETERISED over every knob the
+    /// rule has. TRUE BAND's first BANDTEST pinned only the constants' VALUES and the mult-mode
+    /// reproduction, and review then broke the shipped rule three ways that all still printed
+    /// PASS: hardcoding `Math.Min(2, ...)` at the use site while `PosChoiceCap` still read 4;
+    /// passing `PosBand` where `ShotBand` belonged on axis (a); and reinstating the `pbest > 0`
+    /// guard in additive mode. **Pinning a constant does not pin its USE.** This reference pins
+    /// the use: the real counter must equal it field-for-field in BOTH modes, and every knob is
+    /// separately shown to be load-bearing (change it, and the reference stops matching).
+    /// Do not "clean it up" or share code with the real implementation — its whole value is
+    /// being an independent copy.
+    (int total, int acting, int armed, int losTargets, int tgtChoices, int posChoices)
+        ChoiceReference(bool mult, float shotFrac, float shotBand, float posFrac, float posBand,
+                        int cap, bool posGuard, bool shotFloorAtZero)
     {
         int total = 0, acting = 0, armed = 0, losTargets = 0, tgtChoices = 0, posChoices = 0;
         foreach (var u in Players)
@@ -5163,7 +5248,9 @@ public partial class Game
             if (best <= 0f) continue;
             armed++;
             losTargets += vals.Count;
-            foreach (var v in vals) if (v >= best * 0.88f) comparable++;
+            float shotCut = mult ? best * shotFrac : best - shotBand;
+            if (!mult && shotFloorAtZero && shotCut < 0f) shotCut = 0f;
+            foreach (var v in vals) if (v >= shotCut) comparable++;
             if (comparable >= 2) { total += comparable - 1; tgtChoices += comparable - 1; }
 
             if (u.ActionsLeft >= 2)
@@ -5184,19 +5271,94 @@ public partial class Game
                         if (pcost[x, y] <= 0 || pcost[x, y] > u.MoveBudget) continue;
                         float s = SafetyAt(x, y); pvals.Add(s); if (s > pbest) pbest = s;
                     }
-                if (pbest > 0f)
+                if (!posGuard || pbest > 0f)
                 {
+                    float posCut = mult ? pbest * posFrac : pbest - posBand;
                     int pComparable = 0;
-                    foreach (var s in pvals) if (s >= pbest * 0.85f) pComparable++;
+                    foreach (var s in pvals) if (s >= posCut) pComparable++;
                     if (pComparable >= 2)
                     {
-                        int add = Math.Min(2, pComparable - 1);
+                        int add = Math.Min(cap, pComparable - 1);
                         total += add; posChoices += add;
                     }
                 }
             }
         }
         return (total, acting, armed, losTargets, tgtChoices, posChoices);
+    }
+
+    /// The PRE-WAVE rule, as one call (multiplicative 0.88 / 0.85, `pbest > 0` guard, cap 2).
+    /// Its arguments are LITERALS on purpose: this is the archive's instrument, and it must not
+    /// follow a future edit to the shipped constants.
+    (int total, int acting, int armed, int losTargets, int tgtChoices, int posChoices) OldChoiceReference()
+        => ChoiceReference(true, 0.88f, 0f, 0.85f, 0f, 2, true, false);
+
+    /// The SHIPPED rule, as one call — every argument read from the shipped constant it pins, so
+    /// a constant and its use can never drift apart without this failing.
+    (int total, int acting, int armed, int losTargets, int tgtChoices, int posChoices) NewChoiceReference()
+        => ChoiceReference(false, MultShotFrac, ShotBand, MultPosFrac, PosBand, PosChoiceCap, false, true);
+
+    /// The destination scores of the FIRST armed 2-action soldier, recomputed independently, so
+    /// the cap can be pinned BEHAVIOURALLY — how many near-best tiles were really on offer before
+    /// the cap clipped them.
+    List<float> BandPosCandidates(out float pbest)
+    {
+        pbest = 0f;
+        foreach (var u in Players)
+        {
+            if (!u.Alive || !u.CanAct || u.IsVip || u.Ammo <= 0 || u.ActionsLeft < 2) continue;
+            float SafetyAt(int x, int y)
+            {
+                float s = 24f - TileExposure(u, x, y);
+                var foe = AliveEnemies().OrderBy(en => Util.TileDist(x, y, en.X, en.Y)).FirstOrDefault();
+                if (foe != null) s += Grid.GetCover(x, y, foe.X, foe.Y).Level * 8f;
+                s += Grid.HeightAt(x, y) * 5f;
+                return s;
+            }
+            var pcost = Grid.CostMap(u.X, u.Y, (x, y) => IsOccupiedByOther(x, y, u), out _, u.MoveBudget * 2);
+            pbest = SafetyAt(u.X, u.Y); var pvals = new List<float> { pbest };
+            for (int x = 0; x < Grid.W; x++)
+                for (int y = 0; y < Grid.H; y++)
+                {
+                    if (pcost[x, y] <= 0 || pcost[x, y] > u.MoveBudget) continue;
+                    float s = SafetyAt(x, y); pvals.Add(s); if (s > pbest) pbest = s;
+                }
+            return pvals;
+        }
+        return new List<float>();
+    }
+
+    /// A board on which EVERY reachable tile scores NEGATIVE safety: no cover anywhere, no high
+    /// ground, one soldier ringed by enough guns that `24 - TileExposure` goes below zero. The
+    /// 120 random scenes never produce this (and only 0.0-1.0% of real soldier-turns do), which
+    /// is exactly why reinstating the dropped `pbest > 0` guard was invisible to the first
+    /// BANDTEST. Here it is not: under the guard the axis contributes 0, without it the capped 4.
+    void BuildNegativeSafetyScene()
+    {
+        Grid = new Grid();                       // all Floor, height 0 -> no cover term anywhere
+        Players = new List<Unit>();
+        Enemies = new List<Unit>();
+        Vip = null; CaptiveLocked = false;
+        Objective = Objective.Eliminate;
+        EvacZone.Clear();
+
+        var p = new Unit { Name = "PINNED", Cls = "ASSAULT", Team = Team.Player, X = 9, Y = 5,
+                           Hp = 8, MaxHp = 8, Aim = 65, Mobility = 4,
+                           Weapon = Weapon.Make(WeaponKind.Rifle) };
+        p.Ammo = p.Weapon.Clip; p.SyncPos(); p.BeginTurn();
+        Players.Add(p);
+        // Eight guns, every one with clear LoS on an empty board and inside rifle range of the
+        // whole reachable set: exposure >= 8 x 6 = 48, so safety <= 24 - 48 = -24 on every tile.
+        var spots = new (int x, int y)[] { (2, 1), (4, 1), (6, 1), (12, 1), (14, 1),
+                                           (2, 9), (6, 9), (14, 9) };
+        for (int i = 0; i < spots.Length; i++)
+        {
+            var e = new Unit { Name = "G" + i, Cls = "GRUNT", Team = Team.Enemy,
+                               X = spots[i].x, Y = spots[i].y, Hp = 6, MaxHp = 6, Aim = 60,
+                               Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+            e.Ammo = e.Weapon.Clip; e.Alert = AlertLevel.Alert; e.SyncPos(); e.BeginTurn();
+            Enemies.Add(e);
+        }
     }
 
 }

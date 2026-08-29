@@ -7,6 +7,20 @@ public static class Program
 {
     public static void Main()
     {
+        // TRUE BAND (review fix): SIGHTLINE_CHOICEBAND selects the DECISION-DENSITY INSTRUMENT,
+        // and a typo used to select the new rule silently — a batch a shell history calls "mult"
+        // but that was measured on "add" is exactly the corruption this wave exists to prevent.
+        // Refuse to start on anything but "mult", "add" or unset. This sits at the very top so it
+        // covers every mode, not just the balance batch.
+        if (!Game.ChoiceBandValid)
+        {
+            Console.Error.WriteLine($"SIGHTLINE_CHOICEBAND: unknown value '{Game.ChoiceBandEnv}' — "
+                + "expected 'mult' (the pre-TRUE-BAND multiplicative instrument), 'add' (the "
+                + "current additive one) or unset. Refusing to run rather than guess which "
+                + "instrument you meant.");
+            Environment.Exit(2);
+            return;
+        }
         // ---- Headless verification harness (env-gated; no effect in normal play) ----
         // SIGHTLINE_SHOT=<frame>  : skip intro, run to <frame>, write sightline_shot.png, exit.
         // SIGHTLINE_AUTOPLAY=1    : skip intro, let an autopilot play full matches to a result.

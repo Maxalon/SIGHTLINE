@@ -341,10 +341,13 @@ public partial class Game
     // MEASURED CORRECTION (TRUE BAND, SIGHTLINE_BANDPROBE, docs/measurements/tb/): that
     // MECHANISM is not what happens on this tree. `pbest` does NOT slide with threat — it is
     // pinned at the "full cover, unexposed, ground level" value of 40 (24 + 2*8) at every rung
-    // (median 40 at heat 0, 4 and 8; mean 37.7 / 38.6 / 38.8 — it RISES with heat), because the
+    // (median 40 at heat 0, 4 and 8 — confirmed in ALL FIVE measured chunks), because the
     // autopilot almost always has one such tile in one-action reach. The multiplicative window
     // was therefore already ~6 points wide everywhere, and the `pbest > 0` guard fired on
-    // 0.5% / 1.0% / 0.0% of soldier-turns. What actually flattens the axis is the CAP, and what makes the window
+    // 0.0-1.0% of soldier-turns. (The MEAN also rises with heat on the common CRN base 50 —
+    // 37.7 / 38.6 / 38.8 — but that 1.1-point rise reverses off-base, 35.4 at base 60 and 36.6
+    // at base 70, so it is world-set noise and is not claimed. The pinned MEDIAN is the
+    // load-bearing fact and it is unaffected.) What actually flattens the axis is the CAP, and what makes the window
     // wrong is that it is a fraction of a number whose own scale is arbitrary. Both are fixed
     // here anyway: an ADDITIVE band means a candidate is a real alternative when it scores
     // within a FIXED number of points of the best, so the window is stated in the units the
@@ -354,8 +357,19 @@ public partial class Game
     // NOTE: these five are `static readonly`, not `const`, on purpose — SIGHTLINE_BANDTEST PINS
     // them by value, and a const would be folded at the comparison so the pin could never fail.
     /// The pre-wave multiplicative rule, kept reproducible for the paired instrument diff.
-    public static bool MultChoiceBand =
-        Environment.GetEnvironmentVariable("SIGHTLINE_CHOICEBAND") == "mult";
+    /// STRICT: only the exact literals "mult" and "add" (and unset) are accepted. A typo used to
+    /// select the NEW rule silently, which is the single worst failure mode this dial has — a
+    /// batch labelled "mult" in someone's shell history but measured on "add". `ChoiceBandValid`
+    /// is checked at the top of Program.Main, which refuses to run at all on a bad value.
+    public static readonly string ChoiceBandEnv =
+        Environment.GetEnvironmentVariable("SIGHTLINE_CHOICEBAND");
+    public static readonly bool ChoiceBandValid =
+        string.IsNullOrEmpty(ChoiceBandEnv) || ChoiceBandEnv == "mult" || ChoiceBandEnv == "add";
+    public static bool MultChoiceBand = ChoiceBandEnv == "mult";
+    /// The instrument identity, stamped into the SIGHTLINE_BALANCE aggregate JSON so a future
+    /// comparison script can REFUSE a cross-instrument diff instead of quietly producing one.
+    /// "mult-v1" = every number archived before wave TRUE BAND; "add-v2" = everything since.
+    public static string InstrumentTag => MultChoiceBand ? "mult-v1" : "add-v2";
     public static readonly float MultShotFrac = 0.88f;   // pre-wave axis (a): within 12% of the best shot
     public static readonly float MultPosFrac  = 0.85f;   // pre-wave axis (b): within 15% of the best safety
     /// Axis (a) additive band, in SHOT-VALUE points. Axis (a) needed the same treatment and the
@@ -372,29 +386,51 @@ public partial class Game
     /// steps: one cover level = 8, one elevation step = 5, one exposed enemy gun = 6-10. 3 points
     /// is deliberately BELOW all three — a tile inside the band is one you could stand on without
     /// giving up a cover step, an elevation step or eating an extra gun.
+    /// HONEST SCOPE: unlike ShotBand, this value is NOT pinned by the measurement, because the
+    /// score lives on that lattice and nothing falls in the gap between 3 and 4 — admitted/turn
+    /// reads 3.56 / 3.64 / 3.64 / 4.49 for bands 2 / 3 / 4 / 5 at heat 0. **Any value in [3, 5)
+    /// is the same instrument.** 3 is the bottom of that interval, picked for the "same tactical
+    /// class" reading. Only 2 (drops the gap-3 tiles) and 5 (admits the elevation step) differ.
     public static readonly float PosBand = 3f;
     /// Anti-inflation cap on axis (b). KEPT — a cap is right, because the admitted-count
     /// distribution is hard right-skewed (measured p50=2-3, p75=4-5, p95=7-15) and its long tail
     /// is the open field: a soldier with fifteen identically safe tiles around it faces one
-    /// shrug, not fourteen decisions. But the pre-wave cap of **2** was not clipping a tail, it
-    /// was clipping the MEDIAN — it sits at the p25-p50 of the distribution, which turns the axis
-    /// into a near-binary "were there 3+ near-best tiles or not?" and retains only 41-55% of the
-    /// uncapped signal (measured 1.082/2.640 at heat 0, 1.242/2.399 at heat 4, 1.094/1.992 at
-    /// heat 8, common slot base). 4 sits at the measured **p75-p80**: it preserves the median and
-    /// the interquartile body, retains 60-84% of the signal, and clips only the tail. That is the
-    /// whole argument — it is a distribution argument, not a "which cap moves the number most"
-    /// argument. (Three caps were priced against the heat rungs too; at n=10/rung the rung
-    /// ordering flipped between two different slot bases, so that comparison resolves nothing and
-    /// is NOT the reason for this value. See DEVLOG §TRUE BAND.)
+    /// shrug, not fourteen decisions.
+    /// THE ARITHMETIC, stated exactly, because the first version of this comment got it wrong:
+    /// the cap applies as `Math.Min(cap, admitted - 1)` inside `if (admitted >= 2)`, so cap 2
+    /// first BINDS at admitted >= 4 and cap 4 at admitted >= 6. **Neither clips the median turn**
+    /// (admitted 2-3) at any rung — cap 2 starts clipping around p70-p75 of the distribution and
+    /// cap 4 around p80-p88. The earlier claim that cap 2 "clips the median" was false.
+    /// What IS true, and is the reason for the raise: cap 2 retains only **41-55%** of the
+    /// uncapped signal (measured 1.082 of 2.640 at heat 0, 1.242 of 2.399 at heat 4, 1.094 of
+    /// 1.992 at heat 8, common slot base 50) while cap 4 retains **60-84%**. Losing half of a
+    /// metric's dynamic range to a clip that starts inside its third quartile is too much
+    /// compression for a number whose whole job is to distinguish states.
+    /// It is a distribution argument, not a "which cap moves the number most" argument: three
+    /// caps were priced against the heat rungs too, and at n=10/rung the rung ordering flipped
+    /// between two different slot bases, so that comparison resolves nothing and is NOT the
+    /// reason for this value. See DEVLOG §TRUE BAND.
     public static readonly int PosChoiceCap = 4;
 
     /// THE BAND itself, factored out so both axes provably apply the same rule and so
     /// SIGHTLINE_BANDTEST can pin it without needing a board. Returns how many of `vals` count
     /// as near-best. `mult` = the pre-wave multiplicative window (cut at `best * frac`);
     /// otherwise the additive band (cut at `best - band`). Pure — no state, no Util.Rng.
-    public static int AdmitNearBest(List<float> vals, float best, bool mult, float frac, float band)
+    /// `floorAtZero` clamps the ADDITIVE cut at 0. Axis (a) passes true: `ShotValue` is strictly
+    /// positive for any legal shot, so an unclamped cut of `best - 2` goes NEGATIVE whenever the
+    /// best shot is worth under 2 points (measured p5 = 2-4, so rare but not empty) and then
+    /// admits every rival however worthless — a mirror of the magnitude-dependence this wave
+    /// removed. Axis (b) passes FALSE and must: safety scores are signed by construction
+    /// (`24 - TileExposure + ...`), and clamping there would re-create the `pbest > 0` guard.
+    /// NOTE (honest): because every `ShotValue` is > 0 the clamp is arithmetically a NO-OP on
+    /// every number this wave measured — [best-2, 0) is empty of candidates — so it documents an
+    /// invariant and guards a future signed ShotValue rather than changing anything. It does NOT
+    /// fix the underlying wart: at best = 1.5 the band is still 133% of the best. See ROADMAP.
+    public static int AdmitNearBest(List<float> vals, float best, bool mult, float frac, float band,
+                                    bool floorAtZero = false)
     {
         float cut = mult ? best * frac : best - band;
+        if (!mult && floorAtZero && cut < 0f) cut = 0f;
         int n = 0;
         foreach (var v in vals) if (v >= cut) n++;
         return n;
@@ -452,7 +488,7 @@ public partial class Game
             if (best <= 0f) continue;                                      // no shot -> no shot/positioning decision
             armed++;
             losTargets += vals.Count;                                      // W4: raw simultaneous presentation
-            comparable = AdmitNearBest(vals, best, MultChoiceBand, MultShotFrac, ShotBand);
+            comparable = AdmitNearBest(vals, best, MultChoiceBand, MultShotFrac, ShotBand, floorAtZero: true);
             if (comparable >= 2) { total += comparable - 1; tgtChoices += comparable - 1; }  // real target alternatives
             if (ChoiceProbe.On)
             {
@@ -512,6 +548,15 @@ public partial class Game
                         ChoiceProbe.PosRawAdd3 += a3 - 1;
                         ChoiceProbe.PosCap2Add3 += Math.Min(2, a3 - 1);
                         ChoiceProbe.PosCap4Add3 += Math.Min(4, a3 - 1);
+                        ChoiceProbe.PosAddCap2 += Math.Min(2, a3 - 1);
+                        ChoiceProbe.PosAddCap4 += Math.Min(4, a3 - 1);
+                    }
+                    // the mult leg carries the pre-wave `pbest > 0` guard, so MultCap2 is
+                    // EXACTLY the pre-wave contribution on these same soldier-turns.
+                    if (pbest > 0f && am >= 2)
+                    {
+                        ChoiceProbe.PosMultCap2 += Math.Min(2, am - 1);
+                        ChoiceProbe.PosMultCap4 += Math.Min(4, am - 1);
                     }
                 }
                 // MULT mode keeps the pre-wave `pbest > 0` guard, because a non-positive best
@@ -2117,6 +2162,13 @@ public static class ChoiceProbe
     // capped-contribution sums, so the effect of the anti-inflation cap is visible: raw
     // (n-1) vs the shipped min(2, n-1), under the additive-3 rule.
     public static long PosRawAdd3, PosCap2Add3, PosCap4Add3;
+    // TRUE BAND review fix: the FULL 2x2 decomposition of axis (b) — {mult window, additive
+    // band} x {cap 2, cap 4} — accumulated over the SAME soldier-turns and therefore with the
+    // SAME denominator. Without this the band's effect and the cap's effect could only be
+    // compared across two different denominators (the probe's PosTurns vs Stats'
+    // ArmedSoldierTurns), which is how the wave's first write-up attributed the cap's lift to
+    // the band. MultCap2 IS the pre-wave rule (guard included); AddCap4 IS the shipped one.
+    public static long PosMultCap2, PosMultCap4, PosAddCap2, PosAddCap4;
     // per-turn ADMITTED-COUNT histograms (clamped at 40): the distribution the anti-inflation
     // cap actually clips. Choosing the cap needs this, not the mean.
     public const int AdmitMax = 40;
@@ -2158,6 +2210,8 @@ public static class ChoiceProbe
         s.AppendLine($"  gap(pbest-s)       : {Pct(PosGap, 0)}");
         s.AppendLine($"  admitted/turn      : mult.85={(double)PosMult / Math.Max(1, PosTurns):0.00}  add2={(double)PosAdd2 / Math.Max(1, PosTurns):0.00}  add3={(double)PosAdd3 / Math.Max(1, PosTurns):0.00}  add4={(double)PosAdd4 / Math.Max(1, PosTurns):0.00}  add5={(double)PosAdd5 / Math.Max(1, PosTurns):0.00}");
         s.AppendLine($"  contribution/turn  : add3 raw={(double)PosRawAdd3 / Math.Max(1, PosTurns):0.000}  cap2={(double)PosCap2Add3 / Math.Max(1, PosTurns):0.000}  cap4={(double)PosCap4Add3 / Math.Max(1, PosTurns):0.000}");
+        s.AppendLine($"  2x2 decomposition  : multCap2={(double)PosMultCap2 / Math.Max(1, PosTurns):0.000} (PRE-WAVE)  addCap2={(double)PosAddCap2 / Math.Max(1, PosTurns):0.000}  multCap4={(double)PosMultCap4 / Math.Max(1, PosTurns):0.000}  addCap4={(double)PosAddCap4 / Math.Max(1, PosTurns):0.000} (SHIPPED)");
+        s.AppendLine($"  band effect @cap2  : {(double)(PosAddCap2 - PosMultCap2) / Math.Max(1, PosTurns):+0.000;-0.000}   cap effect @add: {(double)(PosAddCap4 - PosAddCap2) / Math.Max(1, PosTurns):+0.000;-0.000}");
         s.AppendLine($"  admitted/turn dist : add3 {Pct(AdmitAdd3, 0)}");
         s.AppendLine($"                     : mult {Pct(AdmitMult, 0)}");
         return s.ToString();
