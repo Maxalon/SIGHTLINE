@@ -428,6 +428,68 @@ and readability?* Until that bar is cleared, we do not pay its price.
 
 ---
 
+### 5.1 AMENDMENT — the mid-mission checkpoint (considered, deferred; PROGRAM RESONANCE wave W5, 2026-08-29)
+
+Same contract as §5: **on the record and reversible with eyes open.**
+
+**The problem.** Until W5 the game had *no way to quit*. The pause card carried 18
+controls, the main menu 9 entries, and neither offered an exit — and because
+`Raylib.SetExitKey(KeyboardKey.Null)` is load-bearing (ESC cancels a targeting mode and
+opens the pause card, and must never close the window), ESC could not do it either. The
+only sanctioned ways out were **ABANDON RUN**, which destroys the run, or **alt-F4**.
+W5 shipped `QUIT TO DESKTOP` on both surfaces. That half is not in question.
+
+The half that *is* a design decision: **the campaign checkpoint is written at mission
+start and nowhere else** (`SaveGame.Save(_run)` in `Game.SetupMission` is the only live
+gameplay call site). So quitting fifteen minutes into mission 5 rewinds to the beginning
+of mission 5. Every turn since is gone.
+
+**The options considered:**
+
+1. **A real mid-mission checkpoint.** The board is fully describable — units, tiles,
+   objective state, pod alert tiers, the anim queue's terminal state — and `SaveGame`'s
+   source-generated JSON contexts make another DTO cheap. Quit exactly where you stand.
+2. **Accept mission-restart-on-quit, and say so out loud.**
+3. **Say nothing** (the status quo before W5, which is what made the missing exit worse
+   than merely missing: a player who force-quit lost work and was never told they would).
+
+**The decision: Option 2, for now.** The confirm text on the pause card reads *"the
+current mission restarts from its start"* — the player is told the price before they pay
+it, and `SIGHTLINE_QUITTEST` asserts the claim is TRUE: the quit path writes nothing,
+deletes nothing, and leaves the mission-start checkpoint byte-identical and `meta.json`
+untouched.
+
+Rationale, and the honest cost:
+
+- **A mission is a coffee break, not an evening.** Measured over five Release autoplays
+  (audit wildcard-8, base `d350416`), a whole six-mission campaign runs 3,581–17,163
+  frames — roughly two minutes of *animation* for the entire campaign. The lost work of
+  a mid-mission quit is bounded by one mission, and one mission is the unit this game is
+  already built around: it is the unit the checkpoint uses, the unit the barracks sits
+  between, and the unit the end card counts.
+- **A mid-mission save is a new persisted format, and this project has been burned by
+  persistence twice** — `PublishTrimmed` destroying save/load while the game still booted
+  (`docs/DISTRIBUTION.md` §3), and a `catch { }` that let a broken publish look healthy.
+  A board DTO is not a small format: it would need a golden fingerprint in the SAVETEST
+  family, and it would need to survive every future change to `Unit`, `Grid` and the
+  objective state machines. That is a wave of its own, not a rider on a UI wave.
+- **It would also be a save-scum surface.** §1's "stakes that bite" is a pillar: a
+  quit-anywhere-resume-anywhere checkpoint inside a mission makes reloading past a bad
+  roll a two-click operation, and the run-to-run loop (pillar 3) is priced on losses
+  being permanent. That is a real design question, not just an engineering one, and it
+  deserves to be answered deliberately rather than acquired as a side effect of adding a
+  QUIT button.
+
+**Deferred, not rejected.** Revisit when either of two things is true: a recorded human
+session (audit wildcard-6's journal proposal) shows real players quitting mid-mission
+often enough to matter, or a mission's median wall-clock length grows past the coffee
+break the argument above rests on. If it ships, it ships with the save-scum question
+answered first — most likely as a **suspend-and-close** (the file is consumed on resume,
+so it restores a session rather than banking a reload point), which keeps the stakes and
+buys the convenience.
+
+---
+
 ## 6. Encounter-design intent (feeds Phase 4)
 
 Design intent only — the build checklist lives in `CLAUDE.md` → **ROADMAP — PHASE 4**.

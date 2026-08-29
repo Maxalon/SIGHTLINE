@@ -3685,8 +3685,14 @@ public partial class Game
         //            Tab cycle · Enter end turn · Space act · WASD/arrows cursor
         // — no other key appears twice in one context. The other contexts (Intro, skirmish setup,
         // codex, barracks/shop, tag editor) are each internally unique and are reached only when
-        // UpdatePlayer is not, so a letter may safely mean different things across them. Free
-        // letters remaining, for whoever binds next: I J O Q U Z.
+        // UpdatePlayer is not, so a letter may safely mean different things across them.
+        //
+        // W5, and read this before you trust the line that used to follow: this list and
+        // CLAUDE.md's disagreed with each other AND with the binary (audit wildcard-4 — N/P/U/V
+        // were advertised as free and were bound). DERIVE the set instead:
+        //     grep -ohE 'KeyboardKey\.[A-Z][a-z0-9]*' src/*.cs | sort -u
+        // W5 bound Q (QUIT TO DESKTOP — the pause card and the main menu; not an in-mission verb,
+        // so it does not collide with UpdatePlayer's set above). Free letters as of W5: I J O Z.
         if (Raylib.IsKeyPressed(KeyboardKey.M)) Audio.ToggleMute();
         if (!AutoPlay && Raylib.IsKeyPressed(KeyboardKey.F11)) Display.ToggleFullscreen();
         if (!AutoPlay && Raylib.IsKeyPressed(KeyboardKey.F2)) CycleAnimSpeed();   // fast-forward anim pacing (persisted; also in the pause menu)

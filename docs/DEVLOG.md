@@ -5412,3 +5412,294 @@ unmoved: win-rate 50→50, missions 83→83, policy gap 20→20, paired gap 20�
 only micro-jitter in decision richness (meaningful choices/turn 2.757→2.737, lead swings/match
 0.60→0.63, avg max swing 51.13→50.70). FIX 1 changes procedural ENVELOP geometry in ~1-4% of
 builds, which is the size of that jitter.
+
+---
+
+# PROGRAM RESONANCE — WAVE W5 "THE FIRST HOUR AND THE FRONT DOOR"
+
+**Branch** `wave/first-hour`, base `d350416`. Source: the 67-finding audit dossier —
+`newplayer-1..7`, `visual-2`, `visual-7`, `wildcard-3`. **Balance-inert by construction and by
+measurement** (see §W5-9); this wave takes no balance round and that identity is the proof.
+
+**Thesis.** Ten programs tuned what the bot could measure. This wave fixed six things a person
+would meet in their first hour and a bot never can: a story card that could not draw, a bloom
+that ate the type, a difficulty on-ramp nobody was shown, a bar that moved under the cursor,
+teaching that pointed at a cue the renderer no longer draws, and a game with no way out.
+
+## W5-1 — THE HEADLINE DEFECT: mission 1's briefing could not draw. Measured at 0.00 s of 11 s.
+
+The auditor traced the chain by code-read and said explicitly that they could not reproduce it.
+**It reproduces.** The first job of this wave was to build the instrument, and the instrument is
+`SIGHTLINE_BRIEFTEST=1` — the one self-test in the project that deliberately drives the LIVE,
+persisting path, because `NoPersist` is exactly what hid the defect.
+
+The chain, all four sites verified:
+
+| site | fact |
+|---|---|
+| `Game.BriefAllowed` (Game.cs) | requires `TutorialText == null` |
+| `Game.SetupMission` | arms the mission-1 strip on the same frame `BeginBriefing` composes the card |
+| `Game.UpdateBriefing` | `if (Stats.CombatLog.Count > 0) { BriefLines = null; return; }` |
+| `Stats.Log` / `Anim.cs` | ALWAYS-ON, called from every shot resolution by either side |
+
+So the card **held** — never burning its 11 s clock — for the whole strip, and was then destroyed
+by the first exchange, or by `BriefHoldMax` at 45 s, whichever came first.
+
+One correction to the auditor's account, and it makes the defect *broader*, not narrower.
+They wrote that `TutStepFire`'s only exit is `_tutShot`, so the strip cannot end without a shot.
+`Game.EndPlayerTurn` also advances it — `if (TutStep >= 0 && TutStep < TutStepDone)
+AdvanceTutorial()` — so the strip clears after four END TURNs regardless. The card still never
+draws: four player turns plus four enemy turns is not free, and by then either the log has an
+entry or the 45 s hold has expired. The defect is real; the mechanism is the *duration* of the
+strip, not an infinite one.
+
+**Why ten programs never saw it.** Every harness path sets `NoPersist`, `StartTutorialMaybe`
+returns early under `NoPersist`, so **every mission-1 screenshot ever taken showed the briefing
+precisely because the tutorial was not running.**
+
+**Measured, on the live path:** `briefShownOnlyFor0.00sOf11s`. Not "reduced". Zero.
+
+**The fix is ORDERING, not content** (DESIGN §1.1 caps the narrative frame; this makes an
+existing card reachable, it does not write more of it). The board is not contested on turn 1, so
+the briefing is a genuine pre-fight beat: `StartTutorialMaybe` arms the strip **pending**
+(`Game.TutPending`), `UpdateTutorial` opens it the frame the card retires. `OnboardingActive`
+counts `_tutPending`, so the action bar does not flicker whole-then-staged across the 11 s. Any
+key or click still dismisses the card, so a player who wants to move reaches the lesson in one
+input. `TutStepFire` also gains the turn-count patience fallback its three siblings have had for
+waves (CONCEAL 2 / MOVE 3 / OVERWATCH 6 / now FIRE 9).
+
+`SIGHTLINE_FIRSTRUN=1` is the new screenshot seam: it arms the strip under `NoPersist` so a frame
+can show what a first-ever player actually sees. Screenshots before/after confirm it — before,
+`TRAINING 1/5`; after, `BRIEFING - ELIMINATE` with the bar still staged; at frame 760, the strip.
+
+## W5-2 — THE BLOOM WAS EATING THE TYPE. The HUD comes out of the post-FX target.
+
+`Display.RenderFrame` rendered the **entire** frame into the post-FX target, so bloom, vignette
+and chromatic aberration ran over every button, label and panel — and a saturated UI plate
+bloomed into its own label. It was also quietly undoing wave V1's two-atlas font work.
+
+Re-measured with an explicitly stated method (inset the button rect 8 px so the plate border is
+excluded; glyph core = p2 of a 3×3 MIN-filtered relative luminance, plate fill = p98 of a 3×3
+MAX-filtered one; WCAG ratio between them — the min/max filter erases antialiased edge pixels so
+the two readings are the glyph INTERIOR and the plate INTERIOR):
+
+| main-menu label | FX off | FX on, BEFORE | FX on, AFTER |
+|---|---|---|---|
+| **TRAINING OP** (the on-ramp button) | 8.67 | **2.19** | 8.87 |
+| CONTINUE RUN | 7.07 | 5.77 | 7.24 |
+| DEPLOY SQUAD | 7.07 | 5.66 | 7.07 |
+| LAST STAND | 5.79 | 6.38 | 5.79 |
+
+The absolute numbers differ from the auditor's (4.51 → 1.35 on TRAINING OP, 5.34 → 3.42 on
+CONTINUE RUN) because the sampling methods differ; they agree exactly on the headline — TRAINING
+OP collapses ~4× under post-FX and fails 4.5:1 outright — and disagree at the margin, where the
+auditor's method also failed CONTINUE RUN and mine does not. **The method is stated so the number
+is quotable.**
+
+**And this is the SHIPPED resting configuration, not a combat spike.** `SIGHTLINE_POSTFX=1`'s
+boot-time "demo bloom" injection (`BloomIntensity = 0.85`) is overwritten on frame 1 by
+`Game.Update`'s own `SetPostFxParams(_postFxBloom, …)`, which rests at 0. What was measured is the
+fragment shader's always-on `bloomAmt = 1.45` baseline halo. **That comment has been stale for
+waves** — the hook does not do what it says.
+
+**The fix** is the two-target split the audit asked for, with the seam at **atmosphere vs
+chrome** rather than board vs menu:
+
+- pass 1 (graded) — board, death-flash, and `Hud.DrawBackdropLayer`: the overlay screens'
+  animated tactical backdrop, split out of the six screen builders, so the main menu and both end
+  cards keep their whole premium grade;
+- pass 2 (ungraded) — `Hud.Draw`: every plate, glyph and number, exactly as authored.
+
+Letterboxed/fullscreen draws pass 2 through a `Camera2D` carrying the blit's own scale+offset. A
+camera, **not** a second render texture: compositing a translucent HUD through an alpha RT
+double-applies source alpha and would silently change every panel's opacity.
+
+`Hud.BackdropOwnsFrame` skips the in-mission chrome on the seven screens with an opaque backdrop.
+Those screens used to draw the top/bottom bars and then bury them; with the backdrop in the
+earlier pass they painted straight over the main menu until this was added. BARRACKS and AUDIO
+CHECK are deliberately absent — neither draws a backdrop, so their frame order is unchanged.
+
+**THE BOARD IS UNCHANGED, measured against a noise floor.** Same seed, post-FX on, seven board
+patches. Largest before/after swing: +3.8 mean / −2.4 peak. Two runs of the **same build** swing
+±3.4 mean / ±5.6 peak (58 `GetTime()` reads drive animation — CLAUDE.md's documented screenshot
+non-determinism; 42.5% of the board band's pixels differ run-to-run at mean |Δ| 7.80, against
+51.6% at 7.96 for before-vs-after). Peaks on all four glowing objects — soldier token, gold
+objective, supply crate, dormant pod — are identical. **The change is inside the instrument's
+noise.**
+
+## W5-3 — THE DOORS.
+
+**The end cards banked salvage and never mentioned the War Room** (`newplayer-2`). The loss card
+is the highest-leverage retention moment in the product: the player has just lost their first
+squad and is deciding whether there is a second run, and it showed them the number 18 with no
+meaning and no route. Now: a third plate **WAR ROOM [W]**; *"spend it in the WAR ROOM"* centred
+under the SALVAGE slab it explains; and the SURVIVING SQUAD panel headed **"N JOIN THE RESERVE -
+recallable at the next draft"** with each survivor's recall price.
+
+`Game.EndReserve` is the **delta** of `SaveGame.VeteranCount()` across `EnshrineVeterans`, never
+`vets.Count`, so the card structurally cannot over-claim: a name already in the reserve does not
+re-join, and a MERCENARY CLAUSE run (which enshrines nobody) reads 0 with no special case.
+METATEST asserts both legs.
+
+The button gets its own `Hud.EndWarRoomBtn` rect rather than reusing the intro's `OverlayBtn3`
+(LAST STAND). The two screens publish into the same statics, input runs before draw, and a stale
+end-card rect surviving one frame into the intro would turn the door the player just used into an
+accidental LAST STAND.
+
+**There was no way to quit the game** (`wildcard-3`). 18 pause controls, 9 menu entries, no exit —
+and `SetExitKey(KeyboardKey.Null)` is load-bearing (ESC cancels a targeting mode and opens the
+pause card), so ESC could not do it either. The only sanctioned ways out were ABANDON RUN, which
+destroys the run, or alt-F4. Now **QUIT TO DESKTOP [Q]** on the pause card, arm-then-confirm, with
+the honest line *"the current mission restarts from its start"*; and **QUIT [Q]** on the main menu
+with no confirm (nothing is in flight on the title screen). It also completes the intro's utility
+grid into a 3×2 instead of a lone centred AUDIO CHECK. `[Q]` was verified unbound by grep before
+being claimed — note that CLAUDE.md's free-key list and the `Game.cs` keymap comment are both
+stale (`wildcard-4`, not this wave's fix).
+
+The harder half is now **a written decision**: `docs/DESIGN.md` §5.1 records mission-restart-on-
+quit as chosen deliberately, with the argument (a mission is a coffee break; a board DTO is a new
+persisted format in a project burned by persistence twice; and quit-anywhere-resume-anywhere is a
+save-scum surface that prices against the "stakes that bite" pillar) and the conditions under which to
+revisit it.
+
+## W5-4 — THE ON-RAMP. A zero-run profile now opens on RECRUIT.
+
+`newplayer-4`: RECRUIT (rung −1) was always selectable and always **unlabelled** — nothing at level
+0 hinted anything existed below it, and the copy *"standard difficulty - the designed fight"*
+framed 0 as the floor. The archived X2 ladder (n=40/rung, base `a61ef42`,
+`docs/measurements/x2/`) puts RECRUIT at **75.0%** run completion against heat 0's **57.5%** — a
+17.5-point gap, outside the ±6–8 error bar. Roughly two in five first campaigns were ending in a
+loss the on-ramp exists to prevent.
+
+`Game.FirstTimeProfile` (from `SaveGame.LoadRunTotals`) defaults `PendingHeat` to RECRUIT and
+rewrites level 0's hint to *"[<] for a gentler first run"*; **"< RECRUIT"** names the rung below
+zero on every profile. **This moves a DEFAULT, not a rung.** Every heat number in `docs/` is
+untouched, and the measurement harness sets heat explicitly under `NoPersist`, which returns from
+`EnsureMetaLoaded` before the default can be read. ONRAMPTEST asserts both the fresh-profile
+default *and* the control: a profile that has finished a run keeps heat 0.
+
+## W5-5 — THE CHROME.
+
+**The action bar re-flowed between turns** (`visual-7`), so no verb had a stable position — the
+auditor measured OVERWATCH moving from bottom-row slot 8 to **top-row slot 1** purely because a
+squadmate went down and STABILIZE appeared ahead of it in the list. The layout is a greedy wrap
+that fills row 0 and stacks later rows *above* it, so **appending never moves anything already
+placed**. That makes the fixed slot map cheap: everything whose *presence* can change between two
+turns of one mission moves to the tail (BEACON, one-way once planted; STABILIZE, with a downed
+mate; SHOW ALL, with the onboarding); everything ahead of it is per-mission / per-soldier
+constant. No empty ghost cells, no permanently dead buttons. The ability slot also reserves its
+`" (N)"` cooldown suffix — a slot that changes **width** shifts its neighbours just as surely as
+one that appears, and that one moved ten buttons. And the bar gets **one backing plate**: twelve
+chips floating over the battlefield with board texture and gold overlay lines running between them
+was the untidiest composition in the in-mission UI.
+
+**The CONCEALED pill faded to 10% alpha** (5% on the border), so the opening state read as *off*
+for part of every 1.8 s cycle. Concealment is the first rule the onboarding teaches and the one
+that decides where the whole first fight starts; the auditor and a reviewer before them both
+misread a trough-phase frame as "not concealed". Now 0.56–1.00 (a 1.79× swing against 10.0×). The
+renderer and the test read **one** expression, `Hud.ConcealPulse` — a test that re-implements the
+curve it guards proves nothing.
+
+**Doctrine card text overflowed its box** on the first screen a new player touches: the height was
+FIXED at 74 while the body wrapped from y+38 in 19 px steps. Now sized to content and evened
+across the row. **Measured: ten of the sixteen boons in the catalogue overflowed the old fixed
+height**, not just the one the auditor caught. Its second half — the class-glyph disc eating the
+operator blurb's last words on FLINT/NOX/BRIAR — is fixed by dropping the disc into the true
+corner so the blurb row clears it entirely, rather than by clipping the sentence, which is the
+point of the row. One blurb (ASSAULT's) was four characters too wide for its column even then and
+was trimmed.
+
+## W5-6 — THE WORDS.
+
+**The first sentence of instruction in the game pointed at a cue that no longer exists**
+(`newplayer-5`). Both the Training Op's first lesson and the campaign strip's MOVE card said
+*"click a glowing tile"*. Wave V deliberately replaced the flood-fill with a thin cyan contour and
+a corner-tick lattice the code itself calls ~0.6% of a tile's area — a 5/255 modal inner lift.
+Both strings now name the **outline**, the **corner ticks** and the **dashed** outer ring.
+
+**Three verbs were taught only by a 9-second card that burns forever** (`newplayer-7`).
+`UpdateFieldTips` marks a tip seen the instant it shows, per-profile and permanent, with no replay
+surface — and SHOVE appeared **nowhere** in `src/Codex.cs`, nor did any of the four utility items,
+and a grep for `CONTROLS|KEYBIND` over `src/` returned nothing. Now: two FIELD CRAFT rows (SHOVE,
+with `Game.ShoveReach` and both collision damages interpolated from the real constants like every
+other row in that tab; and UTILITY ITEMS, all four kinds by class), and a **VERBS & KEYS** tab —
+16 verbs with hotkeys plus three rows for the bindings that live nowhere else. It is **generated**
+from `Hud.VerbTable` + `Hud.VerbHelp`, i.e. from the same `ActionDesc` switch the bar's hover
+tooltip reads, so a verb's help and its manual entry cannot drift apart. `ActionDesc` is now
+null-safe: its four situational branches fall back to a generic sentence with no live game.
+
+## W5-7 — Four new gates, and each one FAILS on the pre-W5 tree.
+
+A test that cannot fail is not a test. Every one below was falsified by flipping its off-switch:
+
+| hook | falsifier | what it printed |
+|---|---|---|
+| `SIGHTLINE_BRIEFTEST` | `SIGHTLINE_BRIEFFIRST=0` | `stripNotArmedPending, stripOpenedOverTheBriefing, briefShownOnlyFor0.00sOf11s, briefNeverRetired, fireStepHasNoPatienceFallback` |
+| `SIGHTLINE_CONTRASTTEST` | `SIGHTLINE_HUDINFX=1` | `TRAINING_OP@2.21` |
+| `SIGHTLINE_CHROMETEST` | `SIGHTLINE_OLDCHROME=1` | `moved(mateDown):overwatch,focusow,brace,hunker,reload` · `abilitySlotGrewOnCooldown` + 10 more `moved(abilityCd)` · `pillFloor=0.10 pillSwing=10.00x` · `boonOverflow` ×10 |
+| `SIGHTLINE_QUITTEST` | (new surface; no pre-W5 form) | — |
+
+CONTRASTTEST boots a real 1280×800 window with Display and PostFX on and reads the framebuffer
+back; a screen read is the only honest instrument, because the whole defect lived in the
+composite. CHROMETEST **loads the real font atlases before measuring** — a gotcha worth recording:
+without them `Cfg.Measure` falls back to raylib's default face, whose narrower metrics fitted
+every doctrine description on one line, and the overflow leg silently could not fail.
+
+CODEXTEST gained the audit's assertion (every id in the verb table has help text, a hotkey and a
+manual entry; FIELD CRAFT carries SHOVE and UTILITY ITEMS — `shove` and `item` failed it before).
+METATEST gained the reserve-delta anti-over-claim. ONRAMPTEST gained the zero-run default.
+
+## W5-8 — Verification.
+
+`dotnet build -c Release` 0 warn / 0 err. `bash scripts/qa-sweep.sh --full`: **51/51 PASS**,
+COVERAGE GAP block empty, `PAIRTEST: PASS`. Autoplay ×3: LOSE m3 / LOSE m5 / LOSE m6 — no TIMEOUT,
+no exception. Screenshots read and judged: first-run mission 1 before/after (+ the strip at frame
+760), intro with FX before/after, board with FX before/after, both end cards, pause card, draft
+(cards + doctrine row), FIELD MANUAL's new tab, WAR ROOM, barracks.
+
+## W5-9 — The inertness proof.
+
+This is a UI/teaching wave and it must not move a gameplay number. Proved two ways:
+
+1. **`SIGHTLINE_PAIRTEST: PASS`** — byte-identical CRN pairing. The render split takes no draws.
+2. **A pinned-slot balance batch is FIELD-FOR-FIELD IDENTICAL to the branch point.**
+   `SIGHTLINE_BALANCE=5` (greedy+sloppy → `runs=10`, asserted in both), `SIGHTLINE_BALANCE_BASE=120`,
+   `SIGHTLINE_BALANCE_HEAT=0`, Release binaries run directly under `xvfb-run` with per-tree
+   `XDG_CONFIG_HOME` and `SIGHTLINE_BALANCE_JSON`. Baseline built from `git archive d350416`.
+   Both JSONs: `runs=10, missions=44, runWinRate=60, avgMissionsCleared=5.1` — and a
+   key-by-key diff of the two documents reports **zero differing fields**, including every
+   nested `byHeat` / `byMission` / `byObjective` / `decisionRichness` / `policyGap` block.
+
+The one behavioural default this wave *does* move is the fresh-profile difficulty rung (W5-4),
+and it cannot reach the instrument: the batch sets heat explicitly, and `EnsureMetaLoaded` returns
+under `NoPersist` before the default is read. That is why the two JSONs are identical rather than
+merely close.
+
+## W5-10 — WHAT I DID NOT DO, and what it costs.
+
+- **CUT: `visual-6` / brief item (g) — unifying the intro's four button families onto one system**
+  (dark plate + coloured left rule, one filled treatment for the single primary verb, hotkey
+  badges in a fixed column, LAST STAND's reserved danger red demoted to a rule). The brief marked
+  it droppable-last and I dropped it. Two reasons, one good and one honest: the half of it that
+  was *measurable* — the labels washing out — is fixed by W5-2 and now reads 5.79–11.6:1 with FX
+  on; and the rest is a substantial aesthetic redesign of the storefront screen whose only
+  reviewer this session is my own screenshot, where the downside (flat saturated primaries are
+  loud, but they are also the clearest call-to-action on the page) is a judgement I would be
+  making alone. **Cost: the intro still stacks three button styles across four widths, and the
+  frame's top-1% chroma is still ~189 against a board at ~100.** The finding stands, unfixed.
+- **The `EndReserve` count and the priced rows can disagree in one narrow case.** The header shows
+  new joiners (the delta); the per-row prices are shown for every Rank ≥ 1 survivor. A run whose
+  survivors were *all* already reserve records reads "0 join" with priced rows above it — correct
+  on both counts, and the header is simply omitted at 0, but it is not the same number. I chose
+  the anti-over-claim delta the gate asked for over the friendlier count.
+- **The board's own bloom was verified INSIDE the measurement noise, not identical.** The
+  screenshot harness has never been byte-stable (CLAUDE.md documents why), so "unchanged" here
+  means "smaller than the run-to-run swing of the same build", with both numbers stated. A
+  stronger claim would need a deterministic render path this project does not have.
+- **`SIGHTLINE_POSTFX=1`'s stale demo-bloom comment is documented above but not fixed.** Removing
+  the dead injection is a one-liner; it belongs with whoever next touches that hook, and changing
+  it now would have made my before/after contrast pair non-comparable.
+- **No human has played any of this.** Every judgement here is a screenshot read by the agent that
+  wrote the code, which is exactly the gap `wildcard-6` names. The gates are real; the *taste*
+  calls (the bar's backing-plate alpha, the pill's new floor, the disc's new corner) are not
+  measured and are not claimed to be.

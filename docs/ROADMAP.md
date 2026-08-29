@@ -1361,6 +1361,63 @@ sets, one lever per measured round, fresh same-slot R0 first, dip budgets, breac
       cols 16-17 extraction corner and gets scattered by the spawn-collision loop. Gating it
       off evac objectives the way ENVELOP is gated is the cheap fix, unmeasured.
 
+### PROGRAM RESONANCE — W5 "THE FIRST HOUR AND THE FRONT DOOR" (2026-08-29, details in DEVLOG §W5)
+
+Balance-inert by construction *and* by measurement: `PAIRTEST` byte-identical, and a pinned-slot
+`SIGHTLINE_BALANCE=5` (`runs=10` asserted, `SIGHTLINE_BALANCE_BASE=120`, heat 0) whose JSON is
+**field-for-field identical** to the same batch on the branch point `d350416`.
+
+- [x] **THE HEADLINE DEFECT — mission 1's briefing could not draw, and it REPRODUCES.** The audit
+      traced the chain by code-read and said it could not be reproduced; `SIGHTLINE_BRIEFTEST`
+      (the one self-test that drives the LIVE, persisting path, because `NoPersist` is what hid
+      it) measures **0.00 s of 11 s** on the pre-fix tree. Fixed by ORDERING: the briefing is a
+      pre-fight beat and the mission-1 lesson strip arms PENDING behind it (`Game.TutPending`),
+      opening the frame the card retires. `TutStepFire` gains the turn-count patience fallback its
+      three siblings had. `SIGHTLINE_BRIEFFIRST=0` restores the old order and turns the test red.
+- [x] **THE BLOOM STOPS EATING THE TYPE** (`visual-2`). `Display.RenderFrame` is now two-target:
+      board + overlay-screen backdrop keep the full grade, the HUD is drawn after the composite.
+      Main-menu TRAINING OP measured **2.19:1 → 8.87:1** glyph-vs-plate with post-FX ON (method
+      stated in DEVLOG §W5-2), and the board's own bloom is unchanged *within the screenshot
+      harness's documented noise floor*, with both numbers recorded. `SIGHTLINE_CONTRASTTEST` is
+      the standing gate; `SIGHTLINE_HUDINFX=1` falsifies it.
+- [x] **THE DOORS** (`newplayer-2`, `wildcard-3`). A third **WAR ROOM [W]** plate on both end
+      cards, a "spend it in the WAR ROOM" line under the SALVAGE slab, and an "N JOIN THE RESERVE"
+      header with per-survivor recall prices — where N is the *delta* of `SaveGame.VeteranCount()`
+      so the card cannot over-claim (METATEST pins it). **QUIT TO DESKTOP [Q]** on the pause card
+      (arm-then-confirm, with the honest cost stated) and **QUIT [Q]** on the main menu.
+      `SIGHTLINE_QUITTEST` asserts the quit path keeps the mission-start checkpoint byte-identical
+      and never touches `meta.json`.
+- [x] **THE ON-RAMP IS THE DEFAULT** (`newplayer-4`). A zero-run profile opens on RECRUIT
+      (`Game.FirstTimeProfile`) and "< RECRUIT" names the rung below zero on every profile. This
+      moves a DEFAULT, not a rung — every archived heat number is untouched, and the measurement
+      harness sets heat explicitly under `NoPersist`. ONRAMPTEST asserts the default *and* the
+      control (a played profile keeps heat 0).
+- [x] **THE CHROME** (`visual-7`, `newplayer-3`, `newplayer-6`). A fixed slot map keyed by verb
+      stability (volatile verbs at the tail, where appending cannot move anything) plus one
+      backing plate; the CONCEALED pill's pulse floor raised from **0.10 to 0.56** (a 10.0× swing
+      to 1.79×); doctrine cards sized to content — **ten of sixteen boons overflowed** the old
+      fixed 74px height — and the class-glyph disc moved out of the operator blurb's row.
+      `SIGHTLINE_CHROMETEST`, falsified by `SIGHTLINE_OLDCHROME=1`.
+- [x] **THE WORDS** (`newplayer-5`, `newplayer-7`). Both "glowing tile" prompts now name the
+      outline, the corner ticks and the dashed ring the renderer actually draws. FIELD CRAFT gains
+      SHOVE and UTILITY ITEMS, and a **VERBS & KEYS** tab is generated from `Hud.VerbTable` +
+      `Hud.VerbHelp` — the same switch the action bar's tooltip reads, so help and manual cannot
+      drift. CODEXTEST asserts every verb has a permanent home (`shove` and `item` failed before).
+
+- [ ] **NOT DONE — `visual-6`: unify the intro's four button families onto one system.** Marked
+      droppable-last in the brief and dropped. Its *measurable* half (labels washing out) is fixed
+      by the post-FX split; the rest is a substantial aesthetic redesign of the storefront screen
+      that this wave could only review with its own screenshots. **Still true:** three button
+      styles across four widths on five rows with three gutters, hotkey badges inside the corner
+      radius, LAST STAND spending the reserved danger red on a menu affordance, and a frame whose
+      top-1% chroma is ~189 against a board at ~100.
+- [ ] **Residual (recorded, not fixed): `SIGHTLINE_POSTFX=1`'s "demo bloom" comment is stale.**
+      The boot-time `BloomIntensity = 0.85` / `ChromaIntensity = 0.6` injection is overwritten on
+      frame 1 by `Game.Update`'s own `SetPostFxParams(_postFxBloom = 0, …)`, so the hook has been
+      photographing the RESTING configuration for waves. That is *better* for W5's purposes (the
+      contrast numbers above are what every player sees on the menu, every time) but the hook does
+      not do what its comment says. One-liner for whoever next touches that path.
+
 ### PROGRAM RESONANCE — X2 "TRUE NORTH II" (2026-08-29, details in DEVLOG §X2)
 
 - [x] **THE LADDER OF RECORD.** The first ladder ever measured on the COMPOSED tree: n=40

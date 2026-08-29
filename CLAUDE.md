@@ -162,18 +162,24 @@ for `SIGHTLINE_` for the authoritative set.
 | `SIGHTLINE_AUTOPLAY=1` (Debug) | ~22 s |
 | `SIGHTLINE_BALANCE=10` (Release binary, **under xvfb**) | 311 s (~31 s/slot) |
 
-**Free keys** (nothing is bound to them — check here before adding a shortcut):
-**`I J N O P Q U V Z`**. Bound today: `A B C D E F G H K L M R S T W X Y`, `1`–`9`, the
-arrows, Tab/Space/Enter/Escape/Backspace/F2/Kp+/Kp−.
+**Free keys** — **DO NOT TRUST THE LIST BELOW; DERIVE IT.** The 2026 audit (wildcard-4)
+found four of the nine letters this line advertised as free were already bound (N/P/U/V),
+and the duplicate registry at `src/Game.cs` ("Free letters remaining…") disagreed with it.
+Run `grep -ohE 'KeyboardKey\.[A-Z][a-z0-9]*' src/*.cs | sort -u` before binding anything.
+As of wave W5 the genuinely free letters are **`I J O Z`** — W5 bound **Q** (QUIT TO
+DESKTOP, pause card + main menu). Everything else is claimed somewhere.
 
 **Distribution** (publishing a build, the licence position, where saves live, and the
 `PublishTrimmed` hazard): [`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md) +
 `bash scripts/publish.sh`.
 
-**Self-tests & measurement:** 41 features ship a window-free `SIGHTLINE_*TEST` hook
+**Self-tests & measurement:** **53** features ship a window-free `SIGHTLINE_*TEST` hook
 (e.g. `COMBATTEST`, `SAVETEST`, `AITEST`, `ITEMTEST`) that prints `PASS/FAIL`, and there
-are `SIGHTLINE_*` screenshot hooks per feature. `bash scripts/qa-sweep.sh --full` runs all
-41 plus autoplay ×3 and is the pre-merge gate; without `--full` it skips the 38 s PAIRTEST.
+are `SIGHTLINE_*` screenshot hooks per feature. `bash scripts/qa-sweep.sh --full` runs 51
+of them plus autoplay ×3 and is the pre-merge gate; without `--full` it skips the 38 s
+PAIRTEST. **Do not hand-maintain that count** — it has now been wrong three times (41 / 46
+/ 49 all claimed while a different number ran). Derive it:
+`grep -oE 'SIGHTLINE_[A-Z0-9_]+TEST|SIGHTLINE_FUL11PROBE' scripts/qa-sweep.sh | sort -u | wc -l`.
 The `SIGHTLINE_BALANCE=<N>` flywheel runs N headless campaigns and reports
 win-rate/decision-richness/policy-gap — **it needs a display**, so run it under `xvfb-run`;
 without one it silently reports `runs=0`. A fuller (but non-exhaustive) list of hooks is
@@ -228,7 +234,7 @@ src/
   Display.cs    render-target, post-FX shader, brightness/colorblind, settings
   Stats.cs      SIGHTLINE_BALANCE analytics harness
 scripts/dev-setup.sh   sandbox setup
-scripts/qa-sweep.sh    all 41 self-tests + autoplay x3 (--full adds PAIRTEST)
+scripts/qa-sweep.sh    every self-test + autoplay x3 (--full adds PAIRTEST); count DERIVED, not typed
 scripts/publish.sh     hand-run distributable build + persistence re-proof
 THIRD-PARTY-NOTICES.txt  raylib/Raylib-cs (Zlib) + .NET (MIT); copied to build output
 docs/screenshot.png    README image
