@@ -20,7 +20,7 @@ step between rungs**. This wave re-measures every rung at **n=80** — four disj
 (`SIGHTLINE_BALANCE_BASE` 0 / 10 / 20 / 30) x greedy+sloppy = 80 campaigns per rung — which
 halves the variance and takes the SE to ±3.4-5.6.
 
-**`runs=20` was asserted in every one of the 53 chunks below** (`run_chunk.sh` reads the JSON's
+**`runs=20` was asserted in every one of the 62 chunks below** (`run_chunk.sh` reads the JSON's
 own `runs` field — it cannot be half-written — and prints OK/BAD; every chunk printed OK).
 
 ## How every chunk was run

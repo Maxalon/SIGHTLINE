@@ -5431,8 +5431,8 @@ between rungs**. Three of its six shipped deltas were indistinguishable from noi
 top recommendation was "not another lever — n≥80 on the state already shipped."
 
 So: **every rung re-measured at n=80** — four disjoint CRN slot sets
-(`SIGHTLINE_BALANCE_BASE` 0/10/20/30) × greedy+sloppy — with `runs=20` asserted in all 53 chunks.
-SE fell to ±3.4-5.6. Budget: 53 chunks × ~5 min at P=4 ≈ 75 minutes of batches.
+(`SIGHTLINE_BALANCE_BASE` 0/10/20/30) × greedy+sloppy — with `runs=20` asserted in all 62 chunks.
+SE fell to ±3.4-5.6. Budget: 62 chunks × ~5 min at P=4 ≈ 80 minutes of batches.
 
 ## 2. THE CONFIRMED LADDER — round R0, no lever, n=80/rung
 

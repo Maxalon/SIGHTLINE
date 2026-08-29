@@ -1438,7 +1438,7 @@ sets, one lever per measured round, fresh same-slot R0 first, dip budgets, breac
 
 - [x] **THE LADDER CONFIRMED AT n=80.** Every rung re-measured on the integration tip — four
       disjoint CRN slot sets (`SIGHTLINE_BALANCE_BASE` 0/10/20/30) × greedy+sloppy, `runs=20`
-      asserted in all 53 chunks, base commit `d350416`, raw data in `docs/measurements/x3/`.
+      asserted in all 62 chunks, base commit `d350416`, raw data in `docs/measurements/x3/`.
       Per-rung SE fell from ±6-8 to **±3.4-5.6**. Baseline (no lever):
       **73.8 / 48.8 / 33.8 / 21.2 / 17.5 / 10.0**. Supersedes X2's n=40 table.
 - [x] **X2's table was a SAMPLING excursion, not tree drift — proved, not argued.** X2's archived

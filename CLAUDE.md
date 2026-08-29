@@ -347,7 +347,7 @@ funnel, so a trade takes roughly two hits instead of one. Its raw chunk logs liv
 > **NUMBERS AND THEIR BASE COMMIT — read before quoting any balance figure.**
 >
 > **THE LADDER OF RECORD (wave X3 "CONFIRM", base commit `d350416` + X3's own class-role pass,
-> n=80 campaigns per rung, `runs=20` asserted in all 53 chunks, raw data in
+> n=80 campaigns per rung, `runs=20` asserted in all 62 chunks, raw data in
 > `docs/measurements/x3/`):**
 >
 > | RECRUIT | heat 0 | heat 2 | heat 4 | heat 6 | heat 8 |
