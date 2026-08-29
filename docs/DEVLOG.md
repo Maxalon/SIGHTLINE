@@ -4728,3 +4728,53 @@ mission-1 difference from heat 0 is **one hostile body** (its −1 stat is a no-
 `bump = Math.Max(0, (n-1) + statDelta)` is already 0 — the fact W4's ONRAMPTEST repair
 surfaced) plus the 5-turn bleed-out valve. Mission 1 goes **75% → 100%, zero losses in 40
 campaigns.** Ten of heat 0's twenty-six lost runs die on the opening mission.
+
+## 2. THE TARGET — I am KEEPING the band, adding the rung it is missing, and fixing its stated precision
+
+The brief offered the option of adjusting the band rather than the game, and named the
+strongest argument for it: the game now has a **RECRUIT rung below heat 0** that did not exist
+when the band was written, so heat 0 no longer has to be the on-ramp. **I am not taking it, and
+the reason is a measurement.**
+
+FUL-13 set h0 = 55 *before* RECRUIT existed. W5 then added RECRUIT and measured the pair on its
+own base at **RECRUIT 75 / h0 55** — i.e. the on-ramp was designed as a **+20 step above an h0
+of 55**, with RECRUIT present. On this tree RECRUIT measures **75.0** (n=40): the on-ramp has
+not moved at all. What has moved is heat 0, from 55 to 35 — so the step a player takes when
+they leave the on-ramp is now **40 points, double the one that was designed**. The RECRUIT
+argument, followed honestly, argues for restoring h0, not for lowering the band to meet it.
+Lowering h0's target to ~40 would make the first paid rung a 35-point cliff off a tutorial
+setting, which is the anxiety side of DESIGN §3.D, not the flow channel.
+
+The second reason is that the band is **not** broadly missed. Only h0 is out by more than one
+standard error. FUL-13's re-set was justified because the game had *changed identity* (routes
+that dodged their own hardest content started dealing it); nothing comparable happened here.
+Fourteen waves of accumulation moved ONE rung and left the other four where they were. That is
+a correction, not a re-specification.
+
+**Two amendments I am proposing, both from measurement, neither of them a difficulty change:**
+
+**(i) Publish the RECRUIT rung in the band: `RECRUIT 75 ±8`, with a standing floor of
+`RECRUIT − h0 ≥ 15`.** The band has never included the rung below zero even though the game has
+shipped it for two waves. RECRUIT measures 75.0 here and 75 at W5's own base — the only number
+in this project that has reproduced across a re-baseline — so it is the safest anchor the ladder
+has, and pinning it is what makes "the on-ramp is too steep" a *gate* instead of an observation.
+
+**(ii) State the band's precision, and stop reading rung ORDER off it at n=40.** A 40-campaign
+rung carries **±6-8 points of standard error** — the same size as the ±8 tolerance and larger
+than the 10-point step the band asks between rungs. That is why this baseline reads h2 above h0
+and h6 above h4: those inversions are noise, and no wave should spend a lever on them. Pooling
+adjacent rungs (n=80) gives back a monotone ladder and is the granularity this harness can
+actually resolve:
+
+| pooled rung pair | measured | ±SE | band target (mean of the two rungs) | verdict |
+|---|---|---|---|---|
+| RECRUIT | 75.0 (n=40) | 6.8 | *(unpublished — proposed 75)* | anchor |
+| heat 0-2 | **37.5** (n=80) | 5.4 | 47.5 | **10.0 low** |
+| heat 4-6 | **26.3** (n=80) | 4.9 | 25.0 | **on target** |
+| heat 8 | 7.5 (n=40) | 4.2 | 10 (±5) | in band |
+
+**So the correction this wave owes the game is +10 completion points at the BOTTOM of the
+ladder and nothing anywhere else** — which is a much smaller and much better-aimed job than the
+"20+ points everywhere" the brief inherited, and it is the exact shape a cold-opener repair
+produces: relief on missions 1-2 multiplies every rung's completion by the same factor, and the
+same multiplier is worth the most absolute points where completion is highest.
