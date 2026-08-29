@@ -70,27 +70,10 @@ runbin/
 autoplay10.txt
 qasweep.txt
 sweep-balance.json
-# W9 THE REPAIR — wave-local scratch (repro drivers, snapshots, census logs)
-.w9repro/
-.w9frames/
-.w9base/
-.w9keep/
-.home/
-w9.sh
-w9env.sh
-t.sh
-frames.sh
-run-autoplay.sh
-repro-meta.sh
-prove1.py
-.w9frames-*.log
+# W9 THE REPAIR — wave-local scratch. Kept SHORT and wave-scoped on purpose: generic names
+# (t.sh / sweep.sh / frames.sh ...) would shadow a real project file later, so the wave's throwaway
+# scripts are deleted from the worktree rather than ignored forever.
+.w9*
+# Every agent is told to point SIGHTLINE_BALANCE_JSON at $PWD/balance.json (see the dev contract),
+# so this one is durable, not wave-local — it belongs beside sweep-balance.json above.
 balance.json
-.w9shots/
-shot.sh
-.w9msg*.txt
-.w9devlog.md
-sweep.sh
-waitcensus.sh
-.w9sweep.log
-recal.py
-.w9sweep2.log

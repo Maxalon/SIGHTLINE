@@ -5715,8 +5715,9 @@ the WAR ROOM layout, and the skirmish key bindings.
 * **`bash scripts/qa-sweep.sh --full`:** **52/52 PASS**, PAIRTEST **PASS**, COVERAGE GAP block
   empty, `SWEEP-EXIT=0`. The footer count is now DERIVED from `src/` rather than hand-maintained
   (it had been wrong twice before).
-* **Autoplay ×3 inside the sweep:** `LOSE mission=6 frame=12512 turns=40` / `LOSE mission=6
-  frame=16417 turns=51` / `WIN mission=6 frame=10341 turns=25`. No TIMEOUT, no blank.
+* **Autoplay ×3 inside the sweep** (final tree, after the cap recalibration): `LOSE mission=6
+  frame=12517 turns=32` / `LOSE mission=3 frame=7900 turns=20` / `LOSE mission=5 frame=11652
+  turns=31`. No TIMEOUT, no blank — and the sweep would now have exited 1 if there had been.
 * **PAIRTEST is green and must be** — it asserts that two identical legs match EACH OTHER, not
   that they match an archived number, so the draw-order changes above do not and cannot break it.
 * **Seeded census, the same 20 campaigns, before and after (base `d350416` vs the final tree).**
