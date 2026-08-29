@@ -4942,6 +4942,204 @@ public partial class Game
         return sb.ToString();
     }
 
+
+    // ================= W4 "THE BOARD BECOMES A PLACE" — BOARDTEST ================================
+    // The one self-test in this project that measures RENDERED PIXELS rather than game state, and
+    // it exists because the defect it guards is a rendering defect that no state test can see: at
+    // base commit d350416 a DORMANT POD measured peak luminance 219.9 while the SELECTED SOLDIER
+    // measured 188.1 and a LIVE HOSTILE 211.1 — the squint hierarchy in docs/DESIGN.md 3.H
+    // ("the focal element is the brightest"; "neutral/inactive is dimmed toward the background")
+    // was running exactly backwards, and nine programs of balance work could not see it.
+    //
+    // The test stages a fixed three-token scene on a real mission board, draws ONE real frame
+    // through the shipped Game.Draw path, screenshots it, and probes the pixels:
+    //   GATE A (value hierarchy): peak AND mean luminance of a 14px patch on each token must run
+    //           SELECTED SOLDIER > LIVE HOSTILE > DORMANT POD, with >= 8 luma of margin so the
+    //           move overlay's alpha-15 whisper tint cannot flip a verdict.
+    //   GATE B (cover merge): on a horizontally adjacent same-type cover pair, the scanline from
+    //           one tile centre to the other must contain no FLOOR-coloured gutter. Pre-wave (and
+    //           under SIGHTLINE_COVERMERGE=0) that scanline crosses ~10px of visible floor,
+    //           because DrawCover inset every tile on all four sides with no neighbour test.
+    //   GATE C (the reserved objective gold): Pal.MoveDash must not share Pal.Accent's RGB bytes.
+    //   GATE D (dash on demand): the default interactive frame draws the WALK contour and NOT the
+    //           dash region.
+    // FAILS on the pre-wave tree: run it with SIGHTLINE_TOKENSTYLE=0 (gate A), SIGHTLINE_COVERMERGE=0
+    // (gate B) or SIGHTLINE_MOVESTYLE=0 (gate D) and it reports the pre-wave numbers and FAILs.
+    public string BoardSelfTest()
+    {
+        var sb = new System.Text.StringBuilder();
+        var fails = new List<string>();
+        NoPersist = true;
+        // Pin the world. This test reads PIXELS, so it has to be looking at the same board every
+        // time or its numbers are not comparable run to run — and the cover-merge gate needs a
+        // board that actually contains an adjacent same-type cover pair, which a clock-seeded
+        // arena does not guarantee (measured: one draw in three had none).
+        Util.Reseed(90210);
+        StartMission(1);
+        for (int i = 0; i < 12; i++) Update(1f / 60f);   // settle the opening anims
+        BriefLines = null;                                // the briefing card sits over the probes
+        CalloutText = null; TutStep = -1;                  // and so would a field tip / a lesson card
+
+        // ---- stage: three tokens on clean floor, well clear of the HUD and of each other -------
+        // The roster strip occupies board column 0 and the action bar the bottom two rows, so the
+        // probe window is columns 3..W-4, rows 1..H-4. Facings and bob phases are pinned so the
+        // three patches differ ONLY in the thing under test.
+        var spots = new List<(int, int)>();
+        for (int x = 3; x < Grid.W - 3 && spots.Count < 3; x++)
+            for (int y = 1; y < Grid.H - 3 && spots.Count < 3; y++)
+            {
+                if (!Grid.IsFloor(x, y)) continue;
+                bool clear = true;
+                foreach (var (sx, sy) in spots) if (Util.ChebyDist(x, y, sx, sy) < 3) clear = false;
+                if (clear) spots.Add((x, y));
+            }
+        if (spots.Count < 3) return "BOARDTEST: FAIL (could not stage three clear tiles)";
+
+        Enemies.Clear();
+        Unit Stage(string cls, Team team, AlertLevel a, int x, int y)
+        {
+            var u = new Unit { Name = "PROBE", Cls = cls, Team = team, X = x, Y = y,
+                               Hp = 6, MaxHp = 6, Aim = 60, Mobility = 6, Weapon = Weapon.Make(WeaponKind.Rifle) };
+            u.Ammo = u.Weapon.Clip; u.Alert = a; u.PodId = -1; u.Bob = 0f; u.Facing = 0f;
+            u.SyncPos();
+            return u;
+        }
+        // ---- stamp a KNOWN two-tile cover volume for the merge gate ---------------------------
+        // The gate must not depend on the arena roll handing it an adjacent same-type pair (one
+        // board in three does not). Stamp one: two ground-level HighCover tiles side by side on
+        // clean floor, well away from the three probe tokens. This is a throwaway harness Game,
+        // and DrawCover reads the grid every frame, so the merge logic gets exercised exactly as
+        // it would on an authored wall.
+        int cvx = -1, cvy = -1;
+        for (int y = Grid.H - 4; y >= 1 && cvx < 0; y--)
+            for (int x = Grid.W - 5; x >= 3 && cvx < 0; x--)
+            {
+                if (!Grid.IsFloor(x, y) || !Grid.IsFloor(x + 1, y)) continue;
+                if (Grid.HeightAt(x, y) != 0 || Grid.HeightAt(x + 1, y) != 0) continue;
+                bool nearProbe = false;
+                foreach (var (sx, sy) in spots)
+                    if (Util.ChebyDist(x, y, sx, sy) < 2 || Util.ChebyDist(x + 1, y, sx, sy) < 2) nearProbe = true;
+                if (nearProbe) continue;
+                cvx = x; cvy = y;
+            }
+        if (cvx >= 0)
+        {
+            Grid.Tiles[cvx, cvy] = TileType.HighCover;
+            Grid.Tiles[cvx + 1, cvy] = TileType.HighCover;
+            Grid.SetCoverHp(cvx, cvy); Grid.SetCoverHp(cvx + 1, cvy);   // undamaged: no crack overlay
+        }
+
+        var foe = Stage("GRUNT", Team.Enemy, AlertLevel.Alert, spots[1].Item1, spots[1].Item2);
+        var pod = Stage("GRUNT", Team.Enemy, AlertLevel.Unaware, spots[2].Item1, spots[2].Item2);
+        Enemies.Add(foe); Enemies.Add(pod);
+        // put every soldier but one off the probe window, and stand the survivor on spots[0]
+        var hero = Players[0];
+        for (int i = Players.Count - 1; i >= 1; i--) Players.RemoveAt(i);
+        hero.X = spots[0].Item1; hero.Y = spots[0].Item2; hero.Bob = 0f; hero.Facing = 0f; hero.SyncPos();
+        Selected = hero;
+        RecomputeMoveCost();
+
+        // ---- draw one real frame and read it back ----------------------------------------------
+        const string shotPath = "sightline_boardtest.png";
+        Display.RenderFrame(Draw);
+        Raylib.TakeScreenshot(shotPath);
+        var img = Raylib.LoadImage(shotPath);
+        float Lum(int px, int py)
+        {
+            var c = Raylib.GetImageColor(img, px, py);
+            return 0.2126f * c.R + 0.7152f * c.G + 0.0722f * c.B;
+        }
+        (float mean, float peak) Patch(int cx, int cy, int r)
+        {
+            float sum = 0, pk = 0; int n = 0;
+            for (int px = cx - r; px <= cx + r; px++)
+                for (int py = cy - r; py <= cy + r; py++)
+                {
+                    float l = Lum(px, py); sum += l; if (l > pk) pk = l; n++;
+                }
+            return (sum / n, pk);
+        }
+        Vector2 Cen(int tx, int ty) => Util.TileCenter(tx, ty);
+        var pHero = Patch((int)Cen(hero.X, hero.Y).X, (int)Cen(hero.X, hero.Y).Y, 14);
+        var pFoe = Patch((int)Cen(foe.X, foe.Y).X, (int)Cen(foe.X, foe.Y).Y, 14);
+        var pPod = Patch((int)Cen(pod.X, pod.Y).X, (int)Cen(pod.X, pod.Y).Y, 14);
+        int walkLoops = Renderer.LastWalkLoops, walkEdges = Renderer.LastWalkEdges;
+        bool dashShown = Renderer.LastDashShown;
+
+        sb.AppendLine($"BOARDTEST value hierarchy (14px patches, Rec.709 luma):");
+        sb.AppendLine($"  SELECTED soldier  mean {pHero.mean,6:0.0}  PEAK {pHero.peak,6:0.0}");
+        sb.AppendLine($"  ACTIVE hostile    mean {pFoe.mean,6:0.0}  PEAK {pFoe.peak,6:0.0}");
+        sb.AppendLine($"  DORMANT pod       mean {pPod.mean,6:0.0}  PEAK {pPod.peak,6:0.0}");
+        const float margin = 8f;
+        if (pHero.peak < pFoe.peak + margin) fails.Add($"peak: selected {pHero.peak:0.0} !> hostile {pFoe.peak:0.0}");
+        if (pFoe.peak < pPod.peak + margin) fails.Add($"peak: hostile {pFoe.peak:0.0} !> dormant {pPod.peak:0.0}");
+        if (pHero.mean < pFoe.mean + margin) fails.Add($"mean: selected {pHero.mean:0.0} !> hostile {pFoe.mean:0.0}");
+        if (pFoe.mean < pPod.mean + margin) fails.Add($"mean: hostile {pFoe.mean:0.0} !> dormant {pPod.mean:0.0}");
+
+        // ---- GATE B: no floor gutter between two tiles of the same cover volume ----------------
+        // Redraw with nothing selected first: the move overlay strokes tile EDGES, and a cyan
+        // stroke sitting exactly on the seam under test would mask an unmerged gutter.
+        Selected = null;
+        Display.RenderFrame(Draw);
+        Raylib.TakeScreenshot(shotPath);
+        Raylib.UnloadImage(img);
+        img = Raylib.LoadImage(shotPath);
+        // The discriminator is NOT "is the seam floor-coloured" — a cover top standing in the key
+        // light's far corner can measure darker than a lit floor tile, so an absolute threshold
+        // reads the wrong answer at one end of the board. It is the TROUGH: an unmerged pair puts
+        // a gutter of floor PLUS both blocks' hairline edges and contact shadows between the two
+        // top faces, which is a deep, wide dip relative to the SAME MATERIAL a few pixels either
+        // side. A merged volume has continuous top face across the seam.
+        int gapPx = -1; string pairDesc = "none"; float topRef = 0f, seamMin = 0f;
+        if (cvx >= 0)
+        {
+            var a = Cen(cvx, cvy); var b = Cen(cvx + 1, cvy);
+            int yy = (int)a.Y - 6;                       // inside the merged top face
+            int seamX = (int)((a.X + b.X) * 0.5f);       // the shared tile edge
+            var interior = new List<float>();
+            for (int px = (int)a.X - 14; px <= (int)a.X + 6; px++) interior.Add(Lum(px, yy));
+            for (int px = (int)b.X - 6; px <= (int)b.X + 14; px++) interior.Add(Lum(px, yy));
+            interior.Sort();
+            topRef = interior[interior.Count / 2];
+            seamMin = float.MaxValue; int g = 0;
+            for (int px = seamX - 12; px <= seamX + 12; px++)
+            {
+                float l = Lum(px, yy);
+                if (l < seamMin) seamMin = l;
+                if (l < 0.78f * topRef) g++;
+            }
+            gapPx = g; pairDesc = $"({cvx},{cvy})-({cvx + 1},{cvy}) HighCover";
+        }
+        sb.AppendLine($"BOARDTEST cover merge: stamped pair {pairDesc}; top-face median {topRef:0.0} luma, "
+                      + $"seam minimum {seamMin:0.0}; dark-trough pixels across the seam = {gapPx} "
+                      + $"(merged expects <= 3; SIGHTLINE_COVERMERGE=0 measures ~14)");
+        if (gapPx < 0) fails.Add("could not stamp a two-tile cover volume — the merge gate could not run");
+        else if (gapPx > 3) fails.Add($"cover seam shows a {gapPx}px dark trough — the volume is not merged");
+
+        Raylib.UnloadImage(img);
+        try { System.IO.File.Delete(shotPath); } catch { }
+
+        // ---- GATE C: the dash stroke is off the reserved objective gold ------------------------
+        bool goldClash = Pal.MoveDash.R == Pal.Accent.R && Pal.MoveDash.G == Pal.Accent.G
+                         && Pal.MoveDash.B == Pal.Accent.B;
+        float stitch = walkLoops > 0 ? walkEdges / (float)walkLoops : 0f;
+        sb.AppendLine($"BOARDTEST move overlay: dash RGB ({Pal.MoveDash.R},{Pal.MoveDash.G},{Pal.MoveDash.B}) "
+                      + $"vs objective gold ({Pal.Accent.R},{Pal.Accent.G},{Pal.Accent.B}); "
+                      + $"walk region {walkEdges} boundary edges stroked as {walkLoops} closed contour(s) "
+                      + $"= {stitch:0.0} edges/stroke (pre-wave 1.0); dash region shown {dashShown}");
+        if (goldClash) fails.Add("the dash stroke is painted in Pal.Accent, the reserved objective gold");
+        // ---- GATE D: the boundary is STITCHED, the dash region is off by default ---------------
+        if (walkLoops < 1) fails.Add("the walk region drew nothing — the overlay never ran, so gates C/D are untested");
+        else if (stitch < 4f) fails.Add($"the walk boundary is stroked at {stitch:0.0} edges per primitive — it is per-tile edges, not a contour");
+        else if (dashShown) fails.Add("the dash region drew unasked on a default interactive frame");
+
+        foreach (var f in fails) sb.AppendLine($"  !! {f}");
+        sb.Append(fails.Count == 0
+            ? "BOARDTEST: PASS (selected > hostile > dormant on mean and peak; cover volumes merged; dash on demand, off the objective gold)"
+            : $"BOARDTEST: FAIL ({fails.Count} violations)");
+        return sb.ToString();
+    }
+
     /// The unit the filmstrip is following (the one DebugLongMove staged), for the per-frame
     /// position dump in Program.cs. Null before the hook runs.
     public Unit DebugFilmUnit => Selected;

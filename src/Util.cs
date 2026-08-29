@@ -186,7 +186,7 @@ public static class Pal
     // dash-yellow indistinguishable from a warm-biome plateau top. Now the region is drawn as an
     // OUTLINE + corner lattice + a whisper of inner tint, so the same information costs a
     // fraction of the pixels and the room keeps its own colour.
-    //   MoveBlue / MoveYellow  — the region STROKE (walk solid, dash dashed)
+    //   MoveBlue / MoveDash    — the region STROKE (walk solid, dash dashed)
     //   MoveWalkTint / MoveDashTint — the whisper-level inner lift (see DrawMoveOverlay)
     //   MoveTick               — the per-tile corner lattice (walk only)
     // The inner lift is WHITE, not cyan, and that is deliberate. Mixing white into a colour
@@ -196,8 +196,16 @@ public static class Pal
     // almost-colourless floor even a whisper of blue decides the hue. A value lift is also the
     // channel DESIGN 3.H asks for: value carries, hue does not. The friendly-cyan identity of
     // the affordance rides on the stroke and the tick lattice, which are lines and points.
+    // W4 THE BOARD BECOMES A PLACE — the DASH boundary is no longer painted in the objective gold.
+    // Pal.MoveYellow was RGBA(251,191,36) — BYTE-IDENTICAL to Pal.Accent, the goal hue DESIGN.md
+    // §3.H reserves for terminals/evac/sites/VIP and which already carries 18 separate jobs in
+    // Renderer.cs alone. On the opening frame that put dashed GOLD rectangles on the far side of
+    // the board, next to enemies, which reads as "objective" or "enemy zone", not "where I could
+    // sprint". The dash region is a FRIENDLY affordance, so it now rides the friendly cyan and is
+    // separated from the walk stroke on VALUE + stroke STYLE (paler + dashed vs saturated + solid)
+    // rather than on hue. Renamed, not just re-valued, so nothing can quietly reintroduce the gold.
     public static readonly Color MoveBlue     = RGBA(56, 189, 248, 205);
-    public static readonly Color MoveYellow   = RGBA(251, 191, 36, 190);
+    public static readonly Color MoveDash     = RGBA(148, 221, 252, 180);
     public static readonly Color MoveWalkTint = RGBA(255, 255, 255, 15);
     public static readonly Color MoveDashTint = RGBA(255, 255, 255, 6);
     public static readonly Color MoveTick     = RGBA(120, 210, 250, 150);

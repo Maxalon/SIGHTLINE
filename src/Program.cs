@@ -135,6 +135,30 @@ public static class Program
             return;
         }
 
+        // W4 "THE BOARD BECOMES A PLACE": SIGHTLINE_BOARDTEST=1 — the board's RENDERED value
+        // hierarchy and the cover merge, measured on real pixels rather than on game state. This
+        // is the only self-test in the project that draws a frame and reads it back, and it has to
+        // be: the defect it guards (a dormant pod out-shining the selected soldier) is invisible to
+        // every state assertion in the suite. Needs the FULL-SIZE window + the baked fonts +
+        // Display, because it photographs the shipped Game.Draw path.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_BOARDTEST") == "1")
+        {
+            Raylib.SetConfigFlags(ConfigFlags.Msaa4xHint);
+            Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "boardtest");
+            Raylib.SetExitKey(KeyboardKey.Null);
+            LoadGameFonts();
+            Display.Init(false);          // post-FX OFF: the rungs are authored values, not bloom
+            Raylib.SetTargetFPS(0);
+            Audio.Init();
+            var bt = new Game { NoPersist = true };
+            Console.WriteLine(bt.BoardSelfTest());
+            Display.Shutdown();
+            Audio.Shutdown();
+            Renderer.UnloadNoise();
+            Raylib.CloseWindow();
+            return;
+        }
+
         // SIGHTLINE_SAVETEST=1 : headless round-trip check for run persistence (item E). No window.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_SAVETEST") == "1")
         {
