@@ -536,8 +536,10 @@ void main() {
     // regression for exactly the player those settings exist for. Painting into the target instead
     // keeps brightness, gamma, the biome grade and the vignette uniform across the whole frame,
     // needs no second render texture (and therefore no double-applied source alpha on translucent
-    // panels) and no Camera2D for the letterboxed path — while still removing the one thing that
-    // was actually destroying the type.
+    // panels) and no letterbox-blit Camera2D — while still removing the one thing that was
+    // actually destroying the type. (To be exact, because the DEVLOG once implied otherwise: the
+    // camera the abandoned attempt would have needed was never written. The BOARD's shake/zoom
+    // Camera2D — Game.ViewCamera, wrapped around Renderer.DrawBoard — is untouched.)
     //
     // What the chrome still receives: the composite's grade, and the bloom of whatever the BOARD
     // had behind it — which behind a menu plate is the dark tactical backdrop, i.e. nothing. The
@@ -551,14 +553,13 @@ void main() {
     {
         if (HudInFx && hud != null) { var b = board; var h = hud; board = () => { b(); h(); }; hud = null; }
         bool applyFx = Enabled && PostFX && _fxReady;
-        // Every non-post-FX path below wants one callable that paints the whole frame.
-        Action draw = hud == null ? board : () => { board(); hud(); };
 
         if (applyFx)
         {
-            // Pass 1 — the BLOOM SOURCE. Atmosphere only when the frame is split.
+            // Pass 1 — the BLOOM SOURCE. Atmosphere only when the frame is split; when there is
+            // no split `board` already IS the whole frame.
             Raylib.BeginTextureMode(_target);
-            if (hud == null) draw(); else board();
+            board();
             Raylib.EndTextureMode();
 
             // P1: build the half-res bloom from that frame before compositing.
@@ -605,6 +606,10 @@ void main() {
         }
 
         // --- original paths (no post-FX) ---
+        // W5-FIX (review): built HERE, not at the top. The shipped path is the post-FX one above,
+        // which returns without ever calling `draw` — allocating the combining closure (and its
+        // display class) on every frame of it was two managed allocations for nothing.
+        Action draw = hud == null ? board : () => { board(); hud(); };
         if (!Scaled)
         {
             Raylib.BeginDrawing();

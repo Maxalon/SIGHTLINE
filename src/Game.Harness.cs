@@ -4589,15 +4589,53 @@ public partial class Game
         }
 
         // ---- (C) the doctrine card fits its own text, for every boon in the catalogue ---------
+        //
+        // W5-FIX (review): the original form of this leg was TAUTOLOGICAL. It compared
+        //     need = BodyTop + lines*LineH + PadB      against      DraftBoonCardHeight(lines)
+        // which IS Math.Max(74, need) — the assertion could not fail for any string whatsoever.
+        // It now measures where the last line's INK actually lands, through the real font at the
+        // live UI scale (Hud.DraftBoonInkBottom), against the height the RENDERER uses. That can
+        // fail: shrink DraftBoonLineH, or raise DraftBoonFs past the 19 px step, and it does.
         {
             foreach (var b in BoonDef.All)
             {
                 int lines = Hud.DraftBoonLineCount(b);
-                int need = Hud.DraftBoonBodyTop + lines * Hud.DraftBoonLineH + Hud.DraftBoonPadB;
-                if (need > Hud.DraftBoonCardHeight(lines)) fails.Add("boonOverflow:" + BoonDef.Code(b));
-                if (lines >= 3 && Hud.DraftBoonCardHeight(lines) <= 74)
+                int bch = Hud.DraftBoonCardHeight(lines);   // the renderer's own card height
+                float ink = Hud.DraftBoonInkBottom(b);
+                if (ink + 4f > bch) fails.Add($"boonOverflow:{BoonDef.Code(b)}@{ink:0}>{bch}");
+                if (lines >= 3 && bch <= 74)
                     fails.Add("boonCardStillFixed:" + BoonDef.Code(b));
             }
+            // ...and the DEPLOY row must be ON SCREEN, for every boon in the catalogue, at every
+            // text size the pause menu can select. This is review blocker 2: the content-sized
+            // card pushed BACK / DEPLOY / RE-ROLL POOL through the bottom of the screen at the
+            // DEFAULT 100%, and clean off it at 120% — and RE-ROLL POOL has no keyboard
+            // alternative, so a control became unreachable. Nothing observed it, because nothing
+            // observed the layout below the card it grew.
+            float savedScale = Cfg.UiScale;
+            try
+            {
+                foreach (float ui in Display.UiScaleLevels)
+                {
+                    Cfg.UiScale = ui;
+                    int conH = Hud.DraftContractH();
+                    foreach (var b in BoonDef.All)
+                    {
+                        var st = Hud.DraftLayout(Hud.DraftBoonLineCount(b), conH);
+                        string tag = $"{BoonDef.Code(b)}@{(int)(ui * 100)}%";
+                        int margin = Cfg.ScreenH - Hud.DraftBottomPad - st.Bottom;
+                        if (margin < _draftWorstMargin) { _draftWorstMargin = margin; _draftWorstTag = tag; }
+                        _draftWorstSqueeze = Math.Max(_draftWorstSqueeze, st.Squeeze);
+                        if (st.Overflow > 0) fails.Add($"draftStackOverflows:{tag}by{st.Overflow}px");
+                        if (st.Bottom > Cfg.ScreenH - Hud.DraftBottomPad)
+                            fails.Add($"deployRowOffScreen:{tag}@{st.Bottom}");
+                        // the doctrine card must still clear the contract header below it
+                        if (st.BoonY + st.BoonH > st.ConHeadY) fails.Add("doctrineEatsContractHead:" + tag);
+                        if (st.ConY + st.ConH > st.InfoY) fails.Add("contractEatsInfoLine:" + tag);
+                    }
+                }
+            }
+            finally { Cfg.UiScale = savedScale; }
             // ...and the operator blurb must clear the class-glyph disc VERTICALLY (the disc
             // dropped into the corner) and fit its column HORIZONTALLY (so nothing ellipsizes —
             // the sentence is the whole point of the row).
@@ -4612,9 +4650,18 @@ public partial class Game
             ? "CHROMETEST: PASS (action-bar rects identical across full/no-ammo/mate-down + ability "
               + $"cooldown, CONCEALED pulse {Hud.ConcealPulseFloor:0.00}-{Hud.ConcealPulseCeil:0.00} "
               + $"({Hud.ConcealPulseCeil / Hud.ConcealPulseFloor:0.00}x), {BoonDef.All.Length} doctrine "
-              + "cards fit their text, blurb column clears the glyph)"
+              + "cards fit their text, blurb column clears the glyph, DEPLOY row on screen for all "
+              + $"{BoonDef.All.Length} x {Display.UiScaleLevels.Length} text sizes - tightest "
+              + $"{_draftWorstTag} with {_draftWorstMargin}px to spare, max gap squeeze "
+              + $"{_draftWorstSqueeze}px)"
             : "CHROMETEST: FAIL (" + string.Join(",", fails.Distinct()) + ")";
     }
+
+    // W5-FIX: diagnostics for CHROMETEST's draft-stack leg — the tightest DEPLOY-row margin over
+    // the whole doctrine catalogue x every text size, so the PASS line states the headroom
+    // instead of merely asserting there is some.
+    static int _draftWorstMargin = int.MaxValue, _draftWorstSqueeze;
+    static string _draftWorstTag = "-";
 
     static bool SameRect(Rectangle a, Rectangle b)
         => MathF.Abs(a.X - b.X) < 0.01f && MathF.Abs(a.Y - b.Y) < 0.01f
@@ -4814,18 +4861,33 @@ public partial class Game
         bool savedTut = Display.TutorialSeen, savedShow = Display.ShowAllVerbs;
         int savedTips = Display.TipsSeen;
 
-        // Drive `secs` seconds of an IDLE, READING player and return how many of them the briefing
-        // card actually spent burning its own clock. Zero = the card was on screen for none of it.
-        float Watch(Game g, float secs)
+        // Drive `secs` seconds of an IDLE, READING player and return (a) how many of them the
+        // briefing card spent burning its own clock — the MODEL — and (b) on how many of those
+        // frames Hud.DrawBriefCard actually RAN — the DRAW.
+        //
+        // W5-FIX (review blocker 5): (b) is new and it is the point. This test certified "the
+        // briefing plays its full 11 s" while observing only `Game.BriefTimer` and `BriefLines`,
+        // i.e. the model's own `BriefAllowed` predicate re-read back. A reviewer put a one-line
+        // `&& false` on the dispatch in Hud.Draw so the card is never drawn; it built clean and
+        // still PASSed with the full 11 s. A test that cannot see the thing it certifies is not a
+        // test — so every watched frame now paints a REAL frame through Hud.Draw and counts the
+        // card's own paints. (The window is 64x64; raylib clips, and the cost is the reason the
+        // watch runs at the tick rate and not faster.)
+        (float shown, int drawn) Watch(Game g, float secs)
         {
-            float shown = 0f;
+            float shown = 0f; int drawn = 0;
             for (int i = 0; i < (int)(secs * 60); i++)
             {
                 float before = g.BriefLines != null ? g.BriefTimer : -1f;
                 g.DebugTeachTick(Dt);
+                Hud.BriefCardDraws = 0;
+                Raylib.BeginDrawing();
+                Hud.Draw(g);
+                Raylib.EndDrawing();
+                if (Hud.BriefCardDraws > 0) drawn++;
                 if (before >= 0f && g.BriefLines != null && g.BriefTimer < before) shown += before - g.BriefTimer;
             }
-            return shown;
+            return (shown, drawn);
         }
 
         try
@@ -4849,9 +4911,13 @@ public partial class Game
 
             // 12 s of a player reading: the card is 11 s (BriefShowSeconds) and must burn nearly
             // all of it. THIS IS THE HEADLINE ASSERTION and it measured 0.00 s before the fix.
-            float shown = Watch(g, 12f);
+            var (shown, drawn) = Watch(g, 12f);
             if (shown < BriefShowSeconds - 0.5f)
                 fails.Add($"briefShownOnlyFor{shown:0.00}sOf{BriefShowSeconds:0}s");
+            // ...and the card was PAINTED on those frames. Model and draw, separately observed.
+            int wantFrames = (int)((BriefShowSeconds - 0.5f) * 60f);
+            if (drawn < wantFrames)
+                fails.Add($"briefCardDrawnOnOnly{drawn}framesOf{wantFrames}");
             if (g.BriefLines != null) fails.Add("briefNeverRetired");
             // ...and the strip opens the moment the card retires — the lesson is not lost, it is
             // re-ordered. TutStepConceal holds while the squad is concealed on turn 1.
@@ -4897,8 +4963,10 @@ public partial class Game
                 var rg = new Game();
                 rg.StartMission(1);
                 if (rg.TutPending || rg.TutStep >= 0) fails.Add("stripArmedForReturningPlayer");
-                float rshown = Watch(rg, 12f);
+                var (rshown, rdrawn) = Watch(rg, 12f);
                 if (rshown < BriefShowSeconds - 0.5f) fails.Add($"controlBriefShownOnlyFor{rshown:0.00}s");
+                if (rdrawn < (int)((BriefShowSeconds - 0.5f) * 60f))
+                    fails.Add($"controlBriefCardDrawnOnOnly{rdrawn}frames");
             }
 
             // ---- (E) the combat log still retires the card — the pre-fight contract is intact ----
@@ -4937,11 +5005,116 @@ public partial class Game
         }
 
         return fails.Count == 0
-            ? "BRIEFTEST: PASS (live first-ever mission 1: briefing plays its full "
+            ? "BRIEFTEST: PASS (live first-ever mission 1: briefing plays AND IS DRAWN for its full "
               + $"{BriefShowSeconds:0}s pre-fight, strip opens after it with staging unbroken, strip still "
               + $"completes, FIRE lesson yields at turn {TutFirePatience}, returning-player control + "
               + "combat-log retirement + drill silence)"
             : "BRIEFTEST: FAIL (" + string.Join(",", fails.Distinct()) + ")";
+    }
+
+    // ─── W5-FIX — the BACKDROP registry (SIGHTLINE_BACKDROPTEST=1) ─────────────────────────────
+    /// SIGHTLINE_BACKDROPTEST — the STRUCTURAL gate for review blocker 1.
+    ///
+    /// THE DEFECT THIS TEST EXISTS TO PIN. W5-2 split the frame so the animated full-screen
+    /// backdrops render into the BLOOM SOURCE (before `Display.BuildBloom`) and the chrome renders
+    /// after it. `Hud.DrawBackdropLayer` was made the home of every backdrop... except AUDIO
+    /// CHECK's, which stayed inside `Hud.DrawAudition`, i.e. in the CHROME pass. The composite
+    /// then added `glow * 1.45` computed from the LIVE BOARD on top of an opaque audition screen:
+    /// measured against a d350416 build with post-FX on, 17,010 px brightened by more than 20
+    /// luma, 8,640 by more than 40, peak +154 — worst over the MASTER and MUSIC fader rows. The
+    /// screen ships reachable from the intro AND from the pause card mid-mission, and
+    /// `Display.PostFX` defaults true, so it shipped to everyone.
+    ///
+    /// WHY NOTHING CAUGHT IT. Three source comments and the DEVLOG all asserted that AUDIO CHECK
+    /// "draws no backdrop". CONTRASTTEST reads nine main-menu labels and could never have seen it,
+    /// and cannot see the NEXT phase added without a `DrawBackdropLayer` entry either. So this
+    /// test does not check a screen — it checks the INVARIANT, over every Phase that exists:
+    ///
+    ///   (A) NO phase paints a full-screen backdrop from the CHROME pass. Ever. This is the one
+    ///       that fails on the pre-fix tree (`SIGHTLINE_AUDBACKDROP=1` restores the defect).
+    ///   (B) `Hud.BackdropPhase` and `DrawBackdropLayer`'s switch agree exactly — a phase in the
+    ///       registry must paint, a phase out of it must not. A future screen with a backdrop and
+    ///       no registry entry paints its chrome over the main menu; one in the registry with no
+    ///       backdrop loses its top bar entirely.
+    ///   (C) the modal scrim is laid in the bloom-source pass ONLY when the composite is actually
+    ///       running — with post-FX off there is no bright pass to attenuate, and the second wash
+    ///       cost 40% of the board's luminance under the pause card for nothing.
+    ///
+    /// The observation point is `Hud.BackdropPaints`, incremented inside `DrawTacticalBackdrop`
+    /// itself — the draw, not a predicate about the draw.
+    public string BackdropSelfTest()
+    {
+        var fails = new List<string>();
+        var phases = (Phase[])Enum.GetValues(typeof(Phase));
+        bool savedFx = Display.PostFX, savedEn = Display.Enabled;
+        try
+        {
+            var g = new Game { NoPersist = true };
+            g.StartMission(1);
+            g.BeginDraft();          // populate the draft pool/offer so DrawDraft has content
+            g.Phase = Phase.PlayerTurn;
+
+            // ---- (A) the chrome pass paints NO backdrop, for any phase ------------------------
+            foreach (var p in phases)
+            {
+                g.Phase = p;
+                Hud.BackdropPaints = 0;
+                try
+                {
+                    Raylib.BeginDrawing();
+                    Hud.Draw(g);
+                    Raylib.EndDrawing();
+                }
+                catch (Exception ex) { fails.Add($"chromeThrew:{p}:{ex.GetType().Name}"); continue; }
+                if (Hud.BackdropPaints != 0) fails.Add($"backdropFromChromePass:{p}");
+            }
+
+            // ---- (B) the registry and the switch are the same set -----------------------------
+            foreach (var p in phases)
+            {
+                g.Phase = p;
+                Hud.BackdropPaints = 0;
+                try
+                {
+                    Raylib.BeginDrawing();
+                    Hud.DrawBackdropLayer(g);
+                    Raylib.EndDrawing();
+                }
+                catch (Exception ex) { fails.Add($"backdropThrew:{p}:{ex.GetType().Name}"); continue; }
+                bool painted = Hud.BackdropPaints > 0;
+                bool owns = Hud.BackdropPhase(p);
+                if (painted && !owns) fails.Add($"paintsButNotInRegistry:{p}");
+                if (owns && !painted) fails.Add($"inRegistryButPaintsNothing:{p}");
+            }
+            // AUDIO CHECK by name — this is the whole point, and a name is harder to delete by
+            // accident than a set membership.
+            if (!Hud.BackdropPhase(Phase.AudioCheck)) fails.Add("audioCheckNotInRegistry");
+
+            // ---- (C) the modal scrim only doubles up where the bright pass exists -------------
+            {
+                // BARRACKS, not PAUSE: the pause wash is multiplied by a time-based entrance tween
+                // that reads 0 on its first frame, so it is not a fixed quantity to assert on.
+                // The barracks family's wash is a constant and covers the same code path.
+                g.Phase = Phase.Barracks;
+                float lit = Hud.BloomScrimAlpha(g, true);
+                float dark = Hud.BloomScrimAlpha(g, false);
+                g.Phase = Phase.PlayerTurn;
+                if (lit <= 0f) fails.Add($"scrimMissingUnderPostFx:{lit:0.00}");
+                if (dark != 0f) fails.Add($"scrimDoubledWithPostFxOff:{dark:0.00}");
+                // ...and a phase with its own opaque backdrop must not also be scrimmed.
+                g.Phase = Phase.Intro;
+                if (Hud.BloomScrimAlpha(g, true) != 0f) fails.Add("scrimOverAnOpaqueBackdrop");
+                g.Phase = Phase.PlayerTurn;
+            }
+        }
+        catch (Exception ex) { fails.Add("threw:" + ex.GetType().Name + ":" + ex.Message); }
+        finally { Display.PostFX = savedFx; Display.Enabled = savedEn; }
+
+        return fails.Count == 0
+            ? $"BACKDROPTEST: PASS (all {phases.Length} phases: none paints a backdrop from the chrome "
+              + "pass; DrawBackdropLayer's switch == Hud.BackdropPhase exactly, AUDIO CHECK included; "
+              + "modal scrim doubles only when the composite runs)"
+            : "BACKDROPTEST: FAIL (" + string.Join(",", fails.Distinct()) + ")";
     }
 
     /// SIGHTLINE_ONRAMPTEST — PROGRAM RESONANCE W5 "ON-RAMP". Two features, one test:

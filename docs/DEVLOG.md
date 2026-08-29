@@ -5523,9 +5523,14 @@ seam and the bloom seam are not the same seam, and only the bloom one was ever t
 
 Painting the chrome **into** the target after the bright-pass fixes the defect and keeps
 brightness, gamma, the biome grade and the vignette uniform across the whole frame. It also needs
-no second render texture (so no double-applied source alpha on translucent panels) and no camera
-path. And it measures **better** than the version that left the frame entirely — the composite's
-tonemap deepens a dark glyph against a bright plate rather than washing it:
+no second render texture (so no double-applied source alpha on translucent panels) and **no
+letterbox-blit camera** — the `Camera2D` the abandoned first attempt would have needed to place
+the chrome on the scaled backbuffer was never written, not deleted. *(W5-FIX, correcting this
+paragraph's own wording: the board's shake/zoom camera is UNTOUCHED and still there —
+`Game.ViewCamera` and the `BeginMode2D(ViewCamera(true))` around `Renderer.DrawBoard` at
+`Game.cs:7629/7658`. Do not go hunting for a removed camera; nothing was removed.)* And it
+measures **better** than the version that left the frame entirely — the composite's tonemap
+deepens a dark glyph against a bright plate rather than washing it:
 
 | main-menu label | FX off | FX on, BEFORE | HUD outside FX entirely | **shipped (out of the bloom)** |
 |---|---|---|---|---|
@@ -5534,11 +5539,18 @@ tonemap deepens a dark glyph against a bright plate rather than washing it:
 | DEPLOY SQUAD | 7.07 | 5.66 | 7.07 | 8.99 |
 | LAST STAND | 5.79 | 6.38 | 5.79 | 6.51 |
 
-`Hud.BackdropOwnsFrame` skips the in-mission chrome on the seven screens with an opaque backdrop.
+`Hud.BackdropOwnsFrame` skips the in-mission chrome on the screens with an opaque backdrop.
 Those screens used to draw the top/bottom bars and then bury them under the backdrop; with the
 backdrop in the bloom-source pass they painted straight over the main menu until this was added.
-BARRACKS and AUDIO CHECK are deliberately absent — neither draws a backdrop, so their frame order
-is unchanged.
+BARRACKS is deliberately absent — it draws no backdrop (it scrims the live board), so its frame
+order is unchanged.
+
+> **CORRECTION (W5-FIX, review blocker 1).** This paragraph originally read "BARRACKS **and AUDIO
+> CHECK** are deliberately absent — neither draws a backdrop". That was false of AUDIO CHECK and
+> the false premise WAS the bug: `Hud.DrawAudition` opened with its own `DrawTacticalBackdrop`
+> call, in the CHROME pass, i.e. after `BuildBloom` — so the composite added the LIVE BOARD's glow
+> straight through an opaque screen that ships post-FX ON and is reachable from the pause card
+> mid-mission. AUDIO CHECK is now in the registry with the rest; see §W5-FIX-1.
 
 **And one more thing the split broke, found by looking at a screenshot rather than by a test.**
 PAUSE, the tag editor and the whole BARRACKS modal family (requisition / perk / spec / boon /

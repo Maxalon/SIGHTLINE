@@ -202,7 +202,22 @@ public static class Program
         if (Environment.GetEnvironmentVariable("SIGHTLINE_BRIEFTEST") == "1")
         {
             Raylib.InitWindow(64, 64, "brieftest");   // StartMission -> Unit.SyncPos uses tile math
+            LoadGameFonts();   // W5-FIX: the test now DRAWS the real HUD, so it needs the atlases
             Console.WriteLine(new Game().BriefingSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
+        // SIGHTLINE_BACKDROPTEST=1 : W5-FIX — the backdrop registry. Drives EVERY Phase through the
+        // chrome pass and through DrawBackdropLayer and asserts (a) no screen builder paints a
+        // full-screen backdrop from the chrome pass (the AUDIO CHECK defect), (b) the registry and
+        // the switch are the same set, (c) the modal scrim doubles only when the composite runs.
+        // Draws the real HUD, so it needs a context + the real font atlases.
+        // SIGHTLINE_AUDBACKDROP=1 restores the defect and turns this red.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_BACKDROPTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "backdroptest");
+            LoadGameFonts();
+            Console.WriteLine(new Game().BackdropSelfTest());
             Raylib.CloseWindow();
             return;
         }

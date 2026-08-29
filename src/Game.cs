@@ -633,6 +633,11 @@ public partial class Game
     // turn 1, so the briefing is a genuine PRE-FIGHT beat: arm the strip PENDING, let the card
     // play, open the strip the frame it retires. Any key or click still dismisses the card, so a
     // player who wants to move immediately reaches the lesson in one input.
+    //
+    // THIS INVERTS A STATED PRIORITY AND IS RECORDED AS ONE: docs/DESIGN.md §1.2 is the amendment
+    // (§1.1 says the briefing yields to the teaching layers ABSOLUTELY; here, for mission 1 of a
+    // first-ever campaign only, teaching waits up to 11 s behind it). The never-simultaneous
+    // invariant is untouched — read §1.2's limits before widening this to any other mission.
     bool _tutPending;
     /// True while the mission-1 lesson strip is armed but yielding to the pre-fight briefing.
     public bool TutPending => _tutPending;
@@ -1586,6 +1591,11 @@ public partial class Game
         }
         // keyboard: Enter deploys when the draft is complete
         if (DraftReady && Raylib.IsKeyPressed(KeyboardKey.Enter)) ConfirmDraft();
+        // W5-FIX (review blocker 2): [R] re-rolls the pool. RE-ROLL POOL was the one control on
+        // this screen with NO keyboard route, which is why a layout that pushed it off the bottom
+        // made it unreachable rather than merely awkward. R is free in this phase (the draft reads
+        // only Esc and Enter) and is the same mnemonic RELOAD uses in the fight.
+        if (Raylib.IsKeyPressed(KeyboardKey.R)) TryRerollDraftPool();
     }
 
     /// True when exactly DraftCap soldiers and one boon are chosen (CONFIRM/Enter enabled).

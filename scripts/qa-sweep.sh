@@ -98,6 +98,8 @@ echo -n "TUTTEST    : "; SIGHTLINE_TUTTEST=1  run | grep -oE "TUTTEST: (PASS|FAI
 echo -n "BRIEFTEST  : "; SIGHTLINE_BRIEFTEST=1 run | grep -oE "BRIEFTEST: (PASS|FAIL)" | head -1
 echo -n "CONTRASTTEST: "; SIGHTLINE_CONTRASTTEST=1 run | grep -oE "CONTRASTTEST: (PASS|FAIL)" | head -1
 echo -n "CHROMETEST : "; SIGHTLINE_CHROMETEST=1 run | grep -oE "CHROMETEST: (PASS|FAIL)" | head -1
+# W5-FIX: the backdrop registry — no phase may paint a full-screen backdrop from the chrome pass.
+echo -n "BACKDROPTEST: "; SIGHTLINE_BACKDROPTEST=1 run | grep -oE "BACKDROPTEST: (PASS|FAIL)" | head -1
 echo -n "QUITTEST   : "; SIGHTLINE_QUITTEST=1   run | grep -oE "QUITTEST: (PASS|FAIL)" | head -1
 echo -n "THREATTEST : "; SIGHTLINE_THREATTEST=1 run | grep -oE "THREATTEST (PASS|FAIL)" | head -1
 # R2 FIX 1: the nobody-is-walled-out geometry invariant (all 4 deployment shapes x 8 objectives
@@ -128,10 +130,16 @@ echo -n "run1: "; SIGHTLINE_AUTOPLAY=1 run | grep -oE "RESULT: (WIN|LOSE|TIMEOUT
 echo -n "run2: "; SIGHTLINE_AUTOPLAY=1 run | grep -oE "RESULT: (WIN|LOSE|TIMEOUT) mission=[0-9]+" | head -1
 echo -n "run3: "; SIGHTLINE_AUTOPLAY=1 run | grep -oE "RESULT: (WIN|LOSE|TIMEOUT) mission=[0-9]+" | head -1
 echo "=== DONE ==="
-# W5: DERIVED, not typed. This footer's number has now been wrong FOUR times (41 / 46 / 49 / 51
-# all claimed while a different count ran) — the 2026 audit's wildcard-4 finding is exactly this
-# class of hand-maintained registry drift. Count the invocation lines in this file instead.
-_ran=$(grep -cE '^echo -n "[A-Z0-9]+ *: "; SIGHTLINE_' "$_SELF")
+# W5: DERIVED, not typed. This footer's number has now been wrong FIVE times (41 / 46 / 49 / 51
+# all claimed while a different count ran — and then W5's own DERIVATION was wrong too, which is
+# the joke this comment has to carry). The 2026 audit's wildcard-4 finding is exactly this class of
+# hand-maintained registry drift. Count the invocation lines in this file instead.
+#
+# W5-FIX: the anchor is '^ *echo', not '^echo'. PAIRTEST's invocation is INDENTED inside the
+# --full block, so anchoring at column 0 silently missed it: --full printed 53 while 54 ran, and
+# plain printed 52 while 53 ran. A derived counter that skips indented lines is a hand-maintained
+# counter wearing a grep.
+_ran=$(grep -cE '^ *echo -n "[A-Z0-9]+ *: "; SIGHTLINE_' "$_SELF")
 [ "$FULL" = 1 ] || _ran=$((_ran - 1))   # PAIRTEST is the only --full-gated one
 echo "($_ran self-tests ran$([ "$FULL" = 1 ] || echo ", PAIRTEST skipped"). Every line above"
 echo " must read PASS, and every autoplay must read WIN or LOSE — never TIMEOUT, never blank.)"

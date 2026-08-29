@@ -76,6 +76,9 @@ acknowledgement. Naming a thing is the cheapest way to make an existing system l
 - **Readability wins, always.** §3.E and §3.H govern. Text that fights the signal is a
   regression, and the briefing card yields the shared card slot to wave T1's teaching
   layers *absolutely* — a lesson or a field tip on screen silences the frame outright.
+  **AMENDED by §1.2** for mission 1 of a first-ever campaign only: the never-simultaneous
+  invariant stands, but the ORDER is reversed there (the briefing plays first and the
+  lesson strip opens behind it), because the rule as written measured 0.00 s of 11 s.
 - **Barks are rate-limited by design, not by taste.** One per turn, one per beat kind
   per mission, never the same speaker twice running. The combat log is load-bearing for
   "why did that happen"; flavour may never crowd out a mechanical line.
@@ -96,6 +99,76 @@ would ship an ellipsis fails the build gate instead.
 for the same attention budget as balance and feel work. It earns its place only while it
 stays this small. If a future wave wants dialogue, arcs or a plot, that is a *different*
 amendment and it should be argued on its own terms — this one does not authorise it.
+
+### 1.2 AMENDMENT — the briefing goes FIRST on mission 1 (PROGRAM RESONANCE, wave W5, 2026-08-29)
+
+> **This amends the fourth limit in §1.1 above, and only on mission 1 of a first-ever
+> campaign.** Same contract: on the record, argued, and reversible with one env var.
+
+**What §1.1 said, and what W5 did.** §1.1 lists as a non-negotiable limit that *"the
+briefing card yields the shared card slot to wave T1's teaching layers **absolutely** — a
+lesson or a field tip on screen silences the frame outright."* W5 shipped the opposite
+**priority** for one window: `Game.StartTutorialMaybe` now arms the mission-1 lesson strip
+**pending** (`Game.TutPending`) and `UpdateTutorial` opens it on the frame the briefing card
+retires, so teaching waits up to 11 s behind flavour. The literal *never-simultaneous*
+invariant §1.1 was written to protect is intact — the two still cannot share the slot, and
+`Hud.Draw`'s dispatch chain still puts every teaching layer ahead of the briefing — but the
+ORDER is inverted in exactly the first eleven seconds a new player ever sees. That is the
+window §1.1's limit exists to protect, so this has to be a recorded amendment, not a
+detail of an implementation.
+
+**Why it is nonetheless right.**
+
+- **The rule as written produced ZERO briefings, not a delayed one.** `BriefAllowed`
+  requires `TutorialText == null`; the strip was non-null from the frame `SetupMission`
+  armed it; and `UpdateBriefing` destroys the card outright the instant `Stats.CombatLog`
+  fills, which the strip's own FIRE lesson guarantees. So on a first-ever run the card held
+  without ever burning its clock and was then deleted. Measured on the live persisting path
+  by `SIGHTLINE_BRIEFTEST`: **0.00 s of 11 s.** An absolute yield to a layer that never
+  ends is not a priority, it is a deletion. §1.1's own justification — *"naming a thing is
+  the cheapest way to make an existing system land"* — cannot be served by a card no player
+  has ever seen.
+- **The two layers are not competing for the same moment.** §1.1's limit is about
+  ATTENTION during play: a lesson that says *do this now* must not fight prose. On turn 1
+  of mission 1 nothing is contested — the squad is concealed, no hostile has acted, the
+  combat log is empty, and the MOVE lesson has nothing to teach yet that the next eleven
+  seconds will change. The briefing is a genuine pre-fight beat, and playing it there costs
+  the teaching layer nothing it can use.
+- **The player keeps the override.** Any key or click dismisses the card
+  (`Game.UpdateBriefing`), so a player who wants to move reaches the lesson in **one
+  input**. Teaching is deferred, never withheld; a player cannot get stuck behind flavour.
+  The wait is also bounded twice — `BriefShowSeconds` = 11 s, and `BriefHoldMax` = 45 s
+  gives up entirely rather than ambush anyone mid-fight.
+- **Nothing else moved.** The strip still runs in full and still completes; the action bar's
+  verb staging is live throughout (`OnboardingActive` counts `_tutPending`) so the bar does
+  not flicker whole-then-staged across the card; and `TutStepFire` gained the turn-count
+  patience fallback its three siblings already had, so the FIRE lesson can no longer be the
+  step that outlives the briefing.
+
+**The limit on the amendment — this is the load-bearing half.**
+- **Mission 1 of a first-ever campaign only.** `StartTutorialMaybe` returns immediately for
+  `Mission != 1` and for `Display.TutorialSeen`. On every other mission, and for every
+  returning player, §1.1's absolute yield stands unchanged.
+- **The never-simultaneous invariant is untouched and is still absolute.** `Hud.Draw` draws
+  the tutorial, the training lesson and the field tip ahead of the briefing in one `else if`
+  chain; `BriefAllowed` still requires `TutorialText == null`; `BarksAllowed` still defers to
+  all three. A lesson and a briefing on screen together remains a bug.
+- **This buys ORDER, not CONTENT.** §1.1's cap on the frame — three lines, no plot, nothing
+  a player must read — is not touched. This wave made an existing card reachable; it wrote
+  no new words.
+- **It stays falsifiable.** `SIGHTLINE_BRIEFFIRST=0` restores the pre-W5 ordering, and
+  `SIGHTLINE_BRIEFTEST` goes red without it — with `briefShownOnlyFor0.00sOf11s`, the
+  original defect, named.
+
+**The honest cost, and the correction that produced this section.** A first-time player's
+first eleven seconds are now prose rather than instruction, and nobody has watched a human
+sit through them: the wait is defensible on the argument above, not on evidence. The wave
+that shipped it also did **not** record it as an amendment at the time — it wrote a full
+§5.1 for the much smaller mid-mission-checkpoint decision and left this one as an
+implementation comment in `Game.cs`, which is exactly the drift this document exists to
+prevent. If a recorded human session (audit `wildcard-6`) shows players skipping the card
+or fumbling turn 1, the cheap retreat is to cut `BriefShowSeconds`, not to restore a rule
+that measured zero.
 
 ---
 

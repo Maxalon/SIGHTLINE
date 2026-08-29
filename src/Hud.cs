@@ -205,12 +205,25 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     // screens used to draw the in-mission chrome first and then bury it under the backdrop; now
     // the backdrop lands in the EARLIER (bloom-source) pass, so the chrome has to be SKIPPED
     // instead of covered — otherwise the top bar and the action bar paint over the main menu.
-    // BARRACKS and AUDIO CHECK are deliberately absent: neither draws a backdrop, so their frame
-    // order is identical to before the split.
-    public static bool BackdropOwnsFrame(Game g) =>
-        g.Phase == Phase.Intro || g.Phase == Phase.Win || g.Phase == Phase.Lose
-        || g.Phase == Phase.SkirmishSetup || g.Phase == Phase.WarRoom
-        || g.Phase == Phase.Codex || g.Phase == Phase.Draft;
+    // BARRACKS is deliberately absent: it draws no backdrop of its own (it scrims the live board),
+    // so its frame order is identical to before the split.
+    //
+    // W5-FIX (review blocker 1): AUDIO CHECK belongs HERE and used to be listed with BARRACKS as a
+    // screen that "draws no backdrop". It draws one — `Hud.DrawAudition` opened with its own
+    // `DrawTacticalBackdrop` call — and because that call sat in the CHROME pass, i.e. AFTER
+    // BuildBloom, the composite added the LIVE BOARD's glow straight through the opaque audition
+    // screen. Measured post-FX ON against a d350416 build: 16,887 px brightened by >20 luma,
+    // peak +189, worst over the MASTER fader row. This list and DrawBackdropLayer's switch are
+    // ONE registry now — SIGHTLINE_BACKDROPTEST asserts they agree, and that no screen builder
+    // paints a backdrop from the chrome pass ever again.
+    public static bool BackdropOwnsFrame(Game g) => BackdropPhase(g.Phase);
+
+    /// The registry itself, as a pure predicate over Phase so a self-test can enumerate it.
+    /// Must be TRUE for exactly the phases DrawBackdropLayer's switch paints.
+    public static bool BackdropPhase(Phase p) =>
+        p == Phase.Intro || p == Phase.Win || p == Phase.Lose
+        || p == Phase.SkirmishSetup || p == Phase.WarRoom
+        || p == Phase.Codex || p == Phase.Draft || p == Phase.AudioCheck;
 
     public static void Draw(Game g)
     {
@@ -283,6 +296,14 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         foreach (var ln in lines) { Cfg.Text(ln, new Vector2(x + pad, ty), 15, 1f, Pal.Txt); ty += 20; }
     }
 
+    /// W5-FIX (review blocker 5): how many times the briefing card has actually been PAINTED
+    /// since the counter was last zeroed. SIGHTLINE_BRIEFTEST used to certify "the briefing plays
+    /// its full 11 s" by reading Game.BriefTimer — the MODEL. A reviewer put `&& false` on the
+    /// dispatch in Hud.Draw so the card could never draw; the test still PASSed with the full 11 s.
+    /// This wave's whole thesis is that a defect hid because nothing observed the draw side, so
+    /// the test now counts frames on which THIS METHOD RAN.
+    public static int BriefCardDraws;
+
     /// RESONANCE C1 — the mission BRIEFING card. Deliberately the FIELD TIP chrome, one accent
     /// apart (Friend blue = "this is context", Accent = "this is a lesson", Good = "this is a
     /// tip"), so the game has ONE card slot and the player never has to learn a second place to
@@ -292,6 +313,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     {
         var lines = g.BriefLines;
         if (lines == null || lines.Length == 0) return;
+        BriefCardDraws++;   // W5-FIX: the ONLY draw-side observation of this card (BRIEFTEST)
         float a = Util.Clamp(g.BriefTimer / 0.6f, 0f, 1f);        // fade the final 0.6s
         int w = BriefCardW, x = Cfg.ScreenW / 2 - w / 2, pad = BriefPad;
         var rows = new System.Collections.Generic.List<string>();
@@ -2548,8 +2570,13 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     ///
     /// This is the atmosphere/chrome seam, not the screen/HUD seam: everything here is
     /// full-screen, type-free and deliberately soft, so nothing in it can lose contrast to a
-    /// blur. Screens with no backdrop of their own (BARRACKS, AUDIO CHECK, live play) draw
-    /// nothing and fall through to the board underneath, exactly as before.
+    /// blur. Screens with no backdrop of their own (BARRACKS, live play) draw nothing and fall
+    /// through to the board underneath, exactly as before.
+    ///
+    /// EVERY DrawTacticalBackdrop CALL IN THE PROJECT LIVES IN THIS SWITCH. That is an invariant,
+    /// not a convention — SIGHTLINE_BACKDROPTEST drives every Phase through the chrome pass and
+    /// fails if any screen builder paints a backdrop of its own (which is exactly how AUDIO CHECK
+    /// spent this wave punching the board's bloom through its own opaque screen).
     public static void DrawBackdropLayer(Game g)
     {
         float t = (float)Raylib.GetTime();
@@ -2575,6 +2602,11 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
                 DrawTacticalBackdrop(t, Pal.Friend, 0f);
                 Raylib.DrawRectangle(0, 0, Cfg.ScreenW, Cfg.ScreenH, Raylib.Fade(Pal.RGBA(6, 9, 13), 0.82f));
                 break;
+            // W5-FIX: AudClock, NOT GetTime. The audition screen is deliberately clock-free (see
+            // Hud.Audition.cs' header) so its frames are reproducible; reading GetTime here would
+            // cost it that, and with it the post-FX-OFF byte-identity that made blocker 1
+            // measurable in the first place.
+            case Phase.AudioCheck: DrawTacticalBackdrop(g.AudClock, Pal.Accent, 0f); break;
         }
         // W5, and this cost a screenshot to find: the SCRIM SCREENS need their wash in the
         // BLOOM SOURCE too. PAUSE, the tag editor and the whole BARRACKS family dim the live
@@ -2588,10 +2620,23 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         // The board therefore takes the wash TWICE (once here, once in the chrome pass, which
         // still owns dimming the HUD) and reads darker under a modal than it did pre-W5. That is
         // deliberate and it is the better of the two available errors: the card is the focus.
-        float scrim = BoardScrimAlpha(g);
+        //
+        // W5-FIX (review): ...but ONLY where the justification exists. With post-FX off there is
+        // no bright pass to attenuate and nothing to punch back through, so the second wash was
+        // pure loss — measured on a pure-board strip under the pause card, 15.44 -> 9.24 luma
+        // (−40%) for no benefit at all. Gate it on the composite actually running.
+        float scrim = BloomScrimAlpha(g);
         if (scrim > 0f)
             Raylib.DrawRectangle(0, 0, Cfg.ScreenW, Cfg.ScreenH, Raylib.Fade(Pal.RGBA(5, 8, 11), scrim));
     }
+
+    /// The wash the BLOOM-SOURCE pass lays over the live board, so the board's own glow is gone
+    /// from the bright pass before the composite can add it back over a modal card. ZERO when the
+    /// composite is not running: with post-FX off there is no bright pass to attenuate and the
+    /// second wash is pure loss (measured on a pure-board strip under the pause card, 15.44 ->
+    /// 9.24 luma, −40%, for no benefit). SIGHTLINE_BACKDROPTEST asserts both halves.
+    public static float BloomScrimAlpha(Game g) => BloomScrimAlpha(g, Display.Enabled && Display.PostFX);
+    public static float BloomScrimAlpha(Game g, bool compositeRuns) => compositeRuns ? BoardScrimAlpha(g) : 0f;
 
     /// The alpha of the full-screen wash the CHROME pass is about to lay over the live board.
     /// Screens with an OPAQUE backdrop are handled by DrawBackdropLayer's switch above and are
@@ -2604,12 +2649,19 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
          : g.Phase == Phase.Barracks ? 0.85f
          : 0f;
 
+    /// W5-FIX: how many full-screen backdrops have been painted since the counter was last
+    /// zeroed. SIGHTLINE_BACKDROPTEST zeroes it, runs one pass, and reads it — the ONLY way to
+    /// observe "did this phase paint a backdrop, and from WHICH pass" without a framebuffer read.
+    /// Free in the shipped game (one increment per frame at most).
+    public static int BackdropPaints;
+
     /// A reusable animated geometric backdrop: an opaque graded fill, a slow-drifting
     /// perspective-ish grid, a horizontal scanning sightline, drifting reticle rings,
     /// and a few primitive "tracer" streaks. Used by the intro + the win/lose screens
     /// (tinted by `accent`). `warp` (0..1) bends the grid toward the horizon for variety.
     static void DrawTacticalBackdrop(float t, Color accent, float warp)
     {
+        BackdropPaints++;   // W5-FIX: the structural gate's only observation point (BACKDROPTEST)
         int W = Cfg.ScreenW, H = Cfg.ScreenH;
 
         // 1) Opaque vertical graded base so the live board/HUD underneath is hidden.
@@ -3760,13 +3812,138 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     /// starts at y+38 and WrapLines steps 13+6 = 19 px; +10 leaves the last descender clear of the
     /// border. SIGHTLINE_CHROMETEST asserts this against every boon in the catalogue.
     public const int DraftBoonBodyTop = 38, DraftBoonLineH = 19, DraftBoonPadB = 10;
+    public const int DraftBoonFs = 13, DraftBoonGap = 22;
+
+    /// W5-FIX (review blocker 2): the doctrine row now spans exactly the same width as the RUN
+    /// CONTRACT row directly beneath it (it used to be 932 px against that row's 1230 — the one
+    /// mismatched width on the screen). That is a composition fix that happens to pay for itself:
+    /// a 395 px card wraps FIELD DRILLS' description in three lines where a 296 px one needed
+    /// four at 120% text, and four lines is what pushed the DEPLOY row off the bottom. The height
+    /// is reclaimed from the horizontal slack the screen was already wasting.
+    public static int DraftBoonCardW()
+    {
+        int cn = DraftContractCards.Length;
+        int rowW = cn * DraftContractCardW() + (cn - 1) * DraftContractGap;
+        return (rowW - 2 * DraftBoonGap) / 3;
+    }
     public static int DraftBoonCardHeight(int lines)
         => OldChrome ? 74 : Math.Max(74, DraftBoonBodyTop + Math.Max(1, lines) * DraftBoonLineH + DraftBoonPadB);
 
     /// W5: the wrapped-line count the doctrine card sizer uses, exposed so the self-test measures
     /// the SAME wrap the renderer does rather than a re-implementation of it.
-    public static int DraftBoonLineCount(Boon b, int cardW = 296)
-        => WrapLines(BoonDef.Desc(b), cardW - 28, 13, 0).Count;
+    public static int DraftBoonLineCount(Boon b, int cardW = 0)
+        => WrapLines(BoonDef.Desc(b), (cardW > 0 ? cardW : DraftBoonCardW()) - 28, DraftBoonFs, 0).Count;
+
+    /// W5-FIX: where the LAST line of a doctrine description actually lands, measured through the
+    /// real font at the real UI scale — not re-derived from the same constants the height formula
+    /// uses. CHROMETEST's old assertion compared `need` against `Math.Max(74, need)` and so could
+    /// never fail; this one can, and does the moment the 19 px step stops clearing the glyph.
+    public static float DraftBoonInkBottom(Boon b, int cardW = 0)
+    {
+        int lines = DraftBoonLineCount(b, cardW);
+        return DraftBoonBodyTop + (Math.Max(1, lines) - 1) * DraftBoonLineH
+             + Cfg.Measure(BoonDef.Desc(b), DraftBoonFs, 1f).Y;
+    }
+
+    // ── W5-FIX (review blocker 2): the draft screen's VERTICAL STACK, computed in ONE place ────
+    //
+    // The defect this replaces: W5 made the doctrine card size to its content (74 -> 105 for a
+    // 3-line boon, which is what FIELD DRILLS is) and every row below it simply moved down by the
+    // difference. `DraftConfirm` derives from the contract row, so at the DEFAULT 100% text size
+    // the BACK / DEPLOY / RE-ROLL POOL row was sliced through the middle by the bottom of the
+    // screen, and at 120% it was off it entirely — and RE-ROLL POOL has no keyboard alternative,
+    // so a squeezed layout made a real control unreachable. One overflow was traded for a worse
+    // one.
+    //
+    // The fix keeps the content-sized card (the sentence is the point) and RECLAIMS the height
+    // from the gaps instead, in a fixed order of least harm, with a floor on each. The stack is
+    // computed BEFORE anything is drawn, so the candidate grid participates in the reclaim rather
+    // than pinning everything below it. `Overflow` is the px the stack STILL cannot fit after
+    // every gap has been given up: it is 0 for the whole shipped catalogue at all four text
+    // sizes, CHROMETEST asserts that, and the DEPLOY row is additionally hard-clamped on screen
+    // so the failure mode of a future copy edit is a tight layout, never an unreachable button.
+    public const int DraftConfirmH = 46, DraftBottomPad = 8;
+
+    /// Squeezable gaps, in the order the layout gives them up (last entry goes first).
+    ///   0 grid top · 1 candidate row gap (counts twice) · 2 grid -> doctrine head
+    ///   3 doctrine head -> cards · 4 doctrine cards -> contract head · 5 contract head -> cards
+    ///   6 contract cards -> info line · 7 info line -> DEPLOY row
+    static readonly int[] DraftGapNat = { 134, 18, 10, 20, 10, 22, 10, 22 };
+    // Floors are set by what each gap CARRIES at the LARGEST text size (120%), not by taste:
+    //   g[0] clears the "N / 4 SELECTED" counter (18 px -> 21.6 px, drawn at y=98)
+    //   g[3] clears "STARTING DOCTRINE"  (18 px header, drawn 4 px above the gap)
+    //   g[5] clears "RUN CONTRACT"       (16 px header, drawn 2 px above the gap)
+    //   g[7] clears the "FIRST OP / HEAT" preview line (14 px -> 16.8 px)
+    //   g[1] g[2] g[4] g[6] are air and give the most.
+    // Squeezing g[5] to 14 collided "RUN CONTRACT" with the top border of its own cards on the
+    // very first screenshot after this fix — these floors are that screenshot's answer, and the
+    // whole-catalogue x four-text-sizes assertion in CHROMETEST is what keeps them honest.
+    static readonly int[] DraftGapMin = { 122, 10, 4, 18, 6, 19, 6, 18 };
+
+    /// The contract row's cards, as one list — the stack has to measure them before the screen
+    /// can be laid out, so the renderer can no longer own the array privately.
+    public static readonly Contract[] DraftContractCards =
+        { Contract.None, Contract.IronVeterans, Contract.HighStakes,
+          Contract.Spearhead, Contract.MercenaryClause, Contract.LivingLegends };
+
+    /// The contract card's width and the row's content height, measured through the real font at
+    /// the live UI scale. Shared by the renderer and by CHROMETEST — the stack needs the height
+    /// before it can place anything, so it cannot stay private to DrawDraft.
+    public const int DraftContractGap = 12;
+    public static int DraftContractCardW()
+        => Math.Min(222, (Cfg.ScreenW - 48 - (DraftContractCards.Length - 1) * DraftContractGap)
+                         / DraftContractCards.Length);
+    public static int DraftContractH()
+    {
+        int ccw = DraftContractCardW();
+        int descBottom = 47;   // one-line floor (desc top 30 + line height 17)
+        foreach (var c in DraftContractCards)
+            foreach (var (_, dy) in WrapLines(ContractDef.Desc(c), ccw - 22, 12, 0))
+                descBottom = Math.Max(descBottom, 30 + dy + 17);   // WrapLines' lh = size + 6
+        return descBottom + 4;
+    }
+
+    public struct DraftStack
+    {
+        public int GridTop, GridRowGap;
+        public int BoonHeadY, BoonY, BoonH;
+        public int ConHeadY, ConY, ConH;
+        public int InfoY, ConfirmY;
+        public int Bottom, Squeeze, Overflow;
+    }
+
+    public static DraftStack DraftLayout(int boonLines, int conH)
+    {
+        var g = (int[])DraftGapNat.Clone();
+        int bH = DraftBoonCardHeight(boonLines);
+        // everything that is not a gap: two candidate rows + the two card rows + the DEPLOY plate
+        int solid = 2 * DraftCardH + bH + conH + DraftConfirmH;
+        int limit = Cfg.ScreenH - DraftBottomPad;
+        int GapTotal() { int t = g[1]; foreach (var v in g) t += v; return t; }   // g[1] twice
+        int deficit = solid + GapTotal() - limit;
+        int squeeze = 0;
+        for (int i = g.Length - 1; i >= 0 && deficit > 0; i--)
+        {
+            int per = i == 1 ? 2 : 1;                     // the row gap is spent twice
+            int give = Math.Min((g[i] - DraftGapMin[i]) * per, deficit);
+            int step = give / per;
+            g[i] -= step; deficit -= step * per; squeeze += step * per;
+        }
+
+        var s = new DraftStack { GridTop = g[0], GridRowGap = g[1], BoonH = bH, ConH = conH, Squeeze = squeeze };
+        s.BoonHeadY = s.GridTop + 2 * (DraftCardH + s.GridRowGap) + g[2];
+        s.BoonY = s.BoonHeadY + g[3];
+        s.ConHeadY = s.BoonY + bH + g[4];
+        s.ConY = s.ConHeadY + g[5];
+        s.InfoY = s.ConY + conH + g[6];
+        s.ConfirmY = s.InfoY + g[7];
+        s.Overflow = Math.Max(0, deficit);
+        // Last-resort clamp: a control the player cannot reach is worse than a tight row. This
+        // only ever fires when Overflow > 0, which CHROMETEST refuses to let ship.
+        if (s.ConfirmY + DraftConfirmH > limit) s.ConfirmY = limit - DraftConfirmH;
+        s.Bottom = s.ConfirmY + DraftConfirmH;
+        return s;
+    }
 
     static System.Collections.Generic.List<(string, int)> WrapLines(string text, int width, int size, int _)
     {
@@ -3982,11 +4159,21 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
             Cfg.Text(bank, new Vector2(W - bkm.X - 40, 100), 14, 1f, bankCol);
         }
 
+        // ---- the vertical stack, computed BEFORE anything below the header is drawn -------
+        // W5-FIX (review blocker 2): one layout pass owns every y on this screen, so a doctrine
+        // card that grows to fit its text cannot push the DEPLOY row off the bottom. See
+        // Hud.DraftLayout. The contract row's own height is content-sized too and is measured
+        // first, because the stack needs it.
+        int bLines = 1;
+        foreach (var bo in g.DraftBoonOffer)
+            bLines = Math.Max(bLines, DraftBoonLineCount(bo));
+        var st = DraftLayout(bLines, DraftContractH());
+
         // ---- candidate cards: 6 in two rows of 3 ----
-        int cols = 3, cw = 300, chH = 150, gx = 24, gy = 18;
+        int cols = 3, cw = DraftCardW, chH = DraftCardH, gx = 24, gy = st.GridRowGap;
         int gridW = cols * cw + (cols - 1) * gx;
         int x0 = W / 2 - gridW / 2;
-        int y0 = 134;
+        int y0 = st.GridTop;
         for (int i = 0; i < g.DraftPool.Count; i++)
         {
             var u = g.DraftPool[i];
@@ -4095,7 +4282,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         }
 
         // ---- starting boon (pick 1 of 3) ----
-        int boonY = y0 + 2 * (chH + gy) + 10;
+        int boonY = st.BoonHeadY;
         string bh = "STARTING DOCTRINE";
         var bhm = Cfg.Measure(bh, 18, 1f);
         Cfg.Text(bh, new Vector2(W / 2f - bhm.X / 2f, boonY - 4), 18, 1f, Pal.VipGold);
@@ -4108,14 +4295,11 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         // the tallest, apply it to all three so the row stays even. DraftCardHeight is the shared
         // formula — SIGHTLINE_CHROMETEST asserts it against every boon in the catalogue, so a
         // future copy edit that adds a line cannot silently overflow again.
-        int bn = g.DraftBoonOffer.Count, bcw = 296, bgap = 22;
-        int bLines = 1;
-        foreach (var bo in g.DraftBoonOffer)
-            bLines = Math.Max(bLines, WrapLines(BoonDef.Desc(bo), bcw - 28, 13, 0).Count);
-        int bch = DraftBoonCardHeight(bLines);
+        int bn = g.DraftBoonOffer.Count, bcw = DraftBoonCardW(), bgap = DraftBoonGap;
+        int bch = st.BoonH;
         int btotal = bn * bcw + (bn - 1) * bgap;
         int bx0 = W / 2 - btotal / 2;
-        int by = boonY + 20;
+        int by = st.BoonY;
         for (int i = 0; i < bn; i++)
         {
             var boon = g.DraftBoonOffer[i];
@@ -4126,8 +4310,8 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
             Raylib.DrawRectangleRounded(r, 0.08f, 8, sel ? Pal.RGBA(40, 34, 12) : (hover ? Pal.RGBA(26, 36, 48) : Pal.Panel));
             Raylib.DrawRectangleLinesEx(r, sel ? 3f : 1.5f, sel ? Pal.VipGold : (hover ? Pal.VipGold : Pal.PanelBd));
             Cfg.Text(BoonDef.Name(boon), new Vector2((int)r.X + 14, (int)r.Y + 10), 18, 1f, sel ? Pal.VipGold : Pal.Txt);
-            foreach (var (line, dy) in WrapLines(BoonDef.Desc(boon), bcw - 28, 13, 0))
-                Cfg.Text(line, new Vector2((int)r.X + 14, (int)r.Y + 38 + dy), 13, 1f, Pal.TxtDim);
+            foreach (var (line, dy) in WrapLines(BoonDef.Desc(boon), bcw - 28, DraftBoonFs, 0))
+                Cfg.Text(line, new Vector2((int)r.X + 14, (int)r.Y + DraftBoonBodyTop + dy), DraftBoonFs, 1f, Pal.TxtDim);
             // W12 first-run RECOMMENDED badge on the pre-selected safe doctrine (top-right corner).
             if (g.DraftRecommendedBoon.HasValue && g.DraftRecommendedBoon.Value == boon)
             {
@@ -4144,7 +4328,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         // ---- run CONTRACT (W6): a compact selector row (STANDARD opt-out + the 3 contracts) ----
         // Mirrors the boon row but more compact. STANDARD (= Contract.None) is the default if nothing
         // is clicked, so the row never blocks the deploy. The selected card highlights.
-        int conY = by + bch + 10;
+        int conY = st.ConHeadY;
         string ch = "RUN CONTRACT  (optional)";
         var chm = Cfg.Measure(ch, 16, 1f);
         Cfg.Text(ch, new Vector2(W / 2f - chm.X / 2f, conY - 2), 16, 1f, Pal.Accent);
@@ -4152,18 +4336,13 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         // cards: STANDARD then the contracts (None == STANDARD opt-out).
         // FUL-10 re-fit: six cards now — width shrinks to fit the row on screen, and the card
         // height grows to the TALLEST wrapped desc (wrap, never truncate: the no-ellipsis rule).
-        var conCards = new Contract[] { Contract.None, Contract.IronVeterans, Contract.HighStakes,
-                                        Contract.Spearhead, Contract.MercenaryClause, Contract.LivingLegends };
-        int cn = conCards.Length, cgap = 12;
-        int ccw = Math.Min(222, (W - 48 - (cn - 1) * cgap) / cn);
-        int descBottom = 47;   // one-line floor (desc top 30 + line height 17)
-        foreach (var c0 in conCards)
-            foreach (var (_, dy0) in WrapLines(ContractDef.Desc(c0), ccw - 22, 12, 0))
-                descBottom = Math.Max(descBottom, 30 + dy0 + 17);   // WrapLines' lh = size + 6
-        int cch = descBottom + 4;
+        var conCards = DraftContractCards;
+        int cn = conCards.Length, cgap = DraftContractGap;
+        int ccw = DraftContractCardW();
+        int cch = st.ConH;
         int ctotal = cn * ccw + (cn - 1) * cgap;
         int cx0 = W / 2 - ctotal / 2;
-        int cy = conY + 22;
+        int cy = st.ConY;
         // selected? null DraftSelectedContract means STANDARD (Contract.None) is the effective pick.
         Contract effSel = g.DraftSelectedContract ?? Contract.None;
         for (int i = 0; i < cn; i++)
@@ -4187,7 +4366,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         // ---- mission-1 + heat preview ----
         string m1 = $"FIRST OP: {ObjectiveLabel(Run.ObjectiveFor(1))}   ·   {Sightline.Heat.Label(g.PendingHeat)}";
         var m1m = Cfg.Measure(m1, 14, 1f);
-        int infoY = cy + cch + 10;
+        int infoY = st.InfoY;
         Cfg.Text(m1, new Vector2(W / 2f - m1m.X / 2f, infoY), 14, 1f, Pal.TxtDim);
 
         // ---- DEPLOY button (greyed until exactly DraftCap soldiers + a boon are chosen) ----
@@ -4196,8 +4375,8 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         bool ready = g.DraftReady;
         bool payable = g.DraftRecallAffordable;
         int recallBill = g.DraftRecallCost;
-        int dbw = 280, dbh = 46;
-        DraftConfirm = new Rectangle(W / 2 - dbw / 2, infoY + 22, dbw, dbh);
+        int dbw = 280, dbh = DraftConfirmH;
+        DraftConfirm = new Rectangle(W / 2 - dbw / 2, st.ConfirmY, dbw, dbh);
         bool dhover = ready && payable && Raylib.CheckCollisionPointRec(mouse, DraftConfirm);
         Color deployCol = ready && payable ? (dhover ? Pal.RGBA(92, 200, 251) : Pal.Good)
                         : (ready ? Pal.RGBA(64, 34, 34) : Pal.RGBA(40, 50, 63));
@@ -4228,8 +4407,12 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         Raylib.DrawRectangleLinesEx(DraftReroll, 1.4f, rrCan ? (rrHov ? Pal.VipGold : Pal.PanelBd) : Pal.RGBA(40, 46, 54));
         string rrl = $"RE-ROLL POOL  ({MetaProg.DraftRerollCost} SALV)";
         var rrm = Cfg.Measure(rrl, 13, 1f);
-        Cfg.Text(rrl, new Vector2((int)(DraftReroll.X + rrw / 2 - rrm.X / 2), (int)(DraftReroll.Y + dbh / 2 - 7)), 13, 1f,
+        Cfg.Text(rrl, new Vector2((int)(DraftReroll.X + rrw / 2 - rrm.X / 2), (int)(DraftReroll.Y + dbh / 2 - 10)), 13, 1f,
             rrCan ? (rrHov ? Pal.VipGold : Pal.Txt) : Pal.TxtDim);
+        // W5-FIX: the hotkey, advertised. This control had no keyboard route at all until now.
+        var rkm = Cfg.Measure("[R]", 12, 1f);
+        Cfg.Text("[R]", new Vector2((int)(DraftReroll.X + rrw / 2 - rkm.X / 2), (int)(DraftReroll.Y + dbh - 15)), 12, 1f,
+            Raylib.Fade(rrCan ? Pal.TxtDim : Pal.RGBA(60, 68, 78), 0.9f));
     }
 
     /// A short prose role one-liner per class, for the draft candidate cards.
