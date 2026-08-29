@@ -5415,6 +5415,524 @@ builds, which is the size of that jitter.
 
 ---
 
+## PROGRAM RESONANCE — Wave W1 "TRUE INSTRUMENT" (dev; worktree `wt-w1`, branch `wave/true-instrument`)
+
+**Base commit: `d350416`** (RESONANCE milestone 2). Four code commits (`d336016`, `7b9878d`,
+`5ae9149`, `e264335`) plus docs, deliberately kept separately bisectable, because the third one
+breaks something on purpose.
+
+> ### ⚠ `5ae9149` (W1/3) IS THE INVALIDATING COMMIT — AND IT IS THE ONLY ONE
+>
+> **Every archived CRN world in this repository is incomparable across it.** Any balance number
+> measured at or before `d350416` and any number measured at or after `5ae9149` are measurements
+> of different worlds, even on the identical slot seed. This is not a regression; it is the fix.
+> Every pre-W1 archive — `docs/measurements/x1/`, `x2/`, `w4/`, `l1/` — was measured on a gameplay
+> stream that no longer exists. They stay valid as history; they may not be compared with, or
+> rescaled to, a number from the current tree. **Re-measure. Do not rescale.** CLAUDE.md's
+> ladder-of-record block now carries this warning too — the W1 review found it said nothing about
+> the break at all, and that is the one block a fresh session is guaranteed to read.
+>
+> The measured size of the break, over the exact 10 slots X2 archived as `S1-h0-b0`:
+>
+> | | slots reproduced | chunk win-rate |
+> |---|---|---|
+> | archive `x2/S1-h0-b0` (base `a61ef42`) vs W1 commits 1-2 | **10 / 10** | 65% / 65% |
+> | archive `x2/S1-h0-b0` vs W1/3 as first written (`6bcdde6`, Fx only) | **3 / 10** | 65% / 55% |
+> | archive `x2/S1-h0-b0` vs W1/3 as shipped (`5ae9149`, Fx + the bob draw) | **3 / 10** | 65% / 60% |
+> | W1/3-as-first-written vs W1/3-as-shipped (the bob draw alone) | **0 / 10** | 55% / 60% |
+>
+> Read that top row first: the X2 archive was still bit-for-bit live on this tree right up to
+> W1/3 — a base commit later, through a whole milestone merge. The bottom row's 10-point
+> win-rate move is **not** a claim that the game got harder; at n=20 the SE is ~11 points. It is
+> a claim that **seven of ten worlds are different worlds now**.
+> (The three "reproduced" slots are the ones whose win/loss pattern happens to survive a reshuffle;
+> at this granularity ~3/10 is about what chance gives you, so read the row as "the worlds changed",
+> not "30% of them held.")
+>
+> The last row is why the missed `Unit()` bob draw had to ride THIS commit rather than a later one:
+> on its own it moves **every one of the ten slots**. Shipped separately it would have been a second
+> full invalidation, thrown at a post-W1 ladder that had just been measured.
+>
+> **The dev-instrument agent's L1 n=80 ladder (`docs/measurements/l1/`, base `8dd5e90` per that
+> wave's own brief — its own write-up is the authority on the commit) is THE PRE-REPAIR
+> LADDER.** It is the only n≥80 picture of the frame-coupled tree that will ever exist, and it is
+> the reference W7 needs in order to say how much of the ladder's shape was the dice being a
+> function of the frame rate. It was in flight while this wave was built and must be archived
+> before W1 lands.
+
+### THE DEFECT — gameplay was a function of the frame rate
+
+`src/Fx.cs:155` rolled `Util.RandF()` **once per RENDERED FRAME**, on the **shared gameplay
+stream**, for as long as a screen shake was decaying:
+
+```csharp
+if (Shake > 0.01f) { Shake *= …; float a = Util.RandF() * MathF.PI * 2f; … }
+```
+
+So the dice a campaign rolled depended on how many frames were drawn while the screen was
+wobbling — i.e. on the frame rate, on the animation-speed comfort setting, and on whether the
+player has screen shake switched on at all. **`Fx.ShakeOn` is a shipped accessibility toggle.**
+A player who turns screen shake off to avoid motion sickness was playing a different game from
+the same seed. Measured, same binary, `SIGHTLINE_FXRNG=0` (the old coupling) against the default:
+
+```
+PRE   seed99   1x/shake WIN  m=5 t=28 f=9713  | 8x/shake LOSE m=3 t=23 | 1x/noshake WIN  m=5 t=30
+PRE   seed4242 1x/shake LOSE m=2 t=10 f=5490  | 8x/shake WIN  m=4 t=14 | 1x/noshake LOSE m=2 t=20
+POST  seed99   1x/shake LOSE m=3 t=25 f=14241 | 8x/shake LOSE m=3 t=25 f=4081 | 1x/noshake LOSE m=3 t=25
+POST  seed4242 1x/shake LOSE m=6 t=24 f=11548 | 8x/shake LOSE m=6 t=24 f=3232 | 1x/noshake LOSE m=6 t=24
+```
+
+(`docs/measurements/w1/gate3.txt`, re-run against the SHIPPED W1/3. The POST column differs from
+the first draft of this write-up because W1/3 now also carries the `Unit()` bob draw — see "THE
+DRAW I MISSED". The PRE column is unchanged: `SIGHTLINE_FXRNG=0` restores both couplings at once.)
+
+and the raw reproduction the brief asked for, one seed through the ordinary autoplay entry:
+
+```
+PRE   SIGHTLINE_SEED=99 SIGHTLINE_ANIMSPEED=1   -> RESULT: WIN  mission=6
+PRE   SIGHTLINE_SEED=99 SIGHTLINE_ANIMSPEED=20  -> RESULT: LOSE mission=3
+POST  SIGHTLINE_SEED=99 SIGHTLINE_ANIMSPEED=1   -> RESULT: WIN  mission=6
+POST  SIGHTLINE_SEED=99 SIGHTLINE_ANIMSPEED=20  -> RESULT: WIN  mission=6
+```
+
+One seed, one comfort setting, a six-mission win or a mission-three washout.
+
+**The harness never saw it because it was holding the frame rate still.** `dt` is pinned to
+1/60 in every batch loop and `Game.AnimSpeed` hard-pins 1x under `AutoPlay || NoPersist`.
+PAIRTEST passed for years not because gameplay was independent of presentation but because two
+legs of the same pinned harness draw the same number of frames.
+
+**Fix:** `Util.FxRng` — a separate clock-seeded stream that `Util.Reseed` deliberately does NOT
+touch (a SEEDED DAILY board must replay; nobody wants the sparks to replay). All 29 draw sites in
+`Fx.cs` route through `Util.FxRandF/FxRandInt/FxRandRange`. `SIGHTLINE_FXRNG=0` restores the
+coupling, so the defect stays reproducible in the shipped binary instead of by archaeology.
+
+One line beyond the wave's file list, flagged: `Anim.cs`'s miss-scatter (where a missed tracer's
+endpoint lands) also drew from the gameplay stream. It is event-driven, not frame-driven, so it
+never made gameplay frame-dependent — but it is the same defect one "reduce visual clutter"
+toggle away from becoming the same bug, so it moved too.
+
+**New gate — `SIGHTLINE_RNGFRAMETEST`** (wired into `qa-sweep.sh`): four pinned seeds ×
+{AnimSpeed 1x, 8x} × {shake on, off}; all four legs of a seed must agree on result, missions and
+turns. It carries a **vacuity guard**: the 1x and 8x legs must differ in FRAME COUNT, or the
+anim-speed lever is not reaching the queue and "identical" would mean nothing. It prints FAIL
+under `SIGHTLINE_FXRNG=0` and PASS by default (both shown above).
+
+### THE BATCH WAS 99% GL AND 1% GAME
+
+Every headless batch loop called `Display.RenderFrame(() => Raylib.ClearBackground(Pal.Bg))` once
+per **simulated** frame. Nothing in that call draws game content; its only job was to make raylib
+pump the window event queue so `WindowShouldClose()` stays honest. `Raylib.PollInputEvents()` is
+that pump on its own (`EndDrawing()` *is* `SwapScreenBuffer() + PollInputEvents()`), so the close
+semantics are preserved exactly and the llvmpipe clear + buffer swap are dropped.
+
+`SIGHTLINE_BALANCE=10`, heat 0, `SIGHTLINE_BALANCE_BASE=100`, Release binaries from snapshots,
+same container (`nproc=4`):
+
+| tree | batch wall-time | s / campaign slot | data-ready | `runs` asserted |
+|---|---|---|---|---|
+| `d350416` (pre) | **509.0 s** | 50.9 | 511 s | 20 |
+| W1/1 | **5.3 s** | 0.53 | 10 s | 20 |
+| W1/2 | **4.2 s** | 0.42 | 5 s | 20 |
+
+**THE LOAD ON THE 509 s ROW IS UNKNOWN, and the review was right to press on it.** An earlier
+draft of this section wrote "loadavg 20–30 for all of them" to reconcile the 509 s baseline with
+CLAUDE.md's 311 s reference. My own new `harness{}` block refutes that: the three chunks that
+carry one read `loadAtStart` **8.55, 13.00 and 27.80** — one of the three is in that range — and
+**`G1-pre` and `G1-c1`, the two rows the claim existed to explain, predate the block entirely and
+have no load record at all.** So the honest statement is: the pre/post rows above are three
+separate binaries run at three unrecorded moments on a shared four-core container, and the ratio
+between them is **not a controlled measurement**. It is quoted here only as the raw wall-clock of
+the chunks as they ran.
+
+**The controlled number is 17-33x (median ~23x over four measured pairs)**, and it is in the
+autoplay A/B below: one binary, one seed,
+identical frame counts, only the GL work removed. That is the figure to cite; CLAUDE.md cites it.
+(Being able to catch this at all is the point of the `harness{}` block — the first thing it did
+was contradict its own author.) Either way the conclusion holds: the
+number a balance round cost was almost entirely a software rasteriser clearing a window nobody
+looks at. A 40-campaign rung is now under a minute; the 12-chunk X2-shaped round is minutes, not
+an afternoon. `SIGHTLINE_BALANCE_DRAW=1` restores the old path for an A/B.
+
+The same change applies to the AUTOPLAY smoke path in W1/4 (`autoplay && !shot` only; a shot
+frame requested on top of autoplay still draws for real). That one A/Bs cleanly on a **single
+binary and a single seed**, because after W1/3 the GL work cannot touch the dice — so the frame
+counts and the results are identical and only the clock moves (`autoplay_ab.txt`):
+
+```
+seed99     DRAW=1 (pre-W1 GL clear)       19.8s  RESULT: WIN mission=6 frame=11680
+seed99     default  (PollInputEvents)      0.9s  RESULT: WIN mission=6 frame=11680
+seed4242   DRAW=1 (pre-W1 GL clear)       22.0s  RESULT: WIN mission=6 frame=12389
+seed4242   default  (PollInputEvents)      0.9s  RESULT: WIN mission=6 frame=12389
+```
+
+Same binary, same seed, same frame count, same result — only the GL work removed. This is the
+wave's only CONTROLLED timing measurement and therefore the only speed-up worth quoting.
+**Across four measured pairs it is 17x to 33x (22.0 and 24.4 above; 32.8 and 17.4 on an earlier
+run at different container load), median ~23x.** Quote the RANGE, not a point — the spread is
+load on a shared four-core box, not the change. CLAUDE.md's "`SIGHTLINE_AUTOPLAY=1` (Debug)
+~22 s" was almost entirely llvmpipe.
+
+### A DISPLAY-LESS BATCH USED TO LOOK LIKE A FINISHED ONE
+
+With no display `InitWindow` fails, `WindowShouldClose()` is true before frame one, every match
+loop falls straight through — and the process still printed a full report, still **wrote an
+aggregate JSON with `runs=0` over the previous chunk's data**, still claimed N matches, then
+exited 139 out of the GL teardown, which reads as "finished, crashed on the way out". X2 had to
+bolt an external `runs`-field assertion onto every chunk script because of it, and CLAUDE.md
+carries a five-point contract whose first point is this hazard.
+
+Now: `RequireWindow()` refuses at the door on the balance, PAIRTEST and STACKTEST entries —
+named message on stderr, exit 2, nothing written — and `Stats.WriteJson` refuses to serialise a
+zero-run aggregate at all. Measured (`gate2.sh`), with a sentinel file standing in for the
+previous chunk's data:
+
+```
+before: mtime=1788029404  md5=b42c19653c703857ef0313bbdc313072
+BALANCE: no display - run under xvfb-run. No data written.
+exit code: 2
+after : mtime=1788029404  md5=b42c19653c703857ef0313bbdc313072
+GATE2a: PASS (non-zero exit, JSON untouched)   GATE2b: PASS (same command under xvfb -> runs=4)
+```
+
+### THE INERTNESS PROOF (commits 1 and 2)
+
+Commit 1 is inert on the **whole document**, no exclusions:
+
+```
+$ bash docs/measurements/w1/inert_diff.sh G1-pre.json G1-c1.json
+(empty diff — IDENTICAL)
+```
+
+Commit 2 adds read-only keys, so its diff deletes exactly those keys and nothing else:
+
+```
+$ bash docs/measurements/w1/inert_diff.sh G1-c1.json G1-c2.json \
+      harness runWinRateExStalemate instrumentHealth byObjectiveByBucket byNodeKind shotGap
+(empty diff — IDENTICAL)
+```
+
+Every per-slot RunRec, every win, loss, turn count, shot and kill identical across both. And the
+strongest form of the same claim: **the commit-2 binary reproduces X2's archived `S1-h0-b0`
+chunk exactly, 10 of 10 slots** (`gate4.py`), across a base-commit change.
+
+### WHAT THE NEW INSTRUMENT SAYS ON ITS FIRST BATCH
+
+n=20 campaigns, heat 0 — small, so these are *shapes*, not results.
+
+**Shot-gap deciles** — for every ARMED soldier-turn, `(best − runner-up) / best`:
+
+```
+decile   0    1    2    3    4    5    6    7    8    9
+count  684  189  230  148   99   90   80   31   11  850   (POOLED n=2412, mean gap 0.490)
+```
+
+Pooled over all three instrumented chunks (the individual chunks agree: mean gap 0.458 / 0.510 /
+0.502, d9 share 33 / 35 / 38%). It is **bimodal**. 35.2% of armed soldier-turns are decile 9 —
+the shot picks itself (a lone legal target, or a runner-up worth under a tenth of the best).
+28.4% are decile 0 — a genuine near-tie. The middle is thin. So "which target?" is almost never a *graded* judgement; it is
+either forced or a coin-flip. W4's `CountMeaningfulChoices` asks "how many options are within
+12% of best?", which is a threshold, and a threshold cannot tell a 40-vs-40 tie from a 40-vs-39
+one. This is the same population as a continuous distribution, and it says W4's near-invariant
+at ~1.6 may be measuring a bimodal population's mean — **which is exactly the statistic that is
+least informative about a bimodal population.** (Same batches, same population, for the avoidance
+of doubt: on `W1post-h0-b0` `choicesPerArmedSoldierTurn` reads **1.895** and that chunk's deciles
+sum to exactly its 800 armed soldier-turns — these are two views of one denominator, not two
+metrics.) W4's open item ("chase it with a positioning lever, not another threat lever") should be
+re-argued against this histogram first. **Caveat, stated because the ELITE row above is a lesson
+in not stating it:** these three chunks straddle the W1/3 break, so the pooled histogram mixes
+pre- and post-break worlds. The bimodality is visible in each chunk separately, which is why it
+survives the caveat; the exact shares do not.
+
+**`byNodeKind`** — the first record of which campaign-map nodes the flywheel actually played.
+**Pooled over all three instrumented chunks**, which is the correction the W1 review forced: an
+earlier draft of this section printed only `W1post-h0-b0` and called it "the first time", when
+three chunks carry the block and W1post is merely the LAST by `harness.startedUtc`.
+
+| node | pooled n | pooled mission win% | the three chunks, in start order |
+|---|---|---|---|
+| Start | 60 | 100.0 | 100 / 100 / 100 |
+| Combat | 74 | 89.2 | 88.5 (26) / 87.0 (23) / 92.0 (25) |
+| Supply | 36 | 94.4 | 85.7 (14) / 100 (11) / 100 (11) |
+| Boss | 44 | 79.5 | 91.7 (12) / 86.7 (15) / 64.7 (17) |
+| **Elite** | **29** | **79.3** | **57.1 (7) / 80.0 (10) / 91.7 (12)** |
+
+**I withdraw the ELITE finding.** The earlier draft read the last chunk alone (Elite 91.7 vs
+Combat 92.0) and concluded ELITE "measures identical to an ordinary Combat node" — a claim the
+other two chunks flatly contradict (57.1% and 80.0%). The pooled figure points the *other* way,
+Elite 79.3% against Combat 89.2%, and even that is not a result: n=29 carries roughly ±7.5 points,
+so a 10-point gap is about 1.3 SE. Two further caveats make it weaker still — the Elite cells
+range over 35 points across three 20-run chunks, and the three chunks **straddle the W1/3 break**
+(the first two are pre-break worlds, the third post-break), so they are not strictly poolable.
+The honest reading is: **ELITE's difficulty relative to Combat is unmeasured at this n**, and the
+cherry-picked version of this paragraph was exactly the kind of claim this project punishes.
+
+**`instrumentHealth` — and it has already fired.** An earlier draft of this section said the one
+batch it ran on had zero STALEMATEs, so `runWinRateExStalemate` had never differed from
+`runWinRate`. **That was wrong, and my own archive contained the counter-example when I wrote it.**
+Across the three instrumented chunks:
+
+| chunk | runWinRate | runWinRateExStalemate | STALEMATE losses | harnessLossPct |
+|---|---|---|---|---|
+| `G1-c2` | 55.0 | 55.0 | 0 | 0.0 |
+| **`R0diag-h0-b0`** | **65.0** | **68.4** | **1 (5%)** | **5.0** |
+| `W1post-h0-b0` | 55.0 | 55.0 | 0 | 0.0 |
+
+So the **first reading is a 3.4-point gap at heat 0** — one campaign in twenty that every
+published ladder would have counted as the game beating the player, when it was the autopilot
+failing to find a finishing line at the turn cap. One run is not a rate; what it establishes is
+that the correction is **non-zero on ordinary batches at the easiest rung**, and that a rung
+measured at n=40 can carry two of these. Whether the higher rungs — where a stalled autopilot is
+likelier — are worse is still **unmeasured**.
+
+**`harness`** — `nproc=4`, loadavg **27.80 at batch start, 30.30 at end**. Seven times the core
+count. It does not bias a deterministic sim, but it is why the wall-clock table above disagrees
+with CLAUDE.md's 311 s, and it is exactly the context the artifact never recorded.
+
+### THE ROUTE NOBODY CHOSE
+
+Every balance number this project has published was drawn through **one** campaign-routing policy
+that nobody selected: *prefer an Event node when one is reachable, else take `nn[0]`* — and
+`nn[0]` is simply the lowest row of the next column, because `MissionNode.Next` was appended in
+row order. The bot walks one edge of the DAG for ever. `SIGHTLINE_ROUTETEST` measures it over 400
+maps and 678 **real** (k≥2) branch choices:
+
+| | branch-0 rate | Combat | Event | Elite | Supply | Boss |
+|---|---|---|---|---|---|---|
+| a fair deal would be | 45.1% | — | — | — | — | — |
+| `first` (SHIPPED) | **81.4%** | 29.7% | **23.1%** | **11.7%** | 15.6% | 20.0% |
+| `hash` | 51.5% | 33.9% | 15.6% | 13.8% | 16.8% | 20.0% |
+
+The flywheel plays **48% more "?" beats and 15% fewer ELITE fights** than a fair deal would.
+`SIGHTLINE_ROUTE=hash` deals the branch from `Util.Hash3(MapSeed, 13, mission)` — zero draws from
+`Util.Rng`, so CRN pairing survives it (ROUTETEST asserts that directly by snapshotting the
+shared stream around the whole sweep). **The default stays `first`**: this wave measured the
+sampling frame, it did not change it.
+
+### THE SAVE FORMAT HAD A SECOND HALF NOBODY WAS GUARDING
+
+CLAUDE.md's append-only enum guard covers thirteen enums persisted by ordinal. But a save also
+stores the entire campaign map as **one int** — `MapSeed` — and regenerates the whole DAG from it
+on load. `Run.GenerateMap` draws from a local `new Random(seed)`, so its **draw order is as much
+a part of the save format as any ordinal**, and it is far easier to disturb: one stray
+`rng.Next()` before the mid-column shuffle re-deals every existing save's node kinds, factions and
+edges, and silently re-points `MapPos` at a different mission. `SaveGame.MapFingerprint` +
+`PersistedGenerators` now pin three seeds, checked by SAVETEST. Demonstrated both ways:
+
+```
+# one rng.Next() inserted before the shuffle in Run.GenerateMap:
+SAVETEST: FAIL (mapShape:seed1 (golden 0xC169C99E, actual 0x3977AAFC), mapShape:seed424242 …)
+# reverted:
+SAVETEST: PASS (… 13 persisted-enum fingerprints match; 3 map-generator fingerprints match; …)
+```
+
+`HEATLADDERTEST` gained the matching guard for the difficulty axis: the cumulative
+`(EnemyDelta, StatDelta, DmgDelta, AiTier)` vector for all ten levels is pinned. The published
+ladder is a table of win-rates **by heat level**; if a rung moves, the column headings still say
+"heat 4" and every archived number silently changes meaning.
+
+### THE FRAME CAP BECAME A MEASURED NUMBER
+
+It had been a round `20000` since it was written, with nothing saying where it came from. Over 30
+fresh Release autoplays (`docs/measurements/w1/framecount.txt`):
+
+```
+n=30  min=2461  median=9492  p90=12530  MAX=13589   (second-largest 13407)
+```
+
+The old cap was **1.47x the observed maximum** — a much thinner margin than anyone had reason to
+believe, given the contract is "never a TIMEOUT". Now `3 x autoMax` = **40767**, with the max kept
+beside it as a named constant, and a TIMEOUT line that reports the multiple of it instead of just
+echoing the cap.
+
+**NAMING, corrected by the W1 review.** The first version of this shipped the constant as
+`autoP99` and quoted "p99 = 13536". **You cannot estimate a 99th percentile from n=30.** The top
+two samples are 13589 and 13407, so any "p99" is an interpolation between the two largest
+observations and carries nothing the maximum does not — it was a quantile-shaped word wrapped
+round a max, in a wave whose entire thesis is that instruments should not overstate what they
+know. Renamed `autoMax`, described as the observed maximum, and the `framecount.sh` header now
+says to raise n if a real quantile is ever wanted.
+
+The **balance batch's** own `frameCap` is deliberately untouched: it decides whether a censored
+match is scored a loss, so moving it would be a measurement change.
+
+### THE DRAW I MISSED, AND WHAT IT SAYS ABOUT THE TEST I WROTE
+
+The W1 review found a second draw on the gameplay stream that I had not: **`Unit()`'s constructor
+set the idle-bob phase from `Util.RandF()`** (`src/Unit.cs`). All twelve `Bob` read sites are
+cosmetic phase terms in `Renderer`, and the field's own comment already said "render-only". The
+reviewer found it by instrumenting `Util.Rng` as a counting property with `StackTrace` capture and
+catching exactly one draw-side stack over a complete campaign.
+
+**Describe it precisely, because the obvious description is wrong.** This is *not* a live
+frame-count coupling. `Bob` is drawn once per unit construction — a deterministic gameplay event —
+so it introduces no frame dependence of its own. It is worse in a quieter way: `Renderer` holds
+`static readonly Unit _codexGlyphStub = new Unit()`, whose initialiser fires lazily on the first
+`DrawBoard`. So **a process that RENDERS took one gameplay draw that a process that does not
+render never took** — a fixed one-draw offset between the shipped binary and the instrument. And
+after W1/1 and W1/4 the instrument renders nothing at all: the flywheel, PAIRTEST, autoplay and
+RNGFRAMETEST are all now non-rendering processes.
+
+**Attribution, and a correction to my own first draft of this paragraph.** The split
+`no-draw WIN mission=6 frame=6008` / `forced-draw LOSE mission=4 frame=3962` is **the reviewer's
+measurement, not mine** — I have written it as mine once already and that is exactly the habit
+this project punishes. I tried to reproduce it end to end with
+`SIGHTLINE_FXRNG=0 SIGHTLINE_BALANCE_DRAW=1` and **it does not reproduce**, for a reason worth
+recording: `SIGHTLINE_BALANCE_DRAW=1` restores a bare `ClearBackground`, never `game.Draw()`, so
+it never calls `Renderer.DrawBoard` and never fires the static initialiser. There is no shipped
+dial that makes an autoplay run draw the board for a whole campaign at a usable speed.
+
+**What I did measure, twice, is the same claim from both ends:**
+* `RNGFRAMETEST` phase 2, with the bob fix reverted and rebuilt:
+  `newUnit=DREW draw30Frames=DREW probeSensitive=yes -> FAIL`, while phase 1 printed MATCH x4 and
+  would have passed. Constructing a Unit, and drawing thirty real frames, each moved the gameplay
+  stream.
+* The CRN chunk table above: the bob draw **on its own** changes **10 of 10** slots
+  (`W1post-h0-b0` vs `W1final-h0-b0`, same slots, same heat, the only difference being this one
+  line). It is a real gameplay-affecting draw, not a rounding artefact.
+
+It is folded into **W1/3**, the one authorised break, and not shipped separately. That is an
+economic decision and it is worth stating: `new Unit{...}` is the gameplay spawn path, so moving
+its draw shifts every downstream draw. Landing it in a later commit would have been a **second
+full CRN invalidation** — and it would have invalidated the post-W1 ladder that is about to be
+measured. One break, both defects.
+
+**The test I shipped could not have caught it, and I should have seen that.** RNGFRAMETEST phase 1
+certifies FRAME-COUNT invariance: four seeds × {1x, 8x} × {shake on, off}. Every one of those legs
+runs the same non-rendering path, so all four agreed and the test passed. With `Bob` reverted it
+still passes phase 1 — verified, MATCH ×4 — while the new phase 2 prints
+`newUnit=DREW draw30Frames=DREW probeSensitive=yes -> FAIL`.
+
+(The adjudicator did **not** uphold the stronger form of this — that RNGFRAMETEST "cannot detect
+the defect class it certifies". It certifies frame-count invariance, that invariance is real, and
+a reviewer independently confirmed it holds in the RENDERING path too: seed 4242 LOSE m=4 at 1x,
+8x and 20x on frame counts 3962/1318/1218. Phase 1 was narrow, not wrong. Phase 2 widens it.)
+
+**Two more things the review broke that I had built.** RNGFRAMETEST's SHAKE lever had no vacuity
+guard: deleting `game.Fx.ShakeOn = shake;` left the test printing MATCH ×4 and PASS with
+byte-identical output — certifying an invariance it never varied. `Fx.ShakeApplied` now counts the
+`AddShake` calls that actually moved the screen; sabotaged, the test prints
+`VACUOUS (shake lever inert: shk 264/264)` and FAIL. And `RngFrameTest` dialled `SIGHTLINE_HEAT=2`
+without restoring it, against the house stash-and-restore pattern; it restores it now.
+
+**A grep would not have saved me.** `qa-sweep.sh` gains `FXSTREAM`, a free static tripwire
+asserting `src/Fx.cs` contains zero `Util.Rand*`. Its scope is stated honestly in the script
+itself: **it would not have caught `Bob`, which lives in `Unit.cs`.** The runtime assertion —
+"constructing a Unit and drawing thirty real frames both leave `Util.Rng` untouched, and the probe
+is proven sensitive by a deliberate draw" — is the guard that catches this class. The grep is a
+backstop that also runs when the binary will not build.
+
+### VERIFICATION
+
+Release **0 warn / 0 err**. `qa-sweep.sh --full` (through `docs/measurements/w1/sweep.sh`, which
+adds the house isolation exports the sweep inherits but never sets): every self-test PASS,
+including the three new lines `ROUTETEST`, `RNGFRAMETEST` and `FXSTREAM`, plus `PAIRTEST: PASS`
+and an **empty COVERAGE GAP block** (transcript: `docs/measurements/w1/qa-sweep-full.txt`).
+Autoplay ×3 clean, no TIMEOUT.
+
+The sweep's hand-maintained "N self-tests exist" footer had drifted a **fourth** time — and W1's
+first attempt at fixing it made it a fifth, by hardcoding 52 while wave TRUE BAND was adding
+BANDTEST on a parallel branch. Both waves wrote down the correct derivation and then pasted its
+answer as a literal, which is precisely how it keeps drifting. It now RUNS the derivation (two
+greps, one over `src/`, one over the sweep itself) so it cannot go stale, and it points at the
+coverage guard as the real check.
+
+**FXSTREAM caught itself on its first run, which is worth recording.** The static tripwire I added
+for the "presentation never draws from `Util.Rng`" rule grepped the raw file and FAILed on
+`Fx.cs:653` — a *doc comment* reading `deterministic hash (NOT Util.Rng)`. A tripwire that fires
+on the word rather than the call is worse than none, because the second person to see it will
+ignore it. It now strips `//` comments first, is verified to still catch a real violation (three
+hits when one `Util.FxRandF()` is reverted to `Util.RandF()`), and says so in the script.
+
+Gate by gate: **G1** the two empty diffs above, plus 10/10 slot reproduction of the X2 archive.
+**G2** `gate2.sh`, both halves PASS. **G3** `gate3.sh`, FAIL under `SIGHTLINE_FXRNG=0` and PASS by
+default, both pasted above — and now covering the render-purity phase in both directions. **G4**
+`gate4.py`, 10/10 before the break and 3/10 after; the invalidation is measured, not asserted.
+**G5** SAVETEST demonstrated failing on a deliberately sabotaged `Run.GenerateMap` (one extra
+`rng.Next()`) and passing after the revert. **G6** the sweep above. **G7 (new, from the review)**
+`gate6.sh` — the stale-file trap the refusal path created, demonstrated and then refused.
+
+Every self-test that this wave added or changed has been shown FAILING on a deliberate sabotage
+and PASSING clean: RNGFRAMETEST phase 1 (`SIGHTLINE_FXRNG=0`), its anim-speed guard, its shake
+guard (lever deleted → `VACUOUS (shake lever inert: shk 264/264)`), its render-purity phase (bob
+reverted → `newUnit=DREW draw30Frames=DREW`), SAVETEST's `mapShape:` pin (stray `rng.Next()`),
+HEATLADDERTEST's rung-shape pin (wrong golden), ROUTETEST's skew and uniformity assertions, and
+FXSTREAM. A test that cannot fail is not a test.
+
+### MERGE NOTE — the conflict surface against wave TRUE BAND
+
+W1 branches from `d350416` and so does TRUE BAND; neither is merged as this is written, and the
+integration tip that also carries L1 is not visible from this worktree, so **W1 is NOT rebased
+onto it** — rebasing onto a tip I cannot read would produce a branch the lead cannot use. What I
+did instead was measure the conflict surface with `git merge-tree wave/true-band HEAD` and shrink
+it. **Five files conflict, all of them trivially, and every one is semantically independent** —
+no resolution requires choosing between the two waves' behaviour:
+
+* **`src/Game.Autopilot.cs`** — inside `CountMeaningfulChoices`, on adjacent lines. TRUE BAND
+  replaces `foreach (var v in vals) if (v >= best * 0.88f) comparable++;` with its additive
+  `AdmitNearBest(...)`; W1 inserts a `Stats.RecordShotGap(best, second)` block immediately above
+  it. **Keep both.** W1's shot-gap computes `best`/`second` directly and never reads the band, so
+  the additive rule does not change what the histogram measures (it does change
+  `choicesPerArmedSoldierTurn`, which is TRUE BAND's point, not W1's).
+* **`src/Game.Harness.cs`** — both waves append a new self-test at the end of the file.
+  **Keep both**, in either order.
+* **`scripts/qa-sweep.sh`** — at the FOOTER only, and the resolution is **take W1's**. Both waves
+  independently patched the same hand-maintained "N self-tests exist" line (the fourth time it has
+  been wrong), and both wrote down the correct DERIVATION and then pasted its answer as a literal —
+  TRUE BAND's `51 / 51 / 50` and W1's first attempt at `52 / 51`, each of which the other wave
+  invalidates on contact. W1 now RUNS the derivation at runtime (one grep over `src/`, one over the
+  sweep itself), so the footer is right whatever either wave added and it cannot drift a fifth
+  time. TRUE BAND's `BANDTEST` line itself is elsewhere in the file and **does not conflict**.
+* **`docs/DEVLOG.md`, `docs/ROADMAP.md`** — both-append-at-the-end. Keep both.
+  `CLAUDE.md` auto-merges.
+
+(Measured with `git merge-tree wave/true-band HEAD` against the finished branch, not guessed. An
+earlier draft of this note claimed qa-sweep.sh "no longer conflicts" — that was true when I
+measured it at W1/4, before the docs commit rewrote the footer, and it is corrected here rather
+than left standing.)
+
+### WHAT I DID NOT DO, AND WHAT IT COST
+
+**The `AnimSpeed = 1` harness pin at `Game.cs:82` STAYS.** The brief asked for it to be removed
+once RNGFRAMETEST was green. It is green, and the pin is no longer load-bearing for
+*correctness* — RNGFRAMETEST now proves outcome-invariance across 1x and 8x directly, which is
+the property the pin was silently defending. But the pin has a second job that is still real:
+`Display.AnimSpeed` is a **persisted user setting**, and removing the pin would let a value read
+off the player's `display.json` into a measurement path. That is precisely the class of coupling
+this wave exists to delete. Removing it would also require rewriting `ONRAMPTEST`, which
+explicitly asserts the pin (`noPersistNotPinned` / `autoPlayNotPinned`) — i.e. deleting a live
+green invariant to satisfy a brief item, for no measured gain. Kept, and now *justified* rather
+than merely inherited. **Cost:** none I can measure; the harness-only escape hatch
+(`AnimSpeedOverride`, which RNGFRAMETEST drives) already provides everything a test needs.
+
+**`runWinRateExStalemate` has one reading and it is non-zero** — see the table above; an earlier
+draft of this write-up claimed the opposite and its own archive refuted it. What is still
+**unmeasured** is the stalemate share at the rungs above heat 0, where a stalled autopilot is
+likelier.
+
+**`byObjectiveByBucket` is shipped and unread.** It is deliberately fine-grained (objective ×
+squad size × HP band) and therefore sparse at n=20; nothing in this write-up quotes a cell from
+it, because at these n every cell is n≤4. It is for the n≥80 wave.
+
+**I did not rebase onto the integration tip** — see the merge note above; it is not reachable
+from this worktree. The conflict surface is measured and the resolutions are written down instead.
+
+**No ladder.** W1 measured no rung and publishes no win-rate. The tables above are instrument
+readings on n=20, labelled as such. The ladder is W7's, and W7 must re-measure from scratch —
+see the invalidation box at the top.
+
+**The route finding is measured but unspent.** `SIGHTLINE_ROUTE=hash` exists, is proven
+draw-free and near-uniform, and is **off**. Switching it would be a second archive invalidation
+in one wave, and it is a balance decision, not an instrument one.
+
+**`Anim.cs:354` was moved off the gameplay stream; nothing else outside `Fx.cs` was audited
+exhaustively.** A file-by-file census (`Util.Rand*`/`Util.Rng` by file) shows `Voice.cs`,
+`Renderer.cs`, `Audio.cs` and `Display.cs` reference the shared stream **only in comments and
+their own self-tests** — those separations hold. `Game.cs`, `Mission.cs`, `Run.cs`, `Ai.cs`,
+`Combat.cs` etc. are gameplay and belong on the gameplay stream. I did not audit whether every
+one of those is event-ordered rather than frame-ordered; RNGFRAMETEST would catch a frame-ordered
+one at the four seeds it drives, and it is green.
+
 # PROGRAM RESONANCE — WAVE "TRUE BAND" (2026-08-29, dev on `wave/true-band`)
 
 **The spec.** ROADMAP carried a ready-to-dev spec, written by X2 out of W4's finding: re-specify

@@ -2041,9 +2041,15 @@ public partial class Game
 
         // balance telemetry (no-op unless Stats.Enabled): record the encounter we just built.
         // W2: Mission.AppliedLayout = the authored arena the guard actually ACCEPTED (-1 procedural).
+        // W1: + the two survivorship coordinates (campaign node kind, squad HP% at deploy).
+        // Both are pure reads of state that already exists; no draw, no mutation.
+        int hpNow = Players.Where(p => p.Alive && !p.IsVip).Sum(p => p.Hp);
+        int hpMax = Players.Where(p => p.Alive && !p.IsVip).Sum(p => p.MaxHp);
         Stats.BeginMission(n, Objective.ToString(), _run.HeatLevel,
                            Players.Count(p => p.Alive && !p.IsVip), Enemies.Count(e => e.Alive),
-                           Mission.AppliedLayout, Mission.AppliedDeploy);
+                           Mission.AppliedLayout, Mission.AppliedDeploy,
+                           Mode == GameMode.Campaign && _run.CurrentNode != null ? _run.CurrentNode.Kind.ToString() : Mode.ToString(),
+                           hpMax > 0 ? (int)Math.Round(100.0 * hpNow / hpMax) : 100);
         // FUL-7: the PATCH per-presence denominator (corpsman enters via backfill only)
         if (Players.Any(p => p.Alive && !p.IsVip && p.Ability == AbilityKind.Heal))
             Stats.RecordCorpsmanFielded();
@@ -3698,11 +3704,8 @@ public partial class Game
                     {
                         if (AutoPlay)
                         {
-                            // Prefer an Event node when reachable so autoplay/balance always exercise
-                            // the "?" path (and continuously verify the event mission-lockstep fix).
                             var nn = _run.NextNodes();
-                            var ev = nn.FirstOrDefault(x => x.Kind == NodeKind.Event);
-                            ChooseNode((ev ?? nn[0]).Id);
+                            ChooseNode(PickAutoNode(nn).Id);
                         }
                         else HandleNodeClick();
                     }

@@ -122,6 +122,15 @@ public static class Program
             return;
         }
 
+        // W1: SIGHTLINE_RNGFRAMETEST=1 : gameplay must be a function of the SEED — not of the
+        // frame rate, the animation-speed setting or the screen-shake comfort toggle. Four pinned
+        // seeds x {1x, 8x} x {shake on, off}; all four legs of a seed must agree. See RngFrameTest.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_RNGFRAMETEST") == "1")
+        {
+            RngFrameTest();
+            return;
+        }
+
         // Q1: SIGHTLINE_STACKTEST=1 : the NO-TWO-IN-ONE-PLACE invariant. Drives real missions across
         // all 8 objectives at heat 0/2 with two detectors running at once — (a) a hook on every
         // MoveStepAnim ACTIVATION asserting the destination tile is empty-or-self, and (b) a
@@ -365,6 +374,13 @@ public static class Program
             Raylib.InitWindow(64, 64, "heatladdertest");   // SetupMission/EnterBarracks use tile math
             Console.WriteLine(new Game().HeatLadderSelfTest());
             Raylib.CloseWindow();
+            return;
+        }
+        // SIGHTLINE_ROUTETEST=1 : W1 — measure the AUTOPILOT'S ROUTE through the campaign DAG (the
+        // sampling frame every published balance number was drawn through). Window-free.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_ROUTETEST") == "1")
+        {
+            Console.WriteLine(Game.RouteSelfTest());
             return;
         }
         if (Environment.GetEnvironmentVariable("SIGHTLINE_WOUNDTEST") == "1")
@@ -780,7 +796,21 @@ public static class Program
         bool shotOnBark = shot && Environment.GetEnvironmentVariable("SIGHTLINE_SHOTONBARK") == "1";
         if (shotOnBark) shotFrame = int.MaxValue;
         int frame = 0;
-        const int autoCap = 20000;
+        // W1: the autoplay smoke test's frame budget, DERIVED rather than guessed. It had been a
+        // round 20000 since it was written, with nothing in the repo saying where that came from
+        // or how close a real campaign gets. Measured over 30 fresh Release autoplays
+        // (docs/measurements/w1/framecount.txt): min 2461, median 9492, p90 12530, MAX 13589 —
+        // so the old cap was 1.47x the observed maximum, a much thinner margin than anyone
+        // had reason to believe, for a contract whose whole point is "never a TIMEOUT".
+        //
+        // NAMING, corrected by the W1 review: an earlier version of this called the reference
+        // `autoP99` and quoted "p99 = 13536". You cannot estimate a 99th percentile from n=30 —
+        // the top two samples are 13589 and 13407, so any "p99" is an interpolation between the
+        // two largest observations and carries no more information than the max itself. The
+        // honest statistic at this n is the OBSERVED MAXIMUM, and that is what this now is.
+        // TO RE-DERIVE: bash docs/measurements/w1/framecount.sh 30   (raise n for a real quantile)
+        const int autoMax = 13589;             // observed max over n=30, Release, base commit 5ae9149
+        const int autoCap = 3 * autoMax;       // 40767
 
         while (!Raylib.WindowShouldClose())
         {
@@ -796,14 +826,14 @@ public static class Program
             game.Update(dt);
             Audio.UpdateMusic(dt);
 
-            Display.RenderFrame(() =>
-            {
-                // Q1: autoplay normally skips the heavy draw (it's a smoke test), but a shot frame
-                // requested ON TOP of autoplay is asking for a picture of live play — the only way
-                // to photograph a unit MID-MOVE — so draw for real in that combination.
-                if (autoplay && !shot) Raylib.ClearBackground(Pal.Bg);
-                else game.Draw();
-            });
+            // Q1: autoplay normally skips the heavy draw (it's a smoke test), but a shot frame
+            // requested ON TOP of autoplay is asking for a picture of live play — the only way to
+            // photograph a unit MID-MOVE — so draw for real in that combination.
+            // W1: when the draw is a bare ClearBackground, skip the frame entirely and just pump
+            // the event queue (see BatchPump). Same reasoning as the three batch loops: the clear
+            // and the buffer swap were the whole cost of an autoplay smoke run.
+            if (autoplay && !shot) BatchPump();
+            else Display.RenderFrame(game.Draw);
 
             if (shot || autoplay) frame++;
             // W5: dump the filmed unit's tweened board position every frame, so "positions advance
@@ -838,7 +868,9 @@ public static class Program
                 }
                 if (game.Phase == Phase.Win) { Console.WriteLine($"RESULT: WIN mission={game.RunState.Mission} frame={frame}"); break; }
                 if (game.Phase == Phase.Lose) { Console.WriteLine($"RESULT: LOSE mission={game.RunState.Mission} frame={frame}"); break; }
-                if (frame >= autoCap) { Console.WriteLine($"RESULT: TIMEOUT mission={game.RunState.Mission} frame={frame}"); break; }
+                // W1: a TIMEOUT now says how far past normal it got. "frame=20000" alone told you
+                // nothing about whether the cap was tight or the match was genuinely stuck.
+                if (frame >= autoCap) { Console.WriteLine($"RESULT: TIMEOUT mission={game.RunState.Mission} frame={frame} cap={autoCap} observedMax={autoMax} ({(double)frame / autoMax:0.0}x the longest campaign measured)"); break; }
             }
         }
 
@@ -874,12 +906,46 @@ public static class Program
     //   SIGHTLINE_BALANCE_DUMB=1    use the dumb smoke-test autopilot (single policy, baseline)
     //   SIGHTLINE_BALANCE_SLOPPY=1  run ONLY the sloppy policy (else greedy+sloppy paired)
     //   SIGHTLINE_BALANCE_JSON=<p>  override the JSON artifact path (else <tmp>/balance.json)
+    //   SIGHTLINE_BALANCE_DRAW=1    W1: restore the pre-W1 per-frame GL clear (see BatchPump).
+    //                               Provably inert on the numbers; it only costs wall-clock.
     //
     // APEX W4 — `endless: true` (SIGHTLINE_BALANCE_ENDLESS=<N>) points the same machinery at
     // LAST STAND: each "campaign" slot becomes one endless stand via BeginEndless, and depth
     // (waves survived) is logged from game.Wave at EVERY exit — wipe, wave-cap, frame-cap,
     // abort — NEVER from RunState.Mission (endless keeps Mission==1, so the old campaign
     // fallback would log every capped deep stand as depth 0 and corrupt the p90).
+    // ── W1 TRUE INSTRUMENT: the headless batch frame pump ───────────────────────────────
+    // Every headless batch loop (balance / pairtest / stacktest) used to call
+    // `Display.RenderFrame(() => Raylib.ClearBackground(Pal.Bg))` once per SIMULATED frame.
+    // Nothing in that call draws game content — its only job was to make raylib pump the
+    // window's event queue so `WindowShouldClose()` stays honest — but it still cost a full
+    // llvmpipe clear + buffer swap per frame, and a 20 000-frame campaign pays it 20 000
+    // times for a picture nobody looks at. `PollInputEvents()` IS that pump on its own
+    // (raylib's `EndDrawing()` is `SwapScreenBuffer() + PollInputEvents()`), so the close
+    // semantics are preserved exactly and the swap is dropped.
+    // SIGHTLINE_BALANCE_DRAW=1 restores the old path verbatim for an A/B.
+    static readonly bool BatchDraw = Environment.GetEnvironmentVariable("SIGHTLINE_BALANCE_DRAW") == "1";
+    static void BatchPump()
+    {
+        if (BatchDraw) Display.RenderFrame(() => Raylib.ClearBackground(Pal.Bg));
+        else Raylib.PollInputEvents();
+    }
+
+    // W1: a headless batch with NO DISPLAY was indistinguishable from a completed one.
+    // InitWindow fails, `WindowShouldClose()` returns true before frame one, every match loop
+    // falls straight through, and the process STILL printed a full-looking report, still wrote
+    // an aggregate JSON (with runs=0 in it), still claimed N matches — and then exited 139 out
+    // of the GL teardown, which is easy to read as "finished, then crashed on the way out".
+    // X2 had to bolt an external `runs`-field assertion onto every chunk script because of it.
+    // Refuse at the door instead: name the cause, write nothing, exit non-zero.
+    static void RequireWindow(string what)
+    {
+        if (Raylib.IsWindowReady()) return;
+        Console.Error.WriteLine($"{what}: no display - run under xvfb-run. No data written.");
+        Console.Error.Flush();
+        Environment.Exit(2);
+    }
+
     static void BalanceBatch(int runs, bool endless = false)
     {
         // Cumulative telemetry across the whole batch (NOT reset per match).
@@ -927,6 +993,7 @@ public static class Program
         // One window for the whole batch (the autoplay smoke path uses Display.RenderFrame).
         Raylib.SetConfigFlags(ConfigFlags.Msaa4xHint);
         Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "SIGHTLINE — balance batch");
+        RequireWindow("BALANCE");   // W1: no display => refuse, write nothing, exit 2
         Raylib.SetExitKey(KeyboardKey.Null);
         Cfg.Font = Raylib.GetFontDefault();   // no draw of game content in autoplay; default font is enough
         Display.Init(false);                  // headless render-frame path (no post-FX / no save)
@@ -983,7 +1050,7 @@ public static class Program
             while (!Raylib.WindowShouldClose())
             {
                 game.Update(1f / 60f);
-                Display.RenderFrame(() => Raylib.ClearBackground(Pal.Bg));   // minimal draw
+                BatchPump();   // W1: event pump only (SIGHTLINE_BALANCE_DRAW=1 restores the GL clear)
                 frame++;
                 if (endless)
                 {
@@ -1081,6 +1148,7 @@ public static class Program
 
         Raylib.SetConfigFlags(ConfigFlags.Msaa4xHint);
         Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "SIGHTLINE — pair test");
+        RequireWindow("PAIRTEST");  // W1: a display-less PAIRTEST proves nothing; do not pretend
         Raylib.SetExitKey(KeyboardKey.Null);
         Cfg.Font = Raylib.GetFontDefault();
         Display.Init(false);
@@ -1100,7 +1168,7 @@ public static class Program
             while (!Raylib.WindowShouldClose())
             {
                 game.Update(1f / 60f);
-                Display.RenderFrame(() => Raylib.ClearBackground(Pal.Bg));
+                BatchPump();
                 if (game.Phase == Phase.Win || game.Phase == Phase.Lose || ++frame >= frameCap) break;
             }
             // natural exits already finalised the run record; the frame-cap close is defensive.
@@ -1129,6 +1197,163 @@ public static class Program
         Util.Reseed(0);
         Stats.Slot = -1;
         Stats.Enabled = false;
+        Display.Shutdown();
+        Renderer.UnloadNoise();
+        Raylib.CloseWindow();
+    }
+
+    // ── W1 TRUE INSTRUMENT: SIGHTLINE_RNGFRAMETEST — gameplay is a function of the SEED ───────
+    // The headline defect this wave exists to fix: Fx.Update rolled Util.RandF() once per
+    // RENDERED FRAME for as long as a screen shake was decaying, on the SHARED GAMEPLAY stream.
+    // So the dice a campaign rolled depended on how many frames were drawn while the screen was
+    // wobbling — which depends on the frame rate, on the animation-speed comfort setting, and on
+    // whether the player has screen shake switched on at all (Fx.ShakeOn is a shipped
+    // accessibility toggle). Two players on the same seed with different comfort settings played
+    // different fights. The measurement harness never saw it because it pins dt to 1/60 AND pins
+    // AnimSpeed to 1x — it was surviving by holding the frame rate still.
+    //
+    // This test refuses to hold it still. It replays four pinned seeds under the cross product of
+    // {AnimSpeed 1x, 8x} x {shake ON, shake OFF} and demands the SAME outcome, the same missions
+    // and the same total turns from all four. It has a vacuity guard: the 1x and 8x legs must
+    // differ in FRAME COUNT, or the animation-speed lever is not wired and the test proves nothing.
+    //
+    // It FAILS by design on the pre-W1 tree — and it still can, on demand, in the shipped binary:
+    // SIGHTLINE_FXRNG=0 re-couples Fx to the gameplay stream (see Util.FxRng).
+    static void RngFrameTest()
+    {
+        Stats.Reset();
+        Stats.Enabled = true;
+        Mission.ForcedLayout = -1;
+        Pal.SetColorblind(false);
+
+        Raylib.SetConfigFlags(ConfigFlags.Msaa4xHint);
+        Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "SIGHTLINE — rng frame test");
+        RequireWindow("RNGFRAMETEST");
+        Raylib.SetExitKey(KeyboardKey.Null);
+        Cfg.Font = Raylib.GetFontDefault();
+        Display.Init(false);
+        Raylib.SetTargetFPS(0);
+
+        const int frameCap = 40000;
+
+        // House stash-and-restore: this hook dials SIGHTLINE_HEAT and must not leave it dialled
+        // for anything later in the process (the SIGHTLINE_OBJ / Mission.ForcedLayout precedent).
+        string savedHeat = Environment.GetEnvironmentVariable("SIGHTLINE_HEAT");
+
+        (string result, int missions, int turns, int frames, int shakes) Leg(int seed, float animSpeed, bool shake)
+        {
+            Environment.SetEnvironmentVariable("SIGHTLINE_HEAT", "2");
+            Util.Reseed(seed);                 // the ONLY thing that may determine the fight
+            Stats.Slot = seed;
+            var game = new Game { NoPersist = true, AutoPlay = true, SmartPlay = true,
+                                  AnimSpeedOverride = animSpeed };
+            game.Fx.ShakeOn = shake;           // the shipped comfort toggle, exercised as a variable
+            game.SeedSloppy(1000 + seed);      // greedy never draws from it; seeded for parity
+            game.StartMission(1);
+            int frame = 0;
+            while (!Raylib.WindowShouldClose())
+            {
+                game.Update(1f / 60f);
+                BatchPump();
+                if (game.Phase == Phase.Win || game.Phase == Phase.Lose || ++frame >= frameCap) break;
+            }
+            Stats.EndRun(false, game.RunState != null ? game.RunState.Mission - 1 : 0, "frame-cap");
+            var run = Stats.Runs[Stats.Runs.Count - 1];
+            string result = game.Phase == Phase.Win ? "WIN" : game.Phase == Phase.Lose ? "LOSE" : "CAP";
+            return (result, run.Missions.Count, run.Missions.Sum(m => m.Turns), frame, game.Fx.ShakeApplied);
+        }
+
+        bool pass = true;
+        foreach (int seed in new[] { 99, 777, 4242, 31337 })
+        {
+            var refLeg = Leg(seed, 1f, true);                       // the shipped conditions
+            var fast = Leg(seed, 8f, true);                          // anim speed 8x
+            var noShake = Leg(seed, 1f, false);                      // comfort: shake off
+            var fastNoShake = Leg(seed, 8f, false);                  // both at once
+
+            bool Same((string result, int missions, int turns, int frames, int shakes) x)
+                => x.result == refLeg.result && x.missions == refLeg.missions && x.turns == refLeg.turns;
+
+            bool ok = Same(fast) && Same(noShake) && Same(fastNoShake);
+            // VACUITY GUARD (a): if 8x did not change the frame budget, AnimSpeedOverride is not
+            // reaching the anim queue and an "identical" result would mean nothing.
+            bool animLever = fast.frames != refLeg.frames;
+            // VACUITY GUARD (b): the SHAKE lever must actually have been thrown. The W1 review
+            // deleted `game.Fx.ShakeOn = shake;` from this test and it still printed MATCH x4 and
+            // PASS with byte-identical output — it was certifying an invariance it never varied.
+            // Fx.ShakeApplied counts the AddShake calls that actually moved the screen, so the
+            // shake legs must show some and the no-shake legs must show none.
+            bool shakeLever = refLeg.shakes > 0 && noShake.shakes == 0 && fastNoShake.shakes == 0;
+            if (!animLever || !shakeLever) ok = false;
+            pass &= ok;
+            string why = ok ? "MATCH"
+                       : !animLever ? "VACUOUS (anim-speed lever inert)"
+                       : !shakeLever ? $"VACUOUS (shake lever inert: shk {refLeg.shakes}/{noShake.shakes})"
+                       : "MISMATCH";
+            Console.WriteLine(
+                $"RNGFRAMETEST: seed{seed}  1x/shake {refLeg.result} m={refLeg.missions} t={refLeg.turns} f={refLeg.frames} shk={refLeg.shakes}"
+              + $" | 8x/shake {fast.result} m={fast.missions} t={fast.turns} f={fast.frames} shk={fast.shakes}"
+              + $" | 1x/noshake {noShake.result} m={noShake.missions} t={noShake.turns} f={noShake.frames} shk={noShake.shakes}"
+              + $" | 8x/noshake {fastNoShake.result} m={fastNoShake.missions} t={fastNoShake.turns} f={fastNoShake.frames} shk={fastNoShake.shakes}"
+              + $"  -> {why}");
+            // a leg that never played a mission proves nothing either (the FUL-5 vacuous-PASS trap)
+            if (refLeg.missions <= 0) { pass = false; Console.WriteLine($"RNGFRAMETEST: seed{seed} VACUOUS — no mission played"); }
+        }
+
+        // PHASE 2: RENDER PURITY.
+        // Phase 1 certifies FRAME-COUNT invariance, and it is honest about exactly that. It could
+        // not, and did not, catch the defect the W1 review found: Unit()'s idle-bob phase drew
+        // from the shared gameplay stream, and Renderer holds a `static readonly Unit` stub whose
+        // initializer fires on the first DrawBoard. That is NOT a frame-count coupling — it is a
+        // FIXED ONE-DRAW OFFSET between a process that renders and one that does not, and after
+        // W1/1 and W1/4 the whole measurement harness is a process that does not render. Phase 1
+        // runs every leg through the same non-rendering path, so all four legs agreed.
+        //
+        // This phase pins the RULE instead of the symptom: PRESENTATION TAKES ZERO DRAWS FROM
+        // Util.Rng. (a) constructing a Unit costs nothing — the exact defect; (b) drawing real
+        // frames of a real board costs nothing — the class; (c) the probe is proven SENSITIVE by
+        // running it once with a deliberate draw (the VOICETEST precedent), so it cannot pass
+        // vacuously. A grep for Util.Rand* in Fx.cs would NOT have caught Bob — it is in Unit.cs.
+        {
+            const int K = 24;
+            int[] Draws() { var a = new int[K]; for (int i = 0; i < K; i++) a[i] = Util.Rng.Next(1 << 20); return a; }
+            bool SeqEq(int[] a, int[] b) { for (int i = 0; i < K; i++) if (a[i] != b[i]) return false; return true; }
+            bool Clean(Action body)
+            {
+                Util.Reseed(31337);
+                var pre = Draws();
+                Util.Reseed(31337);
+                body();
+                return SeqEq(pre, Draws());
+            }
+
+            Environment.SetEnvironmentVariable("SIGHTLINE_HEAT", "0");
+            Util.Reseed(4242);
+            var stage = new Game { NoPersist = true, AutoPlay = true, SmartPlay = true };
+            stage.StartMission(1);
+            for (int i = 0; i < 120; i++) stage.Update(1f / 60f);   // let a real board settle
+
+            int bobSink = 0;
+            bool unitClean = Clean(() => { var stub = new Unit(); bobSink += stub.Bob > 0f ? 1 : 0; });
+            bool drawClean = Clean(() => { for (int i = 0; i < 30; i++) Display.RenderFrame(stage.Draw); });
+            bool sensitive = !Clean(() => { Util.Rng.Next(); });     // the probe must SEE one draw
+            if (bobSink < 0) Console.Write("");                      // keep the ctor call observable
+
+            bool phase2 = unitClean && drawClean && sensitive;
+            pass &= phase2;
+            Console.WriteLine($"RNGFRAMETEST: render-purity  newUnit={(unitClean ? "clean" : "DREW")}"
+                            + $"  draw30Frames={(drawClean ? "clean" : "DREW")}"
+                            + $"  probeSensitive={(sensitive ? "yes" : "NO — VACUOUS")}"
+                            + $"  -> {(phase2 ? "PASS" : "FAIL")}");
+        }
+
+        Console.WriteLine(pass ? "RNGFRAMETEST: PASS" : "RNGFRAMETEST: FAIL");
+
+        Util.Reseed(0);
+        Stats.Slot = -1;
+        Stats.Enabled = false;
+        // restore the harness environment exactly as found (house stash-and-restore)
+        Environment.SetEnvironmentVariable("SIGHTLINE_HEAT", savedHeat);
         Display.Shutdown();
         Renderer.UnloadNoise();
         Raylib.CloseWindow();
@@ -1198,6 +1423,7 @@ public static class Program
 
         Raylib.SetConfigFlags(ConfigFlags.Msaa4xHint);
         Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "SIGHTLINE — stack test");
+        RequireWindow("STACKTEST"); // W1: ditto — zero sampled frames is not a clean sweep
         Raylib.SetExitKey(KeyboardKey.Null);
         Cfg.Font = Raylib.GetFontDefault();
         Display.Init(false);
@@ -1235,7 +1461,7 @@ public static class Program
             while (!Raylib.WindowShouldClose())
             {
                 game.Update(1f / 60f);
-                Display.RenderFrame(() => Raylib.ClearBackground(Pal.Bg));
+                BatchPump();
 
                 // ---- (b) per-frame shared-tile sweep ----
                 seenThisFrame.Clear();

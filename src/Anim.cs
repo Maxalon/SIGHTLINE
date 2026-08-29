@@ -351,7 +351,11 @@ public class ShotAnim : Anim
         else
         {
             // near miss: kick the beam endpoint aside
-            var perp = new Vector2(-dir.Y, dir.X) * Util.RandRange(-22f, 22f);
+            // W1: the miss-scatter is PRESENTATION (where the tracer's endpoint lands), so it
+            // draws from Util.FxRng, not the gameplay stream. It was event-driven rather than
+            // frame-driven, so unlike the shake jitter it never made gameplay frame-dependent —
+            // but it is the same class of defect one clutter toggle away from doing so.
+            var perp = new Vector2(-dir.Y, dir.X) * Util.FxRandRange(-22f, 22f);
             _impact = D.Pos + perp;
             g.Fx.Burst(_impact, Pal.RGBA(150, 160, 175), 5, 130f, 0.35f, 2f, true);
             // a faint ricochet spit where the round strikes air/terrain (small — it whiffed)

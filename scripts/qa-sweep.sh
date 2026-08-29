@@ -102,6 +102,30 @@ echo -n "THREATTEST : "; SIGHTLINE_THREATTEST=1 run | grep -oE "THREATTEST (PASS
 # R2 FIX 1: the nobody-is-walled-out geometry invariant (all 4 deployment shapes x 8 objectives
 # x 2 heats, thousands of fresh boards). ~25 s.
 echo -n "GEOMTEST   : "; SIGHTLINE_GEOMTEST=1 run | grep -oE "GEOMTEST: (PASS|FAIL)" | head -1
+# W1 TRUE INSTRUMENT: the autopilot's ROUTE through the campaign DAG (the sampling frame every
+# published balance number was drawn through) and the frame/RNG independence of gameplay.
+echo -n "ROUTETEST  : "; SIGHTLINE_ROUTETEST=1 run | grep -oE "ROUTETEST: (PASS|FAIL)" | tail -1
+# ~20 s: gameplay must be a function of the SEED, not of the frame rate, the animation-speed
+# setting or the screen-shake comfort toggle. 16 campaigns; FAILs under SIGHTLINE_FXRNG=0.
+# Its PHASE 2 (render purity) is the real guard for "presentation never draws from Util.Rng":
+# it asserts that constructing a Unit and drawing 30 real frames both leave the shared stream
+# untouched, and proves the probe sensitive with a deliberate draw.
+echo -n "RNGFRAMETEST: "; SIGHTLINE_RNGFRAMETEST=1 run | grep -oE "RNGFRAMETEST: (PASS|FAIL)" | tail -1
+
+# W1 STATIC BACKSTOP (free, and it runs even when the binary will not build): Fx.cs is the
+# FX layer and must contain zero draws from the shared gameplay stream. HONEST SCOPE: this
+# grep would NOT have caught the W1 review's Bob defect, which lived in Unit.cs — only
+# RNGFRAMETEST phase 2 catches that class. This is a cheap tripwire on the one file whose
+# entire job is presentation, not a substitute for the runtime assertion.
+# COMMENTS ARE STRIPPED FIRST. The first version of this check grepped the raw file and FAILed on
+# Fx.cs:653, a doc comment reading "deterministic hash (NOT Util.Rng)" — a tripwire that fires on
+# the word rather than the call is worse than no tripwire, and it would have been ignored by the
+# second wave to see it.
+_fxhits=$(sed -E 's,//.*,,' src/Fx.cs | grep -nE 'Util\.(RandF|RandInt|RandRange|Roll|Choice)\(|Util\.Rng')
+echo -n "FXSTREAM   : "; if [ -n "$_fxhits" ]; then
+  echo "FXSTREAM: FAIL (src/Fx.cs draws from the shared gameplay Util.Rng — use Util.FxRand*)"
+  echo "$_fxhits" | sed 's/^/     /'
+else echo "FXSTREAM: PASS"; fi
 
 if [ "$FULL" = 1 ]; then
   # ~38 s: the CRN identity check. Skipped by default so the sweep stays a quick loop;
@@ -127,5 +151,19 @@ echo -n "run1: "; SIGHTLINE_AUTOPLAY=1 run | grep -oE "RESULT: (WIN|LOSE|TIMEOUT
 echo -n "run2: "; SIGHTLINE_AUTOPLAY=1 run | grep -oE "RESULT: (WIN|LOSE|TIMEOUT) mission=[0-9]+" | head -1
 echo -n "run3: "; SIGHTLINE_AUTOPLAY=1 run | grep -oE "RESULT: (WIN|LOSE|TIMEOUT) mission=[0-9]+" | head -1
 echo "=== DONE ==="
-echo "(51 self-tests exist; this sweep ran $([ "$FULL" = 1 ] && echo 51 || echo 50). Every line above"
-echo " must read PASS, and every autoplay must read WIN or LOSE — never TIMEOUT, never blank.)"
+# W1: this counter is now DERIVED AT RUNTIME, not hand-maintained. It has been wrong four times
+# (41-while-42; the W5/C1 double bump; TRUE BAND finding the "derived" recipe itself miscounted;
+# and W1 hardcoding a fresh number that TRUE BAND's BANDTEST immediately invalidated). Two waves
+# in a row wrote down the right RECIPE and then pasted its answer as a literal, which is how it
+# drifts. So run the recipe instead — it costs one grep and it cannot go stale, whatever the next
+# wave adds.
+# Both sides are counted on the SAME basis — env-var-driven self-tests — so they are comparable.
+# FUL11PROBE has no ...TEST/GATE suffix in src/, hence the +1. FXSTREAM is a shell-side grep with
+# no SIGHTLINE_ env var at all, so it is reported separately rather than inflating either count.
+_exist=$(( $(grep -ohE 'SIGHTLINE_[A-Z0-9_]+(TEST|GATE)' src/*.cs | sort -u | wc -l) + 1 ))   # +1: FUL11PROBE
+_ran=$(grep -oE 'SIGHTLINE_[A-Z0-9_]+(TEST|GATE|PROBE)=' scripts/qa-sweep.sh | sort -u | wc -l)
+[ "$FULL" = 1 ] || _ran=$((_ran - 1))    # the default skips exactly one (PAIRTEST)
+echo "($_exist self-tests exist in src/; this sweep ran $_ran of them, plus the FXSTREAM shell check."
+echo " Both counts are derived at runtime, not typed. The COVERAGE GUARD block above is the real"
+echo " check — if it is empty, every self-test in src/ was invoked. Every line above must read PASS,"
+echo " and every autoplay must read WIN or LOSE — never TIMEOUT, never blank.)"

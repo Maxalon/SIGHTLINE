@@ -859,7 +859,7 @@ public static partial class SaveGame
             if (structure != null) fails.Add(structure);
 
             return fails.Count == 0
-                ? "SAVETEST: PASS (run round-trips squad/perks/weapon-mods/card/heat; schema stamped; 13 persisted-enum fingerprints match; meta heat round-trips; corrupt meta stashed to .bak, rewrite clean; unusable saves stashed + un-offered; junk ordinals clamped)"
+                ? "SAVETEST: PASS (run round-trips squad/perks/weapon-mods/card/heat; schema stamped; 13 persisted-enum fingerprints match; 3 map-generator fingerprints match; meta heat round-trips; corrupt meta stashed to .bak, rewrite clean; unusable saves stashed + un-offered; junk ordinals clamped)"
                 : "SAVETEST: FAIL (" + string.Join(",", fails) + ")"
                   + (fails.Exists(f => f.StartsWith("enumShape:")) ? EnumShapeAdvice : "");
         }
@@ -913,7 +913,12 @@ public static partial class SaveGame
         "\n  >> A persisted enum changed shape. Ordinals ARE the save format: appending a member at "
       + "the END is safe (old saves keep their meaning); inserting, reordering, removing or renaming "
       + "one silently re-points every existing save and every meta.json profile. If you appended, "
-      + "paste the actual hash above into SaveGame.PersistedEnums. If you did anything else, undo it.";
+      + "paste the actual hash above into SaveGame.PersistedEnums. If you did anything else, undo it."
+      + "\n  >> A mapShape: line means Run.GenerateMap's DRAW ORDER moved. A save stores only "
+      + "MapSeed and rebuilds the DAG from it, so every existing save now reloads a different "
+      + "campaign — different node kinds, factions, edges, and a MapPos pointing at another "
+      + "mission. If the map change was deliberate, paste the actual hashes into "
+      + "SaveGame.PersistedGenerators. If it was an accidental extra rng draw, undo it.";
 
     static void EnumShapeFails(List<string> fails)
     {
@@ -922,6 +927,56 @@ public static partial class SaveGame
             uint got = EnumFingerprint(t);
             if (got != golden)
                 fails.Add("enumShape:" + t.Name + " (golden 0x" + golden.ToString("X8")
+                          + ", actual 0x" + got.ToString("X8") + ")");
+        }
+        MapShapeFails(fails);
+    }
+
+    // ---- W1: APPEND-ONLY GENERATOR GUARD (the second half of the save format) --------------
+    // A save stores the campaign map as a single int — MapSeed — and REGENERATES the whole DAG
+    // from it on load (`Run.GenerateMap`, which draws from a local `new Random(seed)`). So the
+    // GENERATOR's draw order is as much a part of the save format as any enum ordinal, and it is
+    // far easier to disturb: one extra `rng.Next()` inserted anywhere before the mid-column
+    // shuffle re-deals every node kind, faction and edge in every existing save, and silently
+    // re-points MapPos at a different mission. The enum guard cannot see that — it only knows
+    // about types. This does for the generator what EnumFingerprint does for the enums.
+    //
+    // It is a hash of the SHAPE, not of the draw sequence, so it is also the natural place a
+    // legitimate map-generator change announces itself: if you meant to change the map, run
+    // SAVETEST and paste the printed "actual" hashes in. If you did not, you just broke saves.
+    static uint MapFingerprint(int seed)
+    {
+        var r = new Run();
+        r.GenerateMap(seed);
+        uint h = 2166136261u;
+        void Feed(string s) { foreach (char c in s) { h ^= c; h *= 16777619u; } }
+        foreach (var n in r.Map)
+        {
+            Feed(n.Col + "," + n.Row + "," + n.RowCount + "," + (int)n.Kind + "," + (int)n.Faction
+                 + "," + (n.Card != null ? (int)n.Card.Objective : -1) + ":");
+            foreach (int e in n.Next) Feed(e + "|");
+            Feed(";");
+        }
+        return h;
+    }
+
+    /// Three fixed seeds' committed map shapes. Three, not one, because a single seed can miss a
+    /// change that only shows up at a particular column count (GenerateMap deals 2 OR 3 nodes per
+    /// mid column) or when the event/anchor/escort placement collides.
+    static readonly (int Seed, uint Golden)[] PersistedGenerators =
+    {
+        (1,       0xC169C99Eu),
+        (424242,  0xEC48647Au),
+        (31337,   0x5CE96D55u),
+    };
+
+    static void MapShapeFails(List<string> fails)
+    {
+        foreach (var (seed, golden) in PersistedGenerators)
+        {
+            uint got = MapFingerprint(seed);
+            if (got != golden)
+                fails.Add("mapShape:seed" + seed + " (golden 0x" + golden.ToString("X8")
                           + ", actual 0x" + got.ToString("X8") + ")");
         }
     }

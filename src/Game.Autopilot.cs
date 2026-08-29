@@ -488,6 +488,20 @@ public partial class Game
             if (best <= 0f) continue;                                      // no shot -> no shot/positioning decision
             armed++;
             losTargets += vals.Count;                                      // W4: raw simultaneous presentation
+            // W1 TRUE INSTRUMENT: the CONTINUOUS form of the same question the band below asks.
+            // `second` is the runner-up by ORDER, not by value — consume exactly one instance of
+            // the max first, so two targets tied at `best` correctly score gap 0 rather than being
+            // read as a lone option. Telemetry only; zero draws, zero mutation. It does NOT read
+            // the band, so TRUE BAND's rule and this histogram are independent (lead, at merge).
+            {
+                float second = 0f; bool tookBest = false;
+                foreach (var v in vals)
+                {
+                    if (!tookBest && v >= best) { tookBest = true; continue; }
+                    if (v > second) second = v;
+                }
+                Stats.RecordShotGap(best, second);
+            }
             comparable = AdmitNearBest(vals, best, MultChoiceBand, MultShotFrac, ShotBand, floorAtZero: true);
             if (comparable >= 2) { total += comparable - 1; tgtChoices += comparable - 1; }  // real target alternatives
             if (ChoiceProbe.On)
@@ -2132,6 +2146,46 @@ public partial class Game
         if (reachable.Count > 0) { var (rx, ry) = Util.Choice(reachable); IssueMove(rx, ry); return true; }
         return false;
     }
+
+    // ── W1 TRUE INSTRUMENT: the autopilot's CAMPAIGN ROUTING POLICY ──────────────────────
+    // Every balance number this project has published was measured on ONE route policy, and
+    // nobody ever chose it. The rule was "prefer an Event node when one is reachable, else take
+    // nn[0]" — and nn[0] is simply whichever node Run.NextNodes() happened to list first, i.e.
+    // the LOWEST ROW of the next column, because the edges were appended in row order. That is
+    // not a neutral sample of the campaign map: the bot walks one edge of the DAG and pulls the
+    // node kinds, factions and objectives that live along it, every run, for ever. byNodeKind
+    // (Stats) is the read-out; this is the dial.
+    //
+    // SIGHTLINE_ROUTE:
+    //   first (DEFAULT) — the shipped behaviour, unchanged. Every archived measurement stays
+    //                     comparable; this wave does not move a single published number with it.
+    //   hash            — deal the branch from Util.Hash3(MapSeed, 13, mission), the same
+    //                     zero-draw hashing FUL-9 uses for the objective plan. It takes NO draws
+    //                     from Util.Rng, so a CRN slot pair still replays identically under it.
+    // Strict parse (the SIGHTLINE_OBJ precedent): a typo runs the DEFAULT with a loud warning,
+    // never a silently different route that walks into a DEVLOG as a baseline.
+    public static readonly string RoutePolicy = ParseRoutePolicy();
+    static string ParseRoutePolicy()
+    {
+        string v = Environment.GetEnvironmentVariable("SIGHTLINE_ROUTE");
+        if (string.IsNullOrEmpty(v) || v == "first") return "first";
+        if (v == "hash") return "hash";
+        Console.WriteLine($"ROUTE: unknown SIGHTLINE_ROUTE '{v}' — routing 'first'");
+        return "first";
+    }
+
+    /// The next-node pick for a given policy. Static + parameterised so ROUTETEST can drive it
+    /// over a bare Run map with no Game, no window and no draws.
+    public static MissionNode PickAutoNode(List<MissionNode> nn, int mapSeed, int mission, string policy = null)
+    {
+        if (nn == null || nn.Count == 0) return null;
+        if ((policy ?? RoutePolicy) == "hash")
+            return nn[(int)(Util.Hash3(mapSeed, 13, mission) % (uint)nn.Count)];
+        var ev = nn.FirstOrDefault(x => x.Kind == NodeKind.Event);
+        return ev ?? nn[0];
+    }
+
+    MissionNode PickAutoNode(List<MissionNode> nn) => PickAutoNode(nn, _run.MapSeed, _run.Mission);
 }
 
 /// ── TRUE BAND: the instrument-DESIGN probe (SIGHTLINE_BANDPROBE=1) ──────────────────

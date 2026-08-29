@@ -1286,8 +1286,35 @@ public partial class Game
         DmgAtHeat("noQuarterDmg", 8, 1);   // apex: every spawned weapon carries the +1
         DmgAtHeat("heat7Dmg", 7, 0);       // one rung below: untouched
 
+        // ── W1 TRUE INSTRUMENT: the ladder's SHAPE, pinned ──────────────────────────────
+        // Everything above proves heat's effects REACH the board. Nothing proved what the rungs
+        // actually ARE. The published ladder of record (CLAUDE.md) is a table of win-rates by
+        // heat level; if a rung's cumulative (EnemyDelta, StatDelta, DmgDelta, AiTier) moves, the
+        // column headings still say "heat 4" and every archived number silently changes meaning —
+        // a 40-campaign rung costs ~5 minutes to measure and days to re-argue, and nothing in the
+        // repo would have said the axis moved underneath it. This is the EnumFingerprint idea
+        // applied to the difficulty axis: re-tuning the ladder is allowed, doing it SILENTLY is not.
+        // TO RE-TUNE: change Heat.Mods, run SIGHTLINE_HEATLADDERTEST, paste the printed "actual"
+        // string in below — and re-measure every rung you moved.
+        const string rungShapeGolden =
+            "-1:-1,-1,0,0|0:0,0,0,0|1:1,0,0,0|2:1,1,0,0|3:2,1,0,0|4:2,1,0,1|" +
+            "5:3,1,0,1|6:3,2,0,1|7:3,3,0,1|8:4,4,1,2";
+        {
+            var sb = new System.Text.StringBuilder();
+            for (int lv = Heat.Min; lv <= Heat.Max; lv++)
+            {
+                if (sb.Length > 0) sb.Append('|');
+                sb.Append(lv).Append(':').Append(Heat.EnemyDelta(lv)).Append(',')
+                  .Append(Heat.StatDelta(lv)).Append(',').Append(Heat.DmgDelta(lv)).Append(',')
+                  .Append(Heat.AiTier(lv));
+            }
+            string got = sb.ToString();
+            if (got != rungShapeGolden)
+                fails.Add("rungShape (golden \"" + rungShapeGolden + "\", actual \"" + got + "\")");
+        }
+
         return fails.Count == 0
-            ? "HEATLADDERTEST: PASS (lone-VIP wins at heat 8 / IRON VETERANS / Rescue conscript to the floor + next mission deploys; empty-deploy Build fails soft; NO QUARTER +1 dmg on every m3 weapon, none at heat 7)"
+            ? "HEATLADDERTEST: PASS (lone-VIP wins at heat 8 / IRON VETERANS / Rescue conscript to the floor + next mission deploys; empty-deploy Build fails soft; NO QUARTER +1 dmg on every m3 weapon, none at heat 7; rung shape (enemy,stat,dmg,aiTier) pinned for all 10 levels)"
             : "HEATLADDERTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
@@ -5359,6 +5386,110 @@ public partial class Game
             e.Ammo = e.Weapon.Clip; e.Alert = AlertLevel.Alert; e.SyncPos(); e.BeginTurn();
             Enemies.Add(e);
         }
+    }
+
+    // ── W1 TRUE INSTRUMENT: SIGHTLINE_ROUTETEST ─────────────────────────────────────────
+    /// Measures the AUTOPILOT'S ROUTE through the campaign DAG — the sampling frame every
+    /// balance number in docs/ was drawn through, and which nobody has ever looked at.
+    ///
+    /// The shipped rule is "prefer an Event node, else nn[0]". `nn` comes from
+    /// Run.NextNodes(), which walks the current node's `Next` list, which was appended in ROW
+    /// order — so nn[0] is the lowest row of the next column, and the bot takes it essentially
+    /// every time. Whatever node kinds, factions and objectives live along that edge of the map
+    /// are over-sampled in every rung of every published ladder; whatever lives on the other
+    /// branches is under-sampled by the same amount.
+    ///
+    /// Asserts three things, and is deliberately capable of failing on the SHIPPED default:
+    ///   (a) 'first' IS skewed — it takes branch index 0 far more often than a uniform deal would;
+    ///   (b) 'hash' is near-uniform — within 8 points of the per-choice uniform expectation;
+    ///   (c) 'hash' is DETERMINISTIC and draw-free — two walks of a seed give the identical route
+    ///       and neither perturbs Util.Rng (a CRN slot pair must still replay under it).
+    /// Window-free: it walks bare Run maps, builds no missions and needs no GL context.
+    public static string RouteSelfTest(int seeds = 400)
+    {
+        var fails = new List<string>();
+
+        // one walk of one map under one policy: returns the branch indices taken and the kinds visited.
+        (List<int> idx, List<int> optionCounts, List<string> kinds) Walk(int seed, string policy)
+        {
+            var run = new Run();
+            run.GenerateMap(seed);
+            run.MapPos = 0;
+            var idx = new List<int>(); var opts = new List<int>(); var kinds = new List<string>();
+            for (int guard = 0; guard < Run.MaxMissions + 4; guard++)
+            {
+                var nn = run.NextNodes();
+                if (nn.Count == 0) break;
+                int mission = run.CurrentNode != null ? run.CurrentNode.Mission : 1;
+                var pick = PickAutoNode(nn, seed, mission, policy);
+                idx.Add(nn.IndexOf(pick)); opts.Add(nn.Count); kinds.Add(pick.Kind.ToString());
+                run.MapPos = pick.Id;
+            }
+            return (idx, opts, kinds);
+        }
+
+        var kindsFirst = new Dictionary<string, int>();
+        var kindsHash = new Dictionary<string, int>();
+        int firstZero = 0, hashZero = 0, choices = 0;
+        double uniformZeroExpect = 0;   // sum of 1/k over the SAME choices, i.e. a fair deal's index-0 rate
+
+        // (c) determinism + draw-freedom: snapshot the shared stream around the whole sweep.
+        Util.Reseed(4242);
+        double rngProbeBefore = Util.RandF();
+        Util.Reseed(4242);
+        double rngProbeAfter;
+
+        for (int s = 1; s <= seeds; s++)
+        {
+            var f = Walk(s, "first");
+            var h = Walk(s, "hash");
+            var h2 = Walk(s, "hash");
+            if (!h.idx.SequenceEqual(h2.idx)) fails.Add($"hashNotDeterministic@seed{s}");
+            foreach (var k in f.kinds) { kindsFirst.TryGetValue(k, out int v); kindsFirst[k] = v + 1; }
+            foreach (var k in h.kinds) { kindsHash.TryGetValue(k, out int v); kindsHash[k] = v + 1; }
+            // Only REAL branches count. Most steps of the DAG offer exactly one successor from
+            // where you stand; a forced step says nothing about a routing policy, and folding
+            // those in drags both rates toward 100% and hides the effect entirely.
+            for (int i = 0; i < f.idx.Count; i++)
+            {
+                if (f.optionCounts[i] < 2) continue;
+                choices++;
+                uniformZeroExpect += 1.0 / f.optionCounts[i];
+                if (f.idx[i] == 0) firstZero++;
+            }
+            for (int i = 0; i < h.idx.Count; i++) if (h.optionCounts[i] >= 2 && h.idx[i] == 0) hashZero++;
+        }
+        rngProbeAfter = Util.RandF();
+        Util.Reseed(0);
+
+        if (choices < 100) fails.Add($"VACUOUS — only {choices} real (k>=2) branch choices sampled");
+        double firstPct = choices == 0 ? 0 : 100.0 * firstZero / choices;
+        double hashPct = choices == 0 ? 0 : 100.0 * hashZero / choices;
+        double uniPct = choices == 0 ? 0 : 100.0 * uniformZeroExpect / choices;
+
+        // (a) the shipped route must be provably skewed, or this whole finding is imaginary.
+        if (firstPct <= uniPct + 15) fails.Add($"firstNotSkewed(first={firstPct:0.0}% uniform={uniPct:0.0}%)");
+        // (b) the hashed route must be a fair deal.
+        if (Math.Abs(hashPct - uniPct) > 8.0) fails.Add($"hashNotUniform(hash={hashPct:0.0}% uniform={uniPct:0.0}%)");
+        // (c) neither policy may consume a draw from the shared gameplay stream.
+        if (rngProbeBefore != rngProbeAfter) fails.Add("routeConsumedGameplayRngDraws");
+
+        string Hist(Dictionary<string, int> d)
+        {
+            int tot = d.Values.Sum();
+            return string.Join(" ", d.OrderByDescending(kv => kv.Value)
+                .Select(kv => $"{kv.Key}={kv.Value}({(tot == 0 ? 0 : 100.0 * kv.Value / tot):0.0}%)"));
+        }
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"ROUTETEST: {seeds} maps, {choices} REAL branch choices (k>=2); a fair deal takes branch 0 {uniPct:0.0}% of the time");
+        sb.AppendLine($"  first (SHIPPED): branch-0 {firstPct:0.0}%   nodes visited: {Hist(kindsFirst)}");
+        sb.AppendLine($"  hash            : branch-0 {hashPct:0.0}%   nodes visited: {Hist(kindsHash)}");
+        foreach (var f in fails.Take(8)) sb.AppendLine("  " + f);
+        sb.Append(fails.Count == 0
+            ? "ROUTETEST: PASS ('first' is measurably skewed to branch 0; 'hash' deals within 8pts of uniform; both take zero Util.Rng draws)"
+            : $"ROUTETEST: FAIL ({string.Join(",", fails.Take(8))})");
+        return sb.ToString();
     }
 
 }
