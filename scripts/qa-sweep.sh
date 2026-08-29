@@ -4,14 +4,18 @@
 # quirk: piping an xvfb-run child through $(...) / a for-loop silently drops its
 # stdout, so every test is a direct `CMD | grep` statement below.
 #
-#   bash scripts/qa-sweep.sh          # 46 self-tests + autoplay x3   (~2 min)
-#   bash scripts/qa-sweep.sh --full   # + PAIRTEST                    (~2 min 40 s)
+#   bash scripts/qa-sweep.sh          # 50 self-tests + autoplay x3   (~2 min)
+#   bash scripts/qa-sweep.sh --full   # all 51 (adds PAIRTEST)         (~2 min 40 s)
 #
-# COUNT NOTE: this footer has been wrong twice. C1 found it claiming 41 while running 42;
-# the W5/C1 integration then had two waves bumping it from different bases. It is now
-# DERIVED - if you add a test, re-run:  grep -oE 'SIGHTLINE_[A-Z0-9_]+TEST|SIGHTLINE_FUL11PROBE' scripts/qa-sweep.sh | sort -u | wc -l
-# an off-by-one that predates VOICETEST. Counted by hand from the echo lines: 42 before this
-# wave, 43 with VOICETEST. Corrected below rather than carried forward.
+# COUNT NOTE: this footer has been wrong three times now. C1 found it claiming 41 while running
+# 42; the W5/C1 integration then had two waves bumping it from different bases; and TRUE BAND
+# found the "derived" recipe itself was wrong - it grepped only `...TEST|FUL11PROBE`, so it never
+# counted AUDIOGATE, and it counted over THIS FILE while the label said "exist". Both halves are
+# now derived, and from the right place. If you add a test, re-run BOTH:
+#   exist (in src/):   grep -ohE 'SIGHTLINE_[A-Z0-9_]+(TEST|GATE)' src/*.cs | sort -u | wc -l    # +1 for FUL11PROBE
+#   run   (this file): grep -oE 'SIGHTLINE_[A-Z0-9_]+(TEST|GATE|PROBE)=' scripts/qa-sweep.sh | sort -u | wc -l
+# The two must be EQUAL - if `run` is smaller the COVERAGE GUARD below will name the gap.
+# `--full` runs all of them; the default skips exactly one (PAIRTEST).
 #
 # RUN --full BEFORE MERGING. PAIRTEST (38 s measured) is the CRN-pairing identity check
 # that every paired measurement in this project rests on: two identical greedy legs on the
@@ -45,6 +49,7 @@ echo -n "BEACONTEST : "; SIGHTLINE_BEACONTEST=1 run | grep -oE "BEACONTEST: (PAS
 echo -n "COMBATTEST : "; SIGHTLINE_COMBATTEST=1 run | grep -oE "COMBATTEST: (PASS|FAIL)" | head -1
 echo -n "SAVETEST   : "; SIGHTLINE_SAVETEST=1  run | grep -oE "SAVETEST: (PASS|FAIL)" | head -1
 echo -n "AITEST     : "; SIGHTLINE_AITEST=1    run | grep -oE "AITEST: (PASS|FAIL)" | head -1
+echo -n "BANDTEST   : "; SIGHTLINE_BANDTEST=1 run | grep -oE "BANDTEST: (PASS|FAIL)" | head -1
 echo -n "ITEMTEST   : "; SIGHTLINE_ITEMTEST=1  run | grep -oE "ITEMTEST: (PASS|FAIL)" | head -1
 echo -n "STATUSTEST : "; SIGHTLINE_STATUSTEST=1 run | grep -oE "STATUSTEST: (PASS|FAIL)" | head -1
 echo -n "COVERTEST  : "; SIGHTLINE_COVERTEST=1 run | grep -oE "COVERTEST: (PASS|FAIL)" | head -1
@@ -122,5 +127,5 @@ echo -n "run1: "; SIGHTLINE_AUTOPLAY=1 run | grep -oE "RESULT: (WIN|LOSE|TIMEOUT
 echo -n "run2: "; SIGHTLINE_AUTOPLAY=1 run | grep -oE "RESULT: (WIN|LOSE|TIMEOUT) mission=[0-9]+" | head -1
 echo -n "run3: "; SIGHTLINE_AUTOPLAY=1 run | grep -oE "RESULT: (WIN|LOSE|TIMEOUT) mission=[0-9]+" | head -1
 echo "=== DONE ==="
-echo "(49 self-tests exist; this sweep ran $([ "$FULL" = 1 ] && echo 47 || echo 46). Every line above"
+echo "(51 self-tests exist; this sweep ran $([ "$FULL" = 1 ] && echo 51 || echo 50). Every line above"
 echo " must read PASS, and every autoplay must read WIN or LOSE — never TIMEOUT, never blank.)"
