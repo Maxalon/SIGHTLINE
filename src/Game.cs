@@ -3228,7 +3228,7 @@ public partial class Game
         if (ActiveAnim is not ShotAnim sa) return;          // only a direct shot refunds (not a grenade/DoT)
         var killer = sa.A;
         // W9: `|| killer.Downed` — a soldier at Hp 0 must not be handed ActionsLeft = 1 (which would
-        // make CanAct true again for a body). Never observed escalating in 214 campaigns, but the
+        // make CanAct true again for a body). QA saw no escalation in 214 campaigns, but the
         // guard read only !Alive while Downed is exactly the state a felled soldier is IN.
         if (sa.D != d || killer == null || killer.Team != Team.Player || killer.IsVip
             || !killer.Alive || killer.Downed) return;
@@ -3954,9 +3954,10 @@ public partial class Game
     /// `_turnCount = 1`, INCLUDING the mid-mission checkpoint redeploy — so a campaign could spend
     /// 21 turns on mission 5, wipe on mission 6, take the checkpoint, and be handed a fresh 50-turn
     /// allowance, while Program.cs's autoCap = 20000 frames buys the WHOLE campaign about 40 turns.
-    /// The backstop was roughly 5x too loose to bound what it claimed to bound: 2 TIMEOUTs in 214
-    /// seeded campaigns (~1%), which qa-sweep printed and never failed on, and which BalanceBatch
-    /// scores as a LOSS — right-censoring exactly the longest campaigns.
+    /// The backstop was roughly 5x too loose to bound what it claimed to bound. QA measured 2 TIMEOUTs
+    /// in 214 seeded campaigns (~1%); W9 reproduced both (seeds 2001 and 3001) and, on a 20-seed
+    /// census of its own, saw 2 of 20 — a rate qa-sweep only PRINTED and never failed on, and which
+    /// BalanceBatch scores as a LOSS, right-censoring exactly the longest campaigns.
     /// CALIBRATED FROM A MEASURED CENSUS of this tree's own autoplay, 20 seeded campaigns, RESULT
     /// lines carrying `turns=`: every run finished, the longest took 75 run-turns / 18,992 frames and
     /// the next longest 38, and the per-turn frame cost falls as a campaign lengthens (a long campaign

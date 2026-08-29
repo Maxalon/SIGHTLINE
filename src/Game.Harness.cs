@@ -296,9 +296,9 @@ public partial class Game
     /// THE GAP THIS CLOSES: NOTHING asserted the backstop's contract. Game.Autopilot.cs states it in
     /// a comment — "the smoke test / balance batch ALWAYS terminates well before the frame cap —
     /// never a RESULT: TIMEOUT" — and CLAUDE.md makes a TIMEOUT a hard pre-merge failure, but
-    /// qa-sweep.sh only PRINTED the RESULT line and left a human to read it. At ~1% per run that is
-    /// well inside the noise an agent writes off as "a weak-autopilot flake", which is exactly how
-    /// two independent causes survived:
+    /// qa-sweep.sh only PRINTED the RESULT line and left a human to read it. At the ~1% per run QA
+    /// measured, that is well inside the noise an agent writes off as "a weak-autopilot flake",
+    /// which is exactly how two independent causes survived:
     ///   (a) the cap was PER-MISSION (_turnCount) and re-armed by SetupMission — including the
     ///       MID-MISSION checkpoint redeploy — while the budget it sits under is a whole-CAMPAIGN
     ///       frame count. A campaign got ~40 frames-worth of turns against a 50-turn-per-mission cap.

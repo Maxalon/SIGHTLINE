@@ -541,7 +541,7 @@ public static class Combat
     /// grenade blast) and FALSE at every READ — ComputeOdds' GrazeFloor/DmgMinEff/DmgMaxEff and
     /// ExpectedDamage. Without it ComputeOdds was NOT side-effect free: merely HOVERING the guarded
     /// HVT armed HvtGuardReducePending, and Game.Update drained it into a "GUARDED" pop EVERY FRAME
-    /// (measured: 181 pops over 181 frames of aiming with zero shots fired), against a comment at the
+    /// (QA measured 181 pops over 181 frames of aiming with zero shots fired), against a comment at the
     /// field that promises "a single float when a hit was actually softened (not spammy)". Worse, a
     /// read with side effects breaks the purity ExpectedDamage's contract and Game.ComputeThreat
     /// (which calls ComputeOdds W*H*foes times per rebuild) both assume.

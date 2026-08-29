@@ -5500,8 +5500,8 @@ ComputeOdds EXACTLY so the explanation always matches the math".
   left to drift.
 * **`ComputeOdds` was not side-effect free.** Its GrazeFloor read called `HardenedReduce`, which
   arms `HvtGuardReducePending`, which `Game.Update` drains into a floating "GUARDED" pop — so
-  merely HOVERING the guarded HVT popped it ~60x/second (181 pops over 181 frames, zero shots
-  fired) against a comment promising "a single float when a hit was actually softened (not
+  merely HOVERING the guarded HVT popped it once per frame (QA's in-game count, not re-measured
+  here: 181 pops over 181 frames of aiming with zero shots fired) against a comment promising "a single float when a hit was actually softened (not
   spammy)". `HardenedReduce` takes `telegraph = true` by default; the five READ sites pass false.
 
 **Gap closed:** every existing test reads the MATH and none reads the DISPLAYED QUANTITY.
@@ -5520,8 +5520,10 @@ the badge predicate and the hit% delta are the same number.
 **GRAPPLE could never pull an adjacent foe — it self-rammed the grappler, every time.** The pull
 vector is `sign(u - target)`, so a Chebyshev-1 target's destination tile IS the grappler's own;
 `ShoveAnim` takes its blocked branch and `rammed` resolves to the GRAPPLER, which eats
-`ShoveRammedDamage` from its own verb. Measured: 3 of 3 Chebyshev-1 grapples across 11 autoplay
-campaigns, one lethal. It is also **100% of a JUGGERNAUT's grapples** (`GrappleReachFor` pins that
+`ShoveRammedDamage` from its own verb. Reproduced here on seed 3406 exactly as filed (`GRAPPLE
+by=VEGA@(13,5) hp=1 target=STALKER@(14,6) cheby=1` -> `ENV VEGA(Player) hp=1->0 SLAM`, i.e. the
+grappler killed itself); the wider rate — 3 of 3 Chebyshev-1 grapples across 11 campaigns — is
+QA's verifier's count, not re-measured here. It is also **100% of a JUGGERNAUT's grapples** (`GrappleReachFor` pins that
 fork at reach 1), so the fork's signature verb could never once do what `Unit.cs:414` advertises.
 
 > **I did not take the brief's first fix option, and this is the disagreement worth recording.**

@@ -132,8 +132,9 @@ public class ShoveAnim : Anim
             // GRAPPLE pulls TOWARD the grappler, so a Chebyshev-1 foe's destination tile IS the
             // grappler's own tile — the slide is blocked, `rammed` resolved to the GRAPPLER, and the
             // soldier who spent the action and the cooldown took ShoveRammedDamage from its own
-            // GRAPPLE. Measured live: 3 of 3 Chebyshev-1 grapples across 11 autoplay campaigns
-            // self-rammed, one of them killing the grappler outright (VEGA, hp 1 -> 0, seed 3406).
+            // GRAPPLE. Reproduced live on autoplay seed 3406: the grappler killed ITSELF (VEGA, hp
+            // 1 -> 0) with the target never moving. QA's verifier measured the wider rate at 3 of 3
+            // Chebyshev-1 grapples across 11 campaigns.
             // That is also 100% of a JUGGERNAUT's grapples — GrappleReachFor pins that fork at reach 1.
             // Excluding the shover makes the adjacent case a clean SLAM: the foe still takes the
             // collision damage and still loses overwatch/hunker, which is a real (if lesser) use of the
