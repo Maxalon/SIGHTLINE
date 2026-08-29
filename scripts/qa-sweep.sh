@@ -4,8 +4,8 @@
 # quirk: piping an xvfb-run child through $(...) / a for-loop silently drops its
 # stdout, so every test is a direct `CMD | grep` statement below.
 #
-#   bash scripts/qa-sweep.sh          # 51 self-tests + autoplay x3   (~2 min)
-#   bash scripts/qa-sweep.sh --full   # all 52 (adds PAIRTEST)         (~2 min 50 s)
+#   bash scripts/qa-sweep.sh          # 53 self-tests + autoplay x3   (~2 min)
+#   bash scripts/qa-sweep.sh --full   # all 54 (adds PAIRTEST)         (~2 min 50 s)
 #
 # COUNT NOTE: this footer has been wrong three times now. C1 found it claiming 41 while running
 # 42; the W5/C1 integration then had two waves bumping it from different bases; and TRUE BAND

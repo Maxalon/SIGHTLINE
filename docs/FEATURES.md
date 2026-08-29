@@ -665,3 +665,26 @@ seeds (mix of WIN/LOSE, no exceptions):
   turn budget untouched) and `Mission.EnemyBaseCount` (`SIGHTLINE_ENEMYBASE`, the constant in
   `count = base + missionNum`). `Mission.HostileToughness` / `HostileDamageTrim` became static
   fields pinnable from `SIGHTLINE_TOUGH` / `SIGHTLINE_TRIM`, so one binary serves every round.
+
+## PROGRAM RESONANCE — WAVE W2 "THE OPPONENT ACTS" (the enemy turn stops being partly empty)
+
+- **No enemy act-opportunity ends unspent.** `Ai.Plan`'s reachable-tile shot search is gated on
+  the unit's own ammo; the no-shot fallback has a **terminal else** that re-targets the move at
+  the best full-two-action-budget tile (scored by the same per-tile function, no extra RNG draw);
+  and `Game.ActAfterMove` carries a structural terminal guarantee for the cases where the board
+  moved out from under a plan. Measured 32.4% of enemy act-opportunities idle before, **0.0%**
+  after (`SIGHTLINE_AIIDLETEST`). Behind `SIGHTLINE_AIIDLEFIX` (default ON; `=0` restores the
+  pre-W2 opponent exactly).
+- **Hostiles RELOAD.** One action, full clip, mirroring the player's `DoReload`; a spare action
+  after the mag change digs in. Before this, hostiles were handed one clip at spawn and had no
+  reload verb anywhere — 11.5% of enemy acts were made with an empty weapon and essentially all of
+  them produced nothing, so a hostile that emptied its magazine stopped being a combatant for the
+  rest of the mission. The choice of a reload verb over a per-turn clip refresh is recorded with
+  its reasoning in `docs/DESIGN.md` §5.1.
+- **Enemy ammo is readable** (`Renderer.DrawEnemyAmmo`): a pip row under the hostile token
+  counting the rounds left, and the word **DRY** in an opaque pill on an empty weapon — text, not
+  hue, per §3.H. Drawn only for hostiles already in contact (`AlertLevel.Alert`), so a dormant "?"
+  pod still gives nothing away. Enemy ammo previously appeared nowhere in `Hud.cs` or
+  `Renderer.cs`. `SIGHTLINE_AIIDLESHOT=1` stages a full/partial/DRY spread for a screenshot.
+- **The enemy HUNKER is audible and visible.** It was the one branch of the eleven that fired in
+  complete silence; it now pops "HUNKERED" and plays the same cue the player's own hunker does.

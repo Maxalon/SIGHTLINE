@@ -6524,3 +6524,181 @@ enough to read at all (X2 had it at n=4 per rung).
   means a player who turns it off is playing different dice. That repair **invalidates every CRN
   world in `docs/measurements/l1/`**. L1 is therefore the **pre-repair ladder** and the only n>=80
   picture of the pre-repair tree that will ever exist.
+
+---
+
+# PROGRAM RESONANCE — Wave W2 "THE OPPONENT ACTS" (dev; worktree `agent-aec483dc62bf01706`, branch `wave/opponent-acts`)
+
+**Base commit: `4784803`** (the integration tip carrying W1 TRUE INSTRUMENT and TRUE BAND — NOT
+`main`). Two code commits plus docs.
+
+## THE DEFECT
+
+The auditor's `depth-1` finding said roughly a quarter of the enemy's turns produce no action at
+all. I instrumented it on this tree and it is worse than the audit's number.
+
+`Game.UpdateEnemy`'s `ActAfterMove` stage is an eleven-branch else-if chain. **Every branch in it
+changes `ActionsLeft`** — ten set it to zero, the shot decrements it — so "the unit still holds an
+action AND `ActionsLeft` is unchanged" is an exact structural test for *no branch fired*. It needs
+no cooperation from the branches, and a future branch that forgets to spend is correctly reported
+as an idle rather than hidden by a stale `fired` flag.
+
+Measured over 32 full campaigns (8 objectives x heat {0,4} x 2, greedy autopilot, this tree):
+
+| | acts | actsDry | **idle** | idleDry | noTgt |
+|---|---|---|---|---|---|
+| `SIGHTLINE_AIIDLEFIX=0` (pre-wave) | 1048 | 120 (11.5%) | **340 (32.4%)** | 93 | 298 |
+| `SIGHTLINE_AIIDLEFIX=1` (shipped) | 963 | 44 (4.6%) | **0 (0.0%)** | 0 | 0 |
+
+The audit measured 23.9% (n=465) and 26.7% (n=641) on `d350416`; my 32.4% is a different sampling
+frame (whole campaigns, objectives pinned round-robin, heats 0 and 4) on a different tree, so the
+numbers are not the same measurement — but they are the same defect, and mine is the bigger sample.
+
+**87.6% of the idles (298/340) were by a unit whose planner had planned no shot at all.** That is
+the shape of the whole finding, and it is what makes the price so low (below).
+
+Three causes, all one-liners:
+
+1. **The planner never read its own ammo.** `Ai.cs` touched `.Ammo` at exactly two lines (251, the
+   PIKEMAN plant gate; 933, the overwatch fallback) and **neither is the reachable-tile shot
+   search**. A dry hostile therefore planned a `ShootTarget`; a non-null `ShootTarget` suppresses
+   the entire no-shot fallback block below it; and `ActAfterMove`'s own `e.Ammo > 0` gate then
+   refused the shot. The unit had a plan, the plan was refused, and nothing replaced it.
+2. **The no-shot fallback had no terminal else.** `if (sees && ammo && !routing) Overwatch; else if
+   (cover) Hunker;` — a hostile that had lost line of sight to the squad AND was standing on open
+   floor got neither and froze in the open, still holding an action.
+3. **Dry was permanent.** Hostiles get one clip at spawn (`Mission.cs:277/1236/1249/1323/1832`) and
+   there was **no enemy reload verb anywhere in the codebase**. 11.5% of enemy acts were made with
+   an empty weapon. Nor was enemy ammo drawn anywhere — it appeared in neither `Hud.cs` nor
+   `Renderer.cs` — so the state was invisible as well as terminal.
+
+## WHAT SHIPPED (`SIGHTLINE_AIIDLEFIX`, default ON)
+
+- **`src/Ai.cs` — the ammo gate.** The tile loop's shot search is gated on `e.Ammo > 0`, so a dry
+  hostile plans no shot and falls into the fallback that was always there.
+- **`src/Ai.cs` — the terminal else.** When neither overwatch nor hunker qualifies, the plan is
+  re-targeted at `bestDash`: the best tile among those needing the **full two-action budget**,
+  tracked by the *same* per-tile scorer in the *same* pass. That matters twice — no new policy
+  (so this wave cannot be accused of doing W3's job), and **no new `Util.Rng` draw**, so CRN
+  pairing is untouched. `SIGHTLINE_PAIRTEST` passes with the dial on.
+- **`src/Ai.cs` — the plan mirrors the exec.** Overwatch is planned only when the exec would
+  accept it (`!Disoriented`). A plan the exec refuses is an idle by another name.
+- **`src/Game.cs` — the RELOAD branch.** One action, full clip, mirroring `Game.DoReload`; a spare
+  action after the mag change digs in. *What to do with a fresh clip is W3's question, not this
+  wave's.*
+- **`src/Game.cs` — the terminal guarantee.** After the chain, an alive unit still holding an
+  unchanged action reloads (if dry) or hunkers. This covers the EXEC's side — a target that died,
+  a `PINNED` clamp that shortened the move out of range, a plan gone stale between planning and
+  acting — structurally, instead of by enumerating the ways a plan can rot.
+- **`src/Game.cs` — the enemy HUNKER stops being silent.** It was the one branch that fired with
+  no pop and no sound; it read exactly like the paralysis this wave removes. It now gets the beat
+  the player's own HUNKER has.
+- **`src/Renderer.cs` — the ammo read** (`DrawEnemyAmmo`, ~15 lines in the token draw, deliberately
+  surgical because W4 is reworking the same file). A pip row under the body; **DRY in words** on an
+  empty weapon, in an opaque pill kept inside the unit's own 64px tile. Drawn only for hostiles
+  already in contact (`AlertLevel.Alert`) so a dormant "?" pod still gives nothing away.
+  *First attempt was a bare 12px label at +23 with no backing, and the HP pip row of whatever
+  hostile stood one tile below punched straight through it — caught by reading the crop, which is
+  the only reason it isn't shipping.*
+- **`docs/DESIGN.md` §5.1 — the ammo economy, decided.** Reload verb over per-turn clip refresh,
+  with the reasoning and with the constraint that comes with it: **if a future wave removes the
+  read it must remove the reload too — they are one decision.**
+
+## GATE 3 — THE PRICE, AND IT IS ESSENTIALLY ZERO
+
+**Instrument first.** The dial-off leg must be the pre-wave game, not an approximation of it. An
+`R0diag` pair — the base commit's own binary (`git archive 4784803`, built into `runbin/W2pre`)
+against this wave's binary at `SIGHTLINE_AIIDLEFIX=0`, at h0/b0 and h4/b10 — **diffs empty**
+outside the `harness` block. The instrumentation and the unconditional `bestDash` bookkeeping are
+inert.
+
+**The round.** 5 heat rungs x **four** disjoint CRN slot sets (bases 0/10/20/30, N=10) x
+greedy+sloppy = **80 campaigns per rung per leg, 800 campaigns**, all 40 chunks asserting their own
+`runs` field. Four sets rather than two because L1's method note found bases 20/30 reading ~8.3
+points harder than 0/10 (z=1.93, p=0.053) — unproven, but free to guard against. The whole round
+costs ~6 minutes of wall clock now, which is the dividend W1 paid for.
+
+```
+  rung    OFF%     ON%   delta     n  0->1  1->0  p(2-sided)
+    h0    47.5    42.5    -5.0    80     6     2       0.289
+    h2    26.2    23.8    -2.5    80     4     2       0.688
+    h4    22.5    23.8    +1.2    80     6     7       1.000
+    h6    17.5    18.8    +1.2    80     5     6       1.000
+    h8    12.5    10.0    -2.5    80     4     2       0.688
+  POOL    25.2    23.8    -1.5   400    25    19       0.451
+```
+
+`0->1` = worlds the baseline won and the fix lost. **No rung separates; the pooled effect does
+not either.** Two finer-grained fields, on ~10x the sample size of the run-completion column,
+agree with the null: mission win-rate **78.94% -> 78.56%** (n = 1410 / 1404 missions) and soldier
+deaths per mission **1.340 -> 1.340**. Texture: choices/ARMED +0.025, meaningful-choices/turn
++0.072, lead-swings/match +0.007 — all noise.
+
+**Why a fix this large is this cheap, and this is the wave's actual finding:** the paralysis was
+real, visible and worth removing, but it was **almost never load-bearing**. 87.6% of idle acts
+were units with no planned target — hostiles that had already lost contact with the squad. Making
+them dash, hunker or reload changes what the player *sees* on the enemy turn without changing what
+the player *takes*. The 11.5% of acts made on an empty weapon are the part that does restore
+firepower, and across a 5.9-turn median mission that washes out.
+
+**So the dial ships ON.** The brief reserved that default for a rung result, and the rung result
+is "not distinguishable from zero at n=80 per rung, on five rungs and on three different
+statistics". `SIGHTLINE_AIIDLEFIX=0` reverts the whole wave in one env var.
+
+## THE NUMBER I AM HANDING TO W7, AND IT IS NOT MINE TO SPEND
+
+The **dial-OFF control** is a fresh n=80/rung read of the composition on the post-W1 tree:
+
+| | heat 0 | heat 2 | heat 4 | heat 6 | heat 8 |
+|---|---|---|---|---|---|
+| **W2 control (dial OFF)** | 47.5% | 26.2% | 22.5% | 17.5% | 12.5% |
+| **W2 shipped (dial ON)** | 42.5% | 23.8% | 23.8% | 18.8% | 10.0% |
+| published band | 55±8 | 40±8 | 30±8 | 20±8 | 10±5 |
+
+**Before this wave's lever, h2 is 14 points below its band and h0 is at the very bottom of its
+own.** That is the composition, not W2 — the R0diag proves the control leg IS the pre-wave game.
+I am not calling this a ladder of record (that is W7's word, and W7 owns the band), but it is an
+n=80/rung post-W1 measurement and it disagrees with everything published. Note also that h4/h6/h8
+sit inside their bands while h0/h2 do not, i.e. **the curve is too FLAT, not uniformly too low** —
+the cold rungs are the broken ones.
+
+## WHAT I DID NOT FIX, AND WHAT IT COST
+
+- **The enemy still cannot CHOOSE.** `Ai.cs:534` still scores any available shot at `100 + bestHit`
+  against terrain terms bounded well under 64, so a 3%-hit fully-exposed shot still outranks the
+  best covered, elevated, non-shooting tile in the game, and `plan.Overwatch` is still reachable
+  only when *no* reachable tile has *any* shot. **That is W3 and I deliberately did not touch it** —
+  mixing it in would have made this round unattributable. The cost is that the opponent now always
+  *acts* but still never *declines*, so a hostile that runs dry, reloads and re-engages is following
+  the same one-line policy it always did.
+- **The idle repair is a floor, not a policy.** The terminal else spends the action on ground
+  scored by the existing function; the terminal exec guarantee spends it on HUNKER. Neither is
+  claimed to be the *right* action — only that it is a real one. W3 should revisit both once the
+  planner can weigh a position against a shot.
+- **The ammo read is unmeasured as an affordance.** I can show it draws correctly and does not
+  collide (screenshots below); I have no evidence any player, or the autopilot, ever *baits* a
+  hostile dry. `Game.Autopilot.cs` has no term for enemy ammo at all, so the flywheel cannot
+  measure the affordance it just gained. That is honest scope for a later wave.
+- **`SIGHTLINE_AIIDLESHOT` is a screenshot hook, not a test.** The ammo read has no self-test; it
+  is verified by eye.
+- **Container isolation was partial.** This agent's shell refused to set `XDG_CONFIG_HOME` or
+  `HOME`, so the persistence self-tests ran against the shared `~/.config/Sightline` (they
+  stash-and-restore, and the full sweep is green, but a concurrent agent's sweep could in
+  principle have interleaved). `SIGHTLINE_BALANCE_JSON` was pinned per chunk as normal, and
+  `run_chunk.sh` sets `XDG_CONFIG_HOME` itself, so the measured round is unaffected.
+
+## VERIFICATION
+
+- `dotnet build -c Release` — 0 warnings / 0 errors.
+- `bash scripts/qa-sweep.sh --full` — all **54** self-tests PASS (AIIDLETEST included), COVERAGE
+  GAP block empty, FXSTREAM PASS, **PAIRTEST PASS** (the CRN identity holds with the dial on),
+  autoplay x3 LOSE/LOSE/LOSE, no TIMEOUT, no exception.
+- `SIGHTLINE_AIIDLETEST=1` — PASS. It runs BOTH legs on the SAME seeds and requires the OFF leg to
+  still idle, so it cannot pass vacuously and it *does* fail on the pre-wave tree (the counter rows
+  above are its own output).
+- Screenshots read and judged: `SIGHTLINE_AIIDLESHOT=1 SIGHTLINE_MISSION=4 SIGHTLINE_SHOT=90`
+  (the ammo row across a full/partial/DRY spread) and
+  `SIGHTLINE_SEED=4242 SIGHTLINE_SMARTPLAY=1 SIGHTLINE_OBJ=defend SIGHTLINE_MISSION=4
+  SIGHTLINE_SHOT=1750 SIGHTLINE_SHOTSEQ=1` (a live Defend at t4 with five hostiles in contact,
+  each carrying its ammo row; one ROUTED and fleeing). **The honest limit of GATE 2: a still frame
+  cannot show an unspent action.** It shows the read and the aftermath; `AIIDLETEST` is the proof.

@@ -6633,12 +6633,20 @@ public partial class Game
     }
 
     // ── W2 THE OPPONENT ACTS ────────────────────────────────────────────────────────────────
-    /// SIGHTLINE_AIIDLEFIX — the wave's single dial. OFF restores the pre-W2 opponent exactly
+    /// SIGHTLINE_AIIDLEFIX — the wave's single dial. `=0` restores the pre-W2 opponent EXACTLY
     /// (the planner ignores its own ammo, the no-shot fallback has no terminal else, and a dry
-    /// hostile never reloads), which is what makes the CRN-paired round possible and a bad
-    /// ladder one env var from reverted. Set from SIGHTLINE_AIIDLEFIX in Program.Main; mutable
-    /// so SIGHTLINE_AIIDLETEST can run BOTH legs in one process.
-    public static bool AiIdleFix = false;
+    /// hostile never reloads); proven identical by an R0diag pair at h0/b0 and h4/b10 whose
+    /// balance JSONs diff empty outside the `harness` block.
+    ///
+    /// SHIPPED ON. Its price was measured over 800 CRN-paired campaigns (5 heat rungs x 4
+    /// disjoint slot sets x 2 policies, base commit 4784803): run completion 25.2% -> 23.8%
+    /// pooled, McNemar p=0.451 on 25/19 discordant worlds; mission win-rate 78.94% -> 78.56%
+    /// over ~1400 missions; soldier deaths per mission 1.340 -> 1.340. The paralysis was real
+    /// and visible but almost never load-bearing — 87.6% of idle acts were by hostiles with no
+    /// planned target, i.e. units already out of contact. See docs/measurements/w2/.
+    ///
+    /// Mutable so SIGHTLINE_AIIDLETEST can run BOTH legs in one process.
+    public static bool AiIdleFix = true;
 
     /// SIGHTLINE_AIIDLETEST probe (harness-only; ALWAYS null in normal play). Called once per
     /// enemy act-opportunity, immediately after the ActAfterMove branch chain:

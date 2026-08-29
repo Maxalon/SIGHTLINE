@@ -1529,3 +1529,54 @@ sets, one lever per measured round, fresh same-slot R0 first, dip budgets, breac
       Rungs 1-7 add bodies and stat points that the measurement cannot see. Either the rungs need
       real teeth or the ladder needs fewer, bigger steps — but the first job is a **higher-N**
       measurement (n≥80/rung) so the question can be asked at a precision that can answer it.
+
+### PROGRAM RESONANCE — W2 "THE OPPONENT ACTS" (2026-08-29, details in DEVLOG §W2)
+
+- [x] **A THIRD OF THE ENEMY'S ACT-OPPORTUNITIES ENDED WITH AN UNSPENT ACTION AND NO BRANCH
+      FIRED — MEASURED, THEN FIXED TO ZERO.** Instrumented on this tree (base `4784803`) over 32
+      full campaigns: `acts=1048 actsDry=120 idle=340 (32.4%) idleDry=93 noTgt=298`; with the fix
+      `acts=963 actsDry=44 idle=0 idleDry=0 noTgt=0`. (The audit measured 23.9% / 26.7% on
+      `d350416` over a different sampling frame — same defect, different measurement.) Three
+      one-line causes, all repaired behind `SIGHTLINE_AIIDLEFIX`: `Ai.Plan`'s reachable-tile shot
+      search never read `e.Ammo`, so a dry hostile planned a shot the exec then refused; the
+      no-shot fallback had **no terminal else**, so a unit with no line of sight AND no cover got
+      neither overwatch nor hunker; and hostiles had **no reload verb anywhere in the codebase**,
+      so dry was permanent. `SIGHTLINE_AIIDLETEST` runs both legs on the same seeds and requires
+      the OFF leg to still idle — it cannot pass vacuously.
+- [x] **THE TERMINAL ELSE ADDS NO POLICY AND NO RANDOMNESS.** When nothing else qualifies the plan
+      is re-targeted at the best tile among those needing the FULL two-action budget, tracked by
+      the *same* per-tile scorer in the *same* pass — so the wave cannot be accused of doing W3's
+      job, and it takes **zero extra `Util.Rng` draws**. PAIRTEST green with the dial on. A
+      structural terminal guarantee in `ActAfterMove` itself covers the exec's side (a target that
+      died, a PINNED clamp that shortened the move out of range) rather than enumerating the ways
+      a plan can go stale.
+- [x] **THE ENEMY AMMO ECONOMY IS NOW A DECIDED DESIGN POSITION** (`docs/DESIGN.md` §5.1): a
+      RELOAD verb (1 action, mirroring the player's `DoReload`) over a per-turn clip refresh, on
+      symmetry + decision grounds — **plus the read it requires**. `Renderer.DrawEnemyAmmo` puts a
+      pip row under the hostile token and the word **DRY** on an empty weapon (text, not hue, per
+      §3.H), drawn only for hostiles already in contact. If a future wave removes the read it must
+      remove the reload with it; they are one decision.
+- [x] **THE PRICE WAS MEASURED AND IS ESSENTIALLY ZERO, SO THE DIAL SHIPS ON.** 800 CRN-paired
+      campaigns (5 heat rungs x **four** disjoint slot sets, bases 0/10/20/30 x greedy+sloppy =
+      80 campaigns per rung per leg), base `4784803`, all 40 chunks asserting their own `runs`
+      field, preceded by an `R0diag` pair proving the dial-off leg is byte-identical to the base
+      commit's own binary. Run completion **25.2% → 23.8%** pooled (McNemar p=0.451 on 25/19
+      discordant worlds); no rung separates. Mission win-rate **78.94% → 78.56%** over ~1400
+      missions; soldier deaths per mission **1.340 → 1.340**. The reason a fix this large is this
+      cheap is the wave's real finding: **87.6% of idle acts were units with no planned target** —
+      hostiles already out of contact — so the paralysis was visible without being load-bearing.
+      `SIGHTLINE_AIIDLEFIX=0` reverts the wave in one env var. Raw data `docs/measurements/w2/`.
+- [ ] **OPEN, HANDED TO W7 — the composition is below its own band at the COLD rungs, before any
+      W2 lever.** The dial-OFF control (n=80/rung, post-W1 tree) reads
+      **h0 47.5 / h2 26.2 / h4 22.5 / h6 17.5 / h8 12.5** against a published band of
+      55/40/30/20/10 (±8, h8 ±5). h4/h6/h8 are IN band and h0/h2 are not, i.e. **the curve is too
+      FLAT, not uniformly too low.** This is not called a ladder of record — W7 owns the band —
+      but it is an n=80/rung post-W1 measurement and it disagrees with everything published.
+- [ ] **OPEN, HANDED TO W3 — the opponent now always ACTS but still never DECLINES.** `Ai.cs`
+      still scores any available shot at `100 + bestHit` against terrain terms bounded under 64,
+      so `plan.Overwatch` remains reachable only when no reachable tile has any shot. Deliberately
+      untouched here so this round stayed attributable.
+- [ ] **OPEN — the ammo read is unmeasured as an affordance.** It draws correctly and does not
+      collide, but nothing proves a player (or the autopilot) ever *baits* a hostile dry;
+      `Game.Autopilot.cs` has no term for enemy ammo at all, so the flywheel cannot see the
+      affordance it just gained.
