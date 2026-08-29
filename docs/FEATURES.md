@@ -681,6 +681,10 @@ field-for-field identical to the branch point). Details + every number in `docs/
   strap — a strapped stack), WALL (masonry courses in running bond across the run), BOULDER (dome
   catch + hashed pits, no chip) or WRECK (diagonal shear, torn lip, a strut past the outer edge),
   hashed off the volume's root tile from a three-form table per biome. 4–6 object types per map.
+  The root is a **stable identity** (`Grid.CoverSeed`), assigned when a cover tile first exists and
+  never re-derived from the live tile set, so shooting part of a wall away cannot re-roll the
+  material or the footprint of what is still standing. New cover adopts the identity of a volume it
+  is touching, so a deployed barricade joins the wall it is built against.
 - **The archetype form IS the token.** The 25 hand-designed silhouettes are drawn as the opaque
   high-value figure with their own dark outline; the enclosing ring is demoted to a 2px state
   indicator that keeps its full topology (closed-doubled friendly / broken hostile / square TURRET
@@ -692,15 +696,21 @@ field-for-field identical to the branch point). Details + every number in `docs/
   the ordering is identical in the colourblind palette.
 - **Dormant contacts read by outline, not brightness.** Body at roughly floor+20, a crisp cold
   rotating dashed ring, and the `?` glyph moved off the body into the same marker slot the
-  SUSPICIOUS `!` uses, so the pod's chassis is no longer obscured by its own label.
+  SUSPICIOUS `!` uses, so the pod's chassis is no longer obscured by its own label. That slot is
+  clamped to the board's top edge and drops into the pod's own tile (on a dark lozenge) when a unit
+  stands on the tile above — the two cases where "above the token" is off screen or under someone
+  else's feet.
 - **The move overlay is one region and one contour.** The DASH region draws only on demand (hold
   SHIFT, or hover a tile outside walk range — the dash *action* is unchanged); the boundary is
   stitched by marching squares into closed loops stroked as single polylines with welded joints and
   a continuous dash phase; the dash stroke moved off `Pal.Accent`'s bytes (the reserved objective
   gold) onto `Pal.MoveDash`, a value variant of the friendly cyan.
 - **`SIGHTLINE_BOARDTEST`** — the project's only self-test that measures rendered pixels: it draws
-  a real frame and asserts the value ladder (mean and peak, ≥8 luma margin), the absence of a floor
-  gutter inside a cover volume, the dash palette and the boundary's edges-per-stroke ratio. In
-  `scripts/qa-sweep.sh`.
+  real frames on a **pinned animation clock** (`Renderer.TimePin`) and asserts the value ladder in
+  **both palettes** (mean and peak, ≥8 luma margin), the absence of a floor gutter inside a cover
+  volume, that destroying one tile of a volume leaves a surviving tile byte-identical, the dash
+  palette and the boundary's edges-per-stroke ratio. In `scripts/qa-sweep.sh`.
 - **A/B dials:** `SIGHTLINE_COVERMERGE=0`, `SIGHTLINE_TOKENSTYLE=0`, `SIGHTLINE_MOVESTYLE=0`,
-  `SIGHTLINE_MOVEDASH=1`.
+  `SIGHTLINE_MOVEDASH=1`, `SIGHTLINE_COVERSEED=0` (re-derive the volume identity every frame — the
+  pre-review behaviour), `SIGHTLINE_COVER=1 [+SIGHTLINE_COVERKILL=1]` (the cover-destruction A/B),
+  `SIGHTLINE_MARKERS=1` (the occluded awareness-marker cases).

@@ -7,6 +7,19 @@ namespace Sightline;
 /// Draws the battlefield, units and tactical overlays.
 public static class Renderer
 {
+    // ---- the animation clock, with a harness-only PIN ----------------------------------------
+    // Every pulsing/rotating/drifting element in this file reads the wall clock through Now().
+    // In play that IS Raylib.GetTime(): TimePin is -1 and nothing but a self-test ever writes it.
+    // A PIXEL probe cannot sample an unpinned animation phase and call the number a result — the
+    // W4 review measured SIGHTLINE_BOARDTEST's legacy-path SELECTED peak bimodal at 166.8 (x3)
+    // and 188.1 (x7) over ten runs of ONE binary; the selected-unit halo pulsing
+    // 0.55 + 0.40*sin(t*5) on Pal.Accent is one such element, and there are 45 clock reads in
+    // this file, so which of them owns that particular swing is NOT claimed here. CLAUDE.md's
+    // warning that screenshots are not byte-identical is exactly this. Pinning the clock makes a
+    // probe's frame reproducible without touching a shipped pixel.
+    public static double TimePin = -1.0;
+    static double Now() => TimePin >= 0.0 ? TimePin : Raylib.GetTime();
+
     // how far raised terrain (and anything standing on it) lifts on screen
     public const float ElevLift = 8f;
 
@@ -590,7 +603,7 @@ public static class Renderer
     // catches. Runs once per floor tile — a handful of primitives each, no allocation.
     static void DrawBiomeSignature(Game g, Biome bm, int bi)
     {
-        float t = (float)Raylib.GetTime();
+        float t = (float)Now();
         // V3 PART B — the BOARD-SCALE features go down first, under the per-tile cues, so a
         // biome reads as terrain with structure and the per-tile cue is the fine detail on top.
         DrawBiomeFeatures(g, bm, bi, t);
@@ -1039,7 +1052,7 @@ public static class Renderer
         if (g.EvacZone.Count == 0) return;
         // the WIN-CONDITION must be the 2nd-most-salient thing on the board: a strong animated
         // pulsing fill + a chevron sweep, not a thin outline. Uses the friendly Good role colour.
-        float pulse = 0.5f + 0.5f * MathF.Sin((float)Raylib.GetTime() * 3f);
+        float pulse = 0.5f + 0.5f * MathF.Sin((float)Now() * 3f);
         // SIGNAL W3: the label anchors to ACTUAL member tiles of the zone's topmost row — the old
         // (minx,miny) bounding-box corner may not be a zone tile on L-shaped beacon-extended zones.
         int minY = int.MaxValue;
@@ -1051,7 +1064,7 @@ public static class Renderer
             // glowing fill — much stronger than before so the zone reads as "go here to win"
             Raylib.DrawRectangleRec(r, Raylib.Fade(Pal.Good, 0.16f + 0.16f * pulse));
             // animated upward chevrons inside the tile (the "extract / lift-out" cue)
-            float ph = ((float)Raylib.GetTime() * 0.8f) % 1f;
+            float ph = ((float)Now() * 0.8f) % 1f;
             for (int c = 0; c < 2; c++)
             {
                 float cy = r.Y + r.Height * (0.85f - ((ph + c * 0.5f) % 1f) * 0.7f);
@@ -1093,11 +1106,11 @@ public static class Renderer
         if (g.BeaconPlanted)
         {
             var bc = Util.TileCenter(g.BeaconTile.x, g.BeaconTile.y);
-            float bp = 0.5f + 0.5f * MathF.Sin((float)Raylib.GetTime() * 4f);
+            float bp = 0.5f + 0.5f * MathF.Sin((float)Now() * 4f);
             // expanding broadcast rings
             for (int ring = 0; ring < 2; ring++)
             {
-                float rr = 8f + ((float)Raylib.GetTime() * 22f + ring * 14f) % 26f;
+                float rr = 8f + ((float)Now() * 22f + ring * 14f) % 26f;
                 Raylib.DrawCircleLines((int)bc.X, (int)bc.Y, rr, Raylib.Fade(Pal.Good, 0.4f * (1f - rr / 34f)));
             }
             // the mast + emitter
@@ -1116,7 +1129,7 @@ public static class Renderer
         var c = ElevCenter(g, tx, ty);
         bool done = g.HackProgress >= Game.HackRequired;
         Color col = done ? Pal.Good : Pal.Accent;
-        float pulse = 0.5f + 0.5f * MathF.Sin((float)Raylib.GetTime() * 3f);
+        float pulse = 0.5f + 0.5f * MathF.Sin((float)Now() * 3f);
 
         // pad — strong pulsing glow + a radial bloom so the hack objective reads at 2nd-salience
         Raylib.DrawRectangleRec(r, Raylib.Fade(col, 0.13f + 0.12f * pulse));
@@ -1156,7 +1169,7 @@ public static class Renderer
             // OBJECTIVE accent (amber) — NOT red — so a charge site can never be misread as an
             // enemy. Armed (done) flips to the friendly Good colour.
             Color col = blown ? Pal.Good : Pal.Accent;
-            float pulse = 0.5f + 0.5f * MathF.Sin((float)Raylib.GetTime() * 3f + i);
+            float pulse = 0.5f + 0.5f * MathF.Sin((float)Now() * 3f + i);
 
             // a strong pulsing glow fill so the win-condition site reads at 2nd-salience
             Raylib.DrawRectangleRec(r, Raylib.Fade(col, 0.12f + (blown ? 0f : 0.14f * pulse)));
@@ -1183,7 +1196,7 @@ public static class Renderer
         if (!g.CachePresent) return;
         var r = ElevRect(g, g.CacheX, g.CacheY);
         var c = ElevCenter(g, g.CacheX, g.CacheY);
-        float t = (float)Raylib.GetTime();
+        float t = (float)Now();
         bool expiring = g.CacheTurnsLeft <= 2;
         // expiring: a harder, faster blink; fresh: a soft pulse
         float pulse = expiring ? (MathF.Sin(t * 8f) > 0f ? 1f : 0.25f) : 0.5f + 0.5f * MathF.Sin(t * 3f);
@@ -1216,7 +1229,7 @@ public static class Renderer
     {
         if (g.Secondary != SecondaryKind.Bounty || g.BountyTarget == null || !g.BountyTarget.Alive) return;
         var u = g.BountyTarget;
-        float t = (float)Raylib.GetTime();
+        float t = (float)Now();
         float bob = 2f * MathF.Sin(t * 4f);
         var p = u.Pos + new Vector2(0, -34 + bob);
         Color col = Pal.VipGold;
@@ -1456,10 +1469,13 @@ public static class Renderer
         { _moveCls = new byte[W * H]; _moveClsW = W; _moveClsH = H; }
         var cls = _moveCls;
 
-        // DASH ON DEMAND. Hold SHIFT (nothing else in the game reads a modifier — no IsKeyDown
-        // call existed anywhere before this one), or hover a tile that is out of walk range but in
-        // dash range, and the sprint region appears. Otherwise the default frame carries exactly
-        // one region, which is the whole point of the change.
+        // DASH ON DEMAND. Hold SHIFT, or hover a tile that is out of walk range but in dash range,
+        // and the sprint region appears. Otherwise the default frame carries exactly one region,
+        // which is the whole point of the change.
+        // (W4 REVIEW FIX — the original comment here claimed "no IsKeyDown call existed anywhere
+        // before this one". False: src/Game.Codex.cs has read held Right/D and Left/A to scroll
+        // the field manual since long before this wave. What is new is reading a key as a
+        // MODIFIER — held to change what another element shows rather than to drive it.)
         bool hoverDash = g.HoverValid && g.Grid.InBounds(g.HoverX, g.HoverY)
                          && cost[g.HoverX, g.HoverY] > budget;
         bool showDash = canDash && (!MoveStyleNew || ForceDashRing || hoverDash
@@ -1577,7 +1593,7 @@ public static class Renderer
         if (g.Threat == null || g.MoveCost == null) return;
 
         bool full = g.ThreatPref >= Game.ThreatFull;
-        float pulse = 0.6f + 0.4f * MathF.Sin((float)Raylib.GetTime() * 4f);
+        float pulse = 0.6f + 0.4f * MathF.Sin((float)Now() * 4f);
         for (int x = 0; x < g.Grid.W; x++)
             for (int y = 0; y < g.Grid.H; y++)
             {
@@ -1655,7 +1671,7 @@ public static class Renderer
     // + a rotating warning triangle (shape redundancy) + a dashed source->zone line.
     static void DrawSiegeZones(Game g)
     {
-        float t = (float)Raylib.GetTime();
+        float t = (float)Now();
         float pulse = 0.55f + 0.45f * MathF.Sin(t * 5f);
         foreach (var e in g.Enemies)
         {
@@ -1684,7 +1700,7 @@ public static class Renderer
     // an "it WILL hit here" warning. Reads live state, so a killed banner's aura clears next frame.
     static void DrawBannerAuras(Game g)
     {
-        float t = (float)Raylib.GetTime();
+        float t = (float)Now();
         float pulse = 0.75f + 0.25f * MathF.Sin(t * 2.2f);
         foreach (var e in g.Enemies)
         {
@@ -1726,7 +1742,7 @@ public static class Renderer
                 (watchers ??= new System.Collections.Generic.List<Unit>()).Add(p);
         if (watchers == null) return;
 
-        float pulse = 0.5f + 0.5f * MathF.Sin((float)Raylib.GetTime() * 3.0f);
+        float pulse = 0.5f + 0.5f * MathF.Sin((float)Now() * 3.0f);
         // SIGNAL W3: wash lifted 0.06-0.11 -> 0.14-0.21 — the old floor was below llvmpipe/monitor
         // perceptibility over a dark biome floor. Deliberately a tier ABOVE the enemy threat wash
         // (DrawOverwatchThreat runs 0.07-0.12): a friendly braced lane is a plan the player made
@@ -1792,7 +1808,7 @@ public static class Renderer
         }
         if (watchers == null) return;
 
-        float pulse = 0.5f + 0.5f * MathF.Sin((float)Raylib.GetTime() * 3.2f);
+        float pulse = 0.5f + 0.5f * MathF.Sin((float)Now() * 3.2f);
         // soft red wash — well below signal level so it informs without dominating the board, but
         // nudged up to a reliably-perceptible floor so "this tile is in a reaction kill-zone" reads.
         Color wash = Raylib.Fade(Pal.Foe, 0.07f + 0.05f * pulse);
@@ -1826,7 +1842,7 @@ public static class Renderer
 
         // mark each overwatcher with a danger reticle so the SOURCE of the kill-zone reads, plus a
         // slow expanding "watching" pulse ring that draws the eye to the threat without occluding it.
-        float t = (float)Raylib.GetTime();
+        float t = (float)Now();
         foreach (var w in watchers)
         {
             float hlift = g.Grid.IsHigh(w.X, w.Y) ? ElevLift : 0f;
@@ -1898,7 +1914,7 @@ public static class Renderer
         var plan = g.IntentPlan;
         if (e == null || plan == null || !e.Alive) return;
 
-        float t = (float)Raylib.GetTime();
+        float t = (float)Now();
         float pulse = 0.6f + 0.4f * MathF.Sin(t * 5f);
         Color danger = Pal.Foe;
 
@@ -2071,12 +2087,23 @@ public static class Renderer
     //
     // SIGHTLINE_COVERMERGE=0 restores the pre-wave per-tile boxes for a paired capture.
     static readonly bool CoverMerge = Environment.GetEnvironmentVariable("SIGHTLINE_COVERMERGE") != "0";
+    // SIGHTLINE_COVERSEED=0 — the NEGATIVE CONTROL for the volume-identity fix below: throw the
+    // stable seeds away and re-derive them from the LIVE tile set every frame, which is exactly
+    // what the wave shipped. Two lines, because "min linear index over the 4-connected same-type
+    // run" is what a full reseed of a cleared grid computes. Gate E of SIGHTLINE_BOARDTEST FAILS
+    // under it, and SIGHTLINE_COVER=1 [+SIGHTLINE_COVERKILL=1] shows the morph on a real frame.
+    static readonly bool CoverSeedStable = Environment.GetEnvironmentVariable("SIGHTLINE_COVERSEED") != "0";
 
-    // union-find scratch (roots per tile), reused frame to frame — no per-frame allocation
-    static int[] _cvGrp; static int _cvW, _cvH;
-    static int CvFind(int[] p, int i) { while (p[i] != i) { p[i] = p[p[i]]; i = p[i]; } return i; }
-    static void CvUnion(int[] p, int a, int b)
-    { a = CvFind(p, a); b = CvFind(p, b); if (a != b) { if (a < b) p[b] = a; else p[a] = b; } }
+    // W4 REVIEW FIX — the volume's identity is STABLE, not recomputed from the live tile set.
+    // This pass originally ran a union-find over `Grid.Tiles` every frame and took the MIN linear
+    // index as the group root, then hashed the material form and the footprint jitter off that
+    // root. Cover is destructible: `Grid.DamageCover` walks a tile High->Low->Floor during play,
+    // so destroying or downgrading a volume's north/west-most tile moved the root and re-rolled
+    // the FORM of every surviving tile — a wall visibly turned from crates into rock mid-mission,
+    // which reads as a rendering glitch rather than as damage. The identity now lives in
+    // `Grid.CoverSeed`, assigned once when a cover tile first exists (see Grid.SeedCoverVolumes)
+    // and never re-derived, so a volume keeps its material and its footprint for the whole
+    // mission no matter what is shot off it. Asserted by SIGHTLINE_BOARDTEST's gate E.
 
     /// W4(b) — the per-biome FORM vocabulary. One form per merged VOLUME, hashed off the group's
     /// root tile, so a map carries 4-6 distinguishable object types (3 forms x 2 cover tiers)
@@ -2099,6 +2126,35 @@ public static class Renderer
         { FormCrate,   FormWall,    FormWreck   },   // NEON    — server crate, partition, torn panel
         { FormBoulder, FormWreck,   FormWall    },   // MAGMA   — basalt boulder, slag wreck, revetment
     };
+
+    /// W4 REVIEW FIX — the awareness marker's slot. Both pod markers ('!' suspicious, '?'
+    /// dormant) float ABOVE the token so the archetype figure underneath stays readable. The
+    /// wave moved them there and did not check the two cases where that slot is not on screen:
+    ///   * a ROW-0 pod — Cfg.OriginY 40 + a 64px tile puts that centre at y=72, so a 23px glyph
+    ///     at p.Y-44 lands at y 28..51, entirely behind a top HUD bar whose lower edge is ~y45;
+    ///   * a pod with a unit standing on the tile directly above, which is the NORMAL case
+    ///     because hostiles spawn in pods — the neighbour's token is drawn over the slot.
+    /// The high slot is therefore CLAMPED to the board's top edge, and dropped to just above the
+    /// figure (inside the pod's OWN tile, where no neighbour can paint over it) when the tile
+    /// above is occupied. An overlapped glyph is a compromise; an invisible one is a lost cue.
+    static float MarkerY(Game g, Unit u, Vector2 p, float above, out bool crowded)
+    {
+        float y = p.Y + above;
+        crowded = false;
+        if (g.UnitAt(u.X, u.Y - 1) != null) { y = p.Y - 26f; crowded = true; }
+        if (y < Cfg.OriginY + 6f) { y = Cfg.OriginY + 6f; crowded = true; }
+        return y;
+    }
+
+    /// In a fallback slot the glyph lands on the token's own ring instead of on clean floor, and
+    /// a 1px drop shadow is not enough separation there. Seat it on a dark lozenge — only when
+    /// crowded, so the clean high slot keeps the light, unbacked look it was designed with.
+    static void MarkerBacking(bool crowded, float cx, float y, float h)
+    {
+        if (!crowded) return;
+        Raylib.DrawRectangleRounded(new Rectangle(cx - 10f, y + 1f, 20f, h - 2f), 0.55f, 6,
+                                    Raylib.Fade(Pal.RGBA(5, 8, 12), 0.66f));
+    }
 
     static void DrawCover(Game g)
     {
@@ -2143,32 +2199,24 @@ public static class Renderer
         Color seam  = Pal.Mix(Pal.RGBA(0, 0, 0), tint, 0.22f);   // the chipped-corner shadow
 
         int W = g.Grid.W, H = g.Grid.H;
-        if (_cvGrp == null || _cvW != W || _cvH != H) { _cvGrp = new int[W * H]; _cvW = W; _cvH = H; }
-        var grp = _cvGrp;
-        // A tile joins its neighbour only when the TYPE and the ELEVATION TIER both match: the
-        // drawn rect is lifted by HeightAt*ElevLift, so merging across a step would weld two
-        // rects that do not line up. Rebuilt every frame — cover is destructible, so the grouping
-        // has to follow CoverHp reaching zero (198 tiles, two passes: measurably free).
-        for (int i = 0; i < W * H; i++) grp[i] = i;
-        if (CoverMerge)
-            for (int x = 0; x < W; x++)
-                for (int y = 0; y < H; y++)
-                {
-                    var tt = g.Grid.Tiles[x, y];
-                    if (tt == TileType.Floor) continue;
-                    int hh = g.Grid.HeightAt(x, y);
-                    if (x + 1 < W && g.Grid.Tiles[x + 1, y] == tt && g.Grid.HeightAt(x + 1, y) == hh)
-                        CvUnion(grp, y * W + x, y * W + x + 1);
-                    if (y + 1 < H && g.Grid.Tiles[x, y + 1] == tt && g.Grid.HeightAt(x, y + 1) == hh)
-                        CvUnion(grp, y * W + x, (y + 1) * W + x);
-                }
-        // same-volume test for a neighbour, used to gate every per-side decoration below
+        // Hand out a volume seed to any cover tile that does not have one yet (mission start, a
+        // deployed barricade, a harness stamp). Idempotent and cheap — one scan, work only where
+        // seeds are missing — so no stamping site has to remember to call it.
+        if (!CoverSeedStable) g.Grid.ClearCoverSeeds();   // negative control: re-roll every frame
+        g.Grid.SeedCoverVolumes();
+        // Two adjacent tiles draw as ONE volume when the TYPE, the ELEVATION TIER and the volume
+        // SEED all match. Type and tier because the drawn rect is lifted by HeightAt*ElevLift and
+        // merging across a step would weld two rects that do not line up; the seed because a High
+        // tile shot down to rubble must split off from its run rather than drag the run's jitter
+        // into a differently-typed block.
         bool Joined(int x, int y, int nx, int ny)
         {
             if (!CoverMerge) return false;
             if (nx < 0 || ny < 0 || nx >= W || ny >= H) return false;
-            if (g.Grid.Tiles[nx, ny] == TileType.Floor) return false;
-            return CvFind(grp, y * W + x) == CvFind(grp, ny * W + nx);
+            var tt = g.Grid.Tiles[x, y];
+            if (tt == TileType.Floor || g.Grid.Tiles[nx, ny] != tt) return false;
+            if (g.Grid.HeightAt(nx, ny) != g.Grid.HeightAt(x, y)) return false;
+            return g.Grid.CoverSeed[x, y] == g.Grid.CoverSeed[nx, ny];
         }
 
         for (int x = 0; x < W; x++)
@@ -2187,7 +2235,10 @@ public static class Renderer
                 // clones; this varies the VOLUME instead. Nothing downstream reads these: `r` is a
                 // local copy, Util.TileRect is untouched, and every consumer of tile-centre maths
                 // (hit-testing, LoS, overlays, FX anchors) still sees the exact grid.
-                int root = CvFind(grp, y * W + x);
+                // The hash root is the STABLE volume seed, not a live group root: this is the
+                // line the review's "crates turn into rock when you blow up the end of the wall"
+                // defect lived on. Falls back to the tile itself when merging is off.
+                int root = CoverMerge && g.Grid.CoverSeed[x, y] >= 0 ? g.Grid.CoverSeed[x, y] : y * W + x;
                 int rx = root % W, ry = root / W;
                 float jx = (SHash(rx, ry, 101) - 0.5f) * 6f;
                 float jy = (SHash(rx, ry, 103) - 0.5f) * 6f;
@@ -2488,7 +2539,7 @@ public static class Renderer
     {
         if (!g.KbCursor || !g.Grid.InBounds(g.CurX, g.CurY)) return;
         var r = ElevRect(g, g.CurX, g.CurY);
-        float p = 0.5f + 0.5f * MathF.Sin((float)Raylib.GetTime() * 6f);
+        float p = 0.5f + 0.5f * MathF.Sin((float)Now() * 6f);
         Color c = Raylib.Fade(Pal.Accent, 0.55f + 0.45f * p);
         float L = 11f, m = 2f;
         float x0 = r.X + m, y0 = r.Y + m, x1 = r.X + r.Width - m, y1 = r.Y + r.Height - m;
@@ -2560,7 +2611,7 @@ public static class Renderer
     // at cover/terrain z-order (objects on the board, under the units).
     static void DrawBarrels(Game g)
     {
-        float t = (float)Raylib.GetTime();
+        float t = (float)Now();
         // warning palette — orange/red, distinct from cover's cool blues
         Color drum    = Pal.RGBA(150, 64, 24);     // body
         Color drumTop = Pal.RGBA(196, 92, 34);     // lit top
@@ -2617,7 +2668,7 @@ public static class Renderer
     // Drawn on the floor, UNDER the units (deny-ground hazard).
     static void DrawFire(Game g)
     {
-        float t = (float)Raylib.GetTime();
+        float t = (float)Now();
         Color core  = Pal.RGBA(255, 224, 120);   // hot inner
         Color flame = Pal.RGBA(244, 132, 40);    // main tongue
         Color deep  = Pal.RGBA(176, 52, 20);     // outer/cooler
@@ -2682,7 +2733,7 @@ public static class Renderer
     {
         if (!g.AimMode || !g.BarrelAimValid) return;
         var c = ElevCenter(g, g.BarrelAimX, g.BarrelAimY);
-        float t = (float)Raylib.GetTime();
+        float t = (float)Now();
         Color col = Pal.Foe;
 
         // faint blast-radius wash over the Chebyshev-1 footprint
@@ -3035,8 +3086,8 @@ public static class Renderer
         if (!u.Alive || (u.Statuses.Count == 0 && !u.Downed)) return;
         float hlift = g.Grid.IsHigh(u.X, u.Y) ? ElevLift : 0f;
         bool drone = u.Team == Team.Enemy && u.Cls == "DRONE";
-        float hover = drone ? 11f + MathF.Sin((float)Raylib.GetTime() * 3f + u.Bob) * 2f : 0f;
-        float bob = MathF.Sin((float)Raylib.GetTime() * 2.2f + u.Bob) * 1.6f;
+        float hover = drone ? 11f + MathF.Sin((float)Now() * 3f + u.Bob) * 2f : 0f;
+        float bob = MathF.Sin((float)Now() * 2.2f + u.Bob) * 1.6f;
         Vector2 p = u.Pos - new Vector2(0, hlift) + new Vector2(0, bob - hover) + u.Recoil;
         const float chipH = 18f;
         // FUL-7: the DOWN countdown pill leads the row — red "DOWN 3/2/1" while the timer runs,
@@ -3156,9 +3207,9 @@ public static class Renderer
 
         // a DRONE hovers above its shadow (reads as airborne)
         bool drone = u.Team == Team.Enemy && u.Cls == "DRONE";
-        float hover = drone ? 11f + MathF.Sin((float)Raylib.GetTime() * 3f + u.Bob) * 2f : 0f;
+        float hover = drone ? 11f + MathF.Sin((float)Now() * 3f + u.Bob) * 2f : 0f;
 
-        float bob = MathF.Sin((float)Raylib.GetTime() * 2.2f + u.Bob) * 1.6f;
+        float bob = MathF.Sin((float)Now() * 2.2f + u.Bob) * 1.6f;
         Vector2 p = foot + new Vector2(0, bob - hover) + u.Recoil;
 
         // ---- procedural unit animation pose (render-only; Unit fields decay in Game.Update) ----
@@ -3210,7 +3261,7 @@ public static class Renderer
             Color glow = vip ? Pal.VipGold
                        : friend ? Pal.Friend
                        : (elite ? Pal.Elite : Pal.Foe);
-            float gpulse = 0.85f + 0.15f * MathF.Sin((float)Raylib.GetTime() * 2.4f + u.Bob);
+            float gpulse = 0.85f + 0.15f * MathF.Sin((float)Now() * 2.4f + u.Bob);
             float gA = (friend ? 0.32f : 0.36f) * figAlpha * gpulse;   // enemies a hair hotter (W5: nudged up)
             float gR = (elite || hvt) ? 37f : 31f;                     // W5: haloes the enlarged body
             // a wide soft bloom + a tighter brighter core radial (two rings read as a glow on llvmpipe)
@@ -3243,7 +3294,7 @@ public static class Renderer
         // against busy cover. All in the friendly Accent role colour; pulses gently.
         if (g.Selected == u)
         {
-            float pulse = 0.5f + 0.5f * MathF.Sin((float)Raylib.GetTime() * 5f);
+            float pulse = 0.5f + 0.5f * MathF.Sin((float)Now() * 5f);
             var sc = foot + new Vector2(0, 17);
             // wide soft bloom — reads as the unit being "lit"
             Raylib.DrawRing(sc, 24f, 32f, 0, 360, 56, Raylib.Fade(Pal.Accent, 0.07f + 0.07f * pulse));
@@ -3262,7 +3313,7 @@ public static class Renderer
         // 4.4 ghost ring: soft pulsing ring on friendly units while the squad is concealed
         if (friend && !vip && g.SquadConcealed)
         {
-            float pulse = 0.3f + 0.3f * MathF.Sin((float)Raylib.GetTime() * 2.8f + u.Bob);
+            float pulse = 0.3f + 0.3f * MathF.Sin((float)Now() * 2.8f + u.Bob);
             Raylib.DrawRing(foot + new Vector2(0, 17), 20f, 23f, 0, 360, 40,
                             Raylib.Fade(Pal.Friend, pulse));
         }
@@ -3272,7 +3323,7 @@ public static class Renderer
         // a squint: "a soldier is on the ground HERE, and the clock is running."
         if (downed)
         {
-            float dpls = 0.5f + 0.5f * MathF.Sin((float)Raylib.GetTime() * 3.4f);
+            float dpls = 0.5f + 0.5f * MathF.Sin((float)Now() * 3.4f);
             var dcr = foot + new Vector2(0, 17);
             Raylib.DrawRing(dcr, 21f, 25f, 0, 360, 48, Raylib.Fade(Pal.Foe, 0.30f + 0.35f * dpls));
             Raylib.DrawRing(dcr, 16.5f, 18.5f, 0, 360, 48, Raylib.Fade(Pal.Foe, 0.16f + 0.16f * dpls));
@@ -3285,7 +3336,7 @@ public static class Renderer
         // every alert state (the capstone must read even while the pod sleeps). Presentation only.
         if (u.Team == Team.Enemy && u.IsBoss)
         {
-            float bp = 0.5f + 0.5f * MathF.Sin((float)Raylib.GetTime() * 2.2f + u.Bob);
+            float bp = 0.5f + 0.5f * MathF.Sin((float)Now() * 2.2f + u.Bob);
             var bc = foot + new Vector2(0, 17);
             Raylib.DrawRing(bc, 30f, 41f, 0, 360, 56, Raylib.Fade(Pal.Elite, 0.09f + 0.07f * bp));   // soft aura wash
             Raylib.DrawRing(bc, 33f, 36.5f, 0, 360, 56, Raylib.Fade(Pal.Elite, 0.40f + 0.25f * bp)); // heavy outer ring
@@ -3296,7 +3347,7 @@ public static class Renderer
         // the pack at a glance (full-alpha signal, drawn regardless of alert state / dimming).
         if (hvt)
         {
-            float pulse = 0.55f + 0.45f * MathF.Sin((float)Raylib.GetTime() * 4.2f + u.Bob);
+            float pulse = 0.55f + 0.45f * MathF.Sin((float)Now() * 4.2f + u.Bob);
             var hc = Pal.VipGold;
             Raylib.DrawRing(foot + new Vector2(0, 17), 20f, 24f, 0, 360, 48, Raylib.Fade(hc, 0.85f));
             Raylib.DrawRing(foot + new Vector2(0, 17), 26f, 28f, 0, 360, 48, Raylib.Fade(hc, 0.30f + 0.40f * pulse));
@@ -3306,7 +3357,7 @@ public static class Renderer
             // read "kill these to expose it." No gotcha — the bodyguard relationship is fully visible.
             if (u.HvtGuarded)
             {
-                float gp = 0.5f + 0.5f * MathF.Sin((float)Raylib.GetTime() * 5.5f);
+                float gp = 0.5f + 0.5f * MathF.Sin((float)Now() * 5.5f);
                 // a domed shield arc above the HVT (reads as a protective bubble)
                 Raylib.DrawRing(p, 22f, 26f, 200, 340, 28, Raylib.Fade(Pal.Foe, 0.35f + 0.45f * gp));
                 Raylib.DrawRing(p, 26f, 28.5f, 200, 340, 28, Raylib.Fade(Pal.Foe, 0.18f + 0.18f * gp));
@@ -3515,11 +3566,12 @@ public static class Renderer
                 // that is shooting at you. Measured before the change: suspicious PEAK 179.0
                 // against a live hostile's 171.0. The tier keeps its own hue, its pulse, its
                 // double band and its glyph; only the rung moves.
-                float pulse = 0.5f + 0.5f * MathF.Sin((float)Raylib.GetTime() * 6f);
+                float pulse = 0.5f + 0.5f * MathF.Sin((float)Now() * 6f);
                 Color sus = TokenStyleNew ? ToLuma(Pal.Suspect, 162) : Pal.Suspect;
                 Raylib.DrawRing(p, 24f, 28f, 0, 360, 44, Raylib.Fade(sus, 0.42f + 0.48f * pulse));
                 Raylib.DrawRing(p, 28f, 29.5f, 0, 360, 44, Raylib.Fade(sus, 0.18f + 0.20f * pulse));
-                var qp = new Vector2((int)(p.X - 2), (int)(p.Y - 42));
+                var qp = new Vector2((int)(p.X - 2), (int)MarkerY(g, u, p, -42f, out bool susCrowd));
+                MarkerBacking(susCrowd, p.X, qp.Y, 22f);
                 Cfg.Text("!", qp + new Vector2(1.2f, 1.2f), 22, 1f, Raylib.Fade(Pal.RGBA(8, 6, 2), 0.85f)); // drop shadow for contrast
                 Cfg.Text("!", qp, 22, 1f, sus);
             }
@@ -3530,7 +3582,7 @@ public static class Renderer
                 // W6: brighter, slightly heavier desaturated-slate dashed ring + a shadow-backed "?"
                 // so the DORMANT tier reads at a glance against any biome floor — still cold/quiet,
                 // still clearly subordinate to the amber SUSPICIOUS ring and the hot-red LIVE halo.
-                float t = (float)Raylib.GetTime();
+                float t = (float)Now();
                 // W4: the dormant ring + '?' come down onto the dormant value rung (~150) with
                 // the body. They stay the LOUDEST thing on the pod — outline weight and glyph is
                 // where dormancy is carried now — but the pod stops out-shouting a live threat.
@@ -3552,7 +3604,10 @@ public static class Renderer
                 // in the same place above the token, which also makes the two tiers directly
                 // comparable at a glance instead of one being a badge and the other a stamp.
                 float qw = Cfg.Measure("?", 23, 1f).X;
-                var qp = new Vector2((int)(p.X - qw / 2), (int)(p.Y - (TokenStyleNew ? 44f : 13f)));
+                bool podCrowd = false;
+                var qp = new Vector2((int)(p.X - qw / 2),
+                                     (int)(TokenStyleNew ? MarkerY(g, u, p, -44f, out podCrowd) : p.Y - 13f));
+                MarkerBacking(podCrowd, p.X, qp.Y, 23f);
                 Cfg.Text("?", qp + new Vector2(1.2f, 1.2f), 23, 1f, Raylib.Fade(Pal.RGBA(6, 8, 12), 0.85f)); // drop shadow
                 Cfg.Text("?", qp, 23, 1f, Raylib.Fade(dim, 1.0f));
             }
@@ -3652,7 +3707,7 @@ public static class Renderer
         // the crossfire). Signal-level, so drawn at a readable alpha regardless of focal dimming.
         if (u.Team == Team.Enemy && u.Cls == "SPOTTER")
         {
-            float t = (float)Raylib.GetTime();
+            float t = (float)Now();
             // an expanding scan ring (radar sweep) that breathes outward from the unit
             float scan = (t * 0.6f + u.Bob) % 1f;                     // 0..1 sweep phase
             float rad = 14f + scan * 16f;
@@ -3680,7 +3735,7 @@ public static class Renderer
         // SIGNAL W5: HasSiege flag (mirrors Cls=="BOMBARD") — a siege-armed boss pulses too.
         if (u.Team == Team.Enemy && u.HasSiege && u.ChargeTurns > 0)
         {
-            float ct = (float)Raylib.GetTime();
+            float ct = (float)Now();
             float cp = 0.5f + 0.5f * MathF.Sin(ct * 7f);
             Raylib.DrawCircleV(p, (3.5f + 2.5f * cp), Raylib.Fade(Pal.RGBA(255, 180, 120), 0.55f + 0.35f * cp));
             Raylib.DrawRing(p, 10f, 12f, 0, 360, 28, Raylib.Fade(Pal.Foe, 0.35f + 0.45f * cp));
@@ -3700,7 +3755,7 @@ public static class Renderer
         // to a new tile after firing. Never shown on dormant/suspicious pods.
         if (u.FiredThisTurn && !u.MovedAfterFire && !inactive)
         {
-            float ep = 0.55f + 0.45f * MathF.Sin((float)Raylib.GetTime() * 5.2f + u.Bob);
+            float ep = 0.55f + 0.45f * MathF.Sin((float)Now() * 5.2f + u.Bob);
             Color ec = friend ? Pal.Friend : (elite ? Pal.Elite : Pal.Foe);
             float cx = p.X + 15f, cyt = p.Y - 15f;          // upper-right of the figure
             // an open downward chevron (▽ outline) — "pinned in the open" cue
@@ -3837,7 +3892,7 @@ public static class Renderer
     // Smoke clouds: a drifting translucent haze drawn over the board (and units).
     static void DrawSmoke(Game g)
     {
-        float t = (float)Raylib.GetTime();
+        float t = (float)Now();
         for (int x = 0; x < g.Grid.W; x++)
             for (int y = 0; y < g.Grid.H; y++)
             {
@@ -3885,7 +3940,7 @@ public static class Renderer
     {
         if (!g.ShoveMode || g.Selected == null) return;
         var u = g.Selected;
-        float t = (float)Raylib.GetTime();
+        float t = (float)Now();
 
         // ring all valid (adjacent, alive) enemy targets so the player sees what's shovable.
         foreach (var e in g.Enemies)
@@ -3935,7 +3990,7 @@ public static class Renderer
     // for every marked enemy regardless of mode, since the mark persists through the enemy turn.
     static void DrawMarkIndicators(Game g)
     {
-        float t = (float)Raylib.GetTime();
+        float t = (float)Now();
         foreach (var e in g.Enemies)
         {
             if (!e.Alive || !e.Marked) continue;
@@ -3970,7 +4025,7 @@ public static class Renderer
     {
         if (!g.MarkMode || g.Selected == null) return;
         var u = g.Selected;
-        float t = (float)Raylib.GetTime();
+        float t = (float)Now();
         foreach (var e in g.Enemies)
         {
             if (!e.Alive || e.Marked) continue;
@@ -3994,7 +4049,7 @@ public static class Renderer
     {
         if (!g.GrappleMode || g.Selected == null) return;
         var u = g.Selected;
-        float t = (float)Raylib.GetTime();
+        float t = (float)Now();
         foreach (var e in g.Enemies)
         {
             if (!e.Alive || Util.ChebyDist(u.X, u.Y, e.X, e.Y) > g.GrappleReachFor(u)) continue;   // JUGGERNAUT: reach 1
@@ -4025,7 +4080,7 @@ public static class Renderer
     // turn). Pulses gently so it reads as a live debuff.
     static void DrawPinIndicators(Game g)
     {
-        float t = (float)Raylib.GetTime();
+        float t = (float)Now();
         foreach (var e in g.Enemies)
         {
             if (!e.Alive || e.Pinned <= 0) continue;
@@ -4050,7 +4105,7 @@ public static class Renderer
     {
         if (!g.PinMode || g.Selected == null) return;
         var u = g.Selected;
-        float t = (float)Raylib.GetTime();
+        float t = (float)Now();
         foreach (var e in g.Enemies)
         {
             if (!e.Alive || Util.TileDist(u.X, u.Y, e.X, e.Y) > Game.PinRange) continue;
@@ -4081,7 +4136,7 @@ public static class Renderer
         Color col = g.AimValid ? Pal.Foe : Pal.TxtDim;
         Raylib.DrawLineEx(a, d, 1.6f, Raylib.Fade(col, 0.55f));
 
-        float t = (float)Raylib.GetTime();
+        float t = (float)Now();
         float ang = t * 90f;
         Raylib.DrawRing(d, 18, 21, ang, ang + 60, 16, col);
         Raylib.DrawRing(d, 18, 21, ang + 120, ang + 180, 16, col);
@@ -4132,7 +4187,7 @@ public static class Renderer
         if (!Combat.InCrossfire(g.Grid, aimer, target)) return;
 
         var d = target.Pos;
-        float t = (float)Raylib.GetTime();
+        float t = (float)Now();
         // gentle travelling dash so the converging fire reads as live/active without flashing.
         float phase = t * 2.2f;
 

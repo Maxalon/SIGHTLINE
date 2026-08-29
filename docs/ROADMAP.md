@@ -1456,12 +1456,18 @@ to the same batch on the branch point.
 - [x] **THE MOVE OVERLAY IS ONE REGION, ONE CONTOUR, AND NOT GOLD** (audit `visual-5`). Dash region
       on demand (hold SHIFT, or hover a tile outside walk range); boundary stitched by marching
       squares into closed loops with a continuous dash phase (**58 edges as 5 strokes = 11.6
-      edges/primitive, against 1.0 before**); `Pal.MoveYellow` (byte-identical to the reserved
+      edges/primitive, against 1.0 before** — a code-structure metric, not a visual result: the
+      strokes land on the same pixels, what it buys is the welded joint and the continuous dash
+      phase); `Pal.MoveYellow` (byte-identical to the reserved
       objective gold) renamed `Pal.MoveDash` and moved onto a value variant of the friendly cyan.
       `SIGHTLINE_MOVESTYLE=0`, `SIGHTLINE_MOVEDASH=1`.
 - [x] **`SIGHTLINE_BOARDTEST`** — the project's only pixel-measuring self-test, wired into
-      `scripts/qa-sweep.sh`. Fails on each pre-wave dial (TOKENSTYLE=0 reproduces the auditor's own
-      166.8 / 219.9; COVERMERGE=0 measures a 10px gutter; MOVESTYLE=0 measures 1.0 edges/stroke).
+      `scripts/qa-sweep.sh`. Its clock is pinned (`Renderer.TimePin`), so it prints one number per
+      run. Fails on each pre-wave dial (TOKENSTYLE=0 reports the dormant pod at the auditor's
+      **219.9** against a selected soldier at **188.1** — the wave's published 166.8 was the other
+      mode of an unpinned animation phase and is superseded; COVERMERGE=0 measures a 10px gutter;
+      MOVESTYLE=0 measures 1.0 edges/stroke; COVERSEED=0 re-rolls 1886px of a surviving cover
+      tile).
 
 **Left open by this wave (see DEVLOG §W4 BOARD "WHAT I DID NOT FIX"):**
 - [ ] **The merged volumes are still axis-aligned rectangles on a square grid**, because the drawn
@@ -1473,6 +1479,44 @@ to the same batch on the branch point.
       four-tile wall carries four identical marks. Kept deliberately: cover tier is a per-tile
       gameplay fact and DESIGN.md §3.H names the glyph as its non-colour channel. Revisit only with
       a read that keeps the tier legible at the far end of a long run.
+
+**W4 BOARD REVIEW FIXES (same branch, base `d122ea5`) — see DEVLOG §W4 BOARD REVIEW FIXES:**
+- [x] **The cover volume's identity is stable under damage** (`Grid.CoverSeed`, assigned once when
+      a cover tile first exists and never re-derived; new cover ADOPTS a volume it touches). The
+      wave keyed the material form and the footprint jitter off a union-find root recomputed from
+      the live grid every frame, so shooting the NW tile off a wall re-rolled the material of every
+      surviving tile. Gate E of `SIGHTLINE_BOARDTEST` asserts a surviving tile is byte-identical
+      after the destruction (0 of 3360 px; `SIGHTLINE_COVERSEED=0` measures 1886).
+- [x] **`SIGHTLINE_BOARDTEST`'s animation clock is pinned** (`Renderer.TimePin`, set to t = 3π/10
+      for the test and restored after). The legacy path was bimodal at 166.8 ×3 / 188.1 ×7 over ten
+      runs of one binary; it now prints one line, ten times out of ten.
+- [x] **Gate A runs in BOTH palettes**, and `SIGHTLINE_CB` is read where a BOARDTEST run can see it.
+      The claim that value rungs stated as target luma survive `Pal.SetColorblind` had zero coverage.
+- [x] **The awareness markers cannot be occluded off the board** — the high slot is clamped to the
+      board's top edge and drops inside the pod's own tile (on a dark lozenge) when a unit stands on
+      the tile above. `SIGHTLINE_MARKERS=1` stages the cases.
+- [x] **Three false "no `IsKeyDown` existed before this" claims corrected** (Renderer.cs, DEVLOG,
+      CLAUDE.md): `Game.Codex.cs` has read four held keys since before the wave. SHIFT is the first
+      key read as a *modifier*, which is the defensible claim.
+- [x] **`bal/w4after.json` / `bal/w4base.json` removed from the index** (added in the same commit
+      that gitignored `bal/`; byte-identical to `docs/measurements/w4-board/`).
+
+**Costs the W4 review accepted as costs, not defects (lead's call; recorded so a later wave can
+price them):**
+- [ ] **A merged volume reads FLATTER than the boxes it replaced.** The reviewers' arithmetic: a
+      two-tile-deep north-south run draws as a 128px top face with a single ~16px wall band at its
+      southern end, so the north half of the run has no "standing up" read left — the very cue the
+      per-tile boxes were paying for with their gutters. The merge is still the right trade (one
+      wall instead of a light/dark ladder), but the volume needs its height back on the deep case.
+      Counter-measures named by the reviewers: a stronger OUTER RIM on the volume, or a north-edge
+      occlusion band that darkens the top face where it meets the tile behind it, applied only when
+      the run is ≥2 tiles deep. Neither costs a hitbox.
+- [ ] **Four identical △ tier glyphs on one slab read as SURFACE PATTERN, not as information.**
+      This is the sharper form of the per-tile-cue item above: at four repeats the eye stops
+      parsing them as a legend and starts parsing them as texture. The reviewers' proposal keeps
+      both properties — draw the tier glyph per VOLUME but at BOTH ENDS of a run, so the far end of
+      a long wall keeps its tier read (the thing the per-tile stamp is protecting) without the
+      middle of the run being tiled with repeats.
 - [ ] **The dash-on-demand SHIFT modifier is undiscoverable** — nothing labels it. The hover
       trigger covers the case that matters and no information is lost, but it wants a FIELD MANUAL
       line.

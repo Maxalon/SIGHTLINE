@@ -146,6 +146,12 @@ public static class Program
             Raylib.SetConfigFlags(ConfigFlags.Msaa4xHint);
             Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "boardtest");
             Raylib.SetExitKey(KeyboardKey.Null);
+            // W4 REVIEW FIX: SIGHTLINE_CB is read ~600 lines below, inside the SHOT path, so it
+            // could never reach a self-test that returns from up here — the wave's claim that the
+            // value rungs survive the colourblind palette had zero coverage. BOARDTEST now asserts
+            // the ladder in BOTH palettes on its own and restores whichever it started in, and
+            // this line makes SIGHTLINE_CB=1 pick which one that is.
+            if (Environment.GetEnvironmentVariable("SIGHTLINE_CB") == "1") Pal.SetColorblind(true);
             LoadGameFonts();
             Display.Init(false);          // post-FX OFF: the rungs are authored values, not bloom
             Raylib.SetTargetFPS(0);
@@ -695,6 +701,7 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_WAKE") == "1") game.DebugWakeAll();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CONTENT") == "1") Mission.DebugContentShowcase(game);
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_ALERT") == "1") game.DebugAlertTiers();
+        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_MARKERS") == "1") game.DebugMarkers();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_PRESSURE") == "1") game.DebugPressure();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_PODSHOT") == "1") game.DebugPodShot();   // FUL-6: pair with SIGHTLINE_MISSION=3
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_WAVEBANNER") == "1") game.DebugWaveTelegraph();   // FUL-4: pair with SIGHTLINE_OBJ=defend

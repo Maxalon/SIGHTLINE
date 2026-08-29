@@ -56,6 +56,28 @@ public partial class Game
             foes[i].Alert = (AlertLevel)(i % 3);   // 0 Unaware, 1 Suspicious, 2 Alert
     }
 
+    /// W4 REVIEW FIX harness hook (screenshot only): the two cases in which the awareness
+    /// marker's ABOVE-THE-TOKEN slot is occluded. Row 0 (the marker would sit behind the top HUD
+    /// bar) and a pod with a unit standing on the tile directly above (the normal case — hostiles
+    /// spawn in pods). A third pod in open mid-field is the control that must keep the high slot.
+    public void DebugMarkers()
+    {
+        var foes = Enemies.Where(e => e.Alive).ToList();
+        if (foes.Count < 3) return;
+        void Seat(Unit u, int x, int y, AlertLevel a)
+        {
+            Grid.Tiles[x, y] = TileType.Floor;
+            u.X = x; u.Y = y; u.Alert = a; u.Bob = 0f; u.Facing = 0f; u.SyncPos();
+        }
+        Seat(foes[0], 5, 0, AlertLevel.Unaware);        // row 0: the HUD-bar case
+        Seat(foes[1], 2, 0, AlertLevel.Suspicious);     // row 0, the other marker
+        Seat(foes[2], 13, 5, AlertLevel.Unaware);       // mid-field: a unit stands on (13,4)
+        var stacker = AlivePlayers().FirstOrDefault(pl => !pl.IsVip) ?? AlivePlayers().FirstOrDefault();
+        if (stacker != null) { Grid.Tiles[13, 4] = TileType.Floor; stacker.X = 13; stacker.Y = 4; stacker.SyncPos(); }
+        if (foes.Count > 3) Seat(foes[3], 3, 5, AlertLevel.Unaware);   // control: clear above
+        Selected = null;
+    }
+
     /// Harness hook (screenshot only): the squad is concealed at mission start anyway;
     /// this just adds a banner so the intent reads in the frame (the CONCEALED pill +
     /// ghost rings are already drawn because SquadConcealed is true).
@@ -757,12 +779,36 @@ public partial class Game
 
     /// Harness hook (screenshot only): chip several high-cover blocks so the cracked
     /// damage state is visible, and fully degrade one to show the rubble (low) state.
+    ///
+    /// W4 REVIEW FIX — it also stamps a clean four-tile HighCover run at (5..8,5) as the visual
+    /// A/B for the cover-volume identity. `SIGHTLINE_COVERKILL=1` destroys that run's NW-most
+    /// tile through the real `Grid.DamageCover` path (High -> rubble -> gone), so two captures
+    /// differ by exactly one tile. Before the fix the volume's identity was the LIVE minimum tile
+    /// index, so losing the end of a wall re-rolled the material FORM and the footprint jitter of
+    /// every surviving tile — a wall turned from crates into rock mid-mission. After it the
+    /// survivors are pixel-identical. Gate E of SIGHTLINE_BOARDTEST asserts the same in-process.
     public void DebugCover()
     {
         int chipped = 0;
         for (int x = 0; x < Grid.W; x++)
             for (int y = 0; y < Grid.H; y++)
                 if (Grid.Tiles[x, y] == TileType.HighCover && chipped < 8) { Grid.DamageCover(x, y, 1); chipped++; }
+
+        const int wx = 5, wy = 5;
+        if (Grid.InBounds(wx + 3, wy + 1))
+        {
+            for (int i = 0; i < 4; i++)
+            {
+                Grid.Tiles[wx + i, wy - 1] = TileType.Floor;    // clear a lane so the run reads alone
+                Grid.Tiles[wx + i, wy + 1] = TileType.Floor;
+                Grid.Tiles[wx + i, wy] = TileType.HighCover;
+                Grid.Height[wx + i, wy] = 0;
+                Grid.SetCoverHp(wx + i, wy);
+            }
+            Grid.ClearCoverSeeds(); Grid.SeedCoverVolumes();   // the wall exists BEFORE it is shot
+            if (Environment.GetEnvironmentVariable("SIGHTLINE_COVERKILL") == "1")
+            { Grid.DamageCover(wx, wy, 99); Grid.DamageCover(wx, wy, 99); }   // High -> rubble -> gone
+        }
     }
 
     /// Harness hook (screenshot only): stamp a barrel cluster near the squad + a live fire patch,
@@ -4963,6 +5009,24 @@ public partial class Game
     //   GATE C (the reserved objective gold): Pal.MoveDash must not share Pal.Accent's RGB bytes.
     //   GATE D (dash on demand): the default interactive frame draws the WALK contour and NOT the
     //           dash region.
+    //   GATE E (the cover volume's identity survives damage): a stamped four-tile HighCover run is
+    //           drawn, its NW-most tile is then destroyed through the real Grid.DamageCover path,
+    //           and the run's FAR tile must come back BYTE-IDENTICAL. Before the W4 review fix the
+    //           volume's identity was the live minimum tile index, so losing the end of a wall
+    //           re-rolled the material form and the footprint jitter of every surviving tile.
+    //
+    // THE CLOCK IS PINNED (Renderer.TimePin) for the whole test. A pixel probe cannot sample an
+    // unpinned animation phase and call the number a result: ten runs of the LEGACY path on one
+    // binary gave a bimodal SELECTED peak of 166.8 (x3) / 188.1 (x7), because the selection halo
+    // pulses 0.55 + 0.40*sin(t*5) on Pal.Accent. The pin is set to the phase where that halo is at
+    // its DIMMEST (sin = -1), which is the hardest moment for the gate that protects the selected
+    // soldier's primacy, and it makes gate E's byte-identity comparison possible at all.
+    //
+    // GATE A runs TWICE: once in the normal palette and once through Pal.SetColorblind(true). The
+    // value rungs are stated as target LUMINANCE rather than as mix fractions precisely so the
+    // ordering survives the colourblind remap (Pal.Foe changes hue AND luma), and until this the
+    // claim had no coverage at all — SIGHTLINE_CB is read far below this hook in Program.cs.
+    //
     // FAILS on the pre-wave tree: run it with SIGHTLINE_TOKENSTYLE=0 (gate A), SIGHTLINE_COVERMERGE=0
     // (gate B) or SIGHTLINE_MOVESTYLE=0 (gate D) and it reports the pre-wave numbers and FAILs.
     public string BoardSelfTest()
@@ -4970,6 +5034,14 @@ public partial class Game
         var sb = new System.Text.StringBuilder();
         var fails = new List<string>();
         NoPersist = true;
+        // Pin the CLOCK as well as the world: 45 wall-clock reads in Renderer.cs drive animation,
+        // and the legacy path's headline number swung 21 luma between runs of one binary because
+        // of it. t = 3*pi/10 puts the selection halo's 5 rad/s pulse at its minimum; that is a
+        // stated constant, not a claim about which element owned the swing. Under it the legacy
+        // path prints ONE number, 188.1, ten runs out of ten, and the shipped path's 201.7 is
+        // phase-independent (measured across seven pins, 0..12s).
+        bool cbWas = Pal.Colorblind;
+        Renderer.TimePin = 3.0 * Math.PI / 10.0;
         // Pin the world. This test reads PIXELS, so it has to be looking at the same board every
         // time or its numbers are not comparable run to run — and the cover-merge gate needs a
         // board that actually contains an adjacent same-type cover pair, which a clock-seeded
@@ -4993,7 +5065,7 @@ public partial class Game
                 foreach (var (sx, sy) in spots) if (Util.ChebyDist(x, y, sx, sy) < 3) clear = false;
                 if (clear) spots.Add((x, y));
             }
-        if (spots.Count < 3) return "BOARDTEST: FAIL (could not stage three clear tiles)";
+        if (spots.Count < 3) { Renderer.TimePin = -1.0; return "BOARDTEST: FAIL (could not stage three clear tiles)"; }
 
         Enemies.Clear();
         Unit Stage(string cls, Team team, AlertLevel a, int x, int y)
@@ -5076,6 +5148,31 @@ public partial class Game
         if (pHero.mean < pFoe.mean + margin) fails.Add($"mean: selected {pHero.mean:0.0} !> hostile {pFoe.mean:0.0}");
         if (pFoe.mean < pPod.mean + margin) fails.Add($"mean: hostile {pFoe.mean:0.0} !> dormant {pPod.mean:0.0}");
 
+        // ---- GATE A, AGAIN, IN THE COLOURBLIND PALETTE ----------------------------------------
+        // The rungs are stated as target LUMINANCE (Renderer.ToLuma) instead of as mix fractions
+        // exactly so the ordering survives Pal.SetColorblind, where Pal.Foe changes hue AND luma
+        // (248,113,113 lum 153 -> 238,138,40 lum 152) and a fixed mix would land somewhere
+        // different in each palette. That was the wave's most load-bearing robustness claim and it
+        // had ZERO self-test coverage: SIGHTLINE_CB is read ~600 lines below this hook's early
+        // return in Program.cs, so it could never reach a BOARDTEST run.
+        Pal.SetColorblind(true);
+        Display.RenderFrame(Draw);
+        Raylib.TakeScreenshot(shotPath);
+        Raylib.UnloadImage(img);
+        img = Raylib.LoadImage(shotPath);
+        var qHero = Patch((int)Cen(hero.X, hero.Y).X, (int)Cen(hero.X, hero.Y).Y, 14);
+        var qFoe = Patch((int)Cen(foe.X, foe.Y).X, (int)Cen(foe.X, foe.Y).Y, 14);
+        var qPod = Patch((int)Cen(pod.X, pod.Y).X, (int)Cen(pod.X, pod.Y).Y, 14);
+        Pal.SetColorblind(cbWas);
+        sb.AppendLine($"BOARDTEST value hierarchy, COLORBLIND palette (SIGHTLINE_CB's remap):");
+        sb.AppendLine($"  SELECTED soldier  mean {qHero.mean,6:0.0}  PEAK {qHero.peak,6:0.0}");
+        sb.AppendLine($"  ACTIVE hostile    mean {qFoe.mean,6:0.0}  PEAK {qFoe.peak,6:0.0}");
+        sb.AppendLine($"  DORMANT pod       mean {qPod.mean,6:0.0}  PEAK {qPod.peak,6:0.0}");
+        if (qHero.peak < qFoe.peak + margin) fails.Add($"CB peak: selected {qHero.peak:0.0} !> hostile {qFoe.peak:0.0}");
+        if (qFoe.peak < qPod.peak + margin) fails.Add($"CB peak: hostile {qFoe.peak:0.0} !> dormant {qPod.peak:0.0}");
+        if (qHero.mean < qFoe.mean + margin) fails.Add($"CB mean: selected {qHero.mean:0.0} !> hostile {qFoe.mean:0.0}");
+        if (qFoe.mean < qPod.mean + margin) fails.Add($"CB mean: hostile {qFoe.mean:0.0} !> dormant {qPod.mean:0.0}");
+
         // ---- GATE B: no floor gutter between two tiles of the same cover volume ----------------
         // Redraw with nothing selected first: the move overlay strokes tile EDGES, and a cyan
         // stroke sitting exactly on the seam under test would mask an unmerged gutter.
@@ -5116,6 +5213,70 @@ public partial class Game
         if (gapPx < 0) fails.Add("could not stamp a two-tile cover volume — the merge gate could not run");
         else if (gapPx > 3) fails.Add($"cover seam shows a {gapPx}px dark trough — the volume is not merged");
 
+        // ---- GATE E: damage must not RE-ROLL the surviving tiles of a volume -------------------
+        // The wave keyed the volume's material FORM and its footprint jitter off a union-find root
+        // recomputed from the LIVE tile set every frame, with the minimum linear index as root.
+        // Cover is destructible, so shooting the north/west-most tile off a wall moved the root and
+        // re-rolled the material for every tile that was still standing — the wall turned from
+        // crates into rock mid-mission, which reads as a rendering glitch and not as damage.
+        // Stamp a four-tile run, photograph its FAR tile, destroy the run's NW-most tile through
+        // the real Grid.DamageCover path (High -> rubble -> gone), photograph the far tile again:
+        // with the clock pinned the two frames differ by exactly one tile, so the far tile must
+        // come back byte-identical. The visual A/B is SIGHTLINE_COVER=1 [+ SIGHTLINE_COVERKILL=1].
+        int wallX = -1, wallY = -1;
+        for (int wy = 1; wy < Grid.H - 3 && wallX < 0; wy++)
+            for (int wx = 3; wx <= Grid.W - 8 && wallX < 0; wx++)
+            {
+                if (wy == cvy) continue;                        // keep clear of gate B's stamped pair
+                bool flat = true;
+                for (int i = 0; i < 4; i++) if (Grid.HeightAt(wx + i, wy) != 0) flat = false;
+                if (flat) { wallX = wx; wallY = wy; }
+            }
+        int morphPx = -1, morphTot = 0;
+        if (wallX >= 0)
+        {
+            for (int i = 0; i < 4; i++)
+            {
+                if (Grid.InBounds(wallX + i, wallY - 1)) Grid.Tiles[wallX + i, wallY - 1] = TileType.Floor;
+                if (Grid.InBounds(wallX + i, wallY + 1)) Grid.Tiles[wallX + i, wallY + 1] = TileType.Floor;
+                Grid.Tiles[wallX + i, wallY] = TileType.HighCover;
+                Grid.SetCoverHp(wallX + i, wallY);
+            }
+            Grid.ClearCoverSeeds(); Grid.SeedCoverVolumes();    // the wall EXISTS before it is shot
+            var farC = Cen(wallX + 3, wallY);
+            int fx0 = (int)farC.X - 28, fy0 = (int)farC.Y - 34, fw = 56, fh = 60;
+            int[] Grab()
+            {
+                var buf = new int[fw * fh];
+                for (int py = 0; py < fh; py++)
+                    for (int px = 0; px < fw; px++)
+                    {
+                        var c = Raylib.GetImageColor(img, fx0 + px, fy0 + py);
+                        buf[py * fw + px] = (c.R << 16) | (c.G << 8) | c.B;
+                    }
+                return buf;
+            }
+            void Reshoot()
+            {
+                Display.RenderFrame(Draw);
+                Raylib.TakeScreenshot(shotPath);
+                Raylib.UnloadImage(img);
+                img = Raylib.LoadImage(shotPath);
+            }
+            Reshoot(); var farBefore = Grab();
+            Grid.DamageCover(wallX, wallY, 99); Grid.DamageCover(wallX, wallY, 99);
+            Reshoot(); var farAfter = Grab();
+            morphTot = farBefore.Length; morphPx = 0;
+            for (int i = 0; i < farBefore.Length; i++) if (farBefore[i] != farAfter[i]) morphPx++;
+            if (Grid.Tiles[wallX, wallY] != TileType.Floor)
+                fails.Add("gate E could not destroy the run's NW tile — the probe did not run");
+        }
+        sb.AppendLine($"BOARDTEST volume identity: stamped run ({wallX},{wallY})..({wallX + 3},{wallY}) HighCover; "
+                      + $"NW tile destroyed; far tile re-render differs in {morphPx} of {morphTot} px "
+                      + "(a re-rolled form/jitter measures thousands)");
+        if (morphPx < 0) fails.Add("could not stamp a four-tile cover run — the volume-identity gate could not run");
+        else if (morphPx > 0) fails.Add($"destroying one tile changed {morphPx}px of a SURVIVING tile — the volume's material re-rolled");
+
         Raylib.UnloadImage(img);
         try { System.IO.File.Delete(shotPath); } catch { }
 
@@ -5135,8 +5296,9 @@ public partial class Game
 
         foreach (var f in fails) sb.AppendLine($"  !! {f}");
         sb.Append(fails.Count == 0
-            ? "BOARDTEST: PASS (selected > hostile > dormant on mean and peak; cover volumes merged; dash on demand, off the objective gold)"
+            ? "BOARDTEST: PASS (selected > hostile > dormant on mean and peak in BOTH palettes; cover volumes merged and their material survives damage; dash on demand, off the objective gold)"
             : $"BOARDTEST: FAIL ({fails.Count} violations)");
+        Renderer.TimePin = -1.0;
         return sb.ToString();
     }
 

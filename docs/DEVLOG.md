@@ -5433,9 +5433,17 @@ opposite in two places ("make the focal element the brightest"; "Neutral/inactiv
 desaturated/dimmed toward the background"), and its acceptance check — *squint; can you instantly
 find the selected unit?* — was failing against the game's own dormant pods.
 
-**Both audit figures reproduce exactly on this tree.** `SIGHTLINE_BOARDTEST` run against the
-pre-wave path (`SIGHTLINE_TOKENSTYLE=0`) prints SELECTED soldier PEAK **166.8**, DORMANT pod PEAK
-**219.9** — the auditor's two numbers, to one decimal, from an independent probe.
+**The dormant pod's figure reproduces exactly on this tree; the soldier's did not reproduce
+STABLY.** `SIGHTLINE_BOARDTEST` run against the pre-wave path (`SIGHTLINE_TOKENSTYLE=0`) prints
+DORMANT pod PEAK **219.9** — the auditor's number, to one decimal, from an independent probe. The
+SELECTED-soldier figure quoted here as 166.8 was **phase-dependent and this write-up was wrong to
+present it as deterministic output**: ten runs of one Release binary gave 166.8 three times and
+188.1 seven times, because the probe sampled an unpinned animation phase (45 wall-clock reads in
+`Renderer.cs` drive animation — CLAUDE.md's "screenshots are not byte-identical" warning is exactly
+this). The clock is now pinned inside the test (`Renderer.TimePin`, set to t = 3π/10), and the
+legacy path prints **188.1**, ten runs out of ten — see §W4 BOARD REVIEW FIXES. Either way the
+inversion the wave exists to fix is unaffected: the dormant pod at 219.9 out-shines the selected
+soldier at both of its modes.
 
 ### 1. Cover is MERGED VOLUMES, not one box per tile (audit `visual-1`)
 
@@ -5570,13 +5578,20 @@ Three things, all in the same 100 lines:
 
 * **Dash on demand.** `canDash` is true whenever `ActionsLeft >= 2`, i.e. at every turn start, so
   the default board always carried two nested regions. The dash region now draws only when asked
-  for: hold **SHIFT** (nothing else in the game reads a modifier — there was not one `IsKeyDown`
-  call in the codebase before this one), or hover a tile that is outside walk range. The dash
+  for: hold **SHIFT** (the first key this game reads as a *modifier* — held to change what another
+  element shows. The original claim here, that "there was not one `IsKeyDown` call in the codebase
+  before this one", is **false**: `src/Game.Codex.cs` lines 80-81 have read held Right/D and Left/A
+  to scroll the field manual since long before this wave), or hover a tile that is outside walk
+  range. The dash
   **action** is untouched: clicking a far tile still dashes. This is the affordance, not the rule.
 * **A closed contour, not per-tile edges.** The boundary is stitched by a marching-squares walk
   over the reachability mask into closed loops, each stroked as one polyline with welded joints
   and a **continuous dash phase**. Measured by the new test on a live frame: **58 boundary edges
   stroked as 5 closed contours = 11.6 edges per primitive**, against the pre-wave path's **1.0**.
+  That ratio is a **code-structure metric, not a visual result** — it says the boundary is now one
+  stitched primitive per loop instead of 58 independent ones, which is what makes a welded joint
+  and a continuous dash phase possible at all. A reviewer compared the two frames and the strokes
+  land on the same pixels; the visible payoff is the dash phase and the joints, not the count.
 * **Off the reserved gold.** `Pal.MoveYellow` was `RGBA(251,191,36)` — byte-identical to
   `Pal.Accent`, the objective gold `docs/DESIGN.md` §3.H reserves for goals and which already
   carries 18 separate jobs in `Renderer.cs` alone. It is **renamed** `Pal.MoveDash` (renamed, not
@@ -5610,10 +5625,15 @@ path, screenshots it and probes:
 
 | dial | what it reports | verdict |
 |---|---|---|
-| `SIGHTLINE_TOKENSTYLE=0` | selected PEAK **166.8**, hostile 158.1, dormant **219.9**; mean 121.6 / 100.3 / 128.4 | FAIL (2 violations) |
+| `SIGHTLINE_TOKENSTYLE=0` | selected PEAK 166.8, hostile 158.1, dormant **219.9**; mean 121.6 / 100.3 / 128.4 | FAIL (2 violations) |
 | `SIGHTLINE_COVERMERGE=0` | seam dark-trough **10px** | FAIL (1 violation) |
 | `SIGHTLINE_MOVESTYLE=0` | **1.0** edges/stroke, dash region shown | FAIL (1 violation) |
 | shipped | 201.7 / 171.0 / 149.3, 1px trough, 11.6 edges/stroke, dash off | **PASS** |
+
+**The TOKENSTYLE=0 row's `selected PEAK 166.8` is the unpinned figure and is superseded** — with
+the clock pinned it is **188.1** and the row FAILs with 5 violations, not 2 (the colourblind repeat
+of gate A, added by the review fixes, contributes three more). The current table is in
+§W4 BOARD REVIEW FIXES.
 
 Wired into `scripts/qa-sweep.sh` (50 self-tests exist; the sweep runs 48 with `--full`).
 
@@ -5699,3 +5719,183 @@ measurable. **Unmeasured on real hardware.**
   `Raylib.GetTime`), and the wave's file scope was `Renderer.cs` + `Pal`, so routing it through
   `Game` was out of bounds. Deterministic under the harness (no input), so it costs nothing
   measurable — but it is a wart.
+
+### W4 BOARD REVIEW FIXES (dev, same branch; base `d122ea5`)
+
+Four independent reviewers plus an adjudicator went over the wave. **The substance held** and none
+of it was touched: the value-hierarchy inversion and its fix reproduce (shipped ladder 201.7 >
+171.0 > 149.3, bit-identical across 14 runs), the authored cover arithmetic was recomputed exactly
+by three reviewers, gameplay-inertness was proven twice over, Release is 0/0 and an independent
+`qa-sweep --full` came back 48/48. Five blockers were raised against it. All five are fixed here,
+plus three cheap evidenced items. Two more findings the lead accepted as **costs, not defects**,
+are recorded in `docs/ROADMAP.md` instead of fixed.
+
+#### 1. The cover volume re-rolled its MATERIAL when you shot part of it away
+
+The wave grouped 4-connected same-type cover with a union-find rebuilt **from the live grid every
+frame**, took the MIN linear index as the group root, and hashed the volume's material `form` and
+its footprint `jx/jy/jRad/jIn/lift` off that root. Cover is destructible — `Grid.DamageCover` walks
+a tile High → Low → Floor during play — so **destroying or downgrading a volume's north/west-most
+tile moved the root and re-rolled the material for every surviving tile.** A wall turned from
+crates into rock mid-mission, reading as a rendering glitch rather than as damage. Grenades,
+barrels and sustained fire all trigger it.
+
+**Reproduced first, on the reviewer's own probe tree** (`/home/user/rev-w4-probe`, a 3-tile
+HighCover run stamped on clean floor, `SIGHTLINE_W4KILL=1` deleting its NW tile): over the two
+surviving tiles, two runs of the *same* configuration differ in **755 px** (the animation noise
+floor — screenshots are not byte-identical), while intact-vs-killed differs in **4387 px**. Read as
+images the survivors go from a masonry WALL face to a WRECK's diagonal shear, and the whole volume
+shifts by the re-rolled jitter.
+
+**The fix: the identity stops being a function of the live tile set.** `Grid.CoverSeed[x,y]` is a
+per-tile volume identity assigned **once**, when a cover tile first exists (`Grid.SeedCoverVolumes`,
+called from `ResetCoverHp` at mission build and idempotently by `DrawCover` so no stamping site has
+to remember), and never re-derived. `DamageCover` clears the seed of a tile it destroys. Two
+adjacent tiles draw as one volume when TYPE, ELEVATION TIER **and** SEED all match, so a High tile
+shot down to rubble splits off from its run instead of dragging a mismatched jitter into it. Cover
+that appears mid-mission **adopts** the identity of a volume it is touching rather than relabelling
+it — a barricade deployed against a wall joins that wall *and takes its material*, and the standing
+wall can never re-roll because something was built next to it. At mission build nothing is seeded,
+so the partition and the roots are exactly what the per-frame union-find used to produce: **the
+pristine board is unchanged** (plain-board capture, same seed, against the pre-fix tree: 17,939
+differing px over the board region against a 16,052-px same-tree animation noise floor, i.e. inside
+the noise; and BOARDTEST's shipped ladder is the same 201.7 / 171.0 / 149.3 to one decimal).
+
+**Proved by a new gate and by a same-binary A/B.** `SIGHTLINE_BOARDTEST` gate E stamps a four-tile
+HighCover run, photographs its FAR tile, destroys the run's NW tile through the real
+`Grid.DamageCover` path (High → rubble → gone) and photographs it again. With the clock pinned the
+two frames differ by exactly one tile, so the far tile must come back byte-identical:
+
+| | far-tile pixels changed by destroying the NW tile |
+|---|---|
+| shipped (stable seed) | **0 of 3360** |
+| `SIGHTLINE_COVERSEED=0` (the pre-fix identity, re-derived every frame) | **1886 of 3360** |
+
+`SIGHTLINE_COVERSEED=0` is a real negative control and not a mock: it clears the seeds each frame
+before reseeding, which *is* "min linear index over the live 4-connected run". The visual A/B on one
+binary is `SIGHTLINE_COVER=1 [+ SIGHTLINE_COVERKILL=1]` (a clean four-tile run at (5..8,5), the NW
+tile destroyed): with `COVERSEED=0` the survivors gain a WRECK shear after the kill, with the
+shipped path they are the same masonry as before it. Both frames read and judged.
+
+#### 2. BOARDTEST was non-deterministic on the legacy path — the clock is now pinned
+
+Ten runs of `SIGHTLINE_TOKENSTYLE=0 SIGHTLINE_BOARDTEST=1` on ONE Release binary gave a SELECTED
+peak of 166.8 ×3 and 188.1 ×7. A pixel probe cannot sample an unpinned animation phase and call the
+number a result. `Renderer` now routes every wall-clock read through `Now()`, which returns
+`Raylib.GetTime()` unless the harness-only `Renderer.TimePin` is set; `BoardSelfTest` pins it to
+**t = 3π/10** for the whole test and restores −1 on the way out. That is a stated constant, not a
+claim about which of the file's 45 clock reads owned the swing — the selection halo's
+`0.55 + 0.40·sin(t·5)` on `Pal.Accent` is *a* candidate, and pinning it to its minimum did not
+produce the dimmer mode, so the diagnosis is explicitly not claimed. Ten runs, one line:
+
+```
+  SELECTED soldier  mean  121.6  PEAK  188.1
+  ACTIVE hostile    mean  101.2  PEAK  170.3
+  DORMANT pod       mean  131.7  PEAK  219.9      <- x10, identical
+```
+
+The shipped path was never flaky (14/14 in review) and is also **phase-independent**: 201.7 at
+seven pins swept over 0–12 s. Gate B (the cover seam) is phase-independent too, measured over the
+same sweep.
+
+#### 3. The doc over-claim that followed from it
+
+`docs/DEVLOG.md` presented 166.8/158.1 as deterministic output ("Both audit figures reproduce
+exactly on this tree"); they reproduce about 30% of the time. The claim is corrected in place, in
+both the thesis section and the dial table, and in `docs/ROADMAP.md`. The pinned figure is
+**188.1**, and it is quoted as the pinned figure — *not* swapped in silently, because 188.1 was
+equally unstable before the pin. `src/Game.Harness.cs`'s header comment carries the same correction.
+The dormant pod's **219.9** was never in doubt and is unchanged, so the inversion the wave exists to
+fix is untouched by any of this.
+
+#### 4. The dormant pod's `?` was occluded — the wave's own compensating cue
+
+The wave moved the glyph from `p.Y-13` to `p.Y-44`. With `Cfg.OriginY=40` and `Cfg.Tile=64` a row-0
+token centre is y=72, putting a 23px glyph at y 28..51 behind a top HUD bar whose lower edge
+measures ~y45 — **entirely gone**. It was also swallowed whenever a unit stood on the tile above,
+which is the NORMAL case since hostiles spawn in pods. `Renderer.MarkerY` now clamps the high slot
+to the board's top edge and drops it to `p.Y-26` (inside the pod's OWN tile, where a neighbour's
+token cannot paint over it) when the tile above is occupied; in either fallback the glyph is seated
+on a dark lozenge, because in a fallback slot it lands on the token's own ring instead of on clean
+floor and a 1px drop shadow is not enough separation there. The clean high slot is unchanged and
+keeps its light, unbacked look. The same treatment is applied to the SUSPICIOUS `!`, which had the
+identical bug and pre-dates the wave (it has sat at `p.Y-42` since before `main`).
+
+New harness hook `SIGHTLINE_MARKERS=1` stages exactly the three cases. Screenshots re-shot and read:
+a row-0 dormant pod's `?` is fully on the board and legible; a row-0 suspicious `!` likewise; a pod
+with a soldier on the tile above shows the `?` on its lozenge at the top of its own token (it was
+invisible before). **Residual, stated plainly:** in the stacked case the soldier's ground arc paints
+over the top of the lozenge, so the glyph reads at maybe 70% — better than gone, not as good as the
+clean slot.
+
+#### 5. A false factual claim in three places
+
+`src/Renderer.cs` asserted "no `IsKeyDown` call existed anywhere before this one"; the DEVLOG
+repeated it; and `CLAUDE.md` — the continuity contract — said SHIFT is "the only held modifier in
+the game". `git show main:src/Game.Codex.cs` lines 80–81 hold **four** pre-existing
+`Raylib.IsKeyDown` calls (Right/D, Left/A, scrolling the field manual). All three are corrected. The
+defensible claim, and the one now written, is that SHIFT is the first key read as a **modifier** —
+held to change what another element shows — not the first key read while held.
+
+#### Also taken (cheap, evidenced)
+
+* **`SIGHTLINE_CB=1` had no effect on BOARDTEST** — the BOARDTEST block returns from `Program.cs`
+  ~line 160 while `Pal.SetColorblind` is applied ~line 770, so the wave's most load-bearing
+  robustness claim (rungs stated as target luma survive the colourblind palette) had **zero**
+  self-test coverage. The env read now also happens inside the BOARDTEST block, and more to the
+  point **gate A runs twice, in both palettes**, and asserts the ladder in each:
+
+  | | SELECTED | ACTIVE | DORMANT |
+  |---|---|---|---|
+  | normal palette | 201.7 | 171.0 | 149.3 |
+  | colourblind palette | 201.7 | **171.5** | 149.3 |
+
+  A reviewer had verified this by hand; it is now a gate. On the legacy path the colourblind repeat
+  adds three more violations, which is why `TOKENSTYLE=0` now reports FAIL (5) where the wave's
+  table says FAIL (2).
+* **`bal/w4after.json` and `bal/w4base.json` are out of the index.** Commit `d3cc4d8` added `bal/`
+  to `.gitignore` while committing both files in the same commit — 2064 lines byte-identical to the
+  canonical copies under `docs/measurements/w4-board/` (verified by diff before removing).
+* **The "11.6 edges/primitive vs 1.0" contour figure is relabelled a CODE-STRUCTURE metric**, in
+  both the DEVLOG and the ROADMAP. A reviewer compared the frames and the strokes land on the same
+  pixels; what the ratio buys is the welded joint and the continuous dash phase, not a different
+  silhouette.
+
+#### One number moved that is worth stating
+
+Gate B's stamped-pair top-face median went **85.9 → 90.2** luma (its dark-trough count is 1 either
+way, and `COVERMERGE=0` still measures 10). Cause: the gate stamps its cover pair *after* mission
+build, i.e. after the board is seeded, and one of the pair's neighbours — (13,8) — is pre-existing
+mission cover. Under the adoption rule the stamped pair now joins that standing volume and inherits
+its root (157) instead of rooting on itself (139), so the pair draws with a different hash. This is
+an artefact of a harness that stamps terrain into a live board, not a change to how an authored map
+renders; a pristine arena has nothing pre-seeded and is bit-identical.
+
+#### WHAT I DID NOT FIX
+
+* **The two accepted costs** — merged volumes reading flatter on deep runs, and four identical △
+  tier glyphs reading as surface pattern — are ROADMAP items with the reviewers' proposed
+  counter-measures (a stronger outer rim or a north-edge occlusion band; per-volume glyphs at BOTH
+  ENDS of a run). The lead's call, and I agree with it: both are trades the wave made knowingly, and
+  both want a measurement rather than a reflex.
+* **The stacked-pod `?` is still partly overpainted** by the unit above's ground decorations. Fixing
+  it properly means the marker owning a z-layer above the unit pass, which is a draw-order change to
+  `Game.Draw` this fix's scope does not include.
+* **`DrawMoveOverlay` still reads `Raylib.IsKeyDown` in the draw path.** Unchanged and still a wart;
+  it stays on the ROADMAP.
+* **Nothing was re-balanced and nothing was re-measured on the flywheel.** Every change here is in
+  `Renderer.cs`, `Grid.cs` (a visual-only field plus its seeding), the harness and the docs.
+  `Grid.CoverSeed` is read by exactly one file — `src/Renderer.cs` — takes zero draws from
+  `Util.Rng`, and is derived from the tile layout alone; `SIGHTLINE_PAIRTEST` is byte-identical.
+
+#### VERIFICATION
+
+* Release **0 warn / 0 err**.
+* `bash scripts/qa-sweep.sh --full`: every self-test **PASS** including BOARDTEST and **PAIRTEST**,
+  COVERAGE GAP block empty.
+* Autoplay ×3: WIN m6 / WIN m6 / LOSE m3 — no exception, no TIMEOUT.
+* `SIGHTLINE_TOKENSTYLE=0 SIGHTLINE_BOARDTEST=1` ×10 on one Release binary: **ten identical lines**.
+* Negative controls all fire: `TOKENSTYLE=0` FAIL (5), `COVERMERGE=0` FAIL (1, 10px trough),
+  `MOVESTYLE=0` FAIL (1, 1.0 edges/stroke), `COVERSEED=0` FAIL (1, 1886px re-roll).
+* Screenshots read and judged: the cover-destruction A/B in both identity modes, a row-0 dormant
+  pod, a row-0 suspicious pod, a stacked pod, and the open-field control.
