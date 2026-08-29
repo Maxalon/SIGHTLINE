@@ -2569,20 +2569,26 @@ public static class Hud
         // `over` (W5): an optional literal to print INSTEAD of the counted number — the difficulty
         // slab needs a word at the RECRUIT rung, because counting up to "-1" would read as a
         // penalty rather than as the name of the setting the run was played on.
+        // P1 — TWO ACCENTS, NOT FIVE. The slab row used to be a rainbow (green / cyan / blue /
+        // red / gold), and DIFFICULTY-in-red read as a WARNING when a high heat is the single
+        // most impressive number on the card. Every slab is now neutral chrome; exactly ONE
+        // carries the card's accent (the headline: how far the run got). The difficulty slab
+        // shows its rung as a row of PIPS instead of a colour, which is what makes it read as
+        // an achievement — and, being shape, it survives SIGHTLINE_CB=1 unchanged.
+        Color neutral = Pal.TxtDim;
         var stats = new System.Collections.Generic.List<(string label, int value, Color col, string over)>
         {
-            ("MISSIONS CLEARED", missionsShown, accent, null),
-            ("INTEL EARNED",     run?.Intel ?? 0, Pal.Accent, null),   // FUL-12 review: spec wording
-            ("CONFIRMED KILLS",  totalKills, Pal.Friend, null),
+            ("MISSIONS CLEARED", missionsShown, accent, null),          // the one highlighted slab
+            ("INTEL EARNED",     run?.Intel ?? 0, neutral, null),       // FUL-12 review: spec wording
+            ("CONFIRMED KILLS",  totalKills, neutral, null),
         };
         int endHeat = run?.HeatLevel ?? 0;
         bool endRecruit = Sightline.Heat.IsRecruit(endHeat);
-        stats.Add(("DIFFICULTY", endRecruit ? 0 : endHeat,
-                   endHeat > 0 ? Pal.Foe : endRecruit ? Pal.Good : Pal.TxtDim,
-                   endRecruit ? "RECRUIT" : null));
-        // FUL-12: the SALVAGE bounty gets a real slab (gold — it's the persistent currency). Only
-        // when the meta path actually banked some, so harness/autoplay cards keep their 4-slab row.
-        if (g.EndSalvage > 0) stats.Add(("SALVAGE BANKED", g.EndSalvage, Pal.VipGold, null));
+        stats.Add(("DIFFICULTY", endRecruit ? 0 : endHeat, neutral, endRecruit ? "RECRUIT" : null));
+        // FUL-12: the SALVAGE bounty gets a real slab. Only when the meta path actually banked
+        // some, so harness/autoplay cards keep their 4-slab row.
+        if (g.EndSalvage > 0) stats.Add(("SALVAGE BANKED", g.EndSalvage, neutral, null));
+        int heatSlab = 3;   // index of the DIFFICULTY slab, for the pip strip below
 
         float statsIn = PanelAnim("endStats", 0.3f, 0.45f);
         int n = stats.Count;
@@ -2598,17 +2604,33 @@ public static class Hud
             if (in_ <= 0f) continue;
             var slab = new Rectangle(sx0 + i * (slabW + gap), sy + (int)((1f - Util.EaseOutQuad(in_)) * 16f), slabW, 82);
             float a = Util.EaseOutQuad(in_);
+            bool lead = i == 0;   // P1: only the headline slab wears the accent
             Raylib.DrawRectangleRounded(slab, 0.10f, 8, Raylib.Fade(Pal.Panel, 0.92f * a));
-            Raylib.DrawRectangleLinesEx(slab, 1.4f, Raylib.Fade(stats[i].col, 0.55f * a));
-            Raylib.DrawRectangle((int)slab.X, (int)slab.Y, 3, (int)slab.Height, Raylib.Fade(stats[i].col, a));
-            // big counted number
+            Raylib.DrawRectangleLinesEx(slab, lead ? 1.6f : 1.2f, Raylib.Fade(stats[i].col, (lead ? 0.60f : 0.32f) * a));
+            Raylib.DrawRectangle((int)slab.X, (int)slab.Y, lead ? 4 : 2, (int)slab.Height, Raylib.Fade(stats[i].col, (lead ? 1f : 0.55f) * a));
+            // big counted number — accent on the headline, plain Txt everywhere else
             int shownVal = (int)MathF.Round(stats[i].value * countF);
             string num = stats[i].over ?? shownVal.ToString();
             float numSz = stats[i].over != null ? 26f : 42f;   // a word needs to fit the slab a numeral was sized for
             Vector2 nmz = Cfg.Measure(num, numSz, 1f);
-            Cfg.Text(num, new Vector2(slab.X + slab.Width / 2 - nmz.X / 2, slab.Y + (numSz < 42f ? 24 : 14)), numSz, 1f, Raylib.Fade(stats[i].col, a));
+            Cfg.Text(num, new Vector2(slab.X + slab.Width / 2 - nmz.X / 2, slab.Y + (numSz < 42f ? 24 : 14)), numSz, 1f,
+                     Raylib.Fade(lead ? stats[i].col : Pal.Txt, a));
+            // DIFFICULTY: a rung-pip strip under the numeral. Filled pips = the heat that was
+            // actually played; hollow pips = the rungs above it. Shape, not hue.
+            if (i == heatSlab && !endRecruit && endHeat > 0)
+            {
+                const int maxPip = 8;
+                float pw = 9f, py = slab.Y + 55;
+                float px0 = slab.X + slab.Width / 2f - (maxPip * pw - 3f) / 2f;
+                for (int k = 0; k < maxPip; k++)
+                {
+                    var pr = new Rectangle(px0 + k * pw, py, pw - 3f, 4f);
+                    if (k < endHeat) Raylib.DrawRectangleRec(pr, Raylib.Fade(accent, 0.9f * a));
+                    else Raylib.DrawRectangleLinesEx(pr, 1f, Raylib.Fade(Pal.TxtDim, 0.5f * a));
+                }
+            }
             Vector2 lz = Cfg.Measure(stats[i].label, 12, 1f);
-            Cfg.Text(stats[i].label, new Vector2(slab.X + slab.Width / 2 - lz.X / 2, slab.Y + 62), 12, 1f, Raylib.Fade(Pal.TxtDim, a));
+            Cfg.Text(stats[i].label, new Vector2(slab.X + slab.Width / 2 - lz.X / 2, slab.Y + 64), 12, 1f, Raylib.Fade(Pal.TxtDim, a));
         }
 
         // ---- two-column dossier: SURVIVING SQUAD (+ MVP) | KIA MEMORIAL ------------------
@@ -2783,28 +2805,22 @@ public static class Hud
         Cfg.TitleText(title, new Vector2(tx, ty), tfs, 4f, Raylib.Fade(Pal.Txt, titleIn));
         DrawCornerBrackets(new Rectangle(tx - 20, ty + 6, tm.X + 40, tfs - 8), Raylib.Fade(Pal.Accent, 0.5f * titleIn), 16f);
 
-        // SALVAGE bank + lifetime stat strip, centred under the title
+        // SALVAGE bank, centred under the title. P1: the cramped 13px lifetime run-on that used
+        // to sit here has moved DOWN into the CAREER footer as real stat cells — see below.
         string salv = $"SALVAGE  {p.Salvage}";
         Vector2 svm = Cfg.Measure(salv, 26, 1f);
         Cfg.Text(salv, new Vector2(W / 2f - svm.X / 2f, ty + tfs + 6), 26, 1f, Raylib.Fade(Pal.VipGold, titleIn));
-        // W9: the DAILY STREAK joins the lifetime strip (gold while alive so the habit loop reads)
-        string life = $"RUNS {p.Runs}   ·   WINS {p.Wins}   ·   BEST MISSION {p.BestMissions}   ·   BEST WAVE {p.BestWave}   ·   VETERANS {p.Veterans}/{SaveGame.MaxVeterans}   ·   DAILY STREAK {p.DailyStreak}";
-        Vector2 lfm = Cfg.Measure(life, 13, 1f);
-        Cfg.Text(life, new Vector2(W / 2f - lfm.X / 2f, ty + tfs + 40), 13, 1f, Raylib.Fade(Pal.TxtDim, titleIn));
-        if (p.DailyStreak > 0)
-        {
-            // re-draw just the streak segment in gold over the dim strip (right-aligned tail)
-            string tail = $"DAILY STREAK {p.DailyStreak}";
-            Vector2 tlm = Cfg.Measure(tail, 13, 1f);
-            Cfg.Text(tail, new Vector2(W / 2f - lfm.X / 2f + lfm.X - tlm.X, ty + tfs + 40), 13, 1f, Raylib.Fade(Pal.VipGold, titleIn));
-        }
 
         // ---- three-column layout: ACHIEVEMENTS | HALL OF FAME | UNLOCKS ----
-        int top = (int)(ty + tfs + 66);
+        // P1: the three content-sized panels used to end at three different heights above a
+        // ~25%-tall empty band with BACK floating alone in it. The band is now a full-width
+        // CAREER footer, and the columns are capped so they always clear it.
+        int top = (int)(ty + tfs + 52);
         int colGap = 24;
         int marginX = 60;
         int colW = (W - marginX * 2 - colGap * 2) / 3;
-        int colH = Cfg.ScreenH - top - 92;
+        const int footerY = 618, footerH = 82;
+        int colH = footerY - top - 16;
         int c0 = marginX, c1 = marginX + colW + colGap, c2 = marginX + (colW + colGap) * 2;
 
         // FUL-12: each panel is sized to its CONTENT (capped at the column height) — three equal
@@ -2822,9 +2838,46 @@ public static class Hud
         DrawWarHallOfFame(p, c1, top, colW, hofH, PanelAnim("warHof", 0.4f, 0.25f));
         DrawWarUnlocks(g, p, c2, top, colW, unlH, PanelAnim("warUnl", 0.4f, 0.35f));
 
-        // ---- BACK button (centred, bottom) ----
+        // ---- CAREER footer (P1) — the lifetime numbers as a full-width row of cells ----
+        // This band is what closes the L-shaped void: it grounds the three columns on a common
+        // baseline and gives BACK something to sit under instead of floating in empty space.
+        float footIn = PanelAnim("warCareer", 0.4f, 0.45f);
+        if (footIn > 0f)
+        {
+            var foot = new Rectangle(marginX, footerY, W - marginX * 2, footerH);
+            DrawWarPanel(foot, "CAREER", Pal.VipGold, footIn);
+            (string lbl, string val, bool hot)[] cells =
+            {
+                ("RUNS",         p.Runs.ToString(), false),
+                ("WINS",         p.Wins.ToString(), false),
+                ("WIN RATE",     p.Runs > 0 ? $"{(int)MathF.Round(100f * p.Wins / p.Runs)}%" : "-", false),
+                ("BEST MISSION", p.BestMissions.ToString(), false),
+                ("BEST WAVE",    p.BestWave.ToString(), false),
+                ("VETERANS",     $"{p.Veterans}/{SaveGame.MaxVeterans}", false),
+                ("DAILY STREAK", p.DailyStreak.ToString(), p.DailyStreak > 0),
+            };
+            float cellW = (foot.Width - 28) / cells.Length;
+            for (int i = 0; i < cells.Length; i++)
+            {
+                float ccx = foot.X + 14 + cellW * (i + 0.5f);
+                if (i > 0)
+                    Raylib.DrawRectangle((int)(foot.X + 14 + cellW * i), (int)foot.Y + 34, 1, 34,
+                                         Raylib.Fade(Pal.PanelBd, footIn));
+                Color vc = cells[i].hot ? Pal.VipGold : Pal.Txt;
+                int vfs = FitSize(cells[i].val, 26, 16, (int)cellW - 10);
+                float vw = Cfg.Measure(cells[i].val, vfs, 1f).X;
+                Cfg.Text(cells[i].val, new Vector2((int)(ccx - vw / 2f), (int)foot.Y + 32), vfs, 1f,
+                         Raylib.Fade(vc, footIn));
+                int lfs = FitSize(cells[i].lbl, 11, 8, (int)cellW - 6);
+                float lwx = Cfg.Measure(cells[i].lbl, lfs, 1f).X;
+                Cfg.Text(cells[i].lbl, new Vector2((int)(ccx - lwx / 2f), (int)foot.Y + 62), lfs, 1f,
+                         Raylib.Fade(Pal.TxtDim, footIn));
+            }
+        }
+
+        // ---- BACK button (centred, under the footer) ----
         float backIn = PanelAnim("warBack", 0.3f, 0.5f);
-        int by = Cfg.ScreenH - 66;
+        int by = footerY + footerH + 18;
         WarRoomBack = new Rectangle(W / 2 - 120, by, 240, 44);
         DrawOverlayButton(WarRoomBack, "BACK", Pal.Friend, "Esc", backIn);
     }
@@ -3389,6 +3442,67 @@ public static class Hud
     //  Illegal choices (unaffordable / roster full) are greyed out + non-clickable. Rects are
     //  cached in EventBtns; Game.HandleEventClick hit-tests them.
     // ============================================================================
+    // ── P1 — EVENT RISK TIERS ────────────────────────────────────────────────────────────
+    // Derived purely from the outcomes a choice already carries, so the catalogue stays data
+    // and nothing new is persisted. Three tiers, ranked by how badly the arm can bite:
+    //   GAMBLE  a seeded roll, or a permanent cost (scar / wound / heat / losing a soldier)
+    //   COST    a certain price paid for a certain reward (intel spent, resource traded)
+    //   CLEAR   a pure gain, or walking away with nothing
+    const int RiskClear = 0, RiskCost = 1, RiskGamble = 2;
+
+    static int OutcomeRisk(EventOutcome o)
+    {
+        if (o.ChancePct > 0 && o.ChancePct < 100) return RiskGamble;
+        switch (o.Kind)
+        {
+            case EventOutcomeKind.GambleIntel:
+            case EventOutcomeKind.GrantScar:
+            case EventOutcomeKind.WoundSoldier:
+            case EventOutcomeKind.AddHeat:
+            case EventOutcomeKind.ReleaseSoldier:
+                return RiskGamble;
+            case EventOutcomeKind.Intel:
+                return o.Amount < 0 ? RiskCost : RiskClear;
+            default:
+                return o.Cost > 0 ? RiskCost : RiskClear;
+        }
+    }
+
+    static (int tier, string label, Color col) ChoiceRisk(EventChoice ch)
+    {
+        int t = OutcomeRisk(ch.Outcome);
+        if (ch.HasSecond) t = Math.Max(t, OutcomeRisk(ch.Outcome2));
+        if (ch.HasThird)  t = Math.Max(t, OutcomeRisk(ch.Outcome3));
+        bool walk = !ch.HasSecond && !ch.HasThird && ch.Outcome.Kind == EventOutcomeKind.Nothing;
+        return t switch
+        {
+            RiskGamble => (RiskGamble, "GAMBLE", Pal.Foe),
+            RiskCost   => (RiskCost,   "COST",   Pal.Suspect),
+            _          => (RiskClear,  walk ? "WALK AWAY" : "CLEAR", walk ? Pal.TxtDim : Pal.Good),
+        };
+    }
+
+    /// The risk mark: a ring plus one interior primitive, in the codex's glyph language.
+    /// CLEAR = a solid pip (nothing in the way), COST = a minus bar (you pay), GAMBLE = a
+    /// split cross (it can go either way).
+    static void DrawRiskIcon(int tier, float cx, float cy, Color c)
+    {
+        Raylib.DrawCircleLinesV(new Vector2(cx, cy), 9f, c);
+        switch (tier)
+        {
+            case RiskGamble:
+                Raylib.DrawLineEx(new Vector2(cx - 4.5f, cy - 4.5f), new Vector2(cx + 4.5f, cy + 4.5f), 2f, c);
+                Raylib.DrawLineEx(new Vector2(cx + 4.5f, cy - 4.5f), new Vector2(cx - 4.5f, cy + 4.5f), 2f, c);
+                break;
+            case RiskCost:
+                Raylib.DrawLineEx(new Vector2(cx - 5f, cy), new Vector2(cx + 5f, cy), 2.2f, c);
+                break;
+            default:
+                Raylib.DrawCircleV(new Vector2(cx, cy), 3.2f, c);
+                break;
+        }
+    }
+
     static void DrawEventScreen(Game g)
     {
         for (int i = 0; i < EventBtns.Length; i++) EventBtns[i] = new Rectangle(0, 0, 0, 0);
@@ -3403,7 +3517,10 @@ public static class Hud
         // panel sizes to fit the (wrapped) flavor + the choice stack
         var flavorLines = WrapText(ev.Flavor, 15, w - 64);
         int flavorH = flavorLines.Count * 21;
-        int h = 150 + flavorH + n * (btnH + btnGap) + 30;
+        // P1: the card used to reserve ~90px of dead slab under the last option (the old
+        // constant was 150 + ... + 30, against a real content bottom of 98 + ...). Sized to a
+        // 22px bottom pad now, so the card ends where the choices do.
+        int h = 120 + flavorH + n * (btnH + btnGap);
         int x = Cfg.ScreenW / 2 - w / 2;
         int y = Cfg.ScreenH / 2 - h / 2;
         y -= (int)((1f - Util.EaseOutQuad(PanelAnim("event", 0.15f))) * 16f);
@@ -3436,16 +3553,30 @@ public static class Hud
             var r = new Rectangle(x + 32, by, w - 64, btnH);
             EventBtns[i] = r;
             bool hover = legal && Raylib.CheckCollisionPointRec(mouse, r);
+            // P1 RISK TELEGRAPH: three identical grey slabs told the player nothing about which
+            // arm was the gamble. The tier is derived here from the choice's own outcomes (no
+            // change to Events.cs, no new persisted field) and is signalled THREE ways — a left
+            // risk rail, a drawn mark, and a word — so it survives SIGHTLINE_CB=1 on shape alone.
+            var (tier, tierLbl, tierCol) = ChoiceRisk(ch);
             Color fill = !legal ? Pal.RGBA(18, 22, 28) : (hover ? Pal.RGBA(30, 40, 52) : Pal.RGBA(20, 28, 38));
-            Color bd = !legal ? Pal.PanelBd : (hover ? Pal.Suspect : Pal.PanelBd);
+            Color bd = !legal ? Pal.PanelBd : (hover ? tierCol : Pal.PanelBd);
             Raylib.DrawRectangleRounded(r, 0.10f, 6, fill);
             Raylib.DrawRectangleLinesEx(r, hover ? 2.2f : 1.4f, bd);
+            Color railCol = legal ? tierCol : Pal.RGBA(60, 66, 74);
+            Raylib.DrawRectangle((int)r.X, (int)r.Y + 6, 3, (int)r.Height - 12, railCol);
+            DrawRiskIcon(tier, r.X + 28, r.Y + r.Height / 2f, legal ? tierCol : Pal.RGBA(70, 76, 84));
             Color lblCol = !legal ? Pal.TxtDim : (hover ? Pal.Suspect : Pal.Txt);
-            Cfg.Text(ch.Label, new Vector2((int)r.X + 16, (int)r.Y + 12), 18, 1f, lblCol);
+            // the tier word is right-aligned on the label row; the label gets the space that is left
+            int tw = (int)Cfg.Measure(tierLbl, 11, 1f).X;
+            Cfg.Text(tierLbl, new Vector2((int)(r.X + r.Width - tw - 14), (int)r.Y + 14), 11, 1f,
+                     legal ? tierCol : Pal.TxtDim);
+            int labMaxW = (int)r.Width - 48 - tw - 24;
+            int labFs = FitSize(ch.Label, 18, 14, labMaxW);
+            Cfg.Text(Clip(ch.Label, labFs, labMaxW), new Vector2((int)r.X + 48, (int)r.Y + 12 + (18 - labFs) / 2), labFs, 1f, lblCol);
             // FUL-10 review: the old fixed reason "(need more intel / roster full)" LIED for the
             // new gates (no scarred soldier / lone roster) — keep it honest and generic.
             string prev = legal ? ch.Preview : ch.Preview + "   (requirements not met)";
-            Cfg.Text(prev, new Vector2((int)r.X + 16, (int)r.Y + 38), 13, 1f, legal ? Pal.TxtDim : Pal.Foe);
+            Cfg.Text(Clip(prev, 13, (int)r.Width - 62), new Vector2((int)r.X + 48, (int)r.Y + 38), 13, 1f, legal ? Pal.TxtDim : Pal.Foe);
             by += btnH + btnGap;
         }
     }
@@ -3854,22 +3985,26 @@ public static class Hud
             // so the map's coding reads without hovering every node — and survives SIGHTLINE_CB=1).
             // FUL-12: S/START and */BATTLE join it — they were the only two glyphs on the map the
             // legend refused to name (the commonest node reading as "unexplained asterisk").
-            (string gly, string lbl, Color col)[] legend =
+            // P1: the legend draws the map's REAL markers (a filled disc carrying the same
+            // DrawNodeIcon geometry), not stand-in letters — so the key and the territory match.
+            (NodeKind k, string lbl)[] legend =
             {
-                ("S", "START", Pal.TxtDim), ("*", "BATTLE", Pal.Friend),
-                ("+", "SUPPLY", Pal.Good), ("!", "ELITE", Pal.Elite), ("?", "EVENT", Pal.Suspect), ("X", "BOSS", Pal.Foe),
+                (NodeKind.Start, "START"), (NodeKind.Combat, "BATTLE"), (NodeKind.Supply, "SUPPLY"),
+                (NodeKind.Elite, "ELITE"), (NodeKind.Event, "EVENT"), (NodeKind.Boss, "BOSS"),
             };
+            const float legR = 7f;
             float lw = 0f;
-            foreach (var it in legend)
-                lw += Cfg.Measure(it.gly, 12, 1f).X + 5 + Cfg.Measure(it.lbl, 12, 1f).X + 22;
-            float lx = x + w / 2f - (lw - 22) / 2f;
+            foreach (var it in legend) lw += legR * 2 + 6 + Cfg.Measure(it.lbl, 12, 1f).X + 20;
+            float lx = x + w / 2f - (lw - 20) / 2f;
             int ly = mapTop + 26 + mapH + 5;
             foreach (var it in legend)
             {
-                Cfg.Text(it.gly, new Vector2((int)lx, ly), 12, 1f, it.col);
-                lx += Cfg.Measure(it.gly, 12, 1f).X + 5;
+                var lc = new Vector2(lx + legR, ly + 7);
+                Raylib.DrawCircleV(lc, legR, NodeColor(it.k));
+                DrawNodeIcon(it.k, lc.X, lc.Y, legR, Pal.RGBA(8, 12, 18));
+                lx += legR * 2 + 6;
                 Cfg.Text(it.lbl, new Vector2((int)lx, ly + 1), 12, 1f, Pal.TxtDim);
-                lx += Cfg.Measure(it.lbl, 12, 1f).X + 22;
+                lx += Cfg.Measure(it.lbl, 12, 1f).X + 20;
             }
         }
         else  // fallback: legacy deployment cards (only if the map is unavailable)
@@ -3895,15 +4030,101 @@ public static class Hud
         _ => Pal.Friend,
     };
 
-    static string NodeGlyph(NodeKind k) => k switch
-    {
-        NodeKind.Start => "S", NodeKind.Elite => "!", NodeKind.Supply => "+", NodeKind.Boss => "X",
-        NodeKind.Event => "?", _ => "*",
-    };
 
     /// Draw the branching campaign DAG inside `region`: columns left-to-right (one per
     /// mission), edges as lines, the current position ringed, the reachable next nodes
     /// glowing + clickable (rects cached in NodeBtns), everything else dimmed.
+    // ── PROGRAM RESONANCE P1 — a THEATRE OF OPERATIONS, not a debug graph ────────────────
+    // Three complaints, three fixes, all in Raylib primitives (zero committed bytes):
+    //   1. flat circles with single letters -> ring markers carrying DRAWN geometry, in the
+    //      same vocabulary as the codex's enemy glyphs (a ring plus one interior primitive).
+    //      Shape alone identifies the kind, so the map still reads under SIGHTLINE_CB=1.
+    //   2. 1px grey lines -> a dark casing + a coloured core, and a direction chevron on the
+    //      routes you can actually take.
+    //   3. an empty white field -> faint contour bands + per-region column tinting, so C1's
+    //      region names sit on ground that looks like ground.
+
+    /// A stable 0..1 hash. The terrain must be identical every frame and must round-trip with
+    /// the map, so it is derived from MapSeed by pure arithmetic — no Random allocation, no RNG
+    /// draws (which would desync the seeded campaign), and nothing time-varying.
+    static float MapHash(int a, int b)
+    {
+        int h = a * 374761393 + b * 668265263;
+        h = (h ^ (h >> 13)) * 1274126177;
+        return ((h ^ (h >> 16)) & 0x7fffffff) / 2147483647f;
+    }
+
+    /// Ground under the route graph: alternating region bands, hairline column dividers and a
+    /// few seeded contour lines. Everything here is <= alpha 22, so it never competes with the
+    /// nodes; it exists so the six named regions read as six PLACES.
+    static void DrawMapTerrain(Rectangle f, int seed, int cols)
+    {
+        float colW = f.Width / cols;
+        for (int c = 0; c < cols; c += 2)
+            Raylib.DrawRectangle((int)(f.X + c * colW), (int)f.Y,
+                                 (int)MathF.Ceiling(colW), (int)f.Height, Pal.RGBA(150, 175, 200, 9));
+        for (int c = 1; c < cols; c++)
+            Raylib.DrawRectangle((int)(f.X + c * colW), (int)f.Y, 1, (int)f.Height, Pal.RGBA(150, 175, 200, 12));
+
+        const int segs = 30;
+        for (int b = 0; b < 4; b++)
+        {
+            float ph   = MapHash(seed, b) * MathF.Tau;
+            float amp  = (3f + MapHash(seed, b + 40) * 6f) * (f.Height / 200f);
+            float freq = 1.2f + MapHash(seed, b + 80) * 1.5f;
+            float baseY = f.Y + f.Height * (0.13f + 0.25f * b);
+            var prev = new Vector2(f.X, baseY + MathF.Sin(ph) * amp);
+            for (int i = 1; i <= segs; i++)
+            {
+                float u = i / (float)segs;
+                var pt = new Vector2(f.X + u * f.Width,
+                                     baseY + MathF.Sin(ph + u * freq * MathF.Tau) * amp);
+                Raylib.DrawLineEx(prev, pt, 1f, Pal.RGBA(120, 152, 180, 26));
+                prev = pt;
+            }
+        }
+    }
+
+    /// The interior mark of a campaign-map node. Drawn dark on the node's bright fill, sized
+    /// off the node radius so it tracks the sized-to-fit map.
+    static void DrawNodeIcon(NodeKind k, float cx, float cy, float rad, Color c)
+    {
+        float u = rad * 0.58f;                 // half-extent of the mark
+        float t = MathF.Max(1.5f, rad * 0.17f);  // stroke weight
+        var C = new Vector2(cx, cy);
+        switch (k)
+        {
+            case NodeKind.Start:   // a launch chevron — "the file opens here"
+                Raylib.DrawLineEx(new Vector2(cx - u * 0.55f, cy - u), new Vector2(cx + u * 0.65f, cy), t, c);
+                Raylib.DrawLineEx(new Vector2(cx - u * 0.55f, cy + u), new Vector2(cx + u * 0.65f, cy), t, c);
+                break;
+            case NodeKind.Supply:  // a depot cross
+                Raylib.DrawLineEx(new Vector2(cx - u, cy), new Vector2(cx + u, cy), t, c);
+                Raylib.DrawLineEx(new Vector2(cx, cy - u), new Vector2(cx, cy + u), t, c);
+                break;
+            case NodeKind.Elite:   // a warning delta with a centre pip
+                Raylib.DrawPolyLinesEx(new Vector2(cx, cy + u * 0.18f), 3, u * 1.15f, -90f, t, c);
+                Raylib.DrawCircleV(new Vector2(cx, cy + u * 0.34f), MathF.Max(1f, t * 0.6f), c);
+                break;
+            case NodeKind.Event:   // a fork — the stem of a route splitting into a choice
+                Raylib.DrawLineEx(new Vector2(cx, cy + u), new Vector2(cx, cy), t, c);
+                Raylib.DrawLineEx(new Vector2(cx, cy), new Vector2(cx - u, cy - u), t, c);
+                Raylib.DrawLineEx(new Vector2(cx, cy), new Vector2(cx + u, cy - u), t, c);
+                break;
+            case NodeKind.Boss:    // a solid diamond inside a ring tick — the heaviest mark on the map
+                Raylib.DrawPoly(C, 4, u * 0.88f, 0f, c);
+                Raylib.DrawPolyLinesEx(C, 4, u * 1.38f, 0f, MathF.Max(1f, t * 0.7f), c);
+                break;
+            default:               // BATTLE: a crosshair (one circle, four ticks)
+                Raylib.DrawCircleLinesV(C, u * 0.52f, c);
+                Raylib.DrawLineEx(new Vector2(cx - u, cy), new Vector2(cx - u * 0.66f, cy), t, c);
+                Raylib.DrawLineEx(new Vector2(cx + u * 0.66f, cy), new Vector2(cx + u, cy), t, c);
+                Raylib.DrawLineEx(new Vector2(cx, cy - u), new Vector2(cx, cy - u * 0.66f), t, c);
+                Raylib.DrawLineEx(new Vector2(cx, cy + u * 0.66f), new Vector2(cx, cy + u), t, c);
+                break;
+        }
+    }
+
     static void DrawCampaignMap(Run run, Rectangle region)
     {
         NodeBtns.Clear();
@@ -3938,14 +4159,28 @@ public static class Hud
             return new Vector2(cx, cy);
         }
 
-        // edges first, so nodes sit on top
+        // P1: ground first — region bands + seeded contours, all at <= alpha 22.
+        DrawMapTerrain(field, run.MapSeed, cols);
+
+        // P1: routes are a DARK CASING plus a coloured core, so a stroke reads as a road cut
+        // through the terrain rather than a 1px hairline lost in it. The route you can take
+        // also gets a direction chevron at its midpoint.
         foreach (var a in run.Map)
             foreach (var nid in a.Next)
             {
                 var b = run.Map[nid];
                 bool live = cur != null && a.Id == cur.Id;        // outgoing from the current node
-                Color ec = live ? Pal.Accent : Pal.RGBA(48, 56, 66);
-                Raylib.DrawLineEx(Center(a), Center(b), live ? 2.2f : 1.3f, ec);
+                Vector2 pa = Center(a), pb = Center(b);
+                Raylib.DrawLineEx(pa, pb, live ? 5.4f : 3.6f, Pal.RGBA(9, 13, 19));
+                Raylib.DrawLineEx(pa, pb, live ? 2.6f : 1.5f, live ? Pal.Accent : Pal.RGBA(66, 78, 92));
+                if (live)
+                {
+                    Vector2 d = Vector2.Normalize(pb - pa);
+                    Vector2 m = (pa + pb) * 0.5f;
+                    var perp = new Vector2(-d.Y, d.X);
+                    Raylib.DrawLineEx(m + d * 3.5f, m - d * 2.5f + perp * 4f, 1.8f, Pal.Accent);
+                    Raylib.DrawLineEx(m + d * 3.5f, m - d * 2.5f - perp * 4f, 1.8f, Pal.Accent);
+                }
             }
 
         var mouse = Raylib.GetMousePosition();
@@ -3954,7 +4189,6 @@ public static class Hud
         // bigger markers than the old fixed 124px strip did (base 10px radius grows to 12px
         // once the region clears 200px; BOSS keeps its +3 emphasis).
         float baseRad = region.Height >= 200 ? 12f : 10f;
-        int glyFs = region.Height >= 200 ? 16 : 14;
         // W9: labels only exist on the 1-2 reachable nodes, so remembering ONE previously
         // drawn label rect is enough to dodge every possible overprint at RowCount <= 3.
         Rectangle prevLabel = default;
@@ -3976,12 +4210,18 @@ public static class Hud
                 Raylib.DrawCircleV(p, rad + (hov ? 6f : 4f), Raylib.Fade(Pal.Accent, hov ? 0.45f : 0.25f));  // glow
                 NodeBtns.Add((n.Id, new Rectangle(p.X - rad - 4, p.Y - rad - 4, rad * 2 + 8, rad * 2 + 8)));
             }
-            Raylib.DrawCircleV(p, rad, fill);
+            Raylib.DrawCircleV(p, rad + 1.6f, Pal.RGBA(9, 13, 19));     // P1: a dark seat, so the
+            Raylib.DrawCircleV(p, rad, fill);                            // marker sits ON the terrain
             Raylib.DrawCircleLinesV(p, rad, isCur ? Pal.Txt : Pal.RGBA(10, 14, 20));
-            if (isCur) Raylib.DrawCircleLinesV(p, rad + 4, Pal.Accent);  // "you are here"
+            if (isCur)                                                   // "you are here": ring + brackets
+            {
+                Raylib.DrawCircleLinesV(p, rad + 4, Pal.Accent);
+                DrawCornerBrackets(new Rectangle(p.X - rad - 7, p.Y - rad - 7, rad * 2 + 14, rad * 2 + 14),
+                                   Raylib.Fade(Pal.Accent, 0.85f), 5f);
+            }
 
-            string gly = NodeGlyph(n.Kind);
-            Cfg.Text(gly, new Vector2((int)(p.X - (int)Cfg.Measure(gly, glyFs, 1f).X / 2), (int)(p.Y - glyFs / 2)), glyFs, 1f, Pal.RGBA(8, 12, 18));
+            // P1: drawn geometry replaces the single letter (see DrawNodeIcon).
+            DrawNodeIcon(n.Kind, p.X, p.Y, rad, Pal.RGBA(8, 12, 18));
 
             if (canPick)  // label the choices with their objective (one clean line, readable size)
             {
@@ -4027,6 +4267,115 @@ public static class Hud
         }
     }
 
+    // ── P1 — REQUISITION / ARMORY ICONS ──────────────────────────────────────────────────
+    // A weapon mod, a consumable and a counter-prep used to be visually identical cards. The
+    // fix is TRANSCRIBED GEOMETRY, not art: every mark below is circles and lines in the same
+    // vocabulary as DrawActionIcon and the codex glyphs, so nothing is committed to the repo
+    // and nothing fights the existing language. Shape is the whole signal — colour is only
+    // inherited from the card's enabled/disabled state, so SIGHTLINE_CB=1 is a no-op here.
+
+    /// Which mark a slate row wears. Item ids come from Game's shop table (0..4 fixed block,
+    /// then the weapon mods, then the dynamic COUNTER-PREP slot).
+    static string ShopIconId(int item)
+    {
+        if (Game.IsModItem(item)) return "mod";
+        if (item == Game.PrepItem) return "prep";
+        return item switch { 0 => "med", 1 => "stim", 2 => "train", 3 => "frag", 4 => "armor", _ => "mod" };
+    }
+
+    static void DrawShopIcon(string id, float cx, float cy, Color c)
+    {
+        switch (id)
+        {
+            case "med":     // aid cross in a ring
+                Raylib.DrawCircleLinesV(new Vector2(cx, cy), 9f, c);
+                Raylib.DrawLineEx(new Vector2(cx - 4.5f, cy), new Vector2(cx + 4.5f, cy), 2.2f, c);
+                Raylib.DrawLineEx(new Vector2(cx, cy - 4.5f), new Vector2(cx, cy + 4.5f), 2.2f, c);
+                break;
+            case "stim":    // an ampoule: a body with a plunger, and an up-tick (a boost)
+                Raylib.DrawRectangleLinesEx(new Rectangle(cx - 3.5f, cy - 4f, 7f, 11f), 1.6f, c);
+                Raylib.DrawLineEx(new Vector2(cx, cy - 9f), new Vector2(cx, cy - 4f), 2f, c);
+                Raylib.DrawLineEx(new Vector2(cx - 3.5f, cy - 6.5f), new Vector2(cx + 3.5f, cy - 6.5f), 1.6f, c);
+                break;
+            case "train":   // a rank chevron pair
+                Raylib.DrawLineEx(new Vector2(cx - 7f, cy + 1f), new Vector2(cx, cy - 5f), 2f, c);
+                Raylib.DrawLineEx(new Vector2(cx + 7f, cy + 1f), new Vector2(cx, cy - 5f), 2f, c);
+                Raylib.DrawLineEx(new Vector2(cx - 7f, cy + 7f), new Vector2(cx, cy + 1f), 2f, c);
+                Raylib.DrawLineEx(new Vector2(cx + 7f, cy + 7f), new Vector2(cx, cy + 1f), 2f, c);
+                break;
+            case "frag":    // the action bar's grenade, verbatim vocabulary: body + fuse + cap
+                Raylib.DrawCircleLines((int)cx, (int)(cy + 2f), 6f, c);
+                Raylib.DrawLineEx(new Vector2(cx, cy - 4f), new Vector2(cx, cy - 8f), 1.8f, c);
+                Raylib.DrawLineEx(new Vector2(cx - 2.5f, cy - 8f), new Vector2(cx + 2.5f, cy - 8f), 1.6f, c);
+                break;
+            case "armor":   // a plated shield
+                DrawShieldOutline(cx, cy, 8f, 2f, c);
+                Raylib.DrawLineEx(new Vector2(cx - 4f, cy - 1f), new Vector2(cx + 4f, cy - 1f), 1.4f, c);
+                break;
+            case "prep":    // a shield with a counter-slash: a prepared, situational block
+                DrawShieldOutline(cx, cy, 8f, 2f, c);
+                Raylib.DrawLineEx(new Vector2(cx - 5f, cy + 4f), new Vector2(cx + 5f, cy - 5f), 1.8f, c);
+                break;
+            default:        // "mod": a crosshair — the weapon-upgrade family
+                Raylib.DrawCircleLinesV(new Vector2(cx, cy), 5.5f, c);
+                Raylib.DrawLineEx(new Vector2(cx - 9f, cy), new Vector2(cx - 6.5f, cy), 2f, c);
+                Raylib.DrawLineEx(new Vector2(cx + 6.5f, cy), new Vector2(cx + 9f, cy), 2f, c);
+                Raylib.DrawLineEx(new Vector2(cx, cy - 9f), new Vector2(cx, cy - 6.5f), 2f, c);
+                Raylib.DrawLineEx(new Vector2(cx, cy + 6.5f), new Vector2(cx, cy + 9f), 2f, c);
+                break;
+        }
+    }
+
+    /// A five-sided shield outline (flat top, tapered point). Its own helper because both the
+    /// armor and counter-prep marks use it.
+    static void DrawShieldOutline(float cx, float cy, float r, float t, Color c)
+    {
+        var tl = new Vector2(cx - r * 0.78f, cy - r * 0.8f);
+        var tr = new Vector2(cx + r * 0.78f, cy - r * 0.8f);
+        var ml = new Vector2(cx - r * 0.78f, cy + r * 0.15f);
+        var mr = new Vector2(cx + r * 0.78f, cy + r * 0.15f);
+        var bt = new Vector2(cx, cy + r * 0.95f);
+        Raylib.DrawLineEx(tl, tr, t, c);
+        Raylib.DrawLineEx(tl, ml, t, c);
+        Raylib.DrawLineEx(tr, mr, t, c);
+        Raylib.DrawLineEx(ml, bt, t, c);
+        Raylib.DrawLineEx(mr, bt, t, c);
+    }
+
+    /// A weapon-kind silhouette for the ARMORY rows: a receiver bar plus the one feature that
+    /// tells the family apart (barrel length, scope, drum, wide muzzle, stubby body).
+    static void DrawWeaponIcon(WeaponKind k, float cx, float cy, Color c)
+    {
+        switch (k)
+        {
+            case WeaponKind.Shotgun:   // short body, wide muzzle
+                Raylib.DrawLineEx(new Vector2(cx - 8f, cy), new Vector2(cx + 5f, cy), 2.6f, c);
+                Raylib.DrawLineEx(new Vector2(cx + 5f, cy - 3.5f), new Vector2(cx + 5f, cy + 3.5f), 2f, c);
+                Raylib.DrawLineEx(new Vector2(cx - 8f, cy), new Vector2(cx - 10f, cy + 4f), 2f, c);
+                break;
+            case WeaponKind.Sniper:    // long barrel + a scope ring above the receiver
+                Raylib.DrawLineEx(new Vector2(cx - 10f, cy + 1f), new Vector2(cx + 10f, cy + 1f), 2.2f, c);
+                Raylib.DrawCircleLinesV(new Vector2(cx + 1f, cy - 4f), 3.2f, c);
+                Raylib.DrawLineEx(new Vector2(cx - 10f, cy + 1f), new Vector2(cx - 12f, cy + 5f), 2f, c);
+                break;
+            case WeaponKind.Lmg:       // receiver + a belt drum under it
+                Raylib.DrawLineEx(new Vector2(cx - 9f, cy - 2f), new Vector2(cx + 10f, cy - 2f), 2.6f, c);
+                Raylib.DrawCircleLinesV(new Vector2(cx - 1f, cy + 4f), 4.2f, c);
+                Raylib.DrawLineEx(new Vector2(cx + 6f, cy - 2f), new Vector2(cx + 6f, cy + 3f), 1.6f, c);
+                break;
+            case WeaponKind.Smg:       // stubby body + a short angled magazine
+                Raylib.DrawLineEx(new Vector2(cx - 6f, cy - 1f), new Vector2(cx + 7f, cy - 1f), 2.6f, c);
+                Raylib.DrawLineEx(new Vector2(cx - 1f, cy - 1f), new Vector2(cx - 3f, cy + 6f), 2.2f, c);
+                Raylib.DrawLineEx(new Vector2(cx - 6f, cy - 1f), new Vector2(cx - 8f, cy + 2f), 2f, c);
+                break;
+            default:                   // RIFLE: receiver + straight magazine + stock
+                Raylib.DrawLineEx(new Vector2(cx - 9f, cy - 1f), new Vector2(cx + 10f, cy - 1f), 2.4f, c);
+                Raylib.DrawLineEx(new Vector2(cx + 1f, cy - 1f), new Vector2(cx + 1f, cy + 6f), 2.2f, c);
+                Raylib.DrawLineEx(new Vector2(cx - 9f, cy - 1f), new Vector2(cx - 11f, cy + 3f), 2f, c);
+                break;
+        }
+    }
+
     static void DrawRequisition(Game g)
     {
         var run = g.RunState;
@@ -4052,7 +4401,10 @@ public static class Hud
         // The armory sub-screen is a single shorter column, so size the card to the active view —
         // otherwise the taller shop card clips off the top/bottom of the screen.
         int armoryH = 104 + 28 + Run.RosterMax * 52 + 64;
-        int w = g.ArmoryMode ? 560 : 760, h = g.ArmoryMode ? armoryH : shopH;
+        // P1: the slate card widens 760 -> 808 to pay for the 24px icon gutter added to every
+        // row, so the TEXT column keeps exactly the width it had (366 - 28 - 24 == 342 - 28).
+        // Verified against the pre-P1 shot: no desc/effect line reflows or clips.
+        int w = g.ArmoryMode ? 560 : 808, h = g.ArmoryMode ? armoryH : shopH;
         int x = Cfg.ScreenW / 2 - w / 2, y = Cfg.ScreenH / 2 - h / 2;
         y -= (int)((1f - Util.EaseOutQuad(PanelAnim("requisition", 0.15f))) * 16f);  // slide-down entrance
         var card = new Rectangle(x, y, w, h);
@@ -4095,33 +4447,39 @@ public static class Hud
             // straight into its right-aligned price — "COUNTER-PREP: SYNDICATE" + "12 INTEL"
             // rendered as "SYNDICATE2 INTEL". Reserve the measured price column, then shrink the
             // title (18 -> 14) to fit; Clip is only the last-resort backstop.
+            // P1: a 26px icon gutter on the left of every card. The text column shifts with it
+            // (the title/desc/effect all measure against the reduced width) so nothing reflows
+            // into the price column at any text scale.
+            const int icoGut = 24;
+            DrawShopIcon(ShopIconId(i), r.X + 14 + 10, r.Y + 22, can ? (hover ? Pal.Accent : Pal.Txt) : Pal.TxtDim);
+            int textX = (int)r.X + 14 + icoGut;
             int icost = g.ShopCostAt(i);
             string cost = $"{icost} INTEL";
             int costW = (int)Cfg.Measure(cost, 16, 1f).X;
-            int titleMaxW = (int)r.Width - 28 - costW - 12;
+            int titleMaxW = (int)r.Width - 28 - icoGut - costW - 12;
             string sname = g.ShopNameAt(i);
             int snameFs = FitSize(sname, 18, 14, titleMaxW);
-            Cfg.Text(Clip(sname, snameFs, titleMaxW), new Vector2((int)r.X + 14, (int)r.Y + 10 + (18 - snameFs) / 2), snameFs, 1f, txt);
+            Cfg.Text(Clip(sname, snameFs, titleMaxW), new Vector2(textX, (int)r.Y + 10 + (18 - snameFs) / 2), snameFs, 1f, txt);
             // W11: the desc WRAPS to (max) two 11px lines inside the card — several descs (FRAG
             // CACHE, BALLISTIC PLATING, the prep rows) measured wider than the card and ran under
             // the neighbouring column. Two lines cover every current desc; Clip is the backstop.
-            var descLines = WrapText(g.ShopDescAt(i), 12, (int)r.Width - 28);
+            var descLines = WrapText(g.ShopDescAt(i), 12, (int)r.Width - 28 - icoGut);
             if (descLines.Count > 2)
             {
-                descLines[1] = Clip(descLines[1] + " " + string.Join(" ", descLines.GetRange(2, descLines.Count - 2)), 12, (int)r.Width - 28);
+                descLines[1] = Clip(descLines[1] + " " + string.Join(" ", descLines.GetRange(2, descLines.Count - 2)), 12, (int)r.Width - 28 - icoGut);
                 descLines.RemoveRange(2, descLines.Count - 2);
             }
             for (int li = 0; li < descLines.Count; li++)
-                Cfg.Text(descLines[li], new Vector2((int)r.X + 14, (int)r.Y + 32 + li * TextRow(13)), 12, 1f, Pal.TxtDim);
+                Cfg.Text(descLines[li], new Vector2(textX, (int)r.Y + 32 + li * TextRow(13)), 12, 1f, Pal.TxtDim);
             // W5: the effect line and the BUY / "- unavailable -" column share the card's last row,
             // and the effect line was drawn with NO width limit — at 100% "counters SYNDICATE for
             // one mission" already stopped a couple of px short of "[ BUY ]", and any text scale
             // pushed it straight through. Reserve the measured right column and clip to what's left.
             string rightLbl = can ? "[ BUY ]" : "- unavailable -";
             int rightW = (int)Cfg.Measure(rightLbl, 12, 1f).X + 22;
-            int effMaxW = (int)r.Width - 28 - rightW;
+            int effMaxW = (int)r.Width - 28 - icoGut - rightW;
             int effY = (int)r.Y + 32 + 2 * TextRow(13) + 1;
-            Cfg.Text(Clip(g.ShopEffect(i), 12, effMaxW), new Vector2((int)r.X + 14, effY), 12, 1f, can ? Pal.Accent : Pal.TxtDim);  // concrete effect
+            Cfg.Text(Clip(g.ShopEffect(i), 12, effMaxW), new Vector2(textX, effY), 12, 1f, can ? Pal.Accent : Pal.TxtDim);  // concrete effect
             Color cc = run.Intel >= icost ? Pal.Good : Pal.Foe;
             Cfg.Text(cost, new Vector2((int)(r.X + r.Width - costW - 14), (int)r.Y + 12), 16, 1f, cc);
             // -5 puts the label back on its authored r.Y+54 baseline at 100% (effY is r.Y+59 there),
@@ -4170,9 +4528,11 @@ public static class Hud
                 bool hov = Raylib.CheckCollisionPointRec(mouse, r);
                 Raylib.DrawRectangleRounded(r, 0.12f, 6, hov ? Pal.RGBA(24, 34, 46) : Pal.RGBA(14, 20, 28));
                 Raylib.DrawRectangleLinesEx(r, 1.3f, hov ? Pal.Accent : Pal.PanelBd);
-                Cfg.Text($"{u.Name}  ({u.Cls})", new Vector2((int)r.X + 14, (int)r.Y + 8), 16, 1f, Pal.Txt);
+                // P1: the codex's own class silhouette leads the row (borrowed, not reinvented).
+                Renderer.DrawCodexGlyph(u.Cls, new Vector2(r.X + 26, r.Y + 22), hov ? Pal.Accent : Pal.Friend, 0.95f);
+                Cfg.Text($"{u.Name}  ({u.Cls})", new Vector2((int)r.X + 46, (int)r.Y + 8), 16, 1f, Pal.Txt);
                 string cur = $"carrying: {u.Weapon?.Name}";
-                Cfg.Text(cur, new Vector2((int)r.X + 14, (int)r.Y + 27), 12, 1f, Pal.TxtDim);
+                Cfg.Text(cur, new Vector2((int)r.X + 46, (int)r.Y + 27), 12, 1f, Pal.TxtDim);
                 int nopt = Weapon.ArmoryOptions(u.Cls).Length;
                 string opt = $"{nopt} option{(nopt > 1 ? "s" : "")} >";
                 Cfg.Text(opt, new Vector2((int)(r.X + r.Width - (int)Cfg.Measure(opt, 13, 1f).X - 14), (int)r.Y + 15), 13, 1f, hov ? Pal.Accent : Pal.TxtDim);
@@ -4197,8 +4557,10 @@ public static class Hud
                 Raylib.DrawRectangleRounded(r, 0.1f, 6, bg);
                 Raylib.DrawRectangleLinesEx(r, 1.4f, current ? Pal.Good : (can ? (hov ? Pal.Accent : Pal.PanelBd) : Pal.RGBA(40, 46, 54)));
                 var probe = Weapon.Make(k);
-                Cfg.Text(probe.Name, new Vector2((int)r.X + 14, (int)r.Y + 8), 17, 1f, current ? Pal.Good : (can ? Pal.Txt : Pal.TxtDim));
-                Cfg.Text(Weapon.KindBlurb(k), new Vector2((int)r.X + 14, (int)r.Y + 31), 12, 1f, Pal.TxtDim);
+                Color wic = current ? Pal.Good : (can ? (hov ? Pal.Accent : Pal.Txt) : Pal.TxtDim);
+                DrawWeaponIcon(k, r.X + 28, r.Y + 28, wic);   // P1: the family reads before the name
+                Cfg.Text(probe.Name, new Vector2((int)r.X + 48, (int)r.Y + 8), 17, 1f, current ? Pal.Good : (can ? Pal.Txt : Pal.TxtDim));
+                Cfg.Text(Weapon.KindBlurb(k), new Vector2((int)r.X + 48, (int)r.Y + 31), 12, 1f, Pal.TxtDim);
                 if (current)
                     Cfg.Text("EQUIPPED", new Vector2((int)(r.X + r.Width - (int)Cfg.Measure("EQUIPPED", 13, 1f).X - 14), (int)r.Y + 20), 13, 1f, Pal.Good);
                 else if (can)

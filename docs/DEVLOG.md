@@ -4174,6 +4174,140 @@ animation-speed cycle and keeps that job).
 - RECRUIT is selectable in SKIRMISH too (the dial floor moved with `Heat.Min`), because the intro
   seeds `SkirmishHeat` from `PendingHeat` and a dial that snapped back to 0 would silently discard
   the player's choice. The owner docket's "skirmish numeric heat" question is untouched.
+## PROGRAM RESONANCE — WAVE P1 "PRESENTATION" (the post chain; the meta layer stops looking like a spreadsheet)
+
+Branched from the integration tip `764055a` (V3 SURFACES) on `wt-p1`. Two parts: the post-FX
+chain in `src/Display.cs`, then the strategic-layer screens in `src/Hud.cs`. Presentation only —
+no gameplay, no data, no persisted field.
+
+### Part A — the post-FX chain (`src/Display.cs`)
+
+**The bloom is now two-pass and half-res.** It was one 12-tap radial ring at 5px, computed at
+full res inside the composite. It is now a 3-pass chain built before the composite:
+
+| pass | shader | target | work |
+|---|---|---|---|
+| 1 | `FsBrightSrc` | 640x400 | per-tap soft threshold, then a 4-tap box downsample |
+| 2 | `FsBlurSrc` | 640x400 | separable gaussian, horizontal (5 fetches = a 9-tap kernel) |
+| 3 | `FsBlurSrc` | 640x400 | the same, vertical, back into buffer A |
+
+That is **~5.6M texel fetches against the old ~12.3M**, and the outer tap now reaches ~10.3
+full-res px against the old 5px ring — cheaper *and* wider, which is the whole point.
+
+**The knee did NOT move.** It is still `smoothstep(0.36, 0.85, luma)` squared, and — critically —
+it is still applied **per tap, before** the box average. Averaging four pixels first and *then*
+thresholding would have dropped V3's 1px cover rims below the knee and quietly deleted them.
+Checked against V3's own board metric (`scripts/board-metrics.py luma`, seed 7, mission 1,
+post-FX forced on, resting bloom):
+
+| | min | median | p95 | max | >180 band |
+|---|---|---|---|---|---|
+| base `764055a` | 9 | 59 | 114 | 255 | 1.05% |
+| P1 | 8 | 59 | 117 | 254 | 1.19% |
+
+Median holds exactly; p95 +3; the >180 band that V3 reserved for unit rings **grows** 1.05 ->
+1.19% rather than shrinking. Read at 2x on the same tile block: the old halo had a visible hard
+ring edge at 5px (the kernel's outer tap showing through); the new one is a smooth falloff, and
+the cover-block rims and lips are pixel-for-pixel the same shape. Nothing blew out.
+
+Bloom **amount** was retuned because a wide gaussian conserves energy over ~4x the area, so the
+peak off a small source drops: `0.5 + uBloom*1.7` -> `1.45 + uBloom*4.30`. Three settings were
+measured (1.30/4.20, 2.05/5.60, 1.45/4.30); 1.45 is the one that keeps the ring cores crisp
+instead of veiling them.
+
+**A tonemap, but an honest one.** The brief asked for "ACES-ish". A FULL-RANGE Narkowicz ACES is
+the wrong tool here and the arithmetic says so: it expects scene-linear input, and against our
+already display-referred frame it maps the board median (0.26) to **0.39** and white to **0.80** —
+it washes the dark board out *and* dims the UI, undoing V2's re-grade. What shipped is the real
+ACES curve blended in **only over the 0.85..1.60 luma band** (`smoothstep(0.85,1.60,luma)*0.75`),
+against the clamped frame. Below 0.70 luma the output is bit-identical; a blown bloom core stops
+clipping to a flat white disc and gets gradation back. Measured cost: frame max 255 -> 254.
+
+**Film grain and scan.** Grain is a 256x256 `GenImageWhiteNoise` tile generated at `Display.Init`
+(repeat-wrapped, point-filtered, **zero committed bytes**), alpha 0.025, scrolled from `uTime` and
+faded out below 0.30 luma so the black board floor and the letterbox stay clean. Scan is a 3px-period
+cosine at 0.028 amplitude. Both are driven by `uTime`, which `Display.AdvanceTime(dt)` accumulates —
+**no new `Raylib.GetTime()` read** (the count is unchanged at 59).
+
+**Everything stays behind `Display.Enabled`.** A plain `SIGHTLINE_SHOT` run logs exactly **one**
+`Program shader loaded` line (raylib's default); the P1 chain would add three. Verified twice.
+
+**A real bug found on the way:** `SetShaderValueTexture` was being called from `UploadFxUniforms`,
+*before* `BeginShaderMode(_fx)`. `BeginShaderMode` flushes rlgl's batch, and that flush zeroes the
+active-texture-slot table — so `uBloomTex` read black and the whole bloom silently vanished (two
+consecutive tunings produced byte-identical metrics, which is what gave it away). The binds now
+happen in `BindFxSamplers()` immediately after `BeginShaderMode`.
+
+### Part B — the strategic layer (`src/Hud.cs`)
+
+**Campaign map — a theatre of operations, not a debug graph.** Ground first: alternating per-region
+column bands, hairline dividers, and four seeded contour lines from `MapHash` (pure arithmetic off
+`MapSeed` — no `Random` allocation, no RNG draw, so the seeded campaign cannot desync). Routes are a
+dark casing under a coloured core, with a direction chevron at the midpoint of the edges you can
+actually take. Nodes replace their single letter with `DrawNodeIcon` geometry in the codex's own
+vocabulary: launch chevron / crosshair / depot cross / warning delta / choice fork / boss diamond.
+The current node gains corner brackets. The legend now draws the map's **real** markers instead of
+stand-in letters, so `NodeGlyph` has no caller and is deleted.
+
+**WAR ROOM — the L-shaped void is gone.** The three content-sized columns ended at three different
+heights above ~25% of empty screen with BACK floating alone in it. A full-width **CAREER** footer
+(7 stat cells: runs / wins / win rate / best mission / best wave / veterans / daily streak) now
+grounds them on a common baseline, the columns are capped so they always clear it, and BACK sits
+under the footer. The cramped 13px lifetime run-on that used to hide under the title moved into
+the footer as real cells; every value and label routes through `FitSize`, so 120% fits.
+
+**Victory card — five accents become two.** Green / cyan / blue / red / gold collapse to neutral
+chrome plus the card accent on exactly one headline slab (MISSIONS CLEARED). DIFFICULTY stops being
+red — a high heat is the most impressive number on the card, not a warning — and gains a filled /
+hollow **rung-pip strip** under the numeral, so the heat played reads by shape and survives
+`SIGHTLINE_CB=1`.
+
+**Event card — sized to its content, and risk is telegraphed.** The card reserved a constant that
+left ~82px of dead slab under the last option (`150 + ... + 30` against a real content bottom of
+`98 + ...`); it is now `118 + ...` for a 22px pad. Each option carries a risk tier derived **in Hud**
+from the outcomes the choice already holds — no change to `Events.cs`, nothing new persisted — and
+signals it three ways: a coloured left rail, a drawn ring mark (pip / minus / cross) and a word
+(CLEAR / COST / GAMBLE / WALK AWAY). Shape carries it, so CB is a no-op.
+
+**Shop / armory — icons.** `DrawShopIcon` transcribes simple geometry into the existing
+`DrawActionIcon` primitives: aid cross, ampoule, rank chevrons, grenade, shield, shield-with-slash,
+crosshair. **Nothing was fetched or committed.** The slate card widens 760 -> 808 to pay for the
+24px gutter so the text column keeps *exactly* its prior width (366-28-24 == 342-28) — verified
+against a base capture at 120%, where both builds clip the same three desc lines identically.
+The ARMORY borrows the codex's own class silhouette (`Renderer.DrawCodexGlyph`) for soldier rows
+and adds a per-`WeaponKind` receiver mark to weapon rows.
+
+### Verification
+
+- `dotnet build -c Release` -> **0 warnings / 0 errors**
+- `bash scripts/qa-sweep.sh --full` -> **45 self-tests ran, 0 FAIL**, PAIRTEST PASS, no
+  COVERAGE GAP block, autoplay x3 inside the sweep clean
+- `SIGHTLINE_PAIRTEST=1` -> **PASS** (h0 and h4 legs both MATCH)
+- autoplay x5 -> WIN/WIN/WIN/LOSE/LOSE, no exception, no TIMEOUT
+- `SIGHTLINE_BALANCE=10` -> **runs=20 missions=69**, **byte-identical to base `764055a`** (0 diff lines after stripping the wall-clock stamps and the worktree path) — the proof this wave is presentation-only
+- plain `SIGHTLINE_SHOT` -> **one** shader program loaded (raylib's default): post-FX off
+- captures read and judged: post-FX on/off on seed 7 at 1x and 2x; every touched meta screen
+  before/after; the whole set again under `SIGHTLINE_CB=1` and again at `SIGHTLINE_UISCALE=3`
+  (120%); plus a base-vs-P1 120% shop capture to prove the gutter cost nothing
+
+### Honest verdict / left undone
+
+- **Better:** the bloom is genuinely nicer *and* cheaper — the old 5px ring had a visible hard
+  edge that is simply gone. The campaign map went from "debug graph" to somewhere. WAR ROOM and
+  the victory card are both calmer and read faster. The event card telegraphing risk is the
+  change most likely to alter how someone plays.
+- **Judgement call, stated plainly:** the tonemap is a *shoulder*, not a full-range ACES, and it
+  is deliberately weak (frame max moved one value, 255 -> 254). A stronger filmic look is available
+  but costs the dark board its contrast, and V2/V3 spent two waves earning that contrast.
+- **Slightly worse:** the wider bloom veils the very core of a bright ring a hair more than the
+  tight 5px kernel did. Three amounts were tried; 1.45 is the best trade found, but it is a trade.
+- The HALL OF FAME column is short, so a gap remains between it and the CAREER footer. Filling it
+  needs more content in that panel, not more chrome.
+- **Not reached:** nothing in the brief was skipped. Not attempted beyond it: the boon-offer and
+  perk-chooser cards were left alone (they were not in the art-direction findings), and the
+  ARMORY weapon marks are the weakest of the new icons — rifle and SMG are differentiable but
+  not instantly so at 20px.
+
 ## PROGRAM RESONANCE — WAVE V3 "SURFACES" (cover as material, biomes as places, silhouettes)
 
 **Branch** `wt-v3` off the integration tip. Owner: V3. Files touched: `src/Renderer.cs` only.

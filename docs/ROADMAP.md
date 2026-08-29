@@ -1103,6 +1103,45 @@ sets, one lever per measured round, fresh same-slot R0 first, dip budgets, breac
 
 ## PROGRAM "RESONANCE" — landed waves (see docs/DEVLOG.md for the write-ups)
 
+- [x] **P1 — PRESENTATION.** DONE. The post chain got the cheapest visual headroom left in the
+      project, and the strategic layer stopped looking like a spreadsheet.
+      - **Bloom is two-pass and half-res.** A bright-extract + 4-tap box downsample to 640x400,
+        then a separable gaussian H and V — **~5.6M texel fetches against the old single-pass
+        12-tap-at-full-res ~12.3M**, with the outer tap reaching **~10.3px** instead of 5px.
+        The bright-pass **knee is UNCHANGED at 0.36** and is still applied PER TAP before the box
+        average, so V3's 1px cover rims still cross it. Measured (seed 7, post-FX on, resting):
+        board median **59 -> 59**, p95 **114 -> 117**, max **255 -> 254**, and the >180 band V3
+        reserves for unit rings **1.05% -> 1.19%**. Nothing blew out; the old 5px ring's hard
+        halo edge is gone. Amount retuned `0.5+1.7*b` -> `1.45+4.30*b` (three settings measured).
+      - **An ACES shoulder, not a full-range ACES.** Full-range Narkowicz maps the board median
+        0.26 -> **0.39** and white -> **0.80** against display-referred input — it would undo V2's
+        re-grade. Shipped: the same curve blended only over the **0.85..1.60** luma band, so
+        everything at or below 0.70 luma is bit-identical and only blown bloom cores get a shoulder.
+      - **Film grain + scan.** A 256px `GenImageWhiteNoise` tile made at init (**zero committed
+        bytes**), alpha 0.025, faded out below 0.30 luma; a 3px-period scan at 0.028. Both driven
+        by the existing `uTime` accumulator — **no new `Raylib.GetTime()` read** (count still 59).
+        All of it stays behind `Display.Enabled`: a plain `SIGHTLINE_SHOT` loads **one** shader
+        program (raylib's default) where the P1 chain would add three.
+      - **Campaign map.** Seeded contour terrain + per-region column bands (`MapHash`, pure
+        arithmetic off `MapSeed` — no alloc, no RNG draw), casing-plus-core route strokes with a
+        direction chevron on live edges, and `DrawNodeIcon` geometry replacing the single letters
+        (crosshair / depot cross / warning delta / choice fork / boss diamond). The legend draws
+        the real markers now; `NodeGlyph` is deleted.
+      - **WAR ROOM.** A full-width **CAREER** footer of 7 stat cells closes the L-shaped void and
+        grounds the three content-sized columns; BACK sits under it instead of floating in it.
+      - **Victory card.** Five accent colours -> two (neutral + the card accent on one headline
+        slab). DIFFICULTY stops reading as a warning and gains a filled/hollow rung-pip strip.
+      - **Event card.** Sized to content (~82px of dead slab removed) and every option telegraphs
+        its risk three ways — rail, drawn mark, word — derived in Hud from outcomes that already
+        exist, so `Events.cs` is untouched.
+      - **Shop / armory icons.** Geometry transcribed into the existing `DrawActionIcon`
+        primitives; the slate card widens 760 -> 808 so the text column keeps EXACTLY its prior
+        width (366-28-24 == 342-28), verified against a base capture at 120%.
+      - Verified: Release **0 warn / 0 err**, `qa-sweep --full` **45 self-tests, 0 FAIL** (PAIRTEST
+        PASS, no COVERAGE GAP), autoplay x5 clean, `SIGHTLINE_BALANCE=10` **runs=20 missions=69**
+        **byte-identical to base `764055a`** (0 diff lines after stripping the wall-clock stamps and the worktree path) — the proof this wave is presentation-only. `SIGHTLINE_CB=1` and `SIGHTLINE_UISCALE=3` passes read on every
+        touched screen. Write-up: DEVLOG §RESONANCE P1.
+
 - [x] **V3 — SURFACES.** DONE. Cover became a material, biomes became places, and the
       unit tier finally moved into the band the V2 grade reserves for it.
       - **Cover joins its biome.** The tint pull on cover was 0.28 over a strongly slate
