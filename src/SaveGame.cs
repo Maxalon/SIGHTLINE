@@ -205,11 +205,20 @@ public static partial class SaveGame
         catch { /* a failed meta save must never crash the game */ }
     }
 
-    public static int LoadMetaHeat() => Heat.Clamp(LoadMetaDto().MaxHeat);
+    /// The highest heat rung the profile has UNLOCKED. R2 FIX 4: floored at 0, not at Heat.Min.
+    /// W5 moved Heat.Clamp's floor to -1 (RECRUIT) — correct for a DIALLED level, wrong for an
+    /// unlock CEILING, which starts at 0 and only ever rises. A corrupt/edited meta carrying
+    /// {"MaxHeat":-9} clamped to -1, so Game.RefreshMeta set UnlockedHeat = -1, PendingHeat was
+    /// pinned to -1, and BOTH intro steppers went dead (minus needs level > Heat.Min, plus needs
+    /// level < unlocked) — the difficulty picker locked on RECRUIT with no way out but deleting
+    /// meta.json. Game.cs:1727 already applies Math.Max(0, ...) on the SIGHTLINE_HEAT env path,
+    /// so the invariant was known; this is the disk path that was missed. SaveMetaHeat floors
+    /// the same way so a bad ceiling can never be written back either.
+    public static int LoadMetaHeat() => Math.Clamp(LoadMetaDto().MaxHeat, 0, Heat.Max);
 
     public static void SaveMetaHeat(int maxHeat)
     {
-        var d = LoadMetaDto(); d.MaxHeat = Heat.Clamp(maxHeat); WriteMetaDto(d);
+        var d = LoadMetaDto(); d.MaxHeat = Math.Clamp(maxHeat, 0, Heat.Max); WriteMetaDto(d);   // R2 FIX 4: a CEILING floors at 0
     }
 
     /// Adaptive-assist meta: how many runs the player has lost in a row (0 on a fresh profile).

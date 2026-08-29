@@ -504,6 +504,29 @@ public partial class Game
                 if (!reserve.Exists(v => v.Name == "VEGA") || !reserve.Exists(v => v.Name == "KRESS")) fails.Add("lgdOvercull");
                 if (!reserve.Exists(v => v.Name == "BRAVO")) fails.Add("lgdEnshrineSkipped");   // LGD never blocks enshrine
             }
+            // (12) R2 FIX 4 — the unlock CEILING can never lock the difficulty picker.
+            // MaxHeat is a ceiling, not a dialled level: W5 moved Heat.Clamp's floor to -1
+            // (RECRUIT) and LoadMetaHeat clamped through it, so a corrupt/edited {"MaxHeat":-9}
+            // produced UnlockedHeat = -1 -> PendingHeat pinned to -1 -> BOTH intro steppers dead
+            // (minus needs level > Heat.Min, plus needs level < unlocked). Assert the load floors
+            // at 0, that the write path floors too, and that the picker's own predicates stay live.
+            foreach (int bad in new[] { -9, -1, 0, 3, 9999 })
+            {
+                System.IO.File.WriteAllText(SaveGame.MetaPathPublic, "{\"MaxHeat\":" + bad + "}");
+                int unlocked = SaveGame.LoadMetaHeat();
+                if (unlocked < 0 || unlocked > Sightline.Heat.Max)
+                    fails.Add($"metaHeat({bad})={unlocked} outside 0..{Sightline.Heat.Max}");
+                // EnsureMetaLoaded's exact two lines, then the two stepper predicates from
+                // Game.UpdateIntro — the picker must be able to move in at least one direction.
+                int pending = Math.Min(0, unlocked);
+                bool minusLive = pending > Sightline.Heat.Min, plusLive = pending < unlocked;
+                if (!minusLive && !plusLive)
+                    fails.Add($"pickerLOCKED at meta MaxHeat={bad} (unlocked={unlocked} pending={pending})");
+            }
+            SaveGame.SaveMetaHeat(-9);
+            if (SaveGame.LoadMetaHeat() != 0) fails.Add($"saveMetaHeat(-9)={SaveGame.LoadMetaHeat()} want 0");
+            SaveGame.SaveMetaHeat(9999);
+            if (SaveGame.LoadMetaHeat() != Sightline.Heat.Max) fails.Add("saveMetaHeat(9999) not capped");
         }
         catch (Exception e) { return "METATEST: FAIL (exception " + e.Message + ")"; }
         finally
@@ -517,7 +540,8 @@ public partial class Game
         return fails.Count == 0
             ? "METATEST: PASS (salvage/achievements/unlocks/legends/totals round-trip; unlock gated by NoPersist; "
               + "recall charged once in ConfirmDraft + broke-confirm refuses; barracks sinks pend until the checkpoint commit "
-              + "(quit-at-barracks keeps the money); daily bounty once-per-stamp, pay+mark atomic; save.json preserved)"
+              + "(quit-at-barracks keeps the money); daily bounty once-per-stamp, pay+mark atomic; save.json preserved; "
+              + "a corrupt MaxHeat can never lock the difficulty picker)"
             : "METATEST: FAIL (" + string.Join(",", fails) + ")";
     }
 }
