@@ -173,13 +173,13 @@ DESKTOP, pause card + main menu). Everything else is claimed somewhere.
 `PublishTrimmed` hazard): [`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md) +
 `bash scripts/publish.sh`.
 
-**Self-tests & measurement:** **53** features ship a window-free `SIGHTLINE_*TEST` hook
-(e.g. `COMBATTEST`, `SAVETEST`, `AITEST`, `ITEMTEST`) that prints `PASS/FAIL`, and there
-are `SIGHTLINE_*` screenshot hooks per feature. `bash scripts/qa-sweep.sh --full` runs 51
-of them plus autoplay ×3 and is the pre-merge gate; without `--full` it skips the 38 s
-PAIRTEST. **Do not hand-maintain that count** — it has now been wrong three times (41 / 46
-/ 49 all claimed while a different number ran). Derive it:
-`grep -oE 'SIGHTLINE_[A-Z0-9_]+TEST|SIGHTLINE_FUL11PROBE' scripts/qa-sweep.sh | sort -u | wc -l`.
+**Self-tests & measurement:** every feature that can be checked headlessly ships a
+`SIGHTLINE_*TEST` hook (e.g. `COMBATTEST`, `SAVETEST`, `AITEST`, `ITEMTEST`) that prints
+`PASS/FAIL`, plus `SIGHTLINE_*` screenshot hooks. `bash scripts/qa-sweep.sh --full` runs
+them all plus autoplay ×3 and is the pre-merge gate; without `--full` it skips the 38 s
+PAIRTEST. **Do not write a count here** — it has been wrong four times (41 / 46 / 49 / 51
+each claimed while a different number ran). W5 made the sweep's own footer DERIVE it, so
+run the sweep and read the last line.
 The `SIGHTLINE_BALANCE=<N>` flywheel runs N headless campaigns and reports
 win-rate/decision-richness/policy-gap — **it needs a display**, so run it under `xvfb-run`;
 without one it silently reports `runs=0`. A fuller (but non-exhaustive) list of hooks is

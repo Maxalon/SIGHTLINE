@@ -5472,7 +5472,7 @@ waves (CONCEAL 2 / MOVE 3 / OVERWATCH 6 / now FIRE 9).
 can show what a first-ever player actually sees. Screenshots before/after confirm it — before,
 `TRAINING 1/5`; after, `BRIEFING - ELIMINATE` with the bar still staged; at frame 760, the strip.
 
-## W5-2 — THE BLOOM WAS EATING THE TYPE. The HUD comes out of the post-FX target.
+## W5-2 — THE BLOOM WAS EATING THE TYPE. The HUD comes out of the BLOOM SOURCE.
 
 `Display.RenderFrame` rendered the **entire** frame into the post-FX target, so bloom, vignette
 and chromatic aberration ran over every button, label and panel — and a saturated UI plate
@@ -5483,12 +5483,14 @@ excluded; glyph core = p2 of a 3×3 MIN-filtered relative luminance, plate fill 
 MAX-filtered one; WCAG ratio between them — the min/max filter erases antialiased edge pixels so
 the two readings are the glyph INTERIOR and the plate INTERIOR):
 
-| main-menu label | FX off | FX on, BEFORE | FX on, AFTER |
-|---|---|---|---|
-| **TRAINING OP** (the on-ramp button) | 8.67 | **2.19** | 8.87 |
-| CONTINUE RUN | 7.07 | 5.77 | 7.24 |
-| DEPLOY SQUAD | 7.07 | 5.66 | 7.07 |
-| LAST STAND | 5.79 | 6.38 | 5.79 |
+| main-menu label | FX off | **FX on, the shipped defect** |
+|---|---|---|
+| **TRAINING OP** (the on-ramp button) | 8.67 | **2.19** |
+| CONTINUE RUN | 7.07 | 5.77 |
+| DEPLOY SQUAD | 7.07 | 5.66 |
+| LAST STAND | 5.79 | 6.38 |
+
+(The post-fix column is further down, with the two candidate fixes side by side.)
 
 The absolute numbers differ from the auditor's (4.51 → 1.35 on TRAINING OP, 5.34 → 3.42 on
 CONTINUE RUN) because the sampling methods differ; they agree exactly on the headline — TRAINING

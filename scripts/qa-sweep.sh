@@ -4,8 +4,9 @@
 # quirk: piping an xvfb-run child through $(...) / a for-loop silently drops its
 # stdout, so every test is a direct `CMD | grep` statement below.
 #
-#   bash scripts/qa-sweep.sh          # 50 self-tests + autoplay x3   (~2 min)
-#   bash scripts/qa-sweep.sh --full   # + PAIRTEST                    (~2 min 40 s)
+#   bash scripts/qa-sweep.sh          # every self-test but PAIRTEST + autoplay x3  (~2 min)
+#   bash scripts/qa-sweep.sh --full   # + PAIRTEST                               (~2 min 40 s)
+# The footer prints how many actually ran, DERIVED from this file. Do not type a count here.
 #
 # COUNT NOTE: this footer has been wrong twice. C1 found it claiming 41 while running 42;
 # the W5/C1 integration then had two waves bumping it from different bases. It is now
@@ -24,6 +25,7 @@
 # directory must already EXIST) and SIGHTLINE_BALANCE_JSON=<your worktree>/balance.json
 # before running this. Both are inherited from your shell; this script does not set them.
 set -u
+_SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"   # W5: absolute, for the derived footer count
 export PATH="$PATH:/usr/lib/dotnet"
 export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe
 cd "$(dirname "$0")/.."
@@ -126,5 +128,10 @@ echo -n "run1: "; SIGHTLINE_AUTOPLAY=1 run | grep -oE "RESULT: (WIN|LOSE|TIMEOUT
 echo -n "run2: "; SIGHTLINE_AUTOPLAY=1 run | grep -oE "RESULT: (WIN|LOSE|TIMEOUT) mission=[0-9]+" | head -1
 echo -n "run3: "; SIGHTLINE_AUTOPLAY=1 run | grep -oE "RESULT: (WIN|LOSE|TIMEOUT) mission=[0-9]+" | head -1
 echo "=== DONE ==="
-echo "(53 self-tests exist; this sweep ran $([ "$FULL" = 1 ] && echo 51 || echo 50). Every line above"
+# W5: DERIVED, not typed. This footer's number has now been wrong FOUR times (41 / 46 / 49 / 51
+# all claimed while a different count ran) — the 2026 audit's wildcard-4 finding is exactly this
+# class of hand-maintained registry drift. Count the invocation lines in this file instead.
+_ran=$(grep -cE '^echo -n "[A-Z0-9]+ *: "; SIGHTLINE_' "$_SELF")
+[ "$FULL" = 1 ] || _ran=$((_ran - 1))   # PAIRTEST is the only --full-gated one
+echo "($_ran self-tests ran$([ "$FULL" = 1 ] || echo ", PAIRTEST skipped"). Every line above"
 echo " must read PASS, and every autoplay must read WIN or LOSE — never TIMEOUT, never blank.)"
