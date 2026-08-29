@@ -1324,6 +1324,45 @@ sets, one lever per measured round, fresh same-slot R0 first, dip budgets, breac
 
 ### PROGRAM RESONANCE — X2 "TRUE NORTH II" (2026-08-29, details in DEVLOG §X2)
 
+- [x] **THE LADDER OF RECORD.** The first ladder ever measured on the COMPOSED tree: n=40
+      campaigns per rung across six rungs (RECRUIT + h0/2/4/6/8), `runs=20` asserted in all 12
+      chunks, base commit `a61ef42`, raw data archived in `docs/measurements/x2/`. Supersedes
+      X1's, W5's, W4's and FUL-13's ladders, each of which was measured on its own base.
+- [x] **THE BAND, re-argued and KEPT** (h0 55 / h2 40 / h4 30 / h6 20 / h8 10, ±8; h8 ±5), with
+      two amendments from measurement: **RECRUIT joins it at 75 ±8** with a standing
+      `RECRUIT − h0 ≥ 15` floor, and the band's ±8 is now documented as **≈1 standard error at
+      n=40**, so rung ORDER is not a gate at that N.
+- [x] **THE COLD-OPENER GRACE** (`Mission.OpenerTrim`, shipped 1). Mission 1 measured **75%**
+      win at heat 0 against 90% for m3-m4 — a U-shaped curve whose left arm ended a quarter of
+      all runs before the player had earned anything, and the exact front-loaded anxiety
+      DESIGN §3.D forbids. The heat grace that already fixes this is gated on `heat > 0`. One
+      body off m1 and m2 takes mission 1 to **100% (n=40, zero losses)** and heat 0 from
+      **35.0% → 57.5%**, with shots-per-kill UP at every rung. `OPENERTEST` pins it.
+- [x] **Three default-OFF dials, measured and priced, for whoever needs one**:
+      `SIGHTLINE_AIMTRIM` (**+7.5 completion per 5 aim points** at h0, Eliminate's turn budget
+      untouched at the 5-point dose; the 10-point dose reaches the band but breaks two turn
+      budgets), `SIGHTLINE_TOUGH` / `SIGHTLINE_TRIM` (X1's pair, now pinnable), and
+      `SIGHTLINE_ENEMYBASE`.
+
+- [ ] **RAISE N BEFORE SPENDING ANOTHER LEVER.** The highest-value measurement in the project
+      right now is **n≥80 per rung on the state that is already shipped**. At n=40 the error bar
+      (±6-8) is the size of the band tolerance and bigger than the step between rungs; three of
+      the six deltas in X2's shipped table are indistinguishable from noise, and two waves have
+      now argued about rung inversions that no data could resolve.
+- [ ] **Heat 8 is out of band at 17.5%** (band 5-15, so +2.5 over the ceiling, 0.4 SE). Do not
+      aim a rung-average lever at it: the apex is a wall made of four objectives —
+      **Escort 33% (n=15), Evac 0% (n=4), Rescue 33% (n=3), Decapitate 41% (n=17)** — and the
+      rung average is what those produce.
+- [ ] **Escort is the drag objective and its repair was flattered by a broken ladder.**
+      12.81 turns at h0 and 13.48 at RECRUIT in the shipped state, against the 8.03/8.19 that
+      W4 and X2's own baseline recorded — those samples contained only the runs healthy enough
+      to REACH an Escort (n 13 → 19 once the opener was repaired). Its real h0 cost is ~13 turns.
+- [ ] **Lead-swings fell 0.79 → 0.61 at heat 0** and the wave accepted it: a 4-body opener
+      against a full squad is not a contested fight, and mission 1 is ~26% of matches played.
+      If the swing metric matters more than the opener's shape, the honest fix is to make m1
+      contested *some other way* (a mid-mission reinforcement beat, a timed objective), not to
+      put the fifth body back.
+
 - [ ] **SPEC (ready to dev, do NOT implement inside a tuning wave): re-specify
       `CountMeaningfulChoices` axis (b) as an ADDITIVE band.** Two waves (X1, W4) have now missed
       a decision-density gate that X2's baseline shows is not merely hard but *structurally
