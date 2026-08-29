@@ -770,7 +770,21 @@ public static class Program
         bool shotOnBark = shot && Environment.GetEnvironmentVariable("SIGHTLINE_SHOTONBARK") == "1";
         if (shotOnBark) shotFrame = int.MaxValue;
         int frame = 0;
-        const int autoCap = 20000;
+        // W1: the autoplay smoke test's frame budget, DERIVED rather than guessed. It had been a
+        // round 20000 since it was written, with nothing in the repo saying where that came from
+        // or how close a real campaign gets. Measured over 30 fresh Release autoplays
+        // (docs/measurements/w1/framecount.txt): min 2461, median 9492, p90 12530, MAX 13589 —
+        // so the old cap was 1.47x the observed maximum, a much thinner margin than anyone
+        // had reason to believe, for a contract whose whole point is "never a TIMEOUT".
+        //
+        // NAMING, corrected by the W1 review: an earlier version of this called the reference
+        // `autoP99` and quoted "p99 = 13536". You cannot estimate a 99th percentile from n=30 —
+        // the top two samples are 13589 and 13407, so any "p99" is an interpolation between the
+        // two largest observations and carries no more information than the max itself. The
+        // honest statistic at this n is the OBSERVED MAXIMUM, and that is what this now is.
+        // TO RE-DERIVE: bash docs/measurements/w1/framecount.sh 30   (raise n for a real quantile)
+        const int autoMax = 13589;             // observed max over n=30, Release, base commit 5ae9149
+        const int autoCap = 3 * autoMax;       // 40767
 
         while (!Raylib.WindowShouldClose())
         {
@@ -786,14 +800,14 @@ public static class Program
             game.Update(dt);
             Audio.UpdateMusic(dt);
 
-            Display.RenderFrame(() =>
-            {
-                // Q1: autoplay normally skips the heavy draw (it's a smoke test), but a shot frame
-                // requested ON TOP of autoplay is asking for a picture of live play — the only way
-                // to photograph a unit MID-MOVE — so draw for real in that combination.
-                if (autoplay && !shot) Raylib.ClearBackground(Pal.Bg);
-                else game.Draw();
-            });
+            // Q1: autoplay normally skips the heavy draw (it's a smoke test), but a shot frame
+            // requested ON TOP of autoplay is asking for a picture of live play — the only way to
+            // photograph a unit MID-MOVE — so draw for real in that combination.
+            // W1: when the draw is a bare ClearBackground, skip the frame entirely and just pump
+            // the event queue (see BatchPump). Same reasoning as the three batch loops: the clear
+            // and the buffer swap were the whole cost of an autoplay smoke run.
+            if (autoplay && !shot) BatchPump();
+            else Display.RenderFrame(game.Draw);
 
             if (shot || autoplay) frame++;
             // W5: dump the filmed unit's tweened board position every frame, so "positions advance
@@ -828,7 +842,9 @@ public static class Program
                 }
                 if (game.Phase == Phase.Win) { Console.WriteLine($"RESULT: WIN mission={game.RunState.Mission} frame={frame}"); break; }
                 if (game.Phase == Phase.Lose) { Console.WriteLine($"RESULT: LOSE mission={game.RunState.Mission} frame={frame}"); break; }
-                if (frame >= autoCap) { Console.WriteLine($"RESULT: TIMEOUT mission={game.RunState.Mission} frame={frame}"); break; }
+                // W1: a TIMEOUT now says how far past normal it got. "frame=20000" alone told you
+                // nothing about whether the cap was tight or the match was genuinely stuck.
+                if (frame >= autoCap) { Console.WriteLine($"RESULT: TIMEOUT mission={game.RunState.Mission} frame={frame} cap={autoCap} observedMax={autoMax} ({(double)frame / autoMax:0.0}x the longest campaign measured)"); break; }
             }
         }
 
