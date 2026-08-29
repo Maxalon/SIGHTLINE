@@ -117,12 +117,35 @@ of the residual.)
 | Eliminate | 536 | 92.5 | 1.1 | 3.66 |
 | Sabotage | 115 | 85.2 | 3.3 | 3.64 |
 
-**Decapitate is the worst objective in the game and nothing in the project says so.** At n=326 it
-is 64.1% ±2.7 — **17 points below the next-worst and 28 below Eliminate** — and it is the
-second-most-played objective in a run. The ROADMAP names *Escort* as "the drag objective"; at
-n=156 Escort is 83.3%, and what is actually true of Escort and Evac is that they are **slow**
-(10.8 and 10.5 turns against a 3.6-turn Eliminate), not that they are lost. Slow and lost are
-different defects with different repairs, and the project has been conflating them.
+**Decapitate pools to 64.1% — but the pooled number is misleading, and the decomposition is the
+real finding.** `Run.cs:556-558` sets `Map[Map.Count-1].Kind = NodeKind.Boss`, exactly one Boss
+node, always the map's last, and `CardForNode` makes the Boss **always Decapitate**. So every one
+of the 234 mission-6 attempts is a Decapitate, and the objective's row pools the campaign finale
+together with the mid-run ones:
+
+| Decapitate | n | win% | ±SE |
+|---|---|---|---|
+| **finale (the BOSS node, m6)** | 234 | **70.1** | 3.0 |
+| **mid-run (every other node)** | **92** | **48.9** | **5.2** |
+
+**A mid-run Decapitate is 21 points HARDER than the campaign's climactic boss fight**, and at
+48.9% it is the worst mission of any kind in the game — against a per-mission average near 80%.
+
+The mechanism is in `Game.DesignateHvt` (src/Game.cs:2059) and it is documented in its own
+comment. On the Boss node the HVT is the WARLORD, an **ELITE**, and the code deliberately skips
+the buff: *"an ELITE is ALREADY a tuned boss — double-buffing it would re-create the stat-check
+wall we're removing."* On every OTHER Decapitate the HVT is the toughest rank-and-file body and it
+takes `+6 + mission` HP (so +8 to +11 at missions 2-5) **and** +6 aim — on top of X1's
+`Mission.HostileToughness` +3 that every hostile already carries.
+
+**The stat-check wall was removed from the boss and left in the mid-run case.** That is a
+hypothesis with a named mechanism, not a proven cause — it needs its own paired round — but it is
+specific, it is cheap to test (`DesignateHvt`'s bonus is one expression), and nothing in the
+project has ever looked at it.
+
+What is true of Escort and Evac is that they are **slow** (10.84 and 10.45 turns against
+Eliminate's 3.66), not that they are lost. Slow and lost are different defects with different
+repairs, and the project has been conflating them.
 
 Evac at n=56 is finally large enough to read at all — X2 had it at n=4 and n=25 pooled.
 
