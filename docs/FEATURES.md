@@ -329,7 +329,8 @@ seeds (mix of WIN/LOSE, no exceptions):
   orange / Good→teal), both in the pause menu + persisted. (Phase 3 item 3.13.)
 - **Display settings** (`src/Display.cs`): the fixed 1280x800 game is rendered to a
   letterboxed render-target scaled to the window, so it stays readable on big/4K
-  screens. Pause menu offers **FULLSCREEN** (key **F**) + a **WINDOW** size cycle
+  screens. Pause menu offers **FULLSCREEN** (key **F11** — it was `F`, which the player
+  turn also binds to FOCUS; see the keymap note in `Game.Update`) + a **WINDOW** size cycle
   (1280x800 → 3200x2000); the window is also free-resizable. Mouse is mapped back to
   virtual space via `SetMouseOffset/Scale`. At native 1280x800 windowed it draws
   directly (keeps MSAA). Settings persist to `display.json` in the user-data dir.
@@ -581,3 +582,86 @@ seeds (mix of WIN/LOSE, no exceptions):
   report: downs -> revived/recovered/bled-out/finished + honest save-rate + corpsman-fielded
   missions. Review round F1-F6: downed bodies exit EVERY enemy-attention seam — the squad focus
   pick, shield facing, reposition exposure — plus the honest ledger/banner/pill wording.)
+
+## PROGRAM RESONANCE — WAVE C1 "VOICE" (the game's words)
+- **Mission briefings:** a 3-line card at the start of every CAMPAIGN node, composed from data the
+  game already had — the named **region** × the authored **arena's** terrain clause × the enemy
+  **faction** and its real combat rule × the **objective** said in a commander's voice. Rides the
+  shared FIELD TIP card chrome (Friend-blue accent) and yields the slot ABSOLUTELY to wave T1's
+  lesson cards and field tips. Never hit-tested (cannot swallow a click); dismissed by any key or
+  click, auto-fades after 11s, HOLDS its clock while a teaching card owns the slot (giving up after
+  45s), and **clears itself the moment the combat log has an entry** — it is a pre-fight object and
+  the ledger is load-bearing. Deterministic: a reloaded save briefs identically.
+- **Faction dossiers + region names:** a **FACTIONS** codex tab (3rd, after ENEMIES) with a
+  three-paragraph dossier per faction — who they are / **FIELD RULE** / **COUNTER** — each rule line
+  interpolating the REAL `Combat` constant (`LegionCloseAim/Crit`, `WardenLongAim`, the Syndicate
+  see-over-low rule) and each counter naming the real counter-prep item and capstone boss.
+  `Faction.None` ("LOCAL FORCES", UNALIGNED) is documented too. The campaign map's six columns are
+  now labelled with **named regions** — 64 curated, biome-true place names (8 per biome) derived
+  from `MapSeed`; a run's six missions always land on six distinct biomes, so a region name can
+  never repeat inside a run. Cleared/current columns read brighter than the ones ahead.
+- **Soldier barks:** six beats only — first blood, a bonded squadmate going down, a pod routing, a
+  clutch STABILIZE, a vendetta kill, last-soldier-standing — written into the combat log with the
+  outcome tag `VOICE` (a cooler, quieter tint than every mechanical line). **Four hard rate limits:**
+  never while a lesson/tip card is up, at most one per game turn, never the same speaker twice in a
+  row, each beat kind at most once per mission. Ceiling six lines a mission. A beat needing a second
+  name that is handed none never fires, so a bondless soldier can never draw a bond line.
+- **Run epilogue:** exactly five lines under the dossier panels on the CAMPAIGN end card, generated
+  from the numbers the card already computes — where the file closed and what fell there, the count
+  of the dead, ONE death told properly (the costliest loss, named, with its region and kill count),
+  what the run turned on (the archetype that did most of the killing, or the MVP), and where it
+  leaves the survivors. Every slot has a non-empty fallback and every count is grammatical and true
+  at every N. The dossier panels yield height to it, so a loss card with a cause line, a heat unlock
+  and three achievements still lands its buttons on screen.
+- **The determinism contract:** all of the above lives in `src/Voice.cs` and takes **ZERO draws from
+  the shared `Util.Rng`** — regions/briefings/epilogue are pure `Util.Hash3` derivations of
+  `MapSeed`; only bark variety uses a dedicated `Random` re-seeded per mission. `SIGHTLINE_VOICETEST`
+  proves the separation (with a sensitivity probe so it cannot pass vacuously), asserts every
+  template slot resolves, walks all four bark gates, and measures every generated string against the
+  real pixel width of the chrome that draws it. `SIGHTLINE_BALANCE=10` is byte-identical to base.
+  (`src/Voice.cs`; `SIGHTLINE_VOICETEST` / `SIGHTLINE_VOICEDUMP` (read the copy as prose) /
+  `SIGHTLINE_SHOTONBARK` / `SIGHTLINE_CODEXTAB=2`;
+  `docs/DESIGN.md` §1.1 records the pillar amendment that authorises any of it.)
+
+## PROGRAM RESONANCE — WAVE W4 "THE SECOND AXIS" (the opening geometry becomes a variable)
+
+- **Four deployment SHAPES**, dealt per mission from `(MapSeed, mission)` with zero extra RNG
+  draws (`Mission.DeployFor`; `Mission.AppliedDeploy` is the telemetry stamp):
+  - **FRONTAL** — the historical opening: squad cols 0-3, the whole force on the east edge.
+  - **PINCER** — a front pair plus two flank pairs in the open rim lanes (cols 12-13,
+    rows 0-1 / 9-10). Contact comes from three bearings; the fastest of the four openings.
+  - **CROSSFIRE** — two dense masses on the NE and SE bearings with the middle rows empty.
+  - **ENVELOP** — the **surrounded opening**: the squad deploys at board CENTRE (cols 7-10)
+    and pods hold all four rims. Legal only on Eliminate, Decapitate and **Defend** (an
+    objective-gate that keeps every extraction / hack / sabotage route untouched).
+  Shipped mix 3/3/1/3; `SIGHTLINE_DEPLOYMIX=1,0,0,0` restores the pre-W4 all-FRONTAL board.
+- **Pods field one kind of body** (`Mission.PodUniform`) — members past the pod lead reuse the
+  lead's archetype roll. Three RAIDERS, not a trio of strangers; measured ladder-neutral.
+- **Protective cover faces the nearest threat** on the dominant axis, whatever bearing the
+  mission deployed on (reproduces the historical +1 / −1 column for a frontal opening), and
+  **barrels never spawn within two tiles of a soldier's deployment tile**.
+- **Decision-density instrumentation** — the `[choice-split]` report line and four JSON fields
+  break `meaningful-choices` into `los-targets` / `target-choices` / `position-choices` per
+  ARMED soldier-turn, and a `DEPLOYMENT GEOMETRY` block reports win / turns / density per
+  opening shape. `SIGHTLINE_EXPOSURETEST` now enumerates shape x arena x objective.
+- **Harness pins**: `SIGHTLINE_DEPLOY` (`frontal|pincer|crossfire|envelop`),
+  `SIGHTLINE_DEPLOYMIX`, `SIGHTLINE_PODUNIFORM`, `SIGHTLINE_PODMASS`, `SIGHTLINE_RIMWAVES`,
+  `SIGHTLINE_ESCORTFIX`.
+
+## PROGRAM RESONANCE — WAVE X2 "TRUE NORTH II" (the cold opener stops ending runs)
+
+- **THE COLD-OPENER GRACE** (`Mission.OpenerTrim`, shipped at **1**). `Game.SetupMission` has
+  long ramped HEAT's escalation in over missions 1-2 ("the measured ~20% mission-1 loss, which
+  hard-caps run completion"), but that grace is gated on `heat > 0`, so the BASE force met the
+  coldest squad in the game with no ramp at all: **5 hostiles against 4 rookies** with no
+  promotion, perk, mod or boon, each hostile carrying X1's +3 HP. The base force now gets the
+  same ramp: **one body off mission 1, one off mission 2** (full trim on m1, half rounded up on
+  m2, nothing from m3). `SIGHTLINE_OPENERTRIM=0` restores the pre-X2 opener exactly.
+  Measured (n=40 campaigns, base `a61ef42`): mission 1 **75% → 100%** win, heat-0 run completion
+  **35.0% → 57.5%**, shots-per-kill **3.22 → 3.30** (the two-hit trade is not clawed back).
+- **Two more balance knobs, both default-OFF, for the next tuning wave**:
+  `Mission.HostileAimTrim` (`SIGHTLINE_AIMTRIM`, flat points off every hostile's aim in the
+  MakeHostile funnel — measured at **+7.5 completion per 5 points** at heat 0, with Eliminate's
+  turn budget untouched) and `Mission.EnemyBaseCount` (`SIGHTLINE_ENEMYBASE`, the constant in
+  `count = base + missionNum`). `Mission.HostileToughness` / `HostileDamageTrim` became static
+  fields pinnable from `SIGHTLINE_TOUGH` / `SIGHTLINE_TRIM`, so one binary serves every round.

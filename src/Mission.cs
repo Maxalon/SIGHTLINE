@@ -20,6 +20,179 @@ public static class Mission
     // doesn't mirror a parallel firing line. Indexed by pod id (i/2), cycling if more pods.
     static readonly int[] EnemyPodColOffset = { 1, 3, 0, 2, 1, 3 };
 
+
+    // ════════════════════════ W4 "THE SECOND AXIS" — DEPLOYMENT GEOMETRY ════════════════════════
+    // Every fight in the game opened the same way: squad in cols 0-3, every pod in cols 14-17, a
+    // single left-to-right push. X1's instrumentation proved the binding decision-density
+    // constraint is `choices/ARMED-soldier-turn` (~1.5 — the typical armed soldier sees exactly
+    // ONE worthwhile target), and named the cause: a single advancing front presents pods
+    // SERIALLY. This block makes the opening geometry a per-mission variable so the force can be
+    // presented on more than one bearing at once.
+    //
+    // HARD CONTRACT (load-bearing for every CRN pairing in the project): the shape is derived
+    // PURELY from (DeckSeed, missionNum) by an FNV-1a mix — ZERO Util.Rng draws, exactly like the
+    // FUL-9 arena deck. SIGHTLINE_PAIRTEST is the gate.
+    public const int DeployFrontal = 0;    // today: squad west, every pod on the east edge
+    public const int DeployPincer = 1;     // squad west; the force splits front + both flanks
+    public const int DeployCrossfire = 2;  // squad west; two dense masses, NE and SE
+    public const int DeployEnvelop = 3;    // squad CENTRE, pods on every rim (the surrounded open)
+    public const int DeployShapes = 4;
+
+    /// Measurement/harness pin (SIGHTLINE_DEPLOY): -1 = the shipped mix, >=0 pins one shape for
+    /// every mission. A pinned ENVELOP still falls back where the objective forbids it (below).
+    public static int ForcedDeploy = -1;
+
+    /// The shipped MIX — relative weights per shape, indexed by the Deploy* constants. Weights
+    /// (not a shape list) so a measured round can re-balance the deal without touching the
+    /// derivation. All-zero or a bad table degrades to FRONTAL.
+    /// SHIPPED 3/3/1/3, measured end-to-end at h0 and h4 (DEVLOG §W4 round S1). ENVELOP is
+    /// legal on ~60% of objectives and falls back to FRONTAL elsewhere, so the EFFECTIVE deal
+    /// is roughly FRONTAL 42% / PINCER 35% / CROSSFIRE 13% / ENVELOP 11%. CROSSFIRE is the low
+    /// weight deliberately: pinned, it was the only shape to move the "which target?" axis
+    /// (+0.06) but also the only one that DRAGS Escort (13.40t vs PINCER's 5.65t), because its
+    /// NE mass lands on the cols 16-17 extraction corner. `SIGHTLINE_DEPLOYMIX=1,0,0,0`
+    /// restores the pre-W4 all-FRONTAL board exactly.
+    public static int[] DeployMix = { 3, 3, 1, 3 };
+
+    /// Telemetry: the shape the LAST Build actually used (read by Game.SetupMission for Stats).
+    public static int AppliedDeploy = DeployFrontal;
+
+    /// Under an ENVELOP opening, rotate the rim reinforcement waves arrive from (Game.
+    /// SpawnReinforcements) so a surrounded hold stays surrounded. Measured as its own round —
+    /// OFF by default until it is; SIGHTLINE_RIMWAVES=1 turns it on.
+    public static bool EnvelopRimWaves = false;
+
+    /// ENVELOP seats the squad in the MIDDLE of the board, which would trivialise any objective
+    /// whose key tile sits at board centre or whose extraction is a far corner. It is therefore
+    /// only legal on the objectives that have no placed geography of their own: Eliminate,
+    /// Decapitate and Defend (a hold-out with no zone — the surrounded opening the shape exists
+    /// for). Evac/Escort/Rescue (evac zone), Hack (centre terminal) and Sabotage (mid-field
+    /// sites) all keep a directional opening, so no extraction/hack routing changes at all.
+    public static bool EnvelopLegal(List<(int x, int y)> evac, (int x, int y)? terminal,
+                                    List<(int x, int y)> sabotage)
+        => (evac == null || evac.Count == 0) && !terminal.HasValue
+           && (sabotage == null || sabotage.Count == 0);
+
+    /// The deployment shape for this mission. PURE — no RNG draw, no state read beyond the two
+    /// arguments and the static mix/pin. `canEnvelop` comes from EnvelopLegal.
+    public static int DeployFor(int deckSeed, int missionNum, bool canEnvelop)
+    {
+        if (ForcedDeploy >= 0)
+        {
+            int f = ForcedDeploy % DeployShapes;
+            return (f == DeployEnvelop && !canEnvelop) ? DeployFrontal : f;
+        }
+        int total = 0;
+        for (int i = 0; i < DeployMix.Length && i < DeployShapes; i++) total += Math.Max(0, DeployMix[i]);
+        if (total <= 0) return DeployFrontal;
+        // FNV-1a over the two keys, then an avalanche so adjacent missions don't correlate.
+        uint h = 2166136261u;
+        unchecked
+        {
+            h = (h ^ (uint)(deckSeed & 0xffff)) * 16777619u;
+            h = (h ^ (uint)((deckSeed >> 16) & 0xffff)) * 16777619u;
+            h = (h ^ (uint)(missionNum & 0xff)) * 16777619u;
+            h ^= h >> 15; h *= 2246822519u; h ^= h >> 13;
+        }
+        int r = (int)(h % (uint)total);
+        for (int i = 0; i < DeployMix.Length && i < DeployShapes; i++)
+        {
+            r -= Math.Max(0, DeployMix[i]);
+            if (r < 0) return (i == DeployEnvelop && !canEnvelop) ? DeployFrontal : i;
+        }
+        return DeployFrontal;
+    }
+
+    // ENVELOP's player footprint: a tight centre cluster (cols 7-10, rows 3-6) with the same
+    // VIP-LAST contract as PlayerSpawns. All tiles distinct, none on the board's exact centre
+    // (Rescue re-seats a captive there — and Rescue can never draw ENVELOP anyway).
+    static readonly (int x, int y)[] PlayerSpawnsCentre =
+        { (8, 3), (7, 5), (9, 6), (7, 4), (10, 3), (10, 6), (8, 5) };
+
+    static (int x, int y)[] SpawnTableFor(int shape)
+        => shape == DeployEnvelop ? PlayerSpawnsCentre : PlayerSpawns;
+
+    /// Where pod `podId`'s LEAD body deploys. `row` is the shuffled row the FRONTAL path would
+    /// have used (kept as the jitter source so the shared RNG stream is untouched — reading
+    /// rows[] is not a draw). Returns a tile; the caller's collision-relocate loop is unchanged
+    /// and is still the only conditional draw source.
+    static (int x, int y) PodAnchor(int shape, int podId, int row, int gw, int gh)
+    {
+        switch (shape)
+        {
+            case DeployPincer:
+                // Front + both flanks. The two flank pairs sit in the rim lanes the mid-field
+                // screen deliberately leaves open (cols 12-13), at a standoff comparable to the
+                // frontal column so the squad is not shot off its own spawn.
+                switch (podId % 6)
+                {
+                    case 0: return (gw - 2, Math.Clamp(row, 3, gh - 4));
+                    case 1: return (gw - 5, 0);
+                    case 2: return (gw - 5, gh - 1);
+                    case 3: return (gw - 1, row);
+                    case 4: return (gw - 6, 1);
+                    default: return (gw - 6, gh - 2);
+                }
+            case DeployCrossfire:
+                // Two dense masses on the NE and SE bearings with the middle rows left EMPTY, so
+                // a squad in the centre lane holds both in one arc instead of meeting a wall of
+                // evenly-spread bodies one pod at a time.
+                {
+                    int step = podId / 2;
+                    int x = Math.Max(gw - 5, gw - 2 - step);
+                    return (podId % 2 == 0) ? (x, Math.Min(gh - 1, step)) : (x, Math.Max(0, gh - 1 - step));
+                }
+            case DeployEnvelop:
+                // The surrounded opening: pods on all four rims around a centre-deployed squad.
+                switch (podId % 6)
+                {
+                    case 0: return (gw - 2, gh / 2);
+                    case 1: return (1, gh / 2);
+                    case 2: return (gw / 2 + 2, 0);
+                    case 3: return (gw / 2 - 2, gh - 1);
+                    case 4: return (gw - 3, 1);
+                    default: return (2, gh - 2);
+                }
+            default:
+                return (gw - 1 - EnemyPodColOffset[podId % EnemyPodColOffset.Length], row);
+        }
+    }
+
+    /// Which way pod members stack off their lead. FRONTAL/PINCER/CROSSFIRE keep the historical
+    /// downward row stack; ENVELOP's rim pods stack ALONG their own edge so a pod on the north
+    /// rim doesn't march into the squad's lap. Returns (dx, dy) for member 1; member 2 doubles it.
+    static (int dx, int dy) PodStack(int shape, int podId)
+    {
+        if (shape != DeployEnvelop) return (0, 1);
+        switch (podId % 6)
+        {
+            case 0: case 1: case 4: return (0, 1);   // E / W rim pods stack DOWN their column
+            case 5: return (0, -1);                  // the SW pod is already low: stack UP
+            default: return (1, 0);                  // N / S rim pods stack ALONG their row
+        }
+    }
+
+    /// The unit step from `u` toward the NEAREST body in `foes`, on the dominant axis only (so
+    /// the result is always one of the four cardinals). Used to put protective cover on the side
+    /// a body is actually threatened from, whatever bearing this mission's deployment used.
+    /// Identity-preserving for a FRONTAL opening: the squad sits in cols 0-3 and the force in
+    /// cols 12-17, so |dx| >= 11 always dominates |dy| <= 10 and the step is the historical
+    /// +1 (soldiers) / −1 (hostiles) column.
+    static (int dx, int dy) FacingStep(Unit u, List<Unit> foes)
+    {
+        if (u == null || foes == null || foes.Count == 0) return (1, 0);
+        Unit near = null; int bestD = int.MaxValue;
+        foreach (var f in foes)
+        {
+            int d = Util.ChebyDist(u.X, u.Y, f.X, f.Y);
+            if (d < bestD) { bestD = d; near = f; }
+        }
+        if (near == null) return (1, 0);
+        int dx = near.X - u.X, dy = near.Y - u.Y;
+        if (Math.Abs(dx) >= Math.Abs(dy)) return (dx >= 0 ? 1 : -1, 0);
+        return (0, dy >= 0 ? 1 : -1);
+    }
+
     // test hook (SIGHTLINE_MAP): force a specific authored layout index; -1 = normal roll
     public static int ForcedLayout = -1;
 
@@ -83,15 +256,22 @@ public static class Mission
                 grid.Height[x, y] = 0;
             }
 
-        // place players at left spawns, refresh per-mission state (HP persists)
-        for (int i = 0; i < players.Count && i < PlayerSpawns.Length; i++)
+        // W4 THE SECOND AXIS — pick this mission's deployment SHAPE first: it decides both the
+        // squad footprint (below) and every pod's bearing (SpawnEnemies). Pure derivation from
+        // (DeckSeed, missionNum): zero RNG draws, so the shared stream is untouched.
+        int shape = DeployFor(DeckSeed, missionNum, EnvelopLegal(evac, terminal, sabotage));
+        AppliedDeploy = shape;
+        var spawnTable = SpawnTableFor(shape);
+
+        // place players at their deployment footprint, refresh per-mission state (HP persists)
+        for (int i = 0; i < players.Count && i < spawnTable.Length; i++)
         {
             var u = players[i];
             // the VIP/captive always takes the dedicated 5th slot, even when the squad is
             // short-handed (benched soldier) and the VIP would otherwise land on a soldier's
             // lower index and spawn far from the squad/extraction (review Major). Rescue
             // re-seats its captive at centre after Build, so this only matters for Escort.
-            var sp = u.IsVip ? PlayerSpawns[PlayerSpawns.Length - 1] : PlayerSpawns[i];
+            var sp = u.IsVip ? spawnTable[spawnTable.Length - 1] : spawnTable[i];
             u.X = sp.x;
             u.Y = sp.y;
             u.Ammo = u.Weapon.Clip;
@@ -120,7 +300,7 @@ public static class Mission
         // a lighter hostile force (the loud-tempo IS the difficulty) + covered fighting positions
         // at each site (below) so the split squad can hold.
         bool sabotageObj = sabotage != null && sabotage.Count > 0;
-        SpawnEnemies(grid, enemies, missionNum, evacSet, enemyDelta, statDelta, sabotageObj, dmgDelta, defend, defendKeep);
+        SpawnEnemies(grid, enemies, missionNum, evacSet, enemyDelta, statDelta, sabotageObj, dmgDelta, defend, defendKeep, shape);
 
         var occupied = new HashSet<(int, int)>();
         foreach (var u in players) occupied.Add((u.X, u.Y));
@@ -169,9 +349,17 @@ public static class Mission
         Stats.RecordArenaFunnel(authored ? Stats.ArenaAuthored
                                 : attempted ? Stats.ArenaReject : Stats.ArenaProcRoll);
 
-        // protective cover beside each soldier and hostile (both layout paths)
-        foreach (var u in players) TryCover(grid, occupied, u.X + 1, u.Y, TileType.LowCover);
-        foreach (var u in enemies) TryCover(grid, occupied, u.X - 1, u.Y, TileType.HighCover);
+        // Protective cover beside each soldier and hostile (both layout paths), on the tile facing
+        // the OTHER side. W4: with the force no longer always due east, "facing" is derived from
+        // the opposing centroid on its dominant axis — which reproduces the historical +1 / −1
+        // column exactly for a FRONTAL opening (the centroids are ~13 columns apart and at most
+        // ~5 rows apart, so the dominant axis is always x there).
+        {
+            foreach (var u in players)
+            { var f = FacingStep(u, enemies); TryCover(grid, occupied, u.X + f.dx, u.Y + f.dy, TileType.LowCover); }
+            foreach (var u in enemies)
+            { var f = FacingStep(u, players); TryCover(grid, occupied, u.X + f.dx, u.Y + f.dy, TileType.HighCover); }
+        }
 
         // SABOTAGE: drop covered fighting positions just OUTSIDE each charge site's reserved ring,
         // on the squad-facing (west) side, so a split planter isn't planting in the open. Two low
@@ -397,20 +585,59 @@ public static class Mission
     /// Public + static so the endless wave splitter (Game.Endless) and PODTEST share it.
     /// (count == 1 can only reach here from an endless top-up trickle; it keeps a 1-pod,
     /// which is morale-inert by construction — PodAtWaverPoint needs alive >= 2.)
-    public static int[] PodPlan(int count)
+    public static int[] PodPlan(int count) => PodPlan(count, PodMass);
+
+    /// W4 THE SECOND AXIS — FORMATION MASS. `mass` 3 is the FUL-6 plan above, reproduced
+    /// exactly (PODTEST pins its splits). A larger mass trades the number of SERIAL contacts for
+    /// the number of bodies each contact presents at once, which is the raw
+    /// `los-targets/ARMED-soldier-turn` number X1's decomposition named as the thing decision
+    /// density is actually made of. Bodies are split as evenly as possible over
+    /// round(count/mass) pods, so no pod is ever a lone body (the waver telegraph needs a
+    /// survivor) and none is a shapeless blob. Pure — no RNG draw.
+    public static int PodMass = 3;
+
+    /// X2 measurement knob (SIGHTLINE_ENEMYBASE): the constant in `count = base + missionNum`.
+    /// Default 4 = the historical force size.
+    public static int EnemyBaseCount = 4;
+
+    /// X2 (SIGHTLINE_OPENERTRIM): bodies removed from the BASE force on the opening missions —
+    /// the full trim on mission 1, half (rounded up) on mission 2, none from mission 3. The same
+    /// shape as Game.SetupMission's heat grace, applied to the force heat's grace cannot reach.
+    ///
+    /// SHIPPED at 1, measured end-to-end (DEVLOG §X2 round O1/S1). `SIGHTLINE_OPENERTRIM=0`
+    /// restores the pre-X2 opener exactly.
+    public static int OpenerTrim = 1;
+
+    /// W4 — every body in a pod fields the pod LEAD's archetype (see the spawn loop). SHIPPED
+    /// ON: measured exactly ladder-neutral (32.5% = 32.5% run completion, n=40) for the wave's
+    /// biggest single gain on the "which target?" axis (+0.06 target-choices/ARMED) and
+    /// Escort 12.57t -> 8.75t. `SIGHTLINE_PODUNIFORM=0` restores mixed pods.
+    public static bool PodUniform = true;
+
+    public static int[] PodPlan(int count, int mass)
     {
         var sizes = new List<int>();
-        int rem = count;
-        while (rem >= 5) { sizes.Add(3); rem -= 3; }
-        if (rem == 4) { sizes.Add(2); sizes.Add(2); }
-        else if (rem == 3) sizes.Add(3);
-        else if (rem > 0) sizes.Add(rem);
+        if (mass <= 3)
+        {
+            int rem = count;
+            while (rem >= 5) { sizes.Add(3); rem -= 3; }
+            if (rem == 4) { sizes.Add(2); sizes.Add(2); }
+            else if (rem == 3) sizes.Add(3);
+            else if (rem > 0) sizes.Add(rem);
+            return sizes.ToArray();
+        }
+        if (count <= 0) return sizes.ToArray();
+        int pods = Math.Max(1, (int)Math.Round(count / (double)mass, MidpointRounding.AwayFromZero));
+        while (pods > 1 && count / pods < 2) pods--;      // never a pod of 1 while a merge is possible
+        int baseSize = count / pods, extra = count % pods;
+        for (int p = 0; p < pods; p++) sizes.Add(baseSize + (p < extra ? 1 : 0));
         return sizes.ToArray();
     }
 
     static void SpawnEnemies(Grid grid, List<Unit> enemies, int n, HashSet<(int, int)> evac,
                              int enemyDelta = 0, int statDelta = 0, bool sabotage = false,
-                             int dmgDelta = 0, bool defend = false, int defendKeep = 0)
+                             int dmgDelta = 0, bool defend = false, int defendKeep = 0,
+                             int shape = DeployFrontal)
     {
         // Headcount cap raised 10 -> 12 so the top-Heat "+enemy" rungs aren't silently wasted
         // (the +1/+1 from RELENTLESS/OVERWHELMING used to clip at 10 on later missions). 12 still
@@ -421,8 +648,35 @@ public static class Mission
         // Armor, and the Evac fix stacked huge squad power -> heat-0 hit ~97%/mission (too trivial).
         // Restored the enemy headcount (4+n, cap 12) and the full per-mission stat bump (n-1) so the
         // now-strong squad faces a real fight; Heat's deltas still stack for the mastery ladder.
-        int count = Math.Clamp(4 + n + enemyDelta, 3, 12);   // deployment-card + Heat modifier
-        int bump = Math.Max(0, (n - 1) + statDelta);         // stat growth per mission +/- card
+        // X2: the base headcount is a static (default 4 — the historical `4 + n`) so a measured
+        // round can price the BODY lever against the ACCURACY lever without a rebuild.
+        int count = Math.Clamp(EnemyBaseCount + n + enemyDelta, 3, 12);   // deployment-card + Heat modifier
+        // R1 REVIEW FIX — the floor was `Math.Max(0, ...)`, which silently ATE the RECRUIT rung's
+        // advertised relief on MISSION 1, the exact mission the on-ramp exists for: at n == 1 the
+        // growth term is 0, so heat 0 gave max(0, 0) = 0 and RECRUIT (statDelta -1) gave
+        // max(0, -1) = 0 — identical. Only the body count moved, while Hud.RecruitLines and
+        // Heat.RecruitMod.Desc both promise "each -1 HP and aim". The floor drops to -1: one point
+        // of force-wide relief may go BELOW the base, and no more (a deeper stack — RECRUIT plus a
+        // multi-tier adaptive assist — still bottoms out at -1, so no archetype can be trivialised).
+        // Heats 1-8 are bit-for-bit unchanged by construction: there statDelta = card.StatDelta +
+        // heatStat is never negative, so (n-1)+statDelta >= 0 and the new floor is unreachable.
+        int bump = Math.Max(-1, (n - 1) + statDelta);        // stat growth per mission +/- card (relief floor -1)
+        // X2 TRUE NORTH II — THE COLD OPENER. Game.SetupMission already ramps HEAT's escalation in
+        // over m1-2 ("the measured ~20% mission-1 loss, which hard-caps run completion"), but that
+        // grace is gated on heat > 0, so the BASE force meets the coldest squad in the game with no
+        // ramp at all: 5 hostiles against 4 rookies with no promotion, perk, mod or boon — and,
+        // since X1, +3 HP each. The X2 baseline measured mission 1 at 75% win (n=40) against
+        // 90% for missions 3-4, i.e. the difficulty curve is U-SHAPED at heat 0 and the opener is
+        // as lethal as the finale — exactly the front-loaded anxiety DESIGN.md §3.D forbids.
+        // RECRUIT ran the experiment for us: over the SAME 40 worlds its only mission-1 difference
+        // is one fewer body (its -1 stat is a no-op at m1, where bump is already 0), and mission 1
+        // reads 100% (n=40, zero losses). OpenerTrim gives the base force the same ramp heat has:
+        // full trim on m1, half on m2, nothing from m3. Default 0 = the pre-X2 opener.
+        // INTEGRATION NOTE: R1's -1 relief floor now makes RECRUIT's m1 stat relief real, so the
+        // "its -1 stat is a no-op at m1" clause above is no longer true post-R1 — the OpenerTrim
+        // diagnosis and its measurement are unaffected (they turn on the BODY count, not the stat).
+        if (OpenerTrim > 0 && n <= 2)
+            count = Math.Max(3, count - (n == 1 ? OpenerTrim : (OpenerTrim + 1) / 2));
         // SABOTAGE relief (the weakest objective / m5 gate, ~65% -> aiming ~85%): the difficulty of
         // this objective IS the 3x split-and-go-loud tempo, not raw bodies, so trim the force by 2
         // (floored at 3) so a divided squad isn't also out-gunned. Stat bump is untouched and the
@@ -504,11 +758,16 @@ public static class Mission
         // like the sabotage/defend trims above.
         if (podsOf3) count = Math.Max(3, count - 1);
         int[] podOf = null, memberOf = null;
-        int[] podAnchor = null;
+        int[] podAnchor = null, podAnchorX = null;
+        // W4 POD UNIFORMITY: the pod lead's archetype roll, reused by its members. Sized for the
+        // i/2 pairing too (m1-2), so the teaching tier's pairs field one kind of body as well;
+        // the FINALE is excluded (its kit slots are explicit and FUL11PROBE pins their geometry).
+        float[] podRoll = new float[count / 2 + 2];
         if (podsOf3)
         {
             int[] plan = PodPlan(count);
-            podOf = new int[count]; memberOf = new int[count]; podAnchor = new int[plan.Length];
+            podOf = new int[count]; memberOf = new int[count];
+            podAnchor = new int[plan.Length]; podAnchorX = new int[plan.Length];
             for (int p = 0, idx = 0; p < plan.Length; p++)
                 for (int m = 0; m < plan[p] && idx < count; m++, idx++) { podOf[idx] = p; memberOf[idx] = m; }
         }
@@ -516,24 +775,63 @@ public static class Mission
         {
             int podId = podsOf3 ? podOf[i] : i / 2;
             int member = podsOf3 ? memberOf[i] : 0;
-            int y;
-            if (podsOf3 && member > 0)
+            // the member index WITHIN the pod for uniformity purposes: the FUL-6 plan on m3-5,
+            // and the i/2 pairing everywhere else (`member` itself must stay 0 off the plan —
+            // the COHESION row stack below is keyed on it).
+            int podMember = podsOf3 ? member : i % 2;
+            // W4 — the pod's LEAD bearing comes from the deployment shape (FRONTAL reproduces the
+            // historical `grid.W - 1 - colOff` column exactly); followers stack off the lead's
+            // FINAL tile along the shape's own stacking axis. rows[] reads are not RNG draws, so
+            // the shared stream is untouched; the collision-relocate loop below stays the only
+            // conditional draw source, exactly as before.
+            var lead = PodAnchor(shape, podId, rows[i % rows.Count], grid.W, grid.H);
+            int x, y;
+            if (podsOf3 && member > 0 && shape == DeployEnvelop)
             {
-                int a = podAnchor[podId];               // first member's final row (set below)
-                y = a + member < grid.H ? a + member : a - member;   // stack down; flip up at the edge
+                // ENVELOP's rim pods stack ALONG their own edge (a north-rim pod marching straight
+                // down into the squad's lap would un-surround the opening), off the lead's FINAL
+                // tile so a relocated lead keeps its formation.
+                var (sdx, sdy) = PodStack(shape, podId);
+                int ax = podAnchorX[podId], ay = podAnchor[podId];
+                x = ax + sdx * member; y = ay + sdy * member;
+                if (!grid.InBounds(x, y)) { x = ax - sdx * member; y = ay - sdy * member; }
+                if (!grid.InBounds(x, y)) { x = ax; y = ay; }        // degenerate: the relocate loop deals
             }
-            else y = rows[i % rows.Count];
-            int colOff = EnemyPodColOffset[podId % EnemyPodColOffset.Length];
-            int x = grid.W - 1 - colOff;              // stagger across cols 14-17
+            else if (podsOf3 && member > 0)
+            {
+                // the historical COHESION stack, unchanged: the pod's own column, rows off the
+                // lead's final row, flipped upward at the board edge.
+                int a = podAnchor[podId];
+                x = lead.x;
+                y = a + member < grid.H ? a + member : a - member;
+            }
+            else { x = lead.x; y = lead.y; }
+            x = Math.Clamp(x, 0, grid.W - 1); y = Math.Clamp(y, 0, grid.H - 1);
             int guard = 0;
             while ((used.Contains((x, y)) || evac.Contains((x, y))) && guard++ < 30)
             { y = Util.RandInt(0, grid.H - 1); x = grid.W - 2 - Util.RandInt(0, 2); }
             used.Add((x, y));
-            if (podsOf3 && member == 0) podAnchor[podId] = y;   // anchor = the pod lead's final row
+            if (podsOf3 && member == 0) { podAnchor[podId] = y; podAnchorX[podId] = x; }   // the pod lead's final tile
 
             bool finalMission = n >= Run.MaxMissions;
             bool midBoss = !finalMission && i == 0 && (n == 3 || n == 5);   // recurring named elite
+            bool finalBody = n >= Run.MaxMissions;
             float r = Util.RandF();
+            // W4 THE SECOND AXIS — POD UNIFORMITY. The wave's instrumentation says an armed
+            // soldier already SEES ~2.4 foes but almost never has two shots worth choosing
+            // between: CountMeaningfulChoices only counts a rival target whose ShotValue is
+            // within 12% of the best, and three independently-rolled archetypes have wildly
+            // different HP, guns and PriorityWeight, so the shots are never comparable. A pod
+            // that fields ONE kind of body presents genuinely interchangeable targets — the
+            // "which one do I shoot?" call the metric is trying to detect — at no change in
+            // force strength or draw count (the per-body roll still happens; members past the
+            // lead just reuse the lead's). It also reads better: "three RAIDERS", not a trio of
+            // strangers. The one-BOMBARD / one-WARBRINGER caps below still demote any extra.
+            if (PodUniform && !finalBody && podId < podRoll.Length)
+            {
+                if (podMember == 0) podRoll[podId] = r;
+                else r = podRoll[podId];
+            }
             // SIGNAL W5 — BOSS IDENTITY: the finale boss (i==0) + its explicit kit retinue
             // (i==1/2 on Legion/Syndicate finales) and the m3/m5 mid-boss are all keyed off
             // Combat.MissionFaction (see MakeFinaleBoss/MakeFinaleRetinue/MakeMidBoss below),
@@ -956,9 +1254,72 @@ public static class Mission
         return u;
     }
 
+    // ─── PROGRAM RESONANCE X1 "THE EXCHANGE" — HOSTILE TOUGHNESS ─────────────────────────
+    /// A flat HP surcharge carried by EVERY hostile body. MakeHostile is the single funnel for
+    /// hostiles (rank-and-file cascade, faction rosters, Defend/LAST STAND waves, finale retinue,
+    /// mid-boss and finale boss), so this one constant is the whole lever.
+    ///
+    /// WHY (measured on the FUL-13 tree, h0 CRN pair-set slots 0-19, n=40 campaigns / 158 missions):
+    /// a soldier's shot averaged 5.1 damage per SHOT (5.8 per hit) into an ~8 HP body, so
+    /// time-to-kill was ONE hit and a fight resolved as an alpha-strike race — Eliminate 3.59
+    /// turns, lead-swings 0.60/match, meaningful-choices/turn 2.33 (the project's own design doc
+    /// cites a 3-5 band). Nine programs of comeback economy — pod morale/rout, the BRACE interrupt,
+    /// focused overwatch, the 3-turn bleed-out with STABILIZE/revive, sixteen boons — were tuned
+    /// for a fight that ended before any of them could bite. Bodies were never the constraint;
+    /// one-shot lethality was.
+    ///
+    /// WHY FLAT, NOT A MULTIPLIER: the one-shot victims are the LIGHT bodies (DRONE/HOUND 3,
+    /// SCOUT/SNIPER/STRIKER 4, GRUNT/HUNTER/SPOTTER 5). Player damage grows across a run through
+    /// mods/perks while enemy HP grows through `bump` (= mission-1 + Heat.StatDelta), so a flat
+    /// surcharge holds hits-to-kill near 2 at BOTH ends of the campaign, where a multiplier would
+    /// leave m1 one-shot and turn the m6 boss (14+n) into a drag. It also leaves the archetype
+    /// spread intact in absolute HP.
+    ///
+    /// SYMMETRY: soldier durability is deliberately NOT moved with it — the lead metric the wave
+    /// targets is (sum player HP - sum ACTIVE enemy HP), and scaling both pools leaves that ratio
+    /// (and therefore lead-swings) exactly where it was. The squad's exposure cost of the longer
+    /// fight is the measured trade; see the wave's round table in docs/DEVLOG.md.
+    /// X2 TRUE NORTH II: `const` -> static field so the post-merge correction wave can pin it
+    /// per measured round from `SIGHTLINE_TOUGH` (Program.cs). Default is X1's shipped 3 — a
+    /// batch with no override is byte-identical to the const form.
+    public static int HostileToughness = 3;
+
+    /// X1 THE EXCHANGE, the SYMMETRY half. Points trimmed off BOTH ends of every hostile
+    /// weapon's damage band (DmgMin floored at 1). MEASURED necessity, not a guess: shipping
+    /// HostileToughness alone (round R1, h0 CRN slots 0-19, n=40) moved Eliminate to 5.75
+    /// turns and lead-swings to 0.79 but collapsed run completion 52.5% -> 22.5% — the longer
+    /// fight simply handed the enemy ~40% more shooting turns at an unchanged 6-10 HP squad.
+    /// Soldiers cannot absorb the extra exposure and the roster cannot be inflated to let them
+    /// (soldier HP is the OTHER side of the lead metric this wave targets — raising it would
+    /// restore the pool ratio and undo the swing gain), so the give-back is taken out of the
+    /// hostile's per-shot lethality instead. Net design statement: a hostile is a BODY TO BE
+    /// WORN DOWN, not a glass cannon trading one-shot kills — the same trade the player now
+    /// faces going the other way.
+    /// X2 TRUE NORTH II: `const` -> static field, pinnable from `SIGHTLINE_TRIM`. Default 1.
+    public static int HostileDamageTrim = 1;
+
+    /// X2 TRUE NORTH II — the POST-MERGE CORRECTION lever, and the third member of the X1 pair.
+    /// Flat points off EVERY hostile's aim, applied in the same single funnel as HostileToughness
+    /// (aim floored at 20 so no body becomes a harmless prop). Default 0 = the pre-X2 force.
+    ///
+    /// WHY ACCURACY, and not bodies or durability. Fourteen waves each measured on their own base
+    /// composed into a tree 20 points below its own published band. Almost none of that drift was
+    /// a difficulty DECISION: Q1 stopped pod scatter stacking two bodies in one tile, FUL-9
+    /// repaired route exposure, FUL-6 fielded pods of 3 with linked activation, W6 gave the mid
+    /// ladder a coordination tier, W4 opened the fight on more than one bearing. Every one of them
+    /// made the SAME force put MORE FIRE on the squad. The give-back therefore comes out of the
+    /// same quantity — how much of that fire lands — and out of nothing the waves deliberately
+    /// bought: hostile HP (X1's two-hit trade), hostile COUNT (W4's contact breadth, armed/turn
+    /// 1.39 -> 1.55) and player damage (shots-per-kill) are all untouched by construction, so
+    /// Eliminate's turn budget and the decision-density instruments cannot move through this knob.
+    public static int HostileAimTrim = 0;
+
     static Unit MakeHostile(string name, string cls, WeaponKind w, int hp, int aim, int mob, int x, int y)
     {
-        var u = new Unit { Name = name, Cls = cls, Team = Team.Enemy, X = x, Y = y, Hp = hp, MaxHp = hp, Aim = aim, Mobility = mob, Weapon = Weapon.Make(w) };
+        int thp = hp + HostileToughness;
+        if (HostileAimTrim > 0) aim = Math.Max(20, aim - HostileAimTrim);   // no-op (identity) at the default 0
+        var u = new Unit { Name = name, Cls = cls, Team = Team.Enemy, X = x, Y = y, Hp = thp, MaxHp = thp, Aim = aim, Mobility = mob, Weapon = Weapon.Make(w) };
+        u.Weapon.TrimBaseDamage(HostileDamageTrim);
         u.Ammo = u.Weapon.Clip;
         return u;
     }
@@ -1142,22 +1503,83 @@ public static class Mission
         return e;
     }
 
-    /// Procedural-path safety net: every hostile / objective tile must stay reachable
+    /// Procedural-path safety net: every SOLDIER / hostile / objective tile must stay reachable
     /// from the squad over walkable terrain. If a generated structure walled one off,
     /// carve an L-shaped lane back toward the squad by clearing the blocking cover. Runs
     /// universally (authored maps are pre-verified, but the protective cover is added
     /// after that check, so this catches any edge case for both paths).
+    ///
+    /// R2 FIX 1: the OTHER PLAYERS are repaired too. This net floods from players[0] and used
+    /// to repair only enemies / evac / terminal / sabotage — the rest of the squad was never
+    /// checked. Invisible while every deployment shape seated the squad in cols 0-3 (which
+    /// BuildProcedural deliberately keeps clear), but W4's ENVELOP centre seat (cols 7-10,
+    /// rows 3-6) drops soldiers into the mid-field HIGH-cover band, and Grid.CostMap's
+    /// no-corner-cutting rule then seals pockets around them: measured 23 stranded soldiers in
+    /// 540 ENVELOP builds (~4.3%, i.e. ~20-25% of the procedural ones), one fully entombed with
+    /// no legal move for the whole mission. A stranded soldier is a silent force reduction, and
+    /// if it is ever downed nobody can reach it to STABILIZE, so the bleed-out is a guaranteed
+    /// KIA. PlaceBarrels already treats every player tile as required (see its `required` set)
+    /// — this brings the second net in line with the first. SIGHTLINE_GEOMTEST is the standing
+    /// guard (it sweeps all four deployment shapes; STACKTEST's fixed 16-board sample does not).
+    static readonly int[,] ElbowDirs =
+    {
+        { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 },
+        { 1, 1 }, { 1, -1 }, { -1, 1 }, { -1, -1 }
+    };
+
     static void EnsureConnectivity(Grid g, List<Unit> players, List<Unit> enemies,
                                    HashSet<(int, int)> evac, (int x, int y)? terminal, List<(int x, int y)> sabotage)
     {
         if (players.Count == 0) return;
         var from = players[0];
+
+        // R2 FIX 1b — ELBOW ROOM. A soldier can be perfectly *reachable* and still have no legal
+        // move on turn 1: every neighbour is either cover or a teammate, and CostMap's corner rule
+        // kills the diagonals. ENVELOP packs the squad four-abreast into the mid-field cover band,
+        // so this shows up on its own and it is the same defect wearing a different hat. Open ONE
+        // adjacent cover tile — cardinals first, in a fixed direction order — so nobody opens the
+        // mission frozen. Deterministic: zero RNG draws, and a no-op on every build that already
+        // had a step (so h0 batches stay paired).
+        //
+        // MEASURED FIRING RATE, 1536 fresh boards across all four shapes x 8 objectives x 6
+        // missions x heats {0,8}: 22 builds (1.4%), and EVERY ONE of them under ENVELOP — 15 on
+        // the procedural fallback, 7 on two authored arenas (28 and 3, whose centre seats can box
+        // a soldier too). It never fires under FRONTAL/PINCER/CROSSFIRE, so no pre-W4 opening has
+        // its geometry touched at all.
+        var occupied = new HashSet<(int, int)>();
+        foreach (var u in players) occupied.Add((u.X, u.Y));
+        foreach (var u in enemies) occupied.Add((u.X, u.Y));
+        bool Free(int x, int y) => g.IsFloor(x, y) && !occupied.Contains((x, y));
+        bool HasStep(int x, int y)
+        {
+            for (int i = 0; i < 8; i++)
+            {
+                int dx = ElbowDirs[i, 0], dy = ElbowDirs[i, 1];
+                if (!Free(x + dx, y + dy)) continue;
+                if (dx != 0 && dy != 0 && (!Free(x + dx, y) || !Free(x, y + dy))) continue;   // no corner cutting
+                return true;
+            }
+            return false;
+        }
+        foreach (var u in players)
+        {
+            if (HasStep(u.X, u.Y)) continue;
+            for (int i = 0; i < 4; i++)   // cardinals only — a diagonal opening can still be corner-blocked
+            {
+                int nx = u.X + ElbowDirs[i, 0], ny = u.Y + ElbowDirs[i, 1];
+                if (!g.InBounds(nx, ny) || occupied.Contains((nx, ny))) continue;
+                g.Tiles[nx, ny] = TileType.Floor; g.Barrel[nx, ny] = false;
+                break;
+            }
+        }
+
         for (int attempt = 0; attempt < 8; attempt++)
         {
             var cost = g.CostMap(from.X, from.Y, (x, y) => false, out _, 9999);
             bool Stuck(int x, int y) => g.InBounds(x, y) && cost[x, y] < 0;
 
             var stuck = new List<(int x, int y)>();
+            foreach (var p in players) if (Stuck(p.X, p.Y)) stuck.Add((p.X, p.Y));
             foreach (var e in enemies) if (Stuck(e.X, e.Y)) stuck.Add((e.X, e.Y));
             foreach (var t in evac) if (Stuck(t.Item1, t.Item2)) stuck.Add(t);
             if (terminal.HasValue && Stuck(terminal.Value.x, terminal.Value.y)) stuck.Add(terminal.Value);
@@ -1228,6 +1650,12 @@ public static class Mission
             if (occupied.Contains((x, y))) continue;
             if (!g.IsFloor(x, y)) continue;                       // cover / existing barrel / OOB
             if (g.Barrel[x, y]) continue;
+            // W4: never within blast reach of a soldier's DEPLOYMENT tile — a centre-deployed
+            // squad (ENVELOP) would otherwise open the mission sitting next to a live barrel.
+            // A no-op for every left-to-right opening (cols 0-3 vs the cols 6-15 bias).
+            bool nearSquad = false;
+            foreach (var pu in players) if (Util.ChebyDist(x, y, pu.X, pu.Y) <= 2) { nearSquad = true; break; }
+            if (nearSquad) continue;
 
             // tentatively drop the barrel, then verify connectivity; revert if it walls anything off.
             g.Barrel[x, y] = true;

@@ -1271,7 +1271,14 @@ public partial class Game
             SetupMission(3);
             foreach (var e in Enemies)
             {
-                int baseMax = Weapon.Make(e.Weapon.Kind).DmgMax;
+                // X1 THE EXCHANGE: every hostile weapon is trimmed by Mission.HostileDamageTrim
+                // at MakeHostile, so the reference band must take the SAME trim — otherwise this
+                // pin reports the exchange's give-back as a heat-ladder regression (it is not:
+                // what the pin actually asserts is that heat's +1 reaches every spawned weapon).
+                // Derived, not re-hardcoded, so it stays true if the trim constant ever moves.
+                var refW = Weapon.Make(e.Weapon.Kind);
+                refW.TrimBaseDamage(Mission.HostileDamageTrim);
+                int baseMax = refW.DmgMax;
                 if (e.Weapon.DmgMax != baseMax + expectDelta)
                 { fails.Add($"{tag}:{e.Cls}dmg={e.Weapon.DmgMax}want={baseMax + expectDelta}"); return; }
             }
@@ -3626,6 +3633,7 @@ public partial class Game
     public static string ExposureSelfTest()
     {
         var fails = new List<string>();
+        System.Text.StringBuilder sb0Deploy = null;   // W4 deployment-shape histogram (filled below)
         const int Seeds = 200;
         int nLay = Maps.Layouts.Length;
         var arenaHist = new int[nLay];
@@ -3690,6 +3698,107 @@ public partial class Game
         for (int a = 0; a < nLay; a++)
             if (arenaHist[a] == 0) fails.Add($"arenaNeverDealt:{a}");
 
+        // ── W4 THE SECOND AXIS: the DEPLOYMENT SHAPE is now a third exposure axis ─────
+        // Enumerate shape x arena and shape x objective over the same seed space, and pin the
+        // three contracts the geometry has to keep:
+        //   (1) PURE — DeployFor consumes ZERO Util.Rng draws (every CRN pairing depends on it);
+        //   (2) DETERMINISTIC — the same (seed, mission) always yields the same shape;
+        //   (3) LEGAL — ENVELOP (a centre deployment) is never dealt to an objective whose
+        //       geography it would trivialise; every legal shape reaches every objective/arena.
+        {
+            int nShapes = Mission.DeployShapes;
+            var shapeHist = new int[nShapes];
+            var shapeArena = new bool[nShapes, nLay];
+            var shapeObj = new Dictionary<(int, Objective), int>();
+            // (1) purity: interleaving DeployFor calls must not perturb the shared stream.
+            Util.Reseed(4242);
+            int refDraw = Util.RandInt(0, 1000000);
+            Util.Reseed(4242);
+            for (int k = 0; k < 500; k++) Mission.DeployFor(k * 31 + 7, (k % Run.MaxMissions) + 1, k % 2 == 0);
+            if (Util.RandInt(0, 1000000) != refDraw) fails.Add("deployConsumesRng");
+
+            bool EnvOk(Objective o) => o == Objective.Eliminate || o == Objective.Decapitate || o == Objective.Defend;
+
+            // shape x ARENA is a pure (seed, mission) x (seed, mission) cross-product — no map
+            // generation needed — so it sweeps a MUCH wider seed space than the route walk below.
+            // A low-weight shape (CROSSFIRE at 1/10) simply does not reach all 35 arenas inside
+            // 200 seeds, and asserting on that sample would be asserting on sampling noise.
+            const int ArenaSeeds = 4000;
+            for (int i = 0; i < ArenaSeeds; i++)
+            {
+                int seed = 1000 + i * 7919;
+                for (int m = 1; m <= Run.MaxMissions; m++)
+                {
+                    int a = Mission.DeckPick(seed, m);
+                    if (a < 0 || a >= nLay) continue;
+                    for (int leg = 0; leg < 2; leg++)
+                    {
+                        int sh = Mission.DeployFor(seed, m, leg == 1);
+                        if (sh != Mission.DeployFor(seed, m, leg == 1)) fails.Add($"seed{seed}:deployNotDeterministic");
+                        if (sh < 0 || sh >= nShapes) { fails.Add($"seed{seed}:deployOutOfRange:{sh}"); continue; }
+                        if (sh == Mission.DeployEnvelop && leg == 0) fails.Add($"seed{seed}:envelopOnIllegalObjective");
+                        shapeHist[sh]++; shapeArena[sh, a] = true;
+                    }
+                }
+            }
+            for (int i = 0; i < Seeds; i++)
+            {
+                int seed = 1000 + i * 7919;
+                var run = new Run { MapSeed = seed };
+                run.GenerateMap(seed);
+                // shape x objective over every enumerated route (mission # = the fight's depth)
+                var routes2 = new List<List<MissionNode>>();
+                void Walk2(MissionNode node, List<MissionNode> path)
+                {
+                    path.Add(node);
+                    if (node.Next.Count == 0) routes2.Add(new List<MissionNode>(path));
+                    else foreach (int id in node.Next) Walk2(run.Map[id], path);
+                    path.RemoveAt(path.Count - 1);
+                }
+                Walk2(run.Map[0], new List<MissionNode>());
+                foreach (var route in routes2)
+                {
+                    int m = 0;
+                    foreach (var node in route)
+                    {
+                        if (node.Kind == NodeKind.Event) continue;
+                        m++;
+                        var o = node.Card.Objective;
+                        int sh = Mission.DeployFor(seed, m, EnvOk(o));
+                        if (sh == Mission.DeployEnvelop && !EnvOk(o)) fails.Add($"seed{seed}:envelopDealtTo{o}");
+                        shapeObj[(sh, o)] = shapeObj.GetValueOrDefault((sh, o)) + 1;
+                    }
+                }
+            }
+
+            string ShapeName(int d) => d switch
+            {
+                Mission.DeployPincer => "PINCER", Mission.DeployCrossfire => "CROSSFIRE",
+                Mission.DeployEnvelop => "ENVELOP", _ => "FRONTAL",
+            };
+            // every shape the SHIPPED mix can deal must reach every arena, and every legal
+            // objective. A zero-weight shape is inert by design and is not required to appear.
+            for (int sh = 0; sh < nShapes; sh++)
+            {
+                bool weighted = sh < Mission.DeployMix.Length && Mission.DeployMix[sh] > 0;
+                if (!weighted) continue;
+                if (shapeHist[sh] == 0) { fails.Add($"shapeNeverDealt:{ShapeName(sh)}"); continue; }
+                for (int a = 0; a < nLay; a++)
+                    if (!shapeArena[sh, a]) fails.Add($"shape{ShapeName(sh)}NeverOnArena{a}");
+                foreach (Objective o in Enum.GetValues<Objective>())
+                {
+                    if (sh == Mission.DeployEnvelop && !EnvOk(o)) continue;   // illegal by design
+                    if (shapeObj.GetValueOrDefault((sh, o)) == 0) fails.Add($"shape{ShapeName(sh)}Never{o}");
+                }
+            }
+            sb0Deploy = new System.Text.StringBuilder();
+            sb0Deploy.AppendLine($"DEPLOYMENT SHAPE HISTOGRAM ({ArenaSeeds} seeds x {Run.MaxMissions} missions x 2 legality states):");
+            for (int sh = 0; sh < nShapes; sh++)
+                sb0Deploy.AppendLine($"  {ShapeName(sh),-10}: {shapeHist[sh]}"
+                    + $"   arenas covered {Enumerable.Range(0, nLay).Count(a => shapeArena[sh, a])}/{nLay}"
+                    + $"   objectives covered {Enum.GetValues<Objective>().Count(o => shapeObj.GetValueOrDefault((sh, o)) > 0)}/{Enum.GetValues<Objective>().Length}");
+        }
+
         var sb = new System.Text.StringBuilder();
         sb.AppendLine($"EXPOSURETEST: {Seeds} seeds | {routesTotal} routes enumerated | {Seeds * Run.MaxMissions} deck draws over {nLay} arenas");
         sb.AppendLine("ARENA DECK HISTOGRAM (arena:draws):");
@@ -3703,6 +3812,7 @@ public partial class Game
         foreach (Objective o in Enum.GetValues<Objective>())
             sb.AppendLine($"  {o,-10}: {objHist.GetValueOrDefault(o)}");
         sb.AppendLine($"  (Escort nodes total {escortNodes} — exactly one per map by construction, <=1 per route)");
+        if (sb0Deploy != null) sb.Append(sb0Deploy);
         sb.Append(fails.Count == 0 ? "EXPOSURETEST PASS"
             : $"EXPOSURETEST FAIL: {string.Join(", ", fails.Take(12))}{(fails.Count > 12 ? $" (+{fails.Count - 12} more)" : "")}");
         return sb.ToString();
@@ -3723,12 +3833,20 @@ public partial class Game
     ///   (7) unreachable tiles are never computed, and the caged captive forecasts empty,
     ///   (8) the mover's real X/Y/Hunkered/MovedAfterFire survive the probe untouched,
     ///   (9) the post-move state model (moving drops HUNKER) is applied per tile, and
-    ///  (10) the signature cache actually suppresses redundant rebuilds.
+    ///  (10) the signature cache actually suppresses redundant rebuilds, and
+    ///  (11) R2 FIX 2 — the forecast is TRUE: for every weapon kind, the number the card shows is
+    ///       measured against 100k real Combat.Resolve rolls and must match the sample mean.
+    /// Leg (11) exists because legs (1)-(10) could not have caught the defect it guards. They
+    /// hand-recomputed the SAME formula the forecast used, so a wrong formula agreed with itself:
+    /// the card read 31-44% low for two years' worth of waves (crit AND graze both omitted, both
+    /// pushing the same way) and every assertion here passed. Comparing against the resolver is
+    /// the only kind of check that catches that class of defect.
     /// Finishes with a measured worst-case rebuild cost (198 tiles x 8 guns). One-line report.
     public string ThreatSelfTest()
     {
         NoPersist = true;
         var fails = new System.Collections.Generic.List<string>();
+        string groundTruth = "ground truth NOT MEASURED";
 
         // ---- deterministic combat statics (a prior test in the same process must not bleed in) ----
         Combat.AllUnits = System.Array.Empty<Unit>();
@@ -3797,7 +3915,7 @@ public partial class Game
         foreach (var e in new[] { a1, a2, a3 })
         {
             var o = Combat.ComputeOdds(Grid, e, sol);
-            wantExp += o.HitChance * 0.01f * ((Combat.HardenedReduce(sol, o.DmgMin, false) + Combat.HardenedReduce(sol, o.DmgMax, false)) * 0.5f);
+            wantExp += Combat.ExpectedDamage(sol, o);   // R2 FIX 2: the shared source of truth, ground-truthed in leg (11)
             float sc = o.HitChance * 1000f + (o.DmgMin + o.DmgMax);
             if (sc > wantScore) { wantScore = sc; wantBest = o.HitChance; wantCls = e.Cls; }
         }
@@ -3908,6 +4026,52 @@ public partial class Game
         Grid.Tiles[3, 3] = TileType.LowCover; ComputeThreat();
         if (ThreatRebuilds != r0 + 2) fails.Add("cacheDidNotInvalidateOnTerrainChange");
 
+        // ---------- (11) R2 FIX 2: GROUND TRUTH — the forecast vs 100k real Resolve rolls ----------
+        // One enemy attacker per weapon kind at a fixed range on open ground, firing at a soldier
+        // pinned off full HP (so Combat.FragileFloor — the only term ExpectedDamage deliberately
+        // omits — can never fire and skew the sample). The attacker is an ENEMY on purpose: the
+        // streak-breaker aim bonus Resolve folds into effHit is player-only, so the displayed
+        // HitChance is exactly the roll threshold and the comparison is apples to apples.
+        {
+            const int rolls = 100000;
+            double worstRel = 0; string worstName = "";
+            foreach (WeaponKind wk in System.Enum.GetValues(typeof(WeaponKind)))
+            {
+                var g2 = new Grid();
+                var atk = new Unit { Name = "FOE", Cls = "GRUNT", Team = Team.Enemy, X = 5, Y = 5, Hp = 6, MaxHp = 6,
+                                     Aim = 65, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+                atk.Weapon = Weapon.Make(wk);
+                var def = new Unit { Name = "SOL", Cls = "ASSAULT", Team = Team.Player, X = 9, Y = 5, Hp = 400, MaxHp = 401,
+                                     Aim = 65, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+                atk.Ammo = 9999; def.Ammo = def.Weapon.Clip;
+                if (Util.TileDist(atk.X, atk.Y, def.X, def.Y) > atk.Weapon.MaxRange) { fails.Add($"gt_{wk}_outOfRange"); continue; }
+                Combat.AllUnits = new System.Collections.Generic.List<Unit> { atk, def };
+
+                var o = Combat.ComputeOdds(g2, atk, def);
+                float shown = Combat.ExpectedDamage(def, o);
+                if (shown <= 0f) { fails.Add($"gt_{wk}_vacuousForecast"); continue; }
+
+                Util.Reseed(7723 + (int)wk);
+                long total = 0;
+                for (int i = 0; i < rolls; i++)
+                {
+                    def.Hp = 400;                     // never full HP -> FragileFloor stays out of the sample
+                    atk.ConsecutiveMisses = 0;        // enemy streak is inert in ComputeOdds; pin it anyway
+                    total += Combat.Resolve(g2, atk, def).Damage;
+                }
+                double measured = (double)total / rolls;
+                double rel = Math.Abs(measured - shown) / Math.Max(0.001, measured);
+                if (rel > worstRel) { worstRel = rel; worstName = wk.ToString(); }
+                // 2% is ~6 sigma at this sample size for every band here; the pre-fix formula was
+                // off by 31-44%, so this tolerance separates "true" from "wrong formula" by 15x.
+                if (rel > 0.02)
+                    fails.Add($"gt_{wk}_forecast={shown:0.000}_measured={measured:0.000}_off={rel * 100:0.0}%");
+            }
+            Combat.AllUnits = System.Array.Empty<Unit>();
+            if (worstName.Length == 0) fails.Add("gt_noWeaponSampled");
+            groundTruth = $"worst forecast-vs-Resolve error {worstRel * 100:0.00}% ({worstName}, {rolls} rolls/weapon)";
+        }
+
         // ---------- perf: worst case — every tile reachable, 8 armed guns ----------
         Scene(9, 5);
         for (int i = 0; i < 8; i++)
@@ -3926,7 +4090,7 @@ public partial class Game
 
         Combat.AllUnits = System.Array.Empty<Unit>();
         return fails.Count == 0
-            ? $"THREATTEST PASS (worst-case rebuild {ms:0.000} ms over {Cfg.GridW * Cfg.GridH} tiles x 8 guns; centre sees {guns})"
+            ? $"THREATTEST PASS ({groundTruth}; worst-case rebuild {ms:0.000} ms over {Cfg.GridW * Cfg.GridH} tiles x 8 guns; centre sees {guns})"
             : $"THREATTEST FAIL: {string.Join(", ", fails)}";
     }
 
@@ -4344,5 +4508,442 @@ public partial class Game
     }
     public void DebugSetTurn(int t) => _turnCount = t;
     public void DebugCheckEnd() => CheckEnd();
+
+    /// SIGHTLINE_ONRAMPTEST — PROGRAM RESONANCE W5 "ON-RAMP". Two features, one test:
+    ///
+    ///  (A) the RECRUIT rung (Heat.Min == -1) is a REAL, measurable difficulty below standard —
+    ///      the data row, the built mission, the bleed-out clock and the checkpoint valve all move,
+    ///      and heat 0 does NOT. The last clause matters most: RECRUIT ships by widening the heat
+    ///      RANGE, so every assertion below is paired with the same read at heat 0 to prove the
+    ///      designed difficulty (and with it every measured number in docs/) is untouched.
+    ///  (B) the comfort settings (animation speed, UI text scale) survive a real JSON round trip,
+    ///      the text scale reaches Cfg symmetrically (measure and draw share one multiplier), and
+    ///      the animation multiplier is HARD-PINNED to 1x under AutoPlay/NoPersist — the guard that
+    ///      keeps the autopilot smoke test and the SIGHTLINE_BALANCE flywheel bit-for-bit as before.
+    /// X2 TRUE NORTH II — SIGHTLINE_OPENERTEST. Pins the COLD-OPENER GRACE (`Mission.OpenerTrim`):
+    /// the base force is trimmed by the full amount on mission 1, by half (rounded up) on mission
+    /// 2, and NOT AT ALL from mission 3 — the same ramp `Game.SetupMission` already applies to
+    /// Heat's own escalation, applied to the force heat's grace cannot reach. Also pins the
+    /// floor (a trim can never take the force below 3 bodies), determinism, and the shipped
+    /// default, so a future wave cannot silently un-ship the repair that moved mission 1 from
+    /// 75% to 100% (DEVLOG §X2).
+    public string OpenerSelfTest()
+    {
+        NoPersist = true;
+        var fails = new List<string>();
+        int shipped = Sightline.Mission.OpenerTrim;
+
+        int CountAt(int mission, int trim, int heat = 0)
+        {
+            Sightline.Mission.OpenerTrim = trim;
+            Util.Reseed(4242);
+            _run = new Run(); _run.Start();
+            _run.HeatLevel = heat;
+            _run.CurrentCard = new MissionCard { Objective = Objective.Eliminate, ModName = "STANDARD", Reward = RewardKind.None };
+            SetupMission(mission);
+            return Enemies.Count;
+        }
+
+        try
+        {
+            // (1) the shipped default is the measured one — 1 body off the opener.
+            if (shipped != 1) fails.Add("shippedTrim=" + shipped);
+
+            // (2) the ramp's SHAPE: full on m1, half (rounded up) on m2, nothing from m3.
+            foreach (int trim in new[] { 1, 2 })
+            {
+                int m1Off = CountAt(1, 0) - CountAt(1, trim);
+                int m2Off = CountAt(2, 0) - CountAt(2, trim);
+                int m3Off = CountAt(3, 0) - CountAt(3, trim);
+                if (m1Off != trim) fails.Add($"trim{trim}:m1Off={m1Off}");
+                if (m2Off != (trim + 1) / 2) fails.Add($"trim{trim}:m2Off={m2Off}");
+                if (m3Off != 0) fails.Add($"trim{trim}:m3Off={m3Off}");
+            }
+
+            // (3) OFF is the pre-X2 opener, and it is not accidentally the same as ON.
+            if (CountAt(1, 0) == CountAt(1, 1)) fails.Add("trimIsNoOp");
+
+            // (4) the floor: a huge trim can never field fewer than 3 bodies (or none at all).
+            int floored = CountAt(1, 99);
+            if (floored < 3) fails.Add("floorBroken=" + floored);
+
+            // (5) deterministic — the same seed and trim build the same force twice.
+            if (CountAt(1, 1) != CountAt(1, 1)) fails.Add("nonDeterministic");
+
+            // (6) the ramp is a BASE-force grace and stacks with Heat's own: the RECRUIT rung
+            //     (-1 body) still fields exactly one fewer than heat 0 at m1 with the trim on,
+            //     which is the relation ONRAMPTEST pins from the other side.
+            int stdM1 = CountAt(1, 1, 0), recM1 = CountAt(1, 1, -1);
+            if (recM1 != stdM1 - 1) fails.Add($"recruitDelta {recM1} vs {stdM1}");
+        }
+        finally { Sightline.Mission.OpenerTrim = shipped; }
+
+        return fails.Count == 0
+            ? "OPENERTEST: PASS (cold-opener grace: full trim at m1, half at m2, none from m3; shipped default 1; floor 3 holds; deterministic; RECRUIT still one body under heat 0 at m1)"
+            : "OPENERTEST: FAIL " + string.Join(", ", fails);
+    }
+
+    public string OnRampSelfTest()
+    {
+        NoPersist = true;
+        var fails = new List<string>();
+
+        // ---- (A1) the ladder data row -----------------------------------------------------
+        // (through locals: Min/Recruit are compile-time consts, so a direct literal compare folds
+        // away and the compiler flags the failure branch as unreachable)
+        int minRung = Sightline.Heat.Min, recruitRung = Sightline.Heat.Recruit;
+        if (minRung != -1) fails.Add("min=" + minRung);
+        if (recruitRung != -1) fails.Add("recruitConst=" + recruitRung);
+        if (!Sightline.Heat.IsRecruit(-1)) fails.Add("isRecruit(-1)");
+        if (Sightline.Heat.IsRecruit(0)) fails.Add("isRecruit(0)");
+        if (Sightline.Heat.Clamp(-9) != -1) fails.Add("clampFloor");
+        if (Sightline.Heat.Label(-1) != "RECRUIT") fails.Add("label(-1)=" + Sightline.Heat.Label(-1));
+        if (Sightline.Heat.Label(3) != "HEAT 3") fails.Add("label(3)");
+        if (Sightline.Heat.Active(-1).Count() != 1) fails.Add("activeCount(-1)");
+        if (Sightline.Heat.EnemyDelta(-1) != -1) fails.Add("enemyDelta(-1)=" + Sightline.Heat.EnemyDelta(-1));
+        if (Sightline.Heat.StatDelta(-1) != -1) fails.Add("statDelta(-1)=" + Sightline.Heat.StatDelta(-1));
+        // the relief must be BODIES AND STATS ONLY — RECRUIT never flips a qualitative mutator on
+        if (Sightline.Heat.DmgDelta(-1) != 0 || Sightline.Heat.AiTier(-1) != 0
+            || Sightline.Heat.Exposed(-1) || Sightline.Heat.HarshAttrition(-1)
+            || Sightline.Heat.NoReinforcements(-1) || Sightline.Heat.TighterContact(-1))
+            fails.Add("recruitMutatorLeak");
+        // ...and it must never pay a NEGATIVE requisition bonus
+        if (Sightline.Heat.IntelBonus(-1) != 0) fails.Add("intelBonus(-1)=" + Sightline.Heat.IntelBonus(-1));
+        // heat 0 is still a true no-op, and rung 1 still bites
+        if (Sightline.Heat.EnemyDelta(0) != 0 || Sightline.Heat.StatDelta(0) != 0
+            || Sightline.Heat.IntelBonus(0) != 0 || Sightline.Heat.Active(0).Any())
+            fails.Add("heat0NotNoOp");
+        if (Sightline.Heat.EnemyDelta(1) != 1 || Sightline.Heat.IntelBonus(1) != 3) fails.Add("heat1Moved");
+
+        // ---- (A2) the BUILT mission: a SEED SWEEP, one fewer + weaker hostile ----------------
+        // Both legs replay the identical world (Util.Reseed before each), so the ONLY difference
+        // is the rung. This is the assertion that catches the early-mission "heat grace" (W5) and
+        // the SpawnEnemies bump FLOOR (R1) silently zeroing RECRUIT's relief on mission 1 — the
+        // mission a first-timer meets first.
+        //
+        // W4 REPAIR — this probe used to compare the two legs' FORCE-WIDE per-enemy averages.
+        // That is not a measurement of the stat relief, it is a measurement of the archetype MIX:
+        // the two legs field different body counts, so they sit at different positions in the
+        // shared RNG stream and roll different archetypes, whose base HP/aim differ by far more
+        // than the one point RECRUIT takes off. It happened to pass at the old spawn geometry and
+        // started failing the moment W4 changed pod placement — on composition luck, both times.
+        // It is now composition-CONTROLLED: compare each archetype CLASS against itself across
+        // the legs, which is exactly what `bump` moves.
+        //
+        // R1 REVIEW FIX — W4's per-class control is kept and two things are added on top:
+        //   * A SEED SWEEP. The old form asserted on the single hard-coded seed 4242, and a
+        //     reviewer's 12-seed probe of it scored 5 pass / 7 fail — a rung-wide claim needs a
+        //     rung-wide sample, and a test that is green on 5 seeds of 12 is worse than no test.
+        //   * A STRICT per-class row. Within one mission every member of a class shares one base,
+        //     so a class's mean HP/aim is exactly `base + bump`: with composition controlled the
+        //     relief is not "at least one class moved", it is EVERY shared rank-and-file class
+        //     moved, on every seed. Named ELITEs (the m3/m5 mid-boss, the finale boss) are spawned
+        //     with explicit stats and never read `bump`, so they are exempt by construction.
+        //   * And it now bites at MISSION 1 as well: W4 recorded, correctly, that the m1 relief
+        //     was a no-op because `bump = Math.Max(0, (n - 1) + statDelta)` floored RECRUIT's −1
+        //     away on the one mission the on-ramp exists for. That floor is now −1
+        //     (Mission.SpawnEnemies), so m1 is asserted exactly like m3 rather than excused.
+        (int count, Dictionary<string, (int n, int hp, int aim)> byCls) BuildAt(int heat, int mission, int seed)
+        {
+            Util.Reseed(seed);
+            _run = new Run(); _run.Start();
+            _run.HeatLevel = heat;
+            _run.CurrentCard = new MissionCard { Objective = Objective.Eliminate, ModName = "STANDARD", Reward = RewardKind.None };
+            SetupMission(mission);
+            var map = new Dictionary<string, (int n, int hp, int aim)>();
+            foreach (var e in Enemies)
+            {
+                var cur = map.TryGetValue(e.Cls, out var v) ? v : (0, 0, 0);
+                map[e.Cls] = (cur.Item1 + 1, cur.Item2 + e.MaxHp, cur.Item3 + e.Aim);
+            }
+            return (Enemies.Count, map);
+        }
+        int[] sweepSeeds = { 1, 7, 42, 99, 123, 777, 1234, 2026, 4242, 8675, 31337, 65535 };
+        foreach (int m in new[] { 1, 3 })
+        {
+            int seedsChecked = 0;
+            foreach (int seed in sweepSeeds)
+            {
+                var std = BuildAt(0, m, seed);
+                var rec = BuildAt(-1, m, seed);
+                seedsChecked++;
+                if (rec.count != std.count - 1) { fails.Add($"m{m}s{seed}:count {rec.count} vs {std.count}"); continue; }
+                if (rec.count <= 0 || std.count <= 0) { fails.Add($"m{m}s{seed}:emptyBuild"); continue; }
+                int shared = 0;
+                foreach (var kv in rec.byCls)
+                {
+                    if (!std.byCls.TryGetValue(kv.Key, out var sv)) continue;   // class only one leg fielded
+                    // named ELITEs carry explicit stats and never read `bump` — the force's fixed
+                    // tooth, which the rung cannot and should not move.
+                    if (kv.Key == "ELITE") continue;
+                    shared++;
+                    float rHp = kv.Value.hp / (float)kv.Value.n, sHp = sv.hp / (float)sv.n;
+                    float rAim = kv.Value.aim / (float)kv.Value.n, sAim = sv.aim / (float)sv.n;
+                    if (!(rHp < sHp))  fails.Add($"m{m}s{seed}:{kv.Key}:hp {rHp:0.##} vs {sHp:0.##}");
+                    if (!(rAim < sAim)) fails.Add($"m{m}s{seed}:{kv.Key}:aim {rAim:0.##} vs {sAim:0.##}");
+                }
+                if (shared == 0) fails.Add($"m{m}s{seed}:noSharedClass");
+            }
+            if (seedsChecked != sweepSeeds.Length) fails.Add($"m{m}:sweepShort {seedsChecked}/{sweepSeeds.Length}");
+        }
+
+        // ---- (A3) the bleed-out clock ------------------------------------------------------
+        int DownTurnsAt(int heat)
+        {
+            Util.Reseed(77);
+            _run = new Run(); _run.Start();
+            _run.HeatLevel = heat;
+            _run.CurrentCard = new MissionCard { Objective = Objective.Eliminate, ModName = "STANDARD", Reward = RewardKind.None };
+            SetupMission(2);
+            var sol = Players.FirstOrDefault(p => p.Alive && !p.IsVip);
+            if (sol == null) return -1;
+            EnterDowned(sol);
+            return sol.DownedTurns;
+        }
+        if (DownTurnsAt(0) != DownedTimerTurns) fails.Add("downTurnsHeat0");
+        if (DownTurnsAt(-1) != DownedTimerTurns + 2) fails.Add("downTurnsRecruit=" + DownTurnsAt(-1));
+
+        // ---- (A4) the checkpoint valve opens at mission 1 (and ONLY at RECRUIT) --------------
+        bool CheckpointAt(int heat, int mission)
+        {
+            Util.Reseed(99);
+            _run = new Run(); _run.Start();
+            _run.HeatLevel = heat;
+            _run.Mission = mission;
+            _run.CheckpointUsed = false;
+            _run.CurrentCard = new MissionCard { Objective = Objective.Eliminate, ModName = "STANDARD", Reward = RewardKind.None };
+            return TryReinforcements();
+        }
+        if (!CheckpointAt(-1, 1)) fails.Add("recruitNoM1Checkpoint");
+        if (CheckpointAt(0, 1)) fails.Add("heat0GainedM1Checkpoint");
+        if (CheckpointAt(0, 2)) fails.Add("heat0GainedM2Checkpoint");
+        if (!CheckpointAt(0, 3)) fails.Add("heat0LostM3Checkpoint");
+        // still ONE checkpoint per run at RECRUIT — the valve is earlier, not repeatable
+        Util.Reseed(99);
+        _run = new Run(); _run.Start();
+        _run.HeatLevel = -1; _run.Mission = 1;
+        _run.CurrentCard = new MissionCard { Objective = Objective.Eliminate, ModName = "STANDARD", Reward = RewardKind.None };
+        if (!TryReinforcements()) fails.Add("recruitFirstCheckpoint");
+        if (TryReinforcements()) fails.Add("recruitCheckpointRepeats");
+
+        // ---- (B1) the dt multiplier can NEVER reach the harness or the flywheel --------------
+        int savedAnim = Display.AnimSpeedIdx, savedScale = Display.UiScaleIdx;
+        float savedCfg = Cfg.UiScale;
+        Display.AnimSpeedIdx = Display.AnimSpeedLevels.Length - 1;   // fastest setting
+        if (Display.AnimSpeed <= 1f) fails.Add("animSpeedTopIsNotFaster");
+        var harnessGame = new Game { NoPersist = true };
+        if (harnessGame.AnimSpeed != 1f) fails.Add("noPersistNotPinned=" + harnessGame.AnimSpeed);
+        var botGame = new Game { AutoPlay = true };
+        if (botGame.AnimSpeed != 1f) fails.Add("autoPlayNotPinned=" + botGame.AnimSpeed);
+        var liveGame = new Game();
+        if (liveGame.AnimSpeed != Display.AnimSpeed) fails.Add("liveGameNotWired");
+        // ...and the cycle wraps back to 1x rather than running away
+        Display.AnimSpeedIdx = 0;
+        for (int i = 0; i < Display.AnimSpeedLevels.Length; i++) Display.CycleAnimSpeed();
+        if (Display.AnimSpeedIdx != 0 || Display.AnimSpeed != 1f) fails.Add("animCycleWrap");
+
+        // ---- (B2) the text scale is symmetric, tapered, and inert at 100% --------------------
+        Cfg.UiScale = 1f;
+        float base12 = Cfg.Measure("STABILIZE", 12, 1f).X;
+        float base44 = Cfg.Measure("STABILIZE", 44, 1f).X;
+        Cfg.UiScale = 1.2f;
+        float big12 = Cfg.Measure("STABILIZE", 12, 1f).X;
+        float big44 = Cfg.Measure("STABILIZE", 44, 1f).X;
+        if (!(big12 > base12 * 1.1f)) fails.Add($"bodyTextDidNotScale {base12:0.#}->{big12:0.#}");
+        if (MathF.Abs(big44 - base44) > 0.01f) fails.Add("titleTextScaledPastTaper");
+        Cfg.UiScale = 1f;
+        if (MathF.Abs(Cfg.Measure("STABILIZE", 12, 1f).X - base12) > 0.01f) fails.Add("scale1NotInert");
+
+        // ---- (B3) both settings survive a REAL JSON round trip -------------------------------
+        string dispPath = Display.SettingsPathPublic;
+        // R1 REVIEW FIX — and they must survive it in the SAME PLACE every launch. SaveGame.Dir
+        // guards a real hazard that Display.Dir did not: GetFolderPath(ApplicationData) returns
+        // "" when the resolved directory does not exist yet, so Path.Combine("", "Sightline") is
+        // a RELATIVE dir next to the process CWD. Saves and meta fell back to $HOME/.config;
+        // display.json did not, so settings scattered per launch directory and read back as a
+        // reset to the player — tutorial-tip flags, the four volume faders, animation speed and
+        // text scale all inherit it. Reproduce with XDG_CONFIG_HOME pointed at a directory that
+        // does not exist: before the fix this asserts `Sightline/display.json`, relative.
+        if (!System.IO.Path.IsPathRooted(dispPath)) fails.Add("displayPathRelative:" + dispPath);
+        if (System.IO.Path.GetDirectoryName(dispPath) != SaveGame.ConfigDir)
+            fails.Add($"displayDirSplit:{System.IO.Path.GetDirectoryName(dispPath)} vs {SaveGame.ConfigDir}");
+        string dispStash = null; bool hadDisp = false;
+        try { hadDisp = System.IO.File.Exists(dispPath); if (hadDisp) dispStash = System.IO.File.ReadAllText(dispPath); } catch { }
+        try
+        {
+            Display.AnimSpeedIdx = 2; Display.UiScaleIdx = 3; Display.ApplyUiScale();
+            float wroteScale = Cfg.UiScale;
+            Display.SaveForTest();
+            Display.AnimSpeedIdx = 0; Display.UiScaleIdx = 1; Display.ApplyUiScale();
+            Display.LoadForTest();
+            if (Display.AnimSpeedIdx != 2) fails.Add("animIdxRoundTrip=" + Display.AnimSpeedIdx);
+            if (Display.UiScaleIdx != 3) fails.Add("uiIdxRoundTrip=" + Display.UiScaleIdx);
+            if (MathF.Abs(Cfg.UiScale - wroteScale) > 0.001f) fails.Add("loadDidNotApplyScaleToCfg");
+            // an out-of-range file must clamp, not crash or index out of bounds
+            System.IO.File.WriteAllText(dispPath, "{\"AnimSpeedIdx\":99,\"UiScaleIdx\":-7}");
+            Display.LoadForTest();
+            if (Display.AnimSpeedIdx != Display.AnimSpeedLevels.Length - 1) fails.Add("animIdxClamp");
+            if (Display.UiScaleIdx != 0) fails.Add("uiIdxClamp");
+            // a pre-W5 profile (neither field) must read as the shipped defaults: 1x, 100%
+            System.IO.File.WriteAllText(dispPath, "{\"BrightIdx\":2}");
+            Display.AnimSpeedIdx = 3; Display.UiScaleIdx = 0;
+            Display.LoadForTest();
+            if (Display.AnimSpeedIdx != 0 || Display.AnimSpeed != 1f) fails.Add("legacyProfileAnimDefault");
+            if (Display.UiScaleIdx != 1 || Cfg.UiScale != 1f) fails.Add("legacyProfileScaleDefault");
+        }
+        catch (Exception ex) { fails.Add("settingsThrew:" + ex.GetType().Name); }
+        finally
+        {
+            try
+            {
+                if (hadDisp) System.IO.File.WriteAllText(dispPath, dispStash);
+                else if (System.IO.File.Exists(dispPath)) System.IO.File.Delete(dispPath);
+            }
+            catch { }
+            Display.AnimSpeedIdx = savedAnim; Display.UiScaleIdx = savedScale; Cfg.UiScale = savedCfg;
+        }
+
+        return fails.Count == 0
+            ? "ONRAMPTEST: PASS (RECRUIT rung -1: data row + built mission -1 body and -1 stat on EVERY shared rank-and-file class, over a 12-seed sweep, at m1 AND m3; 5-turn bleed-out, checkpoint from m1 and once only, no mutator leak, no negative intel; heat 0 untouched; anim speed pinned 1x under AutoPlay/NoPersist; text scale symmetric + tapered; both settings round-trip, clamp, and default on a pre-W5 profile)"
+            : "ONRAMPTEST: FAIL (" + string.Join(",", fails.Distinct()) + ")";
+    }
+
+    /// W5 (screenshot/eyes-only harness): stage a MULTI-TILE MOVE for the animation-speed filmstrip.
+    /// The whole point of the animation-speed setting's DANGER note in CLAUDE.md is that the
+    /// movement-jitter bug (MoveStepAnim capturing `_from` at enqueue instead of at activation)
+    /// is invisible to every self-test — only a filmstrip of a multi-tile path shows the snap-back.
+    /// Autoplay rarely orders a long, clean, straight walk on demand, so this hook does: it selects
+    /// the first soldier, finds the longest clear straight run from its tile, and enqueues one
+    /// MoveStepAnim per tile through the SAME Enqueue the player's own move uses (no OnStart here —
+    /// activation is still the queue's job, which is exactly the property the filmstrip verifies).
+    /// Returns the number of steps queued (0 if no clear run was found).
+    public int DebugLongMove(int want = 6)
+    {
+        var u = Players.FirstOrDefault(p => p.Alive && !p.IsVip);
+        if (u == null) return 0;
+        Selected = u;
+        (int dx, int dy)[] dirs = { (1, 0), (-1, 0), (0, 1), (0, -1) };
+        int bestLen = 0; (int dx, int dy) bestDir = (1, 0);
+        foreach (var (dx, dy) in dirs)
+        {
+            int len = 0;
+            for (int i = 1; i <= want; i++)
+            {
+                int nx = u.X + dx * i, ny = u.Y + dy * i;
+                if (!Grid.IsFloor(nx, ny) || UnitAt(nx, ny) != null) break;
+                len = i;
+            }
+            if (len > bestLen) { bestLen = len; bestDir = (dx, dy); }
+        }
+        if (bestLen == 0) return 0;
+        for (int i = 1; i <= bestLen; i++)
+            Enqueue(new MoveStepAnim(u, u.X + bestDir.dx * i, u.Y + bestDir.dy * i), Team.Player);
+        return bestLen;
+    }
+
+
+    // ── R2 FIX 1 "NOBODY IS WALLED OUT" — SIGHTLINE_GEOMTEST ───────────────────────────────
+    /// Every deployed SOLDIER must be able to reach the rest of the squad and must have at
+    /// least one legal move on turn 1 — and every hostile / evac tile / terminal / sabotage
+    /// site must stay reachable from the squad. Mission.EnsureConnectivity is the net that
+    /// guarantees it; before R2 it repaired everything EXCEPT the other players, which was
+    /// invisible until W4's ENVELOP shape seated the squad in the mid-field cover band
+    /// (measured 23 stranded soldiers / 5760 fresh builds at heat 0, one fully entombed).
+    ///
+    /// This sweeps what STACKTEST structurally cannot: STACKTEST is a fixed 16-board sample
+    /// that never varies the deployment shape, so it could not have caught a shape-specific
+    /// geometry defect. Here every shape x objective x mission x seed x heat is BUILT fresh
+    /// (no play — StartMission only), which is cheap enough to sweep thousands of boards.
+    /// Both terrain paths are exercised: authored arenas and the procedural fallback (the
+    /// defect only ever appeared on the procedural one; the split is reported so a future
+    /// change that silently stops sampling one of them is visible).
+    /// Non-vacuity: PASS requires a real sample AND at least one ENVELOP build per heat.
+    public static string GeomSelfTest(int seeds = 8)
+    {
+        var fails = new List<string>();
+        int cases = 0, envelopBuilds = 0, authored = 0, procedural = 0;
+        string prevHeat = Environment.GetEnvironmentVariable("SIGHTLINE_HEAT");
+        int prevDeploy = Mission.ForcedDeploy;
+        var objs = (Objective[])Enum.GetValues(typeof(Objective));
+        var shapeName = new[] { "FRONTAL", "PINCER", "CROSSFIRE", "ENVELOP" };
+
+        foreach (int heat in new[] { 0, 8 })
+        {
+            Environment.SetEnvironmentVariable("SIGHTLINE_HEAT", heat.ToString());
+            int envelopThisHeat = 0;
+            for (int shape = 0; shape < Mission.DeployShapes; shape++)
+            {
+                Mission.ForcedDeploy = shape;
+                foreach (var obj in objs)
+                    for (int m = 1; m <= Run.MaxMissions; m++)
+                        for (int s = 0; s < seeds; s++)
+                        {
+                            Util.Reseed(90001 + s * 7919 + m * 131 + (int)obj * 17 + shape * 3 + heat * 104729);
+                            Game g;
+                            try { g = new Game { NoPersist = true, ForcedObjective = obj }; g.StartMission(m); }
+                            catch (Exception ex)
+                            { fails.Add($"h{heat}/{shapeName[shape]}/{obj}/m{m}/s{s} THREW {ex.GetType().Name}"); continue; }
+                            cases++;
+                            if (Mission.AppliedDeploy == Mission.DeployEnvelop) { envelopBuilds++; envelopThisHeat++; }
+                            if (Mission.AppliedLayout >= 0) authored++; else procedural++;
+                            string tag = $"h{heat}/{shapeName[shape]}/{obj}/m{m}/s{s}";
+                            if (fails.Count > 30) continue;   // the report is already damning; stop collecting
+
+                            var p0 = g.Players.FirstOrDefault(p => p.Alive);
+                            if (p0 == null) { fails.Add(tag + ": no living squad"); continue; }
+                            var cost = g.Grid.CostMap(p0.X, p0.Y, (x, y) => false, out _, 9999);
+                            bool Stuck(int x, int y) => !g.Grid.InBounds(x, y) || cost[x, y] < 0;
+
+                            foreach (var u in g.Players)
+                                if (u.Alive && Stuck(u.X, u.Y))
+                                    fails.Add($"{tag}: SOLDIER {u.Name} walled off at ({u.X},{u.Y}) layout={Mission.AppliedLayout}");
+                            foreach (var u in g.Enemies)
+                                if (u.Alive && Stuck(u.X, u.Y)) fails.Add($"{tag}: hostile {u.Cls} unreachable at ({u.X},{u.Y})");
+                            foreach (var t in g.EvacZone)
+                                if (Stuck(t.x, t.y)) fails.Add($"{tag}: evac tile ({t.x},{t.y}) unreachable");
+                            if (g.HasTerminal && Stuck(g.Terminal.x, g.Terminal.y)) fails.Add(tag + ": terminal unreachable");
+                            foreach (var st in g.SabotageSites)
+                                if (Stuck(st.x, st.y)) fails.Add($"{tag}: sabotage site ({st.x},{st.y}) unreachable");
+
+                            // ELBOW ROOM: a soldier can be reachable and still be frozen on turn 1
+                            // (every neighbour cover or a teammate, diagonals killed by the corner rule).
+                            foreach (var u in g.Players)
+                            {
+                                if (!u.Alive || u.IsVip) continue;
+                                bool step = false;
+                                for (int dx = -1; dx <= 1 && !step; dx++)
+                                    for (int dy = -1; dy <= 1 && !step; dy++)
+                                    {
+                                        if (dx == 0 && dy == 0) continue;
+                                        bool OpenT(int ax, int ay) => g.Grid.IsFloor(ax, ay) && g.UnitAt(ax, ay) == null;
+                                        if (!OpenT(u.X + dx, u.Y + dy)) continue;
+                                        if (dx != 0 && dy != 0 && (!OpenT(u.X + dx, u.Y) || !OpenT(u.X, u.Y + dy))) continue;
+                                        step = true;
+                                    }
+                                if (!step) fails.Add($"{tag}: SOLDIER {u.Name} ENTOMBED at ({u.X},{u.Y}) — no legal move");
+                            }
+                        }
+            }
+            if (envelopThisHeat == 0) fails.Add($"h{heat}: VACUOUS — no ENVELOP build sampled");
+        }
+
+        Mission.ForcedDeploy = prevDeploy;
+        Environment.SetEnvironmentVariable("SIGHTLINE_HEAT", prevHeat);
+        if (cases < 1000) fails.Add($"VACUOUS — only {cases} boards built");
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"GEOMTEST: {cases} fresh boards (authored {authored} / procedural {procedural}), "
+                    + $"{envelopBuilds} ENVELOP, heats 0+8, {seeds} seeds x 4 shapes x 8 objectives x {Run.MaxMissions} missions");
+        foreach (var f in fails.Take(12)) sb.AppendLine("  " + f);
+        if (fails.Count > 12) sb.AppendLine($"  (+{fails.Count - 12} more)");
+        sb.Append(fails.Count == 0
+            ? "GEOMTEST: PASS (every soldier reachable and able to move; every hostile/objective tile reachable)"
+            : $"GEOMTEST: FAIL ({fails.Count} violations)");
+        return sb.ToString();
+    }
+
+    /// The unit the filmstrip is following (the one DebugLongMove staged), for the per-frame
+    /// position dump in Program.cs. Null before the hook runs.
+    public Unit DebugFilmUnit => Selected;
 
 }

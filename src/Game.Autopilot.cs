@@ -70,7 +70,10 @@ public partial class Game
         if (Stats.Enabled && _turnCount != _lastTelemetryTurn)
         {
             _lastTelemetryTurn = _turnCount;
-            Stats.RecordPlayerTurn(CountMeaningfulChoices(), CurrentLead());
+            int choices = CountMeaningfulChoices(out int actingSoldiers, out int armedSoldiers,
+                                                 out int losTargets, out int tgtChoices, out int posChoices);
+            Stats.RecordPlayerTurn(choices, CurrentLead(), actingSoldiers, armedSoldiers,
+                                   losTargets, tgtChoices, posChoices);
         }
         TryFreeCaptive();                       // free a captive a soldier already stands next to
         var u = Players.FirstOrDefault(p => p.CanAct);
@@ -335,12 +338,29 @@ public partial class Game
     ///       budget), so its contribution is new decision depth, not a re-weighting. Capped per
     ///       soldier so an open map can't trivially inflate it.
     /// Reuses ShotValue/ComputeOdds/TileExposure (read-only — never mutates state). Cheap + bounded.
-    int CountMeaningfulChoices()
+    int CountMeaningfulChoices() => CountMeaningfulChoices(out _, out _, out _, out _, out _);
+    int CountMeaningfulChoices(out int acting, out int armed)
+        => CountMeaningfulChoices(out acting, out armed, out _, out _, out _);
+
+    /// X1 — same count, plus the SHOT-GATE decomposition (Stats.MissionRec): `acting` is the
+    /// number of soldiers this turn that were alive, able to act and carrying ammo (i.e. eligible
+    /// to be scored at all), and `armed` is the subset that actually had a legal shot from where
+    /// they stood. Without these, meaningful-choices/turn cannot be read: a lever that lengthens
+    /// a fight adds low-contact mop-up turns and shrinks the roster, both of which push the
+    /// per-turn average DOWN without making any individual decision poorer. Pure bookkeeping.
+    /// W4 — same count again, plus the CHOICE decomposition: `losTargets` is the number of foes
+    /// in range+LoS summed over ARMED soldiers (the raw simultaneous-presentation number the
+    /// deployment-geometry wave targets), and `tgtChoices`/`posChoices` split the return value
+    /// into its (a) which-target and (b) where-to-stand halves (they sum to it by construction).
+    /// X1 could measure that choices/ARMED was ~1.5 but not which axis was starved; this can.
+    int CountMeaningfulChoices(out int acting, out int armed,
+                               out int losTargets, out int tgtChoices, out int posChoices)
     {
-        int total = 0;
+        int total = 0; acting = 0; armed = 0; losTargets = 0; tgtChoices = 0; posChoices = 0;
         foreach (var u in Players)
         {
             if (!u.Alive || !u.CanAct || u.IsVip || u.Ammo <= 0) continue;
+            acting++;
             // (a) which target — gather the value of every legal shot from where this soldier stands.
             float best = 0f; int comparable = 0;
             var vals = new List<float>();
@@ -355,8 +375,10 @@ public partial class Game
                 if (v > best) best = v;
             }
             if (best <= 0f) continue;                                      // no shot -> no shot/positioning decision
+            armed++;
+            losTargets += vals.Count;                                      // W4: raw simultaneous presentation
             foreach (var v in vals) if (v >= best * 0.88f) comparable++;   // within ~12% of best
-            if (comparable >= 2) total += comparable - 1;                  // count the real target alternatives
+            if (comparable >= 2) { total += comparable - 1; tgtChoices += comparable - 1; }  // real target alternatives
 
             // (b) where to stand after firing — only when the soldier can fire AND still has an
             // action left to move (the post-shot positioning bet). Score each 1-action-reachable
@@ -383,7 +405,11 @@ public partial class Game
                 {
                     int pComparable = 0;
                     foreach (var s in pvals) if (s >= pbest * 0.85f) pComparable++;
-                    if (pComparable >= 2) total += Math.Min(2, pComparable - 1);       // capped: anti-inflation
+                    if (pComparable >= 2)
+                    {
+                        int add = Math.Min(2, pComparable - 1);                        // capped: anti-inflation
+                        total += add; posChoices += add;
+                    }
                 }
             }
         }
@@ -632,6 +658,11 @@ public partial class Game
         return false;
     }
 
+    /// W4 — the SmartEscort lone-VIP self-race counts a DOWNED soldier as fallen (it cannot act,
+    /// and the leash skips it as an anchor). Ships ON; SIGHTLINE_ESCORTFIX=0 restores the old,
+    /// broken test so the fix can be measured as its own CRN-paired round.
+    public static bool EscortDownedFix = true;
+
     bool SmartEscort(Unit u)
     {
         if (u.IsVip)
@@ -642,7 +673,15 @@ public partial class Game
             // LAST-SURVIVOR FALLBACK: if the whole squad has fallen, there's nobody to follow — the leash
             // holds it in place, which would livelock to the turn cap. So the lone VIP self-races to evac
             // (win if it makes it, else it dies to the foes en route) — either way the match RESOLVES.
-            if (!Players.Any(p => p.Alive && !p.IsVip) && !EvacZone.Contains((u.X, u.Y)))
+            // W4 INSTRUMENT FIX: `Alive` is TRUE for a soldier who is DOWNED and bleeding out, so
+            // the old test read "the squad still stands" while every escort lay on the floor — the
+            // leash then skipped its downed anchors, the self-race never fired, and the asset just
+            // hunkered until the timers expired. Pure drag, and it fires exactly in the apex state
+            // where X1 measured Escort at 15.61 turns. This is a MEASUREMENT-INSTRUMENT defect (it
+            // makes the bot worse at Escort than a human would be), so it ships ON and the harness
+            // pin SIGHTLINE_ESCORTFIX=0 reproduces the old behaviour for the paired round.
+            if (!Players.Any(p => p.Alive && (!EscortDownedFix || !p.Downed) && !p.IsVip)
+                && !EvacZone.Contains((u.X, u.Y)))
             {
                 var g = EvacZone.Where(t => !IsOccupiedByOther(t.x, t.y, u))
                                 .OrderBy(t => Util.TileDist(u.X, u.Y, t.x, t.y)).FirstOrDefault();

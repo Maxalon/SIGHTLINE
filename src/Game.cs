@@ -6,7 +6,7 @@ using Raylib_cs;
 
 namespace Sightline;
 
-public enum Phase { Intro, PlayerTurn, EnemyTurn, Barracks, Win, Lose, Draft, WarRoom, Codex, SkirmishSetup }   // WarRoom (W3), Codex (W6), SkirmishSetup (W4) appended; none persisted
+public enum Phase { Intro, PlayerTurn, EnemyTurn, Barracks, Win, Lose, Draft, WarRoom, Codex, SkirmishSetup, AudioCheck }   // WarRoom (W3), Codex (W6), SkirmishSetup (W4), AudioCheck (A3) appended; none persisted
 // APPEND-ONLY: serialized as a raw (int) in SaveGame (CardDto.Objective). Never reorder or
 // remove a member — a saved run stores the ordinal, so a reorder silently corrupts the loaded
 // objective. Add new objectives at the END only. (SaveGame.SelfTest asserts the tail ordinal.)
@@ -35,7 +35,8 @@ public struct ThreatCell
 {
     public byte Guns;        // how many live, ACTIVE, armed hostiles can actually shoot a soldier standing here
     public sbyte BestHit;    // the best (highest) enemy hit% among those guns, 0 when none
-    public float ExpDmg;     // expected incoming damage if every bearing gun fires once (post-armor)
+    public float ExpDmg;     // TRUE expected incoming damage if every bearing gun fires once (post-armor,
+                             // crit- and graze-inclusive -- Combat.ExpectedDamage; R2 FIX 2)
     public bool Flanked;     // at least one bearing gun would have the mover FLANKED (cover negated)
     public bool Exposed;     // at least one bearing gun sees the mover with NO cover at all (the pre-T2 bool, now via ComputeOdds so see-over/DRONE/SHIELD count)
     public bool Watched;     // the tile sits inside a live enemy OVERWATCH / braced (PIKEMAN) reaction lane
@@ -67,8 +68,20 @@ public partial class Game
     // hit-stop decay — NOT the whole game tick, so the autopilot/timers/sim are unaffected.
     // Default 1f, and nothing reads it unless the key is pressed, so the headless screenshot
     // path stays byte-stable and the autoplay smoke test is unchanged.
-    public float AnimSpeed = 1f;
-    public void CycleAnimSpeed() { AnimSpeed = AnimSpeed >= 3f ? 1f : AnimSpeed + 1f; }
+    /// W5 COMFORT: the animation-playback multiplier. The VALUE lives in Display (persisted in
+    /// display.json, cycled from the pause menu or [F2]); this property is the single read point
+    /// and it HARD-PINS 1x for the headless harness and the autopilot. That gate is load-bearing:
+    /// SIGHTLINE_BALANCE / autoplay / screenshot runs must step the queue at exactly the pace they
+    /// always did, or every measured number in docs/ shifts. Display.Init(false) also never Loads,
+    /// so a headless process cannot pick a speed up off disk either — belt and braces.
+    /// Harness-only escape hatch for the animation-speed FILMSTRIP (SIGHTLINE_ANIMSPEED, shot mode
+    /// only). The pin below is what keeps the flywheel honest, so the filmstrip cannot simply turn
+    /// it off — instead it names an explicit speed here. Default 0 = inert, so autoplay, the balance
+    /// batch and every other headless path are untouched (ONRAMPTEST asserts the pin with it unset).
+    public float AnimSpeedOverride;
+    public float AnimSpeed => AnimSpeedOverride > 0f ? AnimSpeedOverride
+                            : (AutoPlay || NoPersist) ? 1f : Display.AnimSpeed;
+    public void CycleAnimSpeed() { if (!AutoPlay && !NoPersist) Display.CycleAnimSpeed(); }
 
     // selection / hover
     public Unit Selected;
@@ -431,7 +444,7 @@ public partial class Game
     // if every reachable node is mixed-force -> the prep row is unavailable/greyed.
     public Faction PrepFactionOffered => _run != null ? _run.UpcomingFaction() : Faction.None;
 
-    static string PrepDescFor(Faction f) => f switch
+    public static string PrepDescFor(Faction f) => f switch
     {
         Faction.Syndicate => "HARDENED OPTICS: deny their see-over-low cover next mission.",
         Faction.Legion    => "REACTIVE PLATING: squad takes -1 damage next mission.",
@@ -965,6 +978,139 @@ public partial class Game
         if (!NoPersist) Display.MarkTipSeen(pick.Bit);   // one-shot: burned the moment it shows
     }
 
+    // ═══════════════════════════════════════════════════════════════════════════════════════
+    //  RESONANCE C1 (VOICE) — the mission BRIEFING and the squad's BARKS.
+    //
+    //  Both are pure presentation: the text comes from src/Voice.cs, which takes ZERO draws from
+    //  Util.Rng (see that file's header — the whole CRN balance methodology depends on it), and
+    //  nothing here is read by combat, AI, mission generation or the save file.
+    // ═══════════════════════════════════════════════════════════════════════════════════════
+
+    /// The three composed briefing lines for this mission, or null when there is nothing to say
+    /// (non-campaign modes) or the card is done. Hud.DrawBriefCard renders it; it is never
+    /// hit-tested, so it cannot swallow a click.
+    public string[] BriefLines;
+    public string BriefHead;
+    public float BriefTimer;          // seconds of card left
+    float _briefHold;                 // seconds spent WAITING for the teaching layers to finish
+    public const float BriefShowSeconds = 11f;
+    const float BriefHoldMax = 45f;   // give up waiting rather than ambush the player mid-fight
+
+    /// True when the briefing may draw at all: an interactive phase with NO teaching card up.
+    /// Wave T1's lesson strip and just-in-time field tips outrank the briefing absolutely — a
+    /// player learning to move must never have flavour competing for the same card slot.
+    bool BriefAllowed => (Phase == Phase.PlayerTurn || Phase == Phase.EnemyTurn)
+                         && TutorialText == null && TrainingText == null && CalloutText == null;
+
+    /// Compose the briefing for the mission that just built. CAMPAIGN only: regions, factions and
+    /// operation numbers are campaign vocabulary, and TRAINING/SKIRMISH/DAILY/LAST STAND already
+    /// say their own thing on the banner. Deterministic — a reloaded save briefs identically.
+    void BeginBriefing(int n)
+    {
+        BriefLines = null; BriefHead = null; BriefTimer = 0f; _briefHold = 0f;
+        if (Mode != GameMode.Campaign || _run == null) return;
+        bool finale = n >= Run.MaxMissions && Objective == Objective.Decapitate;
+        var kf = Combat.MissionFaction;
+        BriefLines = Voice.Brief(n, _run.MapSeed, Mission.AppliedLayout, Objective, kf, finale,
+                                 finale ? Run.FinaleBossName(kf) : null,
+                                 finale ? Run.FinaleKitClause(kf) : null);
+        BriefHead = Voice.BriefHead(Objective);
+        BriefTimer = BriefShowSeconds;
+    }
+
+    /// Tick the card. It HOLDS (does not burn its clock) while a lesson/tip owns the slot, and
+    /// gives up entirely after BriefHoldMax so a long tutorial can never make a briefing surface
+    /// three turns into a firefight. Any key or click dismisses it — that is the whole "skippable"
+    /// contract, and because the dismissal is a passive read the click still does its normal job.
+    void UpdateBriefing(float dt)
+    {
+        if (BriefLines == null) return;
+        // The briefing is a PRE-FIGHT object. The moment real events start hitting the combat log
+        // the card's job is over — and the log panel is the one piece of chrome the centred card
+        // would sit on top of. The ledger is load-bearing ("why did that happen?"); flavour yields.
+        if (Stats.CombatLog.Count > 0) { BriefLines = null; return; }
+        if (!BriefAllowed)
+        {
+            _briefHold += dt;
+            if (_briefHold > BriefHoldMax) BriefLines = null;
+            return;
+        }
+        if (!AutoPlay && (Raylib.GetKeyPressed() != 0
+                          || Raylib.IsMouseButtonPressed(MouseButton.Left)
+                          || Raylib.IsMouseButtonPressed(MouseButton.Right)))
+        { BriefLines = null; return; }
+        BriefTimer -= dt;
+        if (BriefTimer <= 0) BriefLines = null;
+    }
+
+    /// True when the squad may speak: the same absolute deference to the teaching layers the
+    /// briefing shows. Barks ride the ENEMY turn too (a bond partner falls on their turn, not
+    /// yours), so this is deliberately not gated on PlayerTurn.
+    bool BarksAllowed => TutorialText == null && TrainingText == null && CalloutText == null;
+
+    /// Speak one line into the combat log, if every gate lets it through (Voice.TryBark owns the
+    /// per-turn / per-speaker / per-beat budget; this owns the teaching-layer veto and the
+    /// speaker's own eligibility). Silent by construction when `speaker` is dead, a VIP or null.
+    bool Bark(Voice.Beat beat, Unit speaker, Unit other = null)
+    {
+        if (speaker == null || speaker.Team != Team.Player || speaker.IsVip || !speaker.Alive) return false;
+        if (!BarksAllowed) return false;
+        string line = Voice.TryBark(beat, speaker.Name, other?.Name, _turnCount);
+        if (line == null) return false;
+        Stats.Log(_turnCount, (int)Team.Player, line, Voice.LogTag);
+        return true;
+    }
+
+    /// The living soldier standing closest to `at` — the one who would plausibly call a beat that
+    /// happened over there (a pod breaking, for instance). Null when nobody is on their feet.
+    Unit NearestSoldierTo(Unit at)
+    {
+        if (at == null) return null;
+        Unit best = null; int bd = int.MaxValue;
+        foreach (var p in Players)
+        {
+            if (!p.Alive || p.IsVip || p.Downed) continue;
+            int d = Util.ChebyDist(p.X, p.Y, at.X, at.Y);
+            if (d < bd) { bd = d; best = p; }
+        }
+        return best;
+    }
+
+    /// First player kill of the mission — so "first blood" can never be said over the fifth body.
+    bool _firstBloodSeen;
+
+    /// The bonded squadmate best placed to react to `d` going down: alive, on their feet, and
+    /// actually bonded to them. Null when the soldier has no bond on the field — which is exactly
+    /// why a bondless soldier can never draw a bond line.
+    Unit BondPartnerOf(Unit d)
+    {
+        if (d == null || d.Bonds == null || d.Bonds.Count == 0) return null;
+        foreach (var p in Players)
+            if (p != d && p.Alive && !p.Downed && !p.IsVip && d.Bonds.Contains(p.Name)) return p;
+        return null;
+    }
+
+    /// The last soldier on their feet, or null while two or more are still up.
+    Unit LoneSurvivor()
+    {
+        Unit only = null;
+        foreach (var p in Players)
+        {
+            if (!p.Alive || p.IsVip || p.Downed) continue;
+            if (only != null) return null;
+            only = p;
+        }
+        return only;
+    }
+
+    /// Fired after any soldier falls or goes down: if that left exactly one on their feet with
+    /// hostiles still active, they say so. Once per mission (Voice's per-beat gate).
+    void CheckLastStanding()
+    {
+        if (!Enemies.Any(e => e.Alive && e.Active)) return;
+        Bark(Voice.Beat.LastStanding, LoneSurvivor());
+    }
+
     // optional secondary objective (3.9): a per-mission bonus goal worth extra intel
     public const int SwiftTurns = 7;
     public const int SecondaryIntel = 12;
@@ -1078,6 +1224,10 @@ public partial class Game
     // from waves). Ids allocated from 100 up: initial pods are i/2 (<=5), harness scenes use 90/91,
     // so wave pods can never collide with either. Reset per mission beside _podOrig.
     int _nextWavePod = 100;
+    // W4 THE SECOND AXIS: how many reinforcement waves this mission has already landed. Only
+    // read by the ENVELOP rim rotation below (a surrounded hold must keep being surrounded);
+    // every other opening ignores it, so the east-edge arrival is unchanged.
+    int _waveIndex;
     // FUL-6 CRITICAL MASS — LINKED ACTIVATION ("they heard the guns"): pods flagged here were put
     // Suspicious by a nearby pod's wake (ActivatePod's link rider) and CONFIRM to Alert at the next
     // ResolveSuspicion pass even when unseen (the sound was enough). Cleared per mission in
@@ -1570,10 +1720,13 @@ public partial class Game
             // Harness/screenshot affordance only: SIGHTLINE_HEAT lets the headless intro shot
             // preview the dialled-in level + its unlocked ceiling. No disk I/O; default 0 keeps
             // a plain shot byte-stable.
-            if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_HEAT"), out int hEnv) && hEnv > 0)
+            // W5: the hook now also accepts the sub-standard rung (-1 = RECRUIT) so the intro
+            // DIFFICULTY card can be photographed at it. Unset / 0 still changes nothing, so a
+            // plain intro shot stays exactly as before.
+            if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_HEAT"), out int hEnv) && hEnv != 0)
             {
-                UnlockedHeat = Sightline.Heat.Clamp(hEnv);
-                PendingHeat = UnlockedHeat;
+                UnlockedHeat = Sightline.Heat.Clamp(Math.Max(0, hEnv));
+                PendingHeat = Sightline.Heat.Clamp(hEnv);
             }
             // W11 (same affordance family): SIGHTLINE_LOSSTREAK=<n> seeds the assist streak so the
             // intro FIELD SUPPORT chip can be screenshot headless. No disk; default 0 = byte-stable.
@@ -1692,8 +1845,14 @@ public partial class Game
         // over the first missions so the ladder bites once the squad can answer it (m1 x0, m2
         // x1/2, m3+ full). Card deltas and the per-mission growth curve (Mission.cs) are
         // untouched — only Heat's extra bodies/stats ramp. Heat 0 stays a true no-op.
-        if (n <= 1)      { heatEnemy = 0; heatStat = 0; heatDmg = 0; }
-        else if (n == 2) { heatEnemy /= 2; heatStat /= 2; heatDmg /= 2; }   // W6c: +1 dmg graces to 0 on m1-2 like the other deltas
+        // W5: the grace ramps HEAT's escalation in — it must not also ramp the RECRUIT rung's
+        // RELIEF out. Rung -1's whole point is that mission 1 is survivable, which is exactly the
+        // mission the grace would zero. Gated on heat > 0 so heats 1-8 are bit-for-bit unchanged.
+        if (heat > 0)
+        {
+            if (n <= 1)      { heatEnemy = 0; heatStat = 0; heatDmg = 0; }
+            else if (n == 2) { heatEnemy /= 2; heatStat /= 2; heatDmg /= 2; }   // W6c: +1 dmg graces to 0 on m1-2 like the other deltas
+        }
         int enemyDelta = card.EnemyDelta + heatEnemy;
         // adaptive assist eases the force-wide enemy stat bump (base Heat only; 0 otherwise).
         int statDelta = card.StatDelta + heatStat - _run.AssistStatRelief;
@@ -1824,6 +1983,7 @@ public partial class Game
         _podOrig.Clear();
         _linkedPods.Clear();   // FUL-6: no linked-alert carryover across missions
         _nextWavePod = 100;
+        _waveIndex = 0;
         foreach (var e in Enemies) if (e.PodId >= 0) _podOrig[e.PodId] = _podOrig.GetValueOrDefault(e.PodId) + 1;
         Selected = Players.FirstOrDefault(p => p.CanAct);
         AimMode = false;
@@ -1862,6 +2022,12 @@ public partial class Game
         }
         else ShowBanner($"LAST STAND - {Biome.Name}", false);   // SpawnEndlessWave already banner'd WAVE 1
 
+        // RESONANCE C1 (VOICE): re-seed the DEDICATED bark stream and clear the per-mission bark
+        // budget, then compose the briefing. Voice never touches Util.Rng — see src/Voice.cs.
+        Voice.BeginMission(_run?.MapSeed ?? 0, n);
+        _firstBloodSeen = false;
+        BeginBriefing(n);
+
         // checkpoint the run at the start of each mission (CAMPAIGN only). LAST STAND, SKIRMISH, and
         // the DAILY are all transient single-mode fights — never resumable, so they never write save.json.
         // W9 review fix: commit the barracks' PENDING salvage spends (scar rehab / slate re-roll)
@@ -1877,7 +2043,7 @@ public partial class Game
         // W2: Mission.AppliedLayout = the authored arena the guard actually ACCEPTED (-1 procedural).
         Stats.BeginMission(n, Objective.ToString(), _run.HeatLevel,
                            Players.Count(p => p.Alive && !p.IsVip), Enemies.Count(e => e.Alive),
-                           Mission.AppliedLayout);
+                           Mission.AppliedLayout, Mission.AppliedDeploy);
         // FUL-7: the PATCH per-presence denominator (corpsman enters via backfill only)
         if (Players.Any(p => p.Alive && !p.IsVip && p.Ability == AbilityKind.Heal))
             Stats.RecordCorpsmanFielded();
@@ -2723,6 +2889,11 @@ public partial class Game
             _missionKia.Add(d.FullName);
             DeathFlash = 1f;
             Fx.AddShake(9f);
+            // C1 VOICE: the same two beats as the DOWN path — a bonded mate reacting, and the
+            // moment the squad is down to one. Both are once-per-mission inside Voice, so a death
+            // that follows a down never repeats what was already said.
+            Bark(Voice.Beat.BondDown, BondPartnerOf(d), d);
+            CheckLastStanding();
         }
 
         // final-blow kill-cam (3.11): the mission-deciding death lingers in slow-mo
@@ -2790,6 +2961,8 @@ public partial class Game
         Fx.PopText(ldr.Pos + new Vector2(0, -34), "BROKEN", Pal.Good, 20f);
         Fx.Flash(ldr.Pos, Pal.Good, 26f, 0.2f, 0.5f);
         ShowBanner("POD ROUTED", false);
+        // C1 VOICE: whoever is standing closest to the break calls it. Once per mission.
+        Bark(Voice.Beat.PodRout, NearestSoldierTo(ldr));
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -2800,6 +2973,14 @@ public partial class Game
     //  ONE down per soldier per mission (WasDownedThisMission) — no revive-tanking.
     // ──────────────────────────────────────────────────────────────────────────
     public const int DownedTimerTurns = 3;   // player-turn countdown (ticks in StartPlayerTurn)
+
+    /// W5 ON-RAMP: the bleed-out clock the CURRENT run actually plays with. Standard and every
+    /// Heat rung keep the designed 3 turns; the sub-standard RECRUIT rung holds for 5, which is
+    /// the difference between "you must already know STABILIZE exists" and "you have time to find
+    /// it in the action bar". Read at EnterDowned (and by the banner copy) — the const stays the
+    /// baseline so Codex/harness references and every non-recruit run are unchanged.
+    public int DownedTimerTurnsNow
+        => DownedTimerTurns + (Sightline.Heat.IsRecruit(HeatLevel) ? 2 : 0);
 
     /// The single purge shared by KillUnit and EnterDowned: drop the unit's queued moves AND any
     /// queued surplus reaction ShotAnims aimed at it (the active blow — the one that caused this —
@@ -2824,7 +3005,7 @@ public partial class Game
         d.Downed = true;
         d.WasDownedThisMission = true;
         d.Stabilized = false;
-        d.DownedTurns = DownedTimerTurns;
+        d.DownedTurns = DownedTimerTurnsNow;
         d.Hp = 0;
         // attribution snapshot — the same switch KillUnit computes, taken NOW so a later bleed-out
         // names the archetype that actually downed them (or the DoT label, which buckets "?").
@@ -2854,8 +3035,13 @@ public partial class Game
         Audio.Play("death");
         // review F3 (honesty): the pill counts 3->2->1 and death lands when it would hit 0, so
         // the player ACTS on pills 2 and 1 — say the truthful count instead of promising three.
-        ShowBanner($"SOLDIER DOWN - THEY HOLD FOR {DownedTimerTurns}, TWO TURNS TO ACT", true);
+        ShowBanner($"SOLDIER DOWN - THEY HOLD FOR {DownedTimerTurnsNow}, {DownedTimerTurnsNow - 1} TURNS TO ACT", true);
         BannerSub = "stabilize to stop the bleeding - a corpsman's PATCH gets them up";
+        // C1 VOICE: the squad has bonds and the game has never once acknowledged one. BondPartnerOf
+        // returns null unless a REAL bonded squadmate is on their feet, so a bondless soldier can
+        // never draw this line. If nobody is bonded to them, the last one up may speak instead.
+        Bark(Voice.Beat.BondDown, BondPartnerOf(d), d);
+        CheckLastStanding();
     }
 
     /// The timer ran out: the FULL death flow runs — Fallen + Memorial append, KIA stamp,
@@ -2902,6 +3088,9 @@ public partial class Game
         Fx.Burst(t.Pos, Pal.Good, 12, 120f, 0.45f, 3f);
         Fx.PopText(Selected.Pos + new Vector2(0, -30), "STABILIZE", Pal.Good, 15f);
         Audio.Play("reload");
+        // C1 VOICE: the clutch save. This is the beat the game most needed words for — 146 soldiers
+        // went down across 16 measured campaigns and exactly ONE was revived, in total silence.
+        Bark(Voice.Beat.Stabilize, Selected, t);
     }
 
     /// True when killing `d` decides the mission (last hostile on an Eliminate, a squad
@@ -2934,6 +3123,18 @@ public partial class Game
         { killer.FeatClutch = true; FeatBanner(killer, "CLUTCH KILL"); }
         if (killer.AllyDown && !killer.FeatVengeful)
         { killer.FeatVengeful = true; FeatBanner(killer, "AVENGED"); }
+
+        // C1 VOICE — two beats ride the kill. The VENDETTA line is the rarer and more specific of
+        // the two (this soldier has a standing grudge against the outfit they just shot), so it is
+        // offered first; FIRST BLOOD only ever gets the chance on the mission's actual first kill.
+        bool spoke = false;
+        if (killer.VendettaFaction != Faction.None && Combat.MissionFaction == killer.VendettaFaction)
+            spoke = Bark(Voice.Beat.Vendetta, killer);
+        if (!_firstBloodSeen)
+        {
+            _firstBloodSeen = true;
+            if (!spoke) Bark(Voice.Beat.FirstBlood, killer);
+        }
 
         // run boons (on a player kill): reward aggression / sustain.
         if (_run != null && _run.ActiveBoons.Count > 0)
@@ -3338,13 +3539,37 @@ public partial class Game
         // custom-tag editor is modal: it swallows all other input while open
         if (EditingTag) { UpdateTagEditor(); return; }
 
+        // ── GLOBAL keys (read every phase, before any per-phase handler) ────────────────────
+        // These fire ON TOP of whatever the current phase binds, so anything claimed here is
+        // claimed EVERYWHERE. Keep the set tiny, and never give a global a letter that an
+        // in-mission verb wants.
+        //
+        // R1 REVIEW FIX — fullscreen was on `F`, which UpdatePlayer also binds to FOCUS (cone
+        // overwatch, advertised as "FOCUS F" on the action bar). IsKeyPressed is true for BOTH
+        // reads in the same frame, so pressing F during the player turn spent the soldier's
+        // action AND toggled fullscreen. The HUD advertises the verb, so the verb wins: fullscreen
+        // moves to F11, the platform convention for it, and the only function key besides F2 that
+        // this game binds. (The pause menu's FULLSCREEN button is unchanged and still the
+        // discoverable path; its key hint now reads F11.)
+        //
+        // Audited with it: the full in-mission player-turn keymap is
+        //   global   M mute · F11 fullscreen · F2 anim speed · Esc cancel-target/pause · C cam reset
+        //   verbs    1 aim · 2 overwatch · F focus · B brace · 3 hunker · 4 grenade · 5 ability
+        //            6 item · 7 drag · 8 shove · 9 vault · E stabilize · G beacon · H hack
+        //            X extract · R reload · T tag · V show-all-verbs · P restart drill
+        //            Tab cycle · Enter end turn · Space act · WASD/arrows cursor
+        // — no other key appears twice in one context. The other contexts (Intro, skirmish setup,
+        // codex, barracks/shop, tag editor) are each internally unique and are reached only when
+        // UpdatePlayer is not, so a letter may safely mean different things across them. Free
+        // letters remaining, for whoever binds next: I J O Q U Z.
         if (Raylib.IsKeyPressed(KeyboardKey.M)) Audio.ToggleMute();
-        if (!AutoPlay && Raylib.IsKeyPressed(KeyboardKey.F)) Display.ToggleFullscreen();
-        if (!AutoPlay && Raylib.IsKeyPressed(KeyboardKey.F2)) CycleAnimSpeed();   // fast-forward anim pacing (1x/2x/3x)
+        if (!AutoPlay && Raylib.IsKeyPressed(KeyboardKey.F11)) Display.ToggleFullscreen();
+        if (!AutoPlay && Raylib.IsKeyPressed(KeyboardKey.F2)) CycleAnimSpeed();   // fast-forward anim pacing (persisted; also in the pause menu)
         Audio.SetMusicIntensity(MusicIntensity());
         UpdateTutorial(dt);
         UpdateTraining(dt);            // T1: the TRAINING OP lesson track (drill mode only)
         UpdateFieldTips(dt);           // FUL-12 -> T1: once-per-profile JIT tips (never overlap a lesson)
+        UpdateBriefing(dt);            // RESONANCE C1: the mission briefing card's own clock
         Fx.UpdateAmbient(Biome, dt);   // per-biome ambient atmosphere (Wave B)
 
         // camera zoom-punch always relaxes; hit-stop freezes the rest of the sim
@@ -3407,7 +3632,7 @@ public partial class Game
         // advance animation queue — but NEVER while the codex is open (FUL-2: BeginCodex clears
         // Paused for the overlay, which let queued enemy ShotAnims resolve while the player read
         // the field manual; the queue freezes with the fight and resumes on ExitCodex).
-        if (Phase != Phase.Codex && _anims.Count > 0)
+        if (Phase != Phase.Codex && Phase != Phase.AudioCheck && _anims.Count > 0)   // A3: the audition screen freezes the fight exactly like the codex does
         {
             var a = _anims[0];
             if (!a.Started) { a.Started = true; a.OnStart(this); }
@@ -3490,6 +3715,7 @@ public partial class Game
             case Phase.Draft: HandleDraftClick(); break;
             case Phase.WarRoom: HandleWarRoomClick(); break;   // W3: cross-run meta screen
             case Phase.Codex: HandleCodexInput(); break;       // W6: field manual / reference
+            case Phase.AudioCheck: HandleAudition(t); break;   // A3: the AUDIO CHECK audition screen
             case Phase.SkirmishSetup: HandleSkirmishSetup(); break;  // W4: skirmish objective/heat picker
         }
 
@@ -3580,7 +3806,12 @@ public partial class Game
     /// survivable but costly, not run-ending. Can fire at most once per run, so there's no loop risk.
     bool TryReinforcements()
     {
-        if (_run == null || _run.CheckpointUsed || _run.Mission < 3) return false;
+        // W5 ON-RAMP: the valve opens at mission 1 on the RECRUIT rung. On the standard ladder an
+        // m1-2 wipe still ends cleanly (a 4-rookie opener loss is a fast restart, not a tragedy);
+        // for a first-time player it is the single most run-ending moment in the game, so RECRUIT
+        // spends the one-time checkpoint there instead.
+        int ckMin = _run != null && Sightline.Heat.IsRecruit(_run.HeatLevel) ? 1 : 3;
+        if (_run == null || _run.CheckpointUsed || _run.Mission < ckMin) return false;
         _run.CheckpointUsed = true;
 
         // fresh emergency squad: deploy as many rookies as this mission fields (fall back to the
@@ -4088,12 +4319,14 @@ public partial class Game
                         if (c.Guns < 255) c.Guns++;
                         if (o.Flanked) c.Flanked = true;
                         if (o.CoverLevel == 0) c.Exposed = true;
-                        // expected damage = hit% x post-armor average. Crits (up) and the graze floor
-                        // (down) are deliberately NOT modelled: this is the honest first-order read the
-                        // card labels "expected", not a simulation of the damage roll.
-                        int lo = Combat.HardenedReduce(Selected, o.DmgMin, crit: false);
-                        int hi = Combat.HardenedReduce(Selected, o.DmgMax, crit: false);
-                        c.ExpDmg += o.HitChance * 0.01f * ((lo + hi) * 0.5f);
+                        // R2 FIX 2: the TRUE expectation of the damage roll — clean hit (uniform band,
+                        // crit-rolled) PLUS the graze leg. This used to be hit% x mean(post-armor band),
+                        // whose comment claimed crits (up) and "the graze floor (down)" cancelled. They
+                        // don't: a graze deals max(1, reduce(DmgMin)) on a roll that would otherwise deal
+                        // ZERO, so both omissions pushed the same way and the card read 31-44% low.
+                        // Combat.ExpectedDamage is the single source of truth (THREATTEST measures it
+                        // against real Resolve rolls); see its doc for what stays excluded and why.
+                        c.ExpDmg += Combat.ExpectedDamage(Selected, o);
                         // "worst" gun = highest hit%, tie-broken by the bigger average bite
                         float score = o.HitChance * 1000f + (o.DmgMin + o.DmgMax);
                         if (score > bestScore) { bestScore = score; bestHit = o.HitChance; c.WorstCls = e.Cls; }
@@ -4464,7 +4697,10 @@ public partial class Game
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseGamma)) Display.CycleGamma();   // W9: true gamma (post-FX pass)
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseColorblind)) Display.ToggleColorblind();
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseAutoCam)) { Display.ToggleAutoCam(); if (!Display.AutoCam) { CamZoom = 1f; CamPan = Vector2.Zero; } }
+        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseAnimSpeed)) CycleAnimSpeed();   // W5 comfort: playback pacing
+        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseUiScale)) Display.CycleUiScale();  // W5 comfort: UI text size
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseCodex)) { BeginCodex(); }   // W6: open the field manual (remembers this phase for BACK)
+        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseAudio)) { BeginAudition(); }   // A3: open AUDIO CHECK (same remember-and-restore contract as the codex)
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseAbandon)) AbandonRun();
     }
 
@@ -5636,13 +5872,34 @@ public partial class Game
         var rows = Enumerable.Range(0, Grid.H).OrderBy(_ => Util.RandF()).ToList();
         int added = 0;
         var waveClasses = new List<string>();   // harness-only composition echo (AutoPlay)
-        foreach (int y in rows)
+        // W4 — a SURROUNDED hold has to keep being surrounded: under an ENVELOP opening the
+        // squad sits at board centre, so waves that all walk in from the east edge would quietly
+        // turn the second half of every Defend back into a one-bearing fight. Rotate the arrival
+        // rim deterministically (no RNG draw — a plain per-mission wave counter). Every other
+        // opening keeps the historical east edge byte-for-byte.
+        bool rimRotate = Mission.EnvelopRimWaves && Mission.AppliedDeploy == Mission.DeployEnvelop;
+        int rim = rimRotate ? _waveIndex % 4 : 0;
+        _waveIndex++;
+        // Along-rim scan order: reuse the shuffled row list on the E/W rims, and a shuffled
+        // COLUMN list on the N/S rims (same draw kind, so nothing else about the wave changes).
+        var lane = rim == 2 || rim == 3
+            ? Enumerable.Range(0, Grid.W).OrderBy(_ => Util.RandF()).ToList()
+            : rows;
+        foreach (int t in lane)
         {
             if (added >= want || AliveEnemies().Count >= cap) break;
-            int x = Grid.W - 2;
+            // (outer tile, fallback one step further out) for the chosen rim
+            int x, y, x2, y2;
+            switch (rim)
+            {
+                case 1:  x = 1; y = t; x2 = 0; y2 = t; break;                          // west
+                case 2:  x = t; y = 1; x2 = t; y2 = 0; break;                          // north
+                case 3:  x = t; y = Grid.H - 2; x2 = t; y2 = Grid.H - 1; break;        // south
+                default: x = Grid.W - 2; y = t; x2 = Grid.W - 1; y2 = t; break;        // east (today)
+            }
             if (!Grid.IsFloor(x, y) || IsOccupiedByOther(x, y, null))
             {
-                x = Grid.W - 1;
+                x = x2; y = y2;
                 if (!Grid.IsFloor(x, y) || IsOccupiedByOther(x, y, null)) continue;
             }
             var e = Mission.MakeWaveHostile(n, x, y, rich, heatStat);   // FUL-13: DEFEND waves inherit heat
@@ -7084,7 +7341,9 @@ public partial class Game
             }
             if (delta != 0)
             {
-                PendingHeat = Sightline.Heat.Clamp(Math.Clamp(PendingHeat + delta, 0, UnlockedHeat));
+                // W5: the floor is Heat.Min (-1 = RECRUIT), not 0 — the on-ramp is always
+                // selectable; only the ceiling above standard is gated by the earned unlock.
+                PendingHeat = Sightline.Heat.Clamp(Math.Clamp(PendingHeat + delta, Sightline.Heat.Min, UnlockedHeat));
                 Audio.Play("select");
             }
         }
@@ -7151,6 +7410,15 @@ public partial class Game
                           Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.OverlayBtn8))
                          || Raylib.IsKeyPressed(KeyboardKey.N);
             if (train) { BeginTraining(); return; }
+        }
+
+        // RESONANCE A3: intro AUDIO CHECK — the cue/mix audition screen (button or key U).
+        if (Phase == Phase.Intro)
+        {
+            bool audio = (Raylib.IsMouseButtonPressed(MouseButton.Left) &&
+                          Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.OverlayBtn9))
+                         || Raylib.IsKeyPressed(KeyboardKey.U);
+            if (audio) { BeginAudition(); return; }
         }
 
         // W1 mode-seam: end-card MAIN MENU (OverlayBtn2, button or Esc) — back to the intro without

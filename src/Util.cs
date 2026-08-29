@@ -40,19 +40,54 @@ public static class Cfg
     /// The display face, for titles only. Falls back to NotoMono when the TTF is absent.
     public static Font TitleFontFor(float size) => Has(FontTitle) ? FontTitle : FontFor(size);
 
+    // ---- W5 ON-RAMP: user text scale ------------------------------------------------------
+    // A multiplier on every point size the game draws, owned by the pause-menu TEXT SIZE setting
+    // (Display.UiScale pushes it here via Display.ApplyUiScale). It MUST be applied to Measure and
+    // Text symmetrically — a scale on one and not the other wraps at one size and paints at
+    // another, which is the exact failure mode the two-atlas split warned about.
+    // Stays at 1.0 in every headless path: Display.Init(false) never Loads settings, so
+    // screenshots, self-tests and the balance flywheel all measure the authored layout.
+    public static float UiScale = 1f;
+
+    /// The point size actually drawn/measured for a requested authored size.
+    ///
+    /// The scale TAPERS with size, and that is a deliberate layout decision rather than a fudge.
+    /// The readability problem this setting exists to solve is the 11-14px label layer — the odds
+    /// chips, roster rows, tooltips and stat lines that carry almost every word in the game. The
+    /// 40-92px headline layer is already legible at any setting, sits in fixed-size cards, and is
+    /// the layer that OVERFLOWS first when it grows. So body type takes the full multiplier, the
+    /// mid sizes ease off, and display type is left exactly as authored:
+    ///   <= UiFontMax (18px)  full scale        — the layer that needed this
+    ///   18 -> 40px           eased toward 1.0  — subheads/values
+    ///   >= 40px              1.0               — titles, banners, the end cards
+    static float Scaled(float size)
+    {
+        if (UiScale == 1f) return size;                      // fast path: the default changes nothing
+        if (size <= UiFontMax) return size * UiScale;
+        if (size >= TitleTaperMax) return size;
+        float k = (size - UiFontMax) / (TitleTaperMax - UiFontMax);   // 0 at 18px, 1 at 40px
+        return size * (UiScale + (1f - UiScale) * k);
+    }
+
+    /// Above this authored size the user text scale no longer applies (see Scaled).
+    public const float TitleTaperMax = 40f;
+
     // Size-routed text helpers. Every DrawTextEx/MeasureTextEx call site in the game goes
     // through these so the atlas choice is made in exactly one place.
+    // NOTE the atlas routes on the AUTHORED size, not the scaled one: body text stays on the
+    // crisp 20px UI bake even at 120%, instead of falling off the <=18px cliff onto the 64px
+    // atlas (which is minification mush at label sizes — the whole reason V1 split them).
     public static void Text(string t, Vector2 pos, float size, float spacing, Color tint) =>
-        Raylib.DrawTextEx(FontFor(size), t, pos, size, spacing, tint);
+        Raylib.DrawTextEx(FontFor(size), t, pos, Scaled(size), spacing, tint);
     public static Vector2 Measure(string t, float size, float spacing) =>
-        Raylib.MeasureTextEx(FontFor(size), t, size, spacing);
+        Raylib.MeasureTextEx(FontFor(size), t, Scaled(size), spacing);
 
     /// Title text — routed to the display face. Use for headline/card titles only; numerals and
     /// data stay on NotoMono (a good data face) via Text/Measure.
     public static void TitleText(string t, Vector2 pos, float size, float spacing, Color tint) =>
-        Raylib.DrawTextEx(TitleFontFor(size), t, pos, size, spacing, tint);
+        Raylib.DrawTextEx(TitleFontFor(size), t, pos, Scaled(size), spacing, tint);
     public static Vector2 TitleMeasure(string t, float size, float spacing) =>
-        Raylib.MeasureTextEx(TitleFontFor(size), t, size, spacing);
+        Raylib.MeasureTextEx(TitleFontFor(size), t, Scaled(size), spacing);
 
     /// Resolve a bundled asset next to the BINARY, not the current working directory.
     /// V1 ship-blocker: every asset path was relative to the cwd, so launching the built

@@ -20,6 +20,62 @@ public static class Program
             Util.Reseed(seedPin);
         // SIGHTLINE_SMARTPLAY=1 : like AUTOPLAY, but routes the autopilot through the
         // competent SmartStep() so a single headless game is played to win (balance gauge).
+        // W4 THE SECOND AXIS — deployment-geometry measurement pins (no effect unset).
+        //   SIGHTLINE_DEPLOY=frontal|pincer|crossfire|envelop|<0-3> : pin ONE opening shape.
+        //   SIGHTLINE_DEPLOYMIX=a,b,c,d                             : set the shipped weight mix.
+        // Both are pure statics on Mission read at Build time; the shape itself is derived from
+        // (MapSeed, mission) with zero RNG draws, so CRN pairing survives either pin.
+        {
+            string dep = Environment.GetEnvironmentVariable("SIGHTLINE_DEPLOY");
+            if (!string.IsNullOrEmpty(dep))
+                Mission.ForcedDeploy = dep.Trim().ToLowerInvariant() switch
+                {
+                    "frontal" => Mission.DeployFrontal,
+                    "pincer" => Mission.DeployPincer,
+                    "crossfire" => Mission.DeployCrossfire,
+                    "envelop" => Mission.DeployEnvelop,
+                    _ => int.TryParse(dep, out int dv) && dv >= 0 ? dv : -1,
+                };
+            string mix = Environment.GetEnvironmentVariable("SIGHTLINE_DEPLOYMIX");
+            if (!string.IsNullOrEmpty(mix))
+            {
+                var parts = mix.Split(',');
+                var w = new int[Mission.DeployShapes];
+                for (int i = 0; i < w.Length && i < parts.Length; i++) int.TryParse(parts[i].Trim(), out w[i]);
+                Mission.DeployMix = w;
+            }
+        }
+
+        // W4 — SIGHTLINE_PODMASS=<n>: enemy formation mass (3 = the FUL-6 pods-of-3 plan).
+        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_PODMASS"), out int pm) && pm >= 2)
+            Mission.PodMass = pm;
+        // W4 — SIGHTLINE_PODUNIFORM=1: a pod fields one kind of body (comparable targets).
+        string uni = Environment.GetEnvironmentVariable("SIGHTLINE_PODUNIFORM");
+        if (uni == "1") Mission.PodUniform = true; else if (uni == "0") Mission.PodUniform = false;
+        // W4 — SIGHTLINE_RIMWAVES=1: under an ENVELOP opening, rotate the rim reinforcement
+        // waves arrive from (a surrounded hold that keeps being surrounded).
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_RIMWAVES") == "1") Mission.EnvelopRimWaves = true;
+        // W4 — SIGHTLINE_ESCORTFIX=0 restores the pre-fix SmartEscort lone-VIP test (a DOWNED
+        // soldier counted as still standing) so the instrument fix has a paired measurement.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_ESCORTFIX") == "0") Game.EscortDownedFix = false;
+        // X2 TRUE NORTH II — the X1 durability pair, pinnable per measured round.
+        //   SIGHTLINE_TOUGH=<n> : Mission.HostileToughness (flat HP surcharge; X1 shipped 3)
+        //   SIGHTLINE_TRIM=<n>  : Mission.HostileDamageTrim (flat points off both ends; shipped 1)
+        // Unset = the shipped defaults, so an unpinned batch is unchanged.
+        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_TOUGH"), out int xtough) && xtough >= 0)
+            Mission.HostileToughness = xtough;
+        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_TRIM"), out int xtrim) && xtrim >= 0)
+            Mission.HostileDamageTrim = xtrim;
+        //   SIGHTLINE_AIMTRIM=<n>    : Mission.HostileAimTrim (flat points off every hostile's aim)
+        //   SIGHTLINE_ENEMYBASE=<n>  : Mission.EnemyBaseCount (the `count = base + mission` constant)
+        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_AIMTRIM"), out int xaim) && xaim >= 0)
+            Mission.HostileAimTrim = xaim;
+        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_ENEMYBASE"), out int xbase) && xbase >= 0)
+            Mission.EnemyBaseCount = xbase;
+        //   SIGHTLINE_OPENERTRIM=<n> : Mission.OpenerTrim (bodies off the m1 / half off m2 force)
+        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_OPENERTRIM"), out int xopen) && xopen >= 0)
+            Mission.OpenerTrim = xopen;
+
         bool smartplay = Environment.GetEnvironmentVariable("SIGHTLINE_SMARTPLAY") == "1";
         bool autoplay = Environment.GetEnvironmentVariable("SIGHTLINE_AUTOPLAY") == "1" || smartplay;
 
@@ -62,6 +118,20 @@ public static class Program
         if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_STACKTEST"), out int stackMode) && stackMode > 0)
         {
             StackTest(stackMode >= 2);
+            return;
+        }
+
+        // R2 FIX 1: SIGHTLINE_GEOMTEST=1 : the NOBODY-IS-WALLED-OUT invariant. Builds thousands of
+        // fresh boards across all 4 deployment shapes x 8 objectives x every mission x 2 heats and
+        // asserts every soldier can reach the squad and has a legal turn-1 move, and every hostile /
+        // objective tile stays reachable. STACKTEST could not have caught this: it is a fixed
+        // 16-board sample that never varies the deployment shape. SIGHTLINE_GEOMTEST=<N> widens the
+        // seed count. Needs a window only because Unit.SyncPos does tile->px math.
+        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_GEOMTEST"), out int geomN) && geomN > 0)
+        {
+            Raylib.InitWindow(64, 64, "geomtest");
+            Console.WriteLine(Game.GeomSelfTest(geomN == 1 ? 8 : geomN));
+            Raylib.CloseWindow();
             return;
         }
 
@@ -150,6 +220,31 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        // SIGHTLINE_VOICETEST=1 : RESONANCE C1 (VOICE) — the game's WORDS as a contract. Asserts
+        // (a) generating every region / briefing / dossier / bark / epilogue consumes ZERO draws
+        // from the shared Util.Rng — the CRN-pairing guarantee every measurement in this project
+        // rests on — with a sensitivity probe so the check cannot pass vacuously; (b) every
+        // template slot resolves non-empty and no beat can produce a nonsensical combination
+        // (a bondless soldier can never draw a bond line); (c) every bark trigger is reachable
+        // through TryBark and all four rate-limit gates actually bite; (d) no generated line
+        // overflows the chrome that draws it. Needs a window + the real atlases: the width
+        // assertions measure actual glyphs through Cfg.Measure.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_VOICETEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "voicetest");
+            LoadGameFonts();
+            Console.WriteLine(Voice.SelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
+        // SIGHTLINE_VOICEDUMP=1 : RESONANCE C1 — print every text type Voice generates (regions,
+        // briefings, faction dossiers, all bark variants, four epilogue shapes) so the COPY can be
+        // read and judged as prose without walking six missions. No window, changes nothing.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_VOICEDUMP") == "1")
+        {
+            Console.Write(Voice.SampleReport());
+            return;
+        }
         // SIGHTLINE_EVENTTEST=1 : between-mission FIELD EVENT selection/placement/outcomes + save round-trip (W4). No window.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_EVENTTEST") == "1")
         {
@@ -202,6 +297,19 @@ public static class Program
             Console.WriteLine(Audio.GateReport());
             return;
         }
+        // RESONANCE A3: SIGHTLINE_AUDITIONTEST=1 : the AUDIO CHECK screen's contract — every cue
+        // in SfxCueIds is listed exactly once and is a registered recipe, every cue has a role
+        // caption, no label overflows its column at 120% text scale, every gate stack resolves to
+        // known cues, and the numbers the rows print are finite and inside the budget. Needs a tiny
+        // window + the real atlases (the width assertions measure actual glyphs).
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_AUDITIONTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "auditiontest");
+            LoadGameFonts();
+            Console.WriteLine(Game.AuditionSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         // SIGHTLINE_AMBIENTTEST=1 : per-biome ambient field stays bounded/finite/on-board (Phase 5). No window.
         if (Environment.GetEnvironmentVariable("SIGHTLINE_AMBIENTTEST") == "1")
         {
@@ -212,6 +320,27 @@ public static class Program
         {
             Raylib.InitWindow(64, 64, "deathtest");   // a Game/Audio-free path still needs tile math; window is tiny
             Console.WriteLine(new Game().DeathConsequenceTest());
+            Raylib.CloseWindow();
+            return;
+        }
+        // SIGHTLINE_OPENERTEST=1 : RESONANCE X2 — the COLD-OPENER GRACE (Mission.OpenerTrim): the
+        // base force's m1 / m2 ramp, its floor, its shipped default and its determinism.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_OPENERTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "openertest");   // SetupMission uses tile math
+            Console.WriteLine(new Game().OpenerSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
+        // SIGHTLINE_ONRAMPTEST=1 : RESONANCE W5 — the RECRUIT rung (a real difficulty below standard)
+        // and the comfort settings (anim speed / UI text scale) incl. the harness-pinning guard.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_ONRAMPTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "onramptest");   // SetupMission / Cfg.Measure need a GL context
+            // The text-scale assertions MEASURE, so Cfg needs a real atlas; the bundled TTFs are
+            // irrelevant to what is being asserted (a ratio), so the built-in font is enough.
+            Cfg.Font = Cfg.FontUi = Cfg.FontTitle = Raylib.GetFontDefault();
+            Console.WriteLine(new Game().OnRampSelfTest());
             Raylib.CloseWindow();
             return;
         }
@@ -443,81 +572,7 @@ public static class Program
         // Phase 5.3 — real bitmap font (NotoMono-Regular, OFL-1.1).
         // Bake ASCII 32-126 plus a selection of useful non-ASCII codepoints so the
         // font supports them once we start using them.
-        {
-            int[] codepoints = new int[]
-            {
-                // ASCII printable range 32..126
-                32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,
-                48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,
-                65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,
-                81,82,83,84,85,86,87,88,89,90,
-                91,92,93,94,95,96,
-                97,98,99,100,101,102,103,104,105,106,107,108,109,110,
-                111,112,113,114,115,116,117,118,119,120,121,122,
-                123,124,125,126,
-                // useful non-ASCII
-                0x2013, // en-dash
-                0x2014, // em-dash
-                0x2018, // left single quote
-                0x2019, // right single quote
-                0x201C, // left double quote
-                0x201D, // right double quote
-                0x2022, // bullet
-                0x2026, // ellipsis
-                0x00D7, // multiply sign
-                0x00B7, // middle dot
-            };
-            // RESONANCE V1 — TWO ATLASES, and asset paths resolved next to the BINARY.
-            //
-            // (1) A single 64px atlas served everything from 11px to 92px. The 11-14px body text
-            //     is most of the words in the game, and minifying 64px glyphs ~5x with bilinear
-            //     filtering and no mip chain is exactly what turns small type into grey mush.
-            //     Bake a second atlas at 20px for text <= Cfg.UiFontMax and keep the 64px atlas
-            //     for the big sizes; Cfg.FontFor(size) routes every call site.
-            // (2) Ship-blocker: the path was relative to the CURRENT WORKING DIRECTORY. A player
-            //     launching the built binary from anywhere but the project root silently got
-            //     Raylib's built-in bitmap font and every em-dash rendered as '?'. Cfg.AssetPath
-            //     resolves against AppContext.BaseDirectory (with a cwd fallback for dev).
-            // Mipmaps + trilinear on both atlases so any residual off-size draw filters cleanly.
-            string notoPath = Cfg.AssetPath("assets/NotoMono-Regular.ttf");
-            Font loaded = Raylib.LoadFontEx(notoPath, 64, codepoints, codepoints.Length);
-            if (loaded.Texture.Id != 0)
-            {
-                Raylib.GenTextureMipmaps(ref loaded.Texture);
-                Raylib.SetTextureFilter(loaded.Texture, TextureFilter.Trilinear);
-                Cfg.Font = loaded;
-                Console.WriteLine($"FONT: NotoMono-Regular 64px atlas loaded ({notoPath})");
-
-                Font ui = Raylib.LoadFontEx(notoPath, 20, codepoints, codepoints.Length);
-                if (ui.Texture.Id != 0)
-                {
-                    Raylib.GenTextureMipmaps(ref ui.Texture);
-                    Raylib.SetTextureFilter(ui.Texture, TextureFilter.Trilinear);
-                    Cfg.FontUi = ui;
-                    Console.WriteLine("FONT: NotoMono-Regular 20px UI atlas loaded");
-                }
-            }
-            else
-            {
-                Cfg.Font = Raylib.GetFontDefault();
-                Console.WriteLine($"FONT: NotoMono-Regular NOT FOUND at {notoPath} — falling back to default");
-            }
-
-            // Display face (Chakra Petch Bold, OFL-1.1) — titles only; NotoMono keeps the data.
-            string dispPath = Cfg.AssetPath("assets/ChakraPetch-Bold.ttf");
-            Font disp = Raylib.LoadFontEx(dispPath, 96, codepoints, codepoints.Length);
-            if (disp.Texture.Id != 0)
-            {
-                Raylib.GenTextureMipmaps(ref disp.Texture);
-                Raylib.SetTextureFilter(disp.Texture, TextureFilter.Trilinear);
-                Cfg.FontTitle = disp;
-                Console.WriteLine("FONT: ChakraPetch-Bold display atlas loaded");
-            }
-            else
-            {
-                Console.WriteLine($"FONT: ChakraPetch-Bold NOT FOUND at {dispPath} — titles stay on NotoMono");
-            }
-        }
+        LoadGameFonts();
 
         // Display is normally OFF in the headless harness (byte-identical screenshots).
         // SIGHTLINE_POSTFX=1 forces it ON (+ the post-FX demo bloom) for verification.
@@ -592,6 +647,26 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_BEACON") == "1") game.DebugBeacon();
         if (shot && float.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_ZOOM"), out float z)) game.CamZoom = z;
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_PAUSE") == "1") game.Paused = true;
+        // W5 ON-RAMP (shot + the hand-run autoplay smoke test): SIGHTLINE_ANIMSPEED=<x> names the
+        // playback multiplier and SIGHTLINE_LONGMOVE=1 stages a multi-tile walk to film. Autoplay is
+        // included so the smoke test can be re-run AT the fastest setting (the pace change alters
+        // the frame budget a match takes, and that is exactly what needs proving safe). Both are
+        // inert when unset — and BalanceBatch has its own Main branch that never reaches here — so
+        // the flywheel and every default autoplay/screenshot run are unchanged.
+        if ((shot || autoplay) && float.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_ANIMSPEED"),
+                                   System.Globalization.NumberStyles.Float,
+                                   System.Globalization.CultureInfo.InvariantCulture, out float aspd) && aspd > 0f)
+            game.AnimSpeedOverride = aspd;
+        // W5 (shot only): SIGHTLINE_UISCALE=<idx into Display.UiScaleLevels> photographs the UI at a
+        // text size other than 100%. Set on Cfg directly — Display never Loads headless — and inert
+        // when unset, so every other screenshot keeps measuring the authored layout.
+        if (shot && int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_UISCALE"), out int uiIdx))
+        {
+            Display.UiScaleIdx = Math.Clamp(uiIdx, 0, Display.UiScaleLevels.Length - 1);
+            Display.ApplyUiScale();
+        }
+        bool longMove = shot && Environment.GetEnvironmentVariable("SIGHTLINE_LONGMOVE") == "1";
+        if (longMove) Console.WriteLine($"LONGMOVE: staged {game.DebugLongMove()} steps at {game.AnimSpeed:0.##}x");
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_PERKSHOT") == "1") game.DebugBarracksPerk();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_WAKE") == "1") game.DebugWakeAll();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CONTENT") == "1") Mission.DebugContentShowcase(game);
@@ -640,6 +715,7 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_FOCUSOW") == "1") game.DebugFocusOw();      // focused-overwatch cone
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_WARROOM") == "1") game.DebugWarRoom();   // W3 cross-run meta screen
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CODEX") == "1") game.DebugCodex();       // W6 field-manual reference screen
+        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_AUDITION") == "1") game.DebugAudition();  // A3 AUDIO CHECK screen (+ SIGHTLINE_AUDITIONFIRE=1 lights the just-played rows)
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_HAZARD") == "1") game.DebugHazards();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_TAGEDIT") == "1") game.DebugTagEditor();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_WOUND") == "1") game.DebugWound();
@@ -670,6 +746,13 @@ public static class Program
         }
         bool helpShot = shot && Environment.GetEnvironmentVariable("SIGHTLINE_HELP") == "1";  // hover the ability button
         int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_SHOTSEQ"), out int seqCount);   // Q1: consecutive-frame dump
+        // RESONANCE C1: SIGHTLINE_SHOTONBARK=1 — do not shoot a fixed frame; wait until a soldier
+        // BARK has actually landed in the combat log during live play, then shoot 40 frames later
+        // (long enough for the line to settle into the ledger, short enough that it is still one of
+        // the last six entries the panel shows). Pair with SIGHTLINE_AUTOPLAY=1 so a real fight is
+        // driving. Shot-mode only; inert everywhere else, so nothing measured changes.
+        bool shotOnBark = shot && Environment.GetEnvironmentVariable("SIGHTLINE_SHOTONBARK") == "1";
+        if (shotOnBark) shotFrame = int.MaxValue;
         int frame = 0;
         const int autoCap = 20000;
 
@@ -697,8 +780,15 @@ public static class Program
             });
 
             if (shot || autoplay) frame++;
+            // W5: dump the filmed unit's tweened board position every frame, so "positions advance
+            // monotonically, no backwards step" is a MEASURED claim rather than an eyeball on PNGs.
+            if (longMove && game.DebugFilmUnit != null)
+                Console.WriteLine($"FILM {frame} {game.DebugFilmUnit.Pos.X:0.000} {game.DebugFilmUnit.Pos.Y:0.000}");
             if (shot)
             {
+                if (shotOnBark && shotFrame == int.MaxValue && frame > 60
+                    && Stats.CombatLog.Exists(e => e.Outcome == Voice.LogTag))
+                    shotFrame = frame + 40;
                 if (frame == shotFrame) Raylib.TakeScreenshot("sightline_shot.png");
                 // Q1 SIGHTLINE_SHOTSEQ=<n>: also dump the n consecutive frames from shotFrame as
                 // sightline_seq_NN.png. Pair with SIGHTLINE_AUTOPLAY=1 to film a multi-tile move —
@@ -1215,5 +1305,86 @@ public static class Program
         return fails.Count == 0
             ? "WOUNDTEST: PASS (wound assigned, penalises aim+mobility, decays, clears)"
             : "WOUNDTEST: FAIL (" + string.Join(",", fails) + ")";
+    }
+
+    /// RESONANCE C1 — extracted verbatim from the inline block that used to live in Main, so a
+    /// window-free-ish self-test hook (SIGHTLINE_VOICETEST measures real glyph widths) can bake
+    /// the same atlases the game uses. Idempotent enough for the harness: call it once, after
+    /// InitWindow. Behaviour is unchanged for the normal launch path.
+    static void LoadGameFonts()
+    {
+            int[] codepoints = new int[]
+            {
+                // ASCII printable range 32..126
+                32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,
+                48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,
+                65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,
+                81,82,83,84,85,86,87,88,89,90,
+                91,92,93,94,95,96,
+                97,98,99,100,101,102,103,104,105,106,107,108,109,110,
+                111,112,113,114,115,116,117,118,119,120,121,122,
+                123,124,125,126,
+                // useful non-ASCII
+                0x2013, // en-dash
+                0x2014, // em-dash
+                0x2018, // left single quote
+                0x2019, // right single quote
+                0x201C, // left double quote
+                0x201D, // right double quote
+                0x2022, // bullet
+                0x2026, // ellipsis
+                0x00D7, // multiply sign
+                0x00B7, // middle dot
+            };
+            // RESONANCE V1 — TWO ATLASES, and asset paths resolved next to the BINARY.
+            //
+            // (1) A single 64px atlas served everything from 11px to 92px. The 11-14px body text
+            //     is most of the words in the game, and minifying 64px glyphs ~5x with bilinear
+            //     filtering and no mip chain is exactly what turns small type into grey mush.
+            //     Bake a second atlas at 20px for text <= Cfg.UiFontMax and keep the 64px atlas
+            //     for the big sizes; Cfg.FontFor(size) routes every call site.
+            // (2) Ship-blocker: the path was relative to the CURRENT WORKING DIRECTORY. A player
+            //     launching the built binary from anywhere but the project root silently got
+            //     Raylib's built-in bitmap font and every em-dash rendered as '?'. Cfg.AssetPath
+            //     resolves against AppContext.BaseDirectory (with a cwd fallback for dev).
+            // Mipmaps + trilinear on both atlases so any residual off-size draw filters cleanly.
+            string notoPath = Cfg.AssetPath("assets/NotoMono-Regular.ttf");
+            Font loaded = Raylib.LoadFontEx(notoPath, 64, codepoints, codepoints.Length);
+            if (loaded.Texture.Id != 0)
+            {
+                Raylib.GenTextureMipmaps(ref loaded.Texture);
+                Raylib.SetTextureFilter(loaded.Texture, TextureFilter.Trilinear);
+                Cfg.Font = loaded;
+                Console.WriteLine($"FONT: NotoMono-Regular 64px atlas loaded ({notoPath})");
+
+                Font ui = Raylib.LoadFontEx(notoPath, 20, codepoints, codepoints.Length);
+                if (ui.Texture.Id != 0)
+                {
+                    Raylib.GenTextureMipmaps(ref ui.Texture);
+                    Raylib.SetTextureFilter(ui.Texture, TextureFilter.Trilinear);
+                    Cfg.FontUi = ui;
+                    Console.WriteLine("FONT: NotoMono-Regular 20px UI atlas loaded");
+                }
+            }
+            else
+            {
+                Cfg.Font = Raylib.GetFontDefault();
+                Console.WriteLine($"FONT: NotoMono-Regular NOT FOUND at {notoPath} — falling back to default");
+            }
+
+            // Display face (Chakra Petch Bold, OFL-1.1) — titles only; NotoMono keeps the data.
+            string dispPath = Cfg.AssetPath("assets/ChakraPetch-Bold.ttf");
+            Font disp = Raylib.LoadFontEx(dispPath, 96, codepoints, codepoints.Length);
+            if (disp.Texture.Id != 0)
+            {
+                Raylib.GenTextureMipmaps(ref disp.Texture);
+                Raylib.SetTextureFilter(disp.Texture, TextureFilter.Trilinear);
+                Cfg.FontTitle = disp;
+                Console.WriteLine("FONT: ChakraPetch-Bold display atlas loaded");
+            }
+            else
+            {
+                Console.WriteLine($"FONT: ChakraPetch-Bold NOT FOUND at {dispPath} — titles stay on NotoMono");
+            }
     }
 }

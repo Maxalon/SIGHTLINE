@@ -34,6 +34,7 @@ audio_dump/
 # agent test isolation (XDG_CONFIG_HOME / SIGHTLINE_BALANCE_JSON per worktree)
 shots/
 .xdg/
+.xdg*/
 balance.json
 
 # RESONANCE Q1 verification artifacts
@@ -47,3 +48,25 @@ audio_dump_before/
 dump_r1/
 dump_r2/
 v2_*.png
+probe.json
+probe.log
+runs-A.out
+runs-B.out
+runs/
+table.py
+run_chunk.sh
+run_chunk0.sh
+battery.sh
+agg.py
+
+# RESONANCE C1 (VOICE) verification artifacts — screenshots + measurement dumps, never committed
+c1_*.png
+*_balance.txt
+qa*.txt
+
+# per-agent direnv shims (never commit - they hard-code a worktree path)
+.envrc
+runbin/
+autoplay10.txt
+qasweep.txt
+sweep-balance.json

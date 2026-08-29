@@ -469,8 +469,12 @@ ASCII-only **until a font ships** (Phase 5.3; see the clarified Art policy), ver
       **pause menu** (`Hud.PauseBright`/`PauseColorblind`, card grown to 9 buttons) and
       persist in `display.json` (`Display` Dto `BrightIdx`+`Colorblind`, applied in `Load`).
       Verify: `SIGHTLINE_CB=1` (orange foes) + `SIGHTLINE_PAUSE`+`SIGHTLINE_BRIGHT=1` (menu +
-      dim) screenshots. **TODO:** a true contrast/gamma post-pass (needs a shader) + an
-      independent UI text scale (invasive — all DrawText sizes are fixed).
+      dim) screenshots. ~~**TODO:** a true contrast/gamma post-pass (needs a shader) + an
+      independent UI text scale (invasive — all DrawText sizes are fixed).~~ **BOTH DONE** —
+      true gamma landed in APEX W9 (`uGamma` in the post-FX shader); the **UI text scale**
+      landed in RESONANCE W5 (`Display.UiScaleLevels` 90/100/110/120%, applied once in
+      `Cfg.Text`/`Cfg.Measure` with a size taper; see DEVLOG §W5 ON-RAMP). Still open from the
+      same family: **key rebinding**.
 
 **PHASE 3 IS COMPLETE — every item 3.1 through 3.13 is DONE and on `main`.** The game is
 feature-complete against the whole spec. Remaining work is now *open-ended polish*, not a
@@ -1033,6 +1037,31 @@ Reference for any future wave: the FUL-13 ladder + re-set goal band (docs/DEVLOG
 is the number of record; method per FUL-2/FUL-5 — CRN chunks via SIGHTLINE_BALANCE_BASE slot
 sets, one lever per measured round, fresh same-slot R0 first, dip budgets, breaches reported.
 
+> **Ladder update (RESONANCE X1 "THE EXCHANGE", docs/DEVLOG.md §X1).** The numbers of record
+> for h0/h4/h8 are now the X1 shipped rungs — **h0 52.5% / h4 27.5% / h8 15.0%** (n=40
+> campaigns each, CRN slot sets 0-19 x greedy+sloppy), all inside the FUL-13 band. X1's own
+> pre-lever baseline re-measured h0 at 52.5% (FUL-13's number to the decimal), h4 at 22.5%
+> and h8 at 10.0%. **h2 and h6 were not re-measured** — X1 moved the top rungs UP, so those
+> two are the first to check on any re-baseline.
+
+- [ ] **X1 residual — Escort at heat 8 runs 15.61 turns** (n=17; h0 6.00t and h4 6.01t both
+      IMPROVED vs baseline, so this is an apex-only drag). Two candidates in priority order,
+      with the measured caveats, in DEVLOG §X1 "THE ONE HONEST BREACH": (1) `SmartEscort`'s
+      downed-squad hole — the lone-VIP self-race tests `p.Alive` but a DOWNED soldier is still
+      Alive, so the asset hunkers while the squad bleeds out (an INSTRUMENT fix: needs its own
+      paired re-measure); (2) the cold-LZ beacon gate (`Game.EscortBeaconOk`, Chebyshev 3) —
+      but BEACON plant counts were UNCHANGED between X1's R0 and R2, so it was not the binding
+      constraint at h0. Evac's pooled 11.32t rests on n=9 and is not yet a finding.
+- [ ] **X1 residual — meaningful-choices/turn is a CONTACT-DENSITY metric, not a lethality
+      one.** X1 added the shot-gate decomposition (`[shot-gate]` report line +
+      `decisionRichness.{actingSoldiersPerTurn,armedSoldiersPerTurn,turnsWithAShotPct,
+      choicesPerArmedSoldierTurn}`) and it shows the binding constraint is
+      choices/ARMED-soldier-turn ~1.5: the typical armed soldier sees exactly ONE worthwhile
+      target. Compare rungs — h4 out-scores h0 (2.90 vs 2.33) purely because heat fields MORE
+      bodies. **Chase the 3-5 band with simultaneous-target geometry** (pod placement, arena
+      sightlines, activation overlap), and always quote choices/ARMED alongside the per-turn
+      average so a turn-count change is never mistaken for a decision-quality change.
+
 - [ ] **Owner decisions pending** (decision paragraphs with recommendations in DEVLOG §FUL-13
       "DESIGN-QUESTION DOCKET"): skirmish numeric heat (recommend: exempt SKIRMISH from the m1
       grace, keep DAILY); founding-squad corpsman (recommend: first-backfill guarantee or
@@ -1074,6 +1103,91 @@ sets, one lever per measured round, fresh same-slot R0 first, dip budgets, breac
 
 ## PROGRAM "RESONANCE" — landed waves (see docs/DEVLOG.md for the write-ups)
 
+- [x] **P1 — PRESENTATION.** DONE. The post chain got the cheapest visual headroom left in the
+      project, and the strategic layer stopped looking like a spreadsheet.
+      - **Bloom is two-pass and half-res.** A bright-extract + 4-tap box downsample to 640x400,
+        then a separable gaussian H and V — **~5.6M texel fetches against the old single-pass
+        12-tap-at-full-res ~12.3M**, with the outer tap reaching **~10.3px** instead of 5px.
+        The bright-pass **knee is UNCHANGED at 0.36** and is still applied PER TAP before the box
+        average, so V3's 1px cover rims still cross it. Measured (seed 7, post-FX on, resting):
+        board median **59 -> 59**, p95 **114 -> 117**, max **255 -> 254**, and the >180 band V3
+        reserves for unit rings **1.05% -> 1.19%**. Nothing blew out; the old 5px ring's hard
+        halo edge is gone. Amount retuned `0.5+1.7*b` -> `1.45+4.30*b` (three settings measured).
+      - **An ACES shoulder, not a full-range ACES.** Full-range Narkowicz maps the board median
+        0.26 -> **0.39** and white -> **0.80** against display-referred input — it would undo V2's
+        re-grade. Shipped: the same curve blended only over the **0.85..1.60** luma band, so
+        everything at or below 0.70 luma is bit-identical and only blown bloom cores get a shoulder.
+      - **Film grain + scan.** A 256px `GenImageWhiteNoise` tile made at init (**zero committed
+        bytes**), alpha 0.025, faded out below 0.30 luma; a 3px-period scan at 0.028. Both driven
+        by the existing `uTime` accumulator — **no new `Raylib.GetTime()` read** (count still 59).
+        All of it stays behind `Display.Enabled`: a plain `SIGHTLINE_SHOT` loads **one** shader
+        program (raylib's default) where the P1 chain would add three.
+      - **Campaign map.** Seeded contour terrain + per-region column bands (`MapHash`, pure
+        arithmetic off `MapSeed` — no alloc, no RNG draw), casing-plus-core route strokes with a
+        direction chevron on live edges, and `DrawNodeIcon` geometry replacing the single letters
+        (crosshair / depot cross / warning delta / choice fork / boss diamond). The legend draws
+        the real markers now; `NodeGlyph` is deleted.
+      - **WAR ROOM.** A full-width **CAREER** footer of 7 stat cells closes the L-shaped void and
+        grounds the three content-sized columns; BACK sits under it instead of floating in it.
+      - **Victory card.** Five accent colours -> two (neutral + the card accent on one headline
+        slab). DIFFICULTY stops reading as a warning and gains a filled/hollow rung-pip strip.
+      - **Event card.** Sized to content (~82px of dead slab removed) and every option telegraphs
+        its risk three ways — rail, drawn mark, word — derived in Hud from outcomes that already
+        exist, so `Events.cs` is untouched.
+      - **Shop / armory icons.** Geometry transcribed into the existing `DrawActionIcon`
+        primitives; the slate card widens 760 -> 808 so the text column keeps EXACTLY its prior
+        width (366-28-24 == 342-28), verified against a base capture at 120%.
+      - Verified: Release **0 warn / 0 err**, `qa-sweep --full` **45 self-tests, 0 FAIL** (PAIRTEST
+        PASS, no COVERAGE GAP), autoplay x5 clean, `SIGHTLINE_BALANCE=10` **runs=20 missions=69**
+        **byte-identical to base `764055a`** (0 diff lines after stripping the wall-clock stamps and the worktree path) — the proof this wave is presentation-only. `SIGHTLINE_CB=1` and `SIGHTLINE_UISCALE=3` passes read on every
+        touched screen. Write-up: DEVLOG §RESONANCE P1.
+
+- [x] **V3 — SURFACES.** DONE. Cover became a material, biomes became places, and the
+      unit tier finally moved into the band the V2 grade reserves for it.
+      - **Cover joins its biome.** The tint pull on cover was 0.28 over a strongly slate
+        base, so measured (analytic, exact from the colour math) six of eight biomes' cover
+        tops sat at hue 190-235 — blue — regardless of the room: ARID cover was hue **204
+        at saturation 0.03** (a grey block in a sand room) and MAGMA's was hue 320 at 0.05.
+        Pull to **0.55**: ARID cover moves **179 degrees** off slate, MAGMA **158**,
+        VERDANT to 156 (green), VOID to 248 (violet). Cover-top hue spread across the eight
+        biomes **130 -> 178 degrees**.
+      - **Cover became a material.** A per-biome `GenImageCellular` field (256², biome-sized
+        cells, CPU-baked, **zero committed bytes**) is inverted at bake and drawn through a
+        light biome stone, so the cell faces lift and the seams stay — concrete slabs, ice
+        plates, cracked basalt, gravel. Plus purely-visual footprint jitter (+/-3px), a
+        hash-picked corner radius (0.12-0.32) and a chipped corner on ~35% of tops. Cover-top
+        interior luma std **3.5 -> 5.1-5.5** on the small-cell biomes. `Util.TileRect` and
+        every tile-centre consumer are untouched — the jitter is a local copy of the rect.
+      - **Biomes became places.** `DrawBiomeFeatures`: 6-12 **board-scale** features per
+        mission (fissure + pool, frost drift, soot fan, dune ridge, lattice trunk, moss
+        patch, plate seam) drawn *across* tiles under the terrain, all derived from
+        `Run.MapSeed` via `Util.Hash3` — no `Random`, **zero draws from `Util.Rng`**, built
+        once per (seed, biome, grid) into fixed static buffers (no per-frame allocation).
+        MAGMA's per-tile squiggle drops 40% -> 16% of tiles now that structure carries it.
+      - **The colorblind collision.** V2 caught MAGMA's per-tile veins landing on the CB foe
+        orange. In `SIGHTLINE_CB` the fissure now gives up saturated warmth and works in
+        value (dark crevasse, pale hot core). Terrain wearing the CB-foe hue band on MAGMA:
+        **0.83% -> 0.61%** of board pixels.
+      - **Silhouettes.** A **team chassis carried by topology, not hue**: player = a closed,
+        doubled ring; enemy = a broken ring notched in three places (survives greyscale and
+        `SIGHTLINE_CB`). GRUNT / SCOUT / HUNTER re-cut as **solid wedge / hollow wedge /
+        twin chevrons** — they were the same wedge 2px apart. A dark keyline contour on every
+        unit and a white specular catch. Dormant contacts lifted (pale slate body, dark
+        backing arc under each dash) — they were near-invisible on several biomes.
+      - **The grade: only the unit tier moved.** Board **median and p95 held at base**
+        (medians identical; p95 within +/-2 across all eight biomes) while pixels above
+        luma 180 went **0.06-0.15% -> 0.49-0.66%**. The V2 blocker is cleared and measured:
+        unit ring stroke **179-182**, specular **215**, against a cover top face whose
+        worst possible pixel (high cover, cell face, directly under the key light, plus
+        grain) is **~149** — below a soldier's body fill (153). Cover tops are now
+        **value-targeted** (`Renderer.LiftTo`) so all eight biomes sit on the same rung;
+        their luma spread went **12 -> 0**. The p95=150 target is still unmet and was NOT
+        chased — see DEVLOG §RESONANCE V3.
+      - Verified: Release **0 warn / 0 err**, **41/41** self-tests incl. PAIRTEST, autoplay
+        x5 clean, `SIGHTLINE_BALANCE=10` **byte-identical to base** (runs=20, missions=76,
+        0 diff lines). V2's hue-convergence table re-run: no regression (ASH dHue 30 -> 24,
+        cyan% within 1.5pp everywhere). Write-up: DEVLOG §RESONANCE V3.
+
 - [x] **V2 — LIGHT ON THE BOARD.** DONE. Two measured problems, one of them tactical.
       - **The move overlay stopped repainting the room.** `Renderer.DrawMoveOverlay` filled
         every reachable tile at a=60 and every dash tile at a=55 — 60-120 tiles of flat
@@ -1103,6 +1217,22 @@ sets, one lever per measured round, fresh same-slot R0 first, dip budgets, breac
         rect minus HUD overlap) and the **`SIGHTLINE_NOMOVE=1`** ground-truth capture hook.
       - Verified: Release 0/0, **41/41 self-tests**, PAIRTEST PASS, autoplay x5 clean,
         `SIGHTLINE_BALANCE=10` byte-identical to base. Write-up: DEVLOG §RESONANCE V2.
+- [x] **X1 — THE EXCHANGE.** DONE (partial, honestly reported). The fight was over before it
+      became tactical: a soldier's shot averaged 5.1 damage into an ~8 HP body, so time-to-kill
+      was one hit and a match tipped 0.60 times. Two constants in `Mission.MakeHostile` (the
+      single hostile funnel) now carry the trade: **`HostileToughness = 3`** (flat HP surcharge
+      on every hostile) and **`HostileDamageTrim = 1`** (flat points off both ends of every
+      hostile weapon's band, via the new `Weapon.TrimBaseDamage`, which moves the PRISTINE base
+      so `ApplyMods` can never resurrect it). Six measured rounds, one lever each, n=40
+      campaigns per row. **Landed:** Eliminate 3.60 -> 5.30 turns (into the 5-7 budget),
+      shots-per-kill 2.34 -> 3.17, lead-swings 0.59 -> 0.80, Eliminate stopped being a 95% free
+      square (-> 81%), Defend did not grow (8.70 -> 8.78), and all three measured rungs stayed
+      inside the FUL-13 band (h0 52.5 flat, h4 22.5 -> 27.5, h8 10.0 -> 15.0). **Missed:**
+      lead-swings < 1.00, and meaningful-choices/turn fell 2.33 -> 2.09 — the wave's own new
+      shot-gate decomposition shows why, and it is a metric finding, not a lever failure (see
+      the OPEN/NEXT residual above). **Reverted:** a −2 damage trim (bought ~nothing, worst
+      Escort drag of the wave) and toughness +4 (−30 completion; the symmetry warning, measured).
+      **Breach recorded:** Escort at heat 8 runs 15.61 turns.
 
 - [x] **T1 — BASIC TRAINING.** DONE. Onboarding stopped being a doc claim.
       `docs/DESIGN.md` §4 graded onboarding "Addressed (W11)"; what shipped was a
@@ -1164,3 +1294,137 @@ sets, one lever per measured round, fresh same-slot R0 first, dip budgets, breac
       trade-offs and a recommendation are in `docs/DISTRIBUTION.md` §4; the status quo
       (unlicensed private repo = all rights reserved) is safe and blocks nothing until a
       build goes to someone outside the project.
+
+### PROGRAM RESONANCE — C1 "VOICE" (done 2026-08-28, details in DEVLOG §C1)
+
+- [x] **`docs/DESIGN.md` §1.1 AMENDMENT — the light frame.** Narrative was listed as a
+      deliberately-unpursued aesthetic; the project owner granted this program permission to
+      relax documented constraints, so the change is **recorded**, with its limits, rather than
+      allowed to drift. Read §1.1 before adding any word to the game.
+- [x] Mission **briefings** (3 lines/campaign node: region × arena × faction × objective),
+      skippable, never hit-tested, yielding absolutely to the T1 teaching cards, and clearing
+      itself the instant the combat log has an entry.
+- [x] **Faction dossiers** (codex FACTIONS tab, each FIELD RULE line interpolating the real
+      `Combat` constant) + **named regions** on the campaign map (64 biome-true names off `MapSeed`).
+- [x] **Soldier barks** at six beats with four hard rate limits, tagged `VOICE` in the combat log.
+- [x] **Run epilogue** — five lines on the campaign end card, off the card's own telemetry.
+- [x] `SIGHTLINE_VOICETEST=1` (43rd self-test, wired into `scripts/qa-sweep.sh`; the sweep's
+      footer count was also off by one before this wave and is corrected): RNG-separation
+      proof with a sensitivity probe, template-completeness, bark reachability + all four gates,
+      and a pixel-width fit check for every generated line. `SIGHTLINE_BALANCE=10` byte-identical.
+
+- [ ] **Widen the bark pools.** Three variants per beat is thin; the test that measures fit and
+      slot-safety already exists, so this is pure content work.
+- [ ] **Briefing opposition line reads as a template by the fourth run** — three of the four are
+      structurally identical ("X ground: a, b, c. <rule>."). Worth a rewrite pass, not a rewrite.
+- [ ] **No briefing in SKIRMISH / DAILY / LAST STAND** (no `MapSeed` route, no operation number).
+      A one-line mode-appropriate variant is cheap if the owner wants it.
+- [ ] **Region names are decoration.** Nothing keys off them — no per-region modifier, no return
+      visits. Deliberate scope for a *frame*; a future wave could make them mechanical.
+
+### PROGRAM RESONANCE — W4 "THE SECOND AXIS" (done 2026-08-28, details in DEVLOG §W4)
+
+- [x] **The opening geometry is a variable.** `Mission` now deals one of four deployment
+      SHAPES per mission — FRONTAL (today's left-to-right push), PINCER (front + both flanks),
+      CROSSFIRE (two dense NE/SE masses) and ENVELOP (squad at board centre, pods on every
+      rim, the surrounded opening). Derived PURELY from `(MapSeed, mission)` by FNV-1a with
+      **zero `Util.Rng` draws**, so every CRN pairing in the project survives; PAIRTEST is green
+      with the whole surface on. ENVELOP is objective-gated to Eliminate / Decapitate / Defend,
+      so no extraction, hack, beacon or sabotage routing changed.
+- [x] **Pod uniformity** — a pod fields one kind of body. Measured exactly ladder-neutral
+      (32.5% = 32.5%, n=40) for the wave's biggest single gain on the "which target?" axis.
+- [x] **The `SmartEscort` downed-soldier instrument fix** (X1's hand-off), measured as its own
+      CRN-paired round with `SIGHTLINE_ESCORTFIX=0` reproducing the broken instrument.
+- [x] **New instrumentation** — the `[choice-split]` decomposition (`los-targets` /
+      `target-choices` / `position-choices` per ARMED soldier-turn) and a per-shape
+      `DEPLOYMENT GEOMETRY` report/JSON block. `SIGHTLINE_EXPOSURETEST` extended to a third
+      exposure axis (shape x arena x objective over 4000 seeds) with purity, determinism and
+      ENVELOP-legality assertions.
+
+- [ ] **THE LADDER HAS DRIFTED BELOW ITS BAND AND NEEDS A WAVE.** W4's fresh baseline on the
+      integration tip measured h0 **32.5%** and h4 **12.5%** run completion (n=40 each) against
+      the FUL-13 band 55±8 / 30±8. X1 shipped 52.5 / 27.5. Nothing in W4 caused it — it was
+      true before the first lever — but it is now the biggest open number in the project.
+- [ ] **`choices/ARMED-soldier-turn` needs a POSITIONING lever, not another threat lever.**
+      W4 measured it as a near-invariant at ~1.6 across five structurally different levers,
+      because `CountMeaningfulChoices`' two halves respond to threat with opposite signs
+      (DEVLOG §W4). The two honest routes: a terrain-grammar pass that adds equally-good
+      destinations at constant threat (more LOW cover, which also does not block sightlines),
+      or re-specifying axis (b) with an additive rather than multiplicative band.
+- [ ] **ENVELOP rim waves** (`SIGHTLINE_RIMWAVES=1`) — built, deterministic, PAIRTEST-clean,
+      shipped OFF because the round budget ran out. One flag, one paired round.
+- [ ] **A heavier PINCER / ENVELOP weighting.** Pinned at h0 (n=40 each) PINCER ran 47.5%
+      completion and ENVELOP 60.0% against a 32.5% baseline, and inside the shipped mix
+      PINCER missions score `choices/ARMED` 1.70 vs FRONTAL's 1.39. The shipped 3/3/1/3 is what
+      was measured end-to-end; a 1/4/1/4 deal is the obvious next round.
+- [ ] **CROSSFIRE drags Escort** (13.40t pinned vs PINCER's 5.65t) — its NE mass sits on the
+      cols 16-17 extraction corner and gets scattered by the spawn-collision loop. Gating it
+      off evac objectives the way ENVELOP is gated is the cheap fix, unmeasured.
+
+### PROGRAM RESONANCE — X2 "TRUE NORTH II" (2026-08-29, details in DEVLOG §X2)
+
+- [x] **THE LADDER OF RECORD.** The first ladder ever measured on the COMPOSED tree: n=40
+      campaigns per rung across six rungs (RECRUIT + h0/2/4/6/8), `runs=20` asserted in all 12
+      chunks, base commit `a61ef42`, raw data archived in `docs/measurements/x2/`. Supersedes
+      X1's, W5's, W4's and FUL-13's ladders, each of which was measured on its own base.
+- [x] **THE BAND, re-argued and KEPT** (h0 55 / h2 40 / h4 30 / h6 20 / h8 10, ±8; h8 ±5), with
+      two amendments from measurement: **RECRUIT joins it at 75 ±8** with a standing
+      `RECRUIT − h0 ≥ 15` floor, and the band's ±8 is now documented as **≈1 standard error at
+      n=40**, so rung ORDER is not a gate at that N.
+- [x] **THE COLD-OPENER GRACE** (`Mission.OpenerTrim`, shipped 1). Mission 1 measured **75%**
+      win at heat 0 against 90% for m3-m4 — a U-shaped curve whose left arm ended a quarter of
+      all runs before the player had earned anything, and the exact front-loaded anxiety
+      DESIGN §3.D forbids. The heat grace that already fixes this is gated on `heat > 0`. One
+      body off m1 and m2 takes mission 1 to **100% (n=40, zero losses)** and heat 0 from
+      **35.0% → 57.5%**, with shots-per-kill UP at every rung. `OPENERTEST` pins it.
+- [x] **Three default-OFF dials, measured and priced, for whoever needs one**:
+      `SIGHTLINE_AIMTRIM` (**+7.5 completion per 5 aim points** at h0, Eliminate's turn budget
+      untouched at the 5-point dose; the 10-point dose reaches the band but breaks two turn
+      budgets), `SIGHTLINE_TOUGH` / `SIGHTLINE_TRIM` (X1's pair, now pinnable), and
+      `SIGHTLINE_ENEMYBASE`.
+
+- [ ] **RAISE N BEFORE SPENDING ANOTHER LEVER.** The highest-value measurement in the project
+      right now is **n≥80 per rung on the state that is already shipped**. At n=40 the error bar
+      (±6-8) is the size of the band tolerance and bigger than the step between rungs; three of
+      the six deltas in X2's shipped table are indistinguishable from noise, and two waves have
+      now argued about rung inversions that no data could resolve.
+- [ ] **Heat 8 is out of band at 17.5%** (band 5-15, so +2.5 over the ceiling, 0.4 SE). Do not
+      aim a rung-average lever at it: the apex is a wall made of four objectives —
+      **Escort 33% (n=15), Evac 0% (n=4), Rescue 33% (n=3), Decapitate 41% (n=17)** — and the
+      rung average is what those produce.
+- [ ] **Escort is the drag objective and its repair was flattered by a broken ladder.**
+      12.81 turns at h0 and 13.48 at RECRUIT in the shipped state, against the 8.03/8.19 that
+      W4 and X2's own baseline recorded — those samples contained only the runs healthy enough
+      to REACH an Escort (n 13 → 19 once the opener was repaired). Its real h0 cost is ~13 turns.
+- [ ] **Lead-swings fell 0.79 → 0.61 at heat 0** and the wave accepted it: a 4-body opener
+      against a full squad is not a contested fight, and mission 1 is ~26% of matches played.
+      If the swing metric matters more than the opener's shape, the honest fix is to make m1
+      contested *some other way* (a mid-mission reinforcement beat, a timed objective), not to
+      put the fifth body back.
+
+- [ ] **SPEC (ready to dev, do NOT implement inside a tuning wave): re-specify
+      `CountMeaningfulChoices` axis (b) as an ADDITIVE band.** Two waves (X1, W4) have now missed
+      a decision-density gate that X2's baseline shows is not merely hard but *structurally
+      unreachable*: axis (b) counts destinations scoring within **15% of the BEST** safety score
+      (`24 − TileExposure + cover*8 + height*5`), so raising threat lowers the best score, shrinks
+      the absolute window `0.15 × best`, and disqualifies tiles. Axis (a) ("which target?") and
+      axis (b) ("where do I stand after?") therefore respond to threat with **opposite signs** and
+      their sum is close to conserved — W4 measured 1.55-1.64 across five structurally different
+      levers, and X2's baseline reads 1.44-1.78 across six *rungs*, which is the same invariance
+      seen from the difficulty axis instead of the lever axis.
+      **The fix:** replace the multiplicative window with an **additive** one — count a destination
+      as a real alternative when it scores within a FIXED number of safety points of the best
+      (start at 3, i.e. within roughly one cover step or half an elevation step), not within a
+      fraction of it. An additive band measures "are there several places worth standing?" without
+      being deflated by how dangerous the board is, which is what the metric was always trying to
+      ask. It is a **pure instrument change**: it invalidates every archived `ch/ARMED` number, so
+      it must ship with its own paired R0 re-baseline (the X1/W4/X2 `R0diag` pattern: run the
+      instrumented tree lever-off on a pinned slot set and diff the per-slot records) and the
+      DEVLOG must state that pre-change numbers are not comparable. Land it in a wave that is NOT
+      also tuning difficulty, so the two effects can never be confused.
+- [ ] **The heat ladder's MIDDLE does not measurably escalate.** X2's baseline (n=40/rung, ±6-8)
+      reads mission-win 80.2 (h0) / 82.6 (h2) / 75.0 (h4) / 81.7 (h6) — a 2.8-point spread on
+      n=263 vs n=266 pooled halves, i.e. nothing. Only RECRUIT (94.3) and heat 8 (68.4) separate.
+      Rungs 1-7 add bodies and stat points that the measurement cannot see. Either the rungs need
+      real teeth or the ladder needs fewer, bigger steps — but the first job is a **higher-N**
+      measurement (n≥80/rung) so the question can be asked at a precision that can answer it.

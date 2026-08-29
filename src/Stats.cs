@@ -45,6 +45,10 @@ public static class Stats
         // (recorded only after TryApplyLayout's connectivity guard accepted it), or -1 for
         // the procedural fallback. Lets the report rank arenas and expose the fallback rate.
         public int Layout = -1;
+        // W4 THE SECOND AXIS: the deployment SHAPE this mission opened with
+        // (Mission.DeployFrontal/Pincer/Crossfire/Envelop). Lets a report split turn count,
+        // win rate and decision density by opening geometry.
+        public int Deploy = Sightline.Mission.DeployFrontal;
         public int SquadStart, SquadSurvived, EnemiesStart, EnemiesKilled;
         public int DamageDealt, DamageTaken;
         public bool Win;
@@ -58,6 +62,27 @@ public static class Stats
         // sum-enemy-HP) lead changed sign during the match (a tension proxy); MaxSwing:
         // the largest single-turn change in that lead.
         public int PlayerTurns, MeaningfulChoiceSum, LeadSwings, MaxSwing;
+        // X1 THE EXCHANGE — the shot-gate decomposition. meaningful-choices/turn is an average
+        // over PLAYER TURNS, but CountMeaningfulChoices only scores a soldier that (a) is alive
+        // and able to act and (b) has at least one legal shot from where it stands. So the ratio
+        // conflates three different things: how many soldiers are still standing, how often they
+        // are in contact at all, and how rich the decision is when they ARE. These three counters
+        // split them so a lever that lengthens fights can be told apart from one that flattens
+        // decisions. Read-only bookkeeping — no RNG draws, no gameplay effect.
+        //   ActingSoldierTurns: soldier-turns where the soldier was alive + CanAct (roster size).
+        //   ArmedSoldierTurns : the subset of those that had >=1 legal shot (in contact).
+        //   ArmedTurns        : player turns where at least one soldier was armed.
+        public int ActingSoldierTurns, ArmedSoldierTurns, ArmedTurns;
+        // W4 THE SECOND AXIS — the CHOICE decomposition beneath the shot gate. X1 proved
+        // choices/ARMED-soldier-turn (~1.5) is the binding constraint but could not say WHICH of
+        // CountMeaningfulChoices' two axes was starved. These three split it:
+        //   LosTargetSum   : sum over ARMED soldier-turns of how many foes were in range+LoS at
+        //                    all (the raw simultaneous-presentation number this wave targets).
+        //   TargetChoiceSum: the (a) "which target" contribution only (rival shots within 12%).
+        //   PosChoiceSum   : the (b) "where do I stand after firing" contribution only (capped 2).
+        // TargetChoiceSum + PosChoiceSum == MeaningfulChoiceSum by construction. Read-only
+        // bookkeeping — no RNG draws, no gameplay effect.
+        public int LosTargetSum, TargetChoiceSum, PosChoiceSum;
         // attacker-class -> totals (player side only, for weapon/class balance)
         public readonly Dictionary<string, int> DamageByClass = new();
         public readonly Dictionary<string, int> ShotsByClass = new();
@@ -235,14 +260,15 @@ public static class Stats
         Runs.Add(_run);
     }
 
-    public static void BeginMission(int mission, string objective, int heat, int squad, int enemies, int layout = -1)
+    public static void BeginMission(int mission, string objective, int heat, int squad, int enemies, int layout = -1,
+                                    int deploy = Sightline.Mission.DeployFrontal)
     {
         if (!Enabled) return;
         if (_run == null) BeginRun(heat);
         _mission = new MissionRec
         {
             Mission = mission, Objective = objective, Heat = heat,
-            SquadStart = squad, EnemiesStart = enemies, Layout = layout
+            SquadStart = squad, EnemiesStart = enemies, Layout = layout, Deploy = deploy
         };
         ResetLeadTracker();   // swings/lead are scoped to one match
     }
@@ -331,11 +357,21 @@ public static class Stats
     //   lead: (sum player HP) − (sum live enemy HP) right now. We track the lead's sign
     //   changes (swings) and the largest per-turn delta across the mission.
     static bool _haveLead; static int _lastLead;
-    public static void RecordPlayerTurn(int meaningfulChoices, int lead)
+    public static void RecordPlayerTurn(int meaningfulChoices, int lead,
+                                        int actingSoldiers = 0, int armedSoldiers = 0,
+                                        int losTargets = 0, int targetChoices = 0, int posChoices = 0)
     {
         if (!Enabled || _mission == null) return;
         _mission.PlayerTurns++;
         _mission.MeaningfulChoiceSum += Math.Max(0, meaningfulChoices);
+        // X1 shot-gate decomposition (see MissionRec) — pure bookkeeping.
+        _mission.ActingSoldierTurns += Math.Max(0, actingSoldiers);
+        _mission.ArmedSoldierTurns  += Math.Max(0, armedSoldiers);
+        if (armedSoldiers > 0) _mission.ArmedTurns++;
+        // W4 choice decomposition (see MissionRec) — also pure bookkeeping.
+        _mission.LosTargetSum    += Math.Max(0, losTargets);
+        _mission.TargetChoiceSum += Math.Max(0, targetChoices);
+        _mission.PosChoiceSum    += Math.Max(0, posChoices);
         if (_haveLead)
         {
             int delta = Math.Abs(lead - _lastLead);
@@ -528,6 +564,25 @@ public static class Stats
             double maxSwing = tMissions.Average(m => (double)m.MaxSwing);
             sb.AppendLine($"\nDECISION RICHNESS / SWING:");
             sb.AppendLine($"  meaningful-choices/turn {choicesPerTurn:0.00}   lead-swings/match {swingsPerMatch:0.0}   avg max-swing {maxSwing:0.0}");
+            // X1 — the shot-gate decomposition of that first number (see MissionRec).
+            double actingT = tMissions.Sum(m => (double)m.ActingSoldierTurns);
+            double armedT  = tMissions.Sum(m => (double)m.ArmedSoldierTurns);
+            double turnsT  = tMissions.Sum(m => (double)m.PlayerTurns);
+            double armedTurns = tMissions.Sum(m => (double)m.ArmedTurns);
+            if (actingT > 0)
+                sb.AppendLine($"  [shot-gate] acting-soldiers/turn {actingT / turnsT:0.00}"
+                    + $"   armed-soldiers/turn {armedT / turnsT:0.00}"
+                    + $"   armed-fraction {100.0 * armedT / actingT:0}%"
+                    + $"   turns-with-a-shot {100.0 * armedTurns / turnsT:0}%"
+                    + $"   choices/ARMED-soldier-turn {(armedT > 0 ? choicesPerTurn * turnsT / armedT : 0):0.00}");
+            // W4 — which of the two choice axes is actually starved (see MissionRec).
+            double losT = tMissions.Sum(m => (double)m.LosTargetSum);
+            double tgtC = tMissions.Sum(m => (double)m.TargetChoiceSum);
+            double posC = tMissions.Sum(m => (double)m.PosChoiceSum);
+            if (armedT > 0)
+                sb.AppendLine($"  [choice-split] los-targets/ARMED {losT / armedT:0.00}"
+                    + $"   target-choices/ARMED {tgtC / armedT:0.00}"
+                    + $"   position-choices/ARMED {posC / armedT:0.00}");
         }
 
         // Run-completion by heat — the metric the Heat ladder is supposed to bend. The
@@ -622,6 +677,33 @@ public static class Stats
                 sb.AppendLine($"  arena {g.Key,2}: {Pct(g.Count(m => m.Win), g.Count())}{Se(g.Count(m => m.Win), g.Count())}  (n={g.Count()}, avg {g.Average(m => (double)m.Turns):0.0} turns)  [{ByMissionCells(g)}]");
             if (procN >= 3)
                 sb.AppendLine($"  procedural: {Pct(missions.Count(m => m.Layout < 0 && m.Win), procN)}{Se(missions.Count(m => m.Layout < 0 && m.Win), procN)}  (n={procN}, avg {missions.Where(m => m.Layout < 0).Average(m => (double)m.Turns):0.0} turns)  [{ByMissionCells(missions.Where(m => m.Layout < 0))}]");
+        }
+
+        // ── W4 THE SECOND AXIS: WIN / TURNS / DECISION DENSITY BY DEPLOYMENT SHAPE ──
+        // The opening geometry this wave made variable. Every row carries the two numbers the
+        // wave is judged on side by side, because a shape that shortens fights can lift
+        // choices/turn without any soldier facing a richer decision.
+        if (missions.Count > 0)
+        {
+            string ShapeName(int d) => d switch
+            {
+                Mission.DeployPincer => "PINCER",
+                Mission.DeployCrossfire => "CROSSFIRE",
+                Mission.DeployEnvelop => "ENVELOP",
+                _ => "FRONTAL",
+            };
+            sb.AppendLine("\nDEPLOYMENT GEOMETRY (opening shape; choices/ARMED is the wave's real gate):");
+            foreach (var g in missions.GroupBy(m => m.Deploy).OrderBy(g => g.Key))
+            {
+                double gTurns = g.Sum(m => (double)m.PlayerTurns);
+                double gArmed = g.Sum(m => (double)m.ArmedSoldierTurns);
+                double gCh = g.Sum(m => (double)m.MeaningfulChoiceSum);
+                sb.AppendLine($"  {ShapeName(g.Key),-10}: {Pct(g.Count(m => m.Win), g.Count())}{Se(g.Count(m => m.Win), g.Count())}"
+                    + $"  (n={g.Count()}, avg {g.Average(m => (double)m.Turns):0.0} turns)"
+                    + $"  choices/turn {(gTurns > 0 ? gCh / gTurns : 0):0.00}"
+                    + $"  choices/ARMED {(gArmed > 0 ? gCh / gArmed : 0):0.00}"
+                    + $"  los-targets/ARMED {(gArmed > 0 ? g.Sum(m => (double)m.LosTargetSum) / gArmed : 0):0.00}");
+            }
         }
 
         // ── FUL-1: ARENA FUNNEL (Mission.Build's three exits — the lines sum to 100%) ──
@@ -989,7 +1071,24 @@ public static class Stats
             {
                 meaningfulChoicesPerTurn = choicesPerTurn,
                 leadSwingsPerMatch = swingsPerMatch,
-                avgMaxSwing = avgMaxSwing
+                avgMaxSwing = avgMaxSwing,
+                // X1 shot-gate decomposition (see MissionRec) — lets a consumer tell a lever
+                // that shrinks the roster apart from one that flattens the decision itself.
+                actingSoldiersPerTurn = tMissions.Count == 0 ? 0.0 : Math.Round(
+                    tMissions.Sum(m => (double)m.ActingSoldierTurns) / Math.Max(1, tMissions.Sum(m => m.PlayerTurns)), 3),
+                armedSoldiersPerTurn = tMissions.Count == 0 ? 0.0 : Math.Round(
+                    tMissions.Sum(m => (double)m.ArmedSoldierTurns) / Math.Max(1, tMissions.Sum(m => m.PlayerTurns)), 3),
+                turnsWithAShotPct = tMissions.Count == 0 ? 0.0 : Math.Round(
+                    100.0 * tMissions.Sum(m => (double)m.ArmedTurns) / Math.Max(1, tMissions.Sum(m => m.PlayerTurns)), 1),
+                choicesPerArmedSoldierTurn = tMissions.Count == 0 || tMissions.Sum(m => m.ArmedSoldierTurns) == 0 ? 0.0 : Math.Round(
+                    tMissions.Sum(m => (double)m.MeaningfulChoiceSum) / tMissions.Sum(m => (double)m.ArmedSoldierTurns), 3),
+                // W4 — the two axes CountMeaningfulChoices sums, split (see MissionRec).
+                losTargetsPerArmedSoldierTurn = tMissions.Count == 0 || tMissions.Sum(m => m.ArmedSoldierTurns) == 0 ? 0.0 : Math.Round(
+                    tMissions.Sum(m => (double)m.LosTargetSum) / tMissions.Sum(m => (double)m.ArmedSoldierTurns), 3),
+                targetChoicesPerArmedSoldierTurn = tMissions.Count == 0 || tMissions.Sum(m => m.ArmedSoldierTurns) == 0 ? 0.0 : Math.Round(
+                    tMissions.Sum(m => (double)m.TargetChoiceSum) / tMissions.Sum(m => (double)m.ArmedSoldierTurns), 3),
+                positionChoicesPerArmedSoldierTurn = tMissions.Count == 0 || tMissions.Sum(m => m.ArmedSoldierTurns) == 0 ? 0.0 : Math.Round(
+                    tMissions.Sum(m => (double)m.PosChoiceSum) / tMissions.Sum(m => (double)m.ArmedSoldierTurns), 3)
             },
             // Run-completion grouped by heat (the ladder's true shape — distinct from the
             // survivorship-skewed per-mission byHeat below). Campaign runs only.
@@ -1026,6 +1125,19 @@ public static class Stats
             // W2 arena telemetry: authored layout index (-1 rows are folded into proceduralRate).
             // FUL-1: + per-mission stratification (an arena's aggregate mixes difficulty
             // rungs — the cells expose the mix; pre-FUL-9 the hint even coupled arena to mission).
+            // W4 — the same split in machine-readable form.
+            byDeploy = missions.GroupBy(m => m.Deploy).OrderBy(g => g.Key).Select(g => new
+            {
+                deploy = g.Key, n = g.Count(),
+                winRate = Math.Round(100.0 * g.Count(m => m.Win) / g.Count(), 1),
+                avgTurns = Math.Round(g.Average(m => (double)m.Turns), 2),
+                choicesPerTurn = g.Sum(m => m.PlayerTurns) == 0 ? 0.0 : Math.Round(
+                    g.Sum(m => (double)m.MeaningfulChoiceSum) / g.Sum(m => (double)m.PlayerTurns), 3),
+                choicesPerArmed = g.Sum(m => m.ArmedSoldierTurns) == 0 ? 0.0 : Math.Round(
+                    g.Sum(m => (double)m.MeaningfulChoiceSum) / g.Sum(m => (double)m.ArmedSoldierTurns), 3),
+                losTargetsPerArmed = g.Sum(m => m.ArmedSoldierTurns) == 0 ? 0.0 : Math.Round(
+                    g.Sum(m => (double)m.LosTargetSum) / g.Sum(m => (double)m.ArmedSoldierTurns), 3)
+            }).ToList(),
             byArena = missions.Where(m => m.Layout >= 0).GroupBy(m => m.Layout).OrderBy(g => g.Key).Select(g => new
             {
                 arena = g.Key, n = g.Count(), winRate = WinRate(g), se = SeVal(g.Count(m => m.Win), g.Count()), avgTurns = Math.Round(g.Average(m => (double)m.Turns), 1),

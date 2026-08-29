@@ -43,6 +43,60 @@ and pillar **5 (Stakes)** are promoted to first-class status because they are th
 places the game is currently thinnest (see §4) — and because pillar 3 is the lens
 through which the fog-of-war decision must be judged (see §5).
 
+### 1.1 AMENDMENT — the light frame (PROGRAM RESONANCE, wave C1, 2026-08-28)
+
+> **This amends the paragraph directly above.** It is a recorded, deliberate change of
+> scope, not drift. Read the limits; they are the load-bearing half.
+
+**What changed.** "Not pursuing *Narrative*" is too blunt, and the game paid for it.
+SIGHTLINE now pursues a **light frame**: a small, bounded body of generated text whose
+only job is to make the systems the game *already has* legible and felt. Concretely
+that is four things and no more — a three-line mission briefing, faction dossiers and
+named regions, rare soldier barks at real beats, and a five-line run epilogue.
+
+**Why — the measurement that forced it.** Over 16 measured campaigns: **146 soldiers
+went down, 74 bled out, 22 were finished while down, and exactly 1 was revived.** That
+is ~96 dying people who each had a callsign, a rank, earned traits, a nickname, scars, a
+faction grudge and a bond with a specific squadmate — and the game's entire telling of
+their deaths was a floating damage number and a name on an end-card list. Three
+factions, eight biomes and a branching campaign map shipped with **zero words of world**.
+Pillar 5 was *implemented and unnarrated*, which is exactly why the stakes have always
+read thinner in play than in the changelog. The fix was never more machinery. It was
+acknowledgement. Naming a thing is the cheapest way to make an existing system land.
+
+**What this is NOT — the limits, which are not negotiable.**
+- **It is not a sixth pillar.** The frame *serves* pillars 3 and 5. When it competes
+  with either, it loses — automatically, not after a discussion.
+- **No story.** No plot, no scripted beats, no character arcs, no branching dialogue,
+  no cutscene, no unskippable anything. There is no protagonist and there is no villain
+  beyond the three factions the combat code already models.
+- **Nothing the player must read to play well.** Every word is redundant with a
+  mechanical read that already exists on the board or in the FIELD MANUAL. A player who
+  never reads a briefing must not be at a disadvantage.
+- **Readability wins, always.** §3.E and §3.H govern. Text that fights the signal is a
+  regression, and the briefing card yields the shared card slot to wave T1's teaching
+  layers *absolutely* — a lesson or a field tip on screen silences the frame outright.
+- **Barks are rate-limited by design, not by taste.** One per turn, one per beat kind
+  per mission, never the same speaker twice running. The combat log is load-bearing for
+  "why did that happen"; flavour may never crowd out a mechanical line.
+- **Determinism is a hard constraint, not a preference.** Every generated word comes
+  from `src/Voice.cs`, which takes **zero draws from the shared `Util.Rng`** — region
+  names, briefings and the epilogue are pure `Util.Hash3` derivations of `MapSeed`, and
+  bark variety uses a dedicated `Random`. The project's entire balance methodology rests
+  on common-random-number pairing; flavour text must never be able to move a measurement.
+
+**How the limits are kept honest.** `SIGHTLINE_VOICETEST=1` is the contract: it proves
+the RNG separation (with a sensitivity probe so it cannot pass vacuously), asserts every
+template slot resolves and that no beat can produce a nonsensical combination (a soldier
+with no bond can never draw a bond line), walks every rate-limit gate, and measures every
+generated string against the real pixel width of the chrome that draws it. A line that
+would ship an ellipsis fails the build gate instead.
+
+**The honest cost.** This is scope the project previously spent nowhere, and it competes
+for the same attention budget as balance and feel work. It earns its place only while it
+stays this small. If a future wave wants dialogue, arcs or a plot, that is a *different*
+amendment and it should be argued on its own terms — this one does not authorise it.
+
 ---
 
 ## 2. The lenses (vocabulary we reason with)

@@ -180,6 +180,22 @@ without one it silently reports `runs=0`. A fuller (but non-exhaustive) list of 
 scattered through `docs/DEVLOG.md`; grep `Program.cs` for `SIGHTLINE_` for the
 authoritative set.
 
+**The `SIGHTLINE_BALANCE` measurement contract (X2 — do not shortcut any of it):**
+1. `SIGHTLINE_BALANCE=<N>` **requires `xvfb-run`.** Without a display it prints `runs=0 /
+   (no data)`, still claims N matches and exits 139 — a silent zero-data batch that looks
+   completed. **Assert the JSON's own `runs` field in every chunk** (see
+   `docs/measurements/x2/run_chunk.sh`, which does it and prints OK/BAD).
+2. Run the **Release binary directly**, and from a *snapshot* (`runbin/<tag>/`, gitignored) so
+   the tree can keep building while a round is in flight.
+3. Two disjoint CRN slot sets (`SIGHTLINE_BALANCE_BASE` 0 / 10) x greedy+sloppy = 40 campaigns
+   per rung. Pin `XDG_CONFIG_HOME` and `SIGHTLINE_BALANCE_JSON` per chunk — several agents
+   share the container. **A 40-campaign rung carries ±6-8 points**: differences smaller than
+   that are not results.
+4. **One lever per round**, always against a FRESH same-slot baseline on the same instrument;
+   if the tree gained instrumentation, prove logic identity with an `R0diag` chunk first.
+5. Archive every chunk's JSON + log under `docs/measurements/<wave>/` with a README giving the
+   exact command lines — **and state the base commit.**
+
 ---
 
 ## Architecture (file map)
@@ -243,6 +259,14 @@ docs/screenshot.png    README image
   corner → flank). High ground negates the target's LOW cover. Verified by
   `SIGHTLINE_COMBATTEST`.
 - Each `WeaponKind` has its own `RangeMod` curve + `MaxRange` + clip + crit base.
+- **THE EXCHANGE (RESONANCE X1):** every hostile is built through `Mission.MakeHostile`,
+  which adds `Mission.HostileToughness` (+3 HP) and applies `Mission.HostileDamageTrim`
+  (−1 off both ends of its weapon band, via `Weapon.TrimBaseDamage`, which moves the
+  PRISTINE base so `ApplyMods` can't undo it). That pair sets time-to-kill (~2 hits both
+  ways). Change it only with a measured round per side — enemy-only durability was
+  measured at −30 run completion. `Ai.cs`/`Game.Autopilot.cs` compare `Hp` to
+  `Weapon.Dmg*`, so they re-price themselves; `HEATLADDERTEST` derives its damage pin
+  through the trim.
 - **Thirteen persisted-by-ordinal enums** (Objective, WeaponKind, Perk, WeaponMod, Trait,
   Boon, SecondaryKind, Faction, Spec, Scar, Contract, MetaUnlock, RewardKind) are
   **APPEND-ONLY** — the ordinal IS the save format. `SIGHTLINE_SAVETEST` pins each one with
@@ -314,7 +338,64 @@ filter bug meant every weapon was raw white noise), the board's biome identity w
 move overlay that flooded it, only 3 of ~14 verbs were ever taught, the displayed hit% was not
 the hit probability, a pod scatter bug stacked units on one tile so the buried one could not be
 clicked, and a published build launched from the wrong directory silently lost its font. Detail
-in `docs/DEVLOG.md` §RESONANCE; open work in `docs/ROADMAP.md`.
+in `docs/DEVLOG.md` §RESONANCE; open work in `docs/ROADMAP.md`. Wave **X1 THE EXCHANGE** then changed the
+combat model's headline ratio: `Mission.HostileToughness` (+3 HP) and
+`Mission.HostileDamageTrim` (−1 per weapon band end) in the single `Mission.MakeHostile`
+funnel, so a trade takes roughly two hits instead of one. Its raw chunk logs live in
+`docs/measurements/x1/`.
+
+> **NUMBERS AND THEIR BASE COMMIT — read before quoting any balance figure.**
+>
+> **THE LADDER OF RECORD (wave X2 "TRUE NORTH II", base commit `a61ef42` + X2's own repair,
+> n=40 campaigns per rung, `runs=20` asserted in all 12 chunks, raw data in
+> `docs/measurements/x2/`):**
+>
+> | RECRUIT | heat 0 | heat 2 | heat 4 | heat 6 | heat 8 |
+> |---|---|---|---|---|---|
+> | **75.0%** | **57.5%** | **35.0%** | **30.0%** | **20.0%** | **17.5%** |
+>
+> Published band: **RECRUIT 75 / h0 55 / h2 40 / h4 30 / h6 20 / h8 10, ±8 (h8 ±5, hard floor
+> ≥5)** — FUL-13's, kept after X2 re-argued it, plus the RECRUIT row X2 added. Five of six
+> rungs are in band; **heat 8 is out at +2.5 over its ceiling.**
+>
+> **This table supersedes every ladder published before it** — X1's 52.5/27.5/15.0 (base
+> `2100858`), W5's on-ramp pair (base `b68f38a`), W4's 35.0/20.0 and FUL-13's
+> 52.5/35/30/22.5/10. Those were each measured on the tree their wave branched from, **never
+> on the merged tree**, and the composition was 20 points below its own band at heat 0 until
+> X2 measured it and repaired the cause.
+>
+> **The rule this wave exists to enforce: a balance number without a base commit is not a
+> number.** Quote the base, or re-measure. And note the precision — a 40-campaign rung carries
+> **±6-8 points of standard error**, which is the same size as the band's ±8 tolerance and
+> larger than the 10-point step between rungs, so **rung ORDER is not resolvable at n=40**;
+> pool adjacent rungs, or raise N, before spending a lever on an inversion.
+
+RESONANCE **W4 "THE SECOND AXIS"** then made the OPENING GEOMETRY a variable: four deployment
+shapes (FRONTAL / PINCER / CROSSFIRE / **ENVELOP**, a centre-deploy surrounded opening gated to
+Eliminate/Decapitate/Defend) dealt per mission from `(MapSeed, mission)` with **zero extra RNG
+draws**, plus uniform pods. It **missed** its decision-density gates and says why with new
+instrumentation: `choices/ARMED-soldier-turn` is a **near-invariant at ~1.6** across five
+structurally different levers, because `CountMeaningfulChoices`' two halves ("which target?" and
+"where do I stand after?") respond to threat with **opposite signs** — chase it with a
+positioning lever at constant threat, never another threat lever (DEVLOG §W4). It also
+re-measured the ladder and found it **20+ points BELOW the FUL-13 band at h0 and h4 before any
+lever** (32.5% / 12.5% vs 55±8 / 30±8) — the biggest open number in the project.
+
+RESONANCE **X2 "TRUE NORTH II"** then measured the composition and fixed what it found. The
+definitive post-merge ladder is the table above; getting there took one lever. `Game.SetupMission`
+has long ramped HEAT's escalation in over missions 1-2 — but that grace is gated on `heat > 0`,
+so the BASE force met the coldest squad in the game with no ramp at all (5 hostiles vs 4 rookies
+with no promotion, perk, mod or boon, each carrying X1's +3 HP). **Mission 1 measured 75% win at
+heat 0 against 90% for missions 3-4** — a U-shaped curve whose left arm ended a quarter of all
+runs, the front-loaded anxiety `docs/DESIGN.md` §3.D forbids. RECRUIT had been running the
+control for two waves: over the SAME 40 worlds its only mission-1 difference is **one body**, and
+its mission 1 reads **100%, zero losses in 40**. `Mission.OpenerTrim` (shipped 1) gives the base
+force heat's ramp — one body off m1, one off m2 — and moved heat 0 from **35.0% to 57.5%** with
+shots-per-kill going **up** at every rung (3.22 → 3.30 at h0). Two breaches are recorded straight:
+lead-swings 0.79 → 0.61 (a 4-body opener is not a contested fight) and Escort at 12.81t (its old
+8.03t was survivorship bias — only healthy runs used to reach it). `SIGHTLINE_OPENERTRIM=0`
+restores the pre-X2 opener; `SIGHTLINE_AIMTRIM` / `SIGHTLINE_TOUGH` / `SIGHTLINE_TRIM` /
+`SIGHTLINE_ENEMYBASE` are default-off dials the wave priced and did not spend.
 
 **Three doc over-claims were found and corrected** — they are the reason this project needs the
 "no over-claims" rule enforced hard: juice was graded "Strong" partly on audio nobody had heard;

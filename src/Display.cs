@@ -35,6 +35,22 @@ public static partial class Display
     static Shader _fx;
     static bool   _fxReady;
 
+    // P1 two-pass half-res bloom + the film-grain tile. All of it lives behind `Enabled`, so
+    // the headless harness (Display.Init(false)) allocates none of it and carries no shader state.
+    static RenderTexture2D _bloomA, _bloomB;
+    static Shader _bright, _blur;
+    static bool   _bloomReady;
+    static Texture2D _noise;
+    static bool   _noiseReady;
+    static int _locBloomTex, _locNoiseTex;
+    static int _brLocTexel, _blLocDir;
+    // Half-res bloom buffer size, and the blur radius expressed in HALF-RES texels. 1.6 puts the
+    // outer gaussian tap at ~5.2 half-res texels = ~10.3 full-res px, roughly double the reach of
+    // the old 5px single-pass ring.
+    static int BloomW => Cfg.ScreenW / 2;
+    static int BloomH => Cfg.ScreenH / 2;
+    const float BlurRadius = 1.6f;
+
     // Uniforms fed each frame from Game via Display.SetPostFxParams(...)
     static int _locResolution, _locBloom, _locChroma, _locGrade, _locTime, _locBright, _locGamma;
 
@@ -72,39 +88,22 @@ uniform float uGamma;        // user gamma (0.8..1.3, 1.0 = neutral) — midtone
 // Rec.709 luminance.
 float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
 
-// Bright-pass bloom: a weighted radial blur of ONLY the bright/emissive part of the
-// frame. SIGHTLINE is dark geometric art, so the only bright pixels are the things we
-// WANT to halo — objective glows (EVAC green / VIP gold), unit under-glows (cyan/red),
-// muzzle/impact flashes, HP bars. A soft luma threshold keeps the dark board clean.
-// radiusPx is in PIXELS; divided per-axis by uResolution so the kernel stays square
-// regardless of aspect ratio.
-vec3 brightBlur(vec2 uv, float radiusPx) {
-    vec2 r1 = vec2(radiusPx) / uResolution;   // aspect-correct UV offset
-    vec2 r2 = r1 * 0.5;
-    vec3 sum = vec3(0.0);
-    float wsum = 0.0;
-    // 12-tap: a centre + ring at r2 + ring at r1, each soft-thresholded so only
-    // genuinely bright sources contribute. Cheap enough for a single full-screen pass.
-    vec2 offs[12] = vec2[12](
-        vec2( 0.0,  0.0),
-        vec2( r2.x, 0.0), vec2(-r2.x, 0.0), vec2(0.0,  r2.y), vec2(0.0, -r2.y),
-        vec2( r1.x, r1.y), vec2(-r1.x, r1.y), vec2(r1.x, -r1.y), vec2(-r1.x, -r1.y),
-        vec2( r1.x*1.6, 0.0), vec2(-r1.x*1.6, 0.0), vec2(0.0, r1.y*1.6)
-    );
-    for (int i = 0; i < 12; i++) {
-        vec3 s = texture(texture0, uv + offs[i]).rgb;
-        // Soft bright-pass: knee at ~0.36 luma (HORIZON W5: lowered from 0.42 so the
-        // fattened tracer core + unit under-glows + objective glows reliably cross the
-        // knee and BLOOM, while the (now further-receded) dark board floor + muted cover
-        // stay below it and never wash. Square it for a punchier, less-smeary falloff.
-        float b = smoothstep(0.36, 0.85, luma(s));
-        b = b * b;
-        // weight inner taps slightly higher for a tighter core + soft outer halo.
-        float w = (i == 0) ? 1.6 : (i < 5 ? 1.0 : 0.6);
-        sum += s * b * w;
-        wsum += w;
-    }
-    return sum / wsum;
+// PROGRAM RESONANCE P1 — the bloom is no longer computed here.
+// It is pre-built by a TWO-PASS, HALF-RES chain (see FsBrightSrc / FsBlurSrc + BuildBloom):
+//   pass 1  bright-extract + 4-tap box downsample   1280x800 -> 640x400
+//   pass 2  separable gaussian, horizontal          640x400
+//   pass 3  separable gaussian, vertical            640x400
+// That is ~5.6M texel fetches against the old single-pass 12-tap-at-full-res 12.3M, and it
+// buys a MUCH wider, smoother halo than a 5px radial ring could ever reach. The composite
+// just reads the finished glow. The bright-pass KNEE IS UNCHANGED at 0.36 (V3 raised its
+// cover-rim and lip alphas assuming that knee; moving it would blow those rims out), and the
+// threshold is still applied PER TAP before the box average, so a 1px rim still crosses it.
+uniform sampler2D uBloomTex;   // half-res, pre-blurred bright pass
+uniform sampler2D uNoiseTex;   // 256x256 GenImageWhiteNoise, repeat-wrapped, for film grain
+
+// ACES (Narkowicz fit). Applied ONLY over the highlight band — see the note at the call site.
+vec3 acesFilm(vec3 x) {
+    return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
 }
 
 void main() {
@@ -127,11 +126,14 @@ void main() {
     // A constant gentle glow makes emissive accents (objective rings, unit under-glows)
     // halo softly at all times — this is the ""shippable indie"" payoff. Combat events
     // (uBloom) push it brighter for a punchy hit/kill flash that then decays.
-    vec3 glow = brightBlur(uv, 5.0);
-    // HORIZON W5 — keep the resting halo restrained (0.5, not a baseline wash) but RAISE the
+    vec3 glow = texture(uBloomTex, uv).rgb;
+    // HORIZON W5 — keep the resting halo restrained (not a baseline wash) but RAISE the
     // reactive ceiling so a KILL/crit (Game.AddBloom spikes uBloom, then decays) visibly
     // FLOODS the screen with light before settling. Reactive, not always-on.
-    float bloomAmt = 0.5 + uBloom * 1.7;      // restrained baseline halo + a big reactive spike
+    // P1: the gaussian conserves energy across a ~10px full-res radius instead of concentrating
+    // it in a 5px ring, so the PEAK off a small source is lower — the amounts are scaled up to
+    // land the resting halo where W5 tuned it. Knee untouched, so what blooms is unchanged.
+    float bloomAmt = 1.45 + uBloom * 4.30;    // restrained baseline halo + a big reactive spike
     vec3 withBloom = base + glow * bloomAmt;
 
     // --- colour grade: saturation + contrast + per-biome tint ---
@@ -160,6 +162,16 @@ void main() {
     // Both uniforms are uploaded EVERY frame (an unset uniform reads 0 -> 1/0 -> black frame).
     graded = pow(clamp(graded * uBright, 0.0, 1.0), vec3(1.0 / uGamma));
 
+    // --- ACES-ish filmic shoulder (P1) ---
+    // Applied ONLY over the highlight band. A FULL-RANGE ACES is wrong for this game: the
+    // Narkowicz fit expects scene-linear input, and against our already display-referred frame
+    // it maps the board median (0.26) to 0.39 and white to 0.80 — i.e. it washes the dark board
+    // out AND dims the UI, undoing V2's re-grade. Weighted to the highlights it does the one
+    // job we actually want from a tonemap: the blown bloom core stops clipping to a flat white
+    // disc and gets gradation back, while everything at or below 0.70 luma is bit-identical.
+    vec3 tm = acesFilm(graded);
+    graded = mix(clamp(graded, 0.0, 1.0), tm, smoothstep(0.85, 1.60, luma(graded)) * 0.75);
+
     // --- vignette: a clear frame around the busy board ---
     // Two-stage: a wide gentle darken across the outer frame + a sharper corner cinch.
     // Centre (edge<~0.45) is untouched; corners lose ~16-20% so the eye is drawn inward.
@@ -168,10 +180,74 @@ void main() {
     float vig = 1.0 - v1 * 0.13 - v2 * 0.10;        // ~0.13 frame + extra ~0.10 at corners
     graded *= vig;
 
+    // --- tactical-display framing: a faint horizontal scan + film grain (P1) ---
+    // Both are deliberately at the edge of perception. The scan is a 3px-period cosine at
+    // <=0.03 amplitude — enough to read as a CRT/tac-display surface, not enough to fight the
+    // board. The grain is a repeat-wrapped white-noise tile scrolled by uTime (which is fed by
+    // Display.AdvanceTime(dt) — no wall-clock read anywhere in the FX path) and is FADED OUT
+    // in the darks, so the black board floor and the letterbox stay clean instead of speckling.
+    float scan = 1.0 - 0.028 * (0.5 + 0.5 * cos(uv.y * uResolution.y * 2.0943951));
+    graded *= scan;
+
+    vec2 gUv = uv * (uResolution / 256.0) + vec2(fract(uTime * 11.0), fract(uTime * 7.0));
+    float grain = texture(uNoiseTex, gUv).r - 0.5;
+    graded += vec3(grain) * 0.025 * (0.25 + 0.75 * smoothstep(0.0, 0.30, luma(graded)));
+
     // Slight gamma to keep the output natural (not washed out).
     graded = pow(clamp(graded, 0.0, 1.0), vec3(0.96));
 
     finalColor = vec4(graded, 1.0);
+}
+";
+
+    // ── P1 BLOOM CHAIN — pass 1: bright extract + 4-tap box downsample (full -> half res) ──
+    // The threshold is applied PER TAP and only then averaged, so a 1px-wide bright rim still
+    // crosses the knee. Averaging first would have quietly killed V3's thin cover rims.
+    const string FsBrightSrc = @"#version 330 core
+in vec2 fragTexCoord;
+in vec4 fragColor;
+out vec4 finalColor;
+uniform sampler2D texture0;
+uniform vec2 uTexel;          // 1.0 / full-resolution, in UV units
+
+float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+
+vec3 tap(vec2 uv) {
+    vec3 s = texture(texture0, uv).rgb;
+    // Knee at 0.36 — IDENTICAL to the pre-P1 single-pass bloom. V3 raised its cover-rim and
+    // lip alphas against this exact value; do not move it without re-checking V3's captures.
+    float b = smoothstep(0.36, 0.85, luma(s));
+    return s * b * b;
+}
+
+void main() {
+    vec2 uv = fragTexCoord;
+    vec3 s = tap(uv + vec2(-uTexel.x, -uTexel.y))
+           + tap(uv + vec2( uTexel.x, -uTexel.y))
+           + tap(uv + vec2(-uTexel.x,  uTexel.y))
+           + tap(uv + vec2( uTexel.x,  uTexel.y));
+    finalColor = vec4(s * 0.25, 1.0);
+}
+";
+
+    // ── P1 BLOOM CHAIN — passes 2 & 3: separable gaussian at half res ──
+    // The classic 5-fetch linear-sampled kernel (equivalent to a 9-tap gaussian). Run once
+    // horizontally and once vertically; uDir already carries the radius.
+    const string FsBlurSrc = @"#version 330 core
+in vec2 fragTexCoord;
+in vec4 fragColor;
+out vec4 finalColor;
+uniform sampler2D texture0;
+uniform vec2 uDir;            // per-pass blur axis, in UV units (radius baked in)
+
+void main() {
+    vec2 uv = fragTexCoord;
+    vec3 c = texture(texture0, uv).rgb * 0.2270270270;
+    c += (texture(texture0, uv + uDir * 1.3846153846).rgb
+        + texture(texture0, uv - uDir * 1.3846153846).rgb) * 0.3162162162;
+    c += (texture(texture0, uv + uDir * 3.2307692308).rgb
+        + texture(texture0, uv - uDir * 3.2307692308).rgb) * 0.0702702703;
+    finalColor = vec4(c, 1.0);
 }
 ";
 
@@ -221,6 +297,45 @@ void main() {
         PostFX = !PostFX;
         Save();
     }
+
+    // ---- W5 ON-RAMP: comfort controls (animation pacing + UI text size) ------------------
+    // ANIMATION SPEED. A roguelike campaign replays the same ~0.5 s telegraph beat hundreds of
+    // times; a playback multiplier is the single most-asked-for comfort control in the genre.
+    // The value is a pure dt MULTIPLIER applied at exactly ONE place (Game.Update's
+    // `a.Update(this, t * AnimSpeed)`): the queue's state machine is untouched, no activation is
+    // skipped, and OnStart still fires only when an anim becomes ACTIVE. Anything that drained
+    // the queue faster by other means would resurrect the movement-jitter bug.
+    // Game.AnimSpeed pins 1x under AutoPlay/NoPersist, so the harness and the flywheel never see it.
+    public static readonly float[] AnimSpeedLevels = { 1.00f, 1.50f, 2.00f, 3.00f };
+    public static int AnimSpeedIdx;   // 0 = 1x (the shipped pacing)
+    public static float AnimSpeed => AnimSpeedLevels[Math.Clamp(AnimSpeedIdx, 0, AnimSpeedLevels.Length - 1)];
+    public static string AnimSpeedLabel => AnimSpeed == 1f ? "1x" : $"{AnimSpeed:0.##}x";
+    public static void CycleAnimSpeed()
+    {
+        AnimSpeedIdx = (AnimSpeedIdx + 1) % AnimSpeedLevels.Length;
+        Save();
+    }
+
+    // UI TEXT SIZE. Applied inside Cfg.Text/Cfg.Measure (and the title pair), which every draw
+    // site in the game already routes through — so a label's MEASURE and its DRAW scale together
+    // by construction. That symmetry is the whole safety argument: several call sites measure via
+    // a wrap/clip/centre helper and paint separately, and a scale applied to only one of the two
+    // wraps at one size and paints at another. The atlas choice still routes on the UNSCALED size
+    // so body text keeps coming off the crisp 20px UI bake.
+    // Never applied headless: Display.Init(false) skips Load(), so Cfg.UiScale stays 1.0 and every
+    // screenshot / self-test / balance run measures the shipped layout.
+    public static readonly float[] UiScaleLevels = { 0.90f, 1.00f, 1.10f, 1.20f };
+    public static int UiScaleIdx = 1;   // 1.00 = the authored layout
+    public static float UiScale => UiScaleLevels[Math.Clamp(UiScaleIdx, 0, UiScaleLevels.Length - 1)];
+    public static string UiScaleLabel => $"{(int)MathF.Round(UiScale * 100f)}%";
+    public static void CycleUiScale()
+    {
+        UiScaleIdx = (UiScaleIdx + 1) % UiScaleLevels.Length;
+        ApplyUiScale();
+        Save();
+    }
+    /// Push the chosen scale into Cfg (the one place text size is resolved).
+    public static void ApplyUiScale() => Cfg.UiScale = UiScale;
 
     // auto-cam: optional character-focus camera that follows the selected/acting unit
     public static bool AutoCam;
@@ -311,6 +426,36 @@ void main() {
             _locTime       = Raylib.GetShaderLocation(_fx, "uTime");
             _locBright     = Raylib.GetShaderLocation(_fx, "uBright");
             _locGamma      = Raylib.GetShaderLocation(_fx, "uGamma");
+            _locBloomTex   = Raylib.GetShaderLocation(_fx, "uBloomTex");
+            _locNoiseTex   = Raylib.GetShaderLocation(_fx, "uNoiseTex");
+        }
+
+        // P1: the two-pass bloom chain. If either shader fails to compile we simply leave
+        // _bloomReady false — the composite then reads an unbound (black) uBloomTex, i.e. the
+        // frame renders with no bloom rather than not rendering at all.
+        _bright = Raylib.LoadShaderFromMemory(null, FsBrightSrc);
+        _blur   = Raylib.LoadShaderFromMemory(null, FsBlurSrc);
+        _bloomReady = Raylib.IsShaderValid(_bright) && Raylib.IsShaderValid(_blur);
+        if (_bloomReady)
+        {
+            _brLocTexel = Raylib.GetShaderLocation(_bright, "uTexel");
+            _blLocDir   = Raylib.GetShaderLocation(_blur, "uDir");
+            _bloomA = Raylib.LoadRenderTexture(BloomW, BloomH);
+            _bloomB = Raylib.LoadRenderTexture(BloomW, BloomH);
+            Raylib.SetTextureFilter(_bloomA.Texture, TextureFilter.Bilinear);
+            Raylib.SetTextureFilter(_bloomB.Texture, TextureFilter.Bilinear);
+        }
+
+        // P1: film-grain tile — generated in-engine (GenImageWhiteNoise), so nothing is
+        // committed to the repo. Point-filtered + repeat-wrapped: crisp grain, free tiling.
+        var noiseImg = Raylib.GenImageWhiteNoise(256, 256, 0.5f);
+        _noise = Raylib.LoadTextureFromImage(noiseImg);
+        Raylib.UnloadImage(noiseImg);
+        _noiseReady = Raylib.IsTextureValid(_noise);
+        if (_noiseReady)
+        {
+            Raylib.SetTextureWrap(_noise, TextureWrap.Repeat);
+            Raylib.SetTextureFilter(_noise, TextureFilter.Point);
         }
 
         Load();
@@ -321,6 +466,14 @@ void main() {
     {
         if (!Enabled) return;
         if (_fxReady) Raylib.UnloadShader(_fx);
+        if (_bloomReady)
+        {
+            Raylib.UnloadShader(_bright);
+            Raylib.UnloadShader(_blur);
+            Raylib.UnloadRenderTexture(_bloomA);
+            Raylib.UnloadRenderTexture(_bloomB);
+        }
+        if (_noiseReady) Raylib.UnloadTexture(_noise);
         Raylib.UnloadRenderTexture(_target);
     }
 
@@ -368,6 +521,9 @@ void main() {
             draw();
             Raylib.EndTextureMode();
 
+            // P1: build the half-res bloom from that frame before compositing.
+            BuildBloom();
+
             // Upload uniforms.
             UploadFxUniforms();
 
@@ -375,6 +531,10 @@ void main() {
             Raylib.BeginDrawing();
             Raylib.ClearBackground(Pal.RGBA(0, 0, 0));
             Raylib.BeginShaderMode(_fx);
+            // P1 extra samplers, bound AFTER BeginShaderMode on purpose. BeginShaderMode flushes
+            // rlgl's batch, and that flush ZEROES the active-texture-slot table — binding these in
+            // UploadFxUniforms (before the shader is made current) left uBloomTex reading black.
+            BindFxSamplers();
             if (Scaled)
             {
                 float s = Scale(); var o = Offset();
@@ -418,6 +578,57 @@ void main() {
         Raylib.DrawTexturePro(_target.Texture, sr, dr, Vector2.Zero, 0f, Color.White);
         DrawBrightness();
         Raylib.EndDrawing();
+    }
+
+    /// P1: bright-extract + separable-gaussian bloom, both blur passes at half resolution.
+    /// EVERY intermediate blit uses a NEGATIVE source height. Both the source and the
+    /// destination are bottom-up render textures, so a flipped blit is the one that PRESERVES
+    /// raw-texel orientation — which is what lets the composite sample uBloomTex with exactly
+    /// the same fragTexCoord it uses for texture0. Drop the flip and the glow lands upside-down.
+    static void BuildBloom()
+    {
+        if (!_bloomReady) return;
+        var fullSrc = new Rectangle(0, 0, Cfg.ScreenW, -Cfg.ScreenH);
+        var halfSrc = new Rectangle(0, 0, BloomW, -BloomH);
+        var halfDst = new Rectangle(0, 0, BloomW, BloomH);
+
+        // pass 1 — bright extract, downsampled to half res.
+        Raylib.SetShaderValue(_bright, _brLocTexel,
+            new Vector2(1f / Cfg.ScreenW, 1f / Cfg.ScreenH), ShaderUniformDataType.Vec2);
+        Raylib.BeginTextureMode(_bloomA);
+        Raylib.ClearBackground(Pal.RGBA(0, 0, 0));
+        Raylib.BeginShaderMode(_bright);
+        Raylib.DrawTexturePro(_target.Texture, fullSrc, halfDst, Vector2.Zero, 0f, Color.White);
+        Raylib.EndShaderMode();
+        Raylib.EndTextureMode();
+
+        // pass 2 — horizontal gaussian.
+        Raylib.SetShaderValue(_blur, _blLocDir,
+            new Vector2(BlurRadius / BloomW, 0f), ShaderUniformDataType.Vec2);
+        Raylib.BeginTextureMode(_bloomB);
+        Raylib.ClearBackground(Pal.RGBA(0, 0, 0));
+        Raylib.BeginShaderMode(_blur);
+        Raylib.DrawTexturePro(_bloomA.Texture, halfSrc, halfDst, Vector2.Zero, 0f, Color.White);
+        Raylib.EndShaderMode();
+        Raylib.EndTextureMode();
+
+        // pass 3 — vertical gaussian, back into A (which the composite samples).
+        Raylib.SetShaderValue(_blur, _blLocDir,
+            new Vector2(0f, BlurRadius / BloomH), ShaderUniformDataType.Vec2);
+        Raylib.BeginTextureMode(_bloomA);
+        Raylib.ClearBackground(Pal.RGBA(0, 0, 0));
+        Raylib.BeginShaderMode(_blur);
+        Raylib.DrawTexturePro(_bloomB.Texture, halfSrc, halfDst, Vector2.Zero, 0f, Color.White);
+        Raylib.EndShaderMode();
+        Raylib.EndTextureMode();
+    }
+
+    /// Attach the two extra samplers the composite reads. MUST be called while _fx is the
+    /// current shader and before the composite draw — see the call site.
+    static void BindFxSamplers()
+    {
+        if (_bloomReady) Raylib.SetShaderValueTexture(_fx, _locBloomTex, _bloomA.Texture);
+        if (_noiseReady) Raylib.SetShaderValueTexture(_fx, _locNoiseTex, _noise);
     }
 
     static void UploadFxUniforms()
@@ -507,6 +718,10 @@ void main() {
         public float VolSfx { get; set; } = 1.00f;
         public float VolMusic { get; set; } = 1.00f;
         public float VolUi { get; set; } = 1.00f;
+        // W5 ON-RAMP — additive again; absent in an older display.json, so these defaults are
+        // exactly the pre-W5 behaviour (1x playback, 100% text).
+        public int AnimSpeedIdx { get; set; }        // absent = 0 = 1x
+        public int UiScaleIdx { get; set; } = 1;     // absent = 1 = 100%
     }
     // Source-generated serializer (see SaveGame.SaveJson for the why): reflection-based
     // System.Text.Json loses its type metadata under `-p:PublishTrimmed=true`, which silently
@@ -514,13 +729,18 @@ void main() {
     [System.Text.Json.Serialization.JsonSerializable(typeof(Dto))]
     internal partial class DisplayJson : System.Text.Json.Serialization.JsonSerializerContext { }
 
-    static string Dir => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Sightline");
+    /// R1 REVIEW FIX — share SaveGame's guarded config root rather than re-deriving it. The old
+    /// body was `Path.Combine(GetFolderPath(ApplicationData), "Sightline")`, which misses the
+    /// hazard SaveGame.Dir documents: GetFolderPath uses SpecialFolderOption.None and returns ""
+    /// when the resolved directory does not exist yet, so Path.Combine("", "Sightline") yields a
+    /// RELATIVE path. Settings then scattered per launch directory (and looked to the player like
+    /// a reset) while saves and meta went to the right place. One derivation, one guard.
+    static string Dir => SaveGame.ConfigDir;
     static string FilePath => Path.Combine(Dir, "display.json");
 
     static void Save()
     {
-        try { Directory.CreateDirectory(Dir); File.WriteAllText(FilePath, JsonSerializer.Serialize(new Dto { Fullscreen = Fullscreen, SizeIdx = SizeIdx, BrightIdx = BrightIdx, GammaIdx = GammaIdx, Colorblind = Pal.Colorblind, TutorialSeen = TutorialSeen, PostFX = PostFX, AutoCam = AutoCam, BraceTipSeen = (TipsSeen & 1) != 0, TipsSeen = TipsSeen, TrainingSeen = TrainingSeen, ShowAllVerbs = ShowAllVerbs, VolMaster = VolMaster, VolSfx = VolSfx, VolMusic = VolMusic, VolUi = VolUi }, DisplayJson.Default.Dto)); }
+        try { Directory.CreateDirectory(Dir); File.WriteAllText(FilePath, JsonSerializer.Serialize(new Dto { Fullscreen = Fullscreen, SizeIdx = SizeIdx, BrightIdx = BrightIdx, GammaIdx = GammaIdx, Colorblind = Pal.Colorblind, TutorialSeen = TutorialSeen, PostFX = PostFX, AutoCam = AutoCam, BraceTipSeen = (TipsSeen & 1) != 0, TipsSeen = TipsSeen, TrainingSeen = TrainingSeen, ShowAllVerbs = ShowAllVerbs, VolMaster = VolMaster, VolSfx = VolSfx, VolMusic = VolMusic, VolUi = VolUi, AnimSpeedIdx = AnimSpeedIdx, UiScaleIdx = UiScaleIdx }, DisplayJson.Default.Dto)); }
         catch { }
     }
 
@@ -530,6 +750,10 @@ void main() {
     public static string SettingsPathPublic => FilePath;
     public static void SaveForTest() => Save();
     public static void LoadForTest() => Load();
+
+    /// Set once a corrupt display.json has been stashed this session, so a later corrupt read
+    /// can never overwrite that evidence with a fresher corpse (mirrors SaveGame's meta rule).
+    static bool _settingsEvidenceStashed;
 
     static void Load()
     {
@@ -558,8 +782,29 @@ void main() {
                 VolSfx    = Math.Clamp(d.VolSfx, 0f, 1f);
                 VolMusic  = Math.Clamp(d.VolMusic, 0f, 1f);
                 VolUi     = Math.Clamp(d.VolUi, 0f, 1f);
+                AnimSpeedIdx = Math.Clamp(d.AnimSpeedIdx, 0, AnimSpeedLevels.Length - 1);
+                UiScaleIdx   = Math.Clamp(d.UiScaleIdx, 0, UiScaleLevels.Length - 1);
+                ApplyUiScale();
             }
         }
-        catch { }
+        catch
+        {
+            // R2 (LOW-3): PRESERVE THE EVIDENCE. save.json and meta.json both stash an unreadable
+            // file as <name>.bak before moving on; display.json alone was silently discarded and
+            // then overwritten by the next Save() with defaults. That is the player's whole
+            // settings profile (volumes, text scale, brightness, tips-seen) gone with no trace of
+            // what went wrong. Copy, don't move: the file is still the live path, and a stale .bak
+            // from an older session may be overwritten but one stashed earlier THIS session may
+            // not. Recovery I/O must never throw — we are already inside a failure path.
+            try
+            {
+                if (!_settingsEvidenceStashed && File.Exists(FilePath))
+                {
+                    File.Copy(FilePath, FilePath + ".bak", true);
+                    _settingsEvidenceStashed = true;
+                }
+            }
+            catch { }
+        }
     }
 }

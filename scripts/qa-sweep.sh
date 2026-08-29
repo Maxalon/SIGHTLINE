@@ -4,8 +4,14 @@
 # quirk: piping an xvfb-run child through $(...) / a for-loop silently drops its
 # stdout, so every test is a direct `CMD | grep` statement below.
 #
-#   bash scripts/qa-sweep.sh          # 40 self-tests + autoplay x3   (~2 min)
+#   bash scripts/qa-sweep.sh          # 46 self-tests + autoplay x3   (~2 min)
 #   bash scripts/qa-sweep.sh --full   # + PAIRTEST                    (~2 min 40 s)
+#
+# COUNT NOTE: this footer has been wrong twice. C1 found it claiming 41 while running 42;
+# the W5/C1 integration then had two waves bumping it from different bases. It is now
+# DERIVED - if you add a test, re-run:  grep -oE 'SIGHTLINE_[A-Z0-9_]+TEST|SIGHTLINE_FUL11PROBE' scripts/qa-sweep.sh | sort -u | wc -l
+# an off-by-one that predates VOICETEST. Counted by hand from the echo lines: 42 before this
+# wave, 43 with VOICETEST. Corrected below rather than carried forward.
 #
 # RUN --full BEFORE MERGING. PAIRTEST (38 s measured) is the CRN-pairing identity check
 # that every paired measurement in this project rests on: two identical greedy legs on the
@@ -59,12 +65,16 @@ echo -n "BENCHTEST  : "; SIGHTLINE_BENCHTEST=1 run | grep -oE "BENCHTEST: (PASS|
 echo -n "DRAFTTEST  : "; SIGHTLINE_DRAFTTEST=1 run | grep -oE "DRAFTTEST: (PASS|FAIL)" | head -1
 echo -n "METATEST   : "; SIGHTLINE_METATEST=1  run | grep -oE "METATEST: (PASS|FAIL)" | head -1
 echo -n "CODEXTEST  : "; SIGHTLINE_CODEXTEST=1 run | grep -oE "CODEXTEST: (PASS|FAIL)" | head -1
+echo -n "VOICETEST  : "; SIGHTLINE_VOICETEST=1 run | grep -oE "VOICETEST: (PASS|FAIL)" | head -1
 echo -n "MODETEST   : "; SIGHTLINE_MODETEST=1  run | grep -oE "MODETEST: (PASS|FAIL)" | head -1
 echo -n "HORDETEST  : "; SIGHTLINE_HORDETEST=1 run | grep -oE "HORDETEST: (PASS|FAIL)" | head -1
 echo -n "DEATHTEST  : "; SIGHTLINE_DEATHTEST=1 run | grep -oE "DEATHTEST: (PASS|FAIL)" | head -1
 echo -n "HEATLADDERTEST: "; SIGHTLINE_HEATLADDERTEST=1 run | grep -oE "HEATLADDERTEST: (PASS|FAIL)" | head -1
 echo -n "SNAPTEST   : "; SIGHTLINE_SNAPTEST=1  run | grep -oE "SNAPTEST: (PASS|FAIL)" | head -1
 echo -n "AUDIOTEST  : "; SIGHTLINE_AUDIOTEST=1 run | grep -oE "AUDIOTEST: (PASS|FAIL)" | head -1
+echo -n "AUDIOGATE  : "; SIGHTLINE_AUDIOGATE=1 run | grep -oE "AUDIOGATE: (PASS|FAIL)" | head -1
+# RESONANCE A3: the AUDIO CHECK audition screen's listing/label/measurement contract.
+echo -n "AUDITIONTEST: "; SIGHTLINE_AUDITIONTEST=1 run | grep -oE "AUDITIONTEST: (PASS|FAIL)" | head -1
 echo -n "AMBIENTTEST: "; SIGHTLINE_AMBIENTTEST=1 run | grep -oE "AMBIENTTEST: (PASS|FAIL)" | head -1
 # Q1: the no-two-units-on-one-tile invariant. Drives 16 real missions (~70s), so it goes last.
 echo -n "STACKTEST  : "; SIGHTLINE_STACKTEST=1 run | grep -oE "STACKTEST: (PASS|FAIL)" | head -1
@@ -76,6 +86,17 @@ echo -n "PIKETEST   : "; SIGHTLINE_PIKETEST=1  run | grep -oE "PIKETEST: (PASS|F
 echo -n "PODTEST    : "; SIGHTLINE_PODTEST=1   run | grep -oE "PODTEST: (PASS|FAIL)" | head -1
 echo -n "EXPOSURETEST: "; SIGHTLINE_EXPOSURETEST=1 run | grep -oE "EXPOSURETEST (PASS|FAIL)" | head -1
 echo -n "FUL11PROBE : "; SIGHTLINE_FUL11PROBE=40 run | grep -oE "FUL11PROBE (PASS|FAIL)" | head -1
+# RESONANCE W5: the RECRUIT rung + the comfort settings (anim speed / UI text scale).
+echo -n "ONRAMPTEST : "; SIGHTLINE_ONRAMPTEST=1 run | grep -oE "ONRAMPTEST: (PASS|FAIL)" | head -1
+echo -n "OPENERTEST : "; SIGHTLINE_OPENERTEST=1 run | grep -oE "OPENERTEST: (PASS|FAIL)" | head -1
+# RESONANCE T1/T2: the onboarding contract and the incoming-fire forecast. These two EXISTED
+# but were never run by this sweep - the integration review caught it. THREATTEST prints
+# "NAME PASS" with no colon, like EXPOSURETEST.
+echo -n "TUTTEST    : "; SIGHTLINE_TUTTEST=1  run | grep -oE "TUTTEST: (PASS|FAIL)" | head -1
+echo -n "THREATTEST : "; SIGHTLINE_THREATTEST=1 run | grep -oE "THREATTEST (PASS|FAIL)" | head -1
+# R2 FIX 1: the nobody-is-walled-out geometry invariant (all 4 deployment shapes x 8 objectives
+# x 2 heats, thousands of fresh boards). ~25 s.
+echo -n "GEOMTEST   : "; SIGHTLINE_GEOMTEST=1 run | grep -oE "GEOMTEST: (PASS|FAIL)" | head -1
 
 if [ "$FULL" = 1 ]; then
   # ~38 s: the CRN identity check. Skipped by default so the sweep stays a quick loop;
@@ -85,10 +106,21 @@ else
   echo "PAIRTEST   : SKIPPED (re-run with --full; required before merging)"
 fi
 
+# COVERAGE GUARD: this sweep's test list has drifted from src/ twice (a hand-maintained
+# counter said 41 while 42 ran; a later recount still missed TUTTEST and THREATTEST). Derive
+# it instead of trusting it - if a self-test exists in src/ and is not invoked above, say so.
+_missing=$(comm -23 \
+  <(grep -ohE 'SIGHTLINE_[A-Z0-9_]+(TEST|GATE)' src/*.cs | sort -u) \
+  <(grep -ohE 'SIGHTLINE_[A-Z0-9_]+(TEST|GATE)' scripts/qa-sweep.sh | sort -u))
+if [ -n "$_missing" ]; then
+  echo "!! COVERAGE GAP - these self-tests exist in src/ but this sweep never runs them:"
+  echo "$_missing" | sed 's/^/     /'
+fi
+
 echo "=== AUTOPLAY x3 ==="
 echo -n "run1: "; SIGHTLINE_AUTOPLAY=1 run | grep -oE "RESULT: (WIN|LOSE|TIMEOUT) mission=[0-9]+" | head -1
 echo -n "run2: "; SIGHTLINE_AUTOPLAY=1 run | grep -oE "RESULT: (WIN|LOSE|TIMEOUT) mission=[0-9]+" | head -1
 echo -n "run3: "; SIGHTLINE_AUTOPLAY=1 run | grep -oE "RESULT: (WIN|LOSE|TIMEOUT) mission=[0-9]+" | head -1
 echo "=== DONE ==="
-echo "(41 self-tests exist; this sweep ran $([ "$FULL" = 1 ] && echo 41 || echo 40). Every line above"
+echo "(49 self-tests exist; this sweep ran $([ "$FULL" = 1 ] && echo 47 || echo 46). Every line above"
 echo " must read PASS, and every autoplay must read WIN or LOSE — never TIMEOUT, never blank.)"
