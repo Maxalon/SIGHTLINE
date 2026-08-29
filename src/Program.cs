@@ -513,6 +513,28 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        // SIGHTLINE_STALLTEST=1 : W9 THE REPAIR — the autopilot's "never a RESULT: TIMEOUT" contract,
+        // asserted instead of asserted-in-a-comment. Run-scoped turn counter, its force-lose arm, the
+        // turn-cap-vs-frame-cap arithmetic, and the measured DEFEND/disoriented within-turn deadlock.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_STALLTEST") == "1")
+        {
+            Raylib.SetTraceLogLevel(TraceLogLevel.Error);
+            Raylib.InitWindow(64, 64, "stalltest");
+            Console.WriteLine(new Game().StallSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
+        // SIGHTLINE_GRAPPLETEST=1 : W9 THE REPAIR — the assault GRAPPLE verb, which had ZERO coverage
+        // (its two siblings SHOVE and DRAG were both pinned). Reach-2 pull, the adjacent SLAM, and the
+        // invariant that a soldier NEVER takes damage from its own grapple — incl. as a JUGGERNAUT,
+        // whose reach-1 fork makes the adjacent case 100% of its grapples.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_GRAPPLETEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "grappletest");   // Unit.SyncPos + ShoveAnim use tile->px math
+            Console.WriteLine(new Game().GrappleSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
         // SIGHTLINE_CONTRACTTEST=1 : RUN CONTRACTS (IronVeterans no-backfill/fast-rank, HighStakes no-heal, ordinals).
         if (Environment.GetEnvironmentVariable("SIGHTLINE_CONTRACTTEST") == "1")
         {
@@ -762,7 +784,12 @@ public static class Program
         bool shotOnBark = shot && Environment.GetEnvironmentVariable("SIGHTLINE_SHOTONBARK") == "1";
         if (shotOnBark) shotFrame = int.MaxValue;
         int frame = 0;
-        const int autoCap = 20000;
+        // W9 THE REPAIR: 20000 frames bought the WHOLE 6-mission campaign only ~30-40 turns (measured
+        // 427-681 frames per run-turn, including the between-mission screens), so the harness budget — not any stall — was ending ~1% of
+        // runs as RESULT: TIMEOUT. Game.AutoMaxRunTurns (90 run-turns) is now the binding backstop and
+        // force-loses well under this; the cap stays purely as a hang guard. The number lives in Game
+        // beside the turn cap it must dominate, and STALLTEST pins that relationship.
+        const int autoCap = Game.AutoFrameCap;
 
         while (!Raylib.WindowShouldClose())
         {
@@ -818,9 +845,9 @@ public static class Program
                     { Console.WriteLine($"RESULT: ENDLESS waves={game.Wave} frame={frame}"); break; }
                     continue;   // still surviving — keep fighting
                 }
-                if (game.Phase == Phase.Win) { Console.WriteLine($"RESULT: WIN mission={game.RunState.Mission} frame={frame}"); break; }
-                if (game.Phase == Phase.Lose) { Console.WriteLine($"RESULT: LOSE mission={game.RunState.Mission} frame={frame}"); break; }
-                if (frame >= autoCap) { Console.WriteLine($"RESULT: TIMEOUT mission={game.RunState.Mission} frame={frame}"); break; }
+                if (game.Phase == Phase.Win) { Console.WriteLine($"RESULT: WIN mission={game.RunState.Mission} frame={frame} turns={game.RunTurns}"); break; }
+                if (game.Phase == Phase.Lose) { Console.WriteLine($"RESULT: LOSE mission={game.RunState.Mission} frame={frame} turns={game.RunTurns}"); break; }
+                if (frame >= autoCap) { Console.WriteLine($"RESULT: TIMEOUT mission={game.RunState.Mission} frame={frame} turns={game.RunTurns}"); break; }
             }
         }
 
@@ -910,7 +937,13 @@ public static class Program
         Display.Init(false);                  // headless render-frame path (no post-FX / no save)
         Raylib.SetTargetFPS(0);               // uncapped — run as fast as the sim allows
 
-        const int frameCap = 20000;           // per-match safety cap; a hit cap counts as a loss
+        // W9 THE REPAIR: raised 20000 -> Game.AutoFrameCap (60000) with the autoplay cap. A frame-cap
+        // hit is scored as a LOSS below, so at 20000 the batch RIGHT-CENSORED exactly the longest
+        // campaigns (the archived x2 chunks show it firing: one 20-match chunk logs "frame-cap hits:
+        // 1"), putting a small unattributed downward bias into the ladder of record.
+        // Game.AutoMaxRunTurns (90 run-turns) now force-loses a genuinely dragging campaign long
+        // before this, so the cap is a hang guard only.
+        const int frameCap = Game.AutoFrameCap;   // per-match safety cap; a hit cap counts as a loss
         // APEX W4 — explicit ENDLESS CAP POLICY (so the wave-depth p90 is never silently censored):
         //   * wave cap 30 — mirrors the SIGHTLINE_ENDLESS autoplay cap in Main. A stand that deep is
         //     a deliberate right-censor: it's logged as LossCause "wave-cap" and the report calls out
@@ -1063,7 +1096,7 @@ public static class Program
         Display.Init(false);
         Raylib.SetTargetFPS(0);
 
-        const int frameCap = 20000;
+        const int frameCap = Game.AutoFrameCap;   // W9: matched to BalanceBatch's cap (a censored leg is not a leg)
         // one greedy leg on (heat, slot): the EXACT seeding sequence BalanceBatch.RunOne uses.
         (string result, int cleared, int missions, int turns) Leg(int heat, int slot)
         {

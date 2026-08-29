@@ -97,6 +97,13 @@ echo -n "THREATTEST : "; SIGHTLINE_THREATTEST=1 run | grep -oE "THREATTEST (PASS
 # R2 FIX 1: the nobody-is-walled-out geometry invariant (all 4 deployment shapes x 8 objectives
 # x 2 heats, thousands of fresh boards). ~25 s.
 echo -n "GEOMTEST   : "; SIGHTLINE_GEOMTEST=1 run | grep -oE "GEOMTEST: (PASS|FAIL)" | head -1
+# W9 THE REPAIR: the three hooks this wave shipped. TRUTHTEST ground-truths the DISPLAYED shot
+# numbers against rolled outcomes (no test had ever read a displayed quantity); GRAPPLETEST is the
+# FIRST coverage the GRAPPLE verb has ever had; STALLTEST asserts the autopilot's own
+# "never a RESULT: TIMEOUT" contract instead of leaving it in a comment.
+echo -n "TRUTHTEST  : "; SIGHTLINE_TRUTHTEST=1 run | grep -oE "TRUTHTEST: (PASS|FAIL)" | head -1
+echo -n "GRAPPLETEST: "; SIGHTLINE_GRAPPLETEST=1 run | grep -oE "GRAPPLETEST: (PASS|FAIL)" | head -1
+echo -n "STALLTEST  : "; SIGHTLINE_STALLTEST=1 run | grep -oE "STALLTEST: (PASS|FAIL)" | head -1
 
 if [ "$FULL" = 1 ]; then
   # ~38 s: the CRN identity check. Skipped by default so the sweep stays a quick loop;
@@ -118,9 +125,32 @@ if [ -n "$_missing" ]; then
 fi
 
 echo "=== AUTOPLAY x3 ==="
-echo -n "run1: "; SIGHTLINE_AUTOPLAY=1 run | grep -oE "RESULT: (WIN|LOSE|TIMEOUT) mission=[0-9]+" | head -1
-echo -n "run2: "; SIGHTLINE_AUTOPLAY=1 run | grep -oE "RESULT: (WIN|LOSE|TIMEOUT) mission=[0-9]+" | head -1
-echo -n "run3: "; SIGHTLINE_AUTOPLAY=1 run | grep -oE "RESULT: (WIN|LOSE|TIMEOUT) mission=[0-9]+" | head -1
+# W9 THE REPAIR: a TIMEOUT is now a HARD FAILURE of this script, not a line for a reader to notice.
+# CLAUDE.md has always called TIMEOUT a pre-merge failure, but this sweep only PRINTED the RESULT
+# line — and at the ~1% rate two independent stall causes ran at, that is squarely inside the noise
+# an agent writes off as "a weak-autopilot flake". That is exactly how both survived. A BLANK result
+# (the run threw, or printed nothing) fails too.
+_autofail=0
+for _i in 1 2 3; do
+  echo -n "run$_i: "
+  _r=$(SIGHTLINE_AUTOPLAY=1 run | grep -oE "RESULT: (WIN|LOSE|TIMEOUT) mission=[0-9]+ frame=[0-9]+ turns=[0-9]+" | head -1)
+  echo "${_r:-<no RESULT line>}"
+  case "$_r" in
+    *WIN*|*LOSE*) ;;
+    *) _autofail=1 ;;
+  esac
+done
+if [ "$_autofail" = 1 ]; then
+  echo "!! AUTOPLAY FAILED - a TIMEOUT or a missing RESULT line. The autopilot contract"
+  echo "   (Game.AutoMaxRunTurns + the within-turn idle guard) says this is unreachable;"
+  echo "   if it fired, something regressed. DO NOT MERGE."
+fi
 echo "=== DONE ==="
-echo "(49 self-tests exist; this sweep ran $([ "$FULL" = 1 ] && echo 47 || echo 46). Every line above"
-echo " must read PASS, and every autoplay must read WIN or LOSE — never TIMEOUT, never blank.)"
+# COUNT NOTE (see the header): DERIVED, never hand-maintained.
+_have=$(grep -ohE 'SIGHTLINE_[A-Z0-9_]+(TEST|GATE)' src/*.cs | sort -u | wc -l)
+_ran=$(grep -ohE 'SIGHTLINE_[A-Z0-9_]+(TEST|GATE)' scripts/qa-sweep.sh | sort -u | wc -l)
+[ "$FULL" = 1 ] || _ran=$((_ran - 1))   # PAIRTEST is named but skipped without --full
+echo "($_have self-tests exist; this sweep ran $_ran. Every line above must read PASS, and every"
+echo " autoplay must read WIN or LOSE - never TIMEOUT, never blank.)"
+[ "$_autofail" = 1 ] && exit 1
+exit 0

@@ -291,6 +291,276 @@ public partial class Game
             : "SHOVETEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
+    /// W9 THE REPAIR — SIGHTLINE_STALLTEST: the autopilot's own no-TIMEOUT CONTRACT, asserted.
+    ///
+    /// THE GAP THIS CLOSES: NOTHING asserted the backstop's contract. Game.Autopilot.cs states it in
+    /// a comment — "the smoke test / balance batch ALWAYS terminates well before the frame cap —
+    /// never a RESULT: TIMEOUT" — and CLAUDE.md makes a TIMEOUT a hard pre-merge failure, but
+    /// qa-sweep.sh only PRINTED the RESULT line and left a human to read it. At ~1% per run that is
+    /// well inside the noise an agent writes off as "a weak-autopilot flake", which is exactly how
+    /// two independent causes survived:
+    ///   (a) the cap was PER-MISSION (_turnCount) and re-armed by SetupMission — including the
+    ///       MID-MISSION checkpoint redeploy — while the budget it sits under is a whole-CAMPAIGN
+    ///       frame count. A campaign got ~40 frames-worth of turns against a 50-turn-per-mission cap.
+    ///   (b) a WITHIN-TURN deadlock is invisible to it entirely, because AutoStallCheck runs in
+    ///       StartPlayerTurn and a deadlocked turn never starts another one. Measured: autoplay seed
+    ///       3001 sat 38,000 consecutive frames in mission 5 DEFEND with every enemy dead, because a
+    ///       DISORIENTED soldier hit `DoOverwatch(); return;` — DoOverwatch refuses for a disoriented
+    ///       unit and spends nothing, and AutoStep returned anyway.
+    /// This test pins all four repairs: the run-scoped counter, its arm, the frame/turn budget
+    /// arithmetic, and the deadlock scene actually draining.
+    public string StallSelfTest()
+    {
+        NoPersist = true;
+        var fails = new System.Collections.Generic.List<string>();
+
+        // ---- (1) BUDGET ARITHMETIC: the turn cap must always bite before the frame cap ----
+        // If this fails, RESULT: TIMEOUT is reachable again no matter what the other legs say.
+        // (through locals: a const-folded comparison compiles to unreachable code and stops being a check)
+        long capTurns = AutoMaxRunTurns, perTurn = AutoFramesPerTurn, frameCap = AutoFrameCap;
+        if (capTurns * perTurn > frameCap)
+            fails.Add($"budget {capTurns}x{perTurn}>{frameCap}");
+
+        // ---- (2) THE ASYMMETRY: SetupMission resets the MISSION counter, never the RUN counter ----
+        // This is the whole mechanism of (a): the checkpoint redeploy calls SetupMission mid-mission
+        // and used to hand the autopilot a fresh 50-turn allowance.
+        StartMission(1);
+        if (RunTurns != 1) fails.Add($"runTurnsAfterStart={RunTurns}");
+        for (int i = 0; i < 6; i++) StartPlayerTurn();
+        int missionTurnBefore = Turn, runTurnsBefore = RunTurns;
+        if (runTurnsBefore <= 1) fails.Add("runTurnsNotCounting");
+        DebugResetupMission();                                  // exactly what the checkpoint does
+        if (Turn != 1) fails.Add($"missionTurnNotReset={Turn}");            // (unchanged behaviour)
+        // the run counter KEEPS its history and books the new opening turn — it is never reset
+        if (RunTurns != runTurnsBefore + 1) fails.Add($"runTurnsResetBySetup={RunTurns} was={runTurnsBefore}");
+        if (missionTurnBefore <= 1) fails.Add("missionTurnNotCounting");
+
+        // ---- (3) THE ARM: crossing AutoMaxRunTurns force-loses the run, and only then ----
+        {
+            var g = new Game { NoPersist = true, AutoPlay = true };
+            g.StartMission(1);
+            g.DebugSetRunTurns(AutoMaxRunTurns - 1);
+            g.DebugSetTurn(1);                                  // the per-mission cap must NOT be what fires
+            g.StartPlayerTurn();                                // -> RunTurns == AutoMaxRunTurns
+            if (g.Phase == Phase.Lose) fails.Add("armFiredEarly");
+            g.DebugSetTurn(1);
+            g.StartPlayerTurn();                                // -> RunTurns == AutoMaxRunTurns + 1
+            if (g.Phase != Phase.Lose) fails.Add($"armDidNotFire phase={g.Phase} runTurns={g.RunTurns}");
+        }
+        // ...and a game that is NOT the autopilot is never force-lost by it
+        {
+            var g = new Game { NoPersist = true, AutoPlay = false };
+            g.StartMission(1);
+            g.DebugSetRunTurns(AutoMaxRunTurns + 5);
+            g.StartPlayerTurn();
+            if (g.Phase == Phase.Lose) fails.Add("armFiredInLivePlay");
+        }
+
+        // ---- (4) THE DEADLOCK SCENE, verbatim: DEFEND, no enemies, a DISORIENTED soldier ----
+        // Pre-fix this never ends the turn, at any number of updates. 60 is far more than the two or
+        // three steps a healthy squad needs, and far FEWER than AutoIdleFrames (240) — so this leg
+        // fails unless the ROOT cause is fixed, not merely caught by the idle backstop.
+        {
+            var g = new Game { NoPersist = true, AutoPlay = true };
+            g.StartMission(1);
+            g.DebugStageDefendDeadlock();
+            int turn0 = g.Turn;
+            for (int i = 0; i < 60 && g.Turn == turn0 && g.Phase == Phase.PlayerTurn; i++) g.Update(1f / 60f);
+            if (g.Turn == turn0 && g.Phase == Phase.PlayerTurn)
+                fails.Add("deadlockNotDrained");
+        }
+
+        // ---- (5) THE IDLE BACKSTOP itself: a frozen board ends the turn, and not before ----
+        {
+            var g = new Game { NoPersist = true, AutoPlay = true };
+            g.StartMission(1);
+            g.DebugStageDefendDeadlock();
+            int turn0 = g.Turn;
+            for (int i = 0; i < AutoIdleFrames - 1; i++) g.DebugAutoIdleGuard();
+            if (g.Turn != turn0) fails.Add("idleGuardFiredEarly");
+            for (int i = 0; i < 3; i++) g.DebugAutoIdleGuard();
+            if (g.Turn == turn0 && g.Phase == Phase.PlayerTurn) fails.Add("idleGuardNeverFired");
+        }
+
+        return fails.Count == 0
+            ? $"STALLTEST: PASS (run-scoped turn counter survives SetupMission's mission reset; the arm force-loses at >{AutoMaxRunTurns} run-turns in autoplay only; {AutoMaxRunTurns} turns x {AutoFramesPerTurn} frames <= the {AutoFrameCap}-frame harness budget, so the turn cap always bites first; the DEFEND/disoriented deadlock drains in <60 steps and the idle backstop ends a frozen turn at {AutoIdleFrames} steps)"
+            : "STALLTEST: FAIL (" + string.Join(",", fails) + ")";
+    }
+
+    /// STALLTEST hooks. DebugResetupMission re-runs SetupMission for the CURRENT mission — exactly
+    /// what TryReinforcements does for the mid-mission checkpoint redeploy, which is the call that
+    /// used to re-arm the per-mission turn cap.
+    public void DebugResetupMission() => SetupMission(_run.Mission);
+    public void DebugSetRunTurns(int t) => RunTurns = t;
+    public void DebugAutoIdleGuard() => AutoIdleGuard();
+    /// Stage the measured seed-3001 deadlock: DEFEND, every hostile dead, and the first soldier in
+    /// action order DISORIENTED but holding actions and ammo. Pre-fix the autopilot spins here forever.
+    public void DebugStageDefendDeadlock()
+    {
+        Objective = Objective.Defend;
+        Phase = Phase.PlayerTurn;
+        _anims.Clear();
+        foreach (var e in Enemies) { e.Alive = false; e.Hp = 0; }
+        SquadConcealed = false;
+        bool first = true;
+        foreach (var p in Players)
+        {
+            if (!p.Alive || p.IsVip) continue;
+            p.BeginTurn();
+            p.Ammo = Math.Max(1, p.Ammo);
+            if (first) { p.AddStatus(StatusKind.Disoriented, 3); first = false; }
+        }
+    }
+
+    /// W9 THE REPAIR — SIGHTLINE_GRAPPLETEST, the FIRST test GRAPPLE has ever had.
+    ///
+    /// THE GAP THIS CLOSES: `grep -i grapple src/Game.Harness.cs` returned NOTHING before this. The
+    /// verb had zero coverage while both of its siblings were pinned — SHOVETEST covers SHOVE, whose
+    /// vector points AWAY from the shover so its blocked case can never ram him, and FIELDTEST covers
+    /// DRAG and explicitly asserts the Chebyshev-1 exclusion. The suite tested the two safe siblings
+    /// and never touched the one that shares ShoveAnim's blocked branch with an INVERTED vector.
+    /// The defect that hid there: a Chebyshev-1 grapple's destination tile IS the grappler's own tile,
+    /// so the slide was blocked, `rammed` resolved to the GRAPPLER, and the soldier who spent the
+    /// action and the cooldown took ShoveRammedDamage from its own GRAPPLE — measured at 3 of 3
+    /// Chebyshev-1 grapples across 11 autoplay campaigns, one of them lethal (VEGA 1 -> 0, seed 3406),
+    /// and 100% of a JUGGERNAUT's grapples, because GrappleReachFor pins that fork at reach 1.
+    /// Autoplay drove the real trigger every run and only ever checked for exceptions and TIMEOUT;
+    /// losing 1 HP to your own verb is silent.
+    public string GrappleSelfTest()
+    {
+        NoPersist = true;
+        var fails = new System.Collections.Generic.List<string>();
+
+        Grid = new Grid();                       // all Floor, Height 0
+        Players = new System.Collections.Generic.List<Unit>();
+        Enemies = new System.Collections.Generic.List<Unit>();
+        Vip = null; CaptiveLocked = false;
+        Objective = Objective.Eliminate;
+        EvacZone.Clear();
+        Fx = new Fx();
+        Phase = Phase.PlayerTurn;
+        Combat.MissionFaction = Faction.None;
+
+        Unit MkP(int x, int y, Spec spec = Spec.None)
+        {
+            var u = new Unit { Name = "S", Cls = "ASSAULT", Team = Team.Player, X = x, Y = y,
+                               Hp = 8, MaxHp = 8, Aim = 65, Mobility = 4, Spec = spec,
+                               Weapon = Weapon.Make(WeaponKind.Rifle) };   // Cls ASSAULT => Ability GRAPPLE
+            u.Ammo = u.Weapon.Clip; u.SyncPos(); u.BeginTurn(); return u;
+        }
+        Unit MkE(int x, int y)
+        {
+            var u = new Unit { Name = "E", Cls = "GRUNT", Team = Team.Enemy, X = x, Y = y,
+                               Hp = 9, MaxHp = 9, Aim = 60, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+            u.Ammo = u.Weapon.Clip; u.Alert = AlertLevel.Alert; u.SyncPos(); u.BeginTurn(); return u;
+        }
+        void Pump() { for (int i = 0; i < 400 && _anims.Count > 0; i++) Update(0.05f); }
+        void Scene()
+        {
+            Grid = new Grid();
+            Players = new System.Collections.Generic.List<Unit>();
+            Enemies = new System.Collections.Generic.List<Unit>();
+            _anims.Clear(); Fx = new Fx(); Phase = Phase.PlayerTurn;
+            SquadConcealed = false;
+        }
+
+        // ---- (1) reach 2: the foe is PULLED one tile toward the grappler, and the grappler is unhurt
+        Scene();
+        var p1 = MkP(5, 5);
+        var f1 = MkE(7, 5);                       // Chebyshev 2 east
+        f1.OnOverwatch = true; f1.Hunkered = true;
+        Players.Add(p1); Enemies.Add(f1);
+        int pHp1 = p1.Hp, fHp1 = f1.Hp;
+        if (!GrappleTargetOk(p1, f1)) fails.Add("reach2NotLegal");
+        IssueGrapple(p1, f1); Pump();
+        if (!(f1.X == 6 && f1.Y == 5)) fails.Add($"reach2NotPulled({f1.X},{f1.Y})");
+        if (f1.Hp != fHp1) fails.Add($"reach2PullDamagedFoe({f1.Hp})");     // a clean pull is not a slam
+        if (p1.Hp != pHp1) fails.Add($"reach2HurtGrappler({p1.Hp})");
+        if (f1.OnOverwatch) fails.Add("reach2OverwatchHeld");
+        if (f1.Hunkered) fails.Add("reach2HunkerHeld");
+        if (!p1.ShovedThisTurn) fails.Add("reach2NoBudgetSpent");
+        if (p1.AbilityCd <= 0) fails.Add("reach2NoCooldown");
+        if (p1.ActionsLeft != 1) fails.Add($"reach2ActionCost({p1.ActionsLeft})");
+
+        // ---- (2) THE DEFECT: Chebyshev 1. The foe cannot be pulled anywhere (its only toward-tile
+        //          is the grappler's own), so the verb resolves as a SLAM — the foe takes the collision
+        //          damage and loses its stance, and THE GRAPPLER LOSES NO HP. It used to lose HP.
+        Scene();
+        var p2 = MkP(5, 5);
+        var f2 = MkE(6, 5);                       // Chebyshev 1 east
+        f2.OnOverwatch = true; f2.Hunkered = true;
+        Players.Add(p2); Enemies.Add(f2);
+        int pHp2 = p2.Hp, fHp2 = f2.Hp;
+        if (!GrappleTargetOk(p2, f2)) fails.Add("adjacentNotLegal");         // the UI offers it: it must work
+        IssueGrapple(p2, f2); Pump();
+        if (p2.Hp != pHp2) fails.Add($"SELF-RAM grapplerHp {pHp2}->{p2.Hp}");
+        if (!p2.Alive || p2.Downed) fails.Add("SELF-RAM grapplerFelledByOwnGrapple");
+        if (!(f2.X == 6 && f2.Y == 5)) fails.Add($"adjacentFoeMoved({f2.X},{f2.Y})");
+        if (f2.Hp >= fHp2) fails.Add($"adjacentSlamDealtNothing({f2.Hp})");  // it is still a real hit
+        if (f2.OnOverwatch) fails.Add("adjacentOverwatchHeld");
+        if (f2.Hunkered) fails.Add("adjacentHunkerHeld");
+
+        // ---- (3) the same, DIAGONALLY (the seed-3406 geometry: grappler (13,5), foe (14,6)) ----
+        Scene();
+        var p3 = MkP(5, 5);
+        var f3 = MkE(6, 6);                       // Chebyshev 1 diagonal
+        Players.Add(p3); Enemies.Add(f3);
+        p3.Hp = 1;                                // exactly the state that made it lethal in the wild
+        Players.Add(MkP(2, 2));                   // a second soldier so a loss can't end the mission
+        IssueGrapple(p3, f3); Pump();
+        if (p3.Hp != 1) fails.Add($"SELF-RAM diagonalGrapplerHp={p3.Hp}");
+        if (!p3.Alive || p3.Downed) fails.Add("SELF-RAM diagonalGrapplerFelled");
+
+        // ---- (4) JUGGERNAUT: reach 1 is its whole fork, so EVERY grapple it can make is case (2).
+        //          Its signature verb must therefore still do something and still not hurt it.
+        Scene();
+        var jug = MkP(5, 5, Spec.Juggernaut);
+        var jf = MkE(6, 5);
+        var jFar = MkE(7, 5);
+        Players.Add(jug); Enemies.Add(jf); Enemies.Add(jFar);
+        if (GrappleReachFor(jug) != 1) fails.Add("juggernautReachNot1");
+        if (!GrappleTargetOk(jug, jf)) fails.Add("juggernautHasNoLegalGrapple");
+        if (GrappleTargetOk(jug, jFar)) fails.Add("juggernautReachedPastOne");
+        int jHp = jug.Hp, jfHp = jf.Hp;
+        IssueGrapple(jug, jf); Pump();
+        if (jug.Hp != jHp) fails.Add($"SELF-RAM juggernautHp {jHp}->{jug.Hp}");
+        if (jf.Hp >= jfHp) fails.Add("juggernautSlamDidNothing");
+
+        // ---- (5) a reach-2 pull BLOCKED by terrain still slams the foe and still spares the grappler
+        Scene();
+        var p5 = MkP(5, 5);
+        var f5 = MkE(7, 5);
+        Grid.Tiles[6, 5] = TileType.HighCover;    // the destination tile is a wall
+        Grid.SetCoverHp(6, 5);
+        Players.Add(p5); Enemies.Add(f5);
+        int pHp5 = p5.Hp, fHp5 = f5.Hp;
+        IssueGrapple(p5, f5); Pump();
+        if (!(f5.X == 7 && f5.Y == 5)) fails.Add($"blockedPullMoved({f5.X},{f5.Y})");
+        if (f5.Hp >= fHp5) fails.Add("blockedPullNoDamage");
+        if (p5.Hp != pHp5) fails.Add($"blockedPullHurtGrappler({p5.Hp})");
+
+        // ---- (6) gating: no target, out of reach, self, dead, already spent this turn ----
+        Scene();
+        var p6 = MkP(5, 5);
+        Players.Add(p6);
+        if (HasGrappleTarget(p6)) fails.Add("grappleTargetWithNoEnemy");
+        var far = MkE(9, 5); Enemies.Add(far);                 // Chebyshev 4 -> beyond reach 2
+        if (GrappleTargetOk(p6, far)) fails.Add("farFoeLegal");
+        var near = MkE(6, 5); Enemies.Add(near);
+        if (!HasGrappleTarget(p6)) fails.Add("noTargetWithFoeInReach");
+        if (GrappleTargetOk(p6, p6)) fails.Add("selfLegal");
+        near.Alive = false;
+        if (GrappleTargetOk(p6, near)) fails.Add("deadFoeLegal");
+        near.Alive = true;
+        p6.ShovedThisTurn = true;                              // shared anti-loop budget with SHOVE
+        if (GrappleTargetOk(p6, near)) fails.Add("grappleTwiceInOneTurn");
+
+        _anims.Clear();
+        return fails.Count == 0
+            ? "GRAPPLETEST: PASS (reach 2 pulls the foe one tile toward the grappler and costs 1 action + the charge + the shove budget; an adjacent foe cannot be pulled so the verb SLAMS it — damage + stance broken — and the grappler NEVER takes damage from its own grapple, cardinal or diagonal, at 1 HP, or as a JUGGERNAUT whose reach-1 fork makes that its only case; a blocked reach-2 pull slams too; gating holds)"
+            : "GRAPPLETEST: FAIL (" + string.Join(",", fails) + ")";
+    }
+
     /// Headless self-test for the FIELD CRAFT (W1) verbs DRAG + VAULT. Verifies: DRAG pulls a
     /// LAGGING ally (Chebyshev 2) one tile toward the dragger, an already-adjacent (Chebyshev 1)
     /// ally is NOT draggable (no legal closer tile), and the once-per-turn cap holds; VAULT crosses
@@ -1340,6 +1610,27 @@ public partial class Game
         if (movesForE != 0) fails.Add($"deadMoveKept={movesForE}");
         _anims.Clear();
 
+        // (2b) W9 THE REPAIR — the SHOOTER's side of the same purge. Legs (1)/(2) above, and every
+        // purge leg in DKTEST/DOWNTEST/OWTEST, only ever built a queue of shots AT the unit about to fall —
+        // because in a hand-built harness scenario the SHOOTER is never the one harmed. So the missing
+        // `s.A == d` clause was structurally invisible, and a unit that died or went down mid-queue
+        // still fired: full damage, a credited kill, telemetry under a corpse's class.
+        {
+            var shooter = Enemies.First(x => x.Alive && x != e2);
+            var victim  = Players.First(u => u.Alive && !u.IsVip);
+            _anims.Clear();
+            var r2 = Combat.Resolve(Grid, shooter, victim);
+            Enqueue(new ShotAnim(shooter, victim, r2, reaction: true), Team.Enemy);   // [0] ACTIVE (keep)
+            Enqueue(new ShotAnim(shooter, victim, r2, reaction: true), Team.Enemy);   // [1] BY the dier (drop)
+            Enqueue(new ShotAnim(a1, victim, r2, reaction: true), Team.Player);       // [2] by someone else (keep)
+            shooter.Hp = 0; KillUnit(shooter);
+            int byDead    = _anims.Count(x => x is ShotAnim sh && sh.A == shooter);
+            int byOther   = _anims.Count(x => x is ShotAnim sh && sh.A == a1);
+            if (byDead  != 1) fails.Add($"shotsByCorpse={byDead}");        // only the active one survives
+            if (byOther != 1) fails.Add($"otherShooterShotDropped={byOther}");
+            _anims.Clear();
+        }
+
         // (3) APEX W2 — the overwatch RESOURCE LEAK: with 3 watchers covering one lane, the reaction
         // loop must stop SPENDING (OnOverwatch/ReactedThisTurn/Ammo) the moment the already-queued
         // hits cumulatively predict the mover's death — the old per-shot check only caught a single
@@ -1395,7 +1686,7 @@ public partial class Game
         _anims.Clear();
 
         return fails.Count == 0
-            ? "DKTEST: PASS (KillUnit idempotent; surplus corpse-reaction purged; active + other-target kept; 3rd watcher unspent once queued hits predict the kill)"
+            ? "DKTEST: PASS (KillUnit idempotent; surplus corpse-reaction purged; shots BY the felled unit purged too; active + other-target/other-shooter kept; 3rd watcher unspent once queued hits predict the kill)"
             : "DKTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
@@ -2362,8 +2653,40 @@ public partial class Game
             if (!EvacZone.Contains((load.X, load.Y))) fails.Add("h:extractDidNotLand");
         }
 
+        // ---- (i) W9 THE REPAIR — a DOWNED soldier's OWN queued shot must never fire ----
+        // The live sequence this reproduces (autoplay seeds 3406/4205): a soldier issued GRAPPLE,
+        // which queued a ShoveAnim, and a shot was queued behind it; the ShoveAnim downed the
+        // grappler; EnterDowned -> PurgeAnimsFor dropped shots AT the soldier and had NO clause for
+        // shots BY it, so a body at Hp 0 fired — full damage, a credited kill, Stats.RecordShot under
+        // the downed soldier's class, and the takedown stinger.
+        // THE GAP: every purge leg in this file (DKTEST (2), DOWNTEST (a), OWTEST) builds a queue
+        // of shots AT the unit about to fall, because in a hand-built scenario the SHOOTER is never
+        // the one harmed. Both independent guards are pinned: the PURGE, and ShotAnim self-cancelling.
+        Scene();
+        var gunner = MkP("GUN", 4, 5);
+        Players.Add(gunner);
+        var mark = MkE("MARK", 9, 5);
+        Enemies.Add(mark);
+        {
+            int foeHp0 = mark.Hp;
+            var rq = Combat.Resolve(Grid, gunner, mark);
+            _anims.Clear();
+            Enqueue(new ShoveAnim(gunner, mark, 0, 0), Team.Player);              // [0] the blow in flight
+            Enqueue(new ShotAnim(gunner, mark, rq, reaction: false), Team.Player); // [1] the gunner's OWN shot
+            gunner.Hp = 0; KillUnit(gunner);                                       // -> EnterDowned
+            if (!gunner.Downed) fails.Add("i:notDowned");
+            if (_anims.Count(x => x is ShotAnim sh && sh.A == gunner) != 0) fails.Add("i:downedShotKept");
+            // second, independent guard: even hand-fed an ACTIVE shot, a downed shooter fires nothing
+            _anims.Clear();
+            var solo = new ShotAnim(gunner, mark, rq, reaction: false);
+            solo.OnStart(this);
+            for (int i = 0; i < 60 && !solo.Update(this, 1f / 60f); i++) { }
+            if (mark.Hp != foeHp0) fails.Add($"i:downedShotResolved {foeHp0}->{mark.Hp}");
+            _anims.Clear();
+        }
+
         return fails.Count == 0
-            ? "DOWNTEST: PASS (down entry clean of death bookkeeping; expiry runs the full death flow once, cause = downing archetype; stabilize freezes + won field recovers wounded/scarred; corpsman revive incl. CombatMedic reach; no second down + AoE finishes; AI ignores downed + all-downed bounded; VIP instant; drag/extract carry pinned)"
+            ? "DOWNTEST: PASS (down entry clean of death bookkeeping; expiry runs the full death flow once, cause = downing archetype; stabilize freezes + won field recovers wounded/scarred; corpsman revive incl. CombatMedic reach; no second down + AoE finishes; AI ignores downed + all-downed bounded; VIP instant; drag/extract carry pinned; a downed shooter's own queued shot is purged and self-cancels)"
             : "DOWNTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
@@ -4507,6 +4830,7 @@ public partial class Game
         }
     }
     public void DebugSetTurn(int t) => _turnCount = t;
+    public int DebugAnimCount => _anims.Count;
     public void DebugCheckEnd() => CheckEnd();
 
     /// SIGHTLINE_ONRAMPTEST — PROGRAM RESONANCE W5 "ON-RAMP". Two features, one test:

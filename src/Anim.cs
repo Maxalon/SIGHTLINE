@@ -128,9 +128,21 @@ public class ShoveAnim : Anim
 
             // collision damage to the shoved enemy; if it was rammed INTO another unit, that unit
             // takes a lighter hit too. EnvDamage handles FX + kill/near-death + KillUnit.
+            // W9 THE REPAIR: the INITIATOR is never "rammed" by its own forced-movement verb.
+            // GRAPPLE pulls TOWARD the grappler, so a Chebyshev-1 foe's destination tile IS the
+            // grappler's own tile — the slide is blocked, `rammed` resolved to the GRAPPLER, and the
+            // soldier who spent the action and the cooldown took ShoveRammedDamage from its own
+            // GRAPPLE. Measured live: 3 of 3 Chebyshev-1 grapples across 11 autoplay campaigns
+            // self-rammed, one of them killing the grappler outright (VEGA, hp 1 -> 0, seed 3406).
+            // That is also 100% of a JUGGERNAUT's grapples — GrappleReachFor pins that fork at reach 1.
+            // Excluding the shover makes the adjacent case a clean SLAM: the foe still takes the
+            // collision damage and still loses overwatch/hunker, which is a real (if lesser) use of the
+            // verb, so JUGGERNAUT keeps a working signature ability. Inert for SHOVE (its vector points
+            // AWAY, so the shover is never in the destination tile) and for DRAG (DragTargetOk already
+            // refuses a destination equal to the dragger's tile).
             var rammed = g.UnitAt(_tx, _ty);   // null if blocked by terrain/edge rather than a unit
             g.EnvDamage(Target, Math.Max(1, Combat.ShoveCollisionDamage), "SLAM", Pal.RGBA(255, 210, 150));
-            if (rammed != null && rammed.Alive && rammed != Target)
+            if (rammed != null && rammed.Alive && rammed != Target && rammed != Shover)
                 g.EnvDamage(rammed, Math.Max(1, Combat.ShoveRammedDamage), "SLAM", Pal.RGBA(255, 210, 150));
         }
     }
@@ -199,6 +211,12 @@ public class ShotAnim : Anim
 
     public override bool Update(Game g, float dt)
     {
+        // W9 THE REPAIR: a body does not shoot. Game.PurgeAnimsFor now drops queued shots whose
+        // ATTACKER was just felled, but this is the independent second guard — the one that also
+        // covers a shooter that dies between this anim becoming active and its FireAt beat, and any
+        // future path that queues a shot without going through the purge. Self-cancelling here
+        // (rather than inside Apply) also skips the muzzle/tracer, so nothing at all fires.
+        if (A == null || !A.Alive || A.Downed) return true;
         _t += dt;
         if (!_applied && _t >= FireAt)
         {

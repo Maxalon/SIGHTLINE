@@ -241,6 +241,14 @@ public partial class Game
 
     int _turnCount;
 
+    /// W9 THE REPAIR — player turns taken since this RUN began, across every mission. Distinct from
+    /// _turnCount, which SetupMission resets to 1 at every mission start AND at the mid-mission
+    /// checkpoint redeploy. That reset is why the "never a RESULT: TIMEOUT" guarantee was false:
+    /// AutoStallCheck's cap was PER-MISSION and re-armable, while the harness budget it claims to sit
+    /// under (Program.cs autoCap) is a whole-campaign FRAME count. Reset only at a mode seam
+    /// (ResetModeState), never by SetupMission. Public so the harness can report it.
+    public int RunTurns { get; private set; }
+
     // campaign run
     Run _run = new();
     public Run RunState => _run;
@@ -1562,6 +1570,7 @@ public partial class Game
     /// and needs the RNG stream untouched for byte-stable shots/measurement.
     void ResetModeState()
     {
+        RunTurns = 0;   // W9: the run-scoped autopilot budget resets at the mode seam, and ONLY here
         Mode = GameMode.Campaign;
         DailyMode = false;
         DailyStamp = 0;
@@ -1919,6 +1928,9 @@ public partial class Game
         _anims.Clear();
         HitStop = 0;
         _turnCount = 1;
+        RunTurns++;   // W9: the mission's OPENING turn is a real turn — SetupMission seats it without
+                      // going through StartPlayerTurn, so the run-scoped counter has to book it here.
+                      // Deliberately an INCREMENT, not a reset: that is the entire point (see the field).
         Pressure = 0; _pressureWaves = 0;   // anti-turtle clock resets each mission (Combat.PressureAim cleared by BeginMission)
         _autoSig = -1; _autoStall = 0;
         Phase = Phase.PlayerTurn;
@@ -2988,7 +3000,14 @@ public partial class Game
     void PurgeAnimsFor(Unit d)
     {
         _anims.RemoveAll(a => (a is MoveStepAnim m && m.Unit == d)
-                           || (a is ShotAnim s && s.D == d && a != ActiveAnim));
+                           || (a is ShotAnim s && s.D == d && a != ActiveAnim)
+                           // W9 THE REPAIR: ...and shots BY the felled unit. The purge only ever
+                           // covered the VICTIM's side, so a soldier downed while its OWN shot sat in
+                           // the queue behind the blow that felled it still fired: full damage, a
+                           // credited kill, Stats bucketed under the downed soldier's class, and the
+                           // takedown stinger — off a body at Hp 0. Same ActiveAnim exemption as the
+                           // target clause, so the blow in flight still finishes.
+                           || (a is ShotAnim s2 && s2.A == d && a != ActiveAnim));
     }
 
     /// FUL-7: does this lethal event open a bleed-out window instead of killing? Soldiers only
@@ -3191,7 +3210,11 @@ public partial class Game
         if (Phase != Phase.PlayerTurn || d.Team != Team.Enemy) return;
         if (ActiveAnim is not ShotAnim sa) return;          // only a direct shot refunds (not a grenade/DoT)
         var killer = sa.A;
-        if (sa.D != d || killer == null || killer.Team != Team.Player || killer.IsVip || !killer.Alive) return;
+        // W9: `|| killer.Downed` — a soldier at Hp 0 must not be handed ActionsLeft = 1 (which would
+        // make CanAct true again for a body). Never observed escalating in 214 campaigns, but the
+        // guard read only !Alive while Downed is exactly the state a felled soldier is IN.
+        if (sa.D != d || killer == null || killer.Team != Team.Player || killer.IsVip
+            || !killer.Alive || killer.Downed) return;
         // Require a GENUINE FLANK (not merely any exposed target): the refund rewards
         // *maneuvering to a flank*, not finishing an already-open foe. This de-snowballs the
         // ambush+refund chain a balance audit flagged (an ambush-snap-kill on an exposed-but-
@@ -3908,7 +3931,29 @@ public partial class Game
     // so the match always resolves. Test-only; never runs in normal play.
     int _autoSig = -1, _autoStall;
     int _smartConcealTurns;  // SmartStep: player turns spent concealed (hard anti-TIMEOUT cap)
-    const int AutoMaxTurns = 50;  // hard autopilot match cap: force-end a dragging match as a LOSS
+    const int AutoMaxTurns = 50;  // hard autopilot MISSION cap: force-end a dragging match as a LOSS
+    /// W9 THE REPAIR — the RUN-scoped autopilot cap, and the one that actually makes "never a
+    /// RESULT: TIMEOUT" true. AutoMaxTurns above is per-MISSION and is re-armed by SetupMission's
+    /// `_turnCount = 1`, INCLUDING the mid-mission checkpoint redeploy — so a campaign could spend
+    /// 21 turns on mission 5, wipe on mission 6, take the checkpoint, and be handed a fresh 50-turn
+    /// allowance, while Program.cs's autoCap = 20000 frames buys the WHOLE campaign about 40 turns.
+    /// The backstop was roughly 5x too loose to bound what it claimed to bound: 2 TIMEOUTs in 214
+    /// seeded campaigns (~1%), which qa-sweep printed and never failed on, and which BalanceBatch
+    /// scores as a LOSS — right-censoring exactly the longest campaigns.
+    /// Calibrated from a measured 20-seed census of this tree's own autoplay (RESULT lines now
+    /// carry `turns=`): the longest campaign ran 44 run-turns / 20,661 frames, and the worst
+    /// frames-per-turn ratio observed was 681 (frames include the between-mission barracks / shop /
+    /// campaign-map screens, which cost frames and no turns). 100 run-turns is ~2.3x the longest real
+    /// campaign, so this only ever fires on something genuinely stuck.
+    public const int AutoMaxRunTurns = 100;
+    /// The harness's whole-campaign FRAME budget (Program.cs's autoplay loop and BalanceBatch both
+    /// read it). It lives HERE, next to the turn cap it must dominate, because the two numbers are a
+    /// PAIR: if the frame budget can expire before AutoMaxRunTurns is reached, RESULT: TIMEOUT is
+    /// reachable again. STALLTEST pins AutoMaxRunTurns * AutoFramesPerTurn <= AutoFrameCap so a future
+    /// edit to either number fails loudly instead of quietly re-opening the hole.
+    public const int AutoFrameCap = 90000;
+    /// A generous per-turn frame ceiling for that arithmetic: 750 against a measured worst of 681.
+    public const int AutoFramesPerTurn = 750;
 
     // ---------------- activation pods (4.3 awareness tiers) ----------------
     // Baselines; Heat "SHORT FUSE"/"RELENTLESS" shrink first-contact ranges by 1 (read off the
@@ -4185,7 +4230,7 @@ public partial class Game
 
     void UpdatePlayer()
     {
-        if (AutoPlay) { if (SmartPlay) SmartStep(); else AutoStep(); return; }
+        if (AutoPlay) { AutoIdleGuard(); if (SmartPlay) SmartStep(); else AutoStep(); return; }
 
         CheckPodActivation();
         if (_anims.Count > 0) return;   // a pod just activated — let the scatter play
@@ -6030,6 +6075,7 @@ public partial class Game
     void StartPlayerTurn()
     {
         _turnCount++;
+        RunTurns++;      // W9: run-scoped, never reset by SetupMission — see the field
         Phase = Phase.PlayerTurn;
         // W10 INTEL CACHE: the pickup window closes after CacheTurns player turns — the routing
         // detour is a bet against this clock, not free money whenever the fight happens to drift by.

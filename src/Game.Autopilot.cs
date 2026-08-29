@@ -1281,7 +1281,11 @@ public partial class Game
                 if (tgt == null) return false;
                 if (Grid.GetCover(tgt.X, tgt.Y, u.X, u.Y).Level <= 0) return false;  // only worth it vs a covered foe
                 IssueGrapple(u, tgt);
-                return false;   // free of end-turn; act with the remaining action
+                // W9: TRUE = "this step is done". The grapple queues a ShoveAnim that has not run yet;
+                // acting again now decides from a board the anim is about to change (and is how a
+                // grappler ended up firing a shot after its own grapple downed it). The soldier keeps
+                // its remaining action and uses it on the next SmartStep, once the queue has drained.
+                return true;
             }
             case AbilityKind.Slipstream:
             {
@@ -1684,13 +1688,47 @@ public partial class Game
         return true;
     }
 
+    // ---- W9 THE REPAIR: the WITHIN-TURN deadlock guard -------------------------------------
+    // AutoStallCheck below runs in StartPlayerTurn, so by construction it can only ever catch a
+    // stall that spans TURN BOUNDARIES. An autopilot step that returns WITHOUT spending an action
+    // and WITHOUT ending the turn never reaches a boundary at all, so the only thing that ended
+    // such a run was the harness frame cap — a RESULT: TIMEOUT the autopilot's own contract calls
+    // unreachable. One instance was found and fixed at source (the disoriented DEFEND overwatch,
+    // above); this is the STRUCTURAL backstop, so the next one costs a forced turn instead of a
+    // phantom pre-merge failure that an agent spends a session chasing.
+    // Fires only when literally nothing changed: player turn, empty anim queue, identical
+    // action/ammo/HP/position signature for AutoIdleFrames consecutive updates. Any real action
+    // moves the signature, so a healthy fight can never trip it. Autoplay-only.
+    const int AutoIdleFrames = 240;   // 4 s of a frozen board with nothing animating
+    int _autoIdleSig, _autoIdleFrames;
+    void AutoIdleGuard()
+    {
+        if (_anims.Count > 0) { _autoIdleFrames = 0; return; }
+        int sig = 17;
+        foreach (var p in Players)
+            sig = sig * 31 + (p.ActionsLeft * 8191 + p.Ammo * 127 + p.Hp * 7 + p.X * 31 + p.Y
+                              + (p.Alive ? 1 : 0) + (p.Downed ? 2 : 0) + p.Statuses.Count * 3);
+        foreach (var e in Enemies) sig = sig * 31 + (e.Hp * 7 + e.X * 31 + e.Y + (e.Alive ? 1 : 0));
+        if (sig != _autoIdleSig) { _autoIdleSig = sig; _autoIdleFrames = 0; return; }
+        if (++_autoIdleFrames < AutoIdleFrames) return;
+        _autoIdleFrames = 0;
+        // Force the turn to end. StartPlayerTurn then runs AutoStallCheck, whose run-scoped cap
+        // (AutoMaxRunTurns) closes the run for good if the deadlock simply repeats — so the only
+        // exits left are WIN and LOSE.
+        EndPlayerTurn();
+    }
+
     void AutoStallCheck()
     {
         // HARD no-TIMEOUT backstop: a match still going at AutoMaxTurns is effectively stalled (normal
         // matches resolve in ~5-15 turns; Defend caps at 8). Force-lose so the smoke test / balance
         // batch ALWAYS terminates well before the frame cap — never a RESULT: TIMEOUT. Only ever fires
         // in autoplay (this method is autoplay-only); real play is unaffected.
-        if (_turnCount > AutoMaxTurns)
+        // W9 THE REPAIR: the RUN-scoped arm. `_turnCount` is reset to 1 by SetupMission at every
+        // mission start AND at the mid-mission checkpoint redeploy, so the per-mission cap below could
+        // never bound a CAMPAIGN — which is the thing the harness's frame budget bounds. RunTurns is
+        // never reset by SetupMission, so this arm is the one that makes the comment above true.
+        if (_turnCount > AutoMaxTurns || RunTurns > AutoMaxRunTurns)
         {
             // PROGRAM HORIZON W2: in LAST STAND the "turn cap" just ends the horde run cleanly at the
             // waves survived so far (route through EndEndless, not the campaign LoseRun).
@@ -1836,8 +1874,21 @@ public partial class Game
             var dt = FirstTargetFor(u);
             if (dt != null && u.Ammo > 0) { AutoShoot(u, dt); return; }
             if (u.Ammo == 0) { DoReload(); return; }
-            if (u.ActionsLeft > 0 && u.Ammo > 0) { DoOverwatch(); return; }
-            DoHunker(); return;
+            // W9 THE REPAIR — `&& !u.HasStatus(StatusKind.Disoriented)`. THIS LINE WAS A HARD HANG.
+            // DoOverwatch REFUSES for a disoriented soldier (Codex: "cannot hold overwatch") and
+            // returns having spent nothing, but the `return` here was unconditional — so AutoStep
+            // ended the step with the action unspent, the turn never ended, and the next frame did
+            // the same thing forever. Head-of-line blocking makes it total: AutoStep always picks
+            // Players.FirstOrDefault(CanAct), so one disoriented soldier freezes the whole squad.
+            // Measured live (autoplay seed 3001, ~1% of campaigns): mission 5 DEFEND, all enemies
+            // dead, ASH disoriented with 2 actions and 3 ammo, 38,000 consecutive frames in
+            // PlayerTurn with _turnCount frozen at 2 and an empty anim queue. AutoStallCheck could
+            // never see it — that guard only runs in StartPlayerTurn, i.e. only at a turn boundary
+            // the game can no longer reach. The frame cap was the ONLY exit, which is exactly the
+            // RESULT: TIMEOUT the autopilot's own contract says is unreachable. SmartStep already
+            // carried this guard at both of its overwatch sites; the smoke-test policy did not.
+            if (u.ActionsLeft > 0 && u.Ammo > 0 && !u.HasStatus(StatusKind.Disoriented)) { DoOverwatch(); return; }
+            DoHunker(); return;   // always spends the action -> progress is guaranteed
         }
 
         // DECAPITATE objective: focus the marked HVT. Shoot it on sight, grenade it if it's the
@@ -1877,12 +1928,20 @@ public partial class Game
             if (kind == AbilityKind.Mark)
             {
                 var mt = BestMarkTarget(u);
+                // MARK resolves IMMEDIATELY (no anim is queued), so falling through to the shot still
+                // decides from the real board — unlike GRAPPLE below.
                 if (mt != null) IssueMark(u, mt);    // costs an action but not the turn -> fall through and shoot
             }
             else if (kind == AbilityKind.Grapple)
             {
+                // W9 THE REPAIR: HONOUR THE QUEUE. GRAPPLE enqueues a ShoveAnim that has NOT run yet;
+                // falling through to AutoShoot queued a SECOND player action behind it, decided from a
+                // board that anim is about to change. That is exactly how a soldier came to fire its own
+                // shot after its own grapple downed it (ShoveAnim -> EnterDowned, with the ShotAnim
+                // already queued). Return instead: the soldier keeps its remaining action and uses it on
+                // the next AutoStep, once the queue has drained. AbilityCd is set, so no loop.
                 var gt = BestGrappleTarget(u);
-                if (gt != null) IssueGrapple(u, gt); // costs an action but not the turn -> fall through and shoot
+                if (gt != null) { IssueGrapple(u, gt); return; }
             }
             else if (kind == AbilityKind.Pin)
             {
