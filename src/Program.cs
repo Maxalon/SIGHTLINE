@@ -76,6 +76,33 @@ public static class Program
         if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_OPENERTRIM"), out int xopen) && xopen >= 0)
             Mission.OpenerTrim = xopen;
 
+        // X3 CONFIRM — the CLASS ROLE knobs (Combat.cs). Unset/0 = the shipped tree exactly.
+        //   SIGHTLINE_CLASSBAL=<n>  : the composite dose (ONE lever per measured round) — sets the
+        //                             four shooter damage deltas (SHARPSHOOTER -n/-n, RANGER 0/-n,
+        //                             GUNNER +n/0, ASSAULT +n/+n across the band's two ends) and the
+        //                             CORPSMAN FIELD PRESENCE aura. A sub-knob below wins over it.
+        //   SIGHTLINE_SHARPDMG / _RANGERDMG / _GUNNERDMG / _ASSAULTDMG : the four damage deltas
+        //   SIGHTLINE_GUNNERAIM=<n> : Combat.GunnerAimBonus  (0 in the composite)
+        //   SIGHTLINE_MEDICAURA=<n> : Combat.MedicAuraReduce (-dmg/hit near a Corpsman)
+        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_CLASSBAL"), out int xcbal) && xcbal >= 0)
+        {
+            Combat.SharpDmgTrim = Combat.RangerDmgTrim = xcbal;
+            Combat.GunnerDmgBonus = Combat.AssaultDmgBonus = xcbal;
+            Combat.MedicAuraReduce = xcbal;
+        }
+        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_SHARPDMG"), out int xsd) && xsd >= 0)
+            Combat.SharpDmgTrim = xsd;
+        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_RANGERDMG"), out int xrd) && xrd >= 0)
+            Combat.RangerDmgTrim = xrd;
+        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_GUNNERDMG"), out int xgd) && xgd >= 0)
+            Combat.GunnerDmgBonus = xgd;
+        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_ASSAULTDMG"), out int xad) && xad >= 0)
+            Combat.AssaultDmgBonus = xad;
+        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_GUNNERAIM"), out int xga) && xga >= 0)
+            Combat.GunnerAimBonus = xga;
+        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_MEDICAURA"), out int xma) && xma >= 0)
+            Combat.MedicAuraReduce = xma;
+
         bool smartplay = Environment.GetEnvironmentVariable("SIGHTLINE_SMARTPLAY") == "1";
         bool autoplay = Environment.GetEnvironmentVariable("SIGHTLINE_AUTOPLAY") == "1" || smartplay;
 

@@ -352,29 +352,31 @@ funnel, so a trade takes roughly two hits instead of one. Its raw chunk logs liv
 
 > **NUMBERS AND THEIR BASE COMMIT — read before quoting any balance figure.**
 >
-> **THE LADDER OF RECORD (wave X2 "TRUE NORTH II", base commit `a61ef42` + X2's own repair,
-> n=40 campaigns per rung, `runs=20` asserted in all 12 chunks, raw data in
-> `docs/measurements/x2/`):**
+> **THE LADDER OF RECORD (wave X3 "CONFIRM", base commit `d350416` + X3's own class-role pass,
+> n=80 campaigns per rung, `runs=20` asserted in all 62 chunks, raw data in
+> `docs/measurements/x3/`):**
 >
 > | RECRUIT | heat 0 | heat 2 | heat 4 | heat 6 | heat 8 |
 > |---|---|---|---|---|---|
-> | **75.0%** | **57.5%** | **35.0%** | **30.0%** | **20.0%** | **17.5%** |
+> | **72.5%** | **50.0%** | **35.0%** | **22.5%** | **23.8%** | **13.8%** |
+> | ±5.0 | ±5.6 | ±5.3 | ±4.7 | ±4.8 | ±3.9 |
 >
 > Published band: **RECRUIT 75 / h0 55 / h2 40 / h4 30 / h6 20 / h8 10, ±8 (h8 ±5, hard floor
-> ≥5)** — FUL-13's, kept after X2 re-argued it, plus the RECRUIT row X2 added. Five of six
-> rungs are in band; **heat 8 is out at +2.5 over its ceiling.**
+> ≥5)** — FUL-13's, kept through X2 and X3. **All six rungs are in band.**
 >
-> **This table supersedes every ladder published before it** — X1's 52.5/27.5/15.0 (base
-> `2100858`), W5's on-ramp pair (base `b68f38a`), W4's 35.0/20.0 and FUL-13's
-> 52.5/35/30/22.5/10. Those were each measured on the tree their wave branched from, **never
-> on the merged tree**, and the composition was 20 points below its own band at heat 0 until
-> X2 measured it and repaired the cause.
+> **This table supersedes X2's** (75.0 / 57.5 / 35.0 / 30.0 / 20.0 / 17.5, base `a61ef42`, n=40),
+> which X3 re-measured at n=80 on the merged tip and found to be a **sampling excursion, not a
+> tree difference**: X2's archived chunks reproduce BIT-EXACTLY here (its slots 0-19 give the same
+> outcomes at every rung h0-h8), but the slots nobody had run pull h0 to 48.8 and h8 to 10.0
+> before any lever. **X2's "heat 8 is out of band at +2.5" does not survive n=80** — h8 measured
+> **10.0 ±3.4**, the band's nominal value. The RECRUIT rung is the one place a real (small)
+> milestone-2 drift shows.
 >
-> **The rule this wave exists to enforce: a balance number without a base commit is not a
-> number.** Quote the base, or re-measure. And note the precision — a 40-campaign rung carries
-> **±6-8 points of standard error**, which is the same size as the band's ±8 tolerance and
-> larger than the 10-point step between rungs, so **rung ORDER is not resolvable at n=40**;
-> pool adjacent rungs, or raise N, before spending a lever on an inversion.
+> **The rule this contract exists to enforce: a balance number without a base commit is not a
+> number.** Quote the base, or re-measure. And note the precision: n=80 carries **±3.4-5.6**
+> points of SE. That resolves a 10-point step between rungs (h2 vs h4 is real, Δ12.6 ± 7.0) but
+> **NOT a 4-point one** (h4 vs h6 is Δ3.7 ± 6.2, and the shipped ladder's h4/h6 inversion is
+> noise, not a finding). Below n≈200, do not spend a lever on an adjacent-rung inversion.
 
 RESONANCE **W4 "THE SECOND AXIS"** then made the OPENING GEOMETRY a variable: four deployment
 shapes (FRONTAL / PINCER / CROSSFIRE / **ENVELOP**, a centre-deploy surrounded opening gated to

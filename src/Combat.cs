@@ -158,6 +158,97 @@ public static class Combat
     public static bool HvtGuardReducePending = false;   // set when a reduction fires; drained by Game.Update
 
     // ──────────────────────────────────────────────────────────────────────────────────────────
+    // PROGRAM RESONANCE X3 "CONFIRM" — CLASS ROLE DIFFERENTIATION
+    //
+    // WHY. `docs/AUDIT-2026.md` has carried "class dominance" as PARTIAL through several
+    // programs. Measured on the merged tree (h0, per-class PLAYER CLASS PERFORMANCE table):
+    // SHARPSHOOTER killed in 2.27 shots where a GUNNER needed 3.62 — a 60% efficiency lead — and
+    // the CORPSMAN was a non-combatant (2 kills in 43 shots). The cause is NOT crit (an earlier
+    // program trimmed crit and the lead survived): it is damage-per-shot. At h0 the sniper landed
+    // 6.29 dmg/shot against the LMG's 4.33, because the Sharpshooter carries the best base aim
+    // (72), the best weapon aim (+3), the best damage band (5-7) AND the longest reach (MaxRange
+    // 20, +16 range aim past 8 tiles) with no cost that bites at the ranges fights actually happen.
+    //
+    // THE SHAPE OF THE FIX. Not a flat nerf: a REDISTRIBUTION in which each shooter loses
+    // something the others keep, so squad composition becomes a decision.
+    //   * SHARPSHOOTER pays in PUNCH (-1/shot) and keeps its reach (MaxRange 20, +16 past 8 tiles),
+    //     its MARK designator and crit 14 — the long-range specialist, no longer the best gun.
+    //   * RANGER pays in PUNCH too (it measured 2.56 s/kill at RECRUIT n=80, the joint outlier) and
+    //     keeps crit 15 and the +24 point-blank band it has to walk into fire to collect.
+    //   * GUNNER is paid in PUNCH (+1/shot) and keeps the lowest aim (62) and crit (5) of the four,
+    //     buying the volume role its 5-round clip and 10 HP were always drawn for.
+    //   * ASSAULT is paid in PUNCH (+1/shot) and keeps no peak band anywhere: the generalist's
+    //     price is that it is never the best tool for a given range.
+    //   * CORPSMAN gets a reason to hold a slot that is NOT damage — see MedicAuraReduce below.
+    // The four deltas sum to ZERO across the shooters by construction, so the composite is a
+    // redistribution and not a lethality change (the measured residual is reported in the DEVLOG).
+    //
+    // Player-only by construction (every read gates on Team.Player), keyed on Unit.Cls like the
+    // rest of the class plumbing, and applied inside ComputeOdds/HardenedReduce — the single
+    // funnels the HUD forecast, the AI and Resolve all read, so the numbers on screen stay honest.
+    // SHIPPED DOSE 1 (round S1). `SIGHTLINE_CLASSBAL=0` restores the pre-X3 tree EXACTLY — the
+    // round-R0diag identity check proved the scaffolding is logic-free at 0, so the 0 path is the
+    // honest control, not an approximation of one.
+
+    /// Per-class damage deltas on a PLAYER soldier's shot, applied to both ends of the band
+    /// (DmgMin floored at 1). Keyed on Unit.Cls, so a class carries its role through an armory
+    /// weapon swap and a hostile with the same gun is never touched. All 0 by default.
+    /// SHIPPED at 1 (X3 round S1, base d350416, n=80/rung). `SIGHTLINE_CLASSBAL=0` restores the
+    /// pre-X3 tree exactly, and each class has its own sub-knob for attribution.
+    public static int SharpDmgTrim = 1;      // SHARPSHOOTER: -n on BOTH ends  (pays for reach + MARK)
+    public static int RangerDmgTrim = 1;     // RANGER:       -n on the TOP end (pays for crit 15 + the +24 close band)
+    public static int GunnerDmgBonus = 1;    // GUNNER:       +n on the FLOOR  (paid for with the lowest aim + crit of the four)
+    public static int AssaultDmgBonus = 1;   // ASSAULT:      +n on BOTH ends  (paid for with no peak band anywhere)
+    /// Aim points added to a player GUNNER's shot. Held at 0 in the shipped composite — kept as a
+    /// separate lever for the hit%-spread half of the gate.
+    public static int GunnerAimBonus = 0;
+    /// FIELD PRESENCE: damage subtracted from every hit on a soldier standing within
+    /// MedicAuraRange of a living, non-downed CORPSMAN. Does NOT stack (presence, not plating),
+    /// never applies to the Corpsman itself (support, not a tank) and never to the escort VIP
+    /// (Escort's tuning is hard-won and stays out of this wave's attribution). SHIPPED at 1.
+    public static int MedicAuraReduce = 1;
+    public const int MedicAuraRange = 2;   // Chebyshev tiles: a squad's natural spacing, not a touch
+
+    /// The player-class damage deltas on this attacker's shot, one per BAND END. The shape of
+    /// each class's delta is part of the role, not just its size:
+    ///   SHARPSHOOTER  -n / -n   the whole band drops — it is no longer the biggest gun anywhere.
+    ///   RANGER        0 / -n    it loses its 7-damage CEILING (the burst spike) and keeps its floor.
+    ///   GUNNER       +n / 0     its FLOOR lifts — the volume gun stops rolling 3s; no new ceiling,
+    ///                            which is exactly the attrition role its 5-round clip is drawn for.
+    ///   ASSAULT      +n / +n    the whole band lifts to rifle-competitive; the generalist still has
+    ///                            no PEAK anywhere (its band equals the trimmed sniper's) and pays
+    ///                            with 2 less base aim, no reach and no range bonus.
+    /// 0 for every enemy and every un-dialled class, so the default tree is byte-identical.
+    static void RoleDmgDelta(Unit a, out int dMin, out int dMax)
+    {
+        dMin = dMax = 0;
+        if (a.Team != Team.Player) return;
+        switch (a.Cls)
+        {
+            case "SHARPSHOOTER": dMin = -SharpDmgTrim;   dMax = -SharpDmgTrim;   break;
+            case "RANGER":                               dMax = -RangerDmgTrim;  break;
+            case "GUNNER":       dMin =  GunnerDmgBonus;                          break;
+            case "ASSAULT":      dMin =  AssaultDmgBonus; dMax =  AssaultDmgBonus; break;
+        }
+    }
+    static int RoleDmgMin(Unit a) { RoleDmgDelta(a, out int lo, out _); return Math.Max(1, a.Weapon.DmgMin + lo); }
+    static int RoleDmgMax(Unit a) { RoleDmgDelta(a, out _, out int hi); return Math.Max(RoleDmgMin(a), a.Weapon.DmgMax + hi); }
+
+    /// True when a living, standing CORPSMAN other than `d` is within MedicAuraRange of `d`.
+    /// O(AllUnits) (<= ~18) and allocation-free, exactly like the crossfire scan beside it.
+    public static bool HasMedicPresence(Unit d)
+    {
+        if (d == null) return false;
+        foreach (var u in AllUnits)
+        {
+            if (u == null || ReferenceEquals(u, d)) continue;
+            if (!u.Alive || u.Downed || u.Team != Team.Player || u.Cls != "CORPSMAN") continue;
+            if (Math.Max(Math.Abs(u.X - d.X), Math.Abs(u.Y - d.Y)) <= MedicAuraRange) return true;
+        }
+        return false;
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────────────────────
     // MISSION-STATIC LIFECYCLE (PROGRAM TEMPO wave 4). The five per-mission combat statics above
     // (RunBoons / AllUnits / MissionFaction / PrepFaction / PressureAim) were previously set and
     // cleared at ~14 scattered call sites with "defensive: clear ... so no stale value can warp ..."
@@ -265,6 +356,9 @@ public static class Combat
         if (d.Hunkered) hit -= 25;
         if (highGround) hit += HighGroundAim;
         if (a.Steady) hit += SteadyAim;          // sharpshooter: braced shot
+        // X3 CLASS ROLE: the GUNNER is paid in accuracy for the lowest damage band of the four
+        // shooters (see the block above). Player-only; 0 by default.
+        if (GunnerAimBonus != 0 && a.Team == Team.Player && a.Cls == "GUNNER") hit += GunnerAimBonus;
         if (a.Suppress > 0) hit -= a.Suppress;   // gunner: suppressed shooter
         if (a.Pinned > 0) hit -= SuppressAim;    // gunner SUPPRESSING FIRE: pinned foe shoots wild (area denial)
         if (a.Wound > 0) hit -= Unit.WoundAim;   // attrition: a wounded shooter is shakier
@@ -427,8 +521,8 @@ public static class Combat
         {
             HitChance = hit,
             CritChance = crit,
-            DmgMin = a.Weapon.DmgMin,
-            DmgMax = a.Weapon.DmgMax,
+            DmgMin = RoleDmgMin(a),   // X3 CLASS ROLE: the SHARPSHOOTER pays in punch (0 by default)
+            DmgMax = RoleDmgMax(a),
             CoverLevel = coverLevel,
             Flanked = flanked,
             Hunkered = d.Hunkered,
@@ -448,7 +542,7 @@ public static class Combat
             //    (exactly Resolve's graze branch). FragileFloor only ever CAPS damage, so it can't
             //    lower this guaranteed minimum.
             StreakBonus = steadying,
-            GrazeFloor = Math.Max(1, HardenedReduce(d, a.Weapon.DmgMin, crit: false)),
+            GrazeFloor = Math.Max(1, HardenedReduce(d, RoleDmgMin(a), crit: false)),
         };
     }
 
@@ -542,6 +636,11 @@ public static class Combat
         // weather the close-range alpha (only when MissionFaction matches the prep — an honest bet).
         if (d.Team == Team.Player && PrepFaction == Faction.Legion && MissionFaction == Faction.Legion)
             reduce += PrepLegionArmor;
+        // X3 CLASS ROLE — CORPSMAN FIELD PRESENCE: a soldier standing within MedicAuraRange of a
+        // living, standing Corpsman shrugs off MedicAuraReduce off every hit. Flat, non-stacking,
+        // never on the Corpsman itself and never on the escort VIP. 0 by default.
+        if (MedicAuraReduce > 0 && d.Team == Team.Player && !d.IsVip && HasMedicPresence(d))
+            reduce += MedicAuraReduce;
         // DECAPITATE GUARDED HVT (W4): the HVT shrugs off part of every hit while a bodyguard is near.
         // FLOOR at 1 (never zero) so a naive bot still whittles it down — this is the no-TIMEOUT guarantee.
         // Mark the reduction (only when it actually shaved off damage) for a one-shot "GUARDED" float.
@@ -1715,8 +1814,88 @@ public static class Combat
             if (gSm.HasLineOfSight(4, 4, 6, 6, true)) fails.Add("supercoverSmokeSealed");
         }
 
+        // --- X3 CONFIRM: the CLASS ROLE funnel (four shooter damage deltas + CORPSMAN FIELD
+        // PRESENCE). Gates: (a) OFF is exact identity, (b) each delta moves only its own class,
+        // (c) an ENEMY with the same class string is never touched, (d) DmgMin floors at 1,
+        // (e) the aura reduces a soldier's incoming damage only inside range, never the Corpsman
+        // itself, never the VIP, and never stacks with a second Corpsman. Every static is
+        // restored before returning, so the rest of the suite runs on the shipped defaults. ---
+        {
+            int svS = SharpDmgTrim, svR = RangerDmgTrim, svG = GunnerDmgBonus, svA = AssaultDmgBonus,
+                svM = MedicAuraReduce, svAim = GunnerAimBonus;
+            var svAll = AllUnits;
+            var gX = new Grid();
+            Unit Shooter(string cls, WeaponKind w, Team t) =>
+                new Unit { Cls = cls, Aim = 70, Weapon = Weapon.Make(w), Team = t, X = 2, Y = 5, Hp = 8, MaxHp = 8 };
+            var tgt = new Unit { Cls = "GRUNT", Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle),
+                                 Team = Team.Enemy, X = 8, Y = 5, Hp = 8, MaxHp = 8 };
+            var snp = Shooter("SHARPSHOOTER", WeaponKind.Sniper, Team.Player);
+            var gun = Shooter("GUNNER", WeaponKind.Lmg, Team.Player);
+            var foe = Shooter("SHARPSHOOTER", WeaponKind.Sniper, Team.Enemy);   // same Cls, wrong team
+            var foeD = new Unit { Cls = "GRUNT", Weapon = Weapon.Make(WeaponKind.Rifle),
+                                  Team = Team.Player, X = 8, Y = 5, Hp = 8, MaxHp = 8 };
+
+            SharpDmgTrim = RangerDmgTrim = GunnerDmgBonus = AssaultDmgBonus = MedicAuraReduce = 0;
+            var offS = ComputeOdds(gX, snp, tgt); var offG = ComputeOdds(gX, gun, tgt);
+            if (offS.DmgMin != snp.Weapon.DmgMin || offS.DmgMax != snp.Weapon.DmgMax) fails.Add("x3RoleOffIdentity");
+            int gunAimOff = offG.HitChance;
+
+            SharpDmgTrim = 1; GunnerDmgBonus = 1;
+            var onS = ComputeOdds(gX, snp, tgt); var onG = ComputeOdds(gX, gun, tgt);
+            if (onS.DmgMin != offS.DmgMin - 1 || onS.DmgMax != offS.DmgMax - 1) fails.Add("x3SharpTrim");
+            if (onG.DmgMin != offG.DmgMin + 1 || onG.DmgMax != offG.DmgMax) fails.Add("x3GunnerFloorOnly");
+            var rng = Shooter("RANGER", WeaponKind.Shotgun, Team.Player);
+            var asl = Shooter("ASSAULT", WeaponKind.Rifle, Team.Player);
+            var offR = ComputeOdds(gX, rng, tgt); var offA = ComputeOdds(gX, asl, tgt);
+            RangerDmgTrim = 1; AssaultDmgBonus = 1;
+            var onR = ComputeOdds(gX, rng, tgt); var onA = ComputeOdds(gX, asl, tgt);
+            if (onR.DmgMin != offR.DmgMin || onR.DmgMax != offR.DmgMax - 1) fails.Add("x3RangerTopOnly");
+            if (onA.DmgMin != offA.DmgMin + 1 || onA.DmgMax != offA.DmgMax + 1) fails.Add("x3AssaultBothEnds");
+            RangerDmgTrim = 0; AssaultDmgBonus = 0;
+            var onFoe = ComputeOdds(gX, foe, foeD);
+            if (onFoe.DmgMin != foe.Weapon.DmgMin) fails.Add("x3EnemyClsUntouched");
+            // floor: a huge trim can never take a band below 1, and never inverts min/max
+            SharpDmgTrim = 99;
+            var floorS = ComputeOdds(gX, snp, tgt);
+            if (floorS.DmgMin != 1 || floorS.DmgMax < floorS.DmgMin) fails.Add("x3DmgFloor");
+            SharpDmgTrim = 0; GunnerDmgBonus = 0;
+
+            // the GUNNER aim lever moves the gunner and nothing else
+            GunnerAimBonus = 7;
+            if (ComputeOdds(gX, gun, tgt).HitChance != gunAimOff + 7) fails.Add("x3GunnerAim");
+            if (ComputeOdds(gX, snp, tgt).HitChance != offS.HitChance) fails.Add("x3GunnerAimClassOnly");
+            GunnerAimBonus = 0;
+
+            // --- CORPSMAN FIELD PRESENCE ---
+            var med = new Unit { Cls = "CORPSMAN", Weapon = Weapon.Make(WeaponKind.Smg), Team = Team.Player, X = 8, Y = 5, Hp = 7, MaxHp = 7 };
+            var med2 = new Unit { Cls = "CORPSMAN", Weapon = Weapon.Make(WeaponKind.Smg), Team = Team.Player, X = 9, Y = 5, Hp = 7, MaxHp = 7 };
+            var ally = new Unit { Cls = "ASSAULT", Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 7, Y = 5, Hp = 8, MaxHp = 8 };
+            var vip  = new Unit { Cls = "VIP", Weapon = Weapon.Make(WeaponKind.Smg), Team = Team.Player, X = 7, Y = 6, Hp = 8, MaxHp = 8, IsVip = true };
+            var hostile = new Unit { Cls = "GRUNT", Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 7, Y = 4, Hp = 5, MaxHp = 5 };
+            AllUnits = new System.Collections.Generic.List<Unit> { med, med2, ally, vip, hostile };
+            MedicAuraReduce = 1;
+            if (HardenedReduce(ally, 5, false) != 4) fails.Add("x3AuraInRange");
+            if (HardenedReduce(med, 5, false) != 4) fails.Add("x3AuraNoStack");      // med2 covers med: -1, never -2
+            if (HardenedReduce(vip, 5, false) != 5) fails.Add("x3AuraSkipsVip");
+            if (HardenedReduce(hostile, 5, false) != 5) fails.Add("x3AuraPlayerOnly");
+            ally.X = 9 + MedicAuraRange + 1;                                          // walk out of BOTH auras (med2 sits at x=9)
+            if (HardenedReduce(ally, 5, false) != 5) fails.Add("x3AuraOutOfRange");
+            ally.X = 7;
+            med.Downed = true; med2.Downed = true;                                    // a downed medic protects nobody
+            if (HardenedReduce(ally, 5, false) != 5) fails.Add("x3AuraDownedInert");
+            med.Downed = med2.Downed = false;
+            med.Alive = med2.Alive = false;
+            if (HardenedReduce(ally, 5, false) != 5) fails.Add("x3AuraDeadInert");
+            med.Alive = med2.Alive = true;
+            MedicAuraReduce = 0;
+            if (HardenedReduce(ally, 5, false) != 5) fails.Add("x3AuraOffIdentity");
+
+            SharpDmgTrim = svS; RangerDmgTrim = svR; GunnerDmgBonus = svG; AssaultDmgBonus = svA;
+            MedicAuraReduce = svM; GunnerAimBonus = svAim; AllUnits = svAll;
+        }
+
         return fails.Count == 0
-            ? "COMBATTEST: PASS (cover A-E + high-ground + tier-2 + drone/shield + boss-arc-flag + ambush + graze + streak + perk-balance + build-perks + vantage/breaker/siegebreaker + fragile-floor + armor + bulwark-plating + momentum + outrunner + vanguard + crossfire + factions + faction-prep + spec-forks + bipod/suppressor + field-drills/shock-doctrine + supercover-corner gates all hold)"
+            ? "COMBATTEST: PASS (cover A-E + high-ground + tier-2 + drone/shield + boss-arc-flag + ambush + graze + streak + perk-balance + build-perks + vantage/breaker/siegebreaker + fragile-floor + armor + bulwark-plating + momentum + outrunner + vanguard + crossfire + factions + faction-prep + spec-forks + bipod/suppressor + field-drills/shock-doctrine + supercover-corner + x3-class-role gates all hold)"
             : "COMBATTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 }

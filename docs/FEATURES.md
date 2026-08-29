@@ -90,6 +90,21 @@ seeds (mix of WIN/LOSE, no exceptions):
   harsher close RangeMod); Ranger owns close range (+4 aim, pairs with the Shotgun's close bonus); MARK is now an
   aim-only designator (squad-wide crit amp removed). Each class has a clearer niche (close/long/tanky-area/flex).
   (`Unit.RangeMod`/`Weapon.Make`/`Combat.MarkCrit`.)
+- **CLASS ROLE REDISTRIBUTION (RESONANCE X3):** the four shooters' damage bands are moved per band END, in
+  `Combat.ComputeOdds` and keyed on `Unit.Cls` (player-only; survives an armory weapon swap; a hostile with the same
+  gun is never touched): **SHARPSHOOTER −1/−1** (keeps reach 20, +16 long aim, crit 14, MARK — it is no longer the
+  biggest gun anywhere), **RANGER 0/−1** (keeps crit 15 and the +24 point-blank band; loses its burst ceiling),
+  **GUNNER +1 on the FLOOR** (keeps 10 HP / clip 5 / PIN; still the lowest aim and crit of the four), **ASSAULT
+  +1/+1** (keeps mobility 7 + GRAPPLE; has no peak band anywhere). MEASURED at n=480 campaigns: shots-per-kill
+  spread **1.62× → 1.08×** (2.92 / 2.97 / 3.08 / 3.15), hit% spread 7.3 points, overall shots-per-kill unchanged at
+  3.16, ladder in band at all six rungs. `SIGHTLINE_CLASSBAL=0` restores the pre-X3 tree exactly.
+  (`Combat.SharpDmgTrim`/`RangerDmgTrim`/`GunnerDmgBonus`/`AssaultDmgBonus`; `SIGHTLINE_COMBATTEST` x3-class-role.)
+- **CORPSMAN FIELD PRESENCE (RESONANCE X3):** a soldier standing within **2 tiles** (Chebyshev) of a living,
+  standing CORPSMAN takes **−1 off every hit** — flat, non-stacking, never on the Corpsman itself, never on the
+  escort VIP. It reads through `Combat.HardenedReduce`, so the incoming-fire forecast is honest about it for free.
+  The medic's reason to hold a squad slot that isn't damage: **+2.5 points of completion and −4.2% soldier deaths
+  per mission** at h0 (direction-consistent, not individually resolvable at n=80).
+  (`Combat.MedicAuraReduce`/`MedicAuraRange`/`HasMedicPresence`.)
 - **MISSION-STATIC LIFECYCLE (TEMPO W4):** the 5 per-mission `Combat` statics (RunBoons/AllUnits/MissionFaction/
   PrepFaction/PressureAim) are owned by `Combat.BeginMission/EndMission/EndRun` (one set + one clear per lifecycle),
   replacing ~14 scattered defensive resets — stale-static bleed is now structurally impossible.
