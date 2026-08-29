@@ -61,6 +61,21 @@ no information about the lever — that is what the CRN pairing is for. **No run
 the pooled effect does not either.** Two finer-grained fields agree: mission win-rate
 **78.94% → 78.56%** over 1410/1404 missions, and soldier deaths per mission **1.340 → 1.340**.
 
+### The h0 extension (post-hoc, reported separately)
+
+h0 showed the largest delta, so it got four MORE disjoint slot sets — `R2ext-*`, bases 40/50/60/70
+(`queue_h0ext.sh`). This was run *because of* the first result and is not pooled into the table
+above:
+
+```
+h0 extension only      n= 80  OFF  46.2%  ON  46.2%  delta  +0.0  disc 5/5  p=1.000
+h0 main round          n= 80  OFF  47.5%  ON  42.5%  delta  -5.0  disc 6/2  p=0.289
+h0 ALL 8 slot sets     n=160  OFF  46.9%  ON  44.4%  delta  -2.5  disc 11/7  p=0.481
+```
+
+The −5.0 was noise. The two control legs at the same rung differ by 1.3 points across slot sets,
+which is a direct measurement of the spread L1's four-slot-set rule exists to guard against.
+
 **Read the OFF column as this wave's control, not as a ladder of record.** It is a fresh
 n=80/rung measurement of the composition on the post-W1 tree and it sits below the published band
 at h0 (47.5 vs 55±8) and well below at h2 (26.2 vs 40±8) **before this wave's lever is applied**.

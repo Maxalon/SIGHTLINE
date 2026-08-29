@@ -6645,6 +6645,26 @@ firepower, and across a 5.9-turn median mission that washes out.
 is "not distinguishable from zero at n=80 per rung, on five rungs and on three different
 statistics". `SIGHTLINE_AIIDLEFIX=0` reverts the whole wave in one env var.
 
+
+## GATE 3 ADDENDUM — heat 0 doubled, because it was the one rung that moved
+
+h0's −5.0 was the largest delta of the five and the rung the band cares most about, so it got
+**four more disjoint slot sets** (bases 40/50/60/70 — disjoint from the round's 0-39 and from the
+100-700 other agents hold). This is explicitly **post-hoc**, run because of the first result, and
+it is reported as its own line rather than folded into the headline table.
+
+```
+h0 extension only      n= 80  OFF  46.2%  ON  46.2%  delta  +0.0  disc 5/5  p=1.000
+h0 main round          n= 80  OFF  47.5%  ON  42.5%  delta  -5.0  disc 6/2  p=0.289
+h0 ALL 8 slot sets     n=160  OFF  46.9%  ON  44.4%  delta  -2.5  disc 11/7  p=0.481
+```
+
+The fresh 80 campaigns read a delta of **exactly zero** with 5/5 discordant worlds. Pooled over
+all 160 the h0 effect is −2.5 points at p=0.481. The −5.0 was noise, which is what a 6-vs-2
+discordant split at n=80 always looked like. Note also that the extension's OFF leg reads 46.2%
+against the main round's 47.5% — **1.3 points of slot-set spread on the control at the same
+rung**, which is a useful direct measurement of the thing L1's method rule exists to guard.
+
 ## THE NUMBER I AM HANDING TO W7, AND IT IS NOT MINE TO SPEND
 
 The **dial-OFF control** is a fresh n=80/rung read of the composition on the post-W1 tree:
