@@ -682,14 +682,15 @@ branch point.
   (`SIGHTLINE_BRIEFTEST` — the one self-test that drives the LIVE persisting path;
   `SIGHTLINE_BRIEFFIRST=0` restores the old order; `SIGHTLINE_FIRSTRUN=1` arms the strip under
   the screenshot harness so a first-ever mission 1 can be photographed.)
-- **The HUD is drawn OUTSIDE post-FX.** `Display.RenderFrame(board, hud)` is two-target: the
-  board, the death-flash and the overlay screens' animated backdrop (`Hud.DrawBackdropLayer`,
-  split out of the six screen builders) go through bloom / vignette / chromatic aberration; every
-  plate, glyph and number is drawn after the composite, through a `Camera2D` carrying the blit's
-  scale+offset in the letterboxed path. `Hud.BackdropOwnsFrame` skips the in-mission chrome on the
-  seven screens with an opaque backdrop. Main-menu TRAINING OP: **2.19:1 → 8.87:1** glyph-vs-plate
-  with post-FX ON. (`SIGHTLINE_CONTRASTTEST` boots a real 1280x800 window and reads the
-  framebuffer back; `SIGHTLINE_HUDINFX=1` restores the single-target composite.)
+- **The HUD is out of the BLOOM.** `Display.RenderFrame(board, hud)` renders the board, the
+  death-flash and the overlay screens' animated backdrop (`Hud.DrawBackdropLayer`, split out of
+  the six screen builders) into `_target`, runs `BuildBloom` on **that**, and only then paints the
+  chrome into the same target — so no plate can flood its own label, while brightness, gamma, the
+  biome grade and the vignette stay uniform across the whole frame. `Hud.BackdropOwnsFrame` skips
+  the in-mission chrome on the seven screens with an opaque backdrop. Main-menu TRAINING OP:
+  **2.19:1 → 10.76:1** glyph-vs-plate with post-FX ON. (`SIGHTLINE_CONTRASTTEST` boots a real
+  1280x800 window and reads the framebuffer back; `SIGHTLINE_HUDINFX=1` puts the chrome back in
+  the bloom source and turns it red.)
 - **Both end cards have a third door.** **WAR ROOM [W]** (`Hud.EndWarRoomBtn`, its own rect so a
   stale end-card rect can never alias the intro's LAST STAND), a "spend it in the WAR ROOM" line
   under the SALVAGE slab, and a **"N JOIN THE RESERVE - recallable at the next draft"** header on

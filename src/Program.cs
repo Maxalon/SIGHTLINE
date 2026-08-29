@@ -1372,8 +1372,9 @@ public static class Program
     //  through the bright-pass, so a saturated UI plate bloomed into its own label: the main
     //  menu's TRAINING OP — the on-ramp button for a first-time player — measured 2.19:1
     //  glyph-vs-fill with post-FX on, against 8.67:1 with it off. W5 split the frame in two
-    //  (board + overlay backdrop graded, chrome drawn after the composite), and this test is the
-    //  standing gate that keeps it that way.
+    //  (board + overlay backdrop become the BLOOM SOURCE; the chrome is painted on top of the
+    //  bright pass, into the same target so the colour grade stays uniform), and this test is the
+    //  standing gate that keeps it that way. Shipped reading: 10.76:1.
     //
     //  It boots a REAL 1280x800 window with Display and PostFX ON — a screen read is the only
     //  honest instrument here, because the whole defect lived in the composite — drives the intro

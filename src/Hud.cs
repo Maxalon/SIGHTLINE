@@ -203,8 +203,8 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
 
     // W5: TRUE when DrawBackdropLayer paints an OPAQUE full-screen ground for this phase. Those
     // screens used to draw the in-mission chrome first and then bury it under the backdrop; now
-    // the backdrop lands in the EARLIER (post-FX) pass, so the chrome has to be skipped instead of
-    // covered — otherwise the top bar and the action bar paint straight over the main menu.
+    // the backdrop lands in the EARLIER (bloom-source) pass, so the chrome has to be SKIPPED
+    // instead of covered — otherwise the top bar and the action bar paint over the main menu.
     // BARRACKS and AUDIO CHECK are deliberately absent: neither draws a backdrop, so their frame
     // order is identical to before the split.
     public static bool BackdropOwnsFrame(Game g) =>
@@ -2363,7 +2363,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     // ============================================================================
     static void DrawIntro(Game g)
     {
-        float t = (float)Raylib.GetTime();   // backdrop drawn by DrawBackdropLayer (post-FX pass)
+        float t = (float)Raylib.GetTime();   // backdrop drawn by DrawBackdropLayer (bloom-source pass)
 
         int W = Cfg.ScreenW, H = Cfg.ScreenH;
 
@@ -2541,10 +2541,10 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     // ── W5 THE FIRST HOUR: the ATMOSPHERE half of the overlay screens ─────────────────────────
     /// The animated tactical backdrop (and each screen's colour wash) for whichever full-screen
     /// overlay is up. Split out of the six screen builders so `Display.RenderFrame` can put it in
-    /// the POST-FX pass — where the bloom, vignette and chromatic aberration belong — while the
-    /// screen's PLATES AND TYPE are drawn after the composite and stay as authored (audit
-    /// visual-2: the bloom was flooding a saturated button's own label; TRAINING OP measured
-    /// 2.19:1 with post-FX on against 8.67:1 with it off).
+    /// the BLOOM-SOURCE pass — where a soft full-screen glow belongs — while the screen's PLATES
+    /// AND TYPE are painted on top of the bright pass and stay as authored (audit visual-2: the
+    /// bloom was flooding a saturated button's own label; TRAINING OP measured 2.19:1 with
+    /// post-FX on against 8.67:1 with it off, and 10.76:1 after this split).
     ///
     /// This is the atmosphere/chrome seam, not the screen/HUD seam: everything here is
     /// full-screen, type-free and deliberately soft, so nothing in it can lose contrast to a
@@ -2956,7 +2956,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     // ============================================================================
     static void DrawSkirmishSetup(Game g)
     {
-        float t = (float)Raylib.GetTime();   // backdrop drawn by DrawBackdropLayer (post-FX pass)
+        float t = (float)Raylib.GetTime();   // backdrop drawn by DrawBackdropLayer (bloom-source pass)
         int W = Cfg.ScreenW;
 
         // title
@@ -3040,7 +3040,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     // ============================================================================
     static void DrawWarRoom(Game g)
     {
-        float t = (float)Raylib.GetTime();   // backdrop drawn by DrawBackdropLayer (post-FX pass)
+        float t = (float)Raylib.GetTime();   // backdrop drawn by DrawBackdropLayer (bloom-source pass)
         var p = g.WarRoom;
         if (p == null) return;
 
@@ -3144,7 +3144,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     // ============================================================================
     static void DrawCodex(Game g)
     {
-        float t = (float)Raylib.GetTime();   // backdrop drawn by DrawBackdropLayer (post-FX pass)
+        float t = (float)Raylib.GetTime();   // backdrop drawn by DrawBackdropLayer (bloom-source pass)
         CodexTabBtns.Clear();
 
         var cats = g.CodexCats;

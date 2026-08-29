@@ -1374,12 +1374,17 @@ Balance-inert by construction *and* by measurement: `PAIRTEST` byte-identical, a
       pre-fight beat and the mission-1 lesson strip arms PENDING behind it (`Game.TutPending`),
       opening the frame the card retires. `TutStepFire` gains the turn-count patience fallback its
       three siblings had. `SIGHTLINE_BRIEFFIRST=0` restores the old order and turns the test red.
-- [x] **THE BLOOM STOPS EATING THE TYPE** (`visual-2`). `Display.RenderFrame` is now two-target:
-      board + overlay-screen backdrop keep the full grade, the HUD is drawn after the composite.
-      Main-menu TRAINING OP measured **2.19:1 → 8.87:1** glyph-vs-plate with post-FX ON (method
-      stated in DEVLOG §W5-2), and the board's own bloom is unchanged *within the screenshot
-      harness's documented noise floor*, with both numbers recorded. `SIGHTLINE_CONTRASTTEST` is
-      the standing gate; `SIGHTLINE_HUDINFX=1` falsifies it.
+- [x] **THE BLOOM STOPS EATING THE TYPE** (`visual-2`). `Display.RenderFrame` splits the frame
+      on the **bloom source**: board + overlay-screen backdrop are the bright-pass input, the
+      chrome is painted on top of it into the same target. Main-menu TRAINING OP measured
+      **2.19:1 → 10.76:1** glyph-vs-plate with post-FX ON (method stated in DEVLOG §W5-2). The
+      first attempt drew the HUD after the composite and **stranded BRIGHTNESS and GAMMA on the
+      board** — that is recorded in DEVLOG §W5-2 and in `Display.RenderFrame`'s header, because
+      the colour-grade seam and the bloom seam are not the same seam. The board's own bloom is
+      unchanged: every sampled patch sits inside its own frame-to-frame animation swing (the gold
+      objective marker alone spans 18.9 luma across four adjacent frames of one build), and every
+      glowing object's peak is identical. `SIGHTLINE_CONTRASTTEST` is the standing gate;
+      `SIGHTLINE_HUDINFX=1` falsifies it.
 - [x] **THE DOORS** (`newplayer-2`, `wildcard-3`). A third **WAR ROOM [W]** plate on both end
       cards, a "spend it in the WAR ROOM" line under the SALVAGE slab, and an "N JOIN THE RESERVE"
       header with per-survivor recall prices — where N is the *delta* of `SaveGame.VeteranCount()`
@@ -1411,6 +1416,14 @@ Balance-inert by construction *and* by measurement: `PAIRTEST` byte-identical, a
       styles across four widths on five rows with three gutters, hotkey badges inside the corner
       radius, LAST STAND spending the reserved danger red on a menu affordance, and a frame whose
       top-1% chroma is ~189 against a board at ~100.
+- [ ] **Residual (recorded, not fixed): the HUD still receives the composite's chromatic
+      aberration and vignette.** The audit's *primary* visual-2 finding (contrast collapse) is
+      fixed; its smaller secondary one — edge colour-fringing on HUD text up 16-66%, edge
+      luminance down ~14% — is not, because the chrome is deliberately still inside the colour
+      grade so BRIGHTNESS and GAMMA keep working on it. Fixing it properly means a third pass:
+      composite with `uBright`/`uGamma` neutral into a second target, draw the chrome, then blit
+      through a small grade-only shader that writes `alpha = 1`. Costs one full-screen RT and one
+      blit per frame, on a game with no frame-time instrument yet (`wildcard-7`).
 - [ ] **Residual (recorded, not fixed): `SIGHTLINE_POSTFX=1`'s "demo bloom" comment is stale.**
       The boot-time `BloomIntensity = 0.85` / `ChromaIntensity = 0.6` injection is overwritten on
       frame 1 by `Game.Update`'s own `SetPostFxParams(_postFxBloom = 0, …)`, so the hook has been

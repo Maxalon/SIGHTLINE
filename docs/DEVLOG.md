@@ -5502,30 +5502,66 @@ boot-time "demo bloom" injection (`BloomIntensity = 0.85`) is overwritten on fra
 fragment shader's always-on `bloomAmt = 1.45` baseline halo. **That comment has been stale for
 waves** — the hook does not do what it says.
 
-**The fix** is the two-target split the audit asked for, with the seam at **atmosphere vs
-chrome** rather than board vs menu:
+**The fix** is a split — but on the **bloom source**, not on the render target, and the
+distinction is load-bearing. `Display.RenderFrame(board, hud)` now runs:
 
-- pass 1 (graded) — board, death-flash, and `Hud.DrawBackdropLayer`: the overlay screens'
-  animated tactical backdrop, split out of the six screen builders, so the main menu and both end
-  cards keep their whole premium grade;
-- pass 2 (ungraded) — `Hud.Draw`: every plate, glyph and number, exactly as authored.
+1. `board` — the board, its death-flash, and the overlay screens' animated backdrop
+   (`Hud.DrawBackdropLayer`, split out of the six screen builders) — into `_target`;
+2. `BuildBloom()` on **that**, so the bright-pass sees only atmosphere;
+3. `hud` into the **same** target, on top, contributing nothing to the glow;
+4. one composite, exactly as before.
 
-Letterboxed/fullscreen draws pass 2 through a `Camera2D` carrying the blit's own scale+offset. A
-camera, **not** a second render texture: compositing a translucent HUD through an alpha RT
-double-applies source alpha and would silently change every panel's opacity.
+**The first version of this wave did what the brief literally asked** — HUD drawn after the
+composite, straight onto the backbuffer, through a `Camera2D` carrying the blit's scale+offset for
+the letterboxed path. It measured beautifully (TRAINING OP 8.87:1) and **it broke accessibility.**
+`uBright` and `uGamma` live in the composite shader, so the pause menu's BRIGHTNESS and GAMMA
+applied to the board and not to the chrome. Screenshot at BRIGHTNESS 70%: the board dimmed and the
+HUD did not — a regression aimed squarely at the player those settings exist for. The colour-grade
+seam and the bloom seam are not the same seam, and only the bloom one was ever the defect.
+
+Painting the chrome **into** the target after the bright-pass fixes the defect and keeps
+brightness, gamma, the biome grade and the vignette uniform across the whole frame. It also needs
+no second render texture (so no double-applied source alpha on translucent panels) and no camera
+path. And it measures **better** than the version that left the frame entirely — the composite's
+tonemap deepens a dark glyph against a bright plate rather than washing it:
+
+| main-menu label | FX off | FX on, BEFORE | HUD outside FX entirely | **shipped (out of the bloom)** |
+|---|---|---|---|---|
+| **TRAINING OP** (the on-ramp button) | 8.67 | **2.19** | 8.87 | **10.76** |
+| CONTINUE RUN | 7.07 | 5.77 | 7.24 | 8.99 |
+| DEPLOY SQUAD | 7.07 | 5.66 | 7.07 | 8.99 |
+| LAST STAND | 5.79 | 6.38 | 5.79 | 6.51 |
 
 `Hud.BackdropOwnsFrame` skips the in-mission chrome on the seven screens with an opaque backdrop.
-Those screens used to draw the top/bottom bars and then bury them; with the backdrop in the
-earlier pass they painted straight over the main menu until this was added. BARRACKS and AUDIO
-CHECK are deliberately absent — neither draws a backdrop, so their frame order is unchanged.
+Those screens used to draw the top/bottom bars and then bury them under the backdrop; with the
+backdrop in the bloom-source pass they painted straight over the main menu until this was added.
+BARRACKS and AUDIO CHECK are deliberately absent — neither draws a backdrop, so their frame order
+is unchanged.
 
-**THE BOARD IS UNCHANGED, measured against a noise floor.** Same seed, post-FX on, seven board
-patches. Largest before/after swing: +3.8 mean / −2.4 peak. Two runs of the **same build** swing
-±3.4 mean / ±5.6 peak (58 `GetTime()` reads drive animation — CLAUDE.md's documented screenshot
-non-determinism; 42.5% of the board band's pixels differ run-to-run at mean |Δ| 7.80, against
-51.6% at 7.96 for before-vs-after). Peaks on all four glowing objects — soldier token, gold
-objective, supply crate, dormant pod — are identical. **The change is inside the instrument's
-noise.**
+**One accepted side effect, recorded rather than hidden.** `PruneAnims` forgets a panel's entrance
+key when it is not drawn in a frame ("re-animate on re-show" — its own comment). The in-mission
+chrome used to be drawn *and buried* under an overlay screen's backdrop, so its keys stayed warm;
+now it is skipped, so returning to the board from the FIELD MANUAL mid-mission re-runs the
+roster/top-bar entrance tween (~0.2 s). That is the same transition every other screen return
+already plays, and it reads as a transition rather than a pop — but it is a behaviour change this
+wave introduced, and it is here so the next person does not have to rediscover why.
+
+**THE BOARD IS UNCHANGED, and the measurement had to be done twice to say so honestly.** Paired
+comparison — *same binary*, only `SIGHTLINE_HUDINFX` toggled, same seed, post-FX on, seven board
+patches. Every patch reads within its own frame-to-frame animation swing, and the two largest
+apparent deltas are that swing, not a render change:
+
+- The gold objective tile first read **−7.0 mean** against the pre-W5 leg, which looked like a
+  result against a same-build run-to-run floor of ±2.9. It is not. That marker *breathes*: over
+  four adjacent frames of the **same build** (86 / 90 / 90-again / 94) its patch mean spans
+  **93.9 → 112.8, a range of 18.9**, and the pre-W5 leg's 103.8 sits inside it. The harness fixes
+  `dt = 1/60` but every animation is driven by wall-clock `GetTime()`, so a build that reaches
+  frame 90 a few milliseconds later samples a different phase. **A screenshot delta is not a
+  result until you have measured the animation's own swing at the same pixels.**
+- The selected soldier's token: +6.6 against a same-build frame swing of 5.9. Same story.
+- Peaks on all four glowing objects — soldier token, gold objective, supply crate, dormant pod —
+  are **identical** (245.8 / 254.0 / 242.1 / 254.0), and bare floor and the cover run move by
+  ±0.03 mean.
 
 ## W5-3 — THE DOORS.
 
@@ -5667,8 +5703,10 @@ This is a UI/teaching wave and it must not move a gameplay number. Proved two wa
    `SIGHTLINE_BALANCE_HEAT=0`, Release binaries run directly under `xvfb-run` with per-tree
    `XDG_CONFIG_HOME` and `SIGHTLINE_BALANCE_JSON`. Baseline built from `git archive d350416`.
    Both JSONs: `runs=10, missions=44, runWinRate=60, avgMissionsCleared=5.1` — and a
-   key-by-key diff of the two documents reports **zero differing fields**, including every
-   nested `byHeat` / `byMission` / `byObjective` / `decisionRichness` / `policyGap` block.
+   key-by-key diff over all **670 leaf fields** of the two documents reports **0 differing**,
+   including every nested `byHeat` / `byMission` / `byObjective` / `byArena` / `byDeploy` /
+   `decisionRichness` / `policyGap` / `lossCauses` block. Re-run after the render was
+   re-architected mid-wave (see §W5-2); still 0.
 
 The one behavioural default this wave *does* move is the fresh-profile difficulty rung (W5-4),
 and it cannot reach the instrument: the batch sets heat explicitly, and `EnsureMetaLoaded` returns
@@ -5692,10 +5730,20 @@ merely close.
   survivors were *all* already reserve records reads "0 join" with priced rows above it — correct
   on both counts, and the header is simply omitted at 0, but it is not the same number. I chose
   the anti-over-claim delta the gate asked for over the friendlier count.
-- **The board's own bloom was verified INSIDE the measurement noise, not identical.** The
+- **The board's own bloom was verified INSIDE the measurement noise, not proven identical.** The
   screenshot harness has never been byte-stable (CLAUDE.md documents why), so "unchanged" here
-  means "smaller than the run-to-run swing of the same build", with both numbers stated. A
-  stronger claim would need a deterministic render path this project does not have.
+  means "smaller than the same build's own frame-to-frame swing at the same pixels", with both
+  numbers stated. A stronger claim would need a deterministic render path this project does not
+  have. I also got this wrong once before getting it right: the first reading looked like a real
+  −14.9 on the gold objective tile, and only measuring that patch across four adjacent frames of
+  one build showed its natural range is 18.9.
+- **The HUD is still inside the colour grade, so the audit's SECONDARY visual-2 finding stands.**
+  Chromatic fringing on HUD text edges (+16-66%) and the ~14% edge-luminance drop are untouched;
+  they come from the composite's CA and vignette, not the bloom. Taking the chrome fully out of
+  the grade is what broke BRIGHTNESS/GAMMA in this wave's first attempt, so doing it properly
+  needs a third pass (grade-only shader over a second target) that costs a full-screen RT and a
+  blit per frame — on a game with no frame-time instrument (`wildcard-7`). Left open in ROADMAP
+  with the shape of the fix written down.
 - **`SIGHTLINE_POSTFX=1`'s stale demo-bloom comment is documented above but not fixed.** Removing
   the dead injection is a one-liner; it belongs with whoever next touches that hook, and changing
   it now would have made my before/after contrast pair non-comparable.

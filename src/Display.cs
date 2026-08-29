@@ -512,47 +512,65 @@ void main() {
     /// When PostFX is off the original Scaled / non-Scaled paths are preserved exactly.
     public static void RenderFrame(Action draw) => RenderFrame(draw, null);
 
-    // ── W5 THE FIRST HOUR: the HUD comes OUT of the post-FX target ─────────────────────────────
-    // The defect (audit visual-2, pinned by SIGHTLINE_CONTRASTTEST): the single-target RenderFrame
-    // put every button, label and panel through the bright-pass, so a saturated UI plate BLOOMED
-    // INTO ITS OWN LABEL. Measured on the main menu, glyph-core vs plate-fill: TRAINING OP fell
-    // 8.67:1 -> 2.19:1 the moment SIGHTLINE_POSTFX=1 was set. That is the on-ramp button for a
-    // first-time player, and it was also quietly undoing the two-atlas font work of wave V1 —
-    // crisp 20px glyphs blurred back into mush at composite time.
+    // ── W5 THE FIRST HOUR: the HUD comes OUT of the BLOOM ──────────────────────────────────────
+    // The defect (audit visual-2, pinned by SIGHTLINE_CONTRASTTEST): RenderFrame painted the whole
+    // frame into `_target` BEFORE BuildBloom, so every button, label and panel was part of the
+    // bright-pass — and a saturated UI plate BLOOMED INTO ITS OWN LABEL. Measured on the main
+    // menu, glyph-core vs plate-fill: TRAINING OP fell 8.67:1 -> 2.19:1 the moment post-FX was on.
+    // That is the on-ramp button for a first-time player, and the same blur was quietly undoing
+    // wave V1's two-atlas font work at composite time.
     //
-    // The split: `board` (the board, its death-flash, and the overlay screens' animated backdrop)
-    // renders into `_target` and keeps the whole premium grade — bloom, vignette, chromatic
-    // aberration, brightness/gamma. `hud` is drawn AFTER the composite, straight onto the
-    // backbuffer, so type lands exactly as authored. The board's grade is byte-for-byte the
-    // better-looking frame and is unchanged; only what is drawn on top of it moved.
+    // THE SPLIT IS ON THE BLOOM SOURCE, NOT ON THE TARGET, and that distinction is load-bearing:
+    //   1. `board` — the board, its death-flash, and the overlay screens' animated backdrop
+    //      (Hud.DrawBackdropLayer) — renders into `_target`.
+    //   2. BuildBloom runs on THAT, so the bright-pass sees only atmosphere. Nothing type-bearing
+    //      can flood its own glyphs, and the board's own glow is computed from exactly the same
+    //      pixels it always was.
+    //   3. `hud` is then drawn into the SAME target, on top, contributing nothing to the glow.
+    //   4. one composite, exactly as before.
     //
-    // In the letterboxed/fullscreen path the HUD is authored in virtual 1280x800 space, so it goes
-    // through a Camera2D carrying the same scale+offset the blit uses (screen = world*s + o). A
-    // camera, not a second render texture, on purpose: compositing a translucent HUD through an
-    // alpha render target double-applies source alpha and would silently change every panel's
-    // opacity. `Raylib.SetMouseScale/SetMouseOffset` (UpdateMouse) already maps the cursor into the
-    // same virtual space, so every hit-test in Hud/Game is untouched.
-    /// Off-switch for the split (SIGHTLINE_HUDINFX=1 folds the chrome back into the post-FX
-    /// target, i.e. the pre-W5 compositing), so SIGHTLINE_CONTRASTTEST is falsifiable without
-    /// reverting the tree. Default OFF.
+    // The first version of this wave drew the HUD after the composite, straight onto the
+    // backbuffer. It read beautifully and it BROKE ACCESSIBILITY: uBright/uGamma live in the
+    // composite shader, so the pause menu's BRIGHTNESS and GAMMA settings applied to the board and
+    // not to the chrome — at BRIGHTNESS 70% the board dimmed and the HUD did not, which is a
+    // regression for exactly the player those settings exist for. Painting into the target instead
+    // keeps brightness, gamma, the biome grade and the vignette uniform across the whole frame,
+    // needs no second render texture (and therefore no double-applied source alpha on translucent
+    // panels) and no Camera2D for the letterboxed path — while still removing the one thing that
+    // was actually destroying the type.
+    //
+    // What the chrome still receives: the composite's grade, and the bloom of whatever the BOARD
+    // had behind it — which behind a menu plate is the dark tactical backdrop, i.e. nothing. The
+    // audit's smaller secondary finding (chromatic fringing on HUD edges) is NOT addressed by this
+    // and is recorded as open in docs/ROADMAP.md.
+    /// Off-switch (SIGHTLINE_HUDINFX=1 puts the chrome back INSIDE the bloom source, i.e. the
+    /// pre-W5 compositing), so SIGHTLINE_CONTRASTTEST is falsifiable without reverting the tree.
     static readonly bool HudInFx = Environment.GetEnvironmentVariable("SIGHTLINE_HUDINFX") == "1";
 
     public static void RenderFrame(Action board, Action hud)
     {
         if (HudInFx && hud != null) { var b = board; var h = hud; board = () => { b(); h(); }; hud = null; }
         bool applyFx = Enabled && PostFX && _fxReady;
-        // Every non-split path below wants one callable that paints the whole frame.
+        // Every non-post-FX path below wants one callable that paints the whole frame.
         Action draw = hud == null ? board : () => { board(); hud(); };
 
         if (applyFx)
         {
-            // Always render into the render-target so the shader has a full-res source.
+            // Pass 1 — the BLOOM SOURCE. Atmosphere only when the frame is split.
             Raylib.BeginTextureMode(_target);
             if (hud == null) draw(); else board();
             Raylib.EndTextureMode();
 
             // P1: build the half-res bloom from that frame before compositing.
             BuildBloom();
+
+            // Pass 2 — the chrome, into the same target, after the bright-pass has already run.
+            if (hud != null)
+            {
+                Raylib.BeginTextureMode(_target);
+                hud();
+                Raylib.EndTextureMode();
+            }
 
             // Upload uniforms.
             UploadFxUniforms();
@@ -580,18 +598,6 @@ void main() {
                 Raylib.DrawTexturePro(_target.Texture, src, dst, Vector2.Zero, 0f, Color.White);
             }
             Raylib.EndShaderMode();
-            // W5: the chrome pass — outside the shader, on top of the composite.
-            if (hud != null)
-            {
-                if (Scaled)
-                {
-                    float s = Scale(); var o = Offset();
-                    Raylib.BeginMode2D(new Camera2D { Target = Vector2.Zero, Offset = o, Rotation = 0f, Zoom = s });
-                    hud();
-                    Raylib.EndMode2D();
-                }
-                else hud();
-            }
             // W9: no brightness quad here — the shader's uBright/uGamma pass IS the
             // brightness/gamma correction when PostFX is active (no more white wash).
             Raylib.EndDrawing();

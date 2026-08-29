@@ -7638,14 +7638,19 @@ public partial class Game
         };
     }
 
-    // W5 THE FIRST HOUR: the frame is drawn in TWO passes so `Display.RenderFrame` can put the
-    // post-FX grade on the board and NOT on the type (audit visual-2 — the bloom was flooding
-    // saturated UI plates into their own labels). The seam is atmosphere-vs-chrome, not
-    // board-vs-menu: the overlay screens' full-screen animated backdrop rides in the board pass
-    // and keeps its bloom, while every plate, glyph and number is painted after the composite.
-    // Nothing here changes WHAT is drawn or in what order — only which pass it lands in.
+    // W5 THE FIRST HOUR: the frame is drawn in TWO passes so `Display.RenderFrame` can build the
+    // BLOOM from the board alone and NOT from the type (audit visual-2 — a saturated UI plate was
+    // flooding its own label; TRAINING OP measured 2.19:1 with post-FX on against 8.67:1 with it
+    // off). The seam is atmosphere-vs-chrome, not board-vs-menu: the overlay screens' full-screen
+    // animated backdrop rides in the bloom-source pass and keeps its glow, while every plate,
+    // glyph and number is painted on top of it afterwards, contributing nothing to the bright
+    // pass. Both passes still land in the SAME render target, so brightness, gamma, the biome
+    // grade and the vignette stay uniform across the whole frame — an earlier version of this
+    // wave drew the chrome after the composite and stranded the accessibility settings on the
+    // board (Display.RenderFrame's header records that, and why). Nothing here changes WHAT is
+    // drawn or in what order — only which pass it lands in.
 
-    /// Pass 1 — the graded pass. Board, death-flash, overlay-screen atmosphere.
+    /// Pass 1 — the bloom source. Board, death-flash, overlay-screen atmosphere.
     public void DrawBoardLayer()
     {
         Raylib.ClearBackground(Pal.Bg);
@@ -7661,7 +7666,7 @@ public partial class Game
         Hud.DrawBackdropLayer(this);
     }
 
-    /// Pass 2 — the ungraded pass. Every plate, label and number, exactly as authored.
+    /// Pass 2 — the chrome. Every plate, label and number, drawn after the bright pass has run.
     public void DrawHudLayer() => Hud.Draw(this);
 
     /// Single-pass draw, kept for callers that don't split (and as the definition of the order).
