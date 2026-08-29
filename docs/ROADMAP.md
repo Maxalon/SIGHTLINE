@@ -1321,3 +1321,32 @@ sets, one lever per measured round, fresh same-slot R0 first, dip budgets, breac
 - [ ] **CROSSFIRE drags Escort** (13.40t pinned vs PINCER's 5.65t) — its NE mass sits on the
       cols 16-17 extraction corner and gets scattered by the spawn-collision loop. Gating it
       off evac objectives the way ENVELOP is gated is the cheap fix, unmeasured.
+
+### PROGRAM RESONANCE — X2 "TRUE NORTH II" (2026-08-29, details in DEVLOG §X2)
+
+- [ ] **SPEC (ready to dev, do NOT implement inside a tuning wave): re-specify
+      `CountMeaningfulChoices` axis (b) as an ADDITIVE band.** Two waves (X1, W4) have now missed
+      a decision-density gate that X2's baseline shows is not merely hard but *structurally
+      unreachable*: axis (b) counts destinations scoring within **15% of the BEST** safety score
+      (`24 − TileExposure + cover*8 + height*5`), so raising threat lowers the best score, shrinks
+      the absolute window `0.15 × best`, and disqualifies tiles. Axis (a) ("which target?") and
+      axis (b) ("where do I stand after?") therefore respond to threat with **opposite signs** and
+      their sum is close to conserved — W4 measured 1.55-1.64 across five structurally different
+      levers, and X2's baseline reads 1.44-1.78 across six *rungs*, which is the same invariance
+      seen from the difficulty axis instead of the lever axis.
+      **The fix:** replace the multiplicative window with an **additive** one — count a destination
+      as a real alternative when it scores within a FIXED number of safety points of the best
+      (start at 3, i.e. within roughly one cover step or half an elevation step), not within a
+      fraction of it. An additive band measures "are there several places worth standing?" without
+      being deflated by how dangerous the board is, which is what the metric was always trying to
+      ask. It is a **pure instrument change**: it invalidates every archived `ch/ARMED` number, so
+      it must ship with its own paired R0 re-baseline (the X1/W4/X2 `R0diag` pattern: run the
+      instrumented tree lever-off on a pinned slot set and diff the per-slot records) and the
+      DEVLOG must state that pre-change numbers are not comparable. Land it in a wave that is NOT
+      also tuning difficulty, so the two effects can never be confused.
+- [ ] **The heat ladder's MIDDLE does not measurably escalate.** X2's baseline (n=40/rung, ±6-8)
+      reads mission-win 80.2 (h0) / 82.6 (h2) / 75.0 (h4) / 81.7 (h6) — a 2.8-point spread on
+      n=263 vs n=266 pooled halves, i.e. nothing. Only RECRUIT (94.3) and heat 8 (68.4) separate.
+      Rungs 1-7 add bodies and stat points that the measurement cannot see. Either the rungs need
+      real teeth or the ladder needs fewer, bigger steps — but the first job is a **higher-N**
+      measurement (n≥80/rung) so the question can be asked at a precision that can answer it.
