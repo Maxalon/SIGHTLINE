@@ -22,11 +22,21 @@ and balance (see `docs/ROADMAP.md` and the "OPEN/NEXT" notes in `docs/DEVLOG.md`
 - **Stack:** C# / .NET 8 + [Raylib-cs](https://github.com/raylib-cs/raylib-cs) 8.0.0 (NuGet).
 - **Platform:** native; primary target **Linux** (also macOS/Windows). Compiles to a
   real ELF binary via `dotnet` — no `.exe` on Linux.
-- **Art policy:** **no *hand-made / human-authored* art or audio.** The aesthetic is
-  geometry + particles + shaders + screen shake; audio is synthesised. **Generated
-  assets ARE allowed** — procedurally / in-engine / via shaders first, AI generators
-  only where procedural can't get the look. Commit **small** generated files (e.g. a
-  font); keep large binaries out. Raylib bakes noise/gradient textures (`GenImage*`)
+- **Asset policy — RELAXED by the owner, 2026-08-29.** The old hard line ("no hand-made /
+  human-authored art or audio") is **gone**. The aesthetic is still geometry + particles +
+  shaders + screen shake and audio is still synthesised — that is a *style* choice we keep
+  because it works, not a rule. **Third-party assets are now allowed** provided BOTH bars are
+  cleared: (1) **zero cost** — nothing that costs money now or to distribute, ever; and
+  (2) **zero legal risk** — the licence must permit free use *and redistribution in a shipped
+  build*, in any context (CC0 / public domain / OFL / MIT-class). Record every added file and
+  its source + licence in `assets/*/CREDITS.txt` **and** `THIRD-PARTY-NOTICES.txt`. The audio
+  loader is already **file-first**: dropping `<cue-id>.ogg` into `assets/sfx/` overrides that
+  cue's synth with no code change (`assets/sfx/CREDITS.txt`); `assets/music/{ambient,combat}.ogg`
+  does the same for the beds. **Sandbox reality (measured 2026-08-29): the agent proxy BLOCKS
+  freesound.org and opengameart.org (403). `raw.githubusercontent.com`, `api.github.com` and
+  `nuget.org` DO resolve.** So free audio is largely unobtainable *from inside a session* — do
+  not spend a wave discovering that again. Procedural/in-engine remains the default because it
+  is the only path that always works here. Commit **small** files only; keep large binaries out. Raylib bakes noise/gradient textures (`GenImage*`)
   and TTF/OTF fonts (`LoadFontEx`) in-engine, so most upgrades need **no committed
   binaries**. Drawn text was ASCII-only until a font shipped (Phase 5.3) — that limit
   is now **lifted**. Rationale + style guide: [`docs/DESIGN.md`](docs/DESIGN.md) §3.H.

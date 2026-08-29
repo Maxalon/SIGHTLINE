@@ -298,6 +298,37 @@ on the existing `Display` render-target reads as "premium."
 baked fonts add richness with [far less storage than bitmaps](https://docs.unity3d.com/550/Documentation/Manual/ProceduralMaterials.html)
 and no human-authored art.
 
+#### H.1 AMENDMENT — the asset policy is now a STYLE, not a RULE (owner, 2026-08-29)
+
+> This amends the paragraph above and CLAUDE.md's "Art policy". Recorded, with limits, rather
+> than left to drift — the same treatment §1.1 gave the narrative amendment.
+
+**What changed.** "No hand-made / human-authored art or audio" was a hard constraint. The owner
+has removed it. Third-party assets are permitted when they clear **both** bars, and only then:
+1. **Zero cost** — free to obtain AND free to redistribute inside a shipped build, forever. No
+   asset that would cost money if the game were distributed in any capacity.
+2. **Zero legal risk** — an explicit licence permitting redistribution (CC0 / public domain /
+   OFL / MIT-class). "Free to download" is not a licence. If the licence is unclear, the answer
+   is no.
+Every added file is recorded in `assets/*/CREDITS.txt` **and** `THIRD-PARTY-NOTICES.txt`, with
+its source URL and licence. Small files only; large binaries still stay out of the repo.
+
+**What did NOT change — and this is the load-bearing half.** The geometric aesthetic is kept
+**because it is good**, not because a rule forced it. Every principle above still governs: an
+imported asset that fails the squint test, breaks the semantic colour roles, or adds texture
+competing with gameplay signal is a **regression**, and the fact that it is "real art" does not
+earn it a pass. The bar for an imported asset is *higher* than for a procedural one, because
+procedural content is authored against the palette by construction and an import is not. In
+practice this means the policy mostly unlocks **fonts, shader/LUT data, and audio** — not
+sprites or illustrations, which would fight the established visual language.
+
+**The sandbox constraint, measured.** From inside an agent session the outbound proxy blocks
+`freesound.org` and `opengameart.org` (403); `raw.githubusercontent.com`, `api.github.com` and
+`nuget.org` resolve. So the *audio* half of this amendment is mostly unusable by an agent and is
+work for the owner's own machine, where `assets/sfx/<cue-id>.ogg` and
+`assets/music/{ambient,combat}.ogg` are picked up by the existing file-first loader with **no
+code change**. Do not spend a wave rediscovering this.
+
 **Style guide — semantic color roles (lock in roadmap 5.1):**
 
 | Role | Job | Rule |
