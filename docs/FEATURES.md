@@ -646,3 +646,21 @@ seeds (mix of WIN/LOSE, no exceptions):
 - **Harness pins**: `SIGHTLINE_DEPLOY` (`frontal|pincer|crossfire|envelop`),
   `SIGHTLINE_DEPLOYMIX`, `SIGHTLINE_PODUNIFORM`, `SIGHTLINE_PODMASS`, `SIGHTLINE_RIMWAVES`,
   `SIGHTLINE_ESCORTFIX`.
+
+## PROGRAM RESONANCE — WAVE X2 "TRUE NORTH II" (the cold opener stops ending runs)
+
+- **THE COLD-OPENER GRACE** (`Mission.OpenerTrim`, shipped at **1**). `Game.SetupMission` has
+  long ramped HEAT's escalation in over missions 1-2 ("the measured ~20% mission-1 loss, which
+  hard-caps run completion"), but that grace is gated on `heat > 0`, so the BASE force met the
+  coldest squad in the game with no ramp at all: **5 hostiles against 4 rookies** with no
+  promotion, perk, mod or boon, each hostile carrying X1's +3 HP. The base force now gets the
+  same ramp: **one body off mission 1, one off mission 2** (full trim on m1, half rounded up on
+  m2, nothing from m3). `SIGHTLINE_OPENERTRIM=0` restores the pre-X2 opener exactly.
+  Measured (n=40 campaigns, base `a61ef42`): mission 1 **75% → 100%** win, heat-0 run completion
+  **35.0% → 57.5%**, shots-per-kill **3.22 → 3.30** (the two-hit trade is not clawed back).
+- **Two more balance knobs, both default-OFF, for the next tuning wave**:
+  `Mission.HostileAimTrim` (`SIGHTLINE_AIMTRIM`, flat points off every hostile's aim in the
+  MakeHostile funnel — measured at **+7.5 completion per 5 points** at heat 0, with Eliminate's
+  turn budget untouched) and `Mission.EnemyBaseCount` (`SIGHTLINE_ENEMYBASE`, the constant in
+  `count = base + missionNum`). `Mission.HostileToughness` / `HostileDamageTrim` became static
+  fields pinnable from `SIGHTLINE_TOUGH` / `SIGHTLINE_TRIM`, so one binary serves every round.

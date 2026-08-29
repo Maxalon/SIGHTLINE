@@ -603,7 +603,10 @@ public static class Mission
     /// X2 (SIGHTLINE_OPENERTRIM): bodies removed from the BASE force on the opening missions —
     /// the full trim on mission 1, half (rounded up) on mission 2, none from mission 3. The same
     /// shape as Game.SetupMission's heat grace, applied to the force heat's grace cannot reach.
-    public static int OpenerTrim = 0;
+    ///
+    /// SHIPPED at 1, measured end-to-end (DEVLOG §X2 round O1/S1). `SIGHTLINE_OPENERTRIM=0`
+    /// restores the pre-X2 opener exactly.
+    public static int OpenerTrim = 1;
 
     /// W4 — every body in a pod fields the pod LEAD's archetype (see the spawn loop). SHIPPED
     /// ON: measured exactly ladder-neutral (32.5% = 32.5% run completion, n=40) for the wave's
