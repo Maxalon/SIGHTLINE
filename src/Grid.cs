@@ -14,6 +14,7 @@ public class Grid
     public int[,] Height;       // elevation layer: 0 = ground, 1 = high ground
     public int[,] Smoke;        // utility-item smoke: turns remaining a tile blocks sight (3.4)
     public int[,] CoverHp;      // hits a cover tile takes before degrading High->Low->gone (3.6)
+    public int[,] CoverSeed;    // PURELY VISUAL: stable per-tile identity of the drawn cover VOLUME
     public int[,] Fire;         // environmental fire: turns remaining a tile burns (hazards)
     public bool[,] Barrel;      // explosive barrel present on a tile (hazards)
 
@@ -27,8 +28,91 @@ public class Grid
         Height = new int[W, H];
         Smoke = new int[W, H];
         CoverHp = new int[W, H];
+        CoverSeed = new int[W, H];
         Fire = new int[W, H];
         Barrel = new bool[W, H];
+        ClearCoverSeeds();
+    }
+
+    // ---- PURELY VISUAL: stable cover-volume identity (W4 review fix) -------------------------
+    // src/Renderer.cs draws 4-connected same-type cover as ONE merged volume and hashes the
+    // volume's MATERIAL FORM and its footprint jitter off the volume's identity. That identity
+    // used to be recomputed from the LIVE tile set every frame (union-find, min linear index as
+    // root), which meant destroying or downgrading a wall's north/west-most tile moved the root
+    // and RE-ROLLED the material for every surviving tile — a wall visibly turned from crates
+    // into rock mid-mission, reading as a rendering glitch rather than as damage. Grenades,
+    // barrels and sustained fire all triggered it.
+    //
+    // The identity is therefore assigned ONCE, when a cover tile first exists, and never
+    // re-derived from the live set. A tile keeps its seed for as long as it holds cover; a tile
+    // destroyed to Floor drops its seed so a barricade later deployed there starts a new volume.
+    // Two adjacent tiles draw as one volume only when type, elevation tier AND seed all match,
+    // so a High tile downgraded to rubble splits off from its run instead of dragging a
+    // mismatched jitter into it.
+    //
+    // Gameplay-inert by construction: nothing outside Renderer.cs reads CoverSeed, it takes no
+    // draws from Util.Rng, and it is derived from the tile layout alone.
+    public const int NoSeed = -1;
+    const int Pending = -2;        // in-flight marker used only inside SeedCoverVolumes
+
+    public void ClearCoverSeeds()
+    {
+        for (int x = 0; x < W; x++)
+            for (int y = 0; y < H; y++) CoverSeed[x, y] = NoSeed;
+    }
+
+    /// Give every cover tile that does not have one yet a volume seed: the minimum linear index
+    /// of the 4-connected run of same-type, same-elevation, still-unseeded cover it belongs to.
+    /// Idempotent and cheap (one scan; work only where seeds are missing), so the renderer can
+    /// call it every frame and no stamping site has to remember to.
+    public void SeedCoverVolumes()
+    {
+        var run = new List<int>(32);
+        var frontier = new List<int>(32);
+        for (int y0 = 0; y0 < H; y0++)                 // scan in linear-index order, so the first
+            for (int x0 = 0; x0 < W; x0++)             // tile of a run IS the run's minimum index
+            {
+                if (Tiles[x0, y0] == TileType.Floor || CoverSeed[x0, y0] != NoSeed) continue;
+                var tt = Tiles[x0, y0]; int hh = Height[x0, y0];
+                int seed = y0 * W + x0;
+                int adopt = int.MaxValue;
+                run.Clear(); frontier.Clear();
+                CoverSeed[x0, y0] = Pending;           // marked, so the walk terminates — and so a
+                run.Add(seed); frontier.Add(seed);     // tile of THIS run is never mistaken for an
+                                                       // already-standing volume to adopt from
+                while (frontier.Count > 0)
+                {
+                    int cur = frontier[frontier.Count - 1]; frontier.RemoveAt(frontier.Count - 1);
+                    int cx = cur % W, cy = cur / W;
+                    for (int d = 0; d < 4; d++)
+                    {
+                        int nx = cx + (d == 0 ? -1 : d == 1 ? 1 : 0);
+                        int ny = cy + (d == 2 ? -1 : d == 3 ? 1 : 0);
+                        if (!InBounds(nx, ny)) continue;
+                        if (Tiles[nx, ny] != tt || Height[nx, ny] != hh) continue;
+                        int ns = CoverSeed[nx, ny];
+                        if (ns == Pending) continue;   // already walked, this run
+                        if (ns == NoSeed)
+                        {
+                            CoverSeed[nx, ny] = Pending;
+                            run.Add(ny * W + nx); frontier.Add(ny * W + nx);
+                            continue;
+                        }
+                        // ADOPT: a tile that appears mid-mission JOINS the volume it is touching
+                        // (a barricade deployed against a wall is part of that wall; a tile rebuilt
+                        // where one was destroyed rejoins its run WITH THE RUN'S OWN MATERIAL). The
+                        // direction matters: the new tiles take the standing volume's identity, so
+                        // the standing volume is never relabelled and can never re-roll its
+                        // material because something was built next to it. At mission build nothing
+                        // is seeded yet, so this never fires and the partition is exactly the
+                        // 4-connected same-type/same-tier grouping, rooted on the same minimum
+                        // linear index, that the renderer used to rebuild every frame.
+                        if (ns < adopt) adopt = ns;
+                    }
+                }
+                int final = adopt != int.MaxValue ? adopt : seed;
+                foreach (int i in run) CoverSeed[i % W, i / W] = final;
+            }
     }
 
     public enum CoverHit { None, Chipped, Downgraded, Destroyed }
@@ -41,10 +125,15 @@ public class Grid
     public void SetCoverHp(int x, int y) { if (InBounds(x, y)) CoverHp[x, y] = MaxCoverHp(x, y); }
 
     /// (Re)initialise HP for every cover tile — call once a mission's terrain is final.
+    /// One Game owns ONE Grid for its whole life (Game.Grid is a field initialiser), so the
+    /// visual volume seeds are re-derived here too: a mission-2 wall standing where a mission-1
+    /// wall stood would otherwise inherit mission 1's identity.
     public void ResetCoverHp()
     {
         for (int x = 0; x < W; x++)
             for (int y = 0; y < H; y++) CoverHp[x, y] = MaxCoverHp(x, y);
+        ClearCoverSeeds();
+        SeedCoverVolumes();
     }
 
     /// Apply `dmg` to a cover tile, degrading High->Low->Floor as its HP runs out.
@@ -61,6 +150,7 @@ public class Grid
         }
         Tiles[x, y] = TileType.Floor;
         CoverHp[x, y] = 0;
+        CoverSeed[x, y] = NoSeed;               // the volume identity dies with the tile (visual only)
         return CoverHit.Destroyed;
     }
 

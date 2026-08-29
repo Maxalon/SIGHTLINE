@@ -127,6 +127,8 @@ env-gated harness baked into `Program.cs`:
 export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe
 
 # Screenshot a frame -> sightline_shot.png  (then Read it to inspect visuals)
+# NOTE: the mission BRIEFING card holds for 11 s and covers the middle of the board, so any
+# frame under ~700 photographs the card, not the board. Use SIGHTLINE_SHOT=760 for board shots.
 SIGHTLINE_SHOT=90 xvfb-run -a -s "-screen 0 1280x800x24" dotnet run -c Debug
 
 # Full-match autopilot smoke test -> prints "RESULT: WIN|LOSE|TIMEOUT mission=N"
@@ -185,7 +187,9 @@ for `SIGHTLINE_` for the authoritative set.
 
 **Free keys** (nothing is bound to them — check here before adding a shortcut):
 **`I J N O P Q U V Z`**. Bound today: `A B C D E F G H K L M R S T W X Y`, `1`–`9`, the
-arrows, Tab/Space/Enter/Escape/Backspace/F2/Kp+/Kp−.
+arrows, Tab/Space/Enter/Escape/Backspace/F2/Kp+/Kp−, and **held SHIFT** (W4: reveals the
+dash/sprint region in the move overlay — the only key read as a *modifier*; held keys as such are
+not new, `Game.Codex.cs` has scrolled the field manual on held Left/Right/A/D since before it).
 
 **Distribution** (publishing a build, the licence position, where saves live, and the
 `PublishTrimmed` hazard): [`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md) +
@@ -348,6 +352,7 @@ docs/screenshot.png    README image
   reseeds explicitly (`Util.Reseed(50000+slot)`), so **paired measurement** is
   reproducible. **Screenshots are NOT byte-identical** and never were: two
   `SIGHTLINE_SHOT=90` runs measurably differ in ~30% of pixels (measured 303,065 of
+<<<<<<< HEAD
   1,024,000 px), because 58 `Raylib.GetTime()` wall-clock reads drive animation
   (46 in `Renderer.cs`, 12 in `Hud.cs`) and `Util.Rng` is clock-seeded by default. Never
   gate anything on a screenshot hash — **`SIGHTLINE_PAIRTEST` byte-identity is the real
@@ -362,6 +367,17 @@ docs/screenshot.png    README image
   only. **`SIGHTLINE_RNGFRAMETEST` is the gate** (four seeds x {1x,8x} x {shake on,off} must all
   agree); `SIGHTLINE_FXRNG=0` reproduces the old coupling on demand. PAIRTEST alone could never
   have caught this — it pins dt AND AnimSpeed, so both its legs draw the same number of frames.
+=======
+  1,024,000 px), because 56 wall-clock reads drive animation (45 in `Renderer.cs`, 11 in
+  `Hud.cs` — counted, the old "58 / 46 / 12" here was off) and `Util.Rng` is clock-seeded by
+  default. Never gate anything on a screenshot
+  hash — **`SIGHTLINE_PAIRTEST` byte-identity is the real determinism gate**. Keep new
+  persistent/random/post-FX work behind the `NoPersist`/Display gates so that stays true.
+  **If you write a test that reads PIXELS, pin the clock**: `Renderer.cs`'s 45 reads all go
+  through `Renderer.Now()`, which returns the real clock unless the harness-only
+  `Renderer.TimePin` is set to a fixed t (`SIGHTLINE_BOARDTEST` does; it is the only reason
+  that probe prints one number per run). Restore it to `-1` when you are done.
+>>>>>>> wave/board-as-place
 
 ---
 

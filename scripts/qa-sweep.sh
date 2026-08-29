@@ -4,8 +4,9 @@
 # quirk: piping an xvfb-run child through $(...) / a for-loop silently drops its
 # stdout, so every test is a direct `CMD | grep` statement below.
 #
-#   bash scripts/qa-sweep.sh          # 50 self-tests + autoplay x3   (~2 min)
-#   bash scripts/qa-sweep.sh --full   # all 51 (adds PAIRTEST)         (~2 min 40 s)
+#   bash scripts/qa-sweep.sh          # every self-test + autoplay x3   (~2 min)
+#   bash scripts/qa-sweep.sh --full   # + PAIRTEST                      (~2 min 40 s)
+# The counts are DERIVED at runtime and printed in the footer — do not hand-type one here.
 #
 # COUNT NOTE: this footer has been wrong three times now. C1 found it claiming 41 while running
 # 42; the W5/C1 integration then had two waves bumping it from different bases; and TRUE BAND
@@ -126,6 +127,10 @@ echo -n "FXSTREAM   : "; if [ -n "$_fxhits" ]; then
   echo "FXSTREAM: FAIL (src/Fx.cs draws from the shared gameplay Util.Rng — use Util.FxRand*)"
   echo "$_fxhits" | sed 's/^/     /'
 else echo "FXSTREAM: PASS"; fi
+# W4 THE BOARD BECOMES A PLACE: the only self-test that measures RENDERED PIXELS — the squint
+# value hierarchy (selected soldier > live hostile > dormant pod on mean AND peak luminance),
+# the cover-volume merge, and the move overlay's contour + palette. Needs the full-size window.
+echo -n "BOARDTEST  : "; SIGHTLINE_BOARDTEST=1 run | grep -oE "BOARDTEST: (PASS|FAIL)" | head -1
 
 if [ "$FULL" = 1 ]; then
   # ~38 s: the CRN identity check. Skipped by default so the sweep stays a quick loop;
@@ -167,3 +172,5 @@ echo "($_exist self-tests exist in src/; this sweep ran $_ran of them, plus the 
 echo " Both counts are derived at runtime, not typed. The COVERAGE GUARD block above is the real"
 echo " check — if it is empty, every self-test in src/ was invoked. Every line above must read PASS,"
 echo " and every autoplay must read WIN or LOSE — never TIMEOUT, never blank.)"
+echo "(50 self-tests exist; this sweep ran $([ "$FULL" = 1 ] && echo 48 || echo 47). Every line above"
+echo " must read PASS, and every autoplay must read WIN or LOSE — never TIMEOUT, never blank.)"
