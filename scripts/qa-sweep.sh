@@ -100,6 +100,22 @@ echo -n "GEOMTEST   : "; SIGHTLINE_GEOMTEST=1 run | grep -oE "GEOMTEST: (PASS|FA
 # W1 TRUE INSTRUMENT: the autopilot's ROUTE through the campaign DAG (the sampling frame every
 # published balance number was drawn through) and the frame/RNG independence of gameplay.
 echo -n "ROUTETEST  : "; SIGHTLINE_ROUTETEST=1 run | grep -oE "ROUTETEST: (PASS|FAIL)" | tail -1
+# ~20 s: gameplay must be a function of the SEED, not of the frame rate, the animation-speed
+# setting or the screen-shake comfort toggle. 16 campaigns; FAILs under SIGHTLINE_FXRNG=0.
+# Its PHASE 2 (render purity) is the real guard for "presentation never draws from Util.Rng":
+# it asserts that constructing a Unit and drawing 30 real frames both leave the shared stream
+# untouched, and proves the probe sensitive with a deliberate draw.
+echo -n "RNGFRAMETEST: "; SIGHTLINE_RNGFRAMETEST=1 run | grep -oE "RNGFRAMETEST: (PASS|FAIL)" | tail -1
+
+# W1 STATIC BACKSTOP (free, and it runs even when the binary will not build): Fx.cs is the
+# FX layer and must contain zero draws from the shared gameplay stream. HONEST SCOPE: this
+# grep would NOT have caught the W1 review's Bob defect, which lived in Unit.cs — only
+# RNGFRAMETEST phase 2 catches that class. This is a cheap tripwire on the one file whose
+# entire job is presentation, not a substitute for the runtime assertion.
+echo -n "FXSTREAM   : "; if grep -qE 'Util\.(RandF|RandInt|RandRange|Roll|Choice)\(|Util\.Rng' src/Fx.cs; then
+  echo "FXSTREAM: FAIL (src/Fx.cs draws from the shared gameplay Util.Rng — use Util.FxRand*)"
+  grep -nE 'Util\.(RandF|RandInt|RandRange|Roll|Choice)\(|Util\.Rng' src/Fx.cs | sed 's/^/     /'
+else echo "FXSTREAM: PASS"; fi
 
 if [ "$FULL" = 1 ]; then
   # ~38 s: the CRN identity check. Skipped by default so the sweep stays a quick loop;

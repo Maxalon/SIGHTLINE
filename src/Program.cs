@@ -108,6 +108,15 @@ public static class Program
             return;
         }
 
+        // W1: SIGHTLINE_RNGFRAMETEST=1 : gameplay must be a function of the SEED — not of the
+        // frame rate, the animation-speed setting or the screen-shake comfort toggle. Four pinned
+        // seeds x {1x, 8x} x {shake on, off}; all four legs of a seed must agree. See RngFrameTest.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_RNGFRAMETEST") == "1")
+        {
+            RngFrameTest();
+            return;
+        }
+
         // Q1: SIGHTLINE_STACKTEST=1 : the NO-TWO-IN-ONE-PLACE invariant. Drives real missions across
         // all 8 objectives at heat 0/2 with two detectors running at once — (a) a hook on every
         // MoveStepAnim ACTIVATION asserting the destination tile is empty-or-self, and (b) a
@@ -1141,6 +1150,163 @@ public static class Program
         Util.Reseed(0);
         Stats.Slot = -1;
         Stats.Enabled = false;
+        Display.Shutdown();
+        Renderer.UnloadNoise();
+        Raylib.CloseWindow();
+    }
+
+    // ── W1 TRUE INSTRUMENT: SIGHTLINE_RNGFRAMETEST — gameplay is a function of the SEED ───────
+    // The headline defect this wave exists to fix: Fx.Update rolled Util.RandF() once per
+    // RENDERED FRAME for as long as a screen shake was decaying, on the SHARED GAMEPLAY stream.
+    // So the dice a campaign rolled depended on how many frames were drawn while the screen was
+    // wobbling — which depends on the frame rate, on the animation-speed comfort setting, and on
+    // whether the player has screen shake switched on at all (Fx.ShakeOn is a shipped
+    // accessibility toggle). Two players on the same seed with different comfort settings played
+    // different fights. The measurement harness never saw it because it pins dt to 1/60 AND pins
+    // AnimSpeed to 1x — it was surviving by holding the frame rate still.
+    //
+    // This test refuses to hold it still. It replays four pinned seeds under the cross product of
+    // {AnimSpeed 1x, 8x} x {shake ON, shake OFF} and demands the SAME outcome, the same missions
+    // and the same total turns from all four. It has a vacuity guard: the 1x and 8x legs must
+    // differ in FRAME COUNT, or the animation-speed lever is not wired and the test proves nothing.
+    //
+    // It FAILS by design on the pre-W1 tree — and it still can, on demand, in the shipped binary:
+    // SIGHTLINE_FXRNG=0 re-couples Fx to the gameplay stream (see Util.FxRng).
+    static void RngFrameTest()
+    {
+        Stats.Reset();
+        Stats.Enabled = true;
+        Mission.ForcedLayout = -1;
+        Pal.SetColorblind(false);
+
+        Raylib.SetConfigFlags(ConfigFlags.Msaa4xHint);
+        Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "SIGHTLINE — rng frame test");
+        RequireWindow("RNGFRAMETEST");
+        Raylib.SetExitKey(KeyboardKey.Null);
+        Cfg.Font = Raylib.GetFontDefault();
+        Display.Init(false);
+        Raylib.SetTargetFPS(0);
+
+        const int frameCap = 40000;
+
+        // House stash-and-restore: this hook dials SIGHTLINE_HEAT and must not leave it dialled
+        // for anything later in the process (the SIGHTLINE_OBJ / Mission.ForcedLayout precedent).
+        string savedHeat = Environment.GetEnvironmentVariable("SIGHTLINE_HEAT");
+
+        (string result, int missions, int turns, int frames, int shakes) Leg(int seed, float animSpeed, bool shake)
+        {
+            Environment.SetEnvironmentVariable("SIGHTLINE_HEAT", "2");
+            Util.Reseed(seed);                 // the ONLY thing that may determine the fight
+            Stats.Slot = seed;
+            var game = new Game { NoPersist = true, AutoPlay = true, SmartPlay = true,
+                                  AnimSpeedOverride = animSpeed };
+            game.Fx.ShakeOn = shake;           // the shipped comfort toggle, exercised as a variable
+            game.SeedSloppy(1000 + seed);      // greedy never draws from it; seeded for parity
+            game.StartMission(1);
+            int frame = 0;
+            while (!Raylib.WindowShouldClose())
+            {
+                game.Update(1f / 60f);
+                BatchPump();
+                if (game.Phase == Phase.Win || game.Phase == Phase.Lose || ++frame >= frameCap) break;
+            }
+            Stats.EndRun(false, game.RunState != null ? game.RunState.Mission - 1 : 0, "frame-cap");
+            var run = Stats.Runs[Stats.Runs.Count - 1];
+            string result = game.Phase == Phase.Win ? "WIN" : game.Phase == Phase.Lose ? "LOSE" : "CAP";
+            return (result, run.Missions.Count, run.Missions.Sum(m => m.Turns), frame, game.Fx.ShakeApplied);
+        }
+
+        bool pass = true;
+        foreach (int seed in new[] { 99, 777, 4242, 31337 })
+        {
+            var refLeg = Leg(seed, 1f, true);                       // the shipped conditions
+            var fast = Leg(seed, 8f, true);                          // anim speed 8x
+            var noShake = Leg(seed, 1f, false);                      // comfort: shake off
+            var fastNoShake = Leg(seed, 8f, false);                  // both at once
+
+            bool Same((string result, int missions, int turns, int frames, int shakes) x)
+                => x.result == refLeg.result && x.missions == refLeg.missions && x.turns == refLeg.turns;
+
+            bool ok = Same(fast) && Same(noShake) && Same(fastNoShake);
+            // VACUITY GUARD (a): if 8x did not change the frame budget, AnimSpeedOverride is not
+            // reaching the anim queue and an "identical" result would mean nothing.
+            bool animLever = fast.frames != refLeg.frames;
+            // VACUITY GUARD (b): the SHAKE lever must actually have been thrown. The W1 review
+            // deleted `game.Fx.ShakeOn = shake;` from this test and it still printed MATCH x4 and
+            // PASS with byte-identical output — it was certifying an invariance it never varied.
+            // Fx.ShakeApplied counts the AddShake calls that actually moved the screen, so the
+            // shake legs must show some and the no-shake legs must show none.
+            bool shakeLever = refLeg.shakes > 0 && noShake.shakes == 0 && fastNoShake.shakes == 0;
+            if (!animLever || !shakeLever) ok = false;
+            pass &= ok;
+            string why = ok ? "MATCH"
+                       : !animLever ? "VACUOUS (anim-speed lever inert)"
+                       : !shakeLever ? $"VACUOUS (shake lever inert: shk {refLeg.shakes}/{noShake.shakes})"
+                       : "MISMATCH";
+            Console.WriteLine(
+                $"RNGFRAMETEST: seed{seed}  1x/shake {refLeg.result} m={refLeg.missions} t={refLeg.turns} f={refLeg.frames} shk={refLeg.shakes}"
+              + $" | 8x/shake {fast.result} m={fast.missions} t={fast.turns} f={fast.frames} shk={fast.shakes}"
+              + $" | 1x/noshake {noShake.result} m={noShake.missions} t={noShake.turns} f={noShake.frames} shk={noShake.shakes}"
+              + $" | 8x/noshake {fastNoShake.result} m={fastNoShake.missions} t={fastNoShake.turns} f={fastNoShake.frames} shk={fastNoShake.shakes}"
+              + $"  -> {why}");
+            // a leg that never played a mission proves nothing either (the FUL-5 vacuous-PASS trap)
+            if (refLeg.missions <= 0) { pass = false; Console.WriteLine($"RNGFRAMETEST: seed{seed} VACUOUS — no mission played"); }
+        }
+
+        // PHASE 2: RENDER PURITY.
+        // Phase 1 certifies FRAME-COUNT invariance, and it is honest about exactly that. It could
+        // not, and did not, catch the defect the W1 review found: Unit()'s idle-bob phase drew
+        // from the shared gameplay stream, and Renderer holds a `static readonly Unit` stub whose
+        // initializer fires on the first DrawBoard. That is NOT a frame-count coupling — it is a
+        // FIXED ONE-DRAW OFFSET between a process that renders and one that does not, and after
+        // W1/1 and W1/4 the whole measurement harness is a process that does not render. Phase 1
+        // runs every leg through the same non-rendering path, so all four legs agreed.
+        //
+        // This phase pins the RULE instead of the symptom: PRESENTATION TAKES ZERO DRAWS FROM
+        // Util.Rng. (a) constructing a Unit costs nothing — the exact defect; (b) drawing real
+        // frames of a real board costs nothing — the class; (c) the probe is proven SENSITIVE by
+        // running it once with a deliberate draw (the VOICETEST precedent), so it cannot pass
+        // vacuously. A grep for Util.Rand* in Fx.cs would NOT have caught Bob — it is in Unit.cs.
+        {
+            const int K = 24;
+            int[] Draws() { var a = new int[K]; for (int i = 0; i < K; i++) a[i] = Util.Rng.Next(1 << 20); return a; }
+            bool SeqEq(int[] a, int[] b) { for (int i = 0; i < K; i++) if (a[i] != b[i]) return false; return true; }
+            bool Clean(Action body)
+            {
+                Util.Reseed(31337);
+                var pre = Draws();
+                Util.Reseed(31337);
+                body();
+                return SeqEq(pre, Draws());
+            }
+
+            Environment.SetEnvironmentVariable("SIGHTLINE_HEAT", "0");
+            Util.Reseed(4242);
+            var stage = new Game { NoPersist = true, AutoPlay = true, SmartPlay = true };
+            stage.StartMission(1);
+            for (int i = 0; i < 120; i++) stage.Update(1f / 60f);   // let a real board settle
+
+            int bobSink = 0;
+            bool unitClean = Clean(() => { var stub = new Unit(); bobSink += stub.Bob > 0f ? 1 : 0; });
+            bool drawClean = Clean(() => { for (int i = 0; i < 30; i++) Display.RenderFrame(stage.Draw); });
+            bool sensitive = !Clean(() => { Util.Rng.Next(); });     // the probe must SEE one draw
+            if (bobSink < 0) Console.Write("");                      // keep the ctor call observable
+
+            bool phase2 = unitClean && drawClean && sensitive;
+            pass &= phase2;
+            Console.WriteLine($"RNGFRAMETEST: render-purity  newUnit={(unitClean ? "clean" : "DREW")}"
+                            + $"  draw30Frames={(drawClean ? "clean" : "DREW")}"
+                            + $"  probeSensitive={(sensitive ? "yes" : "NO — VACUOUS")}"
+                            + $"  -> {(phase2 ? "PASS" : "FAIL")}");
+        }
+
+        Console.WriteLine(pass ? "RNGFRAMETEST: PASS" : "RNGFRAMETEST: FAIL");
+
+        Util.Reseed(0);
+        Stats.Slot = -1;
+        Stats.Enabled = false;
+        // restore the harness environment exactly as found (house stash-and-restore)
+        Environment.SetEnvironmentVariable("SIGHTLINE_HEAT", savedHeat);
         Display.Shutdown();
         Renderer.UnloadNoise();
         Raylib.CloseWindow();

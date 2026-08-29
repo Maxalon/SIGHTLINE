@@ -340,6 +340,30 @@ public static class Util
     public static float RandRange(float a, float b) => a + (b - a) * (float)Rng.NextDouble();
     public static T     Choice<T>(System.Collections.Generic.IList<T> a) => a[Rng.Next(a.Count)];
 
+    // ── W1 TRUE INSTRUMENT: the PRESENTATION rng ────────────────────────────────────────
+    // Fx.cs — particles, muzzle flashes, floating text, and above all the SCREEN-SHAKE jitter —
+    // used to draw from the shared GAMEPLAY stream above. The shake angle in particular was
+    // rolled once per RENDERED FRAME for as long as a shake was decaying, so the dice a match
+    // rolled depended on HOW MANY FRAMES were drawn while the screen was wobbling. That made
+    // gameplay a function of the seed AND the frame rate AND the player's comfort settings:
+    // Fx.ShakeOn is a shipped accessibility toggle, so a player who turns screen shake off gets
+    // a different fight from the same seed, and the animation-speed setting shifts it again.
+    // The measurement harness only escaped it by pinning dt to 1/60 and AnimSpeed to 1x — i.e.
+    // by holding the frame rate still, which is not a property anyone should have to preserve.
+    //
+    // FxRng is a separate clock-seeded stream that Reseed() DELIBERATELY does not touch: a
+    // SEEDED DAILY board must replay identically, and nobody wants the sparks to replay too.
+    // Nothing here may ever be read by gameplay.
+    //
+    // SIGHTLINE_FXRNG=0 re-couples Fx to the gameplay stream — the pre-W1 behaviour, kept so
+    // SIGHTLINE_RNGFRAMETEST can demonstrate the defect on demand instead of by archaeology.
+    public static readonly bool FxOnGameplayStream =
+        System.Environment.GetEnvironmentVariable("SIGHTLINE_FXRNG") == "0";
+    public static Random FxRng = new();
+    public static int   FxRandInt(int aIncl, int bIncl) => FxOnGameplayStream ? RandInt(aIncl, bIncl) : FxRng.Next(aIncl, bIncl + 1);
+    public static float FxRandF() => FxOnGameplayStream ? RandF() : (float)FxRng.NextDouble();
+    public static float FxRandRange(float a, float b) => FxOnGameplayStream ? RandRange(a, b) : a + (b - a) * (float)FxRng.NextDouble();
+
     // FUL-9: seed-keyed avalanche hash (the Run.cs W5 finale-kit mixer, parameterised). For
     // campaign structure that must derive from MapSeed WITHOUT touching Util.Rng or a .NET
     // Random stream — nearby seeds keep .NET Random correlated for many draws (the measured
