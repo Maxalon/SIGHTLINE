@@ -353,6 +353,13 @@ public static class Program
             Raylib.CloseWindow();
             return;
         }
+        // SIGHTLINE_ROUTETEST=1 : W1 — measure the AUTOPILOT'S ROUTE through the campaign DAG (the
+        // sampling frame every published balance number was drawn through). Window-free.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_ROUTETEST") == "1")
+        {
+            Console.WriteLine(Game.RouteSelfTest());
+            return;
+        }
         if (Environment.GetEnvironmentVariable("SIGHTLINE_WOUNDTEST") == "1")
         {
             Console.WriteLine(WoundTest());

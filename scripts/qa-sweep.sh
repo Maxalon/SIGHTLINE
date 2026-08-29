@@ -97,6 +97,9 @@ echo -n "THREATTEST : "; SIGHTLINE_THREATTEST=1 run | grep -oE "THREATTEST (PASS
 # R2 FIX 1: the nobody-is-walled-out geometry invariant (all 4 deployment shapes x 8 objectives
 # x 2 heats, thousands of fresh boards). ~25 s.
 echo -n "GEOMTEST   : "; SIGHTLINE_GEOMTEST=1 run | grep -oE "GEOMTEST: (PASS|FAIL)" | head -1
+# W1 TRUE INSTRUMENT: the autopilot's ROUTE through the campaign DAG (the sampling frame every
+# published balance number was drawn through) and the frame/RNG independence of gameplay.
+echo -n "ROUTETEST  : "; SIGHTLINE_ROUTETEST=1 run | grep -oE "ROUTETEST: (PASS|FAIL)" | tail -1
 
 if [ "$FULL" = 1 ]; then
   # ~38 s: the CRN identity check. Skipped by default so the sweep stays a quick loop;
