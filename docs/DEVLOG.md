@@ -5865,7 +5865,8 @@ W1 branches from `d350416` and so does TRUE BAND; neither is merged as this is w
 integration tip that also carries L1 is not visible from this worktree, so **W1 is NOT rebased
 onto it** — rebasing onto a tip I cannot read would produce a branch the lead cannot use. What I
 did instead was measure the conflict surface with `git merge-tree wave/true-band HEAD` and shrink
-it. Two files conflict, both trivially and both semantically independent:
+it. **Five files conflict, all of them trivially, and every one is semantically independent** —
+no resolution requires choosing between the two waves' behaviour:
 
 * **`src/Game.Autopilot.cs`** — inside `CountMeaningfulChoices`, on adjacent lines. TRUE BAND
   replaces `foreach (var v in vals) if (v >= best * 0.88f) comparable++;` with its additive
@@ -5875,13 +5876,20 @@ it. Two files conflict, both trivially and both semantically independent:
   `choicesPerArmedSoldierTurn`, which is TRUE BAND's point, not W1's).
 * **`src/Game.Harness.cs`** — both waves append a new self-test at the end of the file.
   **Keep both**, in either order.
+* **`scripts/qa-sweep.sh`** — at the FOOTER only, and the resolution is **take W1's**. Both waves
+  independently patched the same hand-maintained "N self-tests exist" line (the fourth time it has
+  been wrong), and both wrote down the correct DERIVATION and then pasted its answer as a literal —
+  TRUE BAND's `51 / 51 / 50` and W1's first attempt at `52 / 51`, each of which the other wave
+  invalidates on contact. W1 now RUNS the derivation at runtime (one grep over `src/`, one over the
+  sweep itself), so the footer is right whatever either wave added and it cannot drift a fifth
+  time. TRUE BAND's `BANDTEST` line itself is elsewhere in the file and **does not conflict**.
+* **`docs/DEVLOG.md`, `docs/ROADMAP.md`** — both-append-at-the-end. Keep both.
+  `CLAUDE.md` auto-merges.
 
-`scripts/qa-sweep.sh` **no longer conflicts**, and that is deliberate. Both waves independently
-patched the same hand-maintained "N self-tests exist" footer — the fourth time it has been wrong —
-and both wrote down the correct DERIVATION and then pasted its answer as a literal. W1 now runs
-the derivation at runtime (two greps), so the footer is correct whatever either wave adds and the
-merge is clean. `CLAUDE.md`, `docs/DEVLOG.md` and `docs/ROADMAP.md` conflict only as
-both-append-at-the-end.
+(Measured with `git merge-tree wave/true-band HEAD` against the finished branch, not guessed. An
+earlier draft of this note claimed qa-sweep.sh "no longer conflicts" — that was true when I
+measured it at W1/4, before the docs commit rewrote the footer, and it is corrected here rather
+than left standing.)
 
 ### WHAT I DID NOT DO, AND WHAT IT COST
 
