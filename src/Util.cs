@@ -157,9 +157,31 @@ public static class Pal
     // accessibility: a deuteranopia/protanopia-friendly remap of the threat/good hues
     // (blue friend vs vermillion-orange foe vs blue-green good — distinguishable across
     // common colour-blindness types). Toggled in the pause menu, persisted in display.json.
+    //
+    // RESONANCE W6 — FoeCb moved (238,138,40) -> (255,120,0), MEASURED, not eyeballed. Simulating
+    // the shipped palette through the Vienot-1999 dichromat matrices showed the CB toggle doing its
+    // headline job well (Foe/Friend and Foe/Good improve in every CVD type) while INTRODUCING one
+    // regression it was never checked for: the swap moved the hostile hue INTO the amber band the
+    // objective/interactable accent already occupies, so for a deuteranope
+    //     Foe/Accent  50.5 (normal palette)  ->  39.8 (colorblind palette)
+    // i.e. turning the accessibility option ON made a hostile and an objective marker HARDER to
+    // tell apart than leaving it off. Two more pairs sat under the same threshold: Foe/Elite 39.4
+    // (deut) and Foe/Accent 34.4 (trit).
+    //
+    // The replacement is a search over warm hues constrained to (a) stay clearly hostile, (b) keep
+    // a luminance that pops off all eight biome floors, and (c) maximise the WORST pairwise
+    // separation across none/deut/prot/trit. (255,120,0) is strictly dominant: EVERY pair against
+    // Friend / Good / Accent / Suspect / VipGold / Elite improves in EVERY simulation, all three
+    // sub-40 collisions close (deut Foe/Accent 39.8->55.6, deut Foe/Elite 39.4->69.7, trit
+    // Foe/Accent 34.4->73.4), the worst UI pair goes 34.4 -> 55.6, and separation from the darkest
+    // biome floor goes 114.6 -> 137.3. It is still Okabe-Ito vermillion, so "hostile" looks the
+    // same; it is simply further from amber.
+    //
+    // NOT a measurement risk: Colorblind is off by default and Display.Init(false) never Loads, so
+    // no screenshot, self-test or balance run can observe this constant.
     public static bool Colorblind;
-    static readonly Color FoeNorm = RGBA(248, 113, 113), FoeCb = RGBA(238, 138, 40);
-    static readonly Color FoeDkNorm = RGBA(120, 30, 30), FoeDkCb = RGBA(122, 66, 14);
+    static readonly Color FoeNorm = RGBA(248, 113, 113), FoeCb = RGBA(255, 120, 0);
+    static readonly Color FoeDkNorm = RGBA(120, 30, 30), FoeDkCb = RGBA(130, 58, 0);
     static readonly Color GoodNorm = RGBA(74, 222, 128), GoodCb = RGBA(40, 200, 168);
     public static void SetColorblind(bool on)
     {

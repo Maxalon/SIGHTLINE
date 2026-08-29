@@ -110,6 +110,10 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     public static Rectangle PauseAudio;   // A3: pause-menu entry to the AUDIO CHECK screen
     public static Rectangle PauseAnimSpeed, PauseUiScale;   // W5 ON-RAMP comfort controls
     public static Rectangle PauseControls;                  // W6: entry to the CONTROLS / rebinding screen
+    // W6 fine-motor accessibility: the pause card's rows IN VISUAL ORDER, so the same list drives
+    // the mouse hit-test, the keyboard cursor and the selection ring. One order, one activation
+    // switch (Game.ActivatePauseRow) — a row cannot be clickable and un-reachable by keyboard.
+    public static readonly System.Collections.Generic.List<(string id, Rectangle rect)> PauseRows = new();
 
     // CONTROLS (W6): one clickable rect per listed key row, plus BACK / RESET DEFAULTS and the
     // scroll bound — all published by DrawControls for Game.HandleControlsInput to hit-test.
@@ -359,7 +363,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         // the controls hint off the bottom edge.
         const int leftRows = 11;
         int bw0 = 320, bh0 = 42, gap0 = 11;
-        int w = 760, h = 84 + leftRows * bh0 + (leftRows - 1) * gap0 + 38;
+        int w = 760, h = 84 + leftRows * bh0 + (leftRows - 1) * gap0 + 52;   // W6: +14 for the second hint line
         int x = Cfg.ScreenW / 2 - w / 2, y = Cfg.ScreenH / 2 - h / 2;
         y -= (int)((1f - Util.EaseOutQuad(in_)) * 14f);
         var card = new Rectangle(x, y, w, h);
@@ -442,12 +446,57 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
                           : "ABANDON RUN";
         DrawButtonRect(PauseAbandon, abandonLbl, "", true, false, Pal.Foe);
 
+        // ---- W6: publish the rows IN VISUAL ORDER, then ring the keyboard selection ----
+        PauseRows.Clear();
+        PauseRows.Add(("resume", PauseResume));
+        PauseRows.Add(("fullscreen", PauseFullscreen));
+        PauseRows.Add(("window", PauseWindow));
+        PauseRows.Add(("shake", PauseShake));
+        PauseRows.Add(("threat", PauseThreat));
+        PauseRows.Add(("bright", PauseBright));
+        PauseRows.Add(("gamma", PauseGamma));
+        PauseRows.Add(("colorblind", PauseColorblind));
+        PauseRows.Add(("autocam", PauseAutoCam));
+        PauseRows.Add(("animspeed", PauseAnimSpeed));
+        PauseRows.Add(("uiscale", PauseUiScale));
+        PauseRows.Add(("mute", PauseMute));
+        for (int i = 0; i < PauseVol.Length; i++) PauseRows.Add(("vol" + i, PauseVol[i]));
+        PauseRows.Add(("audio", PauseAudio));
+        PauseRows.Add(("controls", PauseControls));
+        PauseRows.Add(("codex", PauseCodex));
+        PauseRows.Add(("abandon", PauseAbandon));
+        if (g.PauseSel >= 0 && g.PauseSel < PauseRows.Count)
+        {
+            var sr = PauseRows[g.PauseSel].rect;
+            var ring = new Rectangle(sr.X - 4, sr.Y - 4, sr.Width + 8, sr.Height + 8);
+            Raylib.DrawRectangleLinesEx(ring, 2f, Pal.Friend);
+            // A caret on the left edge, so the selection reads by SHAPE as well as by the ring's
+            // hue (DESIGN 3.H). Winding matters: Raylib culls a clockwise triangle in this
+            // y-down space, and the first version of this caret drew nothing at all — vertices
+            // are ordered left-tip, BOTTOM-right, TOP-right.
+            float cy2 = ring.Y + ring.Height / 2f;
+            Raylib.DrawTriangle(new Vector2(ring.X - 13, cy2),
+                                new Vector2(ring.X - 4,  cy2 + 6f),
+                                new Vector2(ring.X - 4,  cy2 - 6f), Pal.Friend);
+        }
+
         // W6: the hint reads the live keymap, so a rebind is reflected here instead of the card
-        // continuing to advertise the shipped defaults.
+        // continuing to advertise the shipped defaults. A second line names the keyboard route
+        // through this card — every comfort setting lives here and, before W6, every one of them
+        // was mouse-only.
         string ctl = "Wheel zoom  -  Middle-drag pan  -  [" + Keymap.Label(Keymap.CamReset) + "] reset camera  -  Arrows/"
                    + Keymap.Label(Keymap.CursorUp) + Keymap.Label(Keymap.CursorLeft) + Keymap.Label(Keymap.CursorDown)
                    + Keymap.Label(Keymap.CursorRight) + " + [" + Keymap.Label(Keymap.Act) + "]";
-        Cfg.Text(ctl, new Vector2(x + w / 2 - (int)Cfg.Measure(ctl, 12, 1f).X / 2, y + h - 24), 12, 1f, Pal.TxtDim);
+        Cfg.Text(ctl, new Vector2(x + w / 2 - (int)Cfg.Measure(ctl, 12, 1f).X / 2, y + h - 38), 12, 1f, Pal.TxtDim);
+        // At the top TEXT SIZE step, say where the REST of the magnification lives: Display scales
+        // the whole 1280x800 frame to the window, so WINDOW / FULLSCREEN is the real low-vision
+        // magnifier and TEXT SIZE is "labels bigger RELATIVE to the board". A player who hits the
+        // 120% cap should not conclude the game cannot go bigger.
+        string ctl2 = Display.UiScaleIdx == Display.UiScaleLevels.Length - 1
+            ? "TEXT SIZE tops out at " + Display.UiScaleLabel + " - for a bigger PICTURE use WINDOW / FULLSCREEN: the whole frame scales."
+            : "Keyboard: [Up]/[Down] pick a row, [Left]/[Right] adjust, [Enter] activate.";
+        Cfg.Text(ctl2, new Vector2(x + w / 2 - (int)Cfg.Measure(ctl2, 12, 1f).X / 2, y + h - 22), 12, 1f,
+                 Display.UiScaleIdx == Display.UiScaleLevels.Length - 1 ? Pal.Accent : Pal.TxtDim);
     }
 
     /// A2 mix fader: a labelled track with a filled level and a percentage. Dimmed whole when

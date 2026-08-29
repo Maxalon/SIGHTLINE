@@ -186,6 +186,16 @@ public static class Keymap
             (KeyboardKey.Enter, "CONFIRM"), (KeyboardKey.Backspace, "EDIT TEXT"),
         })
             t.Add(F("menu." + k, what + " (MENUS)", "MENUS", ScopeMenu, k, true));
+        // The pause card's own keyboard route (W6 fine-motor access): arrows pick/adjust a row and
+        // Enter runs it. Reserved so a rebind can never shadow the only non-mouse way to reach the
+        // comfort settings — which is the whole point of it existing.
+        foreach (var (k, what) in new[]
+        {
+            (KeyboardKey.Up, "PICK ROW"), (KeyboardKey.Down, "PICK ROW"),
+            (KeyboardKey.Left, "ADJUST"), (KeyboardKey.Right, "ADJUST"),
+            (KeyboardKey.Enter, "ACTIVATE ROW"),
+        })
+            t.Add(F("pause." + k, what + " (PAUSE)", "PAUSE MENU", ScopePause, k, true));
 
         return t.ToArray();
     }

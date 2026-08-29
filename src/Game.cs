@@ -4674,6 +4674,48 @@ public partial class Game
     /// keep in sync with Hud.DrawVolSlider).
     static float VolFrac(Rectangle r, float mx) => Util.Clamp((mx - (r.X + 8f)) / MathF.Max(1f, r.Width - 16f), 0f, 1f);
 
+    /// W6 fine-motor accessibility: the pause card's keyboard cursor (-1 = mouse mode). Every
+    /// comfort setting in the game lives on this card — text size, brightness, gamma, colorblind,
+    /// screen shake, animation speed, the four mix faders — and until W6 all of them were reachable
+    /// ONLY by landing a mouse on a 320x42 plate or dragging a 304px fader track. A player who
+    /// needs the text at 120% or the brightness up is, by definition, a player who may not be able
+    /// to do that comfortably.
+    public int PauseSel = -1;
+
+    /// Run one pause-card row. The SAME switch serves the mouse and the keyboard, off the SAME
+    /// ordered list Hud publishes — so a row cannot be clickable and keyboard-unreachable, which
+    /// is how "mouse-only" creeps back in one button at a time.
+    void ActivatePauseRow(string id)
+    {
+        switch (id)
+        {
+            case "resume": Paused = false; break;
+            case "fullscreen": Display.ToggleFullscreen(); break;
+            case "window": Display.CycleSize(); break;
+            case "shake": Fx.ShakeOn = !Fx.ShakeOn; break;
+            case "threat": CycleThreatPref(); break;
+            case "bright": Display.CycleBrightness(); break;
+            case "gamma": Display.CycleGamma(); break;                 // W9: true gamma (post-FX pass)
+            case "colorblind": Display.ToggleColorblind(); break;
+            case "autocam": Display.ToggleAutoCam(); if (!Display.AutoCam) { CamZoom = 1f; CamPan = Vector2.Zero; } break;
+            case "animspeed": CycleAnimSpeed(); break;                 // W5 comfort: playback pacing
+            case "uiscale": Display.CycleUiScale(); break;             // W5 comfort: UI text size
+            case "mute": Audio.ToggleMute(); break;
+            case "audio": BeginAudition(); break;                      // A3 (remember-and-restore, like the codex)
+            case "controls": BeginControls(); break;                   // W6 key rebinding
+            case "codex": BeginCodex(); break;                         // W6/HORIZON: the field manual
+            case "abandon": AbandonRun(); break;
+        }
+    }
+
+    /// Nudge one mix fader by `dir` steps of 5% (the keyboard's answer to dragging a 304px track).
+    void NudgeVol(int idx, int dir)
+    {
+        if (idx < 0 || idx >= Hud.PauseVol.Length) return;
+        Display.SetVol(idx, Util.Clamp(Display.Vol(idx) + dir * 0.05f, 0f, 1f));
+        Display.CommitVol();
+    }
+
     void HandlePauseMenu()
     {
         // W6: the three pause-overlay buttons that carry a KEY TAG now actually respond to it.
@@ -4686,6 +4728,43 @@ public partial class Game
         if (Keymap.Pressed(Keymap.PauseControls)) { BeginControls(); return; }
 
         var m = Raylib.GetMousePosition();
+
+        // ---- W6 keyboard route through the card ------------------------------------------------
+        // Arrows + Enter, held at ScopePause in Keymap's reserved table so no rebind can shadow
+        // them. Up/Down pick a row, Enter runs it, Left/Right adjust anything that has a range
+        // (the four faders by 5%, every cycling setting by one step). Moving the mouse hands
+        // control back, exactly like the board's KbCursor.
+        int step = 0;
+        if (Raylib.IsKeyPressed(KeyboardKey.Down)) step = 1;
+        else if (Raylib.IsKeyPressed(KeyboardKey.Up)) step = -1;
+        if (step != 0 && Hud.PauseRows.Count > 0)
+        {
+            PauseSel = PauseSel < 0 ? (step > 0 ? 0 : Hud.PauseRows.Count - 1)
+                                    : (PauseSel + step + Hud.PauseRows.Count) % Hud.PauseRows.Count;
+            Audio.Play("select");
+            return;
+        }
+        if (PauseSel >= 0 && PauseSel < Hud.PauseRows.Count)
+        {
+            string sid = Hud.PauseRows[PauseSel].id;
+            int dir = Raylib.IsKeyPressed(KeyboardKey.Right) ? 1 : (Raylib.IsKeyPressed(KeyboardKey.Left) ? -1 : 0);
+            if (dir != 0)
+            {
+                if (sid.StartsWith("vol", StringComparison.Ordinal)) NudgeVol(sid[3] - '0', dir);
+                // Every other adjustable row is a one-way cycle (its own click behaviour), so a
+                // left-nudge cycles too rather than pretending to be a reversible slider.
+                else ActivatePauseRow(sid);
+                return;
+            }
+            if (Raylib.IsKeyPressed(KeyboardKey.Enter))
+            {
+                if (!sid.StartsWith("vol", StringComparison.Ordinal)) ActivatePauseRow(sid);
+                return;
+            }
+        }
+        if (PauseSel >= 0 && Raylib.GetMouseDelta() != Vector2.Zero) PauseSel = -1;   // mouse takes back over
+
+        // ---- mouse ------------------------------------------------------------------------------
         // A2 mix faders: a drag in progress owns the mouse until it is released, and only THEN
         // does the setting hit disk (Display.SetVol is live, CommitVol writes display.json).
         if (_volDrag >= 0)
@@ -4703,22 +4782,8 @@ public partial class Game
                 Display.SetVol(i, VolFrac(Hud.PauseVol[i], m.X));
                 return;
             }
-        if (Raylib.CheckCollisionPointRec(m, Hud.PauseResume)) Paused = false;
-        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseFullscreen)) Display.ToggleFullscreen();
-        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseWindow)) Display.CycleSize();
-        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseMute)) Audio.ToggleMute();
-        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseShake)) Fx.ShakeOn = !Fx.ShakeOn;
-        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseThreat)) CycleThreatPref();
-        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseBright)) Display.CycleBrightness();
-        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseGamma)) Display.CycleGamma();   // W9: true gamma (post-FX pass)
-        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseColorblind)) Display.ToggleColorblind();
-        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseAutoCam)) { Display.ToggleAutoCam(); if (!Display.AutoCam) { CamZoom = 1f; CamPan = Vector2.Zero; } }
-        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseAnimSpeed)) CycleAnimSpeed();   // W5 comfort: playback pacing
-        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseUiScale)) Display.CycleUiScale();  // W5 comfort: UI text size
-        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseCodex)) { BeginCodex(); }   // W6: open the field manual (remembers this phase for BACK)
-        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseAudio)) { BeginAudition(); }   // A3: open AUDIO CHECK (same remember-and-restore contract as the codex)
-        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseControls)) { BeginControls(); }   // W6: open CONTROLS (key rebinding)
-        else if (Raylib.CheckCollisionPointRec(m, Hud.PauseAbandon)) AbandonRun();
+        foreach (var (id, r) in Hud.PauseRows)
+            if (Raylib.CheckCollisionPointRec(m, r)) { ActivatePauseRow(id); return; }
     }
 
     /// PAUSE-menu ABANDON — mode-aware teardown (W1 mode-seam). LAST STAND and SKIRMISH/DAILY route

@@ -681,6 +681,13 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_BEACON") == "1") game.DebugBeacon();
         if (shot && float.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_ZOOM"), out float z)) game.CamZoom = z;
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_PAUSE") == "1") game.Paused = true;
+        // W6: SIGHTLINE_PAUSESEL=<row index> parks the pause card's KEYBOARD cursor on a row, so the
+        // fine-motor navigation route can be photographed. Shot-only; -1 (the default) is mouse mode.
+        // HELD every frame (like DebugMousePark below): the pause card hands control back to the
+        // mouse on any pointer movement, and the Xvfb pointer twitches, so a one-shot assignment
+        // gets cleared before the shot frame lands.
+        int _psel = -1;
+        bool pauseSelSet = shot && int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_PAUSESEL"), out _psel);
         // W5 ON-RAMP (shot + the hand-run autoplay smoke test): SIGHTLINE_ANIMSPEED=<x> names the
         // playback multiplier and SIGHTLINE_LONGMOVE=1 stages a multi-tile walk to film. Autoplay is
         // included so the smoke test can be re-run AT the fastest setting (the pace change alters
@@ -806,6 +813,7 @@ public static class Program
             // hover-driven, so the harness has to hold the cursor on the tile every frame.
             if (shot && game.DebugMousePark.HasValue)
                 Raylib.SetMousePosition((int)game.DebugMousePark.Value.X, (int)game.DebugMousePark.Value.Y);
+            if (pauseSelSet) game.PauseSel = _psel;   // W6: hold the pause card's keyboard cursor
             if (tooltipHover) game.KbCursor = true;            // Q1: hold the board cursor on the foe (a mouse
                                                                // delta from the Xvfb pointer clears it otherwise)
             game.Update(dt);
