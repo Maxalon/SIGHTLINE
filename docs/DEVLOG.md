@@ -4913,3 +4913,67 @@ that changed *geometry at constant lethality*; a lever that lowers how much enem
 raises both axes at once, because more soldiers survive to hold targets AND the board is safer
 to stand on. That is consistent with the mechanism W4 identified and is the strongest argument
 yet for re-specifying axis (b) additively (spec in ROADMAP).
+
+## 7. VERIFICATION
+- `dotnet build -c Release` — **0 warnings / 0 errors**.
+- `bash scripts/qa-sweep.sh --full` — **46/46 PASS, 0 FAIL**, and the **COVERAGE GAP block is
+  empty**. Includes the wave's new `OPENERTEST` and the three tests most exposed to a
+  body-count change (`ONRAMPTEST`, `PODTEST`, `HEATLADDERTEST`), plus its autoplay x3
+  (WIN/WIN/WIN). The sweep's derived footer is now 46.
+- **`SIGHTLINE_PAIRTEST=1` under `xvfb-run` — PASS** with the shipped default on: h0 slot0
+  (WIN, 6 cleared, 42 turns) and h4 slot1 (LOSE, 4 cleared, 32 turns) both byte-MATCH.
+- **Autoplay x10 on the shipped defaults** — 5 WIN / 5 LOSE, **zero exceptions, zero TIMEOUTs**,
+  max 14022 frames against the 20000 cap. (The win split is the weak smoke-test autopilot's,
+  not a balance number; the contract is "no exception, no TIMEOUT".)
+- **Instrument identity**: `R0diag-h0-b0` — the X2 tree with every new knob OFF, on the pinned
+  slot set — reproduces `R0-h0-b0` **exactly**: runs, missions, completion, avg-missions,
+  `decisionRichness`, `byObjective`, `byMission`, `playerClasses` and all ten per-slot paired
+  records MATCH. Every round in this write-up is therefore a comparison on one instrument.
+- **`OPENERTEST`** (new, in the sweep): pins the ramp's shape (full trim at m1, half rounded up
+  at m2, none from m3), the shipped default of 1, the 3-body floor, determinism, and that
+  RECRUIT still fields exactly one fewer body than heat 0 at m1 with the trim on.
+
+## 8. HONEST ASSESSMENT — is this tree tuned, or merely measured?
+
+**It is measured, and one real defect in it is fixed. It is not yet tuned, and the difference
+matters.**
+
+What this wave can defend. There is now a ladder of record with a base commit, run at n=40 per
+rung across six rungs including the one below zero, on the composed tree, with the raw chunks
+archived. It is monotone, five of its six rungs sit inside the published band and two land on
+target to the decimal, and the correction that got it there is a **repair of a named defect**
+rather than a difficulty dial: the game was ending a quarter of its runs on mission 1, against
+a squad with nothing earned yet, because the opener grace the codebase already contains was
+gated on `heat > 0`. RECRUIT had been running the control experiment for two waves and nobody
+had read it. Fixing it cost one hostile body on two missions and no combat math at all —
+shots-per-kill went *up* at every single rung.
+
+What it cannot defend, in order of how much it bothers me:
+
+1. **The instrument is too coarse for the question the band asks.** A 40-campaign rung carries
+   ±6-8 points; the band's tolerance is ±8 and its rung steps are 10. Three of the six deltas
+   in the shipped table (h2 −5.0, h6 −12.5, h8 +10.0) are almost certainly noise, and I cannot
+   prove otherwise from this data. **The single highest-value thing the next wave can do is not
+   another lever — it is n≥80 per rung on the state that is already shipped.** Everything else
+   in this program is built on a measurement whose error bar is the size of the answer.
+2. **Two non-regression gates are breached and one of them is a real cost.** The
+   Eliminate-turns breach I will defend (§4: on this tree that metric is mission 1's length,
+   and shots-per-kill — the metric that actually guards X1's purchase — improved). The
+   **lead-swings breach is a genuine cost**: 0.79 → 0.61 at heat 0, because a 4-body opener
+   against a full squad is not a contested fight and mission 1 is a quarter of all matches
+   played. The game traded some of its swing for a first mission that is not a coin flip. I
+   think that is the right trade and I do not think it is free.
+3. **Escort is still the drag objective and the old numbers were flattering it.** 12.81 turns
+   at heat 0, 13.48 at RECRUIT, 33% win at heat 8. Its previously-celebrated 8.03/8.19 came
+   from a sample of only the runs healthy enough to reach it. This is the clearest example in
+   the project of a metric improving because the game got *worse* around it.
+4. **Heat 8 is out of band at 17.5% and the middle rungs still have no measurable teeth.**
+   Mission win-rate barely separates heats 0-6 even in the shipped state (89.2 / 82.4 / 82.1 /
+   80.2), and the apex is a wall made of four objectives (Escort 33, Evac 0, Rescue 33,
+   Decapitate 41), not a rung average. Both are recorded as ROADMAP items.
+
+**The one thing I would say to the next wave.** This wave's finding was not produced by a
+lever; it was produced by looking at `byMission` instead of the rung average, and by noticing
+that a rung the project already ships (RECRUIT) was a controlled experiment nobody had read.
+The rung average hid a 25% mission-1 failure behind a plausible-looking 35%. Before spending
+another twenty minutes of CPU on a dial, read the decomposition you already have.
