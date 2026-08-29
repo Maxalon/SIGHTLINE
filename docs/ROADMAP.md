@@ -1063,10 +1063,35 @@ sets, one lever per measured round, fresh same-slot R0 first, dip budgets, breac
       average so a turn-count change is never mistaken for a decision-quality change.
 
 - [ ] **Owner decisions pending** (decision paragraphs with recommendations in DEVLOG §FUL-13
-      "DESIGN-QUESTION DOCKET"): skirmish numeric heat (recommend: exempt SKIRMISH from the m1
-      grace, keep DAILY); founding-squad corpsman (recommend: first-backfill guarantee or
-      keep-as-is — a founding-four identity choice, not a tune); grenade pre-frag bot arm
+      "DESIGN-QUESTION DOCKET"): ~~skirmish numeric heat~~ **DECIDED + SHIPPED by W9 THE REPAIR**
+      (the m1 grace is gated on `Mode != GameMode.Skirmish`, which covers DAILY too — a skirmish
+      player explicitly dialled the rung, so there is no green squad to protect; CAMPAIGN and
+      ENDLESS keep the grace byte-for-byte. The dial had been adding ZERO bodies/stats/damage in
+      two of the four shipped modes); founding-squad corpsman (recommend: first-backfill guarantee
+      or keep-as-is — a founding-four identity choice, not a tune); grenade pre-frag bot arm
       (recommend: accept the human-vs-bot read gap as designed skill expression).
+- [ ] **RE-MEASURE THE LADDER — W9 THE REPAIR changed RNG DRAW ORDER.** Three defect fixes move
+      the draw sequence (the grapple no longer env-damages its own grappler and so no longer draws
+      its FX; a downed unit's queued shot no longer rolls; the autopilot returns after a GRAPPLE
+      and takes an extra `Util.Roll(45)` on the next step), and two more change composition without
+      changing draw order (the skirmish/daily heat gate, the post-event `AutoDeploy`). **Every
+      ladder figure published before W9 is therefore void against this tree.** W9 deliberately did
+      NOT price them — a batch would only confirm the numbers moved. Note the frame cap also moved
+      20000 -> 90000, which REMOVES the right-censoring that scored the longest campaigns as
+      losses (the archived x2 chunks log `frame-cap hits: 1`), so the new baseline may read
+      slightly higher for that reason alone.
+- [ ] **`Mission.OpenerTrim` still trims a SKIRMISH / DAILY force** (one body off any `n <= 1`
+      force). Uniform across every heat rung, so it does not flatten the dial W9 restored and it is
+      not a defect — but a skirmish is one body lighter than a campaign mission 1 with the same
+      parameters. Changing it is a balance lever, not a repair; decide it with a measured round.
+- [ ] **The tooltip's UNBADGED modifiers.** W9 fixed the three badges that LIED; these are
+      OMISSIONS — Siegebreaker, Bipod, the defender's CoolHeaded, Routed, Vantage/Breaker/Guardian
+      crit, the Marksmen/Fervor/Executioners boons, PressureAim and the faction aim rules all move
+      the hit%/crit with no badge. `Hud.DrawTooltip`'s own header claims the panel surfaces EVERY
+      modifier, so either the badges or the comment is still over-claiming.
+- [ ] **CODEX footer drift** — its legend reads "Up/Down select · Wheel scroll" while keyboard
+      scrolling is bound to Left/Right and A/D (`Game.Codex.cs:80-81`). Same class as the SKIRMISH
+      "+/- heat" legend W9 fixed by binding the keys; do the same here or reword.
 - [ ] **The h6 Defend residual** (the one recorded bump after the FUL-13 rounds: pinned h6
       Defend 97% n=89 while pinned h8 sits at 87 parity). Mechanism named in Game.cs at the
       defendKeep line: at +2 stats extra bodies feed the rout economy instead of pressuring
@@ -1102,6 +1127,49 @@ sets, one lever per measured round, fresh same-slot R0 first, dip budgets, breac
 ---
 
 ## PROGRAM "RESONANCE" — landed waves (see docs/DEVLOG.md for the write-ups)
+
+- [x] **W9 — THE REPAIR.** DONE. 15 of 15 assigned defects reproduced and fixed, plus one hard
+      autoplay HANG found while calibrating the TIMEOUT fix that the brief did not have. Write-up
+      in docs/DEVLOG.md §W9. Every fix ships a test that FAILS on the pre-fix tree (proven by
+      reintroducing each defect alone and recording the failure tag).
+      - **The crashes.** `meta.json` — the file holding ALL permanent progress — had no analogue of
+        the "parses fine but is unusable is corruption too" guard `save.json` has had since D2, so
+        `{"Veterans":[null]}`, a veteran with `Cls:null`, and `{"Legends":[null]}` each killed NEW
+        CAMPAIGN or the WAR ROOM with an unhandled exception, no stash, no recovery. Sanitised at
+        the single choke point (`SaveGame.LoadMetaDto`). `MetaDto.SchemaVersion` is now READ, with
+        an explicit FORWARD-TOLERANT policy (the opposite of the run save's, on purpose: refusing a
+        newer profile would blank a career) that copies the file to `.bak` before the first
+        write-back can drop fields it cannot see.
+      - **The displayed number.** The tooltip's DMG row printed the RAW weapon band (3-5 for a shot
+        dealing 1-2 to a guarded HVT, with its own GRAZE 1 row disagreeing beneath it); the LOCK-ON
+        badge was a second, four-waves-stale copy of a rule UNDERTOW W5 changed; and
+        `Combat.ComputeOdds` was NOT side-effect free — hovering the guarded HVT popped "GUARDED"
+        ~60x/second. `ShotOdds` gains `DmgMinEff/DmgMaxEff` (the raw band stays raw for
+        `ExpectedDamage`), `Combat.LockOnAim` is now the single source of truth for both the math
+        and the badge, and `HardenedReduce` takes `telegraph`, false at every read site.
+      - **Verbs and flow.** GRAPPLE self-rammed the grappler on every adjacent target — 100% of a
+        JUGGERNAUT's grapples — so `ShoveAnim` no longer rams its own initiator (the adjacent case
+        is a deliberate SLAM; rejecting the target instead would have left the fork with no legal
+        grapple). A soldier downed mid-queue still fired its own queued shot: the purge gains the
+        shooter clause, `ShotAnim` self-cancels, and the autopilot stops queueing a second action
+        behind an unstarted anim.
+      - **The no-TIMEOUT contract, made TRUE.** The stall cap was per-MISSION and re-armed by the
+        checkpoint redeploy while the harness budget is a whole-campaign frame count; and a
+        WITHIN-TURN deadlock was invisible to it entirely (a DISORIENTED soldier hit
+        `DoOverwatch(); return;` in AutoStep's DEFEND branch and spent nothing — 38,000 frozen
+        frames on seed 3001). Run-scoped `RunTurns` + `AutoMaxRunTurns` + a within-turn idle guard,
+        caps recalibrated from a measured census, and **qa-sweep.sh now EXITS NON-ZERO** on a
+        TIMEOUT instead of printing it for a reader to notice.
+      - **Modes + economy.** SKIRMISH/DAILY heat was numerically inert (see the decided owner item
+        above); a field event's recruit fielded cap+1 and its release stranded a healthy benched
+        soldier at cap-1 (one `_run.AutoDeploy()`); the SKIRMISH legend's "+/- heat" keys are now
+        bound.
+      - **WAR ROOM.** STANDING RESERVE was invisible AND unbuyable on a fresh profile (the overflow
+        `break` fired before the buy-rect was published). `Hud.WarUnlockPlan` sizes rows to the room
+        instead of truncating the catalogue, so every unowned unlock always gets a card and a rect.
+      - **New hooks:** `SIGHTLINE_TRUTHTEST`, `SIGHTLINE_GRAPPLETEST` (the first coverage GRAPPLE
+        has ever had), `SIGHTLINE_STALLTEST`; plus new legs in SAVETEST, COMBATTEST, DKTEST,
+        DOWNTEST, BENCHTEST, MODETEST and METATEST. All wired into `scripts/qa-sweep.sh`.
 
 - [x] **P1 — PRESENTATION.** DONE. The post chain got the cheapest visual headroom left in the
       project, and the strategic layer stopped looking like a spreadsheet.
