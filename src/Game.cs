@@ -7542,7 +7542,15 @@ public partial class Game
         };
     }
 
-    public void Draw()
+    // W5 THE FIRST HOUR: the frame is drawn in TWO passes so `Display.RenderFrame` can put the
+    // post-FX grade on the board and NOT on the type (audit visual-2 — the bloom was flooding
+    // saturated UI plates into their own labels). The seam is atmosphere-vs-chrome, not
+    // board-vs-menu: the overlay screens' full-screen animated backdrop rides in the board pass
+    // and keeps its bloom, while every plate, glyph and number is painted after the composite.
+    // Nothing here changes WHAT is drawn or in what order — only which pass it lands in.
+
+    /// Pass 1 — the graded pass. Board, death-flash, overlay-screen atmosphere.
+    public void DrawBoardLayer()
     {
         Raylib.ClearBackground(Pal.Bg);
 
@@ -7554,6 +7562,12 @@ public partial class Game
         if (DeathFlash > 0)
             Raylib.DrawRectangle(0, 0, Cfg.ScreenW, Cfg.ScreenH, Raylib.Fade(Pal.Foe, DeathFlash * 0.35f));
 
-        Hud.Draw(this);
+        Hud.DrawBackdropLayer(this);
     }
+
+    /// Pass 2 — the ungraded pass. Every plate, label and number, exactly as authored.
+    public void DrawHudLayer() => Hud.Draw(this);
+
+    /// Single-pass draw, kept for callers that don't split (and as the definition of the order).
+    public void Draw() { DrawBoardLayer(); DrawHudLayer(); }
 }

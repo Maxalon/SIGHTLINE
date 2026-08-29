@@ -94,6 +94,7 @@ echo -n "OPENERTEST : "; SIGHTLINE_OPENERTEST=1 run | grep -oE "OPENERTEST: (PAS
 # "NAME PASS" with no colon, like EXPOSURETEST.
 echo -n "TUTTEST    : "; SIGHTLINE_TUTTEST=1  run | grep -oE "TUTTEST: (PASS|FAIL)" | head -1
 echo -n "BRIEFTEST  : "; SIGHTLINE_BRIEFTEST=1 run | grep -oE "BRIEFTEST: (PASS|FAIL)" | head -1
+echo -n "CONTRASTTEST: "; SIGHTLINE_CONTRASTTEST=1 run | grep -oE "CONTRASTTEST: (PASS|FAIL)" | head -1
 echo -n "THREATTEST : "; SIGHTLINE_THREATTEST=1 run | grep -oE "THREATTEST (PASS|FAIL)" | head -1
 # R2 FIX 1: the nobody-is-walled-out geometry invariant (all 4 deployment shapes x 8 objectives
 # x 2 heats, thousands of fresh boards). ~25 s.

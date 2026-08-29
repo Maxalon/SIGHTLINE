@@ -196,8 +196,27 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         return new Rectangle(cx - r.Width * s / 2f, cy - r.Height * s / 2f, r.Width * s, r.Height * s);
     }
 
+    // W5: TRUE when DrawBackdropLayer paints an OPAQUE full-screen ground for this phase. Those
+    // screens used to draw the in-mission chrome first and then bury it under the backdrop; now
+    // the backdrop lands in the EARLIER (post-FX) pass, so the chrome has to be skipped instead of
+    // covered — otherwise the top bar and the action bar paint straight over the main menu.
+    // BARRACKS and AUDIO CHECK are deliberately absent: neither draws a backdrop, so their frame
+    // order is identical to before the split.
+    public static bool BackdropOwnsFrame(Game g) =>
+        g.Phase == Phase.Intro || g.Phase == Phase.Win || g.Phase == Phase.Lose
+        || g.Phase == Phase.SkirmishSetup || g.Phase == Phase.WarRoom
+        || g.Phase == Phase.Codex || g.Phase == Phase.Draft;
+
     public static void Draw(Game g)
     {
+        if (BackdropOwnsFrame(g))
+        {
+            DrawOverlays(g);
+            if (g.Paused) DrawPause(g);
+            if (g.EditingTag) DrawTagEditor(g);
+            PruneAnims();
+            return;
+        }
         DrawTopBar(g);
         if (g.Phase == Phase.PlayerTurn || g.Phase == Phase.EnemyTurn)
         {
@@ -2232,8 +2251,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     // ============================================================================
     static void DrawIntro(Game g)
     {
-        float t = (float)Raylib.GetTime();
-        DrawTacticalBackdrop(t, Pal.Friend, 0.0f);
+        float t = (float)Raylib.GetTime();   // backdrop drawn by DrawBackdropLayer (post-FX pass)
 
         int W = Cfg.ScreenW, H = Cfg.ScreenH;
 
@@ -2402,6 +2420,46 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         Cfg.Text("GEOMETRY · PARTICLES · NO QUARTER", new Vector2(W / 2f - 150, H - 30), 12, 1f, Raylib.Fade(Pal.TxtDim, 0.6f));
     }
 
+    // ── W5 THE FIRST HOUR: the ATMOSPHERE half of the overlay screens ─────────────────────────
+    /// The animated tactical backdrop (and each screen's colour wash) for whichever full-screen
+    /// overlay is up. Split out of the six screen builders so `Display.RenderFrame` can put it in
+    /// the POST-FX pass — where the bloom, vignette and chromatic aberration belong — while the
+    /// screen's PLATES AND TYPE are drawn after the composite and stay as authored (audit
+    /// visual-2: the bloom was flooding a saturated button's own label; TRAINING OP measured
+    /// 2.19:1 with post-FX on against 8.67:1 with it off).
+    ///
+    /// This is the atmosphere/chrome seam, not the screen/HUD seam: everything here is
+    /// full-screen, type-free and deliberately soft, so nothing in it can lose contrast to a
+    /// blur. Screens with no backdrop of their own (BARRACKS, AUDIO CHECK, live play) draw
+    /// nothing and fall through to the board underneath, exactly as before.
+    public static void DrawBackdropLayer(Game g)
+    {
+        float t = (float)Raylib.GetTime();
+        switch (g.Phase)
+        {
+            case Phase.Intro:
+                DrawTacticalBackdrop(t, Pal.Friend, 0.0f);
+                break;
+            case Phase.Win:
+            case Phase.Lose:
+            {
+                Color accent = g.Phase == Phase.Win ? Pal.Good : Pal.Foe;
+                DrawTacticalBackdrop(t, accent, 0f);
+                // an extra colour wash to grade the whole frame toward win-green / lose-red
+                Raylib.DrawRectangle(0, 0, Cfg.ScreenW, Cfg.ScreenH,
+                                     Raylib.Fade(accent, g.Phase == Phase.Win ? 0.06f : 0.08f));
+                break;
+            }
+            case Phase.SkirmishSetup: DrawTacticalBackdrop(t, Pal.Friend, 0.15f); break;
+            case Phase.WarRoom:       DrawTacticalBackdrop(t, Pal.Accent, 0f); break;
+            case Phase.Codex:         DrawTacticalBackdrop(t, Pal.Good, 0f); break;
+            case Phase.Draft:
+                DrawTacticalBackdrop(t, Pal.Friend, 0f);
+                Raylib.DrawRectangle(0, 0, Cfg.ScreenW, Cfg.ScreenH, Raylib.Fade(Pal.RGBA(6, 9, 13), 0.82f));
+                break;
+        }
+    }
+
     /// A reusable animated geometric backdrop: an opaque graded fill, a slow-drifting
     /// perspective-ish grid, a horizontal scanning sightline, drifting reticle rings,
     /// and a few primitive "tracer" streaks. Used by the intro + the win/lose screens
@@ -2512,9 +2570,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     {
         float t = (float)Raylib.GetTime();
         Color accent = win ? Pal.Good : Pal.Foe;
-        DrawTacticalBackdrop(t, accent, 0f);
-        // an extra colour wash to grade the whole frame toward win-green / lose-red
-        Raylib.DrawRectangle(0, 0, Cfg.ScreenW, Cfg.ScreenH, Raylib.Fade(accent, win ? 0.06f : 0.08f));
+        // backdrop + win/lose colour wash drawn by DrawBackdropLayer (post-FX pass)
 
         int W = Cfg.ScreenW;
         var run = g.RunState;
@@ -2764,8 +2820,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     // ============================================================================
     static void DrawSkirmishSetup(Game g)
     {
-        float t = (float)Raylib.GetTime();
-        DrawTacticalBackdrop(t, Pal.Friend, 0.15f);
+        float t = (float)Raylib.GetTime();   // backdrop drawn by DrawBackdropLayer (post-FX pass)
         int W = Cfg.ScreenW;
 
         // title
@@ -2849,8 +2904,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     // ============================================================================
     static void DrawWarRoom(Game g)
     {
-        float t = (float)Raylib.GetTime();
-        DrawTacticalBackdrop(t, Pal.Accent, 0f);
+        float t = (float)Raylib.GetTime();   // backdrop drawn by DrawBackdropLayer (post-FX pass)
         var p = g.WarRoom;
         if (p == null) return;
 
@@ -2954,8 +3008,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     // ============================================================================
     static void DrawCodex(Game g)
     {
-        float t = (float)Raylib.GetTime();
-        DrawTacticalBackdrop(t, Pal.Good, 0f);
+        float t = (float)Raylib.GetTime();   // backdrop drawn by DrawBackdropLayer (post-FX pass)
         CodexTabBtns.Clear();
 
         var cats = g.CodexCats;
@@ -3665,9 +3718,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         DraftBoonBtns.Clear();
         DraftContractBtns.Clear();
 
-        float t = (float)Raylib.GetTime();
-        DrawTacticalBackdrop(t, Pal.Friend, 0f);
-        Raylib.DrawRectangle(0, 0, Cfg.ScreenW, Cfg.ScreenH, Raylib.Fade(Pal.RGBA(6, 9, 13), 0.82f));
+        float t = (float)Raylib.GetTime();   // backdrop + dim wash drawn by DrawBackdropLayer
 
         int W = Cfg.ScreenW;
         var mouse = Raylib.GetMousePosition();
