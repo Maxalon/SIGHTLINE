@@ -927,6 +927,19 @@ public class Run
     // ---- adaptive assist (meta) ----
     /// The active assist tier (0..AssistMax). Disabled above Heat 0 — Heat is the hard mode, so a
     /// struggling player on base difficulty gets help, while anyone climbing the ladder never does.
+    ///
+    /// R2 reviewed and KEPT the RECRUIT case, which the `> 0` test makes stack the assist ON TOP of
+    /// RECRUIT's own relief. That is deliberate, not an oversight of W5's new rung:
+    ///   - The assist responds to a LOSS STREAK, not to a difficulty rung. The player most likely
+    ///     to have one is the player on the on-ramp; switching the safety net off precisely there
+    ///     inverts the reason it exists.
+    ///   - The stack is worth ONE point. RECRUIT is -1 force-wide HP/Aim and the assist is already
+    ///     up to -AssistMax on its own at heat 0, so the RECRUIT+assist floor is -6 against heat
+    ///     0's -5. It does not open a new order of magnitude of relief.
+    ///   - The gate that actually matters is intact: any rung ABOVE standard gets nothing. Winning
+    ///     at RECRUIT still does not advance the Heat ceiling, so no assisted win buys progression.
+    /// If it is ever changed, the test to change is `HeatLevel > 0` -> `HeatLevel != 0`, and
+    /// Game.AssistPreview (`PendingHeat > 0`) must move in the same commit or the intro chip lies.
     public int AssistLevel => HeatLevel > 0 ? 0 : Math.Min(AssistMax, LossStreak);
 
     /// Enemy stat-bump relief from the assist (subtracted from statDelta in SetupMission): one
