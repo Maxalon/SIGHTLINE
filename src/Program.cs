@@ -198,6 +198,14 @@ public static class Program
             Console.WriteLine(Combat.SelfTest());
             return;
         }
+        // SIGHTLINE_TRUTHTEST=1 : W9 THE REPAIR — "what the UI says is what the dice do". Ground-truths
+        // the DISPLAYED shot numbers (the tooltip's DMG band, its GRAZE row, its LOCK-ON badge) against
+        // real Combat.Resolve rolls, and pins ComputeOdds/ExpectedDamage as side-effect free. Window-free.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_TRUTHTEST") == "1")
+        {
+            Console.WriteLine(Combat.TruthSelfTest());
+            return;
+        }
         // SIGHTLINE_THREATTEST=1 : RESONANCE T2 — the incoming-fire FORECAST pinned against
         // Combat.ComputeOdds on a synthetic board (gun count, best hit%, expected damage, cover /
         // flank angle, out-of-range / dormant / dry / no-LoS exclusion, overwatch + focused cones,

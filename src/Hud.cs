@@ -1889,7 +1889,12 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
             if (a.HasTrait(Trait.Killer) && tgtHurt)          flags.Add(("KILLER", $"+{Unit.KillerAim} aim", Pal.Good));
             if (a.HasTrait(Trait.Vengeful) && a.AllyDown)     flags.Add(("VENGEFUL", $"+{Unit.VengefulAim} aim", Pal.Good));
             if (a.HasTrait(Trait.ColdBlood) && selfHurt)      flags.Add(("COLD BLOOD", $"+{Unit.ColdBloodCrit} crit", Pal.Good));
-            if (a.HasPerk(Perk.LockOn) && o.CoverLevel == 0)  flags.Add(("LOCK-ON", $"+{Unit.PerkAim} aim", Pal.Good));
+            // W9: read the SAME predicate ComputeOdds adds to the hit%, not a second copy of the rule.
+            // The copy here still gated on CoverLevel==0 — a strict superset of Flanked — four waves
+            // after UNDERTOW W5 de-supersetted the perk, so the badge promised "+15 aim" on any
+            // uncovered target (the modal targeting state) for a shot whose hit% moved by 0.
+            int lockOnAim = Combat.LockOnAim(a, o.Flanked);
+            if (lockOnAim > 0)                                flags.Add(("LOCK-ON", $"+{lockOnAim} aim", Pal.Good));
             if (a.HasPerk(Perk.CloseQuarters) && dist <= Unit.CloseRange) flags.Add(("CLOSE QUARTERS", $"+{Unit.PerkAim} aim", Pal.Good));
             if (a.HasPerk(Perk.Marksman) && dist >= Unit.LongRange)       flags.Add(("MARKSMAN", $"+{Unit.PerkAim} aim", Pal.Good));
             if (a.HasPerk(Perk.Executioner) && tgtSubHalf)    flags.Add(("EXECUTIONER", $"+{Unit.ExecutionerCrit} crit", Pal.Good));
@@ -1998,7 +2003,9 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         // band are SEPARATE fields (W10): "DMG 3-5" then "GRAZE 3" on its own line, so the
         // consolation floor never reads as part of the full-hit range.
         Cfg.Text("DMG", new Vector2(x + pad, oy + 58), 13, 1f, Pal.TxtDim);
-        string dmg = $"{o.DmgMin}-{o.DmgMax}";
+        // W9: the EFFECTIVE band (after THIS defender's reduction), not the raw weapon band. Against
+        // a guarded HVT this row read 3-5 for a shot that deals 1-2, with GRAZE 1 right beneath it.
+        string dmg = $"{o.DmgMinEff}-{o.DmgMaxEff}";
         Cfg.Text(dmg, new Vector2(x + w - (int)Cfg.Measure(dmg, 16, 1f).X - pad, oy + 56), 16, 1f, Pal.Txt);
         // Graze safety net: a near-miss still hits for this guaranteed floor instead of whiffing
         // (so missing is never *nothing*). Its own row, in the Accent hue used for graze FX so it
