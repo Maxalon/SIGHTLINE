@@ -5412,3 +5412,114 @@ unmoved: win-rate 50→50, missions 83→83, policy gap 20→20, paired gap 20�
 only micro-jitter in decision richness (meaningful choices/turn 2.757→2.737, lead swings/match
 0.60→0.63, avg max swing 51.13→50.70). FIX 1 changes procedural ENVELOP geometry in ~1-4% of
 builds, which is the size of that jitter.
+
+---
+
+# PROGRAM CROSSCUT — L1 "THE LADDER OF RECORD AT n=80" (2026-08-29, lead)
+
+**Base commit `636112c`** (documentation-only on top of `d350416`, RESONANCE milestone 2).
+Raw data, method and the full tables: `docs/measurements/l1/README.md`.
+
+## The charter
+
+X2 closed by naming its own successor: *"The single highest-value thing the next wave can do is
+not another lever — it is n>=80 per rung on the state that is already shipped. Everything else in
+this program is built on a measurement whose error bar is the size of the answer."* Nobody had
+done it. This round did: 24 CRN chunks, 6 rungs x 4 disjoint slot sets x greedy+sloppy,
+**480 campaigns**, `runs=20` asserted in every chunk, run from a snapshot binary so the tree could
+keep building. No lever was spent. Nothing in the game changed.
+
+## THE LADDER
+
+| rung | L1 (n=80) | +-SE | X2 (n=40) | band | verdict | step |
+|---|---|---|---|---|---|---|
+| RECRUIT | **73.8** | 4.9 | 75.0 | 75 +-8 | in band | - |
+| heat 0 | **48.8** | 5.6 | 57.5 | 55 +-8 | in band | -25.0 |
+| heat 2 | **33.8** | 5.3 | 35.0 | 40 +-8 | in band | -15.0 |
+| heat 4 | **21.2** | 4.6 | 30.0 | 30 +-8 | BELOW by 0.8 | -12.5 |
+| heat 6 | **17.5** | 4.2 | 20.0 | 20 +-8 | in band | **-3.8** |
+| heat 8 | **10.0** | 3.4 | 17.5 | 10 +-5 | in band, on target | -7.5 |
+
+**This table supersedes X2's**, which supersedes X1's, W5's, W4's and FUL-13's. Halving the error
+bar bought three things no lever could have:
+
+1. **The ladder is monotone at every step, first try.** X2 recorded that "rung ORDER is not
+   resolvable at n=40" and that two waves had argued over inversions no data could settle. There
+   are none.
+2. **Heat 8 lands on its published target to the decimal.** X2 measured it **out of band at 17.5%**
+   and left it as a standing ROADMAP defect with a named cause ("the apex is a wall made of four
+   objectives"). It is 10.0%. **The defect was the measurement.** Every hour a future wave would
+   have spent tuning the apex is saved.
+3. **The middle of the ladder is flat and the top is a cliff.** Steps: -25.0, -15.0, -12.5,
+   **-3.8**, -7.5. Heat 5 and 6 together buy 3.8 points. `Heat.Mods` explains it exactly: rung 8
+   is the ONLY entry carrying `DmgDelta` or `AiTier`, so the middle rungs add bodies and stats
+   while only the apex changes KIND. That is now a measured shape, not a suspicion.
+
+heat 4's miss is 0.8 points under the floor at 1.9 sigma from the band centre. Recorded, not
+repaired: it is a boundary case and repairing it inside a measurement round would be exactly the
+mistake this round exists to stop.
+
+## THE FINDING: twenty worlds have been standing in for the game
+
+Every wave since W2 has measured on `SIGHTLINE_BALANCE_BASE` **0 and 10**, and only those. This
+round added bases 20 and 30, which had never been run. Pooled over all six rungs the old sets
+read **92/240 = 38.3%** and the new ones **72/240 = 30.0%** - a **+8.3 point** gap, SE 4.3,
+**z = 1.93, two-sided p = 0.053**, 5 of 6 rungs positive. At heat 0 it is 60.0 vs 37.5; at heat 8,
+17.5 vs 2.5.
+
+**Stated honestly: p = 0.053 is not established, and this write-up does not claim it is.** But the
+mechanism is not mysterious - `Util.Reseed(50000 + slot)` makes slot *i* a fixed world forever, so
+twenty fixed worlds became the operational definition of "the game" and every lever since W2 was
+priced against them. The response is a method rule, which costs nothing:
+
+> **No wave may measure a ladder on bases 0 and 10 alone.** A rung is four slot sets or it is not
+> a rung. A wave that can only afford 40 campaigns must draw its two sets from a rotating pool and
+> must say which two it drew.
+
+## THE TREE HAS NOT DRIFTED (and two waves' inertness claims are confirmed)
+
+On X2's own slot set (bases 0+10, n=40, directly comparable to its archived S1 chunks): RECRUIT
+72.5 vs 75.0, heat 0 60.0 vs 57.5, heat 2 35.0 vs 35.0 - **within 2.5 points at every rung.**
+A3 AUDITION and R2 QA FIXES both claimed to be gameplay-inert against their own batches; neither
+checked the ladder. They were right, and now it is on the record.
+
+## DECAPITATE IS THE WORST OBJECTIVE IN THE GAME
+
+Pooled over all 480 campaigns:
+
+| objective | n | win% | +-SE | turns |
+|---|---|---|---|---|
+| Escort | 156 | 83.3 | 3.0 | **10.84** |
+| Evac | 56 | 78.6 | 5.5 | **10.45** |
+| Defend | 368 | 81.5 | 2.0 | 8.73 |
+| **Decapitate** | **326** | **64.1** | **2.7** | 4.79 |
+| Rescue | 110 | 85.5 | 3.4 | 4.68 |
+| Hack | 130 | 88.5 | 2.8 | 3.68 |
+| Eliminate | 536 | 92.5 | 1.1 | 3.66 |
+| Sabotage | 115 | 85.2 | 3.3 | 3.64 |
+
+Decapitate is **17 points below the next-worst objective and 28 below Eliminate**, at n=326 with
+an SE of 2.7 - and it is the second-most-played objective in a run. **Nothing in this project's
+documentation says so.** The ROADMAP names *Escort* as "the drag objective"; Escort is 83.3%.
+
+What is true of Escort and Evac is that they are **slow** - 10.84 and 10.45 turns against
+Eliminate's 3.66 - not that they are lost. **Slow and lost are different defects with different
+repairs, and the project has been conflating them for three waves.** Evac at n=56 is finally large
+enough to read at all (X2 had it at n=4 per rung).
+
+## WHAT THIS ROUND DID NOT DO
+
+- **It repaired nothing.** No lever, no tuning constant, no game code. That is deliberate: the
+  point was to find out what is true before spending anything.
+- **The slot-set effect is not established at p=0.053** and the method rule is proposed on cost
+  grounds (it is free) rather than on proof.
+- **heat 4's 0.8-point miss is unexplained.** It could be the flat middle, it could be the boundary.
+- **The decision-richness columns are on a superseded instrument.** Wave TRUE BAND re-specified
+  `CountMeaningfulChoices` from multiplicative to additive windows; L1's `ch/ARMED` numbers are
+  pre-TRUE-BAND and are not comparable to anything measured after it.
+- **THE STANDING WARNING.** Wave W1 TRUE INSTRUMENT severs `src/Fx.cs`'s shake jitter from the
+  shared gameplay `Util.Rng` - today `Fx.Update` draws `Util.RandF()` once per RENDERED FRAME, so
+  the dice are a function of the frame count, and screen shake is a shipped comfort toggle, which
+  means a player who turns it off is playing different dice. That repair **invalidates every CRN
+  world in `docs/measurements/l1/`**. L1 is therefore the **pre-repair ladder** and the only n>=80
+  picture of the pre-repair tree that will ever exist.
