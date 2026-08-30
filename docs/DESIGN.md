@@ -696,9 +696,15 @@ chance and so ranks targets sensibly once the unit is standing somewhere. The de
 shot QUALITY. It was that the opponent never paid attention to what the firing position COST. That
 distinction decided the shape of the fix and it is the reason this section exists.
 
-**The decision.** Price the shot by its expected value, and price the alternative honestly:
+**The decision.** Weight the shot by the chance it connects, and price the alternative honestly:
 
-1. **The tile term is an expectation, not a constant.** `ShotSeat + bestHit x P(hit)`, with
+1. **The tile term is a hit-weighted value, not a constant.** `ShotSeat + bestHit x P(hit)`, with
+   **one piece of arithmetic worth naming honestly**: `bestHit` already contains the hit chance,
+   so the term expands to `ShotSeat + hit^2/100 + bonuses x hit/100` — a hit-SQUARED weighting,
+   not an expected value, and an earlier draft of this section called it one. The squaring is kept
+   deliberately: it makes the opponent more hit-greedy than an EV maximiser, which suits a fight
+   where a soldier dies in about two connections (an EV maximiser is indifferent between one 80%
+   shot and four 20% shots; an HP bar is not). With
    `ShotSeat = 18` — deliberately **one level of cover**, because the trade the term arbitrates is
    *stand in the open with a shot* vs *stand behind that wall without one*, and those should be
    comparable, not one of them free.

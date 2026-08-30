@@ -103,7 +103,10 @@ public static class Ai
     // the rest of the fight — so a shot in the finish band is pressed at a discount.
     internal const float FinishPress = 1.6f;
 
-    /// C2: what a line of fire from this tile is worth to the per-tile scorer. Extracted so
+    /// C2: what a line of fire from this tile is worth to the per-tile scorer. NOT an expected
+    /// value despite the shape — `bestHit` already contains `hitPct`, so this expands to
+    /// `ShotSeat + hitPct^2/100 + bonuses*hitPct/100`. See the call site for why the squaring is
+    /// deliberate. Extracted so
     /// SIGHTLINE_DECLINETEST can pin the arithmetic of the one line this wave changed, on both
     /// sides of its dial, without reconstructing a whole board — the pre-C2 branch is the literal
     /// constant it replaced.
@@ -121,6 +124,14 @@ public static class Ai
     /// overwatch discount so they eat reaction fire to close. An opponent whose chargers
     /// suddenly took cover would not read as smarter, it would read as broken, and it would
     /// remove the tempo the patient archetypes are measured against.
+    ///
+    /// ELITE IS DELIBERATELY NOT ON THIS LIST, and the review was right that the rationale above
+    /// describes it (advW 3.4, the same owEnd 9f discount, never broken off). The exclusion is a
+    /// judgement, not an oversight: an ELITE is a BOSS, it is the archetype most likely to survive
+    /// long enough for a held lane to pay, and a boss that visibly picks its moment reads as
+    /// competent where a charger doing the same reads as broken. It is also the one body whose
+    /// damage output most rewards waiting for a better shot. If a later wave wants chargers and
+    /// bosses to behave alike, change the SET — but change this comment with it.
     static bool NeverDeclines(Unit e)
         => e.RagesTwice || e.Cls == "BERSERKER" || e.Cls == "HOUND"
         || e.Cls == "STRIKER" || e.Cls == "DRONE";
@@ -636,12 +647,22 @@ public static class Ai
             // anything, from anywhere, at any odds. It never declined, never repositioned for a
             // better angle, and its overwatch branch was measurably dead.
             //
-            // The replacement is the shot's EXPECTED value. `bestHit` is a target-CHOICE comparator
-            // (hit chance plus what CONNECTING is worth: exposure, the finish band, the squad's
-            // focus, crossfire) — so weighting it by the probability of actually connecting turns it
-            // into an expected value, and `ShotSeat` is the option value of holding a line of fire
-            // at all, priced at roughly one level of cover. Target SELECTION is untouched: the loop
-            // above still ranks targets by `val` exactly as before.
+            // The replacement weights the shot by the probability of actually connecting. Say what
+            // that arithmetic IS, because "expected value" is not literally true and an earlier
+            // version of this comment claimed it: `bestHit` is `odds.HitChance + bonuses`, so
+            // `ShotSeat + bestHit * hit/100` expands to
+            //
+            //     18  +  hit^2/100  +  bonuses * hit/100
+            //
+            // — a hit-SQUARED term, not an expectation. A true EV term would weight only the
+            // consequence of connecting (`bonuses`) by `hit`, and would not re-multiply the hit
+            // chance by itself. The squaring is deliberate and kept: it makes the planner more
+            // hit-greedy than an EV maximiser, which is what a fight this short wants (an EV
+            // maximiser is indifferent between one 80% shot and four 20% shots; a soldier's HP bar
+            // is not). But it is a WEIGHTING, not an expectation, and the honest name is the
+            // arithmetic. `ShotSeat` is the option value of holding a line of fire at all, priced
+            // at roughly one level of cover. Target SELECTION is untouched: the loop above still
+            // ranks targets by `val` exactly as before.
             if (shoot != null)
                 score += routing ? bestHit * 0.25f : ShotTileValue(bestHit, shootHit);
             score += cover.Level * 18;                           // value cover

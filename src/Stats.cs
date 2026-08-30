@@ -924,7 +924,10 @@ public static class Stats
         if (_enemyActsContested > 0)
         {
             sb.AppendLine($"\nENEMY DECISION MIX (contested acts={_enemyActsContested}; all-downed acts not counted={_enemyActsAllDowned}):");
-            foreach (var kv in _enemyDecisions.OrderByDescending(k => k.Value))
+            // ThenBy(Key): ties would otherwise break by Dictionary INSERTION order, which is not
+            // stable across runs — enough to make a paired inertness diff show a spurious non-empty
+            // `mix` block and send someone hunting a gameplay change that never happened.
+            foreach (var kv in _enemyDecisions.OrderByDescending(k => k.Value).ThenBy(k => k.Key))
                 sb.AppendLine($"  {kv.Key,-12}{kv.Value,7}  {Pct(kv.Value, _enemyActsContested)}");
             int taken = EnemyShotsTaken, declined = EnemyShotsDeclined;
             sb.AppendLine($"\n  the shot on the table (acts where the chosen tile HAD a shot = {_enemyActsWithShot}):");
@@ -1464,7 +1467,7 @@ public static class Stats
                 preempted = _enemyShotPreempted,
                 lanesHeld = _enemyDecisions.GetValueOrDefault("overwatch", 0) + _enemyDecisions.GetValueOrDefault("brace", 0),
                 reactionShots = _enemyReactions,
-                mix = _enemyDecisions.OrderByDescending(kv => kv.Value)
+                mix = _enemyDecisions.OrderByDescending(kv => kv.Value).ThenBy(kv => kv.Key)
                         .Select(kv => new { verb = kv.Key, n = kv.Value }).ToList(),
                 shotTaken = (int[])_enemyShotTaken.Clone(),
                 shotDeclined = (int[])_enemyShotDeclined.Clone(),

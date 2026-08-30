@@ -2107,6 +2107,16 @@ ladder is `docs/measurements/l3/` and the write-up is DEVLOG §L3. Start here:
       non-combat win condition; at mission 5, Eliminate 25.6% and Sabotage 96.8%. That is a
       45-point gap between objective *classes*, not between objectives.
 
+### Handed on from C2's review (not C2's code, recorded so it is not lost)
+
+- [ ] **`Hud.DrawThreatCard` ignores the TEXT SIZE setting entirely.** It calls
+      `Raylib.MeasureTextEx`/`DrawTextEx` directly (`Hud.cs:2317-2331`) instead of going through
+      `Cfg.Text`/`Cfg.Measure`, so the INCOMING FIRE card renders pixel-identically at 90/110/120%.
+      It does NOT overflow — measure and draw are consistently unscaled — it simply never scales,
+      stranding its body at the 12px floor while every other surface grows. **Pre-existing at
+      `17934ee`, not introduced by C2**; found independently by two reviewers on the same card.
+      Routed to the wave that owns the text-scale surface.
+
 ### The methodological rules this program had to learn the hard way
 
 1. **A pooled row can hide a 49.5-point artifact.** `Eliminate` reads 89.1% pooled and ~40% over
@@ -2163,6 +2173,15 @@ ladder is `docs/measurements/l3/` and the write-up is DEVLOG §L3. Start here:
       hostile that chose WHERE to watch would be worth several times this, and would justify a
       much higher `Ai.DeclineWatchRatio`.** This is the next wave in this area, not another pass
       at the gate.
+- [ ] **The enemy kill-zone wash is below perceptual threshold, and covers the whole board.**
+      `Renderer` washes every tile an enemy overwatch threatens at **7-12% alpha**, which C2's
+      code review measured as invisible on a warm biome even at 2.6x contrast — so the one visual
+      that is supposed to communicate "this ground is denied" communicates nothing. It is also
+      **the same finding as the lane-selection gap seen from the other end**: because a plain
+      enemy overwatch has no cone, the wash covers nearly the entire open board, and a signal that
+      marks everything marks nothing. Fixing lane selection would fix the wash's *information*;
+      the alpha needs raising regardless. (C2's `SIGHTLINE_DECLINESHOT` doc comment claimed the
+      wash "lights the ground it now denies"; that claim is withdrawn in the code.)
 - [ ] **The flywheel is structurally blind to enemy area denial.**
       `Game.Autopilot.TileExposure` carries `+18` for an enemy BRACE lane (`InEnemyBraceLane`) and
       **no term at all** for an ordinary enemy overwatch — its "exposed to this gun" `+6` is

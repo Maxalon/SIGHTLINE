@@ -9043,7 +9043,14 @@ ShotSeat + bestHit * (hitPct / 100)        //  ShotSeat = 18f
 
 `bestHit` is a target-CHOICE comparator (hit chance plus what CONNECTING is worth — exposure,
 the finish band, the squad's focus, crossfire), so weighting it by the probability of actually
-connecting turns it into an expected value. `ShotSeat` is the option value of holding a line of
+connecting weights it by how likely that is. **It is NOT an expected value and an earlier draft
+of this section said it was.** `bestHit` already contains the hit chance, so the term expands to
+`ShotSeat + hit²/100 + bonuses·hit/100` — a hit-SQUARED weighting. A true EV term would weight
+only the consequence of connecting by `hit`, and would not re-multiply the hit chance by itself.
+The squaring is kept on purpose: it makes the opponent more hit-greedy than an EV maximiser,
+which is what a fight where a soldier dies in ~two connections wants (an EV maximiser is
+indifferent between one 80% shot and four 20% shots; an HP bar is not). But the honest name for
+it is the arithmetic, not "expectation". `ShotSeat` is the option value of holding a line of
 fire at all, priced deliberately at **~one level of cover** (`cover.Level * 18` in the same
 scorer), because that is the trade the term has to arbitrate: *stand in the open with a shot* vs
 *stand behind that wall without one*. **Target selection is untouched** — the loop above still
@@ -9304,11 +9311,19 @@ the check that this is a shift in WHICH shots get taken and not a change to the 
 declines sit where they should: 85 of 105 in the 20-59% bands, four in the 60-79% band (a shot
 whose open-cover reference was far better), none at 80%+.
 
-**The wave's real effect is the first and the last-but-one row.** The opponent chooses a tile with
-a line of fire 920 fewer times, spends 2 points less of its action budget shooting and 2 points
-more digging in, and the OVERWATCH branch that fired 20 times in 26841 contested acts now fires
-111. The DECLINE itself is **0.65% of the shots on the table** — small, and §4 is the argument that
-small is correct here, not a hedge.
+**The wave's real effect is HUNKERING, and the ×5.6 overwatch figure is the smaller story.** Only
+**105 of the 897 fewer shots** are gate declines; the rest come from the tile term steering units
+onto cover tiles that have no shot at all, where they dig in. So the honest headline is
+**+2.0 points of hunkering**, not +0.35 of overwatch — the overwatch number has the bigger
+multiplier and the smaller effect, and leading with it (as an earlier draft did) inverts their
+importance.
+
+**That matters because DESIGN §3.A's anti-turtle rule cuts at this wave.** "Kill the dominant
+defensive strategy" is written about the player, but an opponent that hunkers 2 points more is
+moving in the direction the section warns about. The mission-length tripwire says it has not cost
+tempo (§5b: directionally shorter, and certainly not longer), so this is not a defect today — but
+**"the opponent hunkers more" is the line a feel review should watch**, not the decline rate. The
+DECLINE itself is 0.65% of the shots on the table; §4 is the argument that small is correct.
 
 ## 6. SCREENSHOTS — Rule 3, and what the frames actually show
 
@@ -9319,27 +9334,43 @@ not a hand-set flag. One soldier behind one high-cover block; one hostile; every
 behind a high-cover wall down column 16 so the hostile's only shot in the world is the covered
 one. Both frames are `SIGHTLINE_SHOT=760 SIGHTLINE_MISSION=1`; the only difference is the dial.
 
+**Both frames are `SIGHTLINE_SEED=4242`**, so the pair is a genuine controlled contrast rather
+than two similar pictures — same arena, same roster, same shot, differing in the dial and nothing
+else. (An earlier version of these frames was unseeded and the two shots landed on different
+biomes; the write-up then carried a caveat about clock-seeded RNG that was entirely avoidable.
+`SIGHTLINE_SEED` existed the whole time.)
+
 `docs/measurements/c2/shots/decline-on.png` (`SIGHTLINE_AIDECLINE=1`, shipped) —
-`RAIDER@(6,0) vs VEGA@(12,3) shotHit=26% E[dmg]=1.15 declined=True -> DECLINED - HOLDING THE LANE`.
-**What I see:** the raider top-left inside its low-cover ring; VEGA right-of-centre with the grey
-high-cover block hard against its west face; and the read that matters — the INCOMING FIRE card
-carries a third line, **"OVERWATCH LANE — entering draws a reaction"**. The game itself is telling
-the player the hostile is holding ground it now denies. That line is the whole wave in one string.
+`STALKER@(6,0) vs VEGA@(12,3) shotHit=25% E[dmg]=0.71 declined=True -> DECLINED - HOLDING THE LANE`.
+**What I see:** the blue industrial arena; the STALKER top-centre inside its low-cover ring; VEGA
+right-of-centre, gold-ringed, with the grey high-cover block hard against its west face; the
+parked units sealed behind the column-16 wall on the right edge. And the read that matters — the
+INCOMING FIRE card carries a **third** line: *"OVERWATCH LANE — entering draws a reaction."* The
+game itself tells the player the hostile is holding ground it now denies.
 
-`docs/measurements/c2/shots/decline-off.png` (`SIGHTLINE_AIDECLINE=0`) —
-`shotHit=26% ... declined=False -> TOOK THE SHOT`. **Same geometry, same units, same 26% shot.**
-The INCOMING FIRE card has only its two normal lines: no lane, no denial, nothing for the player
-to plan around. The hostile spent its action on a shot worth 1.15 expected damage.
+`docs/measurements/c2/shots/decline-off.png` (`SIGHTLINE_AIDECLINE=0`) — `shotHit=25%
+E[dmg]=0.71 declined=False -> TOOK THE SHOT`. **Pixel-for-pixel the same board**: same arena, same
+STALKER on the same tile, same VEGA, same card header (`1 hostile bears · best 67% · ~2 dmg /
+worst gun: STALKER — SCOUT`). The single difference in the entire frame is that the third line is
+**gone**. The hostile spent its action on a shot worth 0.71 expected damage and holds nothing.
 
-Two honest notes on the frames. **(1)** The arena BIOME differs between the two shots (desert vs
-the blue rain set) because `Util.Rng` is clock-seeded outside the flywheel — CLAUDE.md's standing
-warning that screenshots were never byte-stable. The staged geometry is identical and the console
-line proves the same 26% shot in both. **(2)** The hostile had to be PINNED (a ring of impassable
-low cover) to stage this at all. The first version of the hook left it free and it did something
-better than declining: **it walked around the block and took a 77% flanking shot.** That is the
-wave working — the tile term is what made a flank outrank a frontal potshot — but it is a
-different frame, and it is worth recording that on open ground the planner's first answer to a
-covered target is now to out-position it, not to hold fire.
+**Two honest notes.** **(1)** That tooltip line is **pre-existing** — `Hud.cs` has drawn it since
+before this wave (`git diff 17934ee..HEAD -- src/Hud.cs` is empty). This wave did not add the
+read; it created the enemy state that makes the read appear, which is the better half of the deal
+but not the same claim, and the lead's review brief had it the other way round. **(2)** The
+hostile had to be PINNED (a ring of impassable low cover) to stage this at all. The first version
+of the hook left it free and it did something better than declining: **it walked around the block
+and took a 77% flanking shot.** That is the wave working — the tile term is what makes a flank
+outrank a frontal potshot — but it is a different frame, and it is worth recording that on open
+ground the planner's first answer to a covered target is now to out-position it, not to hold fire.
+
+**What the frames do NOT show, contrary to the hook's own former doc comment.**
+`Renderer`'s enemy kill-zone wash is 7-12% alpha and is **below perceptual threshold** on these
+biomes — the code review measured it invisible even at 2.6x contrast. The comment claimed it
+"lights the ground it now denies"; that claim is withdrawn in the code. Worse and more
+interesting: because a plain enemy overwatch has no lane selection, the wash covers nearly the
+whole open board, so even if it were visible it would carry no information. **That is this wave's
+no-lane-selection finding arriving from the render side**, and it is in ROADMAP as its own item.
 
 ## 7. THE SELF-TEST, AND THE PROOF IT CAN FAIL
 
@@ -9379,6 +9410,32 @@ DECLINETEST: ambient SIGHTLINE_AIDECLINE=0; gate scene [...] shot hit=21% E[dmg]
   gate:killBoxDidNotDecline
 DECLINETEST: FAIL (gate:didNotDecline(hit=21 exp=1.36),gate:declinedButStillShoots,gate:killBoxDidNotDecline)
 ```
+
+**A second review then showed the test was much weaker than "it fails when the feature is off".**
+It perturbed each constant one at a time, rebuilding for each, and found **only two of seven were
+pinned at all**: `ShotSeat` could be set to **0** — deleting the "a line of fire has option value"
+concept DESIGN §5.2 point 1 is entirely about — and the whole suite stayed green. Worse, the
+kill-box leg did not test the kill box: `bar *= 1 + DeclineThreatScale * min(guns, cap)` could be
+**deleted outright** and all three of its assertions still passed, because they only exercised
+`DeclineDigIn = guns >= 2 && canDig`. **The most-argued piece of model in this wave had zero
+coverage.** Four legs were added in response (7-10 above), and every one was proven able to fail:
+
+| constant | lower pin | upper pin |
+|---|---|---|
+| `ShotSeat` 18 | **0 → FAIL** (leg 8) | **35 → FAIL** (leg 2) |
+| `DeclineThreatScale` 0.20 | **0.00 → FAIL** (leg 7) | **2.00 → FAIL** (leg 7) |
+| `DeclineWatchRatio` 0.45 | **0.35 → FAIL** (leg 3) | none |
+| `DeclineDigRatio` 0.30 | **0.00 → FAIL** (leg 10) | none |
+| `DeclineThreatCap` 3 | **0 → FAIL** (leg 7) | none |
+| `DeclineAbsKeep` 3.00 | **0.50 → FAIL** (leg 3) | none — 10.00 passes |
+| `FinishPress` 1.6 | **1.0 → FAIL** (leg 9) | none — 9.0 passes |
+
+**Seven of seven now have at least a lower pin; two have both sides.** The straddle (leg 7) is the
+one that matters most: one scene, evaluated at one gun and at three, with the aim SEARCHED until
+the shot's ratio lands between the two bars. It reports what it found —
+`straddle: aim=82 1gun=SHOOT(58%,exp=2.96) 3gun=DECLINE` — so the archive shows the leg was live
+and not vacuous. Setting the scale to 0 or 2, or the cap to 0, collapses the window and the leg
+fails with `scene:noThreatStraddle` rather than passing quietly.
 
 **The test's own scene was wrong twice before it could fail for the right reason**, and both are
 the program's rule 6 (a correct assertion in the wrong scope is indistinguishable from no
@@ -9467,7 +9524,14 @@ trusting it.
   campaigns. **I did NOT instrument it separately over the 960-campaign round**, so "never fires"
   is not a claim I can make — what I can say is that it did not move a paired probe and that no
   counter exists for it. A follow-up that cares should add one.
-- **NONE of the four scoring constants is a measured optimum, `ShotSeat` least of all.** An
+- **Four of seven constants are still pinned from ONE side only.** `DeclineWatchRatio`,
+  `DeclineDigRatio`, `DeclineThreatCap`, `DeclineAbsKeep` and `FinishPress` have lower pins but no
+  upper one: `DeclineAbsKeep` can be raised to 10.00 and `FinishPress` to 9.0 with the suite green.
+  Both are inert in that direction at the shipped ratios (a 0.45-ratio shot is weak by
+  construction, so the absolute guard cannot bind; and a finish-band target is rare), which is why
+  the missing pin costs nothing today — but a wave that RAISES the ratios inherits an untested
+  guard, and should add the upper legs before it does.
+- **NONE of the seven scoring constants is a measured optimum, `ShotSeat` least of all.** An
   earlier draft said "the three decline constants were calibrated"; that over-states what the
   `CAL-*` chunks did. They were a **swept ladder of candidate settings scored on a single
   20-campaign slot set** — enough to reject an absolute-damage bar and to bound the rate, not

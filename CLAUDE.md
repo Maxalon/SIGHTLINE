@@ -536,7 +536,9 @@ may claim them until they are restated. DEVLOG §TRUE BAND; raw chunks `docs/mea
 CROSSCUT handoff's "single biggest remaining gap in the fight": `Ai.cs` scored any tile with a
 shot at a flat `100 + bestHit` against terrain terms bounded under ~64, so the opponent paid any
 positional price for a line of fire and its overwatch branch fired 20 times in 26841 contested
-acts. The term is now `Ai.ShotTileValue` (an expectation) plus a decline gate priced against
+acts. The term is now `Ai.ShotTileValue` (a hit-WEIGHTED value — note it expands to
+`ShotSeat + hit²/100 + bonuses·hit/100`, deliberately hit-greedier than a true expectation) plus a
+decline gate priced against
 `Combat.AsIfExposed`; `SIGHTLINE_AIDECLINE=0` restores the pre-C2 opponent exactly. **It changes
 gameplay, so the L3 ladder above is now a pre-C2 ladder** — C2's own 960-campaign CRN round on
 `17934ee` is in `docs/measurements/c2/`. **Read its §5 before quoting it**: the round is near-inert
