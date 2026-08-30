@@ -1954,7 +1954,9 @@ public partial class Game
         // Heat row above. (Revisit only with flywheel evidence that the inversion is gone.)
         int heatEnemy = Sightline.Heat.EnemyDelta(heat);
         int heatStat  = Sightline.Heat.StatDelta(heat);
-        int heatDmg   = Sightline.Heat.DmgDelta(heat);   // W6c: rung-8 +1 enemy damage (0 below the apex)
+        // W6c introduced this as a rung-8-only +1 enemy damage; CONTOUR C1 moved the single point
+        // that feeds it down to EXPOSED (rung 6), so it is live from heat 6 up, not just at the apex.
+        int heatDmg   = Sightline.Heat.DmgDelta(heat);
         // EARLY-MISSION HEAT GRACE. The measured ~20% mission-1 loss (which hard-caps run
         // completion, a geometric product) was almost entirely a heat-3/4 alpha-strike on the
         // COLD OPENER: Heat adds +2 bodies / +2 stat to a force a green 4-rookie squad meets

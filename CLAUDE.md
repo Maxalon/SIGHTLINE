@@ -357,7 +357,11 @@ docs/screenshot.png    README image
   three seeds through `SaveGame.MapFingerprint` / `PersistedGenerators`; a `mapShape:` line means
   the generator moved. A deliberate map change ⇒ paste the printed hashes in **and re-measure**.
   `HEATLADDERTEST` pins the difficulty axis the same way: the cumulative
-  `(EnemyDelta, StatDelta, DmgDelta, AiTier)` vector for all ten heat levels.
+  `(EnemyDelta, StatDelta, DmgDelta, AiTier)` vector for all ten heat levels. **A CUMULATIVE pin
+  cannot see a DEAD ROW** — C1 found rung 6 declaring `AiTier = 1` that could never fire (rung 4
+  already published tier 1; the aggregation is `Math.Max`), inert for two programs under a green
+  HEATLADDERTEST. `SIGHTLINE_MIDTOOTHTEST` adds the per-rung invariants: no rung may declare a
+  value the rungs below already provide, and no rung may leave the cumulative vector unchanged.
 
 ---
 
@@ -459,32 +463,77 @@ funnel, so a trade takes roughly two hits instead of one. Its raw chunk logs liv
 > > number from today's tree. **Re-measure. Do not rescale.** See `docs/DEVLOG.md` §W1.
 >
 >
-> **THE LADDER OF RECORD — PROGRAM CROSSCUT wave L3, base commit `d814f0c`, n=160 campaigns per
-> rung (960 total), all 48 chunks `runs=20` asserted, raw data in `docs/measurements/l3/`.**
+> **THE LADDER OF RECORD — PROGRAM CONTOUR wave C1, base commit `17934ee` + C1's own lever,
+> n=320 campaigns per rung (640 at heat 6), 416 chunks all `runs=40` asserted, 16,640 campaigns.
+> Raw round: `docs/measurements/c1/`.**
 >
-> **This is the first ladder in the project's history measured on a tree carrying every wave of
-> its own program** rather than on the tree one wave branched from — the standing answer to X2's
-> closing finding that fourteen consecutive waves had each published a branch-point ladder.
+> **It is also the first PER-RUNG ladder in the project's history.** Every earlier one sampled
+> `{RECRUIT, 0, 2, 4, 6, 8}`; sampling all ten rungs is what turned "`h4 → h6` is flat" into a
+> located defect (below).
 >
-> | RECRUIT | heat 0 | heat 2 | heat 4 | heat 6 | heat 8 |
-> |---|---|---|---|---|---|
-> | **71.2** | **47.5** | **31.2** | **23.8** | **20.0** | **6.9** |
+> | rung | RECRUIT | h0 | h1 | h2 | h3 | h4 | h5 | h6 | h7 | h8 |
+> |---|---|---|---|---|---|---|---|---|---|---|
+> | **win%** | **70.0** | **44.4** | 37.5 | **32.5** | 27.5 | **20.9** | 20.6 | **13.9** | 9.7 | **8.1** |
+> | ±SE | 2.6 | 2.8 | 2.7 | 2.6 | 2.5 | 2.3 | 2.3 | 1.4 | 1.6 | 1.5 |
+> | **rung N buys** | — | 25.6 | 6.9 | 5.0 | 5.0 | 6.6 | **0.3** | **6.7** | 4.2 | **1.6** |
 >
-> ±SE 3.6 / 3.9 / 3.7 / 3.4 / 3.2 / 2.0. Band: RECRUIT 75 / h0 55 / h2 40 / h4 30 / h6 20 / h8 10,
-> ±8 (h8 ±5). **Five of six in band and monotone at every step**; heat 2 misses its floor by 0.8,
-> a fifth of a standard error.
+> Band: RECRUIT 75 / h0 55 / h2 40 / h4 30 / h6 20 / h8 10, ±8 (h8 ±5, hard floor ≥5). **Four of
+> six in band and monotone at every step.** h0 misses its floor by 2.6 and h4 by 1.1, both
+> inherited from the pre-C1 tree and untouched by C1's lever; h6 is in band, 1.4 SE clear of the
+> floor, but sits **6.1 under its band CENTRE** where the control sat 1.4 over.
 >
-> **SUPERSEDES EVERY EARLIER LADDER, and they are not merely stale — they are INCOMPARABLE.** Wave
-> W1 severed presentation from the shared `Util.Rng` stream, which re-rolled every CRN world in the
-> repository: the same slot seed now plays a different world (measured 10/10 slots reproducing up
-> to W1's break, 3/10 after). `x1/`, `x2/`, `w4/` and `l1/` remain valid as history. **Re-measure;
-> do not rescale.**
+> **SUPERSEDES L3 AND EVERY EARLIER LADDER, and the pre-W1 ones are not merely stale — they are
+> INCOMPARABLE.** Wave W1 severed presentation from the shared `Util.Rng` stream, which re-rolled
+> every CRN world in the repository: the same slot seed now plays a different world (10/10 slots
+> reproduced up to W1's break, 3/10 after). `x1/`, `x2/`, `w4/`, `l1/` remain valid as history.
+> **Re-measure; do not rescale.** L3 (`d814f0c`, n=160) *is* on the current stream, and a reviewer
+> restricted C1's control to L3's exact 160 campaigns and reproduced L3's published ladder at **all
+> six rungs** — so the CRN chain is intact across two programs.
 >
-> **THE OPEN FINDING, replicated on three disjoint trees.** The `h4 → h6` step is the smallest on
-> ALL THREE ladders (−3.8 / −2.5 / −3.8) and on the composed tree `h2 → h4` joins it at −7.5, while
-> the ends buy −23.8, −16.2 and −13.1. `Heat.Mods` explains it exactly: **rung 8 is the only entry
-> carrying either `DmgDelta` or `AiTier`**, so the middle rungs add bodies and stats and only the
-> apex changes KIND. The ladder's LEVEL is fine; its SHAPE is not.
+> **THE FLAT MIDDLE, LOCATED AND HALF-CLOSED (C1).** Per-rung, "`h4 → h6` is flat" is **two rungs,
+> one of them exactly zero**: rung 5 (LINGERING WOUNDS) bought **0.00 ±3.2** and rung 6 (EXPOSED)
+> **2.34 ±2.7**, against six other rungs averaging 5.7. Cause: **rung 6 declared `AiTier = 1`, which
+> could never fire** — rung 4 already publishes tier 1 and `Heat.AiTier` aggregates with `Math.Max`,
+> so EXPOSED's advertised coordination tooth was dead for two programs and `HEATLADDERTEST` could
+> not see it (it pins the CUMULATIVE vector, which a dead declaration does not move). C1 moved BOTH
+> of NO QUARTER's qualitative teeth — the **+1 per-hit damage** and **coordination tier 2** — down
+> to rung 6 (`Heat.MidTooth`, default 3; `SIGHTLINE_MIDTOOTH=0` restores the pre-C1 table).
+> `h4 → h6` went **−2.3 ±2.7 → −7.0 ±2.7**, with six rungs *exactly* unchanged (0/320 discordant
+> pairs each) because the lever is apex-neutral by construction.
+>
+> **READ THE WHOLE SHAPE, NOT THAT ONE STEP.** The lever did not remove the flat region, it
+> RELOCATED part of it: rung 8 now buys **1.6** where it bought 4.1, and **rung 5 still buys 0.3 —
+> C1 fixed the second-flattest rung and left the flattest.** The rungs sum identically (36.25 in
+> every mode, to the decimal), so the allocation is a design choice, not arithmetic:
+>
+> | rungs 1–8 dispersion | control | mode 1 | **mode 3 (shipped)** |
+> |---|---|---|---|
+> | SD of the 8 steps | 2.36 | 2.89 | **2.44** |
+> | L1 from even spacing | 14.38 | 18.75 | **15.00** |
+> | L1 from the band's implied profile | 14.69 | 19.06 | **15.31** |
+> | steps < 2.0 points | 1 | 2 | 2 |
+>
+> **No lever beats the control on dispersion**; mode 3 was chosen because it is the least-bad
+> redistribution and because mode 1's h6 landed on the band floor at P(below) ≈ 0.49 after an
+> optional-stopping extension. DEVLOG §C1 carries the full decision.
+>
+> **Measured and NOT used as a reason: coordination tier 2 is INDISTINGUISHABLE FROM ZERO with a
+> wrong-signed point estimate.** Pooled over the four contrasts in C1's archive that isolate it
+> (1600 CRN pairs): **+1.09 ±0.63, z = +1.73, 95% CI [−0.15, +2.33]**, wrong-signed in all four
+> cells. The CI does not exclude a small real effect, so "it is not a difficulty lever" is an
+> over-claim and is withdrawn. It also cannot see FEEL (rule 3), and nobody has looked.
+>
+> **THE BIGGEST OPEN NUMBER IS THE LEVEL, NOT THE SHAPE.** h0 is 10.6 points under its band centre
+> and h4 is 9.1 under — the ladder's top half has sunk onto its bottom. An apex-neutral heat-table
+> lever pins h4 (20.9) and h8 (8.1), leaving **12.8 points for four rungs, 3.2 each**, so no
+> redistribution inside `Heat.Mods` can fix it. That is a BASE-difficulty lever. See `docs/ROADMAP.md`.
+>
+> **A rung is not a fixed rung, and the leak is DIRECTIONAL.** `Events.cs`
+> (`EventOutcomeKind.AddHeat`) lets three field events raise a run's heat mid-campaign. Heat 8 is
+> clamped and cannot leak, so every rung below it is contaminated UPWARD and **the instrument
+> systematically compresses the top of the ladder it is used to diagnose.** C1 measured ≈10% of h5
+> campaigns reaching heat ≥ 6. Campaign-level inertness claims survive it; "this rung is unaffected"
+> claims have always had this hole.
 >
 > **A pooled objective row can hide a 49.5-point artifact** — W8 proved it on `Eliminate`, whose
 > 89.1% row is largely 960 mission-1s and reads ~40% over its mid-run cells. Use the
@@ -572,6 +621,17 @@ against `AppContext.BaseDirectory`, the licence obligations, the player-data pat
 writers proven atomic by an **open-handle inode probe**, trim-safe serialization, and the version
 stamp. The publish matrix is re-measured in `docs/DISTRIBUTION.md` §2; detail in
 `docs/DEVLOG.md` §C6, open items in `docs/ROADMAP.md`.
+
+CONTOUR wave **C1 "THE FLAT MIDDLE"** It measured the
+heat ladder **per RUNG** for the first time (all ten rungs, n=320, 16,640 campaigns) and found the
+long-open flat step was two rungs, one of them buying **exactly zero**, caused by a `Heat.Mods` row
+declaring an `AiTier` the rung below already provided — dead for two programs. `Heat.MidTooth`
+(default 3, `SIGHTLINE_MIDTOOTH=0` restores the pre-C1 table) hands BOTH of NO QUARTER's qualitative
+teeth down to EXPOSED; `h4 → h6` went −2.3 → −7.0 with six rungs bit-identical. **It did not remove
+the flat region — it relocated part of it** (rung 8 now buys 1.6, and rung 5 still buys 0.3), and no
+lever beat the control on dispersion; read the ladder-of-record entry above in full before quoting
+one step from it. The wave was sent back once for exactly that framing. DEVLOG §C1 and §C1-R; raw
+round `docs/measurements/c1/`.
 
 ## Handoff protocol (when context gets heavy)
 You judge when context rot risks quality (don't wait for the 1M hard limit). Before stopping:

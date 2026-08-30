@@ -58,6 +58,15 @@ run_chunk.sh
 run_chunk0.sh
 battery.sh
 agg.py
+# CONTOUR C1: the four bare filenames above came from an earlier wave's scratch cleanup, and a
+# bare pattern matches at ANY DEPTH — so they silently swallow the ARCHIVED measurement runners
+# under docs/measurements/. L3's had to be `git add -f`d; C1's `git add -A` dropped run_chunk.sh
+# without a word, leaving both committed runners (which do `bash "$HERE/run_chunk.sh"`) inoperable.
+# An archived runner is the provenance of every number in this repo. Un-ignore them explicitly.
+!docs/measurements/**/run_chunk.sh
+!docs/measurements/**/run_chunk0.sh
+!docs/measurements/**/battery.sh
+!docs/measurements/**/agg.py
 
 # RESONANCE C1 (VOICE) verification artifacts — screenshots + measurement dumps, never committed
 c1_*.png

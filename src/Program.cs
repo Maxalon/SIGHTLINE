@@ -112,6 +112,14 @@ public static class Program
         //   SIGHTLINE_OPENERTRIM=<n> : Mission.OpenerTrim (bodies off the m1 / half off m2 force)
         if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_OPENERTRIM"), out int xopen) && xopen >= 0)
             Mission.OpenerTrim = xopen;
+        // C1 THE FLAT MIDDLE — SIGHTLINE_MIDTOOTH=<n> : Heat.MidTooth, which of NO QUARTER's two
+        // qualitative teeth ride EXPOSED (rung 6) instead. Bitfield: 1 = the +1 per-hit damage,
+        // 2 = coordination tier 2, 3 = both. **0 restores the pre-C1 table exactly** — that is
+        // the control the wave was measured against and the off-switch that keeps the lever
+        // falsifiable (docs/measurements/c1/, docs/DEVLOG.md §C1). Unset = the shipped 1.
+        // Parsed BEFORE any Run/Game exists, so no mission can be built off a half-applied table.
+        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_MIDTOOTH"), out int xmid) && xmid >= 0)
+            Sightline.Heat.SetMidTooth(xmid);
         // W8 THE HALF WALL — the DECAPITATE HVT statline buff (Game.DesignateHvt), pinnable so the
         // mid-run/finale asymmetry can be priced one lever at a time. Unset = the shipped defaults
         // 6 / 1 / 6, which are the pre-W8 arithmetic exactly, so an unpinned batch is unchanged.
@@ -584,6 +592,17 @@ public static class Program
         {
             Raylib.InitWindow(64, 64, "openertest");   // SetupMission uses tile math
             Console.WriteLine(new Game().OpenerSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
+        // SIGHTLINE_MIDTOOTHTEST=1 : CONTOUR C1 — the mid-ladder tooth (Heat.MidTooth): no DEAD
+        // AiTier declaration and no SILENT rung on the shipped table, the dial's apex neutrality
+        // across all eight modes, MIDTOOTH=0 as a field-for-field control, the per-mode rung
+        // shapes, and the +1 damage arriving on every heat-6 m3 hostile (none at heat 5).
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_MIDTOOTHTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "midtoothtest");   // SetupMission uses tile math
+            Console.WriteLine(new Game().MidToothSelfTest());
             Raylib.CloseWindow();
             return;
         }

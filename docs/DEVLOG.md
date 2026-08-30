@@ -9370,3 +9370,375 @@ a worse number, not a truer one. `docs/DISTRIBUTION.md` §2 carries them with th
   `Main`, so setting both silently runs a balance batch and prints no SHIPTEST line. First-match-
   wins is the house convention for every hook in that file; `qa-sweep.sh`'s `verdict` already treats
   a blank capture as a failure.
+
+# PROGRAM "CONTOUR" — wave C1 "THE FLAT MIDDLE"
+
+**Branch `wave/flat-middle`, base `17934ee`.** Brief: the `h4 -> h6` step is the smallest on three
+measured ladders while the ends buy 10-24 points apiece; give the middle of the heat ladder a tooth
+the player could describe in one sentence after the mission, measure it CRN-paired, and do not
+break the LEVEL while fixing the SHAPE.
+
+> **SUPERSEDED IN PART BY §C1-R (the send-back). READ BOTH.** This section is the original wave
+> write-up and it concludes for **mode 1**; the shipped default is **mode 3**, changed on review
+> evidence recomputed from this same archive. Two claims below are formally withdrawn there
+> ("tier 2 is not a difficulty lever", "nothing that was in band left it"), the measurement and
+> mechanism sections stand unchanged, and the shape verdict is restated. Quoting §C1-3/§C1-4 without
+> §C1-R will give you the wrong shipped mode and the wrong shape conclusion.
+
+**Shipped (as revised in §C1-R):** `Heat.MidTooth` (default 3) — BOTH of NO QUARTER's qualitative
+teeth, the +1 per-hit damage and coordination tier 2, move down from rung 8 to EXPOSED (rung 6),
+and rung 6's dead `AiTier = 1` declaration is deleted. `SIGHTLINE_MIDTOOTH=0` restores the pre-C1
+table. New hook `SIGHTLINE_MIDTOOTHTEST`. Raw round and full tables:
+[`docs/measurements/c1/`](measurements/c1/README.md). **416 chunks, every one asserted `runs=40`,
+zero `BAD` — 16,640 campaigns.**
+
+## C1-1. Sample the ladder per RUNG and the finding changes shape
+
+Every published ladder in this project samples `{RECRUIT, 0, 2, 4, 6, 8}`. C1 measured **all ten
+rungs** at n=320 (n=640 at h6), eight disjoint CRN slot sets each, on its own tree:
+
+| rung | RECRUIT | h0 | h1 | h2 | h3 | h4 | h5 | h6 | h7 | h8 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| win% | 70.0 | 44.4 | 37.5 | 32.5 | 27.5 | 20.9 | 20.9 | 18.6 | 12.2 | 8.1 |
+| +-SE | 2.6 | 2.8 | 2.7 | 2.6 | 2.5 | 2.3 | 2.3 | 1.5 | 1.8 | 1.5 |
+| **rung N buys** | - | 25.6 | 6.9 | 5.0 | 5.0 | 6.6 | **0.0** | **2.3** | 6.4 | 4.1 |
+
+"`h4 -> h6` is flat" is really **two rungs, and one of them is exactly zero**. Rung 5 (LINGERING
+WOUNDS: +1 enemy, HarshAttrition) buys **0.0 +-3.2** — the only rung on the ladder that cannot be
+distinguished from doing nothing. Rung 6 buys 2.3 +-2.7 against a ladder whose other six rungs
+average 5.7.
+
+## C1-2. The mechanism: a declaration that could never fire
+
+Rung 6 read `Exposed = true, StatDelta = 1, AiTier = 1`. `Heat.AiTier` aggregates with `Math.Max`
+and **rung 4 (ELITE CADRE) already publishes tier 1** — so EXPOSED's advertised coordination tooth
+was a **dead declaration** for two whole programs. W6b wrote it; its own comment ("rungs 6-7 stay
+tier 1") records the fact without noticing the consequence. Nothing caught it because
+`HEATLADDERTEST` pins the CUMULATIVE vector, which a dead declaration by definition does not move.
+Rung 6 shipped +1 body, +1 stat and a concealment flag, and the player climbed two rungs for a stat
+point.
+
+## C1-3. Five candidates, all provably apex-neutral, priced at heat 6
+
+`Heat.MidTooth` is a bitfield (1 = +1 damage moves 8 -> 6, 2 = coordination tier 2 moves 8 -> 6,
+4 = rung 6's stat point moves 6 -> 7), so one binary measured every candidate against one control.
+**DmgDelta sums and AiTier is a Math.Max, so the cumulative vector at heat 8 is IDENTICAL in every
+mode** — the dial cannot push the apex under its >=5 hard floor, by construction rather than by
+hope. Verified, not asserted: the h8 chunks are byte-identical control-vs-lever.
+
+| mode | what moves | n | h6 ctl -> lev | paired delta | +-SE | z |
+|---|---|---|---|---|---|---|
+| **1** | **+1 dmg -> rung 6** | **640** | **18.6 -> 12.0** | **-6.6** | **1.6** | **-4.16** |
+| 3 | +1 dmg AND tier 2 -> rung 6 | 640 | 18.6 -> 13.9 | -4.7 | 1.7 | -2.69 |
+| 2 | tier 2 -> rung 6 alone | 320 | 18.4 -> 20.0 | **+1.6** | 1.9 | +0.80 |
+| 4 | rung 6's stat point -> rung 7 | 320 | 18.4 -> 23.1 | +4.7 | 2.7 | +1.76 |
+| 5 | mode 1 + mode 4 (the "trade") | 320 | 18.4 -> 10.6 | -7.8 | 2.5 | -3.10 |
+
+**The negative result is the more interesting half.** Moving the apex's coordination tier down a
+rung is **not a difficulty lever**: alone it measured **+1.6 in the PLAYER's favour**, and mode 3
+(which bundles it with the damage tooth) is 1.9 points *softer* than mode 1 alone. Two programs of
+table comments call `AiTier` an escalation; over 320 CRN pairs at heat 6 it does not read as one.
+Caveat, per the program's own rule 3: **a CRN round prices CONSEQUENCES and is blind to FEEL.**
+Tier 2 may well change how a fight reads without changing who wins it. Nobody has looked.
+
+Mode 4 is the useful by-product: it **prices a single `StatDelta` rung at 4.7 points**, the first
+time one has been isolated on this ladder.
+
+**Why mode 1 and not mode 3**, which lands a more even 7.0/5.8 split across rungs 5-6 / 7-8: mode 3
+strips NO QUARTER of *every* qualitative tooth (leaving the apex "+1 enemy, +1 stat" — the exact
+complaint the wave opened with), and the component that buys the softening measured with the wrong
+sign on its own. Mode 1 is the only candidate that leaves rungs 6, 7 AND 8 each with a tooth a
+player could name. **The design thesis decided it; the numbers only narrowed the field.**
+
+## C1-4. The shipped ladder — and what did NOT move
+
+| rung | RECRUIT | h0 | h1 | h2 | h3 | h4 | h5 | h6 | h7 | h8 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| control | 70.0 | 44.4 | 37.5 | 32.5 | 27.5 | 20.9 | 20.9 | 18.6 | 12.2 | 8.1 |
+| **C1** | **70.0** | **44.4** | **37.5** | **32.5** | **27.5** | **20.9** | **20.6** | **12.0** | **9.4** | **8.1** |
+| +-SE | 2.6 | 2.8 | 2.7 | 2.6 | 2.5 | 2.3 | 2.3 | 1.3 | 1.6 | 1.5 |
+| discordant pairs | 0/320 | 0/320 | 0/320 | 0/320 | 0/320 | 0/320 | 5/320 | 102/640 | 35/320 | 0/320 |
+
+**Six rungs are EXACTLY unchanged — zero discordant pairs out of 320 at each.** `h4 -> h6` goes
+from **-2.3 +-2.7 to -8.9 +-2.6**. Band: nothing that was in band left it — h6 moves from mid-band
+to **exactly its floor (12.0, band 12-28)**, and h0's 2.6-point and h4's 1.1-point misses are the
+control's, untouched. The first n=320 round put h6 at 11.2, i.e. 0.8 *under* the floor; the doubled
+n=640 round is the only reason the lever shipped, and it is why the second eight slot sets were run.
+
+## C1-5. THE HONEST PART — the flat spot moved, it did not vanish
+
+Rungs 7 and 8 now buy 2.7 and 1.2 where they bought 6.4 and 4.1. That is **arithmetic, not a design
+failure, and it is the wave's real finding**: an apex-neutral lever pins h4 (20.9) and h8 (8.1), so
+there are **12.8 points of win-rate for four rungs — 3.2 each.** No redistribution inside that
+window can give rungs 5-8 the ~5.7 points per rung that rungs 1-4 buy. What a lever CAN do, and
+did, is stop one rung taking almost none of it.
+
+**The deficit that causes it sits ABOVE heat 4, not in the middle.** Against the band centres, h0
+is 10.6 points low and h4 is 9.1 low, while h6 and h8 are within 2. The ladder is flat at the
+bottom because its top half has sunk onto it. That is a BASE-difficulty lever, not a `Heat.Mods`
+lever, and it was out of C1's scope. **It is the next thing to price, and it is now the biggest
+open number.**
+
+## C1-6. Two things measured on the way that nobody had written down
+
+**A "heat-N rung" is not a fixed rung.** `Events.cs:460` (`EventOutcomeKind.AddHeat`) lets three
+field-event choices raise a run's HeatLevel mid-campaign, +1 each — so a heat-5 cell contains some
+heat-6 missions. It is the *only* reason the lever is not perfectly inert below rung 6: h5 shows 5
+discordant pairs in 320 (-0.3, z=-0.45) and h4 shows zero, because from h4 the escalation must fire
+twice and in 320 campaigns it never did. Every past "this rung is unaffected" claim on this ladder
+has had this hole in it.
+
+**Two rungs' player-facing copy was painting off the panel.** `Hud.DrawHeatSelector` renders a
+rung's `Desc` at 12px into a 320px card with the body column at x+40, and it neither clips nor
+wraps — it just keeps painting. Measured off a heat-8 intro screenshot: ~7.07 px/char, 278px inside
+the border, **38 characters**. NO QUARTER's shipped line was **57** and LINGERING WOUNDS' was 42;
+both were visibly cut off, and NO QUARTER's clipped clause meant the apex **never named its
+coordination peak at all**. Found by looking at the screenshot, which is what the screenshot rule is
+for. Both now fit, `Heat.DescBudget` records the measurement, and MIDTOOTHTEST asserts the budget
+for every rung of every dial mode so it cannot come back.
+
+## C1-7. The self-test — `SIGHTLINE_MIDTOOTHTEST`, and the proof it can fail
+
+Seven legs, aimed at the SEAM rather than the model (W9's thesis):
+
+- **(A) NO DEAD DECLARATION** — a rung declaring `AiTier = t` must actually RAISE the cumulative
+  tier. *This is the defect.* **Under `SIGHTLINE_MIDTOOTH=0` it FAILS:**
+  `MIDTOOTHTEST: FAIL deadAiTier@rung6 (declares 1, cumulative below is already 1)`.
+- **(B) NO SILENT RUNG** — every rung must move the cumulative (enemy, stat, dmg, tier, flags).
+- **(C) APEX NEUTRALITY** — all eight dial modes must leave the heat-8 vector identical. Proven able
+  to fail by scratch-editing rung 8 to KEEP its DmgDelta (the add-instead-of-move mistake):
+  `FAIL apexMoved(mode1)=(4, 4, 2, 2, 15) vs (4, 4, 1, 2, 15)`, on four modes at once.
+- **(D) THE OFF-SWITCH IS A TRUE CONTROL** — `MIDTOOTH=0` reproduced field-for-field against a
+  literal transcription (the TRUE BAND precedent). One deviation is named inside the test itself:
+  rung 5's copy fix, which is copy-only and applies in every mode.
+- **(E)** per-mode rung shapes as goldens. **(F)** the +1 damage reaching every heat-6 m3 hostile
+  through the whole `SetupMission -> Build -> SpawnEnemies` thread, none at heat 5, exactly one at
+  heat 8. **(G)** the 38-character panel budget, every rung, every mode.
+
+`HEATLADDERTEST`'s golden and `AITEST`'s `DmgDelta(7) != 0` pin both had to move, and both are
+re-aimed rather than deleted: AITEST now asserts the invariant that actually matters — the ladder
+carries the damage point **exactly once**, so the apex cumulative is 1 and never 2.
+
+## C1-8. What C1 did NOT do
+
+- **Rung 5 is untouched and still buys 0.0.** C1 shipped ONE lever and it was rung 6's. LINGERING
+  WOUNDS' +1 body is partly eaten by the 12-hostile spawn cap on late missions, and `HarshAttrition`
+  compounds over a run length the bot rarely reaches (avgMis 3.66 at h5) — **hypotheses, unmeasured.**
+- **The LEVEL was not addressed.** h0 (-10.6) and h4 (-9.1) against band centre are the control's
+  and are untouched. C1 diagnosed them as the cause of the flat bottom and did not spend a lever on
+  them, because the brief scoped the wave to `Heat.Mods` and a base-difficulty lever is not that.
+- **No FEEL measurement of the tier.** Mode 2's +1.6 says tier 2 does not change who wins. It says
+  nothing about whether the fight reads differently, and this instrument structurally cannot.
+- **`avgMis` and `ch/ARMED` are reported but not analysed.** `ch/ARMED` at h6 moves 2.103 -> 2.087,
+  which is noise; C1 makes no decision-density claim.
+- **Objective cross-tabs were not run on the lever.** Every C1 claim is rung-level win-rate, so it
+  did not need one — but a follow-up that wants to say *which fights* got harder at heat 6 must run
+  `byObjectiveByMission` first (rule 1).
+- **The 34 MB raw round is not committed.** It was distilled to a 428 KB per-campaign CSV that
+  re-derives every published number exactly (one 0.01 rounding difference in `avgMis` at h3, where
+  the CSV is the more accurate of the two). The aggregate blocks are gone: `inert_diff.py` cannot be
+  re-run from the archive, and its results are recorded rather than reproducible.
+
+---
+
+# PROGRAM "CONTOUR" — C1-R: the send-back, and the mode changed on the evidence
+
+C1 shipped mode 1 and was returned `merge-after-fixes` by two review lenses. The instrument,
+archive and guard were upheld — a reviewer reproduced the h6 chunks **bit-exactly** from a fresh
+build, corroborated apex-neutrality from the committed samples (h8 pair: 1535 leaf fields, **0
+differ**; h6 pair: 1608 fields, **984 differ** — the h6 difference is what makes the h8 zero mean
+something), and confirmed all seven MIDTOOTHTEST legs provably able to fail. **What failed was the
+conclusion drawn from the numbers.** This section records what changed and why.
+
+## C1-R1. THE SHIPPED MODE CHANGED: 1 → 3
+
+Recomputed from C1's own `chunks.csv`, the rung 1–8 step profiles:
+
+```
+             h1    h2    h3    h4    h5    h6    h7    h8    sum
+control     6.88  5.00  5.00  6.56  0.00  2.34  6.41  4.06  36.25
+mode 1      6.88  5.00  5.00  6.56  0.31  8.59  2.66  1.25  36.25
+mode 3      6.88  5.00  5.00  6.56  0.31  6.72  4.22  1.56  36.25
+```
+
+| metric | control | mode 1 (was shipped) | **mode 3 (now shipped)** |
+|---|---|---|---|
+| SD of the 8 steps (sample, n−1) | 2.36 | 2.89 | 2.44 |
+| L1 deviation from even spacing | 14.38 | 18.75 | 15.00 |
+| L1 deviation from the band's implied profile | 14.69 | 19.06 | 15.31 |
+| L1 from even, inside the rungs 5–8 window | 8.12 | 10.78 | 9.06 |
+| steps < 2.0 points | 1 | 2 | 2 |
+| **sum of rungs 1–8** | **36.25** | **36.25** | **36.25** |
+
+**The sums are identical to the decimal, which confirms C1's zero-sum claim — and is exactly what
+makes the allocation a design choice rather than arithmetic.** C1's original write-up used
+zero-sum-ness to explain away the flattened top; that was the wrong inference from a correct fact.
+The ranking control > mode 3 > mode 1 is identical on all four dispersion metrics.
+
+**The decision, and the four reasons:**
+
+1. **Mode 3 wins every shape metric mode 1 loses**, and shape is what the wave is for.
+2. **The band verdict.** Mode 1's h6 is 12.03 ±1.29 against a floor of 12: **P(true value below the
+   floor) ≈ 0.49**, a coin flip. Mode 3's is 13.91 ±1.37 — 1.4 SE clear (P ≈ 0.08) — and in band at
+   **both** n=320 (13.4) and n=640 (13.9).
+3. **Mode 1's band verdict came from optional stopping.** The first n=320 round read 11.2 (out of
+   band); the round was extended to n=640, read 12.0, and shipped. C1 disclosed the extension — but
+   **disclosure makes optional stopping auditable, not unbiased.** Mode 3 never needed the rule.
+4. **The tension C1 left implicit, resolved.** Mode 1's only advantage was leaving a qualitative
+   tooth on the apex — and that tooth is `AiTier 2`, the one component C1 itself measured as doing
+   nothing. **C1 cannot call tier 2 "not a difficulty lever" and simultaneously pay four shape
+   metrics and a band verdict to keep it at the apex.** Mode 3 is also weakly DOMINANT across that
+   component's full CI: at the bottom (−0.15) mode 3 ≈ mode 1; at the top (+2.33) it is clearly
+   better on band and shape; **it is never worse.**
+
+**The best argument FOR mode 1 — which C1 never made, and the review supplied.** With h4 measured
+at 20.94 against a band asking 30, the band's implied `h4 → h6` step of −10 puts h6 at **10.9
+relative to measured h4**; on that shape-relative reading mode 1's 12.03 is better positioned than
+mode 3's 13.91 and the control's 18.59 is nowhere near either. It is a real argument. It is **not
+self-consistent on this tree**: the same −10-per-two-rungs slope applied to `h6 → h8` demands
+h8 = 0.9 against a measured 8.12 and a hard floor of 5. The shape-relative target can be honoured
+for one step at a time only, and honouring it at `h4 → h6` while ignoring `h6 → h8` is precisely the
+cherry-pick that produced mode 1's flat top. That is why it did not carry the decision — but it
+does replace C1's original, too-easy framing of "nothing that was in band left it".
+
+**What mode 3 costs, recorded not hidden:** NO QUARTER becomes a quantitative row —
+`+1 enemy; +1 stat; the ceiling`. The apex is a wall because of the STACK beneath it, which the
+panel lists in full at heat 8, not because of its own row. C1 pays that legibility cost knowingly.
+
+## C1-R2. Two claims withdrawn, one strengthened
+
+**WITHDRAWN — "moving coordination tier 2 down a rung is not a difficulty lever."** That rested on
+one cell: +1.56 ±1.95, z = +0.80, **95% CI [−2.26, +5.38]** — which does not exclude tier 2 buying
+2.3 points, *more* than rung 6 was buying in the first place. C1 had better evidence in its own
+archive and did not use it. **Four contrasts isolate the same component:**
+
+| contrast | n | lev-only | ctl-only | Δ | ±SE |
+|---|---|---|---|---|---|
+| m2 vs ctl, h6 | 320 | 22 | 17 | +1.56 | 1.95 |
+| m2 vs ctl, h7 | 320 | 13 | 10 | +0.94 | 1.50 |
+| m3 vs m1, h6 | 640 | 30 | 18 | +1.88 | 1.08 |
+| m3 vs m1, h7 | 320 | 6 | 5 | +0.31 | 1.04 |
+| **pooled, inverse-variance (1600 CRN pairs)** | | | | **+1.09** | **0.63** |
+
+z = +1.73, 95% CI **[−0.15, +2.33]**, **wrong-signed in all four cells**. The claim on the record is
+now: *indistinguishable from zero, with a point estimate slightly in the player's favour.*
+
+**WITHDRAWN — "nothing that was in band left it."** True but self-serving. h6 moves from 1.4 points
+ABOVE the band centre to 6.1 BELOW it. The honest reading is the shape-relative one: h6 is now far
+better positioned relative to a measured h4 of 20.9, and **it is the h4 LEVEL that is broken** —
+which is C1's own closing diagnosis, and it now appears in the ladder-of-record entry instead.
+
+**STRENGTHENED — the AddHeat leak is DIRECTIONAL, and it points at C1's own headline.** Heat 8 is
+clamped and cannot leak upward, so every rung below it is contaminated TOWARD the rung above, and
+**the instrument systematically compresses the top of the ladder it is being used to diagnose.**
+Some part of the flat middle/top this program exists to fix may be the instrument, not the design.
+Quantified from the archive: h5's 1.56% flip rate under a lever that can only bite at heat ≥ 6
+implies **≈10% of h5 campaigns reach heat ≥ 6**. C1's campaign-level inertness claims survive it
+(the six 0/320 rungs are exact). ROADMAP now carries it with a cheap fix: a harness pin that
+suppresses `AddHeat` for a measured batch, to be done BEFORE the base-difficulty round.
+
+## C1-R3. Two undeclared effects, now on the record
+
+**The damage tooth is not purely numeric.** `Mission.cs:890-902` says so in its own comment: +1
+`DmgMax` **widens the AI finish band** (`Ai.Plan` scores a kill on `p.Hp <= e.Weapon.DmgMax`), so
+moving it down two rungs moves a **coordination sharpening** down two rungs too. The CRN round
+prices it; C1 never named it. It cuts *toward* the wave's thesis — rung 6 partly re-earns, through
+the finish band, the coordination identity its dead `AiTier = 1` never delivered — and it belongs
+on the record either way, especially next to a headline about coordination.
+
+**The same comment names a watch item C1 did not report:** a wider finish band leans AGAINST the
+BRACE comeback lever, and "the comeback economy is the first re-tune if lead-swings collapse". In
+C1's committed h6 sample pair lead-swings/match holds at 0.9, but average max-swing goes 59.6 → 55.8
+and greedy BRACE usage **146 → 96 (−34%)**. n=40 and not conclusive — but the code told us to look,
+and it is now a ROADMAP item.
+
+**SKIRMISH at heat 6–7 is changed and unmeasured.** `Game.cs` gates the m1–2 heat grace on
+`Mode != GameMode.Skirmish` (W9), so a heat-6 skirmish now takes the +1 enemy damage **from turn
+one**, where before only heat 8 did. `SIGHTLINE_BALANCE` measures campaigns only. DAILY is safe
+(`DailyHeat` is `% 4u`, capped at 3); ENDLESS is safe (`EndlessWaveScale` reads `StatDelta`).
+
+## C1-R4. THE ARCHIVE TOOLING FAILED OPEN — in the wave built to find that
+
+`inert_diff.py` globs the raw chunk JSONs, which C1 deliberately did not commit. Run exactly as
+C1's own README documented it, it printed:
+
+```
+h0: 0 chunk pairs, 0 leaf fields compared, 0 DIFFER  <- INERT
+TOTAL: 0 fields, 0 differ
+```
+
+**A green inertness verdict on zero comparisons** — the same pathology the wave's own test-design
+section warns about, sitting in the wave's own tooling, while the README claimed "nothing published
+here is unreproducible" and the DEVLOG (correctly) said the opposite. Fixed: the script now exits
+non-zero with `NO CHUNKS` and names the reason, and the README states plainly which numbers are
+reproducible (every win-rate figure, from `chunks.csv`) and which are recorded-only (the
+`inert_diff` rounds, the `ch/ARM` column, all per-chunk aggregates).
+
+**And the fixed runner was not in the repo.** `git check-ignore` →
+`.gitignore:57:run_chunk.sh` — a bare filename from an earlier wave's scratch cleanup, which
+matches at any depth and silently swallowed it; L3's copy had been force-added, C1's `git add -A`
+dropped it without a word, leaving **both committed runners inoperable** (they call
+`bash "$HERE/run_chunk.sh"`). The rule now carries explicit `!docs/measurements/**/…` negations for
+all four swallowed names, so the next wave's archive cannot lose its runner either. **C1's own
+headline process lesson was "a shared path is not storage — the runner lives in the repo now", and
+the runner was the one file missing.**
+
+## C1-R5. THE COPY BUDGET COULD NOT EXPRESS A SCALE — and the panel is now structurally safe
+
+C1 measured a 38-character budget off a 100% screenshot and asserted it in a test. The review found
+the hole: `Cfg.Scaled` multiplies any size ≤ `Cfg.UiFontMax` by `Cfg.UiScale` (the settings offer
+0.90/1.00/1.10/**1.20**) while the panel geometry does not scale, so the real budget at 120% is
+~32 characters. Measured at 120% against the border at x=1240: HARDENED (38 chars) reached 1268,
+**28px off the card**; LINGERING WOUNDS (37) reached 1261, **21px off** — *a row C1 had shortened
+from 43 for exactly this reason.* A character count cannot express a scale.
+
+**Fixed structurally rather than by more copy-trimming.** `Hud.DrawHeatSelector` now WRAPS each
+rung's Desc to the measured body column via `WrapText` (which measures through `Cfg.Measure`, so it
+is scale-correct) and sizes the card by the LINE COUNT, with the row step on the house `TextRow`
+scaler so lines cannot overlap either. At `UiScale == 1.0` every number is arithmetically identical
+to the old `132 + rows * 26 + 30`, so the shipped 100% layout is unchanged — verified by
+screenshot. `Heat.DescBudget` survives, correctly labelled: a COPY-QUALITY budget ("should read as
+one line at 100%"), explicitly not the thing that keeps ink inside the border.
+
+C1's original char counts were also off by one: NO QUARTER was **58**, not 57; LINGERING WOUNDS
+**43**, not 42. No conclusion changes, and this project treats stated measurements as load-bearing.
+
+## C1-R6. Test hygiene, on the wave's own rules
+
+- **PASS-banner over-claims removed.** "Every rung of every mode fits the 38-char column" was false
+  (mode 0 is exempt by design and its rung 8 is 58 chars — the defect itself), and "per-mode shapes
+  pinned" covered 0/1/2/3/5 while **4, 6 and 7 had no pin at all**. Shapes are now pinned for all
+  eight modes and the banner says what it actually checked, including *at 100% text size*.
+- **Three assertions that could not fail are gone or made real.** `dialNotRestored` was a tautology
+  (`SetMidTooth` clamps to [0,7], so the `finally` restore always satisfied it) — exactly the
+  pattern C1 invoked against others. `recruitMoved` ran eight identical times inside a loop it did
+  not depend on; it is now one assertion, kept as a guard against a future edit folding `RecruitMod`
+  into `Mods`. The mode-0 `untouchedRung1..5` loop was strictly implied by the mode-1..7 loop.
+- **The shipped-default check was keyed on an ARRAY INDEX** (`shapeGolden[1]`), not on the mode; it
+  now looks up `mt == Heat.ShippedMidTooth`, so reordering the golden list cannot silently make it
+  check a different mode.
+- **`DmgOnBoard` passed vacuously on an empty spawn** (a `foreach` over an empty force asserts
+  nothing). It now fails with `noEnemiesSpawned`.
+- **Two comments the lever falsified** are corrected: `Heat.DmgDelta`'s "today only NO QUARTER
+  carries it, so this is 0 below the rung-8 apex" and `Game.SetupMission`'s "W6c: rung-8 +1 enemy
+  damage (0 below the apex)". Both were false at heats 6–7 the moment the lever landed, three lines
+  from the code that falsified them. **That is the exact defect class this wave was created to
+  find**, and it is the second time in one wave (the first being the dead `AiTier`) that a comment
+  outlived the fact it described.
+- `AITEST`'s `aiTierExposedNot1` tag was a misnomer even before C1 — heat 6's tier came from rung 4,
+  which IS the defect — and is now `aiTierExposedNot2`, asserting what it actually asserts.
+
+## C1-R7. Still not done, after the send-back
+
+- **Rung 5 is untouched and still buys 0.31 — indistinguishable from zero.** C1 fixed the
+  second-flattest rung and left the flattest. Its `+1 enemy` is likely partly eaten by the
+  12-hostile spawn cap and `HarshAttrition` compounds over a run length the bot rarely reaches:
+  **hypotheses, unmeasured.** ROADMAP names the instrumentation to do first.
+- **No lever beat the CONTROL on dispersion.** Mode 3 is the least-bad redistribution, not an
+  improvement over doing nothing on that metric, and the ladder-of-record entry now says so.
+- **Nothing was re-measured for this send-back**, as instructed: mode 3's h5 cell is substituted
+  from mode 1's measured h5 (20.62) and flagged in the archive README, and mode 3's heats −1..3 are
+  unmeasured (cumulative-identical to control below rung 6, and measured exactly the control under
+  mode 1 at six rungs).
+- **SKIRMISH at heat 6–7, the BRACE comeback economy, and the AddHeat directional bias are all
+  unmeasured** and are now ROADMAP items rather than footnotes.

@@ -2084,16 +2084,71 @@ fixable, and what makes it worth a wave even though every rung is in band.
 Eight waves merged, each independently reviewed, each sent back at least once. The composed-tree
 ladder is `docs/measurements/l3/` and the write-up is DEVLOG §L3. Start here:
 
-### The three best-evidenced open findings, in priority order
+### The best-evidenced open findings, in priority order (C1 closed the first and opened three)
 
-- [ ] **THE FLAT MIDDLE — replicated on THREE disjoint trees, and it is the obvious next wave.**
-      `h4 → h6` is the smallest step on all three ladders (−3.8 / −2.5 / −3.8) and on the composed
-      tree `h2 → h4` joins it at −7.5, while the ends buy −23.8, −16.2 and −13.1. `Heat.Mods`
-      explains it exactly: **rung 8 is the only entry carrying either `DmgDelta` or `AiTier`**, so
-      the middle rungs add bodies and stats and only the apex changes KIND. The ladder's LEVEL is
-      fine — five of six rungs in band — its SHAPE is not, and the cause is a static table.
-      First candidate (the audit's `balance-3`): move `DmgDelta` to rung 6 and `AiTier 2` to rung 7.
-      **ONE lever, CRN-paired, against a fresh same-slot baseline on your own tree.**
+- [x] **THE FLAT MIDDLE — PARTLY closed by PROGRAM CONTOUR wave C1 (`docs/measurements/c1/`,
+      DEVLOG §C1 + §C1-R). One lever shipped; the finding was sharpened and PART OF IT RELOCATED
+      rather than removed.** Measuring all TEN rungs (n=320, n=640 at h6, base `17934ee`) showed
+      "`h4 → h6` is flat" is really **two rungs, one of them exactly zero**: rung 5 buys
+      **0.00 ±3.2**, rung 6 bought **2.34 ±2.7**, against six other rungs averaging 5.7. Mechanism:
+      **rung 6 declared `AiTier = 1`, which could never fire** — rung 4 already publishes tier 1 and
+      the aggregation is `Math.Max` — so EXPOSED's coordination tooth was dead for two programs.
+      Shipped `Heat.MidTooth` (default **3**): BOTH of NO QUARTER's qualitative teeth move down to
+      rung 6. **`h4 → h6` −2.3 ±2.7 → −7.0 ±2.7**; six rungs exactly unchanged (0/320 discordant
+      each); h6 in band at 13.9, 1.4 SE clear of the floor. `SIGHTLINE_MIDTOOTH=0` restores the
+      pre-C1 table; `SIGHTLINE_MIDTOOTHTEST` pins it.
+      **What is still open here:** rung 8 now buys 1.6 (was 4.1) and rung 5 still buys 0.3 —
+      **C1 fixed the second-flattest rung and left the flattest** — and NO lever beat the control on
+      dispersion (SD of the 8 steps 2.36 control / 2.44 mode 3 / 2.89 mode 1). The rung sums are
+      identical to the decimal in every mode, so this is an allocation problem, and the next two
+      items are why it cannot be solved inside `Heat.Mods`.
+
+- [ ] **THE LADDER'S TOP HALF HAS SUNK ONTO ITS BOTTOM — C1's closing finding, and now the
+      biggest open number.** Against band centres, **h0 is 10.6 points low and h4 is 9.1 low**,
+      while h6 and h8 are within 2. An apex-neutral `Heat.Mods` lever pins h4 (20.9) and h8 (8.1),
+      leaving **12.8 points of win-rate for four rungs — 3.2 each** — so no redistribution inside
+      the table can give rungs 5–8 the ~5.7 points per rung that rungs 1–4 buy. C1 could stop one
+      rung taking almost none of it, and did; it could not create room that is not there.
+      **This is a BASE-difficulty lever, not a heat-table lever.** Price it against the band
+      (RECRUIT 75 / h0 55 / h2 40 / h4 30 / h6 20 / h8 10) and expect the whole ladder to move.
+      **On the SHIPPED tree h6 is also 6.1 under its centre** — C1's lever added a third rung to
+      this deficit list, so read it as h0 −10.6 / h4 −9.1 / h6 −6.1, not as the two-rung list C1's
+      first draft wrote here (which described the CONTROL and told the next wave the wrong thing).
+
+- [ ] **RUNG 5 (LINGERING WOUNDS) BUYS EXACTLY ZERO — 0.0 ±3.2 at n=320.** The deadest rung on
+      the ladder, and C1 left it alone (one lever per wave). Two unmeasured hypotheses to test
+      first: its `+1 enemy` is partly eaten by the **12-hostile spawn cap**
+      (`Mission.cs:653`, `Math.Clamp(EnemyBaseCount + n + enemyDelta, 3, 12)`) on late missions,
+      and `HarshAttrition` compounds over a run length the autopilot rarely reaches (avgMis 3.66
+      at h5). **Instrument the delivered headcount per (heat, mission) before choosing a lever.**
+
+- [ ] **A "heat-N rung" IS NOT A FIXED RUNG, AND THE LEAK IS DIRECTIONAL — it biases the very
+      finding this program is chasing.** `Events.cs:460` (`EventOutcomeKind.AddHeat`) lets three
+      field-event choices raise a run's HeatLevel mid-campaign, +1 each, so every heat-N cell
+      contains some heat-N+1 missions. **Heat 8 is clamped and cannot leak, so every rung below it
+      is contaminated UPWARD**: the instrument systematically **compresses the top of the ladder it
+      is being used to diagnose**, which means some part of the flat middle/top may be the
+      INSTRUMENT, not the design. Quantified from C1's archive: h5 shows a 1.56% flip rate under a
+      lever that can only bite at heat ≥ 6, implying **≈10% of h5 campaigns reach heat ≥ 6** (h4
+      shows zero — from there the escalation must fire twice). C1's campaign-level inertness claims
+      survive it (six rungs at 0/320 are exact), but **every past "this rung is unaffected" claim on
+      this ladder has had this hole in it.** A clean fix exists and is cheap: a harness-only pin
+      that suppresses `AddHeat` for a measured batch, so a rung means the rung. Do that BEFORE the
+      base-difficulty round above, or that round re-inherits the bias.
+
+- [ ] **SKIRMISH AT HEAT 6–7 IS UNMEASURED AND C1 CHANGED IT.** `Game.cs` gates the m1–2 heat grace
+      on `Mode != GameMode.Skirmish` (W9's fix), so a heat-6 SKIRMISH now takes C1's +1 enemy damage
+      **from turn one**, where before only heat 8 did. `SIGHTLINE_BALANCE` measures campaigns only,
+      so no instrument in the repo has ever priced a skirmish. DAILY is safe (`DailyHeat` is `% 4u`,
+      capped at 3); ENDLESS is safe (`EndlessWaveScale` reads `StatDelta`, never `DmgDelta`).
+      **Two of four shipped modes have no measurement at all** — that is the wider item.
+
+- [ ] **THE BRACE COMEBACK ECONOMY, flagged by the code and not yet priced.** `Mission.cs:890-902`
+      warns that a wider AI finish band "leans AGAINST the BRACE comeback lever … the comeback
+      economy is the first re-tune if lead-swings collapse", and C1 moved exactly that widening down
+      two rungs. In C1's committed h6 sample pair lead-swings/match holds at 0.9, but average
+      max-swing goes 59.6 → 55.8 and greedy BRACE usage **146 → 96 (−34%)**. n=40 and not
+      conclusive. Re-measure at n≥320 before or alongside the next heat-table change.
 
 - [ ] **THE MID-RUN DECAPITATE — replicated three times, mechanism located, lever unspent.**
       44.7% ±3.9 (n=161) against the finale's 68.0% (n=472): **23.3 points harder than the
