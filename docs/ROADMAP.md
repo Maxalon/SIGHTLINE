@@ -2182,3 +2182,38 @@ hide a 49.5-point artifact, so cross-tab; a rung is four slot sets or it is not 
 round prices consequences and is blind to feel; count NAMES not line shapes; a test that cannot
 fail is not a test; and a correct assertion in the wrong scope is indistinguishable from no
 assertion.
+
+### CONTOUR interim finding — THE GATE WAS A REPORT, NOT A GATE (found by C3, verified by the lead)
+
+`scripts/qa-sweep.sh` accumulated `_fail` and `_autofail` and then **ended on an `echo`. There was
+no `exit`.** `_autofail` even printed "DO NOT MERGE" — and the script still exited 0. Verified
+directly on base `17934ee`.
+
+**So CLAUDE.md's claim was false:** *"Since W9 the sweep EXITS NON-ZERO on any FAIL line, a
+non-empty COVERAGE GAP, a TIMEOUT or a missing RESULT line, so it is a gate rather than a report."*
+It was a report the whole time, and **every green-sweep claim quoting `SWEEP-EXIT=0` — including
+all eight PROGRAM CROSSCUT merges — was quoting the exit code of an echo.**
+
+**What this does NOT invalidate, stated precisely.** A hardened re-run on `main` @ `17934ee` reads
+build 0 warn / 0 err, **FAIL lines 0**, autoplay **3/3** WIN|LOSE, `PAIRTEST: PASS`. `main` is
+genuinely green. The CROSSCUT merges were gated by *reading the printed output*, not by the exit
+code — which is exactly why the W9 merge defect was caught: every autoplay leg printed
+`<no RESULT line>` and the merge was refused on that text. The earlier write-up said "the sweep
+correctly refused"; it did not. The automation was hollow, the inspection was real. Both halves of
+that sentence matter.
+
+C3 ships the fix (`[ "$_fail" = 1 ] && _rc=1; [ "$_autofail" = 1 ] && _rc=1; exit $_rc`) plus
+`AIIDLETEST`, which was the one sweep line not routed through `verdict`.
+
+**Consequence for anyone reading an archived measurement:** a wave's "SWEEP-EXIT=0" line is
+evidence of nothing on any tree before C3. The FAIL-line count, the three RESULT lines and the
+`PAIRTEST: PASS` line in the same log ARE evidence. Read those.
+
+### CONTOUR interim finding — a bare `.gitignore` rule silently ate three waves' runners
+
+`.gitignore:57` carries a bare `run_chunk.sh` pattern from an earlier wave's scratch cleanup.
+**C1, C2 and C4 each cited a `run_chunk.sh` in their archive README and each silently failed to
+commit it**, leaving their archived runners inoperable; C2 also lost `qa*.txt` and `shots/*.png`.
+Those rules are indiscriminate because `.gitignore` reached `main` carrying unresolved merge
+conflict markers (lines 74/93/104) — a lead merge defect, fixed by C6. Narrow the rule and re-check
+every wave archive after that merge.
