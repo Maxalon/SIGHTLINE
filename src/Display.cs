@@ -791,9 +791,15 @@ void main() {
     static string Dir => SaveGame.ConfigDir;
     static string FilePath => Path.Combine(Dir, "display.json");
 
+    /// C6: routed through SaveGame.WriteAtomic. This was the ONE writer in the player-data
+    /// directory that truncated its target in place — and it is the most frequently written file
+    /// of the three (every volume drag, every toggle, every one-shot tip). docs/DISTRIBUTION.md §5
+    /// has claimed ".tmp then rename, so a crash mid-write cannot tear a save" for the whole
+    /// directory since W5; for display.json that sentence was simply false. SIGHTLINE_SHIPTEST
+    /// now asserts the mechanism on all three files.
     static void Save()
     {
-        try { Directory.CreateDirectory(Dir); File.WriteAllText(FilePath, JsonSerializer.Serialize(new Dto { Fullscreen = Fullscreen, SizeIdx = SizeIdx, BrightIdx = BrightIdx, GammaIdx = GammaIdx, Colorblind = Pal.Colorblind, TutorialSeen = TutorialSeen, PostFX = PostFX, AutoCam = AutoCam, BraceTipSeen = (TipsSeen & 1) != 0, TipsSeen = TipsSeen, TrainingSeen = TrainingSeen, ShowAllVerbs = ShowAllVerbs, VolMaster = VolMaster, VolSfx = VolSfx, VolMusic = VolMusic, VolUi = VolUi, AnimSpeedIdx = AnimSpeedIdx, UiScaleIdx = UiScaleIdx }, DisplayJson.Default.Dto)); }
+        try { SaveGame.WriteAtomic(FilePath, JsonSerializer.Serialize(new Dto { Fullscreen = Fullscreen, SizeIdx = SizeIdx, BrightIdx = BrightIdx, GammaIdx = GammaIdx, Colorblind = Pal.Colorblind, TutorialSeen = TutorialSeen, PostFX = PostFX, AutoCam = AutoCam, BraceTipSeen = (TipsSeen & 1) != 0, TipsSeen = TipsSeen, TrainingSeen = TrainingSeen, ShowAllVerbs = ShowAllVerbs, VolMaster = VolMaster, VolSfx = VolSfx, VolMusic = VolMusic, VolUi = VolUi, AnimSpeedIdx = AnimSpeedIdx, UiScaleIdx = UiScaleIdx }, DisplayJson.Default.Dto)); }
         catch { }
     }
 

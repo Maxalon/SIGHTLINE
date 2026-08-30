@@ -384,6 +384,11 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         return sp.Count == 0 ? ("", false) : (string.Join(" ", sp.GetRange(0, Math.Min(2, sp.Count))), false);
     }
 
+    /// C6: the main menu's footer line, exposed so SIGHTLINE_SHIPTEST can assert the build stamp
+    /// is actually PAINTED rather than merely available. Ship.Version comes off the assembly, so
+    /// there is one place to bump and no second copy to forget.
+    public static string IntroFooter => "GEOMETRY · PARTICLES · NO QUARTER   ·   " + Ship.VersionLabel;
+
     // ---------------- pause / settings ----------------
     static void DrawPause(Game g)
     {
@@ -406,6 +411,12 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         Raylib.DrawRectangleLinesEx(card, 1.5f, Pal.PanelBd);
 
         Cfg.TitleText("PAUSED", new Vector2(x + w / 2 - (int)Cfg.TitleMeasure("PAUSED", 40, 1f).X / 2, y + 22), 40, 1f, Pal.Friend);
+        // C6: the build stamp, where a player who is about to file a bug report is already looking.
+        // Right-aligned into the card's empty top-right corner (the title is centred), so it stays
+        // clear of every row at every TEXT SIZE instead of competing with the centred controls hint.
+        string ver = Ship.VersionLabel;
+        Cfg.Text(ver, new Vector2((int)(x + w - 22 - Cfg.Measure(ver, 12, 1f).X), y + 26), 12, 1f,
+                 Raylib.Fade(Pal.TxtDim, 0.75f));
 
         int bw = bw0, bh = bh0, gap = gap0;
         int cx1 = x + 40, cx2 = x + 400, top = y + 84;
@@ -2570,8 +2581,13 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         Cfg.Text(caption, new Vector2((int)(W / 2f - bwm.X / 2f), lsBy + 50), 12, 1f,
             Raylib.Fade(capCol, 0.9f * Util.EaseOutQuad(Util.Clamp(lsIn, 0f, 1f))));
 
-        // a faint version/footer stamp
-        Cfg.Text("GEOMETRY · PARTICLES · NO QUARTER", new Vector2(W / 2f - 150, H - 30), 12, 1f, Raylib.Fade(Pal.TxtDim, 0.6f));
+        // C6: the faint footer stamp, which this comment has called a "version/footer stamp" since
+        // it was written while carrying NO VERSION. A bug report could not name a build. It now
+        // does, from the assembly (Ship.Version <- <Version> in Sightline.csproj), and the same
+        // string appears on the pause card so a player never has to quit to read it. Measured
+        // rather than offset by a hand-typed 150px, so it stays centred at every TEXT SIZE.
+        Vector2 fm = Cfg.Measure(IntroFooter, 12, 1f);
+        Cfg.Text(IntroFooter, new Vector2((int)(W / 2f - fm.X / 2f), H - 30), 12, 1f, Raylib.Fade(Pal.TxtDim, 0.6f));
     }
 
     // ── W5 THE FIRST HOUR: the ATMOSPHERE half of the overlay screens ─────────────────────────

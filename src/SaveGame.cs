@@ -97,6 +97,42 @@ public static partial class SaveGame
     /// mirroring MetaPathPublic). Not used by gameplay code.
     public static string SavePathPublic => FilePath;
 
+    /// C6 SHIPS LIKE A PRODUCT — THE ONE WRITER for every file in the player-data directory.
+    ///
+    /// Serialise to a sibling `.tmp`, then rename over the target. `File.Move(overwrite: true)` is
+    /// rename(2) on the same volume, which is ATOMIC: a reader (or a crash, or a kill -9, or a
+    /// disk that fills mid-write) sees either the complete old file or the complete new one, never
+    /// a torn one. A bare `File.WriteAllText(target, ...)` truncates the target's own inode FIRST
+    /// and then streams into it, so the window between those two acts is a window in which the
+    /// player's file is destroyed and not yet replaced.
+    ///
+    /// save.json and meta.json have written this way since W5. **display.json did not** — it was a
+    /// single bare WriteAllText, and it is the most frequently written of the three (every volume
+    /// drag, every toggle, every tip dismissed). C6 routed all three through here so the property
+    /// docs/DISTRIBUTION.md §5 asserts for the whole directory is true of the whole directory.
+    /// SIGHTLINE_SHIPTEST proves it by mechanism, not by inspection: it holds an open handle on the
+    /// target across a save and asserts the handle still sees the OLD bytes (a rename swapped the
+    /// inode). A truncate-in-place writer fails that leg.
+    ///
+    /// Also sweeps a stale `.tmp` on failure: DISTRIBUTION.md says `*.json.tmp` "should never
+    /// persist", and before this an exception between the write and the rename left one forever.
+    internal static void WriteAtomic(string path, string text)
+    {
+        string tmp = path + ".tmp";
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(path));
+            File.WriteAllText(tmp, text);
+            File.Move(tmp, path, overwrite: true);
+        }
+        catch
+        {
+            // Never let a failed save take the game down — and never leave the corpse behind.
+            try { if (File.Exists(tmp)) File.Delete(tmp); } catch { }
+            throw;
+        }
+    }
+
     public static void Delete()
     {
         try { if (File.Exists(FilePath)) File.Delete(FilePath); } catch { /* best effort */ }
@@ -108,13 +144,9 @@ public static partial class SaveGame
         if (run == null) return;
         try
         {
-            // Atomic write: serialize to a sibling .tmp then rename over the target
-            // (File.Move w/ overwrite is rename(2) on the same volume), so a crash or
-            // torn write mid-save can never leave a half-written save.json behind.
-            Directory.CreateDirectory(Dir);
-            string tmp = FilePath + ".tmp";
-            File.WriteAllText(tmp, JsonSerializer.Serialize(ToDto(run), SaveJson.Default.RunDto));
-            File.Move(tmp, FilePath, overwrite: true);
+            // Atomic write (WriteAtomic: .tmp then rename), so a crash or torn write mid-save
+            // can never leave a half-written save.json behind.
+            WriteAtomic(FilePath, JsonSerializer.Serialize(ToDto(run), SaveJson.Default.RunDto));
             InvalidateExistsCache();
         }
         catch { /* a failed save must never crash the game */ }
@@ -269,13 +301,10 @@ public static partial class SaveGame
     {
         try
         {
-            // Atomic write (same pattern as Save): .tmp then rename, so the game's only
+            // Atomic write (same one writer as Save): .tmp then rename, so the game's only
             // permanent state can't be torn by a crash mid-write.
-            Directory.CreateDirectory(Dir);
             dto.SchemaVersion = CurrentSchema;
-            string tmp = MetaPath + ".tmp";
-            File.WriteAllText(tmp, JsonSerializer.Serialize(dto, SaveJson.Default.MetaDto));
-            File.Move(tmp, MetaPath, overwrite: true);
+            WriteAtomic(MetaPath, JsonSerializer.Serialize(dto, SaveJson.Default.MetaDto));
         }
         catch { /* a failed meta save must never crash the game */ }
     }
@@ -876,6 +905,19 @@ public static partial class SaveGame
             string metaSaved = File.Exists(MetaPath) ? File.ReadAllText(MetaPath) : null;
             try
             {
+                // C6 FIX — START FROM A CLEAN META, exactly as MetaSelfTest already did.
+                // This block STASHED the player's meta.json but never CLEARED it, and then asserted
+                // `if (HasUnlock(1)) fails.Add("metaUnlockPhantom")` — a claim about the ABSENCE of
+                // an unlock, read off whatever profile happened to be on the machine. Ordinal 1 is
+                // StartBoon (STANDING ORDERS, 70 salvage, the second-cheapest unlock in the game),
+                // so ANY maintainer who has bought it fails SAVETEST — and SAVETEST is on the
+                // shipping gate: `scripts/publish.sh` runs it against the binary it just built and
+                // REFUSES THE PUBLISH on a FAIL. A correct build, unshippable, because of the
+                // publisher's own save file. Found by C6 the way a player would find it: with a
+                // pre-existing profile sitting in the config directory.
+                // The bytes are already in metaSaved above and go back in the finally below.
+                try { if (File.Exists(MetaPath)) File.Delete(MetaPath); } catch { }
+
                 SaveMetaHeat(4);
                 if (LoadMetaHeat() != 4) fails.Add("metaHeat");
                 SaveMetaHeat(99);                       // clamped to the ladder ceiling on read/write

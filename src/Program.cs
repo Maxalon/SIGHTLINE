@@ -7,6 +7,29 @@ public static class Program
 {
     public static void Main()
     {
+        // ══ C6: THE SECOND-LAUNCH CHILD. THIS BRANCH MUST STAY FIRST IN Main. ══════════════════
+        // SIGHTLINE_SHIPTEST forks this same binary with SIGHTLINE_SHIPCHILD=1 so that "quit the
+        // game, start it again, your progress is there" can be checked by TWO PROCESSES rather
+        // than asserted by one — no other hook in this project can check it, because the house
+        // rule (never touch the player's real profile) makes every hook stash-and-restore inside a
+        // single run.
+        //
+        // IT IS FIRST FOR A REASON, MEASURED THE HARD WAY: the first version of this branch sat
+        // below the SHIPTEST branch, and the child inherited SIGHTLINE_SHIPTEST=1 from its parent.
+        // The child therefore ran SHIPTEST, which forked a grandchild, which ran SHIPTEST... a
+        // fork bomb that reached 184 processes on a container shared with five other agents before
+        // it was killed. TWO independent guards now stop that, and both must stay:
+        //   (a) this branch is FIRST, so a process carrying SHIPCHILD can never reach SHIPTEST; and
+        //   (b) Ship.SecondLaunchProbe strips EVERY SIGHTLINE_* variable from the child's
+        //       environment before setting SHIPCHILD, so the child inherits no test mode at all.
+        // The child writes to the LIVE player-data directory on purpose; it is SHIPTEST's
+        // stash/restore that cleans up, so never set SIGHTLINE_SHIPCHILD by hand.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_SHIPCHILD") == "1")
+        {
+            Ship.SecondLaunchChild();
+            return;
+        }
+
         // TRUE BAND (review fix): SIGHTLINE_CHOICEBAND selects the DECISION-DENSITY INSTRUMENT,
         // and a typo used to select the new rule silently — a batch a shell history calls "mult"
         // but that was measured on "add" is exactly the corruption this wave exists to prevent.
@@ -227,6 +250,24 @@ public static class Program
         if (Environment.GetEnvironmentVariable("SIGHTLINE_SAVETEST") == "1")
         {
             Console.WriteLine(SaveGame.SelfTest());
+            return;
+        }
+
+        // C6 SHIPS LIKE A PRODUCT: SIGHTLINE_SHIPTEST=1 — the DISTRIBUTABLE's contract, not the
+        // game model's. The bundled-file manifest resolved STRICTLY next to the binary (the cwd
+        // fallback that hid RESONANCE F1's lost font is explicitly not allowed to carry it), the
+        // licence obligations present AND non-empty AND naming every redistributed component, the
+        // player-data directory rooted, a profile written and read back off disk, all three
+        // player-data writers proven atomic by an open-handle inode probe, every persisted DTO
+        // reachable from a source-generated JSON context, and the build stamped and painted.
+        // Runs against the PUBLISHED binary too (scripts/publish.sh invokes it there, which is the
+        // only place the manifest leg is testing the artifact a player receives).
+        // Tiny window: leg (4) builds a real Run, whose Unit ctors do tile math.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_SHIPTEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "shiptest");
+            Console.WriteLine(Ship.SelfTest());
+            Raylib.CloseWindow();
             return;
         }
 
@@ -840,6 +881,13 @@ public static class Program
         if ((shot || autoplay) && int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_MAP"), out int forcedMap))
             Mission.ForcedLayout = forcedMap;
         bool introShot = shot && Environment.GetEnvironmentVariable("SIGHTLINE_INTRO") == "1";
+        // C6 SHIPS LIKE A PRODUCT — SIGHTLINE_COLD=1: photograph the FIRST-EVER-LAUNCH state of a
+        // profile-driven screen instead of the staged demo one. Every screenshot hook in this
+        // project stages a rich profile (SIGHTLINE_INTRO fabricates a mid-campaign save so the
+        // CONTINUE button can be framed; DebugWarRoom hard-codes a twelve-run career), which means
+        // the two screens a NEW PLAYER actually meets first have never been photographed at all.
+        // Shot-only and NoPersist-gated like the rest, so it can never touch a real profile.
+        bool coldShot = shot && Environment.GetEnvironmentVariable("SIGHTLINE_COLD") == "1";
         // FUL-2: the staged CONTINUE save silently CLOBBERED a real campaign save when the intro
         // shot ran on a machine with one. Stash the player's save.json bytes and restore-or-delete
         // after the shot loop (the METATEST preserve/restore pattern).
@@ -849,7 +897,11 @@ public static class Program
             introStash = System.IO.File.Exists(SaveGame.SavePathPublic)
                 ? System.IO.File.ReadAllText(SaveGame.SavePathPublic) : null;
             introStaged = true;
-            var r = new Run(); r.Start(); r.Mission = 3; SaveGame.Save(r);
+            // C6: cold = the FIRST launch. Remove the save entirely (the stash above already holds
+            // the player's bytes, and the same restore path below puts them back), so CONTINUE RUN
+            // renders in its real never-played state instead of the fabricated mission-3 one.
+            if (coldShot) SaveGame.Delete();
+            else { var r = new Run(); r.Start(); r.Mission = 3; SaveGame.Save(r); }
         }
         // PROGRAM HORIZON W2: LAST STAND harness entry. SIGHTLINE_ENDLESS=1 boots straight into the
         // endless horde mode (BeginEndless) instead of a campaign mission. AutoPlay/SmartPlay/NoPersist
@@ -962,7 +1014,9 @@ public static class Program
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_DRAFT") == "1") game.BeginDraft();
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_VETDRAFT") == "1") game.DebugVetDraft();   // draft w/ recalled veterans
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_FOCUSOW") == "1") game.DebugFocusOw();      // focused-overwatch cone
-        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_WARROOM") == "1") game.DebugWarRoom();   // W3 cross-run meta screen
+        // W3 cross-run meta screen. C6: + SIGHTLINE_COLD=1 renders the ZERO state instead of the
+        // staged twelve-run demo career — the screen a first-time player actually opens.
+        if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_WARROOM") == "1") game.DebugWarRoom(coldShot);
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_CODEX") == "1") game.DebugCodex();       // W6 field-manual reference screen
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_AUDITION") == "1") game.DebugAudition();  // A3 AUDIO CHECK screen (+ SIGHTLINE_AUDITIONFIRE=1 lights the just-played rows)
         if (shot && Environment.GetEnvironmentVariable("SIGHTLINE_HAZARD") == "1") game.DebugHazards();

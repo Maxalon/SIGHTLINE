@@ -2138,8 +2138,71 @@ ladder is `docs/measurements/l3/` and the write-up is DEVLOG §L3. Start here:
 - [ ] **W3 THE OPPONENT CHOOSES was never started.** `Ai.cs` still scores any shot at
       `100 + bestHit` against terrain terms bounded under ~64, so the opponent now always ACTS but
       still never DECLINES. That is the single biggest remaining gap in the fight.
-- [ ] **W6 (biome mechanical) and W7 (ships-like-a-product) were never started.** `grep -ci biome`
-      still returns 0 in `Combat.cs`, `Ai.cs`, `Grid.cs` and `Unit.cs` — eight biomes are paint.
+- [ ] **W6 (biome mechanical) was never started.** `grep -ci biome` still returns 0 in
+      `Combat.cs`, `Ai.cs`, `Grid.cs` and `Unit.cs` — eight biomes are paint.
+      (**W7 ships-like-a-product is now DONE** — CONTOUR wave C6, section at the end of this file.)
 - [ ] **A deadlock inside `UpdateEnemy`** would still be bounded only by the frame cap; W9's idle
       guard covers the player turn only.
 - [ ] **On-device audio** still needs the owner: nobody has heard this game.
+
+---
+
+## PROGRAM CONTOUR — wave C6 "SHIPS LIKE A PRODUCT" (CLOSED 2026-08-30, branch `wave/ships`)
+
+The "ships-like-a-product" item declared never-started above is **done**. Full write-up in
+`docs/DEVLOG.md` §C6; the shipping contract in `docs/DISTRIBUTION.md` was re-measured from scratch.
+
+- [x] **Publish for real, all five configurations.** `release` / `small` / `no-trim` / `plain` for
+      linux-x64 plus a `--rid win-x64` cross-publish; every one verified by three self-tests run
+      against the binary it just built. Matrix re-measured **interleaved** (DEVLOG §C6): the
+      default is 28.4 MB across **10 files** and the fastest start of the four.
+- [x] **The `PublishTrimmed` hazard is a guard, not a comment.** `C6GuardTrimmedPersistence` in
+      `Sightline.csproj` makes removing either mitigation a **build error** (proven by running the
+      command that trips it); `SIGHTLINE_SHIPTEST`'s TRIMSAFE leg covers the half MSBuild cannot
+      see. **CLAUDE.md's "never publish with `-p:PublishTrimmed=true`" was stale and harmful** —
+      trimmed is the recommended default; what you must not do is publish without the script.
+- [x] **Walked the player's path** — published directory, outside the source tree, path with a
+      space in it, empty profile. Fonts resolve by absolute path from the install directory and a
+      full campaign wins. `SIGHTLINE_SHIPTEST` from that install PASSes and leaves the profile
+      directory empty.
+- [x] **Ship the root `LICENSE` in the distributable.** It had been decided and committed and
+      **never copied into any build output**.
+- [x] **All three player-data writers are atomic.** `display.json` was not; `save.json` and
+      `meta.json` were. One writer now (`SaveGame.WriteAtomic`), plus a stale-`.tmp` sweep that a
+      measured full-disk run proved was needed.
+- [x] **A version stamp a bug report can name** — `<Version>` in the `.csproj`, read off the
+      assembly, painted on the main menu and the pause card. Stamped **v1.0.0**.
+- [x] **A cold-first-run screenshot hook** (`SIGHTLINE_COLD=1`): the main menu and the WAR ROOM's
+      zero state, neither of which had ever been photographed (both hooks staged rich profiles).
+- [x] **`SIGHTLINE_SAVETEST` no longer fails on the publisher's own save file.** It asserted the
+      ABSENCE of `MetaUnlock` ordinal 1 against the real profile; anyone owning STANDING ORDERS
+      could not publish. **A latent block on the shipping gate.**
+- [x] **`.gitignore` no longer contains committed merge-conflict markers.** They were in `main`.
+
+### What C6 found and deliberately did NOT fix (each is a candidate wave)
+
+- [ ] **The cold WAR ROOM ellipsises 4 of 6 unlock descriptions.** With 0 owned the catalogue wants
+      508 px in a 446 px column, so `Hud.WarUnlockPlan` clips each compact row to one 12 px line.
+      W9 chose this deliberately over breaking the 12 px floor or dropping a card, and documented
+      it — but the cost lands on the **only player who ever sees all six unowned: the new one**,
+      who therefore cannot read what any unlock does. `METATEST` asserts the font size and the hit
+      rect, not readability. Now photographable via `SIGHTLINE_COLD=1`.
+- [ ] **The intro screen is not in `FITTEST`'s list and overflows at TEXT SIZE 120%.** The
+      DIFFICULTY panel's body line paints to x≈1266 against a panel edge at x≈1239 — outside its
+      own panel — and the `[K]`/`[U]` chips overlap their labels. The first screen in the game has
+      never been checked at any scale but 100%. This is the natural sixth leg for `FITTEST`.
+- [ ] **`display.json` load-back cannot be verified headlessly.** `Display.Init` calls `Load()`
+      after its `if (!enabled) return`, and every shot/autoplay path passes `false`. Deliberate
+      (headless byte-stability), and it means the settings round trip has no coverage past "the
+      file is written correctly". SHIPTEST's second-launch fork closes the equivalent gap for
+      `meta.json` only.
+- [ ] **No crash reporter and no log file.** An exception on a player's machine goes to a stdout
+      nobody reads. The version stamp lets them name a build; there is nothing to attach.
+- [ ] **No installer, icon, window-title art or `.desktop` file**; on Windows the binary is
+      unsigned and SmartScreen will warn. **Code signing costs money and is out of scope
+      permanently** under this project's rules — but say so out loud rather than leaving it as a
+      surprise.
+- [ ] **macOS was never even cross-published**, and the Windows build is unverified beyond its
+      file list (nothing here can run either).
+- [ ] **`meta.json` has no export or backup path.** It holds every permanent thing the player owns
+      and the `.bak` beside it is corruption evidence, not a restore.

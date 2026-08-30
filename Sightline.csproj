@@ -8,6 +8,13 @@
     <AssemblyName>Sightline</AssemblyName>
     <RootNamespace>Sightline</RootNamespace>
     <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- C6 SHIPS LIKE A PRODUCT — the build stamp a bug report can name. THIS LINE IS THE SINGLE
+         SOURCE: Ship.Version reads it back off the assembly at runtime (never a hard-coded string
+         that can drift from it) and the main-menu footer and pause card paint it. Bump it by hand
+         when you cut a build. SIGHTLINE_SHIPTEST asserts it parses as MAJOR.MINOR.PATCH and that
+         the string the HUD paints actually contains the assembly's own value. -->
+    <Version>1.0.0</Version>
+    <InformationalVersion>1.0.0</InformationalVersion>
     <!-- RESONANCE A2: Raylib.AttachAudioMixedProcessor takes a
          `delegate* unmanaged[Cdecl]<void*, uint, void>` (the master limiter in Audio.cs).
          Only that one callback needs it. -->
@@ -38,6 +45,13 @@
          their notice be retained in distributions. Copied to the build/publish output so it
          travels with the binary. -->
     <None Include="THIRD-PARTY-NOTICES.txt" CopyToOutputDirectory="PreserveNewest" />
+    <!-- C6: the project's OWN licence. docs/DISTRIBUTION.md §4 decided it (all rights reserved,
+         explicitly NOT restricting compiled builds) and committed a root LICENSE — but nothing
+         ever copied it into a build, so every distributable this repo has produced shipped the
+         third-party notices and no statement of its own terms. A recipient of the zip could not
+         tell what they were allowed to do with it. SIGHTLINE_SHIPTEST's manifest leg fails
+         without this line. -->
+    <None Include="LICENSE" CopyToOutputDirectory="PreserveNewest" />
     <None Include="assets/NotoMono-Regular.ttf" CopyToOutputDirectory="PreserveNewest" />
     <None Include="assets/NotoMono-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" />
     <!-- RESONANCE V1 — display face for titles (Chakra Petch Bold, SIL OFL 1.1, 78 KB).
@@ -53,5 +67,26 @@
     <None Include="assets/sfx/**" CopyToOutputDirectory="PreserveNewest" />
     <None Include="assets/music/**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
+
+  <!-- ══ C6: THE PublishTrimmed HAZARD, AS A GUARD RATHER THAN A COMMENT ══════════════════════
+       History (docs/DISTRIBUTION.md §3): a trimmed publish once compiled with 0 errors, booted,
+       played and finished a whole autoplay campaign while saving NOTHING — no save.json, no meta
+       profile — because reflection-based System.Text.Json lost the metadata trimming strips and
+       the persistence layer's `catch { }` ate the exception. The mitigation is the two blocks
+       above. Nothing enforced that they stayed: delete either one and the next trimmed publish is
+       silently broken again, and only `scripts/publish.sh` (which a raw `dotnet publish` skips)
+       would have caught it.
+       This target makes the mitigation a BUILD ERROR to remove. It is deliberately narrow — it
+       guards the two knobs, not the whole hazard. The other half of the hazard is "a new persisted
+       DTO that no [JsonSerializable] root can see", which MSBuild cannot possibly know about;
+       SIGHTLINE_SHIPTEST's source-generation leg covers that one, in the untrimmed build where
+       everyone actually develops. -->
+  <Target Name="C6GuardTrimmedPersistence" BeforeTargets="Publish;PrepareForILLink"
+          Condition="'$(PublishTrimmed)' == 'true'">
+    <Error Condition="'$(JsonSerializerIsReflectionEnabledByDefault)' != 'true'"
+           Text="TRIMMED PUBLISH GUARD: JsonSerializerIsReflectionEnabledByDefault is not true. A trimmed build with it off silently loses the SIGHTLINE_BALANCE telemetry export (it serialises anonymous types). See docs/DISTRIBUTION.md section 3." />
+    <Error Condition="'@(TrimmerRootAssembly)' == ''"
+           Text="TRIMMED PUBLISH GUARD: TrimmerRootAssembly is empty. Re-enabling the JSON reflection fallback is only safe BECAUSE our own assembly is rooted; without it a trimmed publish compiles clean, boots, plays a whole campaign and saves nothing. See docs/DISTRIBUTION.md section 3." />
+  </Target>
 
 </Project>

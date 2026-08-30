@@ -9,25 +9,27 @@
 #   bash scripts/publish.sh --rid win-x64   # cross-publish (any RID dotnet supports)
 #   bash scripts/publish.sh --out /some/dir
 #
-# Output is ONE self-contained executable plus libraylib.so (a native library the runtime
-# dlopen()s — it cannot be linked into the single file), the assets/ directory, and
-# THIRD-PARTY-NOTICES.txt. SHIP THE WHOLE OUTPUT DIRECTORY: the notice file and
-# assets/NotoMono-LICENSE.txt and assets/ChakraPetch-LICENSE.txt are licence obligations,
-# not optional extras.
+# Output is TEN files: ONE self-contained executable, libraylib.so (a native library the runtime
+# dlopen()s — it cannot be linked into the single file), the assets/ directory (two fonts, their
+# two OFL licence texts, two CREDITS ledgers), THIRD-PARTY-NOTICES.txt and LICENSE.
+# SHIP THE WHOLE OUTPUT DIRECTORY: the notice file, both assets/*-LICENSE.txt and LICENSE are
+# licence obligations, not optional extras. SIGHTLINE_SHIPTEST (below) is what enforces that.
 #
-# Measured on this project (linux-x64, self-contained, .NET SDK 8.0.130, this container).
-# "start" = wall time for one window-free SIGHTLINE_SAVETEST launch, median of 10 after a
-# warm run, so it is startup + JIT of the persistence path, not frame time:
+# Re-measured by wave C6 on 2026-08-30 (linux-x64, self-contained, .NET SDK 8.0.130, this
+# container). "start" = wall time for one window-free SIGHTLINE_SAVETEST launch — startup + JIT of
+# the persistence path, not frame time. Measured INTERLEAVED (one launch of each mode per round, 9
+# rounds) so all four see the same load on a container shared with five other agents; read the
+# ORDERING as the result. Full table + caveats in docs/DISTRIBUTION.md section 2.
 #
-#   mode        flags                                  size   start   files
-#   release     PublishTrimmed + ReadyToRun + single    25 MB    95 ms     6   <- default
-#   small       PublishTrimmed + single                 18 MB   350 ms     6
-#   no-trim     ReadyToRun + single                     80 MB   115 ms     6
-#   plain       single                                  68 MB   168 ms     6
-#   (folder, no single file: 75 MB across 193 files)
+#   mode        flags                                exe      dir    files   start (median of 9)
+#   release     PublishTrimmed + ReadyToRun + single  25.6 MB  28.4 MB  10     169 ms  <- default
+#   small       PublishTrimmed + single               15.8 MB  18.5 MB  10     545 ms
+#   no-trim     ReadyToRun + single                   82.3 MB  85.1 MB  10     206 ms
+#   plain       single                                68.3 MB  71.0 MB  10     317 ms
+#   win-x64     (cross-published)                     24.3 MB  26.4 MB  10     n/a here
 #
 # Trimming is what makes "small" slow: it strips the framework's precompiled ReadyToRun code,
-# so everything JITs at startup. Adding ReadyToRun back costs 7 MB and buys the fastest start
+# so everything JITs at startup. Adding ReadyToRun back costs ~10 MB and buys the fastest start
 # of any config — which is why the default is both.
 #
 # On PublishTrimmed: it USED to silently destroy all persistence (save.json AND the entire
@@ -35,8 +37,11 @@
 # trimming strips — the game booted, played and finished a whole campaign while saving nothing.
 # That is fixed: SaveGame and Display serialise through source-generated JsonSerializerContexts,
 # and Sightline.csproj roots our own assembly for the one remaining reflective site (the
-# SIGHTLINE_BALANCE telemetry export, which serialises anonymous types). This script re-proves it
-# on every publish by running the two persistence self-tests against the binary it just built.
+# SIGHTLINE_BALANCE telemetry export, which serialises anonymous types). Trimmed is therefore the
+# RECOMMENDED default, not a hazard to avoid; what you must not do is publish without this script,
+# which re-proves the artifact by running SAVETEST + METATEST + SHIPTEST against the binary it just
+# built. Sightline.csproj's C6GuardTrimmedPersistence target additionally makes removing either
+# mitigation a build ERROR.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -86,16 +91,24 @@ if [ -x "$OUT/Sightline" ] && [ "$RID" = "linux-x64" ]; then
     RUN=(xvfb-run -a -s "-screen 0 1280x800x24")
   fi
   ok=1
-  for t in SAVETEST METATEST; do
+  # C6: SHIPTEST is the leg that can ONLY be judged here. Run from the source tree it proves very
+  # little — Cfg.AssetPath's cwd fallback quietly resolves anything the .csproj forgot to copy off
+  # the repo instead of off the build output, which is exactly how RESONANCE F1's missing font
+  # survived every self-test in the suite. Against the PUBLISHED directory there is no repo to fall
+  # back to, so the manifest leg is testing the artifact a player actually receives.
+  for t in SAVETEST METATEST SHIPTEST; do
     line=$( cd "$OUT" && "${RUN[@]}" env "SIGHTLINE_$t=1" ./Sightline 2>/dev/null | grep -E "^$t: " || true )
     echo "   ${line:-$t: NO OUTPUT}"
     case "$line" in *": PASS"*) ;; *) ok=0 ;; esac
   done
   if [ "$ok" != 1 ]; then
     echo
-    echo "!! PERSISTENCE IS BROKEN IN THIS PUBLISH CONFIG. Do not ship it." >&2
-    echo "   Most likely a serialization change stopped going through the source-generated" >&2
-    echo "   JsonSerializerContexts in SaveGame/Display. See docs/DISTRIBUTION.md." >&2
+    echo "!! THIS PUBLISH IS NOT SHIPPABLE. Do not ship it." >&2
+    echo "   SAVETEST/METATEST: most likely a serialization change stopped going through the" >&2
+    echo "   source-generated JsonSerializerContexts in SaveGame/Display." >&2
+    echo "   SHIPTEST: a bundled file (font, licence text, THIRD-PARTY-NOTICES.txt, LICENSE) is" >&2
+    echo "   missing from the output directory, or a player-data writer stopped being atomic." >&2
+    echo "   See docs/DISTRIBUTION.md." >&2
     exit 1
   fi
 fi

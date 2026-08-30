@@ -137,6 +137,13 @@ echo -n "GEOMTEST   : "; verdict "$(SIGHTLINE_GEOMTEST=1 run | grep -oE "GEOMTES
 # numbers against rolled outcomes (no test had ever read a displayed quantity); GRAPPLETEST is the
 # FIRST coverage the GRAPPLE verb has ever had; STALLTEST asserts the autopilot's own
 # "never a RESULT: TIMEOUT" contract instead of leaving it in a comment.
+# C6 SHIPS LIKE A PRODUCT: the DISTRIBUTABLE's own contract — the bundled-file manifest resolved
+# strictly next to the binary, the licence obligations, the player-data directory, the atomicity of
+# all three writers, trim-safe serialization, and the build stamp. HONEST SCOPE: run from HERE it
+# is testing bin/Debug/net8.0/, so its manifest leg proves the .csproj copies what it claims. The
+# leg that matters most — "is the artifact a player receives complete?" — can only be judged
+# against a published directory, and `bash scripts/publish.sh` runs SHIPTEST there on every publish.
+echo -n "SHIPTEST   : "; verdict "$(SIGHTLINE_SHIPTEST=1 run | grep -oE "SHIPTEST: (PASS|FAIL)" | head -1)"
 echo -n "TRUTHTEST  : "; verdict "$(SIGHTLINE_TRUTHTEST=1 run | grep -oE "TRUTHTEST: (PASS|FAIL)" | head -1)"
 echo -n "GRAPPLETEST: "; verdict "$(SIGHTLINE_GRAPPLETEST=1 run | grep -oE "GRAPPLETEST: (PASS|FAIL)" | head -1)"
 echo -n "STALLTEST  : "; verdict "$(SIGHTLINE_STALLTEST=1 run | grep -oE "STALLTEST: (PASS|FAIL)" | head -1)"

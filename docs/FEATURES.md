@@ -841,3 +841,59 @@ branch point.
 - **The enemy HUNKER is audible and visible** — it was the one branch of the eleven that fired in
   complete silence. It now pops "HUNKERED" and plays the player's own hunker cue, **except during
   the bleed-out window**, where it stays silent by design.
+
+---
+
+## PROGRAM CONTOUR — WAVE C6 "SHIPS LIKE A PRODUCT" (the artifact becomes a thing you can hand someone)
+
+Everything here is about the **built artifact**, not the game model. No gameplay code changed
+(`PAIRTEST` byte-identical). Rationale and measurements: `docs/DEVLOG.md` §C6; the shipping
+contract itself is `docs/DISTRIBUTION.md`.
+
+### A version stamp
+- **`Ship.Version`** reads `<Version>` off the assembly at runtime — one source (`Sightline.csproj`),
+  never a hard-coded second copy. Currently **1.0.0**.
+- **`Ship.VersionLabel`** ("SIGHTLINE v1.0.0") is painted in the **main-menu footer** and in the
+  **pause card's top-right corner**, so a player filing a bug can name the build without quitting.
+
+### The shipped file set is now declared, and enforced
+- **`Ship.RequiredFiles`** is the manifest of everything that must sit next to the executable: both
+  font faces, both OFL licence texts, `THIRD-PARTY-NOTICES.txt`, and the project's own **`LICENSE`**
+  (which had been decided, committed, and never copied into a build).
+- A published directory is **10 files**: `Sightline` + `libraylib.so` + `assets/` (2 fonts,
+  2 licences, 2 `CREDITS.txt`) + `THIRD-PARTY-NOTICES.txt` + `LICENSE`.
+
+### Atomic writes across the whole player-data directory
+- **`SaveGame.WriteAtomic`** is now the ONE writer for `save.json`, `meta.json` **and
+  `display.json`** — serialise to `<name>.tmp`, then `rename(2)` over the target. `display.json`
+  previously truncated its own target in place, and it is the most frequently written of the three.
+- The failure path **sweeps the stale `.tmp`**, which a measured full-disk run showed the old shape
+  leaves behind permanently.
+
+### `SIGHTLINE_SHIPTEST` — the distributable's self-test (in `qa-sweep.sh` and `publish.sh`)
+Six legs: the bundled manifest resolved **strictly** against `AppContext.BaseDirectory` (refusing
+`Cfg.AssetPath`'s cwd fallback, which is what hid RESONANCE F1's missing font from every test in
+the suite); the notices file actually **naming** all 8 redistributed components; the player-data
+directory rooted plus a profile round-trip through disk **and through a real second process of the
+shipped binary**; all three writers proven atomic **by mechanism** (an open handle held across the
+write must still see the old inode's bytes); every persisted DTO reachable from a source-generated
+JSON context; and the version stamp present and painted.
+
+`scripts/publish.sh` runs it **against the published directory**, which is the only place the
+manifest leg tests the artifact a player receives.
+
+### The `PublishTrimmed` hazard, enforced rather than described
+- **`C6GuardTrimmedPersistence`** (an MSBuild target in `Sightline.csproj`) makes a trimmed publish
+  **fail to build** if `JsonSerializerIsReflectionEnabledByDefault` is off or `TrimmerRootAssembly`
+  is empty, naming the reason and pointing at `docs/DISTRIBUTION.md` §3.
+- Trimmed is the **recommended default** and has been since F1 fixed the hazard; the old
+  "never publish trimmed" line in CLAUDE.md was stale. What must not happen is a publish that skips
+  `scripts/publish.sh` and therefore skips all three verifications.
+
+### `SIGHTLINE_COLD=1` — photograph the first launch
+A shot-only modifier that makes a profile-driven screenshot hook render its **zero state** instead
+of a staged demo one. `SIGHTLINE_INTRO=1 SIGHTLINE_COLD=1` shows the main menu with no save (the
+hook otherwise fabricates a mission-3 one to frame CONTINUE); `SIGHTLINE_WARROOM=1
+SIGHTLINE_COLD=1` shows the WAR ROOM with an empty profile (the hook otherwise hard-codes a
+twelve-run career). Before this, the two screens a new player meets first had never been
+photographed.

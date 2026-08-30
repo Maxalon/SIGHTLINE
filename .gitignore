@@ -71,8 +71,13 @@ autoplay10.txt
 qasweep.txt
 sweep-balance.json
 
-<<<<<<< HEAD
-# W4 THE BOARD BECOMES A PLACE — the BOARDTEST pixel probe's frame + this wave's shell helpers
+# C6 SHIPS LIKE A PRODUCT — this block reached `main` as an UNRESOLVED MERGE CONFLICT: commit
+# 17934ee's .gitignore literally contained `<<<<<<< HEAD` / `=======` / `>>>>>>> wave/first-hour`
+# as committed lines. Git read them as three harmless patterns, so nothing ever failed and no
+# self-test could see it — but it is the first file a stranger opens after README, and the wave
+# whose job is "what does a stranger receive" is the right one to fix it. Both sides are kept.
+#
+# W4 THE BOARD BECOMES A PLACE — the BOARDTEST pixel probe's frame + that wave's shell helpers
 sightline_boardtest.png
 .w4*.sh
 bal/
@@ -90,7 +95,6 @@ balance.json
 .w9shot.sh
 .w9sweep.sh
 .w9rev.md
-=======
 # W5 THE FIRST HOUR scratch — per-agent wrappers, the branch-point tree/binary the inertness
 # batch was measured against, and its artifacts. None of it is ever committed.
 .w5*.sh
@@ -101,4 +105,7 @@ w5sweep.txt
 basetree/
 basebin/
 .xdg-*/
->>>>>>> wave/first-hour
+# C6 SHIPS LIKE A PRODUCT scratch — the isolation wrapper (it hard-codes a worktree path) and the
+# throwaway atomicity/full-disk probe project.
+.sl-env.sh
+.c6probe/
