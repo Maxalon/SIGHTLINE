@@ -11,10 +11,10 @@
 | `ladder.sh` | the paired round: 6 rungs x 4 slot sets x 2 arms x N=10 (greedy+sloppy) = **80 campaigns per rung per arm, 960 total**. |
 | `ladder_table.py` | pools the four slot sets per rung and prints the paired ladder + the pooled decision mix. |
 | `summarise.py` | the wave's tripwires for any single chunk: mission length, shots/kill, and the enemy decision mix. |
-| `hook.sh` | runs one `SIGHTLINE_*` hook under xvfb with this worktree's isolation exports. |
+| `hook.sh` | runs one `SIGHTLINE_*` hook under xvfb with the checkout's isolation exports (root derived from the script's own location). |
 | `BEFORE-h0-b0.*` | the pre-change decision mix (`AIDECLINE=0`), n=20 runs / 89 missions. The wave's "instrument first" chunk. |
 | `AFTER-h0-b0.*` | the same slots with the change on, at the first (later rejected) pricing. |
-| `CAL-*.` | the calibration chunks. `CAL-diag` is the **maximal-decline diagnostic** — the one that priced the lane. |
+| `CAL-*` | the calibration chunks — **see the lever table below**, which records what each one ran with and which three pairs are duplicates. `CAL-diag` is the **maximal-decline diagnostic**, the only chunk here whose lanes are genuinely overwatch (442 of 457) rather than PIKEMAN brace. |
 | `R0diag-*` | logic-identity: the base-commit binary vs this tree with `AIDECLINE=0`, two slot sets. |
 | `L-{BASE,DECL}-h*-b*.*` | the ladder chunks. |
 | `POST-*` | one ladder chunk per ARM re-run on the FINAL binary after three behaviour-neutral tidies; both diff empty against their archived `L-*` JSON outside `harness`, which is the proof the ladder binary is the shipped binary. |
