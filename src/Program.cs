@@ -961,11 +961,11 @@ public static class Program
                     { Console.WriteLine($"RESULT: ENDLESS waves={game.Wave} frame={frame}"); break; }
                     continue;   // still surviving — keep fighting
                 }
-                if (game.Phase == Phase.Win) { Console.WriteLine($"RESULT: WIN mission={game.RunState.Mission} frame={frame}"); break; }
-                if (game.Phase == Phase.Lose) { Console.WriteLine($"RESULT: LOSE mission={game.RunState.Mission} frame={frame}"); break; }
+                if (game.Phase == Phase.Win) { Console.WriteLine($"RESULT: WIN mission={game.RunState.Mission} frame={frame} turns={game.RunTurns}"); break; }
+                if (game.Phase == Phase.Lose) { Console.WriteLine($"RESULT: LOSE mission={game.RunState.Mission} frame={frame} turns={game.RunTurns}"); break; }
                 // W1: a TIMEOUT now says how far past normal it got. "frame=20000" alone told you
                 // nothing about whether the cap was tight or the match was genuinely stuck.
-                if (frame >= autoCap) { Console.WriteLine($"RESULT: TIMEOUT mission={game.RunState.Mission} frame={frame} cap={autoCap} observedMax={autoMax} ({(double)frame / autoMax:0.0}x the longest campaign measured)"); break; }
+                if (frame >= autoCap) { Console.WriteLine($"RESULT: TIMEOUT mission={game.RunState.Mission} frame={frame} turns={game.RunTurns} cap={autoCap} observedMax={autoMax} ({(double)frame / autoMax:0.0}x the longest campaign measured)"); break; }
             }
         }
 
