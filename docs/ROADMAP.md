@@ -2131,6 +2131,25 @@ ladder is `docs/measurements/l3/` and the write-up is DEVLOG §L3. Start here:
 
 ### Standing gaps, honestly declared
 
+- [ ] **A FOUR-SLOT-SET RUNG IS NOT INTERCHANGEABLE WITH ANOTHER FOUR-SLOT-SET RUNG — measured.**
+      C2 found this while checking its own baseline: because `src/` is byte-identical between
+      `d814f0c` and `17934ee`, its BASE arm turned out to be **L3's b0-b30 replayed bit for bit**,
+      which makes L3's two halves directly comparable. At heat 2 they disagree —
+      **b0-b30 reads 21.2% and b40-b70 reads 41.2%** (17/80 vs 33/80), difference +20.0, SE 7.16,
+      **z = 2.79, p = 0.0052**, and 0.031 after Bonferroni x6. **L3's slot space is heterogeneous
+      at heat 2 beyond binomial noise**, so the ladder-of-record's h2 = 31.2% is an average over
+      two populations twenty points apart. CLAUDE.md's rule "a rung is four slot sets or it is not
+      a rung" is about SIZE; this is about WHICH FOUR. An UNPAIRED comparison across different slot
+      sets can therefore be badly misleading at h2 even at n=80 — a CRN-PAIRED one is immune,
+      because the effect hits both arms in the same worlds and cancels. **Prefer paired designs;
+      if you must compare unpaired rungs, use the same bases.** Raw data `docs/measurements/l3/`.
+- [ ] **A CRN round's resolving power comes from its DISCORDANT count, not its n, and nobody had
+      been reporting it.** C2's 80-pair rungs can only detect swings of 11-14 points (17-19 family
+      wise), and its heat-8 rung had **4 discordant pairs** — an exact two-sided minimum p of
+      0.125, so nothing was reachable there at any effect size. A "p = 1.000, no change" row at a
+      hard rung is an absence of evidence. **Report n_discordant and the MDE beside every paired
+      ladder**, or the flat rows will keep being read as neutrality. `docs/measurements/c2/paired.py`.
+
 - [ ] **THE ENEMY OVERWATCH HAS NO LANE SELECTION, and that is now the binding constraint.**
       C2 measured a held enemy lane FIRING **24-27%** of the time (n=457/461 lanes in the
       maximal-decline diagnostic, of which 442/455 are genuine overwatch; the shipped round's own

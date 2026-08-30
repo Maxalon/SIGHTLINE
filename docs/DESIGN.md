@@ -735,8 +735,12 @@ piece of ground and the decline becomes worth taking; until then it is not.** Re
 wave in `docs/ROADMAP.md`.
 
 `SIGHTLINE_AIDECLINE=0` restores the pre-C2 opponent exactly. Round: `docs/measurements/c2/`,
-960 CRN-paired campaigns on base `17934ee`; five of six rungs moved by one discordant pair or
-less, mission length 5.74 → 5.56 turns, shots-per-kill 3.153 → 3.157.
+960 CRN-paired campaigns on base `17934ee`. **Four rungs net one discordant pair and heat 8 nets
+two — but 124 of 480 paired worlds (25.8%) came out differently, so the round is near-inert in
+AGGREGATE, through cancellation, not per world.** Mission length is directionally shorter
+(−0.19 turns, chunk-paired t(23) = −1.60, p ≈ 0.12) and shots-per-kill is flat (3.153 → 3.157).
+At 4 discordant pairs the heat-8 rung could not have detected anything at all, so the flat rows
+are an absence of evidence rather than evidence of neutrality; see DEVLOG §5.
 
 ---
 

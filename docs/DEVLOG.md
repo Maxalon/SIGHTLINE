@@ -9243,8 +9243,8 @@ a four-slot-set rung as if slot sets were interchangeable. It does NOT explain t
 **heat 0 is below band in BOTH arms** (42.5 and 41.2 against a 47 floor), and the delta between
 them is −1.2 (one discordant pair, p = 1.000). **That miss predates this wave and is now provable
 rather than asserted**: the 42.5 is L3's own b0-b30 replayed bit for bit, and L3's eight-slot-set
-h0 reads 47.5, exactly at the floor. Recorded, not repaired: repairing a rung inside a wave that also changes gameplay is the mistake the measurement
-contract exists to prevent.
+h0 reads 47.5, exactly at the floor. Recorded, not repaired: repairing a rung inside a wave that
+also changes gameplay is the mistake the measurement contract exists to prevent.
 
 ## 5b. THE PASSIVITY TRIPWIRE — the fight did not get longer
 
