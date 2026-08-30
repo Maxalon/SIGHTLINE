@@ -9342,10 +9342,13 @@ trusting it.
   flywheel able to price the lane properly — but it would also change the INSTRUMENT, which
   invalidates every CRN world in the repository, so it is a wave of its own and must not be
   smuggled into one that also changes gameplay.
-- **`DeclineDigIn` never fired in any measured chunk.** It is pinned by DECLINETEST leg 6 on a
-  constructed board, but the "two or more guns AND cover to hand AND a bad shot" conjunction did
-  not coincide once in the probe batches. It is correct behaviour that is currently theoretical;
-  I am recording that rather than claiming it as an effect.
+- **`DeclineDigIn` is unexercised in play, as far as I measured.** It is pinned by DECLINETEST
+  leg 6 on a constructed board, but the two probe chunks run with and without it
+  (`CAL-e` / `CAL-f`, same slots, same seeds) came back **identical on every field**, so the
+  "two or more guns AND cover to hand AND a bad shot" conjunction did not occur once in those 20
+  campaigns. **I did NOT instrument it separately over the 960-campaign round**, so "never fires"
+  is not a claim I can make — what I can say is that it did not move a paired probe and that no
+  counter exists for it. A follow-up that cares should add one.
 - **`ShotSeat = 18` is reasoned, not measured.** It is set to one level of cover because that is
   the trade the term arbitrates, and a sensitivity sweep on it was not run. The three decline
   constants were calibrated (§4 and `CAL-*`); `ShotSeat` was not, and a wave that wants to move
