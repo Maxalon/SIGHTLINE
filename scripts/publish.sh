@@ -21,12 +21,16 @@
 # rounds) so all four see the same load on a container shared with five other agents; read the
 # ORDERING as the result. Full table + caveats in docs/DISTRIBUTION.md section 2.
 #
+# SIZES ARE MB = 10^6 BYTES, and are from the final C6 binary. The START column is NOT: it was
+# measured on the pre-review-fix binary the same day and deliberately not re-run under nine
+# concurrent reviewers. See docs/DISTRIBUTION.md section 2.
+#
 #   mode        flags                                exe      dir    files   start (median of 9)
-#   release     PublishTrimmed + ReadyToRun + single  25.6 MB  28.4 MB  10     169 ms  <- default
-#   small       PublishTrimmed + single               15.8 MB  18.5 MB  10     545 ms
+#   release     PublishTrimmed + ReadyToRun + single  26.5 MB  29.3 MB  10     169 ms  <- default
+#   small       PublishTrimmed + single               16.1 MB  18.8 MB  10     545 ms
 #   no-trim     ReadyToRun + single                   82.3 MB  85.1 MB  10     206 ms
 #   plain       single                                68.3 MB  71.0 MB  10     317 ms
-#   win-x64     (cross-published)                     24.3 MB  26.4 MB  10     n/a here
+#   win-x64     (cross-published)                     24.8 MB  26.9 MB  10     n/a here
 #
 # Trimming is what makes "small" slow: it strips the framework's precompiled ReadyToRun code,
 # so everything JITs at startup. Adding ReadyToRun back costs ~10 MB and buys the fastest start

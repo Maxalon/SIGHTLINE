@@ -857,9 +857,10 @@ contract itself is `docs/DISTRIBUTION.md`.
   **pause card's top-right corner**, so a player filing a bug can name the build without quitting.
 
 ### The shipped file set is now declared, and enforced
-- **`Ship.RequiredFiles`** is the manifest of everything that must sit next to the executable: both
-  font faces, both OFL licence texts, `THIRD-PARTY-NOTICES.txt`, and the project's own **`LICENSE`**
-  (which had been decided, committed, and never copied into a build).
+- **`Ship.RequiredFiles`** is the manifest of all **eight** files that must sit next to the
+  executable: both font faces, both OFL licence texts, both `CREDITS.txt` audio-provenance ledgers,
+  `THIRD-PARTY-NOTICES.txt`, and the project's own **`LICENSE`** (which had been decided, committed,
+  and never copied into any build output).
 - A published directory is **10 files**: `Sightline` + `libraylib.so` + `assets/` (2 fonts,
   2 licences, 2 `CREDITS.txt`) + `THIRD-PARTY-NOTICES.txt` + `LICENSE`.
 
@@ -867,17 +868,25 @@ contract itself is `docs/DISTRIBUTION.md`.
 - **`SaveGame.WriteAtomic`** is now the ONE writer for `save.json`, `meta.json` **and
   `display.json`** — serialise to `<name>.tmp`, then `rename(2)` over the target. `display.json`
   previously truncated its own target in place, and it is the most frequently written of the three.
-- The failure path **sweeps the stale `.tmp`**, which a measured full-disk run showed the old shape
-  leaves behind permanently.
+- The **failure path** sweeps the stale `.tmp`, which a measured full-disk run showed the old shape
+  leaves behind permanently. **Scope, plainly:** the sweep runs only when the write itself fails, so
+  a `kill -9` or power cut between the tmp write and the rename still leaves one — deliberately, as
+  crash evidence, with no startup sweep. The rename makes the write safe against **process death and
+  concurrent readers**; it is **not** proof of power-loss durability (no `fsync` of the tmp or the
+  directory), and the probe that verifies it is **Unix-only** while the change itself applies to all
+  platforms.
 
 ### `SIGHTLINE_SHIPTEST` — the distributable's self-test (in `qa-sweep.sh` and `publish.sh`)
 Six legs: the bundled manifest resolved **strictly** against `AppContext.BaseDirectory` (refusing
 `Cfg.AssetPath`'s cwd fallback, which is what hid RESONANCE F1's missing font from every test in
-the suite); the notices file actually **naming** all 8 redistributed components; the player-data
+the suite); the notices file actually **naming** all 5 redistributed components and all 3 of their
+licences, each keyed on a string unique to its own section; the player-data
 directory rooted plus a profile round-trip through disk **and through a real second process of the
-shipped binary**; all three writers proven atomic **by mechanism** (an open handle held across the
-write must still see the old inode's bytes); every persisted DTO reachable from a source-generated
-JSON context; and the version stamp present and painted.
+shipped binary** (which resolves the apphost, the published single-file exe *or* a `dotnet <dll>`
+relaunch, and reports a skip rather than failing a good build if it can identify none); all three
+writers proven atomic **by mechanism** (an open handle held across the write must still see the old
+inode's bytes) plus a forced-failure probe for the `.tmp` sweep; every persisted DTO reachable from
+a source-generated JSON context; and the version stamp present and painted.
 
 `scripts/publish.sh` runs it **against the published directory**, which is the only place the
 manifest leg tests the artifact a player receives.

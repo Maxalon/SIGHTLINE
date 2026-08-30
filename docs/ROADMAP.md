@@ -2155,7 +2155,7 @@ The "ships-like-a-product" item declared never-started above is **done**. Full w
 - [x] **Publish for real, all five configurations.** `release` / `small` / `no-trim` / `plain` for
       linux-x64 plus a `--rid win-x64` cross-publish; every one verified by three self-tests run
       against the binary it just built. Matrix re-measured **interleaved** (DEVLOG §C6): the
-      default is 28.4 MB across **10 files** and the fastest start of the four.
+      default is **29.3 MB across 10 files** (MB = 10^6 bytes) and the fastest start of the four.
 - [x] **The `PublishTrimmed` hazard is a guard, not a comment.** `C6GuardTrimmedPersistence` in
       `Sightline.csproj` makes removing either mitigation a **build error** (proven by running the
       command that trips it); `SIGHTLINE_SHIPTEST`'s TRIMSAFE leg covers the half MSBuild cannot
@@ -2168,8 +2168,10 @@ The "ships-like-a-product" item declared never-started above is **done**. Full w
 - [x] **Ship the root `LICENSE` in the distributable.** It had been decided and committed and
       **never copied into any build output**.
 - [x] **All three player-data writers are atomic.** `display.json` was not; `save.json` and
-      `meta.json` were. One writer now (`SaveGame.WriteAtomic`), plus a stale-`.tmp` sweep that a
-      measured full-disk run proved was needed.
+      `meta.json` were. One writer now (`SaveGame.WriteAtomic`), plus a **failure-path** `.tmp`
+      sweep that a measured full-disk run proved was needed. Scope stated in
+      `docs/DISTRIBUTION.md` §5: safe against process death and concurrent readers, **not** proven
+      against power loss (no `fsync`), and the probe that verifies the mechanism is Unix-only.
 - [x] **A version stamp a bug report can name** — `<Version>` in the `.csproj`, read off the
       assembly, painted on the main menu and the pause card. Stamped **v1.0.0**.
 - [x] **A cold-first-run screenshot hook** (`SIGHTLINE_COLD=1`): the main menu and the WAR ROOM's

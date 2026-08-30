@@ -80,13 +80,30 @@
        guards the two knobs, not the whole hazard. The other half of the hazard is "a new persisted
        DTO that no [JsonSerializable] root can see", which MSBuild cannot possibly know about;
        SIGHTLINE_SHIPTEST's source-generation leg covers that one, in the untrimmed build where
-       everyone actually develops. -->
+       everyone actually develops.
+
+       WHAT EACH KNOB ACTUALLY PROTECTS — MEASURED, not inferred (C6 review, second reviewer).
+       The first version of this target's error text said removing TrimmerRootAssembly meant a
+       trimmed build "compiles clean, boots, plays a whole campaign and saves nothing". THAT IS
+       FALSE TODAY and it is the sentence someone reads at their worst moment. Measured with the
+       root removed and the reflection knob kept: SAVETEST PASSES and a run round-trips
+       squad/perks/weapon-mods/card/heat correctly. With BOTH knobs removed: SAVETEST, METATEST and
+       SHIPTEST all still PASS. **Player persistence is protected by SOURCE GENERATION ALONE** —
+       that is the whole point of part (1) of the fix in docs/DISTRIBUTION.md section 3, and it
+       works. The old sentence describes the PRE-source-generation failure and would send the next
+       maintainer down the wrong road.
+       What the two knobs actually keep alive is the SIGHTLINE_BALANCE telemetry export, the one
+       remaining reflective site (it serialises anonymous types no generator can see). Measured
+       failures there: root removed -> NotSupportedException ("parameter names have been trimmed by
+       ILLink"); reflection knob removed -> InvalidOperationException ("Reflection-based
+       serialization has been disabled"). Losing the flywheel silently is reason enough for a build
+       error — this project's balance work runs on it — but say what breaks, not something worse. -->
   <Target Name="C6GuardTrimmedPersistence" BeforeTargets="Publish;PrepareForILLink"
           Condition="'$(PublishTrimmed)' == 'true'">
     <Error Condition="'$(JsonSerializerIsReflectionEnabledByDefault)' != 'true'"
-           Text="TRIMMED PUBLISH GUARD: JsonSerializerIsReflectionEnabledByDefault is not true. A trimmed build with it off silently loses the SIGHTLINE_BALANCE telemetry export (it serialises anonymous types). See docs/DISTRIBUTION.md section 3." />
+           Text="TRIMMED PUBLISH GUARD: JsonSerializerIsReflectionEnabledByDefault is not true. Trimming turns System.Text.Json's reflection fallback off by default, which breaks the SIGHTLINE_BALANCE telemetry export (it serialises anonymous types no source generator can see): InvalidOperationException, 'Reflection-based serialization has been disabled for this application'. Save/meta persistence is NOT affected - it goes through source-generated contexts - but losing the balance flywheel silently is not acceptable either. See docs/DISTRIBUTION.md section 3." />
     <Error Condition="'@(TrimmerRootAssembly)' == ''"
-           Text="TRIMMED PUBLISH GUARD: TrimmerRootAssembly is empty. Re-enabling the JSON reflection fallback is only safe BECAUSE our own assembly is rooted; without it a trimmed publish compiles clean, boots, plays a whole campaign and saves nothing. See docs/DISTRIBUTION.md section 3." />
+           Text="TRIMMED PUBLISH GUARD: TrimmerRootAssembly is empty. Re-enabling the JSON reflection fallback above is only safe BECAUSE our own assembly is rooted; without it ILLink strips the metadata that fallback needs and the SIGHTLINE_BALANCE telemetry export throws NotSupportedException ('parameter names have been trimmed by ILLink'). Measured: save/meta persistence still works without this root (source-generated contexts), so this guards the flywheel, not the player's profile. See docs/DISTRIBUTION.md section 3." />
   </Target>
 
 </Project>

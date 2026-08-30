@@ -116,6 +116,47 @@ public static partial class SaveGame
     ///
     /// Also sweeps a stale `.tmp` on failure: DISTRIBUTION.md says `*.json.tmp` "should never
     /// persist", and before this an exception between the write and the rename left one forever.
+    /// C6 REVIEW FIX (T4) — THE SELF-TEST STASH, made survivable.
+    ///
+    /// SAVETEST's meta block held the player's profile in a LOCAL STRING while it deleted the real
+    /// file, so a kill -9 between the delete and the finally lost the profile outright. C6's own
+    /// hermeticity fix made that window WORSE, not better: before it, the file was left in place
+    /// and merely mutated; after it, the file was absent. Trading "polluted" for "gone" is not an
+    /// improvement, and doing it in the wave whose whole thesis is "the player's data survives a
+    /// crash" is worse than doing it anywhere else.
+    ///
+    /// So the stash is a REAL FILE, moved aside by rename rather than deleted, and moved back the
+    /// same way. A process killed mid-test leaves the profile at `<name>.selftest-stash`, whole and
+    /// recoverable by hand, instead of leaving nothing at all. Both directions are rename(2), so
+    /// neither the stash nor the restore can tear a file.
+    internal static string StashAside(string path)
+    {
+        string stash = path + ".selftest-stash";
+        try
+        {
+            if (!File.Exists(path)) { try { if (File.Exists(stash)) File.Delete(stash); } catch { } return null; }
+            Directory.CreateDirectory(Path.GetDirectoryName(path));
+            File.Move(path, stash, overwrite: true);       // rename: the bytes are never in flight
+            return stash;
+        }
+        catch { return null; }
+    }
+
+    /// Undo StashAside. `text` is the belt-and-braces in-memory copy the caller already had: if the
+    /// stash file is gone (someone deleted it, or StashAside failed) we still put the bytes back —
+    /// through WriteAtomic, because a restore that truncates the target in place is the exact
+    /// pattern this wave exists to condemn.
+    internal static void UnstashAside(string path, string stash, string text)
+    {
+        try
+        {
+            if (stash != null && File.Exists(stash)) { File.Move(stash, path, overwrite: true); return; }
+            if (text != null) WriteAtomic(path, text);
+            else if (File.Exists(path)) File.Delete(path);
+        }
+        catch { }
+    }
+
     internal static void WriteAtomic(string path, string text)
     {
         string tmp = path + ".tmp";
@@ -903,6 +944,7 @@ public static partial class SaveGame
 
             // meta (unlocked-max heat) round-trips through its own meta.json
             string metaSaved = File.Exists(MetaPath) ? File.ReadAllText(MetaPath) : null;
+            string metaStash = null;
             try
             {
                 // C6 FIX — START FROM A CLEAN META, exactly as MetaSelfTest already did.
@@ -915,8 +957,10 @@ public static partial class SaveGame
                 // REFUSES THE PUBLISH on a FAIL. A correct build, unshippable, because of the
                 // publisher's own save file. Found by C6 the way a player would find it: with a
                 // pre-existing profile sitting in the config directory.
-                // The bytes are already in metaSaved above and go back in the finally below.
-                try { if (File.Exists(MetaPath)) File.Delete(MetaPath); } catch { }
+                // C6 REVIEW FIX (T4): move it ASIDE rather than DELETE it. A kill -9 here used to
+                // leave the player with no meta.json at all, because the only copy was a local
+                // string; now it leaves meta.json.selftest-stash, whole. See StashAside.
+                metaStash = StashAside(MetaPath);
 
                 SaveMetaHeat(4);
                 if (LoadMetaHeat() != 4) fails.Add("metaHeat");
@@ -958,8 +1002,7 @@ public static partial class SaveGame
             }
             finally
             {
-                if (metaSaved != null) { try { File.WriteAllText(MetaPath, metaSaved); } catch { } }
-                else { try { if (File.Exists(MetaPath)) File.Delete(MetaPath); } catch { } }
+                UnstashAside(MetaPath, metaStash, metaSaved);
             }
 
             // corrupt-file armor: garbage meta.json must never be silently wiped
@@ -983,7 +1026,10 @@ public static partial class SaveGame
         catch (Exception e) { return "SAVETEST: FAIL (exception " + e.Message + ")"; }
         finally
         {
-            if (saved != null) { try { Directory.CreateDirectory(Dir); File.WriteAllText(FilePath, saved); } catch { } }
+            // C6 REVIEW FIX (T4): the restore goes through WriteAtomic like every other write in
+            // this file. A bare WriteAllText here truncates the player's save.json in place — the
+            // pattern this wave removed everywhere else.
+            if (saved != null) { try { WriteAtomic(FilePath, saved); } catch { } }
             else Delete();
         }
     }

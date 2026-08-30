@@ -150,6 +150,18 @@ export XDG_CONFIG_HOME="$PWD/.xdg"         # return "" and saves land in a relat
 export SIGHTLINE_BALANCE_JSON="$PWD/balance.json"
 ```
 
+> **`SIGHTLINE_SHIPTEST` writes the LIVE player-data directory, and from a SECOND PROCESS** (C6).
+> It is the only hook in the project that does, because "quit the game, start it again, your
+> progress is there" cannot be checked inside one process. It stashes and restores on the way out —
+> verified byte-identical, including any `.tmp` siblings it had to clobber — and the child is
+> bounded. But a sweep **killed mid-SHIPTEST** can leave `4242` salvage and a `C6_SECOND_LAUNCH`
+> achievement in whatever profile `XDG_CONFIG_HOME` points at. Export the isolation above and it is
+> your worktree's throwaway `.xdg`, not your real one.
+>
+> Two file names that mean "a self-test died holding your data", and what to do:
+> `<name>.json.selftest-stash` — **your profile, whole**; rename it back over the original.
+> `<name>.json.tmp` — a write that never landed; the original is untouched, so just delete it.
+
 Run autoplay a few times (RNG varies); confirm **no exceptions and no TIMEOUT**. The
 contract is "no exceptions, no TIMEOUT" — *not* a win, and not a loss either. **W9 THE REPAIR made
 that contract TRUE rather than merely claimed**: it was violated at ~1% per run by two independent

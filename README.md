@@ -9,8 +9,8 @@ textures and shaders, and every sound effect and music bed is **synthesised at
 runtime** — no recorded audio ships. The only committed binaries are two text
 fonts (Noto Mono and Chakra Petch, both SIL Open Font License 1.1, full licence
 text in `assets/`) and the screenshot below. A whole distributable build is
-**27 MB across 10 files**, self-contained: no .NET install needed on the target
-machine. It runs natively on Linux, macOS and Windows.
+**29.3 MB across 10 files** (MB = 10^6 bytes), self-contained: no .NET install
+needed on the target machine. It runs natively on Linux, macOS and Windows.
 
 ![SIGHTLINE gameplay](docs/screenshot.png)
 
@@ -112,7 +112,7 @@ To produce a standalone distributable (no SDK needed to run it), use the publish
 **not** a bare `dotnet publish`:
 
 ```bash
-bash scripts/publish.sh                 # -> dist/linux-x64-release/  (27 MB, 10 files)
+bash scripts/publish.sh                 # -> dist/linux-x64-release/  (29.3 MB, 10 files)
 bash scripts/publish.sh --rid win-x64   # or osx-x64 / osx-arm64
 ```
 

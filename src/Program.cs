@@ -263,6 +263,14 @@ public static class Program
         // Runs against the PUBLISHED binary too (scripts/publish.sh invokes it there, which is the
         // only place the manifest leg is testing the artifact a player receives).
         // Tiny window: leg (4) builds a real Run, whose Unit ctors do tile math.
+        //
+        // DISPATCH-ORDER QUIRK, noted rather than "fixed" (C6 review): SIGHTLINE_BALANCE is handled
+        // EARLIER in this method, so `SIGHTLINE_SHIPTEST=1 SIGHTLINE_BALANCE=5` silently runs a
+        // balance batch and prints no SHIPTEST line at all. That is the house convention here —
+        // first matching branch wins, and every hook in this file behaves that way — so reordering
+        // for one test would be the surprise, not the fix. Set one mode at a time. (The one place
+        // this matters is a script that greps for a PASS line: a missing line is a mode collision,
+        // not a crash. qa-sweep.sh's `verdict` already treats a blank capture as a FAILURE.)
         if (Environment.GetEnvironmentVariable("SIGHTLINE_SHIPTEST") == "1")
         {
             Raylib.InitWindow(64, 64, "shiptest");
@@ -886,7 +894,16 @@ public static class Program
         // project stages a rich profile (SIGHTLINE_INTRO fabricates a mid-campaign save so the
         // CONTINUE button can be framed; DebugWarRoom hard-codes a twelve-run career), which means
         // the two screens a NEW PLAYER actually meets first have never been photographed at all.
-        // Shot-only and NoPersist-gated like the rest, so it can never touch a real profile.
+        //
+        // REVIEW FIX (C6, sent back) — WHAT ACTUALLY PROTECTS THE PLAYER'S SAVE HERE, stated
+        // correctly. This comment used to read "shot-only and NoPersist-gated like the rest, so it
+        // can never touch a real profile". **That is false.** The cold intro path below calls
+        // SaveGame.Delete(), which has NO NoPersist guard (see SaveGame.Delete) and removes the
+        // real save.json. What makes it safe is the introStash capture-and-restore immediately
+        // below — FUL-2's fix, which already had to exist because the non-cold path CLOBBERS the
+        // same file the same way by writing a staged mission-3 run over it. Net risk is unchanged
+        // by this flag; the stated reason was simply wrong, on a line that deletes a save, which is
+        // exactly the comment somebody trusts later instead of reading the code.
         bool coldShot = shot && Environment.GetEnvironmentVariable("SIGHTLINE_COLD") == "1";
         // FUL-2: the staged CONTINUE save silently CLOBBERED a real campaign save when the intro
         // shot ran on a machine with one. Stash the player's save.json bytes and restore-or-delete

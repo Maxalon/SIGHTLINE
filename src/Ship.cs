@@ -50,32 +50,56 @@ public static class Ship
     public static string VersionLabel => "SIGHTLINE v" + Version;
 
     // ── THE BUNDLED MANIFEST ─────────────────────────────────────────────────────────────────
-    /// Every file that must sit next to the executable in a shipped build. Two kinds of thing are
-    /// in here and both are load-bearing:
-    ///   • assets the game cannot render without (the two font faces), and
+    /// Every file that must sit next to the executable in a shipped build. Three kinds of thing
+    /// are in here and all are load-bearing:
+    ///   • assets the game cannot render without (the two font faces);
     ///   • LICENCE OBLIGATIONS — the OFL text for each font, the third-party notices, and the
     ///     project's own LICENSE. Shipping the fonts without their licence text is a compliance
     ///     break; shipping the build with no statement of its own terms leaves a recipient unable
-    ///     to tell what they may do with it.
+    ///     to tell what they may do with it;
+    ///   • the two CREDITS ledgers, which are the drop-in audio provenance record AND the
+    ///     directories the file-first audio loader looks in (Audio.cs resolves
+    ///     assets/sfx/<cue>.ogg and assets/music/{ambient,combat}.ogg through Cfg.AssetPath).
     /// Adding a bundled file means adding it HERE and to the .csproj's copy list. The two halves
     /// disagreeing is precisely the failure this manifest exists to name.
+    ///
+    /// REVIEW FIX (C6, sent back): the first version of this array shipped with SIX entries while
+    /// docs/DISTRIBUTION.md section 1 — written by the same wave, in the same commit — called the
+    /// output "ten files, and you must ship all of them" and listed both CREDITS ledgers. So the
+    /// two halves this comment warns about ALREADY disagreed at merge time, and a build output
+    /// with both ledgers deleted read SHIPTEST: PASS. A manifest that does not match the document
+    /// it is the guard for is worse than no manifest, because it gets quoted as evidence.
     public static readonly string[] RequiredFiles =
     {
         "assets/NotoMono-Regular.ttf",
         "assets/NotoMono-LICENSE.txt",
         "assets/ChakraPetch-Bold.ttf",
         "assets/ChakraPetch-LICENSE.txt",
+        "assets/sfx/CREDITS.txt",
+        "assets/music/CREDITS.txt",
         "THIRD-PARTY-NOTICES.txt",
         "LICENSE",
     };
 
-    /// Words that MUST appear in the shipped THIRD-PARTY-NOTICES.txt. File.Exists is not
+    /// Strings that MUST appear in the shipped THIRD-PARTY-NOTICES.txt. File.Exists is not
     /// compliance: an empty or truncated notices file satisfies it and satisfies nothing else.
-    /// Each entry is a component this build actually redistributes.
-    static readonly string[] NoticeMustName =
+    ///
+    /// REVIEW FIX (C6, sent back): these used to be ONE array of eight advertised as "components",
+    /// which was wrong twice over — three of the eight are LICENCE names, not components, and the
+    /// raylib entry was the bare string "raylib", trivially satisfied by the substring inside
+    /// "Raylib-cs". A notices file that had lost the entire raylib section would still have passed.
+    /// Split, and each component is now keyed on a string that appears ONLY in its own section.
+    static readonly string[] NoticeComponents =
     {
-        "raylib", "Raylib-cs", ".NET", "Zlib", "MIT", "Noto", "Chakra Petch", "Open Font License",
+        "Ramon Santamaria",   // raylib's copyright holder — absent iff the raylib notice is gone
+        "raylib-cs",          // the binding's own copyright line ("Copyright (C) 2018-2025 raylib-cs")
+        ".NET Foundation",    // the runtime's copyright holder
+        "Noto Mono",
+        "Chakra Petch",
     };
+    /// ...and the licences those components are under. Losing the licence TEXT while keeping a
+    /// component's header is its own compliance failure, so it gets its own assertion.
+    static readonly string[] NoticeLicences = { "zlib", "MIT License", "Open Font License" };
 
     /// Resolve a bundled file STRICTLY against the executable's own directory — no cwd fallback.
     /// This is the path a player's launch actually takes; Cfg.AssetPath's fallback is the mask.
@@ -88,7 +112,9 @@ public static class Ship
     ///   (1) MANIFEST      every RequiredFiles entry exists next to the binary, is non-empty, and
     ///                     is what Cfg.AssetPath actually returns (i.e. the cwd fallback is NOT
     ///                     what is carrying it). The fonts are checked for a real sfnt magic.
-    ///   (2) NOTICES       the shipped notices file names every component this build redistributes.
+    ///   (2) NOTICES       the shipped notices file names every component this build redistributes
+    ///                     (each keyed on a string unique to its own section) AND every licence
+    ///                     those components are under.
     ///   (3) PROFILE       the player-data dir is an ABSOLUTE path, a profile written through the
     ///                     real public API reads back off disk AND is present in the file's raw
     ///                     bytes, and — leg (3b) — a SECOND PROCESS of this same binary banks a
@@ -96,6 +122,11 @@ public static class Ship
     ///   (4) ATOMIC        save.json / meta.json / display.json are each written by rename, proven
     ///                     by MECHANISM: hold an open handle across the write and assert it still
     ///                     sees the old inode's bytes. A truncate-in-place writer fails this.
+    ///                     SCOPE, STATED PLAINLY: the inode swap makes the write atomic against a
+    ///                     CONCURRENT READER and against PROCESS DEATH (crash, kill -9, OOM kill).
+    ///                     It is NOT proof of POWER-LOSS durability — that needs an fsync of the
+    ///                     tmp AND of the directory, which this code does not do. Plus SweepProbe:
+    ///                     a write that FAILS must not leave its .tmp behind.
     ///   (5) TRIMSAFE      every persisted DTO is reachable from a source-generated JSON context —
     ///                     the half of the PublishTrimmed hazard MSBuild cannot see.
     ///   (6) VERSION       the assembly carries a MAJOR.MINOR.PATCH stamp and the HUD's label
@@ -128,9 +159,12 @@ public static class Ship
             if (File.Exists(noticePath))
             {
                 string notices = File.ReadAllText(noticePath);
-                foreach (string need in NoticeMustName)
+                foreach (string need in NoticeComponents)
                     if (notices.IndexOf(need, StringComparison.OrdinalIgnoreCase) < 0)
-                        fails.Add("noticeOmits:" + need);
+                        fails.Add("noticeOmitsComponent:" + need);
+                foreach (string need in NoticeLicences)
+                    if (notices.IndexOf(need, StringComparison.OrdinalIgnoreCase) < 0)
+                        fails.Add("noticeOmitsLicence:" + need);
             }
 
             // ---- (3)+(4) the player-data directory ------------------------------------------
@@ -142,6 +176,12 @@ public static class Ship
             string savePath = SaveGame.SavePathPublic, metaPath = SaveGame.MetaPathPublic,
                    dispPath = Display.SettingsPathPublic;
             string saveWas = Read(savePath), metaWas = Read(metaPath), dispWas = Read(dispPath);
+            // REVIEW FIX (C6, sent back) — STASH THE .tmp SIBLINGS TOO. Restore used to delete
+            // <path>.tmp unconditionally, so running qa-sweep.sh silently DESTROYED a .tmp left
+            // behind by a real crash — the single artefact a maintainer would have to reason about
+            // that crash from. A test may only remove what it created.
+            string saveTmpWas = Read(savePath + ".tmp"), metaTmpWas = Read(metaPath + ".tmp"),
+                   dispTmpWas = Read(dispPath + ".tmp");
             try
             {
                 // (3) PROFILE ROUND-TRIP — write through the REAL API, then read back. Every
@@ -182,13 +222,27 @@ public static class Ship
                 {
                     string why = AtomicityProbe(path, write);
                     if (why != null) fails.Add(label + "NotAtomic:" + why);
-                    // and no corpse left behind
-                    if (File.Exists(path + ".tmp")) fails.Add(label + "StaleTmp");
+                    // REVIEW FIX (C6, sent back) — THIS USED TO BE `if (File.Exists(path + ".tmp"))
+                    // fails.Add(label + "StaleTmp")`, WHICH COULD NOT FAIL. It ran only after a
+                    // SUCCESSFUL WriteAtomic, whose File.Move has already consumed the .tmp, so it
+                    // asserted a tautology — and a stale .tmp pre-seeded in the profile directory
+                    // still read PASS while the PASS string advertised "no stale .tmp". It is kept
+                    // only as a SHAPE guard (a future writer that stopped renaming would trip it);
+                    // the actual sweep is proven by SweepProbe below, on a scratch path, by forcing
+                    // the rename to fail. The PASS string no longer claims anything for this line.
+                    if (File.Exists(path + ".tmp")) fails.Add(label + "TmpSurvivedSuccessfulWrite");
                 }
+
+                // ...and the sweep itself, which is a property of the FAILURE path and therefore
+                // cannot be observed after a write that worked.
+                string sweepWhy = SweepProbe();
+                if (sweepWhy != null) fails.Add("sweep:" + sweepWhy);
             }
             finally
             {
-                Restore(savePath, saveWas); Restore(metaPath, metaWas); Restore(dispPath, dispWas);
+                Restore(savePath, saveWas, saveTmpWas);
+                Restore(metaPath, metaWas, metaTmpWas);
+                Restore(dispPath, dispWas, dispTmpWas);
                 Display.LoadForTest();   // hand the player's own settings back to the process too
             }
 
@@ -214,13 +268,47 @@ public static class Ship
 
             return fails.Count == 0
                 ? $"SHIPTEST: PASS ({RequiredFiles.Length} bundled files resolve next to the binary, none via the cwd fallback; "
-                  + $"notices name all {NoticeMustName.Length} redistributed components; player-data dir rooted; profile "
-                  + "round-trips through disk and survives a real second launch of this binary; save/meta/display all "
-                  + "written by rename (proven by open-handle probe), no stale .tmp; "
+                  + $"notices name all {NoticeComponents.Length} redistributed components and all {NoticeLicences.Length} of their licences; "
+                  + "player-data dir rooted; profile round-trips through disk"
+                  + (_secondLaunchSkip == null ? " and survives a real second launch of this binary"
+                                               : $" (SECOND-LAUNCH LEG SKIPPED: {_secondLaunchSkip})")
+                  + "; save/meta/display all written by rename, proven by an open-handle inode probe (process death "
+                  + "and concurrent readers, NOT power loss - no fsync); a failed write sweeps its own .tmp; "
                   + $"3 persisted DTOs source-generated; build stamped v{Version} and painted)"
                 : "SHIPTEST: FAIL (" + string.Join(",", fails) + ")";
         }
         catch (Exception e) { return "SHIPTEST: FAIL (exception " + e.GetType().Name + ": " + e.Message + ")"; }
+    }
+
+    /// THE SWEEP PROBE — does a FAILED WriteAtomic leave its .tmp behind?
+    ///
+    /// docs/DISTRIBUTION.md section 5 says a *.json.tmp "should never persist", and the measured
+    /// full-disk run that motivated the sweep showed the pre-C6 shape leaving a 0-byte corpse on
+    /// ENOSPC forever. That is a property of the FAILURE path, so it is unobservable after a write
+    /// that succeeded — which is exactly how the first version of this check ended up tautological.
+    ///
+    /// Force the failure deterministically and at the right MOMENT: make the TARGET a directory.
+    /// The .tmp write then succeeds and the rename onto a directory cannot, so control lands in
+    /// WriteAtomic's catch with a corpse on disk — the precise state the sweep exists for. Runs on
+    /// a scratch directory under the OS temp path, never in the player's data directory.
+    /// Returns null on pass, else the reason. Remove the sweep from WriteAtomic and this reads
+    /// "sweep:tmpNotSwept".
+    static string SweepProbe()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "c6sweep_" + Guid.NewGuid().ToString("N"));
+        string target = Path.Combine(dir, "blocked.json");
+        try
+        {
+            Directory.CreateDirectory(target);        // the target IS a directory -> rename must fail
+            bool threw = false;
+            try { SaveGame.WriteAtomic(target, "{\"probe\":1}"); }
+            catch { threw = true; }
+            if (!threw) return "writeUnexpectedlySucceeded";   // the probe is not exercising failure
+            if (File.Exists(target + ".tmp")) return "tmpNotSwept";
+            return null;
+        }
+        catch (Exception e) { return "probeThrew:" + e.GetType().Name; }
+        finally { try { Directory.Delete(dir, true); } catch { } }
     }
 
     // ── the second-launch child ──────────────────────────────────────────────────────────────
@@ -241,15 +329,58 @@ public static class Ship
         catch (Exception e) { Console.WriteLine("SHIPCHILD: threw " + e.GetType().Name); }
     }
 
-    /// Parent side. Returns null on pass, else the reason.
-    /// The child is THIS EXACT BINARY (Environment.ProcessPath) — the published single-file exe
-    /// when run from a distributable, the apphost under `dotnet run`. It inherits the environment,
-    /// so it resolves the same player-data directory (XDG_CONFIG_HOME included, which is what keeps
-    /// parallel agents isolated). Bounded wait; a child that hangs is a failure, not a hang here.
-    static string SecondLaunchProbe()
+    /// Set when the second-launch leg could not identify a way to relaunch this build. Reported in
+    /// the PASS string rather than swallowed — a leg that silently stops running is a lie.
+    static string _secondLaunchSkip;
+
+    /// How to start a second copy of THIS build: the executable, plus any arguments it needs.
+    ///
+    /// REVIEW FIX (C6, sent back — and it was THE SAME BUG CLASS THIS WAVE EXISTS TO KILL).
+    /// The first version used `Environment.ProcessPath` unconditionally. Under `dotnet Sightline.dll`
+    /// that is the **dotnet muxer**, so the probe spawned a bare `dotnet`, which printed its usage
+    /// banner, exited 0, and wrote no sentinel — `SHIPTEST: FAIL (secondLaunch:salvageNotCarried)`
+    /// **on a completely correct build**. Neither `qa-sweep.sh` (`dotnet run`) nor `publish.sh`
+    /// (`./Sightline`) uses that invocation so the gate was never wrong in practice, but that is
+    /// exactly the excuse that let SAVETEST's `metaUnlockPhantom` sit on the publish gate: an
+    /// environment-dependent FAIL on a good build is a defect whether or not today's callers trip it.
+    ///
+    /// So: identify the launcher instead of assuming it.
+    ///   • ProcessPath's filename matches our assembly  -> apphost or published single-file exe. Use it.
+    ///   • otherwise                                    -> we are under the muxer; relaunch as
+    ///                                                     `<ProcessPath> <our .dll>`, which is a
+    ///                                                     genuine second process of this build.
+    ///   • neither identifiable                         -> SKIP with a stated reason. Never FAIL.
+    static (string exe, string arg, string skip) SecondLaunchCommand()
     {
         string exe = Environment.ProcessPath;
-        if (string.IsNullOrEmpty(exe) || !File.Exists(exe)) return "noProcessPath";
+        if (string.IsNullOrEmpty(exe) || !File.Exists(exe))
+            return (null, null, "noProcessPath");
+
+        var asm = typeof(Ship).Assembly;
+        string asmName = asm.GetName().Name;                                   // "Sightline"
+        string procName = Path.GetFileNameWithoutExtension(exe);               // "Sightline" or "dotnet"
+        if (string.Equals(procName, asmName, StringComparison.OrdinalIgnoreCase))
+            return (exe, null, null);                                          // apphost / single-file
+
+        // Under the muxer. Assembly.Location is "" for a single-file build, but a single-file build
+        // never lands here (its ProcessPath IS the assembly name), so a blank one means we genuinely
+        // cannot name the thing to relaunch.
+        string dll = null;
+        try { dll = asm.Location; } catch { }
+        if (string.IsNullOrEmpty(dll) || !File.Exists(dll))
+            return (null, null, "launcherIsHost:" + procName);
+        return (exe, dll, null);
+    }
+
+    /// Parent side. Returns null on pass, else the reason.
+    /// The child is a second process of THIS build (see SecondLaunchCommand). It inherits the
+    /// environment minus every SIGHTLINE_* variable, so it resolves the same player-data directory
+    /// (XDG_CONFIG_HOME included, which is what keeps parallel agents isolated). Bounded wait; a
+    /// child that hangs is a failure, not a hang here.
+    static string SecondLaunchProbe()
+    {
+        var (exe, arg, skip) = SecondLaunchCommand();
+        if (skip != null) { _secondLaunchSkip = skip; return null; }
         int before = SaveGame.LoadSalvage();
         try
         {
@@ -258,6 +389,7 @@ public static class Ship
                 UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true,
                 WorkingDirectory = AppContext.BaseDirectory,
             };
+            if (arg != null) psi.ArgumentList.Add(arg);
             // GUARD (b) — see the note at the top of Program.Main. psi.Environment starts as a COPY
             // of ours, which includes SIGHTLINE_SHIPTEST=1: the first version of this leg let the
             // child inherit it, the child ran SHIPTEST, SHIPTEST forked a grandchild, and the thing
@@ -270,7 +402,16 @@ public static class Ship
             psi.Environment["SIGHTLINE_SHIPCHILD"] = "1";
             using var proc = System.Diagnostics.Process.Start(psi);
             if (proc == null) return "childDidNotStart";
-            proc.StandardOutput.ReadToEnd(); proc.StandardError.ReadToEnd();
+            // REVIEW FIX (C6, sent back) — "bounded wait" has to be TRUE, not nearly true. This was
+            // two sequential blocking `ReadToEnd()` calls BEFORE WaitForExit, and ReadToEnd has no
+            // timeout: a child that filled a redirected pipe would hang the whole sweep for ever.
+            // It cannot happen today (the child writes ~15 bytes and exits before any window opens)
+            // — but the claim in the comment was stronger than the code, and that is the thing this
+            // project punishes. Drain both pipes on background threads, THEN wait with a deadline.
+            proc.OutputDataReceived += (_, __) => { };
+            proc.ErrorDataReceived  += (_, __) => { };
+            proc.BeginOutputReadLine();
+            proc.BeginErrorReadLine();
             if (!proc.WaitForExit(60_000)) { try { proc.Kill(true); } catch { } return "childTimedOut"; }
         }
         catch (Exception e) { return "childThrew:" + e.GetType().Name; }
@@ -340,13 +481,22 @@ public static class Ship
     }
 
     static string Read(string p) { try { return File.Exists(p) ? File.ReadAllText(p) : null; } catch { return null; } }
-    static void Restore(string p, string was)
+
+    /// Put the player's directory back exactly as it was — the FILE and its .tmp sibling, each
+    /// restored to the bytes it held (or removed if it did not exist). `tmpWas` is not an
+    /// afterthought: the previous version deleted <p>.tmp unconditionally, which meant this test
+    /// destroyed the evidence of somebody else's crash every time the sweep ran.
+    static void Restore(string p, string was, string tmpWas)
+    {
+        Put(p, was);
+        Put(p + ".tmp", tmpWas);
+    }
+    static void Put(string p, string was)
     {
         try
         {
             if (was != null) { Directory.CreateDirectory(Path.GetDirectoryName(p)); File.WriteAllText(p, was); }
             else if (File.Exists(p)) File.Delete(p);
-            try { if (File.Exists(p + ".tmp")) File.Delete(p + ".tmp"); } catch { }
         }
         catch { }
     }

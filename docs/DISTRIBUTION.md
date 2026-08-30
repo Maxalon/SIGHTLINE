@@ -62,7 +62,11 @@ still boots (one `WARNING:` line, then the bitmap-font fallback) while SHIPTEST 
 `FAIL (missing:assets/NotoMono-Regular.ttf)`.
 
 **Adding a bundled file means adding it in TWO places** — `Ship.RequiredFiles` and the `.csproj`
-copy list. Those two disagreeing is exactly what the manifest leg exists to name.
+copy list. Those two disagreeing is exactly what the manifest leg exists to name — and C6's own
+first draft shipped them disagreeing: this table said ten files while `RequiredFiles` listed six,
+omitting both `CREDITS.txt` ledgers, so a build output with both deleted read `SHIPTEST: PASS`.
+Two independent reviewers found it separately. The manifest now carries all eight non-binary
+entries (the executable and `libraylib.so` are the artifact itself, not things it resolves).
 
 ---
 
@@ -75,13 +79,24 @@ other agents running balance batches, and a *sequential* pass taken twenty minut
 `no-trim` at 117 ms and then 184 ms. Read the ORDERING as the result and the absolute numbers as
 "on a loaded four-core container".
 
+**SIZE CONVENTION: MB = 10^6 bytes**, stated because C6's first draft did not state it and shipped
+a README saying "27 MB" (that was MiB) against a §2 saying 28.4 MB for the same directory. Exact
+byte counts are given so nobody has to guess again.
+
 | mode | flags | executable | whole directory | files | start (median of 9, min–max) |
 |---|---|---|---|---|---|
-| **release** (default) | `PublishTrimmed` + `PublishReadyToRun` + `PublishSingleFile` | **25.6 MB** | **28.4 MB** | 10 | **169 ms** (102–323) |
-| small | `PublishTrimmed` + `PublishSingleFile` | 15.8 MB | 18.5 MB | 10 | 545 ms (397–696) |
-| no-trim | `PublishReadyToRun` + `PublishSingleFile` | 82.3 MB | 85.1 MB | 10 | 206 ms (144–288) |
-| plain | `PublishSingleFile` | 68.3 MB | 71.0 MB | 10 | 317 ms (256–405) |
-| win-x64 release | cross-published from Linux | 24.3 MB (`.exe`) | 26.4 MB | 10 | not runnable here |
+| **release** (default) | `PublishTrimmed` + `PublishReadyToRun` + `PublishSingleFile` | **26.5 MB** (26,531,848 B) | **29.3 MB** (29,284,496 B) | 10 | **169 ms** (102–323) |
+| small | `PublishTrimmed` + `PublishSingleFile` | 16.1 MB | 18.8 MB (18,844,773 B) | 10 | 545 ms (397–696) |
+| no-trim | `PublishReadyToRun` + `PublishSingleFile` | 82.3 MB | 85.1 MB (85,076,690 B) | 10 | 206 ms (144–288) |
+| plain | `PublishSingleFile` | 68.3 MB | 71.0 MB (71,049,575 B) | 10 | 317 ms (256–405) |
+| win-x64 release | cross-published from Linux | 24.8 MB (`.exe`) | 26.9 MB (26,921,328 B) | 10 | not runnable here |
+
+**Sizes are from the final C6 binary; the START COLUMN IS NOT.** The timings were measured on the
+pre-review-fix binary earlier the same day. They were deliberately **not** re-run after the review
+fixes: the container was under nine concurrent reviewers at load ~60, which would have produced a
+worse number rather than a truer one. The review fixes added ~0.9 MB of code and touched nothing on
+the startup path, but that is an argument, not a measurement — treat the start column as attached to
+commit `d3feb90` and re-measure on a quiet box before quoting it anywhere that matters.
 
 Trimming is what makes `small` slow: it strips the framework's precompiled ReadyToRun code, so
 everything JITs at startup. Adding ReadyToRun back costs ~10 MB and produces the **fastest** start
@@ -139,6 +154,25 @@ The fix has FOUR parts (C6 added the fourth), all of which must stay in place:
    actually see `RunDto` / `MetaDto` / `Display.Dto`. That leg runs in the UNTRIMMED build, where
    everyone develops — so a new persisted DTO that no `[JsonSerializable]` root can see fails at
    `qa-sweep` time instead of shipping and losing the player's profile.
+
+**What each knob actually protects, measured (C6 review, second reviewer) — the guard's first error
+text got this wrong and has been corrected.** With `TrimmerRootAssembly` removed and the reflection
+knob kept: `SAVETEST` **passes**, and a run round-trips squad/perks/weapon-mods/card/heat correctly.
+With **both** removed: `SAVETEST`, `METATEST` and `SHIPTEST` all still pass. **Player persistence is
+protected by source generation alone** — part (1) of the fix, working as designed. What the two
+knobs keep alive is the `SIGHTLINE_BALANCE` telemetry export, the one remaining reflective site
+(`NotSupportedException: …parameter names have been trimmed by ILLink` without the root;
+`InvalidOperationException: Reflection-based serialization has been disabled` without the knob).
+Losing the flywheel silently is reason enough for a build error — but the error text must name what
+actually breaks, not something worse.
+
+**Trim-safety verified at the metadata level, not by test coverage** (same review): a
+`MetadataLoadContext` diff of `obj/…/linux-x64/Sightline.dll` against `obj/…/linked/Sightline.dll`
+shows **356 types before trimming, 356 after — zero types removed, no persisted-DTO member
+trimmed.** Rooting the assembly means ILLink removes literally nothing from our code.
+
+**`PublishAot` was NOT tested here.** By inspection it sets `PublishTrimmed`, so it trips the same
+guard and therefore fails safe — but that is inspection, not a measurement.
 
 **Honest scope of the guard:** it catches *removal of the mitigation*, not every way persistence
 can break. A new DTO reachable from a root but with an unsupported member shape, or a trimmer
@@ -222,7 +256,8 @@ Files in it:
 | `meta.json` | the cross-run profile: salvage, veterans, achievements, unlocks, hall of fame, max heat | permanent |
 | `display.json` | window size, fullscreen, brightness/gamma, colorblind mode, post-FX | permanent |
 | `*.json.bak` | a file that could not be read, moved aside instead of destroyed | until overwritten |
-| `*.json.tmp` | transient — every write goes to a `.tmp` then renames over the target, so a crash mid-write cannot tear a file | should never persist, and now does not |
+| `*.json.tmp` | transient — every write goes to a `.tmp` then renames over the target, so a crash mid-write cannot tear a file | should not persist; a *failed* write sweeps its own, but see below |
+| `*.json.selftest-stash` | a self-test moved your profile aside and was killed before putting it back. **Your data, intact** — rename it back over the original | should never persist |
 
 **To uninstall completely**, delete the publish directory and that folder.
 
@@ -264,9 +299,29 @@ now a measurement rather than an assertion.
 
 One real thing that full-disk pass found: on `ENOSPC` the old code path leaves a **0-byte
 `<name>.json.tmp` behind forever**, contradicting the "should never persist" line in the table
-above. `WriteAtomic` sweeps it in the failure path. Measured side by side: old shape leaves
-`old.json.tmp len=0`, new shape leaves nothing.
+above. `WriteAtomic` sweeps it **in the failure path**. Measured side by side: old shape leaves
+`old.json.tmp len=0`, new shape leaves nothing. `SIGHTLINE_SHIPTEST`'s `SweepProbe` proves it by
+forcing a rename to fail (it makes the target a directory) and asserting the `.tmp` is gone; remove
+the sweep and the leg reads `sweep:tmpNotSwept`.
 
-**`kill -9` mid-write is NOT directly tested** — the write window is sub-millisecond and racing it
-from a shell is not a test, it is a coin flip. What is tested is the property that makes the
-outcome safe (the rename), on all three files. Stated as a limit rather than dressed up as a pass.
+### The exact scope of the atomicity claim — read this before quoting it
+
+**REVIEW FIX (C6, sent back).** This section's first draft said `*.json.tmp` "should never persist,
+**and now does not**", which was an over-claim on precisely the case the sweep does not cover.
+Three separate limits, stated plainly:
+
+1. **The sweep is in the `catch`, so it only runs when the write itself fails.** A `kill -9`, an OOM
+   kill or a power cut *between* `File.WriteAllText(tmp, …)` and `File.Move(tmp, target)` still
+   leaves a `.tmp` behind, and there is **no startup sweep**. That is deliberate: a `.tmp` left by a
+   real crash is the one artefact a maintainer can reason about the crash from, and deleting it at
+   boot would destroy evidence to tidy a directory listing. "A crash mid-write" is the whole reason
+   the rename exists, so asserting the corpse is impossible there was exactly the wrong sentence.
+2. **The probe tests the INODE-SWAP property, not durability.** Holding a handle across the write
+   and finding the old bytes proves a reader — or a crashed process's half-finished work — can
+   never see a torn file. It does **not** prove power-loss safety: that needs an `fsync` of the tmp
+   **and** of the directory before the rename, and this code does neither. So: **safe against
+   process death and concurrent readers; NOT proven against power loss.**
+3. **The mechanism is verified on Unix only.** `Ship.AtomicityProbe` self-skips on Windows (the file
+   semantics differ and the rename path is not observable this way), while `SaveGame.WriteAtomic` —
+   which `display.json` was moved onto — changed behaviour on **all** platforms. The Windows
+   behaviour of that change is **unverified**, not assumed-good.
