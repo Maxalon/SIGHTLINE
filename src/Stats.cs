@@ -67,6 +67,19 @@ public static class Stats
         public int HvtKind = -1;
         public int HvtMaxHp;
         public int DamageDealt, DamageTaken;
+        // C3 THE TWO GAMES — the ENCOUNTER-COMPLETION decomposition. EnemiesStart is the force at
+        // deploy; nothing recorded what the force GREW to, or how much of it the squad actually had
+        // to beat. Without these three, "kill objectives are 43 points harder" is a bare win-rate
+        // and every mechanism for it is equally plausible.
+        //   EnemiesAdded : bodies spawned into this mission AFTER deploy by any reinforcement path
+        //                  (the anti-turtle pressure clock, DEFEND's wave schedule, LAST STAND's
+        //                  horde). EnemiesStart does NOT include them, so EnemiesKilled can exceed
+        //                  EnemiesStart — which is itself the treadmill's fingerprint.
+        //   MaxPressure  : the highest anti-turtle rung this mission reached (0 when the clock did
+        //                  not run — it only runs on Eliminate/Hack/Decapitate; see
+        //                  Game.PressureClockObjective).
+        // Read-only bookkeeping: no RNG draws, no gameplay effect, harness-gated like the rest.
+        public int EnemiesAdded, MaxPressure;
         public bool Win;
         public string LossCause = "";
         // ── decision-richness + swing instrumentation (balance harness only) ──────────
@@ -182,6 +195,21 @@ public static class Stats
     {
         if (!Enabled) return;
         Bump(factionRoster ? _spawnsFactionByClass : _spawnsDefaultByClass, cls);
+    }
+
+    // ── C3 THE TWO GAMES: mid-mission REINFORCEMENTS + the anti-turtle rung ──────
+    // Per-mission (unlike RecordSpawn, which is batch-global) because the whole question is
+    // whether ONE objective class gets a growing force while the other does not. Both are pure
+    // counters written from sites that have already decided everything; neither takes a draw.
+    public static void RecordReinforce(int n)
+    {
+        if (!Enabled || _mission == null || n <= 0) return;
+        _mission.EnemiesAdded += n;
+    }
+    public static void RecordPressure(int rung)
+    {
+        if (!Enabled || _mission == null) return;
+        if (rung > _mission.MaxPressure) _mission.MaxPressure = rung;
     }
 
     // ── FUL-1: BOON PROC counters ────────────────────────────────────────────────
@@ -736,6 +764,47 @@ public static class Stats
                     .Select(g => $"m{g.Key}:{(int)Math.Round(100.0 * g.Count(m => m.Win) / g.Count())}%({g.Count()})"));
                 sb.AppendLine($"  {og.Key,-11}: {cells}");
                 sb.AppendLine($"  {"",-11}  depth: {depth}");
+            }
+
+            // ── C3 THE TWO GAMES: the ENCOUNTER-COMPLETION decomposition ─────────────────────
+            // W8's cross-tab established a 43-point win-rate gap on mid-run nodes between the two
+            // objectives that end when bodies fall and the six that end when a tile is reached, a
+            // timer is held or a charge is set. A win-rate cannot say WHY. These columns can:
+            //   force  = the force at deploy (is one class simply outnumbered?)
+            //   +rf    = bodies added AFTER deploy by any reinforcement path (the treadmill)
+            //   killed = bodies the squad actually put down
+            //   clear% = killed / (force + reinforcements) — the share of the encounter FOUGHT.
+            //            This is the decline-the-fight number: a class that wins by walking away
+            //            reads low here and high in win%, and no other column can show that.
+            //   prs    = mean high-water anti-turtle rung (0 where the clock does not run)
+            // Restricted to mid-run node kinds (Combat + Elite) for exactly W8's reason: pooling
+            // Start (every campaign's 97%-win mission 1, always Eliminate) or Boss (the de-stacked
+            // finale, always Decapitate) puts the two classes on different populations and the
+            // comparison stops meaning anything.
+            var midrun = missions.Where(m => m.NodeKind == "Combat" || m.NodeKind == "Elite").ToList();
+            if (midrun.Count > 0)
+            {
+                sb.AppendLine("\nENCOUNTER COMPLETION on MID-RUN nodes (Combat+Elite) — clear% is the share of the fight actually fought:");
+                sb.AppendLine("  objective     n   win%   turns   force    +rf  killed  clear%   prs  WONclear%");
+                void EncRow(string lbl, List<MissionRec> rows)
+                {
+                    if (rows.Count == 0) return;
+                    double force = rows.Average(m => (double)m.EnemiesStart);
+                    double rf = rows.Average(m => (double)m.EnemiesAdded);
+                    double kill = rows.Average(m => (double)m.EnemiesKilled);
+                    int tot = rows.Sum(m => m.EnemiesStart + m.EnemiesAdded);
+                    var won = rows.Where(m => m.Win).ToList();
+                    int wtot = won.Sum(m => m.EnemiesStart + m.EnemiesAdded);
+                    sb.AppendLine($"  {lbl,-11} {rows.Count,4} {Pct(rows.Count(m => m.Win), rows.Count),5}  {rows.Average(m => (double)m.Turns),6:0.0}"
+                        + $"  {force,6:0.00} {rf,6:0.00}  {kill,6:0.00}  {(tot > 0 ? 100.0 * rows.Sum(m => m.EnemiesKilled) / tot : 0),6:0.0}"
+                        + $"  {rows.Average(m => (double)m.MaxPressure),4:0.00}"
+                        + $"  {(wtot > 0 ? 100.0 * won.Sum(m => m.EnemiesKilled) / wtot : 0),7:0.0} (n={won.Count})");
+                }
+                foreach (var og in midrun.GroupBy(m => m.Objective).OrderByDescending(g => g.Count()))
+                    EncRow(og.Key, og.ToList());
+                sb.AppendLine("  ---- the two classes ----");
+                EncRow("KILL", midrun.Where(m => Run.IsKillObjective(m.Objective)).ToList());
+                EncRow("NON-KILL", midrun.Where(m => !Run.IsKillObjective(m.Objective)).ToList());
             }
 
             // ── W8: the DECAPITATE punch-through target, split by whether it took the buff ────
@@ -1308,6 +1377,21 @@ public static class Stats
                     n = g.Count(), winRate = WinRate(g), se = SeVal(g.Count(m => m.Win), g.Count()),
                     avgTurns = Math.Round(g.Average(m => (double)m.Turns), 1)
                 }).ToList(),
+            // C3 THE TWO GAMES: the ENCOUNTER-COMPLETION decomposition, as JSON. Same population and
+            // same columns as the console block of that name — mid-run node kinds only (Combat +
+            // Elite), because Start is 960 mission-1 Eliminates and Boss is the de-stacked finale,
+            // and pooling either puts the two objective CLASSES on different populations. `clearPct`
+            // is killed / (start + reinforcements): the share of the encounter actually fought, and
+            // the only column that can separate "this class wins the fight" from "this class never
+            // has the fight". Rows: one per objective, then the two class aggregates.
+            encounterMidrun = missions.Where(m => m.NodeKind == "Combat" || m.NodeKind == "Elite")
+                .GroupBy(m => m.Objective).OrderBy(g => g.Key)
+                .Select(g => EncounterRow(g.Key, g.ToList()))
+                .Concat(new[]
+                {
+                    EncounterRow("KILL", missions.Where(m => (m.NodeKind == "Combat" || m.NodeKind == "Elite") && Run.IsKillObjective(m.Objective)).ToList()),
+                    EncounterRow("NONKILL", missions.Where(m => (m.NodeKind == "Combat" || m.NodeKind == "Elite") && !Run.IsKillObjective(m.Objective)).ToList())
+                }).ToList(),
             // W8: the DECAPITATE HVT split by DesignateHvt's ELITE exemption. buffed=false is the
             // named boss (finale or m3/m5 mid-boss) that keeps its own statline; buffed=true is a
             // rank-and-file body carrying + (base + perMission*depth) HP and + aim on top of the
@@ -1479,6 +1563,52 @@ public static class Stats
     /// Coarse squad-condition band for byObjectiveByBucket. Four bands, chosen so a full-health
     /// squad and a squad one hit from a death spiral never share a cell.
     static string HpBand(int pct) => pct >= 90 ? "hp90+" : pct >= 70 ? "hp70-89" : pct >= 50 ? "hp50-69" : "hp<50";
+
+    /// C3 THE TWO GAMES: one ENCOUNTER-COMPLETION row for the JSON artifact. `label` is either an
+    /// objective name or one of the two class aggregates ("KILL" / "NONKILL"). `clearPct` pools the
+    /// numerator and denominator across the rows rather than averaging per-mission ratios — a
+    /// mission that fields 3 hostiles and one that fields 11 must not carry equal weight in a
+    /// statement about how much of the force gets beaten. An empty row is emitted with n=0 rather
+    /// than dropped, so a lever that empties a cell is visible instead of silently absent.
+    static object EncounterRow(string label, List<MissionRec> rows)
+    {
+        int n = rows.Count;
+        int tot = rows.Sum(m => m.EnemiesStart + m.EnemiesAdded);
+        var wins = rows.Where(m => m.Win).ToList();
+        int winTot = wins.Sum(m => m.EnemiesStart + m.EnemiesAdded);
+        return new
+        {
+            row = label,
+            n,
+            winRate = n == 0 ? 0.0 : Math.Round(100.0 * rows.Count(m => m.Win) / n, 1),
+            se = n == 0 ? 0.0 : SeVal(rows.Count(m => m.Win), n),
+            avgTurns = n == 0 ? 0.0 : Math.Round(rows.Average(m => (double)m.Turns), 2),
+            enemiesStart = n == 0 ? 0.0 : Math.Round(rows.Average(m => (double)m.EnemiesStart), 2),
+            enemiesAdded = n == 0 ? 0.0 : Math.Round(rows.Average(m => (double)m.EnemiesAdded), 2),
+            enemiesKilled = n == 0 ? 0.0 : Math.Round(rows.Average(m => (double)m.EnemiesKilled), 2),
+            clearPct = tot == 0 ? 0.0 : Math.Round(100.0 * rows.Sum(m => m.EnemiesKilled) / tot, 1),
+            reinforcedPct = n == 0 ? 0.0 : Math.Round(100.0 * rows.Count(m => m.EnemiesAdded > 0) / n, 1),
+            avgPressure = n == 0 ? 0.0 : Math.Round(rows.Average(m => (double)m.MaxPressure), 2),
+            squadLoss = n == 0 ? 0.0 : Math.Round(rows.Average(m => (double)(m.SquadStart - m.SquadSurvived)), 2),
+            dmgTaken = n == 0 ? 0.0 : Math.Round(rows.Average(m => (double)m.DamageTaken), 1),
+            // ...and the same three columns restricted to WON missions. Without this restriction a
+            // low clearPct has two readings that point in opposite directions — "the squad walked
+            // past the force and won" and "the squad died before it could kill anything" — and the
+            // first is the finding while the second is its refutation. On a WON kill objective
+            // clearPct is 100 by construction (Eliminate) or gated on one body (Decapitate); on a
+            // WON non-kill objective it is the share of the fight the squad chose to take.
+            winN = wins.Count,
+            winClearPct = winTot == 0 ? 0.0 : Math.Round(100.0 * wins.Sum(m => m.EnemiesKilled) / winTot, 1),
+            // RAW SUMS, not just the ratios above. A chunk holds 20 campaigns and a round holds 48
+            // chunks; pooling a round by AVERAGING 48 per-chunk percentages weights a chunk with 3
+            // mid-run Hacks the same as one with 30. Every rate in this row is re-derivable from
+            // these four integers, so the pooled figure is exact rather than approximately right.
+            killedSum = rows.Sum(m => m.EnemiesKilled), forceSum = tot,
+            winKilledSum = wins.Sum(m => m.EnemiesKilled), winForceSum = winTot,
+            winSquadLoss = wins.Count == 0 ? 0.0 : Math.Round(wins.Average(m => (double)(m.SquadStart - m.SquadSurvived)), 2),
+            winTurns = wins.Count == 0 ? 0.0 : Math.Round(wins.Average(m => (double)m.Turns), 2)
+        };
+    }
 
     // W2: the paired-outcome object for the JSON artifact (mirrors the PAIRED report line).
     // FUL-1: + the raw per-slot records and the all-pairs missions-cleared margin — the
