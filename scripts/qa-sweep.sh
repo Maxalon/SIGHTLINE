@@ -91,6 +91,7 @@ echo -n "MODETEST   : "; verdict "$(SIGHTLINE_MODETEST=1 run | grep -oE "MODETES
 echo -n "HORDETEST  : "; verdict "$(SIGHTLINE_HORDETEST=1 run | grep -oE "HORDETEST: (PASS|FAIL)" | head -1)"
 echo -n "DEATHTEST  : "; verdict "$(SIGHTLINE_DEATHTEST=1 run | grep -oE "DEATHTEST: (PASS|FAIL)" | head -1)"
 echo -n "HEATLADDERTEST: "; verdict "$(SIGHTLINE_HEATLADDERTEST=1 run | grep -oE "HEATLADDERTEST: (PASS|FAIL)" | head -1)"
+echo -n "MIDTOOTHTEST: "; verdict "$(SIGHTLINE_MIDTOOTHTEST=1 run | grep -oE "MIDTOOTHTEST: (PASS|FAIL)" | head -1)"
 echo -n "SNAPTEST   : "; verdict "$(SIGHTLINE_SNAPTEST=1 run | grep -oE "SNAPTEST: (PASS|FAIL)" | head -1)"
 echo -n "AUDIOTEST  : "; verdict "$(SIGHTLINE_AUDIOTEST=1 run | grep -oE "AUDIOTEST: (PASS|FAIL)" | head -1)"
 echo -n "AUDIOGATE  : "; verdict "$(SIGHTLINE_AUDIOGATE=1 run | grep -oE "AUDIOGATE: (PASS|FAIL)" | head -1)"

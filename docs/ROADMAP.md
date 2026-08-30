@@ -2084,16 +2084,41 @@ fixable, and what makes it worth a wave even though every rung is in band.
 Eight waves merged, each independently reviewed, each sent back at least once. The composed-tree
 ladder is `docs/measurements/l3/` and the write-up is DEVLOG §L3. Start here:
 
-### The three best-evidenced open findings, in priority order
+### The best-evidenced open findings, in priority order (C1 closed the first and opened three)
 
-- [ ] **THE FLAT MIDDLE — replicated on THREE disjoint trees, and it is the obvious next wave.**
-      `h4 → h6` is the smallest step on all three ladders (−3.8 / −2.5 / −3.8) and on the composed
-      tree `h2 → h4` joins it at −7.5, while the ends buy −23.8, −16.2 and −13.1. `Heat.Mods`
-      explains it exactly: **rung 8 is the only entry carrying either `DmgDelta` or `AiTier`**, so
-      the middle rungs add bodies and stats and only the apex changes KIND. The ladder's LEVEL is
-      fine — five of six rungs in band — its SHAPE is not, and the cause is a static table.
-      First candidate (the audit's `balance-3`): move `DmgDelta` to rung 6 and `AiTier 2` to rung 7.
-      **ONE lever, CRN-paired, against a fresh same-slot baseline on your own tree.**
+- [x] **THE FLAT MIDDLE — addressed by PROGRAM CONTOUR wave C1 (`docs/measurements/c1/`, DEVLOG
+      §C1). One lever shipped, and the finding was sharpened, not just closed.** Measuring all TEN
+      rungs (n=320, n=640 at h6, base `17934ee`) showed "`h4 → h6` is flat" is really **two rungs,
+      one of them exactly zero**: rung 5 buys **0.0 ±3.2**, rung 6 buys **2.3 ±2.7**, against six
+      other rungs averaging 5.7. Mechanism found: **rung 6 declared `AiTier = 1`, which could never
+      fire** — rung 4 already published tier 1 and the aggregation is `Math.Max` — so EXPOSED's
+      advertised coordination tooth was dead for two programs. Shipped `Heat.MidTooth` (default 1):
+      NO QUARTER's +1 per-hit damage moves down to rung 6. **`h4 → h6` −2.3 ±2.7 → −8.9 ±2.6**;
+      six rungs exactly unchanged (0/320 discordant each); h6 lands at its band floor, 12.0.
+      `SIGHTLINE_MIDTOOTH=0` restores the pre-C1 table; `SIGHTLINE_MIDTOOTHTEST` pins it.
+
+- [ ] **THE LADDER'S TOP HALF HAS SUNK ONTO ITS BOTTOM — C1's closing finding, and now the
+      biggest open number.** Against band centres, **h0 is 10.6 points low and h4 is 9.1 low**,
+      while h6 and h8 are within 2. An apex-neutral `Heat.Mods` lever pins h4 (20.9) and h8 (8.1),
+      leaving **12.8 points of win-rate for four rungs — 3.2 each** — so no redistribution inside
+      the table can give rungs 5–8 the ~5.7 points per rung that rungs 1–4 buy. C1 could stop one
+      rung taking almost none of it, and did; it could not create room that is not there.
+      **This is a BASE-difficulty lever, not a heat-table lever.** Price it against the band
+      (RECRUIT 75 / h0 55 / h2 40 / h4 30 / h6 20 / h8 10) and expect the whole ladder to move.
+
+- [ ] **RUNG 5 (LINGERING WOUNDS) BUYS EXACTLY ZERO — 0.0 ±3.2 at n=320.** The deadest rung on
+      the ladder, and C1 left it alone (one lever per wave). Two unmeasured hypotheses to test
+      first: its `+1 enemy` is partly eaten by the **12-hostile spawn cap**
+      (`Mission.cs:653`, `Math.Clamp(EnemyBaseCount + n + enemyDelta, 3, 12)`) on late missions,
+      and `HarshAttrition` compounds over a run length the autopilot rarely reaches (avgMis 3.66
+      at h5). **Instrument the delivered headcount per (heat, mission) before choosing a lever.**
+
+- [ ] **A "heat-N rung" IS NOT A FIXED RUNG.** `Events.cs:460` (`EventOutcomeKind.AddHeat`) lets
+      three field-event choices raise a run's HeatLevel mid-campaign, +1 each, so every heat-N cell
+      contains some heat-N+1 missions. C1 measured the leak (5 discordant pairs in 320 at h5 for a
+      lever that touches only rungs 6+; zero at h4, where it would have to fire twice). Harmless at
+      C1's magnitudes, but **every past "this rung is unaffected" claim on this ladder has had this
+      hole in it**, and a future wave making a tighter inertness claim must account for it.
 
 - [ ] **THE MID-RUN DECAPITATE — replicated three times, mechanism located, lever unspent.**
       44.7% ±3.9 (n=161) against the finale's 68.0% (n=472): **23.3 points harder than the

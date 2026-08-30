@@ -306,7 +306,135 @@ public static class Heat
         StatDelta = -1,
     };
 
-    public static readonly HeatModifier[] Mods =
+    // ── C1 THE FLAT MIDDLE (PROGRAM CONTOUR) ────────────────────────────────────────────────
+    // WHICH of the apex's two QUALITATIVE teeth ride EXPOSED (rung 6) instead of NO QUARTER
+    // (rung 8), and whether rung 6 PAYS for it. A BITFIELD, so one binary measures every
+    // candidate against one control:
+    //   bit 1 (=1) : the +1 per-hit enemy DAMAGE moves 8 -> 6
+    //   bit 2 (=2) : AI coordination tier 2 moves 8 -> 6
+    //   bit 4 (=4) : rung 6's anonymous +1 StatDelta moves 6 -> 7 (so heats 7-8 keep their
+    //                cumulative stat exactly; only heat 6 pays)
+    //   1          : SHIPPED. EXPOSED gains the damage tooth; the apex KEEPS its coordination
+    //                peak (and now names it — the pre-C1 copy never did).
+    //   0          : the pre-C1 table, transcribed literally (see Rung6/Rung8 below)
+    //
+    // WHY. The `h4 -> h6` step is the smallest on FOUR measured ladders (L1 -3.8, L2 -2.5,
+    // L3 -3.8, and C1's own control -2.3 +-2.7 at n=320/n=640 — indistinguishable from zero), while the
+    // ends of the ladder buy 10-24 points apiece. `Heat.Mods` explained it and one row explained
+    // it exactly: **rung 6 declared `AiTier = 1`, which could never fire.** ELITE CADRE (rung 4)
+    // already published tier 1 and AiTier aggregates with `Math.Max`, so EXPOSED's advertised
+    // coordination tooth was a DEAD DECLARATION — rung 6 shipped +1 body, +1 stat and a
+    // concealment flag, and the player climbed two rungs for a stat point.
+    //
+    // WHAT MOVING (rather than ADDING) BUYS. Both teeth aggregate in a way that makes the move
+    // provably APEX-NEUTRAL: DmgDelta SUMS (1 declared once is 1 wherever it is declared, as
+    // long as it is declared once) and AiTier is a Math.Max (2 at rung 6 is still 2 at rung 8).
+    // So the cumulative vector at heat 8 is IDENTICAL in every mode and the apex CANNOT be
+    // pushed under its >=5 hard floor by this dial. Verified, not asserted: the h8 and h4 CRN
+    // chunks are byte-identical between control and lever (docs/measurements/c1/).
+    // MEASURED, base 17934ee, CRN-paired, four-to-sixteen disjoint slot sets per cell
+    // (docs/measurements/c1/, DEVLOG §C1). Heat 6, paired delta vs the pre-C1 control:
+    //   mode 1 (dmg 8->6)              n=640  18.6 -> 12.0   -6.6 +-1.6  z=-4.16   <- SHIPPED
+    //   mode 3 (dmg + tier2 8->6)      n=640  18.6 -> 13.9   -4.7 +-1.7  z=-2.69
+    //   mode 2 (tier2 8->6 alone)      n=320  18.4 -> 20.0   +1.6 +-1.9  z=+0.80  (WRONG SIGN)
+    //   mode 4 (stat 6->7 alone)       n=320  18.4 -> 23.1   +4.7 +-2.7  (prices rung 6's stat)
+    //   mode 5 (dmg 8->6 + stat 6->7)  n=320  18.4 -> 10.6   -7.8 +-2.5  z=-3.10
+    // Mode 3 lands the more even 7.0/5.8 split across rungs 5-6 / 7-8, and was NOT shipped: it
+    // strips NO QUARTER of every qualitative tooth, and the component that buys the softening
+    // measured +1.6 with the WRONG SIGN on its own. Mode 1 is the only candidate that leaves
+    // rungs 6, 7 AND 8 each with a tooth a player could name.
+    public const int ShippedMidTooth = 1;
+    public static int MidTooth { get; private set; } = ShippedMidTooth;
+
+    /// `SIGHTLINE_MIDTOOTH=<n>` — repoint the mid-ladder tooth. 0 restores the pre-C1 table.
+    /// Rebuilds the table in place; call BEFORE a run starts (Program.cs does, at startup).
+    public static void SetMidTooth(int m)
+    {
+        MidTooth = Math.Clamp(m, 0, 7);
+        Mods = BuildMods(MidTooth);
+    }
+
+    /// The intro DIFFICULTY panel (`Hud.DrawHeatSelector`) paints a rung's Desc at 12px into a
+    /// 320px card whose body column starts at x+40 — and it does NOT clip or wrap, it just keeps
+    /// painting off the card. MEASURED off a heat-8 screenshot: ~7.07 px/char (NotoMono is
+    /// monospace, so a CHARACTER count is an exact proxy), 278px inside the border => 39 chars.
+    /// Budget 38 for a pixel of margin. `Hud`'s RecruitLines block records the same limit from
+    /// the other side ("held to ~37 characters ... measured — the first draft clipped").
+    /// C1 found NO QUARTER's shipped copy 19 characters OVER it and LINGERING WOUNDS 4 over,
+    /// both visibly clipping; `SIGHTLINE_MIDTOOTHTEST` now asserts the budget for every rung of
+    /// every dial mode, so this cannot come back. Only mode 0 is exempt — it is a faithful
+    /// transcription of the pre-C1 table and reproducing it faithfully includes its defect.
+    public const int DescBudget = 38;
+
+    /// Prefer the fuller phrasing; fall back to the terse one when the composed clauses push it
+    /// past what the panel can actually show.
+    static string Fit(string full, string terse) => full.Length <= DescBudget ? full : terse;
+
+    /// Rung 6 (EXPOSED). `mt == 0` is a LITERAL transcription of the pre-C1 row, dead
+    /// `AiTier = 1` included — the TRUE BAND precedent: an off-switch is only a control if it
+    /// reproduces the old rule exactly, so it is written out rather than derived.
+    static HeatModifier Rung6(int mt) => mt == 0
+        ? new HeatModifier { Name = "EXPOSED", Desc = "No concealment opener; +1 stat",
+                             Exposed = true, StatDelta = 1, AiTier = 1 }
+        : new HeatModifier
+        {
+            Name = "EXPOSED",
+            Desc = Fit("No ambush opener" + Rung6Clauses(mt), "No ambush" + Rung6Clauses(mt)),
+            Exposed = true,
+            // bit 4: the anonymous stat point is what rung 6 PAYS for its tooth. It does not
+            // vanish — Rung7 picks it up — so heats 7 and 8 keep their cumulative stat exactly.
+            StatDelta = ((mt & 4) != 0) ? 0 : 1,
+            // The dead AiTier = 1 is GONE in every non-zero mode: rung 4 already provides it.
+            AiTier  = ((mt & 2) != 0) ? 2 : 0,
+            DmgDelta = ((mt & 1) != 0) ? 1 : 0,
+        };
+
+    /// What rung 6 actually carries in this mode, as panel copy. FUL-3's "from mission 3" rider
+    /// is deliberately NOT carried down with the damage: it was added because the SKIRMISH picker
+    /// deployed on its own mission 1, and W9 THE REPAIR removed that grace from SKIRMISH/DAILY
+    /// outright — so the caveat now describes only the campaign's m1-2 ramp, which EVERY numeric
+    /// rung shares and none of the others mentions. Singling damage out was the odd one, and it
+    /// cost 14 of the 38 characters the panel can show.
+    static string Rung6Clauses(int mt)
+        => (((mt & 4) != 0) ? "" : "; +1 stat")
+         + (((mt & 1) != 0) ? "; +1 dmg" : "")
+         + (((mt & 2) != 0) ? "; peak coord" : "");
+
+    /// Rung 7 (RELENTLESS). Identical in every mode EXCEPT that bit 4 parks rung 6's stat point
+    /// here, which is what keeps the heat-7 and heat-8 cumulative stat rows unchanged.
+    static HeatModifier Rung7(int mt) => new HeatModifier
+    {
+        Name = "RELENTLESS",
+        Desc = ((mt & 4) != 0) ? "No replacement recruits; +2 stat" : "No replacement recruits; +1 stat",
+        NoReinforcements = true,
+        StatDelta = ((mt & 4) != 0) ? 2 : 1,
+    };
+
+    /// Rung 8 (NO QUARTER, the ceiling). `mt == 0` is the literal pre-C1 row. Whatever the dial
+    /// did NOT move down stays here and is NAMED in the Desc (the pre-C1 copy never mentioned
+    /// the coordination peak at all, so the shipped mode reads MORE honestly, not less).
+    static HeatModifier Rung8(int mt) => mt == 0
+        ? new HeatModifier { Name = "NO QUARTER", Desc = "+1 enemy; deadliest force (+1 stat; +1 dmg from mission 3)",
+                             EnemyDelta = 1, StatDelta = 1, AiTier = 2, DmgDelta = 1 }
+        : new HeatModifier
+        {
+            Name = "NO QUARTER",
+            // The pre-C1 copy was 57 characters into a 38-character column AND never named the
+            // coordination peak at all — the apex's own marquee tooth. This names it and fits.
+            Desc = Fit("+1 enemy; +1 stat" + Rung8Clauses(mt), "+1 enemy, stat" + Rung8Clauses(mt)),
+            EnemyDelta = 1, StatDelta = 1,
+            AiTier  = ((mt & 2) != 0) ? 0 : 2,
+            DmgDelta = ((mt & 1) != 0) ? 0 : 1,
+        };
+
+    /// Whatever the dial did NOT hand down to rung 6 is still the apex's, and is named here.
+    static string Rung8Clauses(int mt)
+        => (((mt & 1) != 0) ? "" : "; +1 dmg")
+         + (((mt & 2) != 0) ? "" : "; peak coord");
+
+    public static HeatModifier[] Mods { get; private set; } = BuildMods(ShippedMidTooth);
+
+    static HeatModifier[] BuildMods(int mt) => new[]
     {
         new HeatModifier { Name = "REINFORCED",   Desc = "+1 enemy per mission",                 EnemyDelta = 1 },
         new HeatModifier { Name = "HARDENED",      Desc = "Enemies hit harder & tougher (+1 stat)", StatDelta = 1 },
@@ -324,15 +452,22 @@ public static class Heat
         new HeatModifier { Name = "ELITE CADRE",   Desc = "Enemies coordinate their fire",        AiTier = 1 },
         // LINGERING WOUNDS arrives earlier (rung 5) and carries a body -- run-loop attrition
         // pressure starts compounding in the mid-ladder instead of only near the top.
-        new HeatModifier { Name = "LINGERING WOUNDS", Desc = "+1 enemy; wounds linger, less field healing", EnemyDelta = 1, HarshAttrition = true },
+        // C1: "less field healing" -> "less healing". The old line was 42 characters into a
+        // 38-character panel column and clipped on screen (see Heat.DescBudget). No mechanic moved.
+        new HeatModifier { Name = "LINGERING WOUNDS", Desc = "+1 enemy; wounds linger, less healing", EnemyDelta = 1, HarshAttrition = true },
         // EXPOSED is the marquee mid-ladder MUTATOR: from heat 6 the squad loses its free
         // concealment ambush opener AND every hostile gets another stat point.
         // W6b: EXPOSED is also where the enemy starts PLAYING better (coordination tier 1) —
         // the depth-preserving apex lever, instead of leaning only on the saturating StatDelta.
-        new HeatModifier { Name = "EXPOSED",       Desc = "No concealment opener; +1 stat",       Exposed = true, StatDelta = 1, AiTier = 1 },
+        // C1 THE FLAT MIDDLE: ...except it WASN'T. Rung 4 (ELITE CADRE) already published tier 1
+        // and AiTier aggregates with Math.Max, so W6b's tooth here was a dead declaration for two
+        // whole programs. The row is now built by Rung6(MidTooth) — see the block above.
+        Rung6(mt),
         // RELENTLESS: the run-loop screw -- fallen soldiers are NOT replaced (the squad shrinks
         // for the rest of the run) and the survivors face yet tougher enemies.
-        new HeatModifier { Name = "RELENTLESS",    Desc = "No replacement recruits; +1 stat",     NoReinforcements = true, StatDelta = 1 },
+        // C1: the row is Rung7(MidTooth) — the shipped TRADE parks EXPOSED's stat point here so
+        // heats 7-8 keep their cumulative stat exactly and only heat 6 pays for its new tooth.
+        Rung7(mt),
         // NO QUARTER (rung 8, the ceiling): the final escalation -- one more body and the force
         // hits its peak durability/accuracy (+5 stat cumulative). With every flag above also
         // active, the top of the ladder is a genuine wall, beatable only by excellent play.
@@ -341,7 +476,11 @@ public static class Heat
         // W6c: ...and the apex is the ONE rung where heat scales enemy DAMAGE (+1 per hit) —
         // the counterweight to late-run plated squads, since StatDelta (HP/aim) saturates
         // against Armor while the damage floor never did. Desc surfaces it to the player.
-        new HeatModifier { Name = "NO QUARTER",    Desc = "+1 enemy; deadliest force (+1 stat; +1 dmg from mission 3)", EnemyDelta = 1, StatDelta = 1, AiTier = 2, DmgDelta = 1 },   // FUL-3: desc admits the m1-2 opener grace (it zeroed the +1 dmg on the skirmish picker's own mission)
+        // FUL-3: the desc admits the m1-2 opener grace (it zeroed the +1 dmg on the skirmish
+        // picker's own mission). C1: the row is now Rung8(MidTooth) — the shipped mode hands
+        // that +1 damage DOWN to EXPOSED and leaves the apex its coordination peak, which the
+        // cumulative vector at heat 8 does not notice (DmgDelta sums, AiTier is a Math.Max).
+        Rung8(mt),
     };
 
     public static int Clamp(int level) => Math.Clamp(level, Min, Max);
