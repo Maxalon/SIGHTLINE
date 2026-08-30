@@ -2173,11 +2173,35 @@ ladder is `docs/measurements/l3/` and the write-up is DEVLOG §L3. Start here:
 - [ ] **Six shrink-to-fit calls reach their floor at 120%** (three WAR ROOM achievement
       descriptions, one shop body, one prep body). Nothing is lost yet; they are one authored
       character from losing a word. Counted in FITTEST's PASS line on every run.
-- [ ] **The pause card is unreachable outside a mission.** `Update`'s Escape handler is gated on
-      `PlayerTurn || EnemyTurn`, so QUIT TO DESKTOP and every comfort setting (text size, anim
-      speed, volume, colourblind) cannot be opened from the BARRACKS, DRAFT, WAR ROOM, CODEX or
-      AUDIO CHECK. Each of those screens has its own exit, so it is not a trap — it is W5's "the
-      two ways OUT" wave stopping at the mission phases.
+- [ ] **ACCESSIBILITY: TEXT SIZE AND COLOURBLIND MODE CANNOT BE REACHED UNTIL YOU ARE IN A FIGHT.**
+      `Update`'s Escape handler is gated on `PlayerTurn || EnemyTurn`, and the pause card is the
+      SOLE home of TEXT SIZE, COLORBLIND, BRIGHTNESS, GAMMA, ANIM SPEED, SCREEN SHAKE, THREAT
+      PREVIEW, AUTO-CAM and FULLSCREEN. The INTRO — the first screen a player sees — carries ten
+      doors (CONTINUE / DEPLOY / TRAINING / LAST STAND / WAR ROOM / FIELD MANUAL / SKIRMISH / DAILY
+      / AUDIO CHECK / QUIT) and a difficulty dial, and **no settings entry at all**. It compounds
+      the 12px finding above exactly: the 120% text size that would lift every sub-12px string to
+      >=12px is behind the door that cannot be opened.
+      **BARRACKS is worse** — `case Phase.Barracks` has no Escape handler whatsoever: no pause card,
+      no route back to the intro, no field manual (`K` is `Phase.Intro`-gated). On the screen where
+      a player deliberates over perks, the shop and the node pick, the only exits are forward or the
+      window's close button. Not a soft-lock (forward always exists), and every overlay phase
+      (Draft, SkirmishSetup, WarRoom, Codex, AudioCheck, the end cards) does take Escape — walked
+      and confirmed. **VOLUME is the exception and an earlier draft of this item had it wrong:** the
+      four faders live on AUDIO CHECK, which the intro opens with `U`.
+      `QUITTEST` asserts the arm/confirm/checkpoint contract and **asserts nothing about
+      reachability from any phase** — that is the half that is broken.
 - [ ] **`terminal-reload` fired 0 times in 8083 enemy acts.** That is a BACKSTOP working as
       designed (the planner's own reload branch gets there first), not a hole — recorded so the
       next reader does not re-discover it as a defect.
+- [ ] **The sweep's AICOVTEST is a COARSE version of the gate.** It runs `=2` (48 campaigns,
+      ~2740 acts), where the one-per-1000 rate is a threshold of **2.74 events** — "does every
+      undeclared branch fire at least 3 times?" — and `item` (10), `sap` (13) and `brace` (13) sit
+      at 3.6-4.7x the bar. The headline "overwatch fires 8 times in 8083 acts" is the `=6` run;
+      **at the sweep's n, overwatch is 0**. A wave that suspects a verb has gone quiet should run
+      `SIGHTLINE_AICOVTEST=6` by hand rather than trust the sweep line.
+- [ ] **An OCCLUSION signal would let the text audit assert string-vs-string overprint.**
+      `Cfg.InkProbe` already fires in draw order, so z-order is available; what is missing is
+      whether an opaque fill landed between two strings. Acquiring it means funnelling **230** raw
+      `Raylib.DrawRectangle*` calls in `Hud.cs` and **87** in `Renderer.cs` through a `Cfg.Rect`
+      seam. Two overprint assertions exist today, both hand-scoped to one row each (FITTEST legs B
+      and C). Priced, declined by C5, and worth doing for whoever next owns the chrome.

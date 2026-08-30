@@ -392,9 +392,12 @@ docs/screenshot.png    README image
   that probe prints one number per run). Restore it to `-1` when you are done. **The CHROME has
   the same pin since C5** — `Hud.TimePin` (the 12 wall-clock reads in `Hud.cs` route through
   `Hud.Now()`) plus `Hud.AnimPin`, which forces panel-entrance progress instead of waiting real
-  seconds for a card to slide in. `SIGHTLINE_FITTEST`'s screen audit sets all three, and it also
-  reseeds per staged screen: the shop slate and the event roll are clock-seeded, so an unseeded
-  screen audit reports a different worst-case string on consecutive runs.
+  seconds for a card to slide in. `Hud.MousePin` does the same for the POINTER, which 30 draw sites read live
+  (hover fills, hover cards, and the threat card, which anchors itself at the cursor) — an unpinned
+  pointer measured a ~3% flake in FITTEST and a 16-assertion disagreement between two machines on
+  one commit. `SIGHTLINE_FITTEST`'s screen audit sets all four, and it also reseeds per staged
+  screen: the shop slate and the event roll are clock-seeded, so an unseeded screen audit reports a
+  different worst-case string on consecutive runs.
 
 ---
 

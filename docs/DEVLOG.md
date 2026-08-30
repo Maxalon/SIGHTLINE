@@ -9014,19 +9014,53 @@ scale:
 5. **the screen drew, and drew ITS OWN frame** — a fingerprint collision between two screen cases
    means one of them never staged.
 
-Legs A–E are unchanged in substance. What changed for them is **THE SCOPE GUARD**: FITTEST now
-counts the assertions it evaluates *per leg, per scale*, and fails by name on any leg that did not
-run at every scale. That is CROSSCUT rule 6 made mechanical — W5 wrote the right guard for the
-longest string on the squad screen and placed it outside the scale loop, and CHROMETEST's own blurb
-leg sat outside its loop for a wave. Current run: **13,898 assertions over 45 legs, every leg
-evaluated at all four scales.**
+Legs A–E are unchanged in substance. What changed for them is **THE SCOPE GUARD**, and it took two
+review rounds to make it mean what it says. CROSSCUT rule 6 asks for a mechanical answer to "is the
+assertion inside the loop?"; the first version counted `Bump` calls placed *next to* the
+assertions, and **the review defeated it in two edits**: create a real 120%-only defect
+(`PlateSlack 1.5 → 1.0`, which fails with 18 violations, all at `@120%`), then gate only the
+ASSERTION on `S == "@100%"` while leaving its bump — **PASS, with a byte-identical count, while 18
+real violations went unreported.**
+
+So the guard is now three things, and the third is the one that earns the claim:
+
+1. **`Check(leg, cond, msg)` bumps and asserts in one statement**, so the number is a count of
+   assertions *evaluated*, and moving, gating or deleting one moves the number with it.
+2. **Every leg must record checks at every scale** (the original guard), which still catches the
+   W5 defect verbatim — demonstrated by gating leg F to `ui == 1f`:
+   `legOutsideScaleLoop:scr:INTRO@90%(0 checks)`, 120 of them.
+3. **A SENSITIVITY CONTROL runs on every invocation.** Binding still cannot see a *narrowed
+   condition*, so FITTEST re-runs the whole screen audit at a deliberately **unshipped 200% text
+   scale**, where fixed-pixel chrome must break, and FAILS if the assertions do not fire there
+   (today: **490 plate / 11 off-canvas / 57 ellipsis** violations, counted and discarded). Against
+   that, the review's step-2 mutation reads
+   `sensitivityDead:labelLeavesPlate never fired at the 200% control`.
+
+**And the residual limit, stated rather than implied:** this proves an assertion RAN at each scale.
+It cannot prove the CONDITION was not narrowed — nothing short of mutation testing can — and the
+200% control is an empirical backstop for that, not a proof. Current run: **14,132 assertions over
+45 legs**, every leg at all four scales, plus the control.
+
+**What leg F does NOT see, stated because "it IS the draw" is the claim that sells it.**
+`Hud.PlateProbe` covers the four button helpers plus `CenterText` — **7 call sites**, not "every
+button in the game"; a control that draws its own plate and label by hand is invisible to it. And
+`Cfg.InkProbe` only sees text routed through `Cfg.Text`/`Cfg.TitleText`: review found **four raw
+`Raylib.DrawTextEx` sites** — the volume fader's label and percentage, and the THREAT CARD's title
+and body — which were therefore invisible to the audit *and* frozen while the rest of the UI scaled,
+on two screens leg F claims to audit. **Fixed** (they now go through `Cfg.Text`/`Cfg.Measure`, which
+is what CLAUDE.md requires); the point that survives is that the probe is only as complete as the
+funnel it sits on, and `grep -c "Raylib.DrawTextEx" src/*.cs` is the check.
 
 Supporting mechanics, all inert in play: `Hud.AnimPin` (audit the settled frame without waiting
 real seconds), `Hud.TimePin` (the chrome's twelve wall-clock reads now route through one `Now()`,
 mirroring `Renderer.TimePin` — CLAUDE.md has said "if you write a test that reads pixels, pin the
 clock" since W4 and only the board could), and one fixed RNG seed per staged screen (the shop slate
-and the event roll are clock-seeded; the first version of this leg reported a different worst-case
-string on consecutive runs, which is a flaky gate rather than a gate).
+and the event roll are clock-seeded), and **`Hud.MousePin`** — added after review measured the gate
+**flaking at ~3% (1 run in 32)** on a TOOLTIP-HOVER/TOOLTIP-AIM fingerprint collision. Thirty draw
+sites read the live cursor (hover fills, hover cards, and the threat card, which anchors itself at
+it): the clock, the animations and the RNG were pinned and the POINTER was not. The same gap
+explains why this entry's own assertion count differed by 16 between two machines on one commit.
+The audit now parks the pointer off-canvas. Determinism verified 3× on the shipped tree.
 
 ## GAP 2 — the enemy turn has a deadlock guard, and it names what stalled
 
@@ -9074,6 +9108,15 @@ Census at n=2740 acts: `shoot 40.18% · hunker 17.08% · grenade 2.52% · heal 1
 reload 0.95% · sap 0.47% · brace 0.47% · item 0.36% · shove 0.11% · relock 0.04% · overwatch 0.00% ·
 terminal-hunker 0.22% · terminal-reload 0.04% · none 34.38%`.
 
+**Read the two sample sizes carefully, because they say different things.** The headline
+"overwatch fires 8 times in 8083 acts" is a **144-campaign** run (`SIGHTLINE_AICOVTEST=6`). The
+sweep runs `=2` — **48 campaigns, 2740 acts — and at that n overwatch is 0**. The gate is a rate of
+one per 1000 acts, so at the sweep's n the threshold is **2.74 events**: it is asking "does every
+undeclared branch fire at least 3 times in 2740 acts?", and `item` (10), `sap` (13) and `brace` (13)
+are the marginal ones at 3.6–4.7× the bar. That is a deliberate trade — a bigger n in the pre-merge
+sweep costs minutes — but it means the sweep's version of this gate is a coarse one, and a wave that
+suspects a verb has gone quiet should run `=6` by hand.
+
 The three **backstops** (`terminal-reload`, `terminal-hunker`, `none`) are censused and reported,
 never gated: they exist so W2's no-idle-act invariant holds structurally when a plan goes stale.
 `terminal-reload` measured **0 in 8083 acts**, which is the design working rather than a hole.
@@ -9104,12 +9147,26 @@ wave changed no scoring; it owns the test that would have caught it.
    deployment rule that already exists (best `NextDeployCap`, healthy and senior first), so a
    player's own bench choices are never touched.
 4. **`SIGHTLINE_BENCH=1` staged nothing.** `DebugBench` set `Wound = 2` and then called
-   `DebriefSurvivors`, whose recovery step takes an unhurt soldier's wound down by two — both
-   soldiers were healed by the very call that follows, and the hook photographed the plain barracks.
-   Found as a frame byte-identical to `SIGHTLINE_CAMPAIGN`'s.
-5. **`AIIDLETEST` was the one self-test in `qa-sweep.sh` not routed through `verdict`.** A FAIL there
-   printed FAIL and left `SWEEP-EXIT=0`. W9 built `verdict` precisely so the exit code means the
-   whole sweep; this line was missed by it.
+   `DebriefSurvivors`, whose recovery step decrements a survivor's wound (`u.Wound--`, `Run.cs`) —
+   so the flag was spent before anything drew and the hook photographed the plain barracks. Found as
+   a frame byte-identical to the audit's CAMPAIGNMAP case. (Two corrections from review: the
+   decrement is the `u.Wound--` arm, not the unhurt-branch's −2; and the hook's docstring premise —
+   "so the BENCH toggle buttons are visible" — is stale, because the DEPLOY/BENCH pill draws on
+   EVERY roster row. What it actually stages now is the WOUNDED(n) line.)
+5. **`AIIDLETEST` was the one self-test in `qa-sweep.sh` not routed through `verdict`** — real, and
+   **the consequence I first published for it was false**, which is worth more than the fix. I wrote
+   that a FAIL there "left `SWEEP-EXIT=0`". It does — but so does *every other* FAIL, because
+   `qa-sweep.sh` **contains no `exit` statement at all**: `_fail` and `_autofail` are set and never
+   read (verified here: assignments at 49/51/53/175/199/208/215, zero reads in a condition that
+   exits). The provenance, established by the lead: W9 shipped `exit 0` as a review fix
+   (`3304c41`), the **W5 merge (`4ba1ed3`) deleted it**, and CLAUDE.md has asserted the gate for two
+   programs since. So this fix is a *precondition* for the exit code to mean the whole sweep — when
+   wave **C3** lands the `exit` (its half; C5 deliberately did not duplicate it), an AIIDLETEST FAIL
+   will now be counted. **CLAUDE.md's "Since W9 the sweep EXITS NON-ZERO on any FAIL line" is false
+   until C3 merges** — left for C3 rather than edited into a conflict.
+   C5's own half of the same defect: `scripts/qa-isolated.sh` ended its `--sweep` branch with
+   `echo "SWEEP-EXIT=$?"`, so the *wrapper* exited 0 whatever the sweep returned. Fixed and proven
+   with a fake sweep returning 7 — old wrapper `WRAPPER-EXIT=0`, new wrapper `WRAPPER-EXIT=7`.
 6. **The PERK CHOOSER's fourteen numbers were transcriptions — and this one is stated carefully,
    because it is a SEAM and not a live lie.** Every "before > after" line on the card
    (`HP 8 > 11`, `AIM 68 > 83 vs flanked`, `DMG TAKEN -1 (crits -4)`, ...) was a literal typed
@@ -9131,27 +9188,57 @@ wave changed no scoring; it owns the test that would have caught it.
 ### FOUND, NOT FIXED — with the repro
 
 - **The 12px small-text floor is not met by the shipped UI, at the default scale.** CLAUDE.md
-  declares 12px the floor. Measured at 100%: **10px** on the AUDIO CHECK screen (75 strings per
-  frame below the floor) and **11px** on seventeen other screens including the in-mission HUD, the
-  end cards, the WAR ROOM and the EVENT card. Repro: `SIGHTLINE_FITTEST=1 SIGHTLINE_FITDUMP=small`
-  lists every string with its authored and rendered size. **Not fixed** because meeting the rule is
-  a re-layout of half the game's chrome — every one of those call sites is inside another wave's
-  surface, and this wave's own gate would then be enforcing a design change nobody has priced. What
-  ships instead is a REGRESSION BOUND at the measured worst (9px authored, 9px rendered, which is
-  what the tightest shipped fitter, `FitSize(effect, 12, 9, ...)` on the REQUISITION card, declares
-  as its own minimum) plus the survey. The next wave that wants the rule can start from the list.
-- **Six shrink-to-fit calls reach their floor at 120%** (three WAR ROOM achievement descriptions,
-  one shop body, one prep body). They still fit — nothing is lost — but they are one authored
-  character away from losing a word. Reported in the FITTEST PASS line on every run.
-- **The pause card, and therefore QUIT TO DESKTOP and every comfort setting, is unreachable from the
-  BARRACKS, DRAFT, WAR ROOM, CODEX and AUDIO CHECK screens.** `Update`'s Escape handler is gated on
-  `Phase == PlayerTurn || EnemyTurn`. Every one of those screens has its own exit (all four overlay
-  phases take Escape; the barracks proceeds), so it is not a soft-lock and not a trap — but W5's
-  "the two ways OUT" wave stopped at the mission phases, and a player who wants to change the text
-  size from the barracks cannot. Not fixed: it is a UX decision with a keymap cost, not a defect.
+  declares 12px the floor. Measured at 100%: **10px** on the AUDIO CHECK screen (12 strings at 10px
+  + 63 at 11px = 75 below the floor on one frame) and **11px** on seventeen other screens including
+  the in-mission HUD, the end cards, the WAR ROOM and the EVENT card — **109 strings over exactly 18
+  screens**. Repro: `SIGHTLINE_FITTEST=1 SIGHTLINE_FITDUMP=small` lists every one with its authored
+  and rendered size. **Scope, stated accurately after review:** no PRIMARY information is affected —
+  hit%, damage, ammo, objective, unit names and action-bar labels are all ≥12px — and the 11px cases
+  are ~4 call sites repeated across 11 staged screens, so "a re-layout of half the chrome" is fair
+  for AUDIO CHECK and overstated for the rest. **Not fixed** because those call sites sit inside
+  other waves' surfaces and this wave's gate would then enforce a design change nobody has priced.
+  What ships instead is a REGRESSION BOUND **at the measured worst — 10px authored / 9.0px
+  rendered** — so any further shrink fails. (It was first set at 9px authored, one point of slack
+  below the measurement, which would have let a 10→9 regression on AUDIO CHECK pass in silence;
+  review B3.) **Setting a bound at the worst entrenches the breach**, which is the disclosure this
+  rule asks for: the next wave that wants the rule met starts from the list, not from the bound.
+- **Six shrink-to-fit calls reach their floor at 120%** — three WAR ROOM achievement descriptions,
+  one shop body, one prep body, and the same shop body again on the worst-case SHOP-WORST staging
+  (the sixth, which the first draft of this list omitted while quoting the count of six). They still
+  fit — nothing is lost — but they are one authored character from losing a word. Counted in the
+  FITTEST PASS line on every run.
+- **THE SETTINGS ARE BEHIND A DOOR YOU CANNOT OPEN UNTIL YOU ARE IN A FIGHT — and this is an
+  ACCESSIBILITY gap, not a comfort one.** `Update`'s Escape handler is gated on
+  `Phase == PlayerTurn || EnemyTurn`, and the pause card is the sole home of **TEXT SIZE,
+  COLORBLIND, BRIGHTNESS, GAMMA, ANIM SPEED, SCREEN SHAKE, THREAT PREVIEW, AUTO-CAM and
+  FULLSCREEN** (verified against `DrawPause`). The INTRO — the screen a player meets first — offers
+  CONTINUE / DEPLOY / TRAINING / LAST STAND / WAR ROOM / FIELD MANUAL / SKIRMISH / DAILY /
+  AUDIO CHECK / QUIT and a difficulty dial, and **no settings entry of any kind**. So on first
+  launch a player cannot set the text size or turn on colourblind mode until they have started a
+  mission and pressed Escape. **It compounds the finding above exactly**: the 120% setting that
+  would lift every sub-12px string to ≥12px is behind the door that cannot be opened.
+  **BARRACKS is worse:** `case Phase.Barracks` has no Escape handler at all — no pause card, no
+  route back to the intro, no field manual (`K` is gated on `Phase.Intro`) — so on the screen where
+  a player deliberates over perks, the shop and the node pick, the only exits are forward or the
+  window's close button. (Not a soft-lock: forward always exists. Draft, SkirmishSetup, WarRoom,
+  Codex, AudioCheck and the end cards all take Escape — walked and confirmed.)
+  **Correction to my first write-up:** VOLUME *is* reachable outside a mission — the four faders
+  live on AUDIO CHECK (`Hud.Audition.cs`), which the intro opens with `U`.
+  Not fixed here — it is a keymap and menu-structure change across five phases, on surfaces this
+  wave does not own — but it is filed as a real open item rather than "a UX decision", and
+  `QUITTEST`, which asserts the arm/confirm/checkpoint contract, **asserts nothing about
+  reachability from any phase**, which is the half that is broken.
 - **`plan=none` is what the stall line prints when the stall is at `PickNext`**, because the plan
   for that unit has not been made yet. Truthful, but the diagnosis is weaker at that stage than at
   `ActAfterMove`. Left as is rather than fabricating a plan to name.
+- **String-vs-string overprint is not asserted, and my first reason for that was wrong.** I wrote
+  "no z-order signal"; `Cfg.InkProbe` fires **in draw order**, so z-order is exactly what it does
+  have. What is missing is an **occlusion** signal — whether an opaque fill landed between two
+  strings — and acquiring one means funnelling **230** raw `Raylib.DrawRectangle*` calls in
+  `Hud.cs` and **87** in `Renderer.cs` through a `Cfg.Rect` seam. That is a real refactor and
+  declining it is a scope call, not an impossibility: the project already asserts overprint in two
+  hand-scoped places (FITTEST's own armory tag-vs-blurb leg and the hall-of-fame score-vs-name leg),
+  so this is a gap with a known price.
 
 ## VERIFICATION
 
@@ -9159,8 +9246,11 @@ wave changed no scoring; it owns the test that would have caught it.
 - `bash scripts/qa-isolated.sh --sweep --full` (the house sweep with the isolation exports the
   contract requires, now a committed script instead of four lines a reader has to remember):
   every line PASS, COVERAGE GAP empty, autoplay x3 clean (LOSE m3 / LOSE m1 / LOSE m5, no TIMEOUT),
-  PAIRTEST byte-identical, **SWEEP-EXIT=0**. FITTEST's final line: 40 screens, **13,914
-  assertions over 45 legs, every leg at all four scales**. Coverage, DERIVED (never typed — this footer has been
+  PAIRTEST byte-identical. FITTEST's final line: 40 screens, **14,132 assertions over 45 legs**,
+  every leg at all four scales, plus the 200% sensitivity control. **On the sweep's exit code, read
+  fix 5 above and do not quote `SWEEP-EXIT=0` as a whole-sweep verdict**: `qa-sweep.sh` has no
+  `exit`, so the code is the last `echo`'s. C5's wrapper now propagates whatever the sweep returns;
+  C3 restores the sweep's own `exit`. Coverage, DERIVED (never typed — this footer has been
   wrong six times): **67 hooks exist in `src/`, 67 run**, up from 64 at the base commit — this wave
   adds ENEMYSTALLTEST, AICOVTEST and SAVEEDGETEST. COVERAGE GAP block empty.
 - **Every fix ships a test proven to FAIL on the pre-fix tree** (reverted, run, output pasted in the
