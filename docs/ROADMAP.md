@@ -1826,36 +1826,59 @@ price them):**
 
 ## PROGRAM CROSSCUT — THE OPEN BALANCE TARGET (measured, replicated, unspent)
 
-**THE LADDER IS COMPRESSED, NOT LOW.** Three independent measurements on the post-W1 tree agree:
+> ### ⚠ CORRECTION (2026-08-30) — THE FIRST VERSION OF THIS SECTION OVER-CLAIMED, AND IT WAS MINE
+>
+> I originally wrote that "the cold rungs sit ~7-8 points below band". **That is false.** I
+> computed each rung's distance from the band's CENTRE and printed it under a column headed
+> "vs band" — but the band is a TOLERANCE (±8), and membership is decided against its floor, not
+> its midpoint. A W2 reviewer caught it. Checked properly:
+>
+> | rung | band | floor | L2 (n=160) | verdict | W2's control (n=80) | verdict |
+> |---|---|---|---|---|---|---|
+> | heat 0 | 55 ±8 | 47 | 46.9 | **out by 0.1** | 47.5 | in |
+> | heat 2 | 40 ±8 | 32 | 36.9 | in | 26.2 | **out by 5.8** |
+> | heat 4 | 30 ±8 | 22 | 23.1 | in | 22.5 | in |
+> | heat 6 | 20 ±8 | 12 | 20.6 | in | 17.5 | in |
+> | heat 8 | 10 ±5 | 5 | 8.8 | in | 12.5 | in |
+>
+> **Nine of those ten measurements are IN BAND.** At n=160, exactly one rung is out — heat 0, by
+> 0.1 points, which at SE 3.9 *is* the floor. The two rungs the two instruments disagree about
+> (h0 and h2) are the two where they disagree with each other, which is what you would expect
+> from n=80 against n=160 rather than from a defect.
+>
+> This is the same class of error the program sent three waves back for, made by the person
+> enforcing the rule. It is corrected in place rather than edited away.
 
-| rung | band | L2 (n=160/rung) | W2's dial-OFF control (n=80/rung) | mean vs band |
-|---|---|---|---|---|
-| heat 0 | 55 | 46.9 | 47.5 | **−7.8** |
-| heat 2 | 40 | 36.9 | 26.2 | **−8.5** |
-| heat 4 | 30 | 23.1 | 22.5 | **−7.2** |
-| heat 6 | 20 | 20.6 | 17.5 | −0.9 |
-| heat 8 | 10 | 8.8 | 12.5 | +0.7 |
+### WHAT SURVIVES THE CORRECTION — and it is still worth a wave
 
-The COLD rungs sit ~7-8 points below band; the HOT rungs sit on it. **The game starts too hard and
-then stops getting harder.** That is a different defect from "the ladder is low", and it has a
-different repair: the cold end needs relief, or the hot end needs teeth — not a uniform shift.
+The ladder's LEVEL is fine. Its SHAPE is not, and that claim rests on step sizes rather than on
+band membership, so the correction above does not touch it:
 
-**The mechanism is already identified and replicated.** The `h4 → h6` step is the smallest on BOTH
-ladders (**−3.8** on L1, **−2.5** on L2) against neighbours of −12.5/−13.8 and −7.5/−11.9.
-`Heat.Mods` explains it exactly: **rung 8 is the ONLY entry in the table carrying either `DmgDelta`
-or `AiTier`.** The middle rungs add bodies and stats; only the apex changes KIND. So heat 5 and 6
-buy almost nothing, and the ladder's shape is a table property rather than an emergent one.
+| step | L1 (pre-W1, n=80) | L2 (post-W1, n=160) |
+|---|---|---|
+| RECRUIT → h0 | −25.0 | −25.6 |
+| h0 → h2 | −15.0 | −10.0 |
+| h2 → h4 | −12.5 | −13.8 |
+| **h4 → h6** | **−3.8** | **−2.5** |
+| h6 → h8 | −7.5 | −11.9 |
 
-- [ ] **THE COMPRESSION WAVE (specced, not started).** Reshape `Heat.Mods` so the middle rungs
+**`h4 → h6` is the smallest step on BOTH ladders**, measured on disjoint world sets, against
+neighbours three to five times its size. `Heat.Mods` explains it exactly: **rung 8 is the ONLY
+entry in the table carrying either `DmgDelta` or `AiTier`.** The middle rungs add bodies and
+stats; only the apex changes KIND. Two rungs of the ladder buy the player almost nothing, and
+that is a property of a static table rather than an emergent one — which is what makes it
+fixable, and what makes it worth a wave even though every rung is in band.
+
+- [ ] **THE FLAT-MIDDLE WAVE (specced, not started).** Reshape `Heat.Mods` so the middle rungs
       change KIND rather than only quantity — the audit's `balance-3` finding proposed moving
-      `DmgDelta` to rung 6 and `AiTier 2` to rung 7, which is the obvious first candidate. Price it
-      as ONE lever with a CRN-paired round against a fresh same-slot baseline on the merged tree.
-      **Do not aim a rung-average lever at this** — pair it with the per-objective decomposition,
-      because the apex is a wall made of specific objectives and the cold end is a different
-      problem from the hot end.
-      **Note the prerequisite:** waves W2, W9 and W8 all move gameplay, so this must be measured
-      AFTER they merge, on the composed tree. Measuring it before is exactly the mistake fourteen
-      waves made before X2 caught it.
+      `DmgDelta` to rung 6 and `AiTier 2` to rung 7, which is the obvious first candidate. Price
+      it as ONE lever with a CRN-paired round against a fresh same-slot baseline on the merged
+      tree. **Do not aim a rung-average lever at it** — pair it with the per-objective and
+      per-node-kind decomposition W8 shipped, because W8 proved a pooled row can hide a
+      49.5-point artifact.
+      **Prerequisite:** W2, W9 and W8 all move gameplay or composition, so this must be measured
+      AFTER they compose. Measuring before composition is the mistake fourteen waves made before
+      X2 caught it.
 
 - [ ] **THE MID-RUN DECAPITATE** (wave W8, in flight). 46.0% ±3.9 (n=163) against the boss
       finale's 69.7% (n=479), replicated from L1's 48.9/70.1 on disjoint worlds. Worst mission of
