@@ -9317,6 +9317,12 @@ trusting it.
   movement), `AIIDLETEST` (the no-idle invariant survives declining), `HEATLADDERTEST` (the
   difficulty axis is untouched), and `AITEST` (focus fire and target selection are untouched).
 - **`SIGHTLINE_DECLINETEST` FAILS with `SIGHTLINE_AIDECLINE=0`** — output in §7.
+- **The INSTRUMENT does not share this code path** — the brief's explicit WATCH OUT. Checked
+  rather than assumed: `grep -nE '\bAi\.[A-Z]' src/Game.Autopilot.cs` returns exactly three
+  hits, **all of them doc comments** ("the Ai.Plan trick", "Ai.Plan-style"). The player-side
+  autopilot re-implements its own scorer and calls nothing in `Ai.cs`, so changing enemy scoring
+  changes the WORLD but not the measuring stick, and the before/after are comparable. (The
+  R0diag above is the second, empirical half of the same check.)
 - **R0diag**: this tree with the dial off vs the base-commit binary, two disjoint slot sets
   (h0/b0 and h4/b10), **2750 aggregate fields diffed to EMPTY** on both. The telemetry this wave
   adds — including the extra `ComputeOdds` + `ExpectedDamage` per plan — is gameplay-inert.
