@@ -9308,10 +9308,13 @@ trusting it.
 - **Release build 0 warnings / 0 errors.**
 - **`bash scripts/qa-sweep.sh --full` — SWEEP-EXIT=0**, **65/65** self-tests PASS (incl. the new
   `DECLINETEST`), COVERAGE GAP block empty, PAIRTEST byte-identical, autoplay x3 WIN/LOSE with no
-  TIMEOUT. Full output in `docs/measurements/c2/qa-sweep-full.txt`. (An earlier full sweep was
-  run and then DISCARDED as `qa-sweep-full.interim.txt`: comment-only edits landed mid-run, and
-  since `run()` is `dotnet run -c Debug` it rebuilds per test, so that sweep spanned two binaries.
-  Behaviour-identical, but a gate that spanned two builds is not the gate.)
+  TIMEOUT. Full output in `docs/measurements/c2/qa-sweep-full.txt`. (**Two earlier full sweeps
+  were run and DISCARDED**, as `qa-sweep-full.interim.txt` and `.interim2.txt`. Both were green,
+  and both are worthless as a gate for the same reason: `run()` is `dotnet run -c Debug`, which
+  REBUILDS per test, so a source edit landing mid-sweep — even a comment-only one — makes the run
+  span two binaries. The sweep of record was started only after the source tree was frozen, and
+  nothing but documentation changed after it began. A gate that spanned two builds is not a gate,
+  and noticing that twice cost two sweeps.)
   Notable passes for this diff specifically: `COMBATTEST` and `TRUTHTEST` (the new
   `ShotOdds.CoverDef` field and the tooltip), `SAVETEST` (no persisted-enum or map-generator
   movement), `AIIDLETEST` (the no-idle invariant survives declining), `HEATLADDERTEST` (the
