@@ -77,15 +77,32 @@ public static class Cfg
     // NOTE the atlas routes on the AUTHORED size, not the scaled one: body text stays on the
     // crisp 20px UI bake even at 120%, instead of falling off the <=18px cliff onto the 64px
     // atlas (which is minification mush at label sizes — the whole reason V1 split them).
-    public static void Text(string t, Vector2 pos, float size, float spacing, Color tint) =>
+    /// W9 REVIEW FIX — TEST-ONLY TEXT CAPTURE. When non-null, EVERY string this game paints is
+    /// recorded here with the size it was painted at. It exists so a self-test can assert on what
+    /// the UI ACTUALLY SAYS instead of on a re-derivation of what it ought to say.
+    /// That distinction is the whole point: W9's first TRUTHTEST asserted `o.DmgMinEff` and
+    /// `Combat.LockOnAim(...)` — the values the HUD is SUPPOSED to read — and nothing bound the HUD
+    /// to them, so reverting Hud.DrawTooltip's DMG row to the raw band and its LOCK-ON badge to the
+    /// old CoverLevel==0 predicate left TRUTHTEST PASSing. Capturing at the draw call closes that
+    /// seam: whatever the tooltip paints is what the test reads, however it was computed.
+    /// Null in every normal run (one predictable branch, no allocation, no behaviour change).
+    public static System.Collections.Generic.List<(string text, float size)> CaptureText;
+
+    public static void Text(string t, Vector2 pos, float size, float spacing, Color tint)
+    {
+        if (CaptureText != null) CaptureText.Add((t, size));
         Raylib.DrawTextEx(FontFor(size), t, pos, Scaled(size), spacing, tint);
+    }
     public static Vector2 Measure(string t, float size, float spacing) =>
         Raylib.MeasureTextEx(FontFor(size), t, Scaled(size), spacing);
 
     /// Title text — routed to the display face. Use for headline/card titles only; numerals and
     /// data stay on NotoMono (a good data face) via Text/Measure.
-    public static void TitleText(string t, Vector2 pos, float size, float spacing, Color tint) =>
+    public static void TitleText(string t, Vector2 pos, float size, float spacing, Color tint)
+    {
+        if (CaptureText != null) CaptureText.Add((t, size));
         Raylib.DrawTextEx(TitleFontFor(size), t, pos, Scaled(size), spacing, tint);
+    }
     public static Vector2 TitleMeasure(string t, float size, float spacing) =>
         Raylib.MeasureTextEx(TitleFontFor(size), t, Scaled(size), spacing);
 
@@ -186,7 +203,7 @@ public static class Pal
     // dash-yellow indistinguishable from a warm-biome plateau top. Now the region is drawn as an
     // OUTLINE + corner lattice + a whisper of inner tint, so the same information costs a
     // fraction of the pixels and the room keeps its own colour.
-    //   MoveBlue / MoveYellow  — the region STROKE (walk solid, dash dashed)
+    //   MoveBlue / MoveDash    — the region STROKE (walk solid, dash dashed)
     //   MoveWalkTint / MoveDashTint — the whisper-level inner lift (see DrawMoveOverlay)
     //   MoveTick               — the per-tile corner lattice (walk only)
     // The inner lift is WHITE, not cyan, and that is deliberate. Mixing white into a colour
@@ -196,8 +213,16 @@ public static class Pal
     // almost-colourless floor even a whisper of blue decides the hue. A value lift is also the
     // channel DESIGN 3.H asks for: value carries, hue does not. The friendly-cyan identity of
     // the affordance rides on the stroke and the tick lattice, which are lines and points.
+    // W4 THE BOARD BECOMES A PLACE — the DASH boundary is no longer painted in the objective gold.
+    // Pal.MoveYellow was RGBA(251,191,36) — BYTE-IDENTICAL to Pal.Accent, the goal hue DESIGN.md
+    // §3.H reserves for terminals/evac/sites/VIP and which already carries 18 separate jobs in
+    // Renderer.cs alone. On the opening frame that put dashed GOLD rectangles on the far side of
+    // the board, next to enemies, which reads as "objective" or "enemy zone", not "where I could
+    // sprint". The dash region is a FRIENDLY affordance, so it now rides the friendly cyan and is
+    // separated from the walk stroke on VALUE + stroke STYLE (paler + dashed vs saturated + solid)
+    // rather than on hue. Renamed, not just re-valued, so nothing can quietly reintroduce the gold.
     public static readonly Color MoveBlue     = RGBA(56, 189, 248, 205);
-    public static readonly Color MoveYellow   = RGBA(251, 191, 36, 190);
+    public static readonly Color MoveDash     = RGBA(148, 221, 252, 180);
     public static readonly Color MoveWalkTint = RGBA(255, 255, 255, 15);
     public static readonly Color MoveDashTint = RGBA(255, 255, 255, 6);
     public static readonly Color MoveTick     = RGBA(120, 210, 250, 150);
@@ -339,6 +364,30 @@ public static class Util
     public static bool  Roll(float pct) => Rng.NextDouble() * 100.0 < pct;
     public static float RandRange(float a, float b) => a + (b - a) * (float)Rng.NextDouble();
     public static T     Choice<T>(System.Collections.Generic.IList<T> a) => a[Rng.Next(a.Count)];
+
+    // ── W1 TRUE INSTRUMENT: the PRESENTATION rng ────────────────────────────────────────
+    // Fx.cs — particles, muzzle flashes, floating text, and above all the SCREEN-SHAKE jitter —
+    // used to draw from the shared GAMEPLAY stream above. The shake angle in particular was
+    // rolled once per RENDERED FRAME for as long as a shake was decaying, so the dice a match
+    // rolled depended on HOW MANY FRAMES were drawn while the screen was wobbling. That made
+    // gameplay a function of the seed AND the frame rate AND the player's comfort settings:
+    // Fx.ShakeOn is a shipped accessibility toggle, so a player who turns screen shake off gets
+    // a different fight from the same seed, and the animation-speed setting shifts it again.
+    // The measurement harness only escaped it by pinning dt to 1/60 and AnimSpeed to 1x — i.e.
+    // by holding the frame rate still, which is not a property anyone should have to preserve.
+    //
+    // FxRng is a separate clock-seeded stream that Reseed() DELIBERATELY does not touch: a
+    // SEEDED DAILY board must replay identically, and nobody wants the sparks to replay too.
+    // Nothing here may ever be read by gameplay.
+    //
+    // SIGHTLINE_FXRNG=0 re-couples Fx to the gameplay stream — the pre-W1 behaviour, kept so
+    // SIGHTLINE_RNGFRAMETEST can demonstrate the defect on demand instead of by archaeology.
+    public static readonly bool FxOnGameplayStream =
+        System.Environment.GetEnvironmentVariable("SIGHTLINE_FXRNG") == "0";
+    public static Random FxRng = new();
+    public static int   FxRandInt(int aIncl, int bIncl) => FxOnGameplayStream ? RandInt(aIncl, bIncl) : FxRng.Next(aIncl, bIncl + 1);
+    public static float FxRandF() => FxOnGameplayStream ? RandF() : (float)FxRng.NextDouble();
+    public static float FxRandRange(float a, float b) => FxOnGameplayStream ? RandRange(a, b) : a + (b - a) * (float)FxRng.NextDouble();
 
     // FUL-9: seed-keyed avalanche hash (the Run.cs W5 finale-kit mixer, parameterised). For
     // campaign structure that must derive from MapSeed WITHOUT touching Util.Rng or a .NET

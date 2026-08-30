@@ -39,6 +39,7 @@ public static class Codex
         return new List<CodexCategory>
         {
             Category("FIELD CRAFT", FieldCraftEntries()),   // W11: the RULES tab, first — read this, win fights
+            Category("VERBS & KEYS", VerbEntries()),        // W5: every action-bar verb + its hotkey
             Enemies(),
             Category("FACTIONS",    FactionEntries()),      // C1 (VOICE): who you are actually fighting
             Classes(),
@@ -192,6 +193,25 @@ public static class Codex
         Add("SUPPRESSION", $"-{Combat.SuppressAim} AIM",
             $"Weight of fire pins a target: -{Combat.SuppressAim} aim, and a PINNED foe cannot dash. " +
             $"A sharpshooter's MARK is the mirror: the whole squad gains +{Combat.MarkAim} aim against the painted foe.");
+        // W5 (audit newplayer-7): SHOVE and the four UTILITY ITEMS appeared NOWHERE in this file.
+        // Their only explanation in the entire product was a 9-second just-in-time card that
+        // Game.UpdateFieldTips burns permanently the moment it shows ("one-shot: burned the moment
+        // it shows") — so a player who was mid-thought, alt-tabbed, or simply reading the board
+        // when it fired lost that verb's only teaching for the life of the profile. Both are
+        // once-per-turn positional verbs with real tactical weight. Numbers interpolated from the
+        // real constants, like every other row here.
+        Add("SHOVE", $"{Game.ShoveReach} TILES",
+            $"Push an adjacent hostile one tile straight back, from up to {Game.ShoveReach} tiles' reach. " +
+            $"It BREAKS the target's overwatch and can strip its cover — shove a foe out from behind a block " +
+            $"and the lane opens for the rest of the squad. Blocked (a wall, another body) it deals " +
+            $"{Combat.ShoveCollisionDamage} damage instead, plus {Combat.ShoveRammedDamage} to whatever it was " +
+            "rammed into. 1 action, does NOT end your turn, once per soldier per turn.");
+        Add("UTILITY ITEMS", "1 / MISSION",
+            "Every class carries one throwable with a SINGLE charge per mission — the decision is when, not " +
+            "whether. SMOKE (ranger) blocks line of sight and overwatch through the cloud for a few turns. " +
+            "FLASH (assault) disorients everyone in the blast: -aim, and no overwatch next turn. " +
+            "INCENDIARY (sharpshooter) sets a 3x3 fire field that denies ground, ignites foes and cooks barrels. " +
+            "BARRICADE (gunner) drops low cover on an empty tile — cover where the map gave you none.");
         // FUL-6: the two universal positioning verbs get a rules row (they had none), incl. the
         // reworked FIELD DRILLS drill effect so the boon's copy is anchored in the rules tab.
         Add("DRAG & VAULT", "FIELD CRAFT",
@@ -199,6 +219,37 @@ public static class Codex
             "toward you (haul a wounded mate out of a lane); VAULT leaps an adjacent cover block to the floor beyond. " +
             "Neither ends the turn. The FIELD DRILLS boon makes either DRILL the soldier: +1 tile of movement that turn.");
 
+        return e;
+    }
+
+    // ---------------- VERBS & KEYS (W5: the controls reference the game never had) ----------
+    // Generated from Hud.VerbTable + Hud.VerbHelp — i.e. from the SAME switch the action bar's
+    // hover tooltip reads — so a verb's help and its manual entry cannot drift apart. Before W5
+    // there was no controls or keybinding reference anywhere in the product: `grep -rE
+    // "CONTROLS|KEYBIND"` over src/ returned nothing, and the only route to a verb's explanation
+    // was discovering that action-bar buttons have mouse-hover help.
+    static List<CodexEntry> VerbEntries()
+    {
+        var e = new List<CodexEntry>();
+        foreach (var v in Hud.VerbTable)
+        {
+            string help = Hud.VerbHelp(v.Id);
+            if (string.IsNullOrWhiteSpace(help)) continue;
+            e.Add(new CodexEntry { Title = v.Label, Code = "[" + v.Key + "]", Desc = help });
+        }
+        // The non-verb bindings, which live nowhere else at all.
+        e.Add(new CodexEntry { Title = "SELECTING & MOVING", Code = "CLICK",
+            Desc = "Click a soldier to select; [Tab] cycles. Click inside the CYAN OUTLINE to move - the corner " +
+                   "ticks mark each reachable tile, and the DASHED outer ring costs both actions. Arrows / WASD " +
+                   "drive a keyboard cursor and [Space] acts on it. [Enter] ends the turn." });
+        e.Add(new CodexEntry { Title = "CAMERA", Code = "WHEEL",
+            Desc = "Mouse wheel zooms, middle-drag pans, [C] resets. AUTO-CAM (pause menu) follows the action on " +
+                   "its own." });
+        e.Add(new CodexEntry { Title = "THE REST", Code = "GLOBAL",
+            Desc = "[Esc] cancels an aim / targeting mode, or opens the pause menu. [K] opens this manual from " +
+                   "anywhere. [T] writes a custom tag on the selected soldier. [V] shows every verb while the " +
+                   "onboarding is staging the bar. [M] mutes, [F11] is fullscreen, [F2] cycles animation speed, " +
+                   "[Q] quits from the pause card or the main menu." });
         return e;
     }
 
@@ -447,6 +498,34 @@ public static class Codex
         // every bestiary blurb non-empty
         foreach (var b in Bestiary)
             if (string.IsNullOrWhiteSpace(b.Blurb)) fails.Add($"BESTIARY:{b.Cls} empty blurb");
+
+        // ── W5 (audit newplayer-7): EVERY ACTION-BAR VERB HAS A PERMANENT HOME ────────────────
+        // Three verbs were taught only by a 9-second just-in-time card that Game.UpdateFieldTips
+        // burns the instant it shows, and had no entry anywhere in this file — `shove` and `item`
+        // failed this assertion before W5. The Field Manual is the backstop for every verb the
+        // tips teach, so the manual, not the timing of a card, decides whether the player can
+        // ever learn a verb.
+        {
+            var verbTab = Category("VERBS & KEYS", VerbEntries());
+            var titles = new HashSet<string>();
+            foreach (var en in verbTab.Entries) titles.Add(en.Title);
+            foreach (var v in Hud.VerbTable)
+            {
+                if (string.IsNullOrWhiteSpace(Hud.VerbHelp(v.Id))) { fails.Add($"VERB:{v.Id} has no help text"); continue; }
+                if (!titles.Contains(v.Label)) fails.Add($"VERB:{v.Id} missing from VERBS & KEYS");
+                if (string.IsNullOrWhiteSpace(v.Key)) fails.Add($"VERB:{v.Id} has no hotkey");
+            }
+            // and the two rules rows the tips used to be the only home for
+            var craft = FieldCraftEntries();
+            bool hasShove = false, hasItems = false;
+            foreach (var en in craft)
+            {
+                if (en.Title == "SHOVE") hasShove = true;
+                if (en.Title == "UTILITY ITEMS") hasItems = true;
+            }
+            if (!hasShove) fails.Add("FIELD CRAFT missing SHOVE");
+            if (!hasItems) fails.Add("FIELD CRAFT missing UTILITY ITEMS");
+        }
 
         // W11: the HUD-facing accessors resolve for every archetype (enemy-ID tooltip, NEW CONTACT
         // banner, lose-card cause line all read these — an empty return would draw a blank ID).

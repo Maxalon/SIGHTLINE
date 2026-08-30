@@ -75,9 +75,20 @@ public partial class Game
         int objDelta = 0;
         if (Raylib.IsKeyPressed(KeyboardKey.Left) || Raylib.IsKeyPressed(KeyboardKey.A)) objDelta = -1;
         else if (Raylib.IsKeyPressed(KeyboardKey.Right) || Raylib.IsKeyPressed(KeyboardKey.D)) objDelta = 1;
+        // W9 THE REPAIR: the screen's own footer legend reads "+/- heat" (Hud.DrawSkirmishSetup) and
+        // this handler bound NEITHER. `grep -nE "KpAdd|KpSubtract|KeyboardKey.Equal|KeyboardKey.Minus"
+        // src/*.cs` found exactly two hits in the whole codebase, both in the INTRO's heat stepper —
+        // so a player who had just dialled difficulty with +/- on the intro found those keys dead one
+        // screen later, with the screen still telling them to use them. Binding is the better half of
+        // the fix than rewording: it makes the legend true AND makes the two heat dials consistent.
+        // Equal/Minus come along because "+/-" most naturally means the main-row keys on a laptop
+        // (neither was bound anywhere in the game, so nothing is displaced). Up/Down and W/S keep
+        // working — this only ADDS keys.
         int heatDelta = 0;
-        if (Raylib.IsKeyPressed(KeyboardKey.Down) || Raylib.IsKeyPressed(KeyboardKey.S)) heatDelta = -1;
-        else if (Raylib.IsKeyPressed(KeyboardKey.Up) || Raylib.IsKeyPressed(KeyboardKey.W)) heatDelta = 1;
+        if (Raylib.IsKeyPressed(KeyboardKey.Down) || Raylib.IsKeyPressed(KeyboardKey.S)
+            || Raylib.IsKeyPressed(KeyboardKey.KpSubtract) || Raylib.IsKeyPressed(KeyboardKey.Minus)) heatDelta = -1;
+        else if (Raylib.IsKeyPressed(KeyboardKey.Up) || Raylib.IsKeyPressed(KeyboardKey.W)
+            || Raylib.IsKeyPressed(KeyboardKey.KpAdd) || Raylib.IsKeyPressed(KeyboardKey.Equal)) heatDelta = 1;
 
         if (Raylib.IsMouseButtonPressed(MouseButton.Left))
         {
@@ -601,10 +612,45 @@ public partial class Game
             foreach (var u in Run.GenerateDraftPool())
                 foreach (char c in u.Name + u.Cls) { unchecked { pfp ^= c; pfp *= 16777619u; } }
             Console.WriteLine($"MODETEST daily-abandon draft-pool fingerprint: {pfp:x8}  (must differ across processes)");
+
+            // (7) W9 THE REPAIR — A SKIRMISH'S FORCE MUST RESPOND TO THE HEAT DIAL.
+            // THE GAP: HEATLADDERTEST and OPENERTEST both pin the heat ramp against CAMPAIGN missions
+            // (where n>=2 exists), and this test's own skirmish legs only assert PHASE ROUTING —
+            // Win/Lose rather than Barracks. Nothing anywhere asserted that a skirmish's fielded
+            // force reads _run.HeatLevel at all. The flywheel covers campaign and endless only, so no
+            // measured rung has ever included a skirmish. Result: SetupMission's `n <= 1` grace, which
+            // exists to protect a green CAMPAIGN opener, zeroed the entire numeric ladder in two of
+            // the four shipped modes — measured at 4 HOSTILES on both heat 0 and heat 8, with the red
+            // HEAT 8 chip the only difference on screen.
+            // Same seed + same arena on both rungs, so the ONLY variable is the dial.
+            NoPersist = true;
+            int ForceAt(int heat)
+            {
+                Util.Reseed(4242);
+                Sightline.Mission.ForcedLayout = 5;
+                BeginSkirmish(Objective.Eliminate, heat);
+                return Enemies.Count(e => e.Alive);
+            }
+            int fCold = ForceAt(0), fHot = ForceAt(Sightline.Heat.Max);
+            Sightline.Mission.ForcedLayout = -1;
+            if (fHot <= fCold) fails.Add($"skirmishHeatInert h0={fCold} h{Sightline.Heat.Max}={fHot}");
+            // and the CAMPAIGN opener keeps its grace — the whole reason the gate is on MODE, not on n
+            int CampaignM1(int heat)
+            {
+                Util.Reseed(4242);
+                Sightline.Mission.ForcedLayout = 5;
+                PendingHeat = heat;
+                StartMission(1);
+                PendingHeat = 0;
+                return Enemies.Count(e => e.Alive);
+            }
+            int cCold = CampaignM1(0), cHot = CampaignM1(Sightline.Heat.Max);
+            Sightline.Mission.ForcedLayout = -1;
+            if (cHot != cCold) fails.Add($"campaignM1GraceLost h0={cCold} h{Sightline.Heat.Max}={cHot}");
         }
         catch (Exception e) { return "MODETEST: FAIL (exception " + e.Message + ")"; }
         return fails.Count == 0
-            ? "MODETEST: PASS (daily seed deterministic; skirmish ends single-mission (Win/Lose, not Barracks); daily best round-trips; abandon is mode-aware + campaign-checkpoint-preserving)"
+            ? "MODETEST: PASS (daily seed deterministic; skirmish ends single-mission (Win/Lose, not Barracks); daily best round-trips; abandon is mode-aware + campaign-checkpoint-preserving; a skirmish's force answers the heat dial while the campaign's mission-1 grace is untouched)"
             : "MODETEST: FAIL (" + string.Join(",", fails) + ")";
     }
 }

@@ -241,6 +241,14 @@ public partial class Game
 
     int _turnCount;
 
+    /// W9 THE REPAIR — player turns taken since this RUN began, across every mission. Distinct from
+    /// _turnCount, which SetupMission resets to 1 at every mission start AND at the mid-mission
+    /// checkpoint redeploy. That reset is why the "never a RESULT: TIMEOUT" guarantee was false:
+    /// AutoStallCheck's cap was PER-MISSION and re-armable, while the harness budget it claims to sit
+    /// under (Program.cs autoCap) is a whole-campaign FRAME count. Reset only at a mode seam
+    /// (ResetModeState), never by SetupMission. Public so the harness can report it.
+    public int RunTurns { get; private set; }
+
     // campaign run
     Run _run = new();
     public Run RunState => _run;
@@ -595,7 +603,12 @@ public partial class Game
         // FUL-12: the opening CONCEALED state was the one core rule the onboarding never named —
         // a new player read the quiet board as "no threat" and walked into the first pod blind.
         "WELCOME, COMMANDER. The squad opens CONCEALED - the enemy pods ahead are dormant and blind to you. Position freely: your first attack from hiding is an AMBUSH (bonus aim + crit), so you choose where the fight starts.",
-        "Click a glowing tile to MOVE the selected soldier. Cover (the raised blocks) shields you from fire - end your move beside one.",
+        // W5 (audit newplayer-5): this used to point the player at "a glow". Wave V deliberately
+        // replaced the old flood-fill with a thin cyan CONTOUR plus corner ticks the code itself
+        // describes as ~0.6% of a tile's area — measured at a 5/255 modal inner lift, a ~2% luma
+        // change. The visual was right; the copy was never updated with it, so the very first
+        // sentence of instruction in the game pointed at a cue that had been reduced to a whisper.
+        "Click inside the CYAN OUTLINE to MOVE the selected soldier - the corner ticks mark each tile you can reach, and the DASHED outer ring costs both actions. Cover (the raised blocks) shields you from fire: end your move beside one.",
         "Now set OVERWATCH: press [2] (or the button). That soldier will fire on the first enemy that moves into its line of sight.",
         "Click a hostile to FIRE. A shot costs 1 action and does NOT end the turn - keep the other action to reposition (one shot per turn). Attacking from a side a foe has no cover on FLANKS it - far deadlier.",
         "That's the basics: move into cover, flank, overwatch, fire - then END TURN. Press [K] anytime for the FIELD MANUAL - every enemy, verb and rule lives there. Good hunting.",
@@ -615,10 +628,53 @@ public partial class Game
     };
     public string TutorialText => (TutStep >= 0 && TutStep < TutPrompts.Length) ? TutPrompts[TutStep] : null;
 
+    // ── W5 THE FIRST HOUR: the briefing goes FIRST on mission 1 ───────────────────────────────
+    // The defect (audit newplayer-1, pinned by SIGHTLINE_BRIEFTEST): on a FIRST-EVER campaign run
+    // the mission-1 briefing could not draw at all. `BriefAllowed` requires TutorialText == null,
+    // the strip was non-null from the frame SetupMission armed it, and `UpdateBriefing` destroys
+    // the card outright the moment Stats.CombatLog fills — which the strip's own FIRE lesson does.
+    // So the card HELD for the whole strip (never burning its 11 s clock) and was then killed by
+    // the first exchange, or by BriefHoldMax at 45 s. Measured before the fix: 0.00 s of 11 s.
+    //
+    // The repair is ORDERING, not content (DESIGN.md §1.1 caps the narrative frame: this makes an
+    // EXISTING card reachable, it does not write more of it). The board is not yet contested on
+    // turn 1, so the briefing is a genuine PRE-FIGHT beat: arm the strip PENDING, let the card
+    // play, open the strip the frame it retires. Any key or click still dismisses the card, so a
+    // player who wants to move immediately reaches the lesson in one input.
+    //
+    // THIS INVERTS A STATED PRIORITY AND IS RECORDED AS ONE: docs/DESIGN.md §1.2 is the amendment
+    // (§1.1 says the briefing yields to the teaching layers ABSOLUTELY; here, for mission 1 of a
+    // first-ever campaign only, teaching waits up to 11 s behind it). The never-simultaneous
+    // invariant is untouched — read §1.2's limits before widening this to any other mission.
+    bool _tutPending;
+    /// True while the mission-1 lesson strip is armed but yielding to the pre-fight briefing.
+    public bool TutPending => _tutPending;
+    /// Turn at which the FIRE lesson yields anyway. Its three siblings have had a patience
+    /// fallback for waves (CONCEAL 2, MOVE 3, OVERWATCH 6); FIRE was the one lesson whose only
+    /// exit was performing the verb, which is also the action that destroyed the briefing.
+    public const int TutFirePatience = 9;
+    /// Off-switch for the reordering (SIGHTLINE_BRIEFFIRST=0 restores the pre-W5 behaviour), so
+    /// BRIEFTEST is falsifiable without reverting the tree. Default ON.
+    static readonly bool BriefFirst = Environment.GetEnvironmentVariable("SIGHTLINE_BRIEFFIRST") != "0";
+
+    /// Harness seam (SIGHTLINE_FIRSTRUN=1, screenshot only). The NoPersist gate below is EXACTLY
+    /// what hid the W5 defect for ten programs: every SHOT/AUTOPLAY path sets NoPersist, so the
+    /// strip never armed and every mission-1 screenshot ever taken showed the briefing precisely
+    /// because the tutorial was not running. This override arms the strip under NoPersist so a
+    /// frame can show what a FIRST-EVER player actually sees. Disk stays untouched (CompleteTutorial
+    /// keeps its own !NoPersist gate), and it is inert unless the variable is set -> PAIRTEST-safe.
+    static readonly bool FirstRunShot = Environment.GetEnvironmentVariable("SIGHTLINE_FIRSTRUN") == "1";
+
     void StartTutorialMaybe()
     {
-        if (NoPersist || _run.Mission != 1 || Display.TutorialSeen) return;
-        TutStep = 0;
+        if (_run.Mission != 1) return;
+        if (NoPersist ? !FirstRunShot : Display.TutorialSeen) return;
+        // SetupMission calls this BEFORE BeginBriefing, so "will there be a card?" is not knowable
+        // here — arm PENDING and let UpdateTutorial open the strip on the first frame the card is
+        // gone. When no briefing composes (BriefLines stays null) that is the very next tick, so a
+        // non-campaign or briefing-less path is unchanged in everything but one frame of latency.
+        _tutPending = BriefFirst;
+        TutStep = BriefFirst ? -1 : 0;
         _tutMoved = _tutOver = _tutShot = _tutGrenade = _tutAbility = false;
         RevealedVerbs.Clear();
         ApplyReveal(TutReveal[0]);
@@ -628,6 +684,13 @@ public partial class Game
 
     void UpdateTutorial(float dt)
     {
+        if (_tutPending)
+        {
+            if (BriefLines != null) return;      // the pre-fight card still owns the slot
+            _tutPending = false;
+            TutStep = 0;
+            ApplyReveal(TutReveal[0]);
+        }
         if (TutStep < 0) return;
         switch (TutStep)
         {
@@ -643,7 +706,12 @@ public partial class Game
             // never arms a watch would otherwise park here below the reached-FIRE "seen" gate and
             // get the whole onboarding re-offered every future run.
             case TutStepOverwatch: if (_tutOver || _turnCount >= 6) AdvanceTutorial(); break;
-            case TutStepFire: if (_tutShot) AdvanceTutorial(); break;
+            // W5: the patience fallback the other three lessons already had. FIRE was the one step
+            // whose ONLY exit was performing the verb — and performing it wrote the combat-log
+            // entry that destroyed the briefing, so the action that ended the lesson was the same
+            // action that killed the card. A player who wins mission 1 on overwatch reactions
+            // alone (their soldier never takes an aimed shot) used to hold this card all mission.
+            case TutStepFire: if (_tutShot || (BriefFirst && _turnCount >= TutFirePatience)) AdvanceTutorial(); break;
             case TutStepDone: _tutDoneTimer -= dt; if (_tutDoneTimer <= 0) CompleteTutorial(); break;
         }
     }
@@ -662,6 +730,7 @@ public partial class Game
     public void ShowTutorialStep(int step)
     {
         TutStep = Math.Clamp(step, 0, TutPrompts.Length - 1);
+        _tutPending = false;   // W5: forcing a step IS opening the strip — drop the pre-fight arm
         if (TutStep == TutStepDone) _tutDoneTimer = 7f;
         RevealedVerbs.Clear();
         for (int i = 0; i <= TutStep && i < TutReveal.Length; i++) ApplyReveal(TutReveal[i]);
@@ -676,6 +745,7 @@ public partial class Game
     void CompleteTutorial()
     {
         TutStep = -1;
+        _tutPending = false;   // W5: a strip that never opened is still finished
         RevealedVerbs.Clear();      // staging ends with the lessons: the full bar is the graduation
         if (!NoPersist) Display.MarkTutorialSeen();
     }
@@ -700,7 +770,9 @@ public partial class Game
     {
         new Lesson { Code = "MOVE", Patience = 3,
             Reveal = new string[0],
-            Text = "TRAINING OP. Two recruits, four dormant targets, no consequences - nothing here touches your campaign. Select a soldier and click a glowing tile to MOVE. Move costs 1 of 2 actions; a far (dashed) tile costs both.",
+            // W5 (audit newplayer-5): same repair as the campaign strip's MOVE card — name the
+            // outline and the corner ticks the board actually draws, not a glow it does not.
+            Text = "TRAINING OP. Two recruits, four dormant targets, no consequences - nothing here touches your campaign. Select a soldier and click inside the CYAN OUTLINE to MOVE; the corner ticks mark each reachable tile. Move costs 1 of 2 actions; a tile in the DASHED outer ring costs both.",
             Done = g => g._tutMoved },
         new Lesson { Code = "COVER", Patience = 4,
             Reveal = new string[0],
@@ -833,8 +905,10 @@ public partial class Game
             if (Mode == GameMode.Training) return TrainStep >= 0 && TrainStep < TrainLessons.Length - 1;
             // Mission 1 only, and only while the callout strip is actually running. TutStepDone is
             // the wrap-up card ("that's the basics") — the bar is whole from there.
+            // W5: _tutPending counts. The strip is armed and about to open; without this the bar
+            // would draw WHOLE for the briefing's 11 s and then visibly collapse to one button.
             return Mode == GameMode.Campaign && _run != null && _run.Mission <= 1
-                   && TutStep >= 0 && TutStep < TutStepDone;
+                   && (_tutPending || (TutStep >= 0 && TutStep < TutStepDone));
         }
     }
 
@@ -1156,6 +1230,11 @@ public partial class Game
     // SetupMission after Mission.Build; null on every other objective.
     public Unit Hvt;
     public bool HasHvt => Objective == Objective.Decapitate && Hvt != null;
+    // W8: did THIS mission's HVT take DesignateHvt's statline buff, or was it exempt (an ELITE —
+    // i.e. the campaign finale's named boss, or the m3/m5 mid-boss)? Balance telemetry only; the
+    // harness reports the two populations separately so a mid-run Decapitate can never again be
+    // pooled with the capstone. Reset with Hvt in SetupMission.
+    public bool HvtBuffed;
     // DECAPITATE GUARDED HVT (W4): up to 2 bodyguards picked near the HVT. While any is alive within
     // Combat.HvtGuardRange of the HVT, the HVT takes reduced (never zero) damage — peel the guards or
     // pull the HVT out of the bubble to execute it. Transient (enemies aren't persisted). Recomputed
@@ -1525,6 +1604,11 @@ public partial class Game
         }
         // keyboard: Enter deploys when the draft is complete
         if (DraftReady && Raylib.IsKeyPressed(KeyboardKey.Enter)) ConfirmDraft();
+        // W5-FIX (review blocker 2): [R] re-rolls the pool. RE-ROLL POOL was the one control on
+        // this screen with NO keyboard route, which is why a layout that pushed it off the bottom
+        // made it unreachable rather than merely awkward. R is free in this phase (the draft reads
+        // only Esc and Enter) and is the same mnemonic RELOAD uses in the fight.
+        if (Raylib.IsKeyPressed(KeyboardKey.R)) TryRerollDraftPool();
     }
 
     /// True when exactly DraftCap soldiers and one boon are chosen (CONFIRM/Enter enabled).
@@ -1562,6 +1646,7 @@ public partial class Game
     /// and needs the RNG stream untouched for byte-stable shots/measurement.
     void ResetModeState()
     {
+        RunTurns = 0;   // W9: the run-scoped autopilot budget resets at the mode seam, and ONLY here
         Mode = GameMode.Campaign;
         DailyMode = false;
         DailyStamp = 0;
@@ -1582,9 +1667,12 @@ public partial class Game
         // at the mode seam too means a future second IsBoss spawn point can't silently turn
         // "once per sighting ceremony" into a stale carry-over across mode entries.
         _bossSighted = false;
+        // W5: the mission-1 strip's PENDING arm is per-run state too — a new mode entry must never
+        // inherit an arm from a run that ended before the briefing retired.
+        _tutPending = false;
         // FUL-12: the end-card meta payoff is per-RUN — a new mode entry must not inherit the
         // previous run's SALVAGE slab / HEAT UNLOCKED line / achievement roll.
-        EndSalvage = 0; EndHeatUnlocked = 0; EndAchievements.Clear();
+        EndSalvage = 0; EndReserve = 0; EndHeatUnlocked = 0; EndAchievements.Clear();
         // Harness affordance (screenshot only, mirrors the SIGHTLINE_HEAT pattern): pre-seed the
         // cause-of-death tally, e.g. SIGHTLINE_DEATHS=SNIPER:2,GRUNT:1 — so the lose-card line can
         // be framed without playing a full losing run. Inert when unset -> plain shots byte-stable.
@@ -1711,12 +1799,33 @@ public partial class Game
     /// exists). The intro heat panel shows it as a FIELD SUPPORT chip — the easing was invisible.
     /// 0 headless (streak never loads under NoPersist), so plain intro shots stay byte-stable.
     public int AssistPreview => PendingHeat > 0 ? 0 : Math.Min(Run.AssistMax, _metaLossStreak);
+
+    // ── W5 THE ON-RAMP (audit newplayer-4) ────────────────────────────────────────────────────
+    /// True when this profile has never finished a run. The intro uses it twice: it DEFAULTS the
+    /// difficulty dial to RECRUIT, and it changes level 0's hint so the rung below is named
+    /// instead of hidden behind an unlabelled "-".
+    ///
+    /// The game already built a proper beginner rung and then defaulted every first-time player
+    /// off it, with copy ("standard difficulty - the designed fight") that framed 0 as the floor.
+    /// The archived X2 ladder (n=40/rung, base a61ef42, docs/measurements/x2/) puts RECRUIT at
+    /// 75.0% run completion against heat 0's 57.5% — a 17.5-point gap, outside the +-6-8 error
+    /// bar. Roughly two in five first campaigns were ending in a loss the on-ramp exists to
+    /// prevent. This moves a DEFAULT, not a rung: every heat number in docs/ is untouched, and
+    /// the measurement harness sets heat explicitly (SIGHTLINE_HEAT / SIGHTLINE_BALANCE_HEAT)
+    /// under NoPersist, which returns from EnsureMetaLoaded before this can be read.
+    public bool FirstTimeProfile;
+
     void EnsureMetaLoaded()
     {
         if (_metaLoaded) return;
         _metaLoaded = true;
         if (NoPersist)
         {
+            // W5: SIGHTLINE_FIRSTRUN=1 (the same flag that arms the mission-1 strip under the
+            // harness) also simulates a NEVER-PLAYED profile here, so the intro's on-ramp default
+            // can be photographed headless. An explicit SIGHTLINE_HEAT below still overrides it.
+            // Inert unless the variable is set -> plain shots and PAIRTEST stay byte-stable.
+            if (FirstRunShot) { FirstTimeProfile = true; PendingHeat = Sightline.Heat.Recruit; }
             // Harness/screenshot affordance only: SIGHTLINE_HEAT lets the headless intro shot
             // preview the dialled-in level + its unlocked ceiling. No disk I/O; default 0 keeps
             // a plain shot byte-stable.
@@ -1735,6 +1844,13 @@ public partial class Game
             return;
         }
         UnlockedHeat = SaveGame.LoadMetaHeat();
+        var (metaRuns, _, _) = SaveGame.LoadRunTotals();
+        FirstTimeProfile = metaRuns == 0;
+        // W5 THE ON-RAMP: a profile that has never finished a run opens on RECRUIT. One-shot —
+        // EnsureMetaLoaded runs once per process (_metaLoaded), so every later stepper press is
+        // the player's and sticks. The Min() below still applies, and clamps to -1 at UnlockedHeat
+        // 0, so this can never dial a rung the player has not earned.
+        if (FirstTimeProfile) PendingHeat = Sightline.Heat.Recruit;
         PendingHeat = Math.Min(PendingHeat, UnlockedHeat);
         _metaLossStreak = SaveGame.LoadMetaLossStreak();
     }
@@ -1779,6 +1895,7 @@ public partial class Game
         SabotageBlown.Clear();
         Vip = null;
         Hvt = null;
+        HvtBuffed = false;
         CaptiveLocked = false;
         // Evac / Escort / Rescue all extract to the same top-right zone
         if (Objective == Objective.Evac || Objective == Objective.Escort || Objective == Objective.Rescue)
@@ -1848,7 +1965,24 @@ public partial class Game
         // W5: the grace ramps HEAT's escalation in — it must not also ramp the RECRUIT rung's
         // RELIEF out. Rung -1's whole point is that mission 1 is survivable, which is exactly the
         // mission the grace would zero. Gated on heat > 0 so heats 1-8 are bit-for-bit unchanged.
-        if (heat > 0)
+        // W9 THE REPAIR — the grace is gated on CAMPAIGN, which makes it the thing it always claimed
+        // to be. It exists to protect "a green 4-rookie squad meeting Heat before it has earned a
+        // single promotion, perk or boon" — a statement about the CAMPAIGN OPENER. But SKIRMISH and
+        // DAILY both enter through SetupMission(1) (Game.Modes.cs), so `n <= 1` was true for EVERY
+        // skirmish and EVERY daily, and the grace zeroed the entire numeric ladder in two of the four
+        // shipped modes. MEASURED: skirmish eliminate, seed 4242, arena 5 reads "4 SQUAD 4 HOSTILES"
+        // at heat 0 and "4 SQUAD 4 HOSTILES  HEAT 8" at heat 8 — the red chip was the only difference
+        // on screen — against a campaign control of 6 vs 10 hostiles on the same seed and arena. Only
+        // the qualitative flags (Ai.Tier at rung 6+, SHORT FUSE, EXPOSED, NO QUARTER's label)
+        // survived; every body, stat and damage point the dial promises was discarded.
+        // This is ROADMAP:1066's own recommendation, which it left as an owner decision. THE CALL,
+        // made: a SKIRMISH or DAILY player explicitly DIALLED the rung — the setup screen renders the
+        // ladder and its per-rung modifier text, the intro sells "pick the objective and the heat",
+        // and FEATURES.md line 13 sells "one fight with a chosen objective+heat". There is no green
+        // squad to protect and no campaign ahead to front-load anxiety into; there is only the fight
+        // they asked for. The grace stays exactly as it was for CAMPAIGN (and for ENDLESS, which
+        // opens at n==1 too and whose escalation is the wave ladder, not heat).
+        if (heat > 0 && Mode != GameMode.Skirmish)
         {
             if (n <= 1)      { heatEnemy = 0; heatStat = 0; heatDmg = 0; }
             else if (n == 2) { heatEnemy /= 2; heatStat /= 2; heatDmg /= 2; }   // W6c: +1 dmg graces to 0 on m1-2 like the other deltas
@@ -1919,6 +2053,9 @@ public partial class Game
         _anims.Clear();
         HitStop = 0;
         _turnCount = 1;
+        RunTurns++;   // W9: the mission's OPENING turn is a real turn — SetupMission seats it without
+                      // going through StartPlayerTurn, so the run-scoped counter has to book it here.
+                      // Deliberately an INCREMENT, not a reset: that is the entire point (see the field).
         Pressure = 0; _pressureWaves = 0;   // anti-turtle clock resets each mission (Combat.PressureAim cleared by BeginMission)
         _autoSig = -1; _autoStall = 0;
         Phase = Phase.PlayerTurn;
@@ -2041,9 +2178,18 @@ public partial class Game
 
         // balance telemetry (no-op unless Stats.Enabled): record the encounter we just built.
         // W2: Mission.AppliedLayout = the authored arena the guard actually ACCEPTED (-1 procedural).
+        // W1: + the two survivorship coordinates (campaign node kind, squad HP% at deploy).
+        // Both are pure reads of state that already exists; no draw, no mutation.
+        int hpNow = Players.Where(p => p.Alive && !p.IsVip).Sum(p => p.Hp);
+        int hpMax = Players.Where(p => p.Alive && !p.IsVip).Sum(p => p.MaxHp);
         Stats.BeginMission(n, Objective.ToString(), _run.HeatLevel,
                            Players.Count(p => p.Alive && !p.IsVip), Enemies.Count(e => e.Alive),
-                           Mission.AppliedLayout, Mission.AppliedDeploy);
+                           Mission.AppliedLayout, Mission.AppliedDeploy,
+                           Mode == GameMode.Campaign && _run.CurrentNode != null ? _run.CurrentNode.Kind.ToString() : Mode.ToString(),
+                           hpMax > 0 ? (int)Math.Round(100.0 * hpNow / hpMax) : 100,
+                           // W8: the DECAPITATE punch-through target's shape. -1 no HVT (any other
+                           // objective), 0 an ELITE that took no buff, 1 a rank-and-file that did.
+                           Hvt == null ? -1 : (HvtBuffed ? 1 : 0), Hvt == null ? 0 : Hvt.MaxHp);
         // FUL-7: the PATCH per-presence denominator (corpsman enters via backfill only)
         if (Players.Any(p => p.Alive && !p.IsVip && p.Ability == AbilityKind.Heal))
             Stats.RecordCorpsmanFielded();
@@ -2059,6 +2205,7 @@ public partial class Game
     void DesignateHvt()
     {
         var pool = Enemies.Where(e => e.Alive).ToList();
+        HvtBuffed = false;
         if (pool.Count == 0) { Hvt = null; return; }
         bool IsSpecial(Unit e) => e.Cls == "TURRET" || e.Cls == "MEDIC" || e.Cls == "SAPPER"
                                || e.Cls == "SHIELD" || e.Cls == "DRONE" || e.Cls == "MORTAR";
@@ -2071,11 +2218,16 @@ public partial class Game
         // it normally. EXCEPTION: an ELITE (the WARLORD on the boss node, now a Decapitate) is
         // ALREADY a tuned boss — double-buffing it would re-create the stat-check wall we're
         // removing, so the ELITE keeps its own stats and only takes the HVT marker/name.
-        if (Hvt.Cls != "ELITE")
+        // W8: the three magnitudes now live on Combat (HvtHpBonusBase/PerMission/AimBonus) so a
+        // measured round can pin them; the defaults 6 / 1 / 6 are this line's original arithmetic
+        // exactly. HvtBuffed records which branch ran — the balance harness needs it to tell a
+        // BUFFED mid-run Decapitate apart from an EXEMPT one (see Stats.BeginMission).
+        HvtBuffed = Hvt.Cls != "ELITE";
+        if (HvtBuffed)
         {
-            int bonus = 6 + _run.Mission;      // scales gently with mission depth
+            int bonus = Combat.HvtHpBonus(_run.Mission);   // scales with mission depth
             Hvt.MaxHp += bonus; Hvt.Hp += bonus;
-            Hvt.Aim = Math.Min(85, Hvt.Aim + 6);
+            Hvt.Aim = Math.Min(85, Hvt.Aim + Combat.HvtAimBonus);
             Hvt.Name = "HVT-" + Hvt.Name;
         }
 
@@ -2241,7 +2393,9 @@ public partial class Game
         // W11: mark "seen" only if the player actually reached the FIRE lesson — someone who never
         // got past MOVE hasn't been onboarded; let the tutorial re-offer next run. (FUL-12: the
         // named TutStepFire constant keeps this gate on the same SEMANTIC step across renumbers.)
-        if (TutStep >= TutStepFire) CompleteTutorial(); else TutStep = -1;
+        // W5: a strip still PENDING behind the briefing never opened, so it can never have
+        // reached FIRE — clear the arm and let the onboarding re-offer next run.
+        if (TutStep >= TutStepFire) CompleteTutorial(); else { TutStep = -1; _tutPending = false; }
         // W5 SCARS: capture the just-played mission's faction BEFORE EndMission clears it, so
         // DebriefSurvivors can brand a VENDETTA grudge on a survived near-death (the faction that
         // nearly killed them). None on a mixed-force mission -> no grudge stamped (inert).
@@ -2393,6 +2547,24 @@ public partial class Game
         }
     }
 
+    // ── W5 THE DOORS (audit wildcard-3) ───────────────────────────────────────────────────────
+    /// Set when the player has confirmed QUIT TO DESKTOP; Program's frame loop breaks on it.
+    /// The quit path is deliberately INERT with respect to persistence: it writes nothing, deletes
+    /// nothing, and touches neither save.json nor meta.json. The campaign checkpoint is written at
+    /// MISSION START (SetupMission), so quitting mid-mission resumes that mission from its start —
+    /// which is exactly what the confirm text says out loud. SIGHTLINE_QUITTEST pins all of it.
+    public bool QuitRequested;
+    /// One-click-arms, two-clicks-quits. Disarmed by any other pause interaction and by closing the
+    /// pause card, so a stray click can never take the window down mid-fight.
+    public bool QuitArmed;
+
+    /// The QUIT verb. Arms on the first press, quits on the second.
+    public void RequestQuit()
+    {
+        if (!QuitArmed) { QuitArmed = true; Audio.Play("select"); return; }
+        QuitRequested = true;
+    }
+
     // run-over screen text (set by LoseRun so the cause reads accurately)
     public string LoseTitle = "RUN OVER";
     public string LoseReason = "";
@@ -2402,6 +2574,12 @@ public partial class Game
     // UnlockHeatOnWin / TryAchievement / AwardMetaEndless), so every harness end card stays
     // byte-stable (fields sit at defaults there); reset per mode entry in ResetModeState.
     public int EndSalvage;                                  // salvage banked at run end (0 = no slab)
+    // W5 THE DOORS: how many survivors NEWLY joined the persistent reserve at run end. Measured as
+    // the DELTA of SaveGame.VeteranCount() across EnshrineVeterans — never as vets.Count — so the
+    // end card structurally cannot over-claim: a survivor who was already a reserve record does not
+    // "join" twice, and the MERCENARY CLAUSE run (which enshrines nobody) reads 0 without a special
+    // case. SIGHTLINE_METATEST pins that identity.
+    public int EndReserve;
     public int EndHeatUnlocked;                             // freshly-opened heat rung (0 = no line)
     public readonly List<string> EndAchievements = new();   // display names of NEW unlocks this run-end
 
@@ -2423,7 +2601,9 @@ public partial class Game
         // APEX W2: tutorial completion fallback (mirror of EnterBarracks) — a first-mission loss
         // still counts as "the onboarding ran"; don't re-show it forever. NoPersist-gated inside.
         // W11: same reached-the-FIRE-lesson gate as EnterBarracks — an early washout re-offers.
-        if (TutStep >= TutStepFire) CompleteTutorial(); else TutStep = -1;
+        // W5: a strip still PENDING behind the briefing never opened, so it can never have
+        // reached FIRE — clear the arm and let the onboarding re-offer next run.
+        if (TutStep >= TutStepFire) CompleteTutorial(); else { TutStep = -1; _tutPending = false; }
         Combat.EndRun();   // TEMPO wave 4: clear every mission-scoped combat static (+ run boons) on run end
         LoseTitle = title;
         LoseReason = reason;
@@ -2498,7 +2678,12 @@ public partial class Game
         // (promoted-at-least-once) gate keeps green rookies out so the reserve stays a roster of legends.
         var vets = _run.Squad.Where(u => u.Alive && !u.IsVip && u.Rank >= 1).ToList();
         // FUL-10 MRC: cheap recalls now, no pipeline later — this run's survivors never enshrine.
+        // W5: measure the reserve DELTA around the enshrine (before LGD's RemoveVeterans below can
+        // touch it) so the end card's "N JOIN THE RESERVE" line is the count that actually landed
+        // on disk — a name already in the reserve updates its record and does not re-join.
+        int vetsBefore = SaveGame.VeteranCount();
         if (vets.Count > 0 && _run.Contract != Contract.MercenaryClause) SaveGame.EnshrineVeterans(vets);
+        EndReserve = Math.Max(0, SaveGame.VeteranCount() - vetsBefore);
         // FUL-10 LGD: a KIA whose name matches a reserve record ERASES it — veterans are mortal
         // across runs, not just priced. Name-keyed exactly like EnshrineVeterans' dedupe.
         if (_run.Contract == Contract.LivingLegends && _run.Fallen.Count > 0)
@@ -2988,7 +3173,20 @@ public partial class Game
     void PurgeAnimsFor(Unit d)
     {
         _anims.RemoveAll(a => (a is MoveStepAnim m && m.Unit == d)
-                           || (a is ShotAnim s && s.D == d && a != ActiveAnim));
+                           || (a is ShotAnim s && s.D == d && a != ActiveAnim)
+                           // W9 THE REPAIR: ...and shots BY the felled unit. The purge only ever
+                           // covered the VICTIM's side, so a soldier downed while its OWN shot sat in
+                           // the queue behind the blow that felled it still fired: full damage, a
+                           // credited kill, Stats bucketed under the downed soldier's class, and the
+                           // takedown stinger — off a body at Hp 0.
+                           // W9 REVIEW FIX to this comment: it used to claim the ActiveAnim exemption
+                           // means "the blow in flight still finishes". TRUE for the target clause
+                           // above; FALSE here — ShotAnim.Update self-cancels for a dead/downed
+                           // ATTACKER, so an exempted active shot by the felled unit is cancelled one
+                           // frame later anyway. The exemption is kept for symmetry and to avoid
+                           // mutating the list under the active anim, but on this clause it is inert.
+                           // A body does not shoot, in flight or not — which is the intended rule.
+                           || (a is ShotAnim s2 && s2.A == d && a != ActiveAnim));
     }
 
     /// FUL-7: does this lethal event open a bleed-out window instead of killing? Soldiers only
@@ -3191,7 +3389,11 @@ public partial class Game
         if (Phase != Phase.PlayerTurn || d.Team != Team.Enemy) return;
         if (ActiveAnim is not ShotAnim sa) return;          // only a direct shot refunds (not a grenade/DoT)
         var killer = sa.A;
-        if (sa.D != d || killer == null || killer.Team != Team.Player || killer.IsVip || !killer.Alive) return;
+        // W9: `|| killer.Downed` — a soldier at Hp 0 must not be handed ActionsLeft = 1 (which would
+        // make CanAct true again for a body). QA saw no escalation in 214 campaigns, but the
+        // guard read only !Alive while Downed is exactly the state a felled soldier is IN.
+        if (sa.D != d || killer == null || killer.Team != Team.Player || killer.IsVip
+            || !killer.Alive || killer.Downed) return;
         // Require a GENUINE FLANK (not merely any exposed target): the refund rewards
         // *maneuvering to a flank*, not finishing an already-open foe. This de-snowballs the
         // ambush+refund chain a balance audit flagged (an ambush-snap-kill on an exposed-but-
@@ -3560,8 +3762,14 @@ public partial class Game
         //            Tab cycle · Enter end turn · Space act · WASD/arrows cursor
         // — no other key appears twice in one context. The other contexts (Intro, skirmish setup,
         // codex, barracks/shop, tag editor) are each internally unique and are reached only when
-        // UpdatePlayer is not, so a letter may safely mean different things across them. Free
-        // letters remaining, for whoever binds next: I J O Q U Z.
+        // UpdatePlayer is not, so a letter may safely mean different things across them.
+        //
+        // W5, and read this before you trust the line that used to follow: this list and
+        // CLAUDE.md's disagreed with each other AND with the binary (audit wildcard-4 — N/P/U/V
+        // were advertised as free and were bound). DERIVE the set instead:
+        //     grep -ohE 'KeyboardKey\.[A-Z][a-z0-9]*' src/*.cs | sort -u
+        // W5 bound Q (QUIT TO DESKTOP — the pause card and the main menu; not an in-mission verb,
+        // so it does not collide with UpdatePlayer's set above). Free letters as of W5: I J O Z.
         if (Raylib.IsKeyPressed(KeyboardKey.M)) Audio.ToggleMute();
         if (!AutoPlay && Raylib.IsKeyPressed(KeyboardKey.F11)) Display.ToggleFullscreen();
         if (!AutoPlay && Raylib.IsKeyPressed(KeyboardKey.F2)) CycleAnimSpeed();   // fast-forward anim pacing (persisted; also in the pause menu)
@@ -3600,7 +3808,7 @@ public partial class Game
             if (Raylib.IsKeyPressed(KeyboardKey.Escape))
             {
                 if (AimMode || GrenadeMode || ItemMode || ShoveMode || MarkMode || GrappleMode || PinMode || DragMode || VaultMode) { AimMode = false; SnapShot = false; GrenadeMode = false; ItemMode = false; ShoveMode = false; MarkMode = false; GrappleMode = false; PinMode = false; DragMode = false; VaultMode = false; }
-                else Paused = !Paused;
+                else { Paused = !Paused; QuitArmed = false; }   // W5: closing the card disarms QUIT
             }
             if (Paused) { HandlePauseMenu(); return; }
             HandleCamera();
@@ -3698,11 +3906,8 @@ public partial class Game
                     {
                         if (AutoPlay)
                         {
-                            // Prefer an Event node when reachable so autoplay/balance always exercise
-                            // the "?" path (and continuously verify the event mission-lockstep fix).
                             var nn = _run.NextNodes();
-                            var ev = nn.FirstOrDefault(x => x.Kind == NodeKind.Event);
-                            ChooseNode((ev ?? nn[0]).Id);
+                            ChooseNode(PickAutoNode(nn).Id);
                         }
                         else HandleNodeClick();
                     }
@@ -3908,7 +4113,40 @@ public partial class Game
     // so the match always resolves. Test-only; never runs in normal play.
     int _autoSig = -1, _autoStall;
     int _smartConcealTurns;  // SmartStep: player turns spent concealed (hard anti-TIMEOUT cap)
-    const int AutoMaxTurns = 50;  // hard autopilot match cap: force-end a dragging match as a LOSS
+    const int AutoMaxTurns = 50;  // hard autopilot MISSION cap: force-end a dragging match as a LOSS
+    /// W9 THE REPAIR — the RUN-scoped autopilot cap, and the one that actually makes "never a
+    /// RESULT: TIMEOUT" true. AutoMaxTurns above is per-MISSION and is re-armed by SetupMission's
+    /// `_turnCount = 1`, INCLUDING the mid-mission checkpoint redeploy — so a campaign could spend
+    /// 21 turns on mission 5, wipe on mission 6, take the checkpoint, and be handed a fresh 50-turn
+    /// allowance, while Program.cs's autoCap = 20000 frames buys the WHOLE campaign about 40 turns.
+    /// The backstop was roughly 5x too loose to bound what it claimed to bound. QA measured 2 TIMEOUTs
+    /// in 214 seeded campaigns (~1%); W9 reproduced both (seeds 2001 and 3001) and, on a 20-seed
+    /// census of its own, saw 2 of 20 — a rate qa-sweep only PRINTED and never failed on, and which
+    /// BalanceBatch scores as a LOSS, right-censoring exactly the longest campaigns.
+    /// CALIBRATED FROM A MEASURED CENSUS of this tree's own autoplay, 20 seeded campaigns, RESULT
+    /// lines carrying `turns=`: every run finished, the longest took 75 run-turns / 18,992 frames and
+    /// the next longest 38, and the per-turn frame cost falls as a campaign lengthens (a long campaign
+    /// is long because it is ATTRITED, and a small squad takes cheap turns — the 75-turn outlier ran
+    /// 253 frames/turn against 400-680 on short full-squad runs).
+    /// 150 is 2x the longest campaign measured. That headroom is the point: firing this cap on a
+    /// LEGITIMATE run would score it a LOSS and put the same downward bias into the ladder that the
+    /// old 20,000-frame budget did. It must only ever catch something genuinely stuck.
+    public const int AutoMaxRunTurns = 150;
+    /// The harness's whole-campaign FRAME budget (Program.cs's autoplay loop and BalanceBatch both
+    /// read it). It lives HERE, next to the turn cap it must dominate, because the two numbers are a
+    /// PAIR: if the frame budget can expire before AutoMaxRunTurns is reached, RESULT: TIMEOUT is
+    /// reachable again. STALLTEST pins AutoMaxRunTurns * AutoFramesPerTurn <= AutoFrameCap so a future
+    /// edit to either number fails loudly instead of quietly re-opening the hole.
+    public const int AutoFrameCap = 120000;
+    /// The per-turn frame ceiling for that arithmetic. W9 REVIEW FIX: this was 600, chosen from the
+    /// LONG-CAMPAIGN regime (253 frames/turn at 75 turns) — but the measured SPREAD runs to 681
+    /// (Program.cs), so a campaign that somehow sustained its worst observed rate for 150 turns would
+    /// have hit the frame cap at ~147 turns, three turns before the turn cap. "TIMEOUT is unreachable"
+    /// would then have been EMPIRICAL rather than STRUCTURAL — and that matters more now the sweep
+    /// hard-fails on a TIMEOUT, because a rare false positive becomes a merge block. Set to the
+    /// measured WORST case instead: 150 x 700 = 105,000 <= the 120,000 budget, with no regime
+    /// assumption left in the argument.
+    public const int AutoFramesPerTurn = 700;
 
     // ---------------- activation pods (4.3 awareness tiers) ----------------
     // Baselines; Heat "SHORT FUSE"/"RELENTLESS" shrink first-contact ranges by 1 (read off the
@@ -4185,7 +4423,7 @@ public partial class Game
 
     void UpdatePlayer()
     {
-        if (AutoPlay) { if (SmartPlay) SmartStep(); else AutoStep(); return; }
+        if (AutoPlay) { AutoIdleGuard(); if (SmartPlay) SmartStep(); else AutoStep(); return; }
 
         CheckPodActivation();
         if (_anims.Count > 0) return;   // a pod just activated — let the scatter play
@@ -4670,6 +4908,9 @@ public partial class Game
     void HandlePauseMenu()
     {
         var m = Raylib.GetMousePosition();
+        // W5 THE DOORS: [Q] is the pause card's quit shortcut (arms, then quits — same two-step as
+        // the button). Q was verified unbound in every context before being claimed.
+        if (Raylib.IsKeyPressed(KeyboardKey.Q)) { RequestQuit(); return; }
         // A2 mix faders: a drag in progress owns the mouse until it is released, and only THEN
         // does the setting hit disk (Display.SetVol is live, CommitVol writes display.json).
         if (_volDrag >= 0)
@@ -4687,6 +4928,8 @@ public partial class Game
                 Display.SetVol(i, VolFrac(Hud.PauseVol[i], m.X));
                 return;
             }
+        if (Raylib.CheckCollisionPointRec(m, Hud.PauseQuit)) { RequestQuit(); return; }
+        QuitArmed = false;   // any other pause control disarms the confirm
         if (Raylib.CheckCollisionPointRec(m, Hud.PauseResume)) Paused = false;
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseFullscreen)) Display.ToggleFullscreen();
         else if (Raylib.CheckCollisionPointRec(m, Hud.PauseWindow)) Display.CycleSize();
@@ -4714,7 +4957,8 @@ public partial class Game
     void AbandonRun()
     {
         Paused = false;
-        if (TutStep >= 0) CompleteTutorial();   // mirrors LoseRun: the onboarding ran
+        QuitArmed = false;
+        if (TutStep >= 0 || _tutPending) CompleteTutorial();   // mirrors LoseRun: the onboarding ran
         if (Mode == GameMode.Training) { EndTraining(false); return; }   // T1: abandoning a drill is just leaving it
         if (Mode == GameMode.Skirmish) { EndSkirmish(false); return; }
         if (Mode == GameMode.Endless) { EndEndless(); return; }
@@ -6030,6 +6274,7 @@ public partial class Game
     void StartPlayerTurn()
     {
         _turnCount++;
+        RunTurns++;      // W9: run-scoped, never reset by SetupMission — see the field
         Phase = Phase.PlayerTurn;
         // W10 INTEL CACHE: the pickup window closes after CacheTurns player turns — the routing
         // detour is a bet against this clock, not free money whenever the fight happens to drift by.
@@ -6435,6 +6680,26 @@ public partial class Game
         if (_aiStage == AiStage.ActAfterMove)
         {
             var e = _aiUnits[_aiIdx];
+            // W2 THE OPPONENT ACTS — the idle detector's baseline. EVERY branch in the chain below
+            // changes ActionsLeft (the shot and the reload decrement it; the other ten zero it), so
+            // "ActionsLeft > 0 AND unchanged" is an exact structural test for "no branch fired" —
+            // the auditor's definition of an idle act — without a `fired` flag threaded through all
+            // twelve branch bodies.
+            int actionsBefore = e.ActionsLeft, ammoBefore = e.Ammo;
+            // W2 REVIEW FIX — the BLEED-OUT WINDOW, and it is the whole shape of this wave's number.
+            // When every surviving soldier is on the floor, Ai.Plan takes its `players.Count == 0`
+            // early return (Ai.cs:78, after the FUL-7 LAST LIGHT downed filter): there is nothing to
+            // target and nobody who can act. EVERY hostile then idles, by design — and that window
+            // supplied 86% of the raw idle count this wave first published as though it were combat
+            // paralysis. It is not a defect and it must not be "fixed": a squad bleeding out is the
+            // game's most dramatic beat, and filling it with hostiles dashing and barking HUNKERED
+            // turn after turn is a feel regression the price measurement is STRUCTURALLY BLIND to
+            // (no soldier can act, so run completion cannot move). So the repair below — and its
+            // pops and SFX — are gated on there being somebody left standing to act against, and
+            // the invariant this wave actually enforces is "no CONTESTED act-opportunity ends
+            // unspent". The all-downed acts stay silent, exactly as they were pre-wave.
+            int standing = 0;
+            foreach (var p in Players) if (p.Alive && !p.Downed) standing++;
             if (e.Alive)
             {
                 if (_aiPlan.SiegeCharge != null && e.HasSiege && e.ChargeTurns == 0 && e.ActionsLeft > 0)
@@ -6559,15 +6824,107 @@ public partial class Game
                     Fx.PopText(e.Pos + new Vector2(0, -30), "OVERWATCH", Pal.Accent, 16f);
                     Audio.Play("over");
                 }
+                else if (_aiPlan.Reload && e.ActionsLeft > 0 && e.Ammo < e.Weapon.Clip)
+                {
+                    // W2 THE OPPONENT ACTS — the enemy AMMO ECONOMY, decided rather than defaulted
+                    // into (docs/DESIGN.md §5.1). Hostiles used to be handed exactly one clip at spawn
+                    // with no reload verb anywhere, so "dry" was PERMANENT. Measured on this tree over
+                    // CONTESTED act-opportunities only (at least one soldier standing — an all-downed
+                    // board idles every hostile by design): 9.1% of acts at n=16 campaigns and 3.3% at
+                    // n=32 were made on an empty weapon, and ~61% of those produced nothing in both
+                    // frames. That is the LARGER half of contested enemy paralysis. A dry gun is
+                    // now RELOADED, on the player's own terms — one action, same clip refill as
+                    // Game.DoReload — which makes running a hostile dry a real tempo window the player
+                    // can bait and push into, instead of a unit that silently stops existing.
+                    e.Ammo = e.Weapon.Clip;
+                    e.ActionsLeft = Math.Max(0, e.ActionsLeft - 1);
+                    Fx.PopText(e.Pos + new Vector2(0, -30), "RELOADING", Pal.TxtDim, 16f);
+                    Audio.Play("reload");
+                    Enqueue(new WaitAnim(0.2f), Team.Enemy);
+                    // a spare action after the mag change digs in behind it (never a free extra shot —
+                    // choosing what to do with a fresh clip is W3's question, not this wave's).
+                    if (e.ActionsLeft > 0) { e.Hunkered = true; e.ActionsLeft = 0; }
+                }
                 else if (_aiPlan.Hunker && e.ActionsLeft > 0)
                 {
                     e.Hunkered = true; e.ActionsLeft = 0;
+                    // W2: the enemy hunker was the one branch that fired in COMPLETE silence — no pop,
+                    // no sound, only a small diamond in the status row. It reads identically to the
+                    // paralysis this wave removes, so give it the same beat the player's own HUNKER has.
+                    // `standing > 0`: never during the bleed-out window (see the note at the top of
+                    // this stage) — 99.7% of the review's measured HUNKERED chorus was there.
+                    if (AiIdleFix && standing > 0)
+                    {
+                        Fx.PopText(e.Pos + new Vector2(0, -30), "HUNKERED", Pal.Foe, 16f);
+                        Audio.Play("hunker");
+                    }
+                }
+                // W2 TERMINAL GUARANTEE: no branch fired and the unit still holds an action. Every
+                // gate above is a plan-vs-board disagreement (the planned target died or slid out of
+                // CanTarget, a PINNED clamp shortened the move out of range, a Disoriented unit's
+                // watch was refused, ...). Ai.Plan's own terminal else covers the planner's side; this
+                // covers the EXEC's, so the invariant holds structurally rather than by enumerating
+                // the ways a plan can go stale. Reload if the gun is empty (the same economy
+                // decision), else dig in — both are real, readable, mechanically live actions
+                // (HUNKERED is -25 to hit against it and no crit).
+                //
+                // THE INVARIANT IS "no act-opportunity ends with NO BRANCH HAVING FIRED", and the
+                // review corrected an earlier comment here that claimed the stronger "never ends
+                // unspent". It does not: measured 30 of 963 acts (3.1%) end holding exactly one
+                // action, via the SHOT branch decrementing 2 -> 1 and TryEnemyReposition then
+                // declining at `curExp < 2.0f`. That is a covered shooter deciding to hold its
+                // ground and it is the intended behaviour — but it is a spent branch, not a spent
+                // action, and the two are not the same claim.
+                else if (AiIdleFix && standing > 0 && e.ActionsLeft > 0 && e.ActionsLeft == actionsBefore)
+                {
+                    if (e.Ammo <= 0 && e.Weapon.Clip > 0)
+                    {
+                        e.Ammo = e.Weapon.Clip;
+                        Fx.PopText(e.Pos + new Vector2(0, -30), "RELOADING", Pal.TxtDim, 16f);
+                        Audio.Play("reload");
+                    }
+                    else
+                    {
+                        Fx.PopText(e.Pos + new Vector2(0, -30), "HUNKERED", Pal.Foe, 16f);
+                        Audio.Play("hunker");
+                    }
+                    e.Hunkered = true;
+                    e.ActionsLeft = 0;
                 }
             }
+            // W2 AIIDLETEST probe (harness-only; ALWAYS null in normal play, so this costs one null
+            // check per enemy act). Fires once per act-opportunity with the plan that was executed and
+            // the unit's pre-chain action/ammo counts, so the harness can classify idle / dry / no-target
+            // without the game itself carrying a counter.
+            if (ActProbe != null && e.Alive) ActProbe(e, _aiPlan, actionsBefore, ammoBefore, standing);
             _aiIdx++;
             _aiStage = AiStage.PickNext;
         }
     }
+
+    // ── W2 THE OPPONENT ACTS ────────────────────────────────────────────────────────────────
+    /// SIGHTLINE_AIIDLEFIX — the wave's single dial. `=0` restores the pre-W2 opponent EXACTLY
+    /// (the planner ignores its own ammo, the no-shot fallback has no terminal else, and a dry
+    /// hostile never reloads); proven identical by an R0diag pair at h0/b0 and h4/b10 whose
+    /// balance JSONs diff empty outside the `harness` block.
+    ///
+    /// SHIPPED ON, and argued on the CONTESTED rate — not on the 32.4% unsplit figure this wave
+    /// first published, which was 86% bleed-out window (see the note in ActAfterMove). Pre-wave a
+    /// contested act-opportunity idled 6.2% of the time at n=16 campaigns and 3.8% at n=32; it is
+    /// now 0.0% in both. Price, over 800 CRN-paired campaigns (5 heat rungs x 4 disjoint slot sets
+    /// x 2 policies, base commit 4784803): run completion 25.2% -> 23.8% pooled, McNemar p=0.451
+    /// on 25/19 discordant worlds; mission win-rate 78.94% -> 78.56% over ~1400 missions; soldier
+    /// deaths per mission 1.340 -> 1.340. See docs/measurements/w2/.
+    ///
+    /// Mutable so SIGHTLINE_AIIDLETEST can run BOTH legs in one process.
+    public static bool AiIdleFix = true;
+
+    /// SIGHTLINE_AIIDLETEST probe (harness-only; ALWAYS null in normal play). Called once per
+    /// enemy act-opportunity, immediately after the ActAfterMove branch chain:
+    /// (unit, the plan it executed, ActionsLeft before the chain, Ammo before the chain, and the
+    /// STANDING (alive, not downed) soldier count — without which an idle count cannot be read,
+    /// because an all-downed board idles every hostile by design and supplied 86% of the raw rate).
+    public static Action<Unit, EnemyPlan, int, int, int> ActProbe;
 
     // Enqueue the move steps for the just-planned enemy (shared by the AutoPlay fast path and
     // the post-telegraph path so the move timing/cost accounting is identical either way).
@@ -7241,6 +7598,10 @@ public partial class Game
         if (choiceIdx < 0 || choiceIdx >= _activeEvent.Choices.Length) choiceIdx = AutoEventChoice();
         var ch = _activeEvent.Choices[choiceIdx];
         if (!ChoiceLegal(ch)) return;   // ignore clicks on illegal choices
+        // W9 REVIEW FIX: snapshot the roster BEFORE the outcomes so the reconcile below can tell an
+        // event that actually moved a body from one that did not (see the comment at the call).
+        var rosterBefore = new System.Collections.Generic.HashSet<Unit>(_run.Squad);
+        int deployedBefore = _run.Deployed.Count;
         Stats.RecordEvent(_activeEvent.Id, choiceIdx);   // FUL-1: BY EVENT-CHOICE telemetry (no-op unless Enabled)
         string line = EventCatalog.Apply(_run, ch.Outcome, _eventNode);
         if (ch.HasSecond)
@@ -7250,6 +7611,32 @@ public partial class Game
         }
         if (ch.HasThird) line = line + "; " + EventCatalog.Apply(_run, ch.Outcome3, _eventNode);   // FUL-10
         _run.Report.Insert(0, $"EVENT: {_activeEvent.Title} -- {line}");
+        // W9 THE REPAIR — RECONCILE THE DEPLOYMENT. A field event can add or remove a body, and
+        // Run.DebriefSurvivors' AutoDeploy() has ALREADY run by the time this resolves, so the
+        // roster and the deployment disagreed in BOTH directions:
+        //   * a free RECRUIT (DEFECTOR) arrived un-benched, so the barracks header printed
+        //     "DEPLOY 5/4 (squad at capacity)" over five DEPLOYED soldiers and the next mission
+        //     fielded FIVE where Run.DeployCapFor(2) == 4. HandleBenchClick refuses to un-bench past
+        //     the cap, so the event path was the only way over it. A cap is a cap.
+        //   * a RELEASE (THE RESERVE CALLS) freed a DEPLOYED slot and never handed it to the healthy
+        //     benched soldier, so the squad fielded 3/4 with a 6/6-HP body sitting out while the
+        //     header printed its "cap grows over the campaign - field up to it" hint.
+        //
+        // W9 REVIEW FIX — GATED, and NOT AutoDeploy. The first cut called _run.AutoDeploy()
+        // UNCONDITIONALLY here, and the comment claimed it was "a no-op for every event that does not
+        // touch the roster". It is not: AutoDeploy re-derives Benched across the WHOLE roster from a
+        // fixed rule, so it silently discarded the player's own barracks swap on EVERY event —
+        // measured on an Intel-only outcome, MANUAL VEGA[B],KRESS[D],NOX[D],BISHOP[D],LYNX[D] came
+        // back VEGA[D],...,NOX[B],... . Reachable in normal play (HandleBenchClick and ChooseNode sit
+        // in the same barracks branch), and ResolveEvent is the CHECKPOINT site, so the clobbered
+        // deployment is what gets persisted.
+        // So: fire only when the roster ACTUALLY moved, and reconcile by exception —
+        // Run.ReconcileDeployment benches only what the event added, fills only slots the event
+        // freed, trims only over the cap, and leaves every deliberate choice alone. No RNG draw.
+        bool rosterMoved = _run.Squad.Count != rosterBefore.Count
+                           || _run.Squad.Exists(u => !rosterBefore.Contains(u))
+                           || _run.Deployed.Count != deployedBefore;
+        if (rosterMoved) _run.ReconcileDeployment(rosterBefore);
         Audio.Play("turn");
         _activeEvent = null; _eventNode = null;
         // The event node is now CurrentNode (MapPos already advanced), so NextNodes() offers its
@@ -7419,6 +7806,13 @@ public partial class Game
                           Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.OverlayBtn9))
                          || Raylib.IsKeyPressed(KeyboardKey.U);
             if (audio) { BeginAudition(); return; }
+
+            // W5 THE DOORS: QUIT from the main menu. No confirm here — nothing is in flight on the
+            // title screen, and a campaign in progress is already on disk at its last mission start.
+            bool quit = (Raylib.IsMouseButtonPressed(MouseButton.Left) &&
+                         Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.IntroQuitBtn))
+                        || Raylib.IsKeyPressed(KeyboardKey.Q);
+            if (quit) { QuitRequested = true; return; }
         }
 
         // W1 mode-seam: end-card MAIN MENU (OverlayBtn2, button or Esc) — back to the intro without
@@ -7427,6 +7821,18 @@ public partial class Game
         // daily-forced arena) into whatever is picked next.
         if (Phase == Phase.Win || Phase == Phase.Lose)
         {
+            // W5 THE DOORS (audit newplayer-2): the end card banks salvage and never named the
+            // room that spends it. WAR ROOM [W] is the third plate; BACK from there lands on the
+            // main menu, which is where MAIN MENU would have gone anyway.
+            bool war = (Raylib.IsMouseButtonPressed(MouseButton.Left) &&
+                        Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.EndWarRoomBtn))
+                       || Raylib.IsKeyPressed(KeyboardKey.W);
+            if (war)
+            {
+                Hud.EndWarRoomBtn = new Rectangle(0, 0, 0, 0);   // no stale rect into the next screen
+                BeginWarRoom();
+                return;
+            }
             bool menu = (Raylib.IsMouseButtonPressed(MouseButton.Left) &&
                          Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), Hud.OverlayBtn2))
                         || Raylib.IsKeyPressed(KeyboardKey.Escape);
@@ -7439,6 +7845,7 @@ public partial class Game
                 // same OverlayBtn2, so a stale end-card rect could otherwise turn a second click
                 // at this position into an accidental CONTINUE before the next Draw republishes it.
                 Hud.OverlayBtn2 = new Rectangle(0, 0, 0, 0);
+                Hud.EndWarRoomBtn = new Rectangle(0, 0, 0, 0);
                 Phase = Phase.Intro;
                 Audio.Play("select");
                 return;
@@ -7481,7 +7888,20 @@ public partial class Game
         };
     }
 
-    public void Draw()
+    // W5 THE FIRST HOUR: the frame is drawn in TWO passes so `Display.RenderFrame` can build the
+    // BLOOM from the board alone and NOT from the type (audit visual-2 — a saturated UI plate was
+    // flooding its own label; TRAINING OP measured 2.19:1 with post-FX on against 8.67:1 with it
+    // off). The seam is atmosphere-vs-chrome, not board-vs-menu: the overlay screens' full-screen
+    // animated backdrop rides in the bloom-source pass and keeps its glow, while every plate,
+    // glyph and number is painted on top of it afterwards, contributing nothing to the bright
+    // pass. Both passes still land in the SAME render target, so brightness, gamma, the biome
+    // grade and the vignette stay uniform across the whole frame — an earlier version of this
+    // wave drew the chrome after the composite and stranded the accessibility settings on the
+    // board (Display.RenderFrame's header records that, and why). Nothing here changes WHAT is
+    // drawn or in what order — only which pass it lands in.
+
+    /// Pass 1 — the bloom source. Board, death-flash, overlay-screen atmosphere.
+    public void DrawBoardLayer()
     {
         Raylib.ClearBackground(Pal.Bg);
 
@@ -7493,6 +7913,12 @@ public partial class Game
         if (DeathFlash > 0)
             Raylib.DrawRectangle(0, 0, Cfg.ScreenW, Cfg.ScreenH, Raylib.Fade(Pal.Foe, DeathFlash * 0.35f));
 
-        Hud.Draw(this);
+        Hud.DrawBackdropLayer(this);
     }
+
+    /// Pass 2 — the chrome. Every plate, label and number, drawn after the bright pass has run.
+    public void DrawHudLayer() => Hud.Draw(this);
+
+    /// Single-pass draw, kept for callers that don't split (and as the definition of the order).
+    public void Draw() { DrawBoardLayer(); DrawHudLayer(); }
 }

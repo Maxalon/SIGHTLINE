@@ -24,6 +24,11 @@ namespace Sightline;
 // ═══════════════════════════════════════════════════════════════════════════════════════════
 public static partial class Hud
 {
+    /// Off-switch for W5-FIX blocker 1: puts the audition backdrop back in the CHROME pass, i.e.
+    /// after BuildBloom, which is the shipped defect. BACKDROPTEST goes red with it set.
+    static readonly bool AudBackdropInChrome =
+        Environment.GetEnvironmentVariable("SIGHTLINE_AUDBACKDROP") == "1";
+
     // ---- published hit rects (read by Game.HandleAudition) ----
     public static Rectangle AudBack, AudMute, AudMusicSlider, AudMusicAmb, AudMusicComb;
     public static readonly Rectangle[] AudVol = new Rectangle[4];
@@ -42,7 +47,14 @@ public static partial class Hud
     {
         // the screen's own clock — no GetTime read (CLAUDE.md: use the Fx pattern)
         float t = g.AudClock;
-        DrawTacticalBackdrop(t, Pal.Accent, 0f);
+        // W5-FIX (review blocker 1): the backdrop is NOT drawn here any more. It moved into
+        // Hud.DrawBackdropLayer (the bloom-source pass, still off g.AudClock) — painting it from
+        // this, the CHROME pass, put it AFTER BuildBloom, so the composite added the live board's
+        // glow on top of an opaque screen. The screen is reachable from the pause card with the
+        // board fully lit behind it, and post-FX ships ON.
+        // SIGHTLINE_AUDBACKDROP=1 restores the defect so SIGHTLINE_BACKDROPTEST is falsifiable
+        // without reverting the tree.
+        if (AudBackdropInChrome) DrawTacticalBackdrop(t, Pal.Accent, 0f);
         AudCueBtns.Clear(); AudBurstBtns.Clear(); AudStackBtns.Clear();
 
         int W = Cfg.ScreenW, H = Cfg.ScreenH;

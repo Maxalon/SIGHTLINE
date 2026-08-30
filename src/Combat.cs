@@ -39,6 +39,14 @@ public struct ShotOdds
     // stays pure (the streak bonus is applied only inside Resolve's effHit, never here).
     public int StreakBonus;  // S4-C: hidden +aim this soldier has banked from consecutive misses (0..MaxStreakBonus)
     public int GrazeFloor;   // S2-A: guaranteed damage a near-miss (graze) would still deal to THIS target (>=1)
+    // W9 THE REPAIR — the band this shot actually deals to THIS defender, i.e. DmgMin/DmgMax after
+    // the defender's flat reduction (armor / Hardened / Bulwark / spec armor / FORTIFIED / the
+    // DECAPITATE guarded-HVT shave), floored at 1 exactly like Resolve. DmgMin/DmgMax above stay the
+    // RAW attacker band ON PURPOSE — ExpectedDamage and Game's threat-card tie-break both want the raw
+    // numbers and apply reduction themselves — so this is an ADDED pair, not a mutation.
+    // The HUD prints THESE. Against a guarded HVT the tooltip used to advertise "DMG 3-5" for a shot
+    // that deals 1-2, with its own "GRAZE 1" row directly beneath disagreeing by 3x.
+    public int DmgMinEff, DmgMaxEff;
 }
 
 /// The resolved outcome of a shot.
@@ -156,6 +164,23 @@ public static class Combat
     public const int HvtGuardRange  = 2;   // Chebyshev: a guard within 2 tiles protects the HVT
     public const int HvtGuardReduce = 3;   // damage subtracted per hit while guarded (floored to >=1)
     public static bool HvtGuardReducePending = false;   // set when a reduction fires; drained by Game.Update
+
+    // ── W8 THE HALF WALL — the DECAPITATE HVT statline buff, made pinnable ────────────────────
+    // Game.DesignateHvt turns the toughest rank-and-file body into the punch-through target with
+    // `+ (HvtHpBonusBase + HvtHpBonusPerMission * mission)` HP and `+ HvtAimBonus` aim, on top of
+    // the +3 HP every hostile already carries from Mission.HostileToughness. The ELITE exemption
+    // (a named boss is already tuned) means the CAMPAIGN FINALE never takes this — only the
+    // mid-run Decapitates do, which is the asymmetry wave W8 measured (mid-run 46.0% n=163 vs the
+    // boss node's 69.7% n=479, L2 archive). These three are the levers that asymmetry can be
+    // priced with; the DEFAULTS 6 / 1 / 6 reproduce the pre-W8 behaviour EXACTLY (identity), and
+    // Program.cs exposes them as SIGHTLINE_HVTBUFF / SIGHTLINE_HVTDEPTH / SIGHTLINE_HVTAIM.
+    public static int HvtHpBonusBase       = 6;   // flat HP added to a non-ELITE HVT
+    public static int HvtHpBonusPerMission = 1;   // HP added per mission of depth (may be negative)
+    public static int HvtAimBonus          = 6;   // aim points added (clamped to 85 as before)
+
+    /// The HP surcharge a non-ELITE HVT takes at this mission depth. Floored at 0 so a negative
+    /// depth coefficient can flatten the buff but never make the HVT weaker than its own archetype.
+    public static int HvtHpBonus(int mission) => Math.Max(0, HvtHpBonusBase + HvtHpBonusPerMission * mission);
 
     // ──────────────────────────────────────────────────────────────────────────────────────────
     // MISSION-STATIC LIFECYCLE (PROGRAM TEMPO wave 4). The five per-mission combat statics above
@@ -276,7 +301,7 @@ public static class Combat
         // a strict superset of the range/state-gated aim perks (CloseQuarters/Marksman) and dominated picks
         // (34 vs ~2-4). As a FLANK reward it's now a positional perk that rewards out-positioning — a real
         // build choice, not the biggest always-on number. (flanked already accounts for seesOver.)
-        if (a.HasPerk(Perk.LockOn) && flanked) hit += Unit.PerkAim;
+        hit += LockOnAim(a, flanked);   // W9: via the shared predicate — the tooltip badge reads the SAME one
         if (a.HasPerk(Perk.CloseQuarters) && dist <= Unit.CloseRange) hit += Unit.PerkAim;
         if (a.HasPerk(Perk.Marksman) && dist >= Unit.LongRange) hit += Unit.PerkAim;
         // SIEGEBREAKER (anti-turtle): +aim vs a HUNKERED target — claws back part of the -25 hunker
@@ -448,7 +473,11 @@ public static class Combat
             //    (exactly Resolve's graze branch). FragileFloor only ever CAPS damage, so it can't
             //    lower this guaranteed minimum.
             StreakBonus = steadying,
-            GrazeFloor = Math.Max(1, HardenedReduce(d, a.Weapon.DmgMin, crit: false)),
+            // telegraph:false — ComputeOdds is a READ (the HUD calls it every frame on hover, and
+            // Game.ComputeThreat calls it W*H*foes times per rebuild). See HardenedReduce.
+            GrazeFloor = Math.Max(1, HardenedReduce(d, a.Weapon.DmgMin, crit: false, telegraph: false)),
+            DmgMinEff  = Math.Max(1, HardenedReduce(d, a.Weapon.DmgMin, crit: false, telegraph: false)),
+            DmgMaxEff  = Math.Max(1, HardenedReduce(d, a.Weapon.DmgMax, crit: false, telegraph: false)),
         };
     }
 
@@ -524,7 +553,16 @@ public static class Combat
     ///     durability curve, no stance required; distinct from Hardened's always-on/crit-weighted cut).
     /// ALWAYS floored at 1, so the guaranteed-damage floor still holds: every hit deals >= 1 no matter
     /// how much armor/perk reduction stacks. With no armor and no perks this is a pass-through (dmg).
-    public static int HardenedReduce(Unit d, int dmg, bool crit)
+    /// `telegraph` (W9 THE REPAIR): whether this call may ARM the one-shot "GUARDED" float below.
+    /// It must be TRUE only where damage is actually being DEALT (Resolve's hit/graze branches, the
+    /// grenade blast) and FALSE at every READ — ComputeOdds' GrazeFloor/DmgMinEff/DmgMaxEff and
+    /// ExpectedDamage. Without it ComputeOdds was NOT side-effect free: merely HOVERING the guarded
+    /// HVT armed HvtGuardReducePending, and Game.Update drained it into a "GUARDED" pop EVERY FRAME
+    /// (QA measured 181 pops over 181 frames of aiming with zero shots fired), against a comment at the
+    /// field that promises "a single float when a hit was actually softened (not spammy)". Worse, a
+    /// read with side effects breaks the purity ExpectedDamage's contract and Game.ComputeThreat
+    /// (which calls ComputeOdds W*H*foes times per rebuild) both assume.
+    public static int HardenedReduce(Unit d, int dmg, bool crit, bool telegraph = true)
     {
         int reduce = d.Armor;                                   // persistent shop armor (flat, always)
         if (d.HasPerk(Perk.Hardened))
@@ -549,7 +587,7 @@ public static class Combat
         {
             int before = Math.Max(1, dmg - reduce);
             int after  = Math.Max(1, before - HvtGuardReduce);
-            if (after < before) HvtGuardReducePending = true;
+            if (after < before && telegraph) HvtGuardReducePending = true;
             return after;
         }
         if (reduce <= 0) return dmg;                            // nothing to subtract: pass through
@@ -560,6 +598,18 @@ public static class Combat
     // These encode the GATING for two perks whose EFFECT is a Game-side action (an action refund /
     // skipping the overwatch loop) rather than a combat-odds read, so the condition can still be
     // unit-tested in COMBATTEST without duplicating the Game logic.
+
+    /// LOCK-ON's aim contribution for attacker `a` against a target whose flanked state is `flanked`:
+    /// +Unit.PerkAim only when the perk is held AND the target is FLANKED. W9 THE REPAIR made this a
+    /// SINGLE SOURCE OF TRUTH (the KillRefundsAction pattern above) because the rule was written
+    /// TWICE — once here in ComputeOdds and once as an independent copy in Hud.DrawTooltip's badge
+    /// list. UNDERTOW W5 de-supersetted the perk (CoverLevel==0 -> flanked) and updated only the math,
+    /// so for four waves the badge asserted "LOCK-ON +15 aim" on ANY uncovered target — the modal
+    /// targeting state on these maps — for a shot whose hit% moved by 0. DrawTooltip's own header
+    /// promises "each badge's condition mirrors ComputeOdds EXACTLY"; now it cannot drift, because
+    /// there is only one condition. COMBATTEST pins it; TRUTHTEST pins the badge against it.
+    public static int LockOnAim(Unit a, bool flanked)
+        => a != null && a.HasPerk(Perk.LockOn) && flanked ? Unit.PerkAim : 0;
 
     /// MOMENTUM (perk Adrenal, reworked): a KILL on the player's own turn refunds the killer +1
     /// action — capped at once per soldier per turn (Game enforces the per-turn cap via the same
@@ -693,8 +743,9 @@ public static class Combat
         double pHit = effHit / 100.0;
         double pGraze = Math.Max(0.0, grazeTop - effHit) / 100.0;
 
-        // graze leg: minimum damage through armor, floored at 1, never a crit
-        double grazeDmg = Math.Max(1, HardenedReduce(d, o.DmgMin, crit: false));
+        // graze leg: minimum damage through armor, floored at 1, never a crit.
+        // telegraph:false — ExpectedDamage is a pure READ (see HardenedReduce).
+        double grazeDmg = Math.Max(1, HardenedReduce(d, o.DmgMin, crit: false, telegraph: false));
 
         // clean-hit leg: the uniform band, each roll independently crit-rolled
         int lo = Math.Min(o.DmgMin, o.DmgMax), hi = Math.Max(o.DmgMin, o.DmgMax);
@@ -702,9 +753,9 @@ public static class Combat
         double sum = 0;
         for (int raw = lo; raw <= hi; raw++)
         {
-            double plain = Math.Max(1, HardenedReduce(d, raw, crit: false));
+            double plain = Math.Max(1, HardenedReduce(d, raw, crit: false, telegraph: false));
             int critRaw = (int)MathF.Ceiling(raw * 1.5f) + 1;
-            double critted = Math.Max(1, HardenedReduce(d, critRaw, crit: true));
+            double critted = Math.Max(1, HardenedReduce(d, critRaw, crit: true, telegraph: false));
             sum += (1.0 - pCrit) * plain + pCrit * critted;
         }
         double hitDmg = sum / Math.Max(1, hi - lo + 1);
@@ -1715,8 +1766,164 @@ public static class Combat
             if (gSm.HasLineOfSight(4, 4, 6, 6, true)) fails.Add("supercoverSmokeSealed");
         }
 
+        // ---- W9 THE REPAIR: LOCK-ON's SINGLE predicate (the tooltip badge reads this same function) ----
+        {
+            var lo = new Unit { Aim = 65, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player };
+            lo.Perks.Add(Perk.LockOn);
+            var noLo = new Unit { Aim = 65, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player };
+            if (LockOnAim(lo, flanked: false) != 0) fails.Add("lockOnAimExposedZero");
+            if (LockOnAim(lo, flanked: true) != Unit.PerkAim) fails.Add("lockOnAimFlanked");
+            if (LockOnAim(noLo, flanked: true) != 0) fails.Add("lockOnAimNoPerk");
+            if (LockOnAim(null, flanked: true) != 0) fails.Add("lockOnAimNull");
+        }
+
         return fails.Count == 0
             ? "COMBATTEST: PASS (cover A-E + high-ground + tier-2 + drone/shield + boss-arc-flag + ambush + graze + streak + perk-balance + build-perks + vantage/breaker/siegebreaker + fragile-floor + armor + bulwark-plating + momentum + outrunner + vanguard + crossfire + factions + faction-prep + spec-forks + bipod/suppressor + field-drills/shock-doctrine + supercover-corner gates all hold)"
             : "COMBATTEST: FAIL (" + string.Join(",", fails) + ")";
+    }
+
+    // =====================================================================================
+    // W9 THE REPAIR — SIGHTLINE_TRUTHTEST: "what the UI says is what the dice do."
+    //
+    // THE GAP THIS CLOSES. The project treats a lying readout as a first-class defect (R2 fixed
+    // the incoming-fire forecast; Q1 D3 folded STEADYING into the displayed HIT%), and yet three
+    // display defects survived 51 self-tests at once, for one structural reason: every existing
+    // test reads the MATH and no test reads the DISPLAYED QUANTITY.
+    //   * COMBATTEST pins the graze floor and THREATTEST ground-truths ExpectedDamage — both of
+    //     which are RIGHT — while nothing ever read ShotOdds.DmgMin/DmgMax as the number the
+    //     tooltip prints. It printed the RAW weapon band: 3-5 for a shot dealing 1-2 to a guarded
+    //     HVT, with its own "GRAZE 1" row disagreeing by 3x directly beneath it.
+    //   * COMBATTEST pins LOCK-ON's math (lockOnExposedNoOp, above) — but the BADGE was a second,
+    //     independent copy of the rule inside Hud.DrawTooltip, and no test executes any HUD
+    //     drawing code. That copy was four waves stale.
+    //   * Nothing asserted ComputeOdds is SIDE-EFFECT FREE, and PAIRTEST structurally cannot see
+    //     it: it compares two runs of the SAME code, so a deterministic defect is invisible.
+    // So this test ground-truths the displayed numbers against real rolled outcomes, and pins the
+    // read/write split on the one static ComputeOdds could touch.
+    // =====================================================================================
+    /// Returns "" when every leg holds, else a comma-joined fail list. W9 REVIEW FIX: this half is
+    /// the MATH/PURITY half. It is composed with Game.TooltipTruthFails — which reads what the HUD
+    /// ACTUALLY PAINTS — into the single SIGHTLINE_TRUTHTEST line. Neither half is sufficient alone:
+    /// this one proves the effective band and the shared LockOn predicate are RIGHT, and the UI half
+    /// proves the tooltip is the thing that reads them.
+    public static string TruthFails()
+    {
+        var fails = new System.Collections.Generic.List<string>();
+        var savedFaction = MissionFaction; var savedPrep = PrepFaction;
+        bool savedPending = HvtGuardReducePending;
+        try
+        {
+            MissionFaction = Faction.None; PrepFaction = Faction.None;
+            RunBoons.Clear();
+            var grid = new Grid();
+            Util.Reseed(90210);   // rolled ground truth must be reproducible
+
+            Unit MakeAtk() => new Unit { Aim = 75, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 8, Y = 5, Hp = 6, MaxHp = 6, Alive = true };
+            Unit MakeFoe() => new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy,  X = 5, Y = 5, Hp = 40, MaxHp = 40, Alive = true };
+
+            // ---- (1) the DMG row BRACKETS what Resolve actually deals — plain foe AND guarded HVT ----
+            // Rolls real shots and checks every NON-CRIT clean hit lands inside [DmgMinEff, DmgMaxEff],
+            // the exact pair Hud.DrawTooltip prints, and that the band is TIGHT (both ends observed).
+            foreach (bool guarded in new[] { false, true })
+            {
+                var a = MakeAtk(); var d = MakeFoe();
+                d.HvtGuarded = guarded;
+                var o = ComputeOdds(grid, a, d);
+                int lo = int.MaxValue, hi = int.MinValue, n = 0;
+                for (int i = 0; i < 40000; i++)
+                {
+                    a.ConsecutiveMisses = 0;
+                    d.Hp = d.MaxHp;                       // never let it die out from under the roll
+                    var r = Resolve(grid, a, d);
+                    if (!r.Hit || r.Graze || r.Crit) continue;
+                    n++;
+                    if (r.Damage < lo) lo = r.Damage;
+                    if (r.Damage > hi) hi = r.Damage;
+                }
+                string tag = guarded ? "Guarded" : "Plain";
+                if (n < 500) { fails.Add("truthNoSample" + tag); continue; }
+                if (lo < o.DmgMinEff || hi > o.DmgMaxEff) fails.Add("truthDmgRowOverstates" + tag);
+                if (lo != o.DmgMinEff || hi != o.DmgMaxEff) fails.Add("truthDmgRowLoose" + tag);
+                // the GRAZE row beneath it is computed from the same defender: they must agree
+                if (o.GrazeFloor != o.DmgMinEff) fails.Add("truthGrazeDisagrees" + tag);
+            }
+
+            // ---- (2) reduction must actually MOVE the displayed band (else (1) proves nothing) ----
+            {
+                var a = MakeAtk(); var plain = MakeFoe(); var guard = MakeFoe();
+                guard.HvtGuarded = true;
+                var op = ComputeOdds(grid, a, plain);
+                var og = ComputeOdds(grid, a, guard);
+                if (op.DmgMin != a.Weapon.DmgMin || op.DmgMax != a.Weapon.DmgMax)
+                    fails.Add("truthRawBandMutated");            // ExpectedDamage and the threat card's
+                if (og.DmgMin != a.Weapon.DmgMin || og.DmgMax != a.Weapon.DmgMax)
+                    fails.Add("truthRawBandMutatedGuarded");     // tie-break both want the band RAW
+                if (og.DmgMinEff >= op.DmgMinEff || og.DmgMaxEff >= op.DmgMaxEff)
+                    fails.Add("truthGuardNotShownInBand");       // this is THE regression
+                if (og.DmgMinEff < 1 || og.DmgMaxEff < 1) fails.Add("truthEffBandBelowFloor");
+                // flat shop armor is the same rule reached by another route
+                var armored = MakeFoe(); armored.Armor = 2;
+                var oa = ComputeOdds(grid, a, armored);
+                if (oa.DmgMinEff != Math.Max(1, op.DmgMinEff - 2) || oa.DmgMaxEff != Math.Max(1, op.DmgMaxEff - 2))
+                    fails.Add("truthArmorNotShownInBand");
+            }
+
+            // ---- (3) ComputeOdds is SIDE-EFFECT FREE; Resolve is the one that telegraphs ----
+            {
+                var a = MakeAtk(); var d = MakeFoe(); d.HvtGuarded = true;
+                HvtGuardReducePending = false;
+                for (int i = 0; i < 60; i++) ComputeOdds(grid, a, d);      // 60 frames of pure hover
+                if (HvtGuardReducePending) fails.Add("truthComputeOddsArmsTelegraph");
+                ExpectedDamage(d, ComputeOdds(grid, a, d));
+                if (HvtGuardReducePending) fails.Add("truthExpectedDamageArmsTelegraph");
+                // ...and the telegraph still fires when damage was really softened
+                bool armed = false;
+                for (int i = 0; i < 400 && !armed; i++)
+                {
+                    d.Hp = d.MaxHp; a.ConsecutiveMisses = 0;
+                    var r = Resolve(grid, a, d);
+                    if (r.Hit) armed = HvtGuardReducePending;
+                }
+                if (!armed) fails.Add("truthResolveLostTelegraph");
+                // an UNGUARDED defender never arms it, whatever the caller
+                HvtGuardReducePending = false;
+                var plain = MakeFoe();
+                for (int i = 0; i < 200; i++) { plain.Hp = plain.MaxHp; Resolve(grid, a, plain); }
+                if (HvtGuardReducePending) fails.Add("truthUnguardedArmsTelegraph");
+            }
+
+            // ---- (4) the LOCK-ON badge is the SAME predicate as the hit% (no second copy) ----
+            {
+                // Flanked geometry: the defender HAS cover, just not on the side we shoot from.
+                var g2 = new Grid();
+                g2.Tiles[4, 5] = TileType.HighCover;                       // cover on its -x side
+                var a = new Unit { Aim = 65, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 8, Y = 5, Alive = true };
+                var open = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 9, Y = 9, Hp = 20, MaxHp = 20, Alive = true };
+                var flankd = new Unit { Aim = 60, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Enemy, X = 5, Y = 5, Hp = 20, MaxHp = 20, Alive = true };
+                var oOpen = ComputeOdds(g2, a, open);
+                var oFlank = ComputeOdds(g2, a, flankd);
+                if (oOpen.CoverLevel != 0 || oOpen.Flanked) fails.Add("truthOpenSetup");
+                if (!oFlank.Flanked) fails.Add("truthFlankSetup");
+                var lockOn = new Unit { Aim = 65, Weapon = Weapon.Make(WeaponKind.Rifle), Team = Team.Player, X = 8, Y = 5, Alive = true };
+                lockOn.Perks.Add(Perk.LockOn);
+                // the BADGE the tooltip draws is exactly `Combat.LockOnAim(a, o.Flanked) > 0`
+                int badgeOpen = LockOnAim(lockOn, oOpen.Flanked);
+                int badgeFlank = LockOnAim(lockOn, oFlank.Flanked);
+                // ...and the MATH delta is the difference the perk makes to the displayed hit%
+                int mathOpen = ComputeOdds(g2, lockOn, open).HitChance - oOpen.HitChance;
+                int mathFlank = ComputeOdds(g2, lockOn, flankd).HitChance - oFlank.HitChance;
+                if (badgeOpen != mathOpen) fails.Add("truthLockOnBadgeLiesOpen");   // was: badge +15, math 0
+                if (badgeFlank != mathFlank) fails.Add("truthLockOnBadgeLiesFlank");
+                if (mathFlank != Unit.PerkAim) fails.Add("truthLockOnFlankNoBonus");
+            }
+
+            return string.Join(",", fails);
+        }
+        catch (Exception e) { return "mathException:" + e.GetType().Name + ":" + e.Message; }
+        finally
+        {
+            MissionFaction = savedFaction; PrepFaction = savedPrep;
+            HvtGuardReducePending = savedPending;
+        }
     }
 }

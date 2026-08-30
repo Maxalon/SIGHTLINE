@@ -111,29 +111,28 @@ Adding another OFL font means one new entry in the FONTS section of
 Nothing else in the shipped build is third-party: all art, audio, shaders and map content
 are generated in-engine (CLAUDE.md, "Art policy").
 
-### The repo's own licence — **OPEN OWNER DECISION**
+### The repo's own licence — **DECIDED (PROGRAM CROSSCUT, 2026-08-29)**
 
-There is **no root `LICENSE` file**, and F1 deliberately did not add one: choosing how the
-owner's own code is licensed is the owner's call, not an agent's. The status quo is safe —
-an unlicensed private repo defaults to all-rights-reserved — so this blocks nothing until
-the code is published or the game is distributed to someone else.
+There is now a root **`LICENSE`**: explicit **all rights reserved**, with a note recording why.
 
-The three realistic options:
+The decision was made on the reversibility argument F1 itself framed, not on taste. Of the three
+options below, all-rights-reserved is the only one that is **one-way reversible**: it can become
+MIT (or PolyForm, or anything) in a single commit at any future moment, whereas source once
+published under MIT stays MIT for every copy already taken. It costs nothing and forecloses
+nothing, and unlike silence it is **unambiguous to a recipient of a build**.
 
 | Option | What it means | Good if |
 |---|---|---|
-| **All rights reserved** (status quo, or an explicit proprietary `LICENSE`) | Nobody may copy, modify or redistribute the source. Shipping compiled builds is unaffected. | The game may be sold, or the owner simply has not decided. Costs nothing and forecloses nothing. |
+| **All rights reserved** (CHOSEN) | Nobody may copy, modify or redistribute the source. Shipping compiled builds is unaffected. | The game may be sold, or the owner has not decided. Costs nothing and forecloses nothing. |
 | **MIT** | Anyone may do anything, including sell it, with attribution. | The goal is portfolio visibility and maximum reuse. |
 | **Source-available** (e.g. PolyForm Noncommercial, BSL) | Source is readable and forkable for non-commercial use; commercial use reserved. | The owner wants the code public but not resold. |
 
-**Recommendation: leave it as-is for now, and write an explicit proprietary `LICENSE` the
-moment a build goes to anyone outside the project.** The reason to act at that point rather
-than now is that silence is ambiguous to a recipient, whereas today there are no
-recipients. The reason not to pick MIT pre-emptively is that MIT is irrevocable for the
-code already published under it, while all-rights-reserved can become MIT at any time —
-the decision is one-way in only one direction.
+The `LICENSE` explicitly does **not** restrict distributing compiled builds, and explicitly does
+not limit the rights the bundled third-party licences (Zlib / MIT / OFL) grant in those
+components — so it cannot accidentally contradict `THIRD-PARTY-NOTICES.txt`.
 
-This decision is the owner's alone; no wave should make it on their behalf.
+**To change it later:** replace `LICENSE` wholesale and say so in `docs/DEVLOG.md`. Nothing else
+in the repo keys off it.
 
 ---
 

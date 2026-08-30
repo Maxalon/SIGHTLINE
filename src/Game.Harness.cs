@@ -28,6 +28,32 @@ public partial class Game
     /// Harness hook (screenshot only): reveal all dormant enemies (fully alert).
     public void DebugWakeAll() { foreach (var e in Enemies) if (e.Alive) e.Alert = AlertLevel.Alert; }
 
+    /// W2 harness hook (screenshot only): SIGHTLINE_AIIDLESHOT — the enemy AMMO read. Wakes the
+    /// board and walks every live hostile's clip down a different amount, leaving the first one
+    /// DRY, so one frame shows the whole range of the token's read: a full mag, partial mags, and
+    /// the DRY chip on the hostile that must now spend an action reloading.
+    ///
+    /// It also puts a STATUS EFFECT on the first three hostiles, and that is the point of the hook,
+    /// not decoration. The W2 review found the original read overpainted: it drew its own pill and
+    /// pip row into p.Y+24..+42, which `DrawUnitStatusChips` owns and paints LATE, so on any hostile
+    /// carrying BRN/BLD/DAZ the pill lost 9 of its 15 px and the pip row vanished entirely — while
+    /// the ROADMAP claimed "it does not collide". The scene now STAGES that exact collision, so the
+    /// claim is checkable from one frame instead of taken on trust. Pair with SIGHTLINE_CB=1 for the
+    /// colorblind pass (the DRY state is carried by word + empty-magazine glyph, not hue).
+    public void DebugAmmoShot()
+    {
+        DebugWakeAll();
+        var statuses = new[] { StatusKind.Burning, StatusKind.Bleed, StatusKind.Disoriented };
+        int i = 0;
+        foreach (var e in Enemies)
+        {
+            if (!e.Alive || e.Weapon == null) continue;
+            e.Ammo = Math.Min(e.Weapon.Clip, i);       // 0 (DRY), 1, 2, ... rounds left across the board
+            if (i < statuses.Length) e.AddStatus(statuses[i], 3);   // DRY + BRN on the same token
+            i++;
+        }
+    }
+
     /// Harness hook (screenshot only): drive the anti-turtle pressure clock to its max rung so a
     /// single frame shows the PRESSURE meter filled in the top bar (and its escalation banner).
     public void DebugPressure()
@@ -54,6 +80,28 @@ public partial class Game
         var foes = Enemies.Where(e => e.Alive).ToList();
         for (int i = 0; i < foes.Count; i++)
             foes[i].Alert = (AlertLevel)(i % 3);   // 0 Unaware, 1 Suspicious, 2 Alert
+    }
+
+    /// W4 REVIEW FIX harness hook (screenshot only): the two cases in which the awareness
+    /// marker's ABOVE-THE-TOKEN slot is occluded. Row 0 (the marker would sit behind the top HUD
+    /// bar) and a pod with a unit standing on the tile directly above (the normal case — hostiles
+    /// spawn in pods). A third pod in open mid-field is the control that must keep the high slot.
+    public void DebugMarkers()
+    {
+        var foes = Enemies.Where(e => e.Alive).ToList();
+        if (foes.Count < 3) return;
+        void Seat(Unit u, int x, int y, AlertLevel a)
+        {
+            Grid.Tiles[x, y] = TileType.Floor;
+            u.X = x; u.Y = y; u.Alert = a; u.Bob = 0f; u.Facing = 0f; u.SyncPos();
+        }
+        Seat(foes[0], 5, 0, AlertLevel.Unaware);        // row 0: the HUD-bar case
+        Seat(foes[1], 2, 0, AlertLevel.Suspicious);     // row 0, the other marker
+        Seat(foes[2], 13, 5, AlertLevel.Unaware);       // mid-field: a unit stands on (13,4)
+        var stacker = AlivePlayers().FirstOrDefault(pl => !pl.IsVip) ?? AlivePlayers().FirstOrDefault();
+        if (stacker != null) { Grid.Tiles[13, 4] = TileType.Floor; stacker.X = 13; stacker.Y = 4; stacker.SyncPos(); }
+        if (foes.Count > 3) Seat(foes[3], 3, 5, AlertLevel.Unaware);   // control: clear above
+        Selected = null;
     }
 
     /// Harness hook (screenshot only): the squad is concealed at mission start anyway;
@@ -291,6 +339,451 @@ public partial class Game
             : "SHOVETEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
+    /// W9 REVIEW FIX — the UI half of SIGHTLINE_TRUTHTEST: read what the TOOLTIP ACTUALLY PAINTS.
+    ///
+    /// WHY THIS EXISTS. W9's first TRUTHTEST asserted `ShotOdds.DmgMinEff/DmgMaxEff` and
+    /// `Combat.LockOnAim(...)` — the values the HUD is SUPPOSED to read. Nothing bound the HUD to
+    /// them, so reverting Hud.DrawTooltip's DMG row to `$"{o.DmgMin}-{o.DmgMax}"` and its LOCK-ON
+    /// badge to the old `o.CoverLevel == 0` predicate left TRUTHTEST PASSing on BOTH of the display
+    /// defects it was written for. A test that re-derives the right answer is a PIN, not a test.
+    /// So this half drives the REAL hover/aim path (Game.Update -> UpdateHoverAndAim -> ComputeOdds),
+    /// renders the REAL tooltip, and captures every string it paints AT THE DRAW CALL
+    /// (Cfg.CaptureText). Whatever the panel says is what this reads, however it was computed.
+    ///
+    /// Returns "" when every leg holds, else a comma-joined fail list.
+    public string TooltipTruthFails()
+    {
+        NoPersist = true;
+        var fails = new System.Collections.Generic.List<string>();
+        var savedCapture = Cfg.CaptureText;
+        try
+        {
+            // ---- a controlled two-unit board; the fire lane is clear so nothing warps the odds ----
+            void Scene()
+            {
+                Grid = new Grid();
+                Players = new System.Collections.Generic.List<Unit>();
+                Enemies = new System.Collections.Generic.List<Unit>();
+                Vip = null; CaptiveLocked = false;
+                Objective = Objective.Eliminate; EvacZone.Clear();
+                Fx = new Fx(); _anims.Clear();
+                Phase = Phase.PlayerTurn; SquadConcealed = false;
+                Combat.MissionFaction = Faction.None; Combat.PrepFaction = Faction.None;
+                Combat.RunBoons.Clear();
+                AimMode = false; KbCursor = false;
+            }
+            Unit MkP(int x, int y)
+            {
+                var u = new Unit { Name = "SOL", Cls = "ASSAULT", Team = Team.Player, X = x, Y = y,
+                                   Hp = 8, MaxHp = 8, Aim = 75, Mobility = 4,
+                                   Weapon = Weapon.Make(WeaponKind.Rifle), Alive = true };
+                u.Ammo = u.Weapon.Clip; u.SyncPos(); u.BeginTurn(); return u;
+            }
+            Unit MkE(int x, int y)
+            {
+                var u = new Unit { Name = "FOE", Cls = "GRUNT", Team = Team.Enemy, X = x, Y = y,
+                                   Hp = 40, MaxHp = 40, Aim = 60, Mobility = 4,
+                                   Weapon = Weapon.Make(WeaponKind.Rifle), Alive = true };
+                u.Ammo = u.Weapon.Clip; u.Alert = AlertLevel.Alert; u.SyncPos(); u.BeginTurn(); return u;
+            }
+
+            // Drive the REAL aim path, then paint the REAL tooltip and return everything it SAID.
+            System.Collections.Generic.List<(string text, float size)> PaintTooltip(Unit a, Unit d)
+            {
+                Selected = a; AimMode = true; AimTarget = d;
+                Update(1f / 60f);                        // -> UpdateHoverAndAim -> ShowOdds/HoverOdds
+                var cap = new System.Collections.Generic.List<(string text, float size)>();
+                Cfg.CaptureText = cap;
+                Raylib.BeginDrawing();
+                Hud.DebugDrawTooltip(this);
+                Raylib.EndDrawing();
+                Cfg.CaptureText = null;
+                return cap;
+            }
+            // the value painted immediately after a label IS that tooltip row (label then value)
+            string RowAfter(System.Collections.Generic.List<(string text, float size)> cap, string label)
+            {
+                for (int i = 0; i < cap.Count - 1; i++) if (cap[i].text == label) return cap[i + 1].text;
+                return null;
+            }
+            bool Painted(System.Collections.Generic.List<(string text, float size)> cap, string label)
+            {
+                foreach (var c in cap) if (c.text == label) return true;
+                return false;
+            }
+
+            // ============ (1) the DMG ROW the panel PAINTS vs the damage Resolve DEALS ============
+            // Two defenders differing ONLY in HvtGuarded. A raw-band row is identical for both and
+            // wrong for the guarded one; the rolled ground truth is what catches it.
+            string plainRow = null, guardedRow = null;
+            foreach (bool guarded in new[] { false, true })
+            {
+                Scene();
+                var a = MkP(4, 5); var d = MkE(9, 5);
+                d.HvtGuarded = guarded;
+                Players.Add(a); Enemies.Add(d);
+                var cap = PaintTooltip(a, d);
+                string tag = guarded ? "Guarded" : "Plain";
+                string row = RowAfter(cap, "DMG");
+                if (guarded) guardedRow = row; else plainRow = row;
+                if (string.IsNullOrEmpty(row)) { fails.Add("uiNoDmgRow" + tag); continue; }
+                var parts = row.Split('-');
+                if (parts.Length != 2 || !int.TryParse(parts[0], out int shownLo)
+                                      || !int.TryParse(parts[1], out int shownHi))
+                { fails.Add("uiDmgRowShape" + tag + ":" + row); continue; }
+
+                // ground truth: roll real shots at the SAME defender, keep clean non-crit hits
+                Util.Reseed(90210);
+                int lo = int.MaxValue, hi = int.MinValue, n = 0;
+                for (int i = 0; i < 40000; i++)
+                {
+                    a.ConsecutiveMisses = 0; d.Hp = d.MaxHp;
+                    var r = Combat.Resolve(Grid, a, d);
+                    if (!r.Hit || r.Graze || r.Crit) continue;
+                    n++;
+                    if (r.Damage < lo) lo = r.Damage;
+                    if (r.Damage > hi) hi = r.Damage;
+                }
+                if (n < 500) { fails.Add("uiNoSample" + tag); continue; }
+                if (shownLo != lo || shownHi != hi)
+                    fails.Add($"uiDmgRowLies{tag} shows={row} deals={lo}-{hi}");
+                // the GRAZE row directly beneath it is computed from the same defender: they must agree
+                string gz = RowAfter(cap, "GRAZE");
+                if (gz != null && !gz.StartsWith(shownLo.ToString() + " "))
+                    fails.Add($"uiGrazeDisagrees{tag} dmg={row} graze={gz}");
+            }
+            // ...and the guard must MOVE the painted row, or leg (1) proves nothing
+            if (plainRow != null && guardedRow != null && plainRow == guardedRow)
+                fails.Add($"uiDmgRowIgnoresDefender both={plainRow}");
+
+            // ============ (2) the LOCK-ON BADGE the panel PAINTS vs the hit% it moves =============
+            // OPEN target (CoverLevel 0, NOT flanked) — the modal targeting state, and the exact case
+            // the stale badge fired on. FLANKED — the case the perk really applies to.
+            foreach (bool flankGeom in new[] { false, true })
+            {
+                Scene();
+                var a = MkP(4, 5);
+                Unit d;
+                if (flankGeom)
+                {
+                    d = MkE(9, 5);
+                    Grid.Tiles[10, 5] = TileType.HighCover;   // cover on its FAR side: flanked from us
+                    Grid.SetCoverHp(10, 5);
+                }
+                else d = MkE(9, 9);                            // open ground, no cover anywhere near
+                Players.Add(a); Enemies.Add(d);
+
+                var plainOdds = Combat.ComputeOdds(Grid, a, d);
+                string tag = flankGeom ? "Flanked" : "Open";
+                if (flankGeom && !plainOdds.Flanked) { fails.Add("uiFlankSetup"); continue; }
+                if (!flankGeom && (plainOdds.Flanked || plainOdds.CoverLevel != 0)) { fails.Add("uiOpenSetup"); continue; }
+
+                a.Perks.Add(Perk.LockOn);
+                int mathDelta = Combat.ComputeOdds(Grid, a, d).HitChance - plainOdds.HitChance;
+                var cap = PaintTooltip(a, d);
+                bool badge = Painted(cap, "LOCK-ON");
+                if (badge != (mathDelta != 0))
+                    fails.Add($"uiLockOnBadgeLies{tag} painted={badge} hitDelta={mathDelta}");
+                if (badge)
+                {
+                    string val = RowAfter(cap, "LOCK-ON");
+                    if (val != $"+{mathDelta} aim") fails.Add($"uiLockOnValue{tag}={val} delta={mathDelta}");
+                }
+            }
+
+            // ============ (3) the panel obeys the 12px small-text floor ===========================
+            // Cheap, and captured at the DRAW CALL, so it covers every string the tooltip paints at
+            // whatever size the fitters settled on.
+            {
+                Scene();
+                var a = MkP(4, 5); var d = MkE(9, 5);
+                Players.Add(a); Enemies.Add(d);
+                foreach (var c in PaintTooltip(a, d))
+                    if (c.size < 12f) { fails.Add($"uiSubFloorText '{c.text}'@{c.size}"); break; }
+            }
+
+            return string.Join(",", fails);
+        }
+        catch (Exception e) { return "uiException:" + e.GetType().Name + ":" + e.Message; }
+        finally { Cfg.CaptureText = savedCapture; }
+    }
+
+    /// W9 THE REPAIR — SIGHTLINE_STALLTEST: the autopilot's own no-TIMEOUT CONTRACT, asserted.
+    ///
+    /// THE GAP THIS CLOSES: NOTHING asserted the backstop's contract. Game.Autopilot.cs states it in
+    /// a comment — "the smoke test / balance batch ALWAYS terminates well before the frame cap —
+    /// never a RESULT: TIMEOUT" — and CLAUDE.md makes a TIMEOUT a hard pre-merge failure, but
+    /// qa-sweep.sh only PRINTED the RESULT line and left a human to read it. At the ~1% per run QA
+    /// measured, that is well inside the noise an agent writes off as "a weak-autopilot flake",
+    /// which is exactly how two independent causes survived:
+    ///   (a) the cap was PER-MISSION (_turnCount) and re-armed by SetupMission — including the
+    ///       MID-MISSION checkpoint redeploy — while the budget it sits under is a whole-CAMPAIGN
+    ///       frame count. A campaign got ~40 frames-worth of turns against a 50-turn-per-mission cap.
+    ///   (b) a WITHIN-TURN deadlock is invisible to it entirely, because AutoStallCheck runs in
+    ///       StartPlayerTurn and a deadlocked turn never starts another one. Measured: autoplay seed
+    ///       3001 sat 38,000 consecutive frames in mission 5 DEFEND with every enemy dead, because a
+    ///       DISORIENTED soldier hit `DoOverwatch(); return;` — DoOverwatch refuses for a disoriented
+    ///       unit and spends nothing, and AutoStep returned anyway.
+    /// This test pins all four repairs: the run-scoped counter, its arm, the frame/turn budget
+    /// arithmetic, and the deadlock scene actually draining.
+    public string StallSelfTest()
+    {
+        NoPersist = true;
+        var fails = new System.Collections.Generic.List<string>();
+
+        // ---- (1) BUDGET ARITHMETIC: the turn cap must always bite before the frame cap ----
+        // HONEST ABOUT WHAT THIS IS (W9 review): it is true BY CONSTRUCTION for the three constants
+        // as shipped — it cannot fail on this tree. That is the point: it is a COUPLING check, not an
+        // empirical proof. AutoMaxRunTurns, AutoFramesPerTurn and AutoFrameCap are a triple that only
+        // means anything together, and they live in two files; this fails the moment someone edits one
+        // without the others and quietly re-opens the TIMEOUT hole. The EMPIRICAL half of the claim is
+        // AutoFramesPerTurn itself, which is now the measured WORST frames-per-turn (700 vs an
+        // observed 681), not a regime average — so no assumption about campaign shape is left in it.
+        // (through locals: a const-folded comparison compiles to unreachable code and stops being a check)
+        long capTurns = AutoMaxRunTurns, perTurn = AutoFramesPerTurn, frameCap = AutoFrameCap;
+        if (capTurns * perTurn > frameCap)
+            fails.Add($"budget {capTurns}x{perTurn}>{frameCap}");
+
+        // ---- (2) THE ASYMMETRY: SetupMission resets the MISSION counter, never the RUN counter ----
+        // This is the whole mechanism of (a): the checkpoint redeploy calls SetupMission mid-mission
+        // and used to hand the autopilot a fresh 50-turn allowance.
+        StartMission(1);
+        if (RunTurns != 1) fails.Add($"runTurnsAfterStart={RunTurns}");
+        for (int i = 0; i < 6; i++) StartPlayerTurn();
+        int missionTurnBefore = Turn, runTurnsBefore = RunTurns;
+        if (runTurnsBefore <= 1) fails.Add("runTurnsNotCounting");
+        DebugResetupMission();                                  // exactly what the checkpoint does
+        if (Turn != 1) fails.Add($"missionTurnNotReset={Turn}");            // (unchanged behaviour)
+        // the run counter KEEPS its history and books the new opening turn — it is never reset
+        if (RunTurns != runTurnsBefore + 1) fails.Add($"runTurnsResetBySetup={RunTurns} was={runTurnsBefore}");
+        if (missionTurnBefore <= 1) fails.Add("missionTurnNotCounting");
+
+        // ---- (3) THE ARM: crossing AutoMaxRunTurns force-loses the run, and only then ----
+        {
+            var g = new Game { NoPersist = true, AutoPlay = true };
+            g.StartMission(1);
+            g.DebugSetRunTurns(AutoMaxRunTurns - 1);
+            g.DebugSetTurn(1);                                  // the per-mission cap must NOT be what fires
+            g.StartPlayerTurn();                                // -> RunTurns == AutoMaxRunTurns
+            if (g.Phase == Phase.Lose) fails.Add("armFiredEarly");
+            g.DebugSetTurn(1);
+            g.StartPlayerTurn();                                // -> RunTurns == AutoMaxRunTurns + 1
+            if (g.Phase != Phase.Lose) fails.Add($"armDidNotFire phase={g.Phase} runTurns={g.RunTurns}");
+        }
+        // ...and a game that is NOT the autopilot is never force-lost by it
+        {
+            var g = new Game { NoPersist = true, AutoPlay = false };
+            g.StartMission(1);
+            g.DebugSetRunTurns(AutoMaxRunTurns + 5);
+            g.StartPlayerTurn();
+            if (g.Phase == Phase.Lose) fails.Add("armFiredInLivePlay");
+        }
+
+        // ---- (4) THE DEADLOCK SCENE, verbatim: DEFEND, no enemies, a DISORIENTED soldier ----
+        // Pre-fix this never ends the turn, at any number of updates. 60 is far more than the two or
+        // three steps a healthy squad needs, and far FEWER than AutoIdleFrames (240) — so this leg
+        // fails unless the ROOT cause is fixed, not merely caught by the idle backstop.
+        {
+            var g = new Game { NoPersist = true, AutoPlay = true };
+            g.StartMission(1);
+            g.DebugStageDefendDeadlock();
+            int turn0 = g.Turn;
+            for (int i = 0; i < 60 && g.Turn == turn0 && g.Phase == Phase.PlayerTurn; i++) g.Update(1f / 60f);
+            if (g.Turn == turn0 && g.Phase == Phase.PlayerTurn)
+                fails.Add("deadlockNotDrained");
+        }
+
+        // ---- (5) THE IDLE BACKSTOP itself: a frozen board ends the turn, and not before ----
+        {
+            var g = new Game { NoPersist = true, AutoPlay = true };
+            g.StartMission(1);
+            g.DebugStageDefendDeadlock();
+            int turn0 = g.Turn;
+            for (int i = 0; i < AutoIdleFrames - 1; i++) g.DebugAutoIdleGuard();
+            if (g.Turn != turn0) fails.Add("idleGuardFiredEarly");
+            for (int i = 0; i < 3; i++) g.DebugAutoIdleGuard();
+            if (g.Turn == turn0 && g.Phase == Phase.PlayerTurn) fails.Add("idleGuardNeverFired");
+        }
+
+        return fails.Count == 0
+            ? $"STALLTEST: PASS (run-scoped turn counter survives SetupMission's mission reset; the arm force-loses at >{AutoMaxRunTurns} run-turns in autoplay only; {AutoMaxRunTurns} turns x {AutoFramesPerTurn} frames <= the {AutoFrameCap}-frame harness budget, so the turn cap always bites first; the DEFEND/disoriented deadlock drains in <60 steps and the idle backstop ends a frozen turn at {AutoIdleFrames} steps)"
+            : "STALLTEST: FAIL (" + string.Join(",", fails) + ")";
+    }
+
+    /// STALLTEST hooks. DebugResetupMission re-runs SetupMission for the CURRENT mission — exactly
+    /// what TryReinforcements does for the mid-mission checkpoint redeploy, which is the call that
+    /// used to re-arm the per-mission turn cap.
+    public void DebugResetupMission() => SetupMission(_run.Mission);
+    public void DebugSetRunTurns(int t) => RunTurns = t;
+    public void DebugAutoIdleGuard() => AutoIdleGuard();
+    /// Stage the measured seed-3001 deadlock: DEFEND, every hostile dead, and the first soldier in
+    /// action order DISORIENTED but holding actions and ammo. Pre-fix the autopilot spins here forever.
+    public void DebugStageDefendDeadlock()
+    {
+        Objective = Objective.Defend;
+        Phase = Phase.PlayerTurn;
+        _anims.Clear();
+        foreach (var e in Enemies) { e.Alive = false; e.Hp = 0; }
+        SquadConcealed = false;
+        bool first = true;
+        foreach (var p in Players)
+        {
+            if (!p.Alive || p.IsVip) continue;
+            p.BeginTurn();
+            p.Ammo = Math.Max(1, p.Ammo);
+            if (first) { p.AddStatus(StatusKind.Disoriented, 3); first = false; }
+        }
+    }
+
+    /// W9 THE REPAIR — SIGHTLINE_GRAPPLETEST, the FIRST test GRAPPLE has ever had.
+    ///
+    /// THE GAP THIS CLOSES: `grep -i grapple src/Game.Harness.cs` returned NOTHING before this. The
+    /// verb had zero coverage while both of its siblings were pinned — SHOVETEST covers SHOVE, whose
+    /// vector points AWAY from the shover so its blocked case can never ram him, and FIELDTEST covers
+    /// DRAG and explicitly asserts the Chebyshev-1 exclusion. The suite tested the two safe siblings
+    /// and never touched the one that shares ShoveAnim's blocked branch with an INVERTED vector.
+    /// The defect that hid there: a Chebyshev-1 grapple's destination tile IS the grappler's own tile,
+    /// so the slide was blocked, `rammed` resolved to the GRAPPLER, and the soldier who spent the
+    /// action and the cooldown took ShoveRammedDamage from its own GRAPPLE — measured at 3 of 3
+    /// Chebyshev-1 grapples across 11 autoplay campaigns, one of them lethal (VEGA 1 -> 0, seed 3406),
+    /// and 100% of a JUGGERNAUT's grapples, because GrappleReachFor pins that fork at reach 1.
+    /// Autoplay drove the real trigger every run and only ever checked for exceptions and TIMEOUT;
+    /// losing 1 HP to your own verb is silent.
+    public string GrappleSelfTest()
+    {
+        NoPersist = true;
+        var fails = new System.Collections.Generic.List<string>();
+
+        Grid = new Grid();                       // all Floor, Height 0
+        Players = new System.Collections.Generic.List<Unit>();
+        Enemies = new System.Collections.Generic.List<Unit>();
+        Vip = null; CaptiveLocked = false;
+        Objective = Objective.Eliminate;
+        EvacZone.Clear();
+        Fx = new Fx();
+        Phase = Phase.PlayerTurn;
+        Combat.MissionFaction = Faction.None;
+
+        Unit MkP(int x, int y, Spec spec = Spec.None)
+        {
+            var u = new Unit { Name = "S", Cls = "ASSAULT", Team = Team.Player, X = x, Y = y,
+                               Hp = 8, MaxHp = 8, Aim = 65, Mobility = 4, Spec = spec,
+                               Weapon = Weapon.Make(WeaponKind.Rifle) };   // Cls ASSAULT => Ability GRAPPLE
+            u.Ammo = u.Weapon.Clip; u.SyncPos(); u.BeginTurn(); return u;
+        }
+        Unit MkE(int x, int y)
+        {
+            var u = new Unit { Name = "E", Cls = "GRUNT", Team = Team.Enemy, X = x, Y = y,
+                               Hp = 9, MaxHp = 9, Aim = 60, Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+            u.Ammo = u.Weapon.Clip; u.Alert = AlertLevel.Alert; u.SyncPos(); u.BeginTurn(); return u;
+        }
+        void Pump() { for (int i = 0; i < 400 && _anims.Count > 0; i++) Update(0.05f); }
+        void Scene()
+        {
+            Grid = new Grid();
+            Players = new System.Collections.Generic.List<Unit>();
+            Enemies = new System.Collections.Generic.List<Unit>();
+            _anims.Clear(); Fx = new Fx(); Phase = Phase.PlayerTurn;
+            SquadConcealed = false;
+        }
+
+        // ---- (1) reach 2: the foe is PULLED one tile toward the grappler, and the grappler is unhurt
+        Scene();
+        var p1 = MkP(5, 5);
+        var f1 = MkE(7, 5);                       // Chebyshev 2 east
+        f1.OnOverwatch = true; f1.Hunkered = true;
+        Players.Add(p1); Enemies.Add(f1);
+        int pHp1 = p1.Hp, fHp1 = f1.Hp;
+        if (!GrappleTargetOk(p1, f1)) fails.Add("reach2NotLegal");
+        IssueGrapple(p1, f1); Pump();
+        if (!(f1.X == 6 && f1.Y == 5)) fails.Add($"reach2NotPulled({f1.X},{f1.Y})");
+        if (f1.Hp != fHp1) fails.Add($"reach2PullDamagedFoe({f1.Hp})");     // a clean pull is not a slam
+        if (p1.Hp != pHp1) fails.Add($"reach2HurtGrappler({p1.Hp})");
+        if (f1.OnOverwatch) fails.Add("reach2OverwatchHeld");
+        if (f1.Hunkered) fails.Add("reach2HunkerHeld");
+        if (!p1.ShovedThisTurn) fails.Add("reach2NoBudgetSpent");
+        if (p1.AbilityCd <= 0) fails.Add("reach2NoCooldown");
+        if (p1.ActionsLeft != 1) fails.Add($"reach2ActionCost({p1.ActionsLeft})");
+
+        // ---- (2) THE DEFECT: Chebyshev 1. The foe cannot be pulled anywhere (its only toward-tile
+        //          is the grappler's own), so the verb resolves as a SLAM — the foe takes the collision
+        //          damage and loses its stance, and THE GRAPPLER LOSES NO HP. It used to lose HP.
+        Scene();
+        var p2 = MkP(5, 5);
+        var f2 = MkE(6, 5);                       // Chebyshev 1 east
+        f2.OnOverwatch = true; f2.Hunkered = true;
+        Players.Add(p2); Enemies.Add(f2);
+        int pHp2 = p2.Hp, fHp2 = f2.Hp;
+        if (!GrappleTargetOk(p2, f2)) fails.Add("adjacentNotLegal");         // the UI offers it: it must work
+        IssueGrapple(p2, f2); Pump();
+        if (p2.Hp != pHp2) fails.Add($"SELF-RAM grapplerHp {pHp2}->{p2.Hp}");
+        if (!p2.Alive || p2.Downed) fails.Add("SELF-RAM grapplerFelledByOwnGrapple");
+        if (!(f2.X == 6 && f2.Y == 5)) fails.Add($"adjacentFoeMoved({f2.X},{f2.Y})");
+        if (f2.Hp >= fHp2) fails.Add($"adjacentSlamDealtNothing({f2.Hp})");  // it is still a real hit
+        if (f2.OnOverwatch) fails.Add("adjacentOverwatchHeld");
+        if (f2.Hunkered) fails.Add("adjacentHunkerHeld");
+
+        // ---- (3) the same, DIAGONALLY (the seed-3406 geometry: grappler (13,5), foe (14,6)) ----
+        Scene();
+        var p3 = MkP(5, 5);
+        var f3 = MkE(6, 6);                       // Chebyshev 1 diagonal
+        Players.Add(p3); Enemies.Add(f3);
+        p3.Hp = 1;                                // exactly the state that made it lethal in the wild
+        Players.Add(MkP(2, 2));                   // a second soldier so a loss can't end the mission
+        IssueGrapple(p3, f3); Pump();
+        if (p3.Hp != 1) fails.Add($"SELF-RAM diagonalGrapplerHp={p3.Hp}");
+        if (!p3.Alive || p3.Downed) fails.Add("SELF-RAM diagonalGrapplerFelled");
+
+        // ---- (4) JUGGERNAUT: reach 1 is its whole fork, so EVERY grapple it can make is case (2).
+        //          Its signature verb must therefore still do something and still not hurt it.
+        Scene();
+        var jug = MkP(5, 5, Spec.Juggernaut);
+        var jf = MkE(6, 5);
+        var jFar = MkE(7, 5);
+        Players.Add(jug); Enemies.Add(jf); Enemies.Add(jFar);
+        if (GrappleReachFor(jug) != 1) fails.Add("juggernautReachNot1");
+        if (!GrappleTargetOk(jug, jf)) fails.Add("juggernautHasNoLegalGrapple");
+        if (GrappleTargetOk(jug, jFar)) fails.Add("juggernautReachedPastOne");
+        int jHp = jug.Hp, jfHp = jf.Hp;
+        IssueGrapple(jug, jf); Pump();
+        if (jug.Hp != jHp) fails.Add($"SELF-RAM juggernautHp {jHp}->{jug.Hp}");
+        if (jf.Hp >= jfHp) fails.Add("juggernautSlamDidNothing");
+
+        // ---- (5) a reach-2 pull BLOCKED by terrain still slams the foe and still spares the grappler
+        Scene();
+        var p5 = MkP(5, 5);
+        var f5 = MkE(7, 5);
+        Grid.Tiles[6, 5] = TileType.HighCover;    // the destination tile is a wall
+        Grid.SetCoverHp(6, 5);
+        Players.Add(p5); Enemies.Add(f5);
+        int pHp5 = p5.Hp, fHp5 = f5.Hp;
+        IssueGrapple(p5, f5); Pump();
+        if (!(f5.X == 7 && f5.Y == 5)) fails.Add($"blockedPullMoved({f5.X},{f5.Y})");
+        if (f5.Hp >= fHp5) fails.Add("blockedPullNoDamage");
+        if (p5.Hp != pHp5) fails.Add($"blockedPullHurtGrappler({p5.Hp})");
+
+        // ---- (6) gating: no target, out of reach, self, dead, already spent this turn ----
+        Scene();
+        var p6 = MkP(5, 5);
+        Players.Add(p6);
+        if (HasGrappleTarget(p6)) fails.Add("grappleTargetWithNoEnemy");
+        var far = MkE(9, 5); Enemies.Add(far);                 // Chebyshev 4 -> beyond reach 2
+        if (GrappleTargetOk(p6, far)) fails.Add("farFoeLegal");
+        var near = MkE(6, 5); Enemies.Add(near);
+        if (!HasGrappleTarget(p6)) fails.Add("noTargetWithFoeInReach");
+        if (GrappleTargetOk(p6, p6)) fails.Add("selfLegal");
+        near.Alive = false;
+        if (GrappleTargetOk(p6, near)) fails.Add("deadFoeLegal");
+        near.Alive = true;
+        p6.ShovedThisTurn = true;                              // shared anti-loop budget with SHOVE
+        if (GrappleTargetOk(p6, near)) fails.Add("grappleTwiceInOneTurn");
+
+        _anims.Clear();
+        return fails.Count == 0
+            ? "GRAPPLETEST: PASS (reach 2 pulls the foe one tile toward the grappler and costs 1 action + the charge + the shove budget; an adjacent foe cannot be pulled so the verb SLAMS it — damage + stance broken — and the grappler NEVER takes damage from its own grapple, cardinal or diagonal, at 1 HP, or as a JUGGERNAUT whose reach-1 fork makes that its only case; a blocked reach-2 pull slams too; gating holds)"
+            : "GRAPPLETEST: FAIL (" + string.Join(",", fails) + ")";
+    }
+
     /// Headless self-test for the FIELD CRAFT (W1) verbs DRAG + VAULT. Verifies: DRAG pulls a
     /// LAGGING ally (Chebyshev 2) one tile toward the dragger, an already-adjacent (Chebyshev 1)
     /// ally is NOT draggable (no legal closer tile), and the once-per-turn cap holds; VAULT crosses
@@ -413,8 +906,79 @@ public partial class Game
         if (_run.Squad.Count > Run.RosterMax) fails.Add("rosterOverMax");
         if (_run.Deployed.Count > _run.NextDeployCap) fails.Add("deployedOverCapAfterDebrief");
 
+        // (4) W9 THE REPAIR — caps hold after a FIELD EVENT too.
+        // THE GAP: this test asserted the cap only immediately after DebriefSurvivors(), the one
+        // moment AutoDeploy has just run, and EVENTTEST exercises EventCatalog.Apply against a bare
+        // test Run with no deployment or bench state at all (it checks Squad.Count and nothing else).
+        // Nothing anywhere composed the ordering the campaign actually uses — debrief -> AutoDeploy
+        // -> resolve an event -> read Deployed — so a roster change made by an event went straight
+        // past the cap in BOTH directions: a free RECRUIT deployed cap+1 ("DEPLOY 5/4" over five
+        // deployed soldiers, five on the next board where DeployCapFor(2) == 4), and a RELEASE left
+        // the freed slot empty while a 6/6-HP soldier sat benched ("DEPLOY 3/4").
+        // The invariant, both ways: Deployed.Count == min(healthy roster, NextDeployCap).
+        {
+            _run.DebriefSurvivors();                                    // the campaign's real ordering
+            int capNow = _run.NextDeployCap;
+            int Want() => Math.Min(_run.Squad.Count, _run.NextDeployCap);
+
+            // (4a) RECRUIT: a body arrives mid-barracks and must not push the field over the cap.
+            while (_run.Squad.Count >= Run.RosterMax) _run.Squad.RemoveAt(_run.Squad.Count - 1);
+            _run.AutoDeploy();
+            int before = _run.Deployed.Count;
+            DebugResolveEventOutcome(new EventOutcome { Kind = EventOutcomeKind.Recruit, Veteran = true });
+            if (_run.Deployed.Count != Want())
+                fails.Add($"eventRecruitDeployed={_run.Deployed.Count} want={Want()} (was {before}, cap {capNow})");
+            if (_run.Deployed.Count > _run.NextDeployCap) fails.Add("eventRecruitOverCap");
+
+            // (4a2) W9 REVIEW FIX — THE PLAYER'S OWN BENCH CHOICE SURVIVES AN EVENT.
+            // THE LESSON, and why (4a)/(4b) below could not catch this: they assert a COUNT invariant,
+            // `Deployed.Count == min(Squad.Count, NextDeployCap)` — and a CLOBBERING implementation
+            // satisfies that exactly as well as a preserving one. The first cut called AutoDeploy()
+            // unconditionally here, which re-derives Benched for the WHOLE roster from a fixed rule and
+            // so discarded a manual barracks swap on EVERY event, including outcomes with NO roster
+            // change at all. ResolveEvent is the checkpoint site, so that is what got persisted.
+            // Assert IDENTITY, not arithmetic: who is benched, by name.
+            {
+                foreach (var u in _run.Squad) { u.Wound = 0; u.Hp = u.MaxHp; }
+                _run.AutoDeploy();
+                // the player then swaps by hand: bench the soldier AutoDeploy would seat FIRST, and
+                // seat one it benched — the choice a re-derivation is guaranteed to undo.
+                var seated = _run.Deployed[0];
+                var benched = _run.Squad.Find(u => u.Benched);
+                if (benched == null) fails.Add("4a2:noBenchToSwap");
+                else
+                {
+                    seated.Benched = true; benched.Benched = false;
+                    string manual = string.Join(",", _run.Squad.ConvertAll(u => u.Name + (u.Benched ? "[B]" : "[D]")));
+                    // an outcome with NO roster change at all — the reviewer's exact repro
+                    DebugResolveEventOutcome(new EventOutcome { Kind = EventOutcomeKind.Intel, Amount = 5 });
+                    string after = string.Join(",", _run.Squad.ConvertAll(u => u.Name + (u.Benched ? "[B]" : "[D]")));
+                    if (after != manual) fails.Add($"4a2:benchClobbered manual={manual} after={after}");
+                    // ...and a roster-CHANGING outcome must still not move anyone it did not have to
+                    var untouched = _run.Squad.FindAll(u => u != seated && u != benched);
+                    var wasBenched = untouched.ConvertAll(u => u.Benched);
+                    DebugResolveEventOutcome(new EventOutcome { Kind = EventOutcomeKind.Recruit, Veteran = true });
+                    for (int i = 0; i < untouched.Count; i++)
+                        if (untouched[i].Benched != wasBenched[i] && _run.Deployed.Count <= _run.NextDeployCap)
+                        { fails.Add($"4a2:recruitMovedBystander {untouched[i].Name}"); break; }
+                    if (_run.Deployed.Count > _run.NextDeployCap) fails.Add("4a2:recruitOverCap");
+                }
+            }
+
+            // (4b) RELEASE: a DEPLOYED body leaves and the freed slot must go to a benched soldier.
+            while (_run.Squad.Count <= _run.NextDeployCap) _run.Squad.Add(Mission.MakeRecruit());
+            foreach (var u in _run.Squad) { u.Wound = 0; u.Hp = u.MaxHp; }   // everyone healthy: no bench excuse
+            _run.AutoDeploy();
+            int deployedBefore = _run.Deployed.Count;
+            DebugResolveEventOutcome(new EventOutcome { Kind = EventOutcomeKind.ReleaseSoldier });
+            if (_run.Deployed.Count != Want())
+                fails.Add($"eventReleaseDeployed={_run.Deployed.Count} want={Want()} (was {deployedBefore})");
+            if (_run.Squad.Any(u => u.Benched && u.Wound == 0 && _run.Deployed.Count < _run.NextDeployCap))
+                fails.Add("eventReleaseStrandedHealthyBench");
+        }
+
         return fails.Count == 0
-            ? "BENCHTEST: PASS (auto-bench wounded, deploy<=cap, roster<=max, benched recover+preserved)"
+            ? "BENCHTEST: PASS (auto-bench wounded, deploy<=cap, roster<=max, benched recover+preserved; a field event's recruit/release reconciles the deployment so the field is never cap+1 or cap-1, AND the player's own manual bench swap survives an event untouched)"
             : "BENCHTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
@@ -757,12 +1321,36 @@ public partial class Game
 
     /// Harness hook (screenshot only): chip several high-cover blocks so the cracked
     /// damage state is visible, and fully degrade one to show the rubble (low) state.
+    ///
+    /// W4 REVIEW FIX — it also stamps a clean four-tile HighCover run at (5..8,5) as the visual
+    /// A/B for the cover-volume identity. `SIGHTLINE_COVERKILL=1` destroys that run's NW-most
+    /// tile through the real `Grid.DamageCover` path (High -> rubble -> gone), so two captures
+    /// differ by exactly one tile. Before the fix the volume's identity was the LIVE minimum tile
+    /// index, so losing the end of a wall re-rolled the material FORM and the footprint jitter of
+    /// every surviving tile — a wall turned from crates into rock mid-mission. After it the
+    /// survivors are pixel-identical. Gate E of SIGHTLINE_BOARDTEST asserts the same in-process.
     public void DebugCover()
     {
         int chipped = 0;
         for (int x = 0; x < Grid.W; x++)
             for (int y = 0; y < Grid.H; y++)
                 if (Grid.Tiles[x, y] == TileType.HighCover && chipped < 8) { Grid.DamageCover(x, y, 1); chipped++; }
+
+        const int wx = 5, wy = 5;
+        if (Grid.InBounds(wx + 3, wy + 1))
+        {
+            for (int i = 0; i < 4; i++)
+            {
+                Grid.Tiles[wx + i, wy - 1] = TileType.Floor;    // clear a lane so the run reads alone
+                Grid.Tiles[wx + i, wy + 1] = TileType.Floor;
+                Grid.Tiles[wx + i, wy] = TileType.HighCover;
+                Grid.Height[wx + i, wy] = 0;
+                Grid.SetCoverHp(wx + i, wy);
+            }
+            Grid.ClearCoverSeeds(); Grid.SeedCoverVolumes();   // the wall exists BEFORE it is shot
+            if (Environment.GetEnvironmentVariable("SIGHTLINE_COVERKILL") == "1")
+            { Grid.DamageCover(wx, wy, 99); Grid.DamageCover(wx, wy, 99); }   // High -> rubble -> gone
+        }
     }
 
     /// Harness hook (screenshot only): stamp a barrel cluster near the squad + a live fire patch,
@@ -975,6 +1563,17 @@ public partial class Game
         _run.PendingSpecs.Clear();
         _shopDone = true;
         _run.GenerateBoonOffer();        // populate the pick-1-of-3 doctrine card
+        // THE FIT: stage the WORST case. FIELD DRILLS' description is 98 characters — the only
+        // one in the catalogue over 60, and the one that overflowed this card — but it is 1 of 16,
+        // so an unseeded glance at this screen showed it ~19% of the time and the defect survived
+        // ten programs. The offer now always LEADS with the longest description it can draw.
+        if (_run.BoonOffer.Count > 0)
+        {
+            Boon worst = _run.BoonOffer[0];
+            foreach (var b in BoonDef.All)
+                if (BoonDef.Desc(b).Length > BoonDef.Desc(worst).Length) worst = b;
+            if (!_run.BoonOffer.Contains(worst)) _run.BoonOffer[0] = worst;
+        }
         Phase = Phase.Barracks;
     }
 
@@ -1088,6 +1687,9 @@ public partial class Game
         // NoPersist), so the SALVAGE slab / HEAT UNLOCKED line / achievement roll can be framed.
         // Fixed values -> the SUMMARY shot stays byte-stable; a lose card shows the consolation only.
         EndSalvage = lose ? 18 : 79;
+        // W5: the reserve line + per-survivor recall prices. Derived from the staged squad rather
+        // than hard-coded, so the header count and the priced rows can never disagree on the card.
+        EndReserve = squad.Count(u => u != null && !u.IsVip && u.Rank >= 1);
         EndHeatUnlocked = lose ? 0 : 4;
         EndAchievements.Clear();
         if (!lose) { EndAchievements.Add("TURNING UP"); EndAchievements.Add("THE LONG WAR"); }   // HEAT3 + DEEP: both true of this staged run (3 KIA -> never FLAWLESS)
@@ -1180,7 +1782,13 @@ public partial class Game
         DebugShop();
         _run.Intel = 40;
         ArmoryMode = true;
-        ArmorySoldier = _run.Squad.FirstOrDefault(u => !u.IsVip);
+        // THE FIT: stage the WORST case, not the first one. This hook used to photograph
+        // `Squad.First(!IsVip)` — an ASSAULT, whose 44-char rifle blurb is the second-shortest
+        // in the game — so the screen a human eyeballs was never the screen that overflowed.
+        // A SHARPSHOOTER carries the 49-char SNIPER blurb, the widest string this row can hold;
+        // if none is on the roster the old behaviour stands.
+        ArmorySoldier = _run.Squad.FirstOrDefault(u => !u.IsVip && u.Cls == "SHARPSHOOTER")
+                     ?? _run.Squad.FirstOrDefault(u => !u.IsVip);
     }
 
     /// Headless self-test (SIGHTLINE_DEATHTEST): kill the whole squad on an escort
@@ -1286,8 +1894,35 @@ public partial class Game
         DmgAtHeat("noQuarterDmg", 8, 1);   // apex: every spawned weapon carries the +1
         DmgAtHeat("heat7Dmg", 7, 0);       // one rung below: untouched
 
+        // ── W1 TRUE INSTRUMENT: the ladder's SHAPE, pinned ──────────────────────────────
+        // Everything above proves heat's effects REACH the board. Nothing proved what the rungs
+        // actually ARE. The published ladder of record (CLAUDE.md) is a table of win-rates by
+        // heat level; if a rung's cumulative (EnemyDelta, StatDelta, DmgDelta, AiTier) moves, the
+        // column headings still say "heat 4" and every archived number silently changes meaning —
+        // a 40-campaign rung costs ~5 minutes to measure and days to re-argue, and nothing in the
+        // repo would have said the axis moved underneath it. This is the EnumFingerprint idea
+        // applied to the difficulty axis: re-tuning the ladder is allowed, doing it SILENTLY is not.
+        // TO RE-TUNE: change Heat.Mods, run SIGHTLINE_HEATLADDERTEST, paste the printed "actual"
+        // string in below — and re-measure every rung you moved.
+        const string rungShapeGolden =
+            "-1:-1,-1,0,0|0:0,0,0,0|1:1,0,0,0|2:1,1,0,0|3:2,1,0,0|4:2,1,0,1|" +
+            "5:3,1,0,1|6:3,2,0,1|7:3,3,0,1|8:4,4,1,2";
+        {
+            var sb = new System.Text.StringBuilder();
+            for (int lv = Heat.Min; lv <= Heat.Max; lv++)
+            {
+                if (sb.Length > 0) sb.Append('|');
+                sb.Append(lv).Append(':').Append(Heat.EnemyDelta(lv)).Append(',')
+                  .Append(Heat.StatDelta(lv)).Append(',').Append(Heat.DmgDelta(lv)).Append(',')
+                  .Append(Heat.AiTier(lv));
+            }
+            string got = sb.ToString();
+            if (got != rungShapeGolden)
+                fails.Add("rungShape (golden \"" + rungShapeGolden + "\", actual \"" + got + "\")");
+        }
+
         return fails.Count == 0
-            ? "HEATLADDERTEST: PASS (lone-VIP wins at heat 8 / IRON VETERANS / Rescue conscript to the floor + next mission deploys; empty-deploy Build fails soft; NO QUARTER +1 dmg on every m3 weapon, none at heat 7)"
+            ? "HEATLADDERTEST: PASS (lone-VIP wins at heat 8 / IRON VETERANS / Rescue conscript to the floor + next mission deploys; empty-deploy Build fails soft; NO QUARTER +1 dmg on every m3 weapon, none at heat 7; rung shape (enemy,stat,dmg,aiTier) pinned for all 10 levels)"
             : "HEATLADDERTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
@@ -1339,6 +1974,27 @@ public partial class Game
         if (shotsAtE2 != 1) fails.Add($"otherTargetShotDropped={shotsAtE2}");
         if (movesForE != 0) fails.Add($"deadMoveKept={movesForE}");
         _anims.Clear();
+
+        // (2b) W9 THE REPAIR — the SHOOTER's side of the same purge. Legs (1)/(2) above, and every
+        // purge leg in DKTEST/DOWNTEST/OWTEST, only ever built a queue of shots AT the unit about to fall —
+        // because in a hand-built harness scenario the SHOOTER is never the one harmed. So the missing
+        // `s.A == d` clause was structurally invisible, and a unit that died or went down mid-queue
+        // still fired: full damage, a credited kill, telemetry under a corpse's class.
+        {
+            var shooter = Enemies.First(x => x.Alive && x != e2);
+            var victim  = Players.First(u => u.Alive && !u.IsVip);
+            _anims.Clear();
+            var r2 = Combat.Resolve(Grid, shooter, victim);
+            Enqueue(new ShotAnim(shooter, victim, r2, reaction: true), Team.Enemy);   // [0] ACTIVE (keep)
+            Enqueue(new ShotAnim(shooter, victim, r2, reaction: true), Team.Enemy);   // [1] BY the dier (drop)
+            Enqueue(new ShotAnim(a1, victim, r2, reaction: true), Team.Player);       // [2] by someone else (keep)
+            shooter.Hp = 0; KillUnit(shooter);
+            int byDead    = _anims.Count(x => x is ShotAnim sh && sh.A == shooter);
+            int byOther   = _anims.Count(x => x is ShotAnim sh && sh.A == a1);
+            if (byDead  != 1) fails.Add($"shotsByCorpse={byDead}");        // only the active one survives
+            if (byOther != 1) fails.Add($"otherShooterShotDropped={byOther}");
+            _anims.Clear();
+        }
 
         // (3) APEX W2 — the overwatch RESOURCE LEAK: with 3 watchers covering one lane, the reaction
         // loop must stop SPENDING (OnOverwatch/ReactedThisTurn/Ammo) the moment the already-queued
@@ -1395,7 +2051,7 @@ public partial class Game
         _anims.Clear();
 
         return fails.Count == 0
-            ? "DKTEST: PASS (KillUnit idempotent; surplus corpse-reaction purged; active + other-target kept; 3rd watcher unspent once queued hits predict the kill)"
+            ? "DKTEST: PASS (KillUnit idempotent; surplus corpse-reaction purged; shots BY the felled unit purged too; active + other-target/other-shooter kept; 3rd watcher unspent once queued hits predict the kill)"
             : "DKTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
@@ -2362,8 +3018,40 @@ public partial class Game
             if (!EvacZone.Contains((load.X, load.Y))) fails.Add("h:extractDidNotLand");
         }
 
+        // ---- (i) W9 THE REPAIR — a DOWNED soldier's OWN queued shot must never fire ----
+        // The live sequence this reproduces (autoplay seeds 3406/4205): a soldier issued GRAPPLE,
+        // which queued a ShoveAnim, and a shot was queued behind it; the ShoveAnim downed the
+        // grappler; EnterDowned -> PurgeAnimsFor dropped shots AT the soldier and had NO clause for
+        // shots BY it, so a body at Hp 0 fired — full damage, a credited kill, Stats.RecordShot under
+        // the downed soldier's class, and the takedown stinger.
+        // THE GAP: every purge leg in this file (DKTEST (2), DOWNTEST (a), OWTEST) builds a queue
+        // of shots AT the unit about to fall, because in a hand-built scenario the SHOOTER is never
+        // the one harmed. Both independent guards are pinned: the PURGE, and ShotAnim self-cancelling.
+        Scene();
+        var gunner = MkP("GUN", 4, 5);
+        Players.Add(gunner);
+        var mark = MkE("MARK", 9, 5);
+        Enemies.Add(mark);
+        {
+            int foeHp0 = mark.Hp;
+            var rq = Combat.Resolve(Grid, gunner, mark);
+            _anims.Clear();
+            Enqueue(new ShoveAnim(gunner, mark, 0, 0), Team.Player);              // [0] the blow in flight
+            Enqueue(new ShotAnim(gunner, mark, rq, reaction: false), Team.Player); // [1] the gunner's OWN shot
+            gunner.Hp = 0; KillUnit(gunner);                                       // -> EnterDowned
+            if (!gunner.Downed) fails.Add("i:notDowned");
+            if (_anims.Count(x => x is ShotAnim sh && sh.A == gunner) != 0) fails.Add("i:downedShotKept");
+            // second, independent guard: even hand-fed an ACTIVE shot, a downed shooter fires nothing
+            _anims.Clear();
+            var solo = new ShotAnim(gunner, mark, rq, reaction: false);
+            solo.OnStart(this);
+            for (int i = 0; i < 60 && !solo.Update(this, 1f / 60f); i++) { }
+            if (mark.Hp != foeHp0) fails.Add($"i:downedShotResolved {foeHp0}->{mark.Hp}");
+            _anims.Clear();
+        }
+
         return fails.Count == 0
-            ? "DOWNTEST: PASS (down entry clean of death bookkeeping; expiry runs the full death flow once, cause = downing archetype; stabilize freezes + won field recovers wounded/scarred; corpsman revive incl. CombatMedic reach; no second down + AoE finishes; AI ignores downed + all-downed bounded; VIP instant; drag/extract carry pinned)"
+            ? "DOWNTEST: PASS (down entry clean of death bookkeeping; expiry runs the full death flow once, cause = downing archetype; stabilize freezes + won field recovers wounded/scarred; corpsman revive incl. CombatMedic reach; no second down + AoE finishes; AI ignores downed + all-downed bounded; VIP instant; drag/extract carry pinned; a downed shooter's own queued shot is purged and self-cancels)"
             : "DOWNTEST: FAIL (" + string.Join(",", fails) + ")";
     }
 
@@ -4493,6 +5181,501 @@ public partial class Game
             : "TUTTEST: FAIL (" + string.Join(",", fails.Distinct()) + ")";
     }
 
+
+    // ─── W5 THE FIRST HOUR — the CHROME self-test (SIGHTLINE_CHROMETEST=1) ─────────────────────
+    /// Three audit findings that all reduce to "a thing the player is reading moved, or vanished,
+    /// or fell out of its box". Each leg fails on the pre-W5 tree; SIGHTLINE_BARREFLOW=1 restores
+    /// the old action-bar order so the first one is falsifiable without reverting.
+    ///
+    ///  (A) visual-7 — THE ACTION BAR RE-FLOWED BETWEEN TURNS. The auditor measured OVERWATCH
+    ///      moving from bottom-row slot 8 to TOP-row slot 1 purely because a squadmate went down
+    ///      and STABILIZE appeared ahead of it in the list. Drive one soldier through three
+    ///      states — full verbs / no ammo / squadmate down — and assert every verb present in all
+    ///      three has a BYTE-IDENTICAL rect. Also asserts the ability slot's width absorbs its
+    ///      " (N)" cooldown suffix, which is the same defect wearing a different hat.
+    ///  (B) newplayer-3 — THE CONCEALED PILL FADED TO 10% ALPHA, so the opening state read as
+    ///      "off" for part of every 1.8 s cycle. Asserts the pulse envelope's floor and its
+    ///      peak/trough ratio directly, at the four fixed phases the auditor sampled.
+    ///  (C) newplayer-6 — DOCTRINE CARD TEXT OVERFLOWED ITS BOX on the first screen a new player
+    ///      touches. Asserts `body top + lines*lineH + pad <= card height` for EVERY boon in the
+    ///      catalogue, not just the three in one offer, and that the operator blurb column clears
+    ///      the class-glyph disc.
+    public string ChromeSelfTest()
+    {
+        var fails = new List<string>();
+
+        // ---- (A) the fixed slot map ----------------------------------------------------------
+        {
+            var g = new Game { NoPersist = true };
+            g.StartMission(1);
+            var u = g.Players.FirstOrDefault(p => p.Alive && !p.IsVip);
+            var mate = g.Players.FirstOrDefault(p => p != u && p.Alive && !p.IsVip);
+            if (u == null || mate == null) fails.Add("noSquadForBarProbe");
+            else
+            {
+                g.Selected = u;
+                Dictionary<string, Rectangle> Snap()
+                {
+                    Raylib.BeginDrawing();
+                    var bar = Hud.ProbeActionBar(g);
+                    Raylib.EndDrawing();
+                    var d = new Dictionary<string, Rectangle>();
+                    foreach (var b in bar) d[b.Id] = b.Rect;
+                    return d;
+                }
+                int ammo = u.Ammo;
+                var full = Snap();                            // state 1: everything available
+                u.Ammo = 0; var dry = Snap();                 // state 2: no ammo
+                u.Ammo = ammo;
+                mate.Downed = true; var down = Snap();        // state 3: a squadmate is bleeding out
+                mate.Downed = false;
+
+                if (full.Count < 8) fails.Add("barTooSmall:" + full.Count);
+                if (!down.ContainsKey("stabilize")) fails.Add("stabilizeNeverSurfaced");
+                if (dry.Count != full.Count) fails.Add("dryChangedTheVerbSet");
+                foreach (var id in full.Keys)
+                {
+                    if (!dry.TryGetValue(id, out var rd) || !SameRect(full[id], rd))
+                        fails.Add("moved(noAmmo):" + id);
+                    if (!down.TryGetValue(id, out var rw) || !SameRect(full[id], rw))
+                        fails.Add("moved(mateDown):" + id);
+                }
+                // the ability slot must already be wide enough for its cooldown suffix
+                if (u.Ability != AbilityKind.None && full.ContainsKey("ability"))
+                {
+                    var before = full["ability"];
+                    u.AbilityCd = 3;
+                    var cd = Snap();
+                    u.AbilityCd = 0;
+                    if (!cd.TryGetValue("ability", out var ra) || !SameRect(before, ra))
+                        fails.Add("abilitySlotGrewOnCooldown");
+                    foreach (var id in full.Keys)
+                        if (cd.TryGetValue(id, out var r2) && !SameRect(full[id], r2))
+                            fails.Add("moved(abilityCd):" + id);
+                }
+            }
+        }
+
+        // ---- (B) the CONCEALED pill's pulse envelope ------------------------------------------
+        {
+            // The exact expression Hud draws with, sampled at the four phases the audit used.
+            float lo = 2f, hi = -1f;
+            foreach (float t in new[] { 0.5f, 1.0f, 1.5f, 2.5f })
+            {
+                float pulse = Hud.ConcealPulse(t);
+                lo = MathF.Min(lo, pulse); hi = MathF.Max(hi, pulse);
+            }
+            // measured floor across the whole cycle, not just those four samples
+            float trueLo = Hud.ConcealPulseFloor;
+            if (trueLo < 0.5f) fails.Add($"pillFloor={trueLo:0.00}");
+            if (Hud.ConcealPulseCeil / MathF.Max(0.001f, trueLo) > 2.0f)
+                fails.Add($"pillSwing={Hud.ConcealPulseCeil / trueLo:0.00}x");
+            if (hi <= lo) fails.Add("pillDoesNotPulse");   // it must still BREATHE, not go static
+        }
+
+        // ---- (C) the doctrine card fits its own text, for every boon in the catalogue ---------
+        //
+        // W5-FIX (review): the original form of this leg was TAUTOLOGICAL. It compared
+        //     need = BodyTop + lines*LineH + PadB      against      DraftBoonCardHeight(lines)
+        // which IS Math.Max(74, need) — the assertion could not fail for any string whatsoever.
+        // It now measures where the last line's INK actually lands, through the real font at the
+        // live UI scale (Hud.DraftBoonInkBottom), against the height the RENDERER uses. That can
+        // fail: shrink DraftBoonLineH, or raise DraftBoonFs past the 19 px step, and it does.
+        {
+            foreach (var b in BoonDef.All)
+            {
+                int lines = Hud.DraftBoonLineCount(b);
+                int bch = Hud.DraftBoonCardHeight(lines);   // the renderer's own card height
+                float ink = Hud.DraftBoonInkBottom(b);
+                if (ink + 4f > bch) fails.Add($"boonOverflow:{BoonDef.Code(b)}@{ink:0}>{bch}");
+                if (lines >= 3 && bch <= 74)
+                    fails.Add("boonCardStillFixed:" + BoonDef.Code(b));
+            }
+            // ...and the DEPLOY row must be ON SCREEN, for every boon in the catalogue, at every
+            // text size the pause menu can select. This is review blocker 2: the content-sized
+            // card pushed BACK / DEPLOY / RE-ROLL POOL through the bottom of the screen at the
+            // DEFAULT 100%, and clean off it at 120% — and RE-ROLL POOL has no keyboard
+            // alternative, so a control became unreachable. Nothing observed it, because nothing
+            // observed the layout below the card it grew.
+            float savedScale = Cfg.UiScale;
+            try
+            {
+                foreach (float ui in Display.UiScaleLevels)
+                {
+                    Cfg.UiScale = ui;
+                    int conH = Hud.DraftContractH();
+                    foreach (var b in BoonDef.All)
+                    {
+                        var st = Hud.DraftLayout(Hud.DraftBoonLineCount(b), conH);
+                        string tag = $"{BoonDef.Code(b)}@{(int)(ui * 100)}%";
+                        int margin = Cfg.ScreenH - Hud.DraftBottomPad - st.Bottom;
+                        if (margin < _draftWorstMargin) { _draftWorstMargin = margin; _draftWorstTag = tag; }
+                        _draftWorstSqueeze = Math.Max(_draftWorstSqueeze, st.Squeeze);
+                        if (st.Overflow > 0) fails.Add($"draftStackOverflows:{tag}by{st.Overflow}px");
+                        if (st.Bottom > Cfg.ScreenH - Hud.DraftBottomPad)
+                            fails.Add($"deployRowOffScreen:{tag}@{st.Bottom}");
+                        // the doctrine card must still clear the contract header below it
+                        if (st.BoonY + st.BoonH > st.ConHeadY) fails.Add("doctrineEatsContractHead:" + tag);
+                        if (st.ConY + st.ConH > st.InfoY) fails.Add("contractEatsInfoLine:" + tag);
+                    }
+                    // THE FIT (wave "THE FIT"): this assertion used to sit OUTSIDE the scale loop,
+                    // so it only ever ran at 100% — where the longest blurb had TWO pixels of
+                    // margin and 110%/120% silently ellipsized ("picks off th…"). It belongs
+                    // inside, and the same width is now re-asserted by FITTEST leg (E).
+                    foreach (var bl in Hud.ClassBlurbsForTest())
+                        if (Cfg.Measure(bl, Hud.DraftBlurbFs, 1f).X > Hud.DraftBlurbWidth())
+                            fails.Add($"blurbEllipsizes@{(int)(ui * 100)}%:" + bl);
+                }
+            }
+            finally { Cfg.UiScale = savedScale; }
+            // ...and the operator blurb must clear the class-glyph disc VERTICALLY (the disc
+            // dropped into the corner).
+            if (Hud.DraftGlyphTop() < Hud.DraftBlurbBottom())
+                fails.Add($"glyphOverlapsBlurb({Hud.DraftGlyphTop():0}<{Hud.DraftBlurbBottom()})");
+        }
+
+        return fails.Count == 0
+            ? "CHROMETEST: PASS (action-bar rects identical across full/no-ammo/mate-down + ability "
+              + $"cooldown, CONCEALED pulse {Hud.ConcealPulseFloor:0.00}-{Hud.ConcealPulseCeil:0.00} "
+              + $"({Hud.ConcealPulseCeil / Hud.ConcealPulseFloor:0.00}x), {BoonDef.All.Length} doctrine "
+              + "cards fit their text, blurb column clears the glyph, DEPLOY row on screen for all "
+              + $"{BoonDef.All.Length} x {Display.UiScaleLevels.Length} text sizes - tightest "
+              + $"{_draftWorstTag} with {_draftWorstMargin}px to spare, max gap squeeze "
+              + $"{_draftWorstSqueeze}px)"
+            : "CHROMETEST: FAIL (" + string.Join(",", fails.Distinct()) + ")";
+    }
+
+    // W5-FIX: diagnostics for CHROMETEST's draft-stack leg — the tightest DEPLOY-row margin over
+    // the whole doctrine catalogue x every text size, so the PASS line states the headroom
+    // instead of merely asserting there is some.
+    static int _draftWorstMargin = int.MaxValue, _draftWorstSqueeze;
+    static string _draftWorstTag = "-";
+
+    static bool SameRect(Rectangle a, Rectangle b)
+        => MathF.Abs(a.X - b.X) < 0.01f && MathF.Abs(a.Y - b.Y) < 0.01f
+        && MathF.Abs(a.Width - b.Width) < 0.01f && MathF.Abs(a.Height - b.Height) < 0.01f;
+
+    // ─── WAVE "THE FIT" — the TEXT-SCALE self-test (SIGHTLINE_FITTEST=1) ───────────────────────
+    /// The standing gate this wave exists to ship. The project's five text-scale defects were all
+    /// one structural gap: **no self-test in this project ran at any text size but 100%.**
+    /// `SIGHTLINE_UISCALE` is a screenshot-only hook (Program.cs, gated on `shot`) that exists so
+    /// a human can PHOTOGRAPH the UI at another size; nothing asserted anything there, while the
+    /// game ships four scales {0.90, 1.00, 1.10, 1.20} against a lot of fixed-pixel chrome. W5's
+    /// CHROMETEST closed that gap for ONE row of ONE screen (the draft's DEPLOY row) and R2's
+    /// VOICETEST for the card BODIES; everything else was still measured once, at 1.00, or not at
+    /// all — including CHROMETEST's own `blurbEllipsizes` leg, which sat OUTSIDE its scale loop.
+    ///
+    /// FITTEST asserts the same contract for the five surfaces this wave touched, at **all four**
+    /// shipped scales, through the real font: **no string is painted outside the box that owns it,
+    /// and no two independent strings are painted into the same pixels.**
+    ///
+    ///  (A) FIELD DOCTRINE (mid-run boon offer) — every boon's wrapped body clears "[ CHOOSE ]"
+    ///      and the card's own bottom border, and the card block stays on the canvas.
+    ///  (B) ARMORY weapon row — the blurb and the right-aligned price/EQUIPPED tag never share a
+    ///      vertical band while their horizontal spans overlap, and the blurb fits its budget.
+    ///  (C) WAR ROOM HALL OF FAME — over EVERY rank x class (not the five short staged legends),
+    ///      the identity and score halves clear each other and the panel's inner border.
+    ///  (D) DRAFT bottom row — every plate contains its own widest label, and the row fits.
+    ///  (E) DRAFT operator card — the class blurb and the ABILITY line fit their columns, and the
+    ///      candidate grid fits the canvas. (This is CHROMETEST's leg, re-run at every scale.)
+    ///
+    /// Falsifiable without reverting: `SIGHTLINE_OLDFIT=1` restores all five pre-fix geometries.
+    public static string FitSelfTest()
+    {
+        var fails = new List<string>();
+        var notes = new List<string>();
+        float savedScale = Cfg.UiScale;
+        float pad = 4f;                     // px of clear air demanded between independent ink
+
+        // The tightest margin observed per leg, so the PASS line states its own headroom.
+        float mA = 9999f, mB = 9999f, mC = 9999f, mD = 9999f, mE = 9999f;
+        string tA = "-", tB = "-", tC = "-", tD = "-", tE = "-";
+        void Tight(ref float best, ref string tag, float v, string what)
+        { if (v < best) { best = v; tag = what; } }
+
+        try
+        {
+            foreach (float ui in Display.UiScaleLevels)
+            {
+                Cfg.UiScale = ui;
+                string S = $"@{(int)(ui * 100)}%";
+
+                // ---- (A) the MID-RUN FIELD DOCTRINE card ------------------------------------
+                {
+                    int lines = 1;
+                    foreach (var b in BoonDef.All) lines = Math.Max(lines, Hud.BoonOfferLineCount(b));
+                    int ch = Hud.BoonOfferCardH(lines);            // worst-case row height
+                    foreach (var b in BoonDef.All)
+                    {
+                        // the body must clear the [ CHOOSE ] call-to-action's own top edge
+                        float ink = Hud.BoonOfferInkBottom(b);
+                        float chooseTop = ch - Hud.BoonOfferChooseUp;
+                        Tight(ref mA, ref tA, chooseTop - ink, $"{BoonDef.Code(b)}{S}");
+                        if (ink + pad > chooseTop)
+                            fails.Add($"boonBodyHitsChoose:{BoonDef.Code(b)}{S}({ink:0}>{chooseTop:0})");
+                        // ...and no wrapped line may exceed the column it was wrapped to
+                        foreach (var (line, _) in Hud.WrapLinesForTest(BoonDef.Desc(b), Hud.BoonOfferBodyW, Hud.BoonOfferFs))
+                            if (Cfg.Measure(line, Hud.BoonOfferFs, 1f).X > Hud.BoonOfferBodyW + 1)
+                                fails.Add($"boonLineOverruns:{BoonDef.Code(b)}{S}");
+                    }
+                    // [ CHOOSE ] itself must land inside the card
+                    float cbot = ch - Hud.BoonOfferChooseUp + Cfg.Measure("[ CHOOSE ]", Hud.BoonOfferFs, 1f).Y;
+                    if (cbot + pad > ch) fails.Add($"chooseBelowCard{S}({cbot:0}>{ch})");
+                    // and the whole block (title 92px above, ACTIVE strip 40px below) fits the canvas
+                    int y0 = Cfg.ScreenH / 2 - ch / 2 - 10;
+                    if (y0 - 92 < 8) fails.Add($"boonTitleOffTop{S}({y0 - 92})");
+                    if (y0 + ch + 40 > Cfg.ScreenH) fails.Add($"boonBlockOffBottom{S}({y0 + ch + 40})");
+                }
+
+                // ---- (B) the ARMORY weapon row ---------------------------------------------
+                {
+                    var kinds = new List<WeaponKind>();
+                    foreach (var cls in new[] { "ASSAULT", "RANGER", "SHARPSHOOTER", "GUNNER", "CORPSMAN" })
+                        foreach (var k in Weapon.ArmoryOptions(cls))
+                            if (!kinds.Contains(k)) kinds.Add(k);
+                    int rowW = Hud.ArmoryRowW();
+                    float blurbTop = Hud.ArmoryBlurbY;
+                    float blurbBot = blurbTop + Cfg.Measure("X", Hud.ArmoryBlurbFs, 1f).Y;
+                    foreach (var k in kinds)
+                    {
+                        string blurb = Weapon.KindBlurb(k), name = Weapon.Make(k).Name;
+                        float bw = Cfg.Measure(blurb, Hud.ArmoryBlurbFs, 1f).X;
+                        float budget = Hud.ArmoryBlurbWidth();
+                        Tight(ref mB, ref tB, budget - bw, $"{k}blurb{S}");
+                        if (bw > budget) fails.Add($"armoryBlurbOverruns:{k}{S}({bw:0}>{budget:0})");
+                        if (blurbBot + pad > Hud.ArmoryRowH) fails.Add($"armoryBlurbBelowRow{S}");
+                        float nameRight = Hud.ArmoryTextX + Cfg.Measure(name, Hud.ArmoryNameFs, 1f).X;
+                        foreach (var (tag, fs) in new[] { ("EQUIPPED", Hud.ArmoryTagFs),
+                                                          ($"[ {Game.ArmoryCost} INTEL ]", Hud.ArmoryTagFs),
+                                                          ("- need intel -", Hud.ArmoryBlurbFs) })
+                        {
+                            float tw = Cfg.Measure(tag, fs, 1f).X;
+                            float tagLeft = rowW - Hud.ArmoryPadR - tw;
+                            float tagTop = Hud.ArmoryTagY, tagBot = tagTop + Cfg.Measure(tag, fs, 1f).Y;
+                            // two independent strings may share a BAND or a COLUMN, never both
+                            bool xOverlapBlurb = tagLeft < Hud.ArmoryTextX + bw + pad;
+                            bool yOverlapBlurb = tagBot + pad > blurbTop && tagTop < blurbBot + pad;
+                            if (xOverlapBlurb && yOverlapBlurb)
+                                fails.Add($"armoryTagOverprintsBlurb:{k}/{tag.Trim('[', ']', ' ')}{S}");
+                            if (tagLeft < nameRight + 12)
+                                fails.Add($"armoryTagHitsName:{k}{S}({tagLeft:0}<{nameRight:0})");
+                            if (tagBot + pad > Hud.ArmoryRowH) fails.Add($"armoryTagBelowRow:{k}{S}");
+                            if (tagTop < 2) fails.Add($"armoryTagAboveRow:{k}{S}");
+                        }
+                    }
+                }
+
+                // ---- (C) the WAR ROOM HALL OF FAME legend row ------------------------------
+                {
+                    int colW = Hud.WarColWidth;
+                    int textW = Hud.WarLegendTextW(colW);
+                    // The staged demo profile is five SHORT legends; the real one is every rank in
+                    // Run.Ranks against every player class, with a three-digit lifetime kill count
+                    // and the longest callsign + nickname the generator can produce.
+                    string worstName = "KESTREL \"MAVERICK\"";
+                    foreach (var rank in Run.Ranks)
+                        foreach (var cls in new[] { "ASSAULT", "RANGER", "SHARPSHOOTER", "GUNNER", "CORPSMAN" })
+                        {
+                            var l = new SaveGame.LegendDto
+                            { Name = worstName, Cls = cls, Rank = rank, Kills = 999, Heat = 8, Won = true };
+                            float subW = Cfg.Measure(Hud.WarLegendSub(l), Hud.WarLegendSubFs, 1f).X;
+                            Tight(ref mC, ref tC, textW - subW, $"{rank[0]}{cls[0]}sub{S}");
+                            if (subW > textW)
+                                fails.Add($"legendSubOverruns:{rank} {cls}{S}({subW:0}>{textW})");
+                            string score = Hud.WarLegendScore(l);
+                            float scw = Cfg.Measure(score, Hud.WarLegendScoreFs, 1f).X;
+                            float nameW = Cfg.Measure(l.Name, Hud.WarLegendNameFs, 1f).X;
+                            float scoreLeft = colW - Hud.WarLegendPadR - scw;
+                            float nameRight = Hud.WarLegendTextX + nameW;
+                            Tight(ref mC, ref tC, scoreLeft - nameRight, $"{rank[0]}{cls[0]}name{S}");
+                            if (score.Length > 0 && scoreLeft < nameRight + 12)
+                                fails.Add($"legendScoreHitsName:{rank}{S}({scoreLeft:0}<{nameRight:0})");
+                            if (scw > textW) fails.Add($"legendScoreOverruns{S}");
+                        }
+                }
+
+                // ---- (D) the DRAFT bottom row ----------------------------------------------
+                {
+                    int dbw = Hud.DraftConfirmW(), rrw = Hud.DraftRerollW(), bkw = Hud.DraftBackW();
+                    foreach (var dl in Hud.DraftDeployLabels())
+                    {
+                        float lw = Cfg.Measure(dl, Hud.DraftDeployFs, 1f).X;
+                        Tight(ref mD, ref tD, dbw - lw, $"DEPLOY{S}");
+                        if (lw + 8 > dbw) fails.Add($"deployLabelOverruns{S}:{dl}({lw:0}>{dbw})");
+                    }
+                    float rw = Cfg.Measure(Hud.DraftRerollLabel, Hud.DraftRerollFs, 1f).X;
+                    Tight(ref mD, ref tD, rrw - rw, $"REROLL{S}");
+                    if (rw + 8 > rrw) fails.Add($"rerollLabelOverruns{S}({rw:0}+8>{rrw})");
+                    float bw2 = Cfg.Measure("BACK", Hud.DraftBackFs, 1f).X
+                              + Cfg.Measure("[Esc]", Hud.DraftBackHintFs, 1f).X;
+                    Tight(ref mD, ref tD, bkw - bw2, $"BACK{S}");
+                    if (bw2 + 12 > bkw) fails.Add($"backLabelOverruns{S}({bw2:0}>{bkw})");
+                    if (Hud.DraftBtnRowW() > Cfg.ScreenW - 24)
+                        fails.Add($"draftBtnRowOffCanvas{S}({Hud.DraftBtnRowW()})");
+                }
+
+                // ---- (E) the DRAFT operator card's text columns -----------------------------
+                {
+                    int bw = Hud.DraftBlurbWidth(), aw = Hud.DraftAbilityWidth();
+                    foreach (var bl in Hud.ClassBlurbsForTest())
+                    {
+                        float w2 = Cfg.Measure(bl, Hud.DraftBlurbFs, 1f).X;
+                        Tight(ref mE, ref tE, bw - w2, $"blurb{S}");
+                        if (w2 > bw) fails.Add($"draftBlurbEllipsizes{S}:{bl.Substring(0, 12)}({w2:0}>{bw})");
+                    }
+                    foreach (var ab in new[] { "RUN&GUN", "BLITZ", "STEADY", "SUPPRESS", "PATCH",
+                                               "MARK", "GRAPPLE", "SLIPSTREAM", "SUPPR. FIRE" })
+                    {
+                        float w2 = Cfg.Measure("ABILITY: " + ab, Hud.DraftAbilityFs, 1f).X;
+                        Tight(ref mE, ref tE, aw - w2, $"ability{S}");
+                        if (w2 > aw) fails.Add($"draftAbilityClips{S}:{ab}");
+                    }
+                    int gridW = 3 * Hud.DraftCardW() + 2 * Hud.DraftGridGap;
+                    if (gridW > Cfg.ScreenW - 24) fails.Add($"draftGridOffCanvas{S}({gridW})");
+                }
+            }
+        }
+        finally { Cfg.UiScale = savedScale; }
+
+        notes.Add($"doctrine {mA:0}px@{tA}");
+        notes.Add($"armory {mB:0}px@{tB}");
+        notes.Add($"legend {mC:0}px@{tC}");
+        notes.Add($"draftRow {mD:0}px@{tD}");
+        notes.Add($"operatorCard {mE:0}px@{tE}");
+        return fails.Count == 0
+            ? $"FITTEST: PASS ({BoonDef.All.Length} doctrine cards, 5 weapon rows x 3 tags, "
+              + $"{Run.Ranks.Length}x5 legend rows, 5 deploy labels and the operator card fit their "
+              + $"chrome at all {Display.UiScaleLevels.Length} shipped text sizes - tightest margins: "
+              + string.Join(", ", notes) + ")"
+            : $"FITTEST: FAIL ({fails.Distinct().Count()} violations; first 14: "
+              + string.Join(",", fails.Distinct().Take(14)) + ")";
+    }
+
+
+    // ─── W5 THE FIRST HOUR — THE DOORS self-test (SIGHTLINE_QUITTEST=1) ────────────────────────
+    /// The two ways OUT of a screen that the audit found missing, pinned together because they are
+    /// the same problem: a route the player needed and could not find.
+    ///
+    ///  (A) wildcard-3 — QUIT TO DESKTOP. The pause card carried 18 controls and no exit; the main
+    ///      menu 9 entries and no exit; and `SetExitKey(KeyboardKey.Null)` means ESC deliberately
+    ///      cannot close the window either. The only sanctioned ways out were ABANDON RUN (which
+    ///      destroys the run) or alt-F4. Asserts the arm-then-confirm contract, and — the part
+    ///      that matters — that the quit path is PERSISTENCE-INERT: it writes nothing, deletes
+    ///      nothing, and leaves the mission-start checkpoint and meta.json byte-identical. That is
+    ///      what makes the confirm text ("the current mission restarts from its start") TRUE.
+    ///  (B) newplayer-2 — the end card's third door. Asserts DrawSummary publishes THREE distinct,
+    ///      non-overlapping hit-test rects, and that the third one's handler reaches the War Room.
+    ///
+    /// Runs the LIVE (non-NoPersist) path, so it stashes and restores save.json / meta.json.
+    public string QuitSelfTest()
+    {
+        var fails = new List<string>();
+        string sp = SaveGame.SavePathPublic, mp = SaveGame.MetaPathPublic;
+        bool hadSave = false, hadMeta = false;
+        string saveStash = null, metaStash = null;
+        try
+        {
+            hadSave = System.IO.File.Exists(sp); if (hadSave) saveStash = System.IO.File.ReadAllText(sp);
+            hadMeta = System.IO.File.Exists(mp); if (hadMeta) metaStash = System.IO.File.ReadAllText(mp);
+        }
+        catch { }
+
+        try
+        {
+            // ---- (A1) arm, then quit. One press must never take the window down --------------
+            {
+                var g = new Game { NoPersist = true };
+                if (g.QuitArmed || g.QuitRequested) fails.Add("quitArmedAtBoot");
+                g.RequestQuit();
+                if (!g.QuitArmed) fails.Add("firstPressDidNotArm");
+                if (g.QuitRequested) fails.Add("firstPressQuit");
+                g.RequestQuit();
+                if (!g.QuitRequested) fails.Add("secondPressDidNotQuit");
+            }
+
+            // ---- (A2) the quit path is PERSISTENCE-INERT ------------------------------------
+            {
+                var g = new Game();                     // live path
+                g.StartMission(1);                      // writes the mission-start checkpoint
+                if (!System.IO.File.Exists(sp)) fails.Add("noCheckpointAtMissionStart");
+                string saveAt = System.IO.File.ReadAllText(sp);
+                bool metaAt = System.IO.File.Exists(mp);
+                string metaBody = metaAt ? System.IO.File.ReadAllText(mp) : null;
+
+                // play forward a little so the LIVE state has diverged from the checkpoint, then quit
+                g.DebugSetTurn(4);
+                foreach (var u in g.Players) u.Hp = Math.Max(1, u.Hp - 2);
+                g.RequestQuit(); g.RequestQuit();
+                if (!g.QuitRequested) fails.Add("quitNotRequested");
+
+                if (!System.IO.File.Exists(sp)) fails.Add("quitDeletedTheCheckpoint");
+                else if (System.IO.File.ReadAllText(sp) != saveAt) fails.Add("quitRewroteTheCheckpoint");
+                if (System.IO.File.Exists(mp) != metaAt) fails.Add("quitTouchedMetaExistence");
+                else if (metaAt && System.IO.File.ReadAllText(mp) != metaBody) fails.Add("quitWroteMeta");
+
+                // and the checkpoint it kept is the MISSION-START one, so the confirm text is true
+                var resumed = SaveGame.Load();
+                if (resumed == null) fails.Add("checkpointUnreadable");
+                else if (resumed.Mission != 1) fails.Add("checkpointNotMissionStart:" + resumed.Mission);
+            }
+
+            // ---- (A3) the confirm disarms rather than latching -------------------------------
+            {
+                var g = new Game { NoPersist = true };
+                g.RequestQuit();
+                g.QuitArmed = false;                    // what closing the pause / any other control does
+                g.RequestQuit();
+                if (g.QuitRequested) fails.Add("disarmDidNotResetTheConfirm");
+            }
+
+            // ---- (B) the end card publishes THREE doors, and the third is the War Room --------
+            {
+                var g = new Game { NoPersist = true };
+                g.DebugSummary(false);                  // the staged VICTORY card
+                Raylib.BeginDrawing();
+                Hud.Draw(g);
+                Raylib.EndDrawing();
+                var a = Hud.OverlayBtn; var b = Hud.OverlayBtn2; var c = Hud.EndWarRoomBtn;
+                if (a.Width < 20 || b.Width < 20 || c.Width < 20) fails.Add("endCardMissingADoor");
+                if (Raylib.CheckCollisionRecs(a, b) || Raylib.CheckCollisionRecs(b, c) || Raylib.CheckCollisionRecs(a, c))
+                    fails.Add("endCardDoorsOverlap");
+                if (!(a.X < b.X && b.X < c.X)) fails.Add("endCardDoorOrder");
+                if (g.EndReserve < 0) fails.Add("endReserveNegative");
+                // the third door's handler
+                g.BeginWarRoom();
+                if (g.Phase != Phase.WarRoom) fails.Add("warRoomDoorDoesNotOpen");
+
+                // ...and the LOSE card, which is the one the audit called the highest-leverage
+                // retention moment in the product, publishes the same three.
+                var gl = new Game { NoPersist = true };
+                gl.DebugSummary(true);
+                Raylib.BeginDrawing();
+                Hud.Draw(gl);
+                Raylib.EndDrawing();
+                if (Hud.EndWarRoomBtn.Width < 20) fails.Add("loseCardMissingWarRoom");
+                if (gl.EndSalvage <= 0) fails.Add("loseCardBanksNoSalvage");   // the slab the subtitle explains
+            }
+        }
+        catch (Exception ex) { fails.Add("threw:" + ex.GetType().Name + ":" + ex.Message); }
+        finally
+        {
+            try
+            {
+                if (hadSave) System.IO.File.WriteAllText(sp, saveStash);
+                else if (System.IO.File.Exists(sp)) System.IO.File.Delete(sp);
+                if (hadMeta) System.IO.File.WriteAllText(mp, metaStash);
+                else if (System.IO.File.Exists(mp)) System.IO.File.Delete(mp);
+            }
+            catch { }
+        }
+
+        return fails.Count == 0
+            ? "QUITTEST: PASS (quit arms then confirms and disarms; the quit path keeps the "
+              + "mission-start checkpoint byte-identical and never touches meta.json; both end "
+              + "cards publish three non-overlapping doors and the third opens the War Room)"
+            : "QUITTEST: FAIL (" + string.Join(",", fails.Distinct()) + ")";
+    }
+
     /// TUTTEST seams: set one of the verb-performed lesson flags / the turn counter / force an end
     /// check, without reaching into private state from the test body. Harness-only.
     public void DebugSetTutFlag(string which)
@@ -4507,7 +5690,332 @@ public partial class Game
         }
     }
     public void DebugSetTurn(int t) => _turnCount = t;
+    public int DebugAnimCount => _anims.Count;
+
+    /// W9 THE REPAIR — drive the REAL Game.ResolveEvent with a single synthetic outcome. BENCHTEST
+    /// needs the whole path (EventCatalog.Apply + the report line + the re-derive), not just Apply,
+    /// because the defect lived in the CALLER: ResolveEvent mutated the roster and never re-derived
+    /// the deployment that DebriefSurvivors had already computed.
+    public void DebugResolveEventOutcome(EventOutcome o)
+    {
+        _activeEvent = new GameEvent
+        {
+            Id = "w9probe", Title = "W9 PROBE", Flavor = "-",
+            Choices = new[] { new EventChoice { Label = "-", Preview = "-", Outcome = o } },
+        };
+        _eventNode = null;
+        ResolveEvent(0);
+    }
+    /// W5 ONRAMPTEST seam: run the once-per-process meta load on THIS instance (EnsureMetaLoaded
+    /// is private and idempotent per Game), so the test can read the profile defaults it sets.
+    public void DebugLoadMeta() => EnsureMetaLoaded();
     public void DebugCheckEnd() => CheckEnd();
+
+    // ─── W5 THE FIRST HOUR — the mission-1 briefing (SIGHTLINE_BRIEFTEST=1) ────────────────────
+    /// BRIEFTEST seam: tick EXACTLY the teaching/briefing chain `Game.Update` runs, in Update's
+    /// order (Game.cs, the four calls under the global-key block). No window, no input device, no
+    /// turn flow — this is the observation instrument the W5 audit finding had no way to build,
+    /// because every existing harness path sets NoPersist and NoPersist makes StartTutorialMaybe
+    /// return before the strip ever arms.
+    public void DebugTeachTick(float dt) { UpdateTutorial(dt); UpdateTraining(dt); UpdateFieldTips(dt); UpdateBriefing(dt); }
+
+    /// BRIEFTEST seam: the tutorial half of EndPlayerTurn (Game.cs) plus the turn bump, so the
+    /// test can drive a player who is ENDING TURNS without staging a whole enemy phase.
+    public void DebugEndTurnTutorial() { if (TutStep >= 0 && TutStep < TutStepDone) AdvanceTutorial(); _turnCount++; }
+
+    /// SIGHTLINE_BRIEFTEST — PROGRAM RESONANCE W5 "THE FIRST HOUR".
+    ///
+    /// THE DEFECT THIS TEST EXISTS TO PIN. On a FIRST-EVER campaign run, mission 1's briefing —
+    /// RESONANCE C1's entire narrative frame, the faction, the region, the reason the squad is on
+    /// this field — could not draw. `BriefAllowed` requires `TutorialText == null`; the mission-1
+    /// lesson strip is non-null from the moment `SetupMission` arms it; `UpdateBriefing` nulls the
+    /// card outright the instant `Stats.CombatLog` fills, and the log fills on the first shot by
+    /// either side. So the card spent the whole strip HOLDING (never burning its 11 s clock) and
+    /// was then destroyed by the first exchange — or by `BriefHoldMax` (45 s), whichever came
+    /// first. Mission 1 is the only mission a first-time player is guaranteed to see.
+    ///
+    /// The fix is an ORDERING one: on mission 1 the briefing is a PRE-FIGHT beat and goes FIRST —
+    /// `StartTutorialMaybe` arms the strip PENDING (`TutPending`), and `UpdateTutorial` opens it
+    /// the moment the card retires. Verb staging is live throughout, so the action bar does not
+    /// flicker between whole and staged. `TutStepFire` also gains the turn-count patience fallback
+    /// its three siblings already had.
+    ///
+    /// Every leg runs a LIVE (NoPersist == false) game — that is the whole point — so the real
+    /// display.json / save.json / meta.json are stashed and restored around the body.
+    public string BriefingSelfTest()
+    {
+        var fails = new List<string>();
+        const float Dt = 1f / 60f;
+
+        string dispPath = Display.SettingsPathPublic;
+        string sp = SaveGame.SavePathPublic, mp = SaveGame.MetaPathPublic;
+        bool hadDisp = false, hadSave = false, hadMeta = false;
+        string dispStash = null, saveStash = null, metaStash = null;
+        try
+        {
+            hadDisp = System.IO.File.Exists(dispPath); if (hadDisp) dispStash = System.IO.File.ReadAllText(dispPath);
+            hadSave = System.IO.File.Exists(sp); if (hadSave) saveStash = System.IO.File.ReadAllText(sp);
+            hadMeta = System.IO.File.Exists(mp); if (hadMeta) metaStash = System.IO.File.ReadAllText(mp);
+        }
+        catch { }
+        bool savedTut = Display.TutorialSeen, savedShow = Display.ShowAllVerbs;
+        int savedTips = Display.TipsSeen;
+
+        // Drive `secs` seconds of an IDLE, READING player and return (a) how many of them the
+        // briefing card spent burning its own clock — the MODEL — and (b) on how many of those
+        // frames Hud.DrawBriefCard actually RAN — the DRAW.
+        //
+        // W5-FIX (review blocker 5): (b) is new and it is the point. This test certified "the
+        // briefing plays its full 11 s" while observing only `Game.BriefTimer` and `BriefLines`,
+        // i.e. the model's own `BriefAllowed` predicate re-read back. A reviewer put a one-line
+        // `&& false` on the dispatch in Hud.Draw so the card is never drawn; it built clean and
+        // still PASSed with the full 11 s. A test that cannot see the thing it certifies is not a
+        // test — so every watched frame now paints a REAL frame through Hud.Draw and counts the
+        // card's own paints. (The window is 64x64; raylib clips, and the cost is the reason the
+        // watch runs at the tick rate and not faster.)
+        (float shown, int drawn) Watch(Game g, float secs)
+        {
+            float shown = 0f; int drawn = 0;
+            for (int i = 0; i < (int)(secs * 60); i++)
+            {
+                float before = g.BriefLines != null ? g.BriefTimer : -1f;
+                g.DebugTeachTick(Dt);
+                Hud.BriefCardDraws = 0;
+                Raylib.BeginDrawing();
+                Hud.Draw(g);
+                Raylib.EndDrawing();
+                if (Hud.BriefCardDraws > 0) drawn++;
+                if (before >= 0f && g.BriefLines != null && g.BriefTimer < before) shown += before - g.BriefTimer;
+            }
+            return (shown, drawn);
+        }
+
+        try
+        {
+            Display.TipsSeen = ~0;        // burn every just-in-time field tip: this test is about
+            Display.ShowAllVerbs = false; // the LESSON strip, and a tip would be a second variable
+
+            // ---- (A) THE FIRST-EVER RUN. The card must play, in full, before the strip opens ----
+            Display.TutorialSeen = false;
+            var g = new Game();                       // NoPersist deliberately FALSE — the live path
+            g.StartMission(1);
+            if (g.BriefLines == null) fails.Add("briefNotComposed");
+            if (g.BriefHead == null) fails.Add("briefHeadMissing");
+            if (Stats.CombatLog.Count != 0) fails.Add("logNotEmptyAtMissionStart");
+            // The strip is ARMED but DEFERRED, and the bar is staged the whole time (no flicker
+            // between a whole bar during the briefing and a staged one after it).
+            if (!g.TutPending) fails.Add("stripNotArmedPending");
+            if (g.TutorialText != null) fails.Add("stripOpenedOverTheBriefing");
+            if (!g.OnboardingActive) fails.Add("stagingOffDuringBriefing");
+            if (!g.VerbStagingActive) fails.Add("verbStagingOffDuringBriefing");
+
+            // 12 s of a player reading: the card is 11 s (BriefShowSeconds) and must burn nearly
+            // all of it. THIS IS THE HEADLINE ASSERTION and it measured 0.00 s before the fix.
+            var (shown, drawn) = Watch(g, 12f);
+            if (shown < BriefShowSeconds - 0.5f)
+                fails.Add($"briefShownOnlyFor{shown:0.00}sOf{BriefShowSeconds:0}s");
+            // ...and the card was PAINTED on those frames. Model and draw, separately observed.
+            int wantFrames = (int)((BriefShowSeconds - 0.5f) * 60f);
+            if (drawn < wantFrames)
+                fails.Add($"briefCardDrawnOnOnly{drawn}framesOf{wantFrames}");
+            if (g.BriefLines != null) fails.Add("briefNeverRetired");
+            // ...and the strip opens the moment the card retires — the lesson is not lost, it is
+            // re-ordered. TutStepConceal holds while the squad is concealed on turn 1.
+            if (g.TutPending) fails.Add("stripStillPendingAfterBrief");
+            if (g.TutStep != TutStepConceal) fails.Add("stripDidNotOpenAfterBrief:" + g.TutStep);
+            if (g.TutorialText == null) fails.Add("stripTextNullAfterBrief");
+
+            // ---- (B) the strip still RUNS and still COMPLETES (the fix reorders, never removes) --
+            for (int t = 0; t < 6 && g.TutStep >= 0 && g.TutStep < TutStepDone; t++)
+            { g.DebugEndTurnTutorial(); g.DebugTeachTick(Dt); }
+            if (g.TutStep != TutStepDone) fails.Add("stripDidNotReachDone:" + g.TutStep);
+            for (int i = 0; i < 60 * 9; i++) g.DebugTeachTick(Dt);   // the 7 s wrap-up dwell
+            if (g.TutStep != -1) fails.Add("stripDidNotComplete:" + g.TutStep);
+            if (!Display.TutorialSeen) fails.Add("completionDidNotMarkSeen");
+
+            // ---- (C) TutStepFire's patience fallback (its three siblings have had one for waves) --
+            {
+                Display.TutorialSeen = false;
+                var pg = new Game();
+                pg.StartMission(1);
+                pg.ShowTutorialStep(TutStepFire);
+                pg.DebugSetTurn(TutFirePatience - 1);
+                pg.DebugTeachTick(Dt);
+                if (pg.TutStep != TutStepFire) fails.Add("fireStepYieldedEarly");   // not before its turn
+                pg.DebugSetTurn(TutFirePatience);
+                pg.DebugTeachTick(Dt);
+                if (pg.TutStep == TutStepFire) fails.Add("fireStepHasNoPatienceFallback");
+                // and the shot still ends it immediately, whatever the turn count
+                Display.TutorialSeen = false;
+                var sg = new Game();
+                sg.StartMission(1);
+                sg.ShowTutorialStep(TutStepFire);
+                sg.DebugSetTutFlag("shot");
+                sg.DebugTeachTick(Dt);
+                if (sg.TutStep == TutStepFire) fails.Add("fireStepIgnoredTheShot");
+            }
+
+            // ---- (D) THE CONTROL. A RETURNING player (TutorialSeen) has no strip, so the card has
+            //          always worked for them. If this leg ever failed, the test would be measuring
+            //          something other than the tutorial interaction.
+            {
+                Display.TutorialSeen = true;
+                var rg = new Game();
+                rg.StartMission(1);
+                if (rg.TutPending || rg.TutStep >= 0) fails.Add("stripArmedForReturningPlayer");
+                var (rshown, rdrawn) = Watch(rg, 12f);
+                if (rshown < BriefShowSeconds - 0.5f) fails.Add($"controlBriefShownOnlyFor{rshown:0.00}s");
+                if (rdrawn < (int)((BriefShowSeconds - 0.5f) * 60f))
+                    fails.Add($"controlBriefCardDrawnOnOnly{rdrawn}frames");
+            }
+
+            // ---- (E) the combat log still retires the card — the pre-fight contract is intact ----
+            {
+                Display.TutorialSeen = true;
+                var lg = new Game();
+                lg.StartMission(1);
+                Stats.Log(1, (int)Team.Player, "BRIEFTEST synthetic exchange");
+                lg.DebugTeachTick(Dt);
+                if (lg.BriefLines != null) fails.Add("logDidNotRetireTheCard");
+                Stats.ClearLog();
+            }
+
+            // ---- (F) non-campaign modes still say nothing (the briefing is campaign vocabulary) --
+            {
+                var tg = new Game { NoPersist = true };
+                tg.BeginTraining();
+                if (tg.BriefLines != null) fails.Add("drillComposedABriefing");
+            }
+        }
+        catch (Exception ex) { fails.Add("threw:" + ex.GetType().Name + ":" + ex.Message); }
+        finally
+        {
+            Display.TutorialSeen = savedTut; Display.ShowAllVerbs = savedShow; Display.TipsSeen = savedTips;
+            Stats.ClearLog();
+            try
+            {
+                if (hadDisp) System.IO.File.WriteAllText(dispPath, dispStash);
+                else if (System.IO.File.Exists(dispPath)) System.IO.File.Delete(dispPath);
+                if (hadSave) System.IO.File.WriteAllText(sp, saveStash);
+                else if (System.IO.File.Exists(sp)) System.IO.File.Delete(sp);
+                if (hadMeta) System.IO.File.WriteAllText(mp, metaStash);
+                else if (System.IO.File.Exists(mp)) System.IO.File.Delete(mp);
+            }
+            catch { }
+        }
+
+        return fails.Count == 0
+            ? "BRIEFTEST: PASS (live first-ever mission 1: briefing plays AND IS DRAWN for its full "
+              + $"{BriefShowSeconds:0}s pre-fight, strip opens after it with staging unbroken, strip still "
+              + $"completes, FIRE lesson yields at turn {TutFirePatience}, returning-player control + "
+              + "combat-log retirement + drill silence)"
+            : "BRIEFTEST: FAIL (" + string.Join(",", fails.Distinct()) + ")";
+    }
+
+    // ─── W5-FIX — the BACKDROP registry (SIGHTLINE_BACKDROPTEST=1) ─────────────────────────────
+    /// SIGHTLINE_BACKDROPTEST — the STRUCTURAL gate for review blocker 1.
+    ///
+    /// THE DEFECT THIS TEST EXISTS TO PIN. W5-2 split the frame so the animated full-screen
+    /// backdrops render into the BLOOM SOURCE (before `Display.BuildBloom`) and the chrome renders
+    /// after it. `Hud.DrawBackdropLayer` was made the home of every backdrop... except AUDIO
+    /// CHECK's, which stayed inside `Hud.DrawAudition`, i.e. in the CHROME pass. The composite
+    /// then added `glow * 1.45` computed from the LIVE BOARD on top of an opaque audition screen:
+    /// measured against a d350416 build with post-FX on, 17,010 px brightened by more than 20
+    /// luma, 8,640 by more than 40, peak +154 — worst over the MASTER and MUSIC fader rows. The
+    /// screen ships reachable from the intro AND from the pause card mid-mission, and
+    /// `Display.PostFX` defaults true, so it shipped to everyone.
+    ///
+    /// WHY NOTHING CAUGHT IT. Three source comments and the DEVLOG all asserted that AUDIO CHECK
+    /// "draws no backdrop". CONTRASTTEST reads nine main-menu labels and could never have seen it,
+    /// and cannot see the NEXT phase added without a `DrawBackdropLayer` entry either. So this
+    /// test does not check a screen — it checks the INVARIANT, over every Phase that exists:
+    ///
+    ///   (A) NO phase paints a full-screen backdrop from the CHROME pass. Ever. This is the one
+    ///       that fails on the pre-fix tree (`SIGHTLINE_AUDBACKDROP=1` restores the defect).
+    ///   (B) `Hud.BackdropPhase` and `DrawBackdropLayer`'s switch agree exactly — a phase in the
+    ///       registry must paint, a phase out of it must not. A future screen with a backdrop and
+    ///       no registry entry paints its chrome over the main menu; one in the registry with no
+    ///       backdrop loses its top bar entirely.
+    ///   (C) the modal scrim is laid in the bloom-source pass ONLY when the composite is actually
+    ///       running — with post-FX off there is no bright pass to attenuate, and the second wash
+    ///       cost 40% of the board's luminance under the pause card for nothing.
+    ///
+    /// The observation point is `Hud.BackdropPaints`, incremented inside `DrawTacticalBackdrop`
+    /// itself — the draw, not a predicate about the draw.
+    public string BackdropSelfTest()
+    {
+        var fails = new List<string>();
+        var phases = (Phase[])Enum.GetValues(typeof(Phase));
+        bool savedFx = Display.PostFX, savedEn = Display.Enabled;
+        try
+        {
+            var g = new Game { NoPersist = true };
+            g.StartMission(1);
+            g.BeginDraft();          // populate the draft pool/offer so DrawDraft has content
+            g.Phase = Phase.PlayerTurn;
+
+            // ---- (A) the chrome pass paints NO backdrop, for any phase ------------------------
+            foreach (var p in phases)
+            {
+                g.Phase = p;
+                Hud.BackdropPaints = 0;
+                try
+                {
+                    Raylib.BeginDrawing();
+                    Hud.Draw(g);
+                    Raylib.EndDrawing();
+                }
+                catch (Exception ex) { fails.Add($"chromeThrew:{p}:{ex.GetType().Name}"); continue; }
+                if (Hud.BackdropPaints != 0) fails.Add($"backdropFromChromePass:{p}");
+            }
+
+            // ---- (B) the registry and the switch are the same set -----------------------------
+            foreach (var p in phases)
+            {
+                g.Phase = p;
+                Hud.BackdropPaints = 0;
+                try
+                {
+                    Raylib.BeginDrawing();
+                    Hud.DrawBackdropLayer(g);
+                    Raylib.EndDrawing();
+                }
+                catch (Exception ex) { fails.Add($"backdropThrew:{p}:{ex.GetType().Name}"); continue; }
+                bool painted = Hud.BackdropPaints > 0;
+                bool owns = Hud.BackdropPhase(p);
+                if (painted && !owns) fails.Add($"paintsButNotInRegistry:{p}");
+                if (owns && !painted) fails.Add($"inRegistryButPaintsNothing:{p}");
+            }
+            // AUDIO CHECK by name — this is the whole point, and a name is harder to delete by
+            // accident than a set membership.
+            if (!Hud.BackdropPhase(Phase.AudioCheck)) fails.Add("audioCheckNotInRegistry");
+
+            // ---- (C) the modal scrim only doubles up where the bright pass exists -------------
+            {
+                // BARRACKS, not PAUSE: the pause wash is multiplied by a time-based entrance tween
+                // that reads 0 on its first frame, so it is not a fixed quantity to assert on.
+                // The barracks family's wash is a constant and covers the same code path.
+                g.Phase = Phase.Barracks;
+                float lit = Hud.BloomScrimAlpha(g, true);
+                float dark = Hud.BloomScrimAlpha(g, false);
+                g.Phase = Phase.PlayerTurn;
+                if (lit <= 0f) fails.Add($"scrimMissingUnderPostFx:{lit:0.00}");
+                if (dark != 0f) fails.Add($"scrimDoubledWithPostFxOff:{dark:0.00}");
+                // ...and a phase with its own opaque backdrop must not also be scrimmed.
+                g.Phase = Phase.Intro;
+                if (Hud.BloomScrimAlpha(g, true) != 0f) fails.Add("scrimOverAnOpaqueBackdrop");
+                g.Phase = Phase.PlayerTurn;
+            }
+        }
+        catch (Exception ex) { fails.Add("threw:" + ex.GetType().Name + ":" + ex.Message); }
+        finally { Display.PostFX = savedFx; Display.Enabled = savedEn; }
+
+        return fails.Count == 0
+            ? $"BACKDROPTEST: PASS (all {phases.Length} phases: none paints a backdrop from the chrome "
+              + "pass; DrawBackdropLayer's switch == Hud.BackdropPhase exactly, AUDIO CHECK included; "
+              + "modal scrim doubles only when the composite runs)"
+            : "BACKDROPTEST: FAIL (" + string.Join(",", fails.Distinct()) + ")";
+    }
 
     /// SIGHTLINE_ONRAMPTEST — PROGRAM RESONANCE W5 "ON-RAMP". Two features, one test:
     ///
@@ -4527,6 +6035,147 @@ public partial class Game
     /// floor (a trim can never take the force below 3 bodies), determinism, and the shipped
     /// default, so a future wave cannot silently un-ship the repair that moved mission 1 from
     /// 75% to 100% (DEVLOG §X2).
+    /// SIGHTLINE_HVTTEST — RESONANCE W8 "THE HALF WALL". Pins DECAPITATE's punch-through target,
+    /// `Game.DesignateHvt`, because the objective's difficulty is almost entirely that one body and
+    /// nothing pinned it. What this pins, and why each clause exists:
+    ///
+    ///  (1) THE SELECTION RULE — the HVT is the toughest NON-SPECIAL alive hostile, and it is
+    ///      always a member of Enemies (a legal, clickable, shootable target). A TURRET/MEDIC/
+    ///      SAPPER/SHIELD/DRONE/MORTAR makes a poor punch-through and is excluded whenever any
+    ///      other body exists. If this rule ever drifts, "kill the HVT" silently becomes a
+    ///      different mission.
+    ///  (2) THE ELITE EXEMPTION AND ITS ASYMMETRY — the whole reason this wave exists. A named
+    ///      boss (the m6 finale, and the m3/m5 mid-boss) is already tuned, so it takes the HVT
+    ///      marker and NO statline buff; a rank-and-file HVT on any other mission takes the full
+    ///      buff. The finale is therefore the ONLY Decapitate the buff never touches, which is
+    ///      how the mid-run case ended up 23.7 points harder than the climax (L2, n=163/479).
+    ///      Both halves are asserted, so neither can move without this test noticing.
+    ///  (3) THE EXACT MAGNITUDE, at several depths — `+(HvtHpBonusBase + HvtHpBonusPerMission *
+    ///      mission)` HP and `+HvtAimBonus` aim (aim clamped at 85), measured as a DIFFERENCE
+    ///      against the same seed built with the buff zeroed, so it pins the arithmetic and not
+    ///      an archetype's statline.
+    ///  (4) THE SHIPPED DEFAULTS — 6 / 1 / 6, i.e. the pre-W8 literal `6 + _run.Mission` and `+6`
+    ///      exactly. W8 moved those numbers out of the method body and behind three dials; this
+    ///      clause is what stops the move from silently becoming a balance change, and it is the
+    ///      clause `SIGHTLINE_HVTBUFF=<anything but 6>` makes FAIL.
+    ///  (5) THE DIALS ARE REAL — zeroing them must actually produce a weaker HVT (a dial that is
+    ///      a no-op would make every future measured round a lie), and a negative depth
+    ///      coefficient must floor the bonus at 0 rather than going through zero.
+    ///  (6) NO HVT OFF-OBJECTIVE — an Eliminate mission leaves Hvt null and HvtBuffed false, so
+    ///      the balance telemetry's `hvtKind = -1` row means what it says.
+    public string HvtSelfTest()
+    {
+        NoPersist = true;
+        var fails = new List<string>();
+        int sBase = Combat.HvtHpBonusBase, sPer = Combat.HvtHpBonusPerMission, sAim = Combat.HvtAimBonus;
+
+        bool IsSpecialCls(string c) => c == "TURRET" || c == "MEDIC" || c == "SAPPER"
+                                    || c == "SHIELD" || c == "DRONE" || c == "MORTAR";
+
+        // Build one Decapitate mission at a given depth/seed with the buff dials pinned.
+        void Build(int mission, int seed, int bBase, int bPer, int bAim, Objective obj = Objective.Decapitate)
+        {
+            Combat.HvtHpBonusBase = bBase; Combat.HvtHpBonusPerMission = bPer; Combat.HvtAimBonus = bAim;
+            Util.Reseed(seed);
+            _run = new Run(); _run.Start();
+            _run.HeatLevel = 0;
+            _run.CurrentCard = new MissionCard { Objective = obj, ModName = "STANDARD", Reward = RewardKind.None };
+            SetupMission(mission);
+        }
+
+        try
+        {
+            // ---- (4) the shipped defaults ARE the pre-W8 arithmetic ---------------------------
+            if (sBase != 6) fails.Add("shippedHpBase=" + sBase);
+            if (sPer != 1) fails.Add("shippedHpPerMission=" + sPer);
+            if (sAim != 6) fails.Add("shippedAim=" + sAim);
+            for (int m = 1; m <= Run.MaxMissions; m++)
+            {
+                Combat.HvtHpBonusBase = sBase; Combat.HvtHpBonusPerMission = sPer;
+                if (Combat.HvtHpBonus(m) != 6 + m) fails.Add($"bonus(m{m})={Combat.HvtHpBonus(m)}");
+            }
+            // (5b) a negative depth coefficient flattens the buff but never inverts it
+            Combat.HvtHpBonusBase = 2; Combat.HvtHpBonusPerMission = -5;
+            if (Combat.HvtHpBonus(6) != 0) fails.Add("bonusFloor=" + Combat.HvtHpBonus(6));
+            Combat.HvtHpBonusBase = sBase; Combat.HvtHpBonusPerMission = sPer;
+
+            // ---- (1)(2)(3) over a spread of seeds and depths ---------------------------------
+            int buffedSeen = 0, exemptSeen = 0;
+            foreach (int seed in new[] { 1301, 4242, 90210, 777 })
+            {
+                for (int m = 1; m <= Run.MaxMissions; m++)
+                {
+                    Build(m, seed, sBase, sPer, sAim);
+                    var live = Enemies.Where(e => e.Alive).ToList();
+                    if (Hvt == null) { fails.Add($"noHvt s{seed} m{m}"); continue; }
+
+                    // (1) a legal target: alive, hostile, and actually on the board.
+                    if (!Hvt.Alive || Hvt.Team != Team.Enemy || !Enemies.Contains(Hvt))
+                        fails.Add($"illegalHvt s{seed} m{m}");
+                    // (1) specials are excluded whenever any non-special body exists.
+                    if (live.Any(e => !IsSpecialCls(e.Cls)) && IsSpecialCls(Hvt.Cls))
+                        fails.Add($"specialHvt s{seed} m{m} {Hvt.Cls}");
+
+                    // (2) the exemption keys on ELITE, both ways.
+                    if (HvtBuffed != (Hvt.Cls != "ELITE")) fails.Add($"exemptFlag s{seed} m{m} {Hvt.Cls}");
+                    if (HvtBuffed) buffedSeen++; else exemptSeen++;
+
+                    // (3) magnitude: rebuild the SAME world with the buff zeroed and difference it.
+                    int hpOn = Hvt.MaxHp, aimOn = Hvt.Aim; string cls = Hvt.Cls, name = Hvt.Name;
+                    Build(m, seed, 0, 0, 0);
+                    if (Hvt == null) { fails.Add($"noHvtZeroed s{seed} m{m}"); continue; }
+                    if (Hvt.Cls != cls) { fails.Add($"unstableHvt s{seed} m{m}"); continue; }
+                    int wantHp = cls == "ELITE" ? 0 : 6 + m;
+                    int wantAim = cls == "ELITE" ? 0 : Math.Min(85, Hvt.Aim + 6) - Hvt.Aim;
+                    if (hpOn - Hvt.MaxHp != wantHp) fails.Add($"hpDelta s{seed} m{m} {hpOn - Hvt.MaxHp}!={wantHp}");
+                    if (aimOn - Hvt.Aim != wantAim) fails.Add($"aimDelta s{seed} m{m} {aimOn - Hvt.Aim}!={wantAim}");
+                    // (5) the dial is not a no-op on a body that is supposed to take it.
+                    if (cls != "ELITE" && hpOn <= Hvt.MaxHp) fails.Add($"dialNoOp s{seed} m{m}");
+                    // (1) toughest non-special: nothing else non-special out-bulks the UNBUFFED HVT.
+                    int hvtBase = Hvt.MaxHp;
+                    foreach (var e in Enemies.Where(e => e.Alive && !IsSpecialCls(e.Cls) && e != Hvt))
+                        if (e.MaxHp > hvtBase) { fails.Add($"notToughest s{seed} m{m} {e.Cls}{e.MaxHp}>{hvtBase}"); break; }
+                    // (2) the name marker follows the buff branch exactly.
+                    if ((cls != "ELITE") != name.StartsWith("HVT-")) fails.Add($"marker s{seed} m{m} {name}");
+                }
+            }
+            // both populations must actually have been exercised, or the asymmetry above is vacuous.
+            if (buffedSeen == 0) fails.Add("noBuffedCaseSeen");
+            if (exemptSeen == 0) fails.Add("noExemptCaseSeen");
+
+            // ---- (2) THE ASYMMETRY, stated as the wave found it ------------------------------
+            // The campaign FINALE is always an ELITE and therefore always exempt; a mid-run
+            // Decapitate at m2/m4 is always a rank-and-file body and therefore always buffed.
+            foreach (int seed in new[] { 1301, 4242, 90210, 777 })
+            {
+                Build(Run.MaxMissions, seed, sBase, sPer, sAim);
+                if (Hvt == null || Hvt.Cls != "ELITE" || HvtBuffed) fails.Add($"finaleNotExempt s{seed}");
+                foreach (int m in new[] { 2, 4 })
+                {
+                    Build(m, seed, sBase, sPer, sAim);
+                    if (Hvt == null || Hvt.Cls == "ELITE" || !HvtBuffed) fails.Add($"midRunNotBuffed s{seed} m{m}");
+                }
+            }
+
+            // (4b) the autopilot's HVT focus policy ships ON — it is the policy every published
+            //      Decapitate number was measured through, so its default is part of the contract.
+            if (!SmartHvtFocus) fails.Add("hvtPolicyDefaultOff");
+
+            // ---- (6) no HVT on any other objective -------------------------------------------
+            Build(3, 4242, sBase, sPer, sAim, Objective.Eliminate);
+            if (Hvt != null || HvtBuffed) fails.Add("hvtLeakedOffObjective");
+        }
+        finally
+        {
+            Combat.HvtHpBonusBase = sBase; Combat.HvtHpBonusPerMission = sPer; Combat.HvtAimBonus = sAim;
+        }
+
+        return fails.Count == 0
+            ? "HVTTEST: PASS (toughest non-special, always a legal target; ELITE exempt and mid-run buffed; "
+              + "+6+1*mission HP / +6 aim at every depth; dials real, floored, default-identical; no HVT off-objective)"
+            : "HVTTEST: FAIL " + string.Join(", ", fails);
+    }
+
     public string OpenerSelfTest()
     {
         NoPersist = true;
@@ -4803,8 +6452,57 @@ public partial class Game
             Display.AnimSpeedIdx = savedAnim; Display.UiScaleIdx = savedScale; Cfg.UiScale = savedCfg;
         }
 
+
+        // ── (C) W5 THE FIRST HOUR: the on-ramp is now the DEFAULT on a never-played profile ────
+        // Audit newplayer-4: RECRUIT was always selectable and always unlabelled, so nothing at
+        // level 0 hinted anything existed below it, and the copy framed 0 as the floor. The
+        // archived X2 ladder (n=40/rung, base a61ef42) puts RECRUIT at 75.0% run completion
+        // against heat 0's 57.5% — a 17.5-point gap outside the +-6-8 error bar, i.e. roughly two
+        // in five first campaigns ended in a loss the on-ramp exists to prevent.
+        //
+        // This asserts a DEFAULT, not a rung: (A) above is what pins the rung's actual numbers,
+        // and they are untouched. It runs the LIVE (non-NoPersist) path — the whole point is what
+        // a real profile does — so it stashes and restores save.json / meta.json.
+        {
+            string sp2 = SaveGame.SavePathPublic, mp2 = SaveGame.MetaPathPublic;
+            bool hadS = false, hadM = false; string sStash = null, mStash = null;
+            try
+            {
+                hadS = System.IO.File.Exists(sp2); if (hadS) sStash = System.IO.File.ReadAllText(sp2);
+                hadM = System.IO.File.Exists(mp2); if (hadM) mStash = System.IO.File.ReadAllText(mp2);
+                if (System.IO.File.Exists(mp2)) System.IO.File.Delete(mp2);   // a never-played profile
+
+                var fresh = new Game { NoPersist = false };
+                fresh.DebugLoadMeta();
+                if (!fresh.FirstTimeProfile) fails.Add("freshProfileNotFlagged");
+                if (fresh.PendingHeat != Sightline.Heat.Recruit)
+                    fails.Add("freshProfilePendingHeat=" + fresh.PendingHeat);
+                if (fresh.UnlockedHeat != 0) fails.Add("freshProfileUnlocked=" + fresh.UnlockedHeat);
+
+                // ...and a profile that HAS finished a run keeps the standard rung. The default is
+                // an on-ramp for a first-timer, never a silent difficulty drop for a returning one.
+                SaveGame.RecordRunTotals(false, 2);
+                var seasoned = new Game { NoPersist = false };
+                seasoned.DebugLoadMeta();
+                if (seasoned.FirstTimeProfile) fails.Add("seasonedProfileFlaggedFresh");
+                if (seasoned.PendingHeat != 0) fails.Add("seasonedProfilePendingHeat=" + seasoned.PendingHeat);
+            }
+            catch (Exception ex) { fails.Add("onRampDefaultThrew:" + ex.GetType().Name); }
+            finally
+            {
+                try
+                {
+                    if (hadS) System.IO.File.WriteAllText(sp2, sStash);
+                    else if (System.IO.File.Exists(sp2)) System.IO.File.Delete(sp2);
+                    if (hadM) System.IO.File.WriteAllText(mp2, mStash);
+                    else if (System.IO.File.Exists(mp2)) System.IO.File.Delete(mp2);
+                }
+                catch { }
+            }
+        }
+
         return fails.Count == 0
-            ? "ONRAMPTEST: PASS (RECRUIT rung -1: data row + built mission -1 body and -1 stat on EVERY shared rank-and-file class, over a 12-seed sweep, at m1 AND m3; 5-turn bleed-out, checkpoint from m1 and once only, no mutator leak, no negative intel; heat 0 untouched; anim speed pinned 1x under AutoPlay/NoPersist; text scale symmetric + tapered; both settings round-trip, clamp, and default on a pre-W5 profile)"
+            ? "ONRAMPTEST: PASS (RECRUIT rung -1: data row + built mission -1 body and -1 stat on EVERY shared rank-and-file class, over a 12-seed sweep, at m1 AND m3; 5-turn bleed-out, checkpoint from m1 and once only, no mutator leak, no negative intel; heat 0 untouched; anim speed pinned 1x under AutoPlay/NoPersist; text scale symmetric + tapered; both settings round-trip, clamp, and default on a pre-W5 profile; W5: a zero-run profile DEFAULTS to RECRUIT and a played one does not)"
             : "ONRAMPTEST: FAIL (" + string.Join(",", fails.Distinct()) + ")";
     }
 
@@ -4942,8 +6640,841 @@ public partial class Game
         return sb.ToString();
     }
 
+
+    // ================= W4 "THE BOARD BECOMES A PLACE" — BOARDTEST ================================
+    // The one self-test in this project that measures RENDERED PIXELS rather than game state, and
+    // it exists because the defect it guards is a rendering defect that no state test can see: at
+    // base commit d350416 a DORMANT POD measured peak luminance 219.9 while the SELECTED SOLDIER
+    // measured 188.1 and a LIVE HOSTILE 211.1 — the squint hierarchy in docs/DESIGN.md 3.H
+    // ("the focal element is the brightest"; "neutral/inactive is dimmed toward the background")
+    // was running exactly backwards, and nine programs of balance work could not see it.
+    //
+    // The test stages a fixed three-token scene on a real mission board, draws ONE real frame
+    // through the shipped Game.Draw path, screenshots it, and probes the pixels:
+    //   GATE A (value hierarchy): peak AND mean luminance of a 14px patch on each token must run
+    //           SELECTED SOLDIER > LIVE HOSTILE > DORMANT POD, with >= 8 luma of margin so the
+    //           move overlay's alpha-15 whisper tint cannot flip a verdict.
+    //   GATE B (cover merge): on a horizontally adjacent same-type cover pair, the scanline from
+    //           one tile centre to the other must contain no FLOOR-coloured gutter. Pre-wave (and
+    //           under SIGHTLINE_COVERMERGE=0) that scanline crosses ~10px of visible floor,
+    //           because DrawCover inset every tile on all four sides with no neighbour test.
+    //   GATE C (the reserved objective gold): Pal.MoveDash must not share Pal.Accent's RGB bytes.
+    //   GATE D (dash on demand): the default interactive frame draws the WALK contour and NOT the
+    //           dash region.
+    //   GATE E (the cover volume's identity survives damage): a stamped four-tile HighCover run is
+    //           drawn, its NW-most tile is then destroyed through the real Grid.DamageCover path,
+    //           and the run's FAR tile must come back BYTE-IDENTICAL. Before the W4 review fix the
+    //           volume's identity was the live minimum tile index, so losing the end of a wall
+    //           re-rolled the material form and the footprint jitter of every surviving tile.
+    //
+    // THE CLOCK IS PINNED (Renderer.TimePin) for the whole test. A pixel probe cannot sample an
+    // unpinned animation phase and call the number a result: ten runs of the LEGACY path on one
+    // binary gave a bimodal SELECTED peak of 166.8 (x3) / 188.1 (x7), because the selection halo
+    // pulses 0.55 + 0.40*sin(t*5) on Pal.Accent. The pin is set to the phase where that halo is at
+    // its DIMMEST (sin = -1), which is the hardest moment for the gate that protects the selected
+    // soldier's primacy, and it makes gate E's byte-identity comparison possible at all.
+    //
+    // GATE A runs TWICE: once in the normal palette and once through Pal.SetColorblind(true). The
+    // value rungs are stated as target LUMINANCE rather than as mix fractions precisely so the
+    // ordering survives the colourblind remap (Pal.Foe changes hue AND luma), and until this the
+    // claim had no coverage at all — SIGHTLINE_CB is read far below this hook in Program.cs.
+    //
+    // FAILS on the pre-wave tree: run it with SIGHTLINE_TOKENSTYLE=0 (gate A), SIGHTLINE_COVERMERGE=0
+    // (gate B) or SIGHTLINE_MOVESTYLE=0 (gate D) and it reports the pre-wave numbers and FAILs.
+    public string BoardSelfTest()
+    {
+        var sb = new System.Text.StringBuilder();
+        var fails = new List<string>();
+        NoPersist = true;
+        // Pin the CLOCK as well as the world: 45 wall-clock reads in Renderer.cs drive animation,
+        // and the legacy path's headline number swung 21 luma between runs of one binary because
+        // of it. t = 3*pi/10 puts the selection halo's 5 rad/s pulse at its minimum; that is a
+        // stated constant, not a claim about which element owned the swing. Under it the legacy
+        // path prints ONE number, 188.1, ten runs out of ten, and the shipped path's 201.7 is
+        // phase-independent (measured across seven pins, 0..12s).
+        bool cbWas = Pal.Colorblind;
+        Renderer.TimePin = 3.0 * Math.PI / 10.0;
+        // Pin the world. This test reads PIXELS, so it has to be looking at the same board every
+        // time or its numbers are not comparable run to run — and the cover-merge gate needs a
+        // board that actually contains an adjacent same-type cover pair, which a clock-seeded
+        // arena does not guarantee (measured: one draw in three had none).
+        Util.Reseed(90210);
+        StartMission(1);
+        for (int i = 0; i < 12; i++) Update(1f / 60f);   // settle the opening anims
+        BriefLines = null;                                // the briefing card sits over the probes
+        CalloutText = null; TutStep = -1;                  // and so would a field tip / a lesson card
+
+        // ---- stage: three tokens on clean floor, well clear of the HUD and of each other -------
+        // The roster strip occupies board column 0 and the action bar the bottom two rows, so the
+        // probe window is columns 3..W-4, rows 1..H-4. Facings and bob phases are pinned so the
+        // three patches differ ONLY in the thing under test.
+        var spots = new List<(int, int)>();
+        for (int x = 3; x < Grid.W - 3 && spots.Count < 3; x++)
+            for (int y = 1; y < Grid.H - 3 && spots.Count < 3; y++)
+            {
+                if (!Grid.IsFloor(x, y)) continue;
+                bool clear = true;
+                foreach (var (sx, sy) in spots) if (Util.ChebyDist(x, y, sx, sy) < 3) clear = false;
+                if (clear) spots.Add((x, y));
+            }
+        if (spots.Count < 3) { Renderer.TimePin = -1.0; return "BOARDTEST: FAIL (could not stage three clear tiles)"; }
+
+        Enemies.Clear();
+        Unit Stage(string cls, Team team, AlertLevel a, int x, int y)
+        {
+            var u = new Unit { Name = "PROBE", Cls = cls, Team = team, X = x, Y = y,
+                               Hp = 6, MaxHp = 6, Aim = 60, Mobility = 6, Weapon = Weapon.Make(WeaponKind.Rifle) };
+            u.Ammo = u.Weapon.Clip; u.Alert = a; u.PodId = -1; u.Bob = 0f; u.Facing = 0f;
+            u.SyncPos();
+            return u;
+        }
+        // ---- stamp a KNOWN two-tile cover volume for the merge gate ---------------------------
+        // The gate must not depend on the arena roll handing it an adjacent same-type pair (one
+        // board in three does not). Stamp one: two ground-level HighCover tiles side by side on
+        // clean floor, well away from the three probe tokens. This is a throwaway harness Game,
+        // and DrawCover reads the grid every frame, so the merge logic gets exercised exactly as
+        // it would on an authored wall.
+        int cvx = -1, cvy = -1;
+        for (int y = Grid.H - 4; y >= 1 && cvx < 0; y--)
+            for (int x = Grid.W - 5; x >= 3 && cvx < 0; x--)
+            {
+                if (!Grid.IsFloor(x, y) || !Grid.IsFloor(x + 1, y)) continue;
+                if (Grid.HeightAt(x, y) != 0 || Grid.HeightAt(x + 1, y) != 0) continue;
+                bool nearProbe = false;
+                foreach (var (sx, sy) in spots)
+                    if (Util.ChebyDist(x, y, sx, sy) < 2 || Util.ChebyDist(x + 1, y, sx, sy) < 2) nearProbe = true;
+                if (nearProbe) continue;
+                cvx = x; cvy = y;
+            }
+        if (cvx >= 0)
+        {
+            Grid.Tiles[cvx, cvy] = TileType.HighCover;
+            Grid.Tiles[cvx + 1, cvy] = TileType.HighCover;
+            Grid.SetCoverHp(cvx, cvy); Grid.SetCoverHp(cvx + 1, cvy);   // undamaged: no crack overlay
+        }
+
+        var foe = Stage("GRUNT", Team.Enemy, AlertLevel.Alert, spots[1].Item1, spots[1].Item2);
+        var pod = Stage("GRUNT", Team.Enemy, AlertLevel.Unaware, spots[2].Item1, spots[2].Item2);
+        Enemies.Add(foe); Enemies.Add(pod);
+        // put every soldier but one off the probe window, and stand the survivor on spots[0]
+        var hero = Players[0];
+        for (int i = Players.Count - 1; i >= 1; i--) Players.RemoveAt(i);
+        hero.X = spots[0].Item1; hero.Y = spots[0].Item2; hero.Bob = 0f; hero.Facing = 0f; hero.SyncPos();
+        Selected = hero;
+        RecomputeMoveCost();
+
+        // ---- draw one real frame and read it back ----------------------------------------------
+        const string shotPath = "sightline_boardtest.png";
+        Display.RenderFrame(Draw);
+        Raylib.TakeScreenshot(shotPath);
+        var img = Raylib.LoadImage(shotPath);
+        float Lum(int px, int py)
+        {
+            var c = Raylib.GetImageColor(img, px, py);
+            return 0.2126f * c.R + 0.7152f * c.G + 0.0722f * c.B;
+        }
+        (float mean, float peak) Patch(int cx, int cy, int r)
+        {
+            float sum = 0, pk = 0; int n = 0;
+            for (int px = cx - r; px <= cx + r; px++)
+                for (int py = cy - r; py <= cy + r; py++)
+                {
+                    float l = Lum(px, py); sum += l; if (l > pk) pk = l; n++;
+                }
+            return (sum / n, pk);
+        }
+        Vector2 Cen(int tx, int ty) => Util.TileCenter(tx, ty);
+        var pHero = Patch((int)Cen(hero.X, hero.Y).X, (int)Cen(hero.X, hero.Y).Y, 14);
+        var pFoe = Patch((int)Cen(foe.X, foe.Y).X, (int)Cen(foe.X, foe.Y).Y, 14);
+        var pPod = Patch((int)Cen(pod.X, pod.Y).X, (int)Cen(pod.X, pod.Y).Y, 14);
+        int walkLoops = Renderer.LastWalkLoops, walkEdges = Renderer.LastWalkEdges;
+        bool dashShown = Renderer.LastDashShown;
+
+        sb.AppendLine($"BOARDTEST value hierarchy (14px patches, Rec.709 luma):");
+        sb.AppendLine($"  SELECTED soldier  mean {pHero.mean,6:0.0}  PEAK {pHero.peak,6:0.0}");
+        sb.AppendLine($"  ACTIVE hostile    mean {pFoe.mean,6:0.0}  PEAK {pFoe.peak,6:0.0}");
+        sb.AppendLine($"  DORMANT pod       mean {pPod.mean,6:0.0}  PEAK {pPod.peak,6:0.0}");
+        const float margin = 8f;
+        if (pHero.peak < pFoe.peak + margin) fails.Add($"peak: selected {pHero.peak:0.0} !> hostile {pFoe.peak:0.0}");
+        if (pFoe.peak < pPod.peak + margin) fails.Add($"peak: hostile {pFoe.peak:0.0} !> dormant {pPod.peak:0.0}");
+        if (pHero.mean < pFoe.mean + margin) fails.Add($"mean: selected {pHero.mean:0.0} !> hostile {pFoe.mean:0.0}");
+        if (pFoe.mean < pPod.mean + margin) fails.Add($"mean: hostile {pFoe.mean:0.0} !> dormant {pPod.mean:0.0}");
+
+        // ---- GATE A, AGAIN, IN THE COLOURBLIND PALETTE ----------------------------------------
+        // The rungs are stated as target LUMINANCE (Renderer.ToLuma) instead of as mix fractions
+        // exactly so the ordering survives Pal.SetColorblind, where Pal.Foe changes hue AND luma
+        // (248,113,113 lum 153 -> 238,138,40 lum 152) and a fixed mix would land somewhere
+        // different in each palette. That was the wave's most load-bearing robustness claim and it
+        // had ZERO self-test coverage: SIGHTLINE_CB is read ~600 lines below this hook's early
+        // return in Program.cs, so it could never reach a BOARDTEST run.
+        Pal.SetColorblind(true);
+        Display.RenderFrame(Draw);
+        Raylib.TakeScreenshot(shotPath);
+        Raylib.UnloadImage(img);
+        img = Raylib.LoadImage(shotPath);
+        var qHero = Patch((int)Cen(hero.X, hero.Y).X, (int)Cen(hero.X, hero.Y).Y, 14);
+        var qFoe = Patch((int)Cen(foe.X, foe.Y).X, (int)Cen(foe.X, foe.Y).Y, 14);
+        var qPod = Patch((int)Cen(pod.X, pod.Y).X, (int)Cen(pod.X, pod.Y).Y, 14);
+        Pal.SetColorblind(cbWas);
+        sb.AppendLine($"BOARDTEST value hierarchy, COLORBLIND palette (SIGHTLINE_CB's remap):");
+        sb.AppendLine($"  SELECTED soldier  mean {qHero.mean,6:0.0}  PEAK {qHero.peak,6:0.0}");
+        sb.AppendLine($"  ACTIVE hostile    mean {qFoe.mean,6:0.0}  PEAK {qFoe.peak,6:0.0}");
+        sb.AppendLine($"  DORMANT pod       mean {qPod.mean,6:0.0}  PEAK {qPod.peak,6:0.0}");
+        if (qHero.peak < qFoe.peak + margin) fails.Add($"CB peak: selected {qHero.peak:0.0} !> hostile {qFoe.peak:0.0}");
+        if (qFoe.peak < qPod.peak + margin) fails.Add($"CB peak: hostile {qFoe.peak:0.0} !> dormant {qPod.peak:0.0}");
+        if (qHero.mean < qFoe.mean + margin) fails.Add($"CB mean: selected {qHero.mean:0.0} !> hostile {qFoe.mean:0.0}");
+        if (qFoe.mean < qPod.mean + margin) fails.Add($"CB mean: hostile {qFoe.mean:0.0} !> dormant {qPod.mean:0.0}");
+
+        // ---- GATE B: no floor gutter between two tiles of the same cover volume ----------------
+        // Redraw with nothing selected first: the move overlay strokes tile EDGES, and a cyan
+        // stroke sitting exactly on the seam under test would mask an unmerged gutter.
+        Selected = null;
+        Display.RenderFrame(Draw);
+        Raylib.TakeScreenshot(shotPath);
+        Raylib.UnloadImage(img);
+        img = Raylib.LoadImage(shotPath);
+        // The discriminator is NOT "is the seam floor-coloured" — a cover top standing in the key
+        // light's far corner can measure darker than a lit floor tile, so an absolute threshold
+        // reads the wrong answer at one end of the board. It is the TROUGH: an unmerged pair puts
+        // a gutter of floor PLUS both blocks' hairline edges and contact shadows between the two
+        // top faces, which is a deep, wide dip relative to the SAME MATERIAL a few pixels either
+        // side. A merged volume has continuous top face across the seam.
+        int gapPx = -1; string pairDesc = "none"; float topRef = 0f, seamMin = 0f;
+        if (cvx >= 0)
+        {
+            var a = Cen(cvx, cvy); var b = Cen(cvx + 1, cvy);
+            int yy = (int)a.Y - 6;                       // inside the merged top face
+            int seamX = (int)((a.X + b.X) * 0.5f);       // the shared tile edge
+            var interior = new List<float>();
+            for (int px = (int)a.X - 14; px <= (int)a.X + 6; px++) interior.Add(Lum(px, yy));
+            for (int px = (int)b.X - 6; px <= (int)b.X + 14; px++) interior.Add(Lum(px, yy));
+            interior.Sort();
+            topRef = interior[interior.Count / 2];
+            seamMin = float.MaxValue; int g = 0;
+            for (int px = seamX - 12; px <= seamX + 12; px++)
+            {
+                float l = Lum(px, yy);
+                if (l < seamMin) seamMin = l;
+                if (l < 0.78f * topRef) g++;
+            }
+            gapPx = g; pairDesc = $"({cvx},{cvy})-({cvx + 1},{cvy}) HighCover";
+        }
+        sb.AppendLine($"BOARDTEST cover merge: stamped pair {pairDesc}; top-face median {topRef:0.0} luma, "
+                      + $"seam minimum {seamMin:0.0}; dark-trough pixels across the seam = {gapPx} "
+                      + $"(merged expects <= 3; SIGHTLINE_COVERMERGE=0 measures ~14)");
+        if (gapPx < 0) fails.Add("could not stamp a two-tile cover volume — the merge gate could not run");
+        else if (gapPx > 3) fails.Add($"cover seam shows a {gapPx}px dark trough — the volume is not merged");
+
+        // ---- GATE E: damage must not RE-ROLL the surviving tiles of a volume -------------------
+        // The wave keyed the volume's material FORM and its footprint jitter off a union-find root
+        // recomputed from the LIVE tile set every frame, with the minimum linear index as root.
+        // Cover is destructible, so shooting the north/west-most tile off a wall moved the root and
+        // re-rolled the material for every tile that was still standing — the wall turned from
+        // crates into rock mid-mission, which reads as a rendering glitch and not as damage.
+        // Stamp a four-tile run, photograph its FAR tile, destroy the run's NW-most tile through
+        // the real Grid.DamageCover path (High -> rubble -> gone), photograph the far tile again:
+        // with the clock pinned the two frames differ by exactly one tile, so the far tile must
+        // come back byte-identical. The visual A/B is SIGHTLINE_COVER=1 [+ SIGHTLINE_COVERKILL=1].
+        int wallX = -1, wallY = -1;
+        for (int wy = 1; wy < Grid.H - 3 && wallX < 0; wy++)
+            for (int wx = 3; wx <= Grid.W - 8 && wallX < 0; wx++)
+            {
+                if (wy == cvy) continue;                        // keep clear of gate B's stamped pair
+                bool flat = true;
+                for (int i = 0; i < 4; i++) if (Grid.HeightAt(wx + i, wy) != 0) flat = false;
+                if (flat) { wallX = wx; wallY = wy; }
+            }
+        int morphPx = -1, morphTot = 0;
+        if (wallX >= 0)
+        {
+            for (int i = 0; i < 4; i++)
+            {
+                if (Grid.InBounds(wallX + i, wallY - 1)) Grid.Tiles[wallX + i, wallY - 1] = TileType.Floor;
+                if (Grid.InBounds(wallX + i, wallY + 1)) Grid.Tiles[wallX + i, wallY + 1] = TileType.Floor;
+                Grid.Tiles[wallX + i, wallY] = TileType.HighCover;
+                Grid.SetCoverHp(wallX + i, wallY);
+            }
+            Grid.ClearCoverSeeds(); Grid.SeedCoverVolumes();    // the wall EXISTS before it is shot
+            var farC = Cen(wallX + 3, wallY);
+            int fx0 = (int)farC.X - 28, fy0 = (int)farC.Y - 34, fw = 56, fh = 60;
+            int[] Grab()
+            {
+                var buf = new int[fw * fh];
+                for (int py = 0; py < fh; py++)
+                    for (int px = 0; px < fw; px++)
+                    {
+                        var c = Raylib.GetImageColor(img, fx0 + px, fy0 + py);
+                        buf[py * fw + px] = (c.R << 16) | (c.G << 8) | c.B;
+                    }
+                return buf;
+            }
+            void Reshoot()
+            {
+                Display.RenderFrame(Draw);
+                Raylib.TakeScreenshot(shotPath);
+                Raylib.UnloadImage(img);
+                img = Raylib.LoadImage(shotPath);
+            }
+            Reshoot(); var farBefore = Grab();
+            Grid.DamageCover(wallX, wallY, 99); Grid.DamageCover(wallX, wallY, 99);
+            Reshoot(); var farAfter = Grab();
+            morphTot = farBefore.Length; morphPx = 0;
+            for (int i = 0; i < farBefore.Length; i++) if (farBefore[i] != farAfter[i]) morphPx++;
+            if (Grid.Tiles[wallX, wallY] != TileType.Floor)
+                fails.Add("gate E could not destroy the run's NW tile — the probe did not run");
+        }
+        sb.AppendLine($"BOARDTEST volume identity: stamped run ({wallX},{wallY})..({wallX + 3},{wallY}) HighCover; "
+                      + $"NW tile destroyed; far tile re-render differs in {morphPx} of {morphTot} px "
+                      + "(a re-rolled form/jitter measures thousands)");
+        if (morphPx < 0) fails.Add("could not stamp a four-tile cover run — the volume-identity gate could not run");
+        else if (morphPx > 0) fails.Add($"destroying one tile changed {morphPx}px of a SURVIVING tile — the volume's material re-rolled");
+
+        Raylib.UnloadImage(img);
+        try { System.IO.File.Delete(shotPath); } catch { }
+
+        // ---- GATE C: the dash stroke is off the reserved objective gold ------------------------
+        bool goldClash = Pal.MoveDash.R == Pal.Accent.R && Pal.MoveDash.G == Pal.Accent.G
+                         && Pal.MoveDash.B == Pal.Accent.B;
+        float stitch = walkLoops > 0 ? walkEdges / (float)walkLoops : 0f;
+        sb.AppendLine($"BOARDTEST move overlay: dash RGB ({Pal.MoveDash.R},{Pal.MoveDash.G},{Pal.MoveDash.B}) "
+                      + $"vs objective gold ({Pal.Accent.R},{Pal.Accent.G},{Pal.Accent.B}); "
+                      + $"walk region {walkEdges} boundary edges stroked as {walkLoops} closed contour(s) "
+                      + $"= {stitch:0.0} edges/stroke (pre-wave 1.0); dash region shown {dashShown}");
+        if (goldClash) fails.Add("the dash stroke is painted in Pal.Accent, the reserved objective gold");
+        // ---- GATE D: the boundary is STITCHED, the dash region is off by default ---------------
+        if (walkLoops < 1) fails.Add("the walk region drew nothing — the overlay never ran, so gates C/D are untested");
+        else if (stitch < 4f) fails.Add($"the walk boundary is stroked at {stitch:0.0} edges per primitive — it is per-tile edges, not a contour");
+        else if (dashShown) fails.Add("the dash region drew unasked on a default interactive frame");
+
+        foreach (var f in fails) sb.AppendLine($"  !! {f}");
+        sb.Append(fails.Count == 0
+            ? "BOARDTEST: PASS (selected > hostile > dormant on mean and peak in BOTH palettes; cover volumes merged and their material survives damage; dash on demand, off the objective gold)"
+            : $"BOARDTEST: FAIL ({fails.Count} violations)");
+        Renderer.TimePin = -1.0;
+        return sb.ToString();
+    }
+
     /// The unit the filmstrip is following (the one DebugLongMove staged), for the per-frame
     /// position dump in Program.cs. Null before the hook runs.
     public Unit DebugFilmUnit => Selected;
+
+
+    // ── TRUE BAND: SIGHTLINE_BANDTEST — the decision-density INSTRUMENT as a contract ───────
+    /// `CountMeaningfulChoices` is the number every balance wave in this project has argued
+    /// about, and until TRUE BAND nobody had pinned it. It is READ-ONLY bookkeeping whose
+    /// constants ARE the meaning of every archived `ch/ARMED` figure, so this test pins:
+    ///   1. the band CONSTANTS (a silent retune silently invalidates the archive);
+    ///   2. the RULE, on the pure `AdmitNearBest` helper — the additive band is invariant under
+    ///      a uniform shift of the score scale and the multiplicative one is NOT (that shift
+    ///      sensitivity IS the defect this wave removed), and the multiplicative rule is
+    ///      degenerate at a non-positive best (which is why it needed the `pbest > 0` guard);
+    ///   3. that `SIGHTLINE_CHOICEBAND=mult` reproduces the PRE-WAVE counts EXACTLY, checked
+    ///      against a literal transcription of the old method over 120 constructed boards —
+    ///      and that the band dial actually moves the number on a good share of them (a dial
+    ///      that changed nothing would pass every other assertion here);
+    ///   4. that the two halves sum to the total by construction, in BOTH modes, and that the
+    ///      band never moves the shot GATE (`armed`) — only the near-best count;
+    ///   5. that the counter mutates NO game state and takes ZERO `Util.Rng` draws — the latter
+    ///      with a SENSITIVITY probe (the same detector, fed one hand-injected draw, must FAIL),
+    ///      so a green purity result can never be the detector not detecting.
+    /// Window-free apart from Unit.SyncPos's tile->px math. Prints "BANDTEST: PASS|FAIL".
+    public string BandSelfTest()
+    {
+        NoPersist = true;
+        var fails = new List<string>();
+        bool savedBand = MultChoiceBand;
+
+        // ── 1. constants ──────────────────────────────────────────────────────────────
+        if (PosBand != 3f) fails.Add($"posBand={PosBand}");
+        if (ShotBand != 2f) fails.Add($"shotBand={ShotBand}");
+        if (PosChoiceCap != 4) fails.Add($"posChoiceCap={PosChoiceCap}");
+        if (MultPosFrac != 0.85f) fails.Add($"multPosFrac={MultPosFrac}");
+        if (MultShotFrac != 0.88f) fails.Add($"multShotFrac={MultShotFrac}");
+
+        // ── 2. the rule, on the pure helper ───────────────────────────────────────────
+        // Same RELATIVE structure (gaps 0/3/6/20), three absolute levels. The additive band
+        // must return the same count at every level; the multiplicative window must not.
+        var mid = new List<float> { 40f, 37f, 34f, 20f };
+        var hi = mid.Select(v => v + 20f).ToList();
+        var lo = mid.Select(v => v - 20f).ToList();
+        int aMid = AdmitNearBest(mid, 40f, false, MultPosFrac, PosBand);
+        int aHi = AdmitNearBest(hi, 60f, false, MultPosFrac, PosBand);
+        int aLo = AdmitNearBest(lo, 20f, false, MultPosFrac, PosBand);
+        if (aMid != 2 || aHi != 2 || aLo != 2)
+            fails.Add($"additiveNotShiftInvariant:{aMid}/{aHi}/{aLo}");
+        int mMid = AdmitNearBest(mid, 40f, true, MultPosFrac, PosBand);
+        int mHi = AdmitNearBest(hi, 60f, true, MultPosFrac, PosBand);
+        int mLo = AdmitNearBest(lo, 20f, true, MultPosFrac, PosBand);
+        // the pre-wave defect, pinned so it can never be mistaken for a fixed instrument:
+        // drop every score by 20 and the SAME board reads as strictly fewer choices.
+        if (!(mMid == 3 && mHi == 3 && mLo == 2))
+            fails.Add($"multWindowNotAsSpecified:{mMid}/{mHi}/{mLo}");
+        // degeneracy at a non-positive best — the reason the old rule carried a `pbest > 0` guard.
+        var neg = new List<float> { -10f, -13f };
+        if (AdmitNearBest(neg, -10f, true, MultPosFrac, PosBand) != 0)
+            fails.Add("multNotDegenerateAtNegativeBest");
+        if (AdmitNearBest(neg, -10f, false, MultPosFrac, PosBand) != 2)
+            fails.Add("additiveBrokenAtNegativeBest");
+
+        // ── 3./4. constructed boards ──────────────────────────────────────────────────
+        // A LOCAL Random on purpose: the Util.Rng purity check in step 5 must not have to
+        // subtract the scene builder's own draws.
+        var scenes = new Random(20260829);
+        int n = 0, bandMoved = 0, posMoved = 0;
+        // review fix: the ADD mode is the rule every future archived number will be measured
+        // with, and the first version of this test pinned NO additive behaviour at all. Three
+        // knob-level breaks are tracked scene by scene so each pin can be shown NON-VACUOUS —
+        // a pin that never differs from its variant is a pin that cannot fail.
+        int capPinLive = 0, shotBandPinLive = 0;
+        ulong golden = 1469598103934665603UL;   // FNV-1a over the add-mode (total,tgt,pos) triples
+        for (int s = 0; s < 120; s++)
+        {
+            BuildBandScene(scenes);
+            MultChoiceBand = true;
+            int mt = CountMeaningfulChoices(out int mAct, out int mArm, out int mLos, out int mTgt, out int mPos);
+            var o = OldChoiceReference();
+            if (mt != o.total || mAct != o.acting || mArm != o.armed || mLos != o.losTargets
+                || mTgt != o.tgtChoices || mPos != o.posChoices)
+                fails.Add($"scene{s}:multNotOldRule got({mt},{mAct},{mArm},{mLos},{mTgt},{mPos}) "
+                          + $"want({o.total},{o.acting},{o.armed},{o.losTargets},{o.tgtChoices},{o.posChoices})");
+            if (mTgt + mPos != mt) fails.Add($"scene{s}:multHalvesDontSum {mTgt}+{mPos}!={mt}");
+            MultChoiceBand = false;
+            int at = CountMeaningfulChoices(out int aAct, out int aArm, out int aLos, out int aTgt, out int aPos);
+            if (aTgt + aPos != at) fails.Add($"scene{s}:addHalvesDontSum {aTgt}+{aPos}!={at}");
+            // THE ADD-MODE PIN: the shipped rule must equal an independent transcription of it,
+            // field for field. This is what catches a constant being right while its USE is not.
+            var a = NewChoiceReference();
+            if (at != a.total || aAct != a.acting || aArm != a.armed || aLos != a.losTargets
+                || aTgt != a.tgtChoices || aPos != a.posChoices)
+                fails.Add($"scene{s}:addNotNewRule got({at},{aAct},{aArm},{aLos},{aTgt},{aPos}) "
+                          + $"want({a.total},{a.acting},{a.armed},{a.losTargets},{a.tgtChoices},{a.posChoices})");
+            // each knob, shown load-bearing: swap it in the reference and the answer must move
+            // somewhere across the sweep (counted, asserted after the loop).
+            if (ChoiceReference(false, MultShotFrac, ShotBand, MultPosFrac, PosBand, 2, false, true).posChoices != a.posChoices)
+                capPinLive++;
+            if (ChoiceReference(false, MultShotFrac, PosBand, MultPosFrac, PosBand, PosChoiceCap, false, true).tgtChoices != a.tgtChoices)
+                shotBandPinLive++;
+            // golden regression anchor over the fixed-seed sweep (FNV-1a, deterministic).
+            foreach (int v in new[] { at, aTgt, aPos })
+            { golden ^= (ulong)(uint)v; golden *= 1099511628211UL; }
+            // the band decides only WHICH candidates count as near-best — never who is eligible.
+            if (aAct != mAct || aArm != mArm || aLos != mLos)
+                fails.Add($"scene{s}:bandMovedTheGate acting {mAct}->{aAct} armed {mArm}->{aArm} los {mLos}->{aLos}");
+            if (at != mt) bandMoved++;
+            if (aPos != mPos) posMoved++;
+            n++;
+        }
+        if (n != 120) fails.Add($"sceneCount={n}");
+        if (bandMoved < 20) fails.Add($"bandDialInert:{bandMoved}/{n}");
+        if (posMoved < 20) fails.Add($"posAxisDialInert:{posMoved}/{n}");
+        if (capPinLive < 10) fails.Add($"capPinVacuous:{capPinLive}/{n}");
+        if (shotBandPinLive < 10) fails.Add($"shotBandPinVacuous:{shotBandPinLive}/{n}");
+        // Golden triples for ADD mode over the fixed-seed sweep. Belt and braces next to the
+        // reference above: it also catches the reference itself being edited in lockstep with
+        // a broken implementation. Regenerate ONLY with a deliberate, documented rule change.
+        const ulong GoldenAddTriples = 0xA58D4F1D8838497BUL;
+        if (golden != GoldenAddTriples)
+            fails.Add($"addGoldenTriples=0x{golden:X16} (want 0x{GoldenAddTriples:X16})");
+
+        // ── 4b. the NEGATIVE-SAFETY board: the dropped `pbest > 0` guard, pinned ──────
+        // The 120 random scenes never produce pbest <= 0, which is exactly why reinstating the
+        // guard in additive mode was invisible. On this board every reachable tile is negative.
+        BuildNegativeSafetyScene();
+        var negPvals = BandPosCandidates(out float negBest);
+        if (negPvals.Count < 2) fails.Add($"negSceneNoCandidates:{negPvals.Count}");
+        if (negBest >= 0f) fails.Add($"negSceneNotNegative:pbest={negBest:0.0}");
+        int negUncapped = AdmitNearBest(negPvals, negBest, false, MultPosFrac, PosBand) - 1;
+        if (negUncapped < 5) fails.Add($"negSceneNotEnoughCandidates:{negUncapped}");
+        MultChoiceBand = false;
+        CountMeaningfulChoices(out _, out int negArmed, out _, out _, out int negAddPos);
+        if (negArmed < 1) fails.Add("negSceneSoldierNotArmed");
+        // BEHAVIOURAL cap pin: >=5 near-best destinations on offer, so the contribution must be
+        // exactly PosChoiceCap. A hardcoded Math.Min(2, ...) at the use site fails here.
+        if (negAddPos != PosChoiceCap)
+            fails.Add($"negSceneAddPos={negAddPos} want {PosChoiceCap} (uncapped {negUncapped})");
+        MultChoiceBand = true;
+        CountMeaningfulChoices(out _, out _, out _, out _, out int negMultPos);
+        // and the pre-wave rule must contribute NOTHING here — that is the guard, and it is the
+        // whole reason dropping it is a real change rather than a cosmetic one.
+        if (negMultPos != 0) fails.Add($"negSceneMultPos={negMultPos} want 0 (the pbest>0 guard)");
+
+        // ── 4c. the precondition the axis-(a) zero floor rests on ────────────────────
+        // `AdmitNearBest(..., floorAtZero: true)` is only a no-op because every legal ShotValue
+        // is strictly positive. Assert that rather than assume it.
+        MultChoiceBand = false;
+        var shotScenes = new Random(31337);
+        int shotVals = 0;
+        for (int s = 0; s < 40; s++)
+        {
+            BuildBandScene(shotScenes);
+            foreach (var u in Players)
+            {
+                if (!u.Alive || u.Ammo <= 0) continue;
+                foreach (var e in Enemies)
+                {
+                    if (!e.Alive) continue;
+                    if (Util.TileDist(u.X, u.Y, e.X, e.Y) > u.Weapon.MaxRange) continue;
+                    bool commanding = Grid.HeightAt(u.X, u.Y) - Grid.HeightAt(e.X, e.Y) >= 2;
+                    if (!Grid.HasLineOfSight(u.X, u.Y, e.X, e.Y, commanding)) continue;
+                    float v = ShotValue(Combat.ComputeOdds(Grid, u, e), e);
+                    shotVals++;
+                    if (v <= 0f) fails.Add($"shotValueNotPositive:{v}");
+                }
+            }
+        }
+        if (shotVals < 200) fails.Add($"shotValueSampleTooSmall:{shotVals}");
+
+        // ── 5a. no state mutation ─────────────────────────────────────────────────────
+        BuildBandScene(new Random(4242));
+        string before = BandBoardFingerprint();
+        MultChoiceBand = false; CountMeaningfulChoices();
+        MultChoiceBand = true; CountMeaningfulChoices();
+        string after = BandBoardFingerprint();
+        if (after != before) fails.Add("counterMutatedState");
+
+        // ── 5b. zero Util.Rng draws, WITH a sensitivity probe ─────────────────────────
+        bool Pure(Action body)
+        {
+            Util.Reseed(777);
+            int refDraw = Util.RandInt(0, 1000000);
+            Util.Reseed(777);
+            for (int k = 0; k < 200; k++) body();
+            return Util.RandInt(0, 1000000) == refDraw;
+        }
+        MultChoiceBand = false;
+        if (!Pure(() => CountMeaningfulChoices())) fails.Add("counterConsumesRng");
+        MultChoiceBand = true;
+        if (!Pure(() => CountMeaningfulChoices())) fails.Add("counterConsumesRngMult");
+        // The detector must be able to FAIL: feed it the same body plus one hand-injected draw.
+        if (Pure(() => { CountMeaningfulChoices(); Util.RandF(); }))
+            fails.Add("rngPurityProbeInsensitive");
+        Util.Reseed(0);                       // never leave a deterministic stream behind
+
+        MultChoiceBand = savedBand;
+        return fails.Count == 0
+            ? $"BANDTEST: PASS (boards={n} bandMoved={bandMoved} posMoved={posMoved} "
+              + $"posBand={PosBand} shotBand={ShotBand} cap={PosChoiceCap})"
+            : "BANDTEST: FAIL " + string.Join(", ", fails.Take(12));
+    }
+
+    /// Build a controlled board for BandSelfTest: scattered cover + a little high ground (so the
+    /// cover*8 and height*5 terms of the safety score both vary across the reachable set), 2-4
+    /// soldiers with mixed kit and 2-5 hostiles, all on distinct floor tiles and all with a fresh
+    /// 2-action turn. Draws ONLY from the caller's local Random — never Util.Rng.
+    void BuildBandScene(Random r)
+    {
+        Grid = new Grid();
+        Players = new List<Unit>();
+        Enemies = new List<Unit>();
+        Vip = null; CaptiveLocked = false;
+        Objective = Objective.Eliminate;
+        EvacZone.Clear();
+
+        for (int i = 0, blocks = 25 + r.Next(45); i < blocks; i++)
+            Grid.Tiles[r.Next(Grid.W), r.Next(Grid.H)] =
+                r.Next(2) == 0 ? TileType.LowCover : TileType.HighCover;
+        for (int i = 0; i < 14; i++) Grid.Height[r.Next(Grid.W), r.Next(Grid.H)] = 1;
+        Grid.ResetCoverHp();
+
+        var taken = new HashSet<(int, int)>();
+        (int x, int y) Spot()
+        {
+            for (int t = 0; t < 200; t++)
+            {
+                int x = r.Next(Grid.W), y = r.Next(Grid.H);
+                if (!taken.Add((x, y))) continue;
+                Grid.Tiles[x, y] = TileType.Floor;   // stand on floor, never inside cover
+                return (x, y);
+            }
+            return (0, 0);
+        }
+        var kinds = new[] { WeaponKind.Rifle, WeaponKind.Shotgun, WeaponKind.Sniper,
+                            WeaponKind.Smg, WeaponKind.Lmg };
+        for (int i = 0, np = 2 + r.Next(3); i < np; i++)
+        {
+            var (x, y) = Spot();
+            var u = new Unit { Name = "P" + i, Cls = "ASSAULT", Team = Team.Player, X = x, Y = y,
+                               Hp = 4 + r.Next(5), MaxHp = 8, Aim = 55 + r.Next(20),
+                               Mobility = 3 + r.Next(3), Weapon = Weapon.Make(kinds[r.Next(kinds.Length)]) };
+            u.Ammo = u.Weapon.Clip; u.SyncPos(); u.BeginTurn();
+            Players.Add(u);
+        }
+        for (int i = 0, ne = 2 + r.Next(4); i < ne; i++)
+        {
+            var (x, y) = Spot();
+            var e = new Unit { Name = "E" + i, Cls = "GRUNT", Team = Team.Enemy, X = x, Y = y,
+                               Hp = 3 + r.Next(7), MaxHp = 9, Aim = 55 + r.Next(15),
+                               Mobility = 4, Weapon = Weapon.Make(kinds[r.Next(kinds.Length)]) };
+            e.Ammo = e.Weapon.Clip; e.Alert = AlertLevel.Alert; e.SyncPos(); e.BeginTurn();
+            Enemies.Add(e);
+        }
+    }
+
+    /// Everything CountMeaningfulChoices could conceivably touch, as one string — the
+    /// no-mutation assertion.
+    string BandBoardFingerprint()
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.Append((int)Phase).Append('|').Append(Selected?.Name ?? "-").Append('|');
+        foreach (var u in Players.Concat(Enemies))
+            sb.Append(u.Name).Append(':').Append(u.X).Append(',').Append(u.Y).Append(',')
+              .Append(u.Hp).Append(',').Append(u.Ammo).Append(',').Append(u.ActionsLeft).Append(',')
+              .Append(u.Alive ? 1 : 0).Append(',').Append(u.OnOverwatch ? 1 : 0).Append(';');
+        for (int x = 0; x < Grid.W; x++)
+            for (int y = 0; y < Grid.H; y++)
+                sb.Append((int)Grid.Tiles[x, y]).Append(Grid.Height[x, y]).Append(Grid.CoverHp[x, y]);
+        return sb.ToString();
+    }
+
+    /// A LITERAL transcription of `CountMeaningfulChoices`, PARAMETERISED over every knob the
+    /// rule has. TRUE BAND's first BANDTEST pinned only the constants' VALUES and the mult-mode
+    /// reproduction, and review then broke the shipped rule three ways that all still printed
+    /// PASS: hardcoding `Math.Min(2, ...)` at the use site while `PosChoiceCap` still read 4;
+    /// passing `PosBand` where `ShotBand` belonged on axis (a); and reinstating the `pbest > 0`
+    /// guard in additive mode. **Pinning a constant does not pin its USE.** This reference pins
+    /// the use: the real counter must equal it field-for-field in BOTH modes, and every knob is
+    /// separately shown to be load-bearing (change it, and the reference stops matching).
+    /// Do not "clean it up" or share code with the real implementation — its whole value is
+    /// being an independent copy.
+    (int total, int acting, int armed, int losTargets, int tgtChoices, int posChoices)
+        ChoiceReference(bool mult, float shotFrac, float shotBand, float posFrac, float posBand,
+                        int cap, bool posGuard, bool shotFloorAtZero)
+    {
+        int total = 0, acting = 0, armed = 0, losTargets = 0, tgtChoices = 0, posChoices = 0;
+        foreach (var u in Players)
+        {
+            if (!u.Alive || !u.CanAct || u.IsVip || u.Ammo <= 0) continue;
+            acting++;
+            float best = 0f; int comparable = 0;
+            var vals = new List<float>();
+            foreach (var e in Enemies)
+            {
+                if (!e.Alive || (e == Vip && CaptiveLocked)) continue;
+                if (Util.TileDist(u.X, u.Y, e.X, e.Y) > u.Weapon.MaxRange) continue;
+                bool commanding = Grid.HeightAt(u.X, u.Y) - Grid.HeightAt(e.X, e.Y) >= 2;
+                if (!Grid.HasLineOfSight(u.X, u.Y, e.X, e.Y, commanding)) continue;
+                float v = ShotValue(Combat.ComputeOdds(Grid, u, e), e);
+                vals.Add(v);
+                if (v > best) best = v;
+            }
+            if (best <= 0f) continue;
+            armed++;
+            losTargets += vals.Count;
+            float shotCut = mult ? best * shotFrac : best - shotBand;
+            if (!mult && shotFloorAtZero && shotCut < 0f) shotCut = 0f;
+            foreach (var v in vals) if (v >= shotCut) comparable++;
+            if (comparable >= 2) { total += comparable - 1; tgtChoices += comparable - 1; }
+
+            if (u.ActionsLeft >= 2)
+            {
+                float SafetyAt(int x, int y)
+                {
+                    float s = 24f - TileExposure(u, x, y);
+                    var foe = AliveEnemies().OrderBy(en => Util.TileDist(x, y, en.X, en.Y)).FirstOrDefault();
+                    if (foe != null) s += Grid.GetCover(x, y, foe.X, foe.Y).Level * 8f;
+                    s += Grid.HeightAt(x, y) * 5f;
+                    return s;
+                }
+                var pcost = Grid.CostMap(u.X, u.Y, (x, y) => IsOccupiedByOther(x, y, u), out _, u.MoveBudget * 2);
+                float pbest = SafetyAt(u.X, u.Y); var pvals = new List<float> { pbest };
+                for (int x = 0; x < Grid.W; x++)
+                    for (int y = 0; y < Grid.H; y++)
+                    {
+                        if (pcost[x, y] <= 0 || pcost[x, y] > u.MoveBudget) continue;
+                        float s = SafetyAt(x, y); pvals.Add(s); if (s > pbest) pbest = s;
+                    }
+                if (!posGuard || pbest > 0f)
+                {
+                    float posCut = mult ? pbest * posFrac : pbest - posBand;
+                    int pComparable = 0;
+                    foreach (var s in pvals) if (s >= posCut) pComparable++;
+                    if (pComparable >= 2)
+                    {
+                        int add = Math.Min(cap, pComparable - 1);
+                        total += add; posChoices += add;
+                    }
+                }
+            }
+        }
+        return (total, acting, armed, losTargets, tgtChoices, posChoices);
+    }
+
+    /// The PRE-WAVE rule, as one call (multiplicative 0.88 / 0.85, `pbest > 0` guard, cap 2).
+    /// Its arguments are LITERALS on purpose: this is the archive's instrument, and it must not
+    /// follow a future edit to the shipped constants.
+    (int total, int acting, int armed, int losTargets, int tgtChoices, int posChoices) OldChoiceReference()
+        => ChoiceReference(true, 0.88f, 0f, 0.85f, 0f, 2, true, false);
+
+    /// The SHIPPED rule, as one call — every argument read from the shipped constant it pins, so
+    /// a constant and its use can never drift apart without this failing.
+    (int total, int acting, int armed, int losTargets, int tgtChoices, int posChoices) NewChoiceReference()
+        => ChoiceReference(false, MultShotFrac, ShotBand, MultPosFrac, PosBand, PosChoiceCap, false, true);
+
+    /// The destination scores of the FIRST armed 2-action soldier, recomputed independently, so
+    /// the cap can be pinned BEHAVIOURALLY — how many near-best tiles were really on offer before
+    /// the cap clipped them.
+    List<float> BandPosCandidates(out float pbest)
+    {
+        pbest = 0f;
+        foreach (var u in Players)
+        {
+            if (!u.Alive || !u.CanAct || u.IsVip || u.Ammo <= 0 || u.ActionsLeft < 2) continue;
+            float SafetyAt(int x, int y)
+            {
+                float s = 24f - TileExposure(u, x, y);
+                var foe = AliveEnemies().OrderBy(en => Util.TileDist(x, y, en.X, en.Y)).FirstOrDefault();
+                if (foe != null) s += Grid.GetCover(x, y, foe.X, foe.Y).Level * 8f;
+                s += Grid.HeightAt(x, y) * 5f;
+                return s;
+            }
+            var pcost = Grid.CostMap(u.X, u.Y, (x, y) => IsOccupiedByOther(x, y, u), out _, u.MoveBudget * 2);
+            pbest = SafetyAt(u.X, u.Y); var pvals = new List<float> { pbest };
+            for (int x = 0; x < Grid.W; x++)
+                for (int y = 0; y < Grid.H; y++)
+                {
+                    if (pcost[x, y] <= 0 || pcost[x, y] > u.MoveBudget) continue;
+                    float s = SafetyAt(x, y); pvals.Add(s); if (s > pbest) pbest = s;
+                }
+            return pvals;
+        }
+        return new List<float>();
+    }
+
+    /// A board on which EVERY reachable tile scores NEGATIVE safety: no cover anywhere, no high
+    /// ground, one soldier ringed by enough guns that `24 - TileExposure` goes below zero. The
+    /// 120 random scenes never produce this (and only 0.0-1.0% of real soldier-turns do), which
+    /// is exactly why reinstating the dropped `pbest > 0` guard was invisible to the first
+    /// BANDTEST. Here it is not: under the guard the axis contributes 0, without it the capped 4.
+    void BuildNegativeSafetyScene()
+    {
+        Grid = new Grid();                       // all Floor, height 0 -> no cover term anywhere
+        Players = new List<Unit>();
+        Enemies = new List<Unit>();
+        Vip = null; CaptiveLocked = false;
+        Objective = Objective.Eliminate;
+        EvacZone.Clear();
+
+        var p = new Unit { Name = "PINNED", Cls = "ASSAULT", Team = Team.Player, X = 9, Y = 5,
+                           Hp = 8, MaxHp = 8, Aim = 65, Mobility = 4,
+                           Weapon = Weapon.Make(WeaponKind.Rifle) };
+        p.Ammo = p.Weapon.Clip; p.SyncPos(); p.BeginTurn();
+        Players.Add(p);
+        // Eight guns, every one with clear LoS on an empty board and inside rifle range of the
+        // whole reachable set: exposure >= 8 x 6 = 48, so safety <= 24 - 48 = -24 on every tile.
+        var spots = new (int x, int y)[] { (2, 1), (4, 1), (6, 1), (12, 1), (14, 1),
+                                           (2, 9), (6, 9), (14, 9) };
+        for (int i = 0; i < spots.Length; i++)
+        {
+            var e = new Unit { Name = "G" + i, Cls = "GRUNT", Team = Team.Enemy,
+                               X = spots[i].x, Y = spots[i].y, Hp = 6, MaxHp = 6, Aim = 60,
+                               Mobility = 4, Weapon = Weapon.Make(WeaponKind.Rifle) };
+            e.Ammo = e.Weapon.Clip; e.Alert = AlertLevel.Alert; e.SyncPos(); e.BeginTurn();
+            Enemies.Add(e);
+        }
+    }
+
+    // ── W1 TRUE INSTRUMENT: SIGHTLINE_ROUTETEST ─────────────────────────────────────────
+    /// Measures the AUTOPILOT'S ROUTE through the campaign DAG — the sampling frame every
+    /// balance number in docs/ was drawn through, and which nobody has ever looked at.
+    ///
+    /// The shipped rule is "prefer an Event node, else nn[0]". `nn` comes from
+    /// Run.NextNodes(), which walks the current node's `Next` list, which was appended in ROW
+    /// order — so nn[0] is the lowest row of the next column, and the bot takes it essentially
+    /// every time. Whatever node kinds, factions and objectives live along that edge of the map
+    /// are over-sampled in every rung of every published ladder; whatever lives on the other
+    /// branches is under-sampled by the same amount.
+    ///
+    /// Asserts three things, and is deliberately capable of failing on the SHIPPED default:
+    ///   (a) 'first' IS skewed — it takes branch index 0 far more often than a uniform deal would;
+    ///   (b) 'hash' is near-uniform — within 8 points of the per-choice uniform expectation;
+    ///   (c) 'hash' is DETERMINISTIC and draw-free — two walks of a seed give the identical route
+    ///       and neither perturbs Util.Rng (a CRN slot pair must still replay under it).
+    /// Window-free: it walks bare Run maps, builds no missions and needs no GL context.
+    public static string RouteSelfTest(int seeds = 400)
+    {
+        var fails = new List<string>();
+
+        // one walk of one map under one policy: returns the branch indices taken and the kinds visited.
+        (List<int> idx, List<int> optionCounts, List<string> kinds) Walk(int seed, string policy)
+        {
+            var run = new Run();
+            run.GenerateMap(seed);
+            run.MapPos = 0;
+            var idx = new List<int>(); var opts = new List<int>(); var kinds = new List<string>();
+            for (int guard = 0; guard < Run.MaxMissions + 4; guard++)
+            {
+                var nn = run.NextNodes();
+                if (nn.Count == 0) break;
+                int mission = run.CurrentNode != null ? run.CurrentNode.Mission : 1;
+                var pick = PickAutoNode(nn, seed, mission, policy);
+                idx.Add(nn.IndexOf(pick)); opts.Add(nn.Count); kinds.Add(pick.Kind.ToString());
+                run.MapPos = pick.Id;
+            }
+            return (idx, opts, kinds);
+        }
+
+        var kindsFirst = new Dictionary<string, int>();
+        var kindsHash = new Dictionary<string, int>();
+        int firstZero = 0, hashZero = 0, choices = 0;
+        double uniformZeroExpect = 0;   // sum of 1/k over the SAME choices, i.e. a fair deal's index-0 rate
+
+        // (c) determinism + draw-freedom: snapshot the shared stream around the whole sweep.
+        Util.Reseed(4242);
+        double rngProbeBefore = Util.RandF();
+        Util.Reseed(4242);
+        double rngProbeAfter;
+
+        for (int s = 1; s <= seeds; s++)
+        {
+            var f = Walk(s, "first");
+            var h = Walk(s, "hash");
+            var h2 = Walk(s, "hash");
+            if (!h.idx.SequenceEqual(h2.idx)) fails.Add($"hashNotDeterministic@seed{s}");
+            foreach (var k in f.kinds) { kindsFirst.TryGetValue(k, out int v); kindsFirst[k] = v + 1; }
+            foreach (var k in h.kinds) { kindsHash.TryGetValue(k, out int v); kindsHash[k] = v + 1; }
+            // Only REAL branches count. Most steps of the DAG offer exactly one successor from
+            // where you stand; a forced step says nothing about a routing policy, and folding
+            // those in drags both rates toward 100% and hides the effect entirely.
+            for (int i = 0; i < f.idx.Count; i++)
+            {
+                if (f.optionCounts[i] < 2) continue;
+                choices++;
+                uniformZeroExpect += 1.0 / f.optionCounts[i];
+                if (f.idx[i] == 0) firstZero++;
+            }
+            for (int i = 0; i < h.idx.Count; i++) if (h.optionCounts[i] >= 2 && h.idx[i] == 0) hashZero++;
+        }
+        rngProbeAfter = Util.RandF();
+        Util.Reseed(0);
+
+        if (choices < 100) fails.Add($"VACUOUS — only {choices} real (k>=2) branch choices sampled");
+        double firstPct = choices == 0 ? 0 : 100.0 * firstZero / choices;
+        double hashPct = choices == 0 ? 0 : 100.0 * hashZero / choices;
+        double uniPct = choices == 0 ? 0 : 100.0 * uniformZeroExpect / choices;
+
+        // (a) the shipped route must be provably skewed, or this whole finding is imaginary.
+        if (firstPct <= uniPct + 15) fails.Add($"firstNotSkewed(first={firstPct:0.0}% uniform={uniPct:0.0}%)");
+        // (b) the hashed route must be a fair deal.
+        if (Math.Abs(hashPct - uniPct) > 8.0) fails.Add($"hashNotUniform(hash={hashPct:0.0}% uniform={uniPct:0.0}%)");
+        // (c) neither policy may consume a draw from the shared gameplay stream.
+        if (rngProbeBefore != rngProbeAfter) fails.Add("routeConsumedGameplayRngDraws");
+
+        string Hist(Dictionary<string, int> d)
+        {
+            int tot = d.Values.Sum();
+            return string.Join(" ", d.OrderByDescending(kv => kv.Value)
+                .Select(kv => $"{kv.Key}={kv.Value}({(tot == 0 ? 0 : 100.0 * kv.Value / tot):0.0}%)"));
+        }
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"ROUTETEST: {seeds} maps, {choices} REAL branch choices (k>=2); a fair deal takes branch 0 {uniPct:0.0}% of the time");
+        sb.AppendLine($"  first (SHIPPED): branch-0 {firstPct:0.0}%   nodes visited: {Hist(kindsFirst)}");
+        sb.AppendLine($"  hash            : branch-0 {hashPct:0.0}%   nodes visited: {Hist(kindsHash)}");
+        foreach (var f in fails.Take(8)) sb.AppendLine("  " + f);
+        sb.Append(fails.Count == 0
+            ? "ROUTETEST: PASS ('first' is measurably skewed to branch 0; 'hash' deals within 8pts of uniform; both take zero Util.Rng draws)"
+            : $"ROUTETEST: FAIL ({string.Join(",", fails.Take(8))})");
+        return sb.ToString();
+    }
 
 }

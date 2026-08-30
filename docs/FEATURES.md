@@ -12,6 +12,11 @@ seeds (mix of WIN/LOSE, no exceptions):
   (endless horde survival, W2 — escalating full-roster waves on one arena, persistent BEST WAVE) / **SKIRMISH**
   (W4 — one fight with a chosen objective+heat) / **DAILY** (W4 — a deterministic date-seeded challenge with a
   local best). Modes share the tactical kernel; endless/skirmish/daily are single-session (no campaign wrapper).
+  **W9 THE REPAIR:** a skirmish's/daily's heat dial is NUMERICALLY REAL — both enter through
+  `SetupMission(1)`, so the mission-1 heat grace (a CAMPAIGN-opener protection) used to zero every extra body,
+  stat and damage point the dial promises, leaving only the qualitative flags. The grace is now gated on
+  `Mode != GameMode.Skirmish`; MODETEST pins that a skirmish's force answers the dial AND that the campaign's
+  mission-1 grace is untouched.
 - **CROSS-RUN META-PROGRESSION — WAR ROOM (HORIZON W3):** the game finally has LEGS beyond one sitting. A persistent
   profile (meta.json, append-only) banks SALVAGE currency, 7 ACHIEVEMENTS, a HALL OF FAME (fallen KIA + won-run
   legends), lifetime totals, and 3 additive UNLOCKS (StartIntel/StartBoon/StartArmor) bought with salvage — all
@@ -58,6 +63,11 @@ seeds (mix of WIN/LOSE, no exceptions):
 - **GUARDED HVT — Decapitate teeth (PROGRAM VANTAGE W4):** the HVT takes reduced (never zero) damage while a
   designated bodyguard lives within 2 tiles, so the kill is a peel-then-execute positioning puzzle (telegraphed
   shield-dome aura + "HVT GUARDED" readout). `Game.UpdateHvtGuard`, `Combat.HvtGuardReduce`.
+- **HVT statline, pinnable (CROSSCUT W8):** the buff `Game.DesignateHvt` puts on a rank-and-file HVT
+  (`+6 + mission` HP, `+6` aim; an ELITE keeps its own stats) now lives on `Combat.HvtHpBonusBase` /
+  `HvtHpBonusPerMission` / `HvtAimBonus` so a measured round can pin it — `SIGHTLINE_HVTBUFF`,
+  `SIGHTLINE_HVTDEPTH`, `SIGHTLINE_HVTAIM`, all default-identical to the pre-W8 arithmetic.
+  `SIGHTLINE_HVTTEST` pins the selection rule, the ELITE exemption, the magnitudes and the defaults.
 - **AUDIO + LIGHT polish (PROGRAM VANTAGE W3):** transient additive muzzle/impact lights (bloom haloes them),
   tracer/grenade arc trails, damage-number arc+punch, audio pan/pitch, + a sample-asset loader (assets/sfx,
   assets/music tried first; procedural synth fallback) so real CC0 audio can drop in with no call-site changes.
@@ -130,7 +140,10 @@ seeds (mix of WIN/LOSE, no exceptions):
   AttritionFloor`) so a wipe genuinely shrinks strength for a mission or two without death-spiralling.
   `SIGHTLINE_ARMORY`.
 - **VERB abilities — every class has a TOY (AGENCY W2+W4):** **Sharpshooter MARK** (squad focus-fire designator;
-  `Unit.Marked`, `Combat.MarkAim/MarkCrit`), **Assault GRAPPLE** (yank a foe out of cover; reuses `ShoveAnim`),
+  `Unit.Marked`, `Combat.MarkAim/MarkCrit`), **Assault GRAPPLE** (yank a foe out of cover; reuses `ShoveAnim` — an ADJACENT
+  foe has nowhere to be pulled to, so the verb resolves as a SLAM: collision damage plus a broken stance, and
+  W9 THE REPAIR stopped it damaging the GRAPPLER, which was 100% of a JUGGERNAUT's grapples;
+  `SIGHTLINE_GRAPPLETEST` pins it),
   **Ranger SLIPSTREAM** (free, overwatch-immune long move; `Unit.Slipstreaming`), **Gunner SUPPRESSING FIRE**
   (AoE PIN — a foe + its neighbours can't aim/DASH next turn; `Unit.Pinned`/`ClearPins`), and **Corpsman PATCH**
   (heal adjacent ally). Append-only `AbilityKind`, save-safe; AI uses all via direct helpers (no TIMEOUT).
@@ -665,3 +678,166 @@ seeds (mix of WIN/LOSE, no exceptions):
   turn budget untouched) and `Mission.EnemyBaseCount` (`SIGHTLINE_ENEMYBASE`, the constant in
   `count = base + missionNum`). `Mission.HostileToughness` / `HostileDamageTrim` became static
   fields pinnable from `SIGHTLINE_TOUGH` / `SIGHTLINE_TRIM`, so one binary serves every round.
+
+## PROGRAM RESONANCE — WAVE W4 "THE BOARD BECOMES A PLACE" (the board stops being a texture)
+
+Rendering only; provably gameplay-inert (`PAIRTEST` byte-identical + a pinned-slot balance chunk
+field-for-field identical to the branch point). Details + every number in `docs/DEVLOG.md`.
+
+- **Cover is drawn as MERGED VOLUMES.** A union-find pass groups 4-connected tiles of the same
+  `TileType` at the same elevation tier and drops the inset, the corner rounding and every edge
+  decoration (cast shadow, contact AO, front-face gradient, top-edge highlight, structural rim,
+  corner chip) on any side that is a group seam; the top face extends over the wall band on an
+  interior south edge, so a north-south run reads as one slab with one wall face. Footprint
+  jitter/lift/radius are per VOLUME, not per tile. 19.0 drawn boxes/map → 10.6 volumes/map.
+- **A per-biome FORM vocabulary.** Each merged volume takes one of CRATE (per-tile cross-brace +
+  strap — a strapped stack), WALL (masonry courses in running bond across the run), BOULDER (dome
+  catch + hashed pits, no chip) or WRECK (diagonal shear, torn lip, a strut past the outer edge),
+  hashed off the volume's root tile from a three-form table per biome. 4–6 object types per map.
+  The root is a **stable identity** (`Grid.CoverSeed`), assigned when a cover tile first exists and
+  never re-derived from the live tile set, so shooting part of a wall away cannot re-roll the
+  material or the footprint of what is still standing. New cover adopts the identity of a volume it
+  is touching, so a deployed barricade joins the wall it is built against.
+- **The archetype form IS the token.** The 25 hand-designed silhouettes are drawn as the opaque
+  high-value figure with their own dark outline; the enclosing ring is demoted to a 2px state
+  indicator that keeps its full topology (closed-doubled friendly / broken hostile / square TURRET
+  / hex BRUISER / dashed SCOUT / diamond banner-bearer). 0% → 87% of a token's brightest pixels
+  now lie in the figure rather than the ring.
+- **The squint value ladder is stated as numbers** (`Renderer.ToLuma`): selected soldier 202 > VIP
+  196 > other soldier 190 > boss 184 > live hostile 172 > suspicious 162 > dormant 150, each ring
+  one step below its own figure. Because the rungs are target luminances rather than mix fractions,
+  the ordering is identical in the colourblind palette.
+- **Dormant contacts read by outline, not brightness.** Body at roughly floor+20, a crisp cold
+  rotating dashed ring, and the `?` glyph moved off the body into the same marker slot the
+  SUSPICIOUS `!` uses, so the pod's chassis is no longer obscured by its own label. That slot is
+  clamped to the board's top edge and drops into the pod's own tile (on a dark lozenge) when a unit
+  stands on the tile above — the two cases where "above the token" is off screen or under someone
+  else's feet.
+- **The move overlay is one region and one contour.** The DASH region draws only on demand (hold
+  SHIFT, or hover a tile outside walk range — the dash *action* is unchanged); the boundary is
+  stitched by marching squares into closed loops stroked as single polylines with welded joints and
+  a continuous dash phase; the dash stroke moved off `Pal.Accent`'s bytes (the reserved objective
+  gold) onto `Pal.MoveDash`, a value variant of the friendly cyan.
+- **`SIGHTLINE_BOARDTEST`** — the project's only self-test that measures rendered pixels: it draws
+  real frames on a **pinned animation clock** (`Renderer.TimePin`) and asserts the value ladder in
+  **both palettes** (mean and peak, ≥8 luma margin), the absence of a floor gutter inside a cover
+  volume, that destroying one tile of a volume leaves a surviving tile byte-identical, the dash
+  palette and the boundary's edges-per-stroke ratio. In `scripts/qa-sweep.sh`.
+- **A/B dials:** `SIGHTLINE_COVERMERGE=0`, `SIGHTLINE_TOKENSTYLE=0`, `SIGHTLINE_MOVESTYLE=0`,
+  `SIGHTLINE_MOVEDASH=1`, `SIGHTLINE_COVERSEED=0` (re-derive the volume identity every frame — the
+  pre-review behaviour), `SIGHTLINE_COVER=1 [+SIGHTLINE_COVERKILL=1]` (the cover-destruction A/B),
+  `SIGHTLINE_MARKERS=1` (the occluded awareness-marker cases).
+
+## PROGRAM RESONANCE — WAVE W5 "THE FIRST HOUR AND THE FRONT DOOR"
+
+Six things a first-time player meets and the bot never can. **Balance-inert:** `PAIRTEST`
+byte-identical, and a pinned-slot `SIGHTLINE_BALANCE=5` JSON field-for-field identical to the
+branch point.
+
+- **The mission-1 briefing is a PRE-FIGHT BEAT.** On a first-ever campaign run the briefing card
+  could not draw at all — `BriefAllowed` requires `TutorialText == null`, the lesson strip armed
+  on the same frame the card composed, and `UpdateBriefing` destroys the card the instant
+  `Stats.CombatLog` fills. Measured at **0.00 s of 11 s**. The strip now arms PENDING
+  (`Game.TutPending`) and opens the frame the card retires; verb staging counts the pending state
+  so the action bar does not flicker whole-then-staged. `TutStepFire` gained the turn-count
+  patience fallback (9) its three siblings already had.
+  (`SIGHTLINE_BRIEFTEST` — the one self-test that drives the LIVE persisting path;
+  `SIGHTLINE_BRIEFFIRST=0` restores the old order; `SIGHTLINE_FIRSTRUN=1` arms the strip under
+  the screenshot harness so a first-ever mission 1 can be photographed.)
+- **The HUD is out of the BLOOM.** `Display.RenderFrame(board, hud)` renders the board, the
+  death-flash and the overlay screens' animated backdrop (`Hud.DrawBackdropLayer`, split out of
+  the six screen builders) into `_target`, runs `BuildBloom` on **that**, and only then paints the
+  chrome into the same target — so no plate can flood its own label, while brightness, gamma, the
+  biome grade and the vignette stay uniform across the whole frame. `Hud.BackdropOwnsFrame` skips
+  the in-mission chrome on the **eight** screens with an opaque backdrop — Intro, Win, Lose,
+  Skirmish setup, War Room, Codex, Draft and **AUDIO CHECK**, which W5 missed and W5-FIX added
+  (it drew its own backdrop from the chrome pass, so the composite added the live board's glow
+  straight through it: 17,010 px brightened >20 luma against a `d350416` build, now 0).
+  Main-menu TRAINING OP:
+  **2.19:1 → 10.76:1** glyph-vs-plate with post-FX ON. (`SIGHTLINE_CONTRASTTEST` boots a real
+  1280x800 window and reads the framebuffer back; `SIGHTLINE_HUDINFX=1` puts the chrome back in
+  the bloom source and turns it red.)
+- **Both end cards have a third door.** **WAR ROOM [W]** (`Hud.EndWarRoomBtn`, its own rect so a
+  stale end-card rect can never alias the intro's LAST STAND), a "spend it in the WAR ROOM" line
+  under the SALVAGE slab, and a **"N JOIN THE RESERVE - recallable at the next draft"** header on
+  SURVIVING SQUAD with each survivor's `MetaProg.RecallCost`. `Game.EndReserve` is the DELTA of
+  `SaveGame.VeteranCount()` across the award, so the card can never over-claim.
+- **QUIT TO DESKTOP.** `[Q]` on the pause card (arm-then-confirm, with "the current mission
+  restarts from its start") and on the main menu (no confirm). `Game.QuitRequested` breaks the
+  frame loop; the path writes nothing, deletes nothing and leaves the mission-start checkpoint and
+  `meta.json` untouched. The mid-mission-checkpoint question is answered on the record in
+  `docs/DESIGN.md` §5.1 (deferred, with the argument and the revisit conditions).
+  (`SIGHTLINE_QUITTEST`.)
+- **RECRUIT is the DEFAULT on a never-played profile.** `Game.FirstTimeProfile` (from
+  `SaveGame.LoadRunTotals`) dials the intro to rung −1 and rewrites level 0's hint; "< RECRUIT"
+  names the rung below zero on every profile. A default, not a rung — no measured heat number
+  moves, and the harness sets heat explicitly under `NoPersist`.
+- **A fixed-slot action bar with one backing plate.** Verbs whose PRESENCE can change between two
+  turns of one mission (BEACON, STABILIZE, SHOW ALL) live at the tail, where the greedy
+  bottom-row-first wrap means appending cannot move anything already placed; the ability slot
+  reserves its " (N)" cooldown suffix. A single quiet plate under the whole bar.
+- **The CONCEALED pill breathes 0.56–1.00** instead of 0.10–1.00 (`Hud.ConcealPulse`, read by both
+  the renderer and the test).
+- **Doctrine cards size to their content** (`Hud.DraftBoonCardHeight`) and the operator blurb's row
+  clears the class-glyph disc. The whole draft screen is laid out by **one** clamped stack
+  (`Hud.DraftLayout`), which reclaims a taller card's height from the gaps rather than pushing the
+  DEPLOY row off the bottom, and the doctrine row spans the same width as the RUN CONTRACT row
+  beneath it. `[R]` re-rolls the pool. (`SIGHTLINE_CHROMETEST` covers all three chrome items and
+  asserts the DEPLOY row is on screen for all 16 boons × all 4 text sizes;
+  `SIGHTLINE_OLDCHROME=1` restores the pre-W5 chrome and turns it red.)
+- **The whole shipped TEXT SIZE range is a tested surface** (wave THE FIT). `SIGHTLINE_FITTEST`
+  asserts one contract — *no string is painted outside the box that owns it, and no two independent
+  strings are painted into the same pixels* — over five surfaces at **all four** scales
+  {0.90, 1.00, 1.10, 1.20}: the mid-run FIELD DOCTRINE card (all 16 boons), the ARMORY weapon rows
+  (5 weapons × 3 right-hand tags), the WAR ROOM HALL OF FAME legend rows (all 8 ranks × 5 classes,
+  not the 5 short staged ones), the draft's BACK/DEPLOY/RE-ROLL plates (all 5 DEPLOY state labels),
+  and the draft operator card's blurb + ABILITY columns. It prints its own tightest margin per leg.
+  `SIGHTLINE_OLDFIT=1` restores all five pre-fix geometries and turns it red (40 violations).
+  The corresponding chrome all sizes to its content now: `Hud.BoonOfferCardH`, `Hud.ArmoryTagY`
+  (the price/EQUIPPED tag shares the weapon NAME's band, never the blurb's), `Hud.WarLegendScore`
+  (kills + heat right-align into their own column), `Hud.DraftConfirmW`/`DraftRerollW` (sized from
+  the widest label the button can ever show) and `Hud.DraftCardW` (== the RUN CONTRACT row / 3).
+- **One registry owns the full-screen backdrops** (`Hud.BackdropPhase` + `Hud.DrawBackdropLayer`'s
+  switch — every `DrawTacticalBackdrop` call in the project lives in that switch).
+  `SIGHTLINE_BACKDROPTEST` drives every `Phase` through the chrome pass and fails if any screen
+  builder paints a backdrop of its own, then checks the registry and the switch are the same set,
+  then that the modal scrim doubles only where the composite runs. (`SIGHTLINE_AUDBACKDROP=1`
+  restores the AUDIO CHECK defect and turns it red.)
+- **Teaching layer:** both "glowing tile" prompts rewritten to name the CYAN OUTLINE, the corner
+  ticks and the DASHED outer ring; **FIELD CRAFT** gains **SHOVE** and **UTILITY ITEMS** rows (the
+  two verbs whose only explanation was a one-shot 9-second tip); and a new **VERBS & KEYS** codex
+  tab lists 16 verbs with hotkeys plus selection/camera/global bindings — generated from
+  `Hud.VerbTable` + `Hud.VerbHelp`, i.e. the same `ActionDesc` switch the action bar's hover
+  tooltip reads, so help and manual cannot drift. CODEXTEST asserts every verb has a home.
+
+## PROGRAM RESONANCE — WAVE W2 "THE OPPONENT ACTS" (the enemy stops freezing mid-fight)
+
+- **No CONTESTED enemy act-opportunity ends with NO branch having fired.** `Ai.Plan`'s
+  reachable-tile shot search is gated on the unit's own ammo; the no-shot fallback has a **terminal
+  else** that re-targets the move at the best full-two-action-budget tile — same per-tile scorer, no
+  extra RNG draw, and only when that tile wins a **move-cost-neutral** comparison (every score
+  carries `-actionsToReach * 6`, a term pricing an action that in this branch has no alternative
+  use), otherwise the unit digs in; and `Game.ActAfterMove` carries a structural terminal guarantee
+  for the cases where the board moved out from under a plan. Scale: 14 reloads + 25 terminal-else
+  over 1589 act-opportunities = **2.5% of all enemy acts, 3.5% of contested ones**. Measured pre-wave at **6.2%** of contested act-opportunities (n=16
+  campaigns) / **3.8%** (n=32), **0.0%** after (`SIGHTLINE_AIIDLETEST`). Behind
+  `SIGHTLINE_AIIDLEFIX` (default ON; `=0` restores the pre-W2 opponent AND its read exactly).
+  **The bleed-out window is deliberately excluded and deliberately silent:** when every surviving
+  soldier is downed, `Ai.Plan` returns an empty plan by design, every hostile idles, and nothing
+  this wave added fires there — the test asserts it.
+- **Hostiles RELOAD.** One action, full clip, mirroring the player's `DoReload`. Before this,
+  hostiles were handed one clip at spawn and had no reload verb anywhere, so a hostile that emptied
+  its magazine stopped being a combatant for the rest of the mission: 9.1% of contested acts (n=16)
+  / 3.3% (n=32) were made on an empty weapon and ~61% of those produced nothing in both frames.
+  Reload-verb-over-clip-refresh is recorded with its reasoning in `docs/DESIGN.md` §5.1.
+- **Enemy ammo is readable** — enemy ammo appeared nowhere in `Hud.cs` or `Renderer.cs` before this
+  wave. A pip row sits in the 4px band between the HP pips and the top of the body, and **DRY is a
+  status CHIP** (empty-magazine glyph + the word, amber) in `DrawUnitStatusChips`' late opaque pass,
+  so it can never be buried — the wave's first attempt drew its own pill into the p.Y+24..+42 band
+  that pass owns and was silently overpainted on any hostile carrying a status effect. Drawn only
+  for hostiles already in contact (`AlertLevel.Alert`), so a dormant "?" pod gives nothing away.
+  `SIGHTLINE_AIIDLESHOT=1` stages a full/partial/DRY spread **with status effects on**, so the
+  no-collision claim is checkable from one frame.
+- **The enemy HUNKER is audible and visible** — it was the one branch of the eleven that fired in
+  complete silence. It now pops "HUNKERED" and plays the player's own hunker cue, **except during
+  the bleed-out window**, where it stays silent by design.

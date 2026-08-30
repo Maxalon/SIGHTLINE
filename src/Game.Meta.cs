@@ -188,7 +188,11 @@ public partial class Game
         WarRoom.Unlocks.Add((int)MetaUnlock.StartIntel);   // one owned, the rest buyable
         WarRoom.Unlocks.Add((int)MetaUnlock.Quartermaster);   // W9: a new horizontal unlock owned
         WarRoom.Legends.Add(new SaveGame.LegendDto { Name = "VEGA \"REAPER\"", Cls = "ASSAULT", Rank = "CAPTAIN", Kills = 21, Heat = 3, Won = true });
-        WarRoom.Legends.Add(new SaveGame.LegendDto { Name = "NOX", Cls = "SHARPSHOOTER", Rank = "SERGEANT", Kills = 17, Heat = 3, Won = true });
+        // THE FIT: the staged Hall of Fame used to be five SHORT legends, so a human looking at
+        // this screen saw ~50px of slack and no reason to suspect the row was one text-size step
+        // from touching the panel border. NOX now carries the longest rank+class pair the game
+        // can produce (LIEUTENANT SHARPSHOOTER) plus a nickname — the worst case, staged.
+        WarRoom.Legends.Add(new SaveGame.LegendDto { Name = "NOX \"MAVERICK\"", Cls = "SHARPSHOOTER", Rank = "LIEUTENANT", Kills = 17, Heat = 3, Won = true });
         WarRoom.Legends.Add(new SaveGame.LegendDto { Name = "KRESS", Cls = "RANGER", Rank = "CORPORAL", Kills = 9, Heat = 2, Won = false });
         WarRoom.Legends.Add(new SaveGame.LegendDto { Name = "DRAKE", Cls = "GUNNER", Rank = "PRIVATE", Kills = 4, Heat = 0, Won = false });
         WarRoom.Legends.Add(new SaveGame.LegendDto { Name = "ILO", Cls = "CORPSMAN", Rank = "PRIVATE", Kills = 2, Heat = 1, Won = false });
@@ -271,6 +275,37 @@ public partial class Game
                 gl.LoseRun("METATEST", "assist-cache leg");
                 if (gl.RunState.LossStreak != before + 1) fails.Add("lossStreakNotGrown");
                 if (gl._metaLossStreak != gl.RunState.LossStreak) fails.Add("lossStreakCacheStale");
+            }
+
+            // (6c) W5 THE DOORS: the end card's "N JOIN THE RESERVE" line can never over-claim.
+            //      Game.EndReserve is set as the DELTA of SaveGame.VeteranCount() across
+            //      EnshrineVeterans, so the card's count is the number that actually landed on
+            //      disk — not vets.Count, which would double-count a survivor who was ALREADY a
+            //      reserve record (a recalled veteran who came home again). Both legs asserted.
+            {
+                var gr = new Game { NoPersist = false };
+                gr.StartMission(1);
+                foreach (var u in gr.RunState.Squad) if (!u.IsVip) u.Rank = 2;   // all reserve-eligible
+                int vetsBefore = SaveGame.VeteranCount();
+                gr.LoseRun("METATEST", "reserve-delta leg");
+                int delta = SaveGame.VeteranCount() - vetsBefore;
+                if (gr.EndReserve != delta) fails.Add($"reserveDelta={gr.EndReserve}!={delta}");
+                if (gr.EndReserve > SaveGame.VeteranCount()) fails.Add("reserveOverClaim");
+                // ...and re-enshrining the SAME names adds nobody, so the card must read 0.
+                var gr2 = new Game { NoPersist = false };
+                gr2.StartMission(1);
+                var names = new List<string>();
+                foreach (var u in gr.RunState.Squad) if (!u.IsVip) names.Add(u.Name);
+                for (int i = 0; i < gr2.RunState.Squad.Count && i < names.Count; i++)
+                { gr2.RunState.Squad[i].Name = names[i]; gr2.RunState.Squad[i].Rank = 2; }
+                int before2 = SaveGame.VeteranCount();
+                gr2.LoseRun("METATEST", "reserve-rejoin leg");
+                if (gr2.EndReserve != SaveGame.VeteranCount() - before2) fails.Add("reserveRejoinDelta");
+                // ...and when EVERY survivor was already a reserve record under the same name, the
+                // delta is exactly 0 — vets.Count would have claimed the whole squad joined again.
+                int renamed = Math.Min(gr2.RunState.Squad.Count, names.Count);
+                if (renamed == gr2.RunState.Squad.Count(u => !u.IsVip) && gr2.EndReserve != 0)
+                    fails.Add("reserveRejoinNotZero=" + gr2.EndReserve);
             }
 
             // ── W9 (SIGNAL): the standing economy ─────────────────────────────────────────────
@@ -527,6 +562,42 @@ public partial class Game
             if (SaveGame.LoadMetaHeat() != 0) fails.Add($"saveMetaHeat(-9)={SaveGame.LoadMetaHeat()} want 0");
             SaveGame.SaveMetaHeat(9999);
             if (SaveGame.LoadMetaHeat() != Sightline.Heat.Max) fails.Add("saveMetaHeat(9999) not capped");
+
+            // W9 THE REPAIR — EVERY UNOWNED UNLOCK MUST GET A CARD (and so a WarRoomBuyBtns hit-rect).
+            // THE GAP: this test covers the unlock MODEL exhaustively — round-trip, HasUnlock, the
+            // Quartermaster/StandingReserve effects — and never once asked whether the WAR ROOM can
+            // DRAW them. The only WAR ROOM screenshot hook, DebugWarRoom, hard-codes a demo profile
+            // with TWO already owned, which is exactly the configuration that fits (4 unowned needs
+            // 416px in a 446px column). On a FRESH PROFILE all six want 508px and DrawWarUnlocks' old
+            // overflow `break` fired before WarRoomBuyBtns.Add, so STANDING RESERVE — the third
+            // cheapest unlock in the game — was invisible AND unclickable in the one profile state
+            // every new player is in. There is no keyboard path to an unlock, only the mouse rects.
+            // Pure geometry, so it needs no window: assert the column's row plan paints every unowned
+            // entry at EVERY owned/unowned split, which also fails loudly the day a MetaUnlock is
+            // appended past what the column can hold.
+            {
+                int n = MetaProg.AllUnlocks.Length;
+                int colH = Hud.WarColumnHeight;
+                for (int owned = 0; owned <= n; owned++)
+                {
+                    int unowned = n - owned;
+                    var plan = Hud.WarUnlockPlan(colH, owned, unowned);
+                    int wantCompact = Math.Max(0, unowned - 1);   // the hero card carries the first
+                    if (plan.drawn != wantCompact)
+                        fails.Add($"warUnlockDropped owned={owned} unowned={unowned} drew={plan.drawn}/{wantCompact}");
+                    if (plan.panelH > colH) fails.Add($"warUnlockPanelOverflow owned={owned}");
+                    if (unowned > 1 && plan.cardH < 20) fails.Add($"warUnlockCardCollapsed owned={owned}");
+                    // W9 REVIEW FIX — the 12px SMALL-TEXT FLOOR, asserted where it broke. The first
+                    // cut let a compressed card run FitWrap, whose floor is CardBodyMinSize = 10, so
+                    // a FRESH PROFILE (0 owned / 6 unowned -> cardH 49 -> descRows 1) painted five of
+                    // six unlock descriptions at 10px. A body row is now either >= 12px or absent.
+                    if (plan.descRows > 0 && plan.bodySize < 12)
+                        fails.Add($"warUnlockSubFloorBody owned={owned} size={plan.bodySize} rows={plan.descRows}");
+                    // and a card that claims description rows must have the height to paint them
+                    if (plan.descRows > 0 && plan.cardH < 27 + plan.descRows * Hud.TextRowPublic(13))
+                        fails.Add($"warUnlockBodyOverflows owned={owned} cardH={plan.cardH} rows={plan.descRows}");
+                }
+            }
         }
         catch (Exception e) { return "METATEST: FAIL (exception " + e.Message + ")"; }
         finally
@@ -541,7 +612,7 @@ public partial class Game
             ? "METATEST: PASS (salvage/achievements/unlocks/legends/totals round-trip; unlock gated by NoPersist; "
               + "recall charged once in ConfirmDraft + broke-confirm refuses; barracks sinks pend until the checkpoint commit "
               + "(quit-at-barracks keeps the money); daily bounty once-per-stamp, pay+mark atomic; save.json preserved; "
-              + "a corrupt MaxHeat can never lock the difficulty picker)"
+              + "a corrupt MaxHeat can never lock the difficulty picker; the WAR ROOM publishes a buy-rect for every unowned unlock at every owned/unowned split, and never paints an unlock body below the 12px floor)"
             : "METATEST: FAIL (" + string.Join(",", fails) + ")";
     }
 }

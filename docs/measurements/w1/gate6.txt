@@ -1,0 +1,10 @@
+=== PART 1 — the TRAP: the X2-era assertion against a display-less batch ===
+batch exit code: 2   (2 = refused, nothing written)
+the old runs-field check reads runs=20 -> it would print 'OK runs=20' for a batch that measured NOTHING
+
+=== PART 2 — the FIX: run_chunk.sh against a binary that refuses ===
+planted stale docs/measurements/w1/gate6probe.json with runs=20
+TIME gate6probe data-ready-after=5s
+BAD  gate6probe — NO DISPLAY. The batch refused and wrote nothing (exit 2). Run under xvfb-run.
+     Any gate6probe.json on disk is a STALE file from an earlier chunk. Do not read it.
+run_chunk.sh exit code: 2   (non-zero = the stale file did not fool it)

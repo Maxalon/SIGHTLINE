@@ -510,19 +510,68 @@ void main() {
     /// Run the frame's drawing. When PostFX is active the game always renders to the
     /// render-target first, then the shader blit is applied to the screen.
     /// When PostFX is off the original Scaled / non-Scaled paths are preserved exactly.
-    public static void RenderFrame(Action draw)
+    public static void RenderFrame(Action draw) => RenderFrame(draw, null);
+
+    // ── W5 THE FIRST HOUR: the HUD comes OUT of the BLOOM ──────────────────────────────────────
+    // The defect (audit visual-2, pinned by SIGHTLINE_CONTRASTTEST): RenderFrame painted the whole
+    // frame into `_target` BEFORE BuildBloom, so every button, label and panel was part of the
+    // bright-pass — and a saturated UI plate BLOOMED INTO ITS OWN LABEL. Measured on the main
+    // menu, glyph-core vs plate-fill: TRAINING OP fell 8.67:1 -> 2.19:1 the moment post-FX was on.
+    // That is the on-ramp button for a first-time player, and the same blur was quietly undoing
+    // wave V1's two-atlas font work at composite time.
+    //
+    // THE SPLIT IS ON THE BLOOM SOURCE, NOT ON THE TARGET, and that distinction is load-bearing:
+    //   1. `board` — the board, its death-flash, and the overlay screens' animated backdrop
+    //      (Hud.DrawBackdropLayer) — renders into `_target`.
+    //   2. BuildBloom runs on THAT, so the bright-pass sees only atmosphere. Nothing type-bearing
+    //      can flood its own glyphs, and the board's own glow is computed from exactly the same
+    //      pixels it always was.
+    //   3. `hud` is then drawn into the SAME target, on top, contributing nothing to the glow.
+    //   4. one composite, exactly as before.
+    //
+    // The first version of this wave drew the HUD after the composite, straight onto the
+    // backbuffer. It read beautifully and it BROKE ACCESSIBILITY: uBright/uGamma live in the
+    // composite shader, so the pause menu's BRIGHTNESS and GAMMA settings applied to the board and
+    // not to the chrome — at BRIGHTNESS 70% the board dimmed and the HUD did not, which is a
+    // regression for exactly the player those settings exist for. Painting into the target instead
+    // keeps brightness, gamma, the biome grade and the vignette uniform across the whole frame,
+    // needs no second render texture (and therefore no double-applied source alpha on translucent
+    // panels) and no letterbox-blit Camera2D — while still removing the one thing that was
+    // actually destroying the type. (To be exact, because the DEVLOG once implied otherwise: the
+    // camera the abandoned attempt would have needed was never written. The BOARD's shake/zoom
+    // Camera2D — Game.ViewCamera, wrapped around Renderer.DrawBoard — is untouched.)
+    //
+    // What the chrome still receives: the composite's grade, and the bloom of whatever the BOARD
+    // had behind it — which behind a menu plate is the dark tactical backdrop, i.e. nothing. The
+    // audit's smaller secondary finding (chromatic fringing on HUD edges) is NOT addressed by this
+    // and is recorded as open in docs/ROADMAP.md.
+    /// Off-switch (SIGHTLINE_HUDINFX=1 puts the chrome back INSIDE the bloom source, i.e. the
+    /// pre-W5 compositing), so SIGHTLINE_CONTRASTTEST is falsifiable without reverting the tree.
+    static readonly bool HudInFx = Environment.GetEnvironmentVariable("SIGHTLINE_HUDINFX") == "1";
+
+    public static void RenderFrame(Action board, Action hud)
     {
+        if (HudInFx && hud != null) { var b = board; var h = hud; board = () => { b(); h(); }; hud = null; }
         bool applyFx = Enabled && PostFX && _fxReady;
 
         if (applyFx)
         {
-            // Always render into the render-target so the shader has a full-res source.
+            // Pass 1 — the BLOOM SOURCE. Atmosphere only when the frame is split; when there is
+            // no split `board` already IS the whole frame.
             Raylib.BeginTextureMode(_target);
-            draw();
+            board();
             Raylib.EndTextureMode();
 
             // P1: build the half-res bloom from that frame before compositing.
             BuildBloom();
+
+            // Pass 2 — the chrome, into the same target, after the bright-pass has already run.
+            if (hud != null)
+            {
+                Raylib.BeginTextureMode(_target);
+                hud();
+                Raylib.EndTextureMode();
+            }
 
             // Upload uniforms.
             UploadFxUniforms();
@@ -557,6 +606,10 @@ void main() {
         }
 
         // --- original paths (no post-FX) ---
+        // W5-FIX (review): built HERE, not at the top. The shipped path is the post-FX one above,
+        // which returns without ever calling `draw` — allocating the combining closure (and its
+        // display class) on every frame of it was two managed allocations for nothing.
+        Action draw = hud == null ? board : () => { board(); hud(); };
         if (!Scaled)
         {
             Raylib.BeginDrawing();

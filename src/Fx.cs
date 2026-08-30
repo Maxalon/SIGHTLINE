@@ -103,7 +103,12 @@ public class Fx
     Vector2 _shakeOff;
     public Vector2 ShakeOffset => _shakeOff;
 
-    public void AddShake(float amt) { if (ShakeOn) Shake = MathF.Min(18f, Shake + amt); }
+    // W1: ShakeApplied is RNGFRAMETEST's VACUITY GUARD for the shake lever. Without it a
+    // reviewer could delete `game.Fx.ShakeOn = shake;` from the test and every leg would still
+    // print MATCH — the test would be certifying an invariance it never varied. Presentation-
+    // side counter only; nothing reads it but the harness.
+    public int ShakeApplied;
+    public void AddShake(float amt) { if (ShakeOn) { Shake = MathF.Min(18f, Shake + amt); ShakeApplied++; } }
 
     public void Update(float dt)
     {
@@ -152,7 +157,7 @@ public class Fx
         if (Shake > 0.01f)
         {
             Shake *= MathF.Pow(0.001f, dt); // fast decay
-            float a = Util.RandF() * MathF.PI * 2f;
+            float a = Util.FxRandF() * MathF.PI * 2f;
             _shakeOff = new Vector2(MathF.Cos(a), MathF.Sin(a)) * Shake;
             if (Shake < 0.4f) { Shake = 0; _shakeOff = Vector2.Zero; }
         }
@@ -163,15 +168,15 @@ public class Fx
     {
         for (int i = 0; i < count; i++)
         {
-            float a = Util.RandF() * MathF.PI * 2f;
-            float s = speed * (0.4f + Util.RandF());
+            float a = Util.FxRandF() * MathF.PI * 2f;
+            float s = speed * (0.4f + Util.FxRandF());
             Particles.Add(new Particle
             {
                 Pos = at,
                 Vel = new Vector2(MathF.Cos(a), MathF.Sin(a)) * s,
-                Life = life * (0.6f + Util.RandF() * 0.7f),
+                Life = life * (0.6f + Util.FxRandF() * 0.7f),
                 MaxLife = life,
-                Size = size * (0.6f + Util.RandF() * 0.8f),
+                Size = size * (0.6f + Util.FxRandF() * 0.8f),
                 Drag = spark ? 6f : 3f,
                 Color = col,
                 Spark = spark,
@@ -185,15 +190,15 @@ public class Fx
         // directional spark cone
         for (int i = 0; i < 10; i++)
         {
-            float spread = Util.RandRange(-0.4f, 0.4f);
+            float spread = Util.FxRandRange(-0.4f, 0.4f);
             var d = Rotate(dir, spread);
             Particles.Add(new Particle
             {
                 Pos = mouth,
-                Vel = d * Util.RandRange(180f, 420f),
-                Life = Util.RandRange(0.08f, 0.22f),
+                Vel = d * Util.FxRandRange(180f, 420f),
+                Life = Util.FxRandRange(0.08f, 0.22f),
                 MaxLife = 0.22f,
-                Size = Util.RandRange(2f, 4.5f),
+                Size = Util.FxRandRange(2f, 4.5f),
                 Drag = 7f,
                 Color = col,
                 Spark = true,
@@ -204,11 +209,11 @@ public class Fx
         for (int i = 0; i < 2; i++)
             Particles.Add(new Particle
             {
-                Pos = mouth + dir * Util.RandRange(0f, 4f),
-                Vel = dir * Util.RandRange(20f, 60f),
-                Life = Util.RandRange(0.05f, 0.10f),
+                Pos = mouth + dir * Util.FxRandRange(0f, 4f),
+                Vel = dir * Util.FxRandRange(20f, 60f),
+                Life = Util.FxRandRange(0.05f, 0.10f),
                 MaxLife = 0.10f,
-                Size = Util.RandRange(5f, 7.5f),
+                Size = Util.FxRandRange(5f, 7.5f),
                 Drag = 9f,
                 Color = Pal.RGBA(255, 244, 210),
                 Spark = false,
@@ -261,15 +266,15 @@ public class Fx
         var n = dir.LengthSquared() > 0.0001f ? Vector2.Normalize(dir) : new Vector2(1f, 0f);
         for (int i = 0; i < count; i++)
         {
-            float a = Util.RandRange(-spread, spread);
+            float a = Util.FxRandRange(-spread, spread);
             var d = Rotate(n, a);
             Particles.Add(new Particle
             {
-                Pos = at + n * Util.RandRange(0f, 6f),
-                Vel = d * speed * (0.45f + Util.RandF() * 1.1f),
-                Life = Util.RandRange(0.18f, 0.42f),
+                Pos = at + n * Util.FxRandRange(0f, 6f),
+                Vel = d * speed * (0.45f + Util.FxRandF() * 1.1f),
+                Life = Util.FxRandRange(0.18f, 0.42f),
                 MaxLife = 0.42f,
-                Size = size * (0.55f + Util.RandF() * 0.9f),
+                Size = size * (0.55f + Util.FxRandF() * 0.9f),
                 Drag = 6.5f,
                 Color = col,
                 Spark = true,
@@ -351,15 +356,15 @@ public class Fx
     {
         for (int i = 0; i < count; i++)
         {
-            float a = Util.RandRange(-2.55f, -0.6f);    // bias the cone upward-out (a kicked-up puff)
-            float s = Util.RandRange(18f, 46f);
+            float a = Util.FxRandRange(-2.55f, -0.6f);    // bias the cone upward-out (a kicked-up puff)
+            float s = Util.FxRandRange(18f, 46f);
             Particles.Add(new Particle
             {
-                Pos = at + new Vector2(Util.RandRange(-5f, 5f), 6f),
+                Pos = at + new Vector2(Util.FxRandRange(-5f, 5f), 6f),
                 Vel = new Vector2(MathF.Cos(a), MathF.Sin(a)) * s,
-                Life = Util.RandRange(0.22f, 0.42f),
+                Life = Util.FxRandRange(0.22f, 0.42f),
                 MaxLife = 0.42f,
-                Size = Util.RandRange(2.5f, 4.5f),
+                Size = Util.FxRandRange(2.5f, 4.5f),
                 Drag = 5.5f,
                 Color = Pal.RGBA(150, 150, 150),
                 Spark = false,
@@ -430,18 +435,18 @@ public class Fx
     {
         for (int i = 0; i < count; i++)
         {
-            float a = Util.RandF() * MathF.PI * 2f;
+            float a = Util.FxRandF() * MathF.PI * 2f;
             var dir = new Vector2(MathF.Cos(a), MathF.Sin(a) - up);   // lift the cone upward
-            float s = speed * (0.5f + Util.RandF());
+            float s = speed * (0.5f + Util.FxRandF());
             Particles.Add(new Particle
             {
-                Pos = at + new Vector2(Util.RandRange(-6f, 6f), Util.RandRange(-6f, 6f)),
+                Pos = at + new Vector2(Util.FxRandRange(-6f, 6f), Util.FxRandRange(-6f, 6f)),
                 Vel = dir * s,
-                Life = Util.RandRange(0.7f, 1.5f),
+                Life = Util.FxRandRange(0.7f, 1.5f),
                 MaxLife = 1.5f,
-                Size = Util.RandRange(2.5f, 5f),
+                Size = Util.FxRandRange(2.5f, 5f),
                 Drag = 2.2f,                                          // long, lazy flutter
-                Color = _confettiCols[Util.RandInt(0, _confettiCols.Length - 1)],
+                Color = _confettiCols[Util.FxRandInt(0, _confettiCols.Length - 1)],
                 Spark = false,
             });
         }

@@ -76,6 +76,9 @@ acknowledgement. Naming a thing is the cheapest way to make an existing system l
 - **Readability wins, always.** §3.E and §3.H govern. Text that fights the signal is a
   regression, and the briefing card yields the shared card slot to wave T1's teaching
   layers *absolutely* — a lesson or a field tip on screen silences the frame outright.
+  **AMENDED by §1.2** for mission 1 of a first-ever campaign only: the never-simultaneous
+  invariant stands, but the ORDER is reversed there (the briefing plays first and the
+  lesson strip opens behind it), because the rule as written measured 0.00 s of 11 s.
 - **Barks are rate-limited by design, not by taste.** One per turn, one per beat kind
   per mission, never the same speaker twice running. The combat log is load-bearing for
   "why did that happen"; flavour may never crowd out a mechanical line.
@@ -96,6 +99,76 @@ would ship an ellipsis fails the build gate instead.
 for the same attention budget as balance and feel work. It earns its place only while it
 stays this small. If a future wave wants dialogue, arcs or a plot, that is a *different*
 amendment and it should be argued on its own terms — this one does not authorise it.
+
+### 1.2 AMENDMENT — the briefing goes FIRST on mission 1 (PROGRAM RESONANCE, wave W5, 2026-08-29)
+
+> **This amends the fourth limit in §1.1 above, and only on mission 1 of a first-ever
+> campaign.** Same contract: on the record, argued, and reversible with one env var.
+
+**What §1.1 said, and what W5 did.** §1.1 lists as a non-negotiable limit that *"the
+briefing card yields the shared card slot to wave T1's teaching layers **absolutely** — a
+lesson or a field tip on screen silences the frame outright."* W5 shipped the opposite
+**priority** for one window: `Game.StartTutorialMaybe` now arms the mission-1 lesson strip
+**pending** (`Game.TutPending`) and `UpdateTutorial` opens it on the frame the briefing card
+retires, so teaching waits up to 11 s behind flavour. The literal *never-simultaneous*
+invariant §1.1 was written to protect is intact — the two still cannot share the slot, and
+`Hud.Draw`'s dispatch chain still puts every teaching layer ahead of the briefing — but the
+ORDER is inverted in exactly the first eleven seconds a new player ever sees. That is the
+window §1.1's limit exists to protect, so this has to be a recorded amendment, not a
+detail of an implementation.
+
+**Why it is nonetheless right.**
+
+- **The rule as written produced ZERO briefings, not a delayed one.** `BriefAllowed`
+  requires `TutorialText == null`; the strip was non-null from the frame `SetupMission`
+  armed it; and `UpdateBriefing` destroys the card outright the instant `Stats.CombatLog`
+  fills, which the strip's own FIRE lesson guarantees. So on a first-ever run the card held
+  without ever burning its clock and was then deleted. Measured on the live persisting path
+  by `SIGHTLINE_BRIEFTEST`: **0.00 s of 11 s.** An absolute yield to a layer that never
+  ends is not a priority, it is a deletion. §1.1's own justification — *"naming a thing is
+  the cheapest way to make an existing system land"* — cannot be served by a card no player
+  has ever seen.
+- **The two layers are not competing for the same moment.** §1.1's limit is about
+  ATTENTION during play: a lesson that says *do this now* must not fight prose. On turn 1
+  of mission 1 nothing is contested — the squad is concealed, no hostile has acted, the
+  combat log is empty, and the MOVE lesson has nothing to teach yet that the next eleven
+  seconds will change. The briefing is a genuine pre-fight beat, and playing it there costs
+  the teaching layer nothing it can use.
+- **The player keeps the override.** Any key or click dismisses the card
+  (`Game.UpdateBriefing`), so a player who wants to move reaches the lesson in **one
+  input**. Teaching is deferred, never withheld; a player cannot get stuck behind flavour.
+  The wait is also bounded twice — `BriefShowSeconds` = 11 s, and `BriefHoldMax` = 45 s
+  gives up entirely rather than ambush anyone mid-fight.
+- **Nothing else moved.** The strip still runs in full and still completes; the action bar's
+  verb staging is live throughout (`OnboardingActive` counts `_tutPending`) so the bar does
+  not flicker whole-then-staged across the card; and `TutStepFire` gained the turn-count
+  patience fallback its three siblings already had, so the FIRE lesson can no longer be the
+  step that outlives the briefing.
+
+**The limit on the amendment — this is the load-bearing half.**
+- **Mission 1 of a first-ever campaign only.** `StartTutorialMaybe` returns immediately for
+  `Mission != 1` and for `Display.TutorialSeen`. On every other mission, and for every
+  returning player, §1.1's absolute yield stands unchanged.
+- **The never-simultaneous invariant is untouched and is still absolute.** `Hud.Draw` draws
+  the tutorial, the training lesson and the field tip ahead of the briefing in one `else if`
+  chain; `BriefAllowed` still requires `TutorialText == null`; `BarksAllowed` still defers to
+  all three. A lesson and a briefing on screen together remains a bug.
+- **This buys ORDER, not CONTENT.** §1.1's cap on the frame — three lines, no plot, nothing
+  a player must read — is not touched. This wave made an existing card reachable; it wrote
+  no new words.
+- **It stays falsifiable.** `SIGHTLINE_BRIEFFIRST=0` restores the pre-W5 ordering, and
+  `SIGHTLINE_BRIEFTEST` goes red without it — with `briefShownOnlyFor0.00sOf11s`, the
+  original defect, named.
+
+**The honest cost, and the correction that produced this section.** A first-time player's
+first eleven seconds are now prose rather than instruction, and nobody has watched a human
+sit through them: the wait is defensible on the argument above, not on evidence. The wave
+that shipped it also did **not** record it as an amendment at the time — it wrote a full
+§5.1 for the much smaller mid-mission-checkpoint decision and left this one as an
+implementation comment in `Game.cs`, which is exactly the drift this document exists to
+prevent. If a recorded human session (audit `wildcard-6`) shows players skipping the card
+or fumbling turn 1, the cheap retreat is to cut `BriefShowSeconds`, not to restore a rule
+that measured zero.
 
 ---
 
@@ -298,6 +371,37 @@ on the existing `Display` render-target reads as "premium."
 baked fonts add richness with [far less storage than bitmaps](https://docs.unity3d.com/550/Documentation/Manual/ProceduralMaterials.html)
 and no human-authored art.
 
+#### H.1 AMENDMENT — the asset policy is now a STYLE, not a RULE (owner, 2026-08-29)
+
+> This amends the paragraph above and CLAUDE.md's "Art policy". Recorded, with limits, rather
+> than left to drift — the same treatment §1.1 gave the narrative amendment.
+
+**What changed.** "No hand-made / human-authored art or audio" was a hard constraint. The owner
+has removed it. Third-party assets are permitted when they clear **both** bars, and only then:
+1. **Zero cost** — free to obtain AND free to redistribute inside a shipped build, forever. No
+   asset that would cost money if the game were distributed in any capacity.
+2. **Zero legal risk** — an explicit licence permitting redistribution (CC0 / public domain /
+   OFL / MIT-class). "Free to download" is not a licence. If the licence is unclear, the answer
+   is no.
+Every added file is recorded in `assets/*/CREDITS.txt` **and** `THIRD-PARTY-NOTICES.txt`, with
+its source URL and licence. Small files only; large binaries still stay out of the repo.
+
+**What did NOT change — and this is the load-bearing half.** The geometric aesthetic is kept
+**because it is good**, not because a rule forced it. Every principle above still governs: an
+imported asset that fails the squint test, breaks the semantic colour roles, or adds texture
+competing with gameplay signal is a **regression**, and the fact that it is "real art" does not
+earn it a pass. The bar for an imported asset is *higher* than for a procedural one, because
+procedural content is authored against the palette by construction and an import is not. In
+practice this means the policy mostly unlocks **fonts, shader/LUT data, and audio** — not
+sprites or illustrations, which would fight the established visual language.
+
+**The sandbox constraint, measured.** From inside an agent session the outbound proxy blocks
+`freesound.org` and `opengameart.org` (403); `raw.githubusercontent.com`, `api.github.com` and
+`nuget.org` resolve. So the *audio* half of this amendment is mostly unusable by an agent and is
+work for the owner's own machine, where `assets/sfx/<cue-id>.ogg` and
+`assets/music/{ambient,combat}.ogg` are picked up by the existing file-first loader with **no
+code change**. Do not spend a wave rediscovering this.
+
 **Style guide — semantic color roles (lock in roadmap 5.1):**
 
 | Role | Job | Rule |
@@ -425,6 +529,153 @@ of the spectrum). Revisit it only **after** Option 3 ships and playtests, and on
 **flagged prototype on the larger maps**, judged on one question: *is partial-information
 SIGHTLINE more fun than full-information SIGHTLINE, knowing it costs us threat-preview
 and readability?* Until that bar is cleared, we do not pay its price.
+
+---
+
+### 5.1 AMENDMENT — the mid-mission checkpoint (considered, deferred; PROGRAM RESONANCE wave W5, 2026-08-29)
+
+Same contract as §5: **on the record and reversible with eyes open.**
+
+**The problem.** Until W5 the game had *no way to quit*. The pause card carried 18
+controls, the main menu 9 entries, and neither offered an exit — and because
+`Raylib.SetExitKey(KeyboardKey.Null)` is load-bearing (ESC cancels a targeting mode and
+opens the pause card, and must never close the window), ESC could not do it either. The
+only sanctioned ways out were **ABANDON RUN**, which destroys the run, or **alt-F4**.
+W5 shipped `QUIT TO DESKTOP` on both surfaces. That half is not in question.
+
+The half that *is* a design decision: **the campaign checkpoint is written at mission
+start and nowhere else** (`SaveGame.Save(_run)` in `Game.SetupMission` is the only live
+gameplay call site). So quitting fifteen minutes into mission 5 rewinds to the beginning
+of mission 5. Every turn since is gone.
+
+**The options considered:**
+
+1. **A real mid-mission checkpoint.** The board is fully describable — units, tiles,
+   objective state, pod alert tiers, the anim queue's terminal state — and `SaveGame`'s
+   source-generated JSON contexts make another DTO cheap. Quit exactly where you stand.
+2. **Accept mission-restart-on-quit, and say so out loud.**
+3. **Say nothing** (the status quo before W5, which is what made the missing exit worse
+   than merely missing: a player who force-quit lost work and was never told they would).
+
+**The decision: Option 2, for now.** The confirm text on the pause card reads *"the
+current mission restarts from its start"* — the player is told the price before they pay
+it, and `SIGHTLINE_QUITTEST` asserts the claim is TRUE: the quit path writes nothing,
+deletes nothing, and leaves the mission-start checkpoint byte-identical and `meta.json`
+untouched.
+
+Rationale, and the honest cost:
+
+- **A mission is a coffee break, not an evening.** Measured over five Release autoplays
+  (audit wildcard-8, base `d350416`), a whole six-mission campaign runs 3,581–17,163
+  frames — roughly two minutes of *animation* for the entire campaign. The lost work of
+  a mid-mission quit is bounded by one mission, and one mission is the unit this game is
+  already built around: it is the unit the checkpoint uses, the unit the barracks sits
+  between, and the unit the end card counts.
+- **A mid-mission save is a new persisted format, and this project has been burned by
+  persistence twice** — `PublishTrimmed` destroying save/load while the game still booted
+  (`docs/DISTRIBUTION.md` §3), and a `catch { }` that let a broken publish look healthy.
+  A board DTO is not a small format: it would need a golden fingerprint in the SAVETEST
+  family, and it would need to survive every future change to `Unit`, `Grid` and the
+  objective state machines. That is a wave of its own, not a rider on a UI wave.
+- **It would also be a save-scum surface.** §1's "stakes that bite" is a pillar: a
+  quit-anywhere-resume-anywhere checkpoint inside a mission makes reloading past a bad
+  roll a two-click operation, and the run-to-run loop (pillar 3) is priced on losses
+  being permanent. That is a real design question, not just an engineering one, and it
+  deserves to be answered deliberately rather than acquired as a side effect of adding a
+  QUIT button.
+
+**Deferred, not rejected.** Revisit when either of two things is true: a recorded human
+session (audit wildcard-6's journal proposal) shows real players quitting mid-mission
+often enough to matter, or a mission's median wall-clock length grows past the coffee
+break the argument above rests on. If it ships, it ships with the save-scum question
+answered first — most likely as a **suspend-and-close** (the file is consumed on resume,
+so it restores a session rather than banking a reload point), which keeps the stakes and
+buys the convenience.
+
+## 5.1 The enemy ammo economy (decided 2026-08-29, wave W2 "THE OPPONENT ACTS")
+
+This section exists because the project had never *made* this decision — it **defaulted
+into** one, and the default was the bad half of a real design fork.
+
+**What was actually shipping.** Hostiles are handed exactly one clip at spawn
+(`Mission.cs:277/1236/1249/1323/1832`) and there was **no enemy reload verb anywhere in the
+codebase.** So "dry" was not a tempo state, it was **death by other means**: a hostile that
+emptied its magazine stopped being a combatant for the rest of the mission and simply stood
+on the board. It was invisible on top of that — enemy ammo appeared nowhere in `Hud.cs` or
+`Renderer.cs`, so the player could neither read it nor plan around it.
+
+Measured on the current tree (`SIGHTLINE_AIIDLETEST`, base `4784803`), counting only **contested**
+act-opportunities — at least one soldier still standing, because on an all-downed board `Ai.Plan`
+returns an empty plan by design and every hostile idles regardless of ammo:
+
+| frame | acts | on an empty weapon | of those, produced nothing |
+|---|---|---|---|
+| n=16 campaigns | 755 | 69 (**9.1%**) | 42 (**60.9%**) |
+| n=32 campaigns | 1195 | 39 (**3.3%**) | 24 (**61.5%**) |
+
+The *rate* is sample-dependent (3-9% of contested acts); the *consequence* is not — **~61% of
+dry-weapon acts produced nothing in both frames.** An earlier draft of this section cited "11.5%
+… essentially all of them": the first figure was unsplit (it counted the bleed-out window) and
+the second rounded 61% up to "essentially all". Both are corrected here, and the correction is
+the reason CLAUDE.md's rule reads *do not cite a number you have not just re-measured*.
+
+**The fork.** Two coherent options, and only two:
+
+| | **(a) A reload verb** | **(b) Per-turn clip refresh** |
+|---|---|---|
+| Rule | a dry hostile spends 1 action changing the mag | ammo silently refills each enemy turn |
+| Cost to the player | a free turn of tempo they can *bait and punish* | none — the state is deleted |
+| What it adds | suppressing fire and long fights acquire a point | nothing; it removes a system |
+| What it costs us | one more branch, and it must be **legible** or it is invisible pressure | the enemy's magazine stops meaning anything |
+
+**The decision: (a), the reload verb** — mirroring the player's own `Game.DoReload` exactly
+(one action, full clip, does not end the turn). Rationale, in the order that decided it:
+
+1. **Symmetry is the game's contract.** The player reloads; the reaction system, the shove,
+   the brace and the overwatch cone are all already team-symmetric (see `CLAUDE.md` →
+   "How a turn flows"). An opponent that never has to manage a magazine is playing a
+   different game from the one the player is playing, and §3.A calls that a false choice
+   worn by the *player's* ammo management.
+2. **It creates a decision instead of deleting one.** §3.A: an interesting decision needs
+   consequences. Option (b) makes "how much fire has this hostile put out?" unanswerable and
+   therefore unusable. Option (a) makes it a live read — *this one is empty, push now* — which
+   is exactly the kind of minute-to-minute lever §2 asks for and costs no new verb, no new
+   screen and no new number.
+3. **It is the only option that fixes the actual defect.** The defect was not "enemies run
+   out of ammo"; it was "a hostile that runs out stops existing while still standing on the
+   board." (b) hides that by making the state unreachable. (a) turns it into a beat.
+
+**The constraint that comes with it, and it is not optional.** A reload the player cannot
+see is invisible pressure — a hidden clock that quietly makes the game harder. So the
+decision *includes* the read: the hostile token carries a small ammo pip row
+(`Renderer.DrawEnemyAmmoPips`), and a dry hostile carries a **DRY** chip — an empty-magazine
+glyph plus the word — in `DrawUnitStatusChips`. Per §3.H the actionable state is carried by
+SHAPE and TEXT, not by hue, and both are drawn only for hostiles already in contact
+(`AlertLevel.Alert`) so a dormant "?" pod still gives nothing away.
+
+Two things this rule was found violating in review, and both are now enforced rather than
+asserted. **(1)** The read must actually be *visible*: the first version drew its own pill and pip
+row into p.Y+24..+42, the band `DrawUnitStatusChips` owns and paints LAST, so on any hostile
+carrying BRN/BLD/DAZ the pill lost 9 of its 15 px and the pip row vanished entirely. The DRY read
+therefore lives *inside* that late pass now, and `SIGHTLINE_AIIDLESHOT` stages a DRY+BRN token so
+the claim is checkable from one frame instead of taken on trust. **(2)** "One decision" has to
+mean one switch: the read is gated on `Game.AiIdleFix`, the same dial as the reload verb. Before
+that, turning the reload off left hostiles wearing a permanent DRY badge advertising a state the
+player could do nothing about. **If a future wave removes the read, it must remove the reload with
+it** — the two are one decision, and the code now makes that structural.
+
+**What this is NOT.** It is not an ammo *economy* in the resource-management sense: there
+are no magazines to count, no ammo pickups, and no attrition model. A hostile can reload
+indefinitely. The only thing being bought here is a **one-action tempo window** the player
+can create and then spend, and that is the whole of the intended scope.
+
+**The honest cost.** This makes the game harder in principle — a hostile that used to be
+permanently neutralised on 3-9% of its contested act-opportunities is now merely delayed by one
+action. In practice the cost was measured and is not distinguishable from zero: over 800
+CRN-paired campaigns, run completion 25.2% → 23.8% pooled (McNemar p=0.451), mission win-rate
+78.94% → 78.56% over ~1400 missions, soldier deaths per mission 1.340 → 1.340. See
+`docs/measurements/w2/` and `docs/DEVLOG.md` §W2; `SIGHTLINE_AIIDLEFIX=0` restores the pre-W2
+behaviour — and, since the review, the pre-W2 *read* — exactly.
 
 ---
 
