@@ -1723,6 +1723,61 @@ safety claim from W5 was re-verified by the reviewers and held; none of it was t
       real teeth or the ladder needs fewer, bigger steps — but the first job is a **higher-N**
       measurement (n≥80/rung) so the question can be asked at a precision that can answer it.
 
+### PROGRAM RESONANCE — WAVE "THE FIT" (2026-08-30, details in DEVLOG §THE FIT)
+
+Presentation only (base = the W9/W5/W8 integration tip). Proved balance-inert two ways:
+`SIGHTLINE_PAIRTEST` PASS, and a pinned-slot `SIGHTLINE_BALANCE=5 BASE=950` chunk (`runs=10`
+asserted both sides, exit 0 both sides) **field-for-field identical** to the same batch on the
+branch point, `harness{}` excluded.
+
+- [x] **THE STANDING GATE: `SIGHTLINE_FITTEST`** (wired into `scripts/qa-sweep.sh` through
+      `verdict`). The five defects this wave took were one structural gap: **no self-test in this
+      project ran at any text size but 100%**, while the game ships four {0.90, 1.00, 1.10, 1.20}
+      against fixed-pixel chrome. FITTEST asserts that no string on the five surfaces this wave
+      touched is painted outside its own chrome, or into another string's pixels, at **all four**
+      shipped scales. It PASSes with 15-69 px of STATED headroom per leg; `SIGHTLINE_OLDFIT=1`
+      restores all five pre-fix geometries and it reports **40 violations** across 100/110/120%.
+      A direct source revert of one fix alone (the armory tag's band) fails it at 8.
+- [x] **CHROMETEST's own `blurbEllipsizes` leg moved INSIDE its scale loop.** It had been sitting
+      outside, so the one assertion that guarded the operator blurb only ever ran at 100% — where
+      the longest blurb had **two pixels** of margin. `SIGHTLINE_OLDFIT=1` now fails CHROMETEST too.
+- [x] **The mid-run FIELD DOCTRINE card sizes to its text** (`Hud.BoonOfferCardH`). It was a
+      literal 188 px drawing the same sixteen descriptions W5-FIX-2 had already content-sized on
+      the DRAFT screen: FIELD DRILLS' fourth line landed ON `[ CHOOSE ]` at the **default** text
+      size, five lines at 120%. Same string, second call site.
+- [x] **The ARMORY weapon row's two strings stop sharing a band.** The blurb started at a literal
+      `r.X+48`; the price/EQUIPPED tag was right-aligned through `Cfg.Measure`, so it scaled while
+      the blurb's origin did not and the two converged. The tag moves onto the NAME's band and the
+      card widens 560 → 600. Vertical separation, not truncation.
+- [x] **The HALL OF FAME legend row splits.** Identity (rank + class) left, score (kills + heat)
+      right-aligned to the panel's content edge — where it also columnises down the list. With a
+      LIEUTENANT staged at 120% the old single line was painted **outside** the panel border.
+- [x] **The draft's bottom row plates are sized from their own widest label** — RE-ROLL POOL was a
+      literal 190 px carrying a 201 px label at 120% (text hung past **both** borders); DEPLOY a
+      literal 280 px against a 294 px worst-case label. Sized from the widest label the button can
+      EVER show, never the current one, so the row cannot re-flow under the cursor.
+- [x] **The draft operator card widens 300 → 394** = the RUN CONTRACT row's width / 3, so the class
+      blurb (37 chars, 320 px at 120%) fits without ellipsis and the candidate grid stops being the
+      one narrow row on a screen whose other two rows are 1230 px. Growing the chrome, not
+      shrinking the writing.
+- [x] **The three screenshot hooks stage the WORST case, not the first one.** `DebugBoon` leads
+      with the longest description (FIELD DRILLS is 1 of 16, so an unseeded glance showed it ~19%
+      of the time); `DebugWarRoom`'s NOX is a LIEUTENANT SHARPSHOOTER with a nickname; `DebugArmory`
+      picks the SHARPSHOOTER (the 49-char SNIPER blurb) instead of `Squad.First(!IsVip)`. "The
+      staged data is short" is why a human eyeballing these screens never saw any of this.
+- [ ] **Two of the five were ALREADY FIXED by W5 and are recorded as such.** The draft-screen
+      doctrine card overflow (W5-FIX-2's content-sized card) and the DEPLOY row falling off the
+      bottom at 120% (`Hud.DraftLayout`) do not reproduce on this tree. Their *residues* did —
+      the second call site and the plate widths above.
+- [ ] **The REQUISITION card is still sized for the full roster in ARMORY step 2.** `armoryH =
+      104 + 28 + Run.RosterMax*52 + 64` regardless of how many weapon rows the chosen soldier
+      actually has, so a SHARPSHOOTER (2 options) leaves ~250 px of dead panel. Pre-existing,
+      cosmetic, out of scope for a wave about overflow — but it is now visible in every armory
+      screenshot because the hook stages a SHARPSHOOTER.
+- [ ] **The gate covers five surfaces, not the game.** Every other screen is still asserted at
+      100% only (or, for card bodies, by R2's `VOICETEST` leg 8). FITTEST is written so a sixth
+      leg is an addition, not a rewrite — the next wave that touches a screen should add one.
+
 <<<<<<< HEAD
 ### PROGRAM RESONANCE — W4 "THE BOARD BECOMES A PLACE" (2026-08-29, details in DEVLOG §W4 BOARD)
 
