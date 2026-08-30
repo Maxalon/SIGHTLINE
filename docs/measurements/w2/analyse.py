@@ -10,6 +10,9 @@ import json, math, os, sys
 
 OUT = os.path.dirname(os.path.abspath(__file__))
 HEATS = [0, 2, 4, 6, 8]
+# R4 = the round of record, on the FINAL binary (standing gate + dash guard). R3 = before the
+# dash guard, R1 = before the standing gate; both kept as provenance.
+PREFIX = os.environ.get("W2_PREFIX", "R4")
 BASES = [0, 10, 20, 30]
 
 
@@ -17,7 +20,7 @@ def legs(fix, heat):
     """(slot, policy) -> win, pooled over the four slot sets."""
     out = {}
     for b in BASES:
-        p = os.path.join(OUT, f"R1-fix{fix}-h{heat}-b{b}.json")
+        p = os.path.join(OUT, f"{PREFIX}-fix{fix}-h{heat}-b{b}.json")
         d = json.load(open(p))
         assert d["runs"] == 20, f"{p}: runs={d['runs']}"
         for s in d["pairedPolicy"]["slots"]:
@@ -30,7 +33,7 @@ def field(fix, heat, path):
     """Mean of a scalar field over the four chunks of a rung."""
     vals = []
     for b in BASES:
-        d = json.load(open(os.path.join(OUT, f"R1-fix{fix}-h{heat}-b{b}.json")))
+        d = json.load(open(os.path.join(OUT, f"{PREFIX}-fix{fix}-h{heat}-b{b}.json")))
         cur = d
         for k in path:
             cur = cur[k]

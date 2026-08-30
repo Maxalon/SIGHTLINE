@@ -1579,24 +1579,58 @@ public static class Program
 
         bool shipped = Game.AiIdleFix;
 
-        // one leg's counters. `acts` = act-opportunities (a living enemy reaching ActAfterMove);
-        // `actsDry` = those made holding an empty weapon; `idle` = ended with an action unspent and
-        // no branch fired; `idleDry` = idles by a dry unit; `noTgt` = idles where the planner had
-        // planned no shot at all (the fallback-with-no-terminal-else family).
-        (long acts, long actsDry, long idle, long idleDry, long noTgt, int missions) Leg(bool fix)
+        // One leg's counters, and EVERY ONE OF THEM IS SPLIT BY WHETHER ANY SOLDIER IS STILL
+        // STANDING. That split is not a refinement, it is the measurement: on an all-downed board
+        // Ai.Plan returns an empty plan by design (the FUL-7 downed filter empties `players`), so
+        // every hostile idles and always did. The wave's first write-up reported the UNSPLIT rate
+        // as combat paralysis; 86% of it was the bleed-out window. Contested = at least one alive,
+        // non-downed soldier — the only regime in which "the enemy did nothing" is a defect.
+        //   acts/actsDry  — act-opportunities, and those made holding an empty weapon
+        //   idle/idleDry  — ended with an action unspent and no branch fired
+        //   noTgt         — idles where the planner had planned no shot at all
+        //   actedDown     — acts that DID something on an all-downed board. Pre-wave this is 0
+        //                   (nothing can fire off an empty plan); the wave's first build made it
+        //                   320, of which 319 popped HUNKERED into the player's death scene.
+        (long acts, long actsDry, long idle, long idleDry, long noTgt,
+         long actsC, long actsDryC, long idleC, long idleDryC, long noTgtC,
+         long actedDown, int campaigns, int missions,
+         long dashOffered, long dashTaken, long reloads, long repairs, long owHeld,
+         double dashLoss) Leg(bool fix)
         {
             Game.AiIdleFix = fix;
             long acts = 0, actsDry = 0, idle = 0, idleDry = 0, noTgt = 0;
-            int missions = 0;
-            Game.ActProbe = (u, plan, actionsBefore, ammoBefore) =>
+            long actsC = 0, actsDryC = 0, idleC = 0, idleDryC = 0, noTgtC = 0, actedDown = 0;
+            int campaigns = 0, missions = 0;
+            long dashOffered = 0, dashTaken = 0, reloads = 0, repairs = 0, owHeld = 0;
+            double dashLoss = 0;
+            Ai.DashProbe = (dashScore, bestScore, spent, win) =>
             {
+                dashOffered++;
+                if (win) dashTaken++;
+                dashLoss += bestScore - dashScore;   // raw, BEFORE the move-cost refund
+            };
+            Game.ActProbe = (u, plan, actionsBefore, ammoBefore, standing) =>
+            {
+                if (plan != null && plan.Reload) reloads++;
+                if (plan != null && plan.IdleRepair) repairs++;
+                // W3 hand-off: how often does the enemy OVERWATCH branch actually fire? (Not
+                // "is it planned" — planned AND accepted by the exec, i.e. the unit ended its
+                // turn holding a lane.) The review claims zero; this makes it my own number.
+                if (u.OnOverwatch && !u.OwBrace) owHeld++;
+                bool contested = standing > 0;
                 acts++;
-                if (ammoBefore <= 0) actsDry++;
+                if (contested) actsC++;
+                if (ammoBefore <= 0) { actsDry++; if (contested) actsDryC++; }
                 bool isIdle = u.ActionsLeft > 0 && u.ActionsLeft == actionsBefore;
-                if (!isIdle) return;
+                if (!isIdle)
+                {
+                    if (!contested) actedDown++;   // the bleed-out chorus guard
+                    return;
+                }
                 idle++;
-                if (ammoBefore <= 0) idleDry++;
-                if (plan == null || plan.ShootTarget == null) noTgt++;
+                if (contested) idleC++;
+                if (ammoBefore <= 0) { idleDry++; if (contested) idleDryC++; }
+                if (plan == null || plan.ShootTarget == null) { noTgt++; if (contested) noTgtC++; }
             };
 
             var objs = new[] { Objective.Eliminate, Objective.Hack, Objective.Evac, Objective.Escort,
@@ -1627,11 +1661,15 @@ public static class Program
                             if (++frame >= 20000) break;
                             if (game.Phase == Phase.Lose || game.Phase == Phase.Win) break;
                         }
+                        campaigns++;
                         missions += game.RunState != null ? Math.Max(1, game.RunState.Mission) : 1;
                     }
 
             Game.ActProbe = null;
-            return (acts, actsDry, idle, idleDry, noTgt, missions);
+            Ai.DashProbe = null;
+            return (acts, actsDry, idle, idleDry, noTgt,
+                    actsC, actsDryC, idleC, idleDryC, noTgtC, actedDown, campaigns, missions,
+                    dashOffered, dashTaken, reloads, repairs, owHeld, dashLoss);
         }
 
         var off = Leg(false);
@@ -1643,20 +1681,48 @@ public static class Program
         Renderer.UnloadNoise();
         Raylib.CloseWindow();
 
-        string Row(string tag, (long acts, long actsDry, long idle, long idleDry, long noTgt, int missions) r)
-            => $"AIIDLETEST: {tag} missions={r.missions} acts={r.acts} actsDry={r.actsDry} " +
+        string Row(string tag, (long acts, long actsDry, long idle, long idleDry, long noTgt,
+                                long actsC, long actsDryC, long idleC, long idleDryC, long noTgtC,
+                                long actedDown, int campaigns, int missions,
+                                long dashOffered, long dashTaken, long reloads, long repairs,
+                                long owHeld, double dashLoss) r)
+            => $"AIIDLETEST: {tag} campaigns={r.campaigns} missions={r.missions}\n" +
+               $"AIIDLETEST:   CONTESTED (>=1 soldier standing — the regime an idle is a DEFECT in): " +
+               $"acts={r.actsC} actsDry={r.actsDryC} " +
+               $"idle={r.idleC} ({(r.actsC > 0 ? 100.0 * r.idleC / r.actsC : 0):0.0}%) " +
+               $"idleDry={r.idleDryC} noTgt={r.noTgtC}\n" +
+               $"AIIDLETEST:   ALL-DOWNED (bleed-out window — Ai.Plan returns an empty plan BY DESIGN): " +
+               $"acts={r.acts - r.actsC} idle={r.idle - r.idleC} " +
+               $"({(r.acts - r.actsC > 0 ? 100.0 * (r.idle - r.idleC) / (r.acts - r.actsC) : 0):0.0}%) " +
+               $"acted={r.actedDown}\n" +
+               $"AIIDLETEST:   UNSPLIT (do NOT quote this as a paralysis rate): " +
+               $"acts={r.acts} actsDry={r.actsDry} " +
                $"idle={r.idle} ({(r.acts > 0 ? 100.0 * r.idle / r.acts : 0):0.0}%) " +
-               $"idleDry={r.idleDry} noTgt={r.noTgt}";
+               $"idleDry={r.idleDry} noTgt={r.noTgt}\n" +
+               $"AIIDLETEST:   SCALE OF THE LIVE REPAIR (what the wave actually changes in play): " +
+               $"reload={r.reloads} terminal-else={r.repairs} (dash {r.dashTaken} of {r.dashOffered} offered, " +
+               $"rawScoreLoss/offer={(r.dashOffered > 0 ? r.dashLoss / r.dashOffered : 0):0.0}) " +
+               $"=> {(r.acts > 0 ? 100.0 * (r.reloads + r.repairs) / r.acts : 0):0.0}% of ALL acts, " +
+               $"{(r.actsC > 0 ? 100.0 * (r.reloads + r.repairs) / r.actsC : 0):0.0}% of CONTESTED acts\n" +
+               $"AIIDLETEST:   FOR W3: enemy act-opportunities that ended holding an OVERWATCH lane = {r.owHeld}";
         Console.WriteLine(Row("AIIDLEFIX=0", off));
         Console.WriteLine(Row("AIIDLEFIX=1", on));
 
         var idleFails = new System.Collections.Generic.List<string>();
-        if (on.idle > 0)    idleFails.Add($"idleActs={on.idle}");
-        if (on.idleDry > 0) idleFails.Add($"idleDryActs={on.idleDry}");
-        if (off.idle == 0)  idleFails.Add("probeInsensitive(the pre-wave tree idled zero times — the probe is not measuring)");
-        if (on.acts < 200)  idleFails.Add($"vacuous(acts={on.acts})");   // no display / no gameplay
+        // (1) the invariant: no CONTESTED act-opportunity ends unspent.
+        if (on.idleC > 0)    idleFails.Add($"contestedIdleActs={on.idleC}");
+        if (on.idleDryC > 0) idleFails.Add($"contestedIdleDryActs={on.idleDryC}");
+        // (2) the bleed-out guard, and it is as load-bearing as (1). A squad on the floor must not be
+        //     narrated at by the hostiles standing over it; the first W2 build did exactly that 320
+        //     times, and no balance measurement can see it because no soldier can act.
+        if (on.actedDown > 0)  idleFails.Add($"actedDuringBleedOut={on.actedDown}");
+        if (off.actedDown > 0) idleFails.Add($"actedDuringBleedOut(pre-wave)={off.actedDown}");
+        // (3) non-vacuity, on the CONTESTED counter — the split is what makes the probe honest, so
+        //     the sensitivity check has to be on the split number, not on the flattering unsplit one.
+        if (off.idleC == 0)  idleFails.Add("probeInsensitive(the pre-wave tree never idled in a contested fight)");
+        if (on.actsC < 200)  idleFails.Add($"vacuous(contestedActs={on.actsC})");   // no display / no gameplay
         Console.WriteLine(idleFails.Count == 0
-            ? "AIIDLETEST: PASS (no enemy act-opportunity ends with an unspent action; no dry weapon holds one; the pre-wave tree still fails the same probe)"
+            ? "AIIDLETEST: PASS (no CONTESTED act-opportunity ends unspent; no dry weapon holds one; nothing acts or speaks during the bleed-out window; the pre-wave tree still fails the same probe)"
             : "AIIDLETEST: FAIL (" + string.Join(",", idleFails) + ")");
     }
 

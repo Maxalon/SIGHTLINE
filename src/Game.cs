@@ -6439,10 +6439,25 @@ public partial class Game
         {
             var e = _aiUnits[_aiIdx];
             // W2 THE OPPONENT ACTS — the idle detector's baseline. EVERY branch in the chain below
-            // changes ActionsLeft (ten set it to 0; the shot decrements it), so "ActionsLeft > 0 AND
-            // unchanged" is an exact structural test for "no branch fired" — the auditor's definition
-            // of an idle act — without a `fired` flag threaded through eleven branch bodies.
+            // changes ActionsLeft (the shot and the reload decrement it; the other ten zero it), so
+            // "ActionsLeft > 0 AND unchanged" is an exact structural test for "no branch fired" —
+            // the auditor's definition of an idle act — without a `fired` flag threaded through all
+            // twelve branch bodies.
             int actionsBefore = e.ActionsLeft, ammoBefore = e.Ammo;
+            // W2 REVIEW FIX — the BLEED-OUT WINDOW, and it is the whole shape of this wave's number.
+            // When every surviving soldier is on the floor, Ai.Plan takes its `players.Count == 0`
+            // early return (Ai.cs:78, after the FUL-7 LAST LIGHT downed filter): there is nothing to
+            // target and nobody who can act. EVERY hostile then idles, by design — and that window
+            // supplied 86% of the raw idle count this wave first published as though it were combat
+            // paralysis. It is not a defect and it must not be "fixed": a squad bleeding out is the
+            // game's most dramatic beat, and filling it with hostiles dashing and barking HUNKERED
+            // turn after turn is a feel regression the price measurement is STRUCTURALLY BLIND to
+            // (no soldier can act, so run completion cannot move). So the repair below — and its
+            // pops and SFX — are gated on there being somebody left standing to act against, and
+            // the invariant this wave actually enforces is "no CONTESTED act-opportunity ends
+            // unspent". The all-downed acts stay silent, exactly as they were pre-wave.
+            int standing = 0;
+            foreach (var p in Players) if (p.Alive && !p.Downed) standing++;
             if (e.Alive)
             {
                 if (_aiPlan.SiegeCharge != null && e.HasSiege && e.ChargeTurns == 0 && e.ActionsLeft > 0)
@@ -6571,9 +6586,11 @@ public partial class Game
                 {
                     // W2 THE OPPONENT ACTS — the enemy AMMO ECONOMY, decided rather than defaulted
                     // into (docs/DESIGN.md §5.1). Hostiles used to be handed exactly one clip at spawn
-                    // with no reload verb anywhere, so "dry" was PERMANENT: measured on this tree,
-                    // 120 of 1048 enemy acts (11.5%) were made with an empty weapon and 93 of those
-                    // (77.5%) produced no action at all. A dry gun is
+                    // with no reload verb anywhere, so "dry" was PERMANENT. Measured on this tree over
+                    // CONTESTED act-opportunities only (at least one soldier standing — an all-downed
+                    // board idles every hostile by design): 9.1% of acts at n=16 campaigns and 3.3% at
+                    // n=32 were made on an empty weapon, and ~61% of those produced nothing in both
+                    // frames. That is the LARGER half of contested enemy paralysis. A dry gun is
                     // now RELOADED, on the player's own terms — one action, same clip refill as
                     // Game.DoReload — which makes running a hostile dry a real tempo window the player
                     // can bait and push into, instead of a unit that silently stops existing.
@@ -6592,7 +6609,9 @@ public partial class Game
                     // W2: the enemy hunker was the one branch that fired in COMPLETE silence — no pop,
                     // no sound, only a small diamond in the status row. It reads identically to the
                     // paralysis this wave removes, so give it the same beat the player's own HUNKER has.
-                    if (AiIdleFix)
+                    // `standing > 0`: never during the bleed-out window (see the note at the top of
+                    // this stage) — 99.7% of the review's measured HUNKERED chorus was there.
+                    if (AiIdleFix && standing > 0)
                     {
                         Fx.PopText(e.Pos + new Vector2(0, -30), "HUNKERED", Pal.Foe, 16f);
                         Audio.Play("hunker");
@@ -6602,11 +6621,19 @@ public partial class Game
                 // gate above is a plan-vs-board disagreement (the planned target died or slid out of
                 // CanTarget, a PINNED clamp shortened the move out of range, a Disoriented unit's
                 // watch was refused, ...). Ai.Plan's own terminal else covers the planner's side; this
-                // covers the EXEC's, so the invariant "an act-opportunity never ends unspent" holds
-                // structurally rather than by enumerating the ways a plan can go stale. Reload if the
-                // gun is empty (the same economy decision), else dig in — both are real, readable,
-                // mechanically live actions (HUNKERED is -25 to hit against it and no crit).
-                else if (AiIdleFix && e.ActionsLeft > 0 && e.ActionsLeft == actionsBefore)
+                // covers the EXEC's, so the invariant holds structurally rather than by enumerating
+                // the ways a plan can go stale. Reload if the gun is empty (the same economy
+                // decision), else dig in — both are real, readable, mechanically live actions
+                // (HUNKERED is -25 to hit against it and no crit).
+                //
+                // THE INVARIANT IS "no act-opportunity ends with NO BRANCH HAVING FIRED", and the
+                // review corrected an earlier comment here that claimed the stronger "never ends
+                // unspent". It does not: measured 30 of 963 acts (3.1%) end holding exactly one
+                // action, via the SHOT branch decrementing 2 -> 1 and TryEnemyReposition then
+                // declining at `curExp < 2.0f`. That is a covered shooter deciding to hold its
+                // ground and it is the intended behaviour — but it is a spent branch, not a spent
+                // action, and the two are not the same claim.
+                else if (AiIdleFix && standing > 0 && e.ActionsLeft > 0 && e.ActionsLeft == actionsBefore)
                 {
                     if (e.Ammo <= 0 && e.Weapon.Clip > 0)
                     {
@@ -6627,7 +6654,7 @@ public partial class Game
             // check per enemy act). Fires once per act-opportunity with the plan that was executed and
             // the unit's pre-chain action/ammo counts, so the harness can classify idle / dry / no-target
             // without the game itself carrying a counter.
-            if (ActProbe != null && e.Alive) ActProbe(e, _aiPlan, actionsBefore, ammoBefore);
+            if (ActProbe != null && e.Alive) ActProbe(e, _aiPlan, actionsBefore, ammoBefore, standing);
             _aiIdx++;
             _aiStage = AiStage.PickNext;
         }
@@ -6639,20 +6666,23 @@ public partial class Game
     /// hostile never reloads); proven identical by an R0diag pair at h0/b0 and h4/b10 whose
     /// balance JSONs diff empty outside the `harness` block.
     ///
-    /// SHIPPED ON. Its price was measured over 800 CRN-paired campaigns (5 heat rungs x 4
-    /// disjoint slot sets x 2 policies, base commit 4784803): run completion 25.2% -> 23.8%
-    /// pooled, McNemar p=0.451 on 25/19 discordant worlds; mission win-rate 78.94% -> 78.56%
-    /// over ~1400 missions; soldier deaths per mission 1.340 -> 1.340. The paralysis was real
-    /// and visible but almost never load-bearing — 87.6% of idle acts were by hostiles with no
-    /// planned target, i.e. units already out of contact. See docs/measurements/w2/.
+    /// SHIPPED ON, and argued on the CONTESTED rate — not on the 32.4% unsplit figure this wave
+    /// first published, which was 86% bleed-out window (see the note in ActAfterMove). Pre-wave a
+    /// contested act-opportunity idled 6.2% of the time at n=16 campaigns and 3.8% at n=32; it is
+    /// now 0.0% in both. Price, over 800 CRN-paired campaigns (5 heat rungs x 4 disjoint slot sets
+    /// x 2 policies, base commit 4784803): run completion 25.2% -> 23.8% pooled, McNemar p=0.451
+    /// on 25/19 discordant worlds; mission win-rate 78.94% -> 78.56% over ~1400 missions; soldier
+    /// deaths per mission 1.340 -> 1.340. See docs/measurements/w2/.
     ///
     /// Mutable so SIGHTLINE_AIIDLETEST can run BOTH legs in one process.
     public static bool AiIdleFix = true;
 
     /// SIGHTLINE_AIIDLETEST probe (harness-only; ALWAYS null in normal play). Called once per
     /// enemy act-opportunity, immediately after the ActAfterMove branch chain:
-    /// (unit, the plan it executed, ActionsLeft before the chain, Ammo before the chain).
-    public static Action<Unit, EnemyPlan, int, int> ActProbe;
+    /// (unit, the plan it executed, ActionsLeft before the chain, Ammo before the chain, and the
+    /// STANDING (alive, not downed) soldier count — without which an idle count cannot be read,
+    /// because an all-downed board idles every hostile by design and supplied 86% of the raw rate).
+    public static Action<Unit, EnemyPlan, int, int, int> ActProbe;
 
     // Enqueue the move steps for the just-planned enemy (shared by the AutoPlay fast path and
     // the post-telegraph path so the move timing/cost accounting is identical either way).

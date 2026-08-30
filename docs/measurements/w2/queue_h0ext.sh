@@ -10,6 +10,6 @@ cd "$(dirname "$0")/../../.." || exit 1
 BIN=${BIN:?set BIN to a binary snapshot dir, e.g. BIN=runbin/W2}
 for B in 40 50 60 70; do
   for F in 0 1; do
-    BIN="$BIN" FIX=$F bash docs/measurements/w2/run_chunk.sh "R2ext-fix$F-h0-b$B" 0 "$B" 10
+    BIN="$BIN" FIX=$F bash docs/measurements/w2/run_chunk.sh "R3ext-fix$F-h0-b$B" 0 "$B" 10
   done
 done

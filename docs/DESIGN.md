@@ -469,9 +469,22 @@ into** one, and the default was the bad half of a real design fork.
 codebase.** So "dry" was not a tempo state, it was **death by other means**: a hostile that
 emptied its magazine stopped being a combatant for the rest of the mission and simply stood
 on the board. It was invisible on top of that — enemy ammo appeared nowhere in `Hud.cs` or
-`Renderer.cs`, so the player could neither read it nor plan around it. Measured over 32
-instrumented campaigns on the current tree: **11.5% of enemy act-opportunities were made
-holding an empty weapon**, and essentially all of them produced no action at all.
+`Renderer.cs`, so the player could neither read it nor plan around it.
+
+Measured on the current tree (`SIGHTLINE_AIIDLETEST`, base `4784803`), counting only **contested**
+act-opportunities — at least one soldier still standing, because on an all-downed board `Ai.Plan`
+returns an empty plan by design and every hostile idles regardless of ammo:
+
+| frame | acts | on an empty weapon | of those, produced nothing |
+|---|---|---|---|
+| n=16 campaigns | 755 | 69 (**9.1%**) | 42 (**60.9%**) |
+| n=32 campaigns | 1195 | 39 (**3.3%**) | 24 (**61.5%**) |
+
+The *rate* is sample-dependent (3-9% of contested acts); the *consequence* is not — **~61% of
+dry-weapon acts produced nothing in both frames.** An earlier draft of this section cited "11.5%
+… essentially all of them": the first figure was unsplit (it counted the bleed-out window) and
+the second rounded 61% up to "essentially all". Both are corrected here, and the correction is
+the reason CLAUDE.md's rule reads *do not cite a number you have not just re-measured*.
 
 **The fork.** Two coherent options, and only two:
 
@@ -501,21 +514,35 @@ holding an empty weapon**, and essentially all of them produced no action at all
 
 **The constraint that comes with it, and it is not optional.** A reload the player cannot
 see is invisible pressure — a hidden clock that quietly makes the game harder. So the
-decision *includes* the read: the hostile token now carries a small ammo pip row, and a dry
-hostile is labelled **DRY** in words (`Renderer.DrawEnemyAmmo`). Per §3.H the actionable
-state is carried by TEXT, not by hue, and the pips are drawn only for hostiles already in
-contact (`AlertLevel.Alert`) so a dormant "?" pod still gives nothing away. **If a future
-wave removes the read, it must remove the reload with it** — the two are one decision.
+decision *includes* the read: the hostile token carries a small ammo pip row
+(`Renderer.DrawEnemyAmmoPips`), and a dry hostile carries a **DRY** chip — an empty-magazine
+glyph plus the word — in `DrawUnitStatusChips`. Per §3.H the actionable state is carried by
+SHAPE and TEXT, not by hue, and both are drawn only for hostiles already in contact
+(`AlertLevel.Alert`) so a dormant "?" pod still gives nothing away.
+
+Two things this rule was found violating in review, and both are now enforced rather than
+asserted. **(1)** The read must actually be *visible*: the first version drew its own pill and pip
+row into p.Y+24..+42, the band `DrawUnitStatusChips` owns and paints LAST, so on any hostile
+carrying BRN/BLD/DAZ the pill lost 9 of its 15 px and the pip row vanished entirely. The DRY read
+therefore lives *inside* that late pass now, and `SIGHTLINE_AIIDLESHOT` stages a DRY+BRN token so
+the claim is checkable from one frame instead of taken on trust. **(2)** "One decision" has to
+mean one switch: the read is gated on `Game.AiIdleFix`, the same dial as the reload verb. Before
+that, turning the reload off left hostiles wearing a permanent DRY badge advertising a state the
+player could do nothing about. **If a future wave removes the read, it must remove the reload with
+it** — the two are one decision, and the code now makes that structural.
 
 **What this is NOT.** It is not an ammo *economy* in the resource-management sense: there
 are no magazines to count, no ammo pickups, and no attrition model. A hostile can reload
 indefinitely. The only thing being bought here is a **one-action tempo window** the player
 can create and then spend, and that is the whole of the intended scope.
 
-**The honest cost.** This makes the game harder — a hostile that used to be permanently
-neutralised at ~11.5% of its act-opportunities is now merely delayed by one action. That
-cost is measured, not asserted: see `docs/measurements/w2/` and `docs/DEVLOG.md` §W2 for
-the CRN-paired round, and `SIGHTLINE_AIIDLEFIX=0` restores the pre-W2 behaviour exactly.
+**The honest cost.** This makes the game harder in principle — a hostile that used to be
+permanently neutralised on 3-9% of its contested act-opportunities is now merely delayed by one
+action. In practice the cost was measured and is not distinguishable from zero: over 800
+CRN-paired campaigns, run completion 25.2% → 23.8% pooled (McNemar p=0.451), mission win-rate
+78.94% → 78.56% over ~1400 missions, soldier deaths per mission 1.340 → 1.340. See
+`docs/measurements/w2/` and `docs/DEVLOG.md` §W2; `SIGHTLINE_AIIDLEFIX=0` restores the pre-W2
+behaviour — and, since the review, the pre-W2 *read* — exactly.
 
 ---
 
