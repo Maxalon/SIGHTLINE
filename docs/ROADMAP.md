@@ -1723,7 +1723,6 @@ safety claim from W5 was re-verified by the reviewers and held; none of it was t
       real teeth or the ladder needs fewer, bigger steps — but the first job is a **higher-N**
       measurement (n≥80/rung) so the question can be asked at a precision that can answer it.
 
-<<<<<<< HEAD
 ### PROGRAM RESONANCE — W4 "THE BOARD BECOMES A PLACE" (2026-08-29, details in DEVLOG §W4 BOARD)
 
 Rendering only (base `d350416`); `src/Renderer.cs` draw path + the `Pal` block of `src/Util.cs`.
@@ -1891,7 +1890,7 @@ fixable, and what makes it worth a wave even though every rung is in band.
       sets over 960 campaigns: +3.1 points, p=0.394, three of six rungs reversed. **The effect is
       not there.** The method rule (a rung is four slot sets) stays on COST grounds — it is free
       insurance — but must not be cited as evidence of a world-set artefact.
-=======
+
 ### PROGRAM CROSSCUT — W8 "THE HALF WALL" (2026-08-30, details in DEVLOG §W8)
 
 - [x] **THE DECOMPOSITION IS VERIFIED FROM DATA, not only from reading `Run.cs`.** Pooled over
@@ -1935,4 +1934,3 @@ fixable, and what makes it worth a wave even though every rung is in band.
       condition, and the autopilot's non-kill policies are written to skip the fight.
 - [ ] **`SIGHTLINE_HVTAIM` is dialled and unpriced.** The `+6` aim half of the HVT buff partly
       duplicates what `bump` already grants; nobody has spent a round on it.
->>>>>>> wave/the-half-wall

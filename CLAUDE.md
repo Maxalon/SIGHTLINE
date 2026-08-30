@@ -211,29 +211,19 @@ DESKTOP, pause card + main menu). Everything else is claimed somewhere.
 `PublishTrimmed` hazard): [`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md) +
 `bash scripts/publish.sh`.
 
-<<<<<<< HEAD
-**Self-tests & measurement:** every feature ships a window-free `SIGHTLINE_*TEST` hook
-(e.g. `COMBATTEST`, `SAVETEST`, `AITEST`, `ITEMTEST`) that prints `PASS/FAIL`, and there
-are `SIGHTLINE_*` screenshot hooks per feature. `bash scripts/qa-sweep.sh --full` runs all of
-them plus autoplay ×3 and is the pre-merge gate; without `--full` it skips the 38 s PAIRTEST.
-**Don't hand-count them** — the sweep DERIVES its own total and prints a COVERAGE GAP block
-naming any hook in `src/` it fails to run. **W9: the sweep now EXITS NON-ZERO** on a TIMEOUT or a
-missing RESULT line, so autoplay is a real gate instead of a line for a reader to notice.
 **Self-tests & measurement:** every feature that can be checked headlessly ships a
 `SIGHTLINE_*TEST` hook (e.g. `COMBATTEST`, `SAVETEST`, `AITEST`, `ITEMTEST`) that prints
-`PASS/FAIL`, plus `SIGHTLINE_*` screenshot hooks. `bash scripts/qa-sweep.sh --full` runs
-them all plus autoplay ×3 and is the pre-merge gate; without `--full` it skips the 38 s
-PAIRTEST. **Do not write a count here** — it has been wrong four times (41 / 46 / 49 / 51
-each claimed while a different number ran). W5 made the sweep's own footer DERIVE it, so
-run the sweep and read the last line.
-=======
-**Self-tests & measurement:** most features ship a window-free `SIGHTLINE_*TEST` hook
-(e.g. `COMBATTEST`, `SAVETEST`, `AITEST`, `ITEMTEST`) that prints `PASS/FAIL`, and there
-are `SIGHTLINE_*` screenshot hooks per feature. `bash scripts/qa-sweep.sh --full` runs **every
-one of them** plus autoplay ×3 and is the pre-merge gate; without `--full` it skips the 38 s
-PAIRTEST. **Do not write the count down here** — it has gone stale four times; the sweep derives
-it at runtime and prints it, and its COVERAGE GUARD block is the real check.
->>>>>>> wave/the-half-wall
+`PASS/FAIL`, plus `SIGHTLINE_*` screenshot hooks per feature. `bash scripts/qa-sweep.sh --full`
+runs every one of them plus autoplay ×3 and is the pre-merge gate; without `--full` it skips the
+38 s PAIRTEST.
+**DO NOT WRITE A COUNT HERE.** It has been wrong six times — 41 / 46 / 49 / 51 / 53 each claimed
+while a different number ran, and then two successive "derivations" that were themselves wrong.
+The sweep derives both halves at runtime *from env-var NAMES rather than line shapes* (the last
+break was a counter keyed on a line shape that a routing change invalidated), prints them in its
+footer, and its **COVERAGE GUARD** block — which names any hook in `src/` the sweep never invokes
+— is the real check. Run it and read the last lines.
+**Since W9 the sweep EXITS NON-ZERO** on any FAIL line, a non-empty COVERAGE GAP, a TIMEOUT or a
+missing RESULT line, so it is a gate rather than a report for a reader to notice.
 The `SIGHTLINE_BALANCE=<N>` flywheel runs N headless campaigns and reports
 win-rate/decision-richness/policy-gap — **it needs a display**, so run it under `xvfb-run`;
 since W1 a display-less batch REFUSES, writes nothing and exits 2 (see the contract below — it
@@ -299,12 +289,7 @@ src/
   Display.cs    render-target, post-FX shader, brightness/colorblind, settings
   Stats.cs      SIGHTLINE_BALANCE analytics harness
 scripts/dev-setup.sh   sandbox setup
-<<<<<<< HEAD
-scripts/qa-sweep.sh    every self-test + autoplay x3 (--full adds PAIRTEST); count is DERIVED
-scripts/qa-sweep.sh    every self-test + autoplay x3 (--full adds PAIRTEST); count DERIVED, not typed
-=======
-scripts/qa-sweep.sh    every self-test in src/ + autoplay x3 (--full adds PAIRTEST)
->>>>>>> wave/the-half-wall
+scripts/qa-sweep.sh    every self-test in src/ + autoplay x3 (--full adds PAIRTEST); counts DERIVED
 scripts/publish.sh     hand-run distributable build + persistence re-proof
 THIRD-PARTY-NOTICES.txt  raylib/Raylib-cs (Zlib) + .NET (MIT); copied to build output
 docs/screenshot.png    README image

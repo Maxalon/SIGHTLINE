@@ -679,7 +679,6 @@ seeds (mix of WIN/LOSE, no exceptions):
   `count = base + missionNum`). `Mission.HostileToughness` / `HostileDamageTrim` became static
   fields pinnable from `SIGHTLINE_TOUGH` / `SIGHTLINE_TRIM`, so one binary serves every round.
 
-<<<<<<< HEAD
 ## PROGRAM RESONANCE — WAVE W4 "THE BOARD BECOMES A PLACE" (the board stops being a texture)
 
 Rendering only; provably gameplay-inert (`PAIRTEST` byte-identical + a pinned-slot balance chunk
@@ -728,7 +727,7 @@ field-for-field identical to the branch point). Details + every number in `docs/
   `SIGHTLINE_MOVEDASH=1`, `SIGHTLINE_COVERSEED=0` (re-derive the volume identity every frame — the
   pre-review behaviour), `SIGHTLINE_COVER=1 [+SIGHTLINE_COVERKILL=1]` (the cover-destruction A/B),
   `SIGHTLINE_MARKERS=1` (the occluded awareness-marker cases).
-=======
+
 ## PROGRAM RESONANCE — WAVE W5 "THE FIRST HOUR AND THE FRONT DOOR"
 
 Six things a first-time player meets and the bot never can. **Balance-inert:** `PAIRTEST`
@@ -798,4 +797,3 @@ branch point.
   tab lists 16 verbs with hotkeys plus selection/camera/global bindings — generated from
   `Hud.VerbTable` + `Hud.VerbHelp`, i.e. the same `ActionDesc` switch the action bar's hover
   tooltip reads, so help and manual cannot drift. CODEXTEST asserts every verb has a home.
->>>>>>> wave/first-hour
