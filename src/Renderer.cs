@@ -450,6 +450,14 @@ public static class Renderer
     /// the caller's already-read clock (DrawBiomeSignature owns the single GetTime read).
     static void DrawBiomeFeatures(Game g, Biome bm, int bi, float t)
     {
+        // C4 "EIGHT BIOMES ARE PAINT" — THE ART FOLLOWS THE MECHANIC. V3 drew a fissure that
+        // snaked across six tiles and went nowhere, a frost drift that did nothing and a moss
+        // patch that was a colour. Those three motifs are now REAL, in tile space, with rules
+        // (src/Terrain.cs), so the decorative version is retired on exactly those three biomes:
+        // drawing both would put a second, lying copy of the same shape on the board. The other
+        // five biomes keep their V3 features unchanged — they are still paint, and they say so.
+        if (Terrain.Enabled && (bi == Terrain.BiomeMagma || bi == Terrain.BiomeTundra || bi == Terrain.BiomeVerdant))
+            return;
         EnsureFeatures(g, bm, bi);
         bool cb = Pal.Colorblind;
         for (int f = 0; f < _featN; f++)
@@ -612,6 +620,13 @@ public static class Renderer
             for (int gy = 0; gy < g.Grid.H; gy++)
             {
                 if (g.Grid.Tiles[gx, gy] != TileType.Floor) continue;
+                // C4 — ONE MOTIF, ONE MEANING. The ambient signature stops where the MECHANICAL
+                // ground starts: a tile that is fern / drift / vent wears the material DrawGround
+                // paints for it and nothing else, so the biome's decorative texture can never be
+                // mistaken for the thing that has rules. (The first MAGMA capture is why: V3's
+                // decorative orange squiggles and the new vent seams were the same colour on the
+                // same board, and no player could have told which line burns them.)
+                if (Terrain.Enabled && g.Grid.Ground[gx, gy] != GroundKind.None) continue;
                 var r = Util.TileRect(gx, gy);
                 float cx = r.X + r.Width * 0.5f, cy = r.Y + r.Height * 0.5f;
 
@@ -629,6 +644,9 @@ public static class Renderer
                         // fine detail beside it — 45 identical orange scribbles was the thing
                         // that read as a doodle field. In colorblind mode the vein gives up
                         // saturated orange entirely (it is the CB foe hue) and works in value.
+                        // C4: when the board carries REAL vents, the decorative vein is gone
+                        // entirely. Orange on a MAGMA board now means exactly one thing.
+                        if (Terrain.Enabled && g.Grid.AnyVent) break;
                         if (SHash(gx, gy, 11) > 0.16f) break;
                         float ph = SHash(gx, gy, 13) * 6.28f;
                         float pulse = 0.55f + 0.45f * MathF.Sin(t * 2.2f + ph);   // veins breathe
@@ -867,6 +885,13 @@ public static class Renderer
         // function of tile coords + frozen constants — no RNG), on the floor under terrain/units.
         DrawBiomeSignature(g, bm, bi);
 
+        // C4 — the GROUND layer (VERDANT fern mat / TUNDRA drift / MAGMA fissure). Drawn on the
+        // floor, over the biome signature and under everything that carries gameplay signal, so it
+        // reads as MATERIAL rather than as an overlay. ONE new wall-clock read for the whole layer
+        // (shared with DrawVentSteam below) — see the determinism note in CLAUDE.md.
+        float groundT = (float)Now();
+        DrawGround(g, groundT);
+
         // RESONANCE V2 — per-biome AMBIENT-OCCLUSION VIGNETTE on the board rect. The third leg of
         // the re-grade (with the widened key light and the raised plateau/cover tops): the room
         // needs a deep-shadow tier, and the cheapest honest one is the ground falling off into
@@ -900,6 +925,7 @@ public static class Renderer
         DrawFire(g);              // burning floor — deny-ground hazard, on the floor under the figures
         DrawUnits(g);
         DrawSmoke(g);
+        DrawVentSteam(g, groundT);   // C4: the vent's sight-block reads ABOVE the figures, like smoke
         DrawAim(g);
         DrawBarrelAimReticle(g);  // targeting reticle + blast preview when aiming a shootable barrel
         DrawCrossfire(g);         // pincer telegraph: converging-fire prongs when the aimed/hovered shot is a crossfire
@@ -2666,6 +2692,136 @@ public static class Renderer
     // Burning floor tiles — animated flickering flames with a warm core and darker smoke
     // edges. Alpha + height scale with the remaining fire turns (guttering as it expires).
     // Drawn on the floor, UNDER the units (deny-ground hazard).
+    // ── C4 "EIGHT BIOMES ARE PAINT": the GROUND layer ────────────────────────────────────────
+    // Three biomes now have a mechanic, and each one has to be legible FROM THE BOARD — a rule the
+    // player can only find in a tooltip is invisible unfairness (brief C4 / DESIGN.md 3.B).
+    // Everything here carries on VALUE first so it survives greyscale and SIGHTLINE_CB: the fern
+    // mat is a DARK plate with LIGHT fronds, the drift is a LIGHT plate with a bright rim, and the
+    // fissure is a DARK crevasse with a PALE-HOT core (V3's colorblind finding, reused: a
+    // board-scale saturated orange collides with the CB foe hue, so in CB the vent works in value).
+    // Deterministic: per-tile jitter comes from Util.Hash3, and the only clock read is the `t` the
+    // caller already took — no new Raylib.GetTime() call, no allocation, no Util.Rng draw.
+    static float GH(int x, int y, int salt) => (Util.Hash3(x * 73856093, y * 19349663, salt) & 0xFFFFu) / 65536f;
+
+    static void DrawGround(Game g, float t)
+    {
+        if (!Terrain.Enabled) return;
+        var gr = g.Grid;
+        if (!gr.AnyFoliage && !gr.AnyIce && !gr.AnyVent) return;
+        bool cb = Pal.Colorblind;
+
+        for (int x = 0; x < gr.W; x++)
+            for (int y = 0; y < gr.H; y++)
+            {
+                var kind = gr.Ground[x, y];
+                if (kind == GroundKind.None) continue;
+                var r = Util.TileRect(x, y);
+                var c = Util.TileCenter(x, y);
+
+                if (kind == GroundKind.Undergrowth)
+                {
+                    // a dark mat of fern with light blades standing out of it. The mat is what
+                    // reads at a squint (a value block); the blades are what says "plants"; the
+                    // RIM is what makes it read as a REGION with a boundary rather than as
+                    // scattered decoration — the first capture had blades and no edge, and at a
+                    // squint that photographs as texture, not as a place you can decide to stand in.
+                    Raylib.DrawRectangleRec(r, Raylib.Fade(Pal.RGBA(8, 24, 12), 0.60f));
+                    Color edgeC = cb ? Pal.RGBA(206, 216, 188) : Pal.RGBA(142, 210, 130);
+                    if (!gr.IsFoliage(x - 1, y)) Raylib.DrawLineEx(new Vector2(r.X, r.Y), new Vector2(r.X, r.Y + r.Height), 2.0f, Raylib.Fade(edgeC, 0.40f));
+                    if (!gr.IsFoliage(x + 1, y)) Raylib.DrawLineEx(new Vector2(r.X + r.Width, r.Y), new Vector2(r.X + r.Width, r.Y + r.Height), 2.0f, Raylib.Fade(edgeC, 0.40f));
+                    if (!gr.IsFoliage(x, y - 1)) Raylib.DrawLineEx(new Vector2(r.X, r.Y), new Vector2(r.X + r.Width, r.Y), 2.0f, Raylib.Fade(edgeC, 0.40f));
+                    if (!gr.IsFoliage(x, y + 1)) Raylib.DrawLineEx(new Vector2(r.X, r.Y + r.Height), new Vector2(r.X + r.Width, r.Y + r.Height), 2.0f, Raylib.Fade(edgeC, 0.40f));
+                    Color blade = cb ? Pal.RGBA(196, 208, 176) : Pal.RGBA(126, 196, 118);
+                    for (int i = 0; i < 7; i++)
+                    {
+                        float bx = r.X + 5f + GH(x, y, 300 + i) * (Cfg.Tile - 10f);
+                        float by = r.Y + 8f + GH(x, y, 400 + i) * (Cfg.Tile - 14f);
+                        float h = 7f + GH(x, y, 500 + i) * 9f;
+                        float lean = MathF.Sin(t * 0.7f + (x * 3 + y) * 0.9f + i) * 2.4f;
+                        Raylib.DrawLineEx(new Vector2(bx, by), new Vector2(bx + lean, by - h), 1.7f,
+                                          Raylib.Fade(blade, 0.62f));
+                        Raylib.DrawLineEx(new Vector2(bx, by), new Vector2(bx + lean * 0.5f - 3.4f, by - h * 0.62f), 1.4f,
+                                          Raylib.Fade(blade, 0.44f));
+                    }
+                }
+                else if (kind == GroundKind.Ice)
+                {
+                    // a pale plate lifting the tile's VALUE, with a bright fracture across it and a
+                    // hairline rim where the drift meets bare ground — so the fast lane has an edge
+                    // you can trace with your eye and the move overlay visibly bulges along it.
+                    Raylib.DrawRectangleRec(r, Raylib.Fade(Pal.RGBA(196, 224, 240), 0.14f));   // C4 review: the first capture put the drift at the same value as TUNDRA cover; the plate is now OUTLINE-led (rim 0.42 -> 0.58) so cover keeps the top of the value hierarchy
+                    Color rim = Pal.RGBA(226, 244, 255);
+                    if (!gr.IsIce(x - 1, y)) Raylib.DrawLineEx(new Vector2(r.X, r.Y), new Vector2(r.X, r.Y + r.Height), 1.6f, Raylib.Fade(rim, 0.58f));
+                    if (!gr.IsIce(x + 1, y)) Raylib.DrawLineEx(new Vector2(r.X + r.Width, r.Y), new Vector2(r.X + r.Width, r.Y + r.Height), 1.6f, Raylib.Fade(rim, 0.58f));
+                    if (!gr.IsIce(x, y - 1)) Raylib.DrawLineEx(new Vector2(r.X, r.Y), new Vector2(r.X + r.Width, r.Y), 1.6f, Raylib.Fade(rim, 0.58f));
+                    if (!gr.IsIce(x, y + 1)) Raylib.DrawLineEx(new Vector2(r.X, r.Y + r.Height), new Vector2(r.X + r.Width, r.Y + r.Height), 1.6f, Raylib.Fade(rim, 0.58f));
+                    for (int i = 0; i < 2; i++)
+                    {
+                        float ax = r.X + 6f + GH(x, y, 600 + i) * (Cfg.Tile - 12f);
+                        float ay = r.Y + 6f + GH(x, y, 620 + i) * (Cfg.Tile - 12f);
+                        float ang = GH(x, y, 640 + i) * MathF.Tau;
+                        float len = 12f + GH(x, y, 660 + i) * 16f;
+                        Raylib.DrawLineEx(new Vector2(ax, ay),
+                                          new Vector2(ax + MathF.Cos(ang) * len, ay + MathF.Sin(ang) * len),
+                                          1.3f, Raylib.Fade(rim, 0.34f));
+                    }
+                    // a slow specular travelling along the drift: the tile is SLICK, and motion is
+                    // the cue that says so without a word of UI.
+                    float sh = 0.5f + 0.5f * MathF.Sin(t * 1.4f + (x + y) * 0.55f);
+                    Raylib.DrawCircleV(c, Cfg.Tile * 0.20f, Raylib.Fade(rim, 0.05f + 0.09f * sh));
+                }
+                else if (kind == GroundKind.Vent)
+                {
+                    // a crevasse: the tile drops into shadow, a jagged hot seam runs through it, and
+                    // (in DrawVentSteam, above the figures) a steam column says "you cannot see
+                    // across this". Value carries all three reads.
+                    Raylib.DrawRectangleRec(r, Raylib.Fade(Pal.RGBA(6, 4, 4), 0.62f));
+                    // rim, same device as the fern mat and the drift: the tile has a BOUNDARY, so
+                    // "which tiles are hot" is a question the board answers rather than the tooltip.
+                    Color vrim = cb ? Pal.RGBA(226, 216, 204) : Pal.RGBA(255, 168, 96);
+                    if (!gr.IsVent(x - 1, y)) Raylib.DrawLineEx(new Vector2(r.X, r.Y), new Vector2(r.X, r.Y + r.Height), 2.0f, Raylib.Fade(vrim, 0.34f));
+                    if (!gr.IsVent(x + 1, y)) Raylib.DrawLineEx(new Vector2(r.X + r.Width, r.Y), new Vector2(r.X + r.Width, r.Y + r.Height), 2.0f, Raylib.Fade(vrim, 0.34f));
+                    if (!gr.IsVent(x, y - 1)) Raylib.DrawLineEx(new Vector2(r.X, r.Y), new Vector2(r.X + r.Width, r.Y), 2.0f, Raylib.Fade(vrim, 0.34f));
+                    if (!gr.IsVent(x, y + 1)) Raylib.DrawLineEx(new Vector2(r.X, r.Y + r.Height), new Vector2(r.X + r.Width, r.Y + r.Height), 2.0f, Raylib.Fade(vrim, 0.34f));
+                    Color glow = cb ? Pal.RGBA(128, 84, 58) : Pal.RGBA(236, 104, 30);
+                    Color core = cb ? Pal.RGBA(255, 248, 236) : Pal.RGBA(255, 220, 150);
+                    float pulse = 0.60f + 0.40f * MathF.Sin(t * 1.6f + (x * 5 + y * 3) * 0.7f);
+                    var p0 = new Vector2(r.X + 4f + GH(x, y, 700) * 8f, r.Y + 3f);
+                    var p1 = new Vector2(r.X + Cfg.Tile * 0.5f + (GH(x, y, 701) - 0.5f) * 16f, r.Y + Cfg.Tile * 0.5f);
+                    var p2 = new Vector2(r.X + Cfg.Tile - 12f + GH(x, y, 702) * 8f, r.Y + r.Height - 3f);
+                    Raylib.DrawLineEx(p0, p1, 7f, Raylib.Fade(glow, 0.42f + 0.24f * pulse));
+                    Raylib.DrawLineEx(p1, p2, 7f, Raylib.Fade(glow, 0.42f + 0.24f * pulse));
+                    Raylib.DrawLineEx(p0, p1, 2.4f, Raylib.Fade(core, 0.55f + 0.35f * pulse));
+                    Raylib.DrawLineEx(p1, p2, 2.4f, Raylib.Fade(core, 0.55f + 0.35f * pulse));
+                }
+            }
+    }
+
+    /// The vent's STEAM, drawn above the figures beside DrawSmoke — because the thing it is
+    /// telling you is exactly what smoke tells you: nothing sees through this tile. Same visual
+    /// family on purpose (soft grey puffs), warmed a touch so it reads as steam off hot rock.
+    static void DrawVentSteam(Game g, float t)
+    {
+        if (!Terrain.Enabled || !g.Grid.AnyVent) return;
+        for (int x = 0; x < g.Grid.W; x++)
+            for (int y = 0; y < g.Grid.H; y++)
+            {
+                if (g.Grid.Ground[x, y] != GroundKind.Vent) continue;
+                var c = Util.TileCenter(x, y);
+                float ph = (x * 3 + y) * 0.83f;
+                float rise = (t * 13f + ph * 7f) % 30f;
+                float fade = 1f - rise / 30f;
+                float drift = MathF.Sin(t * 0.9f + ph) * 3.5f;
+                Raylib.DrawCircleV(c + new Vector2(drift, 2f - rise * 0.5f), Cfg.Tile * 0.40f,
+                                   Raylib.Fade(Pal.RGBA(198, 190, 184), 0.30f * fade));
+                Raylib.DrawCircleV(c + new Vector2(-drift * 0.7f, 8f - rise * 0.8f), Cfg.Tile * 0.30f,
+                                   Raylib.Fade(Pal.RGBA(176, 168, 164), 0.26f * fade));
+                // a low, always-present haze so the sight-blocker never disappears between puffs
+                Raylib.DrawCircleV(c + new Vector2(0, -2f), Cfg.Tile * 0.44f,
+                                   Raylib.Fade(Pal.RGBA(186, 178, 174), 0.20f));
+            }
+    }
+
     static void DrawFire(Game g)
     {
         float t = (float)Now();

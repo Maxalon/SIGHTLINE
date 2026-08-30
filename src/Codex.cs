@@ -161,6 +161,20 @@ public static class Codex
         Add("FLANKING", "NO COVER",
             "Cover only faces the shot. Fire from a side the block does not face and the target is FLANKED: " +
             "its cover is void and the EXPOSED +18 crit applies. Your own sides obey the same rule.");
+        // C4 "EIGHT BIOMES ARE PAINT" — three biomes now change the fight, on three different axes.
+        // They live in FIELD CRAFT rather than a tab of their own because they are cover / movement /
+        // sight rules, and that is the tab the player already reads to learn cover, movement and sight.
+        Add("UNDERGROWTH", "VERDANT",
+            "The fern mats on a VERDANT board are LOW COVER FROM EVERY ANGLE - but only against fire from more than " +
+            Terrain.FoliageMinDist + " tiles away. It cannot be flanked, and high ground still sees over it. " +
+            "The counter is to CLOSE: inside " + Terrain.FoliageMinDist + " tiles the ferns are worth nothing. Works for both sides.");
+        Add("SLICK ICE", "TUNDRA",
+            "The frost drifts on a TUNDRA board are slick: stepping onto ice costs HALF a step, so a drift is a fast lane " +
+            "that reaches roughly twice as far. Watch the move overlay bulge along it - and remember the hostiles ride it too.");
+        Add("THERMAL VENTS", "MAGMA",
+            "The fissure on a MAGMA board vents steam: NOTHING SEES ACROSS A VENT (it blocks line of sight like smoke, and " +
+            "gives no cover at all), forcing a crossing costs extra movement, and touching one sets you alight. " +
+            "The gaps in the crack are the fords - that is where the firefight goes.");
         Add("DIAGONALS", "CORNERS",
             "A diagonal shot at range past ONE facing block is HALF cover (-10 low / -20 high). A TRUE corner " +
             "(blocks on BOTH facing sides) holds full cover. Adjacent, a diagonal slips a single corner entirely: a flank.");

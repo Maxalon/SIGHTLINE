@@ -112,6 +112,12 @@ public static class Program
         // docs/DEVLOG.md §W2 for the shipped default. =0 restores the pre-W2 opponent exactly.
         string aiIdleEnv = Environment.GetEnvironmentVariable("SIGHTLINE_AIIDLEFIX");
         if (aiIdleEnv == "1") Game.AiIdleFix = true; else if (aiIdleEnv == "0") Game.AiIdleFix = false;
+        // C4 "EIGHT BIOMES ARE PAINT" — SIGHTLINE_BIOMEMECH=0/1: the biome GROUND layer (VERDANT
+        // undergrowth / TUNDRA slick ice / MAGMA thermal vents). =0 restores the pre-C4 board
+        // EXACTLY (Terrain.Enabled gates the stamper AND every Grid predicate), which is both the
+        // A/B lever for the CRN round and the "watch your own test fail" proof for BIOMETEST.
+        string biomeMechEnv = Environment.GetEnvironmentVariable("SIGHTLINE_BIOMEMECH");
+        if (biomeMechEnv == "1") Terrain.Enabled = true; else if (biomeMechEnv == "0") Terrain.Enabled = false;
 
         bool smartplay = Environment.GetEnvironmentVariable("SIGHTLINE_SMARTPLAY") == "1";
         bool autoplay = Environment.GetEnvironmentVariable("SIGHTLINE_AUTOPLAY") == "1" || smartplay;
@@ -685,6 +691,17 @@ public static class Program
         {
             Raylib.InitWindow(64, 64, "benchtest");
             Console.WriteLine(new Game().BenchSelfTest());
+            Raylib.CloseWindow();
+            return;
+        }
+        // SIGHTLINE_BIOMETEST=1 : C4 "EIGHT BIOMES ARE PAINT" — the biome GROUND layer. Pins the
+        // MECHANIC'S EFFECT (cover level, hit%, Dijkstra cost, line-of-sight verdict, HP, the AI's
+        // chosen destination) on constructed boards, not the presence of a field. Reads the ambient
+        // Terrain.Enabled on purpose, so SIGHTLINE_BIOMEMECH=0 makes it FAIL.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_BIOMETEST") == "1")
+        {
+            Raylib.InitWindow(64, 64, "biometest");   // Unit.SyncPos + Ai.Plan use tile->px math
+            Console.WriteLine(new Game().BiomeSelfTest());
             Raylib.CloseWindow();
             return;
         }
