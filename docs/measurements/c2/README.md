@@ -19,7 +19,7 @@
 | `L-{BASE,DECL}-h*-b*.*` | the ladder chunks. |
 | `POST-*` | one ladder chunk per ARM re-run on the FINAL binary after three behaviour-neutral tidies; both diff empty against their archived `L-*` JSON outside `harness`, which is the proof the ladder binary is the shipped binary. |
 | `paired.py` | McNemar over the identical slot seeds — the honest test for a CRN round, since the two arms play the same worlds. |
-| **`qa-sweep-full.txt`** | **THE GATE OF RECORD.** Run on a FROZEN source tree: `SWEEP-EXIT=0`, 65/65 self-tests PASS (incl. `DECLINETEST`), COVERAGE GAP block empty, PAIRTEST byte-identical, autoplay x3 WIN/LOSE/LOSE with no TIMEOUT. **This is the file to read.** |
+| **`qa-sweep-full.txt`** | **THE GATE OF RECORD**, re-run after the code review's D1/D3 source fixes: `SWEEP-EXIT=0`, 65/65 self-tests PASS (incl. `DECLINETEST`), COVERAGE GAP block empty, PAIRTEST byte-identical, autoplay x3 WIN/LOSE/LOSE with no TIMEOUT. **This is the file to read.** |
 | `qa-sweep-full.interim.txt`, `.interim2.txt` | two earlier full sweeps — **both green, both DISCARDED**, and not the record. `run()` is `dotnet run -c Debug`, which REBUILDS per test, so a source edit landing mid-sweep makes the run span two binaries. Each of these did. Behaviour-identical builds either way, but a gate that spanned two builds is not a gate. |
 | `shots/` | the two staged frames (`SIGHTLINE_DECLINESHOT`), flag on and off. |
 | `ladder.progress.prelim.txt` | a first 48-chunk pass on an interim binary, kept for provenance. **The round of record is `ladder.progress.txt`**, run on the final binary. |

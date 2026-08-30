@@ -9425,12 +9425,16 @@ coverage.** Four legs were added in response (7-10 above), and every one was pro
 | `ShotSeat` 18 | **0 → FAIL** (leg 8) | **35 → FAIL** (leg 2) |
 | `DeclineThreatScale` 0.20 | **0.00 → FAIL** (leg 7) | **2.00 → FAIL** (leg 7) |
 | `DeclineWatchRatio` 0.45 | **0.35 → FAIL** (leg 3) | none |
+<!-- every cell above re-measured on this branch, not taken from the review -->
 | `DeclineDigRatio` 0.30 | **0.00 → FAIL** (leg 10) | none |
 | `DeclineThreatCap` 3 | **0 → FAIL** (leg 7) | none |
 | `DeclineAbsKeep` 3.00 | **0.50 → FAIL** (leg 3) | none — 10.00 passes |
 | `FinishPress` 1.6 | **1.0 → FAIL** (leg 9) | none — 9.0 passes |
 
-**Seven of seven now have at least a lower pin; two have both sides.** The straddle (leg 7) is the
+**Seven of seven now have at least a lower pin; two have both sides.** Every cell in that table
+was re-run on this branch rather than copied from the review — including the two the review had
+already measured, because a table published under this wave's name should be this wave's
+measurement. The straddle (leg 7) is the
 one that matters most: one scene, evaluated at one gun and at three, with the aim SEARCHED until
 the shot's ratio lands between the two bars. It reports what it found —
 `straddle: aim=82 1gun=SHOOT(58%,exp=2.96) 3gun=DECLINE` — so the archive shows the leg was live
@@ -9464,7 +9468,11 @@ trusting it.
   concurrent sweeps were saturating a four-core box. **No post-fix sweep result exists and none is
   claimed.** Killing it also truncated `qa-sweep-full.txt` in place, which a routine `git add -A`
   had already committed as a five-line stub; the log was restored from git and the trap is written
-  up in `docs/measurements/c2/README.md`.)
+  up in `docs/measurements/c2/README.md`. A FOURTH sweep then ran after the code review's D1/D3
+  fixes — which DID touch `src/` — and is the log archived above: **SWEEP-EXIT=0, 65/65 PASS,
+  COVERAGE GAP empty, PAIRTEST byte-identical, autoplay x3 LOSE/WIN/LOSE with no TIMEOUT.** It was
+  written to a scratch path and copied into place on success, which is the rule the truncation
+  trap taught.)
   Notable passes for this diff specifically: `COMBATTEST` and `TRUTHTEST` (the new
   `ShotOdds.CoverDef` field and the tooltip), `SAVETEST` (no persisted-enum or map-generator
   movement), `AIIDLETEST` (the no-idle invariant survives declining), `HEATLADDERTEST` (the
