@@ -696,8 +696,17 @@ public static partial class SaveGame
         }
         // installed weapon mods are re-baked BEFORE ammo seeding inside FromUnitDto so an EXTENDED MAG
         // is reflected in the starting clip; all append-only fields default inert for old saves.
+        // C5 THE HARD EDGES — DEFECT: `FromUnitDto` returns null for a null element and its own
+        // comment says "callers skip nulls" — and this caller, the one that builds the RUN's
+        // roster, did not. A save.json whose Squad array holds a `null` (a truncated writer, a
+        // hand edit, a merge of two files) therefore resumed with a null IN the roster and threw a
+        // NullReferenceException as soon as anything walked it. The veteran-reserve caller does
+        // skip; this one now does too.
         foreach (var d in dto.Squad)
-            r.Squad.Add(FromUnitDto(d));
+        {
+            var u = FromUnitDto(d);
+            if (u != null) r.Squad.Add(u);
+        }
         var cd = dto.Card;
         r.CurrentCard = cd == null
             ? Run.StandardCard(Math.Max(1, dto.Mission))

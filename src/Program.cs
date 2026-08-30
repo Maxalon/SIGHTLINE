@@ -744,6 +744,64 @@ public static class Program
         // SIGHTLINE_STALLTEST=1 : W9 THE REPAIR — the autopilot's "never a RESULT: TIMEOUT" contract,
         // asserted instead of asserted-in-a-comment. Run-scoped turn counter, its force-lose arm, the
         // turn-cap-vs-frame-cap arithmetic, and the measured DEFEND/disoriented within-turn deadlock.
+        // SIGHTLINE_SAVEEDGETEST=1 : C5 THE HARD EDGES — the HOSTILE SAVE. W9 asked this of
+        // meta.json and found three killers; save.json had never been asked. Drives eight edited /
+        // truncated / older-build save shapes through the real resume path and then plays and
+        // draws them. Needs a window: it draws a frame per shape.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_SAVEEDGETEST") == "1")
+        {
+            Raylib.SetConfigFlags(ConfigFlags.Msaa4xHint);
+            Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "saveedgetest");
+            RequireWindow("SAVEEDGETEST");
+            Raylib.SetExitKey(KeyboardKey.Null);
+            LoadGameFonts();
+            Display.Init(false);
+            Raylib.SetTargetFPS(0);
+            Console.WriteLine(Game.SaveEdgeSelfTest());
+            Display.Shutdown();
+            Renderer.UnloadNoise();
+            Raylib.CloseWindow();
+            return;
+        }
+        // SIGHTLINE_AICOVTEST=<N> : C5 THE HARD EDGES — the ENEMY DECISION CENSUS. Walks N
+        // campaigns per (heat x objective) cell and asserts every branch of the enemy exec chain
+        // is REACHED at least once; the known-dead OVERWATCH branch is waived by name and its
+        // count is printed on every run. SIGHTLINE_AICOVSTRICT=1 drops the waiver (and fails on
+        // this tree, which is the proof the gate can fail). Needs a window: it drives real play.
+        if (int.TryParse(Environment.GetEnvironmentVariable("SIGHTLINE_AICOVTEST"), out int covN) && covN > 0)
+        {
+            Raylib.SetConfigFlags(ConfigFlags.Msaa4xHint);
+            Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "aicovtest");
+            RequireWindow("AICOVTEST");
+            Raylib.SetExitKey(KeyboardKey.Null);
+            Cfg.Font = Raylib.GetFontDefault();
+            Display.Init(false);
+            Raylib.SetTargetFPS(0);
+            Console.WriteLine(Game.AiCoverageSelfTest(covN));
+            Display.Shutdown();
+            Renderer.UnloadNoise();
+            Raylib.CloseWindow();
+            return;
+        }
+        // SIGHTLINE_ENEMYSTALLTEST=1 : C5 THE HARD EDGES — the ENEMY-turn deadlock guard. W9's
+        // idle guard covers the player turn; this one wedges a real enemy turn and asserts the
+        // guard names the stalled unit, ends the turn, stays silent in clean play, and that the
+        // SAME wedge with the guard off still hangs. Needs a window: it drives real missions.
+        if (Environment.GetEnvironmentVariable("SIGHTLINE_ENEMYSTALLTEST") == "1")
+        {
+            Raylib.SetConfigFlags(ConfigFlags.Msaa4xHint);
+            Raylib.InitWindow(Cfg.ScreenW, Cfg.ScreenH, "enemystalltest");
+            RequireWindow("ENEMYSTALLTEST");
+            Raylib.SetExitKey(KeyboardKey.Null);
+            Cfg.Font = Raylib.GetFontDefault();
+            Display.Init(false);
+            Raylib.SetTargetFPS(0);
+            Console.WriteLine(Game.EnemyStallSelfTest());
+            Display.Shutdown();
+            Renderer.UnloadNoise();
+            Raylib.CloseWindow();
+            return;
+        }
         if (Environment.GetEnvironmentVariable("SIGHTLINE_STALLTEST") == "1")
         {
             Raylib.SetTraceLogLevel(TraceLogLevel.Error);

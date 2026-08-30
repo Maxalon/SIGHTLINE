@@ -5610,6 +5610,406 @@ public partial class Game
 
 
 
+
+
+
+    // ─── C5 THE HARD EDGES — SIGHTLINE_SAVEEDGETEST: THE HOSTILE SAVE ─────────────────────────
+    /// W9 asked "what does a hand-edited meta.json do to the game?" and found three shapes that
+    /// each killed a screen outright. It never asked the same question of `save.json`, whose guard
+    /// (D2, R2) stops at three shapes: unparseable, no squad, and a schema from the future. Every
+    /// other field is read as written.
+    ///
+    /// This drives the shapes a real corrupted / edited / truncated / older-build save produces,
+    /// through the REAL resume path (`ContinueRun`) and then through 300 updates and a drawn frame
+    /// — because "loads without throwing" is not the contract; "you can play it" is. A shape that
+    /// crashes, that resumes with nobody on the board, or that puts a number on the HUD the run
+    /// cannot mean, is a defect.
+    public static string SaveEdgeSelfTest()
+    {
+        var fails = new List<string>();
+        var notes = new List<string>();
+        string sp = SaveGame.SavePathPublic, mp = SaveGame.MetaPathPublic;
+        bool hadSave = false, hadMeta = false; string saveStash = null, metaStash = null;
+        try
+        {
+            hadSave = System.IO.File.Exists(sp); if (hadSave) saveStash = System.IO.File.ReadAllText(sp);
+            hadMeta = System.IO.File.Exists(mp); if (hadMeta) metaStash = System.IO.File.ReadAllText(mp);
+        }
+        catch { }
+
+        // A real save, written by the game, as the base every shape is edited FROM. Hand-writing
+        // the JSON would test a fiction; this is the file the game actually produces.
+        string good = null;
+        try
+        {
+            Util.Reseed(9001);
+            var seed = new Game();                 // live path: StartMission writes the checkpoint
+            seed.StartMission(1);
+            good = System.IO.File.ReadAllText(sp);
+        }
+        catch (Exception ex) { fails.Add("couldNotWriteABaseSave:" + ex.GetType().Name); }
+
+        /// Apply one edit to the base save, resume it, and play it. Returns the resumed Game
+        /// (null if the resume was refused, which is a legitimate outcome — refusing a broken
+        /// save is a repair; crashing on it is not).
+        Game Resume(string what, Func<string, string> edit, bool expectRefusal)
+        {
+            if (good == null) return null;
+            try
+            {
+                System.IO.File.WriteAllText(sp, edit(good));
+                var g = new Game { NoPersist = true, AutoPlay = true, SmartPlay = true };
+                bool ok = g.ContinueRun();
+                if (!ok)
+                {
+                    // A refusal is the right answer for a file that cannot be read at all, and
+                    // DATA LOSS for one that can: the recovery path MOVES save.json aside, so a
+                    // shape that should have resumed and did not has just cost a player their run.
+                    if (!expectRefusal) fails.Add($"refusedAResumableSave:{what}");
+                    return null;
+                }
+                if (expectRefusal) fails.Add($"acceptedAnUnusableSave:{what}");
+                // it has to be PLAYABLE, not merely loaded
+                if (g.Players.Count == 0) fails.Add($"resumedWithNoSquad:{what}");
+                if (g.AlivePlayers().Count == 0) fails.Add($"resumedWithNobodyAlive:{what}");
+                for (int i = 0; i < 300 && g.Phase != Phase.Win && g.Phase != Phase.Lose; i++)
+                    g.Update(1f / 60f);
+                Raylib.BeginDrawing();
+                g.Draw();                              // the HUD reads the run's numbers
+                Raylib.EndDrawing();
+                return g;
+            }
+            catch (Exception ex)
+            {
+                fails.Add($"threw:{what}:{ex.GetType().Name}:{Short(ex.Message)}");
+                return null;
+            }
+        }
+
+        try
+        {
+            // (1) MISSION out of range, in both directions. ContinueRun clamps the number it SETS
+            //     UP with and leaves `Run.Mission` as written — so the board is mission 6 while
+            //     every readout, reward and cap still reads 999.
+            var far = Resume("mission=999", s => s.Replace("\"Mission\": 1,", "\"Mission\": 999,"), false);
+            if (far != null && far.RunState != null && far.RunState.Mission > Run.MaxMissions)
+                fails.Add($"missionNotClamped:{far.RunState.Mission}(>{Run.MaxMissions})");
+            var zero = Resume("mission=0", s => s.Replace("\"Mission\": 1,", "\"Mission\": 0,"), false);
+            if (zero != null && zero.RunState != null && zero.RunState.Mission < 1)
+                fails.Add($"missionNotClamped:{zero.RunState.Mission}(<1)");
+            var neg = Resume("mission=-7", s => s.Replace("\"Mission\": 1,", "\"Mission\": -7,"), false);
+            if (neg != null && neg.RunState != null && neg.RunState.Mission < 1)
+                fails.Add($"missionNotClamped:{neg.RunState.Mission}(<1)");
+
+            // (2) A soldier with NO NAME. `Name` is the one string the DTO reads raw, and it is a
+            //     dictionary key (BondTally), a save key and a HUD string.
+            Resume("name=null", s => s.Replace("\"Name\":", "\"Name\": null, \"NameWas\":"), false);
+
+            // (3) A soldier of an UNKNOWN CLASS — what an older/newer build's roster looks like.
+            Resume("cls=WIZARD", s => s.Replace("\"Cls\": \"", "\"Cls\": \"WIZARD"), false);
+
+            // (4) EVERYBODY BENCHED. Nothing in the DTO stops it, and a run you cannot field is a
+            //     run you cannot lose or leave.
+            var benched = Resume("allBenched", s => s.Replace("\"Benched\": false", "\"Benched\": true"), false);
+            if (benched != null && benched.Players.Count == 0)
+                fails.Add("allBenchedFieldsNobody");
+
+            // (5) A roster twice RosterMax — the barracks lays out six rows.
+            Resume("doubleRoster", s =>
+            {
+                int i = s.IndexOf("\"Squad\": [");
+                if (i < 0) return s;
+                int open = s.IndexOf('{', i);
+                int depth = 0, j = open;
+                for (; j < s.Length; j++) { if (s[j] == '{') depth++; else if (s[j] == '}') { depth--; if (depth == 0) break; } }
+                string one = s.Substring(open, j - open + 1);
+                var sb = new System.Text.StringBuilder(s.Substring(0, open));
+                for (int k = 0; k < 12; k++) { sb.Append(one.Replace("\"Name\": \"", $"\"Name\": \"X{k}")); sb.Append(','); }
+                sb.Append(s.Substring(open));
+                return sb.ToString();
+            }, false);
+
+            // (6) A BOND naming somebody who is not on the roster.
+            Resume("phantomBond", s => s.Contains("\"BondTally\": {}")
+                ? s.Replace("\"BondTally\": {}", "\"BondTally\": {\"NOBODY\": 3}")
+                : s.Replace("\"BondTally\": {", "\"BondTally\": {\"NOBODY\": 3,"), false);
+
+            // (7) TRUNCATION — the classic half-written file. Must be refused, not read.
+            Resume("truncated", s => s.Substring(0, s.Length / 2), true);
+
+            // (8) A save whose squad array holds a null element.
+            Resume("nullSquadMember", s => s.Replace("\"Squad\": [", "\"Squad\": [null,"), false);
+        }
+        finally
+        {
+            try
+            {
+                if (hadSave) System.IO.File.WriteAllText(sp, saveStash);
+                else if (System.IO.File.Exists(sp)) System.IO.File.Delete(sp);
+                if (System.IO.File.Exists(sp + ".bak")) System.IO.File.Delete(sp + ".bak");
+                if (hadMeta) System.IO.File.WriteAllText(mp, metaStash);
+                else if (System.IO.File.Exists(mp)) System.IO.File.Delete(mp);
+            }
+            catch { }
+        }
+
+        return fails.Count == 0
+            ? "SAVEEDGETEST: PASS (8 hostile save shapes resume into a PLAYABLE run or are refused: "
+              + "mission out of range in both directions, a nameless soldier, an unknown class, an "
+              + "all-benched roster, a double-length roster, a phantom bond, a truncated file and a "
+              + "null squad member — none throws, none fields an empty board"
+              + (notes.Count > 0 ? "; " + string.Join(", ", notes) : "") + ")"
+            : "SAVEEDGETEST: FAIL (" + string.Join(",", fails.Distinct()) + ")";
+    }
+
+    // ─── C5 THE HARD EDGES — SIGHTLINE_AICOVTEST: THE ENEMY DECISION CENSUS ────────────────────
+    /// The test that would have caught a branch firing ZERO times in 1595 enemy turns.
+    ///
+    /// THE STANDING FINDING (CROSSCUT, docs/ROADMAP.md): the enemy OVERWATCH branch was measured
+    /// taken 0 times in 1595 pre-W2 enemy act-opportunities and 3 times in 1589 post-W2 — a whole
+    /// verb of the opponent's vocabulary that does not exist in play. Nothing in the project could
+    /// see it: every AI test asserts that a DECISION IS CORRECT GIVEN A BOARD, and a branch that
+    /// is never reached is correct on every board it never reaches. The gap is not a missing
+    /// assertion about overwatch; it is the absence of any assertion about REACHABILITY.
+    ///
+    /// So this walks real campaigns and counts which of `Game.ActBranches` the opponent actually
+    /// takes. A branch that never fires over the whole sample is a coverage FAILURE by name.
+    ///
+    /// A ZERO GATE WOULD NOT HAVE CAUGHT IT, AND SAYING SO IS THE POINT. Measured on this tree
+    /// (144 campaigns, 8083 enemy acts): `overwatch` fires **8 times, 0.10%**. So "the branch is
+    /// never taken" is not literally true here — it is taken about once per thousand acts, which
+    /// is a verb no player will ever see, and a test that only asked "> 0?" would have passed the
+    /// pre-W2 tree on a large enough sample too. The gate is therefore a RATE, and the set of
+    /// effectively-dead branches is a DECLARED REGISTRY:
+    ///
+    ///   * any branch firing below `AiCovRareRate` (once per 1000 enemy acts) must be NAMED in
+    ///     `AiCovKnownRare`. An undeclared branch that falls that low FAILS, by name — which is
+    ///     precisely what would have happened to `overwatch` the day it went quiet, instead of a
+    ///     human noticing three programs later;
+    ///   * a DECLARED branch that climbs back above the rate is reported as a stale declaration
+    ///     (a note, not a failure — the wave that revives a verb should not be blocked by the
+    ///     registry that recorded it as dead, it should be told to delete the entry);
+    ///   * `SIGHTLINE_AICOVSTRICT=1` treats every declared entry as a failure. That is the mode
+    ///     that fails on today's tree, and it is this test's proof that it can fail at all.
+    ///
+    /// THE BACKSTOPS ARE NOT VERBS. `terminal-reload` / `terminal-hunker` exist so W2's
+    /// no-idle-act invariant holds STRUCTURALLY when a plan goes stale, and `none` is the tag for
+    /// "no branch fired" (the bleed-out window). They are censused and reported, never gated:
+    /// `terminal-reload` measured 0 in 8083 acts, which is the design working, not a hole.
+    static readonly string[] AiCovBackstops = { "terminal-reload", "terminal-hunker", "none" };
+    /// The declared effectively-dead branches, with the rate measured at the base of this wave
+    /// (8083 acts): overwatch 0.10%, relock 0.06%, shove 0.05%. Delete an entry when its verb
+    /// climbs back above the rate — the PASS line will tell you which.
+    static readonly string[] AiCovKnownRare = { "overwatch", "relock", "shove" };
+    /// Once per 1000 enemy acts. Below this a verb exists in the code and not in the game.
+    const double AiCovRareRate = 0.001;
+    public static string AiCoverageSelfTest(int campaigns)
+    {
+        var fails = new List<string>();
+        var notes = new List<string>();
+        var count = new Dictionary<string, long>();
+        foreach (var b in ActBranches) count[b] = 0;
+        long acts = 0, contested = 0, unknown = 0;
+        bool strict = Environment.GetEnvironmentVariable("SIGHTLINE_AICOVSTRICT") == "1";
+
+        BranchProbe = (branch, plan, standing) =>
+        {
+            acts++;
+            if (standing > 0) contested++;
+            if (count.ContainsKey(branch)) count[branch]++;
+            else { unknown++; count[branch] = 1; }        // a new branch nobody registered
+        };
+
+        var objs = new[] { Objective.Eliminate, Objective.Hack, Objective.Evac, Objective.Escort,
+                           Objective.Sabotage, Objective.Rescue, Objective.Defend, Objective.Decapitate };
+        int slot = 0, played = 0, missions = 0;
+        foreach (int heat in new[] { 0, 4, 8 })
+            foreach (var o in objs)
+                for (int rep = 0; rep < campaigns; rep++)
+                {
+                    Environment.SetEnvironmentVariable("SIGHTLINE_HEAT", heat.ToString());
+                    Util.Reseed(310000 + slot++);
+                    var g = new Game { NoPersist = true, AutoPlay = true, SmartPlay = true, ForcedObjective = o };
+                    g.StartMission(1);
+                    int frame = 0;
+                    while (frame++ < 40000 && g.Phase != Phase.Win && g.Phase != Phase.Lose)
+                        g.Update(1f / 60f);
+                    played++;
+                    missions += g.RunState != null ? Math.Max(1, g.RunState.Mission) : 1;
+                }
+        BranchProbe = null;
+        Environment.SetEnvironmentVariable("SIGHTLINE_HEAT", null);
+
+        // ---- the verdict ----------------------------------------------------------------------
+        var census = new List<string>();
+        foreach (var b in ActBranches)
+        {
+            long c = count[b];
+            double rate = acts > 0 ? c / (double)acts : 0;
+            census.Add($"{b}={c}({100.0 * rate:0.00}%)");
+            if (Array.IndexOf(AiCovBackstops, b) >= 0) continue;      // structural, not a verb
+            bool declared = Array.IndexOf(AiCovKnownRare, b) >= 0;
+            if (rate < AiCovRareRate)
+            {
+                if (!declared)
+                    fails.Add($"branchEffectivelyDead:{b}={c}/{acts}({100.0 * rate:0.00}% < {100.0 * AiCovRareRate:0.00}%)");
+                else if (strict)
+                    fails.Add($"declaredDeadBranch:{b}={c}/{acts}");
+                else
+                    notes.Add($"DEAD-BY-DECLARATION:{b}={c}/{acts}");
+            }
+            else if (declared && rate >= 2 * AiCovRareRate)   // 2x, so a branch sitting ON the line does not flip the note run to run
+                notes.Add($"STALE DECLARATION:{b}={c}/{acts}({100.0 * rate:0.00}%) is above the rate — delete it from AiCovKnownRare");
+        }
+        // vacuity: a census of nothing proves nothing, and the rate gate needs enough acts for
+        // "once per thousand" to be a measurable statement at all.
+        if (acts < 1500) fails.Add($"vacuousCensus(acts={acts})");
+        if (contested < acts / 2) notes.Add($"contested={contested}/{acts}");
+        if (unknown > 0) fails.Add($"unregisteredBranch(count={unknown}) — add it to Game.ActBranches");
+        // and the probe has to be wired to the chain it claims to census
+        if (count["shoot"] == 0) fails.Add("probeNotWired(no shots seen at all)");
+
+        return fails.Count == 0
+            ? $"AICOVTEST: PASS ({played} campaigns / {missions} missions / {acts} enemy acts "
+              + $"({contested} contested); every enemy verb fires at least once per "
+              + $"{(int)(1 / AiCovRareRate)} acts except the {AiCovKnownRare.Length} declared "
+              + $"effectively-dead ones. census: " + string.Join(" ", census)
+              + (notes.Count > 0 ? " | " + string.Join(" | ", notes) : "") + ")"
+            : $"AICOVTEST: FAIL ({string.Join(",", fails.Distinct())}) census: "
+              + string.Join(" ", census) + (notes.Count > 0 ? " | " + string.Join(" | ", notes) : "");
+    }
+
+    // ─── C5 THE HARD EDGES — SIGHTLINE_ENEMYSTALLTEST ──────────────────────────────────────────
+    /// The ENEMY-TURN half of the no-deadlock contract, asserted the only way a deadlock guard
+    /// honestly can be: by DEADLOCKING THE ENEMY TURN and watching what happens.
+    ///
+    ///  (A) THE ARM — with the turn wedged, the guard fires within its own bound and the line it
+    ///      prints NAMES the unit, the stage and the planner branch. A guard that fires silently
+    ///      is the W9 TIMEOUT again: an agent gets a frame count and no diagnosis.
+    ///  (B) THE ESCAPE — the wedged turn ENDS. Not "eventually, at the harness frame cap": the
+    ///      guard forfeits the stalled unit and, when that exhausts the staging list, hands the
+    ///      turn back. Real play is where this matters; a batch loses a run, a player loses the
+    ///      session.
+    ///  (C) NON-VACUITY, and this is the leg that makes the whole test mean something — the SAME
+    ///      wedge with `EnemyStallGuardOn = false` (the pre-guard tree) must NOT recover. If it
+    ///      did, the wedge would be proving nothing and (A)/(B) would pass on a tree with no
+    ///      guard in it at all.
+    ///  (D) NO FALSE POSITIVES — real missions, no wedge, hundreds of real enemy turns: the guard
+    ///      must never fire. A stall guard that trips in a healthy fight would silently forfeit
+    ///      hostile turns and quietly move every balance number in the project.
+    ///  (E) THE BUDGET — the guard has to bite before the harness frame budget, or a TIMEOUT is
+    ///      reachable again through this door. Pinned against Game.AutoFrameCap, exactly as
+    ///      STALLTEST pins AutoMaxRunTurns.
+    public static string EnemyStallSelfTest()
+    {
+        var fails = new List<string>();
+        int armFrames = -1, escapeFrames = -1, noGuardFrames = -1;
+        string armLine = "";
+        long enemyTurnsSeen = 0;
+
+        // ---- (A) + (B): wedge a real enemy turn -----------------------------------------------
+        {
+            Util.Reseed(4242);
+            EnemyStallFires = 0; LastEnemyStall = ""; EnemyStallGuardOn = true;
+            var g = new Game { NoPersist = true, AutoPlay = true, SmartPlay = true };
+            g.StartMission(1);
+            // play forward until the enemy turn is actually running
+            int f = 0;
+            while (g.Phase != Phase.EnemyTurn && f++ < 20000) g.Update(1f / 60f);
+            if (g.Phase != Phase.EnemyTurn) fails.Add("neverReachedAnEnemyTurn");
+            else
+            {
+                DebugEnemyWedge = true;
+                int before = EnemyStallFires;
+                int spun = 0;
+                while (EnemyStallFires == before && spun++ < EnemyStallFrames + 240) g.Update(1f / 60f);
+                armFrames = spun;
+                armLine = LastEnemyStall;
+                if (EnemyStallFires == before) fails.Add($"guardNeverFired(after {spun} wedged updates)");
+                if (armFrames > EnemyStallFrames + 120) fails.Add($"guardFiredLate({armFrames})");
+                // the diagnosis has to be a diagnosis
+                foreach (var must in new[] { "stage=", "unit=", "plan=", "anims=", "mission=" })
+                    if (!armLine.Contains(must)) fails.Add("stallLineMissing:" + must);
+                if (armLine.Contains("unit=<none")) fails.Add("stallLineNamesNoUnit");
+
+                // (B) the turn gets OUT — bounded by one fire per staged hostile.
+                int budget = (g.Enemies.Count + 2) * (EnemyStallFrames + 8);
+                int e2 = 0;
+                while (g.Phase == Phase.EnemyTurn && e2++ < budget) g.Update(1f / 60f);
+                escapeFrames = e2;
+                if (g.Phase == Phase.EnemyTurn)
+                    fails.Add($"wedgedTurnNeverEnded(after {e2} updates, fires={EnemyStallFires})");
+                DebugEnemyWedge = false;
+            }
+        }
+
+        // ---- (C) the same wedge on the PRE-GUARD tree hangs ------------------------------------
+        {
+            Util.Reseed(4242);
+            EnemyStallGuardOn = false;
+            int firesBefore = EnemyStallFires;
+            var g = new Game { NoPersist = true, AutoPlay = true, SmartPlay = true };
+            g.StartMission(1);
+            int f = 0;
+            while (g.Phase != Phase.EnemyTurn && f++ < 20000) g.Update(1f / 60f);
+            if (g.Phase == Phase.EnemyTurn)
+            {
+                DebugEnemyWedge = true;
+                int budget = (g.Enemies.Count + 2) * (EnemyStallFrames + 8);
+                int spun = 0;
+                while (g.Phase == Phase.EnemyTurn && spun++ < budget) g.Update(1f / 60f);
+                noGuardFrames = spun;
+                if (g.Phase != Phase.EnemyTurn)
+                    fails.Add("wedgeIsNotAWedge(the turn ended with the guard OFF, so (A)/(B) prove nothing)");
+                if (EnemyStallFires != firesBefore)
+                    fails.Add("guardFiredWhileDisabled");
+                DebugEnemyWedge = false;
+            }
+            else fails.Add("neverReachedAnEnemyTurn(legC)");
+            EnemyStallGuardOn = true;
+        }
+
+        // ---- (D) real missions, no wedge: the guard must stay silent ---------------------------
+        {
+            EnemyStallFires = 0;
+            Game.ActProbe = (u, plan, a, am, st) => { };
+            for (int rep = 0; rep < 4; rep++)
+            {
+                Util.Reseed(70000 + rep);
+                var g = new Game { NoPersist = true, AutoPlay = true, SmartPlay = true };
+                g.StartMission(1);
+                Phase last = g.Phase;
+                int f = 0;
+                while (f++ < 30000 && g.Phase != Phase.Win && g.Phase != Phase.Lose)
+                {
+                    g.Update(1f / 60f);
+                    if (g.Phase == Phase.EnemyTurn && last != Phase.EnemyTurn) enemyTurnsSeen++;
+                    last = g.Phase;
+                }
+            }
+            Game.ActProbe = null;
+            if (EnemyStallFires > 0) fails.Add($"falsePositives={EnemyStallFires} in clean play");
+            if (enemyTurnsSeen < 40) fails.Add($"vacuous(onlySaw {enemyTurnsSeen} enemy turns)");
+        }
+
+        // ---- (E) the budget relationship --------------------------------------------------------
+        // (read through locals so the compiler evaluates the RELATIONSHIP rather than folding two
+        // consts into a constant-false branch it then warns is unreachable — which is exactly the
+        // shape of a check that cannot fail.)
+        long stallBound = EnemyStallFrames, frameCap = AutoFrameCap;
+        if (stallBound * 24 >= frameCap)
+            fails.Add($"stallBudgetExceedsFrameCap({stallBound}x24 >= {frameCap})");
+        if (stallBound <= 0) fails.Add("stallFramesNotPositive");
+
+        return fails.Count == 0
+            ? $"ENEMYSTALLTEST: PASS (a wedged enemy turn is detected in {armFrames} updates "
+              + $"(bound {EnemyStallFrames}) and named — \"{armLine.Substring(0, Math.Min(armLine.Length, 150))}\" — "
+              + $"the turn then ends in {escapeFrames} more; the SAME wedge with the guard off still "
+              + $"hangs after {noGuardFrames} updates; {enemyTurnsSeen} clean enemy turns fired it zero "
+              + $"times; {EnemyStallFrames} x 24 units < the {AutoFrameCap}-frame harness budget)"
+            : "ENEMYSTALLTEST: FAIL (" + string.Join(",", fails.Distinct()) + ")";
+    }
+
     // ─── C5 THE HARD EDGES — THE SCREEN AUDIT (FITTEST leg F) ──────────────────────────────────
     /// Every screen the game can draw, drawn for real at every shipped text size, with the ink and
     /// the control plates read back FROM THE DRAW CALLS (`Cfg.InkProbe` / `Hud.PlateProbe`).

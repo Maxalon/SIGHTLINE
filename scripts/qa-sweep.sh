@@ -94,7 +94,10 @@ echo -n "HEATLADDERTEST: "; verdict "$(SIGHTLINE_HEATLADDERTEST=1 run | grep -oE
 echo -n "SNAPTEST   : "; verdict "$(SIGHTLINE_SNAPTEST=1 run | grep -oE "SNAPTEST: (PASS|FAIL)" | head -1)"
 echo -n "AUDIOTEST  : "; verdict "$(SIGHTLINE_AUDIOTEST=1 run | grep -oE "AUDIOTEST: (PASS|FAIL)" | head -1)"
 echo -n "AUDIOGATE  : "; verdict "$(SIGHTLINE_AUDIOGATE=1 run | grep -oE "AUDIOGATE: (PASS|FAIL)" | head -1)"
-echo -n "AIIDLETEST : "; SIGHTLINE_AIIDLETEST=1 run | grep -oE "AIIDLETEST: (PASS|FAIL)" | tail -1
+# C5 THE HARD EDGES — DEFECT: this was the ONE self-test in the sweep not routed through
+# `verdict`, so an AIIDLETEST FAIL printed "FAIL" and the sweep still exited 0. W9 built `verdict`
+# precisely so the exit code means the whole sweep, and this line was missed by it.
+echo -n "AIIDLETEST : "; verdict "$(SIGHTLINE_AIIDLETEST=1 run | grep -oE "AIIDLETEST: (PASS|FAIL)" | tail -1)"
 # RESONANCE A3: the AUDIO CHECK audition screen's listing/label/measurement contract.
 echo -n "AUDITIONTEST: "; verdict "$(SIGHTLINE_AUDITIONTEST=1 run | grep -oE "AUDITIONTEST: (PASS|FAIL)" | head -1)"
 echo -n "AMBIENTTEST: "; verdict "$(SIGHTLINE_AMBIENTTEST=1 run | grep -oE "AMBIENTTEST: (PASS|FAIL)" | head -1)"
@@ -140,6 +143,15 @@ echo -n "GEOMTEST   : "; verdict "$(SIGHTLINE_GEOMTEST=1 run | grep -oE "GEOMTES
 echo -n "TRUTHTEST  : "; verdict "$(SIGHTLINE_TRUTHTEST=1 run | grep -oE "TRUTHTEST: (PASS|FAIL)" | head -1)"
 echo -n "GRAPPLETEST: "; verdict "$(SIGHTLINE_GRAPPLETEST=1 run | grep -oE "GRAPPLETEST: (PASS|FAIL)" | head -1)"
 echo -n "STALLTEST  : "; verdict "$(SIGHTLINE_STALLTEST=1 run | grep -oE "STALLTEST: (PASS|FAIL)" | head -1)"
+# C5 THE HARD EDGES: the ENEMY-turn half of the no-deadlock contract (STALLTEST covers the player
+# turn), and the enemy DECISION CENSUS — every branch of the enemy exec chain must be REACHED, at
+# a rate a player could actually meet. AICOVTEST=2 walks 48 campaigns (~10 s); the effectively-dead
+# branches it tolerates are named in Game.Harness.cs's AiCovKnownRare and printed on every run.
+echo -n "ENEMYSTALLTEST: "; verdict "$(SIGHTLINE_ENEMYSTALLTEST=1 run | grep -oE "ENEMYSTALLTEST: (PASS|FAIL)" | head -1)"
+echo -n "AICOVTEST  : "; verdict "$(SIGHTLINE_AICOVTEST=2 run | grep -oE "AICOVTEST: (PASS|FAIL)" | head -1)"
+# C5: the HOSTILE SAVE — eight edited/truncated/older-build save.json shapes through the real
+# resume path. W9 asked this of meta.json; save.json had never been asked.
+echo -n "SAVEEDGETEST: "; verdict "$(SIGHTLINE_SAVEEDGETEST=1 run | grep -oE "SAVEEDGETEST: (PASS|FAIL)" | head -1)"
 
 # W1 TRUE INSTRUMENT: the autopilot's ROUTE through the campaign DAG (the sampling frame every
 # published balance number was drawn through) and the frame/RNG independence of gameplay.
