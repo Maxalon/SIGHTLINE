@@ -8116,3 +8116,298 @@ expression to test and it is now the best-evidenced open defect in the project.
 - **Three waves are still unmerged** (W4 board, W5 first hour, W9 repair) and W9 explicitly changes
   RNG draw order and composition. **This table will need re-running once they land** — it is the
   post-W1 ladder, not the final one.
+
+# PROGRAM CROSSCUT — W8 "THE HALF WALL" (2026-08-30)
+
+**Base commit `dfa7c0f`** — the integration tip carrying W1 TRUE INSTRUMENT, TRUE BAND and the
+L1/L2 ladders. The wave's instrument is `ee5a85c`, its autopilot probe `95b127a`. Raw data,
+method and every command line: `docs/measurements/w8/README.md`.
+
+## The charter
+
+L2 handed this wave a defect with a named mechanism: a **mid-run Decapitate wins 46.0% ±3.9
+(n=163) against the boss finale's 69.7% (n=479)** — 23.7 points harder than the campaign's climax,
+replicated across two disjoint world sets. The suspect was `Game.DesignateHvt`, which buffs the
+punch-through target by `+6 + mission` HP and `+6` aim **unless it is an ELITE** — and the finale's
+boss always is. The exemption's own comment says why: *"an ELITE is ALREADY a tuned boss —
+double-buffing it would re-create the stat-check wall we're removing."* The wall was removed from
+the boss and left in the mid-run case.
+
+**The decomposition verified. The mechanism did not** — the buffed half of the mid-run population
+turned out to be the EASIER half. A second probe asked how much of the gap belongs to the measuring
+bot rather than the game, and returned a clean null: the bot's HVT-focus policy costs about nine
+points on a Decapitate but costs them on BOTH sides, leaving the gap at 20.3 → 20.4. And the
+cross-tab built to check all this found a larger defect of exactly the same shape one row above.
+The wave therefore ships **an instrument, a self-test, four default-off dials (one of them
+priced), and a finding** — and no balance change.
+
+## 1. THE DECOMPOSITION VERIFIES — from data, not only from reading the code
+
+`Run.GenerateMap` sets `Map[Map.Count-1].Kind = Boss` and the last column holds exactly one node;
+`CardForNode` makes a Boss node **always** Decapitate. So mission 6 ⟺ Boss node ⟺ Decapitate, and
+subtracting the mission-6 row from the Decapitate row recovers the mid-run half. That is the
+reading. **The data says the same thing exactly**: pooled over L2's 48 archived chunks
+(960 campaigns), `byNodeKind` Boss is **n=479, 334 wins** and `byMission` m6 is **n=479, 334 wins**
+— identical counts, not merely identical rates. There is no mission 6 that is not a Boss node and
+no Boss node that is not mission 6, in 960 campaigns. The subtraction is valid and the lead's
+46.0% (n=163) is confirmed.
+
+## 2. THE INSTRUMENT — and a 960-campaign inertness proof
+
+`Stats` gained three read-only blocks, zero RNG draws:
+
+- **`byObjectiveByNodeKind`** — the cross-tab the wave was chartered on. An objective's row can no
+  longer pool a capstone with a mid-run node.
+- **`byObjectiveByMission`** — the *other* mix a flat objective row hides, and the one that turned
+  out to matter more. `Run.DeckObjective` deals a fight objective from a hash of the map **column**,
+  and a column *is* a mission number, so every objective row carries a depth mix as well.
+- **`hvt{}`** — the Decapitate target split by `DesignateHvt`'s ELITE exemption (buffed
+  rank-and-file vs exempt named boss), per mission, with its average `MaxHp` and with the three
+  buff magnitudes echoed so a chunk's JSON records the tree it was measured on.
+
+Inertness, three ways. **(a)** `I1-pre` vs `I1-post`, the same three (rung, slot-set) chunks on the
+pre-wave and instrumented binaries, 60 campaigns per arm: **42 of 43 aggregate fields byte-identical
+on all three pairs**, the only mover being `harness{}` (timestamps and loadavg, designed to vary).
+**(b)** `R0diag` vs `P0` — the same check for the §7 policy-dial binary at its default, so a probe
+round may be paired against the lever round's baseline: **45 of 46 fields byte-identical**, again
+only `harness{}`. That is CLAUDE.md's measurement contract, item 4, done rather than asserted.
+**(c)** the strong one: round **B** re-ran L2's exact 48-chunk grid on the instrumented binary and
+reproduced the archive **with zero differing rows** — every `byObjective`, `byNodeKind`, `byMission`
+count and win total, and all six ladder rungs (72.5 / 46.9 / 36.9 / 23.1 / 20.6 / 8.8). **L2 is
+therefore this wave's baseline, re-measured rather than quoted.**
+
+## 3. THE NAMED MECHANISM IS NOT THE CAUSE
+
+The cross-tab splits the 163 mid-run Decapitates by whether the HVT actually took the buff.
+`DesignateHvt` picks the toughest non-special body — and on missions 3 and 5 that is the recurring
+named **mid-boss** (`Mission.MakeMidBoss`, `Cls == "ELITE"`), so those are **exempt**. Missions 2
+and 4 have no named elite, so their HVT is rank-and-file and **buffed**. Round B, n=960 campaigns:
+
+| mid-run Decapitate | win% | ±SE | n | HVT MaxHp |
+|---|---|---|---|---|
+| m2 **BUFFED** | 63.6 | 10.3 | 22 | 17.5 |
+| m4 **BUFFED** | 53.8 | 8.0 | 39 | 24.7 |
+| m3 EXEMPT (mid-boss) | 38.3 | 7.1 | 47 | 23.0 |
+| m5 EXEMPT (mid-boss) | 40.0 | 6.6 | 55 | 27.0 |
+| **m6 EXEMPT (the finale)** | **69.7** | 2.1 | 479 | 22.4 |
+
+Pooled, the **buffed** half of the mid-run population reads **57.4% (n=61)** and the **exempt** half
+**39.2% (n=102)** — the buffed half is **18.2 points EASIER**, ±8.0. The buff is on the wrong side of
+the gap.
+
+And the line that settles it: **the m3 HVT (23.0 HP) and the m6 HVT (22.4 HP) are the same size of
+body, and the two missions read 38.3% and 69.7%.** The same target, 31.4 points apart. Whatever is
+making a mid-run Decapitate hard, it is not the size of the thing you have to kill.
+
+## 4. WHAT THE ASYMMETRY ACTUALLY IS — the FORCE, not the target
+
+`Mission.Build` has a de-stack branch gated on `n >= Run.MaxMissions`: the finale drops **3-4
+bodies** from the force and resets `bump` to `max(0, n-1)`, dropping the boss card's and heat's
+`StatDelta` off every supporting body. Nothing equivalent exists mid-run — and an **ELITE campaign
+node adds +2 bodies and +1 stat**, the exact inverse. So the campaign's climax is the *lightest*
+escort a boss gets all game, and a mid-run Decapitate is the same punch-through against a force
+that was never trimmed.
+
+Round B's node-kind cells price that directly. Decapitate by node kind: **Supply 67.3% (n=52)** (a
+node that fields **one fewer body** and −1 stat), **Combat 32.9% (n=73)**, **Elite 42.1% (n=38)**,
+**Boss 69.7% (n=479)**. One body and one stat point separate the Supply cell from the Combat cell
+and they are **34 points apart**. That is the same order as the 25-point mission-1 move X2 got from
+one body — quoted as a prior on the SIZE of a body, not as a current number (X2's figures predate
+W1 and are formally incomparable to this tree).
+
+## 5. THE BIGGER DEFECT THE CROSS-TAB FOUND: the two KILL objectives
+
+The wave was chartered on Decapitate because its flat row (63.7%) is the worst in the game. The
+cross-tab shows that row was not the worst thing hiding in `byObjective` — **`Eliminate` was**, and
+it was hiding behind a 89.6% headline:
+
+| objective | flat row | Start (m1) | Combat | Elite | Supply | Boss |
+|---|---|---|---|---|---|---|
+| Eliminate | **89.6** (n=1158) | 97.5 (n=960) | **42.3** (n=104) | **33.3** (n=33) | 77.0 (n=61) | — |
+| Decapitate | **63.7** (n=642) | — | **32.9** (n=73) | **42.1** (n=38) | 67.3 (n=52) | 69.7 (n=479) |
+| Defend | 84.2 | — | 81.2 (n=329) | 72.5 (n=109) | 91.9 (n=297) | — |
+| Escort | 86.9 | — | 91.4 (n=163) | 83.1 (n=83) | 80.0 (n=60) | — |
+| Evac | 88.2 | — | 87.5 (n=64) | 84.9 (n=33) | 93.3 (n=30) | — |
+| Hack | 85.3 | — | 80.0 (n=55) | 93.9 (n=49) | 75.0 (n=12) | — |
+| Rescue | 85.0 | — | 82.4 (n=125) | 86.6 (n=97) | 87.0 (n=77) | — |
+| Sabotage | 83.5 | — | 84.7 (n=118) | 73.5 (n=34) | 100.0 (n=12) | — |
+
+**Eliminate's flat row is 89.6% because 960 of its 1158 rows are mission 1.** Every campaign opens
+on a Start node, a Start node is always Eliminate (`Run.ObjectiveFor(1)`), and mission 1 wins 97.5%
+of the time. Pooled over its mid-run cells Eliminate reads **40.1% ±4.2 (n=137)** — strip the opener
+and the game's best-looking objective is its **worst**. That is the same composition artifact the
+wave was chartered to fix for Decapitate, one row up, in the opposite direction, and **larger**:
+**49.5 points of it against Decapitate's 23.7.**
+
+Pooled over the mid-run node kinds (Combat + Elite), the split is not by objective at all — it is
+by **whether the objective can be won without winning the fight**:
+
+| on Combat + Elite nodes | win% | ±SE | n |
+|---|---|---|---|
+| **KILL** (Eliminate, Decapitate) | **38.3** | 3.1 | 248 |
+| **NON-KILL** (the other six) | **83.4** | 1.0 | 1259 |
+
+**45.1 points, SE 3.3.** At mission 5, `Eliminate` reads **25.6% (n=43)** and `Sabotage` reads
+**96.8% (n=31)** — the same mission depth, a 71.2-point spread. Six of the game's eight
+objectives end when you reach a tile, hold a timer or set a charge; two end only when bodies fall.
+`docs/DESIGN.md` §A wants objectives that "force movement" and break the turtle — they do, and the
+measurement says they also let a squad **decline the encounter entirely**. Whether that is the
+design working or the design leaking is a call for a design wave, not a measurement one, but
+nobody could see it before this cross-tab existed.
+
+## 6. THE LEVER, PRICED — and shipped OFF
+
+**One lever, one round, against a fresh same-slot baseline on this wave's own tree.** The dial is
+`SIGHTLINE_HVTDEPTH`, the brief's option (b): the buff's depth coefficient, `+6 + 1*mission` HP,
+inverted to `+6 − 1*mission`. The mechanism argument for picking that term over the flat one is
+that a rank-and-file body's HP **already** scales with depth — `Mission.SpawnEnemies` sets
+`bump = (n-1) + statDelta` and every archetype's HP is `base + bump` — so `+_run.Mission` scales the
+HVT with depth a second time.
+
+**The instrument had to be the objective pin.** Unpinned, a buffed HVT appears in **61 of the 3,547
+missions round B played — 1.72%, or 0.064 per campaign.** No campaign-level round can price a term
+that rare. `SIGHTLINE_OBJ=decapitate`
+pins every mission of every run, which puts the buffed body on missions 1, 2 and 4 (3, 5 and 6 have
+a named ELITE and stay exempt) and raises the population to **824 of 1,233 missions**. **The price
+of the pin is representativeness**: a run of six Decapitates is not a run anyone plays — no Defend
+anchor, no Escort, and mission 1 becomes a Decapitate, which never happens naturally. Pinned run
+completion is 8.3% against the unpinned ladder's 46.9% at h0. **P0/P1 measure the MISSION, not the
+campaign.**
+
+Rounds **P0** (defaults) and **P1** (`HVTDEPTH=-1`), 6 rungs × 4 slot sets × N=10 = **480 campaigns
+each on identical CRN worlds**, all 48 chunks `OK ... runs=20`:
+
+| pinned Decapitate | P0 (buff `6+m`) | P1 (buff `6−m`) | Δ | HVT MaxHp |
+|---|---|---|---|---|
+| **m1 BUFFED** (every campaign plays it — no survivorship at all) | 89.8% (n=480) | **92.9%** (n=480) | **+3.1** | 14.4 → 12.4 |
+| m2 BUFFED | 54.2% (n=201) | **60.9%** (n=207) | +6.7 | 19.5 → 15.2 |
+| m4 BUFFED | 47.6% (n=143) | **57.3%** (n=150) | +9.7 | 23.2 → 15.4 |
+| m3 EXEMPT (buff cannot touch it) | 40.9% (n=257) | 42.2% (n=277) | +1.3 | 23.0 → 23.0 |
+| m5 EXEMPT (buff cannot touch it) | 43.6% (n=94) | 50.0% (n=120) | +6.4 | 27.0 → 27.0 |
+| all buffed missions | 73.8% (n=824) | 78.6% (n=837) | **+4.8 ±2.1** | 17.2 → 13.7 |
+| pinned run completion | 8.3% (n=480) | 13.1% (n=480) | +4.8 ±2.0 | — |
+
+**The lever is real and it behaves exactly as the arithmetic predicts** — the HP it removes at m1/m2/m4
+is −2.0 / −4.3 / −7.8 against a predicted −2 / −4 / −8, and the win rate moves monotonically with it.
+The EXEMPT rows are the control: their HVT MaxHp is **identical to the tenth of a point** across the two
+arms, so their +1.3 / +6.4 is downstream carry-over (healthier squads arriving at m3/m5), not the dial.
+Any single-arm reading of P1 that ignores that would over-credit the lever.
+
+**It is shipped OFF, for three reasons, in order of weight.**
+
+1. **It is on the wrong side of the gap.** Section 3: the buffed half of the mid-run population is
+   already the EASIER half (57.4% vs 39.2%). This lever makes the easy half easier.
+2. **It cannot close the gap it was chartered to close.** *Extrapolation, not a measurement*: apply
+   P1's largest measured buffed-mission effect (+9.7) to round B's 61 buffed missions and the mid-run
+   Decapitate figure moves from 46.0% to roughly 49.7% — still ~20 points under the finale's 69.7%.
+3. **The population is 1.72% of missions played.** A 0.064-missions-per-campaign term cannot move a
+   ladder rung, and this project has spent waves discovering that after the fact.
+
+`SIGHTLINE_HVTBUFF` / `SIGHTLINE_HVTDEPTH` / `SIGHTLINE_HVTAIM` therefore ship **default-identical to
+the pre-W8 arithmetic**, priced and unspent — the same disposition X2 gave `SIGHTLINE_AIMTRIM` and
+friends. The numbers above are what a future wave needs to decide differently without re-running the
+round.
+## 7. THE PROBE: how much of "Decapitate is hard" is the measuring bot?
+
+`SmartDecapitate` is a **hard focus policy**: while the HVT lives, every soldier peels its guards,
+shoots it, grenades it, or **walks at it**, ignoring the rest of the force except a blocker within 3
+tiles. On the finale that is fine — `Mission.Build` has already de-stacked the boss force by 3-4
+bodies. On a mid-run Decapitate the force is at full strength and the same policy marches a squad
+across an intact firing line. So every published Decapitate figure was a joint property of the
+**game** and of one `if` in `Game.Autopilot.cs`, and nothing had ever separated them.
+
+`SIGHTLINE_HVTPOLICY=0` (autopilot-only; `Game.SmartHvtFocus`) demotes the HVT to an ordinary
+target, except when it is the last active hostile so a batch can never stall. It runs from
+`runbin/W8inst3`, which `R0diag` proves logic-identical to the rounds' binary at the dial's default
+(**45 of 46 fields byte-identical on three chunks**).
+
+**Pinned (P0 vs P2, 480 CRN-paired campaigns per arm).** The HVT is untouched — its average MaxHp
+is 17.2 against 17.4 — so everything below is the bot:
+
+| pinned Decapitate | focus ON (shipped) | focus OFF | Δ |
+|---|---|---|---|
+| **m1** (every campaign plays it — no survivorship, HVT MaxHp identical at 14.4) | 89.8% (n=480) | **94.6%** (n=480) | **+4.8** |
+| m2 | 54.2% (n=201) | 62.7% (n=220) | +8.5 |
+| m4 | 47.6% (n=143) | 56.5% (n=170) | +8.9 |
+| all buffed missions | 73.8% (n=824) | 79.1% (n=870) | **+5.3 ±2.1** |
+| pinned run completion | 8.3% (n=480) | **15.8%** (n=480) | **+7.5 ±2.1** |
+
+At mission 1 — identical worlds, identical squad, an identical 14.4-HP target, zero survivorship —
+**telling the bot to stop charging the HVT is worth +4.8 points, more than the entire game lever
+the brief proposed (+3.1 at the same cell).**
+
+**Unpinned (B vs BP, the same 24 chunks / 480 campaigns per arm on bases 0-30) — and this is the
+result that matters.** The B column here is round B's four-slot-set SUBSET, so its mid-run cell reads
+47.7% (n=86) rather than the full round's 46.0% (n=163); the pairing is chunk-for-chunk and only
+over chunks both rounds completed.
+
+| unpinned | focus ON | focus OFF | Δ |
+|---|---|---|---|
+| Decapitate, **mid-run** | 47.7% (n=86) | 57.0% (n=86) | +9.3 ±7.6 |
+| Decapitate, **finale** | 68.0% (n=234) | 77.4% (n=239) | +9.4 ±4.1 |
+| **the gap between them** | **20.3 ±6.2** | **20.4 ±6.0** | **+0.1 ±8.6** |
+| run completion | 33.1% (n=480) | 38.5% (n=480) | +5.4 ±3.1 |
+
+**The policy costs about nine points on a Decapitate — and it costs them on BOTH sides.
+The mid-run/finale gap does not move at all.** So the bot is a real, previously invisible tax on
+this objective's measured difficulty, and it is **not** the source of the asymmetry the wave was
+chartered on. That asymmetry is structural, and §4 names what it is.
+
+*(An interim reading of this round at 13 of 24 chunks showed the mid-run cell moving +22.5 while
+the finale moved +8.3, which would have been the opposite conclusion. It was a rung-mix artefact of
+an unfinished round — the easy rungs land first. It is recorded here because this program has been
+burned by exactly that shape of mistake, and because the fix is trivial: the pairing script now
+intersects the two rounds' completed chunk sets before pooling anything.)*
+
+The dial stays **default ON** — it is today's behaviour and every archived number was measured
+through it. `HVTTEST` pins that default, so it cannot drift silently.
+
+## 8. VERIFICATION
+
+- `dotnet build -c Release`: **0 warnings / 0 errors.**
+- `bash scripts/qa-sweep.sh --full`: every self-test PASS, **COVERAGE GAP block empty**, PAIRTEST
+  PASS, autoplay ×3 clean (no TIMEOUT, no exception).
+- **`SIGHTLINE_HVTTEST` (new, wired into the sweep) PASSES, and it was proven able to FAIL five
+  ways** — a test that cannot fail is not a test. Two of the five are code reverts, applied,
+  observed and restored:
+  - `SIGHTLINE_HVTBUFF=3` → `FAIL shippedHpBase=3, bonus(m1)=4 … hpDelta s1301 m4 7!=10 …`
+  - `SIGHTLINE_HVTAIM=0` → `FAIL shippedAim=0, aimDelta s1301 m2 0!=6 …`
+  - the ELITE exemption reverted in `DesignateHvt` (`HvtBuffed = true`) →
+    `FAIL exemptFlag s1301 m3 ELITE, hpDelta s1301 m3 9!=0, marker s1301 m3 HVT-BREAKER, …,
+    noExemptCaseSeen, finaleNotExempt s1301 …` (restored, re-run, PASS)
+  - the `IsSpecial` exclusion removed from the selection → `FAIL specialHvt s1301 m4 SHIELD,
+    specialHvt s4242 m4 TURRET` (restored, re-run, PASS)
+  - `SIGHTLINE_HVTPOLICY=0` → `FAIL hvtPolicyDefaultOff`
+- **205 measurement chunks run, zero `BAD`** — every one asserted on all three layers (JSON
+  removed first, exit code checked, `runs == 2N` re-read from the file). **153 chunks / 3,060
+  campaigns are archived**: B (48 / 960), P0, P1, P2 and BP (24 / 480 each), plus the `I1` and
+  `R0diag` inertness pairs. The 52 pruned chunks are a mid-wave diagnostic grid and inertness pair
+  run on an earlier build of the same instrument; `B` and `I1` supersede them exactly and the
+  archive is 4 MB smaller without them.
+
+## 9. WHAT I DID NOT FIX, AND WHAT IT COST
+
+- **The mechanism that is actually there is unspent.** §4 names it — the finale is de-stacked by
+  3-4 bodies and has its stat bump reset, and no mid-run Decapitate is. A trim gated to mid-run
+  Decapitates is one dial and one paired round, and the Supply-vs-Combat cell (67.3% vs 32.9% on
+  one body and one stat point) is a prior on its size. W8 did not spend it because CLAUDE.md's
+  contract is one lever per round and this wave's round went to the HVT buff the brief named.
+  **That was the right call for the brief and the wrong lever for the defect; the next wave should
+  spend its round on the force, not the target.**
+- **The KILL/NON-KILL gap is a design question and I did not touch it.** Six of eight objectives
+  end when the squad reaches a tile, holds a clock or sets a charge, and the measurement says a
+  squad can decline the encounter and still win. Whether that is `docs/DESIGN.md` §A's anti-turtle
+  design working as intended or leaking is not something a balance round can settle.
+- **Two caveats on the KILL/NON-KILL number, stated plainly.** (a) It holds node kind and mission
+  depth constant (both cross-tabs agree) but **not squad condition** — `byObjectiveByBucket` is the
+  instrument for that and is still too sparse at these n. (b) The autopilot's non-kill policies are
+  written to skip the fight (`SmartEvac`: *"EXTRACTION IS A RACE … beeline to the zone FIRST"*), so
+  part of the 83.4% is the bot exploiting an exit the game offers. A human would too — but the
+  number is a joint property of the game and the bot and must not be quoted as the game alone.
+- **The pinned rounds are not campaigns.** P0/P1/P2 pin every mission to Decapitate; pinned run
+  completion is 8.3% against the ladder's 46.9% at h0. They measure a mission, not a campaign —
+  which is why §7's conclusion rests on the UNPINNED B/BP pair and the pinned P0/P2 table is only
+  the mechanism check beside it.
+- **`SIGHTLINE_HVTAIM` was never spent.** The aim half of the buff (+6, which partly duplicates
+  what `bump` already gives) is dialled and priced at zero rounds. One lever, one round, whenever
+  someone wants it.

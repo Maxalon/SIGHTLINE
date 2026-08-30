@@ -1230,6 +1230,11 @@ public partial class Game
     // SetupMission after Mission.Build; null on every other objective.
     public Unit Hvt;
     public bool HasHvt => Objective == Objective.Decapitate && Hvt != null;
+    // W8: did THIS mission's HVT take DesignateHvt's statline buff, or was it exempt (an ELITE —
+    // i.e. the campaign finale's named boss, or the m3/m5 mid-boss)? Balance telemetry only; the
+    // harness reports the two populations separately so a mid-run Decapitate can never again be
+    // pooled with the capstone. Reset with Hvt in SetupMission.
+    public bool HvtBuffed;
     // DECAPITATE GUARDED HVT (W4): up to 2 bodyguards picked near the HVT. While any is alive within
     // Combat.HvtGuardRange of the HVT, the HVT takes reduced (never zero) damage — peel the guards or
     // pull the HVT out of the bubble to execute it. Transient (enemies aren't persisted). Recomputed
@@ -1890,6 +1895,7 @@ public partial class Game
         SabotageBlown.Clear();
         Vip = null;
         Hvt = null;
+        HvtBuffed = false;
         CaptiveLocked = false;
         // Evac / Escort / Rescue all extract to the same top-right zone
         if (Objective == Objective.Evac || Objective == Objective.Escort || Objective == Objective.Rescue)
@@ -2180,7 +2186,10 @@ public partial class Game
                            Players.Count(p => p.Alive && !p.IsVip), Enemies.Count(e => e.Alive),
                            Mission.AppliedLayout, Mission.AppliedDeploy,
                            Mode == GameMode.Campaign && _run.CurrentNode != null ? _run.CurrentNode.Kind.ToString() : Mode.ToString(),
-                           hpMax > 0 ? (int)Math.Round(100.0 * hpNow / hpMax) : 100);
+                           hpMax > 0 ? (int)Math.Round(100.0 * hpNow / hpMax) : 100,
+                           // W8: the DECAPITATE punch-through target's shape. -1 no HVT (any other
+                           // objective), 0 an ELITE that took no buff, 1 a rank-and-file that did.
+                           Hvt == null ? -1 : (HvtBuffed ? 1 : 0), Hvt == null ? 0 : Hvt.MaxHp);
         // FUL-7: the PATCH per-presence denominator (corpsman enters via backfill only)
         if (Players.Any(p => p.Alive && !p.IsVip && p.Ability == AbilityKind.Heal))
             Stats.RecordCorpsmanFielded();
@@ -2196,6 +2205,7 @@ public partial class Game
     void DesignateHvt()
     {
         var pool = Enemies.Where(e => e.Alive).ToList();
+        HvtBuffed = false;
         if (pool.Count == 0) { Hvt = null; return; }
         bool IsSpecial(Unit e) => e.Cls == "TURRET" || e.Cls == "MEDIC" || e.Cls == "SAPPER"
                                || e.Cls == "SHIELD" || e.Cls == "DRONE" || e.Cls == "MORTAR";
@@ -2208,11 +2218,16 @@ public partial class Game
         // it normally. EXCEPTION: an ELITE (the WARLORD on the boss node, now a Decapitate) is
         // ALREADY a tuned boss — double-buffing it would re-create the stat-check wall we're
         // removing, so the ELITE keeps its own stats and only takes the HVT marker/name.
-        if (Hvt.Cls != "ELITE")
+        // W8: the three magnitudes now live on Combat (HvtHpBonusBase/PerMission/AimBonus) so a
+        // measured round can pin them; the defaults 6 / 1 / 6 are this line's original arithmetic
+        // exactly. HvtBuffed records which branch ran — the balance harness needs it to tell a
+        // BUFFED mid-run Decapitate apart from an EXEMPT one (see Stats.BeginMission).
+        HvtBuffed = Hvt.Cls != "ELITE";
+        if (HvtBuffed)
         {
-            int bonus = 6 + _run.Mission;      // scales gently with mission depth
+            int bonus = Combat.HvtHpBonus(_run.Mission);   // scales with mission depth
             Hvt.MaxHp += bonus; Hvt.Hp += bonus;
-            Hvt.Aim = Math.Min(85, Hvt.Aim + 6);
+            Hvt.Aim = Math.Min(85, Hvt.Aim + Combat.HvtAimBonus);
             Hvt.Name = "HVT-" + Hvt.Name;
         }
 

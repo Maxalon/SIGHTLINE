@@ -1723,6 +1723,7 @@ safety claim from W5 was re-verified by the reviewers and held; none of it was t
       real teeth or the ladder needs fewer, bigger steps — but the first job is a **higher-N**
       measurement (n≥80/rung) so the question can be asked at a precision that can answer it.
 
+<<<<<<< HEAD
 ### PROGRAM RESONANCE — W4 "THE BOARD BECOMES A PLACE" (2026-08-29, details in DEVLOG §W4 BOARD)
 
 Rendering only (base `d350416`); `src/Renderer.cs` draw path + the `Pal` block of `src/Util.cs`.
@@ -1867,3 +1868,48 @@ buy almost nothing, and the ladder's shape is a table property rather than an em
       sets over 960 campaigns: +3.1 points, p=0.394, three of six rungs reversed. **The effect is
       not there.** The method rule (a rung is four slot sets) stays on COST grounds — it is free
       insurance — but must not be cited as evidence of a world-set artefact.
+=======
+### PROGRAM CROSSCUT — W8 "THE HALF WALL" (2026-08-30, details in DEVLOG §W8)
+
+- [x] **THE DECOMPOSITION IS VERIFIED FROM DATA, not only from reading `Run.cs`.** Pooled over
+      L2's 48 archived chunks, `byNodeKind` Boss is **n=479 / 334 wins** and `byMission` m6 is
+      **n=479 / 334 wins** — identical counts, not merely identical rates. There is no mission 6
+      that is not a Boss node in 960 campaigns, so subtracting the m6 row from the Decapitate row
+      is valid and the mid-run figure **46.0% ±3.9 (n=163)** stands.
+- [x] **`byObjectiveByNodeKind` + `byObjectiveByMission` + `hvt{}` shipped** (`src/Stats.cs`,
+      read-only, zero RNG draws), so an objective's row can never again pool a capstone with a
+      mid-run node — or one mission depth with another. Inertness proven three ways: 42/43
+      aggregate fields byte-identical on three paired chunks (only `harness{}` moves); 45/46 for
+      the policy-dial binary at default (`R0diag`); and round **B** re-ran L2's exact 48-chunk grid
+      and reproduced the archive with **zero differing rows** on every objective, node-kind,
+      mission and rung total.
+- [x] **The brief's named mechanism is REFUTED — do not re-open it without new evidence.** Split by
+      whether the HVT actually took `DesignateHvt`'s buff, the mid-run population reads **BUFFED
+      57.4% (n=61)** against **EXEMPT 39.2% (n=102)**: the buffed half is **18.2 points EASIER**,
+      ±8.0. The m3 HVT (23.0 MaxHp) and the m6 HVT (22.4) are the same size of body and their
+      missions read 38.3% and 69.7%. It is not the target.
+- [x] **The lever was priced and NOT spent.** `SIGHTLINE_HVTDEPTH=-1` (buff `6+m` → `6−m`), 480
+      CRN-paired campaigns per arm: buffed missions **73.8% → 78.6% (+4.8 ±2.1)**, mission 1
+      **89.8% → 92.9%**, m4 **47.6% → 57.3%**. Real, and shipped OFF: the buffed HVT is **61 of
+      3,547 missions played (1.72%, 0.064 per campaign)** and is the EASIER half of the gap.
+      `SIGHTLINE_HVTBUFF` / `HVTDEPTH` / `HVTAIM` are default-identical to the pre-W8 arithmetic.
+- [ ] **THE REAL ASYMMETRY IS THE FORCE, AND IT IS UNSPENT — this is the next wave's lever.**
+      `Mission.Build` de-stacks the finale by **3-4 bodies** and resets `bump` (the
+      `n >= Run.MaxMissions` branch); nothing equivalent exists mid-run, and an ELITE node adds
+      **+2 bodies and +1 stat**, the exact inverse. Decapitate by node kind: **Supply 67.3%
+      (n=52)** (one fewer body, −1 stat) against **Combat 32.9% (n=73)** — 34 points on one body
+      and one stat point. One dial, one paired round.
+- [ ] **THE BIGGER DEFECT: `Eliminate`'s 89.6% row is 960 mission-1s.** Every campaign opens on a
+      Start node and a Start node is always Eliminate, at 97.5%. Strip the opener and Eliminate
+      reads **42.3% on Combat nodes (n=104)** and **33.3% on Elite nodes (n=33)**, pooling to
+      **40.1% ±4.2 (n=137)** — a **49.5-point** composition artifact, twice Decapitate's 23.7, and
+      worse than Decapitate's own mid-run cells. Pooled on mid-run node kinds, the two KILL objectives read
+      **38.3% ±3.1 (n=248)** against the six with a non-combat win condition at **83.4% ±1.0
+      (n=1259)** — **45.1 points**. At mission 5, Eliminate is **25.6% (n=43)** and Sabotage is
+      **96.8% (n=31)**. Six of eight objectives let a squad decline the encounter and still win.
+      That is a design question (`docs/DESIGN.md` §A) and needs its own wave, not a tuning round.
+      Two caveats travel with the number: it holds node kind and depth constant but NOT squad
+      condition, and the autopilot's non-kill policies are written to skip the fight.
+- [ ] **`SIGHTLINE_HVTAIM` is dialled and unpriced.** The `+6` aim half of the HVT buff partly
+      duplicates what `bump` already grants; nobody has spent a round on it.
+>>>>>>> wave/the-half-wall

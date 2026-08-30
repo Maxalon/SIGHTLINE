@@ -110,6 +110,7 @@ echo -n "FUL11PROBE : "; verdict "$(SIGHTLINE_FUL11PROBE=40 run | grep -oE "FUL1
 # RESONANCE W5: the RECRUIT rung + the comfort settings (anim speed / UI text scale).
 echo -n "ONRAMPTEST : "; verdict "$(SIGHTLINE_ONRAMPTEST=1 run | grep -oE "ONRAMPTEST: (PASS|FAIL)" | head -1)"
 echo -n "OPENERTEST : "; verdict "$(SIGHTLINE_OPENERTEST=1 run | grep -oE "OPENERTEST: (PASS|FAIL)" | head -1)"
+echo -n "HVTTEST    : "; verdict "$(SIGHTLINE_HVTTEST=1 run | grep -oE "HVTTEST: (PASS|FAIL)" | head -1)"
 # RESONANCE T1/T2: the onboarding contract and the incoming-fire forecast. These two EXISTED
 # but were never run by this sweep - the integration review caught it. THREATTEST prints
 # "NAME PASS" with no colon, like EXPOSURETEST.
