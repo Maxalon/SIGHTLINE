@@ -6646,10 +6646,18 @@ public partial class Game
     /// wedged turn with this false and asserts the game hangs, which is what the pre-guard tree
     /// does). Never false in play.
     public static bool EnemyStallGuardOn = true;
-    /// Harness-only fault injector: makes `UpdateEnemy` return without doing anything, i.e. an
-    /// enemy turn that cannot progress. There is no way to write an honest test for a deadlock
-    /// guard without a deadlock.
+    /// Harness-only fault injectors. There is no way to write an honest test for a deadlock guard
+    /// without a deadlock, and the two halves of the deadlock need DIFFERENT wedges:
+    ///   `DebugEnemyWedge`     — `UpdateEnemy` returns without doing anything: the STAGE MACHINE
+    ///                           stops advancing with an EMPTY queue.
+    ///   `DebugEnemyAnimWedge` — an animation is enqueued that never reports done: `Update` then
+    ///                           returns at the animation pump and never reaches the phase switch
+    ///                           at all. THIS is the half a guard inside `UpdateEnemy` cannot see,
+    ///                           and it is the reason this guard runs from `Update` instead
+    ///                           (C5 review E3: the first version of ENEMYSTALLTEST only wedged the
+    ///                           stage machine, so it PASSED on the placement it argues against).
     public static bool DebugEnemyWedge;
+    public static bool DebugEnemyAnimWedge;
 
     int _enemyStallSig, _enemyStallFrames;
 
@@ -6735,6 +6743,8 @@ public partial class Game
     void UpdateEnemy()
     {
         if (DebugEnemyWedge) return;    // C5 harness-only fault injector (see EnemyStallGuard)
+        if (DebugEnemyAnimWedge && _anims.Count == 0)
+            Enqueue(new StuckAnim(), Team.Enemy);   // C5: the animation half of the deadlock
         if (BannerTimer > 0.55f) return; // let banner breathe before acting
 
         if (_aiStage == AiStage.PickNext)

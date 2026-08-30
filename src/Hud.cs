@@ -168,6 +168,17 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     public static double TimePin = -1.0;
     static double Now() => TimePin >= 0.0 ? TimePin : Raylib.GetTime();
 
+    /// C5 REVIEW FIX (E2) — the HUD's POINTER, in one place, for the same reason as its clock.
+    /// Thirty draw sites read `Mouse()` live: hover fills, hover cards, and the
+    /// threat card, which ANCHORS ITSELF at the cursor. FITTEST's screen audit pinned the clock,
+    /// the entrance animations and the RNG and left the pointer free, so an audited frame still
+    /// depended on where the cursor happened to be — measured as a ~3% flake (a TOOLTIP-HOVER /
+    /// TOOLTIP-AIM fingerprint collision) and as a 16-check disagreement in the assertion count
+    /// between two machines running the same commit. A flaky gate is not a gate.
+    /// `NaN` (the default) means "read the real pointer"; nothing but the harness writes it.
+    public static Vector2 MousePin = new Vector2(float.NaN, float.NaN);
+    static Vector2 Mouse() => float.IsNaN(MousePin.X) ? Mouse() : MousePin;
+
     /// C5 THE HARD EDGES — harness-only entrance-animation PIN. `>= 0` makes every panel
     /// entrance report that progress instead of reading the wall clock, so a self-test can audit
     /// a SETTLED frame (1f) deterministically rather than waiting real seconds for 60 screens x
@@ -539,10 +550,14 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
 
         // label row on top, track underneath — they must not overlap, or the handle draws
         // straight through the percentage at 100%
-        Raylib.DrawTextEx(Cfg.Font, label, new Vector2(r.X + 9, r.Y + 4), 13, 1f, live ? Pal.Txt : Pal.TxtDim);
+        // C5 REVIEW FIX: these two went through Raylib.DrawTextEx directly — so they were frozen
+        // while every other string in the game scaled with the TEXT SIZE setting, and invisible to
+        // Cfg.InkProbe (FITTEST's screen audit could not see them, on a screen it claims to audit).
+        // CLAUDE.md: "Text goes through Cfg.Text / Cfg.Measure, never Raylib.DrawTextEx directly."
+        Cfg.Text(label, new Vector2(r.X + 9, r.Y + 4), 13, 1f, live ? Pal.Txt : Pal.TxtDim);
         string pct = $"{(int)MathF.Round(v * 100f)}%";
-        float pw = Raylib.MeasureTextEx(Cfg.Font, pct, 13, 1f).X;
-        Raylib.DrawTextEx(Cfg.Font, pct, new Vector2(r.X + r.Width - 9 - pw, r.Y + 4), 13, 1f, live ? Pal.Txt : Pal.TxtDim);
+        float pw = Cfg.Measure(pct, 13, 1f).X;
+        Cfg.Text(pct, new Vector2(r.X + r.Width - 9 - pw, r.Y + 4), 13, 1f, live ? Pal.Txt : Pal.TxtDim);
 
         var track = new Rectangle(r.X + 8, r.Y + 23, r.Width - 16, 6);
         Raylib.DrawRectangleRec(track, Pal.RGBA(34, 40, 50));
@@ -1053,7 +1068,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     static void DrawHudHovers(Game g)
     {
         if (g.Phase != Phase.PlayerTurn && g.Phase != Phase.EnemyTurn) return;
-        var m = Raylib.GetMousePosition();
+        var m = Mouse();
 
         if (g.Mode != GameMode.Endless
             && (Raylib.CheckCollisionPointRec(m, _objectiveRect) || (g.NoPersist && _forcedHover == "obj")))
@@ -1529,7 +1544,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         // don't count as cover-worthy. Mousing over the bar restores it instantly — it never
         // stops being interactive; it just yields visually while the board needs the pixels.
         var barRect = new Rectangle(bx0, _barTop, right - bx0, (yBase + bh) - _barTop);
-        bool mouseOnBar = Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), barRect);
+        bool mouseOnBar = Raylib.CheckCollisionPointRec(Mouse(), barRect);
         // W5 (audit visual-7): ONE backing plate under the whole bar. Twelve chips floating over
         // the battlefield with board texture and gold overlay lines running between them was the
         // untidiest composition in the in-mission UI; a single quiet ground makes it read as one
@@ -1582,7 +1597,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         string key   = b.Key;
         Color accent = b.Accent;
 
-        bool hover = enabled && Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), r);
+        bool hover = enabled && Raylib.CheckCollisionPointRec(Mouse(), r);
         Color bg = selected ? Pal.RGBA(40, 34, 12) : (hover ? Pal.RGBA(22, 32, 44) : Pal.Panel);
         Raylib.DrawRectangleRounded(r, 0.22f, 6, Raylib.Fade(bg, (enabled ? 1f : 0.4f) * dim));
         Color bd = selected ? Pal.Accent : (hover ? accent : Pal.PanelBd);
@@ -1958,7 +1973,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     static void DrawActionHelp(Game g)
     {
         if (ActionButtons == null) return;
-        var m = Raylib.GetMousePosition();
+        var m = Mouse();
         foreach (var b in ActionButtons)
         {
             // Harness seam (screenshot only): SIGHTLINE_HELPBTN=<id> treats that button as hovered,
@@ -2185,7 +2200,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         }
         int h = idH + hdr + flags.Count * lineH + (flags.Count > 0 ? 10 : 4);
 
-        var m = Raylib.GetMousePosition();
+        var m = Mouse();
         int x = (int)m.X - w / 2;
         int y = (int)m.Y - h - 18;
         x = Util.Clamp(x, 8, Cfg.ScreenW - w - 8);
@@ -2281,7 +2296,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
             // UpdateHoverAndAim uses) — g.HoverX/Y only refresh in UpdatePlayer, so during the
             // enemy turn / anim playback the card would follow the cursor while identifying the
             // STALE tile's unit (and mis-label an enemy that walked onto it). Display-only.
-            var world = Raylib.GetScreenToWorld2D(Raylib.GetMousePosition(), g.ViewCamera(false));
+            var world = Raylib.GetScreenToWorld2D(Mouse(), g.ViewCamera(false));
             if (Util.ScreenToTile(world, out int hx, out int hy))
             {
                 var u = g.UnitAt(hx, hy);
@@ -2308,7 +2323,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         int h = 27 + lines.Count * 14 + 6 + 18 + 8;
 
         // anchor: above the cursor in live play; above the unit itself for the forced headless shot
-        Vector2 a = forced ? Raylib.GetWorldToScreen2D(d.Pos, g.ViewCamera(false)) : Raylib.GetMousePosition();
+        Vector2 a = forced ? Raylib.GetWorldToScreen2D(d.Pos, g.ViewCamera(false)) : Mouse();
         int x = Util.Clamp((int)a.X - w / 2, 8, Cfg.ScreenW - w - 8);
         int y = Util.Clamp((int)a.Y - h - (forced ? 42 : 18), 64, Cfg.ScreenH - h - 8);
 
@@ -2341,7 +2356,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         var sel = g.Selected;
         if (sel == null || sel.Team != Team.Player || !sel.CanAct) return;
 
-        var world = Raylib.GetScreenToWorld2D(Raylib.GetMousePosition(), g.ViewCamera(false));
+        var world = Raylib.GetScreenToWorld2D(Mouse(), g.ViewCamera(false));
         if (!Util.ScreenToTile(world, out int tx, out int ty)) return;
         if (g.UnitAt(tx, ty) != null && !(tx == sel.X && ty == sel.Y)) return;   // a body owns its own hover
         bool here = tx == sel.X && ty == sel.Y;
@@ -2376,21 +2391,24 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
                             : "OVERWATCH LANE — entering draws a reaction", Pal.Suspect));
 
         const int pad = 11, lh = 16;
-        int w = (int)Raylib.MeasureTextEx(Cfg.Font, title, 14, 1f).X;
-        foreach (var (t, _) in lines) w = Math.Max(w, (int)Raylib.MeasureTextEx(Cfg.Font, t, 12, 1f).X);
+        // C5 REVIEW FIX: the THREAT CARD measured and painted through raylib directly — the card
+        // that answers "what happens to me if I stand HERE?" was the one card that never grew with
+        // the text-size setting, and the one card FITTEST's ink probe could not see.
+        int w = (int)Cfg.Measure(title, 14, 1f).X;
+        foreach (var (t, _) in lines) w = Math.Max(w, (int)Cfg.Measure(t, 12, 1f).X);
         w += pad * 2;
         int h = 26 + lines.Count * lh + 7;
 
         // anchored BELOW-right of the cursor so it never fights the enemy-ID card (which sits above)
-        var m = Raylib.GetMousePosition();
+        var m = Mouse();
         int x = Util.Clamp((int)m.X + 16, 8, Cfg.ScreenW - w - 8);
         int y = Util.Clamp((int)m.Y + 18, 64, Cfg.ScreenH - h - 8);
         var box = new Rectangle(x, y, w, h);
         Raylib.DrawRectangleRounded(box, 0.12f, 8, Pal.RGBA(10, 14, 19, 248));
         Raylib.DrawRectangleLinesEx(box, 1.4f, Raylib.Fade(accent, 0.85f));
-        Raylib.DrawTextEx(Cfg.Font, title, new Vector2(x + pad, y + 8), 14, 1f, accent);
+        Cfg.Text(title, new Vector2(x + pad, y + 8), 14, 1f, accent);
         int ly = y + 26;
-        foreach (var (t, col) in lines) { Raylib.DrawTextEx(Cfg.Font, t, new Vector2(x + pad, ly), 12, 1f, col); ly += lh; }
+        foreach (var (t, col) in lines) { Cfg.Text(t, new Vector2(x + pad, ly), 12, 1f, col); ly += lh; }
 
         // the SAME danger-meter glyph the board draws, echoed on the title row — the player learns
         // the board's vocabulary straight off the card, with no legend screen.
@@ -2534,7 +2552,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         // Pal.Friend primaries; LAST STAND keeps the sole Foe-red plate (danger mode); the four
         // utility modes sit in a neutral-outline 2x2 grid of EQUAL width. One shared CAPTION SLOT
         // (the old LAST STAND blurb line) explains whichever button the mouse is over.
-        var introMouse = Raylib.GetMousePosition();
+        var introMouse = Mouse();
         float btnIn = PanelAnim("introBtns", 0.3f, 0.55f);
         int by = ry0 + 46;
         by += (int)((1f - Util.EaseOutQuad(btnIn)) * 14f);
@@ -3349,7 +3367,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
             var r = new Rectangle(marginX, tyy, tabW, tabH);
             CodexTabBtns.Add(r);
             bool sel = i == tab;
-            bool hover = Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), r);
+            bool hover = Raylib.CheckCollisionPointRec(Mouse(), r);
             Color bg = sel ? Pal.RGBA(24, 40, 32) : (hover ? Pal.RGBA(20, 30, 40) : Pal.Panel);
             Raylib.DrawRectangleRounded(r, 0.16f, 6, Raylib.Fade(bg, tabsIn));
             Raylib.DrawRectangleLinesEx(r, 1.4f, Raylib.Fade(sel ? Pal.Good : Pal.PanelBd, tabsIn));
@@ -3663,7 +3681,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
                     Raylib.Fade(afford ? Pal.Good : Pal.VipGold, anim));
             string bank = afford ? "READY" : $"{p.Salvage}/{nextCost}";
             var chip = new Rectangle(card.X + card.Width - 92, card.Y + card.Height - 28, 80, 20);
-            bool hover = afford && Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), chip);
+            bool hover = afford && Raylib.CheckCollisionPointRec(Mouse(), chip);
             Color chipCol = afford ? (hover ? Pal.Good : Pal.RGBA(30, 44, 34)) : Pal.RGBA(26, 22, 16);
             Raylib.DrawRectangleRounded(chip, 0.3f, 6, Raylib.Fade(chipCol, anim));
             Raylib.DrawRectangleLinesEx(chip, 1f, Raylib.Fade(afford ? Pal.Good : Pal.VipGold, 0.6f * anim));
@@ -3726,7 +3744,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
                 }
             }
             var chip = new Rectangle(card.X + card.Width - 82, card.Y + 5, 70, 18);
-            bool hover = afford && Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), chip);
+            bool hover = afford && Raylib.CheckCollisionPointRec(Mouse(), chip);
             Color chipCol = afford ? (hover ? Pal.Good : Pal.RGBA(30, 44, 34)) : Pal.RGBA(30, 24, 24);
             Raylib.DrawRectangleRounded(chip, 0.3f, 6, Raylib.Fade(chipCol, anim));
             Raylib.DrawRectangleLinesEx(chip, 1f, Raylib.Fade(afford ? Pal.Good : Pal.Foe, 0.6f * anim));
@@ -3969,7 +3987,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         string sub = "CHOOSE A BOON  -  it lasts the whole run";
         Cfg.Text(sub, new Vector2(Cfg.ScreenW / 2 - (int)Cfg.Measure(sub, 14, 1f).X / 2, y0 - 54), 14, 1f, Pal.TxtDim);
 
-        var mouse = Raylib.GetMousePosition();
+        var mouse = Mouse();
         for (int i = 0; i < n; i++)
         {
             var boon = run.BoonOffer[i];
@@ -4358,7 +4376,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         }
 
         // choice buttons
-        var mouse = Raylib.GetMousePosition();
+        var mouse = Mouse();
         int by = fy + 16;
         for (int i = 0; i < n && i < EventBtns.Length; i++)
         {
@@ -4411,7 +4429,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         float t = (float)Now();   // backdrop + dim wash drawn by DrawBackdropLayer
 
         int W = Cfg.ScreenW;
-        var mouse = Raylib.GetMousePosition();
+        var mouse = Mouse();
 
         // ---- title ----
         string title = "ASSEMBLE STRIKE TEAM";
@@ -5029,7 +5047,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
                 }
             }
 
-        var mouse = Raylib.GetMousePosition();
+        var mouse = Mouse();
         MissionNode hovered = null;
         // W12: node size follows the region — the sized-to-fit map (150..250px tall) affords
         // bigger markers than the old fixed 124px strip did (base 10px radius grows to 12px
@@ -5265,7 +5283,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
 
         // ARMORY toggle (top-right of the card): swap to the re-arm sub-screen and back.
         ArmoryToggle = new Rectangle(x + w - 132, y + 24, 108, 30);
-        bool ath = Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), ArmoryToggle);
+        bool ath = Raylib.CheckCollisionPointRec(Mouse(), ArmoryToggle);
         Raylib.DrawRectangleRounded(ArmoryToggle, 0.3f, 6, g.ArmoryMode ? Pal.Accent : (ath ? Pal.RGBA(24, 34, 46) : Pal.RGBA(14, 20, 28)));
         Raylib.DrawRectangleLinesEx(ArmoryToggle, 1.4f, g.ArmoryMode ? Pal.Accent : Pal.PanelBd);
         CenterText(g.ArmoryMode ? "< SHOP" : "ARMORY [A]", ArmoryToggle, 13, g.ArmoryMode ? Pal.RGBA(3, 18, 26) : Pal.Txt);
@@ -5285,7 +5303,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
             var r = new Rectangle(x + 30 + col * (colW + colGap), gridTop + rowInCol * (ih + gap), colW, ih);
             ShopBtns[slot] = r;
             bool can = g.CanBuy(i);
-            bool hover = can && Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), r);
+            bool hover = can && Raylib.CheckCollisionPointRec(Mouse(), r);
             Raylib.DrawRectangleRounded(r, 0.1f, 6, hover ? Pal.RGBA(24, 34, 46) : Pal.RGBA(14, 20, 28));
             Raylib.DrawRectangleLinesEx(r, 1.5f, can ? (hover ? Pal.Accent : Pal.PanelBd) : Pal.RGBA(40, 46, 54));
             Color txt = can ? Pal.Txt : Pal.TxtDim;
@@ -5342,7 +5360,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         }
 
         ShopProceed = new Rectangle(x + w / 2 - 130, y + h - 60, 260, 44);
-        bool ph = Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), ShopProceed);
+        bool ph = Raylib.CheckCollisionPointRec(Mouse(), ShopProceed);
         Raylib.DrawRectangleRounded(ShopProceed, 0.3f, 8, ph ? Pal.RGBA(92, 200, 251) : Pal.Friend);
         CenterText("PROCEED TO DEPLOYMENT", ShopProceed, 15, Pal.RGBA(3, 18, 26));
 
@@ -5355,7 +5373,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         rrW = Math.Min(rrW, (int)(x + w - 30 - (ShopProceed.X + ShopProceed.Width + 12)));
         ShopReroll = new Rectangle(x + w - 30 - rrW, y + h - 56, rrW, 36);
         bool srCan = g.BarracksSalvage >= MetaProg.ShopRerollCost;
-        bool srHov = srCan && Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), ShopReroll);
+        bool srHov = srCan && Raylib.CheckCollisionPointRec(Mouse(), ShopReroll);
         Raylib.DrawRectangleRounded(ShopReroll, 0.3f, 8, srHov ? Pal.RGBA(30, 44, 34) : Pal.RGBA(14, 20, 28));
         Raylib.DrawRectangleLinesEx(ShopReroll, 1.4f, srCan ? (srHov ? Pal.VipGold : Pal.PanelBd) : Pal.RGBA(40, 46, 54));
         CenterText(rrLbl, ShopReroll, FitSize(rrLbl, 12, 9, rrW - 12), srCan ? (srHov ? Pal.VipGold : Pal.Txt) : Pal.TxtDim);
@@ -5390,7 +5408,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         var run = g.RunState;
         ArmorySoldierBtns.Clear();
         ArmoryWeaponBtns.Clear();
-        var mouse = Raylib.GetMousePosition();
+        var mouse = Mouse();
 
         string sub = $"ARMORY  -  re-arm a soldier ({Game.ArmoryCost} INTEL each)";
         Cfg.Text(sub, new Vector2(x + 30, y + 92), 14, 1f, Pal.TxtDim);
@@ -5468,7 +5486,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
 
     static void DrawDeployCard(Rectangle r, MissionCard c)
     {
-        bool hover = Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), r);
+        bool hover = Raylib.CheckCollisionPointRec(Mouse(), r);
         Color tint = c.ModName == "RECON" ? Pal.Good : (c.ModName == "ONSLAUGHT" ? Pal.Foe : Pal.Friend);
         Raylib.DrawRectangleRounded(r, 0.1f, 6, hover ? Pal.RGBA(24, 34, 46) : Pal.RGBA(14, 20, 28));
         Raylib.DrawRectangleLinesEx(r, 1.5f, hover ? tint : Pal.PanelBd);
@@ -5513,7 +5531,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
 
         // edit-tag affordance (also editable in-mission with key T)
         PerkTagBtn = new Rectangle(x + w - 20 - 120, y + 94, 120, 24);
-        bool th = Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), PerkTagBtn);
+        bool th = Raylib.CheckCollisionPointRec(Mouse(), PerkTagBtn);
         Raylib.DrawRectangleRounded(PerkTagBtn, 0.3f, 6, th ? Pal.RGBA(24, 34, 46) : Pal.RGBA(14, 20, 28));
         Raylib.DrawRectangleLinesEx(PerkTagBtn, 1.2f, th ? Pal.Accent : Pal.PanelBd);
         CenterText("EDIT TAG", PerkTagBtn, 12, th ? Pal.Accent : Pal.TxtDim);
@@ -5625,7 +5643,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
 
     static void DrawPerkCard(Rectangle r, Perk p, Unit u = null)
     {
-        bool hover = Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), r);
+        bool hover = Raylib.CheckCollisionPointRec(Mouse(), r);
         Raylib.DrawRectangleRounded(r, 0.08f, 8, hover ? Pal.RGBA(24, 34, 46) : Pal.RGBA(14, 20, 28));
         Raylib.DrawRectangleLinesEx(r, 1.5f, hover ? Pal.Accent : Pal.PanelBd);
         Raylib.DrawRectangle((int)r.X, (int)r.Y, 4, (int)r.Height, hover ? Pal.Accent : Pal.Friend);
@@ -5724,7 +5742,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
 
     static void DrawSpecCard(Rectangle r, Spec s)
     {
-        bool hover = Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), r);
+        bool hover = Raylib.CheckCollisionPointRec(Mouse(), r);
         Raylib.DrawRectangleRounded(r, 0.08f, 8, hover ? Pal.RGBA(24, 34, 46) : Pal.RGBA(14, 20, 28));
         Raylib.DrawRectangleLinesEx(r, 1.5f, hover ? Pal.Accent : Pal.PanelBd);
         Raylib.DrawRectangle((int)r.X, (int)r.Y, 4, (int)r.Height, hover ? Pal.Accent : Pal.Friend);
@@ -6001,7 +6019,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
 
     static void DrawStepper(Rectangle r, string sym, bool enabled)
     {
-        bool hover = enabled && Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), r);
+        bool hover = enabled && Raylib.CheckCollisionPointRec(Mouse(), r);
         Raylib.DrawRectangleRounded(r, 0.3f, 6, Raylib.Fade(hover ? Pal.RGBA(40, 30, 20) : Pal.Panel, enabled ? 1f : 0.4f));
         Raylib.DrawRectangleLinesEx(r, 1.5f, Raylib.Fade(enabled ? (hover ? Pal.Accent : Pal.PanelBd) : Pal.PanelBd, enabled ? 1f : 0.35f));
         CenterText(sym, r, 22, Raylib.Fade(enabled ? Pal.Txt : Pal.TxtDim, enabled ? 1f : 0.5f));
@@ -6013,7 +6031,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         // entrance: fade + a few px of upward slide so it lands rather than pops
         float dy = (1f - a) * 12f;
         var rr = new Rectangle(r.X, r.Y + dy, r.Width, r.Height);
-        bool hover = a > 0.7f && Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), r);  // hit-test stays on the resting rect
+        bool hover = a > 0.7f && Raylib.CheckCollisionPointRec(Mouse(), r);  // hit-test stays on the resting rect
         Color hi = Pal.RGBA(92, 200, 251);
         // a soft halo when hovered (premium affordance)
         if (hover) Raylib.DrawRectangleRounded(new Rectangle(rr.X - 3, rr.Y - 3, rr.Width + 6, rr.Height + 6), 0.3f, 8, Raylib.Fade(hi, 0.25f));
@@ -6043,7 +6061,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         float a = Util.EaseOutQuad(Util.Clamp(anim, 0f, 1f));
         float dy = (1f - a) * 12f;
         var rr = new Rectangle(r.X, r.Y + dy, r.Width, r.Height);
-        bool hover = a > 0.7f && Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), r);
+        bool hover = a > 0.7f && Raylib.CheckCollisionPointRec(Mouse(), r);
         Raylib.DrawRectangleRounded(rr, 0.3f, 8, Raylib.Fade(Pal.RGBA(13, 19, 27), 0.88f * a));
         Raylib.DrawRectangleLinesEx(rr, 1.4f, Raylib.Fade(hover ? Pal.Friend : Pal.PanelBd, a));
         var lz = Cfg.Measure(label, 16, 1f);
@@ -6070,7 +6088,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
 
     public static void DrawButtonRect(Rectangle r, string label, string key, bool enabled, bool selected, Color accent)
     {
-        bool hover = enabled && Raylib.CheckCollisionPointRec(Raylib.GetMousePosition(), r);
+        bool hover = enabled && Raylib.CheckCollisionPointRec(Mouse(), r);
         Color bg = selected ? Pal.RGBA(40, 34, 12) : (hover ? Pal.RGBA(22, 32, 44) : Pal.Panel);
         Raylib.DrawRectangleRounded(r, 0.22f, 6, Raylib.Fade(bg, enabled ? 1f : 0.4f));
         Color bd = selected ? Pal.Accent : (hover ? accent : Pal.PanelBd);

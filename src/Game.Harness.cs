@@ -5417,6 +5417,22 @@ public partial class Game
             if (!legChecks.TryGetValue(leg, out var row)) legChecks[leg] = row = new int[Display.UiScaleLevels.Length];
             row[scaleIdx]++;
         }
+        // C5 REVIEW FIX (E1) — THE COUNTER AND THE ASSERTION ARE ONE STATEMENT.
+        // The first version bumped and asserted separately, so the number counted BUMPS. The review
+        // defeated it in two edits: introduce a real 120%-only defect (PlateSlack 1.5 -> 1.0, which
+        // FAILS with 18 violations, all @120%), then condition only the ASSERTION on
+        // `S == "@100%"` while leaving its bump — PASS, with a byte-identical headline count, while
+        // 18 real violations went unreported. `Check` cannot be separated from what it asserts, so
+        // the number now means "assertions EVALUATED".
+        // AND THE LIMIT, STATED RATHER THAN IMPLIED: this proves each assertion RAN at each scale.
+        // It cannot prove the CONDITION was not itself narrowed — nothing short of mutation testing
+        // can. What it buys is that the natural way to lose coverage (moving, gating or deleting an
+        // assertion) now moves the number with it.
+        void Check(string leg, bool ok, string fail)
+        {
+            Bump(leg);
+            if (!ok) fails.Add(fail);
+        }
         int screens = 0;
 
         try
@@ -5438,24 +5454,22 @@ public partial class Game
                         float ink = Hud.BoonOfferInkBottom(b);
                         float chooseTop = ch - Hud.BoonOfferChooseUp;
                         Tight(ref mA, ref tA, chooseTop - ink, $"{BoonDef.Code(b)}{S}");
-                        Bump("A");
-                        if (ink + pad > chooseTop)
-                            fails.Add($"boonBodyHitsChoose:{BoonDef.Code(b)}{S}({ink:0}>{chooseTop:0})");
+                        Check("A", !(ink + pad > chooseTop),
+                              $"boonBodyHitsChoose:{BoonDef.Code(b)}{S}({ink:0}>{chooseTop:0})");
                         // ...and no wrapped line may exceed the column it was wrapped to
                         foreach (var (line, _) in Hud.WrapLinesForTest(BoonDef.Desc(b), Hud.BoonOfferBodyW, Hud.BoonOfferFs))
                         {
-                            Bump("A");
-                            if (Cfg.Measure(line, Hud.BoonOfferFs, 1f).X > Hud.BoonOfferBodyW + 1)
-                                fails.Add($"boonLineOverruns:{BoonDef.Code(b)}{S}");
+                            Check("A", !(Cfg.Measure(line, Hud.BoonOfferFs, 1f).X > Hud.BoonOfferBodyW + 1),
+                                  $"boonLineOverruns:{BoonDef.Code(b)}{S}");
                         }
                     }
                     // [ CHOOSE ] itself must land inside the card
                     float cbot = ch - Hud.BoonOfferChooseUp + Cfg.Measure("[ CHOOSE ]", Hud.BoonOfferFs, 1f).Y;
-                    Bump("A"); if (cbot + pad > ch) fails.Add($"chooseBelowCard{S}({cbot:0}>{ch})");
+                    Check("A", !(cbot + pad > ch), $"chooseBelowCard{S}({cbot:0}>{ch})");
                     // and the whole block (title 92px above, ACTIVE strip 40px below) fits the canvas
                     int y0 = Cfg.ScreenH / 2 - ch / 2 - 10;
-                    Bump("A"); if (y0 - 92 < 8) fails.Add($"boonTitleOffTop{S}({y0 - 92})");
-                    Bump("A"); if (y0 + ch + 40 > Cfg.ScreenH) fails.Add($"boonBlockOffBottom{S}({y0 + ch + 40})");
+                    Check("A", !(y0 - 92 < 8), $"boonTitleOffTop{S}({y0 - 92})");
+                    Check("A", !(y0 + ch + 40 > Cfg.ScreenH), $"boonBlockOffBottom{S}({y0 + ch + 40})");
                 }
 
                 // ---- (B) the ARMORY weapon row ---------------------------------------------
@@ -5473,8 +5487,8 @@ public partial class Game
                         float bw = Cfg.Measure(blurb, Hud.ArmoryBlurbFs, 1f).X;
                         float budget = Hud.ArmoryBlurbWidth();
                         Tight(ref mB, ref tB, budget - bw, $"{k}blurb{S}");
-                        Bump("B"); if (bw > budget) fails.Add($"armoryBlurbOverruns:{k}{S}({bw:0}>{budget:0})");
-                        Bump("B"); if (blurbBot + pad > Hud.ArmoryRowH) fails.Add($"armoryBlurbBelowRow{S}");
+                        Check("B", !(bw > budget), $"armoryBlurbOverruns:{k}{S}({bw:0}>{budget:0})");
+                        Check("B", !(blurbBot + pad > Hud.ArmoryRowH), $"armoryBlurbBelowRow{S}");
                         float nameRight = Hud.ArmoryTextX + Cfg.Measure(name, Hud.ArmoryNameFs, 1f).X;
                         foreach (var (tag, fs) in new[] { ("EQUIPPED", Hud.ArmoryTagFs),
                                                           ($"[ {Game.ArmoryCost} INTEL ]", Hud.ArmoryTagFs),
@@ -5486,14 +5500,12 @@ public partial class Game
                             // two independent strings may share a BAND or a COLUMN, never both
                             bool xOverlapBlurb = tagLeft < Hud.ArmoryTextX + bw + pad;
                             bool yOverlapBlurb = tagBot + pad > blurbTop && tagTop < blurbBot + pad;
-                            Bump("B");
-                            if (xOverlapBlurb && yOverlapBlurb)
-                                fails.Add($"armoryTagOverprintsBlurb:{k}/{tag.Trim('[', ']', ' ')}{S}");
-                            Bump("B");
-                            if (tagLeft < nameRight + 12)
-                                fails.Add($"armoryTagHitsName:{k}{S}({tagLeft:0}<{nameRight:0})");
-                            Bump("B"); if (tagBot + pad > Hud.ArmoryRowH) fails.Add($"armoryTagBelowRow:{k}{S}");
-                            Bump("B"); if (tagTop < 2) fails.Add($"armoryTagAboveRow:{k}{S}");
+                            Check("B", !(xOverlapBlurb && yOverlapBlurb),
+                                  $"armoryTagOverprintsBlurb:{k}/{tag.Trim('[', ']', ' ')}{S}");
+                            Check("B", !(tagLeft < nameRight + 12),
+                                  $"armoryTagHitsName:{k}{S}({tagLeft:0}<{nameRight:0})");
+                            Check("B", !(tagBot + pad > Hud.ArmoryRowH), $"armoryTagBelowRow:{k}{S}");
+                            Check("B", !(tagTop < 2), $"armoryTagAboveRow:{k}{S}");
                         }
                     }
                 }
@@ -5513,19 +5525,17 @@ public partial class Game
                             { Name = worstName, Cls = cls, Rank = rank, Kills = 999, Heat = 8, Won = true };
                             float subW = Cfg.Measure(Hud.WarLegendSub(l), Hud.WarLegendSubFs, 1f).X;
                             Tight(ref mC, ref tC, textW - subW, $"{rank[0]}{cls[0]}sub{S}");
-                            Bump("C");
-                            if (subW > textW)
-                                fails.Add($"legendSubOverruns:{rank} {cls}{S}({subW:0}>{textW})");
+                            Check("C", !(subW > textW),
+                                  $"legendSubOverruns:{rank} {cls}{S}({subW:0}>{textW})");
                             string score = Hud.WarLegendScore(l);
                             float scw = Cfg.Measure(score, Hud.WarLegendScoreFs, 1f).X;
                             float nameW = Cfg.Measure(l.Name, Hud.WarLegendNameFs, 1f).X;
                             float scoreLeft = colW - Hud.WarLegendPadR - scw;
                             float nameRight = Hud.WarLegendTextX + nameW;
                             Tight(ref mC, ref tC, scoreLeft - nameRight, $"{rank[0]}{cls[0]}name{S}");
-                            Bump("C");
-                            if (score.Length > 0 && scoreLeft < nameRight + 12)
-                                fails.Add($"legendScoreHitsName:{rank}{S}({scoreLeft:0}<{nameRight:0})");
-                            Bump("C"); if (scw > textW) fails.Add($"legendScoreOverruns{S}");
+                            Check("C", !(score.Length > 0 && scoreLeft < nameRight + 12),
+                                  $"legendScoreHitsName:{rank}{S}({scoreLeft:0}<{nameRight:0})");
+                            Check("C", !(scw > textW), $"legendScoreOverruns{S}");
                         }
                 }
 
@@ -5536,18 +5546,17 @@ public partial class Game
                     {
                         float lw = Cfg.Measure(dl, Hud.DraftDeployFs, 1f).X;
                         Tight(ref mD, ref tD, dbw - lw, $"DEPLOY{S}");
-                        Bump("D"); if (lw + 8 > dbw) fails.Add($"deployLabelOverruns{S}:{dl}({lw:0}>{dbw})");
+                        Check("D", !(lw + 8 > dbw), $"deployLabelOverruns{S}:{dl}({lw:0}>{dbw})");
                     }
                     float rw = Cfg.Measure(Hud.DraftRerollLabel, Hud.DraftRerollFs, 1f).X;
                     Tight(ref mD, ref tD, rrw - rw, $"REROLL{S}");
-                    Bump("D"); if (rw + 8 > rrw) fails.Add($"rerollLabelOverruns{S}({rw:0}+8>{rrw})");
+                    Check("D", !(rw + 8 > rrw), $"rerollLabelOverruns{S}({rw:0}+8>{rrw})");
                     float bw2 = Cfg.Measure("BACK", Hud.DraftBackFs, 1f).X
                               + Cfg.Measure("[Esc]", Hud.DraftBackHintFs, 1f).X;
                     Tight(ref mD, ref tD, bkw - bw2, $"BACK{S}");
-                    Bump("D"); if (bw2 + 12 > bkw) fails.Add($"backLabelOverruns{S}({bw2:0}>{bkw})");
-                    Bump("D");
-                    if (Hud.DraftBtnRowW() > Cfg.ScreenW - 24)
-                        fails.Add($"draftBtnRowOffCanvas{S}({Hud.DraftBtnRowW()})");
+                    Check("D", !(bw2 + 12 > bkw), $"backLabelOverruns{S}({bw2:0}>{bkw})");
+                    Check("D", !(Hud.DraftBtnRowW() > Cfg.ScreenW - 24),
+                          $"draftBtnRowOffCanvas{S}({Hud.DraftBtnRowW()})");
                 }
 
                 // ---- (E) the DRAFT operator card's text columns -----------------------------
@@ -5557,17 +5566,17 @@ public partial class Game
                     {
                         float w2 = Cfg.Measure(bl, Hud.DraftBlurbFs, 1f).X;
                         Tight(ref mE, ref tE, bw - w2, $"blurb{S}");
-                        Bump("E"); if (w2 > bw) fails.Add($"draftBlurbEllipsizes{S}:{bl.Substring(0, 12)}({w2:0}>{bw})");
+                        Check("E", !(w2 > bw), $"draftBlurbEllipsizes{S}:{bl.Substring(0, 12)}({w2:0}>{bw})");
                     }
                     foreach (var ab in new[] { "RUN&GUN", "BLITZ", "STEADY", "SUPPRESS", "PATCH",
                                                "MARK", "GRAPPLE", "SLIPSTREAM", "SUPPR. FIRE" })
                     {
                         float w2 = Cfg.Measure("ABILITY: " + ab, Hud.DraftAbilityFs, 1f).X;
                         Tight(ref mE, ref tE, aw - w2, $"ability{S}");
-                        Bump("E"); if (w2 > aw) fails.Add($"draftAbilityClips{S}:{ab}");
+                        Check("E", !(w2 > aw), $"draftAbilityClips{S}:{ab}");
                     }
                     int gridW = 3 * Hud.DraftCardW() + 2 * Hud.DraftGridGap;
-                    Bump("E"); if (gridW > Cfg.ScreenW - 24) fails.Add($"draftGridOffCanvas{S}({gridW})");
+                    Check("E", !(gridW > Cfg.ScreenW - 24), $"draftGridOffCanvas{S}({gridW})");
                 }
 
                 // ---- (F) THE SCREEN AUDIT - every screen the game can draw, on a LIVE FRAME ---
@@ -5577,10 +5586,42 @@ public partial class Game
                 // Hud.PlateProbe) - so it observes what the game paints rather than a
                 // transcription of the layout arithmetic, and a screen that throws while drawing
                 // is a failure too. Inside the loop by construction: it takes the scale.
-                screens = ScreenAudit(S, fails, Bump);
+                screens = ScreenAudit(S, fails, Check);
             }
         }
         finally { Cfg.UiScale = savedScale; Cfg.InkProbe = null; Hud.PlateProbe = null; Hud.AnimPin = -1f; }
+
+        // ── C5 REVIEW FIX (E1) — THE SENSITIVITY CONTROL, run on every invocation ────────────
+        // Binding the counter to the assertion (Check, above) makes the number mean "assertions
+        // evaluated" — but the review's step 2 shows what that still cannot see: narrow the
+        // CONDITION to one scale and the count does not move. Nothing structural can catch that,
+        // so this catches it EMPIRICALLY, the way AIIDLETEST proves its own probe: re-run the whole
+        // screen audit at a deliberately UNSHIPPED 200% text scale, where the fixed-pixel chrome
+        // must break, and require the assertions to FIRE. If a leg has been gated to one scale, or
+        // its tolerance loosened into uselessness, this control goes quiet and the test fails —
+        // which is exactly what happens to the review's step-2 mutation.
+        // The 200% pass is DIAGNOSTIC ONLY: its violations are counted, never added to `fails`.
+        var control = new List<string>();
+        try
+        {
+            Cfg.UiScale = 2.0f;
+            scaleIdx = 0;                       // the control's checks are not part of the coverage tally
+            ScreenAudit("@200%CONTROL", control, (leg, ok, msg) => { if (!ok) control.Add(msg); });
+        }
+        catch (Exception ex) { fails.Add("sensitivityControlThrew:" + ex.GetType().Name); }
+        finally { Cfg.UiScale = savedScale; Cfg.InkProbe = null; Hud.PlateProbe = null; Hud.AnimPin = -1f; }
+
+        int ctlPlate = 0, ctlInk = 0, ctlClip = 0;
+        foreach (var c in control)
+        {
+            if (c.StartsWith("labelLeavesPlate")) ctlPlate++;
+            else if (c.StartsWith("inkOffCanvas")) ctlInk++;
+            else if (c.StartsWith("textEllipsized")) ctlClip++;
+        }
+        if (ctlPlate == 0)
+            fails.Add("sensitivityDead:labelLeavesPlate never fired at the 200% control");
+        if (ctlInk + ctlClip == 0)
+            fails.Add("sensitivityDead:neither inkOffCanvas nor textEllipsized fired at the 200% control");
 
         // THE SCOPE GUARD's verdict (see the note above the counter).
         foreach (var kv in legChecks)
@@ -5609,7 +5650,10 @@ public partial class Game
               + $"smallest authored size and the smallest ink need not be the same screen), "
               + $"{_fitFloors} shrink-to-fit calls "
               + $"reach their floor; {totalChecks} assertions over {legChecks.Count} legs, every "
-              + $"leg evaluated at all {Display.UiScaleLevels.Length} scales)"
+              + $"leg evaluated at all {Display.UiScaleLevels.Length} scales, and a 200% CONTROL "
+              + $"pass fires them ({ctlPlate} plate / {ctlInk} off-canvas / {ctlClip} ellipsis "
+              + $"violations at a scale the game does not ship) so the gate is proven live on this "
+              + $"run rather than merely counted)"
             : $"FITTEST: FAIL ({fails.Distinct().Count()} violations; first 14: "
               + string.Join(",", fails.Distinct().Take(14)) + ")";
     }
@@ -6119,6 +6163,15 @@ public partial class Game
               + string.Join(" ", census) + (notes.Count > 0 ? " | " + string.Join(" | ", notes) : "");
     }
 
+    /// C5 (review E3): an animation that never completes — the OTHER deadlock. Harness-only; the
+    /// enemy turn enqueues one when `Game.DebugEnemyAnimWedge` is set, and `Game.Update` then
+    /// returns at the animation pump every frame without ever reaching the phase switch.
+    class StuckAnim : Anim
+    {
+        public override bool Update(Game g, float dt) => false;   // never done, by construction
+        public override void Draw(Game g) { }
+    }
+
     // ─── C5 THE HARD EDGES — SIGHTLINE_ENEMYSTALLTEST ──────────────────────────────────────────
     /// The ENEMY-TURN half of the no-deadlock contract, asserted the only way a deadlock guard
     /// honestly can be: by DEADLOCKING THE ENEMY TURN and watching what happens.
@@ -6183,6 +6236,52 @@ public partial class Game
             }
         }
 
+        // ---- (B2) THE ANIMATION HALF — the deadlock a guard inside UpdateEnemy cannot see ------
+        // `Update` returns at the animation pump while the queue is non-empty, so it never reaches
+        // the phase switch: a guard called from `UpdateEnemy` is not merely late here, it is NEVER
+        // CALLED. The first version of this test only wedged the stage machine (its own stall line
+        // said `anims=0`), so it passed on the placement it argues against — review E3.
+        int animArm = -1, animEscape = -1; string animLine = "";
+        {
+            Util.Reseed(4242);
+            EnemyStallGuardOn = true;
+            int before = EnemyStallFires;
+            var g = new Game { NoPersist = true, AutoPlay = true, SmartPlay = true };
+            g.StartMission(1);
+            int f = 0;
+            while (g.Phase != Phase.EnemyTurn && f++ < 20000) g.Update(1f / 60f);
+            if (g.Phase != Phase.EnemyTurn) fails.Add("neverReachedAnEnemyTurn(animWedge)");
+            else
+            {
+                DebugEnemyAnimWedge = true;
+                int spun = 0;
+                while (EnemyStallFires == before && spun++ < EnemyStallFrames + 240) g.Update(1f / 60f);
+                animArm = spun;
+                animLine = LastEnemyStall;
+                if (EnemyStallFires == before)
+                    fails.Add($"guardNeverFiredOnAStUCKANIM(after {spun} updates)");
+                // the diagnosis must NAME the queue, or it is not a diagnosis of THIS half
+                if (!animLine.Contains("head=StuckAnim"))
+                    fails.Add("animStallLineDoesNotNameTheQueueHead:" + Short(animLine));
+                // and it must recover: the queue is dropped and the turn ends
+                int budget = (g.Enemies.Count + 2) * (EnemyStallFrames + 8);
+                int e2 = 0;
+                DebugEnemyAnimWedge = false;      // one wedge is enough; the recovery must finish the turn
+                while (g.Phase == Phase.EnemyTurn && e2++ < budget) g.Update(1f / 60f);
+                animEscape = e2;
+                if (g.Phase == Phase.EnemyTurn) fails.Add($"animWedgedTurnNeverEnded(after {e2})");
+                // ...and nobody is left standing between two tiles (the recovery drops the queue,
+                // and MoveStepAnim commits X/Y only on completion).
+                foreach (var u in g.Players)
+                    if (u.Alive && Vector2.Distance(u.Pos, Util.TileCenter(u.X, u.Y)) > 1.5f)
+                        fails.Add($"unitLeftMidTile:{u.Name}");
+                foreach (var e in g.Enemies)
+                    if (e.Alive && Vector2.Distance(e.Pos, Util.TileCenter(e.X, e.Y)) > 1.5f)
+                        fails.Add($"enemyLeftMidTile:{e.Name}");
+            }
+            DebugEnemyAnimWedge = false;
+        }
+
         // ---- (C) the same wedge on the PRE-GUARD tree hangs ------------------------------------
         {
             Util.Reseed(4242);
@@ -6242,8 +6341,11 @@ public partial class Game
         if (stallBound <= 0) fails.Add("stallFramesNotPositive");
 
         return fails.Count == 0
-            ? $"ENEMYSTALLTEST: PASS (a wedged enemy turn is detected in {armFrames} updates "
-              + $"(bound {EnemyStallFrames}) and named — \"{armLine.Substring(0, Math.Min(armLine.Length, 150))}\" — "
+            ? $"ENEMYSTALLTEST: PASS (BOTH halves of the deadlock: a wedged ANIMATION is detected in "
+              + $"{animArm} updates, named at the queue head, and drained in {animEscape} more with "
+              + $"no unit left between tiles - that is the half a guard inside UpdateEnemy is never "
+              + $"even called for; and a wedged STAGE MACHINE is detected in {armFrames} updates "
+              + $"(bound {EnemyStallFrames}) and named — \"{armLine.Substring(0, Math.Min(armLine.Length, 130))}\" — "
               + $"the turn then ends in {escapeFrames} more; the SAME wedge with the guard off still "
               + $"hangs after {noGuardFrames} updates; {enemyTurnsSeen} clean enemy turns fired it zero "
               + $"times; {EnemyStallFrames} x 24 units < the {AutoFrameCap}-frame harness budget)"
@@ -6273,7 +6375,7 @@ public partial class Game
     ///      is a failed audit rather than a quiet pass — the vacuity trap that lets a screen
     ///      "pass" because it was never on screen.
     /// Returns the number of screens audited so the PASS line can state its own coverage.
-    static int ScreenAudit(string S, List<string> fails, Action<string> bump)
+    static int ScreenAudit(string S, List<string> fails, Action<string, bool, string> check)
     {
         var ink = new List<(string text, Rectangle box, float alpha)>();
         var plates = new List<(string label, Rectangle plate, Rectangle box)>();
@@ -6302,6 +6404,13 @@ public partial class Game
                 for (int f = 0; f < 3; f++) g.Update(1f / 60f);
                 Hud.AnimPin = 1f;              // audit the SETTLED frame, deterministically
                 Hud.TimePin = 1000.0; Renderer.TimePin = 1000.0;   // ...and at a FIXED clock
+                // ...and a FIXED POINTER. Thirty draw sites read the live cursor (hover fills,
+                // hover cards, and the threat card, which anchors itself at it), so without this
+                // the audited frame depended on where the mouse happened to be: a ~3% flake and a
+                // 16-check disagreement between machines on the same commit (review E2). Parked
+                // off-canvas so no control is hovered and every cursor-anchored panel clamps to the
+                // same place on every run and every machine.
+                Hud.MousePin = new System.Numerics.Vector2(-4000f, -4000f);
                 var fp = new System.Text.StringBuilder();
                 Cfg.InkProbe = (t, pos, box, size, alpha) =>
                     {
@@ -6339,35 +6448,35 @@ public partial class Game
             {
                 Cfg.InkProbe = null; Hud.PlateProbe = null; Hud.ClipProbe = null; Hud.FloorProbe = null;
                 Hud.AnimPin = -1f; Hud.TimePin = -1.0; Renderer.TimePin = -1.0;
+                Hud.MousePin = new System.Numerics.Vector2(float.NaN, float.NaN);
             }
             n++;
 
             // (1) every control plate contains its own label
             foreach (var (label, plate, box) in plates)
             {
-                bump("scr:" + sc.Name);
                 if (plate.Width < 2 || plate.Height < 2) continue;          // a collapsed/hidden control
                 float overL = plate.X - box.X, overR = (box.X + box.Width) - (plate.X + plate.Width);
                 float overT = plate.Y - box.Y, overB = (box.Y + box.Height) - (plate.Y + plate.Height);
                 float worst = MathF.Max(MathF.Max(overL, overR), MathF.Max(overT, overB));
                 if (-worst < _fitPlateMargin) { _fitPlateMargin = -worst; _fitPlateTag = $"{tag}:{Short(label)}"; }
-                if (worst > PlateSlack)
-                    fails.Add($"labelLeavesPlate:{tag}:'{Short(label)}'by{worst:0}px");
+                check("scr:" + sc.Name, worst <= PlateSlack,
+                      $"labelLeavesPlate:{tag}:'{Short(label)}'by{worst:0}px");
             }
 
             // (2) nothing visible is painted off the canvas
             if (!sc.Scrolls)
                 foreach (var (text, box, alpha) in ink)
                 {
-                    bump("scr:" + sc.Name);
                     if (alpha < 0.06f) continue;                            // an entrance fade paints nothing
                     float edge = MathF.Min(MathF.Min(box.X, box.Y),
                                            MathF.Min(Cfg.ScreenW - (box.X + box.Width), Cfg.ScreenH - (box.Y + box.Height)));
                     if (edge < _fitEdgeMargin) { _fitEdgeMargin = edge; _fitEdgeTag = $"{tag}:{Short(text)}"; }
-                    if (box.X < -CanvasSlack || box.Y < -CanvasSlack
-                        || box.X + box.Width > Cfg.ScreenW + CanvasSlack
-                        || box.Y + box.Height > Cfg.ScreenH + CanvasSlack)
-                        fails.Add($"inkOffCanvas:{tag}:'{Short(text)}'@({box.X:0},{box.Y:0},{box.Width:0}x{box.Height:0})");
+                    check("scr:" + sc.Name,
+                          box.X >= -CanvasSlack && box.Y >= -CanvasSlack
+                          && box.X + box.Width <= Cfg.ScreenW + CanvasSlack
+                          && box.Y + box.Height <= Cfg.ScreenH + CanvasSlack,
+                          $"inkOffCanvas:{tag}:'{Short(text)}'@({box.X:0},{box.Y:0},{box.Width:0}x{box.Height:0})");
                 }
 
             // (3) THE SMALL-TEXT FLOOR, as a REGRESSION BOUND rather than as the rule.
@@ -6378,7 +6487,6 @@ public partial class Game
             //     let the next fitter step take it lower still. So the gate is the MEASURED worst,
             //     which makes any further shrink a failure, and the breach itself is recorded as an
             //     open finding rather than quietly normalised.
-            bump("scr:" + sc.Name);
             // C5 REVIEW FIX (B3): these are TWO minima and they do not live on the same screen.
             // The first version tracked one pair under `minSize <= _fitMinSize`, so the LAST screen
             // to tie the smallest AUTHORED size overwrote the rendered figure — and since the scale
@@ -6390,10 +6498,10 @@ public partial class Game
             { _fitMinSize = minSize; _fitMinAuthTag = $"{tag}:{minWhat}"; }
             if (minSize < 99f && Cfg.Scaled(minSize) < _fitMinRendered)
             { _fitMinRendered = Cfg.Scaled(minSize); _fitMinTag = $"{tag}:{minWhat}"; }
-            if (minSize < SmallTextAuthoredFloor)
-                fails.Add($"belowSmallTextFloor:{tag}:'{minWhat}'@{minSize:0.#}px");
-            if (minSize * 1f < 99f && Cfg.Scaled(minSize) < SmallTextRenderedFloor - 0.01f)
-                fails.Add($"rendersBelowFloor:{tag}:'{minWhat}'@{Cfg.Scaled(minSize):0.#}px");
+            check("scr:" + sc.Name, minSize >= SmallTextAuthoredFloor,
+                  $"belowSmallTextFloor:{tag}:'{minWhat}'@{minSize:0.#}px");
+            check("scr:" + sc.Name, minSize >= 99f || Cfg.Scaled(minSize) >= SmallTextRenderedFloor - 0.01f,
+                  $"rendersBelowFloor:{tag}:'{minWhat}'@{Cfg.Scaled(minSize):0.#}px");
 
             // (4) NOTHING WAS ELLIPSIZED. A geometry audit cannot see this: the box a clipped
             //     string paints FITS — losing the tail is what made it fit. Clip is the renderer's
@@ -6401,18 +6509,19 @@ public partial class Game
             //     have drifted apart. This found the WAR ROOM ellipsizing an achievement
             //     description at the 110% text size over a sub-pixel disagreement between the
             //     wrapper and the clipper (fixed in Hud.Clip; this assertion is what caught it).
-            foreach (var c in clips) { bump("scr:" + sc.Name); fails.Add("textEllipsized:" + c); }
-            bump("scr:" + sc.Name);
+            check("scr:" + sc.Name, clips.Count == 0,
+                  "textEllipsized:" + (clips.Count > 0 ? clips[0] : ""));
+            for (int ci = 1; ci < clips.Count; ci++)
+                check("scr:" + sc.Name, false, "textEllipsized:" + clips[ci]);
 
             // (5) the screen actually drew, and drew ITS OWN screen. Two cases that paint an
             //     identical frame mean one of them never staged — the vacuity trap that would
             //     otherwise let this leg "cover" a screen it has never seen. (Found three:
             //     WOUND / TRAITS / ENDLESSOFFER all photographed the main menu.)
-            bump("scr:" + sc.Name);
-            if (ink.Count < 3) fails.Add($"screenDrewNothing:{tag}(strings={ink.Count})");
-            bump("scr:" + sc.Name);
-            if (seen.TryGetValue(_fitFrameFp, out string twin)) fails.Add($"screenNotStaged:{tag}(identical frame to {twin})");
-            else seen[_fitFrameFp] = sc.Name;
+            check("scr:" + sc.Name, ink.Count >= 3, $"screenDrewNothing:{tag}(strings={ink.Count})");
+            bool twinned = seen.TryGetValue(_fitFrameFp, out string twin);
+            check("scr:" + sc.Name, !twinned, $"screenNotStaged:{tag}(identical frame to {twin})");
+            if (!twinned) seen[_fitFrameFp] = sc.Name;
             if (FitDump && (clips.Count > 0 || floors.Count > 0))
                 Console.WriteLine($"FITDUMP {tag}: clipped={clips.Count} atFloor={floors.Count} "
                     + string.Join(" ", clips.Concat(floors)));
