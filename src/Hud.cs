@@ -5808,10 +5808,42 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         // reward); the ceiling above 0 is still the earned unlock.
         bool recruit = Sightline.Heat.IsRecruit(level);
         int w = 320, x = Cfg.ScreenW - w - 40, y = 150;
-        // height grows with the active-modifier list (always tall enough for the ceiling's worth)
-        int rows = recruit ? RecruitLines.Length : Math.Max(1, level);
+        // ── C1 (review A4): the rung list is WRAPPED and the card grows to fit it ────────────
+        // This panel used to draw every rung's Desc as ONE unwrapped 12px line and neither clip
+        // nor wrap it — a long row simply kept painting off the card. Worse, it was invisible
+        // from the copy alone: `Cfg.Scaled` multiplies any size <= UiFontMax by `Cfg.UiScale`
+        // (settings offer 0.90/1.00/1.10/1.20) while THIS GEOMETRY DOES NOT SCALE, so a row that
+        // fitted at 100% could still run off the border at 120%. C1's first pass held the copy to
+        // a measured 38-character budget, which fixed 100% and left 110/120% broken — a character
+        // budget cannot express a scale. The fix is structural instead: wrap through WrapText
+        // (which measures via Cfg.Measure, so it is scale-correct) and size the card by the LINE
+        // COUNT, with the row step on the house `TextRow` scaler so the lines cannot overlap
+        // either. At UiScale 1.0 every number below is arithmetically identical to the old
+        // `132 + rows * 26 + 30`, so the shipped 100% layout is unchanged.
+        // `Heat.DescBudget` survives as a COPY-QUALITY budget (one line at 100%), not as the
+        // thing that keeps ink inside the border.
+        const int DescCol = 40;                       // body column inset, from the card's left
+        // 270px of usable body width. The right inset is 10px, not the 18px of the left bullet
+        // column, DELIBERATELY: at ~7.07 px/char (12px NotoMono, monospace) 270px is 38.2 chars,
+        // which is exactly `Heat.DescBudget`. At 262 the two 38-character rows wrapped at 100% and
+        // orphaned one word each — measured on a heat-8 screenshot, not reasoned about.
+        int descW = w - DescCol - 10;
+        int step = TextRow(13);                       // one text row, scaled like the rest of the UI
+        var rungRows = new System.Collections.Generic.List<(string bullet, string head, string body)>();
+        if (recruit)
+            foreach (var rl in RecruitLines) rungRows.Add(("+", rl.head, rl.body));
+        else if (level > 0)
+        {
+            int ri0 = 1;
+            foreach (var mod in Sightline.Heat.Active(level)) { rungRows.Add((ri0 + ".", mod.Name, mod.Desc)); ri0++; }
+        }
+        var rungWrap = new System.Collections.Generic.List<System.Collections.Generic.List<string>>();
+        int bodyRows = 0;
+        foreach (var r in rungRows) { var ls = WrapText(r.body, 12, descW); rungWrap.Add(ls); bodyRows += ls.Count; }
         int assist = g.AssistPreview;
-        int h = 132 + rows * 26 + 30;
+        // Empty list (heat 0) still reserves the two rows the "No modifiers active." line sat in.
+        int listH = rungRows.Count == 0 ? step * 2 : (rungRows.Count + bodyRows) * step;
+        int h = 132 + listH + 30;
         var card = new Rectangle(x, y, w, h);
         PanelShadow(card, 1f, 0.06f);
         Raylib.DrawRectangleRounded(card, 0.06f, 8, Pal.Panel);
@@ -5881,31 +5913,19 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
             Cfg.Text(hint, new Vector2(x + 18, y + 110), 12, 1f, level > 0 ? Pal.Good : heatTxt2);
         }
 
-        // active modifiers (cumulative rungs 1..level)
+        // active modifiers (cumulative rungs 1..level) — wrapped, one row per line (see above)
         int my = y + 132;
-        if (recruit)
-        {
-            for (int ri = 0; ri < RecruitLines.Length; ri++)
-            {
-                Cfg.Text("+", new Vector2(x + 18, my), 12, 1f, Pal.Good);
-                Cfg.Text(RecruitLines[ri].head, new Vector2(x + 40, my), 12, 1f, Pal.Txt);
-                Cfg.Text(RecruitLines[ri].body, new Vector2(x + 40, my + 13), 12, 1f, heatTxt2);
-                my += 26;
-            }
-        }
-        else if (level == 0)
+        if (rungRows.Count == 0)
             Cfg.Text("No modifiers active.", new Vector2(x + 18, my), 12, 1f, heatTxt2);
         else
-        {
-            int i = 1;
-            foreach (var mod in Sightline.Heat.Active(level))
+            for (int ri = 0; ri < rungRows.Count; ri++)
             {
-                Cfg.Text($"{i}.", new Vector2(x + 18, my), 12, 1f, Pal.Foe);
-                Cfg.Text(mod.Name, new Vector2(x + 40, my), 12, 1f, Pal.Txt);
-                Cfg.Text(mod.Desc, new Vector2(x + 40, my + 13), 12, 1f, heatTxt2);
-                my += 26; i++;
+                Cfg.Text(rungRows[ri].bullet, new Vector2(x + 18, my), 12, 1f, recruit ? Pal.Good : Pal.Foe);
+                Cfg.Text(rungRows[ri].head, new Vector2(x + DescCol, my), 12, 1f, Pal.Txt);
+                my += step;
+                foreach (var line in rungWrap[ri])
+                { Cfg.Text(line, new Vector2(x + DescCol, my), 12, 1f, heatTxt2); my += step; }
             }
-        }
 
         Cfg.Text(recruit ? "[>] for HEAT 0 - the standard fight" : "[<] [>] to adjust",
                  new Vector2(x + 18, y + h - 20), 12, 1f, heatTxt2);

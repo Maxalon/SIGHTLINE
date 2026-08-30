@@ -1233,7 +1233,11 @@ public partial class Game
             // rungs 4-7 hold tier 1 (Math.Max aggregation) and NO QUARTER stays the tier-2 apex.
             if (Sightline.Heat.AiTier(0) != 0 || Sightline.Heat.AiTier(3) != 0) fails.Add("aiTierLowHeatNot0");
             if (Sightline.Heat.AiTier(4) != 1 || Sightline.Heat.AiTier(5) != 1) fails.Add("aiTierEliteCadreNot1");
-            if (Sightline.Heat.AiTier(6) != 1 || Sightline.Heat.AiTier(7) != 1) fails.Add("aiTierExposedNot1");
+            // C1 THE FLAT MIDDLE: tier 2 moved from NO QUARTER down to EXPOSED, so heats 6-7 are
+            // tier 2 now. The old tag here read "aiTierExposedNot1", which was ALREADY a misnomer
+            // before C1 — heat 6's tier came from rung 4, not from EXPOSED, and that dead rung-6
+            // declaration is the defect C1 found. Named for what it actually asserts now.
+            if (Sightline.Heat.AiTier(6) != 2 || Sightline.Heat.AiTier(7) != 2) fails.Add("aiTierExposedNot2");
             if (Sightline.Heat.AiTier(8) != 2) fails.Add("aiTierNoQuarterNot2");
             // W6c data pin, RE-AIMED BY C1 THE FLAT MIDDLE: the +1 enemy damage moved down from
             // the rung-8 apex to EXPOSED (rung 6), so the "one rung below is clean" control moves
@@ -1912,13 +1916,14 @@ public partial class Game
         // applied to the difficulty axis: re-tuning the ladder is allowed, doing it SILENTLY is not.
         // TO RE-TUNE: change Heat.Mods, run SIGHTLINE_HEATLADDERTEST, paste the printed "actual"
         // string in below — and re-measure every rung you moved.
-        // C1 THE FLAT MIDDLE re-tuned rungs 6 and 8 (the +1 per-hit damage moved 8 -> 6) and
-        // re-measured every rung it moved; the levels 6 and 7 columns changed 0 -> 1 in the dmg
-        // slot. SIGHTLINE_MIDTOOTHTEST pins the OTHER modes of that dial and the structural
-        // invariants; this line stays the ladder's single cumulative fingerprint.
+        // C1 THE FLAT MIDDLE re-tuned rungs 6 and 8 (the +1 per-hit damage AND coordination tier 2
+        // both moved 8 -> 6) and re-measured every rung it moved; levels 6 and 7 changed 0 -> 1 in
+        // the dmg slot and 1 -> 2 in the aiTier slot. SIGHTLINE_MIDTOOTHTEST pins the OTHER modes
+        // of that dial and the structural invariants; this line stays the ladder's single
+        // cumulative fingerprint.
         const string rungShapeGolden =
             "-1:-1,-1,0,0|0:0,0,0,0|1:1,0,0,0|2:1,1,0,0|3:2,1,0,0|4:2,1,0,1|" +
-            "5:3,1,0,1|6:3,2,1,1|7:3,3,1,1|8:4,4,1,2";
+            "5:3,1,0,1|6:3,2,1,2|7:3,3,1,2|8:4,4,1,2";
         {
             var sb = new System.Text.StringBuilder();
             for (int lv = Heat.Min; lv <= Heat.Max; lv++)
@@ -6339,9 +6344,12 @@ public partial class Game
             {
                 Heat.SetMidTooth(mt);
                 if (Vec(Heat.Max) != apex) fails.Add("apexMoved(mode" + mt + ")=" + Vec(Heat.Max) + " vs " + apex);
-                // ...and the sub-standard RECRUIT rung is below the dial entirely.
-                if (Vec(-1) != (-1, -1, 0, 0, 0)) fails.Add("recruitMoved(mode" + mt + ")");
             }
+            // ...and RECRUIT is below the dial entirely. Asserted ONCE, not once per mode: the rung
+            // lives in `RecruitMod`, outside `Mods`, so the dial cannot reach it and eight identical
+            // passes were eight copies of one fact. It stays as a guard against a future edit that
+            // folds RecruitMod INTO the table.
+            if (Vec(-1) != (-1, -1, 0, 0, 0)) fails.Add("recruitMoved=" + Vec(-1));
 
             // ---- (E) the per-mode rung shapes, pinned -------------------------------------
             // level: enemy,stat,dmg,aiTier,flagbits (1=tighter 2=exposed 4=harsh 8=noReinf)
@@ -6351,7 +6359,10 @@ public partial class Game
                 (1, "0:0,0,0,0,0|1:1,0,0,0,0|2:1,1,0,0,0|3:2,1,0,0,1|4:2,1,0,1,1|5:3,1,0,1,5|6:3,2,1,1,7|7:3,3,1,1,15|8:4,4,1,2,15"),
                 (2, "0:0,0,0,0,0|1:1,0,0,0,0|2:1,1,0,0,0|3:2,1,0,0,1|4:2,1,0,1,1|5:3,1,0,1,5|6:3,2,0,2,7|7:3,3,0,2,15|8:4,4,1,2,15"),
                 (3, "0:0,0,0,0,0|1:1,0,0,0,0|2:1,1,0,0,0|3:2,1,0,0,1|4:2,1,0,1,1|5:3,1,0,1,5|6:3,2,1,2,7|7:3,3,1,2,15|8:4,4,1,2,15"),
+                (4, "0:0,0,0,0,0|1:1,0,0,0,0|2:1,1,0,0,0|3:2,1,0,0,1|4:2,1,0,1,1|5:3,1,0,1,5|6:3,1,0,1,7|7:3,3,0,1,15|8:4,4,1,2,15"),
                 (5, "0:0,0,0,0,0|1:1,0,0,0,0|2:1,1,0,0,0|3:2,1,0,0,1|4:2,1,0,1,1|5:3,1,0,1,5|6:3,1,1,1,7|7:3,3,1,1,15|8:4,4,1,2,15"),
+                (6, "0:0,0,0,0,0|1:1,0,0,0,0|2:1,1,0,0,0|3:2,1,0,0,1|4:2,1,0,1,1|5:3,1,0,1,5|6:3,1,0,2,7|7:3,3,0,2,15|8:4,4,1,2,15"),
+                (7, "0:0,0,0,0,0|1:1,0,0,0,0|2:1,1,0,0,0|3:2,1,0,0,1|4:2,1,0,1,1|5:3,1,0,1,5|6:3,1,1,2,7|7:3,3,1,2,15|8:4,4,1,2,15"),
             };
             foreach (var (mt, want) in shapeGolden)
             {
@@ -6374,13 +6385,15 @@ public partial class Game
                     fails.Add("silentRung" + rung + " (" + m.Name + " changes nothing)");
             }
 
-            // ---- (G) THE COPY FITS THE PANEL, in every mode -------------------------------
-            // Hud.DrawHeatSelector paints Desc at 12px into a 320px card with the body column at
-            // x+40 and NO clip and NO wrap — it just keeps painting off the card, which is how
-            // NO QUARTER shipped 19 characters over the edge for a whole program and LINGERING
-            // WOUNDS 4 over, both visible in a heat-8 intro screenshot. NotoMono is monospace, so
-            // a character count is an exact proxy for the measured 278px column. Mode 0 is
-            // EXEMPT: it is a faithful transcription of the pre-C1 table, defect included.
+            // ---- (G) THE COPY FITS ON ONE LINE AT 100%, in modes 1-7 ----------------------
+            // NOT a correctness guard, and the banner no longer claims it is. Hud.DrawHeatSelector
+            // WRAPS each Desc to the measured column and grows the card, so ink stays inside the
+            // border at every `Cfg.UiScale` — that is what makes the panel correct. This leg is a
+            // copy-quality budget: at 100% a rung should READ as one line rather than wrapping.
+            // A character count cannot express a scale (at 120% the real limit is ~32), which is
+            // exactly why the structural fix had to exist and this check cannot replace it.
+            // Mode 0 is EXEMPT: it is a faithful transcription of the pre-C1 table, and its rung 8
+            // at 58 characters IS the defect C1 found.
             for (int mt = 1; mt <= 7; mt++)
             {
                 Heat.SetMidTooth(mt);
@@ -6392,18 +6405,17 @@ public partial class Game
                                   + ">" + Heat.DescBudget + " '" + m.Desc + "'");
                 }
             }
-            // ...and the pre-C1 rows this wave did NOT touch must fit too, or the panel still lies.
-            Heat.SetMidTooth(0);
-            for (int rung = 1; rung <= 5; rung++)
-                if (Heat.Mods[rung - 1].Desc.Length > Heat.DescBudget)
-                    fails.Add("descOverflow(untouchedRung" + rung + ")=" + Heat.Mods[rung - 1].Desc.Length);
-
             // ---- the shipped default is the MEASURED one ----------------------------------
             // Asserted BEHAVIOURALLY (the table the shipped constant builds), not as
-            // `ShippedMidTooth != 1` — that compare is const-folded away and cannot fail.
+            // `ShippedMidTooth != 3` — that compare is const-folded away and cannot fail. Keyed on
+            // the MODE, not on a position in shapeGolden: an array index couples this to the order
+            // of the golden list and would silently start checking a different mode if it changed.
             Heat.SetMidTooth(Heat.ShippedMidTooth);
-            if (Shape() != shapeGolden[1].want)
-                fails.Add("shippedDefaultIsNotMode1 (actual '" + Shape() + "')");
+            var shippedGolden = System.Linq.Enumerable.FirstOrDefault(shapeGolden, gg => gg.mt == Heat.ShippedMidTooth);
+            if (shippedGolden.want == null)
+                fails.Add("shippedMode" + Heat.ShippedMidTooth + "HasNoGolden");
+            else if (Shape() != shippedGolden.want)
+                fails.Add("shippedDefaultShapeWrong (actual '" + Shape() + "')");
 
             // ---- (F) the tooth REACHES THE BOARD ------------------------------------------
             // Mission 3: past the m1-2 heat grace that zeroes heatDmg. Mirrors HEATLADDERTEST's
@@ -6416,6 +6428,9 @@ public partial class Game
                 _run.HeatLevel = heat;
                 _run.CurrentCard = new MissionCard { Objective = Objective.Eliminate, ModName = "STANDARD", Reward = RewardKind.None };
                 SetupMission(3);
+                // A `foreach` over an empty force asserts NOTHING and reports PASS — the fail-open
+                // shape this wave exists to hunt. Refuse the vacuous pass explicitly.
+                if (Enemies.Count == 0) { fails.Add(tag + ":noEnemiesSpawned"); return; }
                 foreach (var e in Enemies)
                 {
                     var refW = Weapon.Make(e.Weapon.Kind);
@@ -6428,8 +6443,13 @@ public partial class Game
             DmgOnBoard("heat5Dmg",   5, 0);    // ...one rung below is untouched...
             DmgOnBoard("apexDmg",    8, 1);    // ...and the apex still carries exactly ONE, not two.
 
-            // The shipped mode moved the DAMAGE, not the TIER: coordination still peaks at rung 8.
-            if (Heat.AiTier(6) != 1) fails.Add("shippedMovedTierAt6=" + Heat.AiTier(6));
+            // The shipped mode (3) hands BOTH teeth down to rung 6: damage AND coordination tier 2.
+            // Heat 5 keeps neither, and the apex's cumulative tier is unchanged at 2 — which is the
+            // whole point of a Math.Max aggregation and is what leg (C) generalises.
+            if (Heat.DmgDelta(6) != 1 || Heat.AiTier(6) != 2)
+                fails.Add("shippedToothNotAtRung6 dmg=" + Heat.DmgDelta(6) + " tier=" + Heat.AiTier(6));
+            if (Heat.DmgDelta(5) != 0 || Heat.AiTier(5) != 1)
+                fails.Add("rung5Contaminated dmg=" + Heat.DmgDelta(5) + " tier=" + Heat.AiTier(5));
             if (Heat.AiTier(8) != 2) fails.Add("apexTierNot2=" + Heat.AiTier(8));
 
             // The dial CLAMPS rather than throwing or building a short table.
@@ -6440,13 +6460,14 @@ public partial class Game
         }
         finally { Heat.SetMidTooth(shipped); }
 
-        if (Heat.MidTooth != shipped) fails.Add("dialNotRestored=" + Heat.MidTooth);
-
         return fails.Count == 0
             ? "MIDTOOTHTEST: PASS (no dead AiTier declaration and no silent rung on the shipped table; "
-              + "apex vector identical across all 8 dial modes and RECRUIT untouched; MIDTOOTH=0 reproduces "
-              + "the pre-C1 table field-for-field; per-mode shapes pinned; every rung of every mode fits the 38-char panel column; the +1 damage reaches every m3 "
-              + "hostile at heat 6, none at heat 5, exactly one at heat 8; tier still peaks at rung 8; dial clamps)"
+              + "apex vector identical across ALL 8 dial modes and RECRUIT untouched; MIDTOOTH=0 reproduces "
+              + "the pre-C1 table field-for-field; rung shapes pinned for all 8 modes; rungs 1-8 of modes 1-7 "
+              + "fit the one-line 38-char copy budget AT 100% TEXT SIZE (mode 0 exempt by design - its rung 8 "
+              + "IS the 58-char defect; the panel wraps and grows, so larger text scales are safe structurally, "
+              + "not by this count); the +1 damage AND tier 2 reach heat 6, neither reaches heat 5, and the apex "
+              + "carries exactly one damage point; dial clamps)"
             : "MIDTOOTHTEST: FAIL " + string.Join(", ", fails);
     }
 

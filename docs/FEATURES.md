@@ -485,9 +485,11 @@ seeds (mix of WIN/LOSE, no exceptions):
 - **The ladder's top exists:** the heat 7-8 / IRON VETERANS zero-roster crash is fixed (a shattered command
   drafts emergency conscripts to the AttritionFloor — the rung still shrinks a surviving roster, never zeroes
   it), and heat 8 has its first measured completion (~25%, a wall not a flat). **The +1 enemy weapon damage**
-  (m3+, initial force) shipped on NO QUARTER here and **moved down to EXPOSED (rung 6) in CONTOUR C1** — the
-  rung that had been buying 2.3 points; `SIGHTLINE_MIDTOOTH=0` restores it to the apex, `SIGHTLINE_MIDTOOTHTEST`
-  pins it. Heat rungs 4+ raise a data-driven **`Ai.Tier`** — at the apex the AI
+  (m3+, initial force) shipped on NO QUARTER here, and **CONTOUR C1 moved it — together with coordination
+  tier 2 — down to EXPOSED (rung 6)**, the rung that had been buying 2.3 points and whose own `AiTier`
+  declaration could never fire. `SIGHTLINE_MIDTOOTH=0` restores both to the apex; `SIGHTLINE_MIDTOOTHTEST`
+  pins the table, and the intro DIFFICULTY panel now wraps and grows so a rung's copy cannot paint off the
+  card at any text scale. Heat rungs 4+ raise a data-driven **`Ai.Tier`** — from rung 6 the AI
   coordinates harder (tighter smoke discipline capped short of certainty, stronger focus/crossfire pull)
   instead of just aiming better; Tier 0 is byte-identical to the shipped constants. (`SIGHTLINE_HEATLADDERTEST`.)
 - **Planner-resolver truthfulness:** the enemy planner now sees the commanding (2-tier) LoS the resolver

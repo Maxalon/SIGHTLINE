@@ -314,8 +314,8 @@ public static class Heat
     //   bit 2 (=2) : AI coordination tier 2 moves 8 -> 6
     //   bit 4 (=4) : rung 6's anonymous +1 StatDelta moves 6 -> 7 (so heats 7-8 keep their
     //                cumulative stat exactly; only heat 6 pays)
-    //   1          : SHIPPED. EXPOSED gains the damage tooth; the apex KEEPS its coordination
-    //                peak (and now names it — the pre-C1 copy never did).
+    //   3          : SHIPPED. EXPOSED gains BOTH — the damage tooth and coordination tier 2 —
+    //                and rung 6 becomes unambiguously the coordination rung (see WHY MODE 3).
     //   0          : the pre-C1 table, transcribed literally (see Rung6/Rung8 below)
     //
     // WHY. The `h4 -> h6` step is the smallest on FOUR measured ladders (L1 -3.8, L2 -2.5,
@@ -325,6 +325,14 @@ public static class Heat
     // already published tier 1 and AiTier aggregates with `Math.Max`, so EXPOSED's advertised
     // coordination tooth was a DEAD DECLARATION — rung 6 shipped +1 body, +1 stat and a
     // concealment flag, and the player climbed two rungs for a stat point.
+    //
+    // NOT PURELY NUMERIC, and C1 owes this on the record (review A7): the +1 DmgMax also WIDENS
+    // the AI's finish band — `Ai.Plan` scores a kill on `p.Hp <= e.Weapon.DmgMax` — so moving it
+    // down moves a COORDINATION sharpening down two rungs as well (Mission.cs:890-902 says so in
+    // its own comment). The CRN round prices that effect along with the raw damage; what it means
+    // is that rung 6 partly re-earns, through the finish band, the coordination identity its dead
+    // `AiTier = 1` promised and never delivered. Watch item inherited from the same comment: the
+    // wider finish band leans AGAINST the BRACE comeback lever.
     //
     // WHAT MOVING (rather than ADDING) BUYS. Both teeth aggregate in a way that makes the move
     // provably APEX-NEUTRAL: DmgDelta SUMS (1 declared once is 1 wherever it is declared, as
@@ -339,11 +347,31 @@ public static class Heat
     //   mode 2 (tier2 8->6 alone)      n=320  18.4 -> 20.0   +1.6 +-1.9  z=+0.80  (WRONG SIGN)
     //   mode 4 (stat 6->7 alone)       n=320  18.4 -> 23.1   +4.7 +-2.7  (prices rung 6's stat)
     //   mode 5 (dmg 8->6 + stat 6->7)  n=320  18.4 -> 10.6   -7.8 +-2.5  z=-3.10
-    // Mode 3 lands the more even 7.0/5.8 split across rungs 5-6 / 7-8, and was NOT shipped: it
-    // strips NO QUARTER of every qualitative tooth, and the component that buys the softening
-    // measured +1.6 with the WRONG SIGN on its own. Mode 1 is the only candidate that leaves
-    // rungs 6, 7 AND 8 each with a tooth a player could name.
-    public const int ShippedMidTooth = 1;
+    // WHY MODE 3 AND NOT MODE 1. C1 first shipped mode 1 and was sent back; the review recomputed
+    // the SHAPE from the same archive and mode 1 lost on every dispersion metric. Rung 1-8 steps:
+    //   control    25.62  6.88  5.00  5.00  6.56  0.00  2.34  6.41  4.06
+    //   mode 1     25.62  6.88  5.00  5.00  6.56  0.31  8.59  2.66  1.25
+    //   mode 3     25.62  6.88  5.00  5.00  6.56  0.31  6.72  4.22  1.56
+    //   SD of the 8 steps        2.36 / 2.89 / 2.44      (control / mode 1 / mode 3)
+    //   L1 from even spacing    14.38 / 18.75 / 15.00
+    //   L1 from the band shape  14.69 / 19.06 / 15.31
+    //   L1 from even, rungs 5-8  8.12 / 10.78 /  9.06
+    // The ranking control > mode 3 > mode 1 is IDENTICAL on all four, and the rung sums are equal
+    // to the decimal (36.25) — so the allocation is a CHOICE, not arithmetic. Mode 1 also lands
+    // heat 6 at 12.03 +-1.3 against a band floor of 12: P(below floor) ~= 0.49, a coin flip
+    // reached by optional stopping (n=320 read 11.2 = out of band; extending to n=640 read 12.0
+    // and shipped). Mode 3 reads 13.9 +-1.4, in band at BOTH n=320 and n=640.
+    // THE TENSION, RESOLVED (the review was right that it could not stay implicit): mode 1's only
+    // advantage was keeping a qualitative tooth on the apex — and that tooth is `AiTier 2`, the
+    // one component C1 itself measured as doing nothing (pooled over four contrasts isolating it,
+    // 1600 CRN pairs: +1.09 +-0.63, wrong-signed in all four cells). C1 cannot call tier 2 "not a
+    // difficulty lever" and simultaneously pay four shape metrics and a band verdict to keep it
+    // at the apex. Mode 3 is also weakly DOMINANT under that component's full CI [-0.15, +2.33]:
+    // at the bottom mode 3 ~= mode 1, at the top it is clearly better on band and shape, and it is
+    // never worse. What mode 3 costs is recorded, not hidden: NO QUARTER becomes a quantitative
+    // row (+1 enemy, +1 stat, and the ceiling) — the apex is a wall because of the STACK below it,
+    // which the panel lists in full, not because of its own row.
+    public const int ShippedMidTooth = 3;
     public static int MidTooth { get; private set; } = ShippedMidTooth;
 
     /// `SIGHTLINE_MIDTOOTH=<n>` — repoint the mid-ladder tooth. 0 restores the pre-C1 table.
@@ -354,16 +382,22 @@ public static class Heat
         Mods = BuildMods(MidTooth);
     }
 
-    /// The intro DIFFICULTY panel (`Hud.DrawHeatSelector`) paints a rung's Desc at 12px into a
-    /// 320px card whose body column starts at x+40 — and it does NOT clip or wrap, it just keeps
-    /// painting off the card. MEASURED off a heat-8 screenshot: ~7.07 px/char (NotoMono is
-    /// monospace, so a CHARACTER count is an exact proxy), 278px inside the border => 39 chars.
-    /// Budget 38 for a pixel of margin. `Hud`'s RecruitLines block records the same limit from
-    /// the other side ("held to ~37 characters ... measured — the first draft clipped").
-    /// C1 found NO QUARTER's shipped copy 19 characters OVER it and LINGERING WOUNDS 4 over,
-    /// both visibly clipping; `SIGHTLINE_MIDTOOTHTEST` now asserts the budget for every rung of
-    /// every dial mode, so this cannot come back. Only mode 0 is exempt — it is a faithful
-    /// transcription of the pre-C1 table and reproducing it faithfully includes its defect.
+    /// A COPY-QUALITY budget: how long a rung's Desc may be and still occupy ONE line of the
+    /// intro DIFFICULTY panel AT 100% TEXT SIZE. Measured off a heat-8 screenshot — ~7.07 px/char
+    /// (NotoMono is monospace, so a character count is an exact proxy) against the panel's 270px
+    /// body column => 38.2 characters. `Hud.DrawHeatSelector` sets that column width to match this
+    /// number rather than the other way round, and the pairing is screenshot-verified: at a 262px
+    /// column the two 38-character rows wrapped at 100% and orphaned a word each.
+    ///
+    /// IT IS NOT A CORRECTNESS GUARD AND MUST NOT BE READ AS ONE. C1's first pass treated it as
+    /// one and the review found the hole: `Cfg.Scaled` multiplies any size <= `Cfg.UiFontMax` by
+    /// `Cfg.UiScale` (settings offer 0.90/1.00/1.10/1.20) while the panel geometry does not
+    /// scale, so at 120% the real limit is ~32 characters and a CHARACTER COUNT CANNOT EXPRESS A
+    /// SCALE. `Hud.DrawHeatSelector` now WRAPS each Desc to the measured column and grows the
+    /// card by the line count, which is what actually keeps ink inside the border at every text
+    /// size. This budget only says "should not need to wrap at 100%".
+    /// `SIGHTLINE_MIDTOOTHTEST` asserts it for rungs 1-8 of modes 1-7; mode 0 is exempt because
+    /// it is a faithful transcription of the pre-C1 table and its rung 8 (58 chars) IS the defect.
     public const int DescBudget = 38;
 
     /// Prefer the fuller phrasing; fall back to the terse one when the composed clauses push it
@@ -419,18 +453,24 @@ public static class Heat
         : new HeatModifier
         {
             Name = "NO QUARTER",
-            // The pre-C1 copy was 57 characters into a 38-character column AND never named the
-            // coordination peak at all — the apex's own marquee tooth. This names it and fits.
-            Desc = Fit("+1 enemy; +1 stat" + Rung8Clauses(mt), "+1 enemy, stat" + Rung8Clauses(mt)),
+            // The pre-C1 copy was 58 characters of unwrapped 12px text into a 262px column AND
+            // never named the coordination peak at all — the apex's own marquee tooth. Under the
+            // SHIPPED mode 3 both teeth are handed down, so this row names what is actually left.
+            Desc = "+1 enemy; +1 stat" + Rung8Clauses(mt),
             EnemyDelta = 1, StatDelta = 1,
             AiTier  = ((mt & 2) != 0) ? 0 : 2,
             DmgDelta = ((mt & 1) != 0) ? 0 : 1,
         };
 
     /// Whatever the dial did NOT hand down to rung 6 is still the apex's, and is named here.
+    /// When the dial hands down BOTH (the shipped mode 3) nothing qualitative is left, so the row
+    /// says what it honestly is: the top of the ladder. Longest form is 36 chars, inside
+    /// DescBudget, which is why this one needs no `Fit` fallback.
     static string Rung8Clauses(int mt)
-        => (((mt & 1) != 0) ? "" : "; +1 dmg")
-         + (((mt & 2) != 0) ? "" : "; peak coord");
+    {
+        string c = (((mt & 1) != 0) ? "" : "; +1 dmg") + (((mt & 2) != 0) ? "" : "; peak coord");
+        return c.Length == 0 ? "; the ceiling" : c;
+    }
 
     public static HeatModifier[] Mods { get; private set; } = BuildMods(ShippedMidTooth);
 
@@ -452,8 +492,10 @@ public static class Heat
         new HeatModifier { Name = "ELITE CADRE",   Desc = "Enemies coordinate their fire",        AiTier = 1 },
         // LINGERING WOUNDS arrives earlier (rung 5) and carries a body -- run-loop attrition
         // pressure starts compounding in the mid-ladder instead of only near the top.
-        // C1: "less field healing" -> "less healing". The old line was 42 characters into a
-        // 38-character panel column and clipped on screen (see Heat.DescBudget). No mechanic moved.
+        // C1: "less field healing" -> "less healing". The old line was 43 characters against a
+        // one-line budget of 38 and clipped on screen (see Heat.DescBudget). No mechanic moved.
+        // At 37 it still wrapped at the 120% text setting, which is why Hud.DrawHeatSelector now
+        // wraps and grows the card rather than relying on any character count at all.
         new HeatModifier { Name = "LINGERING WOUNDS", Desc = "+1 enemy; wounds linger, less healing", EnemyDelta = 1, HarshAttrition = true },
         // EXPOSED is the marquee mid-ladder MUTATOR: from heat 6 the squad loses its free
         // concealment ambush opener AND every hostile gets another stat point.
@@ -514,8 +556,10 @@ public static class Heat
     /// W6b: the AI coordination tier this heat level demands — the MAX over active rungs (a
     /// tier is a quality level, not a stackable quantity). 0 below ELITE CADRE (rung 4).
     public static int AiTier(int level) { int t = 0; foreach (var m in Active(level)) t = Math.Max(t, m.AiTier); return t; }
-    /// W6c: extra per-hit enemy weapon damage at this heat level (summed like StatDelta;
-    /// today only NO QUARTER carries it, so this is 0 below the rung-8 apex).
+    /// W6c: extra per-hit enemy weapon damage at this heat level (summed like StatDelta).
+    /// C1 THE FLAT MIDDLE moved the single point that feeds this from NO QUARTER (rung 8) down to
+    /// EXPOSED (rung 6), so it is 1 from heat 6 up and 0 below — NOT "0 below the apex", which is
+    /// what this line used to say. `SIGHTLINE_MIDTOOTH=0` restores the pre-C1 placement.
     public static int DmgDelta(int level) { int s = 0; foreach (var m in Active(level)) s += m.DmgDelta; return s; }
 
     /// Bonus requisition intel per cleared mission at this heat level. ACCELERATING (not

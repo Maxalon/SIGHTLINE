@@ -53,10 +53,19 @@ def main():
                         shown.append(f"    {os.path.basename(fa)}  {k}: {la.get(k)} -> {lb.get(k)}")
         total_fields += hfields
         total_diff += hdiff
+        # FAIL CLOSED. Run against the COMMITTED archive this globbed zero files and printed
+        # "0 chunk pairs, 0 leaf fields compared, 0 DIFFER  <- INERT" — a green inertness verdict
+        # on nothing at all, which is precisely the fail-open shape wave C1 exists to hunt, sitting
+        # in C1's own tooling. An empty comparison is an error, never a pass.
+        if nch == 0:
+            sys.exit(f"NO CHUNKS: no {A}/{B} pairs at h{h} in {HERE}. The raw chunk JSONs are NOT "
+                     f"committed (see README) — regenerate them with run_ladder.sh before diffing.")
         print(f"h{h}: {nch} chunk pairs, {hfields} leaf fields compared, {hdiff} DIFFER"
               + ("  <- INERT" if hdiff == 0 else ""))
         for s in shown:
             print(s)
+    if total_fields == 0:
+        sys.exit("NO FIELDS COMPARED — refusing to report inertness.")
     print(f"TOTAL: {total_fields} fields, {total_diff} differ")
 
 

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Distil every C1 chunk JSON into ONE csv of per-campaign outcomes.
 
-The raw round is 384 chunks / 34 MB (17 MB of JSON, 10 MB of log, 6.6 MB of report), which
+The raw round is 416 chunks / 34 MB (17 MB of JSON, 10 MB of log, 6.6 MB of report), which
 this repo does not commit. Everything C1 concluded rests on the PER-SLOT outcome of each
 campaign — that is what makes the rounds CRN-paired — so the archive keeps exactly that, in
-full, for all 15,360 campaigns, at ~700 KB. `ladder.py --csv` re-derives every published
+full, for all 16,640 campaigns, at 428 KB. `ladder.py --csv` re-derives every published
 table from it, so no number in the write-up is unreproducible.
 
 What is DROPPED and why: the aggregate blocks (actionMix, byArena, perkPicks, ...) are
