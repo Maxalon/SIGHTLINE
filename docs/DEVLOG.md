@@ -8977,3 +8977,397 @@ bodies and resets `bump`; no mid-run Decapitate gets that. **Unspent, and it is 
 - **The first attempt produced ZERO chunks** because a shared-scratchpad copy of the runner had
   been overwritten by another agent. It failed loudly and wrote no data. The runner now lives in
   the repo, and that is the wider lesson: a shared path is not storage.
+
+---
+
+# PROGRAM CONTOUR — WAVE C3 "THE TWO GAMES"
+
+**Branch `wave/two-games`. Base commit `17934ee`** (CROSSCUT composed — the L3 ladder's tree).
+Raw data, runners and readouts: `docs/measurements/c3/`. Gate: `SIGHTLINE_CLASSTEST`.
+
+## THE FINDING, RE-ESTABLISHED ON THIS TREE
+
+960 campaigns, 48 chunks, all `runs=20`, `byObjectiveByNodeKind` and `byObjectiveByMission`:
+
+| on mid-run campaign nodes (Combat + Elite) | win% | ±SE | n |
+|---|---|---|---|
+| **KILL** — Eliminate, Decapitate | **38.5** | 3.1 | 247 |
+| **NON-KILL** — the other six | **81.5** | 1.1 | 1243 |
+| **gap** | **43.0** | 3.3 | |
+
+`byObjectiveByMission` says the same thing at fixed depth: at **m5**, `Eliminate` 23.8% (n=42)
+against `Sabotage` 83.9% (n=31) and `Evac` 93.8% (n=16). The brief's figures (38.3 / 83.4, and
+Sabotage 96.8 at m5) came from W8's own round on a different composition; they replicate in
+direction and magnitude, and the cells with n<40 differ inside their own error. **W8's trap is
+real and it is worth restating: `Eliminate`'s POOLED row on this tree is 89.1%, because 960 of its
+1155 rows are mission 1.** The pooled table is in `agg.py`'s output and it is the wrong table.
+
+## 1. THE INSTRUMENT — because a win rate cannot say WHY
+
+Nothing recorded what the enemy force GREW to, or how much of it a squad actually had to beat, so
+every mechanism for the gap was equally plausible. `Stats.MissionRec` gains two per-mission
+counters — `EnemiesAdded` (bodies spawned after deploy by ANY reinforcement path) and
+`MaxPressure` (the high-water anti-turtle rung) — and the report gains an **ENCOUNTER COMPLETION**
+block, console and JSON, restricted to mid-run node kinds for W8's exact reason. Its load-bearing
+column is `clear%` = killed / (deploy force + reinforcements): the share of the encounter actually
+FOUGHT, and the only column that can tell "this class wins the fight" from "this class never has
+the fight". The same columns are repeated restricted to **won** missions, because a low `clear%`
+otherwise has two readings that point in opposite directions.
+
+**Proven inert before it was used**: `inert.py` diffs every pre-existing field of 8 paired chunks
+(2 rungs × 4 slot sets, same worlds, pristine vs instrumented binary) — **9,848 aggregate fields,
+zero moved.**
+
+## 2. THE MECHANISM — three candidates refuted by measurement, one survives
+
+`enc.py B1`, mid-run nodes, 960 campaigns:
+
+| row | n | win% | turns | force | +rf | clear% | rf% | prs | WON n | WON clear% |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Eliminate | 139 | 37.4 | 8.53 | 7.78 | 1.69 | 48.8 | 41.0 | 1.55 | 52 | 100.0 |
+| Decapitate | 108 | 39.8 | 5.42 | 9.06 | 0.55 | 14.4 | 20.4 | 0.79 | 43 | 25.3 |
+| Defend | 425 | 78.1 | 8.64 | 5.56 | 6.48 | 35.5 | 100.0 | 0.00 | 332 | 40.2 |
+| Escort | 247 | 83.0 | 8.12 | 8.41 | 0.00 | 17.4 | 0.0 | 0.00 | 205 | 14.0 |
+| Evac | 98 | 90.8 | 5.68 | 8.14 | 0.00 | 4.1 | 0.0 | 0.00 | 89 | **3.3** |
+| Hack | 102 | 81.4 | 3.67 | 8.96 | 0.04 | 14.6 | 2.0 | 0.16 | 83 | 14.5 |
+| Rescue | 220 | 83.6 | 5.44 | 8.35 | 0.00 | 14.5 | 0.0 | 0.00 | 184 | 12.2 |
+| Sabotage | 151 | 79.5 | 3.76 | 5.71 | 0.00 | 24.1 | 0.0 | 0.00 | 120 | 25.8 |
+| **KILL** | 247 | 38.5 | 7.17 | 8.34 | 1.19 | 33.6 | 32.0 | 1.22 | 95 | 62.0 |
+| **NON-KILL** | 1243 | 81.5 | 6.73 | 7.12 | 2.22 | 24.3 | 34.4 | 0.01 | 1013 | **25.1** |
+
+**(a) FORCE SIZE — refuted.** KILL deploys 8.34 bodies, NON-KILL 7.12 — but the NON-KILL average
+is dragged down entirely by the two objectives the game *already* eases on purpose (`Defend` 5.56
+via FUL-4's opener trim, `Sabotage` 5.71 via `Mission.Build`'s explicit easing). The four
+untrimmed non-kill objectives deploy **8.14 – 8.96**, at or above the kill class. `Escort` deploys
+8.41 and wins 83.0%; `Eliminate` deploys 7.78 and wins 37.4%. Force size does not order the classes.
+
+**(b) TURN PRESSURE / MISSION LENGTH — refuted.** KILL 7.17 turns, NON-KILL 6.73. `Defend` is the
+LONGEST objective in the game at 8.64 turns and wins 78.1%. And `Hack` carries *the same
+anti-turtle clock as Eliminate* and wins 81.4%.
+
+**(c) REINFORCEMENT VOLUME — refuted, and this is the one worth stating loudly.** `Defend` takes
+**6.48** added bodies per mission and is reinforced on **100%** of missions; `Eliminate` takes 1.69
+on 41%. Defend wins 78.1%, Eliminate 37.4%. **Nearly four times the reinforcements and twice the
+win rate.** Volume is not it.
+
+**(d) WHAT SURVIVES: the win condition's dependence on beating the force.** A WON non-kill mission
+kills **25.1%** of the force it deployed against — `Evac` **3.3%** (0.27 bodies of 8.14),
+`Rescue` 12.2%, `Escort` 14.0%, `Hack` 14.5%. **Six of eight objectives are routinely won by
+declining three quarters of the encounter.** The two kill objectives cannot decline any of it.
+
+That is not a difficulty bug inside an objective. It is two different games sharing a UI, and the
+only thing separating them is whether the mission can end while the enemy is still standing.
+
+**Where (c) DOES bite, and it is an interaction, not a volume.** On `Eliminate` — and on no other
+objective in the game — a reinforcement is also **win condition**. The anti-turtle clock's second
+arm therefore does not raise the price of the finish line there; it MOVES it. 41.0% of mid-run
+Eliminates took at least one wave, and over those missions the waves averaged ~4.1 bodies on top
+of a 7.78-body deploy force. On `Hack` and `Decapitate` the same clock adds the same bodies and
+the win condition does not move — which is exactly why Hack reads 81.4% with `prs` 0.16 and
+`Eliminate` reads 37.4% with `prs` 1.55.
+
+**A fifth candidate, named and NOT ruled out: the measuring bot.** `Game.SmartStep` is what chose
+to walk past those fights. A player who fights anyway on an `Evac` would see a much smaller gap.
+That does not rescue the design — the point is that declining is *available and dominant*, and the
+flywheel is the thing that found it — but this wave did not measure a fight-anyway policy, and
+`clear%` is a joint property of the game and of the bot. Said plainly rather than buried.
+
+## 3. THE DESIGN CALL — it is a defect, and it is TWO defects
+
+`docs/DESIGN.md` was the deciding document, not the win rate.
+
+**The variety is a FEATURE and it is kept.** §3.F wants runs to differ by *combinations*, and a
+campaign that alternates "clear the room" with "get in and out" is exactly that. Making all eight
+objectives demand attrition would delete the best thing about the objective roster. **Any lever
+that closes this gap by making the six harder was rejected on that ground alone.**
+
+**Defect one: the fork is a FALSE CHOICE (§3.A).** "A decision is interesting only if no option
+dominates, the options are asymmetric, and *the player can make it informed*." The campaign map
+named the objective and nothing named the class, so the single largest predictor of a node's
+difficulty — bigger than any step on the heat ladder — was the one property the player could not
+read. A fork whose dominant term is invisible is a non-decision wearing a decision's costume.
+
+**Defect two: it is a difficulty SPIKE the player cannot see coming (§3.D).** The within-run curve
+is 98 / 83 / 77 / 78 / 73 / 68 — the stair-step §3.D asks for. A mid-run kill node sits at 38.5%
+*inside* that curve. §3.D's rule is "pace spikes; give the player a beat to find footing" and
+"don't front-load anxiety"; an unreadable 43-point step is the same failure one layer up.
+
+So the answer is **one information change and one mechanical lever**, and they do different jobs:
+the information change makes the choice real, the lever pulls the spike toward the curve. Neither
+alone is the answer, and the wave claims neither is sufficient.
+
+## 4. THE LEVER — the anti-turtle clock stops moving ELIMINATE's finish line
+
+`Game.ClockMayReinforce`. The clock has two arms and they are not the same thing:
+
+- the **AIM ramp** (+3/+4 per rung to 4 rungs) makes a slow squad's position worse — untouched,
+  banner and HUD meter and all;
+- the **REINFORCEMENT wave** (rungs 2–4) adds bodies — suppressed on `Eliminate` **only**.
+
+`Hack` and `Decapitate` carry the same clock and keep both arms, because their win condition does
+not count bodies. `SIGHTLINE_KILLTREADMILL=1` restores the pre-C3 clock exactly.
+
+**`Decapitate` is therefore this round's WITHIN-ROUND CONTROL on the class**, and `Hack` is the
+control on the clock. If either had moved, something other than the lever moved it.
+
+### The measurement
+
+Two rounds on ONE binary — `B1` = `SIGHTLINE_KILLTREADMILL=1`, `L1` = defaults — 6 rungs × 8
+disjoint CRN slot sets × greedy+sloppy = **960 campaigns per arm on identical worlds**, 96 chunks,
+all `OK ... runs=20`. `samearm.py D0 B1` first proved the lever's OFF path is byte-identical to the
+pre-lever tree: **67,956 aggregate fields, zero moved**, so `L1 − B1` prices the lever and nothing
+else.
+
+| rung | B1 | L1 | Δ | band | verdict |
+|---|---|---|---|---|---|
+| RECRUIT | 71.2 | **73.1** | +1.9 | 75±8 | in |
+| heat 0 | 47.5 | **55.0** | **+7.5** | 55±8 | in — on target |
+| heat 2 | 31.2 | **34.4** | +3.2 | 40±8 | **in** (B1 was 0.8 under the floor) |
+| heat 4 | 23.8 | **25.6** | +1.8 | 30±8 | in |
+| heat 6 | 20.0 | **20.0** | 0.0 | 20±8 | in — on target |
+| heat 8 | 6.9 | **7.5** | +0.6 | 10±5 | in |
+
+**Six of six in band, monotone at every step.** The one miss on the L3 ladder of record is closed.
+
+**±3.5–3.9 per rung is the WRONG error bar for a CRN round** and this project has quoted it before.
+B1 and L1 played the same 960 worlds, so the statistic is the paired one (`paired.py`, a McNemar
+table built from each chunk's own PER-SLOT RECORDS block):
+
+| rung | pairs | lever-only wins | baseline-only wins | p (2-sided) | Δ missions cleared |
+|---|---|---|---|---|---|
+| RECRUIT | 160 | 4 | 1 | 0.375 | +0.05 |
+| heat 0 | 160 | **13** | 1 | **0.0018** | +0.37 |
+| heat 2 | 160 | 5 | 0 | 0.0625 | +0.35 |
+| heat 4 | 160 | 3 | 0 | 0.250 | +0.21 |
+| heat 6 | 160 | 0 | 0 | 1.000 | +0.09 |
+| heat 8 | 160 | 1 | 0 | 1.000 | +0.08 |
+| **ALL** | **960** | **26** | **2** | **<0.0001** | **+0.19** |
+
+### The post-lever cross-tab
+
+| on mid-run nodes | B1 | L1 |
+|---|---|---|
+| KILL | 38.5 ±3.1 (n=247) | **45.3 ±3.1** (n=256) |
+| NON-KILL | 81.5 ±1.1 (n=1243) | 81.8 ±1.1 (n=1280) |
+| **gap** | **43.0 ±3.3** | **36.5 ±3.3** |
+
+`byObjectiveByNodeKind`, the cells that moved: `Eliminate` Combat 39.6 → **53.3** (n≈106), Elite
+30.3 → 32.4 (n≈33), Supply 73.2 → 82.8, Start 97.5 → 99.8.
+`byObjectiveByMission`, `Eliminate`: m2 63.3 → 76.7, m3 40.9 → 54.5, m4 55.1 → 64.7, m5 23.8 → 29.5.
+
+**Both controls held.** `Hack` is identical to the last digit across the arms (n=102, 81.4%, 3.67t,
++rf 0.04, prs 0.16, WON clear% 14.5). `Decapitate` moves 39.8 → 41.7 inside its own ±4.6, and its
+BOSS cell — n≈472/509, the largest cell in the game — is flat at 68.0 → 67.8. The other five
+non-kill rows move by −0.2 to +0.6.
+
+**And the mechanism reads back exactly as designed**: `Eliminate`'s reinforcements go 1.69 → 0.00
+and its reinforced share 41.0% → 0.0%, while its mean anti-turtle rung is 1.55 → **1.50** — the aim
+arm is alive and the clock still bites. Turns barely move (8.53 → 8.63): the squad is not finishing
+*faster*, it is finishing *at all*.
+
+### The within-run curve
+
+| mission | 1 | 2 | 3 | 4 | 5 | 6 |
+|---|---|---|---|---|---|---|
+| B1 | 97.5 | 82.7 | 77.1 | 77.7 | 73.5 | 68.0 |
+| **L1** | **99.8** | **84.8** | **78.7** | **78.7** | **75.5** | **67.8** |
+| n (L1) | 960 | 442 | 718 | 572 | 437 | 509 |
+
+Still the monotone ramp §3.D asks for (the m3/m4 tie is inside its own error, as it was before).
+
+**But mission 1 is now 99.8%, and that is a stakes cost this wave paid without meaning to.**
+Mission 1 is always an `Eliminate` on a Start node, so it is the single largest population the
+lever touches: **mission-1 losses fell from 24 in 960 campaigns to 2.** The anti-turtle clock's
+waves were ending 22 of every 960 openers. X2's whole charter was to stop mission 1 ending a
+quarter of all runs (§3.D forbids front-loaded anxiety), so the direction is right — but "the
+opener is now essentially unlosable" is a different thing from "the opener is fair", and pillar 5
+(stakes that bite) is on the other side of it. Recorded, not repaired: repairing it would be a
+second lever in a one-lever round. If a later wave wants the opener to bite again, the place to do
+it is `Mission.OpenerTrim`, not the clock.
+
+### The side effects, checked and recorded straight (`top.py`, 960 vs 960)
+
+`choices/ARMED-soldier-turn` 2.305 → 2.290, `meaningful-choices/turn` 3.197 → 3.200,
+`lead-swings/match` 0.726 → 0.731, `avg max-swing` 49.25 → 49.64, `turns-with-a-shot` 57.4% →
+57.8%, policy-gap mean shot 0.542 → 0.542. **Nothing moved outside noise.** That matters because
+X2's opener trim bought its win rate partly by making the opening fight less contested
+(lead-swings 0.79 → 0.61); this lever did not.
+
+## 5. THE INFORMATION CHANGE — the fork says which game it is
+
+`Run.IsKillObjective` is the single source of truth; every surface asks it, so the game can never
+tell the player one thing and score another. Two words, used identically everywhere:
+
+- **PITCHED** — the field must be cleared; the fight IS the objective.
+- **TASKED** — the objective ends it, *and the force can be left standing*.
+
+The second clause is deliberate and it is the honest half. The flywheel's optimal policy already
+declines those fights (a won `Evac` kills 3.3% of its force); hiding that only taxed the players
+who had not worked it out. §3.A's complaint about a dominant line is that it exists, not that it
+is known — and §3.B says telegraph.
+
+Four surfaces, all reading the same predicate:
+
+1. **The campaign-map node label** gains a drawn class mark in a 12px gutter left of the objective
+   name (the name is unchanged — W9 cut this label to one line for overprint reasons and it stays
+   one line).
+2. **The hover tooltip** gains a class row directly under the node name, above force/payout/reward
+   — the class is the headline property, so it goes first. `EVENT` nodes get no row: they are not
+   fights and their `Card.Objective` is a placeholder that must not be read as one.
+3. **A two-entry class key** on its own row under the node-kind legend. Deliberately not merged
+   into that row: two taxonomies answering different questions ("what node is this" / "what ends
+   this mission") must not share a key. FUL-12's rule binds — a mark the map draws and the key does
+   not name is an unexplained glyph.
+4. **The legacy deploy card** (shown only when the map is unavailable) gains the tag, so the two
+   forks can never disagree.
+
+**THE SHAPES WERE CHOSEN AGAINST `DrawNodeIcon`, AND THE FIRST PAIR WAS KILLED BY A SCREENSHOT.**
+The first pass used a filled diamond (PITCHED) and a hollow ring (TASKED). Reading the shot:
+`NodeKind.Boss` is *already* "a solid diamond inside a ring tick", and the boss node is **always**
+Decapitate — i.e. always PITCHED — so on the one node where glyph and mark are guaranteed to
+co-occur the mark would have read as a duplicate of the node icon. `NodeKind.Combat`'s crosshair
+already carries a hollow circle, so the ring collided too. The shipped marks are **crossed blades**
+and an **empty tile-square**: diagonal strokes and an orthogonal outline are the two silhouettes
+the node vocabulary (chevron, cross, delta, fork, diamond, crosshair) does not use.
+
+**Colour is redundant, and the two colours were picked on purpose.** `Pal.Foe` and `Pal.Good` are
+the only two palette entries `SetColorblind` remaps, so the marks stay separable under
+`SIGHTLINE_CB=1` — and shape carries them regardless (§3.H: never hue alone).
+
+**Layout arithmetic, since the barracks card height is derived.** `mapChrome` goes 58 → 74 (a 19px
+class-key row, bottom pad 14 → 11). The card is `contentH + mapChrome + mapH` with
+`mapH = Clamp(800 − 24 − contentH − mapChrome, 150, 250)`; the clamp only binds above
+`contentH = 552`, and the worst case is a `RosterMax = 6` roster + the 5-line report cap + a KIA
+line = **546**, so `h = 776` for every reachable roster. A screenshot at the worst case confirms it.
+`RosterMax` is a hard constant, so this is arithmetic, not hope — but the margin is **6 points of
+contentH**, down from 22, and a seventh roster row would break it (it would have broken the pre-C3
+card too, at 798 of 800).
+
+### Screenshots read and judged
+
+All at 1280×800 under Xvfb/llvmpipe:
+
+- **the fork, default staging** (`SIGHTLINE_CAMPAIGN=1 SIGHTLINE_SHOT=90`) — the class key reads as
+  its own row; the reachable node's square sits cleanly left of `RESCUE`. First pass with the
+  diamond/ring pair was rejected here (see above) and the row gap went 16 → 19px because the two
+  keys read as one four-item row.
+- **the TASKED tooltip** (`+ SIGHTLINE_MAPHOVER=1`) — "STANDARD − EXTRACT" / green square "TASKED −
+  it ends when the task is done" / "Standard force +26 intel" / the enemy hint. Hierarchy correct:
+  class above economy.
+- **the PITCHED tooltip** (`+ SIGHTLINE_MAPCOL=5`, which stages the boss column — the only node
+  kind guaranteed to be a kill objective) — "BOSS − DECAPITATE" / red X "PITCHED − it ends when the
+  field is clear" / "+34 intel" / "BOSS: WARLORD".
+- **a colourblind pass** of that same frame (`SIGHTLINE_CB=1`) — orange X / teal square, both still
+  separable, and the silhouettes carry it independently of hue.
+- **the worst-case card** (`SIGHTLINE_ROSTER=6 SIGHTLINE_REPORT=5`) — six soldier rows, five report
+  lines, both legend rows, nothing clipped.
+
+Two new shot hooks: `SIGHTLINE_MAPHOVER=<k>` parks the cursor on the k-th reachable node (it reads
+`Hud.NodeBtns`, which the map publishes as it draws, so it necessarily lags a frame); and
+`SIGHTLINE_MAPCOL=<n>` moves `DebugCampaignMap`'s staged column off its hardcoded 3.
+
+## 6. THE GATE — `SIGHTLINE_CLASSTEST`, and it FAILS on the pre-C3 tree
+
+Four legs; wired into `scripts/qa-sweep.sh` (derived counts balance at 65 in `src/` and 65 run).
+
+- **(A) MODEL** — over the whole `Objective` enum, `IsKillObjective` is true for exactly
+  `{Eliminate, Decapitate}`, by enum value AND by telemetry name; an unparseable name is not a kill
+  objective; and the member count is pinned at 8 so appending a ninth objective cannot silently
+  inherit "not a kill objective".
+- **(B) DRAW — the fork** — paints the REAL barracks frame and reads strings at the draw call
+  (`Cfg.CaptureText`) and class marks at the draw site (`Hud.CaptureClassMarks`, null in normal
+  play). Both classes are staged deterministically by overwriting the reachable nodes' cards, so
+  the two passes differ only in the class. Asserts the key names both marks, that the mark census
+  is `choices + 1` of the staged class and exactly 1 of the other, that the objective label is
+  still painted beside the mark, and the 12px floor.
+- **(C) DRAW — the tooltip** — parks the real cursor on a real `NodeBtns` rect and redraws, so the
+  tooltip is reached through the shipped hover predicate. Asserts it paints THIS node's class line
+  and NOT the other one, and that it still carries the intel row it carried before.
+- **(D) LEVER** — runs the real `UpdatePressure` at turn 7 (rung 2, the first wave rung) and counts
+  bodies: `Eliminate` adds none while `Combat.PressureAim` still rises and the rung still reaches
+  2; `Hack` and `Decapitate` add bodies and their aim/rung are identical to Eliminate's; `Evac` has
+  no clock at all; and `ClockWavesOnEliminate = true` restores the waves.
+
+**Proof it can fail** (`prefix_revert.py apply` — reverts the four behaviours and leaves the test
+wired, then `git checkout -- src/`):
+
+```
+CLASSTEST: FAIL pitched:noKeyPitched, pitched:noKeyTasked, pitched:marks=0 want2,
+pitched:otherMarks=0, pitched:tooltipMissingClass, tasked:noKeyPitched, tasked:noKeyTasked,
+tasked:marks=0 want2, tasked:otherMarks=0, tasked:tooltipMissingClass, elimAdded=2
+```
+
+Eleven failures across every leg the wave added, including the lever (`elimAdded=2` — the pre-C3
+clock put two bodies into an `Eliminate`).
+
+**The test caught two of its own bugs before it caught anything else**, and both are the recorded
+CROSSCUT rules:
+
+- *Rule 6, an assertion in the wrong scope.* Leg D read `Pressure` after the LAST of five staged
+  clocks (Evac's 0) instead of Eliminate's, so `elimRung` failed for a reason unrelated to the
+  lever. Each arm now carries its own rung out.
+- *A gate that fails for the wrong reason is noise.* Leg B's first version swept the 12px floor
+  over the whole frame and failed on `WHITE FORD` at 11px — the campaign map's region-name strip,
+  which is `FitSize(11, 8)`. Scoped to the strings this wave paints; the pre-existing breach is
+  recorded below and NOT fixed.
+
+## 7. VERIFICATION
+
+- `dotnet build -c Release` — **0 warnings / 0 errors**.
+- `bash scripts/qa-sweep.sh --full` — **SWEEP-EXIT=0**, 65 of 65 self-tests PASS (CLASSTEST among
+  them), COVERAGE GUARD block empty, PAIRTEST byte-identical, autoplay ×3
+  `LOSE m3 / LOSE m6 / WIN m6` — no TIMEOUT, no blank.
+- **A flake, recorded rather than hidden.** The FIRST `--full` sweep printed `CONTRASTTEST: FAIL`.
+  Re-run standalone it PASSES (`glyph-vs-plate >= 4.5:1 on all 9 labels`, 6.51–13.50) and the
+  second full sweep passed it too. CONTRASTTEST reads real pixels through the post-FX shader under
+  llvmpipe on a shared four-core box; that is the most plausible cause and this wave did not touch
+  the main menu, `Pal`, or `Display`. Flagged, not explained.
+- 96 measurement chunks, every one `OK ... runs=20`; zero `BAD`.
+
+## 8. WHAT I DID NOT DO, AND WHAT IT COST
+
+- **The gap is 36.5 points, not zero, and this wave does not claim to have closed it.** It moved
+  43.0 → 36.5 — **6.5 points of a 43-point structural difference**, or 15%. The lever addresses
+  ELIMINATE's half of the kill class and nothing else.
+- **DECAPITATE's half is untouched, on purpose.** Its mid-run row is 41.3 / 42.5 (Combat / Elite)
+  and its mechanism was already located by W8 and L3 — `Mission.Build` de-stacks the FINALE by 3–4
+  bodies and resets `bump`, and no mid-run Decapitate gets that. That lever is still unspent and it
+  is still the right next one. I kept off it deliberately so this round would have a within-class
+  control; using it here would have left nothing to check the lever against.
+- **I did not price the reward.** The brief's own framing is that a 43-point spread "might be
+  correct if the game tells the player which one they are choosing **and prices the reward
+  accordingly**". This wave did the first half. `MissionNode.Intel` is depth-scaled and
+  kind-scaled and is blind to the objective class, so a PITCHED node pays a TASKED node's rate for
+  a much harder fight. That is a small change and a full round to price, and it is the obvious
+  next-wave lever. **Unmeasured, not shipped.**
+- **The bot's declining policy is not separated from the game's.** `clear%` is a joint property of
+  the design and of `Game.SmartStep`. A `SIGHTLINE_*POLICY`-style dial that forces the bot to
+  engage on non-kill objectives (the shape W8 used for `SIGHTLINE_HVTPOLICY`) would split them.
+  Not built.
+- **The anti-turtle clock is now weaker on ELIMINATE and I have not measured turtling.** The aim
+  ramp remains (up to +12/+16, telegraphed) and the flywheel's bot advances, so the batch cannot
+  see camping either way. The design argument is in §4 and it is an argument, not a measurement:
+  *this is the objective where a slow fight already punishes itself, because the force stays on the
+  board.* If a human player finds camping newly viable on Eliminate, `SIGHTLINE_KILLTREADMILL=1`
+  is the switch back and the honest reading is that this wave was wrong.
+- **A pre-existing 12px-floor breach, found and left.** `Hud.DrawCampaignMap`'s region-name strip is
+  `FitSize(rn, 11, 8, ...)` and paints at 8–11px; CLAUDE.md's floor is 12. It is not alone —
+  the WAR ROOM footer's stat labels are `FitSize(11, 8)` and the requisition slate's effect line
+  and reroll label are `FitSize(12, 9)` — so the "floor" is in practice a guideline that FITTEST
+  enforces where it looks.
+  Recorded here as the breach it is; out of this wave's charter to move, because raising those
+  strips to 12px risks overflowing the columns they were fitted to.
+- **`heat 6` moved by exactly nothing** (0 lever-only wins, 0 baseline-only, over 160 pairs). I do
+  not know why and did not chase it. The plausible reading is that at h6 the runs that reach a
+  mid-run Eliminate are already lost, so the missions this lever touches are not the ones deciding
+  the campaign — but that is a hypothesis, not a measurement.
+- **I did not put mission 1's stakes back.** The opener went 97.5% → 99.8% (24 losses in 960 → 2)
+  because it is always an `Eliminate` and therefore the largest population the lever touches. See
+  the within-run curve above. One lever per round is the rule that kept this measurable, so the
+  fix — if it is one — belongs to the next wave and belongs on `Mission.OpenerTrim`.
+- **The `EVENT`-node tooltip has no class row and no mark.** Correct (an event is not a fight), but
+  it means the map's marked/unmarked distinction now carries two meanings: "TASKED" and "not a
+  fight at all". The legend does not say so.
+- **No onboarding for the two words.** PITCHED/TASKED appear on the map, the tooltip, the key and
+  the deploy card, but the FIELD MANUAL (`Codex.cs`) does not define them and T1's just-in-time
+  tips do not introduce them. The key row is the only teaching surface.

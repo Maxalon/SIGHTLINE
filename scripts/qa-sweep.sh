@@ -94,7 +94,11 @@ echo -n "HEATLADDERTEST: "; verdict "$(SIGHTLINE_HEATLADDERTEST=1 run | grep -oE
 echo -n "SNAPTEST   : "; verdict "$(SIGHTLINE_SNAPTEST=1 run | grep -oE "SNAPTEST: (PASS|FAIL)" | head -1)"
 echo -n "AUDIOTEST  : "; verdict "$(SIGHTLINE_AUDIOTEST=1 run | grep -oE "AUDIOTEST: (PASS|FAIL)" | head -1)"
 echo -n "AUDIOGATE  : "; verdict "$(SIGHTLINE_AUDIOGATE=1 run | grep -oE "AUDIOGATE: (PASS|FAIL)" | head -1)"
-echo -n "AIIDLETEST : "; SIGHTLINE_AIIDLETEST=1 run | grep -oE "AIIDLETEST: (PASS|FAIL)" | tail -1
+# C3: this was the ONE self-test line still not routed through `verdict` — a FAIL here printed and
+# was never recorded. It did not matter while the script had no exit statement at all; now that it
+# has one, it does. (`tail -1` is kept: this test prints two candidate lines and the last is the
+# verdict.)
+echo -n "AIIDLETEST : "; verdict "$(SIGHTLINE_AIIDLETEST=1 run | grep -oE "AIIDLETEST: (PASS|FAIL)" | tail -1)"
 # RESONANCE A3: the AUDIO CHECK audition screen's listing/label/measurement contract.
 echo -n "AUDITIONTEST: "; verdict "$(SIGHTLINE_AUDITIONTEST=1 run | grep -oE "AUDITIONTEST: (PASS|FAIL)" | head -1)"
 echo -n "AMBIENTTEST: "; verdict "$(SIGHTLINE_AMBIENTTEST=1 run | grep -oE "AMBIENTTEST: (PASS|FAIL)" | head -1)"
@@ -112,6 +116,11 @@ echo -n "FUL11PROBE : "; verdict "$(SIGHTLINE_FUL11PROBE=40 run | grep -oE "FUL1
 echo -n "ONRAMPTEST : "; verdict "$(SIGHTLINE_ONRAMPTEST=1 run | grep -oE "ONRAMPTEST: (PASS|FAIL)" | head -1)"
 echo -n "OPENERTEST : "; verdict "$(SIGHTLINE_OPENERTEST=1 run | grep -oE "OPENERTEST: (PASS|FAIL)" | head -1)"
 echo -n "HVTTEST    : "; verdict "$(SIGHTLINE_HVTTEST=1 run | grep -oE "HVTTEST: (PASS|FAIL)" | head -1)"
+# CONTOUR C3 THE TWO GAMES: the objective-CLASS contract. Model (exactly Eliminate+Decapitate of
+# the eight are PITCHED) + DRAW (the campaign fork paints the class mark, the key and the hover
+# tooltip's class line, both classes staged, read at the draw call) + LEVER (the anti-turtle clock
+# adds no bodies to an ELIMINATE while its aim ramp still rises; Hack/Decapitate unchanged).
+echo -n "CLASSTEST  : "; verdict "$(SIGHTLINE_CLASSTEST=1 run | grep -oE "CLASSTEST: (PASS|FAIL)" | head -1)"
 # RESONANCE T1/T2: the onboarding contract and the incoming-fire forecast. These two EXISTED
 # but were never run by this sweep - the integration review caught it. THREATTEST prints
 # "NAME PASS" with no colon, like EXPOSURETEST.
@@ -230,3 +239,21 @@ _ran=$(grep -ohE 'SIGHTLINE_[A-Z0-9_]+(TEST|GATE)' "$_SELF" | sort -u | wc -l)
 echo "($_have self-tests exist in src/; this sweep ran $_ran$([ "$FULL" = 1 ] || echo ", PAIRTEST skipped")."
 echo " Both counts are derived from env-var NAMES, not line shapes. Every line above must read"
 echo " PASS, and every autoplay must read WIN or LOSE — never TIMEOUT, never blank.)"
+
+# ── CONTOUR C3: THE EXIT CODE, WHICH HAD NEVER BEEN WIRED ──────────────────────────────────────
+# W9's block at the top of this file says, at length, that a FAIL line / a COVERAGE GAP / a TIMEOUT
+# must make the sweep exit non-zero "so it is a gate rather than a report for a reader to notice",
+# and CLAUDE.md repeats the claim. Every path faithfully accumulated `_fail` and `_autofail` — and
+# then the script ENDED ON AN `echo`, so its exit status was that echo's, i.e. 0, always. C3 found
+# it the only way anyone was going to: its own new self-test failed inside a --full sweep and the
+# sweep still reported SWEEP-EXIT=0.
+#
+# Every "qa-sweep --full green, SWEEP-EXIT=0" claim made before this line existed was therefore
+# reporting the exit code of an echo. The PASS/FAIL lines were real; the code above them was not.
+_rc=0
+[ "$_fail" = 1 ] && _rc=1
+[ "$_autofail" = 1 ] && _rc=1
+if [ "$_rc" != 0 ]; then
+  echo "!! SWEEP FAILED - see the FAIL / COVERAGE GAP / AUTOPLAY lines above. DO NOT MERGE."
+fi
+exit $_rc

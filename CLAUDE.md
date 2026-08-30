@@ -460,6 +460,19 @@ funnel, so a trade takes roughly two hits instead of one. Its raw chunk logs liv
 > carrying either `DmgDelta` or `AiTier`**, so the middle rungs add bodies and stats and only the
 > apex changes KIND. The ladder's LEVEL is fine; its SHAPE is not.
 >
+> **SUPERSEDED AT SIX OF SIX RUNGS BY PROGRAM CONTOUR WAVE C3** (branch `wave/two-games`, base
+> `17934ee` — i.e. L3's own tree, so the two are directly comparable). One lever, CRN-paired,
+> 960 campaigns per arm on identical worlds:
+>
+> | | RECRUIT | heat 0 | heat 2 | heat 4 | heat 6 | heat 8 |
+> |---|---|---|---|---|---|---|
+> | L3 (= C3's baseline arm, reproduced exactly) | 71.2 | 47.5 | 31.2 | 23.8 | 20.0 | 6.9 |
+> | **C3** | **73.1** | **55.0** | **34.4** | **25.6** | **20.0** | **7.5** |
+>
+> **Six of six in band and monotone** — heat 2's 0.8-point miss above is closed. The paired
+> (McNemar) test over all 960 pairs is 26 lever-only wins to 2, p<0.0001. Data
+> `docs/measurements/c3/`; DEVLOG §C3.
+>
 > **A pooled objective row can hide a 49.5-point artifact** — W8 proved it on `Eliminate`, whose
 > 89.1% row is largely 960 mission-1s and reads ~40% over its mid-run cells. Use the
 > `byObjectiveByNodeKind` / `byObjectiveByMission` cross-tab before concluding anything from a
@@ -531,6 +544,23 @@ paired batches, **zero** non-choice fields moved on every one).
 **W4's gates `ch/ARMED >= 2.00` and `meaningful-choices/turn >= 3.00` are now VOID, not met** —
 this tree reads 2.389 / 3.738 at h0, but the thresholds were set on the old instrument, so nobody
 may claim them until they are restated. DEVLOG §TRUE BAND; raw chunks `docs/measurements/tb/`.
+
+**PROGRAM CONTOUR** is the eleventh, and wave **C3 "THE TWO GAMES"** is the one a fresh session
+most needs to know about, because it changes what an objective *is* in this game. SIGHTLINE's eight
+objectives are **two classes**: two end only when hostile bodies fall (ELIMINATE, DECAPITATE) and
+six end on a task. On mid-run campaign nodes that split was worth **43.0 points** of win rate —
+more than any step on the heat ladder — and nothing in the game said which class a node was.
+C3 refuted force size, mission length and reinforcement volume as causes by measurement and located
+it in the win condition: **a WON non-kill mission kills 25.1% of the force it deployed against, and
+a won EXTRACT kills 3.3%.** Six of eight objectives are routinely won by declining the encounter.
+It shipped one lever (the anti-turtle clock's reinforcement arm no longer fires on ELIMINATE — the
+one objective where an added body is also win condition, so the clock moved the finish line instead
+of raising its price; `SIGHTLINE_KILLTREADMILL=1` restores it) and one information change (the
+campaign fork names the class — **PITCHED** / **TASKED** — on the node label, a legend key, the
+hover tooltip and the deploy card). Gap 43.0 → **36.5**; the ladder above. `Run.IsKillObjective` is
+the single source of truth; `SIGHTLINE_CLASSTEST` is the gate. **The reward is still not priced:
+`MissionNode.Intel` is blind to the class, so a PITCHED node pays a TASKED node's rate.** Rationale
+and its cost: `docs/DESIGN.md` §5.2; detail `docs/DEVLOG.md` §C3.
 
 ## Handoff protocol (when context gets heavy)
 You judge when context rot risks quality (don't wait for the 1M hard limit). Before stopping:

@@ -461,7 +461,7 @@ assumes — the system is built, measured, and largely fails to reach play.
 | Decision quality per turn | **Measured (W2+)** | No longer a hypothesis: the flywheel instruments meaningful-choices/turn and lead-swings/match, and UNDERTOW/APEX moved both. The live question is the **~0 policy gap** (sloppy play is fully viable) — accept-vs-sharpen is parked at FUL-13. |
 | Output-randomness feel | **Addressed** | Graze band, streak-breaker (S4-C), always-on combat log ("did the dice cheat me?"), banded odds colors. The rage surface is mitigated, not gone — %-to-hit stays genre-true. |
 | **Death stakes** | **Addressed (FUL-7), measured** | The moment of death is now a 3-turn BLEED-OUT with real counterplay — STABILIZE freezes the clock, the corpsman's PATCH revives, DRAG/EXTRACT carry the body, a won field recovers the survivor gravely wounded (Wound 3 + the near-death scar track), and only telegraphed AoE/fire can finish a downed soldier. Measured (paired h0; review-fixed build, same-slot re-measure): soldier true-KIA **-40%** (125→75 on slots 0-9), 186 downs staged at a **33% save-rate** (the honest ledger — a body finished by AoE/fire while down is a death, not a save), STABILIZE a live first-class verb (~60 uses/chunk). What remains thin is the REVIVE half: the corpsman reaches only ~38% of missions (backfill-only roster), so revives are rare (7 measured) — the FUL-13 founding-squad question, recorded not quota-chased. |
-| **Engagement mass** | **Thin** | The comeback economy (BRACE, morale/rout, the verb boons) is tuned for battles that mostly don't happen: 2-enemy pods executed serially in 3-4-turn missions. The balance bot has used BRACE **zero** times in ~500 measured missions, and the FUL-1 PROCS column now shows which held boons never fire. One real multi-pod battle per mission is the fix (FUL-6). |
+| **Engagement mass** | **Thin — and C3 measured the size of it** | The comeback economy (BRACE, morale/rout, the verb boons) is tuned for battles that mostly don't happen: 2-enemy pods executed serially in 3-4-turn missions. The balance bot has used BRACE **zero** times in ~500 measured missions, and the FUL-1 PROCS column now shows which held boons never fire. One real multi-pod battle per mission was the fix (FUL-6). **C3 put a number on the residue and it is worse than "thin": on a WON non-kill mid-run mission the squad kills 25.1% of the force it deployed against, and on a won EXTRACT 3.3% — 0.27 bodies of 8.14.** Six of the eight objectives deploy a full hostile force that is, in play, scenery. That is the same finding one layer up: it is not that the battles are small, it is that on most objectives the battle is optional. See §5.2. |
 | Screen usage / UI framing | **Addressed (4.1)** | Full-bleed board with translucent floating panels; W11 de-occluded the HUD and FUL-3 fixed the chip reflow. |
 | Onboarding | **Addressed (RESONANCE T1)** — was an over-claim | The W11 grade ("Addressed") was wrong and is recorded here as the mis-grade it was: what shipped was a 5-card callout strip on mission 1 that taught **3 of ~14 verbs** while the bar showed twelve (FUL-12 dimmed the other eleven — dimming is not staging), plus a six-bullet rules wall on the intro, i.e. the exact artefact §3.G says not to ship. T1 replaced it with the shape §3.G actually asks for: a scripted, non-persistent, restartable **TRAINING OP** (8 well-ordered problems on an authored arena — move, cover, flank, fire, overwatch, grenade, ability, clear), **staged verbs** (drill + mission 1 only, with a permanent SHOW ALL escape), and **10 just-in-time field tips** (one per untaught verb, once per profile, fired the first time its precondition is true in play). The intro is one line. The FIELD MANUAL stays the reference it always was. Hook: `SIGHTLINE_TUTTEST`. |
 | Accessibility | **Improving** | Colorblind palette + brightness/gamma shipped (Display settings). No text-scale pass yet (3.13). |
@@ -676,6 +676,85 @@ CRN-paired campaigns, run completion 25.2% → 23.8% pooled (McNemar p=0.451), m
 78.94% → 78.56% over ~1400 missions, soldier deaths per mission 1.340 → 1.340. See
 `docs/measurements/w2/` and `docs/DEVLOG.md` §W2; `SIGHTLINE_AIIDLEFIX=0` restores the pre-W2
 behaviour — and, since the review, the pre-W2 *read* — exactly.
+
+---
+
+## 5.2 The objective CLASS (decided 2026-08-30, PROGRAM CONTOUR wave C3 "THE TWO GAMES")
+
+Same contract as §5: on the record, with the alternatives named and the cost of the one
+we chose stated.
+
+**The finding.** SIGHTLINE has eight objectives and they belong to two classes. Two end
+only when hostile bodies fall — **ELIMINATE** (all of them) and **DECAPITATE** (one named
+one). Six end when the squad reaches a tile, holds a timer or sets a charge. On mid-run
+campaign nodes, measured over 960 campaigns (base `17934ee`, `docs/measurements/c3/`):
+
+| on Combat + Elite nodes | win% | ±SE | n |
+|---|---|---|---|
+| KILL | **38.5** | 3.1 | 247 |
+| NON-KILL | **81.5** | 1.1 | 1243 |
+
+**43 points — larger than any step on the heat ladder.** And the reason is not force
+size, mission length or reinforcement volume (all three refuted by measurement; DEVLOG
+§C3 §2). It is the win condition: **a WON non-kill mission kills 25.1% of the force it
+deployed against, and a won EXTRACT kills 3.3%.** Six of eight objectives are routinely
+won by walking past an intact enemy force.
+
+**The options considered:**
+
+1. **Close the gap by making the six harder** — gate the extraction zone on attrition,
+   require a partial clear, make the force chase harder. Rejected outright: §3.F wants
+   runs to differ by *combinations*, and "clear the room" alternating with "get in and
+   out" is the best combination the objective roster has. This option deletes it and
+   makes all eight objectives the same mission.
+2. **Close the gap by making the two easier** — the direction C3 took, but only partly.
+   Taken far enough it has the same failure: a PITCHED mission that plays like a TASKED
+   one is not a second game, it is the first game with more walking.
+3. **Accept the gap and make it LEGIBLE and PRICED** — the class is stated at the fork
+   and the harder class pays more. This is the option that treats the difference as
+   content rather than as a defect.
+4. **Do nothing.** What was shipping.
+
+**The decision: 3, plus as much of 2 as one well-argued mechanism justifies — and the
+pricing half is NOT done.**
+
+The reasoning is §3.A. *"A decision is interesting only if no option dominates, the
+options are asymmetric, and the player can make it informed."* The campaign fork failed
+the third clause absolutely: it named the objective and nothing named the class, so the
+single largest predictor of a node's difficulty was the one property the player could not
+read. That is a **false choice** — options that look different and whose real difference
+is hidden. And §3.D compounds it: the within-run curve is a clean 98/83/77/78/73/68
+stair-step with an unreadable 38.5% node sitting inside it.
+
+So the class is now said out loud, everywhere the player picks a node — **PITCHED** (the
+field must be cleared) and **TASKED** (the objective ends it, *and the force can be left
+standing*). The second clause is deliberate. §3.A objects to a dominant line **existing**,
+not to it being known, and §3.B says telegraph; the optimal policy already declines those
+fights, so concealing it only taxed players who had not worked it out.
+
+The mechanical half was held to **one** change with a mechanism, not a difficulty knob:
+the anti-turtle clock's reinforcement arm no longer fires on ELIMINATE. The clock's
+charter (§3.A, "incentivize aggression") is to make camping worse than advancing — but on
+the one objective whose win condition counts bodies, its second arm was not raising the
+price of the finish line, it was moving it. Hack and Decapitate carry the same clock and
+keep both arms, because their win conditions do not count bodies. That closed 6.5 of the
+43 points.
+
+**What this decision costs, stated plainly.**
+
+- **The gap is still 36.5 points.** This section records a *position*, not a repair. A
+  fork between a 45%-node and an 82%-node is only defensible once it is legible AND
+  priced, and **the pricing is not built**: `MissionNode.Intel` is depth- and kind-scaled
+  and blind to the class, so a PITCHED node pays a TASKED node's rate. Until that lands,
+  the map tells the player which game they are choosing and still offers no reason to
+  choose the hard one. **That is the open half of this decision.**
+- **The anti-turtle clock is weaker on ELIMINATE and turtling was not measured.** The aim
+  ramp remains and the argument is structural (a slow Eliminate already punishes itself,
+  because the force stays on the board), but it is an argument.
+  `SIGHTLINE_KILLTREADMILL=1` reverses it.
+- **"You may decline the fight" is now printed on the map.** If a later wave decides the
+  encounter should not be declinable, this line becomes a promise the game stops keeping,
+  and it has to come off the tooltip in the same wave.
 
 ---
 

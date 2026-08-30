@@ -6288,12 +6288,22 @@ public partial class Game
             // else.
             void DrawPass(Objective forced, string tag)
             {
+                // FIXED SEED: the map is dealt from the ambient RNG, so an unseeded run gave this
+                // test a different fork every invocation. A gate that samples the world is a gate
+                // that flakes — and this one did, on its second sweep.
+                Util.Reseed(20260830);
                 _run = new Run(); _run.Start();
                 DebugCampaignMap();                       // -> Phase.Barracks with a live fork
                 var choices = _run.NextNodes();
                 if (choices.Count == 0) { fails.Add(tag + ":noFork"); return; }
                 foreach (var n in choices) { n.Kind = NodeKind.Combat; n.Card.Objective = forced; }
 
+                // PARK THE CURSOR OFF THE MAP. The hover tooltip draws a class mark of its own, so
+                // a cursor left on a node by the PREVIOUS pass's tooltip step silently adds one to
+                // the census below. That is the exact flake this leg shipped with: the map layout
+                // is seed-dependent, so whether the stale cursor happened to land on a node varied
+                // run to run and the test failed roughly one sweep in three.
+                Raylib.SetMousePosition(2, 2);
                 var cap = new List<(string text, float size)>();
                 var marks = new List<(Objective obj, float x, float y)>();
                 Cfg.CaptureText = cap; Hud.CaptureClassMarks = marks;
@@ -6324,6 +6334,9 @@ public partial class Game
                 //      as an unlabelled fork).
                 string objName = forced == Objective.Eliminate ? "ELIMINATE" : "EXTRACT";
                 if (!Said(cap, objName)) fails.Add(tag + ":noObjLabel");
+                // (B3b) and with the cursor off the map NO tooltip was painted — which is what
+                //       makes the census above a statement about the LABELS and the key.
+                if (Said(cap, mine) || Said(cap, theirs)) fails.Add(tag + ":tooltipWithoutHover");
                 // (B4) every string THIS WAVE paints clears the 12px floor. Scoped deliberately:
                 //      a whole-frame sweep fails on text this wave did not write — the campaign
                 //      map's region-name strip is FitSize(11, 8) and paints at 8-11px, which is a
@@ -6340,16 +6353,32 @@ public partial class Game
                 //     cursor on a real node and draw again, so the tooltip is reached through the
                 //     shipped hover predicate and not through a staging flag.
                 if (Hud.NodeBtns.Count == 0) { fails.Add(tag + ":noNodeBtns"); return; }
-                var r = Hud.NodeBtns[0].Rect;
-                Raylib.SetMousePosition((int)(r.X + r.Width / 2), (int)(r.Y + r.Height / 2));
+                // THE HOVER HAS TO CONVERGE, NOT BE ASSUMED. DrawBarracks gives the card a 0.15 s
+                // slide-down entrance (`PanelAnim("barracks")`), so the whole map — and therefore
+                // every rect NodeBtns publishes — moves by up to 16 px between two consecutive
+                // draws taken inside that window. Parking the cursor on a rect read from the
+                // PREVIOUS draw therefore misses the node about half the time, and it missed 3 of
+                // 4 runs under `dotnet run -c Debug` (where the first draw is slow enough to land
+                // mid-entrance) while passing 8 of 8 on the Release binary. So: re-read the rect,
+                // re-park, re-draw, until the tooltip actually appears. The entrance ends, so this
+                // converges; and it is still the shipped hover predicate doing the deciding.
                 var cap2 = new List<(string text, float size)>();
-                Cfg.CaptureText = cap2;
-                Raylib.BeginDrawing(); DrawHudLayer(); Raylib.EndDrawing();
-                Cfg.CaptureText = null;
+                for (int tries = 0; tries < 10; tries++)
+                {
+                    var r = Hud.NodeBtns[0].Rect;
+                    Raylib.SetMousePosition((int)(r.X + r.Width / 2), (int)(r.Y + r.Height / 2));
+                    cap2 = new List<(string text, float size)>();
+                    Cfg.CaptureText = cap2;
+                    Raylib.BeginDrawing(); DrawHudLayer(); Raylib.EndDrawing();
+                    Cfg.CaptureText = null;
+                    // "the tooltip drew at all" is the intel row, which predates this wave — so the
+                    // loop's exit condition can never be satisfied by the thing under test.
+                    if (cap2.Any(t => t.text.Contains("intel"))) break;
+                    if (Hud.NodeBtns.Count == 0) break;
+                }
+                if (!cap2.Any(t => t.text.Contains("intel"))) { fails.Add(tag + ":noTooltip"); return; }
                 if (!Said(cap2, mine)) fails.Add(tag + ":tooltipMissingClass");
                 if (Said(cap2, theirs)) fails.Add(tag + ":tooltipWrongClass");
-                // the tooltip must still carry what it carried before this wave
-                if (!cap2.Any(t => t.text.Contains("intel"))) fails.Add(tag + ":tooltipLostIntel");
             }
             DrawPass(Objective.Eliminate, "pitched");
             DrawPass(Objective.Evac, "tasked");

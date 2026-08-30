@@ -2102,10 +2102,31 @@ ladder is `docs/measurements/l3/` and the write-up is DEVLOG §L3. Start here:
       `bump`; no mid-run Decapitate gets that, and an ELITE node adds +2 bodies and +1 stat.
       **The next lever belongs on the force de-stack, not on the target.**
 
-- [ ] **KILL OBJECTIVES ARE A DIFFERENT GAME FROM THE REST.** On mid-run node kinds, kill
-      objectives read **38.3% ±3.1 (n=248)** against **83.4% ±1.0 (n=1259)** for the six with a
-      non-combat win condition; at mission 5, Eliminate 25.6% and Sabotage 96.8%. That is a
-      45-point gap between objective *classes*, not between objectives.
+- [x] **KILL OBJECTIVES ARE A DIFFERENT GAME FROM THE REST.** Taken by **PROGRAM CONTOUR wave
+      C3 "THE TWO GAMES"** (branch `wave/two-games`, base `17934ee`; DEVLOG §C3, data
+      `docs/measurements/c3/`). Re-established on that tree at **38.5 ±3.1 (n=247)** vs
+      **81.5 ±1.1 (n=1243)** — a **43.0-point** gap. **Mechanism located and three rivals refuted
+      by measurement**: not force size (the four untrimmed non-kill objectives deploy 8.14–8.96
+      against the kill class's 8.34), not mission length (7.17 turns vs 6.73; Defend is the longest
+      objective in the game and wins 78%), not reinforcement VOLUME (Defend takes 6.48 added bodies
+      a mission and wins 78%; Eliminate takes 1.69 and wins 37%). What survives is the win
+      condition: **a WON non-kill mission kills 25.1% of the force it deployed against — Evac 3.3%
+      — so six of eight objectives are routinely won by declining the encounter.** Shipped one
+      lever (the anti-turtle clock's reinforcement arm no longer fires on ELIMINATE, the one
+      objective where an added body is also win condition) and one information change (the campaign
+      fork now names the class: PITCHED / TASKED). Gap **43.0 → 36.5**; ladder **six of six rungs
+      in band** for the first time; CRN-paired 26 lever-only wins to 2 over 960 pairs, p<0.0001.
+
+- [ ] **OPEN, left by C3 — the class gap is 36.5 points, and the reward is still not priced.**
+      Two named follow-ons, in order:
+      1. **Price the PITCHED node.** `MissionNode.Intel` is depth- and kind-scaled and blind to the
+         objective class, so a node that is 36.5 points harder pays the same rate. `docs/DESIGN.md`
+         §3.A wants the fork to trade off; C3 made it legible and did not make it a bargain.
+      2. **DECAPITATE's half of the class is untouched.** C3 kept off it deliberately so the round
+         had a within-class control. The mechanism is still W8/L3's: `Mission.Build` de-stacks the
+         FINALE by 3-4 bodies and resets `bump`, and no mid-run Decapitate gets that.
+      Also unbuilt: a bot dial that forces engagement on non-kill objectives, which is the only way
+      to separate "the design lets you decline" from "`Game.SmartStep` chooses to".
 
 ### The methodological rules this program had to learn the hard way
 
