@@ -9302,6 +9302,7 @@ shot to decline and four legs were failing vacuously; and the exec-site decision
 terminal-else's `staleplan` tag inside its dry-weapon arm, so its hunker arm fell through
 unlabelled and reported as `idle`. Both were found by making the test PRINT its scene rather than
 trusting it.
+
 ## 8. VERIFICATION
 
 - **Release build 0 warnings / 0 errors.**
@@ -9330,8 +9331,9 @@ trusting it.
 ## 9. WHAT I DID NOT DO, AND WHAT IT COSTS
 
 - **I did not make declining common, and I will not pretend the shipped rate is large.** It is
-  ~1-2% of the shots on the table. A player will see the opponent hold fire roughly once every few
-  missions. That is a deliberate consequence of pricing the gate against a measured 24% lane
+  **0.65%** of the shots on the table pooled over the 960-campaign round (1.0-1.4% on the heat-0
+  probe chunks, where the calibration was done). At ~11.8 contested enemy acts per mission that is
+  roughly one visible decline every several missions. That is a deliberate consequence of pricing the gate against a measured 24% lane
   payoff rather than against a target rate, and §4's diagnostic is the evidence that the
   alternative is worse: at 51% declines the opponent handed the player 20 points of run
   completion. **If a later wave wants a felt decline rate, the thing to fix first is the LANE, not
