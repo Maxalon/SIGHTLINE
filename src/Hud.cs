@@ -3454,6 +3454,24 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         }
     }
 
+    // ── THE FIT — the HALL OF FAME legend row stops running into the panel it lives in ─────────
+    //
+    // The row packed identity AND score into one unbounded 12 px sub-line drawn at a literal
+    // x+66: "SERGEANT SHARPSHOOTER · 17 K · H3" measured 46 px clear of the panel's cyan inner
+    // border at 100%, 24 px at 110% and 2 px at 120% — and the staged profile is not the worst
+    // case, because Run.Ranks carries LIEUTENANT and real legends carry three-digit kill counts.
+    // The border was going to be the thing that stopped the text. Splitting the line is a reflow,
+    // not a shrink: the SCORE (kills + heat) right-aligns to the panel's content edge, where it
+    // also columnises across rows, and the IDENTITY (rank + class) keeps the sub-line to itself.
+    // Nothing is clipped, nothing goes below the 12 px floor.
+    public const int WarLegendTextX = 66, WarLegendPadR = 14;
+    public const int WarLegendNameFs = 14, WarLegendSubFs = 12, WarLegendScoreFs = 12;
+    public static string WarLegendSub(SaveGame.LegendDto l) => OldFit ? WarLegendOldLine(l) : $"{l.Rank} {l.Cls}";
+    public static string WarLegendScore(SaveGame.LegendDto l) => OldFit ? "" : $"{l.Kills} K  ·  H{l.Heat}";
+    static string WarLegendOldLine(SaveGame.LegendDto l) => $"{l.Rank} {l.Cls}  ·  {l.Kills} K  ·  H{l.Heat}";
+    /// The row's usable text width inside a panel `panelW` wide.
+    public static int WarLegendTextW(int panelW) => panelW - WarLegendTextX - WarLegendPadR;
+
     static void DrawWarHallOfFame(Game.WarRoomProfile p, int x, int y, int w, int h, float anim)
     {
         if (anim <= 0f) return;
@@ -3475,9 +3493,16 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
             // FUL-12: the class glyph leads each legend (gold for a run-winner, dim for the
             // fallen) — the same silhouette language as the board/roster/end card.
             Renderer.DrawCodexGlyph(l.Cls, new Vector2(x + 52, rowY + 13), Raylib.Fade(l.Won ? Pal.VipGold : Pal.TxtDim, 0.9f * anim), 0.8f);
-            Cfg.Text(l.Name ?? "", new Vector2(x + 66, rowY), 14, 1f, Raylib.Fade(l.Won ? Pal.Txt : Pal.TxtDim, anim));
-            string sub = $"{l.Rank} {l.Cls}  ·  {l.Kills} K  ·  H{l.Heat}";
-            Cfg.Text(sub, new Vector2(x + 66, rowY + 16), 12, 1f, Raylib.Fade(Pal.TxtDim, anim));
+            Cfg.Text(l.Name ?? "", new Vector2(x + WarLegendTextX, rowY), WarLegendNameFs, 1f,
+                     Raylib.Fade(l.Won ? Pal.Txt : Pal.TxtDim, anim));
+            // THE FIT: the score half is right-aligned to the panel's own content edge and the
+            // identity half keeps the sub-line to itself. See WarLegendSub/WarLegendScore.
+            string score = WarLegendScore(l);
+            float scw = Cfg.Measure(score, WarLegendScoreFs, 1f).X;
+            Cfg.Text(score, new Vector2(x + w - WarLegendPadR - scw, rowY + 3), WarLegendScoreFs, 1f,
+                     Raylib.Fade(l.Won ? Pal.VipGold : Pal.TxtDim, 0.9f * anim));
+            Cfg.Text(WarLegendSub(l), new Vector2(x + WarLegendTextX, rowY + 16), WarLegendSubFs, 1f,
+                     Raylib.Fade(Pal.TxtDim, anim));
             rowY += 34;
         }
     }
@@ -3836,11 +3861,42 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     /// The run-scoped BOON pick (Wave 3): a pick-1-of-3 doctrine card shown in the barracks before
     /// the campaign-map node choice. Boons last the whole run (discarded at run end) and stack, so
     /// every run develops a different character. Cards are clickable (rects cached in BoonBtns).
+    // ── THE FIT — the MID-RUN doctrine card sizes to its own text, exactly as the DRAFT one does.
+    //
+    // W5-FIX-2 content-sized the doctrine card on the draft screen and gated it (CHROMETEST leg C).
+    // This screen draws the SAME sixteen descriptions from a second, older call site that kept a
+    // literal 188 px box: FIELD DRILLS (98 chars, the catalogue's only description over 60) wrapped
+    // to four lines whose last one landed ON the "[ CHOOSE ]" call-to-action at the DEFAULT text
+    // size, and to five at 120%. Same authored string, same defect, different code path — which is
+    // why the gate below asserts every boon against the box that DRAWS it rather than against the
+    // one screen a screenshot happened to catch.
+    public const int BoonOfferCardW = 300, BoonOfferGap = 22, BoonOfferMinH = 188;
+    public const int BoonOfferBodyTop = 86, BoonOfferFs = 14, BoonOfferPadB = 12;
+    public const int BoonOfferChooseUp = 30;          // [ CHOOSE ] baseline = cardH - this
+    public static int BoonOfferLineH => BoonOfferFs + 6;                 // WrapLines' own step
+    public static int BoonOfferBodyW => BoonOfferCardW - 36;
+    public static int BoonOfferLineCount(Boon b)
+        => WrapLines(BoonDef.Desc(b), BoonOfferBodyW, BoonOfferFs, 0).Count;
+    /// Where the LAST body line's ink actually lands, through the real font at the live UI scale —
+    /// measured, not re-derived from the constants the height formula uses (W5-FIX's lesson: a
+    /// test that recomputes the sizer's own arithmetic cannot fail).
+    public static float BoonOfferInkBottom(Boon b)
+        => BoonOfferBodyTop + (Math.Max(1, BoonOfferLineCount(b)) - 1) * BoonOfferLineH
+         + Cfg.Measure(BoonDef.Desc(b), BoonOfferFs, 1f).Y;
+    public static int BoonOfferCardH(int lines)
+        => OldFit ? BoonOfferMinH
+         : Math.Max(BoonOfferMinH, BoonOfferBodyTop + Math.Max(1, lines) * BoonOfferLineH
+                                 + BoonOfferPadB + BoonOfferChooseUp);
+
     static void DrawBoonOffer(Game g, Run run)
     {
         Raylib.DrawRectangle(0, 0, Cfg.ScreenW, Cfg.ScreenH, Raylib.Fade(Pal.RGBA(5, 8, 11), 0.9f));
         int n = run.BoonOffer.Count;
-        int cw = 300, gap = 22, ch = 188;
+        int cw = BoonOfferCardW, gap = BoonOfferGap;
+        // the row is even: every card takes the height the TALLEST description needs
+        int bLines = 1;
+        foreach (var b0 in run.BoonOffer) bLines = Math.Max(bLines, BoonOfferLineCount(b0));
+        int ch = BoonOfferCardH(bLines);
         int totalW = n * cw + (n - 1) * gap;
         int x0 = Cfg.ScreenW / 2 - totalW / 2;
         int y0 = Cfg.ScreenH / 2 - ch / 2 - 10;
@@ -3864,9 +3920,9 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
             // name
             Cfg.Text(BoonDef.Name(boon), new Vector2((int)r.X + 18, (int)r.Y + 46), 22, 1f, Pal.Txt);
             // description (word-wrapped)
-            foreach (var (line, dy) in WrapLines(BoonDef.Desc(boon), cw - 36, 14, 0))
-                Cfg.Text(line, new Vector2((int)r.X + 18, (int)r.Y + 86 + dy), 14, 1f, Pal.TxtDim);
-            Cfg.Text("[ CHOOSE ]", new Vector2((int)r.X + 18, (int)r.Y + ch - 30), 14, 1f, hover ? Pal.Good : Pal.Accent);
+            foreach (var (line, dy) in WrapLines(BoonDef.Desc(boon), BoonOfferBodyW, BoonOfferFs, 0))
+                Cfg.Text(line, new Vector2((int)r.X + 18, (int)r.Y + BoonOfferBodyTop + dy), BoonOfferFs, 1f, Pal.TxtDim);
+            Cfg.Text("[ CHOOSE ]", new Vector2((int)r.X + 18, (int)r.Y + ch - BoonOfferChooseUp), BoonOfferFs, 1f, hover ? Pal.Good : Pal.Accent);
             BoonBtns.Add((boon, r));
         }
 
@@ -3888,6 +3944,13 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     /// action-bar order, pill envelope and fixed doctrine-card height), so SIGHTLINE_CHROMETEST is
     /// falsifiable without reverting the tree. Default OFF.
     public static readonly bool OldChrome = Environment.GetEnvironmentVariable("SIGHTLINE_OLDCHROME") == "1";
+
+    /// Off-switch for wave THE FIT's five text-scale repairs (SIGHTLINE_OLDFIT=1 restores the
+    /// fixed-pixel geometry each one replaced: the 300px draft card, the 188px FIELD DOCTRINE
+    /// card, the armory price on the blurb's own band, the unbounded HALL OF FAME legend line and
+    /// the literal 190/280px draft button plates). SIGHTLINE_FITTEST fails on every one of them,
+    /// so the gate is falsifiable without reverting the tree. Default OFF.
+    public static readonly bool OldFit = Environment.GetEnvironmentVariable("SIGHTLINE_OLDFIT") == "1";
     static float PulseMid => OldChrome ? 0.55f : 0.78f;
     static float PulseAmp => OldChrome ? 0.45f : 0.22f;
     public static float ConcealPulseFloor => PulseMid - PulseAmp;
@@ -3899,10 +3962,30 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     /// ABOVE the class-glyph disc (that is the repair for audit newplayer-6's second half), so
     /// the assertion is a VERTICAL clearance plus a width that fits the longest authored blurb —
     /// not a horizontal inset, which is what the disc used to force.
-    public const int DraftCardW = 300, DraftCardH = 150;
+    public const int DraftCardH = 150, DraftGridGap = 24;
     public const int DraftBlurbTop = 12 + 76, DraftBlurbFs = 12;
-    public static int DraftBlurbWidth() => DraftCardW - 32;
+
+    /// THE FIT: the operator card was a literal 300 px while its blurb column (cw-32 = 268 px)
+    /// carried a 37-character sentence — 266 px at 100%, i.e. TWO pixels of margin, and 293/320 px
+    /// at the 110%/120% text sizes the game ships. W5 moved the class-glyph disc out of the blurb
+    /// row and asserted the fit, but only at 100%, so the two larger sizes silently ellipsized
+    /// ("picks off th…") on the screen where a player picks their squad for the whole run.
+    /// The card now derives its width from the RUN CONTRACT row below it — 3 cards + 2 gaps ==
+    /// that row's 1230 px — so the candidate grid stops being the one narrow row on the screen
+    /// (the same composition argument, and the same reclaim, W5-FIX-2 made for the doctrine row)
+    /// and the blurb column grows 268 -> 362 px. Growing the chrome, not shrinking the writing.
+    public static int DraftRowW()
+    {
+        int cn = DraftContractCards.Length;
+        return cn * DraftContractCardW() + (cn - 1) * DraftContractGap;
+    }
+    public static int DraftCardW() => OldFit ? 300 : (DraftRowW() - 2 * DraftGridGap) / 3;
+    public static int DraftBlurbWidth() => DraftCardW() - 32;
     public static int DraftBlurbBottom() => DraftBlurbTop + DraftBlurbFs;
+    /// The card's other two measured text columns, so the gate covers the whole card and not
+    /// just the one line the last wave happened to look at.
+    public static int DraftAbilityWidth() => DraftCardW() - 16 - ((int)(GlyphDiscR * 2) + 16);
+    public const int DraftAbilityFs = 12;
     public static float DraftGlyphTop() => DraftCardH - (GlyphDiscR + 8) - GlyphDiscR;
     /// Every authored class blurb, so the test can assert none of them ellipsizes.
     public static string[] ClassBlurbsForTest()
@@ -3925,12 +4008,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     /// a 395 px card wraps FIELD DRILLS' description in three lines where a 296 px one needed
     /// four at 120% text, and four lines is what pushed the DEPLOY row off the bottom. The height
     /// is reclaimed from the horizontal slack the screen was already wasting.
-    public static int DraftBoonCardW()
-    {
-        int cn = DraftContractCards.Length;
-        int rowW = cn * DraftContractCardW() + (cn - 1) * DraftContractGap;
-        return (rowW - 2 * DraftBoonGap) / 3;
-    }
+    public static int DraftBoonCardW() => (DraftRowW() - 2 * DraftBoonGap) / 3;
     public static int DraftBoonCardHeight(int lines)
         => OldChrome ? 74 : Math.Max(74, DraftBoonBodyTop + Math.Max(1, lines) * DraftBoonLineH + DraftBoonPadB);
 
@@ -3967,7 +4045,44 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
     // every gap has been given up: it is 0 for the whole shipped catalogue at all four text
     // sizes, CHROMETEST asserts that, and the DEPLOY row is additionally hard-clamped on screen
     // so the failure mode of a future copy edit is a tight layout, never an unreachable button.
-    public const int DraftConfirmH = 46, DraftBottomPad = 8;
+    public const int DraftConfirmH = 46, DraftBottomPad = 8, DraftBtnGap = 14;
+
+    // ── THE FIT — the draft's bottom row: three plates that are sized by their own labels ──────
+    //
+    // W5-FIX-2 fixed WHERE this row sits (it was sliced by the bottom of the screen, and clean
+    // off it at 120%) and gated that with CHROMETEST. What it did not fix is how WIDE the plates
+    // are: RE-ROLL POOL was a literal 190 px carrying a label that measures 216 px at 120%, so
+    // the text hung ~13 px past BOTH vertical borders of its own plate — the 'RE' started left of
+    // the plate's left edge. DEPLOY was a literal 280 px and its longest state label,
+    // "DEPLOY  (PAY nnn SALVAGE)", measures 324 px at 120%.
+    //
+    // Both are now measured — but from the WIDEST label the button can ever show, never from the
+    // one it happens to be showing. A plate that resized as the draft filled up would move BACK
+    // and RE-ROLL under the player's cursor, which is exactly the defect CHROMETEST leg (A)
+    // exists to forbid on the action bar.
+    public const int DraftDeployFs = 18, DraftRerollFs = 13, DraftBackFs = 16, DraftBackHintFs = 12;
+    /// Every label the DEPLOY plate can carry, with the widest numbers the fields can hold.
+    public static string[] DraftDeployLabels() => new[]
+    {
+        "DEPLOY", "DEPLOY  (PAY 999 SALVAGE)", "NEED 999 MORE SALVAGE",
+        $"SELECT {Game.DraftCap} MORE", "PICK A DOCTRINE",
+    };
+    public static int DraftConfirmW()
+    {
+        if (OldFit) return 280;
+        float wid = 0f;
+        foreach (var s in DraftDeployLabels()) wid = MathF.Max(wid, Cfg.Measure(s, DraftDeployFs, 1f).X);
+        return Math.Max(280, (int)wid + 24);
+    }
+    public static string DraftRerollLabel => $"RE-ROLL POOL  ({MetaProg.DraftRerollCost} SALV)";
+    public static int DraftRerollW()
+        => OldFit ? 190 : Math.Max(190, (int)Cfg.Measure(DraftRerollLabel, DraftRerollFs, 1f).X + 28);
+    public static int DraftBackW()
+        => OldFit ? 120
+         : Math.Max(120, (int)(Cfg.Measure("BACK", DraftBackFs, 1f).X
+                             + Cfg.Measure("[Esc]", DraftBackHintFs, 1f).X) + 26);
+    /// The whole row's horizontal extent, so the gate can assert it stays on the canvas.
+    public static int DraftBtnRowW() => DraftBackW() + DraftBtnGap + DraftConfirmW() + DraftBtnGap + DraftRerollW();
 
     /// Squeezable gaps, in the order the layout gives them up (last entry goes first).
     ///   0 grid top · 1 candidate row gap (counts twice) · 2 grid -> doctrine head
@@ -4049,6 +4164,11 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         s.Bottom = s.ConfirmY + DraftConfirmH;
         return s;
     }
+
+    /// THE FIT seam: the renderer's OWN wrap, so the gate measures the lines that will actually
+    /// be painted rather than a re-implementation of the wrapper (W5-FIX's lesson).
+    public static System.Collections.Generic.List<(string, int)> WrapLinesForTest(string text, int width, int size)
+        => WrapLines(text, width, size, 0);
 
     static System.Collections.Generic.List<(string, int)> WrapLines(string text, int width, int size, int _)
     {
@@ -4275,7 +4395,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         var st = DraftLayout(bLines, DraftContractH());
 
         // ---- candidate cards: 6 in two rows of 3 ----
-        int cols = 3, cw = DraftCardW, chH = DraftCardH, gx = 24, gy = st.GridRowGap;
+        int cols = 3, cw = DraftCardW(), chH = DraftCardH, gx = DraftGridGap, gy = st.GridRowGap;
         int gridW = cols * cw + (cols - 1) * gx;
         int x0 = W / 2 - gridW / 2;
         int y0 = st.GridTop;
@@ -4480,7 +4600,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         bool ready = g.DraftReady;
         bool payable = g.DraftRecallAffordable;
         int recallBill = g.DraftRecallCost;
-        int dbw = 280, dbh = DraftConfirmH;
+        int dbw = DraftConfirmW(), dbh = DraftConfirmH;
         DraftConfirm = new Rectangle(W / 2 - dbw / 2, st.ConfirmY, dbw, dbh);
         bool dhover = ready && payable && Raylib.CheckCollisionPointRec(mouse, DraftConfirm);
         Color deployCol = ready && payable ? (dhover ? Pal.RGBA(92, 200, 251) : Pal.Good)
@@ -4499,20 +4619,20 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
 
         // ---- BACK to the intro (W1 mode-seam: the skirmish setup's escape hatch, mirrored) ----
         // W12: neutral-outline ghost — BACK is never a primary verb, so it never gets a filled plate.
-        int bkw = 120;
-        DraftBack = new Rectangle(DraftConfirm.X - bkw - 14, DraftConfirm.Y, bkw, dbh);
+        int bkw = DraftBackW();
+        DraftBack = new Rectangle(DraftConfirm.X - bkw - DraftBtnGap, DraftConfirm.Y, bkw, dbh);
         DrawGhostButton(DraftBack, "BACK", "Esc", 1f);
 
         // ---- W9: paid pool RE-ROLL (repeatable salvage sink; Game refuses the click when broke) ----
-        int rrw = 190;
-        DraftReroll = new Rectangle(DraftConfirm.X + dbw + 14, DraftConfirm.Y, rrw, dbh);
+        int rrw = DraftRerollW();
+        DraftReroll = new Rectangle(DraftConfirm.X + dbw + DraftBtnGap, DraftConfirm.Y, rrw, dbh);
         bool rrCan = g.DraftSalvage >= MetaProg.DraftRerollCost;
         bool rrHov = rrCan && Raylib.CheckCollisionPointRec(mouse, DraftReroll);
         Raylib.DrawRectangleRounded(DraftReroll, 0.3f, 8, rrHov ? Pal.RGBA(30, 44, 34) : Pal.RGBA(14, 20, 28));
         Raylib.DrawRectangleLinesEx(DraftReroll, 1.4f, rrCan ? (rrHov ? Pal.VipGold : Pal.PanelBd) : Pal.RGBA(40, 46, 54));
-        string rrl = $"RE-ROLL POOL  ({MetaProg.DraftRerollCost} SALV)";
-        var rrm = Cfg.Measure(rrl, 13, 1f);
-        Cfg.Text(rrl, new Vector2((int)(DraftReroll.X + rrw / 2 - rrm.X / 2), (int)(DraftReroll.Y + dbh / 2 - 10)), 13, 1f,
+        string rrl = DraftRerollLabel;
+        var rrm = Cfg.Measure(rrl, DraftRerollFs, 1f);
+        Cfg.Text(rrl, new Vector2((int)(DraftReroll.X + rrw / 2 - rrm.X / 2), (int)(DraftReroll.Y + dbh / 2 - 10)), DraftRerollFs, 1f,
             rrCan ? (rrHov ? Pal.VipGold : Pal.Txt) : Pal.TxtDim);
         // W5-FIX: the hotkey, advertised. This control had no keyboard route at all until now.
         var rkm = Cfg.Measure("[R]", 12, 1f);
@@ -5067,7 +5187,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         // P1: the slate card widens 760 -> 808 to pay for the 24px icon gutter added to every
         // row, so the TEXT column keeps exactly the width it had (366 - 28 - 24 == 342 - 28).
         // Verified against the pre-P1 shot: no desc/effect line reflows or clips.
-        int w = g.ArmoryMode ? 560 : 808, h = g.ArmoryMode ? armoryH : shopH;
+        int w = g.ArmoryMode ? ArmoryPanelW() : 808, h = g.ArmoryMode ? armoryH : shopH;
         int x = Cfg.ScreenW / 2 - w / 2, y = Cfg.ScreenH / 2 - h / 2;
         y -= (int)((1f - Util.EaseOutQuad(PanelAnim("requisition", 0.15f))) * 16f);  // slide-down entrance
         var card = new Rectangle(x, y, w, h);
@@ -5178,6 +5298,27 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
         CenterText(rrLbl, ShopReroll, FitSize(rrLbl, 12, 9, rrW - 12), srCan ? (srHov ? Pal.VipGold : Pal.Txt) : Pal.TxtDim);
     }
 
+    // ── THE FIT — the ARMORY weapon row's two strings stop sharing a band ──────────────────────
+    //
+    // The blurb started at a LITERAL r.X+48 with no width budget; the price/EQUIPPED tag was
+    // right-aligned through Cfg.Measure, i.e. it SCALED while the blurb's start did not. At 100%
+    // that left ~20 px of slack, which is inside the noise of a font change; at 110% the '[' of
+    // "[ 7 INTEL ]" touched the 'p' of "clip"; at 120% the two strings were painted into the same
+    // pixels and neither read. The repair is vertical, not a truncation: the tag moves up onto the
+    // NAME's band — where the longest weapon name leaves ~240 px of clear air — so the blurb owns
+    // the row's full width and the two can no longer converge at any text size. The card also
+    // widens 560 -> 600 so the longest blurb (SNIPER, 49 chars = 423 px at 120%) keeps a real
+    // margin rather than the 15 px the old width would have left it.
+    public const int ArmoryCardW = 600, ArmoryRowH = 56, ArmoryTextX = 48, ArmoryPadR = 14;
+    public const int ArmoryNameFs = 17, ArmoryBlurbFs = 12, ArmoryTagFs = 13, ArmoryBlurbY = 31;
+    /// The tag's y INSIDE the row. Pre-fix it was 20 — squarely inside the 12 px blurb's band at
+    /// every scale above 100%. SIGHTLINE_OLDFIT=1 puts it back so the gate can fail on it.
+    public static int ArmoryTagY => OldFit ? 20 : 10;
+    public static int ArmoryPanelW() => OldFit ? 560 : ArmoryCardW;
+    public static int ArmoryRowW() => ArmoryPanelW() - 60;
+    /// The blurb's real budget: the row, less its left text inset and its right padding.
+    public static int ArmoryBlurbWidth() => ArmoryRowW() - ArmoryTextX - ArmoryPadR;
+
     /// The ARMORY sub-screen of REQUISITION: re-arm a soldier with a different weapon their class
     /// can carry (Weapon.ArmoryOptions). Two steps: pick a soldier, then pick a weapon. A flat
     /// Intel cost; the choice persists on the soldier across the run.
@@ -5225,7 +5366,7 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
             var opts = Weapon.ArmoryOptions(u.Cls);
             foreach (var k in opts)
             {
-                var r = new Rectangle(x + 30, iy, w - 60, 56);
+                var r = new Rectangle(x + 30, iy, w - 60, ArmoryRowH);
                 ArmoryWeaponBtns.Add(r);
                 bool current = u.Weapon != null && u.Weapon.Kind == k;
                 bool can = g.CanRearm(u, k);
@@ -5236,14 +5377,14 @@ public static partial class Hud   // A3: the AUDIO CHECK screen lives in Hud.Aud
                 var probe = Weapon.Make(k);
                 Color wic = current ? Pal.Good : (can ? (hov ? Pal.Accent : Pal.Txt) : Pal.TxtDim);
                 DrawWeaponIcon(k, r.X + 28, r.Y + 28, wic);   // P1: the family reads before the name
-                Cfg.Text(probe.Name, new Vector2((int)r.X + 48, (int)r.Y + 8), 17, 1f, current ? Pal.Good : (can ? Pal.Txt : Pal.TxtDim));
-                Cfg.Text(Weapon.KindBlurb(k), new Vector2((int)r.X + 48, (int)r.Y + 31), 12, 1f, Pal.TxtDim);
-                if (current)
-                    Cfg.Text("EQUIPPED", new Vector2((int)(r.X + r.Width - (int)Cfg.Measure("EQUIPPED", 13, 1f).X - 14), (int)r.Y + 20), 13, 1f, Pal.Good);
-                else if (can)
-                    Cfg.Text($"[ {Game.ArmoryCost} INTEL ]", new Vector2((int)(r.X + r.Width - (int)Cfg.Measure($"[ {Game.ArmoryCost} INTEL ]", 13, 1f).X - 14), (int)r.Y + 20), 13, 1f, Pal.Accent);
-                else
-                    Cfg.Text("- need intel -", new Vector2((int)(r.X + r.Width - (int)Cfg.Measure("- need intel -", 12, 1f).X - 14), (int)r.Y + 21), 12, 1f, Pal.Foe);
+                Cfg.Text(probe.Name, new Vector2((int)r.X + ArmoryTextX, (int)r.Y + 8), ArmoryNameFs, 1f, current ? Pal.Good : (can ? Pal.Txt : Pal.TxtDim));
+                Cfg.Text(Weapon.KindBlurb(k), new Vector2((int)r.X + ArmoryTextX, (int)r.Y + ArmoryBlurbY), ArmoryBlurbFs, 1f, Pal.TxtDim);
+                // THE FIT: the right-hand tag shares the NAME's band, not the BLURB's. See ArmoryTagY.
+                string tag = current ? "EQUIPPED" : (can ? $"[ {Game.ArmoryCost} INTEL ]" : "- need intel -");
+                int tagFs = current || can ? ArmoryTagFs : ArmoryBlurbFs;
+                Color tagCol = current ? Pal.Good : (can ? Pal.Accent : Pal.Foe);
+                Cfg.Text(tag, new Vector2((int)(r.X + r.Width - (int)Cfg.Measure(tag, tagFs, 1f).X - ArmoryPadR),
+                                          (int)r.Y + ArmoryTagY), tagFs, 1f, tagCol);
                 iy += 64;
             }
             Cfg.Text("[Esc] back to soldier list", new Vector2(x + 30, iy + 4), 12, 1f, Pal.TxtDim);

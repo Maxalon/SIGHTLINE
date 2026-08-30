@@ -120,6 +120,11 @@ echo -n "TUTTEST    : "; verdict "$(SIGHTLINE_TUTTEST=1  run | grep -oE "TUTTEST
 echo -n "BRIEFTEST  : "; verdict "$(SIGHTLINE_BRIEFTEST=1 run | grep -oE "BRIEFTEST: (PASS|FAIL)" | head -1)"
 echo -n "CONTRASTTEST: "; verdict "$(SIGHTLINE_CONTRASTTEST=1 run | grep -oE "CONTRASTTEST: (PASS|FAIL)" | head -1)"
 echo -n "CHROMETEST : "; verdict "$(SIGHTLINE_CHROMETEST=1 run | grep -oE "CHROMETEST: (PASS|FAIL)" | head -1)"
+# THE FIT: the shipped TEXT SIZE range {0.90, 1.00, 1.10, 1.20} is a tested surface. Asserts that
+# no string on the doctrine / armory / hall-of-fame / draft screens is painted outside its own
+# chrome or into another string's pixels, at EVERY scale - not just at 100%, which is the only
+# scale any self-test in this project had ever run at. SIGHTLINE_OLDFIT=1 makes it fail (40).
+echo -n "FITTEST    : "; verdict "$(SIGHTLINE_FITTEST=1 run | grep -oE "FITTEST: (PASS|FAIL)" | head -1)"
 # W5-FIX: the backdrop registry — no phase may paint a full-screen backdrop from the chrome pass.
 echo -n "BACKDROPTEST: "; verdict "$(SIGHTLINE_BACKDROPTEST=1 run | grep -oE "BACKDROPTEST: (PASS|FAIL)" | head -1)"
 echo -n "QUITTEST   : "; verdict "$(SIGHTLINE_QUITTEST=1   run | grep -oE "QUITTEST: (PASS|FAIL)" | head -1)"

@@ -1537,6 +1537,17 @@ public partial class Game
         _run.PendingSpecs.Clear();
         _shopDone = true;
         _run.GenerateBoonOffer();        // populate the pick-1-of-3 doctrine card
+        // THE FIT: stage the WORST case. FIELD DRILLS' description is 98 characters — the only
+        // one in the catalogue over 60, and the one that overflowed this card — but it is 1 of 16,
+        // so an unseeded glance at this screen showed it ~19% of the time and the defect survived
+        // ten programs. The offer now always LEADS with the longest description it can draw.
+        if (_run.BoonOffer.Count > 0)
+        {
+            Boon worst = _run.BoonOffer[0];
+            foreach (var b in BoonDef.All)
+                if (BoonDef.Desc(b).Length > BoonDef.Desc(worst).Length) worst = b;
+            if (!_run.BoonOffer.Contains(worst)) _run.BoonOffer[0] = worst;
+        }
         Phase = Phase.Barracks;
     }
 
@@ -1745,7 +1756,13 @@ public partial class Game
         DebugShop();
         _run.Intel = 40;
         ArmoryMode = true;
-        ArmorySoldier = _run.Squad.FirstOrDefault(u => !u.IsVip);
+        // THE FIT: stage the WORST case, not the first one. This hook used to photograph
+        // `Squad.First(!IsVip)` — an ASSAULT, whose 44-char rifle blurb is the second-shortest
+        // in the game — so the screen a human eyeballs was never the screen that overflowed.
+        // A SHARPSHOOTER carries the 49-char SNIPER blurb, the widest string this row can hold;
+        // if none is on the roster the old behaviour stands.
+        ArmorySoldier = _run.Squad.FirstOrDefault(u => !u.IsVip && u.Cls == "SHARPSHOOTER")
+                     ?? _run.Squad.FirstOrDefault(u => !u.IsVip);
     }
 
     /// Headless self-test (SIGHTLINE_DEATHTEST): kill the whole squad on an escort
@@ -5275,17 +5292,20 @@ public partial class Game
                         if (st.BoonY + st.BoonH > st.ConHeadY) fails.Add("doctrineEatsContractHead:" + tag);
                         if (st.ConY + st.ConH > st.InfoY) fails.Add("contractEatsInfoLine:" + tag);
                     }
+                    // THE FIT (wave "THE FIT"): this assertion used to sit OUTSIDE the scale loop,
+                    // so it only ever ran at 100% — where the longest blurb had TWO pixels of
+                    // margin and 110%/120% silently ellipsized ("picks off th…"). It belongs
+                    // inside, and the same width is now re-asserted by FITTEST leg (E).
+                    foreach (var bl in Hud.ClassBlurbsForTest())
+                        if (Cfg.Measure(bl, Hud.DraftBlurbFs, 1f).X > Hud.DraftBlurbWidth())
+                            fails.Add($"blurbEllipsizes@{(int)(ui * 100)}%:" + bl);
                 }
             }
             finally { Cfg.UiScale = savedScale; }
             // ...and the operator blurb must clear the class-glyph disc VERTICALLY (the disc
-            // dropped into the corner) and fit its column HORIZONTALLY (so nothing ellipsizes —
-            // the sentence is the whole point of the row).
+            // dropped into the corner).
             if (Hud.DraftGlyphTop() < Hud.DraftBlurbBottom())
                 fails.Add($"glyphOverlapsBlurb({Hud.DraftGlyphTop():0}<{Hud.DraftBlurbBottom()})");
-            foreach (var bl in Hud.ClassBlurbsForTest())
-                if (Cfg.Measure(bl, Hud.DraftBlurbFs, 1f).X > Hud.DraftBlurbWidth())
-                    fails.Add("blurbEllipsizes:" + bl);
         }
 
         return fails.Count == 0
@@ -5308,6 +5328,202 @@ public partial class Game
     static bool SameRect(Rectangle a, Rectangle b)
         => MathF.Abs(a.X - b.X) < 0.01f && MathF.Abs(a.Y - b.Y) < 0.01f
         && MathF.Abs(a.Width - b.Width) < 0.01f && MathF.Abs(a.Height - b.Height) < 0.01f;
+
+    // ─── WAVE "THE FIT" — the TEXT-SCALE self-test (SIGHTLINE_FITTEST=1) ───────────────────────
+    /// The standing gate this wave exists to ship. The project's five text-scale defects were all
+    /// one structural gap: **no self-test in this project ran at any text size but 100%.**
+    /// `SIGHTLINE_UISCALE` is a screenshot-only hook (Program.cs, gated on `shot`) that exists so
+    /// a human can PHOTOGRAPH the UI at another size; nothing asserted anything there, while the
+    /// game ships four scales {0.90, 1.00, 1.10, 1.20} against a lot of fixed-pixel chrome. W5's
+    /// CHROMETEST closed that gap for ONE row of ONE screen (the draft's DEPLOY row) and R2's
+    /// VOICETEST for the card BODIES; everything else was still measured once, at 1.00, or not at
+    /// all — including CHROMETEST's own `blurbEllipsizes` leg, which sat OUTSIDE its scale loop.
+    ///
+    /// FITTEST asserts the same contract for the five surfaces this wave touched, at **all four**
+    /// shipped scales, through the real font: **no string is painted outside the box that owns it,
+    /// and no two independent strings are painted into the same pixels.**
+    ///
+    ///  (A) FIELD DOCTRINE (mid-run boon offer) — every boon's wrapped body clears "[ CHOOSE ]"
+    ///      and the card's own bottom border, and the card block stays on the canvas.
+    ///  (B) ARMORY weapon row — the blurb and the right-aligned price/EQUIPPED tag never share a
+    ///      vertical band while their horizontal spans overlap, and the blurb fits its budget.
+    ///  (C) WAR ROOM HALL OF FAME — over EVERY rank x class (not the five short staged legends),
+    ///      the identity and score halves clear each other and the panel's inner border.
+    ///  (D) DRAFT bottom row — every plate contains its own widest label, and the row fits.
+    ///  (E) DRAFT operator card — the class blurb and the ABILITY line fit their columns, and the
+    ///      candidate grid fits the canvas. (This is CHROMETEST's leg, re-run at every scale.)
+    ///
+    /// Falsifiable without reverting: `SIGHTLINE_OLDFIT=1` restores all five pre-fix geometries.
+    public static string FitSelfTest()
+    {
+        var fails = new List<string>();
+        var notes = new List<string>();
+        float savedScale = Cfg.UiScale;
+        float pad = 4f;                     // px of clear air demanded between independent ink
+
+        // The tightest margin observed per leg, so the PASS line states its own headroom.
+        float mA = 9999f, mB = 9999f, mC = 9999f, mD = 9999f, mE = 9999f;
+        string tA = "-", tB = "-", tC = "-", tD = "-", tE = "-";
+        void Tight(ref float best, ref string tag, float v, string what)
+        { if (v < best) { best = v; tag = what; } }
+
+        try
+        {
+            foreach (float ui in Display.UiScaleLevels)
+            {
+                Cfg.UiScale = ui;
+                string S = $"@{(int)(ui * 100)}%";
+
+                // ---- (A) the MID-RUN FIELD DOCTRINE card ------------------------------------
+                {
+                    int lines = 1;
+                    foreach (var b in BoonDef.All) lines = Math.Max(lines, Hud.BoonOfferLineCount(b));
+                    int ch = Hud.BoonOfferCardH(lines);            // worst-case row height
+                    foreach (var b in BoonDef.All)
+                    {
+                        // the body must clear the [ CHOOSE ] call-to-action's own top edge
+                        float ink = Hud.BoonOfferInkBottom(b);
+                        float chooseTop = ch - Hud.BoonOfferChooseUp;
+                        Tight(ref mA, ref tA, chooseTop - ink, $"{BoonDef.Code(b)}{S}");
+                        if (ink + pad > chooseTop)
+                            fails.Add($"boonBodyHitsChoose:{BoonDef.Code(b)}{S}({ink:0}>{chooseTop:0})");
+                        // ...and no wrapped line may exceed the column it was wrapped to
+                        foreach (var (line, _) in Hud.WrapLinesForTest(BoonDef.Desc(b), Hud.BoonOfferBodyW, Hud.BoonOfferFs))
+                            if (Cfg.Measure(line, Hud.BoonOfferFs, 1f).X > Hud.BoonOfferBodyW + 1)
+                                fails.Add($"boonLineOverruns:{BoonDef.Code(b)}{S}");
+                    }
+                    // [ CHOOSE ] itself must land inside the card
+                    float cbot = ch - Hud.BoonOfferChooseUp + Cfg.Measure("[ CHOOSE ]", Hud.BoonOfferFs, 1f).Y;
+                    if (cbot + pad > ch) fails.Add($"chooseBelowCard{S}({cbot:0}>{ch})");
+                    // and the whole block (title 92px above, ACTIVE strip 40px below) fits the canvas
+                    int y0 = Cfg.ScreenH / 2 - ch / 2 - 10;
+                    if (y0 - 92 < 8) fails.Add($"boonTitleOffTop{S}({y0 - 92})");
+                    if (y0 + ch + 40 > Cfg.ScreenH) fails.Add($"boonBlockOffBottom{S}({y0 + ch + 40})");
+                }
+
+                // ---- (B) the ARMORY weapon row ---------------------------------------------
+                {
+                    var kinds = new List<WeaponKind>();
+                    foreach (var cls in new[] { "ASSAULT", "RANGER", "SHARPSHOOTER", "GUNNER", "CORPSMAN" })
+                        foreach (var k in Weapon.ArmoryOptions(cls))
+                            if (!kinds.Contains(k)) kinds.Add(k);
+                    int rowW = Hud.ArmoryRowW();
+                    float blurbTop = Hud.ArmoryBlurbY;
+                    float blurbBot = blurbTop + Cfg.Measure("X", Hud.ArmoryBlurbFs, 1f).Y;
+                    foreach (var k in kinds)
+                    {
+                        string blurb = Weapon.KindBlurb(k), name = Weapon.Make(k).Name;
+                        float bw = Cfg.Measure(blurb, Hud.ArmoryBlurbFs, 1f).X;
+                        float budget = Hud.ArmoryBlurbWidth();
+                        Tight(ref mB, ref tB, budget - bw, $"{k}blurb{S}");
+                        if (bw > budget) fails.Add($"armoryBlurbOverruns:{k}{S}({bw:0}>{budget:0})");
+                        if (blurbBot + pad > Hud.ArmoryRowH) fails.Add($"armoryBlurbBelowRow{S}");
+                        float nameRight = Hud.ArmoryTextX + Cfg.Measure(name, Hud.ArmoryNameFs, 1f).X;
+                        foreach (var (tag, fs) in new[] { ("EQUIPPED", Hud.ArmoryTagFs),
+                                                          ($"[ {Game.ArmoryCost} INTEL ]", Hud.ArmoryTagFs),
+                                                          ("- need intel -", Hud.ArmoryBlurbFs) })
+                        {
+                            float tw = Cfg.Measure(tag, fs, 1f).X;
+                            float tagLeft = rowW - Hud.ArmoryPadR - tw;
+                            float tagTop = Hud.ArmoryTagY, tagBot = tagTop + Cfg.Measure(tag, fs, 1f).Y;
+                            // two independent strings may share a BAND or a COLUMN, never both
+                            bool xOverlapBlurb = tagLeft < Hud.ArmoryTextX + bw + pad;
+                            bool yOverlapBlurb = tagBot + pad > blurbTop && tagTop < blurbBot + pad;
+                            if (xOverlapBlurb && yOverlapBlurb)
+                                fails.Add($"armoryTagOverprintsBlurb:{k}/{tag.Trim('[', ']', ' ')}{S}");
+                            if (tagLeft < nameRight + 12)
+                                fails.Add($"armoryTagHitsName:{k}{S}({tagLeft:0}<{nameRight:0})");
+                            if (tagBot + pad > Hud.ArmoryRowH) fails.Add($"armoryTagBelowRow:{k}{S}");
+                            if (tagTop < 2) fails.Add($"armoryTagAboveRow:{k}{S}");
+                        }
+                    }
+                }
+
+                // ---- (C) the WAR ROOM HALL OF FAME legend row ------------------------------
+                {
+                    int colW = Hud.WarColWidth;
+                    int textW = Hud.WarLegendTextW(colW);
+                    // The staged demo profile is five SHORT legends; the real one is every rank in
+                    // Run.Ranks against every player class, with a three-digit lifetime kill count
+                    // and the longest callsign + nickname the generator can produce.
+                    string worstName = "KESTREL \"MAVERICK\"";
+                    foreach (var rank in Run.Ranks)
+                        foreach (var cls in new[] { "ASSAULT", "RANGER", "SHARPSHOOTER", "GUNNER", "CORPSMAN" })
+                        {
+                            var l = new SaveGame.LegendDto
+                            { Name = worstName, Cls = cls, Rank = rank, Kills = 999, Heat = 8, Won = true };
+                            float subW = Cfg.Measure(Hud.WarLegendSub(l), Hud.WarLegendSubFs, 1f).X;
+                            Tight(ref mC, ref tC, textW - subW, $"{rank[0]}{cls[0]}sub{S}");
+                            if (subW > textW)
+                                fails.Add($"legendSubOverruns:{rank} {cls}{S}({subW:0}>{textW})");
+                            string score = Hud.WarLegendScore(l);
+                            float scw = Cfg.Measure(score, Hud.WarLegendScoreFs, 1f).X;
+                            float nameW = Cfg.Measure(l.Name, Hud.WarLegendNameFs, 1f).X;
+                            float scoreLeft = colW - Hud.WarLegendPadR - scw;
+                            float nameRight = Hud.WarLegendTextX + nameW;
+                            Tight(ref mC, ref tC, scoreLeft - nameRight, $"{rank[0]}{cls[0]}name{S}");
+                            if (score.Length > 0 && scoreLeft < nameRight + 12)
+                                fails.Add($"legendScoreHitsName:{rank}{S}({scoreLeft:0}<{nameRight:0})");
+                            if (scw > textW) fails.Add($"legendScoreOverruns{S}");
+                        }
+                }
+
+                // ---- (D) the DRAFT bottom row ----------------------------------------------
+                {
+                    int dbw = Hud.DraftConfirmW(), rrw = Hud.DraftRerollW(), bkw = Hud.DraftBackW();
+                    foreach (var dl in Hud.DraftDeployLabels())
+                    {
+                        float lw = Cfg.Measure(dl, Hud.DraftDeployFs, 1f).X;
+                        Tight(ref mD, ref tD, dbw - lw, $"DEPLOY{S}");
+                        if (lw + 8 > dbw) fails.Add($"deployLabelOverruns{S}:{dl}({lw:0}>{dbw})");
+                    }
+                    float rw = Cfg.Measure(Hud.DraftRerollLabel, Hud.DraftRerollFs, 1f).X;
+                    Tight(ref mD, ref tD, rrw - rw, $"REROLL{S}");
+                    if (rw + 8 > rrw) fails.Add($"rerollLabelOverruns{S}({rw:0}+8>{rrw})");
+                    float bw2 = Cfg.Measure("BACK", Hud.DraftBackFs, 1f).X
+                              + Cfg.Measure("[Esc]", Hud.DraftBackHintFs, 1f).X;
+                    Tight(ref mD, ref tD, bkw - bw2, $"BACK{S}");
+                    if (bw2 + 12 > bkw) fails.Add($"backLabelOverruns{S}({bw2:0}>{bkw})");
+                    if (Hud.DraftBtnRowW() > Cfg.ScreenW - 24)
+                        fails.Add($"draftBtnRowOffCanvas{S}({Hud.DraftBtnRowW()})");
+                }
+
+                // ---- (E) the DRAFT operator card's text columns -----------------------------
+                {
+                    int bw = Hud.DraftBlurbWidth(), aw = Hud.DraftAbilityWidth();
+                    foreach (var bl in Hud.ClassBlurbsForTest())
+                    {
+                        float w2 = Cfg.Measure(bl, Hud.DraftBlurbFs, 1f).X;
+                        Tight(ref mE, ref tE, bw - w2, $"blurb{S}");
+                        if (w2 > bw) fails.Add($"draftBlurbEllipsizes{S}:{bl.Substring(0, 12)}({w2:0}>{bw})");
+                    }
+                    foreach (var ab in new[] { "RUN&GUN", "BLITZ", "STEADY", "SUPPRESS", "PATCH",
+                                               "MARK", "GRAPPLE", "SLIPSTREAM", "SUPPR. FIRE" })
+                    {
+                        float w2 = Cfg.Measure("ABILITY: " + ab, Hud.DraftAbilityFs, 1f).X;
+                        Tight(ref mE, ref tE, aw - w2, $"ability{S}");
+                        if (w2 > aw) fails.Add($"draftAbilityClips{S}:{ab}");
+                    }
+                    int gridW = 3 * Hud.DraftCardW() + 2 * Hud.DraftGridGap;
+                    if (gridW > Cfg.ScreenW - 24) fails.Add($"draftGridOffCanvas{S}({gridW})");
+                }
+            }
+        }
+        finally { Cfg.UiScale = savedScale; }
+
+        notes.Add($"doctrine {mA:0}px@{tA}");
+        notes.Add($"armory {mB:0}px@{tB}");
+        notes.Add($"legend {mC:0}px@{tC}");
+        notes.Add($"draftRow {mD:0}px@{tD}");
+        notes.Add($"operatorCard {mE:0}px@{tE}");
+        return fails.Count == 0
+            ? $"FITTEST: PASS ({BoonDef.All.Length} doctrine cards, 5 weapon rows x 3 tags, "
+              + $"{Run.Ranks.Length}x5 legend rows, 5 deploy labels and the operator card fit their "
+              + $"chrome at all {Display.UiScaleLevels.Length} shipped text sizes - tightest margins: "
+              + string.Join(", ", notes) + ")"
+            : $"FITTEST: FAIL ({fails.Distinct().Count()} violations; first 14: "
+              + string.Join(",", fails.Distinct().Take(14)) + ")";
+    }
 
 
     // ─── W5 THE FIRST HOUR — THE DOORS self-test (SIGHTLINE_QUITTEST=1) ────────────────────────
