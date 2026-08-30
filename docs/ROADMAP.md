@@ -2138,8 +2138,30 @@ ladder is `docs/measurements/l3/` and the write-up is DEVLOG §L3. Start here:
 - [ ] **W3 THE OPPONENT CHOOSES was never started.** `Ai.cs` still scores any shot at
       `100 + bestHit` against terrain terms bounded under ~64, so the opponent now always ACTS but
       still never DECLINES. That is the single biggest remaining gap in the fight.
-- [ ] **W6 (biome mechanical) and W7 (ships-like-a-product) were never started.** `grep -ci biome`
-      still returns 0 in `Combat.cs`, `Ai.cs`, `Grid.cs` and `Unit.cs` — eight biomes are paint.
+- [x] **BIOME MECHANICAL — done for THREE of eight** (PROGRAM CONTOUR **C4 "EIGHT BIOMES ARE
+      PAINT"**, base `17934ee`). `src/Terrain.cs` adds a per-tile GROUND layer stamped from
+      `(MapSeed, mission)` via `Util.Hash3` (zero `Util.Rng` draws; PAIRTEST byte-identical), and
+      three biomes now change the fight on three different axes: **VERDANT UNDERGROWTH** (low
+      cover from every angle, but only past 2 tiles — `Grid.GetCover`), **TUNDRA SLICK ICE** (half
+      a step to cross — `Grid.CostMap`), **MAGMA THERMAL VENTS** (opaque, dear to cross, and it
+      sets you alight — `Grid.HasLineOfSight` + `CostMap` + `OnUnitEnteredTile`). Symmetry is
+      structural: every rule lives in a function both sides already ask for the truth, so `Ai.cs`
+      cannot play the old game. `SIGHTLINE_BIOMETEST`; `SIGHTLINE_BIOMEMECH=0` restores the pre-C4
+      board exactly. Measured CRN-paired at n=160/rung/arm on h0/h2/h4 — **declared: heat 0 moves
+      47.5 → 43.8 and lands 3.2 under its band floor** (−3.7 ± 5.6, inside its own SE), and the
+      per-biome cross-tab reads **mechanical −3.2 ± 2.1 against a flat paint control +0.3 ± 1.7**.
+      DEVLOG §C4; raw round `docs/measurements/c4/`.
+- [ ] **The other FIVE biomes are still paint.** STEEL / ARID / ASH / VOID / NEON change nothing;
+      BIOMETEST asserts they stamp nothing, so giving one a mechanic means changing that assertion
+      deliberately. The obvious candidates follow the art: ASH = short sight lines in the ashfall,
+      ARID = dune ridges as soft high ground, NEON/VOID = the lattice as a conductive/teleport
+      grid. None designed, none measured.
+- [ ] **C4 left the heat-0 rung 3.2 points under its floor and did not chase it.** Unpriced levers,
+      all in `src/Terrain.cs`: the per-biome tile budgets (44 / 34 / 24), `FoliageMinDist`,
+      `VentStepExtra`. And the standing question it opened: **a symmetric rule is not a neutral
+      rule** — all three mechanics cost the player 2-4 points of mission win rate, and the
+      hypothesis (a longer exchange favours the side with more bodies) is untested.
+- [ ] **W7 (ships-like-a-product) was never started.**
 - [ ] **A deadlock inside `UpdateEnemy`** would still be bounded only by the frame cap; W9's idle
       guard covers the player turn only.
 - [ ] **On-device audio** still needs the owner: nobody has heard this game.

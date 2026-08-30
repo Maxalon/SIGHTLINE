@@ -8977,3 +8977,242 @@ bodies and resets `bump`; no mid-run Decapitate gets that. **Unspent, and it is 
 - **The first attempt produced ZERO chunks** because a shared-scratchpad copy of the runner had
   been overwritten by another agent. It failed loudly and wrote no data. The runner now lives in
   the repo, and that is the wider lesson: a shared path is not storage.
+
+---
+
+# PROGRAM CONTOUR — WAVE C4 "EIGHT BIOMES ARE PAINT" (2026-08-30, dev on wave/biome-mechanical)
+
+**Branch** `wave/biome-mechanical` off `main` at **`17934ee`** (CROSSCUT composed — the tree the
+L3 ladder of record was measured on). Files touched: `src/Terrain.cs` (new), `Grid.cs`,
+`Combat.cs`, `Ai.cs`, `Game.cs`, `Game.Autopilot.cs`, `Game.Harness.cs`, `Renderer.cs`, `Hud.cs`,
+`Codex.cs`, `Stats.cs`, `Program.cs`, `scripts/qa-sweep.sh`.
+
+## The finding
+
+`grep -ci biome` returned **0** in `Combat.cs`, `Ai.cs`, `Grid.cs` and `Unit.cs`. The game had
+eight biomes and **not one of them changed how the fight worked.** Wave V3 "SURFACES" and HORIZON
+W6 had given them a real visual identity — a fissure that snakes across six tiles, a frost drift,
+a moss patch — and every one of those motifs was a lie: the fissure went nowhere, the drift did
+nothing, the patch was a colour. This wave is the other half.
+
+## What shipped — THREE biomes, THREE axes, five still paint
+
+| biome | mechanic | the one sentence the player gets |
+|---|---|---|
+| **VERDANT** | **UNDERGROWTH** (cover axis) | *"The ferns give LOW COVER from every angle — but only against fire from more than 2 tiles away. Close in to strip it."* |
+| **TUNDRA** | **SLICK ICE** (movement axis) | *"Crossing a frost drift costs HALF a step, so the drift is a fast lane — for both sides."* |
+| **MAGMA** | **THERMAL VENTS** (sight axis) | *"No one can see across a steaming fissure, forcing a crossing costs movement, and touching one sets you alight."* |
+
+STEEL / ARID / ASH / VOID / NEON are **still paint**. That is a decision, not an omission: three
+mechanics the player can name beat eight they cannot tell apart, and the five are the round's
+built-in control (see the cross-tab below). `Terrain.Tag()` returns null for them and BIOMETEST
+**asserts** they stamp nothing, so a future wave that gives one of them a mechanic has to change
+that line and say so.
+
+## The mechanism: symmetry is STRUCTURAL, not promised
+
+Every rule lives in one of the three functions **both sides already ask for the truth**:
+
+| mechanic | seam | consequence |
+|---|---|---|
+| undergrowth | `Grid.GetCover` | a cover LEVEL, so high ground / a DRONE / a SYNDICATE optic see over it, the exposed-crit bonus and the LOCK-ON flank perk price it, `Ai`'s `cover.Level * 18` scores it and the HUD's pip draws it — with no second implementation to drift |
+| slick ice | `Grid.CostMap` | the one movement model: `Ai.Plan`'s reachable set, the player's move overlay, the path preview and the VIP leash all widen together |
+| thermal vents | `Grid.HasLineOfSight` (via a new `IsVapor`, joining smoke rather than high cover) + `CostMap` + `OnUnitEnteredTile` | every sight read on both sides routes around it; the crossing toll is in half-tiles and the burn is the existing 3.6 fire sear |
+
+Nothing in `src/Terrain.cs` reads `a.Team`. The layer is stamped once per mission from
+`(MapSeed, mission)` through `Util.Hash3` — **zero `Util.Rng` draws, no `System.Random`** — so
+CRN pairing is untouched. It is **not persisted** (`SaveGame` never serialises a `Grid`; verified
+`Tiles`/`Height`/`Smoke`/`Fire`/`Barrel` appear nowhere in it), so `GroundKind` is **not** a
+fourteenth persisted-by-ordinal enum and SAVETEST's hashes are unchanged.
+
+### What Ai.cs actually needed
+
+The honest answer is **less than expected, and that is the design working.** Because the three
+rules live in the three truth functions, the planner re-prices itself: `OddsFrom(g, e, tx, ty, p)`
+already computes odds *from the candidate tile*, so a hostile facing a soldier in the undergrowth
+automatically prefers closing inside 2 tiles (where the ferns are worth nothing); `reach` is the
+shared cost map, so ice widens the enemy's options with no code; `HasLineOfSight` is the same
+function, so vents cut the planner's shots, its overwatch and its focus cones.
+
+What the AI genuinely could **not** derive is a preference about *ending* a move on hot ground.
+Three explicit terms were added:
+
+* `Ai.cs` — `if (g.Grid.IsVent(tx, ty)) score -= 34;` beside the existing `IsFire → −60`.
+  **Deliberately smaller than fire's and smaller than the `100 + bestHit` a shot is worth**: a
+  vent is a price, not a wall, so a hostile that can only reach a killing angle by standing on the
+  crack takes it and eats the burn. That is the same bet the player is offered.
+* `Game.Autopilot.cs` — `TileExposure += 12` on a vent, on the same scale as its `IsFire → 20`,
+  so the balance bot does not walk the squad into the fissure and hand the wave a win-rate drop
+  that is a *bot* defect rather than a design consequence.
+* `Game.cs` VIP leash — the escorted asset is neither parked on a vent nor routed through one when
+  a cooler lane exists (mirroring the existing fire-route term).
+
+## Legibility — five surfaces, because a rule you cannot see is invisible unfairness
+
+1. **The board.** `Renderer.DrawGround` gives each mechanic a material that carries on **VALUE**
+   (so it survives greyscale and `SIGHTLINE_CB`) **plus a rim** (so a patch reads as a *region
+   with a boundary*, not as scattered decoration): a dark fern mat with light blades, a pale drift
+   plate with a bright fracture and a travelling specular, a dark crevasse with a hot seam.
+   `DrawVentSteam` draws the vent's steam **above the figures beside `DrawSmoke`**, in the same
+   soft-grey visual family — because what it is telling you is exactly what smoke tells you.
+2. **The banner** — `MISSION 3 - VERDANT - UNDERGROWTH`.
+3. **The briefing card** — the one-sentence rule, appended in `Game.BeginBriefing` (NOT in
+   `Voice.Brief`, which is under a zero-`Util.Rng` contract and whose VOICETEST pre-measures its
+   own three lines; the card auto-sizes to its row count).
+4. **The shot tooltip** — a soldier in the ferns reads **`UNDERGROWTH  -20 aim past 2`**, not
+   `LOW COVER`. "LOW COVER" on a tile with no block beside it reads as a bug.
+5. **The hover threat card + the CODEX** (FIELD CRAFT tab, beside COVER and FLANKING — they are
+   cover/movement/sight rules and that is the tab that teaches cover, movement and sight).
+
+### THE ART FOLLOWS THE MECHANIC — the capture that forced it
+
+The first MAGMA screenshot is the most useful artifact this wave produced. V3's **decorative**
+board-scale fissure and per-tile veins were still drawn, in the same orange, on the same board, as
+the new **real** vents. The result was a field of orange squiggles in which **no player could have
+told which line burns them.** That is worse than no mechanic at all.
+
+The rule that came out of it, and it is general: **when a biome's mechanic is live, the biome's
+DECORATIVE version of that same motif is retired.** `DrawBiomeFeatures` returns early on the three
+mechanical biomes; the MAGMA per-tile vein is suppressed entirely when the board carries vents;
+and the ambient per-tile signature skips any tile that has mechanical ground. Orange on a MAGMA
+board now means exactly one thing. The other five biomes keep their V3 features unchanged.
+
+Two more capture-driven repairs, both caught by looking rather than by a test:
+* **The fern had no edge.** First capture: blades, no rim — at a squint that photographs as
+  texture, not as a place you can decide to stand in. Added the boundary rim.
+* **The fissure was ten scattered singles.** The walker wandered at 0.9 rad/step and cover tiles
+  ate a third of its steps. Dropped to 0.55 and forced two cracks per board; it now reads as a
+  line with **fords** — and the fords are load-bearing, not cosmetic: a *continuous* 1-wide crack
+  is a total sight barrier (Bresenham supercover always passes through a 1-wide wall), which would
+  cut the board in half for shooting and stall the fight.
+
+Judged captures: VERDANT (three dark fern regions with bright rims, cover keeps the top of the
+value hierarchy), TUNDRA (narrow outlined lanes after the drift budget was cut 42 -> 34 — the
+first capture was a *lake*, not a lane), MAGMA (a broken vertical crack down the right third),
+and MAGMA under `SIGHTLINE_CB=1`, where the fissure works purely in value and is **more** legible
+than in colour.
+
+## THE MEASUREMENT — declared, including the part that is bad
+
+Full round in `docs/measurements/c4/` with the exact command lines. **Base `17934ee`. One lever
+(`SIGHTLINE_BIOMEMECH`), same binary, same snapshot, same slots. 3 rungs x 2 arms x 8 disjoint CRN
+slot sets x greedy+sloppy = 160 campaigns per (rung, arm), 960 per round, twice (uninstrumented +
+instrumented). All 96 chunks printed `OK ... runs=20`; zero `BAD`.**
+
+| rung | A (mechanic ON) | B (pre-C4 board) | delta | ±SE(delta) | L3 of record | floor | verdict |
+|---|---|---|---|---|---|---|---|
+| heat 0 | **43.8%** | 47.5% | −3.7 | 5.6 | 47.5 | 47 | **3.2 BELOW the floor** |
+| heat 2 | **30.0%** | 31.2% | −1.3 | 5.2 | 31.2 | 32 | below by 2.0 (B was below by 0.8) |
+| heat 4 | **25.6%** | 23.8% | +1.9 | 4.8 | 23.8 | 22 | in band |
+
+**Arm B reproduces the L3 ladder to the decimal on all three rungs.** With the flag off this
+branch is the same game as `17934ee`, so every point of difference in column A is the ground layer
+and nothing else. **None of the three deltas reaches its own standard error** and the ladder stays
+monotone — but heat 0 was sitting *exactly* on its band floor beforehand, so the point estimate
+puts it under. **The wave did not stay in band at heat 0.** It also cannot claim the move is
+noise: the round could not resolve it at n=160, which is not the same statement.
+
+### The cross-tab, and the finding worth keeping
+
+A pooled rung now mixes two populations that are no longer the same game. `Stats` gained a
+read-only `byBiome` block (proven inert: **1304 and 1256 fields diffed on the R0diag pair, zero
+differing**, with only `harness{}` and the new block excluded — the same exclusion W1 makes).
+Pooled across all three rungs, **mission** win rate:
+
+| population | A n | A win | B n | B win | delta | ±SE(delta) |
+|---|---|---|---|---|---|---|
+| MAGMA * | 219 | 80.4% | 220 | 84.5% | −4.2 | 3.6 |
+| TUNDRA * | 218 | 81.2% | 223 | 84.8% | −3.6 | 3.6 |
+| VERDANT * | 212 | 83.5% | 226 | 85.4% | −1.9 | 3.5 |
+| **MECHANICAL (3)** | 649 | **81.7%** | 669 | **84.9%** | **−3.2** | **2.1** |
+| **PAINT (5, control)** | 1070 | 81.1% | 1124 | 80.9% | **+0.3** | 1.7 |
+
+> **A SYMMETRIC RULE IS NOT A NEUTRAL RULE.** All three mechanics point the same way and cost the
+> player 2-4 points of mission win rate on the boards that carry them, while the five paint biomes
+> read **+0.3 ± 1.7** — flat. The effect is confined to exactly the boards with the mechanic,
+> which is what makes the pooled campaign move credible even though it sits under its own SE.
+
+*Hypothesised mechanism, NOT measured:* each rule makes the exchange harder to resolve, and a
+longer exchange favours the side with more bodies — the enemy, at every rung. Nothing in this
+round tests that. *Caveat on the control:* the paint rows are not clean, because a run mauled on a
+MAGMA mission arrives at the next (paint) mission weaker. They read flat anyway.
+
+**Decision density did not move** at heat 0 (`meaningful-choices/turn` 3.581 -> 3.502,
+`ch/ARMED` 2.314 -> 2.269 — TRUE BAND instrument, not comparable to anything before 2026-08-29).
+W4's law predicted this: the wave shipped a positioning lever *and* a threat lever at once, and
+`CountMeaningfulChoices`' two halves respond with opposite signs.
+
+## The test — and it fails on the pre-feature tree
+
+`SIGHTLINE_BIOMETEST` (`Game.BiomeSelfTest`, wired into `scripts/qa-sweep.sh`). It pins the
+**mechanic's effect** on constructed boards — a cover level, a hit%, a Dijkstra cost, a
+line-of-sight verdict, an HP total, an AI destination — never the presence of a field. Six blocks:
+the stamper (3 mechanical biomes stamp their own kind, **5 paint biomes stamp nothing**,
+determinism per `(seed, mission)`, reserved tiles untouched, and a **density sweep over 24 seeds x
+3 missions per biome** with per-biome floor/ceiling); undergrowth; ice; vents; the AI; the
+off switch.
+
+Two of its assertions found real defects during development, which is the point of writing a test
+that measures rather than one that checks:
+* the **sparsity floor** caught a drift that laid down **two** tiles and a fissure that laid down
+  **one** — the walkers were breaking out of their loop at the board edge instead of reflecting.
+  A mechanic that silently vanishes on some seeds is worse than one that is merely small.
+* the **flood ceiling** caught VERDANT covering 73 of 198 tiles on its first tuning, a board where
+  cover has stopped meaning anything. Hence the hard per-biome tile budget.
+
+The AI leg is the one worth describing, because there is only one honest way to test "the enemy
+understands the new board": run the SAME scene twice, record the tile `Ai.Plan` chose, make **that
+exact tile** a vent, re-plan, and assert it abandons it.
+
+**Proof it can fail** — the same binary with the flag off (`SIGHTLINE_BIOMEMECH=0`, which is the
+pre-C4 board exactly):
+
+```
+BIOMETEST: FAIL (noGround[TUNDRA],noTag[2],noGround[VERDANT],noTag[3],noGround[MAGMA],noTag[7],
+groundTooSparse[TUNDRA]=0,groundTooSparse[VERDANT]=0,groundTooSparse[MAGMA]=0,stampIgnoresMission,
+foliageNoCoverAtRange,foliageDefense=0,foliageDiagonal,foliageFromWest,oddsMissedFoliage,
+highGroundBlindToFoliage,foliageAimDelta=0,iceStep=2,iceReachCost=12,iceLaneNoExtraReach,
+ventDidNotBlockSight,commandingSawThroughVent,ventNotVapor,ventStep=2,ventNoSear=0,
+ventDidNotIgnite,ventParkedNotReignited,aiParkedOnVent,iceGaveTheAiNothing)
+```
+
+29 distinct assertions across all three biomes and both AI legs.
+
+## Gates
+
+* `dotnet build -c Release` — **0 warn / 0 err**.
+* `bash scripts/qa-sweep.sh --full` — **SWEEP-EXIT=0**, 65/65 self-tests PASS (was 64; +BIOMETEST),
+  COVERAGE GAP empty, autoplay x3 clean.
+* `SIGHTLINE_PAIRTEST=1` — **PASS**, both legs byte-identical (`h0 slot0 WIN/WIN 28 turns`,
+  `h4 slot1 LOSE/LOSE 8 turns`). The layer takes zero `Util.Rng` draws, as designed.
+* Autoplay x3 — LOSE m6 / LOSE m3 / WIN m6. No TIMEOUT, no exception.
+
+## What I did NOT do — read this before quoting anything above
+
+1. **Five of the eight biomes are still paint.** STEEL, ARID, ASH, VOID and NEON change nothing.
+   Declared, asserted by BIOMETEST, and deliberate.
+2. **The heat-0 rung is 3.2 points below its band floor** and this wave did not repair it. The
+   obvious levers exist and are **unpriced**: the per-biome tile budgets (44 / 34 / 24),
+   `Terrain.FoliageMinDist`, `Terrain.VentStepExtra`. Repairing a noise-level delta with a second
+   unmeasured lever is exactly the mistake this project's rules forbid.
+3. **The mechanism behind the −3.2 mission-level cost is a hypothesis, not a measurement.** "A
+   longer exchange favours the side with more bodies" was not tested.
+4. **The autopilot's vent weight (12) is below fire's (20) even though a vent is PERMANENT and
+   fire gutters out in 3 turns.** That asymmetry is an unpriced defect in the *instrument*. I did
+   not change it after the round and then publish the better of two arms; at n=160 the round could
+   not have resolved 12 from 20 anyway.
+5. **No per-biome ladder.** `byBiome` splits MISSION win rate, not campaign win rate; a
+   campaign-level split would need a biome-forced batch mode that does not exist.
+6. **RECRUIT, heat 6 and heat 8 were not measured.** Three rungs at n=160/arm was the budget.
+7. **The mechanics are not taught by the tutorial/drill.** The drill is pinned to STEEL, so a new
+   player meets a mechanic for the first time on a live mission with only the briefing card, the
+   banner and the codex. W5's onboarding work is the right home for that and this wave did not
+   touch it.
+8. **The ambient particle layer was not re-cut.** TUNDRA still snows and MAGMA still throws embers
+   across the *whole* board, including over tiles with no drift or vent. Only the per-tile
+   *signature* and the board-scale *features* were retired on the mechanical biomes.
+9. **One new wall-clock read in `Renderer.cs`** (shared by `DrawGround` and `DrawVentSteam`), so
+   CLAUDE.md's count of 45 is now 46. Screenshots were never byte-stable; `PAIRTEST` is the
+   determinism gate and it is green.
+10. **`GroundKind` is not persisted and that is load-bearing.** If a future wave ever serialises a
+    Grid mid-mission, this enum joins the append-only set and needs a SAVETEST fingerprint.

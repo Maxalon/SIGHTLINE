@@ -17,6 +17,21 @@ seeds (mix of WIN/LOSE, no exceptions):
   stat and damage point the dial promises, leaving only the qualitative flags. The grace is now gated on
   `Mode != GameMode.Skirmish`; MODETEST pins that a skirmish's force answers the dial AND that the campaign's
   mission-1 grace is untouched.
+- **BIOME MECHANICS — THE GROUND HAS RULES (CONTOUR C4, `src/Terrain.cs`):** three of the eight biomes now
+  change how the fight works, on three different axes; the other five are still paint and say so.
+  **VERDANT — UNDERGROWTH:** the fern mats are LOW COVER FROM EVERY ANGLE, but only against fire from more than
+  2 tiles away, so they cannot be flanked and the counter is to CLOSE (a cover *level* inside `Grid.GetCover`,
+  so high ground / a DRONE / a SYNDICATE optic see over it exactly as they see over any low block, and the HUD
+  badge reads `UNDERGROWTH -20 aim past 2`). **TUNDRA — SLICK ICE:** stepping onto a frost drift costs HALF a
+  step (`Grid.CostMap`), so a drift is a fast lane visible as a bulge in the move overlay — for both sides.
+  **MAGMA — THERMAL VENTS:** a steaming fissure BLOCKS LINE OF SIGHT like smoke (it joins `Grid.IsVapor`, not
+  the terrain — it gives no cover at all), forcing a crossing costs extra movement, and touching one sears +
+  ignites you; the gaps in the crack are the FORDS, and parking on a vent keeps you burning. The layer is
+  stamped once per mission from `(MapSeed, mission)` through `Util.Hash3` — zero `Util.Rng` draws, not
+  persisted — with a hard per-biome tile budget. Legible on five surfaces: the board material (value-carried +
+  rimmed, colorblind-safe), the mission banner tag, the briefing card's one-sentence rule, the shot tooltip /
+  hover threat card, and the CODEX FIELD CRAFT tab. `SIGHTLINE_BIOMETEST`; `SIGHTLINE_BIOMEMECH=0` restores the
+  pre-C4 board exactly. Priced CRN-paired at n=160/rung/arm — see DEVLOG §C4 for the declared heat-0 move.
 - **CROSS-RUN META-PROGRESSION — WAR ROOM (HORIZON W3):** the game finally has LEGS beyond one sitting. A persistent
   profile (meta.json, append-only) banks SALVAGE currency, 7 ACHIEVEMENTS, a HALL OF FAME (fallen KIA + won-run
   legends), lifetime totals, and 3 additive UNLOCKS (StartIntel/StartBoon/StartArmor) bought with salvage — all

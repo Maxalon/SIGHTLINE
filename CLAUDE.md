@@ -270,6 +270,10 @@ src/
   Game.Autopilot.cs  SmartStep/AutoStep balance + smoke-test AI (headless-only)
   Game.Harness.cs    every Debug*/*SelfTest env-gated hook (headless-only)
   Grid.cs       tiles, line-of-sight (Bresenham), cover queries, 8-dir Dijkstra
+  Terrain.cs    C4: the per-tile biome GROUND layer (VERDANT undergrowth / TUNDRA ice /
+                MAGMA vents). Stamped from (MapSeed,mission) via Hash3 — zero Util.Rng
+                draws, NOT persisted. Read by Grid.GetCover/CostMap/HasLineOfSight, so
+                both teams get it from the same truth. SIGHTLINE_BIOMEMECH=0 = pre-C4.
   Unit.cs       Unit + Weapon + enums (Team/WeaponKind); per-weapon range curves
   Combat.cs     ComputeOdds (hit/crit/dmg) + Resolve (rolls a shot)
   Ai.cs         enemy planner: score reachable tiles for cover+LoF, flank, finish
@@ -378,8 +382,9 @@ docs/screenshot.png    README image
   reseeds explicitly (`Util.Reseed(50000+slot)`), so **paired measurement** is
   reproducible. **Screenshots are NOT byte-identical** and never were: two
   `SIGHTLINE_SHOT=90` runs measurably differ in ~30% of pixels (measured 303,065 of
-  1,024,000 px), because 56 wall-clock reads drive animation (45 in `Renderer.cs`, 11 in
-  `Hud.cs` — counted, the old "58 / 46 / 12" here was off) and `Util.Rng` is clock-seeded by
+  1,024,000 px), because 57 wall-clock reads drive animation (46 in `Renderer.cs` — C4 added
+  one, shared by `DrawGround`/`DrawVentSteam` — and 11 in
+  `Hud.cs`; counted, the old "58 / 46 / 12" here was off) and `Util.Rng` is clock-seeded by
   default. Never gate anything on a screenshot
   hash — **`SIGHTLINE_PAIRTEST` byte-identity is the real determinism gate**. Keep new
   persistent/random/post-FX work behind the `NoPersist`/Display gates so that stays true.
@@ -531,6 +536,21 @@ paired batches, **zero** non-choice fields moved on every one).
 **W4's gates `ch/ARMED >= 2.00` and `meaningful-choices/turn >= 3.00` are now VOID, not met** —
 this tree reads 2.389 / 3.738 at h0, but the thresholds were set on the old instrument, so nobody
 may claim them until they are restated. DEVLOG §TRUE BAND; raw chunks `docs/measurements/tb/`.
+
+**PROGRAM CONTOUR — wave C4 "EIGHT BIOMES ARE PAINT" (2026-08-30)** ended the standing gap that
+`grep -ci biome` returned **0** in `Combat.cs`/`Ai.cs`/`Grid.cs`/`Unit.cs`. `src/Terrain.cs` adds a
+per-tile GROUND layer and **three of eight biomes now change the fight, on three axes**: VERDANT
+UNDERGROWTH (low cover from every angle, but only past 2 tiles), TUNDRA SLICK ICE (half a step to
+cross), MAGMA THERMAL VENTS (opaque like smoke, dear to cross, and it burns). Symmetry is
+structural — every rule lives in `Grid.GetCover` / `Grid.CostMap` / `Grid.HasLineOfSight`, the
+functions both sides already ask for the truth, so `Ai.cs` cannot play the old game.
+**The other five are still paint and BIOMETEST asserts it.** Priced CRN-paired (base `17934ee`,
+n=160/rung/arm, `docs/measurements/c4/`): the flag-off arm reproduces the L3 ladder to the decimal,
+and **heat 0 moves 47.5 → 43.8, landing 3.2 under its band floor** (−3.7 ± 5.6 — inside its own SE,
+so unresolved, not "noise"). Its per-biome cross-tab is the finding to carry forward: **a symmetric
+rule is not a neutral rule** — the three mechanical biomes read −3.2 ± 2.1 in mission win rate
+against a flat +0.3 ± 1.7 paint control. `SIGHTLINE_BIOMEMECH=0` restores the pre-C4 board exactly.
+DEVLOG §C4.
 
 ## Handoff protocol (when context gets heavy)
 You judge when context rot risks quality (don't wait for the 1M hard limit). Before stopping:
