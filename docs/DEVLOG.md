@@ -9160,6 +9160,14 @@ table built from each chunk's own PER-SLOT RECORDS block):
 BOSS cell — n≈472/509, the largest cell in the game — is flat at 68.0 → 67.8. The other five
 non-kill rows move by −0.2 to +0.6.
 
+**An independent cross-check, from a channel that is not the Stats block.** `SpawnReinforcements`
+echoes every wave to the console under AutoPlay. On the same 20 campaigns at `h0-b0`, the baseline
+log carries **13** `REINFORCEMENTS:` lines and the lever log **5** — the residual five are Hack and
+Decapitate, which keep the arm. DEFEND's own `WAVE:` schedule reads 82 → 85 across the two, which
+is **not** the lever reaching Defend but more Defend missions being played at all because runs
+survive longer; per mission `enc.py` holds it still at 6.48 → 6.47. Four raw logs are archived for
+this (`docs/measurements/c3/{B1,L1}-h{0,4}-b0.log`).
+
 **And the mechanism reads back exactly as designed**: `Eliminate`'s reinforcements go 1.69 → 0.00
 and its reinforced share 41.0% → 0.0%, while its mean anti-turtle rung is 1.55 → **1.50** — the aim
 arm is alive and the clock still bites. Turns barely move (8.53 → 8.63): the squad is not finishing

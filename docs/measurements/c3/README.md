@@ -93,6 +93,23 @@ and the new block itself): **8 paired chunks, 9,848 aggregate fields, zero moved
 | win% | 37.4 ±4.1 | **48.2 ±4.2** |
 | turns | 8.53 | 8.63 |
 
+### An independent cross-check, from a channel that is not the Stats block
+
+`SpawnReinforcements` echoes each wave to the console under AutoPlay (`REINFORCEMENTS: +N (...)`
+for the anti-turtle clock, `WAVE: +N` for DEFEND's own schedule). Four raw chunk logs are archived
+here for that reason (the rest are gitignored; every analysis in this directory runs off the
+committed `.json` and `.report.txt`). On the same 20 campaigns at `h0-b0`:
+
+| | `REINFORCEMENTS:` lines | `WAVE:` lines |
+|---|---|---|
+| B1 (clock as before) | **13** | 82 |
+| L1 (lever) | **5** | 85 |
+
+The residual 5 are Hack and Decapitate, which deliberately keep the arm. The `WAVE:` count moves
+82 → 85 and that is **not** the lever touching DEFEND: runs survive longer under it, so more Defend
+missions get played at all. (`enc.py` holds that still and reads Defend's `+rf` at 6.48 → 6.47 per
+mission across the two arms.)
+
 **HACK is the control on the clock** — same clock, different win condition — and its row is
 identical to the last digit across the two arms (n=102, 81.4%, 3.67t, +rf 0.04, prs 0.16).
 **DECAPITATE is the control on the class** — a kill objective the lever deliberately does not
