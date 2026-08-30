@@ -9004,7 +9004,7 @@ enter the denominator):
 | shoot | 649 | 60.3% |
 | hunker | 158 | 14.7% |
 | move (reposition, no shot) | 114 | 10.6% |
-| heal / grenade / siege / reload / item / brace / sap / shove | 128 | 11.9% |
+| heal 47 / grenade 28 / siege 26 / reload 19 / item 16 / brace 10 / staleplan 5 / sap 3 / shove 1 | 155 | 14.4% |
 | **overwatch** | **0** | **0.0%** |
 
 and the shot that was on the table, by hit-chance band:
@@ -9103,6 +9103,12 @@ big enough to read:
 |---|---|---|---|
 | CAL-diag h0 b0 | 457 | 111 | **24%** |
 | CAL-diag h4 b0 | 461 | 124 | **27%** |
+| (the shipped round, for scale) L-BASE all rungs | 194 | 53 | 27% |
+| (the shipped round, for scale) L-DECL all rungs | 267 | 57 | 21% |
+
+The diagnostic ran on an interim binary (before the threat-scaled bar and the dig-in preference,
+both of which only change WHICH shots are declined, never what a lane is worth); the two ladder
+rows are the shipped binary and agree with it at a tenth of the sample.
 
 Times the reaction's −10 aim mod, a held lane is worth roughly **0.20 of the open shot** in
 damage the flywheel can see. That is far below the shipped 0.45, and the excess is declared, not
@@ -9153,6 +9159,12 @@ these four slot sets, and the DECL arm's 36.2 is the one closer to the ladder of
 honest sentence is: *this wave did not move the ladder, and one of six rungs produced a
 nominally-significant cell in the direction the diagnostic predicts.*
 
+**The BASE arm reproduces L3 within noise, which is the check that this round is on the same
+instrument.** L3 (n=160, 8 slot sets) read 71.2 / 47.5 / 31.2 / 23.8 / 20.0 / 6.9; this round's
+BASE arm (n=80, the first 4 of those slot sets) reads 72.5 / 42.5 / 21.2 / 25.0 / 20.0 / 10.0.
+Differences +1.3 / −5.0 / −10.0 / +1.2 / 0.0 / +3.1 against a combined SE of ~6 — **every rung
+inside 1.6 SE**, the largest being the h2 cell discussed above.
+
 **heat 0 is below band in BOTH arms** (42.5 and 41.2 against a 47 floor), and the delta between
 them is −1.2 at p = 1.000. **That miss is a property of these four slot sets and the base commit,
 not of this wave** — L3 measured h0 at 47.5 on eight slot sets, exactly at the floor. Recorded, not
@@ -9186,7 +9198,7 @@ Pooled over all six rungs (contested acts only):
 | hunker | 6176 | 23.0% | 6539 | **25.0%** | +2.0 pts |
 | move (reposition, no shot) | 2255 | 8.4% | 2143 | 8.2% | — |
 | **overwatch** | **20** | **0.07%** | **111** | **0.42%** | **x5.6** |
-| everything else | 2983 | 11.1% | 2879 | 11.0% | — |
+| everything else | 2983 | 11.1% | 2869 | 11.0% | — |
 | contested acts | 26841 | | 26172 | | |
 | **acts where the chosen tile HAD a shot** | **17030** | **63.4%** | **16110** | **61.6%** | **−920** |
 | shots DECLINED | 0 | 0.00% | **105** | **0.65%** | — |
@@ -9293,9 +9305,16 @@ trusting it.
 ## 8. VERIFICATION
 
 - **Release build 0 warnings / 0 errors.**
-- **`bash scripts/qa-sweep.sh --full` — SWEEP-EXIT=0**, every self-test PASS (incl. the new
+- **`bash scripts/qa-sweep.sh --full` — SWEEP-EXIT=0**, **65/65** self-tests PASS (incl. the new
   `DECLINETEST`), COVERAGE GAP block empty, PAIRTEST byte-identical, autoplay x3 WIN/LOSE with no
-  TIMEOUT. Full output in `docs/measurements/c2/qa-sweep-full.txt`.
+  TIMEOUT. Full output in `docs/measurements/c2/qa-sweep-full.txt`. (An earlier full sweep was
+  run and then DISCARDED as `qa-sweep-full.interim.txt`: comment-only edits landed mid-run, and
+  since `run()` is `dotnet run -c Debug` it rebuilds per test, so that sweep spanned two binaries.
+  Behaviour-identical, but a gate that spanned two builds is not the gate.)
+  Notable passes for this diff specifically: `COMBATTEST` and `TRUTHTEST` (the new
+  `ShotOdds.CoverDef` field and the tooltip), `SAVETEST` (no persisted-enum or map-generator
+  movement), `AIIDLETEST` (the no-idle invariant survives declining), `HEATLADDERTEST` (the
+  difficulty axis is untouched), and `AITEST` (focus fire and target selection are untouched).
 - **`SIGHTLINE_DECLINETEST` FAILS with `SIGHTLINE_AIDECLINE=0`** — output in §7.
 - **R0diag**: this tree with the dial off vs the base-commit binary, two disjoint slot sets
   (h0/b0 and h4/b10), **2750 aggregate fields diffed to EMPTY** on both. The telemetry this wave
