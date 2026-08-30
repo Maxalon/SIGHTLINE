@@ -2150,6 +2150,21 @@ ladder is `docs/measurements/l3/` and the write-up is DEVLOG §L3. Start here:
 6. **A correct assertion in the wrong scope is indistinguishable from no assertion.** W5 wrote the
    right guard for the longest string on the squad screen and placed it outside the scale loop.
 
+### Found by CONTOUR C3 while running its own gate — fixed, and worth knowing
+
+- [x] **`scripts/qa-sweep.sh` had no `exit` statement.** It accumulated `_fail` / `_autofail` and
+      ended on an `echo`, so `SWEEP-EXIT` was 0 whatever happened. Every green-sweep claim dated
+      before C3 quotes the exit code of an echo. Wired, and `AIIDLETEST` — the one self-test line
+      not routed through `verdict` — was routed. **If you add a self-test line, route it through
+      `verdict` or the gate cannot see it.**
+- [ ] **A DRAW-observing test has two failure modes this project had not written down**, and C3's
+      own gate hit both: state left on screen by the previous case (a parked cursor makes the next
+      case draw a tooltip), and a rect read from a PREVIOUS frame that has since moved
+      (`DrawBarracks`' 0.15 s slide-down entrance shifts the whole map up to 16 px, which made the
+      hover leg fail 3 runs in 4 under `dotnet run -c Debug` and 0 in 8 on the Release binary).
+      **Run a new draw test under BOTH the Release binary and the sweep's own
+      `dotnet run -c Debug`, several times each.**
+
 ### Standing gaps, honestly declared
 
 - [ ] **W10's text-scale gate covers five surfaces, not the game.** Every other screen is still

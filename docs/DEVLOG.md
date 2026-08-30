@@ -9300,8 +9300,8 @@ tasked:marks=0 want2, tasked:otherMarks=0, tasked:tooltipMissingClass, elimAdded
 Eleven failures across every leg the wave added, including the lever (`elimAdded=2` — the pre-C3
 clock put two bodies into an `Eliminate`).
 
-**The test caught two of its own bugs before it caught anything else**, and both are the recorded
-CROSSCUT rules:
+**The test caught FOUR of its own bugs before it caught anything else.** Two are the recorded
+CROSSCUT rules, and two are new and worth adding to them:
 
 - *Rule 6, an assertion in the wrong scope.* Leg D read `Pressure` after the LAST of five staged
   clocks (Evac's 0) instead of Eliminate's, so `elimRung` failed for a reason unrelated to the
@@ -9310,18 +9310,65 @@ CROSSCUT rules:
   over the whole frame and failed on `WHITE FORD` at 11px — the campaign map's region-name strip,
   which is `FitSize(11, 8)`. Scoped to the strings this wave paints; the pre-existing breach is
   recorded below and NOT fixed.
+- **A DRAW test must not leave state on the screen for the next one.** The hover step of the
+  PITCHED pass left the cursor parked on a node; the TASKED pass's first draw then sometimes drew
+  a tooltip — which paints a class mark of its own — and the mark census came back one too high.
+  Whether it did depended on the seed-dealt map layout, so it failed intermittently. The run is now
+  `Util.Reseed`ed, the cursor is parked off the map before each pass, and a new leg asserts that an
+  un-hovered draw paints **no** tooltip, which is what makes the census a statement about the
+  labels and the key.
+- **A DRAW test must not assume a rect it read from a PREVIOUS frame is still there.** `DrawBarracks`
+  gives the card a 0.15 s slide-down entrance (`PanelAnim("barracks")`), so the whole map — and
+  every rect `NodeBtns` publishes — moves by up to 16 px between two consecutive draws taken inside
+  that window. Parking the cursor on a rect read from the previous draw therefore missed the node
+  about half the time. **It missed 3 runs in 4 under `dotnet run -c Debug`** (where the first draw
+  is slow enough to land mid-entrance) **while passing 8 of 8 on the Release binary** — so "it
+  passes" was a statement about which binary you ran it on. The hover now re-reads the rect,
+  re-parks and re-draws until the tooltip appears, exiting on the *intel* row that predates this
+  wave so the loop can never be satisfied by the thing under test. Now 6/6 under the sweep's exact
+  invocation and 8/8 on the Release binary (`classtest_x8.sh`).
+
+## 6a. A DEFECT IN THE PRE-MERGE GATE ITSELF — `qa-sweep.sh` had no exit statement
+
+This was found the only way it was ever going to be: **this wave's own new self-test failed inside
+a `--full` sweep and the sweep still reported `SWEEP-EXIT=0`.**
+
+`scripts/qa-sweep.sh` has a long header, written at the W9 merge, explaining that a FAIL line, a
+non-empty COVERAGE GAP or a TIMEOUT must make the sweep exit non-zero *"so it is a gate rather than
+a report for a reader to notice"*, and CLAUDE.md repeats the claim in its own words. Every path in
+the script faithfully accumulates `_fail` / `_autofail` — **and the script then ends on an `echo`,
+so its exit status was that echo's. Zero. Always.** `grep -n 'exit ' scripts/qa-sweep.sh` returned
+three comment lines and no statement.
+
+So **every "qa-sweep --full green, SWEEP-EXIT=0" claim made in this repository before this wave was
+reporting the exit code of an echo.** The PASS/FAIL lines printed above it were real and a human
+reading them would have caught a failure; the machine-checkable gate the lead relies on at merge
+was not there. Fixed: `_fail` and `_autofail` now decide a real `exit`, with a `!! SWEEP FAILED`
+line naming it. Verified in both directions — a tree with a failing CLASSTEST exits 1 and prints
+the line; the shipped tree exits 0.
+
+While wiring it, one more hole: **`AIIDLETEST` was the only self-test line not routed through
+`verdict`**, so a FAIL there printed and was never recorded. Harmless while nothing consumed
+`_fail`; load-bearing now. Routed.
 
 ## 7. VERIFICATION
 
 - `dotnet build -c Release` — **0 warnings / 0 errors**.
-- `bash scripts/qa-sweep.sh --full` — **SWEEP-EXIT=0**, 65 of 65 self-tests PASS (CLASSTEST among
-  them), COVERAGE GUARD block empty, PAIRTEST byte-identical, autoplay ×3
-  `LOSE m3 / LOSE m6 / WIN m6` — no TIMEOUT, no blank.
-- **A flake, recorded rather than hidden.** The FIRST `--full` sweep printed `CONTRASTTEST: FAIL`.
-  Re-run standalone it PASSES (`glyph-vs-plate >= 4.5:1 on all 9 labels`, 6.51–13.50) and the
-  second full sweep passed it too. CONTRASTTEST reads real pixels through the post-FX shader under
-  llvmpipe on a shared four-core box; that is the most plausible cause and this wave did not touch
-  the main menu, `Pal`, or `Display`. Flagged, not explained.
+- `bash scripts/qa-sweep.sh --full` — **SWEEP-EXIT=0** (and for the first time in this repo that
+  statement means something; see §6a), 65 of 65 self-tests PASS (CLASSTEST among them), COVERAGE
+  GUARD block empty, PAIRTEST byte-identical, autoplay ×3 `LOSE m3 / WIN m6 / WIN m6` — no TIMEOUT,
+  no blank. Verified in the other direction too: a tree with the wave reverted exits **1** and
+  prints `!! SWEEP FAILED`.
+- `SIGHTLINE_CLASSTEST` run **8× on the Release binary and 6× under the sweep's own
+  `dotnet run -c Debug`** — 14 PASS, 0 FAIL. Both were needed: the flake §6 describes only ever
+  showed up on the Debug path.
+- **A flake in someone else's test, recorded rather than hidden.** One `--full` sweep out of four
+  printed `CONTRASTTEST: FAIL`. Run standalone it PASSES (`glyph-vs-plate >= 4.5:1 on all 9
+  labels`, 6.51–13.50) and the other three sweeps passed it. CONTRASTTEST reads real pixels through
+  the post-FX shader under llvmpipe on a shared four-core box; that is the most plausible cause and
+  this wave did not touch the main menu, `Pal`, or `Display`. **Flagged, not explained** — and now
+  that the sweep has a real exit code, a 1-in-4 pixel-test flake is a merge-blocker rather than a
+  line someone skims past, so it is worth someone's wave.
 - 96 measurement chunks, every one `OK ... runs=20`; zero `BAD`.
 
 ## 8. WHAT I DID NOT DO, AND WHAT IT COST

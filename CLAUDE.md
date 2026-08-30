@@ -222,8 +222,13 @@ The sweep derives both halves at runtime *from env-var NAMES rather than line sh
 break was a counter keyed on a line shape that a routing change invalidated), prints them in its
 footer, and its **COVERAGE GUARD** block — which names any hook in `src/` the sweep never invokes
 — is the real check. Run it and read the last lines.
-**Since W9 the sweep EXITS NON-ZERO** on any FAIL line, a non-empty COVERAGE GAP, a TIMEOUT or a
-missing RESULT line, so it is a gate rather than a report for a reader to notice.
+**Since W9 the sweep was SUPPOSED to EXIT NON-ZERO** on any FAIL line, a non-empty COVERAGE GAP, a
+TIMEOUT or a missing RESULT line — **and until CONTOUR C3 it did not: the script accumulated
+`_fail`/`_autofail` and then ended on an `echo`, so its status was always 0.** C3 found it when its
+own new self-test FAILED inside a `--full` sweep that still reported `SWEEP-EXIT=0`, and wired the
+`exit`. Every green-sweep claim in this repo dated before C3 was quoting the exit code of an echo;
+the PASS/FAIL lines were real, the machine-checkable gate was not. **It is a gate now — check the
+code, and if you add a self-test line route it through `verdict` or it is invisible to it.**
 The `SIGHTLINE_BALANCE=<N>` flywheel runs N headless campaigns and reports
 win-rate/decision-richness/policy-gap — **it needs a display**, so run it under `xvfb-run`;
 since W1 a display-less batch REFUSES, writes nothing and exits 2 (see the contract below — it
